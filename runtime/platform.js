@@ -126,9 +126,11 @@
     return new Promise(function (resolve, reject) {
       var box = document.createElement("div");
       box.className = "save-sheet";
-      box.innerHTML = '<p></p><div class="row"><button class="btn" type="button">保存</button><button class="btn ghost" type="button">取消</button></div>';
-      box.querySelector("p").textContent = file.name + " 已准备好。";
+      box.innerHTML = '<p></p><div class="row"><button class="btn" type="button"></button><button class="btn ghost" type="button"></button></div>';
+      var t = window.LopdaStrings ? window.LopdaStrings.t : function (k) { return k; };
+      box.querySelector("p").textContent = t("common.ready", { name: file.name });
       var btns = box.querySelectorAll("button");
+      btns[0].textContent = t("common.save"); btns[1].textContent = t("common.cancel");
       btns[0].onclick = function () { box.remove(); share(file).then(resolve, function (e) { reject(err(e && e.name === "AbortError" ? "declined" : "unavailable", e)); }); };
       btns[1].onclick = function () { box.remove(); reject(err("declined")); };
       (document.getElementById("screen") || document.body).appendChild(box);

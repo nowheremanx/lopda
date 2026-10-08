@@ -6,6 +6,8 @@
 "use strict";
 var $ = function(id){ return document.getElementById(id); };
 var REGISTRY = new URL("../registry/", location.href).href;
+/* runtime/strings.js: every word on screen, in zh and en */
+var I18N = window.LopdaStrings, tr = I18N.t;
 
 var S = {
   db:null, refs:{}, downloads:null,
@@ -28,7 +30,7 @@ var chains={};
 /* one write at a time per document; resolves true when it landed */
 function put(ref,data){
   var k=ref.path;
-  chains[k]=(chains[k]||Promise.resolve()).then(function(){ return ref.set(data); }).then(function(){ return true; },function(e){ toast("存档失败："+((e&&e.code)||"未知错误")); return false; });
+  chains[k]=(chains[k]||Promise.resolve()).then(function(){ return ref.set(data); }).then(function(){ return true; },function(e){ toast(tr("common.savefail",{code:(e&&e.code)||tr("common.unknown")})); return false; });
   return chains[k];
 }
 var pending={notes:{},apps:{}}, removed={notes:{},apps:{}};
@@ -55,12 +57,14 @@ function refresh(kind){
     if(mine!==readSeq[kind]) return;
     applyRemote(kind,q.docs);
   }).catch(function(e){
-    $("savestate").textContent="读档失败";
-    toast("读档失败："+String((e&&e.code)||(e&&e.message)||e).slice(0,120));
+    setStatus("status.readfail");
+    toast(tr("common.readfail",{msg:String((e&&e.code)||(e&&e.message)||e).slice(0,120)}));
   });
 }
 
 /* ---------- clock & status ---------- */
+var statusKey="status.boot";
+function setStatus(key){ statusKey=key; $("savestate").textContent=tr(key); }
 function tickClock(){ var d=new Date(); $("clock").textContent=String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0"); }
 
 /* ---------- views ---------- */
@@ -78,7 +82,7 @@ function show(name){
 $("home-key").onclick=function(){ flushNote(); show("home"); sfx("home"); };
 
 /* ---------- sound: tiny square-wave chips through Web Audio ---------- */
-var RUNTIME_VERSION="0.3.2";   /* keep in step with VERSION in sw.js */
+var RUNTIME_VERSION="0.4.0";   /* keep in step with VERSION in sw.js */
 var SND={ctx:null, on:true, vol:2, gain:null};
 var VOL_GAIN=[0,0.05,0.11,0.2];
 function audio(){
@@ -135,12 +139,28 @@ document.addEventListener("pointerdown",function(e){
 
 /* ---------- settings ---------- */
 function renderSettings(){
-  $("set-sound").textContent=SND.on?"开":"关"; $("set-sound").setAttribute("aria-pressed",SND.on?"true":"false");
+  $("set-sound").textContent=tr(SND.on?"set.on":"set.off"); $("set-sound").setAttribute("aria-pressed",SND.on?"true":"false");
   $("set-vol").textContent="▮".repeat(SND.vol)+"▯".repeat(3-SND.vol);
   $("set-vol-down").disabled=!SND.on||SND.vol<=0; $("set-vol-up").disabled=!SND.on||SND.vol>=3;
-  $("set-version").textContent="Lo-PDA "+RUNTIME_VERSION+" · 规范 lopda/1";
+  $("set-version").textContent=tr("set.version",{v:RUNTIME_VERSION});
+  Array.prototype.forEach.call(document.querySelectorAll("[data-lang]"),function(b){
+    var on=b.getAttribute("data-lang")===I18N.lang; b.className=on?"btn":"btn ghost"; b.setAttribute("aria-checked",on?"true":"false");
+  });
 }
-function saveSettings(){ renderSettings(); if(S.db) put(S.refs.settings,{sound:SND.on, volume:SND.vol}); }
+function saveSettings(){ renderSettings(); if(S.db) put(S.refs.settings,{sound:SND.on, volume:SND.vol, lang:I18N.lang}); }
+/* switching language redraws what is on screen in place; every other view builds its text when it opens */
+function setLang(lang){
+  if(lang===I18N.lang || !I18N.STR[lang]) return;
+  I18N.set(lang); setStatus(statusKey);
+  renderHome(); renderSettings(); renderUpdate(); paintRolls(); cutEdgeLabel(); cutState(); paintSizeLabel();
+  if(!$("v-settings").hidden) openSettings();
+  if(!$("v-cam").hidden) renderCam();
+  /* apps read PAD.lang once at start: a running app is started again in the new language */
+  if(S.running && !$("v-run").hidden) runApp(S.running);
+}
+Array.prototype.forEach.call(document.querySelectorAll("[data-lang]"),function(b){
+  b.onclick=function(){ setLang(b.getAttribute("data-lang")); saveSettings(); sfx("ok"); };
+});
 $("set-sound").onclick=function(){ SND.on=!SND.on; saveSettings(); sfx("ok"); };
 $("set-vol-down").onclick=function(){ if(SND.vol>0){ SND.vol--; saveSettings(); sfx("tap"); } };
 $("set-vol-up").onclick=function(){ if(SND.vol<3){ SND.vol++; saveSettings(); sfx("tap"); } };
@@ -148,14 +168,14 @@ $("set-vol-up").onclick=function(){ if(SND.vol<3){ SND.vol++; saveSettings(); sf
 var UPD={ready:false, busy:false, latest:null};
 function renderUpdate(){
   var b=$("set-update"); if(!b) return;
-  $("upd-label").textContent="系统版本 "+RUNTIME_VERSION+(UPD.latest && UPD.latest!==RUNTIME_VERSION ? " → "+UPD.latest : "");
+  $("upd-label").textContent=tr("upd.label")+" "+RUNTIME_VERSION+(UPD.latest && UPD.latest!==RUNTIME_VERSION ? " → "+UPD.latest : "");
   b.disabled=UPD.busy;
   b.className=UPD.ready?"btn":"btn ghost";
-  b.textContent=UPD.busy?"接收中…":UPD.ready?"重启升级":"检查更新";
+  b.textContent=tr(UPD.busy?"upd.busy":UPD.ready?"upd.restart":"upd.check");
 }
 function latestVersion(){
   return fetch("sw.js?fresh="+Date.now(),{cache:"no-store"}).then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.text(); })
-    .then(function(t){ var m=/VERSION\s*=\s*"lopda-v([^"]+)"/.exec(t); if(!m) throw new Error("读不到版本号"); return m[1]; });
+    .then(function(t){ var m=/VERSION\s*=\s*"lopda-v([^"]+)"/.exec(t); if(!m) throw new Error(tr("upd.noversion")); return m[1]; });
 }
 function waitForNewWorker(reg){
   return new Promise(function(resolve){
@@ -168,27 +188,27 @@ function waitForNewWorker(reg){
 }
 $("set-update").onclick=function(){
   if(UPD.ready){ sfx("ok"); flushNote(); setTimeout(function(){ location.reload(); },150); return; }
-  if(!("serviceWorker" in navigator) || !navigator.serviceWorker.controller){ toast("这个浏览器不支持离线版本，刷新页面就是最新的。"); return; }
+  if(!("serviceWorker" in navigator) || !navigator.serviceWorker.controller){ toast(tr("upd.nosw")); return; }
   UPD.busy=true; renderUpdate(); sfx("modem");
   latestVersion().then(function(v){
     UPD.latest=v;
-    if(v===RUNTIME_VERSION){ toast("已经是最新版 "+v+"。"); return; }
+    if(v===RUNTIME_VERSION){ toast(tr("upd.latest",{v:v})); return; }
     return navigator.serviceWorker.getRegistration().then(function(reg){
-      if(!reg) throw new Error("没有离线副本");
+      if(!reg) throw new Error(tr("upd.nocopy"));
       return reg.update().then(function(){ return waitForNewWorker(reg); });
-    }).then(function(){ UPD.ready=true; toast("新版本 "+v+" 下载好了，按「重启升级」。"); sfx("ok"); });
-  }).catch(function(e){ toast("检查失败："+((e&&e.message)||"连不上")); sfx("err"); })
+    }).then(function(){ UPD.ready=true; toast(tr("upd.ready",{v:v})); sfx("ok"); });
+  }).catch(function(e){ toast(tr("upd.failed",{msg:(e&&e.message)||tr("upd.offline")})); sfx("err"); })
     .then(function(){ UPD.busy=false; renderUpdate(); });
 };
 function openSettings(){
   show("settings"); renderSettings(); renderUpdate();
-  var el=$("set-storage");
+  var el=$("set-storage"); el.textContent=tr("set.counting");
   if(navigator.storage && navigator.storage.estimate){
     Promise.all([navigator.storage.estimate(), navigator.storage.persisted ? navigator.storage.persisted() : Promise.resolve(false)]).then(function(r){
       var kb=Math.max(1,Math.round((r[0].usage||0)/1024));
-      el.textContent="本机存档：约 "+(kb>1024?(kb/1024).toFixed(1)+" MB":kb+" KB")+(r[1]?" · 已锁定，不会被系统清理":" · 未锁定，长期不用可能被系统清理");
-    }).catch(function(){ el.textContent="本机存档：无法读取用量"; });
-  } else el.textContent="本机存档：无法读取用量";
+      el.textContent=tr("set.storage",{size:kb>1024?(kb/1024).toFixed(1)+" MB":kb+" KB"})+tr(r[1]?"set.locked":"set.unlocked");
+    }).catch(function(){ el.textContent=tr("set.nousage"); });
+  } else el.textContent=tr("set.nousage");
 }
 
 /* ---------- pixel icons: 16 rows of 16 chars, 0-3 = the four tones, "." = transparent ---------- */
@@ -227,35 +247,48 @@ function renderHome(){
     if(tag){ var t=document.createElement("span"); t.className="tag"; t.textContent=tag; b.appendChild(t); }
     b.onclick=onclick; h.appendChild(b);
   }
-  add("builtin",{glyph:"记"},"记事本","",function(){ show("notes"); },"notes");
-  add("builtin",{glyph:"画"},"点阵画板","",function(){ openPaint(); },"paint");
-  add("builtin",{glyph:"摄"},"点阵相机",F.roll?(F.frames.length+"/"+F.size):"",function(){ openCam(); },"camera");
-  add("builtin",{glyph:"裁"},"裁片机","",function(){ show("cut"); cutLayout(); },"cutter");
-  add("builtin",{glyph:"卡"},"卡带机","",function(){ openCart(); },"cart");
-  add("builtin",{glyph:"商"},"应用商店",updatesAvailable()?"有更新":"",function(){ show("store"); },"store");
-  add("builtin",{glyph:"设"},"设置","",function(){ openSettings(); },"settings");
+  add("builtin",{},tr("app.notes"),"",function(){ show("notes"); },"notes");
+  add("builtin",{},tr("app.paint"),"",function(){ openPaint(); },"paint");
+  add("builtin",{},tr("app.camera"),F.roll?(F.frames.length+"/"+F.size):"",function(){ openCam(); },"camera");
+  add("builtin",{},tr("app.cutter"),"",function(){ show("cut"); cutLayout(); },"cutter");
+  add("builtin",{},tr("app.cart"),"",function(){ openCart(); },"cart");
+  add("builtin",{},tr("app.store"),updatesAvailable()?tr("home.updates"):"",function(){ show("store"); },"store");
+  add("builtin",{},tr("app.settings"),"",function(){ openSettings(); },"settings");
   S.apps.slice().sort(function(a,b){ return (a.installed||0)-(b.installed||0); }).forEach(function(a){
-    add("",a,noEmoji(a.name)||"无名","v"+(a.version||"?"),function(){ runApp(a); });
+    add("",a,appName(a),"v"+(a.version||"?"),function(){ runApp(a); });
   });
 }
 
 /* ---------- store: the community registry ---------- */
+/* manifest name and description in the current language, when the app has them (manifest "i18n") */
+function appName(a){ return noEmoji(I18N.field(a,"name"))||tr("app.unnamed"); }
+function appDesc(a){ return noEmoji(I18N.field(a,"description")); }
+function validI18n(x){
+  if(!x || typeof x!=="object") return undefined;
+  var out={}, n=0;
+  I18N.LANGS.forEach(function(l){ var e=x[l]; if(e && typeof e==="object"){ var o={}; if(typeof e.name==="string") o.name=e.name.slice(0,16); if(typeof e.description==="string") o.description=e.description.slice(0,160); out[l]=o; n++; } });
+  return n?out:undefined;
+}
 var regLoading=null;
 function loadRegistry(force){
   if(regLoading && !force) return regLoading;
-  $("store-state").textContent="接收目录…";
+  $("store-state").textContent=tr("store.fetching");
   regLoading=fetch(REGISTRY+"index.json",{cache:"no-cache"}).then(function(r){
     if(!r.ok) throw new Error("HTTP "+r.status);
     return r.json();
   }).then(function(idx){
-    if(!idx || (idx.spec!=="lopda/0" && idx.spec!=="lopda/1") || !Array.isArray(idx.apps)) throw new Error("目录格式不对");
-    S.registry=idx; $("store-state").textContent=idx.apps.length+" 个程序";
-    /* icons are metadata: refresh them on installed apps whose code is unchanged */
-    idx.apps.forEach(function(r){ var a=installedOf(r.id); if(a && a.sha256===r.sha256 && validIcon(r.icon) && JSON.stringify(a.icon)!==JSON.stringify(r.icon)){ a.icon=r.icon; saveApp(a); } });
+    if(!idx || (idx.spec!=="lopda/0" && idx.spec!=="lopda/1") || !Array.isArray(idx.apps)) throw new Error(tr("store.badindex"));
+    S.registry=idx; $("store-state").textContent=tr("store.count",{n:idx.apps.length});
+    /* icons and localized names are metadata: refresh them on installed apps whose code is unchanged */
+    idx.apps.forEach(function(r){
+      var a=installedOf(r.id); if(!a || a.sha256!==r.sha256) return;
+      var icon=validIcon(r.icon)?r.icon:a.icon, i18n=validI18n(r.i18n);
+      if(JSON.stringify(a.icon)!==JSON.stringify(icon) || JSON.stringify(a.i18n)!==JSON.stringify(i18n)){ a.icon=icon; a.i18n=i18n; saveApp(a); }
+    });
     renderStore(); if(!$("v-home").hidden) renderHome();
   }).catch(function(e){
-    $("store-state").textContent="收不到目录";
-    if(!$("v-store").hidden) toast("连不上应用目录："+e.message);
+    $("store-state").textContent=tr("store.offline");
+    if(!$("v-store").hidden) toast(tr("store.cantreach",{msg:e.message}));
   }).then(function(){ regLoading=null; });
   return regLoading;
 }
@@ -266,19 +299,19 @@ function updatesAvailable(){
 }
 function renderStore(){
   var ul=$("store-list"); ul.textContent="";
-  if(!S.registry){ var e=document.createElement("li"); e.className="empty"; e.textContent="正在接收应用目录。连不上的话，检查网络后再进来一次。"; ul.appendChild(e); return; }
+  if(!S.registry){ var e=document.createElement("li"); e.className="empty"; e.textContent=tr("store.waiting"); ul.appendChild(e); return; }
   S.registry.apps.forEach(function(r){
     var li=document.createElement("li"); li.className="store-item";
     var tile=document.createElement("span"); tile.className="tile"; fillTile(tile,r);
     var body=document.createElement("div"); body.className="store-body";
-    var t=document.createElement("b"); t.textContent=noEmoji(r.name)+"  v"+r.version;
-    var d=document.createElement("span"); d.textContent=noEmoji(r.description||"");
-    var m=document.createElement("small"); m.textContent=(r.author||"佚名")+" · "+(r.license||"")+" · "+Math.max(1,Math.round((r.bytes||0)/1024))+" KB";
+    var t=document.createElement("b"); t.textContent=appName(r)+"  v"+r.version;
+    var d=document.createElement("span"); d.textContent=appDesc(r);
+    var m=document.createElement("small"); m.textContent=(r.author||tr("store.anon"))+" · "+(r.license||"")+" · "+Math.max(1,Math.round((r.bytes||0)/1024))+" KB";
     body.appendChild(t); body.appendChild(d); body.appendChild(m);
     var a=installedOf(r.id), btn=document.createElement("button"); btn.type="button";
-    if(!a){ btn.className="btn"; btn.textContent="安装"; }
-    else if(a.sha256!==r.sha256){ btn.className="btn"; btn.textContent="更新"; }
-    else { btn.className="btn ghost"; btn.textContent="打开"; }
+    if(!a){ btn.className="btn"; btn.textContent=tr("store.install"); }
+    else if(a.sha256!==r.sha256){ btn.className="btn"; btn.textContent=tr("store.update"); }
+    else { btn.className="btn ghost"; btn.textContent=tr("store.open"); }
     btn.onclick=function(){ if(a && a.sha256===r.sha256) runApp(a); else install(r,btn); };
     li.appendChild(tile); li.appendChild(body); li.appendChild(btn); ul.appendChild(li);
   });
@@ -317,27 +350,27 @@ function sha256js(bytes){
 }
 /* install exactly the file the registry describes: the hash must match */
 function install(r,btn){
-  btn.disabled=true; btn.textContent="下载中…";
+  btn.disabled=true; btn.textContent=tr("store.downloading");
   fetch(new URL(r.path,REGISTRY).href,{cache:"no-cache"}).then(function(res){
     if(!res.ok) throw new Error("HTTP "+res.status);
     return res.arrayBuffer();
   }).then(function(buf){
     return sha256hex(buf).then(function(h){
-      if(h!==r.sha256) throw new Error("校验不通过，文件和目录对不上");
+      if(h!==r.sha256) throw new Error(tr("store.badhash"));
       return new TextDecoder().decode(buf);
     });
   }).then(function(html){
     var prev=installedOf(r.id);
-    var app={id:r.id, name:r.name, glyph:r.glyph, icon: validIcon(r.icon) ? r.icon : undefined, version:r.version, author:r.author, license:r.license,
+    var app={id:r.id, name:r.name, glyph:r.glyph, icon: validIcon(r.icon) ? r.icon : undefined, i18n: validI18n(r.i18n), version:r.version, author:r.author, license:r.license,
       spec:r.spec||"lopda/0", buttons: r.spec==="lopda/1" && r.buttons===true,
       sha256:r.sha256, installed: prev ? prev.installed : Date.now(), updated: Date.now(), html:html};
     return saveApp(app).then(function(ok){
-      if(!ok) throw new Error("存不进本机");
-      toast((prev?"已更新 ":"已安装 ")+noEmoji(r.name)+"。"); sfx("ok");
+      if(!ok) throw new Error(tr("store.nostore"));
+      toast(tr(prev?"store.updated":"store.installed",{name:appName(r)})); sfx("ok");
       renderStore();
     });
   }).catch(function(e){
-    toast("安装失败："+e.message); sfx("err"); btn.disabled=false; btn.textContent="重试";
+    toast(tr("store.failed",{msg:e.message})); sfx("err"); btn.disabled=false; btn.textContent=tr("store.retry");
   });
 }
 
@@ -360,7 +393,7 @@ function loadHtml(a){
 }
 function deleteApp(id){
   dropLocal("apps",id);
-  if(S.db){ S.refs.apps.doc(id).delete().catch(function(){ toast("卸载失败"); }); S.refs.kv.doc(id).delete().catch(function(){}); S.refs.code.doc(id).delete().catch(function(){}); }
+  if(S.db){ S.refs.apps.doc(id).delete().catch(function(){ toast(tr("store.removefail")); }); S.refs.kv.doc(id).delete().catch(function(){}); S.refs.code.doc(id).delete().catch(function(){}); }
   delete S.kv[id];
 }
 
@@ -375,19 +408,19 @@ function freshRunFrame(){
 }
 function runApp(a){
   S.running=a;
-  $("run-title").textContent=noEmoji(a.name)+" · v"+(a.version||"?");
-  resetConfirm("run-del-wrap","run-del","卸载");
+  $("run-title").textContent=appName(a)+" · v"+(a.version||"?");
+  resetConfirm("run-del-wrap","run-del",tr("run.remove"));
   $("run-err").hidden=true;
   show("run");
   showPad(!!a.buttons);
   freshRunFrame();
-  var start=function(h){ $("run-frame").srcdoc=lopdaWrapApp(h); };
+  var start=function(h){ $("run-frame").srcdoc=lopdaWrapApp(h,{lang:I18N.lang}); };
   if(a.html){ start(a.html); return; }
-  $("run-frame").srcdoc='<body style="margin:0;height:100%;display:flex;align-items:center;justify-content:center;background:#a3ad7e;color:#1f2a14;font:16px monospace">载入中…</body>';
+  $("run-frame").srcdoc='<body style="margin:0;height:100%;display:flex;align-items:center;justify-content:center;background:#a3ad7e;color:#1f2a14;font:16px monospace">'+tr("run.loading")+'</body>';
   loadHtml(a).then(function(h){
     if(S.running!==a) return;
-    if(h) start(h); else toast("这个程序的代码找不到了，去应用商店重新安装。");
-  }).catch(function(e){ if(S.running===a) toast("读档失败（"+((e&&e.code)||"未知")+"）"); });
+    if(h) start(h); else toast(tr("run.missing"));
+  }).catch(function(e){ if(S.running===a) toast(tr("run.loadfail",{code:(e&&e.code)||tr("common.unknown")})); });
 }
 $("run-back").onclick=function(){ show("home"); };
 $("run-err-close").onclick=function(){ $("run-err").hidden=true; };
@@ -415,7 +448,7 @@ window.addEventListener("message",function(e){
       var next=Object.assign({},kv);
       if(d.op==="remove") delete next[d.k];
       else { try{ next[d.k]=JSON.parse(JSON.stringify(d.v)); }catch(err){ return; } }
-      if(JSON.stringify(next).length>KV_BUDGET){ $("run-err-msg").textContent="存档超过 256 KB 上限，这次没存。"; $("run-err").hidden=false; return; }
+      if(JSON.stringify(next).length>KV_BUDGET){ $("run-err-msg").textContent=tr("run.toobig"); $("run-err").hidden=false; return; }
       S.kv[appId]=next; saveKvSoon(appId);
     });
   } else if(d.op==="error"){
@@ -434,17 +467,17 @@ var sfxWindow={t:0,n:0};
 /* two-tap confirm: the page builds its own confirmation instead of confirm() */
 function resetConfirm(wrapId,btnId,label){
   var w=$(wrapId); w.textContent="";
-  var b=document.createElement("button"); b.className="btn ghost"; b.type="button"; b.id=btnId; b.textContent=label||"删除";
+  var b=document.createElement("button"); b.className="btn ghost"; b.type="button"; b.id=btnId; b.textContent=label||tr("common.delete");
   w.appendChild(b); b.onclick=function(){ armConfirm(wrapId,btnId,label); };
 }
 function armConfirm(wrapId,btnId,label){
   var w=$(wrapId); w.textContent="";
-  var yes=document.createElement("button"); yes.className="btn"; yes.type="button"; yes.textContent="确认"+(label||"删除");
-  var no=document.createElement("button"); no.className="btn ghost"; no.type="button"; no.textContent="取消";
+  var yes=document.createElement("button"); yes.className="btn"; yes.type="button"; yes.textContent=tr("common.confirm",{what:label||tr("common.delete")});
+  var no=document.createElement("button"); no.className="btn ghost"; no.type="button"; no.textContent=tr("common.cancel");
   w.appendChild(yes); w.appendChild(no);
   no.onclick=function(){ resetConfirm(wrapId,btnId,label); };
   yes.onclick=function(){
-    if(wrapId==="run-del-wrap" && S.running){ var n=S.running.name; deleteApp(S.running.id); show("home"); toast("已卸载 "+noEmoji(n)+"，存档也一并清掉了。"); }
+    if(wrapId==="run-del-wrap" && S.running){ var n=appName(S.running); deleteApp(S.running.id); show("home"); toast(tr("run.removed",{name:n})); }
     if(wrapId==="note-del-wrap" && S.editing){ deleteNote(S.editing.id); show("notes"); }
     if(wrapId==="paint-clear-wrap"){ paintClear(); resetConfirm(wrapId,btnId,label); }
   };
@@ -455,10 +488,10 @@ function fmt(ts){ var d=new Date(ts||0); return (d.getMonth()+1)+"/"+d.getDate()
 function renderNotes(){
   var ul=$("notes-list"); ul.textContent="";
   var list=S.notes.slice().sort(function(a,b){ return (b.updated||0)-(a.updated||0); });
-  if(!list.length){ var li=document.createElement("li"); li.className="empty"; li.textContent=S.db?"还没有笔记。点「新建」写第一条，存在这台机器里。":"还没有笔记。现在存不了档，写的内容关掉就没了。"; ul.appendChild(li); return; }
+  if(!list.length){ var li=document.createElement("li"); li.className="empty"; li.textContent=tr(S.db?"notes.empty":"notes.emptynodb"); ul.appendChild(li); return; }
   list.forEach(function(n){
     var li=document.createElement("li"), b=document.createElement("button"); b.type="button";
-    var t=document.createElement("span"); t.className="t"; t.textContent=(n.body||"").split("\n")[0].trim()||"（空白）";
+    var t=document.createElement("span"); t.className="t"; t.textContent=(n.body||"").split("\n")[0].trim()||tr("notes.blank");
     var d=document.createElement("span"); d.className="d"; d.textContent=fmt(n.updated);
     b.appendChild(t); b.appendChild(d); b.onclick=function(){ openNote(n); };
     li.appendChild(b); ul.appendChild(li);
@@ -471,15 +504,15 @@ $("note-new").onclick=function(){
 function openNote(n){
   S.editing={id:n.id, body:n.body||"", fresh:!!n.fresh};
   $("note-body").value=S.editing.body;
-  $("note-state").textContent=n.fresh?"新笔记":"已保存";
-  resetConfirm("note-del-wrap","note-del","删除");
+  $("note-state").textContent=tr(n.fresh?"notes.fresh":"notes.saved");
+  resetConfirm("note-del-wrap","note-del",tr("common.delete"));
   show("note"); $("note-body").focus();
 }
 var noteTimer;
 $("note-body").addEventListener("input",function(){
   if(!S.editing) return;
   S.editing.body=$("note-body").value; S.editing.dirty=true;
-  $("note-state").textContent="编辑中…";
+  $("note-state").textContent=tr("notes.editing");
   clearTimeout(noteTimer); noteTimer=setTimeout(flushNote,700);
 });
 function flushNote(){
@@ -488,23 +521,23 @@ function flushNote(){
   e.dirty=false;
   var doc={body:e.body, updated:Date.now()};
   upsert("notes",{id:e.id, body:doc.body, updated:doc.updated});
-  if(!S.db){ $("note-state").textContent="已保存（仅本次）"; return; }
+  if(!S.db){ $("note-state").textContent=tr("notes.savedtemp"); return; }
   pending.notes[e.id]=true;
-  $("note-state").textContent="保存中…";
+  $("note-state").textContent=tr("common.saving");
   put(S.refs.notes.doc(e.id),doc).then(function(ok){
     if(ok) delete pending.notes[e.id];
-    if(S.editing===e) $("note-state").textContent= ok ? "已保存" : "保存失败，再编辑一下会重试";
+    if(S.editing===e) $("note-state").textContent=tr(ok?"notes.saved":"notes.savefail");
     if(!ok) e.dirty=true;
   });
 }
 function deleteNote(id){
   S.editing=null;
   dropLocal("notes",id);
-  if(S.db) S.refs.notes.doc(id).delete().catch(function(){ toast("删除失败"); });
+  if(S.db) S.refs.notes.doc(id).delete().catch(function(){ toast(tr("notes.delfail")); });
 }
 $("note-back").onclick=function(){ flushNote(); S.editing=null; show("notes"); };
 
-/* ---------- 点阵画板: 96x96, four LCD tones ---------- */
+/* ---------- pixel paint: 96x96, four LCD tones ---------- */
 var PW=96, TONES=[[31,42,20],[74,90,50],[125,138,88],[163,173,126]];
 var P={px:new Uint8Array(PW*PW).fill(3), color:0, size:1, undo:[], loaded:false, drawing:false, last:null, saveTimer:null};
 var pcv=$("paint-cv"), pctx=pcv.getContext("2d"), pimg=pctx.createImageData(PW,PW);
@@ -545,10 +578,11 @@ Array.prototype.forEach.call(document.querySelectorAll(".sw"),function(b){
   };
 });
 /* two brushes: a single pixel, or a 3x3 block */
-$("paint-size").onclick=function(){ P.size=P.size===1?3:1; this.textContent= P.size===1 ? "笔 · 细" : "笔 · 粗"; };
-$("paint-undo").onclick=function(){ var prev=P.undo.pop(); if(!prev){ toast("没有可以撤销的了。"); return; } P.px=prev; paintRender(); paintSaveSoon(); };
+function paintSizeLabel(){ $("paint-size").textContent=tr(P.size===1?"paint.fine":"paint.bold"); }
+$("paint-size").onclick=function(){ P.size=P.size===1?3:1; paintSizeLabel(); };
+$("paint-undo").onclick=function(){ var prev=P.undo.pop(); if(!prev){ toast(tr("paint.noundo")); return; } P.px=prev; paintRender(); paintSaveSoon(); };
 function paintClear(){ paintPushUndo(); P.px=new Uint8Array(PW*PW).fill(3); paintRender(); paintSaveSoon(); }
-resetConfirm("paint-clear-wrap","paint-clear","清空");
+resetConfirm("paint-clear-wrap","paint-clear",tr("paint.clear"));
 
 /* import: crop to a square, stretch contrast, Bayer-dither to four tones */
 var BAYER=[0,8,2,10,12,4,14,6,3,11,1,9,15,7,13,5];
@@ -569,45 +603,46 @@ $("paint-file").addEventListener("change",function(){
       var k=y*PW+xx, v=(lum[k]-lo)/span, t=(BAYER[(y%4)*4+(xx%4)]+0.5)/16-0.5;
       P.px[k]=Math.max(0,Math.min(3,Math.round(v*3+t)));
     }
-    URL.revokeObjectURL(url); paintRender(); paintSaveSoon(); toast("已转成 96×96 四色点阵。");
+    URL.revokeObjectURL(url); paintRender(); paintSaveSoon(); toast(tr("paint.imported"));
   };
-  img.onerror=function(){ URL.revokeObjectURL(url); toast("这张图读不出来，换一张试试。"); };
+  img.onerror=function(){ URL.revokeObjectURL(url); toast(tr("paint.badimg")); };
   img.src=url;
 });
 
 /* export: scale up 8x with hard pixels, hand to the viewer's save dialog */
 $("paint-export").onclick=function(){
-  if(!S.downloads){ toast("这里不能导出，要在 Claude 里打开。"); return; }
+  if(!S.downloads){ toast(tr("paint.noexport")); return; }
   var big=document.createElement("canvas"); big.width=big.height=PW*8;
   var bx=big.getContext("2d"); bx.imageSmoothingEnabled=false; bx.drawImage(pcv,0,0,big.width,big.height);
   big.toBlob(function(blob){
-    if(!blob){ toast("生成图片失败。"); return; }
+    if(!blob){ toast(tr("paint.genfail")); return; }
     var d=new Date(), stamp=d.getFullYear()+String(d.getMonth()+1).padStart(2,"0")+String(d.getDate()).padStart(2,"0")+"-"+String(d.getHours()).padStart(2,"0")+String(d.getMinutes()).padStart(2,"0");
     S.downloads.save({filename:"lopda-"+stamp+".png", data:blob}).then(function(r){
-      if(r && r.status==="saved") toast("导出好了。");
+      if(r && r.status==="saved") toast(tr("paint.exported"));
     }).catch(function(e){
       var c=e&&e.code;
       if(c==="declined") return;
-      toast(c==="rate_limited" ? "上一个保存窗口还没关。" : "导出失败（"+(c||"未知")+"）。");
+      toast(c==="rate_limited" ? tr("save.busy") : tr("save.failed",{code:c||tr("common.unknown")}));
     });
   },"image/png");
 };
 
 /* persistence: the 9216 pixels as a digit string, one document */
 function paintSaveSoon(){
-  if(!S.db) { $("paint-state").textContent="96×96 · 未存档"; return; }
+  if(!S.db) { $("paint-state").textContent=tr("paint.unsaved"); return; }
   clearTimeout(P.saveTimer);
-  $("paint-state").textContent="保存中…";
+  $("paint-state").textContent=tr("common.saving");
   P.saveTimer=setTimeout(function(){
-    put(S.refs.paint,{px:Array.prototype.join.call(P.px,""), updated:Date.now()}).then(function(ok){ $("paint-state").textContent= ok ? "96×96 · 已保存" : "保存失败"; });
+    put(S.refs.paint,{px:Array.prototype.join.call(P.px,""), updated:Date.now()}).then(function(ok){ $("paint-state").textContent=tr(ok?"paint.saved":"paint.savefail"); });
   },1200);
 }
-/* ---------- 点阵相机: a roll of film. Frames are fixed once taken; a full roll is developed out. ---------- */
+/* ---------- pixel camera: a roll of film. Frames are fixed once taken; a full roll is developed out. ---------- */
 var CW=128, CH=112;
 var F={roll:null, size:12, res:1, tint:"lcd", loaded:0, exposure:0, contrast:0, date:true, frames:[], ready:false};
 var ccv=$("cam-cv"), cctx=ccv.getContext("2d"), cimg=cctx.createImageData(CW,CH);
 /* film stock: 1 = 128x112 standard, 2 = 256x224 fine grain. Fixed for the life of a roll. */
 /* film tints: the four tones a roll develops in. The handheld's own screen always stays green. */
+/* name: the Chinese tint name, kept as data; it is printed on film output in zh mode only */
 var TINTS={
   lcd:   {name:"绿屏", en:"LCD",    tones:[[31,42,20],[74,90,50],[125,138,88],[163,173,126]]},
   sepia: {name:"暖褐", en:"SEPIA",  tones:[[43,29,20],[107,74,50],[168,128,90],[230,210,176]]},
@@ -617,9 +652,13 @@ var TINTS={
 };
 var TINT_ORDER=["lcd","sepia","sakura","cyano","mono"];
 function tintOf(id){ return TINTS[id]||TINTS.lcd; }
+/* the tint as the screen calls it: Chinese name in zh, the English one in en */
+function tintLabel(id){ var T=tintOf(id); return I18N.lang==="zh"?T.name:T.en; }
+/* the tint as film output prints it: "SAKURA 樱粉" in zh, "SAKURA" in en */
+function tintPrint(id){ var T=tintOf(id); return I18N.lang==="zh"?T.en+" "+T.name:T.en; }
 var nextTint="lcd";
 function setRes(r){ r=r===2?2:1; F.res=r; CW=128*r; CH=112*r; ccv.width=CW; ccv.height=CH; cimg=cctx.createImageData(CW,CH); }
-function stockName(r){ return r===2 ? "细颗粒" : "标准片"; }
+function stockName(r){ return tr(r===2?"cam.stock2":"cam.stock1"); }
 function filmDoc(){ return {roll:F.roll,size:F.size,res:F.res,tint:F.tint,loaded:F.loaded,exposure:F.exposure,contrast:F.contrast,date:F.date}; }
 var nextStock=1, nextSize=12;
 function drawPx(ctx,img,px){
@@ -659,7 +698,7 @@ function stampOf(ts){ var d=new Date(ts); return String(d.getFullYear()).slice(2
 function pad2(n){ return String(n).padStart(2,"0"); }
 function fileStamp(ts){ var d=new Date(ts); return d.getFullYear()+pad2(d.getMonth()+1)+pad2(d.getDate()); }
 function rollFull(){ return F.roll && F.frames.length>=F.size; }
-function frameStamp(fr){ return fr.blank==="dark" ? "未曝光" : fr.blank==="light" ? "全曝光" : stampOf(fr.taken); }
+function frameStamp(fr){ return fr.blank==="dark" ? tr("cam.unexposed") : fr.blank==="light" ? tr("cam.fogged") : stampOf(fr.taken); }
 
 function camIdle(){
   var px=new Uint8Array(CW*CH);
@@ -670,9 +709,9 @@ function camIdle(){
 function renderCam(){
   var has=!!F.roll, full=rollFull();
   $("cam-count").textContent= has ? pad2(Math.min(F.frames.length+(full?0:1),F.size))+"/"+pad2(F.size) : "--/--";
-  $("cam-film").textContent= has ? tintOf(F.tint).en+" "+tintOf(F.tint).name+" · "+(F.res===2?"细":"标") : (F.ready?"未装胶卷":"读取中…");
+  $("cam-film").textContent= has ? tr("cam.lcd",{en:tintOf(F.tint).en, name:tintOf(F.tint).name, stock:tr(F.res===2?"cam.stock.s2":"cam.stock.s1")}) : tr(F.ready?"cam.nofilm":"cam.reading");
   var sg=function(v){ return (v>0?"+":v<0?"−":"±")+Math.abs(v); };
-  $("cam-exp").textContent="亮"+sg(F.exposure)+" 对"+sg(F.contrast);
+  $("cam-exp").textContent=tr("cam.exp",{b:sg(F.exposure), c:sg(F.contrast)});
   $("cam-date").className=F.date?"":"off";
   var shooting=has && !full;
   ["cam-shutter","ck-dark","ck-bright"].forEach(function(id){ $(id).disabled=!shooting; });
@@ -724,7 +763,7 @@ function loadRoll(){
   /* the door closes, the film is wound on to frame 1 */
   sfx("tap"); setTimeout(function(){ sfx("tick"); },120); setTimeout(function(){ sfx("tick"); },240); setTimeout(function(){ sfx("ok"); },420);
   camSheet(null); camIdle(); renderCam(); startLive();
-  toast("装好了：PIXEL FILM "+tintOf(F.tint).en+" "+tintOf(F.tint).name+(F.res===2?" 细颗粒":"")+"，"+F.size+" 张。");
+  toast(tr("cam.loaded",{en:tintOf(F.tint).en, name:tintOf(F.tint).name, fine:F.res===2?tr("cam.loadedfine"):"", n:F.size}));
 }
 
 /* ---- live viewfinder: the camera feed dithered to the LCD in real time (needs HTTPS) ---- */
@@ -745,7 +784,7 @@ function liveSupported(){ return !!(window.isSecureContext && navigator.mediaDev
 function camModeLabel(){
   var has=!!F.roll && !rollFull();
   $("cam-mode").textContent = !has ? "" : LIVE.on ? "" :
-    (liveSupported() ? (LIVE.failed ? "没拿到摄像头权限：按 A 会打开系统相机" : "") : "实时取景需要 HTTPS：按 A 会打开系统相机");
+    (liveSupported() ? (LIVE.failed ? tr("cam.nolive") : "") : tr("cam.needhttps"));
   $("cam-live-tag").hidden=!LIVE.on;
 }
 function startLive(){
@@ -757,7 +796,7 @@ function startLive(){
     camModeLabel(); LIVE.raf=requestAnimationFrame(liveTick);
   }).catch(function(e){
     LIVE.failed=true; camModeLabel();
-    if(e && e.name==="NotAllowedError") toast("没拿到摄像头权限，改用系统相机拍。");
+    if(e && e.name==="NotAllowedError") toast(tr("cam.denied"));
   });
 }
 function stopLive(){
@@ -787,8 +826,8 @@ function takeFrame(px){
   setTimeout(function(){ $("cam-shut").hidden=true; if(!LIVE.on) camIdle(); },160);
   setTimeout(function(){ sfx("tick"); },260); setTimeout(function(){ sfx("tick"); },360);
   renderCam();
-  if(S.db) put(S.refs.frames.doc(F.roll+"-"+pad2(n)),fr).then(function(ok){ if(!ok) toast("这一张没存上，重新打开相机看看。"); });
-  if(rollFull()){ toast("最后一张。这卷拍完了，可以冲洗了。"); stopLive(); }
+  if(S.db) put(S.refs.frames.doc(F.roll+"-"+pad2(n)),fr).then(function(ok){ if(!ok) toast(tr("cam.lost")); });
+  if(rollFull()){ toast(tr("cam.last")); stopLive(); }
 }
 $("cam-shutter").onclick=function(){ shoot(); };
 function shoot(){
@@ -810,7 +849,7 @@ $("cam-file").addEventListener("change",function(){
     var px=ditherLuma(lumaOf(img,CW,CH),CW,CH,F.exposure,F.contrast); URL.revokeObjectURL(url);
     $("cam-dev").hidden=true; takeFrame(px);
   };
-  img.onerror=function(){ URL.revokeObjectURL(url); $("cam-dev").hidden=true; toast("这张照片读不出来，这一格没有用掉。"); };
+  img.onerror=function(){ URL.revokeObjectURL(url); $("cam-dev").hidden=true; toast(tr("cam.badphoto")); };
   img.src=url;
 });
 
@@ -865,16 +904,16 @@ function saveCanvas(cv,name){
 }
 function saveErr(e){
   var c=e&&e.code;
-  if(c==="declined") return "这次没保存。";
-  if(c==="rate_limited") return "上一个保存窗口还没关。";
-  if(c==="unavailable"||c==="not_granted") return "这里不能保存文件，要在 Claude 里打开。";
-  return "保存失败（"+(c||"未知")+"）。";
+  if(c==="declined") return tr("save.declined");
+  if(c==="rate_limited") return tr("save.busy");
+  if(c==="unavailable"||c==="not_granted") return tr("save.unavailable");
+  return tr("save.failed",{code:c||tr("common.unknown")});
 }
 async function developStrip(){
   if(!rollFull()) return;
   try{ if(document.fonts && document.fonts.load) await document.fonts.load('22px "VT323"'); }catch(err){}
   var cv=buildStrip(F.frames,F.size,F.loaded,F.tint);
-  saveCanvas(cv,"lopda-film-"+fileStamp(F.loaded)+"-"+F.size+"exp.png").then(function(r){ if(r&&r.status==="saved") sfx("ok"), toast("冲洗好了。想要单张就放进「裁片机」。"); },function(e){ toast(saveErr(e)); });
+  saveCanvas(cv,"lopda-film-"+fileStamp(F.loaded)+"-"+F.size+"exp.png").then(function(r){ if(r&&r.status==="saved") sfx("ok"), toast(tr("cam.developed")); },function(e){ toast(saveErr(e)); });
 }
 
 /* ---- the 3:4 contact-sheet card: a whole roll laid out on photo paper, sized for sharing ---- */
@@ -913,7 +952,7 @@ function buildCard(frames,size,loaded,tintId){
   x.font='30px "VT323", "DotGothic16", monospace'; x.textAlign="right";
   x.fillText(String(new Date(loaded).getFullYear())+"."+pad2(new Date(loaded).getMonth()+1)+"."+pad2(new Date(loaded).getDate()),CARD.W-MX,126);
   x.textAlign="left"; x.fillStyle=CARD.SOFT; x.font='26px "DotGothic16", "VT323", monospace';
-  x.fillText((F.res===2?"FINE GRAIN":"PIXEL FILM")+" · "+T.en+" "+T.name+" · "+size+" EXP",MX,176);
+  x.fillText((F.res===2?"FINE GRAIN":"PIXEL FILM")+" · "+tintPrint(tintId)+" · "+size+" EXP",MX,176);
   x.fillStyle=CARD.INK; x.fillRect(MX,200,CARD.W-2*MX,3);
   x.textAlign="center"; x.fillStyle=CARD.SOFT; x.font='24px "VT323", monospace';
   x.fillText("· shot on lo-pda ·",CARD.W/2,CARD.H-56);
@@ -944,7 +983,7 @@ function developCard(){
   fontsReady().then(function(){
     var cv=buildCard(F.frames,F.size,F.loaded,F.tint);
     return saveCanvas(cv,"lopda-card-"+fileStamp(F.loaded)+"-"+F.tint+".png");
-  }).then(function(r){ if(r&&r.status==="saved"){ sfx("ok"); toast("印样卡冲印好了。"); } },function(e){ toast(saveErr(e)); })
+  }).then(function(r){ if(r&&r.status==="saved"){ sfx("ok"); toast(tr("cam.carded")); } },function(e){ toast(saveErr(e)); })
     .then(function(){ CAM.busy=false; });
 }
 
@@ -970,7 +1009,7 @@ function rewindEarly(){
   }
   stopLive(); camIdle(); camSheet(null);
   for(var k=0;k<6;k++) setTimeout(function(){ sfx("tick"); },k*70);
-  toast("倒片完成，剩下的格子见光了。"); renderCam();
+  toast(tr("cam.rewound")); renderCam();
   writes.reduce(function(pr,w){ return pr.then(function(){ return put(w[0],w[1]); }); },Promise.resolve());
 }
 
@@ -985,17 +1024,18 @@ function loadFilm(){
       list.sort(function(a,b){ return a.n-b.n; });
       F.frames=list; F.ready=true;
     });
-  }).catch(function(e){ F.ready=true; toast("相机读档失败（"+((e&&e.code)||"未知")+"）"); });
+  }).catch(function(e){ F.ready=true; toast(tr("cam.readfail",{code:(e&&e.code)||tr("common.unknown")})); });
 }
 
 var camLinked=false, bootTimer=null;
 function camBoot(){
   var box=$("cam-boot"), reduce=window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
   if(camLinked || reduce){ camLinked=true; return; }
-  var filmLine = F.roll ? ("胶卷 ： "+tintOf(F.tint).name+stockName(F.res)+" "+F.frames.length+"/"+F.size) : "胶卷 ： 未装";
-  var lines=[["扩展槽 B 检测中","…",380],["发现外设","LP-CAM 点阵镜头 rev.2",420],["握手 9600 bps","",0],["固件","CAM-OS 1.03",300],[filmLine.split(" ： ")[0],filmLine.split(" ： ")[1],360],["","连接完成。",500]];
+  var film = F.roll ? tr("cam.boot.filmof",{name:tintLabel(F.tint), stock:stockName(F.res), n:F.frames.length, size:F.size}) : tr("cam.boot.nofilm");
+  var shake=tr("cam.boot.shake"), sep=I18N.lang==="zh"?" ： ":": ";
+  var lines=[[tr("cam.boot.slot"),"…",380],[tr("cam.boot.found"),tr("cam.boot.lens"),420],[shake,"",0],[tr("cam.boot.fw"),"CAM-OS 1.03",300],[tr("cam.boot.film"),film,360],["",tr("cam.boot.done"),500]];
   box.textContent=""; box.hidden=false;
-  var skip=document.createElement("div"); skip.className="skip"; skip.textContent="轻点跳过";
+  var skip=document.createElement("div"); skip.className="skip"; skip.textContent=tr("cam.boot.skip");
   var done=function(){ clearTimeout(bootTimer); clearInterval(bootTimer); camLinked=true; box.hidden=true; box.onclick=null; };
   box.onclick=done;
   var i=0;
@@ -1005,16 +1045,16 @@ function camBoot(){
     var L=lines[i++], d=document.createElement("div"); d.className="ln";
     box.insertBefore(d,skip.parentNode?skip:null);
     if(!skip.parentNode) box.appendChild(skip);
-    if(L[0]==="握手 9600 bps"){
+    if(L[0]===shake){
       var n=0; d.className="ln bar8";
       bootTimer=setInterval(function(){
-        n++; if(n===1) sfx("modem"); d.textContent="握手 9600 bps ["+"█".repeat(n)+"░".repeat(10-n)+"]";
-        if(n>=10){ clearInterval(bootTimer); d.textContent="握手 9600 bps [██████████] OK"; bootTimer=setTimeout(next,240); sfx("ok"); }
+        n++; if(n===1) sfx("modem"); d.textContent=shake+" ["+"█".repeat(n)+"░".repeat(10-n)+"]";
+        if(n>=10){ clearInterval(bootTimer); d.textContent=shake+" [██████████] OK"; bootTimer=setTimeout(next,240); sfx("ok"); }
       },70);
       return;
     }
     d.textContent=L[0] ? L[0]+" … " : "";
-    bootTimer=setTimeout(function(){ d.textContent=(L[0]?L[0]+(L[1]!=="…"?" ： ":" "):"")+L[1]; bootTimer=setTimeout(next,L[2]); },260);
+    bootTimer=setTimeout(function(){ d.textContent=(L[0]?L[0]+(L[1]!=="…"?sep:" "):"")+L[1]; bootTimer=setTimeout(next,L[2]); },260);
   })();
 }
 function openCam(){
@@ -1037,38 +1077,39 @@ function camSheet(name){
 }
 function camMenu(kind){
   var left=F.size-F.frames.length, M;
-  if(kind==="body") M={title:"机身菜单", note:"", back:function(){ camSheet(null); renderCam(); startLive(); }, items:[
-    {label:"日期", value:function(){ return F.date?"开":"关"; }, pick:function(){ toggleDate(); }},
-    {label:"换镜头", value:function(){ return LIVE.facing==="user"?"前":"后"; }, pick:function(){ LIVE.facing = LIVE.facing==="environment" ? "user" : "environment"; }},
-    {label:"提前倒片", value:function(){ return left+" 张未拍"; }, pick:function(){ camMenu("rewind"); }},
-    {label:"回到取景", pick:function(){ M.back(); }}
+  /* titles, labels and notes are keys, so an open menu redraws in the new language */
+  if(kind==="body") M={title:"cam.menu.body", note:"", back:function(){ camSheet(null); renderCam(); startLive(); }, items:[
+    {label:"cam.menu.date", value:function(){ return tr(F.date?"set.on":"set.off"); }, pick:function(){ toggleDate(); }},
+    {label:"cam.menu.lens", value:function(){ return tr(LIVE.facing==="user"?"cam.menu.front":"cam.menu.back"); }, pick:function(){ LIVE.facing = LIVE.facing==="environment" ? "user" : "environment"; }},
+    {label:"cam.menu.rewind", value:function(){ return tr("cam.menu.left",{n:left}); }, pick:function(){ camMenu("rewind"); }},
+    {label:"cam.menu.finder", pick:function(){ M.back(); }}
   ]};
-  else if(kind==="rewind") M={title:"提前倒片", note:"还有 "+left+" 张没拍。倒片时剩下的胶片会见光，冲出来是一片白。倒片后这卷就拍完了。", back:function(){ camMenu("body"); }, items:[
-    {label:"确认倒片", pick:function(){ rewindEarly(); }},
-    {label:"取消", pick:function(){ camMenu("body"); }}
+  else if(kind==="rewind") M={title:"cam.menu.rewind", note:"cam.menu.rewindnote", back:function(){ camMenu("body"); }, items:[
+    {label:"cam.menu.rewindgo", pick:function(){ rewindEarly(); }},
+    {label:"common.cancel", pick:function(){ camMenu("body"); }}
   ]};
-  else if(kind==="develop") M={title:"这卷拍完了", note:"冲洗之后才看得到拍了什么。长条是一整条胶片；印样卡把整卷印在一张 3:4 相纸上。", back:null, items:[
-    {label:"冲洗成长条", pick:function(){ developStrip(); }},
-    {label:"印样卡 3:4", pick:function(){ developCard(); }},
-    {label:"取出胶卷，装新的", pick:function(){ camMenu("remove"); }}
+  else if(kind==="develop") M={title:"cam.menu.done", note:"cam.menu.donenote", back:null, items:[
+    {label:"cam.menu.strip", pick:function(){ developStrip(); }},
+    {label:"cam.menu.card", pick:function(){ developCard(); }},
+    {label:"cam.menu.swap", pick:function(){ camMenu("remove"); }}
   ]};
-  else if(kind==="remove") M={title:"取出胶卷", note:"旧胶卷会从掌机里清掉。没冲洗的话就没了。", back:function(){ camMenu("develop"); }, items:[
-    {label:"确认取出", pick:function(){ removeRoll(); }},
-    {label:"再想想", pick:function(){ camMenu("develop"); }}
+  else if(kind==="remove") M={title:"cam.menu.remove", note:"cam.menu.removenote", back:function(){ camMenu("develop"); }, items:[
+    {label:"cam.menu.removego", pick:function(){ removeRoll(); }},
+    {label:"cam.menu.wait", pick:function(){ camMenu("develop"); }}
   ]};
-  CAM.menu=M; CAM.sel=0; camSheet("menu"); drawMenu();
+  M.left=left; CAM.menu=M; CAM.sel=0; camSheet("menu"); drawMenu();
 }
 function drawMenu(){
-  var M=CAM.menu; $("menu-title").textContent=M.title; $("menu-note").textContent=M.note;
+  var M=CAM.menu; $("menu-title").textContent=tr(M.title); $("menu-note").textContent=M.note?tr(M.note,{n:M.left}):"";
   var ul=$("menu-list"); ul.textContent="";
   M.items.forEach(function(it,i){
     var li=document.createElement("li"); li.className=i===CAM.sel?"on":"";
-    li.appendChild(document.createTextNode(it.label));
+    li.appendChild(document.createTextNode(tr(it.label)));
     if(it.value){ var v=document.createElement("small"); v.textContent=it.value(); li.appendChild(v); }
     li.onclick=function(){ CAM.sel=i; drawMenu(); menuPick(); };
     ul.appendChild(li);
   });
-  document.querySelector("#cam-menu .menu-keys").textContent="▲▼ 选择 · A 确定"+(M.back?" · B 返回":"");
+  document.querySelector("#cam-menu .menu-keys").textContent=tr("cam.menu.keys")+(M.back?tr("cam.menu.keysback"):"");
 }
 function menuPick(){ var it=CAM.menu.items[CAM.sel]; sfx("tap"); it.pick(); if(CAM.mode==="menu" && CAM.menu && CAM.menu.items.indexOf(it)>=0) drawMenu(); }
 
@@ -1126,17 +1167,18 @@ function pickRoll(i,smooth){
   box.scrollTo({left:c.offsetLeft+c.offsetWidth/2-box.clientWidth/2, behavior:smooth?"smooth":"auto"});
 }
 function paintRolls(){
+  if(!$("rolls").children.length) return;
   nextTint=TINT_ORDER[CAM.roll];
   Array.prototype.forEach.call($("rolls").children,function(c,i){
     var id=c.getAttribute("data-tint"), t=TINTS[id];
     c.className="roll"+(i===CAM.roll?" on":"");
     c.querySelector(".lab").innerHTML="";
     c.querySelector(".lab").appendChild(document.createTextNode(t.en));
-    var sm=document.createElement("small"); sm.textContent=t.name+" · "+nextSize+" 张"+(nextStock===2?" · 细":""); c.querySelector(".lab").appendChild(sm);
+    var sm=document.createElement("small"); sm.textContent=tr("cam.load.label",{name:t.name, n:nextSize, fine:nextStock===2?tr("cam.load.fine"):""}); c.querySelector(".lab").appendChild(sm);
   });
-  $("roll-count").lastChild.textContent=nextSize+" 张";
+  $("roll-count").lastChild.textContent=tr("cam.load.exp",{n:nextSize});
   $("roll-stock").lastChild.textContent=stockName(nextStock);
-  $("roll-note").textContent=(nextStock===2?"细颗粒 256×224，能看清人脸。":"标准片 128×112，颗粒粗，复古味重。")+" 冲洗出来是「"+tintOf(nextTint).name+"」色调，屏幕上永远是绿的。";
+  $("roll-note").textContent=tr(nextStock===2?"cam.load.note2":"cam.load.note1")+tr("cam.load.tint",{name:tintLabel(nextTint)});
 }
 function rollSize(step){ var S3=[8,12,16], i=S3.indexOf(nextSize); nextSize=S3[(i+step+3)%3]; sfx("tick"); paintRolls(); }
 function rollStock(){ nextStock=nextStock===2?1:2; sfx("tick"); paintRolls(); }
@@ -1183,7 +1225,7 @@ function camLayout(){
 if(window.ResizeObserver) new ResizeObserver(function(){ camLayout(); }).observe($("finder-box"));
 window.addEventListener("resize",camLayout);
 
-/* ---------- 裁片机: slide the strip under a fixed window and cut what's inside ---------- */
+/* ---------- cutter: slide the strip under a fixed window and cut what's inside ---------- */
 var CUT={W:0, n:0, data:null, s:1, k:1, mode:"narrow", count:0, name:"lopda", tint:"lcd", pal:TINTS.lcd.tones};
 function nearestTone(r,g,b,pal){
   pal=pal||TONES;
@@ -1249,19 +1291,19 @@ function cutLoad(img,fname){
   cutLayout();
   /* start with frame 1 centred under the window */
   $("cut-scroll").scrollLeft=Math.round((STRIP.LEAD+STRIP.FW/2)*CUT.k);
-  $("cut-state").textContent=TINTS[CUT.tint].name+" · "+n+" 格 · 已裁 0 张";
+  cutState();
   return true;
 }
 $("cut-file").addEventListener("change",function(){
   var f=this.files && this.files[0]; this.value="";
   if(!f) return;
   var url=URL.createObjectURL(f), img=new Image();
-  $("cut-state").textContent="读取中…";
+  $("cut-state").textContent=tr("cut.reading");
   img.onload=function(){
     var ok=cutLoad(img,f.name); URL.revokeObjectURL(url);
-    if(!ok){ $("cut-state").textContent=""; toast("这不像 Lo-PDA 冲洗出来的横向长条。"); }
+    if(!ok){ $("cut-state").textContent=""; toast(tr("cut.notstrip")); }
   };
-  img.onerror=function(){ URL.revokeObjectURL(url); $("cut-state").textContent=""; toast("这张图读不出来。"); };
+  img.onerror=function(){ URL.revokeObjectURL(url); $("cut-state").textContent=""; toast(tr("cut.badimg")); };
   img.src=url;
 });
 function cutNudge(dx){ var sc=$("cut-scroll"); sc.scrollLeft=sc.scrollLeft+dx*CUT.k; }
@@ -1275,12 +1317,14 @@ Array.prototype.forEach.call(document.querySelectorAll("[data-win]"),function(b)
   };
 });
 /* print edges: none, a straight paper border, or a scalloped paper border */
-var EDGES=[["none","无","裁下来直接是胶片画面。"],["plain","白边","加一圈相纸白边。"],["scallop","花边","加一圈波浪形的花边相纸，像老照片。"],["card","3:4 卡","放在一张 3:4 相纸卡上，适合直接发出去。"]];
+var EDGES=["none","plain","scallop","card"];
 var edgeIdx=0;
-$("cut-edge").onclick=function(){
-  edgeIdx=(edgeIdx+1)%EDGES.length;
-  this.textContent="相纸边 · "+EDGES[edgeIdx][1]; $("cut-edge-note").textContent=EDGES[edgeIdx][2];
-};
+function cutEdgeLabel(){
+  var e=EDGES[edgeIdx];
+  $("cut-edge").textContent=tr("cut.edge",{name:tr("cut.edge."+e)}); $("cut-edge-note").textContent=tr("cut.edgenote."+e);
+}
+function cutState(){ $("cut-state").textContent=CUT.data ? tr("cut.state",{tint:tintLabel(CUT.tint), n:CUT.n, k:CUT.count}) : ""; }
+$("cut-edge").onclick=function(){ edgeIdx=(edgeIdx+1)%EDGES.length; cutEdgeLabel(); };
 /* is a point (in strip units, within the bordered print) on the paper? */
 function onPaper(x,y,W,H,style){
   if(style!=="scallop") return true;
@@ -1290,14 +1334,14 @@ function onPaper(x,y,W,H,style){
 /* one cut on a 3:4 card: the print sits on photo paper with a short caption */
 function buildCutCard(w,x0){
   var c=document.createElement("canvas"); c.width=CARD.W; c.height=CARD.H;
-  var x=c.getContext("2d"), T=TINTS[CUT.tint];
+  var x=c.getContext("2d");
   x.fillStyle="rgb("+CARD.PAPER.join(",")+")"; x.fillRect(0,0,c.width,c.height);
   var MX=96, pw=CARD.W-2*MX, ph=Math.round(pw*w.h/w.w), py=Math.round((CARD.H-ph)/2)-60;
   var d=new Date();
   x.fillStyle=CARD.INK; x.font='44px "VT323", monospace'; x.textBaseline="alphabetic";
   x.fillText("LO-PDA",MX,py+ph+76);
   x.textAlign="right"; x.fillStyle=CARD.SOFT; x.font='26px "DotGothic16", "VT323", monospace';
-  x.fillText(T.en+" "+T.name+" · "+d.getFullYear()+"."+pad2(d.getMonth()+1)+"."+pad2(d.getDate()),CARD.W-MX,py+ph+74);
+  x.fillText(tintPrint(CUT.tint)+" · "+d.getFullYear()+"."+pad2(d.getMonth()+1)+"."+pad2(d.getDate()),CARD.W-MX,py+ph+74);
   x.textAlign="left";
   var region=new Uint8Array(w.w*w.h);
   for(var y=0;y<w.h;y++) for(var xx=0;xx<w.w;xx++) region[y*w.w+xx]=CUT.data[(w.y+y)*CUT.W+x0+xx];
@@ -1307,11 +1351,11 @@ function buildCutCard(w,x0){
 $("cut-go").onclick=function(){
   sfx("shutter");
   if(!CUT.data) return;
-  var w=cutWin(), x0=cutX(), SC=2, style=EDGES[edgeIdx][0], B= style==="none" ? 0 : 14;
+  var w=cutWin(), x0=cutX(), SC=2, style=EDGES[edgeIdx], B= style==="none" ? 0 : 14;
   if(style==="card"){
     var btnc=this; btnc.disabled=true;
     fontsReady().then(function(){ return saveCanvas(buildCutCard(w,x0),CUT.name+"-card-"+pad2(CUT.count+1)+".png"); })
-      .then(function(r){ if(r&&r.status==="saved"){ CUT.count++; $("cut-state").textContent=TINTS[CUT.tint].name+" · "+CUT.n+" 格 · 已裁 "+CUT.count+" 张"; toast("卡片冲印好了。"); } },function(e){ toast(saveErr(e)); })
+      .then(function(r){ if(r&&r.status==="saved"){ CUT.count++; cutState(); toast(tr("cut.carded")); } },function(e){ toast(saveErr(e)); })
       .then(function(){ btnc.disabled=false; });
     return;
   }
@@ -1328,7 +1372,7 @@ $("cut-go").onclick=function(){
   ox.putImageData(im,0,0);
   var btn=this; btn.disabled=true;
   saveCanvas(out,CUT.name+"-cut-"+pad2(CUT.count+1)+".png").then(function(r){
-    if(r&&r.status==="saved"){ CUT.count++; $("cut-state").textContent=TINTS[CUT.tint].name+" · "+CUT.n+" 格 · 已裁 "+CUT.count+" 张"; toast("裁好了。"); }
+    if(r&&r.status==="saved"){ CUT.count++; cutState(); toast(tr("cut.done")); }
     btn.disabled=false;
   },function(e){ toast(saveErr(e)); btn.disabled=false; });
 };
@@ -1405,7 +1449,7 @@ function gbModule(){
   if(GB.loading) return GB.loading;
   GB.loading=new Promise(function(res,rej){
     var sc=document.createElement("script"); sc.src="vendor/binjgb/binjgb.js";
-    sc.onload=res; sc.onerror=function(){ rej(new Error("模拟器文件没载入")); };
+    sc.onload=res; sc.onerror=function(){ rej(new Error(tr("cart.noemu"))); };
     document.head.appendChild(sc);
   }).then(function(){
     return window.Binjgb({locateFile:function(p){ return new URL("vendor/binjgb/"+p,location.href).href; }});
@@ -1416,13 +1460,13 @@ function gbModule(){
 function heap(ptr,size){ return new Uint8Array(GB.mod.HEAP8.buffer,ptr,size); }
 /* Read the cartridge header. Returns {title, ok, why}. */
 function cartHeader(u8){
-  if(u8.length<0x8000 || u8.length>8*1024*1024) return {ok:false, why:"文件大小不像 GB 卡带"};
+  if(u8.length<0x8000 || u8.length>8*1024*1024) return {ok:false, why:tr("cart.badsize")};
   var cgb=u8[0x143];
-  if(cgb===0xC0) return {ok:false, why:"这是彩色专用卡带（GBC），这台机器只认黑白卡带"};
+  if(cgb===0xC0) return {ok:false, why:tr("cart.gbc")};
   var t="", end=(cgb&0x80)?0x143:0x144;
   for(var i=0x134;i<end;i++){ var c=u8[i]; if(!c) break; if(c>=32&&c<127) t+=String.fromCharCode(c); }
   var x=0; for(i=0x134;i<=0x14C;i++) x=(x-u8[i]-1)&0xFF;
-  if(x!==u8[0x14D]) return {ok:false, why:"卡带头校验不对，文件可能坏了"};
+  if(x!==u8[0x14D]) return {ok:false, why:tr("cart.badsum")};
   return {ok:true, title:t.trim(), dual:!!(cgb&0x80)};
 }
 /* black-and-white only: clear the colour and Super Game Boy flags on our private copy */
@@ -1433,21 +1477,21 @@ function asMono(u8){
 }
 function renderCarts(){
   var ul=$("cart-list"); ul.textContent="";
-  if(!CARTS.length){ var e=document.createElement("li"); e.className="empty"; e.textContent=S.db?"卡带架是空的。":"现在存不了档，插进来的卡带关掉就没了。"; ul.appendChild(e); return; }
+  if(!CARTS.length){ var e=document.createElement("li"); e.className="empty"; e.textContent=tr(S.db?"cart.empty":"cart.emptynodb"); ul.appendChild(e); return; }
   CARTS.slice().sort(function(a,b){ return (b.played||b.added||0)-(a.played||a.added||0); }).forEach(function(c){
     var li=document.createElement("li"); li.className="store-item";
     var tile=document.createElement("span"); tile.className="tile"; tile.textContent=Array.from(c.name||"?")[0].toUpperCase();
     var body=document.createElement("div"); body.className="store-body";
     var t=document.createElement("b"); t.textContent=c.name;
-    var m=document.createElement("small"); m.textContent=(c.title||"无标题")+" · "+Math.round(c.bytes/1024)+" KB"+(c.played?" · "+fmt(c.played):"");
+    var m=document.createElement("small"); m.textContent=(c.title||tr("cart.untitled"))+" · "+Math.round(c.bytes/1024)+" KB"+(c.played?" · "+fmt(c.played):"");
     body.appendChild(t); body.appendChild(m);
     var acts=document.createElement("div"); acts.className="acts";
-    var play=document.createElement("button"); play.type="button"; play.className="btn"; play.textContent="插卡";
+    var play=document.createElement("button"); play.type="button"; play.className="btn"; play.textContent=tr("cart.play");
     play.onclick=function(){ gbPlay(c); };
-    var del=document.createElement("button"); del.type="button"; del.className="btn ghost"; del.textContent="扔掉";
+    var del=document.createElement("button"); del.type="button"; del.className="btn ghost"; del.textContent=tr("cart.toss");
     del.onclick=function(){
       if(del.dataset.armed){ deleteCart(c); return; }
-      del.dataset.armed="1"; del.textContent="确认扔掉"; setTimeout(function(){ if(del.isConnected){ delete del.dataset.armed; del.textContent="扔掉"; } },3000);
+      del.dataset.armed="1"; del.textContent=tr("cart.tossgo"); setTimeout(function(){ if(del.isConnected){ delete del.dataset.armed; del.textContent=tr("cart.toss"); } },3000);
     };
     acts.appendChild(play); acts.appendChild(del);
     li.appendChild(tile); li.appendChild(body); li.appendChild(acts); ul.appendChild(li);
@@ -1455,12 +1499,12 @@ function renderCarts(){
 }
 function loadCarts(){
   if(!S.db) return Promise.resolve();
-  return S.refs.carts.get().then(function(q){ CARTS=q.docs.map(function(d){ var o=own(d.data()); o.id=d.id; return o; }); renderCarts(); }).catch(function(){ toast("卡带架读不出来"); });
+  return S.refs.carts.get().then(function(q){ CARTS=q.docs.map(function(d){ var o=own(d.data()); o.id=d.id; return o; }); renderCarts(); }).catch(function(){ toast(tr("cart.shelffail")); });
 }
 function deleteCart(c){
   CARTS=CARTS.filter(function(x){ return x.id!==c.id; }); renderCarts();
   if(S.db){ S.refs.carts.doc(c.id).delete(); S.refs.roms.doc(c.id).delete(); S.refs.cartsave.doc(c.id).delete(); }
-  toast("扔掉了 "+c.name+"，存档也一起清掉了。");
+  toast(tr("cart.tossed",{name:c.name}));
 }
 $("cart-file").onchange=function(){
   var f=this.files&&this.files[0]; this.value=""; if(!f) return;
@@ -1468,25 +1512,25 @@ $("cart-file").onchange=function(){
     var u8=new Uint8Array(buf), h=cartHeader(u8);
     if(!h.ok){ toast(h.why); sfx("err"); return; }
     return sha256hex(buf).then(function(hex){
-      var id=hex.slice(0,24), name=noEmoji(f.name.replace(/\.(gbc?|bin)$/i,"")).slice(0,40)||h.title||"卡带";
+      var id=hex.slice(0,24), name=noEmoji(f.name.replace(/\.(gbc?|bin)$/i,"")).slice(0,40)||h.title||tr("cart.default");
       var have=CARTS.filter(function(x){ return x.id===id; })[0];
-      if(have){ toast("这盘卡带已经在架子上了。"); return; }
+      if(have){ toast(tr("cart.dupe")); return; }
       var meta={name:name, title:h.title, bytes:u8.length, added:Date.now(), dual:h.dual};
       var write = S.db ? put(S.refs.roms.doc(id),{rom:b64(u8)}).then(function(ok){ return ok && put(S.refs.carts.doc(id),meta); }) : Promise.resolve(true);
       return write.then(function(ok){
         if(!ok) return;
         meta.id=id; if(!S.db) meta.mem=u8; CARTS.push(meta); renderCarts(); sfx("ok");
-        toast(h.dual?"放好了。这是双模卡带，会按黑白模式运行。":"放好了。");
+        toast(tr(h.dual?"cart.dual":"cart.placed"));
       });
     });
-  }).catch(function(e){ toast("读不了这个文件："+((e&&e.message)||e)); });
+  }).catch(function(e){ toast(tr("cart.badfile",{msg:(e&&e.message)||e})); });
 };
 function openCart(){
   show("cart"); gbShowLib(); renderCarts(); loadCarts();
 }
 function gbShowLib(){
   $("cart-lib").hidden=false; $("cart-play").hidden=true; $("cart-tools").hidden=true; $("v-cart").classList.remove("locked");
-  $("cart-title").textContent="卡带机"; $("cart-state").textContent=""; showPad(false);
+  $("cart-title").textContent=tr("cart.title"); $("cart-state").textContent=""; showPad(false);
 }
 function cartLayout(){
   var cv=$("cart-cv"), box=$("cart-play"); if(box.hidden) return;
@@ -1498,22 +1542,22 @@ function cartLayout(){
 }
 window.addEventListener("resize",function(){ if(!$("v-cart").hidden) cartLayout(); });
 function gbPlay(c){
-  $("cart-state").textContent="读卡…";
-  var romP = c.mem ? Promise.resolve(c.mem) : S.refs.roms.doc(c.id).get().then(function(sn){ if(!sn.exists) throw new Error("卡带数据找不到了"); return unb64(own(sn.data()).rom); });
+  $("cart-state").textContent=tr("cart.reading");
+  var romP = c.mem ? Promise.resolve(c.mem) : S.refs.roms.doc(c.id).get().then(function(sn){ if(!sn.exists) throw new Error(tr("cart.norom")); return unb64(own(sn.data()).rom); });
   var saveP = S.db ? S.refs.cartsave.doc(c.id).get().then(function(sn){ return sn.exists ? own(sn.data()) : {}; }).catch(function(){ return {}; }) : Promise.resolve({});
   audio();   /* this tap unlocks sound on phones */
   if(SND.ctx && SND.ctx.state==="suspended") SND.ctx.resume();
   Promise.all([gbModule(),romP,saveP]).then(function(r){
     if($("v-cart").hidden) return;
     gbStart(c,r[1],r[2]);
-  }).catch(function(e){ $("cart-state").textContent=""; toast("开不了机："+((e&&e.message)||e)); sfx("err"); });
+  }).catch(function(e){ $("cart-state").textContent=""; toast(tr("cart.nopower",{msg:(e&&e.message)||e})); sfx("err"); });
 }
 function gbStart(c,rom,save){
   gbStop();
   var m=GB.mod, data=asMono(rom), size=(data.length+0x7fff)&~0x7fff, ac=SND.ctx;
   GB.rom=m._malloc(size); var h=heap(GB.rom,size); h.fill(0); h.set(data);
   GB.e=m._emulator_new_simple(GB.rom,size,ac?ac.sampleRate:44100,GB_AUDIO_FRAMES,0);
-  if(!GB.e){ m._free(GB.rom); GB.rom=0; throw new Error("这盘卡带读不出来"); }
+  if(!GB.e){ m._free(GB.rom); GB.rom=0; throw new Error(tr("cart.badrom")); }
   GB.joy=m._joypad_new(); m._emulator_set_default_joypad_callback(GB.e,GB.joy);
   var col=function(t){ var c=TINTS.lcd.tones[t]; return ((255<<24)|(c[2]<<16)|(c[1]<<8)|c[0])>>>0; };
   for(var p=0;p<3;p++) m._emulator_set_bw_palette_simple(GB.e,p,col(3),col(2),col(1),col(0));
@@ -1585,16 +1629,16 @@ $("cart-save").onclick=function(){
   var m=GB.mod, s=gbWithFile(m._state_file_data_new(GB.e),function(fd,buf){ m._emulator_write_state(GB.e,fd); return b64(buf); });
   GB.save.state=s; GB.save.stateAt=Date.now();
   if(GB.dirty){ gbSaveSram(); } else if(S.db) put(S.refs.cartsave.doc(GB.cart.id),GB.save);
-  toast("存好了（覆盖上一份）。"); sfx("ok"); resetCartLoad();
+  toast(tr("cart.saved")); sfx("ok"); resetCartLoad();
 };
-function resetCartLoad(){ var b=$("cart-load"); delete b.dataset.armed; b.textContent="读档"; b.disabled=!(GB.save&&GB.save.state); }
+function resetCartLoad(){ var b=$("cart-load"); delete b.dataset.armed; b.textContent=tr("cart.load"); b.disabled=!(GB.save&&GB.save.state); }
 $("cart-load").onclick=function(){
   var b=this; if(!GB.e || !GB.save.state) return;
-  if(!b.dataset.armed){ b.dataset.armed="1"; b.textContent="确认读档"; setTimeout(function(){ if(b.dataset.armed) resetCartLoad(); },3000); return; }
+  if(!b.dataset.armed){ b.dataset.armed="1"; b.textContent=tr("cart.loadgo"); setTimeout(function(){ if(b.dataset.armed) resetCartLoad(); },3000); return; }
   var m=GB.mod, st=unb64(GB.save.state), ok=false;
   gbWithFile(m._state_file_data_new(GB.e),function(fd,buf){ if(st.length===buf.length){ buf.set(st); ok=m._emulator_read_state(GB.e,fd)===0; } });
   resetCartLoad();
-  if(ok){ toast("回到 "+fmt(GB.save.stateAt)+" 的存档。"); sfx("ok"); } else { toast("存档读不进去。"); sfx("err"); }
+  if(ok){ toast(tr("cart.restored",{when:fmt(GB.save.stateAt)})); sfx("ok"); } else { toast(tr("cart.loadfail")); sfx("err"); }
 };
 
 if(/[?&]debug\b/.test(location.search)) window.LOPDA_DEBUG={GB:GB, setButton:setButton, sfxLog:[]};
@@ -1613,6 +1657,7 @@ function openPaint(){
 paintRender();
 
 /* ---------- boot ---------- */
+I18N.apply(document); setStatus(statusKey); paintSizeLabel(); cutEdgeLabel();
 tickClock(); setInterval(tickClock,15000);
 renderHome();
 $("store-refresh").onclick=function(){ loadRegistry(true); };
@@ -1634,8 +1679,8 @@ $("store-refresh").onclick=function(){ loadRegistry(true); };
     S.refs.carts=db.doc(base+"/carts").collection("items");
     S.refs.roms=db.doc(base+"/roms").collection("items");
     S.refs.cartsave=db.doc(base+"/cartsave").collection("items");
-    S.refs.settings.get().then(function(sn){ var d=sn.exists?own(sn.data()):null; if(d){ SND.on=d.sound!==false; SND.vol=Math.max(0,Math.min(3,d.volume==null?2:d.volume|0)); } }).catch(function(){});
-    $("savestate").textContent="本机存档";
+    S.refs.settings.get().then(function(sn){ var d=sn.exists?own(sn.data()):null; if(d){ SND.on=d.sound!==false; SND.vol=Math.max(0,Math.min(3,d.volume==null?2:d.volume|0)); if(I18N.STR[d.lang]) setLang(d.lang); } }).catch(function(){});
+    setStatus("status.saved");
     P.persist();
     refresh("apps"); refresh("notes");
     loadFilm().then(function(){ if(!$("v-home").hidden) renderHome(); if(!$("v-cam").hidden) renderCam(); });
@@ -1647,9 +1692,9 @@ $("store-refresh").onclick=function(){ loadRegistry(true); };
       if(!$("v-cam").hidden) startLive();
     });
   }).catch(function(e){
-    $("savestate").textContent="未存档";
+    setStatus("status.unsaved");
     if(window.console) console.error("Lo-PDA storage failed", e);
-    toast("这台浏览器不让存档，关掉页面后内容会丢。");
+    toast(tr("boot.nostore"));
     F.ready=true;
   });
   if("serviceWorker" in navigator && location.protocol!=="file:"){
@@ -1660,7 +1705,7 @@ $("store-refresh").onclick=function(){ loadRegistry(true); };
     navigator.serviceWorker.addEventListener("controllerchange",function(){
       if(!hadController){ hadController=true; return; }
       UPD.ready=true; renderUpdate();
-      toast("新版本下载好了。到「设置」按「重启升级」。");
+      toast(tr("upd.arrived"));
     });
   }
 })();
