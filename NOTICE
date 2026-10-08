@@ -1,14 +1,11 @@
 Lo-PDA
-Required Notice: Copyright (c) 2026 Haowei Wu
+Copyright (c) 2026 Haowei Wu
 Source: https://github.com/nowheremanx/lopda
 
-The Lo-PDA runtime (everything in this repository except the paths listed
-below) is licensed under the PolyForm Noncommercial License 1.0.0. See LICENSE.
-
-These paths are licensed under the MIT License instead, so that app authors
-and their apps are never bound by the runtime's noncommercial terms:
-  sdk/        (app bridge, template, dev harness, AI prompt)  — see sdk/LICENSE
-  SPEC.md     (the app specification)                         — see sdk/LICENSE
+Lo-PDA is licensed under the MIT License (see LICENSE). Versions published
+before the switch to MIT were released under the PolyForm Noncommercial
+License 1.0.0; the copyright holder also makes those versions available under
+the MIT License.
 
 Third-party parts keep their own licenses:
   runtime/vendor/binjgb/   Game Boy emulator core, MIT, Ben Smith  — see its LICENSE
@@ -17,3 +14,6 @@ Third-party parts keep their own licenses:
 Apps under registry/apps/<id>/ are the work of their authors and carry the
 license named in their own manifest.json (one of the permissive licenses
 listed in LICENSING.md).
+
+The name "Lo-PDA" and the Lo-PDA icons are not covered by the MIT License.
+See "Name and icons" in LICENSING.md.

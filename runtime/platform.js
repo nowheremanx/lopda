@@ -1,6 +1,6 @@
 /*
  * Lo-PDA platform layer for the standalone PWA.
- * Copyright (c) 2026 Haowei Wu. PolyForm Noncommercial 1.0.0, see LICENSE and NOTICE.
+ * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  *
  * The runtime talks to storage and file export only through this object, so the
  * same UI code can later run on a synced backend by swapping this file.

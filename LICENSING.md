@@ -1,89 +1,57 @@
 # Licensing / 许可说明
 
-Lo-PDA uses three layers of licensing on purpose. The goal is that the runtime
-stays noncommercial and credited, while apps and contributions never get stuck
-if the runtime's license changes later.
+## Code: MIT
 
-Lo-PDA 有意分成三层许可。目标是：主程序保持非商用、必须署名；同时，社区的 app 和贡献
-不会因为主程序以后换许可而被卡住。
+Everything in this repository is under the **MIT License** (`LICENSE`), except
+the third-party parts listed below. Use it, change it, ship it, sell it; keep the
+copyright notice. `sdk/LICENSE` is the same MIT license, kept next to the SDK so
+app authors who copy only that folder carry it along.
 
-| Layer 层 | What 内容 | License 许可 |
-|---|---|---|
-| Runtime 主程序 | `runtime/`, `tools/`, `registry/index.json`, docs | PolyForm Noncommercial 1.0.0 (`LICENSE`) + `NOTICE` |
-| SDK & spec 开发包与规范 | `sdk/`, `SPEC.md` | MIT (`sdk/LICENSE`) |
-| Apps 社区 app | `registry/apps/<id>/` | The author's own permissive license, declared in `manifest.json` |
-| Vendored 第三方 | `runtime/vendor/binjgb/` | MIT, Ben Smith (its own `LICENSE` in that folder) |
+仓库里除下面列出的第三方部分外，全部采用 MIT 许可。可以使用、修改、分发、商用，保留版权声明即可。
 
-## 1. Runtime: PolyForm Noncommercial 1.0.0
+Earlier versions were published under the PolyForm Noncommercial License 1.0.0.
+The copyright holder also makes those versions available under the MIT License.
 
-- Anyone may use, copy, modify and share the runtime for noncommercial purposes
-  (personal use, hobby, study, research, education, charities, public bodies).
-- Commercial use needs a separate license from the copyright holder.
-- Anyone who passes on any part of the runtime must keep the license text (or its
-  URL) and every line starting with `Required Notice:` from `NOTICE`. That is the
-  attribution requirement.
-- Note: because it forbids commercial use, this is **source-available**, not
-  "open source" in the OSI sense. Please don't describe it as open source.
+## Name and icons
 
-## 2. SDK and spec: MIT
+The MIT License covers the code, not the name. "Lo-PDA" and the Lo-PDA icons
+identify this project. You may say your work is "based on Lo-PDA" or "for
+Lo-PDA", and an app in the registry may say it runs on Lo-PDA. A fork or a
+product built from this code that is published for others must use a different
+name and icon, so nobody mistakes it for this project.
 
-Everything an app author touches is MIT: the `PAD` bridge, the template, the dev
-harness, the AI prompt and the spec itself. Writing an app for Lo-PDA therefore
-never makes the app a derivative of the noncommercial runtime. Apps run in a
-sandboxed iframe and talk to the runtime only through `postMessage`.
+MIT 许可只覆盖代码，不覆盖名字。可以说「基于 Lo-PDA」或「为 Lo-PDA 开发」；但对外发布的 fork 或产品要换
+名字和图标，以免被误认为是本项目。
 
-## 3. Apps: permissive licenses only
+## Apps in the registry: permissive licenses only
 
-Every app in the registry must declare one of these SPDX identifiers in its
+Every app in `registry/apps/` must declare one of these SPDX identifiers in its
 `manifest.json`:
 
 `MIT`, `0BSD`, `BSD-2-Clause`, `BSD-3-Clause`, `ISC`, `Apache-2.0`, `CC0-1.0`, `Unlicense`
 
-The rule is "as permissive as the runtime or more". In practice only
-permissive licenses qualify, because:
+This keeps the whole registry redistributable together with the project, by
+anyone, under terms at least as open as the project's own. `tools/check-app.mjs`
+rejects any other license string. Authors keep their copyright.
 
-- If an app were noncommercial or copyleft (GPL), the curated registry could
-  never be moved to a different license, bundled into a commercial edition, or
-  relicensed without asking every app author individually.
-- Permissive apps can be redistributed under any future runtime license.
+## Contributions
 
-`tools/check-app.mjs` rejects any other license string.
+Contributions are accepted under the MIT License, the same terms as the project.
+See `CONTRIBUTING.md`.
 
-## 4. Contributions to the runtime: inbound MIT
+## Third-party material
 
-Code contributed to `runtime/` or `tools/` by anyone other than the copyright
-holder is accepted under the **MIT License** (inbound), and the copyright holder
-distributes the combined runtime under PolyForm Noncommercial (outbound).
-
-Why: if contributors gave their code under PolyForm Noncommercial, the copyright
-holder could not later relicense the runtime (for example to a commercial
-edition, or to a fully open license) without tracking down every contributor.
-Inbound MIT keeps that door open with no CLA paperwork. Contributors sign off
-each commit (`git commit -s`, the Developer Certificate of Origin) to confirm
-they have the right to submit the code. See `CONTRIBUTING.md`.
-
-## 5. Third-party material
-
-- Fonts: VT323 and DotGothic16 are loaded from Google Fonts and are licensed
-  under the SIL Open Font License 1.1. If they are ever bundled for offline use,
-  their license files must be shipped alongside them.
 - Game Boy emulator core: binjgb by Ben Smith, MIT License, prebuilt web files
-  copied unchanged into `runtime/vendor/binjgb/` with its license file. MIT allows
-  shipping it inside a noncommercial-licensed runtime; the copyright notice must stay.
+  copied unchanged into `runtime/vendor/binjgb/` with its license file.
 - Pixel font: `sdk/fonts/lopix12.json` is a modified version of Fusion Pixel Font
   (which combines Ark Pixel, Cubic 11 and Galmuri), all SIL Open Font License 1.1.
   It is not called Fusion Pixel, a Reserved Font Name. Apps built with lo-game.js
   carry a subset with the full OFL notice inside the font block
   (`sdk/fonts/LICENSE-lopix12.txt`; upstream licenses in `sdk/fonts/upstream-licenses/`).
-- No game ROMs are bundled or distributed. The cartridge player only plays files the
-  user supplies. Do not add ROMs to this repository or to the registry.
-
-## What this means if the license changes later
-
-- Switching the runtime to a commercial or fully open license: the copyright
-  holder can do it alone, because all outside runtime code arrived as MIT.
-- Apps stay under their own permissive licenses and keep working either way.
-- Copies already distributed under PolyForm Noncommercial keep those terms for
-  the people who received them; a license change applies going forward.
+- Fonts VT323 and DotGothic16 are loaded from Google Fonts (SIL OFL 1.1). If they
+  are ever bundled, their license files must ship with them.
+- No GPL code: it would turn the whole project GPL.
+- No game ROMs are bundled or distributed. The cartridge player only plays files
+  the user supplies. Do not add ROMs to this repository or to the registry.
 
 This document explains intent. It is not legal advice.

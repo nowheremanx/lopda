@@ -1,6 +1,6 @@
 /*
  * Lo-PDA runtime.
- * Copyright (c) 2026 Haowei Wu. PolyForm Noncommercial 1.0.0, see LICENSE and NOTICE.
+ * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  */
 (function(){
 "use strict";
@@ -78,7 +78,7 @@ function show(name){
 $("home-key").onclick=function(){ flushNote(); show("home"); sfx("home"); };
 
 /* ---------- sound: tiny square-wave chips through Web Audio ---------- */
-var RUNTIME_VERSION="0.3.0";   /* keep in step with VERSION in sw.js */
+var RUNTIME_VERSION="0.3.1";   /* keep in step with VERSION in sw.js */
 var SND={ctx:null, on:true, vol:2, gain:null};
 var VOL_GAIN=[0,0.05,0.11,0.2];
 function audio(){

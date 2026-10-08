@@ -7,5 +7,5 @@ Game Boy emulator core by Ben Smith, MIT License (see `LICENSE` in this folder).
   copied unchanged from commit `16621111ed0ee73bcc45c912a823bcebedcffc0f`.
 - Used by the 卡带机 (cartridge player) in `runtime/lopda.js`.
 
-This folder keeps binjgb's own MIT license. The rest of Lo-PDA is under PolyForm Noncommercial 1.0.0.
+This folder keeps binjgb's own MIT license. Lo-PDA itself is also MIT.
 No game ROMs are included or distributed with Lo-PDA.

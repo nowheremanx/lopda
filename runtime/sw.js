@@ -1,8 +1,8 @@
-/* Lo-PDA service worker. Copyright (c) 2026 Haowei Wu. PolyForm Noncommercial 1.0.0.
+/* Lo-PDA service worker. Copyright (c) 2026 Haowei Wu. MIT License.
  * Shell files: cache first, so the handheld opens offline.
  * Registry index: network first, falling back to the last copy.
  * Fonts: cached the first time they load. */
-var VERSION = "lopda-v0.3.0";
+var VERSION = "lopda-v0.3.1";
 var SHELL = ["./", "index.html", "lopda.css", "lopda.js", "platform.js", "../sdk/pad-shim.js",
   "manifest.webmanifest", "vendor/binjgb/binjgb.js", "vendor/binjgb/binjgb.wasm", "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png"];
 

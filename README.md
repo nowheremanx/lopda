@@ -2,13 +2,28 @@
 
 A four-tone handheld that lives on your phone. Hi-PDA's low-fidelity cousin.
 
-Lo-PDA is a Progressive Web App styled as a fictional 1986 PDA with a green LCD.
-It comes with a few built-in programs and installs small community apps from a
-reviewed registry. Everything runs on the device; nothing needs an account.
-
 一台住在手机里的四色掌机，Hi-PDA 的低保真表亲。
 
-Source: https://github.com/nowheremanx/lopda
+**Try it:** https://nowheremanx.github.io/lopda/ — open it on a phone and "Add to Home Screen".
+
+![Lo-PDA on a phone: home screen, loading a roll of film, the live pixel viewfinder, and a small game](docs/images/screens.png)
+
+Lo-PDA is a Progressive Web App styled as a fictional 1986 PDA with a green LCD
+and hardware buttons on its chin. It comes with a film camera, a strip cutter, a
+pixel paint program, a Game Boy cartridge player and a store of small community
+apps. Everything runs and is saved on the device; nothing needs an account.
+
+## Shot on Lo-PDA
+
+The camera behaves like a film camera. You load a roll of 8, 12 or 16 frames,
+you can't see what you shot, and nothing comes out until the whole roll is
+developed: as a film strip, or as a contact sheet sized for sharing.
+
+<img src="docs/images/contact-sheet.png" width="360" alt="A contact sheet: a roll of 8 pink-toned pixel photos of a lake with a pagoda, cut into strips and laid on paper"> 
+
+![The same roll developed as one horizontal film strip, with sprocket holes and edge print](docs/images/film-strip.png)
+
+<sub>Screenshots and film above were made in a desktop browser, with the camera fed a generated test scene.</sub>
 
 ## What's inside
 
@@ -16,14 +31,17 @@ Source: https://github.com/nowheremanx/lopda
 |---|---|---|
 | 记事本 | Notes | Plain notes, saved on the device. |
 | 点阵画板 | Pixel paint | 96×96, four tones, import a photo as a dithered picture, export PNG. |
-| 点阵相机 | Film camera | Load a roll (8, 12 or 16 frames, standard or fine grain). Frames can't be deleted or edited. Date back on or off before each shot. Develop a full roll into one film strip. |
+| 点阵相机 | Film camera | Live dithered viewfinder. Load a roll (8, 12 or 16 frames, standard or fine grain, one of five tints). No previews: develop the full roll into a film strip or a 3:4 contact sheet. Chin buttons after the Game Boy Camera. |
 | 裁片机 | Strip cutter | Slide a developed strip under a fixed window and cut frames, halves or crossings, with optional paper edges. |
 | 卡带机 | Cartridge player | Plays black-and-white Game Boy files you supply, with the chin buttons. No games are included. |
 | 应用商店 | App store | Install, update and run community apps from `registry/`. |
 | 设置 | Settings | Sound, volume, storage, and updating to the newest version. |
 
 Community apps are single HTML files that run in a sandboxed iframe with no
-network access. See `SPEC.md`.
+network access, pinned by hash when installed. Games can use `sdk/lo-game.js`,
+a small framework with a pixel font, dialogue boxes, menus and tile maps.
+See `SPEC.md` and `sdk/LO-GAME.md`. Why things are the way they are:
+[`docs/decisions.md`](docs/decisions.md).
 
 ## Run it locally
 
@@ -81,10 +99,8 @@ roll. The limits are the point.
 
 ## License
 
-Source-available, not open source. The runtime is under the
-[PolyForm Noncommercial License 1.0.0](LICENSE): free for personal, hobby,
-educational and other noncommercial use, with attribution (keep `NOTICE`).
-The SDK and spec are MIT, and every registry app uses a permissive license of
-its author's choice. Read `LICENSING.md` for the reasoning.
+[MIT](LICENSE). Copyright (c) 2026 Haowei Wu.
 
-Required Notice: Copyright (c) 2026 Haowei Wu
+Every registry app uses a permissive license of its author's choice. The name
+"Lo-PDA" and its icons are not covered by the license: forks published for
+others need their own name. Details in `LICENSING.md`.

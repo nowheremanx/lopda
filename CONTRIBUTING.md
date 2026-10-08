@@ -35,15 +35,7 @@ What gets rejected:
 ## B. Change the runtime, tools or docs
 
 - Open an issue first for anything larger than a bug fix.
-- By submitting code to `runtime/` or `tools/`, you license your contribution
-  under the **MIT License**. The project then distributes the runtime as a whole
-  under PolyForm Noncommercial 1.0.0. See `LICENSING.md` section 4 for why.
-- Sign off every commit to certify the Developer Certificate of Origin
-  (https://developercertificate.org):
-
-  ```sh
-  git commit -s -m "Fix the cutter nudge step"
-  ```
+- Contributions are licensed under the MIT License, like the rest of the project.
 
 - Keep the design rule in mind: a change should remove a decision from the user
   or keep the count the same. Changes that add options need a strong reason.

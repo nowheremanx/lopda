@@ -1,4 +1,4 @@
-/* Lo-PDA runtime styles. Copyright (c) 2026 Haowei Wu. PolyForm Noncommercial 1.0.0. */
+/* Lo-PDA runtime styles. Copyright (c) 2026 Haowei Wu. MIT License. */
 /* base reset (the artifact host used to provide this) */
 *,*::before,*::after{box-sizing:border-box}
 [hidden]{display:none!important}
