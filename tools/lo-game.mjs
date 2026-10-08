@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Copies sdk/lo-game.js into every app that asks for it, and adds a pixel-font block holding
 // only the characters the app uses (lopix12, SIL OFL 1.1, see sdk/fonts/LICENSE-lopix12.txt).
-// An app asks with an empty block:  <script data-lo-game="1.1.0"></script>
+// An app asks with an empty block:  <script data-lo-game="1.2.0"></script>
 // Run it again whenever the app's text changes, so new characters get their glyphs.
 // Usage: node tools/lo-game.mjs registry/apps/<id> [more dirs...]
 //        node tools/lo-game.mjs --hash     (print the version and hash of sdk/lo-game.js)
