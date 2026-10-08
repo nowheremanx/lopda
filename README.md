@@ -79,7 +79,8 @@ node tools/build-index.mjs
 
 `sdk/PROMPT.md` is a ready-made prompt for writing an app with an AI assistant.
 For games, use `sdk/lo-game.js` (see `sdk/LO-GAME.md`, which doubles as the AI
-prompt) and start from `sdk/template-game/`.
+prompt) and start from `sdk/template-game/`, or `sdk/template-vn/` for a visual novel
+(the story is a data block of lines, choices and flags).
 
 ## Layout
 
@@ -88,6 +89,7 @@ runtime/     the PWA (index.html, lopda.js, lopda.css, platform.js, sw.js, icons
 sdk/         MIT: PAD bridge, lo-game.js, templates, dev harness, AI prompts
 registry/    index.json + apps/<id>/{manifest.json,index.html}
 tools/       check-app.mjs, build-index.mjs, lo-game.mjs (Node 20+, no dependencies)
+tests/       run with `node --test` (no dependencies)
 SPEC.md      app specification lopda/1
 ```
 

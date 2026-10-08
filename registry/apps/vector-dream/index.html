@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>矢量梦</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #a3ad7e; color: #1f2a14; font-family: monospace; }
+  body { display: flex; align-items: center; justify-content: center; touch-action: none; }
+  canvas { width: 100vw; max-width: calc(100vh * 160 / 144); aspect-ratio: 160 / 144; image-rendering: pixelated; image-rendering: crisp-edges; display: block; }
+  #hud { position: absolute; left: 6px; top: 6px; font-size: 11px; line-height: 1.3; background: #1f2a14; color: #a3ad7e; padding: 3px 5px; white-space: pre; display: none; }
+</style>
+</head>
+<body>
+<canvas id="c" width="160" height="144"></canvas>
+<div id="hud"></div>
+<script>
+/* A tiny software rasteriser: perspective, z-buffer, flat shading, 4x4 Bayer dither to four tones.
+   Pixels go straight into ImageData; nothing is ever drawn canvas-to-canvas. */
+(function () {
+  var W = 160, H = 144;
+  var cv = document.getElementById("c"), ctx = cv.getContext("2d");
+  var img = ctx.createImageData(W, H), px = img.data;
+  var zb = new Float32Array(W * H), lum = new Float32Array(W * H);
+  var hud = document.getElementById("hud");
+  var TONES = [[0x1f, 0x2a, 0x14], [0x4a, 0x5a, 0x32], [0x7d, 0x8a, 0x58], [0xa3, 0xad, 0x7e]];
+  var BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+  var en = (typeof PAD !== "undefined" && PAD.lang === "en");
+  var T = en ? { scene: "SCENE", mode: "MODE", solid: "SOLID", wire: "WIRE", fps: "FPS", tri: "TRIS",
+                 names: ["KNOT", "FLYOVER", "CRYSTAL"] }
+             : { scene: "场景", mode: "模式", solid: "实体", wire: "线框", fps: "帧率", tri: "面数",
+                 names: ["环结", "飞越", "晶体"] };
+
+  /* ---------- meshes ---------- */
+  function knot() {
+    var v = [], t = [], N = 72, M = 7, p = 2, q = 3, i, j;
+    function pt(u) {
+      var r = 1 + 0.45 * Math.cos(q * u);
+      return [r * Math.cos(p * u), 0.45 * Math.sin(q * u), r * Math.sin(p * u)];
+    }
+    for (i = 0; i < N; i++) {
+      var u = i / N * Math.PI * 2, a = pt(u), b = pt(u + 0.01);
+      var tg = norm(sub(b, a)), nb = norm(cross(tg, [0, 1, 0])), bn = cross(nb, tg);
+      for (j = 0; j < M; j++) {
+        var w = j / M * Math.PI * 2, c = Math.cos(w) * 0.22, s = Math.sin(w) * 0.22;
+        v.push([a[0] + nb[0] * c + bn[0] * s, a[1] + nb[1] * c + bn[1] * s, a[2] + nb[2] * c + bn[2] * s]);
+      }
+    }
+    for (i = 0; i < N; i++) for (j = 0; j < M; j++) {
+      var a0 = i * M + j, a1 = i * M + (j + 1) % M, b0 = ((i + 1) % N) * M + j, b1 = ((i + 1) % N) * M + (j + 1) % M;
+      t.push([a0, b0, b1], [a0, b1, a1]);
+    }
+    return { v: v, t: t };
+  }
+  function ico(r) {
+    var g = (1 + Math.sqrt(5)) / 2, v = [[-1, g, 0], [1, g, 0], [-1, -g, 0], [1, -g, 0], [0, -1, g], [0, 1, g], [0, -1, -g], [0, 1, -g], [g, 0, -1], [g, 0, 1], [-g, 0, -1], [-g, 0, 1]];
+    var t = [[0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11], [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8], [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9], [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1]];
+    for (var i = 0; i < v.length; i++) { var n = norm(v[i]); v[i] = [n[0] * r, n[1] * r, n[2] * r]; }
+    return { v: v, t: t };
+  }
+  function cube(s) {
+    var v = [], t = [], i;
+    for (i = 0; i < 8; i++) v.push([(i & 1 ? s : -s), (i & 2 ? s : -s), (i & 4 ? s : -s)]);
+    var q = [[0, 2, 3, 1], [4, 5, 7, 6], [0, 1, 5, 4], [2, 6, 7, 3], [0, 4, 6, 2], [1, 3, 7, 5]];
+    for (i = 0; i < 6; i++) t.push([q[i][0], q[i][1], q[i][2]], [q[i][0], q[i][2], q[i][3]]);
+    return { v: v, t: t };
+  }
+  var GN = 22, GS = 0.5;
+  function height(x, z) {
+    return 0.55 * Math.sin(x * 0.7 + z * 0.3) + 0.35 * Math.sin(z * 0.9 - x * 0.4) + 0.2 * Math.sin(x * 1.9 + z * 1.3) - 0.9;
+  }
+  function terrain(tm) {
+    var v = [], t = [], i, j, off = tm * 1.2, base = Math.floor(off / GS) * GS, fr = off - base;
+    for (j = 0; j <= GN; j++) for (i = 0; i <= GN; i++) {
+      var x = (i - GN / 2) * GS, z = (j - GN / 2) * GS;
+      var h = height(x, z - base); if (h < -1.25) h = -1.25;        /* flat "lakes" */
+      v.push([x, h, z + fr]);
+    }
+    for (j = 0; j < GN; j++) for (i = 0; i < GN; i++) {
+      var a = j * (GN + 1) + i, b = a + 1, c = a + GN + 1, d = c + 1;
+      t.push([a, c, d], [a, d, b]);
+    }
+    return { v: v, t: t, two: true };
+  }
+  var KNOT = knot(), ICO = ico(0.9), CUBE = cube(0.18), SUN = ico(1.2);
+
+  /* ---------- math ---------- */
+  function sub(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
+  function cross(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
+  function norm(a) { var l = Math.sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; }
+  function rotY(p, a) { var c = Math.cos(a), s = Math.sin(a); return [p[0] * c + p[2] * s, p[1], -p[0] * s + p[2] * c]; }
+  function rotX(p, a) { var c = Math.cos(a), s = Math.sin(a); return [p[0], p[1] * c - p[2] * s, p[1] * s + p[2] * c]; }
+  function rotZ(p, a) { var c = Math.cos(a), s = Math.sin(a); return [p[0] * c - p[1] * s, p[0] * s + p[1] * c, p[2]]; }
+
+  /* ---------- state ---------- */
+  var yaw = 0.6, pitch = 0.35, dist = 4.2, scene = 0, wire = false, showHud = false;
+  var LIGHT = norm([-0.5, 0.8, -0.4]), F = 120, triCount = 0, fog = 0;
+  var cam = { yaw: 0, pitch: 0, dist: 0 };
+
+  function project(p) {
+    var q = rotY(p, -cam.yaw); q = rotX(q, cam.pitch); q[2] += cam.dist;
+    return [W / 2 + q[0] * F / q[2], H / 2 - q[1] * F / q[2], q[2]];
+  }
+
+  /* draw a mesh after transforming it by fn (model space -> world space) */
+  function draw(mesh, fn, bias) {
+    var n = mesh.v.length, wv = new Array(n), sv = new Array(n), i;
+    for (i = 0; i < n; i++) { wv[i] = fn ? fn(mesh.v[i]) : mesh.v[i]; sv[i] = project(wv[i]); }
+    for (i = 0; i < mesh.t.length; i++) {
+      var t = mesh.t[i], A = sv[t[0]], B = sv[t[1]], C = sv[t[2]];
+      if (A[2] < 0.2 || B[2] < 0.2 || C[2] < 0.2) continue;
+      var area = (B[0] - A[0]) * (C[1] - A[1]) - (B[1] - A[1]) * (C[0] - A[0]);
+      if (wire) {
+        if (area > 0 && !mesh.two) continue;
+        line(A, B, 0); line(B, C, 0); line(C, A, 0); triCount++;
+        continue;
+      }
+      if (area >= 0 && !mesh.two) continue;
+      var nn = norm(cross(sub(wv[t[1]], wv[t[0]]), sub(wv[t[2]], wv[t[0]])));
+      if (area > 0) nn = [-nn[0], -nn[1], -nn[2]];
+      var d = nn[0] * LIGHT[0] + nn[1] * LIGHT[1] + nn[2] * LIGHT[2];
+      var L = 0.12 + 0.88 * Math.max(0, -d) + (bias || 0);
+      tri(A, B, C, L); triCount++;
+    }
+  }
+
+  function tri(A, B, C, L) {
+    var minx = Math.max(0, Math.floor(Math.min(A[0], B[0], C[0]))), maxx = Math.min(W - 1, Math.ceil(Math.max(A[0], B[0], C[0])));
+    var miny = Math.max(0, Math.floor(Math.min(A[1], B[1], C[1]))), maxy = Math.min(H - 1, Math.ceil(Math.max(A[1], B[1], C[1])));
+    var area = (B[0] - A[0]) * (C[1] - A[1]) - (B[1] - A[1]) * (C[0] - A[0]);
+    if (area === 0) return;
+    var ia = 1 / area, x, y;
+    for (y = miny; y <= maxy; y++) {
+      var py = y + 0.5;
+      for (x = minx; x <= maxx; x++) {
+        var pxx = x + 0.5;
+        var w0 = ((B[0] - pxx) * (C[1] - py) - (B[1] - py) * (C[0] - pxx)) * ia;
+        var w1 = ((C[0] - pxx) * (A[1] - py) - (C[1] - py) * (A[0] - pxx)) * ia;
+        var w2 = 1 - w0 - w1;
+        if (w0 < 0 || w1 < 0 || w2 < 0) continue;
+        var z = w0 * A[2] + w1 * B[2] + w2 * C[2], k = y * W + x;
+        if (z < zb[k]) {
+          zb[k] = z;
+          var l = L;
+          if (fog) { var f = Math.min(1, Math.max(0, (z - 2.5) / 4.5)); l = l * (1 - f) + 0.95 * f; }
+          lum[k] = l;
+        }
+      }
+    }
+  }
+
+  function line(A, B, l) {
+    var x0 = Math.round(A[0]), y0 = Math.round(A[1]), x1 = Math.round(B[0]), y1 = Math.round(B[1]);
+    var dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1, e = dx + dy, guard = 0;
+    while (guard++ < 600) {
+      if (x0 >= 0 && y0 >= 0 && x0 < W && y0 < H) lum[y0 * W + x0] = l;
+      if (x0 === x1 && y0 === y1) break;
+      var e2 = 2 * e;
+      if (e2 >= dy) { e += dy; x0 += sx; }
+      if (e2 <= dx) { e += dx; y0 += sy; }
+    }
+  }
+
+  /* ---------- scenes ---------- */
+  function clear(sky) {
+    zb.fill(1e9);
+    for (var y = 0; y < H; y++) {
+      var v = sky ? 0.55 + 0.45 * (y / H) : 0.92;
+      for (var x = 0; x < W; x++) lum[y * W + x] = v;
+    }
+  }
+  function render(tm) {
+    triCount = 0; fog = 0;
+    cam.yaw = yaw; cam.pitch = pitch; cam.dist = dist;
+    if (scene === 0) {
+      clear(false);
+      draw(KNOT, function (p) { return rotX(rotY(p, tm * 0.7), tm * 0.4); });
+    } else if (scene === 1) {
+      clear(true);
+      /* the sun sits far away, follows the camera's yaw so it stays in the sky */
+      var sunDir = rotY([0, 0, -1], cam.yaw);
+      var sc = [sunDir[0] * 14, 3.2, sunDir[2] * 14];
+      var saved = wire; wire = true;
+      draw(SUN, function (p) { var q = rotY(rotX(p, tm * 0.3), tm * 0.5); return [q[0] + sc[0], q[1] + sc[1], q[2] + sc[2]]; });
+      wire = saved;
+      fog = 1; zb.fill(1e9);
+      cam.dist = Math.max(0.6, dist - 3.2);
+      draw(terrain(tm));
+    } else {
+      clear(false);
+      draw(ICO, function (p) { return rotY(rotZ(p, tm * 0.3), tm * 0.6); }, 0.05);
+      for (var i = 0; i < 6; i++) {
+        var a = tm * 1.1 + i * Math.PI / 3, r = 1.7;
+        var c = [Math.cos(a) * r, Math.sin(a * 2) * 0.35, Math.sin(a) * r];
+        draw(CUBE, function (p) { var q = rotX(rotY(p, tm * 2 + i), tm * 1.5); return [q[0] + c[0], q[1] + c[1], q[2] + c[2]]; });
+      }
+    }
+    /* quantise: luminance + Bayer threshold -> one of four tones */
+    for (var y = 0, k = 0; y < H; y++) for (var x = 0; x < W; x++, k++) {
+      var lv = lum[k] * 3 + (BAYER[(y & 3) * 4 + (x & 3)] + 0.5) / 16 - 0.5;
+      var ti = lv < 0.5 ? 0 : lv < 1.5 ? 1 : lv < 2.5 ? 2 : 3;
+      var tc = TONES[ti], o = k * 4;
+      px[o] = tc[0]; px[o + 1] = tc[1]; px[o + 2] = tc[2]; px[o + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+  }
+
+  /* ---------- input ---------- */
+  function clampPitch() { pitch = Math.max(-1.2, Math.min(1.3, pitch)); }
+  if (typeof PAD !== "undefined") {
+    PAD.on("press", function (b) {
+      if (b === "a") { scene = (scene + 1) % 3; PAD.sfx("tick"); }
+      else if (b === "b") { wire = !wire; PAD.sfx("tick"); }
+      else if (b === "start") { showHud = !showHud; hud.style.display = showHud ? "block" : "none"; }
+      else if (b === "select") { dist = dist > 5 ? 3.2 : dist + 0.8; }
+    });
+  }
+  function held(b) { return typeof PAD !== "undefined" && PAD.isDown && PAD.isDown(b); }
+  var drag = null;
+  cv.addEventListener("pointerdown", function (e) { drag = { x: e.clientX, y: e.clientY, id: e.pointerId }; try { cv.setPointerCapture(e.pointerId); } catch (_) {} });
+  cv.addEventListener("pointermove", function (e) {
+    if (!drag || drag.id !== e.pointerId) return;
+    yaw -= (e.clientX - drag.x) * 0.012; pitch += (e.clientY - drag.y) * 0.012; clampPitch();
+    drag.x = e.clientX; drag.y = e.clientY;
+  });
+  function endDrag() { drag = null; }
+  cv.addEventListener("pointerup", endDrag); cv.addEventListener("pointercancel", endDrag);
+
+  /* ---------- loop ---------- */
+  var last = 0, frames = 0, fpsT = 0, fps = 0, start = 0;
+  function frame(now) {
+    if (!start) { start = now; last = now; }
+    var dt = Math.min(0.05, (now - last) / 1000); last = now;
+    if (held("left")) yaw += dt * 1.6;
+    if (held("right")) yaw -= dt * 1.6;
+    if (held("up")) { pitch += dt * 1.2; clampPitch(); }
+    if (held("down")) { pitch -= dt * 1.2; clampPitch(); }
+    if (!drag && !held("left") && !held("right")) yaw += dt * 0.15;
+    render((now - start) / 1000);
+    frames++; fpsT += dt;
+    if (fpsT >= 0.5) { fps = Math.round(frames / fpsT); frames = 0; fpsT = 0; }
+    if (showHud) hud.textContent = T.scene + " " + T.names[scene] + "\n" + T.mode + " " + (wire ? T.wire : T.solid) + "\n" + T.fps + " " + fps + "  " + T.tri + " " + triCount;
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
