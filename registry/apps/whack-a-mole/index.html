@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <title>打地鼠</title>
-<!-- Lo-PDA example app (lopda/1): pixel sprites on a canvas, touch input, sounds through PAD.sfx. MIT License. -->
+<!-- Lo-PDA example app (lopda/1): pixel sprites on a canvas, touch input, sounds through PAD.sfx,
+     zh/en text through PAD.lang. MIT License. -->
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #a3ad7e; color: #1f2a14; font-family: monospace; }
   #w { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 8px; box-sizing: border-box; }
@@ -36,6 +37,18 @@
 (function () {
   var INK = "#1f2a14", DARK = "#4a5a32", MID = "#7d8a58", PAPER = "#a3ad7e";
   var TONE = { "0": INK, "1": DARK, "2": MID, "3": PAPER };
+
+  /* two languages: PAD.lang from the runtime; older runtimes have none, so Chinese is the default */
+  var LANG = typeof PAD !== "undefined" && PAD.lang === "en" ? "en" : "zh";
+  var TXT = {
+    zh: { title: "打地鼠", score: "分 {n}", time: "{n} 秒", best: "最高 {n}", intro: "30 秒。点冒头的地鼠。<br>戴头盔的要砸两下。",
+      start: "开始", again: "再来一局", record: "新纪录", over: "时间到", got: "砸中 {n} 分。", bestline: "<br>最高 {n} 分。" },
+    en: { title: "MOLE BOP", score: "PTS {n}", time: "{n} S", best: "TOP {n}", intro: "30 seconds. Bop the moles that pop up.<br>Helmets take two hits.",
+      start: "START", again: "AGAIN", record: "NEW RECORD", over: "TIME UP", got: "{n} points.", bestline: "<br>Best: {n}." }
+  }[LANG];
+  function tx(key, n) { return TXT[key].replace("{n}", n); }
+  function $t(id, key, n) { document.getElementById(id).textContent = tx(key, n); }
+  document.documentElement.lang = LANG === "zh" ? "zh-CN" : "en"; document.title = TXT.title;
 
   /* 16x16 pixel sprites: 0 ink, 1 dark, 2 mid, 3 paper, . clear */
   var ART = {
@@ -158,7 +171,7 @@
     }
     var sec = Math.ceil((endAt - now) / 1000);
     if (sec !== lastSec) {
-      lastSec = sec; document.getElementById("tm").textContent = Math.max(0, sec) + " 秒";
+      lastSec = sec; $t("tm", "time", Math.max(0, sec));
       if (sec <= 5 && sec > 0) PAD.sfx("tick");
     }
     if (now >= endAt) finish();
@@ -176,7 +189,7 @@
       score += add; h.s = "hit"; h.t = now;
       pops.push({ x: h.x + 18, y: h.y + 2, n: add, t: now });
       PAD.sfx(add > 1 ? "coin" : "hit");
-      document.getElementById("sc").textContent = "分 " + score;
+      $t("sc", "score", score);
     } else { combo = 0; PAD.sfx("miss"); }
   }
 
@@ -184,7 +197,7 @@
     var now = performance.now();
     score = 0; combo = 0; startAt = now; endAt = now + 30000; nextSpawn = now + 400; lastSec = -1;
     holes.forEach(function (h) { h.s = "down"; h.helmet = false; });
-    document.getElementById("sc").textContent = "分 0";
+    $t("sc", "score", 0);
     document.getElementById("ov").classList.add("hide");
     playing = true; PAD.sfx("ok");
   }
@@ -192,10 +205,10 @@
     playing = false;
     var record = score > best;
     if (record) { best = score; PAD.save("best", best); }
-    document.getElementById("bs").textContent = "最高 " + best;
-    document.getElementById("ot").textContent = record ? "新纪录" : "时间到";
-    document.getElementById("op").innerHTML = "砸中 " + score + " 分。" + (record ? "" : "<br>最高 " + best + " 分。");
-    document.getElementById("go").textContent = "再来一局";
+    $t("bs", "best", best);
+    $t("ot", record ? "record" : "over");
+    document.getElementById("op").innerHTML = tx("got", score) + (record ? "" : tx("bestline", best));
+    $t("go", "again");
     document.getElementById("ov").classList.remove("hide");
     PAD.sfx(record ? "win" : "lose");
   }
@@ -221,10 +234,12 @@
     var col = Math.min(2, Math.floor(x / CW)), row = Math.min(2, Math.floor(y / CH));
     whack(row * 3 + col);
   });
+  $t("sc", "score", 0); $t("tm", "time", 30); $t("bs", "best", 0); $t("ot", "title"); $t("go", "start");
+  document.getElementById("op").innerHTML = TXT.intro;
   document.getElementById("go").addEventListener("click", start);
   var lg = document.getElementById("logo").getContext("2d"); lg.imageSmoothingEnabled = false;
   lg.drawImage(SP.mole, 0, 0, 32, 32);
-  PAD.load("best").then(function (v) { best = +v || 0; document.getElementById("bs").textContent = "最高 " + best; });
+  PAD.load("best").then(function (v) { best = +v || 0; $t("bs", "best", best); });
   addEventListener("resize", fit); fit();
   requestAnimationFrame(loop);
 })();

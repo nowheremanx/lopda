@@ -25,13 +25,19 @@
         "................",
         "................"
       ],
-      "version": "1.2.0",
+      "version": "1.3.0",
       "description": "15×15 棋盘，你执黑先手和电脑下，可以悔棋。",
+      "i18n": {
+        "en": {
+          "name": "Gomoku",
+          "description": "15×15 board. You play black and move first against the computer. Undo allowed."
+        }
+      },
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/gomoku/index.html",
-      "sha256": "f4fbb5ae04ab79b8aaa354790c42270e3dcd5d48bd58cb461f8ead1dce71ca19",
-      "bytes": 9132
+      "sha256": "70565448444f0b5d4b040f5529258cf209a83d6cc678c6f874cf0ee68b23c47a",
+      "bytes": 10463
     },
     {
       "spec": "lopda/1",
@@ -56,13 +62,19 @@
         "................",
         "................"
       ],
-      "version": "2.1.0",
+      "version": "2.2.0",
       "description": "30 秒砸地鼠，戴头盔的要砸两下。",
+      "i18n": {
+        "en": {
+          "name": "Mole Bop",
+          "description": "30 seconds of bopping moles. The ones in helmets take two hits."
+        }
+      },
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/whack-a-mole/index.html",
-      "sha256": "e6d32b6deba4dbf9735671e90d5a661fcd9082da455f5aba6bfb82d24767f8b5",
-      "bytes": 11859
+      "sha256": "f8b86e02ac34d49e6dd531034e5a401de47951ef7062cc0f4bb6747c191077ab",
+      "bytes": 12798
     },
     {
       "spec": "lopda/1",
@@ -88,13 +100,19 @@
         "................",
         "................"
       ],
-      "version": "1.1.1",
+      "version": "1.2.0",
       "description": "lo-game.js 示例：小院和老伯的屋子，摸猫、找钥匙。方向键走，A 互动。",
+      "i18n": {
+        "en": {
+          "name": "The Yard",
+          "description": "lo-game.js example: pet the cat, find the old man's key. D-pad walks, A acts."
+        }
+      },
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/xiaoyuan/index.html",
-      "sha256": "498afd58b457d3dcf4dbdc12b103b5a0406e9d3eb0cffaa4581ff7f5583e06dc",
-      "bytes": 50107
+      "sha256": "bbee6714a42b8eedadf6689a0b8765784a8970f134d4b55dbf39db010ee0d44a",
+      "bytes": 52125
     }
   ]
 }

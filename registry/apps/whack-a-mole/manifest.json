@@ -21,8 +21,14 @@
     "................",
     "................"
   ],
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "30 秒砸地鼠，戴头盔的要砸两下。",
+  "i18n": {
+    "en": {
+      "name": "Mole Bop",
+      "description": "30 seconds of bopping moles. The ones in helmets take two hits."
+    }
+  },
   "author": "Haowei Wu",
   "license": "MIT",
   "permissions": []

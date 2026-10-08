@@ -14,11 +14,18 @@
 </head>
 <body>
 <main>
-  <p>点按钮或按 A 加一，B 清零。关掉再打开，数字还在。</p>
+  <p id="tip"></p>
   <div id="n">0</div>
-  <button id="add" type="button">加一</button>
+  <button id="add" type="button"></button>
 </main>
 <script>
+  /* two languages: PAD.lang is "zh" or "en"; older runtimes give none, so fall back to your default */
+  var TXT = {
+    zh: { tip: "点按钮或按 A 加一，B 清零。关掉再打开，数字还在。", add: "加一" },
+    en: { tip: "Tap the button or press A to add one, B to reset. It remembers.", add: "+1" }
+  }[PAD.lang === "en" ? "en" : "zh"];
+  document.getElementById("tip").textContent = TXT.tip;
+  document.getElementById("add").textContent = TXT.add;
   var n = 0, el = document.getElementById("n");
   PAD.load("count").then(function (v) { n = v || 0; el.textContent = n; });
   function set(v, sound) { n = v; el.textContent = n; PAD.save("count", n); PAD.sfx(sound); }

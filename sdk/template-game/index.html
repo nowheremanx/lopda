@@ -3,13 +3,15 @@
 <head>
 <meta charset="utf-8">
 <title>小院</title>
-<!-- Lo-PDA game template (lopda/1 + lo-game.js). MIT License. -->
+<!-- Lo-PDA game template (lopda/1 + lo-game.js). Bilingual through game.t (PAD.lang). MIT License. -->
 </head>
 <body>
 <!-- The framework. Leave this block alone: node tools/lo-game.mjs <folder> fills it in, plus a font block after it. -->
 <script data-lo-game="1.2.0"></script>
 <script>
-var game = LoGame.create({ width: 160, height: 144 });
+var game = LoGame.create({ width: 160, height: 144, lang: "zh" });   /* lang: used when the runtime gives none */
+var T = game.t;                        /* T({zh: "...", en: "..."}) picks the player's language */
+document.documentElement.lang = game.lang === "zh" ? "zh-CN" : "en";
 var HUD = 16;                          /* status bar height; the map is drawn below it */
 var VIEW_H = 144 - HUD;
 
@@ -138,7 +140,7 @@ function place(map, things) {
       g.sprite(s, p.x, p.y, { flip: p.dir === "left" });
       g.origin(0, 0); g.clip();
       g.window(0, 0, 160, HUD, { thin: true });
-      g.text("摸猫 " + S.pets + "  钥匙 " + (S.key ? "有" : "无"), 4, 1);
+      g.text(T({ zh: "摸猫 {n}  钥匙 {k}", en: "Pets {n}  Key {k}" }, { n: S.pets, k: S.key ? T({ zh: "有", en: "yes" }) : T({ zh: "无", en: "no" }) }), 4, 1);
     }
   };
 }
@@ -148,7 +150,7 @@ var cat = { tx: 11, ty: 5 }, KEY = { tx: 3, ty: 16 };
 async function pickKey() {
   busy = true;
   S.found = true; S.key = true; game.sfx("ok"); game.flash();
-  await game.say("草丛里有一把旧钥匙。你把它收好了。"); save();
+  await game.say(T({ zh: "草丛里有一把旧钥匙。你把它收好了。", en: "An old key in the grass. You pocket it." })); save();
   busy = false;
 }
 game.scene("yard", place(YARD, {
@@ -163,16 +165,16 @@ game.scene("yard", place(YARD, {
     if (!S.found && ((x === KEY.tx && y === KEY.ty) || (p.tx === KEY.tx && p.ty === KEY.ty))) return pickKey();
     busy = true;
     if (x === cat.tx && y === cat.ty) {
-      await game.say(["喵。", "一只橘猫趴在小路上，眯着眼看你。"], { name: "猫" });
-      var i = await game.choose(["摸摸它", "走开"]);
-      if (i === 0) { S.pets++; game.sfx("coin"); await game.say("它呼噜呼噜地蹭你的手。"); save(); }
+      await game.say([T({ zh: "喵。", en: "Mew." }), T({ zh: "一只橘猫趴在小路上，眯着眼看你。", en: "A ginger cat lies on the path, squinting at you." })], { name: T({ zh: "猫", en: "Cat" }) });
+      var i = await game.choose([T({ zh: "摸摸它", en: "Pet it" }), T({ zh: "走开", en: "Leave" })]);
+      if (i === 0) { S.pets++; game.sfx("coin"); await game.say(T({ zh: "它呼噜呼噜地蹭你的手。", en: "It purrs and rubs your hand." })); save(); }
     }
     busy = false;
   }
 }));
 
 /* ---- inside the house ---- */
-var elder = { tx: 8, ty: 3 };
+var elder = { tx: 8, ty: 3 }, ELDER = T({ zh: "老伯", en: "Old man" });
 game.scene("house", place(HOUSE, {
   blocked: function (x, y) { return x === elder.tx && y === elder.ty; },
   door: function () { game.sfx("move"); game.go("yard", { place: "yard", tx: 18, ty: 4, dir: "down" }); },
@@ -180,11 +182,11 @@ game.scene("house", place(HOUSE, {
   act: async function (x, y) {
     if (x !== elder.tx || y !== elder.ty) return;
     busy = true;
-    if (S.thanked) await game.say("猫又胖了。", { name: "老伯" });
+    if (S.thanked) await game.say(T({ zh: "猫又胖了。", en: "That cat's got fatter." }), { name: ELDER });
     else if (S.key) {
       S.thanked = true; S.key = false; game.sfx("win");
-      await game.say(["这是……我的钥匙！", "找了好几天，谢谢你。"], { name: "老伯" }); save();
-    } else await game.say(["我的钥匙不见了。", "大概掉在院子西南边的草丛里。"], { name: "老伯" });
+      await game.say([T({ zh: "这是……我的钥匙！", en: "Why... that's my key!" }), T({ zh: "找了好几天，谢谢你。", en: "Looked for days. Thank you." })], { name: ELDER }); save();
+    } else await game.say([T({ zh: "我的钥匙不见了。", en: "I've lost my key." }), T({ zh: "大概掉在院子西南边的草丛里。", en: "Somewhere in the grass, southwest of the yard." })], { name: ELDER });
     busy = false;
   }
 }));
@@ -200,7 +202,7 @@ game.scene("title", {
   update: function () {
     if (!game.ok() || busy) return;
     busy = true;
-    game.choose(S ? ["继续", "从头开始"] : ["开始"], { cancel: false }).then(function (i) {
+    game.choose(S ? [T({ zh: "继续", en: "Continue" }), T({ zh: "从头开始", en: "New game" })] : [T({ zh: "开始", en: "Start" })], { cancel: false }).then(function (i) {
       busy = false;
       if (!S || i === 1) S = fresh();
       game.go(S.place, { place: S.place, tx: S.tx, ty: S.ty });
@@ -209,15 +211,15 @@ game.scene("title", {
   draw: function (g) {
     g.clear(g.PAPER);
     g.window(20, 30, 120, 44);
-    g.text("小  院", 80, 38, { align: "center" });
-    g.text("lo-game 示例", 80, 54, { align: "center", color: g.DARK });
-    if (Math.floor(game.time * 2) % 2 === 0) g.text("按 A 开始", 80, 100, { align: "center" });
+    g.text(T({ zh: "小  院", en: "THE YARD" }), 80, 38, { align: "center" });
+    g.text(T({ zh: "lo-game 示例", en: "lo-game example" }), 80, 54, { align: "center", color: g.DARK });
+    if (Math.floor(game.time * 2) % 2 === 0) g.text(T({ zh: "按 A 开始", en: "PRESS A" }), 80, 100, { align: "center" });
   }
 });
 async function menu() {
   busy = true;
-  var i = await game.choose(["存档", "回标题"], { title: "菜单" });
-  if (i === 0) { save(); game.sfx("ok"); await game.say("存好了。"); }
+  var i = await game.choose([T({ zh: "存档", en: "Save" }), T({ zh: "回标题", en: "Title" })], { title: T({ zh: "菜单", en: "Menu" }) });
+  if (i === 0) { save(); game.sfx("ok"); await game.say(T({ zh: "存好了。", en: "Saved." })); }
   busy = false;
   if (i === 1) { save(); game.go("title"); }
 }

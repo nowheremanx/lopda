@@ -3,8 +3,14 @@
   "id": "xiaoyuan",
   "name": "小院",
   "glyph": "院",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "lo-game.js 示例：小院和老伯的屋子，摸猫、找钥匙。方向键走，A 互动。",
+  "i18n": {
+    "en": {
+      "name": "The Yard",
+      "description": "lo-game.js example: pet the cat, find the old man's key. D-pad walks, A acts."
+    }
+  },
   "author": "Haowei Wu",
   "license": "MIT",
   "permissions": [],

@@ -5,6 +5,12 @@
   "glyph": "计",
   "version": "0.1.0",
   "description": "点一下或按 A 加一，数字会记住。改成你自己的 app。",
+  "i18n": {
+    "en": {
+      "name": "Counter",
+      "description": "Tap or press A to add one; the number stays. Make it your own app."
+    }
+  },
   "author": "your-name",
   "license": "MIT",
   "permissions": [],
