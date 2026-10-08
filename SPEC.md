@@ -3,7 +3,8 @@
 Status: draft · Spec id: `lopda/1` (apps written for `lopda/0` keep working) · License: MIT (see `sdk/LICENSE`)
 
 What v1 adds over v0: the chin buttons (`"buttons": true`, `PAD.on`, `PAD.isDown`) and
-system sounds (`PAD.sfx`).
+system sounds (`PAD.sfx`). Added later within v1, both optional: the player's language
+(`PAD.lang`) and localized store text (manifest `i18n`). See section 6.1.
 
 A Lo-PDA app is one self-contained HTML file plus a small manifest. The runtime
 installs it from the registry, pins it to an exact version, and runs it inside
@@ -31,6 +32,7 @@ No other files are loaded. Images, sounds and fonts must be embedded in
   "icon": ["................", "...16 rows of 16 characters..."],
   "version": "1.0.0",
   "description": "点黑格子里的地鼠，20 秒。",
+  "i18n": { "en": { "name": "Mole Bop", "description": "Bop the moles in the dark holes. 20 seconds." } },
   "author": "Haowei Wu",
   "license": "MIT",
   "permissions": [],
@@ -47,6 +49,7 @@ No other files are loaded. Images, sounds and fonts must be embedded in
 | `icon` | Optional. A 16×16 pixel icon: an array of 16 strings, each 16 characters long. `0` ink, `1` dark, `2` mid, `3` paper, `.` transparent (the tile shows through). |
 | `version` | Semantic version `MAJOR.MINOR.PATCH`. Bump it on every change. |
 | `description` | One sentence, 80 characters at most. |
+| `i18n` | Optional. Store text in other languages: `{"en": {"name", "description"}, "zh": {...}}`. Only `zh` and `en`, only those two fields, same rules as above. The store and home screen show the entry for the player's language and fall back to `name` / `description`. |
 | `author` | Name or handle. |
 | `license` | One of: `MIT`, `0BSD`, `BSD-2-Clause`, `BSD-3-Clause`, `ISC`, `Apache-2.0`, `CC0-1.0`, `Unlicense`. |
 | `permissions` | Array. Empty for now. Reserved for future capabilities such as `film.read`. |
@@ -113,6 +116,7 @@ PAD.remove(key)
 PAD.TONES                    // ["#1f2a14", "#4a5a32", "#7d8a58", "#a3ad7e"]
 PAD.spec                     // "lopda/1", the newest spec this runtime implements
 PAD.exit()                   // ask the runtime to close the app
+PAD.lang                     // "zh" or "en"; undefined on older runtimes (section 6.1)
 
 // lopda/1
 PAD.on("press", fn)          // fn(button) when a button goes down
@@ -135,12 +139,36 @@ second per app.
 - Uncaught errors and rejected promises are reported to the runtime, which shows
   them to the user.
 
+### 6.1 Language
+
+Lo-PDA runs in Simplified Chinese or English; the player picks one in Settings
+(the default follows the phone). `PAD.lang` tells the app which: `"zh"` or `"en"`.
+
+- It is optional and additive within `lopda/1`. Runtimes before 0.4.0 do not set it,
+  so **always fall back to your own default when `PAD.lang` is undefined**.
+- It does not change while the app runs: when the player switches language, the
+  runtime starts the app again.
+- Apps are **not required** to be bilingual. Writing both is recommended, so the app
+  works for every player. Keep both short; the English need not be a literal translation.
+- A small table is enough:
+
+```js
+var TXT = {
+  zh: { start: "开始", score: "分 " },
+  en: { start: "START", score: "PTS " }
+}[PAD.lang === "en" ? "en" : "zh"];   // "zh" is this app's own default
+```
+
+Add `i18n` to the manifest too (section 2), so the store shows your app's name
+and description in the player's language. Games on lo-game.js can use `game.t`
+(section 10).
+
 ## 7. Size and quality
 
 - `index.html` at most 200 KB.
 - Opens with one line of instructions and a start control.
 - No dead links, no lorem ipsum, no "coming soon" screens.
-- Text in Chinese or English, kept short.
+- Text in Chinese, English or both, kept short. Both is recommended (section 6.1).
 
 ## 8. Versioning and install
 
@@ -165,8 +193,9 @@ To try an app with the chin buttons, serve the repo root and open
 ## 10. Games: lo-game.js (optional)
 
 `sdk/lo-game.js` (MIT) is a small framework for games: a four-tone pixel screen,
-crisp Chinese text, buttons, scenes, dialogue, menus, tile maps and saving. An app
+crisp Chinese and English text, buttons, scenes, dialogue, menus, tile maps and saving. An app
 that uses it carries its own copy in a `<script data-lo-game="VERSION">` block,
 filled in by `node tools/lo-game.mjs registry/apps/<id>`. The checker accepts only
 unmodified released copies and skips them when scanning, so review covers the
-game's own code. Reference and AI prompt: `sdk/LO-GAME.md`.
+game's own code. Since 1.2.0, `game.t({zh: "…", en: "…"})` picks text by `PAD.lang`.
+Reference and AI prompt: `sdk/LO-GAME.md`.

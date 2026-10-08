@@ -1,8 +1,8 @@
 # lo-game.js
 
-A small game framework for Lo-PDA apps. MIT License. Version 1.1.0.
+A small game framework for Lo-PDA apps. MIT License. Version 1.2.0.
 
-It gives every game the same base: a four-tone pixel screen, crisp Chinese text,
+It gives every game the same base: a four-tone pixel screen, crisp Chinese and English text,
 the chin buttons, scenes, dialogue boxes, menus, tile maps and saving. You write
 the game; the framework handles the handheld.
 
@@ -27,12 +27,13 @@ registry/apps/<id>/
 <html lang="zh">
 <head><meta charset="utf-8"><title>My game</title></head>
 <body>
-<script data-lo-game="1.1.0"></script>
+<script data-lo-game="1.2.0"></script>
 <script>
-var game = LoGame.create({ width: 160, height: 144 });
+var game = LoGame.create({ width: 160, height: 144, lang: "zh" });
+var T = game.t;
 game.scene("main", {
   update: function (dt) { if (game.pressed("a")) game.sfx("tap"); },
-  draw: function (g) { g.clear(g.PAPER); g.text("你好", 80, 64, { align: "center" }); }
+  draw: function (g) { g.clear(g.PAPER); g.text(T({ zh: "你好", en: "Hello" }), 80, 64, { align: "center" }); }
 });
 game.start("main");
 </script>
@@ -54,11 +55,12 @@ Do not edit the framework inside your app. The checker rejects a modified copy.
 That keeps review short: reviewers read your game, not the framework.
 
 `sdk/template-game/` is a complete small example: a title menu, walking on a tile
-map, talking to a cat, a choice, picking up an item, and saving.
+map, talking to a cat, a choice, picking up an item, and saving, in Chinese and English.
 
 ## 2. The screen
 
-- `LoGame.create({ width, height })`. The default is 160×144, the size of a Game Boy
+- `LoGame.create({ width, height, lang })`. `lang` is your game's own language
+  (`"zh"`, the default, or `"en"`), used when the runtime does not say (section 7.1). The default size is 160×144, the size of a Game Boy
   screen. Any size works; keep it small. The framework scales it to fit with even
   pixels and fills the rest of the screen with paper.
 - Every pixel is one of four tones. Use the numbers, not colours:
@@ -200,6 +202,31 @@ async function talkToCat() {
 Set a `busy` flag of your own while a script runs, so a held D-pad doesn't walk
 the hero between two lines.
 
+### 7.1 Two languages
+
+Lo-PDA runs in Chinese or English. Bilingual games are recommended, not required.
+Write each piece of text once with both languages and let `game.t` pick:
+
+```js
+var T = game.t;
+await game.say([T({ zh: "喵。", en: "Mew." }), T({ zh: "一只橘猫看着你。", en: "A ginger cat watches you." })],
+               { name: T({ zh: "猫", en: "Cat" }) });
+var i = await game.choose([T({ zh: "摸摸它", en: "Pet it" }), T({ zh: "走开", en: "Leave" })]);
+g.text(T({ zh: "分 {n}", en: "PTS {n}" }, { n: score }), 4, 2);   // {name} is filled from the second argument
+```
+
+- `game.t(text, vars)`: `text` is `{zh, en}` or a plain string (passed through).
+  It picks `PAD.lang`; on runtimes that don't set it, the `lang` you gave `create`;
+  when an entry is missing, whichever language is there.
+- `game.lang` is the language in use, `"zh"` or `"en"`. It does not change while the
+  game runs; switching language in Settings starts the game again.
+- `LoGame.t(text, vars)` does the same outside a game (it uses `PAD.lang`, else `zh`).
+- English takes more room than Chinese: about 26 letters fit across 160 pixels.
+  Keep it terse, and look at both languages before you publish.
+- The font block holds the glyphs of both languages, since both are in your source.
+- Add `"i18n": {"en": {"name": "...", "description": "..."}}` to the manifest so the
+  store shows your game in the player's language.
+
 ## 8. Time, motion, effects
 
 ```js
@@ -237,5 +264,5 @@ var r = LoGame.rng(seed)    // r.next() 0..1, r.int(a, b), r.pick(array), r.chan
 ## 11. Rules that still apply
 
 Everything in `SPEC.md` holds: one HTML file up to 200 KB with the framework
-included (it is about 28 KB), no network, no `eval`, no emoji, Chinese or English
-text, and a first screen that says how to play.
+included (it is about 28 KB), no network, no `eval`, no emoji, short text in Chinese,
+English or (recommended) both, and a first screen that says how to play.

@@ -3,6 +3,9 @@
 Making a game? Use `sdk/LO-GAME.md` instead: paste that file into the assistant.
 It covers the game framework and all the rules below.
 
+Only want one language? Bilingual apps are recommended, not required: delete the
+two-language rule and the "i18n" line from the prompt, and say which language.
+
 Copy everything in the box below into Claude, ChatGPT or any coding assistant,
 then replace the last line with your idea. Save the two files it gives you in
 `registry/apps/<id>/` and run `node tools/check-app.mjs registry/apps/<id>`.
@@ -25,7 +28,12 @@ Hard rules for index.html:
 - Touch input with pointer events. Keyboard optional. Never use alert, confirm
   or prompt; build any confirmation into the page.
 - Opens with one short line of instructions and a start button.
-- Text in Chinese, short.
+- Text short, in two languages: Chinese and English. The runtime sets PAD.lang
+  to "zh" or "en"; older runtimes leave it undefined, so fall back to Chinese.
+  Keep all text in one small table and pick from it:
+    var TXT = { zh: {...}, en: {...} }[PAD.lang === "en" ? "en" : "zh"];
+  The English should be terse, like labels on an old device, not a literal
+  translation.
 - To remember things (high scores, settings), use the global PAD object that the
   runtime provides. Do not use localStorage, cookies or IndexedDB.
     await PAD.load(key)   -> saved value or null
@@ -53,7 +61,9 @@ manifest.json must be:
   "icon": [<16 strings of 16 characters each, a pixel icon: 0 ink, 1 dark,
            2 mid, 3 paper, . transparent. Draw something recognizable.>],
   "version": "0.1.0",
-  "description": "<one sentence, at most 80 characters>",
+  "description": "<one sentence in Chinese, at most 80 characters>",
+  "i18n": { "en": { "name": "<English name, 1-8 characters>",
+                    "description": "<the sentence in English, at most 80 characters>" } },
   "author": "<my name>",
   "license": "MIT",
   "permissions": [],
