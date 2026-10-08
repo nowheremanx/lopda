@@ -44,7 +44,7 @@ game.start("main");
 Then fill in the framework and check the app:
 
 ```sh
-node tools/lo-game.mjs registry/apps/<id>     # copies sdk/lo-game.js in, adds the pixel-font block
+node tools/bundle-app.mjs registry/apps/<id>  # (lo-game.mjs is the same tool) copies sdk/lo-game.js in, adds the pixel-font block
 node tools/check-app.mjs registry/apps/<id>   # verifies the copy is unmodified
 ```
 
@@ -263,6 +263,6 @@ var r = LoGame.rng(seed)    // r.next() 0..1, r.int(a, b), r.pick(array), r.chan
 
 ## 11. Rules that still apply
 
-Everything in `SPEC.md` holds: one HTML file up to 200 KB with the framework
+Everything in `SPEC.md` holds: one HTML file up to 512 KB with the framework
 included (it is about 28 KB), no network, no `eval`, no emoji, short text in Chinese,
 English or (recommended) both, and a first screen that says how to play.

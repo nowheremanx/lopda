@@ -1,0 +1,116 @@
+# Publishes the repo as a static site on the gh-pages branch (GitHub Pages).
+#   push to main  -> site root:  https://nowheremanx.github.io/lopda/runtime/
+#   pull request  -> pr/<n>/:    preview of the dev harness, removed when the PR closes
+# Only git, rsync and the gh CLI are used; no third-party actions.
+name: pages
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+# One push to gh-pages at a time, and never cancel one halfway.
+concurrency:
+  group: pages-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # Fork PRs get a read-only token and must not publish.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PR: ${{ github.event.pull_request.number }}
+      ACTION: ${{ github.event.action }}
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      SITE: https://nowheremanx.github.io/lopda
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # A closed PR may have no merge ref left; the cleanup only needs any commit.
+          ref: ${{ github.event.action == 'closed' && github.event.repository.default_branch || '' }}
+
+      - name: Prepare the gh-pages worktree
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --heads origin gh-pages >/dev/null; then
+            git fetch origin gh-pages
+            git worktree add ../site FETCH_HEAD
+            git -C ../site checkout -B gh-pages
+          else
+            # First run: an orphan branch with no history.
+            git worktree add --detach ../site
+            git -C ../site checkout --orphan gh-pages
+            git -C ../site rm -rf --quiet . || true
+          fi
+
+      - name: Publish this commit
+        if: github.event_name == 'push' || github.event.action != 'closed'
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            DEST=../site
+            # pr/ holds the open previews and .nojekyll must survive --delete.
+            EXTRA="--exclude=/pr/ --exclude=/.nojekyll"
+          else
+            DEST=../site/pr/$PR
+            mkdir -p "$DEST"
+            EXTRA=""
+          fi
+          # Not part of the site: git data, dependencies, tests, scratch and CI files.
+          rsync -a --delete $EXTRA \
+            --exclude=/.git --exclude=/node_modules --exclude=/tests \
+            --exclude=/_to_delete --exclude=/.github \
+            ./ "$DEST"/
+          touch ../site/.nojekyll
+
+      - name: Remove the preview of a closed PR
+        if: github.event_name == 'pull_request' && github.event.action == 'closed'
+        run: rm -rf "../site/pr/$PR"
+
+      - name: Commit and push (retry on a rejected push)
+        run: |
+          cd ../site
+          git add -A
+          if git diff --cached --quiet; then echo "nothing to publish"; exit 0; fi
+          git commit -q -m "pages: ${{ github.event_name }} ${{ github.sha }}"
+          for i in 1 2 3 4 5; do
+            git push origin gh-pages && exit 0
+            git fetch origin gh-pages
+            git rebase FETCH_HEAD || { git rebase --abort; exit 1; }
+          done
+          exit 1
+
+      - name: Comment preview links on the PR
+        if: github.event_name == 'pull_request' && github.event.action != 'closed'
+        run: |
+          # Registry apps the PR touches; all apps when it touches none.
+          APPS=$(git diff --name-only "$BASE_SHA" "${{ github.sha }}" -- registry/apps | cut -d/ -f3 | sort -u | while read -r id; do
+            [ -d "registry/apps/$id" ] && echo "$id"; done)
+          [ -n "$APPS" ] || APPS=$(ls registry/apps)
+          {
+            echo '<!-- lopda-preview -->'
+            echo '**Preview / 预览** (GitHub Pages takes about a minute to update / 页面约需一分钟更新)'
+            echo
+            for id in $APPS; do
+              echo "- $id: $SITE/pr/$PR/sdk/dev.html?app=registry/apps/$id"
+            done
+            echo
+            echo 'The preview shares its origin with the real site. Do not open `runtime/` under the preview path: its IndexedDB is the real handheld data. The dev harness keeps saves in localStorage.'
+            echo
+            echo '预览与正式站点同源。请不要打开预览路径下的 `runtime/`，它的 IndexedDB 就是正式掌机的数据。开发台把存档放在 localStorage。'
+          } > comment.md
+          # Update the one comment carrying the marker, or create it.
+          ID=$(gh api "repos/${{ github.repository }}/issues/$PR/comments" --paginate \
+            --jq '[.[] | select(.body | contains("<!-- lopda-preview -->"))][0].id // empty' | head -n1)
+          if [ -n "$ID" ]; then
+            gh api -X PATCH "repos/${{ github.repository }}/issues/comments/$ID" -F body=@comment.md >/dev/null
+          else
+            gh pr comment "$PR" --body-file comment.md
+          fi

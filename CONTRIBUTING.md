@@ -11,6 +11,10 @@ There are two ways to contribute, and they have different rules.
    `sdk/PROMPT.md` is a ready-made prompt.
 3. Test it locally with `sdk/dev.html` (open it from a local web server and
    pick your app).
+   Larger apps may keep their code in `src/*.js` and include each file with
+   `<script data-src="src/x.js"></script>`; run `node tools/bundle-app.mjs
+   registry/apps/<your-app-id>` to copy the files into `index.html`. Reviewers
+   read `src/`; the checker fails when `index.html` is out of date.
 4. Run the checker and fix every error:
 
    ```sh

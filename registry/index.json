@@ -129,7 +129,7 @@
       "name": "矢量梦",
       "glyph": "梦",
       "buttons": true,
-      "version": "0.1.0",
+      "version": "0.2.0",
       "description": "手写的软件三维渲染：环结、飞越山地、晶体。方向键转视角，A 换场景，B 线框。",
       "i18n": {
         "en": {
@@ -140,8 +140,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/vector-dream/index.html",
-      "sha256": "e0003ba4eaf1022116ad557138c4b501b911ca1805571ae404051691929d502b",
-      "bytes": 12099
+      "sha256": "bbea9491a6c60ea049aa4b1ed484d719f3188456ee6e731d06a454050d644dba",
+      "bytes": 26746
     },
     {
       "spec": "lopda/1",
@@ -217,6 +217,26 @@
       "path": "apps/xiaoyuan/index.html",
       "sha256": "bbee6714a42b8eedadf6689a0b8765784a8970f134d4b55dbf39db010ee0d44a",
       "bytes": 52125
+    },
+    {
+      "spec": "lopda/1",
+      "id": "zhenyao-tower",
+      "name": "镇妖塔外传",
+      "glyph": "塔",
+      "buttons": true,
+      "version": "0.1.0",
+      "description": "仙侠小品。卡带内置 LX-3D 协处理器：四色三维小镇、灯火、雾。试作版，只有小镇。",
+      "i18n": {
+        "en": {
+          "name": "Pagoda",
+          "description": "A xianxia side story. The cart has an LX-3D chip: a four-tone 3D town. Preview."
+        }
+      },
+      "author": "Haowei Wu",
+      "license": "MIT",
+      "path": "apps/zhenyao-tower/index.html",
+      "sha256": "1cb064c7b1b52d537cd0ab2c4ba9139ea027cd40774bd331b6e553f8148a099c",
+      "bytes": 79693
     }
   ]
 }

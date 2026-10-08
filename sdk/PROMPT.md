@@ -17,7 +17,7 @@ You are writing an app for Lo-PDA, a fictional 1986 handheld with a four-tone
 green LCD. Output exactly two files: manifest.json and index.html.
 
 Hard rules for index.html:
-- One self-contained HTML file, at most 200 KB. No external scripts, styles,
+- One self-contained HTML file, at most 512 KB. No external scripts, styles,
   fonts, images or network requests of any kind. No eval or new Function.
 - html,body{margin:0;height:100%;overflow:hidden}. Portrait screen, 300-420 px
   wide, height varies. Use flexbox so it fits any height.

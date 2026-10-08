@@ -88,7 +88,7 @@ prompt) and start from `sdk/template-game/`, or `sdk/template-vn/` for a visual 
 runtime/     the PWA (index.html, lopda.js, lopda.css, platform.js, sw.js, icons)
 sdk/         MIT: PAD bridge, lo-game.js, templates, dev harness, AI prompts
 registry/    index.json + apps/<id>/{manifest.json,index.html}
-tools/       check-app.mjs, build-index.mjs, lo-game.mjs (Node 20+, no dependencies)
+tools/       check-app.mjs, build-index.mjs, bundle-app.mjs, lo-game.mjs (Node 20+, no dependencies)
 tests/       run with `node --test` (no dependencies)
 SPEC.md      app specification lopda/1
 ```

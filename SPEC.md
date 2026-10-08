@@ -165,7 +165,7 @@ and description in the player's language. Games on lo-game.js can use `game.t`
 
 ## 7. Size and quality
 
-- `index.html` at most 200 KB.
+- `index.html` at most 512 KB (with src/ files and framework copies bundled in; section 11).
 - Opens with one line of instructions and a start control.
 - No dead links, no lorem ipsum, no "coming soon" screens.
 - Text in Chinese, English or both, kept short. Both is recommended (section 6.1).
@@ -195,7 +195,21 @@ To try an app with the chin buttons, serve the repo root and open
 `sdk/lo-game.js` (MIT) is a small framework for games: a four-tone pixel screen,
 crisp Chinese and English text, buttons, scenes, dialogue, menus, tile maps and saving. An app
 that uses it carries its own copy in a `<script data-lo-game="VERSION">` block,
-filled in by `node tools/lo-game.mjs registry/apps/<id>`. The checker accepts only
+filled in by `node tools/bundle-app.mjs registry/apps/<id>`. The checker accepts only
 unmodified released copies and skips them when scanning, so review covers the
 game's own code. Since 1.2.0, `game.t({zh: "…", en: "…"})` picks text by `PAD.lang`.
 Reference and AI prompt: `sdk/LO-GAME.md`.
+
+## 11. Source files and lo-3d.js (optional)
+
+An app may keep its code in a `src/` folder next to `index.html` and include each file with
+`<script data-src="src/battle.js"></script>`. `node tools/bundle-app.mjs registry/apps/<id>` copies
+the file into the block verbatim. Paths are relative, start with `src/`, have no `..`, end in `.js`
+(story and data files too, e.g. `var STORY = {...};`), and the file must not contain `</script`.
+Reviewers read `src/`; the checker fails when `index.html` is not exactly what the tool builds,
+and the bundled code is scanned like any other app code. Only `index.html` ships; the 512 KB limit
+applies to it after bundling.
+
+`sdk/lo-3d.js` (MIT) is a small 3D renderer. A block `<script data-lo-3d="VERSION"></script>` is a
+verified framework block exactly like `data-lo-game`: filled by the same tool, accepted only as an
+unmodified released copy (`sdk/lo-3d.versions.json`), and skipped when scanning.

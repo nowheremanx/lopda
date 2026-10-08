@@ -62,17 +62,33 @@
                  fetch("../" + base + "/index.html").then(function (r) { return r.text(); })])
       .then(function (res) {
         var m = res[0]; html = res[1]; appId = m.id || "dev";
-        /* an empty lo-game block is filled from sdk/lo-game.js, so you can edit and reload without the tool */
-        var blk = /<script data-lo-game="[^"]*">\s*<\/script>/;
-        if (blk.test(html)) return fetch("lo-game.js").then(function (r) { return r.text(); }).then(function (lib) {
-          html = html.replace(blk, function () { return "<script data-lo-game>\n" + lib + "<\/script>"; });
-          return [m, html, true];
+        /* empty framework blocks and data-src blocks are filled from sdk/ and the app's src/ folder,
+           so you can edit and reload without running node tools/bundle-app.mjs */
+        var filled = [], jobs = [];
+        var fill = function (re, url, wrap, label) {
+          var found = html.match(re);
+          if (!found) return;
+          jobs.push(fetch(url).then(function (r) { if (!r.ok) throw new Error(url + " not found"); return r.text(); }).then(function (text) {
+            html = html.replace(found[0], function () { return wrap(text, found); });
+            filled.push(label);
+          }));
+        };
+        fill(/<script data-lo-3d="[^"]*">\s*<\/script>/, "lo-3d.js", function (lib) { return "<script data-lo-3d>\n" + lib + "<\/script>"; }, "lo-3d.js");
+        fill(/<script data-lo-game="[^"]*">\s*<\/script>/, "lo-game.js", function (lib) { return "<script data-lo-game>\n" + lib + "<\/script>"; }, "lo-game.js");
+        /* src/ blocks are always re-read, filled or not, so an edit shows on reload */
+        var srcRe = /<script data-src="([^"]*)">[\s\S]*?<\/script>/g, sm, srcs = [];
+        while ((sm = srcRe.exec(html))) srcs.push(sm[1]);
+        srcs.forEach(function (p) {
+          if (p.indexOf("src/") !== 0 || p.indexOf("..") >= 0 || !/\.js$/.test(p)) { log("data-src " + p + " is not allowed (src/...js only)"); return; }
+          var esc = p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          fill(new RegExp('<script data-src="' + esc + '">[\\s\\S]*?<\\/script>'), "../" + base + "/" + p,
+               function (code) { return '<script data-src="' + p + '">\n' + code + "<\/script>"; }, p);
         });
-        return [m, html, false];
+        return Promise.all(jobs).then(function () { return [m, html, filled]; });
       })
       .then(function (res) {
         var m = res[0]; html = res[1];
-        if (res[2]) log("lo-game.js filled in from sdk/");
+        if (res[2].length) log("filled in: " + res[2].join(", "));
         document.getElementById("pad").hidden = m.buttons !== true;
         document.getElementById("manifest").textContent = JSON.stringify(m, null, 2);
         showStore(); run(); log("loaded " + base + " (" + html.length + " bytes)");
