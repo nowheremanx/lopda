@@ -78,7 +78,7 @@ function show(name){
 $("home-key").onclick=function(){ flushNote(); show("home"); sfx("home"); };
 
 /* ---------- sound: tiny square-wave chips through Web Audio ---------- */
-var RUNTIME_VERSION="0.3.1";   /* keep in step with VERSION in sw.js */
+var RUNTIME_VERSION="0.3.2";   /* keep in step with VERSION in sw.js */
 var SND={ctx:null, on:true, vol:2, gain:null};
 var VOL_GAIN=[0,0.05,0.11,0.2];
 function audio(){
@@ -366,6 +366,13 @@ function deleteApp(id){
 
 /* ---------- runner: sandboxed iframe + PAD bridge (sdk/pad-shim.js) ---------- */
 var KV_BUDGET=256*1024;
+/* A new iframe for every run. Desktop Chrome can leave a reused sandboxed frame unpainted
+   (scripts run, nothing shows); a fresh one also means no state carries over between apps. */
+function freshRunFrame(){
+  var old=$("run-frame"), f=document.createElement("iframe");
+  f.id="run-frame"; f.setAttribute("sandbox","allow-scripts"); f.title=old.title;
+  old.parentNode.replaceChild(f,old);
+}
 function runApp(a){
   S.running=a;
   $("run-title").textContent=noEmoji(a.name)+" · v"+(a.version||"?");
@@ -373,6 +380,7 @@ function runApp(a){
   $("run-err").hidden=true;
   show("run");
   showPad(!!a.buttons);
+  freshRunFrame();
   var start=function(h){ $("run-frame").srcdoc=lopdaWrapApp(h); };
   if(a.html){ start(a.html); return; }
   $("run-frame").srcdoc='<body style="margin:0;height:100%;display:flex;align-items:center;justify-content:center;background:#a3ad7e;color:#1f2a14;font:16px monospace">载入中…</body>';
