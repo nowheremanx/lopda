@@ -6,3 +6,6 @@ node_modules/
 *.gb
 *.gbc
 *.sav
+
+# temporary file transfers from Claude
+_to_delete/

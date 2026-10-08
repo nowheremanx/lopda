@@ -78,7 +78,7 @@ function show(name){
 $("home-key").onclick=function(){ flushNote(); show("home"); sfx("home"); };
 
 /* ---------- sound: tiny square-wave chips through Web Audio ---------- */
-var RUNTIME_VERSION="0.2.2";   /* keep in step with VERSION in sw.js */
+var RUNTIME_VERSION="0.2.4";   /* keep in step with VERSION in sw.js */
 var SND={ctx:null, on:true, vol:2, gain:null};
 var VOL_GAIN=[0,0.05,0.11,0.2];
 function audio(){
@@ -886,6 +886,13 @@ function buildStrip(frames,size,loaded,tintId){
     x.fillStyle=rgb(2); x.font='16px "VT323", monospace'; x.fillText(pad2(k+1),fx,26);
   });
   x.fillStyle=rgb(1); x.font='18px "VT323", monospace'; x.fillText("END",c.width-STRIP.TRAIL+12,STRIP.H/2-9);
+  /* edge print in the bottom rebate, as on real film: maker, stock, and a frame number every frame */
+  x.font='15px "VT323", monospace';
+  frames.forEach(function(fr,k){
+    var fx=STRIP.LEAD+k*STRIP.PITCH;
+    x.fillStyle=rgb(1); x.fillText(k%2 ? "LO-PDA  "+T.en : (F.res===2?"FINE ":"")+"PIXEL FILM",fx+4,STRIP.FY+STRIP.FH+5);
+    x.fillStyle=rgb(2); x.fillText(String(k+1)+"▸",fx+STRIP.FW-26,STRIP.FY+STRIP.FH+5);
+  });
   /* frames last, as raw pixels at 2x */
   var sc=STRIP.FW/CW;   /* 2 for standard film, 1 for fine grain: the strip geometry stays the same */
   frames.forEach(function(fr,k){
@@ -934,17 +941,24 @@ function putFrame(x,px,pw,ph,pal,dx,dy,w,h){
     var t=pal[px[sy*pw+Math.min(pw-1,Math.floor(xx*pw/w))]], o=(y*w+xx)*4; d[o]=t[0]; d[o+1]=t[1]; d[o+2]=t[2]; d[o+3]=255; } }
   x.putImageData(img,dx,dy);
 }
+/* The contact sheet, made the way a lab makes one: the developed strip is cut into pieces of a
+   few frames, the pieces are laid side by side on paper, and the paper is printed. Frame numbers
+   and edge print come from the film itself; a short last piece simply leaves paper showing. */
 function buildCard(frames,size,loaded,tintId){
-  var T=tintOf(tintId), PAL=T.tones, n=frames.length;
+  var T=tintOf(tintId), n=frames.length;
+  var strip=buildStrip(frames,size,loaded,tintId), sw=strip.width, sd=strip.getContext("2d").getImageData(0,0,sw,STRIP.H).data;
   var c=document.createElement("canvas"); c.width=CARD.W; c.height=CARD.H;
   var x=c.getContext("2d");
   x.fillStyle="rgb("+CARD.PAPER.join(",")+")"; x.fillRect(0,0,c.width,c.height);
-  var cols = n<=8 ? 2 : n<=12 ? 3 : 4, rows=Math.ceil(n/cols);
-  var MX=72, TOP=236, BOTTOM=120, GX=24, GY=18, LAB=40;
-  var cellW=Math.floor((CARD.W-2*MX-(cols-1)*GX)/cols), fh=Math.round(cellW*CH/CW);
-  var avail=CARD.H-TOP-BOTTOM, gridH=rows*(fh+LAB)+(rows-1)*GY;
-  if(gridH>avail){ var k=avail/gridH; cellW=Math.floor(cellW*k); fh=Math.round(cellW*CH/CW); GX=Math.round(GX*k); gridH=rows*(fh+LAB)+(rows-1)*GY; }
-  var gridW=cols*cellW+(cols-1)*GX, ox=Math.round((CARD.W-gridW)/2), oy=TOP+Math.round((avail-gridH)/2);
+  var MX=72, TOP=236, BOTTOM=110, GAP=26, avail=CARD.H-TOP-BOTTOM, innerW=CARD.W-2*MX;
+  /* frames per piece: whichever lets the pieces be printed largest */
+  var per=3, s=0;
+  [3,4,5,6].forEach(function(k){
+    var rows=Math.ceil(n/k), sc=Math.min(innerW/(k*STRIP.PITCH), (avail-(rows-1)*GAP)/(rows*STRIP.H));
+    if(sc>s+1e-6){ s=sc; per=k; }
+  });
+  var rows=Math.ceil(n/per), pieceH=Math.round(STRIP.H*s), blockW=Math.round(per*STRIP.PITCH*s);
+  var ox=Math.round((CARD.W-blockW)/2), oy=TOP+Math.round((avail-(rows*pieceH+(rows-1)*GAP))/2);
   x.textBaseline="alphabetic";
   x.fillStyle=CARD.INK; x.font='76px "VT323", monospace'; x.fillText("LO-PDA",MX,128);
   x.font='30px "VT323", "DotGothic16", monospace'; x.textAlign="right";
@@ -952,20 +966,27 @@ function buildCard(frames,size,loaded,tintId){
   x.textAlign="left"; x.fillStyle=CARD.SOFT; x.font='26px "DotGothic16", "VT323", monospace';
   x.fillText((F.res===2?"FINE GRAIN":"PIXEL FILM")+" · "+T.en+" "+T.name+" · "+size+" EXP",MX,176);
   x.fillStyle=CARD.INK; x.fillRect(MX,200,CARD.W-2*MX,3);
-  frames.forEach(function(fr,i){
-    var col=i%cols, row=Math.floor(i/cols), fx=ox+col*(cellW+GX), fy=oy+row*(fh+LAB+GY);
-    x.fillStyle=CARD.SOFT; x.font='24px "VT323", "DotGothic16", monospace';
-    x.textAlign="left"; x.fillText(pad2(i+1),fx,fy+fh+30);
-    x.textAlign="right"; x.fillText(fr.blank?"—":stampOf(fr.taken).slice(0,8),fx+cellW,fy+fh+30);
-  });
   x.textAlign="center"; x.fillStyle=CARD.SOFT; x.font='24px "VT323", monospace';
   x.fillText("· shot on lo-pda ·",CARD.W/2,CARD.H-56);
   x.textAlign="left";
-  /* frames last, straight into pixels */
-  frames.forEach(function(fr,i){
-    var col=i%cols, row=Math.floor(i/cols), fx=ox+col*(cellW+GX), fy=oy+row*(fh+LAB+GY);
-    putFrame(x,pxFromString(fr.px),CW,CH,PAL,fx,fy,cellW,fh);
-  });
+  /* pieces last, copied pixel by pixel (never drawImage: Safari swaps red and blue on that path) */
+  var seed=(loaded|0)>>>0;
+  for(var r=0;r<rows;r++){
+    var first=r*per, count=Math.min(per,n-first);
+    var sx0=STRIP.LEAD+first*STRIP.PITCH-(STRIP.PITCH-STRIP.FW)/2, srcW=count*STRIP.PITCH;
+    var dw=Math.round(srcW*s), dh=pieceH;
+    seed=(seed*1103515245+12345)>>>0;
+    var jx=(seed>>>16)%7-3;                    /* hand-laid: each piece sits a little off */
+    var img=x.createImageData(dw,dh), d=img.data;
+    for(var yy=0;yy<dh;yy++){
+      var sy=Math.min(STRIP.H-1,Math.floor(yy/s));
+      for(var xx=0;xx<dw;xx++){
+        var sxp=Math.min(sw-1,Math.floor(sx0+xx/s)), so=(sy*sw+sxp)*4, o=(yy*dw+xx)*4;
+        d[o]=sd[so]; d[o+1]=sd[so+1]; d[o+2]=sd[so+2]; d[o+3]=255;
+      }
+    }
+    x.putImageData(img,ox+jx,oy+r*(pieceH+GAP));
+  }
   return c;
 }
 $("dev-card").onclick=function(){
