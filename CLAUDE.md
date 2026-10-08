@@ -11,9 +11,10 @@ Design history and open questions: `docs/decisions.md`. Read it before changing 
 runtime/        the PWA: index.html, lopda.js (all built-ins), strings.js (zh/en text), lopda.css, platform.js (IndexedDB store,
                 file export), sw.js (offline cache), vendor/binjgb/ (Game Boy core, MIT)
 sdk/            MIT. pad-shim.js (PAD bridge), lo-game.js (game framework), LO-GAME.md, PROMPT.md,
-                dev.html (app harness), template/, template-game/, fonts/ (lopix12, OFL)
+                dev.html (app harness), template/, template-game/, template-vn/ (visual novel), fonts/ (lopix12, OFL)
 registry/       index.json (generated) + apps/<id>/{manifest.json,index.html}
 tools/          check-app.mjs, build-index.mjs, lo-game.mjs, lo-game-lib.mjs (Node 20+, no deps)
+tests/          node:test suite (no deps): tools, strings, PAD shim, platform store, lo-game, repo rules
 SPEC.md         app spec lopda/1 (MIT)
 LICENSE NOTICE LICENSING.md CONTRIBUTING.md
 ```
@@ -36,9 +37,16 @@ python3 -m http.server 8086            # from the repo root; the runtime loads .
 node tools/check-app.mjs registry/apps/*     # must pass
 node tools/lo-game.mjs registry/apps/<id>    # refill framework + font blocks (after any text change)
 node tools/build-index.mjs                   # after changing any registry app
+node --test                                  # the test suite; must pass
 ```
 
-- There is no automated test suite in the repo. So far testing has been Playwright scripts against
+- `node --test` runs `tests/*.test.mjs` with no dependencies. Browser scripts (strings.js, platform.js,
+  pad-shim.js, lo-game.js) run in `node:vm` with small fakes (platform.test.mjs has an in-memory
+  IndexedDB). It also guards repo rules: index.json in sync, RUNTIME_VERSION = sw.js VERSION,
+  zh/en keys complete, lo-game hash released, SHELL files exist.
+- `tests/e2e.test.mjs` boots the runtime and every registry app in headless Chromium; it skips unless
+  Playwright is installed (`npm i --no-save playwright && npx playwright install chromium`).
+- Deeper UI checks (camera, cartridge) have been Playwright scripts against
   Chromium (`--use-fake-device-for-media-stream --use-fake-ui-for-media-stream` for the camera;
   `--disable-site-isolation-trials` or screenshots of sandboxed iframes come out blank), plus
   manual checks on an iPhone. iPhone Safari is the target that matters.
