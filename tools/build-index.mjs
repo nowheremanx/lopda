@@ -24,7 +24,7 @@ for (const id of ids) {
   const html = readFileSync(join(dir, "index.html"));
   apps.push({
     spec: m.spec, id: m.id, name: m.name, glyph: m.glyph, ...(m.buttons ? { buttons: true } : {}), ...(m.icon ? { icon: m.icon } : {}), version: m.version,
-    description: m.description, author: m.author, license: m.license,
+    description: m.description, ...(m.i18n ? { i18n: m.i18n } : {}), author: m.author, license: m.license,
     path: `apps/${id}/index.html`,
     sha256: createHash("sha256").update(html).digest("hex"),
     bytes: html.length,

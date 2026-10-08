@@ -39,6 +39,10 @@
       <button id="reload" type="button">Reload</button>
       <button id="wipe" type="button">Clear saved data</button>
     </div>
+    <div class="row">
+      <label for="lang">PAD.lang</label>
+      <select id="lang" style="width:auto"><option value="zh">zh</option><option value="en">en</option><option value="">(none: older runtime)</option></select>
+    </div>
     <div>Manifest</div><pre id="manifest"></pre>
     <div>PAD storage (this harness keeps it in localStorage)</div><pre id="store"></pre>
     <div>Errors and events</div><pre id="log"></pre>
@@ -75,7 +79,9 @@
       })
       .catch(function (e) { log("load failed: " + e.message); });
   }
-  function run() { frame.srcdoc = lopdaWrapApp(html); }
+  /* like the runtime, a language change starts the app again */
+  function run() { var l = document.getElementById("lang").value; frame.srcdoc = lopdaWrapApp(html, l ? { lang: l } : null); }
+  document.getElementById("lang").onchange = function () { log("PAD.lang = " + (this.value || "undefined")); run(); };
 
   window.addEventListener("message", function (e) {
     if (e.source !== frame.contentWindow) return;
@@ -102,6 +108,8 @@
   document.getElementById("reload").onclick = run;
   document.getElementById("wipe").onclick = function () { localStorage.removeItem(key()); showStore(); log("cleared"); };
   var q = new URLSearchParams(location.search).get("app"); if (q) document.getElementById("path").value = q;
+  var ql = new URLSearchParams(location.search).get("lang");
+  document.getElementById("lang").value = ql != null ? ql : (/^zh/i.test(navigator.language) ? "zh" : "en");
   load();
 </script>
 </body>

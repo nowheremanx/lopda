@@ -5,15 +5,19 @@
  * injects it as the first script of every app, so it must stay self-contained:
  * no closures over outer variables, no imports.
  *
+ * The runtime calls it with options: lopdaPadShim({lang:"zh"|"en"}). Older runtimes pass none,
+ * so PAD.lang is undefined there and apps fall back to their own default.
+ *
  * Messages app -> runtime:  {pad:1, op:"save"|"load"|"remove"|"error"|"exit"|"sfx", ...}
  * Messages runtime -> app:  {pad:1, op:"loaded", i, v}
  *                           {pad:1, op:"button", b, down}   (chin buttons, lopda/1)
  *                           {pad:1, op:"release-all"}
  */
-function lopdaPadShim() {
+function lopdaPadShim(opts) {
   var seq = 0, waiting = {};
   var post = function (msg) { msg.pad = 1; parent.postMessage(msg, "*"); };
   var TONES = ["#1f2a14", "#4a5a32", "#7d8a58", "#a3ad7e"];
+  var LANG = opts && (opts.lang === "zh" || opts.lang === "en") ? opts.lang : undefined;
 
   /* Buttons (lopda/1): the runtime forwards the chin keys; the keyboard works too. */
   var BUTTONS = ["up", "down", "left", "right", "a", "b", "start", "select"];
@@ -33,6 +37,7 @@ function lopdaPadShim() {
 
   window.PAD = Object.freeze({
     spec: "lopda/1",
+    lang: LANG,
     TONES: Object.freeze(TONES.slice()),
     BUTTONS: Object.freeze(BUTTONS.slice()),
     SOUNDS: Object.freeze(SOUNDS.slice()),
@@ -101,11 +106,13 @@ function lopdaPadShim() {
 var LOPDA_APP_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; " +
   "img-src data: blob:; media-src data: blob:; font-src data:; connect-src 'none'";
 
-/* Wrap an app's HTML: CSP meta first, then the bridge, then the app. */
-function lopdaWrapApp(html) {
+/* Wrap an app's HTML: CSP meta first, then the bridge, then the app.
+   opts.lang ("zh" | "en") becomes PAD.lang inside the app. */
+function lopdaWrapApp(html, opts) {
+  var lang = opts && (opts.lang === "zh" || opts.lang === "en") ? opts.lang : null;
   var head = '<meta http-equiv="Content-Security-Policy" content="' + LOPDA_APP_CSP + '">' +
     "<style>*{touch-action:manipulation;-webkit-tap-highlight-color:transparent}</style>" +
-    "<script>(" + lopdaPadShim.toString() + ")();<\/script>";
+    "<script>(" + lopdaPadShim.toString() + ")(" + (lang ? '{"lang":"' + lang + '"}' : "") + ");<\/script>";
   if (/<head[^>]*>/i.test(html)) return html.replace(/<head[^>]*>/i, function (m) { return m + head; });
   if (/<html[^>]*>/i.test(html)) return html.replace(/<html[^>]*>/i, function (m) { return m + "<head>" + head + "</head>"; });
   return "<!doctype html><html><head>" + head + "</head><body>" + html + "</body></html>";

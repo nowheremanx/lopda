@@ -12,6 +12,7 @@ try { Object.assign(LO_GAME, JSON.parse(readFileSync(join(ROOT, "sdk", "lo-game.
 try { const cur = readFileSync(join(ROOT, "sdk", "lo-game.js"), "utf8"); LO_GAME[(cur.match(/var VERSION = "([^"]+)"/) || [])[1] + " (sdk)"] = sha(cur); } catch {}
 
 const SPECS = ["lopda/0", "lopda/1"];
+const LANGS = ["zh", "en"];
 const SOUNDS = ["tap", "tick", "move", "ok", "err", "hit", "miss", "coin", "win", "lose"];
 const MAX_BYTES = 200 * 1024;
 const LICENSES = ["MIT", "0BSD", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Apache-2.0", "CC0-1.0", "Unlicense"];
@@ -88,6 +89,18 @@ function checkApp(dir) {
     if (!okIcon) errors.push('icon must be 16 strings of 16 characters, each one of ".0123"');
   }
   for (const f of ["name", "glyph", "description"]) if (EMOJI.test(String(m[f] || ""))) errors.push(`${f} contains emoji`);
+  /* optional localized store text: {"en": {"name", "description"}, "zh": {...}}, same rules as the defaults */
+  if (m.i18n !== undefined) {
+    if (!m.i18n || typeof m.i18n !== "object" || Array.isArray(m.i18n)) errors.push('i18n must be an object like {"en": {"name": "...", "description": "..."}}');
+    else for (const [lang, v] of Object.entries(m.i18n)) {
+      if (!LANGS.includes(lang)) { errors.push(`i18n.${lang}: only ${LANGS.join(", ")} are supported`); continue; }
+      if (!v || typeof v !== "object" || Array.isArray(v)) { errors.push(`i18n.${lang} must be an object`); continue; }
+      for (const k of Object.keys(v)) if (!["name", "description"].includes(k)) errors.push(`i18n.${lang}.${k}: only name and description can be localized`);
+      if (v.name !== undefined && (typeof v.name !== "string" || !v.name || chars(v.name).length > 8)) errors.push(`i18n.${lang}.name must be 1-8 characters`);
+      if (v.description !== undefined && (typeof v.description !== "string" || !v.description || chars(v.description).length > 80)) errors.push(`i18n.${lang}.description must be 1-80 characters`);
+      for (const f of ["name", "description"]) if (EMOJI.test(String(v[f] || ""))) errors.push(`i18n.${lang}.${f} contains emoji`);
+    }
+  } else info.push("no i18n in the manifest: zh + en names are recommended (SPEC.md)");
   if (typeof m.version !== "string" || !/^\d+\.\d+\.\d+$/.test(m.version)) errors.push("version must be MAJOR.MINOR.PATCH");
   if (!m.description || chars(m.description).length > 80) errors.push("description must be 1-80 characters");
   if (!m.author) errors.push("author is required");
