@@ -210,7 +210,7 @@
       "cam.unexposed": "unexposed", "cam.fogged": "fogged",
 
       "cam.boot.slot": "Probing slot B", "cam.boot.found": "Device", "cam.boot.lens": "LP-CAM dot lens rev.2",
-      "cam.boot.shake": "Handshake 9600 bps", "cam.boot.fw": "Firmware", "cam.boot.film": "Film",
+      "cam.boot.shake": "Link 9600 bps", "cam.boot.fw": "Firmware", "cam.boot.film": "Film",
       "cam.boot.filmof": "{name} {stock} {n}/{size}", "cam.boot.nofilm": "none", "cam.boot.done": "Linked.",
       "cam.boot.skip": "Tap to skip",
 

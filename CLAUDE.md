@@ -8,7 +8,7 @@ Design history and open questions: `docs/decisions.md`. Read it before changing 
 ## Layout
 
 ```
-runtime/        the PWA: index.html, lopda.js (all built-ins), lopda.css, platform.js (IndexedDB store,
+runtime/        the PWA: index.html, lopda.js (all built-ins), strings.js (zh/en text), lopda.css, platform.js (IndexedDB store,
                 file export), sw.js (offline cache), vendor/binjgb/ (Game Boy core, MIT)
 sdk/            MIT. pad-shim.js (PAD bridge), lo-game.js (game framework), LO-GAME.md, PROMPT.md,
                 dev.html (app harness), template/, template-game/, fonts/ (lopix12, OFL)
@@ -53,10 +53,11 @@ node tools/build-index.mjs                   # after changing any registry app
   No network, no eval, no storage APIs, no alert/confirm/prompt, no emoji.
 - Four tones only: ink `#1f2a14`, dark `#4a5a32`, mid `#7d8a58`, paper `#a3ad7e`.
 - PAD API: `PAD.load/save/remove` (256 KB per app), `PAD.exit`, `PAD.TONES`, `PAD.spec`,
-  `PAD.on("press"|"release", fn)`, `PAD.off`, `PAD.isDown`, `PAD.sfx(name)`.
+  `PAD.on("press"|"release", fn)`, `PAD.off`, `PAD.isDown`, `PAD.sfx(name)`,
+  `PAD.lang` ("zh" | "en", undefined on runtimes before 0.4.0). Manifest may add `i18n.{zh,en}.{name,description}`.
 - Buttons: `up down left right a b start select`. Keyboard: arrows, X=A, Z=B, Enter=START, Shift=SELECT.
 - Sounds: `tap tick move ok err hit miss coin win lose`. Max 20 per second per app.
-- Games may use `sdk/lo-game.js`: the app keeps an empty `<script data-lo-game="1.1.0">` block and
+- Games may use `sdk/lo-game.js`: the app keeps an empty `<script data-lo-game="1.2.0">` block and
   `tools/lo-game.mjs` fills it, plus a `data-lo-font` block with only the glyphs the app uses.
   The checker accepts only unmodified released copies (`sdk/lo-game.versions.json`). When you change
   lo-game.js: bump its VERSION, add the new hash to versions.json, re-run the tool on apps.
@@ -74,7 +75,9 @@ node tools/build-index.mjs                   # after changing any registry app
 
 ## Code style and conventions
 
-- Keep files dependency-free and readable; comment why, not what. UI text is short Chinese.
+- Keep files dependency-free and readable; comment why, not what. UI text is short Chinese and English:
+  every runtime string lives in `runtime/strings.js` (`tr(key, vars)` in lopda.js); add both languages.
+  Only zh and en (see docs/decisions.md section 11).
 - Every pixel the user sees on the LCD is one of the four tones. Output images (film, cards)
   may use a roll's tint palette. No emoji anywhere (the runtime strips them in apps).
 - Write pixels with `putImageData` into ImageData. Do not `drawImage` a canvas onto another canvas
