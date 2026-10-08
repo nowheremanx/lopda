@@ -88,69 +88,56 @@
       </div>
     </section>
 
-    <!-- CAMERA -->
-    <section class="view" id="v-cam" hidden style="position:relative">
+    <!-- CAMERA: one fixed screen, like the real thing. Chin buttons or the key strip below. -->
+    <section class="view cam-view" id="v-cam" hidden>
       <div class="link-boot" id="cam-boot" hidden role="status" aria-live="polite"></div>
-      <div class="bar"><h2 id="cam-title">点阵相机 · 128×112</h2><span class="hint" id="cam-count"></span></div>
-      <div class="cam">
-        <div class="finder">
+      <div class="cam-lcd" id="cam-lcd" aria-live="polite">
+        <b id="cam-count">--/--</b>
+        <span id="cam-film">未装胶卷</span>
+        <span id="cam-exp">亮±0 对±0</span>
+        <span id="cam-date" title="日期">D</span>
+      </div>
+      <div class="finder-box" id="finder-box">
+        <div class="finder" id="finder">
           <canvas id="cam-cv" width="128" height="112" aria-label="取景器"></canvas>
           <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
-          <span class="stamp" id="cam-stamp" hidden></span>
-          <div class="dev" id="cam-dev" hidden>接收影像…</div>
           <span class="live-tag" id="cam-live-tag" hidden>LIVE</span>
+          <div class="dev" id="cam-dev" hidden>接收影像…</div>
+          <div class="shut" id="cam-shut" hidden></div>
           <video id="cam-video" playsinline muted autoplay hidden></video>
         </div>
+      </div>
+      <div class="cam-keys" id="cam-keys">
+        <button class="ck" type="button" id="ck-dark" aria-label="调暗"><i>▼</i>暗</button>
+        <button class="ck ck-a" type="button" id="cam-shutter" aria-label="拍照"><i>A</i>拍</button>
+        <button class="ck" type="button" id="ck-bright" aria-label="调亮"><i>▲</i>亮</button>
+        <button class="ck" type="button" id="ck-menu" aria-label="机身菜单"><i>START</i>菜单</button>
+      </div>
+      <p class="cam-mode" id="cam-mode"></p>
+      <input class="file-in" type="file" id="cam-file" accept="image/*" capture="environment">
 
-        <div class="panel" id="cam-load" hidden>
-          <p>机身里没有胶卷。选色调、颗粒和张数：</p>
-          <div class="row tints" role="radiogroup" aria-label="胶片色调" id="tint-row"></div>
-          <p class="hint" id="tint-note">屏幕永远是绿的，颜色要冲洗出来才看得到。</p>
-          <div class="row" role="radiogroup" aria-label="胶片型号">
-            <button class="btn" type="button" role="radio" aria-checked="true" data-stock="1">标准片 · 128</button>
-            <button class="btn ghost" type="button" role="radio" aria-checked="false" data-stock="2">细颗粒 · 256</button>
-          </div>
-          <p class="hint" id="stock-note">标准片颗粒粗，复古味重；细颗粒能看清人脸。</p>
-          <div class="row">
-            <button class="btn ghost" type="button" data-roll="8">8 张</button>
-            <button class="btn" type="button" data-roll="12">12 张</button>
-            <button class="btn ghost" type="button" data-roll="16">16 张</button>
-          </div>
-          <p class="hint">拍下的每一张都不能删、不能改。整卷拍完才能冲洗。</p>
+      <!-- the camera back, opened: choosing a roll -->
+      <div class="cam-sheet" id="cam-load" hidden>
+        <p class="sheet-title">装胶卷</p>
+        <div class="rolls" id="rolls" aria-label="胶卷"></div>
+        <div class="roll-opts">
+          <button class="ck" type="button" id="roll-count"><i>▲▼</i>12 张</button>
+          <button class="ck" type="button" id="roll-stock"><i>SELECT</i>标准片</button>
         </div>
-
-        <div id="cam-shoot" hidden style="display:flex;flex-direction:column;align-items:center;gap:8px">
-          <div class="cam-row">
-            <button class="btn ghost" id="cam-dark" type="button" aria-label="调暗">暗 −</button>
-            <input class="file-in" type="file" id="cam-file" accept="image/*" capture="environment">
-            <button class="shutter" id="cam-shutter" type="button" aria-label="拍照">拍</button>
-            <button class="btn ghost" id="cam-bright" type="button" aria-label="调亮">亮 +</button>
-          </div>
-          <div class="cam-row"><span class="hint" id="cam-exp">曝光 0 · 对下一张生效</span><button class="btn ghost" id="cam-date" type="button">日期 · 开</button></div>
-          <div class="cam-row"><button class="btn ghost" id="cam-flip" type="button" hidden>换镜头</button><button class="btn ghost" id="cam-rewind-btn" type="button">提前倒片</button></div>
-          <span class="hint" id="cam-mode"></span>
+        <p class="hint" id="roll-note"></p>
+        <div class="cam-keys">
+          <button class="ck" type="button" id="roll-prev"><i>◀</i></button>
+          <button class="ck ck-a" type="button" id="roll-go"><i>A</i>装入</button>
+          <button class="ck" type="button" id="roll-next"><i>▶</i></button>
         </div>
+      </div>
 
-        <div class="panel" id="cam-rewind" hidden>
-          <p id="rewind-title">还有几张没拍。</p>
-          <p class="hint">倒片时剩下的胶片会见光，冲出来是一片白。倒片后这卷就拍完了，不能再拍。</p>
-          <div class="row">
-            <button class="btn" id="rewind-go" type="button">确认倒片</button>
-            <button class="btn ghost" id="rewind-cancel" type="button">取消</button>
-          </div>
-        </div>
-
-        <div class="panel" id="cam-develop" hidden>
-          <p id="dev-title">这卷拍完了，可以冲洗。</p>
-          <div class="row">
-            <button class="btn" id="dev-strip" type="button">冲洗成长条</button>
-            <button class="btn" id="dev-card" type="button">印样卡 3:4</button>
-          </div>
-          <p class="hint">长条是一整条横向胶片；印样卡把整卷排在一张 3:4 相纸上，适合直接发出去。想要单张，就把长条放进「裁片机」自己裁。</p>
-          <div class="row" id="cam-new-wrap"><button class="btn ghost" id="cam-new" type="button">取出胶卷，装新的</button></div>
-        </div>
-
-        <div class="album" id="album"></div>
+      <!-- menus: the body menu (START) and the finished-roll menu -->
+      <div class="cam-sheet" id="cam-menu" hidden>
+        <p class="sheet-title" id="menu-title">机身菜单</p>
+        <p class="hint" id="menu-note"></p>
+        <ul class="lcd-menu" id="menu-list"></ul>
+        <p class="hint menu-keys">▲▼ 选择 · A 确定 · B 返回</p>
       </div>
     </section>
 

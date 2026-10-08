@@ -194,3 +194,42 @@ textarea::placeholder{color:var(--ink-2)}
 #cart-tools .btn{padding:6px 8px;font-size:13px}
 .store-item .acts{display:flex;flex-direction:column;gap:6px;flex:none}
 @media (max-width:380px){.brand span{font-size:14px;letter-spacing:.06em}}
+/* camera: one fixed screen; the back opens over it for rolls and menus */
+.cam-view{display:flex;flex-direction:column;overflow:hidden;position:relative}
+.cam-lcd{display:flex;align-items:baseline;gap:10px;padding:5px 10px;border-bottom:2px solid var(--ink);font-family:var(--f-pix);font-size:16px;white-space:nowrap;overflow:hidden;flex:none}
+.cam-lcd b{font-weight:400;font-size:24px;letter-spacing:.06em}
+.cam-lcd #cam-film{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.cam-lcd #cam-date{border:2px solid var(--ink);padding:0 3px;line-height:1.1}
+.cam-lcd #cam-date.off{color:var(--lcd-3);border-color:var(--lcd-3)}
+.finder-box{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:8px}
+#finder{max-width:none;width:auto;flex:none}
+#cam-cv{width:100%;height:100%;aspect-ratio:auto}
+.finder .shut{position:absolute;inset:0;background:var(--ink)}
+.cam-keys{display:flex;gap:6px;justify-content:center;padding:4px 8px 8px;flex:none}
+.ck{display:flex;flex-direction:column;align-items:center;gap:2px;min-width:58px;padding:5px 8px;background:transparent;border:2px solid var(--ink);font-family:var(--f-lcd);font-size:14px;color:var(--ink);cursor:pointer;line-height:1.1}
+.ck i{font-style:normal;font-family:var(--f-pix);font-size:12px;color:var(--ink-2);letter-spacing:.05em;line-height:1}
+.ck-a{background:var(--ink);color:var(--lcd);min-width:72px}
+.ck-a i{color:var(--lcd-3)}
+.ck:active{transform:translateY(1px)}
+.ck:disabled{border-color:var(--lcd-3);color:var(--lcd-3);background:transparent}
+.ck:disabled i{color:var(--lcd-3)}
+.cam-mode{margin:0;padding:0 10px 6px;font-size:12px;color:var(--ink-2);text-align:center;flex:none}
+.cam-mode:empty{display:none}
+.cam-sheet{position:absolute;inset:0;z-index:2;background:var(--lcd);display:flex;flex-direction:column;padding:10px 10px 4px;gap:8px;overflow:hidden}
+.sheet-title{margin:0;font-family:var(--f-pix);font-size:20px;letter-spacing:.1em;border-bottom:2px solid var(--ink);padding-bottom:4px;flex:none}
+.cam-sheet .hint{text-align:center;flex:none}
+.rolls{flex:1;min-height:0;display:flex;align-items:center;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none;padding-inline:calc(50% - 64px);touch-action:pan-x}
+.rolls::-webkit-scrollbar{display:none}
+.roll{flex:none;width:128px;scroll-snap-align:center;display:flex;flex-direction:column;align-items:center;gap:6px;background:none;border:0;padding:0;cursor:pointer;transition:transform .18s;transform:scale(.72)}
+.roll.on{transform:none}
+.roll canvas{width:96px;height:128px;image-rendering:pixelated;image-rendering:crisp-edges}
+.roll .lab{font-family:var(--f-pix);font-size:16px;letter-spacing:.06em;text-align:center;line-height:1.15;color:var(--ink)}
+.roll .lab small{display:block;font-family:var(--f-lcd);font-size:13px;letter-spacing:0}
+.roll-opts{display:flex;gap:8px;justify-content:center;flex:none}
+.lcd-menu{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
+.lcd-menu li{display:flex;gap:8px;align-items:center;padding:9px 10px;font-size:16px;cursor:pointer}
+.lcd-menu li::before{content:"▶";font-size:12px;visibility:hidden}
+.lcd-menu li.on{background:var(--ink);color:var(--lcd)}
+.lcd-menu li.on::before{visibility:visible}
+.lcd-menu li small{margin-left:auto;font-family:var(--f-pix);font-size:15px}
+.menu-keys{margin-top:auto!important}

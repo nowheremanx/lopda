@@ -78,7 +78,7 @@ function show(name){
 $("home-key").onclick=function(){ flushNote(); show("home"); sfx("home"); };
 
 /* ---------- sound: tiny square-wave chips through Web Audio ---------- */
-var RUNTIME_VERSION="0.2.4";   /* keep in step with VERSION in sw.js */
+var RUNTIME_VERSION="0.3.0";   /* keep in step with VERSION in sw.js */
 var SND={ctx:null, on:true, vol:2, gain:null};
 var VOL_GAIN=[0,0.05,0.11,0.2];
 function audio(){
@@ -129,7 +129,7 @@ function sfx(name){
 /* every button gets a key click, except the ones that make their own sound */
 document.addEventListener("pointerdown",function(e){
   var b=e.target.closest && e.target.closest("button,label.btn,.app");
-  if(!b || b.disabled || b.id==="home-key" || b.id==="cam-shutter" || b.id==="cut-go" || b.closest(".gamepad")) return;
+  if(!b || b.disabled || b.id==="home-key" || b.id==="cut-go" || b.closest(".gamepad") || b.closest(".cam-view")) return;
   sfx("tap");
 },true);
 
@@ -596,7 +596,7 @@ function paintSaveSoon(){
 }
 /* ---------- 点阵相机: a roll of film. Frames are fixed once taken; a full roll is developed out. ---------- */
 var CW=128, CH=112;
-var F={roll:null, size:12, res:1, tint:"lcd", loaded:0, exposure:0, date:true, frames:[], ready:false, viewing:null};
+var F={roll:null, size:12, res:1, tint:"lcd", loaded:0, exposure:0, contrast:0, date:true, frames:[], ready:false};
 var ccv=$("cam-cv"), cctx=ccv.getContext("2d"), cimg=cctx.createImageData(CW,CH);
 /* film stock: 1 = 128x112 standard, 2 = 256x224 fine grain. Fixed for the life of a roll. */
 /* film tints: the four tones a roll develops in. The handheld's own screen always stays green. */
@@ -610,29 +610,10 @@ var TINTS={
 var TINT_ORDER=["lcd","sepia","sakura","cyano","mono"];
 function tintOf(id){ return TINTS[id]||TINTS.lcd; }
 var nextTint="lcd";
-(function buildTintRow(){
-  var row=$("tint-row");
-  TINT_ORDER.forEach(function(id){
-    var t=TINTS[id], b=document.createElement("button"); b.type="button"; b.className="tint"; b.setAttribute("role","radio");
-    b.setAttribute("aria-checked", id===nextTint?"true":"false"); b.setAttribute("data-tint",id);
-    var sw=document.createElement("span"); sw.className="sw4";
-    t.tones.forEach(function(c){ var i=document.createElement("i"); i.style.background="rgb("+c.join(",")+")"; sw.appendChild(i); });
-    var l=document.createElement("span"); l.textContent=t.name;
-    b.appendChild(sw); b.appendChild(l);
-    b.onclick=function(){ nextTint=id; Array.prototype.forEach.call(row.children,function(o){ o.setAttribute("aria-checked",o===b?"true":"false"); }); };
-    row.appendChild(b);
-  });
-})();
 function setRes(r){ r=r===2?2:1; F.res=r; CW=128*r; CH=112*r; ccv.width=CW; ccv.height=CH; cimg=cctx.createImageData(CW,CH); }
 function stockName(r){ return r===2 ? "细颗粒" : "标准片"; }
-function filmDoc(){ return {roll:F.roll,size:F.size,res:F.res,tint:F.tint,loaded:F.loaded,exposure:F.exposure,date:F.date}; }
-var nextStock=1;
-Array.prototype.forEach.call(document.querySelectorAll("[data-stock]"),function(b){
-  b.onclick=function(){
-    nextStock=+b.getAttribute("data-stock");
-    Array.prototype.forEach.call(document.querySelectorAll("[data-stock]"),function(o){ var on=o===b; o.setAttribute("aria-checked",on?"true":"false"); o.className=on?"btn":"btn ghost"; });
-  };
-});
+function filmDoc(){ return {roll:F.roll,size:F.size,res:F.res,tint:F.tint,loaded:F.loaded,exposure:F.exposure,contrast:F.contrast,date:F.date}; }
+var nextStock=1, nextSize=12;
 function drawPx(ctx,img,px){
   var d=img.data;
   for(var i=0;i<px.length;i++){ var t=TONES[px[i]]; d[i*4]=t[0]; d[i*4+1]=t[1]; d[i*4+2]=t[2]; d[i*4+3]=255; }
@@ -648,7 +629,7 @@ function lumaOf(img,w,h){
   for(var i=0;i<lum.length;i++) lum[i]=(0.2126*d[i*4]+0.7152*d[i*4+1]+0.0722*d[i*4+2])/255;
   return lum;
 }
-function ditherLuma(lum,w,h,exposure){
+function ditherLuma(lum,w,h,exposure,contrast){
   var hist=new Uint32Array(256), N=lum.length;
   for(var q=0;q<N;q++) hist[Math.min(255,Math.max(0,(lum[q]*255)|0))]++;
   var pct=function(f){ var want=N*f, acc=0; for(var b=0;b<256;b++){ acc+=hist[b]; if(acc>want) return b/255; } return 1; };
@@ -658,6 +639,7 @@ function ditherLuma(lum,w,h,exposure){
     var k=y*w+x, v=(lum[k]-lo)/span;
     var nb=0,n=0; if(x>0){nb+=lum[k-1];n++} if(x<w-1){nb+=lum[k+1];n++} if(y>0){nb+=lum[k-w];n++} if(y<h-1){nb+=lum[k+w];n++}
     v+= ((lum[k]-nb/n)/span)*0.6;
+    if(contrast) v=0.5+(v-0.5)*Math.pow(1.3,contrast);
     v=Math.pow(Math.max(0,Math.min(1,v)),1/gain);
     var t=(BAYER[(y%4)*4+(x%4)]+0.5)/16-0.5;
     out[k]=Math.max(0,Math.min(3,Math.round(v*3+t)));
@@ -671,56 +653,25 @@ function fileStamp(ts){ var d=new Date(ts); return d.getFullYear()+pad2(d.getMon
 function rollFull(){ return F.roll && F.frames.length>=F.size; }
 function frameStamp(fr){ return fr.blank==="dark" ? "未曝光" : fr.blank==="light" ? "全曝光" : stampOf(fr.taken); }
 
-var revealTimer=null;
-function camShowPx(px,stamp,develop){
-  clearInterval(revealTimer); revealTimer=null;
-  $("cam-dev").hidden=true;
-  var reduce=window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
-  var finish=function(){ drawPx(cctx,cimg,px); $("cam-stamp").hidden=true; };
-  if(!develop || reduce){ finish(); return; }
-  $("cam-stamp").hidden=true;
-  var shown=new Uint8Array(CW*CH).fill(3), row=0;
-  revealTimer=setInterval(function(){
-    var end=Math.min(CH,row+4);
-    for(var y=row;y<end;y++) for(var x=0;x<CW;x++) shown[y*CW+x]=px[y*CW+x];
-    if(end<CH) for(var x2=0;x2<CW;x2++) shown[end*CW+x2]=0;
-    row=end; drawPx(cctx,cimg,shown);
-    if(row>=CH){ clearInterval(revealTimer); revealTimer=null; finish(); }
-  },28);
-}
 function camIdle(){
   var px=new Uint8Array(CW*CH);
   for(var y=0;y<CH;y++) for(var x=0;x<CW;x++){ var band=Math.floor(x/(CW/4)); px[y*CW+x]= (y>CH*0.78) ? ((x>>3)+(y>>3))%2*3 : band; }
-  drawPx(cctx,cimg,px); $("cam-stamp").hidden=true;
+  drawPx(cctx,cimg,px);
 }
 
 function renderCam(){
   var has=!!F.roll, full=rollFull();
-  $("cam-load").hidden=has || !F.ready;
-  $("cam-shoot").hidden=!has || full;
-  $("cam-shoot").style.display=(!has||full)?"none":"flex";
-  $("cam-develop").hidden=!full;
-  if(!has || full) $("cam-rewind").hidden=true;
-  $("cam-rewind-btn").hidden= !has || full || $("cam-rewind").hidden===false;
-  $("cam-count").textContent= has ? tintOf(F.tint).name+" · "+stockName(F.res)+" · 第 "+Math.min(F.frames.length+(full?0:1),F.size)+" / "+F.size+" 张" : (F.ready?"未装胶卷":"读取中…");
-  $("cam-exp").textContent="曝光 "+(F.exposure>0?"+":"")+F.exposure+" · 对下一张生效";
-  $("cam-date").textContent="日期 · "+(F.date?"开":"关");
-  var a=$("album"); a.textContent="";
-  if(!has) return;
-  for(var n=1;n<=F.size;n++){
-    var fr=F.frames[n-1];
-    if(!fr){ var bl=document.createElement("div"); bl.className="blank"; bl.textContent=pad2(n); a.appendChild(bl); continue; }
-    var b=document.createElement("button"); b.type="button"; b.className="fr"; b.setAttribute("aria-label","第 "+n+" 张 "+frameStamp(fr));
-    if(F.viewing===n) b.setAttribute("aria-current","true");
-    var cv=document.createElement("canvas"); cv.width=CW; cv.height=CH;
-    var x=cv.getContext("2d"); drawPx(x,x.createImageData(CW,CH),pxFromString(fr.px));
-    var lab=document.createElement("b"); lab.textContent=pad2(n);
-    b.appendChild(cv); b.appendChild(lab);
-    (function(n){ b.onclick=function(){ if(F.viewing===n) exitPreview(); else enterPreview(n); }; })(n);
-    a.appendChild(b);
-  }
-  $("cam-title").textContent="点阵相机 · "+CW+"×"+CH;
-  if(typeof camModeLabel==="function") camModeLabel();
+  $("cam-count").textContent= has ? pad2(Math.min(F.frames.length+(full?0:1),F.size))+"/"+pad2(F.size) : "--/--";
+  $("cam-film").textContent= has ? tintOf(F.tint).en+" "+tintOf(F.tint).name+" · "+(F.res===2?"细":"标") : (F.ready?"未装胶卷":"读取中…");
+  var sg=function(v){ return (v>0?"+":v<0?"−":"±")+Math.abs(v); };
+  $("cam-exp").textContent="亮"+sg(F.exposure)+" 对"+sg(F.contrast);
+  $("cam-date").className=F.date?"":"off";
+  var shooting=has && !full;
+  ["cam-shutter","ck-dark","ck-bright"].forEach(function(id){ $(id).disabled=!shooting; });
+  if(F.ready && !has && CAM.mode!=="load") camSheet("load");
+  else if(has && full && CAM.mode!=="menu") camMenu("develop");
+  else if(has && !full && CAM.mode==="load") camSheet(null);
+  camModeLabel(); camLayout();
 }
 
 /* date back: a 3x5 digit font burned into the lower right corner, like a quartz-date camera */
@@ -744,30 +695,29 @@ function burnDate(px,w,h,ts,s){
   if(cnt && sum/cnt>=1.6){ lit.forEach(function(p){ plot(p[0],p[1],0); }); }
   else { lit.forEach(function(p){ plot(p[0]+1,p[1]+1,0); }); lit.forEach(function(p){ plot(p[0],p[1],3); }); }
 }
-$("cam-date").onclick=function(){
-  F.date=!F.date; renderCam();
-  if(S.db && F.roll){ clearTimeout(expTimer); expTimer=setTimeout(function(){ put(S.refs.film,filmDoc()); },800); }
-};
+function toggleDate(){
+  F.date=!F.date; renderCam(); saveFilmSoon();
+}
+function saveFilmSoon(){ if(S.db && F.roll){ clearTimeout(expTimer); expTimer=setTimeout(function(){ put(S.refs.film,filmDoc()); },800); } }
 
 /* exposure is a setting for the next frame, never an edit of a taken one */
 var expTimer=null;
-function setExposure(v){
-  F.exposure=v; renderCam();
-  if(!S.db || !F.roll) return;
-  clearTimeout(expTimer); expTimer=setTimeout(function(){ put(S.refs.film,filmDoc()); },800);
-}
-$("cam-dark").onclick=function(){ if(F.exposure>-3) setExposure(F.exposure-1); };
-$("cam-bright").onclick=function(){ if(F.exposure<3) setExposure(F.exposure+1); };
+function setExposure(v){ v=LoClamp(v,-3,3); if(v===F.exposure) return; F.exposure=v; sfx("tick"); renderCam(); saveFilmSoon(); }
+function setContrast(v){ v=LoClamp(v,-3,3); if(v===F.contrast) return; F.contrast=v; sfx("tick"); renderCam(); saveFilmSoon(); }
+function LoClamp(v,a,b){ return v<a?a:v>b?b:v; }
+$("ck-dark").onclick=function(){ setExposure(F.exposure-1); };
+$("ck-bright").onclick=function(){ setExposure(F.exposure+1); };
+$("ck-menu").onclick=function(){ if(F.roll && !rollFull()) camMenu("body"); };
 
-Array.prototype.forEach.call(document.querySelectorAll("[data-roll]"),function(b){
-  b.onclick=function(){
-    var size=+b.getAttribute("data-roll");
-    setRes(nextStock); F.tint=nextTint;
-    F.roll="r"+Date.now().toString(36); F.size=size; F.loaded=Date.now(); F.frames=[]; F.viewing=null;
-    if(S.db) put(S.refs.film,filmDoc());
-    camIdle(); renderCam(); toast("装好了一卷 "+tintOf(F.tint).name+stockName(F.res)+"，"+size+" 张。"); startLive();
-  };
-});
+function loadRoll(){
+  setRes(nextStock); F.tint=nextTint; F.contrast=0; F.exposure=0;
+  F.roll="r"+Date.now().toString(36); F.size=nextSize; F.loaded=Date.now(); F.frames=[];
+  if(S.db) put(S.refs.film,filmDoc());
+  /* the door closes, the film is wound on to frame 1 */
+  sfx("tap"); setTimeout(function(){ sfx("tick"); },120); setTimeout(function(){ sfx("tick"); },240); setTimeout(function(){ sfx("ok"); },420);
+  camSheet(null); camIdle(); renderCam(); startLive();
+  toast("装好了：PIXEL FILM "+tintOf(F.tint).en+" "+tintOf(F.tint).name+(F.res===2?" 细颗粒":"")+"，"+F.size+" 张。");
+}
 
 /* ---- live viewfinder: the camera feed dithered to the LCD in real time (needs HTTPS) ---- */
 var LIVE={stream:null, on:false, raf:0, last:0, facing:"environment", hold:0, failed:false,
@@ -785,25 +735,13 @@ function lumaFrom(src,sw,sh,w,h,mirror){
 }
 function liveSupported(){ return !!(window.isSecureContext && navigator.mediaDevices && navigator.mediaDevices.getUserMedia); }
 function camModeLabel(){
-  $("cam-shutter").textContent = F.viewing ? "回" : "拍";
-  $("cam-shutter").setAttribute("aria-label", F.viewing ? "回到拍摄" : "拍照");
-  if(F.viewing){ $("cam-mode").textContent="回看第 "+F.viewing+" 张 · 再点这张、取景器或「回」回到拍摄"; $("cam-live-tag").hidden=true; $("cam-flip").hidden=true; return; }
-  $("cam-mode").textContent = LIVE.on ? "实时取景" :
-    (liveSupported() ? (LIVE.failed ? "没拿到摄像头权限，按「拍」会打开系统相机" : "") : "实时取景需要 HTTPS；现在按「拍」会打开系统相机");
-  $("cam-live-tag").hidden=!LIVE.on || !!F.viewing;
-  $("cam-flip").hidden=!LIVE.on;
-}
-/* two states only: shooting (sensor on) and reviewing a taken frame (sensor off) */
-function enterPreview(n){
-  var fr=F.frames[n-1]; if(!fr) return;
-  F.viewing=n; stopLive();
-  camShowPx(pxFromString(fr.px),frameStamp(fr)); renderCam();
-}
-function exitPreview(){
-  F.viewing=null; camIdle(); renderCam(); startLive();
+  var has=!!F.roll && !rollFull();
+  $("cam-mode").textContent = !has ? "" : LIVE.on ? "" :
+    (liveSupported() ? (LIVE.failed ? "没拿到摄像头权限：按 A 会打开系统相机" : "") : "实时取景需要 HTTPS：按 A 会打开系统相机");
+  $("cam-live-tag").hidden=!LIVE.on;
 }
 function startLive(){
-  if(LIVE.on || F.viewing || !liveSupported() || !F.roll || rollFull()) { camModeLabel(); return; }
+  if(LIVE.on || !liveSupported() || !F.roll || rollFull()) { camModeLabel(); return; }
   navigator.mediaDevices.getUserMedia({video:{facingMode:LIVE.facing, width:{ideal:640}, height:{ideal:480}}, audio:false}).then(function(stream){
     if($("v-cam").hidden || !F.roll || rollFull()){ stream.getTracks().forEach(function(t){ t.stop(); }); return; }
     LIVE.stream=stream; LIVE.on=true; LIVE.failed=false;
@@ -826,40 +764,43 @@ function liveTick(t){
   if(t-LIVE.last<80) return;          /* about 12 frames a second is plenty for an LCD */
   LIVE.last=t;
   var v=$("cam-video");
-  if(F.viewing || revealTimer || Date.now()<LIVE.hold || v.readyState<2 || !v.videoWidth) return;
+  if(Date.now()<LIVE.hold || v.readyState<2 || !v.videoWidth) return;
   var lum=lumaFrom(v,v.videoWidth,v.videoHeight,CW,CH,LIVE.facing==="user");
-  drawPx(cctx,cimg,ditherLuma(lum,CW,CH,F.exposure));
+  drawPx(cctx,cimg,ditherLuma(lum,CW,CH,F.exposure,F.contrast));
 }
-$("cam-flip").onclick=function(){ LIVE.facing = LIVE.facing==="environment" ? "user" : "environment"; stopLive(); startLive(); };
-$("cam-cv").parentNode.addEventListener("click",function(){ if(F.viewing) exitPreview(); });
+function flipLens(){ if(!LIVE.on) return; LIVE.facing = LIVE.facing==="environment" ? "user" : "environment"; sfx("tap"); stopLive(); startLive(); }
 function takeFrame(px){
   var n=F.frames.length+1, now=Date.now();
   if(F.date) burnDate(px,CW,CH,now,F.res);
   var fr={roll:F.roll, n:n, px:Array.prototype.join.call(px,""), taken:now, dated:F.date};
   F.frames.push(fr);
-  sfx("shutter"); camShowPx(px,null,true); LIVE.hold=Date.now()+1800; renderCam();
+  /* film: you never see the frame. The shutter blinks, the film winds on. */
+  sfx("shutter"); $("cam-shut").hidden=false; LIVE.hold=Date.now()+320;
+  setTimeout(function(){ $("cam-shut").hidden=true; if(!LIVE.on) camIdle(); },160);
+  setTimeout(function(){ sfx("tick"); },260); setTimeout(function(){ sfx("tick"); },360);
+  renderCam();
   if(S.db) put(S.refs.frames.doc(F.roll+"-"+pad2(n)),fr).then(function(ok){ if(!ok) toast("这一张没存上，重新打开相机看看。"); });
   if(rollFull()){ toast("最后一张。这卷拍完了，可以冲洗了。"); stopLive(); }
 }
-$("cam-shutter").onclick=function(){
-  if(F.viewing){ exitPreview(); return; }
-  if(!F.roll || rollFull()) return;
+$("cam-shutter").onclick=function(){ shoot(); };
+function shoot(){
+  if(!F.roll || rollFull() || !$("cam-shut").hidden) return;
   var v=$("cam-video");
   if(LIVE.on && v.videoWidth){
     var lum=lumaFrom(v,v.videoWidth,v.videoHeight,CW,CH,LIVE.facing==="user");
-    takeFrame(ditherLuma(lum,CW,CH,F.exposure));
+    takeFrame(ditherLuma(lum,CW,CH,F.exposure,F.contrast));
     return;
   }
   $("cam-file").click();
-};
+}
 $("cam-file").addEventListener("change",function(){
   var f=this.files && this.files[0]; this.value="";
   if(!f || !F.roll || rollFull()) return;
-  $("cam-dev").hidden=false; $("cam-stamp").hidden=true;
+  $("cam-dev").hidden=false;
   var url=URL.createObjectURL(f), img=new Image();
   img.onload=function(){
-    var px=ditherLuma(lumaOf(img,CW,CH),CW,CH,F.exposure); URL.revokeObjectURL(url);
-    F.viewing=null; takeFrame(px);
+    var px=ditherLuma(lumaOf(img,CW,CH),CW,CH,F.exposure,F.contrast); URL.revokeObjectURL(url);
+    $("cam-dev").hidden=true; takeFrame(px);
   };
   img.onerror=function(){ URL.revokeObjectURL(url); $("cam-dev").hidden=true; toast("这张照片读不出来，这一格没有用掉。"); };
   img.src=url;
@@ -921,12 +862,12 @@ function saveErr(e){
   if(c==="unavailable"||c==="not_granted") return "这里不能保存文件，要在 Claude 里打开。";
   return "保存失败（"+(c||"未知")+"）。";
 }
-$("dev-strip").onclick=async function(){
+async function developStrip(){
   if(!rollFull()) return;
   try{ if(document.fonts && document.fonts.load) await document.fonts.load('22px "VT323"'); }catch(err){}
   var cv=buildStrip(F.frames,F.size,F.loaded,F.tint);
   saveCanvas(cv,"lopda-film-"+fileStamp(F.loaded)+"-"+F.size+"exp.png").then(function(r){ if(r&&r.status==="saved") sfx("ok"), toast("冲洗好了。想要单张就放进「裁片机」。"); },function(e){ toast(saveErr(e)); });
-};
+}
 
 /* ---- the 3:4 contact-sheet card: a whole roll laid out on photo paper, sized for sharing ---- */
 var CARD={W:1080, H:1440, PAPER:[241,236,225], INK:"#2b2a26", SOFT:"#8a857a"};
@@ -989,49 +930,29 @@ function buildCard(frames,size,loaded,tintId){
   }
   return c;
 }
-$("dev-card").onclick=function(){
-  if(!rollFull()) return;
-  var btn=this; btn.disabled=true;
+function developCard(){
+  if(!rollFull() || CAM.busy) return;
+  CAM.busy=true;
   fontsReady().then(function(){
     var cv=buildCard(F.frames,F.size,F.loaded,F.tint);
     return saveCanvas(cv,"lopda-card-"+fileStamp(F.loaded)+"-"+F.tint+".png");
   }).then(function(r){ if(r&&r.status==="saved"){ sfx("ok"); toast("印样卡冲印好了。"); } },function(e){ toast(saveErr(e)); })
-    .then(function(){ btn.disabled=false; });
-};
+    .then(function(){ CAM.busy=false; });
+}
 
-/* taking the roll out clears it from the handheld; ask on the panel itself */
-function armNewRoll(){
-  var w=$("cam-new-wrap"); w.textContent="";
-  var p=document.createElement("span"); p.className="hint"; p.textContent="旧胶卷会从掌机里清掉。没冲洗的话就没了。";
-  var yes=document.createElement("button"); yes.className="btn"; yes.type="button"; yes.textContent="确认取出";
-  var no=document.createElement("button"); no.className="btn ghost"; no.type="button"; no.textContent="再想想";
-  w.appendChild(p); w.appendChild(yes); w.appendChild(no);
-  no.onclick=resetNewRoll;
-  yes.onclick=function(){
-    var old=F.frames.slice(), oldRoll=F.roll;
-    F.roll=null; F.frames=[]; F.viewing=null;
-    if(S.db){
-      S.refs.film.delete().catch(function(){});
-      old.reduce(function(pr,fr){ return pr.then(function(){ return S.refs.frames.doc(oldRoll+"-"+pad2(fr.n)).delete().catch(function(){}); }); },Promise.resolve());
-    }
-    stopLive(); resetNewRoll(); camIdle(); renderCam();
-  };
+/* taking the roll out clears it from the handheld */
+function removeRoll(){
+  var old=F.frames.slice(), oldRoll=F.roll;
+  F.roll=null; F.frames=[];
+  if(S.db){
+    S.refs.film.delete().catch(function(){});
+    old.reduce(function(pr,fr){ return pr.then(function(){ return S.refs.frames.doc(oldRoll+"-"+pad2(fr.n)).delete().catch(function(){}); }); },Promise.resolve());
+  }
+  stopLive(); camIdle(); camSheet(null); renderCam();
 }
-function resetNewRoll(){
-  var w=$("cam-new-wrap"); w.textContent="";
-  var b=document.createElement("button"); b.className="btn ghost"; b.type="button"; b.id="cam-new"; b.textContent="取出胶卷，装新的";
-  b.onclick=armNewRoll; w.appendChild(b);
-}
-resetNewRoll();
 
 /* rewind early: the unshot frames get fogged and develop white */
-$("cam-rewind-btn").onclick=function(){
-  var left=F.size-F.frames.length; if(!F.roll || left<=0) return;
-  $("rewind-title").textContent="还有 "+left+" 张没拍。";
-  $("cam-rewind").hidden=false; renderCam();
-};
-$("rewind-cancel").onclick=function(){ $("cam-rewind").hidden=true; renderCam(); };
-$("rewind-go").onclick=function(){
+function rewindEarly(){
   if(!F.roll || rollFull()) return;
   var fill=new Array(CW*CH+1).join("3"), now=Date.now(), writes=[];
   for(var n=F.frames.length+1;n<=F.size;n++){
@@ -1039,17 +960,18 @@ $("rewind-go").onclick=function(){
     F.frames.push(fr);
     if(S.db) writes.push([S.refs.frames.doc(F.roll+"-"+pad2(n)),fr]);
   }
-  $("cam-rewind").hidden=true; F.viewing=null; camIdle(); renderCam();
-  toast("倒片完成，剩下的格子见光了。"); stopLive();
+  stopLive(); camIdle(); camSheet(null);
+  for(var k=0;k<6;k++) setTimeout(function(){ sfx("tick"); },k*70);
+  toast("倒片完成，剩下的格子见光了。"); renderCam();
   writes.reduce(function(pr,w){ return pr.then(function(){ return put(w[0],w[1]); }); },Promise.resolve());
-};
+}
 
 function loadFilm(){
   if(!S.db){ F.ready=true; renderCam(); return Promise.resolve(); }
   return S.refs.film.get().then(function(sn){
     var d=sn.exists?own(sn.data()):null;
     if(!d || !d.roll){ F.roll=null; F.frames=[]; F.ready=true; return; }
-    F.roll=d.roll; F.size=Math.min(d.size||12,16); F.loaded=d.loaded||Date.now(); F.exposure=d.exposure|0; F.date=d.date!==false; F.tint=TINTS[d.tint]?d.tint:"lcd"; setRes(d.res||1);
+    F.roll=d.roll; F.size=Math.min(d.size||12,16); F.loaded=d.loaded||Date.now(); F.exposure=d.exposure|0; F.contrast=d.contrast|0; F.date=d.date!==false; F.tint=TINTS[d.tint]?d.tint:"lcd"; setRes(d.res||1);
     return S.refs.frames.where("roll","==",F.roll).get().then(function(q){
       var list=q.docs.map(function(x){ return own(x.data()); }).filter(function(fr){ return fr && fr.px && fr.px.length===CW*CH; });
       list.sort(function(a,b){ return a.n-b.n; });
@@ -1088,12 +1010,170 @@ function camBoot(){
   })();
 }
 function openCam(){
-  /* the camera always opens ready to shoot, never in the middle of a review */
-  F.viewing=null;
-  show("cam"); renderCam(); camIdle();
+  CAM.mode=null; camSheet(null);
+  show("cam"); showPad(true); renderCam(); camIdle();
   var go=function(){ camBoot(); renderCam(); startLive(); };
   if(F.ready) go(); else loadFilm().then(go);
 }
+
+/* ---- camera controls: the screen is one fixed panel; the back opens for rolls and menus.
+   Chin buttons, after the Game Boy Camera: A shutter, up/down brightness, left/right contrast,
+   START body menu, SELECT turn the lens around. The key strip on screen does the same by touch. ---- */
+var CAM={mode:null, menu:null, sel:0, busy:false, roll:0};
+function camSheet(name){
+  CAM.mode=name;
+  $("cam-load").hidden=name!=="load";
+  $("cam-menu").hidden=name!=="menu";
+  if(name) stopLive();
+  if(name==="load") buildRolls();
+}
+function camMenu(kind){
+  var left=F.size-F.frames.length, M;
+  if(kind==="body") M={title:"机身菜单", note:"", back:function(){ camSheet(null); renderCam(); startLive(); }, items:[
+    {label:"日期", value:function(){ return F.date?"开":"关"; }, pick:function(){ toggleDate(); }},
+    {label:"换镜头", value:function(){ return LIVE.facing==="user"?"前":"后"; }, pick:function(){ LIVE.facing = LIVE.facing==="environment" ? "user" : "environment"; }},
+    {label:"提前倒片", value:function(){ return left+" 张未拍"; }, pick:function(){ camMenu("rewind"); }},
+    {label:"回到取景", pick:function(){ M.back(); }}
+  ]};
+  else if(kind==="rewind") M={title:"提前倒片", note:"还有 "+left+" 张没拍。倒片时剩下的胶片会见光，冲出来是一片白。倒片后这卷就拍完了。", back:function(){ camMenu("body"); }, items:[
+    {label:"确认倒片", pick:function(){ rewindEarly(); }},
+    {label:"取消", pick:function(){ camMenu("body"); }}
+  ]};
+  else if(kind==="develop") M={title:"这卷拍完了", note:"冲洗之后才看得到拍了什么。长条是一整条胶片；印样卡把整卷印在一张 3:4 相纸上。", back:null, items:[
+    {label:"冲洗成长条", pick:function(){ developStrip(); }},
+    {label:"印样卡 3:4", pick:function(){ developCard(); }},
+    {label:"取出胶卷，装新的", pick:function(){ camMenu("remove"); }}
+  ]};
+  else if(kind==="remove") M={title:"取出胶卷", note:"旧胶卷会从掌机里清掉。没冲洗的话就没了。", back:function(){ camMenu("develop"); }, items:[
+    {label:"确认取出", pick:function(){ removeRoll(); }},
+    {label:"再想想", pick:function(){ camMenu("develop"); }}
+  ]};
+  CAM.menu=M; CAM.sel=0; camSheet("menu"); drawMenu();
+}
+function drawMenu(){
+  var M=CAM.menu; $("menu-title").textContent=M.title; $("menu-note").textContent=M.note;
+  var ul=$("menu-list"); ul.textContent="";
+  M.items.forEach(function(it,i){
+    var li=document.createElement("li"); li.className=i===CAM.sel?"on":"";
+    li.appendChild(document.createTextNode(it.label));
+    if(it.value){ var v=document.createElement("small"); v.textContent=it.value(); li.appendChild(v); }
+    li.onclick=function(){ CAM.sel=i; drawMenu(); menuPick(); };
+    ul.appendChild(li);
+  });
+  document.querySelector("#cam-menu .menu-keys").textContent="▲▼ 选择 · A 确定"+(M.back?" · B 返回":"");
+}
+function menuPick(){ var it=CAM.menu.items[CAM.sel]; sfx("tap"); it.pick(); if(CAM.mode==="menu" && CAM.menu && CAM.menu.items.indexOf(it)>=0) drawMenu(); }
+
+/* the roll picker: canisters on a shelf, slide them sideways */
+var ROLL_PATTERN={
+  lcd:   function(x,y){ return y%6===0 ? 3 : 1; },
+  sepia: function(x,y){ return (x+y)%6<3 ? 1 : 2; },
+  sakura:function(x,y){ var a=x%8, b=y%8; return (a===3&&b===3)||(a===2&&b===3)||(a===4&&b===3)||(a===3&&b===2)||(a===3&&b===4) ? 0 : (a===3&&b===3)?3:2; },
+  cyano: function(x,y){ return (y+Math.round(Math.sin(x/2)*1.5))%5===0 ? 3 : 1; },
+  mono:  function(x,y){ return ((x>>1)+(y>>1))%2 ? 0 : 2; }
+};
+function drawCanister(cv,id){
+  var W=48,H=64, x=cv.getContext("2d"), img=x.createImageData(W,H), d=img.data, px=new Uint8Array(W*H).fill(255);
+  var put=function(X,Y,t){ if(X>=0&&Y>=0&&X<W&&Y<H) px[Y*W+X]=t; };
+  var rect=function(x0,y0,w,h,t){ for(var Y=y0;Y<y0+h;Y++) for(var X=x0;X<x0+w;X++) put(X,Y,t); };
+  rect(19,0,10,6,0); rect(21,1,6,4,2);                 /* spool knob */
+  rect(7,6,34,5,0); rect(8,7,32,3,1);                  /* top cap */
+  rect(8,11,32,44,0); rect(9,11,30,44,2);              /* body */
+  rect(9,15,30,36,3);                                  /* label */
+  for(var Y=17;Y<33;Y++) for(var X=10;X<38;X++) put(X,Y,ROLL_PATTERN[id](X,Y));
+  rect(10,35,28,2,0); rect(10,39,18,2,1); rect(10,43,22,2,1); rect(10,47,12,2,1);   /* printed lines */
+  rect(40,30,8,16,0); for(var k=0;k<3;k++) rect(42,32+k*5,3,3,2);                   /* film tongue */
+  rect(7,55,34,5,0); rect(8,56,32,3,1);                /* bottom cap */
+  rect(21,60,6,4,0);
+  for(var i=0;i<W*H;i++){ var o=i*4; if(px[i]===255){ d[o+3]=0; continue; } var t=TONES[px[i]]; d[o]=t[0]; d[o+1]=t[1]; d[o+2]=t[2]; d[o+3]=255; }
+  x.putImageData(img,0,0);
+}
+function buildRolls(){
+  var box=$("rolls");
+  if(!box.children.length){
+    TINT_ORDER.forEach(function(id,i){
+      var b=document.createElement("button"); b.type="button"; b.className="roll"; b.setAttribute("data-tint",id);
+      var cv=document.createElement("canvas"); cv.width=48; cv.height=64; drawCanister(cv,id);
+      var lab=document.createElement("span"); lab.className="lab";
+      b.appendChild(cv); b.appendChild(lab);
+      b.onclick=function(){ if(CAM.roll===i) return; pickRoll(i,true); };
+      box.appendChild(b);
+    });
+    var t=null;
+    box.addEventListener("scroll",function(){
+      clearTimeout(t); t=setTimeout(function(){
+        var mid=box.scrollLeft+box.clientWidth/2, best=0, bd=1e9;
+        Array.prototype.forEach.call(box.children,function(c,i){ var cx=c.offsetLeft+c.offsetWidth/2, dd=Math.abs(cx-mid); if(dd<bd){ bd=dd; best=i; } });
+        if(best!==CAM.roll){ CAM.roll=best; sfx("move"); paintRolls(); }
+      },90);
+    });
+  }
+  CAM.roll=Math.max(0,TINT_ORDER.indexOf(nextTint));
+  paintRolls();
+  requestAnimationFrame(function(){ pickRoll(CAM.roll,false); });
+}
+function pickRoll(i,smooth){
+  var box=$("rolls"), c=box.children[i]; if(!c) return;
+  CAM.roll=i; paintRolls();
+  box.scrollTo({left:c.offsetLeft+c.offsetWidth/2-box.clientWidth/2, behavior:smooth?"smooth":"auto"});
+}
+function paintRolls(){
+  nextTint=TINT_ORDER[CAM.roll];
+  Array.prototype.forEach.call($("rolls").children,function(c,i){
+    var id=c.getAttribute("data-tint"), t=TINTS[id];
+    c.className="roll"+(i===CAM.roll?" on":"");
+    c.querySelector(".lab").innerHTML="";
+    c.querySelector(".lab").appendChild(document.createTextNode(t.en));
+    var sm=document.createElement("small"); sm.textContent=t.name+" · "+nextSize+" 张"+(nextStock===2?" · 细":""); c.querySelector(".lab").appendChild(sm);
+  });
+  $("roll-count").lastChild.textContent=nextSize+" 张";
+  $("roll-stock").lastChild.textContent=stockName(nextStock);
+  $("roll-note").textContent=(nextStock===2?"细颗粒 256×224，能看清人脸。":"标准片 128×112，颗粒粗，复古味重。")+" 冲洗出来是「"+tintOf(nextTint).name+"」色调，屏幕上永远是绿的。";
+}
+function rollSize(step){ var S3=[8,12,16], i=S3.indexOf(nextSize); nextSize=S3[(i+step+3)%3]; sfx("tick"); paintRolls(); }
+function rollStock(){ nextStock=nextStock===2?1:2; sfx("tick"); paintRolls(); }
+$("roll-count").onclick=function(){ rollSize(1); };
+$("roll-stock").onclick=function(){ rollStock(); };
+$("roll-prev").onclick=function(){ pickRoll(Math.max(0,CAM.roll-1),true); };
+$("roll-next").onclick=function(){ pickRoll(Math.min(TINT_ORDER.length-1,CAM.roll+1),true); };
+$("roll-go").onclick=function(){ if(CAM.mode==="load") loadRoll(); };
+
+function camButton(b,down){
+  var boot=$("cam-boot");
+  if(!boot.hidden){ if(down && (b==="a"||b==="b"||b==="start") && boot.onclick) boot.onclick(); return; }
+  /* actions that open the share sheet or the system camera wait for the release: phones only
+     count a finger lifting as permission to open those */
+  if(CAM.mode==="menu"){
+    if(!down){ if(b==="a") menuPick(); return; }
+    var n=CAM.menu.items.length;
+    if(b==="up"||b==="down"){ CAM.sel=(CAM.sel+(b==="down"?1:n-1))%n; sfx("move"); drawMenu(); }
+    else if(b==="b" && CAM.menu.back){ sfx("miss"); CAM.menu.back(); }
+    return;
+  }
+  if(CAM.mode==="load"){
+    if(!down) return;
+    if(b==="left") pickRoll(Math.max(0,CAM.roll-1),true);
+    else if(b==="right") pickRoll(Math.min(TINT_ORDER.length-1,CAM.roll+1),true);
+    else if(b==="up") rollSize(1); else if(b==="down") rollSize(-1);
+    else if(b==="select") rollStock();
+    else if(b==="a"||b==="start") loadRoll();
+    return;
+  }
+  if(!F.roll || rollFull()) return;
+  if(b==="a"){ if(down===LIVE.on) shoot(); return; }   /* live: on press; system camera: on release */
+  if(!down) return;
+  if(b==="up") setExposure(F.exposure+1); else if(b==="down") setExposure(F.exposure-1);
+  else if(b==="right") setContrast(F.contrast+1); else if(b==="left") setContrast(F.contrast-1);
+  else if(b==="start"){ sfx("tap"); camMenu("body"); }
+  else if(b==="select") flipLens();
+}
+function camLayout(){
+  var box=$("finder-box"), f=$("finder"); if($("v-cam").hidden || !box.clientWidth) return;
+  var w=box.clientWidth-16, h=box.clientHeight-16, k=Math.min(w/128,h/112);
+  f.style.width=Math.floor(128*k)+"px"; f.style.height=Math.floor(112*k)+"px";
+}
+if(window.ResizeObserver) new ResizeObserver(function(){ camLayout(); }).observe($("finder-box"));
+window.addEventListener("resize",camLayout);
 
 /* ---------- 裁片机: slide the strip under a fixed window and cut what's inside ---------- */
 var CUT={W:0, n:0, data:null, s:1, k:1, mode:"narrow", count:0, name:"lopda", tint:"lcd", pal:TINTS.lcd.tones};
@@ -1258,6 +1338,7 @@ function setButton(b,down){
   var arm=document.querySelector(".dpad ."+({up:"u",down:"d",left:"l",right:"r"}[b]||"x")); if(arm) arm.classList.toggle("on",down);
   if(down && navigator.vibrate) try{ navigator.vibrate(6); }catch(e){}
   if(GB.e){ gbJoy(b,down); return; }
+  if(!$("v-cam").hidden){ camButton(b,down); return; }
   var f=$("run-frame");
   if(S.running && S.running.buttons && f.contentWindow) f.contentWindow.postMessage({pad:1,op:"button",b:b,down:down},"*");
 }
@@ -1266,6 +1347,7 @@ function showPad(on){
   if(!on) releaseButtons();
   $("gamepad").hidden=!on;
   if(!$("v-cart").hidden) cartLayout();
+  if(!$("v-cam").hidden) camLayout();
 }
 Array.prototype.forEach.call(document.querySelectorAll(".gamepad .pk"),function(el){
   var b=el.getAttribute("data-b");
