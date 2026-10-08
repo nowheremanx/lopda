@@ -1,0 +1,8 @@
+node_modules/
+.DS_Store
+*.log
+
+# game ROMs never go in this repo
+*.gb
+*.gbc
+*.sav

@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#262925">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Lo-PDA">
+<title>Lo-PDA</title>
+<!-- Lo-PDA. Copyright (c) 2026 Haowei Wu. PolyForm Noncommercial 1.0.0; see LICENSE and NOTICE. -->
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DotGothic16&family=VT323&display=swap">
+<link rel="stylesheet" href="lopda.css">
+</head>
+<body>
+<div class="device">
+  <div class="brand"><b>LO-PDA</b><span>MODEL LP-86 · 4 TONE LCD</span></div>
+  <div class="screen" id="screen">
+    <div class="status">
+      <span id="clock">--:--</span>
+      <span class="save" id="savestate">启动中…</span>
+      <span class="save" aria-hidden="true">LP-86</span>
+    </div>
+
+    <!-- HOME -->
+    <section class="view" id="v-home">
+      <div class="home" id="home"></div>
+    </section>
+
+    <!-- STORE -->
+    <section class="view" id="v-store" hidden>
+      <div class="bar"><h2>应用商店</h2><span class="hint" id="store-state"></span><button class="btn ghost" id="store-refresh" type="button">刷新</button></div>
+      <ul class="store-list" id="store-list"></ul>
+      <p class="hint store-note">每个程序都经过社区审核，在隔离的沙盒里运行，不能联网，也碰不到你的其他数据。装好的版本不会自己变，有新版本时这里会提示更新。</p>
+    </section>
+
+    <!-- SETTINGS -->
+    <section class="view" id="v-settings" hidden>
+      <div class="bar"><h2>设置</h2></div>
+      <div class="settings">
+        <div class="set-row">
+          <span>音效</span>
+          <button class="btn ghost" id="set-sound" type="button" aria-pressed="true">开</button>
+        </div>
+        <div class="set-row">
+          <span>音量</span>
+          <div class="row">
+            <button class="btn ghost" id="set-vol-down" type="button" aria-label="调小音量">−</button>
+            <span class="vol" id="set-vol" aria-live="polite">▮▮▯</span>
+            <button class="btn ghost" id="set-vol-up" type="button" aria-label="调大音量">+</button>
+          </div>
+        </div>
+        <p class="hint">手机静音时不出声，也不会打断正在播放的音乐。</p>
+        <div class="set-row">
+          <span id="upd-label">系统版本</span>
+          <button class="btn ghost" id="set-update" type="button">检查更新</button>
+        </div>
+        <p class="hint" id="upd-note">新版本下载好以后按「重启升级」。存档、胶卷和卡带都不受影响。</p>
+        <div class="about">
+          <b>关于</b>
+          <span id="set-version">Lo-PDA</span>
+          <span id="set-storage">本机存档：计算中…</span>
+          <span>PolyForm Noncommercial 1.0.0 · 非商用</span>
+          <span>Required Notice: Copyright (c) 2026 Haowei Wu</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- NOTES LIST -->
+    <section class="view" id="v-notes" hidden>
+      <div class="bar"><h2>记事本</h2><button class="btn" id="note-new" type="button">新建</button></div>
+      <ul class="notes-list" id="notes-list"></ul>
+    </section>
+
+    <!-- NOTE EDITOR -->
+    <section class="view" id="v-note" hidden>
+      <div class="editor">
+        <div class="bar">
+          <button class="btn ghost" id="note-back" type="button">◂ 列表</button>
+          <h2 id="note-state">已保存</h2>
+          <div class="confirm" id="note-del-wrap"><button class="btn ghost" id="note-del" type="button">删除</button></div>
+        </div>
+        <textarea id="note-body" placeholder="写点什么。自动保存。"></textarea>
+      </div>
+    </section>
+
+    <!-- CAMERA -->
+    <section class="view" id="v-cam" hidden style="position:relative">
+      <div class="link-boot" id="cam-boot" hidden role="status" aria-live="polite"></div>
+      <div class="bar"><h2 id="cam-title">点阵相机 · 128×112</h2><span class="hint" id="cam-count"></span></div>
+      <div class="cam">
+        <div class="finder">
+          <canvas id="cam-cv" width="128" height="112" aria-label="取景器"></canvas>
+          <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+          <span class="stamp" id="cam-stamp" hidden></span>
+          <div class="dev" id="cam-dev" hidden>接收影像…</div>
+          <span class="live-tag" id="cam-live-tag" hidden>LIVE</span>
+          <video id="cam-video" playsinline muted autoplay hidden></video>
+        </div>
+
+        <div class="panel" id="cam-load" hidden>
+          <p>机身里没有胶卷。选色调、颗粒和张数：</p>
+          <div class="row tints" role="radiogroup" aria-label="胶片色调" id="tint-row"></div>
+          <p class="hint" id="tint-note">屏幕永远是绿的，颜色要冲洗出来才看得到。</p>
+          <div class="row" role="radiogroup" aria-label="胶片型号">
+            <button class="btn" type="button" role="radio" aria-checked="true" data-stock="1">标准片 · 128</button>
+            <button class="btn ghost" type="button" role="radio" aria-checked="false" data-stock="2">细颗粒 · 256</button>
+          </div>
+          <p class="hint" id="stock-note">标准片颗粒粗，复古味重；细颗粒能看清人脸。</p>
+          <div class="row">
+            <button class="btn ghost" type="button" data-roll="8">8 张</button>
+            <button class="btn" type="button" data-roll="12">12 张</button>
+            <button class="btn ghost" type="button" data-roll="16">16 张</button>
+          </div>
+          <p class="hint">拍下的每一张都不能删、不能改。整卷拍完才能冲洗。</p>
+        </div>
+
+        <div id="cam-shoot" hidden style="display:flex;flex-direction:column;align-items:center;gap:8px">
+          <div class="cam-row">
+            <button class="btn ghost" id="cam-dark" type="button" aria-label="调暗">暗 −</button>
+            <input class="file-in" type="file" id="cam-file" accept="image/*" capture="environment">
+            <button class="shutter" id="cam-shutter" type="button" aria-label="拍照">拍</button>
+            <button class="btn ghost" id="cam-bright" type="button" aria-label="调亮">亮 +</button>
+          </div>
+          <div class="cam-row"><span class="hint" id="cam-exp">曝光 0 · 对下一张生效</span><button class="btn ghost" id="cam-date" type="button">日期 · 开</button></div>
+          <div class="cam-row"><button class="btn ghost" id="cam-flip" type="button" hidden>换镜头</button><button class="btn ghost" id="cam-rewind-btn" type="button">提前倒片</button></div>
+          <span class="hint" id="cam-mode"></span>
+        </div>
+
+        <div class="panel" id="cam-rewind" hidden>
+          <p id="rewind-title">还有几张没拍。</p>
+          <p class="hint">倒片时剩下的胶片会见光，冲出来是一片白。倒片后这卷就拍完了，不能再拍。</p>
+          <div class="row">
+            <button class="btn" id="rewind-go" type="button">确认倒片</button>
+            <button class="btn ghost" id="rewind-cancel" type="button">取消</button>
+          </div>
+        </div>
+
+        <div class="panel" id="cam-develop" hidden>
+          <p id="dev-title">这卷拍完了，可以冲洗。</p>
+          <div class="row">
+            <button class="btn" id="dev-strip" type="button">冲洗成长条</button>
+            <button class="btn" id="dev-card" type="button">印样卡 3:4</button>
+          </div>
+          <p class="hint">长条是一整条横向胶片；印样卡把整卷排在一张 3:4 相纸上，适合直接发出去。想要单张，就把长条放进「裁片机」自己裁。</p>
+          <div class="row" id="cam-new-wrap"><button class="btn ghost" id="cam-new" type="button">取出胶卷，装新的</button></div>
+        </div>
+
+        <div class="album" id="album"></div>
+      </div>
+    </section>
+
+    <!-- CUTTER -->
+    <section class="view" id="v-cut" hidden>
+      <div class="bar"><h2>裁片机</h2><span class="hint" id="cut-state"></span></div>
+      <div class="cam">
+        <div class="cutbox" id="cut-box">
+          <div class="cut-empty" id="cut-empty">放入一条冲洗好的胶片</div>
+          <div class="cut-scroll" id="cut-scroll" hidden><span class="spacer" id="cut-sp1"></span><canvas id="cut-cv" width="1" height="1" aria-label="胶片"></canvas><span class="spacer" id="cut-sp2"></span></div>
+          <div class="cut-window" id="cut-window" hidden><i class="a"></i><i class="b"></i><i class="c"></i><i class="d"></i></div>
+        </div>
+        <div class="cam-row">
+          <input class="file-in" type="file" id="cut-file" accept="image/png,image/*">
+          <label class="btn ghost" for="cut-file">放入长条</label>
+          <button class="btn ghost" id="cut-left" type="button" aria-label="往左挪一点">◀</button>
+          <button class="shutter" id="cut-go" type="button" aria-label="裁下框里的部分" disabled>裁</button>
+          <button class="btn ghost" id="cut-right" type="button" aria-label="往右挪一点">▶</button>
+        </div>
+        <div class="cam-row" role="radiogroup" aria-label="片框大小">
+          <button class="btn" type="button" role="radio" aria-checked="true" data-win="narrow">窄框 · 只裁画面</button>
+          <button class="btn ghost" type="button" role="radio" aria-checked="false" data-win="wide">宽框 · 连齿孔一起</button>
+        </div>
+        <div class="cam-row">
+          <button class="btn ghost" id="cut-edge" type="button">相纸边 · 无</button>
+          <span class="hint" id="cut-edge-note">裁下来直接是胶片画面。</span>
+        </div>
+        <p class="hint" id="cut-hint">左右滑动胶片，把想要的部分对进四个角标里，按「裁」。可以跨在两张中间。</p>
+      </div>
+    </section>
+
+    <!-- PAINT -->
+    <section class="view" id="v-paint" hidden>
+      <div class="paint">
+        <div class="bar"><h2>点阵画板</h2><span class="hint" id="paint-state">96×96 · 4 色</span></div>
+        <div class="paint-stage"><canvas id="paint-cv" width="96" height="96" aria-label="画布"></canvas></div>
+        <div class="paint-tools">
+          <div class="row" role="radiogroup" aria-label="颜色">
+            <button class="sw sw-0" type="button" role="radio" aria-checked="true" data-c="0" aria-label="墨"></button>
+            <button class="sw sw-1" type="button" role="radio" aria-checked="false" data-c="1" aria-label="深"></button>
+            <button class="sw sw-2" type="button" role="radio" aria-checked="false" data-c="2" aria-label="浅"></button>
+            <button class="sw sw-3" type="button" role="radio" aria-checked="false" data-c="3" aria-label="底色（橡皮）"></button>
+          </div>
+          <button class="btn ghost" id="paint-size" type="button" aria-label="笔刷粗细">笔 · 细</button>
+          <button class="btn ghost" id="paint-undo" type="button">撤销</button>
+        </div>
+        <div class="paint-tools">
+          <input class="file-in" type="file" id="paint-file" accept="image/*">
+          <label class="btn ghost" for="paint-file">导入图片</label>
+          <button class="btn" id="paint-export" type="button">导出 PNG</button>
+          <span class="confirm" id="paint-clear-wrap"><button class="btn ghost" id="paint-clear" type="button">清空</button></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- CARTRIDGE PLAYER -->
+    <section class="view" id="v-cart" hidden>
+      <div class="bar">
+        <h2 id="cart-title">卡带机</h2>
+        <span class="hint" id="cart-state"></span>
+        <span class="row" id="cart-tools" hidden>
+          <button class="btn ghost" id="cart-save" type="button">存档</button>
+          <button class="btn ghost" id="cart-load" type="button">读档</button>
+          <button class="btn ghost" id="cart-eject" type="button">退卡</button>
+        </span>
+      </div>
+      <div class="cart-lib" id="cart-lib">
+        <ul class="store-list" id="cart-list"></ul>
+        <div class="cam-row">
+          <input class="file-in" type="file" id="cart-file">
+          <label class="btn" for="cart-file">插入卡带 · .gb 文件</label>
+        </div>
+        <p class="hint store-note">只认黑白 GB 卡带。卡带要你自己准备：从自己的卡带导出的，或者作者公开发布的自制游戏。这台机器不附带任何游戏。游戏里的进度会自动存进卡带；「存档」是另存一份即时存档，只有一个位置。</p>
+      </div>
+      <div class="cart-play" id="cart-play" hidden>
+        <canvas id="cart-cv" width="160" height="144" aria-label="卡带画面"></canvas>
+        <p class="hint" id="cart-msg">键盘：方向键 · X=A · Z=B · 回车=START · Shift=SELECT</p>
+      </div>
+    </section>
+
+    <!-- RUNNER -->
+    <section class="view" id="v-run" hidden>
+      <div class="runner">
+        <div class="bar">
+          <button class="btn ghost" id="run-back" type="button">◂</button>
+          <h2 id="run-title">程序</h2>
+          <div class="confirm" id="run-del-wrap"><button class="btn ghost" id="run-del" type="button">卸载</button></div>
+        </div>
+        <iframe id="run-frame" sandbox="allow-scripts" title="运行中的程序"></iframe>
+        <div class="err" id="run-err" hidden>
+          <span>程序出错了：</span>
+          <code id="run-err-msg"></code>
+          <div class="row"><button class="btn ghost" id="run-err-close" type="button">收起</button></div>
+        </div>
+      </div>
+    </section>
+
+    <div class="toast" id="toast" hidden></div>
+  </div>
+  <div class="gamepad" id="gamepad" hidden>
+    <div class="dpad" id="dpad" role="group" aria-label="方向键"><i class="u"></i><i class="r"></i><i class="d"></i><i class="l"></i><b></b></div>
+    <div class="pad-mid">
+      <button class="pk pill" type="button" data-b="select">SELECT</button>
+      <button class="pk pill" type="button" data-b="start">START</button>
+    </div>
+    <div class="pad-ab">
+      <button class="pk round" type="button" data-b="b">B</button>
+      <button class="pk round" type="button" data-b="a">A</button>
+    </div>
+  </div>
+  <div class="keys">
+    <div class="grille" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    <button class="home-key" id="home-key" type="button">HOME</button>
+    <div class="grille" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+  </div>
+</div>
+
+<script src="../sdk/pad-shim.js"></script>
+<script src="platform.js"></script>
+<script src="lopda.js"></script>
+</body>
+</html>

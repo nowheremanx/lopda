@@ -1,0 +1,12 @@
+{
+  "spec": "lopda/1",
+  "id": "my-app",
+  "name": "计数器",
+  "glyph": "计",
+  "version": "0.1.0",
+  "description": "点一下或按 A 加一，数字会记住。改成你自己的 app。",
+  "author": "your-name",
+  "license": "MIT",
+  "permissions": [],
+  "buttons": true
+}
