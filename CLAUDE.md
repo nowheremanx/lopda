@@ -100,4 +100,8 @@ node --test                                  # the test suite; must pass
   Settings → 检查更新 compares them.
 - Design rule: a change should remove a decision from the user, or at least not add one.
   Prefer realism (how the real device or film behaves) over convenience.
-- Commits: end messages with the Co-Authored-By line the session asks for. The owner pushes.
+- Commits: end messages with the Co-Authored-By line the session asks for. Never push to `main`: work on a branch,
+  the owner merges PRs. Cloud sessions push their own branch and open a PR; local sessions commit and leave pushing to the owner.
+- Accounts: never create anything on the owner's accounts outside this repo's branches and PRs (no gists, repositories,
+  issues or comments elsewhere) and never upload files to third-party hosts. If something can't be attached
+  (screenshots, GIFs), say so in the PR description and keep the files out of the repo.
