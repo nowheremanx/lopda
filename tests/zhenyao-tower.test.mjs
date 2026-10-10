@@ -1,7 +1,7 @@
 // registry/apps/zhenyao-tower: the town data the game and the 3D builder both rely on.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { runScript } from "./helpers.mjs";
+import { runScript, read } from "./helpers.mjs";
 
 const { TOWN } = runScript("registry/apps/zhenyao-tower/src/town.js");
 const at = (x, y) => TOWN.map[y] && TOWN.map[y][x];
@@ -25,4 +25,11 @@ test("the hero, the people and the signs stand on walkable tiles", () => {
 test("every line fits the screen: about 13 characters", () => {
   const lines = [...TOWN.people, ...TOWN.things].flatMap((p) => p.say).flatMap((s) => s.split("\n"));
   for (const l of lines) assert.ok(Array.from(l).length <= 13, l);
+});
+
+test("the title menu offers only the town and 演武; the route fights stay off screen", () => {
+  const main = read("registry/apps/zhenyao-tower/src/main.js");
+  const menus = [...main.matchAll(/game\.choose\((\[[^\]]*\])/g)].map((m) => JSON.parse(m[1]));
+  assert.deepEqual(menus, [["进入小镇", "演武"]]);
+  assert.doesNotMatch(main, /game\.scene\("trial"/);
 });

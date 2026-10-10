@@ -16,6 +16,7 @@ function toggles() { if (game.pressed("select")) perf.show = !perf.show; }
 
 /* ---------- title ---------- */
 game.scene("title", {
+  enter: function () { busy = false; },
   draw: function (g) {
     var a = game.time * 0.12, T = town.def.tower;
     frame(g, { x: T.x, y: 4, z: -T.y, yaw: a, pitch: -0.22, dist: 17, time: game.time }, []);
@@ -26,9 +27,42 @@ game.scene("title", {
   },
   update: function () {
     toggles();
-    if (game.ok()) { game.sfx("ok"); game.go("town", { intro: true }, { to: LoGame.INK }); }
+    if (busy || !game.ok()) return;
+    game.sfx("ok");
+    busy = true;
+    game.choose(["进入小镇", "演武"], { y: 80 }).then(function (i) {
+      busy = false;
+      if (i === 0) game.go("town", { intro: true }, { to: LoGame.INK });
+      if (i === 1) game.go("battle", { ids: ["golem", "wraith", "bronze"], area: "top", hero: galleryHero(), demo: true, back: "title", from: new Uint8Array(R.image.px) }, { fade: false });
+    });
   }
 });
+
+/* ---------- 演武: every spell against practice dummies that never strike back ----------
+   A showcase for players who only want to watch the effects; it stays in the finished game. */
+function galleryHero() { var h = Rules.newHero(10); h.mp = 999; return h; }
+
+/* For tests only, never on screen (the fight list would spoil the route): ZT.fight(part, k) starts fight k of
+   BATTLE.ROUTE[part] with the hero a player would have there, every earlier fight won and item found. */
+var ZT = {
+  heroAt: function (p, k) {
+    var h = Rules.newHero(1), xp = 0;
+    BATTLE.ROUTE.forEach(function (part, pi) {
+      if (pi > p) return;
+      Object.keys(part.found).forEach(function (id) { h.items[id] = (h.items[id] || 0) + part.found[id]; });
+      part.fights.forEach(function (ids, fi) {
+        if (pi < p || fi < k) ids.forEach(function (id) { xp += BATTLE.ENEMIES[id].xp; });
+      });
+    });
+    h.xp = xp; h.level = Rules.levelFor(xp);
+    Rules.rest(h);
+    return h;
+  },
+  fight: function (p, k) {
+    var part = BATTLE.ROUTE[p];
+    game.go("battle", { ids: part.fights[k], area: part.area, hero: ZT.heroAt(p, k), back: "title", from: new Uint8Array(R.image.px) }, { fade: false });
+  }
+};
 
 /* ---------- town ---------- */
 var DIRS = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
@@ -119,4 +153,5 @@ game.scene("town", {
   }
 });
 
+game.scene("battle", Battle.scene);
 game.start("title");
