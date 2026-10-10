@@ -30,61 +30,39 @@ game.scene("title", {
     if (busy || !game.ok()) return;
     game.sfx("ok");
     busy = true;
-    game.choose(["进入小镇", "斗法"], { y: 80 }).then(function (i) {
+    game.choose(["进入小镇", "演武"], { y: 80 }).then(function (i) {
       busy = false;
       if (i === 0) game.go("town", { intro: true }, { to: LoGame.INK });
-      if (i === 1) game.go("trial", null, { to: LoGame.INK });
+      if (i === 1) game.go("battle", { ids: ["golem", "wraith", "bronze"], area: "top", hero: galleryHero(), demo: true, back: "title", from: new Uint8Array(R.image.px) }, { fade: false });
     });
   }
 });
 
-/* ---------- 斗法: any fight on the route, with the hero as strong as a player who got there ----------
-   Until the maps exist (P3) this is how the battles are played. */
-var AREAS = { road: "山道", tower: "塔内", upper: "塔上层", top: "塔顶" };
-/* the hero who reaches fight k of part p: every earlier fight won, every earlier item found */
-function heroAt(p, k) {
-  var h = Rules.newHero(1), xp = 0;
-  BATTLE.ROUTE.forEach(function (part, pi) {
-    if (pi > p) return;
-    Object.keys(part.found).forEach(function (id) { h.items[id] = (h.items[id] || 0) + part.found[id]; });
-    part.fights.forEach(function (ids, fi) {
-      if (pi < p || fi < k) ids.forEach(function (id) { xp += BATTLE.ENEMIES[id].xp; });
+/* ---------- 演武: every spell against practice dummies that never strike back ----------
+   A showcase for players who only want to watch the effects; it stays in the finished game. */
+function galleryHero() { var h = Rules.newHero(10); h.mp = 999; return h; }
+
+/* For tests only, never on screen (the fight list would spoil the route): ZT.fight(part, k) starts fight k of
+   BATTLE.ROUTE[part] with the hero a player would have there, every earlier fight won and item found. */
+var ZT = {
+  heroAt: function (p, k) {
+    var h = Rules.newHero(1), xp = 0;
+    BATTLE.ROUTE.forEach(function (part, pi) {
+      if (pi > p) return;
+      Object.keys(part.found).forEach(function (id) { h.items[id] = (h.items[id] || 0) + part.found[id]; });
+      part.fights.forEach(function (ids, fi) {
+        if (pi < p || fi < k) ids.forEach(function (id) { xp += BATTLE.ENEMIES[id].xp; });
+      });
     });
-  });
-  h.xp = xp; h.level = Rules.levelFor(xp);
-  Rules.rest(h);
-  return h;
-}
-function fightName(ids) {
-  return ids.map(function (id) { return BATTLE.ENEMIES[id].name; }).join(" ");
-}
-game.scene("trial", {
-  enter: async function (args) {
-    busy = true;
-    if (args && args.result) await game.say(args.result === "win" ? "斗法得胜。" : args.result === "fled" ? "暂且退下。" : "败下阵来。");
-    for (;;) {
-      var parts = BATTLE.ROUTE.map(function (r) { return AREAS[r.area]; }).concat(["演武：全部法术"]);
-      var p = await game.choose(parts, { title: "斗法", cancel: true });
-      if (p < 0) { game.go("title", null, { to: LoGame.INK }); return; }
-      var hero, ids, area;
-      if (p === BATTLE.ROUTE.length) {
-        /* every spell, enough mana to show them all */
-        hero = Rules.newHero(10); hero.mp = 999; ids = ["golem", "wraith", "bronze"]; area = "top";
-      } else {
-        var part = BATTLE.ROUTE[p];
-        var k = await game.choose(part.fights.map(fightName), { title: AREAS[part.area], cancel: true });
-        if (k < 0) continue;
-        hero = heroAt(p, k); ids = part.fights[k]; area = part.area;
-      }
-      game.go("battle", { ids: ids, area: area, hero: hero, demo: p === BATTLE.ROUTE.length, back: "trial", from: new Uint8Array(R.image.px) }, { fade: false });
-      return;
-    }
+    h.xp = xp; h.level = Rules.levelFor(xp);
+    Rules.rest(h);
+    return h;
   },
-  draw: function (g) {
-    var T = town.def.tower;
-    frame(g, { x: T.x, y: 4, z: -T.y, yaw: game.time * 0.12, pitch: -0.22, dist: 17, time: game.time }, []);
+  fight: function (p, k) {
+    var part = BATTLE.ROUTE[p];
+    game.go("battle", { ids: part.fights[k], area: part.area, hero: ZT.heroAt(p, k), back: "title", from: new Uint8Array(R.image.px) }, { fade: false });
   }
-});
+};
 
 /* ---------- town ---------- */
 var DIRS = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };

@@ -8,6 +8,95 @@ var Battle = (function () {
   var SKY = { road: [0.1, 0.42], tower: [0.04, 0.16], upper: [0.04, 0.16], top: [0.16, 0.5] };
   var HOME = { x: 0, y: 0, z: 1.0, yaw: -0.4, pitch: -0.17, dist: 6.6, focal: 124 };
 
+  /* ---------- the animation clock ----------
+     Battle animations wait and tween on this clock instead of lo-game's, so an animation the player has
+     seen before can be cut short: cut() finishes every pending tween and timer at once, and while
+     S.skip is set new ones finish as soon as they start. The rules have settled the result already. */
+  var EASE = {
+    linear: function (t) { return t; },
+    out: function (t) { return 1 - (1 - t) * (1 - t); },
+    "in": function (t) { return t * t; },
+    inOut: function (t) { return t < 0.5 ? 2 * t * t : 1 - 2 * (1 - t) * (1 - t); }
+  };
+  var tweens = [], timers = [], none = function () {};
+  var skipping = function () { return !!(S && S.skip); };
+  function settle(w) { for (var p in w.to) w.obj[p] = w.to[p]; w.done(); }
+  var T = {
+    tween: function (obj, to, sec, ease) {
+      return new Promise(function (res) {
+        var w = { obj: obj, from: {}, to: to, dur: Math.max(1 / 60, sec), t: 0, ease: EASE[ease || "out"] || EASE.out, done: res };
+        for (var p in to) w.from[p] = obj[p];
+        if (skipping()) settle(w); else tweens.push(w);
+      });
+    },
+    after: function (sec, fn) {
+      if (skipping()) { fn(); return none; }
+      var t = { left: sec, fn: fn };
+      timers.push(t);
+      return function () { t.dead = true; };
+    },
+    /* repeating timers drive motion only; a cut drops them */
+    every: function (sec, fn) {
+      if (skipping()) return none;
+      var t = { left: sec, every: sec, fn: fn };
+      timers.push(t);
+      return function () { t.dead = true; };
+    },
+    wait: function (sec) { return new Promise(function (res) { T.after(sec, res); }); },
+    flash: function (sec) { if (!skipping()) game.flash(sec); },
+    shake: function (a, sec) { if (!skipping()) game.shake(a, sec); },
+    sfx: function (name) { if (!skipping()) game.sfx(name); }
+  };
+  function stepClock(dt) {
+    tweens = tweens.filter(function (w) {
+      w.t = Math.min(1, w.t + dt / w.dur);
+      var k = w.ease(w.t);
+      for (var p in w.to) w.obj[p] = w.from[p] + (w.to[p] - w.from[p]) * k;
+      if (w.t >= 1) { w.done(); return false; }
+      return true;
+    });
+    var due = [];
+    timers = timers.filter(function (t) {
+      if (t.dead) return false;
+      t.left -= dt;
+      if (t.left > 0) return true;
+      due.push(t);
+      if (t.every) { t.left += t.every; return true; }
+      return false;
+    });
+    due.forEach(function (t) { if (!t.dead) t.fn(); });
+  }
+  function cut() {
+    S.skip = true; S.frozen = 0;
+    var tw = tweens, tm = timers;
+    tweens = []; timers = [];
+    tw.forEach(settle);
+    tm.forEach(function (t) { if (!t.dead && !t.every) t.fn(); });
+  }
+
+  /* animations seen in this session, by key ("spell:sword", "foe:狐火"); P3 saves them with the game */
+  var SEEN = {};
+  /* play an animation: the first time in full, after that A cuts to the result */
+  async function play(key, fn) {
+    S.canSkip = !!SEEN[key];
+    SEEN[key] = true;
+    S.skip = false;
+    await fn();
+    if (S.skip) tidy();
+    S.canSkip = false; S.skip = false;
+  }
+  /* after a cut: everything an animation borrows goes back to rest */
+  function tidy() {
+    FX.reset();
+    Object.assign(S.cam, HOME);
+    S.light = 1; S.sky = 1; S.bars = 0; S.hud = true; S.ripple = 0; S.punch = 1; S.rays = null; S.title = ""; S.msg = "";
+    var h = S.hero;
+    h.pose = null; h.art = ART.heroUp0; h.x = S.heroHome[0]; h.z = S.heroHome[1];
+    S.frozen = 0;
+    /* a foe that fell during the cut is already gone (its timer fired); just stop the flicker */
+    S.foes.forEach(function (f) { f.ox = f.oy = f.oz = 0; f.dying = false; });
+  }
+
   /* ---------- the arena, built once per area ---------- */
   function torch(m, glow, lights, x, z, h) {
     m.box(x - 0.08, 0, z - 0.08, x + 0.08, h, z + 0.08, 0.25);
@@ -74,7 +163,7 @@ var Battle = (function () {
     S = {
       args: args, b: b, A: A, area: area,
       cam: Object.assign({}, HOME), home: HOME,
-      hero: { x: -1.2, y: 0, z: -1.5, art: ART.heroUp0, pose: null, flash: 0, hide: false, flip: false },
+      heroHome: [-1.2, -1.5], hero: { x: -1.2, y: 0, z: -1.5, art: ART.heroUp0, pose: null, flash: 0, hide: false, flip: false },
       foes: b.foes.map(function (f, i) {
         var boss = f.def.boss, art = B_ART[f.def.art];
         return { x: boss ? 0 : spots[i][0], y: 0, z: boss ? 4.4 : spots[i][1], art: art, scale: boss ? 0.1 : 0.115,
@@ -85,13 +174,14 @@ var Battle = (function () {
       menu: null, poll: null, lastCmd: 0, guard: 0, frozen: 0
     };
     FX.reset();
+    tweens = []; timers = [];
     return S;
   }
 
   /* ---------- helpers for src/spells.js ---------- */
   function foeTop(i, k) { var f = S.foes[i]; return [f.x + f.ox, f.y + f.oy + f.art.h * f.scale * (k == null ? 0.55 : k), f.z + f.oz]; }
   function heroAt(k) { var h = S.hero; return [h.x, h.y + 1.1 * (k == null ? 0.55 : k), h.z]; }
-  function camTo(o, sec, ease) { return game.tween(S.cam, o, sec, ease || "inOut"); }
+  function camTo(o, sec, ease) { return T.tween(S.cam, o, sec, ease || "inOut"); }
   function home(sec) { return camTo(HOME, sec == null ? 0.5 : sec); }
   /* a camera aimed at point p from angle yaw */
   function look(p, yaw, pitch, dist, sec, ease) { return camTo({ x: p[0], y: p[1], z: p[2], yaw: yaw, pitch: pitch, dist: dist }, sec, ease); }
@@ -117,11 +207,11 @@ var Battle = (function () {
       if (e.kind === "heal") { S.view.hp += e.hp; popup("+" + e.hp, heroAt(1.0)); }
       if (e.kind === "mana" && e.mp) { S.view.mp += e.mp; popup("+" + e.mp, heroAt(0.6), { mp: true }); }
     });
-    game.sfx("hit");
+    T.sfx("hit");
     if (weakHit != null) await ANIM.weak(S, weakHit);
     var downs = events.filter(function (e) { return e.kind === "down" && (only == null || only === e.target); });
     for (var i = 0; i < downs.length; i++) ANIM.down(S, downs[i].target);
-    if (downs.length) await game.wait(0.5);
+    if (downs.length) await T.wait(0.5);
   }
 
   /* ---------- drawing ---------- */
@@ -343,7 +433,7 @@ var Battle = (function () {
       }
     }
   }
-  async function say(text, sec) { S.menu = null; S.msg = text; await game.wait(sec == null ? 0.9 : sec); S.msg = ""; }
+  async function say(text, sec) { S.menu = null; S.msg = text; await T.wait(sec == null ? 0.9 : sec); S.msg = ""; }
 
   async function run() {
     var args = S.args, b = S.b;
@@ -355,15 +445,17 @@ var Battle = (function () {
       var act = await heroTurn();
       S.menu = null;
       S.guard = 0;
-      var ev = Rules.heroAct(b, act, Math.random);
-      await ANIM.hero(S, act, ev);
+      /* leaving 演武 always works */
+      var ev = Rules.heroAct(b, act, args.demo && act.type === "flee" ? function () { return 0; } : Math.random);
+      if (act.type === "spell") await play("spell:" + act.id, function () { return ANIM.hero(S, act, ev); });
+      else await ANIM.hero(S, act, ev);
       if (b.fled) { result = "fled"; break; }
       result = Rules.result(b);
       if (b.defending) S.guard = 1;
       for (var i = 0; i < b.foes.length && !result && !args.demo; i++) {
         if (b.foes[i].hp <= 0) continue;
         var r = Rules.enemyAct(b, i, Math.random);
-        await ANIM.enemy(S, i, r);
+        await play("foe:" + r.move, function () { return ANIM.enemy(S, i, r); });
         result = Rules.result(b);
       }
     }
@@ -377,6 +469,8 @@ var Battle = (function () {
   var scene = {
     enter: function (args) { setup(args); run(); },
     update: function (dt) {
+      if (S.canSkip && !S.skip && game.ok()) cut();
+      stepClock(dt);
       if (S.frozen > 0) S.frozen -= dt;
       FX.step(dt, S.frozen > 0);
       S.nums = S.nums.filter(function (n) { n.t += dt; return n.t < n.life; });
@@ -388,7 +482,7 @@ var Battle = (function () {
   };
 
   return {
-    scene: scene, S: function () { return S; }, foeTop: foeTop, heroAt: heroAt, camTo: camTo, home: home, look: look,
+    scene: scene, T: T, S: function () { return S; }, foeTop: foeTop, heroAt: heroAt, camTo: camTo, home: home, look: look,
     popup: popup, show: show, say: say, HOME: HOME
   };
 })();
