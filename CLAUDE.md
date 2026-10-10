@@ -21,7 +21,8 @@ LICENSE NOTICE LICENSING.md CONTRIBUTING.md
 
 ## Stack
 
-- Plain HTML/CSS/JS. No build step, no bundler, no npm dependencies, no framework.
+- Plain HTML/CSS/JS. No npm dependencies, no framework. The runtime has no build step; an app may
+  keep its source in `src/` and use `tools/bundle-app.mjs` to fill it into its single `index.html`.
 - Runtime JS is ES5-style (`var`, `function`, one IIFE in lopda.js). Tools are Node ESM.
 - Storage: IndexedDB through `platform.js`, a small document store (`doc(path)`, `collection(path)`;
   doc paths have an even number of segments, base `data/users/local`).

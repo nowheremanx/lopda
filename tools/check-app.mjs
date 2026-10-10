@@ -166,10 +166,11 @@ function checkApp(dir) {
   for (const [re, msg] of FORBIDDEN) if (re.test(code)) errors.push("forbidden: " + msg);
   const colors = colorErrors(code);
   if (colors.length) errors.push("colors outside the palette: " + colors.slice(0, 8).join(", ") + (colors.length > 8 ? ` (+${colors.length - 8})` : ""));
-  const usesLoGame = info.some((m) => m.startsWith("lo-game"));
-  if (!usesLoGame && !/height\s*:\s*100%/.test(code)) warnings.push("html/body should use height:100%");
+  /* lo-game sets up the page and PAD; a lo-3d app is a framework app too (it paints a canvas the same way) */
+  const usesFramework = Boolean(hit || hit3d);
+  if (!usesFramework && !/height\s*:\s*100%/.test(code)) warnings.push("html/body should use height:100%");
   if (EMOJI.test(html)) warnings.push("contains emoji; the runtime will strip them");
-  if (!usesLoGame && !/\bPAD\./.test(code)) warnings.push("does not use PAD; fine if the app saves nothing");
+  if (!usesFramework && !/\bPAD\./.test(code)) warnings.push("does not use PAD; fine if the app saves nothing");
   for (const mm of code.matchAll(/PAD\.sfx\(\s*["']([^"']*)["']/g)) if (!SOUNDS.includes(mm[1])) errors.push(`PAD.sfx("${mm[1]}") is not a known sound: ${SOUNDS.join(", ")}`);
   const usesButtons = /PAD\.(on|isDown)\s*\(/.test(code);
   if (m.spec === "lopda/0" && /PAD\.(on|off|isDown|sfx)\s*\(/.test(code)) errors.push('PAD.on/isDown/sfx need spec "lopda/1"');

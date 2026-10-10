@@ -3,12 +3,12 @@
   "id": "zhenyao-tower",
   "name": "镇妖塔外传",
   "glyph": "塔",
-  "version": "0.1.0",
-  "description": "仙侠小品。卡带内置 LX-3D 协处理器：四色三维小镇、灯火、雾。试作版，只有小镇。",
+  "version": "0.2.0",
+  "description": "仙侠小品。卡带内置 LX-3D 协处理器：四色三维小镇与斗法演出。试作版：小镇和斗法。",
   "i18n": {
     "en": {
       "name": "Pagoda",
-      "description": "A xianxia side story. The cart has an LX-3D chip: a four-tone 3D town. Preview."
+      "description": "A xianxia side story. The cart has an LX-3D chip: 3D town and battles. Preview."
     }
   },
   "author": "Haowei Wu",
