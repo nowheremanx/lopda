@@ -55,6 +55,19 @@ test("the counter template passes without warnings; the game template needs lo-g
   assert.match(r2.out, /lo-font verified/);
 });
 
+test("a lo-3d app is a framework app: no height:100% or PAD warnings", (t) => {
+  const dir = copyApp(t, "sdk/template", "my-3d");
+  const hPath = join(dir, "index.html");
+  writeFileSync(join(dir, "manifest.json"), readFileSync(join(dir, "manifest.json"), "utf8").replace(/"id":\s*"[^"]*"/, '"id": "my-3d"'));
+  writeFileSync(hPath, '<!doctype html><html><body><canvas id="c"></canvas>\n<script data-lo-3d="1.0.0"></script>\n'
+    + '<script>var R = Lo3D.create({ width: 160, height: 144 });</script>\n</body></html>\n');
+  assert.equal(tool("bundle-app.mjs", dir).code, 0);
+  const r = tool("check-app.mjs", dir);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /lo-3d 1\.\d+\.\d+ verified/);
+  assert.doesNotMatch(r.out, /height:100%|does not use PAD/);
+});
+
 test("usage error without arguments", () => {
   assert.equal(tool("check-app.mjs").code, 2);
 });
