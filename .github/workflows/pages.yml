@@ -1,6 +1,7 @@
 # Publishes the repo as a static site on the gh-pages branch (GitHub Pages).
 #   push to main  -> site root:  https://nowheremanx.github.io/lopda/runtime/
-#   pull request  -> pr/<n>/:    preview of the dev harness, removed when the PR closes
+#   pull request  -> pr/<n>/:    preview of the dev harness, removed when the PR closes.
+#                    Only when the PR changes something a preview can show (see "Decide what to preview").
 # Only git, rsync and the gh CLI are used; no third-party actions.
 name: pages
 on:
@@ -36,7 +37,31 @@ jobs:
           # A closed PR may have no merge ref left; the cleanup only needs any commit.
           ref: ${{ github.event.action == 'closed' && github.event.repository.default_branch || '' }}
 
+      - name: Decide what to preview
+        id: plan
+        run: |
+          # Pushes to main and closing a PR always publish (or clean up).
+          if [ "${{ github.event_name }}" = "push" ] || [ "$ACTION" = "closed" ]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          CHANGED=$(git diff --name-only "$BASE_SHA" "${{ github.sha }}")
+          # Registry apps the PR touches (and that still exist). The shell runs with pipefail,
+          # so a grep that matches nothing must not end the step.
+          APPS=$(printf '%s\n' "$CHANGED" | { grep '^registry/apps/' || true; } | cut -d/ -f3 | sort -u | while read -r id; do
+            if [ -d "registry/apps/$id" ]; then echo "$id"; fi; done)
+          # sdk/ and runtime/ are shared by every app, so a change there previews all of them.
+          if printf '%s\n' "$CHANGED" | grep -qE '^(sdk|runtime)/'; then APPS=$(ls registry/apps); fi
+          # Docs, tests, CI only: nothing a preview could show, so no deploy and no comment.
+          if [ -z "$APPS" ]; then
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+            echo "No app, sdk or runtime change: skipping the preview."
+            exit 0
+          fi
+          echo "deploy=true" >> "$GITHUB_OUTPUT"
+          { echo "apps<<EOF"; echo "$APPS"; echo "EOF"; } >> "$GITHUB_OUTPUT"
+
       - name: Prepare the gh-pages worktree
+        if: steps.plan.outputs.deploy == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -52,7 +77,7 @@ jobs:
           fi
 
       - name: Publish this commit
-        if: github.event_name == 'push' || github.event.action != 'closed'
+        if: steps.plan.outputs.deploy == 'true' && (github.event_name == 'push' || github.event.action != 'closed')
         run: |
           if [ "${{ github.event_name }}" = "push" ]; then
             DEST=../site
@@ -75,6 +100,7 @@ jobs:
         run: rm -rf "../site/pr/$PR"
 
       - name: Commit and push (retry on a rejected push)
+        if: steps.plan.outputs.deploy == 'true'
         run: |
           cd ../site
           git add -A
@@ -88,12 +114,10 @@ jobs:
           exit 1
 
       - name: Comment preview links on the PR
-        if: github.event_name == 'pull_request' && github.event.action != 'closed'
+        if: steps.plan.outputs.deploy == 'true' && github.event_name == 'pull_request' && github.event.action != 'closed'
+        env:
+          APPS: ${{ steps.plan.outputs.apps }}
         run: |
-          # Registry apps the PR touches; all apps when it touches none.
-          APPS=$(git diff --name-only "$BASE_SHA" "${{ github.sha }}" -- registry/apps | cut -d/ -f3 | sort -u | while read -r id; do
-            [ -d "registry/apps/$id" ] && echo "$id"; done)
-          [ -n "$APPS" ] || APPS=$(ls registry/apps)
           {
             echo '<!-- lopda-preview -->'
             echo '**Preview / 预览** (GitHub Pages takes about a minute to update / 页面约需一分钟更新)'

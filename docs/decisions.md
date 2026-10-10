@@ -116,12 +116,12 @@
 
 ## 10. 尚未确定的问题
 
-- **即影相机（instant camera）**：计划作为独立项目开发。以下都还没确定：
+- **即影相机（instant camera）**：计划作为独立项目开发。设计草稿见 `docs/design/instant-camera.md`。以下都还没确定：
   - 做成独立的相机程序，还是在像素相机里加一种相纸。〔提议：独立程序〕
   - 名称：「拍立得」、Polaroid、Instax 涉及商标，需要另起名字。〔提议：「即影机」〕
   - 一盒张数〔提议：10〕、调色板〔提议：原创的约 16 色，保留像素风〕、显影动画、相片盒、在白边上写字。
 - **像素相机的「彩色胶卷」**（有限调色板加抖动）、**裁片机的拍立得边框样式**。〔提议〕
-- **背景音乐**：需要在 runtime 里新增类似 `PAD.music` 的接口，并受音量和静音设置控制。〔提议〕
+- **背景音乐**：需要在 runtime 里新增类似 `PAD.music` 的接口，并受音量和静音设置控制。设计草稿见 `docs/design/pad-music.md`。〔提议〕
 - **模拟器扩展**：沙盒 app 是否允许 WebAssembly（`'wasm-unsafe-eval'`）、文件导入权限、是否支持 FC。〔提议〕
 - **十字键 4 向 / 8 向的 manifest 字段（`"dpad": 4`）**。〔提议〕
 - **需要在 iPhone 上验证**：
@@ -174,6 +174,8 @@
 - **部署（GitHub Pages）**：`.github/workflows/pages.yml` 只用 git 命令发布到 `gh-pages` 分支，不用第三方 action。
   - push 到 `main` 发布到站点根目录：`https://nowheremanx.github.io/lopda/runtime/`。
   - 同一 repo 的 PR 发布到 `pr/<编号>/`，在 PR 里留一条预览链接（更新而不是重复发），PR 关闭后删除；fork 的 PR 不发布。
+  - 只在 PR 改了能预览的东西时才发布（2026-10-10）：改了某些 app 只列这些 app；改了 `sdk/` 或 `runtime/` 列出全部 app；
+    只改文档、测试、CI 时不发布也不留言，省掉一次 Pages 构建。
   - **预览和正式站点同源**（`nowheremanx.github.io`），IndexedDB 共享。所以预览链接只给 `sdk/dev.html?app=...`
     （它把存档放在 localStorage），不要在预览路径下打开 `runtime/`，否则读写的就是正式掌机的数据。
   - 本地地址和 Pages 地址是两个站点，数据互不相通。
