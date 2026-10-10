@@ -64,3 +64,33 @@ for (const id of readdirSync(join(ROOT, "registry", "apps"))) {
     assert.deepEqual(errors, []);
   });
 }
+
+/* zhenyao-tower: every spell plays to the end in 演武 (the spell gallery), with no errors */
+test("zhenyao-tower: all six spells play in the battle", { skip, timeout: 90000 }, async (t) => {
+  const { p, errors } = await page(t);
+  await p.goto(`${base}/sdk/dev.html?app=registry/apps/zhenyao-tower`, { waitUntil: "load" });
+  await p.waitForFunction(() => /loaded |load failed/.test(document.getElementById("log").textContent), null, { timeout: 5000 });
+  const app = p.frames().find((f) => f !== p.mainFrame());
+  const press = async (...keys) => { for (const k of keys) { await p.keyboard.press(k); await p.waitForTimeout(150); } };
+  const menu = () => app.evaluate(() => { const S = typeof Battle !== "undefined" && Battle.S(); return S && S.menu ? S.menu.kind : null; });
+  const until = async (kind, ms = 15000) => { const t0 = Date.now(); while ((await menu()) !== kind) { assert.ok(Date.now() - t0 < ms, "waiting for the " + kind + " menu"); await p.waitForTimeout(100); } };
+  /* title -> 斗法 -> 演武 */
+  await press("x", "ArrowDown", "x");
+  await p.waitForTimeout(1000);
+  await press("ArrowDown", "ArrowDown", "ArrowDown", "ArrowDown", "x");
+  await until("cmd");
+  const total = () => app.evaluate(() => Battle.S().b.foes.reduce((s, f) => s + f.maxHp - f.hp, 0));
+  for (let k = 0; k < 6; k++) {
+    const before = await total();
+    await press("ArrowRight", "x");
+    await until("list");
+    for (let i = 0; i < k; i++) await press("ArrowDown");
+    await press("x", "x");
+    await until("cmd");
+    assert.ok((await total()) > before, `spell ${k} did damage`);
+    await press("ArrowLeft");
+  }
+  assert.deepEqual(errors, []);
+  const log = await p.textContent("#log");
+  assert.doesNotMatch(log, /ERROR/, log);
+});

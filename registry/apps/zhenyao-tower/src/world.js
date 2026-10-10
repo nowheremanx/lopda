@@ -57,6 +57,19 @@ var World = (function () {
     m.cone(x, 0.85 * s, z, 0.45 * s, 0.75 * s, 5, 0.5, 0);
   }
 
+  /* a seven-storey pagoda standing at (x, y, z), k times the town tower's size, into builder m.
+     Returns the height of its top. The battle's ultimate drops a phantom copy of it. */
+  function pagoda(m, x, y, z, k, alb) {
+    for (var i = 0; i < 7; i++) {
+      var s = (1.5 - i * 0.14) * k, hgt = (1.5 - i * 0.08) * k;
+      m.box(x - s, y, z - s, x + s, y + hgt, z + s, alb ? alb[0] : 1.2, false);
+      m.roof(x - s - 0.55 * k, z - s - 0.55 * k, x + s + 0.55 * k, z + s + 0.55 * k, y + hgt, 0.45 * k, 0.01, alb ? alb[1] : 0.2);
+      y += hgt + 0.3 * k;
+    }
+    m.cone(x, y - 0.3 * k, z, 0.35 * k, 2.2 * k, 4, alb ? alb[1] : 0.3, 0.125);
+    return y;
+  }
+
   function build(def) {
     var rows = def.map, MW = rows[0].length, MH = rows.length;
     var at = function (c, r) { return r < 0 || r >= MH || c < 0 || c >= MW ? null : rows[r][c]; };
@@ -125,17 +138,10 @@ var World = (function () {
     wm.box(wx + 0.6, 0.55, wz - 0.06, wx + 0.75, 1.6, wz + 0.06, 0.25);
     wm.roof(wx - 1.0, wz - 0.6, wx + 1.0, wz + 0.6, 1.6, 0.5, 0.6, 0.22);
 
-    /* the tower: seven storeys, each with flared eaves, and a light at the top */
-    var tw = builder(), tx = T.x, tz = -T.y, y = 0;
+    /* the tower, and a light at the top */
+    var tw = builder(), tx = T.x, tz = -T.y;
     tw.box(tx - 2.2, 0, tz - 2.2, tx + 2.2, 0.5, tz + 2.2, 0.4);
-    y = 0.5;
-    for (var i = 0; i < 7; i++) {
-      var s = 1.5 - i * 0.14, hgt = 1.5 - i * 0.08;
-      tw.box(tx - s, y, tz - s, tx + s, y + hgt, tz + s, 1.2, false);
-      tw.roof(tx - s - 0.55, tz - s - 0.55, tx + s + 0.55, tz + s + 0.55, y + hgt, 0.45, 0.01, 0.2);
-      y += hgt + 0.3;
-    }
-    tw.cone(tx, y - 0.3, tz, 0.35, 2.2, 4, 0.3, 0.125);
+    var y = pagoda(tw, tx, 0.5, tz, 1);
     glow.box(tx - 0.25, y - 1.6, tz - 1.0, tx + 0.25, y - 1.1, tz - 0.99, 1);
     lights.push({ x: tx, y: y - 1.3, z: tz - 1.6, radius: 3, power: 0.8, base: 0.8, seed: 3 });
 
@@ -183,5 +189,5 @@ var World = (function () {
     return R.image;
   }
 
-  return { build: build, render: render, hash: hash };
+  return { build: build, render: render, hash: hash, builder: builder, tree: tree, pagoda: pagoda };
 })();
