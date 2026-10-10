@@ -64,7 +64,7 @@ test("every local script and stylesheet the page loads is pre-cached", () => {
 });
 
 test("runtime and sdk scripts parse as plain scripts", () => {
-  for (const f of ["runtime/lopda.js", "runtime/strings.js", "runtime/platform.js", "runtime/sw.js", "sdk/pad-shim.js", "sdk/lo-game.js"]) {
+  for (const f of ["runtime/lopda.js", "runtime/strings.js", "runtime/platform.js", "runtime/sw.js", "sdk/pad-shim.js", "sdk/lo-game.js", "sdk/lo-3d.js"]) {
     assert.doesNotThrow(() => new vm.Script(read(f), { filename: f }), f);
   }
 });
@@ -79,7 +79,7 @@ test("runtime code stays ES5-style: no let, const, arrow functions or classes", 
 
 /* ◀ ▶ are text arrows on the device's buttons; Unicode counts them as pictographic, so they are let through here */
 test("no emoji in the runtime or sdk", () => {
-  for (const f of ["runtime/index.html", "runtime/lopda.js", "runtime/lopda.css", "sdk/lo-game.js", "sdk/pad-shim.js", "sdk/dev.html"]) {
+  for (const f of ["runtime/index.html", "runtime/lopda.js", "runtime/lopda.css", "sdk/lo-game.js", "sdk/lo-3d.js", "sdk/pad-shim.js", "sdk/dev.html"]) {
     assert.ok(!EMOJI.test(read(f).replace(/[▶◀]/g, "")), f);
   }
 });
@@ -108,4 +108,11 @@ test("build-index refuses an app that fails the checker", (t) => {
   assert.ok(!index.apps.some((a) => a.id === APP_IDS[0]), out);
   assert.equal(index.apps.length, APP_IDS.length - 1);
   assert.ok(tool("check-app.mjs", join(ROOT, "registry", "apps", APP_IDS[0])).code === 0, "the real app is untouched");
+});
+
+test("the Pages workflow publishes the repo without tests, dependencies or CI files", () => {
+  const y = read(".github/workflows/pages.yml");
+  for (const ex of ["/tests", "/node_modules", "/_to_delete", "/.github"]) assert.ok(y.includes("--exclude=" + ex), ex);
+  assert.ok(y.includes("gh-pages") && y.includes(".nojekyll") && y.includes("lopda-preview"));
+  assert.deepEqual([...y.matchAll(/uses:\s*(\S+)/g)].map((m) => m[1]), ["actions/checkout@v4"], "only actions/checkout");
 });

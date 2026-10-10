@@ -72,11 +72,11 @@ test("the tool rewrites an app in place and reports a folder without a block", (
   const plain = copyApp(t, "sdk/template", "my-app");
   const r2 = tool("lo-game.mjs", plain);
   assert.equal(r2.code, 1);
-  assert.match(r2.out, /no <script data-lo-game> block/);
+  assert.match(r2.out, /no data-src, data-lo-3d or data-lo-game block/);
 });
 
 test("--hash prints the version and hash", () => {
-  assert.equal(tool("lo-game.mjs", "--hash").out.trim(), `${LIB_VERSION} ${sha(LIB)}`);
+  assert.match(tool("lo-game.mjs", "--hash").out, new RegExp(`^lo-game ${LIB_VERSION} ${sha(LIB)}$`, "m"));
 });
 
 test("an edited lo-game copy or font block is rejected by the checker", (t) => {

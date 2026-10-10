@@ -88,7 +88,7 @@ const FAILS = [
   ["permissions", { manifest: (m) => (m.permissions = ["camera"]) }, /permissions must be empty/],
   ["buttons on lopda/0", { manifest: (m) => (m.spec = "lopda/0") }, /buttons needs spec "lopda\/1"/],
   ["buttons not boolean", { manifest: (m) => (m.buttons = "yes") }, /buttons must be true or false/],
-  ["too big", { html: (h) => h + "<!--" + "x".repeat(200 * 1024) + "-->" }, /the limit is 204800/],
+  ["too big", { html: (h) => h + "<!--" + "x".repeat(512 * 1024) + "-->" }, /the limit is 524288/],
   ["fetch", withCode('fetch("/x");'), /network: fetch\(\)/],
   ["XMLHttpRequest", withCode("new XMLHttpRequest();"), /network: XMLHttpRequest/],
   ["WebSocket", withCode('new WebSocket("ws://x");'), /network: WebSocket/],

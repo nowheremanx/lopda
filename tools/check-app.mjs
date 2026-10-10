@@ -3,18 +3,17 @@
 // Exit code 0 when every app passes, 1 otherwise. No dependencies.
 import { readFileSync, existsSync, statSync, readdirSync } from "node:fs";
 import { join, basename, resolve } from "node:path";
-import { sha, fontBlock, FONT_BLOCK } from "./lo-game-lib.mjs";
+import { sha, fontBlock, fillSrc, released, FONT_BLOCK, LIB_BLOCK, LIB3D_BLOCK, SRC_BLOCK } from "./lo-game-lib.mjs";
 
 const ROOT = join(import.meta.dirname, "..");
-/* known lo-game.js releases: the current sdk copy plus any listed in sdk/lo-game.versions.json */
-const LO_GAME = {};
-try { Object.assign(LO_GAME, JSON.parse(readFileSync(join(ROOT, "sdk", "lo-game.versions.json"), "utf8"))); } catch {}
-try { const cur = readFileSync(join(ROOT, "sdk", "lo-game.js"), "utf8"); LO_GAME[(cur.match(/var VERSION = "([^"]+)"/) || [])[1] + " (sdk)"] = sha(cur); } catch {}
+/* known releases of the framework libraries: sdk/<name>.versions.json plus the current sdk copy */
+const LO_GAME = released("lo-game");
+const LO_3D = released("lo-3d");
 
 const SPECS = ["lopda/0", "lopda/1"];
 const LANGS = ["zh", "en"];
 const SOUNDS = ["tap", "tick", "move", "ok", "err", "hit", "miss", "coin", "win", "lose"];
-const MAX_BYTES = 200 * 1024;
+const MAX_BYTES = 512 * 1024;
 const LICENSES = ["MIT", "0BSD", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Apache-2.0", "CC0-1.0", "Unlicense"];
 const PALETTE = [[0x1f, 0x2a, 0x14], [0x4a, 0x5a, 0x32], [0x7d, 0x8a, 0x58], [0xa3, 0xad, 0x7e]];
 const EMOJI = /[\p{Extended_Pictographic}\u{1F1E6}-\u{1F1FF}]/u;
@@ -65,6 +64,28 @@ function colorErrors(src) {
   return [...bad];
 }
 
+/* a framework block must be filled, and be byte-identical to a released copy. Returns the matching release or null. */
+function verifyBlock(label, block, known, dir, errors) {
+  const body = block[2];
+  const hit = Object.entries(known).find(([, h]) => h === sha(body));
+  if (!body.trim()) errors.push(`the ${label} block is empty: run node tools/bundle-app.mjs ${dir}`);
+  else if (!hit) errors.push(`the ${label} copy differs from every released version: do not edit it, run node tools/bundle-app.mjs ${dir}`);
+  return hit || null;
+}
+
+/* .js files under src/, as paths like "src/a/b.js" */
+function srcFiles(dir) {
+  const out = [];
+  const walk = (rel) => {
+    for (const e of readdirSync(join(dir, rel), { withFileTypes: true })) {
+      if (e.isDirectory()) walk(rel + "/" + e.name);
+      else if (e.name.endsWith(".js")) out.push(rel + "/" + e.name);
+    }
+  };
+  if (existsSync(join(dir, "src"))) walk("src");
+  return out;
+}
+
 function checkApp(dir) {
   const errors = [], warnings = [], info = [];
   const id = basename(resolve(dir));
@@ -73,7 +94,7 @@ function checkApp(dir) {
   if (!existsSync(hPath)) errors.push("missing index.html");
   if (errors.length) return { id, errors, warnings };
 
-  const extra = readdirSync(dir).filter((f) => !["manifest.json", "index.html", "README.md", "LICENSE"].includes(f) && !f.startsWith("."));
+  const extra = readdirSync(dir).filter((f) => !["manifest.json", "index.html", "README.md", "LICENSE", "src"].includes(f) && !f.startsWith("."));
   if (extra.length) warnings.push("extra files are not shipped: " + extra.join(", "));
 
   let m;
@@ -115,25 +136,32 @@ function checkApp(dir) {
   const size = statSync(hPath).size;
   if (size > MAX_BYTES) errors.push(`index.html is ${size} bytes; the limit is ${MAX_BYTES}`);
   let html = readFileSync(hPath, "utf8");
-  /* a verified lo-game.js copy is reviewed once, upstream; only the app's own code is scanned */
-  const block = html.match(/<script data-lo-game="([^"]*)">\n?([\s\S]*?)<\/script>/);
-  if (block) {
-    const body = block[2];
-    const hit = Object.entries(LO_GAME).find(([, h]) => h === sha(body));
-    if (!body.trim()) errors.push("the lo-game block is empty: run node tools/lo-game.mjs " + dir);
-    else if (!hit) errors.push("the lo-game copy differs from every released version: do not edit it, run node tools/lo-game.mjs " + dir);
-    else {
-      info.push("lo-game " + hit[0].replace(" (sdk)", "") + " verified");
-      /* the font block must be exactly what the tool builds from this app's text: data, no code */
-      const fb = html.match(FONT_BLOCK);
-      if (fb) {
-        if (fb[0].replace(/^\n/, "") !== fontBlock(html)) errors.push("the lo-font block is out of date or was edited: run node tools/lo-game.mjs " + dir);
-        else info.push("lo-font verified (" + (fb[0].match(/"glyphs":\{/) ? Object.keys(JSON.parse(fb[0].match(/LoGame\.font\((.*)\);/)[1]).glyphs).length : 0) + " glyphs)");
-        html = html.replace(fb[0], "");
-      }
-      html = html.replace(block[0], "<script></script>");
-    }
+  /* src/ files bundled into data-src blocks: index.html must hold exactly the current files */
+  const filled = fillSrc(html, dir);
+  filled.errors.forEach((e) => errors.push(e));
+  if (!filled.errors.length && filled.html !== html) errors.push("index.html is out of date with src/: run node tools/bundle-app.mjs " + dir);
+  else if (filled.paths.length) info.push(`src bundled (${filled.paths.length} file${filled.paths.length > 1 ? "s" : ""})`);
+  for (const f of srcFiles(dir)) if (!filled.paths.includes(f)) warnings.push(`${f} is not referenced by any data-src block`);
+  /* a verified lo-3d.js / lo-game.js copy is reviewed once, upstream; only the app's own code is scanned */
+  const block3d = html.match(LIB3D_BLOCK);
+  const block = html.match(LIB_BLOCK);
+  const hit3d = block3d && verifyBlock("lo-3d", block3d, LO_3D, dir, errors);
+  const hit = block && verifyBlock("lo-game", block, LO_GAME, dir, errors);
+  /* the font block must be exactly what the tool builds from this app's text: data, no code */
+  const fb = html.match(FONT_BLOCK);
+  if (hit && fb) {
+    if (fb[0].replace(/^\n/, "") !== fontBlock(html)) errors.push("the lo-font block is out of date or was edited: run node tools/bundle-app.mjs " + dir);
+    else info.push("lo-font verified (" + (fb[0].match(/"glyphs":\{/) ? Object.keys(JSON.parse(fb[0].match(/LoGame\.font\((.*)\);/)[1]).glyphs).length : 0) + " glyphs)");
   }
+  if (hit3d) info.push("lo-3d " + hit3d[0].replace(" (sdk)", "") + " verified");
+  if (hit) info.push("lo-game " + hit[0].replace(" (sdk)", "") + " verified");
+  if (hit3d) html = html.replace(block3d[0], "<script></script>");
+  if (hit) {
+    if (fb) html = html.replace(fb[0], "");
+    html = html.replace(block[0], "<script></script>");
+  }
+  /* a data-src opener is not an external script */
+  html = html.replace(new RegExp(SRC_BLOCK.source, "g"), (m, p, body) => "<script>\n" + body + "</script>");
   const code = stripComments(html);
   for (const [re, msg] of FORBIDDEN) if (re.test(code)) errors.push("forbidden: " + msg);
   const colors = colorErrors(code);
