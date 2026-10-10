@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Lo-PDA dev harness</title>
+<!-- MIT License, see sdk/LICENSE. Serve the repo root with any static server, then open /sdk/dev.html -->
+<style>
+  :root { --ink:#1f2a14; --dark:#4a5a32; --mid:#7d8a58; --paper:#a3ad7e; --case:#262925; }
+  body { margin:0; background:var(--case); color:#d9d2bf; font:14px/1.5 ui-monospace, Menlo, monospace; padding:16px; display:flex; gap:24px; flex-wrap:wrap; }
+  .side { flex:1 1 280px; min-width:0; display:flex; flex-direction:column; gap:12px; }
+  label, select, input, button { font:inherit; }
+  select, input[type=text] { width:100%; box-sizing:border-box; padding:6px; background:#1b1d1a; color:#d9d2bf; border:1px solid #4a4f45; }
+  button { padding:6px 12px; background:var(--paper); color:var(--ink); border:0; cursor:pointer; }
+  .screen { width:360px; max-width:100%; height:560px; border:6px solid #11130f; border-radius:8px; background:var(--paper); }
+  iframe { width:100%; height:100%; border:0; display:block; }
+  pre { margin:0; white-space:pre-wrap; word-break:break-word; background:#1b1d1a; padding:8px; min-height:3em; max-height:240px; overflow:auto; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .col { display:flex; flex-direction:column; gap:10px; align-items:center; }
+  #pad { display:flex; gap:6px; flex-wrap:wrap; justify-content:center; max-width:360px; }
+  #pad button { min-width:52px; touch-action:none; }
+</style>
+</head>
+<body>
+  <div class="col">
+    <div class="screen"><iframe id="app" sandbox="allow-scripts" title="app"></iframe></div>
+    <div id="pad" hidden>
+      <button data-b="left">◀</button><button data-b="up">▲</button><button data-b="down">▼</button><button data-b="right">▶</button>
+      <button data-b="select">SELECT</button><button data-b="start">START</button><button data-b="b">B</button><button data-b="a">A</button>
+    </div>
+  </div>
+  <div class="side">
+    <div>
+      <label for="path">App folder (relative to repo root)</label>
+      <input type="text" id="path" value="sdk/template">
+    </div>
+    <div class="row">
+      <button id="load" type="button">Load</button>
+      <button id="reload" type="button">Reload</button>
+      <button id="wipe" type="button">Clear saved data</button>
+    </div>
+    <div class="row">
+      <label for="lang">PAD.lang</label>
+      <select id="lang" style="width:auto"><option value="zh">zh</option><option value="en">en</option><option value="">(none: older runtime)</option></select>
+    </div>
+    <div>Manifest</div><pre id="manifest"></pre>
+    <div>PAD storage (this harness keeps it in localStorage)</div><pre id="store"></pre>
+    <div>Errors and events</div><pre id="log"></pre>
+  </div>
+<script src="pad-shim.js"></script>
+<script>
+  var frame = document.getElementById("app"), html = "", appId = "dev";
+  var log = function (s) { var p = document.getElementById("log"); p.textContent = (new Date().toLocaleTimeString() + "  " + s + "\n") + p.textContent; };
+  var key = function () { return "lopda-dev:" + appId; };
+  var readStore = function () { try { return JSON.parse(localStorage.getItem(key()) || "{}"); } catch (e) { return {}; } };
+  var writeStore = function (s) { localStorage.setItem(key(), JSON.stringify(s)); showStore(); };
+  var showStore = function () { document.getElementById("store").textContent = JSON.stringify(readStore(), null, 2); };
+
+  function load() {
+    var base = document.getElementById("path").value.replace(/\/+$/, "");
+    Promise.all([fetch("../" + base + "/manifest.json").then(function (r) { return r.json(); }),
+                 fetch("../" + base + "/index.html").then(function (r) { return r.text(); })])
+      .then(function (res) {
+        var m = res[0]; html = res[1]; appId = m.id || "dev";
+        /* empty framework blocks and data-src blocks are filled from sdk/ and the app's src/ folder,
+           so you can edit and reload without running node tools/bundle-app.mjs */
+        var filled = [], jobs = [];
+        var fill = function (re, url, wrap, label) {
+          var found = html.match(re);
+          if (!found) return;
+          jobs.push(fetch(url).then(function (r) { if (!r.ok) throw new Error(url + " not found"); return r.text(); }).then(function (text) {
+            html = html.replace(found[0], function () { return wrap(text, found); });
+            filled.push(label);
+          }));
+        };
+        fill(/<script data-lo-3d="[^"]*">\s*<\/script>/, "lo-3d.js", function (lib) { return "<script data-lo-3d>\n" + lib + "<\/script>"; }, "lo-3d.js");
+        fill(/<script data-lo-game="[^"]*">\s*<\/script>/, "lo-game.js", function (lib) { return "<script data-lo-game>\n" + lib + "<\/script>"; }, "lo-game.js");
+        /* src/ blocks are always re-read, filled or not, so an edit shows on reload */
+        var srcRe = /<script data-src="([^"]*)">[\s\S]*?<\/script>/g, sm, srcs = [];
+        while ((sm = srcRe.exec(html))) srcs.push(sm[1]);
+        srcs.forEach(function (p) {
+          if (p.indexOf("src/") !== 0 || p.indexOf("..") >= 0 || !/\.js$/.test(p)) { log("data-src " + p + " is not allowed (src/...js only)"); return; }
+          var esc = p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          fill(new RegExp('<script data-src="' + esc + '">[\\s\\S]*?<\\/script>'), "../" + base + "/" + p,
+               function (code) { return '<script data-src="' + p + '">\n' + code + "<\/script>"; }, p);
+        });
+        return Promise.all(jobs).then(function () { return [m, html, filled]; });
+      })
+      .then(function (res) {
+        var m = res[0]; html = res[1];
+        if (res[2].length) log("filled in: " + res[2].join(", "));
+        document.getElementById("pad").hidden = m.buttons !== true;
+        document.getElementById("manifest").textContent = JSON.stringify(m, null, 2);
+        showStore(); run(); log("loaded " + base + " (" + html.length + " bytes)");
+      })
+      .catch(function (e) { log("load failed: " + e.message); });
+  }
+  /* like the runtime, a language change starts the app again */
+  function run() { var l = document.getElementById("lang").value; frame.srcdoc = lopdaWrapApp(html, l ? { lang: l } : null); }
+  document.getElementById("lang").onchange = function () { log("PAD.lang = " + (this.value || "undefined")); run(); };
+
+  window.addEventListener("message", function (e) {
+    if (e.source !== frame.contentWindow) return;
+    var d = e.data; if (!d || !d.pad) return;
+    var s = readStore();
+    if (d.op === "load") frame.contentWindow.postMessage({ pad: 1, op: "loaded", i: d.i, v: d.k in s ? s[d.k] : null }, "*");
+    else if (d.op === "save") { s[d.k] = d.v; writeStore(s); }
+    else if (d.op === "remove") { delete s[d.k]; writeStore(s); }
+    else if (d.op === "error") log("ERROR " + d.msg);
+    else if (d.op === "exit") { log("app asked to exit"); frame.srcdoc = ""; }
+    else if (d.op === "sfx") log("sfx " + d.name);
+  });
+  /* chin buttons: on-screen pad plus keyboard while the harness has focus */
+  var press = function (b, down) { frame.contentWindow.postMessage({ pad: 1, op: "button", b: b, down: down }, "*"); };
+  Array.prototype.forEach.call(document.querySelectorAll("#pad button"), function (el) {
+    var b = el.getAttribute("data-b");
+    el.addEventListener("pointerdown", function (e) { e.preventDefault(); press(b, true); });
+    ["pointerup", "pointerleave", "pointercancel"].forEach(function (t) { el.addEventListener(t, function () { press(b, false); }); });
+  });
+  var KEYS = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right", x: "a", z: "b", Enter: "start", Shift: "select" };
+  document.addEventListener("keydown", function (e) { var b = KEYS[e.key]; if (b && e.target.nodeName !== "INPUT" && !e.repeat) { e.preventDefault(); press(b, true); } });
+  document.addEventListener("keyup", function (e) { var b = KEYS[e.key]; if (b) press(b, false); });
+  document.getElementById("load").onclick = load;
+  document.getElementById("reload").onclick = run;
+  document.getElementById("wipe").onclick = function () { localStorage.removeItem(key()); showStore(); log("cleared"); };
+  var q = new URLSearchParams(location.search).get("app"); if (q) document.getElementById("path").value = q;
+  var ql = new URLSearchParams(location.search).get("lang");
+  document.getElementById("lang").value = ql != null ? ql : (/^zh/i.test(navigator.language) ? "zh" : "en");
+  load();
+</script>
+</body>
+</html>

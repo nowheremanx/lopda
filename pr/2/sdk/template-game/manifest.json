@@ -1,0 +1,18 @@
+{
+  "spec": "lopda/1",
+  "id": "my-game",
+  "name": "小院",
+  "glyph": "院",
+  "version": "0.1.0",
+  "description": "lo-game.js 示例：走动、对话、选项、存档。改成你自己的游戏。",
+  "i18n": {
+    "en": {
+      "name": "The Yard",
+      "description": "lo-game.js example: walking, dialogue, choices, saves. Make it your own game."
+    }
+  },
+  "author": "your-name",
+  "license": "MIT",
+  "permissions": [],
+  "buttons": true
+}
