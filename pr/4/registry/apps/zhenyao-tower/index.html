@@ -1,0 +1,3288 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>镇妖塔外传</title>
+</head>
+<body>
+<!-- Source lives in src/; node tools/bundle-app.mjs registry/apps/zhenyao-tower fills every block below. -->
+<script data-lo-3d="1.0.0">
+/*
+ * lo-3d.js 1.0.0, a small software 3D renderer for Lo-PDA apps.
+ * MIT License. Copyright (c) 2026 Haowei Wu. See sdk/LICENSE.
+ *
+ * Paste-in library, like lo-game.js: an app carries its own copy inside a script tag
+ * marked data-lo-3d="1.0.0", and `node tools/bundle-app.mjs registry/apps/<id>` fills it in.
+ * Do not edit the copy inside an app; the checker verifies it.
+ *
+ * Pipeline: triangles and billboard sprites are rasterised into a luminance buffer with a
+ * z-buffer (flat sun shading and fog per surface, point lights per pixel), then a 4x4 Bayer
+ * dither turns luminance into the four tones 0-3. The result is a lo-game sprite
+ * ({w, h, px}), so a lo-game app draws it with g.sprite(r.image, 0, 0).
+ * Reference: sdk/LO-3D.md
+ */
+var Lo3D = (function () {
+  "use strict";
+
+  var VERSION = "1.0.0";
+  var TONES = ["#1f2a14", "#4a5a32", "#7d8a58", "#a3ad7e"];
+  var BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+  var CLEAR = 255;   /* a transparent sprite pixel, as in lo-game */
+  var FAR = 1e9;
+
+  /* ---------------- vector helpers: points are [x, y, z] arrays ---------------- */
+  function add(a, b) { return [a[0] + b[0], a[1] + b[1], a[2] + b[2]]; }
+  function sub(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
+  function scale(a, k) { return [a[0] * k, a[1] * k, a[2] * k]; }
+  function dot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+  function cross(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
+  function norm(a) { var l = Math.sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; }
+  function rotX(p, a) { var c = Math.cos(a), s = Math.sin(a); return [p[0], p[1] * c - p[2] * s, p[1] * s + p[2] * c]; }
+  function rotY(p, a) { var c = Math.cos(a), s = Math.sin(a); return [p[0] * c + p[2] * s, p[1], -p[0] * s + p[2] * c]; }
+  function rotZ(p, a) { var c = Math.cos(a), s = Math.sin(a); return [p[0] * c - p[1] * s, p[0] * s + p[1] * c, p[2]]; }
+
+  /* ---------------- meshes: {v: [[x,y,z]...], t: [[a,b,c]...], c: [albedo per triangle], two} ----------------
+     World axes: x right, y up, z away from the camera at yaw 0. A face is seen from the side where its
+     corners run counter-clockwise; `two: true` draws both sides. */
+  function box(w, h, d) {
+    var v = [], t = [], i, x = w / 2, y = h / 2, z = d / 2;
+    for (i = 0; i < 8; i++) v.push([(i & 1 ? x : -x), (i & 2 ? y : -y), (i & 4 ? z : -z)]);
+    var q = [[0, 2, 3, 1], [4, 5, 7, 6], [0, 1, 5, 4], [2, 6, 7, 3], [0, 4, 6, 2], [1, 3, 7, 5]];
+    for (i = 0; i < 6; i++) t.push([q[i][0], q[i][2], q[i][1]], [q[i][0], q[i][3], q[i][2]]);
+    return { v: v, t: t };
+  }
+  function ico(r) {
+    var g = (1 + Math.sqrt(5)) / 2, v = [[-1, g, 0], [1, g, 0], [-1, -g, 0], [1, -g, 0], [0, -1, g], [0, 1, g], [0, -1, -g], [0, 1, -g], [g, 0, -1], [g, 0, 1], [-g, 0, -1], [-g, 0, 1]];
+    var t = [[0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11], [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8], [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9], [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1]];
+    for (var i = 0; i < v.length; i++) { var n = norm(v[i]); v[i] = [n[0] * r, n[1] * r, n[2] * r]; }
+    return { v: v, t: t.map(function (f) { return [f[0], f[2], f[1]]; }) };
+  }
+  /* a copy of a mesh with every vertex passed through fn(p) -> p; albedo `c` and `two` are kept */
+  function transform(mesh, fn) {
+    return { v: mesh.v.map(function (p) { return fn(p.slice()); }), t: mesh.t, c: mesh.c, two: mesh.two };
+  }
+  function move(mesh, dx, dy, dz) { return transform(mesh, function (p) { return [p[0] + dx, p[1] + dy, p[2] + dz]; }); }
+  /* paint a whole mesh one albedo (0..1) */
+  function paint(mesh, albedo) { var c = []; for (var i = 0; i < mesh.t.length; i++) c.push(albedo); return { v: mesh.v, t: mesh.t, c: c, two: mesh.two }; }
+  /* one mesh from many: draw a static scene in a single call */
+  function merge(list) {
+    var v = [], t = [], c = [], two = false;
+    list.forEach(function (m) {
+      var base = v.length;
+      m.v.forEach(function (p) { v.push(p); });
+      m.t.forEach(function (tr, i) { t.push([tr[0] + base, tr[1] + base, tr[2] + base]); c.push(m.c ? m.c[i] : 1); });
+      if (m.two) two = true;
+    });
+    return { v: v, t: t, c: c, two: two };
+  }
+
+  /* ---------------- the renderer ---------------- */
+  function create(opt) {
+    opt = opt || {};
+    var W = opt.width || 160, H = opt.height || 144, N = W * H;
+    var lum = new Float32Array(N), depth = new Float32Array(N);
+    /* per-pixel data for point lights, made on first use: albedo, view-space normal, true view depth */
+    var alb = null, nxb = null, nyb = null, nzb = null, vzb = null;
+    var px = new Uint8Array(N);
+    var THR = BAYER.map(function (b) { return (b + 0.5) / 16; });
+
+    var r = {
+      width: W, height: H,
+      image: { w: W, h: H, px: px },   /* tones 0-3, a lo-game sprite */
+      lum: lum, depth: depth,
+      /* view(p) = rotX(rotY(p - (x,y,z), -yaw), pitch) + (0, 0, dist): an eye at (x,y,z) when dist is 0,
+         or a camera orbiting the point (x,y,z) at distance dist */
+      camera: { x: 0, y: 0, z: 0, yaw: 0, pitch: 0, dist: 0, focal: 120 },
+      near: 0.2,
+      clip: true,        /* clip triangles at the near plane; false skips any triangle that crosses it */
+      sun: { dir: norm([-0.5, 0.8, -0.4]), ambient: 0.12, diffuse: 0.88 },   /* dir points toward the sun */
+      lights: [],        /* point lights: {x, y, z, radius, power} */
+      fog: null,         /* {near, far, lum}: surfaces fade to lum between the two view depths */
+      focus: null,       /* {near, far}: outside these view depths the dither is twice as coarse */
+      stats: { tris: 0 }
+    };
+    var cam, cy, sy, cp, sp, F, near, fog, fNear, fSpan, fLum;
+    function begin() {
+      cam = r.camera; cy = Math.cos(-cam.yaw); sy = Math.sin(-cam.yaw); cp = Math.cos(cam.pitch); sp = Math.sin(cam.pitch);
+      F = cam.focal; near = r.near; fog = r.fog;
+      if (fog) { fNear = fog.near; fSpan = fog.far - fog.near; fLum = fog.lum; }
+      if (r.lights.length && !alb) {
+        alb = new Float32Array(N); nxb = new Float32Array(N); nyb = new Float32Array(N); nzb = new Float32Array(N); vzb = new Float32Array(N);
+      }
+    }
+    /* world -> view space */
+    function view(p) {
+      var x = p[0] - cam.x, y = p[1] - cam.y, z = p[2] - cam.z;
+      var q0 = x * cy + z * sy, q2 = -x * sy + z * cy;
+      return [q0, y * cp - q2 * sp, y * sp + q2 * cp + cam.dist];
+    }
+    function dir(n) { var q0 = n[0] * cy + n[2] * sy, q2 = -n[0] * sy + n[2] * cy; return [q0, n[1] * cp - q2 * sp, n[1] * sp + q2 * cp]; }
+    function proj(q) { return [W / 2 + q[0] * F / q[2], H / 2 - q[1] * F / q[2], q[2]]; }
+
+    r.clear = function (v) {
+      depth.fill(FAR);
+      if (alb) alb.fill(0);
+      if (typeof v === "function") { for (var y = 0; y < H; y++) { var l = v(y); for (var x = 0; x < W; x++) lum[y * W + x] = l; } }
+      else lum.fill(v == null ? 1 : v);
+      r.stats.tris = 0;
+    };
+    r.clearDepth = function () { depth.fill(FAR); };
+    /* world point -> [screenX, screenY, viewDepth], or null behind the near plane */
+    r.project = function (p) { begin(); var q = view(p); return q[2] < near ? null : proj(q); };
+
+    /* rasterise one screen triangle; L is its fogless luminance, n its view-space normal (for point lights) */
+    function tri(A, B, C, L, a, n) {
+      var minx = Math.max(0, Math.floor(Math.min(A[0], B[0], C[0]))), maxx = Math.min(W - 1, Math.ceil(Math.max(A[0], B[0], C[0])));
+      var miny = Math.max(0, Math.floor(Math.min(A[1], B[1], C[1]))), maxy = Math.min(H - 1, Math.ceil(Math.max(A[1], B[1], C[1])));
+      var area = (B[0] - A[0]) * (C[1] - A[1]) - (B[1] - A[1]) * (C[0] - A[0]);
+      if (area === 0) return;
+      var ia = 1 / area, x, y, lit = n && a > 0;
+      var iA = 1 / A[2], iB = 1 / B[2], iC = 1 / C[2];
+      for (y = miny; y <= maxy; y++) {
+        var py = y + 0.5;
+        for (x = minx; x <= maxx; x++) {
+          var pxx = x + 0.5;
+          var w0 = ((B[0] - pxx) * (C[1] - py) - (B[1] - py) * (C[0] - pxx)) * ia;
+          var w1 = ((C[0] - pxx) * (A[1] - py) - (C[1] - py) * (A[0] - pxx)) * ia;
+          var w2 = 1 - w0 - w1;
+          if (w0 < 0 || w1 < 0 || w2 < 0) continue;
+          var z = w0 * A[2] + w1 * B[2] + w2 * C[2], k = y * W + x;
+          if (z < depth[k]) {
+            depth[k] = z;
+            var l = L;
+            if (fog) { var f = Math.min(1, Math.max(0, (z - fNear) / fSpan)); l = l * (1 - f) + fLum * f; }
+            lum[k] = l;
+            if (alb) {
+              if (lit) { alb[k] = a; nxb[k] = n[0]; nyb[k] = n[1]; nzb[k] = n[2]; vzb[k] = 1 / (w0 * iA + w1 * iB + w2 * iC); }
+              else alb[k] = 0;
+            }
+          }
+        }
+      }
+    }
+    /* a screen-space line into the luminance buffer, no depth: wireframes */
+    function line(A, B, l) {
+      var x0 = Math.round(A[0]), y0 = Math.round(A[1]), x1 = Math.round(B[0]), y1 = Math.round(B[1]);
+      var dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy2 = y0 < y1 ? 1 : -1, e = dx + dy, guard = 0;
+      while (guard++ < 600) {
+        if (x0 >= 0 && y0 >= 0 && x0 < W && y0 < H) { lum[y0 * W + x0] = l; if (alb) alb[y0 * W + x0] = 0; }
+        if (x0 === x1 && y0 === y1) break;
+        var e2 = 2 * e;
+        if (e2 >= dy) { e += dy; x0 += sx; }
+        if (e2 <= dx) { e += dx; y0 += sy2; }
+      }
+    }
+    /* the part of a view-space triangle in front of the near plane, as 0-2 triangles */
+    function clipNear(a, b, c) {
+      var src = [a, b, c], out = [];
+      for (var i = 0; i < 3; i++) {
+        var p = src[i], q = src[(i + 1) % 3], pin = p[2] >= near, qin = q[2] >= near;
+        if (pin) out.push(p);
+        if (pin !== qin) { var t = (near - p[2]) / (q[2] - p[2]); out.push([p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t, near]); }
+      }
+      return out.length === 4 ? [[out[0], out[1], out[2]], [out[0], out[2], out[3]]] : out.length === 3 ? [out] : [];
+    }
+
+    /* draw a mesh; fn maps a model-space vertex to world space (omit for meshes already in place).
+       o: {bias: added luminance (glow), wire: outline instead of fill, albedo: default 1, two: both sides} */
+    r.draw = function (mesh, fn, o) {
+      o = o || {};
+      begin();
+      var n = mesh.v.length, wv = new Array(n), vv = new Array(n), sv = new Array(n), i;
+      var sun = r.sun, LIGHT = sun.dir, amb = sun.ambient, dif = sun.diffuse, bias = o.bias || 0;
+      var two = mesh.two || o.two, wire = o.wire, cols = mesh.c, base = o.albedo == null ? 1 : o.albedo;
+      var wantN = !!alb && r.lights.length > 0;
+      for (i = 0; i < n; i++) { wv[i] = fn ? fn(mesh.v[i]) : mesh.v[i]; vv[i] = view(wv[i]); sv[i] = vv[i][2] < near ? null : proj(vv[i]); }
+      /* a mesh drawn in place keeps its face normals between frames */
+      var normals = fn ? null : mesh.normals || (mesh.normals = mesh.t.map(function (f) { return norm(cross(sub(mesh.v[f[1]], mesh.v[f[0]]), sub(mesh.v[f[2]], mesh.v[f[0]]))); }));
+      for (i = 0; i < mesh.t.length; i++) {
+        var t = mesh.t[i], A = sv[t[0]], B = sv[t[1]], C = sv[t[2]], parts = null;
+        if (!A || !B || !C) {
+          if (wire || !r.clip) continue;
+          parts = clipNear(vv[t[0]], vv[t[1]], vv[t[2]]);
+          if (!parts.length) continue;
+          parts = parts.map(function (p) { return [proj(p[0]), proj(p[1]), proj(p[2])]; });
+          A = parts[0][0]; B = parts[0][1]; C = parts[0][2];
+        }
+        var area = (B[0] - A[0]) * (C[1] - A[1]) - (B[1] - A[1]) * (C[0] - A[0]);
+        if (wire) {
+          if (area > 0 && !two) continue;
+          line(A, B, 0); line(B, C, 0); line(C, A, 0); r.stats.tris++;
+          continue;
+        }
+        if (area >= 0 && !two) continue;
+        /* counter-clockwise faces in a left-handed world: nn points into the surface, away from the viewer */
+        var nn = normals ? normals[i] : norm(cross(sub(wv[t[1]], wv[t[0]]), sub(wv[t[2]], wv[t[0]])));
+        if (area > 0) nn = [-nn[0], -nn[1], -nn[2]];
+        var d = nn[0] * LIGHT[0] + nn[1] * LIGHT[1] + nn[2] * LIGHT[2];
+        var a = cols ? cols[i] * base : base;
+        var L = a === 1 ? amb + dif * Math.max(0, -d) + bias : a * (amb + dif * Math.max(0, -d)) + bias;
+        var vn = wantN ? dir([-nn[0], -nn[1], -nn[2]]) : null;
+        if (parts) for (var j = 0; j < parts.length; j++) tri(parts[j][0], parts[j][1], parts[j][2], L, a, vn);
+        else tri(A, B, C, L, a, vn);
+        r.stats.tris++;
+      }
+    };
+
+    /* an upright sprite that always faces the camera, depth-tested against the scene.
+       o: {scale: world units per sprite pixel (1/16), anchor: "bottom" | "center", flip, map: [t0..t3],
+           shade: luminance factor (1), lit: true to take point lights,
+           crisp: near 1:1 size, draw at exactly 1:1 on whole pixels, so characters stay readable} */
+    r.sprite = function (s, x, y, z, o) {
+      o = o || {};
+      begin();
+      var q = view([x, y, z]);
+      if (q[2] < near) return;
+      var P = proj(q), k = (o.scale || 1 / 16) * F / q[2];
+      if (o.crisp && k > 0.7 && k < 1.45) k = 1;
+      var sw = s.w * k, sh = s.h * k;
+      var left = P[0] - sw / 2, top = o.anchor === "center" ? P[1] - sh / 2 : P[1] - sh;
+      if (o.crisp) { left = Math.round(left); top = Math.round(top); }
+      var x0 = Math.max(0, Math.floor(left)), x1 = Math.min(W - 1, Math.ceil(left + sw));
+      var y0 = Math.max(0, Math.floor(top)), y1 = Math.min(H - 1, Math.ceil(top + sh));
+      var zz = q[2], shade = o.shade == null ? 1 : o.shade, map = o.map, lit = o.lit && alb, ff = 0;
+      if (fog) ff = Math.min(1, Math.max(0, (zz - fNear) / fSpan));
+      for (var yy = y0; yy <= y1; yy++) {
+        var v = Math.floor((yy + 0.5 - top) / k);
+        if (v < 0 || v >= s.h) continue;
+        for (var xx = x0; xx <= x1; xx++) {
+          var u = Math.floor((xx + 0.5 - left) / k);
+          if (u < 0 || u >= s.w) continue;
+          var c = s.px[v * s.w + (o.flip ? s.w - 1 - u : u)];
+          if (c === CLEAR) continue;
+          var kk = yy * W + xx;
+          if (zz >= depth[kk]) continue;
+          depth[kk] = zz;
+          var tone = (map ? map[c] : c) / 3, l = tone * shade;
+          lum[kk] = fog ? l * (1 - ff) + fLum * ff : l;
+          if (alb) {
+            if (lit) { alb[kk] = tone; nxb[kk] = 0; nyb[kk] = 0; nzb[kk] = -1; vzb[kk] = zz; }
+            else alb[kk] = 0;
+          }
+        }
+      }
+    };
+
+    /* luminance -> tones: point lights, then the dither. Returns r.image. */
+    var acc = new Float32Array(N);
+    r.present = function () {
+      begin();
+      var i, x, y, k, foc = r.focus, lit = false, hw = W / 2, hh = H / 2;
+      /* each point light only visits the pixels inside its sphere's screen rectangle */
+      if (alb && r.lights.length) {
+        acc.fill(0);
+        r.lights.forEach(function (L) {
+          var q = view([L.x, L.y, L.z]), rad = L.radius, r2 = rad * rad, pw = L.power == null ? 1 : L.power;
+          if (q[2] + rad < near) return;
+          var zf = Math.max(near, q[2] - rad), half = rad * F / zf, cx = hw + q[0] * F / zf, cyy = hh - q[1] * F / zf;
+          if (q[2] - rad > near) { var P = proj(q); cx = P[0]; cyy = P[1]; }
+          var x0 = Math.max(0, Math.floor(cx - half)), x1 = Math.min(W - 1, Math.ceil(cx + half));
+          var y0 = Math.max(0, Math.floor(cyy - half)), y1 = Math.min(H - 1, Math.ceil(cyy + half));
+          for (var yy = y0; yy <= y1; yy++) for (var xx = x0; xx <= x1; xx++) {
+            var kk = yy * W + xx;
+            if (alb[kk] <= 0 || depth[kk] >= FAR) continue;
+            var Z = vzb[kk], dx = q[0] - (xx + 0.5 - hw) * Z / F, dy = q[1] - (hh - yy - 0.5) * Z / F, dz = q[2] - Z;
+            var d2 = dx * dx + dy * dy + dz * dz;
+            if (d2 >= r2) continue;
+            var ndl = (nxb[kk] * dx + nyb[kk] * dy + nzb[kk] * dz) / (Math.sqrt(d2) || 1);
+            if (ndl <= 0) continue;
+            var att = 1 - d2 / r2;
+            acc[kk] += pw * att * att * ndl;
+            lit = true;
+          }
+        });
+      }
+      for (y = 0, k = 0; y < H; y++) for (x = 0; x < W; x++, k++) {
+        var l = lum[k], z = depth[k];
+        if (lit && acc[k]) l += alb[k] * acc[k] * (fog ? 1 - Math.min(1, Math.max(0, (z - fNear) / fSpan)) : 1);
+        var coarse = foc && z < FAR && (z < foc.near || z > foc.far);
+        var lv = coarse ? l * 3 + THR[((y >> 1) & 3) * 4 + ((x >> 1) & 3)] - 0.5 : l * 3 + THR[(y & 3) * 4 + (x & 3)] - 0.5;
+        px[k] = lv < 0.5 ? 0 : lv < 1.5 ? 1 : lv < 2.5 ? 2 : 3;
+      }
+      return r.image;
+    };
+
+    /* after present: particles straight into the tone image, hidden behind nearer surfaces */
+    r.dot = function (p, tone, size) {
+      begin();
+      var q = view(p); if (q[2] < near) return;
+      var P = proj(q), s = Math.max(1, Math.round((size || 0) * F / q[2])), x0 = Math.round(P[0] - s / 2), y0 = Math.round(P[1] - s / 2);
+      for (var yy = y0; yy < y0 + s; yy++) for (var xx = x0; xx < x0 + s; xx++) {
+        if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue;
+        var k = yy * W + xx; if (q[2] < depth[k]) px[k] = tone;
+      }
+    };
+    r.streak = function (a, b, tone) {
+      begin();
+      var qa = view(a), qb = view(b); if (qa[2] < near || qb[2] < near) return;
+      var A = proj(qa), B = proj(qb), n = Math.max(1, Math.ceil(Math.max(Math.abs(B[0] - A[0]), Math.abs(B[1] - A[1]))));
+      for (var i = 0; i <= n; i++) {
+        var t = i / n, xx = Math.round(A[0] + (B[0] - A[0]) * t), yy = Math.round(A[1] + (B[1] - A[1]) * t);
+        if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue;
+        var k = yy * W + xx; if (A[2] + (B[2] - A[2]) * t < depth[k]) px[k] = tone;
+      }
+    };
+
+    /* for apps without lo-game: write the tone image into a canvas ImageData of the same size */
+    var RGB = TONES.map(function (h) { return [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)]; });
+    r.paint = function (imageData) {
+      var d = imageData.data;
+      for (var i = 0, o = 0; i < N; i++, o += 4) { var c = RGB[px[i]]; d[o] = c[0]; d[o + 1] = c[1]; d[o + 2] = c[2]; d[o + 3] = 255; }
+      return imageData;
+    };
+
+    r.clear(1);
+    return r;
+  }
+
+  return {
+    VERSION: VERSION, TONES: TONES.slice(), create: create,
+    add: add, sub: sub, scale: scale, dot: dot, cross: cross, norm: norm, rotX: rotX, rotY: rotY, rotZ: rotZ,
+    box: box, ico: ico, transform: transform, move: move, paint: paint, merge: merge
+  };
+})();
+</script>
+<script data-lo-game="1.2.0">
+/*
+ * lo-game.js 1.2.0, a tiny game framework for Lo-PDA apps.
+ * MIT License. Copyright (c) 2026 Haowei Wu. See sdk/LICENSE.
+ *
+ * Paste-in library: an app carries its own copy inside a script tag marked
+ * data-lo-game="1.2.0", and `node tools/lo-game.mjs registry/apps/<id>` fills it in.
+ * The same tool adds a pixel-font block holding just the characters the app uses.
+ * Do not edit the copy inside an app; the checker verifies it.
+ *
+ * Everything is drawn into a four-tone indexed framebuffer (values 0-3), so
+ * nothing can ever show a colour outside the palette or a blurred edge.
+ * Reference: sdk/LO-GAME.md
+ */
+var LoGame = (function () {
+  "use strict";
+
+  var VERSION = "1.2.0";
+  var TONES = ["#1f2a14", "#4a5a32", "#7d8a58", "#a3ad7e"];
+  var INK = 0, DARK = 1, MID = 2, PAPER = 3;
+  var CLEAR = 255;
+  var BUTTONS = ["up", "down", "left", "right", "a", "b", "start", "select"];
+  var KEYS = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right",
+    x: "a", X: "a", z: "b", Z: "b", Enter: "start", Shift: "select" };
+  var HAS_PAD = typeof PAD !== "undefined";
+  var BITMAP_FONT = null;   /* set by LoGame.font(data), from the data-lo-font block */
+  function font(data) { BITMAP_FONT = data; }
+  function b64bits(str, n) {
+    var bin = atob(str), out = new Uint8Array(n);
+    for (var i = 0; i < n; i++) out[i] = (bin.charCodeAt(i >> 3) >> (7 - (i & 7))) & 1;
+    return out;
+  }
+
+  /* bilingual text (1.2.0): t({zh: "...", en: "..."}, vars) picks PAD.lang, else the fallback
+     language, else whichever the app wrote. Plain strings pass through. "{name}" is filled from vars. */
+  function padLang() { var l = HAS_PAD && PAD.lang; return l === "zh" || l === "en" ? l : null; }
+  function pick(text, lang, vars) {
+    var s = text;
+    if (s && typeof s === "object") { s = s[lang]; if (s == null) s = text.zh != null ? text.zh : text.en; }
+    s = s == null ? "" : String(s);
+    return vars ? s.replace(/\{(\w+)\}/g, function (m, k) { return vars[k] == null ? "" : String(vars[k]); }) : s;
+  }
+  function t(text, vars) { return pick(text, padLang() || "zh", vars); }
+
+  function rgbOf(hex) { return [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)]; }
+  var RGB = TONES.map(rgbOf);
+
+  /* ---------------- small helpers ---------------- */
+  function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+  function lerp(a, b, t) { return a + (b - a) * t; }
+  function approach(v, target, step) { return v < target ? Math.min(v + step, target) : Math.max(v - step, target); }
+  function rng(seed) {
+    var s = (seed >>> 0) || 0x9e3779b9;
+    var next = function () { s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; };
+    return {
+      next: next,
+      int: function (a, b) { return a + Math.floor(next() * (b - a + 1)); },
+      pick: function (arr) { return arr[Math.floor(next() * arr.length)]; },
+      chance: function (p) { return next() < p; }
+    };
+  }
+  var EASE = {
+    linear: function (t) { return t; },
+    out: function (t) { return 1 - (1 - t) * (1 - t); },
+    "in": function (t) { return t * t; },
+    inOut: function (t) { return t < 0.5 ? 2 * t * t : 1 - 2 * (1 - t) * (1 - t); }
+  };
+
+  /* ---------------- sprites: rows of "0123." ---------------- */
+  function sprite(rows) {
+    if (!Array.isArray(rows) || !rows.length) throw new Error("sprite: give an array of strings");
+    var h = rows.length, w = rows[0].length, px = new Uint8Array(w * h);
+    for (var y = 0; y < h; y++) {
+      if (rows[y].length !== w) throw new Error("sprite: row " + y + " is " + rows[y].length + " wide, expected " + w);
+      for (var x = 0; x < w; x++) {
+        var c = rows[y].charCodeAt(x) - 48;
+        px[y * w + x] = c >= 0 && c <= 3 ? c : CLEAR;
+      }
+    }
+    return { w: w, h: h, px: px };
+  }
+  function sprites(table) { var out = {}; Object.keys(table).forEach(function (k) { out[k] = sprite(table[k]); }); return out; }
+
+  /* ---------------- tile maps ---------------- */
+  function tilemap(opt) {
+    var rows = opt.map.slice(), size = opt.size || 8, tiles = opt.tiles || {}, solid = opt.solid || "";
+    var cols = rows[0].length;
+    rows.forEach(function (r, i) { if (r.length !== cols) throw new Error("tilemap: row " + i + " is " + r.length + " wide, expected " + cols); });
+    var map = {
+      size: size, cols: cols, rows: rows.length, width: cols * size, height: rows.length * size,
+      get: function (tx, ty) { return ty < 0 || ty >= rows.length || tx < 0 || tx >= cols ? null : rows[ty][tx]; },
+      set: function (tx, ty, ch) { if (map.get(tx, ty) === null) return; rows[ty] = rows[ty].slice(0, tx) + ch + rows[ty].slice(tx + 1); },
+      solid: function (tx, ty) { var c = map.get(tx, ty); return c === null || solid.indexOf(c) >= 0; },
+      find: function (ch) { var out = []; rows.forEach(function (r, y) { for (var x = 0; x < r.length; x++) if (r[x] === ch) out.push({ x: x, y: y }); }); return out; },
+      at: function (px, py) { return { x: Math.floor(px / size), y: Math.floor(py / size) }; },
+      draw: function (g, camX, camY) {
+        camX = Math.round(camX || 0); camY = Math.round(camY || 0);
+        var x0 = Math.max(0, Math.floor(camX / size)), y0 = Math.max(0, Math.floor(camY / size));
+        var x1 = Math.min(cols - 1, Math.floor((camX + g.width - 1) / size)), y1 = Math.min(rows.length - 1, Math.floor((camY + g.height - 1) / size));
+        for (var ty = y0; ty <= y1; ty++) for (var tx = x0; tx <= x1; tx++) {
+          var t = tiles[rows[ty][tx]];
+          if (t) g.sprite(t, tx * size - camX, ty * size - camY);
+        }
+      }
+    };
+    return map;
+  }
+  /* top-left of a camera that keeps (x, y) centred inside a world */
+  function camera(x, y, viewW, viewH, worldW, worldH) {
+    return {
+      x: worldW <= viewW ? Math.round((worldW - viewW) / 2) : clamp(Math.round(x - viewW / 2), 0, worldW - viewW),
+      y: worldH <= viewH ? Math.round((worldH - viewH) / 2) : clamp(Math.round(y - viewH / 2), 0, worldH - viewH)
+    };
+  }
+
+  /* ---------------- the game ---------------- */
+  function create(opt) {
+    opt = opt || {};
+    var W = opt.width || 160, H = opt.height || 144;
+    var LANG = padLang() || (opt.lang === "en" ? "en" : "zh");   /* opt.lang: the app's own default */
+    var STEP = 1 / 60;
+    var fontOpt = opt.font || {};
+    /* text: the pixel font when the app carries one, the phone's own font otherwise */
+    var BF = fontOpt.system ? null : BITMAP_FONT;
+    var FONT = { size: fontOpt.size || 12, family: fontOpt.family || "sans-serif", weight: fontOpt.weight || "400",
+      threshold: fontOpt.threshold || 0.45 };
+    FONT.line = BF ? BF.line : FONT.size + 2;
+    FONT.cell = BF ? BF.cell : FONT.line;
+
+    /* --- page and canvas --- */
+    var parent = opt.parent || document.body;
+    var border = opt.border == null ? PAPER : opt.border;
+    if (!opt.parent) {
+      var st = document.createElement("style");
+      st.textContent = "html,body{margin:0;height:100%;overflow:hidden;background:" + TONES[border] + "}" +
+        "body{display:flex;align-items:center;justify-content:center;touch-action:none;-webkit-user-select:none;user-select:none}";
+      document.head.appendChild(st);
+    }
+    var canvas = document.createElement("canvas");
+    canvas.width = W; canvas.height = H;
+    canvas.style.cssText = "display:block;image-rendering:pixelated;image-rendering:crisp-edges;touch-action:none";
+    parent.appendChild(canvas);
+    var ctx = canvas.getContext("2d");
+    var image = ctx.createImageData(W, H);
+    function fit() {
+      var aw = parent.clientWidth || innerWidth, ah = parent.clientHeight || innerHeight;
+      var dpr = window.devicePixelRatio || 1, best = Math.min(aw / W, ah / H), k = Math.floor(best * dpr) / dpr;
+      if (k < best * 0.9) k = best;   /* small screens: size beats perfectly even pixels */
+      k = Math.max(0.5, k);
+      canvas.style.width = Math.round(W * k) + "px"; canvas.style.height = Math.round(H * k) + "px";
+      game.scale = k;
+    }
+
+    /* --- framebuffer and drawing --- */
+    var buf = new Uint8Array(W * H);
+    var ox = 0, oy = 0, cx0 = 0, cy0 = 0, cx1 = W, cy1 = H;
+    function put(x, y, c) { if (x >= cx0 && y >= cy0 && x < cx1 && y < cy1) buf[y * W + x] = c; }
+
+    var fc = document.createElement("canvas"), fx = null, glyphs = {}, baseline = 0;
+    function fontCtx() {
+      if (fx) return fx;
+      fc.width = FONT.size * 3; fc.height = FONT.line + 4;
+      fx = fc.getContext("2d", { willReadFrequently: true });
+      fx.font = FONT.weight + " " + FONT.size + "px " + FONT.family;
+      fx.textBaseline = "alphabetic"; fx.fillStyle = TONES[INK];
+      var m = fx.measureText("国");
+      baseline = BF ? BF.cell - 2 : Math.round(m.actualBoundingBoxAscent || FONT.size * 0.88);
+      return fx;
+    }
+    /* a glyph is the system font at its native pixel size, thresholded to one bit */
+    function glyph(ch) {
+      var g = glyphs[ch]; if (g) return g;
+      var bf = BF && BF.glyphs[ch];
+      if (bf) {
+        var cut = bf.indexOf(":"), adv0 = +bf.slice(0, cut);
+        return (glyphs[ch] = { w: adv0, adv: adv0, h: BF.cell, bits: b64bits(bf.slice(cut + 1), adv0 * BF.cell) });
+      }
+      var x = fontCtx(), adv = Math.max(1, Math.round(x.measureText(ch).width));
+      x.clearRect(0, 0, fc.width, fc.height);
+      x.fillText(ch, 0, baseline);
+      var h = FONT.cell, w = Math.min(adv, fc.width), d = x.getImageData(0, 0, w, h).data, bits = new Uint8Array(w * h), lim = FONT.threshold * 255;
+      for (var i = 0; i < w * h; i++) bits[i] = d[i * 4 + 3] >= lim ? 1 : 0;
+      g = glyphs[ch] = { w: w, adv: adv, h: h, bits: bits };
+      return g;
+    }
+    function measure(str) { var w = 0; Array.from(String(str)).forEach(function (ch) { if (ch !== "\n") w += glyph(ch).adv; }); return w; }
+    var NO_START = "，。！？、；：）」』》,.!?;:)]%";
+    function wrap(str, width) {
+      var lines = [];
+      String(str).split("\n").forEach(function (para) {
+        var tokens = para.match(/[A-Za-z0-9'_\-]+|\s|./gu) || [""], line = "", lw = 0;
+        tokens.forEach(function (t) {
+          var tw = measure(t);
+          if (lw + tw > width && line && NO_START.indexOf(t) < 0) {
+            lines.push(line.replace(/\s+$/, "")); line = ""; lw = 0;
+            if (/^\s$/.test(t)) return;
+          }
+          line += t; lw += tw;
+        });
+        lines.push(line);
+      });
+      return lines;
+    }
+
+    var g = {
+      width: W, height: H, INK: INK, DARK: DARK, MID: MID, PAPER: PAPER,
+      clear: function (c) { buf.fill(c == null ? PAPER : c); },
+      origin: function (x, y) { ox = Math.round(x || 0); oy = Math.round(y || 0); },
+      clip: function (x, y, w, h) {
+        if (x == null) { cx0 = 0; cy0 = 0; cx1 = W; cy1 = H; return; }
+        cx0 = clamp(Math.round(x + ox), 0, W); cy0 = clamp(Math.round(y + oy), 0, H);
+        cx1 = clamp(Math.round(x + ox + w), 0, W); cy1 = clamp(Math.round(y + oy + h), 0, H);
+      },
+      pixel: function (x, y, c) { put(Math.round(x) + ox, Math.round(y) + oy, c); },
+      get: function (x, y) { x = Math.round(x) + ox; y = Math.round(y) + oy; return x < 0 || y < 0 || x >= W || y >= H ? null : buf[y * W + x]; },
+      rect: function (x, y, w, h, c) {
+        x = Math.round(x) + ox; y = Math.round(y) + oy;
+        var xa = Math.max(x, cx0), ya = Math.max(y, cy0), xb = Math.min(x + Math.round(w), cx1), yb = Math.min(y + Math.round(h), cy1);
+        for (var yy = ya; yy < yb; yy++) buf.fill(c, yy * W + xa, yy * W + Math.max(xa, xb));
+      },
+      frame: function (x, y, w, h, c) {
+        g.rect(x, y, w, 1, c); g.rect(x, y + h - 1, w, 1, c); g.rect(x, y, 1, h, c); g.rect(x + w - 1, y, 1, h, c);
+      },
+      line: function (x0, y0, x1, y1, c) {
+        x0 = Math.round(x0); y0 = Math.round(y0); x1 = Math.round(x1); y1 = Math.round(y1);
+        var dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1, e = dx + dy;
+        for (;;) { put(x0 + ox, y0 + oy, c); if (x0 === x1 && y0 === y1) break; var e2 = 2 * e; if (e2 >= dy) { e += dy; x0 += sx; } if (e2 <= dx) { e += dx; y0 += sy; } }
+      },
+      circle: function (cx, cy, r, c, fill) {
+        cx = Math.round(cx); cy = Math.round(cy);
+        for (var y = -r; y <= r; y++) {
+          var span = Math.round(Math.sqrt(r * r + r - y * y));
+          if (fill) g.rect(cx - span, cy + y, span * 2 + 1, 1, c);
+          else { g.pixel(cx - span, cy + y, c); g.pixel(cx + span, cy + y, c); }
+        }
+        if (!fill) for (var x = -r; x <= r; x++) { var s2 = Math.round(Math.sqrt(r * r + r - x * x)); g.pixel(cx + x, cy - s2, c); g.pixel(cx + x, cy + s2, c); }
+      },
+      /* level 0-4: 0 nothing, 2 checkerboard, 4 solid */
+      dither: function (x, y, w, h, c, level) {
+        level = clamp(level == null ? 2 : level, 0, 4);
+        x = Math.round(x); y = Math.round(y);
+        for (var yy = 0; yy < h; yy++) for (var xx = 0; xx < w; xx++) {
+          var px = (x + xx) & 1, py = (y + yy) & 1;
+          var on = level === 4 || (level === 3 && !(px && py)) || (level === 2 && px === py) || (level === 1 && !px && !py);
+          if (on) put(x + xx + ox, y + yy + oy, c);
+        }
+      },
+      /* opts: {flip, flipY, color (paint every opaque pixel one tone), map: [t0,t1,t2,t3]} */
+      sprite: function (s, x, y, o) {
+        o = o || {};
+        x = Math.round(x) + ox; y = Math.round(y) + oy;
+        var w = s.w, h = s.h, px = s.px, one = o.color, map = o.map;
+        for (var yy = 0; yy < h; yy++) {
+          var dy = y + yy; if (dy < cy0 || dy >= cy1) continue;
+          var sy = o.flipY ? h - 1 - yy : yy;
+          for (var xx = 0; xx < w; xx++) {
+            var dx = x + xx; if (dx < cx0 || dx >= cx1) continue;
+            var v = px[sy * w + (o.flip ? w - 1 - xx : xx)];
+            if (v === CLEAR) continue;
+            buf[dy * W + dx] = one != null ? one : map ? map[v] : v;
+          }
+        }
+      },
+      /* opts: {color, align: "left"|"center"|"right", width (wrap), shadow: tone} -> height drawn */
+      text: function (str, x, y, o) {
+        o = o || {};
+        var color = o.color == null ? INK : o.color;
+        var lines = o.width ? wrap(str, o.width) : String(str).split("\n"), yy = Math.round(y);
+        lines.forEach(function (ln) {
+          /* with a width, align inside x..x+width; without one, x is the centre or the right edge */
+          var lw = measure(ln), box = o.width || 0, xx = Math.round(x);
+          if (o.align === "center") xx = Math.round(box ? x + (box - lw) / 2 : x - lw / 2);
+          else if (o.align === "right") xx = Math.round(box ? x + box - lw : x - lw);
+          Array.from(ln).forEach(function (ch) {
+            var gl = glyph(ch);
+            for (var j = 0; j < gl.h; j++) for (var i = 0; i < gl.w; i++) if (gl.bits[j * gl.w + i]) {
+              if (o.shadow != null) put(xx + i + 1 + ox, yy + j + 1 + oy, o.shadow);
+              put(xx + i + ox, yy + j + oy, color);
+            }
+            xx += gl.adv;
+          });
+          yy += FONT.line;
+        });
+        return lines.length * FONT.line;
+      },
+      measure: measure,
+      wrap: wrap,
+      lineHeight: FONT.line,
+      /* the standard window: paper inside, ink border with cut corners */
+      window: function (x, y, w, h, o) {
+        o = o || {};
+        g.rect(x + 1, y + 1, w - 2, h - 2, o.fill == null ? PAPER : o.fill);
+        var c = o.border == null ? INK : o.border;
+        g.rect(x + 1, y, w - 2, 1, c); g.rect(x + 1, y + h - 1, w - 2, 1, c);
+        g.rect(x, y + 1, 1, h - 2, c); g.rect(x + w - 1, y + 1, 1, h - 2, c);
+        if (!o.thin) { g.rect(x + 2, y + 2, w - 4, 1, MID); }
+      },
+      /* a small arrow used by menus and "more" markers */
+      arrow: function (x, y, dir, c) {
+        c = c == null ? INK : c;
+        for (var i = 0; i < 4; i++) {
+          if (dir === "down") g.rect(x + i, y + i, 7 - 2 * i, 1, c);
+          else g.rect(x + i, y + i, 1, 7 - 2 * i, c);
+        }
+      }
+    };
+
+    /* --- palette effects: every frame the indexed buffer goes through this map --- */
+    var pal = [0, 1, 2, 3], fadeLevel = 0, fadeTo = PAPER, flashT = 0, shakeT = 0, shakeA = 0, sx = 0, sy = 0;
+    function present() {
+      var map = pal.slice();
+      if (fadeLevel) for (var i = 0; i < 4; i++) map[i] = fadeTo === PAPER ? Math.min(3, i + fadeLevel) : Math.max(0, i - fadeLevel);
+      if (flashT > 0) map = map.map(function (v) { return 3 - v; });
+      var d = image.data, n = W * H;
+      if (shakeT > 0) { sx = Math.round((Math.random() * 2 - 1) * shakeA); sy = Math.round((Math.random() * 2 - 1) * shakeA); } else { sx = sy = 0; }
+      for (var y = 0; y < H; y++) for (var x = 0; x < W; x++) {
+        var srcX = x - sx, srcY = y - sy, v = srcX < 0 || srcY < 0 || srcX >= W || srcY >= H ? PAPER : buf[srcY * W + srcX];
+        var c = RGB[map[v]], o = (y * W + x) * 4;
+        d[o] = c[0]; d[o + 1] = c[1]; d[o + 2] = c[2]; d[o + 3] = 255;
+      }
+      ctx.putImageData(image, 0, 0);
+      return n;
+    }
+
+    /* --- input: chin buttons through PAD, keyboard as a fallback, and the pointer --- */
+    var held = {}, heldFor = {}, queued = {}, pressedNow = {}, releasedNow = {}, queuedUp = {};
+    function down(b) { if (held[b]) return; held[b] = true; heldFor[b] = 0; queued[b] = true; }
+    function up(b) { if (!held[b]) return; held[b] = false; queuedUp[b] = true; }
+    if (HAS_PAD && PAD.on) { PAD.on("press", down); PAD.on("release", up); }
+    else {
+      addEventListener("keydown", function (e) { var b = KEYS[e.key]; if (b) { e.preventDefault(); if (!e.repeat) down(b); } });
+      addEventListener("keyup", function (e) { var b = KEYS[e.key]; if (b) up(b); });
+    }
+    addEventListener("blur", function () { BUTTONS.forEach(up); });
+    var pointer = { x: 0, y: 0, down: false, pressed: false, released: false }, pQueued = false, pQueuedUp = false;
+    function toScreen(e) {
+      var r = canvas.getBoundingClientRect();
+      pointer.x = Math.floor((e.clientX - r.left) * W / r.width); pointer.y = Math.floor((e.clientY - r.top) * H / r.height);
+    }
+    canvas.addEventListener("pointerdown", function (e) { e.preventDefault(); try { canvas.setPointerCapture(e.pointerId); } catch (x) {} toScreen(e); pointer.down = true; pQueued = true; });
+    canvas.addEventListener("pointermove", function (e) { toScreen(e); });
+    ["pointerup", "pointercancel"].forEach(function (t) { canvas.addEventListener(t, function (e) { toScreen(e); if (pointer.down) { pointer.down = false; pQueuedUp = true; } }); });
+    function inputBegin() {
+      pressedNow = queued; queued = {}; releasedNow = queuedUp; queuedUp = {};
+      pointer.pressed = pQueued; pQueued = false; pointer.released = pQueuedUp; pQueuedUp = false;
+    }
+    function inputEnd() { BUTTONS.forEach(function (b) { if (held[b]) heldFor[b] += STEP; }); }
+
+    /* --- timers and tweens (owned by the scene stack; cleared by game.go) --- */
+    var timers = [], tweens = [];
+    function runTimers() {
+      for (var i = 0; i < timers.length; i++) {
+        var t = timers[i]; t.left -= STEP;
+        if (t.left <= 0 && !t.dead) { t.fn(); if (t.every) t.left += t.every; else t.dead = true; }
+      }
+      timers = timers.filter(function (t) { return !t.dead; });
+      for (i = 0; i < tweens.length; i++) {
+        var w = tweens[i]; w.t = Math.min(1, w.t + STEP / w.dur);
+        var k = w.ease(w.t);
+        for (var p in w.to) w.obj[p] = lerp(w.from[p], w.to[p], k);
+        if (w.t >= 1) { w.dead = true; w.done(); }
+      }
+      tweens = tweens.filter(function (w) { return !w.dead; });
+    }
+
+    /* --- scenes: a stack; only the top one updates, all of them draw --- */
+    var scenes = {}, stack = [], busy = false;
+    function sceneOf(s) { if (typeof s === "string") { if (!scenes[s]) throw new Error("no scene named " + s); return scenes[s]; } return s; }
+    function enter(s, args) { var e = { scene: s, args: args, resolve: null }; stack.push(e); if (s.enter) s.enter(args); return e; }
+
+    var game = {
+      VERSION: VERSION, width: W, height: H, g: g, time: 0, frame: 0, scale: 1, pointer: pointer, lang: LANG,
+      t: function (text, vars) { return pick(text, LANG, vars); },
+      INK: INK, DARK: DARK, MID: MID, PAPER: PAPER,
+
+      scene: function (name, def) { scenes[name] = def; return def; },
+      start: function (name, args) { stack = []; enter(sceneOf(name), args); loop(); },
+      go: function (name, args, o) {
+        o = o || {};
+        var next = sceneOf(name);
+        var swap = function () {
+          while (stack.length) { var e = stack.pop(); if (e.scene.exit) e.scene.exit(); if (e.resolve) e.resolve(null); }
+          timers = []; tweens = [];
+          enter(next, args);
+        };
+        if (o.fade === false) { swap(); return Promise.resolve(); }
+        busy = true;
+        return game.fade("out", o.time || 0.25, o.to).then(function () { swap(); return game.fade("in", o.time || 0.25, o.to); }).then(function () { busy = false; });
+      },
+      /* overlays: game.push(scene) resolves with the value given to game.pop(value) */
+      push: function (s, args) { return new Promise(function (res) { enter(sceneOf(s), args).resolve = res; }); },
+      pop: function (value) {
+        var e = stack.pop(); if (!e) return;
+        if (e.scene.exit) e.scene.exit();
+        if (e.resolve) e.resolve(value);
+      },
+      top: function () { var e = stack[stack.length - 1]; return e && e.scene; },
+
+      btn: function (b) { return !!held[b]; },
+      pressed: function (b) { return !!pressedNow[b]; },
+      released: function (b) { return !!releasedNow[b]; },
+      /* true when first pressed, then again every `rate` seconds after `delay` (menus, cursors) */
+      repeat: function (b, delay, rate) {
+        if (pressedNow[b]) return true;
+        if (!held[b]) return false;
+        delay = delay == null ? 0.32 : delay; rate = rate == null ? 0.09 : rate;
+        var t = heldFor[b] - delay; return t >= 0 && Math.floor(t / rate) !== Math.floor((t - STEP) / rate);
+      },
+      /* A, START or a tap: "carry on" */
+      ok: function () { return !!(pressedNow.a || pressedNow.start || pointer.pressed); },
+      /* the D-pad as a direction: {x, y}, one step per press with repeat */
+      dir: function (delay, rate) {
+        return { x: (game.repeat("right", delay, rate) ? 1 : 0) - (game.repeat("left", delay, rate) ? 1 : 0),
+                 y: (game.repeat("down", delay, rate) ? 1 : 0) - (game.repeat("up", delay, rate) ? 1 : 0) };
+      },
+
+      after: function (sec, fn) { var t = { left: sec, fn: fn }; timers.push(t); return function () { t.dead = true; }; },
+      every: function (sec, fn) { var t = { left: sec, every: sec, fn: fn }; timers.push(t); return function () { t.dead = true; }; },
+      wait: function (sec) { return new Promise(function (res) { game.after(sec, res); }); },
+      tween: function (obj, to, sec, ease) {
+        return new Promise(function (res) {
+          var from = {}; for (var p in to) from[p] = obj[p];
+          tweens.push({ obj: obj, from: from, to: to, dur: Math.max(STEP, sec), t: 0, ease: EASE[ease || "out"] || EASE.out, done: res });
+        });
+      },
+
+      /* screen effects */
+      fade: function (dir, sec, to) {
+        fadeTo = to == null ? PAPER : to;
+        var steps = 3, each = (sec == null ? 0.25 : sec) / steps, i = 0;
+        return new Promise(function (res) {
+          var tick = function () {
+            i++; fadeLevel = dir === "out" ? i : steps - i;
+            if (i >= steps) { if (dir !== "out") fadeLevel = 0; res(); } else game.after(each, tick);
+          };
+          if (dir !== "out") fadeLevel = steps;
+          game.after(each, tick);
+        });
+      },
+      flash: function (sec) { flashT = sec == null ? 0.08 : sec; },
+      shake: function (amount, sec) { shakeA = amount == null ? 2 : amount; shakeT = sec == null ? 0.25 : sec; },
+
+      sfx: function (name) { if (HAS_PAD && PAD.sfx) PAD.sfx(name); },
+      save: function (key, value) { if (HAS_PAD) PAD.save(key, value); else memory[key] = JSON.parse(JSON.stringify(value)); },
+      load: function (key) { return HAS_PAD ? PAD.load(key) : Promise.resolve(key in memory ? memory[key] : null); },
+      remove: function (key) { if (HAS_PAD) PAD.remove(key); else delete memory[key]; },
+
+      /* dialogue: resolves when the player has read every page */
+      say: function (text, o) { return game.push(dialogScene(text, o || {})); },
+      /* menu: resolves with the chosen index, or -1 when cancelled with B */
+      choose: function (items, o) { return game.push(menuScene(items, o || {})); }
+    };
+    var memory = {};
+
+    /* --- built-in overlay: dialogue box with a typewriter --- */
+    function dialogScene(text, o) {
+      var pages = [], boxH = o.lines ? o.lines * FONT.line + 10 : 3 * FONT.line + 10, innerW = W - 16;
+      (Array.isArray(text) ? text : [text]).forEach(function (t) {
+        var ls = wrap(t, innerW), per = Math.floor((boxH - 10) / FONT.line);
+        for (var i = 0; i < ls.length; i += per) pages.push(ls.slice(i, i + per));
+      });
+      var page = 0, shown = 0, speed = o.speed || 40, blip = o.blip !== false, y = o.top ? 0 : H - boxH, sinceBlip = 0;
+      function total() { return Array.from(pages[page].join("")).length; }
+      return {
+        update: function () {
+          if (shown < total()) {
+            var before = Math.floor(shown);
+            shown = Math.min(total(), shown + speed * STEP);
+            if (blip && Math.floor(shown) !== before && (sinceBlip++ % 3 === 0)) game.sfx("tick");
+            if (game.ok() || game.pressed("b")) shown = total();
+          } else if (game.ok() || game.pressed("b")) {
+            if (page < pages.length - 1) { page++; shown = 0; game.sfx("move"); }
+            else { game.sfx("move"); game.pop(true); }
+          }
+        },
+        draw: function (gg) {
+          gg.origin(0, 0); gg.clip();
+          var top = y;
+          if (o.name) {
+            var nw = measure(o.name) + 10, ny = o.top ? boxH - 1 : top - FONT.line - 3;
+            gg.window(4, ny, nw, FONT.line + 4, { thin: true });
+            gg.text(o.name, 9, ny + 2);
+          }
+          gg.window(0, top, W, boxH);
+          var left = Math.floor(shown), ty = top + 5;
+          pages[page].forEach(function (ln) {
+            var part = Array.from(ln).slice(0, Math.max(0, left)).join("");
+            left -= Array.from(ln).length;
+            gg.text(part, 8, ty); ty += FONT.line;
+          });
+          if (shown >= total() && Math.floor(game.time * 3) % 2 === 0) gg.arrow(W - 13, top + boxH - 7, "down");
+        }
+      };
+    }
+
+    /* --- built-in overlay: a vertical menu --- */
+    function menuScene(items, o) {
+      var sel = clamp(o.index || 0, 0, items.length - 1), pad = 6, rowH = FONT.line + 2;
+      var w = o.width || Math.max.apply(null, items.map(measure).concat([o.title ? measure(o.title) : 0])) + pad * 2 + 10;
+      var h = items.length * rowH + pad * 2 - 2 + (o.title ? rowH : 0);
+      var x = o.x == null ? Math.round((W - w) / 2) : o.x, y = o.y == null ? Math.round((H - h) / 2) : o.y;
+      var cancel = o.cancel !== false;
+      return {
+        update: function () {
+          var d = game.dir();
+          if (d.y) { sel = (sel + d.y + items.length) % items.length; game.sfx("move"); }
+          if (game.pressed("a") || game.pressed("start")) { game.sfx("tap"); game.pop(sel); return; }
+          if (cancel && game.pressed("b")) { game.sfx("miss"); game.pop(-1); return; }
+          if (pointer.pressed) {
+            var r = Math.floor((pointer.y - y - pad - (o.title ? rowH : 0)) / rowH);
+            if (pointer.x >= x && pointer.x < x + w && r >= 0 && r < items.length) { sel = r; game.sfx("tap"); game.pop(sel); }
+            else if (cancel) { game.sfx("miss"); game.pop(-1); }
+          }
+        },
+        draw: function (gg) {
+          gg.origin(0, 0); gg.clip();
+          gg.window(x, y, w, h);
+          var ty = y + pad;
+          if (o.title) { gg.text(o.title, x + pad, ty, { color: DARK }); ty += rowH; }
+          items.forEach(function (it, i) {
+            if (i === sel) gg.arrow(x + pad - 1, ty + 3, "right");
+            gg.text(it, x + pad + 8, ty);
+            ty += rowH;
+          });
+        }
+      };
+    }
+
+    /* --- the loop: fixed 60 steps a second, one draw per screen refresh --- */
+    var last = 0, acc = 0, running = false;
+    function tick() {
+      inputBegin();
+      runTimers();
+      var top = stack[stack.length - 1];
+      if (top && top.scene.update && !busy) top.scene.update(STEP);
+      if (flashT > 0) flashT -= STEP;
+      if (shakeT > 0) shakeT -= STEP;
+      game.time += STEP; game.frame++;
+      inputEnd();
+    }
+    function render() {
+      g.origin(0, 0); g.clip();
+      for (var i = 0; i < stack.length; i++) { var s = stack[i].scene; g.origin(0, 0); g.clip(); if (s.draw) s.draw(g); }
+      present();
+    }
+    function frame(ts) {
+      requestAnimationFrame(frame);
+      if (!last) last = ts;
+      acc += Math.min(0.1, (ts - last) / 1000); last = ts;
+      var n = 0;
+      while (acc >= STEP && n < 6) { tick(); acc -= STEP; n++; }
+      if (n) render();
+    }
+    function loop() {
+      if (running) return; running = true;
+      fit(); addEventListener("resize", fit);
+      document.addEventListener("visibilitychange", function () { last = 0; });
+      requestAnimationFrame(frame);
+    }
+    g.clear();
+    return game;
+  }
+
+  return {
+    VERSION: VERSION, TONES: TONES.slice(), font: font, INK: INK, DARK: DARK, MID: MID, PAPER: PAPER, BUTTONS: BUTTONS.slice(),
+    create: create, sprite: sprite, sprites: sprites, tilemap: tilemap, camera: camera, rng: rng,
+    clamp: clamp, lerp: lerp, approach: approach, t: t
+  };
+})();
+</script>
+<script data-lo-font="lopix12">
+/*
+lopix12: a 12-pixel bitmap font for Lo-PDA apps.
+
+lopix12 is a Modified Version of Fusion Pixel Font (12px, proportional,
+Simplified Chinese; upstream release 2026.08.11): its glyphs were rasterized at
+their native size into one-bit bitmaps, and apps carry only the characters they
+use. It is distributed under the SIL Open Font License 1.1, below, and only
+under that license. It is not named Fusion Pixel, which is a Reserved Font Name.
+
+Fusion Pixel Font: https://github.com/TakWolf/fusion-pixel-font
+Copyright (c) 2022, TakWolf (https://takwolf.com), with Reserved Font Name 'Fusion Pixel'.
+It combines glyphs from these OFL-licensed fonts:
+- Ark Pixel Font, Copyright (c) 2021, TakWolf (https://takwolf.com).
+- Cubic 11, including JF Dot M+H 12, Copyright(c) 2005 M+ FONTS PROJECT,
+  and M+ BITMAP FONTS, Copyright (C) 2002-2004 COZ.
+- Galmuri, Copyright (c) 2019-2025 Lee Minseo (quiple@quiple.dev).
+
+-----------------------------------------------------------
+SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
+-----------------------------------------------------------
+
+PREAMBLE
+The goals of the Open Font License (OFL) are to stimulate worldwide
+development of collaborative font projects, to support the font creation
+efforts of academic and linguistic communities, and to provide a free and
+open framework in which fonts may be shared and improved in partnership
+with others.
+
+The OFL allows the licensed fonts to be used, studied, modified and
+redistributed freely as long as they are not sold by themselves. The
+fonts, including any derivative works, can be bundled, embedded,
+redistributed and/or sold with any software provided that any reserved
+names are not used by derivative works. The fonts and derivatives,
+however, cannot be released under any other type of license. The
+requirement for fonts to remain under this license does not apply
+to any document created using the fonts or their derivatives.
+
+DEFINITIONS
+"Font Software" refers to the set of files released by the Copyright
+Holder(s) under this license and clearly marked as such. This may
+include source files, build scripts and documentation.
+
+"Reserved Font Name" refers to any names specified as such after the
+copyright statement(s).
+
+"Original Version" refers to the collection of Font Software components as
+distributed by the Copyright Holder(s).
+
+"Modified Version" refers to any derivative made by adding to, deleting,
+or substituting -- in part or in whole -- any of the components of the
+Original Version, by changing formats or by porting the Font Software to a
+new environment.
+
+"Author" refers to any designer, engineer, programmer, technical
+writer or other person who contributed to the Font Software.
+
+PERMISSION & CONDITIONS
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of the Font Software, to use, study, copy, merge, embed, modify,
+redistribute, and sell modified and unmodified copies of the Font
+Software, subject to the following conditions:
+
+1) Neither the Font Software nor any of its individual components,
+in Original or Modified Versions, may be sold by itself.
+
+2) Original or Modified Versions of the Font Software may be bundled,
+redistributed and/or sold with any software, provided that each copy
+contains the above copyright notice and this license. These can be
+included either as stand-alone text files, human-readable headers or
+in the appropriate machine-readable metadata fields within text or
+binary files as long as those fields can be easily viewed by the user.
+
+3) No Modified Version of the Font Software may use the Reserved Font
+Name(s) unless explicit written permission is granted by the corresponding
+Copyright Holder. This restriction only applies to the primary font name as
+presented to the users.
+
+4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font
+Software shall not be used to promote, endorse or advertise any
+Modified Version, except to acknowledge the contribution(s) of the
+Copyright Holder(s) and the Author(s) or with their explicit written
+permission.
+
+5) The Font Software, modified or unmodified, in part or in whole,
+must be distributed entirely under this license, and must not be
+distributed under any other license. The requirement for fonts to
+remain under this license does not apply to any document created
+using the Font Software.
+
+TERMINATION
+This license becomes null and void if any of the above conditions are
+not met.
+
+DISCLAIMER
+THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT
+OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
+DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
+OTHER DEALINGS IN THE FONT SOFTWARE.
+*/
+LoGame.font({"name":"lopix12","cell":13,"line":14,"glyphs":{"0":"6:AAciimqyiicAAA==","1":"6:AAIYIIIIIIcAAA==","2":"6:AAciCCEIQg+AAA==","3":"6:AAciCCMCCicAAA==","4":"6:AAEMMUUk+EEAAA==","5":"6:AA+ggg8CCicAAA==","6":"6:AAcigg8iiicAAA==","7":"6:AA+CCEEIIIIAAA==","8":"6:AAciiiciiicAAA==","9":"6:AAciiieCCicAAA=="," ":"6:AAAAAAAAAAAAAA==","!":"4:AEREREBAAA==","\"":"6:AAUUUAAAAAAAAA==","#":"7:AAEiT8kSJPyRIAAA","$":"6:AIcqoocKKqcIAA==","%":"8:AABEpEgIECAkSkQAAA==","&":"7:AADCRIYZSokR0AAA","'":"4:AERAAAAAAA==","(":"6:AEIIQQQQQIIEAA==",")":"6:AQIIEEEEEIIQAA==","*":"6:AAAAAIqcqIAAAA==","+":"6:AAAAAII+IIAAAA==",",":"4:AAAAAABEgA==","-":"6:AAAAAAA+AAAAAA==",".":"4:AAAAAABAAA==","/":"6:ACCEEIIIQQggAA==",":":"4:AAAEAABAAA==",";":"4:AAAEAABEgA==","<":"5:AAABERBBBAAA","=":"6:AAAAAA+A+AAAAA==",">":"5:AAAIIIIiIAAA","?":"6:AAciCCEIIAIAAA==","@":"8:AAA4RJqqqqqqtkA8AA==","A":"8:AAAQECgoRHxEgoIAAA==","B":"7:AAPkKFC+QoUL4AAA","C":"7:AADiKBAgQICI4AAA","D":"7:AAPESFChQoUTwAAA","E":"7:AAP0CBA+QIED8AAA","F":"7:AAP0CBA+QIECAAAA","G":"7:AADiKBAgRoSI8AAA","H":"7:AAIUKFC/QoUKEAAA","I":"4:AORERETgAA==","J":"6:AACCCCCCiicAAA==","K":"7:AAIUSRQwUJESEAAA","L":"6:AAgggggggg+AAA==","M":"8:AACCgsbGqqqSkpIAAA==","N":"7:AAIWKlSlSo0aEAAA","O":"8:AAA4RIKCgoKCRDgAAA==","P":"7:AAPkKFC+QIECAAAA","Q":"8:AAA4RIKCgoKKRDoAAA==","R":"7:AAPkKFC+SIkSEAAA","S":"7:AAHkKAgMBAUJ4AAA","T":"8:AAD+EBAQEBAQEBAAAA==","U":"7:AAIUKFChQoUJ4AAA","V":"8:AACCgkRERCgoEBAAAA==","W":"10:AAAIiiKIlUVRVCIIgiAAAAA=","X":"8:AACCREQoEChERIIAAA==","Y":"8:AACCREQoKBAQEBAAAA==","Z":"7:AAPwIIIIEEED8AAA","[":"6:AcQQQQQQQQQcAA==","\\":"6:AggQQIIIEECCAA==","]":"6:AcEEEEEEEEEcAA==","^":"6:AAIUiAAAAAAAAA==","_":"6:AAAAAAAAAAAA+A==","`":"5:ABBAAAAAAAAA","a":"6:AAAAAcCeiieAAA==","b":"6:AAggg8iiii8AAA==","c":"6:AAAAAciggicAAA==","d":"6:AACCCeiiiieAAA==","e":"6:AAAAAci+gicAAA==","f":"5:AAyEeQhCEAAA","g":"6:AAAAAeiiiieCcA==","h":"6:AAgggsyiiiiAAA==","i":"4:AEAMRETgAA==","j":"4:ACAOIiIiwA==","k":"6:AAgggiswokiAAA==","l":"4:AMRERERgAA==","m":"8:AAAAAADskpKSkpIAAA==","n":"6:AAAAAsyiiiiAAA==","o":"6:AAAAAciiiicAAA==","p":"6:AAAAA8iiii8ggA==","q":"6:AAAAAeiiiieCCA==","r":"5:AAAAWxCEIAAA","s":"6:AAAAAciYEicAAA==","t":"5:ABCEeQhCDAAA","u":"6:AAAAAiiiimaAAA==","v":"6:AAAAAiiUUIIAAA==","w":"8:AAAAAACSkqqqREQAAA==","x":"6:AAAAAiUIIUiAAA==","y":"6:AAAAAiiiUUIIwA==","z":"6:AAAAA+EIQg+AAA==","{":"7:ADCBAgQQECBAgMAA","|":"4:BEREREREAA==","}":"7:AMBAgQICCBAgQwAA","~":"6:AAAAAQqEAAAAAA==","·":"12:AAAAAAAAAAAABgBgAAAAAAAAAAA=","…":"12:AAAAAAAAAAAAZmZmAAAAAAAAAAA=","。":"12:AAAAAAAAAAAAAAAAMASASAMAAAA=","一":"12:AAAAAAAAAAAA/+AAAAAAAAAAAAA=","七":"12:AACACACACODw+ACACACCCCB+AAA=","三":"12:AAf8AAAAAAAAP4AAAAAAAA/+AAA=","上":"12:AABABABABAB8BABABABABA/+AAA=","下":"12:AA/+BABABABQBIBEBABABABAAAA=","不":"12:AA/+AgBADAFQJIxEBCBABABAAAA=","且":"12:AAP4IIIIP4IIIIP4IIIIII/+AAA=","丙":"12:AA/+BABA/+hCiikSoKgCgCgOAAA=","两":"12:AA/+EQEQ/+kSkSqqxGgCgCgOAAA=","个":"12:AABACgEQIIxGBABABABABABAAAA=","丹":"12:AAP8IEJEIkIE/+IEIEQEQEgcAAA=","为":"12:AARAJABA/+BCBSCKCKECICwMAAA=","乙":"12:AA/4AQAgBACAEAIAQAgCgCf+AAA=","了":"12:AAf8AEAIAQAgAgAgAgAgAgDgAAA=","五":"12:AAf8CACACAf4EIEIEIIIII/+AAA=","井":"12:AAEQEQ/+EQEQEQ/+EQEQIQwQAAA=","人":"12:AABABABABACgCgEQEQIIQEgCAAA=","会":"12:AABACgMYwGP4AAAA/+EAIIf0AAA=","传":"12:AAIQL8QgQg3+RAT8QERIQwQIAAA=","体":"12:AAIgIgX+QgxwSoSoUkb6QgQgAAA=","你":"12:AAKAL+SCUSwQRURUSSUSQQQwAAA=","修":"12:AAJAJ8TIUw3OUQVkUYVkQYTgAAA=","傀":"12:AAJAP8UkX80kX8QoRURcSSUeAAA=","光":"12:AABAREJIFQBA/+EQEQESISweAAA=","克":"12:AABA/+BAf8QEQEf8EQESISweAAA=","入":"12:AAEACABABACgCgEQEQIIQEgCAAA=","全":"12:AABACgMYwGP4BABAf8BABA/+AAA=","关":"12:AAIIEQf8BABABA/+CgEQIIwGAAA=","内":"12:AABABA/+hChCiikSoKgCgCgOAAA=","再":"12:AA/+BAf8REf8RERE/+QEQEQcAAA=","凉":"12:AAgQX+QAD8CECET8QQSUkSgwAAA=","出":"12:AABAREREREf8BABAhChChC/+AAA=","击":"12:AABABAf8BABA/+BAREREREf8AAA=","利":"12:AADCcCESES/SESMSOSVCkCEOAAA=","别":"12:AA/ChShS/SIS/SJSJSRCRCmOAAA=","到":"12:AA/iEKIKRK+qEKEK/qECHi4OAAA=","制":"12:AAUCfqkKEK/qEK/qkqkiliEOAAA=","剑":"12:AAECKKRKgqfKAqoqVKVCDi8OAAA=","力":"12:AABABAf+BCBCBCCCCCECICwcAAA=","北":"12:AAEgEgEi8kE4EgEgMg0iEiEeAAA=","升":"12:AADIcIEIEIEI/+EIEIEIIIwIAAA=","协":"12:AARARAX45IRITMVKRKSISIUwAAA=","单":"12:AAIIEQf8REf8REf8BA/+BABAAAA=","南":"12:AABA/+BA/+kSiiv6hCv6hChOAAA=","印":"12:AAGA4+gigi+igigimi4uAgAgAAA=","去":"12:AABABAf8BABA/+CAEIEII0fEAAA=","口":"12:AAAAf8QEQEQEQEQEQEQEf8AAAAA=","只":"12:AAf8QEQEQEQEf8AAAAIIQEgCAAA=","吧":"12:AAD+6SqSqSqSr+qAqA6CCCB+AAA=","吸":"12:AAD85EpEpIpOpCpipU6ICUFiAAA=","品":"12:AAP4IIIIIIP4AA++iiiiii++AAA=","器":"12:AAe8SkSke8BQ/+II++SkSke8AAA=","回":"12:AA/+gCgCnykSkSkSnygCgC/+AAA=","土":"12:AABABABABAf8BABABABABA/+AAA=","在":"12:AACACA/+EAEQIQb+oQIQIQL+AAA=","塔":"12:AAREX+RE44REW6QAb+yCCCD+AAA=","处":"12:AAIIIIPIRIRMpKKIKIEILAw+AAA=","复":"12:AAQAf+oEP8IEP8CAH8cIDw8OAAA=","外":"12:AAIQIQOQSQSYqUESEQIQQQgQAAA=","夜":"12:AABA/+IgI8RESU1IQoQQRoWGAAA=","妖":"12:AAIMJw8QUQUQX+kQUoIoVEiCAAA=","始":"12:AAIQIQ8kVEX6UAl+VCJCVCh+AAA=","婆":"12:AAQQL+iST8CkKYVk/+EIHw4OAAA=","学":"12:AASEJI/+gCv6AQBg/+BABAHAAAA=","守":"12:AABA/+gCgSAQ/+AQIQEQAQBwAAA=","家":"12:AABA/+gCv6DAMkzoMwzoMmzAAAA=","寒":"12:AABA/+kSf8EQ/+EQLIw2HAAwAAA=","封":"12:AAIE+EJ+IE+EAkIU+UIEOEwcAAA=","小":"12:AABABABAJIJERERChCBABAHAAAA=","尸":"12:AAP+ICICICP+IAIAIAQAQAgAAAA=","层":"12:AAf+QCQCf+QAX8QAf+SAUEv6AAA=","屠":"12:AAf+QCf+RCX0RIf+SEX8aEj8AAA=","山":"12:AABABABAhChChChChChChC/+AAA=","岳":"12:AAAYPgIAP8IQIQ/+BAREREf8AAA=","师":"12:AAL+oQoQr+qSqSqSKSKWQQgQAAA=","开":"12:AA/+IIIIIIII/+IIIIQIQIgIAAA=","很":"12:AAL8SEj8KESEz8SSSUSISkTCAAA=","得":"12:AAL8SEj8KET8wAX+QIX+SIRYAAA=","御":"12:AAKAXuhKJKXqxKVqVKVOVoWIAAA=","心":"12:AACABAAgEgEAUEUCUCkKEID4AAA=","怕":"12:AAIIIQp+tCpCpCJ+JCJCJCJ+AAA=","怪":"12:AAJ8JEoosQoorGIQJ8IQIQL+AAA=","按":"12:AAQQT+6CQQQQb+wkREQoQYzmAAA=","掉":"12:AAQQQe4QT8SEb8yET8QQX+wQAAA=","攻":"12:AAAg8gI+JEKkIkIoMowQAoDGAAA=","斗":"12:AAEQCQBQQQIQEQAeDw8QAQAQAAA=","日":"12:AAf8QEQEQEQEf8QEQEQEQEf8AAA=","明":"12:AA9+lClCl+9ClCl+lC9CCCEOAAA=","星":"12:AAf8QEf8QEf8RAf8hAf8BA/+AAA=","春":"12:AABAf8CAf8EA/+IIYMv6IIP4AAA=","是":"12:AAf8QEf8QEf8AA/+JAJ8XAg+AAA=","暂":"12:AAIG+4Qgo++kJEf8QEf8QEf8AAA=","有":"12:AACA/+EAIAP8YEv8IEP8IEIcAAA=","木":"12:AABABA/+FQFQFQJIJIREhCBAAAA=","术":"12:AABIBEBA/+FQFQJIJIREhCBAAAA=","来":"12:AABAf8BAJIFQ/+DgFQJIxGBAAAA=","松":"12:AAIoIo9EJEKCYgcgpEJEKaLiAAA=","枝":"12:AAIIII9+IIIIZ+dCpCIkIYLmAAA=","树":"12:AAIELk8+KkKkZUdMqkKkMEIMAAA=","楼":"12:AAKSJU/+I4JUaScgr+IkI4LGAAA=","武":"12:AAfUAS/+AQEQUQXQUIUKXG4CAAA=","气":"12:AAQAf8gAf4AA/4AIAIAKAKAEAAA=","水":"12:AABABABC9kFoFQJQJIREhCHAAAA=","没":"12:AAR4JIBIhIWOAAD8SERIgwnOAAA=","法":"12:AAQQIQD8gQQQH+AgREREianiAAA=","浮":"12:AAgMXwCihUT8AIAQX+QQgQhwAAA=","涎":"12:AAnCRcCEkEXWBUFUVUSelAk+AAA=","深":"12:AAn+UCAohEWCAQH+QQQ4hUmSAAA=","演":"12:AAgQX+ECj8QQD8CUT8SUj8mGAAA=","潮":"12:AAhOXqBKnuUqHqEuXqRKnqhWAAA=","火":"12:AABABAJEJERIBACgCgEQIIwGAAA=","灵":"12:AAf8AEP8AEf8BAJERICgMYwGAAA=","爪":"12:AAA8fIRIRIRIRIRIRIREREhCAAA=","父":"12:AAEQIIQEoKIIEQCgBACgMYwGAAA=","物":"12:AAJApA9+qqIqMq5KJSKSIiJMAAA=","狐":"12:AAoOT0SUqUKUKUaUqUKkKq12AAA=","现":"12:AAD86ESUSUSU6USUQQYqxKGOAAA=","理":"12:AAD+6SSST+SS6ST+QQb+wQH+AAA=","甲":"12:AA/+hChC/+hChC/+BABABABAAAA=","的":"12:AAIgQg++jCiCiS+KiKiCiC+MAAA=","相":"12:AAJ+JC/CJ+JCdCbCp+JCJCJ+AAA=","着":"12:AAEQ/+CAf8EA/+IEYEv8IEP8AAA=","石":"12:AA/+CACAEAEAP8YEoEIEIEP8AAA=","离":"12:AABA/+EQTkUUf8BA/+kSvqgGAAA=","竭":"12:AAj8SE78CEr8pAr+USaqj6AGAAA=","符":"12:AAQge+lIIAIIT+wISIRIQIQ4AAA=","级":"12:AAT8REhEpIxORChi5UCIKU1iAAA=","缚":"12:AAQUT+gQr+yST+iS4ED+JEwsAAA=","缠":"12:AAQQT+iqqqy+Sqi+6IC+KI1+AAA=","置":"12:AA/+kS/+BA/+BAP4IIP4II/+AAA=","聚":"12:AA/+SCeiSkeYykDCJIJIVUhCAAA=","胜":"12:AA6QqQr86QsQoQ78oQoQoQr+AAA=","能":"12:AAQmk46gAi+eiA+mi4+giimeAAA=","落":"12:AAEQ/+EQQgJ8jEQ4DGJ8REh8AAA=","藤":"12:AAEQ/+ES9Ul+8on+9Uk6nUsyAAA=","蜃":"12:AAf+QAf+UUVIWmX8UkX8Qkv6AAA=","行":"12:AAJ8QAgAL+QIwIQIQIQIQIQ4AAA=","诀":"12:AAggQgD8AkwkQkX+QgRQaIUGAAA=","说":"12:AAiERID8CEyESET8RIVKaKUOAAA=","败":"12:AA+gigq+rEqkqkqoqoIQUojGAAA=","走":"12:AABAf8BABA/+BAJAJ8JAXAg+AAA=","跑":"12:AA9Al+mC96JKJKt6pGpAtCw+AAA=","路":"12:AA8gk8lE+oIQIovGp8pEtEx8AAA=","身":"12:AACAP4IIP4IIP6IM/4BIGI44AAA=","边":"12:AAggQgD+AiwiQiRCRCSMoAn+AAA=","过":"12:AAgIQIH+AIyIRIRIQIQ4oAn+AAA=","还":"12:AAn+QQAgAgxoSkUiQgQgoAn+AAA=","进":"12:AAhIRIH+BIxIX+RIRISIoAn+AAA=","退":"12:AAj8SED8CEz8SiSUSoTGoAn+AAA=","逃":"12:AAhQVUDYBQzYVURQSSUeoAn+AAA=","道":"12:AAhIX+AgD8yET8SESET8oAn+AAA=","部":"12:AAEefSASRUKU/yASfSRcRQfQAAA=","里":"12:AAf8REREf8REREf8BAf8BA/+AAA=","金":"12:AABACgMYwGP4BABAf8JIFQ/+AAA=","铁":"12:AASQaQj86QUQQQ7+QQQoZEWCAAA=","铜":"12:AAT+aCi66CS6Sq6qSqS6aCSGAAA=","镇":"12:AAQQb+gQ58RER85ERET+ZESCAAA=","门":"12:AAn+QCACgCgCgCgCgCgCgCgOAAA=","问":"12:AAn+QCACnykSkSkSnygCgCgOAAA=","防":"12:AA4goQv+pAxAp8pEpE6EiEkYAAA=","阵":"12:AA4gr+pAqQyQr+oQoQ7+gQgQAAA=","阿":"12:AA7+oEoEr0yUqUqUr04EgEgcAAA=","青":"12:AABAf8BAf8BA/+IIP4IIP4IIAAA=","顶":"12:AA7+QQT+SCSSSSSSSSQoREyCAAA=","飞":"12:AA/wASAUAYAUASAQAQAKAKAEAAA=","骗":"12:AA4QJ+pCp+pA9+FqNq1+FqaqAAA=","魅":"12:AAQI+cqI++qI+cKqVIXIUCn+AAA=","魍":"12:AAQ++iq2++qq++KqVuXiUAn+AAA=","！":"12:AAAAIAcAcAcAIAIAIAAAIAAAAAA=","，":"12:AAAAAAAAAAAAAAAAMAMAEAIAAAA=","：":"12:AAAAAAMAMAAAAAAAAAMAMAAAAAA="}});
+</script>
+<script data-src="src/art.js">
+/* Sprites: rows of "0123." (ink, dark, mid, paper, clear). Characters are 16 pixels tall:
+   one world unit at the camera's focus, so they draw 1:1. */
+var ART = LoGame.sprites({
+  heroDown0: [
+    "....0000....",
+    "...022220...",
+    "....0000....",
+    "..00000000..",
+    ".0000000000.",
+    ".0033333300.",
+    ".0303333030.",
+    ".0033333300.",
+    "..00333300..",
+    "...011110...",
+    "..01133110..",
+    ".0311111130.",
+    ".0311221130.",
+    "..01111110..",
+    "..01100110..",
+    "..00....00.."
+  ],
+  heroDown1: [
+    "....0000....",
+    "...022220...",
+    "....0000....",
+    "..00000000..",
+    ".0000000000.",
+    ".0033333300.",
+    ".0303333030.",
+    ".0033333300.",
+    "..00333300..",
+    "...011110...",
+    "..01133110..",
+    ".0311111130.",
+    ".0311221130.",
+    "..01111110..",
+    "...011110...",
+    "...00..00..."
+  ],
+  heroUp0: [
+    "....0000....",
+    "...022220...",
+    "....0000....",
+    "..00000000..",
+    ".0000000000.",
+    ".0001000100.",
+    ".0010001000.",
+    ".0000000000.",
+    "..00000000..",
+    "...011110...",
+    "..01111110..",
+    ".0311111130.",
+    ".0311221130.",
+    "..01111110..",
+    "..01100110..",
+    "..00....00.."
+  ],
+  heroUp1: [
+    "....0000....",
+    "...022220...",
+    "....0000....",
+    "..00000000..",
+    ".0000000000.",
+    ".0001000100.",
+    ".0010001000.",
+    ".0000000000.",
+    "..00000000..",
+    "...011110...",
+    "..01111110..",
+    ".0311111130.",
+    ".0311221130.",
+    "..01111110..",
+    "...011110...",
+    "...00..00..."
+  ],
+  heroSide0: [
+    "......0000..",
+    ".....02220..",
+    "......000...",
+    "...0000000..",
+    "..000000000.",
+    "..033300000.",
+    "..030300000.",
+    "..033330000.",
+    "...0333000..",
+    "....01110...",
+    "...0111110..",
+    "...0311110..",
+    "...0312210..",
+    "...0111110..",
+    "...0110110..",
+    "...00..00..."
+  ],
+  heroSide1: [
+    "......0000..",
+    ".....02220..",
+    "......000...",
+    "...0000000..",
+    "..000000000.",
+    "..033300000.",
+    "..030300000.",
+    "..033330000.",
+    "...0333000..",
+    "....01110...",
+    "...0111110..",
+    "...0311110..",
+    "...0312210..",
+    "...0111110..",
+    "....011100..",
+    "....00.00..."
+  ],
+  elder: [
+    "............",
+    "...000000...",
+    "..01111110..",
+    "000000000000",
+    "..03333330..",
+    "..03033030..",
+    "..03333330..",
+    "..03333330..",
+    "...033330...",
+    "..02333320..",
+    ".0222332220.",
+    ".0222222220.",
+    ".0322222230.",
+    "..02222220..",
+    "..02222220..",
+    "..00....00.."
+  ],
+  granny: [
+    "....0220....",
+    "...022220...",
+    "..02222220..",
+    ".0222222220.",
+    ".0233333320.",
+    ".0303333030.",
+    ".0033333300.",
+    "..00333300..",
+    "...000000...",
+    "..01111110..",
+    ".0111111110.",
+    ".0311111130.",
+    "..01111110..",
+    "..01111110..",
+    "..01111110..",
+    "..00000000.."
+  ],
+  child: [
+    "...0000...",
+    "..000000..",
+    ".00000000.",
+    ".03333330.",
+    ".03033030.",
+    ".03333330.",
+    "..033330..",
+    "..022220..",
+    ".02222220.",
+    ".32222223.",
+    "..022220..",
+    "..00..00.."
+  ]
+});
+</script>
+<script data-src="src/town.js">
+/* The town of 青石镇: map, people, and what they say. Data only; src/world.js builds the 3D scene.
+   Map characters: "." grass  "," path  "T" tree  "L" lantern  "W" well  "#" house  "D" house door (south wall)
+   One character is one world unit. Row 0 is north, toward the tower. */
+var TOWN = {
+  name: "青石镇",
+  map: [
+    "TTTTTTTTTTT,,TTTTTTTTTTT",
+    "T..T.......,,.......T..T",
+    "T.#####...L,,L...####..T",
+    "T.#####....,,....####..T",
+    "T.##D##....,,....#D##..T",
+    "T...,......,,.....,....T",
+    "T...,,,,,,,,,,,,,,,....T",
+    "T.L.....,,,,,,,,....L..T",
+    "T.......,,....,,.......T",
+    "T..T....,,.WW.,,....T..T",
+    "T.......,,.WW.,,.......T",
+    "T.......,,....,,.......T",
+    "T.......,,,,,,,,.......T",
+    "T.####.....,,.....####.T",
+    "T.####..L..,,..L..####.T",
+    "T.#D##.....,,.....##D#.T",
+    "T..,,,,,,,,,,,,,,,,,,..T",
+    "T..........,,..........T",
+    "T..T.......,,.......T..T",
+    "TTTTTTTTTTT,,TTTTTTTTTTT"
+  ],
+  start: { x: 11, y: 16, face: "up" },
+  tower: { x: 12, y: -13 },
+  people: [
+    { x: 6, y: 11, art: "granny", name: "婆婆", say: ["夜里塔上有光。", "你师父说过，\n别一个人上去。"] },
+    { x: 17, y: 10, art: "child", name: "阿青", say: ["井里有星星！", "……骗你的。"] },
+    { x: 13, y: 1, art: "elder", name: "守门人", say: ["封印松了。", "山道还没开。\n明日再来。"] }
+  ],
+  things: [
+    { x: 11, y: 9, say: ["井水很凉。"] },
+    { x: 11, y: 0, say: ["北边是上山的路。\n现在还不能走。"] },
+    { x: 11, y: 19, say: ["南边是回家的路。"] }
+  ]
+};
+</script>
+<script data-src="src/world.js">
+/* The 3D world: turns a map (src/town.js) into lo-3d meshes, lights and colliders, and draws a frame.
+   Tile (col, row) covers x in [col, col+1] and z in [-row-1, -row]: north is +z, away from the camera. */
+var World = (function () {
+  var sub = Lo3D.sub, cross = Lo3D.cross, dot = Lo3D.dot;
+  var CHUNK = 4;
+
+  /* a stable 0..1 number per tile, for texture and scattered trees */
+  function hash(x, y) {
+    var h = (x * 374761393 + y * 668265263) | 0;
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+  }
+
+  /* a mesh under construction; every face is wound so it is seen from the side `out` points to */
+  function builder() {
+    var m = { v: [], t: [], c: [] };
+    m.tri = function (a, b, c, out, alb) {
+      var i = m.v.length;
+      m.v.push(a, b, c);
+      m.t.push(dot(cross(sub(b, a), sub(c, a)), out) <= 0 ? [i, i + 1, i + 2] : [i, i + 2, i + 1]);
+      m.c.push(alb);
+    };
+    m.quad = function (a, b, c, d, out, alb) { m.tri(a, b, c, out, alb); m.tri(a, c, d, out, alb); };
+    /* an axis-aligned box from (x0,y0,z0) to (x1,y1,z1); no bottom, top optional */
+    m.box = function (x0, y0, z0, x1, y1, z1, alb, top) {
+      m.quad([x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0], [0, 0, -1], alb);
+      m.quad([x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1], [0, 0, 1], alb);
+      m.quad([x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0], [-1, 0, 0], alb);
+      m.quad([x1, y0, z0], [x1, y0, z1], [x1, y1, z1], [x1, y1, z0], [1, 0, 0], alb);
+      if (top !== false) m.quad([x0, y1, z0], [x1, y1, z0], [x1, y1, z1], [x0, y1, z1], [0, 1, 0], top == null || top === true ? alb : top);
+    };
+    /* an n-sided cone standing at (x, y, z) */
+    m.cone = function (x, y, z, r, h, n, alb, turn) {
+      for (var i = 0; i < n; i++) {
+        var a0 = (i / n + (turn || 0)) * Math.PI * 2, a1 = ((i + 1) / n + (turn || 0)) * Math.PI * 2, am = (a0 + a1) / 2;
+        m.tri([x + Math.cos(a0) * r, y, z + Math.sin(a0) * r], [x + Math.cos(a1) * r, y, z + Math.sin(a1) * r], [x, y + h, z],
+          [Math.cos(am), r / h, Math.sin(am)], alb);
+      }
+    };
+    /* a four-sided roof: from a w x d rectangle at height y, rising to a ridge (ridge > 0) or a point */
+    m.roof = function (x0, z0, x1, z1, y, h, ridge, alb) {
+      var xm = (x0 + x1) / 2, zm = (z0 + z1) / 2, r = ridge || 0;
+      var A = [xm - r, y + h, zm], B = [xm + r, y + h, zm];
+      m.quad([x0, y, z0], [x1, y, z0], B, A, [0, 1, -1], alb);
+      m.quad([x0, y, z1], [x1, y, z1], B, A, [0, 1, 1], alb);
+      m.tri([x0, y, z0], [x0, y, z1], A, [-1, 1, 0], alb);
+      m.tri([x1, y, z0], [x1, y, z1], B, [1, 1, 0], alb);
+    };
+    return m;
+  }
+
+  /* low-poly pines; the forest outside the town gets the cheaper kind */
+  function tree(m, x, z, s, cheap) {
+    if (cheap) { m.cone(x, 0, z, 0.6 * s, 1.7 * s, 5, 0.42, 0.1); return; }
+    m.cone(x, 0, z, 0.1, 0.6 * s, 3, 0.3, 0);
+    m.cone(x, 0.35 * s, z, 0.62 * s, 0.85 * s, 6, 0.42, 0.08);
+    m.cone(x, 0.85 * s, z, 0.45 * s, 0.75 * s, 5, 0.5, 0);
+  }
+
+  /* a seven-storey pagoda standing at (x, y, z), k times the town tower's size, into builder m.
+     Returns the height of its top. The battle's ultimate drops a phantom copy of it. */
+  function pagoda(m, x, y, z, k, alb) {
+    for (var i = 0; i < 7; i++) {
+      var s = (1.5 - i * 0.14) * k, hgt = (1.5 - i * 0.08) * k;
+      m.box(x - s, y, z - s, x + s, y + hgt, z + s, alb ? alb[0] : 1.2, false);
+      m.roof(x - s - 0.55 * k, z - s - 0.55 * k, x + s + 0.55 * k, z + s + 0.55 * k, y + hgt, 0.45 * k, 0.01, alb ? alb[1] : 0.2);
+      y += hgt + 0.3 * k;
+    }
+    m.cone(x, y - 0.3 * k, z, 0.35 * k, 2.2 * k, 4, alb ? alb[1] : 0.3, 0.125);
+    return y;
+  }
+
+  function build(def) {
+    var rows = def.map, MW = rows[0].length, MH = rows.length;
+    var at = function (c, r) { return r < 0 || r >= MH || c < 0 || c >= MW ? null : rows[r][c]; };
+    var solid = {}, chunks = {}, glow = builder(), lights = [], spots = [];
+    function chunk(c, r) {
+      var k = Math.floor(c / CHUNK) + "," + Math.floor(r / CHUNK);
+      if (!chunks[k]) { chunks[k] = builder(); chunks[k].cx = (Math.floor(c / CHUNK) + 0.5) * CHUNK; chunks[k].cz = -(Math.floor(r / CHUNK) + 0.5) * CHUNK; }
+      return chunks[k];
+    }
+    function ground(m, c, r, alb) { m.quad([c, 0, -r], [c + 1, 0, -r], [c + 1, 0, -r - 1], [c, 0, -r - 1], [0, 1, 0], alb); }
+
+    /* the map itself, plus a band of forest around it and a clearing for the tower up north */
+    var T = def.tower, M = 7;
+    for (var r = T.y - 6; r < MH + M; r++) for (var c = -M; c < MW + M; c++) {
+      var ch = at(c, r), m = chunk(c, r), h = hash(c, r);
+      if (ch === null) {
+        var dt = Math.abs(c + 0.5 - T.x) + Math.abs(r + 0.5 - T.y);
+        var road = r < 0 && (c === 11 || c === 12) && r > T.y + 2;
+        ground(m, c, r, road ? 0.8 : 0.42 + h * 0.06);
+        if (!road && dt > 5.5 && h < 0.4) tree(m, c + 0.3 + h * 0.4, -r - 0.3 - hash(r, c) * 0.4, 0.9 + h * 0.6, true);
+        continue;
+      }
+      if (ch !== "#" && ch !== "D") ground(m, c, r, ch === "," ? 0.92 + h * 0.04 : ch === "W" ? 0.8 : 0.5 + h * 0.06);
+      if (ch === "T") { tree(m, c + 0.5, -r - 0.5, 1 + h * 0.3); solid[c + "," + r] = 1; }
+      if (ch === "L") {
+        m.box(c + 0.44, 0, -r - 0.56, c + 0.56, 1.3, -r - 0.44, 0.2);
+        glow.box(c + 0.33, 1.3, -r - 0.67, c + 0.67, 1.72, -r - 0.33, 0.9);
+        lights.push({ x: c + 0.5, y: 1.5, z: -r - 0.5, radius: 3.6, power: 1.1, base: 1.1, seed: h * 10 });
+        solid[c + "," + r] = 1;
+      }
+      if (ch === "#" || ch === "D" || ch === "W") solid[c + "," + r] = 1;
+    }
+
+    /* houses: each rectangle of # and D; the door is on the south wall */
+    var seen = {};
+    for (r = 0; r < MH; r++) for (c = 0; c < MW; c++) {
+      if ("#D".indexOf(at(c, r)) < 0 || seen[c + "," + r]) continue;
+      var w = 0, d = 0;
+      while ("#D".indexOf(at(c + w, r) || ".") >= 0) w++;
+      while ("#D".indexOf(at(c, r + d) || ".") >= 0) d++;
+      for (var yy = 0; yy < d; yy++) for (var xx = 0; xx < w; xx++) seen[(c + xx) + "," + (r + yy)] = 1;
+      var m2 = chunk(c, r), x0 = c + 0.05, x1 = c + w - 0.05, zN = -r - 0.05, zS = -r - d + 0.05, hh = 1.5 + (w * d > 12 ? 0.3 : 0);
+      m2.box(x0, 0, zS, x1, hh, zN, 1.5, false);
+      m2.box(x0 - 0.05, 0, zS - 0.05, x1 + 0.05, 0.2, zN + 0.05, 0.7, 0.7);    /* stone footing */
+      m2.roof(x0 - 0.35, zS - 0.4, x1 + 0.35, zN + 0.4, hh, 1.0, (w - d) / 2 > 0 ? (w - d) / 2 : 0.01, 0.34);
+      for (xx = 0; xx < w; xx++) {
+        var cx = c + xx + 0.5;
+        if (at(c + xx, r + d - 1) === "D") {
+          m2.quad([cx - 0.3, 0, zS - 0.01], [cx + 0.3, 0, zS - 0.01], [cx + 0.3, 1.0, zS - 0.01], [cx - 0.3, 1.0, zS - 0.01], [0, 0, -1], 0.12);
+          spots.push({ x: c + xx, y: r + d - 1, say: ["门关着。"] });
+        } else if (xx % 2 === 1) {
+          /* a lit paper window, and the glow it throws on the street */
+          glow.quad([cx - 0.25, 0.65, zS - 0.01], [cx + 0.25, 0.65, zS - 0.01], [cx + 0.25, 1.1, zS - 0.01], [cx - 0.25, 1.1, zS - 0.01], [0, 0, -1], 0.75);
+          lights.push({ x: cx, y: 0.9, z: zS - 0.6, radius: 1.8, power: 0.55, base: 0.55, seed: cx });
+        }
+      }
+    }
+
+    /* the well in the square */
+    var wl = def.map.join("\n").split("\n");
+    for (r = 0; r < MH; r++) { c = wl[r].indexOf("WW"); if (c >= 0) break; }
+    var wm = chunk(c, r), wx = c + 1, wz = -r - 1;
+    wm.box(wx - 0.8, 0, wz - 0.8, wx + 0.8, 0.55, wz + 0.8, 1.1, false);
+    wm.quad([wx - 0.8, 0.55, wz - 0.8], [wx + 0.8, 0.55, wz - 0.8], [wx + 0.8, 0.55, wz + 0.8], [wx - 0.8, 0.55, wz + 0.8], [0, 1, 0], 0.05);
+    wm.box(wx - 0.75, 0.55, wz - 0.06, wx - 0.6, 1.6, wz + 0.06, 0.25);
+    wm.box(wx + 0.6, 0.55, wz - 0.06, wx + 0.75, 1.6, wz + 0.06, 0.25);
+    wm.roof(wx - 1.0, wz - 0.6, wx + 1.0, wz + 0.6, 1.6, 0.5, 0.6, 0.22);
+
+    /* the tower, and a light at the top */
+    var tw = builder(), tx = T.x, tz = -T.y;
+    tw.box(tx - 2.2, 0, tz - 2.2, tx + 2.2, 0.5, tz + 2.2, 0.4);
+    var y = pagoda(tw, tx, 0.5, tz, 1);
+    glow.box(tx - 0.25, y - 1.6, tz - 1.0, tx + 0.25, y - 1.1, tz - 0.99, 1);
+    lights.push({ x: tx, y: y - 1.3, z: tz - 1.6, radius: 3, power: 0.8, base: 0.8, seed: 3 });
+
+    var list = Object.keys(chunks).map(function (k) { return chunks[k]; });
+    return { def: def, chunks: list, glow: glow, tower: tw, lights: lights, solid: solid, spots: spots, width: MW, height: MH };
+  }
+
+  /* far-off points for stars: fixed positions, drawn over the sky only */
+  var STARS = [];
+  for (var s = 0; s < 40; s++) STARS.push([hash(s, 7) * 120 - 50, 18 + hash(s, 9) * 30, 70 + hash(s, 3) * 20]);
+  var SHADOW = (function () { var m = builder(); m.cone(0, 0.03, 0, 0.36, 0.0001, 8, 0.02); return m; })();
+
+  /* draw a frame. view: {x, y, z (what the camera looks at), yaw, pitch, dist, time}; actors: [{art, x, z, flip}] */
+  function render(R, w, view, actors) {
+    var cam = R.camera;
+    cam.x = view.x; cam.y = view.y || 0; cam.z = view.z; cam.yaw = view.yaw || 0; cam.pitch = view.pitch; cam.dist = view.dist; cam.focal = 136;
+    R.sun = { dir: Lo3D.norm([-0.4, 0.7, -0.6]), ambient: 0.3, diffuse: 0.5 };
+    R.fog = { near: view.dist + 3, far: view.dist + 24, lum: 0.5 };
+    R.focus = { near: view.dist - 4, far: view.dist + 9 };
+    R.near = 0.3;
+    /* lanterns flicker; only lights near the camera's target are worth their per-pixel cost */
+    var t = view.time || 0;
+    R.lights = w.lights.filter(function (L) {
+      L.power = L.base * (0.86 + 0.14 * Math.sin(t * 11 + L.seed * 7) * Math.sin(t * 4.3 + L.seed));
+      var dx = L.x - view.x, dz = L.z - view.z;
+      return dx * dx + dz * dz < 13 * 13 || L.y > 5;
+    });
+    R.clear(function (yy) { return 0.12 + 0.38 * Math.min(1, yy / 60); });
+    /* a chunk is drawn when the screen rectangle of its box (ground to treetops) overlaps the screen */
+    w.chunks.forEach(function (m) {
+      var x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9, h = CHUNK / 2 + 0.5;
+      for (var i = 0; i < 8; i++) {
+        var p = R.project([m.cx + (i & 1 ? h : -h), i & 2 ? 3 : 0, m.cz + (i & 4 ? h : -h)]);
+        if (!p) { x0 = -1e9; x1 = 1e9; y0 = -1e9; y1 = 1e9; break; }
+        x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]);
+      }
+      if (x1 >= 0 && x0 < R.width && y1 >= 0 && y0 < R.height && (m.cz - view.z) < view.dist + 22) R.draw(m);
+    });
+    R.draw(w.tower);
+    R.draw(w.glow, null, { bias: 0.5 });
+    actors.forEach(function (a) { R.draw(SHADOW, function (p) { return [p[0] + a.x, p[1], p[2] + a.z]; }); });
+    actors.forEach(function (a) { R.sprite(a.art, a.x, 0, a.z, { scale: 1 / 16, flip: a.flip, crisp: true }); });
+    R.present();
+    STARS.forEach(function (p, i) { if ((i * 7 + Math.floor(t * 2)) % 23) R.dot([p[0] + view.x, p[1], p[2] + view.z], 3, 0); });
+    return R.image;
+  }
+
+  return { build: build, render: render, hash: hash, builder: builder, tree: tree, pagoda: pagoda };
+})();
+</script>
+<script data-src="src/battle-art.js">
+/* Battle sprites: rows of "0123." (ink, dark, mid, paper, clear), drawn as billboards in the 3D arena.
+   Enemies are drawn at about 1/9 world unit per pixel (src/battle.js), so a 20-pixel enemy is over two units tall. */
+var B_ART = LoGame.sprites({
+  fox: [
+    "3..................3",
+    "13....0......0....31",
+    "131..020....020..131",
+    ".131.0220..0220.131.",
+    "3131.0222002220.1313",
+    "13310222222222201331",
+    "13310200333300201331",
+    ".133023333333320331.",
+    "3133.0233003320.3313",
+    "1331..00333300..1331",
+    ".131.0223333220.131.",
+    "..1102223333222011..",
+    "...10222233222201...",
+    "....022222222220....",
+    "....022022220220....",
+    ".....0330220330.....",
+    ".....0000..0000....."
+  ],
+  imp: [
+    ".......000000.......",
+    "....000121121000....",
+    "...01212122121210...",
+    "..0121212112121210..",
+    ".012121212212121210.",
+    ".011212121121212110.",
+    "..0111111111111110..",
+    "0..00000000000000..0",
+    "10...0222222220...01",
+    ".10..0222222220..01.",
+    "..10.0330220330.01..",
+    "...10033022033001...",
+    "....102222222201....",
+    ".....0202002020.....",
+    ".....0220220220.....",
+    ".....0222222220.....",
+    ".....0212222120.....",
+    "....021222222120....",
+    "...02121222212120...",
+    "..0021122112211200..",
+    ".0.00000000000000.0.",
+    "0..0.0..0..0..0.0..0"
+  ],
+  golem: [
+    "........00000000........",
+    ".......0112222110.......",
+    ".......0122222210.......",
+    ".......0233223320.......",
+    ".......0122222210.......",
+    "...0000.01000010.0000...",
+    "..011220.000000.022110..",
+    ".0122222000..0002222210.",
+    ".0122222222..2222222210.",
+    "012222211111111112222210",
+    "012222122222222221222210",
+    "012220122222222221022210",
+    "01220.012222222210.02210",
+    "0122..012211112210..2210",
+    "0110..012222222210..0110",
+    ".00...011112211110...00.",
+    "......012222222210......",
+    ".....01222200222210.....",
+    ".....012220..022210.....",
+    "....0122220..0222210....",
+    "....0111110..0111110....",
+    "....000000....000000...."
+  ],
+  wraith: [
+    ".....0000000000.....",
+    "...00111111111100...",
+    "..0111111111111110..",
+    "..0111000000001110..",
+    ".011103333333301110.",
+    ".011033003300330110.",
+    ".011033333333330110.",
+    ".011033330033330110.",
+    "01111000000000011110",
+    "01110222222222201110",
+    "01102222222222220110",
+    "01102222222222220110",
+    "01100222222222200110",
+    "01..022222222220..10",
+    "01.02222222222220.10",
+    "0..02222222222220..0",
+    "...02222222222220...",
+    "....022222222220....",
+    "....022222222220....",
+    ".....0222222220.....",
+    ".....0222002220.....",
+    "......02200220......",
+    ".....0.022220.0.....",
+    "......0..22..0......"
+  ],
+  mirage: [
+    "...........0........................0...........",
+    "...........10......................01...........",
+    "............10....................01............",
+    ".............10...000000000000...01.............",
+    "..............10011111111111111001..............",
+    "...............011222222222222110...............",
+    "..............01122222222222222110..............",
+    "..............01233002222220033210..............",
+    "..............01200302222220300210..............",
+    "..............01122222222222222110..............",
+    "...............011222211112222110...............",
+    "................0111110000111110................",
+    ".................01010100101010.................",
+    "..................000000000000..................",
+    "...................0112222110...................",
+    "...00000...........0122222210...........00000...",
+    ".00111110..........0112222110..........01111100.",
+    "0111111110.........0122222210.........0111111110",
+    "01122221110........0112222110........01112222110",
+    "012222222110.......0122222210.......011222222210",
+    "0122333222210......0112222110......0122223332210",
+    "01223332222110.....0122222210.....01122223332210",
+    ".0122222222211000..0112222110..0001122222222210.",
+    "..00111111111111100011222211000111111111111100..",
+    "....0000000000000000012222100000000000000000....",
+    ".....2.2.2.2.......0122222210.......2.2.2.2.....",
+    "..................011222222110..................",
+    "...000000000000000112222222211000000000000000...",
+    "..02222222222222222222222222222222222222222220..",
+    "..01222222222222222222222222222222222222222210..",
+    "...011221122112211221122221122112211221122110...",
+    "...012211221122112211221122112211221122112210...",
+    "....0122112211221122112222112211221122112210....",
+    "....0112211221122112211221122112211221122110....",
+    ".....01122112211221122111122112211221122110.....",
+    "......011111111111111111111111111111111110......",
+    ".......0000000000000000000000000000000000.......",
+    "................................................",
+    "..2.2...2.2.....2.2..........2.2.....2.2...2.2..",
+    ".2.2.2.2.2.2.2.2.2.2.2.22.2.2.2.2.2.2.2.2.2.2.2."
+  ],
+  bronze: [
+    ".....0000000000.....",
+    "....012222222210....",
+    "....022222222220....",
+    "....023003300320....",
+    "....023333333320....",
+    "....002222222200....",
+    ".....0000000000.....",
+    "..0000011001100000..",
+    ".011122111111221110.",
+    "01112221100112221110",
+    "02211112211221111220",
+    "0221.0111111110.1220",
+    "02210022122122001220",
+    "0220.0111111110.0220",
+    ".00..0122112210..00.",
+    ".....0111111110.....",
+    ".....0221001220.....",
+    ".....0221..1220.....",
+    ".....0221..1220.....",
+    "....00110..01100....",
+    "....01110..01110....",
+    "....00000..00000...."
+  ],
+  heroCast: [
+    "0..........0",
+    "01........10",
+    "01..0000..10",
+    ".01022220.10",
+    ".0100000010.",
+    "..00000000..",
+    ".0000000000.",
+    ".0001000100.",
+    ".0010001000.",
+    ".0000000000.",
+    "..00000000..",
+    "...011110...",
+    "..01111110..",
+    "..01122110..",
+    "..01111110..",
+    "..01100110..",
+    "..00....00.."
+  ],
+  talisman: [
+    "0000000",
+    "0333330",
+    "0300030",
+    "0333330",
+    "0303030",
+    "0330330",
+    "0303030",
+    "0333330",
+    "0300030",
+    "0333330",
+    "0000000"
+  ]
+});
+</script>
+<script data-src="src/battle-data.js">
+/* Battle data: the hero's growth, spells, items, enemies and the fixed fights along the route.
+   Data only; src/rules.js does the arithmetic and tests/zhenyao-sim.mjs checks the balance.
+   Five elements: each one overcomes the next  金 > 木 > 土 > 水 > 火 > 金.
+   An enemy of element X is weak to whatever overcomes X; a hit on the weakness does double damage. */
+var BATTLE = {
+  ELEMENTS: {
+    metal: { name: "金", beats: "wood" },
+    wood: { name: "木", beats: "earth" },
+    earth: { name: "土", beats: "water" },
+    water: { name: "水", beats: "fire" },
+    fire: { name: "火", beats: "metal" }
+  },
+
+  /* total experience needed for each level (index = level); level 10 is the cap */
+  XP: [0, 0, 12, 30, 56, 92, 140, 200, 280, 380, 500],
+  /* stats grow by the same amount every level, so the curve is easy to reason about */
+  HERO: {
+    base: { hp: 44, mp: 18, atk: 9, def: 4, mag: 10 },
+    grow: { hp: 11, mp: 4, atk: 2.5, def: 1.6, mag: 2.4 }
+  },
+
+  /* power is damage at magic 10; "all" spells hit every enemy. level: learned on reaching it */
+  SPELLS: {
+    sword: { name: "飞剑诀", element: "metal", target: "one", power: 15, mp: 4, level: 1 },
+    tide: { name: "寒潮", element: "water", target: "all", power: 9, mp: 6, level: 1 },
+    vine: { name: "青藤缚", element: "wood", target: "all", power: 9, mp: 6, level: 2 },
+    talisman: { name: "离火符", element: "fire", target: "one", power: 17, mp: 5, level: 4 },
+    seal: { name: "山岳印", element: "earth", target: "all", power: 12, mp: 7, level: 5 },
+    pagoda: { name: "七级浮屠", element: null, target: "all", power: 18, mp: 18, level: 7, ultimate: true }
+  },
+  SPELL_ORDER: ["sword", "tide", "vine", "talisman", "seal", "pagoda"],
+
+  ITEMS: {
+    pill: { name: "回春丹", hp: 60 },
+    ether: { name: "聚灵丹", mp: 20 }
+  },
+  ITEM_ORDER: ["pill", "ether"],
+  START_ITEMS: { pill: 3, ether: 1 },
+
+  /* defending halves damage until the hero's next turn and gathers a little mana */
+  DEFEND_MP: 3,
+  FLEE_CHANCE: 0.7,
+  CRIT_CHANCE: 0.08,
+
+  /* move: what the enemy's ordinary attack is called and which effect it plays.
+     charge (boss): every `every` turns it spends a turn gathering, then hits for `mult` times its attack. */
+  ENEMIES: {
+    fox: { name: "狐火", element: "fire", hp: 22, atk: 10, def: 2, xp: 5, art: "fox", move: "狐火", fx: "ember" },
+    imp: { name: "树魅", element: "wood", hp: 30, atk: 9, def: 4, xp: 6, art: "imp", move: "缠枝", fx: "lash" },
+    golem: { name: "石傀", element: "earth", hp: 42, atk: 12, def: 8, xp: 9, art: "golem", move: "落石", fx: "rock" },
+    wraith: { name: "水魍", element: "water", hp: 58, atk: 17, def: 7, xp: 15, art: "wraith", move: "寒涎", fx: "splash" },
+    bronze: { name: "铜甲尸", element: "metal", hp: 74, atk: 19, def: 15, xp: 19, art: "bronze", move: "铁爪", fx: "lash" },
+    mirage: {
+      name: "蜃妖", element: "water", hp: 420, atk: 26, def: 12, xp: 0, art: "mirage", move: "蜃气", fx: "splash",
+      boss: true, charge: { every: 3, mult: 2.4, gather: "蜃妖深吸一口气……", move: "蜃楼潮" }
+    }
+  },
+
+  /* the fights on the way, in order. P3 places them on the maps as enemies you can see (no random battles).
+     save: a save point before this part, which also restores HP and MP. found: items picked up in this part. */
+  ROUTE: [
+    { area: "road", save: true, found: { pill: 1 }, fights: [["fox"], ["imp", "fox"], ["golem"], ["imp", "golem"], ["fox", "fox", "imp"]] },
+    { area: "tower", save: true, found: { pill: 2, ether: 1 }, fights: [["wraith"], ["bronze"], ["wraith", "golem"]] },
+    { area: "upper", save: true, found: { pill: 1, ether: 1 }, fights: [["bronze", "imp"], ["wraith", "wraith"], ["bronze", "wraith"]] },
+    { area: "top", save: true, found: { pill: 2, ether: 2 }, fights: [["mirage"]] }
+  ]
+};
+</script>
+<script data-src="src/rules.js">
+/* Battle rules: pure arithmetic over BATTLE (src/battle-data.js). No drawing, no input, no timers,
+   so the same code runs in the game and in the Node simulator (tests/zhenyao-sim.mjs).
+   rng is a function returning 0..1. Every action changes the state and returns a list of events
+   for the battle scene to animate:
+     {kind: "damage", side: "enemy"|"hero", target, amount, weak, crit}
+     {kind: "heal", hp}  {kind: "mana", mp}  {kind: "defend"}  {kind: "flee", ok}
+     {kind: "gather"}  (the boss is charging)  {kind: "down", target}  (an enemy falls) */
+var Rules = (function () {
+  var B = BATTLE;
+
+  function stats(level) {
+    var b = B.HERO.base, g = B.HERO.grow, n = level - 1;
+    return {
+      maxHp: Math.round(b.hp + g.hp * n), maxMp: Math.round(b.mp + g.mp * n),
+      atk: Math.round(b.atk + g.atk * n), def: Math.round(b.def + g.def * n), mag: Math.round(b.mag + g.mag * n)
+    };
+  }
+  function spellsAt(level) { return B.SPELL_ORDER.filter(function (id) { return B.SPELLS[id].level <= level; }); }
+  function levelFor(xp) { var l = 1; while (l + 1 < B.XP.length && xp >= B.XP[l + 1]) l++; return l; }
+
+  function newHero(level) {
+    level = level || 1;
+    var s = stats(level), items = {};
+    Object.keys(B.START_ITEMS).forEach(function (k) { items[k] = B.START_ITEMS[k]; });
+    return { level: level, xp: B.XP[level], hp: s.maxHp, mp: s.maxMp, items: items };
+  }
+  /* a save point: back to full */
+  function rest(hero) { var s = stats(hero.level); hero.hp = s.maxHp; hero.mp = s.maxMp; }
+
+  function enemy(id) {
+    var d = B.ENEMIES[id];
+    return { id: id, def: d, name: d.name, hp: d.hp, maxHp: d.hp, weak: weakTo(d.element), turns: 0, gathering: false };
+  }
+  /* the element that overcomes e */
+  function weakTo(e) {
+    var k = Object.keys(B.ELEMENTS).filter(function (x) { return B.ELEMENTS[x].beats === e; });
+    return k[0] || null;
+  }
+  /* two enemies of the same kind get 甲/乙 after their names */
+  function start(hero, ids) {
+    var foes = ids.map(enemy), seen = {};
+    foes.forEach(function (f) { seen[f.id] = (seen[f.id] || 0) + 1; });
+    var n = {};
+    foes.forEach(function (f) { if (seen[f.id] > 1) { n[f.id] = (n[f.id] || 0) + 1; f.name += "甲乙丙"[n[f.id] - 1]; } });
+    return { hero: hero, foes: foes, defending: false, round: 0, boss: foes.some(function (f) { return f.def.boss; }) };
+  }
+  function alive(b) { return b.foes.filter(function (f) { return f.hp > 0; }); }
+  /* "win", "lose", or null while the fight goes on (fleeing is reported by the flee event) */
+  function result(b) { return b.hero.hp <= 0 ? "lose" : alive(b).length ? null : "win"; }
+
+  function vary(rng) { return 0.9 + rng() * 0.2; }
+  function hurt(b, f, amount, ev) {
+    f.hp = Math.max(0, f.hp - amount);
+    ev.target = b.foes.indexOf(f);
+    var out = [ev];
+    if (f.hp === 0) out.push({ kind: "down", target: ev.target });
+    return out;
+  }
+
+  /* what a spell would do to one enemy, before the random spread: for menus and the simulator */
+  function spellDamage(hero, spellId, f) {
+    var sp = B.SPELLS[spellId], s = stats(hero.level);
+    return sp.power * s.mag / 10 * (sp.element && sp.element === f.weak ? 2 : 1);
+  }
+  function canCast(hero, spellId) { return spellsAt(hero.level).indexOf(spellId) >= 0 && hero.mp >= B.SPELLS[spellId].mp; }
+
+  /* action: {type: "attack", target} | {type: "spell", id, target} | {type: "item", id} | {type: "defend"} | {type: "flee"}
+     target is an index into b.foes; "all" spells ignore it */
+  function heroAct(b, action, rng) {
+    var h = b.hero, s = stats(h.level), ev = [];
+    b.defending = false;
+    b.round++;
+    if (action.type === "attack") {
+      var f = b.foes[action.target];
+      var crit = rng() < B.CRIT_CHANCE;
+      var dmg = Math.max(1, Math.round(s.atk * vary(rng) * (crit ? 1.5 : 1) - f.def.def * 0.5));
+      ev = hurt(b, f, dmg, { kind: "damage", side: "enemy", amount: dmg, weak: false, crit: crit });
+    } else if (action.type === "spell") {
+      var sp = B.SPELLS[action.id];
+      if (!canCast(h, action.id)) throw new Error("cannot cast " + action.id);
+      h.mp -= sp.mp;
+      var targets = sp.target === "all" ? alive(b) : [b.foes[action.target]];
+      targets.forEach(function (t) {
+        var weak = !!sp.element && sp.element === t.weak;
+        var d = Math.max(1, Math.round(sp.power * s.mag / 10 * vary(rng) * (weak ? 2 : 1)));
+        ev = ev.concat(hurt(b, t, d, { kind: "damage", side: "enemy", amount: d, weak: weak, crit: false }));
+      });
+    } else if (action.type === "item") {
+      var it = B.ITEMS[action.id];
+      if (!(h.items[action.id] > 0)) throw new Error("no " + action.id);
+      h.items[action.id]--;
+      if (it.hp) { var hp = Math.min(it.hp, s.maxHp - h.hp); h.hp += hp; ev.push({ kind: "heal", hp: hp }); }
+      if (it.mp) { var mp = Math.min(it.mp, s.maxMp - h.mp); h.mp += mp; ev.push({ kind: "mana", mp: mp }); }
+    } else if (action.type === "defend") {
+      b.defending = true;
+      var g = Math.min(B.DEFEND_MP, s.maxMp - h.mp);
+      h.mp += g;
+      ev.push({ kind: "defend" }, { kind: "mana", mp: g });
+    } else if (action.type === "flee") {
+      var ok = !b.boss && rng() < B.FLEE_CHANCE;
+      ev.push({ kind: "flee", ok: ok });
+      if (ok) b.fled = true;
+    }
+    return ev;
+  }
+
+  /* enemy i takes its turn. Returns {move: name of what it did, fx, events} */
+  function enemyAct(b, i, rng) {
+    var f = b.foes[i], d = f.def, h = b.hero, s = stats(h.level);
+    f.turns++;
+    if (d.charge && !f.gathering && f.turns % d.charge.every === 0) {
+      f.gathering = true;
+      return { move: d.charge.gather, fx: "gather", gather: true, events: [{ kind: "gather", target: i }] };
+    }
+    var mult = 1, move = d.move, big = false;
+    if (f.gathering) { f.gathering = false; mult = d.charge.mult; move = d.charge.move; big = true; }
+    var dmg = Math.max(1, Math.round((d.atk * vary(rng) * mult - s.def * 0.5) * (b.defending ? 0.5 : 1)));
+    h.hp = Math.max(0, h.hp - dmg);
+    return { move: move, fx: big ? "tidal" : d.fx, big: big, events: [{ kind: "damage", side: "hero", target: i, amount: dmg, weak: false, crit: big }] };
+  }
+
+  /* after a win: experience from every enemy. Returns [{level, learned: [spell ids]}] for each level gained */
+  function reward(b) {
+    var h = b.hero, xp = 0;
+    b.foes.forEach(function (f) { xp += f.def.xp; });
+    var before = h.level;
+    h.xp += xp;
+    var ups = [];
+    for (var l = before + 1; l <= levelFor(h.xp); l++) {
+      var old = stats(l - 1), now = stats(l);
+      h.hp += now.maxHp - old.maxHp; h.mp += now.maxMp - old.maxMp;
+      ups.push({ level: l, learned: B.SPELL_ORDER.filter(function (id) { return B.SPELLS[id].level === l; }) });
+    }
+    h.level = levelFor(h.xp);
+    return { xp: xp, ups: ups };
+  }
+
+  return {
+    stats: stats, spellsAt: spellsAt, levelFor: levelFor, newHero: newHero, rest: rest, weakTo: weakTo,
+    start: start, alive: alive, result: result, heroAct: heroAct, enemyAct: enemyAct, reward: reward,
+    spellDamage: spellDamage, canCast: canCast
+  };
+})();
+</script>
+<script data-src="src/fx.js">
+/* Battle effects: particles, timed layers, and post-processing on the lo-3d tone image (R.image.px).
+   They live in this game, not in lo-3d: no other app needs them yet, and a lo-3d release is permanent,
+   so the API should be proven by a second user first.
+   A layer is {life, draw(R, t), lights(t), dots(R, t), post(px, t)}; every part is optional, t counts up from 0. */
+var FX = (function () {
+  var W = 160, H = 144, tmp = new Uint8Array(W * H);
+  var BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+  var parts = [], layers = [];
+
+  /* ---------- post-processing: px is a W*H array of tones 0-3 ---------- */
+  function invert(px) { for (var i = 0; i < px.length; i++) px[i] = 3 - px[i]; }
+  /* raster wave: each row slides sideways, like heat haze or a scanline effect on old hardware */
+  function wave(px, amp, freq, phase, y0, y1) {
+    tmp.set(px);
+    y0 = Math.max(0, y0 || 0); y1 = Math.min(H, y1 == null ? H : y1);
+    for (var y = y0; y < y1; y++) {
+      var s = Math.round(amp * Math.sin(y * freq + phase)), row = y * W;
+      if (!s) continue;
+      for (var x = 0; x < W; x++) { var sx = x - s; px[row + x] = tmp[row + (sx < 0 ? 0 : sx >= W ? W - 1 : sx)]; }
+    }
+  }
+  /* zoom by k around (cx, cy); nearest pixel, so it stays crisp */
+  function zoom(px, k, cx, cy) {
+    if (Math.abs(k - 1) < 0.01) return;
+    tmp.set(px);
+    for (var y = 0; y < H; y++) {
+      var sy = Math.round(cy + (y - cy) / k); sy = sy < 0 ? 0 : sy >= H ? H - 1 : sy;
+      for (var x = 0; x < W; x++) {
+        var sx = Math.round(cx + (x - cx) / k); sx = sx < 0 ? 0 : sx >= W ? W - 1 : sx;
+        px[y * W + x] = tmp[sy * W + sx];
+      }
+    }
+  }
+  /* big square pixels of size n */
+  function mosaic(px, n) {
+    n = Math.max(1, Math.round(n));
+    if (n < 2) return;
+    for (var y = 0; y < H; y += n) for (var x = 0; x < W; x += n) {
+      var v = px[Math.min(H - 1, y + (n >> 1)) * W + Math.min(W - 1, x + (n >> 1))];
+      for (var yy = y; yy < Math.min(H, y + n); yy++) for (var xx = x; xx < Math.min(W, x + n); xx++) px[yy * W + xx] = v;
+    }
+  }
+  /* cover a fraction f (0..1) of the pixels with one tone, in Bayer order: a dithered fade */
+  function cover(px, tone, f, x0, y0, x1, y1) {
+    var th = f * 16;
+    if (th <= 0) return;
+    x0 = x0 || 0; y0 = y0 || 0; x1 = x1 == null ? W : x1; y1 = y1 == null ? H : y1;
+    for (var y = y0; y < y1; y++) for (var x = x0; x < x1; x++) if (BAYER[(y & 3) * 4 + (x & 3)] < th) px[y * W + x] = tone;
+  }
+  /* n lines from radius r0 to r1 around (cx, cy): speed lines for a hit on the weakness */
+  function rays(px, cx, cy, r0, r1, n, tone, rot) {
+    for (var i = 0; i < n; i++) {
+      var a = rot + i / n * Math.PI * 2 + (i % 3) * 0.07, c = Math.cos(a), s = Math.sin(a);
+      var len = r1 - (i % 2) * (r1 - r0) * 0.35;
+      for (var r = r0; r < len; r += 0.7) {
+        var x = Math.round(cx + c * r), y = Math.round(cy + s * r);
+        if (x >= 0 && y >= 0 && x < W && y < H) px[y * W + x] = tone;
+      }
+    }
+  }
+  /* a dithered disc of light or dark around (cx, cy), stronger at the centre */
+  function glow(px, cx, cy, r, tone, k) {
+    for (var y = Math.max(0, Math.floor(cy - r)); y < Math.min(H, cy + r); y++) for (var x = Math.max(0, Math.floor(cx - r)); x < Math.min(W, cx + r); x++) {
+      var d = Math.sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy)) / r;
+      if (d < 1 && BAYER[(y & 3) * 4 + (x & 3)] < (1 - d) * 16 * k) px[y * W + x] = tone;
+    }
+  }
+
+  /* ---------- particles: {x, y, z, vx, vy, vz, life, tone, size, grav, drag, trail} ---------- */
+  function spawn(p) {
+    p.age = 0; p.vx = p.vx || 0; p.vy = p.vy || 0; p.vz = p.vz || 0;
+    p.life = p.life || 1; p.tone = p.tone == null ? 3 : p.tone;
+    parts.push(p);
+    return p;
+  }
+  function emit(n, fn) { for (var i = 0; i < n; i++) spawn(fn(i, Math.random())); }
+  /* a ball of n particles flying out from a point */
+  function burst(x, y, z, n, speed, o) {
+    o = o || {};
+    emit(n, function () {
+      var a = Math.random() * Math.PI * 2, e = Math.random() * 2 - 1, s = speed * (0.4 + Math.random() * 0.6), c = Math.sqrt(1 - e * e);
+      return { x: x, y: y, z: z, vx: Math.cos(a) * c * s, vy: e * s + (o.up || 0), vz: Math.sin(a) * c * s,
+        life: (o.life || 0.6) * (0.6 + Math.random() * 0.6), tone: o.tone, size: o.size || 0, grav: o.grav || 0, drag: o.drag || 0, trail: o.trail };
+    });
+  }
+  function stepParts(dt) {
+    for (var i = parts.length - 1; i >= 0; i--) {
+      var p = parts[i];
+      p.age += dt;
+      if (p.age >= p.life) { parts.splice(i, 1); continue; }
+      p.px = p.x; p.py = p.y; p.pz = p.z;
+      if (p.drag) { var k = Math.max(0, 1 - p.drag * dt); p.vx *= k; p.vy *= k; p.vz *= k; }
+      p.vy -= (p.grav || 0) * dt;
+      p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
+      if (p.floor != null && p.y < p.floor) { p.y = p.floor; p.vy = -p.vy * 0.3; p.vx *= 0.6; p.vz *= 0.6; }
+    }
+  }
+  function drawParts(R) {
+    parts.forEach(function (p) {
+      /* blink out over the last fifth of a life */
+      if (p.age > p.life * 0.8 && (Math.floor(p.age * 30) & 1)) return;
+      if (p.trail) R.streak([p.x - p.vx * p.trail, p.y - p.vy * p.trail, p.z - p.vz * p.trail], [p.x, p.y, p.z], p.tone);
+      else R.dot([p.x, p.y, p.z], p.tone, p.size);
+    });
+  }
+
+  /* ---------- layers ---------- */
+  /* returns a function that removes the layer; its .layer is the layer itself (for its clock, .t) */
+  function layer(o) {
+    o.t = 0; layers.push(o);
+    var remove = function () { var i = layers.indexOf(o); if (i >= 0) layers.splice(i, 1); };
+    remove.layer = o;
+    return remove;
+  }
+  /* frozen: a hit-stop; only layers marked always (the hit-stop itself) move on */
+  function step(dt, frozen) {
+    if (!frozen) stepParts(dt);
+    for (var i = layers.length - 1; i >= 0; i--) {
+      var L = layers[i];
+      if (frozen && !L.always) continue;
+      L.t += dt;
+      if (L.life && L.t >= L.life) layers.splice(i, 1);
+    }
+  }
+  function each(name, a, b) { layers.forEach(function (L) { if (L[name]) L[name](a, L.t, b); }); }
+  function lights() {
+    var out = [];
+    layers.forEach(function (L) { if (L.lights) out = out.concat(L.lights(L.t) || []); });
+    return out;
+  }
+  function reset() { parts.length = 0; layers.length = 0; }
+
+  /* ---------- small meshes ---------- */
+  /* a flying-sword blade along +z, from the hilt (z -0.3) to the tip (z 0.55); diamond in section so it shows from any side */
+  var BLADE = {
+    v: [[0, 0, 0.55], [0.08, 0, 0.1], [0, 0.08, 0.1], [-0.08, 0, 0.1], [0, -0.08, 0.1], [0, 0, -0.3], [0.17, 0, 0.06], [-0.17, 0, 0.06], [0, 0, 0.0]],
+    t: [[0, 2, 1], [0, 3, 2], [0, 4, 3], [0, 1, 4], [5, 1, 2], [5, 2, 3], [5, 3, 4], [5, 4, 1], [6, 8, 7], [6, 7, 8]],
+    c: [1.2, 1.2, 1.2, 1.2, 0.3, 0.3, 0.3, 0.3, 0.6, 0.6], two: true
+  };
+  /* model -> world for a mesh pointing along d (unit vector), scaled by s, at p */
+  function aim(p, d, s, spin) {
+    var yaw = Math.atan2(d[0], d[2]), pitch = -Math.asin(Math.max(-1, Math.min(1, d[1])));
+    return function (q) {
+      var v = Lo3D.rotY(Lo3D.rotX(Lo3D.rotZ([q[0] * s, q[1] * s, q[2] * s], spin || 0), pitch), yaw);
+      return [v[0] + p[0], v[1] + p[1], v[2] + p[2]];
+    };
+  }
+  function at(p, s, ry) {
+    return function (q) {
+      var v = ry ? Lo3D.rotY(q, ry) : q;
+      return [v[0] * s + p[0], v[1] * s + p[1], v[2] * s + p[2]];
+    };
+  }
+  var BALL = Lo3D.ico(1), CUBE = Lo3D.box(1, 1, 1);
+
+  return {
+    W: W, H: H, invert: invert, wave: wave, zoom: zoom, mosaic: mosaic, cover: cover, rays: rays, glow: glow,
+    spawn: spawn, emit: emit, burst: burst, drawParts: drawParts, parts: parts,
+    layer: layer, step: step, each: each, lights: lights, reset: reset,
+    BLADE: BLADE, BALL: BALL, CUBE: CUBE, aim: aim, at: at
+  };
+})();
+</script>
+<script data-src="src/battle.js">
+/* The battle scene: a 3D arena, the HUD and menus, and the turn loop. The rules are in src/rules.js;
+   what every move looks like is in src/spells.js.
+   game.go("battle", {ids, area, hero, back, from}) starts a fight. hero is a Rules hero (it is changed in place);
+   from is a copy of the last frame, for the transition. When the fight ends it goes to args.back with
+   {result: "win" | "lose" | "fled", hero}. */
+var Battle = (function () {
+  var S = null, ARENAS = {};
+  var SKY = { road: [0.1, 0.42], tower: [0.04, 0.16], upper: [0.04, 0.16], top: [0.16, 0.5] };
+  var HOME = { x: 0, y: 0, z: 1.0, yaw: -0.4, pitch: -0.17, dist: 6.6, focal: 124 };
+
+  /* ---------- the arena, built once per area ---------- */
+  function torch(m, glow, lights, x, z, h) {
+    m.box(x - 0.08, 0, z - 0.08, x + 0.08, h, z + 0.08, 0.25);
+    glow.box(x - 0.2, h, z - 0.2, x + 0.2, h + 0.35, z + 0.2, 0.95);
+    lights.push({ x: x, y: h + 0.25, z: z, radius: 5.5, power: 0.9, base: 0.9, seed: x * 3 + z });
+  }
+  function buildArena(area) {
+    var m = World.builder(), glow = World.builder(), lights = [], hash = World.hash, x, z, i, a;
+    var inside = area === "tower" || area === "upper";
+    /* the platform: stone tiles in a circle, a dark rim, then the ground around it */
+    for (x = -12; x < 12; x++) for (z = -12; z < 12; z++) {
+      var d = Math.sqrt((x + 0.5) * (x + 0.5) + (z + 0.5) * (z + 0.5)), h = hash(x + 40, z + 40);
+      var alb = d < 4.3 ? ((x + z) & 1 ? 0.66 : 0.6) + h * 0.05 : d < 4.9 ? 0.32 : inside ? 0.42 + h * 0.06 : area === "top" ? 0.5 + h * 0.05 : 0.4 + h * 0.07;
+      if (area === "top" && d > 7.5) continue;
+      m.quad([x, 0, z], [x + 1, 0, z], [x + 1, 0, z + 1], [x, 0, z + 1], [0, 1, 0], alb);
+    }
+    if (area === "road") {
+      /* pines all around, and mountains far off */
+      for (i = 0; i < 46; i++) {
+        a = i / 46 * Math.PI * 2 + hash(i, 1) * 0.1;
+        var r = 7 + hash(i, 2) * 5;
+        if (Math.abs(Math.sin(a)) < 0.35 && Math.cos(a) < 0) continue;   /* the road behind the hero */
+        World.tree(m, Math.cos(a) * r, Math.sin(a) * r, 1.2 + hash(i, 3) * 0.8, r > 9);
+      }
+      for (i = 0; i < 9; i++) { a = i / 9 * Math.PI * 2 + 0.3; m.cone(Math.cos(a) * 26, 0, Math.sin(a) * 26, 8, 7 + hash(i, 5) * 4, 5, 0.35, 0.1); }
+      torch(m, glow, lights, -4.6, -0.6, 1.6); torch(m, glow, lights, 4.6, -0.6, 1.6);
+    } else if (inside) {
+      /* inside the tower: a ring of pillars, the wall far behind, braziers */
+      for (i = 0; i < 8; i++) {
+        a = (i + 0.5) / 8 * Math.PI * 2;
+        x = Math.cos(a) * 7; z = Math.sin(a) * 7;
+        m.box(x - 0.45, 0, z - 0.45, x + 0.45, 7, z + 0.45, area === "upper" ? 0.7 : 0.85);
+      }
+      for (i = 0; i < 24; i++) {
+        var a0 = i / 24 * Math.PI * 2, a1 = (i + 1) / 24 * Math.PI * 2, R0 = 11;
+        m.quad([Math.cos(a0) * R0, 0, Math.sin(a0) * R0], [Math.cos(a1) * R0, 0, Math.sin(a1) * R0], [Math.cos(a1) * R0, 8, Math.sin(a1) * R0], [Math.cos(a0) * R0, 8, Math.sin(a0) * R0],
+          [-Math.cos((a0 + a1) / 2), 0, -Math.sin((a0 + a1) / 2)], i & 1 ? 0.55 : 0.5);
+      }
+      torch(m, glow, lights, -4.8, 0.4, 1.1); torch(m, glow, lights, 4.8, 0.4, 1.1);
+      torch(m, glow, lights, -3.2, 4.6, 1.1); torch(m, glow, lights, 3.2, 4.6, 1.1);
+    } else {
+      /* the top of the tower: a railing around the roof, open sky */
+      for (i = 0; i < 20; i++) {
+        a = i / 20 * Math.PI * 2;
+        x = Math.cos(a) * 7.3; z = Math.sin(a) * 7.3;
+        m.box(x - 0.12, 0, z - 0.12, x + 0.12, 0.9, z + 0.12, 0.8);
+      }
+      torch(m, glow, lights, -5, 3, 1.3); torch(m, glow, lights, 5, 3, 1.3);
+    }
+    return { mesh: m, glow: glow, lights: lights, area: area };
+  }
+  var SHADOW = (function () { var m = World.builder(); m.cone(0, 0.03, 0, 1, 0.0001, 10, 0.02); return m; })();
+
+  /* where the foes stand: one in the middle, or spread across the far side */
+  var SPOTS = { 1: [[0, 2.6]], 2: [[-1.6, 2.4], [1.6, 2.4]], 3: [[-2.8, 2.2], [0, 3.0], [2.8, 2.2]] };
+
+  function setup(args) {
+    var area = args.area || "road";
+    var A = ARENAS[area] || (ARENAS[area] = buildArena(area));
+    var b = Rules.start(args.hero, args.ids);
+    /* 演武 (the spell gallery): practice dummies that take every hit and never strike back */
+    if (args.demo) b.foes.forEach(function (f) { f.hp = f.maxHp = 999; });
+    var spots = SPOTS[b.foes.length];
+    S = {
+      args: args, b: b, A: A, area: area,
+      cam: Object.assign({}, HOME), home: HOME,
+      hero: { x: -1.2, y: 0, z: -1.5, art: ART.heroUp0, pose: null, flash: 0, hide: false, flip: false },
+      foes: b.foes.map(function (f, i) {
+        var boss = f.def.boss, art = B_ART[f.def.art];
+        return { x: boss ? 0 : spots[i][0], y: 0, z: boss ? 4.4 : spots[i][1], art: art, scale: boss ? 0.1 : 0.115,
+          ox: 0, oy: 0, oz: 0, flash: 0, hide: false, gone: false, shown: f.hp, boss: boss };
+      }),
+      view: { hp: args.hero.hp, mp: args.hero.mp },
+      nums: [], msg: "", title: "", hud: true, bars: 0, sky: 1, light: 1, stars: area === "road" || area === "top",
+      menu: null, poll: null, lastCmd: 0, guard: 0, frozen: 0
+    };
+    FX.reset();
+    return S;
+  }
+
+  /* ---------- helpers for src/spells.js ---------- */
+  function foeTop(i, k) { var f = S.foes[i]; return [f.x + f.ox, f.y + f.oy + f.art.h * f.scale * (k == null ? 0.55 : k), f.z + f.oz]; }
+  function heroAt(k) { var h = S.hero; return [h.x, h.y + 1.1 * (k == null ? 0.55 : k), h.z]; }
+  function camTo(o, sec, ease) { return game.tween(S.cam, o, sec, ease || "inOut"); }
+  function home(sec) { return camTo(HOME, sec == null ? 0.5 : sec); }
+  /* a camera aimed at point p from angle yaw */
+  function look(p, yaw, pitch, dist, sec, ease) { return camTo({ x: p[0], y: p[1], z: p[2], yaw: yaw, pitch: pitch, dist: dist }, sec, ease); }
+  function popup(text, p, o) { S.nums.push(Object.assign({ text: String(text), p: p, t: 0, life: 1.0 }, o || {})); }
+
+  /* show what the rules already decided: numbers, flashes, falls. Damage events for one foe, or all of them */
+  async function show(events, only) {
+    var weakHit = null;
+    events.forEach(function (e) {
+      if (e.kind === "damage" && e.side === "enemy" && (only == null || only === e.target)) {
+        var f = S.foes[e.target];
+        f.shown = Math.max(0, f.shown - e.amount);
+        f.flash = 0.25;
+        popup(e.amount, foeTop(e.target, 0.8), { big: e.weak || e.crit });
+        if (e.weak) { popup("克制", foeTop(e.target, 1.15), { word: true }); weakHit = e.target; }
+        else if (e.crit) popup("会心", foeTop(e.target, 1.15), { word: true });
+      }
+      if (e.kind === "damage" && e.side === "hero") {
+        S.view.hp = Math.max(0, S.view.hp - e.amount);
+        S.hero.flash = 0.3;
+        popup(e.amount, heroAt(1.0), { big: e.crit });
+      }
+      if (e.kind === "heal") { S.view.hp += e.hp; popup("+" + e.hp, heroAt(1.0)); }
+      if (e.kind === "mana" && e.mp) { S.view.mp += e.mp; popup("+" + e.mp, heroAt(0.6), { mp: true }); }
+    });
+    game.sfx("hit");
+    if (weakHit != null) await ANIM.weak(S, weakHit);
+    var downs = events.filter(function (e) { return e.kind === "down" && (only == null || only === e.target); });
+    for (var i = 0; i < downs.length; i++) ANIM.down(S, downs[i].target);
+    if (downs.length) await game.wait(0.5);
+  }
+
+  /* ---------- drawing ---------- */
+  function render(g) {
+    var A = S.A, c = S.cam, cam = R.camera, t = game.time;
+    cam.x = c.x; cam.y = c.y; cam.z = c.z; cam.yaw = c.yaw; cam.pitch = c.pitch; cam.dist = c.dist; cam.focal = c.focal;
+    var inside = S.area === "tower" || S.area === "upper";
+    R.sun = { dir: Lo3D.norm([-0.45, 0.75, -0.5]), ambient: (inside ? 0.22 : 0.28) * S.light, diffuse: (inside ? 0.32 : 0.48) * S.light };
+    R.fog = { near: c.dist + 4, far: c.dist + 26, lum: (inside ? 0.12 : 0.4) * S.sky };
+    R.focus = { near: c.dist - 5, far: c.dist + 7 };
+    R.near = 0.3;
+    var sky = SKY[S.area];
+    R.clear(function (y) { return (sky[0] + (sky[1] - sky[0]) * Math.min(1, y / 70)) * S.sky; });
+    var ls = A.lights.map(function (L) {
+      L.power = L.base * S.light * (0.82 + 0.18 * Math.sin(t * 11 + L.seed * 7) * Math.sin(t * 4.3 + L.seed));
+      return L;
+    });
+    R.lights = ls.concat(FX.lights());
+    R.draw(A.mesh);
+    R.draw(A.glow, null, { bias: 0.5 * S.light });
+    FX.each("draw", R);
+    var h = S.hero;
+    S.foes.forEach(function (f) {
+      if (f.gone) return;
+      var w = f.art.w * f.scale * 0.42;
+      R.draw(SHADOW, function (p) { return [p[0] * w + f.x + f.ox, p[1], p[2] * w * 0.6 + f.z + f.oz]; });
+    });
+    if (!h.hide) R.draw(SHADOW, function (p) { return [p[0] * 0.38 + h.x, p[1], p[2] * 0.3 + h.z]; });
+    S.foes.forEach(function (f, i) {
+      if (f.gone || f.hide) return;
+      if (f.dying && (Math.floor(t * 24) & 1)) return;
+      /* floating foes bob; flashes turn the sprite white */
+      var bob = f.boss ? Math.sin(t * 1.6) * 0.12 : f.art === B_ART.fox || f.art === B_ART.wraith ? 0.15 + Math.sin(t * 3 + i) * 0.08 : 0;
+      R.sprite(f.art, f.x + f.ox, f.y + f.oy + bob, f.z + f.oz, { scale: f.scale, map: f.flash > 0 && (Math.floor(t * 30) & 1) ? [3, 3, 3, 3] : null });
+    });
+    if (!h.hide && !(h.flash > 0 && (Math.floor(t * 30) & 1))) R.sprite(h.pose || h.art, h.x, h.y, h.z, { scale: 1 / 14, flip: h.flip });
+    R.present();
+    if (S.stars) for (var s = 0; s < 30; s++) {
+      var a = World.hash(s, 11) * Math.PI * 2, e = 0.25 + World.hash(s, 12) * 0.5;
+      if ((s * 5 + Math.floor(t * 2)) % 19) R.dot([Math.cos(a) * 60, Math.sin(e) * 60, Math.sin(a) * 60], 3, 0);
+    }
+    if (S.guard > 0) {
+      /* a ring of light around the hero while defending */
+      for (var k = 0; k < 14; k++) { var aa = k / 14 * Math.PI * 2 + t * 2; R.dot([h.x + Math.cos(aa) * 0.55, 0.15 + (k & 1) * 0.5 + Math.sin(t * 4 + k) * 0.1, h.z + Math.sin(aa) * 0.35], 3, 0); }
+    }
+    FX.drawParts(R);
+    FX.each("dots", R);
+    FX.each("post", R.image.px);
+    g.sprite(R.image, 0, 0);
+    ui(g);
+  }
+
+  /* ---------- the HUD, numbers and menus ---------- */
+  function bar(g, x, y, w, v, max) {
+    g.rect(x, y, w, 4, g.INK);
+    g.rect(x + 1, y + 1, Math.round((w - 2) * Math.max(0, Math.min(1, v / max))), 2, g.PAPER);
+  }
+  function outlined(g, text, x, y, color) {
+    [[-1, 0], [1, 0], [0, -1], [0, 1]].forEach(function (d) { g.text(text, x + d[0], y + d[1], { align: "center", color: g.INK }); });
+    g.text(text, x, y, { align: "center", color: color == null ? g.PAPER : color });
+  }
+  function ui(g) {
+    var s = Rules.stats(S.b.hero.level);
+    /* numbers float up from where they were hit */
+    S.nums.forEach(function (n) {
+      var p = R.project(n.p);
+      if (!p) return;
+      var y = p[1] - 8 - Math.min(1, n.t * 4) * 8 - (n.word ? 4 : 0);
+      if (n.t > n.life * 0.75 && (Math.floor(n.t * 20) & 1)) return;
+      outlined(g, n.text, p[0], y, n.mp ? g.MID : g.PAPER);
+    });
+    if (S.bars > 0) { var bh = Math.round(S.bars * 16); g.rect(0, 0, 160, bh, g.INK); g.rect(0, 144 - bh, 160, bh, g.INK); }
+    if (S.title) { var tw = g.measure(S.title) + 16; g.window(80 - tw / 2, S.hud ? 18 : 20, tw, 20); g.text(S.title, 80, S.hud ? 21 : 23, { align: "center" }); }
+    if (!S.hud) return;
+    g.rect(0, 0, 160, 15, g.INK);
+    g.text("体", 3, 1, { color: g.MID });
+    g.text(String(Math.round(S.view.hp)), 16, 1, { color: g.PAPER });
+    bar(g, 40, 6, 34, S.view.hp, s.maxHp);
+    g.text("法", 82, 1, { color: g.MID });
+    g.text(String(Math.round(S.view.mp)), 95, 1, { color: g.PAPER });
+    bar(g, 116, 6, 40, S.view.mp, s.maxMp);
+    var m = S.menu;
+    if (m) menuDraw(g, m, s);
+    else if (S.msg) { g.window(0, 114, 160, 30); g.text(S.msg, 80, 122, { align: "center" }); }
+  }
+
+  var CMDS = [["attack", "攻击"], ["spell", "法术"], ["item", "物品"], ["defend", "防御"], ["flee", "逃跑"]];
+  function menuDraw(g, m, s) {
+    var t = game.time;
+    if (m.kind === "cmd") {
+      g.window(0, 100, 160, 44);
+      CMDS.forEach(function (c, i) {
+        var x = 16 + (i % 2) * 48, y = 105 + Math.floor(i / 2) * 13;
+        if (i === m.i) g.arrow(x - 8, y + 3, "right");
+        g.text(c[1], x, y, { color: c[0] === "flee" && S.b.boss ? g.MID : g.INK });
+      });
+      g.rect(110, 104, 1, 36, g.MID);
+      g.text("Lv" + S.b.hero.level, 135, 105, { align: "center" });
+      g.text("五行", 135, 118, { align: "center", color: g.DARK });
+      g.text("相克", 135, 130, { align: "center", color: g.DARK });
+    } else if (m.kind === "list") {
+      g.window(0, 100, 160, 44);
+      for (var r = 0; r < 3; r++) {
+        var k = m.top + r, it = m.items[k];
+        if (!it) break;
+        var y = 104 + r * 13;
+        if (k === m.i) g.arrow(5, y + 3, "right");
+        g.text(it.text, 13, y, { color: it.off ? g.MID : g.INK });
+        if (it.right) g.text(it.right, 154, y, { align: "right", color: it.off ? g.MID : g.DARK });
+      }
+      if (m.top > 0) for (var u = 0; u < 4; u++) g.rect(153 - u, 102 + u, 1 + 2 * u, 1, g.INK);
+      if (m.top + 3 < m.items.length && Math.floor(t * 3) % 2) g.arrow(150, 139, "down");
+      var cur = m.items[m.i];
+      if (cur && cur.info) { g.window(0, 15, 160, 22); g.text(cur.info, 80, 19, { align: "center" }); }
+    } else if (m.kind === "target") {
+      var ids = m.all ? Rules.alive(S.b).map(function (f) { return S.b.foes.indexOf(f); }) : [m.i];
+      ids.forEach(function (i) {
+        var p = R.project(foeTop(i, 1.05));
+        if (p) g.arrow(p[0] - 3, p[1] - 9 + (Math.floor(t * 4) % 2), "down");
+      });
+      g.window(0, 112, 160, 32);
+      if (m.all) g.text("全体", 80, 120, { align: "center" });
+      else {
+        var f = S.b.foes[m.i], weak = BATTLE.ELEMENTS[f.weak].name;
+        g.text(f.name, 6, 116);
+        g.text("怕" + weak, 154, 116, { align: "right", color: g.DARK });
+        bar(g, 6, 133, 148, S.foes[m.i].shown, f.maxHp);
+      }
+    }
+  }
+
+  /* resolve a promise when fn() returns something, checked once per update */
+  function poll(fn) { return new Promise(function (res) { S.poll = function () { var v = fn(); if (v !== undefined) { S.poll = null; res(v); } }; }); }
+
+  function chooseCommand() {
+    S.menu = { kind: "cmd", i: S.lastCmd };
+    return poll(function () {
+      var m = S.menu, d = game.dir(), i = m.i;
+      if (d.x) i = (i % 2 === 0 ? i + 1 : i - 1);
+      if (d.y) i = i + d.y * 2;
+      if (i !== m.i && i >= 0 && i < CMDS.length) { m.i = i; game.sfx("move"); }
+      if (game.ok()) { S.lastCmd = m.i; return CMDS[m.i][0]; }
+    });
+  }
+  /* items: [{text, right, info, off}]; resolves with an index, or -1 for B */
+  function chooseList(items, start) {
+    S.menu = { kind: "list", items: items, i: start || 0, top: 0 };
+    S.menu.top = Math.max(0, Math.min(S.menu.i - 1, items.length - 3));
+    return poll(function () {
+      var m = S.menu, d = game.dir();
+      if (d.y) {
+        var i = Math.max(0, Math.min(items.length - 1, m.i + d.y));
+        if (i !== m.i) { m.i = i; game.sfx("move"); }
+        if (m.i < m.top) m.top = m.i;
+        if (m.i > m.top + 2) m.top = m.i - 2;
+      }
+      if (game.pressed("b")) { game.sfx("tap"); return -1; }
+      if (game.ok()) {
+        if (items[m.i].off) { game.sfx("err"); return; }
+        game.sfx("ok");
+        return m.i;
+      }
+    });
+  }
+  /* pick a living foe; resolves with its index, or -1 for B. all: just confirm every foe */
+  function chooseTarget(all) {
+    var live = function () { return S.b.foes.map(function (f, i) { return f.hp > 0 ? i : -1; }).filter(function (i) { return i >= 0; }); };
+    var L = live(), start = S.lastTarget != null && L.indexOf(S.lastTarget) >= 0 ? S.lastTarget : L[0];
+    S.menu = { kind: "target", i: start, all: all };
+    var aim = function () { if (!all) camTo({ x: S.foes[S.menu.i].x * 0.4, yaw: HOME.yaw + S.foes[S.menu.i].x * 0.05 }, 0.25, "out"); };
+    aim();
+    return poll(function () {
+      var m = S.menu, d = game.dir();
+      if (d.x && !all) {
+        var L2 = live(), k = (L2.indexOf(m.i) + d.x + L2.length) % L2.length;
+        if (L2[k] !== m.i) { m.i = L2[k]; game.sfx("move"); aim(); }
+      }
+      if (game.pressed("b")) { game.sfx("tap"); camTo({ x: HOME.x, yaw: HOME.yaw }, 0.25); return -1; }
+      if (game.ok()) { game.sfx("ok"); S.lastTarget = m.i; return m.i; }
+    });
+  }
+
+  /* the hero's turn: menus until there is an action */
+  async function heroTurn() {
+    var hero = S.b.hero;
+    for (;;) {
+      S.view.hp = hero.hp; S.view.mp = hero.mp;
+      var cmd = await chooseCommand();
+      if (cmd === "attack") {
+        var t = await chooseTarget(false);
+        if (t >= 0) return { type: "attack", target: t };
+      } else if (cmd === "spell") {
+        var ids = Rules.spellsAt(hero.level);
+        var items = ids.map(function (id) {
+          var sp = BATTLE.SPELLS[id];
+          return { text: sp.name, right: String(sp.mp),
+            info: (sp.element ? BATTLE.ELEMENTS[sp.element].name + " · " : "五行 · ") + (sp.target === "all" ? "全体" : "单体"),
+            off: hero.mp < sp.mp };
+        });
+        for (;;) {
+          var k = await chooseList(items, S.lastSpell || 0);
+          if (k < 0) break;
+          S.lastSpell = k;
+          var sp = BATTLE.SPELLS[ids[k]];
+          var tg = await chooseTarget(sp.target === "all");
+          if (tg >= 0) return { type: "spell", id: ids[k], target: tg };
+        }
+      } else if (cmd === "item") {
+        var its = BATTLE.ITEM_ORDER.map(function (id) {
+          var it = BATTLE.ITEMS[id];
+          return { text: it.name, right: "x" + (hero.items[id] || 0), info: it.hp ? "回复体力 " + it.hp : "回复法力 " + it.mp, off: !(hero.items[id] > 0) };
+        });
+        var j = await chooseList(its, 0);
+        if (j >= 0) return { type: "item", id: BATTLE.ITEM_ORDER[j] };
+      } else if (cmd === "defend") return { type: "defend" };
+      else if (cmd === "flee") {
+        if (S.b.boss) { game.sfx("err"); await say("逃不掉！", 0.8); continue; }
+        return { type: "flee" };
+      }
+    }
+  }
+  async function say(text, sec) { S.menu = null; S.msg = text; await game.wait(sec == null ? 0.9 : sec); S.msg = ""; }
+
+  async function run() {
+    var args = S.args, b = S.b;
+    await ANIM.intro(S, args.from);
+    if (b.boss) await ANIM.bossIntro(S);
+    await say(b.boss ? b.foes[0].name + "现身了！" : b.foes.length === 1 ? b.foes[0].name + "出现了！" : "出现了" + "一两三"[b.foes.length - 1] + "只妖怪！", 1.1);
+    var result = null;
+    while (!result) {
+      var act = await heroTurn();
+      S.menu = null;
+      S.guard = 0;
+      var ev = Rules.heroAct(b, act, Math.random);
+      await ANIM.hero(S, act, ev);
+      if (b.fled) { result = "fled"; break; }
+      result = Rules.result(b);
+      if (b.defending) S.guard = 1;
+      for (var i = 0; i < b.foes.length && !result && !args.demo; i++) {
+        if (b.foes[i].hp <= 0) continue;
+        var r = Rules.enemyAct(b, i, Math.random);
+        await ANIM.enemy(S, i, r);
+        result = Rules.result(b);
+      }
+    }
+    S.menu = null; S.guard = 0;
+    if (result === "win") await ANIM.victory(S, Rules.reward(b));
+    else if (result === "lose") await ANIM.defeat(S);
+    game.go(args.back || "title", Object.assign({ result: result, hero: b.hero }, args.backArgs || {}), { to: LoGame.INK });
+  }
+
+  /* main.js registers this as the "battle" scene once the game exists */
+  var scene = {
+    enter: function (args) { setup(args); run(); },
+    update: function (dt) {
+      if (S.frozen > 0) S.frozen -= dt;
+      FX.step(dt, S.frozen > 0);
+      S.nums = S.nums.filter(function (n) { n.t += dt; return n.t < n.life; });
+      S.foes.forEach(function (f) { if (f.flash > 0) f.flash -= dt; });
+      if (S.hero.flash > 0) S.hero.flash -= dt;
+      if (S.poll) S.poll();
+    },
+    draw: function (g) { render(g); }
+  };
+
+  return {
+    scene: scene, S: function () { return S; }, foeTop: foeTop, heroAt: heroAt, camTo: camTo, home: home, look: look,
+    popup: popup, show: show, say: say, HOME: HOME
+  };
+})();
+</script>
+<script data-src="src/spells.js">
+/* What every battle move looks like. Each animation is an async script: it moves the camera, adds
+   FX layers and particles, and calls Battle.show(events) at the moment of impact, so numbers appear
+   when the hit lands. The rules have already decided the outcome; nothing here changes it. */
+var ANIM = (function () {
+  var B = Battle, wait = function (s) { return game.wait(s); };
+  var PI = Math.PI;
+  function clamp01(t) { return t < 0 ? 0 : t > 1 ? 1 : t; }
+  function smooth(t) { t = clamp01(t); return t * t * (3 - 2 * t); }
+  function mix(a, b, t) { return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]; }
+  /* a point along a curve from a over c to b */
+  function bez(a, c, b, t) { return mix(mix(a, c, t), mix(c, b, t), t); }
+  function targets(ev) {
+    var out = [];
+    ev.forEach(function (e) { if (e.kind === "damage" && e.side === "enemy" && out.indexOf(e.target) < 0) out.push(e.target); });
+    return out;
+  }
+  /* the middle of the enemy line, on the ground */
+  function centre(S) {
+    var x = 0, z = 0, n = 0;
+    S.foes.forEach(function (f) { if (!f.gone) { x += f.x; z += f.z; n++; } });
+    return n ? [x / n, 0, z / n] : [0, 0, 2.5];
+  }
+  function cast(S, on) { S.hero.pose = on ? B_ART.heroCast : null; }
+  function title(S, text, sec) { S.title = text; game.after(sec || 1.2, function () { if (S.title === text) S.title = ""; }); }
+
+  /* ---------- into the fight ---------- */
+  async function intro(S, from) {
+    var H = B.HOME, pic = from ? new Uint8Array(from) : null;
+    Object.assign(S.cam, { yaw: H.yaw + 2.6, pitch: -0.8, dist: 19, y: 2.5 });
+    S.hud = false;
+    game.sfx("hit");
+    game.after(0.3, function () { game.sfx("tick"); });
+    game.after(0.55, function () { game.sfx("tick"); });
+    /* the last picture twists, breaks into blocks, flashes twice and goes dark; then the arena fades in */
+    FX.layer({ life: 1.6, always: true, post: function (px, t) {
+      if (t < 0.85) {
+        if (pic) px.set(pic);
+        FX.wave(px, t * 16, 0.16, t * 28);
+        FX.mosaic(px, 1 + t * 10);
+        if ((t > 0.28 && t < 0.36) || (t > 0.55 && t < 0.63)) FX.invert(px);
+        FX.cover(px, 0, (t - 0.55) / 0.3);
+      } else FX.cover(px, 0, 1 - (t - 0.85) / 0.6);
+    } });
+    await wait(0.85);
+    await B.camTo(H, 1.5, "out");
+    S.hud = true;
+  }
+
+  async function bossIntro(S) {
+    var p = B.foeTop(0, 0.6), H = B.HOME;
+    S.hud = false;
+    await game.tween(S, { bars: 1 }, 0.3);
+    B.look(p, H.yaw + 0.5, 0.1, 6, 1.6, "inOut");
+    /* mist rising around the shell */
+    for (var k = 0; k < 4; k++) game.after(k * 0.3, function () {
+      FX.emit(14, function () { var a = Math.random() * PI * 2; return { x: Math.cos(a) * 2.6, y: 0.2, z: 3.6 + Math.sin(a) * 1.4, vy: 0.6 + Math.random(), vx: Math.cos(a) * 0.3, life: 1.6, tone: 2, size: 0.12 }; });
+    });
+    await wait(1.7);
+    game.sfx("lose");
+    game.shake(3, 0.6);
+    FX.layer({ life: 0.6, post: function (px, t) { FX.wave(px, 3 * (1 - t / 0.6), 0.3, t * 30); } });
+    await wait(0.8);
+    await B.home(0.8);
+    await game.tween(S, { bars: 0 }, 0.3);
+    S.hud = true;
+  }
+
+  /* ---------- hits ---------- */
+  /* a hit on the weakness: the picture stops, flashes negative, and lines burst from the target */
+  async function weak(S, i) {
+    S.frozen = 0.3;
+    game.sfx("coin");
+    game.shake(3, 0.35);
+    FX.layer({ life: 0.32, always: true, post: function (px, t) {
+      var q = R.project(B.foeTop(i));
+      if (t < 0.15) FX.invert(px);
+      if (q) FX.rays(px, q[0], q[1], 12 + t * 50, 40 + t * 140, 18, t < 0.15 ? 3 : 0, i + t);
+    } });
+    await wait(0.32);
+  }
+  function down(S, i) {
+    var f = S.foes[i];
+    f.dying = true;
+    game.after(0.45, function () {
+      f.gone = true; f.dying = false;
+      var p = B.foeTop(i, 0.5);
+      FX.burst(p[0], p[1], p[2], f.boss ? 90 : 26, f.boss ? 4 : 2.4, { tone: 3, life: 0.8, drag: 2 });
+      FX.burst(p[0], p[1], p[2], f.boss ? 40 : 12, 1.4, { tone: 1, life: 0.9, drag: 1 });
+      game.sfx("tick");
+    });
+  }
+
+  /* ---------- the hero ---------- */
+  async function attack(S, i, ev) {
+    var h = S.hero, f = S.foes[i], x0 = h.x, z0 = h.z, H = B.HOME;
+    B.camTo({ x: f.x * 0.5, z: 0.4, dist: 6.6, yaw: H.yaw + 0.2 }, 0.35);
+    h.art = ART.heroUp1;
+    game.sfx("move");
+    await game.tween(h, { x: f.x - 0.25, z: f.z - 1.2 }, 0.28, "in");
+    var c = B.foeTop(i, 0.5);
+    FX.layer({ life: 0.22, dots: function (R, t) {
+      var k = clamp01(t / 0.08);
+      for (var s = -1; s <= 1; s++) R.streak([c[0] - 0.6 + s * 0.2, c[1] + 0.6, c[2] - 0.3], mix([c[0] - 0.6 + s * 0.2, c[1] + 0.6, c[2] - 0.3], [c[0] + 0.6 + s * 0.2, c[1] - 0.6, c[2] - 0.3], k), 3);
+    } });
+    FX.burst(c[0], c[1], c[2] - 0.2, 14, 3, { tone: 3, life: 0.3, trail: 0.05 });
+    game.shake(2, 0.15);
+    await B.show(ev);
+    await game.tween(h, { x: x0, z: z0 }, 0.3, "out");
+    h.art = ART.heroUp0;
+    await B.home(0.35);
+  }
+
+  async function item(S, ev, id) {
+    var h = S.hero, mana = id === "ether";
+    title(S, BATTLE.ITEMS[id].name, 1.4);
+    B.camTo({ x: h.x, y: 0.9, z: h.z + 0.5, yaw: B.HOME.yaw + PI * 0.85, dist: 4.6, pitch: -0.12 }, 0.5);
+    await wait(0.4);
+    game.sfx("coin");
+    /* pills: light rises out of the ground; mana: motes are drawn in from all around */
+    FX.emit(36, function (k, r) {
+      var a = k / 36 * PI * 2, rad = mana ? 1.8 : 0.5;
+      var p = { x: h.x + Math.cos(a) * rad, y: mana ? 0.3 + r * 1.4 : 0.05, z: h.z + Math.sin(a) * rad, life: 0.9 + r * 0.3, tone: 3, size: 0 };
+      if (mana) { p.vx = -Math.cos(a) * 2; p.vz = -Math.sin(a) * 2; p.vy = 0.3; p.tone = 2; } else { p.vy = 1 + r * 1.5; p.vx = -Math.sin(a) * 0.4; p.vz = Math.cos(a) * 0.4; }
+      return p;
+    });
+    FX.layer({ life: 1.0, lights: function (t) { return [{ x: h.x, y: 0.8, z: h.z - 0.4, radius: 3, power: 1.2 * Math.sin(t / 1.0 * PI) }]; } });
+    await wait(0.6);
+    await B.show(ev);
+    await wait(0.4);
+    await B.home(0.5);
+  }
+
+  async function defend(S, ev) {
+    var h = S.hero;
+    title(S, "防御", 1.0);
+    game.sfx("tap");
+    FX.emit(24, function (k) { var a = k / 24 * PI * 2; return { x: h.x, y: 0.5, z: h.z, vx: Math.cos(a) * 2.2, vz: Math.sin(a) * 1.4, life: 0.4, tone: 3, drag: 4 }; });
+    await wait(0.3);
+    await B.show(ev);
+    await wait(0.3);
+  }
+
+  async function flee(S, ok) {
+    var h = S.hero, z0 = h.z;
+    h.art = ART.heroDown0;
+    game.sfx("move");
+    await game.tween(h, { z: ok ? -7 : -3.6 }, ok ? 0.6 : 0.35, "in");
+    if (ok) { await B.say("逃走了。", 0.8); return; }
+    game.sfx("err");
+    game.shake(1, 0.2);
+    h.art = ART.heroUp0;
+    await game.tween(h, { z: z0 }, 0.25, "out");
+    await B.say("没能逃掉！", 0.8);
+  }
+
+  /* ---------- spells ---------- */
+  var SPELL = {};
+
+  /* 飞剑诀: a halo of swords fans out behind the hero, facing the camera, then they fly at the target one by one */
+  SPELL.sword = async function (S, ev) {
+    var i = targets(ev)[0], h = S.hero, H = B.HOME, n = 8, swords = [];
+    var yaw = H.yaw - 0.55, right = [Math.cos(yaw), 0, -Math.sin(yaw)], fwd = [Math.sin(yaw), 0, Math.cos(yaw)];
+    var hub = [h.x + fwd[0] * 0.35, 1.25, h.z + fwd[2] * 0.35];
+    cast(S, true);
+    B.look([h.x, 1.15, h.z], yaw, -0.06, 4.0, 0.5);
+    for (var k = 0; k < n; k++) swords.push({ a: k / n * PI * 2, fly: -1 });
+    /* the scene dims so the blades stand out in paper white */
+    game.tween(S, { light: 0.45, sky: 0.6 }, 0.4);
+    var L = FX.layer({
+      draw: function (R, t) {
+        var open = smooth(t / 0.45), turn = t * 1.2;
+        swords.forEach(function (s, k) {
+          if (s.done) return;
+          var pos, dir;
+          if (s.fly < 0) {
+            var a = s.a + turn, c = Math.cos(a), sn = Math.sin(a), rad = 0.25 + open * 0.75;
+            dir = [right[0] * c, sn, right[2] * c];
+            pos = [hub[0] + dir[0] * rad, hub[1] + dir[1] * rad, hub[2] + dir[2] * rad];
+            if (k === Math.floor(t * 20) % n) FX.spawn({ x: pos[0], y: pos[1], z: pos[2], vy: -0.6, life: 0.35, tone: 3 });
+          } else {
+            var u = clamp01((t - s.fly) / 0.32), tc = B.foeTop(i, 0.55), top = mix(s.from, tc, 0.5);
+            top[1] += 1.6;
+            pos = bez(s.from, top, tc, u);
+            dir = Lo3D.norm(Lo3D.sub(bez(s.from, top, tc, Math.min(1, u + 0.05)), pos));
+            if (u >= 1) { s.done = true; FX.burst(tc[0], tc[1], tc[2] - 0.3, 8, 2.5, { tone: 3, life: 0.3, trail: 0.04 }); game.shake(1, 0.08); return; }
+            if (k % 2 === 0) FX.spawn({ x: pos[0], y: pos[1], z: pos[2], life: 0.18, tone: 3 });
+          }
+          s.pos = pos;
+          R.draw(FX.BLADE, FX.aim(pos, dir, 1.5), { bias: 0.9, two: true });
+        });
+      },
+      lights: function () { return [{ x: hub[0], y: hub[1], z: hub[2] - 0.3, radius: 3.2, power: 0.9 }]; }
+    });
+    game.sfx("ok");
+    await wait(1.0);
+    B.look(B.foeTop(i, 0.4), H.yaw + 0.75, -0.16, 5.6, 0.55);
+    for (k = 0; k < n; k++) {
+      swords[k].from = swords[k].pos;
+      swords[k].fly = L.layer.t;   /* launch now, on the layer's clock */
+      if (k % 3 === 0) game.sfx("tick");
+      await wait(0.07);
+    }
+    await wait(0.3);
+    game.flash(0.05);
+    await B.show(ev);
+    cast(S, false);
+    game.tween(S, { light: 1, sky: 1 }, 0.5);
+    await wait(0.25);
+    L();
+    await B.home(0.5);
+  };
+
+  /* 寒潮: a wave sweeps from behind the hero across the enemies, then everything frosts over */
+  SPELL.tide = async function (S, ev) {
+    var H = B.HOME, front = -6, crest = 0;
+    cast(S, true);
+    B.camTo({ x: 0, y: 1.0, z: 0.8, yaw: H.yaw + 1.0, pitch: -0.26, dist: 9 }, 0.6);
+    game.tween(S, { sky: 0.7, light: 0.6 }, 0.5);
+    var GRID = (function () {
+      var v = [], t = [], c = [], X = 14, U = 5;
+      for (var u = 0; u <= U; u++) for (var x = 0; x <= X; x++) v.push([-7 + x, u / U, 0]);
+      for (u = 0; u < U; u++) for (x = 0; x < X; x++) {
+        var a = u * (X + 1) + x, b = a + 1, d = a + X + 1, e = d + 1;
+        t.push([a, b, e], [a, e, d]); c.push(u === 0 ? 1.6 : 0.4, u === 0 ? 1.6 : 0.4);   /* white crest, dark water */
+      }
+      return { v: v, t: t, c: c, two: true };
+    })();
+    var L = FX.layer({
+      draw: function (R, t) {
+        if (crest <= 0.01) return;
+        R.draw(GRID, function (p) {
+          /* u = 0 is the crest, u = 1 the back of the wave; the crest leans forward */
+          var u = p[1], hgt = crest * Math.pow(Math.sin(PI * (0.15 + u * 0.85)), 0.8) * (1 + 0.15 * Math.sin(p[0] * 1.3 + t * 9));
+          return [p[0], hgt, front - u * 2.4 + (1 - u) * 0.5 * crest];
+        }, { bias: 0.08 });
+      },
+      post: function (px, t) { if (S.ripple) FX.wave(px, S.ripple, 0.22, t * 14); }
+    });
+    game.sfx("ok");
+    await wait(0.4);
+    S.ripple = 0;
+    /* the wave rises and runs forward */
+    var hitDone = false, spray = game.every(0.05, function () {
+      if (crest < 0.3) return;
+      FX.emit(6, function () { return { x: -6 + Math.random() * 12, y: crest * 0.95, z: front + 0.3, vx: (Math.random() - 0.5), vy: 1.5 + Math.random() * 2, vz: 1.5, grav: 6, life: 0.6, tone: 3 }; });
+    });
+    var run = { f: front, c: 0 };
+    var go = game.tween(run, { f: 7.5 }, 1.5, "linear");
+    game.tween(run, { c: 3.0 }, 0.5, "out");
+    var tick = game.every(1 / 60, function () {
+      front = run.f; crest = run.c;
+      if (!hitDone && front > 2.2) { hitDone = true; S.ripple = 3; game.shake(2, 0.4); B.show(ev); game.tween(S, { ripple: 0 }, 1.2, "linear"); }
+    });
+    await go;
+    tick(); spray();
+    crest = 0;
+    /* frost: ice shards on every target, the picture whitens for a moment */
+    game.sfx("tick");
+    targets(ev).forEach(function (i) {
+      var c = B.foeTop(i, 0.3);
+      FX.burst(c[0], c[1], c[2], 18, 1.8, { tone: 3, life: 0.7, drag: 2.5 });
+    });
+    var ice = FX.layer({ life: 0.8, draw: function (R, t) {
+      targets(ev).forEach(function (i, n) {
+        var f = S.foes[i], s = smooth(t / 0.15) * (1 - smooth((t - 0.6) / 0.2));
+        for (var k = 0; k < 4; k++) {
+          var a = k / 4 * PI * 2 + n;
+          R.draw(FX.CUBE, (function (p) {
+            var q = Lo3D.rotY(Lo3D.rotZ([p[0] * 0.18 * s, p[1] * 1.0 * s, p[2] * 0.18 * s], 0.35), a);
+            return [q[0] + f.x + Math.cos(a) * 0.45, q[1] + 0.35 * s, q[2] + f.z + Math.sin(a) * 0.3];
+          }), { bias: 0.3 });
+        }
+      });
+    }, post: function (px, t) { FX.cover(px, 3, 0.35 * Math.sin(clamp01(t / 0.8) * PI)); } });
+    await wait(0.8);
+    L();
+    cast(S, false);
+    game.tween(S, { sky: 1, light: 1 }, 0.5);
+    await B.home(0.5);
+  };
+
+  /* 青藤缚: vines spiral up around every enemy, squeeze, and pull back into the ground */
+  SPELL.vine = async function (S, ev) {
+    var H = B.HOME, tg = targets(ev), grow = { h: 0, r: 0.9, out: 0 };
+    cast(S, true);
+    /* a low camera drifting across from the right, so the hero does not stand in the way */
+    game.tween(S, { light: 0.5, sky: 0.7 }, 0.4);
+    B.camTo({ x: 0.3, y: 1.0, z: 1.8, pitch: -0.08, dist: 7.6 }, 0.5);
+    game.tween(S.cam, { yaw: H.yaw + 0.75 }, 2.8, "inOut");
+    game.sfx("ok");
+    /* the ground cracks first */
+    tg.forEach(function (i) {
+      var f = S.foes[i];
+      FX.emit(16, function (k) { var a = k / 16 * PI * 2; return { x: f.x + Math.cos(a) * 0.3, y: 0.02, z: f.z + Math.sin(a) * 0.3, vx: Math.cos(a) * 1.4, vz: Math.sin(a) * 1.4, drag: 3, life: 0.7, tone: 0, size: 0.06 }; });
+    });
+    game.shake(1, 0.3);
+    var L = FX.layer({ draw: function (R, t) {
+      tg.forEach(function (i, n) {
+        var f = S.foes[i], top = f.art.h * f.scale * 1.05;
+        for (var v = 0; v < 3; v++) {
+          var segs = Math.floor(18 * grow.h);
+          for (var k = 0; k < segs; k++) {
+            var u = k / 18, a = v / 3 * PI * 2 + u * 7 + n, rad = grow.r * (1 - u * 0.35) + grow.out;
+            var p = [f.x + Math.cos(a) * rad, u * top, f.z + Math.sin(a) * rad * 0.8];
+            R.draw(FX.CUBE, FX.at(p, 0.3 - u * 0.14, a), { bias: k % 3 === 0 ? 0.55 : 0.3 });
+          }
+        }
+      });
+    } });
+    await wait(0.3);
+    await game.tween(grow, { h: 1 }, 0.7, "out");
+    /* leaves fall while the vines tighten */
+    game.sfx("hit");
+    tg.forEach(function (i) {
+      var c = B.foeTop(i, 0.8);
+      FX.burst(c[0], c[1], c[2], 12, 1.5, { tone: 2, life: 1.0, grav: 1.5, drag: 1.5, size: 0.06 });
+    });
+    var squeeze = game.tween(grow, { r: 0.42 }, 0.35, "in");
+    var shakeFoes = game.every(1 / 30, function () { tg.forEach(function (i) { S.foes[i].ox = (Math.random() - 0.5) * 0.12; }); });
+    await squeeze;
+    game.shake(2, 0.3);
+    await B.show(ev);
+    await wait(0.35);
+    shakeFoes();
+    tg.forEach(function (i) { S.foes[i].ox = 0; });
+    await game.tween(grow, { h: 0, out: 0.4 }, 0.4, "in");
+    L();
+    cast(S, false);
+    game.tween(S, { light: 1, sky: 1 }, 0.5);
+    await B.home(0.6);
+  };
+
+  /* 离火符: the camera follows a paper charm to the target, where it bursts into a fireball */
+  SPELL.talisman = async function (S, ev) {
+    var i = targets(ev)[0], H = B.HOME, h = S.hero;
+    var start = B.heroAt(1.0), end = B.foeTop(i, 0.55);
+    end = [end[0], end[1], end[2] - 0.7];
+    var charm = { u: 0, pos: start.slice(), boom: 0, fire: 0 };
+    cast(S, true);
+    title(S, "离火符", 1.5);
+    var L = FX.layer({
+      draw: function (R, t) {
+        if (charm.fire > 0.01) R.draw(FX.BALL, FX.at(end, charm.fire, t * 2), { bias: 0.9 - charm.boom * 0.6 });
+      },
+      lights: function () {
+        var out = [{ x: charm.pos[0], y: charm.pos[1], z: charm.pos[2], radius: 2.2, power: 0.6 }];
+        if (charm.fire > 0) out.push({ x: end[0], y: end[1], z: end[2], radius: 8, power: 2.6 * (1 - charm.boom) });
+        return out;
+      },
+      post: function (px, t) {
+        /* heat haze above the fire */
+        if (charm.fire > 0 && charm.boom < 1) { var q = R.project(end); if (q) FX.wave(px, 1.5 * (1 - charm.boom), 0.6, t * 25, 0, Math.round(q[1])); }
+      }
+    });
+    /* the charm itself is drawn as a sprite in the scene by a second layer, so it is depth-tested */
+    var C = FX.layer({ draw: function (R, t) {
+      if (charm.boom > 0) return;
+      R.sprite(B_ART.talisman, charm.pos[0], charm.pos[1], charm.pos[2], { scale: 1 / 26, anchor: "center", flip: Math.floor(t * 12) % 2 === 0 });
+    } });
+    B.look(start, H.yaw - 0.5, -0.1, 3.4, 0.4);
+    await wait(0.4);
+    game.sfx("ok");
+    var top = mix(start, end, 0.5); top[1] += 1.4;
+    var fly = game.tween(charm, { u: 1 }, 0.85, "inOut");
+    var follow = game.every(1 / 60, function () {
+      charm.pos = bez(start, top, end, charm.u);
+      S.cam.x += (charm.pos[0] - S.cam.x) * 0.25; S.cam.y += (charm.pos[1] - S.cam.y) * 0.25; S.cam.z += (charm.pos[2] - S.cam.z) * 0.25;
+      if (Math.random() < 0.5) FX.spawn({ x: charm.pos[0], y: charm.pos[1], z: charm.pos[2], vy: -0.3, life: 0.4, tone: 3 });
+    });
+    game.tween(S.cam, { yaw: H.yaw + 0.35, dist: 4.4 }, 0.85, "inOut");
+    await fly;
+    follow();
+    await wait(0.25);
+    /* ignition */
+    game.sfx("hit");
+    game.flash(0.07);
+    game.shake(3, 0.4);
+    B.camTo({ dist: 6, pitch: -0.12 }, 0.5, "out");
+    charm.boom = 0; charm.fire = 0.2;
+    C();
+    game.tween(charm, { fire: 1.5 }, 0.3, "out");
+    FX.burst(end[0], end[1], end[2], 40, 3.5, { tone: 3, life: 0.9, drag: 2, up: 1.2 });
+    FX.emit(20, function () { return { x: end[0] + (Math.random() - 0.5), y: end[1], z: end[2] + (Math.random() - 0.5), vy: 0.8 + Math.random(), life: 1.4, tone: 1, size: 0.12, drag: 0.5 }; });
+    await wait(0.12);
+    await B.show(ev);
+    await game.tween(charm, { boom: 1, fire: 0.01 }, 0.6, "in");
+    L();
+    cast(S, false);
+    await B.home(0.5);
+  };
+
+  /* 山岳印: the sky darkens, a stone seal comes down out of it and slams onto the enemies */
+  SPELL.seal = async function (S, ev) {
+    var H = B.HOME, c = centre(S), seal = { y: 11, spin: 0, s: 1, punch: 1 };
+    var SEAL = (function () {
+      var m = World.builder();
+      m.box(-1.5, -0.5, -1.5, 1.5, 0.5, 1.5, 0.95);
+      /* the carved face underneath: a square spiral in relief */
+      [[-1.2, -1.2, 1.2, -0.9], [0.9, -1.2, 1.2, 1.2], [-1.2, 0.9, 1.2, 1.2], [-1.2, -0.6, -0.9, 1.2], [-0.6, -0.6, 0.6, -0.3], [0.3, -0.6, 0.6, 0.6], [-0.6, 0.3, 0.6, 0.6]].forEach(function (r) {
+        m.box(r[0], -0.62, r[1], r[2], -0.5, r[3], 0.35, 0.35);
+      });
+      return m;
+    })();
+    cast(S, true);
+    game.tween(S, { sky: 0.45, light: 0.6 }, 0.5);
+    B.camTo({ x: c[0], y: 3.2, z: c[2] - 1, pitch: 0.32, dist: 9.5, yaw: H.yaw + 0.25 }, 0.6);
+    game.sfx("ok");
+    var L = FX.layer({
+      draw: function (R) {
+        var w = 1.6 * smooth((11 - seal.y) / 9);
+        R.draw(FX.BALL, function (p) { return [p[0] * w + c[0], 0.02, p[2] * w + c[2]]; }, { albedo: 0.02 });
+        R.draw(SEAL, function (p) { var q = Lo3D.rotY(p, seal.spin); return [q[0] * seal.s + c[0], q[1] * seal.s + seal.y, q[2] * seal.s + c[2]]; }, { bias: 0.3 });
+      },
+      /* the carved face glows on the ground beneath it */
+      lights: function () { return [{ x: c[0], y: seal.y - 1.2, z: c[2] - 0.5, radius: 4 + Math.max(0, 6 - seal.y) * 0.4, power: 1.4 }]; },
+      post: function (px) { if (seal.punch > 1.001) FX.zoom(px, seal.punch, 80, 80); }
+    });
+    game.tween(seal, { spin: 0.8 }, 1.6, "out");
+    await game.tween(seal, { y: 5.5 }, 1.2, "out");
+    /* a quick cut back, then the slam */
+    B.camTo({ x: c[0], y: 1.2, z: 0.2, pitch: -0.3, dist: 9.5, yaw: H.yaw - 0.15 }, 0.25, "out");
+    await wait(0.15);
+    await game.tween(seal, { y: 0.55 }, 0.18, "in");
+    game.sfx("hit");
+    game.flash(0.05);
+    game.shake(5, 0.5);
+    seal.punch = 1.14;
+    game.tween(seal, { punch: 1 }, 0.35, "out");
+    FX.emit(30, function () {
+      var a = Math.random() * PI * 2, s = 2 + Math.random() * 3;
+      return { x: c[0] + Math.cos(a) * 1.4, y: 0.3, z: c[2] + Math.sin(a) * 1.4, vx: Math.cos(a) * s, vy: 2 + Math.random() * 3, vz: Math.sin(a) * s, grav: 9, floor: 0.05, life: 1.2, tone: Math.random() < 0.5 ? 0 : 1, size: 0.14 };
+    });
+    FX.emit(56, function (k) {
+      var a = k / 56 * PI * 2;
+      return { x: c[0] + Math.cos(a) * 1.6, y: 0.06, z: c[2] + Math.sin(a) * 1.6, vx: Math.cos(a) * 6, vz: Math.sin(a) * 6, drag: 2.2, life: 0.9, tone: 2, size: 0.08 };
+    });
+    await B.show(ev);
+    await wait(0.4);
+    await game.tween(seal, { y: -1.5 }, 0.5, "in");
+    L();
+    cast(S, false);
+    game.tween(S, { sky: 1, light: 1 }, 0.5);
+    await B.home(0.6);
+  };
+
+  /* 七级浮屠: the five elements gather above the arena and bring down a phantom of the tower */
+  SPELL.pagoda = async function (S, ev) {
+    var H = B.HOME, h = S.hero, c = centre(S), hp = B.heroAt(0.7), orbs = [], tw = { y: 16, spin: 0, show: 0, rise: 0 };
+    var PAG = (function () { var m = World.builder(); World.pagoda(m, 0, 0, 0, 0.62, [1.1, 0.25]); return m; })();
+    var storeys = [0.5, 1.4, 2.25, 3.05, 3.8, 4.5, 5.15];
+    S.hud = false;
+    game.tween(S, { bars: 1 }, 0.3);
+    game.tween(S, { sky: 0.15, light: 0.25 }, 0.6);
+    cast(S, true);
+    B.look([h.x, 0.9, h.z], H.yaw + PI - 0.3, -0.05, 3.2, 0.7);
+    var L = FX.layer({
+      draw: function (R, t) {
+        orbs.forEach(function (o) { R.draw(FX.BALL, FX.at(o.p, 0.13, t), { bias: 0.85 }); });
+        if (tw.show && (tw.rise === 0 || Math.floor(t * 20) % 3)) R.draw(PAG, function (p) {
+          var q = Lo3D.rotY(p, tw.spin);
+          return [q[0] + c[0], q[1] + tw.y, q[2] + c[2]];
+        }, { bias: 0.5 + tw.rise * 0.4 });
+      },
+      lights: function () {
+        var out = orbs.map(function (o) { return { x: o.p[0], y: o.p[1], z: o.p[2], radius: 2.4, power: 0.7 }; });
+        if (tw.show) storeys.forEach(function (y, k) { if (k % 2 === 0) out.push({ x: c[0], y: tw.y + y + 0.4, z: c[2] - 1.4, radius: 4.5, power: 1.1 }); });
+        return out;
+      },
+      post: function (px, t) {
+        if (S.rays) { var q = R.project(S.rays); if (q) FX.rays(px, q[0], q[1], 6, 40, 16, 3, t * 0.8); }
+        if (S.ripple) FX.wave(px, S.ripple, 0.2, t * 20);
+        if (S.punch > 1.001) FX.zoom(px, S.punch, 80, 72);
+      }
+    });
+    /* five orbs, one per element */
+    for (var k = 0; k < 5; k++) {
+      (function (k) { orbs.push({ k: k, p: hp.slice() }); })(k);
+      game.sfx("tick");
+      await wait(0.2);
+    }
+    var orbit = game.every(1 / 60, function () {
+      var t = game.time;
+      orbs.forEach(function (o) {
+        var a = o.k / 5 * PI * 2 + t * 4;
+        var target = o.rise ? [c[0] + Math.cos(a) * 0.5 * (1 - o.rise), 1 + o.rise * 9, c[2] + Math.sin(a) * 0.5 * (1 - o.rise)] : [hp[0] + Math.cos(a) * 0.9, hp[1] + Math.sin(t * 3 + o.k) * 0.15, hp[2] + Math.sin(a) * 0.9];
+        o.p = mix(o.p, target, 0.15);
+      });
+    });
+    game.flash(0.05);
+    await wait(0.3);
+    /* they rise and merge high above the enemies */
+    B.look([c[0], 6, c[2]], H.yaw + 0.2, 0.45, 8, 1.1);
+    orbs.forEach(function (o) { o.rise = 0; game.tween(o, { rise: 1 }, 1.0, "in"); });
+    await wait(1.1);
+    orbit();
+    orbs.length = 0;
+    S.rays = [c[0], 10, c[2]];
+    game.sfx("ok");
+    game.flash(0.06);
+    game.tween(S, { sky: 0.6 }, 0.6);
+    /* the phantom tower comes down slowly while the camera circles it */
+    tw.show = 1;
+    game.after(0.7, function () { S.rays = null; });
+    S.cam.yaw = H.yaw + 0.9;
+    B.look([c[0], 4.5, c[2]], H.yaw + 0.9, 0.05, 15, 0.6);
+    game.tween(S.cam, { yaw: H.yaw + 0.9 + 2.3 }, 2.6, "inOut");
+    game.tween(tw, { spin: 1.2 }, 2.6, "out");
+    var motes = game.every(0.04, function () {
+      FX.spawn({ x: c[0] + (Math.random() - 0.5) * 4, y: tw.y + Math.random() * 5, z: c[2] + (Math.random() - 0.5) * 4, vy: -1.5, life: 1.2, tone: 3 });
+    });
+    await game.tween(tw, { y: 3.2 }, 2.4, "out");
+    S.rays = null;
+    B.camTo({ y: 1.6, pitch: -0.2, dist: 12 }, 0.3);
+    await wait(0.2);
+    /* the slam */
+    await game.tween(tw, { y: 0 }, 0.2, "in");
+    motes();
+    game.sfx("hit");
+    game.flash(0.12);
+    game.shake(6, 0.7);
+    S.ripple = 4; S.punch = 1.25;
+    game.tween(S, { ripple: 0 }, 1.2, "out");
+    game.tween(S, { punch: 1 }, 0.5, "out");
+    [[3, 9], [0, 6]].forEach(function (ring) {
+      FX.emit(64, function (k) {
+        var a = k / 64 * PI * 2;
+        return { x: c[0] + Math.cos(a) * 2, y: 0.1, z: c[2] + Math.sin(a) * 2, vx: Math.cos(a) * ring[1], vz: Math.sin(a) * ring[1], drag: 1.5, life: 1.1, tone: ring[0], size: 0.1 };
+      });
+    });
+    await B.show(ev);
+    /* it dissolves into light and rises away */
+    tw.rise = 1;
+    game.tween(tw, { y: 9 }, 1.3, "in");
+    var up = game.every(0.03, function () {
+      FX.spawn({ x: c[0] + (Math.random() - 0.5) * 3, y: tw.y + Math.random() * 5, z: c[2] + (Math.random() - 0.5) * 3, vy: 2.5, life: 0.8, tone: 3 });
+    });
+    await wait(1.3);
+    up();
+    L();
+    S.punch = 1; S.ripple = 0;
+    cast(S, false);
+    game.tween(S, { sky: 1, light: 1, bars: 0 }, 0.5);
+    await B.home(0.8);
+    S.hud = true;
+  };
+
+  async function hero(S, act, ev) {
+    if (act.type === "attack") return attack(S, act.target, ev);
+    if (act.type === "item") return item(S, ev, act.id);
+    if (act.type === "defend") return defend(S, ev);
+    if (act.type === "flee") return flee(S, ev[0].ok);
+    var sp = BATTLE.SPELLS[act.id];
+    S.view.mp = S.b.hero.mp;
+    title(S, sp.name, sp.ultimate ? 1.2 : 1.4);
+    await SPELL[act.id](S, ev);
+  }
+
+  /* ---------- the enemies ---------- */
+  var FOE = {};
+  /* lunge at the hero and back */
+  async function lunge(S, i, hit) {
+    var f = S.foes[i], h = S.hero;
+    var dz = (h.z + 1.3) - f.z, dx = (h.x - f.x) * 0.7;
+    await game.tween(f, { oz: dz, ox: dx }, 0.22, "in");
+    await hit();
+    await game.tween(f, { oz: 0, ox: 0 }, 0.3, "out");
+  }
+  FOE.lash = async function (S, i, r) {
+    var p = B.heroAt(0.6);
+    await lunge(S, i, async function () {
+      FX.layer({ life: 0.2, dots: function (R, t) {
+        var k = clamp01(t / 0.08);
+        for (var s = 0; s < 3; s++) R.streak([p[0] + 0.5, p[1] + 0.5 - s * 0.2, p[2] - 0.2], mix([p[0] + 0.5, p[1] + 0.5 - s * 0.2, p[2] - 0.2], [p[0] - 0.5, p[1] - 0.3 - s * 0.2, p[2] - 0.2], k), 0);
+      } });
+      game.shake(2, 0.2);
+      await B.show(r.events);
+    });
+  };
+  /* fox fire: a small burning ball that lights the ground as it flies */
+  FOE.ember = async function (S, i, r) {
+    var a = B.foeTop(i, 0.6), b = B.heroAt(0.6), top = mix(a, b, 0.5), ball = { u: 0, p: a };
+    top[1] += 1.2;
+    var L = FX.layer({
+      draw: function (R, t) { R.draw(FX.BALL, FX.at(ball.p, 0.18 + Math.sin(t * 30) * 0.03, t * 5), { bias: 0.9 }); },
+      lights: function () { return [{ x: ball.p[0], y: ball.p[1], z: ball.p[2], radius: 3.5, power: 1.3 }]; }
+    });
+    var trail = game.every(1 / 60, function () {
+      ball.p = bez(a, top, b, ball.u);
+      FX.spawn({ x: ball.p[0], y: ball.p[1], z: ball.p[2], vy: 0.5, life: 0.35, tone: 3 });
+    });
+    await game.tween(ball, { u: 1 }, 0.55, "in");
+    trail(); L();
+    FX.burst(b[0], b[1], b[2], 20, 2.5, { tone: 3, life: 0.5, drag: 2, up: 0.8 });
+    game.shake(2, 0.2);
+    await B.show(r.events);
+  };
+  /* a boulder thrown high, landing on the hero */
+  FOE.rock = async function (S, i, r) {
+    var f = S.foes[i], a = B.foeTop(i, 1.0), b = B.heroAt(0.4), top = mix(a, b, 0.5), rk = { u: 0, p: a };
+    top[1] += 3.5;
+    await game.tween(f, { oy: 0.3 }, 0.2, "out");
+    var L = FX.layer({ draw: function (R, t) { R.draw(FX.BALL, FX.at(rk.p, 0.32, t * 6), { albedo: 0.7 }); } });
+    var fly = game.every(1 / 60, function () { rk.p = bez(a, top, b, rk.u); });
+    game.tween(f, { oy: 0 }, 0.2);
+    await game.tween(rk, { u: 1 }, 0.6, "in");
+    fly(); L();
+    FX.emit(18, function () { var q = Math.random() * PI * 2; return { x: b[0], y: 0.2, z: b[2], vx: Math.cos(q) * 2.5, vz: Math.sin(q) * 2.5, vy: 2, grav: 8, floor: 0.05, life: 0.8, tone: 1, size: 0.1 }; });
+    game.shake(3, 0.3);
+    await B.show(r.events);
+  };
+  /* a spray of cold water, and the picture wobbles */
+  FOE.splash = async function (S, i, r) {
+    var a = B.foeTop(i, 0.6), b = B.heroAt(0.6);
+    for (var k = 0; k < 3; k++) {
+      FX.emit(10, function () {
+        var t = 0.5, v = [(b[0] - a[0]) / t, (b[1] - a[1]) / t + 2, (b[2] - a[2]) / t];
+        return { x: a[0], y: a[1], z: a[2], vx: v[0] + (Math.random() - 0.5), vy: v[1] + Math.random(), vz: v[2], grav: 5, life: 0.55, tone: 3, trail: 0.03 };
+      });
+      await wait(0.08);
+    }
+    await wait(0.35);
+    FX.layer({ life: 0.6, post: function (px, t) { FX.wave(px, 2 * (1 - t / 0.6), 0.3, t * 20); } });
+    game.shake(2, 0.2);
+    await B.show(r.events);
+  };
+  /* the boss draws in mist and light, the screen darkens: defend now */
+  async function gather(S, i, r) {
+    var p = B.foeTop(i, 0.75), H = B.HOME;
+    B.look(p, H.yaw + 0.3, -0.05, 6.5, 0.6);
+    game.tween(S, { sky: 0.5, light: 0.6 }, 0.6);
+    var k = game.every(0.05, function () {
+      FX.emit(3, function () {
+        var a = Math.random() * PI * 2, d = 3 + Math.random() * 2;
+        return { x: p[0] + Math.cos(a) * d, y: p[1] + (Math.random() - 0.5) * 3, z: p[2] + Math.sin(a) * d * 0.5, vx: -Math.cos(a) * d * 1.6, vy: 0, vz: -Math.sin(a) * d * 0.8, life: 0.6, tone: 3, trail: 0.05 };
+      });
+    });
+    S.foes[i].glow = FX.layer({ lights: function (t) { return [{ x: p[0], y: p[1], z: p[2] - 1, radius: 5, power: 0.6 + 0.3 * Math.sin(t * 8) }]; } });
+    S.msg = r.move;
+    await wait(1.6);
+    k();
+    S.msg = "";
+    game.tween(S, { sky: 1, light: 1 }, 0.5);
+    await B.home(0.6);
+  }
+  /* the boss's big attack: a tidal blast across the whole arena */
+  FOE.tidal = async function (S, i, r) {
+    var f = S.foes[i], a = B.foeTop(i, 0.75), b = B.heroAt(0.5), H = B.HOME;
+    if (f.glow) { f.glow(); f.glow = null; }
+    S.hud = false;
+    game.tween(S, { bars: 1 }, 0.25);
+    B.look(mix(a, b, 0.5), H.yaw - 1.4, -0.1, 7, 0.5);
+    await wait(0.5);
+    game.sfx("lose");
+    S.ripple = 5;
+    var L = FX.layer({ post: function (px, t) { FX.wave(px, S.ripple, 0.25, t * 30); } });
+    var beam = game.every(1 / 60, function () {
+      FX.emit(5, function () {
+        var v = Lo3D.scale(Lo3D.norm(Lo3D.sub(b, a)), 14);
+        return { x: a[0], y: a[1], z: a[2], vx: v[0] + (Math.random() - 0.5) * 2, vy: v[1] + (Math.random() - 0.5) * 2, vz: v[2], life: 0.45, tone: Math.random() < 0.7 ? 3 : 2, trail: 0.03 };
+      });
+    });
+    await wait(0.6);
+    game.flash(0.1);
+    game.shake(6, 0.6);
+    await B.show(r.events);
+    await wait(0.4);
+    beam();
+    await game.tween(S, { ripple: 0 }, 0.5);
+    L();
+    game.tween(S, { bars: 0 }, 0.3);
+    await B.home(0.6);
+    S.hud = true;
+  };
+
+  async function enemy(S, i, r) {
+    if (r.gather) return gather(S, i, r);
+    title(S, r.move, 1.0);
+    await wait(0.25);
+    await (FOE[r.fx] || FOE.lash)(S, i, r);
+    await wait(0.15);
+  }
+
+  /* ---------- the end ---------- */
+  async function victory(S, rw) {
+    var h = S.hero, H = B.HOME;
+    game.sfx("win");
+    cast(S, true);
+    S.cam.yaw = H.yaw;
+    B.look([h.x, 0.8, h.z], H.yaw + PI * 0.92, -0.12, 4.4, 1.4, "inOut");
+    await wait(1.2);
+    var pages = ["胜利！", "得到修为 " + rw.xp + "。"];
+    rw.ups.forEach(function (u) {
+      pages.push("升到 " + u.level + " 级！");
+      u.learned.forEach(function (id) { pages.push("学会了" + BATTLE.SPELLS[id].name + "！"); });
+    });
+    S.hud = false;
+    await game.say(pages);
+  }
+  async function defeat(S) {
+    game.sfx("lose");
+    S.hud = false;
+    game.tween(S, { sky: 0.3, light: 0.3 }, 1.2);
+    FX.layer({ always: true, post: function (px, t) { FX.cover(px, 0, Math.min(0.6, t / 2)); } });
+    await wait(1.0);
+    S.hero.hide = true;
+    await game.say("力竭了……");
+  }
+
+  return { intro: intro, bossIntro: bossIntro, weak: weak, down: down, hero: hero, enemy: enemy, victory: victory, defeat: defeat, SPELL: SPELL };
+})();
+</script>
+<script data-src="src/main.js">
+/* Scenes: the title (camera circling the tower) and the town, where the hero walks tile by tile.
+   SELECT shows how long the last frame took to render, for checking speed on a phone. */
+var game = LoGame.create({ width: 160, height: 144, lang: "zh" });
+var R = Lo3D.create({ width: 160, height: 144 });
+var town = World.build(TOWN);
+var CAM = { pitch: -0.62, dist: 8.5 };
+var perf = { show: false, ms: 0 };
+
+function frame(g, view, actors) {
+  var t0 = performance.now();
+  g.sprite(World.render(R, town, view, actors), 0, 0);
+  perf.ms = perf.ms * 0.9 + (performance.now() - t0) * 0.1;
+  if (perf.show) { g.rect(0, 0, 50, 14, g.INK); g.text(perf.ms.toFixed(1) + " ms", 2, 1, { color: g.PAPER }); }
+}
+function toggles() { if (game.pressed("select")) perf.show = !perf.show; }
+
+/* ---------- title ---------- */
+game.scene("title", {
+  enter: function () { busy = false; },
+  draw: function (g) {
+    var a = game.time * 0.12, T = town.def.tower;
+    frame(g, { x: T.x, y: 4, z: -T.y, yaw: a, pitch: -0.22, dist: 17, time: game.time }, []);
+    g.window(14, 82, 132, 52);
+    g.text("镇妖塔·外传", 80, 88, { align: "center" });
+    g.text("内置 LX-3D 协处理器", 80, 104, { align: "center", color: g.DARK });
+    if (Math.floor(game.time * 2) % 2) g.text("按 A 开始", 80, 119, { align: "center" });
+  },
+  update: function () {
+    toggles();
+    if (busy || !game.ok()) return;
+    game.sfx("ok");
+    busy = true;
+    game.choose(["进入小镇", "斗法"], { y: 80 }).then(function (i) {
+      busy = false;
+      if (i === 0) game.go("town", { intro: true }, { to: LoGame.INK });
+      if (i === 1) game.go("trial", null, { to: LoGame.INK });
+    });
+  }
+});
+
+/* ---------- 斗法: any fight on the route, with the hero as strong as a player who got there ----------
+   Until the maps exist (P3) this is how the battles are played. */
+var AREAS = { road: "山道", tower: "塔内", upper: "塔上层", top: "塔顶" };
+/* the hero who reaches fight k of part p: every earlier fight won, every earlier item found */
+function heroAt(p, k) {
+  var h = Rules.newHero(1), xp = 0;
+  BATTLE.ROUTE.forEach(function (part, pi) {
+    if (pi > p) return;
+    Object.keys(part.found).forEach(function (id) { h.items[id] = (h.items[id] || 0) + part.found[id]; });
+    part.fights.forEach(function (ids, fi) {
+      if (pi < p || fi < k) ids.forEach(function (id) { xp += BATTLE.ENEMIES[id].xp; });
+    });
+  });
+  h.xp = xp; h.level = Rules.levelFor(xp);
+  Rules.rest(h);
+  return h;
+}
+function fightName(ids) {
+  return ids.map(function (id) { return BATTLE.ENEMIES[id].name; }).join(" ");
+}
+game.scene("trial", {
+  enter: async function (args) {
+    busy = true;
+    if (args && args.result) await game.say(args.result === "win" ? "斗法得胜。" : args.result === "fled" ? "暂且退下。" : "败下阵来。");
+    for (;;) {
+      var parts = BATTLE.ROUTE.map(function (r) { return AREAS[r.area]; }).concat(["演武：全部法术"]);
+      var p = await game.choose(parts, { title: "斗法", cancel: true });
+      if (p < 0) { game.go("title", null, { to: LoGame.INK }); return; }
+      var hero, ids, area;
+      if (p === BATTLE.ROUTE.length) {
+        /* every spell, enough mana to show them all */
+        hero = Rules.newHero(10); hero.mp = 999; ids = ["golem", "wraith", "bronze"]; area = "top";
+      } else {
+        var part = BATTLE.ROUTE[p];
+        var k = await game.choose(part.fights.map(fightName), { title: AREAS[part.area], cancel: true });
+        if (k < 0) continue;
+        hero = heroAt(p, k); ids = part.fights[k]; area = part.area;
+      }
+      game.go("battle", { ids: ids, area: area, hero: hero, demo: p === BATTLE.ROUTE.length, back: "trial", from: new Uint8Array(R.image.px) }, { fade: false });
+      return;
+    }
+  },
+  draw: function (g) {
+    var T = town.def.tower;
+    frame(g, { x: T.x, y: 4, z: -T.y, yaw: game.time * 0.12, pitch: -0.22, dist: 17, time: game.time }, []);
+  }
+});
+
+/* ---------- town ---------- */
+var DIRS = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
+var hero, people, cam, busy = false;
+
+function blocked(c, r) {
+  if (c < 0 || r < 0 || c >= town.width || r >= town.height) return true;
+  if (town.solid[c + "," + r]) return true;
+  return people.some(function (p) { return p.x === c && p.y === r; });
+}
+/* what stands on a tile: a person, a door, the well, a sign */
+function thingAt(c, r) {
+  var p = people.filter(function (q) { return q.x === c && q.y === r; })[0];
+  if (p) return p;
+  var all = TOWN.things.concat(town.spots), well = TOWN.map[r] && TOWN.map[r][c] === "W";
+  for (var i = 0; i < all.length; i++) {
+    var s = all[i];
+    if ((s.x === c && s.y === r) || (well && TOWN.map[s.y][s.x] === "W")) return s;
+  }
+  return null;
+}
+async function talk(s) {
+  busy = true;
+  await game.say(s.say, s.name ? { name: s.name } : {});
+  busy = false;
+}
+/* walking off the map's open edges reads the sign there */
+function edge(c, r) {
+  var row = r < 0 ? 0 : town.height - 1;
+  return TOWN.things.filter(function (s) { return s.y === row && Math.abs(s.x - c) <= 1; })[0];
+}
+
+game.scene("town", {
+  enter: async function (args) {
+    var s = TOWN.start;
+    hero = { c: s.x, r: s.y, x: s.x + 0.5, z: -s.y - 0.5, face: s.face, step: 0, moving: null };
+    people = TOWN.people.map(function (p) { return { x: p.x, y: p.y, art: ART[p.art], name: p.name, say: p.say }; });
+    cam = { x: hero.x, z: hero.z, pitch: CAM.pitch, dist: CAM.dist };
+    if (args && args.intro) {
+      /* the camera starts on the tower and comes down the road to the hero */
+      busy = true;
+      cam.x = TOWN.tower.x; cam.z = -TOWN.tower.y + 2; cam.pitch = -0.25; cam.dist = 14;
+      await game.wait(0.6);
+      await game.tween(cam, { x: hero.x, z: hero.z, pitch: CAM.pitch, dist: CAM.dist }, 3.2, "inOut");
+      busy = false;
+      await talk({ say: ["镇妖塔的封印松了。", "去镇上问问吧。"] });
+    }
+  },
+  update: function (dt) {
+    toggles();
+    if (busy) return;
+    if (hero.moving) {
+      var m = hero.moving;
+      m.t = Math.min(1, m.t + dt * 4.2);
+      hero.x = m.x0 + (m.x1 - m.x0) * m.t; hero.z = m.z0 + (m.z1 - m.z0) * m.t;
+      if (m.t >= 1) hero.moving = null;
+    }
+    if (!hero.moving) {
+      var dir = null;
+      ["up", "down", "left", "right"].forEach(function (d) { if (game.btn(d)) dir = dir || d; });
+      if (dir) {
+        hero.face = dir;
+        var c = hero.c + DIRS[dir][0], r = hero.r + DIRS[dir][1];
+        if (!blocked(c, r)) {
+          hero.moving = { x0: hero.x, z0: hero.z, x1: c + 0.5, z1: -r - 0.5, t: 0 };
+          hero.c = c; hero.r = r; hero.step++;
+        } else if (game.pressed(dir)) {
+          var e = (r < 0 || r >= town.height) && edge(c, r);
+          if (e) talk(e); else game.sfx("tick");
+        }
+      } else if (game.pressed("a")) {
+        var f = thingAt(hero.c + DIRS[hero.face][0], hero.r + DIRS[hero.face][1]);
+        if (f) { game.sfx("tap"); talk(f); }
+      }
+    }
+    /* the camera trails the hero a little */
+    cam.x += (hero.x - cam.x) * Math.min(1, dt * 8);
+    cam.z += (hero.z - cam.z) * Math.min(1, dt * 8);
+  },
+  draw: function (g) {
+    var walk = hero.moving ? Math.floor(hero.moving.t * 2 + hero.step) % 2 : 0;
+    var art = hero.face === "up" ? (walk ? ART.heroUp1 : ART.heroUp0)
+      : hero.face === "down" ? (walk ? ART.heroDown1 : ART.heroDown0)
+      : (walk ? ART.heroSide1 : ART.heroSide0);
+    var actors = people.map(function (p) { return { art: p.art, x: p.x + 0.5, z: -p.y - 0.5 }; });
+    actors.push({ art: art, x: hero.x, z: hero.z, flip: hero.face === "right" });
+    frame(g, { x: cam.x, z: cam.z, pitch: cam.pitch, dist: cam.dist, time: game.time }, actors);
+  }
+});
+
+game.scene("battle", Battle.scene);
+game.start("title");
+</script>
+</body>
+</html>
