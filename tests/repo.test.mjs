@@ -114,5 +114,7 @@ test("the Pages workflow publishes the repo without tests, dependencies or CI fi
   const y = read(".github/workflows/pages.yml");
   for (const ex of ["/tests", "/node_modules", "/_to_delete", "/.github"]) assert.ok(y.includes("--exclude=" + ex), ex);
   assert.ok(y.includes("gh-pages") && y.includes(".nojekyll") && y.includes("lopda-preview"));
+  /* PRs that change no app, sdk or runtime file (docs, tests, CI) get no preview and no comment */
+  assert.ok(y.includes("id: plan") && y.includes("deploy=false") && /\^\(sdk\|runtime\)\//.test(y), "preview only when needed");
   assert.deepEqual([...y.matchAll(/uses:\s*(\S+)/g)].map((m) => m[1]), ["actions/checkout@v4"], "only actions/checkout");
 });

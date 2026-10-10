@@ -174,6 +174,8 @@
 - **部署（GitHub Pages）**：`.github/workflows/pages.yml` 只用 git 命令发布到 `gh-pages` 分支，不用第三方 action。
   - push 到 `main` 发布到站点根目录：`https://nowheremanx.github.io/lopda/runtime/`。
   - 同一 repo 的 PR 发布到 `pr/<编号>/`，在 PR 里留一条预览链接（更新而不是重复发），PR 关闭后删除；fork 的 PR 不发布。
+  - 只在 PR 改了能预览的东西时才发布（2026-10-10）：改了某些 app 只列这些 app；改了 `sdk/` 或 `runtime/` 列出全部 app；
+    只改文档、测试、CI 时不发布也不留言，省掉一次 Pages 构建。
   - **预览和正式站点同源**（`nowheremanx.github.io`），IndexedDB 共享。所以预览链接只给 `sdk/dev.html?app=...`
     （它把存档放在 localStorage），不要在预览路径下打开 `runtime/`，否则读写的就是正式掌机的数据。
   - 本地地址和 Pages 地址是两个站点，数据互不相通。
