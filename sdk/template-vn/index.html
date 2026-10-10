@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>小剧场</title>
+<!-- Lo-PDA visual novel template (lopda/1 + lo-game.js). The story is data; the engine below plays it. MIT License. -->
+</head>
+<body>
+<!-- The framework. Leave this block alone: node tools/lo-game.mjs <folder> fills it in, plus a font block after it. -->
+<script data-lo-game="1.2.0"></script>
+<script>
+var game = LoGame.create({ width: 160, height: 144, lang: "zh" });
+var T = game.t;
+document.documentElement.lang = game.lang === "zh" ? "zh-CN" : "en";
+
+/* ==== STORY: edit from here to END STORY ==== */
+var TITLE = { zh: "小剧场", en: "Little Stage" };
+
+/* Portraits: 12x16, doubled to 24x32 on screen. 0 ink, 1 dark, 2 mid, 3 paper, . clear */
+var CAST = {
+  aya: { name: { zh: "阿雅", en: "Aya" }, art: [
+    "...0000.....", "..011110....", ".01111110...", ".01333310...", ".03033030...", ".03333330...",
+    "..033330....", "...0330.....", "..022220....", ".02222220...", ".02222220...", ".02222220...",
+    ".02222220...", "..022220....", "..02..20....", "..00..00...."] },
+  ken: { name: { zh: "阿健", en: "Ken" }, art: [
+    "............", "...00000....", "..0000000...", "..0333330...", "..3033303...", "..0333330...",
+    "...03330....", "....030.....", "..011110....", ".01111110...", ".01111110...", ".01111110...",
+    ".01111110...", "..011110....", "..01..10....", "..00..00...."] }
+};
+
+/* Backgrounds: drawn into the top 88 pixels */
+var BACKDROPS = {
+  room: function (g) {
+    g.rect(0, 0, 160, 88, g.PAPER); g.dither(0, 0, 160, 60, g.MID, 1);
+    g.rect(0, 60, 160, 28, g.MID); g.line(0, 60, 160, 60, g.INK);
+    g.rect(100, 12, 40, 30, g.PAPER); g.frame(100, 12, 40, 30, g.INK); g.line(120, 12, 120, 42, g.INK);
+  },
+  street: function (g) {
+    g.rect(0, 0, 160, 88, g.MID); g.dither(0, 0, 160, 40, g.PAPER, 2);
+    g.rect(0, 70, 160, 18, g.DARK); g.line(0, 70, 160, 70, g.INK);
+    for (var x = 8; x < 160; x += 40) { g.rect(x, 20, 3, 50, g.INK); g.rect(x - 4, 18, 11, 4, g.INK); }
+  }
+};
+
+/* Steps: bg, show/hide, say, choice, label, goto, set, if, end */
+var SCRIPT = [
+  { bg: "room" },
+  { say: null, text: { zh: "放学后的教室，只剩两个人。", en: "After school. Two people left in the room." } },
+  { show: "left", who: "aya" },
+  { say: "aya", text: { zh: "你还不回家吗？", en: "Not going home yet?" } },
+  { show: "right", who: "ken" },
+  { say: "ken", text: { zh: "我在等雨停。", en: "Waiting for the rain to stop." } },
+  { choice: [
+    { text: { zh: "一起走吧", en: "Let's walk together" }, goto: "walk", set: "brave" },
+    { text: { zh: "再等等", en: "Wait a bit more" }, goto: "wait" }
+  ] },
+  { label: "walk" },
+  { bg: "street" },
+  { say: "aya", text: { zh: "我有伞，够两个人。", en: "I've got an umbrella. Fits two." } },
+  { goto: "after" },
+  { label: "wait" },
+  { say: "ken", text: { zh: "那……再坐一会儿。", en: "Then... let's sit a while." } },
+  { label: "after" },
+  { if: "brave", goto: "good" },
+  { say: null, text: { zh: "雨一直没有停。", en: "The rain never stopped." } },
+  { end: true, title: { zh: "结局：雨天", en: "Ending: Rain" } },
+  { label: "good" },
+  { say: "ken", text: { zh: "明天也一起走吧。", en: "Walk with me tomorrow too?" } },
+  { end: true, title: { zh: "结局：同伞", en: "Ending: One Umbrella" } }
+];
+/* ==== END STORY ==== */
+
+/* ---- the engine: plays SCRIPT. You should not need to change anything below. ---- */
+var ART = {}, LABELS = {};
+function big(rows) { return rows.map(function (r) { return r.replace(/./g, "$&$&"); }).reduce(function (a, r) { a.push(r, r); return a; }, []); }
+Object.keys(CAST).forEach(function (k) { ART[k] = LoGame.sprite(big(CAST[k].art)); });
+SCRIPT.forEach(function (s, i) { if (s.label) LABELS[s.label] = i; });
+
+var BOX_Y = 88, LINES = 3, SPEED = 30;
+var S;          /* saved: { pc, flags, bg, left, right } */
+var log = [];   /* backlog: [{ who, text }] */
+var cur = null; /* what waits for the player: { kind: "say"|"choice"|"end", ... } */
+var view = "play", logTop = 0;
+
+function fresh() { return { pc: 0, flags: {}, bg: null, left: null, right: null }; }
+function who(id) { return id && CAST[id] ? T(CAST[id].name) : ""; }
+function jump(label) { if (!(label in LABELS)) throw new Error("no label " + label); S.pc = LABELS[label]; }
+
+/* run steps until one needs the player */
+function run() {
+  for (var guard = 0; guard < 10000; guard++) {
+    var s = SCRIPT[S.pc];
+    if (!s) { cur = { kind: "end", title: "" }; return; }
+    if (s.bg !== undefined) { S.bg = s.bg; S.pc++; }
+    else if (s.show) { S[s.show] = s.who; S.pc++; }
+    else if (s.hide) { S[s.hide] = null; S.pc++; }
+    else if (s.label) S.pc++;
+    else if (s.set) { S.flags[s.set] = true; S.pc++; }
+    else if (s.if !== undefined) { if (S.flags[s.if]) jump(s.goto); else S.pc++; }
+    else if (s.goto) jump(s.goto);
+    else if (s.say !== undefined) {
+      game.save("vn", S);
+      cur = { kind: "say", who: s.say, text: T(s.text), pages: null, page: 0, n: 0 };
+      log.push({ who: s.say, text: cur.text }); if (log.length > 100) log.shift();
+      return;
+    } else if (s.choice) { game.save("vn", S); cur = { kind: "choice", items: s.choice, idx: 0 }; return; }
+    else if (s.end) { game.remove("vn"); game.sfx("win"); cur = { kind: "end", title: s.title ? T(s.title) : "" }; return; }
+    else S.pc++;
+  }
+}
+
+function advance() {
+  if (cur.kind === "say") {
+    var page = cur.pages ? cur.pages[cur.page].join("") : cur.text;
+    if (cur.n < page.length) { cur.n = page.length; return; }
+    if (cur.pages && cur.page < cur.pages.length - 1) { cur.page++; cur.n = 0; game.sfx("tick"); return; }
+    S.pc++; game.sfx("tap"); run();
+  } else if (cur.kind === "choice") {
+    var c = cur.items[cur.idx];
+    log.push({ who: null, text: "> " + T(c.text) });
+    if (c.set) S.flags[c.set] = true;
+    game.sfx("ok");
+    if (c.goto) jump(c.goto); else S.pc++;
+    run();
+  } else if (cur.kind === "end") game.go("title");
+}
+
+game.scene("play", {
+  enter: function (saved) { S = saved || fresh(); log = []; view = "play"; run(); },
+  update: function (dt) {
+    if (view === "log") {
+      if (game.repeat("up")) logTop = Math.max(0, logTop - 1);
+      if (game.repeat("down")) logTop = Math.min(Math.max(0, log.length - 1), logTop + 1);
+      if (game.pressed("b") || game.pressed("a")) { view = "play"; game.sfx("tap"); }
+      return;
+    }
+    if (cur.kind === "say") cur.n += dt * SPEED;
+    if (cur.kind === "choice") {
+      if (game.repeat("up")) { cur.idx = (cur.idx + cur.items.length - 1) % cur.items.length; game.sfx("move"); }
+      if (game.repeat("down")) { cur.idx = (cur.idx + 1) % cur.items.length; game.sfx("move"); }
+    }
+    if (game.pressed("b") && cur.kind !== "end") { view = "log"; logTop = Math.max(0, log.length - 4); game.sfx("tap"); return; }
+    if (game.pressed("a") || game.pressed("start") || game.pointer.pressed) advance();
+  },
+  draw: function (g) {
+    g.clear(g.PAPER);
+    if (S.bg && BACKDROPS[S.bg]) BACKDROPS[S.bg](g);
+    if (S.left && ART[S.left]) g.sprite(ART[S.left], 14, BOX_Y - 32);
+    if (S.right && ART[S.right]) g.sprite(ART[S.right], 122, BOX_Y - 32, { flip: true });
+    if (view === "log") return drawLog(g);
+    if (cur.kind === "say") {
+      if (!cur.pages) {
+        var lines = g.wrap(cur.text, 150), pages = [];
+        for (var i = 0; i < lines.length; i += LINES) pages.push(lines.slice(i, i + LINES));
+        cur.pages = pages.length ? pages : [[""]];
+      }
+      g.window(0, BOX_Y, 160, 144 - BOX_Y);
+      var name = who(cur.who);
+      if (name) { var w = g.measure(name) + 8; g.window(4, BOX_Y - 14, w, 15, { thin: true }); g.text(name, 8, BOX_Y - 13); }
+      var left = Math.floor(cur.n), pg = cur.pages[cur.page];
+      for (var j = 0; j < pg.length && left > 0; j++) {
+        g.text(pg[j].slice(0, left), 5, BOX_Y + 4 + j * g.lineHeight);
+        left -= pg[j].length;
+      }
+      if (cur.n >= pg.join("").length && Math.floor(game.time * 3) % 2) g.arrow(150, 136, "down", g.INK);
+    } else if (cur.kind === "choice") {
+      var h = cur.items.length * g.lineHeight + 8, y = Math.floor((BOX_Y - h) / 2) + 20;
+      g.window(8, y, 144, h);
+      cur.items.forEach(function (c, k) {
+        if (k === cur.idx) g.arrow(13, y + 7 + k * g.lineHeight, "right", g.INK);
+        g.text(T(c.text), 22, y + 4 + k * g.lineHeight);
+      });
+    } else {
+      g.window(0, BOX_Y, 160, 144 - BOX_Y);
+      g.text(cur.title || "END", 80, BOX_Y + 12, { align: "center" });
+      g.text(T({ zh: "按 A 回到标题", en: "A: back to title" }), 80, BOX_Y + 30, { align: "center", color: g.DARK });
+    }
+  }
+});
+
+function drawLog(g) {
+  g.rect(0, 0, 160, 144, g.PAPER);
+  g.rect(0, 0, 160, 16, g.INK);
+  g.text(T({ zh: "回看  B 返回", en: "Backlog  B: back" }), 4, 1, { color: g.PAPER });
+  var y = 20;
+  for (var i = logTop; i < log.length && y < 140; i++) {
+    var e = log[i], name = who(e.who);
+    var line = name ? name + ": " + e.text : e.text;
+    var lines = g.wrap(line, 152);
+    for (var k = 0; k < lines.length && y < 140; k++) { g.text(lines[k], 4, y, { color: e.who ? g.INK : g.DARK }); y += g.lineHeight; }
+    y += 2;
+  }
+}
+
+var saved = null, menuIdx = 0;
+game.scene("title", {
+  enter: function () { saved = null; menuIdx = 0; game.load("vn").then(function (v) { saved = v; }); },
+  update: function () {
+    var n = saved ? 2 : 1;
+    if (game.repeat("up") || game.repeat("down")) { menuIdx = (menuIdx + 1) % n; game.sfx("move"); }
+    if (game.pressed("a") || game.pressed("start") || game.pointer.pressed) {
+      game.sfx("ok");
+      game.go("play", saved && menuIdx === 0 ? saved : null);
+    }
+  },
+  draw: function (g) {
+    g.clear(g.PAPER);
+    g.dither(0, 0, 160, 144, g.MID, 1);
+    g.text(T(TITLE), 80, 34, { align: "center" });
+    var items = saved ? [T({ zh: "继续", en: "Continue" }), T({ zh: "从头开始", en: "New story" })] : [T({ zh: "开始", en: "Start" })];
+    g.window(40, 64, 80, items.length * g.lineHeight + 8);
+    items.forEach(function (s, k) {
+      if (k === menuIdx) g.arrow(45, 71 + k * g.lineHeight, "right", g.INK);
+      g.text(s, 54, 68 + k * g.lineHeight);
+    });
+    g.text(T({ zh: "A 前进  B 回看", en: "A: next  B: backlog" }), 80, 124, { align: "center", color: g.DARK });
+  }
+});
+game.start("title");
+</script>
+</body>
+</html>

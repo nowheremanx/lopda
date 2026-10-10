@@ -1,0 +1,18 @@
+{
+  "spec": "lopda/1",
+  "id": "zhenyao-tower",
+  "name": "镇妖塔外传",
+  "glyph": "塔",
+  "version": "0.1.0",
+  "description": "仙侠小品。卡带内置 LX-3D 协处理器：四色三维小镇、灯火、雾。试作版，只有小镇。",
+  "i18n": {
+    "en": {
+      "name": "Pagoda",
+      "description": "A xianxia side story. The cart has an LX-3D chip: a four-tone 3D town. Preview."
+    }
+  },
+  "author": "Haowei Wu",
+  "license": "MIT",
+  "permissions": [],
+  "buttons": true
+}
