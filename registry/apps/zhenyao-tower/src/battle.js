@@ -349,7 +349,7 @@ var Battle = (function () {
     var args = S.args, b = S.b;
     await ANIM.intro(S, args.from);
     if (b.boss) await ANIM.bossIntro(S);
-    await say(b.boss ? b.foes[0].name + "现身了！" : b.foes.length === 1 ? b.foes[0].name + "出现了！" : "出现了" + "一二三"[b.foes.length - 1] + "只妖怪！", 1.1);
+    await say(b.boss ? b.foes[0].name + "现身了！" : b.foes.length === 1 ? b.foes[0].name + "出现了！" : "出现了" + "一两三"[b.foes.length - 1] + "只妖怪！", 1.1);
     var result = null;
     while (!result) {
       var act = await heroTurn();
