@@ -75,8 +75,19 @@ test("preinstalled apps: installed on first start after the built-ins, and a rem
   assert.deepEqual(home.slice(-2), ["计算器", "点阵画板"]);
   assert.ok(!home.slice(0, -2).includes("点阵画板"), "paint is no longer a built-in");
   /* remove paint, start again: it does not come back */
+  /* the tiles show before the store records which ids it handled, and removal deletes without waiting:
+     reloading before those writes land would install paint again, so wait for IndexedDB itself */
+  const doc = (path) => p.evaluate((path) => new Promise((resolve, reject) => {
+    const req = indexedDB.open("lopda");
+    req.onerror = () => reject(req.error);
+    req.onsuccess = () => { const get = req.result.transaction("docs").objectStore("docs").get(path);
+      get.onsuccess = () => { req.result.close(); resolve(get.result ? get.result.data : null); }; get.onerror = () => reject(get.error); };
+  }), path);
+  const until = async (fn, what) => { for (let i = 0; i < 100; i++) { if (await fn()) return; await p.waitForTimeout(100); } assert.fail("timed out waiting for " + what); };
+  await until(async () => ((await doc("data/users/local/preinstall"))?.ids || []).length === 2, "the preinstall record");
   await p.locator("#home .app", { hasText: "点阵画板" }).click();
   await p.click("#run-del"); await p.click("#run-del-wrap .btn:not(.ghost)");
+  await until(async () => !(await doc("data/users/local/apps/items/paint")), "paint's removal");
   await p.reload({ waitUntil: "networkidle" }); await p.waitForTimeout(500);
   assert.deepEqual((await tiles(p)).slice(-1), ["计算器"]);
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
@@ -238,4 +249,157 @@ test("zhenyao-tower: a scripted player goes from a new game to 序章 完", { sk
   assert.ok(st.cleared && st.boss && st.level >= 7, JSON.stringify(st));
   assert.deepEqual(errors, []);
   assert.doesNotMatch(await p.textContent("#log"), /ERROR/);
+});
+
+/* ---------- the calendar (万年历) ---------- */
+import vm from "node:vm";
+import { readFileSync } from "node:fs";
+const LUNAR = (() => {
+  const ctx = vm.createContext({ console }); ctx.window = ctx;
+  vm.runInContext(readFileSync(join(ROOT, "runtime", "lunar.js"), "utf8"), ctx);
+  return ctx.LopdaLunar;
+})();
+const JSD = "https://cdn.jsdelivr.net/gh/NateScarlet/holiday-cn@master/";
+const FIXED = new Date(2026, 9, 11, 10, 0, 0);   /* 2026-10-11, lunar 九月初二 */
+
+/* a page with a fixed clock; service workers blocked so page.route sees every request */
+async function calPage(t, { locale = "zh-CN", time = FIXED, route } = {}) {
+  const { p, errors } = await page(t, { locale, serviceWorkers: "block" });
+  const seen = [];
+  await p.route("https://cdn.jsdelivr.net/**", async (r) => {
+    seen.push({ url: r.request().url(), headers: await r.request().allHeaders() });
+    if (route) return route(r);
+    return r.fulfill({ status: 404, body: "not found" });
+  });
+  await p.clock.install({ time });
+  const away = [];
+  p.on("request", (r) => { if (!r.url().startsWith(base) && !/^(data|blob):/.test(r.url())) away.push(r.url()); });
+  const open = async () => {
+    await p.locator("#home .app", { hasText: locale === "en-US" ? "Calendar" : "万年历" }).click();
+    await p.locator("#v-cal:not([hidden])").waitFor();
+    await p.waitForTimeout(400);
+  };
+  const boot = async (reload) => {
+    if (reload) await p.reload({ waitUntil: "networkidle" }); else await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+    await p.waitForTimeout(400);
+  };
+  return { p, errors, seen, away, open, boot };
+}
+const notBlocked = (errors) => errors.filter((e) => !/Failed to load resource/.test(e) && !SW_NOISE.test(e));
+
+test("the runtime asks nothing of other sites, except the calendar's holiday file on jsDelivr", { skip, timeout: 30000 }, async (t) => {
+  const c = await calPage(t);
+  await c.boot();
+  assert.deepEqual(c.away, [], "the home screen asks nobody");
+  await c.open();
+  /* 2026 is bundled, so only next year's file is missing */
+  assert.deepEqual(c.away, [JSD + "2027.json"]);
+  assert.equal(c.seen.length, 1);
+  const h = c.seen[0].headers;
+  assert.ok(!("cookie" in h), "no cookies");
+  assert.ok(!("referer" in h), "no referrer: " + h.referer);
+  assert.deepEqual(notBlocked(c.errors), []);
+  /* the 7-day rule: not again from home, not after a reload */
+  await p_home(c.p); await c.open();
+  await c.boot(true); await c.open();
+  assert.equal(c.seen.length, 1, "no second request");
+  assert.deepEqual(notBlocked(c.errors), []);
+});
+const p_home = (p) => p.click("#home-key");
+
+test("calendar: a downloaded year is kept, shown with the 休 badge, and survives offline", { skip, timeout: 30000 }, async (t) => {
+  const file = { year: 2027, papers: [], days: [{ name: "元旦", date: "2027-01-01", isOffDay: true }] };
+  const c = await calPage(t, { route: (r) => r.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify(file) }) });
+  await c.boot();
+  await c.open();
+  assert.equal(c.seen.length, 1);
+  /* October 2026 -> January 2027: three pages */
+  for (let i = 0; i < 3; i++) await c.p.click("#cal-next");
+  assert.equal(await c.p.textContent("#cal-ym"), "2027年1月");
+  const jan1 = c.p.locator("#cal-grid .cal-cell:not(.out)").first();
+  assert.equal(await jan1.locator("i.off").textContent(), "休");
+  /* offline: the route now fails; the file comes from IndexedDB and nothing is asked */
+  await c.p.unroute("https://cdn.jsdelivr.net/**");
+  const again = [];
+  await c.p.route("https://cdn.jsdelivr.net/**", (r) => { again.push(r.request().url()); return r.abort(); });
+  await c.boot(true); await c.open();
+  for (let i = 0; i < 3; i++) await c.p.click("#cal-next");
+  assert.equal(await c.p.locator("#cal-grid .cal-cell:not(.out)").first().locator("i.off").count(), 1);
+  assert.deepEqual(again, []);
+  assert.deepEqual(notBlocked(c.errors), []);
+});
+
+test("calendar: month view, today, a day off, the day sheet, and a lunar yearly date on the home tile", { skip, timeout: 60000 }, async (t) => {
+  assert.equal(LUNAR.fromSolar(2026, 10, 11).month, 9);
+  assert.equal(LUNAR.fromSolar(2026, 10, 11).day, 2, "2026-10-11 is lunar 九月初二");
+  assert.equal(LUNAR.fromSolar(2026, 10, 14).day, 5);
+  const c = await calPage(t);
+  const { p } = c;
+  await c.boot(); await c.open();
+  assert.equal(await p.textContent("#cal-ym"), "2026年10月");
+  const today = p.locator("#cal-grid .cal-cell.today");
+  assert.equal(await today.count(), 1);
+  assert.equal(await today.locator("span").textContent(), "初二");
+  const oct1 = p.locator("#cal-grid .cal-cell:not(.out)").first();
+  assert.equal(await oct1.locator("i.off").textContent(), "休");
+  assert.equal(await oct1.locator("span").textContent(), "国庆节");
+  /* arrows move the day, START comes back to today */
+  await p.keyboard.press("ArrowRight");
+  assert.ok(!(await today.getAttribute("class")).includes("sel"));
+  await p.keyboard.press("Enter");
+  assert.ok((await today.getAttribute("class")).includes("sel"));
+  /* A opens the day */
+  await p.keyboard.press("x");
+  assert.match(await p.textContent("#cal-sheet"), /农历九月初二/);
+  /* A again: the add form. A lunar date three days from today (九月初五) */
+  await p.keyboard.press("x");
+  await p.fill("#cal-name", "妈妈生日");
+  await p.click(".cal-kind button:has-text('按农历')");
+  const plus = p.locator(".cal-step").nth(1).locator("button", { hasText: "+" });
+  for (let i = 0; i < 3; i++) await plus.click();
+  assert.equal(await p.locator(".cal-step").nth(1).locator("b").textContent(), "初五");
+  await p.click(".cal-keys .ck-a");
+  await p.waitForFunction(() => /妈妈生日/.test(document.getElementById("cal-sheet").textContent));
+  await p.click("#home-key");
+  assert.equal(await p.locator("#home .app", { hasText: "万年历" }).locator(".tag").textContent(), "3天后 妈妈生日");
+  /* a reload: the date is stored; the boot hint shows once per day */
+  await c.boot(true);
+  assert.equal(await p.locator("#home .app", { hasText: "万年历" }).locator(".tag").textContent(), "3天后 妈妈生日");
+  await p.waitForFunction(() => /3天后：妈妈生日/.test(document.getElementById("toast").textContent) && !document.getElementById("toast").hidden, null, { timeout: 5000 });
+  await c.boot(true);
+  await p.waitForTimeout(800);
+  assert.ok(!/妈妈生日/.test(await p.evaluate(() => document.getElementById("toast").hidden ? "" : document.getElementById("toast").textContent)), "no second hint today");
+  assert.deepEqual(notBlocked(c.errors), []);
+});
+
+test("calendar: a leap-month birthday falls in the regular month in a year without that leap month", { skip, timeout: 60000 }, async (t) => {
+  assert.equal(LUNAR.leapMonth(2026), 0);
+  const on = LUNAR.toSolar(2026, 6, 15, false);
+  const days = Math.round((Date.UTC(on.y, on.m - 1, on.d) - Date.UTC(2026, 0, 10)) / 86400000);
+  const c = await calPage(t, { time: new Date(2026, 0, 10, 10, 0, 0) });
+  const { p } = c;
+  await c.boot(); await c.open();
+  await p.keyboard.press("x"); await p.keyboard.press("x");
+  await p.fill("#cal-name", "闰月生日");
+  await p.click(".cal-kind button:has-text('按农历')");
+  await p.click(".cal-step button:has-text('闰月')");
+  /* from the lunar date of the selected day (十一月廿二) back to month 6, day 15 */
+  const minus = (n) => p.locator(".cal-step").nth(n).locator("button", { hasText: "−" });
+  const cur = LUNAR.fromSolar(2026, 1, 10);
+  for (let i = 0; i < cur.month - 6; i++) await minus(0).click();
+  for (let i = 0; i < cur.day - 15; i++) await minus(1).click();
+  await p.click(".cal-keys .ck-a");
+  await p.keyboard.press("z");   /* B closes the day sheet */
+  await p.click("#cal-list-btn");
+  const row = await p.textContent("#cal-sheet .cal-list li");
+  assert.ok(row.includes("闰月生日"), row);
+  assert.ok(row.includes(`${days}天后 · ${on.m}/${on.d}`), `${row} (expected ${days}天后 · ${on.m}/${on.d})`);
+  assert.deepEqual(notBlocked(c.errors), []);
+});
+
+test("calendar: English names", { skip, timeout: 30000 }, async (t) => {
+  const c = await calPage(t, { locale: "en-US" });
+  await c.boot(); await c.open();
+  assert.equal(await c.p.textContent("#cal-ym"), "Oct 2026");
+  assert.deepEqual(notBlocked(c.errors), []);
 });

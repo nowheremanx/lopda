@@ -94,6 +94,21 @@
       </div>
     </section>
 
+    <!-- CALENDAR: one fixed screen; the day, the list of dates and the add form open over it -->
+    <section class="view cal-view" id="v-cal" hidden>
+      <div class="cal-head">
+        <button class="ck cal-arrow" type="button" id="cal-prev" data-i18n-label="cal.prev" aria-label="上个月">◀</button>
+        <div class="cal-title"><b id="cal-ym"></b><span id="cal-ly"></span></div>
+        <button class="ck cal-arrow" type="button" id="cal-next" data-i18n-label="cal.next" aria-label="下个月">▶</button>
+        <button class="btn ghost" type="button" id="cal-list-btn" data-i18n="cal.anniv">纪念日</button>
+        <button class="btn ghost" type="button" id="cal-today" data-i18n="cal.today">今天</button>
+      </div>
+      <div class="cal-week" id="cal-week" aria-hidden="true"></div>
+      <div class="cal-grid" id="cal-grid"></div>
+      <button class="cal-info" type="button" id="cal-info"></button>
+      <div class="cal-sheet" id="cal-sheet" hidden></div>
+    </section>
+
     <!-- CAMERA: one fixed screen, like the real thing. Chin buttons or the key strip below. -->
     <section class="view cam-view" id="v-cam" hidden>
       <div class="link-boot" id="cam-boot" hidden role="status" aria-live="polite"></div>
@@ -240,8 +255,10 @@
 <script src="../sdk/pad-shim.js"></script>
 <script src="strings.js"></script>
 <script src="platform.js"></script>
+<script src="lunar.js"></script>
 <script src="core.js"></script>
 <script src="apps/notes.js"></script>
+<script src="apps/calendar.js"></script>
 <script src="apps/camera.js"></script>
 <script src="apps/cutter.js"></script>
 <script src="apps/cart.js"></script>

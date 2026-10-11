@@ -5,11 +5,11 @@
  * so a first start without network can still install them.
  * The cache is named after this worker's scope as well as its version: GitHub Pages PR previews (pr/<n>/runtime/)
  * share Cache Storage with the real site, and each worker only ever deletes its own scope's old caches. */
-var VERSION = "lopda-v0.5.0";
+var VERSION = "lopda-v0.6.0";
 var CACHE = VERSION + " " + self.registration.scope;
-var SHELL = ["./", "index.html", "lopda.css", "strings.js", "platform.js", "core.js",
-  "apps/notes.js", "apps/camera.js", "apps/cutter.js", "apps/cart.js", "apps/store.js", "apps/settings.js", "boot.js", "../sdk/pad-shim.js",
-  "fonts/fonts.css",
+var SHELL = ["./", "index.html", "lopda.css", "strings.js", "platform.js", "lunar.js", "core.js",
+  "apps/notes.js", "apps/calendar.js", "apps/camera.js", "apps/cutter.js", "apps/cart.js", "apps/store.js", "apps/settings.js", "boot.js", "../sdk/pad-shim.js",
+  "fonts/fonts.css", "vendor/holiday-cn/2026.json",
   "../registry/index.json", "../registry/apps/calculator/index.html", "../registry/apps/paint/index.html",
   "manifest.webmanifest", "vendor/binjgb/binjgb.js", "vendor/binjgb/binjgb.wasm", "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png"];
 

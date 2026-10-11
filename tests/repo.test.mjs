@@ -113,11 +113,44 @@ test("no game ROMs in the repo", () => {
 
 test("third-party code keeps its licence file and is listed in NOTICE and LICENSING.md", () => {
   for (const [dir, licence] of [["runtime/vendor/binjgb", "LICENSE"], ["sdk/fonts", "LICENSE-lopix12.txt"],
-    ["runtime/fonts", "OFL-DotGothic16.txt"], ["runtime/fonts", "OFL-VT323.txt"]]) {
+    ["runtime/fonts", "OFL-DotGothic16.txt"], ["runtime/fonts", "OFL-VT323.txt"],
+    ["runtime/vendor/holiday-cn", "LICENSE"]]) {
     assert.ok(existsSync(join(ROOT, dir, licence)), `${dir}/${licence}`);
     assert.ok(read("NOTICE").includes(dir), "NOTICE lists " + dir);
     assert.ok(read("LICENSING.md").includes(dir), "LICENSING.md lists " + dir);
   }
+});
+
+test("the holiday-cn year files the calendar ships are valid, pre-cached, and the only ones in the folder", () => {
+  const bundled = JSON.parse(read("runtime/apps/calendar.js").match(/var BUNDLED=(\{[^}]*\});/)[1].replace(/(\d{4}):/g, '"$1":'));
+  const shell = read("runtime/sw.js").match(/var SHELL = (\[[\s\S]*?\]);/)[1];
+  assert.ok(Object.keys(bundled).length >= 1);
+  for (const [year, path] of Object.entries(bundled)) {
+    assert.ok(existsSync(join(ROOT, "runtime", path)), path);
+    const j = readJSON("runtime/" + path);
+    assert.equal(j.year, +year, path);
+    assert.ok(Array.isArray(j.days) && j.days.length > 0, path);
+    for (const d of j.days) {
+      assert.equal(typeof d.name, "string", path);
+      assert.match(d.date, /^\d{4}-\d\d-\d\d$/, path);
+      assert.ok(Math.abs(+d.date.slice(0, 4) - +year) <= 1, path + " " + d.date);  /* make-up days can sit in the next file */
+      assert.equal(typeof d.isOffDay, "boolean", path);
+    }
+    assert.ok(shell.includes(`"${path}"`), path + " is in SHELL in sw.js");
+  }
+  const files = readdirSync(join(ROOT, "runtime", "vendor", "holiday-cn")).filter((f) => f.endsWith(".json")).sort();
+  assert.deepEqual(files, Object.values(bundled).map((p) => p.split("/").pop()).sort());
+});
+
+/* The handheld asks no other site for anything, with one exception: the calendar's holiday file (decisions.md section 14).
+   Comments are stripped, strings kept. */
+test("the only other site a runtime script names is the calendar's holiday address", () => {
+  const found = [];
+  for (const f of RUNTIME_JS) {
+    const code = read(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    for (const m of code.matchAll(/"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/g)) if (/https?:\/\//.test(m[0])) found.push(f + " " + m[0]);
+  }
+  assert.deepEqual(found, ['runtime/apps/calendar.js "https://cdn.jsdelivr.net/gh/NateScarlet/holiday-cn@master/"']);
 });
 
 test("build-index refuses an app that fails the checker", (t) => {

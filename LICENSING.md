@@ -54,6 +54,11 @@ See `CONTRIBUTING.md`.
   `runtime/fonts/README.md`). Licence files: `runtime/fonts/OFL-DotGothic16.txt`,
   `runtime/fonts/OFL-VT323.txt`. Since runtime 0.5.0 they ship with the handheld instead
   of loading from Google Fonts, so they work offline and no request leaves the device.
+- China holiday data: statutory days off and make-up workdays from holiday-cn by
+  NateScarlet, MIT License, the year files copied unchanged into
+  `runtime/vendor/holiday-cn/` with its license file. The calendar may download a
+  missing year's file from jsDelivr, at most once every 7 days and with nothing about
+  the user in the request (see docs/decisions.md section 14).
 - No GPL code: it would turn the whole project GPL.
 - No game ROMs are bundled or distributed. The cartridge player only plays files
   the user supplies. Do not add ROMs to this repository or to the registry.
