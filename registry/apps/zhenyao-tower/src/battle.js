@@ -104,7 +104,7 @@ var Battle = (function () {
     lights.push({ x: x, y: h + 0.25, z: z, radius: 5.5, power: 0.9, base: 0.9, seed: x * 3 + z });
   }
   function buildArena(area) {
-    var m = World.builder(), glow = World.builder(), lights = [], hash = World.hash, x, z, i, a;
+    var m = Lo3D.builder(), glow = Lo3D.builder(), lights = [], hash = World.hash, x, z, i, a;
     var inside = area === "tower" || area === "upper";
     /* the platform: stone tiles in a circle, a dark rim, then the ground around it */
     for (x = -12; x < 12; x++) for (z = -12; z < 12; z++) {
@@ -148,7 +148,7 @@ var Battle = (function () {
     }
     return { mesh: m, glow: glow, lights: lights, area: area };
   }
-  var SHADOW = (function () { var m = World.builder(); m.cone(0, 0.03, 0, 1, 0.0001, 10, 0.02); return m; })();
+  var SHADOW = Lo3D.shadow(1, 10);
 
   /* where the foes stand: one in the middle, or spread across the far side */
   var SPOTS = { 1: [[0, 2.6]], 2: [[-1.6, 2.4], [1.6, 2.4]], 3: [[-2.8, 2.2], [0, 3.0], [2.8, 2.2]] };
