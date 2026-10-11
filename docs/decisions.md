@@ -125,6 +125,11 @@
 - **背景音乐**：需要在 runtime 里新增类似 `PAD.music` 的接口，并受音量和静音设置控制。设计草稿见 `docs/design/pad-music.md`。〔提议〕
 - **模拟器扩展**：沙盒 app 是否允许 WebAssembly（`'wasm-unsafe-eval'`）、文件导入权限、是否支持 FC。〔提议〕
 - **十字键 4 向 / 8 向的 manifest 字段（`"dpad": 4`）**。〔提议〕
+- **内置程序扩充**（2026-10-10 讨论，设计草稿）：
+  - 文件接口、预装 app、画板改成社区 app、计算器：`docs/design/pad-files.md`。
+  - 万年历：`docs/design/calendar.md`。
+  - 电子书阅读器 + 英汉词典（联动记事本）：`docs/design/reader-dictionary.md`。
+  - 顺序：先拆分 `lopda.js`（每个内置程序一个文件，纯搬移），再按上面的顺序做。〔提议〕
 - **需要在 iPhone 上验证**：
   - 卡带机在 Safari 上的声音和帧率。
   - 胶卷架左右滑动的停靠手感。
