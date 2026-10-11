@@ -10,13 +10,15 @@ Design history and open questions: `docs/decisions.md`. Read it before changing 
 ```
 runtime/        the PWA: index.html, core.js (shared LP object: utils, views, sound, home, chin pad), apps/*.js (one file per
                 built-in), boot.js (loaded last), strings.js (zh/en text), lopda.css, platform.js (IndexedDB store, file export),
-                sw.js (offline cache), fonts/ (DotGothic16, VT323, OFL), vendor/binjgb/ (Game Boy core, MIT)
+                lunar.js (lunar calendar + solar term tables, 1900-2100), sw.js (offline cache), fonts/ (DotGothic16, VT323, OFL),
+                vendor/binjgb/ (Game Boy core, MIT), vendor/holiday-cn/ (China days off, MIT)
 sdk/            MIT. pad-shim.js (PAD bridge), lo-game.js (game framework), LO-GAME.md, lo-3d.js (3D), LO-3D.md, PROMPT.md,
                 dev.html (app harness), template/, template-game/, template-vn/ (visual novel), fonts/ (lopix12, OFL)
 registry/       index.json (generated) + apps/<id>/{manifest.json,index.html,src/ (optional sources)}
-tools/          check-app.mjs, build-index.mjs, bundle-app.mjs (+ lo-game.mjs alias), lo-game-lib.mjs (Node 20+, no deps)
+tools/          check-app.mjs, build-index.mjs, bundle-app.mjs (+ lo-game.mjs alias), lo-game-lib.mjs (Node 20+, no deps);
+                gen-lunar.py (one-off generator of the lunar table, needs PyEphem)
 tests/          node:test suite (no deps): tools, strings, PAD shim, platform store, lo-game, repo rules;
-                runtime-shots.mjs (before/after screenshots of the runtime)
+                runtime-shots.mjs (before/after screenshots of the runtime), hko-compare.mjs (lunar table vs the HKO tables, manual)
 SPEC.md         app spec lopda/1 (MIT)
 LICENSE NOTICE LICENSING.md CONTRIBUTING.md
 ```
@@ -29,7 +31,8 @@ LICENSE NOTICE LICENSING.md CONTRIBUTING.md
   core.js, then apps/*.js, then boot.js. Files talk only through `window.LP`. Tools are Node ESM.
 - Storage: IndexedDB through `platform.js`, a small document store (`doc(path)`, `collection(path)`;
   doc paths have an even number of segments, base `data/users/local`).
-- Built-ins, one file each in runtime/apps/: notes, camera (viewfinder, film, contact card; shares its film
+- Built-ins, one file each in runtime/apps/: notes, calendar (万年历; lunar.js, holiday-cn, the one built-in that may reach
+  another site, decisions.md section 14), camera (viewfinder, film, contact card; shares its film
   helpers as `LP.film`), cutter, cart (GB), store (app store, preinstalled apps, sandboxed runner, file dialog), settings.
   Paint and the calculator are community apps (`registry/apps/paint`, `calculator`), installed on first start
   (`PREINSTALL` in store.js; their files are in sw.js SHELL). The LCD fonts ship in runtime/fonts/ (OFL). Each registers with

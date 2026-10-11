@@ -19,7 +19,7 @@ var S = {
 };
 
 /* The shared object. Built-ins register with LP.builtin({...}); hooks are optional:
-     id, label (string key), icon (key in ICONS), open(), tag() -> text under the icon,
+     id, label (string key), icon (key in ICONS, or a function returning 16 such rows), open(), tag() -> text under the icon,
      view, enter(), leave(), keepPad   the view it owns: called by show()
      lang()                            redraw after the language changes
      padLayout()                       the chin pad appeared or went away
@@ -150,7 +150,7 @@ function show(name){
 $("home-key").onclick=function(){ LP.flushNote(); show("home"); sfx("home"); };
 
 /* ---------- sound: tiny square-wave chips through Web Audio ---------- */
-var RUNTIME_VERSION="0.5.0";   /* keep in step with VERSION in sw.js */
+var RUNTIME_VERSION="0.6.0";   /* keep in step with VERSION in sw.js */
 var SND={ctx:null, on:true, vol:2, gain:null};
 var VOL_GAIN=[0,0.05,0.11,0.2];
 function audio(){
@@ -270,7 +270,7 @@ function iconCanvas(rows){
 }
 /* fill a tile with the app's pixel icon, or its glyph when it has none */
 function fillTile(tile,app,builtinIcon){
-  var rows = builtinIcon ? ICONS[builtinIcon] : (validIcon(app.icon) ? app.icon : null);
+  var rows = builtinIcon ? (typeof builtinIcon==="function" ? builtinIcon() : ICONS[builtinIcon]) : (validIcon(app.icon) ? app.icon : null);
   if(rows){ tile.classList.add("has-icon"); tile.appendChild(iconCanvas(rows)); }
   else tile.textContent=glyphOf(app);
 }
@@ -315,11 +315,11 @@ function armConfirm(wrapId,btnId,label,onYes){
 }
 
 /* ---------- chin game pad: D-pad, A, B, START, SELECT ----------
-   Routed to the file dialog while it is open, then the cartridge player when it runs, then the camera, otherwise to the running app (PAD.on).
+   Routed to the file dialog while it is open, then the cartridge player when it runs, then the camera, the calendar, otherwise to the running app (PAD.on).
    A route returns true when it took the button. */
 var PADB={up:false,down:false,left:false,right:false,a:false,b:false,start:false,select:false};
 var PADKEYS={ArrowUp:"up",ArrowDown:"down",ArrowLeft:"left",ArrowRight:"right",x:"a",X:"a",z:"b",Z:"b",Enter:"start",Shift:"select"};
-var PAD_ORDER=["file","cart","cam","run"], padRoutes={};   /* "file": the runtime's file dialog, while it is open */
+var PAD_ORDER=["file","cart","cam","cal","run"], padRoutes={};   /* "file": the runtime's file dialog, while it is open */
 function padRoute(name,fn){ padRoutes[name]=fn; }
 function padOn(){ return !$("gamepad").hidden; }
 function setButton(b,down){
