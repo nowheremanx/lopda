@@ -1,5 +1,5 @@
 // Shared by the tests: repo paths, running the browser scripts in a vm, running the tools.
-import { readFileSync, mkdtempSync, cpSync, rmSync } from "node:fs";
+import { readFileSync, readdirSync, mkdtempSync, cpSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
@@ -8,6 +8,10 @@ import vm from "node:vm";
 export const ROOT = join(import.meta.dirname, "..");
 export const read = (rel) => readFileSync(join(ROOT, rel), "utf8");
 export const readJSON = (rel) => JSON.parse(read(rel));
+/* every runtime script of ours (core, built-ins in apps/, boot, strings, platform, sw); vendor/ is third-party */
+export const RUNTIME_JS = readdirSync(join(ROOT, "runtime"), { recursive: true })
+  .map((f) => f.split("\\").join("/")).filter((f) => f.endsWith(".js") && !f.startsWith("vendor/"))
+  .sort().map((f) => "runtime/" + f);
 
 /* run a runtime/sdk script (ES5, browser globals) in a fresh context; returns the context */
 export function runScript(rel, globals) {

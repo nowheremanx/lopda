@@ -1,6 +1,7 @@
 # Publishes the repo as a static site on the gh-pages branch (GitHub Pages).
 #   push to main  -> site root:  https://nowheremanx.github.io/lopda/runtime/
-#   pull request  -> pr/<n>/:    preview of the dev harness, removed when the PR closes.
+#   pull request  -> pr/<n>/:    preview of the dev harness (and of runtime/ when it changed; platform.js gives it
+#                    its own IndexedDB), removed when the PR closes.
 #                    Only when the PR changes something a preview can show (see "Decide what to preview").
 # Only git, rsync and the gh CLI are used; no third-party actions.
 name: pages
@@ -49,8 +50,11 @@ jobs:
           # so a grep that matches nothing must not end the step.
           APPS=$(printf '%s\n' "$CHANGED" | { grep '^registry/apps/' || true; } | cut -d/ -f3 | sort -u | while read -r id; do
             if [ -d "registry/apps/$id" ]; then echo "$id"; fi; done)
-          # sdk/ and runtime/ are shared by every app, so a change there previews all of them.
-          if printf '%s\n' "$CHANGED" | grep -qE '^(sdk|runtime)/'; then APPS=$(ls registry/apps); fi
+          # runtime/ (any file) and the sdk/ scripts (*.js) are shared by every app, so a change there
+          # previews all of them. sdk/*.md and other sdk files are docs and templates: they do not.
+          RUNTIME=false
+          if printf '%s\n' "$CHANGED" | grep -qE '^runtime/'; then RUNTIME=true; fi
+          if [ "$RUNTIME" = true ] || printf '%s\n' "$CHANGED" | grep -qE '^sdk/.*\.js$'; then APPS=$(ls registry/apps); fi
           # Docs, tests, CI only: nothing a preview could show, so no deploy and no comment.
           if [ -z "$APPS" ]; then
             echo "deploy=false" >> "$GITHUB_OUTPUT"
@@ -58,6 +62,7 @@ jobs:
             exit 0
           fi
           echo "deploy=true" >> "$GITHUB_OUTPUT"
+          echo "runtime=$RUNTIME" >> "$GITHUB_OUTPUT"
           { echo "apps<<EOF"; echo "$APPS"; echo "EOF"; } >> "$GITHUB_OUTPUT"
 
       - name: Prepare the gh-pages worktree
@@ -117,18 +122,22 @@ jobs:
         if: steps.plan.outputs.deploy == 'true' && github.event_name == 'pull_request' && github.event.action != 'closed'
         env:
           APPS: ${{ steps.plan.outputs.apps }}
+          RUNTIME: ${{ steps.plan.outputs.runtime }}
         run: |
           {
             echo '<!-- lopda-preview -->'
             echo '**Preview / 预览** (GitHub Pages takes about a minute to update / 页面约需一分钟更新)'
             echo
+            if [ "$RUNTIME" = true ]; then
+              echo "- runtime: $SITE/pr/$PR/runtime/"
+            fi
             for id in $APPS; do
               echo "- $id: $SITE/pr/$PR/sdk/dev.html?app=registry/apps/$id"
             done
             echo
-            echo 'The preview shares its origin with the real site. Do not open `runtime/` under the preview path: its IndexedDB is the real handheld data. The dev harness keeps saves in localStorage.'
+            echo "The preview shares its origin with the real site. Its runtime/ keeps its data in its own IndexedDB (lopda-pr-$PR), separate from the real handheld at the site root. The dev harness keeps PAD saves in localStorage under lopda-dev:<app id>; that is shared by all previews on this origin but not used by the real handheld."
             echo
-            echo '预览与正式站点同源。请不要打开预览路径下的 `runtime/`，它的 IndexedDB 就是正式掌机的数据。开发台把存档放在 localStorage。'
+            echo "预览与正式站点同源。预览里的 runtime/ 把数据放在自己的 IndexedDB（lopda-pr-$PR），和站点根目录的正式掌机互不相通。开发台把 PAD 存档放在 localStorage 的 lopda-dev:<app id> 下，所有预览共用，正式掌机不使用。"
           } > comment.md
           # Update the one comment carrying the marker, or create it.
           ID=$(gh api "repos/${{ github.repository }}/issues/$PR/comments" --paginate \
