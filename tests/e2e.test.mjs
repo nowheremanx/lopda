@@ -408,7 +408,7 @@ test("calendar: English names", { skip, timeout: 30000 }, async (t) => {
 const dictPage = async (t, opts = {}) => {
   const { p, errors } = await page(t, { locale: "zh-CN", ...opts });
   await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
-  await p.locator("#home .app", { hasText: opts.locale === "en-US" ? "Dictionary" : "词典" }).click();
+  await p.locator("#home .app", { hasText: opts.locale === "en-US" ? "Dict" : "词典" }).click();
   await p.waitForSelector("#v-dict:not([hidden])");
   return { p, errors };
 };
@@ -424,10 +424,10 @@ test("dictionary: the built-in ECDICT, a word form, history and the word book", 
   await p.press("#dict-q", "Enter");
   await p.waitForFunction(() => /苹果/.test(document.querySelector("#dict-sheet .dict-page")?.textContent || ""));
   assert.match(await entryText(p), /ECDICT/);
-  /* B adds to the word book (the chin pad), A goes back */
-  await p.click('.gamepad [data-b="b"]');
+  /* START adds to the word book (the chin pad), B goes back, as everywhere on the handheld */
+  await p.click('.gamepad [data-b="start"]');
   await p.waitForFunction(() => /已加入生词本/.test(document.getElementById("toast").textContent));
-  await p.click('.gamepad [data-b="a"]');
+  await p.click('.gamepad [data-b="b"]');
   /* ran is a form of run (and not a headword of the abridged ECDICT): the box offers run first, Enter opens it */
   await typeWord(p, "ran", "ran → run");
   await p.press("#dict-q", "Enter");
