@@ -61,18 +61,8 @@ var Maps = (function () {
     m.cone(x - 0.05, 0, z, 0.52 + h * 0.1, 0.6 + h * 0.3, 5, 0.62, h);
     m.cone(x + 0.25, 0, z - 0.15, 0.3, 0.38, 5, 0.52, h * 2);
   }
-  /* a chest: closed, or open with the lid thrown back and a dark mouth */
-  function chest(c, r) {
-    var x = c + 0.5, z = -r - 0.5, x0 = x - 0.32, x1 = x + 0.32, z0 = z - 0.22, z1 = z + 0.22;
-    var a = builder(), o = builder();
-    a.box(x0, 0, z0, x1, 0.34, z1, 0.3);
-    a.box(x0 - 0.02, 0.34, z0 - 0.02, x1 + 0.02, 0.5, z1 + 0.02, 0.4, 0.5);
-    a.quad([x - 0.06, 0.28, z0 - 0.025], [x + 0.06, 0.28, z0 - 0.025], [x + 0.06, 0.44, z0 - 0.025], [x - 0.06, 0.44, z0 - 0.025], [0, 0, -1], 1.4);
-    o.box(x0, 0, z0, x1, 0.34, z1, 0.3, false);
-    o.quad([x0 + 0.04, 0.34, z0 + 0.04], [x1 - 0.04, 0.34, z0 + 0.04], [x1 - 0.04, 0.34, z1 - 0.04], [x0 + 0.04, 0.34, z1 - 0.04], [0, 1, 0], 0.03);
-    o.quad([x0, 0.34, z1], [x1, 0.34, z1], [x1, 0.72, z1 + 0.16], [x0, 0.72, z1 + 0.16], [0, 0.5, -1], 0.34);
-    return { c: c, r: r, closed: a, open: o };
-  }
+  /* a chest is a pixel sprite (ART.chest), drawn in render; here only where it stands */
+  function chest(c, r) { return { c: c, r: r }; }
   /* stairs up in a wall row: four steps rising north */
   function stairsUp(m, glow, lights, c, r) {
     var zs = -r - 1;
@@ -271,7 +261,14 @@ var Maps = (function () {
       if (p.z - view.z > view.dist + 14 || view.z - p.z > view.dist) return;
       R.draw(p.mesh, null, dz > 0.2 && dz < 3.9 && dx < 0.9 ? { alpha: 0.25 } : null);
     });
-    w.chests.forEach(function (c) { R.draw(st && st.opened && st.opened[c.i] ? c.open : c.closed); });
+    /* chests: crisp sprites in fixed tones, so they read on any floor. A closed one glints every 1.5 s (a paper star for
+       a moment, each chest on its own beat, from the clock, not from chance); an opened one stands open and does not */
+    w.chests.forEach(function (c) {
+      if (c.c + 0.5 < view.x - 14 || c.c + 0.5 > view.x + 14) return;
+      var opened = st && st.opened && st.opened[c.i], ph = ((t + c.c * 0.37 + c.r * 0.61) % 1.5) / 1.5;
+      var art = opened ? ART.chest.open : ART.chest.closed[ph < 0.06 ? 1 : ph < 0.14 ? 2 : ph < 0.2 ? 1 : 0];
+      art.forEach(function (L) { R.sprite(L.art, c.c + 0.5, 0, -c.r - 0.5, { crisp: true, tone: L.tone }); });
+    });
     actors.forEach(function (a) {
       if (a.noShadow) return;
       var fn = function (p) { var k = a.sh || 1; return [p[0] * k + a.x, p[1], p[2] * k + a.z]; };
