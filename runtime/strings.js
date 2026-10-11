@@ -3,7 +3,7 @@
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  *
  * One flat table per language. Keys are grouped by screen: home, store, set, upd, notes,
- * cal, file, cam, cut, cart, run, common. A value with "|" is a list (cal.terms, cal.lday): split, never shown whole. "{name}" in a string is filled from vars.
+ * cal, dict, file, cam, cut, cart, run, common. A value with "|" is a list (cal.terms, cal.lday): split, never shown whole. "{name}" in a string is filled from vars.
  * English is short on purpose: labels on an old device, not a translation.
  * Static text in index.html carries data-i18n (text), data-i18n-ph (placeholder),
  * data-i18n-label (aria-label) or data-i18n-title (title); apply() fills them.
@@ -62,6 +62,22 @@
       "notes.emptynodb": "还没有笔记。现在存不了档，写的内容关掉就没了。",
       "notes.blank": "（空白）", "notes.fresh": "新笔记", "notes.saved": "已保存", "notes.editing": "编辑中…",
       "notes.savedtemp": "已保存（仅本次）", "notes.savefail": "保存失败，再编辑一下会重试", "notes.delfail": "删除失败",
+
+      "app.dict": "词典",
+      "dict.ph": "输入英文单词", "dict.words": "生词本", "dict.books": "词典", "dict.back": "返回", "dict.page": "翻页",
+      "dict.history": "最近查过", "dict.nohistory": "输入单词，候选会出现在这里。A 或回车查词。",
+      "dict.loading": "词典读取中…", "dict.loadfail": "词典读不出来：{msg}", "dict.notfound": "查不到「{w}」",
+      "dict.lemma": "{w} → {base}", "dict.near": "相近的词",
+      "dict.add": "生词本", "dict.added": "已加入生词本", "dict.removed": "已移出生词本", "dict.inbook": "已在生词本",
+      "dict.nowords": "生词本是空的。查词时在释义页按 B 加入。", "dict.review": "复习", "dict.reveal": "看释义", "dict.next": "下一个",
+      "dict.count": "{n} 个词", "dict.of": "{i}/{n}",
+      "dict.builtin": "内置", "dict.up": "上移", "dict.down": "下移", "dict.import": "导入",
+      "dict.importnote": "导入一本 StarDict 词典：一次选中它的全部文件（.ifo、.idx、.dict 或 .dict.dz，有 .syn 也一起选）。压缩包请先在「文件」里解开。",
+      "dict.importing": "导入中：{name}…", "dict.imported": "已导入「{name}」，{n} 个词条", "dict.importfail": "导入失败：{msg}",
+      "dict.noifo": "没有 .ifo 文件", "dict.missing": "「{name}」缺少 {ext} 文件", "dict.dup": "已经装过「{name}」",
+      "dict.nodb": "现在存不了档，不能导入词典",
+      "dict.pwa": "加到主屏，词典才不会被系统清掉。",
+      "dict.entries": "{n} 词", "dict.delfail": "删除失败",
 
       "app.calendar": "万年历",
       "cal.prev": "上个月", "cal.next": "下个月", "cal.today": "今天", "cal.anniv": "纪念日", "cal.back": "返回",
@@ -213,6 +229,22 @@
       "notes.emptynodb": "No notes yet. Saving is off: what you write is lost on close.",
       "notes.blank": "(blank)", "notes.fresh": "New", "notes.saved": "Saved", "notes.editing": "Editing…",
       "notes.savedtemp": "Saved (this session)", "notes.savefail": "Not saved. Edit to retry", "notes.delfail": "Delete failed",
+
+      "app.dict": "Dictionary",
+      "dict.ph": "Type an English word", "dict.words": "Words", "dict.books": "Books", "dict.back": "Back", "dict.page": "Page",
+      "dict.history": "Recent", "dict.nohistory": "Type a word; matches show here. A or Enter looks it up.",
+      "dict.loading": "Reading dictionaries…", "dict.loadfail": "Cannot read the dictionaries: {msg}", "dict.notfound": "No entry for \"{w}\"",
+      "dict.lemma": "{w} → {base}", "dict.near": "Close matches",
+      "dict.add": "Words", "dict.added": "Added to Words", "dict.removed": "Removed from Words", "dict.inbook": "In Words",
+      "dict.nowords": "No words yet. Press B on an entry to add it.", "dict.review": "Review", "dict.reveal": "Show", "dict.next": "Next",
+      "dict.count": "{n} words", "dict.of": "{i}/{n}",
+      "dict.builtin": "Built-in", "dict.up": "Up", "dict.down": "Down", "dict.import": "Import",
+      "dict.importnote": "Import a StarDict dictionary: select all of its files at once (.ifo, .idx, .dict or .dict.dz, and .syn if there is one). Unpack archives in Files first.",
+      "dict.importing": "Importing {name}…", "dict.imported": "Imported {name}: {n} entries", "dict.importfail": "Import failed: {msg}",
+      "dict.noifo": "No .ifo file", "dict.missing": "{name}: {ext} file missing", "dict.dup": "{name} is already installed",
+      "dict.nodb": "Saving is off: cannot import",
+      "dict.pwa": "Add to Home Screen so the system keeps your dictionaries.",
+      "dict.entries": "{n} words", "dict.delfail": "Delete failed",
 
       "app.calendar": "Calendar",
       "cal.prev": "Previous month", "cal.next": "Next month", "cal.today": "Today", "cal.anniv": "Dates", "cal.back": "Back",

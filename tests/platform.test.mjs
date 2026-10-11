@@ -7,7 +7,7 @@ import { runScript } from "./helpers.mjs";
    Requests settle asynchronously; a transaction completes once no request is left, so a put
    queued from a get's onsuccess (doc.update) lands in the same transaction, as in a browser. */
 function fakeIndexedDB(opts = {}) {
-  let stores = null;
+  const dbs = {};
   const later = (fn) => setTimeout(fn, 0);
   const idb = {
     opened: 0,
@@ -16,16 +16,17 @@ function fakeIndexedDB(opts = {}) {
       const req = {};
       later(() => {
         if (opts.broken) { req.error = new Error("blocked"); return req.onerror && req.onerror(); }
+        const fresh = !dbs[name], stores = (dbs[name] ||= {});
         const db = {
-          createObjectStore(sname, { keyPath }) {
+          createObjectStore(sname, { keyPath } = {}) {
             const s = { keyPath, rows: new Map(), indexes: {} };
-            (stores ||= {})[sname] = s;
+            stores[sname] = s;
             return { createIndex(iname, field) { s.indexes[iname] = field; } };
           },
           transaction(sname, mode) { return transaction(stores[sname], mode); },
         };
         req.result = db;
-        if (!stores && req.onupgradeneeded) req.onupgradeneeded();
+        if (fresh && req.onupgradeneeded) req.onupgradeneeded();
         req.onsuccess && req.onsuccess();
       });
       return req;
@@ -50,10 +51,10 @@ function fakeIndexedDB(opts = {}) {
     const write = () => { if (mode !== "readwrite") throw Object.assign(new Error("read only"), { name: "ReadOnlyError" }); };
     t.objectStore = () => ({
       get: (k) => request(() => structuredClone(s.rows.get(k))),
-      put: (v) => request(() => {
+      put: (v, k) => request(() => {
         write();
         if (opts.quota && JSON.stringify(v).length > opts.quota) throw Object.assign(new Error("full"), { name: "QuotaExceededError" });
-        s.rows.set(v[s.keyPath], structuredClone(v));
+        s.rows.set(s.keyPath ? v[s.keyPath] : k, structuredClone(v));
       }),
       delete: (k) => request(() => { write(); s.rows.delete(k); }),
       index: (iname) => ({
@@ -218,4 +219,19 @@ test("a dismissed share sheet is 'declined', other failures 'unavailable'", asyn
   const fail = (name) => () => Promise.reject(Object.assign(new Error(name), { name }));
   await assert.rejects(exporter({ coarse: true, share: fail("AbortError") }).save({ filename: "a.txt", data: "x" }), (e) => e.code === "declined");
   await assert.rejects(exporter({ coarse: true, share: fail("DataError") }).save({ filename: "a.txt", data: "x" }), (e) => e.code === "unavailable");
+});
+
+test("files: binary values round-trip in their own database, apart from the documents", async () => {
+  const { P, indexedDB } = platform();
+  const names = [], open = indexedDB.open;
+  indexedDB.open = (name, v) => (names.push(name), open(name, v));
+  await P.files.put("dict/x/index", { off: new Uint32Array([1, 2, 3]), words: ["a", "b"] });
+  const back = await P.files.get("dict/x/index");
+  assert.ok(back.off instanceof Uint32Array);
+  assert.deepEqual([...back.off], [1, 2, 3]);
+  assert.equal(await P.files.get("nope"), undefined);
+  await P.files.del("dict/x/index");
+  assert.equal(await P.files.get("dict/x/index"), undefined);
+  await P.db.doc(BASE + "/notes/items/x").get();
+  assert.deepEqual(names, ["lopda-files", "lopda"]);
 });

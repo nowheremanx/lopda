@@ -276,3 +276,28 @@ textarea::placeholder{color:var(--ink-2)}
 .cal-step b{font-weight:400;min-width:4.5em;text-align:center;font-size:17px}
 .cal-step .btn{padding:4px 12px;font-size:16px}
 .cal-step small{flex:1}
+/* dictionary: the word box and candidates; an entry, the word book and the book list open over it */
+.dict-view{display:flex;flex-direction:column;overflow:hidden;position:relative}
+.dict-head{display:flex;align-items:center;gap:6px;padding:6px 8px;border-bottom:2px solid var(--ink);flex:none}
+.dict-head input{flex:1;min-width:0;font-family:var(--f-lcd);font-size:17px;color:var(--ink);background:var(--lcd);border:3px solid var(--ink);border-radius:0;padding:6px 8px;-webkit-appearance:none;appearance:none}
+.dict-head input::placeholder{color:var(--ink-2)}
+.dict-head input::-webkit-search-cancel-button{display:none}
+.dict-head .btn{padding:6px 8px;font-size:14px;flex:none}
+.dict-list{flex:1;min-height:0;overflow:auto;padding:2px 0}
+.dict-list li{padding:7px 10px}
+.dict-list li span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dict-list li.label{cursor:default;font-size:13px;color:var(--ink-2);padding:6px 10px 2px}
+.dict-list li.label::before{display:none}
+.dict-note{flex:none;padding:4px 8px 6px;border-top:2px solid var(--ink);text-align:center}
+.dict-note:empty{display:none}
+.dict-sheet{position:absolute;inset:0;z-index:2;background:var(--lcd);display:flex;flex-direction:column;padding:8px 10px 4px;gap:6px;overflow:hidden}
+.dict-sheet .sheet-title{display:flex;gap:8px;align-items:baseline;letter-spacing:.04em;overflow:hidden}
+.dict-sheet .sheet-title span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dict-sheet .sheet-title small{font-size:16px;color:var(--ink-2);flex:none}
+.dict-page{flex:1;min-height:0;overflow:hidden;font-size:16px;line-height:24px;white-space:pre-wrap;word-break:break-word;cursor:pointer}
+.dict-page b{display:inline-block;font-weight:400;font-size:13px;line-height:18px;background:var(--ink);color:var(--lcd);padding:0 6px;margin:3px 0}
+.dict-page .big{display:block;text-align:center;font-family:var(--f-pix);font-size:40px;line-height:48px;margin-top:24px}
+.dict-sheet .lcd-menu{flex:1;min-height:0;overflow:auto}
+.dict-sheet .lcd-menu li span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dict-keys{display:flex;gap:6px;justify-content:center;padding:4px 0 6px;flex:none;flex-wrap:wrap}
+.dict-keys .ck{min-width:0}

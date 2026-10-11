@@ -8,7 +8,7 @@
 - 不加标注：已定，并且已经实现。
 - **〔提议〕**：提出过，但还没有确定。不要当作既定规则。
 
-记录截止：2026-10-11，runtime 0.6.0，lo-game.js 1.2.0，lo-3d.js 1.1.0。
+记录截止：2026-10-11，runtime 0.7.0，lo-game.js 1.2.0，lo-3d.js 1.1.0。
 
 ---
 
@@ -128,7 +128,7 @@
 - **内置程序扩充**（2026-10-10 讨论，设计草稿）：
   - 文件接口、预装 app、画板改成社区 app、计算器：`docs/design/pad-files.md`。**已完成**（runtime 0.5.0，第 13 节）。
   - 万年历：`docs/design/calendar.md`。**已完成**（runtime 0.6.0，第 14 节）。
-  - 电子书阅读器 + 英汉词典（联动记事本）：`docs/design/reader-dictionary.md`。
+  - 电子书阅读器 + 英汉词典（联动记事本）：`docs/design/reader-dictionary.md`。**词典已完成**（runtime 0.7.0，第 15 节），阅读器未做。
   - 顺序：先拆分 `lopda.js`（每个内置程序一个文件，纯搬移），再按上面的顺序做。
   - **拆分已完成**（2026-10-11，runtime 0.4.1）：`core.js`（共享对象 `LP`：工具、存储、视图切换、音效、语言、更新、图标、主屏、下巴按键）、
     `apps/*.js`（notes、paint、camera、cutter、cart、store、settings，每个一个 IIFE）、`boot.js`（最后加载）。仍是 ES5、没有构建步骤、没有 ES module。
@@ -417,3 +417,34 @@ CPU 降速 4 倍（DevTools 的 CPU throttling，粗略代表旧手机）时，�
   开机时也提示一次（toast），每天最多一次。图标排在记事本后面。
 - **英文**：农历写成 `Lunar 8/19`，格子里写农历日的数字（初一写 `8/1`）；节气和节日用英文名，格子里用不超过 7 个字母的缩写；
   干支写拼音（Bing-Wu），生肖用英文（Year of the Horse）。调休标记是 H / W。
+
+## 15. 词典
+
+2026-10-11，runtime 0.7.0。设计草稿 `docs/design/reader-dictionary.md` 第 2 节，owner 同意了其中的推荐。阅读器（第 1、3、4 节）不在这一版。
+
+- **内置程序**（`runtime/apps/dict.js`）：需要大量存储和跨程序调用（以后阅读器查词），沙盒 app 做不了。
+  主屏图标排在万年历后面。对外接口 `LP.dict.lookup(word)` → `Promise<[{book, name, word, head, how, text}]>`，
+  `how` 是 `exact`、`lemma` 或 `prefix`，同义词条（.syn）的 `head` 是它指向的词头；`LP.dict.suggest(prefix, n)` 给候选。
+- **只支持 StarDict**，解析器自己写（`runtime/stardict.js`，`window.LopdaStarDict`，纯函数，在 Node 里测试）：`.ifo`、`.idx`（32 或 64 位偏移，
+  也认 `.idx.gz`）、`.dict` 或 `.dict.dz`（整体用 `DecompressionStream("gzip")` 解压，不做 dictzip 的随机访问）、可选的 `.syn`。
+  释义里的文字类型（m l g t x y k w h）转成纯文本：标记去掉，`<br>` 变换行，音标加方括号；图片、声音、资源列表跳过。
+- **索引**：所有词头和同义词按小写排序成一张表（词头、偏移、长度、同义词指向的词头），二分查找做精确匹配和前缀候选。
+  这张表就是"前缀索引"；加载时再算一遍小写键，不存，省一半空间。
+- **查词顺序**：精确匹配（不分大小写，所有词典）→ 都没有时用 ECDICT 的词形表还原（running → run，leaves → leaf / leave）→ 还没有就取最接近的前 3 个词头。
+  多本词典按用户排的顺序依次给结果。词形表来自内置的 ECDICT，对导入的词典同样有效。
+- **存储**：导入的词典，索引和释义原文（解压后，作为 Blob，按词条切片读取，不整本读进内存）存在 `LopdaPlatform.files`
+  （新增的二进制存储，单独一个 IndexedDB 数据库 `lopda-files`，不用升级原来数据库的版本）；名字、词条数在 `dict/books/<id>`；
+  顺序、查词历史（最近 50 个）、生词本（最多 2000 个）在 `dict` 一个文档里。内置的 ECDICT 不再复制进 IndexedDB，每次从离线缓存读。
+- **导入**：一次选中一本（或几本）词典的全部文件，按文件名配对。不做 .zip / .tar.gz：常见的 StarDict 包是 .tar.bz2，浏览器解不了 bzip2，
+  做了 zip 也覆盖不全；iPhone 的「文件」能直接解开 zip，解开后进文件夹多选就行。文件选择框不设 `accept`，否则 iOS 会把不认识的扩展名变灰。
+  界面上只有导入，不附带、不推荐、不链接任何词典。
+- **持久化**：打开词典时调用 `navigator.storage.persist()`；不是从主屏打开时，底部一行提示"加到主屏，词典才不会被系统清掉"。
+- **按键**：主界面 ▲▼ 选候选，A（或回车）查词，B 清空，SELECT 生词本，START 词典管理。释义页 ◀▶▲▼ 翻页（点屏幕左三分之一往前，别处往后），
+  A 返回，B 加入或移出生词本。生词本 ▲▼ 选，A 从这个词开始复习，B 返回。复习时先只显示单词，A 看释义，再按 A 下一个，◀▶ 前后换词，B 移出。
+  任何覆盖层里 SELECT 都是返回。
+- **内置 ECDICT 精简版**（`runtime/vendor/ecdict/`，`tools/gen-ecdict.mjs` 生成，许可审查见 LICENSING.md）：
+  按 BNC 和当代语料库（COCA）排名中较靠前的一个取前 25000 个词；大写开头的词（人名、地名、星期）只收排名 8000 以内的；
+  只写"run的过去式"这类变形说明的行不收，交给词形表。每个词：中文释义全部（去掉"[网络]"行），英文释义最多 4 条。
+  音标、柯林斯星级、牛津标签、考试标签不收。`.dict.dz` 是真正的 dictzip（带 RA 随机访问表），别的 StarDict 软件也能打开。
+  体积：`.idx` 406 KB、`.dict.dz` 1635 KB（解压后约 3.7 MB）、词形表 104 KB（24502 个变形），合计约 2.1 MB，全部在离线缓存里。
+  比设计稿估计的 1–2 MB 略多；要再小，可以去掉英文释义或少收词（owner 决定）。

@@ -7,6 +7,7 @@
  *
  *   LopdaPlatform.db         a tiny document store on IndexedDB
  *                            doc(path) / collection(path), get / set / update / delete / where
+ *   LopdaPlatform.files      a key-value store for large binary data (dictionaries): get / put / del
  *   LopdaPlatform.downloads  save({filename, data}) -> share sheet on phones, download elsewhere
  */
 (function () {
@@ -105,6 +106,36 @@
   }
   var db = { doc: docRef, collection: collRef, ready: function () { return open().then(function () { return true; }); } };
 
+  /* ---------------- binary store ----------------
+     Dictionaries are megabytes of Blobs and typed arrays, which the document store's JSON copies would break.
+     They get their own database, so adding it needs no version upgrade of the documents database. */
+  var filesOpening = null;
+  function openFiles() {
+    if (filesOpening) return filesOpening;
+    filesOpening = new Promise(function (resolve, reject) {
+      var req = indexedDB.open(DB_NAME + "-files", 1);
+      req.onupgradeneeded = function () { req.result.createObjectStore("files"); };
+      req.onsuccess = function () { resolve(req.result); };
+      req.onerror = function () { filesOpening = null; reject(err("unavailable", req.error)); };
+    });
+    return filesOpening;
+  }
+  function filesTx(mode, fn) {
+    return openFiles().then(function (fdb) {
+      return new Promise(function (resolve, reject) {
+        var t = fdb.transaction("files", mode), r = fn(t.objectStore("files"));
+        t.oncomplete = function () { resolve(r && "result" in r ? r.result : undefined); };
+        t.onerror = function () { reject(err("unavailable", t.error)); };
+        t.onabort = function () { reject(err(t.error && t.error.name === "QuotaExceededError" ? "quota_exceeded" : "unavailable", t.error)); };
+      });
+    });
+  }
+  var files = {
+    get: function (key) { return filesTx("readonly", function (os) { return os.get(key); }); },
+    put: function (key, value) { return filesTx("readwrite", function (os) { return os.put(value, key); }).then(function () {}); },
+    del: function (key) { return filesTx("readwrite", function (os) { return os.delete(key); }).then(function () {}); }
+  };
+
   /* ---------------- file export ---------------- */
   var MIME = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", txt: "text/plain", json: "application/json", html: "text/html" };
   function toFile(req) {
@@ -159,5 +190,5 @@
     return Promise.resolve(false);
   }
 
-  window.LopdaPlatform = { db: db, downloads: downloads, persist: persist, user: { id: function () { return Promise.resolve("local"); } } };
+  window.LopdaPlatform = { db: db, files: files, downloads: downloads, persist: persist, user: { id: function () { return Promise.resolve("local"); } } };
 })();
