@@ -36,6 +36,34 @@ test("solar terms in the fixture", () => {
   }
 });
 
+/* The Hong Kong Observatory's Gregorian-lunar table is the reference (docs/decisions.md section 14). These are the dates
+   where the table used to differ from it (owner's run of tests/hko-compare.mjs, 2026-10): three months before 1929, which
+   follow the Beijing local mean time, and seven solar terms that fall minutes or seconds before midnight. */
+test("the Hong Kong Observatory's dates where the table once differed", () => {
+  const lunar = (date) => { const [y, m, d] = iso(date); const l = L.fromSolar(y, m, d); return [l.year, l.month, l.leap ? "leap" : "", l.day].join(); };
+  for (const [first, last, y, m, before] of [
+    ["1914-11-17", "1914-12-16", 1914, 10, "1914,9,,29"],
+    ["1916-02-03", "1916-03-03", 1916, 1, "1915,12,,29"],
+    ["1920-11-10", "1920-12-09", 1920, 10, "1920,9,,29"]]) {
+    assert.equal(lunar(first), [y, m, "", 1].join(), first);
+    assert.equal(lunar(last), [y, m, "", 30].join(), last);
+    const prev = L.fromDayNumber(L.dayNumber(...iso(first)) - 1), next = L.fromDayNumber(L.dayNumber(...iso(last)) + 1);
+    assert.equal(lunar(fmt(prev)), before, "the day before " + first);
+    assert.equal(lunar(fmt(next)), [y, m + 1, "", 1].join(), "the day after " + last);
+  }
+  assert.equal(fmt(L.toSolar(1916, 1, 1, false)), "1916-02-03", "Spring Festival 1916");
+  /* the generator's MOON_FIX: the 1906 new moon at 23:52 local mean time; the Observatory starts the month the next day */
+  assert.equal(lunar("1906-04-23"), "1906,3,,30");
+  assert.equal(lunar("1906-04-24"), "1906,4,,1");
+  /* j: 0 = Minor Cold ... 23 = Winter Solstice */
+  for (const [date, j, name] of [["1912-11-23", 21, "Minor Snow"], ["1913-09-24", 17, "Autumn Equinox"], ["1917-12-07", 22, "Major Snow"],
+    ["1927-09-08", 16, "White Dew"], ["1928-06-21", 11, "Summer Solstice"], ["1951-12-23", 23, "Winter Solstice"], ["1979-01-21", 1, "Major Cold"]]) {
+    const [y, m, d] = iso(date);
+    assert.equal(L.term(y, m, d), j, name + " " + date);
+    assert.equal(L.termDay(y, j), d, name + " " + date);
+  }
+});
+
 test("round trip, continuity and 24 terms a year, 1900-2100", () => {
   const first = L.dayNumber(1900, 1, 1), last = L.dayNumber(2100, 12, 31);
   let prev = null, terms = 0, year = 1900;
