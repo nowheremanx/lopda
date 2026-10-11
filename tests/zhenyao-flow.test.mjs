@@ -7,7 +7,7 @@ import { ROOT } from "./helpers.mjs";
 import { boot } from "./app-vm.mjs";
 
 const APP = join(ROOT, "registry", "apps", "zhenyao-tower", "index.html");
-const KEYS = { up: "ArrowUp", down: "ArrowDown", a: "x" };
+const KEYS = { up: "ArrowUp", down: "ArrowDown", a: "x", b: "z", start: "Enter" };
 
 /* a game on the title with a save on disk (the one 继续 loads), and a way to press buttons */
 async function start() {
@@ -73,4 +73,66 @@ test("a save stone of this run is where a loss goes back to", async () => {
   const st = z.get("ZT").state();
   assert.equal(st.scene, "map");
   assert.equal(st.map, "road");
+});
+
+/* ---------- the field menu (START on a map) ---------- */
+async function onRoad() {
+  const z = await start();
+  await pick(z, 1);
+  await z.run(200);
+  z.get("ZT").goto("road", { entered: true });
+  await z.run(120);
+  return z;
+}
+
+test("START on a map opens the menu; a pill heals, the count falls, B closes", async () => {
+  const z = await onRoad();
+  assert.equal(z.get("ZT").state().scene, "map");
+  z.get("me.hp = 10");
+  const pills = z.get("me.items.pill");
+  assert.ok(pills > 0);
+  await z.tap("start");
+  assert.equal(z.get("fm.kind"), "main");
+  await z.tap("a");                       // 物品
+  assert.equal(z.get("fm.kind"), "items");
+  await z.tap("a");                       // the first item is 回春丹
+  assert.equal(z.get("me.hp"), Math.min(z.get("Rules.stats(me.level).maxHp"), 10 + z.get("BATTLE.ITEMS.pill.hp")));
+  assert.ok(z.get("me.hp") > 10);
+  assert.equal(z.get("me.items.pill"), pills - 1);
+  /* full HP: the pill is refused and kept */
+  z.get("me.hp = Rules.stats(me.level).maxHp");
+  await z.tap("a");
+  assert.equal(z.get("me.items.pill"), pills - 1);
+  await z.tap("b");
+  assert.equal(z.get("fm.kind"), "main");
+  await z.tap("b");
+  assert.equal(z.get("fm"), null);
+});
+
+test("the menu shows the status and the hero does not walk while it is open", async () => {
+  const z = await onRoad();
+  const at = z.get("ZT").state();
+  await z.tap("start");
+  await z.tap("down");
+  await z.tap("a");
+  assert.equal(z.get("fm.kind"), "status");
+  await z.tap("up");
+  const now = z.get("ZT").state();
+  assert.deepEqual([now.x, now.y], [at.x, at.y]);
+  await z.tap("b");
+  await z.tap("b");
+  assert.equal(z.get("fm"), null);
+});
+
+test("START does nothing during a dialogue", async () => {
+  const z = await onRoad();
+  z.get("talk([{ say: 'hello' }])");
+  await z.run(10);
+  const send = z.get("dispatchEvent"), KE = z.get("KeyboardEvent");
+  send(new KE("keydown", { key: "Enter" }));    // START is also OK in a dialogue: it turns the page
+  await z.run(2);
+  send(new KE("keyup", { key: "Enter" }));
+  await z.run(30);
+  assert.equal(z.get("fm"), null);
+  assert.equal(z.get("busy"), false);
 });

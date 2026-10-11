@@ -80,6 +80,18 @@ function attackOnly(b, R, B) {
 
 export const policies = { smart: makeSmart(false), noWeak: makeSmart(true), attackOnly };
 
+/* Between fights the field menu lets the player eat a pill or a cordial (decisions.md 12.1). The same rule for every
+   policy: a 回春丹 while HP is at or below half, a 聚灵丹 while MP is at or below a quarter. Chests are opened and
+   the save stone is used before the first fight of a part, so the hero starts each part full and this only
+   matters between the fights of one part. */
+function healBetween(hero) {
+  const s = Rules.stats(hero.level);
+  let used = 0;
+  while (hero.hp <= s.maxHp * 0.5 && Rules.useItem(hero, "pill")) used++;
+  while (hero.mp <= s.maxMp * 0.25 && Rules.useItem(hero, "ether")) used++;
+  return used;
+}
+
 const copyHero = (h) => ({ level: h.level, xp: h.xp, hp: h.hp, mp: h.mp, items: Object.assign({}, h.items) });
 
 /* one fight; mutates the hero and returns a record */
@@ -126,6 +138,7 @@ export function runRoute(policy, seed) {
       const rec = fight(hero, ids, policy, rng, part.area);
       fights.push(rec);
       if (rec.result !== "win") { won = false; break; }
+      healBetween(hero);
     }
     if (!won) break;
   }
