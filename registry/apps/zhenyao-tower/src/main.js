@@ -300,9 +300,9 @@ async function afterBoss() {
     stopMist();
     stage = [];
     /* the pendant falls where he stood, and lies there with a soft glow and a few sparks */
-    var pend = { art: ART.pendant, x: bx, z: bz, y: 2.8, scale: 0.1, snap: true, sh: 0.5 };
+    var pend = { art: ART.jade, x: bx, z: bz, y: 2.8, snap: true, sh: 0.3 };
     stage.push(pend);
-    glows = [{ x: bx, y: 0.5, z: bz - 0.3, radius: 3.2, base: 1, env: function (t) { return 0.8 + 0.2 * Math.sin(t * 3); } }];
+    glows = [{ x: bx, y: 0.2, z: bz - 0.3, radius: 3.2, base: 1, dot: 0, env: function (t) { return 0.6 + 0.4 * Math.sin(t * 3.4); } }];
     await C.tween(pend, { y: 0.02 }, 0.45, "in");
     C.sfx("coin");
     await C.tween(pend, { y: 0.3 }, 0.14, "out");
