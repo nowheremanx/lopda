@@ -1,21 +1,29 @@
 /* Scenes: the title (camera circling the tower) and the town, where the hero walks tile by tile.
-   SELECT shows how long the last frame took to render, for checking speed on a phone. */
+   SELECT shows how long the last frame took to draw, in every scene, for checking speed on a phone. */
 var game = LoGame.create({ width: 160, height: 144, lang: "zh" });
 var R = Lo3D.create({ width: 160, height: 144 });
 var town = World.build(TOWN);
 var CAM = { pitch: -0.62, dist: 8.5 };
 var perf = { show: false, ms: 0 };
 
-function frame(g, view, actors) {
-  var t0 = performance.now();
-  g.sprite(World.render(R, town, view, actors), 0, 0);
-  perf.ms = perf.ms * 0.9 + (performance.now() - t0) * 0.1;
-  if (perf.show) { g.rect(0, 0, 50, 14, g.INK); g.text(perf.ms.toFixed(1) + " ms", 2, 1, { color: g.PAPER }); }
+function frame(g, view, actors) { g.sprite(World.render(R, town, view, actors), 0, 0); }
+/* every scene goes through this: SELECT toggles the frame time, which is drawn after the scene and its HUD.
+   Only the overlays lo-game draws itself (dialogue, menus) come later; they sit at the bottom or the middle */
+function scene(name, def) {
+  var update = def.update, draw = def.draw;
+  return game.scene(name, Object.assign({}, def, {
+    update: function (dt) { if (game.pressed("select")) perf.show = !perf.show; if (update) update(dt); },
+    draw: function (g) {
+      var t0 = performance.now();
+      draw(g);
+      perf.ms = perf.ms * 0.9 + (performance.now() - t0) * 0.1;
+      if (perf.show) { g.origin(0, 0); g.clip(); g.rect(0, 0, 50, 14, g.INK); g.text(perf.ms.toFixed(1) + " ms", 2, 1, { color: g.PAPER }); }
+    }
+  }));
 }
-function toggles() { if (game.pressed("select")) perf.show = !perf.show; }
 
 /* ---------- title ---------- */
-game.scene("title", {
+scene("title", {
   enter: function () { busy = false; },
   draw: function (g) {
     var a = game.time * 0.12, T = town.def.tower;
@@ -26,7 +34,6 @@ game.scene("title", {
     if (Math.floor(game.time * 2) % 2) g.text("按 A 开始", 80, 119, { align: "center" });
   },
   update: function () {
-    toggles();
     if (busy || !game.ok()) return;
     game.sfx("ok");
     busy = true;
@@ -95,7 +102,7 @@ function edge(c, r) {
   return TOWN.things.filter(function (s) { return s.y === row && Math.abs(s.x - c) <= 1; })[0];
 }
 
-game.scene("town", {
+scene("town", {
   enter: async function (args) {
     var s = TOWN.start;
     hero = { c: s.x, r: s.y, x: s.x + 0.5, z: -s.y - 0.5, face: s.face, step: 0, moving: null };
@@ -112,7 +119,6 @@ game.scene("town", {
     }
   },
   update: function (dt) {
-    toggles();
     if (busy) return;
     if (hero.moving) {
       var m = hero.moving;
@@ -153,5 +159,5 @@ game.scene("town", {
   }
 });
 
-game.scene("battle", Battle.scene);
+scene("battle", Battle.scene);
 game.start("title");

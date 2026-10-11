@@ -393,7 +393,7 @@ var ANIM = (function () {
   SPELL.seal = async function (S, ev) {
     var H = B.HOME, c = centre(S), seal = { y: 11, spin: 0, s: 1, punch: 1 };
     var SEAL = (function () {
-      var m = World.builder();
+      var m = Lo3D.builder();
       m.box(-1.5, -0.5, -1.5, 1.5, 0.5, 1.5, 0.95);
       /* the carved face underneath: a square spiral in relief */
       [[-1.2, -1.2, 1.2, -0.9], [0.9, -1.2, 1.2, 1.2], [-1.2, 0.9, 1.2, 1.2], [-1.2, -0.6, -0.9, 1.2], [-0.6, -0.6, 0.6, -0.3], [0.3, -0.6, 0.6, 0.6], [-0.6, 0.3, 0.6, 0.6]].forEach(function (r) {
@@ -446,7 +446,7 @@ var ANIM = (function () {
   /* 七级浮屠: the five elements gather above the arena and bring down a phantom of the tower */
   SPELL.pagoda = async function (S, ev) {
     var H = B.HOME, h = S.hero, c = centre(S), hp = B.heroAt(0.7), orbs = [], tw = { y: 16, spin: 0, show: 0, rise: 0 };
-    var PAG = (function () { var m = World.builder(); World.pagoda(m, 0, 0, 0, 0.62, [1.1, 0.25]); return m; })();
+    var PAG = (function () { var m = Lo3D.builder(); World.pagoda(m, 0, 0, 0, 0.62, [1.1, 0.25]); return m; })();
     var storeys = [0.5, 1.4, 2.25, 3.05, 3.8, 4.5, 5.15];
     S.hud = false;
     T.tween(S, { bars: 1 }, 0.3);

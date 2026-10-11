@@ -1,7 +1,7 @@
 /* The 3D world: turns a map (src/town.js) into lo-3d meshes, lights and colliders, and draws a frame.
    Tile (col, row) covers x in [col, col+1] and z in [-row-1, -row]: north is +z, away from the camera. */
 var World = (function () {
-  var sub = Lo3D.sub, cross = Lo3D.cross, dot = Lo3D.dot;
+  var builder = Lo3D.builder;
   var CHUNK = 4;
 
   /* a stable 0..1 number per tile, for texture and scattered trees */
@@ -9,44 +9,6 @@ var World = (function () {
     var h = (x * 374761393 + y * 668265263) | 0;
     h = Math.imul(h ^ (h >>> 13), 1274126177);
     return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
-  }
-
-  /* a mesh under construction; every face is wound so it is seen from the side `out` points to */
-  function builder() {
-    var m = { v: [], t: [], c: [] };
-    m.tri = function (a, b, c, out, alb) {
-      var i = m.v.length;
-      m.v.push(a, b, c);
-      m.t.push(dot(cross(sub(b, a), sub(c, a)), out) <= 0 ? [i, i + 1, i + 2] : [i, i + 2, i + 1]);
-      m.c.push(alb);
-    };
-    m.quad = function (a, b, c, d, out, alb) { m.tri(a, b, c, out, alb); m.tri(a, c, d, out, alb); };
-    /* an axis-aligned box from (x0,y0,z0) to (x1,y1,z1); no bottom, top optional */
-    m.box = function (x0, y0, z0, x1, y1, z1, alb, top) {
-      m.quad([x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0], [0, 0, -1], alb);
-      m.quad([x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1], [0, 0, 1], alb);
-      m.quad([x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0], [-1, 0, 0], alb);
-      m.quad([x1, y0, z0], [x1, y0, z1], [x1, y1, z1], [x1, y1, z0], [1, 0, 0], alb);
-      if (top !== false) m.quad([x0, y1, z0], [x1, y1, z0], [x1, y1, z1], [x0, y1, z1], [0, 1, 0], top == null || top === true ? alb : top);
-    };
-    /* an n-sided cone standing at (x, y, z) */
-    m.cone = function (x, y, z, r, h, n, alb, turn) {
-      for (var i = 0; i < n; i++) {
-        var a0 = (i / n + (turn || 0)) * Math.PI * 2, a1 = ((i + 1) / n + (turn || 0)) * Math.PI * 2, am = (a0 + a1) / 2;
-        m.tri([x + Math.cos(a0) * r, y, z + Math.sin(a0) * r], [x + Math.cos(a1) * r, y, z + Math.sin(a1) * r], [x, y + h, z],
-          [Math.cos(am), r / h, Math.sin(am)], alb);
-      }
-    };
-    /* a four-sided roof: from a w x d rectangle at height y, rising to a ridge (ridge > 0) or a point */
-    m.roof = function (x0, z0, x1, z1, y, h, ridge, alb) {
-      var xm = (x0 + x1) / 2, zm = (z0 + z1) / 2, r = ridge || 0;
-      var A = [xm - r, y + h, zm], B = [xm + r, y + h, zm];
-      m.quad([x0, y, z0], [x1, y, z0], B, A, [0, 1, -1], alb);
-      m.quad([x0, y, z1], [x1, y, z1], B, A, [0, 1, 1], alb);
-      m.tri([x0, y, z0], [x0, y, z1], A, [-1, 1, 0], alb);
-      m.tri([x1, y, z0], [x1, y, z1], B, [1, 1, 0], alb);
-    };
-    return m;
   }
 
   /* low-poly pines; the forest outside the town gets the cheaper kind */
@@ -152,7 +114,7 @@ var World = (function () {
   /* far-off points for stars: fixed positions, drawn over the sky only */
   var STARS = [];
   for (var s = 0; s < 40; s++) STARS.push([hash(s, 7) * 120 - 50, 18 + hash(s, 9) * 30, 70 + hash(s, 3) * 20]);
-  var SHADOW = (function () { var m = builder(); m.cone(0, 0.03, 0, 0.36, 0.0001, 8, 0.02); return m; })();
+  var SHADOW = Lo3D.shadow(0.36, 8);
 
   /* draw a frame. view: {x, y, z (what the camera looks at), yaw, pitch, dist, time}; actors: [{art, x, z, flip}] */
   function render(R, w, view, actors) {
@@ -189,5 +151,5 @@ var World = (function () {
     return R.image;
   }
 
-  return { build: build, render: render, hash: hash, builder: builder, tree: tree, pagoda: pagoda };
+  return { build: build, render: render, hash: hash, tree: tree, pagoda: pagoda };
 })();
