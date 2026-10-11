@@ -1,7 +1,7 @@
 // runtime/strings.js: both languages complete, placeholders agree, every key the UI asks for exists.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { read, runScript, EMOJI } from "./helpers.mjs";
+import { read, runScript, EMOJI, RUNTIME_JS } from "./helpers.mjs";
 
 function load(language) {
   const ctx = runScript("runtime/strings.js", { navigator: { languages: [language], language } });
@@ -36,8 +36,11 @@ test("no empty strings and no emoji", () => {
   }
 });
 
-test("every literal tr() key in lopda.js exists", () => {
-  const keys = new Set([...read("runtime/lopda.js").matchAll(/\btr\(\s*"([^"]+)"\s*[,)]/g)].map((m) => m[1]));
+test("every literal tr() key in the runtime scripts exists", () => {
+  const code = RUNTIME_JS.map(read).join("\n");
+  const keys = new Set([...code.matchAll(/\btr\(\s*"([^"]+)"\s*[,)]/g)].map((m) => m[1]));
+  /* built-ins name their home-screen label as a key: LP.builtin({..., label:"app.notes", ...}) */
+  for (const m of code.matchAll(/\blabel:"([^"]+)"/g)) keys.add(m[1]);
   assert.ok(keys.size > 50, "found the tr() calls");
   assert.deepEqual([...keys].filter((k) => !(k in S.STR.zh)), []);
 });

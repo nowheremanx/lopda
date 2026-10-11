@@ -71,6 +71,19 @@ function platform(opts = {}, extra = {}) {
   const ctx = runScript("runtime/platform.js", Object.assign({ indexedDB, setTimeout }, extra));
   return { P: ctx.LopdaPlatform, indexedDB };
 }
+test("a PR preview path gets its own database name", async () => {
+  const nameFor = async (pathname) => {
+    const { P, indexedDB } = platform({}, { location: { pathname } });
+    const names = [], open = indexedDB.open;
+    indexedDB.open = (name, v) => (names.push(name), open(name, v));
+    await P.db.doc(BASE + "/notes/items/x").get();
+    return names[0];
+  };
+  assert.equal(await nameFor("/lopda/runtime/"), "lopda");
+  assert.equal(await nameFor("/lopda/pr/12/runtime/"), "lopda-pr-12");
+  assert.equal(await nameFor("/lopda/pr/x/runtime/"), "lopda");
+});
+
 const plain = (v) => JSON.parse(JSON.stringify(v));
 const BASE = "data/users/local", NOTES = BASE + "/notes/items";   /* as lopda.js lays them out */
 

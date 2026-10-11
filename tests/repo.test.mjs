@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import vm from "node:vm";
-import { ROOT, read, readJSON, tool, tempDir, EMOJI } from "./helpers.mjs";
+import { ROOT, read, readJSON, tool, tempDir, EMOJI, RUNTIME_JS } from "./helpers.mjs";
 
 const APP_IDS = readdirSync(join(ROOT, "registry", "apps")).sort();
 const sha256 = (buf) => createHash("sha256").update(buf).digest("hex");
@@ -40,10 +40,10 @@ test("registry apps use an allowed licence", () => {
 });
 
 test("RUNTIME_VERSION and the service worker VERSION move together", () => {
-  const rt = read("runtime/lopda.js").match(/var RUNTIME_VERSION="([^"]+)"/)[1];
+  const rt = read("runtime/core.js").match(/var RUNTIME_VERSION="([^"]+)"/)[1];
   const sw = read("runtime/sw.js").match(/var VERSION = "lopda-v([^"]+)"/)[1];
   assert.equal(rt, sw);
-  /* the update check in lopda.js reads sw.js with this same pattern */
+  /* the update check in core.js reads sw.js with this same pattern */
   assert.match(read("runtime/sw.js"), /VERSION\s*=\s*"lopda-v([^"]+)"/);
 });
 
@@ -63,14 +63,25 @@ test("every local script and stylesheet the page loads is pre-cached", () => {
   }
 });
 
+test("every runtime script is loaded by the page and pre-cached", () => {
+  const html = read("runtime/index.html"), shell = read("runtime/sw.js").match(/var SHELL = (\[[\s\S]*?\]);/)[1];
+  assert.ok(RUNTIME_JS.length >= 10, "found the runtime scripts");
+  for (const f of RUNTIME_JS) {
+    const u = f.slice("runtime/".length);
+    if (u === "sw.js") continue;
+    assert.ok(html.includes(`<script src="${u}"></script>`), u + " is loaded by index.html");
+    assert.ok(shell.includes(`"${u}"`), u + " is in SHELL in sw.js");
+  }
+});
+
 test("runtime and sdk scripts parse as plain scripts", () => {
-  for (const f of ["runtime/lopda.js", "runtime/strings.js", "runtime/platform.js", "runtime/sw.js", "sdk/pad-shim.js", "sdk/lo-game.js", "sdk/lo-3d.js"]) {
+  for (const f of [...RUNTIME_JS, "sdk/pad-shim.js", "sdk/lo-game.js", "sdk/lo-3d.js"]) {
     assert.doesNotThrow(() => new vm.Script(read(f), { filename: f }), f);
   }
 });
 
 test("runtime code stays ES5-style: no let, const, arrow functions or classes", () => {
-  for (const f of ["runtime/lopda.js", "runtime/strings.js", "runtime/platform.js", "runtime/sw.js", "sdk/pad-shim.js"]) {
+  for (const f of [...RUNTIME_JS, "sdk/pad-shim.js"]) {
     const code = read(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/g, '""');
     assert.doesNotMatch(code, /\b(?:let|const|class)\s+[\w$]/, f);
     assert.doesNotMatch(code, /=>/, f);
@@ -79,7 +90,7 @@ test("runtime code stays ES5-style: no let, const, arrow functions or classes", 
 
 /* ◀ ▶ are text arrows on the device's buttons; Unicode counts them as pictographic, so they are let through here */
 test("no emoji in the runtime or sdk", () => {
-  for (const f of ["runtime/index.html", "runtime/lopda.js", "runtime/lopda.css", "sdk/lo-game.js", "sdk/lo-3d.js", "sdk/pad-shim.js", "sdk/dev.html"]) {
+  for (const f of ["runtime/index.html", ...RUNTIME_JS, "runtime/lopda.css", "sdk/lo-game.js", "sdk/lo-3d.js", "sdk/pad-shim.js", "sdk/dev.html"]) {
     assert.ok(!EMOJI.test(read(f).replace(/[▶◀]/g, "")), f);
   }
 });
@@ -114,7 +125,15 @@ test("the Pages workflow publishes the repo without tests, dependencies or CI fi
   const y = read(".github/workflows/pages.yml");
   for (const ex of ["/tests", "/node_modules", "/_to_delete", "/.github"]) assert.ok(y.includes("--exclude=" + ex), ex);
   assert.ok(y.includes("gh-pages") && y.includes(".nojekyll") && y.includes("lopda-preview"));
-  /* PRs that change no app, sdk or runtime file (docs, tests, CI) get no preview and no comment */
-  assert.ok(y.includes("id: plan") && y.includes("deploy=false") && /\^\(sdk\|runtime\)\//.test(y), "preview only when needed");
+  /* PRs that change no app, sdk script or runtime file (docs, tests, CI) get no preview and no comment */
+  assert.ok(y.includes("id: plan") && y.includes("deploy=false"), "preview only when needed");
+  const pats = [...y.matchAll(/grep -qE '([^']+)'/g)].map((m) => new RegExp(m[1]));
+  const previewsAll = (p) => pats.some((re) => re.test(p));
+  assert.equal(pats.length, 2, "one pattern for runtime/, one for sdk/*.js");
+  for (const p of ["runtime/lopda.css", "runtime/vendor/binjgb/binjgb.wasm", "sdk/lo-game.js", "sdk/pad-shim.js"]) assert.ok(previewsAll(p), p);
+  for (const p of ["sdk/LO-GAME.md", "sdk/PROMPT.md", "sdk/template/index.html", "docs/x.md", "tests/a.mjs", "registry/apps/a/index.html"]) assert.ok(!previewsAll(p), p);
+  /* the comment links runtime/ when it changed, and no longer warns against opening it */
+  assert.ok(y.includes("runtime=$RUNTIME") && y.includes("$SITE/pr/$PR/runtime/"), "runtime link");
+  assert.ok(y.includes("lopda-pr-") && !/Do not open `?runtime/i.test(y) && !y.includes("请不要打开"), "no warning about runtime/");
   assert.deepEqual([...y.matchAll(/uses:\s*(\S+)/g)].map((m) => m[1]), ["actions/checkout@v4"], "only actions/checkout");
 });

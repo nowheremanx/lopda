@@ -2,8 +2,9 @@
  * Shell files: cache first, so the handheld opens offline.
  * Registry index: network first, falling back to the last copy.
  * Fonts: cached the first time they load. */
-var VERSION = "lopda-v0.4.0";
-var SHELL = ["./", "index.html", "lopda.css", "lopda.js", "strings.js", "platform.js", "../sdk/pad-shim.js",
+var VERSION = "lopda-v0.4.1";
+var SHELL = ["./", "index.html", "lopda.css", "strings.js", "platform.js", "core.js",
+  "apps/notes.js", "apps/paint.js", "apps/camera.js", "apps/cutter.js", "apps/cart.js", "apps/store.js", "apps/settings.js", "boot.js", "../sdk/pad-shim.js",
   "manifest.webmanifest", "vendor/binjgb/binjgb.js", "vendor/binjgb/binjgb.wasm", "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png"];
 
 self.addEventListener("install", function (e) {
