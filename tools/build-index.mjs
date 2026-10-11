@@ -25,6 +25,7 @@ for (const id of ids) {
   apps.push({
     spec: m.spec, id: m.id, name: m.name, glyph: m.glyph, ...(m.buttons ? { buttons: true } : {}), ...(m.icon ? { icon: m.icon } : {}), version: m.version,
     description: m.description, ...(m.i18n ? { i18n: m.i18n } : {}), author: m.author, license: m.license,
+    ...(m.permissions && m.permissions.length ? { permissions: m.permissions } : {}),
     path: `apps/${id}/index.html`,
     sha256: createHash("sha256").update(html).digest("hex"),
     bytes: html.length,

@@ -10,7 +10,7 @@ Design history and open questions: `docs/decisions.md`. Read it before changing 
 ```
 runtime/        the PWA: index.html, core.js (shared LP object: utils, views, sound, home, chin pad), apps/*.js (one file per
                 built-in), boot.js (loaded last), strings.js (zh/en text), lopda.css, platform.js (IndexedDB store, file export),
-                sw.js (offline cache), vendor/binjgb/ (Game Boy core, MIT)
+                sw.js (offline cache), fonts/ (DotGothic16, VT323, OFL), vendor/binjgb/ (Game Boy core, MIT)
 sdk/            MIT. pad-shim.js (PAD bridge), lo-game.js (game framework), LO-GAME.md, lo-3d.js (3D), LO-3D.md, PROMPT.md,
                 dev.html (app harness), template/, template-game/, template-vn/ (visual novel), fonts/ (lopix12, OFL)
 registry/       index.json (generated) + apps/<id>/{manifest.json,index.html,src/ (optional sources)}
@@ -29,8 +29,10 @@ LICENSE NOTICE LICENSING.md CONTRIBUTING.md
   core.js, then apps/*.js, then boot.js. Files talk only through `window.LP`. Tools are Node ESM.
 - Storage: IndexedDB through `platform.js`, a small document store (`doc(path)`, `collection(path)`;
   doc paths have an even number of segments, base `data/users/local`).
-- Built-ins, one file each in runtime/apps/: notes, paint, camera (viewfinder, film, contact card; shares its film
-  helpers as `LP.film`), cutter, cart (GB), store (app store + sandboxed runner), settings. Each registers with
+- Built-ins, one file each in runtime/apps/: notes, camera (viewfinder, film, contact card; shares its film
+  helpers as `LP.film`), cutter, cart (GB), store (app store, preinstalled apps, sandboxed runner, file dialog), settings.
+  Paint and the calculator are community apps (`registry/apps/paint`, `calculator`), installed on first start
+  (`PREINSTALL` in store.js; their files are in sw.js SHELL). The LCD fonts ship in runtime/fonts/ (OFL). Each registers with
   `LP.builtin({id, label, icon, view, open, ...hooks})`; the home screen draws them in registration order
   (the order of the script tags). Hooks are listed at the top of core.js.
 
@@ -73,6 +75,8 @@ node --test                                  # the test suite; must pass
   style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; font-src data:; connect-src 'none'`.
   No network, no eval, no storage APIs, no alert/confirm/prompt, no emoji.
 - Four tones only: ink `#1f2a14`, dark `#4a5a32`, mid `#7d8a58`, paper `#a3ad7e`.
+- Manifest `"permissions"`: `[]` or `["files"]` (`PAD.exportFile` / `PAD.importFile`, each call confirmed by the runtime's
+  own dialog, one file ≤ 2 MB; registry/apps/paint is the example).
 - PAD API: `PAD.load/save/remove` (256 KB per app), `PAD.exit`, `PAD.TONES`, `PAD.spec`,
   `PAD.on("press"|"release", fn)`, `PAD.off`, `PAD.isDown`, `PAD.sfx(name)`,
   `PAD.lang` ("zh" | "en", undefined on runtimes before 0.4.0). Manifest may add `i18n.{zh,en}.{name,description}`.

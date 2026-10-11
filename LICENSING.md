@@ -48,8 +48,12 @@ See `CONTRIBUTING.md`.
   It is not called Fusion Pixel, a Reserved Font Name. Apps built with lo-game.js
   carry a subset with the full OFL notice inside the font block
   (`sdk/fonts/LICENSE-lopix12.txt`; upstream licenses in `sdk/fonts/upstream-licenses/`).
-- Fonts VT323 and DotGothic16 are loaded from Google Fonts (SIL OFL 1.1). If they
-  are ever bundled, their license files must ship with them.
+- LCD fonts: `runtime/fonts/` holds DotGothic16 (Fontworks Inc., The DotGothic16
+  Project Authors) and VT323 (Peter Hull, The VT323 Project Authors), both SIL Open
+  Font License 1.1: the WOFF2 files Google Fonts serves, unchanged (see
+  `runtime/fonts/README.md`). Licence files: `runtime/fonts/OFL-DotGothic16.txt`,
+  `runtime/fonts/OFL-VT323.txt`. Since runtime 0.5.0 they ship with the handheld instead
+  of loading from Google Fonts, so they work offline and no request leaves the device.
 - No GPL code: it would turn the whole project GPL.
 - No game ROMs are bundled or distributed. The cartridge player only plays files
   the user supplies. Do not add ROMs to this repository or to the registry.

@@ -10,8 +10,8 @@ A four-tone handheld that lives on your phone. Hi-PDA's low-fidelity cousin.
 
 Lo-PDA is a Progressive Web App styled as a fictional 1986 PDA with a green LCD
 and hardware buttons on its chin. It comes with a film camera, a strip cutter, a
-pixel paint program, a Game Boy cartridge player and a store of small community
-apps. Everything runs and is saved on the device; nothing needs an account.
+Game Boy cartridge player and a store of small community apps; a pixel paint program
+and a calculator come preinstalled from that store. Everything runs and is saved on the device; nothing needs an account.
 
 ## Shot on Lo-PDA
 
@@ -30,12 +30,18 @@ developed: as a film strip, or as a contact sheet sized for sharing.
 | Built-in | 内置 | What it does |
 |---|---|---|
 | 记事本 | Notes | Plain notes, saved on the device. |
-| 点阵画板 | Pixel paint | 96×96, four tones, import a photo as a dithered picture, export PNG. |
 | 点阵相机 | Film camera | Live dithered viewfinder. Load a roll (8, 12 or 16 frames, standard or fine grain, one of five tints). No previews: develop the full roll into a film strip or a 3:4 contact sheet. Chin buttons after the Game Boy Camera. |
 | 裁片机 | Strip cutter | Slide a developed strip under a fixed window and cut frames, halves or crossings, with optional paper edges. |
 | 卡带机 | Cartridge player | Plays black-and-white Game Boy files you supply, with the chin buttons. No games are included. |
 | 应用商店 | App store | Install, update and run community apps from `registry/`. |
 | 设置 | Settings | Sound, volume, storage, and updating to the newest version. |
+
+| Preinstalled app | 预装 | What it does |
+|---|---|---|
+| 计算器 | Calc | An 8-digit business calculator: + − × ÷, %, ±, memory. Touch or chin buttons. |
+| 点阵画板 | Paint | 96×96, four tones, import a photo as a dithered picture, export PNG. |
+
+Preinstalled apps are ordinary community apps: remove them and they stay removed; the store has them again.
 
 Community apps are single HTML files that run in a sandboxed iframe with no
 network access, pinned by hash when installed. Games can use `sdk/lo-game.js`,

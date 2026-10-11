@@ -3,7 +3,7 @@
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  *
  * One flat table per language. Keys are grouped by screen: home, store, set, upd, notes,
- * paint, cam, cut, cart, run, common. "{name}" in a string is filled from vars.
+ * file, cam, cut, cart, run, common. "{name}" in a string is filled from vars.
  * English is short on purpose: labels on an old device, not a translation.
  * Static text in index.html carries data-i18n (text), data-i18n-ph (placeholder),
  * data-i18n-label (aria-label) or data-i18n-title (title); apply() fills them.
@@ -12,7 +12,7 @@
   "use strict";
   var STR = {
     zh: {
-      "app.notes": "记事本", "app.paint": "点阵画板", "app.camera": "点阵相机", "app.cutter": "裁片机",
+      "app.notes": "记事本", "app.camera": "点阵相机", "app.cutter": "裁片机",
       "app.cart": "卡带机", "app.store": "应用商店", "app.settings": "设置", "app.unnamed": "无名",
       "home.updates": "有更新",
 
@@ -32,6 +32,11 @@
       "store.downloading": "下载中…", "store.retry": "重试", "store.badhash": "校验不通过，文件和目录对不上",
       "store.nostore": "存不进本机", "store.installed": "已安装 {name}。", "store.updated": "已更新 {name}。",
       "store.failed": "安装失败：{msg}", "store.removefail": "卸载失败",
+      "store.perm.files": "可导入、导出文件",
+
+      "file.export": "导出「{name}」？", "file.import": "从文件导入？", "file.ok": "好", "file.pick": "选文件",
+      "file.keys": "A 确定　B 取消", "file.toobig": "文件超过 2 MB，导入不了。", "file.badtype": "这种文件这个程序用不了。",
+      "file.readfail": "文件读不出来。",
 
       "set.title": "设置", "set.sound": "音效", "set.on": "开", "set.off": "关", "set.volume": "音量",
       "set.voldown": "调小音量", "set.volup": "调大音量",
@@ -58,14 +63,6 @@
       "notes.blank": "（空白）", "notes.fresh": "新笔记", "notes.saved": "已保存", "notes.editing": "编辑中…",
       "notes.savedtemp": "已保存（仅本次）", "notes.savefail": "保存失败，再编辑一下会重试", "notes.delfail": "删除失败",
 
-      "paint.title": "点阵画板", "paint.state": "96×96 · 4 色", "paint.canvas": "画布", "paint.colour": "颜色",
-      "paint.ink": "墨", "paint.dark": "深", "paint.light": "浅", "paint.paper": "底色（橡皮）",
-      "paint.brush": "笔刷粗细", "paint.fine": "笔 · 细", "paint.bold": "笔 · 粗", "paint.undo": "撤销",
-      "paint.import": "导入图片", "paint.export": "导出 PNG", "paint.clear": "清空",
-      "paint.noundo": "没有可以撤销的了。", "paint.imported": "已转成 96×96 四色点阵。",
-      "paint.badimg": "这张图读不出来，换一张试试。", "paint.noexport": "这里不能导出，要在 Claude 里打开。",
-      "paint.genfail": "生成图片失败。", "paint.exported": "导出好了。",
-      "paint.unsaved": "96×96 · 未存档", "paint.saved": "96×96 · 已保存", "paint.savefail": "保存失败",
 
       "save.declined": "这次没保存。", "save.busy": "上一个保存窗口还没关。",
       "save.unavailable": "这里不能保存文件，要在 Claude 里打开。", "save.failed": "保存失败（{code}）。",
@@ -137,7 +134,7 @@
     },
 
     en: {
-      "app.notes": "Notes", "app.paint": "Paint", "app.camera": "Camera", "app.cutter": "Cutter",
+      "app.notes": "Notes", "app.camera": "Camera", "app.cutter": "Cutter",
       "app.cart": "Cartridge", "app.store": "Store", "app.settings": "Settings", "app.unnamed": "Untitled",
       "home.updates": "UPDATE",
 
@@ -157,6 +154,11 @@
       "store.downloading": "Loading…", "store.retry": "Retry", "store.badhash": "checksum mismatch",
       "store.nostore": "can't store it here", "store.installed": "{name} installed.", "store.updated": "{name} updated.",
       "store.failed": "Install failed: {msg}", "store.removefail": "Remove failed",
+      "store.perm.files": "Can import and export files",
+
+      "file.export": "Export \u201c{name}\u201d?", "file.import": "Import a file?", "file.ok": "OK", "file.pick": "Choose",
+      "file.keys": "A: OK  B: Cancel", "file.toobig": "That file is over 2 MB.", "file.badtype": "This program can't use that kind of file.",
+      "file.readfail": "Can't read that file.",
 
       "set.title": "Settings", "set.sound": "Sound", "set.on": "On", "set.off": "Off", "set.volume": "Volume",
       "set.voldown": "Volume down", "set.volup": "Volume up",
@@ -183,14 +185,6 @@
       "notes.blank": "(blank)", "notes.fresh": "New", "notes.saved": "Saved", "notes.editing": "Editing…",
       "notes.savedtemp": "Saved (this session)", "notes.savefail": "Not saved. Edit to retry", "notes.delfail": "Delete failed",
 
-      "paint.title": "Paint", "paint.state": "96×96 · 4 tones", "paint.canvas": "Canvas", "paint.colour": "Tone",
-      "paint.ink": "Ink", "paint.dark": "Dark", "paint.light": "Light", "paint.paper": "Paper (eraser)",
-      "paint.brush": "Brush size", "paint.fine": "Pen · fine", "paint.bold": "Pen · bold", "paint.undo": "Undo",
-      "paint.import": "Import", "paint.export": "Export PNG", "paint.clear": "Clear",
-      "paint.noundo": "Nothing to undo.", "paint.imported": "Turned into 96×96, four tones.",
-      "paint.badimg": "Can't read that image. Try another.", "paint.noexport": "Can't export here.",
-      "paint.genfail": "Couldn't make the image.", "paint.exported": "Exported.",
-      "paint.unsaved": "96×96 · not saved", "paint.saved": "96×96 · saved", "paint.savefail": "Save failed",
 
       "save.declined": "Not saved.", "save.busy": "The last save sheet is still open.",
       "save.unavailable": "Can't save files here.", "save.failed": "Save failed ({code}).",

@@ -1,5 +1,6 @@
 /*
- * Lo-PDA built-in: the app store (community registry) and the sandboxed runner.
+ * Lo-PDA built-in: the app store (community registry), the preinstalled apps, and the sandboxed runner
+ * with its PAD bridge (storage, sounds, buttons, and files behind the runtime's own confirm dialog).
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  */
 (function(){
@@ -9,6 +10,12 @@ var REGISTRY = new URL("../registry/", location.href).href;
 var own=LP.own, toast=LP.toast, put=LP.put, sfx=LP.sfx, show=LP.show, showPad=LP.showPad, sha256hex=LP.sha256hex,
   validIcon=LP.validIcon, fillTile=LP.fillTile, appName=LP.appName, appDesc=LP.appDesc, renderHome=LP.renderHome,
   upsert=LP.upsert, dropLocal=LP.dropLocal, pending=LP.pending, APP_SFX=LP.APP_SFX;
+/* community apps that come installed, in this order on the home screen after the built-ins (docs/design/pad-files.md) */
+var PREINSTALL=["calculator","paint"];
+/* capabilities a manifest may ask for (SPEC.md section 2) */
+var PERMISSIONS=["files"];
+function validPerms(x){ return Array.isArray(x) ? PERMISSIONS.filter(function(p){ return x.indexOf(p)>=0; }) : []; }
+function allowed(a,perm){ return !!(a && a.permissions && a.permissions.indexOf(perm)>=0); }
 
 /* ---------- store: the community registry ---------- */
 function validI18n(x){
@@ -34,6 +41,7 @@ function loadRegistry(force){
       if(JSON.stringify(a.icon)!==JSON.stringify(icon) || JSON.stringify(a.i18n)!==JSON.stringify(i18n)){ a.icon=icon; a.i18n=i18n; saveApp(a); }
     });
     renderStore(); if(!$("v-home").hidden) renderHome();
+    preinstall();
   }).catch(function(e){
     $("store-state").textContent=tr("store.offline");
     if(!$("v-store").hidden) toast(tr("store.cantreach",{msg:e.message}));
@@ -56,6 +64,7 @@ function renderStore(){
     var d=document.createElement("span"); d.textContent=appDesc(r);
     var m=document.createElement("small"); m.textContent=(r.author||tr("store.anon"))+" · "+(r.license||"")+" · "+Math.max(1,Math.round((r.bytes||0)/1024))+" KB";
     body.appendChild(t); body.appendChild(d); body.appendChild(m);
+    validPerms(r.permissions).forEach(function(p){ var x=document.createElement("small"); x.textContent=tr("store.perm."+p); body.appendChild(x); });
     var a=installedOf(r.id), btn=document.createElement("button"); btn.type="button";
     if(!a){ btn.className="btn"; btn.textContent=tr("store.install"); }
     else if(a.sha256!==r.sha256){ btn.className="btn"; btn.textContent=tr("store.update"); }
@@ -67,7 +76,16 @@ function renderStore(){
 /* install exactly the file the registry describes: the hash must match */
 function install(r,btn){
   btn.disabled=true; btn.textContent=tr("store.downloading");
-  fetch(new URL(r.path,REGISTRY).href,{cache:"no-cache"}).then(function(res){
+  fetchApp(r).then(function(prev){
+    toast(tr(prev?"store.updated":"store.installed",{name:appName(r)})); sfx("ok");
+    renderStore();
+  }).catch(function(e){
+    toast(tr("store.failed",{msg:e.message})); sfx("err"); btn.disabled=false; btn.textContent=tr("store.retry");
+  });
+}
+/* download, verify and store one registry entry; resolves with the version it replaced (or null) */
+function fetchApp(r,extra){
+  return fetch(new URL(r.path,REGISTRY).href,{cache:"no-cache"}).then(function(res){
     if(!res.ok) throw new Error("HTTP "+res.status);
     return res.arrayBuffer();
   }).then(function(buf){
@@ -78,16 +96,44 @@ function install(r,btn){
   }).then(function(html){
     var prev=installedOf(r.id);
     var app={id:r.id, name:r.name, glyph:r.glyph, icon: validIcon(r.icon) ? r.icon : undefined, i18n: validI18n(r.i18n), version:r.version, author:r.author, license:r.license,
-      spec:r.spec||"lopda/0", buttons: r.spec==="lopda/1" && r.buttons===true,
+      spec:r.spec||"lopda/0", buttons: r.spec==="lopda/1" && r.buttons===true, permissions: r.spec==="lopda/1" ? validPerms(r.permissions) : [],
       sha256:r.sha256, installed: prev ? prev.installed : Date.now(), updated: Date.now(), html:html};
+    /* a preinstalled app keeps its place on the home screen through updates */
+    var pre=(extra && extra.preinstalled) || (prev && prev.preinstalled);
+    if(pre) app.preinstalled=pre;
     return saveApp(app).then(function(ok){
       if(!ok) throw new Error(tr("store.nostore"));
-      toast(tr(prev?"store.updated":"store.installed",{name:appName(r)})); sfx("ok");
-      renderStore();
+      return prev;
     });
-  }).catch(function(e){
-    toast(tr("store.failed",{msg:e.message})); sfx("err"); btn.disabled=false; btn.textContent=tr("store.retry");
   });
+}
+
+/* ---------- preinstalled apps ----------
+   On first start, and whenever PREINSTALL gains an id, install those apps from the registry quietly, exactly like
+   the store would (hash-checked). The ids already handled are remembered, so an app the player removes stays removed.
+   sw.js keeps their files in the offline cache, so this also works when the first start has no network. */
+var preBusy=false;
+function preinstall(){
+  if(preBusy || !S.db || !S.registry) return;
+  preBusy=true;
+  var ref=S.db.doc("data/users/local/preinstall"), done;
+  ref.get().then(function(sn){
+    done=(sn.exists && own(sn.data()).ids) || [];
+    var todo=PREINSTALL.filter(function(id){ return done.indexOf(id)<0; });
+    if(!todo.length) return;
+    return S.refs.apps.get().then(function(q){
+      var have={}; q.docs.forEach(function(d){ have[d.id]=true; });
+      /* one at a time, in list order, so the home screen order is the list order */
+      return todo.reduce(function(chain,id){
+        return chain.then(function(){
+          var r=null; S.registry.apps.forEach(function(x){ if(x.id===id) r=x; });
+          if(have[id]){ done.push(id); return; }            /* the player installed it already */
+          if(!r) return;                                     /* not in this registry: try again later */
+          return fetchApp(r,{preinstalled:PREINSTALL.indexOf(id)+1}).then(function(){ done.push(id); }, function(){});
+        });
+      },Promise.resolve()).then(function(){ return put(ref,{ids:done}); }).then(function(){ renderStore(); if(!$("v-home").hidden) renderHome(); });
+    });
+  }).catch(function(){}).then(function(){ preBusy=false; });
 }
 
 function saveApp(app){
@@ -123,6 +169,7 @@ function freshRunFrame(){
   old.parentNode.replaceChild(f,old);
 }
 function runApp(a){
+  closeAsk(false);
   S.running=a;
   $("run-title").textContent=appName(a)+" · v"+(a.version||"?");
   LP.resetConfirm("run-del-wrap","run-del",tr("run.remove"),function(){ if(S.running){ var n=appName(S.running); deleteApp(S.running.id); show("home"); toast(tr("run.removed",{name:n})); } });
@@ -172,6 +219,8 @@ window.addEventListener("message",function(e){
     $("run-err").hidden=false;
   } else if(d.op==="exit"){
     show("home");
+  } else if(d.op==="file"){
+    fileRequest(S.running,f.contentWindow,d);
   } else if(d.op==="sfx"){
     if(APP_SFX.indexOf(d.name)<0) return;
     var now=Date.now(); if(now-sfxWindow.t>1000){ sfxWindow.t=now; sfxWindow.n=0; }
@@ -179,11 +228,162 @@ window.addEventListener("message",function(e){
   }
 });
 var sfxWindow={t:0,n:0};
+
+/* ---------- files: PAD.exportFile / PAD.importFile ----------
+   Only apps whose manifest has "permissions": ["files"]. Every request opens the runtime's own dialog on the
+   screen; its OK button acts on release (pointerup) or from a real click, so the share sheet and the file picker
+   are opened by a tap on the outer page (iPhone Safari would refuse a gesture that started inside the sandbox).
+   The chin pad works too: a fresh A press confirms, B cancels. One file at most 2 MB. */
+var FILE_MAX=2*1024*1024, ask=null;
+function fileReply(req,v,error){
+  /* the app may have closed meanwhile: answer only the frame that asked */
+  if(S.running!==req.app || $("run-frame").contentWindow!==req.win) return;
+  req.win.postMessage(error ? {pad:1,op:"filed",i:req.i,error:error} : {pad:1,op:"filed",i:req.i,v:v},"*");
+}
+function dataBlob(data,type){
+  var m=/^data:([^,;]*)((?:;[^,;]*)*?)(;base64)?,/.exec(data);
+  if(!m) return new Blob([data],{type:type||"text/plain"});
+  var body=data.slice(m[0].length);
+  if(!m[3]) return new Blob([decodeURIComponent(body)],{type:type||m[1]});
+  var bin=atob(body), u8=new Uint8Array(bin.length);
+  for(var i=0;i<bin.length;i++) u8[i]=bin.charCodeAt(i);
+  return new Blob([u8],{type:type||m[1]});
+}
+/* a file name from an app: no folders, no control characters, no emoji, not too long */
+function cleanName(n){ var x=LP.noEmoji(n).replace(/[\/\\:*?"<>|\u0000-\u001f]/g,"").replace(/^\.+/,"").slice(-64); return x||"lopda.txt"; }
+function fileRequest(app,win,d){
+  var req={app:app, win:win, i:d.i, kind:d.kind};
+  if(!allowed(app,"files")){ fileReply(req,null,'this app has no "files" permission'); return; }
+  if(d.kind==="export"){
+    if(typeof d.data!=="string" || typeof d.name!=="string"){ fileReply(req,null,"bad request"); return; }
+    try{ req.blob=dataBlob(d.data,typeof d.type==="string"?d.type:""); }catch(e){ fileReply(req,null,"bad data"); return; }
+    if(req.blob.size>FILE_MAX){ fileReply(req,null,"file too large (2 MB at most)"); return; }
+    req.name=cleanName(d.name);
+  } else if(d.kind==="import"){
+    req.accept=Array.isArray(d.accept) ? d.accept.filter(function(a){ return typeof a==="string" && /^[\w.+\/*-]{1,64}$/.test(a); }).slice(0,16) : [];
+  } else { fileReply(req,null,"bad request"); return; }
+  if(ask) closeAsk(true);
+  openAsk(req);
+}
+function openAsk(req){
+  ask=req;
+  /* the app lets go of every button: the dialog has the pad now */
+  req.win.postMessage({pad:1,op:"release-all"},"*");
+  var scrim=document.createElement("div"); scrim.className="file-ask"; scrim.id="file-ask";
+  var box=document.createElement("div"); box.className="box"; box.setAttribute("role","dialog");
+  var p=document.createElement("p"); p.textContent=req.kind==="export" ? tr("file.export",{name:req.name}) : tr("file.import");
+  var row=document.createElement("div"); row.className="row";
+  var ok=document.createElement("button"); ok.className="btn"; ok.type="button"; ok.id="file-ok"; ok.textContent=tr(req.kind==="export"?"file.ok":"file.pick");
+  var no=document.createElement("button"); no.className="btn ghost"; no.type="button"; no.id="file-no"; no.textContent=tr("common.cancel");
+  row.appendChild(ok); row.appendChild(no); box.appendChild(p); box.appendChild(row);
+  if(S.running && S.running.buttons){ var k=document.createElement("small"); k.textContent=tr("file.keys"); box.appendChild(k); }
+  scrim.appendChild(box); $("screen").appendChild(scrim);
+  req.el=scrim;
+  onRelease(ok,function(){ askOk(); });
+  onRelease(no,function(){ closeAsk(true); });
+}
+/* act when the finger lifts off the button it went down on, or on a keyboard click */
+function onRelease(btn,fn){
+  var down=false;
+  btn.addEventListener("pointerdown",function(){ down=true; });
+  btn.addEventListener("pointerleave",function(){ down=false; });
+  btn.addEventListener("pointercancel",function(){ down=false; });
+  btn.addEventListener("pointerup",function(){ if(down){ down=false; fn(); } });
+  btn.addEventListener("click",function(e){ if(e.detail===0) fn(); });
+}
+/* answer: true sends "cancelled" / null; false closes without an answer (the app is gone) */
+function closeAsk(answer){
+  var req=ask; if(!req) return;
+  ask=null;
+  /* the tap that closed it may still turn into a click: keep the empty scrim a moment so it can't reach the app */
+  var el=req.el; el.textContent=""; setTimeout(function(){ el.remove(); },400);
+  if(answer) fileReply(req,req.kind==="export"?"cancelled":null);
+}
+function askOk(){
+  var req=ask; if(!req) return;
+  if(req.kind==="export"){
+    closeAsk(false);
+    LP.S.downloads.save({filename:req.name, data:req.blob}).then(function(r){
+      fileReply(req,r && r.status==="saved" ? "saved" : "cancelled");
+    }).catch(function(e){
+      if(!(e && e.code==="declined")) toast(LP.saveErr(e));
+      fileReply(req,"cancelled");
+    });
+    return;
+  }
+  /* the picker must open inside this tap */
+  var input=document.createElement("input"); input.type="file"; input.className="file-in";
+  if(req.accept.length) input.accept=req.accept.join(",");
+  var settled=false, finish=function(v){ if(settled) return; settled=true; input.remove(); fileReply(req,v); };
+  input.addEventListener("change",function(){
+    var f=input.files && input.files[0];
+    if(!f){ finish(null); return; }
+    readPicked(f,req.accept).then(finish,function(e){ toast(tr(e && e.message==="toobig"?"file.toobig":e && e.message==="badtype"?"file.badtype":"file.readfail")); sfx("err"); finish(null); });
+  });
+  input.addEventListener("cancel",function(){ finish(null); });
+  $("screen").appendChild(input);
+  closeAsk(false);
+  input.click();
+}
+function accepts(accept,f){
+  if(!accept.length) return true;
+  var type=(f.type||"").toLowerCase(), name=(f.name||"").toLowerCase();
+  return accept.some(function(a){
+    a=a.toLowerCase();
+    if(a.charAt(0)===".") return name.slice(-a.length)===a;
+    if(/\/\*$/.test(a)) return type.indexOf(a.slice(0,-1))===0;
+    return type===a;
+  });
+}
+/* -> {name, type, data}: text as a string, anything else as a data: URL */
+function readPicked(f,accept){
+  if(!accepts(accept,f)) return Promise.reject(new Error("badtype"));
+  var big=f.size>FILE_MAX;
+  /* a phone photo is often over 2 MB: pictures are scaled down to fit instead of refused */
+  if(big && /^image\/(png|jpeg|webp|gif|heic|heif)$/.test(f.type)) return shrinkImage(f);
+  if(big) return Promise.reject(new Error("toobig"));
+  return new Promise(function(resolve,reject){
+    var text=/^text\/|^application\/json$/.test(f.type), r=new FileReader();
+    r.onload=function(){ resolve({name:f.name, type:f.type, data:r.result}); };
+    r.onerror=function(){ reject(new Error("read")); };
+    if(text) r.readAsText(f); else r.readAsDataURL(f);
+  });
+}
+function shrinkImage(f){
+  return new Promise(function(resolve,reject){
+    var url=URL.createObjectURL(f), img=new Image();
+    img.onerror=function(){ URL.revokeObjectURL(url); reject(new Error("read")); };
+    img.onload=function(){
+      URL.revokeObjectURL(url);
+      var type=f.type==="image/png"?"image/png":"image/jpeg", side=2048;
+      var attempt=function(){
+        var k=Math.min(1,side/Math.max(img.naturalWidth,img.naturalHeight));
+        var c=document.createElement("canvas"); c.width=Math.max(1,Math.round(img.naturalWidth*k)); c.height=Math.max(1,Math.round(img.naturalHeight*k));
+        /* an <img> onto a canvas, never a canvas onto a canvas (Safari swaps red and blue on that path) */
+        c.getContext("2d").drawImage(img,0,0,c.width,c.height);
+        var url2=c.toDataURL(type,0.9), bytes=Math.floor((url2.length-url2.indexOf(",")-1)*3/4);
+        if(bytes<=FILE_MAX) resolve({name:f.name.replace(/\.(heic|heif)$/i,".jpg"), type:type, data:url2});
+        else if(side>256){ side=side/2; attempt(); }
+        else reject(new Error("toobig"));
+      };
+      attempt();
+    };
+    img.src=url;
+  });
+}
 $("store-refresh").onclick=function(){ loadRegistry(true); };
 
 LP.runApp=runApp;
 LP.onData("apps",function(){ if(!$("v-store").hidden) renderStore(); });
 /* the chin pad reaches a running app only when its manifest asks for buttons */
+/* while the file dialog is open it has the pad: a fresh A press confirms on release, B cancels */
+var askA=false;
+LP.padRoute("file",function(b,down){
+  if(!ask){ askA=false; return false; }
+  if(b==="a"){ if(down) askA=true; else if(askA){ askA=false; askOk(); } }
+  else if(b==="b" && !down) closeAsk(true);
+  return true;
+});
 LP.padRoute("run",function(b,down){
   var f=$("run-frame");
   if(S.running && S.running.buttons && f.contentWindow) f.contentWindow.postMessage({pad:1,op:"button",b:b,down:down},"*");
@@ -196,7 +396,7 @@ LP.builtin({id:"store", label:"app.store", icon:"store", view:"store",
   ready:function(){ loadRegistry(); }});
 /* the runner owns the run view but has no icon of its own: apps appear on the home screen */
 LP.builtin({id:"run", view:"run", keepPad:true,
-  leave:function(){ $("run-frame").srcdoc=""; S.running=null; },
+  leave:function(){ closeAsk(false); $("run-frame").srcdoc=""; S.running=null; },
   lang:function(){
     /* apps read PAD.lang once at start: a running app is started again in the new language */
     if(S.running && !$("v-run").hidden) runApp(S.running);
