@@ -22,7 +22,6 @@ LP.renderHome();
     S.refs.notes=db.doc(base+"/notes").collection("items");
     S.refs.kv=db.doc(base+"/appdata").collection("items");
     S.refs.code=db.doc(base+"/code").collection("items");
-    S.refs.paint=db.doc(base+"/paint");
     S.refs.film=db.doc(base+"/film");
     S.refs.frames=db.doc(base+"/frames").collection("items");
     S.refs.settings=db.doc(base+"/settings");

@@ -4,6 +4,44 @@
   "apps": [
     {
       "spec": "lopda/1",
+      "id": "calculator",
+      "name": "计算器",
+      "glyph": "算",
+      "buttons": true,
+      "icon": [
+        "................",
+        "...0000000000...",
+        "...0111111110...",
+        "...0133333310...",
+        "...0133333310...",
+        "...0111111110...",
+        "...0121212120...",
+        "...0111111110...",
+        "...0121212120...",
+        "...0111111110...",
+        "...0121212120...",
+        "...0111111110...",
+        "...0121211120...",
+        "...0111111110...",
+        "...0000000000...",
+        "................"
+      ],
+      "version": "1.0.0",
+      "description": "八位数商务计算器，连续运算、百分比和记忆键。",
+      "i18n": {
+        "en": {
+          "name": "Calc",
+          "description": "Eight-digit business calculator with chain math, percent and memory keys."
+        }
+      },
+      "author": "Haowei Wu",
+      "license": "MIT",
+      "path": "apps/calculator/index.html",
+      "sha256": "e8fb0ad0928312b7552e3794eded6e8516506d0b1285d04383241411bd1dceaf",
+      "bytes": 12813
+    },
+    {
+      "spec": "lopda/1",
       "id": "gomoku",
       "name": "五子棋",
       "glyph": "棋",
@@ -80,6 +118,46 @@
       "path": "apps/last-letter/index.html",
       "sha256": "4641e4fe2a1d0fb2deef6ea52802a7910518da44e5cba527020a2d142e72e7e2",
       "bytes": 53726
+    },
+    {
+      "spec": "lopda/1",
+      "id": "paint",
+      "name": "点阵画板",
+      "glyph": "画",
+      "icon": [
+        "................",
+        "............000.",
+        "...........0330.",
+        "..........03330.",
+        ".........033300.",
+        "........033300..",
+        ".......03330....",
+        "......03330.....",
+        ".....033300.....",
+        "....011000......",
+        "...011110.......",
+        "..0111110.......",
+        "..011110........",
+        ".0000000........",
+        ".0000...........",
+        "................"
+      ],
+      "version": "1.0.0",
+      "description": "96×96 四色点阵画板：撤销、清空，能导入图片转成点阵，也能导出 PNG。",
+      "i18n": {
+        "en": {
+          "name": "Paint",
+          "description": "96×96 four-tone pixel paint. Import a picture, export PNG."
+        }
+      },
+      "author": "Haowei Wu",
+      "license": "MIT",
+      "permissions": [
+        "files"
+      ],
+      "path": "apps/paint/index.html",
+      "sha256": "4fedbcc143ad2ddf629277c2d49e65fa06f9912b4552ef72807b0d9d0e0a6097",
+      "bytes": 11344
     },
     {
       "spec": "lopda/1",

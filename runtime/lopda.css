@@ -122,15 +122,6 @@ textarea::placeholder{color:var(--ink-2)}
 .link-boot .bar8{letter-spacing:.05em;white-space:pre-wrap}   /* on narrow screens the bar drops to its own line instead of being cut off */
 .link-boot .skip{margin-top:14px;font-size:16px;color:var(--ink-2)}
 .finder .dev{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:var(--f-pix);font-size:20px;background:var(--lcd);letter-spacing:.1em}
-/* paint */
-.paint{display:flex;flex-direction:column;min-height:100%}
-.paint-stage{flex:1;display:flex;align-items:center;justify-content:center;padding:10px 12px}
-#paint-cv{width:100%;max-width:min(380px,52vh);aspect-ratio:1;image-rendering:pixelated;image-rendering:crisp-edges;border:3px solid var(--ink);box-shadow:4px 4px 0 var(--ink);touch-action:none;background:var(--lcd);display:block}
-.paint-tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:center;padding:0 10px 10px}
-.paint-tools .btn{padding:8px 12px;font-size:14px}
-.sw{width:34px;height:34px;border:3px solid var(--ink);padding:0;cursor:pointer}
-.sw[aria-checked="true"]{outline:3px solid var(--ink);outline-offset:2px}
-.sw-0{background:var(--ink)} .sw-1{background:var(--ink-2)} .sw-2{background:var(--lcd-3)} .sw-3{background:var(--lcd)}
 .file-in{position:absolute;left:-9999px;top:0;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none}
 .toast{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);background:var(--ink);color:var(--lcd);padding:6px 12px;font-size:14px;z-index:5;max-width:90%;text-align:center}
 @media (prefers-reduced-motion: reduce){.sig i,.cursor{animation:none}}
@@ -149,6 +140,13 @@ textarea::placeholder{color:var(--ink-2)}
 /* one-tap save sheet (iOS needs a fresh tap for the share sheet) */
 .save-sheet{position:absolute;left:12px;right:12px;bottom:12px;z-index:6;background:var(--lcd-2);border:3px solid var(--ink);box-shadow:4px 4px 0 var(--ink);padding:12px;display:flex;flex-direction:column;gap:10px}
 .save-sheet p{margin:0;font-size:14px;word-break:break-all}
+/* the runtime's file dialog over a running app: the scrim (no colour of its own) keeps taps off the app */
+.file-ask{position:absolute;inset:0;z-index:7;display:flex;align-items:center;justify-content:center;padding:16px}
+.file-ask .box{width:100%;max-width:300px;background:var(--lcd-2);border:3px solid var(--ink);box-shadow:4px 4px 0 var(--ink);padding:14px;display:flex;flex-direction:column;gap:12px}
+.file-ask p{margin:0;font-size:16px;line-height:1.4;word-break:break-all}
+.file-ask .row{display:flex;gap:10px}
+.file-ask .btn{flex:1}
+.file-ask small{font-family:var(--f-pix);font-size:14px;color:var(--ink-2)}
 /* live viewfinder */
 .finder .live-tag{position:absolute;left:10px;top:8px;font-family:var(--f-pix);font-size:16px;background:var(--ink);color:var(--lcd);padding:0 4px;letter-spacing:.1em}
 .finder{cursor:pointer}

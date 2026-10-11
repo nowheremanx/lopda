@@ -154,3 +154,30 @@ test("the shim, lo-game and the checker agree on buttons and sounds", () => {
   assert.deepEqual(list(read("tools/check-app.mjs"), "SOUNDS"), [...PAD.SOUNDS]);
   assert.deepEqual(list(read("sdk/lo-game.js"), "BUTTONS"), [...PAD.BUTTONS]);
 });
+
+test("exportFile and importFile ask the runtime and settle from its matching reply", async () => {
+  const a = app();
+  const ex = a.PAD.exportFile({ name: "a.png", type: "image/png", data: "data:image/png;base64,AAAA" });
+  const im = a.PAD.importFile({ accept: ["image/*", 7] });
+  const [e, i] = a.posted();
+  assert.deepEqual(e, { kind: "export", name: "a.png", type: "image/png", data: "data:image/png;base64,AAAA", op: "file", i: e.i, pad: 1 });
+  assert.deepEqual(i, { kind: "import", accept: ["image/*"], op: "file", i: i.i, pad: 1 });
+  a.fromRuntime({ pad: 1, op: "filed", i: i.i, v: null }, {});            /* not from the parent: ignored */
+  a.fromRuntime({ pad: 1, op: "filed", i: i.i, v: { name: "b.png", type: "image/png", data: "data:," } });
+  a.fromRuntime({ pad: 1, op: "filed", i: e.i, v: "cancelled" });
+  assert.equal(await ex, "cancelled");
+  assert.deepEqual(JSON.parse(JSON.stringify(await im)), { name: "b.png", type: "image/png", data: "data:," });
+});
+
+test("file calls reject on the runtime's refusal, bad arguments and files over 2 MB", async () => {
+  const a = app();
+  const p = a.PAD.importFile();
+  a.fromRuntime({ pad: 1, op: "filed", i: a.posted()[0].i, error: 'this app has no "files" permission' });
+  await assert.rejects(p, /permission/);
+  await assert.rejects(a.PAD.exportFile({ name: "a.txt" }), /needs \{name, type, data\}/);
+  await assert.rejects(a.PAD.exportFile({ name: "a.txt", type: "text/plain", data: "x".repeat(2 * 1024 * 1024 + 1) }), /2 MB/);
+  /* base64 counts by the bytes it decodes to: 2.6 M characters is under 2 MB */
+  const big = "data:image/png;base64," + "A".repeat(2.6 * 1024 * 1024);
+  a.PAD.exportFile({ name: "b.png", type: "image/png", data: big });
+  assert.equal(a.posted().length, 2);
+});

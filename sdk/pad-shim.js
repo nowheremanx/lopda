@@ -9,12 +9,15 @@
  * so PAD.lang is undefined there and apps fall back to their own default.
  *
  * Messages app -> runtime:  {pad:1, op:"save"|"load"|"remove"|"error"|"exit"|"sfx", ...}
+ *                           {pad:1, op:"file", i, kind:"export", name, type, data}   (needs "files")
+ *                           {pad:1, op:"file", i, kind:"import", accept}
  * Messages runtime -> app:  {pad:1, op:"loaded", i, v}
+ *                           {pad:1, op:"filed", i, v}  or  {pad:1, op:"filed", i, error}
  *                           {pad:1, op:"button", b, down}   (chin buttons, lopda/1)
  *                           {pad:1, op:"release-all"}
  */
 function lopdaPadShim(opts) {
-  var seq = 0, waiting = {};
+  var seq = 0, waiting = {}, filing = {};
   var post = function (msg) { msg.pad = 1; parent.postMessage(msg, "*"); };
   var TONES = ["#1f2a14", "#4a5a32", "#7d8a58", "#a3ad7e"];
   var LANG = opts && (opts.lang === "zh" || opts.lang === "en") ? opts.lang : undefined;
@@ -35,6 +38,22 @@ function lopdaPadShim(opts) {
   };
   var releaseAll = function () { BUTTONS.forEach(function (b) { setButton(b, false); }); };
 
+  /* Files ("permissions": ["files"]): the runtime asks the player on its own dialog every time,
+     then opens the share sheet or the file picker. One file at most 2 MB. */
+  var FILE_MAX = 2 * 1024 * 1024;
+  var bytesOf = function (data) {
+    var m = /^data:[^,]*?(;base64)?,/.exec(data);
+    if (!m) return unescape(encodeURIComponent(data)).length;   /* text: its UTF-8 size */
+    var body = data.length - m[0].length;
+    return m[1] ? Math.floor(body * 3 / 4) : body;
+  };
+  var fileOp = function (msg) {
+    return new Promise(function (resolve, reject) {
+      var i = ++seq; filing[i] = { resolve: resolve, reject: reject };
+      msg.op = "file"; msg.i = i; post(msg);
+    });
+  };
+
   window.PAD = Object.freeze({
     spec: "lopda/1",
     lang: LANG,
@@ -53,12 +72,28 @@ function lopdaPadShim(opts) {
     sfx: function (name) { if (SOUNDS.indexOf(name) >= 0) post({ op: "sfx", name: name }); },
     on: function (type, fn) { if (on[type] && typeof fn === "function") on[type].push(fn); },
     off: function (type, fn) { if (on[type]) on[type] = on[type].filter(function (f) { return f !== fn; }); },
-    isDown: function (b) { return !!held[b]; }
+    isDown: function (b) { return !!held[b]; },
+    /* -> Promise<"saved" | "cancelled">. data: a data: URL (images) or a string (text). */
+    exportFile: function (o) {
+      o = o || {};
+      if (typeof o.name !== "string" || !o.name || typeof o.data !== "string") return Promise.reject(new Error("PAD.exportFile needs {name, type, data}"));
+      if (bytesOf(o.data) > FILE_MAX) return Promise.reject(new Error("PAD.exportFile: a file is at most 2 MB"));
+      return fileOp({ kind: "export", name: o.name, type: typeof o.type === "string" ? o.type : "", data: o.data });
+    },
+    /* -> Promise<{name, type, data} | null>; null when the player cancels. accept: MIME types such as "image/*" */
+    importFile: function (o) {
+      var acc = o && Array.isArray(o.accept) ? o.accept.filter(function (a) { return typeof a === "string"; }) : [];
+      return fileOp({ kind: "import", accept: acc });
+    }
   });
 
   addEventListener("message", function (e) {
     var d = e.data; if (!d || !d.pad || e.source !== parent) return;
     if (d.op === "loaded" && waiting[d.i]) { waiting[d.i](d.v); delete waiting[d.i]; }
+    else if (d.op === "filed" && filing[d.i]) {
+      var f = filing[d.i]; delete filing[d.i];
+      if (d.error) f.reject(new Error(String(d.error))); else f.resolve(d.v);
+    }
     else if (d.op === "button") setButton(String(d.b), !!d.down);
     else if (d.op === "release-all") releaseAll();
   });
