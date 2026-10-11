@@ -1,9 +1,11 @@
 /* Cutscenes: a clock of their own (tween, after, every, wait, flash, shake, sfx), like Battle.T in
    src/battle.js, so a scene the player has seen before can be cut short.
-     Cut.play(key, fn)  runs fn(Cut.T). The first time it plays in full. After that A cuts it short:
-                        every pending tween and timer finishes at once, new ones finish as they are made,
-                        and a dialogue that is open closes. One press of A is the whole skip.
-     Cut.say(pages)     the dialogue inside a cutscene: [{name, say: [lines]}]; it resolves at once while skipping.
+     Cut.play(key, fn)  runs fn(Cut.T). The first time it plays in full. After that A fast-forwards the motion:
+                        every pending tween and timer finishes at once, and new ones finish as they are made,
+                        up to the next line of dialogue.
+     Cut.say(pages)     the dialogue inside a cutscene: [{name, say: [lines]}]. It is always shown and ends the
+                        fast-forward. A also turns the page, so a skip that swallowed the dialogue went by with
+                        the first press: the owner pressed A to read the boss's entrance and lost the story.
    lo-game only updates the top scene, so while a dialogue is open the map scene's update does not run.
    That is why the skip is watched by a lo-game timer (those run under overlays), and the clock itself is stepped
    by the map scene: Cut.step(dt). Keys of cutscenes seen go into Cut.seen; main.js saves them with the game. */
@@ -75,12 +77,10 @@ var Cut = (function () {
     tweens = []; timers = [];
     tw.forEach(settle);
     tm.forEach(function (t) { if (!t.dead && !t.every) t.fn(); });
-    /* an open dialogue closes; its Cut.say resolves and the script runs on, skipping */
-    while (open > 0) { open--; game.pop(); }
   }
 
   self.say = function (pages, o) {
-    if (skip) return Promise.resolve();
+    skip = false;
     open++;
     return game.say(pages, o || {}).then(function () { if (open > 0) open--; });
   };
@@ -97,7 +97,8 @@ var Cut = (function () {
     var again = !!self.seen[key], stop = null;
     self.seen[key] = true;
     skip = false; playing = true;
-    if (again) stop = game.every(1 / 60, function () { if (!skip && game.ok()) cut(); });
+    /* only while no dialogue is open: there A turns the page */
+    if (again) stop = game.every(1 / 60, function () { if (!skip && open === 0 && game.ok()) cut(); });
     try { await fn(T); }
     finally {
       if (stop) stop();
