@@ -56,6 +56,67 @@ var PLAY = (function () {
     return { cmd: "spell", spell: c };
   }
 
+  /* any fight on a map: drink a pill when low, defend when the boss gathers, otherwise every spell in turn */
+  function mapFightChoice(S) {
+    var h = S.b.hero, st = Rules.stats(h.level);
+    if (S.b.boss) return bossChoice(S);
+    if (h.hp < st.maxHp * 0.35 && h.items.pill > 0) return { cmd: "item" };
+    return cycleChoice(S);
+  }
+  var D4 = [["up", 0, -1], ["down", 0, 1], ["left", -1, 0], ["right", 1, 0]];
+  /* breadth-first walk over the map's tiles: the first button of a way to a tile that goal(c, r) accepts,
+     never through the reach of a fight (one tile round an enemy) that is not the one we want */
+  function firstStep(goal, forbid) {
+    var seen = {}, q = [[hero.c, hero.r, null]];
+    seen[hero.c + "," + hero.r] = 1;
+    while (q.length) {
+      var p = q.shift();
+      if (goal(p[0], p[1])) return p[2];
+      for (var i = 0; i < 4; i++) {
+        var c = p[0] + D4[i][1], r = p[1] + D4[i][2];
+        if (seen[c + "," + r] || blocked(c, r) || forbid(c, r)) continue;
+        seen[c + "," + r] = 1;
+        q.push([c, r, p[2] || D4[i][0]]);
+      }
+    }
+    return null;
+  }
+  /* a map scene: walk to the next fight (they come in order), then to the exit: the gate, the stairs, or the boss row.
+     Done when the map changes, or ten seconds into the boss fight. */
+  function mapScene(id) {
+    return {
+      frames: 12000, map: true, start: function () { ZT.goto(id, { entered: true }); },
+      policy: function (f, sc) {
+        if (overlay()) return tap(f, "a");
+        if (where === "battle") {
+          var S = Battle.S();
+          /* the boss fight ends the walk on the top: ten seconds of it are played, then done */
+          if (S && S.b.boss) { sc.boss = sc.boss == null ? f : sc.boss; if (f - sc.boss > 600) sc.done = true; }
+          if (S && !S.menu) S.pick = null;
+          return battlePolicy(mapFightChoice)(f);
+        }
+        if (busy || !hero || !cur) return [];
+        if (sc.id == null) sc.id = cur.id;
+        if (cur.id !== sc.id) { sc.done = true; return []; }
+        var rows = cur.rows, exit = null;
+        foes.sort(function (a, b) { return a.k - b.k; });
+        if (foes.length) {
+          var want = foes[0], near = function (e) { return function (c, r) { return Math.max(Math.abs(e.c - c), Math.abs(e.r - r)) <= 1; }; };
+          var d = firstStep(near(want), function (c, r) { return foes.some(function (e) { return e !== want && near(e)(c, r); }); });
+          return d ? [d] : [];
+        }
+        if (id === "top") {
+          var north = firstStep(function (c, r) { return r <= STORY.top.bossRow; }, function () { return false; });
+          return north ? [north] : [];
+        }
+        rows.forEach(function (row, r) { var c = row.indexOf(id === "road" ? "G" : "^"); if (c >= 0) exit = { c: c, r: r }; });
+        if (hero.c === exit.c && hero.r === exit.r + 1) return ["up"];
+        var step = firstStep(function (c, r) { return c === exit.c && r === exit.r + 1; }, function () { return false; });
+        return step ? [step] : [];
+      }
+    };
+  }
+
   var SCENES = {
     /* the title: the camera circles the tower for five seconds */
     title: { frames: 300, policy: function () { return []; } },
@@ -95,7 +156,18 @@ var PLAY = (function () {
         if (S && !S.menu) S.pick = null;
         return battlePolicy(cycleChoice)(f);
       }
-    }
+    },
+    /* a fight on the rainy road, the one with three enemies: rain streaks and splashes on top of the arena */
+    rain: {
+      frames: 4200, start: function () { ZT.fight(0, 4); },
+      policy: function (f, sc) {
+        var S = Battle.S();
+        if (S && !S.menu) S.pick = null;
+        return battlePolicy(cycleChoice)(f);
+      }
+    },
+    /* the maps after the town: from ZT.goto to the gate, the stairs or the boss row, every fight on the way played */
+    road: mapScene("road"), floor1: mapScene("floor1"), floor2: mapScene("floor2"), top: mapScene("top")
   };
 
   async function run(name, onFrame) {
@@ -108,7 +180,7 @@ var PLAY = (function () {
       await __yield();
       if (onFrame && (!sc.record || sc.record(f, sc))) onFrame({ f: f, tris: R.stats.tris, lights: R.lights.length });
       /* a fight is over when the game is back on the title */
-      if (sc.start && f > 60 && game.top() && game.top().enter && game.top().enter !== Battle.scene.enter) break;
+      if (sc.start && !sc.map && f > 60 && game.top() && game.top().enter && game.top().enter !== Battle.scene.enter) break;
     }
     hold([]);
     return f;

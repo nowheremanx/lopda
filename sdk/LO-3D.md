@@ -214,3 +214,16 @@ guide for other 3D apps. To stay fast:
 Everything in `SPEC.md` holds: one HTML file up to 512 KB, four tones, no network,
 no `eval`. Write pixels with `putImageData` (lo-game does), never by drawing one
 canvas onto another.
+
+## 7. 实例 (examples in the showcase game)
+
+Each 1.1 feature is used for real in `registry/apps/zhenyao-tower/src/`. Read these before inventing your own:
+
+- `tone`, an effect that reads on any background: `SPELL.sword` in [spells.js](../registry/apps/zhenyao-tower/src/spells.js) draws the blades (`BLADE`, `HILT`, `GUARD` in [fx.js](../registry/apps/zhenyao-tower/src/fx.js)) in fixed tones, so the scene is not darkened to make them stand out; `SPELL.vine` and the ice shards of `SPELL.tide` do the same.
+- `alpha`, see-through water: `SPELL.tide` (spells.js) draws the body of the wave at `alpha: 0.5` and keeps the crest solid in `tone: 3`.
+- `alpha`, fading instead of blinking: the phantom tower dissolving in `SPELL.pagoda` and a falling foe (`ANIM.down` in spells.js, `render` in [battle.js](../registry/apps/zhenyao-tower/src/battle.js)) tween an `alpha` from 1 to 0.
+- `builder().tube`, tapering vines: `SPELL.vine` (spells.js) rebuilds one tube per vine every frame from the growing spiral, instead of a chain of cubes.
+- `builder().ribbon`, trails: `FX.trail` (fx.js) is a camera-facing ribbon along a projectile's last positions, older half at `alpha: 0.5`; `SPELL.sword`, `SPELL.talisman` and `FOE.ember` (spells.js) use it instead of dot particles.
+- `Lo3D.shadow`, a ground shadow that grows with height: `SPELL.seal` (spells.js) scales it as the seal falls.
+- sprite `snap`: the boss in `render` (battle.js), so every pixel of the big close-up sprite is equally thick.
+- sprite `lit`: foes in `render` (battle.js, `lit()`) take spell point lights only while a light reaches them, because a lit sprite goes through the dither and loses its exact tones.

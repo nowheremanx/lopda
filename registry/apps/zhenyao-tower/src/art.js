@@ -145,6 +145,44 @@ var ART = LoGame.sprites({
     "..01111110..",
     "..00000000.."
   ],
+  /* the master: an older man in a long robe, grey hair and beard */
+  master: [
+    "....0220....",
+    "...022220...",
+    "...022220...",
+    "...033330...",
+    "...030030...",
+    "...033330...",
+    "..02222220..",
+    "..02222220..",
+    "...022220...",
+    "..01111110..",
+    ".0111111110.",
+    ".0311111130.",
+    ".0111221110.",
+    ".0111111110.",
+    ".0111111110.",
+    "..00000000.."
+  ],
+  /* the woodcutter: a straw hat, an axe on the shoulder */
+  woodcutter: [
+    "....0000....",
+    "..00222200..",
+    ".0222222220.",
+    "...033330.00",
+    "...030030.02",
+    "...033330.20",
+    "....0330.20.",
+    "..0111110200",
+    ".0111111120.",
+    ".0311111100.",
+    ".0111111110.",
+    ".0111111110.",
+    "..01111110..",
+    "..01100110..",
+    "..01100110..",
+    "..00....00.."
+  ],
   child: [
     "...0000...",
     "..000000..",
@@ -160,3 +198,23 @@ var ART = LoGame.sprites({
     "..00..00.."
   ]
 });
+
+/* the carved mural of 镇妖塔 middle floor: three wave lines wound into a ring, the centre broken off.
+   Drawn as a sprite flat on the wall; made by a loop so the rings stay round. */
+ART.mural = (function () {
+  var N = 14, rows = [], c = (N - 1) / 2, y, x;
+  for (y = 0; y < N; y++) {
+    var row = "";
+    for (x = 0; x < N; x++) {
+      var dx = x - c, dy = y - c, d = Math.sqrt(dx * dx + dy * dy), a = Math.atan2(dy, dx);
+      var wave = Math.sin(a * 5) * 0.3, ch = ".";
+      if (Math.abs(d - 6.3 - wave) < 0.55 || Math.abs(d - 4.5 + wave) < 0.5 || Math.abs(d - 2.9 - wave) < 0.5) ch = "3";
+      /* the centre has come away; a crack runs out of it and the ring is chipped there */
+      if (d < 2.1 + Math.sin(a * 3 + 1) * 0.7) ch = (x + y) % 3 === 0 ? "1" : ".";
+      if (a > 0.5 && a < 0.8 && d > 2.5) ch = ".";
+      row += ch;
+    }
+    rows.push(row);
+  }
+  return LoGame.sprite(rows);
+})();

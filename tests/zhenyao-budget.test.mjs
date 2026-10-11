@@ -44,3 +44,23 @@ test("budget: the boss fight", async () => {
   assert.ok(frames.length >= 3000);
   within(frames);
 });
+
+test("budget: a fight in the rain on the mountain road", async () => {
+  const { frames, get } = await play("rain");
+  assert.ok(frames.length >= 600);
+  assert.equal(get("Battle").S().area, "road");
+  within(frames);
+});
+
+/* the maps after the town, walked from their start to the gate, the stairs or the boss row, every fight on the way played
+   (ZT.goto starts as a player arriving: earlier maps' enemies beaten, chests opened) */
+for (const [id, to] of [["road", "floor1"], ["floor1", "floor2"], ["floor2", "top"], ["top", "top"]]) {
+  test(`budget: the ${id} map, walked to its ${id === "top" ? "boss row" : "exit"} with its fights`, async () => {
+    const { frames, get } = await play(id);
+    assert.ok(frames.length > (id === "top" ? 600 : 1500));
+    const st = get("ZT").state();
+    assert.equal(st.map, to, "reached " + (id === "top" ? "the boss fight on the top" : "the next map"));
+    if (id === "top") assert.ok(get("Battle").S().b.boss, "the boss fight began");
+    within(frames);
+  });
+}

@@ -6,6 +6,7 @@
 // (three scenes, solid and wireframe, zoom and turning). Every frame is hashed as it reaches the canvas.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { boot } from "./app-vm.mjs";
 
 const PLAY = join(import.meta.dirname, "zhenyao-play.js");
@@ -21,7 +22,7 @@ async function zhenyao(file, scenes) {
 }
 
 /* VecDream reads PAD presses and PAD.isDown; frames are its own rAF loop */
-function vecdream(file) {
+export function vecdream(file) {
   const handlers = [], down = new Set();
   const pad = { lang: "zh", on: (type, f) => { if (type === "press") handlers.push(f); }, isDown: (b) => down.has(b), sfx() {} };
   const app = boot(file, { pad });
@@ -34,10 +35,14 @@ function vecdream(file) {
   return { vecdream: app.hashes };
 }
 
-const [file, flag, against] = process.argv.slice(2);
+/* the CLI below only runs when this file is started directly; tests import vecdream() */
+const direct = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+const [file, flag, against] = direct ? process.argv.slice(2) : [];
 const scenes = process.env.SCENES ? process.env.SCENES.split(",") : ["title", "town", "boss", "pagoda", "tower"];
-const result = /vector-dream/.test(file) ? vecdream(file) : await zhenyao(file, scenes);
-if (flag !== "--compare") {
+const result = !direct ? null : /vector-dream/.test(file) ? vecdream(file) : await zhenyao(file, scenes);
+if (!direct) {
+  /* imported: nothing to run */
+} else if (flag !== "--compare") {
   process.stdout.write(JSON.stringify(result) + "\n");
 } else {
   const old = JSON.parse(readFileSync(against, "utf8"));

@@ -221,22 +221,22 @@
     {
       "spec": "lopda/1",
       "id": "zhenyao-tower",
-      "name": "镇妖塔外传",
+      "name": "镇妖塔·序章",
       "glyph": "塔",
       "buttons": true,
-      "version": "0.2.0",
-      "description": "仙侠小品。卡带内置 LX-3D 协处理器：四色三维小镇与斗法演出。试作版：小镇和斗法。",
+      "version": "0.3.0",
+      "description": "仙侠序章，可通关。卡带内置 LX-3D 协处理器：三维小镇、山道、塔内与斗法。",
       "i18n": {
         "en": {
           "name": "Pagoda",
-          "description": "A xianxia side story. The cart has an LX-3D chip: 3D town and battles. Preview."
+          "description": "A xianxia prologue. The cart has an LX-3D chip: 3D town, tower and battles."
         }
       },
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/zhenyao-tower/index.html",
-      "sha256": "9204fa1e43119482d06fad056a29ec81eac6b3afdba765d955c2c284c2e492cc",
-      "bytes": 172616
+      "sha256": "25c0d3357b89ed331cf1d4e8433a97537d85744043d67715a586d8061be46d9e",
+      "bytes": 225879
     }
   ]
 }

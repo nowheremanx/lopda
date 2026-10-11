@@ -81,6 +81,9 @@ var ANIM = (function () {
   function down(S, i) {
     var f = S.foes[i];
     f.dying = true;
+    /* lo-3d `alpha`: the foe fades out over the fall (Battle's render draws its sprite at alpha 1 - f.fade) instead of
+       blinking; a cut to the result settles the tween, and the timer below removes it as before */
+    T.tween(f, { fade: 1 }, 0.45, "linear");
     T.after(0.45, function () {
       f.gone = true; f.dying = false;
       var p = B.foeTop(i, 0.5);
@@ -164,8 +167,6 @@ var ANIM = (function () {
     cast(S, true);
     B.look([h.x, 1.15, h.z], yaw, -0.06, 4.0, 0.5);
     for (var k = 0; k < n; k++) swords.push({ a: k / n * PI * 2, fly: -1 });
-    /* the scene dims so the blades stand out in paper white */
-    T.tween(S, { light: 0.45, sky: 0.6 }, 0.4);
     var L = FX.layer({
       draw: function (R, t) {
         var open = smooth(t / 0.45), turn = t * 1.2;
@@ -183,10 +184,19 @@ var ANIM = (function () {
             pos = bez(s.from, top, tc, u);
             dir = Lo3D.norm(Lo3D.sub(bez(s.from, top, tc, Math.min(1, u + 0.05)), pos));
             if (u >= 1) { s.done = true; FX.burst(tc[0], tc[1], tc[2] - 0.3, 8, 2.5, { tone: 3, life: 0.3, trail: 0.04 }); T.shake(1, 0.08); return; }
-            if (k % 2 === 0) FX.spawn({ x: pos[0], y: pos[1], z: pos[2], life: 0.18, tone: 3 });
+            /* lo-3d `ribbon` (+ tone): a streak along the last positions instead of dot particles; it follows the
+               blade exactly, so it does not lag behind the way a puff of particles does */
+            s.hist = s.hist || [];
+            FX.push(s.hist, pos, 8);
+            FX.trail(R, s.hist, 0.32, 3);
           }
           s.pos = pos;
-          R.draw(FX.BLADE, FX.aim(pos, dir, 1.5), { bias: 0.9, two: true });
+          /* lo-3d `tone`: the blade is drawn in fixed tones (paper blade, dark hilt, mid guard), so it reads on any
+             background and the scene is no longer dimmed to make it stand out */
+          var aimed = FX.aim(pos, dir, 1.5);
+          R.draw(FX.BLADE, aimed, { tone: 3 });
+          R.draw(FX.HILT, aimed, { tone: 1 });
+          R.draw(FX.GUARD, aimed, { tone: 2 });
         });
       },
       lights: function () { return [{ x: hub[0], y: hub[1], z: hub[2] - 0.3, radius: 3.2, power: 0.9 }]; }
@@ -204,7 +214,6 @@ var ANIM = (function () {
     T.flash(0.05);
     await B.show(ev);
     cast(S, false);
-    T.tween(S, { light: 1, sky: 1 }, 0.5);
     await wait(0.25);
     L();
     await B.home(0.5);
@@ -215,24 +224,28 @@ var ANIM = (function () {
     var H = B.HOME, front = -6, crest = 0;
     cast(S, true);
     B.camTo({ x: 0, y: 1.0, z: 0.8, yaw: H.yaw + 1.0, pitch: -0.26, dist: 9 }, 0.6);
-    T.tween(S, { sky: 0.7, light: 0.6 }, 0.5);
+    /* two meshes on one grid of points: the crest (the first row of quads, u = 0) and the body of the wave */
     var GRID = (function () {
-      var v = [], t = [], c = [], X = 14, U = 5;
+      var v = [], crest = [], body = [], X = 14, U = 5;
       for (var u = 0; u <= U; u++) for (var x = 0; x <= X; x++) v.push([-7 + x, u / U, 0]);
       for (u = 0; u < U; u++) for (x = 0; x < X; x++) {
         var a = u * (X + 1) + x, b = a + 1, d = a + X + 1, e = d + 1;
-        t.push([a, b, e], [a, e, d]); c.push(u === 0 ? 1.6 : 0.4, u === 0 ? 1.6 : 0.4);   /* white crest, dark water */
+        (u === 0 ? crest : body).push([a, b, e], [a, e, d]);
       }
-      return { v: v, t: t, c: c, two: true };
+      return { crest: { v: v, t: crest, two: true }, body: { v: v, t: body, c: body.map(function () { return 0.4; }), two: true } };
     })();
     var L = FX.layer({
       draw: function (R, t) {
         if (crest <= 0.01) return;
-        R.draw(GRID, function (p) {
+        var shape = function (p) {
           /* u = 0 is the crest, u = 1 the back of the wave; the crest leans forward */
           var u = p[1], hgt = crest * Math.pow(Math.sin(PI * (0.15 + u * 0.85)), 0.8) * (1 + 0.15 * Math.sin(p[0] * 1.3 + t * 9));
           return [p[0], hgt, front - u * 2.4 + (1 - u) * 0.5 * crest];
-        }, { bias: 0.08 });
+        };
+        /* lo-3d `alpha`: the body of the wave is see-through water (the arena shows through it), and `tone` keeps the
+           crest solid paper. Before, the wave was an opaque dark mesh and the whole scene was darkened around it. */
+        R.draw(GRID.body, shape, { bias: 0.08, alpha: 0.5 });
+        R.draw(GRID.crest, shape, { tone: 3 });
       },
       post: function (px, t) { if (S.ripple) FX.wave(px, S.ripple, 0.22, t * 14); }
     });
@@ -265,17 +278,17 @@ var ANIM = (function () {
         var f = S.foes[i], s = smooth(t / 0.15) * (1 - smooth((t - 0.6) / 0.2));
         for (var k = 0; k < 4; k++) {
           var a = k / 4 * PI * 2 + n;
+          /* `tone`: ice is paper white whatever is behind it (the scene is not darkened any more) */
           R.draw(FX.CUBE, (function (p) {
             var q = Lo3D.rotY(Lo3D.rotZ([p[0] * 0.18 * s, p[1] * 1.0 * s, p[2] * 0.18 * s], 0.35), a);
             return [q[0] + f.x + Math.cos(a) * 0.45, q[1] + 0.35 * s, q[2] + f.z + Math.sin(a) * 0.3];
-          }), { bias: 0.3 });
+          }), { tone: 3 });
         }
       });
     }, post: function (px, t) { FX.cover(px, 3, 0.35 * Math.sin(clamp01(t / 0.8) * PI)); } });
     await wait(0.8);
     L();
     cast(S, false);
-    T.tween(S, { sky: 1, light: 1 }, 0.5);
     await B.home(0.5);
   };
 
@@ -284,7 +297,6 @@ var ANIM = (function () {
     var H = B.HOME, tg = targets(ev), grow = { h: 0, r: 0.9, out: 0 };
     cast(S, true);
     /* a low camera drifting across from the right, so the hero does not stand in the way */
-    T.tween(S, { light: 0.5, sky: 0.7 }, 0.4);
     B.camTo({ x: 0.3, y: 1.0, z: 1.8, pitch: -0.08, dist: 7.6 }, 0.5);
     T.tween(S.cam, { yaw: H.yaw + 0.75 }, 2.8, "inOut");
     T.sfx("ok");
@@ -295,15 +307,21 @@ var ANIM = (function () {
     });
     T.shake(1, 0.3);
     var L = FX.layer({ draw: function (R, t) {
+      if (grow.h < 0.04) return;
       tg.forEach(function (i, n) {
         var f = S.foes[i], top = f.art.h * f.scale * 1.05;
         for (var v = 0; v < 3; v++) {
-          var segs = Math.floor(18 * grow.h);
-          for (var k = 0; k < segs; k++) {
-            var u = k / 18, a = v / 3 * PI * 2 + u * 7 + n, rad = grow.r * (1 - u * 0.35) + grow.out;
-            var p = [f.x + Math.cos(a) * rad, u * top, f.z + Math.sin(a) * rad * 0.8];
-            R.draw(FX.CUBE, FX.at(p, 0.3 - u * 0.14, a), { bias: k % 3 === 0 ? 0.55 : 0.3 });
+          /* lo-3d `tube`: one smooth, tapering vine per spiral (13 points, 5 sides) instead of a chain of cubes, which
+             was a dozen draws per vine and stayed blocky. The path is rebuilt every frame as it grows and squeezes;
+             the radius function thins it towards the tip. */
+          var path = [];
+          for (var k = 0; k <= 12; k++) {
+            var u = grow.h * k / 12, a = v / 3 * PI * 2 + u * 7 + n, rad = grow.r * (1 - u * 0.35) + grow.out;
+            path.push([f.x + Math.cos(a) * rad, u * top, f.z + Math.sin(a) * rad * 0.8]);
           }
+          var vine = Lo3D.builder().tube(path, function (t) { return 0.18 * (1 - t * 0.6) * (0.35 + 0.65 * Math.min(1, grow.h * 4)); }, 5, 0.9);
+          /* `tone`: the vines are dark green against any ground, so the scene is no longer darkened to show them */
+          R.draw(vine, null, { tone: v === 1 ? 3 : 0 });
         }
       });
     } });
@@ -326,7 +344,6 @@ var ANIM = (function () {
     await T.tween(grow, { h: 0, out: 0.4 }, 0.4, "in");
     L();
     cast(S, false);
-    T.tween(S, { light: 1, sky: 1 }, 0.5);
     await B.home(0.6);
   };
 
@@ -335,7 +352,7 @@ var ANIM = (function () {
     var i = targets(ev)[0], H = B.HOME, h = S.hero;
     var start = B.heroAt(1.0), end = B.foeTop(i, 0.55);
     end = [end[0], end[1], end[2] - 0.7];
-    var charm = { u: 0, pos: start.slice(), boom: 0, fire: 0 };
+    var charm = { u: 0, pos: start.slice(), boom: 0, fire: 0, hist: [] };
     cast(S, true);
     title(S, "离火符", 1.5);
     var L = FX.layer({
@@ -355,6 +372,8 @@ var ANIM = (function () {
     /* the charm itself is drawn as a sprite in the scene by a second layer, so it is depth-tested */
     var C = FX.layer({ draw: function (R, t) {
       if (charm.boom > 0) return;
+      /* lo-3d `ribbon` (+ tone): the charm drags a streak of paper behind it instead of a trail of dots */
+      FX.trail(R, charm.hist, 0.3, 3);
       R.sprite(B_ART.talisman, charm.pos[0], charm.pos[1], charm.pos[2], { scale: 1 / 26, anchor: "center", flip: Math.floor(t * 12) % 2 === 0 });
     } });
     B.look(start, H.yaw - 0.5, -0.1, 3.4, 0.4);
@@ -365,7 +384,7 @@ var ANIM = (function () {
     var follow = T.every(1 / 60, function () {
       charm.pos = bez(start, top, end, charm.u);
       S.cam.x += (charm.pos[0] - S.cam.x) * 0.25; S.cam.y += (charm.pos[1] - S.cam.y) * 0.25; S.cam.z += (charm.pos[2] - S.cam.z) * 0.25;
-      if (Math.random() < 0.5) FX.spawn({ x: charm.pos[0], y: charm.pos[1], z: charm.pos[2], vy: -0.3, life: 0.4, tone: 3 });
+      FX.push(charm.hist, charm.pos, 10);
     });
     T.tween(S.cam, { yaw: H.yaw + 0.35, dist: 4.4 }, 0.85, "inOut");
     await fly;
@@ -378,6 +397,7 @@ var ANIM = (function () {
     B.camTo({ dist: 6, pitch: -0.12 }, 0.5, "out");
     charm.boom = 0; charm.fire = 0.2;
     C();
+    charm.hist.length = 0;
     T.tween(charm, { fire: 1.5 }, 0.3, "out");
     FX.burst(end[0], end[1], end[2], 40, 3.5, { tone: 3, life: 0.9, drag: 2, up: 1.2 });
     FX.emit(20, function () { return { x: end[0] + (Math.random() - 0.5), y: end[1], z: end[2] + (Math.random() - 0.5), vy: 0.8 + Math.random(), life: 1.4, tone: 1, size: 0.12, drag: 0.5 }; });
@@ -391,7 +411,7 @@ var ANIM = (function () {
 
   /* 山岳印: the sky darkens, a stone seal comes down out of it and slams onto the enemies */
   SPELL.seal = async function (S, ev) {
-    var H = B.HOME, c = centre(S), seal = { y: 11, spin: 0, s: 1, punch: 1 };
+    var H = B.HOME, c = centre(S), seal = { y: 11, spin: 0, s: 1, punch: 1 }, SHADOW = Lo3D.shadow(1, 12);
     var SEAL = (function () {
       var m = Lo3D.builder();
       m.box(-1.5, -0.5, -1.5, 1.5, 0.5, 1.5, 0.95);
@@ -402,13 +422,16 @@ var ANIM = (function () {
       return m;
     })();
     cast(S, true);
-    T.tween(S, { sky: 0.45, light: 0.6 }, 0.5);
+    /* the darkening here is mood (the seal comes down out of a dim sky), so it stays, but lighter than before: the
+       seal is lit normally and the shadow below needs a ground that is not black */
+    T.tween(S, { sky: 0.6, light: 0.75 }, 0.5);
     B.camTo({ x: c[0], y: 3.2, z: c[2] - 1, pitch: 0.32, dist: 9.5, yaw: H.yaw + 0.25 }, 0.6);
     T.sfx("ok");
     var L = FX.layer({
       draw: function (R) {
+        /* lo-3d `shadow`: a real ground shadow, bigger the lower the seal comes (it was a squashed ball) */
         var w = 1.6 * smooth((11 - seal.y) / 9);
-        R.draw(FX.BALL, function (p) { return [p[0] * w + c[0], 0.02, p[2] * w + c[2]]; }, { albedo: 0.02 });
+        R.draw(SHADOW, function (p) { return [p[0] * w + c[0], p[1], p[2] * w + c[2]]; });
         R.draw(SEAL, function (p) { var q = Lo3D.rotY(p, seal.spin); return [q[0] * seal.s + c[0], q[1] * seal.s + seal.y, q[2] * seal.s + c[2]]; }, { bias: 0.3 });
       },
       /* the carved face glows on the ground beneath it */
@@ -445,7 +468,7 @@ var ANIM = (function () {
 
   /* 七级浮屠: the five elements gather above the arena and bring down a phantom of the tower */
   SPELL.pagoda = async function (S, ev) {
-    var H = B.HOME, h = S.hero, c = centre(S), hp = B.heroAt(0.7), orbs = [], tw = { y: 16, spin: 0, show: 0, rise: 0 };
+    var H = B.HOME, h = S.hero, c = centre(S), hp = B.heroAt(0.7), orbs = [], tw = { y: 16, spin: 0, show: 0, rise: 0, fade: 0 };
     var PAG = (function () { var m = Lo3D.builder(); World.pagoda(m, 0, 0, 0, 0.62, [1.1, 0.25]); return m; })();
     var storeys = [0.5, 1.4, 2.25, 3.05, 3.8, 4.5, 5.15];
     S.hud = false;
@@ -458,10 +481,11 @@ var ANIM = (function () {
     var L = FX.layer({
       draw: function (R, t) {
         orbs.forEach(function (o) { R.draw(FX.BALL, FX.at(o.p, 0.13, t), { bias: 0.85 }); });
-        if (tw.show && (tw.rise === 0 || Math.floor(t * 20) % 3)) R.draw(PAG, function (p) {
+        /* lo-3d `alpha`: the phantom dissolves by fading out (tw.fade 0 to 1), where it used to blink on and off */
+        if (tw.show && tw.fade < 1) R.draw(PAG, function (p) {
           var q = Lo3D.rotY(p, tw.spin);
           return [q[0] + c[0], q[1] + tw.y, q[2] + c[2]];
-        }, { bias: 0.5 + tw.rise * 0.4 });
+        }, { bias: 0.5 + tw.rise * 0.4, alpha: 1 - tw.fade });
       },
       lights: function () {
         var out = orbs.map(function (o) { return { x: o.p[0], y: o.p[1], z: o.p[2], radius: 2.4, power: 0.7 }; });
@@ -534,6 +558,7 @@ var ANIM = (function () {
     /* it dissolves into light and rises away */
     tw.rise = 1;
     T.tween(tw, { y: 9 }, 1.3, "in");
+    T.tween(tw, { fade: 1 }, 1.3, "linear");
     var up = T.every(0.03, function () {
       FX.spawn({ x: c[0] + (Math.random() - 0.5) * 3, y: tw.y + Math.random() * 5, z: c[2] + (Math.random() - 0.5) * 3, vy: 2.5, life: 0.8, tone: 3 });
     });
@@ -581,15 +606,19 @@ var ANIM = (function () {
   };
   /* fox fire: a small burning ball that lights the ground as it flies */
   FOE.ember = async function (S, i, r) {
-    var a = B.foeTop(i, 0.6), b = B.heroAt(0.6), top = mix(a, b, 0.5), ball = { u: 0, p: a };
+    var a = B.foeTop(i, 0.6), b = B.heroAt(0.6), top = mix(a, b, 0.5), ball = { u: 0, p: a, hist: [] };
     top[1] += 1.2;
     var L = FX.layer({
-      draw: function (R, t) { R.draw(FX.BALL, FX.at(ball.p, 0.18 + Math.sin(t * 30) * 0.03, t * 5), { bias: 0.9 }); },
+      draw: function (R, t) {
+        /* lo-3d `ribbon` (+ tone): the fire leaves a streak behind it instead of sparks that hang in the air */
+        FX.trail(R, ball.hist, 0.42, 3);
+        R.draw(FX.BALL, FX.at(ball.p, 0.18 + Math.sin(t * 30) * 0.03, t * 5), { bias: 0.9 });
+      },
       lights: function () { return [{ x: ball.p[0], y: ball.p[1], z: ball.p[2], radius: 3.5, power: 1.3 }]; }
     });
     var trail = T.every(1 / 60, function () {
       ball.p = bez(a, top, b, ball.u);
-      FX.spawn({ x: ball.p[0], y: ball.p[1], z: ball.p[2], vy: 0.5, life: 0.35, tone: 3 });
+      FX.push(ball.hist, ball.p, 9);
     });
     await T.tween(ball, { u: 1 }, 0.55, "in");
     trail(); L();
