@@ -64,6 +64,19 @@ var Rules = (function () {
   }
   function canCast(hero, spellId) { return spellsAt(hero.level).indexOf(spellId) >= 0 && hero.mp >= B.SPELLS[spellId].mp; }
 
+  /* an item taken from the bag, in a fight or on the map: heals up to the maximum. Returns {hp, mp} gained,
+     or null (and changes nothing) when there is none left, or when it would do nothing because that bar is full
+     (a battle passes anyway: the menu there has always let you waste one) */
+  function useItem(hero, id, anyway) {
+    var it = B.ITEMS[id], s = stats(hero.level);
+    if (!it || !(hero.items[id] > 0)) return null;
+    var hp = it.hp ? Math.min(it.hp, s.maxHp - hero.hp) : 0, mp = it.mp ? Math.min(it.mp, s.maxMp - hero.mp) : 0;
+    if (hp + mp <= 0 && !anyway) return null;
+    hero.items[id]--;
+    hero.hp += hp; hero.mp += mp;
+    return { hp: hp, mp: mp };
+  }
+
   /* action: {type: "attack", target} | {type: "spell", id, target} | {type: "item", id} | {type: "defend"} | {type: "flee"}
      target is an index into b.foes; "all" spells ignore it */
   function heroAct(b, action, rng) {
@@ -86,11 +99,10 @@ var Rules = (function () {
         ev = ev.concat(hurt(b, t, d, { kind: "damage", side: "enemy", amount: d, weak: weak, crit: false }));
       });
     } else if (action.type === "item") {
-      var it = B.ITEMS[action.id];
-      if (!(h.items[action.id] > 0)) throw new Error("no " + action.id);
-      h.items[action.id]--;
-      if (it.hp) { var hp = Math.min(it.hp, s.maxHp - h.hp); h.hp += hp; ev.push({ kind: "heal", hp: hp }); }
-      if (it.mp) { var mp = Math.min(it.mp, s.maxMp - h.mp); h.mp += mp; ev.push({ kind: "mana", mp: mp }); }
+      var used = useItem(h, action.id, true);
+      if (!used) throw new Error("cannot use " + action.id);
+      if (B.ITEMS[action.id].hp) ev.push({ kind: "heal", hp: used.hp });
+      if (B.ITEMS[action.id].mp) ev.push({ kind: "mana", mp: used.mp });
     } else if (action.type === "defend") {
       b.defending = true;
       var g = Math.min(B.DEFEND_MP, s.maxMp - h.mp);
@@ -138,6 +150,6 @@ var Rules = (function () {
   return {
     stats: stats, spellsAt: spellsAt, levelFor: levelFor, newHero: newHero, rest: rest, weakTo: weakTo,
     start: start, alive: alive, result: result, heroAct: heroAct, enemyAct: enemyAct, reward: reward,
-    spellDamage: spellDamage, canCast: canCast
+    spellDamage: spellDamage, canCast: canCast, useItem: useItem
   };
 })();

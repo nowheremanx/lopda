@@ -470,6 +470,68 @@ function showBanner(text, sec) {
   Cut.T.after(sec, function () { if (banner === text) banner = ""; });
 }
 
+/* ---------- the field menu ----------
+   START on a map, when nothing else is going on: 物品 (eat a pill), 状态, 返回. No saving here; that stays at the
+   stones. fm is null while closed, else {kind: "main"|"items"|"status", i, msg}. The rule for an item is Rules.useItem,
+   the same one a battle uses. */
+var fm = null;
+var FM_MAIN = ["物品", "状态", "返回"];
+function fmOpen() { fm = { kind: "main", i: 0, msg: "" }; game.sfx("tap"); }
+function fmEffect(id) { var it = BATTLE.ITEMS[id]; return it.hp ? "体力+" + it.hp : "法力+" + it.mp; }
+function fmUpdate() {
+  var d = game.dir();
+  if (fm.kind === "main") {
+    if (d.y) { fm.i = (fm.i + d.y + FM_MAIN.length) % FM_MAIN.length; game.sfx("move"); }
+    if (game.pressed("b") || game.pressed("start")) { fm = null; game.sfx("tap"); }
+    else if (game.pressed("a")) {
+      game.sfx("ok");
+      if (fm.i === 0) fm = { kind: "items", i: 0, msg: "" };
+      else if (fm.i === 1) fm = { kind: "status", i: 1, msg: "" };
+      else fm = null;
+    }
+  } else if (fm.kind === "items") {
+    if (d.y) { fm.i = (fm.i + d.y + BATTLE.ITEM_ORDER.length) % BATTLE.ITEM_ORDER.length; fm.msg = ""; game.sfx("move"); }
+    if (game.pressed("b")) { fm = { kind: "main", i: 0, msg: "" }; game.sfx("tap"); }
+    else if (game.pressed("a")) {
+      var id = BATTLE.ITEM_ORDER[fm.i], got = Rules.useItem(me, id);
+      if (got) { fm.msg = fmEffect(id).replace(/\d+/, got.hp || got.mp); game.sfx("ok"); }
+      else { fm.msg = me.items[id] > 0 ? "已经满了" : "没有了"; game.sfx("err"); }
+    }
+  } else if (game.pressed("b") || game.pressed("a")) { fm = { kind: "main", i: 1, msg: "" }; game.sfx("tap"); }
+}
+function fmDraw(g) {
+  var s = Rules.stats(me.level);
+  if (fm.kind === "main") {
+    g.window(104, 8, 52, 48);
+    FM_MAIN.forEach(function (t, i) {
+      if (i === fm.i) g.arrow(108, 17 + i * 13, "right");
+      g.text(t, 118, 14 + i * 13);
+    });
+  } else if (fm.kind === "items") {
+    g.window(0, 8, 160, 34);
+    g.text("体力 " + me.hp + "/" + s.maxHp, 8, 13);
+    g.text("法力 " + me.mp + "/" + s.maxMp, 152, 13, { align: "right" });
+    g.text(fm.msg, 80, 27, { align: "center", color: g.DARK });
+    g.window(0, 100, 160, 44);
+    BATTLE.ITEM_ORDER.forEach(function (id, i) {
+      var y = 106 + i * 15, none = !(me.items[id] > 0);
+      if (i === fm.i) g.arrow(5, y + 3, "right");
+      g.text(BATTLE.ITEMS[id].name, 13, y, { color: none ? g.MID : g.INK });
+      g.text(fmEffect(id), 90, y, { color: g.DARK });
+      g.text("x" + (me.items[id] || 0), 154, y, { align: "right", color: none ? g.MID : g.INK });
+    });
+  } else {
+    var next = me.level >= BATTLE.XP.length - 1 ? "满级" : String(BATTLE.XP[me.level + 1] - me.xp);
+    var rows = [["等级", String(me.level)], ["体力", me.hp + "/" + s.maxHp], ["法力", me.mp + "/" + s.maxMp],
+      ["经验", String(me.xp)], ["升级还需", next]];
+    g.window(14, 16, 132, 80);
+    rows.forEach(function (r, i) {
+      g.text(r[0], 24, 22 + i * 14, { color: g.DARK });
+      g.text(r[1], 136, 22 + i * 14, { align: "right" });
+    });
+  }
+}
+
 scene("map", {
   enter: async function (args) {
     args = args || {};
@@ -493,7 +555,7 @@ scene("map", {
     }
     hero = { c: c, r: r, pc: c, pr: r, x: c + 0.5, z: -r - 0.5, face: face, step: 0, moving: null };
     cam = { x: hero.x, z: hero.z, pitch: CAM.pitch, dist: CAM.dist, y: 0, yaw: 0, snap: false };
-    banner = "";
+    banner = ""; fm = null;
 
     people = cur.dawn ? [] : cur.id === "town"
       ? TOWN.people.map(function (p) { return { x: p.x, y: p.y, art: ART[p.art], name: p.name, who: p.art, pages: STORY.town[p.art] }; })
@@ -537,6 +599,7 @@ scene("map", {
   update: function (dt) {
     Cut.step(dt);
     if (busy) return;
+    if (fm) { fmUpdate(); return; }
     if (hero.moving) {
       var m = hero.moving;
       m.t = Math.min(1, m.t + dt * 4.2);
@@ -544,6 +607,7 @@ scene("map", {
       if (m.t >= 1) { hero.moving = null; arrive(); }
     }
     if (!hero.moving && !busy) {
+      if (game.pressed("start")) { fmOpen(); return; }
       var dir = null;
       ["up", "down", "left", "right"].forEach(function (d) { if (game.btn(d)) dir = dir || d; });
       if (dir) {
@@ -619,6 +683,7 @@ scene("map", {
       g.sprite(ART.hand[panel.f], 0, 0);
       if (panel.fade > 0) g.dither(0, 0, 160, 144, g.INK, Math.min(4, Math.ceil(panel.fade * 4)));
     }
+    if (fm && !busy) fmDraw(g);
   }
 });
 
