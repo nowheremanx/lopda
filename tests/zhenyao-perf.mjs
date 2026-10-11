@@ -14,7 +14,7 @@ import { ROOT } from "./helpers.mjs";
 const { chromium } = await import("playwright");
 const args = process.argv.slice(2);
 const cpuAt = args.indexOf("--cpu"), cpu = cpuAt >= 0 ? Number(args.splice(cpuAt, 2)[1]) : 1;
-const scenes = args[0] ? args[0].split(",") : ["town", "pagoda", "boss", "tower"];
+const scenes = args[0] ? args[0].split(",") : ["town", "pagoda", "boss", "tower", "rain", "road", "floor1", "floor2", "top", "bossEntrance", "pendant", "ending"];
 
 const server = createServer(async (req, res) => {
   const file = join(ROOT, normalize(decodeURIComponent(new URL(req.url, "http://x").pathname)).replace(/^(\.\.[/\\])+/, ""));

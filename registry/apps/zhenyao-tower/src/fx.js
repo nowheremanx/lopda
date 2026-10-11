@@ -131,12 +131,13 @@ var FX = (function () {
   function reset() { parts.length = 0; layers.length = 0; }
 
   /* ---------- small meshes ---------- */
-  /* a flying-sword blade along +z, from the hilt (z -0.3) to the tip (z 0.55); diamond in section so it shows from any side */
-  var BLADE = {
-    v: [[0, 0, 0.55], [0.08, 0, 0.1], [0, 0.08, 0.1], [-0.08, 0, 0.1], [0, -0.08, 0.1], [0, 0, -0.3], [0.17, 0, 0.06], [-0.17, 0, 0.06], [0, 0, 0.0]],
-    t: [[0, 2, 1], [0, 3, 2], [0, 4, 3], [0, 1, 4], [5, 1, 2], [5, 2, 3], [5, 3, 4], [5, 4, 1], [6, 8, 7], [6, 7, 8]],
-    c: [1.2, 1.2, 1.2, 1.2, 0.3, 0.3, 0.3, 0.3, 0.6, 0.6], two: true
-  };
+  /* a flying-sword blade along +z, from the hilt (z -0.3) to the tip (z 0.55); diamond in section so it shows from any side.
+     Two meshes, because each is drawn in a fixed tone (lo-3d `tone`): the blade in paper, the hilt and guard in dark and mid.
+     Fixed tones keep the sword readable on any background, so the scene does not have to be darkened around it. */
+  var BLADE_V = [[0, 0, 0.55], [0.08, 0, 0.1], [0, 0.08, 0.1], [-0.08, 0, 0.1], [0, -0.08, 0.1], [0, 0, -0.3], [0.17, 0, 0.06], [-0.17, 0, 0.06], [0, 0, 0.0]];
+  var BLADE = { v: BLADE_V, t: [[0, 2, 1], [0, 3, 2], [0, 4, 3], [0, 1, 4]], two: true };
+  var HILT = { v: BLADE_V, t: [[5, 1, 2], [5, 2, 3], [5, 3, 4], [5, 4, 1]], two: true };
+  var GUARD = { v: BLADE_V, t: [[6, 8, 7], [6, 7, 8]], two: true };
   /* model -> world for a mesh pointing along d (unit vector), scaled by s, at p */
   function aim(p, d, s, spin) {
     var yaw = Math.atan2(d[0], d[2]), pitch = -Math.asin(Math.max(-1, Math.min(1, d[1])));
@@ -151,12 +152,35 @@ var FX = (function () {
       return [v[0] * s + p[0], v[1] * s + p[1], v[2] * s + p[2]];
     };
   }
+  /* ---------- ribbon trails ---------- */
+  /* Keep the last few positions of a moving thing: push(hist, p, n) adds p (unless it has not moved) and keeps n. */
+  function push(hist, p, n) {
+    var q = hist[hist.length - 1];
+    if (q && Math.abs(q[0] - p[0]) + Math.abs(q[1] - p[1]) + Math.abs(q[2] - p[2]) < 1e-3) return;
+    hist.push(p.slice());
+    if (hist.length > n) hist.shift();
+  }
+  /* A trail drawn as a lo-3d ribbon along the recent positions (oldest first), tapering to nothing at the tail.
+     The band always faces the camera (its `up` is the direction to the eye), so it never turns edge-on, and it is
+     one-sided in lo-3d, hence `two: true`. The older half is drawn at alpha 0.5, the newer half solid: a fade
+     built from two ribbons. `tone` keeps it paper white on any background (no darkening needed behind it). */
+  function trail(R, hist, width, tone) {
+    var n = hist.length;
+    if (n < 3) return;
+    var c = R.camera, up = Lo3D.rotY(Lo3D.rotX([0, 0, -1], -c.pitch), c.yaw), mid = n >> 1;
+    [[0, mid, 0.5], [mid, n - 1, 1]].forEach(function (h) {
+      var path = hist.slice(h[0], h[1] + 1);
+      if (path.length < 2) return;
+      var m = Lo3D.builder().ribbon(path, function (t) { return width * (h[0] + t * (h[1] - h[0])) / (n - 1); }, 1, up);
+      R.draw(m, null, { tone: tone == null ? 3 : tone, alpha: h[2], two: true });
+    });
+  }
   var BALL = Lo3D.ico(1), CUBE = Lo3D.box(1, 1, 1);
 
   return {
     W: W, H: H, invert: invert, wave: wave, zoom: zoom, mosaic: mosaic, cover: cover, rays: rays, glow: glow,
     spawn: spawn, emit: emit, burst: burst, drawParts: drawParts, parts: parts,
     layer: layer, step: step, each: each, lights: lights, reset: reset,
-    BLADE: BLADE, BALL: BALL, CUBE: CUBE, aim: aim, at: at
+    BLADE: BLADE, HILT: HILT, GUARD: GUARD, push: push, trail: trail, BALL: BALL, CUBE: CUBE, aim: aim, at: at
   };
 })();

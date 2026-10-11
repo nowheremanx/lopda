@@ -74,7 +74,7 @@ var Battle = (function () {
     tm.forEach(function (t) { if (!t.dead && !t.every) t.fn(); });
   }
 
-  /* animations seen in this session, by key ("spell:sword", "foe:狐火"); P3 saves them with the game */
+  /* animations seen in this session, by key ("spell:sword", "foe:狐火"); main.js saves them with the game */
   var SEEN = {};
   /* play an animation: the first time in full, after that A cuts to the result */
   async function play(key, fn) {
@@ -94,7 +94,7 @@ var Battle = (function () {
     h.pose = null; h.art = ART.heroUp0; h.x = S.heroHome[0]; h.z = S.heroHome[1];
     S.frozen = 0;
     /* a foe that fell during the cut is already gone (its timer fired); just stop the flicker */
-    S.foes.forEach(function (f) { f.ox = f.oy = f.oz = 0; f.dying = false; });
+    S.foes.forEach(function (f) { f.ox = f.oy = f.oz = 0; f.dying = false; f.fade = f.gone ? 1 : 0; });
   }
 
   /* ---------- the arena, built once per area ---------- */
@@ -166,8 +166,8 @@ var Battle = (function () {
       heroHome: [-1.2, -1.5], hero: { x: -1.2, y: 0, z: -1.5, art: ART.heroUp0, pose: null, flash: 0, hide: false, flip: false },
       foes: b.foes.map(function (f, i) {
         var boss = f.def.boss, art = B_ART[f.def.art];
-        return { x: boss ? 0 : spots[i][0], y: 0, z: boss ? 4.4 : spots[i][1], art: art, scale: boss ? 0.1 : 0.115,
-          ox: 0, oy: 0, oz: 0, flash: 0, hide: false, gone: false, shown: f.hp, boss: boss };
+        return { x: boss ? 0 : spots[i][0], y: 0, z: boss ? 4.4 : spots[i][1], art: art, scale: boss ? 0.15 : 0.115,
+          ox: 0, oy: 0, oz: 0, fade: 0, flash: 0, hide: false, gone: false, shown: f.hp, boss: boss };
       }),
       view: { hp: args.hero.hp, mp: args.hero.mp },
       nums: [], msg: "", title: "", hud: true, bars: 0, sky: 1, light: 1, stars: area === "road" || area === "top",
@@ -215,6 +215,15 @@ var Battle = (function () {
   }
 
   /* ---------- drawing ---------- */
+  /* A foe takes point light (sprite `lit`) only while a spell's light reaches it: a lit sprite goes through the
+     dither, which blurs its drawn tones, so it stays exact the rest of the time. */
+  function lit(f, lights) {
+    for (var i = 0; i < lights.length; i++) {
+      var L = lights[i], dx = L.x - f.x - f.ox, dy = L.y - f.art.h * f.scale * 0.5, dz = L.z - f.z - f.oz;
+      if (dx * dx + dy * dy + dz * dz < L.radius * L.radius) return true;
+    }
+    return false;
+  }
   function render(g) {
     var A = S.A, c = S.cam, cam = R.camera, t = game.time;
     cam.x = c.x; cam.y = c.y; cam.z = c.z; cam.yaw = c.yaw; cam.pitch = c.pitch; cam.dist = c.dist; cam.focal = c.focal;
@@ -229,7 +238,8 @@ var Battle = (function () {
       L.power = L.base * S.light * (0.82 + 0.18 * Math.sin(t * 11 + L.seed * 7) * Math.sin(t * 4.3 + L.seed));
       return L;
     });
-    R.lights = ls.concat(FX.lights());
+    var fxLights = FX.lights();
+    R.lights = ls.concat(fxLights);
     R.draw(A.mesh);
     R.draw(A.glow, null, { bias: 0.5 * S.light });
     FX.each("draw", R);
@@ -237,18 +247,18 @@ var Battle = (function () {
     S.foes.forEach(function (f) {
       if (f.gone) return;
       var w = f.art.w * f.scale * 0.42;
-      R.draw(SHADOW, function (p) { return [p[0] * w + f.x + f.ox, p[1], p[2] * w * 0.6 + f.z + f.oz]; });
+      R.draw(SHADOW, function (p) { return [p[0] * w + f.x + f.ox, p[1], p[2] * w * 0.6 + f.z + f.oz]; }, { alpha: 1 - f.fade });
     });
     if (!h.hide) R.draw(SHADOW, function (p) { return [p[0] * 0.38 + h.x, p[1], p[2] * 0.3 + h.z]; });
     S.foes.forEach(function (f, i) {
       if (f.gone || f.hide) return;
-      if (f.dying && (Math.floor(t * 24) & 1)) return;
       /* floating foes bob; flashes turn the sprite white */
       var bob = f.boss ? Math.sin(t * 1.6) * 0.12 : f.art === B_ART.fox || f.art === B_ART.wraith ? 0.15 + Math.sin(t * 3 + i) * 0.08 : 0;
-      R.sprite(f.art, f.x + f.ox, f.y + f.oy + bob, f.z + f.oz, { scale: f.scale, map: f.flash > 0 && (Math.floor(t * 30) & 1) ? [3, 3, 3, 3] : null });
+      R.sprite(f.art, f.x + f.ox, f.y + f.oy + bob, f.z + f.oz, { scale: f.scale, alpha: 1 - f.fade, snap: f.boss, lit: lit(f, fxLights), map: f.flash > 0 && (Math.floor(t * 30) & 1) ? [3, 3, 3, 3] : null });
     });
     if (!h.hide && !(h.flash > 0 && (Math.floor(t * 30) & 1))) R.sprite(h.pose || h.art, h.x, h.y, h.z, { scale: 1 / 14, flip: h.flip });
     R.present();
+    if (S.area === "road") Weather.rain(R, c, t);
     if (S.stars) for (var s = 0; s < 30; s++) {
       var a = World.hash(s, 11) * Math.PI * 2, e = 0.25 + World.hash(s, 12) * 0.5;
       if ((s * 5 + Math.floor(t * 2)) % 19) R.dot([Math.cos(a) * 60, Math.sin(e) * 60, Math.sin(a) * 60], 3, 0);
@@ -483,6 +493,8 @@ var Battle = (function () {
 
   return {
     scene: scene, T: T, S: function () { return S; }, foeTop: foeTop, heroAt: heroAt, camTo: camTo, home: home, look: look,
-    popup: popup, show: show, say: say, HOME: HOME
+    popup: popup, show: show, say: say, HOME: HOME,
+    /* the animations seen; main.js saves them and merges the saved ones back in at boot */
+    seen: function () { return SEEN; }
   };
 })();
