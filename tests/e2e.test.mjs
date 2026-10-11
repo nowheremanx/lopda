@@ -75,8 +75,19 @@ test("preinstalled apps: installed on first start after the built-ins, and a rem
   assert.deepEqual(home.slice(-2), ["计算器", "点阵画板"]);
   assert.ok(!home.slice(0, -2).includes("点阵画板"), "paint is no longer a built-in");
   /* remove paint, start again: it does not come back */
+  /* the tiles show before the store records which ids it handled, and removal deletes without waiting:
+     reloading before those writes land would install paint again, so wait for IndexedDB itself */
+  const doc = (path) => p.evaluate((path) => new Promise((resolve, reject) => {
+    const req = indexedDB.open("lopda");
+    req.onerror = () => reject(req.error);
+    req.onsuccess = () => { const get = req.result.transaction("docs").objectStore("docs").get(path);
+      get.onsuccess = () => { req.result.close(); resolve(get.result ? get.result.data : null); }; get.onerror = () => reject(get.error); };
+  }), path);
+  const until = async (fn, what) => { for (let i = 0; i < 100; i++) { if (await fn()) return; await p.waitForTimeout(100); } assert.fail("timed out waiting for " + what); };
+  await until(async () => ((await doc("data/users/local/preinstall"))?.ids || []).length === 2, "the preinstall record");
   await p.locator("#home .app", { hasText: "点阵画板" }).click();
   await p.click("#run-del"); await p.click("#run-del-wrap .btn:not(.ghost)");
+  await until(async () => !(await doc("data/users/local/apps/items/paint")), "paint's removal");
   await p.reload({ waitUntil: "networkidle" }); await p.waitForTimeout(500);
   assert.deepEqual((await tiles(p)).slice(-1), ["计算器"]);
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
