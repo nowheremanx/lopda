@@ -11,6 +11,7 @@ Third-party parts keep their own licenses:
   runtime/vendor/binjgb/   Game Boy emulator core, MIT, Ben Smith  — see its LICENSE
   sdk/fonts/               lopix12 pixel font, SIL OFL 1.1          — see LICENSE-lopix12.txt
   runtime/fonts/           DotGothic16 and VT323, SIL OFL 1.1       — see OFL-DotGothic16.txt, OFL-VT323.txt
+  runtime/vendor/holiday-cn/  China holiday data, MIT, NateScarlet — see its LICENSE
 
 Apps under registry/apps/<id>/ are the work of their authors and carry the
 license named in their own manifest.json (one of the permissive licenses
