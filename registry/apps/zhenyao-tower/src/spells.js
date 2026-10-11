@@ -320,7 +320,7 @@ var ANIM = (function () {
             path.push([f.x + Math.cos(a) * rad, u * top, f.z + Math.sin(a) * rad * 0.8]);
           }
           var vine = Lo3D.builder().tube(path, function (t) { return 0.18 * (1 - t * 0.6) * (0.35 + 0.65 * Math.min(1, grow.h * 4)); }, 5, 0.9);
-          /* `tone`: the vines are dark green against any ground, so the scene is no longer darkened to show them */
+          /* `tone`: the vines are drawn in tone 0 and 3 against any ground, so the scene is no longer darkened to show them */
           R.draw(vine, null, { tone: v === 1 ? 3 : 0 });
         }
       });

@@ -3,7 +3,11 @@
    browser page (tests/zhenyao-perf.mjs). The host provides __frame() (one screen refresh) and __yield()
    (lets pending promises run). Input goes through keyboard events, like a player's.
    PLAY.run(name, onFrame) plays one scene from the title; onFrame(info) is called after every refresh
-   that the scene records, with {f, tris, lights}. */
+   that the scene records, with {f, tris, lights}.
+   Scene "full" plays the whole game with key events only: from 进入小镇 on the title to 序章 完. It walks each map
+   with a breadth-first search (the master, the stone, the chests, the enemies in order, the way on), taps A through
+   every dialogue and fights like the "smart" player of tests/zhenyao-sim.mjs (weak spells, a pill when low,
+   defend when the boss gathers, 七级浮屠 when it pays). */
 var PLAY = (function () {
   var KEYS = { up: "ArrowUp", down: "ArrowDown", left: "ArrowLeft", right: "ArrowRight", a: "x", b: "z", start: "Enter", select: "Shift" };
   var held = {};
@@ -117,9 +121,139 @@ var PLAY = (function () {
     };
   }
 
+
+  /* ---------- the whole game ---------- */
+  var living = function (b) { return b.foes.map(function (f, i) { return f.hp > 0 ? i : -1; }).filter(function (i) { return i >= 0; }); };
+  /* the "smart" player of tests/zhenyao-sim.mjs (makeSmart(false)): what to do now, as a Rules action */
+  function smartAction(b) {
+    var h = b.hero, s = Rules.stats(h.level), idx = living(b), cands = [], castable = 0;
+    if (h.hp < s.maxHp * 0.35 && h.items.pill > 0) return { type: "item", id: "pill" };
+    if (b.foes.some(function (f) { return f.gathering === true && f.hp > 0; })) return { type: "defend" };
+    var contrib = function (f, dmg) { return Math.min(f.hp, dmg); };
+    idx.forEach(function (i) {
+      var f = b.foes[i], dmg = contrib(f, s.atk - f.def.def * 0.5);
+      cands.push({ action: { type: "attack", target: i }, score: dmg + (dmg >= f.hp ? 2 : 0), mp: 0 });
+    });
+    BATTLE.SPELL_ORDER.forEach(function (id) {
+      if (Rules.spellsAt(h.level).indexOf(id) < 0 || !Rules.canCast(h, id)) return;
+      var sp = BATTLE.SPELLS[id];
+      if (sp.target === "all") {
+        var total = 0, kills = 0;
+        castable++;
+        idx.forEach(function (i) { var f = b.foes[i], d = Rules.spellDamage(h, id, f); total += contrib(f, d); if (d >= f.hp) kills++; });
+        cands.push({ action: { type: "spell", id: id, target: 0 }, score: total + kills * 2, mp: sp.mp });
+      } else {
+        idx.forEach(function (i) {
+          var f = b.foes[i], d = Rules.spellDamage(h, id, f);
+          castable++;
+          cands.push({ action: { type: "spell", id: id, target: i }, score: contrib(f, d) + (d >= f.hp ? 2 : 0), mp: sp.mp });
+        });
+      }
+    });
+    if (!castable && h.items.ether > 0 && h.mp < s.maxMp * 0.25) return { type: "item", id: "ether" };
+    cands.sort(function (x, y) { return y.score - x.score || x.mp - y.mp; });
+    return cands[0].action;
+  }
+  /* the battle's menus, driven to the action smartAction chose when the command menu came up. Between menus, A cuts an
+     animation the game has shown before (that is what a player does, and it saves most of the time) */
+  function battleDrive(f) {
+    var S = Battle.S(), m = S && S.menu;
+    if (!S) return [];
+    if (!m) { S.plan = null; return S.canSkip ? tap(f, "a") : []; }
+    if (f % 6 >= 3) return [];
+    var p = S.plan || (S.plan = smartAction(S.b));
+    if (m.kind === "cmd") {
+      var want = { attack: 0, spell: 1, item: 2, defend: 3, flee: 4 }[p.type];
+      if (m.i === want) return ["a"];
+      if (Math.floor(m.i / 2) !== Math.floor(want / 2)) return [want > m.i ? "down" : "up"];
+      return [want > m.i ? "right" : "left"];
+    }
+    if (m.kind === "list") {
+      var k = p.type === "spell" ? Rules.spellsAt(S.b.hero.level).indexOf(p.id) : BATTLE.ITEM_ORDER.indexOf(p.id);
+      return m.i === k ? ["a"] : [k > m.i ? "down" : "up"];
+    }
+    if (m.kind === "target") {
+      if (m.all) return ["a"];
+      var live = living(S.b);
+      return live.indexOf(m.i) === live.indexOf(p.target) ? ["a"] : ["right"];
+    }
+    return ["a"];
+  }
+  /* stand next to the tile (tx, ty), face it and press A */
+  function talkTo(tx, ty, f) {
+    var d = null;
+    D4.forEach(function (e) { if (hero.c + e[1] === tx && hero.r + e[2] === ty) d = e[0]; });
+    if (d) return hero.face !== d ? [d] : tap(f, "a");
+    var step = firstStep(function (c, r) { return Math.abs(c - tx) + Math.abs(r - ty) === 1; }, function () { return false; });
+    return step ? [step] : null;
+  }
+  /* what to do on a map when nothing is open: null when there is nothing to do (wait) */
+  function mapDrive(f) {
+    var id = cur.id, P = cur.P, none = function () { return false; };
+    if (id === "town") {
+      if (!flags.master) {
+        var mp = people.filter(function (p) { return p.who === "master"; })[0];
+        return talkTo(mp.x, mp.y, f) || [];
+      }
+      if (hero.r === 0) return tap(f, "up");
+      var north = firstStep(function (c, r) { return r === 0; }, none);
+      return north ? [north] : [];
+    }
+    var go = null;
+    /* the stone first (it fills HP and MP and keeps the way back), then the chests */
+    if (P.saves[0] && !(runSave && runSave.map === id)) go = talkTo(P.saves[0].c, P.saves[0].r, f);
+    if (!go) P.chests.forEach(function (c, i) { if (!go && !flags.opened[id + ":" + i]) go = talkTo(c.c, c.r, f); });
+    if (go) return go;
+    foes.sort(function (a, b) { return a.k - b.k; });
+    if (foes.length) {
+      var want = foes[0], near = function (e) { return function (c, r) { return Math.max(Math.abs(e.c - c), Math.abs(e.r - r)) <= 1; }; };
+      var d = firstStep(near(want), function (c, r) { return foes.some(function (e) { return e !== want && near(e)(c, r); }); });
+      return d ? [d] : [];
+    }
+    if (id === "top") {
+      var up = firstStep(function (c, r) { return r <= STORY.top.bossRow; }, none);
+      return up ? [up] : [];
+    }
+    var exit = null;
+    cur.rows.forEach(function (row, r) { var c = row.indexOf(id === "road" ? "G" : "^"); if (c >= 0) exit = { c: c, r: r }; });
+    if (hero.c === exit.c && hero.r === exit.r + 1) return tap(f, "up");
+    var to = firstStep(function (c, r) { return c === exit.c && r === exit.r + 1; }, none);
+    return to ? [to] : [];
+  }
+  function fullPolicy(f, sc) {
+    var s = where;
+    if (s !== "title") sc.down = false;
+    if (overlay()) {
+      /* the title's menu lists 继续 first when a save exists: one down to 进入小镇 */
+      if (s === "title" && lastSave && !sc.down) { sc.down = true; return ["down"]; }
+      return tap(f, "a");
+    }
+    if (s === "title") return tap(f, "a");
+    if (s === "credits") { if (ended) sc.done = true; return []; }
+    if (s === "battle") return battleDrive(f);
+    if (s !== "map" || busy || !hero || !cur) return [];
+    return mapDrive(f);
+  }
+  /* the cutscenes of phase 2, each from where the game starts it, with A through every dialogue */
+  function cutscene(start, done) {
+    return {
+      frames: 6000, map: true, start: start,
+      /* the title (the ending's last stop, reached after 待续) is the town's scene, with its own budget */
+      record: function (f, sc) { return !(sc.left && (where === "title" || (where === "credits" && cr.phase === "next"))); },
+      policy: function (f, sc) {
+        if (where !== "title") sc.left = true;
+        if (sc.left && done(sc)) { sc.done = true; return []; }
+        if (overlay() || where === "credits") return tap(f, "a");
+        return where === "map" && !busy && hero && cur.id === "top" ? ["up"] : [];
+      }
+    };
+  }
+
   var SCENES = {
     /* the title: the camera circles the tower for five seconds */
     title: { frames: 300, policy: function () { return []; } },
+    /* the title for one whole turn of its camera (0.12 rad/s), for the budget: it sees the forest from every side */
+    titleTurn: { frames: 3200, policy: function () { return []; } },
     /* the town: in through the title menu, the camera's intro, the first words, then a walk round the square
        and up the road to the sign at the north edge */
     town: {
@@ -167,7 +301,17 @@ var PLAY = (function () {
       }
     },
     /* the maps after the town: from ZT.goto to the gate, the stairs or the boss row, every fight on the way played */
-    road: mapScene("road"), floor1: mapScene("floor1"), floor2: mapScene("floor2"), top: mapScene("top")
+    road: mapScene("road"), floor1: mapScene("floor1"), floor2: mapScene("floor2"), top: mapScene("top"),
+    /* the boss's entrance: from the boss row, through the master, the ripple and the mirage, to its first menu */
+    bossEntrance: cutscene(function () { ZT.goto("top", { entered: true, x: 5, y: 7 }); },
+      function () { var S = where === "battle" && Battle.S(); return !!(S && S.menu); }),
+    /* the pendant scene: as the fight is won, to the dawn map */
+    pendant: cutscene(function () { ZT.goto("top", { entered: true, win: true }); },
+      function () { return where === "map" && cur.id === "ending"; }),
+    /* the ending: the report, the hand, the answer, the last shot, 序章 完, the roll, 待续, and back on the title */
+    ending: cutscene(function () { ZT.goto("ending"); }, function () { return where === "title"; }),
+    /* the whole game, from a new game to 序章 完 */
+    full: { frames: 600000, policy: fullPolicy }
   };
 
   async function run(name, onFrame) {

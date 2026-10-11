@@ -135,3 +135,41 @@ test("zhenyao-tower: ZT.fight (tests only, not on any menu) starts a route fight
   assert.equal(await z.app.evaluate(() => Battle.S().b.foes[0].id), "mirage");
   assert.deepEqual(z.errors, []);
 });
+
+/* The whole game, played by tests/zhenyao-play.js ("full": breadth-first walking, A through every dialogue, the smart
+   battle player) from 进入小镇 on the title to 序章 完. Real time would be more than 20 minutes, so the app frame's clock is
+   ours: requestAnimationFrame is replaced (after the game has started; lo-game asks for the next frame every tick) by a queue
+   that the script's own loop pumps, one 1/60 s step per call and a yield through a MessageChannel in between, which has none of
+   setTimeout's 4 ms floor. Math.random is seeded, so the run is the same every time. */
+test("zhenyao-tower: a scripted player goes from a new game to 序章 完", { skip, timeout: 1500000 }, async (t) => {
+  const { p, errors } = await page(t);
+  await p.goto(`${base}/sdk/dev.html?app=registry/apps/zhenyao-tower`, { waitUntil: "load" });
+  await p.waitForFunction(() => /loaded |load failed/.test(document.getElementById("log").textContent), null, { timeout: 5000 });
+  const app = p.frames().find((f) => f !== p.mainFrame());
+  await app.waitForFunction(() => typeof game !== "undefined" && typeof ZT !== "undefined", null, { timeout: 5000 });
+  await app.evaluate(async () => {
+    const queue = [];
+    let ts = performance.now(), a = 1;
+    window.requestAnimationFrame = (f) => { queue.push(f); return queue.length; };
+    window.__frame = () => { const q = queue.splice(0); ts += 1000 / 60 + 1e-4; q.forEach((f) => f(ts)); };
+    Math.random = () => {
+      a = (a + 0x6d2b79f5) >>> 0; let x = a; x = Math.imul(x ^ (x >>> 15), x | 1);
+      x ^= x + Math.imul(x ^ (x >>> 7), x | 61); return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+    };
+    const ch = new MessageChannel(), waiting = [];
+    ch.port1.onmessage = () => waiting.shift()();
+    window.__yield = () => new Promise((r) => { waiting.push(r); ch.port2.postMessage(0); });
+    /* the frame that was already asked for from the real clock runs once more and asks again, into the queue */
+    while (!queue.length) await new Promise((r) => setTimeout(r, 5));
+  });
+  await app.addScriptTag({ path: join(ROOT, "tests", "zhenyao-play.js") });
+  const t0 = Date.now();
+  const frames = await app.evaluate(() => PLAY.run("full"));
+  const secs = (Date.now() - t0) / 1000;
+  console.log(`  zhenyao-tower full playthrough: ${frames} frames (${(frames / 60 / 60).toFixed(1)} game minutes) in ${secs.toFixed(0)} s`);
+  const st = await app.evaluate(() => { const s = ZT.state(); return { scene: s.scene, ended: s.ended, cleared: s.cleared, level: s.hero.level, boss: !!s.flags.beat["top:B"] }; });
+  assert.ok(st.ended, "reached 序章 完: " + JSON.stringify(st));
+  assert.ok(st.cleared && st.boss && st.level >= 7, JSON.stringify(st));
+  assert.deepEqual(errors, []);
+  assert.doesNotMatch(await p.textContent("#log"), /ERROR/);
+});

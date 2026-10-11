@@ -132,15 +132,16 @@ var World = (function () {
       return dx * dx + dz * dz < 13 * 13 || L.y > 5;
     });
     R.clear(function (yy) { return 0.12 + 0.38 * Math.min(1, yy / 60); });
-    /* a chunk is drawn when the screen rectangle of its box (ground to treetops) overlaps the screen */
+    /* a chunk is drawn when the screen rectangle of its box (ground to treetops) overlaps the screen. view.fogCull
+       (the title) also drops chunks entirely past the fog: its circling camera would draw the whole forest, over budget */
     w.chunks.forEach(function (m) {
-      var x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9, h = CHUNK / 2 + 0.5;
+      var x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9, h = CHUNK / 2 + 0.5, near = 1e9;
       for (var i = 0; i < 8; i++) {
         var p = R.project([m.cx + (i & 1 ? h : -h), i & 2 ? 3 : 0, m.cz + (i & 4 ? h : -h)]);
         if (!p) { x0 = -1e9; x1 = 1e9; y0 = -1e9; y1 = 1e9; break; }
-        x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]);
+        x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); near = Math.min(near, p[2]);
       }
-      if (x1 >= 0 && x0 < R.width && y1 >= 0 && y0 < R.height && (m.cz - view.z) < view.dist + 22) R.draw(m);
+      if (x1 >= 0 && x0 < R.width && y1 >= 0 && y0 < R.height && (m.cz - view.z) < view.dist + 22 && !(view.fogCull && near > R.fog.far)) R.draw(m);
     });
     R.draw(w.tower);
     R.draw(w.glow, null, { bias: 0.5 });

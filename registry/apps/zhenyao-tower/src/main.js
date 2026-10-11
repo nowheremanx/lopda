@@ -1,6 +1,7 @@
 /* Scenes: the title (camera circling the tower) and the map, where the hero walks tile by tile through the town
    and the maps of src/story.js. SELECT shows how long the last frame took to draw, in every scene, for checking
-   speed on a phone. Progress is saved at the save stones; what the player has already seen is saved with it. */
+   speed on a phone. Progress is saved at the save stones; what the player has already seen is saved with it.
+   The cutscenes (the boss's entrance, the pendant, the ending) and the credits are at the end of the map scene. */
 var game = LoGame.create({ width: 160, height: 144, lang: "zh" });
 var R = Lo3D.create({ width: 160, height: 144 });
 var town = World.build(TOWN);
@@ -29,6 +30,9 @@ function scene(name, def) {
    flags: what has happened. master: the first talk is done (the road is open); entered, opened, beat: by map,
    by "map:chest index", by "map:enemy digit". lastSave is a copy of the last "progress" written. */
 var me = null, flags = null, lastSave = null;
+/* runSave: the last stone of THIS run (null in a new game until the first one), the only place a loss goes back to.
+   lastSave is the one on disk, which 继续 on the title loads; an older run's save must not catch a new game's loss */
+var runSave = null;
 function clone(x) { return JSON.parse(JSON.stringify(x)); }
 function freshFlags() { return { master: 0, entered: {}, opened: {}, beat: {} }; }
 /* the animations and cutscenes seen survive a new game, so they can be skipped from the second time on */
@@ -44,7 +48,7 @@ scene("title", {
   enter: function () { busy = false; },
   draw: function (g) {
     var a = game.time * 0.12, T = town.def.tower;
-    frame(g, { x: T.x, y: 4, z: -T.y, yaw: a, pitch: -0.22, dist: 17, time: game.time }, []);
+    frame(g, { x: T.x, y: 4, z: -T.y, yaw: a, pitch: -0.22, dist: 17, time: game.time, fogCull: true }, []);
     g.window(14, 82, 132, 52);
     g.text("镇妖塔·序章", 80, 88, { align: "center" });
     g.text("内置 LX-3D 协处理器", 80, 104, { align: "center", color: g.DARK });
@@ -74,13 +78,19 @@ var DIRS = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
 var NEXT = { floor1: "floor2", floor2: "top" };
 var hero, people = [], foes = [], cam, busy = false, cur = null, banner = "";
 var INFO = {};
+/* what a cutscene adds to the map: stage (extra actors, see Maps.render), glows (point lights that can pulse),
+   rip (the ripple over the frame), panel (a full-screen picture, the hand), ended (the end card has been shown) */
+var stage = [], glows = [], rip = { k: 0, t0: 0 }, panel = null, ended = false, fxT = 0;
 
 /* a map as the scene needs it: the town from src/town.js, the others from STORY (the 3D scene is built on first use) */
 function mapInfo(id) {
   if (INFO[id]) return INFO[id];
   var info;
   if (id === "town") info = { id: id, kind: "town", rows: TOWN.map, world: town, start: TOWN.start, def: null, P: null };
-  else {
+  else if (id === "ending") {
+    /* the road again, at dawn, from the tower's gate: nothing on it to fight, open or talk to */
+    info = Object.assign({}, mapInfo("road"), { id: id, dawn: true, base: "road", start: { x: 7, y: 1, face: "down" } });
+  } else {
     var d = STORY[id];
     info = { id: id, kind: d.kind, rows: d.map, world: Maps.build(d), start: d.start, def: d, P: Maps.parse(d) };
   }
@@ -96,7 +106,7 @@ function blocked(c, r) {
 }
 function openedNow() {
   var o = {};
-  if (cur.P) cur.P.chests.forEach(function (p, i) { if (flags.opened[cur.id + ":" + i]) o[i] = true; });
+  if (cur.P) cur.P.chests.forEach(function (p, i) { if (flags.opened[(cur.base || cur.id) + ":" + i]) o[i] = true; });
   return o;
 }
 /* what stands on a tile that you can talk to: a person, a door, the well, a stone, a chest, the mural */
@@ -135,6 +145,7 @@ function toMap(id) { return game.go("map", { id: id }, { to: LoGame.INK }); }
 function doSave() {
   var p = { v: 1, map: cur.id, x: hero.c, y: hero.r, face: hero.face, hero: clone(me), flags: clone(flags) };
   lastSave = clone(p);
+  runSave = clone(p);
   game.save("progress", p);
   writeSeen();
 }
@@ -183,14 +194,225 @@ function interact(f) {
 /* ---------- fights on the map ----------
    An enemy is drawn where its digit stands. Finishing a step within one tile of it (diagonals count) starts its
    fight. Won: it is gone for good. Fled: it stays and the hero is back on the tile he came from. */
-function fight(key, ids, area) {
+function fight(key, ids, area, at) {
   busy = true;
-  var back = { id: cur.id, key: key, at: { c: hero.c, r: hero.r, face: hero.face }, prev: { c: hero.pc, r: hero.pr } };
+  /* at: where the hero stands when he comes back, when a cutscene has moved him from where he started it */
+  var back = { id: cur.id, key: key, at: at || { c: hero.c, r: hero.r, face: hero.face }, prev: at ? { c: at.c, r: at.r } : { c: hero.pc, r: hero.pr } };
   game.go("battle", { ids: ids, area: area, hero: me, back: "map", backArgs: back, from: new Uint8Array(R.image.px) }, { fade: false });
 }
-/* phase 2 replaces these two with the cutscenes (the master's entrance; the pendant, the ending and the credits) */
-function startBoss() { fight("top:B", BATTLE.ROUTE[3].fights[0], BATTLE.ROUTE[3].area); }
-function afterBoss() { game.go("title", null, { to: LoGame.INK }); }
+/* ---------- the cutscenes ----------
+   Each is one Cut.play: the first time in full, then one press of A runs it to its end state. A script must therefore
+   leave things as it wants them at its end whether or not it was skipped, and change the game's state (healing, flags)
+   in plain code, not in a timer. Everything on screen that a cutscene adds goes through `stage` (actors), `glows`
+   (lights), FX particles, `rip` (the ripple) and `panel`; the map scene draws them. */
+
+/* the hero walks a scripted way, tile by tile (his own walking is off while the scene is busy) */
+async function walkHero(C, dirs) {
+  hero.walking = true;
+  for (var i = 0; i < dirs.length; i++) {
+    var d = dirs[i], c = hero.c + DIRS[d][0], r = hero.r + DIRS[d][1];
+    hero.face = d; hero.pc = hero.c; hero.pr = hero.r; hero.c = c; hero.r = r; hero.step++;
+    await C.tween(hero, { x: c + 0.5, z: -r - 0.5 }, 0.26, "linear");
+  }
+  hero.walking = false;
+}
+/* the buttons that lead from one tile to another: sideways first, then up or down */
+function route(c0, r0, c1, r1) {
+  var d = [], i;
+  for (i = c0; i < c1; i++) d.push("right");
+  for (i = c0; i > c1; i--) d.push("left");
+  for (i = r0; i < r1; i++) d.push("down");
+  for (i = r0; i > r1; i--) d.push("up");
+  return d;
+}
+/* two specks of mist or light rising from around (x, z); called every few hundredths of a second */
+function puff(x, z, spread, tone) {
+  for (var i = 0; i < 2; i++) {
+    FX.spawn({ x: x + (Math.random() - 0.5) * spread, y: 0.05 + Math.random() * 0.3, z: z + (Math.random() - 0.5) * spread * 0.5,
+      vx: (Math.random() - 0.5) * 0.3, vy: 0.5 + Math.random() * 0.9, vz: 0, life: 1.3 + Math.random() * 1.2,
+      tone: tone == null ? (Math.random() < 0.6 ? 3 : 2) : tone, size: 0.05 + Math.random() * 0.09 });
+  }
+}
+/* the boss is drawn like in the battle. lo-3d examples: snap rounds the sprite to a whole multiple of its pixels, so the
+   big close sprite has no uneven pixels; alpha (a tween, see the callers) fades it in and out, where it used to blink */
+function bossActor(b, o) {
+  return Object.assign({ art: B_ART.mirage, x: b.c + 0.5, z: -b.r - 0.5, scale: 0.07, snap: true, sh: 2.2 }, o);
+}
+
+/* The roof, the first step past the boss row: the master waits at the B tile. He has no shadow (Lo3D.shadow is drawn
+   for every actor, so he is drawn with noShadow: the clue), and the camera comes in low to show his feet and the hero's
+   shadow next to them. At 「……呵。」 the frame ripples (FX.wave on the frame's pixels), the master fades out (an sprite
+   alpha tween), mist rises, and the 蜃妖 rises out of it (alpha in, snap, screen shake). Then the fight. */
+async function startBoss() {
+  busy = true;
+  var b = cur.P.boss, bx = b.c + 0.5, bz = -b.r - 0.5, bo = STORY.top.boss;
+  /* lo-3d example: Maps.render gives every actor a Lo3D.shadow; noShadow leaves it off, and that is the whole clue */
+  var master = { art: ART.master, x: bx, z: bz, noShadow: true, alpha: 1 };
+  await Cut.play("top:boss", async function (C) {
+    stage = [master];
+    cam.snap = true;
+    /* to a place beside and below him, and the camera low and close, so both pairs of feet are in it */
+    var go = walkHero(C, route(hero.c, hero.r, 5, 3));
+    await C.tween(cam, { x: bx - 0.5, z: bz - 0.7, y: 0.4, pitch: -0.34, dist: 4.4 }, 1.4, "inOut");
+    await go;
+    hero.face = "up";
+    await Cut.say(bo[0].say, { name: bo[0].name });
+    await Cut.say(bo[1].say.slice(0, 2), { name: bo[1].name });
+    /* the camera drops its eye toward the ground, where the two shadows are, and the last line is said over it */
+    C.sfx("err");
+    await C.tween(cam, { pitch: -0.52, y: 0.15 }, 0.8, "inOut");
+    await C.wait(0.5);
+    await Cut.say(bo[1].say.slice(2), { name: bo[1].name });
+    /* 「……呵。」: the ripple starts with the line (it is drawn from the clock, which runs under the dialogue) */
+    rip.t0 = game.time; rip.k = 1;
+    await Cut.say(bo[2].say, { name: bo[2].name });
+    var stopMist = C.every(0.04, function () { puff(bx, bz, 3.2); });
+    await C.tween(master, { alpha: 0 }, 1.4, "linear");
+    stage = [];
+    var mirage = bossActor(b, { y: -2.4, alpha: 0 });
+    stage.push(mirage);
+    C.shake(3, 1.8); C.sfx("hit");
+    await Promise.all([C.tween(mirage, { y: 0, alpha: 1 }, 1.9, "out"), C.tween(rip, { k: 0 }, 2.4, "linear")]);
+    stopMist();
+    await C.wait(0.4);
+    await Cut.say(bo[3].say, { name: bo[3].name });
+  });
+  /* the hero comes back to the tiles south of the boss (three, as in `afterBoss`), so the pendant scene starts where it should */
+  fight("top:B", BATTLE.ROUTE[3].fights[0], BATTLE.ROUTE[3].area, { c: 6, r: 5, face: "up" });
+}
+
+/* The roof after the fight: the mirage flickers at half strength (alpha pulsing in steps, not blinking) while it speaks,
+   dissolves (alpha 1 to 0, mist rising), and leaves the pendant, which falls and lies glowing. The hero walks to it;
+   when it warms in his hand his HP and MP come back (Rules.rest) with a small glow. Then ink, and the ending. */
+async function afterBoss() {
+  busy = true;
+  var b = cur.P.boss, bx = b.c + 0.5, bz = -b.r - 0.5, st = STORY.top, ghost = bossActor(b, { scale: 0.1, pulse: [0.5, 0.2, 3.2] });
+  stage = [ghost];
+  await Cut.play("top:pendant", async function (C) {
+    cam.snap = true;
+    await C.tween(cam, { x: bx - 0.6, z: bz - 1.9, y: 0.4, pitch: -0.45, dist: 5 }, 1, "inOut");
+    await Cut.dialogue(st.pendant);
+    /* a last surge, then it comes apart into the mist */
+    ghost.alpha = 0.5 + 0.2 * Math.sin(game.time * 3.2); ghost.pulse = null;
+    await C.tween(ghost, { alpha: 1 }, 0.3, "out");
+    var stopMist = C.every(0.03, function () { puff(bx, bz + 0.2, 3); });
+    await C.tween(ghost, { alpha: 0, y: 0.5 }, 1.5, "linear");
+    stopMist();
+    stage = [];
+    /* the pendant falls where he stood, and lies there with a soft glow and a few sparks */
+    var pend = { art: ART.pendant, x: bx, z: bz, y: 2.8, scale: 0.1, snap: true, sh: 0.5 };
+    stage.push(pend);
+    glows = [{ x: bx, y: 0.5, z: bz - 0.3, radius: 3.2, base: 1, env: function (t) { return 0.8 + 0.2 * Math.sin(t * 3); } }];
+    await C.tween(pend, { y: 0.02 }, 0.45, "in");
+    C.sfx("coin");
+    await C.tween(pend, { y: 0.3 }, 0.14, "out");
+    await C.tween(pend, { y: 0.02 }, 0.14, "in");
+    C.every(0.25, function () { FX.spawn({ x: bx + (Math.random() - 0.5) * 0.5, y: 0.2, z: bz + (Math.random() - 0.5) * 0.3, vy: 0.5, life: 0.9, tone: 3, size: 0.05 }); });
+    await C.wait(0.7);
+    var look = C.tween(cam, { x: bx - 0.9, z: bz - 0.1, dist: 4.8 }, 1.3, "inOut");
+    await walkHero(C, route(hero.c, hero.r, 5, 2));
+    await look;
+    hero.face = "right";
+    await Cut.say(st.found[0].say);
+    await Cut.say(st.found[1].say, { name: st.found[1].name });
+    /* he takes it up; it is warm. Hurt and tired no more: the stone's rest, with a glow on him */
+    await C.tween(pend, { x: hero.x + 0.2, z: hero.z, y: 0.5 }, 0.35, "inOut");
+    stage = [];
+    Rules.rest(me);
+    glows = [{ x: hero.x, y: 0.6, z: hero.z - 0.2, radius: 3, base: 1.1, t0: game.time, env: function (t, gl) { var k = t - gl.t0; return Math.max(0, k < 0.4 ? k / 0.4 : 1 - (k - 0.4) / 1.6); } }];
+    for (var i = 0; i < 16; i++) FX.spawn({ x: hero.x + (Math.random() - 0.5) * 0.8, y: 0.1 + Math.random() * 0.5, z: hero.z + (Math.random() - 0.5) * 0.4,
+      vy: 0.6 + Math.random() * 0.8, life: 0.9 + Math.random() * 0.6, tone: 3, size: 0.05 });
+    game.sfx("ok");
+    await Cut.say(st.found[2].say);
+    await Cut.say(st.found[3].say, { name: st.found[3].name });
+    await C.wait(0.3);
+  });
+  game.go("map", { id: "ending" }, { to: LoGame.INK });
+}
+
+/* The ending, at dawn at the tower's gate: the master waits; the hero reports; the close-up of the hand (a full-screen
+   2D picture, no text) closing on the pendant in his sleeve; a pause; the master's answer; the master goes in through the
+   gate; the last shot pulls back and up from the hero alone, a faint glow at his hand beating like a heart. */
+async function ending() {
+  busy = true;
+  var en = STORY.ending, master = { art: ART.master, x: 6.5, z: -3.5 };
+  stage = [master];
+  cam.x = 7.5; cam.z = -2.4; cam.pitch = -0.5;
+  await Cut.play("ending", async function (C) {
+    banner = STORY.places.ending;
+    await C.wait(1.8);
+    banner = "";
+    await walkHero(C, ["down", "down"]);
+    hero.face = "left";
+    await C.tween(cam, { x: 7, z: -3.2 }, 0.6, "inOut");
+    await Cut.dialogue(en.report);
+    panel = { f: 0, fade: 1 };
+    await C.tween(panel, { fade: 0 }, 0.5, "linear");
+    await C.wait(1.3); panel.f = 1;
+    await C.wait(0.35); panel.f = 2;
+    await C.wait(1.0);
+    await C.tween(panel, { fade: 1 }, 0.4, "linear");
+    panel = null;
+    await C.wait(1.5);
+    await Cut.dialogue(en.answer);
+    /* he turns away and goes in through the gate, fading in the doorway */
+    await C.tween(master, { z: -1.45 }, 1.5, "inOut");
+    await C.tween(master, { z: -0.95, alpha: 0 }, 0.8, "linear");
+    stage = [];
+    hero.face = "up";
+    await C.wait(0.9);
+    /* a beat at his right hand: two soft pulses, a pause */
+    var bump = function (p, c) { return Math.max(0, 1 - Math.abs(p - c) / 0.14); };
+    glows = [{ x: hero.x + 0.32, y: 0.32, z: hero.z - 0.1, radius: 3, base: 1.6, dot: 0.22,
+      env: function (t) { var p = t % 1.2; return Math.max(bump(p, 0.1), 0.7 * bump(p, 0.38)); } }];
+    await C.tween(cam, { x: hero.x, z: hero.z + 2, y: 6.5, pitch: -0.08, dist: 18 }, 7, "inOut");
+    await C.wait(2);
+  });
+  glows = [];
+  game.go("credits", null, { to: LoGame.INK });
+}
+
+/* 序章 完, the credits and 待续, on ink. A skips the roll to 待续, then A goes back to the title.
+   Reaching this scene is clearing the game: it is saved with the seen-list (the progress save stays as it was). */
+var cr = { phase: "end", t: 0, y: 0 };
+scene("credits", {
+  enter: function () {
+    ended = true;
+    cr = { phase: "end", t: 0, y: 150 };
+    Cut.seen.cleared = true;
+    writeSeen();
+  },
+  update: function (dt) {
+    cr.t += dt;
+    var lines = STORY.ending.credits;
+    if (cr.phase === "end") {
+      if (cr.t >= 3) { cr.phase = "roll"; cr.t = 0; cr.y = 150; }
+    } else if (cr.phase === "roll") {
+      cr.y -= 16 * dt;
+      if ((game.ok() && cr.t > 0.3) || cr.y + lines.length * 14 < -4) { cr.phase = "next"; cr.t = 0; }
+    } else if (game.ok() && cr.t > 0.4) {
+      game.sfx("ok");
+      game.go("title", null, { to: LoGame.INK });
+    }
+  },
+  draw: function (g) {
+    var en = STORY.ending;
+    g.clear(g.INK);
+    if (cr.phase === "end") g.text(en.end, 80, 66, { align: "center", color: g.PAPER });
+    else if (cr.phase === "roll") {
+      en.credits.forEach(function (line, i) {
+        var y = Math.round(cr.y + i * 14);
+        /* a line after a gap is a heading: mid; the first line and the last stay paper */
+        var head = i > 0 && i < en.credits.length - 1 && en.credits[i - 1] === "";
+        if (line && y > -14 && y < 144) g.text(line, 80, y, { align: "center", color: head ? g.MID : g.PAPER });
+      });
+    } else {
+      g.text(en.next[0], 80, 52, { align: "center", color: g.PAPER });
+      g.text(en.next[1], 80, 72, { align: "center", color: g.PAPER });
+      if (Math.floor(game.time * 2) % 2) g.arrow(77, 116, "down", g.MID);
+    }
+  }
+});
 
 function arrive() {
   var near = foes.filter(function (f) { return Math.max(Math.abs(f.c - hero.c), Math.abs(f.r - hero.r)) <= 1; });
@@ -207,7 +429,7 @@ async function afterFight(args) {
   await game.wait(0.45);
   if (args.result === "lose") {
     await saySeq(STORY.lose);
-    if (lastSave) game.go("map", { id: lastSave.map, resume: clone(lastSave) }, { to: LoGame.INK });
+    if (runSave) game.go("map", { id: runSave.map, resume: clone(runSave) }, { to: LoGame.INK });
     else game.go("title", null, { to: LoGame.INK });
     return;
   }
@@ -253,9 +475,10 @@ scene("map", {
     args = args || {};
     Cut.reset();
     busy = false;
+    stage = []; glows = []; rip.k = 0; panel = null; FX.reset(); fxT = game.time;
     cur = mapInfo(args.id || "town");
-    if (args.fresh) { me = Rules.newHero(1); flags = freshFlags(); }
-    if (args.resume) { me = args.resume.hero; flags = args.resume.flags; }
+    if (args.fresh) { me = Rules.newHero(1); flags = freshFlags(); runSave = null; ended = false; }
+    if (args.resume) { me = args.resume.hero; flags = args.resume.flags; runSave = clone(args.resume); }
     if (args.hero) me = args.hero;
     if (args.flags) flags = args.flags;
     if (!me) { me = Rules.newHero(1); flags = flags || freshFlags(); }
@@ -269,18 +492,19 @@ scene("map", {
       if (args.result === "win") flags.beat[args.key] = 1;
     }
     hero = { c: c, r: r, pc: c, pr: r, x: c + 0.5, z: -r - 0.5, face: face, step: 0, moving: null };
-    cam = { x: hero.x, z: hero.z, pitch: CAM.pitch, dist: CAM.dist };
+    cam = { x: hero.x, z: hero.z, pitch: CAM.pitch, dist: CAM.dist, y: 0, yaw: 0, snap: false };
     banner = "";
 
-    people = cur.id === "town"
+    people = cur.dawn ? [] : cur.id === "town"
       ? TOWN.people.map(function (p) { return { x: p.x, y: p.y, art: ART[p.art], name: p.name, who: p.art, pages: STORY.town[p.art] }; })
       : cur.P.people.map(function (p, i) { var d = cur.def.people[i]; return { x: p.c, y: p.r, art: ART[d.art], name: d.name, pages: [{ name: d.name, say: d.say }] }; });
     var part = cur.def ? BATTLE.ROUTE[cur.def.part] : null;
-    foes = !cur.P ? [] : cur.P.foes.filter(function (f) { return !flags.beat[cur.id + ":" + f.k]; }).map(function (f) {
+    foes = !cur.P || cur.dawn ? [] : cur.P.foes.filter(function (f) { return !flags.beat[cur.id + ":" + f.k]; }).map(function (f) {
       var ids = part.fights[f.k - 1];
       return { c: f.c, r: f.r, k: f.k, key: cur.id + ":" + f.k, ids: ids, area: part.area, art: B_ART[BATTLE.ENEMIES[ids[0]].art] };
     });
 
+    if (cur.dawn) { ending(); return; }
     var name = cur.id === "town" ? TOWN.name : STORY.places[cur.id];
     if (args.intro) {
       /* the camera starts on the tower and comes down the road to the hero */
@@ -342,29 +566,58 @@ scene("map", {
     cam.z += (hero.z - cam.z) * Math.min(1, dt * 8);
   },
   draw: function (g) {
-    var walk = hero.moving ? Math.floor(hero.moving.t * 2 + hero.step) % 2 : 0;
+    /* hero.walking: a cutscene walks him by tweening x and z, so the stride follows the clock instead of a step's progress */
+    var walk = hero.moving ? Math.floor(hero.moving.t * 2 + hero.step) % 2 : hero.walking ? Math.floor(game.time * 8.4 + hero.step) % 2 : 0;
     var art = hero.face === "up" ? (walk ? ART.heroUp1 : ART.heroUp0)
       : hero.face === "down" ? (walk ? ART.heroDown1 : ART.heroDown0)
       : (walk ? ART.heroSide1 : ART.heroSide0);
     var t = game.time;
-    var actors = people.map(function (p) { return { art: p.art, x: p.x + 0.5, z: -p.y - 0.5 }; });
+    var snap = cam.snap;
+    var actors = people.map(function (p) { return { art: p.art, x: p.x + 0.5, z: -p.y - 0.5, snap: snap }; });
     /* enemies idle: the floaters bob, the others turn about now and then */
     foes.forEach(function (f) {
       var float = f.art === B_ART.fox || f.art === B_ART.wraith;
       actors.push({ art: f.art, x: f.c + 0.5, z: -f.r - 0.5, y: float ? 0.2 + Math.sin(t * 3 + f.k) * 0.08 : 0,
         flip: !float && Math.floor(t * 1.4 + f.k) % 2 === 1, sh: f.art.w / 14 });
     });
-    actors.push({ art: art, x: hero.x, z: hero.z, flip: hero.face === "right" });
+    /* a cutscene's actors; one that pulses has its alpha worked out from the clock, so it moves under a dialogue too */
+    stage.forEach(function (a) {
+      var o = Object.assign({}, a);
+      if (a.pulse) o.alpha = a.pulse[0] + a.pulse[1] * Math.sin(t * a.pulse[2]);
+      actors.push(o);
+    });
+    actors.push({ art: art, x: hero.x, z: hero.z, flip: hero.face === "right", snap: snap });
     var view = { x: cam.x, z: cam.z, pitch: cam.pitch, dist: cam.dist, time: t };
     if (cur.kind === "town") frame(g, view, actors);
     else {
-      view.weather = cur.def.weather;
-      g.sprite(Maps.render(R, cur.world, view, actors, { opened: openedNow(), hero: hero }), 0, 0);
+      view.weather = cur.dawn ? null : cur.def.weather;
+      view.y = cam.y; view.yaw = cam.yaw;
+      if (cur.dawn) { view.dawn = true; view.lamp = 0.3; }
+      /* particles and glows step by the clock in draw, which also runs while a dialogue is open */
+      var dt = game.time - fxT;
+      fxT = game.time;
+      if (dt > 0 && dt < 0.2) FX.step(dt);
+      var lights = [];
+      glows.forEach(function (gl) {
+        var p = gl.base * gl.env(t, gl);
+        if (p > 0.02) lights.push({ x: gl.x, y: gl.y, z: gl.z, radius: gl.radius, power: p });
+      });
+      var img = Maps.render(R, cur.world, view, actors, { opened: openedNow(), hero: hero, lights: lights, after: function (RR) {
+        FX.drawParts(RR);
+        glows.forEach(function (gl) { if (gl.dot != null && gl.env(t, gl) > 0.45) RR.dot([gl.x, gl.y, gl.z - 0.12], 3, gl.dot); });
+      } });
+      if (rip.k > 0.01) FX.wave(img.px, rip.k * 2.6 * Math.min(1, (t - rip.t0) * 3), 0.28, t * 8, 0, 144);
+      g.sprite(img, 0, 0);
     }
     if (banner) {
       var w = g.measure(banner) + 14;
       g.window(Math.round(80 - w / 2), 6, w, 18);
       g.text(banner, 80, 10, { align: "center" });
+    }
+    /* the close-up of the hand covers the whole screen; it comes and goes through a dithered ink */
+    if (panel) {
+      g.sprite(ART.hand[panel.f], 0, 0);
+      if (panel.fade > 0) g.dither(0, 0, 160, 144, g.INK, Math.min(4, Math.ceil(panel.fade * 4)));
     }
   }
 });
@@ -395,7 +648,8 @@ var ZT = {
   },
   goto: function (id, o) {
     o = o || {};
-    var part = id === "town" ? 0 : STORY[id].part, f = freshFlags();
+    /* "ending" is the dawn scene after the roof: every map is behind the hero. o.win: the roof's boss has just fallen */
+    var part = id === "town" ? 0 : id === "ending" ? 4 : STORY[id].part, f = freshFlags();
     f.master = id === "town" ? 0 : 1;
     if (o.entered) f.entered[id] = 1;
     ["road", "floor1", "floor2", "top"].forEach(function (m) {
@@ -404,10 +658,11 @@ var ZT = {
       STORY[m].chests.forEach(function (_, i) { f.opened[m + ":" + i] = 1; });
       BATTLE.ROUTE[STORY[m].part].fights.forEach(function (_, k) { f.beat[m + ":" + (k + 1)] = 1; });
     });
-    game.go("map", { id: id, hero: ZT.heroAt(part, 0), flags: f, x: o.x, y: o.y }, { fade: false });
+    var won = o.win ? { at: { c: 6, r: 5, face: "up" }, prev: { c: 6, r: 5 }, result: "win", key: "top:B" } : {};
+    game.go("map", Object.assign({ id: id, hero: ZT.heroAt(part > 3 ? 3 : part, part > 3 ? 1 : 0), flags: f, x: o.x, y: o.y }, won), { fade: false });
   },
   state: function () {
-    return { scene: where, map: cur && cur.id, x: hero && hero.c, y: hero && hero.r, flags: flags, hero: me };
+    return { scene: where, map: cur && cur.id, x: hero && hero.c, y: hero && hero.r, flags: flags, hero: me, ended: ended, credits: cr.phase, cleared: !!Cut.seen.cleared };
   }
 };
 

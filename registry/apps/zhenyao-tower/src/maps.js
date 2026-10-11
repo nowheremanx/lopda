@@ -222,16 +222,21 @@ var Maps = (function () {
   var KIND = {
     road: { sky: [0.1, 0.42], amb: 0.26, dif: 0.42, fog: 0.35, near: 3, far: 24 },
     tower: { sky: [0.02, 0.07], amb: 0.22, dif: 0.32, fog: 0.08, near: 2, far: 18 },
-    roof: { sky: [0.14, 0.5], amb: 0.3, dif: 0.46, fog: 0.4, near: 3, far: 26 }
+    roof: { sky: [0.14, 0.5], amb: 0.3, dif: 0.46, fog: 0.4, near: 3, far: 26 },
+    /* the road at dawn (the ending): a pale sky, mist low over the ground, the lanterns nearly out */
+    dawn: { sky: [0.5, 0.86], amb: 0.52, dif: 0.46, fog: 0.62, near: 4, far: 30 }
   };
   var STARS = [];
   for (var s = 0; s < 40; s++) STARS.push([hash(s, 7) * 120 - 50, 18 + hash(s, 9) * 30, 70 + hash(s, 3) * 20]);
   var SHADOW = Lo3D.shadow(0.36, 8);
   var MAX_LIGHTS = 12;
 
-  /* view: {x, y, z, pitch, dist, time, weather}; actors: [{art, x, z, y, flip, sh}]; st: {opened: {chest index: true}, hero: {x, z}} */
+  /* view: {x, y, z, yaw, pitch, dist, time, weather, dawn}; dawn: the road in the morning, no rain, lamps at view.lamp.
+     actors: [{art, x, z, y, flip, sh, scale, alpha, snap, noShadow}] (cutscene actors use the last four: a sprite that fades,
+     a big close sprite, one that casts no shadow);
+     st: {opened: {chest index: true}, hero: {x, z}, lights: [extra point lights], after: function (R) drawn after present} */
   function render(R, w, view, actors, st) {
-    var cam = R.camera, K = KIND[w.kind], t = view.time || 0;
+    var cam = R.camera, K = view.dawn ? KIND.dawn : KIND[w.kind], t = view.time || 0, lamp = view.lamp == null ? 1 : view.lamp;
     cam.x = view.x; cam.y = view.y || 0; cam.z = view.z; cam.yaw = view.yaw || 0; cam.pitch = view.pitch; cam.dist = view.dist; cam.focal = 136;
     R.sun = { dir: Lo3D.norm([-0.4, 0.7, -0.6]), ambient: K.amb, diffuse: K.dif };
     R.fog = { near: view.dist + K.near, far: view.dist + K.far, lum: K.fog };
@@ -239,12 +244,14 @@ var Maps = (function () {
     R.near = 0.3;
     /* the nearest few lights only: each costs per pixel */
     var ls = w.lights.map(function (L) {
-      L.power = L.base * (0.86 + 0.14 * Math.sin(t * 11 + L.seed * 7) * Math.sin(t * 4.3 + L.seed));
+      L.power = L.base * lamp * (0.86 + 0.14 * Math.sin(t * 11 + L.seed * 7) * Math.sin(t * 4.3 + L.seed));
       var dx = L.x - view.x, dz = L.z - view.z;
       L.d = dx * dx + dz * dz;
       return L;
     }).filter(function (L) { return L.d < 13 * 13; });
     if (ls.length > MAX_LIGHTS) ls = ls.sort(function (a, b) { return a.d - b.d; }).slice(0, MAX_LIGHTS);
+    /* a cutscene's own lights (the pendant, a glow on the hand) come on top; at most two, so the budget of 14 holds */
+    if (st && st.lights) ls = ls.concat(st.lights.slice(0, 2));
     R.lights = ls;
     R.clear(function (yy) { return K.sky[0] + (K.sky[1] - K.sky[0]) * Math.min(1, yy / 60); });
     w.chunks.forEach(function (m) {
@@ -265,10 +272,21 @@ var Maps = (function () {
       R.draw(p.mesh, null, dz > 0.2 && dz < 3.9 && dx < 0.9 ? { alpha: 0.25 } : null);
     });
     w.chests.forEach(function (c) { R.draw(st && st.opened && st.opened[c.i] ? c.open : c.closed); });
-    actors.forEach(function (a) { R.draw(SHADOW, function (p) { var k = a.sh || 1; return [p[0] * k + a.x, p[1], p[2] * k + a.z]; }); });
-    actors.forEach(function (a) { R.sprite(a.art, a.x, a.y || 0, a.z, { scale: 1 / 16, flip: a.flip, crisp: true }); });
+    actors.forEach(function (a) {
+      if (a.noShadow) return;
+      var fn = function (p) { var k = a.sh || 1; return [p[0] * k + a.x, p[1], p[2] * k + a.z]; };
+      /* the shadow of something that is only half there is half there too */
+      if (a.alpha != null && a.alpha < 1) R.draw(SHADOW, fn, { alpha: a.alpha }); else R.draw(SHADOW, fn);
+    });
+    actors.forEach(function (a) {
+      var o = { scale: a.scale || 1 / 16, flip: a.flip, crisp: !a.snap };
+      if (a.snap) o.snap = true;
+      if (a.alpha != null && a.alpha < 1) o.alpha = a.alpha;
+      R.sprite(a.art, a.x, a.y || 0, a.z, o);
+    });
     R.present();
-    if (w.kind !== "tower") STARS.forEach(function (p, i) { if ((i * 7 + Math.floor(t * 2)) % 23) R.dot([p[0] + view.x, p[1], p[2] + view.z], 3, 0); });
+    if (st && st.after) st.after(R);
+    if (w.kind !== "tower" && !view.dawn) STARS.forEach(function (p, i) { if ((i * 7 + Math.floor(t * 2)) % 23) R.dot([p[0] + view.x, p[1], p[2] + view.z], 3, 0); });
     if (view.weather === "rain") Weather.rain(R, view, t);
     return R.image;
   }
