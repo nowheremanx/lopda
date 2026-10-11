@@ -45,6 +45,10 @@ node --test                                  # the test suite; must pass
   pad-shim.js, lo-game.js) run in `node:vm` with small fakes (platform.test.mjs has an in-memory
   IndexedDB). It also guards repo rules: index.json in sync, RUNTIME_VERSION = sw.js VERSION,
   zh/en keys complete, lo-game hash released, SHELL files exist.
+- `tests/app-vm.mjs` runs a bundled app in Node with a fake DOM and a manual clock. `tests/frame-hashes.mjs`
+  uses it to prove a change leaves every frame identical (VecDream, and zhenyao-tower's scripted scenes in
+  `tests/zhenyao-play.js`); `tests/zhenyao-budget.test.mjs` checks the per-frame triangle and light budget
+  (decisions.md 12.2); `tests/zhenyao-perf.mjs` measures frame times in Chromium.
 - `tests/e2e.test.mjs` boots the runtime and every registry app in headless Chromium; it skips unless
   Playwright is installed (`npm i --no-save playwright && npx playwright install chromium`).
 - Deeper UI checks (camera, cartridge) have been Playwright scripts against

@@ -1,6 +1,6 @@
 {
   "spec": "lopda/1",
-  "generated": "2026-10-10",
+  "generated": "2026-10-11",
   "apps": [
     {
       "spec": "lopda/1",
@@ -140,8 +140,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/vector-dream/index.html",
-      "sha256": "bbea9491a6c60ea049aa4b1ed484d719f3188456ee6e731d06a454050d644dba",
-      "bytes": 26746
+      "sha256": "f02b3bcdc81bc8f85a00dcdd434c3c4dbad1b40e6e8f8383449c1548ec6b4965",
+      "bytes": 35446
     },
     {
       "spec": "lopda/1",
@@ -235,8 +235,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/zhenyao-tower/index.html",
-      "sha256": "1c9130f6ef61758dd777e3b87b387810ebc3d4f1a6337c9af9bcb6eaaa99639e",
-      "bytes": 165812
+      "sha256": "9204fa1e43119482d06fad056a29ec81eac6b3afdba765d955c2c284c2e492cc",
+      "bytes": 172616
     }
   ]
 }
