@@ -1,5 +1,7 @@
 # Handoff：RPG 技术展示「镇妖塔·外传」
 
+（2026-10-11：P3 起游戏改名为「镇妖塔·序章」，见 `docs/decisions.md` 12.3。本文件保留原来的提法。）
+
 给 cloud 上的 Claude Code 主 session 读。先读 `CLAUDE.md` 和 `docs/decisions.md`，本文件只写增量。
 本文件的决定已经由 owner（Haowei）确认（2026-10-08）。
 
