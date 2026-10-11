@@ -129,7 +129,12 @@
   - 文件接口、预装 app、画板改成社区 app、计算器：`docs/design/pad-files.md`。
   - 万年历：`docs/design/calendar.md`。
   - 电子书阅读器 + 英汉词典（联动记事本）：`docs/design/reader-dictionary.md`。
-  - 顺序：先拆分 `lopda.js`（每个内置程序一个文件，纯搬移），再按上面的顺序做。〔提议〕
+  - 顺序：先拆分 `lopda.js`（每个内置程序一个文件，纯搬移），再按上面的顺序做。
+  - **拆分已完成**（2026-10-11，runtime 0.4.1）：`core.js`（共享对象 `LP`：工具、存储、视图切换、音效、语言、更新、图标、主屏、下巴按键）、
+    `apps/*.js`（notes、paint、camera、cutter、cart、store、settings，每个一个 IIFE）、`boot.js`（最后加载）。仍是 ES5、没有构建步骤、没有 ES module。
+    内置程序用 `LP.builtin({...})` 注册，主屏按注册顺序（即 index.html 里 script 的顺序）画图标；视图切换、换语言、下巴按键、存储就绪、
+    页面隐藏时的处理都改为钩子，core 不再点名任何内置程序。裁片机用相机的胶片工具（`LP.film`），所以 camera.js 要先于 cutter.js 加载。
+    用户看到的一切不变，用 `tests/runtime-shots.mjs` 在拆分前后逐张截图比对证明。
 - **需要在 iPhone 上验证**：
   - 卡带机在 Safari 上的声音和帧率。
   - 胶卷架左右滑动的停靠手感。
@@ -147,7 +152,7 @@
 - **默认语言**：`navigator.language` 以 `zh` 开头时用中文，否则用英文。设置里有「语言」一行（中文 / English），和其他设置一起存进 IndexedDB。
 - **切换语言**：原地重绘，不重新加载页面。只有设置页能切换，其他界面打开时才生成文字，所以只需重绘主屏和设置页；正在运行的 app 会重新启动。
 - **英文文案的语气**：简短，像老设备上的标签，不逐字翻译。内置程序名：Notes、Paint、Camera、Cutter、Cartridge、Store、Settings。
-- **胶片输出**：本来就用英文标签（PIXEL FILM、SAKURA…）。中文模式下保持原样（「SAKURA 樱粉」）；英文模式下去掉中文色调名。色调的中文名作为数据留在 `lopda.js` 的 `TINTS` 里。
+- **胶片输出**：本来就用英文标签（PIXEL FILM、SAKURA…）。中文模式下保持原样（「SAKURA 樱粉」）；英文模式下去掉中文色调名。色调的中文名作为数据留在 `runtime/apps/camera.js` 的 `TINTS` 里。
 - **app 获知语言**：runtime 把语言传进沙盒，`PAD.lang` 为 `"zh"` 或 `"en"`。这是 `lopda/1` 内的增量字段：旧版 runtime 不提供，app 必须退回自己的默认语言。app 运行期间语言不变。
 - **商店信息**：manifest 可选 `i18n`（`{"en": {"name", "description"}}`），规则和默认字段相同（名字 1–8 个字符、简介 80 个字符以内、不含 emoji）。商店和主屏显示当前语言的名字。8 个字符的上限对英文名同样适用，逼着起短名字（Mole Bop、Gomoku、The Yard）。
 - **社区 app 不要求双语**，只推荐。文档和模板都按双语写；检查器对没有 `i18n` 的 app 只给提示，不报错。
@@ -180,10 +185,15 @@
 - **部署（GitHub Pages）**：`.github/workflows/pages.yml` 只用 git 命令发布到 `gh-pages` 分支，不用第三方 action。
   - push 到 `main` 发布到站点根目录：`https://nowheremanx.github.io/lopda/runtime/`。
   - 同一 repo 的 PR 发布到 `pr/<编号>/`，在 PR 里留一条预览链接（更新而不是重复发），PR 关闭后删除；fork 的 PR 不发布。
-  - 只在 PR 改了能预览的东西时才发布（2026-10-10）：改了某些 app 只列这些 app；改了 `sdk/` 或 `runtime/` 列出全部 app；
-    只改文档、测试、CI 时不发布也不留言，省掉一次 Pages 构建。
-  - **预览和正式站点同源**（`nowheremanx.github.io`），IndexedDB 共享。所以预览链接只给 `sdk/dev.html?app=...`
-    （它把存档放在 localStorage），不要在预览路径下打开 `runtime/`，否则读写的就是正式掌机的数据。
+  - 只在 PR 改了能预览的东西时才发布（2026-10-10）：改了某些 app 只列这些 app；改了 `runtime/`（任何文件）或 `sdk/` 里的
+    `.js` 文件列出全部 app（`sdk/*.md` 之类文档不算）；只改文档、测试、CI 时不发布也不留言，省掉一次 Pages 构建。
+    改了 `runtime/` 时留言里多一条 `pr/<编号>/runtime/` 链接。
+  - **预览和正式站点同源**（`nowheremanx.github.io`），但 `platform.js` 在路径含 `/pr/<编号>/` 时把 IndexedDB 名换成
+    `lopda-pr-<编号>`（2026-10-11），所以预览里的 `runtime/` 可以打开，不会碰正式掌机的数据。
+  - 仍然共享的状态：`sdk/dev.html` 的 localStorage（键 `lopda-dev:<app id>`，所有预览共用，正式掌机不用）。
+    Service worker 的 scope 是脚本所在目录，`pr/<n>/runtime/` 的 SW 管不到根目录的页面，但 Cache Storage 按源共享：
+    `sw.js` 的 activate 会删掉名字不等于自己 `VERSION` 的所有缓存，预览 SW 激活时若版本号不同，会删掉正式站的缓存（反过来也一样），
+    结果是离线缓存被清掉，联网用的时候逐个文件重新缓存，数据不受影响。〔待定：缓存名加上 scope，activate 只清自己 scope 的旧缓存〕
   - 本地地址和 Pages 地址是两个站点，数据互不相通。
 
 ### 12.1 战斗（P2）

@@ -8,13 +8,15 @@ Design history and open questions: `docs/decisions.md`. Read it before changing 
 ## Layout
 
 ```
-runtime/        the PWA: index.html, lopda.js (all built-ins), strings.js (zh/en text), lopda.css, platform.js (IndexedDB store,
-                file export), sw.js (offline cache), vendor/binjgb/ (Game Boy core, MIT)
+runtime/        the PWA: index.html, core.js (shared LP object: utils, views, sound, home, chin pad), apps/*.js (one file per
+                built-in), boot.js (loaded last), strings.js (zh/en text), lopda.css, platform.js (IndexedDB store, file export),
+                sw.js (offline cache), vendor/binjgb/ (Game Boy core, MIT)
 sdk/            MIT. pad-shim.js (PAD bridge), lo-game.js (game framework), LO-GAME.md, lo-3d.js (3D), LO-3D.md, PROMPT.md,
                 dev.html (app harness), template/, template-game/, template-vn/ (visual novel), fonts/ (lopix12, OFL)
 registry/       index.json (generated) + apps/<id>/{manifest.json,index.html,src/ (optional sources)}
 tools/          check-app.mjs, build-index.mjs, bundle-app.mjs (+ lo-game.mjs alias), lo-game-lib.mjs (Node 20+, no deps)
-tests/          node:test suite (no deps): tools, strings, PAD shim, platform store, lo-game, repo rules
+tests/          node:test suite (no deps): tools, strings, PAD shim, platform store, lo-game, repo rules;
+                runtime-shots.mjs (before/after screenshots of the runtime)
 SPEC.md         app spec lopda/1 (MIT)
 LICENSE NOTICE LICENSING.md CONTRIBUTING.md
 ```
@@ -23,11 +25,14 @@ LICENSE NOTICE LICENSING.md CONTRIBUTING.md
 
 - Plain HTML/CSS/JS. No npm dependencies, no framework. The runtime has no build step; an app may
   keep its source in `src/` and use `tools/bundle-app.mjs` to fill it into its single `index.html`.
-- Runtime JS is ES5-style (`var`, `function`, one IIFE in lopda.js). Tools are Node ESM.
+- Runtime JS is ES5-style (`var`, `function`, one IIFE per file, no ES modules, no build step). index.html loads
+  core.js, then apps/*.js, then boot.js. Files talk only through `window.LP`. Tools are Node ESM.
 - Storage: IndexedDB through `platform.js`, a small document store (`doc(path)`, `collection(path)`;
   doc paths have an even number of segments, base `data/users/local`).
-- Built-ins in lopda.js: notes, pixel paint, pixel camera, strip cutter, cartridge player (GB),
-  app store + sandboxed runner, settings.
+- Built-ins, one file each in runtime/apps/: notes, paint, camera (viewfinder, film, contact card; shares its film
+  helpers as `LP.film`), cutter, cart (GB), store (app store + sandboxed runner), settings. Each registers with
+  `LP.builtin({id, label, icon, view, open, ...hooks})`; the home screen draws them in registration order
+  (the order of the script tags). Hooks are listed at the top of core.js.
 
 ## Run and test
 
@@ -44,11 +49,14 @@ node --test                                  # the test suite; must pass
 - `node --test` runs `tests/*.test.mjs` with no dependencies. Browser scripts (strings.js, platform.js,
   pad-shim.js, lo-game.js) run in `node:vm` with small fakes (platform.test.mjs has an in-memory
   IndexedDB). It also guards repo rules: index.json in sync, RUNTIME_VERSION = sw.js VERSION,
-  zh/en keys complete, lo-game hash released, SHELL files exist.
+  zh/en keys complete, lo-game hash released, SHELL files exist, every runtime/*.js is loaded by index.html and listed in SHELL (add new files to both).
 - `tests/app-vm.mjs` runs a bundled app in Node with a fake DOM and a manual clock. `tests/frame-hashes.mjs`
   uses it to prove a change leaves every frame identical (VecDream, and zhenyao-tower's scripted scenes in
   `tests/zhenyao-play.js`); `tests/zhenyao-budget.test.mjs` checks the per-frame triangle and light budget
   (decisions.md 12.2); `tests/zhenyao-perf.mjs` measures frame times in Chromium.
+- `tests/runtime-shots.mjs` proves a runtime change leaves the screen alone: `capture <repoRoot> <outDir>` drives every built-in
+  in Chromium (fixed clock, seeded random, a generated fake camera) and saves screenshots plus the film/cut downloads;
+  `compare <dirA> <dirB>` checks them pixel by pixel. Capture a worktree of main and your tree, then compare.
 - `tests/e2e.test.mjs` boots the runtime and every registry app in headless Chromium; it skips unless
   Playwright is installed (`npm i --no-save playwright && npx playwright install chromium`).
 - Deeper UI checks (camera, cartridge) have been Playwright scripts against
@@ -92,7 +100,7 @@ node --test                                  # the test suite; must pass
 ## Code style and conventions
 
 - Keep files dependency-free and readable; comment why, not what. UI text is short Chinese and English:
-  every runtime string lives in `runtime/strings.js` (`tr(key, vars)` in lopda.js); add both languages.
+  every runtime string lives in `runtime/strings.js` (`tr(key, vars)` in the runtime scripts); add both languages.
   Only zh and en (see docs/decisions.md section 11).
 - Every pixel the user sees on the LCD is one of the four tones. Output images (film, cards)
   may use a roll's tint palette. No emoji anywhere (the runtime strips them in apps).
@@ -101,7 +109,7 @@ node --test                                  # the test suite; must pass
 - On touch, `pointerdown` does not grant user activation. Anything that opens the share sheet
   or the system camera must run on release (`pointerup`) or from a real click.
 - Views must fit one screen without scrolling when they are "hardware" (camera, cartridge).
-- Bump `RUNTIME_VERSION` in lopda.js and `VERSION` in sw.js together on every runtime change;
+- Bump `RUNTIME_VERSION` in core.js and `VERSION` in sw.js together on every runtime change;
   Settings → 检查更新 compares them.
 - Design rule: a change should remove a decision from the user, or at least not add one.
   Prefer realism (how the real device or film behaves) over convenience.

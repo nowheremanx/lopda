@@ -85,7 +85,7 @@ prompt) and start from `sdk/template-game/`, or `sdk/template-vn/` for a visual 
 ## Layout
 
 ```
-runtime/     the PWA (index.html, lopda.js, lopda.css, platform.js, sw.js, icons)
+runtime/     the PWA (index.html, core.js, apps/ (one file per built-in), boot.js, lopda.css, platform.js, sw.js, icons)
 sdk/         MIT: PAD bridge, lo-game.js, templates, dev harness, AI prompts
 registry/    index.json + apps/<id>/{manifest.json,index.html}
 tools/       check-app.mjs, build-index.mjs, bundle-app.mjs, lo-game.mjs (Node 20+, no dependencies)

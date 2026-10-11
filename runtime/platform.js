@@ -13,7 +13,10 @@
   "use strict";
 
   /* ---------------- document store ---------------- */
-  var DB_NAME = "lopda", STORE = "docs";
+  /* A GitHub Pages PR preview (/lopda/pr/12/runtime/) shares the origin nowheremanx.github.io with the real
+     site, so it gets its own database and never reads or writes the real handheld's data. */
+  var PR = typeof location !== "undefined" && /\/pr\/(\d+)\//.exec(location.pathname || "");
+  var DB_NAME = PR ? "lopda-pr-" + PR[1] : "lopda", STORE = "docs";
   var opening = null;
   function open() {
     if (opening) return opening;
