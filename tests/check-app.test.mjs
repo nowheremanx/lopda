@@ -98,7 +98,10 @@ const FAILS = [
   ["long description", { manifest: (m) => (m.description = "长".repeat(81)) }, /description must be 1-80/],
   ["no author", { manifest: (m) => delete m.author }, /author is required/],
   ["GPL licence", { manifest: (m) => (m.license = "GPL-3.0") }, /license must be one of/],
-  ["permissions", { manifest: (m) => (m.permissions = ["camera"]) }, /permissions must be empty/],
+  ["unknown permission", { manifest: (m) => (m.permissions = ["camera"]) }, /unknown permission "camera": allowed are files/],
+  ["permission twice", { manifest: (m) => (m.permissions = ["files", "files"]) }, /the same one twice/],
+  ["PAD.exportFile without the files permission", withCode('PAD.exportFile({ name: "a.txt", type: "text/plain", data: "a" });'), /need "permissions": \["files"\]/],
+  ["PAD.importFile without the files permission", withCode("PAD.importFile({ accept: ['text/plain'] });"), /need "permissions": \["files"\]/],
   ["buttons on lopda/0", { manifest: (m) => (m.spec = "lopda/0") }, /buttons needs spec "lopda\/1"/],
   ["buttons not boolean", { manifest: (m) => (m.buttons = "yes") }, /buttons must be true or false/],
   ["too big", { html: (h) => h + "<!--" + "x".repeat(512 * 1024) + "-->" }, /the limit is 524288/],
@@ -145,6 +148,7 @@ const PASSES = [
   ["palette colours in any spelling", { html: (h) => h.replace("color: #1f2a14", "color: #1F2A14; border-color: rgba(163, 173, 126, 0.5)") }],
   ["a tile-map row is not a colour", withCode('var MAP = ["#bbbbbb#", "#......#"];')],
   ["no i18n is only advice", { manifest: (m) => delete m.i18n }],
+  ["the files permission with the file API", { manifest: (m) => (m.permissions = ["files"]), ...withCode("if (PAD.importFile) PAD.importFile({ accept: [] });") }],
   ["lopda/0 without buttons or PAD.on", {
     manifest: (m) => { m.spec = "lopda/0"; delete m.buttons; },
     html: (h) => h.replace(/PAD\.sfx\(sound\);/, "").replace(/PAD\.on\("press"[\s\S]*?\n {2}\}\);/, ""),
@@ -165,6 +169,12 @@ test("warns, without failing, about PAD.on with buttons off and about extra file
   assert.equal(r.code, 0, r.out);
   assert.match(r.out, /"buttons" is not true/);
   assert.match(r.out, /extra files are not shipped: notes\.txt/);
+});
+
+test("warns about a files permission the app never uses", (t) => {
+  const r = tool("check-app.mjs", counter(t, { manifest: (m) => (m.permissions = ["files"]) }));
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /"files" is declared but PAD\.exportFile\/importFile are never used/);
 });
 
 test("info for a manifest without i18n", (t) => {

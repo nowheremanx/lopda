@@ -3,8 +3,9 @@
 Status: draft · Spec id: `lopda/1` (apps written for `lopda/0` keep working) · License: MIT (see `sdk/LICENSE`)
 
 What v1 adds over v0: the chin buttons (`"buttons": true`, `PAD.on`, `PAD.isDown`) and
-system sounds (`PAD.sfx`). Added later within v1, both optional: the player's language
-(`PAD.lang`) and localized store text (manifest `i18n`). See section 6.1.
+system sounds (`PAD.sfx`). Added later within v1, all optional: the player's language
+(`PAD.lang`) and localized store text (manifest `i18n`), see section 6.1; files
+(`"permissions": ["files"]`, `PAD.exportFile`, `PAD.importFile`), see section 6.2.
 
 A Lo-PDA app is one self-contained HTML file plus a small manifest. The runtime
 installs it from the registry, pins it to an exact version, and runs it inside
@@ -52,7 +53,7 @@ No other files are loaded. Images, sounds and fonts must be embedded in
 | `i18n` | Optional. Store text in other languages: `{"en": {"name", "description"}, "zh": {...}}`. Only `zh` and `en`, only those two fields, same rules as above. The store and home screen show the entry for the player's language and fall back to `name` / `description`. |
 | `author` | Name or handle. |
 | `license` | One of: `MIT`, `0BSD`, `BSD-2-Clause`, `BSD-3-Clause`, `ISC`, `Apache-2.0`, `CC0-1.0`, `Unlicense`. |
-| `permissions` | Array. Empty for now. Reserved for future capabilities such as `film.read`. |
+| `permissions` | Array. Usually empty. The only capability so far is `"files"` (`lopda/1`): the app may export and import files, each time confirmed by the player (section 6.2). The store shows it on the app's entry. Anything else fails the checker. |
 | `buttons` | Optional, `lopda/1` only. `true` shows the chin buttons while the app runs (section 4). Leave it out for touch-only apps. |
 
 ## 3. The screen
@@ -126,6 +127,10 @@ PAD.isDown(button)           // -> true while held
 PAD.BUTTONS                  // ["up","down","left","right","a","b","start","select"]
 PAD.sfx(name)                // play a system sound
 PAD.SOUNDS                   // ["tap","tick","move","ok","err","hit","miss","coin","win","lose"]
+
+// lopda/1 with "permissions": ["files"] (section 6.2); undefined on runtimes before 0.5.0
+await PAD.exportFile({name, type, data})   // -> "saved" | "cancelled"
+await PAD.importFile({accept})             // -> {name, type, data} | null
 ```
 
 Sounds, roughly: `tap` key click, `tick` short tick (timers), `move` cursor step,
@@ -163,6 +168,35 @@ Add `i18n` to the manifest too (section 2), so the store shows your app's name
 and description in the player's language. Games on lo-game.js can use `game.t`
 (section 10).
 
+### 6.2 Files
+
+An app that declares `"permissions": ["files"]` can hand a file to the player and take one
+from them. Paint (`registry/apps/paint`) is the worked example.
+
+```js
+if (PAD.exportFile) {   // runtimes before 0.5.0 have neither method
+  var r = await PAD.exportFile({ name: "drawing.png", type: "image/png", data: canvas.toDataURL("image/png") });
+  // r: "saved", or "cancelled" when the player said no
+  var f = await PAD.importFile({ accept: ["image/*"] });
+  // f: {name, type, data}, or null when the player cancelled
+}
+```
+
+- **The runtime asks every time.** Each call shows the handheld's own dialog over the app
+  (`导出「drawing.png」？ 好 / 取消`, `从文件导入？ 选文件 / 取消`). Only the player's tap on that
+  dialog opens the share sheet (phones), a download (desktop) or the file picker. The app cannot
+  skip it and should not ask twice in a row; there is no prompt at install.
+- `data`: a `data:` URL for binary files (images), or a plain string for text. On import, files
+  whose type is `text/*` or `application/json` come back as a string, everything else as a `data:` URL.
+- `accept`: MIME types (`"image/png"`, `"image/*"`) or extensions (`".txt"`). The picker offers
+  only those, and the runtime refuses a picked file of another type (the call resolves `null`).
+- **One file is at most 2 MB.** `exportFile` rejects larger data. On import, a larger picture
+  (`image/png`, `image/jpeg`, …: phone photos often are) is scaled down by the runtime until it fits;
+  any other file over 2 MB is refused and the call resolves `null`.
+- Without the permission both methods reject with an error, and the checker fails an app that calls
+  them without declaring it.
+- Pictures from the player are full colour: reduce them to the four tones yourself before showing them.
+
 ## 7. Size and quality
 
 - `index.html` at most 512 KB (with src/ files and framework copies bundled in; section 11).
@@ -184,11 +218,12 @@ and description in the player's language. Games on lo-game.js can use `game.t`
 node tools/check-app.mjs registry/apps/<id>
 ```
 
-The checker enforces sections 2, 3 (colors), 5 (forbidden APIs and external
-resources) and 7 (size), and checks `PAD.sfx` names. Passing it is required before review.
+The checker enforces sections 2 (including `permissions`), 3 (colors), 5 (forbidden APIs and external
+resources) and 7 (size), checks `PAD.sfx` names, and fails `PAD.exportFile` / `importFile` without the `files` permission. Passing it is required before review.
 
 To try an app with the chin buttons, serve the repo root and open
-`sdk/dev.html?app=registry/apps/<id>`.
+`sdk/dev.html?app=registry/apps/<id>`. The harness skips the confirm dialog: an export downloads
+straight away, and an import waits for the file input it shows next to the app.
 
 ## 10. Games: lo-game.js (optional)
 

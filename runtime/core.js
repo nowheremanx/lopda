@@ -150,7 +150,7 @@ function show(name){
 $("home-key").onclick=function(){ LP.flushNote(); show("home"); sfx("home"); };
 
 /* ---------- sound: tiny square-wave chips through Web Audio ---------- */
-var RUNTIME_VERSION="0.4.1";   /* keep in step with VERSION in sw.js */
+var RUNTIME_VERSION="0.5.0";   /* keep in step with VERSION in sw.js */
 var SND={ctx:null, on:true, vol:2, gain:null};
 var VOL_GAIN=[0,0.05,0.11,0.2];
 function audio(){
@@ -253,7 +253,6 @@ $("set-update").onclick=function(){
 
 /* ---------- pixel icons: 16 rows of 16 chars, 0-3 = the four tones, "." = transparent ---------- */
 var ICONS={"notes":["................","..0000000000....","..0333333330....","..0311111130....","..0333333330....","..0311111130....","..0333333330....","..0311111130....","..0333333330....","..0311113330000.","..0333333300330.","..0311110003300.","..0333330033000.","..033333003000..","..00000000000...","................"],
-  "paint":["................","............000.","...........0330.","..........03330.",".........033300.","........033300..",".......03330....","......03330.....",".....033300.....","....011000......","...011110.......","..0111110.......","..011110........",".0000000........",".0000...........","................"],
   "cart":["................","...000000000....","...03333333300..","...03333333330..","...030000000330.","...030111110330.","...030122210330.","...030122210330.","...030111110330.","...030000000330.","...033333333330.","...033333333330.","...031313131330.","...033333333330.","...000000000000.","................"],
   "camera":["................","................","....0000........","..000000000000..",".03333333333330.",".03300000333330.",".03011111033000.",".00112222103330.",".00122332103330.",".00122332103330.",".00112222103330.",".03011111033330.",".03300000333330.",".00000000000000.","................","................"],
   "cutter":["................",".00..........00.",".030........030.","..030......030..","...030....030...","....030..030....",".....030030.....","......0330......","......0330......",".....000000.....","....00....00....","...0330..0330...","...0..0..0..0...","...0330..0330...","....00....00....","................"],
@@ -280,7 +279,7 @@ function fillTile(tile,app,builtinIcon){
 /* manifest name and description in the current language, when the app has them (manifest "i18n") */
 function appName(a){ return noEmoji(I18N.field(a,"name"))||tr("app.unnamed"); }
 function appDesc(a){ return noEmoji(I18N.field(a,"description")); }
-/* built-ins first, in the order they registered, then installed apps by install time */
+/* built-ins first, in the order they registered, then the preinstalled apps in their list order, then installed apps by install time */
 function renderHome(){
   var h=$("home"); h.textContent="";
   function add(cls,app,label,tag,onclick,builtinIcon){
@@ -294,7 +293,8 @@ function renderHome(){
   LP.builtins.forEach(function(bi){
     if(bi.icon) add("builtin",{},tr(bi.label),bi.tag?bi.tag():"",function(){ bi.open(); },bi.icon);
   });
-  S.apps.slice().sort(function(a,b){ return (a.installed||0)-(b.installed||0); }).forEach(function(a){
+  var pre=function(a){ return a.preinstalled>0 ? a.preinstalled : Infinity; };
+  S.apps.slice().sort(function(a,b){ return (pre(a)-pre(b)) || ((a.installed||0)-(b.installed||0)); }).forEach(function(a){
     add("",a,appName(a),"v"+(a.version||"?"),function(){ LP.runApp(a); });
   });
 }
@@ -315,11 +315,11 @@ function armConfirm(wrapId,btnId,label,onYes){
 }
 
 /* ---------- chin game pad: D-pad, A, B, START, SELECT ----------
-   Routed to the cartridge player when it runs, then the camera, otherwise to the running app (PAD.on).
+   Routed to the file dialog while it is open, then the cartridge player when it runs, then the camera, otherwise to the running app (PAD.on).
    A route returns true when it took the button. */
 var PADB={up:false,down:false,left:false,right:false,a:false,b:false,start:false,select:false};
 var PADKEYS={ArrowUp:"up",ArrowDown:"down",ArrowLeft:"left",ArrowRight:"right",x:"a",X:"a",z:"b",Z:"b",Enter:"start",Shift:"select"};
-var PAD_ORDER=["cart","cam","run"], padRoutes={};
+var PAD_ORDER=["file","cart","cam","run"], padRoutes={};   /* "file": the runtime's file dialog, while it is open */
 function padRoute(name,fn){ padRoutes[name]=fn; }
 function padOn(){ return !$("gamepad").hidden; }
 function setButton(b,down){

@@ -12,7 +12,8 @@
 //  - Date: page.clock.setFixedTime freezes Date.now()/new Date() (status clock, note times, film date
 //    stamps, roll ids) while timers keep running. Time zone is pinned to UTC, locale to zh-CN.
 //  - Math.random is replaced by a seeded generator (addInitScript).
-//  - Google Fonts requests are aborted, so text always uses the machine's fallback fonts.
+//  - Fonts: the runtime ships its own (runtime/fonts/); screenshots wait for document.fonts.ready.
+//    Older trees loaded them from Google Fonts; those requests are fetched with curl (needs network).
 //  - A fresh browser context per run: empty IndexedDB, no service worker (blocked).
 //  - prefers-reduced-motion: reduce skips the camera boot animation; screenshots use animations:"disabled".
 //  - The camera is Chromium's fake device fed from a static y4m file generated here, so every
@@ -24,12 +25,15 @@
 // Downloads: platform.js uses navigator.share only on a coarse pointer. The context has no touch, so the
 // pointer is fine and saves go through <a download>, which Playwright captures as download events.
 // All driving is through clicks, keys and setInputFiles, never internal functions, so the script works
-// on any tree that keeps the same element ids.
+// on any tree that keeps the same element ids. Home tiles are found by their label, so adding or removing a
+// program does not shift the others. Paint was a built-in up to runtime 0.4.1 and is a preinstalled app
+// since 0.5.0: each tree gets the shots for the paint it has (05-paint* or 05-paint-app*).
 import { createServer } from "node:http";
 import { readFile, writeFile, mkdir, readdir, rm } from "node:fs/promises";
 import { join, extname, normalize, resolve, dirname, delimiter } from "node:path";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
+import { execFileSync } from "node:child_process";
 
 const TYPES = { ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css", ".json": "application/json",
   ".png": "image/png", ".wasm": "application/wasm", ".webmanifest": "application/manifest+json" };
@@ -109,16 +113,16 @@ async function capture(rootArg, outArg) {
     reducedMotion: "reduce", timezoneId: "UTC", locale: "zh-CN", serviceWorkers: "block", acceptDownloads: true,
     permissions: ["camera"] });
   await ctx.addInitScript(initScript);
-  await ctx.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
   const p = await ctx.newPage();
   await p.clock.setFixedTime(new Date("2026-10-11T09:41:00Z"));
   const errors = [];
   p.on("pageerror", (e) => errors.push(e.message));
-  p.on("console", (m) => { if (m.type() === "error" && !/fonts\.(googleapis|gstatic)|ERR_FAILED/.test(m.text())) errors.push(m.text()); });
+  p.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
 
   const names = [];
   const settle = async (ms = 250) => {
     await p.waitForFunction(() => document.getElementById("toast").hidden, null, { timeout: 8000 });
+    await p.evaluate(() => document.fonts.ready);
     await p.waitForTimeout(ms);
   };
   const shot = async (name) => { await settle(); await p.screenshot({ path: join(out, name + ".png"), animations: "disabled", caret: "hide" }); names.push(name); };
@@ -126,17 +130,20 @@ async function capture(rootArg, outArg) {
     const [d] = await Promise.all([p.waitForEvent("download", { timeout: 15000 }), action()]);
     await d.saveAs(join(out, name)); names.push(name);
   };
-  const tile = (n) => p.click(`#home .app:nth-child(${n})`);   /* notes paint camera cutter cart store settings */
+  const LABEL = { notes: "记事本", paint: "点阵画板", camera: "点阵相机", cutter: "裁片机", cart: "卡带机", store: "应用商店", settings: "设置" };
+  const tile = (name) => p.locator("#home .app", { has: p.locator(".label", { hasText: new RegExp("^" + LABEL[name] + "$") }) }).click();
   const home = async () => { await p.click("#home-key"); await p.waitForTimeout(200); };
 
   await p.goto(base + "/runtime/", { waitUntil: "load" });
   await p.waitForFunction(() => window.LopdaPlatform && window.LopdaStrings);
   await p.waitForFunction(() => document.getElementById("savestate").textContent !== "启动中…", null, { timeout: 8000 });
+  /* 0.5.0+ installs the preinstalled apps from the registry on first start: wait for the network to go quiet */
+  await p.waitForLoadState("networkidle");
   await p.waitForTimeout(600);
   await shot("01-home");
 
   /* notes */
-  await tile(1); await p.waitForTimeout(300);
+  await tile("notes"); await p.waitForTimeout(300);
   await shot("02-notes-empty");
   await p.click("#note-new");
   await p.keyboard.type("买胶卷\n周六去裁片。Film: 8 frames.", { delay: 10 });
@@ -145,10 +152,16 @@ async function capture(rootArg, outArg) {
   await p.click("#note-back"); await p.waitForTimeout(300);
   await shot("04-notes-list");
 
-  /* paint */
-  await home(); await tile(2); await p.waitForTimeout(400);
-  await shot("05-paint");
-  const box = await p.locator("#paint-cv").boundingBox();
+  /* paint: the built-in (up to 0.4.1) or the preinstalled app (0.5.0+) */
+  await home(); await tile("paint"); await p.waitForTimeout(600);
+  const builtinPaint = await p.locator("#paint-cv").count() > 0;
+  const paintFrame = builtinPaint ? null : p.frameLocator("#run-frame");
+  const canvas = builtinPaint ? p.locator("#paint-cv") : paintFrame.locator("canvas").first();
+  const pick = (builtinSel, n) => builtinPaint ? p.click(builtinSel) : paintFrame.locator("[data-c]").nth(n).click();
+  const pre = builtinPaint ? "05-paint" : "05-paint-app";
+  await canvas.waitFor();
+  await shot(pre);
+  const box = await canvas.boundingBox();
   const at = (fx, fy) => [box.x + box.width * fx, box.y + box.height * fy];
   const stroke = async (pts) => {
     await p.mouse.move(...at(...pts[0])); await p.mouse.down();
@@ -156,12 +169,14 @@ async function capture(rootArg, outArg) {
     await p.mouse.up();
   };
   await stroke([[0.15, 0.2], [0.5, 0.15], [0.85, 0.3]]);
-  await p.click(".sw-1"); await stroke([[0.2, 0.8], [0.5, 0.45], [0.8, 0.8]]);
-  await p.click(".sw-2"); await p.click("#paint-size"); await stroke([[0.1, 0.55], [0.9, 0.6]]);
-  await shot("06-paint-strokes");
+  await pick(".sw-1", 1); await stroke([[0.2, 0.8], [0.5, 0.45], [0.8, 0.8]]);
+  await pick(".sw-2", 2);
+  if (builtinPaint) await p.click("#paint-size"); else await paintFrame.locator("#size").click();
+  await stroke([[0.1, 0.55], [0.9, 0.6]]);
+  await shot(pre + "-strokes");
 
   /* camera: no film, so the back opens on the roll picker */
-  await home(); await tile(3);
+  await home(); await tile("camera");
   await p.waitForSelector("#cam-load:not([hidden])"); await p.waitForTimeout(700);
   await shot("07-cam-load");
   await p.click("#roll-next"); await p.waitForTimeout(900);
@@ -186,7 +201,7 @@ async function capture(rootArg, outArg) {
   await settle(600);
 
   /* cutter */
-  await home(); await tile(4); await p.waitForTimeout(300);
+  await home(); await tile("cutter"); await p.waitForTimeout(300);
   await shot("11-cutter-empty");
   await p.setInputFiles("#cut-file", join(out, "strip.png"));
   await p.waitForFunction(() => !document.getElementById("cut-go").disabled, null, { timeout: 10000 });
@@ -201,7 +216,7 @@ async function capture(rootArg, outArg) {
   await settle(400);
 
   /* cartridge player, empty library */
-  await home(); await tile(5); await p.waitForTimeout(600);
+  await home(); await tile("cart"); await p.waitForTimeout(600);
   await shot("14-cartridge");
 
   /* settings, English and back */
@@ -215,18 +230,18 @@ async function capture(rootArg, outArg) {
     });
     await shot(name);
   };
-  await home(); await tile(7); await p.waitForTimeout(700);
+  await home(); await tile("settings"); await p.waitForTimeout(700);
   await settings("15-settings");
   await p.click("[data-lang=en]"); await p.waitForTimeout(400);
   await settings("16-settings-en");
   await home(); await p.waitForTimeout(300);
   await shot("17-home-en");
-  await tile(7); await p.waitForTimeout(500);
+  await p.locator("#home .app.builtin").last().click(); await p.waitForTimeout(500);   /* Settings, labelled in English now */
   await p.click("[data-lang=zh]"); await p.waitForTimeout(400);
   await home();
 
   /* store: list, install one small static app, run it */
-  await tile(6);
+  await tile("store");
   await p.waitForSelector("#store-list .store-item", { timeout: 10000 });
   await p.waitForTimeout(500);
   await shot("18-store");

@@ -52,6 +52,17 @@ test("every file the service worker pre-caches exists", () => {
   for (const f of shell) assert.ok(existsSync(join(ROOT, "runtime", f)), f);
 });
 
+test("every font file fonts.css names exists, and nothing else is in runtime/fonts", () => {
+  const css = read("runtime/fonts/fonts.css");
+  const urls = [...css.matchAll(/url\(([^)]+)\)/g)].map((m) => m[1]);
+  assert.ok(urls.length > 100, "DotGothic16 slices and VT323");
+  for (const u of urls) assert.ok(existsSync(join(ROOT, "runtime", "fonts", u)), u);
+  const files = readdirSync(join(ROOT, "runtime", "fonts")).filter((f) => f.endsWith(".woff2")).sort();
+  assert.deepEqual(files, [...urls].sort());
+  /* no request to another site for fonts any more */
+  assert.doesNotMatch(read("runtime/index.html") + read("runtime/lopda.css"), /fonts\.(googleapis|gstatic)\.com/);
+});
+
 test("every local script and stylesheet the page loads is pre-cached", () => {
   const html = read("runtime/index.html");
   const shell = read("runtime/sw.js").match(/var SHELL = (\[[\s\S]*?\]);/)[1];
@@ -101,7 +112,8 @@ test("no game ROMs in the repo", () => {
 });
 
 test("third-party code keeps its licence file and is listed in NOTICE and LICENSING.md", () => {
-  for (const [dir, licence] of [["runtime/vendor/binjgb", "LICENSE"], ["sdk/fonts", "LICENSE-lopix12.txt"]]) {
+  for (const [dir, licence] of [["runtime/vendor/binjgb", "LICENSE"], ["sdk/fonts", "LICENSE-lopix12.txt"],
+    ["runtime/fonts", "OFL-DotGothic16.txt"], ["runtime/fonts", "OFL-VT323.txt"]]) {
     assert.ok(existsSync(join(ROOT, dir, licence)), `${dir}/${licence}`);
     assert.ok(read("NOTICE").includes(dir), "NOTICE lists " + dir);
     assert.ok(read("LICENSING.md").includes(dir), "LICENSING.md lists " + dir);

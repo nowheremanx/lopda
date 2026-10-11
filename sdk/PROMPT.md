@@ -66,7 +66,7 @@ manifest.json must be:
                     "description": "<the sentence in English, at most 80 characters>" } },
   "author": "<my name>",
   "license": "MIT",
-  "permissions": [],
+  "permissions": [<leave empty; ["files"] only if the app imports or exports files with PAD.importFile / PAD.exportFile>],
   "buttons": <true if the app uses PAD.on, otherwise leave this line out>
 }
 

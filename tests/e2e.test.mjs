@@ -33,11 +33,11 @@ before(async () => {
 });
 after(async () => { await browser?.close(); server?.close(); });
 
-async function page(t) {
-  const p = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true });
+async function page(t, opts = {}) {
+  const p = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, ...opts });
   const errors = [];
   p.on("pageerror", (e) => errors.push(e.message));
-  p.on("console", (m) => { if (m.type() === "error" && !/fonts\.(googleapis|gstatic)/.test(m.text())) errors.push(m.text()); });
+  p.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
   t.after(() => p.close());
   return { p, errors };
 }
@@ -48,6 +48,72 @@ test("the runtime boots without errors and shows the home screen", { skip }, asy
   await p.waitForFunction(() => window.LopdaPlatform && window.LopdaStrings);
   await p.waitForTimeout(500);
   assert.ok(await p.evaluate(() => document.body.innerText.length > 0));
+  assert.deepEqual(errors, []);
+});
+
+test("the runtime asks nothing of other sites: fonts and everything else come from its own origin", { skip }, async (t) => {
+  const { p, errors } = await page(t);
+  const away = [];
+  p.on("request", (r) => { if (!r.url().startsWith(base) && !/^(data|blob):/.test(r.url())) away.push(r.url()); });
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  /* fonts.css splits the fonts by unicode-range: load the slices some screen text needs */
+  const faces = await p.evaluate(async () => [(await document.fonts.load('16px "DotGothic16"', "本机存档「存档」。")).length, (await document.fonts.load('16px "VT323"', "09:41 LP-86")).length]);
+  assert.ok(faces[0] >= 2 && faces[1] >= 1, "both LCD fonts load: " + faces);
+  assert.deepEqual(away, []);
+  assert.deepEqual(errors, []);
+});
+
+/* the sandboxed app frame cannot reach a service worker; Chromium logs that once per app start */
+const SW_NOISE = /Service worker is disabled because the context is sandboxed/;
+const tiles = (p) => p.$$eval("#home .app .label", (l) => l.map((x) => x.textContent));
+
+test("preinstalled apps: installed on first start after the built-ins, and a removed one stays removed", { skip, timeout: 30000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN" });
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await p.waitForFunction(() => document.querySelectorAll("#home .app:not(.builtin)").length === 2, null, { timeout: 10000 });
+  const home = await tiles(p);
+  assert.deepEqual(home.slice(-2), ["计算器", "点阵画板"]);
+  assert.ok(!home.slice(0, -2).includes("点阵画板"), "paint is no longer a built-in");
+  /* remove paint, start again: it does not come back */
+  await p.locator("#home .app", { hasText: "点阵画板" }).click();
+  await p.click("#run-del"); await p.click("#run-del-wrap .btn:not(.ghost)");
+  await p.reload({ waitUntil: "networkidle" }); await p.waitForTimeout(500);
+  assert.deepEqual((await tiles(p)).slice(-1), ["计算器"]);
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("files: the runtime's dialog guards PAD.exportFile and PAD.importFile (paint)", { skip, timeout: 30000 }, async (t) => {
+  /* a mouse, not touch: on a coarse pointer the runtime saves through the share sheet, which headless Chromium lacks */
+  const p = await browser.newPage({ viewport: { width: 390, height: 844 }, acceptDownloads: true, locale: "zh-CN" });
+  t.after(() => p.close());
+  const errors = []; p.on("pageerror", (e) => errors.push(e.message));
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await p.locator("#home .app", { hasText: "点阵画板" }).click();
+  const app = p.frameLocator("#run-frame");
+  await app.locator("#cv").waitFor();
+  /* cancel: nothing leaves, the app hears "cancelled" and stays quiet */
+  await app.locator("#exp").click();
+  assert.match(await p.textContent("#file-ask p"), /^导出「lopda-\d{8}-\d{4}\.png」？$/);
+  await p.click("#file-no");
+  await p.waitForSelector("#file-ask .box", { state: "detached" });
+  /* OK: on a desktop the file downloads */
+  await app.locator("#exp").click();
+  const [d] = await Promise.all([p.waitForEvent("download"), p.click("#file-ok")]);
+  assert.match(d.suggestedFilename(), /^lopda-\d{8}-\d{4}\.png$/);
+  const png = await (await import("node:fs/promises")).readFile(await d.path());
+  assert.equal(png.readUInt32BE(16), 768, "8x upscale");
+  /* import: OK opens the system file picker; the picture comes back as four tones */
+  await app.locator("#imp").click();
+  assert.equal(await p.textContent("#file-ok"), "选文件");
+  const [chooser] = await Promise.all([p.waitForEvent("filechooser"), p.click("#file-ok")]);
+  await chooser.setFiles({ name: "x.png", mimeType: "image/png", buffer: png });
+  await app.locator("#msg", { hasText: "已转成" }).waitFor();
+  /* an app without the permission is refused before any dialog */
+  await p.evaluate(() => { window.LP.S.running.permissions = []; });
+  const frame = p.frames().find((f) => f !== p.mainFrame());
+  const refused = await frame.evaluate(() => PAD.importFile({ accept: [] }).then(() => "resolved", (e) => e.message));
+  assert.match(refused, /permission/);
+  assert.equal(await p.locator("#file-ask .box").count(), 0);
   assert.deepEqual(errors, []);
 });
 

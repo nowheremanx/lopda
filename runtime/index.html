@@ -12,8 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DotGothic16&family=VT323&display=swap">
+<link rel="stylesheet" href="fonts/fonts.css">
 <link rel="stylesheet" href="lopda.css">
 </head>
 <body>
@@ -176,30 +175,6 @@
       </div>
     </section>
 
-    <!-- PAINT -->
-    <section class="view" id="v-paint" hidden>
-      <div class="paint">
-        <div class="bar"><h2 data-i18n="paint.title">点阵画板</h2><span class="hint" id="paint-state" data-i18n="paint.state">96×96 · 4 色</span></div>
-        <div class="paint-stage"><canvas id="paint-cv" width="96" height="96" data-i18n-label="paint.canvas" aria-label="画布"></canvas></div>
-        <div class="paint-tools">
-          <div class="row" role="radiogroup" data-i18n-label="paint.colour" aria-label="颜色">
-            <button class="sw sw-0" type="button" role="radio" aria-checked="true" data-c="0" data-i18n-label="paint.ink" aria-label="墨"></button>
-            <button class="sw sw-1" type="button" role="radio" aria-checked="false" data-c="1" data-i18n-label="paint.dark" aria-label="深"></button>
-            <button class="sw sw-2" type="button" role="radio" aria-checked="false" data-c="2" data-i18n-label="paint.light" aria-label="浅"></button>
-            <button class="sw sw-3" type="button" role="radio" aria-checked="false" data-c="3" data-i18n-label="paint.paper" aria-label="底色（橡皮）"></button>
-          </div>
-          <button class="btn ghost" id="paint-size" type="button" data-i18n-label="paint.brush" aria-label="笔刷粗细">笔 · 细</button>
-          <button class="btn ghost" id="paint-undo" type="button" data-i18n="paint.undo">撤销</button>
-        </div>
-        <div class="paint-tools">
-          <input class="file-in" type="file" id="paint-file" accept="image/*">
-          <label class="btn ghost" for="paint-file" data-i18n="paint.import">导入图片</label>
-          <button class="btn" id="paint-export" type="button" data-i18n="paint.export">导出 PNG</button>
-          <span class="confirm" id="paint-clear-wrap"><button class="btn ghost" id="paint-clear" type="button" data-i18n="paint.clear">清空</button></span>
-        </div>
-      </div>
-    </section>
-
     <!-- CARTRIDGE PLAYER -->
     <section class="view" id="v-cart" hidden>
       <div class="bar">
@@ -267,7 +242,6 @@
 <script src="platform.js"></script>
 <script src="core.js"></script>
 <script src="apps/notes.js"></script>
-<script src="apps/paint.js"></script>
 <script src="apps/camera.js"></script>
 <script src="apps/cutter.js"></script>
 <script src="apps/cart.js"></script>

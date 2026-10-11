@@ -14,6 +14,7 @@ const SPECS = ["lopda/0", "lopda/1"];
 const LANGS = ["zh", "en"];
 const SOUNDS = ["tap", "tick", "move", "ok", "err", "hit", "miss", "coin", "win", "lose"];
 const MAX_BYTES = 512 * 1024;
+const PERMISSIONS = ["files"];
 const LICENSES = ["MIT", "0BSD", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Apache-2.0", "CC0-1.0", "Unlicense"];
 const PALETTE = [[0x1f, 0x2a, 0x14], [0x4a, 0x5a, 0x32], [0x7d, 0x8a, 0x58], [0xa3, 0xad, 0x7e]];
 const EMOJI = /[\p{Extended_Pictographic}\u{1F1E6}-\u{1F1FF}]/u;
@@ -127,7 +128,11 @@ function checkApp(dir) {
   if (!m.author) errors.push("author is required");
   if (!LICENSES.includes(m.license)) errors.push(`license must be one of ${LICENSES.join(", ")}`);
   if (!Array.isArray(m.permissions)) errors.push("permissions must be an array");
-  else if (m.permissions.length) errors.push("permissions must be empty for now");
+  else {
+    for (const p of m.permissions) if (!PERMISSIONS.includes(p)) errors.push(`unknown permission ${JSON.stringify(p)}: allowed are ${PERMISSIONS.join(", ")}`);
+    if (new Set(m.permissions).size !== m.permissions.length) errors.push("permissions lists the same one twice");
+    if (m.permissions.length && m.spec !== "lopda/1") errors.push('permissions need spec "lopda/1"');
+  }
   if (m.buttons !== undefined) {
     if (m.spec !== "lopda/1") errors.push('buttons needs spec "lopda/1"');
     else if (typeof m.buttons !== "boolean") errors.push("buttons must be true or false");
@@ -174,6 +179,9 @@ function checkApp(dir) {
   for (const mm of code.matchAll(/PAD\.sfx\(\s*["']([^"']*)["']/g)) if (!SOUNDS.includes(mm[1])) errors.push(`PAD.sfx("${mm[1]}") is not a known sound: ${SOUNDS.join(", ")}`);
   const usesButtons = /PAD\.(on|isDown)\s*\(/.test(code);
   if (m.spec === "lopda/0" && /PAD\.(on|off|isDown|sfx)\s*\(/.test(code)) errors.push('PAD.on/isDown/sfx need spec "lopda/1"');
+  const usesFiles = /PAD\.(exportFile|importFile)\b/.test(code);
+  if (usesFiles && !(Array.isArray(m.permissions) && m.permissions.includes("files"))) errors.push('PAD.exportFile/importFile need "permissions": ["files"] in manifest.json');
+  if (!usesFiles && Array.isArray(m.permissions) && m.permissions.includes("files")) warnings.push('"files" is declared but PAD.exportFile/importFile are never used: drop it');
   if (usesButtons && m.buttons !== true) warnings.push('uses PAD.on but "buttons" is not true, so the chin buttons stay hidden (keyboard still works)');
   return { id, errors, warnings, info };
 }
