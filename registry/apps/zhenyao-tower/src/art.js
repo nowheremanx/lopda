@@ -229,44 +229,45 @@ ART.jade = LoGame.sprite([
 ]);
 
 
-/* A chest, 16 x 16 (a tile wide), with an ink outline and a paper line inside it so that it reads on any floor, light or dark:
-   a mid lid, a dark body, paper bands and lock. Closed, it glints now and then (frames 1 and 2 put a paper star above the lid, timed by
+/* A chest, 16 x 16 (a tile wide), with an ink outline so that it reads on any floor, light or dark:
+   a mid lid with dark iron bands, a dark body with mid bands, paper only on a highlight and the lock. Closed, it glints now and then (frames 1 and 2 put a paper star above the lid, timed by
    the map's clock, see Maps.render); opened, the lid stands up behind a dark mouth and there is no lock. */
 ART.chest = (function () {
+  /* a paper frame round the whole chest glared out of the scene on the phone; paper is kept for the highlight and the lock */
   var closed = [
     "................",
     "................",
     "................",
     "................",
     "..000000000000..",
-    ".03333333333330.",
-    "0322332222332230",
-    "0322332222332230",
-    "0322332332332230",
+    ".02322222222220.",
+    "0222112222112220",
+    "0222112222112220",
+    "0222112332112220",
     "0000000330000000",
-    "0311331001331130",
-    "0311331331331130",
-    "0311331111331130",
-    "0311331111331130",
-    "0333333333333330",
+    "0111221001221110",
+    "0111221221221110",
+    "0111221111221110",
+    "0111221111221110",
+    "0111111111111110",
     "0000000000000000"
   ];
   var open = [
     "................",
     "..000000000000..",
-    ".03333333333330.",
-    ".03111111111130.",
-    ".03111111111130.",
-    ".03333333333330.",
+    ".02222222222220.",
+    ".02111111111120.",
+    ".02111111111120.",
+    ".02222222222220.",
     ".00000000000000.",
     "0000000000000000",
-    "0300000000000030",
-    "0311331111331130",
-    "0311331111331130",
-    "0311331111331130",
-    "0311331111331130",
-    "0311331111331130",
-    "0333333333333330",
+    "0200000000000020",
+    "0111221111221110",
+    "0111221111221110",
+    "0111221111221110",
+    "0111221111221110",
+    "0111221111221110",
+    "0111111111111110",
     "0000000000000000"
   ];
   function put(rows, list) {

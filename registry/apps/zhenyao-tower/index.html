@@ -1401,44 +1401,45 @@ ART.jade = LoGame.sprite([
 ]);
 
 
-/* A chest, 16 x 16 (a tile wide), with an ink outline and a paper line inside it so that it reads on any floor, light or dark:
-   a mid lid, a dark body, paper bands and lock. Closed, it glints now and then (frames 1 and 2 put a paper star above the lid, timed by
+/* A chest, 16 x 16 (a tile wide), with an ink outline so that it reads on any floor, light or dark:
+   a mid lid with dark iron bands, a dark body with mid bands, paper only on a highlight and the lock. Closed, it glints now and then (frames 1 and 2 put a paper star above the lid, timed by
    the map's clock, see Maps.render); opened, the lid stands up behind a dark mouth and there is no lock. */
 ART.chest = (function () {
+  /* a paper frame round the whole chest glared out of the scene on the phone; paper is kept for the highlight and the lock */
   var closed = [
     "................",
     "................",
     "................",
     "................",
     "..000000000000..",
-    ".03333333333330.",
-    "0322332222332230",
-    "0322332222332230",
-    "0322332332332230",
+    ".02322222222220.",
+    "0222112222112220",
+    "0222112222112220",
+    "0222112332112220",
     "0000000330000000",
-    "0311331001331130",
-    "0311331331331130",
-    "0311331111331130",
-    "0311331111331130",
-    "0333333333333330",
+    "0111221001221110",
+    "0111221221221110",
+    "0111221111221110",
+    "0111221111221110",
+    "0111111111111110",
     "0000000000000000"
   ];
   var open = [
     "................",
     "..000000000000..",
-    ".03333333333330.",
-    ".03111111111130.",
-    ".03111111111130.",
-    ".03333333333330.",
+    ".02222222222220.",
+    ".02111111111120.",
+    ".02111111111120.",
+    ".02222222222220.",
     ".00000000000000.",
     "0000000000000000",
-    "0300000000000030",
-    "0311331111331130",
-    "0311331111331130",
-    "0311331111331130",
-    "0311331111331130",
-    "0311331111331130",
-    "0333333333333330",
+    "0200000000000020",
+    "0111221111221110",
+    "0111221111221110",
+    "0111221111221110",
+    "0111221111221110",
+    "0111221111221110",
+    "0111111111111110",
     "0000000000000000"
   ];
   function put(rows, list) {
@@ -2418,10 +2419,12 @@ var Weather = (function () {
 <script data-src="src/cut.js">
 /* Cutscenes: a clock of their own (tween, after, every, wait, flash, shake, sfx), like Battle.T in
    src/battle.js, so a scene the player has seen before can be cut short.
-     Cut.play(key, fn)  runs fn(Cut.T). The first time it plays in full. After that A cuts it short:
-                        every pending tween and timer finishes at once, new ones finish as they are made,
-                        and a dialogue that is open closes. One press of A is the whole skip.
-     Cut.say(pages)     the dialogue inside a cutscene: [{name, say: [lines]}]; it resolves at once while skipping.
+     Cut.play(key, fn)  runs fn(Cut.T). The first time it plays in full. After that A fast-forwards the motion:
+                        every pending tween and timer finishes at once, and new ones finish as they are made,
+                        up to the next line of dialogue.
+     Cut.say(pages)     the dialogue inside a cutscene: [{name, say: [lines]}]. It is always shown and ends the
+                        fast-forward. A also turns the page, so a skip that swallowed the dialogue went by with
+                        the first press: the owner pressed A to read the boss's entrance and lost the story.
    lo-game only updates the top scene, so while a dialogue is open the map scene's update does not run.
    That is why the skip is watched by a lo-game timer (those run under overlays), and the clock itself is stepped
    by the map scene: Cut.step(dt). Keys of cutscenes seen go into Cut.seen; main.js saves them with the game. */
@@ -2493,12 +2496,10 @@ var Cut = (function () {
     tweens = []; timers = [];
     tw.forEach(settle);
     tm.forEach(function (t) { if (!t.dead && !t.every) t.fn(); });
-    /* an open dialogue closes; its Cut.say resolves and the script runs on, skipping */
-    while (open > 0) { open--; game.pop(); }
   }
 
   self.say = function (pages, o) {
-    if (skip) return Promise.resolve();
+    skip = false;
     open++;
     return game.say(pages, o || {}).then(function () { if (open > 0) open--; });
   };
@@ -2515,7 +2516,8 @@ var Cut = (function () {
     var again = !!self.seen[key], stop = null;
     self.seen[key] = true;
     skip = false; playing = true;
-    if (again) stop = game.every(1 / 60, function () { if (!skip && game.ok()) cut(); });
+    /* only while no dialogue is open: there A turns the page */
+    if (again) stop = game.every(1 / 60, function () { if (!skip && open === 0 && game.ok()) cut(); });
     try { await fn(T); }
     finally {
       if (stop) stop();

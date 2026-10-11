@@ -136,3 +136,25 @@ test("START does nothing during a dialogue", async () => {
   assert.equal(z.get("fm"), null);
   assert.equal(z.get("busy"), false);
 });
+
+/* a cutscene seen before: A fast-forwards the motion, but every line of its dialogue is still shown (A also turns the page,
+   and a skip that swallowed the dialogue lost the boss's entrance to the first press) */
+test("a seen cutscene skips its motion with A but still shows every line: the boss's entrance", async () => {
+  const z = await start();
+  z.get("ZT").goto("top", { entered: true });
+  await z.run(60);
+  z.get("Cut").seen["top:boss"] = true;
+  const game = z.get("game"), said = [], say = game.say;
+  game.say = function (pages, o) { said.push(...pages); return say.call(this, pages, o); };
+  z.get("startBoss()");
+  const Battle = z.get("Battle");
+  let f = 0;
+  for (; f < 3000 && game.top() && game.top().enter !== Battle.scene.enter; f++) await z.run(1, () => {
+    const KE = z.get("KeyboardEvent"), send = z.get("dispatchEvent");
+    send(new KE(f % 6 < 3 ? "keydown" : "keyup", { key: "x" }));
+  });
+  assert.equal(game.top().enter, Battle.scene.enter, "the fight started");
+  const want = z.get("STORY").top.boss.flatMap((p) => p.say);
+  assert.deepEqual(said, want, "every line of the entrance was shown, in order");
+  assert.ok(said.includes("您没有影子。"));
+});
