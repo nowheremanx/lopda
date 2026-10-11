@@ -697,6 +697,7 @@ scene("map", {
       g.sprite(panel.art, Math.round(panel.x), 24);
     }
     if (fm && !busy) fmDraw(g);
+    Cut.draw(g);
   }
 });
 

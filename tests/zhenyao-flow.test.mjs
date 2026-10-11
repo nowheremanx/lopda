@@ -158,3 +158,75 @@ test("a seen cutscene skips its motion with A but still shows every line: the bo
   assert.deepEqual(said, want, "every line of the entrance was shown, in order");
   assert.ok(said.includes("您没有影子。"));
 });
+
+/* the boss's entrance from the roof's boss row; said: every line given to a dialogue box */
+async function entrance(z, seen) {
+  z.get("ZT").goto("top", { entered: true });
+  await z.run(60);
+  if (seen) z.get("Cut").seen["top:boss"] = true;
+  const game = z.get("game"), said = [], say = game.say;
+  game.say = function (pages, o) { said.push(...pages); return say.call(this, pages, o); };
+  z.get("startBoss()");
+  const inFight = () => game.top() && game.top().enter === z.get("Battle").scene.enter;
+  const dialogue = () => game.top() && !game.top().enter && !z.get("Cut").state().asking;
+  return { game, said, inFight, dialogue };
+}
+
+test("fast-forward: A shows 快进 in a seen cutscene, B takes it away and nothing is skipped", async () => {
+  const z = await start();
+  const e = await entrance(z, true);
+  /* the hero walks to the master before the first line: A once */
+  await z.run(10);
+  await z.tap("a");
+  assert.ok(z.get("Cut").state().hint, "the hint is up");
+  assert.equal(z.get("Cut").skipping(), false, "one A does not skip");
+  await z.tap("b");
+  assert.equal(z.get("Cut").state().hint, false, "B took it away");
+  assert.equal(z.get("Cut").skipping(), false);
+  /* the hint also goes by itself after two seconds */
+  await z.tap("a");
+  await z.run(130);
+  assert.equal(z.get("Cut").state().hint, false);
+});
+
+test("fast-forward: never in a cutscene seen for the first time", async () => {
+  const z = await start();
+  await entrance(z, false);
+  await z.run(10);
+  await z.tap("a");
+  assert.equal(z.get("Cut").state().hint, false);
+});
+
+test("START skips a cutscene seen for the first time, after asking; B goes back to the same line", async () => {
+  const z = await start();
+  const e = await entrance(z, false);
+  for (let i = 0; i < 600 && !e.dialogue(); i++) await z.run(1);
+  assert.ok(e.dialogue(), "the first line is open");
+  const lines = e.said.length;
+  await z.tap("start");
+  assert.ok(z.get("Cut").state().asking, "START asks first");
+  await z.run(30);
+  assert.equal(e.said.length, lines, "the cutscene waits while it asks");
+  await z.tap("b");
+  assert.equal(z.get("Cut").state().asking, false);
+  assert.ok(e.dialogue(), "B goes back to the line that was open");
+  assert.equal(e.said.length, lines, "START did not turn the page");
+  await z.tap("start");
+  await z.tap("a");
+  for (let i = 0; i < 300 && !e.inFight(); i++) await z.run(1);
+  assert.ok(e.inFight(), "skipped to the fight, as if the whole entrance had been watched");
+  assert.equal(e.said.length, lines, "no line was shown after the skip");
+  assert.equal(z.get("Battle").S().b.foes[0].id, "mirage");
+});
+
+test("START skips the ending to the credits, the same end as watching it", async () => {
+  const z = await start();
+  z.get("ZT").goto("ending");
+  await z.run(30);
+  await z.tap("start");
+  await z.tap("a");
+  for (let i = 0; i < 300 && z.get("ZT").state().scene !== "credits"; i++) await z.run(1);
+  const st = z.get("ZT").state();
+  assert.equal(st.scene, "credits");
+  assert.ok(st.cleared || st.credits || st.ended, "the game counts as cleared");
+});
