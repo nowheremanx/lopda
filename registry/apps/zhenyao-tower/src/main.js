@@ -79,7 +79,7 @@ var NEXT = { floor1: "floor2", floor2: "top" };
 var hero, people = [], foes = [], cam, busy = false, cur = null, banner = "";
 var INFO = {};
 /* what a cutscene adds to the map: stage (extra actors, see Maps.render), glows (point lights that can pulse),
-   rip (the ripple over the frame), panel (a full-screen picture, the hand), ended (the end card has been shown) */
+   rip (the ripple over the frame), panel (a cut-in band: the hand, the master's face), ended (the end card has been shown) */
 var stage = [], glows = [], rip = { k: 0, t0: 0 }, panel = null, ended = false, fxT = 0;
 
 /* a map as the scene needs it: the town from src/town.js, the others from STORY (the 3D scene is built on first use) */
@@ -330,8 +330,8 @@ async function afterBoss() {
   game.go("map", { id: "ending" }, { to: LoGame.INK });
 }
 
-/* The ending, at dawn at the tower's gate: the master waits; the hero reports; the close-up of the hand (a full-screen
-   2D picture, no text) closing on the pendant in his sleeve; a pause; the master's answer; the master goes in through the
+/* The ending, at dawn at the tower's gate: the master waits; the hero reports; the cut-ins (2D pixel bands, no text): the pendant on his palm, the master's
+   face, the hand closing on the pendant and lowering out of the frame; a pause; the master's answer; the master goes in through the
    gate; the last shot pulls back and up from the hero alone, a faint glow at his hand beating like a heart. */
 async function ending() {
   busy = true;
@@ -346,12 +346,25 @@ async function ending() {
     hero.face = "left";
     await C.tween(cam, { x: 7, z: -3.2 }, 0.6, "inOut");
     await Cut.dialogue(en.report);
-    panel = { f: 0, fade: 1 };
-    await C.tween(panel, { fade: 0 }, 0.5, "linear");
-    await C.wait(1.3); panel.f = 1;
-    await C.wait(0.35); panel.f = 2;
-    await C.wait(1.0);
-    await C.tween(panel, { fade: 1 }, 0.4, "linear");
+    /* the cut-ins: a band slides over the darkened scene. The palm with the pendant, the master's face, then the
+       fingers close over the pendant and the fist goes down out of the frame */
+    var cutin = function (name) { panel.art = ART.cutin(name); };
+    panel = { art: ART.cutin("palm"), x: 160, dark: 0 };
+    C.tween(panel, { dark: 1 }, 0.35, "linear");
+    await C.tween(panel, { x: 0 }, 0.35, "out");
+    await C.wait(1.5);
+    await C.tween(panel, { x: -160 }, 0.2, "in");
+    cutin("master"); panel.x = 160;
+    await C.tween(panel, { x: 0 }, 0.2, "out");
+    await C.wait(1.8);
+    await C.tween(panel, { x: -160 }, 0.2, "in");
+    cutin("palm"); panel.x = 160;
+    await C.tween(panel, { x: 0 }, 0.2, "out");
+    await C.wait(0.5);
+    cutin("curl1"); await C.wait(0.25);
+    cutin("fist"); await C.wait(0.7);
+    for (var di = 0; di < 4; di++) { cutin("down" + di); await C.wait(0.14); }
+    await C.tween(panel, { dark: 0 }, 0.3, "linear");
     panel = null;
     await C.wait(1.5);
     await Cut.dialogue(en.answer);
@@ -678,10 +691,10 @@ scene("map", {
       g.window(Math.round(80 - w / 2), 6, w, 18);
       g.text(banner, 80, 10, { align: "center" });
     }
-    /* the close-up of the hand covers the whole screen; it comes and goes through a dithered ink */
+    /* a cut-in is a band across the middle of the screen; the scene behind it is darkened */
     if (panel) {
-      g.sprite(ART.hand[panel.f], 0, 0);
-      if (panel.fade > 0) g.dither(0, 0, 160, 144, g.INK, Math.min(4, Math.ceil(panel.fade * 4)));
+      if (panel.dark > 0) g.dither(0, 0, 160, 144, g.INK, Math.min(3, Math.ceil(panel.dark * 3)));
+      g.sprite(panel.art, Math.round(panel.x), 24);
     }
     if (fm && !busy) fmDraw(g);
   }

@@ -228,19 +228,83 @@ ART.jade = LoGame.sprite([
   ".000."
 ]);
 
-/* The close-up of the hand in the ending (no text on it): the hero's arm hangs at his side in the wide sleeve and his
-   hand, the back of it toward us, is hiding the jade pendant in a fist. Three full-screen frames (160 x 144), painted
-   by code like the mural so the rings stay round: ART.hand[0] the fist low and a little open, jade and glow showing
-   between the fingers; [1] the fist tightening and drawing up; [2] the hand almost back in the sleeve, knuckles only.
-   Painted with a few shape helpers into a tone array, then turned into sprites. */
-ART.hand = (function () {
-  var W = 160, H = 144, cv, BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
-  function put(x, y, t) { x = Math.round(x); y = Math.round(y); if (x >= 0 && y >= 0 && x < W && y < H) cv[y * W + x] = t; }
-  function get(x, y) { return cv[y * W + x]; }
-  /* fill where inside(x, y) holds, within a box */
+
+/* A chest, 16 x 16 (a tile wide), with an ink outline and a paper line inside it so that it reads on any floor, light or dark:
+   a mid lid, a dark body, paper bands and lock. Closed, it glints now and then (frames 1 and 2 put a paper star above the lid, timed by
+   the map's clock, see Maps.render); opened, the lid stands up behind a dark mouth and there is no lock. */
+ART.chest = (function () {
+  var closed = [
+    "................",
+    "................",
+    "................",
+    "................",
+    "..000000000000..",
+    ".03333333333330.",
+    "0322332222332230",
+    "0322332222332230",
+    "0322332332332230",
+    "0000000330000000",
+    "0311331001331130",
+    "0311331331331130",
+    "0311331111331130",
+    "0311331111331130",
+    "0333333333333330",
+    "0000000000000000"
+  ];
+  var open = [
+    "................",
+    "..000000000000..",
+    ".03333333333330.",
+    ".03111111111130.",
+    ".03111111111130.",
+    ".03333333333330.",
+    ".00000000000000.",
+    "0000000000000000",
+    "0300000000000030",
+    "0311331111331130",
+    "0311331111331130",
+    "0311331111331130",
+    "0311331111331130",
+    "0311331111331130",
+    "0333333333333330",
+    "0000000000000000"
+  ];
+  function put(rows, list) {
+    var out = rows.slice();
+    list.forEach(function (p) { var r = out[p[1]]; out[p[1]] = r.slice(0, p[0]) + "3" + r.slice(p[0] + 1); });
+    return out;
+  }
+  /* one sprite per tone, each drawn with the renderer's fixed tone: fog and the dither of the light never turn the
+     lid's paper into mush, and the ink base stays ink */
+  function layers(rows) {
+    return [0, 1, 2, 3].map(function (t) {
+      return { tone: t, art: LoGame.sprite(rows.map(function (r) { return r.replace(/[0-3]/g, function (c) { return +c === t ? c : "."; }); })) };
+    });
+  }
+  return {
+    closed: [
+      layers(closed),
+      layers(put(closed, [[13, 2]])),
+      layers(put(closed, [[13, 0], [12, 1], [13, 1], [14, 1], [13, 2]]))
+    ],
+    open: layers(open)
+  };
+})();
+
+/* ---------- the close-ups of the ending (no text on them) ----------
+   2D pictures in the manner of a portrait cut-in: a band 160 x 96 across the screen with an ink frame, painted by code
+   so that the rings stay round, then turned into sprites. ART.cutin(name) paints on first use and keeps the sprite:
+   "palm" the hero's open hand, palm up, the jade pendant lying on it; "master" the master's face; "curl1", "fist" the
+   fingers closing; "down0".."down3" the fist lowering out of the bottom of the band. */
+ART.cutin = (function () {
+  var W = 160, H = 96, cv, OY = 0, cache = {};
+  var BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+  function put(x, y, t) { x = Math.round(x); y = Math.round(y + OY); if (x >= 0 && y >= 0 && x < W && y < H) cv[y * W + x] = t; }
+  function get(x, y) { x = Math.round(x); y = Math.round(y + OY); return x >= 0 && y >= 0 && x < W && y < H ? cv[y * W + x] : -1; }
+  /* fill where inside(x, y) holds, within a box (all in picture coordinates, moved down by OY) */
   function fill(x0, y0, x1, y1, inside, t) {
-    for (var y = Math.max(0, Math.floor(y0)); y <= Math.min(H - 1, Math.ceil(y1)); y++)
-      for (var x = Math.max(0, Math.floor(x0)); x <= Math.min(W - 1, Math.ceil(x1)); x++) if (inside(x, y)) cv[y * W + x] = t;
+    for (var y = Math.floor(y0); y <= Math.ceil(y1); y++)
+      for (var x = Math.floor(x0); x <= Math.ceil(x1); x++) if (inside(x, y)) put(x, y, t);
   }
   function disc(cx, cy, r, t) { fill(cx - r, cy - r, cx + r, cy + r, function (x, y) { return (x - cx) * (x - cx) + (y - cy) * (y - cy) <= r * r; }, t); }
   function ell(cx, cy, rx, ry, t) { fill(cx - rx, cy - ry, cx + rx, cy + ry, function (x, y) { var u = (x - cx) / rx, v = (y - cy) / ry; return u * u + v * v <= 1; }, t); }
@@ -249,9 +313,14 @@ ART.hand = (function () {
     var n = Math.ceil(Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0)) * 2) + 1;
     for (var i = 0; i <= n; i++) disc(x0 + (x1 - x0) * i / n, y0 + (y1 - y0) * i / n, r, t);
   }
+  /* a thin line */
+  function line(x0, y0, x1, y1, t) {
+    var n = Math.ceil(Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0))) + 1;
+    for (var i = 0; i <= n; i++) put(x0 + (x1 - x0) * i / n, y0 + (y1 - y0) * i / n, t);
+  }
   /* polygon, even-odd */
   function poly(pts, t) {
-    var ys = pts.map(function (p) { return p[1]; }), y0 = Math.max(0, Math.floor(Math.min.apply(null, ys))), y1 = Math.min(H - 1, Math.ceil(Math.max.apply(null, ys)));
+    var ys = pts.map(function (p) { return p[1]; }), y0 = Math.floor(Math.min.apply(null, ys)), y1 = Math.ceil(Math.max.apply(null, ys));
     for (var y = y0; y <= y1; y++) {
       var xs = [];
       for (var i = 0; i < pts.length; i++) {
@@ -262,129 +331,189 @@ ART.hand = (function () {
       for (var k = 0; k + 1 < xs.length; k += 2) for (var x = Math.round(xs[k]); x <= Math.round(xs[k + 1]); x++) put(x, y, t);
     }
   }
-  /* a shape with an ink outline: grow it by one pixel in ink, then paint it */
-  function inked(draw, grow) { draw(grow, 0); draw(0, null); }
-  /* a dithered tone on the pixels of tone `over` where a Bayer threshold passes (level 0..16) */
-  function shade(x0, y0, x1, y1, over, t, level) {
-    for (var y = Math.max(0, y0); y < Math.min(H, y1); y++) for (var x = Math.max(0, x0); x < Math.min(W, x1); x++)
-      if (cv[y * W + x] === over && BAYER[(y & 3) * 4 + (x & 3)] < level) cv[y * W + x] = t;
+  /* a shape in tone t with an ink outline of one pixel: paint it grown by `grow` in ink, then plain */
+  function inked(shape, grow, t) { shape(grow, 0); shape(0, t); }
+  /* tone `over` turned into `t` where a Bayer threshold passes: level 0..16, ramping from `l0` at y0 to `l1` at y1 */
+  function ramp(x0, y0, x1, y1, over, t, l0, l1) {
+    for (var y = y0; y < y1; y++) for (var x = x0; x < x1; x++)
+      if (get(x, y) === over && l0 + (l1 - l0) * (y - y0) / (y1 - y0) > BAYER[((y + OY) & 3) * 4 + (x & 3)]) put(x, y, t);
   }
-
-  /* the pendant as far as it shows: ink rim, jade body, one ring of waves (as in the mural) and the eye */
-  function jade(cx, cy) {
-    var R0 = 17;
-    disc(cx, cy, R0, 0);
-    disc(cx, cy, R0 - 1.2, 2);
-    fill(cx - R0, cy - R0, cx + R0, cy + R0, function (x, y) {
-      var dx = x - cx, dy = y - cy, d = Math.sqrt(dx * dx + dy * dy), a = Math.atan2(dy, dx), w = Math.sin(a * 5) * 0.6;
-      return Math.abs(d - 11 - w) < 0.8;
-    }, 0);
-    fill(cx - R0, cy - R0, cx + R0, cy + R0, function (x, y) {
-      var dx = x - cx, dy = y - cy, d = Math.sqrt(dx * dx + dy * dy);
-      return d > R0 - 2.6 && d <= R0 - 1.2 && dx + dy < 6;
-    }, 3);
-    ell(cx, cy, 5, 3, 0); ell(cx, cy, 3, 1.9, 3); disc(cx, cy, 1.1, 0);
-  }
-
-  /* a soft warmth round (cx, cy): dithered mid over the dark, paper dots near the middle; level 0..1 */
-  function glow(cx, cy, r, level) {
-    for (var y = Math.max(0, cy - r); y < Math.min(H, cy + r); y++) for (var x = Math.max(0, cx - r); x < Math.min(W, cx + r); x++) {
-      var d = Math.sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy)) / r, t = cv[y * W + x];
-      if (d >= 1 || t > 1) continue;
-      var v = (1 - d) * level * 16, b = BAYER[(y & 3) * 4 + (x & 3)];
-      if (v > b + 5) cv[y * W + x] = 3; else if (v > b) cv[y * W + x] = 2; else if (v > b - 4 && t === 0) cv[y * W + x] = 1;
+  /* the frame: two rows of ink at the top and bottom of the band and a paper line inside them */
+  function frame() {
+    for (var x = 0; x < W; x++) {
+      cv[x] = 0; cv[W + x] = 0; cv[2 * W + x] = 3; cv[3 * W + x] = 0;
+      cv[(H - 1) * W + x] = 0; cv[(H - 2) * W + x] = 0; cv[(H - 3) * W + x] = 3; cv[(H - 4) * W + x] = 0;
     }
   }
-
-  /* the sleeve's hem: lower in the middle, where the opening hangs open */
-  function hem(x) { var u = (x - 82) / 62; return Math.round(82 + 7 * (1 - u * u)); }
-  function edgeL(y) { return Math.round(46 - 30 * Math.pow(y / 90, 1.3) + Math.sin(y * 0.07) * 2); }
-  function edgeR(y) { return Math.round(120 + 30 * Math.pow(y / 90, 1.3) + Math.sin(y * 0.06 + 1) * 2); }
-
-  /* the sleeve: long and wide, folds falling straight down; lit on the left, dark on the right.
-     Drawn after the hand so that the hem covers the wrist */
-  function sleeve() {
-    var y, x;
-    for (y = 0; y < H; y++) for (x = edgeL(y); x <= edgeR(y); x++) {
-      if (y > hem(x)) continue;
-      var u = (x - edgeL(y)) / (edgeR(y) - edgeL(y)), b = BAYER[(y & 3) * 4 + (x & 3)];
-      cv[y * W + x] = 1;
-      if (u < 0.5 && (1 - u * 2) * 16 > b + 2) cv[y * W + x] = 2;
-      if (u > 0.72 && (u - 0.72) * 60 > b) cv[y * W + x] = 0;
-    }
-    /* folds: [position across at the top, lean as it falls, start row] */
-    [[0.14, -0.04, 8], [0.28, -0.02, 0], [0.4, 0.03, 20], [0.52, 0.0, 4], [0.64, 0.05, 14], [0.78, 0.08, 0], [0.9, 0.06, 26]].forEach(function (f, i) {
-      for (var yy = f[2]; yy < H; yy++) {
-        var L = edgeL(yy), R = edgeR(yy), xx = Math.round(L + (R - L) * (f[0] + f[1] * (yy / 96)) + Math.sin(yy * 0.11 + i * 1.9) * 1.5);
-        if (yy > hem(xx) - 2) break;
-        put(xx, yy, 0);
-        if (f[0] < 0.7) put(xx - 1, yy, 2);
-        if (f[0] < 0.5 && (yy + i) % 2 === 0) put(xx - 2, yy, 3);
-      }
-    });
-    /* the outline, thicker on the dark side, and the lit edge on the left */
-    for (y = 0; y < H; y++) {
-      var l = edgeL(y), r = edgeR(y);
-      if (y <= hem(l)) { put(l, y, 0); put(l + 1, y, y % 3 ? 3 : 2); put(l + 2, y, 2); }
-      if (y <= hem(r)) { put(r, y, 0); put(r - 1, y, 0); }
-    }
-    /* the hem: an ink line, a lip catching the light on the left */
-    for (x = edgeL(86); x <= edgeR(86); x++) {
-      var h = hem(x);
-      for (y = h - 5; y <= h; y++) put(x, y, (y === h || y === h - 5) ? 0 : (x < 70 && y === h - 4 ? 3 : (y === h - 1 && x > 96 ? 1 : 2)));
-    }
-  }
-
-  /* one frame: y0 is the top of the wrist (the lower, the more the fist is out), open how far the fingers are apart
-     (0..1), warm the glow (0..1) */
-  function paint(y0, open, warm) {
+  /* the ground of the band: ink, with a dithered dark pool round (cx, cy) */
+  function ground(cx, cy, rx) {
     cv = new Uint8Array(W * H);
-    var x, y, i;
-    /* the dark round the sleeve: ink with a dithered dark pool below it */
-    for (y = 0; y < H; y++) for (x = 0; x < W; x++) {
-      var d = Math.sqrt((x - 84) * (x - 84) + (y - 132) * (y - 132)) / 90, lum = Math.max(0, 1 - d) * 0.5;
+    for (var y = 0; y < H; y++) for (var x = 0; x < W; x++) {
+      var d = Math.sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy) * 1.6) / rx, lum = Math.max(0, 1 - d) * 0.9;
       cv[y * W + x] = lum * 16 > BAYER[(y & 3) * 4 + (x & 3)] ? 1 : 0;
     }
-    /* the pendant under the fingers, and its glow round it */
-    var jx = 82, jy = y0 + 37;
-    glow(jx, jy + 2, 34, Math.min(1, warm * 1.5));
-    if (open > 0.02) jade(jx, jy);
-    /* the thumb on the left, the back of the hand, then the fingers curled with their knuckles toward us */
-    cap(50, y0 + 14, 58, y0 + 38, 8, 0);
-    cap(50, y0 + 14, 58, y0 + 38, 7, 2);
-    for (i = 0; i < 6; i++) put(46 + i * 0.7, y0 + 16 + i * 3.5, 3);
-    ell(82, y0 + 3, 23, 17, 0);
-    ell(82, y0 + 3, 22, 16, 2);
-    fill(60, y0, 104, y0 + 40, function (px, py) { return cv[py * W + px] === 2 && px < 70 && (px + py) % 2 === 0; }, 3);
-    shade(94, y0, 106, y0 + 40, 2, 1, 9);
-    var gap = open * 6, fx = [62.5 - gap, 75.5 - gap, 88.5 + gap, 101.5 + gap];
-    for (i = 0; i < 4; i++) {
-      var top = y0 + 17 + (i === 1 || i === 2 ? -2 : 1), tip = y0 + 38 - (i === 0 || i === 3 ? 4 : 0) - open * 3, dx = i < 2 ? 1 : -1;
-      cap(fx[i], top, fx[i] + dx, tip, 7.5, 0);
-      cap(fx[i], top, fx[i] + dx, tip, 6.5, 2);
-      /* a lit knuckle at the top, a crease across the finger, the fingertip in shade */
-      for (var k = -3; k <= 1; k++) put(fx[i] + k, top - 1, 3);
-      put(fx[i] - 4, top + 1, 3); put(fx[i] - 4, top + 2, 3);
-      for (k = -4; k <= 4; k++) {
-        if (cv[(y0 + 29) * W + Math.round(fx[i] + k)] === 2) put(fx[i] + k, y0 + 29, k === 0 ? 2 : 1);
-        if (cv[(tip - 2) * W + Math.round(fx[i] + k + dx)] === 2) put(fx[i] + k + dx, tip - 2, (k + i) % 2 ? 1 : 2);
-      }
-    }
-    /* sparks of paper in the dark round the fist while the fist is open */
-    if (open > 0.5) [[-27, 30], [28, 36], [-22, 52], [24, 49], [-3, 57], [14, 56]].forEach(function (p) { put(jx + p[0], y0 + p[1], 3); });
-    sleeve();
-    /* the shadow under the hem on the wrist, so that it goes in */
-    for (x = 52; x <= 112; x++) for (y = hem(x) + 1; y <= hem(x) + 4; y++)
-      if (cv[y * W + x] > 0 && BAYER[(y & 3) * 4 + (x & 3)] * 0.9 + (y - hem(x)) * 3 < 13) cv[y * W + x] = 0;
-    /* the last of the glow, at the cuff */
-    if (warm < 0.3) { put(78, hem(78) + 2, 3); put(87, hem(87) + 2, 3); put(88, hem(88) + 2, 2); put(77, hem(77) + 3, 2); }
+  }
+  function sprite() {
+    frame();
     var rows = [];
-    for (y = 0; y < H; y++) {
+    for (var y = 0; y < H; y++) {
       var row = "";
-      for (x = 0; x < W; x++) row += cv[y * W + x];
+      for (var x = 0; x < W; x++) row += cv[y * W + x];
       rows.push(row);
     }
     return LoGame.sprite(rows);
   }
-  return [paint(84, 1, 1), paint(70, 0.2, 0.55), paint(52, 0, 0.12)];
+
+  /* ---- the pendant: ink rim, a mid ring, a dark body with three wavy lines wound into a circle round an eye ---- */
+  function jade(cx, cy) {
+    var R0 = 21;
+    disc(cx, cy, R0, 0);
+    disc(cx, cy, R0 - 1.2, 2);
+    disc(cx, cy, R0 - 3.4, 1);
+    /* a light on the rim at the upper left */
+    fill(cx - R0, cy - R0, cx + R0, cy + R0, function (x, y) {
+      var dx = x - cx, dy = y - cy, d = Math.sqrt(dx * dx + dy * dy);
+      return d > R0 - 3.4 && d <= R0 - 1.2 && dx + dy < -5;
+    }, 3);
+    /* three waves, each a third of the circle: a line that swings in and out, drawn in paper */
+    for (var k = 0; k < 3; k++) {
+      for (var s = 0; s <= 200; s++) {
+        var u = s / 200, a = (k + 0.08 + u * 0.84) * Math.PI * 2 / 3 - 1.2, rr = 12.6 + 2.2 * Math.sin(u * Math.PI * 4);
+        var px = cx + Math.cos(a) * rr, py = cy + Math.sin(a) * rr * 0.98;
+        put(px, py, 3); if (Math.abs(Math.sin(a)) > 0.7) put(px, py + 1, 3); else put(px + 1, py, 3);
+      }
+    }
+    /* the eye in the middle */
+    ell(cx, cy, 6, 3.6, 0); ell(cx, cy, 5, 2.6, 3); disc(cx, cy, 1.7, 0);
+    put(cx - 1, cy - 1, 3);
+  }
+  /* the cord: from the hole at the top of the pendant, dangling over the heel of the hand and off the band */
+  function cord(cx, cy) {
+    for (var i = 0; i <= 60; i++) {
+      var u = i / 60, x = cx - 14 - u * 26 + Math.sin(u * 5) * 2, y = cy + 14 + u * 70;
+      put(x, y, 0); put(x + 1, y, 0); put(x + 1, y + 1, 2);
+    }
+  }
+
+  /* ---- the hand: seen from above, palm up, wrist on the left, fingers to the right ----
+     curl: 0 open and flat, 1 the fingers rising and shortening, 2 the fist closed over the pendant */
+  var JX = 66, JY = 50;
+  function skin(shape) { shape(1, 0); shape(0, 3); }
+  function hand(curl, withJade) {
+    var i;
+    /* the forearm, bare, from the left edge */
+    skin(function (g, t) { poly([[-2, 31 - g], [34, 28 - g], [44, 28 - g], [44, 74 + g], [34, 71 + g], [-2, 69 + g]], t); });
+    ramp(0, 30, 44, 71, 3, 2, 2, 12);
+    line(4, 44, 30, 46, 2); line(6, 55, 32, 55, 2);
+    /* the palm */
+    skin(function (g, t) {
+      fill(36 - g, 24 - g, 94 + g, 76 + g, function (x, y) {
+        var dx = Math.max(0, Math.abs(x - 65) - 20), dy = Math.max(0, Math.abs(y - 50) - 14);
+        return dx * dx + dy * dy <= (14 + g) * (14 + g);
+      }, t);
+    });
+    ramp(36, 24, 95, 76, 3, 2, 1, 11);
+    /* the thumb, on the top side */
+    var th = curl === 0 ? [[54, 30], [80, 12]] : curl === 1 ? [[54, 30], [74, 20]] : [[54, 30], [76, 42]];
+    cap(th[0][0], th[0][1], th[1][0], th[1][1], 7, 0); cap(th[0][0], th[0][1], th[1][0], th[1][1], 6, 3);
+    /* the fingers: knuckles at x = 92 */
+    var ys = [31, 43, 55, 67], len = [44, 50, 46, 36];
+    if (withJade) { jade(JX, JY); cord(JX, JY); }
+    if (curl === 0) {
+      for (i = 0; i < 4; i++) {
+        cap(92, ys[i], 92 + len[i], ys[i], 6, 0); cap(92, ys[i], 92 + len[i], ys[i], 5, 3);
+        ramp(92, ys[i], 92 + len[i] + 6, ys[i] + 6, 3, 2, 0, 9);
+        line(92 + len[i] / 3, ys[i] - 4, 92 + len[i] / 3, ys[i] + 4, 0); line(92 + len[i] * 0.66, ys[i] - 4, 92 + len[i] * 0.66, ys[i] + 4, 0);
+      }
+    } else if (curl === 1) {
+      /* rising towards us: short and fat, the tips lit */
+      for (i = 0; i < 4; i++) {
+        var l1 = len[i] * 0.4;
+        cap(92, ys[i], 92 + l1, ys[i], 6.5, 0); cap(92, ys[i], 92 + l1, ys[i], 5.5, 3);
+        ramp(92, ys[i], 92 + l1 + 7, ys[i] + 6, 3, 2, 0, 9);
+        line(92 + l1 / 2, ys[i] - 4, 92 + l1 / 2, ys[i] + 4, 0);
+      }
+    } else {
+      /* closed over the pendant: the fingers lie back across it, tips to the left, the thumb across them */
+      for (i = 0; i < 4; i++) {
+        var l = 33 + (i === 1 ? 3 : 0) - (i === 3 ? 3 : 0);
+        cap(94, ys[i], 94 - l, ys[i], 6.3, 0); cap(94, ys[i], 94 - l, ys[i], 5.3, 3);
+        ramp(94 - l, ys[i], 94, ys[i] + 6, 3, 2, 0, 8);
+        line(94 - l * 0.35, ys[i] - 4, 94 - l * 0.35, ys[i] + 4, 0); line(94 - l * 0.7, ys[i] - 4, 94 - l * 0.7, ys[i] + 4, 0);
+      }
+      cap(50, 33, 70, 50, 7, 0); cap(50, 33, 70, 50, 6, 3); ramp(48, 30, 76, 56, 3, 2, 0, 8);
+      line(54, 29, 70, 44, 3);
+    }
+    /* creases of the palm at the heel, when it is open */
+    if (curl < 2) { line(40, 40, 47, 46, 2); line(41, 62, 48, 56, 2); }
+  }
+
+  /* ---- the master: an old man, calm, long grey brows and beard, looking at the hero (the right of the picture) ---- */
+  function master() {
+    ground(80, 50, 92);
+    var f, x, y;
+    /* shoulders and robe */
+    inked(function (g, t) { poly([[10 - g, 96], [22 - g, 76 - g], [52, 66 - g], [108, 66 - g], [138 + g, 76 - g], [150 + g, 96]], t); }, 1, 1);
+    ramp(14, 70, 146, 96, 1, 0, 2, 12);
+    for (f = 0; f < 5; f++) { line(30 + f * 8, 80 + f, 24 + f * 5, 96, 0); line(130 - f * 8, 80 + f, 136 - f * 5, 96, 0); }
+    /* the collar: a pale V under the beard */
+    line(64, 70, 80, 90, 3); line(96, 70, 80, 90, 3); line(63, 70, 79, 91, 2); line(97, 70, 81, 91, 2);
+    /* the topknot with its pin */
+    inked(function (g, t) { ell(80, 12, 8 + g, 7 + g, t); }, 1, 2);
+    line(70, 14, 90, 10, 0); line(70, 15, 90, 11, 3);
+    /* grey hair round the head */
+    inked(function (g, t) { ell(80, 40, 26 + g, 29 + g, t); }, 1, 2);
+    ramp(54, 14, 106, 70, 2, 3, 0, 5);
+    for (f = 0; f < 6; f++) { line(60 + f * 2, 22, 56 + f, 46, 0); line(100 - f * 2, 22, 104 - f, 46, 0); }
+    /* the face */
+    inked(function (g, t) { ell(80, 46, 20 + g, 24 + g, t); }, 1, 3);
+    ramp(60, 22, 100, 70, 3, 2, 0, 6);
+    for (y = 24; y < 70; y++) for (x = 92; x < 102; x++) if (get(x, y) === 3 && (x - 92) * 1.4 > BAYER[((y + OY) & 3) * 4 + (x & 3)] - 4) put(x, y, 2);
+    /* forehead lines, crow's feet, a line from nose to mouth */
+    line(68, 29, 92, 29, 2); line(70, 33, 90, 33, 2);
+    line(61, 48, 58, 46, 2); line(61, 51, 58, 52, 2); line(99, 48, 102, 46, 2); line(99, 51, 102, 52, 2);
+    line(72, 60, 70, 66, 2); line(88, 60, 90, 66, 2);
+    /* long brows: grey, drooping at the outer ends past the eyes */
+    function brow(x0, y0, x1, y1, x2, y2) {
+      cap(x0, y0, x1, y1, 2, 0); cap(x1, y1, x2, y2, 2, 0);
+      cap(x0, y0, x1, y1, 1, 2); cap(x1, y1, x2, y2, 1, 2);
+    }
+    brow(75, 37, 66, 36, 56, 45); brow(85, 37, 94, 36, 104, 45);
+    /* calm eyes: a lid line, a small iris looking to the right, a pale lower lid */
+    function eye(cx) {
+      line(cx - 5, 46, cx + 5, 46, 0); line(cx - 4, 45, cx + 4, 45, 0);
+      ell(cx + 1.5, 47, 2.4, 1.6, 0); put(cx + 2, 46, 3);
+      line(cx - 4, 49, cx + 4, 49, 2);
+    }
+    eye(69); eye(91);
+    /* nose */
+    line(80, 46, 80, 55, 2); line(78, 56, 82, 56, 0); put(81, 53, 2);
+    /* moustache falling over the mouth, then the beard, long, over the robe */
+    inked(function (g, t) { poly([[80, 58 - g], [90 + g, 59 - g], [97 + g, 67 + g], [88, 64 + g], [80, 62 + g], [72, 64 + g], [63 - g, 67 + g], [70 - g, 59 - g]], t); }, 1, 3);
+    line(76, 64, 84, 64, 0);
+    inked(function (g, t) { poly([[60 - g, 62], [100 + g, 62], [98 + g, 72], [90 + g, 82 + g], [82, 95], [80, 100], [78, 95], [70 - g, 82 + g], [62 - g, 72]], t); }, 1, 3);
+    ramp(60, 62, 100, 96, 3, 2, 0, 8);
+    for (f = 0; f < 7; f++) line(66 + f * 4.7, 66 + Math.abs(f - 3) * 2, 70 + f * 3.4, 92, 2);
+    return sprite();
+  }
+
+  function hold(curl, withJade, dy) {
+    ground(70, 52, 88);
+    OY = dy || 0;
+    hand(curl, withJade);
+    OY = 0;
+    return sprite();
+  }
+
+  var MAKE = {
+    palm: function () { return hold(0, true, 0); },
+    curl1: function () { return hold(1, true, 0); },
+    fist: function () { return hold(2, true, 0); },
+    down0: function () { return hold(2, true, 12); },
+    down1: function () { return hold(2, true, 30); },
+    down2: function () { return hold(2, true, 52); },
+    down3: function () { return hold(2, true, 76); },
+    master: master
+  };
+  return function (name) { return cache[name] || (cache[name] = MAKE[name]()); };
 })();
