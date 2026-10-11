@@ -219,12 +219,12 @@ function entrySheet(sh){
   if(D.review){
     keys.appendChild(keyBtn("ck","◀","",function(){ step(-1); }));
     keys.appendChild(keyBtn("ck ck-a","A",tr(e.shown?"dict.next":"dict.reveal"),function(){ reviewA(); }));
-    keys.appendChild(keyBtn("ck","B",mark,function(){ toggleWord(word); renderSheet(); }));
+    keys.appendChild(keyBtn("ck","START",mark,function(){ toggleWord(word); renderSheet(); }));
     keys.appendChild(keyBtn("ck","▶","",function(){ step(1); }));
   } else {
     keys.appendChild(keyBtn("ck","◀▶",tr("dict.page"),function(){ turn(1); }));
-    keys.appendChild(keyBtn("ck ck-a","A",tr("dict.back"),function(){ closeSheet(); }));
-    if(e.results && e.results.length) keys.appendChild(keyBtn("ck","B",mark,function(){ toggleWord(word); renderSheet(); }));
+    keys.appendChild(keyBtn("ck","B",tr("dict.back"),function(){ closeSheet(); }));
+    if(e.results && e.results.length) keys.appendChild(keyBtn("ck","START",mark,function(){ toggleWord(word); renderSheet(); }));
   }
   sh.appendChild(keys);
   /* whole lines per page: the page box is cut to a multiple of the line height */
@@ -376,7 +376,8 @@ $("dict-file").addEventListener("change",function(){
 
 /* ---------- chin pad ----------
    main: ▲▼ pick, A look up, B clear, SELECT word book, START books
-   entry: ◀▶▲▼ page, A back, B word book; review: A show / next, ◀▶ words, ▲▼ page, B word book
+   entry: ◀▶▲▼ page, B (or A) back, START word book; review: A show / next, ◀▶ words, ▲▼ page, START word book, B back
+   (B is "back" everywhere on the handheld, so the word book sits on START)
    word book and books: ▲▼ pick, A open (review), B back */
 function dictButton(b){
   if(b==="select" && D.sheet){ closeSheet(); return; }
@@ -386,14 +387,14 @@ function dictButton(b){
       if(b==="a") reviewA();
       else if(b==="left"||b==="right") step(b==="left"?-1:1);
       else if(b==="up"||b==="down") turn(b==="up"?-1:1);
-      else if(b==="b"){ toggleWord(w); renderSheet(); }
-      else if(b==="start") closeSheet();
+      else if(b==="start"){ toggleWord(w); renderSheet(); }
+      else if(b==="b") closeSheet();
       return;
     }
     if(b==="left"||b==="up") turn(-1);
     else if(b==="right"||b==="down") turn(1);
-    else if(b==="a"||b==="start") closeSheet();
-    else if(b==="b" && has){ toggleWord(w); renderSheet(); }
+    else if(b==="a"||b==="b") closeSheet();
+    else if(b==="start" && has){ toggleWord(w); renderSheet(); }
     return;
   }
   if(D.sheet==="words"){
