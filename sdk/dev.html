@@ -110,17 +110,18 @@
       .catch(function (e) { log("load failed: " + e.message); });
   }
   /* Sound: the same chip and the same rules as the runtime (music and ambience wait for the first touch or key, stop when the
-     app reloads, pause with the page). The master level is what an app gets at the handheld's default volume step. Named sounds are
-     only logged here; the handheld plays them. */
+     app reloads, pause with the page). The master level is what an app gets at the handheld's default volume step. The named
+     sounds play from chip.js's table too, as on the handheld. */
   var AC = window.AudioContext || window.webkitAudioContext, actx = null, master = null;
+  function chipContext(make) {
+    if (!actx && make && AC) {
+      try { if (navigator.audioSession) navigator.audioSession.type = "ambient"; } catch (e) {}
+      actx = new AC(); master = actx.createGain(); master.gain.value = 0.25; master.connect(actx.destination);
+    }
+    return actx;
+  }
   var chip = window.LopdaChip && AC ? LopdaChip.host({
-    context: function (make) {
-      if (!actx && make) {
-        try { if (navigator.audioSession) navigator.audioSession.type = "ambient"; } catch (e) {}
-        actx = new AC(); master = actx.createGain(); master.gain.value = 0.25; master.connect(actx.destination);
-      }
-      return actx;
-    },
+    context: chipContext,
     output: function () { return master; }
   }) : null;
   ["pointerdown", "touchend", "keydown"].forEach(function (t) { document.addEventListener(t, function () { if (chip) chip.unlock(); }, true); });
@@ -144,7 +145,14 @@
     else if (d.op === "remove") { delete s[d.k]; writeStore(s); }
     else if (d.op === "error") log("ERROR " + d.msg);
     else if (d.op === "exit") { log("app asked to exit"); if (chip) chip.stop(); frame.srcdoc = ""; }
-    else if (d.op === "sfx" && typeof d.name === "string") log("sfx " + d.name);
+    else if (d.op === "sfx" && typeof d.name === "string") {
+      log("sfx " + d.name);
+      /* the ten named sounds, from the same chip.js table the handheld plays */
+      if (chip && LopdaChip.named && LopdaChip.hasNamed(d.name)) {
+        var ctx = chipContext(true);
+        if (ctx) { if (ctx.state !== "running") try { ctx.resume(); } catch (x) {} LopdaChip.named(ctx, master, d.name); }
+      }
+    }
     else if (d.op === "sfx" && d.params) { log("sfx " + JSON.stringify(LopdaChip.sfxParams(d.params))); if (chip) chip.sfx(d.params); }
     else if (d.op === "music" && chip) {
       var r = chip.music(d);

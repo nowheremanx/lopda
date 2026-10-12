@@ -288,7 +288,7 @@ if (PAD.ambience) {                   // undefined before runtime 0.13.0
 | `waterfall` | a steady, thick roar |
 | `wind` | gusts that rise and fall, with a faint whistle |
 | `fire` | a low flicker and random crackles |
-| `stream` | a light, high babble |
+| `stream` | running water: bubbling and babbling over a soft rush |
 
 One ambience plays at a time. It sits under the music: at level 1 it is quieter than a song.
 A level out of range is pulled into 0-1; an unknown preset is not played and the runtime shows
