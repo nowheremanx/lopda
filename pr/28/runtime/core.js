@@ -150,13 +150,13 @@ function show(name){
 }
 $("home-key").onclick=function(){ LP.flushNote(); show("home"); sfx("home"); };
 
-/* ---------- sound: tiny square-wave chips through Web Audio ---------- */
-var RUNTIME_VERSION="0.13.0";   /* keep in step with VERSION in sw.js */
+/* ---------- sound: tiny square-wave chips through Web Audio (the named sounds themselves are in chip.js) ---------- */
+var RUNTIME_VERSION="0.13.1";   /* keep in step with VERSION in sw.js */
 /* One volume, five steps, 0 is off (decisions.md section 10). It sets the master gain and nothing else does.
    Under the master: `ui` for the runtime's own clicks, held at a fraction so they stay as quiet as they always were
    (step 2 gives them 0.11, their level before 0.12.0), and `app` for apps, music and the cartridge at the full step. */
 var SND={ctx:null, vol:2, gain:null, ui:null, app:null, stale:false};
-var VOL_GAIN=[0,0.12,0.25,0.42,0.6], VOL_MAX=4, UI_LEVEL=0.44, OUT=null;
+var VOL_GAIN=[0,0.12,0.25,0.42,0.6], VOL_MAX=4, UI_LEVEL=0.44;
 function applyLevel(){ if(SND.gain) SND.gain.gain.value=VOL_GAIN[SND.vol]||0; }
 function audio(){
   if(SND.ctx) return SND.ctx;
@@ -173,41 +173,14 @@ function audio(){
 }
 /* ask a context that is not running to run, whatever stopped it ("suspended", or Safari's "interrupted") */
 function wake(){ var ac=SND.ctx; if(ac && ac.state!=="running" && ac.state!=="closed") try{ ac.resume(); }catch(e){} }
-function tone(freq,start,dur,type,level){
-  var ac=SND.ctx, o=ac.createOscillator(), g=ac.createGain(), t=ac.currentTime+start;
-  o.type=type||"square"; o.frequency.setValueAtTime(freq,t);
-  g.gain.setValueAtTime(0.0001,t); g.gain.linearRampToValueAtTime(level||1,t+0.004); g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
-  o.connect(g); g.connect(OUT); o.start(t); o.stop(t+dur+0.02);
-}
-function noise(start,dur,level){
-  var ac=SND.ctx, n=Math.floor(ac.sampleRate*dur), buf=ac.createBuffer(1,n,ac.sampleRate), ch=buf.getChannelData(0);
-  for(var i=0;i<n;i++) ch[i]=(Math.random()*2-1)*(1-i/n);
-  var src=ac.createBufferSource(), g=ac.createGain(), t=ac.currentTime+start; src.buffer=buf;
-  g.gain.setValueAtTime(level||1,t); src.connect(g); g.connect(OUT); src.start(t);
-}
-var SFX={
-  tap:function(){ tone(1400,0,0.03,"square",0.5); },
-  home:function(){ tone(660,0,0.06); tone(990,0.06,0.08); },
-  shutter:function(){ noise(0,0.05,0.9); tone(180,0.0,0.05,"square",0.6); noise(0.09,0.04,0.6); },
-  ok:function(){ tone(523,0,0.07); tone(659,0.07,0.07); tone(784,0.14,0.12); },
-  err:function(){ tone(196,0,0.12); tone(147,0.12,0.18); },
-  modem:function(){ for(var i=0;i<6;i++) tone(i%2?2100:1200,i*0.05,0.045,"square",0.35); },
-  tick:function(){ tone(2400,0,0.012,"square",0.25); },
-  /* the rest are also offered to apps through PAD.sfx (see SPEC.md) */
-  move:function(){ tone(880,0,0.025,"square",0.3); },
-  hit:function(){ noise(0,0.07,1); tone(98,0,0.09,"square",0.9); },
-  miss:function(){ tone(330,0,0.05,"triangle",0.8); tone(220,0.05,0.08,"triangle",0.7); },
-  coin:function(){ tone(988,0,0.06,"square",0.5); tone(1319,0.06,0.16,"square",0.5); },
-  win:function(){ [523,659,784,1047].forEach(function(f,i){ tone(f,i*0.09,i===3?0.25:0.09,"square",0.6); }); },
-  lose:function(){ [392,330,262,196].forEach(function(f,i){ tone(f,i*0.14,i===3?0.3:0.13,"triangle",0.9); }); }
-};
 var APP_SFX=["tap","tick","move","ok","err","hit","miss","coin","win","lose"];
 function playNamed(name,bus){
   if(window.LOPDA_DEBUG) window.LOPDA_DEBUG.sfxLog.push(name);
   if(!SND.vol) return;
-  var ac=audio(); if(!ac || !SFX[name]) return;
-  wake(); OUT=SND[bus];
-  try{ SFX[name](); }catch(e){}
+  if(!window.LopdaChip.hasNamed(name)) return;
+  var ac=audio(); if(!ac) return;
+  wake();
+  try{ window.LopdaChip.named(ac,SND[bus],name); }catch(e){}
 }
 /* the runtime's own sounds */
 function sfx(name){ playNamed(name,"ui"); }

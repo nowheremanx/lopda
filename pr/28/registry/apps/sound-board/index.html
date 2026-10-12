@@ -33,11 +33,11 @@
 var ZH = PAD.lang !== "en";
 var T = ZH ? {
   title: "声音样本", music: "乐曲", amb: "环境声", named: "具名音效", custom: "自定义音效",
-  keys: "↑↓ 选　A 播放/停止　←→ 环境声强度　B 全部停止",
+  keys: "↑↓ 选　A 播放/停止　B 全部停止　SELECT 下一组　←→ 环境声强度",
   idle: "安静", newer: "需要新版系统", playing: "播放中", once: "单次"
 } : {
   title: "Sounds", music: "Music", amb: "Ambience", named: "Named sounds", custom: "Custom sounds",
-  keys: "Up/Down pick  A play/stop  Left/Right ambience level  B stop all",
+  keys: "Up/Down pick  A play/stop  B stop all  SELECT next group  Left/Right ambience level",
   idle: "quiet", newer: "needs a newer system", playing: "playing", once: "once"
 };
 
@@ -145,15 +145,17 @@ function stopAll() {
   song = null; amb = null; draw();
 }
 function move(d) { sel = (sel + d + rows.length) % rows.length; draw(); }
+/* Left/Right set an ambience's level, and do nothing elsewhere */
 function side(d) {
   var r = rows[sel];
-  if (r.kind === "amb" && usable(r)) {
-    var n = Math.max(1, Math.min(5, level[r.id] + d));
-    if (n !== level[r.id]) { level[r.id] = n; if (amb === r.id) PAD.ambience(r.id, lv(r.id)); }
-    draw(); return;
-  }
-  /* elsewhere: jump to the next or previous section */
-  var s = (r.sec + d + 4) % 4;
+  if (r.kind !== "amb" || !usable(r)) return;
+  var n = Math.max(1, Math.min(5, level[r.id] + d));
+  if (n !== level[r.id]) { level[r.id] = n; if (amb === r.id) PAD.ambience(r.id, lv(r.id)); PAD.sfx("move"); }
+  draw();
+}
+/* SELECT: the first row of the next group, round to the first */
+function nextGroup() {
+  var s = (rows[sel].sec + 1) % 4;
   for (var i = 0; i < rows.length; i++) if (rows[i].sec === s) { sel = i; break; }
   draw();
 }
@@ -165,6 +167,7 @@ PAD.on("press", function (b) {
   else if (b === "right") side(1);
   else if (b === "a") play(rows[sel]);
   else if (b === "b") stopAll();
+  else if (b === "select") nextGroup();
 });
 list.addEventListener("click", function (e) {
   var el = e.target.closest ? e.target.closest(".row") : null; if (!el) return;
