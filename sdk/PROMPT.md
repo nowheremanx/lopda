@@ -46,9 +46,14 @@ Hard rules for index.html:
   Newer runtimes also play the app's own sounds and music; PAD.music is undefined
   on older ones, so check it first and stay silent without it:
     PAD.sfx({ wave: "square", duty: 2, from: 440, to: 880, ms: 90 })   wave: square, triangle or noise;
-         from/to in Hz (the pitch slides), ms up to 1500, attack/decay in ms, vol 0-1
+         from/to in Hz (the pitch slides), ms up to 1500, attack/decay in ms, vol 0-1,
+         vibrato: { depth: 0.5, rate: 6 } (semitones 0-2, Hz 1-20) makes the pitch wobble
     PAD.music.play({ bpm: 120, p1: "...", p2: "...", tri: "...", noise: "..." })   loops; {loop: false} plays once
     PAD.music.stop()
+  Background ambience, where PAD.ambience exists (check it first, like PAD.music):
+    PAD.ambience("rain", 0.6)   one of rain, waves, waterfall, wind, fire, stream; level 0-1.
+         Calling again fades to the new preset or level; PAD.ambience(null) fades it out.
+         One at a time, under the music. Call it when a scene changes, not every frame.
   Channels are MML: notes c d e f g a b (+ sharp, - flat), r rest, lengths c8 c4. c2,
   l8 sets the default length, o0-o7 or < > the octave (o4 a = 440 Hz), & ties, v0-v15 volume,
   @0-@3 pulse width (p1, p2), [ ... ]3 repeats; the noise channel plays x (short) and X (long).
