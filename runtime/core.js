@@ -1,5 +1,5 @@
 /*
- * Lo-PDA runtime: the core. Utilities, storage helpers, clock, views, sound, language, updates,
+ * Lo-PDA runtime: the core. Utilities, storage helpers, clock, views, sound (music: chip.js), language, updates,
  * icons, the home screen and the chin pad. Built-in programs live in apps/*.js and talk to the
  * rest only through window.LP; boot.js starts the handheld once everything is loaded.
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
@@ -150,7 +150,7 @@ function show(name){
 $("home-key").onclick=function(){ LP.flushNote(); show("home"); sfx("home"); };
 
 /* ---------- sound: tiny square-wave chips through Web Audio ---------- */
-var RUNTIME_VERSION="0.10.0";   /* keep in step with VERSION in sw.js */
+var RUNTIME_VERSION="0.11.0";   /* keep in step with VERSION in sw.js */
 var SND={ctx:null, on:true, vol:2, gain:null};
 var VOL_GAIN=[0,0.05,0.11,0.2];
 function audio(){
@@ -198,6 +198,23 @@ function sfx(name){
   SND.gain.gain.value=VOL_GAIN[SND.vol];
   try{ SFX[name](); }catch(e){}
 }
+/* ---------- music and made-to-order sounds for apps: runtime/chip.js (PAD.music, PAD.sfx({...})) ----------
+   Same master gain, sound switch and four volume steps as the named sounds. With the sound off the song keeps
+   going, silent, and is heard again from wherever it has got to, like turning a real handheld's volume down. */
+function applyLevel(){ if(SND.gain) SND.gain.gain.value = SND.on ? VOL_GAIN[SND.vol] : 0; }
+var chip=window.LopdaChip.host({
+  context:function(make){ return SND.ctx || (make ? audio() : null); },
+  output:function(){ return SND.gain; },
+  level:applyLevel
+});
+function sfxCustom(params){
+  if(!SND.on || !SND.vol || !audio()) return;
+  SND.gain.gain.value=VOL_GAIN[SND.vol];
+  try{ chip.sfx(params); }catch(e){}
+}
+/* a song asked for before the first touch starts on the first touch or key (iPhone keeps audio locked until then) */
+["pointerdown","touchend","keydown"].forEach(function(t){ document.addEventListener(t,function(){ chip.unlock(); },true); });
+document.addEventListener("visibilitychange",function(){ if(document.hidden) chip.pause(); else chip.resume(); });
 /* every button gets a key click, except the ones that make their own sound */
 document.addEventListener("pointerdown",function(e){
   var b=e.target.closest && e.target.closest("button,label.btn,.app");
@@ -381,7 +398,7 @@ var share={
   TONES:TONES, BAYER:BAYER, saveCanvas:saveCanvas, saveErr:saveErr, sha256hex:sha256hex,
   upsert:upsert, dropLocal:dropLocal, pending:pending, refresh:refresh, onData:onData,
   setStatus:setStatus, tickClock:tickClock, show:show,
-  RUNTIME_VERSION:RUNTIME_VERSION, SND:SND, audio:audio, sfx:sfx, APP_SFX:APP_SFX,
+  RUNTIME_VERSION:RUNTIME_VERSION, SND:SND, audio:audio, sfx:sfx, APP_SFX:APP_SFX, chip:chip, sfxCustom:sfxCustom, applyLevel:applyLevel,
   setLang:setLang, UPD:UPD, renderUpdate:renderUpdate,
   validIcon:validIcon, fillTile:fillTile, appName:appName, appDesc:appDesc, renderHome:renderHome,
   resetConfirm:resetConfirm, padRoute:padRoute, setButton:setButton, releaseButtons:releaseButtons, showPad:showPad

@@ -54,6 +54,8 @@
     <div>Errors and events</div><pre id="log"></pre>
   </div>
 <script src="pad-shim.js"></script>
+<!-- the runtime's sound chip, so music and custom sounds sound here as they do on the handheld -->
+<script src="../runtime/chip.js"></script>
 <script>
   var frame = document.getElementById("app"), html = "", appId = "dev", manifest = {};
   var log = function (s) { var p = document.getElementById("log"); p.textContent = (new Date().toLocaleTimeString() + "  " + s + "\n") + p.textContent; };
@@ -101,8 +103,26 @@
       })
       .catch(function (e) { log("load failed: " + e.message); });
   }
+  /* Sound: the same chip and the same rules as the runtime (music waits for the first touch or key, stops when the
+     app reloads, pauses with the page). The master level is the handheld's default volume step. Named sounds are
+     only logged here; the handheld plays them. */
+  var AC = window.AudioContext || window.webkitAudioContext, actx = null, master = null;
+  var chip = window.LopdaChip && AC ? LopdaChip.host({
+    context: function (make) {
+      if (!actx && make) { actx = new AC(); master = actx.createGain(); master.gain.value = 0.11; master.connect(actx.destination); }
+      return actx;
+    },
+    output: function () { return master; }
+  }) : null;
+  ["pointerdown", "touchend", "keydown"].forEach(function (t) { document.addEventListener(t, function () { if (chip) chip.unlock(); }, true); });
+  document.addEventListener("visibilitychange", function () { if (!chip) return; if (document.hidden) chip.pause(); else chip.resume(); });
   /* like the runtime, a language change starts the app again */
-  function run() { var l = document.getElementById("lang").value; frame.srcdoc = lopdaWrapApp(html, l ? { lang: l } : null); }
+  function run() {
+    if (chip) chip.stop();
+    var l = document.getElementById("lang").value, o = { music: !!chip };
+    if (l) o.lang = l;
+    frame.srcdoc = lopdaWrapApp(html, o);
+  }
   document.getElementById("lang").onchange = function () { log("PAD.lang = " + (this.value || "undefined")); run(); };
 
   window.addEventListener("message", function (e) {
@@ -113,8 +133,16 @@
     else if (d.op === "save") { s[d.k] = d.v; writeStore(s); }
     else if (d.op === "remove") { delete s[d.k]; writeStore(s); }
     else if (d.op === "error") log("ERROR " + d.msg);
-    else if (d.op === "exit") { log("app asked to exit"); frame.srcdoc = ""; }
-    else if (d.op === "sfx") log("sfx " + d.name);
+    else if (d.op === "exit") { log("app asked to exit"); if (chip) chip.stop(); frame.srcdoc = ""; }
+    else if (d.op === "sfx" && typeof d.name === "string") log("sfx " + d.name);
+    else if (d.op === "sfx" && d.params) { log("sfx " + JSON.stringify(LopdaChip.sfxParams(d.params))); if (chip) chip.sfx(d.params); }
+    else if (d.op === "music" && chip) {
+      var r = chip.music(d);
+      if (r && r.error) log("ERROR PAD.music: " + r.error);
+      else if (r && r.dropped) log("ERROR " + r.dropped + " (this call was dropped)");
+      else if (d.action === "play") { var st = chip.state(); log("music play" + (d.loop === false ? " once" : ", looping") + (st.waiting ? " (waits for a touch or key, as on the handheld)" : "")); }
+      else log("music stop");
+    }
     else if (d.op === "file") fileOp(d);
   });
   /* PAD.exportFile / importFile. The handheld asks the player on its own dialog first; here an export

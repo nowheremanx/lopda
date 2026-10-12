@@ -56,6 +56,7 @@
       "run.hide": "收起", "run.loading": "载入中…", "run.missing": "这个程序的代码找不到了，去应用商店重新安装。",
       "run.loadfail": "读档失败（{code}）", "run.toobig": "存档超过 256 KB 上限，这次没存。",
       "run.removed": "已卸载 {name}，存档也一并清掉了。",
+      "run.music": "乐谱有误，没有播放：{msg}",
 
       "notes.title": "记事本", "notes.new": "新建", "notes.back": "◂ 列表", "notes.placeholder": "写点什么。自动保存。",
       "notes.empty": "还没有笔记。点「新建」写第一条，存在这台机器里。",
@@ -259,6 +260,7 @@
       "run.hide": "Hide", "run.loading": "Loading…", "run.missing": "This program's code is gone. Reinstall it from the Store.",
       "run.loadfail": "Read failed ({code})", "run.toobig": "Save data over the 256 KB limit. Not saved.",
       "run.removed": "{name} removed, with its saves.",
+      "run.music": "The score has a mistake, so it was not played: {msg}",
 
       "notes.title": "Notes", "notes.new": "New", "notes.back": "◂ List", "notes.placeholder": "Write something. Saves itself.",
       "notes.empty": "No notes yet. Tap New to write one. It stays on this device.",

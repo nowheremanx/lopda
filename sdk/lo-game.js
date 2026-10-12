@@ -1,9 +1,9 @@
 /*
- * lo-game.js 1.2.0, a tiny game framework for Lo-PDA apps.
+ * lo-game.js 1.3.0, a tiny game framework for Lo-PDA apps.
  * MIT License. Copyright (c) 2026 Haowei Wu. See sdk/LICENSE.
  *
  * Paste-in library: an app carries its own copy inside a script tag marked
- * data-lo-game="1.2.0", and `node tools/lo-game.mjs registry/apps/<id>` fills it in.
+ * data-lo-game="1.3.0", and `node tools/lo-game.mjs registry/apps/<id>` fills it in.
  * The same tool adds a pixel-font block holding just the characters the app uses.
  * Do not edit the copy inside an app; the checker verifies it.
  *
@@ -14,7 +14,7 @@
 var LoGame = (function () {
   "use strict";
 
-  var VERSION = "1.2.0";
+  var VERSION = "1.3.0";
   var TONES = ["#1f2a14", "#4a5a32", "#7d8a58", "#a3ad7e"];
   var INK = 0, DARK = 1, MID = 2, PAPER = 3;
   var CLEAR = 255;
@@ -439,7 +439,11 @@ var LoGame = (function () {
       flash: function (sec) { flashT = sec == null ? 0.08 : sec; },
       shake: function (amount, sec) { shakeA = amount == null ? 2 : amount; shakeT = sec == null ? 0.25 : sec; },
 
-      sfx: function (name) { if (HAS_PAD && PAD.sfx) PAD.sfx(name); },
+      /* sound. sfx("coin") or sfx({wave, from, to, ms, ...}); music(song, {loop}) and musicStop() (1.3.0).
+         Runtimes without PAD.music (before 0.11.0) have no music and no custom sounds: those calls do nothing. */
+      sfx: function (s) { if (HAS_PAD && PAD.sfx && (typeof s === "string" || PAD.music)) PAD.sfx(s); },
+      music: function (song, o) { if (HAS_PAD && PAD.music) PAD.music.play(song, o); },
+      musicStop: function () { if (HAS_PAD && PAD.music) PAD.music.stop(); },
       save: function (key, value) { if (HAS_PAD) PAD.save(key, value); else memory[key] = JSON.parse(JSON.stringify(value)); },
       load: function (key) { return HAS_PAD ? PAD.load(key) : Promise.resolve(key in memory ? memory[key] : null); },
       remove: function (key) { if (HAS_PAD) PAD.remove(key); else delete memory[key]; },
