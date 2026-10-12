@@ -342,6 +342,10 @@ Array.prototype.forEach.call(document.querySelectorAll(".gamepad .pk"),function(
   ["pointerup","pointercancel","lostpointercapture"].forEach(function(t){ el.addEventListener(t,function(){ setButton(b,false); }); });
   el.addEventListener("contextmenu",function(e){ e.preventDefault(); });
 });
+/* iOS Safari ignores user-scalable=no and zooms on a quick double tap on anything that is not a button, which the cross
+   (a div with <i> arms) and the gaps between keys are. The pad runs on pointer events and needs no clicks, so cancelling
+   touchend over the whole pad stops the zoom and changes nothing else. */
+$("gamepad").addEventListener("touchend",function(e){ if(e.cancelable) e.preventDefault(); },{passive:false});
 (function(){
   var dp=$("dpad"), id=null;
   function aim(e){
