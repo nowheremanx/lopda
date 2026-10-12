@@ -38,9 +38,9 @@
       "file.keys": "A 确定　B 取消", "file.toobig": "文件超过 2 MB，导入不了。", "file.badtype": "这种文件这个程序用不了。",
       "file.readfail": "文件读不出来。",
 
-      "set.title": "设置", "set.sound": "音效", "set.on": "开", "set.off": "关", "set.volume": "音量",
+      "set.title": "设置", "set.on": "开", "set.off": "关", "set.volume": "音量",
       "set.voldown": "调小音量", "set.volup": "调大音量",
-      "set.soundnote": "手机静音时不出声，也不会打断正在播放的音乐。",
+      "set.soundnote": "外放跟随手机静音键，耳机只看这里的音量；不会打断正在播放的音乐。",
       "set.lang": "语言", "set.about": "关于", "set.version": "Lo-PDA {v} · 规范 lopda/1",
       "set.storage": "本机存档：约 {size}", "set.locked": " · 已锁定，不会被系统清理",
       "set.unlocked": " · 未锁定，长期不用可能被系统清理", "set.counting": "本机存档：计算中…",
@@ -242,9 +242,9 @@
       "file.keys": "A: OK  B: Cancel", "file.toobig": "That file is over 2 MB.", "file.badtype": "This program can't use that kind of file.",
       "file.readfail": "Can't read that file.",
 
-      "set.title": "Settings", "set.sound": "Sound", "set.on": "On", "set.off": "Off", "set.volume": "Volume",
+      "set.title": "Settings", "set.on": "On", "set.off": "Off", "set.volume": "Volume",
       "set.voldown": "Volume down", "set.volup": "Volume up",
-      "set.soundnote": "Silent when the phone is on mute. Never stops your music.",
+      "set.soundnote": "The speaker follows the phone's silent switch; headphones follow this volume only. Never stops your music.",
       "set.lang": "Language", "set.about": "About", "set.version": "Lo-PDA {v} · spec lopda/1",
       "set.storage": "Storage: about {size}", "set.locked": " · kept, the system won't clear it",
       "set.unlocked": " · not kept, may be cleared if unused", "set.counting": "Storage: counting…",

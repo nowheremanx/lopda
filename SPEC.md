@@ -90,7 +90,7 @@ No other files are loaded. Images, sounds and fonts must be embedded in
   leave the app: the handheld's HOME key does that.
 - `alert`, `confirm` and `prompt` are unavailable. Build confirmations into the UI.
 - Prefer `PAD.sfx` for sound effects and `PAD.music` for music (section 6.3): the runtime plays
-  them, so they follow the user's volume and mute settings and the phone's silent switch, stop
+  them, so they follow the user's volume (volume 0 is off) and the phone's silent switch, stop
   when the app closes and pause when the phone locks. Your own Web Audio is allowed but ignores
   all of that, so keep it quiet and start it only after a user gesture.
 
@@ -212,7 +212,7 @@ if (PAD.exportFile) {   // runtimes before 0.5.0 have neither method
 
 The runtime has a small sound chip: four music channels (two pulse waves, a triangle, a noise
 channel) and two sound-effect voices. The app writes the notes; the runtime plays them, so the
-volume, the sound switch, the phone's silent switch, locking the phone and leaving the app are all
+volume, the phone's silent switch, locking the phone and leaving the app are all
 handled for it. Design notes: `docs/design/pad-audio.md`.
 
 ```js
@@ -265,7 +265,7 @@ an effect, so effects and the runtime's own clicks stay on top.
 
 **When the runtime stops or holds the music.** Leaving the app (HOME, the back button, another
 app, a language switch) stops it at once. While the page is hidden or the phone is locked the song
-holds its place and goes on when the player comes back. With the sound switched off it keeps going
+holds its place and goes on when the player comes back. At volume 0 (off) it keeps going
 silently, and is heard again from wherever it has got to. A browser only lets a page make sound
 after the player has touched it: a song asked for before that waits, and starts on the first tap
 or key.
