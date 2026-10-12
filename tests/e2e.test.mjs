@@ -403,3 +403,94 @@ test("calendar: English names", { skip, timeout: 30000 }, async (t) => {
   assert.equal(await c.p.textContent("#cal-ym"), "Oct 2026");
   assert.deepEqual(notBlocked(c.errors), []);
 });
+
+/* ---------------- dictionary ---------------- */
+const dictPage = async (t, opts = {}) => {
+  const { p, errors } = await page(t, { locale: "zh-CN", ...opts });
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await p.locator("#home .app", { hasText: opts.locale === "en-US" ? "Dict" : "词典" }).click();
+  await p.waitForSelector("#v-dict:not([hidden])");
+  return { p, errors };
+};
+const typeWord = async (p, w, want = w) => { await p.fill("#dict-q", w); await p.waitForFunction((want) => {
+  const li = document.querySelector("#dict-list li.on"); return li && li.textContent.indexOf(want) >= 0; }, want, { timeout: 10000 }); };
+const entryText = (p) => p.textContent("#dict-sheet .dict-page");
+
+test("dictionary: the built-in ECDICT, a word form, history and the word book", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await dictPage(t);
+  await typeWord(p, "appl");
+  assert.ok((await p.textContent("#dict-list")).includes("apple"));
+  await typeWord(p, "apple");
+  await p.press("#dict-q", "Enter");
+  await p.waitForFunction(() => /苹果/.test(document.querySelector("#dict-sheet .dict-page")?.textContent || ""));
+  assert.match(await entryText(p), /ECDICT/);
+  /* START adds to the word book (the chin pad), B goes back, as everywhere on the handheld */
+  await p.click('.gamepad [data-b="start"]');
+  await p.waitForFunction(() => /已加入生词本/.test(document.getElementById("toast").textContent));
+  await p.click('.gamepad [data-b="b"]');
+  /* ran is a form of run (and not a headword of the abridged ECDICT): the box offers run first, Enter opens it */
+  await typeWord(p, "ran", "ran → run");
+  await p.press("#dict-q", "Enter");
+  await p.waitForFunction(() => /跑/.test(document.querySelector("#dict-sheet .dict-page")?.textContent || ""));
+  assert.equal(await p.textContent("#dict-sheet .sheet-title span"), "run");
+  const lemma = await p.evaluate(() => LP.dict.lookup("ran").then((r) => r.map((x) => [x.word, x.how])));
+  assert.deepEqual(lemma, [["run", "lemma"]]);
+  await p.click('.gamepad [data-b="a"]');
+  await p.fill("#dict-q", "");
+  await p.waitForFunction(() => /最近查过/.test(document.getElementById("dict-list").textContent));
+  assert.match(await p.textContent("#dict-list"), /run[\s\S]*apple/);
+  /* review: the word first, A shows the entry */
+  await p.click("#dict-words-btn");
+  await p.click("#dict-sheet .ck-a");
+  assert.equal((await p.textContent("#dict-sheet .dict-page .big")).trim(), "apple");
+  await p.click('.gamepad [data-b="a"]');
+  await p.waitForFunction(() => /苹果/.test(document.querySelector("#dict-sheet .dict-page")?.textContent || ""));
+  /* LP.dict.lookup for other programs */
+  const r = await p.evaluate(() => LP.dict.lookup("Apple").then((r) => r.map((x) => [x.book, x.word, x.how])));
+  assert.deepEqual(r[0], ["ecdict", "apple", "exact"]);
+  assert.deepEqual(errors, []);
+});
+
+test("dictionary: import a StarDict book (.dict.dz, .syn), order it, delete it; ECDICT stays", { skip, timeout: 60000 }, async (t) => {
+  const { writeStarDict } = await import("../tools/stardict-write.mjs");
+  const sd = writeStarDict({ bookname: "Tiny", entries: [{ word: "zyzzyva", text: "a weevil (test)", syns: ["zyzz"] }, { word: "apple", text: "TINY-APPLE" }] });
+  const files = [{ name: "tiny.ifo", mimeType: "text/plain", buffer: Buffer.from(sd.ifo) }, { name: "tiny.idx", mimeType: "application/octet-stream", buffer: sd.idx },
+    { name: "tiny.dict.dz", mimeType: "application/octet-stream", buffer: sd.dictdz }, { name: "tiny.syn", mimeType: "application/octet-stream", buffer: sd.syn }];
+  const { p, errors } = await dictPage(t);
+  await p.click("#dict-books-btn");
+  await p.setInputFiles("#dict-file", files);
+  await p.waitForFunction(() => /Tiny/.test(document.getElementById("dict-sheet").textContent), null, { timeout: 10000 });
+  /* the built-in cannot be deleted */
+  await p.click("#dict-sheet .lcd-menu li:nth-child(1)");
+  assert.ok(await p.isDisabled("#dict-sheet .dict-keys .btn.ghost:has-text('删除')"));
+  const books = () => p.$$eval("#dict-sheet .lcd-menu li span", (l) => l.map((x) => x.textContent));
+  assert.deepEqual(await books(), ["ECDICT", "Tiny"]);
+  /* reload: the book survives; a synonym finds its headword */
+  await p.reload({ waitUntil: "networkidle" });
+  await p.locator("#home .app", { hasText: "词典" }).click();
+  const syn = await p.evaluate(() => LP.dict.lookup("zyzz").then((r) => r.map((x) => [x.name, x.word, x.head, x.text])));
+  assert.deepEqual(syn, [["Tiny", "zyzz", "zyzzyva", "a weevil (test)"]]);
+  let apple = await p.evaluate(() => LP.dict.lookup("apple").then((r) => r.map((x) => x.name)));
+  assert.deepEqual(apple, ["ECDICT", "Tiny"]);
+  /* move Tiny up: its answer comes first */
+  await p.click("#dict-books-btn");
+  await p.click("#dict-sheet .lcd-menu li:nth-child(2)");
+  await p.click("#dict-sheet .dict-keys .btn:has-text('上移')");
+  apple = await p.evaluate(() => LP.dict.lookup("apple").then((r) => r.map((x) => x.name)));
+  assert.deepEqual(apple, ["Tiny", "ECDICT"]);
+  /* delete takes two taps */
+  await p.click("#dict-sheet .dict-keys .btn:has-text('删除')");
+  assert.deepEqual(await books(), ["Tiny", "ECDICT"]);
+  await p.click("#dict-sheet .dict-keys .btn:has-text('确认删除')");
+  assert.deepEqual(await books(), ["ECDICT"]);
+  apple = await p.evaluate(() => LP.dict.lookup("apple").then((r) => r.map((x) => x.name)));
+  assert.deepEqual(apple, ["ECDICT"]);
+  assert.deepEqual(errors, []);
+});
+
+test("dictionary: English screen", { skip, timeout: 30000 }, async (t) => {
+  const { p, errors } = await dictPage(t, { locale: "en-US" });
+  assert.equal(await p.getAttribute("#dict-q", "placeholder"), "Type an English word");
+  assert.equal(await p.textContent("#dict-words-btn"), "Words");
+  assert.deepEqual(errors, []);
+});
