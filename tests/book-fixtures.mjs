@@ -77,6 +77,33 @@ export function makeZip(entries) {
   return new Uint8Array(Buffer.concat([...parts, ...central, end]));
 }
 
+/* ---- png ---- */
+// A small valid RGBA PNG; rgbaFn(x, y) returns [r, g, b, a].
+export function makePng(width, height, rgbaFn) {
+  const raw = Buffer.alloc((width * 4 + 1) * height);
+  let o = 0;
+  for (let y = 0; y < height; y++) {
+    raw[o++] = 0;   // filter: none
+    for (let x = 0; x < width; x++) {
+      const px = rgbaFn ? rgbaFn(x, y) : [0, 0, 0, 255];
+      for (let c = 0; c < 4; c++) raw[o++] = px[c];
+    }
+  }
+  const chunk = (type, data) => {
+    const head = Buffer.alloc(8), tail = Buffer.alloc(4);
+    head.writeUInt32BE(data.length, 0); head.write(type, 4, "latin1");
+    tail.writeUInt32BE(crc32(Buffer.concat([head.subarray(4), data])), 0);
+    return Buffer.concat([head, data, tail]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0); ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8; ihdr[9] = 6;   // 8 bits, RGBA
+  return new Uint8Array(Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", ihdr), chunk("IDAT", zlib.deflateSync(raw)), chunk("IEND", Buffer.alloc(0)),
+  ]));
+}
+
 /* ---- epub ---- */
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
 
@@ -94,8 +121,9 @@ function nest(flat) {
 
 /* title, author, lang; chapters: [{ title, html }] (html is the body content; chapter files are OEBPS/text/chN.xhtml);
    nav: "nav" (EPUB 3 nav.xhtml) or "ncx"; toc: optional [{ title, href, d }] with href relative to OEBPS/ (default:
-   one top-level entry per chapter). */
-export function makeEpub({ title = "T", author = "A", lang = "en", chapters = [], nav = "nav", toc } = {}) {
+   one top-level entry per chapter); images: optional [{ name: "OEBPS/images/a.png", type: "image/png", data }] added to
+   the zip and the manifest (chapter html refers to them as ../images/a.png). */
+export function makeEpub({ title = "T", author = "A", lang = "en", chapters = [], nav = "nav", toc, images = [] } = {}) {
   const files = chapters.map((c, i) => ({ id: "c" + (i + 1), href: "text/ch" + (i + 1) + ".xhtml", ...c }));
   const entries = toc || files.map((f, i) => ({ title: chapters[i].title, href: f.href, d: 0 }));
   const tree = nest(entries);
@@ -114,6 +142,10 @@ export function makeEpub({ title = "T", author = "A", lang = "en", chapters = []
       '<rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>' },
   ];
   const manifest = files.map((f) => '<item id="' + f.id + '" href="' + f.href + '" media-type="application/xhtml+xml"/>');
+  images.forEach((im, i) => {
+    manifest.push('<item id="img' + (i + 1) + '" href="' + encodeURI(im.name.replace(/^OEBPS\//, "")) + '" media-type="' + im.type + '"/>');
+    list.push({ name: im.name, data: im.data });
+  });
   if (nav === "nav") {
     manifest.push('<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>');
     list.push({ name: "OEBPS/nav.xhtml", data: head + '<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>Contents</title></head><body>' +

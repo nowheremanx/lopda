@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { runScript } from "./helpers.mjs";
-import { gbkEncode, makeZip, makeEpub } from "./book-fixtures.mjs";
+import { gbkEncode, makeZip, makeEpub, makePng } from "./book-fixtures.mjs";
 
 const B = runScript("runtime/bookparse.js", {
   TextDecoder, Blob, Response, DecompressionStream, Uint8Array, Promise,
@@ -173,11 +173,13 @@ test("parseXhtml: paragraphs, headings, br, entities, emphasis, ignored parts, i
   assert.deepEqual(p[0], { h: 2, s: "Title & more", em: [8, 12] });
   assert.deepEqual(p[1], { h: 0, s: "Hello big world, it's <fine> now é你 &bogus; <raw>", em: [6, 15] });
   assert.deepEqual(p[2], { h: 0, s: "line one\nline two\nline three" });
-  assert.deepEqual(p[3], { h: 0, s: "inline text after end" });
-  assert.deepEqual(p[4], { h: 0, s: "ab c de", em: [0, 2, 5, 7] });
-  assert.deepEqual(p[5], { h: 0, s: "  keep\n    this" });
-  assert.deepEqual(p.slice(6).map((x) => x.s), ["one", "two link", "last"]);
-  assert.equal(p.length, 9);
+  assert.deepEqual(p[3], { h: 0, s: "inline text" });
+  assert.deepEqual(p[4], { h: 0, s: "", img: "x.png", alt: "dropped" });
+  assert.deepEqual(p[5], { h: 0, s: "after end" });
+  assert.deepEqual(p[6], { h: 0, s: "ab c de", em: [0, 2, 5, 7] });
+  assert.deepEqual(p[7], { h: 0, s: "  keep\n    this" });
+  assert.deepEqual(p.slice(8).map((x) => x.s), ["one", "two link", "last"]);
+  assert.equal(p.length, 11);
   assert.deepEqual(J(r.ids), { top: 0, a: 1, in: 3 });
 });
 
@@ -243,4 +245,140 @@ test("parseEpub: Chinese language, heading fallback for chapter titles, errors",
   const guess = J(await B.parseEpub(makeEpub({ lang: "en", chapters: [{ title: "x", html: "<p>这是一本用中文写成的书，没有语言标记。</p>" }] })));
   assert.equal(guess.lang, "zh");
   await assert.rejects(B.parseEpub(makeZip([{ name: "a", data: "b" }])), /rootfile|not in zip/);
+});
+
+/* ---- images and links ---- */
+const PNG = makePng(2, 2, (x, y) => [x * 100, y * 100, 0, 255]);
+const png = (name, data = PNG) => ({ name, type: "image/png", data });
+const epub = async (chapters, extra = {}) => {
+  const raw = await B.parseEpub(makeEpub({ chapters, ...extra })), book = J(raw);
+  book.images.forEach((im, i) => { im.data = raw.images[i].data; });   // JSON would turn the bytes into an object
+  return book;
+};
+
+test("makePng: valid signature and chunk layout", () => {
+  assert.deepEqual(Array.from(PNG.subarray(0, 8)), [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  assert.equal(Buffer.from(PNG.subarray(12, 16)).toString("latin1"), "IHDR");
+});
+
+test("parseEpub: img becomes an image paragraph, text after it starts a new paragraph, alt kept when not empty", async () => {
+  const book = await epub([
+    { title: "One", html: '<p>Before <img src="../images/a.png" alt="  A pic "/> after.</p><p><img src="../images/a.png" alt=""/></p>' },
+  ], { images: [png("OEBPS/images/a.png")] });
+  assert.deepEqual(book.chapters[0].paras, [
+    { h: 0, s: "Before" },
+    { h: 0, s: "", img: 0, alt: "A pic" },
+    { h: 0, s: "after." },
+    { h: 0, s: "", img: 0 },
+  ]);
+  assert.equal(book.images.length, 1);
+  assert.equal(book.images[0].name, "OEBPS/images/a.png");
+  assert.equal(book.images[0].type, "image/png");
+  assert.deepEqual(Array.from(book.images[0].data), Array.from(PNG));
+});
+
+test("parseEpub: svg image cover keeps the chapter; text in svg is still ignored", async () => {
+  const book = await epub([
+    { title: "Cover", html: '<div><svg xmlns:xlink="http://www.w3.org/1999/xlink"><title>x</title><image width="1" height="1" xlink:href="../images/cover.jpg"/><text>no</text></svg></div>' },
+    { title: "Two", html: "<p>Text</p>" },
+  ], { images: [{ name: "OEBPS/images/cover.jpg", type: "", data: PNG }] });
+  assert.equal(book.chapters.length, 2);
+  assert.deepEqual(book.chapters[0].paras, [{ h: 0, s: "", img: 0 }]);
+  assert.equal(book.images[0].type, "image/jpeg");   // no media-type in the manifest: from the extension
+});
+
+test("parseEpub: image paths resolve relative to the file and are percent-decoded; one entry per path", async () => {
+  const book = await epub([
+    { title: "One", html: '<img src="../images/a%20b.png"/><img src="../images/../images/a b.png"/><img src="../images/c.png"/>' },
+  ], { images: [png("OEBPS/images/a b.png"), png("OEBPS/images/c.png", makePng(1, 1))] });
+  assert.deepEqual(book.chapters[0].paras.map((p) => p.img), [0, 0, 1]);
+  assert.deepEqual(book.images.map((i) => i.name), ["OEBPS/images/a b.png", "OEBPS/images/c.png"]);
+});
+
+test("parseEpub: a missing image is skipped (no paragraph) and paragraph numbers stay right", async () => {
+  const book = await epub([
+    { title: "One", html: '<p>a</p><img src="../images/gone.png"/><p id="t">target</p><a href="http://x.org/i.png"><img src="http://x.org/i.png"/></a>' },
+    { title: "Two", html: '<p>see <a href="ch1.xhtml#t">there</a></p>' },
+  ]);
+  assert.deepEqual(book.chapters[0].paras, [{ h: 0, s: "a" }, { h: 0, s: "target" }]);
+  assert.deepEqual(book.chapters[1].paras[0].ln, [4, 9, 0, 1, 0]);
+  assert.deepEqual(book.images, []);
+});
+
+test("parseEpub: links map to chapter and paragraph, with or without fragment, and within the document", async () => {
+  const book = await epub([
+    { title: "One", html: '<h1 id="top">One</h1><p>Go <a href="ch2.xhtml#deep">deep</a>, <a href="ch2.xhtml">chapter two</a>, <a href="#top">top</a>, <a href="ch1.xhtml#nope">nope</a>.</p>' },
+    { title: "Two", html: '<p>x</p><p><span id="deep">Deep</span></p>' },
+  ]);
+  assert.deepEqual(book.chapters[0].paras[1], {
+    h: 0, s: "Go deep, chapter two, top, nope.",
+    ln: [3, 7, 1, 1, 0, 9, 20, 1, 0, 0, 22, 25, 0, 0, 0, 27, 31, 0, 0, 0],
+  });
+  assert.equal(book.chapters[1].paras[0].ln, undefined);
+});
+
+test("parseEpub: footnote references by epub:type, by aside target, by the short-text rule", async () => {
+  const book = await epub([
+    { title: "One", html:
+      '<p>A<a epub:type="noteref" href="ch2.xhtml#n1">long text</a> B<a href="ch2.xhtml#n2">word</a> ' +
+      'C<a href="ch2.xhtml#n3">word</a> D<a href="ch2.xhtml#n4">word</a> ' +
+      'E<a href="ch2.xhtml#n1">12</a> F<a href="ch2.xhtml#n1">[3]</a> G<a href="ch2.xhtml#n1">(4)</a> H<a href="ch2.xhtml#n1">*</a> ' +
+      'I<a href="ch2.xhtml#n1">\u6CE81</a> J<a href="ch2.xhtml#n1">12345</a> K<a href="ch2.xhtml#n1">[1234]</a> L<a href="ch2.xhtml">1</a></p>' },
+    { title: "Two", html:
+      '<aside epub:type="footnote" id="n1"><p>one</p></aside><div id="n2" epub:type="rearnote">two</div>' +
+      '<aside id="n3">three</aside><p id="n4">four</p>' },
+  ]);
+  const ln = book.chapters[0].paras[0].ln, notes = [];
+  for (let i = 0; i < ln.length; i += 5) notes.push(ln[i + 4]);
+  // noteref, rearnote target, aside target, plain; then 12, [3], (4), *, 注1 (short marks); 12345 and [1234] are too long
+  // but their target n1 is a footnote anyway; the last link has no fragment
+  assert.deepEqual(notes, [1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1]);
+  const plain = await epub([
+    { title: "One", html: '<p>A<a href="ch2.xhtml#n4">12345</a> B<a href="ch2.xhtml#n4">[1234]</a> C<a href="ch2.xhtml#n4">1</a> D<a href="ch2.xhtml#n4">1a</a></p>' },
+    { title: "Two", html: '<p id="n4">four</p>' },
+  ]);
+  const l2 = plain.chapters[0].paras[0].ln, n2 = [];
+  for (let i = 0; i < l2.length; i += 5) n2.push(l2[i + 4]);
+  assert.deepEqual(n2, [0, 0, 1, 0]);
+});
+
+test("parseEpub: external and unresolvable links are not recorded; empty link text records nothing", async () => {
+  const book = await epub([
+    { title: "One", html: '<p>a <a href="http://x.org/">web</a> <a href="mailto:a@b.c">mail</a> <a href="https://x.org/ch2.xhtml">https</a> ' +
+      '<a href="missing.xhtml#x">missing</a> <a href="">empty</a> <a name="anchor">anchor</a> <a href="ch2.xhtml"> </a><a href="ch2.xhtml"><img src="x.png"/></a> <a href="ch2.xhtml">ok</a></p>' },
+    { title: "Two", html: "<p>two</p>" },
+  ]);
+  const p = book.chapters[0].paras;
+  assert.equal(p[0].s, "a web mail https missing empty anchor");
+  assert.equal(p[0].ln, undefined);
+  assert.deepEqual(p[p.length - 1], { h: 0, s: "ok", ln: [0, 2, 1, 0, 0] });
+});
+
+test("parseEpub: link ranges sit right next to emphasis, around br, and in a link split by an image", async () => {
+  const book = await epub([
+    { title: "One", html: '<p>x<br/> <em>Em <a href="ch2.xhtml">in link</a></em> and <a href="ch2.xhtml"><i>all em</i></a> end</p>' +
+      '<p><a href="ch2.xhtml">left <img src="../images/a.png"/> right</a></p>' },
+    { title: "Two", html: "<p>two</p>" },
+  ], { images: [png("OEBPS/images/a.png")] });
+  const p = book.chapters[0].paras;
+  assert.equal(p[0].s, "x\nEm in link and all em end");
+  assert.deepEqual(p[0].em, [2, 12, 17, 23]);
+  assert.deepEqual(p[0].ln, [5, 12, 1, 0, 0, 17, 23, 1, 0, 0]);
+  assert.deepEqual(p[1], { h: 0, s: "left", ln: [0, 4, 1, 0, 0] });
+  assert.deepEqual(p[2], { h: 0, s: "", img: 0 });
+  assert.deepEqual(p[3], { h: 0, s: "right", ln: [0, 5, 1, 0, 0] });
+});
+
+test("parseEpub: chapter dropping fixes up link targets and paragraph indexes", async () => {
+  const book = await epub([
+    { title: "Cover", html: '<p><a href="ch4.xhtml#late">stale</a></p><img src="gone.jpg"/>' },
+    { title: "Blank", html: "<p> </p>" },
+    { title: "Real", html: '<p>to <a href="ch4.xhtml#late">late</a> and <a href="ch1.xhtml">cover</a> and <a href="ch2.xhtml">blank</a></p>' },
+    { title: "Late", html: '<img src="../images/a.png"/><p>one</p><p id="late">two</p>' },
+  ], { images: [png("OEBPS/images/a.png")] });
+  // the cover has a text link but keeps its own paragraph, so only the blank chapter goes
+  assert.deepEqual(book.chapters.map((c) => c.title), ["Cover", "Real", "Late"]);
+  assert.deepEqual(book.chapters[0].paras, [{ h: 0, s: "stale", ln: [0, 5, 2, 2, 0] }]);
+  assert.deepEqual(book.chapters[1].paras[0].ln, [3, 7, 2, 2, 0, 12, 17, 0, 0, 0]);
+  assert.equal(book.chapters[2].paras.length, 3);
 });
