@@ -38,7 +38,7 @@ var STOP=/[。！？!?…]/, CLOSE=/[」』”’"')）\]】》]/;
 
 var R={
   set:{size:1, eink:null, seeded:false, helped:false, font:null, layout:1, flash:false},
-  fonts:{}, fpick:0, farmed:null,   // imported fonts {id: {name, bytes, added}}; the font list's row; a font armed for deletion
+  fonts:{}, fpick:0, farmed:null, fbusy:null,   // imported fonts {id: {name, bytes, added}}; the font list's row; a font armed for deletion
   drawn:0, flashing:false,          // pages drawn since the last full refresh; a full refresh is on screen
   meta:{}, refs:null, loaded:false, seeding:null,
   pick:0, armed:null, busy:null,
@@ -399,7 +399,8 @@ function relayout(){
   if(R.sel) startSel(false,R.sel.unit);
 }
 function turn(k){
-  if(!R.book || R.flashing) return false;
+  if(!R.book) return false;
+  if(R.flashing){ flashLog("ignored"); return false; }
   var p=R.page+k;
   if(p<0 ? R.ch===0 : p>=R.pages && R.ch>=R.book.chapters.length-1) return false;
   var draw=function(){
@@ -414,20 +415,31 @@ function turn(k){
 }
 /* ---------- e-ink full refresh: the old page in negative, then paper, then the new page; page turns wait for it ---------- */
 function flashOn(){ return eink() && !!R.set.flash; }
-/* a page drawn whole: after a page turn that is due one, and after anything that lays the pages out again or jumps
-   (contents, go to, text size, font, layout); either way the count starts again */
+/* One rule: a page turn (to the next or the previous page) is drawn as it is, every tenth one since the last full
+   refresh with one; any other change of the page is drawn whole: contents, go to, the progress bar, text size, font,
+   layout, the notes list, a link and B back from it. Either way the count starts again. */
 function whole(draw){
   R.drawn=0;
-  if(!flashOn()){ draw(); return; }
+  if(!flashOn() || !R.book || !visible()){ draw(); return; }
   var f=$("rd-flash"), scr=$("screen");
   if(!f){ f=el("div","rd-flash"); f.id="rd-flash"; scr.appendChild(f); }
   /* the page on screen goes negative; the new one is laid out under the blank paper that follows */
-  R.flashing=true; f.className="rd-flash ink"; f.hidden=false; scr.classList.add("rd-neg");
-  setTimeout(function(){
+  R.flashing=true; f.className="rd-flash ink"; f.hidden=false; scr.classList.add("rd-neg"); flashLog("invert");
+  flashNext(function(){
     scr.classList.remove("rd-neg"); f.className="rd-flash paper";
     if(R.book && visible()) draw();
-    setTimeout(function(){ f.hidden=true; f.className="rd-flash"; R.flashing=false; },FLASH_PAPER);
+    flashLog("paper");
+    flashNext(function(){ f.hidden=true; f.className="rd-flash"; R.flashing=false; flashLog("page"); },FLASH_PAPER);
   },FLASH_INK);
+}
+/* debug mode (?debug): LOPDA_DEBUG.flash is the list of phases ("invert", "paper", "page", and "ignored" for a turn
+   during a refresh), and with LOPDA_DEBUG.flashHold set each phase waits for LOPDA_DEBUG.flashStep(), so a test checks
+   the order without timing anything */
+function flashLog(s){ var d=window.LOPDA_DEBUG; if(d) (d.flash=d.flash||[]).push(s); }
+function flashNext(fn,ms){
+  var d=window.LOPDA_DEBUG;
+  if(d && d.flashHold) d.flashStep=function(){ d.flashStep=null; fn(); };
+  else setTimeout(fn,ms);
 }
 function foot(left,right){
   var f=$("rd-foot"); f.textContent="";
@@ -804,9 +816,9 @@ function followLink(a){
 function jumpLink(ch,p){
   if(lowerSheet()){ R.sheet=""; R.low=null; renderLow(); }
   R.back=R.back || {ch:R.pos.ch, p:R.pos.p, c:R.pos.c};
-  goTo(ch,{p:p, c:0}); sfx("ok");
+  whole(function(){ goTo(ch,{p:p, c:0}); }); sfx("ok");
 }
-function goBack(){ var b=R.back; R.back=null; goTo(b.ch,b); sfx("tap"); }
+function goBack(){ var b=R.back; R.back=null; whole(function(){ goTo(b.ch,b); }); sfx("tap"); }
 
 /* ---------- menu, contents, notes, jump, help ---------- */
 function eink(){
@@ -890,7 +902,7 @@ function renderSheet(){
     });
     sh.appendChild(fu);
     var cur=rows[R.fpick];
-    sh.appendChild(el("p","hint",R.farmed && cur.k===R.farmed ? tr("reader.fontarmed",{name:cur.label}) : tr("reader.fonthint")));
+    sh.appendChild(el("p","hint",R.fbusy || (R.farmed && cur.k===R.farmed ? tr("reader.fontarmed",{name:cur.label}) : tr("reader.fonthint"))));
     if(cur.k && cur.k!=="+") keys.appendChild(keyBtn(R.farmed===cur.k ? "ck ck-a" : "ck","START",tr(R.farmed===cur.k ? "reader.unmarkconfirm" : "common.delete"),function(){ fontDelete(); }));
   } else {
     var box=el("div","rd-jump");
@@ -942,7 +954,7 @@ function tocList(){
   return R.book.chapters.map(function(c,i){ return {title:chapterTitle(i), ch:i, p:0, d:0}; });
 }
 function tocGo(it){ closeSheet(); whole(function(){ goTo(clamp(it.ch,0,R.book.chapters.length-1),{p:it.p, c:0}); }); sfx("ok"); }
-function noteGo(mk){ closeSheet(); goTo(clamp(mk.ch,0,R.book.chapters.length-1),{p:mk.p, c:mk.a}); sfx("ok"); }
+function noteGo(mk){ closeSheet(); whole(function(){ goTo(clamp(mk.ch,0,R.book.chapters.length-1),{p:mk.p, c:mk.a}); }); sfx("ok"); }
 function jumpBy(k){ R.jump=clamp(R.jump+k,0,100); sfx("move"); renderSheet(); }
 function sheetA(){
   if(R.sheet==="menu") menuPick(menuItems()[R.mpick].k);
@@ -1030,6 +1042,7 @@ function useFont(id){
 function fontA(){
   var r=fontRows()[R.fpick]; if(!r) return;
   if(r.k==="+"){
+    if(R.fbusy) return;   /* one import at a time */
     if(!S.db || !R.refs){ toast(tr("reader.nodb")); sfx("err"); return; }
     R.farmed=null; $("rd-fontfile").value=""; $("rd-fontfile").click(); return;
   }
@@ -1065,13 +1078,17 @@ function importFont(f){
   }).catch(function(e){ P.files.del("font/"+id).catch(function(){}); throw e; });
 }
 $("rd-fontfile").addEventListener("change",function(){
-  var f=(this.files||[])[0]; if(!f) return;
+  var f=(this.files||[])[0]; if(!f || R.fbusy) return;
+  /* reading the file and parsing it can take a while for a big CJK font */
+  R.fbusy=tr("reader.importing",{name:fontName(f)}); if(R.sheet==="font") renderSheet();
+  var done=function(){ R.fbusy=null; };
   importFont(f).then(function(id){
+    done();
     toast(tr("reader.fontadded",{name:R.fonts[id].name})); sfx("ok");
     /* imported to be used: it becomes the font at once */
     fontRows().forEach(function(r,i){ if(r.k===id) R.fpick=i; });
     useFont(id);
-  },function(e){ toast(errMsg(e)); sfx("err"); if(R.sheet==="font") renderSheet(); });
+  },function(e){ done(); toast(errMsg(e)); sfx("err"); if(R.sheet==="font") renderSheet(); });
 });
 
 /* ---------- chin pad ----------
