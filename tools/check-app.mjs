@@ -178,7 +178,7 @@ function checkApp(dir) {
   if (!usesFramework && !/\bPAD\./.test(code)) warnings.push("does not use PAD; fine if the app saves nothing");
   for (const mm of code.matchAll(/PAD\.sfx\(\s*["']([^"']*)["']/g)) if (!SOUNDS.includes(mm[1])) errors.push(`PAD.sfx("${mm[1]}") is not a known sound: ${SOUNDS.join(", ")}`);
   const usesButtons = /PAD\.(on|isDown)\s*\(/.test(code);
-  if (m.spec === "lopda/0" && /PAD\.(on|off|isDown|sfx)\s*\(/.test(code)) errors.push('PAD.on/isDown/sfx need spec "lopda/1"');
+  if (m.spec === "lopda/0" && /PAD\.(on|off|isDown|sfx)\s*\(|PAD\.music\b/.test(code)) errors.push('PAD.on/isDown/sfx/music need spec "lopda/1"');
   const usesFiles = /PAD\.(exportFile|importFile)\b/.test(code);
   if (usesFiles && !(Array.isArray(m.permissions) && m.permissions.includes("files"))) errors.push('PAD.exportFile/importFile need "permissions": ["files"] in manifest.json');
   if (!usesFiles && Array.isArray(m.permissions) && m.permissions.includes("files")) warnings.push('"files" is declared but PAD.exportFile/importFile are never used: drop it');

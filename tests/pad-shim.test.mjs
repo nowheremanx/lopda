@@ -122,6 +122,43 @@ test("uncaught errors are reported to the runtime", () => {
   assert.deepEqual(a.posted().map((m) => m.msg), ["x is not defined @3:9", "Promise: nope"]);
 });
 
+test("PAD.music is there only when the runtime can play it, like PAD.lang", () => {
+  assert.equal(app().PAD.music, undefined);
+  assert.equal(app({ lang: "zh" }).PAD.music, undefined);
+  assert.equal(app({ music: "yes" }).PAD.music, undefined);
+  const { PAD } = app({ lang: "en", music: true });
+  assert.equal(typeof PAD.music.play, "function");
+  assert.ok(Object.isFrozen(PAD.music));
+});
+
+test("music play and stop post plain data; loop is on unless it is false", () => {
+  const a = app({ music: true });
+  const song = { bpm: 96, p1: "c d e", tri: "o2 c", extra: () => 1, odd: { x: 1 }, gone: undefined };
+  a.PAD.music.play(song);
+  a.PAD.music.play({ p1: "c" }, { loop: false });
+  a.PAD.music.play({ p1: "c" }, { loop: 0 });
+  a.PAD.music.stop();
+  assert.deepEqual(a.posted(), [
+    /* what cannot be copied becomes a string, so the runtime can say what is wrong with it */
+    { op: "music", action: "play", song: { bpm: 96, p1: "c d e", tri: "o2 c", extra: "() => 1", odd: "[object Object]" }, loop: true, pad: 1 },
+    { op: "music", action: "play", song: { p1: "c" }, loop: false, pad: 1 },
+    { op: "music", action: "play", song: { p1: "c" }, loop: true, pad: 1 },
+    { op: "music", action: "stop", pad: 1 },
+  ]);
+});
+
+test("sfx takes an object: only the sound's own keys are sent", () => {
+  const a = app({ music: true });
+  a.PAD.sfx({ wave: "noise", from: 900, to: 120, ms: 180, attack: 5, decay: 175, vol: 0.8, onend: () => 1, x: 1 });
+  a.PAD.sfx({});
+  a.PAD.sfx(null);
+  a.PAD.sfx(7);
+  assert.deepEqual(a.posted(), [
+    { op: "sfx", params: { wave: "noise", from: 900, to: 120, ms: 180, attack: 5, decay: 175, vol: 0.8 }, pad: 1 },
+    { op: "sfx", params: {}, pad: 1 },
+  ]);
+});
+
 test("CSP blocks the network and allows only inline code and data: media", () => {
   const { LOPDA_APP_CSP: csp } = runScript("sdk/pad-shim.js", {});
   assert.equal(csp, "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; " +
@@ -143,6 +180,8 @@ test("lopdaWrapApp puts CSP and shim first in every shape of document", () => {
     assert.equal((out.match(/Content-Security-Policy/g) || []).length, 1);
   }
   assert.ok(wrap("<p>x</p>", { lang: "de" }).includes("lopdaPadShim(opts)") && !wrap("<p>x</p>", { lang: "de" }).includes('"lang"'));
+  assert.ok(wrap("<p>x</p>", { lang: "zh", music: true }).includes('({"lang":"zh","music":true});'), "passes music");
+  assert.ok(wrap("<p>x</p>", { music: 1 }).includes(")();"), "music only when it is true");
   /* the injected shim is the real function source and runs on its own */
   const src = wrap("<p>x</p>").match(/<script>([\s\S]*?)<\/script>/)[1];
   assert.doesNotThrow(() => new vm.Script(src));

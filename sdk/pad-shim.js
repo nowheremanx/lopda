@@ -5,10 +5,13 @@
  * injects it as the first script of every app, so it must stay self-contained:
  * no closures over outer variables, no imports.
  *
- * The runtime calls it with options: lopdaPadShim({lang:"zh"|"en"}). Older runtimes pass none,
- * so PAD.lang is undefined there and apps fall back to their own default.
+ * The runtime calls it with options: lopdaPadShim({lang:"zh"|"en", music:true}). Older runtimes pass none,
+ * so PAD.lang is undefined there and apps fall back to their own default; PAD.music is likewise undefined
+ * unless the runtime can play it (runtime 0.11.0 and later, and sdk/dev.html).
  *
- * Messages app -> runtime:  {pad:1, op:"save"|"load"|"remove"|"error"|"exit"|"sfx", ...}
+ * Messages app -> runtime:  {pad:1, op:"save"|"load"|"remove"|"error"|"exit", ...}
+ *                           {pad:1, op:"sfx", name}  or  {pad:1, op:"sfx", params:{wave, duty, from, to, ms, attack, decay, vol}}
+ *                           {pad:1, op:"music", action:"play", song:{bpm, p1, p2, tri, noise}, loop}  or  {..., action:"stop"}
  *                           {pad:1, op:"file", i, kind:"export", name, type, data}   (needs "files")
  *                           {pad:1, op:"file", i, kind:"import", accept}
  * Messages runtime -> app:  {pad:1, op:"loaded", i, v}
@@ -21,6 +24,7 @@ function lopdaPadShim(opts) {
   var post = function (msg) { msg.pad = 1; parent.postMessage(msg, "*"); };
   var TONES = ["#1f2a14", "#4a5a32", "#7d8a58", "#a3ad7e"];
   var LANG = opts && (opts.lang === "zh" || opts.lang === "en") ? opts.lang : undefined;
+  var MUSIC = !!(opts && opts.music === true);
 
   /* Buttons (lopda/1): the runtime forwards the chin keys; the keyboard works too. */
   var BUTTONS = ["up", "down", "left", "right", "a", "b", "start", "select"];
@@ -47,6 +51,26 @@ function lopdaPadShim(opts) {
     var body = data.length - m[0].length;
     return m[1] ? Math.floor(body * 3 / 4) : body;
   };
+  /* Sound (docs/design/pad-audio.md). Only plain data crosses to the runtime: numbers and strings are copied,
+     anything else is left for the runtime to refuse or ignore. The runtime clamps and checks everything again. */
+  var plain = function (o, keys) {
+    var out = {};
+    if (!o || typeof o !== "object") return out;
+    (keys || Object.keys(o)).forEach(function (k) {
+      var v = o[k];
+      if (typeof v === "number" || typeof v === "string") out[k] = v;
+      else if (v !== undefined) out[k] = String(v);
+    });
+    return out;
+  };
+  var SFX_KEYS = ["wave", "duty", "from", "to", "ms", "attack", "decay", "vol"];
+  var music = !MUSIC ? undefined : Object.freeze({
+    /* play(song, {loop}) replaces whatever is playing; loops unless loop is false. A score that does not
+       parse is reported like an uncaught error (the runtime's error box, the harness log). */
+    play: function (song, o) { post({ op: "music", action: "play", song: plain(song), loop: !(o && o.loop === false) }); },
+    stop: function () { post({ op: "music", action: "stop" }); }
+  });
+
   var fileOp = function (msg) {
     return new Promise(function (resolve, reject) {
       var i = ++seq; filing[i] = { resolve: resolve, reject: reject };
@@ -69,7 +93,12 @@ function lopdaPadShim(opts) {
       });
     },
     exit: function () { post({ op: "exit" }); },
-    sfx: function (name) { if (SOUNDS.indexOf(name) >= 0) post({ op: "sfx", name: name }); },
+    /* sfx("coin"), one of SOUNDS, or sfx({wave, from, to, ms, ...}), a sound of the app's own */
+    sfx: function (s) {
+      if (typeof s === "string") { if (SOUNDS.indexOf(s) >= 0) post({ op: "sfx", name: s }); }
+      else if (s && typeof s === "object") post({ op: "sfx", params: plain(s, SFX_KEYS.filter(function (k) { return k in s; })) });
+    },
+    music: music,
     on: function (type, fn) { if (on[type] && typeof fn === "function") on[type].push(fn); },
     off: function (type, fn) { if (on[type]) on[type] = on[type].filter(function (f) { return f !== fn; }); },
     isDown: function (b) { return !!held[b]; },
@@ -142,12 +171,14 @@ var LOPDA_APP_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src '
   "img-src data: blob:; media-src data: blob:; font-src data:; connect-src 'none'";
 
 /* Wrap an app's HTML: CSP meta first, then the bridge, then the app.
-   opts.lang ("zh" | "en") becomes PAD.lang inside the app. */
+   opts.lang ("zh" | "en") becomes PAD.lang inside the app; opts.music (true) gives it PAD.music. */
 function lopdaWrapApp(html, opts) {
-  var lang = opts && (opts.lang === "zh" || opts.lang === "en") ? opts.lang : null;
+  var o = {};
+  if (opts && (opts.lang === "zh" || opts.lang === "en")) o.lang = opts.lang;
+  if (opts && opts.music === true) o.music = true;
   var head = '<meta http-equiv="Content-Security-Policy" content="' + LOPDA_APP_CSP + '">' +
     "<style>*{touch-action:manipulation;-webkit-tap-highlight-color:transparent}</style>" +
-    "<script>(" + lopdaPadShim.toString() + ")(" + (lang ? '{"lang":"' + lang + '"}' : "") + ");<\/script>";
+    "<script>(" + lopdaPadShim.toString() + ")(" + (Object.keys(o).length ? JSON.stringify(o) : "") + ");<\/script>";
   if (/<head[^>]*>/i.test(html)) return html.replace(/<head[^>]*>/i, function (m) { return m + head; });
   if (/<html[^>]*>/i.test(html)) return html.replace(/<html[^>]*>/i, function (m) { return m + "<head>" + head + "</head>"; });
   return "<!doctype html><html><head>" + head + "</head><body>" + html + "</body></html>";

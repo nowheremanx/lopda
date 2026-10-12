@@ -1,6 +1,6 @@
 /*
  * Lo-PDA built-in: the app store (community registry), the preinstalled apps, and the sandboxed runner
- * with its PAD bridge (storage, sounds, buttons, and files behind the runtime's own confirm dialog).
+ * with its PAD bridge (storage, sounds and music, buttons, and files behind the runtime's own confirm dialog).
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  */
 (function(){
@@ -170,6 +170,7 @@ function freshRunFrame(){
 }
 function runApp(a){
   closeAsk(false);
+  LP.chip.stop();   /* the old app's song ends with its frame */
   S.running=a;
   $("run-title").textContent=appName(a)+" · v"+(a.version||"?");
   LP.resetConfirm("run-del-wrap","run-del",tr("run.remove"),function(){ if(S.running){ var n=appName(S.running); deleteApp(S.running.id); show("home"); toast(tr("run.removed",{name:n})); } });
@@ -177,7 +178,7 @@ function runApp(a){
   show("run");
   showPad(!!a.buttons);
   freshRunFrame();
-  var start=function(h){ $("run-frame").srcdoc=lopdaWrapApp(h,{lang:I18N.lang}); };
+  var start=function(h){ $("run-frame").srcdoc=lopdaWrapApp(h,{lang:I18N.lang, music:true}); };
   if(a.html){ start(a.html); return; }
   $("run-frame").srcdoc='<body style="margin:0;height:100%;display:flex;align-items:center;justify-content:center;background:#a3ad7e;color:#1f2a14;font:16px monospace">'+tr("run.loading")+'</body>';
   loadHtml(a).then(function(h){
@@ -222,9 +223,15 @@ window.addEventListener("message",function(e){
   } else if(d.op==="file"){
     fileRequest(S.running,f.contentWindow,d);
   } else if(d.op==="sfx"){
-    if(APP_SFX.indexOf(d.name)<0) return;
+    var named=APP_SFX.indexOf(d.name)>=0, custom=!named && d.params && typeof d.params==="object";
+    if(!named && !custom) return;
     var now=Date.now(); if(now-sfxWindow.t>1000){ sfxWindow.t=now; sfxWindow.n=0; }
-    if(++sfxWindow.n<=20) sfx(d.name);   /* at most 20 sounds a second per app */
+    if(++sfxWindow.n>20) return;   /* at most 20 sounds a second per app, named and custom together */
+    if(named) sfx(d.name); else LP.sfxCustom(d.params);
+  } else if(d.op==="music"){
+    /* at most 4 calls a second (chip.js drops the rest); a score that does not parse is shown like any app error */
+    var r=LP.chip.music(d);
+    if(r && r.error){ $("run-err-msg").textContent=tr("run.music",{msg:String(r.error).slice(0,240)}); $("run-err").hidden=false; }
   }
 });
 var sfxWindow={t:0,n:0};
@@ -396,7 +403,7 @@ LP.builtin({id:"store", label:"app.store", icon:"store", view:"store",
   ready:function(){ loadRegistry(); }});
 /* the runner owns the run view but has no icon of its own: apps appear on the home screen */
 LP.builtin({id:"run", view:"run", keepPad:true,
-  leave:function(){ closeAsk(false); $("run-frame").srcdoc=""; S.running=null; },
+  leave:function(){ closeAsk(false); LP.chip.stop(); $("run-frame").srcdoc=""; S.running=null; },
   lang:function(){
     /* apps read PAD.lang once at start: a running app is started again in the new language */
     if(S.running && !$("v-run").hidden) runApp(S.running);

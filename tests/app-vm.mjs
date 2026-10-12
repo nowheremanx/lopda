@@ -30,7 +30,7 @@ export function boot(file, opt = {}) {
      global lookups (Math, every top-level var) are many times slower */
   const g = {
     console, performance, KeyboardEvent, atob, btoa,
-    document: { createElement: el, body: el(), head: el(), getElementById: () => el(), addEventListener() {} },
+    document: { createElement: el, body: el(), head: el(), documentElement: el(), getElementById: () => el(), addEventListener() {} },
     innerWidth: 160, innerHeight: 144, devicePixelRatio: 1,
     requestAnimationFrame: (f) => { raf.push(f); return raf.length; },
     addEventListener: (type, f) => { (listeners[type] = listeners[type] || []).push(f); },

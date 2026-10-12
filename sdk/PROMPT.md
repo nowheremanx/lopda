@@ -43,6 +43,17 @@ Hard rules for index.html:
   Save on meaningful events (game over, setting changed), not every frame.
 - Sound: call PAD.sfx(name) with one of "tap", "tick", "move", "ok", "err",
   "hit", "miss", "coin", "win", "lose". Do not create your own AudioContext.
+  Newer runtimes also play the app's own sounds and music; PAD.music is undefined
+  on older ones, so check it first and stay silent without it:
+    PAD.sfx({ wave: "square", duty: 2, from: 440, to: 880, ms: 90 })   wave: square, triangle or noise;
+         from/to in Hz (the pitch slides), ms up to 1500, attack/decay in ms, vol 0-1
+    PAD.music.play({ bpm: 120, p1: "...", p2: "...", tri: "...", noise: "..." })   loops; {loop: false} plays once
+    PAD.music.stop()
+  Channels are MML: notes c d e f g a b (+ sharp, - flat), r rest, lengths c8 c4. c2,
+  l8 sets the default length, o0-o7 or < > the octave (o4 a = 440 Hz), & ties, v0-v15 volume,
+  @0-@3 pulse width (p1, p2), [ ... ]3 repeats; the noise channel plays x (short) and X (long).
+  Write original music only: no tunes from other games, films or songs, however short.
+  Public-domain classical or folk tunes are fine with the source named in a comment.
 - Games may use the handheld's hardware buttons (D-pad, A, B, START, SELECT):
     PAD.on("press", function (b) { ... })   b is "up","down","left","right","a","b","start" or "select"
     PAD.on("release", function (b) { ... })

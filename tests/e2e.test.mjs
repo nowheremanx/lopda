@@ -1275,3 +1275,212 @@ test("reader: importing a font shows a busy hint, ignores a second import meanwh
   assert.equal(await p.evaluate(() => window.__clicks), 1, "A opens the file dialog again");
   assert.deepEqual(errors, []);
 });
+
+/* ---------- sound: runtime/chip.js rendered offline, and the music's lifecycle in the runtime ---------- */
+
+/* render with the chip into an OfflineAudioContext inside the page; returns peak, rms and the time of the last sound */
+async function chipPage(t) {
+  const { p, errors } = await page(t);
+  await p.setContent("<!doctype html><html><body></body></html>");
+  await p.addScriptTag({ content: await readFile(join(ROOT, "runtime/chip.js"), "utf8") });
+  await p.addScriptTag({ content: await readFile(join(ROOT, "registry/apps/xiaoyuan/src/music.js"), "utf8") });
+  await p.evaluate(() => {
+    window.render = async (seconds, fn, gain = 1) => {
+      const sr = 22050, oc = new OfflineAudioContext(1, Math.ceil(sr * seconds), sr);
+      const out = oc.createGain(); out.gain.value = gain; out.connect(oc.destination);
+      const chip = LopdaChip.create(oc, out, { offline: true, trace: true });
+      fn(chip);
+      const d = (await oc.startRendering()).getChannelData(0);
+      let peak = 0, sum = 0, last = -1;
+      for (let i = 0; i < d.length; i++) { const a = Math.abs(d[i]); if (a > peak) peak = a; sum += d[i] * d[i]; if (a > 1e-4) last = i; }
+      const at = (from, to) => { let m = 0; for (let i = Math.floor(from * sr); i < Math.min(d.length, to * sr); i++) m = Math.max(m, Math.abs(d[i])); return m; };
+      return { peak, rms: Math.sqrt(sum / d.length), last: last / sr, chip, at };
+    };
+    window.song = (s, loop = false, until = 1e9) => (chip) => { const r = LopdaChip.parse(s); chip.play(r.song, { loop, at: 0 }); chip.pump(until); };
+  });
+  return { p, errors };
+}
+
+test("chip: every channel sounds, and a song lasts exactly as long as its bpm says", { skip }, async (t) => {
+  const { p, errors } = await chipPage(t);
+  const r = await p.evaluate(async () => {
+    const out = {};
+    for (const ch of ["p1", "p2", "tri"]) out[ch] = (await render(3, song({ bpm: 120, [ch]: "c d e f" }))).last;
+    out.noise = (await render(3, song({ bpm: 120, noise: "x x x X" }))).last;
+    out.slow = (await render(5, song({ bpm: 60, p1: "c d e f" }))).last;
+    out.peak = (await render(3, song({ bpm: 120, p1: "c d e f" }))).peak;
+    return out;
+  });
+  /* four quarter notes: 2 s at 120 bpm, 4 s at 60; the last note's few-ms edge ends right on the beat */
+  for (const ch of ["p1", "p2", "tri"]) assert.ok(Math.abs(r[ch] - 2) < 0.01, ch + " ends at " + r[ch]);
+  assert.ok(r.noise > 1.5 && r.noise < 2, "noise: the long hit on beat 4 rings, then stops: " + r.noise);
+  assert.ok(Math.abs(r.slow - 4) < 0.01, "60 bpm ends at " + r.slow);
+  assert.ok(r.peak > 0.02, "audible: " + r.peak);
+  assert.deepEqual(errors, []);
+});
+
+test("chip: a looping song comes round again; music sits at about half a sound effect; volume 0 is silence", { skip }, async (t) => {
+  const { p, errors } = await chipPage(t);
+  const r = await p.evaluate(async () => {
+    const loop = await render(5, song({ bpm: 120, p1: "c r r r" }, true, 5));
+    const yard = await render(40, song(YARD_SONG));
+    const fx = await render(1, (c) => c.sfx(LopdaChip.sfxParams({ ms: 400 })));
+    const mute = await render(40, song(YARD_SONG), 0);
+    const muteFx = await render(1, (c) => c.sfx(LopdaChip.sfxParams({ ms: 400 })), 0);
+    return { loop: [loop.at(0, 0.5), loop.at(0.6, 1.9), loop.at(2, 2.5), loop.at(4, 4.5)], yardEnd: yard.last,
+      ratio: yard.rms / fx.rms, mute: mute.peak, muteFx: muteFx.peak };
+  });
+  assert.ok(r.loop[0] > 0.02 && r.loop[1] === 0 && r.loop[2] > 0.02 && r.loop[3] > 0.02, "c at 0 s, 2 s and 4 s: " + r.loop);
+  assert.ok(Math.abs(r.yardEnd - 40) < 0.05, "the yard tune is 40 s: " + r.yardEnd);
+  assert.ok(r.ratio > 0.3 && r.ratio < 0.65, "the whole yard tune against one default effect, by rms: " + r.ratio);
+  assert.equal(r.mute, 0); assert.equal(r.muteFx, 0);
+  assert.deepEqual(errors, []);
+});
+
+test("chip: four music channels at most, two effects at most (a third cuts off the oldest)", { skip }, async (t) => {
+  const { p, errors } = await chipPage(t);
+  const r = await p.evaluate(async () => {
+    const full = await render(4, song({ bpm: 120, p1: "l16 [c d e f]8", p2: "l8 [g a]8", tri: "o2 c1 c1", noise: "l16 [x]32" }));
+    const counts = []; for (let s = 0; s < 4; s += 0.01) counts.push(full.chip.voices(s).music);
+    const tone = { wave: "square", from: 440, ms: 600, attack: 0, decay: 0, vol: 1 };
+    const one = await render(1, (c) => c.sfx(LopdaChip.sfxParams(tone)));
+    const three = await render(1, (c) => { c.sfx(LopdaChip.sfxParams(tone)); c.sfx(LopdaChip.sfxParams(tone)); c.sfx(LopdaChip.sfxParams(tone)); });
+    return { max: Math.max(...counts), atStart: full.chip.voices(0.001).music, fx: three.chip.voices(0.1).sfx,
+      ratio: three.at(0.1, 0.5) / one.at(0.1, 0.5) };
+  });
+  assert.equal(r.max, 4); assert.equal(r.atStart, 4);
+  assert.equal(r.fx, 2);
+  /* three identical tones in step: with two voices the wave is twice as high, not three times */
+  assert.ok(Math.abs(r.ratio - 2) < 0.05, "ratio " + r.ratio);
+  assert.deepEqual(errors, []);
+});
+
+/* The ten named sounds (and the runtime's own) as core.js played them before runtime 0.11.0, verbatim. The runtime
+   must render every one of them sample for sample the same. */
+const LEGACY_SFX = `(function(ac, out){
+  function tone(freq,start,dur,type,level){
+    var o=ac.createOscillator(), g=ac.createGain(), t=ac.currentTime+start;
+    o.type=type||"square"; o.frequency.setValueAtTime(freq,t);
+    g.gain.setValueAtTime(0.0001,t); g.gain.linearRampToValueAtTime(level||1,t+0.004); g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+    o.connect(g); g.connect(out); o.start(t); o.stop(t+dur+0.02);
+  }
+  function noise(start,dur,level){
+    var n=Math.floor(ac.sampleRate*dur), buf=ac.createBuffer(1,n,ac.sampleRate), ch=buf.getChannelData(0);
+    for(var i=0;i<n;i++) ch[i]=(Math.random()*2-1)*(1-i/n);
+    var src=ac.createBufferSource(), g=ac.createGain(), t=ac.currentTime+start; src.buffer=buf;
+    g.gain.setValueAtTime(level||1,t); src.connect(g); g.connect(out); src.start(t);
+  }
+  return {
+    tap:function(){ tone(1400,0,0.03,"square",0.5); },
+    home:function(){ tone(660,0,0.06); tone(990,0.06,0.08); },
+    shutter:function(){ noise(0,0.05,0.9); tone(180,0.0,0.05,"square",0.6); noise(0.09,0.04,0.6); },
+    ok:function(){ tone(523,0,0.07); tone(659,0.07,0.07); tone(784,0.14,0.12); },
+    err:function(){ tone(196,0,0.12); tone(147,0.12,0.18); },
+    modem:function(){ for(var i=0;i<6;i++) tone(i%2?2100:1200,i*0.05,0.045,"square",0.35); },
+    tick:function(){ tone(2400,0,0.012,"square",0.25); },
+    move:function(){ tone(880,0,0.025,"square",0.3); },
+    hit:function(){ noise(0,0.07,1); tone(98,0,0.09,"square",0.9); },
+    miss:function(){ tone(330,0,0.05,"triangle",0.8); tone(220,0.05,0.08,"triangle",0.7); },
+    coin:function(){ tone(988,0,0.06,"square",0.5); tone(1319,0.06,0.16,"square",0.5); },
+    win:function(){ [523,659,784,1047].forEach(function(f,i){ tone(f,i*0.09,i===3?0.25:0.09,"square",0.6); }); },
+    lose:function(){ [392,330,262,196].forEach(function(f,i){ tone(f,i*0.14,i===3?0.3:0.13,"triangle",0.9); }); }
+  };
+})`;
+
+test("chip: the named sounds render exactly as before runtime 0.11.0", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t);
+  /* every AudioContext the runtime makes is an OfflineAudioContext we can render; Math.random is seeded per sound */
+  await p.addInitScript(() => {
+    window.AudioContext = function () { const oc = new OfflineAudioContext(1, 44100, 44100); oc.resume = () => Promise.resolve(); window.lastCtx = oc; return oc; };
+    window.seed = (s) => { Math.random = () => { s = (s * 1103515245 + 12345) % 2147483648; return s / 2147483648; }; };
+  });
+  await p.goto(base + "/runtime/", { waitUntil: "load" });
+  await p.waitForFunction(() => window.LP && window.LP.sfx);
+  const same = await p.evaluate(async (legacySrc) => {
+    const legacy = eval(legacySrc), out = {};
+    const digest = (d) => { let h = 0; for (let i = 0; i < d.length; i++) h = (h * 31 + Math.round(d[i] * 1e7)) | 0; return h; };
+    for (const name of ["tap", "home", "shutter", "ok", "err", "modem", "tick", "move", "hit", "miss", "coin", "win", "lose"]) {
+      LP.SND.ctx = null; LP.SND.vol = 2; LP.SND.on = true;
+      seed(7); LP.sfx(name);
+      const now = digest((await lastCtx.startRendering()).getChannelData(0));
+      const oc = new OfflineAudioContext(1, 44100, 44100), g = oc.createGain(); g.gain.value = 0.11; g.connect(oc.destination);
+      seed(7); legacy(oc, g)[name]();
+      const before = digest((await oc.startRendering()).getChannelData(0));
+      out[name] = now === before && now !== 0;
+    }
+    return out;
+  }, LEGACY_SFX);
+  for (const [name, ok] of Object.entries(same)) assert.ok(ok, name);
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+/* run an app in the runtime the way the store does, from its HTML */
+async function runInRuntime(p, id, html, extra = {}) {
+  await p.evaluate(({ id, html, extra }) => LP.runApp(Object.assign({ id, name: id, version: "t", spec: "lopda/1", buttons: true, permissions: [], html }, extra)), { id, html, extra });
+}
+
+test("music: starts on the first key, stops on HOME and when another app starts, waits through the sound switch", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN" });
+  /* Playwright's evaluate counts as a user gesture; this page should look as if nobody has touched it yet */
+  await p.addInitScript(() => Object.defineProperty(navigator, "userActivation", { value: { hasBeenActive: false, isActive: false } }));
+  await p.goto(base + "/runtime/", { waitUntil: "load" });
+  await p.waitForFunction(() => window.LP && window.LP.S.db);
+  const state = () => p.evaluate(() => LP.chip.state());
+  const until = async (fn, what) => { for (let i = 0; i < 100; i++) { if (fn(await state())) return; await p.waitForTimeout(50); } assert.fail("timed out waiting for " + what); };
+  const yard = await readFile(join(ROOT, "registry/apps/xiaoyuan/index.html"), "utf8");
+  await runInRuntime(p, "xiaoyuan", yard);
+  /* the title asks for the tune at once; nobody has touched anything yet, so it waits */
+  await until((s) => s.waiting, "the tune to be held");
+  assert.equal((await state()).playing, false);
+  await p.keyboard.press("x");
+  await until((s) => s.playing && !s.waiting, "the tune to start on the first key");
+  assert.equal(await p.evaluate(() => LP.SND.ctx.state), "running");
+  await p.click("#home-key");
+  assert.deepEqual(await state(), { playing: false, waiting: false, paused: false });
+  /* again, then switch straight to another app */
+  await runInRuntime(p, "xiaoyuan", yard);
+  await until((s) => s.playing, "the tune to start again (audio is unlocked now)");
+  await runInRuntime(p, "quiet", "<!doctype html><html><body>quiet</body></html>");
+  assert.deepEqual(await state(), { playing: false, waiting: false, paused: false });
+  /* with the sound off the song keeps going, silently */
+  await p.evaluate(() => { LP.SND.on = false; });
+  await runInRuntime(p, "xiaoyuan", yard);
+  await until((s) => s.playing, "the tune under the sound switch");
+  assert.equal(await p.evaluate(() => LP.SND.gain.gain.value), 0);
+  await p.click("#home-key");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("music: a score with a mistake is shown in the error box, with its column; custom sounds and the rate limit", { skip, timeout: 30000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN" });
+  await p.goto(base + "/runtime/", { waitUntil: "load" });
+  await p.waitForFunction(() => window.LP && window.LP.S.db);
+  await runInRuntime(p, "bad", '<!doctype html><html><body><script>PAD.music.play({ p1: "c d q" });</script></body></html>');
+  await p.waitForSelector("#run-err:not([hidden])");
+  assert.equal(await p.textContent("#run-err-msg"), "乐谱有误，没有播放：p1:5: unknown command 'q'");
+  assert.equal((await p.evaluate(() => LP.chip.state())).waiting, false);
+  /* five plays in a row: the fifth is dropped quietly; custom sounds go through the same 20-a-second limit as named ones */
+  await p.evaluate(() => { window.played = 0; const m = LP.chip.music; LP.chip.music = function (d) { const r = m.call(this, d); if (!r && d.action === "play") played++; return r; };
+    window.fx = 0; const s = LP.sfxCustom; LP.sfxCustom = function (x) { fx++; return s.call(this, x); }; });
+  await runInRuntime(p, "many", '<!doctype html><html><body><script>for (var i = 0; i < 5; i++) PAD.music.play({ p1: "c" }); for (i = 0; i < 25; i++) PAD.sfx({ from: 200 + i });</script></body></html>');
+  await p.waitForTimeout(400);
+  assert.deepEqual(await p.evaluate(() => [played, fx]), [4, 20]);
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("music in the dev harness: the yard's tune waits for a key, then plays; a reload stops it and the new run starts it again", { skip, timeout: 30000 }, async (t) => {
+  const { p, errors } = await page(t);
+  await p.addInitScript(() => Object.defineProperty(navigator, "userActivation", { value: { hasBeenActive: false, isActive: false } }));
+  await p.goto(`${base}/sdk/dev.html?app=registry/apps/xiaoyuan`, { waitUntil: "load" });
+  await p.waitForFunction(() => /music play/.test(document.getElementById("log").textContent), null, { timeout: 5000 });
+  assert.match(await p.textContent("#log"), /music play, looping \(waits for a touch or key, as on the handheld\)/);
+  await p.keyboard.press("x");
+  await p.waitForFunction(() => chip.state().playing);
+  await p.evaluate(() => { window.stops = 0; const s = chip.stop; chip.stop = function () { stops++; return s.apply(this, arguments); }; });
+  await p.click("#reload");
+  await p.waitForFunction(() => (document.getElementById("log").textContent.match(/music play/g) || []).length === 2);
+  assert.equal(await p.evaluate(() => stops), 1);
+  assert.equal(await p.evaluate(() => chip.state().playing), true, "audio is unlocked now: the new run plays at once");
+  assert.doesNotMatch(await p.textContent("#log"), /ERROR/);
+  assert.deepEqual(errors, []);
+});

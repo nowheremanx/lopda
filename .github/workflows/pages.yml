@@ -51,12 +51,12 @@ jobs:
           APPS=$(printf '%s\n' "$CHANGED" | { grep '^registry/apps/' || true; } | cut -d/ -f3 | sort -u | while read -r id; do
             if [ -d "registry/apps/$id" ]; then echo "$id"; fi; done)
           # A runtime/ change is previewed through the runtime link only: the app links open sdk/dev.html,
-          # which never loads runtime/, so listing every app would preview nothing new.
+          # which loads nothing from runtime/ but the sound chip, so listing every app would preview nothing new.
           RUNTIME=false
           if printf '%s\n' "$CHANGED" | grep -qE '^runtime/'; then RUNTIME=true; fi
-          # The sdk scripts and the dev harness are what every app link runs on, so a change there lists all apps.
-          # sdk/*.md and the templates are docs: they do not.
-          if printf '%s\n' "$CHANGED" | grep -qE '^sdk/(.*\.js|dev\.html)$'; then APPS=$(ls registry/apps); fi
+          # The sdk scripts, the dev harness and the sound chip it shares with the runtime are what every app link
+          # runs on, so a change there lists all apps. sdk/*.md and the templates are docs: they do not.
+          if printf '%s\n' "$CHANGED" | grep -qE '^(sdk/(.*\.js|dev\.html)|runtime/chip\.js)$'; then APPS=$(ls registry/apps); fi
           # Docs, tests, CI only: nothing a preview could show, so no deploy and no comment.
           if [ -z "$APPS" ] && [ "$RUNTIME" = false ]; then
             echo "deploy=false" >> "$GITHUB_OUTPUT"
