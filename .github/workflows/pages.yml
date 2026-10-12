@@ -50,15 +50,17 @@ jobs:
           # so a grep that matches nothing must not end the step.
           APPS=$(printf '%s\n' "$CHANGED" | { grep '^registry/apps/' || true; } | cut -d/ -f3 | sort -u | while read -r id; do
             if [ -d "registry/apps/$id" ]; then echo "$id"; fi; done)
-          # runtime/ (any file) and the sdk/ scripts (*.js) are shared by every app, so a change there
-          # previews all of them. sdk/*.md and other sdk files are docs and templates: they do not.
+          # A runtime/ change is previewed through the runtime link only: the app links open sdk/dev.html,
+          # which never loads runtime/, so listing every app would preview nothing new.
           RUNTIME=false
           if printf '%s\n' "$CHANGED" | grep -qE '^runtime/'; then RUNTIME=true; fi
-          if [ "$RUNTIME" = true ] || printf '%s\n' "$CHANGED" | grep -qE '^sdk/.*\.js$'; then APPS=$(ls registry/apps); fi
+          # The sdk scripts and the dev harness are what every app link runs on, so a change there lists all apps.
+          # sdk/*.md and the templates are docs: they do not.
+          if printf '%s\n' "$CHANGED" | grep -qE '^sdk/(.*\.js|dev\.html)$'; then APPS=$(ls registry/apps); fi
           # Docs, tests, CI only: nothing a preview could show, so no deploy and no comment.
-          if [ -z "$APPS" ]; then
+          if [ -z "$APPS" ] && [ "$RUNTIME" = false ]; then
             echo "deploy=false" >> "$GITHUB_OUTPUT"
-            echo "No app, sdk or runtime change: skipping the preview."
+            echo "No app, sdk script or runtime change: skipping the preview."
             exit 0
           fi
           echo "deploy=true" >> "$GITHUB_OUTPUT"
