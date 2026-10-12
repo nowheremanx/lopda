@@ -76,6 +76,9 @@ node --test                                  # the test suite; must pass
   `--disable-site-isolation-trials` or screenshots of sandboxed iframes come out blank), plus
   manual checks on an iPhone. iPhone Safari is the target that matters.
 - Live camera, offline cache and the share sheet need HTTPS (or localhost).
+- In e2e tests, tap inline text (a word, an underline) at the middle of one of its `getClientRects()`, never at the middle
+  of its `boundingBox()`: text that wraps has a box whose middle falls between lines, and where lines break depends on the
+  fonts of the machine running the test (a reader test passed in CI and failed elsewhere for exactly this reason).
 
 ## App spec (summary; SPEC.md is the source of truth)
 
