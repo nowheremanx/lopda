@@ -688,7 +688,7 @@ test("reader: whole pages turn by keys, taps and swipes; a new text size keeps t
   assert.ok(await posShown(p));
   /* e-ink: no transition on the page */
   await p.keyboard.press("Enter");
-  for (let i = 0; i < 5; i++) await p.keyboard.press("ArrowDown");
+  for (let i = 0; i < 7; i++) await p.keyboard.press("ArrowDown");
   await p.keyboard.press("x"); await p.keyboard.press("z");
   assert.ok(await p.evaluate(() => document.getElementById("v-reader").classList.contains("eink") && document.getElementById("screen").classList.contains("rd-eink")));
   await p.keyboard.press("ArrowRight");
@@ -862,7 +862,7 @@ test("reader: the key card shows over the first book only, and from the menu; th
   await p.waitForTimeout(300);
   assert.ok(await p.isHidden("#rd-help"));
   await p.keyboard.press("Enter");
-  await p.click("#rd-sheet .lcd-menu li:nth-child(7)");         /* 按键说明 */
+  await p.click("#rd-sheet .lcd-menu li:nth-child(9)");         /* 按键说明 */
   await p.waitForSelector("#rd-help:not([hidden])");
   await p.click("#rd-help");
   await p.waitForSelector("#rd-help", { state: "hidden" });
@@ -968,13 +968,176 @@ test("reader: in a short screen the menu scrolls to keep the highlighted row in 
     return { fits: b.top >= a.top - 1 && b.bottom <= a.bottom + 1, scrolls: ul.scrollHeight > ul.clientHeight, text: li.textContent };
   });
   assert.ok((await inView()).scrolls, "the menu is taller than its box at this height");
-  for (let i = 0; i < 7; i++) {
+  for (let i = 0; i < 9; i++) {
     await p.keyboard.press("ArrowDown");
     const v = await inView();
     assert.ok(v.fits, "row " + (i + 2) + " (" + v.text + ") is in view");
   }
   assert.match((await inView()).text, /回书架/);
-  for (let i = 0; i < 7; i++) await p.keyboard.press("ArrowUp");
+  for (let i = 0; i < 9; i++) await p.keyboard.press("ArrowUp");
   assert.ok((await inView()).fits);
+  assert.deepEqual(errors, []);
+});
+
+/* ---------------- reader: fonts, layouts, full refresh ---------------- */
+const menuRow = (p, text) => p.locator("#rd-sheet .lcd-menu li", { hasText: text });
+const toastSays = (p, re) => p.waitForFunction((s) => { const t = document.getElementById("toast"); return !t.hidden && new RegExp(s).test(t.textContent); }, re.source, { timeout: 20000 });
+const flowFont = (p) => p.evaluate(() => getComputedStyle(document.getElementById("rd-flow")).fontFamily);
+const flowInline = (p) => p.evaluate(() => document.getElementById("rd-flow").style.fontFamily);
+const fontRowTexts = (p) => p.$$eval("#rd-sheet ul.rd-fonts li > span", (l) => l.map((x) => x.textContent));
+/* Alice, three pages in */
+const aliceAhead = async (p, n = 3) => {
+  await openRow(p, 2);
+  await p.waitForFunction(() => /Lewis Carroll/.test(document.getElementById("rd-flow").textContent));
+  for (let i = 0; i < n; i++) { await p.keyboard.press("ArrowRight"); await p.waitForTimeout(250); }
+};
+
+test("reader: an imported font is for the text only; switching keeps the place; deleting goes back to the system font", { skip, timeout: 120000 }, async (t) => {
+  const { fontFile } = await import("./font-fixture.mjs");
+  const { p, errors } = await readerPage(t);
+  await aliceAhead(p);
+  const here = await pos(p), total = (await foot(p)).split("/")[1];
+  assert.ok(await posShown(p));
+  const footFamily = await p.evaluate(() => getComputedStyle(document.getElementById("rd-foot")).fontFamily);
+  const sysFlow = await flowFont(p);
+  assert.equal(await flowInline(p), "", "no inline font before one is imported");
+  await p.keyboard.press("Enter");
+  const menuFamily = await menuRow(p, "字体").evaluate((e) => getComputedStyle(e).fontFamily);
+  await menuRow(p, "字体").click();
+  assert.deepEqual(await fontRowTexts(p), ["默认（系统字体）", "导入字体…"]);
+  await p.setInputFiles("#rd-fontfile", fontFile("Pixel Test.ttf", { advance: 900 }));
+  await toastSays(p, /已导入字体 Pixel Test/);
+  await p.waitForFunction(() => /lprd-/.test(document.getElementById("rd-flow").style.fontFamily));
+  await p.waitForFunction((n) => document.getElementById("rd-foot").textContent.split("/")[1] !== n && /\//.test(document.getElementById("rd-foot").textContent), total, { timeout: 10000 });
+  assert.deepEqual(await fontRowTexts(p), ["默认（系统字体）", "Pixel Test", "导入字体…"]);
+  assert.match(await p.textContent("#rd-sheet ul.rd-fonts li:nth-child(2) small"), /使用中/);
+  const fam = await flowFont(p);
+  assert.match(fam, /^"?lprd-/);
+  assert.ok(fam.endsWith(sysFlow), "the system stack follows: " + fam);
+  assert.ok(await p.evaluate(() => [...document.fonts].some((f) => /lprd-/.test(f.family) && f.status === "loaded")), "the face is loaded");
+  assert.ok(await p.evaluate((f) => document.fonts.check("16px " + f.split(",")[0]), fam));
+  assert.notEqual((await foot(p)).split("/")[1], total, "wider glyphs, other pages");
+  assert.equal(await menuRow(p, "").first().evaluate((e) => getComputedStyle(e).fontFamily), menuFamily, "the menu keeps its font");
+  assert.equal(await p.evaluate(() => getComputedStyle(document.getElementById("rd-foot")).fontFamily), footFamily, "the footer keeps its font");
+  assert.equal(await pos(p), here);
+  assert.ok(await posShown(p));
+  /* back to the system font (A on row 1), then the font again (A on row 2) */
+  await p.keyboard.press("ArrowUp"); await p.keyboard.press("ArrowUp"); await p.keyboard.press("x");
+  await p.waitForFunction(() => document.getElementById("rd-flow").style.fontFamily === "");
+  await p.waitForFunction((n) => document.getElementById("rd-foot").textContent.split("/")[1] === n, total, { timeout: 10000 });
+  assert.equal(await pos(p), here);
+  assert.ok(await posShown(p));
+  await p.keyboard.press("ArrowDown"); await p.keyboard.press("x");
+  await p.waitForFunction(() => /lprd-/.test(document.getElementById("rd-flow").style.fontFamily));
+  await p.waitForFunction((n) => document.getElementById("rd-foot").textContent.split("/")[1] !== n, total, { timeout: 10000 });
+  assert.equal(await pos(p), here);
+  assert.ok(await posShown(p));
+  /* a file that is no font, and one over 30 MB: refused, no row added */
+  await p.setInputFiles("#rd-fontfile", { name: "bad.ttf", mimeType: "font/ttf", buffer: Buffer.from("this is only text, not a font") });
+  await toastSays(p, /^读不出这个字体/);
+  const big = Buffer.alloc(30 * 1024 * 1024 + 1); Buffer.from([0, 1, 0, 0]).copy(big);
+  await p.setInputFiles("#rd-fontfile", { name: "huge.ttf", mimeType: "font/ttf", buffer: big });
+  await toastSays(p, /字体太大/);
+  assert.deepEqual(await fontRowTexts(p), ["默认（系统字体）", "Pixel Test", "导入字体…"]);
+  /* delete the font in use: START twice */
+  await p.keyboard.press("Enter");
+  assert.match(await p.textContent("#rd-sheet .hint"), /再按一次 START 删除 Pixel Test/);
+  await p.keyboard.press("Enter");
+  await toastSays(p, /已删除字体 Pixel Test/);
+  await p.waitForFunction(() => document.getElementById("rd-flow").style.fontFamily === "");
+  assert.deepEqual(await fontRowTexts(p), ["默认（系统字体）", "导入字体…"]);
+  await p.waitForFunction((n) => document.getElementById("rd-foot").textContent.split("/")[1] === n, total, { timeout: 10000 });
+  assert.equal(await pos(p), here);
+  assert.ok(await posShown(p));
+  /* the choice survives a reload */
+  await p.setInputFiles("#rd-fontfile", fontFile("Pixel Test.ttf", { advance: 900 }));
+  await toastSays(p, /已导入字体 Pixel Test/);
+  await p.waitForFunction(() => /lprd-/.test(document.getElementById("rd-flow").style.fontFamily));
+  await p.waitForTimeout(900);
+  await p.reload({ waitUntil: "networkidle" });
+  await p.locator("#home .app", { hasText: "阅读器" }).click();
+  await p.waitForFunction(() => document.querySelectorAll("#rd-list li:not(.label)").length === 2, null, { timeout: 10000 });
+  await openRow(p, 1);
+  await p.waitForFunction(() => /lprd-/.test(document.getElementById("rd-flow").style.fontFamily), null, { timeout: 10000 });
+  assert.ok(await p.evaluate(() => [...document.fonts].some((f) => /lprd-/.test(f.family) && f.status === "loaded")));
+  assert.equal(await pos(p), here);
+  assert.deepEqual(errors, []);
+});
+
+test("reader: the three layouts keep the place", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await readerPage(t);
+  await aliceAhead(p);
+  const here = await pos(p);
+  const lh = () => p.evaluate(() => parseFloat(getComputedStyle(document.getElementById("rd-flow")).lineHeight));
+  const seen = [await lh()];
+  await p.keyboard.press("Enter");
+  assert.match(await p.textContent("#rd-sheet .lcd-menu li:nth-child(5) small"), /适中/);
+  for (const want of ["宽松", "紧凑", "适中"]) {
+    await menuRow(p, "版式").click();
+    assert.match(await menuRow(p, "版式").locator("small").textContent(), new RegExp(want));
+    await p.waitForTimeout(200);
+    assert.equal(await pos(p), here, want);
+    assert.ok(await posShown(p), want);
+    seen.push(await lh());
+  }
+  assert.equal(new Set(seen.slice(0, 3)).size, 3, "three line heights: " + seen);
+  assert.equal(seen[3], seen[0]);
+  assert.ok(!/padding/.test((await p.getAttribute("#rd-page", "style")) || ""), "适中 has no inline padding");
+  await menuRow(p, "版式").click();   /* 宽松 again: padding is set */
+  assert.match((await p.getAttribute("#rd-page", "style")) || "", /padding/);
+  assert.deepEqual(errors, []);
+});
+
+test("reader: e-ink full refresh every 10 pages; the option shows only in e-ink mode", { skip, timeout: 90000 }, async (t) => {
+  const { p, errors } = await readerPage(t);
+  await openRow(p, 2);
+  await p.waitForFunction(() => /Lewis Carroll/.test(document.getElementById("rd-flow").textContent));
+  await p.keyboard.press("Enter");
+  assert.equal(await menuRow(p, "全刷").count(), 0, "not without e-ink");
+  await menuRow(p, "e-ink").click();
+  assert.match(await menuRow(p, "全刷").locator("small").textContent(), /关/);
+  await menuRow(p, "全刷").click();
+  assert.match(await menuRow(p, "全刷").locator("small").textContent(), /每 10 页/);
+  await p.keyboard.press("z"); await p.waitForSelector("#rd-sheet", { state: "hidden" });
+  await p.evaluate(() => {
+    window.__fl = []; let last = "";
+    new MutationObserver(() => {
+      const f = document.getElementById("rd-flash"); if (!f) return;
+      const s = f.className + (f.hidden ? " hidden" : "");
+      if (s !== last) { last = s; window.__fl.push({ s, t: performance.now() }); }
+    }).observe(document.getElementById("screen"), { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "hidden"] });
+  });
+  const log = () => p.evaluate(() => window.__fl);
+  const inks = async () => (await log()).filter((e) => e.s === "rd-flash ink").length;
+  const start = await pos(p);
+  for (let i = 0; i < 8; i++) { await p.keyboard.press("ArrowRight"); await p.waitForTimeout(250); }
+  assert.equal(await inks(), 0, "eight turns: no full refresh");
+  const eighth = await pos(p);
+  assert.notEqual(eighth, start);
+  /* the ninth turn is page ten; a key pressed in the middle of the flash is ignored */
+  await p.keyboard.press("ArrowRight");
+  const ninth = await pos(p);
+  assert.notEqual(ninth, eighth);
+  await p.keyboard.press("ArrowRight");
+  assert.equal(await pos(p), ninth, "ignored during the flash");
+  await p.waitForFunction(() => window.__fl.some((e) => e.s === "rd-flash paper"));
+  await p.waitForFunction(() => document.getElementById("rd-flash").hidden);
+  const l = await log(), ink = l.findIndex((e) => e.s === "rd-flash ink");
+  assert.ok(ink >= 0 && l[ink + 1].s === "rd-flash paper", JSON.stringify(l));
+  const dur = l[ink + 1].t - l[ink].t;
+  assert.ok(dur >= 100 && dur <= 400, "ink lasted " + dur);
+  await p.waitForTimeout(300);
+  assert.equal(await pos(p), ninth, "still the same page");
+  assert.equal(await inks(), 1);
+  /* the contents jump flashes too */
+  await p.keyboard.press("Enter");
+  await menuRow(p, "目录").click();
+  await p.click("#rd-sheet .lcd-menu li:nth-child(3)");
+  await p.waitForFunction(() => window.__fl.filter((e) => e.s === "rd-flash ink").length === 2);
+  await p.waitForFunction(() => document.getElementById("rd-flash").hidden);
+  /* e-ink off: the option goes */
+  await p.keyboard.press("Enter");
+  await menuRow(p, "e-ink").click();
+  assert.equal(await menuRow(p, "全刷").count(), 0);
   assert.deepEqual(errors, []);
 });
