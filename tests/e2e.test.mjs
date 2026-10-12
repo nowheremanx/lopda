@@ -348,6 +348,16 @@ test("calendar: month view, today, a day off, the day sheet, and a lunar yearly 
   assert.ok(!(await today.getAttribute("class")).includes("sel"));
   await p.keyboard.press("Enter");
   assert.ok((await today.getAttribute("class")).includes("sel"));
+  /* B, the month view's "back", also comes back to today, across a month; on today it changes nothing */
+  for (let i = 0; i < 4; i++) await p.keyboard.press("ArrowDown");
+  assert.equal(await p.textContent("#cal-ym"), "2026年11月");
+  await p.keyboard.press("z");
+  assert.equal(await p.textContent("#cal-ym"), "2026年10月");
+  assert.ok((await today.getAttribute("class")).includes("sel"));
+  await p.keyboard.press("z");
+  assert.ok((await today.getAttribute("class")).includes("sel"));
+  assert.ok(await p.isHidden("#cal-sheet"), "B on today opens nothing");
+  assert.ok(await p.isVisible("#v-cal"), "and does not leave the calendar");
   /* A opens the day */
   await p.keyboard.press("x");
   assert.match(await p.textContent("#cal-sheet"), /农历九月初二/);

@@ -357,7 +357,7 @@ function removeDate(id){
   render();
 }
 
-/* ---------- chin pad: arrows move the day, A opens it, START is today, SELECT the list, B goes back ---------- */
+/* ---------- chin pad: arrows move the day, A opens it, START is today, SELECT the list, B goes back (to today in the month view) ---------- */
 function calButton(b){
   if(C.sheet==="add"){ if(b==="a") saveDate(); else if(b==="b"){ C.sheet="day"; C.form=null; renderSheet(); } return; }
   if(C.sheet==="list"){
@@ -378,6 +378,8 @@ function calButton(b){
   else if(b==="a") openSheet("day");
   else if(b==="start"){ goToday(); sfx("tap"); }
   else if(b==="select") openSheet("list");
+  /* the month view is the outermost screen: "back" is back to today; on today it does nothing (HOME leaves) */
+  else if(b==="b" && selN()!==todayN()){ goToday(); sfx("tap"); }
 }
 LP.padRoute("cal",function(b,down){ if($("v-cal").hidden) return false; if(down) calButton(b); return true; });
 
