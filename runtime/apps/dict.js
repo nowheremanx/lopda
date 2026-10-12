@@ -6,7 +6,8 @@
  * Engine: runtime/stardict.js. The built-in ECDICT (vendor/ecdict/, made by tools/gen-ecdict.mjs) is read from the
  * offline cache each start and never stored twice; imported books keep their index and their text in
  * LopdaPlatform.files ("dict/<id>/index", "dict/<id>/data" as a Blob, read entry by entry).
- * Other programs look words up with LP.dict.lookup(word) -> Promise<[{book, name, word, head, how, text}]>,
+ * Other programs look words up with LP.dict.lookup(word) -> Promise<[{book, name, word, head, how, text}]>
+ * (and use the word book through LP.dict.inBook(word), LP.dict.toggleWord(word)),
  * how = "exact" | "lemma" | "prefix" (a .syn entry reports its headword in head).
  */
 (function(){
@@ -149,7 +150,7 @@ function renderList(){
 }
 function note(){
   var standalone=navigator.standalone===true || (window.matchMedia && matchMedia("(display-mode: standalone)").matches);
-  $("dict-note").textContent=standalone ? "" : tr("dict.pwa");
+  $("dict-note").textContent=standalone ? "" : tr("common.pwa");
 }
 function go(){
   var c=D.cand[D.pick], q=D.q.trim();
@@ -429,7 +430,8 @@ function openDict(){
   if(!D.loading) D.loading=loaded();
 }
 
-LP.dict={lookup:lookup, suggest:suggest};
+/* the reader shares the word book: START on an entry there adds or removes it, as here */
+LP.dict={lookup:lookup, suggest:suggest, inBook:inBook, toggleWord:toggleWord};
 LP.builtin({id:"dict", label:"app.dict", icon:function(){ return ICON; }, view:"dict", keepPad:true,
   open:function(){ openDict(); },
   leave:function(){ D.sheet=""; D.entry=null; D.review=null; D.armed=null; var i=$("dict-q"); if(i) i.blur(); },

@@ -10,7 +10,8 @@ Design history and open questions: `docs/decisions.md`. Read it before changing 
 ```
 runtime/        the PWA: index.html, core.js (shared LP object: utils, views, sound, home, chin pad), apps/*.js (one file per
                 built-in), boot.js (loaded last), strings.js (zh/en text), lopda.css, platform.js (IndexedDB store, file export),
-                lunar.js (lunar calendar + solar term tables, 1900-2100), stardict.js (StarDict reader), sw.js (offline cache),
+                lunar.js (lunar calendar + solar term tables, 1900-2100), stardict.js (StarDict reader), bookparse.js (TXT/EPUB parser),
+                books/ (the reader's two public-domain sample books), sw.js (offline cache),
                 fonts/ (DotGothic16, VT323, OFL), vendor/binjgb/ (Game Boy core, MIT), vendor/holiday-cn/ (China days off, MIT),
                 vendor/ecdict/ (abridged ECDICT in StarDict format, MIT + WordNet licence)
 sdk/            MIT. pad-shim.js (PAD bridge), lo-game.js (game framework), LO-GAME.md, lo-3d.js (3D), LO-3D.md, PROMPT.md,
@@ -36,7 +37,8 @@ LICENSE NOTICE LICENSING.md CONTRIBUTING.md
   its own database `lopda-files`) for large binary data.
 - Built-ins, one file each in runtime/apps/: notes, calendar (万年历; lunar.js, holiday-cn, the one built-in that may reach
   another site, decisions.md section 14), dict (词典; stardict.js, built-in ECDICT, imported StarDict books in
-  `LopdaPlatform.files`, `LP.dict.lookup(word)` for other programs, decisions.md section 15), camera (viewfinder, film, contact card; shares its film
+  `LopdaPlatform.files`, `LP.dict.lookup(word)` for other programs, decisions.md section 15), reader (阅读器; bookparse.js, books in
+  `LopdaPlatform.files`, word cursor that looks up through `LP.dict` and quotes through `LP.notes.append`, decisions.md section 16), camera (viewfinder, film, contact card; shares its film
   helpers as `LP.film`), cutter, cart (GB), store (app store, preinstalled apps, sandboxed runner, file dialog), settings.
   Paint and the calculator are community apps (`registry/apps/paint`, `calculator`), installed on first start
   (`PREINSTALL` in store.js; their files are in sw.js SHELL). The LCD fonts ship in runtime/fonts/ (OFL). Each registers with
@@ -123,7 +125,7 @@ node --test                                  # the test suite; must pass
 - Bump `RUNTIME_VERSION` in core.js and `VERSION` in sw.js together on every runtime change;
   Settings → 检查更新 compares them.
 - Buttons in built-ins: A confirms, B goes back or cancels, on every screen, menu, list and dialog. START is the
-  screen's extra action (dictionary: add to the word book; calendar: today), SELECT is free. Leaving a program is the
+  screen's extra action (dictionary: add to the word book; calendar: today; reader's word cursor: quote), SELECT is free. Leaving a program is the
   HOME key's job. Games are different: during play an app maps A and B as it likes (SPEC.md section 4, decisions.md 3).
 - Design rule: a change should remove a decision from the user, or at least not add one.
   Prefer realism (how the real device or film behaves) over convenience.

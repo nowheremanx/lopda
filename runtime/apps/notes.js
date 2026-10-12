@@ -59,7 +59,40 @@ function deleteNote(id){
 }
 $("note-back").onclick=function(){ flushNote(); S.editing=null; show("notes"); };
 
+/* Other programs add to a note by its title (its first line), creating it when there is none: the reader's
+   quotes go into a note called 《书名》. Appends run one at a time, each reading the store afresh, so a quote and
+   the thought typed under it land in order. sep goes between the old text and the new (a blank line by default). */
+var appending=Promise.resolve();
+function firstLine(body){ return String(body||"").split("\n")[0].trim(); }
+function append(title,text,sep){
+  var job=appending.then(function(){
+    if(!S.db) throw new Error(tr("notes.nodb"));
+    flushNote();
+    return S.refs.notes.get().then(function(q){
+      var hit=null;
+      q.docs.forEach(function(d){
+        var o=d.data()||{};
+        if(firstLine(o.body)===title && (!hit || (o.updated||0)>hit.updated)) hit={id:d.id, body:String(o.body||""), updated:o.updated||0};
+      });
+      var id=hit ? hit.id : S.refs.notes.doc().id;
+      var body=hit ? hit.body.replace(/\s+$/,"")+(sep==null?"\n\n":sep)+text : title+"\n\n"+text;
+      var doc={body:body, updated:Date.now()};
+      upsert("notes",{id:id, body:body, updated:doc.updated});
+      if(S.editing && S.editing.id===id){ S.editing.body=body; $("note-body").value=body; }
+      pending.notes[id]=true;
+      return put(S.refs.notes.doc(id),doc).then(function(ok){
+        if(!ok) throw new Error(tr("notes.savefail"));
+        delete pending.notes[id];
+        return id;
+      });
+    });
+  });
+  appending=job.catch(function(){});
+  return job;
+}
+
 LP.flushNote=flushNote;
+LP.notes={append:append};
 LP.onData("notes",function(){ if(!$("v-notes").hidden) renderNotes(); });
 LP.builtin({id:"notes", label:"app.notes", icon:"notes", view:"notes",
   open:function(){ show("notes"); },

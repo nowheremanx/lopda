@@ -15,6 +15,9 @@ Third-party parts keep their own licenses:
   runtime/vendor/ecdict/   English-Chinese dictionary (abridged ECDICT), MIT, Linwei (skywind3000)
                            — see its LICENSE; English senses largely from WordNet 3.0,
                            Copyright 2006 by Princeton University — see LICENSE-WordNet
+  runtime/books/           Sample books, public domain: Lewis Carroll, Alice's Adventures in Wonderland
+                           (Project Gutenberg eBook #11) and the Analects (論語, Project Gutenberg eBook
+                           #23839); Project Gutenberg's header, footer, licence and trademark removed
 
 Apps under registry/apps/<id>/ are the work of their authors and carry the
 license named in their own manifest.json (one of the permissive licenses

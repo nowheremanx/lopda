@@ -301,3 +301,48 @@ textarea::placeholder{color:var(--ink-2)}
 .dict-sheet .lcd-menu li span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dict-keys{display:flex;gap:6px;justify-content:center;padding:4px 0 6px;flex:none;flex-wrap:wrap}
 .dict-keys .ck{min-width:0}
+
+/* reader: the shelf; a book is whole pages laid out in CSS columns and moved sideways, never scrolled */
+.rd{display:flex;flex-direction:column;overflow:hidden}
+.rd-shelf{flex:1;min-height:0;display:flex;flex-direction:column}
+.rd-shelf .bar h2{flex:1}
+.rd-shelf .bar .btn{padding:6px 10px;font-size:14px}
+.rd-list{flex:1;min-height:0;overflow:auto;padding:2px 0}
+.rd-list li span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rd-list li.label{cursor:default;font-size:14px;line-height:1.6;color:var(--ink-2)}
+.rd-list li.label::before{display:none}
+.rd-note{flex:none;padding:4px 8px 6px;border-top:2px solid var(--ink);text-align:center}
+.rd-note:empty{display:none}
+.rd-book{flex:1;min-height:0;display:flex;flex-direction:column}
+.rd-page{flex:1;min-height:0;position:relative;overflow:hidden;padding:12px 16px 0;touch-action:none}
+/* the system font for long reading; CJK justified with a two-character indent */
+.rd-flow{column-fill:auto;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Noto Sans CJK SC","Source Han Sans SC","Microsoft YaHei",sans-serif;
+  color:var(--ink);text-align:justify;white-space:pre-line;overflow-wrap:break-word;-webkit-font-smoothing:antialiased}
+.rd-flow p{margin:0;text-indent:2em}
+.rd-flow[lang=en] p{text-indent:1.5em}
+.rd-flow .h{margin:0 0 .5em;text-indent:0;text-align:center;font-weight:700;break-after:avoid}
+.rd-flow em{font-style:italic}
+.rd-flow[lang=zh] em{font-style:normal;font-weight:700}
+.rd-flow mark{background:var(--ink);color:var(--lcd)}
+.rd-foot{flex:none;height:30px;display:flex;gap:6px;align-items:center;padding:0 12px;font-size:12px;color:var(--ink-2);white-space:nowrap}
+.rd-foot span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.rd-foot b{font-weight:400;font-family:var(--f-pix);font-size:17px}
+.rd-foot button{flex:1;min-width:0;height:24px;background:transparent;border:2px solid var(--ink);font-family:var(--f-lcd);font-size:12px;color:var(--ink);padding:0 4px;cursor:pointer;white-space:nowrap}
+.rd-foot button i{font-style:normal;font-family:var(--f-pix);font-size:13px;margin-right:4px}
+.rd-sheet .lcd-menu li small{font-family:var(--f-lcd);font-size:14px}
+.rd-toc li span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rd-jump{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center}
+.rd-jump b{font-family:var(--f-pix);font-size:56px;font-weight:400;line-height:1}
+.rd-def{position:absolute;left:0;right:0;bottom:0;height:52%;z-index:2;background:var(--lcd);border-top:3px solid var(--ink);display:flex;flex-direction:column;padding:6px 10px 2px;gap:4px;overflow:hidden}
+.rd-def .sheet-title{display:flex;gap:8px;align-items:baseline;letter-spacing:.04em;overflow:hidden}
+.rd-def .sheet-title span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rd-def .sheet-title small{font-size:16px;color:var(--ink-2);flex:none}
+.rd-def textarea{flex:1;min-height:0}
+.rd-def .hint{color:var(--ink)}
+/* e-ink: no motion, and only the two tones furthest apart (ink on paper) */
+.screen.rd-eink{box-shadow:none}
+.screen.rd-eink::after{display:none}
+.rd.eink .hint,.rd.eink .rd-foot,.rd.eink .ck i,.rd.eink li:not(.on) small,.rd.eink .sheet-title small,.rd.eink .rd-list li.label{color:var(--ink)}
+.rd.eink .btn{box-shadow:none}
+.rd.eink .btn:disabled{background:transparent;color:var(--ink);border:2px dashed var(--ink)}
+.rd.eink *{transition:none!important;animation:none!important}

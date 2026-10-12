@@ -122,6 +122,26 @@
       <input type="file" id="dict-file" multiple hidden>
     </section>
 
+    <!-- READER: the shelf; a book opens as whole pages, with its menu, contents and the word cursor over them -->
+    <section class="view rd" id="v-reader" hidden>
+      <div class="rd-shelf" id="rd-shelf">
+        <div class="bar">
+          <h2 data-i18n="reader.shelf">书架</h2>
+          <button class="btn ghost" type="button" id="rd-del" data-i18n="common.delete">删除</button>
+          <button class="btn" type="button" id="rd-import" data-i18n="reader.import">导入</button>
+        </div>
+        <ul class="lcd-menu rd-list" id="rd-list"></ul>
+        <p class="hint rd-note" id="rd-note"></p>
+      </div>
+      <div class="rd-book" id="rd-book" hidden>
+        <div class="rd-page" id="rd-page"><div class="rd-flow" id="rd-flow"></div></div>
+        <div class="rd-foot" id="rd-foot"></div>
+      </div>
+      <div class="dict-sheet rd-sheet" id="rd-sheet" hidden></div>
+      <div class="rd-def" id="rd-def" hidden></div>
+      <input type="file" id="rd-file" hidden>
+    </section>
+
     <!-- CAMERA: one fixed screen, like the real thing. Chin buttons or the key strip below. -->
     <section class="view cam-view" id="v-cam" hidden>
       <div class="link-boot" id="cam-boot" hidden role="status" aria-live="polite"></div>
@@ -270,10 +290,12 @@
 <script src="platform.js"></script>
 <script src="lunar.js"></script>
 <script src="stardict.js"></script>
+<script src="bookparse.js"></script>
 <script src="core.js"></script>
 <script src="apps/notes.js"></script>
 <script src="apps/calendar.js"></script>
 <script src="apps/dict.js"></script>
+<script src="apps/reader.js"></script>
 <script src="apps/camera.js"></script>
 <script src="apps/cutter.js"></script>
 <script src="apps/cart.js"></script>
