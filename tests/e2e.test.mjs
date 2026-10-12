@@ -560,9 +560,11 @@ test("dictionary: English screen", { skip, timeout: 30000 }, async (t) => {
 });
 
 /* ---------------- reader ---------------- */
-const readerPage = async (t, opts = {}) => {
+/* query: e.g. "?debug"; init: a function run in the page before its scripts */
+const readerPage = async (t, { query = "", init, ...opts } = {}) => {
   const { p, errors } = await page(t, { locale: "zh-CN", ...opts });
-  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  if (init) await p.addInitScript(init);
+  await p.goto(base + "/runtime/" + query, { waitUntil: "networkidle" });
   await p.locator("#home .app", { hasText: "阅读器" }).click();
   await p.waitForSelector("#v-reader:not([hidden])");
   /* the two sample books go on the shelf the first time */
@@ -1088,8 +1090,49 @@ test("reader: the three layouts keep the place", { skip, timeout: 60000 }, async
   assert.deepEqual(errors, []);
 });
 
+/* Full refresh, checked by phase order only. The runtime is loaded with ?debug: the reader logs "invert", "paper", "page"
+   (and "ignored" for a turn during a refresh) on LOPDA_DEBUG.flash, and with LOPDA_DEBUG.flashHold set each phase waits
+   for LOPDA_DEBUG.flashStep(). Nothing here measures a duration. */
+const flashLog = (p) => p.evaluate(() => (window.LOPDA_DEBUG.flash || []).slice());
+const flashClear = (p) => p.evaluate(() => { window.LOPDA_DEBUG.flash = []; });
+const flashWait = (p, n) => p.waitForFunction((n) => (window.LOPDA_DEBUG.flash || []).length >= n, n);
+const flashHold = (p) => p.evaluate(() => { window.LOPDA_DEBUG.flashHold = true; });
+const flashStep = async (p) => {
+  await p.waitForFunction(() => typeof window.LOPDA_DEBUG.flashStep === "function");
+  await p.evaluate(() => window.LOPDA_DEBUG.flashStep());
+};
+const isNeg = (p) => p.evaluate(() => document.getElementById("screen").classList.contains("rd-neg"));
+const flashHidden = (p) => p.evaluate(() => document.getElementById("rd-flash").hidden);
+/* run an action that must change the page whole: exactly invert, paper, page, in that order, and nothing after */
+const wholeRefresh = async (p, act, what) => {
+  await flashClear(p);
+  await act();
+  await flashWait(p, 1);
+  assert.deepEqual(await flashLog(p), ["invert"], what);
+  await flashStep(p); await flashWait(p, 2);
+  await flashStep(p); await flashWait(p, 3);
+  await p.waitForTimeout(150);
+  assert.deepEqual(await flashLog(p), ["invert", "paper", "page"], what);
+  assert.ok(await flashHidden(p) && !(await isNeg(p)), what + ": the screen is back");
+};
+/* e-ink and 全刷 on, from the book's menu (both are settings of the reader, so a second book may have them already) */
+const einkFlashOn = async (p) => {
+  await p.keyboard.press("Enter");
+  if (!(await menuRow(p, "全刷").count())) await menuRow(p, "e-ink").click();
+  if (!/每 10 页/.test(await menuRow(p, "全刷").locator("small").textContent())) await menuRow(p, "全刷").click();
+  assert.match(await menuRow(p, "全刷").locator("small").textContent(), /每 10 页/);
+  await p.keyboard.press("z"); await p.waitForSelector("#rd-sheet", { state: "hidden" });
+};
+/* the middle of the widest line box a piece of inline text covers (never the middle of its bounding box) */
+const textSpot = (p, sel, text) => p.evaluate(({ sel, text }) => {
+  const e = [...document.querySelectorAll(sel)].find((x) => x.textContent.includes(text));
+  const rs = [...e.getClientRects()].filter((r) => r.width > 0);
+  const r = rs.reduce((a, b) => (b.width > a.width ? b : a));
+  return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+}, { sel, text });
+
 test("reader: e-ink full refresh every 10 pages; the option shows only in e-ink mode", { skip, timeout: 90000 }, async (t) => {
-  const { p, errors } = await readerPage(t);
+  const { p, errors } = await readerPage(t, { query: "?debug" });
   await openRow(p, 2);
   await p.waitForFunction(() => /Lewis Carroll/.test(document.getElementById("rd-flow").textContent));
   await p.keyboard.press("Enter");
@@ -1099,48 +1142,136 @@ test("reader: e-ink full refresh every 10 pages; the option shows only in e-ink 
   await menuRow(p, "全刷").click();
   assert.match(await menuRow(p, "全刷").locator("small").textContent(), /每 10 页/);
   await p.keyboard.press("z"); await p.waitForSelector("#rd-sheet", { state: "hidden" });
-  await p.evaluate(() => {
-    window.__fl = []; let last = "";
-    new MutationObserver(() => {
-      const f = document.getElementById("rd-flash"); if (!f) return;
-      const s = f.className + (f.hidden ? " hidden" : "") + (document.getElementById("screen").classList.contains("rd-neg") ? " neg" : "");
-      if (s !== last) { last = s; window.__fl.push({ s, t: performance.now() }); }
-    }).observe(document.getElementById("screen"), { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "hidden"] });
-  });
-  const log = () => p.evaluate(() => window.__fl);
-  const inks = async () => (await log()).filter((e) => e.s === "rd-flash ink neg").length;
-  const start = await pos(p);
-  for (let i = 0; i < 8; i++) { await p.keyboard.press("ArrowRight"); await p.waitForTimeout(250); }
-  assert.equal(await inks(), 0, "eight turns: no full refresh");
-  const eighth = await pos(p);
-  assert.notEqual(eighth, start);
-  /* the ninth turn is page ten: the old page in negative, then paper, then the new page; another turn in the middle
-     of it is ignored */
+  await flashHold(p);
+  await flashClear(p);
+  const turn = async () => {
+    const was = await pos(p);
+    await p.keyboard.press("ArrowRight");
+    await p.waitForFunction((was) => document.getElementById("v-reader").getAttribute("data-pos") !== was, was);
+  };
+  for (let i = 0; i < 8; i++) await turn();
+  assert.deepEqual(await flashLog(p), [], "eight turns: no full refresh");
+  /* the ninth turn is page ten: the old page in negative, then paper, then the new page; a turn in between is ignored */
+  const eighth = await pos(p), eighthFoot = (await foot(p)).split("/")[0];
   await p.keyboard.press("ArrowRight");
+  await flashWait(p, 1);
+  assert.deepEqual(await flashLog(p), ["invert"]);
   assert.equal(await pos(p), eighth, "the old page stays, in negative");
-  assert.ok(await p.evaluate(() => document.getElementById("screen").classList.contains("rd-neg")));
+  assert.ok(await isNeg(p));
   await p.keyboard.press("ArrowRight");
-  await p.waitForFunction(() => window.__fl.some((e) => e.s === "rd-flash paper"));
-  await p.waitForFunction(() => document.getElementById("rd-flash").hidden);
-  assert.ok(!(await p.evaluate(() => document.getElementById("screen").classList.contains("rd-neg"))));
+  await flashWait(p, 2);
+  assert.deepEqual(await flashLog(p), ["invert", "ignored"]);
+  assert.equal(await pos(p), eighth);
+  await flashStep(p); await flashWait(p, 3);
+  assert.deepEqual(await flashLog(p), ["invert", "ignored", "paper"]);
+  await flashStep(p); await flashWait(p, 4);
+  assert.deepEqual(await flashLog(p), ["invert", "ignored", "paper", "page"]);
+  assert.ok(await flashHidden(p));
+  assert.ok(!(await isNeg(p)));
   const ninth = await pos(p);
-  assert.notEqual(ninth, eighth);
-  const l = await log(), ink = l.findIndex((e) => e.s === "rd-flash ink neg");
-  assert.ok(ink >= 0 && l[ink + 1].s === "rd-flash paper", JSON.stringify(l));
-  const dur = l[ink + 1].t - l[ink].t;
-  assert.ok(dur >= 100 && dur <= 400, "ink lasted " + dur);
-  await p.waitForTimeout(300);
-  assert.equal(await pos(p), ninth, "one page on: the turn during the flash was ignored");
-  assert.equal(await inks(), 1);
+  assert.notEqual(ninth, eighth, "one page on");
+  assert.equal(+(await foot(p)).split("/")[0], +eighthFoot + 1, "advanced exactly one page");
   /* the contents jump flashes too */
-  await p.keyboard.press("Enter");
-  await menuRow(p, "目录").click();
-  await p.click("#rd-sheet .lcd-menu li:nth-child(3)");
-  await p.waitForFunction(() => window.__fl.filter((e) => e.s === "rd-flash ink neg").length === 2);
-  await p.waitForFunction(() => document.getElementById("rd-flash").hidden);
+  await wholeRefresh(p, async () => {
+    await p.keyboard.press("Enter");
+    await menuRow(p, "目录").click();
+    await p.click("#rd-sheet .lcd-menu li:nth-child(3)");
+  }, "contents");
   /* e-ink off: the option goes */
   await p.keyboard.press("Enter");
   await menuRow(p, "e-ink").click();
   assert.equal(await menuRow(p, "全刷").count(), 0);
+  assert.deepEqual(errors, []);
+});
+
+test("reader: a notes-list jump, a link and B back from it are full refreshes", { skip, timeout: 90000 }, async (t) => {
+  const { makeEpub } = await import("./book-fixtures.mjs");
+  const { p, errors } = await readerPage(t, { query: "?debug" });
+  /* a quote in Alice (as in the quote test), then e-ink + 全刷, turn away, jump back from the notes list */
+  await openRow(p, 2);
+  await p.keyboard.press("ArrowRight");
+  await p.waitForFunction(() => /Rabbit-Hole/.test(document.getElementById("rd-foot").textContent));
+  await p.keyboard.press("Shift");
+  for (let i = 0; i < 4; i++) await p.keyboard.press("ArrowDown");
+  await p.keyboard.press("Shift");
+  await p.keyboard.press("Enter");
+  await p.waitForSelector("#rd-thought");
+  await p.fill("#rd-thought", "心得。");
+  await p.click("#rd-def .ck-a");
+  await p.waitForFunction(() => /心得已存进记事本/.test(document.getElementById("toast").textContent));
+  await einkFlashOn(p);
+  await flashHold(p);
+  const quoted = await pos(p);
+  await p.keyboard.press("ArrowRight"); await p.keyboard.press("ArrowRight");
+  await p.waitForFunction((q) => document.getElementById("v-reader").getAttribute("data-pos") !== q, quoted);
+  await wholeRefresh(p, async () => {
+    await p.keyboard.press("Enter");
+    await menuRow(p, "笔记").click();
+    await p.click("#rd-sheet .rd-notes li");
+  }, "notes list");
+  assert.equal((await pos(p)).split(":")[0], quoted.split(":")[0], "back in the quote's chapter");
+  assert.equal(await p.locator("#rd-flow u.hl").count() > 0, true, "the quote is on the page");
+
+  /* a link in an EPUB, and B back */
+  const filler = Array.from({ length: 30 }, (_, i) => `<p>Filler line ${i} to make the chapter run over several pages.</p>`).join("");
+  const epub = makeEpub({ title: "Link Book", lang: "en", chapters: [
+    { title: "One", html: '<h1>One</h1><p>See <a href="ch2.xhtml#far">the far place</a>.</p>' + filler },
+    { title: "Two", html: '<h1>Two</h1>' + filler + '<p id="far">The far place is here.</p>' }] });
+  await p.keyboard.press("z");                                  /* B: back to the shelf */
+  await importBook(p, { name: "links.epub", mimeType: "application/epub+zip", buffer: Buffer.from(epub) });
+  await openRow(p, 1);
+  await p.waitForFunction(() => /the far place/.test(document.getElementById("rd-flow").textContent));
+  await einkFlashOn(p);
+  await flashHold(p);
+  const before = await pos(p);
+  const spot = await textSpot(p, "#rd-flow a.ln", "the far place");
+  await wholeRefresh(p, () => p.touchscreen.tap(spot.x, spot.y), "link");
+  assert.match(await p.textContent("#rd-foot"), /按 B 回到原处/);
+  assert.notEqual(await pos(p), before);
+  await wholeRefresh(p, () => p.keyboard.press("z"), "B back from the link");
+  assert.equal(await pos(p), before);
+  assert.deepEqual(errors, []);
+});
+
+test("reader: importing a font shows a busy hint, ignores a second import meanwhile, and clears it on success and on failure", { skip, timeout: 90000 }, async (t) => {
+  const { fontFile } = await import("./font-fixture.mjs");
+  /* FontFace.load waits at a gate the test opens; clicks on the hidden file input are counted */
+  const { p, errors } = await readerPage(t, { init: () => {
+    let open; window.__gate = null;
+    window.__closeGate = () => { window.__gate = new Promise((r) => { open = r; }); };
+    window.__openGate = () => { if (open) open(); window.__gate = null; };
+    const load = FontFace.prototype.load;
+    FontFace.prototype.load = function () { const g = window.__gate; return g ? g.then(() => load.call(this)) : load.call(this); };
+    window.__clicks = 0;
+    document.addEventListener("click", (e) => { if (e.target && e.target.id === "rd-fontfile") window.__clicks++; }, true);
+  } });
+  await openRow(p, 2);
+  await p.waitForFunction(() => /Lewis Carroll/.test(document.getElementById("rd-flow").textContent));
+  await p.keyboard.press("Enter");
+  await menuRow(p, "字体").click();
+  const hint = () => p.textContent("#rd-sheet ul.rd-fonts ~ p.hint");
+  const normal = await hint();
+  assert.doesNotMatch(normal, /导入中/);
+  await p.evaluate(() => window.__closeGate());
+  await p.setInputFiles("#rd-fontfile", fontFile("Gate Test.ttf", { advance: 900 }));
+  await p.waitForFunction(() => /导入中/.test(document.querySelector("#rd-sheet p.hint").textContent));
+  assert.match(await hint(), /导入中：Gate Test/);
+  /* busy: a tap on the row and A do nothing */
+  await p.locator("#rd-sheet ul.rd-fonts li", { hasText: "导入字体…" }).click();
+  await p.keyboard.press("x");
+  await p.waitForTimeout(150);
+  assert.equal(await p.evaluate(() => window.__clicks), 0, "no file dialog while busy");
+  assert.match(await hint(), /导入中/, "still busy");
+  await p.evaluate(() => window.__openGate());
+  await toastSays(p, /已导入字体 Gate Test/);
+  assert.equal(await hint(), normal, "back to the explanation");
+  /* a failed import clears it too (the gate is open) */
+  await p.setInputFiles("#rd-fontfile", { name: "bad.ttf", mimeType: "font/ttf", buffer: Buffer.from("this is only text, not a font") });
+  await toastSays(p, /^读不出这个字体/);
+  assert.doesNotMatch(await hint(), /导入中/);
+  /* and the row works again: A asks for a file */
+  await p.keyboard.press("ArrowDown");
+  await p.keyboard.press("x");
+  assert.equal(await p.evaluate(() => window.__clicks), 1, "A opens the file dialog again");
   assert.deepEqual(errors, []);
 });
