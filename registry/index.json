@@ -1,6 +1,6 @@
 {
   "spec": "lopda/1",
-  "generated": "2026-10-11",
+  "generated": "2026-10-12",
   "apps": [
     {
       "spec": "lopda/1",
@@ -101,7 +101,7 @@
         "................",
         "................"
       ],
-      "version": "1.0.0",
+      "version": "1.0.1",
       "description": "视觉小说。邮局关门前，一封没有地址的信要送到山上。三个结局。",
       "i18n": {
         "zh": {
@@ -116,8 +116,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/last-letter/index.html",
-      "sha256": "4641e4fe2a1d0fb2deef6ea52802a7910518da44e5cba527020a2d142e72e7e2",
-      "bytes": 53726
+      "sha256": "54a5e9c32e68b5e81ec30f08bd1c26764186ff0c52097fcd48d3a8367dbe80de",
+      "bytes": 54149
     },
     {
       "spec": "lopda/1",
@@ -183,7 +183,7 @@
         "..2..........2..",
         "................"
       ],
-      "version": "1.0.0",
+      "version": "1.0.1",
       "description": "视觉小说。末班车后的雨夜小站，一张十年前的旧车票。三个结局。",
       "i18n": {
         "zh": {
@@ -198,8 +198,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/rain-station/index.html",
-      "sha256": "48366aef968c41682749c10e25147ce92476ca2144ec03aaf37f29ee85e021da",
-      "bytes": 54010
+      "sha256": "18fb628233f491c69138df1105b97c38e8d41eedbe618927e4c2334bf638643f",
+      "bytes": 54433
     },
     {
       "spec": "lopda/1",
@@ -282,7 +282,7 @@
         "................",
         "................"
       ],
-      "version": "1.2.0",
+      "version": "1.3.0",
       "description": "lo-game.js 示例：小院和老伯的屋子，摸猫、找钥匙。方向键走，A 互动。",
       "i18n": {
         "en": {
@@ -293,8 +293,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/xiaoyuan/index.html",
-      "sha256": "bbee6714a42b8eedadf6689a0b8765784a8970f134d4b55dbf39db010ee0d44a",
-      "bytes": 52125
+      "sha256": "199cc0a680122ed57af29e8fdbb0f2541bd585cbefbade74be360b6d7bdbe11b",
+      "bytes": 55421
     },
     {
       "spec": "lopda/1",
@@ -302,7 +302,7 @@
       "name": "镇妖塔·序章",
       "glyph": "塔",
       "buttons": true,
-      "version": "0.3.0",
+      "version": "0.3.1",
       "description": "仙侠序章，可通关。卡带内置 LX-3D 协处理器：三维小镇、山道、塔内与斗法。",
       "i18n": {
         "en": {
@@ -313,8 +313,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/zhenyao-tower/index.html",
-      "sha256": "b83f7d96fa56b3d1e60406dd84468f6bd4cd7a229a04fb31f71717cb4a3cdde6",
-      "bytes": 263736
+      "sha256": "eece86e90572fe8472deef55a1e0a67e5e0322cc91d390a554e742983f4ee80b",
+      "bytes": 264159
     }
   ]
 }

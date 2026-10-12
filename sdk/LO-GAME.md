@@ -1,6 +1,6 @@
 # lo-game.js
 
-A small game framework for Lo-PDA apps. MIT License. Version 1.2.0.
+A small game framework for Lo-PDA apps. MIT License. Version 1.3.0.
 
 It gives every game the same base: a four-tone pixel screen, crisp Chinese and English text,
 the chin buttons, scenes, dialogue boxes, menus, tile maps and saving. You write
@@ -27,7 +27,7 @@ registry/apps/<id>/
 <html lang="zh">
 <head><meta charset="utf-8"><title>My game</title></head>
 <body>
-<script data-lo-game="1.2.0"></script>
+<script data-lo-game="1.3.0"></script>
 <script>
 var game = LoGame.create({ width: 160, height: 144, lang: "zh" });
 var T = game.t;
@@ -244,13 +244,33 @@ game.shake(pixels, sec)
 
 ```js
 game.sfx("hit")      // tap tick move ok err hit miss coin win lose
+game.sfx({ wave: "noise", from: 900, to: 120, ms: 180, attack: 5, decay: 175, vol: 0.8 })  // your own (1.3.0)
+game.music(song)                      // loop a song (1.3.0); game.music(song, { loop: false }) plays it once
+game.musicStop()                      // fade it out
 game.save("slot1", { hp: 30, x: 4 })  // any JSON value, up to 256 KB per app
 var v = await game.load("slot1")      // null when nothing was saved
 game.remove("slot1")
 ```
 
-Sounds follow the player's volume and mute settings. Save at meaningful moments
-(a save point, a level cleared), not every frame.
+Sounds and music follow the player's volume and mute settings, stop when the game closes and
+hold while the phone is locked. A song is an object of MML strings, one per channel:
+
+```js
+var song = { bpm: 96,
+  p1:    "@1 v11 o4 l8 a4 >c d c4< a4 | g a g f d4. r",   // pulse wave: the tune
+  p2:    "@0 v7  o3 l8 [r f a >c< r a >c< a]2",            // pulse wave: the chords
+  tri:   "v12 o2 l4 f >c f c< d a >d< a",                  // triangle: the bass
+  noise: "l8 [v5 x r v3 x x v6 X4 v3 x r]2" };             // noise: x short, X long
+```
+
+The MML, the sound fields and the rules are in SPEC.md section 6.3. Keep a long score in its own
+file under `src/` (section 11 of SPEC.md); `registry/apps/xiaoyuan/src/music.js` is the worked example.
+`game.music` asked for before the player has touched the screen waits and starts on the first tap or key.
+On runtimes before 0.11.0 there is no music and no custom sounds: those calls do nothing, and named
+sounds still play. Music must be your own, or public domain with its source named: no tunes from
+other games, however short.
+
+Save at meaningful moments (a save point, a level cleared), not every frame.
 
 ## 10. Helpers
 

@@ -10,6 +10,7 @@ Design history and open questions: `docs/decisions.md`. Read it before changing 
 ```
 runtime/        the PWA: index.html, core.js (shared LP object: utils, views, sound, home, chin pad), apps/*.js (one file per
                 built-in), boot.js (loaded last), strings.js (zh/en text), lopda.css, platform.js (IndexedDB store, file export),
+                chip.js (sound chip: MML music + custom sound effects, shared with sdk/dev.html),
                 lunar.js (lunar calendar + solar term tables, 1900-2100), stardict.js (StarDict reader), bookparse.js (TXT/EPUB parser),
                 books/ (the reader's two public-domain sample books), sw.js (offline cache),
                 fonts/ (DotGothic16, VT323, OFL), vendor/binjgb/ (Game Boy core, MIT), vendor/holiday-cn/ (China days off, MIT),
@@ -94,8 +95,11 @@ node --test                                  # the test suite; must pass
   `PAD.on("press"|"release", fn)`, `PAD.off`, `PAD.isDown`, `PAD.sfx(name)`,
   `PAD.lang` ("zh" | "en", undefined on runtimes before 0.4.0). Manifest may add `i18n.{zh,en}.{name,description}`.
 - Buttons: `up down left right a b start select`. Keyboard: arrows, X=A, Z=B, Enter=START, Shift=SELECT.
-- Sounds: `tap tick move ok err hit miss coin win lose`. Max 20 per second per app.
-- Games may use `sdk/lo-game.js`: the app keeps an empty `<script data-lo-game="1.2.0">` block and
+- Sounds: `tap tick move ok err hit miss coin win lose`. Max 20 per second per app (named and custom together).
+- Music and custom sounds (runtime 0.11.0+, `runtime/chip.js`, SPEC.md 6.3): `PAD.music.play(song, {loop})` / `stop()`,
+  song = `{bpm, p1, p2, tri, noise}` in MML (≤ 8 KB); `PAD.sfx({wave, duty, from, to, ms, attack, decay, vol})`.
+  `PAD.music` is undefined on older runtimes. The ten named sounds stay in core.js, unchanged.
+- Games may use `sdk/lo-game.js`: the app keeps an empty `<script data-lo-game="1.3.0">` block and
   `tools/bundle-app.mjs` fills it, plus a `data-lo-font` block with only the glyphs the app uses.
   The checker accepts only unmodified released copies (`sdk/lo-game.versions.json`). When you change
   lo-game.js: bump its VERSION, add the new hash to versions.json, re-run the tool on apps.
@@ -113,6 +117,9 @@ node --test                                  # the test suite; must pass
   LICENSING.md and NOTICE. No GPL code (it would make the project GPL). No game ROMs anywhere.
 - Never use other people's IP (names, characters, sprites, story) in apps, including "ports" of
   old games: make original homages.
+- Music and sound effects must be original, or public domain (classical, folk) with the source named next to
+  the score. No transcriptions, including old game music, however short. The platform supports formats; what users
+  bring is up to them, but nothing the platform ships or the store lists may carry music it may not share.
 
 ## Code style and conventions
 

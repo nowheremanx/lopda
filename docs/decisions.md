@@ -129,6 +129,35 @@
   - 一盒张数〔提议：10〕、调色板〔提议：原创的约 16 色，保留像素风〕、显影动画、相片盒、在白边上写字。
 - **像素相机的「彩色胶卷」**（有限调色板加抖动）、**裁片机的拍立得边框样式**。〔提议〕
 - **声音**（2026-10-11 owner 同意方向，待实现）：三层，都由 runtime 合成、app 只提供内容：音乐（`PAD.music`，4 声道 + MML）、自定义音效（`PAD.sfx` 接受参数）、环境声（`PAD.ambience` 预设）。低保真采样暂不做。创作和分享：runtime 只播放 MML，MIDI ⇄ MML 转换放在 SDK 可选库 `lo-midi.js` 和命令行工具里，`PAD.music.render` 渲染音频文件；平台负责格式支持，内容由用户负责，商店里只能有原创或有许可的音乐。设计见 `docs/design/pad-audio.md`。
+  - **第 1 步已完成**（runtime 0.11.0，lo-game 1.3.0）：音乐 + 自定义音效 + runtime 接入 + 开发台 + 小院的示例曲。
+    `runtime/chip.js`（ES5，一个 IIFE，`window.LopdaChip`）runtime 和 `sdk/dev.html` 共用：`parse`（MML → 事件，纯函数）、
+    `sfxParams`（截断，纯函数）、`create`（在任意 AudioContext / OfflineAudioContext 上合成）、`host`（解锁、暂停、限频，runtime 和开发台各持一个）。
+    方波是带限的 PeriodicWave（4 种占空比），三角波用浏览器自带的，噪声是 15 位移位寄存器（确定性，不用 Math.random）。
+    调度：每 50 ms 一次，把未来 0.25 s 内的音符按 AudioContext 时间排好（lookahead），不逐音触发。
+    10 种具名音效仍在 core.js，代码没动；e2e 里用 OfflineAudioContext 逐个和改动前的原代码比对，逐样本相同。
+    PR 里列了需要在 iPhone 上验证的清单。
+  - 和 `pad-audio.md` 的偏离及实现细节（小的自己定了，列在这里）：
+    - **具名音效不占两个音效声道**，继续走原实现，听感一点不变；"第三个挤掉最早的"只管自定义音效。
+    - **`vibrato` 没做**：设计里没写它的形状（一个数？`{depth, rate}`？单位是半音还是 Hz？），会改变 API 形状，留给 owner 定；在定之前这个字段被忽略、不报错。
+    - 增益：单个声道 v15 的峰值 0.11（音乐总线 0.5），默认自定义音效 0.63；整首小院曲的 RMS 约为一个默认音效的 0.46，即"约一半"。
+    - MML：默认 `o4 l4 v10 @2`，`o4 a` = 440 Hz；时值 1–64、最多两个附点；`[ ]` 不写次数为 2 次，1–99 次，最多套 8 层，展开后每声道最多 20000 个音；
+      `&` 只把同音高连成一个音，不同音高就是紧接（本来也没有间隙）；`@` 在三角波、噪声声道上忽略；噪声声道写音符、方波声道写 `x` 报错；
+      空格和 `|` 忽略（方便按小节排版，设计里没有，是新增的）；音符字母大小写都认（`x` / `X` 例外）；`bpm` 截到 30–300，默认 120。
+      曲子在最长的声道结束时循环，短的声道等到下一轮。错误信息是英文的 `p1:12: unknown command 'q'`，runtime 外面套中英文的一句话。
+    - 自定义音效默认值：`square`、`duty` 2、440 Hz、150 ms、attack 2 ms、decay 到结束、`vol` 0.7；`to` 默认等于 `from`。
+      噪声的 `from` / `to` 是移位寄存器的速度（低的轰隆、高的嘶嘶）。
+    - 限频：每秒最多 4 次 music 调用，多出来的 `play` 静默丢弃（开发台日志里显示），`stop` 总是执行。自定义音效和具名音效合用每秒 20 个的上限。
+    - `PAD.music` 只在 runtime 传 `music: true` 给 shim 时存在（和 `PAD.lang` 同样的方式）；lo-game 的 `game.sfx(对象)` 在没有 `PAD.music` 的 runtime 上什么都不做。
+    - 解锁：收到 `play` 时如果页面还没有过用户激活（`navigator.userActivation.hasBeenActive`）就先记下，外层页面第一次 pointerdown / touchend / keydown 时
+      建 AudioContext、在手势里放一个空样本（iOS 的老办法）再开始。沙盒 iframe 里的触屏不会传到外层页面；Chrome 和 Safari 16.4 以后的用户激活会传给外层，
+      所以 app 在触屏后调用 `play` 也能直接开始。没有这个 API 的旧 Safari 上，要等下巴按键或外层页面的一次触屏。
+    - 暂停：页面隐藏而且正在放音乐时 suspend AudioContext（不放音乐时不动，卡带机照旧），回来 resume；iOS 不许无手势 resume 时，下一次触屏恢复。
+      时钟如果跳了，错过的音符跳过，不会一起补放。
+    - 声音开关关着时音乐照样排（master gain 为 0），打开后从当前位置听到。音量在播放开始时设一次；设置页只能在 app 外打开，打开时音乐已经停了。
+    - 开发台固定用默认音量档（0.11），具名音效仍然只记日志不发声。Pages 预览：`runtime/chip.js` 改了也会列出所有 app 的开发台链接。
+    - 小院 1.3.0：一首原创的 40 秒循环曲（F 大调五声，96 bpm，A、B 两段各 8 小节），摸猫和捡钥匙换成自己的音效；在旧 runtime 上退回原来的 `coin` / `ok`。
+      曲谱在 `registry/apps/xiaoyuan/src/music.js`。其他用 lo-game 的 app 只是重新打包（版本号升了补丁号），`tests/frame-hashes.mjs` 证明画面逐帧不变
+      （新增的通用脚本模式覆盖小院、last-letter、rain-station）。
 - **模拟器扩展**：沙盒 app 是否允许 WebAssembly（`'wasm-unsafe-eval'`）、是否支持 FC。〔提议〕文件导入已经有了（第 13 节）。
 - **十字键 4 向 / 8 向的 manifest 字段（`"dpad": 4`）**。〔提议〕
 - **内置程序扩充**（2026-10-10 讨论，设计草稿）：

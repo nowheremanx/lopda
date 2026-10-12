@@ -4,6 +4,9 @@
 //   node tests/frame-hashes.mjs registry/apps/zhenyao-tower/index.html --compare before.json
 // zhenyao-tower plays the scenes in tests/zhenyao-play.js; vector-dream runs a fixed 145-frame script
 // (three scenes, solid and wireframe, zoom and turning). Every frame is hashed as it reaches the canvas.
+// Any other app (the small lo-game ones: xiaoyuan, last-letter, rain-station) gets a fixed 900-frame script of
+// presses and holds through a fake PAD that records every sound and music call, so a framework release can show
+// that the old apps draw exactly what they drew before.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -35,11 +38,31 @@ export function vecdream(file) {
   return { vecdream: app.hashes };
 }
 
+/* a generic player: A, START, the D-pad held for a while, B, in a fixed order. PAD.load answers null (a new game).
+   opt.music gives the fake PAD a PAD.music, as runtime 0.11.0 does; calls lists every sound and music call. */
+export function scripted(file, opt = {}) {
+  const on = { press: [], release: [] }, down = new Set(), calls = [];
+  const pad = { lang: "zh", spec: "lopda/1", on: (type, f) => { if (on[type]) on[type].push(f); }, off() {}, isDown: (b) => down.has(b),
+    load: () => Promise.resolve(null), save() {}, remove() {}, exit() {}, sfx: (s) => calls.push(["sfx", s]) };
+  if (opt.music) pad.music = { play: (song, o) => calls.push(["play", song, o]), stop: () => calls.push(["stop"]) };
+  const app = boot(file, { pad });
+  const run = async (n) => { for (let i = 0; i < n; i++) { app.frame(); await app.ctx.get("__yield")(); } };
+  const hold = async (b, n) => { down.add(b); on.press.forEach((f) => f(b)); await run(n); down.delete(b); on.release.forEach((f) => f(b)); await run(2); };
+  const steps = [["a", 2, 40], ["a", 2, 60], ["right", 30, 10], ["down", 40, 10], ["a", 2, 40], ["a", 2, 40], ["a", 2, 40], ["left", 50, 10],
+    ["up", 30, 10], ["a", 2, 40], ["b", 2, 30], ["start", 2, 30], ["down", 2, 20], ["b", 2, 30], ["a", 2, 40], ["right", 60, 10], ["select", 2, 30]];
+  return (async () => {
+    await run(30);
+    for (const [b, n, after] of steps) { await hold(b, n); await run(after); }
+    return { frames: app.hashes, calls };
+  })();
+}
+
 /* the CLI below only runs when this file is started directly; tests import vecdream() */
 const direct = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 const [file, flag, against] = direct ? process.argv.slice(2) : [];
 const scenes = process.env.SCENES ? process.env.SCENES.split(",") : ["title", "town", "boss", "pagoda", "tower"];
-const result = !direct ? null : /vector-dream/.test(file) ? vecdream(file) : await zhenyao(file, scenes);
+const result = !direct ? null : /vector-dream/.test(file) ? vecdream(file) : /zhenyao-tower/.test(file) ? await zhenyao(file, scenes)
+  : { frames: (await scripted(file)).frames };
 if (!direct) {
   /* imported: nothing to run */
 } else if (flag !== "--compare") {

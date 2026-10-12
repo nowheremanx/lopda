@@ -128,7 +128,11 @@ const FAILS = [
   ["hsl()", { html: (h) => h.replace("color: #1f2a14", "color: hsl(0, 0%, 0%)") }, /hsl\(\.\.\.\)/],
   ["named colour", { html: (h) => h.replace("color: #1f2a14", "color: red") }, /color: red/],
   ["unknown sound", withCode('PAD.sfx("boom");'), /PAD\.sfx\("boom"\) is not a known sound/],
-  ["buttons on lopda/0 code", { manifest: (m) => { m.spec = "lopda/0"; delete m.buttons; } }, /PAD\.on\/isDown\/sfx need spec "lopda\/1"/],
+  ["buttons on lopda/0 code", { manifest: (m) => { m.spec = "lopda/0"; delete m.buttons; } }, /PAD\.on\/isDown\/sfx\/music need spec "lopda\/1"/],
+  /* the template's own PAD.on and PAD.sfx are renamed away, so PAD.music alone trips the rule */
+  ["music on lopda/0 code", { manifest: (m) => { m.spec = "lopda/0"; delete m.buttons; },
+    html: (h) => withCode("if (PAD.music) PAD.music.play({ p1: \"c\" });").html(h).replace(/PAD\.(on|sfx)\(/g, "noPad(") },
+    /PAD\.on\/isDown\/sfx\/music need spec "lopda\/1"/],
 ];
 
 for (const [name, change, want] of FAILS) {

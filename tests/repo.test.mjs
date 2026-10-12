@@ -175,11 +175,12 @@ test("the Pages workflow publishes the repo without tests, dependencies or CI fi
   const pats = [...y.matchAll(/grep -qE '([^']+)'/g)].map((m) => new RegExp(m[1]));
   assert.equal(pats.length, 2, "one pattern for runtime/, one for the sdk files every app link runs on");
   const [runtimeRe, allAppsRe] = pats;
-  /* runtime/ gets the runtime link only: the app links open sdk/dev.html, which never loads runtime/ */
+  /* runtime/ gets the runtime link only: the app links open sdk/dev.html, which loads nothing from runtime/ but chip.js */
   for (const p of ["runtime/lopda.css", "runtime/apps/dict.js", "runtime/vendor/binjgb/binjgb.wasm"]) {
     assert.ok(runtimeRe.test(p), p); assert.ok(!allAppsRe.test(p), "no app list for " + p);
   }
-  for (const p of ["sdk/lo-game.js", "sdk/pad-shim.js", "sdk/dev.html"]) assert.ok(allAppsRe.test(p), p);
+  for (const p of ["sdk/lo-game.js", "sdk/pad-shim.js", "sdk/dev.html", "runtime/chip.js"]) assert.ok(allAppsRe.test(p), p);
+  assert.ok(!allAppsRe.test("runtime/chip.json") && !allAppsRe.test("runtime/apps/chip.js"), "only the chip itself");
   for (const p of ["sdk/LO-GAME.md", "sdk/PROMPT.md", "sdk/template/index.html", "docs/x.md", "tests/a.mjs", "registry/apps/a/index.html"]) {
     assert.ok(!runtimeRe.test(p) && !allAppsRe.test(p), p);
   }
