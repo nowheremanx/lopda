@@ -63,7 +63,7 @@
         "................",
         "................"
       ],
-      "version": "1.3.0",
+      "version": "1.4.0",
       "description": "15×15 棋盘，你执黑先手和电脑下，可以悔棋。",
       "i18n": {
         "en": {
@@ -74,8 +74,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/gomoku/index.html",
-      "sha256": "70565448444f0b5d4b040f5529258cf209a83d6cc678c6f874cf0ee68b23c47a",
-      "bytes": 10463
+      "sha256": "75833de7a6728e8452da4baa433cdb2d3005db782842e74e7d6d9e1dc3ebe725",
+      "bytes": 12365
     },
     {
       "spec": "lopda/1",
