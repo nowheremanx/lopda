@@ -5,13 +5,14 @@
  * injects it as the first script of every app, so it must stay self-contained:
  * no closures over outer variables, no imports.
  *
- * The runtime calls it with options: lopdaPadShim({lang:"zh"|"en", music:true}). Older runtimes pass none,
+ * The runtime calls it with options: lopdaPadShim({lang:"zh"|"en", music:true, ambience:true}). Older runtimes pass none,
  * so PAD.lang is undefined there and apps fall back to their own default; PAD.music is likewise undefined
- * unless the runtime can play it (runtime 0.11.0 and later, and sdk/dev.html).
+ * unless the runtime can play it (runtime 0.11.0 and later, and sdk/dev.html), and PAD.ambience (0.13.0 and later).
  *
  * Messages app -> runtime:  {pad:1, op:"save"|"load"|"remove"|"error"|"exit", ...}
- *                           {pad:1, op:"sfx", name}  or  {pad:1, op:"sfx", params:{wave, duty, from, to, ms, attack, decay, vol}}
+ *                           {pad:1, op:"sfx", name}  or  {pad:1, op:"sfx", params:{wave, duty, from, to, ms, attack, decay, vol, vibrato:{depth, rate}}}
  *                           {pad:1, op:"music", action:"play", song:{bpm, p1, p2, tri, noise}, loop}  or  {..., action:"stop"}
+ *                           {pad:1, op:"ambience", name, level}   (name null: fade out)
  *                           {pad:1, op:"file", i, kind:"export", name, type, data}   (needs "files")
  *                           {pad:1, op:"file", i, kind:"import", accept}
  * Messages runtime -> app:  {pad:1, op:"loaded", i, v}
@@ -24,7 +25,7 @@ function lopdaPadShim(opts) {
   var post = function (msg) { msg.pad = 1; parent.postMessage(msg, "*"); };
   var TONES = ["#1f2a14", "#4a5a32", "#7d8a58", "#a3ad7e"];
   var LANG = opts && (opts.lang === "zh" || opts.lang === "en") ? opts.lang : undefined;
-  var MUSIC = !!(opts && opts.music === true);
+  var MUSIC = !!(opts && opts.music === true), AMBIENCE = !!(opts && opts.ambience === true);
 
   /* Buttons (lopda/1): the runtime forwards the chin keys; the keyboard works too. */
   var BUTTONS = ["up", "down", "left", "right", "a", "b", "start", "select"];
@@ -64,6 +65,17 @@ function lopdaPadShim(opts) {
     return out;
   };
   var SFX_KEYS = ["wave", "duty", "from", "to", "ms", "attack", "decay", "vol"];
+  var sfxParams = function (s) {
+    var p = plain(s, SFX_KEYS.filter(function (k) { return k in s; }));
+    if (s.vibrato && typeof s.vibrato === "object") p.vibrato = plain(s.vibrato, ["depth", "rate"].filter(function (k) { return k in s.vibrato; }));
+    return p;
+  };
+  /* ambience(name, level): one of rain waves waterfall wind fire stream, level 0-1; ambience(null) fades it out */
+  var ambience = !AMBIENCE ? undefined : function (name, level) {
+    var msg = { op: "ambience", name: name == null ? null : String(name) };
+    if (level !== undefined) msg.level = typeof level === "number" ? level : String(level);
+    post(msg);
+  };
   var music = !MUSIC ? undefined : Object.freeze({
     /* play(song, {loop}) replaces whatever is playing; loops unless loop is false. A score that does not
        parse is reported like an uncaught error (the runtime's error box, the harness log). */
@@ -96,9 +108,10 @@ function lopdaPadShim(opts) {
     /* sfx("coin"), one of SOUNDS, or sfx({wave, from, to, ms, ...}), a sound of the app's own */
     sfx: function (s) {
       if (typeof s === "string") { if (SOUNDS.indexOf(s) >= 0) post({ op: "sfx", name: s }); }
-      else if (s && typeof s === "object") post({ op: "sfx", params: plain(s, SFX_KEYS.filter(function (k) { return k in s; })) });
+      else if (s && typeof s === "object") post({ op: "sfx", params: sfxParams(s) });
     },
     music: music,
+    ambience: ambience,
     on: function (type, fn) { if (on[type] && typeof fn === "function") on[type].push(fn); },
     off: function (type, fn) { if (on[type]) on[type] = on[type].filter(function (f) { return f !== fn; }); },
     isDown: function (b) { return !!held[b]; },
@@ -171,11 +184,12 @@ var LOPDA_APP_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src '
   "img-src data: blob:; media-src data: blob:; font-src data:; connect-src 'none'";
 
 /* Wrap an app's HTML: CSP meta first, then the bridge, then the app.
-   opts.lang ("zh" | "en") becomes PAD.lang inside the app; opts.music (true) gives it PAD.music. */
+   opts.lang ("zh" | "en") becomes PAD.lang inside the app; opts.music (true) gives it PAD.music, opts.ambience (true) PAD.ambience. */
 function lopdaWrapApp(html, opts) {
   var o = {};
   if (opts && (opts.lang === "zh" || opts.lang === "en")) o.lang = opts.lang;
   if (opts && opts.music === true) o.music = true;
+  if (opts && opts.ambience === true) o.ambience = true;
   var head = '<meta http-equiv="Content-Security-Policy" content="' + LOPDA_APP_CSP + '">' +
     "<style>*{touch-action:manipulation;-webkit-tap-highlight-color:transparent}</style>" +
     "<script>(" + lopdaPadShim.toString() + ")(" + (Object.keys(o).length ? JSON.stringify(o) : "") + ");<\/script>";

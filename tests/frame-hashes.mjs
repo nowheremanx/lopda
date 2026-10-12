@@ -5,7 +5,7 @@
 // zhenyao-tower plays the scenes in tests/zhenyao-play.js; vector-dream runs a fixed 145-frame script
 // (three scenes, solid and wireframe, zoom and turning). Every frame is hashed as it reaches the canvas.
 // Any other app (the small lo-game ones: xiaoyuan, last-letter, rain-station) gets a fixed 900-frame script of
-// presses and holds through a fake PAD that records every sound and music call, so a framework release can show
+// presses and holds through a fake PAD that records every sound, music and ambience call, so a framework release can show
 // that the old apps draw exactly what they drew before.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -39,12 +39,14 @@ export function vecdream(file) {
 }
 
 /* a generic player: A, START, the D-pad held for a while, B, in a fixed order. PAD.load answers null (a new game).
-   opt.music gives the fake PAD a PAD.music, as runtime 0.11.0 does; calls lists every sound and music call. */
+   opt.music gives the fake PAD a PAD.music, as runtime 0.11.0 does, opt.ambience a PAD.ambience (0.13.0);
+   calls lists every sound, music and ambience call. */
 export function scripted(file, opt = {}) {
   const on = { press: [], release: [] }, down = new Set(), calls = [];
   const pad = { lang: "zh", spec: "lopda/1", on: (type, f) => { if (on[type]) on[type].push(f); }, off() {}, isDown: (b) => down.has(b),
     load: () => Promise.resolve(null), save() {}, remove() {}, exit() {}, sfx: (s) => calls.push(["sfx", s]) };
   if (opt.music) pad.music = { play: (song, o) => calls.push(["play", song, o]), stop: () => calls.push(["stop"]) };
+  if (opt.ambience) pad.ambience = (name, level) => calls.push(["ambience", name, level]);
   const app = boot(file, { pad });
   const run = async (n) => { for (let i = 0; i < n; i++) { app.frame(); await app.ctx.get("__yield")(); } };
   const hold = async (b, n) => { down.add(b); on.press.forEach((f) => f(b)); await run(n); down.delete(b); on.release.forEach((f) => f(b)); await run(2); };

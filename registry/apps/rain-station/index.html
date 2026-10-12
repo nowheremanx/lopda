@@ -7,13 +7,13 @@
 </head>
 <body>
 <!-- The framework. Leave this block alone: node tools/lo-game.mjs <folder> fills it in, plus a font block after it. -->
-<script data-lo-game="1.3.0">
+<script data-lo-game="1.4.0">
 /*
- * lo-game.js 1.3.0, a tiny game framework for Lo-PDA apps.
+ * lo-game.js 1.4.0, a tiny game framework for Lo-PDA apps.
  * MIT License. Copyright (c) 2026 Haowei Wu. See sdk/LICENSE.
  *
  * Paste-in library: an app carries its own copy inside a script tag marked
- * data-lo-game="1.3.0", and `node tools/lo-game.mjs registry/apps/<id>` fills it in.
+ * data-lo-game="1.4.0", and `node tools/lo-game.mjs registry/apps/<id>` fills it in.
  * The same tool adds a pixel-font block holding just the characters the app uses.
  * Do not edit the copy inside an app; the checker verifies it.
  *
@@ -24,7 +24,7 @@
 var LoGame = (function () {
   "use strict";
 
-  var VERSION = "1.3.0";
+  var VERSION = "1.4.0";
   var TONES = ["#1f2a14", "#4a5a32", "#7d8a58", "#a3ad7e"];
   var INK = 0, DARK = 1, MID = 2, PAPER = 3;
   var CLEAR = 255;
@@ -454,6 +454,8 @@ var LoGame = (function () {
       sfx: function (s) { if (HAS_PAD && PAD.sfx && (typeof s === "string" || PAD.music)) PAD.sfx(s); },
       music: function (song, o) { if (HAS_PAD && PAD.music) PAD.music.play(song, o); },
       musicStop: function () { if (HAS_PAD && PAD.music) PAD.music.stop(); },
+      /* ambience("rain", 0.6), ambience(null) to fade it out (1.4.0); nothing on runtimes before 0.13.0 */
+      ambience: function (name, level) { if (HAS_PAD && PAD.ambience) PAD.ambience(name, level); },
       save: function (key, value) { if (HAS_PAD) PAD.save(key, value); else memory[key] = JSON.parse(JSON.stringify(value)); },
       load: function (key) { return HAS_PAD ? PAD.load(key) : Promise.resolve(key in memory ? memory[key] : null); },
       remove: function (key) { if (HAS_PAD) PAD.remove(key); else delete memory[key]; },
@@ -722,6 +724,8 @@ var BACKDROPS = {
     g.rect(0, 70, 160, 18, g.DARK); g.line(0, 70, 160, 70, g.INK);
   }
 };
+/* what you hear behind each backdrop: [ambience, level 0-1]; "title" is the title screen, anything not listed is quiet */
+var AMBIENCE = { title: ["rain", 0.4], station: ["rain", 0.7], train: ["rain", 0.3] };
 var SCRIPT = [
   { bg: "station" },
   { say: null, text: { zh: "末班车之后的小站。雨下得很大。", en: "A small station after the last train. Heavy rain." } },
@@ -782,6 +786,13 @@ var view = "play", logTop = 0;
 
 function fresh() { return { pc: 0, flags: {}, bg: null, left: null, right: null }; }
 function who(id) { return id && CAST[id] ? T(CAST[id].name) : ""; }
+var heard = "";
+function listen(key) {
+  var a = AMBIENCE[key] || null, now = a ? a.join(" ") : "";
+  if (now === heard) return;
+  heard = now;
+  game.ambience(a ? a[0] : null, a ? a[1] : 0);
+}
 function jump(label) { if (!(label in LABELS)) throw new Error("no label " + label); S.pc = LABELS[label]; }
 
 /* run steps until one needs the player */
@@ -789,7 +800,7 @@ function run() {
   for (var guard = 0; guard < 10000; guard++) {
     var s = SCRIPT[S.pc];
     if (!s) { cur = { kind: "end", title: "" }; return; }
-    if (s.bg !== undefined) { S.bg = s.bg; S.pc++; }
+    if (s.bg !== undefined) { S.bg = s.bg; S.pc++; listen(s.bg); }
     else if (s.show) { S[s.show] = s.who; S.pc++; }
     else if (s.hide) { S[s.hide] = null; S.pc++; }
     else if (s.label) S.pc++;
@@ -824,7 +835,7 @@ function advance() {
 }
 
 game.scene("play", {
-  enter: function (saved) { S = saved || fresh(); log = []; view = "play"; run(); },
+  enter: function (saved) { S = saved || fresh(); log = []; view = "play"; if (S.bg) listen(S.bg); run(); },
   update: function (dt) {
     if (view === "log") {
       if (game.repeat("up")) logTop = Math.max(0, logTop - 1);
@@ -892,7 +903,7 @@ function drawLog(g) {
 
 var saved = null, menuIdx = 0;
 game.scene("title", {
-  enter: function () { saved = null; menuIdx = 0; game.load("vn").then(function (v) { saved = v; }); },
+  enter: function () { saved = null; menuIdx = 0; listen("title"); game.load("vn").then(function (v) { saved = v; }); },
   update: function () {
     var n = saved ? 2 : 1;
     if (game.repeat("up") || game.repeat("down")) { menuIdx = (menuIdx + 1) % n; game.sfx("move"); }

@@ -1415,6 +1415,9 @@ test("chip: the named sounds render as before runtime 0.11.0", { skip, timeout: 
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
+/* what the chip's host reports when nothing sounds and nothing waits */
+const QUIET = { playing: false, waiting: false, paused: false, ambience: null, level: 0, ambienceWaiting: false };
+
 /* run an app in the runtime the way the store does, from its HTML */
 async function runInRuntime(p, id, html, extra = {}) {
   await p.evaluate(({ id, html, extra }) => LP.runApp(Object.assign({ id, name: id, version: "t", spec: "lopda/1", buttons: true, permissions: [], html }, extra)), { id, html, extra });
@@ -1437,12 +1440,12 @@ test("music: starts on the first key, stops on HOME and when another app starts,
   await until((s) => s.playing && !s.waiting, "the tune to start on the first key");
   assert.equal(await p.evaluate(() => LP.SND.ctx.state), "running");
   await p.click("#home-key");
-  assert.deepEqual(await state(), { playing: false, waiting: false, paused: false });
+  assert.deepEqual(await state(), QUIET);
   /* again, then switch straight to another app */
   await runInRuntime(p, "xiaoyuan", yard);
   await until((s) => s.playing, "the tune to start again (audio is unlocked now)");
   await runInRuntime(p, "quiet", "<!doctype html><html><body>quiet</body></html>");
-  assert.deepEqual(await state(), { playing: false, waiting: false, paused: false });
+  assert.deepEqual(await state(), QUIET);
   /* at volume 0 (off) the song keeps going, silently */
   await p.evaluate(() => { LP.SND.vol = 0; });
   await runInRuntime(p, "xiaoyuan", yard);
@@ -1534,5 +1537,244 @@ test("music in the dev harness: the yard's tune waits for a key, then plays; a r
   assert.equal(await p.evaluate(() => stops), 1);
   assert.equal(await p.evaluate(() => chip.state().playing), true, "audio is unlocked now: the new run plays at once");
   assert.doesNotMatch(await p.textContent("#log"), /ERROR/);
+  assert.deepEqual(errors, []);
+});
+
+/* ---------- ambience (PAD.ambience) and vibrato: runtime/chip.js rendered offline, and the runtime's lifecycle ---------- */
+
+/* in the page: amb(seconds, fn) renders with the chip at 22.05 kHz; fn(chip, oc) may schedule changes with at(t, f) */
+async function ambPage(t) {
+  const { p, errors } = await chipPage(t);
+  await p.evaluate(() => {
+    const sr = 22050;
+    window.SR = sr;
+    window.amb = async (seconds, fn) => {
+      const oc = new OfflineAudioContext(1, Math.ceil(sr * seconds), sr);
+      const chip = LopdaChip.create(oc, oc.destination, { offline: true });
+      const at = (time, f) => oc.suspend(time).then(() => { f(chip); chip.pump(seconds); oc.resume(); });
+      fn(chip, at);
+      chip.pump(seconds);
+      return (await oc.startRendering()).getChannelData(0);
+    };
+    /* statistics of d[from s .. to s] */
+    window.stats = (d, from = 0, to = d.length / sr) => {
+      const a = Math.floor(from * sr), b = Math.min(d.length, Math.floor(to * sr)), n = b - a;
+      let sum = 0, peak = 0, zc = 0, step = 0, low = 0, lp = 0;
+      for (let i = a; i < b; i++) {
+        const x = d[i]; sum += x * x; peak = Math.max(peak, Math.abs(x));
+        if (i > a) { if ((x >= 0) !== (d[i - 1] >= 0)) zc++; step = Math.max(step, Math.abs(x - d[i - 1])); }
+        lp += (x - lp) * 0.08; low += lp * lp;               /* a one-pole low-pass near 300 Hz */
+      }
+      const rms = Math.sqrt(sum / n);
+      /* how much the loudness moves: the spread of 100 ms windows; and how spiky it is: 5 ms windows over 4x the rms */
+      const win = (w) => { const out = []; for (let i = a; i + w <= b; i += w) { let s = 0; for (let k = i; k < i + w; k++) s += d[k] * d[k]; out.push(Math.sqrt(s / w)); } return out; };
+      const env = win(Math.round(sr * 0.1)), m = env.reduce((x, y) => x + y, 0) / env.length;
+      const cv = Math.sqrt(env.reduce((x, y) => x + (y - m) ** 2, 0) / env.length) / m;
+      /* crackle: 5 ms windows of the change from sample to sample (the high end) over 4x its rms, per second */
+      const dd = new Float32Array(n); for (let i = a + 1; i < b; i++) dd[i - a] = d[i] - d[i - 1];
+      let ds = 0; for (let i = 0; i < n; i++) ds += dd[i] * dd[i];
+      const drms = Math.sqrt(ds / n), w5 = Math.round(sr * 0.005);
+      let spikes = 0; for (let i = 0; i + w5 <= n; i += w5) { let s = 0; for (let k = i; k < i + w5; k++) s += dd[k] * dd[k]; if (Math.sqrt(s / w5) > 4 * drms) spikes++; }
+      spikes /= n / sr;
+      return { rms, peak, step, zcr: zc / (n / sr), cv, spikes, low: low / sum, env };
+    };
+  });
+  return { p, errors };
+}
+
+test("ambience: six presets, each audible and each its own; the same every time; level 0 is silence; under the music", { skip, timeout: 120000 }, async (t) => {
+  const { p, errors } = await ambPage(t);
+  const r = await p.evaluate(async () => {
+    const out = {};
+    for (const n of LopdaChip.AMBIENCES) {
+      const d = await amb(24, (c) => c.ambience(n, 1));
+      const s = stats(d, 2, 24);
+      out[n] = { rms: s.rms, zcr: s.zcr, cv: s.cv, spikes: s.spikes, low: s.low };
+      out[n].mute = stats(await amb(3, (c) => c.ambience(n, 0))).peak;
+    }
+    const again = await amb(3, (c) => c.ambience("rain", 1)), first = await amb(3, (c) => c.ambience("rain", 1));
+    out.same = again.every((x, i) => x === first[i]);
+    /* waves: count the crests of 40 seconds, from the loudness in half-second steps */
+    const w = stats(await amb(42, (c) => c.ambience("waves", 1)), 2, 42).env;
+    const half = []; for (let i = 0; i + 5 <= w.length; i += 5) half.push(w.slice(i, i + 5).reduce((x, y) => x + y, 0) / 5);
+    const mid = (Math.max(...half) + Math.min(...half)) / 2;
+    let crests = 0; for (let i = 1; i < half.length; i++) if (half[i - 1] < mid && half[i] >= mid) crests++;
+    out.crests = crests;
+    /* the yard's tune through the same output, start to end */
+    const yard = await render(40, song(YARD_SONG));
+    out.yard = yard.rms;
+    return out;
+  });
+  const names = ["rain", "waves", "waterfall", "wind", "fire", "stream"];
+  t.diagnostic(JSON.stringify(r));
+  for (const n of names) {
+    assert.ok(r[n].rms > 0.01, n + " is audible: " + r[n].rms);
+    assert.equal(r[n].mute, 0, n + " at level 0");
+    /* §5: under the music, with room to spare */
+    assert.ok(r[n].rms < 0.7 * r.yard, `${n} (${r[n].rms}) is under the yard's tune (${r.yard})`);
+  }
+  assert.ok(r.same, "seeded, not Math.random: two renders are the same sample for sample");
+  /* every two presets differ by at least a third in at least one measure: brightness (zero crossings), movement
+     (loudness spread), crackle (spikes a second) or weight (share of the energy below about 300 Hz) */
+  const apart = (a, b) => Math.max(a, b) / Math.max(1e-9, Math.min(a, b));
+  for (let i = 0; i < names.length; i++) for (let j = i + 1; j < names.length; j++) {
+    const a = r[names[i]], b = r[names[j]];
+    const d = Math.max(apart(a.zcr, b.zcr), apart(a.cv, b.cv), apart(a.spikes + 0.5, b.spikes + 0.5), apart(a.low, b.low));
+    assert.ok(d > 1.33, `${names[i]} and ${names[j]} are too alike: ${JSON.stringify([a, b])}`);
+  }
+  /* the character each was made for */
+  assert.ok(r.rain.zcr > r.waterfall.zcr && r.rain.cv < 0.15, "rain: bright and even");
+  assert.ok(r.waves.cv > 0.35, "waves come and go: " + r.waves.cv);
+  assert.ok(r.crests >= 4 && r.crests <= 7, "a wave every 6-10 s: " + r.crests + " in 40 s");
+  assert.ok(r.waterfall.cv < 0.12 && r.waterfall.low > r.rain.low, "waterfall: steady and thick");
+  assert.ok(r.wind.cv > 0.15, "wind: gusts");
+  assert.ok(r.fire.spikes > 3 * (r.rain.spikes + 0.5) && r.fire.spikes > 2, "fire: crackles " + r.fire.spikes);
+  assert.ok(r.stream.zcr > r.wind.zcr && r.stream.low < r.waterfall.low, "stream: light and high");
+  assert.deepEqual(errors, []);
+});
+
+test("ambience: a new preset or level fades in about a second, with no gap and no jump; null fades out", { skip, timeout: 120000 }, async (t) => {
+  const { p, errors } = await ambPage(t);
+  const r = await p.evaluate(async () => {
+    const steady = {};
+    for (const [n, l] of [["rain", 0.6], ["waves", 0.8], ["rain", 0.9], ["fire", 0.7], ["wind", 0.5]]) steady[n + l] = stats(await amb(24, (c) => c.ambience(n, l)), 1.5, 24);
+    const max = (...ks) => ({ peak: Math.max(...ks.map((k) => steady[k].peak)), step: Math.max(...ks.map((k) => steady[k].step)), rms: Math.min(...ks.map((k) => steady[k].rms)) });
+    const out = {};
+    /* rain, then waves at 3 s */
+    let d = await amb(6, (c, at) => { c.ambience("rain", 0.6); at(3, (c) => c.ambience("waves", 0.8)); });
+    out.cross = { during: stats(d, 3, 4.1), ref: max("rain0.6", "waves0.8"), dips: [] };
+    for (let s = 3; s < 3.8; s += 0.02) out.cross.dips.push(stats(d, s, s + 0.02).rms);
+    out.cross.before = stats(d, 2, 3).rms;
+    delete out.cross.during.env;
+    /* the same preset, louder */
+    d = await amb(6, (c, at) => { c.ambience("rain", 0.3); at(3, (c) => c.ambience("rain", 0.9)); });
+    out.louder = { during: stats(d, 3, 4.5), ref: max("rain0.9"), early: stats(d, 3, 3.1).rms, late: stats(d, 4.2, 5).rms };
+    delete out.louder.during.env;
+    /* fire to wind, and away */
+    d = await amb(7, (c, at) => { c.ambience("fire", 0.7); at(2.5, (c) => c.ambience("wind", 0.5)); at(4.5, (c) => c.ambience(null)); });
+    out.fw = { during: stats(d, 2.5, 3.6), ref: max("fire0.7", "wind0.5") };
+    delete out.fw.during.env;
+    out.fading = stats(d, 4.6, 5.2).rms; out.after = stats(d, 5.6, 7).peak;
+    return out;
+  });
+  t.diagnostic(JSON.stringify({ cross: [r.cross.during.peak, r.cross.ref], louder: [r.louder.during.peak, r.louder.ref], fw: [r.fw.during.peak, r.fw.ref] }));
+  for (const k of ["cross", "louder", "fw"]) {
+    assert.ok(r[k].during.peak <= 1.2 * r[k].ref.peak, `${k}: peak ${r[k].during.peak} against ${r[k].ref.peak} when steady`);
+    assert.ok(r[k].during.step <= 1.2 * r[k].ref.step, `${k}: the biggest step between samples ${r[k].during.step} against ${r[k].ref.step}`);
+  }
+  /* no gap: the crossfade never drops far below what was playing */
+  assert.ok(Math.min(...r.cross.dips) > 0.3 * r.cross.before, "no gap: " + Math.min(...r.cross.dips) + " of " + r.cross.before);
+  assert.ok(r.louder.late > 2 * r.louder.early, `a level change ramps, it does not jump: ${r.louder.early} in the first 0.1 s, ${r.louder.late} after it`);
+  assert.ok(r.fading > 0.01, "null fades, not cuts: " + r.fading);
+  assert.equal(r.after, 0, "and then it is silent");
+  assert.deepEqual(errors, []);
+});
+
+test("vibrato: the pitch wobbles by the depth, at the rate; depth 0 is the sound without it", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await ambPage(t);
+  const r = await p.evaluate(async () => {
+    const fx = (o) => amb(1.2, (c) => c.sfx(LopdaChip.sfxParams(Object.assign({ wave: "triangle", from: 440, ms: 1000, attack: 0, decay: 0, vol: 1 }, o))));
+    /* the pitch between rising zero crossings, as a list of Hz */
+    const pitch = (d) => { const f = [], cross = []; for (let i = 1; i < 0.95 * SR; i++) if (d[i - 1] < 0 && d[i] >= 0) cross.push(i - d[i] / (d[i] - d[i - 1])); for (let i = 1; i < cross.length; i++) f.push(SR / (cross[i] - cross[i - 1])); return f.slice(5); };
+    const plain = await fx({}), zero = await fx({ vibrato: { depth: 0, rate: 9 } }), one = await fx({ vibrato: { depth: 1, rate: 5 } });
+    const fp = pitch(plain), f1 = pitch(one);
+    /* rate: how often the pitch passes 440 Hz going up */
+    let ups = 0; for (let i = 1; i < f1.length; i++) if (f1[i - 1] < 440 && f1[i] >= 440) ups++;
+    const noiseA = await amb(0.6, (c) => c.sfx(LopdaChip.sfxParams({ wave: "noise", from: 2000, ms: 500 })));
+    const noiseB = await amb(0.6, (c) => c.sfx(LopdaChip.sfxParams({ wave: "noise", from: 2000, ms: 500, vibrato: { depth: 2, rate: 10 } })));
+    return { same: plain.every((x, i) => x === zero[i]), plainSpread: Math.max(...fp) / Math.min(...fp), lo: Math.min(...f1), hi: Math.max(...f1), ups,
+      noiseDiffers: noiseA.some((x, i) => Math.abs(x - noiseB[i]) > 1e-3) };
+  });
+  assert.ok(r.same, "depth 0 renders the sound without vibrato");
+  assert.ok(r.plainSpread < 1.005, "a steady pitch: " + r.plainSpread);
+  /* one semitone either way: 440 / 2^(1/12) .. 440 * 2^(1/12) = 415 .. 466 Hz */
+  assert.ok(r.lo > 405 && r.lo < 422 && r.hi > 458 && r.hi < 476, `pitch ${r.lo} to ${r.hi}`);
+  assert.ok(r.ups >= 4 && r.ups <= 6, "5 Hz for about a second: " + r.ups);
+  assert.ok(r.noiseDiffers, "the noise channel takes vibrato too");
+  assert.deepEqual(errors, []);
+});
+
+test("ambience: waits for the first key, stops on HOME and another app, keeps the last call over the rate, goes on in a rebuilt context", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN" });
+  await p.addInitScript(() => Object.defineProperty(navigator, "userActivation", { value: { hasBeenActive: false, isActive: false } }));
+  await p.goto(base + "/runtime/", { waitUntil: "load" });
+  await p.waitForFunction(() => window.LP && window.LP.S.db);
+  const state = () => p.evaluate(() => LP.chip.state());
+  const until = async (fn, what) => { for (let i = 0; i < 100; i++) { if (fn(await state())) return; await p.waitForTimeout(50); } assert.fail("timed out waiting for " + what + ": " + JSON.stringify(await state())); };
+  const rainy = '<!doctype html><html><body><script>PAD.ambience("rain", 0.6);</script></body></html>';
+  await runInRuntime(p, "rainy", rainy);
+  await until((s) => s.ambienceWaiting, "the rain to be held");
+  assert.equal((await state()).ambience, null);
+  await p.keyboard.press("x");
+  await until((s) => s.ambience === "rain" && !s.ambienceWaiting, "the rain to start on the first key");
+  assert.equal((await state()).level, 0.6);
+  assert.equal(await p.evaluate(() => LP.SND.ctx.state), "running");
+  await p.click("#home-key");
+  assert.deepEqual(await state(), QUIET);
+  /* again (audio is unlocked now, it starts at once), then straight to another app */
+  await runInRuntime(p, "rainy", rainy);
+  await until((s) => s.ambience === "rain", "the rain again");
+  await runInRuntime(p, "quiet", "<!doctype html><html><body>quiet</body></html>");
+  assert.deepEqual(await state(), QUIET);
+  /* six calls at once: four go through, the newest of the other two plays a moment later */
+  await runInRuntime(p, "busy", '<!doctype html><html><body><script>[0.1, 0.2, 0.3, 0.4].forEach(function (l) { PAD.ambience("rain", l); }); PAD.ambience("wind", 0.5); PAD.ambience("fire", 0.7);</script></body></html>');
+  await until((s) => s.ambience === "rain" && s.level === 0.4, "the fourth call");
+  await until((s) => s.ambience === "fire" && s.level === 0.7, "the newest held call, a second later");
+  /* an unknown preset goes to the error box; nothing changes */
+  await runInRuntime(p, "bad", '<!doctype html><html><body><script>PAD.ambience("thunder", 1);</script></body></html>');
+  await p.waitForSelector("#run-err:not([hidden])");
+  assert.match(await p.textContent("#run-err-msg"), /^没有这种环境声：unknown ambience "thunder"/);
+  /* a context found dead is replaced on the next key: same preset, same level, in the new context */
+  await runInRuntime(p, "rainy", rainy);
+  await until((s) => s.ambience === "rain", "the rain for the rebuild");
+  await p.evaluate(() => { window.oldCtx = LP.SND.ctx; LP.SND.stale = true; });
+  await p.keyboard.press("ArrowUp");
+  assert.equal(await p.evaluate(() => LP.SND.ctx !== window.oldCtx && window.oldCtx.state === "closed"), true, "a new context");
+  assert.deepEqual([(await state()).ambience, (await state()).level], ["rain", 0.6]);
+  /* suspended and stuck (as after a podcast hands the audio back): the key tries, the check marks it, the next key rebuilds */
+  await p.evaluate(async () => { await LP.SND.ctx.suspend(); LP.SND.ctx.resume = () => Promise.resolve(); window.oldCtx = LP.SND.ctx; });
+  await p.keyboard.press("ArrowDown");
+  await p.waitForFunction(() => LP.SND.stale === true, null, { timeout: 2000 });
+  await p.keyboard.press("ArrowDown");
+  assert.equal(await p.evaluate(() => LP.SND.ctx !== window.oldCtx), true);
+  await p.waitForFunction(() => LP.SND.ctx.state === "running");
+  assert.deepEqual([(await state()).ambience, (await state()).level], ["rain", 0.6]);
+  /* the new context really makes the rain: something reaches the master */
+  const heard = await p.evaluate(() => new Promise((res) => {
+    const a = LP.SND.ctx.createAnalyser(); LP.SND.gain.connect(a); const buf = new Float32Array(a.fftSize);
+    setTimeout(() => { a.getFloatTimeDomainData(buf); res(Math.max(...buf.map(Math.abs))); }, 1300);
+  }));
+  assert.ok(heard > 0.001, "rain in the rebuilt context: " + heard);
+  /* hidden page: held; shown: going again */
+  await p.evaluate(() => { Object.defineProperty(document, "hidden", { value: true, configurable: true }); document.dispatchEvent(new Event("visibilitychange")); });
+  await until((s) => s.paused, "the page's pause");
+  await p.evaluate(() => { Object.defineProperty(document, "hidden", { value: false, configurable: true }); document.dispatchEvent(new Event("visibilitychange")); });
+  await until((s) => !s.paused, "back");
+  /* at volume 0 it keeps going, silently */
+  await p.evaluate(() => { LP.SND.vol = 0; LP.applyLevel(); });
+  assert.equal((await state()).ambience, "rain");
+  await p.click("#home-key");
+  assert.deepEqual(await state(), QUIET);
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("ambience in the dev harness: the rain station's rain waits for a key; the row on the right tries every preset", { skip, timeout: 30000 }, async (t) => {
+  const { p, errors } = await page(t);
+  await p.addInitScript(() => Object.defineProperty(navigator, "userActivation", { value: { hasBeenActive: false, isActive: false } }));
+  await p.goto(`${base}/sdk/dev.html?app=registry/apps/rain-station`, { waitUntil: "load" });
+  await p.waitForFunction(() => /ambience rain/.test(document.getElementById("log").textContent), null, { timeout: 5000 });
+  assert.match(await p.textContent("#log"), /ambience rain 0\.40 \(waits for a touch or key, as on the handheld\)/);
+  assert.equal(await p.inputValue("#amb"), "rain");
+  await p.keyboard.press("ArrowLeft");   /* a key the title does not use */
+  await p.waitForFunction(() => chip.state().ambience === "rain");
+  for (const n of ["waves", "waterfall", "wind", "fire", "stream"]) {
+    await p.selectOption("#amb", n);
+    await p.waitForFunction((n) => chip.state().ambience === n, n);
+    await p.waitForTimeout(300);   /* four calls a second */
+  }
+  await p.selectOption("#amb", "");
+  await p.waitForFunction(() => chip.state().ambience === null);
+  assert.match(await p.textContent("#log"), /\(by hand\) ambience off/);
+  assert.doesNotMatch(await p.textContent("#log"), /ERROR/, await p.textContent("#log"));
   assert.deepEqual(errors, []);
 });
