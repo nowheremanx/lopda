@@ -2,7 +2,7 @@
 <html lang="zh">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <title>Lo-PDA dev harness</title>
 <!-- MIT License, see sdk/LICENSE. Serve the repo root with any static server, then open /sdk/dev.html -->
 <style>
@@ -18,7 +18,9 @@
   .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
   .col { display:flex; flex-direction:column; gap:10px; align-items:center; }
   #pad { display:flex; gap:6px; flex-wrap:wrap; justify-content:center; max-width:360px; }
-  #pad button { min-width:52px; touch-action:none; }
+  html { touch-action:manipulation; }
+  #pad, #pad button { touch-action:none; }
+  #pad button { min-width:52px; }
 </style>
 </head>
 <body>
@@ -162,6 +164,8 @@
     el.addEventListener("pointerdown", function (e) { e.preventDefault(); press(b, true); });
     ["pointerup", "pointerleave", "pointercancel"].forEach(function (t) { el.addEventListener(t, function () { press(b, false); }); });
   });
+  /* iOS Safari zooms on a double tap between keys (user-scalable=no is ignored); the pad needs no clicks */
+  document.getElementById("pad").addEventListener("touchend", function (e) { if (e.cancelable) e.preventDefault(); }, { passive: false });
   var KEYS = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right", x: "a", z: "b", Enter: "start", Shift: "select" };
   document.addEventListener("keydown", function (e) { var b = KEYS[e.key]; if (b && e.target.nodeName !== "INPUT" && !e.repeat) { e.preventDefault(); press(b, true); } });
   document.addEventListener("keyup", function (e) { var b = KEYS[e.key]; if (b) press(b, false); });
