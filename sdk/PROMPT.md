@@ -49,6 +49,8 @@ Hard rules for index.html:
     PAD.isDown("left")                      -> true while held
   The keyboard is mapped for you (arrows, X=A, Z=B, Enter=START); do not add
   your own key handlers for those keys. Say on the start screen which button does what.
+  In menus, lists, dialogs and pause screens: A confirms, B goes back or cancels. During play,
+  A and B can do anything the game needs. START usually pauses. HOME (not B) leaves the app.
 - Pixel art: draw on a small canvas and scale it up with
   image-rendering: pixelated.
 
