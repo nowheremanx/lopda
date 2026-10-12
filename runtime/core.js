@@ -23,7 +23,8 @@ var S = {
      view, enter(), leave(), keepPad   the view it owns: called by show()
      lang()                            redraw after the language changes
      padLayout()                       the chin pad appeared or went away
-     ready(), nostore(), pause(), resume()   storage opened / failed, page hidden / shown (boot.js) */
+     ready(), nostore(), pause(), resume()   storage opened / failed, page hidden / shown (boot.js)
+     audio()                           the AudioContext was replaced (the phone had stopped it): reconnect into LP.SND.app */
 var LP = window.LP = {$:$, S:S, I18N:I18N, tr:tr, builtins:[]};
 LP.builtin = function(b){ LP.builtins.push(b); return b; };
 LP.each = function(hook){ var args=Array.prototype.slice.call(arguments,1); LP.builtins.forEach(function(b){ if(b[hook]) b[hook].apply(b,args); }); };
@@ -150,28 +151,39 @@ function show(name){
 $("home-key").onclick=function(){ LP.flushNote(); show("home"); sfx("home"); };
 
 /* ---------- sound: tiny square-wave chips through Web Audio ---------- */
-var RUNTIME_VERSION="0.11.0";   /* keep in step with VERSION in sw.js */
-var SND={ctx:null, on:true, vol:2, gain:null};
-var VOL_GAIN=[0,0.05,0.11,0.2];
+var RUNTIME_VERSION="0.12.0";   /* keep in step with VERSION in sw.js */
+/* One volume, five steps, 0 is off (decisions.md section 10). It sets the master gain and nothing else does.
+   Under the master: `ui` for the runtime's own clicks, held at a fraction so they stay as quiet as they always were
+   (step 2 gives them 0.11, their level before 0.12.0), and `app` for apps, music and the cartridge at the full step. */
+var SND={ctx:null, vol:2, gain:null, ui:null, app:null, stale:false};
+var VOL_GAIN=[0,0.12,0.25,0.42,0.6], VOL_MAX=4, UI_LEVEL=0.44, OUT=null;
+function applyLevel(){ if(SND.gain) SND.gain.gain.value=VOL_GAIN[SND.vol]||0; }
 function audio(){
   if(SND.ctx) return SND.ctx;
   var AC=window.AudioContext||window.webkitAudioContext; if(!AC) return null;
-  /* "ambient" follows the ring/silent switch and mixes with music instead of stopping it */
+  /* "ambient": the speaker follows the ring/silent switch (headphones do not, that is iOS), and it mixes with a podcast
+     or music instead of stopping it */
   try{ if(navigator.audioSession) navigator.audioSession.type="ambient"; }catch(e){}
-  SND.ctx=new AC(); SND.gain=SND.ctx.createGain(); SND.gain.connect(SND.ctx.destination);
-  return SND.ctx;
+  var ac=SND.ctx=new AC();
+  SND.gain=ac.createGain(); SND.gain.connect(ac.destination);
+  SND.ui=ac.createGain(); SND.ui.gain.value=UI_LEVEL; SND.ui.connect(SND.gain);
+  SND.app=ac.createGain(); SND.app.connect(SND.gain);
+  SND.stale=false; applyLevel();
+  return ac;
 }
+/* ask a context that is not running to run, whatever stopped it ("suspended", or Safari's "interrupted") */
+function wake(){ var ac=SND.ctx; if(ac && ac.state!=="running" && ac.state!=="closed") try{ ac.resume(); }catch(e){} }
 function tone(freq,start,dur,type,level){
   var ac=SND.ctx, o=ac.createOscillator(), g=ac.createGain(), t=ac.currentTime+start;
   o.type=type||"square"; o.frequency.setValueAtTime(freq,t);
   g.gain.setValueAtTime(0.0001,t); g.gain.linearRampToValueAtTime(level||1,t+0.004); g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
-  o.connect(g); g.connect(SND.gain); o.start(t); o.stop(t+dur+0.02);
+  o.connect(g); g.connect(OUT); o.start(t); o.stop(t+dur+0.02);
 }
 function noise(start,dur,level){
   var ac=SND.ctx, n=Math.floor(ac.sampleRate*dur), buf=ac.createBuffer(1,n,ac.sampleRate), ch=buf.getChannelData(0);
   for(var i=0;i<n;i++) ch[i]=(Math.random()*2-1)*(1-i/n);
   var src=ac.createBufferSource(), g=ac.createGain(), t=ac.currentTime+start; src.buffer=buf;
-  g.gain.setValueAtTime(level||1,t); src.connect(g); g.connect(SND.gain); src.start(t);
+  g.gain.setValueAtTime(level||1,t); src.connect(g); g.connect(OUT); src.start(t);
 }
 var SFX={
   tap:function(){ tone(1400,0,0.03,"square",0.5); },
@@ -190,31 +202,67 @@ var SFX={
   lose:function(){ [392,330,262,196].forEach(function(f,i){ tone(f,i*0.14,i===3?0.3:0.13,"triangle",0.9); }); }
 };
 var APP_SFX=["tap","tick","move","ok","err","hit","miss","coin","win","lose"];
-function sfx(name){
+function playNamed(name,bus){
   if(window.LOPDA_DEBUG) window.LOPDA_DEBUG.sfxLog.push(name);
-  if(!SND.on || !SND.vol) return;
+  if(!SND.vol) return;
   var ac=audio(); if(!ac || !SFX[name]) return;
-  if(ac.state==="suspended") ac.resume();
-  SND.gain.gain.value=VOL_GAIN[SND.vol];
+  wake(); OUT=SND[bus];
   try{ SFX[name](); }catch(e){}
 }
+/* the runtime's own sounds */
+function sfx(name){ playNamed(name,"ui"); }
+/* a named sound an app asked for (PAD.sfx("coin")) */
+function appSfx(name){ playNamed(name,"app"); }
 /* ---------- music and made-to-order sounds for apps: runtime/chip.js (PAD.music, PAD.sfx({...})) ----------
-   Same master gain, sound switch and four volume steps as the named sounds. With the sound off the song keeps
-   going, silent, and is heard again from wherever it has got to, like turning a real handheld's volume down. */
-function applyLevel(){ if(SND.gain) SND.gain.gain.value = SND.on ? VOL_GAIN[SND.vol] : 0; }
+   Into the `app` bus, under the same master. At volume 0 the song keeps going, silent, and is heard again from wherever
+   it has got to, like turning a real handheld's volume down. */
 var chip=window.LopdaChip.host({
   context:function(make){ return SND.ctx || (make ? audio() : null); },
-  output:function(){ return SND.gain; },
+  output:function(){ return SND.app; },
   level:applyLevel
 });
 function sfxCustom(params){
-  if(!SND.on || !SND.vol || !audio()) return;
-  SND.gain.gain.value=VOL_GAIN[SND.vol];
+  if(!SND.vol || !audio()) return;
+  wake();
   try{ chip.sfx(params); }catch(e){}
 }
-/* a song asked for before the first touch starts on the first touch or key (iPhone keeps audio locked until then) */
-["pointerdown","touchend","keydown"].forEach(function(t){ document.addEventListener(t,function(){ chip.unlock(); },true); });
-document.addEventListener("visibilitychange",function(){ if(document.hidden) chip.pause(); else chip.resume(); });
+/* Keeping sound alive. iOS stops the context behind the page's back: a call, Siri, another app taking or handing back
+   the audio (a podcast paused from the headphones), a long stay in the background, headphones coming or going.
+   Sometimes it says so ("suspended", "interrupted"); sometimes it still says "running" and its clock stands still.
+   So on every touch or key: a context Safari calls interrupted, or one an earlier check found dead, is replaced at
+   once, inside the touch, where iOS lets a new one start; one that is merely suspended is asked to run; and a check
+   400 ms later marks it dead if its clock has not moved. The song goes on in the new context from where it was;
+   built-ins that play into the context get the "audio" hook. */
+function rebuild(){
+  var old=SND.ctx; SND.ctx=null; SND.gain=SND.ui=SND.app=null;
+  try{ old.close(); }catch(e){}
+  if(!audio()) return;
+  chip.rebuild();
+  LP.each("audio");
+}
+function checkLater(){
+  var ac=SND.ctx; if(!ac || document.hidden) return;
+  var t=ac.currentTime;
+  setTimeout(function(){
+    if(ac!==SND.ctx || document.hidden) return;
+    if(ac.state!=="running" || ac.currentTime<=t) SND.stale=true;
+  },400);
+}
+function onGesture(){
+  var ac=SND.ctx;
+  if(ac){
+    if(SND.stale || ac.state==="interrupted") rebuild();
+    else wake();
+  }
+  /* a song asked for before the first touch starts on the first touch or key (iPhone keeps audio locked until then) */
+  chip.unlock();
+  checkLater();
+}
+["pointerdown","touchend","keydown"].forEach(function(t){ document.addEventListener(t,onGesture,true); });
+document.addEventListener("visibilitychange",function(){
+  if(document.hidden){ chip.pause(); return; }
+  chip.resume(); setTimeout(checkLater,300);
+});
 /* every button gets a key click, except the ones that make their own sound */
 document.addEventListener("pointerdown",function(e){
   var b=e.target.closest && e.target.closest("button,label.btn,.app");
@@ -398,7 +446,7 @@ var share={
   TONES:TONES, BAYER:BAYER, saveCanvas:saveCanvas, saveErr:saveErr, sha256hex:sha256hex,
   upsert:upsert, dropLocal:dropLocal, pending:pending, refresh:refresh, onData:onData,
   setStatus:setStatus, tickClock:tickClock, show:show,
-  RUNTIME_VERSION:RUNTIME_VERSION, SND:SND, audio:audio, sfx:sfx, APP_SFX:APP_SFX, chip:chip, sfxCustom:sfxCustom, applyLevel:applyLevel,
+  RUNTIME_VERSION:RUNTIME_VERSION, SND:SND, VOL_MAX:VOL_MAX, audio:audio, wake:wake, sfx:sfx, appSfx:appSfx, APP_SFX:APP_SFX, chip:chip, sfxCustom:sfxCustom, applyLevel:applyLevel,
   setLang:setLang, UPD:UPD, renderUpdate:renderUpdate,
   validIcon:validIcon, fillTile:fillTile, appName:appName, appDesc:appDesc, renderHome:renderHome,
   resetConfirm:resetConfirm, padRoute:padRoute, setButton:setButton, releaseButtons:releaseButtons, showPad:showPad

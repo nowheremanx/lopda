@@ -28,7 +28,7 @@ LP.renderHome();
     S.refs.carts=db.doc(base+"/carts").collection("items");
     S.refs.roms=db.doc(base+"/roms").collection("items");
     S.refs.cartsave=db.doc(base+"/cartsave").collection("items");
-    S.refs.settings.get().then(function(sn){ var d=sn.exists?own(sn.data()):null; if(d){ SND.on=d.sound!==false; SND.vol=Math.max(0,Math.min(3,d.volume==null?2:d.volume|0)); if(I18N.STR[d.lang]) LP.setLang(d.lang); } }).catch(function(){});
+    S.refs.settings.get().then(function(sn){ var d=sn.exists?own(sn.data()):null; if(d){ SND.vol=d.sound===false ? 0 : Math.max(0,Math.min(LP.VOL_MAX,d.volume==null?2:d.volume|0)); LP.applyLevel(); if(I18N.STR[d.lang]) LP.setLang(d.lang); } }).catch(function(){});
     setStatus("status.saved");
     P.persist();
     refresh("apps"); refresh("notes");

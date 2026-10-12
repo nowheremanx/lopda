@@ -104,12 +104,15 @@
       .catch(function (e) { log("load failed: " + e.message); });
   }
   /* Sound: the same chip and the same rules as the runtime (music waits for the first touch or key, stops when the
-     app reloads, pauses with the page). The master level is the handheld's default volume step. Named sounds are
+     app reloads, pauses with the page). The master level is what an app gets at the handheld's default volume step. Named sounds are
      only logged here; the handheld plays them. */
   var AC = window.AudioContext || window.webkitAudioContext, actx = null, master = null;
   var chip = window.LopdaChip && AC ? LopdaChip.host({
     context: function (make) {
-      if (!actx && make) { actx = new AC(); master = actx.createGain(); master.gain.value = 0.11; master.connect(actx.destination); }
+      if (!actx && make) {
+        try { if (navigator.audioSession) navigator.audioSession.type = "ambient"; } catch (e) {}
+        actx = new AC(); master = actx.createGain(); master.gain.value = 0.25; master.connect(actx.destination);
+      }
       return actx;
     },
     output: function () { return master; }

@@ -1355,8 +1355,9 @@ test("chip: four music channels at most, two effects at most (a third cuts off t
   assert.deepEqual(errors, []);
 });
 
-/* The ten named sounds (and the runtime's own) as core.js played them before runtime 0.11.0, verbatim. The runtime
-   must render every one of them sample for sample the same. */
+/* The ten named sounds (and the runtime's own) as core.js played them before runtime 0.11.0, verbatim. At the default
+   volume the runtime's own sounds must render the same, sample for sample up to float rounding (since 0.12.0 they go
+   through two gains, 0.44 x 0.25, where there was one of 0.11). */
 const LEGACY_SFX = `(function(ac, out){
   function tone(freq,start,dur,type,level){
     var o=ac.createOscillator(), g=ac.createGain(), t=ac.currentTime+start;
@@ -1387,7 +1388,7 @@ const LEGACY_SFX = `(function(ac, out){
   };
 })`;
 
-test("chip: the named sounds render exactly as before runtime 0.11.0", { skip, timeout: 60000 }, async (t) => {
+test("chip: the named sounds render as before runtime 0.11.0", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await page(t);
   /* every AudioContext the runtime makes is an OfflineAudioContext we can render; Math.random is seeded per sound */
   await p.addInitScript(() => {
@@ -1398,15 +1399,15 @@ test("chip: the named sounds render exactly as before runtime 0.11.0", { skip, t
   await p.waitForFunction(() => window.LP && window.LP.sfx);
   const same = await p.evaluate(async (legacySrc) => {
     const legacy = eval(legacySrc), out = {};
-    const digest = (d) => { let h = 0; for (let i = 0; i < d.length; i++) h = (h * 31 + Math.round(d[i] * 1e7)) | 0; return h; };
+    const same = (a, b) => { let peak = 0, diff = 0; for (let i = 0; i < a.length; i++) { peak = Math.max(peak, Math.abs(a[i])); diff = Math.max(diff, Math.abs(a[i] - b[i])); } return peak > 0 && diff < 1e-6; };
     for (const name of ["tap", "home", "shutter", "ok", "err", "modem", "tick", "move", "hit", "miss", "coin", "win", "lose"]) {
-      LP.SND.ctx = null; LP.SND.vol = 2; LP.SND.on = true;
+      LP.SND.ctx = null; LP.SND.vol = 2;
       seed(7); LP.sfx(name);
-      const now = digest((await lastCtx.startRendering()).getChannelData(0));
+      const now = (await lastCtx.startRendering()).getChannelData(0);
       const oc = new OfflineAudioContext(1, 44100, 44100), g = oc.createGain(); g.gain.value = 0.11; g.connect(oc.destination);
       seed(7); legacy(oc, g)[name]();
-      const before = digest((await oc.startRendering()).getChannelData(0));
-      out[name] = now === before && now !== 0;
+      const before = (await oc.startRendering()).getChannelData(0);
+      out[name] = same(now, before);
     }
     return out;
   }, LEGACY_SFX);
@@ -1442,12 +1443,63 @@ test("music: starts on the first key, stops on HOME and when another app starts,
   await until((s) => s.playing, "the tune to start again (audio is unlocked now)");
   await runInRuntime(p, "quiet", "<!doctype html><html><body>quiet</body></html>");
   assert.deepEqual(await state(), { playing: false, waiting: false, paused: false });
-  /* with the sound off the song keeps going, silently */
-  await p.evaluate(() => { LP.SND.on = false; });
+  /* at volume 0 (off) the song keeps going, silently */
+  await p.evaluate(() => { LP.SND.vol = 0; });
   await runInRuntime(p, "xiaoyuan", yard);
   await until((s) => s.playing, "the tune under the sound switch");
   assert.equal(await p.evaluate(() => LP.SND.gain.gain.value), 0);
   await p.click("#home-key");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("sound: a context the phone stopped is woken or replaced on the next touch, and the song goes on from where it was", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN" });
+  await p.goto(base + "/runtime/", { waitUntil: "load" });
+  await p.waitForFunction(() => window.LP && window.LP.S.db);
+  const yard = await readFile(join(ROOT, "registry/apps/xiaoyuan/index.html"), "utf8");
+  await runInRuntime(p, "xiaoyuan", yard);
+  await p.keyboard.press("x");
+  await p.waitForFunction(() => LP.chip.state().playing && LP.chip.beat() > 2);
+  /* a check found it dead (its clock stood still): the next key replaces it, inside the key press */
+  const before = await p.evaluate(() => { window.oldCtx = LP.SND.ctx; LP.SND.stale = true; return LP.chip.beat(); });
+  await p.keyboard.press("ArrowUp");
+  assert.equal(await p.evaluate(() => LP.SND.ctx !== window.oldCtx && window.oldCtx.state === "closed"), true, "a new context");
+  assert.equal(await p.evaluate(() => LP.chip.state().playing), true);
+  const after = await p.evaluate(() => LP.chip.beat());
+  assert.ok(after >= before - 0.5 && after < before + 2, "the song went on from beat " + before + ", not from the start (" + after + ")");
+  /* stuck: it will not resume (as after a podcast hands the audio back). The touch tries, the check marks it, the next one replaces it */
+  await p.evaluate(async () => { await LP.SND.ctx.suspend(); LP.SND.ctx.resume = () => Promise.resolve(); window.oldCtx = LP.SND.ctx; });
+  await p.keyboard.press("ArrowDown");
+  await p.waitForFunction(() => LP.SND.stale === true, null, { timeout: 2000 });
+  await p.keyboard.press("ArrowDown");
+  assert.equal(await p.evaluate(() => LP.SND.ctx !== window.oldCtx && LP.chip.state().playing), true);
+  await p.waitForFunction(() => LP.SND.ctx.state === "running");
+  /* a merely suspended one is just woken: same context */
+  await p.evaluate(async () => { await LP.SND.ctx.suspend(); window.oldCtx = LP.SND.ctx; });
+  await p.keyboard.press("ArrowUp");
+  await p.waitForFunction(() => LP.SND.ctx.state === "running");
+  assert.equal(await p.evaluate(() => LP.SND.ctx === window.oldCtx), true);
+  await p.click("#home-key");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("sound: one volume with five steps; an old 'sound off' setting becomes volume 0", { skip, timeout: 30000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN" });
+  await p.goto(base + "/runtime/", { waitUntil: "load" });
+  await p.waitForFunction(() => window.LP && window.LP.S.db);
+  await p.evaluate(() => LP.put(LP.S.refs.settings, { sound: false, volume: 2, lang: "zh" }));
+  await p.reload({ waitUntil: "load" });
+  await p.waitForFunction(() => window.LP && window.LP.S.db && LP.SND.vol === 0);
+  await p.evaluate(() => LP.builtins.find((b) => b.id === "settings").open());
+  assert.equal(await p.textContent("#set-vol"), "关");
+  assert.equal(await p.isDisabled("#set-vol-down"), true);
+  for (let i = 0; i < 4; i++) await p.click("#set-vol-up");
+  assert.equal(await p.textContent("#set-vol"), "▮▮▮▮");
+  assert.equal(await p.isDisabled("#set-vol-up"), true);
+  assert.ok(Math.abs(await p.evaluate(() => LP.SND.gain.gain.value) - 0.6) < 1e-6, "step 4 is the loudest");
+  const saved = await p.evaluate(() => LP.S.refs.settings.get().then((s) => s.data()));
+  assert.equal(saved.volume, 4); assert.equal(saved.sound, true);
+  assert.equal(await p.$("#set-sound"), null);
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
