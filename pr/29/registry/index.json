@@ -74,8 +74,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/gomoku/index.html",
-      "sha256": "d50fc13b7fe10b3305aeb39609244b5efa0c2263b84c0250172455564ba0063c",
-      "bytes": 11548
+      "sha256": "02ce3d65a8241edbfbf47b8dc122a896098e79b81d00fc10040180c20a9a56b8",
+      "bytes": 11618
     },
     {
       "spec": "lopda/1",
@@ -200,6 +200,26 @@
       "path": "apps/rain-station/index.html",
       "sha256": "08abfe714eb97b9b3ad5a91ea3ad2e7151881f5efdb742e161e2bd0806fbe380",
       "bytes": 55100
+    },
+    {
+      "spec": "lopda/1",
+      "id": "sound-board",
+      "name": "声音样本",
+      "glyph": "声",
+      "buttons": true,
+      "version": "1.0.1",
+      "description": "这台机器能发出的每一种声音：两首乐曲、六种环境声、十个具名音效和几个自定义音效，选中就显示写法。",
+      "i18n": {
+        "en": {
+          "name": "Sounds",
+          "description": "Every sound the handheld makes, each with the code that makes it."
+        }
+      },
+      "author": "Haowei Wu",
+      "license": "MIT",
+      "path": "apps/sound-board/index.html",
+      "sha256": "6c53cb3941bbb91eb1c8906aa47c0b74acb109d978b076bc51e0ab13b4a52532",
+      "bytes": 9659
     },
     {
       "spec": "lopda/1",

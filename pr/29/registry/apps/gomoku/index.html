@@ -13,6 +13,9 @@ html,body{margin:0;height:100%;overflow:hidden;background:#a3ad7e;font-family:mo
 #wrap{flex:1;min-height:0;width:100%;display:flex;align-items:center;justify-content:center}
 canvas{background:#a3ad7e;border:3px solid #1f2a14;touch-action:none;display:block}
 #bot{width:100%;max-width:560px;display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13px}
+/* the tip may wrap; the buttons keep one row whatever the tip says */
+#tip{flex:1;min-width:0}
+#bot>div:last-child{flex-shrink:0;white-space:nowrap}
 button{font-family:monospace;font-size:15px;font-weight:bold;color:#a3ad7e;background:#1f2a14;border:2px solid #1f2a14;padding:8px 14px;cursor:pointer;box-shadow:3px 3px 0 #4a5a32}
 button:active{transform:translate(2px,2px);box-shadow:1px 1px 0 #4a5a32}
 #ov{position:fixed;left:0;top:0;right:0;bottom:0;background:rgba(31,42,20,.0);display:flex;align-items:center;justify-content:center;background:#7d8a58}
@@ -26,7 +29,7 @@ button:active{transform:translate(2px,2px);box-shadow:1px 1px 0 #4a5a32}
 <div id="app">
 <div id="top"><div class="box" id="turn">黑棋落子</div><div class="box" id="rec">胜 0</div></div>
 <div id="wrap"><canvas id="c"></canvas></div>
-<div id="bot"><div id="tip">点交叉点，再点一次落子</div><div><button id="ud">悔棋</button> <button id="rs">重新开始</button></div></div>
+<div id="bot"><div id="tip">点两下落子</div><div><button id="ud">悔棋</button> <button id="rs">重新开始</button></div></div>
 </div>
 <div id="ov"><div id="panel"><h1 id="ot">五子棋</h1><p id="op">你执黑先手。点一个交叉点选中，再点一次落子。横竖斜连成五子即胜。</p><button id="st">开始</button></div></div>
 <script>
@@ -38,10 +41,10 @@ var ov=document.getElementById('ov'),ot=document.getElementById('ot'),op=documen
 var LANG=(typeof PAD!=='undefined'&&PAD.lang==='en')?'en':'zh';
 var TXT={
   zh:{title:'五子棋',intro:'你执黑先手。点一个交叉点选中，再点一次落子。横竖斜连成五子即胜。',start:'开始',again:'再来一局',undo:'悔棋',restart:'重新开始',
-    yours:'黑棋落子',thinking:'白棋思考中',tip:'点交叉点，再点一次落子',tipsure:'再点一次落子，点别处换位置',tipover:'点重新开始再来一局',wins:'胜 ',
+    yours:'黑棋落子',thinking:'白棋思考中',tip:'点两下落子',tipsure:'再点一下落子',tipover:'点重新开始再来一局',wins:'胜 ',
     win:'你赢了',lose:'你输了',draw:'平局',winnote:'五子连珠，漂亮。',losenote:'电脑连成五子。',drawnote:'棋盘已满。'},
   en:{title:'GOMOKU',intro:'You play black and go first. Tap a point to pick it, tap it again to place. Five in a row wins, any direction.',start:'START',again:'AGAIN',undo:'Undo',restart:'Restart',
-    yours:'Your move',thinking:'White thinking',tip:'Tap a point, then again',tipsure:'Tap again to place',tipover:'Restart for another',wins:'Wins ',
+    yours:'Your move',thinking:'White thinking',tip:'Tap twice',tipsure:'Tap again',tipover:'Restart for another',wins:'Wins ',
     win:'You win',lose:'You lose',draw:'Draw',winnote:'Five in a row. Nice.',losenote:'The computer made five.',drawnote:'The board is full.'}
 }[LANG];
 document.documentElement.lang=LANG==='zh'?'zh-CN':'en';document.title=TXT.title;
