@@ -74,8 +74,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/gomoku/index.html",
-      "sha256": "02ce3d65a8241edbfbf47b8dc122a896098e79b81d00fc10040180c20a9a56b8",
-      "bytes": 11618
+      "sha256": "75833de7a6728e8452da4baa433cdb2d3005db782842e74e7d6d9e1dc3ebe725",
+      "bytes": 12365
     },
     {
       "spec": "lopda/1",
