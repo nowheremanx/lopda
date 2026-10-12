@@ -26,9 +26,9 @@ button:active{transform:translate(2px,2px);box-shadow:1px 1px 0 #4a5a32}
 <div id="app">
 <div id="top"><div class="box" id="turn">黑棋落子</div><div class="box" id="rec">胜 0</div></div>
 <div id="wrap"><canvas id="c"></canvas></div>
-<div id="bot"><div id="tip">点交叉点落子</div><div><button id="ud">悔棋</button> <button id="rs">重新开始</button></div></div>
+<div id="bot"><div id="tip">点交叉点，再点一次落子</div><div><button id="ud">悔棋</button> <button id="rs">重新开始</button></div></div>
 </div>
-<div id="ov"><div id="panel"><h1 id="ot">五子棋</h1><p id="op">你执黑先手，点棋盘交叉点落子。横竖斜连成五子即胜。</p><button id="st">开始</button></div></div>
+<div id="ov"><div id="panel"><h1 id="ot">五子棋</h1><p id="op">你执黑先手。点一个交叉点选中，再点一次落子。横竖斜连成五子即胜。</p><button id="st">开始</button></div></div>
 <script>
 (function(){
 var N=15,cv=document.getElementById('c'),ctx=cv.getContext('2d');
@@ -37,21 +37,21 @@ var ov=document.getElementById('ov'),ot=document.getElementById('ot'),op=documen
 /* two languages: PAD.lang from the runtime; older runtimes have none, so Chinese is the default */
 var LANG=(typeof PAD!=='undefined'&&PAD.lang==='en')?'en':'zh';
 var TXT={
-  zh:{title:'五子棋',intro:'你执黑先手，点棋盘交叉点落子。横竖斜连成五子即胜。',start:'开始',again:'再来一局',undo:'悔棋',restart:'重新开始',
-    yours:'黑棋落子',thinking:'白棋思考中',tip:'点交叉点落子',tipover:'点重新开始再来一局',wins:'胜 ',
+  zh:{title:'五子棋',intro:'你执黑先手。点一个交叉点选中，再点一次落子。横竖斜连成五子即胜。',start:'开始',again:'再来一局',undo:'悔棋',restart:'重新开始',
+    yours:'黑棋落子',thinking:'白棋思考中',tip:'点交叉点，再点一次落子',tipsure:'再点一次落子，点别处换位置',tipover:'点重新开始再来一局',wins:'胜 ',
     win:'你赢了',lose:'你输了',draw:'平局',winnote:'五子连珠，漂亮。',losenote:'电脑连成五子。',drawnote:'棋盘已满。'},
-  en:{title:'GOMOKU',intro:'You play black and go first. Tap a point to place a stone. Five in a row wins, any direction.',start:'START',again:'AGAIN',undo:'Undo',restart:'Restart',
-    yours:'Your move',thinking:'White thinking',tip:'Tap a point',tipover:'Restart for another',wins:'Wins ',
+  en:{title:'GOMOKU',intro:'You play black and go first. Tap a point to pick it, tap it again to place. Five in a row wins, any direction.',start:'START',again:'AGAIN',undo:'Undo',restart:'Restart',
+    yours:'Your move',thinking:'White thinking',tip:'Tap a point, then again',tipsure:'Tap again to place',tipover:'Restart for another',wins:'Wins ',
     win:'You win',lose:'You lose',draw:'Draw',winnote:'Five in a row. Nice.',losenote:'The computer made five.',drawnote:'The board is full.'}
 }[LANG];
 document.documentElement.lang=LANG==='zh'?'zh-CN':'en';document.title=TXT.title;
 ot.textContent=TXT.title;op.textContent=TXT.intro;document.getElementById('st').textContent=TXT.start;
 document.getElementById('ud').textContent=TXT.undo;document.getElementById('rs').textContent=TXT.restart;recEl.textContent=TXT.wins+0;
 var C0='#a3ad7e',C1='#7d8a58',C2='#4a5a32',C3='#1f2a14';
-var b,over,busy,last,winLine,hover,wins=0,size=300,cell=20,pad=14,hist=[];
+var b,over,busy,last,winLine,hover,pick,wins=0,size=300,cell=20,pad=14,hist=[];
 function reset(){
   b=[];for(var i=0;i<N;i++){b.push(new Array(N).fill(0));}
-  over=false;busy=false;last=null;winLine=null;hover=null;hist=[];
+  over=false;busy=false;last=null;winLine=null;hover=null;pick=null;hist=[];
   turnEl.textContent=TXT.yours;tipEl.textContent=TXT.tip;draw();
 }
 function resize(){
@@ -103,6 +103,13 @@ function draw(){
     ctx.moveTo(hx-q,hy+q-5);ctx.lineTo(hx-q,hy+q);ctx.lineTo(hx-q+5,hy+q);
     ctx.moveTo(hx+q,hy+q-5);ctx.lineTo(hx+q,hy+q);ctx.lineTo(hx+q-5,hy+q);
     ctx.stroke();
+  }
+  // the picked point: a dark stone that waits for a second tap
+  if(pick&&!over&&!busy&&b[pick[1]][pick[0]]==0){
+    var kx=pad+pick[0]*cell,ky=pad+pick[1]*cell;
+    ctx.beginPath();ctx.arc(kx,ky,r,0,7);ctx.fillStyle=C2;ctx.fill();
+    ctx.lineWidth=2;ctx.strokeStyle=C3;ctx.stroke();
+    ctx.beginPath();ctx.arc(kx,ky,r*0.45,0,7);ctx.fillStyle=C1;ctx.fill();
   }
   if(winLine){
     ctx.strokeStyle=C3;ctx.lineWidth=4;ctx.beginPath();
@@ -173,7 +180,7 @@ function endGame(result){
 }
 function place(x,y){
   if(over||busy||!inb(x,y)||b[y][x])return;
-  b[y][x]=1;last=[x,y];hist.push([x,y]);PAD.sfx('tap');
+  b[y][x]=1;last=[x,y];pick=null;hist.push([x,y]);PAD.sfx('tap');
   if(checkWin(x,y,1)){wins++;PAD.save('gomoku_wins',wins);endGame('win');return;}
   if(full()){endGame('draw');return;}
   busy=true;turnEl.textContent=TXT.thinking;draw();
@@ -182,7 +189,7 @@ function place(x,y){
     b[m[1]][m[0]]=2;last=[m[0],m[1]];hist.push([m[0],m[1]]);PAD.sfx('tick');
     if(checkWin(m[0],m[1],2)){endGame('lose');return;}
     if(full()){endGame('draw');return;}
-    busy=false;turnEl.textContent=TXT.yours;draw();
+    busy=false;turnEl.textContent=TXT.yours;tipEl.textContent=TXT.tip;draw();
   },450);
 }
 function pos(e){
@@ -191,11 +198,15 @@ function pos(e){
   var x=Math.round((px-pad)/cell),y=Math.round((py-pad)/cell);
   return inb(x,y)?[x,y]:null;
 }
-cv.addEventListener('pointermove',function(e){hover=pos(e);draw();});
+cv.addEventListener('pointermove',function(e){if(e.pointerType!=='mouse')return;hover=pos(e);draw();});
+/* A fingertip covers the point it taps, so on touch the first tap only picks a point and a second tap
+   on the same point places the stone. A mouse shows the hover cursor before the click, so one click places. */
 cv.addEventListener('pointerdown',function(e){
   e.preventDefault();
-  var p=pos(e);hover=p;
-  if(p)place(p[0],p[1]);else draw();
+  var p=pos(e);hover=e.pointerType==='mouse'?p:null;
+  if(!p||over||busy||b[p[1]][p[0]]){draw();return;}
+  if(e.pointerType==='mouse'||(pick&&pick[0]==p[0]&&pick[1]==p[1])){place(p[0],p[1]);return;}
+  pick=p;tipEl.textContent=TXT.tipsure;PAD.sfx('move');draw();
 });
 cv.addEventListener('pointerleave',function(){hover=null;draw();});
 document.getElementById('rs').addEventListener('pointerdown',function(e){e.preventDefault();reset();});
@@ -207,6 +218,7 @@ window.addEventListener('resize',resize);
 function undo(){
   if(over||busy||hist.length<2)return;
   for(var k=0;k<2;k++){var m=hist.pop();b[m[1]][m[0]]=0;}
+  pick=null;tipEl.textContent=TXT.tip;
   last=hist.length?hist[hist.length-1]:null;
   PAD.sfx('miss');draw();
 }
