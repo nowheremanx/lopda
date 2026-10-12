@@ -15,7 +15,9 @@ var TONES=LP.TONES, SND=LP.SND, audio=LP.audio, own=LP.own, toast=LP.toast, put=
    only ever shows the four tones. */
 var GB={mod:null, loading:null, e:0, rom:0, joy:0, raf:0, last:0, left:0, paused:false,
   cart:null, save:null, ctx:null, img:null, gain:null, aStart:0, dirty:false, timer:0};
-var GB_TICKS=4194304, GB_AUDIO_FRAMES=4096, GB_VOL=[0,0.3,0.6,1];
+var GB_TICKS=4194304, GB_AUDIO_FRAMES=4096, GB_LEVEL=2.4;
+/* into the runtime's app bus, under its master volume: 2.4 x the steps (0.12, 0.25, 0.42) is the 0.3 / 0.6 / 1
+   the cartridge had before runtime 0.12.0 */
 var CARTS=[];
 function b64(u8){ var s="", CH=0x8000; for(var i=0;i<u8.length;i+=CH) s+=String.fromCharCode.apply(null,u8.subarray(i,i+CH)); return btoa(s); }
 function unb64(s){ var bin=atob(s), u8=new Uint8Array(bin.length); for(var i=0;i<bin.length;i++) u8[i]=bin.charCodeAt(i); return u8; }
@@ -131,7 +133,8 @@ function gbStart(c,rom,save){
   gbStop();
   var m=GB.mod, data=asMono(rom), size=(data.length+0x7fff)&~0x7fff, ac=SND.ctx;
   GB.rom=m._malloc(size); var h=heap(GB.rom,size); h.fill(0); h.set(data);
-  GB.e=m._emulator_new_simple(GB.rom,size,ac?ac.sampleRate:44100,GB_AUDIO_FRAMES,0);
+  GB.rate=ac?ac.sampleRate:44100;   /* the emulator's rate, kept even if the AudioContext is replaced with another rate */
+  GB.e=m._emulator_new_simple(GB.rom,size,GB.rate,GB_AUDIO_FRAMES,0);
   if(!GB.e){ m._free(GB.rom); GB.rom=0; throw new Error(tr("cart.badrom")); }
   GB.joy=m._joypad_new(); m._emulator_set_default_joypad_callback(GB.e,GB.joy);
   var col=function(t){ var c=TONES[t]; return ((255<<24)|(c[2]<<16)|(c[1]<<8)|c[0])>>>0; };
@@ -140,7 +143,7 @@ function gbStart(c,rom,save){
   if(GB.save.sram) gbWithFile(m._ext_ram_file_data_new(GB.e),function(fd,buf){ var s=unb64(GB.save.sram); if(s.length===buf.length){ buf.set(s); m._emulator_read_ext_ram(GB.e,fd); } });
   var cv=$("cart-cv"); GB.ctx=cv.getContext("2d"); GB.img=GB.ctx.createImageData(160,144);
   GB.ctx.fillStyle="rgb("+TONES[3].join(",")+")"; GB.ctx.fillRect(0,0,160,144);
-  if(ac){ GB.gain=ac.createGain(); GB.gain.gain.value=SND.on?GB_VOL[SND.vol]:0; GB.gain.connect(ac.destination); }
+  gbConnect();
   GB.aStart=0; GB.last=0; GB.left=0; GB.paused=false; GB.dirty=false;
   GB.timer=setInterval(function(){ if(GB.dirty) gbSaveSram(); },1500);
   $("cart-lib").hidden=true; $("cart-play").hidden=false; $("cart-tools").hidden=false; $("v-cart").classList.add("locked"); $("v-cart").scrollTop=0;
@@ -148,6 +151,11 @@ function gbStart(c,rom,save){
   resetCartLoad(); showPad(true); cartLayout();
   c.played=Date.now(); if(S.db) put(S.refs.carts.doc(c.id),(function(){ var o={}; for(var k in c) if(k!=="id"&&k!=="mem") o[k]=c[k]; return o; })());
   GB.raf=requestAnimationFrame(gbFrame);
+}
+function gbConnect(){
+  if(GB.gain){ try{ GB.gain.disconnect(); }catch(e){} GB.gain=null; }
+  var ac=SND.ctx; if(!ac || !SND.app) return;
+  GB.gain=ac.createGain(); GB.gain.gain.value=GB_LEVEL; GB.gain.connect(SND.app); GB.aStart=0;
 }
 function gbWithFile(fd,fn){ var m=GB.mod, buf=heap(m._get_file_data_ptr(fd),m._get_file_data_size(fd)); try{ return fn(fd,buf); } finally { m._file_data_delete(fd); } }
 function gbFrame(ms){
@@ -171,10 +179,10 @@ function gbAudio(){
   var m=GB.mod, src=heap(m._get_audio_buffer_ptr(GB.e),m._get_audio_buffer_capacity(GB.e));
   var now=ac.currentTime;
   if(GB.aStart<now){ GB.aStart=now+0.1; }
-  var buf=ac.createBuffer(2,GB_AUDIO_FRAMES,ac.sampleRate), l=buf.getChannelData(0), r=buf.getChannelData(1);
+  var buf=ac.createBuffer(2,GB_AUDIO_FRAMES,GB.rate), l=buf.getChannelData(0), r=buf.getChannelData(1);
   for(var i=0;i<GB_AUDIO_FRAMES;i++){ l[i]=src[2*i]/255; r[i]=src[2*i+1]/255; }
   var n=ac.createBufferSource(); n.buffer=buf; n.connect(GB.gain); n.start(GB.aStart);
-  GB.aStart+=GB_AUDIO_FRAMES/ac.sampleRate;
+  GB.aStart+=GB_AUDIO_FRAMES/GB.rate;
 }
 var GB_JOY={up:"_set_joyp_up",down:"_set_joyp_down",left:"_set_joyp_left",right:"_set_joyp_right",a:"_set_joyp_A",b:"_set_joyp_B",start:"_set_joyp_start",select:"_set_joyp_select"};
 function gbJoy(b,down){ if(GB.e && GB_JOY[b]) GB.mod[GB_JOY[b]](GB.e,down?1:0); }
@@ -222,6 +230,7 @@ LP.builtin({id:"cart", label:"app.cart", icon:"cart", view:"cart", keepPad:true,
   open:function(){ openCart(); },
   leave:function(){ gbStop(); },
   padLayout:function(){ if(!$("v-cart").hidden) cartLayout(); },
+  audio:function(){ if(GB.e) gbConnect(); },
   pause:function(){ gbPause(true); },
   resume:function(){ gbPause(false); }});
 })();

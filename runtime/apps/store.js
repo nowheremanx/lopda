@@ -227,7 +227,7 @@ window.addEventListener("message",function(e){
     if(!named && !custom) return;
     var now=Date.now(); if(now-sfxWindow.t>1000){ sfxWindow.t=now; sfxWindow.n=0; }
     if(++sfxWindow.n>20) return;   /* at most 20 sounds a second per app, named and custom together */
-    if(named) sfx(d.name); else LP.sfxCustom(d.params);
+    if(named) LP.appSfx(d.name); else LP.sfxCustom(d.params);
   } else if(d.op==="music"){
     /* at most 4 calls a second (chip.js drops the rest); a score that does not parse is shown like any app error */
     var r=LP.chip.music(d);

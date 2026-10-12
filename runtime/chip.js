@@ -265,7 +265,8 @@ function create(ctx,out,opt){
     o=o||{};
     stop(0.02);
     var bus=ctx.createGain(); bus.gain.value=MUSIC_GAIN; bus.connect(out);
-    music={song:song, loop:o.loop!==false, start:(o.at!=null?o.at:now()+START_DELAY), base:0, i:0, bus:bus, nodes:[]};
+    /* o.from: start this many beats in (a song carried over to a new AudioContext goes on where it was) */
+    music={song:song, loop:o.loop!==false, start:(o.at!=null?o.at:now()+START_DELAY-(o.from||0)*60/song.bpm), base:0, i:0, bus:bus, nodes:[]};
     if(opt.offline) return;
     tick();
   }
@@ -308,6 +309,12 @@ function create(ctx,out,opt){
   return {
     play:play, stop:stop, sfx:sfx, pump:pump,
     playing:function(){ return !!music; },
+    /* where the song is, in beats from its start (within the loop) */
+    beat:function(){
+      var m=music; if(!m) return 0;
+      var b=Math.max(0,(now()-m.start)*m.song.bpm/60);
+      return m.loop && m.song.beats>0 ? b%m.song.beats : b;
+    },
     /* for tests (opt.trace): every sound scheduled, and how many sound at time t */
     trace:function(){ return log.map(function(x){ return {ch:x.ch, from:x.from, to:x.to}; }); },
     voices:function(t){
@@ -323,7 +330,7 @@ function create(ctx,out,opt){
    (kept, started on the first touch or key), pausing with the page, and at most 4 music calls a second. */
 var MUSIC_RATE=4;
 function host(o){
-  var chip=null, chipCtx=null, want=null, paused=false, calls=[];
+  var chip=null, chipCtx=null, want=null, cur=null, paused=false, calls=[];
   function ctxOf(make){
     var ctx=o.context(make);
     if(ctx && ctx!==chipCtx){ chipCtx=ctx; chip=create(ctx,o.output()); }
@@ -337,7 +344,7 @@ function host(o){
     var ctx=ctxOf(mayCreate());
     if(!ctx) return;
     if(!running(ctx)){ try{ ctx.resume().then(function(){ if(running(ctx)) start(); },function(){}); }catch(e){} return; }
-    var w=want; want=null; paused=false;
+    var w=want; want=null; paused=false; cur=w;
     if(o.level) o.level();
     chip.play(w.song,{loop:w.loop});
   }
@@ -345,7 +352,7 @@ function host(o){
     /* {action:"play", song, loop} or {action:"stop"} -> null, or {error} for a bad song, or {dropped} over the rate */
     music:function(d){
       var t=Date.now(); calls=calls.filter(function(x){ return t-x<1000; });
-      if(d && d.action==="stop"){ calls.push(t); want=null; if(chip) chip.stop(0.3); return null; }
+      if(d && d.action==="stop"){ calls.push(t); want=null; cur=null; if(chip) chip.stop(0.3); return null; }
       if(!d || d.action!=="play") return {error:"PAD.music: unknown call"};
       if(calls.length>=MUSIC_RATE) return {dropped:"PAD.music: more than "+MUSIC_RATE+" calls a second"};
       calls.push(t);
@@ -374,11 +381,22 @@ function host(o){
       start();
     },
     /* the app went away: stop at once */
-    stop:function(){ want=null; calls=[]; if(chip) chip.stop(0.02); },
+    stop:function(){ want=null; cur=null; calls=[]; if(chip) chip.stop(0.02); },
+    /* the host replaced its AudioContext (the phone had stopped the old one): the song goes on in the new one from
+       the beat it had reached, instead of starting over */
+    rebuild:function(){
+      var going=chip && chip.playing() && cur, at=going ? chip.beat() : 0;
+      if(chip) try{ chip.stop(0.005); }catch(e){}
+      chip=null; chipCtx=null; paused=false;
+      if(!going) return;
+      if(!ctxOf(true)) return;
+      chip.play(cur.song,{loop:cur.loop, from:at});
+    },
     /* page hidden: freeze the clock (the song picks up where it was); shown: let it run */
     pause:function(){ if(chip && chip.playing() && running(chipCtx)){ paused=true; try{ chipCtx.suspend(); }catch(e){} } },
     resume:function(){ if(!paused) return; paused=false; try{ chipCtx.resume(); }catch(e){} },
-    state:function(){ return {playing:!!(chip && chip.playing()), waiting:!!want, paused:paused}; }
+    state:function(){ return {playing:!!(chip && chip.playing()), waiting:!!want, paused:paused}; },
+    beat:function(){ return chip && chip.playing() ? chip.beat() : 0; }
   };
 }
 
