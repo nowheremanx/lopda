@@ -81,13 +81,14 @@ See `CONTRIBUTING.md`.
 - Sample books: `runtime/books/alice.txt` is Lewis Carroll's *Alice's Adventures in Wonderland*
   (1865, public domain), taken from Project Gutenberg eBook #11
   (https://www.gutenberg.org/ebooks/11, plain text UTF-8). `runtime/books/lunyu.txt` is the
-  Analects (《論語》, Traditional Chinese, public domain), transcribed from Chinese Wikisource
-  (https://zh.wikisource.org/wiki/論語, pages 論語/學而第一 to 論語/堯曰第二十). Only the
-  classic's own text is kept: for the Alice text, Project Gutenberg's header, footer, licence
-  and trademark were removed, as were the edition line, contents list and illustration marker;
-  for the Analects, Wikisource's headers, navigation, notes, collation remarks and variant
-  markup were removed. Both are plain text the user can read, and the reader imports them like
-  any other TXT file.
+  Analects (《論語》, Traditional Chinese, public domain), taken from Project Gutenberg eBook #23839
+  (https://www.gutenberg.org/ebooks/23839, "Lun Yu", plain text UTF-8). Only the public-domain
+  text is kept: Project Gutenberg's header, footer, licence and trademark were removed from both,
+  as were, for Alice, the edition line, contents list and illustration marker, and, for the
+  Analects, the producer credit and a transcriber's note (an erratum already applied in the
+  text). The Analects were taken from Wikisource before, which is CC BY-SA; Project Gutenberg's
+  copy is used instead so the repository keeps to permissive and public-domain material. Both
+  are plain text the reader imports like any other TXT file.
 - No GPL code: it would turn the whole project GPL.
 - No game ROMs are bundled or distributed. The cartridge player only plays files
   the user supplies. Do not add ROMs to this repository or to the registry.
