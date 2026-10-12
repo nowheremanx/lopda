@@ -5,12 +5,13 @@
  *
  * Four music channels: two pulse waves (duty 12.5 / 25 / 50 / 75 %), a triangle and a noise channel, plus two
  * sound-effect voices (a third one cuts off the oldest). An original design: it nods at the 1989 handhelds and copies none.
- * The ten named sounds (PAD.sfx("coin")) are not here: they stay in core.js, exactly as they were.
+ * The named sounds (PAD.sfx("coin")) are here too since runtime 0.13.1, unchanged, so the dev harness can play them.
  *
  *   LopdaChip.parse(song)          -> {song} or {error}   pure: MML text -> sorted note events
  *   LopdaChip.sfxParams(o)         -> clamped parameters   pure: out of range is pulled into range, never an error
  *   LopdaChip.ambienceParams(n,l)  -> {name, level} or {error}   pure: a preset name and a level 0-1
  *   LopdaChip.create(ctx, out, o)  -> chip                 synthesis on any (Offline)AudioContext, into the node `out`
+ *   LopdaChip.named(ctx, out, name)                         a named sound ("coin"), as core.js always played it
  *   LopdaChip.host(o)              -> host                 what the runtime and the harness hold: unlock, pause, rate limit
  *
  * Reserved for later steps (pad-audio.md section 11), not implemented here: PAD.music.render.
@@ -220,7 +221,7 @@ function noiseBuffer(ctx){
 var AMB_GAIN=0.3;           /* the ambience bus, under music (0.5): see the levels in docs/decisions.md section 10 */
 var AMB_FADE=1, AMB_LOOKAHEAD=0.6, AMB_TICK_MS=200;
 /* brings every preset to about the same loudness (RMS) at level 1 */
-var AMB_TRIM={rain:0.72, waves:0.78, waterfall:0.47, wind:0.93, fire:0.92, stream:0.83};
+var AMB_TRIM={rain:0.72, waves:0.78, waterfall:0.47, wind:0.93, fire:0.92, stream:0.68};
 
 /* xorshift32 */
 function rng(seed){ var x=(seed|0)||1; return function(){ x^=x<<13; x^=x>>>17; x^=x<<5; return (x>>>0)/4294967296; }; }
@@ -246,8 +247,6 @@ function crackle(){
     var l=r(); return [wait, 0.6+1.6*r(), 0.12+0.8*l*l];
   };
 }
-/* a stream's small bright plinks */
-function plinks(){ return function(r){ return [0.04-Math.log(1-r())*0.16, 0.8+1.4*r(), 0.2+0.6*r()]; }; }
 
 var PRESETS={
   /* dense, fine, bright: hiss over a carpet of tiny drops, with a little low weight */
@@ -284,14 +283,14 @@ var PRESETS={
     b.chain(b.noise(0.9), b.filter("bandpass",1500,0.7), b.gain(0.06), b.out);
     b.chain(b.pops(crackle(),6), b.filter("highpass",700,0.7), b.gain(2), b.out);
   },
-  /* light and high: two narrow bands that wobble quickly (the babble), a thin hiss, small plinks */
+  /* running water babbles because it is full of small bubbles, each a short tone that slides up as it rings out
+     (the "plip" of a drop into water). Bursts of them over a soft rush; a second, slower copy is the deeper gurgle.
+     (Until runtime 0.13.1 this was wobbling bands of noise, which the owner heard as wind rather than water.) */
   stream:function(b){
-    b.chain(b.noise(1), b.mod(b.filter("bandpass",1500,3.5),wander(0,1,0.05,0.22),7,function(v){ return 900+1300*v; }, "frequency"),
-      b.mod(b.gain(0.6),wander(0.3,1,0.05,0.2),8), b.out);
-    b.chain(b.noise(0.89), b.mod(b.filter("bandpass",2500,4.5),wander(0,1,0.04,0.18),9,function(v){ return 1800+1800*v; }, "frequency"),
-      b.mod(b.gain(0.5),wander(0.2,0.8,0.04,0.18),10), b.out);
-    b.chain(b.noise(0.95), b.filter("highpass",2500,0.7), b.gain(0.08), b.out);
-    b.chain(b.pops(plinks(),11), b.filter("bandpass",2600,8), b.gain(0.5), b.out);
+    b.chain(b.noise(1), b.filter("highpass",150,0.7), b.filter("lowpass",900,0.7), b.mod(b.gain(0.35),wander(0.25,0.45,0.3,1.2),7), b.out);
+    b.chain(b.bubbles(1), b.filter("highpass",300,0.7), b.mod(b.gain(0.9),wander(0.6,1,0.2,0.8),8), b.out);
+    b.chain(b.bubbles(0.72), b.filter("highpass",200,0.7), b.mod(b.gain(0.5),wander(0.3,0.7,0.3,1),9), b.out);
+    b.chain(b.noise(0.95), b.filter("highpass",3000,0.7), b.gain(0.04), b.out);
   }
 };
 
@@ -388,6 +387,24 @@ function create(ctx,out,opt){
       }
     });
   }
+  /* six seconds of bubbles: bursts about 14 times a second, each of 2-9 bubbles within 60 ms. A bubble is a sine that
+     slides up by half to double its pitch while it dies away; small ones are high and short, big ones low and longer */
+  function bubblesBuf(){
+    return buffer("bubbles",6,function(d,r){
+      var sr=ctx.sampleRate, bursts=Math.round(d.length/sr*14);
+      for(var k=0;k<bursts;k++){
+        var t0=r()*d.length, m=2+Math.floor(r()*8);
+        for(var j=0;j<m;j++){
+          var at=Math.floor(t0+r()*sr*0.06), f0=320*Math.pow(2,2.6*Math.pow(r(),1.3)), a=r(), amp=0.12+0.88*a*a*a;
+          var tau=sr*Math.min(0.014,Math.max(0.002,0.008*700/f0)), len=Math.min(d.length-at,Math.ceil(tau*5)), rise=0.5+r(), ph=0;
+          for(var i=0;i<len;i++){
+            var f=f0*(1+rise*i/len); ph+=2*Math.PI*f/sr;
+            d[at+i]+=Math.sin(ph)*amp*Math.exp(-i/tau)*Math.min(1,i/(sr*0.0005));
+          }
+        }
+      }
+    });
+  }
   /* one pop: 50 ms of noise dying away fast */
   function popBuf(){ return buffer("pop",0.05,function(d,r){ var tau=ctx.sampleRate*0.004; for(var i=0;i<d.length;i++) d[i]=(r()*2-1)*Math.exp(-i/tau); }); }
 
@@ -403,6 +420,7 @@ function create(ctx,out,opt){
       /* looping white noise; a different rate and starting point for each, so no two are alike */
       noise:function(rate){ return loop(white(),rate); },
       drops:function(rate){ return loop(dropsBuf(),rate); },
+      bubbles:function(rate){ return loop(bubblesBuf(),rate); },
       filter:function(type,f,q){ var n=ctx.createBiquadFilter(); n.type=type; n.frequency.value=f; n.Q.value=q; return n; },
       gain:function(v){ var g=ctx.createGain(); g.gain.value=v; return g; },
       chain:function(){ for(var i=1;i<arguments.length;i++) arguments[i-1].connect(arguments[i]); return arguments[arguments.length-1]; },
@@ -651,5 +669,40 @@ function host(o){
   };
 }
 
-window.LopdaChip={CHANNELS:CHANNELS, MAX_TEXT:MAX_TEXT, AMBIENCES:AMBIENCES, parse:parse, sfxParams:sfxParams, ambienceParams:ambienceParams, create:create, host:host};
+/* ---------- the named sounds: the runtime's own and the ten apps may name (PAD.sfx("coin")) ----------
+   Moved here from core.js as they were (runtime 0.13.1), so the dev harness plays them too. NC and NOUT are the context
+   and the node of the call in progress; the table reads them, as it read core.js's globals. */
+var NC=null, NOUT=null;
+function tone(freq,start,dur,type,level){
+  var ac=NC, o=ac.createOscillator(), g=ac.createGain(), t=ac.currentTime+start;
+  o.type=type||"square"; o.frequency.setValueAtTime(freq,t);
+  g.gain.setValueAtTime(0.0001,t); g.gain.linearRampToValueAtTime(level||1,t+0.004); g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  o.connect(g); g.connect(NOUT); o.start(t); o.stop(t+dur+0.02);
+}
+function noise(start,dur,level){
+  var ac=NC, n=Math.floor(ac.sampleRate*dur), buf=ac.createBuffer(1,n,ac.sampleRate), ch=buf.getChannelData(0);
+  for(var i=0;i<n;i++) ch[i]=(Math.random()*2-1)*(1-i/n);
+  var src=ac.createBufferSource(), g=ac.createGain(), t=ac.currentTime+start; src.buffer=buf;
+  g.gain.setValueAtTime(level||1,t); src.connect(g); g.connect(NOUT); src.start(t);
+}
+var NAMED={
+  tap:function(){ tone(1400,0,0.03,"square",0.5); },
+  home:function(){ tone(660,0,0.06); tone(990,0.06,0.08); },
+  shutter:function(){ noise(0,0.05,0.9); tone(180,0.0,0.05,"square",0.6); noise(0.09,0.04,0.6); },
+  ok:function(){ tone(523,0,0.07); tone(659,0.07,0.07); tone(784,0.14,0.12); },
+  err:function(){ tone(196,0,0.12); tone(147,0.12,0.18); },
+  modem:function(){ for(var i=0;i<6;i++) tone(i%2?2100:1200,i*0.05,0.045,"square",0.35); },
+  tick:function(){ tone(2400,0,0.012,"square",0.25); },
+  /* the rest are also offered to apps through PAD.sfx (see SPEC.md) */
+  move:function(){ tone(880,0,0.025,"square",0.3); },
+  hit:function(){ noise(0,0.07,1); tone(98,0,0.09,"square",0.9); },
+  miss:function(){ tone(330,0,0.05,"triangle",0.8); tone(220,0.05,0.08,"triangle",0.7); },
+  coin:function(){ tone(988,0,0.06,"square",0.5); tone(1319,0.06,0.16,"square",0.5); },
+  win:function(){ [523,659,784,1047].forEach(function(f,i){ tone(f,i*0.09,i===3?0.25:0.09,"square",0.6); }); },
+  lose:function(){ [392,330,262,196].forEach(function(f,i){ tone(f,i*0.14,i===3?0.3:0.13,"triangle",0.9); }); }
+};
+function hasNamed(name){ return Object.prototype.hasOwnProperty.call(NAMED,name); }
+function named(ctx,out,name){ if(!hasNamed(name)) return; NC=ctx; NOUT=out; try{ NAMED[name](); } finally { NC=null; NOUT=null; } }
+
+window.LopdaChip={CHANNELS:CHANNELS, MAX_TEXT:MAX_TEXT, AMBIENCES:AMBIENCES, parse:parse, sfxParams:sfxParams, ambienceParams:ambienceParams, create:create, host:host, named:named, hasNamed:hasNamed};
 })();

@@ -98,7 +98,7 @@ node --test                                  # the test suite; must pass
 - Sounds: `tap tick move ok err hit miss coin win lose`. Max 20 per second per app (named and custom together).
 - Music and custom sounds (runtime 0.11.0+, `runtime/chip.js`, SPEC.md 6.3): `PAD.music.play(song, {loop})` / `stop()`,
   song = `{bpm, p1, p2, tri, noise}` in MML (≤ 8 KB); `PAD.sfx({wave, duty, from, to, ms, attack, decay, vol})`.
-  `PAD.music` is undefined on older runtimes. The ten named sounds stay in core.js, unchanged.
+  `PAD.music` is undefined on older runtimes. The named sounds live in chip.js too (since 0.13.1, unchanged), so dev.html plays them.
   `PAD.sfx({... vibrato: {depth, rate}})` and `PAD.ambience(name, level)` / `PAD.ambience(null)` (runtime 0.13.0+): presets
   `rain waves waterfall wind fire stream`, level 0-1, one at a time under the music, about 1 s fades; music and ambience
   calls are each limited to 4 a second.
