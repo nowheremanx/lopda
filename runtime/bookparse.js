@@ -3,9 +3,14 @@
 //
 // Pure functions, so the reader, the store and the tests share one engine. A book holds only plain
 // objects, arrays, strings and numbers, so IndexedDB keeps it as is:
-//   { title, author, lang: "zh"|"en", chapters: [{ title, paras: [{ h, s, em? }] }], toc: [{ title, ch, p, d }] }
+//   { title, author, lang: "zh"|"en", chapters: [{ title, paras: [{ h, s, em?, ln?, img?, alt? }] }],
+//     toc: [{ title, ch, p, d }], images?: [{ name, type, data }] }
 //   h = 0 for body text, 1..6 for a heading level; s may hold "\n" (a <br>); em = flat [a0,b0,a1,b1..]
 //   character ranges [a,b) of s that are emphasised. toc: ch chapter index, p paragraph index, d depth.
+//   ln = flat 5-tuples [a0,b0,ch0,p0,note0, a1,..]: the range [a,b) of s links to paragraph p0 of chapter
+//   ch0 (note0 = 1 when it is a footnote reference). Only internal links are kept.
+//   An image paragraph is { h: 0, s: "", img: N, alt? } and N indexes book.images (EPUB only; TXT has no images key).
+//   data is a Uint8Array, name the zip path, type the mime type.
 // No DOMParser (not in Node, and a hostile file should not meet a real HTML parser): a small tolerant
 // tokenizer below reads XHTML, OPF, NCX and the EPUB 3 nav document.
 (function () {
@@ -435,15 +440,35 @@
   var EMPH = { em: 1, i: 1, b: 1, strong: 1, cite: 1, dfn: 1 };
   var HEADING = /^h([1-6])$/;
 
+  // Short link text that looks like a footnote mark: 1, *, [12], (3), \u6CE81 (EPUB 2 books have no epub:type)
+  var RE_NOTE_MARK = /^(?:[0-9]+|[*\u2020\u2021]+|\[[0-9]+\]|\([0-9]+\)|\u6CE8[0-9]+)$/;
+  var NOTE_TYPES = ["footnote", "endnote", "rearnote", "note"];
+
+  // Text range [a,b) of s after trimming spaces, shifted by `lead`; null when nothing is left.
+  function clip(s, a, b, lead) {
+    a = Math.max(a - lead, 0);
+    b = Math.min(b - lead, s.length);
+    while (a < b && /\s/.test(s.charAt(a))) a++;
+    while (b > a && /\s/.test(s.charAt(b - 1))) b--;
+    return b > a ? [a, b] : null;
+  }
+
+  // Returns { paras, ids, notes }. ids maps an element id to the index of the paragraph it starts; notes holds
+  // the ids (value 1) whose element looks like a footnote body (epub:type footnote etc., or an <aside>).
+  // The references are raw, parseEpub resolves them: an image paragraph is { h: 0, s: "", img: <src as
+  // written>, alt? } (from <img src> and from <image href> inside an <svg>), a paragraph with links has
+  // lk: [{ a, b, href, note }] (href as written, note from epub:type noteref or the short-text rule only).
   function parseXhtml(src) {
     src = String(src);
     var hasBody = /<body[\s>\/]/i.test(src);
     var inBody = !hasBody, skip = "", skipDepth = 0, pre = 0, emDepth = 0, emStart = 0, curH = 0;
-    var cur = "", ems = [], paras = [], ids = {};
+    var cur = "", ems = [], paras = [], ids = {}, notes = {};
+    var lkOpen = false, lkStart = 0, lkHref = "", lkNref = false, lks = [];
 
     function flush() {
-      var lead = 0, s, k, a, b, para, merged = [];
+      var lead = 0, s, k, a, b, para, merged = [], lk = [], r;
       if (emDepth > 0) ems.push(emStart, cur.length);
+      if (lkOpen) lks.push({ a: lkStart, b: cur.length, href: lkHref, nref: lkNref });
       if (pre) lead = /^(?:[ \t]*\n)*/.exec(cur)[0].length;   // the newline right after <pre>, not the indent
       s = cur.slice(lead).replace(/\s+$/, "");
       for (k = 0; k < ems.length; k += 2) {
@@ -456,13 +481,32 @@
           if (b > merged[merged.length - 1]) merged[merged.length - 1] = b;
         } else merged.push(a, b);
       }
+      for (k = 0; k < lks.length; k++) {
+        r = clip(s, lks[k].a, lks[k].b, lead);
+        if (!r) continue;
+        lk.push({ a: r[0], b: r[1], href: lks[k].href,
+          note: lks[k].nref || (r[1] - r[0] <= 4 && RE_NOTE_MARK.test(s.slice(r[0], r[1]))) ? 1 : 0 });
+      }
       if (s) {
         para = { h: curH, s: s };
         if (merged.length) para.em = merged;
+        if (lk.length) para.lk = lk;
         paras.push(para);
       }
-      cur = ""; ems = [];
+      cur = ""; ems = []; lks = [];
       if (emDepth > 0) emStart = 0;
+      if (lkOpen) lkStart = 0;
+    }
+
+    function addImage(href, alt, id) {
+      flush();
+      if (id && !Object.prototype.hasOwnProperty.call(ids, id)) ids[id] = paras.length;
+      href = String(href || "").replace(/^\s+|\s+$/g, "");
+      if (!href) return;
+      var para = { h: 0, s: "", img: href };
+      alt = String(alt || "").replace(/^\s+|\s+$/g, "");
+      if (alt) para.alt = alt;
+      paras.push(para);
     }
 
     function addText(t) {
@@ -475,19 +519,35 @@
 
     scan(src, {
       open: function (name, attrs) {
-        var id, hm;
-        if (skip) { if (name === skip) skipDepth++; return; }
+        var id, hm, k;
+        if (skip) {
+          // a cover page is often <svg><image xlink:href="cover.jpg"/></svg>: that image counts
+          if (skip === "svg" && name === "image" && inBody) {
+            addImage(attrs["xlink:href"] !== undefined ? attrs["xlink:href"] : attrs.href, "", attrs.id);
+          }
+          if (name === skip) skipDepth++;
+          return;
+        }
         if (name === "body") { inBody = true; return; }
         if (SKIP[name]) { skip = name; skipDepth = 1; return; }
         if (!inBody) return;
+        if (name === "img") { addImage(attrs.src, attrs.alt, attrs.id); return; }
         if (BLOCK[name]) flush();
         id = attrs.id || (name === "a" ? attrs.name : "");
-        if (id && !Object.prototype.hasOwnProperty.call(ids, id)) ids[id] = paras.length;
+        if (id && !Object.prototype.hasOwnProperty.call(ids, id)) {
+          ids[id] = paras.length;
+          if (name === "aside") notes[id] = 1;
+          for (k = 0; k < NOTE_TYPES.length; k++) if (hasToken(attrs["epub:type"], NOTE_TYPES[k])) notes[id] = 1;
+        }
+        if (name === "a" && attrs.href && !lkOpen) {
+          lkOpen = true; lkStart = cur.length; lkHref = attrs.href; lkNref = hasToken(attrs["epub:type"], "noteref");
+        }
         hm = HEADING.exec(name);
         if (hm) curH = parseInt(hm[1], 10);
         if (name === "br") {
           cur = cur.replace(/ +$/, "");
           if (emStart > cur.length) emStart = cur.length;
+          if (lkStart > cur.length) lkStart = cur.length;
           if (cur !== "") cur += "\n";
         }
         if (name === "pre") pre++;
@@ -499,6 +559,10 @@
         if (!inBody) return;
         if (BLOCK[name]) flush();
         if (HEADING.test(name)) curH = 0;
+        if (name === "a" && lkOpen) {
+          lkOpen = false;
+          lks.push({ a: lkStart, b: cur.length, href: lkHref, nref: lkNref });
+        }
         if (name === "pre" && pre > 0) pre--;
         if (EMPH[name] && emDepth > 0) {
           emDepth--;
@@ -512,7 +576,7 @@
     for (key in ids) {
       if (Object.prototype.hasOwnProperty.call(ids, key) && ids[key] >= paras.length) ids[key] = Math.max(paras.length - 1, 0);
     }
-    return { paras: paras, ids: ids };
+    return { paras: paras, ids: ids, notes: notes };
   }
 
   /* ---------- EPUB ---------- */
@@ -599,9 +663,88 @@
     return out;
   }
 
+  var IMG_TYPES = {
+    jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", gif: "image/gif", webp: "image/webp",
+    svg: "image/svg+xml", bmp: "image/bmp",
+  };
+
   function parseEpub(u8) {
     var zip, opfPath, info = { title: "", author: "", language: "" };
-    var manifest = {}, spineIds = [], spineTocId = "", items = [], docs = [];
+    var manifest = {}, spineIds = [], spineTocId = "", items = [], docs = [], images = [];
+
+    // Image paragraphs: read each distinct zip entry once (book.images), point the paragraphs at it by index and
+    // drop the ones whose file is missing, remapping the ids so paragraph numbers stay right.
+    function loadImages() {
+      var want = [], seen = {}, k, j, r, para, doc, path, mt, ext;
+      for (k = 0; k < docs.length; k++) {
+        for (j = 0; j < docs[k].paras.length; j++) {
+          para = docs[k].paras[j];
+          if (para.img === undefined) continue;
+          r = resolve(items[k], para.img);
+          path = r && zip.has(r.path) ? r.path : "";
+          para.img = path;
+          if (path && !Object.prototype.hasOwnProperty.call(seen, path)) { seen[path] = 1; want.push(path); }
+        }
+      }
+      return eachSeq(want, function (p) {
+        return zip.read(p).then(function (d) { return d; }, function () { return null; });
+      }).then(function (datas) {
+        var index = {}, kept, map, key;
+        for (k = 0; k < want.length; k++) {
+          if (!datas[k]) continue;
+          mt = "";
+          for (key in manifest) {
+            if (Object.prototype.hasOwnProperty.call(manifest, key) && manifest[key].path === want[k]) { mt = manifest[key].type; break; }
+          }
+          if (!mt) {
+            ext = /\.([A-Za-z0-9]+)$/.exec(want[k]);
+            ext = ext ? ext[1].toLowerCase() : "";
+            mt = Object.prototype.hasOwnProperty.call(IMG_TYPES, ext) ? IMG_TYPES[ext] : "";
+          }
+          index[want[k]] = images.length;
+          images.push({ name: want[k], type: mt, data: datas[k] });
+        }
+        for (k = 0; k < docs.length; k++) {
+          doc = docs[k]; kept = []; map = [];
+          for (j = 0; j < doc.paras.length; j++) {
+            para = doc.paras[j];
+            map.push(kept.length);
+            if (para.img !== undefined) {
+              if (!Object.prototype.hasOwnProperty.call(index, para.img)) continue;
+              para.img = index[para.img];
+            }
+            kept.push(para);
+          }
+          if (kept.length === doc.paras.length) continue;
+          doc.paras = kept;
+          for (key in doc.ids) {
+            if (Object.prototype.hasOwnProperty.call(doc.ids, key)) doc.ids[key] = Math.min(map[doc.ids[key]], Math.max(kept.length - 1, 0));
+          }
+        }
+      });
+    }
+
+    // raw links of a chapter's paragraphs -> para.ln (internal links into a kept chapter only)
+    function resolveLinks(k, oldToNew, docIdx) {
+      var paras = docs[k].paras, j, i, lk, para, ln, r, idx, frag, note;
+      for (j = 0; j < paras.length; j++) {
+        para = paras[j];
+        lk = para.lk;
+        if (!lk) continue;
+        delete para.lk;
+        ln = [];
+        for (i = 0; i < lk.length; i++) {
+          r = resolve(items[k], lk[i].href);
+          if (!r || !Object.prototype.hasOwnProperty.call(docIdx, r.path)) continue;
+          idx = docIdx[r.path];
+          if (oldToNew[idx] === undefined) continue;
+          frag = r.frag && Object.prototype.hasOwnProperty.call(docs[idx].ids, r.frag) ? r.frag : "";
+          note = lk[i].note || (frag && docs[idx].notes[frag]) ? 1 : 0;
+          ln.push(lk[i].a, lk[i].b, oldToNew[idx], frag ? docs[idx].ids[frag] : 0, note);
+        }
+        if (ln.length) para.ln = ln;
+      }
+    }
 
     return Promise.resolve().then(function () {
       zip = openZip(u8);
@@ -649,6 +792,8 @@
       });
     }).then(function (parsed) {
       docs = parsed;
+      return loadImages();
+    }).then(function () {
       // the table of contents: EPUB 3 nav document first, then NCX
       var id, navItem = null, ncxItem = null, tocPath = "", entries = [];
       for (id in manifest) {
@@ -682,6 +827,7 @@
           chapters.push({ title: "", paras: docs[k].paras });
         }
       }
+      for (k = 0; k < docs.length; k++) if (oldToNew[k] !== undefined) resolveLinks(k, oldToNew, docIdx);
       for (k = 0; k < toc.entries.length; k++) {
         e = toc.entries[k];
         if (!e.title) continue;
@@ -710,7 +856,7 @@
       return {
         title: info.title, author: info.author,
         lang: /^zh/i.test(info.language) ? "zh" : guessLang(sample),
-        chapters: chapters, toc: tocOut,
+        chapters: chapters, toc: tocOut, images: images,
       };
     });
   }

@@ -1,36 +1,43 @@
 /*
  * Lo-PDA built-in: e-book reader. A shelf, whole pages (CSS columns, never scrolled), contents, three text sizes,
- * an e-ink mode, and a 文曲星-style word cursor: A looks the word up in the dictionary, START quotes the selection
- * into a note named after the book. Design: docs/design/reader-dictionary.md sections 1, 3, 4; decisions.md section 16.
+ * an e-ink mode, pictures dithered to the four tones, links and footnotes, and a 文曲星-style selection: long-press
+ * and drag (or SELECT and the D-pad), A looks up, START quotes into a note named after the book and underlines it.
+ * Design: docs/design/reader-dictionary.md sections 1, 3, 4; decisions.md sections 16 and 17.
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  *
- * Books are parsed once, on import (runtime/bookparse.js), and kept in LopdaPlatform.files as "book/<id>".
- * The shelf entry {title, author, lang, chars, lens, added, opened, pos, pct} is data/users/local/reader/books/<id>;
- * settings {size, eink, seeded} are data/users/local/reader. A position is {ch, p, c}: chapter, paragraph and
- * character, never a page number, so another text size or screen finds the same sentence.
+ * Books are parsed once, on import (runtime/bookparse.js), and kept in LopdaPlatform.files as "book/<id>"; an EPUB's
+ * pictures are dithered then and kept as "book/<id>/img/<n>" (PNG). The shelf entry {title, author, lang, chars, lens,
+ * imgs, added, opened, pos, pct, marks} is data/users/local/reader/books/<id>; settings {size, eink, seeded, helped} are
+ * data/users/local/reader. A position is {ch, p, c}: chapter, paragraph and character, never a page number, so another
+ * text size or screen finds the same sentence. A mark (an underlined quote) is {id, ch, p, a, p2, b, text, thought, t}.
  */
 (function(){
 "use strict";
 var LP=window.LP, $=LP.$, S=LP.S, tr=LP.tr, BK=window.LopdaBook, P=window.LopdaPlatform;
 var own=LP.own, toast=LP.toast, put=LP.put, sfx=LP.sfx, show=LP.show, showPad=LP.showPad, uid=LP.uid;
 
-var SIZES=[16,19,23], LINE=1.7, GAP=32;
+var SIZES=[16,19,23], LINE=1.7, GAP=32, LONG_MS=450;
+var UNITS=["word","sent","para"];
+/* pictures are dithered at most this wide, then shown at a whole multiple when it fits: pixels, like the camera's */
+var IMG_W=240, IMG_H=320;
 /* public-domain samples (runtime/books/, see LICENSING.md), put on the shelf once */
 var SAMPLES=[{file:"books/alice.txt", title:"Alice’s Adventures in Wonderland", author:"Lewis Carroll"},
   {file:"books/lunyu.txt", title:"論語", author:""}];
 /* a word for the cursor: one CJK character, or a run of letters and digits with inner apostrophes and hyphens */
 var TOK=/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]|(?:(?![\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}])[\p{L}\p{N}])+(?:['’\-](?:(?![\p{Script=Han}])[\p{L}\p{N}])+)*/gu;
+/* where a sentence ends: CJK and Latin stops, then any closing quotes or brackets after them */
+var STOP=/[。！？!?…]/, CLOSE=/[」』”’"')）\]】》]/;
 
 var R={
-  set:{size:1, eink:null, seeded:false},
+  set:{size:1, eink:null, seeded:false, helped:false},
   meta:{}, refs:null, loaded:false, seeding:null,
   pick:0, armed:null, busy:null,
-  id:null, book:null, cum:{},       // the open book; per chapter, where each paragraph starts
-  ch:0, page:0, pages:1, stride:1, pos:null,
-  sheet:"", mpick:0, tpick:0, jump:0,   // "" | "menu" | "toc" | "jump" | "def" | "thought"
-  sel:null,                          // the word cursor: {toks, cur, anc, held, moved}
-  def:null,                          // the entry under the page: {word, results, page, pages}
-  thought:null                       // the note a quote went into: {name}
+  id:null, book:null, cum:{}, urls:{},   // the open book; per chapter, where each paragraph starts; picture URLs
+  ch:0, page:0, pages:1, stride:1, colW:1, colH:1, pos:null, back:null,
+  sheet:"",          // over the page: "menu" | "toc" | "notes" | "jump" | "help"; lower half: "def" | "mark" | "note" | "thought"
+  mpick:0, tpick:0, npick:0, jump:0, drag:null,
+  sel:null,          // the selection: {toks, cur, anc, unit, held, moved}
+  low:null           // the lower-half sheet: {page, pages, ...}
 };
 
 function el(tag,cls,text){ var e=document.createElement(tag); if(cls) e.className=cls; if(text!=null) e.textContent=text; return e; }
@@ -38,6 +45,9 @@ function btn(cls,text,fn){ var b=el("button",cls,text); b.type="button"; b.oncli
 function keyBtn(cls,key,label,fn){ var b=btn(cls,null,fn); b.appendChild(el("i","",key)); b.appendChild(document.createTextNode(label)); return b; }
 function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
 function visible(){ return !$("v-reader").hidden; }
+function errMsg(e){ return String((e&&e.message)||(e&&e.code)||e).slice(0,100); }
+function paras(ch){ return R.book.chapters[ch==null?R.ch:ch].paras; }
+function lowerSheet(){ return R.sheet==="def"||R.sheet==="mark"||R.sheet==="note"||R.sheet==="thought"; }
 
 /* ---------- storage ---------- */
 function saveSet(){ if(R.refs) put(R.refs.set,R.set); }
@@ -49,17 +59,61 @@ function saveMeta(id,now){
 }
 function flushMeta(){ if(metaTimer && R.id){ saveMeta(R.id,true); } }
 function chars(ch){ return ch.paras.reduce(function(n,p){ return n+p.s.length; },0); }
+
+/* a picture: decoded by the browser, drawn on paper (transparent parts become paper), dithered like a photo */
+function ditherImage(im){
+  return new Promise(function(resolve,reject){
+    var url=URL.createObjectURL(new Blob([im.data],{type:im.type||""})), img=new Image();
+    img.onload=function(){
+      URL.revokeObjectURL(url);
+      var nw=img.naturalWidth||IMG_W, nh=img.naturalHeight||IMG_W;
+      var w=Math.min(IMG_W,nw), h=Math.round(w*nh/nw);
+      if(h>IMG_H){ h=IMG_H; w=Math.max(1,Math.round(h*nw/nh)); }
+      w=Math.max(1,w); h=Math.max(1,h);
+      var c=document.createElement("canvas"); c.width=w; c.height=h;
+      var x=c.getContext("2d"); x.fillStyle="#fff"; x.fillRect(0,0,w,h);
+      x.imageSmoothingEnabled=true; x.imageSmoothingQuality="high"; x.drawImage(img,0,0,w,h);
+      var d=x.getImageData(0,0,w,h).data, lum=new Float32Array(w*h);
+      for(var i=0;i<lum.length;i++) lum[i]=(0.2126*d[i*4]+0.7152*d[i*4+1]+0.0722*d[i*4+2])/255;
+      var px=LP.film.ditherLuma(lum,w,h,0,0), out=x.createImageData(w,h), o=out.data;
+      for(i=0;i<px.length;i++){ var t=LP.TONES[px[i]]; o[i*4]=t[0]; o[i*4+1]=t[1]; o[i*4+2]=t[2]; o[i*4+3]=255; }
+      x.putImageData(out,0,0);
+      c.toBlob(function(b){ if(b) resolve({blob:b, w:w, h:h}); else reject(new Error("png")); },"image/png");
+    };
+    img.onerror=function(){ URL.revokeObjectURL(url); reject(new Error("image")); };
+    img.src=url;
+  });
+}
+/* every picture becomes a four-tone PNG of its own; the book keeps only its size (a broken one keeps its alt text) */
+function storeImages(id,book){
+  var list=book.images||[];
+  return list.reduce(function(p,im,n){
+    return p.then(function(){
+      return ditherImage(im).then(function(r){
+        return P.files.put("book/"+id+"/img/"+n,r.blob).then(function(){ list[n]={w:r.w, h:r.h}; });
+      },function(){ list[n]={bad:true}; });
+    });
+  },Promise.resolve()).then(function(){ return list.length; });
+}
+function dropFiles(id,imgs){
+  var jobs=[P.files.del("book/"+id)];
+  for(var n=0;n<(imgs||0);n++) jobs.push(P.files.del("book/"+id+"/img/"+n));
+  return Promise.all(jobs);
+}
 function addBook(book,added){
   var lens=book.chapters.map(chars), total=lens.reduce(function(a,b){ return a+b; },0);
-  if(!total) return Promise.reject(new Error(tr("reader.notext")));
+  if(!total && !(book.images && book.images.length)) return Promise.reject(new Error(tr("reader.notext")));
   var title=LP.noEmoji(book.title)||tr("reader.untitled");
   for(var k in R.meta) if(R.meta[k].title===title && R.meta[k].chars===total) return Promise.reject(new Error(tr("reader.dup",{name:title})));
-  var id=uid(), meta={title:title, author:LP.noEmoji(book.author), lang:book.lang==="zh"?"zh":"en", chars:total, lens:lens,
-    added:added||Date.now(), opened:0, pos:{ch:0, p:0, c:0}, pct:0};
-  return P.files.put("book/"+id,book).then(function(){ return put(R.refs.books.doc(id),meta); }).then(function(ok){
-    if(!ok){ P.files.del("book/"+id).catch(function(){}); throw new Error(tr("common.savefail",{code:"?"})); }
+  var id=uid(), meta={title:title, author:LP.noEmoji(book.author), lang:book.lang==="zh"?"zh":"en", chars:Math.max(1,total), lens:lens,
+    imgs:0, added:added||Date.now(), opened:0, pos:{ch:0, p:0, c:0}, pct:0, marks:[]};
+  return storeImages(id,book).then(function(n){
+    meta.imgs=n;
+    return P.files.put("book/"+id,book);
+  }).then(function(){ return put(R.refs.books.doc(id),meta); }).then(function(ok){
+    if(!ok) throw new Error(tr("common.savefail",{code:"?"}));
     R.meta[id]=meta; return id;
-  });
+  }).catch(function(e){ dropFiles(id,meta.imgs||(book.images||[]).length).catch(function(){}); throw e; });
 }
 /* not text: a NUL in the first few KB (UTF-16 carries a BOM, which decodeText reads), or a PDF */
 function binary(u8){
@@ -83,7 +137,7 @@ function importFile(f){
 $("rd-file").addEventListener("change",function(){
   var files=Array.prototype.slice.call(this.files||[]); if(!files.length) return;
   files.reduce(function(p,f){ return p.then(function(){ return importFile(f); }); },Promise.resolve())
-    .catch(function(e){ toast(tr("reader.importfail",{msg:String((e&&e.message)||(e&&e.code)||e).slice(0,100)})); sfx("err"); })
+    .catch(function(e){ toast(tr("reader.importfail",{msg:errMsg(e)})); sfx("err"); })
     .then(function(){ R.busy=null; renderShelf(); });
 });
 function seed(){
@@ -134,9 +188,9 @@ $("rd-del").onclick=function(){
   var id=shelfIds()[R.pick]; if(!id) return;
   if(R.armed!==id){ R.armed=id; renderShelf(); return; }
   R.armed=null;
-  var title=R.meta[id].title;
+  var title=R.meta[id].title, imgs=R.meta[id].imgs;
   delete R.meta[id]; renderShelf();
-  Promise.resolve(writing[id]).then(function(){ delete writing[id]; return Promise.all([R.refs.books.doc(id).delete(), P.files.del("book/"+id)]); })
+  Promise.resolve(writing[id]).then(function(){ delete writing[id]; return Promise.all([R.refs.books.doc(id).delete(), dropFiles(id,imgs)]); })
     .then(function(){ toast(tr("reader.deleted",{name:title})); },function(){ toast(tr("reader.delfail")); });
 };
 function shelfButton(b){
@@ -150,8 +204,9 @@ function shelfButton(b){
 function mode(read){ $("rd-shelf").hidden=read; $("rd-book").hidden=!read; }
 function openBook(id){
   var m=R.meta[id];
-  R.id=id; R.book=null; R.cum={}; R.sheet=""; R.sel=null; R.def=null;
-  mode(true); renderSheet(); $("rd-flow").textContent=""; foot(tr("reader.loading"),"");
+  R.id=id; R.book=null; R.cum={}; R.sheet=""; R.sel=null; R.low=null; R.back=null;
+  if(!Array.isArray(m.marks)) m.marks=[];
+  mode(true); renderSheet(); renderLow(); $("rd-flow").textContent=""; foot(tr("reader.loading"),"");
   P.files.get("book/"+id).then(function(book){
     if(R.id!==id) return;
     if(!book || !book.chapters || !book.chapters.length) throw new Error("missing");
@@ -159,36 +214,61 @@ function openBook(id){
     m.opened=Date.now(); saveMeta(id,true);
     var pos=m.pos||{ch:0, p:0, c:0};
     goTo(clamp(pos.ch|0,0,book.chapters.length-1),pos);
+    if(!R.set.helped){ R.set.helped=true; saveSet(); openHelp(); }
   }).catch(function(e){
     if(R.id!==id) return;
-    toast(tr("reader.loadfail",{msg:String((e&&e.message)||e).slice(0,80)})); sfx("err"); closeBook();
+    toast(tr("reader.loadfail",{msg:errMsg(e)})); sfx("err"); closeBook();
   });
 }
+function freeUrls(){ for(var k in R.urls) URL.revokeObjectURL(R.urls[k]); R.urls={}; }
 function closeBook(){
-  flushMeta(); unmark();
-  R.id=null; R.book=null; R.sheet=""; R.sel=null; R.def=null; R.pick=0;
-  mode(false); renderSheet(); renderDef(); renderShelf();
+  flushMeta(); unmark(); freeUrls();
+  R.id=null; R.book=null; R.sheet=""; R.sel=null; R.low=null; R.back=null; R.pick=0;
+  mode(false); renderSheet(); renderLow(); $("rd-help").hidden=true; renderShelf();
 }
 function chapterTitle(ch){
   var t=R.book.chapters[ch].title;
   return t ? t : R.book.chapters.length>1 ? tr("reader.part",{n:ch+1}) : R.meta[R.id].title;
 }
+/* text with its emphasis and links: cut at every range edge, each piece wrapped in <em> and/or <a> */
 function fill(e,pa){
-  var s=pa.s, em=pa.em||[], at=0, k, x;
-  for(k=0;k+1<em.length;k+=2){
-    if(em[k]>at) e.appendChild(document.createTextNode(s.slice(at,em[k])));
-    x=document.createElement("em"); x.textContent=s.slice(em[k],em[k+1]); e.appendChild(x); at=em[k+1];
+  var s=pa.s, em=pa.em||[], ln=pa.ln||[], cuts=[0,s.length], k;
+  for(k=0;k+1<em.length;k+=2) cuts.push(em[k],em[k+1]);
+  for(k=0;k+4<ln.length;k+=5) cuts.push(ln[k],ln[k+1]);
+  cuts=cuts.filter(function(v,i,a){ return v>=0 && v<=s.length && a.indexOf(v)===i; }).sort(function(a,b){ return a-b; });
+  for(var i=0;i+1<cuts.length;i++){
+    var a=cuts[i], b=cuts[i+1], node=document.createTextNode(s.slice(a,b)), j;
+    for(j=0;j+1<em.length;j+=2) if(em[j]<=a && b<=em[j+1]){ var x=document.createElement("em"); x.appendChild(node); node=x; break; }
+    for(j=0;j+4<ln.length;j+=5) if(ln[j]<=a && b<=ln[j+1]){ var l=document.createElement("a"); l.className="ln"; l.setAttribute("data-l",j/5); l.appendChild(node); node=l; break; }
+    e.appendChild(node);
   }
-  if(at<s.length) e.appendChild(document.createTextNode(s.slice(at)));
+}
+function picture(e,pa){
+  var im=(R.book.images||[])[pa.img];
+  e.className="img";
+  if(!im || im.bad){ e.textContent=pa.alt ? "["+pa.alt+"]" : tr("reader.image"); e.className="img bad"; return; }
+  var img=document.createElement("img"); img.alt=pa.alt||""; img.width=im.w; img.height=im.h;
+  img.setAttribute("data-w",im.w); img.setAttribute("data-h",im.h);
+  var key=pa.img, id=R.id;
+  if(R.urls[key]) img.src=R.urls[key];
+  else P.files.get("book/"+id+"/img/"+key).then(function(b){
+    if(!b || R.id!==id) return;
+    if(!R.urls[key]) R.urls[key]=URL.createObjectURL(b);
+    img.src=R.urls[key];
+  }).catch(function(){});
+  e.appendChild(img);
 }
 function renderChapter(ch){
   var flow=$("rd-flow"), c=R.book.chapters[ch];
   flow.textContent=""; flow.setAttribute("lang",R.book.lang==="zh"?"zh":"en");
   c.paras.forEach(function(pa,i){
     var e=document.createElement("p"); if(pa.h) e.className="h";
-    e.setAttribute("data-i",i); fill(e,pa); flow.appendChild(e);
+    e.setAttribute("data-i",i);
+    if(pa.img!=null) picture(e,pa); else fill(e,pa);
+    flow.appendChild(e);
   });
   R.ch=ch;
+  underline();
   measure();
 }
 /* the column box is cut to whole lines; every page is one column, one stride further left */
@@ -202,7 +282,13 @@ function measure(){
   flow.style.width=w+"px"; flow.style.height=h+"px";
   flow.style.columnWidth=w+"px"; flow.style.columnGap=GAP+"px";
   flow.style.transition="none"; flow.style.transform="none";
-  R.stride=w+GAP;
+  R.stride=w+GAP; R.colW=w; R.colH=h;
+  /* a picture fills the column at a whole multiple of its pixels when it can, and never more than a page */
+  Array.prototype.forEach.call(flow.querySelectorAll("p.img img"),function(img){
+    var iw=+img.getAttribute("data-w"), ih=+img.getAttribute("data-h"), s=Math.min(w/iw,(h-lh)/ih);
+    if(s>=1) s=Math.floor(s);
+    img.style.width=Math.max(1,Math.floor(iw*s))+"px"; img.style.height=Math.max(1,Math.floor(ih*s))+"px";
+  });
   var last=flow.lastElementChild, rs=last ? last.getClientRects() : [];
   R.pages=rs.length ? pageOf(rs[rs.length-1])+1 : 1;
 }
@@ -220,7 +306,7 @@ function rangeRects(e,a,b){
   return r.getClientRects();
 }
 function charPage(e,c,o){
-  var len=R.book.chapters[R.ch].paras[+e.getAttribute("data-i")].s.length;
+  var len=paras()[+e.getAttribute("data-i")].s.length;
   if(c>=len) c=len-1;
   var rs=c>=0 ? rangeRects(e,c,c+1) : [];
   return rs.length ? pageOf(rs[0],o) : pageOf(e.getBoundingClientRect(),o);
@@ -235,8 +321,8 @@ function posOfPage(page){
   var lastPage=function(e){ var rs=e.getClientRects(); return rs.length ? pageOf(rs[rs.length-1],o) : 0; };
   while(lo<=hi){ var mid=(lo+hi)>>1; if(lastPage(kids[mid])>=page){ i=mid; hi=mid-1; } else lo=mid+1; }
   var e=kids[i]; if(!e) return {ch:R.ch, p:0, c:0};
-  var len=R.book.chapters[R.ch].paras[i].s.length, a=0, b=len-1, c=0;
-  if(charPage(e,0,o)<page){
+  var len=paras()[i].s.length, a=0, b=len-1, c=0;
+  if(len && charPage(e,0,o)<page){
     c=len-1;
     while(a<=b){ var m=(a+b)>>1; if(charPage(e,m,o)>=page){ c=m; b=m-1; } else a=m+1; }
   }
@@ -282,6 +368,10 @@ function posAtPct(pct){
   while(p<cum.length-1 && cum[p+1]<=want) p++;
   return {ch:ch, p:p, c:Math.max(0,want-cum[p])};
 }
+function goPct(pct){
+  if(pct>=100) goTo(R.book.chapters.length-1,null,true);
+  else { var pos=posAtPct(pct); goTo(pos.ch,pos); }
+}
 function relayout(){
   if(!R.book || !visible()) return;
   unmark();
@@ -289,7 +379,7 @@ function relayout(){
   renderChapter(R.ch);
   R.page=pos ? pageOfPos(pos) : 0;
   place(false);
-  if(R.sel) startSel();
+  if(R.sel) startSel(false,R.sel.unit);
 }
 function turn(k){
   if(!R.book) return false;
@@ -304,51 +394,76 @@ function foot(left,right){
   var f=$("rd-foot"); f.textContent="";
   f.appendChild(el("span","",left)); if(right) f.appendChild(el("b","",right));
 }
+function unitLabel(u){ return tr("reader.units").split("|")[UNITS.indexOf(u)]; }
 function footer(){
   if(!R.book) return;
   if(R.sel){
     var f=$("rd-foot"); f.textContent="";
     f.appendChild(keyBtn("","A",tr("reader.look"),function(){ lookupSel(); }));
     f.appendChild(keyBtn("","START",tr("reader.quote"),function(){ quote(); }));
-    f.appendChild(keyBtn("","B",tr("reader.back"),function(){ endSel(); }));
+    f.appendChild(keyBtn("","SELECT",unitLabel(R.sel.unit),function(){ cycleUnit(); }));
+    f.appendChild(btn("",tr("reader.copy"),function(){ copySel(); }));
     return;
   }
-  foot(chapterTitle(R.ch),(R.page+1)+"/"+R.pages);
+  foot(R.back ? tr("reader.linkback") : chapterTitle(R.ch),(R.page+1)+"/"+R.pages);
 }
 
-/* ---------- touch: the sides turn, a swipe turns, the middle opens the menu; in select mode a tap moves the cursor ---------- */
+/* ---------- touch ----------
+   a tap on the sides turns, a swipe turns, a tap in the middle opens the menu; a tap on a link follows it, on an
+   underline shows the quote; a long press starts a selection at that word and dragging extends it */
 (function(){
-  var pg=$("rd-page"), t=null;
-  pg.addEventListener("pointerdown",function(e){ menuTap=false; if(R.book) t={x:e.clientX, y:e.clientY, id:e.pointerId}; });
-  pg.addEventListener("pointercancel",function(){ t=null; });
+  var pg=$("rd-page"), t=null, menuTap=false;
+  function cancelLong(){ if(t && t.timer){ clearTimeout(t.timer); t.timer=null; } }
+  pg.addEventListener("pointerdown",function(e){
+    menuTap=false;
+    if(!R.book || R.sheet==="help") return;
+    t={x:e.clientX, y:e.clientY, id:e.pointerId, target:e.target, long:false, timer:null};
+    if(!lowerSheet()) t.timer=setTimeout(function(){
+      if(!t) return;
+      t.timer=null; t.long=true;
+      selectAt(t.x,t.y);
+    },LONG_MS);
+  });
+  pg.addEventListener("pointermove",function(e){
+    if(!t || e.pointerId!==t.id) return;
+    if(t.long){ dragTo(e.clientX,e.clientY); return; }
+    if(Math.abs(e.clientX-t.x)>10 || Math.abs(e.clientY-t.y)>10) cancelLong();
+  });
+  pg.addEventListener("pointercancel",function(){ cancelLong(); t=null; });
   pg.addEventListener("pointerup",function(e){
     if(!t || e.pointerId!==t.id || !R.book) return;
-    var dx=e.clientX-t.x, dy=e.clientY-t.y; t=null;
-    if(R.sheet==="def"||R.sheet==="thought"){ if(R.sheet==="def") closeDef(); return; }
+    cancelLong();
+    var dx=e.clientX-t.x, dy=e.clientY-t.y, target=t.target, long=t.long; t=null;
+    if(long){ if(R.sel){ R.sel.held=false; footer(); } return; }
+    if(lowerSheet()){ closeLow(); return; }
     if(Math.abs(dx)>40 && Math.abs(dx)>Math.abs(dy)*1.2){ turnPage(dx<0?1:-1); return; }
     if(Math.abs(dx)>12 || Math.abs(dy)>12) return;
     if(R.sel){ tapWord(e.clientX,e.clientY); return; }
+    var link=target && target.closest && target.closest("a.ln"), hl=target && target.closest && target.closest("u.hl");
+    if(link){ followLink(link); return; }
+    if(hl){ openMark(hl.getAttribute("data-m")); return; }
     var r=pg.getBoundingClientRect(), fx=(e.clientX-r.left)/r.width;
     if(fx<0.3) turnPage(-1); else if(fx>0.7) turnPage(1); else menuTap=true;
   });
   /* the menu opens on the click that follows, not on pointerup: opened earlier, that click would land on a menu row */
-  var menuTap=false;
   pg.addEventListener("click",function(){ if(menuTap){ menuTap=false; openMenu(); } });
+  pg.addEventListener("contextmenu",function(e){ e.preventDefault(); });
 })();
 function turnPage(k){
-  if(R.sel){ unmark(); if(turn(k)) startSel(k<0); else paintSel(); return; }
+  if(R.sel){ var u=R.sel.unit; unmark(); if(turn(k)) startSel(k<0,u); else paintSel(); return; }
   turn(k);
 }
 
-/* ---------- the word cursor (SELECT): English moves by word, Chinese by character; A held extends ---------- */
+/* ---------- selection: English moves by word, Chinese by character; A held (or a drag) extends; SELECT widens to
+   the sentence or the paragraph, which may run over the page (the whole chapter is in the DOM) ---------- */
 function pageTokens(){
   var kids=$("rd-flow").children, o=origin(), left=o.left+R.page*R.stride, right=left+R.stride-GAP, out=[];
-  var paras=R.book.chapters[R.ch].paras;
+  var ps=paras();
   for(var i=0;i<kids.length;i++){
     var rs=kids[i].getClientRects(); if(!rs.length) continue;
     if(pageOf(rs[rs.length-1],o)<R.page) continue;
     if(pageOf(rs[0],o)>R.page) break;
-    var s=paras[i].s, m; TOK.lastIndex=0;
+    var s=ps[i].s, m; TOK.lastIndex=0;
     while((m=TOK.exec(s))){
       var r=rangeRects(kids[i],m.index,m.index+m[0].length)[0];
       if(!r || r.left+r.width/2<left || r.left+r.width/2>right) continue;
@@ -357,9 +472,9 @@ function pageTokens(){
   }
   return out;
 }
-function startSel(fromEnd){
+function startSel(fromEnd,unit){
   var toks=pageTokens();
-  R.sel={toks:toks, cur:fromEnd ? toks.length-1 : 0, anc:null, held:R.sel && R.sel.held, moved:false};
+  R.sel={toks:toks, cur:fromEnd ? toks.length-1 : 0, anc:null, unit:unit||"word", held:R.sel && R.sel.held, moved:false};
   paintSel(); footer();
 }
 function enterSel(){
@@ -369,24 +484,47 @@ function enterSel(){
   if(!R.sel.toks.length) toast(tr("reader.nowords"));
   sfx("tap");
 }
-function endSel(){ unmark(); R.sel=null; closeDef(true); footer(); }
-function selRange(){
-  var s=R.sel; if(!s || !s.toks.length) return null;
-  var a=s.anc==null ? s.cur : Math.min(s.anc,s.cur), b=s.anc==null ? s.cur : Math.max(s.anc,s.cur);
-  return s.toks.slice(a,b+1);
+function endSel(){ unmark(); R.sel=null; closeLow(true); footer(); }
+function cycleUnit(){
+  if(!R.sel) return;
+  R.sel.unit=UNITS[(UNITS.indexOf(R.sel.unit)+1)%UNITS.length];
+  sfx("move"); paintSel(); footer();
 }
-/* the selected tokens, per paragraph from the first token's start to the last one's end (punctuation between included) */
+function sentStart(s,a){
+  var i=a-1;
+  while(i>=0 && !(STOP.test(s.charAt(i)) || (s.charAt(i)==="." && /\s/.test(s.charAt(i+1)||" ")))) i--;
+  i++;
+  while(i<a && (CLOSE.test(s.charAt(i)) || /\s/.test(s.charAt(i)))) i++;
+  return i;
+}
+function sentEnd(s,b){
+  var i=b;
+  while(i<s.length && !(STOP.test(s.charAt(i)) || (s.charAt(i)==="." && (i+1>=s.length || /[\s"'”’」』)）]/.test(s.charAt(i+1)))))) i++;
+  if(i>=s.length) return s.length;
+  while(i<s.length && (STOP.test(s.charAt(i)) || s.charAt(i)===".")) i++;
+  while(i<s.length && CLOSE.test(s.charAt(i))) i++;
+  return i;
+}
+/* the selection as character ranges, one per paragraph: from the unit around the first token to the unit around the last */
 function selParts(){
-  var t=selRange(), parts=[]; if(!t) return parts;
-  t.forEach(function(x){ var l=parts[parts.length-1]; if(l && l.p===x.p) l.b=x.b; else parts.push({p:x.p, a:x.a, b:x.b}); });
+  var s=R.sel; if(!s || !s.toks.length) return [];
+  var lo=s.toks[s.anc==null ? s.cur : Math.min(s.anc,s.cur)], hi=s.toks[s.anc==null ? s.cur : Math.max(s.anc,s.cur)];
+  var ps=paras(), a=lo.a, b=hi.b;
+  if(s.unit==="sent"){ a=sentStart(ps[lo.p].s,lo.a); b=sentEnd(ps[hi.p].s,hi.b); }
+  else if(s.unit==="para"){ a=0; b=ps[hi.p].s.length; }
+  var parts=[];
+  for(var p=lo.p;p<=hi.p;p++){
+    var len=ps[p].s.length; if(!len) continue;
+    parts.push({p:p, a:p===lo.p ? a : 0, b:p===hi.p ? b : len});
+  }
   return parts;
 }
 function selText(){
-  var paras=R.book.chapters[R.ch].paras;
-  return selParts().map(function(x){ return paras[x.p].s.slice(x.a,x.b); }).join("\n");
+  var ps=paras();
+  return selParts().map(function(x){ return ps[x.p].s.slice(x.a,x.b); }).join("\n");
 }
-/* reverse video by wrapping the selected text in <mark>: inline, no padding, so no line moves */
-function mark(e,a,b){
+/* wrap characters a..b of a paragraph in an inline element (no padding, so no line moves) */
+function wrap(e,a,b,make){
   var w=document.createTreeWalker(e,NodeFilter.SHOW_TEXT), list=[], n, at=0;
   while((n=w.nextNode())){ list.push({n:n, at:at}); at+=n.data.length; }
   list.forEach(function(x){
@@ -394,18 +532,19 @@ function mark(e,a,b){
     var node=x.n;
     if(t-x.at<node.data.length) node.splitText(t-x.at);
     if(s>x.at) node=node.splitText(s-x.at);
-    var mk=document.createElement("mark"); node.parentNode.insertBefore(mk,node); mk.appendChild(node);
+    var mk=make(); node.parentNode.insertBefore(mk,node); mk.appendChild(node);
   });
 }
-function unmark(){
-  Array.prototype.slice.call($("rd-flow").querySelectorAll("mark")).forEach(function(mk){
+function unwrap(sel){
+  Array.prototype.slice.call($("rd-flow").querySelectorAll(sel)).forEach(function(mk){
     var p=mk.parentNode; while(mk.firstChild) p.insertBefore(mk.firstChild,mk); p.removeChild(mk); p.normalize();
   });
 }
+function unmark(){ unwrap("mark"); }
 function paintSel(){
   unmark(); if(!R.sel) return;
   var kids=$("rd-flow").children;
-  selParts().forEach(function(x){ mark(kids[x.p],x.a,x.b); });
+  selParts().forEach(function(x){ wrap(kids[x.p],x.a,x.b,function(){ return document.createElement("mark"); }); });
 }
 /* the line above or below (k = -1 or 1), then the token there nearest the middle of the current one; -1 when there is none */
 function vertical(k){
@@ -420,116 +559,220 @@ function moveCur(dir){
   if(!t.length){ turnPage(back?-1:1); return; }
   var next=dir==="left" ? s.cur-1 : dir==="right" ? s.cur+1 : vertical(back?-1:1);
   if(next<0 || next>=t.length){
-    /* off the page: turn to the next one, unless A is held (a selection stays on one page) */
+    /* off the page: turn to the next one, unless A is held (an extended selection stays on one page) */
     if(s.held) sfx("err"); else turnPage(back?-1:1);
     return;
   }
   if(s.held){ if(s.anc==null) s.anc=s.cur; s.moved=true; } else s.anc=null;
   s.cur=next; sfx("move"); paintSel();
 }
-function tapWord(x,y){
-  var s=R.sel, o=origin(), left=o.left+R.page*R.stride, px=x-left, py=y-o.top, best=-1, bd=Infinity;
-  s.toks.forEach(function(t,i){
+function tokenAt(x,y){
+  var o=origin(), left=o.left+R.page*R.stride, px=x-left, py=y-o.top, best=-1, bd=Infinity;
+  R.sel.toks.forEach(function(t,i){
     var dx=px<t.x ? t.x-px : px>t.x+t.w ? px-t.x-t.w : 0, dy=py<t.y ? t.y-py : py>t.y+t.h ? py-t.y-t.h : 0;
     var d=dy*4+dx; if(d<bd){ bd=d; best=i; }
   });
-  if(best<0) return;
+  return best;
+}
+function tapWord(x,y){
+  var s=R.sel, best=tokenAt(x,y); if(best<0) return;
   if(s.held){ if(s.anc==null) s.anc=s.cur; s.moved=true; } else s.anc=null;
   s.cur=best; sfx("move"); paintSel();
 }
+/* long press: a new selection from the word under the finger; dragging moves its far end */
+function selectAt(x,y){
+  if(R.sheet) { R.sheet=""; renderSheet(); }
+  startSel(false,R.sel ? R.sel.unit : "word");
+  var i=tokenAt(x,y); if(i<0){ toast(tr("reader.nowords")); return; }
+  R.sel.cur=i; R.sel.anc=i; R.sel.held=true;
+  if(navigator.vibrate) try{ navigator.vibrate(8); }catch(e){}
+  sfx("tap"); paintSel(); footer();
+}
+function dragTo(x,y){
+  if(!R.sel) return;
+  var i=tokenAt(x,y); if(i<0 || i===R.sel.cur) return;
+  R.sel.cur=i; paintSel();
+}
+/* copying text is otherwise impossible here: the handheld turns off the system's text selection */
+function copySel(){
+  var text=selText(); if(!text) return;
+  var done=function(){ toast(tr("reader.copied")); sfx("ok"); };
+  if(navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(text).then(done,function(){ copyOld(text) ? done() : sfx("err"); }); return; }
+  if(copyOld(text)) done(); else sfx("err");
+}
+function copyOld(text){
+  var ta=el("textarea"); ta.value=text; ta.style.position="fixed"; ta.style.opacity="0"; document.body.appendChild(ta); ta.select();
+  var ok=false; try{ ok=document.execCommand("copy"); }catch(e){}
+  ta.remove(); return ok;
+}
 
-/* ---------- A: the dictionary entry in the lower half of the screen ---------- */
+/* ---------- the lower half: a dictionary entry, an underlined quote, a footnote, or a thought being typed ---------- */
 function lookupSel(){
   if(!R.sel) return;
-  var w=selText().replace(/’/g,"'").replace(/\s+/g," ").trim();
+  var t=R.sel.toks[R.sel.cur];
+  /* a sentence or a paragraph is no headword: look up the word under the cursor */
+  var w=(R.sel.unit==="word" ? selText() : t ? paras()[t.p].s.slice(t.a,t.b) : "").replace(/’/g,"'").replace(/\s+/g," ").trim();
   if(!w) return;
   if(!LP.dict){ toast(tr("reader.nodict")); return; }
-  R.def={word:w, results:null, page:0, pages:1};
-  R.sheet="def"; renderDef(); sfx("tap");
-  var mine=R.def;
-  LP.dict.lookup(w).then(function(r){ if(R.def===mine){ mine.results=r; renderDef(); } },
-    function(e){ if(R.def===mine){ mine.results=[]; mine.error=String((e&&e.message)||e); renderDef(); } });
+  R.low={word:w, results:null, page:0, pages:1};
+  R.sheet="def"; renderLow(); sfx("tap");
+  var mine=R.low;
+  LP.dict.lookup(w).then(function(r){ if(R.low===mine){ mine.results=r; renderLow(); } },
+    function(e){ if(R.low===mine){ mine.results=[]; mine.error=errMsg(e); renderLow(); } });
 }
 function headOf(d){ var r=d.results; return r && r.length && r[0].how!=="exact" ? r[0].word : d.word; }
-function closeDef(quiet){
-  if(R.sheet!=="def" && R.sheet!=="thought") return;
-  if(R.sheet==="thought") saveThought(false);
-  R.sheet=""; R.def=null; R.thought=null; renderDef();
+function closeLow(quiet){
+  if(!lowerSheet()) return;
+  if(R.sheet==="thought") saveThought();
+  R.sheet=""; R.low=null; renderLow();
   if(!quiet) sfx("tap");
 }
-function renderDef(){
-  var sh=$("rd-def"); sh.textContent="";
-  sh.hidden=!(R.sheet==="def" || R.sheet==="thought");
-  if(R.sheet==="thought") return thoughtSheet(sh);
-  if(R.sheet!=="def") return;
-  var d=R.def, word=headOf(d), title=el("p","sheet-title"), count=el("small","");
-  title.appendChild(el("span","",word)); title.appendChild(count); sh.appendChild(title);
-  var page=el("div","dict-page");
-  if(!d.results) page.appendChild(document.createTextNode(tr("dict.loading")));
-  else if(!d.results.length) page.appendChild(document.createTextNode(d.error ? tr("dict.loadfail",{msg:d.error}) : tr("dict.notfound",{w:d.word})));
-  else {
-    if(d.results[0].how==="lemma") page.appendChild(document.createTextNode(tr("dict.lemma",{w:d.word, base:d.results[0].word})+"\n"));
-    if(d.results[0].how==="prefix") page.appendChild(document.createTextNode(tr("dict.notfound",{w:d.word})+" · "+tr("dict.near")+"\n"));
-    var last=null;
-    d.results.forEach(function(r){
-      var label=r.name+(r.word!==word ? " · "+r.word : "")+(r.head && r.head!==r.word ? " → "+r.head : "");
-      if(label!==last){ page.appendChild(el("b","",label)); page.appendChild(document.createTextNode("\n")); last=label; }
-      page.appendChild(document.createTextNode(r.text+"\n"));
-    });
-  }
-  page.onclick=function(ev){ var r=page.getBoundingClientRect(); defTurn(ev.clientX<r.left+r.width/3?-1:1); };
-  sh.appendChild(page);
-  var keys=el("div","dict-keys"), has=d.results && d.results.length;
-  keys.appendChild(keyBtn("ck","◀▶",tr("dict.page"),function(){ defTurn(1); }));
-  keys.appendChild(keyBtn("ck","B",tr("dict.back"),function(){ closeDef(); }));
-  if(has) keys.appendChild(keyBtn("ck","START",LP.dict.inBook(word) ? tr("dict.inbook") : tr("dict.add"),function(){ LP.dict.toggleWord(word); renderDef(); }));
-  sh.appendChild(keys);
-  /* whole lines per page, as in the dictionary */
-  var lh=24, h=Math.max(lh,Math.floor(page.clientHeight/lh)*lh);
+function lowTurn(k){ var d=R.low; if(!d) return; var p=d.page+k; if(p<0 || p>=d.pages) return; d.page=p; sfx("move"); renderLow(); }
+/* a paged text box cut to whole lines, as in the dictionary */
+function pageBox(sh,page,count){
+  page.onclick=function(ev){ var r=page.getBoundingClientRect(); lowTurn(ev.clientX<r.left+r.width/3?-1:1); };
+  var lh=24, h=Math.max(lh,Math.floor(page.clientHeight/lh)*lh), d=R.low;
   page.style.height=h+"px"; page.style.flex="none";
   d.pages=Math.max(1,Math.ceil((page.scrollHeight-2)/h));
   d.page=Math.min(d.page,d.pages-1);
   page.scrollTop=d.page*h;
   count.textContent=d.pages>1 ? tr("dict.of",{i:d.page+1, n:d.pages}) : "";
 }
-function defTurn(k){ var d=R.def; if(!d) return; var p=d.page+k; if(p<0 || p>=d.pages) return; d.page=p; sfx("move"); renderDef(); }
+function renderLow(){
+  var sh=$("rd-def"); sh.textContent="";
+  sh.hidden=!lowerSheet(); if(sh.hidden) return;
+  if(R.sheet==="thought") return thoughtSheet(sh);
+  var d=R.low, title=el("p","sheet-title"), count=el("small",""), page=el("div","dict-page"), keys=el("div","dict-keys");
+  sh.appendChild(title); sh.appendChild(page); sh.appendChild(keys);
+  if(R.sheet==="def"){
+    var word=headOf(d);
+    title.appendChild(el("span","",word));
+    if(!d.results) page.appendChild(document.createTextNode(tr("dict.loading")));
+    else if(!d.results.length) page.appendChild(document.createTextNode(d.error ? tr("dict.loadfail",{msg:d.error}) : tr("dict.notfound",{w:d.word})));
+    else {
+      if(d.results[0].how==="lemma") page.appendChild(document.createTextNode(tr("dict.lemma",{w:d.word, base:d.results[0].word})+"\n"));
+      if(d.results[0].how==="prefix") page.appendChild(document.createTextNode(tr("dict.notfound",{w:d.word})+" · "+tr("dict.near")+"\n"));
+      var last=null;
+      d.results.forEach(function(r){
+        var label=r.name+(r.word!==word ? " · "+r.word : "")+(r.head && r.head!==r.word ? " → "+r.head : "");
+        if(label!==last){ page.appendChild(el("b","",label)); page.appendChild(document.createTextNode("\n")); last=label; }
+        page.appendChild(document.createTextNode(r.text+"\n"));
+      });
+    }
+    keys.appendChild(keyBtn("ck","◀▶",tr("dict.page"),function(){ lowTurn(1); }));
+    keys.appendChild(keyBtn("ck","B",tr("dict.back"),function(){ closeLow(); }));
+    if(d.results && d.results.length) keys.appendChild(keyBtn("ck","START",LP.dict.inBook(word) ? tr("dict.inbook") : tr("dict.add"),function(){ LP.dict.toggleWord(word); renderLow(); }));
+  } else if(R.sheet==="mark"){
+    var mk=markById(d.id);
+    title.appendChild(el("span","",tr("reader.mark")));
+    page.appendChild(document.createTextNode("「"+(mk ? mk.text : "")+"」\n"));
+    page.appendChild(el("b","",tr("reader.thoughts"))); page.appendChild(document.createTextNode("\n"));
+    page.appendChild(document.createTextNode(mk && mk.thought ? mk.thought : tr("reader.nothought")));
+    keys.appendChild(keyBtn("ck","B",tr("reader.back"),function(){ closeLow(); }));
+    keys.appendChild(keyBtn("ck ck-a","A",tr("reader.addthought"),function(){ markThought(); }));
+    keys.appendChild(keyBtn(d.armed ? "ck ck-a" : "ck","START",tr(d.armed ? "reader.unmarkconfirm" : "reader.unmark"),function(){ markDelete(); }));
+  } else if(R.sheet==="note"){
+    title.appendChild(el("span","",tr("reader.note")));
+    page.appendChild(document.createTextNode(d.text));
+    keys.appendChild(keyBtn("ck","B",tr("reader.back"),function(){ closeLow(); }));
+    keys.appendChild(keyBtn("ck ck-a","A",tr("reader.follow"),function(){ jumpLink(d.ch,d.p); }));
+  }
+  title.appendChild(count);
+  pageBox(sh,page,count);
+}
 
-/* ---------- START: quote the selection into the note 《书名》, then a thought under it ---------- */
+/* ---------- START: quote = underline it in the book + add it to the note 《书名》; then a thought under it ---------- */
+function markById(id){ var m=R.meta[R.id]; return m ? m.marks.filter(function(x){ return x.id===id; })[0] : null; }
+function noteName(){ return "《"+R.meta[R.id].title+"》"; }
+function quoteHead(ch){ var t=R.book.chapters[ch].title; return noteName()+(t ? " "+t : ""); }
 function quote(){
   if(!R.sel || !R.book) return;
-  var text=selText().trim(); if(!text) return;
+  var parts=selParts(), text=selText().trim(); if(!text || !parts.length) return;
   if(!LP.notes){ toast(tr("reader.quotefail",{msg:"notes"})); return; }
-  var m=R.meta[R.id], name="《"+m.title+"》", ch=R.book.chapters[R.ch].title;
-  LP.notes.append(name,name+(ch ? " "+ch : "")+"\n「"+text+"」").then(function(){
+  var m=R.meta[R.id], first=parts[0], last=parts[parts.length-1];
+  var mk={id:uid(), ch:R.ch, p:first.p, a:first.a, p2:last.p, b:last.b, text:text, thought:"", t:Date.now()};
+  LP.notes.append(noteName(),quoteHead(R.ch)+"\n「"+text+"」").then(function(){
+    m.marks.push(mk); saveMeta(R.id,true);
     sfx("ok");
-    if(!R.sel) return;
-    R.sel.anc=null; paintSel();
-    R.sheet="thought"; R.thought={name:name}; renderDef();
-  },function(e){ toast(tr("reader.quotefail",{msg:String((e&&e.message)||e).slice(0,80)})); sfx("err"); });
+    if(!R.book || R.id==null) return;
+    endSel(); unwrap("u.hl"); underline();
+    R.sheet="thought"; R.low={mark:mk.id, fresh:true}; renderLow();
+  },function(e){ toast(tr("reader.quotefail",{msg:errMsg(e)})); sfx("err"); });
+}
+/* underline every mark in this chapter (a dotted line under ink; inline, so nothing moves) */
+function underline(){
+  var kids=$("rd-flow").children;
+  (R.meta[R.id].marks||[]).forEach(function(mk){
+    if(mk.ch!==R.ch) return;
+    for(var p=mk.p;p<=mk.p2;p++){
+      var e=kids[p]; if(!e) continue;
+      var len=paras()[p].s.length;
+      wrap(e,p===mk.p ? mk.a : 0,p===mk.p2 ? mk.b : len,function(){ var u=document.createElement("u"); u.className="hl"; u.setAttribute("data-m",mk.id); return u; });
+    }
+  });
+}
+function openMark(id){ if(!markById(id)) return; R.sheet="mark"; R.low={id:id, page:0, pages:1}; renderLow(); sfx("tap"); }
+function markThought(){
+  var mk=markById(R.low.id); if(!mk) return;
+  R.sheet="thought"; R.low={mark:mk.id, fresh:false}; renderLow();
+}
+function markDelete(){
+  var d=R.low, m=R.meta[R.id];
+  if(!d.armed){ d.armed=true; sfx("tap"); renderLow(); return; }
+  m.marks=m.marks.filter(function(x){ return x.id!==d.id; }); saveMeta(R.id,true);
+  R.sheet=""; R.low=null; renderLow();
+  unwrap("u.hl"); underline();
+  toast(tr("reader.unmarked")); sfx("ok");
 }
 function thoughtSheet(sh){
-  sh.appendChild(el("p","hint",tr("reader.quoted",{name:R.thought.name})));
+  var mk=markById(R.low.mark);
+  sh.appendChild(el("p","hint",R.low.fresh ? tr("reader.quoted",{name:noteName()}) : "「"+(mk ? mk.text : "")+"」"));
   var ta=el("textarea"); ta.id="rd-thought"; ta.placeholder=tr("reader.thought"); ta.maxLength=4000;
-  if(R.thought.draft) ta.value=R.thought.draft;
-  ta.oninput=function(){ if(R.thought) R.thought.draft=ta.value; };
+  if(R.low.draft) ta.value=R.low.draft;
+  ta.oninput=function(){ if(R.low) R.low.draft=ta.value; };
   sh.appendChild(ta);
   var keys=el("div","dict-keys");
-  keys.appendChild(keyBtn("ck","B",tr("reader.skip"),function(){ R.thought.draft=""; closeDef(); }));
-  keys.appendChild(keyBtn("ck ck-a","A",tr("reader.done"),function(){ closeDef(); }));
+  keys.appendChild(keyBtn("ck","B",tr("reader.skip"),function(){ R.low.draft=""; closeLow(); }));
+  keys.appendChild(keyBtn("ck ck-a","A",tr("reader.done"),function(){ closeLow(); }));
   sh.appendChild(keys);
   /* a real tap brings up the keyboard on a phone; with a keyboard this is where typing goes anyway */
   if(!(window.matchMedia && matchMedia("(pointer: coarse)").matches)) try{ ta.focus({preventScroll:true}); }catch(e){}
 }
-/* the thought goes right under its quote; leaving the screen keeps what was typed */
+/* right after a quote the thought goes on the line under it; a later thought repeats the quote, since the note is a
+   running log and other quotes may have come in between. Leaving the screen keeps what was typed. */
 function saveThought(){
-  var t=R.thought; if(!t) return;
-  var text=String(t.draft||"").trim(); t.draft="";
+  var d=R.low; if(!d) return;
+  var text=String(d.draft||"").trim(); d.draft="";
   var ta=$("rd-thought"); if(ta) ta.blur();
-  if(!text) return;
-  LP.notes.append(t.name,text,"\n").then(function(){ toast(tr("reader.saved")); },function(e){ toast(tr("reader.quotefail",{msg:String((e&&e.message)||e).slice(0,80)})); });
+  var mk=markById(d.mark);
+  if(!text || !mk) return;
+  mk.thought=mk.thought ? mk.thought+"\n"+text : text; saveMeta(R.id,true);
+  var job=d.fresh ? LP.notes.append(noteName(),text,"\n") : LP.notes.append(noteName(),quoteHead(mk.ch)+"\n「"+mk.text+"」\n"+text);
+  job.then(function(){ toast(tr("reader.saved")); },function(e){ toast(tr("reader.quotefail",{msg:errMsg(e)})); });
 }
 
-/* ---------- menu, contents, jump ---------- */
+/* ---------- links: a footnote opens in the lower half; any other link jumps, and B comes back ---------- */
+function followLink(a){
+  var e=a.closest("p"), pa=paras()[+e.getAttribute("data-i")], k=+a.getAttribute("data-l")*5, ln=pa.ln||[];
+  var ch=ln[k+2], p=ln[k+3], note=ln[k+4];
+  if(ch==null || !R.book.chapters[ch]) return;
+  if(note){
+    var ps=paras(ch), text=(ps[p]||{s:""}).s;
+    /* a note that is only its number ("1") carries its words in the next paragraph */
+    if(text.trim().length<=4 && ps[p+1]) text+=" "+ps[p+1].s;
+    R.sheet="note"; R.low={text:text, ch:ch, p:p, page:0, pages:1}; renderLow(); sfx("tap");
+    return;
+  }
+  jumpLink(ch,p);
+}
+function jumpLink(ch,p){
+  if(lowerSheet()){ R.sheet=""; R.low=null; renderLow(); }
+  R.back=R.back || {ch:R.pos.ch, p:R.pos.p, c:R.pos.c};
+  goTo(ch,{p:p, c:0}); sfx("ok");
+}
+function goBack(){ var b=R.back; R.back=null; goTo(b.ch,b); sfx("tap"); }
+
+/* ---------- menu, contents, notes, jump, help ---------- */
 function eink(){
   if(R.set.eink!=null) return !!R.set.eink;
   return !!(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches);
@@ -542,20 +785,25 @@ function applyEink(){
 function menuItems(){
   return [
     {k:"toc", label:tr("reader.toc")},
+    {k:"notes", label:tr("reader.notes"), val:String(R.meta[R.id].marks.length)},
     {k:"size", label:tr("reader.size"), val:tr("reader.sizes").split("|")[R.set.size]},
     {k:"jump", label:tr("reader.jump")},
     {k:"select", label:tr("reader.select"), val:"SELECT"},
     {k:"eink", label:tr("reader.eink"), val:tr(eink()?"set.on":"set.off")},
+    {k:"help", label:tr("reader.help")},
     {k:"shelf", label:tr("reader.shelfback"), val:"B"}
   ];
 }
-function openMenu(){ if(!R.book) return; R.sheet="menu"; R.mpick=0; renderSheet(); sfx("tap"); }
+function openMenu(){ if(!R.book) return; R.sheet="menu"; R.mpick=0; R.drag=null; renderSheet(); sfx("tap"); }
 function closeSheet(){ R.sheet=""; renderSheet(); }
+function marksSorted(){
+  return R.meta[R.id].marks.slice().sort(function(x,y){ return (x.ch-y.ch)||(x.p-y.p)||(x.a-y.a); });
+}
 function renderSheet(){
-  var sh=$("rd-sheet"), on=R.sheet==="menu"||R.sheet==="toc"||R.sheet==="jump";
+  var sh=$("rd-sheet"), on=R.sheet==="menu"||R.sheet==="toc"||R.sheet==="jump"||R.sheet==="notes";
   sh.hidden=!on; sh.textContent=""; if(!on) return;
   var m=R.meta[R.id], title=el("p","sheet-title");
-  title.appendChild(el("span","",R.sheet==="toc" ? tr("reader.toc") : R.sheet==="jump" ? tr("reader.jump") : m.title));
+  title.appendChild(el("span","",R.sheet==="toc" ? tr("reader.toc") : R.sheet==="jump" ? tr("reader.jump") : R.sheet==="notes" ? tr("reader.notes") : m.title));
   title.appendChild(el("small","",Math.floor(m.pct||0)+"%"));
   sh.appendChild(title);
   var keys=el("div","dict-keys");
@@ -567,9 +815,10 @@ function renderSheet(){
       ul.appendChild(li);
     });
     sh.appendChild(ul);
+    sh.appendChild(track());
   } else if(R.sheet==="toc"){
-    var list=tocList(), tu=el("ul","lcd-menu rd-toc");
-    list.forEach(function(it,i){
+    var tu=el("ul","lcd-menu rd-toc");
+    tocList().forEach(function(it,i){
       var li=el("li",i===R.tpick?"on":""); li.style.paddingLeft=(10+12*(it.d||0))+"px";
       li.appendChild(el("span","",it.title));
       li.onclick=function(){ R.tpick=i; tocGo(it); };
@@ -577,26 +826,56 @@ function renderSheet(){
     });
     sh.appendChild(tu);
     var cur=tu.querySelector("li.on"); if(cur && cur.scrollIntoView) cur.scrollIntoView({block:"center"});
+  } else if(R.sheet==="notes"){
+    var list=marksSorted(), nu=el("ul","lcd-menu rd-notes");
+    if(!list.length) sh.appendChild(el("p","hint",tr("reader.nonotes")));
+    R.npick=clamp(R.npick,0,Math.max(0,list.length-1));
+    list.forEach(function(mk,i){
+      var li=el("li",i===R.npick?"on":""), body=el("span","");
+      body.appendChild(el("small","",chapterTitle(mk.ch)));
+      body.appendChild(el("span","","「"+mk.text+"」"));
+      if(mk.thought) body.appendChild(el("small","",mk.thought));
+      li.appendChild(body);
+      li.onclick=function(){ R.npick=i; noteGo(mk); };
+      nu.appendChild(li);
+    });
+    sh.appendChild(nu);
+    var on2=nu.querySelector("li.on"); if(on2 && on2.scrollIntoView) on2.scrollIntoView({block:"nearest"});
   } else {
     var box=el("div","rd-jump");
     box.appendChild(el("b","",R.jump+"%"));
-    var at=posAtPct(R.jump);
-    box.appendChild(el("span","",chapterTitle(at.ch)));
+    box.appendChild(el("span","",chapterTitle(posAtPct(R.jump).ch)));
     box.appendChild(el("p","hint",tr("reader.jumpkeys")));
     sh.appendChild(box);
-    keys.appendChild(keyBtn("ck","◀",  "",function(){ jumpBy(-1); }));
-    keys.appendChild(keyBtn("ck","▶",  "",function(){ jumpBy(1); }));
+    keys.appendChild(keyBtn("ck","◀","",function(){ jumpBy(-1); }));
+    keys.appendChild(keyBtn("ck","▶","",function(){ jumpBy(1); }));
   }
   keys.appendChild(keyBtn("ck","B",tr("reader.back"),function(){ sheetBack(); }));
-  if(R.sheet!=="toc") keys.appendChild(keyBtn("ck ck-a","A",tr("reader.go"),function(){ sheetA(); }));
+  if(R.sheet!=="toc" && R.sheet!=="notes") keys.appendChild(keyBtn("ck ck-a","A",tr("reader.go"),function(){ sheetA(); }));
   sh.appendChild(keys);
+}
+/* the progress bar under the menu: drag (or tap) anywhere on it to go there */
+function track(){
+  var box=el("div","rd-track"), bar=el("div","rd-bar"), fill=el("i"), label=el("p","hint");
+  var pct=R.drag!=null ? R.drag : Math.floor(R.meta[R.id].pct||0);
+  var draw=function(v){ fill.style.width=v+"%"; label.textContent=tr("reader.at",{pct:v, ch:chapterTitle(posAtPct(v).ch)}); };
+  bar.appendChild(fill); box.appendChild(bar); box.appendChild(label); draw(pct);
+  var at=function(e){ var r=bar.getBoundingClientRect(); return clamp(Math.round((e.clientX-r.left)/r.width*100),0,100); };
+  var id=null;
+  bar.addEventListener("pointerdown",function(e){ id=e.pointerId; try{ bar.setPointerCapture(id); }catch(x){} R.drag=at(e); draw(R.drag); });
+  bar.addEventListener("pointermove",function(e){ if(e.pointerId!==id) return; var v=at(e); if(v!==R.drag){ R.drag=v; draw(v); sfx("tick"); } });
+  bar.addEventListener("pointerup",function(e){ if(e.pointerId!==id) return; id=null; var v=at(e); R.drag=null; closeSheet(); goPct(v); sfx("ok"); });
+  bar.addEventListener("pointercancel",function(){ id=null; R.drag=null; draw(Math.floor(R.meta[R.id].pct||0)); });
+  return box;
 }
 function menuPick(k){
   if(k==="toc"){ var l=tocList(); R.tpick=0; l.forEach(function(it,i){ if(it.ch<R.pos.ch || (it.ch===R.pos.ch && it.p<=R.pos.p)) R.tpick=i; }); R.sheet="toc"; renderSheet(); sfx("tap"); }
+  else if(k==="notes"){ R.npick=0; R.sheet="notes"; renderSheet(); sfx("tap"); }
   else if(k==="size"){ R.set.size=(R.set.size+1)%SIZES.length; saveSet(); relayout(); renderSheet(); sfx("tap"); }
   else if(k==="jump"){ R.jump=Math.floor(R.meta[R.id].pct||0); R.sheet="jump"; renderSheet(); sfx("tap"); }
   else if(k==="select"){ enterSel(); }
   else if(k==="eink"){ R.set.eink=!eink(); saveSet(); applyEink(); renderSheet(); sfx("tap"); }
+  else if(k==="help"){ closeSheet(); openHelp(); }
   else if(k==="shelf"){ closeBook(); sfx("tap"); }
 }
 /* the book's own contents, or one row per chapter when it has none */
@@ -606,15 +885,13 @@ function tocList(){
   return R.book.chapters.map(function(c,i){ return {title:chapterTitle(i), ch:i, p:0, d:0}; });
 }
 function tocGo(it){ closeSheet(); goTo(clamp(it.ch,0,R.book.chapters.length-1),{p:it.p, c:0}); sfx("ok"); }
+function noteGo(mk){ closeSheet(); goTo(clamp(mk.ch,0,R.book.chapters.length-1),{p:mk.p, c:mk.a}); sfx("ok"); }
 function jumpBy(k){ R.jump=clamp(R.jump+k,0,100); sfx("move"); renderSheet(); }
 function sheetA(){
   if(R.sheet==="menu") menuPick(menuItems()[R.mpick].k);
   else if(R.sheet==="toc"){ var l=tocList(); if(l[R.tpick]) tocGo(l[R.tpick]); }
-  else if(R.sheet==="jump"){
-    var pos=posAtPct(R.jump); closeSheet();
-    if(R.jump>=100) goTo(R.book.chapters.length-1,null,true); else goTo(pos.ch,pos);
-    sfx("ok");
-  }
+  else if(R.sheet==="notes"){ var n=marksSorted(); if(n[R.npick]) noteGo(n[R.npick]); }
+  else if(R.sheet==="jump"){ var v=R.jump; closeSheet(); goPct(v); sfx("ok"); }
 }
 function sheetBack(){ if(R.sheet==="menu") closeSheet(); else { R.sheet="menu"; renderSheet(); } sfx("tap"); }
 function sheetButton(b){
@@ -625,28 +902,53 @@ function sheetButton(b){
     else if(b==="up"||b==="down") jumpBy(b==="up"?10:-10);
     return;
   }
-  var n=R.sheet==="menu" ? menuItems().length : tocList().length, k=b==="up"||b==="left" ? -1 : 1;
-  if(R.sheet==="menu") R.mpick=clamp(R.mpick+k,0,n-1); else R.tpick=clamp(R.tpick+(b==="left"||b==="right" ? k*8 : k),0,n-1);
+  var k=b==="up"||b==="left" ? -1 : 1, big=b==="left"||b==="right";
+  if(R.sheet==="menu") R.mpick=clamp(R.mpick+k,0,menuItems().length-1);
+  else if(R.sheet==="toc") R.tpick=clamp(R.tpick+(big ? k*8 : k),0,tocList().length-1);
+  else R.npick=clamp(R.npick+(big ? k*8 : k),0,Math.max(0,R.meta[R.id].marks.length-1));
   sfx("move"); renderSheet();
 }
+/* the key card: once over the first book, and from the menu after that; a tap or any key puts it away */
+function openHelp(){
+  var h=$("rd-help"); h.textContent="";
+  var zones=el("div","rd-zones");
+  zones.appendChild(el("span","",tr("reader.h.prev")));
+  zones.appendChild(el("span","",tr("reader.h.menu")));
+  zones.appendChild(el("span","",tr("reader.h.next")));
+  h.appendChild(zones);
+  var card=el("div","rd-card");
+  ["reader.h.hold","reader.h.keys","reader.h.sel","reader.h.marks"].forEach(function(k){ card.appendChild(el("p","",tr(k))); });
+  card.appendChild(el("p","hint",tr("reader.h.close")));
+  h.appendChild(card);
+  h.hidden=false; R.sheet="help";
+  h.onclick=closeHelp;
+}
+function closeHelp(){ $("rd-help").hidden=true; if(R.sheet==="help") R.sheet=""; sfx("tap"); }
 
 /* ---------- chin pad ----------
    shelf: ▲▼ pick, A open
-   page: ◀▲ back a page, ▶▼ on, A or START menu, SELECT the word cursor, B shelf
-   cursor: ◀▶▲▼ move (holding A extends), A (pressed and let go) look up, START quote, B or SELECT leave
-   entry: ◀▶▲▼ page, B or A close, START word book (as in the dictionary)
-   B is "back" on every screen of the handheld, so the quote sits on START, the screen's extra action, and the word book,
-   which START also holds in the dictionary, moves with the entry */
+   page: ◀▲ back a page, ▶▼ on, A or START menu, SELECT selection, B back from a link, else shelf
+   selection: ◀▶▲▼ move (holding A extends), A (pressed and let go) look up, START quote, SELECT word / sentence /
+     paragraph, B leave
+   entry: ◀▶▲▼ page, B or A close, START word book (as in the dictionary); quote: A thought, START remove (twice), B close;
+   footnote: A go there, B close; help: any key
+   B is "back" on every screen of the handheld, so the quote sits on START, the screen's extra action */
 function readerButton(b,down){
   if(!R.id){ if(down) shelfButton(b); return; }
   if(!R.book) return;
-  if(R.sheet==="thought"){ if(down && b==="a") closeDef(); else if(down && b==="b"){ R.thought.draft=""; closeDef(); } return; }
-  if(R.sheet==="def"){
+  if(R.sheet==="help"){ if(down) closeHelp(); return; }
+  if(R.sheet==="thought"){ if(down && b==="a") closeLow(); else if(down && b==="b"){ R.low.draft=""; closeLow(); } return; }
+  if(lowerSheet()){
     if(!down) return;
-    if(b==="up"||b==="left") defTurn(-1);
-    else if(b==="down"||b==="right") defTurn(1);
-    else if(b==="a"||b==="b"||b==="select") closeDef();
-    else if(b==="start" && R.def.results && R.def.results.length){ LP.dict.toggleWord(headOf(R.def)); renderDef(); }
+    if(b==="up"||b==="left") lowTurn(-1);
+    else if(b==="down"||b==="right") lowTurn(1);
+    else if(b==="b"||b==="select") closeLow();
+    else if(R.sheet==="def"){
+      if(b==="a") closeLow();
+      else if(b==="start" && R.low.results && R.low.results.length){ LP.dict.toggleWord(headOf(R.low)); renderLow(); }
+    }
+    else if(R.sheet==="mark"){ if(b==="a") markThought(); else if(b==="start") markDelete(); }
+    else if(R.sheet==="note" && b==="a") jumpLink(R.low.ch,R.low.p);
     return;
   }
   if(R.sheet){ if(down) sheetButton(b); return; }
@@ -655,7 +957,8 @@ function readerButton(b,down){
     if(b==="a"){ if(down){ s.held=true; s.moved=false; } else if(s.held){ s.held=false; if(!s.moved) lookupSel(); } return; }
     if(!down) return;
     if(b==="left"||b==="right"||b==="up"||b==="down") moveCur(b);
-    else if(b==="b"||b==="select"){ endSel(); sfx("tap"); }
+    else if(b==="select") cycleUnit();
+    else if(b==="b"){ endSel(); sfx("tap"); }
     else if(b==="start") quote();
     return;
   }
@@ -664,7 +967,7 @@ function readerButton(b,down){
   else if(b==="right"||b==="down") turn(1);
   else if(b==="a"||b==="start") openMenu();
   else if(b==="select") enterSel();
-  else if(b==="b"){ closeBook(); sfx("tap"); }
+  else if(b==="b"){ if(R.back) goBack(); else { closeBook(); sfx("tap"); } }
 }
 LP.padRoute("reader",function(b,down){ if(!visible()) return false; readerButton(b,down); return true; });
 window.addEventListener("resize",function(){ clearTimeout(R.rz); R.rz=setTimeout(relayout,150); });
@@ -673,8 +976,8 @@ window.addEventListener("resize",function(){ clearTimeout(R.rz); R.rz=setTimeout
 var ICON=["................","................",".00000000000000.","0333333003333330","0311113003111130","0333333003333330","0311133003111130","0333333003333330","0311113003111130","0333333003333330","0311333003113330","0333333003333330","0000000000000000",".02222222222220.","..000000000000..","................"];
 
 function openReader(){
-  R.sheet=""; R.sel=null; R.def=null; R.armed=null;
-  if(R.id) closeBook(); else { mode(false); renderSheet(); renderDef(); }
+  R.sheet=""; R.sel=null; R.low=null; R.armed=null;
+  if(R.id) closeBook(); else { mode(false); renderSheet(); renderLow(); }
   show("reader"); showPad(true); applyEink(); renderShelf();
   /* the browser may clear a site's data after a while unless it is persistent (a Home Screen app always is) */
   P.persist().catch(function(){});
@@ -686,21 +989,21 @@ LP.builtin({id:"reader", label:"app.reader", icon:function(){ return ICON; }, vi
   leave:function(){
     if(R.sheet==="thought") saveThought();
     flushMeta(); unmark();
-    R.sheet=""; R.sel=null; R.def=null; R.thought=null; R.armed=null;
-    $("rd-sheet").hidden=true; $("rd-def").hidden=true;
+    R.sheet=""; R.sel=null; R.low=null; R.armed=null;
+    $("rd-sheet").hidden=true; $("rd-def").hidden=true; $("rd-help").hidden=true;
     $("screen").classList.remove("rd-eink");
   },
   padLayout:function(){ if(visible() && R.book) setTimeout(relayout,0); },
-  lang:function(){ if(!visible()) return; if(R.book){ footer(); renderSheet(); renderDef(); } else renderShelf(); },
+  lang:function(){ if(!visible()) return; if(R.book){ footer(); renderSheet(); renderLow(); if(R.sheet==="help") openHelp(); } else renderShelf(); },
   ready:function(){
     var base=S.db.doc("data/users/local/reader");
     R.refs={set:base, books:base.collection("books")};
     Promise.all([
       base.get().then(function(sn){
         var s=(sn.exists && own(sn.data()))||{};
-        R.set={size:s.size>=0 && s.size<SIZES.length ? s.size|0 : 1, eink:typeof s.eink==="boolean" ? s.eink : null, seeded:!!s.seeded};
+        R.set={size:s.size>=0 && s.size<SIZES.length ? s.size|0 : 1, eink:typeof s.eink==="boolean" ? s.eink : null, seeded:!!s.seeded, helped:!!s.helped};
       }),
-      R.refs.books.get().then(function(q){ q.docs.forEach(function(d){ var m=own(d.data()); if(m && m.title && m.lens) R.meta[d.id]=m; }); })
+      R.refs.books.get().then(function(q){ q.docs.forEach(function(d){ var m=own(d.data()); if(m && m.title && m.lens){ if(!Array.isArray(m.marks)) m.marks=[]; R.meta[d.id]=m; } }); })
     ]).catch(function(){}).then(function(){
       R.loaded=true;
       if(visible()){ applyEink(); if(!R.id) renderShelf(); seed(); }

@@ -339,6 +339,28 @@ textarea::placeholder{color:var(--ink-2)}
 .rd-def .sheet-title small{font-size:16px;color:var(--ink-2);flex:none}
 .rd-def textarea{flex:1;min-height:0}
 .rd-def .hint{color:var(--ink)}
+.rd-book{position:relative}
+.rd-flow p.img{text-indent:0;text-align:center;margin:.4em 0;break-inside:avoid;line-height:0}
+.rd-flow p.img img{display:inline-block;image-rendering:pixelated;image-rendering:crisp-edges}
+.rd-flow p.img.bad{line-height:inherit;color:var(--ink-2)}
+.rd-flow a.ln{color:inherit;text-decoration:none;border-bottom:2px solid var(--ink)}
+.rd-flow u.hl{text-decoration:underline dotted var(--ink);text-decoration-thickness:2px;text-underline-offset:.2em}
+.rd-notes li{align-items:flex-start}
+.rd-notes li>span{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.rd-notes li>span span{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.4}
+.rd-notes li>span small{margin:0;font-family:var(--f-lcd);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rd-track{flex:none;display:flex;flex-direction:column;gap:4px;padding:2px 4px}
+.rd-bar{height:22px;border:2px solid var(--ink);position:relative;touch-action:none;cursor:pointer}
+.rd-bar i{position:absolute;left:0;top:0;bottom:0;background:var(--ink)}
+.rd-track .hint{text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rd-help{position:absolute;inset:0;z-index:3;display:flex;flex-direction:column;background:var(--lcd);cursor:pointer}
+.rd-zones{flex:1;display:flex}
+.rd-zones span{flex:3;display:flex;align-items:center;justify-content:center;border:2px dashed var(--ink);margin:6px 3px;font-size:15px;text-align:center}
+.rd-zones span:nth-child(2){flex:4}
+.rd-card{flex:none;border-top:3px solid var(--ink);padding:8px 12px 10px;display:flex;flex-direction:column;gap:5px;font-size:14px;line-height:1.45}
+.rd-card p{margin:0}
+.rd-card .hint{text-align:center}
+.rd.eink .rd-flow p.img.bad{color:var(--ink)}
 /* e-ink: no motion, and only the two tones furthest apart (ink on paper) */
 .screen.rd-eink{box-shadow:none}
 .screen.rd-eink::after{display:none}

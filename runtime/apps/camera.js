@@ -582,7 +582,7 @@ if(window.ResizeObserver) new ResizeObserver(function(){ camLayout(); }).observe
 window.addEventListener("resize",camLayout);
 
 LP.film={TINTS:TINTS, TINT_ORDER:TINT_ORDER, tintLabel:tintLabel, tintPrint:tintPrint, STRIP:STRIP, stripWidth:stripWidth,
-  CARD:CARD, putFrame:putFrame, fontsReady:fontsReady};
+  CARD:CARD, putFrame:putFrame, fontsReady:fontsReady, ditherLuma:ditherLuma};   /* the reader dithers book pictures with the same look */
 LP.padRoute("cam",function(b,down){ if($("v-cam").hidden) return false; camButton(b,down); return true; });
 LP.builtin({id:"camera", label:"app.camera", icon:"camera", view:"cam",
   open:function(){ openCam(); },
