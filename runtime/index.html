@@ -109,6 +109,19 @@
       <div class="cal-sheet" id="cal-sheet" hidden></div>
     </section>
 
+    <!-- DICTIONARY: the word box, candidates below; an entry, the word book and the book list open over it -->
+    <section class="view dict-view" id="v-dict" hidden>
+      <div class="dict-head">
+        <input id="dict-q" type="search" enterkeyhint="search" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" maxlength="64" data-i18n-ph="dict.ph" placeholder="输入英文单词">
+        <button class="btn ghost" type="button" id="dict-words-btn" data-i18n="dict.words">生词本</button>
+        <button class="btn ghost" type="button" id="dict-books-btn" data-i18n="dict.books">词典</button>
+      </div>
+      <ul class="lcd-menu dict-list" id="dict-list"></ul>
+      <p class="hint dict-note" id="dict-note"></p>
+      <div class="dict-sheet" id="dict-sheet" hidden></div>
+      <input type="file" id="dict-file" multiple hidden>
+    </section>
+
     <!-- CAMERA: one fixed screen, like the real thing. Chin buttons or the key strip below. -->
     <section class="view cam-view" id="v-cam" hidden>
       <div class="link-boot" id="cam-boot" hidden role="status" aria-live="polite"></div>
@@ -256,9 +269,11 @@
 <script src="strings.js"></script>
 <script src="platform.js"></script>
 <script src="lunar.js"></script>
+<script src="stardict.js"></script>
 <script src="core.js"></script>
 <script src="apps/notes.js"></script>
 <script src="apps/calendar.js"></script>
+<script src="apps/dict.js"></script>
 <script src="apps/camera.js"></script>
 <script src="apps/cutter.js"></script>
 <script src="apps/cart.js"></script>
