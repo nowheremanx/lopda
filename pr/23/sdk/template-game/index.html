@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>小院</title>
+<!-- Lo-PDA game template (lopda/1 + lo-game.js). Bilingual through game.t (PAD.lang). MIT License. -->
+</head>
+<body>
+<!-- The framework. Leave this block alone: node tools/lo-game.mjs <folder> fills it in, plus a font block after it. -->
+<script data-lo-game="1.2.0"></script>
+<script>
+var game = LoGame.create({ width: 160, height: 144, lang: "zh" });   /* lang: used when the runtime gives none */
+var T = game.t;                        /* T({zh: "...", en: "..."}) picks the player's language */
+document.documentElement.lang = game.lang === "zh" ? "zh-CN" : "en";
+var HUD = 16;                          /* status bar height; the map is drawn below it */
+var VIEW_H = 144 - HUD;
+
+/* ---- art: 8x8 pixels, 0 ink, 1 dark, 2 mid, 3 paper, . clear ---- */
+var ART = LoGame.sprites({
+  down:  ["..0000..", ".011110.", ".030030.", ".033330.", "..0000..", ".011110.", "..0110..", "..0..0.."],
+  down2: ["..0000..", ".011110.", ".030030.", ".033330.", "..0000..", ".011110.", "..0110..", ".0....0."],
+  up:    ["..0000..", ".011110.", ".011110.", ".011110.", "..0000..", ".011110.", "..0110..", "..0..0.."],
+  up2:   ["..0000..", ".011110.", ".011110.", ".011110.", "..0000..", ".011110.", "..0110..", ".0....0."],
+  side:  ["..0000..", ".011110.", ".013300.", ".033330.", "..0000..", "..01110.", "..0110..", "..0..0.."],
+  side2: ["..0000..", ".011110.", ".013300.", ".033330.", "..0000..", "..01110.", "..0110..", ".0...0.."],
+  cat:   ["........", ".0...0..", ".00000..", ".03030..", ".00000.0", "..0000.0", "..00000.", "..0.0.0."],
+  elder: ["..1111..", ".133331.", ".130031.", ".133331.", "..3333..", ".022220.", "..0220..", "..0..0.."],
+  key:   ["........", "..000...", ".03330..", ".03.30..", "..000...", "...0....", "...00...", "...0...."],
+  grass: ["33333333", "33323333", "33333333", "33333323", "33333333", "32333333", "33333333", "33333233"],
+  flower:["33333333", "33303333", "33020333", "33303333", "33313333", "33313333", "33333333", "33333333"],
+  path:  ["22222222", "22222222", "22212222", "22222222", "22222222", "22222212", "22222222", "22222222"],
+  wall:  ["00000000", "01110111", "01110111", "00000000", "11011101", "11011101", "00000000", "01110111"],
+  tree:  ["..0000..", ".011110.", "01111110", "01111110", ".011110.", "..0000..", "...00...", "..0000.."],
+  water: ["22222222", "21122222", "22222222", "22222112", "22222222", "22112222", "22222222", "22222222"],
+  roof:  ["00000000", "01010101", "10101010", "01010101", "10101010", "01010101", "10101010", "00000000"],
+  brick: ["11111111", "13331333", "13331333", "11111111", "33133313", "33133313", "11111111", "13331333"],
+  door:  ["13333331", "10000001", "10111101", "10111101", "10111301", "10111101", "10111101", "10111101"],
+  floor: ["33333333", "33333333", "33333333", "22222222", "33333333", "33333333", "33333333", "22222222"],
+  shelf: ["00000000", "01212120", "00000000", "02121210", "00000000", "01212120", "00000000", "00000000"],
+  table: ["33333333", "00000000", "01111110", "00000000", "30333303", "30333303", "30333303", "33333333"],
+  exit:  ["33333333", "33333333", "32222223", "33333333", "32222223", "33333333", "32222223", "33333333"]
+});
+
+/* ---- two places; a door "D" in each leads to the other ---- */
+var YARD = LoGame.tilemap({
+  size: 8, solid: "#T~Rh",
+  tiles: { ".": ART.grass, "*": ART.flower, "=": ART.path, "#": ART.wall, "T": ART.tree, "~": ART.water, "R": ART.roof, "h": ART.brick, "D": ART.door },
+  map: [
+    "########################",
+    "#......*......T.RRRRR..#",
+    "#..T.......*....hhhhh..#",
+    "#.......=======.hhDhh..#",
+    "#...*...=.....=...=....#",
+    "#.......=.....=====....#",
+    "#..~~~..=..*..=...*....#",
+    "#..~~~..=.....=........#",
+    "#..~~~..=======........#",
+    "#...........=..........#",
+    "#.....*.....=......T...#",
+    "#...........=..........#",
+    "#..T........=.....*....#",
+    "#...........=..........#",
+    "#.....*.....=.......~~~#",
+    "#...........=...T...~~~#",
+    "#..*........=..........#",
+    "#...........=.....*....#",
+    "#......T....=..........#",
+    "########################"
+  ]
+});
+var HOUSE = LoGame.tilemap({
+  size: 8, solid: "#bt",
+  tiles: { "#": ART.wall, ".": ART.floor, "b": ART.shelf, "t": ART.table, "D": ART.exit },
+  map: [
+    "############",
+    "#bbb...bbbb#",
+    "#..........#",
+    "#...tt.....#",
+    "#...tt.....#",
+    "#..........#",
+    "#..........#",
+    "#####D######"
+  ]
+});
+
+/* ---- state, saved with game.save ---- */
+var S, busy = false;
+function fresh() { return { place: "yard", tx: 12, ty: 12, pets: 0, found: false, key: false, thanked: false }; }
+function save() { game.save("state", S); }
+
+/* ---- a person who walks one tile at a time on a map ---- */
+var DIRS = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
+function walker(tx, ty, dir) { return { tx: tx, ty: ty, x: tx * 8, y: ty * 8, dir: dir || "down", step: 0, from: null }; }
+function cameraFor(p, map) { return LoGame.camera(p.x + 4, p.y + 4, 160, VIEW_H, map.width, map.height); }
+
+/* one scene definition shared by both places; each place says what is in it */
+function place(map, things) {
+  var p;
+  return {
+    enter: function (spawn) { p = walker(spawn.tx, spawn.ty, spawn.dir); S.place = spawn.place; S.tx = p.tx; S.ty = p.ty; },
+    update: function (dt) {
+      if (busy) return;
+      if (p.from) {                                   /* sliding one tile */
+        p.step = Math.min(1, p.step + dt / 0.15);
+        p.x = LoGame.lerp(p.from[0], p.tx * 8, p.step); p.y = LoGame.lerp(p.from[1], p.ty * 8, p.step);
+        if (p.step >= 1) {                            /* arrived: doors and things on the ground trigger here */
+          p.from = null; S.tx = p.tx; S.ty = p.ty;
+          if (map.get(p.tx, p.ty) === "D") things.door();
+          else if (things.step) things.step(p.tx, p.ty);
+        }
+        return;
+      }
+      var want = null;
+      ["up", "down", "left", "right"].forEach(function (d) { if (game.btn(d)) want = d; });
+      if (!want && game.pointer.down) {               /* touch: walk toward the finger */
+        var cam = cameraFor(p, map);
+        var dx = game.pointer.x + cam.x - (p.x + 4), dy = game.pointer.y - HUD + cam.y - (p.y + 4);
+        if (Math.abs(dx) > 6 || Math.abs(dy) > 6) want = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "right" : "left") : (dy > 0 ? "down" : "up");
+        else if (game.pointer.pressed) act();
+      }
+      if (want) {
+        p.dir = want;
+        var nx = p.tx + DIRS[want][0], ny = p.ty + DIRS[want][1];
+        if (!map.solid(nx, ny) && !things.blocked(nx, ny)) { p.from = [p.x, p.y]; p.tx = nx; p.ty = ny; p.step = 0; }
+      }
+      if (game.pressed("a")) act();
+      if (game.pressed("start")) menu();
+      /* A works on what you face, or on what you stand on */
+      function act() { things.act(p.tx + DIRS[p.dir][0], p.ty + DIRS[p.dir][1], p); }
+    },
+    draw: function (g) {
+      var cam = cameraFor(p, map);
+      g.clear(g.INK);
+      g.origin(0, HUD); g.clip(0, 0, 160, VIEW_H);    /* the map lives under the status bar */
+      map.draw(g, cam.x, cam.y);
+      g.origin(-cam.x, HUD - cam.y);                  /* from here on, draw in map pixels */
+      things.draw(g, p);
+      var walking = p.from && Math.floor(p.step * 2) % 2 === 0;
+      var s = p.dir === "up" ? (walking ? ART.up2 : ART.up) : p.dir === "down" ? (walking ? ART.down2 : ART.down) : (walking ? ART.side2 : ART.side);
+      g.sprite(s, p.x, p.y, { flip: p.dir === "left" });
+      g.origin(0, 0); g.clip();
+      g.window(0, 0, 160, HUD, { thin: true });
+      g.text(T({ zh: "摸猫 {n}  钥匙 {k}", en: "Pets {n}  Key {k}" }, { n: S.pets, k: S.key ? T({ zh: "有", en: "yes" }) : T({ zh: "无", en: "no" }) }), 4, 1);
+    }
+  };
+}
+
+/* ---- the yard ---- */
+var cat = { tx: 11, ty: 5 }, KEY = { tx: 3, ty: 16 };
+async function pickKey() {
+  busy = true;
+  S.found = true; S.key = true; game.sfx("ok"); game.flash();
+  await game.say(T({ zh: "草丛里有一把旧钥匙。你把它收好了。", en: "An old key in the grass. You pocket it." })); save();
+  busy = false;
+}
+game.scene("yard", place(YARD, {
+  blocked: function (x, y) { return x === cat.tx && y === cat.ty; },
+  door: function () { game.sfx("move"); game.go("house", { place: "house", tx: 5, ty: 6, dir: "up" }); },
+  draw: function (g, p) {
+    if (!S.found) g.sprite(ART.key, KEY.tx * 8, KEY.ty * 8);
+    g.sprite(ART.cat, cat.tx * 8, cat.ty * 8, { flip: p.x > cat.tx * 8 });
+  },
+  step: function (x, y) { if (!S.found && x === KEY.tx && y === KEY.ty) pickKey(); },
+  act: async function (x, y, p) {
+    if (!S.found && ((x === KEY.tx && y === KEY.ty) || (p.tx === KEY.tx && p.ty === KEY.ty))) return pickKey();
+    busy = true;
+    if (x === cat.tx && y === cat.ty) {
+      await game.say([T({ zh: "喵。", en: "Mew." }), T({ zh: "一只橘猫趴在小路上，眯着眼看你。", en: "A ginger cat lies on the path, squinting at you." })], { name: T({ zh: "猫", en: "Cat" }) });
+      var i = await game.choose([T({ zh: "摸摸它", en: "Pet it" }), T({ zh: "走开", en: "Leave" })]);
+      if (i === 0) { S.pets++; game.sfx("coin"); await game.say(T({ zh: "它呼噜呼噜地蹭你的手。", en: "It purrs and rubs your hand." })); save(); }
+    }
+    busy = false;
+  }
+}));
+
+/* ---- inside the house ---- */
+var elder = { tx: 8, ty: 3 }, ELDER = T({ zh: "老伯", en: "Old man" });
+game.scene("house", place(HOUSE, {
+  blocked: function (x, y) { return x === elder.tx && y === elder.ty; },
+  door: function () { game.sfx("move"); game.go("yard", { place: "yard", tx: 18, ty: 4, dir: "down" }); },
+  draw: function (g) { g.sprite(ART.elder, elder.tx * 8, elder.ty * 8); },
+  act: async function (x, y) {
+    if (x !== elder.tx || y !== elder.ty) return;
+    busy = true;
+    if (S.thanked) await game.say(T({ zh: "猫又胖了。", en: "That cat's got fatter." }), { name: ELDER });
+    else if (S.key) {
+      S.thanked = true; S.key = false; game.sfx("win");
+      await game.say([T({ zh: "这是……我的钥匙！", en: "Why... that's my key!" }), T({ zh: "找了好几天，谢谢你。", en: "Looked for days. Thank you." })], { name: ELDER }); save();
+    } else await game.say([T({ zh: "我的钥匙不见了。", en: "I've lost my key." }), T({ zh: "大概掉在院子西南边的草丛里。", en: "Somewhere in the grass, southwest of the yard." })], { name: ELDER });
+    busy = false;
+  }
+}));
+
+/* ---- title and menu ---- */
+game.scene("title", {
+  enter: function () {
+    game.load("state").then(function (v) {
+      if (v && v.found == null) v.found = !!(v.key || v.thanked);   /* saves from v1.1.0 */
+      S = v;
+    });
+  },
+  update: function () {
+    if (!game.ok() || busy) return;
+    busy = true;
+    game.choose(S ? [T({ zh: "继续", en: "Continue" }), T({ zh: "从头开始", en: "New game" })] : [T({ zh: "开始", en: "Start" })], { cancel: false }).then(function (i) {
+      busy = false;
+      if (!S || i === 1) S = fresh();
+      game.go(S.place, { place: S.place, tx: S.tx, ty: S.ty });
+    });
+  },
+  draw: function (g) {
+    g.clear(g.PAPER);
+    g.window(20, 30, 120, 44);
+    g.text(T({ zh: "小  院", en: "THE YARD" }), 80, 38, { align: "center" });
+    g.text(T({ zh: "lo-game 示例", en: "lo-game example" }), 80, 54, { align: "center", color: g.DARK });
+    if (Math.floor(game.time * 2) % 2 === 0) g.text(T({ zh: "按 A 开始", en: "PRESS A" }), 80, 100, { align: "center" });
+  }
+});
+async function menu() {
+  busy = true;
+  var i = await game.choose([T({ zh: "存档", en: "Save" }), T({ zh: "回标题", en: "Title" })], { title: T({ zh: "菜单", en: "Menu" }) });
+  if (i === 0) { save(); game.sfx("ok"); await game.say(T({ zh: "存好了。", en: "Saved." })); }
+  busy = false;
+  if (i === 1) { save(); game.go("title"); }
+}
+
+game.start("title");
+</script>
+</body>
+</html>
