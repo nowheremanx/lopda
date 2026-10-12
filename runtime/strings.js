@@ -133,6 +133,9 @@
       "cal.rep.solar": "每年{mon}{d}日", "cal.rep.lunar": "每年农历{month}月{day}", "cal.rep.lunarleap": "每年农历闰{month}月{day}",
       "cal.noname": "先写个名字。", "cal.nodb": "现在存不了档，这个纪念日关掉就没了。", "cal.delfail": "删除失败",
       "cal.empty": "还没有纪念日。选一天，按 A 再按「加纪念日」。", "cal.emptynodb": "还没有纪念日。现在存不了档，加了关掉就没了。",
+      "cal.jump.title": "跳到日期", "cal.jump.go": "跳转", "cal.jump.sep": "年|月|日", "cal.jump.digit": "第 {n} 位",
+      "cal.jump.range": "只能查 1900 到 2100 年", "cal.jump.month": "月份要在 1 到 12 之间", "cal.jump.day": "日期不对",
+      "cal.jump.keys": "◂▸ 移位　▲▼ 改数　SELECT 公历 / 农历",
       "cal.tag": "{n}天后 {name}", "cal.tagtoday": "今天 {name}", "cal.hint": "{n}天后：{name}", "cal.hinttoday": "今天：{name}",
 
 
@@ -328,6 +331,9 @@
       "cal.rep.solar": "Every {mon} {d}", "cal.rep.lunar": "Every lunar {month}/{day}", "cal.rep.lunarleap": "Every lunar leap {month}/{day}",
       "cal.noname": "Give it a name first.", "cal.nodb": "Can't save right now: this date is gone when you close.", "cal.delfail": "Delete failed",
       "cal.empty": "No dates yet. Pick a day, press A, then Add date.", "cal.emptynodb": "No dates yet. Can't save right now: new ones are gone when you close.",
+      "cal.jump.title": "Go to date", "cal.jump.go": "Go", "cal.jump.sep": "-|-| ", "cal.jump.digit": "Digit {n}",
+      "cal.jump.range": "1900 to 2100 only", "cal.jump.month": "Month must be 1 to 12", "cal.jump.day": "No such day",
+      "cal.jump.keys": "◂▸ move · ▲▼ change · SELECT solar / lunar",
       "cal.tag": "{n}d {name}", "cal.tagtoday": "Today {name}", "cal.hint": "{name} in {n} days", "cal.hinttoday": "Today: {name}",
 
 

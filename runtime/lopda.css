@@ -368,3 +368,17 @@ textarea::placeholder{color:var(--ink-2)}
 .rd.eink .btn{box-shadow:none}
 .rd.eink .btn:disabled{background:transparent;color:var(--ink);border:2px dashed var(--ink)}
 .rd.eink *{transition:none!important;animation:none!important}
+/* calendar: go to a date */
+#cal-ym{cursor:pointer}
+.cal-digits{display:flex;align-items:baseline;justify-content:center;gap:2px;flex:none;font-family:var(--f-pix)}
+.cal-digits button{width:28px;height:40px;padding:0;border:2px solid var(--ink);background:none;color:var(--ink);font-family:var(--f-pix);font-size:28px;line-height:1;cursor:pointer}
+.cal-digits button.on{background:var(--ink);color:var(--lcd)}
+.cal-digits span{font-family:var(--f-lcd);font-size:15px;padding:0 4px 0 2px}
+.cal-preview{margin:0;flex:none;text-align:center;font-size:14px;min-height:1.4em}
+.cal-preview.err{color:var(--ink-2)}
+.cal-numpad{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;flex:none;width:100%;max-width:300px;align-self:center}
+.cal-numpad .btn{padding:7px 0;font-family:var(--f-pix);font-size:20px}
+.cal-jumpkeys{text-align:center;flex:none}
+@media (pointer:coarse){.cal-jumpkeys{display:none}}
+.cal-kind .cal-leap{flex:none;padding:8px 10px}
+@media (max-height:700px){.cal-numpad{gap:4px}.cal-numpad .btn{padding:4px 0;font-size:18px}.cal-digits button{height:34px;font-size:24px}}

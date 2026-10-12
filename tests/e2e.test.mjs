@@ -343,10 +343,10 @@ test("calendar: month view, today, a day off, the day sheet, and a lunar yearly 
   const oct1 = p.locator("#cal-grid .cal-cell:not(.out)").first();
   assert.equal(await oct1.locator("i.off").textContent(), "休");
   assert.equal(await oct1.locator("span").textContent(), "国庆节");
-  /* arrows move the day, START comes back to today */
+  /* arrows move the day */
   await p.keyboard.press("ArrowRight");
   assert.ok(!(await today.getAttribute("class")).includes("sel"));
-  await p.keyboard.press("Enter");
+  await p.keyboard.press("ArrowLeft");
   assert.ok((await today.getAttribute("class")).includes("sel"));
   /* B, the month view's "back", also comes back to today, across a month; on today it changes nothing */
   for (let i = 0; i < 4; i++) await p.keyboard.press("ArrowDown");
@@ -411,6 +411,60 @@ test("calendar: English names", { skip, timeout: 30000 }, async (t) => {
   const c = await calPage(t, { locale: "en-US" });
   await c.boot(); await c.open();
   assert.equal(await c.p.textContent("#cal-ym"), "Oct 2026");
+  assert.deepEqual(notBlocked(c.errors), []);
+});
+
+test("calendar: START goes to a date, Gregorian or lunar, by keys, keyboard digits or the on-screen pad", { skip, timeout: 60000 }, async (t) => {
+  const c = await calPage(t);
+  await c.boot(); await c.open();
+  const { p } = c;
+  const sel = async () => [await p.textContent("#cal-ym"), await p.textContent("#cal-grid .cal-cell.sel b")];
+  const digits = () => p.$$eval("#cal-sheet .cal-digits button", (b) => b.map((x) => x.textContent).join(""));
+  /* START opens the panel on the selected day; keyboard digits type from the first and the preview follows */
+  await p.keyboard.press("Enter");
+  assert.equal(await digits(), "20261011");
+  for (const k of "19491001") await p.keyboard.press(k);
+  assert.match(await p.textContent("#cal-sheet .cal-preview"), /1949年10月1日 星期六/);
+  await p.keyboard.press("x");
+  assert.ok(await p.isHidden("#cal-sheet"));
+  assert.deepEqual(await sel(), ["1949年10月", "1"]);
+  /* lunar: SELECT turns the same day into lunar digits (1949-10-01 is 八月初十); the chin pad edits the year and day */
+  await p.keyboard.press("Enter");
+  await p.keyboard.press("Shift");
+  assert.equal(await digits(), "19490810");
+  await p.keyboard.press("ArrowRight"); await p.keyboard.press("ArrowRight");   /* the tens of the year */
+  for (let i = 0; i < 5; i++) await p.keyboard.press("ArrowUp");               /* 1949 -> 1999 */
+  for (let i = 0; i < 5; i++) await p.keyboard.press("ArrowRight");
+  for (let i = 0; i < 5; i++) await p.keyboard.press("ArrowUp");               /* day 10 -> 15 */
+  assert.equal(await digits(), "19990815");
+  await p.keyboard.press("Enter");                                              /* START also jumps */
+  const mid = LUNAR.toSolar(1999, 8, 15, false);
+  assert.deepEqual(await sel(), [`${mid.y}年${mid.m}月`, String(mid.d)]);
+  assert.match(await p.textContent("#cal-grid .cal-cell.sel span"), /中秋/);
+  /* a leap month, on the on-screen pad: 2020 闰四月十五 */
+  await p.click("#cal-ym");
+  await p.locator("#cal-sheet .cal-kind .btn", { hasText: "按农历" }).click();
+  for (const k of "20200415") await p.locator("#cal-sheet .cal-numpad .btn", { hasText: new RegExp("^" + k + "$") }).click();
+  await p.locator("#cal-sheet .cal-kind .cal-leap").click();
+  await p.locator("#cal-sheet .cal-keys .ck-a").click();
+  const lp = LUNAR.toSolar(2020, 4, 15, true);
+  assert.deepEqual(await sel(), [`${lp.y}年${lp.m}月`, String(lp.d)]);
+  /* a day past the month's end falls on its last day; a year out of range stays put with a message; B cancels */
+  await p.keyboard.press("Enter");                                              /* the panel always opens in Gregorian */
+  for (const k of "20230231") await p.keyboard.press(k);
+  assert.match(await p.textContent("#cal-sheet .cal-preview"), /2023年2月28日/);
+  await p.keyboard.press("Backspace"); await p.keyboard.press("Backspace"); await p.keyboard.press("Backspace"); await p.keyboard.press("Backspace");
+  await p.keyboard.press("Backspace"); await p.keyboard.press("Backspace"); await p.keyboard.press("Backspace"); await p.keyboard.press("Backspace");
+  for (const k of "18991231") await p.keyboard.press(k);
+  assert.match(await p.textContent("#cal-sheet .cal-preview"), /1900 到 2100/);
+  await p.keyboard.press("x");
+  assert.ok(await p.isVisible("#cal-sheet"), "an out-of-range year does not jump");
+  await p.keyboard.press("z");
+  assert.ok(await p.isHidden("#cal-sheet"));
+  assert.deepEqual(await sel(), [`${lp.y}年${lp.m}月`, String(lp.d)]);
+  /* B in the month view still comes home to today */
+  await p.keyboard.press("z");
+  assert.deepEqual(await sel(), ["2026年10月", "11"]);
   assert.deepEqual(notBlocked(c.errors), []);
 });
 
