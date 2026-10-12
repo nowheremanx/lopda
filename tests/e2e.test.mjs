@@ -809,11 +809,20 @@ test("reader: START quotes into Notes and underlines it; thoughts; the notes lis
   assert.match(await p.textContent("#rd-sheet .rd-notes"), /第一句心得/);
   await p.click("#rd-sheet .rd-notes li");
   await p.waitForSelector("#rd-sheet", { state: "hidden" });
-  const u = p.locator("#rd-flow u.hl").first();
-  const ub = await u.boundingBox(), page = await p.locator("#rd-page").boundingBox();
-  assert.ok(ub.x >= page.x && ub.x < page.x + page.width, "the quote is on the page");
+  /* Where to tap the underline. Not the middle of its bounding box: a quote that wraps onto two lines has a box
+     whose middle falls in the gap between the lines, and its left edge is in the "previous page" tap zone, so the
+     tap turned the page instead (it depended on the fonts and where the line broke: it failed in one environment
+     and passed in CI). The middle of the widest line the underline actually covers is always on it. */
+  const spot = await p.evaluate(() => {
+    const rs = [...document.querySelector("#rd-flow u.hl").getClientRects()].filter((r) => r.width > 0);
+    const r = rs.reduce((a, b) => (b.width > a.width ? b : a));
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  });
+  const page = await p.locator("#rd-page").boundingBox();
+  assert.ok(spot.x >= page.x && spot.x < page.x + page.width, "the quote is on the page");
+  assert.ok(await p.evaluate(({ x, y }) => !!document.elementFromPoint(x, y).closest("u.hl"), spot), "the spot is on the underline");
   /* a tap on the line: the quote and the thought; a second thought, then remove the line (twice) */
-  await p.touchscreen.tap(ub.x + 4, ub.y + ub.height / 2);
+  await p.touchscreen.tap(spot.x, spot.y);
   await p.waitForSelector("#rd-def:not([hidden])");
   assert.match(await p.textContent("#rd-def"), /第一句心得/);
   await p.keyboard.press("x");                                  /* A: another thought */
@@ -821,7 +830,7 @@ test("reader: START quotes into Notes and underlines it; thoughts; the notes lis
   await p.fill("#rd-thought", "再读一遍。");
   await p.click("#rd-def .ck-a");                               /* (X would type into the box) */
   await p.waitForSelector("#rd-def", { state: "hidden" });
-  await p.touchscreen.tap(ub.x + 4, ub.y + ub.height / 2);
+  await p.touchscreen.tap(spot.x, spot.y);
   await p.waitForSelector("#rd-def:not([hidden])");
   assert.match(await p.textContent("#rd-def"), /第一句心得。\s*再读一遍/);
   await p.keyboard.press("Enter");
