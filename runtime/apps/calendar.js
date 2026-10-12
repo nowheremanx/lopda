@@ -232,6 +232,7 @@ $("cal-next").onclick=function(){ if(shiftMonth(1)) render(); };
 $("cal-today").onclick=function(){ goToday(); };
 $("cal-list-btn").onclick=function(){ openSheet("list"); };
 $("cal-info").onclick=function(){ openSheet("day"); };
+$("cal-ym").onclick=function(){ openJump(); };
 function goToday(){ select(todayN()); render(); }
 
 /* ---------- sheets: the day, the list of dates, the add form ---------- */
@@ -246,6 +247,7 @@ function renderSheet(){
   if(C.sheet==="day") daySheet(sh);
   else if(C.sheet==="list") listSheet(sh);
   else if(C.sheet==="add") addSheet(sh);
+  else if(C.sheet==="jump") jumpSheet(sh);
 }
 function daySheet(sh){
   var lu=L.fromSolar(C.y,C.m,C.d), j=L.term(C.y,C.m,C.d), h=C.hol[iso(C.y,C.m,C.d)], n=selN();
@@ -357,8 +359,97 @@ function removeDate(id){
   render();
 }
 
-/* ---------- chin pad: arrows move the day, A opens it, START is today, SELECT the list, B goes back (to today in the month view) ---------- */
+/* ---------- go to a date: eight digits (YYYYMMDD), Gregorian or lunar, typed like on an old handheld ----------
+   The cursor sits on one digit: ▲▼ change it, ◀▶ move, digits (on-screen pad or keyboard) type and advance.
+   A day past the end of its month falls on the last day, the rule yearly dates follow; a leap month the year
+   does not have falls on the regular month. */
+function digitsOf(y,m,d){ return (String(y)+LP.pad2(m)+LP.pad2(d)).split("").map(Number); }
+function openJump(){
+  var lu=L.fromSolar(C.y,C.m,C.d);
+  C.jump={lunar:false, cur:0, leap:!!(lu&&lu.leap), d:digitsOf(C.y,C.m,C.d)};
+  C.sheet="jump"; renderSheet();
+}
+/* the day number the digits point at, or {err: string key} */
+function jumpTarget(){
+  var J=C.jump, v=function(a,b){ return +J.d.slice(a,b).join(""); }, y=v(0,4), m=v(4,6), d=v(6,8);
+  if(y<MIN || y>MAX) return {err:"cal.jump.range"};
+  if(m<1 || m>12) return {err:"cal.jump.month"};
+  if(d<1) return {err:"cal.jump.day"};
+  if(!J.lunar) return {n:L.dayNumber(y,m,Math.min(d,L.daysInMonth(y,m)))};
+  var leap=J.leap && L.leapMonth(y)===m, t=L.toSolar(y,m,Math.min(d,L.monthSize(y,m,leap)),leap);
+  return t ? {n:L.dayNumber(t.y,t.m,t.d)} : {err:"cal.jump.range"};
+}
+/* switching calendars keeps the day: the digits become the same day in the other one */
+function jumpMode(){
+  var J=C.jump, t=jumpTarget(), day=L.fromDayNumber(t.err ? selN() : t.n), lu;
+  J.lunar=!J.lunar;
+  if(J.lunar){ lu=L.fromSolar(day.y,day.m,day.d); if(lu){ J.d=digitsOf(lu.year,lu.month,lu.day); J.leap=lu.leap; } else J.lunar=false; }
+  else J.d=digitsOf(day.y,day.m,day.d);
+  renderSheet();
+}
+function jumpType(n){ var J=C.jump; J.d[J.cur]=n; J.cur=Math.min(7,J.cur+1); renderSheet(); }
+function jumpGo(){
+  var t=jumpTarget();
+  if(t.err){ sfx("err"); return; }
+  select(t.n); sfx("ok"); closeSheet();
+}
+function jumpSheet(sh){
+  var J=C.jump, sep=list("cal.jump.sep");
+  sh.appendChild(el("p","sheet-title",tr("cal.jump.title")));
+  var kind=el("div","row cal-kind"); kind.setAttribute("role","radiogroup");
+  [[false,"cal.solar"],[true,"cal.lunarrep"]].forEach(function(o){
+    var b=btn(J.lunar===o[0]?"btn":"btn ghost",tr(o[1]),function(){ if(J.lunar!==o[0]) jumpMode(); });
+    b.setAttribute("role","radio"); b.setAttribute("aria-checked",J.lunar===o[0]?"true":"false"); kind.appendChild(b);
+  });
+  /* the leap toggle sits in the same row so the panel fits a small phone; the preview shows which month it lands in */
+  if(J.lunar){
+    var lp=btn(J.leap?"btn cal-leap":"btn ghost cal-leap",tr("cal.leap"),function(){ J.leap=!J.leap; renderSheet(); });
+    lp.setAttribute("aria-pressed",J.leap?"true":"false"); kind.appendChild(lp);
+  }
+  sh.appendChild(kind);
+  var row=el("div","cal-digits");
+  J.d.forEach(function(n,i){
+    var c=btn(i===J.cur?"on":"",String(n),function(){ J.cur=i; renderSheet(); });
+    c.setAttribute("aria-label",tr("cal.jump.digit",{n:i+1}));
+    row.appendChild(c);
+    if(i===3||i===5||i===7) row.appendChild(el("span","",sep[i===3?0:i===5?1:2]));
+  });
+  sh.appendChild(row);
+  /* what A will jump to, or why it can't */
+  var t=jumpTarget(), out;
+  if(t.err) out=tr(t.err);
+  else { var g=L.fromDayNumber(t.n), lu=L.fromSolar(g.y,g.m,g.d); out=dateText(g.y,g.m,g.d)+(lu?" · "+lunarText(lu):""); }
+  var pv=el("p","cal-preview"+(t.err?" err":""),out); pv.setAttribute("aria-live","polite"); sh.appendChild(pv);
+  var pad=el("div","cal-numpad");
+  [1,2,3,4,5,6,7,8,9].forEach(function(n){ pad.appendChild(btn("btn ghost",String(n),function(){ jumpType(n); })); });
+  pad.appendChild(btn("btn ghost","◀",function(){ J.cur=Math.max(0,J.cur-1); renderSheet(); }));
+  pad.appendChild(btn("btn ghost","0",function(){ jumpType(0); }));
+  pad.appendChild(btn("btn ghost","▶",function(){ J.cur=Math.min(7,J.cur+1); renderSheet(); }));
+  sh.appendChild(pad);
+  sh.appendChild(el("p","hint cal-jumpkeys",tr("cal.jump.keys")));
+  var keys=el("div","cal-keys");
+  keys.appendChild(keyBtn("ck","B",tr("common.cancel"),function(){ closeSheet(); }));
+  keys.appendChild(keyBtn("ck ck-a","A",tr("cal.jump.go"),function(){ jumpGo(); }));
+  sh.appendChild(keys);
+}
+/* digits from a keyboard while the panel is open */
+document.addEventListener("keydown",function(e){
+  if($("v-cal").hidden || C.sheet!=="jump" || /INPUT|TEXTAREA/.test(e.target.nodeName)) return;
+  if(/^[0-9]$/.test(e.key)){ e.preventDefault(); jumpType(+e.key); }
+  else if(e.key==="Backspace"){ e.preventDefault(); C.jump.cur=Math.max(0,C.jump.cur-1); renderSheet(); }
+});
+
+/* ---------- chin pad: arrows move the day, A opens it, START goes to a date, SELECT the list, B goes back (to today in the month view) ---------- */
 function calButton(b){
+  if(C.sheet==="jump"){
+    var J=C.jump;
+    if(b==="left"||b==="right"){ J.cur=Math.max(0,Math.min(7,J.cur+(b==="left"?-1:1))); sfx("move"); renderSheet(); }
+    else if(b==="up"||b==="down"){ J.d[J.cur]=(J.d[J.cur]+(b==="up"?1:9))%10; sfx("move"); renderSheet(); }
+    else if(b==="a"||b==="start") jumpGo();
+    else if(b==="b") closeSheet();
+    else if(b==="select"){ jumpMode(); sfx("tap"); }
+    return;
+  }
   if(C.sheet==="add"){ if(b==="a") saveDate(); else if(b==="b"){ C.sheet="day"; C.form=null; renderSheet(); } return; }
   if(C.sheet==="list"){
     var items=upcoming();
@@ -376,7 +467,7 @@ function calButton(b){
   var step={left:-1, right:1, up:-7, down:7}[b];
   if(step){ select(selN()+step); sfx("move"); render(); }
   else if(b==="a") openSheet("day");
-  else if(b==="start"){ goToday(); sfx("tap"); }
+  else if(b==="start") openJump();
   else if(b==="select") openSheet("list");
   /* the month view is the outermost screen: "back" is back to today; on today it does nothing (HOME leaves) */
   else if(b==="b" && selN()!==todayN()){ goToday(); sfx("tap"); }
