@@ -369,11 +369,14 @@ textarea::placeholder{color:var(--ink-2)}
 .rd.eink .btn{box-shadow:none}
 .rd.eink .btn:disabled{background:transparent;color:var(--ink);border:2px dashed var(--ink)}
 .rd.eink *{transition:none!important;animation:none!important}
-/* the e-ink full refresh: the whole screen ink, then paper (reader.js) */
+/* the e-ink full refresh (reader.js), as a real panel does it: the old page in negative, then blank paper, then the new
+   page. Negative swaps ink and paper for everything on the screen; the panel's outer rim is not part of the display and
+   stays paper, so the screen never runs into the bezel. #rd-flash only catches touches, and is the blank paper. */
 .rd-flash{position:absolute;inset:0;z-index:20;pointer-events:auto}
 .rd-flash[hidden]{display:none}
-.rd-flash.ink{background:var(--ink)}
 .rd-flash.paper{background:var(--lcd)}
+.screen.rd-neg{color:var(--ink);--lcd:#1f2a14;--lcd-2:#1f2a14;--lcd-3:#1f2a14;--ink:#a3ad7e;--ink-2:#a3ad7e}
+.screen.rd-neg::after{display:block;z-index:21;background:none;box-shadow:inset 0 0 0 4px #a3ad7e;border-radius:2px}
 /* calendar: go to a date */
 #cal-ym{cursor:pointer}
 .cal-digits{display:flex;align-items:baseline;justify-content:center;gap:2px;flex:none;font-family:var(--f-pix)}

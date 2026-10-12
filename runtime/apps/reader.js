@@ -412,19 +412,20 @@ function turn(k){
   sfx("tick");
   return true;
 }
-/* ---------- e-ink full refresh: the whole screen ink, then paper, then the new page; page turns wait for it ---------- */
+/* ---------- e-ink full refresh: the old page in negative, then paper, then the new page; page turns wait for it ---------- */
 function flashOn(){ return eink() && !!R.set.flash; }
 /* a page drawn whole: after a page turn that is due one, and after anything that lays the pages out again or jumps
    (contents, go to, text size, font, layout); either way the count starts again */
 function whole(draw){
   R.drawn=0;
   if(!flashOn()){ draw(); return; }
-  var f=$("rd-flash");
-  if(!f){ f=el("div","rd-flash"); f.id="rd-flash"; $("screen").appendChild(f); }
-  R.flashing=true; f.className="rd-flash ink"; f.hidden=false;
-  draw();
+  var f=$("rd-flash"), scr=$("screen");
+  if(!f){ f=el("div","rd-flash"); f.id="rd-flash"; scr.appendChild(f); }
+  /* the page on screen goes negative; the new one is laid out under the blank paper that follows */
+  R.flashing=true; f.className="rd-flash ink"; f.hidden=false; scr.classList.add("rd-neg");
   setTimeout(function(){
-    f.className="rd-flash paper";
+    scr.classList.remove("rd-neg"); f.className="rd-flash paper";
+    if(R.book && visible()) draw();
     setTimeout(function(){ f.hidden=true; f.className="rd-flash"; R.flashing=false; },FLASH_PAPER);
   },FLASH_INK);
 }
@@ -1084,7 +1085,7 @@ $("rd-fontfile").addEventListener("change",function(){
    B is "back" on every screen of the handheld, so the quote sits on START, the screen's extra action */
 function readerButton(b,down){
   if(!R.id){ if(down) shelfButton(b); return; }
-  if(!R.book || R.flashing) return;
+  if(!R.book) return;
   if(R.sheet==="help"){ if(down) closeHelp(); return; }
   /* the file picker needs a user gesture, and on a touch screen the chin pad's press is not one: open it on release */
   if(R.sheet==="font" && b==="a" && fontRows()[R.fpick].k==="+"){ if(!down) fontA(); return; }
@@ -1144,7 +1145,7 @@ LP.builtin({id:"reader", label:"app.reader", icon:function(){ return ICON; }, vi
     R.sheet=""; R.sel=null; R.low=null; R.armed=null;
     $("rd-sheet").hidden=true; $("rd-def").hidden=true; $("rd-help").hidden=true;
     $("screen").classList.remove("rd-eink");
-    var f=$("rd-flash"); if(f) f.hidden=true; R.flashing=false;
+    var f=$("rd-flash"); if(f) f.hidden=true; $("screen").classList.remove("rd-neg"); R.flashing=false;
   },
   padLayout:function(){ if(visible() && R.book) setTimeout(relayout,0); },
   lang:function(){ if(!visible()) return; if(R.book){ footer(); renderSheet(); renderLow(); if(R.sheet==="help") openHelp(); } else renderShelf(); },

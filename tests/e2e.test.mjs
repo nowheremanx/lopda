@@ -1103,37 +1103,40 @@ test("reader: e-ink full refresh every 10 pages; the option shows only in e-ink 
     window.__fl = []; let last = "";
     new MutationObserver(() => {
       const f = document.getElementById("rd-flash"); if (!f) return;
-      const s = f.className + (f.hidden ? " hidden" : "");
+      const s = f.className + (f.hidden ? " hidden" : "") + (document.getElementById("screen").classList.contains("rd-neg") ? " neg" : "");
       if (s !== last) { last = s; window.__fl.push({ s, t: performance.now() }); }
     }).observe(document.getElementById("screen"), { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "hidden"] });
   });
   const log = () => p.evaluate(() => window.__fl);
-  const inks = async () => (await log()).filter((e) => e.s === "rd-flash ink").length;
+  const inks = async () => (await log()).filter((e) => e.s === "rd-flash ink neg").length;
   const start = await pos(p);
   for (let i = 0; i < 8; i++) { await p.keyboard.press("ArrowRight"); await p.waitForTimeout(250); }
   assert.equal(await inks(), 0, "eight turns: no full refresh");
   const eighth = await pos(p);
   assert.notEqual(eighth, start);
-  /* the ninth turn is page ten; a key pressed in the middle of the flash is ignored */
+  /* the ninth turn is page ten: the old page in negative, then paper, then the new page; another turn in the middle
+     of it is ignored */
   await p.keyboard.press("ArrowRight");
-  const ninth = await pos(p);
-  assert.notEqual(ninth, eighth);
+  assert.equal(await pos(p), eighth, "the old page stays, in negative");
+  assert.ok(await p.evaluate(() => document.getElementById("screen").classList.contains("rd-neg")));
   await p.keyboard.press("ArrowRight");
-  assert.equal(await pos(p), ninth, "ignored during the flash");
   await p.waitForFunction(() => window.__fl.some((e) => e.s === "rd-flash paper"));
   await p.waitForFunction(() => document.getElementById("rd-flash").hidden);
-  const l = await log(), ink = l.findIndex((e) => e.s === "rd-flash ink");
+  assert.ok(!(await p.evaluate(() => document.getElementById("screen").classList.contains("rd-neg"))));
+  const ninth = await pos(p);
+  assert.notEqual(ninth, eighth);
+  const l = await log(), ink = l.findIndex((e) => e.s === "rd-flash ink neg");
   assert.ok(ink >= 0 && l[ink + 1].s === "rd-flash paper", JSON.stringify(l));
   const dur = l[ink + 1].t - l[ink].t;
   assert.ok(dur >= 100 && dur <= 400, "ink lasted " + dur);
   await p.waitForTimeout(300);
-  assert.equal(await pos(p), ninth, "still the same page");
+  assert.equal(await pos(p), ninth, "one page on: the turn during the flash was ignored");
   assert.equal(await inks(), 1);
   /* the contents jump flashes too */
   await p.keyboard.press("Enter");
   await menuRow(p, "目录").click();
   await p.click("#rd-sheet .lcd-menu li:nth-child(3)");
-  await p.waitForFunction(() => window.__fl.filter((e) => e.s === "rd-flash ink").length === 2);
+  await p.waitForFunction(() => window.__fl.filter((e) => e.s === "rd-flash ink neg").length === 2);
   await p.waitForFunction(() => document.getElementById("rd-flash").hidden);
   /* e-ink off: the option goes */
   await p.keyboard.press("Enter");
