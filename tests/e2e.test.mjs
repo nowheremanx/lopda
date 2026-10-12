@@ -518,6 +518,12 @@ const posShown = async (p) => { await p.waitForTimeout(300); return p.evaluate((
   const a = r.getClientRects()[0], v = document.getElementById("rd-page").getBoundingClientRect();
   return a.left >= v.left - 1 && a.right <= v.right + 1 && a.top >= v.top - 1 && a.bottom <= v.bottom + 1;
 }); };
+/* open the nth book on the shelf; the key card shows over the first book ever opened: put it away */
+const openRow = async (p, n) => {
+  await p.click(`#rd-list li:nth-child(${n})`);
+  await p.waitForFunction(() => document.getElementById("rd-flow").children.length > 0, null, { timeout: 10000 });
+  if (await p.isVisible("#rd-help")) { await p.click("#rd-help"); await p.waitForSelector("#rd-help", { state: "hidden" }); }
+};
 const importBook = async (p, file) => {
   const n = (await shelf(p)).length;
   await p.setInputFiles("#rd-file", file);
@@ -538,7 +544,7 @@ test("reader: imports TXT in GBK and UTF-8 and an EPUB, splits chapters, keeps t
   assert.deepEqual((await shelf(p)).slice(0, 3), ["Tiny Epub", "new", "旧书"]);
 
   /* the GBK book reads as Chinese, with its two chapters in the contents */
-  await p.click("#rd-list li:nth-child(3)");
+  await openRow(p, 3);
   await p.waitForFunction(() => /老和尚/.test(document.getElementById("rd-flow").textContent));
   assert.match(await p.textContent("#rd-foot span"), /第一章 山/);
   await p.keyboard.press("Enter");                              /* START: the menu */
@@ -551,7 +557,7 @@ test("reader: imports TXT in GBK and UTF-8 and an EPUB, splits chapters, keeps t
   assert.equal((await shelf(p))[0], "旧书");
 
   /* the EPUB: emphasis and the line break survive, the chapters come from its contents */
-  await p.click("#rd-list li:nth-child(2)");
+  await openRow(p, 2);
   await p.waitForFunction(() => /dark/.test(document.getElementById("rd-flow").textContent));
   assert.equal(await p.textContent("#rd-flow em"), "dark");
   await p.keyboard.press("ArrowRight");
@@ -580,7 +586,7 @@ test("reader: imports TXT in GBK and UTF-8 and an EPUB, splits chapters, keeps t
 
 test("reader: whole pages turn by keys, taps and swipes; a new text size keeps the place; progress is kept", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await readerPage(t);
-  await p.click("#rd-list li:nth-child(2)");                   /* Alice */
+  await openRow(p, 2);                   /* Alice */
   await p.waitForFunction(() => /Lewis Carroll/.test(document.getElementById("rd-flow").textContent));
   assert.equal(await p.evaluate(() => document.getElementById("rd-page").scrollHeight <= document.getElementById("rd-page").clientHeight + 1), true, "no scrolling");
   await p.keyboard.press("ArrowRight");                         /* the title page, then chapter I */
@@ -605,19 +611,19 @@ test("reader: whole pages turn by keys, taps and swipes; a new text size keeps t
   const before = await foot(p);
   await p.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);     /* middle: the menu */
   await p.waitForSelector("#rd-sheet:not([hidden])");
-  await p.click("#rd-sheet .lcd-menu li:nth-child(2)");         /* 字号: 中 -> 大 */
-  assert.match(await p.textContent("#rd-sheet .lcd-menu li:nth-child(2) small"), /大/);
+  await p.click("#rd-sheet .lcd-menu li:nth-child(3)");         /* 字号: 中 -> 大 */
+  assert.match(await p.textContent("#rd-sheet .lcd-menu li:nth-child(3) small"), /大/);
   await p.keyboard.press("z"); await p.waitForSelector("#rd-sheet", { state: "hidden" });
   assert.equal(await pos(p), here);
   assert.ok(await posShown(p), "the place is still on the page");
   assert.notEqual(await foot(p), before, "pages were laid out again");
-  await p.keyboard.press("Enter"); await p.keyboard.press("ArrowDown"); await p.keyboard.press("x");   /* 中 -> 大 -> 小 */
+  await p.keyboard.press("Enter"); await p.keyboard.press("ArrowDown"); await p.keyboard.press("ArrowDown"); await p.keyboard.press("x");   /* 中 -> 大 -> 小 */
   await p.keyboard.press("z");
   assert.equal(await pos(p), here);
   assert.ok(await posShown(p));
   /* e-ink: no transition on the page */
   await p.keyboard.press("Enter");
-  for (let i = 0; i < 4; i++) await p.keyboard.press("ArrowDown");
+  for (let i = 0; i < 5; i++) await p.keyboard.press("ArrowDown");
   await p.keyboard.press("x"); await p.keyboard.press("z");
   assert.ok(await p.evaluate(() => document.getElementById("v-reader").classList.contains("eink") && document.getElementById("screen").classList.contains("rd-eink")));
   await p.keyboard.press("ArrowRight");
@@ -630,35 +636,49 @@ test("reader: whole pages turn by keys, taps and swipes; a new text size keeps t
   await p.reload({ waitUntil: "networkidle" });
   await p.locator("#home .app", { hasText: "阅读器" }).click();
   await p.waitForFunction(() => document.querySelectorAll("#rd-list li:not(.label)").length === 2, null, { timeout: 10000 });
-  await p.click("#rd-list li:nth-child(1)");
+  await openRow(p, 1);
   await p.waitForFunction(() => document.getElementById("v-reader").hasAttribute("data-pos") && /Rabbit/.test(document.getElementById("rd-foot").textContent));
   assert.equal(await pos(p), at);
   assert.ok(await p.evaluate(() => document.getElementById("v-reader").classList.contains("eink")), "e-ink stays on");
   assert.deepEqual(errors, []);
 });
 
-test("reader: SELECT word cursor, A looks up, START adds to the word book, START in the cursor quotes into Notes", { skip, timeout: 60000 }, async (t) => {
+test("reader: long-press and drag selects, SELECT widens to the sentence, A looks up, START adds to the word book, copy", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await readerPage(t);
-  await p.click("#rd-list li:nth-child(2)");                   /* Alice */
-  await p.waitForFunction(() => /Lewis Carroll/.test(document.getElementById("rd-flow").textContent));
+  await p.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await openRow(p, 2);                                         /* Alice */
   await p.keyboard.press("ArrowRight");
   await p.waitForFunction(() => /Rabbit-Hole/.test(document.getElementById("rd-foot").textContent));
   assert.equal(await p.evaluate(() => getComputedStyle(document.getElementById("rd-flow")).userSelect), "none");
-  await p.keyboard.press("Shift");                              /* SELECT */
+  /* the keys: SELECT shows the cursor, the D-pad moves it */
+  await p.keyboard.press("Shift");
   assert.equal(await p.textContent("#rd-flow mark"), "CHAPTER");
   await p.keyboard.press("ArrowRight"); await p.keyboard.press("ArrowRight");
   assert.equal(await p.textContent("#rd-flow mark"), "Down");
-  /* tap a word: the cursor jumps there */
-  const target = await p.evaluate(() => {
-    const e = document.querySelectorAll("#rd-flow > p")[1], n = e.firstChild, i = n.data.indexOf("sister");
-    const r = document.createRange(); r.setStart(n, i); r.setEnd(n, i + 6); const b = r.getBoundingClientRect();
+  await p.keyboard.press("z");                                  /* B: done */
+  assert.equal(await p.locator("#rd-flow mark").count(), 0);
+  /* long-press "sister" and drag to "bank": three words, no lookup yet */
+  const wordAt = (w) => p.evaluate((w) => {
+    const e = document.querySelectorAll("#rd-flow > p")[1], n = e.firstChild, i = n.data.indexOf(w);
+    const r = document.createRange(); r.setStart(n, i); r.setEnd(n, i + w.length); const b = r.getBoundingClientRect();
     return [b.left + b.width / 2, b.top + b.height / 2];
-  });
-  await p.touchscreen.tap(target[0], target[1]);
+  }, w);
+  const press = (x, y, id = 3) => p.evaluate(([x, y, id]) => document.getElementById("rd-page").dispatchEvent(new PointerEvent("pointerdown", { pointerId: id, clientX: x, clientY: y, bubbles: true, pointerType: "touch" })), [x, y, id]);
+  const move = (x, y, id = 3) => p.evaluate(([x, y, id]) => document.getElementById("rd-page").dispatchEvent(new PointerEvent("pointermove", { pointerId: id, clientX: x, clientY: y, bubbles: true, pointerType: "touch" })), [x, y, id]);
+  const lift = (x, y, id = 3) => p.evaluate(([x, y, id]) => document.getElementById("rd-page").dispatchEvent(new PointerEvent("pointerup", { pointerId: id, clientX: x, clientY: y, bubbles: true, pointerType: "touch" })), [x, y, id]);
+  const [sx, sy] = await wordAt("sister"), [bx, by] = await wordAt("bank");
+  await press(sx, sy); await p.waitForTimeout(600);
+  assert.equal(await p.textContent("#rd-flow mark"), "sister");
+  await move(bx, by); await lift(bx, by);
+  assert.equal(await p.$$eval("#rd-flow mark", (l) => l.map((x) => x.textContent).join("")), "sister on the bank");
+  assert.ok(await p.isHidden("#rd-def"));
+  assert.match(await p.textContent("#rd-foot"), /查词[\s\S]*摘抄[\s\S]*词[\s\S]*复制/);
+  /* a quick tap moves the cursor; a short press is no long press */
+  await press(sx, sy, 4); await lift(sx, sy, 4);
   assert.equal(await p.textContent("#rd-flow mark"), "sister");
   /* A: the entry in the lower half */
   await p.keyboard.press("x");
-  await p.waitForFunction(() => /姐妹|姐|妹/.test(document.getElementById("rd-def").textContent), null, { timeout: 10000 });
+  await p.waitForFunction(() => /姐|妹/.test(document.getElementById("rd-def").textContent), null, { timeout: 10000 });
   assert.equal(await p.textContent("#rd-def .sheet-title span"), "sister");
   const h = await p.evaluate(() => [document.getElementById("rd-def").getBoundingClientRect().top, document.getElementById("screen").getBoundingClientRect()]);
   assert.ok(h[0] > h[1].top + h[1].height * 0.4, "the entry takes the lower half");
@@ -667,39 +687,114 @@ test("reader: SELECT word cursor, A looks up, START adds to the word book, START
   assert.ok(await p.evaluate(() => LP.dict.inBook("sister")));
   await p.keyboard.press("z");
   await p.waitForSelector("#rd-def", { state: "hidden" });
-  /* hold A and move: the selection grows; letting go of A does not look it up */
-  await p.keyboard.down("x"); await p.keyboard.press("ArrowRight"); await p.keyboard.press("ArrowRight"); await p.keyboard.up("x");
-  assert.equal((await p.$$eval("#rd-flow mark", (l) => l.map((x) => x.textContent).join(""))), "sister on the");
-  assert.ok(await p.isHidden("#rd-def"));
-  /* START: quoted into the note 《书名》, then a thought under it */
-  await p.keyboard.press("Enter");
+  /* SELECT: the sentence around the cursor, then the paragraph; A still looks up the word under the cursor */
+  await p.keyboard.press("Shift");
+  const sentence = (await p.$$eval("#rd-flow mark", (l) => l.map((x) => x.textContent).join("")));
+  assert.match(sentence, /^Alice was beginning to get very tired of sitting by her sister on the bank, and of having nothing to do:/);
+  assert.match(sentence, /conversations\?”$/);
+  assert.match(await p.textContent("#rd-foot"), /句/);
+  await p.keyboard.press("Shift");
+  const para = await p.evaluate(() => document.querySelectorAll("#rd-flow > p")[1].textContent);
+  assert.equal(await p.$$eval("#rd-flow mark", (l) => l.map((x) => x.textContent).join("")), para);
+  await p.keyboard.press("Shift");                              /* back to a word */
+  assert.equal(await p.textContent("#rd-flow mark"), "sister");
+  /* copy */
+  await p.click("#rd-foot button:last-child");
+  await p.waitForFunction(() => /已复制/.test(document.getElementById("toast").textContent));
+  assert.equal(await p.evaluate(() => navigator.clipboard.readText()), "sister");
+  assert.deepEqual(errors, []);
+});
+
+test("reader: START quotes into Notes and underlines it; thoughts; the notes list jumps back; a tap on the line shows it; remove", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await readerPage(t);
+  await openRow(p, 2);                                         /* Alice */
+  await p.keyboard.press("ArrowRight");
+  await p.waitForFunction(() => /Rabbit-Hole/.test(document.getElementById("rd-foot").textContent));
+  /* the sentence with "sister" in it */
+  await p.keyboard.press("Shift");
+  for (let i = 0; i < 4; i++) await p.keyboard.press("ArrowDown");
+  await p.keyboard.press("Shift");                              /* sentence */
+  const sentence = await p.$$eval("#rd-flow mark", (l) => l.map((x) => x.textContent).join(""));
+  assert.ok(sentence.length > 40, sentence);
+  await p.keyboard.press("Enter");                              /* START: quote */
   await p.waitForSelector("#rd-thought");
-  await p.fill("#rd-thought", "姐姐在岸边。");
+  assert.equal(await p.locator("#rd-flow mark").count(), 0, "the selection ends");
+  assert.equal(await p.$$eval("#rd-flow u.hl", (l) => l.map((x) => x.textContent).join("")), sentence);
+  await p.fill("#rd-thought", "第一句心得。");
   await p.click("#rd-def .ck-a");
   await p.waitForFunction(() => /心得已存进记事本/.test(document.getElementById("toast").textContent));
-  /* a second quote goes into the same note */
-  await p.keyboard.press("ArrowRight");
+  /* the notes list: one quote with its thought; turn away, then jump back from the list */
+  await p.keyboard.press("ArrowRight"); await p.keyboard.press("ArrowRight");
   await p.keyboard.press("Enter");
+  await p.click("#rd-sheet .lcd-menu li:nth-child(2)");         /* 笔记 */
+  assert.match(await p.textContent("#rd-sheet .rd-notes"), /第一句心得/);
+  await p.click("#rd-sheet .rd-notes li");
+  await p.waitForSelector("#rd-sheet", { state: "hidden" });
+  const u = p.locator("#rd-flow u.hl").first();
+  const ub = await u.boundingBox(), page = await p.locator("#rd-page").boundingBox();
+  assert.ok(ub.x >= page.x && ub.x < page.x + page.width, "the quote is on the page");
+  /* a tap on the line: the quote and the thought; a second thought, then remove the line (twice) */
+  await p.touchscreen.tap(ub.x + 4, ub.y + ub.height / 2);
+  await p.waitForSelector("#rd-def:not([hidden])");
+  assert.match(await p.textContent("#rd-def"), /第一句心得/);
+  await p.keyboard.press("x");                                  /* A: another thought */
   await p.waitForSelector("#rd-thought");
-  await p.keyboard.press("z");
+  await p.fill("#rd-thought", "再读一遍。");
+  await p.click("#rd-def .ck-a");                               /* (X would type into the box) */
   await p.waitForSelector("#rd-def", { state: "hidden" });
-  await p.keyboard.press("z");                                  /* B: the cursor goes away */
-  assert.equal(await p.locator("#rd-flow mark").count(), 0);
+  await p.touchscreen.tap(ub.x + 4, ub.y + ub.height / 2);
+  await p.waitForSelector("#rd-def:not([hidden])");
+  assert.match(await p.textContent("#rd-def"), /第一句心得。\s*再读一遍/);
+  await p.keyboard.press("Enter");
+  assert.match(await p.textContent("#rd-def"), /确认删除/);
+  await p.keyboard.press("Enter");
+  await p.waitForFunction(() => /已删除划线/.test(document.getElementById("toast").textContent));
+  assert.equal(await p.locator("#rd-flow u.hl").count(), 0);
+  /* Notes: the quote, its thought on the next line, and the later thought with the quote repeated */
   await p.click("#home-key");
   await p.locator("#home .app", { hasText: "记事本" }).click();
   await p.waitForFunction(() => /Alice/.test(document.getElementById("notes-list").textContent));
-  assert.equal(await p.locator("#notes-list li").count(), 1);
   await p.click("#notes-list li button");
-  const body = await p.inputValue("#note-body");
-  assert.equal(body, "《Alice’s Adventures in Wonderland》\n\n" +
-    "《Alice’s Adventures in Wonderland》 CHAPTER I. Down the Rabbit-Hole\n「sister on the」\n姐姐在岸边。\n\n" +
-    "《Alice’s Adventures in Wonderland》 CHAPTER I. Down the Rabbit-Hole\n「bank」");
+  const head = "《Alice’s Adventures in Wonderland》 CHAPTER I. Down the Rabbit-Hole\n「" + sentence + "」";
+  assert.equal(await p.inputValue("#note-body"), "《Alice’s Adventures in Wonderland》\n\n" + head + "\n第一句心得。\n\n" + head + "\n再读一遍。");
+  assert.deepEqual(errors, []);
+});
+
+test("reader: the key card shows over the first book only, and from the menu; the progress bar jumps", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await readerPage(t);
+  await p.click("#rd-list li:nth-child(2)");
+  await p.waitForSelector("#rd-help:not([hidden])");
+  assert.match(await p.textContent("#rd-help"), /上一页[\s\S]*菜单[\s\S]*下一页[\s\S]*长按/);
+  await p.keyboard.press("ArrowRight");                         /* any key puts it away, and does nothing else */
+  await p.waitForSelector("#rd-help", { state: "hidden" });
+  assert.equal((await pos(p)).split(":")[0], "0");
+  await p.keyboard.press("z");
+  await p.click("#rd-list li:nth-child(2)");                   /* 論語: no card the second time */
+  await p.waitForFunction(() => document.getElementById("rd-flow").children.length > 0);
+  await p.waitForTimeout(300);
+  assert.ok(await p.isHidden("#rd-help"));
+  await p.keyboard.press("Enter");
+  await p.click("#rd-sheet .lcd-menu li:nth-child(7)");         /* 按键说明 */
+  await p.waitForSelector("#rd-help:not([hidden])");
+  await p.click("#rd-help");
+  await p.waitForSelector("#rd-help", { state: "hidden" });
+  /* the bar under the menu: drag to about the middle and let go */
+  await p.keyboard.press("Enter");
+  const bar = await p.locator("#rd-sheet .rd-bar").boundingBox();
+  await p.mouse.move(bar.x + 2, bar.y + bar.height / 2); await p.mouse.down();
+  await p.mouse.move(bar.x + bar.width * 0.3, bar.y + bar.height / 2, { steps: 4 });
+  await p.mouse.move(bar.x + bar.width * 0.5, bar.y + bar.height / 2, { steps: 4 });
+  assert.match(await p.textContent("#rd-sheet .rd-track"), /^(49|50|51)% · /);
+  await p.mouse.up();
+  await p.waitForSelector("#rd-sheet", { state: "hidden" });
+  const pct = await p.evaluate(() => LP.S && document.getElementById("v-reader").getAttribute("data-pos"));
+  assert.ok(pct && +pct.split(":")[0] >= 8 && +pct.split(":")[0] <= 12, "the middle of the twenty chapters: " + pct);
   assert.deepEqual(errors, []);
 });
 
 test("reader: a Chinese book moves the cursor one character at a time; reduced motion turns e-ink on", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await readerPage(t, { reducedMotion: "reduce" });
-  await p.click("#rd-list li:nth-child(1)");                   /* 論語 */
+  await openRow(p, 1);                   /* 論語 */
   await p.waitForFunction(() => /論語/.test(document.getElementById("rd-flow").textContent));   /* the title page */
   assert.ok(await p.evaluate(() => document.getElementById("v-reader").classList.contains("eink")));
   await p.keyboard.press("ArrowRight");
@@ -715,5 +810,62 @@ test("reader: a Chinese book moves the cursor one character at a time; reduced m
   await p.waitForFunction(() => /查不到|ECDICT/.test(document.getElementById("rd-def").textContent));
   await p.keyboard.press("z"); await p.keyboard.press("z");
   assert.equal(await p.locator("#rd-flow mark").count(), 0);
+  assert.deepEqual(errors, []);
+});
+
+test("reader: EPUB pictures in the four tones, a cover kept, a link that jumps and comes back with B, a footnote in the lower half", { skip, timeout: 60000 }, async (t) => {
+  const { makeEpub, makePng } = await import("./book-fixtures.mjs");
+  const { p, errors } = await readerPage(t);
+  /* a colour gradient with a transparent corner: every pixel on screen must still be one of the four tones */
+  const png = makePng(64, 48, (x, y) => (x < 8 && y < 8) ? [0, 0, 0, 0] : [x * 4, y * 5, 255 - x * 4, 255]);
+  const filler = Array.from({ length: 30 }, (_, i) => `<p>Filler line ${i} to make the chapter run over several pages.</p>`).join("");
+  const epub = makeEpub({ title: "Picture Book", lang: "en",
+    images: [{ name: "OEBPS/images/a.png", type: "image/png", data: png }],
+    chapters: [
+      { title: "Cover", html: '<div><img src="../images/a.png" alt="cover"/></div>' },
+      { title: "One", html: '<h1>One</h1><p>See <a href="ch3.xhtml#far">the far place</a> and a note<a href="#n1">1</a>.</p>' + filler +
+        '<aside epub:type="footnote" id="n1"><p>The note text, short and clear.</p></aside>' },
+      { title: "Three", html: '<h1>Three</h1>' + filler + '<p id="far">The far place is here.</p>' }] });
+  await importBook(p, { name: "pictures.epub", mimeType: "application/epub+zip", buffer: Buffer.from(epub) });
+  await openRow(p, 1);
+  await p.waitForFunction(() => { const i = document.querySelector("#rd-flow p.img img"); return i && i.complete && i.naturalWidth > 0; }, null, { timeout: 10000 });
+  const pix = await p.evaluate(() => {
+    const img = document.querySelector("#rd-flow p.img img"), c = document.createElement("canvas");
+    c.width = img.naturalWidth; c.height = img.naturalHeight;
+    const x = c.getContext("2d"); x.drawImage(img, 0, 0);
+    const d = x.getImageData(0, 0, c.width, c.height).data, tones = new Set();
+    for (let i = 0; i < d.length; i += 4) tones.add(d[i] + "," + d[i + 1] + "," + d[i + 2] + "," + d[i + 3]);
+    return { w: c.width, h: c.height, shown: img.getBoundingClientRect().width, tones: [...tones] };
+  });
+  const TONES = ["31,42,20,255", "74,90,50,255", "125,138,88,255", "163,173,126,255"];
+  assert.deepEqual(pix.tones.filter((x) => !TONES.includes(x)), [], "only the four tones");
+  assert.ok(pix.tones.length >= 3, "dithered, not flat: " + pix.tones);
+  assert.equal(pix.w, 64); assert.equal(pix.h, 48);
+  assert.equal(pix.shown % 64, 0, "shown at a whole multiple of its pixels");
+  /* the link jumps to chapter three, B comes back to where it was */
+  await p.keyboard.press("ArrowRight");
+  await p.waitForFunction(() => /the far place/.test(document.getElementById("rd-flow").textContent));
+  const before = await pos(p);
+  await p.locator("#rd-flow a.ln", { hasText: "the far place" }).click();
+  await p.waitForFunction(() => /Three/.test(document.getElementById("rd-flow").textContent));
+  assert.ok(await posShown(p));
+  assert.match(await p.evaluate(() => { const [ch, i] = document.getElementById("v-reader").getAttribute("data-pos").split(":").map(Number); return document.querySelectorAll("#rd-flow > p")[i].textContent; }), /far place is here/);
+  assert.match(await p.textContent("#rd-foot"), /按 B 回到原处/);
+  await p.keyboard.press("z");
+  await p.waitForFunction(() => /the far place/.test(document.getElementById("rd-flow").textContent));
+  assert.equal(await pos(p), before);
+  /* the footnote opens in the lower half; B closes it */
+  await p.locator("#rd-flow a.ln", { hasText: "1" }).click();
+  await p.waitForSelector("#rd-def:not([hidden])");
+  assert.match(await p.textContent("#rd-def"), /注释[\s\S]*The note text, short and clear/);
+  await p.keyboard.press("z");
+  await p.waitForSelector("#rd-def", { state: "hidden" });
+  assert.equal(await pos(p), before);
+  /* deleting the book takes its pictures too */
+  await p.keyboard.press("z");
+  await p.click("#rd-del"); await p.click("#rd-del");
+  await p.waitForFunction(() => /已删除/.test(document.getElementById("toast").textContent));
+  const left = await p.evaluate(() => new Promise((res) => { const r = indexedDB.open("lopda-files"); r.onsuccess = () => { const q = r.result.transaction("files").objectStore("files").getAllKeys(); q.onsuccess = () => res(q.result.filter((k) => /\/img\//.test(k))); }; }));
+  assert.deepEqual(left, []);
   assert.deepEqual(errors, []);
 });
