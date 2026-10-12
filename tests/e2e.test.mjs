@@ -592,8 +592,9 @@ test("reader: whole pages turn by keys, taps and swipes; a new text size keeps t
   await p.keyboard.press("ArrowRight");                         /* the title page, then chapter I */
   await p.waitForFunction(() => /Rabbit-Hole/.test(document.getElementById("rd-foot").textContent));
   assert.equal(await foot(p), "1/" + (await foot(p)).split("/")[1]);
-  await p.keyboard.press("ArrowDown"); await p.keyboard.press("ArrowRight");
+  await p.keyboard.press("ArrowDown"); await p.keyboard.press("x");     /* A turns the page too */
   assert.equal((await foot(p)).split("/")[0], "3");
+  assert.ok(await p.isHidden("#rd-sheet"), "A is not the menu while reading");
   const box = await p.locator("#rd-page").boundingBox();
   await p.touchscreen.tap(box.x + box.width * 0.9, box.y + box.height / 2);   /* right side: on */
   assert.equal((await foot(p)).split("/")[0], "4");
@@ -673,8 +674,22 @@ test("reader: long-press and drag selects, SELECT widens to the sentence, A look
   assert.equal(await p.$$eval("#rd-flow mark", (l) => l.map((x) => x.textContent).join("")), "sister on the bank");
   assert.ok(await p.isHidden("#rd-def"));
   assert.match(await p.textContent("#rd-foot"), /查词[\s\S]*摘抄[\s\S]*词[\s\S]*复制/);
-  /* a quick tap moves the cursor; a short press is no long press */
-  await press(sx, sy, 4); await lift(sx, sy, 4);
+  /* with a selection, a tap only cancels it: no page turn, no menu */
+  const here = await pos(p);
+  await press(bx, by, 4); await lift(bx, by, 4);
+  assert.equal(await p.locator("#rd-flow mark").count(), 0);
+  assert.equal(await pos(p), here);
+  assert.equal((await foot(p)).split("/")[0], "1");
+  assert.ok(await p.isHidden("#rd-sheet"));
+  /* a swipe cancels it and turns the page */
+  await press(sx, sy, 5); await p.waitForTimeout(600); await lift(sx, sy, 5);
+  assert.equal(await p.textContent("#rd-flow mark"), "sister");
+  await press(sx + 100, sy, 6); await lift(sx - 100, sy, 6);
+  assert.equal(await p.locator("#rd-flow mark").count(), 0);
+  assert.equal((await foot(p)).split("/")[0], "2");
+  await p.keyboard.press("ArrowLeft");
+  /* long-press "sister" again and let go: one word, for the lookup */
+  await press(sx, sy, 7); await p.waitForTimeout(600); await lift(sx, sy, 7);
   assert.equal(await p.textContent("#rd-flow mark"), "sister");
   /* A: the entry in the lower half */
   await p.keyboard.press("x");
@@ -867,5 +882,26 @@ test("reader: EPUB pictures in the four tones, a cover kept, a link that jumps a
   await p.waitForFunction(() => /已删除/.test(document.getElementById("toast").textContent));
   const left = await p.evaluate(() => new Promise((res) => { const r = indexedDB.open("lopda-files"); r.onsuccess = () => { const q = r.result.transaction("files").objectStore("files").getAllKeys(); q.onsuccess = () => res(q.result.filter((k) => /\/img\//.test(k))); }; }));
   assert.deepEqual(left, []);
+  assert.deepEqual(errors, []);
+});
+
+test("reader: in a short screen the menu scrolls to keep the highlighted row in view as the D-pad moves it", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await readerPage(t, { viewport: { width: 390, height: 600 } });
+  await openRow(p, 2);
+  await p.keyboard.press("Enter");                              /* START: the menu */
+  await p.waitForSelector("#rd-sheet:not([hidden])");
+  const inView = () => p.evaluate(() => {
+    const ul = document.querySelector("#rd-sheet .lcd-menu"), li = ul.querySelector("li.on"), a = ul.getBoundingClientRect(), b = li.getBoundingClientRect();
+    return { fits: b.top >= a.top - 1 && b.bottom <= a.bottom + 1, scrolls: ul.scrollHeight > ul.clientHeight, text: li.textContent };
+  });
+  assert.ok((await inView()).scrolls, "the menu is taller than its box at this height");
+  for (let i = 0; i < 7; i++) {
+    await p.keyboard.press("ArrowDown");
+    const v = await inView();
+    assert.ok(v.fits, "row " + (i + 2) + " (" + v.text + ") is in view");
+  }
+  assert.match((await inView()).text, /回书架/);
+  for (let i = 0; i < 7; i++) await p.keyboard.press("ArrowUp");
+  assert.ok((await inView()).fits);
   assert.deepEqual(errors, []);
 });
