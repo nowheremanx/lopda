@@ -369,6 +369,11 @@ textarea::placeholder{color:var(--ink-2)}
 .rd.eink .btn{box-shadow:none}
 .rd.eink .btn:disabled{background:transparent;color:var(--ink);border:2px dashed var(--ink)}
 .rd.eink *{transition:none!important;animation:none!important}
+/* the e-ink full refresh: the whole screen ink, then paper (reader.js) */
+.rd-flash{position:absolute;inset:0;z-index:20;pointer-events:auto}
+.rd-flash[hidden]{display:none}
+.rd-flash.ink{background:var(--ink)}
+.rd-flash.paper{background:var(--lcd)}
 /* calendar: go to a date */
 #cal-ym{cursor:pointer}
 .cal-digits{display:flex;align-items:baseline;justify-content:center;gap:2px;flex:none;font-family:var(--f-pix)}

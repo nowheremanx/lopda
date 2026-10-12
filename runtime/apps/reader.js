@@ -2,13 +2,15 @@
  * Lo-PDA built-in: e-book reader. A shelf, whole pages (CSS columns, never scrolled), contents, three text sizes,
  * an e-ink mode, pictures dithered to the four tones, links and footnotes, and a 文曲星-style selection: long-press
  * and drag (or SELECT and the D-pad), A looks up, START quotes into a note named after the book and underlines it.
+ * An imported font for the text, three layouts, and an e-ink full refresh every ten pages.
  * Design: docs/design/reader-dictionary.md sections 1, 3, 4; decisions.md sections 16 and 17.
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  *
  * Books are parsed once, on import (runtime/bookparse.js), and kept in LopdaPlatform.files as "book/<id>"; an EPUB's
  * pictures are dithered then and kept as "book/<id>/img/<n>" (PNG). The shelf entry {title, author, lang, chars, lens,
- * imgs, added, opened, pos, pct, marks} is data/users/local/reader/books/<id>; settings {size, eink, seeded, helped} are
- * data/users/local/reader. A position is {ch, p, c}: chapter, paragraph and character, never a page number, so another
+ * imgs, added, opened, pos, pct, marks} is data/users/local/reader/books/<id>; settings {size, eink, seeded, helped, font,
+ * layout, flash} are data/users/local/reader. An imported font is "font/<id>" in LopdaPlatform.files (as the user gave it)
+ * and {name, bytes, added} in data/users/local/reader/fonts/<id>. A position is {ch, p, c}: chapter, paragraph and character, never a page number, so another
  * text size or screen finds the same sentence. A mark (an underlined quote) is {id, ch, p, a, p2, b, text, thought, t}.
  */
 (function(){
@@ -16,7 +18,13 @@
 var LP=window.LP, $=LP.$, S=LP.S, tr=LP.tr, BK=window.LopdaBook, P=window.LopdaPlatform;
 var own=LP.own, toast=LP.toast, put=LP.put, sfx=LP.sfx, show=LP.show, showPad=LP.showPad, uid=LP.uid;
 
-var SIZES=[16,19,23], LINE=1.7, GAP=32, LONG_MS=450;
+var SIZES=[16,19,23], GAP=32, LONG_MS=450;
+/* the three layouts: line height (times the text size) and the page's padding; "" keeps the stylesheet's (the default) */
+var LAYOUTS=[{line:1.5, pad:"8px 10px 0"},{line:1.7, pad:""},{line:1.9, pad:"18px 26px 0"}];
+/* e-ink full refresh: ink, then paper, then the page; on a real e-ink screen this clears the ghost of earlier pages */
+var FLASH_EVERY=10, FLASH_INK=120, FLASH_PAPER=80;
+/* a font the user imports: the file's first four bytes say what it is (TrueType 1.0 or "true", OpenType, WOFF, WOFF2) */
+var FONT_MAX=30*1024*1024, FONT_TAGS=["\0\x01\0\0","true","OTTO","wOFF","wOF2"];
 var UNITS=["word","sent","para"];
 /* pictures are dithered at most this wide, then shown at a whole multiple when it fits: pixels, like the camera's */
 var IMG_W=240, IMG_H=320;
@@ -29,7 +37,9 @@ var TOK=/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]
 var STOP=/[。！？!?…]/, CLOSE=/[」』”’"')）\]】》]/;
 
 var R={
-  set:{size:1, eink:null, seeded:false, helped:false},
+  set:{size:1, eink:null, seeded:false, helped:false, font:null, layout:1, flash:false},
+  fonts:{}, fpick:0, farmed:null,   // imported fonts {id: {name, bytes, added}}; the font list's row; a font armed for deletion
+  drawn:0, flashing:false,          // pages drawn since the last full refresh; a full refresh is on screen
   meta:{}, refs:null, loaded:false, seeding:null,
   pick:0, armed:null, busy:null,
   id:null, book:null, cum:{}, urls:{},   // the open book; per chapter, where each paragraph starts; picture URLs
@@ -212,9 +222,13 @@ function openBook(id){
     if(!book || !book.chapters || !book.chapters.length) throw new Error("missing");
     R.book=book;
     m.opened=Date.now(); saveMeta(id,true);
-    var pos=m.pos||{ch:0, p:0, c:0};
-    goTo(clamp(pos.ch|0,0,book.chapters.length-1),pos);
-    if(!R.set.helped){ R.set.helped=true; saveSet(); openHelp(); }
+    return fontReady().then(function(){
+      if(R.id!==id) return;
+      var pos=m.pos||{ch:0, p:0, c:0};
+      goTo(clamp(pos.ch|0,0,book.chapters.length-1),pos);
+      R.drawn=1;   /* opening a book is a page drawn whole: it counts towards the next full refresh */
+      if(!R.set.helped){ R.set.helped=true; saveSet(); openHelp(); }
+    });
   }).catch(function(e){
     if(R.id!==id) return;
     toast(tr("reader.loadfail",{msg:errMsg(e)})); sfx("err"); closeBook();
@@ -273,10 +287,12 @@ function renderChapter(ch){
 }
 /* the column box is cut to whole lines; every page is one column, one stride further left */
 function measure(){
-  var pg=$("rd-page"), flow=$("rd-flow"), cs=getComputedStyle(pg);
+  var pg=$("rd-page"), flow=$("rd-flow"), lay=LAYOUTS[R.set.layout]||LAYOUTS[1];
+  pg.style.padding=lay.pad;
+  var cs=getComputedStyle(pg);
   var w=pg.clientWidth-parseFloat(cs.paddingLeft)-parseFloat(cs.paddingRight);
   var h=pg.clientHeight-parseFloat(cs.paddingTop)-parseFloat(cs.paddingBottom);
-  var fs=SIZES[R.set.size]||SIZES[1], lh=Math.round(fs*LINE);
+  var fs=SIZES[R.set.size]||SIZES[1], lh=Math.round(fs*lay.line);
   w=Math.max(40,Math.floor(w)); h=Math.max(lh,Math.floor(h/lh)*lh);
   flow.style.fontSize=fs+"px"; flow.style.lineHeight=lh+"px";
   flow.style.width=w+"px"; flow.style.height=h+"px";
@@ -372,6 +388,7 @@ function goPct(pct){
   if(pct>=100) goTo(R.book.chapters.length-1,null,true);
   else { var pos=posAtPct(pct); goTo(pos.ch,pos); }
 }
+function reflow(){ whole(relayout); }
 function relayout(){
   if(!R.book || !visible()) return;
   unmark();
@@ -382,13 +399,34 @@ function relayout(){
   if(R.sel) startSel(false,R.sel.unit);
 }
 function turn(k){
-  if(!R.book) return false;
+  if(!R.book || R.flashing) return false;
   var p=R.page+k;
-  if(p<0){ if(R.ch===0) return false; goTo(R.ch-1,null,true); }
-  else if(p>=R.pages){ if(R.ch>=R.book.chapters.length-1) return false; goTo(R.ch+1,{p:0, c:0}); }
-  else { R.page=p; place(true); remember(null); }
+  if(p<0 ? R.ch===0 : p>=R.pages && R.ch>=R.book.chapters.length-1) return false;
+  var draw=function(){
+    if(p<0) goTo(R.ch-1,null,true);
+    else if(p>=R.pages) goTo(R.ch+1,{p:0, c:0});
+    else { R.page=p; place(true); remember(null); }
+  };
+  /* every tenth page drawn since the last full refresh is drawn with one */
+  if(++R.drawn>=FLASH_EVERY && flashOn()) whole(draw); else draw();
   sfx("tick");
   return true;
+}
+/* ---------- e-ink full refresh: the whole screen ink, then paper, then the new page; page turns wait for it ---------- */
+function flashOn(){ return eink() && !!R.set.flash; }
+/* a page drawn whole: after a page turn that is due one, and after anything that lays the pages out again or jumps
+   (contents, go to, text size, font, layout); either way the count starts again */
+function whole(draw){
+  R.drawn=0;
+  if(!flashOn()){ draw(); return; }
+  var f=$("rd-flash");
+  if(!f){ f=el("div","rd-flash"); f.id="rd-flash"; $("screen").appendChild(f); }
+  R.flashing=true; f.className="rd-flash ink"; f.hidden=false;
+  draw();
+  setTimeout(function(){
+    f.className="rd-flash paper";
+    setTimeout(function(){ f.hidden=true; f.className="rd-flash"; R.flashing=false; },FLASH_PAPER);
+  },FLASH_INK);
 }
 function foot(left,right){
   var f=$("rd-foot"); f.textContent="";
@@ -784,12 +822,16 @@ function menuItems(){
     {k:"toc", label:tr("reader.toc")},
     {k:"notes", label:tr("reader.notes"), val:String(R.meta[R.id].marks.length)},
     {k:"size", label:tr("reader.size"), val:tr("reader.sizes").split("|")[R.set.size]},
+    {k:"font", label:tr("reader.font"), val:R.set.font && R.fonts[R.set.font] ? R.fonts[R.set.font].name : ""},
+    {k:"layout", label:tr("reader.layout"), val:tr("reader.layouts").split("|")[R.set.layout]},
     {k:"jump", label:tr("reader.jump")},
     {k:"select", label:tr("reader.select"), val:"SELECT"},
     {k:"eink", label:tr("reader.eink"), val:tr(eink()?"set.on":"set.off")},
+    /* only with e-ink on: on a screen that does not ghost it would only blink */
+    eink() ? {k:"flash", label:tr("reader.flash"), val:tr("reader.flashes").split("|")[R.set.flash?1:0]} : null,
     {k:"help", label:tr("reader.help")},
     {k:"shelf", label:tr("reader.shelfback"), val:"B"}
-  ];
+  ].filter(Boolean);
 }
 function openMenu(){ if(!R.book) return; R.sheet="menu"; R.mpick=0; R.drag=null; renderSheet(); sfx("tap"); }
 function closeSheet(){ R.sheet=""; renderSheet(); }
@@ -797,10 +839,10 @@ function marksSorted(){
   return R.meta[R.id].marks.slice().sort(function(x,y){ return (x.ch-y.ch)||(x.p-y.p)||(x.a-y.a); });
 }
 function renderSheet(){
-  var sh=$("rd-sheet"), on=R.sheet==="menu"||R.sheet==="toc"||R.sheet==="jump"||R.sheet==="notes";
+  var sh=$("rd-sheet"), on=R.sheet==="menu"||R.sheet==="toc"||R.sheet==="jump"||R.sheet==="notes"||R.sheet==="font";
   sh.hidden=!on; sh.textContent=""; if(!on) return;
   var m=R.meta[R.id], title=el("p","sheet-title");
-  title.appendChild(el("span","",R.sheet==="toc" ? tr("reader.toc") : R.sheet==="jump" ? tr("reader.jump") : R.sheet==="notes" ? tr("reader.notes") : m.title));
+  title.appendChild(el("span","",R.sheet==="toc" ? tr("reader.toc") : R.sheet==="jump" ? tr("reader.jump") : R.sheet==="notes" ? tr("reader.notes") : R.sheet==="font" ? tr("reader.font") : m.title));
   title.appendChild(el("small","",Math.floor(m.pct||0)+"%"));
   sh.appendChild(title);
   var keys=el("div","dict-keys");
@@ -836,6 +878,19 @@ function renderSheet(){
       nu.appendChild(li);
     });
     sh.appendChild(nu);
+  } else if(R.sheet==="font"){
+    var rows=fontRows(), fu=el("ul","lcd-menu rd-fonts");
+    R.fpick=clamp(R.fpick,0,rows.length-1);
+    rows.forEach(function(r,i){
+      var li=el("li",i===R.fpick?"on":""); li.appendChild(el("span","",r.label));
+      if(r.k===(R.set.font||"") ) li.appendChild(el("small","",tr("reader.inuse")));
+      li.onclick=function(){ if(R.fpick!==i) R.farmed=null; R.fpick=i; fontA(); };
+      fu.appendChild(li);
+    });
+    sh.appendChild(fu);
+    var cur=rows[R.fpick];
+    sh.appendChild(el("p","hint",R.farmed && cur.k===R.farmed ? tr("reader.fontarmed",{name:cur.label}) : tr("reader.fonthint")));
+    if(cur.k && cur.k!=="+") keys.appendChild(keyBtn(R.farmed===cur.k ? "ck ck-a" : "ck","START",tr(R.farmed===cur.k ? "reader.unmarkconfirm" : "common.delete"),function(){ fontDelete(); }));
   } else {
     var box=el("div","rd-jump");
     box.appendChild(el("b","",R.jump+"%"));
@@ -846,7 +901,8 @@ function renderSheet(){
     keys.appendChild(keyBtn("ck","▶","",function(){ jumpBy(1); }));
   }
   keys.appendChild(keyBtn("ck","B",tr("reader.back"),function(){ sheetBack(); }));
-  if(R.sheet!=="toc" && R.sheet!=="notes") keys.appendChild(keyBtn("ck ck-a","A",tr("reader.go"),function(){ sheetA(); }));
+  if(R.sheet==="font") keys.appendChild(keyBtn("ck ck-a","A",tr(fontRows()[R.fpick].k==="+" ? "reader.import" : "reader.use"),function(){ fontA(); }));
+  else if(R.sheet!=="toc" && R.sheet!=="notes") keys.appendChild(keyBtn("ck ck-a","A",tr("reader.go"),function(){ sheetA(); }));
   sh.appendChild(keys);
   /* only now, with the keys below it, does the list have its final height: keep the highlighted row in view */
   var on=sh.querySelector(".lcd-menu li.on"); if(on && on.scrollIntoView) on.scrollIntoView({block:R.sheet==="toc" ? "center" : "nearest"});
@@ -861,17 +917,20 @@ function track(){
   var id=null;
   bar.addEventListener("pointerdown",function(e){ id=e.pointerId; try{ bar.setPointerCapture(id); }catch(x){} R.drag=at(e); draw(R.drag); });
   bar.addEventListener("pointermove",function(e){ if(e.pointerId!==id) return; var v=at(e); if(v!==R.drag){ R.drag=v; draw(v); sfx("tick"); } });
-  bar.addEventListener("pointerup",function(e){ if(e.pointerId!==id) return; id=null; var v=at(e); R.drag=null; closeSheet(); goPct(v); sfx("ok"); });
+  bar.addEventListener("pointerup",function(e){ if(e.pointerId!==id) return; id=null; var v=at(e); R.drag=null; closeSheet(); whole(function(){ goPct(v); }); sfx("ok"); });
   bar.addEventListener("pointercancel",function(){ id=null; R.drag=null; draw(Math.floor(R.meta[R.id].pct||0)); });
   return box;
 }
 function menuPick(k){
   if(k==="toc"){ var l=tocList(); R.tpick=0; l.forEach(function(it,i){ if(it.ch<R.pos.ch || (it.ch===R.pos.ch && it.p<=R.pos.p)) R.tpick=i; }); R.sheet="toc"; renderSheet(); sfx("tap"); }
   else if(k==="notes"){ R.npick=0; R.sheet="notes"; renderSheet(); sfx("tap"); }
-  else if(k==="size"){ R.set.size=(R.set.size+1)%SIZES.length; saveSet(); relayout(); renderSheet(); sfx("tap"); }
+  else if(k==="size"){ R.set.size=(R.set.size+1)%SIZES.length; saveSet(); reflow(); renderSheet(); sfx("tap"); }
+  else if(k==="font"){ R.fpick=0; R.farmed=null; fontRows().forEach(function(r,i){ if(r.k===(R.set.font||"")) R.fpick=i; }); R.sheet="font"; renderSheet(); sfx("tap"); }
+  else if(k==="layout"){ R.set.layout=(R.set.layout+1)%LAYOUTS.length; saveSet(); reflow(); renderSheet(); sfx("tap"); }
+  else if(k==="flash"){ R.set.flash=!R.set.flash; R.drawn=1; saveSet(); renderSheet(); sfx("tap"); }
   else if(k==="jump"){ R.jump=Math.floor(R.meta[R.id].pct||0); R.sheet="jump"; renderSheet(); sfx("tap"); }
   else if(k==="select"){ enterSel(); }
-  else if(k==="eink"){ R.set.eink=!eink(); saveSet(); applyEink(); renderSheet(); sfx("tap"); }
+  else if(k==="eink"){ R.set.eink=!eink(); R.drawn=1; saveSet(); applyEink(); renderSheet(); sfx("tap"); }
   else if(k==="help"){ closeSheet(); openHelp(); }
   else if(k==="shelf"){ closeBook(); sfx("tap"); }
 }
@@ -881,18 +940,20 @@ function tocList(){
   if(t && t.length) return t.map(function(x){ return {title:x.title||chapterTitle(x.ch), ch:x.ch|0, p:x.p|0, d:x.d|0}; });
   return R.book.chapters.map(function(c,i){ return {title:chapterTitle(i), ch:i, p:0, d:0}; });
 }
-function tocGo(it){ closeSheet(); goTo(clamp(it.ch,0,R.book.chapters.length-1),{p:it.p, c:0}); sfx("ok"); }
+function tocGo(it){ closeSheet(); whole(function(){ goTo(clamp(it.ch,0,R.book.chapters.length-1),{p:it.p, c:0}); }); sfx("ok"); }
 function noteGo(mk){ closeSheet(); goTo(clamp(mk.ch,0,R.book.chapters.length-1),{p:mk.p, c:mk.a}); sfx("ok"); }
 function jumpBy(k){ R.jump=clamp(R.jump+k,0,100); sfx("move"); renderSheet(); }
 function sheetA(){
   if(R.sheet==="menu") menuPick(menuItems()[R.mpick].k);
   else if(R.sheet==="toc"){ var l=tocList(); if(l[R.tpick]) tocGo(l[R.tpick]); }
   else if(R.sheet==="notes"){ var n=marksSorted(); if(n[R.npick]) noteGo(n[R.npick]); }
-  else if(R.sheet==="jump"){ var v=R.jump; closeSheet(); goPct(v); sfx("ok"); }
+  else if(R.sheet==="jump"){ var v=R.jump; closeSheet(); whole(function(){ goPct(v); }); sfx("ok"); }
+  else if(R.sheet==="font") fontA();
 }
 function sheetBack(){ if(R.sheet==="menu") closeSheet(); else { R.sheet="menu"; renderSheet(); } sfx("tap"); }
 function sheetButton(b){
   if(b==="b"||b==="select"){ sheetBack(); return; }
+  if(R.sheet==="font" && b==="start"){ fontDelete(); return; }
   if(b==="a"||b==="start"){ sheetA(); return; }
   if(R.sheet==="jump"){
     if(b==="left"||b==="right") jumpBy(b==="left"?-1:1);
@@ -901,6 +962,7 @@ function sheetButton(b){
   }
   var k=b==="up"||b==="left" ? -1 : 1, big=b==="left"||b==="right";
   if(R.sheet==="menu") R.mpick=clamp(R.mpick+k,0,menuItems().length-1);
+  else if(R.sheet==="font"){ R.fpick=clamp(R.fpick+k,0,fontRows().length-1); R.farmed=null; }
   else if(R.sheet==="toc") R.tpick=clamp(R.tpick+(big ? k*8 : k),0,tocList().length-1);
   else R.npick=clamp(R.npick+(big ? k*8 : k),0,Math.max(0,R.meta[R.id].marks.length-1));
   sfx("move"); renderSheet();
@@ -922,6 +984,95 @@ function openHelp(){
 }
 function closeHelp(){ $("rd-help").hidden=true; if(R.sheet==="help") R.sheet=""; sfx("tap"); }
 
+/* ---------- fonts: imported by the user, used for the text of the book only ----------
+   The list: the system font, each imported font, then a row that imports one. A uses (or imports), START deletes (twice).
+   A font is loaded from its stored bytes with FontFace, under a name of its own, and only .rd-flow asks for it, ahead of
+   the system fonts: a font without Chinese still shows Chinese. Pages are cut once it has loaded. */
+var faces={}, sysFamily=null;
+function fontRows(){
+  var ids=Object.keys(R.fonts).sort(function(a,b){ return (R.fonts[a].added||0)-(R.fonts[b].added||0); });
+  return [{k:"", label:tr("reader.fontsys")}].concat(ids.map(function(id){ return {k:id, label:R.fonts[id].name}; }),[{k:"+", label:tr("reader.fontadd")}]);
+}
+function bufOf(b){ return b instanceof ArrayBuffer ? Promise.resolve(b) : b.arrayBuffer ? b.arrayBuffer() : new Response(b).arrayBuffer(); }
+function loadFace(id){
+  if(!faces[id]) faces[id]=P.files.get("font/"+id).then(function(b){
+    if(!b) throw new Error("missing");
+    return bufOf(b);
+  }).then(function(buf){ return new FontFace("lprd-"+id,buf).load(); }).then(function(face){ document.fonts.add(face); return face; });
+  faces[id].catch(function(){ delete faces[id]; });
+  return faces[id];
+}
+/* the system stack, as the stylesheet has it, so the imported font only goes in front of it */
+function sysFonts(){
+  if(sysFamily==null){ var f=$("rd-flow"), old=f.style.fontFamily; f.style.fontFamily=""; sysFamily=getComputedStyle(f).fontFamily; f.style.fontFamily=old; }
+  return sysFamily;
+}
+function styleFont(){
+  var id=R.set.font;
+  $("rd-flow").style.fontFamily=id && R.fonts[id] ? "\"lprd-"+id+"\", "+sysFonts() : "";
+}
+/* the chosen font loaded and applied; one that cannot load is dropped for the system font */
+function fontReady(){
+  var id=R.set.font;
+  if(id && !R.fonts[id]){ R.set.font=null; id=null; }
+  if(!id){ styleFont(); return Promise.resolve(); }
+  return loadFace(id).then(styleFont,function(){
+    if(R.set.font===id){ R.set.font=null; saveSet(); toast(tr("reader.fontfail")); sfx("err"); }
+    styleFont();
+  });
+}
+function useFont(id){
+  R.set.font=id||null; R.farmed=null; saveSet();
+  fontReady().then(function(){ if(R.book) reflow(); if(R.sheet==="font") renderSheet(); });
+  sfx("tap");
+}
+function fontA(){
+  var r=fontRows()[R.fpick]; if(!r) return;
+  if(r.k==="+"){
+    if(!S.db || !R.refs){ toast(tr("reader.nodb")); sfx("err"); return; }
+    R.farmed=null; $("rd-fontfile").value=""; $("rd-fontfile").click(); return;
+  }
+  if(r.k!==(R.set.font||"")) useFont(r.k);
+  else { R.farmed=null; renderSheet(); }
+}
+function fontDelete(){
+  var r=fontRows()[R.fpick]; if(!r || !r.k || r.k==="+") return;
+  if(R.farmed!==r.k){ R.farmed=r.k; sfx("tap"); renderSheet(); return; }
+  var id=r.k, name=R.fonts[id].name;
+  R.farmed=null; delete R.fonts[id];
+  Promise.all([R.refs.fonts.doc(id).delete(), P.files.del("font/"+id)]).then(function(){ toast(tr("reader.fontdel",{name:name})); },function(){ toast(tr("reader.delfail")); });
+  var face=faces[id]; delete faces[id];
+  if(face) face.then(function(f){ document.fonts.delete(f); },function(){});
+  if(R.set.font===id) useFont(null); else { sfx("ok"); renderSheet(); }
+}
+function fontName(f){ return LP.noEmoji(f.name.replace(/^.*[\\/]/,"").replace(/\.[^.]*$/,"")).slice(0,40)||tr("reader.untitled"); }
+function importFont(f){
+  var name=fontName(f);
+  if(f.size>FONT_MAX) return Promise.reject(new Error(tr("reader.fontbig",{name:name})));
+  for(var k in R.fonts) if(R.fonts[k].name===name && R.fonts[k].bytes===f.size) return Promise.reject(new Error(tr("reader.fontdup")));
+  var id=uid(), meta={name:name, bytes:f.size, added:Date.now()};
+  return bufOf(f).then(function(buf){
+    var head=String.fromCharCode.apply(null,new Uint8Array(buf,0,Math.min(4,buf.byteLength)));
+    if(FONT_TAGS.indexOf(head)<0) throw new Error(tr("reader.fontbad",{name:name}));
+    /* the browser must be able to use it before it is kept */
+    return new FontFace("lprd-test",buf).load().then(function(){ return buf; },function(){ throw new Error(tr("reader.fontbad",{name:name})); });
+  }).then(function(buf){
+    return P.files.put("font/"+id,new Blob([buf],{type:f.type||"application/octet-stream"}));
+  }).then(function(){ return put(R.refs.fonts.doc(id),meta); }).then(function(ok){
+    if(!ok) throw new Error(tr("common.savefail",{code:"?"}));
+    R.fonts[id]=meta; return id;
+  }).catch(function(e){ P.files.del("font/"+id).catch(function(){}); throw e; });
+}
+$("rd-fontfile").addEventListener("change",function(){
+  var f=(this.files||[])[0]; if(!f) return;
+  importFont(f).then(function(id){
+    toast(tr("reader.fontadded",{name:R.fonts[id].name})); sfx("ok");
+    /* imported to be used: it becomes the font at once */
+    fontRows().forEach(function(r,i){ if(r.k===id) R.fpick=i; });
+    useFont(id);
+  },function(e){ toast(errMsg(e)); sfx("err"); if(R.sheet==="font") renderSheet(); });
+});
+
 /* ---------- chin pad ----------
    shelf: ▲▼ pick, A open
    page: ◀▲ back a page, ▶▼ or A on, START menu, SELECT selection, B back from a link, else shelf
@@ -933,8 +1084,10 @@ function closeHelp(){ $("rd-help").hidden=true; if(R.sheet==="help") R.sheet="";
    B is "back" on every screen of the handheld, so the quote sits on START, the screen's extra action */
 function readerButton(b,down){
   if(!R.id){ if(down) shelfButton(b); return; }
-  if(!R.book) return;
+  if(!R.book || R.flashing) return;
   if(R.sheet==="help"){ if(down) closeHelp(); return; }
+  /* the file picker needs a user gesture, and on a touch screen the chin pad's press is not one: open it on release */
+  if(R.sheet==="font" && b==="a" && fontRows()[R.fpick].k==="+"){ if(!down) fontA(); return; }
   if(R.sheet==="thought"){ if(down && b==="a") closeLow(); else if(down && b==="b"){ R.low.draft=""; closeLow(); } return; }
   if(lowerSheet()){
     if(!down) return;
@@ -991,17 +1144,20 @@ LP.builtin({id:"reader", label:"app.reader", icon:function(){ return ICON; }, vi
     R.sheet=""; R.sel=null; R.low=null; R.armed=null;
     $("rd-sheet").hidden=true; $("rd-def").hidden=true; $("rd-help").hidden=true;
     $("screen").classList.remove("rd-eink");
+    var f=$("rd-flash"); if(f) f.hidden=true; R.flashing=false;
   },
   padLayout:function(){ if(visible() && R.book) setTimeout(relayout,0); },
   lang:function(){ if(!visible()) return; if(R.book){ footer(); renderSheet(); renderLow(); if(R.sheet==="help") openHelp(); } else renderShelf(); },
   ready:function(){
     var base=S.db.doc("data/users/local/reader");
-    R.refs={set:base, books:base.collection("books")};
+    R.refs={set:base, books:base.collection("books"), fonts:base.collection("fonts")};
     Promise.all([
       base.get().then(function(sn){
         var s=(sn.exists && own(sn.data()))||{};
-        R.set={size:s.size>=0 && s.size<SIZES.length ? s.size|0 : 1, eink:typeof s.eink==="boolean" ? s.eink : null, seeded:!!s.seeded, helped:!!s.helped};
+        R.set={size:s.size>=0 && s.size<SIZES.length ? s.size|0 : 1, eink:typeof s.eink==="boolean" ? s.eink : null, seeded:!!s.seeded, helped:!!s.helped,
+          font:typeof s.font==="string" ? s.font : null, layout:s.layout>=0 && s.layout<LAYOUTS.length ? s.layout|0 : 1, flash:!!s.flash};
       }),
+      R.refs.fonts.get().then(function(q){ q.docs.forEach(function(d){ var f=own(d.data()); if(f && f.name) R.fonts[d.id]=f; }); }),
       R.refs.books.get().then(function(q){ q.docs.forEach(function(d){ var m=own(d.data()); if(m && m.title && m.lens){ if(!Array.isArray(m.marks)) m.marks=[]; R.meta[d.id]=m; } }); })
     ]).catch(function(){}).then(function(){
       R.loaded=true;

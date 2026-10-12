@@ -37,8 +37,8 @@ LICENSE NOTICE LICENSING.md CONTRIBUTING.md
   its own database `lopda-files`) for large binary data.
 - Built-ins, one file each in runtime/apps/: notes, calendar (万年历; lunar.js, holiday-cn, the one built-in that may reach
   another site, decisions.md section 14), dict (词典; stardict.js, built-in ECDICT, imported StarDict books in
-  `LopdaPlatform.files`, `LP.dict.lookup(word)` for other programs, decisions.md section 15), reader (阅读器; bookparse.js, books and their dithered pictures in
-  `LopdaPlatform.files`, long-press or SELECT selection that looks up through `LP.dict` and quotes (underline + `LP.notes.append`),
+  `LopdaPlatform.files`, `LP.dict.lookup(word)` for other programs, decisions.md section 15), reader (阅读器; bookparse.js, books, their dithered pictures and imported fonts in
+  `LopdaPlatform.files`, layouts and an e-ink full refresh, long-press or SELECT selection that looks up through `LP.dict` and quotes (underline + `LP.notes.append`),
   decisions.md sections 16-17), camera (viewfinder, film, contact card; shares its film
   helpers as `LP.film`), cutter, cart (GB), store (app store, preinstalled apps, sandboxed runner, file dialog), settings.
   Paint and the calculator are community apps (`registry/apps/paint`, `calculator`), installed on first start
