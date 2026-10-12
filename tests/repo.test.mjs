@@ -173,10 +173,17 @@ test("the Pages workflow publishes the repo without tests, dependencies or CI fi
   /* PRs that change no app, sdk script or runtime file (docs, tests, CI) get no preview and no comment */
   assert.ok(y.includes("id: plan") && y.includes("deploy=false"), "preview only when needed");
   const pats = [...y.matchAll(/grep -qE '([^']+)'/g)].map((m) => new RegExp(m[1]));
-  const previewsAll = (p) => pats.some((re) => re.test(p));
-  assert.equal(pats.length, 2, "one pattern for runtime/, one for sdk/*.js");
-  for (const p of ["runtime/lopda.css", "runtime/vendor/binjgb/binjgb.wasm", "sdk/lo-game.js", "sdk/pad-shim.js"]) assert.ok(previewsAll(p), p);
-  for (const p of ["sdk/LO-GAME.md", "sdk/PROMPT.md", "sdk/template/index.html", "docs/x.md", "tests/a.mjs", "registry/apps/a/index.html"]) assert.ok(!previewsAll(p), p);
+  assert.equal(pats.length, 2, "one pattern for runtime/, one for the sdk files every app link runs on");
+  const [runtimeRe, allAppsRe] = pats;
+  /* runtime/ gets the runtime link only: the app links open sdk/dev.html, which never loads runtime/ */
+  for (const p of ["runtime/lopda.css", "runtime/apps/dict.js", "runtime/vendor/binjgb/binjgb.wasm"]) {
+    assert.ok(runtimeRe.test(p), p); assert.ok(!allAppsRe.test(p), "no app list for " + p);
+  }
+  for (const p of ["sdk/lo-game.js", "sdk/pad-shim.js", "sdk/dev.html"]) assert.ok(allAppsRe.test(p), p);
+  for (const p of ["sdk/LO-GAME.md", "sdk/PROMPT.md", "sdk/template/index.html", "docs/x.md", "tests/a.mjs", "registry/apps/a/index.html"]) {
+    assert.ok(!runtimeRe.test(p) && !allAppsRe.test(p), p);
+  }
+  assert.ok(y.includes('[ -z "$APPS" ] && [ "$RUNTIME" = false ]'), "a runtime-only PR still deploys");
   /* the comment links runtime/ when it changed, and no longer warns against opening it */
   assert.ok(y.includes("runtime=$RUNTIME") && y.includes("$SITE/pr/$PR/runtime/"), "runtime link");
   assert.ok(y.includes("lopda-pr-") && !/Do not open `?runtime/i.test(y) && !y.includes("请不要打开"), "no warning about runtime/");
