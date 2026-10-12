@@ -185,9 +185,9 @@
 - **部署（GitHub Pages）**：`.github/workflows/pages.yml` 只用 git 命令发布到 `gh-pages` 分支，不用第三方 action。
   - push 到 `main` 发布到站点根目录：`https://nowheremanx.github.io/lopda/runtime/`。
   - 同一 repo 的 PR 发布到 `pr/<编号>/`，在 PR 里留一条预览链接（更新而不是重复发），PR 关闭后删除；fork 的 PR 不发布。
-  - 只在 PR 改了能预览的东西时才发布（2026-10-10）：改了某些 app 只列这些 app；改了 `runtime/`（任何文件）或 `sdk/` 里的
-    `.js` 文件列出全部 app（`sdk/*.md` 之类文档不算）；只改文档、测试、CI 时不发布也不留言，省掉一次 Pages 构建。
-    改了 `runtime/` 时留言里多一条 `pr/<编号>/runtime/` 链接。
+  - 只在 PR 改了能预览的东西时才发布（2026-10-10，2026-10-11 修订）：改了某些 app 只列这些 app；改了 `sdk/` 里的 `.js` 文件或
+    `sdk/dev.html`（每个 app 链接都跑在它们上面）列出全部 app（`sdk/*.md`、模板不算）；改了 `runtime/` 只给一条 `pr/<编号>/runtime/`
+    链接，不列 app（app 链接打开的是开发台，开发台不加载 `runtime/`）；只改文档、测试、CI 时不发布也不留言，省掉一次 Pages 构建。
   - **预览和正式站点同源**（`nowheremanx.github.io`），但 `platform.js` 在路径含 `/pr/<编号>/` 时把 IndexedDB 名换成
     `lopda-pr-<编号>`（2026-10-11），所以预览里的 `runtime/` 可以打开，不会碰正式掌机的数据。
   - 仍然共享的状态：`sdk/dev.html` 的 localStorage（键 `lopda-dev:<app id>`，所有预览共用，正式掌机不用）。
