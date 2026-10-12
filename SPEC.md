@@ -83,6 +83,11 @@ No other files are loaded. Images, sounds and fonts must be embedded in
   Shift = SELECT. Do not also handle those keys yourself, or they will fire twice.
 - An app that sets `buttons` should still be playable by touch where it makes sense,
   and must say on its first screen which button does what.
+- Button convention (recommended, checked in review rather than by the checker): in menus,
+  lists, dialogs and pause screens, A confirms and B goes back or cancels, as in the
+  built-in programs. During play a game maps A and B however it likes (B may be an attack
+  or a jump). START usually pauses or opens a menu; SELECT is free. Do not rely on B to
+  leave the app: the handheld's HOME key does that.
 - `alert`, `confirm` and `prompt` are unavailable. Build confirmations into the UI.
 - Prefer `PAD.sfx` for sound effects: it follows the user's volume and mute settings and
   the phone's silent switch. Your own Web Audio is allowed but ignores those settings,
