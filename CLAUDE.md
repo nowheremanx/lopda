@@ -10,7 +10,7 @@ Design history and open questions: `docs/decisions.md`. Read it before changing 
 ```
 runtime/        the PWA: index.html, core.js (shared LP object: utils, views, sound, home, chin pad), apps/*.js (one file per
                 built-in), boot.js (loaded last), strings.js (zh/en text), lopda.css, platform.js (IndexedDB store, file export),
-                chip.js (sound chip: MML music + custom sound effects, shared with sdk/dev.html),
+                chip.js (sound chip: MML music, custom sound effects, ambience presets; shared with sdk/dev.html),
                 lunar.js (lunar calendar + solar term tables, 1900-2100), stardict.js (StarDict reader), bookparse.js (TXT/EPUB parser),
                 books/ (the reader's two public-domain sample books), sw.js (offline cache),
                 fonts/ (DotGothic16, VT323, OFL), vendor/binjgb/ (Game Boy core, MIT), vendor/holiday-cn/ (China days off, MIT),
@@ -99,7 +99,10 @@ node --test                                  # the test suite; must pass
 - Music and custom sounds (runtime 0.11.0+, `runtime/chip.js`, SPEC.md 6.3): `PAD.music.play(song, {loop})` / `stop()`,
   song = `{bpm, p1, p2, tri, noise}` in MML (≤ 8 KB); `PAD.sfx({wave, duty, from, to, ms, attack, decay, vol})`.
   `PAD.music` is undefined on older runtimes. The ten named sounds stay in core.js, unchanged.
-- Games may use `sdk/lo-game.js`: the app keeps an empty `<script data-lo-game="1.3.0">` block and
+  `PAD.sfx({... vibrato: {depth, rate}})` and `PAD.ambience(name, level)` / `PAD.ambience(null)` (runtime 0.13.0+): presets
+  `rain waves waterfall wind fire stream`, level 0-1, one at a time under the music, about 1 s fades; music and ambience
+  calls are each limited to 4 a second.
+- Games may use `sdk/lo-game.js`: the app keeps an empty `<script data-lo-game="1.4.0">` block and
   `tools/bundle-app.mjs` fills it, plus a `data-lo-font` block with only the glyphs the app uses.
   The checker accepts only unmodified released copies (`sdk/lo-game.versions.json`). When you change
   lo-game.js: bump its VERSION, add the new hash to versions.json, re-run the tool on apps.

@@ -151,7 +151,7 @@ function show(name){
 $("home-key").onclick=function(){ LP.flushNote(); show("home"); sfx("home"); };
 
 /* ---------- sound: tiny square-wave chips through Web Audio ---------- */
-var RUNTIME_VERSION="0.12.0";   /* keep in step with VERSION in sw.js */
+var RUNTIME_VERSION="0.13.0";   /* keep in step with VERSION in sw.js */
 /* One volume, five steps, 0 is off (decisions.md section 10). It sets the master gain and nothing else does.
    Under the master: `ui` for the runtime's own clicks, held at a fraction so they stay as quiet as they always were
    (step 2 gives them 0.11, their level before 0.12.0), and `app` for apps, music and the cartridge at the full step. */
@@ -213,9 +213,9 @@ function playNamed(name,bus){
 function sfx(name){ playNamed(name,"ui"); }
 /* a named sound an app asked for (PAD.sfx("coin")) */
 function appSfx(name){ playNamed(name,"app"); }
-/* ---------- music and made-to-order sounds for apps: runtime/chip.js (PAD.music, PAD.sfx({...})) ----------
-   Into the `app` bus, under the same master. At volume 0 the song keeps going, silent, and is heard again from wherever
-   it has got to, like turning a real handheld's volume down. */
+/* ---------- music, made-to-order sounds and ambience for apps: runtime/chip.js (PAD.music, PAD.sfx({...}), PAD.ambience) ----------
+   Into the `app` bus, under the same master. At volume 0 the song and the ambience keep going, silent, and are heard again
+   from wherever they have got to, like turning a real handheld's volume down. */
 var chip=window.LopdaChip.host({
   context:function(make){ return SND.ctx || (make ? audio() : null); },
   output:function(){ return SND.app; },
@@ -231,7 +231,8 @@ function sfxCustom(params){
    Sometimes it says so ("suspended", "interrupted"); sometimes it still says "running" and its clock stands still.
    So on every touch or key: a context Safari calls interrupted, or one an earlier check found dead, is replaced at
    once, inside the touch, where iOS lets a new one start; one that is merely suspended is asked to run; and a check
-   400 ms later marks it dead if its clock has not moved. The song goes on in the new context from where it was;
+   400 ms later marks it dead if its clock has not moved. The song goes on in the new context from where it was, the ambience
+   with the same preset and level;
    built-ins that play into the context get the "audio" hook. */
 function rebuild(){
   var old=SND.ctx; SND.ctx=null; SND.gain=SND.ui=SND.app=null;
@@ -254,7 +255,7 @@ function onGesture(){
     if(SND.stale || ac.state==="interrupted") rebuild();
     else wake();
   }
-  /* a song asked for before the first touch starts on the first touch or key (iPhone keeps audio locked until then) */
+  /* a song or ambience asked for before the first touch starts on the first touch or key (iPhone keeps audio locked until then) */
   chip.unlock();
   checkLater();
 }

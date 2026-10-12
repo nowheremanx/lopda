@@ -159,6 +159,40 @@ test("sfx takes an object: only the sound's own keys are sent", () => {
   ]);
 });
 
+test("sfx: vibrato goes across as {depth, rate}, plain numbers or strings only", () => {
+  const a = app({ music: true });
+  a.PAD.sfx({ from: 440, vibrato: { depth: 0.5, rate: 7, shape: "sine" } });
+  a.PAD.sfx({ from: 440, vibrato: { depth: () => 1 } });
+  a.PAD.sfx({ from: 440, vibrato: 3 });
+  assert.deepEqual(a.posted(), [
+    { op: "sfx", params: { from: 440, vibrato: { depth: 0.5, rate: 7 } }, pad: 1 },
+    { op: "sfx", params: { from: 440, vibrato: { depth: "() => 1" } }, pad: 1 },
+    { op: "sfx", params: { from: 440 }, pad: 1 },
+  ]);
+});
+
+test("PAD.ambience is there only when the runtime can play it, and posts a name and a level", () => {
+  assert.equal(app().PAD.ambience, undefined);
+  assert.equal(app({ music: true }).PAD.ambience, undefined);
+  assert.equal(app({ ambience: 1 }).PAD.ambience, undefined);
+  const a = app({ music: true, ambience: true });
+  a.PAD.ambience("rain", 0.6);
+  a.PAD.ambience("waves");
+  a.PAD.ambience(null);
+  a.PAD.ambience();
+  a.PAD.ambience("wind", "loud");
+  a.PAD.ambience({ toString: () => "fire" }, 1);
+  assert.deepEqual(a.posted(), [
+    { op: "ambience", name: "rain", level: 0.6, pad: 1 },
+    { op: "ambience", name: "waves", pad: 1 },
+    { op: "ambience", name: null, pad: 1 },
+    { op: "ambience", name: null, pad: 1 },
+    /* the runtime checks the name and clamps the level */
+    { op: "ambience", name: "wind", level: "loud", pad: 1 },
+    { op: "ambience", name: "fire", level: 1, pad: 1 },
+  ]);
+});
+
 test("CSP blocks the network and allows only inline code and data: media", () => {
   const { LOPDA_APP_CSP: csp } = runScript("sdk/pad-shim.js", {});
   assert.equal(csp, "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; " +
@@ -182,6 +216,8 @@ test("lopdaWrapApp puts CSP and shim first in every shape of document", () => {
   assert.ok(wrap("<p>x</p>", { lang: "de" }).includes("lopdaPadShim(opts)") && !wrap("<p>x</p>", { lang: "de" }).includes('"lang"'));
   assert.ok(wrap("<p>x</p>", { lang: "zh", music: true }).includes('({"lang":"zh","music":true});'), "passes music");
   assert.ok(wrap("<p>x</p>", { music: 1 }).includes(")();"), "music only when it is true");
+  assert.ok(wrap("<p>x</p>", { lang: "en", music: true, ambience: true }).includes('({"lang":"en","music":true,"ambience":true});'), "passes ambience");
+  assert.ok(wrap("<p>x</p>", { ambience: "yes" }).includes(")();"), "ambience only when it is true");
   /* the injected shim is the real function source and runs on its own */
   const src = wrap("<p>x</p>").match(/<script>([\s\S]*?)<\/script>/)[1];
   assert.doesNotThrow(() => new vm.Script(src));
@@ -192,6 +228,8 @@ test("the shim, lo-game and the checker agree on buttons and sounds", () => {
   const list = (src, name) => JSON.parse(src.match(new RegExp(name + " = (\\[[^\\]]*\\])"))[1]);
   assert.deepEqual(list(read("tools/check-app.mjs"), "SOUNDS"), [...PAD.SOUNDS]);
   assert.deepEqual(list(read("sdk/lo-game.js"), "BUTTONS"), [...PAD.BUTTONS]);
+  const chip = runScript("runtime/chip.js", {}).LopdaChip;
+  assert.deepEqual(list(read("tools/check-app.mjs"), "AMBIENCES"), [...chip.AMBIENCES], "the checker knows the chip's presets");
 });
 
 test("exportFile and importFile ask the runtime and settle from its matching reply", async () => {

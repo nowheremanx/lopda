@@ -5,7 +5,8 @@ Status: draft · Spec id: `lopda/1` (apps written for `lopda/0` keep working) ·
 What v1 adds over v0: the chin buttons (`"buttons": true`, `PAD.on`, `PAD.isDown`) and
 system sounds (`PAD.sfx`). Added later within v1, all optional: the player's language
 (`PAD.lang`) and localized store text (manifest `i18n`), see section 6.1; files
-(`"permissions": ["files"]`, `PAD.exportFile`, `PAD.importFile`), see section 6.2.
+(`"permissions": ["files"]`, `PAD.exportFile`, `PAD.importFile`), see section 6.2; music, sound effects of the
+app's own and ambience (`PAD.music`, `PAD.sfx({...})`, `PAD.ambience`), see section 6.3.
 
 A Lo-PDA app is one self-contained HTML file plus a small manifest. The runtime
 installs it from the registry, pins it to an exact version, and runs it inside
@@ -89,7 +90,7 @@ No other files are loaded. Images, sounds and fonts must be embedded in
   or a jump). START usually pauses or opens a menu; SELECT is free. Do not rely on B to
   leave the app: the handheld's HOME key does that.
 - `alert`, `confirm` and `prompt` are unavailable. Build confirmations into the UI.
-- Prefer `PAD.sfx` for sound effects and `PAD.music` for music (section 6.3): the runtime plays
+- Prefer `PAD.sfx` for sound effects, `PAD.music` for music and `PAD.ambience` for background sound (section 6.3): the runtime plays
   them, so they follow the user's volume (volume 0 is off) and the phone's silent switch, stop
   when the app closes and pause when the phone locks. Your own Web Audio is allowed but ignores
   all of that, so keep it quiet and start it only after a user gesture.
@@ -138,6 +139,10 @@ PAD.SOUNDS                   // ["tap","tick","move","ok","err","hit","miss","co
 PAD.sfx({wave, from, to, ms, ...})   // a sound effect of the app's own
 PAD.music.play(song, {loop})         // play a song (MML), replacing the one playing; loops unless loop is false
 PAD.music.stop()                     // fade out over about 0.3 s
+
+// lopda/1, runtime 0.13.0 and later (section 6.3); PAD.ambience is undefined on older runtimes
+PAD.ambience(name, level)            // a background: rain waves waterfall wind fire stream, level 0-1
+PAD.ambience(null)                   // fade it out over about 1 s
 
 // lopda/1 with "permissions": ["files"] (section 6.2); undefined on runtimes before 0.5.0
 await PAD.exportFile({name, type, data})   // -> "saved" | "cancelled"
@@ -208,10 +213,10 @@ if (PAD.exportFile) {   // runtimes before 0.5.0 have neither method
   them without declaring it.
 - Pictures from the player are full colour: reduce them to the four tones yourself before showing them.
 
-### 6.3 Music and sound effects
+### 6.3 Music, sound effects and ambience
 
 The runtime has a small sound chip: four music channels (two pulse waves, a triangle, a noise
-channel) and two sound-effect voices. The app writes the notes; the runtime plays them, so the
+channel), two sound-effect voices and one ambience. The app writes the notes; the runtime plays them, so the
 volume, the phone's silent switch, locking the phone and leaving the app are all
 handled for it. Design notes: `docs/design/pad-audio.md`.
 
@@ -259,16 +264,48 @@ is pulled into range, never refused.
 | `ms` | length, 10-1500 (default 150) |
 | `attack`, `decay` | milliseconds to rise at the start and to fade at the end (default 2, and the rest of the length) |
 | `vol` | 0-1 (default 0.7) |
+| `vibrato` | `{ depth, rate }`: the pitch wobbles `depth` semitones either way (0-2; default 0, none), `rate` times a second (1-20, default 6). Runtime 0.13.0 and later; older runtimes ignore it |
 
 Two effects sound at once; a third cuts off the oldest. Music plays at about half the level of
 an effect, so effects and the runtime's own clicks stay on top.
 
-**When the runtime stops or holds the music.** Leaving the app (HOME, the back button, another
-app, a language switch) stops it at once. While the page is hidden or the phone is locked the song
-holds its place and goes on when the player comes back. At volume 0 (off) it keeps going
-silently, and is heard again from wherever it has got to. A browser only lets a page make sound
-after the player has touched it: a song asked for before that waits, and starts on the first tap
-or key.
+**Ambience** (runtime 0.13.0 and later). A background sound the runtime makes: the app picks a
+preset and a level, nothing more.
+
+```js
+if (PAD.ambience) {                   // undefined before runtime 0.13.0
+  PAD.ambience("rain", 0.6);          // one of the presets below, level 0-1 (default 0.5)
+  PAD.ambience("rain", 0.2);          // calling again fades over about a second to the new level ...
+  PAD.ambience("wind", 0.5);          // ... or the new preset
+  PAD.ambience(null);                 // fade out over about a second
+}
+```
+
+| preset | sounds like |
+|---|---|
+| `rain` | dense, fine patter |
+| `waves` | the sea, a wave every 6-10 seconds |
+| `waterfall` | a steady, thick roar |
+| `wind` | gusts that rise and fall, with a faint whistle |
+| `fire` | a low flicker and random crackles |
+| `stream` | a light, high babble |
+
+One ambience plays at a time. It sits under the music: at level 1 it is quieter than a song.
+A level out of range is pulled into 0-1; an unknown preset is not played and the runtime shows
+it in its error box, like a score that does not parse. The checker fails a literal unknown name.
+
+**Calls a second.** At most 4 `PAD.music` calls a second (more `play` calls are dropped; `stop`
+always works), and separately at most 4 `PAD.ambience` calls a second: over that the newest call
+waits its turn and plays a moment later, and the ones between are skipped, so the ambience always
+ends up as the app last asked. `PAD.ambience(null)` always goes through at once. Call these when a
+scene changes, not every frame.
+
+**When the runtime stops or holds the music and the ambience.** Leaving the app (HOME, the back
+button, another app, a language switch) stops both at once. While the page is hidden or the phone
+is locked the song holds its place and the ambience holds too; both go on when the player comes back.
+At volume 0 (off) they keep going silently, and are heard again from wherever they have got to.
+A browser only lets a page make sound after the player has touched it: a song or ambience asked
+for before that waits, and starts on the first tap or key.
 
 **Only music you may share.** Songs and sound effects in an app must be your own work, or in the
 public domain (classical pieces, folk songs) with the source named in a comment next to the score.
@@ -319,7 +356,8 @@ that uses it carries its own copy in a `<script data-lo-game="VERSION">` block,
 filled in by `node tools/bundle-app.mjs registry/apps/<id>`. The checker accepts only
 unmodified released copies and skips them when scanning, so review covers the
 game's own code. Since 1.2.0, `game.t({zh: "…", en: "…"})` picks text by `PAD.lang`; since 1.3.0,
-`game.music(song)`, `game.musicStop()` and `game.sfx({...})` play music and custom sounds where the runtime has them.
+`game.music(song)`, `game.musicStop()` and `game.sfx({...})` play music and custom sounds where the runtime has them;
+since 1.4.0, `game.ambience(name, level)` plays an ambience.
 Reference and AI prompt: `sdk/LO-GAME.md`.
 
 ## 11. Source files and lo-3d.js (optional)

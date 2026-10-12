@@ -492,13 +492,13 @@ var Lo3D = (function () {
   };
 })();
 </script>
-<script data-lo-game="1.3.0">
+<script data-lo-game="1.4.0">
 /*
- * lo-game.js 1.3.0, a tiny game framework for Lo-PDA apps.
+ * lo-game.js 1.4.0, a tiny game framework for Lo-PDA apps.
  * MIT License. Copyright (c) 2026 Haowei Wu. See sdk/LICENSE.
  *
  * Paste-in library: an app carries its own copy inside a script tag marked
- * data-lo-game="1.3.0", and `node tools/lo-game.mjs registry/apps/<id>` fills it in.
+ * data-lo-game="1.4.0", and `node tools/lo-game.mjs registry/apps/<id>` fills it in.
  * The same tool adds a pixel-font block holding just the characters the app uses.
  * Do not edit the copy inside an app; the checker verifies it.
  *
@@ -509,7 +509,7 @@ var Lo3D = (function () {
 var LoGame = (function () {
   "use strict";
 
-  var VERSION = "1.3.0";
+  var VERSION = "1.4.0";
   var TONES = ["#1f2a14", "#4a5a32", "#7d8a58", "#a3ad7e"];
   var INK = 0, DARK = 1, MID = 2, PAPER = 3;
   var CLEAR = 255;
@@ -939,6 +939,8 @@ var LoGame = (function () {
       sfx: function (s) { if (HAS_PAD && PAD.sfx && (typeof s === "string" || PAD.music)) PAD.sfx(s); },
       music: function (song, o) { if (HAS_PAD && PAD.music) PAD.music.play(song, o); },
       musicStop: function () { if (HAS_PAD && PAD.music) PAD.music.stop(); },
+      /* ambience("rain", 0.6), ambience(null) to fade it out (1.4.0); nothing on runtimes before 0.13.0 */
+      ambience: function (name, level) { if (HAS_PAD && PAD.ambience) PAD.ambience(name, level); },
       save: function (key, value) { if (HAS_PAD) PAD.save(key, value); else memory[key] = JSON.parse(JSON.stringify(value)); },
       load: function (key) { return HAS_PAD ? PAD.load(key) : Promise.resolve(key in memory ? memory[key] : null); },
       remove: function (key) { if (HAS_PAD) PAD.remove(key); else delete memory[key]; },

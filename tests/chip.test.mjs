@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { ROOT, runScript } from "./helpers.mjs";
 import { scripted } from "./frame-hashes.mjs";
+import { boot } from "./app-vm.mjs";
 
 const C = runScript("runtime/chip.js", {}).LopdaChip;
 /* plain copies: values made in the vm have the vm's prototypes, which deepEqual tells apart */
@@ -102,7 +103,7 @@ test("the shape of a song: at most four named channels, 8 KB of text, something 
 });
 
 test("custom sound parameters are pulled into range, never refused", () => {
-  const p = (o) => plain(C.sfxParams(o));
+  const p = (o) => { const r = plain(C.sfxParams(o)); delete r.vibrato; return r; };
   assert.deepEqual(p({}), { wave: "square", duty: 2, from: 440, to: 440, ms: 150, attack: 2, decay: 148, vol: 0.7 });
   assert.deepEqual(p({ wave: "saw", duty: 9, from: 1, to: 99999, ms: 5000, attack: -3, decay: 9999, vol: 2 }),
     { wave: "square", duty: 3, from: 20, to: 12000, ms: 1500, attack: 0, decay: 1500, vol: 1 });
@@ -116,6 +117,84 @@ test("custom sound parameters are pulled into range, never refused", () => {
   assert.deepEqual(p("coin"), p({}));
 });
 
+test("vibrato: depth in semitones 0-2 (0, none, by default), rate in Hz 1-20 (6 by default), clamped", () => {
+  const v = (o) => plain(C.sfxParams(o)).vibrato;
+  assert.deepEqual(v({}), { depth: 0, rate: 6 });
+  assert.deepEqual(v({ vibrato: { depth: 0.5, rate: 8 } }), { depth: 0.5, rate: 8 });
+  assert.deepEqual(v({ vibrato: { depth: 5, rate: 99 } }), { depth: 2, rate: 20 });
+  assert.deepEqual(v({ vibrato: { depth: -1, rate: 0 } }), { depth: 0, rate: 1 });
+  assert.deepEqual(v({ vibrato: { depth: "1", rate: "fast" } }), { depth: 1, rate: 6 });
+  assert.deepEqual(v({ vibrato: 3 }), { depth: 0, rate: 6 }, "a number is not a shape: ignored");
+  assert.deepEqual(v({ vibrato: { rate: 10 } }), { depth: 0, rate: 10 });
+});
+
+test("ambience: six presets by name, null for silence, the level pulled into 0-1", () => {
+  const a = (n, l) => plain(C.ambienceParams(n, l));
+  assert.deepEqual(plain(C.AMBIENCES), ["rain", "waves", "waterfall", "wind", "fire", "stream"]);
+  for (const n of C.AMBIENCES) assert.deepEqual(a(n, 0.3), { name: n, level: 0.3 });
+  assert.deepEqual(a("rain"), { name: "rain", level: 0.5 }, "no level: the default");
+  assert.deepEqual(a("rain", 7), { name: "rain", level: 1 });
+  assert.deepEqual(a("rain", -1), { name: "rain", level: 0 });
+  assert.deepEqual(a("rain", "0.25"), { name: "rain", level: 0.25 });
+  assert.deepEqual(a("rain", "heavy"), { name: "rain", level: 0.5 });
+  assert.deepEqual(a(null), { name: null, level: 0 });
+  assert.deepEqual(a(undefined, 1), { name: null, level: 0 });
+  assert.equal(a("thunder").error, 'unknown ambience "thunder": one of rain, waves, waterfall, wind, fire, stream, or null');
+  assert.match(a("Rain").error, /unknown ambience "Rain"/, "names are lower case, as written");
+  assert.match(a("").error, /unknown ambience ""/);
+  assert.match(a(3).error, /unknown ambience "3"/);
+  assert.equal(a("x".repeat(500)).error.length < 140, true, "a long name is cut in the message");
+});
+
+/* the host's rules, on a fake AudioContext: what waits, what is held over the rate, what stops */
+function fakeHost() {
+  const calls = [];
+  const node = () => { const n = { connect() {}, disconnect() {}, gain: param(), frequency: param(), Q: param(), playbackRate: param(), detune: param(), start() {}, stop() {} }; return n; };
+  function param() { return { value: 0, setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {}, cancelScheduledValues() {} }; }
+  const ctx = { state: "running", currentTime: 0, sampleRate: 8000, destination: node(),
+    createGain: node, createOscillator: node, createBufferSource: node, createBiquadFilter: node,
+    createPeriodicWave: () => ({}), createBuffer: (c, n) => ({ duration: n / 8000, getChannelData: () => new Float32Array(n) }),
+    resume: () => Promise.resolve(), suspend() { calls.push("suspend"); } };
+  const H = runScript("runtime/chip.js", { setTimeout: (f, ms) => { calls.push(["timer", ms]); return 1; }, clearTimeout() {} }).LopdaChip;
+  let made = false;
+  const host = H.host({ context: (make) => { if (make) made = true; return made ? ctx : null; }, output: () => ctx.destination });
+  return { host, ctx, calls, make: () => { made = true; } };
+}
+
+test("ambience in the host: waits for the first touch, the newest call over the rate waits its turn, silence goes at once", () => {
+  const { host, make } = fakeHost();
+  const st = () => plain(host.state());
+  assert.equal(host.ambience({ name: "rain", level: 0.6 }), null);
+  assert.deepEqual([st().ambience, st().ambienceWaiting], [null, true], "no context yet: it waits");
+  make(); host.unlock();
+  assert.deepEqual([st().ambience, st().level, st().ambienceWaiting], ["rain", 0.6, false]);
+  assert.equal(host.ambience({ name: "fire" }), null);
+  host.ambience({ name: "wind", level: 0.2 }); host.ambience({ name: "waves", level: 0.9 });
+  /* four calls this second: the fifth and sixth are held, and only the newest of them counts */
+  assert.match(plain(host.ambience({ name: "stream", level: 0.1 })).held, /more than 4 calls a second/);
+  assert.match(plain(host.ambience({ name: "fire", level: 0.4 })).held, /more than 4/);
+  assert.equal(st().ambience, "waves");
+  /* silence is never held, and drops what was waiting */
+  assert.equal(host.ambience({ name: null }), null);
+  assert.equal(st().ambience, null);
+  assert.match(plain(host.ambience({ name: "lava" })).error, /unknown ambience "lava"/);
+  host.ambience({ name: "rain", level: 0.5 });
+  host.stop();
+  assert.deepEqual(st(), { playing: false, waiting: false, paused: false, ambience: null, level: 0, ambienceWaiting: false });
+});
+
+test("ambience in the host: it goes on in a new context with the same preset and level; it holds the page's pause", () => {
+  const { host, calls, make } = fakeHost();
+  make();
+  host.ambience({ name: "waterfall", level: 0.35 });
+  host.pause();
+  assert.ok(calls.includes("suspend"), "ambience alone is enough to suspend with the page");
+  assert.equal(plain(host.state()).paused, true);
+  host.resume();
+  host.rebuild();
+  assert.deepEqual([plain(host.state()).ambience, plain(host.state()).level], ["waterfall", 0.35]);
+});
+
 test("the yard's tune parses: four channels, 40 seconds, every channel the same length", () => {
   const ctx = runScript("registry/apps/xiaoyuan/src/music.js", {});
   const song = ctx.YARD_SONG;
@@ -123,6 +202,32 @@ test("the yard's tune parses: four channels, 40 seconds, every channel the same 
   const r = parse(song);
   assert.equal(r.song.seconds, 40);
   assert.ok(JSON.stringify(song).length < C.MAX_TEXT);
+});
+
+test("the rain station: rain under the title and the station, lighter on the train, none at dawn; the same frames", async () => {
+  const file = join(ROOT, "registry/apps/rain-station/index.html");
+  const without = await scripted(file), withAmb = await scripted(file, { music: true, ambience: true });
+  assert.deepEqual(withAmb.frames, without.frames);
+  const amb = withAmb.calls.filter((c) => c[0] === "ambience").map((c) => c[1] + " " + c[2]);
+  assert.deepEqual(amb.slice(0, 2), ["rain 0.4", "rain 0.7"], "the title, then the station");
+  for (const a of amb) assert.match(a, /^(rain (0\.4|0\.7|0\.3)|null 0)$/);
+  assert.ok(!without.calls.some((c) => c[0] === "ambience"), "an old runtime: no calls");
+  /* two whole stories: A only (the night train, back to the title), and DOWN before each A (stay, to dawn) */
+  const story = async (keys) => {
+    const on = { press: [], release: [] }, down = new Set(), heard = [];
+    const pad = { lang: "zh", spec: "lopda/1", on: (type, f) => { if (on[type]) on[type].push(f); }, off() {}, isDown: (b) => down.has(b),
+      load: () => Promise.resolve(null), save() {}, remove() {}, exit() {}, sfx() {}, music: { play() {}, stop() {} },
+      ambience: (n, l) => heard.push(n ? n + " " + l : "quiet") };
+    const app = boot(file, { pad });
+    const run = async (n) => { for (let i = 0; i < n; i++) { app.frame(); await app.ctx.get("__yield")(); } };
+    await run(10);
+    for (let i = 0; i < 40; i++) for (const k of keys) {
+      down.add(k); on.press.forEach((f) => f(k)); await run(2); down.delete(k); on.release.forEach((f) => f(k)); await run(80);
+    }
+    return heard;
+  };
+  assert.deepEqual((await story(["a"])).slice(0, 7), ["rain 0.4", "rain 0.7", "rain 0.3", "rain 0.4", "rain 0.7", "rain 0.3", "rain 0.4"]);
+  assert.deepEqual((await story(["down", "a"])).slice(0, 4), ["rain 0.4", "rain 0.7", "quiet", "rain 0.4"]);
 });
 
 test("the yard draws the same frames with and without music, and plays its tune and its own sounds", async () => {

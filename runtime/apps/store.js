@@ -1,6 +1,6 @@
 /*
  * Lo-PDA built-in: the app store (community registry), the preinstalled apps, and the sandboxed runner
- * with its PAD bridge (storage, sounds and music, buttons, and files behind the runtime's own confirm dialog).
+ * with its PAD bridge (storage, sounds, music and ambience, buttons, and files behind the runtime's own confirm dialog).
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  */
 (function(){
@@ -170,7 +170,7 @@ function freshRunFrame(){
 }
 function runApp(a){
   closeAsk(false);
-  LP.chip.stop();   /* the old app's song ends with its frame */
+  LP.chip.stop();   /* the old app's song and ambience end with its frame */
   S.running=a;
   $("run-title").textContent=appName(a)+" · v"+(a.version||"?");
   LP.resetConfirm("run-del-wrap","run-del",tr("run.remove"),function(){ if(S.running){ var n=appName(S.running); deleteApp(S.running.id); show("home"); toast(tr("run.removed",{name:n})); } });
@@ -178,7 +178,7 @@ function runApp(a){
   show("run");
   showPad(!!a.buttons);
   freshRunFrame();
-  var start=function(h){ $("run-frame").srcdoc=lopdaWrapApp(h,{lang:I18N.lang, music:true}); };
+  var start=function(h){ $("run-frame").srcdoc=lopdaWrapApp(h,{lang:I18N.lang, music:true, ambience:true}); };
   if(a.html){ start(a.html); return; }
   $("run-frame").srcdoc='<body style="margin:0;height:100%;display:flex;align-items:center;justify-content:center;background:#a3ad7e;color:#1f2a14;font:16px monospace">'+tr("run.loading")+'</body>';
   loadHtml(a).then(function(h){
@@ -232,6 +232,10 @@ window.addEventListener("message",function(e){
     /* at most 4 calls a second (chip.js drops the rest); a score that does not parse is shown like any app error */
     var r=LP.chip.music(d);
     if(r && r.error){ $("run-err-msg").textContent=tr("run.music",{msg:String(r.error).slice(0,240)}); $("run-err").hidden=false; }
+  } else if(d.op==="ambience"){
+    /* 4 calls a second (over that, the newest waits its turn); an unknown preset is shown like any app error */
+    var ra=LP.chip.ambience(d);
+    if(ra && ra.error){ $("run-err-msg").textContent=tr("run.ambience",{msg:String(ra.error).slice(0,240)}); $("run-err").hidden=false; }
   }
 });
 var sfxWindow={t:0,n:0};
