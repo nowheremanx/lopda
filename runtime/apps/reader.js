@@ -1088,6 +1088,8 @@ $("rd-fontfile").addEventListener("change",function(){
     /* imported to be used: it becomes the font at once */
     fontRows().forEach(function(r,i){ if(r.k===id) R.fpick=i; });
     useFont(id);
+    /* the busy hint goes with the toast, not when the font has loaded for the text */
+    if(R.sheet==="font") renderSheet();
   },function(e){ done(); toast(errMsg(e)); sfx("err"); if(R.sheet==="font") renderSheet(); });
 });
 
