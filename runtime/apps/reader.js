@@ -410,7 +410,8 @@ function footer(){
 
 /* ---------- touch ----------
    a tap on the sides turns, a swipe turns, a tap in the middle opens the menu; a tap on a link follows it, on an
-   underline shows the quote; a long press starts a selection at that word and dragging extends it */
+   underline shows the quote; a long press starts a selection at that word and dragging extends it; while there is a
+   selection, a tap ends it and a swipe ends it and turns */
 (function(){
   var pg=$("rd-page"), t=null, menuTap=false;
   function cancelLong(){ if(t && t.timer){ clearTimeout(t.timer); t.timer=null; } }
@@ -436,9 +437,10 @@ function footer(){
     var dx=e.clientX-t.x, dy=e.clientY-t.y, target=t.target, long=t.long; t=null;
     if(long){ if(R.sel){ R.sel.held=false; footer(); } return; }
     if(lowerSheet()){ closeLow(); return; }
-    if(Math.abs(dx)>40 && Math.abs(dx)>Math.abs(dy)*1.2){ turnPage(dx<0?1:-1); return; }
+    /* with a selection on the page, a touch first puts it away: a tap does only that, a swipe then turns as usual */
+    if(Math.abs(dx)>40 && Math.abs(dx)>Math.abs(dy)*1.2){ if(R.sel) endSel(); turn(dx<0?1:-1); return; }
     if(Math.abs(dx)>12 || Math.abs(dy)>12) return;
-    if(R.sel){ tapWord(e.clientX,e.clientY); return; }
+    if(R.sel){ endSel(); sfx("tap"); return; }
     var link=target && target.closest && target.closest("a.ln"), hl=target && target.closest && target.closest("u.hl");
     if(link){ followLink(link); return; }
     if(hl){ openMark(hl.getAttribute("data-m")); return; }
@@ -573,11 +575,6 @@ function tokenAt(x,y){
     var d=dy*4+dx; if(d<bd){ bd=d; best=i; }
   });
   return best;
-}
-function tapWord(x,y){
-  var s=R.sel, best=tokenAt(x,y); if(best<0) return;
-  if(s.held){ if(s.anc==null) s.anc=s.cur; s.moved=true; } else s.anc=null;
-  s.cur=best; sfx("move"); paintSel();
 }
 /* long press: a new selection from the word under the finger; dragging moves its far end */
 function selectAt(x,y){
@@ -825,7 +822,6 @@ function renderSheet(){
       tu.appendChild(li);
     });
     sh.appendChild(tu);
-    var cur=tu.querySelector("li.on"); if(cur && cur.scrollIntoView) cur.scrollIntoView({block:"center"});
   } else if(R.sheet==="notes"){
     var list=marksSorted(), nu=el("ul","lcd-menu rd-notes");
     if(!list.length) sh.appendChild(el("p","hint",tr("reader.nonotes")));
@@ -840,7 +836,6 @@ function renderSheet(){
       nu.appendChild(li);
     });
     sh.appendChild(nu);
-    var on2=nu.querySelector("li.on"); if(on2 && on2.scrollIntoView) on2.scrollIntoView({block:"nearest"});
   } else {
     var box=el("div","rd-jump");
     box.appendChild(el("b","",R.jump+"%"));
@@ -853,6 +848,8 @@ function renderSheet(){
   keys.appendChild(keyBtn("ck","B",tr("reader.back"),function(){ sheetBack(); }));
   if(R.sheet!=="toc" && R.sheet!=="notes") keys.appendChild(keyBtn("ck ck-a","A",tr("reader.go"),function(){ sheetA(); }));
   sh.appendChild(keys);
+  /* only now, with the keys below it, does the list have its final height: keep the highlighted row in view */
+  var on=sh.querySelector(".lcd-menu li.on"); if(on && on.scrollIntoView) on.scrollIntoView({block:R.sheet==="toc" ? "center" : "nearest"});
 }
 /* the progress bar under the menu: drag (or tap) anywhere on it to go there */
 function track(){
@@ -927,7 +924,8 @@ function closeHelp(){ $("rd-help").hidden=true; if(R.sheet==="help") R.sheet="";
 
 /* ---------- chin pad ----------
    shelf: ▲▼ pick, A open
-   page: ◀▲ back a page, ▶▼ on, A or START menu, SELECT selection, B back from a link, else shelf
+   page: ◀▲ back a page, ▶▼ or A on, START menu, SELECT selection, B back from a link, else shelf
+   (A turns the page: nothing on a page needs confirming, and a right thumb on A reads one-handed; owner 2026-10-11)
    selection: ◀▶▲▼ move (holding A extends), A (pressed and let go) look up, START quote, SELECT word / sentence /
      paragraph, B leave
    entry: ◀▶▲▼ page, B or A close, START word book (as in the dictionary); quote: A thought, START remove (twice), B close;
@@ -965,7 +963,8 @@ function readerButton(b,down){
   if(!down) return;
   if(b==="left"||b==="up") turn(-1);
   else if(b==="right"||b==="down") turn(1);
-  else if(b==="a"||b==="start") openMenu();
+  else if(b==="a") turn(1);
+  else if(b==="start") openMenu();
   else if(b==="select") enterSel();
   else if(b==="b"){ if(R.back) goBack(); else { closeBook(); sfx("tap"); } }
 }
