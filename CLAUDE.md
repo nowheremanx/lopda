@@ -122,6 +122,9 @@ node --test                                  # the test suite; must pass
 - Views must fit one screen without scrolling when they are "hardware" (camera, cartridge).
 - Bump `RUNTIME_VERSION` in core.js and `VERSION` in sw.js together on every runtime change;
   Settings → 检查更新 compares them.
+- Buttons in built-ins: A confirms, B goes back or cancels, on every screen, menu, list and dialog. START is the
+  screen's extra action (dictionary: add to the word book; calendar: today), SELECT is free. Leaving a program is the
+  HOME key's job. Games are different: during play an app maps A and B as it likes (SPEC.md section 4, decisions.md 3).
 - Design rule: a change should remove a decision from the user, or at least not add one.
   Prefer realism (how the real device or film behaves) over convenience.
 - Commits: end messages with the Co-Authored-By line the session asks for. Never push to `main`: work on a branch,
