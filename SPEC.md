@@ -74,6 +74,8 @@ No other files are loaded. Images, sounds and fonts must be embedded in
 - Font: `monospace`. External fonts cannot load.
 - No emoji. The runtime strips them; the screen has no color glyphs.
 - Pixel art is welcome. Use `image-rendering: pixelated` on scaled canvases.
+- Layout, touch targets, which tones may carry text, and the cursor: `sdk/UI.md`. Review reads apps against it;
+  the checker cannot.
 
 ## 4. Input
 

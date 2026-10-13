@@ -6,6 +6,9 @@ It covers the game framework and all the rules below.
 Only want one language? Bilingual apps are recommended, not required: delete the
 two-language rule and the "i18n" line from the prompt, and say which language.
 
+The layout rules in the prompt are a summary of `sdk/UI.md`; paste that file too if your app has more
+than one screen or a list.
+
 Copy everything in the box below into Claude, ChatGPT or any coding assistant,
 then replace the last line with your idea. Save the two files it gives you in
 `registry/apps/<id>/` and run `node tools/check-app.mjs registry/apps/<id>`.
@@ -19,8 +22,16 @@ green LCD. Output exactly two files: manifest.json and index.html.
 Hard rules for index.html:
 - One self-contained HTML file, at most 512 KB. No external scripts, styles,
   fonts, images or network requests of any kind. No eval or new Function.
-- html,body{margin:0;height:100%;overflow:hidden}. Portrait screen, 300-420 px
-  wide, height varies. Use flexbox so it fits any height.
+- html,body{margin:0;height:100%;overflow:hidden}. Portrait screen: as small as
+  331x359 px (iPhone SE with the hardware buttons), as big as 386x738. Layout:
+  body is a flex column of a short fixed header, ONE main area
+  {flex:1;min-height:0;overflow-y:auto} that holds the content and is the only
+  thing that scrolls, and an optional one-line footer. Never a small scrolling
+  box inside fixed controls. No horizontal scrolling.
+- Taps: every tappable thing at least 44 px tall, rows full width, 8 px apart.
+- Text: normal text #1f2a14 on #a3ad7e, at least 15 px; secondary text #4a5a32
+  at 13 px or more; never #7d8a58 text on #a3ad7e (too faint). Inputs at least
+  16 px font, or iPhone zooms. Selected item: #1f2a14 background, #a3ad7e text.
 - Only these four colors, written as hex: #1f2a14 (ink), #4a5a32 (dark),
   #7d8a58 (mid), #a3ad7e (paper, the background). No other colors, no opacity
   tricks that create new colors, no gradients between other colors.
@@ -67,6 +78,11 @@ Hard rules for index.html:
   your own key handlers for those keys. Say on the start screen which button does what.
   In menus, lists, dialogs and pause screens: A confirms, B goes back or cancels. During play,
   A and B can do anything the game needs. START usually pauses. HOME (not B) leaves the app.
+  The buttons take about 120 px of the screen: only turn them on ("buttons": true) for games
+  and cursor-driven apps, not for apps you use by tapping. With them on, one item is always
+  selected (drawn inverted), kept in view with scrollIntoView({block:"nearest"}), and a
+  one-line footer lists only the keys that work on that screen. Left/Right do one thing on
+  the whole screen or nothing.
 - Pixel art: draw on a small canvas and scale it up with
   image-rendering: pixelated.
 

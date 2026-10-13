@@ -15,7 +15,7 @@ runtime/        the PWA: index.html, core.js (shared LP object: utils, views, so
                 books/ (the reader's two public-domain sample books), sw.js (offline cache),
                 fonts/ (DotGothic16, VT323, OFL), vendor/binjgb/ (Game Boy core, MIT), vendor/holiday-cn/ (China days off, MIT),
                 vendor/ecdict/ (abridged ECDICT in StarDict format, MIT + WordNet licence)
-sdk/            MIT. pad-shim.js (PAD bridge), lo-game.js (game framework), LO-GAME.md, lo-3d.js (3D), LO-3D.md, PROMPT.md,
+sdk/            MIT. pad-shim.js (PAD bridge), lo-game.js (game framework), LO-GAME.md, lo-3d.js (3D), LO-3D.md, PROMPT.md, UI.md (app layout rules),
                 dev.html (app harness), template/, template-game/, template-vn/ (visual novel), fonts/ (lopix12, OFL)
 registry/       index.json (generated) + apps/<id>/{manifest.json,index.html,src/ (optional sources)}
 tools/          check-app.mjs, build-index.mjs, bundle-app.mjs (+ lo-game.mjs alias), lo-game-lib.mjs (Node 20+, no deps);
@@ -129,6 +129,8 @@ node --test                                  # the test suite; must pass
 - Keep files dependency-free and readable; comment why, not what. UI text is short Chinese and English:
   every runtime string lives in `runtime/strings.js` (`tr(key, vars)` in the runtime scripts); add both languages.
   Only zh and en (see docs/decisions.md section 11).
+- App screens (registry apps, test apps too) follow `sdk/UI.md`: one scrolling main area, 44 px targets, ink text on paper,
+  no chin pad unless the app needs it. Design for 331×359, the smallest screen.
 - Every pixel the user sees on the LCD is one of the four tones. Output images (film, cards)
   may use a roll's tint palette. No emoji anywhere (the runtime strips them in apps).
 - Write pixels with `putImageData` into ImageData. Do not `drawImage` a canvas onto another canvas
