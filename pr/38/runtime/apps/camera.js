@@ -5,8 +5,9 @@
  * layouts, fonts) are shared with the darkroom as LP.film.
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  *
- * The roll in the camera: data/users/local/film {roll, stock, seed, size, res, loaded, exposure, contrast, date, lens};
+ * The roll in the camera: data/users/local/film {roll, no, stock, seed, size, res, loaded, exposure, contrast, date, lens};
  * its frames: data/users/local/frames/items/<roll>-<nn> {roll, n, px, taken, dated, lens, exposure, contrast, blank};
+ * how many rolls this handheld has loaded: data/users/local/camera {rolls};
  * latent images: LopdaPlatform.files "roll/<roll>/<nn>.jpg" (800x700 JPEG). Unloading moves the roll to
  * data/users/local/rolls/items/<roll> (apps/darkroom.js); the latent images keep their keys.
  */
@@ -18,7 +19,7 @@ var FILES=window.LopdaPlatform.files;
 
 /* ---------- pixel camera: a roll of film. Frames are fixed once taken; a finished roll goes to the darkroom. ---------- */
 var CW=128, CH=112;
-var F={roll:null, size:12, res:1, stock:"portrait", seed:0, loaded:0, exposure:0, contrast:0, date:true, frames:[], ready:false, stale:null, jobs:[]};
+var F={roll:null, no:0, count:0, size:12, res:1, stock:"portrait", seed:0, loaded:0, exposure:0, contrast:0, date:true, frames:[], ready:false, stale:null, jobs:[]};
 var ccv=$("cam-cv"), cctx=ccv.getContext("2d"), cimg=cctx.createImageData(CW,CH);
 /* film format: 1 = 128x112 standard, 2 = 256x224 fine grain. Fixed for the life of a roll. */
 /* film stocks (docs/design/darkroom.md section 4): a describing word and a speed, never a real film's name. The
@@ -45,7 +46,7 @@ var LATENT={W:800, H:700, Q:0.8};
 function latentKey(roll,n){ return "roll/"+roll+"/"+pad2(n)+".jpg"; }
 function setRes(r){ r=r===2?2:1; F.res=r; CW=128*r; CH=112*r; ccv.width=CW; ccv.height=CH; cimg=cctx.createImageData(CW,CH); }
 function stockName(r){ return tr(r===2?"cam.stock2":"cam.stock1"); }
-function filmDoc(){ return {roll:F.roll,stock:F.stock,seed:F.seed,size:F.size,res:F.res,loaded:F.loaded,exposure:F.exposure,contrast:F.contrast,date:F.date,lens:LIVE.lens}; }
+function filmDoc(){ return {roll:F.roll,no:F.no,stock:F.stock,seed:F.seed,size:F.size,res:F.res,loaded:F.loaded,exposure:F.exposure,contrast:F.contrast,date:F.date,lens:LIVE.lens}; }
 var nextStock=1, nextSize=12;
 function drawPx(ctx,img,px){
   var d=img.data;
@@ -152,7 +153,10 @@ function random32(){
 function loadRoll(){
   setRes(nextStock); F.stock=nextStockId; F.contrast=0; F.exposure=0; F.seed=random32();
   F.roll="r"+Date.now().toString(36)+Math.floor(Math.random()*1679616).toString(36); F.size=nextSize; F.loaded=Date.now(); F.frames=[]; F.jobs=[];
-  if(S.db) put(S.refs.film,filmDoc());
+  /* the roll's number on this handheld, 1, 2, 3...: it names the negative's file, so a day's rolls never come out as
+     "(1)" "(2)" copies. Never reused, even when a roll is thrown away. */
+  F.count++; F.no=F.count;
+  if(S.db){ put(S.refs.film,filmDoc()); put(S.refs.camera,{rolls:F.count}); }
   /* the door closes, the film is wound on to frame 1 */
   sfx("tap"); setTimeout(function(){ sfx("tick"); },120); setTimeout(function(){ sfx("tick"); },240); setTimeout(function(){ sfx("ok"); },420);
   camSheet(null); camIdle(); renderCam(); startLive();
@@ -438,7 +442,7 @@ function buildCard(frames,o){
 /* Taking the roll out: it goes into the darkroom's film box (data/users/local/rolls) once every latent image is
    stored, then the camera is empty. The latent images keep their keys. */
 function rollDoc(frames,bytes){
-  return {id:F.roll, stock:F.stock, seed:F.seed, size:F.size, res:F.res, loaded:F.loaded, out:Date.now(), name:"", bytes:bytes,
+  return {id:F.roll, no:F.no, stock:F.stock, seed:F.seed, size:F.size, res:F.res, loaded:F.loaded, out:Date.now(), name:"", bytes:bytes,
     frames:frames.map(function(fr){
       var f={n:fr.n, px:fr.px, taken:fr.taken};
       if(fr.blank) f.blank=fr.blank;
@@ -490,14 +494,15 @@ function rewindEarly(){
 
 function loadFilm(){
   if(!S.db){ F.ready=true; renderCam(); return Promise.resolve(); }
-  return S.refs.film.get().then(function(sn){
+  return S.refs.camera.get().then(function(sn){ var c=sn.exists?own(sn.data()):null; F.count=Math.max(F.count,(c&&c.rolls)|0); },function(){})
+  .then(function(){ return S.refs.film.get(); }).then(function(sn){
     var d=sn.exists?own(sn.data()):null;
     if(!d || !d.roll){ F.roll=null; F.frames=[]; F.ready=true; return; }
     /* a roll from before 0.14.0 (a tint, no stock, no latent images) cannot be developed in colour: it is void.
        Opening the camera clears it (voidStale); nothing is made up for it (darkroom.md, decision 7). */
     if(!STOCKS[d.stock] || typeof d.seed!=="number"){ F.stale=d.roll; F.roll=null; F.frames=[]; F.ready=true; return; }
     F.roll=d.roll; F.size=Math.min(d.size||12,16); F.loaded=d.loaded||Date.now(); F.exposure=d.exposure|0; F.contrast=d.contrast|0; F.date=d.date!==false;
-    F.stock=d.stock; F.seed=d.seed>>>0; F.jobs=[]; setRes(d.res||1);
+    F.stock=d.stock; F.seed=d.seed>>>0; F.no=d.no|0; F.jobs=[]; setRes(d.res||1);
     LIVE.lens=LENS.ORDER.indexOf(d.lens)>=0?d.lens:"w";
     return S.refs.frames.where("roll","==",F.roll).get().then(function(q){
       var list=q.docs.map(function(x){ return own(x.data()); }).filter(function(fr){ return fr && fr.px && fr.px.length===CW*CH; });

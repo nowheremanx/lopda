@@ -155,12 +155,14 @@ function snap(cv){
 }
 /* what goes into the lpDa chunk: the roll without what this handheld adds (its size on disk) */
 function packable(r){
-  return {id:r.id, stock:r.stock, seed:r.seed, size:r.size, res:r.res, loaded:r.loaded, out:r.out, name:r.name||"", frames:r.frames};
+  return {id:r.id, no:r.no, stock:r.stock, seed:r.seed, size:r.size, res:r.res, loaded:r.loaded, out:r.out, name:r.name||"", frames:r.frames};
 }
 function bytesOf(blob){ return blob.arrayBuffer ? blob.arrayBuffer().then(function(b){ return new Uint8Array(b); }) : new Promise(function(res,rej){ var fr=new FileReader(); fr.onload=function(){ res(new Uint8Array(fr.result)); }; fr.onerror=rej; fr.readAsArrayBuffer(blob); }); }
-/* lopda-negative-20261011-sunny-200.png: the day it was loaded and the stock, in plain letters (a roll's own name may be
-   Chinese, which some browsers and chat apps turn into "download") */
-function negFile(r){ return "lopda-negative-"+FILM.fileStamp(r.loaded)+"-"+FILM.stockPrint(r.stock).replace(/\s+/g,"-").toLowerCase()+".png"; }
+/* lopda-negative-20261011-sunny-200-007.png: the day it was loaded, the stock and the roll's number on the handheld that
+   shot it, in plain letters (a roll's own name may be Chinese, which some browsers and chat apps turn into "download");
+   the number keeps a day's rolls apart without the system's "(1)" */
+function rollNo(r){ return String(r.no).padStart(3,"0"); }
+function negFile(r){ return "lopda-negative-"+FILM.fileStamp(r.loaded)+"-"+FILM.stockPrint(r.stock).replace(/\s+/g,"-").toLowerCase()+"-"+rollNo(r)+".png"; }
 function buildNegative(r){
   var stock=FILM.stockPrint(r.stock);
   return FILM.fontsReady().then(function(){
@@ -171,7 +173,7 @@ function buildNegative(r){
     var cv=FILM.buildCard(r.frames,{pal:TONES, res:r.res, size:r.size, loaded:r.loaded, out:r.out,
       lead:"NEGATIVE "+stock, edges:["LO-PDA NEGATIVE", stock+" "+FILM.stampOf(r.loaded).slice(0,8)],
       paper:rgb(TONES[3]), ink:rgb(TONES[0]), soft:rgb(TONES[1]),
-      head:"LO-PDA NEGATIVE", sub:stock+" · "+r.size+" EXP"+(r.name?" · "+r.name:""), foot:"· "+r.id+" ·"});
+      head:"LO-PDA NEGATIVE", sub:stock+" · "+r.size+" EXP"+(r.name?" · "+r.name:""), foot:"· ROLL "+rollNo(r)+" ·"});
     snap(cv);
     return new Promise(function(resolve,reject){ cv.toBlob(function(b){ if(b) resolve(b); else reject(new Error("png")); },"image/png"); })
       .then(bytesOf).then(function(png){ return new Blob([NEG.pack(png,packable(r),jpegs)],{type:"image/png"}); });

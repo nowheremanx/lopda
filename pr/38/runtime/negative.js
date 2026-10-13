@@ -82,7 +82,7 @@ function checkRoll(roll){
     typeof roll.id==="string" && /^[a-z0-9]{1,40}$/.test(roll.id) &&
     typeof roll.stock==="string" && /^[a-z]{1,20}$/.test(roll.stock) &&
     int(roll.size,1,36) && (roll.res===1 || roll.res===2) &&
-    int(roll.seed,0,4294967295) && int(roll.loaded,0,1e14) && int(roll.out,0,1e14) &&
+    int(roll.no,1,999999) && int(roll.seed,0,4294967295) && int(roll.loaded,0,1e14) && int(roll.out,0,1e14) &&
     typeof roll.name==="string" && roll.name.length<=64 &&
     Array.isArray(roll.frames) && roll.frames.length===roll.size;
   if(!ok) return false;
