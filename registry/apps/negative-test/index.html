@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>底片测试</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #a3ad7e; color: #1f2a14; font-family: monospace; }
+  main { height: 100%; display: flex; flex-direction: column; gap: 10px; padding: 12px; box-sizing: border-box; }
+  h1 { font-size: 16px; margin: 0; }
+  p { margin: 0; font-size: 12px; color: #4a5a32; line-height: 1.5; }
+  button { font: inherit; font-size: 15px; padding: 10px; background: #1f2a14; color: #a3ad7e; border: 0; box-shadow: 3px 3px 0 #4a5a32; touch-action: manipulation; text-align: left; }
+  button.sel { outline: 3px solid #4a5a32; outline-offset: 2px; }
+  #out { flex: 1; overflow-y: auto; background: #7d8a58; padding: 8px; font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
+</style>
+</head>
+<body>
+<main>
+  <h1 id="h"></h1>
+  <p id="how"></p>
+  <button type="button" data-k="s"></button>
+  <button type="button" data-k="l"></button>
+  <button type="button" data-k="i"></button>
+  <div id="out"></div>
+</main>
+<script>
+/* A throwaway test for docs/design (darkroom): can a four-tone PNG carry hidden data (a private PNG chunk) through
+   "Save Image" to the iPhone photo library and back through the file picker? Not meant for the store. */
+var ZH = PAD.lang !== "en";
+var T = ZH ? {
+  h: "底片测试", how: "1. 导出底片，在分享菜单里选「存储图像」存进相册。2. 点「导入检查」，从「照片图库」选回刚才那张；再试一次，从「选取文件」里选（如果存到了文件 app）。3. 截图下面的结果。",
+  s: "导出小底片（数据 300 KB）", l: "导出大底片（数据 1.5 MB，约一整卷）", i: "导入检查",
+  making: "生成中…", saved: "导出：", cancelled: "取消了", none: "没有选文件"
+} : {
+  h: "Negative test", how: "1. Export a negative and pick Save Image in the share sheet. 2. Import check: pick it back from the Photo Library, then again from Choose File if you saved one to Files. 3. Screenshot the result below.",
+  s: "Export small negative (300 KB of data)", l: "Export big negative (1.5 MB, about a roll)", i: "Import check",
+  making: "making...", saved: "export: ", cancelled: "cancelled", none: "no file picked"
+};
+document.getElementById("h").textContent = T.h;
+document.getElementById("how").textContent = T.how;
+var btns = Array.prototype.slice.call(document.querySelectorAll("button"));
+btns.forEach(function (b) { b.textContent = T[b.getAttribute("data-k")]; });
+var out = document.getElementById("out");
+function log(s) { out.textContent = s + "\n" + out.textContent; }
+
+/* ---------- PNG chunks ---------- */
+var CRC = (function () { var t = new Uint32Array(256); for (var n = 0; n < 256; n++) { var c = n; for (var k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function crc32(bytes, from, to) { var c = 0xffffffff; for (var i = from; i < to; i++) c = CRC[(c ^ bytes[i]) & 255] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; }
+function u32(b, i) { return ((b[i] << 24) | (b[i + 1] << 16) | (b[i + 2] << 8) | b[i + 3]) >>> 0; }
+function put32(b, i, v) { b[i] = v >>> 24; b[i + 1] = (v >>> 16) & 255; b[i + 2] = (v >>> 8) & 255; b[i + 3] = v & 255; }
+function fromData(url) { var s = atob(url.slice(url.indexOf(",") + 1)), b = new Uint8Array(s.length); for (var i = 0; i < s.length; i++) b[i] = s.charCodeAt(i); return b; }
+function toData(b, type) { var s = "", step = 0x8000; for (var i = 0; i < b.length; i += step) s += String.fromCharCode.apply(null, b.subarray(i, i + step)); return "data:" + type + ";base64," + btoa(s); }
+/* "lpDa": ancillary (viewers may skip it), private, safe to copy */
+var TYPE = [108, 112, 68, 97], MAGIC = "LOPDA-NEG-TEST";
+function withChunk(png, data) {
+  var iend = png.length - 12, len = data.length, c = new Uint8Array(12 + len);
+  put32(c, 0, len); c.set(TYPE, 4); c.set(data, 8); put32(c, 8 + len, crc32(c, 4, 8 + len));
+  var o = new Uint8Array(png.length + c.length); o.set(png.subarray(0, iend), 0); o.set(c, iend); o.set(png.subarray(iend), iend + c.length);
+  return o;
+}
+function chunks(b) {
+  var list = [], i = 8;
+  while (i + 12 <= b.length) { var len = u32(b, i), type = String.fromCharCode(b[i + 4], b[i + 5], b[i + 6], b[i + 7]); list.push({ type: type, at: i, len: len }); i += 12 + len; if (type === "IEND") break; }
+  return list;
+}
+
+/* the hidden data: MAGIC, its length, a CRC of the body, then a body that does not compress (like JPEG frames) */
+function payload(n) {
+  var head = MAGIC.length + 8, b = new Uint8Array(head + n), x = 2463534242;
+  for (var i = 0; i < MAGIC.length; i++) b[i] = MAGIC.charCodeAt(i);
+  for (var j = head; j < b.length; j++) { x ^= x << 13; x ^= x >>> 17; x ^= x << 5; b[j] = x & 255; }
+  put32(b, MAGIC.length, n); put32(b, MAGIC.length + 4, crc32(b, head, b.length));
+  return b;
+}
+/* the visible part: a four-tone test picture, 256x224 shown 3x, like a fine-grain negative */
+function picture() {
+  var W = 256, H = 224, S = 3, c = document.createElement("canvas"); c.width = W * S; c.height = H * S;
+  var g = c.getContext("2d"), img = g.createImageData(W * S, H * S), d = img.data, tones = [[31, 42, 20], [74, 90, 50], [125, 138, 88], [163, 173, 126]];
+  var bayer = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+  for (var y = 0; y < H * S; y++) for (var x = 0; x < W * S; x++) {
+    var px = (x / S) | 0, py = (y / S) | 0, v = (Math.sin(px / 23) + Math.cos(py / 17) + 2) / 4 * 3 + (bayer[(py & 3) * 4 + (px & 3)] / 16 - 0.5);
+    var t = tones[Math.max(0, Math.min(3, Math.round(v)))], k = (y * W * S + x) * 4;
+    d[k] = t[0]; d[k + 1] = t[1]; d[k + 2] = t[2]; d[k + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  return fromData(c.toDataURL("image/png"));
+}
+
+function exportNeg(n, label) {
+  log(T.making);
+  setTimeout(function () {
+    var png = withChunk(picture(), payload(n));
+    log(label + ": " + (png.length / 1024).toFixed(0) + " KB PNG");
+    PAD.exportFile({ name: "lopda-negative-" + label + ".png", type: "image/png", data: toData(png, "image/png") })
+      .then(function (r) { log(T.saved + r); }, function (e) { log("ERROR " + (e && e.message || e)); });
+  }, 30);
+}
+function check() {
+  PAD.importFile({ accept: ["image/*"] }).then(function (f) {
+    if (!f) { log(T.none); return; }
+    var b = fromData(f.data), lines = ["---", "name: " + f.name, "type: " + f.type, "bytes: " + b.length];
+    var png = b[0] === 137 && b[1] === 80 && b[2] === 78 && b[3] === 71;
+    if (!png) { lines.push(b[0] === 255 && b[1] === 216 ? "JPEG: re-encoded, the hidden data is gone" : "not a PNG"); log(lines.join("\n")); return; }
+    var list = chunks(b), ihdr = list[0];
+    lines.push("PNG " + u32(b, ihdr.at + 8) + "x" + u32(b, ihdr.at + 12));
+    lines.push("chunks: " + list.map(function (c) { return c.type; }).join(" "));
+    var hit = list.filter(function (c) { return c.type === "lpDa"; })[0];
+    if (!hit) { lines.push("RESULT: no lpDa chunk, the data was stripped"); log(lines.join("\n")); return; }
+    var d = b.subarray(hit.at + 8, hit.at + 8 + hit.len), m = "";
+    for (var i = 0; i < MAGIC.length; i++) m += String.fromCharCode(d[i]);
+    var n = u32(d, MAGIC.length), want = u32(d, MAGIC.length + 4), got = crc32(d, MAGIC.length + 8, d.length);
+    lines.push("lpDa: " + hit.len + " bytes, magic " + (m === MAGIC ? "ok" : "BAD") + ", body " + n);
+    lines.push(got === want && m === MAGIC ? "RESULT: OK, the hidden data came back intact" : "RESULT: chunk found but the data is damaged");
+    log(lines.join("\n"));
+  }, function (e) { log("ERROR " + (e && e.message || e)); });
+}
+
+var sel = 0;
+function act(k) { if (k === "s") exportNeg(300 * 1024, "small"); else if (k === "l") exportNeg(1536 * 1024, "big"); else check(); }
+btns.forEach(function (b, i) { b.addEventListener("click", function () { sel = i; mark(); act(b.getAttribute("data-k")); }); });
+function mark() { btns.forEach(function (b, i) { b.className = i === sel ? "sel" : ""; }); }
+PAD.on("press", function (k) {
+  if (k === "up") { sel = (sel + 2) % 3; mark(); }
+  else if (k === "down") { sel = (sel + 1) % 3; mark(); }
+  else if (k === "a") act(btns[sel].getAttribute("data-k"));
+});
+mark();
+</script>
+</body>
+</html>

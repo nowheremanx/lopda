@@ -1,6 +1,6 @@
 {
   "spec": "lopda/1",
-  "generated": "2026-10-12",
+  "generated": "2026-10-13",
   "apps": [
     {
       "spec": "lopda/1",
@@ -118,6 +118,29 @@
       "path": "apps/last-letter/index.html",
       "sha256": "bd5433b9226b37c4f927c3f103e38248e16cfb9d708ceb541c94e9bd22c06762",
       "bytes": 54357
+    },
+    {
+      "spec": "lopda/1",
+      "id": "negative-test",
+      "name": "底片测试",
+      "glyph": "片",
+      "buttons": true,
+      "version": "0.1.0",
+      "description": "测试用：导出一张藏着数据的四色底片，存进相册再选回来，看数据还在不在。",
+      "i18n": {
+        "en": {
+          "name": "NegTest",
+          "description": "Test: hide data in a negative, check it survives the photo library."
+        }
+      },
+      "author": "Haowei Wu",
+      "license": "MIT",
+      "permissions": [
+        "files"
+      ],
+      "path": "apps/negative-test/index.html",
+      "sha256": "4700c8c5abc433823a240a2b1581e99f3470745a8febfbdcd3499bee8e410db9",
+      "bytes": 8239
     },
     {
       "spec": "lopda/1",
