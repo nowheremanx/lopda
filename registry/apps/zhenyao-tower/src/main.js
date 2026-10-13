@@ -1,8 +1,10 @@
 /* Scenes: the title (camera circling the tower) and the map, where the hero walks tile by tile through the town
    and the maps of src/story.js. SELECT shows how long the last frame took to draw, in every scene, for checking
    speed on a phone. Progress is saved at the save stones; what the player has already seen is saved with it.
-   The cutscenes (the boss's entrance, the pendant, the ending) and the credits are at the end of the map scene. */
+   The cutscenes (the boss's entrance, the pendant, the ending) and the credits are at the end of the map scene.
+   Sound (src/sound.js): each scene says which song and ambience it wants; the wrapper below sends them once a frame. */
 var game = LoGame.create({ width: 160, height: 144, lang: "zh" });
+Snd.attach(game);
 var R = Lo3D.create({ width: 160, height: 144 });
 var town = World.build(TOWN);
 var CAM = { pitch: -0.62, dist: 8.5 };
@@ -21,6 +23,7 @@ function scene(name, def) {
       draw(g);
       perf.ms = perf.ms * 0.9 + (performance.now() - t0) * 0.1;
       if (perf.show) { g.origin(0, 0); g.clip(); g.rect(0, 0, 50, 14, g.INK); g.text(perf.ms.toFixed(1) + " ms", 2, 1, { color: g.PAPER }); }
+      Snd.flush();
     }
   }));
 }
@@ -45,7 +48,7 @@ game.load("progress").then(function (p) { if (p && p.v === 1 && p.map && p.hero 
 
 /* ---------- title ---------- */
 scene("title", {
-  enter: function () { busy = false; },
+  enter: function () { busy = false; Snd.music("title"); Snd.amb(null); },
   draw: function (g) {
     var a = game.time * 0.12, T = town.def.tower;
     frame(g, { x: T.x, y: 4, z: -T.y, yaw: a, pitch: -0.22, dist: 17, time: game.time, fogCull: true }, []);
@@ -58,16 +61,60 @@ scene("title", {
     if (busy || !game.ok()) return;
     game.sfx("ok");
     busy = true;
-    var items = lastSave ? ["继续", "进入小镇", "演武"] : ["进入小镇", "演武"];
-    game.choose(items, { y: lastSave ? 66 : 80 }).then(function (i) {
+    /* 听曲 (the music room) once the game has been cleared */
+    var items = (lastSave ? ["继续", "进入小镇", "演武"] : ["进入小镇", "演武"]).concat(Cut.seen.cleared ? ["听曲"] : []);
+    game.choose(items, { y: 108 - 14 * items.length }).then(function (i) {
       busy = false;
       var pick = items[i];
       if (pick === "继续") game.go("map", { id: lastSave.map, resume: clone(lastSave) }, { to: LoGame.INK });
       if (pick === "进入小镇") game.go("map", { id: "town", intro: true, fresh: true }, { to: LoGame.INK });
       if (pick === "演武") game.go("battle", { ids: ["golem", "wraith", "bronze"], area: "top", hero: galleryHero(), demo: true, back: "title", from: new Uint8Array(R.image.px) }, { fade: false });
+      if (pick === "听曲") { busy = true; game.push(musicRoom()).then(function () { busy = false; Snd.music("title"); }); }
     });
   }
 });
+
+/* ---------- 听曲: the music room ----------
+   Every piece in the game, in the order they come. Drawn like lo-game's own menu (a window, the arrow, the title in
+   dark), six rows at a time with the battle list's scroll marks. A or START plays the piece from its start and the list
+   stays open; B goes back to the title and its music. */
+var TRACKS = ["title", "town", "road", "tower", "towerUp", "battle", "victory", "boss", "dawn", "coda"];
+function musicRoom() {
+  var gg = game.g, sel = 0, top = 0, ROWS = 6, pad = 6, rowH = gg.lineHeight + 2;
+  var names = TRACKS.map(function (id) { return MUSIC[id].name; });
+  var w = Math.max.apply(null, names.concat(["听曲"]).map(gg.measure)) + pad * 2 + 18;
+  var h = (ROWS + 1) * rowH + pad * 2 - 2, x = Math.round((160 - w) / 2), y = Math.round((144 - h) / 2);
+  return {
+    update: function () {
+      var d = game.dir(), pick = -1;
+      if (d.y) { sel = (sel + d.y + TRACKS.length) % TRACKS.length; game.sfx("move"); }
+      if (game.pressed("a") || game.pressed("start")) pick = sel;
+      else if (game.pressed("b")) { game.sfx("miss"); game.pop(); return; }
+      else if (game.pointer.pressed) {
+        var r = Math.floor((game.pointer.y - y - pad - rowH) / rowH);
+        if (game.pointer.x >= x && game.pointer.x < x + w && r >= 0 && r < ROWS && top + r < TRACKS.length) pick = sel = top + r;
+        else { game.sfx("miss"); game.pop(); return; }
+      }
+      if (sel < top) top = sel;
+      if (sel >= top + ROWS) top = sel - ROWS + 1;
+      if (pick >= 0) Snd.replay(TRACKS[pick]);
+    },
+    draw: function (g) {
+      g.origin(0, 0); g.clip();
+      g.window(x, y, w, h);
+      var ty = y + pad;
+      g.text("听曲", x + pad, ty, { color: g.DARK });
+      if (top > 0) for (var u = 0; u < 4; u++) g.rect(x + w - 7 - u, ty + 3 + u, 1 + 2 * u, 1, g.INK);
+      ty += rowH;
+      for (var k = top; k < top + ROWS && k < TRACKS.length; k++) {
+        if (k === sel) g.arrow(x + pad - 1, ty + 3, "right");
+        g.text(names[k], x + pad + 8, ty);
+        ty += rowH;
+      }
+      if (top + ROWS < TRACKS.length && Math.floor(game.time * 3) % 2) g.arrow(x + w - 10, y + h - 7, "down");
+    }
+  };
+}
 
 /* ---------- 演武: every spell against practice dummies that never strike back ----------
    A showcase for players who only want to watch the effects; it stays in the finished game. */
@@ -151,6 +198,7 @@ function doSave() {
 }
 async function saveStone() {
   busy = true;
+  Snd.fx("save");
   await saySeq(STORY.save);
   Rules.rest(me);
   doSave();
@@ -163,7 +211,7 @@ async function openChest(i) {
   else {
     flags.opened[key] = 1;
     me.items[id] = (me.items[id] || 0) + 1;
-    game.sfx("coin");
+    Snd.fx("chest");
     await game.say(STORY.chest.replace("{item}", BATTLE.ITEMS[id].name));
   }
   busy = false;
@@ -258,20 +306,24 @@ async function startBoss() {
     hero.face = "up";
     await Cut.say(bo[0].say, { name: bo[0].name });
     await Cut.say(bo[1].say.slice(0, 2), { name: bo[1].name });
-    /* the camera drops its eye toward the ground, where the two shadows are, and the last line is said over it */
-    C.sfx("err");
+    /* the camera drops its eye toward the ground, where the two shadows are, and the last line is said over it.
+       The music stops here: the wind alone until the mirage rises */
+    Snd.music(null);
+    C.sfx("dread");
     await C.tween(cam, { pitch: -0.52, y: 0.15 }, 0.8, "inOut");
     await C.wait(0.5);
     await Cut.say(bo[1].say.slice(2), { name: bo[1].name });
     /* 「……呵。」: the ripple starts with the line (it is drawn from the clock, which runs under the dialogue) */
     rip.t0 = game.time; rip.k = 1;
-    await Cut.say(bo[2].say, { name: bo[2].name });
+    /* the name tag still says 师父, but the voice is already the mirage's */
+    await Cut.say(bo[2].say, { name: bo[2].name, voice: "蜃妖" });
     var stopMist = C.every(0.04, function () { puff(bx, bz, 3.2); });
     await C.tween(master, { alpha: 0 }, 1.4, "linear");
     stage = [];
     var mirage = bossActor(b, { y: -2.4, alpha: 0 });
     stage.push(mirage);
-    C.shake(3, 1.8); C.sfx("hit");
+    C.shake(3, 1.8); C.sfx("roar");
+    Snd.music("boss");
     await Promise.all([C.tween(mirage, { y: 0, alpha: 1 }, 1.9, "out"), C.tween(rip, { k: 0 }, 2.4, "linear")]);
     stopMist();
     await C.wait(0.4);
@@ -304,7 +356,7 @@ async function afterBoss() {
     stage.push(pend);
     glows = [{ x: bx, y: 0.2, z: bz - 0.3, radius: 3.2, base: 1, dot: 0, env: function (t) { return 0.6 + 0.4 * Math.sin(t * 3.4); } }];
     await C.tween(pend, { y: 0.02 }, 0.45, "in");
-    C.sfx("coin");
+    C.sfx("jade");
     await C.tween(pend, { y: 0.3 }, 0.14, "out");
     await C.tween(pend, { y: 0.02 }, 0.14, "in");
     C.every(0.25, function () { FX.spawn({ x: bx + (Math.random() - 0.5) * 0.5, y: 0.2, z: bz + (Math.random() - 0.5) * 0.3, vy: 0.5, life: 0.9, tone: 3, size: 0.05 }); });
@@ -322,7 +374,7 @@ async function afterBoss() {
     glows = [{ x: hero.x, y: 0.6, z: hero.z - 0.2, radius: 3, base: 1.1, t0: game.time, env: function (t, gl) { var k = t - gl.t0; return Math.max(0, k < 0.4 ? k / 0.4 : 1 - (k - 0.4) / 1.6); } }];
     for (var i = 0; i < 16; i++) FX.spawn({ x: hero.x + (Math.random() - 0.5) * 0.8, y: 0.1 + Math.random() * 0.5, z: hero.z + (Math.random() - 0.5) * 0.4,
       vy: 0.6 + Math.random() * 0.8, life: 0.9 + Math.random() * 0.6, tone: 3, size: 0.05 });
-    game.sfx("ok");
+    Snd.fx("warm");
     await Cut.say(st.found[2].say);
     await Cut.say(st.found[3].say, { name: st.found[3].name });
     await C.wait(0.3);
@@ -339,9 +391,12 @@ async function ending() {
   stage = [master];
   cam.x = 7.5; cam.z = -2.4; cam.pitch = -0.5;
   await Cut.play("ending", async function (C) {
+    /* the last of the rain (src/sound.js's PLACES) under the name of the place; then dawn, and the stream */
     banner = STORY.places.ending;
     await C.wait(1.8);
     banner = "";
+    Snd.music("dawn");
+    Snd.amb("stream", 0.3);
     await walkHero(C, ["down", "down"]);
     hero.face = "left";
     await C.tween(cam, { x: 7, z: -3.2 }, 0.6, "inOut");
@@ -362,13 +417,15 @@ async function ending() {
     await C.tween(panel, { x: 0 }, 0.2, "out");
     await C.wait(0.5);
     cutin("curl1"); await C.wait(0.25);
-    cutin("fist"); await C.wait(0.7);
+    /* the hand closes: the music stops, and the rest of the scene is the stream and the master's pause */
+    cutin("fist"); Snd.music(null); await C.wait(0.7);
     for (var di = 0; di < 4; di++) { cutin("down" + di); await C.wait(0.14); }
     await C.tween(panel, { dark: 0 }, 0.3, "linear");
     panel = null;
     await C.wait(1.5);
     await Cut.dialogue(en.answer);
-    /* he turns away and goes in through the gate, fading in the doorway */
+    /* he turns away and goes in through the gate, fading in the doorway. 未完 plays once, over the last shot and 序章 完 */
+    Snd.music("coda");
     await C.tween(master, { z: -1.45 }, 1.5, "inOut");
     await C.tween(master, { z: -0.95, alpha: 0 }, 0.8, "linear");
     stage = [];
@@ -392,6 +449,7 @@ scene("credits", {
   enter: function () {
     ended = true;
     cr = { phase: "end", t: 0, y: 150 };
+    Snd.amb(null);
     Cut.seen.cleared = true;
     writeSeen();
   },
@@ -399,7 +457,8 @@ scene("credits", {
     cr.t += dt;
     var lines = STORY.ending.credits;
     if (cr.phase === "end") {
-      if (cr.t >= 3) { cr.phase = "roll"; cr.t = 0; cr.y = 150; }
+      /* the credits roll to the title's music */
+      if (cr.t >= 3) { cr.phase = "roll"; cr.t = 0; cr.y = 150; Snd.music("title"); }
     } else if (cr.phase === "roll") {
       cr.y -= 16 * dt;
       if ((game.ok() && cr.t > 0.3) || cr.y + lines.length * 14 < -4) { cr.phase = "next"; cr.t = 0; }
@@ -569,6 +628,7 @@ scene("map", {
     hero = { c: c, r: r, pc: c, pr: r, x: c + 0.5, z: -r - 0.5, face: face, step: 0, moving: null };
     cam = { x: hero.x, z: hero.z, pitch: CAM.pitch, dist: CAM.dist, y: 0, yaw: 0, snap: false };
     banner = ""; fm = null;
+    Snd.place(cur.id, { lost: args.result === "lose", bossBeaten: cur.id === "top" && !!flags.beat["top:B"] });
 
     people = cur.dawn ? [] : cur.id === "town"
       ? TOWN.people.map(function (p) { return { x: p.x, y: p.y, art: ART[p.art], name: p.name, who: p.art, pages: STORY.town[p.art] }; })
@@ -741,7 +801,8 @@ var ZT = {
     game.go("map", Object.assign({ id: id, hero: ZT.heroAt(part > 3 ? 3 : part, part > 3 ? 1 : 0), flags: f, x: o.x, y: o.y }, won), { fade: false });
   },
   state: function () {
-    return { scene: where, map: cur && cur.id, x: hero && hero.c, y: hero && hero.r, flags: flags, hero: me, ended: ended, credits: cr.phase, cleared: !!Cut.seen.cleared };
+    return { scene: where, map: cur && cur.id, x: hero && hero.c, y: hero && hero.r, flags: flags, hero: me, ended: ended, credits: cr.phase, cleared: !!Cut.seen.cleared,
+      sound: Snd.wanted() };
   }
 };
 

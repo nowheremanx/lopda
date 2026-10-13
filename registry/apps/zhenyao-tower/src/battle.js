@@ -45,7 +45,8 @@ var Battle = (function () {
     wait: function (sec) { return new Promise(function (res) { T.after(sec, res); }); },
     flash: function (sec) { if (!skipping()) game.flash(sec); },
     shake: function (a, sec) { if (!skipping()) game.shake(a, sec); },
-    sfx: function (name) { if (!skipping()) game.sfx(name); }
+    /* an effect of src/sound.js (or a named sound); nothing while an animation is cut */
+    sfx: function (name) { if (!skipping()) Snd.fx(name); }
   };
   function stepClock(dt) {
     tweens = tweens.filter(function (w) {
@@ -187,27 +188,28 @@ var Battle = (function () {
   function look(p, yaw, pitch, dist, sec, ease) { return camTo({ x: p[0], y: p[1], z: p[2], yaw: yaw, pitch: pitch, dist: dist }, sec, ease); }
   function popup(text, p, o) { S.nums.push(Object.assign({ text: String(text), p: p, t: 0, life: 1.0 }, o || {})); }
 
-  /* show what the rules already decided: numbers, flashes, falls. Damage events for one foe, or all of them */
-  async function show(events, only) {
-    var weakHit = null;
+  /* show what the rules already decided: numbers, flashes, falls. Damage events for one foe, or all of them.
+     quiet: the spell has made its own sound of the blow (a slam), so the usual one is left out */
+  async function show(events, only, quiet) {
+    var weakHit = null, hurt = false, struck = false;
     events.forEach(function (e) {
       if (e.kind === "damage" && e.side === "enemy" && (only == null || only === e.target)) {
         var f = S.foes[e.target];
         f.shown = Math.max(0, f.shown - e.amount);
-        f.flash = 0.25;
+        f.flash = 0.25; struck = true;
         popup(e.amount, foeTop(e.target, 0.8), { big: e.weak || e.crit });
         if (e.weak) { popup("克制", foeTop(e.target, 1.15), { word: true }); weakHit = e.target; }
         else if (e.crit) popup("会心", foeTop(e.target, 1.15), { word: true });
       }
       if (e.kind === "damage" && e.side === "hero") {
         S.view.hp = Math.max(0, S.view.hp - e.amount);
-        S.hero.flash = 0.3;
+        S.hero.flash = 0.3; hurt = true;
         popup(e.amount, heroAt(1.0), { big: e.crit });
       }
       if (e.kind === "heal") { S.view.hp += e.hp; popup("+" + e.hp, heroAt(1.0)); }
       if (e.kind === "mana" && e.mp) { S.view.mp += e.mp; popup("+" + e.mp, heroAt(0.6), { mp: true }); }
     });
-    T.sfx("hit");
+    if (!quiet) T.sfx(hurt ? "hurt" : struck ? "hit" : "noHit");
     if (weakHit != null) await ANIM.weak(S, weakHit);
     var downs = events.filter(function (e) { return e.kind === "down" && (only == null || only === e.target); });
     for (var i = 0; i < downs.length; i++) ANIM.down(S, downs[i].target);
@@ -477,7 +479,7 @@ var Battle = (function () {
 
   /* main.js registers this as the "battle" scene once the game exists */
   var scene = {
-    enter: function (args) { setup(args); run(); },
+    enter: function (args) { setup(args); Snd.battle(S.area, S.b.boss); run(); },
     update: function (dt) {
       if (S.canSkip && !S.skip && game.ok()) cut();
       stepClock(dt);

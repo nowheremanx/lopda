@@ -1,6 +1,6 @@
 {
   "spec": "lopda/1",
-  "generated": "2026-10-12",
+  "generated": "2026-10-13",
   "apps": [
     {
       "spec": "lopda/1",
@@ -322,7 +322,7 @@
       "name": "镇妖塔·序章",
       "glyph": "塔",
       "buttons": true,
-      "version": "0.3.2",
+      "version": "0.4.0",
       "description": "仙侠序章，可通关。卡带内置 LX-3D 协处理器：三维小镇、山道、塔内与斗法。",
       "i18n": {
         "en": {
@@ -333,8 +333,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/zhenyao-tower/index.html",
-      "sha256": "b4b45dc1ecfc3c11f3db4f244a726dd843c17866127f4023eb5a9f829bb1c5b6",
-      "bytes": 264367
+      "sha256": "901fd75decb02770b25df835a3de4b3d76f036dd7409975728824af55c723ef7",
+      "bytes": 297184
     }
   ]
 }

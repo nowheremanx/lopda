@@ -1,7 +1,7 @@
 # 设计：声音 `PAD.music` / `PAD.sfx` / `PAD.ambience`
 
 状态：owner 已同意方向（2026-10-11）。第 11 节的第 1 步（音乐 + 自定义音效）已实现（runtime 0.11.0），第 2 步（环境声 + vibrato）已实现（runtime 0.13.0），
-实际做法和偏离记在 `docs/decisions.md` 第 10 节；第 3–4 步待做。
+实际做法和偏离记在 `docs/decisions.md` 第 10 节；第 4 步（镇妖塔序章的配乐和音效）已完成（镇妖塔 0.4.0，decisions.md 12.4）；第 3 步待做。
 前身是 `pad-music.md`（只有背景音乐）；owner 问到人物受伤声、海浪瀑布等环境声之后，扩成三层。
 
 ## 已定的事
