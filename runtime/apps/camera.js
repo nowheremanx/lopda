@@ -32,7 +32,7 @@ function tintPrint(id){ var T=tintOf(id); return I18N.lang==="zh"?T.en+" "+T.nam
 var nextTint="lcd";
 function setRes(r){ r=r===2?2:1; F.res=r; CW=128*r; CH=112*r; ccv.width=CW; ccv.height=CH; cimg=cctx.createImageData(CW,CH); }
 function stockName(r){ return tr(r===2?"cam.stock2":"cam.stock1"); }
-function filmDoc(){ return {roll:F.roll,size:F.size,res:F.res,tint:F.tint,loaded:F.loaded,exposure:F.exposure,contrast:F.contrast,date:F.date}; }
+function filmDoc(){ return {roll:F.roll,size:F.size,res:F.res,tint:F.tint,loaded:F.loaded,exposure:F.exposure,contrast:F.contrast,date:F.date,lens:LIVE.lens}; }
 var nextStock=1, nextSize=12;
 function drawPx(ctx,img,px){
   var d=img.data;
@@ -138,8 +138,11 @@ function loadRoll(){
   toast(tr("cam.loaded",{en:tintOf(F.tint).en, name:tintOf(F.tint).name, fine:F.res===2?tr("cam.loadedfine"):"", n:F.size}));
 }
 
-/* ---- live viewfinder: the camera feed dithered to the LCD in real time (needs HTTPS) ---- */
-var LIVE={stream:null, on:false, raf:0, last:0, facing:"environment", hold:0, failed:false,
+/* ---- live viewfinder: the camera feed dithered to the LCD in real time (needs HTTPS) ----
+   Lenses: the phone's physical cameras (LopdaLenses, runtime/lenses.js), found once after the first permission.
+   lens is the id the user last chose ("uw" "w" "t" "f"), kept in the film doc; lenses stays null until found. */
+var LENS=window.LopdaLenses;
+var LIVE={stream:null, on:false, opening:false, gen:0, raf:0, last:0, lens:"w", lenses:null, hold:0, failed:false, swapping:0,
   cv:document.createElement("canvas"), ctx:null};
 LIVE.ctx=LIVE.cv.getContext("2d",{willReadFrequently:true});
 function lumaFrom(src,sw,sh,w,h,mirror){
@@ -158,22 +161,66 @@ function camModeLabel(){
   $("cam-mode").textContent = !has ? "" : LIVE.on ? "" :
     (liveSupported() ? (LIVE.failed ? tr("cam.nolive") : "") : tr("cam.needhttps"));
   $("cam-live-tag").hidden=!LIVE.on;
+  $("cam-live-tag").textContent="LIVE "+lensName(lensNow());
+}
+function lensNow(){ return LENS.pick(LIVE.lenses,LIVE.lens); }
+function mirrored(){ return lensNow().id==="f"; }
+/* what the screen calls a lens: its focal length; the plain back/front pair has none to tell */
+function lensName(L){ return L.id==="f" ? tr("cam.lens.front") : L.fallback ? tr("cam.lens.back") : tr("cam.lens.mm",{mm:LENS.MM[L.id]}); }
+function videoFor(L){
+  var v={width:{ideal:640}, height:{ideal:480}};
+  if(L.deviceId) v.deviceId={exact:L.deviceId}; else v.facingMode=L.facing;
+  return {video:v, audio:false};
+}
+function stopStream(s){ if(s) s.getTracks().forEach(function(t){ t.stop(); }); }
+function capsOf(o){ try{ return o && typeof o.getCapabilities==="function" ? o.getCapabilities() : null; }catch(e){ return null; } }
+/* Find the physical lenses. Names only come once the camera is allowed, so if they are blank, open the
+   plain back camera first. Names in another language with no capabilities on the device list: open each
+   camera for a moment and read its track's capabilities. Never use the virtual cameras (Dual Wide,
+   Triple): they switch lenses by themselves when something comes close. */
+function findLenses(alive){
+  var md=navigator.mediaDevices;
+  var list=function(){ return md.enumerateDevices ? md.enumerateDevices().then(function(ds){ return ds.filter(function(d){ return d.kind==="videoinput"; }); }) : Promise.resolve([]); };
+  var named=function(ds){ return ds.length>0 && ds.every(function(d){ return !!d.label; }); };
+  var info=function(d,caps){ return {deviceId:d.deviceId, label:d.label, caps:caps}; };
+  return list().then(function(ds){
+    if(named(ds) || !alive()) return alive() ? ds : null;
+    return md.getUserMedia(videoFor(LENS.pick(null,LIVE.lens))).then(function(s){ stopStream(s); return list(); });
+  }).then(function(ds){
+    if(!ds) return undefined;   /* left before the names came: look again next time */
+    var found=LENS.identify(ds.map(function(d){ return info(d,capsOf(d)); }));
+    if(found || ds.length<2 || !named(ds) || !alive()) return found;
+    return ds.reduce(function(pr,d){ return pr.then(function(seen){
+      return md.getUserMedia(videoFor({deviceId:d.deviceId})).then(function(s){
+        var caps=capsOf(s.getVideoTracks()[0]); stopStream(s); return seen.concat([info(d,caps)]);
+      },function(){ return seen.concat([info(d,null)]); });
+    }); },Promise.resolve([])).then(LENS.identify);
+  }).then(function(found){ if(found!==undefined) LIVE.lenses=found||LENS.FALLBACK; });
 }
 function startLive(){
-  if(LIVE.on || !liveSupported() || !F.roll || rollFull()) { camModeLabel(); return; }
-  navigator.mediaDevices.getUserMedia({video:{facingMode:LIVE.facing, width:{ideal:640}, height:{ideal:480}}, audio:false}).then(function(stream){
-    if($("v-cam").hidden || !F.roll || rollFull()){ stream.getTracks().forEach(function(t){ t.stop(); }); return; }
-    LIVE.stream=stream; LIVE.on=true; LIVE.failed=false;
+  if(LIVE.on || LIVE.opening || !liveSupported() || !F.roll || rollFull()) { camModeLabel(); return; }
+  /* every stopLive starts a new generation: an answer for an older one is thrown away */
+  var gen=++LIVE.gen; LIVE.opening=true;
+  var alive=function(){ return gen===LIVE.gen && !$("v-cam").hidden && !!F.roll && !rollFull(); };
+  (LIVE.lenses ? Promise.resolve() : findLenses(alive)).then(function(){
+    return alive() ? navigator.mediaDevices.getUserMedia(videoFor(lensNow())) : null;
+  }).then(function(stream){
+    if(!stream) return;
+    if(!alive()){ stopStream(stream); return; }
+    LIVE.opening=false; LIVE.stream=stream; LIVE.on=true; LIVE.failed=false;
     var v=$("cam-video"); v.srcObject=stream; var pl=v.play(); if(pl&&pl.catch) pl.catch(function(){});
     camModeLabel(); LIVE.raf=requestAnimationFrame(liveTick);
   }).catch(function(e){
+    if(gen!==LIVE.gen) return;
+    /* the remembered camera list is stale (a camera went away): find the lenses again next time */
+    if(e && (e.name==="OverconstrainedError" || e.name==="NotFoundError")) LIVE.lenses=null;
     LIVE.failed=true; camModeLabel();
     if(e && e.name==="NotAllowedError") toast(tr("cam.denied"));
-  });
+  }).then(function(){ if(gen===LIVE.gen) LIVE.opening=false; });
 }
 function stopLive(){
-  cancelAnimationFrame(LIVE.raf); LIVE.on=false;
-  if(LIVE.stream){ LIVE.stream.getTracks().forEach(function(t){ t.stop(); }); LIVE.stream=null; }
+  cancelAnimationFrame(LIVE.raf); LIVE.on=false; LIVE.opening=false; LIVE.gen++;
+  if(LIVE.stream){ stopStream(LIVE.stream); LIVE.stream=null; }
   var v=$("cam-video"); if(v) v.srcObject=null;
   if(!$("v-cam").hidden) camModeLabel();
 }
@@ -184,14 +231,28 @@ function liveTick(t){
   LIVE.last=t;
   var v=$("cam-video");
   if(Date.now()<LIVE.hold || v.readyState<2 || !v.videoWidth) return;
-  var lum=lumaFrom(v,v.videoWidth,v.videoHeight,CW,CH,LIVE.facing==="user");
+  var lum=lumaFrom(v,v.videoWidth,v.videoHeight,CW,CH,mirrored());
   drawPx(cctx,cimg,ditherLuma(lum,CW,CH,F.exposure,F.contrast));
+  if(LIVE.swapping) endSwap();
 }
-function flipLens(){ if(!LIVE.on) return; LIVE.facing = LIVE.facing==="environment" ? "user" : "environment"; sfx("tap"); stopLive(); startLive(); }
+/* SELECT: the next lens. The finder goes dark, as for the shutter, until the new lens gives a picture. */
+function nextLens(){
+  if(!LIVE.on || LIVE.swapping) return;
+  LIVE.lens=LENS.next(LIVE.lenses,LIVE.lens).id; sfx("tap");
+  $("cam-shut").hidden=false; LIVE.swapping=Date.now()+160;
+  clearTimeout(LIVE.swapTimer); LIVE.swapTimer=setTimeout(function(){ LIVE.swapping=Date.now(); endSwap(); },2500);
+  stopLive(); startLive(); renderCam(); saveFilmSoon();
+}
+function endSwap(){
+  if(Date.now()<LIVE.swapping) return;
+  LIVE.swapping=0; clearTimeout(LIVE.swapTimer); $("cam-shut").hidden=true;
+  if(!LIVE.on && !LIVE.opening) camIdle();
+}
 function takeFrame(px){
   var n=F.frames.length+1, now=Date.now();
   if(F.date) burnDate(px,CW,CH,now,F.res);
   var fr={roll:F.roll, n:n, px:Array.prototype.join.call(px,""), taken:now, dated:F.date};
+  if(LIVE.on) fr.lens=lensNow().id;   /* for the lab to print later; the system camera's lens is unknown */
   F.frames.push(fr);
   /* film: you never see the frame. The shutter blinks, the film winds on. */
   sfx("shutter"); $("cam-shut").hidden=false; LIVE.hold=Date.now()+320;
@@ -206,7 +267,7 @@ function shoot(){
   if(!F.roll || rollFull() || !$("cam-shut").hidden) return;
   var v=$("cam-video");
   if(LIVE.on && v.videoWidth){
-    var lum=lumaFrom(v,v.videoWidth,v.videoHeight,CW,CH,LIVE.facing==="user");
+    var lum=lumaFrom(v,v.videoWidth,v.videoHeight,CW,CH,mirrored());
     takeFrame(ditherLuma(lum,CW,CH,F.exposure,F.contrast));
     return;
   }
@@ -375,6 +436,7 @@ function loadFilm(){
     var d=sn.exists?own(sn.data()):null;
     if(!d || !d.roll){ F.roll=null; F.frames=[]; F.ready=true; return; }
     F.roll=d.roll; F.size=Math.min(d.size||12,16); F.loaded=d.loaded||Date.now(); F.exposure=d.exposure|0; F.contrast=d.contrast|0; F.date=d.date!==false; F.tint=TINTS[d.tint]?d.tint:"lcd"; setRes(d.res||1);
+    LIVE.lens=LENS.ORDER.indexOf(d.lens)>=0?d.lens:"w";
     return S.refs.frames.where("roll","==",F.roll).get().then(function(q){
       var list=q.docs.map(function(x){ return own(x.data()); }).filter(function(fr){ return fr && fr.px && fr.px.length===CW*CH; });
       list.sort(function(a,b){ return a.n-b.n; });
@@ -422,7 +484,7 @@ function openCam(){
 
 /* ---- camera controls: the screen is one fixed panel; the back opens for rolls and menus.
    Chin buttons, after the Game Boy Camera: A shutter, up/down brightness, left/right contrast,
-   START body menu, SELECT turn the lens around. The key strip on screen does the same by touch. ---- */
+   START body menu, SELECT the next lens. The key strip on screen does the same by touch. ---- */
 var CAM={mode:null, menu:null, sel:0, busy:false, roll:0};
 function camSheet(name){
   CAM.mode=name;
@@ -436,7 +498,7 @@ function camMenu(kind){
   /* titles, labels and notes are keys, so an open menu redraws in the new language */
   if(kind==="body") M={title:"cam.menu.body", note:"", back:function(){ camSheet(null); renderCam(); startLive(); }, items:[
     {label:"cam.menu.date", value:function(){ return tr(F.date?"set.on":"set.off"); }, pick:function(){ toggleDate(); }},
-    {label:"cam.menu.lens", value:function(){ return tr(LIVE.facing==="user"?"cam.menu.front":"cam.menu.back"); }, pick:function(){ LIVE.facing = LIVE.facing==="environment" ? "user" : "environment"; }},
+    {label:"cam.menu.lens", value:function(){ return lensName(lensNow()); }, pick:function(){ LIVE.lens=LENS.next(LIVE.lenses,LIVE.lens).id; saveFilmSoon(); }},
     {label:"cam.menu.rewind", value:function(){ return tr("cam.menu.left",{n:left}); }, pick:function(){ camMenu("rewind"); }},
     {label:"cam.menu.finder", pick:function(){ M.back(); }}
   ]};
@@ -571,7 +633,7 @@ function camButton(b,down){
   if(b==="up") setExposure(F.exposure+1); else if(b==="down") setExposure(F.exposure-1);
   else if(b==="right") setContrast(F.contrast+1); else if(b==="left") setContrast(F.contrast-1);
   else if(b==="start"){ sfx("tap"); camMenu("body"); }
-  else if(b==="select") flipLens();
+  else if(b==="select") nextLens();
 }
 function camLayout(){
   var box=$("finder-box"), f=$("finder"); if($("v-cam").hidden || !box.clientWidth) return;

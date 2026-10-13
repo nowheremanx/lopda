@@ -175,8 +175,8 @@
       "cam.load.note1": "标准片 128×112，颗粒粗，复古味重。", "cam.load.note2": "细颗粒 256×224，能看清人脸。",
       "cam.load.tint": " 冲洗出来是「{name}」色调，屏幕上永远是绿的。",
 
-      "cam.menu.body": "机身菜单", "cam.menu.date": "日期", "cam.menu.lens": "换镜头", "cam.menu.front": "前",
-      "cam.menu.back": "后", "cam.menu.rewind": "提前倒片", "cam.menu.left": "{n} 张未拍", "cam.menu.finder": "回到取景",
+      "cam.menu.body": "机身菜单", "cam.menu.date": "日期", "cam.menu.lens": "换镜头",
+      "cam.lens.mm": "{mm}mm", "cam.lens.front": "前置", "cam.lens.back": "后置", "cam.menu.rewind": "提前倒片", "cam.menu.left": "{n} 张未拍", "cam.menu.finder": "回到取景",
       "cam.menu.rewindnote": "还有 {n} 张没拍。倒片时剩下的胶片会见光，冲出来是一片白。倒片后这卷就拍完了。",
       "cam.menu.rewindgo": "确认倒片", "cam.menu.done": "这卷拍完了",
       "cam.menu.donenote": "冲洗之后才看得到拍了什么。长条是一整条胶片；印样卡把整卷印在一张 3:4 相纸上。",
@@ -381,8 +381,8 @@
       "cam.load.note1": "Standard 128×112: coarse grain, very retro.", "cam.load.note2": "Fine grain 256×224: faces come through.",
       "cam.load.tint": " Develops in {name}. The screen always stays green.",
 
-      "cam.menu.body": "BODY MENU", "cam.menu.date": "Date", "cam.menu.lens": "Lens", "cam.menu.front": "Front",
-      "cam.menu.back": "Back", "cam.menu.rewind": "Rewind now", "cam.menu.left": "{n} left", "cam.menu.finder": "Back to finder",
+      "cam.menu.body": "BODY MENU", "cam.menu.date": "Date", "cam.menu.lens": "Lens",
+      "cam.lens.mm": "{mm}mm", "cam.lens.front": "FRONT", "cam.lens.back": "BACK", "cam.menu.rewind": "Rewind now", "cam.menu.left": "{n} left", "cam.menu.finder": "Back to finder",
       "cam.menu.rewindnote": "{n} frames unshot. Rewinding lets light onto them: they develop white. The roll is then done.",
       "cam.menu.rewindgo": "Rewind", "cam.menu.done": "ROLL DONE",
       "cam.menu.donenote": "You see the pictures only once developed. Strip: the whole film. Contact sheet: the roll on one 3:4 print.",
