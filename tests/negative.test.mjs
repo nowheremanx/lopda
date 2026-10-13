@@ -32,7 +32,7 @@ function jpeg(len, seed) {
 function roll({ size = 4, res = 1, name = "海边" } = {}) {
   const px = (k) => Array.from({ length: 128 * res * 112 * res }, (_, i) => String((i * 7 + k) % 4)).join("");
   return {
-    id: "rmg7x2kq1a2b", stock: "portrait", size, res, seed: 4000000000, loaded: 1791700000000, out: 1791800000000, name,
+    id: "rmg7x2kq1a2b", no: 7, stock: "portrait", size, res, seed: 4000000000, loaded: 1791700000000, out: 1791800000000, name,
     frames: Array.from({ length: size }, (_, k) => k === size - 1
       ? { n: k + 1, px: "3".repeat(128 * res * 112 * res), taken: 1791790000000, blank: "light" }
       : { n: k + 1, px: px(k), taken: 1791710000000 + k, dated: k % 2 === 0, lens: ["uw", "w", "t", "f"][k % 4], exposure: (k % 7) - 3, contrast: 1 })
@@ -113,7 +113,7 @@ test("a negative from a newer format version is refused, not half read", () => {
 test("bad metadata is refused when writing and when reading", () => {
   const r = roll();
   for (const bad of [
-    { ...r, id: "../x" }, { ...r, size: 5 }, { ...r, res: 3 }, { ...r, name: "x".repeat(65) },
+    { ...r, id: "../x" }, { ...r, no: 0 }, { ...r, size: 5 }, { ...r, res: 3 }, { ...r, name: "x".repeat(65) },
     { ...r, frames: r.frames.map((f, k) => k === 1 ? { ...f, px: f.px.slice(1) } : f) },
     { ...r, frames: r.frames.map((f, k) => k === 1 ? { ...f, px: "4" + f.px.slice(1) } : f) },
     { ...r, frames: r.frames.map((f, k) => k === 1 ? { ...f, lens: "zoom" } : f) },

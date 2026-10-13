@@ -25,6 +25,7 @@ LP.renderHome();
     S.refs.film=db.doc(base+"/film");
     S.refs.frames=db.doc(base+"/frames").collection("items");
     S.refs.rolls=db.doc(base+"/rolls").collection("items");
+    S.refs.camera=db.doc(base+"/camera");
     S.refs.settings=db.doc(base+"/settings");
     S.refs.carts=db.doc(base+"/carts").collection("items");
     S.refs.roms=db.doc(base+"/roms").collection("items");

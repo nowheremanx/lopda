@@ -1947,6 +1947,8 @@ test("darkroom: load a stock, shoot a roll with latent images, unload it to the 
   assert.deepEqual(await p.$$eval("#menu-list li", (ls) => ls.map((l) => l.textContent)), ["取出胶卷"], "no developing in the camera");
   const film = await idb.doc(p, "data/users/local/film");
   assert.equal(film.stock, "sunny"); assert.equal(typeof film.seed, "number"); assert.ok(!("tint" in film));
+  assert.equal(film.no, 1, "the first roll on this handheld");
+  assert.deepEqual(await idb.doc(p, "data/users/local/camera"), { rolls: 1 });
   const id = film.roll;
   await p.waitForFunction((id) => new Promise((res) => { const r = indexedDB.open("lopda-files"); r.onsuccess = () => { const k = r.result.transaction("files").objectStore("files").getAllKeys(); k.onsuccess = () => { r.result.close(); res(k.result.filter((x) => x.startsWith("roll/" + id + "/")).length === 16); }; }; }), id, { timeout: 20000 });
   const lat = await idb.latents(p, id);
@@ -1994,7 +1996,7 @@ test("darkroom: load a stock, shoot a roll with latent images, unload it to the 
   assert.equal(await p.textContent("#dk-sheet li.on"), "取消");
   await press("ArrowUp");
   const [d] = await Promise.all([p.waitForEvent("download", { timeout: 30000 }), press("x")]);
-  assert.match(d.suggestedFilename(), /^lopda-negative-\d{8}-sunny-200\.png$/);
+  assert.match(d.suggestedFilename(), /^lopda-negative-\d{8}-sunny-200-001\.png$/);
   const neg = await (await import("node:fs/promises")).readFile(await d.path());
   const pic = await pngColours(neg);
   assert.deepEqual([pic.w, pic.h], [1080, 1440]);
