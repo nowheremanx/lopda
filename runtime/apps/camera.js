@@ -1,38 +1,52 @@
 /*
- * Lo-PDA built-in: the pixel camera. Viewfinder, rolls of film, the developed strip and the
- * contact-sheet card. The film helpers are shared with the cutter as LP.film.
+ * Lo-PDA built-in: the pixel camera. Viewfinder, rolls of film in seven film stocks, and with every frame a latent
+ * image: the colour picture behind the four-tone frame, kept for the darkroom (docs/design/darkroom.md sections 1-3).
+ * A finished roll is unloaded into the darkroom's film box. The film helpers (stocks, strip and contact-sheet
+ * layouts, fonts) are shared with the darkroom as LP.film.
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
+ *
+ * The roll in the camera: data/users/local/film {roll, no, stock, seed, size, res, loaded, exposure, contrast, date, lens};
+ * its frames: data/users/local/frames/items/<roll>-<nn> {roll, n, px, taken, dated, lens, exposure, contrast, blank};
+ * how many rolls this handheld has loaded: data/users/local/camera {rolls};
+ * latent images: LopdaPlatform.files "roll/<roll>/<nn>.jpg" (800x700 JPEG). Unloading moves the roll to
+ * data/users/local/rolls/items/<roll> (apps/darkroom.js); the latent images keep their keys.
  */
 (function(){
 "use strict";
 var LP=window.LP, $=LP.$, S=LP.S, I18N=LP.I18N, tr=LP.tr;
-var TONES=LP.TONES, BAYER=LP.BAYER, own=LP.own, toast=LP.toast, put=LP.put, pad2=LP.pad2, sfx=LP.sfx, show=LP.show, showPad=LP.showPad,
-  saveCanvas=LP.saveCanvas, saveErr=LP.saveErr;
+var TONES=LP.TONES, BAYER=LP.BAYER, own=LP.own, toast=LP.toast, put=LP.put, pad2=LP.pad2, sfx=LP.sfx, show=LP.show, showPad=LP.showPad;
+var FILES=window.LopdaPlatform.files;
 
-/* ---------- pixel camera: a roll of film. Frames are fixed once taken; a full roll is developed out. ---------- */
+/* ---------- pixel camera: a roll of film. Frames are fixed once taken; a finished roll goes to the darkroom. ---------- */
 var CW=128, CH=112;
-var F={roll:null, size:12, res:1, tint:"lcd", loaded:0, exposure:0, contrast:0, date:true, frames:[], ready:false};
+var F={roll:null, no:0, count:0, size:12, res:1, stock:"portrait", seed:0, loaded:0, exposure:0, contrast:0, date:true, frames:[], ready:false, stale:null, jobs:[]};
 var ccv=$("cam-cv"), cctx=ccv.getContext("2d"), cimg=cctx.createImageData(CW,CH);
-/* film stock: 1 = 128x112 standard, 2 = 256x224 fine grain. Fixed for the life of a roll. */
-/* film tints: the four tones a roll develops in. The handheld's own screen always stays green. */
-/* name: the Chinese tint name, kept as data; it is printed on film output in zh mode only */
-var TINTS={
-  lcd:   {name:"绿屏", en:"LCD",    tones:[[31,42,20],[74,90,50],[125,138,88],[163,173,126]]},
-  sepia: {name:"暖褐", en:"SEPIA",  tones:[[43,29,20],[107,74,50],[168,128,90],[230,210,176]]},
-  sakura:{name:"樱粉", en:"SAKURA", tones:[[58,31,43],[138,74,99],[212,138,163],[246,219,227]]},
-  cyano: {name:"晒蓝", en:"CYANO",  tones:[[16,36,58],[47,92,134],[111,159,196],[214,230,240]]},
-  mono:  {name:"黑白", en:"MONO",   tones:[[27,27,27],[90,90,90],[158,158,158],[232,230,225]]}
+/* film format: 1 = 128x112 standard, 2 = 256x224 fine grain. Fixed for the life of a roll. */
+/* film stocks (docs/design/darkroom.md section 4): a describing word and a speed, never a real film's name. The
+   screen calls a stock by its strings.js name ("stock.<id>"); film edges print `print`. The colour belongs to the
+   darkroom: on the handheld every stock is the same four greens. */
+var STOCKS={
+  portrait:{print:"PORTRAIT 400"},
+  sunny:   {print:"SUNNY 200"},
+  verde:   {print:"VERDE 400"},
+  pastel:  {print:"PASTEL 400"},
+  tungsten:{print:"TUNGSTEN 800T"},
+  noir:    {print:"NOIR 400"},
+  expired: {print:"EXPIRED"}
 };
-var TINT_ORDER=["lcd","sepia","sakura","cyano","mono"];
-function tintOf(id){ return TINTS[id]||TINTS.lcd; }
-/* the tint as the screen calls it: Chinese name in zh, the English one in en */
-function tintLabel(id){ var T=tintOf(id); return I18N.lang==="zh"?T.name:T.en; }
-/* the tint as film output prints it: "SAKURA 樱粉" in zh, "SAKURA" in en */
-function tintPrint(id){ var T=tintOf(id); return I18N.lang==="zh"?T.en+" "+T.name:T.en; }
-var nextTint="lcd";
+var STOCK_ORDER=["portrait","sunny","verde","pastel","tungsten","noir","expired"];
+function stockOf(id){ return STOCKS[id]?id:"portrait"; }
+/* the stock as the screen calls it: "人像 400" in zh, "PORTRAIT 400" in en */
+function stockLabel(id){ return tr("stock."+stockOf(id)); }
+/* the stock as film edges print it, the same in both languages */
+function stockPrint(id){ return STOCKS[stockOf(id)].print; }
+var nextStockId="portrait";
+/* the latent image of frame n of a roll: an 800x700 JPEG in LopdaPlatform.files */
+var LATENT={W:800, H:700, Q:0.8};
+function latentKey(roll,n){ return "roll/"+roll+"/"+pad2(n)+".jpg"; }
 function setRes(r){ r=r===2?2:1; F.res=r; CW=128*r; CH=112*r; ccv.width=CW; ccv.height=CH; cimg=cctx.createImageData(CW,CH); }
 function stockName(r){ return tr(r===2?"cam.stock2":"cam.stock1"); }
-function filmDoc(){ return {roll:F.roll,size:F.size,res:F.res,tint:F.tint,loaded:F.loaded,exposure:F.exposure,contrast:F.contrast,date:F.date,lens:LIVE.lens}; }
+function filmDoc(){ return {roll:F.roll,no:F.no,stock:F.stock,seed:F.seed,size:F.size,res:F.res,loaded:F.loaded,exposure:F.exposure,contrast:F.contrast,date:F.date,lens:LIVE.lens}; }
 var nextStock=1, nextSize=12;
 function drawPx(ctx,img,px){
   var d=img.data;
@@ -81,20 +95,20 @@ function camIdle(){
 function renderCam(){
   var has=!!F.roll, full=rollFull();
   $("cam-count").textContent= has ? pad2(Math.min(F.frames.length+(full?0:1),F.size))+"/"+pad2(F.size) : "--/--";
-  $("cam-film").textContent= has ? tr("cam.lcd",{en:tintOf(F.tint).en, name:tintOf(F.tint).name, stock:tr(F.res===2?"cam.stock.s2":"cam.stock.s1")}) : tr(F.ready?"cam.nofilm":"cam.reading");
+  $("cam-film").textContent= has ? tr("cam.lcd",{film:stockLabel(F.stock), stock:tr(F.res===2?"cam.stock.s2":"cam.stock.s1")}) : tr(F.ready?"cam.nofilm":"cam.reading");
   var sg=function(v){ return (v>0?"+":v<0?"−":"±")+Math.abs(v); };
   $("cam-exp").textContent=tr("cam.exp",{b:sg(F.exposure), c:sg(F.contrast)});
   $("cam-date").className=F.date?"":"off";
   var shooting=has && !full;
   ["cam-shutter","ck-dark","ck-bright"].forEach(function(id){ $(id).disabled=!shooting; });
   if(F.ready && !has && CAM.mode!=="load") camSheet("load");
-  else if(has && full && CAM.mode!=="menu") camMenu("develop");
+  else if(has && full && CAM.mode!=="menu") camMenu("done");
   else if(has && !full && CAM.mode==="load") camSheet(null);
   camModeLabel(); camLayout();
 }
 
 /* date back: a 3x5 digit font burned into the lower right corner, like a quartz-date camera */
-var DIGITS={"0":"111101101101111","1":"010110010010111","2":"111001111100111","3":"111001111001111","4":"101101111001001","5":"111100111001111","6":"111100111101111","7":"111001010010010","8":"111101111101111","9":"111101111001111","'":"1100","-":"000000111000000"};
+var DIGITS={"0":"111101101101111","1":"010110010010111","2":"111001111100111","3":"111001111001111","4":"101101111001001","5":"111100111001111","6":"111100111101111","7":"111001010010010","8":"111101111101111","9":"111101111001111","'":"1100","-":"000000111000000","T":"111010010010010"};
 function burnDate(px,w,h,ts,s){
   var d=new Date(ts), text="'"+String(d.getFullYear()).slice(2)+" "+pad2(d.getMonth()+1)+" "+pad2(d.getDate());
   var glyphs=[], width=0;
@@ -128,14 +142,25 @@ $("ck-dark").onclick=function(){ setExposure(F.exposure-1); };
 $("ck-bright").onclick=function(){ setExposure(F.exposure+1); };
 $("ck-menu").onclick=function(){ if(F.roll && !rollFull()) camMenu("body"); };
 
+/* a roll's own randomness (how an expired roll fades, whether frame 1 caught light) is fixed when it is loaded,
+   as on real film; the darkroom uses the seed (darkroom.md 4.1). The id takes a few random letters too: it is how
+   a negative imported on another handheld is told apart (they need no crypto; tests/runtime-shots.mjs seeds Math.random). */
+function random32(){
+  var c=window.crypto, a=new Uint32Array(1);
+  if(c && c.getRandomValues) c.getRandomValues(a); else a[0]=Math.floor(Math.random()*4294967296);
+  return a[0]>>>0;
+}
 function loadRoll(){
-  setRes(nextStock); F.tint=nextTint; F.contrast=0; F.exposure=0;
-  F.roll="r"+Date.now().toString(36); F.size=nextSize; F.loaded=Date.now(); F.frames=[];
-  if(S.db) put(S.refs.film,filmDoc());
+  setRes(nextStock); F.stock=nextStockId; F.contrast=0; F.exposure=0; F.seed=random32();
+  F.roll="r"+Date.now().toString(36)+Math.floor(Math.random()*1679616).toString(36); F.size=nextSize; F.loaded=Date.now(); F.frames=[]; F.jobs=[];
+  /* the roll's number on this handheld, 1, 2, 3...: it names the negative's file, so a day's rolls never come out as
+     "(1)" "(2)" copies. Never reused, even when a roll is thrown away. */
+  F.count++; F.no=F.count;
+  if(S.db){ put(S.refs.film,filmDoc()); put(S.refs.camera,{rolls:F.count}); }
   /* the door closes, the film is wound on to frame 1 */
   sfx("tap"); setTimeout(function(){ sfx("tick"); },120); setTimeout(function(){ sfx("tick"); },240); setTimeout(function(){ sfx("ok"); },420);
   camSheet(null); camIdle(); renderCam(); startLive();
-  toast(tr("cam.loaded",{en:tintOf(F.tint).en, name:tintOf(F.tint).name, fine:F.res===2?tr("cam.loadedfine"):"", n:F.size}));
+  toast(tr("cam.loaded",{film:stockLabel(F.stock), fine:F.res===2?tr("cam.loadedfine"):"", n:F.size}));
 }
 
 /* ---- live viewfinder: the camera feed dithered to the LCD in real time (needs HTTPS) ----
@@ -168,7 +193,8 @@ function mirrored(){ return lensNow().id==="f"; }
 /* what the screen calls a lens: its focal length; the plain back/front pair has none to tell */
 function lensName(L){ return L.id==="f" ? tr("cam.lens.front") : L.fallback ? tr("cam.lens.back") : tr("cam.lens.mm",{mm:LENS.MM[L.id]}); }
 function videoFor(L){
-  var v={width:{ideal:640}, height:{ideal:480}};
+  /* the latent image wants detail: an iPhone answers 1280x960 with 960x1280 at 30 fps (darkroom.md section 3) */
+  var v={width:{ideal:1280}, height:{ideal:960}};
   if(L.deviceId) v.deviceId={exact:L.deviceId}; else v.facingMode=L.facing;
   return {video:v, audio:false};
 }
@@ -248,10 +274,28 @@ function endSwap(){
   LIVE.swapping=0; clearTimeout(LIVE.swapTimer); $("cam-shut").hidden=true;
   if(!LIVE.on && !LIVE.opening) camIdle();
 }
-function takeFrame(px){
-  var n=F.frames.length+1, now=Date.now();
+/* The latent image: the finder's 8:7 crop of the full picture, 800x700, mirrored like the finder for the front lens,
+   with no other change (exposure and contrast are recorded, the darkroom applies them). The drawing is done at once,
+   while the picture is the one the shutter saw; the JPEG is encoded and stored in the background. */
+function latentFrom(src,sw,sh,mirror){
+  var ar=LATENT.W/LATENT.H, cw=sw, ch=sw/ar; if(ch>sh){ ch=sh; cw=sh*ar; }
+  var c=document.createElement("canvas"); c.width=LATENT.W; c.height=LATENT.H;
+  var x=c.getContext("2d"); x.imageSmoothingEnabled=true; x.imageSmoothingQuality="high";
+  if(mirror){ x.translate(LATENT.W,0); x.scale(-1,1); }
+  x.drawImage(src,(sw-cw)/2,(sh-ch)/2,cw,ch,0,0,LATENT.W,LATENT.H);
+  return c;
+}
+function keepLatent(roll,n,c){
+  var job=new Promise(function(resolve){ c.toBlob(resolve,"image/jpeg",LATENT.Q); }).then(function(blob){
+    if(!blob) throw new Error("encode");
+    return FILES.put(latentKey(roll,n),blob);
+  }).catch(function(){ if(F.roll===roll) toast(tr("cam.lost")); });
+  F.jobs.push(job);
+}
+function takeFrame(px,latent){
+  var n=F.frames.length+1, now=Date.now(), roll=F.roll;
   if(F.date) burnDate(px,CW,CH,now,F.res);
-  var fr={roll:F.roll, n:n, px:Array.prototype.join.call(px,""), taken:now, dated:F.date};
+  var fr={roll:roll, n:n, px:Array.prototype.join.call(px,""), taken:now, dated:F.date, exposure:F.exposure, contrast:F.contrast};
   if(LIVE.on) fr.lens=lensNow().id;   /* for the lab to print later; the system camera's lens is unknown */
   F.frames.push(fr);
   /* film: you never see the frame. The shutter blinks, the film winds on. */
@@ -259,7 +303,8 @@ function takeFrame(px){
   setTimeout(function(){ $("cam-shut").hidden=true; if(!LIVE.on) camIdle(); },160);
   setTimeout(function(){ sfx("tick"); },260); setTimeout(function(){ sfx("tick"); },360);
   renderCam();
-  if(S.db) put(S.refs.frames.doc(F.roll+"-"+pad2(n)),fr).then(function(ok){ if(!ok) toast(tr("cam.lost")); });
+  if(S.db) put(S.refs.frames.doc(roll+"-"+pad2(n)),fr).then(function(ok){ if(!ok) toast(tr("cam.lost")); });
+  if(latent && S.db) keepLatent(roll,n,latent());
   if(rollFull()){ toast(tr("cam.last")); stopLive(); }
 }
 $("cam-shutter").onclick=function(){ shoot(); };
@@ -267,8 +312,9 @@ function shoot(){
   if(!F.roll || rollFull() || !$("cam-shut").hidden) return;
   var v=$("cam-video");
   if(LIVE.on && v.videoWidth){
-    var lum=lumaFrom(v,v.videoWidth,v.videoHeight,CW,CH,mirrored());
-    takeFrame(ditherLuma(lum,CW,CH,F.exposure,F.contrast));
+    var w=v.videoWidth, h=v.videoHeight, m=mirrored();
+    var lum=lumaFrom(v,w,h,CW,CH,m);
+    takeFrame(ditherLuma(lum,CW,CH,F.exposure,F.contrast),function(){ return latentFrom(v,w,h,m); });
     return;
   }
   $("cam-file").click();
@@ -279,29 +325,31 @@ $("cam-file").addEventListener("change",function(){
   $("cam-dev").hidden=false;
   var url=URL.createObjectURL(f), img=new Image();
   img.onload=function(){
-    var px=ditherLuma(lumaOf(img,CW,CH),CW,CH,F.exposure,F.contrast); URL.revokeObjectURL(url);
-    $("cam-dev").hidden=true; takeFrame(px);
+    var px=ditherLuma(lumaOf(img,CW,CH),CW,CH,F.exposure,F.contrast), lat=latentFrom(img,img.naturalWidth,img.naturalHeight,false);
+    URL.revokeObjectURL(url);
+    $("cam-dev").hidden=true; takeFrame(px,function(){ return lat; });
   };
   img.onerror=function(){ URL.revokeObjectURL(url); $("cam-dev").hidden=true; toast(tr("cam.badphoto")); };
   img.src=url;
 });
 
-/* ---- the strip: one wide PNG laid out like a 35mm negative strip, frames left to right.
+/* ---- the strip: one wide picture laid out like a 35mm negative strip, frames left to right.
    Frame pixels are written straight into ImageData: Safari can swap red/blue when a
-   canvas is drawn onto another canvas right after putImageData. ---- */
+   canvas is drawn onto another canvas right after putImageData.
+   o: {pal (four [r,g,b] tones), res, size, loaded, out (when it left the camera), lead (the stock word on the
+   leader), edges (the edge print under even and odd frames)}. The darkroom draws negatives with it (apps/darkroom.js). ---- */
 var STRIP={S:2, H:320, LEAD:200, TRAIL:64, PITCH:272, FW:256, FH:224, FY:48};
 function stripWidth(n){ return STRIP.LEAD + n*STRIP.PITCH - (STRIP.PITCH-STRIP.FW) + STRIP.TRAIL; }
-function rgb(t){ return "rgb("+TONES[t].join(",")+")"; }
-function buildStrip(frames,size,loaded,tintId){
-  var T=tintOf(tintId), PAL=T.tones, rgb=function(t){ return "rgb("+PAL[t].join(",")+")"; };
+function buildStrip(frames,o){
+  var PAL=o.pal, rgb=function(t){ return "rgb("+PAL[t].join(",")+")"; }, fw=128*o.res;
   var n=frames.length, c=document.createElement("canvas"); c.width=stripWidth(n); c.height=STRIP.H;
   var x=c.getContext("2d",{willReadFrequently:true});
   x.fillStyle=rgb(0); x.fillRect(0,0,c.width,c.height);
   for(var hx=0;hx<c.width;hx+=30){ x.fillStyle=rgb(1); x.fillRect(hx+9,8,12,14); x.fillRect(hx+9,STRIP.H-22,12,14); }
   x.textBaseline="top";
   var fit=function(text,px,y,tone){ var sz=px; do{ x.font=sz+'px "VT323", monospace'; sz--; } while(x.measureText(text).width>STRIP.LEAD-40 && sz>8); x.fillStyle=rgb(tone); x.fillText(text,24,y); };
-  fit("LO-PDA",30,70,2); fit((F.res===2?"FINE GRAIN":"PIXEL FILM")+" "+T.en,22,104,2); fit(size+" EXP",22,130,2);
-  fit("LOADED "+stampOf(loaded).slice(0,8),16,172,1); fit("DEV    "+stampOf(Date.now()).slice(0,8),16,192,1);
+  fit("LO-PDA",30,70,2); fit(o.lead,22,104,2); fit(o.size+" EXP",22,130,2);
+  fit("LOADED "+stampOf(o.loaded).slice(0,8),16,172,1); fit("OUT    "+stampOf(o.out).slice(0,8),16,192,1);
   frames.forEach(function(fr,k){
     var fx=STRIP.LEAD+k*STRIP.PITCH;
     x.fillStyle=rgb(2); x.font='16px "VT323", monospace'; x.fillText(pad2(k+1),fx,26);
@@ -311,29 +359,23 @@ function buildStrip(frames,size,loaded,tintId){
   x.font='15px "VT323", monospace';
   frames.forEach(function(fr,k){
     var fx=STRIP.LEAD+k*STRIP.PITCH;
-    x.fillStyle=rgb(1); x.fillText(k%2 ? "LO-PDA  "+T.en : (F.res===2?"FINE ":"")+"PIXEL FILM",fx+4,STRIP.FY+STRIP.FH+5);
+    x.fillStyle=rgb(1); x.fillText(o.edges[k%2],fx+4,STRIP.FY+STRIP.FH+5);
     x.fillStyle=rgb(2); x.fillText(String(k+1)+"▸",fx+STRIP.FW-26,STRIP.FY+STRIP.FH+5);
   });
   /* frames last, as raw pixels at 2x */
-  var sc=STRIP.FW/CW;   /* 2 for standard film, 1 for fine grain: the strip geometry stays the same */
+  var sc=STRIP.FW/fw;   /* 2 for standard film, 1 for fine grain: the strip geometry stays the same */
   frames.forEach(function(fr,k){
     var img=x.createImageData(STRIP.FW,STRIP.FH), d=img.data, px=pxFromString(fr.px);
     for(var y=0;y<STRIP.FH;y++) for(var xx=0;xx<STRIP.FW;xx++){
-      var t=PAL[px[Math.floor(y/sc)*CW+Math.floor(xx/sc)]], o=(y*STRIP.FW+xx)*4;
-      d[o]=t[0]; d[o+1]=t[1]; d[o+2]=t[2]; d[o+3]=255;
+      var t=PAL[px[Math.floor(y/sc)*fw+Math.floor(xx/sc)]], q=(y*STRIP.FW+xx)*4;
+      d[q]=t[0]; d[q+1]=t[1]; d[q+2]=t[2]; d[q+3]=255;
     }
     x.putImageData(img,STRIP.LEAD+k*STRIP.PITCH,STRIP.FY);
   });
   return c;
 }
-async function developStrip(){
-  if(!rollFull()) return;
-  try{ if(document.fonts && document.fonts.load) await document.fonts.load('22px "VT323"'); }catch(err){}
-  var cv=buildStrip(F.frames,F.size,F.loaded,F.tint);
-  saveCanvas(cv,"lopda-film-"+fileStamp(F.loaded)+"-"+F.size+"exp.png").then(function(r){ if(r&&r.status==="saved") sfx("ok"), toast(tr("cam.developed")); },function(e){ toast(saveErr(e)); });
-}
 
-/* ---- the 3:4 contact-sheet card: a whole roll laid out on photo paper, sized for sharing ---- */
+/* ---- the 3:4 contact-sheet card: a whole roll laid out on photo paper ---- */
 var CARD={W:1080, H:1440, PAPER:[241,236,225], INK:"#2b2a26", SOFT:"#8a857a"};
 function fontsReady(){
   try{ if(document.fonts && document.fonts.load) return Promise.all([document.fonts.load('40px "VT323"'),document.fonts.load('28px "DotGothic16"')]).catch(function(){}); }catch(e){}
@@ -346,15 +388,16 @@ function putFrame(x,px,pw,ph,pal,dx,dy,w,h){
     var t=pal[px[sy*pw+Math.min(pw-1,Math.floor(xx*pw/w))]], o=(y*w+xx)*4; d[o]=t[0]; d[o+1]=t[1]; d[o+2]=t[2]; d[o+3]=255; } }
   x.putImageData(img,dx,dy);
 }
-/* The contact sheet, made the way a lab makes one: the developed strip is cut into pieces of a
-   few frames, the pieces are laid side by side on paper, and the paper is printed. Frame numbers
-   and edge print come from the film itself; a short last piece simply leaves paper showing. */
-function buildCard(frames,size,loaded,tintId){
-  var T=tintOf(tintId), n=frames.length;
-  var strip=buildStrip(frames,size,loaded,tintId), sw=strip.width, sd=strip.getContext("2d").getImageData(0,0,sw,STRIP.H).data;
+/* The contact sheet, made the way a lab makes one: the strip is cut into pieces of a few frames, the pieces
+   are laid side by side on paper, and the paper is printed. Frame numbers and edge print come from the film
+   itself; a short last piece simply leaves paper showing.
+   o: the strip's options, plus {paper, ink, soft (CSS colours), head (top left), sub (the line under it), foot}. */
+function buildCard(frames,o){
+  var n=frames.length;
+  var strip=buildStrip(frames,o), sw=strip.width, sd=strip.getContext("2d").getImageData(0,0,sw,STRIP.H).data;
   var c=document.createElement("canvas"); c.width=CARD.W; c.height=CARD.H;
-  var x=c.getContext("2d");
-  x.fillStyle="rgb("+CARD.PAPER.join(",")+")"; x.fillRect(0,0,c.width,c.height);
+  var x=c.getContext("2d",{willReadFrequently:true});
+  x.fillStyle=o.paper; x.fillRect(0,0,c.width,c.height);
   var MX=72, TOP=236, BOTTOM=110, GAP=26, avail=CARD.H-TOP-BOTTOM, innerW=CARD.W-2*MX;
   /* frames per piece: whichever lets the pieces be printed largest */
   var per=3, s=0;
@@ -364,18 +407,19 @@ function buildCard(frames,size,loaded,tintId){
   });
   var rows=Math.ceil(n/per), pieceH=Math.round(STRIP.H*s), blockW=Math.round(per*STRIP.PITCH*s);
   var ox=Math.round((CARD.W-blockW)/2), oy=TOP+Math.round((avail-(rows*pieceH+(rows-1)*GAP))/2);
+  var day=new Date(o.loaded);
   x.textBaseline="alphabetic";
-  x.fillStyle=CARD.INK; x.font='76px "VT323", monospace'; x.fillText("LO-PDA",MX,128);
+  x.fillStyle=o.ink; x.font='76px "VT323", monospace'; x.fillText(o.head,MX,128);
   x.font='30px "VT323", "DotGothic16", monospace'; x.textAlign="right";
-  x.fillText(String(new Date(loaded).getFullYear())+"."+pad2(new Date(loaded).getMonth()+1)+"."+pad2(new Date(loaded).getDate()),CARD.W-MX,126);
-  x.textAlign="left"; x.fillStyle=CARD.SOFT; x.font='26px "DotGothic16", "VT323", monospace';
-  x.fillText((F.res===2?"FINE GRAIN":"PIXEL FILM")+" · "+tintPrint(tintId)+" · "+size+" EXP",MX,176);
-  x.fillStyle=CARD.INK; x.fillRect(MX,200,CARD.W-2*MX,3);
-  x.textAlign="center"; x.fillStyle=CARD.SOFT; x.font='24px "VT323", monospace';
-  x.fillText("· shot on lo-pda ·",CARD.W/2,CARD.H-56);
+  x.fillText(String(day.getFullYear())+"."+pad2(day.getMonth()+1)+"."+pad2(day.getDate()),CARD.W-MX,126);
+  x.textAlign="left"; x.fillStyle=o.soft; x.font='26px "DotGothic16", "VT323", monospace';
+  x.fillText(o.sub,MX,176);
+  x.fillStyle=o.ink; x.fillRect(MX,200,CARD.W-2*MX,3);
+  x.textAlign="center"; x.fillStyle=o.soft; x.font='24px "VT323", monospace';
+  x.fillText(o.foot,CARD.W/2,CARD.H-56);
   x.textAlign="left";
   /* pieces last, copied pixel by pixel (never drawImage: Safari swaps red and blue on that path) */
-  var seed=(loaded|0)>>>0;
+  var seed=(o.loaded|0)>>>0;
   for(var r=0;r<rows;r++){
     var first=r*per, count=Math.min(per,n-first);
     var sx0=STRIP.LEAD+first*STRIP.PITCH-(STRIP.PITCH-STRIP.FW)/2, srcW=count*STRIP.PITCH;
@@ -386,33 +430,51 @@ function buildCard(frames,size,loaded,tintId){
     for(var yy=0;yy<dh;yy++){
       var sy=Math.min(STRIP.H-1,Math.floor(yy/s));
       for(var xx=0;xx<dw;xx++){
-        var sxp=Math.min(sw-1,Math.floor(sx0+xx/s)), so=(sy*sw+sxp)*4, o=(yy*dw+xx)*4;
-        d[o]=sd[so]; d[o+1]=sd[so+1]; d[o+2]=sd[so+2]; d[o+3]=255;
+        var sxp=Math.min(sw-1,Math.floor(sx0+xx/s)), so=(sy*sw+sxp)*4, q=(yy*dw+xx)*4;
+        d[q]=sd[so]; d[q+1]=sd[so+1]; d[q+2]=sd[so+2]; d[q+3]=255;
       }
     }
     x.putImageData(img,ox+jx,oy+r*(pieceH+GAP));
   }
   return c;
 }
-function developCard(){
-  if(!rollFull() || CAM.busy) return;
-  CAM.busy=true;
-  fontsReady().then(function(){
-    var cv=buildCard(F.frames,F.size,F.loaded,F.tint);
-    return saveCanvas(cv,"lopda-card-"+fileStamp(F.loaded)+"-"+F.tint+".png");
-  }).then(function(r){ if(r&&r.status==="saved"){ sfx("ok"); toast(tr("cam.carded")); } },function(e){ toast(saveErr(e)); })
-    .then(function(){ CAM.busy=false; });
-}
 
-/* taking the roll out clears it from the handheld */
-function removeRoll(){
-  var old=F.frames.slice(), oldRoll=F.roll;
-  F.roll=null; F.frames=[];
-  if(S.db){
-    S.refs.film.delete().catch(function(){});
-    old.reduce(function(pr,fr){ return pr.then(function(){ return S.refs.frames.doc(oldRoll+"-"+pad2(fr.n)).delete().catch(function(){}); }); },Promise.resolve());
-  }
-  stopLive(); camIdle(); camSheet(null); renderCam();
+/* Taking the roll out: it goes into the darkroom's film box (data/users/local/rolls) once every latent image is
+   stored, then the camera is empty. The latent images keep their keys. */
+function rollDoc(frames,bytes){
+  return {id:F.roll, no:F.no, stock:F.stock, seed:F.seed, size:F.size, res:F.res, loaded:F.loaded, out:Date.now(), name:"", bytes:bytes,
+    frames:frames.map(function(fr){
+      var f={n:fr.n, px:fr.px, taken:fr.taken};
+      if(fr.blank) f.blank=fr.blank;
+      else { f.dated=!!fr.dated; f.exposure=fr.exposure|0; f.contrast=fr.contrast|0; if(fr.lens) f.lens=fr.lens; }
+      return f;
+    })};
+}
+function unloadRoll(){
+  if(CAM.busy || !rollFull()) return;
+  var roll=F.roll, frames=F.frames.slice();
+  var clear=function(){
+    F.roll=null; F.frames=[]; F.jobs=[];
+    if(S.db){
+      S.refs.film.delete().catch(function(){});
+      frames.reduce(function(pr,fr){ return pr.then(function(){ return S.refs.frames.doc(roll+"-"+pad2(fr.n)).delete().catch(function(){}); }); },Promise.resolve());
+    }
+    stopLive(); camIdle(); camSheet(null); renderCam();
+  };
+  if(!S.db){ clear(); return; }
+  CAM.busy=true; drawMenu();
+  Promise.all(F.jobs).then(function(){
+    return Promise.all(frames.map(function(fr){ return fr.blank ? null : FILES.get(latentKey(roll,fr.n)).catch(function(){ return null; }); }));
+  }).then(function(blobs){
+    var bytes=0;
+    blobs.forEach(function(b){ if(b) bytes+=b.size||b.byteLength||0; });
+    frames.forEach(function(fr){ bytes+=fr.px.length; });
+    return put(S.refs.rolls.doc(roll),rollDoc(frames,bytes));
+  }).then(function(ok){
+    CAM.busy=false;
+    if(!ok){ drawMenu(); sfx("err"); return; }
+    sfx("ok"); toast(tr("cam.unloaded")); clear();
+  },function(){ CAM.busy=false; drawMenu(); sfx("err"); toast(tr("cam.lost")); });
 }
 
 /* rewind early: the unshot frames get fogged and develop white */
@@ -432,10 +494,15 @@ function rewindEarly(){
 
 function loadFilm(){
   if(!S.db){ F.ready=true; renderCam(); return Promise.resolve(); }
-  return S.refs.film.get().then(function(sn){
+  return S.refs.camera.get().then(function(sn){ var c=sn.exists?own(sn.data()):null; F.count=Math.max(F.count,(c&&c.rolls)|0); },function(){})
+  .then(function(){ return S.refs.film.get(); }).then(function(sn){
     var d=sn.exists?own(sn.data()):null;
     if(!d || !d.roll){ F.roll=null; F.frames=[]; F.ready=true; return; }
-    F.roll=d.roll; F.size=Math.min(d.size||12,16); F.loaded=d.loaded||Date.now(); F.exposure=d.exposure|0; F.contrast=d.contrast|0; F.date=d.date!==false; F.tint=TINTS[d.tint]?d.tint:"lcd"; setRes(d.res||1);
+    /* a roll from before 0.14.0 (a tint, no stock, no latent images) cannot be developed in colour: it is void.
+       Opening the camera clears it (voidStale); nothing is made up for it (darkroom.md, decision 7). */
+    if(!STOCKS[d.stock] || typeof d.seed!=="number"){ F.stale=d.roll; F.roll=null; F.frames=[]; F.ready=true; return; }
+    F.roll=d.roll; F.size=Math.min(d.size||12,16); F.loaded=d.loaded||Date.now(); F.exposure=d.exposure|0; F.contrast=d.contrast|0; F.date=d.date!==false;
+    F.stock=d.stock; F.seed=d.seed>>>0; F.no=d.no|0; F.jobs=[]; setRes(d.res||1);
     LIVE.lens=LENS.ORDER.indexOf(d.lens)>=0?d.lens:"w";
     return S.refs.frames.where("roll","==",F.roll).get().then(function(q){
       var list=q.docs.map(function(x){ return own(x.data()); }).filter(function(fr){ return fr && fr.px && fr.px.length===CW*CH; });
@@ -449,7 +516,7 @@ var camLinked=false, bootTimer=null;
 function camBoot(){
   var box=$("cam-boot"), reduce=window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
   if(camLinked || reduce){ camLinked=true; return; }
-  var film = F.roll ? tr("cam.boot.filmof",{name:tintLabel(F.tint), stock:stockName(F.res), n:F.frames.length, size:F.size}) : tr("cam.boot.nofilm");
+  var film = F.roll ? tr("cam.boot.filmof",{name:stockLabel(F.stock), stock:stockName(F.res), n:F.frames.length, size:F.size}) : tr("cam.boot.nofilm");
   var shake=tr("cam.boot.shake"), sep=I18N.lang==="zh"?" ： ":": ";
   var lines=[[tr("cam.boot.slot"),"…",380],[tr("cam.boot.found"),tr("cam.boot.lens"),420],[shake,"",0],[tr("cam.boot.fw"),"CAM-OS 1.03",300],[tr("cam.boot.film"),film,360],["",tr("cam.boot.done"),500]];
   box.textContent=""; box.hidden=false;
@@ -475,10 +542,22 @@ function camBoot(){
     bootTimer=setTimeout(function(){ d.textContent=(L[0]?L[0]+(L[1]!=="…"?sep:" "):"")+L[1]; bootTimer=setTimeout(next,L[2]); },260);
   })();
 }
+/* the old roll and every frame left from it go, with one line to say so */
+function voidStale(){
+  if(!F.stale) return;
+  F.stale=null;
+  if(S.db){
+    S.refs.film.delete().catch(function(){});
+    S.refs.frames.get().then(function(q){
+      return q.docs.reduce(function(pr,x){ return pr.then(function(){ return S.refs.frames.doc(x.id).delete().catch(function(){}); }); },Promise.resolve());
+    }).catch(function(){});
+  }
+  toast(tr("cam.void"));
+}
 function openCam(){
   CAM.mode=null; camSheet(null);
   show("cam"); showPad(true); renderCam(); camIdle();
-  var go=function(){ camBoot(); renderCam(); startLive(); };
+  var go=function(){ voidStale(); camBoot(); renderCam(); startLive(); };
   if(F.ready) go(); else loadFilm().then(go);
 }
 
@@ -506,19 +585,14 @@ function camMenu(kind){
     {label:"cam.menu.rewindgo", pick:function(){ rewindEarly(); }},
     {label:"common.cancel", pick:function(){ camMenu("body"); }}
   ]};
-  else if(kind==="develop") M={title:"cam.menu.done", note:"cam.menu.donenote", back:null, items:[
-    {label:"cam.menu.strip", pick:function(){ developStrip(); }},
-    {label:"cam.menu.card", pick:function(){ developCard(); }},
-    {label:"cam.menu.swap", pick:function(){ camMenu("remove"); }}
-  ]};
-  else if(kind==="remove") M={title:"cam.menu.remove", note:"cam.menu.removenote", back:function(){ camMenu("develop"); }, items:[
-    {label:"cam.menu.removego", pick:function(){ removeRoll(); }},
-    {label:"cam.menu.wait", pick:function(){ camMenu("develop"); }}
+  /* a finished roll has one way to go: out, into the darkroom's film box */
+  else if(kind==="done") M={title:"cam.menu.done", note:"cam.menu.donenote", back:null, items:[
+    {label:"cam.menu.unload", pick:function(){ unloadRoll(); }}
   ]};
   M.left=left; CAM.menu=M; CAM.sel=0; camSheet("menu"); drawMenu();
 }
 function drawMenu(){
-  var M=CAM.menu; $("menu-title").textContent=tr(M.title); $("menu-note").textContent=M.note?tr(M.note,{n:M.left}):"";
+  var M=CAM.menu; $("menu-title").textContent=tr(M.title); $("menu-note").textContent=CAM.busy?tr("cam.unloading"):M.note?tr(M.note,{n:M.left}):"";
   var ul=$("menu-list"); ul.textContent="";
   M.items.forEach(function(it,i){
     var li=document.createElement("li"); li.className=i===CAM.sel?"on":"";
@@ -529,15 +603,18 @@ function drawMenu(){
   });
   document.querySelector("#cam-menu .menu-keys").textContent=tr("cam.menu.keys")+(M.back?tr("cam.menu.keysback"):"");
 }
-function menuPick(){ var it=CAM.menu.items[CAM.sel]; sfx("tap"); it.pick(); if(CAM.mode==="menu" && CAM.menu && CAM.menu.items.indexOf(it)>=0) drawMenu(); }
+function menuPick(){ if(CAM.busy) return; var it=CAM.menu.items[CAM.sel]; sfx("tap"); it.pick(); if(CAM.mode==="menu" && CAM.menu && CAM.menu.items.indexOf(it)>=0) drawMenu(); }
 
-/* the roll picker: canisters on a shelf, slide them sideways */
+/* the roll picker: canisters on a shelf, slide them sideways. Each stock's label has its own four-tone pattern and
+   its speed printed on it; no maker's logo, no real film's packaging. */
 var ROLL_PATTERN={
-  lcd:   function(x,y){ return y%6===0 ? 3 : 1; },
-  sepia: function(x,y){ return (x+y)%6<3 ? 1 : 2; },
-  sakura:function(x,y){ var a=x%8, b=y%8; return (a===3&&b===3)||(a===2&&b===3)||(a===4&&b===3)||(a===3&&b===2)||(a===3&&b===4) ? 0 : (a===3&&b===3)?3:2; },
-  cyano: function(x,y){ return (y+Math.round(Math.sin(x/2)*1.5))%5===0 ? 3 : 1; },
-  mono:  function(x,y){ return ((x>>1)+(y>>1))%2 ? 0 : 2; }
+  portrait:function(x,y){ return ((x+y)>>2)%2 ? 2 : 3; },
+  sunny:   function(x,y){ var dx=x-24, dy=y-25, r=dx*dx+dy*dy; return r<20 ? 3 : r<30 ? 2 : (dx===0||dy===0||dx===dy||dx===-dy) ? 2 : 1; },
+  verde:   function(x,y){ return ((x-(y>>1))%6+6)%6<3 ? 1 : 2; },
+  pastel:  function(x,y){ var a=x%8, b=y%8; return (a===3&&b===3) ? 3 : (a===2&&b===3)||(a===4&&b===3)||(a===3&&b===2)||(a===3&&b===4) ? 1 : 2; },
+  tungsten:function(x,y){ return y>28 ? 1 : (x*7+y*13)%23===0 ? 3 : 0; },
+  noir:    function(x,y){ return ((x>>1)+(y>>1))%2 ? 0 : 2; },
+  expired: function(x,y){ return (x*x*3+y*7+x*y)%5<2 ? 2 : 3; }
 };
 function drawCanister(cv,id){
   var W=48,H=64, x=cv.getContext("2d"), img=x.createImageData(W,H), d=img.data, px=new Uint8Array(W*H).fill(255);
@@ -548,7 +625,11 @@ function drawCanister(cv,id){
   rect(8,11,32,44,0); rect(9,11,30,44,2);              /* body */
   rect(9,15,30,36,3);                                  /* label */
   for(var Y=17;Y<33;Y++) for(var X=10;X<38;X++) put(X,Y,ROLL_PATTERN[id](X,Y));
-  rect(10,35,28,2,0); rect(10,39,18,2,1); rect(10,43,22,2,1); rect(10,47,12,2,1);   /* printed lines */
+  /* the speed in the date back's digits, then printed lines */
+  var iso=stockPrint(id).split(" ")[1]||"", cx=11;
+  iso.split("").forEach(function(ch){ var bits=DIGITS[ch]; if(bits) for(var r=0;r<5;r++) for(var c=0;c<3;c++) if(bits[r*3+c]==="1") put(cx+c,35+r,0); cx+=4; });
+  if(!iso) rect(10,37,28,2,0);
+  rect(10,42,18,2,1); rect(10,46,12,2,1);
   rect(40,30,8,16,0); for(var k=0;k<3;k++) rect(42,32+k*5,3,3,2);                   /* film tongue */
   rect(7,55,34,5,0); rect(8,56,32,3,1);                /* bottom cap */
   rect(21,60,6,4,0);
@@ -558,8 +639,8 @@ function drawCanister(cv,id){
 function buildRolls(){
   var box=$("rolls");
   if(!box.children.length){
-    TINT_ORDER.forEach(function(id,i){
-      var b=document.createElement("button"); b.type="button"; b.className="roll"; b.setAttribute("data-tint",id);
+    STOCK_ORDER.forEach(function(id,i){
+      var b=document.createElement("button"); b.type="button"; b.className="roll"; b.setAttribute("data-stock",id);
       var cv=document.createElement("canvas"); cv.width=48; cv.height=64; drawCanister(cv,id);
       var lab=document.createElement("span"); lab.className="lab";
       b.appendChild(cv); b.appendChild(lab);
@@ -575,7 +656,7 @@ function buildRolls(){
       },90);
     });
   }
-  CAM.roll=Math.max(0,TINT_ORDER.indexOf(nextTint));
+  CAM.roll=Math.max(0,STOCK_ORDER.indexOf(nextStockId));
   paintRolls();
   requestAnimationFrame(function(){ pickRoll(CAM.roll,false); });
 }
@@ -586,24 +667,24 @@ function pickRoll(i,smooth){
 }
 function paintRolls(){
   if(!$("rolls").children.length) return;
-  nextTint=TINT_ORDER[CAM.roll];
+  nextStockId=STOCK_ORDER[CAM.roll];
   Array.prototype.forEach.call($("rolls").children,function(c,i){
-    var id=c.getAttribute("data-tint"), t=TINTS[id];
+    var id=c.getAttribute("data-stock");
     c.className="roll"+(i===CAM.roll?" on":"");
     c.querySelector(".lab").innerHTML="";
-    c.querySelector(".lab").appendChild(document.createTextNode(t.en));
-    var sm=document.createElement("small"); sm.textContent=tr("cam.load.label",{name:t.name, n:nextSize, fine:nextStock===2?tr("cam.load.fine"):""}); c.querySelector(".lab").appendChild(sm);
+    c.querySelector(".lab").appendChild(document.createTextNode(stockLabel(id)));
+    var sm=document.createElement("small"); sm.textContent=tr("cam.load.label",{n:nextSize, fine:nextStock===2?tr("cam.load.fine"):""}); c.querySelector(".lab").appendChild(sm);
   });
   $("roll-count").lastChild.textContent=tr("cam.load.exp",{n:nextSize});
   $("roll-stock").lastChild.textContent=stockName(nextStock);
-  $("roll-note").textContent=tr(nextStock===2?"cam.load.note2":"cam.load.note1")+tr("cam.load.tint",{name:tintLabel(nextTint)});
+  $("roll-note").textContent=tr("stock."+nextStockId+".note")+tr(nextStock===2?"cam.load.note2":"cam.load.note1");
 }
 function rollSize(step){ var S3=[8,12,16], i=S3.indexOf(nextSize); nextSize=S3[(i+step+3)%3]; sfx("tick"); paintRolls(); }
 function rollStock(){ nextStock=nextStock===2?1:2; sfx("tick"); paintRolls(); }
 $("roll-count").onclick=function(){ rollSize(1); };
 $("roll-stock").onclick=function(){ rollStock(); };
 $("roll-prev").onclick=function(){ pickRoll(Math.max(0,CAM.roll-1),true); };
-$("roll-next").onclick=function(){ pickRoll(Math.min(TINT_ORDER.length-1,CAM.roll+1),true); };
+$("roll-next").onclick=function(){ pickRoll(Math.min(STOCK_ORDER.length-1,CAM.roll+1),true); };
 $("roll-go").onclick=function(){ if(CAM.mode==="load") loadRoll(); };
 
 function camButton(b,down){
@@ -621,7 +702,7 @@ function camButton(b,down){
   if(CAM.mode==="load"){
     if(!down) return;
     if(b==="left") pickRoll(Math.max(0,CAM.roll-1),true);
-    else if(b==="right") pickRoll(Math.min(TINT_ORDER.length-1,CAM.roll+1),true);
+    else if(b==="right") pickRoll(Math.min(STOCK_ORDER.length-1,CAM.roll+1),true);
     else if(b==="up") rollSize(1); else if(b==="down") rollSize(-1);
     else if(b==="select") rollStock();
     else if(b==="a"||b==="start") loadRoll();
@@ -643,8 +724,10 @@ function camLayout(){
 if(window.ResizeObserver) new ResizeObserver(function(){ camLayout(); }).observe($("finder-box"));
 window.addEventListener("resize",camLayout);
 
-LP.film={TINTS:TINTS, TINT_ORDER:TINT_ORDER, tintLabel:tintLabel, tintPrint:tintPrint, STRIP:STRIP, stripWidth:stripWidth,
-  CARD:CARD, putFrame:putFrame, fontsReady:fontsReady, ditherLuma:ditherLuma};   /* the reader dithers book pictures with the same look */
+LP.film={STOCKS:STOCKS, STOCK_ORDER:STOCK_ORDER, stockLabel:stockLabel, stockPrint:stockPrint, LATENT:LATENT, latentKey:latentKey,
+  STRIP:STRIP, stripWidth:stripWidth, buildStrip:buildStrip, CARD:CARD, buildCard:buildCard, putFrame:putFrame, fontsReady:fontsReady,
+  stampOf:stampOf, fileStamp:fileStamp,
+  ditherLuma:ditherLuma};   /* the reader dithers book pictures with the same look */
 LP.padRoute("cam",function(b,down){ if($("v-cam").hidden) return false; camButton(b,down); return true; });
 LP.builtin({id:"camera", label:"app.camera", icon:"camera", view:"cam",
   open:function(){ openCam(); },

@@ -193,32 +193,16 @@
       </div>
     </section>
 
-    <!-- CUTTER -->
-    <section class="view" id="v-cut" hidden>
-      <div class="bar"><h2 data-i18n="cut.title">裁片机</h2><span class="hint" id="cut-state"></span></div>
-      <div class="cam">
-        <div class="cutbox" id="cut-box">
-          <div class="cut-empty" id="cut-empty" data-i18n="cut.empty">放入一条冲洗好的胶片</div>
-          <div class="cut-scroll" id="cut-scroll" hidden><span class="spacer" id="cut-sp1"></span><canvas id="cut-cv" width="1" height="1" data-i18n-label="cut.strip" aria-label="胶片"></canvas><span class="spacer" id="cut-sp2"></span></div>
-          <div class="cut-window" id="cut-window" hidden><i class="a"></i><i class="b"></i><i class="c"></i><i class="d"></i></div>
-        </div>
-        <div class="cam-row">
-          <input class="file-in" type="file" id="cut-file" accept="image/png,image/*">
-          <label class="btn ghost" for="cut-file" data-i18n="cut.insert">放入长条</label>
-          <button class="btn ghost" id="cut-left" type="button" data-i18n-label="cut.left" aria-label="往左挪一点">◀</button>
-          <button class="shutter" id="cut-go" type="button" data-i18n-label="cut.goa" aria-label="裁下框里的部分" disabled data-i18n="cut.go">裁</button>
-          <button class="btn ghost" id="cut-right" type="button" data-i18n-label="cut.right" aria-label="往右挪一点">▶</button>
-        </div>
-        <div class="cam-row" role="radiogroup" data-i18n-label="cut.size" aria-label="片框大小">
-          <button class="btn" type="button" role="radio" aria-checked="true" data-win="narrow" data-i18n="cut.narrow">窄框 · 只裁画面</button>
-          <button class="btn ghost" type="button" role="radio" aria-checked="false" data-win="wide" data-i18n="cut.wide">宽框 · 连齿孔一起</button>
-        </div>
-        <div class="cam-row">
-          <button class="btn ghost" id="cut-edge" type="button">相纸边 · 无</button>
-          <span class="hint" id="cut-edge-note" data-i18n="cut.edgenote.none">裁下来直接是胶片画面。</span>
-        </div>
-        <p class="hint" id="cut-hint" data-i18n="cut.hint">左右滑动胶片，把想要的部分对进四个角标里，按「裁」。可以跨在两张中间。</p>
+    <!-- DARKROOM: the film box; a roll's menu, naming and the confirmations open over it -->
+    <section class="view dk" id="v-dark" hidden>
+      <div class="bar">
+        <h2 data-i18n="dk.title">胶卷盒</h2>
+        <button class="btn" type="button" id="dk-import" data-i18n="dk.import">导入底片</button>
       </div>
+      <ul class="lcd-menu dk-list" id="dk-list"></ul>
+      <p class="hint dk-keys" id="dk-keys"></p>
+      <div class="dict-sheet dk-sheet" id="dk-sheet" hidden></div>
+      <input type="file" id="dk-file" accept="image/png,image/*" hidden>
     </section>
 
     <!-- CARTRIDGE PLAYER -->
@@ -291,13 +275,14 @@
 <script src="bookparse.js"></script>
 <script src="chip.js"></script>
 <script src="lenses.js"></script>
+<script src="negative.js"></script>
 <script src="core.js"></script>
 <script src="apps/notes.js"></script>
 <script src="apps/calendar.js"></script>
 <script src="apps/dict.js"></script>
 <script src="apps/reader.js"></script>
 <script src="apps/camera.js"></script>
-<script src="apps/cutter.js"></script>
+<script src="apps/darkroom.js"></script>
 <script src="apps/cart.js"></script>
 <script src="apps/store.js"></script>
 <script src="apps/settings.js"></script>

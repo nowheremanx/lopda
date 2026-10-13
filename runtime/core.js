@@ -151,7 +151,7 @@ function show(name){
 $("home-key").onclick=function(){ LP.flushNote(); show("home"); sfx("home"); };
 
 /* ---------- sound: tiny square-wave chips through Web Audio (the named sounds themselves are in chip.js) ---------- */
-var RUNTIME_VERSION="0.13.3";   /* keep in step with VERSION in sw.js */
+var RUNTIME_VERSION="0.14.0";   /* keep in step with VERSION in sw.js */
 /* One volume, five steps, 0 is off (decisions.md section 10). It sets the master gain and nothing else does.
    Under the master: `ui` for the runtime's own clicks, held at a fraction so they stay as quiet as they always were
    (step 2 gives them 0.11, their level before 0.12.0), and `app` for apps, music and the cartridge at the full step. */
@@ -240,7 +240,7 @@ document.addEventListener("visibilitychange",function(){
 /* every button gets a key click, except the ones that make their own sound */
 document.addEventListener("pointerdown",function(e){
   var b=e.target.closest && e.target.closest("button,label.btn,.app");
-  if(!b || b.disabled || b.id==="home-key" || b.id==="cut-go" || b.closest(".gamepad") || b.closest(".cam-view")) return;
+  if(!b || b.disabled || b.id==="home-key" || b.closest(".gamepad") || b.closest(".cam-view")) return;
   sfx("tap");
 },true);
 
@@ -294,7 +294,6 @@ $("set-update").onclick=function(){
 var ICONS={"notes":["................","..0000000000....","..0333333330....","..0311111130....","..0333333330....","..0311111130....","..0333333330....","..0311111130....","..0333333330....","..0311113330000.","..0333333300330.","..0311110003300.","..0333330033000.","..033333003000..","..00000000000...","................"],
   "cart":["................","...000000000....","...03333333300..","...03333333330..","...030000000330.","...030111110330.","...030122210330.","...030122210330.","...030111110330.","...030000000330.","...033333333330.","...033333333330.","...031313131330.","...033333333330.","...000000000000.","................"],
   "camera":["................","................","....0000........","..000000000000..",".03333333333330.",".03300000333330.",".03011111033000.",".00112222103330.",".00122332103330.",".00122332103330.",".00112222103330.",".03011111033330.",".03300000333330.",".00000000000000.","................","................"],
-  "cutter":["................",".00..........00.",".030........030.","..030......030..","...030....030...","....030..030....",".....030030.....","......0330......","......0330......",".....000000.....","....00....00....","...0330..0330...","...0..0..0..0...","...0330..0330...","....00....00....","................"],
   "store":["................","...0000000000...","...0333333330...","...0300000030...","...0302222030...","...0302112030...","...0302222030...","...0300000030...","...0333333330...","...0303333330...","...0000333300...","...0330333330...","...0303303330...","...0333333330...","...0000000000...","................"],
   "settings":["................","......0000......","...00.0330.00...","..0330333303330.","..0333333333300.","...03330000330..",".000330....0300.",".03330......0330",".03330......0330",".000330....0300.","...03330000330..","..0333333333300.","..0330333303330.","...00.0330.00...","......0000......","................"]};
 function validIcon(rows){
@@ -354,11 +353,11 @@ function armConfirm(wrapId,btnId,label,onYes){
 }
 
 /* ---------- chin game pad: D-pad, A, B, START, SELECT ----------
-   Routed to the file dialog while it is open, then the cartridge player when it runs, then the camera, the calendar, the dictionary, the reader, otherwise to the running app (PAD.on).
+   Routed to the file dialog while it is open, then the cartridge player when it runs, then the camera, the darkroom, the calendar, the dictionary, the reader, otherwise to the running app (PAD.on).
    A route returns true when it took the button. */
 var PADB={up:false,down:false,left:false,right:false,a:false,b:false,start:false,select:false};
 var PADKEYS={ArrowUp:"up",ArrowDown:"down",ArrowLeft:"left",ArrowRight:"right",x:"a",X:"a",z:"b",Z:"b",Enter:"start",Shift:"select"};
-var PAD_ORDER=["file","cart","cam","cal","dict","reader","run"], padRoutes={};   /* "file": the runtime's file dialog, while it is open */
+var PAD_ORDER=["file","cart","cam","dark","cal","dict","reader","run"], padRoutes={};   /* "file": the runtime's file dialog, while it is open */
 function padRoute(name,fn){ padRoutes[name]=fn; }
 function padOn(){ return !$("gamepad").hidden; }
 function setButton(b,down){
