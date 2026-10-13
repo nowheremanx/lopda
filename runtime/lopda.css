@@ -101,22 +101,6 @@ textarea::placeholder{color:var(--ink-2)}
 .panel{width:100%;max-width:420px;border:2px solid var(--ink);background:var(--lcd-2);padding:10px 12px;display:flex;flex-direction:column;gap:8px}
 .panel p{margin:0;font-size:14px;line-height:1.6}
 .panel .row .btn{padding:8px 12px;font-size:14px}
-.cutbox{position:relative;width:100%;max-width:520px;border:3px solid var(--ink);background:var(--ink)}
-.cut-scroll{overflow-x:auto;overflow-y:hidden;display:flex;align-items:center;-webkit-overflow-scrolling:touch;scrollbar-width:none}
-.cut-scroll::-webkit-scrollbar{display:none}
-.cut-scroll .spacer{flex:none;height:1px}
-#cut-cv{flex:none;display:block;image-rendering:pixelated;image-rendering:crisp-edges}
-.cut-window{position:absolute;left:50%;transform:translateX(-50%);pointer-events:none}
-.cut-window i{position:absolute;width:12px;height:12px;border:3px solid var(--key)}
-.cut-window .a{left:-3px;top:-3px;border-right:0;border-bottom:0}.cut-window .b{right:-3px;top:-3px;border-left:0;border-bottom:0}
-.cut-window .c{left:-3px;bottom:-3px;border-right:0;border-top:0}.cut-window .d{right:-3px;bottom:-3px;border-left:0;border-top:0}
-.cutbox{overflow:visible;margin-block:10px}
-.cut-empty{height:180px;display:flex;align-items:center;justify-content:center;color:var(--lcd-3);font-family:var(--f-pix);font-size:18px}
-.cut-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(72px,1fr));gap:8px;width:100%;max-width:420px}
-.cut-grid button{padding:0;border:2px solid var(--ink);background:var(--lcd);cursor:pointer;position:relative;line-height:0}
-.cut-grid button.done{opacity:.45}
-.cut-grid canvas{width:100%;aspect-ratio:128/112;image-rendering:pixelated}
-.cut-grid b{position:absolute;left:2px;top:1px;font-family:var(--f-pix);font-size:14px;font-weight:400;background:var(--lcd);padding:0 2px;line-height:1.1}
 .link-boot{position:absolute;inset:0;z-index:3;background:var(--lcd);display:flex;flex-direction:column;justify-content:center;gap:6px;padding:20px 22px;font-family:var(--f-pix);font-size:19px;line-height:1.25;cursor:pointer}
 .link-boot .ln{white-space:pre}
 .link-boot .bar8{letter-spacing:.05em;white-space:pre-wrap}   /* on narrow screens the bar drops to its own line instead of being cut off */
@@ -391,3 +375,25 @@ textarea::placeholder{color:var(--ink-2)}
 @media (pointer:coarse){.cal-jumpkeys{display:none}}
 .cal-kind .cal-leap{flex:none;padding:8px 10px}
 @media (max-height:700px){.cal-numpad{gap:4px}.cal-numpad .btn{padding:4px 0;font-size:18px}.cal-digits button{height:34px;font-size:24px}}
+
+/* ---------- darkroom: the film box (apps/darkroom.js) ---------- */
+.dk{display:flex;flex-direction:column;overflow:hidden}
+.dk-list{flex:1;min-height:0;overflow:auto;padding:2px 0}
+.dk-list li{min-height:52px;padding:6px 10px}
+.dk-list li>span{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.dk-list li b{font-weight:400;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dk-list li>span small{margin:0;font-family:var(--f-lcd);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dk-list li em{font-style:normal;font-size:13px;flex:none}
+.dk-list li.label{cursor:default;font-size:15px;line-height:1.6;color:var(--ink);align-items:flex-start}
+.dk-list li.label::before{display:none}
+.dk-keys{flex:none;padding:4px 8px 6px;border-top:2px solid var(--ink);text-align:center}
+.dk-sheet .dk-keys{border-top:0;margin-top:auto}
+.dk-sheet .dk-note{font-size:14px;line-height:1.6;color:var(--ink)}
+.dk-sheet .lcd-menu{flex:none}
+.dk-sheet .lcd-menu li{min-height:44px;box-sizing:border-box}
+.dk-sheet .lcd-menu li small{font-family:var(--f-lcd);font-size:14px;max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dk-name{display:flex;flex-direction:column;gap:12px;padding-top:6px}
+.dk-name input{font-family:var(--f-lcd);font-size:16px;padding:10px;border:2px solid var(--ink);background:var(--lcd);color:var(--ink);border-radius:0;min-height:44px;box-sizing:border-box;width:100%}
+.dk-name input::placeholder{color:var(--ink-2)}
+.dk-name .row{display:flex;gap:10px}
+.dk-name .row .btn{flex:1;min-height:44px}

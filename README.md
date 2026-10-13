@@ -9,15 +9,16 @@ A four-tone handheld that lives on your phone. Hi-PDA's low-fidelity cousin.
 ![Lo-PDA on a phone: home screen, loading a roll of film, the live pixel viewfinder, and a small game](docs/images/screens.png)
 
 Lo-PDA is a Progressive Web App styled as a fictional 1986 PDA with a green LCD
-and hardware buttons on its chin. It comes with a film camera, a strip cutter, a
+and hardware buttons on its chin. It comes with a film camera, a darkroom, a
 Game Boy cartridge player and a store of small community apps; a pixel paint program
 and a calculator come preinstalled from that store. Everything runs and is saved on the device; nothing needs an account.
 
 ## Shot on Lo-PDA
 
-The camera behaves like a film camera. You load a roll of 8, 12 or 16 frames,
-you can't see what you shot, and nothing comes out until the whole roll is
-developed: as a film strip, or as a contact sheet sized for sharing.
+The camera behaves like a film camera. You load a roll of 8, 12 or 16 frames in one of seven film stocks,
+you can't see what you shot, and the finished roll goes into the darkroom's film box. With every four-tone frame the
+camera keeps a colour latent image; a roll leaves the handheld as a four-tone negative PNG that carries them inside.
+Developing in colour comes next (`docs/design/darkroom.md`); the pictures below are from the earlier tinted strips.
 
 <img src="docs/images/contact-sheet.png" width="360" alt="A contact sheet: a roll of 8 pink-toned pixel photos of a lake with a pagoda, cut into strips and laid on paper"> 
 
@@ -30,8 +31,8 @@ developed: as a film strip, or as a contact sheet sized for sharing.
 | Built-in | 内置 | What it does |
 |---|---|---|
 | 记事本 | Notes | Plain notes, saved on the device. |
-| 点阵相机 | Film camera | Live dithered viewfinder. Load a roll (8, 12 or 16 frames, standard or fine grain, one of five tints). No previews: develop the full roll into a film strip or a 3:4 contact sheet. Chin buttons after the Game Boy Camera. |
-| 裁片机 | Strip cutter | Slide a developed strip under a fixed window and cut frames, halves or crossings, with optional paper edges. |
+| 点阵相机 | Film camera | Live dithered viewfinder. Load a roll (8, 12 or 16 frames, standard or fine grain, one of seven film stocks). No previews; every frame also keeps a colour latent image. A finished roll is unloaded into the darkroom. Chin buttons after the Game Boy Camera. |
+| 冲洗店 | Darkroom | The film box: every unloaded roll, named, exported as a negative PNG (the colour originals inside) and imported back. Developing comes in the next step. |
 | 卡带机 | Cartridge player | Plays black-and-white Game Boy files you supply, with the chin buttons. No games are included. |
 | 应用商店 | App store | Install, update and run community apps from `registry/`. |
 | 设置 | Settings | Sound, volume, storage, and updating to the newest version. |
