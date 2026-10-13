@@ -49,7 +49,8 @@ var Cut = (function () {
     wait: function (sec) { return new Promise(function (res) { T.after(sec, res); }); },
     flash: function (sec) { if (!skip) game.flash(sec); },
     shake: function (a, sec) { if (!skip) game.shake(a, sec); },
-    sfx: function (name) { if (!skip) game.sfx(name); }
+    /* an effect of src/sound.js (or a named sound); nothing while skipping */
+    sfx: function (name) { if (!skip) Snd.fx(name); }
   };
 
   /* called by the map scene's update, also while the scene is busy with a cutscene */
