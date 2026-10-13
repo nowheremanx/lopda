@@ -28,12 +28,14 @@ $("set-vol-up").onclick=function(){ if(SND.vol<LP.VOL_MAX) setVol(SND.vol+1); };
 function openSettings(){
   show("settings"); renderSettings(); renderUpdate();
   var el=$("set-storage"); el.textContent=tr("set.counting");
+  /* the darkroom's film box, in rolls and the space they take (apps/darkroom.js) */
+  var box=LP.darkroom ? LP.darkroom.summary().then(function(b){ return tr("set.box",{n:b.n, size:LP.darkroom.size(b.bytes)}); },function(){ return ""; }) : Promise.resolve("");
   if(navigator.storage && navigator.storage.estimate){
-    Promise.all([navigator.storage.estimate(), navigator.storage.persisted ? navigator.storage.persisted() : Promise.resolve(false)]).then(function(r){
+    Promise.all([navigator.storage.estimate(), navigator.storage.persisted ? navigator.storage.persisted() : Promise.resolve(false), box]).then(function(r){
       var kb=Math.max(1,Math.round((r[0].usage||0)/1024));
-      el.textContent=tr("set.storage",{size:kb>1024?(kb/1024).toFixed(1)+" MB":kb+" KB"})+tr(r[1]?"set.locked":"set.unlocked");
+      el.textContent=tr("set.storage",{size:kb>1024?(kb/1024).toFixed(1)+" MB":kb+" KB"})+r[2]+tr(r[1]?"set.locked":"set.unlocked");
     }).catch(function(){ el.textContent=tr("set.nousage"); });
-  } else el.textContent=tr("set.nousage");
+  } else box.then(function(t){ el.textContent=tr("set.nousage")+t; });
 }
 
 LP.builtin({id:"settings", label:"app.settings", icon:"settings", view:"settings",

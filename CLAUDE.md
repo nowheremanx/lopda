@@ -11,7 +11,7 @@ Design history and open questions: `docs/decisions.md`. Read it before changing 
 runtime/        the PWA: index.html, core.js (shared LP object: utils, views, sound, home, chin pad), apps/*.js (one file per
                 built-in), boot.js (loaded last), strings.js (zh/en text), lopda.css, platform.js (IndexedDB store, file export),
                 chip.js (sound chip: MML music, custom sound effects, ambience presets; shared with sdk/dev.html),
-                lenses.js (which physical camera lenses a phone has, pure functions), lunar.js (lunar calendar + solar term tables, 1900-2100), stardict.js (StarDict reader), bookparse.js (TXT/EPUB parser),
+                lenses.js (which physical camera lenses a phone has, pure functions), negative.js (the negative PNG and its lpDa chunk, pure functions), lunar.js (lunar calendar + solar term tables, 1900-2100), stardict.js (StarDict reader), bookparse.js (TXT/EPUB parser),
                 books/ (the reader's two public-domain sample books), sw.js (offline cache),
                 fonts/ (DotGothic16, VT323, OFL), vendor/binjgb/ (Game Boy core, MIT), vendor/holiday-cn/ (China days off, MIT),
                 vendor/ecdict/ (abridged ECDICT in StarDict format, MIT + WordNet licence)
@@ -21,7 +21,7 @@ registry/       index.json (generated) + apps/<id>/{manifest.json,index.html,src
 tools/          check-app.mjs, build-index.mjs, bundle-app.mjs (+ lo-game.mjs alias), lo-game-lib.mjs (Node 20+, no deps);
                 gen-lunar.py (one-off generator of the lunar table, needs PyEphem); gen-ecdict.mjs (one-off, ECDICT csv ->
                 vendor/ecdict/) with stardict-write.mjs (StarDict + dictzip writer, also used by tests)
-tests/          node:test suite (no deps): tools, strings, PAD shim, platform store, lo-game, repo rules;
+tests/          node:test suite (no deps): tools, strings, PAD shim, platform store, lo-game, negative, repo rules;
                 runtime-shots.mjs (before/after screenshots of the runtime), hko-compare.mjs (lunar table vs the HKO tables, manual)
 SPEC.md         app spec lopda/1 (MIT)
 LICENSE NOTICE LICENSING.md CONTRIBUTING.md
@@ -40,8 +40,9 @@ LICENSE NOTICE LICENSING.md CONTRIBUTING.md
   another site, decisions.md section 14), dict (词典; stardict.js, built-in ECDICT, imported StarDict books in
   `LopdaPlatform.files`, `LP.dict.lookup(word)` for other programs, decisions.md section 15), reader (阅读器; bookparse.js, books, their dithered pictures and imported fonts in
   `LopdaPlatform.files`, layouts and an e-ink full refresh, long-press or SELECT selection that looks up through `LP.dict` and quotes (underline + `LP.notes.append`),
-  decisions.md sections 16-17), camera (viewfinder, film, contact card, SELECT cycles the physical lenses found by lenses.js; shares its film
-  helpers as `LP.film`), cutter, cart (GB), store (app store, preinstalled apps, sandboxed runner, file dialog), settings.
+  decisions.md sections 16-17), camera (viewfinder, film stocks, a colour latent image per frame in `LopdaPlatform.files`, SELECT cycles the
+  physical lenses found by lenses.js; shares its film helpers as `LP.film`), darkroom (冲洗店: the film box of unloaded rolls,
+  negative export and import through negative.js; developing is docs/design/darkroom.md step 2), cart (GB), store (app store, preinstalled apps, sandboxed runner, file dialog), settings.
   Paint and the calculator are community apps (`registry/apps/paint`, `calculator`), installed on first start
   (`PREINSTALL` in store.js; their files are in sw.js SHELL). The LCD fonts ship in runtime/fonts/ (OFL). Each registers with
   `LP.builtin({id, label, icon, view, open, ...hooks})`; the home screen draws them in registration order

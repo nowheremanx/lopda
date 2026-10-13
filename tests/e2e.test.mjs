@@ -1871,3 +1871,199 @@ test("camera: names in another language, capabilities only on the tracks: each c
   assert.equal(await p.evaluate(() => window.__opened.at(-1)), "ultrawide");
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
+
+/* ---------- darkroom step 1 (docs/design/darkroom.md section 9): latent images, the film box, negatives ---------- */
+
+/* a PNG decoder of our own (8-bit RGB/RGBA/grey, no interlace), so the colours are counted the way Pillow would, not by a browser */
+async function pngColours(buf) {
+  const { inflateSync } = await import("node:zlib");
+  assert.equal(buf.toString("latin1", 1, 4), "PNG");
+  let o = 8, w, h, type, idat = [];
+  while (o < buf.length) {
+    const len = buf.readUInt32BE(o), t = buf.toString("latin1", o + 4, o + 8), d = buf.subarray(o + 8, o + 8 + len);
+    if (t === "IHDR") { w = d.readUInt32BE(0); h = d.readUInt32BE(4); assert.equal(d[8], 8, "8 bits"); type = d[9]; assert.equal(d[12], 0, "no interlace"); }
+    if (t === "IDAT") idat.push(d);
+    o += 12 + len;
+  }
+  const bpp = { 0: 1, 2: 3, 4: 2, 6: 4 }[type], raw = inflateSync(Buffer.concat(idat)), stride = w * bpp, cur = Buffer.alloc(stride);
+  let prev = Buffer.alloc(stride); const seen = new Set();
+  for (let y = 0; y < h; y++) {
+    const f = raw[y * (stride + 1)], line = raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1));
+    for (let i = 0; i < stride; i++) {
+      const a = i >= bpp ? cur[i - bpp] : 0, b = prev[i], c = i >= bpp ? prev[i - bpp] : 0;
+      const pa = Math.abs(b - c), pb = Math.abs(a - c), pc = Math.abs(a + b - 2 * c);
+      cur[i] = (line[i] + [0, a, b, (a + b) >> 1, pa <= pb && pa <= pc ? a : pb <= pc ? b : c][f]) & 255;
+    }
+    for (let x = 0; x < w; x++) {
+      const p = cur.subarray(x * bpp, x * bpp + bpp);
+      seen.add(type === 0 ? `${p[0]},${p[0]},${p[0]}` : type === 4 ? `${p[0]},${p[0]},${p[0]},${p[1]}` : [...p].join(","));
+    }
+    prev = Buffer.from(cur);
+  }
+  return { w, h, colours: [...seen].sort() };
+}
+/* the handheld's stores, read from the page */
+const idb = {
+  doc: (p, path) => p.evaluate((path) => new Promise((res, rej) => { const r = indexedDB.open("lopda"); r.onerror = () => rej(r.error);
+    r.onsuccess = () => { const g = r.result.transaction("docs").objectStore("docs").get(path); g.onsuccess = () => { r.result.close(); res(g.result ? g.result.data : null); }; }; }), path),
+  under: (p, parent) => p.evaluate((parent) => new Promise((res) => { const r = indexedDB.open("lopda");
+    r.onsuccess = () => { const g = r.result.transaction("docs").objectStore("docs").index("parent").getAll(parent); g.onsuccess = () => { r.result.close(); res(g.result.map((x) => x.data)); }; }; }), parent),
+  /* latent images of a roll: {key: {size, w, h, sha}} */
+  latents: (p, id) => p.evaluate((id) => new Promise((res) => { const r = indexedDB.open("lopda-files");
+    r.onsuccess = () => { const s = r.result.transaction("files").objectStore("files"), out = {};
+      const keys = s.getAllKeys(); keys.onsuccess = async () => {
+        const mine = keys.result.filter((k) => k.startsWith("roll/" + id + "/"));
+        const blobs = await Promise.all(mine.map((k) => new Promise((ok) => { const g = r.result.transaction("files").objectStore("files").get(k); g.onsuccess = () => ok(g.result); })));
+        for (let i = 0; i < mine.length; i++) {
+          const b = blobs[i], bmp = await createImageBitmap(b), sha = [...new Uint8Array(await crypto.subtle.digest("SHA-256", await b.arrayBuffer()))].map((v) => v.toString(16).padStart(2, "0")).join("");
+          out[mine[i]] = { size: b.size, type: b.type, w: bmp.width, h: bmp.height, sha };
+        }
+        r.result.close(); res(out);
+      }; }; }), id)
+};
+
+test("darkroom: load a stock, shoot a roll with latent images, unload it to the film box, name it, export the negative, throw it away, import it back", { skip, timeout: 180000 }, async (t) => {
+  const { p, errors, open } = await camPage(t);
+  const toast = (re) => p.waitForFunction((s) => { const el = document.getElementById("toast"); return !el.hidden && new RegExp(s).test(el.textContent); }, re.source, { timeout: 20000 });
+  const press = async (key) => { await p.keyboard.down(key); await p.waitForTimeout(30); await p.keyboard.up(key); await p.waitForTimeout(60); };
+  await open();
+  await p.waitForSelector("#cam-load:not([hidden])");
+  /* seven stocks on the shelf, by name and speed only */
+  assert.deepEqual(await p.$$eval("#rolls .roll .lab", (ls) => ls.map((l) => l.firstChild.textContent)), ["人像 400", "暖阳 200", "青绿 400", "樱 400", "夜 800T", "黑白 400", "过期"]);
+  await press("ArrowRight"); await p.waitForTimeout(500);
+  await press("ArrowUp");                                           /* 12 -> 16 */
+  assert.match(await p.textContent("#roll-count"), /16 张/);
+  await press("x");
+  await toast(/装好了：暖阳 200，16 张/);
+  await p.waitForSelector("#cam-live-tag:not([hidden])", { timeout: 10000 });
+  assert.match(await p.textContent("#cam-film"), /暖阳 200/);
+  await press("ArrowUp");                                           /* brightness +1 for the first frame */
+  for (let i = 0; i < 16; i++) {
+    await p.click("#cam-shutter");
+    await p.waitForFunction(() => document.getElementById("cam-shut").hidden, null, { timeout: 3000 });
+    await p.waitForTimeout(120);
+  }
+  await p.waitForSelector("#cam-menu:not([hidden])");
+  assert.deepEqual(await p.$$eval("#menu-list li", (ls) => ls.map((l) => l.textContent)), ["取出胶卷"], "no developing in the camera");
+  const film = await idb.doc(p, "data/users/local/film");
+  assert.equal(film.stock, "sunny"); assert.equal(typeof film.seed, "number"); assert.ok(!("tint" in film));
+  const id = film.roll;
+  await p.waitForFunction((id) => new Promise((res) => { const r = indexedDB.open("lopda-files"); r.onsuccess = () => { const k = r.result.transaction("files").objectStore("files").getAllKeys(); k.onsuccess = () => { r.result.close(); res(k.result.filter((x) => x.startsWith("roll/" + id + "/")).length === 16); }; }; }), id, { timeout: 20000 });
+  const lat = await idb.latents(p, id);
+  assert.deepEqual(Object.keys(lat).sort(), Array.from({ length: 16 }, (_, k) => `roll/${id}/${String(k + 1).padStart(2, "0")}.jpg`));
+  for (const v of Object.values(lat)) { assert.equal(v.w, 800); assert.equal(v.h, 700); assert.equal(v.type, "image/jpeg"); }
+  const f1 = await idb.doc(p, `data/users/local/frames/items/${id}-01`);
+  assert.equal(f1.exposure, 1); assert.equal(f1.contrast, 0); assert.equal(f1.dated, true);
+
+  /* unload: into the box, the camera is empty again */
+  await p.click("#menu-list li");
+  await toast(/胶卷放进冲洗店的胶卷盒了/);
+  await p.waitForSelector("#cam-load:not([hidden])");
+  assert.equal(await idb.doc(p, "data/users/local/film"), null);
+  for (let i = 0; i < 50 && (await idb.under(p, "data/users/local/frames/items")).length; i++) await p.waitForTimeout(100);   /* deleted one by one */
+  assert.deepEqual(await idb.under(p, "data/users/local/frames/items"), []);
+  const roll = await idb.doc(p, `data/users/local/rolls/items/${id}`);
+  assert.equal(roll.stock, "sunny"); assert.equal(roll.size, 16); assert.equal(roll.frames.length, 16); assert.equal(roll.name, "");
+  assert.equal(roll.frames[0].exposure, 1); assert.ok(roll.bytes > 16 * 128 * 112);
+  assert.deepEqual(await idb.latents(p, id), lat, "the latent images stay where they were");
+
+  /* the darkroom: the camera's old place on the home screen */
+  await p.click("#home-key");
+  assert.deepEqual(await p.$$eval("#home .app.builtin .label", (ls) => ls.map((l) => l.textContent)).then((l) => l.slice(l.indexOf("点阵相机"), l.indexOf("点阵相机") + 2)), ["点阵相机", "冲洗店"]);
+  await p.locator("#home .app", { has: p.locator(".label", { hasText: /^冲洗店$/ }) }).click();
+  await p.waitForFunction(() => /暖阳 200/.test(document.getElementById("dk-list").textContent));
+  assert.match(await p.textContent("#dk-list li.on"), /暖阳 200.*16 张.*未冲洗/);
+  assert.equal(await p.textContent("#dk-keys"), "▲▼ 选　A 打开　START 导入底片");
+  const rowH = await p.$eval("#dk-list li.on", (e) => e.getBoundingClientRect().height);
+  assert.ok(rowH >= 44, "row height " + rowH);
+
+  /* name it: A opens the roll's menu */
+  await press("x");
+  assert.deepEqual(await p.$$eval("#dk-sheet li", (ls) => ls.map((l) => l.textContent)), ["起名", "导出底片", "扔掉"]);
+  await press("x");
+  await p.waitForSelector("#dk-name");
+  assert.ok(await p.$eval("#dk-name", (e) => parseFloat(getComputedStyle(e).fontSize) >= 16), "16 px or more, or iPhone zooms");
+  await p.fill("#dk-name", "海边");
+  await p.press("#dk-name", "Enter");
+  await p.waitForFunction(() => /海边/.test(document.getElementById("dk-list").textContent));
+  assert.equal((await idb.doc(p, `data/users/local/rolls/items/${id}`)).name, "海边");
+
+  /* export: the confirmation says what is inside, the safe choice is selected */
+  await press("ArrowDown"); await press("x");
+  await p.waitForFunction(() => /彩色原片/.test(document.getElementById("dk-sheet").textContent));
+  assert.equal(await p.textContent("#dk-sheet li.on"), "取消");
+  await press("ArrowUp");
+  const [d] = await Promise.all([p.waitForEvent("download", { timeout: 30000 }), press("x")]);
+  assert.match(d.suggestedFilename(), /^lopda-negative-\d{8}-sunny-200\.png$/);
+  const neg = await (await import("node:fs/promises")).readFile(await d.path());
+  const pic = await pngColours(neg);
+  assert.deepEqual([pic.w, pic.h], [1080, 1440]);
+  assert.deepEqual(pic.colours.map((c) => c.split(",").slice(0, 3).join(",")).sort(), ["125,138,88", "163,173,126", "31,42,20", "74,90,50"], "only the four tones");
+  assert.ok(neg.includes(Buffer.from("lpDa")) && neg.includes(Buffer.from("LOPDA-NEG")));
+  await toast(/底片导出了/);
+
+  /* throw it away: the safe choice first, then the roll and its latent images go */
+  await p.waitForSelector("#dk-sheet:not([hidden])");
+  await press("ArrowDown"); await press("x");
+  await p.waitForFunction(() => /不能撤销/.test(document.getElementById("dk-sheet").textContent));
+  assert.equal(await p.textContent("#dk-sheet li.on"), "留着");
+  await press("ArrowUp"); await press("x");
+  await toast(/扔掉了/);
+  await p.waitForFunction(() => /胶卷盒是空的/.test(document.getElementById("dk-list").textContent));
+  assert.equal(await p.textContent("#dk-keys"), "START 导入底片");
+  await p.waitForTimeout(500);
+  assert.equal(await idb.doc(p, `data/users/local/rolls/items/${id}`), null);
+  assert.deepEqual(await idb.latents(p, id), {});
+
+  /* import the negative: the roll comes back as it was, latent images byte for byte */
+  await p.setInputFiles("#dk-file", { name: d.suggestedFilename(), mimeType: "image/png", buffer: neg });
+  await toast(/底片放进胶卷盒了/);
+  await p.waitForFunction(() => /海边/.test(document.getElementById("dk-list").textContent));
+  const back = await idb.doc(p, `data/users/local/rolls/items/${id}`);
+  assert.deepEqual({ ...back, out: 0 }, { ...roll, name: "海边", out: 0, bytes: back.bytes });
+  assert.equal(back.out, roll.out);
+  assert.deepEqual(await idb.latents(p, id), lat);
+  /* once is enough */
+  await p.setInputFiles("#dk-file", { name: "again.png", mimeType: "image/png", buffer: neg });
+  await toast(/已经在胶卷盒里/);
+  assert.equal((await idb.under(p, "data/users/local/rolls/items")).length, 1);
+  /* not a negative, a damaged one, and the same picture sent without "original" (a JPEG) */
+  const plainPng = Buffer.from(neg.subarray(0, neg.indexOf(Buffer.from("lpDa")) - 4));
+  const damaged = Buffer.from(neg); damaged[neg.indexOf(Buffer.from("LOPDA-NEG")) + 400] ^= 1;
+  for (const [name, mimeType, buffer] of [["a.png", "image/png", Buffer.concat([plainPng, neg.subarray(neg.length - 12)])], ["b.png", "image/png", damaged], ["c.jpg", "image/jpeg", Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 16, 74, 70, 73, 70, 0, 1])]]) {
+    await p.waitForFunction(() => document.getElementById("toast").hidden, null, { timeout: 8000 });
+    await p.setInputFiles("#dk-file", { name, mimeType, buffer });
+    await toast(/这张底片冲不出来/);
+  }
+  /* Settings counts the box */
+  await p.click("#home-key");
+  await p.locator("#home .app", { has: p.locator(".label", { hasText: /^设置$/ }) }).click();
+  await p.waitForFunction(() => /胶卷盒 1 卷，\d/.test(document.getElementById("set-storage").textContent));
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("darkroom: a roll left in the camera by an older version is void when the camera opens", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors, open } = await camPage(t);
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await p.waitForFunction(() => document.getElementById("savestate").textContent !== "启动中…", null, { timeout: 8000 });
+  await p.evaluate(() => new Promise((res) => {
+    const r = indexedDB.open("lopda");
+    r.onsuccess = () => {
+      const s = r.result.transaction("docs", "readwrite").objectStore("docs"), px = "1".repeat(128 * 112);
+      s.put({ path: "data/users/local/film", parent: "data/users/local", data: { roll: "rold1", size: 12, res: 1, tint: "sepia", loaded: 1791700000000, exposure: 0, contrast: 0, date: true } });
+      for (const n of [1, 2]) s.put({ path: "data/users/local/frames/items/rold1-0" + n, parent: "data/users/local/frames/items", data: { roll: "rold1", n, px, taken: 1791700000000 + n, dated: true } });
+      s.transaction.oncomplete = () => { r.result.close(); res(); };
+    };
+  }));
+  await open();
+  await p.waitForFunction(() => { const el = document.getElementById("toast"); return !el.hidden && el.textContent === "旧胶卷已作废"; }, null, { timeout: 10000 });
+  await p.waitForSelector("#cam-load:not([hidden])");
+  await p.waitForTimeout(500);
+  assert.equal(await idb.doc(p, "data/users/local/film"), null);
+  assert.deepEqual(await idb.under(p, "data/users/local/frames/items"), []);
+  /* and only once */
+  await open();
+  await p.waitForSelector("#cam-load:not([hidden])"); await p.waitForTimeout(600);
+  assert.notEqual(await p.evaluate(() => document.getElementById("toast").hidden ? "" : document.getElementById("toast").textContent), "旧胶卷已作废");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});

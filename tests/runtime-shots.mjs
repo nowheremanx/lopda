@@ -27,7 +27,9 @@
 // All driving is through clicks, keys and setInputFiles, never internal functions, so the script works
 // on any tree that keeps the same element ids. Home tiles are found by their label, so adding or removing a
 // program does not shift the others. Paint was a built-in up to runtime 0.4.1 and is a preinstalled app
-// since 0.5.0: each tree gets the shots for the paint it has (05-paint* or 05-paint-app*).
+// since 0.5.0: each tree gets the shots for the paint it has (05-paint* or 05-paint-app*). Likewise the cutter
+// (up to 0.13.x: 10-cam-develop-menu, strip/card/cut downloads, 11-13 cutter) and the darkroom that replaced it
+// (0.14.0+: 10-cam-done-menu, 11-13b darkroom, negative.png).
 import { createServer } from "node:http";
 import { readFile, writeFile, mkdir, readdir, rm } from "node:fs/promises";
 import { join, extname, normalize, resolve, dirname, delimiter } from "node:path";
@@ -130,7 +132,7 @@ async function capture(rootArg, outArg) {
     const [d] = await Promise.all([p.waitForEvent("download", { timeout: 15000 }), action()]);
     await d.saveAs(join(out, name)); names.push(name);
   };
-  const LABEL = { notes: "记事本", paint: "点阵画板", camera: "点阵相机", cutter: "裁片机", cart: "卡带机", store: "应用商店", settings: "设置" };
+  const LABEL = { notes: "记事本", paint: "点阵画板", camera: "点阵相机", cutter: "裁片机", darkroom: "冲洗店", cart: "卡带机", store: "应用商店", settings: "设置" };
   const tile = (name) => p.locator("#home .app", { has: p.locator(".label", { hasText: new RegExp("^" + LABEL[name] + "$") }) }).click();
   const home = async () => { await p.click("#home-key"); await p.waitForTimeout(200); };
 
@@ -194,6 +196,32 @@ async function capture(rootArg, outArg) {
   }
   await p.waitForSelector("#cam-menu:not([hidden])");
   await p.waitForTimeout(400);
+  /* up to 0.13.x the camera developed the roll and the cutter cut prints; since 0.14.0 the roll is unloaded into
+     the darkroom's film box (docs/design/darkroom.md). Each tree gets the shots for what it has. */
+  const darkroom = await p.locator("#v-dark").count() > 0;
+  if (darkroom) {
+    await shot("10-cam-done-menu");
+    await p.click("#menu-list li:nth-child(1)");                                   /* 取出胶卷 */
+    await p.waitForSelector("#cam-load:not([hidden])");
+    await settle(400);
+
+    /* darkroom: the film box, a roll's menu, naming, the export confirmation, the negative */
+    await home(); await tile("darkroom");
+    await p.waitForSelector("#dk-list li.on"); await p.waitForTimeout(300);
+    await shot("11-darkroom-box");
+    await p.keyboard.press("x"); await p.waitForSelector("#dk-sheet:not([hidden])");
+    await shot("12-darkroom-menu");
+    await p.keyboard.press("x"); await p.waitForSelector("#dk-name");
+    await p.keyboard.type("海边", { delay: 10 });
+    await shot("13-darkroom-name");
+    await p.keyboard.press("Enter"); await p.waitForTimeout(200);
+    await p.keyboard.press("ArrowDown"); await p.keyboard.press("x");
+    await p.waitForSelector("#dk-sheet .dk-note"); await p.waitForTimeout(800);
+    await shot("13b-darkroom-export");
+    await p.keyboard.press("ArrowUp");
+    await download(() => p.keyboard.press("x"), "negative.png");
+    await settle(400);
+  } else {
   await shot("10-cam-develop-menu");
   await download(() => p.click("#menu-list li:nth-child(1)"), "strip.png");      /* 冲洗长条 */
   await settle(600);
@@ -214,6 +242,7 @@ async function capture(rootArg, outArg) {
   await p.waitForFunction(() => !document.getElementById("cut-go").disabled);
   await download(() => p.click("#cut-go"), "cut-edge.png");
   await settle(400);
+  }
 
   /* cartridge player, empty library */
   await home(); await tile("cart"); await p.waitForTimeout(600);
