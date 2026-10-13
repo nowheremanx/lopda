@@ -1778,3 +1778,96 @@ test("ambience in the dev harness: the rain station's rain waits for a key; the 
   assert.doesNotMatch(await p.textContent("#log"), /ERROR/, await p.textContent("#log"));
   assert.deepEqual(errors, []);
 });
+
+/* camera lenses (docs/decisions.md section 4): Chromium's fake camera is one unnamed device, so the camera keeps
+   the plain back/front pair; a faked device list stands in for an iPhone's four cameras */
+async function camPage(t, init, arg) {
+  const cam = await pw.chromium.launch({ args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"] });
+  t.after(() => cam.close());
+  const ctx = await cam.newContext({ viewport: { width: 390, height: 844 }, locale: "zh-CN", reducedMotion: "reduce", serviceWorkers: "block", permissions: ["camera"] });
+  if (init) await ctx.addInitScript(init, arg);
+  const p = await ctx.newPage();
+  const errors = [];
+  p.on("pageerror", (e) => errors.push(e.message));
+  p.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
+  const open = async () => {
+    await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+    await p.waitForFunction(() => document.getElementById("savestate").textContent !== "启动中…", null, { timeout: 8000 });
+    await p.locator("#home .app", { has: p.locator(".label", { hasText: /^点阵相机$/ }) }).click();
+  };
+  const tag = (text) => p.waitForFunction((text) => { const el = document.getElementById("cam-live-tag"); return !el.hidden && el.textContent === text; }, text, { timeout: 10000 });
+  const select = async (text) => { await p.keyboard.press("Shift"); await tag(text); await p.waitForFunction(() => document.getElementById("cam-shut").hidden); };
+  return { p, errors, open, tag, select };
+}
+
+/* stands in for Safari: enumerateDevices lists the cameras, getUserMedia records what was opened and gives the track the
+   capabilities of the camera asked for (Chromium's fake device has no zoom or focus distance) */
+function fakeCameras({ list, caps }) {
+  const md = navigator.mediaDevices, real = md.getUserMedia.bind(md);
+  window.__opened = [];
+  md.enumerateDevices = async () => list.map(([deviceId, label]) => ({ deviceId, groupId: deviceId, kind: "videoinput", label }));
+  md.getUserMedia = async (c) => {
+    const id = (c.video.deviceId && c.video.deviceId.exact) || c.video.facingMode;
+    window.__opened.push(id);
+    const s = await real({ video: { width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
+    if (caps && caps[id]) s.getVideoTracks()[0].getCapabilities = () => caps[id];
+    return s;
+  };
+}
+const IPHONE = [["front", "Front Camera"], ["dualwide", "Back Dual Wide Camera"], ["ultrawide", "Back Ultra Wide Camera"], ["wide", "Back Camera"]];
+
+test("camera: one unnamed camera keeps the back/front pair, SELECT flips between them", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors, open, tag, select } = await camPage(t);
+  await open();
+  await p.waitForSelector("#cam-load:not([hidden])"); await p.click("#roll-go");
+  await tag("LIVE 后置");
+  await select("LIVE 前置");
+  await select("LIVE 后置");
+  await p.keyboard.press("Enter"); await p.waitForSelector("#cam-menu:not([hidden])");
+  assert.match(await p.textContent("#menu-list"), /换镜头后置/);
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("camera: an iPhone's cameras, SELECT goes 13mm, 26mm, front; the virtual camera is never opened; the lens is remembered", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors, open, tag, select } = await camPage(t, fakeCameras, { list: IPHONE });
+  const last = () => p.evaluate(() => window.__opened[window.__opened.length - 1]);
+  await open();
+  await p.waitForSelector("#cam-load:not([hidden])"); await p.click("#roll-go");
+  await tag("LIVE 26mm"); assert.equal(await last(), "wide", "the main camera by default");
+  await select("LIVE 前置"); assert.equal(await last(), "front");
+  await select("LIVE 13mm"); assert.equal(await last(), "ultrawide");
+  await select("LIVE 26mm"); assert.equal(await last(), "wide");
+  await select("LIVE 前置"); await select("LIVE 13mm");
+  await p.click("#cam-shutter"); await p.waitForFunction(() => document.getElementById("cam-shut").hidden);
+  assert.ok(!(await p.evaluate(() => window.__opened)).includes("dualwide"), "Back Dual Wide is never used");
+  /* the frame records its lens, the film doc the lens to start with next time */
+  const doc = (path) => p.evaluate((path) => new Promise((resolve, reject) => {
+    const req = indexedDB.open("lopda");
+    req.onerror = () => reject(req.error);
+    req.onsuccess = () => { const get = req.result.transaction("docs").objectStore("docs").get(path);
+      get.onsuccess = () => { req.result.close(); resolve(get.result ? get.result.data : null); }; get.onerror = () => reject(get.error); };
+  }), path);
+  await p.waitForTimeout(1200);
+  const film = await doc("data/users/local/film");
+  assert.equal(film.lens, "uw");
+  assert.equal((await doc("data/users/local/frames/items/" + film.roll + "-01")).lens, "uw");
+  await open();
+  await tag("LIVE 13mm"); assert.equal(await last(), "ultrawide", "a reopened camera starts on the last lens");
+  await p.keyboard.press("Enter"); await p.waitForSelector("#cam-menu:not([hidden])");
+  assert.match(await p.textContent("#menu-list"), /换镜头13mm/);
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("camera: names in another language, capabilities only on the tracks: each camera is opened once to read them", { skip, timeout: 60000 }, async (t) => {
+  const list = [["front", "Avant"], ["dualwide", "Arriere double grand angle"], ["ultrawide", "Arriere ultra grand angle"], ["wide", "Arriere"]];
+  const caps = { front: { facingMode: ["user"] }, dualwide: { facingMode: ["environment"], zoom: { min: 0.5, max: 10 }, focusDistance: { min: 0.02 } },
+    ultrawide: { facingMode: ["environment"], zoom: { min: 1, max: 5 }, focusDistance: { min: 0.02 } }, wide: { facingMode: ["environment"], zoom: { min: 1, max: 5 }, focusDistance: { min: 0.15 } } };
+  const { p, errors, open, tag, select } = await camPage(t, fakeCameras, { list, caps });
+  await open();
+  await p.waitForSelector("#cam-load:not([hidden])"); await p.click("#roll-go");
+  await tag("LIVE 26mm");
+  assert.deepEqual(await p.evaluate(() => window.__opened), ["front", "dualwide", "ultrawide", "wide", "wide"]);
+  await select("LIVE 前置"); await select("LIVE 13mm");
+  assert.equal(await p.evaluate(() => window.__opened.at(-1)), "ultrawide");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
