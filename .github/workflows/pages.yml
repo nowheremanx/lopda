@@ -130,11 +130,17 @@ jobs:
             echo '<!-- lopda-preview -->'
             echo '**Preview / 预览** (GitHub Pages takes about a minute to update / 页面约需一分钟更新)'
             echo
-            if [ "$RUNTIME" = true ]; then
+            # Every preview carries the whole site, so the runtime link always works. It is the one to use on a
+            # phone: the dev harness is a desktop tool (small buttons, a log). For an app-only PR it says where to
+            # find the changed apps: the preview's store lists this PR's registry.
+            if [ "$RUNTIME" = true ] || [ -z "$APPS" ]; then
               echo "- runtime: $SITE/pr/$PR/runtime/"
+            else
+              NAMES=$(echo $APPS | sed 's/ /, /g'); if [ $(echo $APPS | wc -w) -gt 3 ]; then NAMES="any app / 任意 app"; fi
+              echo "- runtime (on a phone; install from the store / 在商店里安装: $NAMES): $SITE/pr/$PR/runtime/"
             fi
             for id in $APPS; do
-              echo "- $id: $SITE/pr/$PR/sdk/dev.html?app=registry/apps/$id"
+              echo "- $id (dev harness, desktop / 开发台，电脑上用): $SITE/pr/$PR/sdk/dev.html?app=registry/apps/$id"
             done
             echo
             echo "The preview shares its origin with the real site. Its runtime/ keeps its data in its own IndexedDB (lopda-pr-$PR), separate from the real handheld at the site root. The dev harness keeps PAD saves in localStorage under lopda-dev:<app id>; that is shared by all previews on this origin but not used by the real handheld."

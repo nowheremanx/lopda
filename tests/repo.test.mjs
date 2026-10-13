@@ -166,6 +166,14 @@ test("build-index refuses an app that fails the checker", (t) => {
   assert.ok(tool("check-app.mjs", join(ROOT, "registry", "apps", APP_IDS[0])).code === 0, "the real app is untouched");
 });
 
+test("every preview comment links the runtime, also for a PR that only changes an app", () => {
+  const y = read(".github/workflows/pages.yml");
+  const step = y.slice(y.indexOf("Comment preview links on the PR"));
+  const links = [...step.matchAll(/echo "- runtime[^"]*: \$SITE\/pr\/\$PR\/runtime\/"/g)];
+  assert.equal(links.length, 2, "one runtime line for runtime PRs, one naming the apps to install");
+  assert.ok(/if \[ "\$RUNTIME" = true \] \|\| \[ -z "\$APPS" \]; then[\s\S]*else[\s\S]*fi/.test(step), "no branch without a runtime link");
+});
+
 test("the Pages workflow publishes the repo without tests, dependencies or CI files", () => {
   const y = read(".github/workflows/pages.yml");
   for (const ex of ["/tests", "/node_modules", "/_to_delete", "/.github"]) assert.ok(y.includes("--exclude=" + ex), ex);
