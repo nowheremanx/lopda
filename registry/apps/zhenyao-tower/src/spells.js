@@ -28,9 +28,9 @@ var ANIM = (function () {
     var H = B.HOME, pic = from ? new Uint8Array(from) : null;
     Object.assign(S.cam, { yaw: H.yaw + 2.6, pitch: -0.8, dist: 19, y: 2.5 });
     S.hud = false;
-    T.sfx("hit");
-    T.after(0.3, function () { T.sfx("tick"); });
-    T.after(0.55, function () { T.sfx("tick"); });
+    T.sfx("encounter");
+    T.after(0.3, function () { T.sfx("encTick"); });
+    T.after(0.55, function () { T.sfx("encTick"); });
     /* the last picture twists, breaks into blocks, flashes twice and goes dark; then the arena fades in */
     FX.layer({ life: 1.6, always: true, post: function (px, t) {
       if (t < 0.85) {
@@ -56,7 +56,7 @@ var ANIM = (function () {
       FX.emit(14, function () { var a = Math.random() * PI * 2; return { x: Math.cos(a) * 2.6, y: 0.2, z: 3.6 + Math.sin(a) * 1.4, vy: 0.6 + Math.random(), vx: Math.cos(a) * 0.3, life: 1.6, tone: 2, size: 0.12 }; });
     });
     await wait(1.7);
-    T.sfx("lose");
+    T.sfx("roar");
     T.shake(3, 0.6);
     FX.layer({ life: 0.6, post: function (px, t) { FX.wave(px, 3 * (1 - t / 0.6), 0.3, t * 30); } });
     await wait(0.8);
@@ -69,7 +69,7 @@ var ANIM = (function () {
   /* a hit on the weakness: the picture stops, flashes negative, and lines burst from the target */
   async function weak(S, i) {
     S.frozen = 0.3;
-    T.sfx("coin");
+    T.sfx("weak");
     T.shake(3, 0.35);
     FX.layer({ life: 0.32, always: true, post: function (px, t) {
       var q = R.project(B.foeTop(i));
@@ -89,7 +89,7 @@ var ANIM = (function () {
       var p = B.foeTop(i, 0.5);
       FX.burst(p[0], p[1], p[2], f.boss ? 90 : 26, f.boss ? 4 : 2.4, { tone: 3, life: 0.8, drag: 2 });
       FX.burst(p[0], p[1], p[2], f.boss ? 40 : 12, 1.4, { tone: 1, life: 0.9, drag: 1 });
-      T.sfx("tick");
+      T.sfx(f.boss ? "bossDown" : "down");
     });
   }
 
@@ -98,7 +98,7 @@ var ANIM = (function () {
     var h = S.hero, f = S.foes[i], x0 = h.x, z0 = h.z, H = B.HOME;
     B.camTo({ x: f.x * 0.5, z: 0.4, dist: 6.6, yaw: H.yaw + 0.2 }, 0.35);
     h.art = ART.heroUp1;
-    T.sfx("move");
+    T.sfx("slash");
     await T.tween(h, { x: f.x - 0.25, z: f.z - 1.2 }, 0.28, "in");
     var c = B.foeTop(i, 0.5);
     FX.layer({ life: 0.22, dots: function (R, t) {
@@ -118,7 +118,7 @@ var ANIM = (function () {
     title(S, BATTLE.ITEMS[id].name, 1.4);
     B.camTo({ x: h.x, y: 0.9, z: h.z + 0.5, yaw: B.HOME.yaw + PI * 0.85, dist: 4.6, pitch: -0.12 }, 0.5);
     await wait(0.4);
-    T.sfx("coin");
+    T.sfx(mana ? "ether" : "pill");
     /* pills: light rises out of the ground; mana: motes are drawn in from all around */
     FX.emit(36, function (k, r) {
       var a = k / 36 * PI * 2, rad = mana ? 1.8 : 0.5;
@@ -136,7 +136,7 @@ var ANIM = (function () {
   async function defend(S, ev) {
     var h = S.hero;
     title(S, "防御", 1.0);
-    T.sfx("tap");
+    T.sfx("guard");
     FX.emit(24, function (k) { var a = k / 24 * PI * 2; return { x: h.x, y: 0.5, z: h.z, vx: Math.cos(a) * 2.2, vz: Math.sin(a) * 1.4, life: 0.4, tone: 3, drag: 4 }; });
     await wait(0.3);
     await B.show(ev);
@@ -201,13 +201,13 @@ var ANIM = (function () {
       },
       lights: function () { return [{ x: hub[0], y: hub[1], z: hub[2] - 0.3, radius: 3.2, power: 0.9 }]; }
     });
-    T.sfx("ok");
+    T.sfx("swordCast");
     await wait(1.0);
     B.look(B.foeTop(i, 0.4), H.yaw + 0.75, -0.16, 5.6, 0.55);
     for (k = 0; k < n; k++) {
       swords[k].from = swords[k].pos;
       swords[k].fly = L.layer.t;   /* launch now, on the layer's clock */
-      if (k % 3 === 0) T.sfx("tick");
+      if (k % 3 === 0) T.sfx("swordFly");
       await wait(0.07);
     }
     await wait(0.3);
@@ -249,7 +249,7 @@ var ANIM = (function () {
       },
       post: function (px, t) { if (S.ripple) FX.wave(px, S.ripple, 0.22, t * 14); }
     });
-    T.sfx("ok");
+    T.sfx("tideCast");
     await wait(0.4);
     S.ripple = 0;
     /* the wave rises and runs forward */
@@ -258,6 +258,7 @@ var ANIM = (function () {
       FX.emit(6, function () { return { x: -6 + Math.random() * 12, y: crest * 0.95, z: front + 0.3, vx: (Math.random() - 0.5), vy: 1.5 + Math.random() * 2, vz: 1.5, grav: 6, life: 0.6, tone: 3 }; });
     });
     var run = { f: front, c: 0 };
+    T.sfx("tideWave");
     var go = T.tween(run, { f: 7.5 }, 1.5, "linear");
     T.tween(run, { c: 3.0 }, 0.5, "out");
     var tick = T.every(1 / 60, function () {
@@ -268,7 +269,7 @@ var ANIM = (function () {
     tick(); spray();
     crest = 0;
     /* frost: ice shards on every target, the picture whitens for a moment */
-    T.sfx("tick");
+    T.sfx("tideFrost");
     targets(ev).forEach(function (i) {
       var c = B.foeTop(i, 0.3);
       FX.burst(c[0], c[1], c[2], 18, 1.8, { tone: 3, life: 0.7, drag: 2.5 });
@@ -299,7 +300,7 @@ var ANIM = (function () {
     /* a low camera drifting across from the right, so the hero does not stand in the way */
     B.camTo({ x: 0.3, y: 1.0, z: 1.8, pitch: -0.08, dist: 7.6 }, 0.5);
     T.tween(S.cam, { yaw: H.yaw + 0.75 }, 2.8, "inOut");
-    T.sfx("ok");
+    T.sfx("vineCast");
     /* the ground cracks first */
     tg.forEach(function (i) {
       var f = S.foes[i];
@@ -328,7 +329,7 @@ var ANIM = (function () {
     await wait(0.3);
     await T.tween(grow, { h: 1 }, 0.7, "out");
     /* leaves fall while the vines tighten */
-    T.sfx("hit");
+    T.sfx("vineSqueeze");
     tg.forEach(function (i) {
       var c = B.foeTop(i, 0.8);
       FX.burst(c[0], c[1], c[2], 12, 1.5, { tone: 2, life: 1.0, grav: 1.5, drag: 1.5, size: 0.06 });
@@ -378,7 +379,7 @@ var ANIM = (function () {
     } });
     B.look(start, H.yaw - 0.5, -0.1, 3.4, 0.4);
     await wait(0.4);
-    T.sfx("ok");
+    T.sfx("charmCast");
     var top = mix(start, end, 0.5); top[1] += 1.4;
     var fly = T.tween(charm, { u: 1 }, 0.85, "inOut");
     var follow = T.every(1 / 60, function () {
@@ -391,7 +392,7 @@ var ANIM = (function () {
     follow();
     await wait(0.25);
     /* ignition */
-    T.sfx("hit");
+    T.sfx("charmFire");
     T.flash(0.07);
     T.shake(3, 0.4);
     B.camTo({ dist: 6, pitch: -0.12 }, 0.5, "out");
@@ -426,7 +427,7 @@ var ANIM = (function () {
        seal is lit normally and the shadow below needs a ground that is not black */
     T.tween(S, { sky: 0.6, light: 0.75 }, 0.5);
     B.camTo({ x: c[0], y: 3.2, z: c[2] - 1, pitch: 0.32, dist: 9.5, yaw: H.yaw + 0.25 }, 0.6);
-    T.sfx("ok");
+    T.sfx("sealCast");
     var L = FX.layer({
       draw: function (R) {
         /* lo-3d `shadow`: a real ground shadow, bigger the lower the seal comes (it was a squashed ball) */
@@ -444,7 +445,7 @@ var ANIM = (function () {
     B.camTo({ x: c[0], y: 1.2, z: 0.2, pitch: -0.3, dist: 9.5, yaw: H.yaw - 0.15 }, 0.25, "out");
     await wait(0.15);
     await T.tween(seal, { y: 0.55 }, 0.18, "in");
-    T.sfx("hit");
+    T.sfx("sealSlam");
     T.flash(0.05);
     T.shake(5, 0.5);
     seal.punch = 1.14;
@@ -457,7 +458,7 @@ var ANIM = (function () {
       var a = k / 56 * PI * 2;
       return { x: c[0] + Math.cos(a) * 1.6, y: 0.06, z: c[2] + Math.sin(a) * 1.6, vx: Math.cos(a) * 6, vz: Math.sin(a) * 6, drag: 2.2, life: 0.9, tone: 2, size: 0.08 };
     });
-    await B.show(ev);
+    await B.show(ev, null, true);
     await wait(0.4);
     await T.tween(seal, { y: -1.5 }, 0.5, "in");
     L();
@@ -501,7 +502,8 @@ var ANIM = (function () {
     /* five orbs, one per element */
     for (var k = 0; k < 5; k++) {
       (function (k) { orbs.push({ k: k, p: hp.slice() }); })(k);
-      T.sfx("tick");
+      /* one note of the five for each element's orb */
+      T.sfx("orb" + k);
       await wait(0.2);
     }
     var orbit = T.every(1 / 60, function () {
@@ -522,7 +524,7 @@ var ANIM = (function () {
     orbit();
     orbs.length = 0;
     S.rays = [c[0], 10, c[2]];
-    T.sfx("ok");
+    T.sfx("pagodaCast");
     T.flash(0.06);
     T.tween(S, { sky: 0.6 }, 0.6);
     /* the phantom tower comes down slowly while the camera circles it */
@@ -542,7 +544,7 @@ var ANIM = (function () {
     /* the slam */
     await T.tween(tw, { y: 0 }, 0.2, "in");
     motes();
-    T.sfx("hit");
+    T.sfx("pagodaSlam");
     T.flash(0.12);
     T.shake(6, 0.7);
     S.ripple = 4; S.punch = 1.25;
@@ -554,7 +556,7 @@ var ANIM = (function () {
         return { x: c[0] + Math.cos(a) * 2, y: 0.1, z: c[2] + Math.sin(a) * 2, vx: Math.cos(a) * ring[1], vz: Math.sin(a) * ring[1], drag: 1.5, life: 1.1, tone: ring[0], size: 0.1 };
       });
     });
-    await B.show(ev);
+    await B.show(ev, null, true);
     /* it dissolves into light and rises away */
     tw.rise = 1;
     T.tween(tw, { y: 9 }, 1.3, "in");
@@ -596,6 +598,7 @@ var ANIM = (function () {
   FOE.lash = async function (S, i, r) {
     var p = B.heroAt(0.6);
     await lunge(S, i, async function () {
+      T.sfx("lash");
       FX.layer({ life: 0.2, dots: function (R, t) {
         var k = clamp01(t / 0.08);
         for (var s = 0; s < 3; s++) R.streak([p[0] + 0.5, p[1] + 0.5 - s * 0.2, p[2] - 0.2], mix([p[0] + 0.5, p[1] + 0.5 - s * 0.2, p[2] - 0.2], [p[0] - 0.5, p[1] - 0.3 - s * 0.2, p[2] - 0.2], k), 0);
@@ -608,6 +611,7 @@ var ANIM = (function () {
   FOE.ember = async function (S, i, r) {
     var a = B.foeTop(i, 0.6), b = B.heroAt(0.6), top = mix(a, b, 0.5), ball = { u: 0, p: a, hist: [] };
     top[1] += 1.2;
+    T.sfx("ember");
     var L = FX.layer({
       draw: function (R, t) {
         /* lo-3d `ribbon` (+ tone): the fire leaves a streak behind it instead of sparks that hang in the air */
@@ -630,6 +634,7 @@ var ANIM = (function () {
   FOE.rock = async function (S, i, r) {
     var f = S.foes[i], a = B.foeTop(i, 1.0), b = B.heroAt(0.4), top = mix(a, b, 0.5), rk = { u: 0, p: a };
     top[1] += 3.5;
+    T.sfx("rock");
     await T.tween(f, { oy: 0.3 }, 0.2, "out");
     var L = FX.layer({ draw: function (R, t) { R.draw(FX.BALL, FX.at(rk.p, 0.32, t * 6), { albedo: 0.7 }); } });
     var fly = T.every(1 / 60, function () { rk.p = bez(a, top, b, rk.u); });
@@ -643,6 +648,7 @@ var ANIM = (function () {
   /* a spray of cold water, and the picture wobbles */
   FOE.splash = async function (S, i, r) {
     var a = B.foeTop(i, 0.6), b = B.heroAt(0.6);
+    T.sfx("splash");
     for (var k = 0; k < 3; k++) {
       FX.emit(10, function () {
         var t = 0.5, v = [(b[0] - a[0]) / t, (b[1] - a[1]) / t + 2, (b[2] - a[2]) / t];
@@ -660,6 +666,7 @@ var ANIM = (function () {
     var p = B.foeTop(i, 0.75), H = B.HOME;
     B.look(p, H.yaw + 0.3, -0.05, 6.5, 0.6);
     T.tween(S, { sky: 0.5, light: 0.6 }, 0.6);
+    T.sfx("gather");
     var k = T.every(0.05, function () {
       FX.emit(3, function () {
         var a = Math.random() * PI * 2, d = 3 + Math.random() * 2;
@@ -682,7 +689,7 @@ var ANIM = (function () {
     T.tween(S, { bars: 1 }, 0.25);
     B.look(mix(a, b, 0.5), H.yaw - 1.4, -0.1, 7, 0.5);
     await wait(0.5);
-    T.sfx("lose");
+    T.sfx("tidal");
     S.ripple = 5;
     var L = FX.layer({ post: function (px, t) { FX.wave(px, S.ripple, 0.25, t * 30); } });
     var beam = T.every(1 / 60, function () {
@@ -715,7 +722,7 @@ var ANIM = (function () {
   /* ---------- the end ---------- */
   async function victory(S, rw) {
     var h = S.hero, H = B.HOME;
-    T.sfx("win");
+    Snd.victory();
     cast(S, true);
     S.cam.yaw = H.yaw;
     B.look([h.x, 0.8, h.z], H.yaw + PI * 0.92, -0.12, 4.4, 1.4, "inOut");
@@ -726,10 +733,14 @@ var ANIM = (function () {
       u.learned.forEach(function (id) { pages.push("学会了" + BATTLE.SPELLS[id].name + "！"); });
     });
     S.hud = false;
-    await game.say(pages);
+    /* a level reached and a spell learned each sound when their page comes up */
+    var sounds = {};
+    pages.forEach(function (p, k) { if (/^升到/.test(p)) sounds[k] = "levelUp"; else if (/^学会了/.test(p)) sounds[k] = "learn"; });
+    await game.say(pages, { sounds: sounds });
   }
   async function defeat(S) {
-    T.sfx("lose");
+    Snd.music(null);
+    T.sfx("defeat");
     S.hud = false;
     T.tween(S, { sky: 0.3, light: 0.3 }, 1.2);
     FX.layer({ always: true, post: function (px, t) { FX.cover(px, 0, Math.min(0.6, t / 2)); } });
