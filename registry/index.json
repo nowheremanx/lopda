@@ -263,7 +263,7 @@
         "................",
         "................"
       ],
-      "version": "2.2.0",
+      "version": "2.3.0",
       "description": "30 秒砸地鼠，戴头盔的要砸两下。",
       "i18n": {
         "en": {
@@ -274,8 +274,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/whack-a-mole/index.html",
-      "sha256": "f8b86e02ac34d49e6dd531034e5a401de47951ef7062cc0f4bb6747c191077ab",
-      "bytes": 12798
+      "sha256": "a1f16555ee761c6d05c338cd02ec720be696652c6e850088a994fc03ada37c6f",
+      "bytes": 12816
     },
     {
       "spec": "lopda/1",
