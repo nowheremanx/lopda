@@ -209,7 +209,7 @@ game.scene("play", {
       g.window(8, y, 144, h);
       cur.items.forEach(function (c, k) {
         var row = choiceRow(k), selected = k === cur.idx;
-        if (selected) g.rect(row.x, row.y, row.w, row.h, g.INK);
+        if (selected) g.rect(row.x + 2, row.y, row.w - 4, row.h, g.INK);
         g.text(T(c.text), 12, row.y, { color: selected ? g.PAPER : g.INK });
       });
     } else {
@@ -261,7 +261,7 @@ game.scene("title", {
     g.window(40, 64, 80, items.length * g.lineHeight + 8);
     items.forEach(function (s, k) {
       var row = titleRow(k), selected = k === menuIdx;
-      if (selected) g.rect(row.x, row.y, row.w, row.h, g.INK);
+      if (selected) g.rect(row.x + 2, row.y, row.w - 4, row.h, g.INK);
       g.text(s, 54, row.y, { color: selected ? g.PAPER : g.INK });
     });
     g.rect(0, 112, 160, 32, g.PAPER);
