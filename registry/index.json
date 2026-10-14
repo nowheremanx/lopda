@@ -7,7 +7,6 @@
       "id": "calculator",
       "name": "计算器",
       "glyph": "算",
-      "buttons": true,
       "icon": [
         "................",
         "...0000000000...",
@@ -26,7 +25,7 @@
         "...0000000000...",
         "................"
       ],
-      "version": "1.0.0",
+      "version": "1.1.0",
       "description": "八位数商务计算器，连续运算、百分比和记忆键。",
       "i18n": {
         "en": {
@@ -37,7 +36,7 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/calculator/index.html",
-      "sha256": "2773a3a30c0b83053972e58c7d0123c6974bbf10617992c4acf649d4276a27bd",
+      "sha256": "a62418629dabce24745cf77d0faf0a9d7224cbfbc1053c2c9c158673054b0691",
       "bytes": 14545
     },
     {

@@ -21,7 +21,7 @@
     "...0000000000...",
     "................"
   ],
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "八位数商务计算器，连续运算、百分比和记忆键。",
   "i18n": {
     "en": {
@@ -31,6 +31,5 @@
   },
   "author": "Haowei Wu",
   "license": "MIT",
-  "permissions": [],
-  "buttons": true
+  "permissions": []
 }
