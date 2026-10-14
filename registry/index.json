@@ -100,7 +100,7 @@
         "................",
         "................"
       ],
-      "version": "1.0.2",
+      "version": "1.1.0",
       "description": "视觉小说。邮局关门前，一封没有地址的信要送到山上。三个结局。",
       "i18n": {
         "zh": {
@@ -115,8 +115,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/last-letter/index.html",
-      "sha256": "bd5433b9226b37c4f927c3f103e38248e16cfb9d708ceb541c94e9bd22c06762",
-      "bytes": 54357
+      "sha256": "96ba6089b7ac7038d4f4258a1b05b30f3e3deefea533474ea1cde1c64438706b",
+      "bytes": 56143
     },
     {
       "spec": "lopda/1",
