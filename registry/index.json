@@ -183,7 +183,7 @@
         "..2..........2..",
         "................"
       ],
-      "version": "1.1.0",
+      "version": "1.2.0",
       "description": "视觉小说。末班车后的雨夜小站，一张十年前的旧车票。三个结局。",
       "i18n": {
         "zh": {
@@ -198,8 +198,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/rain-station/index.html",
-      "sha256": "08abfe714eb97b9b3ad5a91ea3ad2e7151881f5efdb742e161e2bd0806fbe380",
-      "bytes": 55100
+      "sha256": "ea690dcc65110c1c63ff1df2b777076490a2c433a6803a814230f1761fb451e3",
+      "bytes": 56845
     },
     {
       "spec": "lopda/1",
