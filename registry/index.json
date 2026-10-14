@@ -1,6 +1,6 @@
 {
   "spec": "lopda/1",
-  "generated": "2026-10-13",
+  "generated": "2026-10-14",
   "apps": [
     {
       "spec": "lopda/1",
@@ -302,7 +302,7 @@
         "................",
         "................"
       ],
-      "version": "1.3.1",
+      "version": "1.4.0",
       "description": "lo-game.js 示例：小院和老伯的屋子，摸猫、找钥匙。方向键走，A 互动。",
       "i18n": {
         "en": {
@@ -313,8 +313,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/xiaoyuan/index.html",
-      "sha256": "349c896bb748c9ad5c47127c5de702473649348beb1638b05cd562ea3c090782",
-      "bytes": 55629
+      "sha256": "f9dd7972f6706910afcd45be22a022e4fce3d7cc20ef18c786e50ae729ba3dbd",
+      "bytes": 63105
     },
     {
       "spec": "lopda/1",
