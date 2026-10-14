@@ -8,18 +8,18 @@
   body { display: flex; flex-direction: column; }
   header { padding: 8px 12px 6px; border-bottom: 2px solid #1f2a14; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
   header b { font-size: 17px; }
-  #now { color: #4a5a32; font-size: 12px; text-align: right; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-  #list { flex: 1; overflow-y: auto; padding: 2px 0 8px; -webkit-overflow-scrolling: touch; touch-action: pan-y; }
-  h2 { font-size: 12px; font-weight: normal; color: #4a5a32; margin: 10px 12px 2px; letter-spacing: 1px; }
-  .row { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 12px; font-size: 15px; cursor: pointer; touch-action: manipulation; }
-  .row small { color: #4a5a32; font-size: 12px; white-space: nowrap; }
+  #now { color: #4a5a32; font-size: 14px; text-align: right; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  #list { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 0 8px; -webkit-overflow-scrolling: touch; touch-action: pan-y; }
+  h2 { font-size: 14px; font-weight: normal; color: #4a5a32; margin: 10px 12px 2px; letter-spacing: 1px; }
+  .row { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 0 12px; min-height: 48px; font-size: 15px; cursor: pointer; touch-action: manipulation; }
+  .row small { color: #4a5a32; font-size: 14px; white-space: nowrap; }
   .row.on small { color: #1f2a14; }
+  .row.off { color: #4a5a32; }
   .row.sel { background: #1f2a14; color: #a3ad7e; }
-  .row.sel small { color: #7d8a58; }
-  .row.off { color: #7d8a58; }
+  .row.sel small { color: #a3ad7e; }
   .mark { display: inline-block; width: 1.2em; }
-  #code { border-top: 2px solid #1f2a14; padding: 8px 12px; min-height: 58px; font-size: 12px; line-height: 1.45; color: #1f2a14; background: #7d8a58; white-space: pre-wrap; word-break: break-all; }
-  #keys { padding: 4px 12px 8px; font-size: 11px; color: #4a5a32; background: #7d8a58; }
+  #code { border-top: 2px solid #1f2a14; padding: 8px 12px; min-height: 58px; font-size: 14px; line-height: 1.45; color: #1f2a14; background: #7d8a58; white-space: pre-wrap; word-break: break-all; }
+  #keys { padding: 4px 12px 8px; font-size: 14px; color: #1f2a14; background: #7d8a58; }
 </style>
 </head>
 <body>
@@ -33,11 +33,13 @@
 var ZH = PAD.lang !== "en";
 var T = ZH ? {
   title: "声音样本", music: "乐曲", amb: "环境声", named: "具名音效", custom: "自定义音效",
-  keys: "↑↓ 选　A 播放/停止　B 全部停止　SELECT 下一组　←→ 环境声强度",
+  keys: "↑↓ 选  A 播放  B 全停  SELECT 换组",
+  keysAmb: "↑↓ 选  A 播放  ←→ 强度  B 全停",
   idle: "安静", newer: "需要新版系统", playing: "播放中", once: "单次"
 } : {
   title: "Sounds", music: "Music", amb: "Ambience", named: "Named sounds", custom: "Custom sounds",
-  keys: "Up/Down pick  A play/stop  B stop all  SELECT next group  Left/Right ambience level",
+  keys: "↑↓ pick  A play  B stop  SELECT group",
+  keysAmb: "↑↓ pick  A play  ←→ level  B stop",
   idle: "quiet", newer: "needs a newer system", playing: "playing", once: "once"
 };
 
@@ -115,12 +117,17 @@ function draw() {
       '<span><span class="mark">' + (on ? "&gt;" : "") + "</span>" + r.label + "</span><small>" + right + "</small></div>";
   });
   list.innerHTML = h;
-  var el = list.querySelector(".sel"); if (el && el.scrollIntoView) el.scrollIntoView({ block: "nearest" });
   document.getElementById("code").textContent = code(rows[sel]);
+  document.getElementById("keys").textContent = rows[sel].kind === "amb" && usable(rows[sel]) ? T.keysAmb : T.keys;
   var now = [];
   if (song) now.push(rows.filter(function (r) { return r.id === song; })[0].label);
   if (amb) now.push(rows.filter(function (r) { return r.id === amb; })[0].label + " " + lv(amb).toFixed(1));
   document.getElementById("now").textContent = now.length ? T.playing + ": " + now.join(" / ") : T.idle;
+  var el = list.querySelector(".sel");
+  if (el && el.scrollIntoView) {
+    el.scrollIntoView({ block: "nearest" });
+    if (el.getBoundingClientRect().bottom > list.getBoundingClientRect().bottom) list.scrollTop += 1;
+  }
 }
 
 function talk() {
@@ -176,7 +183,6 @@ list.addEventListener("click", function (e) {
 
 document.title = T.title;
 document.getElementById("title").textContent = T.title;
-document.getElementById("keys").textContent = T.keys;
 draw();
 </script>
 </body>
