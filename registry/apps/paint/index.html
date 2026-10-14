@@ -10,18 +10,18 @@
 html,body{margin:0;height:100%;overflow:hidden;background:#a3ad7e;font-family:monospace;color:#1f2a14;touch-action:none;user-select:none;-webkit-user-select:none}
 #app{display:flex;flex-direction:column;height:100%;box-sizing:border-box;padding:8px 10px;gap:8px}
 #bar{display:flex;justify-content:space-between;align-items:baseline;font-size:15px;font-weight:bold}
-#state{font-size:12px;font-weight:normal}
+#state{font-size:14px;font-weight:normal}
 #stage{flex:1;min-height:0;display:flex;align-items:center;justify-content:center}
 /* the script sets the pixel size (a square as large as the stage allows); the fallback keeps it visible */
 #cv{width:240px;height:240px;image-rendering:pixelated;image-rendering:crisp-edges;border:3px solid #1f2a14;box-shadow:4px 4px 0 #1f2a14;background:#a3ad7e;touch-action:none;display:block}
 .tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:center}
-button{font-family:monospace;font-size:14px;font-weight:bold;color:#a3ad7e;background:#1f2a14;border:2px solid #1f2a14;padding:8px 12px;cursor:pointer;box-shadow:3px 3px 0 #4a5a32}
+button{font-family:monospace;font-size:14px;font-weight:bold;min-height:44px;color:#a3ad7e;background:#1f2a14;border:2px solid #1f2a14;padding:8px 12px;cursor:pointer;box-shadow:3px 3px 0 #4a5a32}
 button:active{transform:translate(2px,2px);box-shadow:1px 1px 0 #4a5a32}
 button.ghost{background:transparent;color:#1f2a14;box-shadow:none}
-button.sw{width:34px;height:34px;padding:0;box-shadow:none}
+button.sw{width:44px;height:44px;padding:0;box-shadow:none}
 button.sw[aria-checked="true"]{outline:3px solid #1f2a14;outline-offset:2px}
 #sw0{background:#1f2a14}#sw1{background:#4a5a32}#sw2{background:#7d8a58}#sw3{background:#a3ad7e}
-#msg{min-height:16px;font-size:12px;text-align:center}
+#msg{min-height:16px;font-size:14px;text-align:center}
 .hide{display:none!important}
 </style>
 </head>
