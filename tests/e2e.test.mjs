@@ -414,6 +414,22 @@ test("calendar: English names", { skip, timeout: 30000 }, async (t) => {
   assert.deepEqual(notBlocked(c.errors), []);
 });
 
+test("calendar: HOME closes a date sheet and reopening returns to the month", { skip, timeout: 30000 }, async (t) => {
+  const c = await calPage(t);
+  await c.boot(); await c.open();
+  await c.p.click("#cal-info");
+  await c.p.waitForSelector("#cal-sheet:not([hidden])");
+  await c.p.click("#home-key");
+  await c.open();
+  assert.ok(await c.p.isVisible("#v-cal"));
+  assert.ok(await c.p.isHidden("#cal-sheet"));
+  const month = await c.p.textContent("#cal-ym");
+  await c.p.keyboard.press("z");
+  assert.equal(await c.p.textContent("#cal-ym"), month);
+  assert.ok(await c.p.isHidden("#cal-sheet"), "B on the first calendar screen leaves the screen unchanged");
+  assert.deepEqual(notBlocked(c.errors), []);
+});
+
 test("calendar: START goes to a date, Gregorian or lunar, by keys, keyboard digits or the on-screen pad", { skip, timeout: 60000 }, async (t) => {
   const c = await calPage(t);
   await c.boot(); await c.open();
@@ -480,6 +496,23 @@ const typeWord = async (p, w, want = w) => { await p.fill("#dict-q", w); await p
   const li = document.querySelector("#dict-list li.on"); return li && li.textContent.indexOf(want) >= 0; }, want, { timeout: 10000 }); };
 const entryText = (p) => p.textContent("#dict-sheet .dict-page");
 
+test("dictionary: HOME closes an entry and reopening resets to the word box", { skip, timeout: 30000 }, async (t) => {
+  const { p, errors } = await dictPage(t);
+  await typeWord(p, "apple");
+  await p.press("#dict-q", "Enter");
+  await p.waitForFunction(() => /苹果/.test(document.querySelector("#dict-sheet .dict-page")?.textContent || ""));
+  await p.click("#home-key");
+  await p.locator("#home .app", { hasText: "词典" }).click();
+  assert.ok(await p.isVisible("#v-dict"));
+  assert.ok(await p.isHidden("#dict-sheet"));
+  assert.equal(await p.inputValue("#dict-q"), "");
+  await p.keyboard.press("z");
+  assert.ok(await p.isVisible("#dict-list"), "B on the first dictionary screen keeps the app usable");
+  assert.ok(await p.isHidden("#dict-sheet"));
+  assert.equal(await p.inputValue("#dict-q"), "");
+  assert.deepEqual(errors, []);
+});
+
 test("dictionary: the built-in ECDICT, a word form, history and the word book", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await dictPage(t);
   await typeWord(p, "appl");
@@ -501,7 +534,7 @@ test("dictionary: the built-in ECDICT, a word form, history and the word book", 
   assert.deepEqual(lemma, [["run", "lemma"]]);
   await p.click('.gamepad [data-b="a"]');
   await p.fill("#dict-q", "");
-  await p.waitForFunction(() => /最近查过/.test(document.getElementById("dict-list").textContent));
+  await p.waitForFunction(() => /最近查过/.test(document.getElementById("dict-history").textContent));
   assert.match(await p.textContent("#dict-list"), /run[\s\S]*apple/);
   /* review: the word first, A shows the entry */
   await p.click("#dict-words-btn");
@@ -512,6 +545,105 @@ test("dictionary: the built-in ECDICT, a word form, history and the word book", 
   /* LP.dict.lookup for other programs */
   const r = await p.evaluate(() => LP.dict.lookup("Apple").then((r) => r.map((x) => [x.book, x.word, x.how])));
   assert.deepEqual(r[0], ["ecdict", "apple", "exact"]);
+  assert.deepEqual(errors, []);
+});
+
+test("dictionary: browse matches, restore the selected row, and page entries", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await dictPage(t);
+  await typeWord(p, "a");
+  await p.waitForFunction(() => document.querySelectorAll("#dict-list li:not(.label)").length > 12);
+  await p.evaluate(() => { const list = document.getElementById("dict-list"); list.style.flex = "0 0 140px"; list.style.height = "140px"; });
+  for (let i = 0; i < 10; i++) await p.keyboard.press("ArrowDown");
+  const savedScroll = await p.evaluate(() => document.getElementById("dict-list").scrollTop);
+  assert.ok(savedScroll > 0);
+  const picked = await p.textContent("#dict-list li.on");
+  await p.click("#dict-list li.on");
+  await p.waitForFunction(() => document.querySelector("#dict-sheet .dict-page")?.textContent.length > 0);
+  assert.equal(await p.evaluate(() => getComputedStyle(document.querySelector("#dict-sheet .dict-page")).overflowY), "auto");
+  await p.keyboard.press("ArrowRight");
+  await p.waitForFunction((before) => document.querySelector("#dict-sheet .sheet-title span")?.textContent !== before, picked);
+  const next = await p.textContent("#dict-sheet .sheet-title span");
+  await p.keyboard.press("z");
+  assert.equal(await p.textContent("#dict-list li.on"), next);
+  assert.equal(await p.evaluate(() => document.getElementById("dict-list").scrollTop), savedScroll);
+
+  await p.click("#dict-list li.on");
+  await p.waitForFunction(() => document.querySelector("#dict-sheet .dict-page")?.textContent.length > 0);
+  assert.equal(await p.locator("#dict-sheet .dict-copy, #dict-sheet .dict-note").count(), 0);
+  assert.equal(await p.evaluate(() => getComputedStyle(document.querySelector("#dict-sheet .dict-page")).userSelect), "none");
+  await p.keyboard.press("z");
+  await p.fill("#dict-q", "run");
+  await p.press("#dict-q", "Enter");
+  await p.waitForFunction(() => document.querySelector("#dict-sheet .sheet-title span")?.textContent === "run");
+  await p.waitForFunction(() => /跑/.test(document.querySelector("#dict-sheet .dict-page")?.textContent || ""));
+  await p.evaluate(() => {
+    const page = document.querySelector("#dict-sheet .dict-page");
+    page.style.flex = "0 0 240px";
+    page.dispatchEvent(new Event("scroll"));
+  });
+  const entryHeight = await p.evaluate(() => {
+    const page = document.querySelector("#dict-sheet .dict-page");
+    return { height: page.scrollHeight, visible: page.clientHeight, top: page.scrollTop };
+  });
+  assert.ok(entryHeight.height > entryHeight.visible, `the long entry has content to scroll: ${JSON.stringify(entryHeight)}`);
+  const paging = {
+    step: Math.max(1, Math.floor(entryHeight.visible / 24) - 1) * 24,
+    maxTop: Math.max(0, Math.floor((entryHeight.height - entryHeight.visible) / 24) * 24)
+  };
+  const pages = Math.max(1, Math.ceil(paging.maxTop / paging.step) + 1);
+  const target = Math.min(paging.maxTop, Math.round(entryHeight.top / 24) * 24 + paging.step);
+  await p.keyboard.press("ArrowDown");
+  await p.waitForFunction((top) => document.querySelector("#dict-sheet .dict-page")?.scrollTop === top, target);
+  assert.equal(await p.evaluate(() => document.querySelector("#dict-sheet .dict-page").scrollTop % 24), 0);
+  assert.equal(await p.textContent("#dict-sheet .sheet-title small"), `2/${pages}`);
+
+  await p.click('.gamepad [data-b="start"]');
+  await p.keyboard.press("z");
+  await p.click("#dict-words-btn");
+  await p.click("#dict-sheet .ck-a");
+  await p.waitForFunction(() => document.querySelector("#dict-sheet .dict-page .big")?.textContent === "run");
+  await p.keyboard.press("x");
+  await p.waitForFunction(() => /跑/.test(document.querySelector("#dict-sheet .dict-page")?.textContent || ""));
+  await p.evaluate(() => {
+    const page = document.querySelector("#dict-sheet .dict-page");
+    page.style.flex = "0 0 240px";
+    page.dispatchEvent(new Event("scroll"));
+  });
+  const reviewPages = await p.evaluate(() => {
+    const page = document.querySelector("#dict-sheet .dict-page");
+    const step = Math.max(1, Math.floor(page.clientHeight / 24) - 1) * 24;
+    const maxTop = Math.max(0, Math.floor((page.scrollHeight - page.clientHeight) / 24) * 24);
+    return Math.max(1, Math.ceil(maxTop / step) + 1);
+  });
+  assert.equal(await p.textContent("#dict-sheet .sheet-title small"), `1/1 1/${reviewPages}`);
+  await p.keyboard.press("ArrowDown");
+  await p.waitForFunction((count) => document.querySelector("#dict-sheet .sheet-title small")?.textContent === `1/1 2/${count}`, reviewPages);
+  assert.deepEqual(errors, []);
+});
+
+test("dictionary: disable books, persist settings, and explain when all are off", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await dictPage(t);
+  await p.click("#dict-books-btn");
+  assert.equal(await p.textContent("#dict-sheet .lcd-menu li .dict-book-state"), "启用");
+  await p.click('.gamepad [data-b="a"]');
+  assert.equal(await p.textContent("#dict-sheet .lcd-menu li .dict-book-state"), "停用");
+  assert.deepEqual(await p.evaluate(() => LP.dict.lookup("apple")), []);
+  assert.deepEqual(await p.evaluate(() => LP.dict.suggest("app")), []);
+  await p.click("#dict-sheet .dict-keys .ck:first-child");
+  await p.waitForFunction(() => document.querySelector("#dict-sheet").hidden);
+  await p.fill("#dict-q", "apple");
+  await p.waitForFunction(() => document.querySelector("#dict-list .dict-alloff")?.textContent.includes("没有启用的词典"));
+  assert.equal(await p.locator("#dict-list .dict-alloff").count(), 1);
+
+  await p.reload({ waitUntil: "networkidle" });
+  await p.locator("#home .app", { hasText: "词典" }).click();
+  await p.waitForFunction(() => document.querySelector("#dict-books-btn") && window.LP.dict);
+  await p.click("#dict-books-btn");
+  await p.waitForFunction(() => document.querySelector("#dict-sheet .dict-book-state")?.textContent === "停用");
+  assert.deepEqual(await p.evaluate(() => LP.dict.lookup("apple")), []);
+  await p.click('.gamepad [data-b="a"]');
+  await p.waitForFunction(() => LP.dict.lookup("apple").then((r) => r.length === 1));
+  assert.equal(await p.textContent("#dict-sheet .lcd-menu li .dict-book-state"), "启用");
   assert.deepEqual(errors, []);
 });
 
@@ -536,8 +668,18 @@ test("dictionary: import a StarDict book (.dict.dz, .syn), order it, delete it; 
   assert.deepEqual(syn, [["Tiny", "zyzz", "zyzzyva", "a weevil (test)"]]);
   let apple = await p.evaluate(() => LP.dict.lookup("apple").then((r) => r.map((x) => x.name)));
   assert.deepEqual(apple, ["ECDICT", "Tiny"]);
-  /* move Tiny up: its answer comes first */
   await p.click("#dict-books-btn");
+  await p.click("#dict-sheet .lcd-menu li:nth-child(2)");
+  await p.click("#dict-sheet .ck-a");
+  assert.equal(await p.textContent("#dict-sheet .lcd-menu li:nth-child(2) .dict-book-state"), "停用");
+  assert.deepEqual(await p.evaluate(() => LP.dict.lookup("zyzz")), []);
+  apple = await p.evaluate(() => LP.dict.lookup("apple").then((r) => r.map((x) => x.name)));
+  assert.deepEqual(apple, ["ECDICT"]);
+  await p.click("#dict-sheet .ck-a");
+  assert.equal(await p.textContent("#dict-sheet .lcd-menu li:nth-child(2) .dict-book-state"), "启用");
+  apple = await p.evaluate(() => LP.dict.lookup("apple").then((r) => r.map((x) => x.name)));
+  assert.deepEqual(apple, ["ECDICT", "Tiny"]);
+  /* move Tiny up: its answer comes first */
   await p.click("#dict-sheet .lcd-menu li:nth-child(2)");
   await p.click("#dict-sheet .dict-keys .btn:has-text('上移')");
   apple = await p.evaluate(() => LP.dict.lookup("apple").then((r) => r.map((x) => x.name)));
@@ -1906,6 +2048,9 @@ async function pngColours(buf) {
 const idb = {
   doc: (p, path) => p.evaluate((path) => new Promise((res, rej) => { const r = indexedDB.open("lopda"); r.onerror = () => rej(r.error);
     r.onsuccess = () => { const g = r.result.transaction("docs").objectStore("docs").get(path); g.onsuccess = () => { r.result.close(); res(g.result ? g.result.data : null); }; }; }), path),
+  setDoc: (p, path, data) => p.evaluate(({ path, data }) => new Promise((res, rej) => { const r = indexedDB.open("lopda"); r.onerror = () => rej(r.error);
+    r.onsuccess = () => { const tx = r.result.transaction("docs", "readwrite"); tx.objectStore("docs").put({ path, parent: path.slice(0, path.lastIndexOf("/")), data });
+      tx.oncomplete = () => { r.result.close(); res(); }; tx.onerror = () => rej(tx.error); }; }), { path, data }),
   under: (p, parent) => p.evaluate((parent) => new Promise((res) => { const r = indexedDB.open("lopda");
     r.onsuccess = () => { const g = r.result.transaction("docs").objectStore("docs").index("parent").getAll(parent); g.onsuccess = () => { r.result.close(); res(g.result.map((x) => x.data)); }; }; }), parent),
   /* latent images of a roll: {key: {size, w, h, sha}} */
@@ -1921,6 +2066,29 @@ const idb = {
         r.result.close(); res(out);
       }; }; }), id)
 };
+
+test("darkroom: HOME closes a roll menu and reopening returns to the film box", { skip, timeout: 30000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN", serviceWorkers: "block" });
+  await p.route("https://cdn.jsdelivr.net/**", (r) => r.fulfill({ status: 404, body: "not found" }));
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await idb.setDoc(p, "data/users/local/rolls/items/reopen-roll", {
+    id: "reopen-roll", stock: "sunny", size: 1, frames: [], bytes: 0, name: "Reopen test",
+    loaded: Date.now(), out: Date.now()
+  });
+  await p.locator("#home .app", { hasText: "冲洗店" }).click();
+  await p.waitForFunction(() => /Reopen test/.test(document.getElementById("dk-list").textContent));
+  await p.keyboard.press("x");
+  await p.waitForSelector("#dk-sheet:not([hidden])");
+  await p.click("#home-key");
+  await p.locator("#home .app", { hasText: "冲洗店" }).click();
+  await p.waitForFunction(() => /Reopen test/.test(document.getElementById("dk-list").textContent));
+  assert.ok(await p.isVisible("#v-dark"));
+  assert.ok(await p.isHidden("#dk-sheet"));
+  await p.keyboard.press("z");
+  assert.ok(await p.isHidden("#dk-sheet"), "B on the first darkroom screen does not act on the old menu");
+  assert.match(await p.textContent("#dk-list"), /Reopen test/);
+  assert.deepEqual(notBlocked(errors), []);
+});
 
 test("darkroom: load a stock, shoot a roll with latent images, unload it to the film box, name it, export the negative, throw it away, import it back", { skip, timeout: 180000 }, async (t) => {
   const { p, errors, open } = await camPage(t);

@@ -67,7 +67,9 @@
 
       "app.dict": "词典",
       "dict.ph": "输入英文单词", "dict.words": "生词本", "dict.books": "词典", "dict.back": "返回", "dict.page": "翻页",
+      "dict.prev": "前词", "dict.next": "后词",
       "dict.history": "最近查过", "dict.nohistory": "输入单词，候选会出现在这里。A 或回车查词。",
+      "dict.alloff": "没有启用的词典。按 START 启用一本。",
       "dict.loading": "词典读取中…", "dict.loadfail": "词典读不出来：{msg}", "dict.notfound": "查不到「{w}」",
       "dict.lemma": "{w} → {base}", "dict.near": "相近的词",
       "dict.add": "生词本", "dict.added": "已加入生词本", "dict.removed": "已移出生词本", "dict.inbook": "已在生词本",
@@ -79,6 +81,9 @@
       "dict.noifo": "没有 .ifo 文件", "dict.missing": "「{name}」缺少 {ext} 文件", "dict.dup": "已经装过「{name}」",
       "dict.nodb": "现在存不了档，不能导入词典",
       "dict.entries": "{n} 词", "dict.delfail": "删除失败",
+      "dict.on": "启用", "dict.off": "停用", "dict.enable": "启用", "dict.disable": "停用",
+      "dict.enabled": "已启用「{name}」", "dict.disabled": "已停用「{name}」",
+      "dict.bookkeys": "A 启用/停用　↑↓ 选　B 返回",
 
       "app.reader": "阅读器",
       "reader.shelf": "书架", "reader.import": "导入", "reader.loading": "读取中…",
@@ -276,7 +281,9 @@
 
       "app.dict": "Dict",
       "dict.ph": "Type an English word", "dict.words": "Words", "dict.books": "Books", "dict.back": "Back", "dict.page": "Page",
+      "dict.prev": "Prev", "dict.next": "Next",
       "dict.history": "Recent", "dict.nohistory": "Type a word; matches show here. A or Enter looks it up.",
+      "dict.alloff": "All dictionaries are off. Press START to enable one.",
       "dict.loading": "Reading dictionaries…", "dict.loadfail": "Cannot read the dictionaries: {msg}", "dict.notfound": "No entry for \"{w}\"",
       "dict.lemma": "{w} → {base}", "dict.near": "Close matches",
       "dict.add": "Words", "dict.added": "Added to Words", "dict.removed": "Removed from Words", "dict.inbook": "In Words",
@@ -288,6 +295,9 @@
       "dict.noifo": "No .ifo file", "dict.missing": "{name}: {ext} file missing", "dict.dup": "{name} is already installed",
       "dict.nodb": "Saving is off: cannot import",
       "dict.entries": "{n} words", "dict.delfail": "Delete failed",
+      "dict.on": "On", "dict.off": "Off", "dict.enable": "Enable", "dict.disable": "Disable",
+      "dict.enabled": "{name} enabled", "dict.disabled": "{name} disabled",
+      "dict.bookkeys": "A On/Off · ↑↓ Select · B Back",
 
       "app.reader": "Reader",
       "reader.shelf": "Books", "reader.import": "Import", "reader.loading": "Loading…",
