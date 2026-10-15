@@ -2374,6 +2374,7 @@ test("darkroom: HOME closes a roll menu and reopening returns to the film box", 
   await p.click("#dk-keys .sk-a");
   await p.waitForSelector("#dk-sheet:not([hidden])");
   await assertOneRow("#dk-sheet .softkeys");
+  await p.keyboard.press("ArrowDown");                              /* past 冲洗 (step 2) to 起名 */
   await p.click("#dk-sheet .sk-a");
   await assertOneRow("#dk-sheet .softkeys");
   await p.click("#dk-sheet .sk-b");
@@ -2457,8 +2458,8 @@ test("darkroom: load a stock, shoot a roll with latent images, unload it to the 
 
   /* name it: A opens the roll's menu */
   await press("x");
-  assert.deepEqual(await p.$$eval("#dk-sheet li", (ls) => ls.map((l) => l.textContent)), ["起名", "导出底片", "扔掉"]);
-  await press("x");
+  assert.deepEqual(await p.$$eval("#dk-sheet li", (ls) => ls.map((l) => l.textContent)), ["冲洗", "起名", "导出底片", "扔掉"]);
+  await press("ArrowDown"); await press("x");
   await p.waitForSelector("#dk-name");
   assert.ok(await p.$eval("#dk-name", (e) => parseFloat(getComputedStyle(e).fontSize) >= 16), "16 px or more, or iPhone zooms");
   await p.fill("#dk-name", "海边");
@@ -2543,5 +2544,137 @@ test("darkroom: a roll left in the camera by an older version is void when the c
   await open();
   await p.waitForSelector("#cam-load:not([hidden])"); await p.waitForTimeout(600);
   assert.notEqual(await p.evaluate(() => document.getElementById("toast").hidden ? "" : document.getElementById("toast").textContent), "旧胶卷已作废");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+/* ---------- darkroom step 2 (docs/design/darkroom.md section 9): developing, the viewer, the three prints ---------- */
+/* width and height from a PNG's IHDR */
+const pngSize = (buf) => [buf.readUInt32BE(16), buf.readUInt32BE(20)];
+
+test("darkroom: develop a roll with blank frames, walk it in colour, print single, contact sheet and strip; a re-imported negative reprints byte for byte", { skip, timeout: 240000 }, async (t) => {
+  const { p, errors, open } = await camPage(t);
+  const fs = await import("node:fs/promises");
+  const toast = (re) => p.waitForFunction((s) => { const el = document.getElementById("toast"); return !el.hidden && new RegExp(s).test(el.textContent); }, re.source, { timeout: 20000 });
+  const press = async (key) => { await p.keyboard.down(key); await p.waitForTimeout(30); await p.keyboard.up(key); await p.waitForTimeout(60); };
+  const save = async (action) => { const [d] = await Promise.all([p.waitForEvent("download", { timeout: 60000 }), action()]); return { name: d.suggestedFilename(), buf: await fs.readFile(await d.path()) }; };
+  const items = () => p.$$eval("#dk-sheet li", (ls) => ls.map((l) => l.querySelector("span").textContent));
+  const head = () => p.textContent("#dk-vno");
+
+  /* an 8-frame PORTRAIT roll: 6 shots, then rewound, so frames 7 and 8 are blank */
+  await open();
+  await p.waitForSelector("#cam-load:not([hidden])");
+  await press("ArrowDown");                                          /* 12 -> 8 */
+  assert.match(await p.textContent("#roll-count"), /8 张/);
+  await press("x");
+  await p.waitForSelector("#cam-live-tag:not([hidden])", { timeout: 10000 });
+  for (let i = 0; i < 6; i++) {
+    await p.click("#cam-shutter");
+    await p.waitForFunction(() => document.getElementById("cam-shut").hidden, null, { timeout: 3000 });
+    await p.waitForTimeout(120);
+  }
+  await press("Enter");                                              /* the body menu: rewind now */
+  await p.locator("#menu-list li", { hasText: "提前倒片" }).click();
+  await p.locator("#menu-list li").first().click();
+  await p.waitForSelector("#cam-menu:not([hidden])");
+  const id = (await idb.doc(p, "data/users/local/film")).roll;
+  await p.locator("#menu-list li", { hasText: "取出胶卷" }).click();
+  await toast(/胶卷放进冲洗店的胶卷盒了/);
+
+  /* the darkroom: 冲洗 comes first on an undeveloped roll */
+  await p.click("#home-key");
+  await p.locator("#home .app", { has: p.locator(".label", { hasText: /^冲洗店$/ }) }).click();
+  await p.waitForFunction(() => /人像 400/.test(document.getElementById("dk-list").textContent));
+  await press("x");
+  assert.deepEqual(await items(), ["冲洗", "起名", "导出底片", "扔掉"], "no debug item without ?debug");
+  const t0 = Date.now();
+  await press("x");
+  await p.waitForSelector("#dk-dev:not([hidden])");
+  assert.match(await p.textContent("#dk-dev-step"), /^显影 \d\d\/08$/);
+  await press("z"); await press("Enter");                            /* ignored while it develops */
+  assert.ok(await p.isVisible("#dk-dev"));
+  assert.ok(await p.isHidden("#dk-sheet"));
+  await p.waitForSelector("#dk-view:not([hidden])", { timeout: 60000 });
+  const took = Date.now() - t0;
+  assert.ok(took >= 3500, "the animation runs at least its length: " + took);
+  const roll = await idb.doc(p, `data/users/local/rolls/items/${id}`);
+  assert.equal(roll.dev.v, 1); assert.equal(roll.dev.seed >>> 0, roll.dev.seed); assert.ok(Math.abs(roll.dev.at - Date.now()) < 120000);
+  assert.deepEqual(Object.keys(roll.dev).sort(), ["at", "seed", "v"]);
+
+  /* the viewer: colour, the header names frame, lens and date; ◀▶ walk, the blank frames too */
+  await p.waitForFunction(() => document.getElementById("dk-vwait").hidden, null, { timeout: 20000 });
+  const colours = await p.evaluate(() => { const c = document.getElementById("dk-vcv"), d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data, s = new Set();
+    for (let i = 0; i < d.length; i += 4 * 7) s.add(d[i] << 16 | d[i + 1] << 8 | d[i + 2]); return s.size; });
+  assert.ok(colours > 500, "colour on the LCD: " + colours + " colours");
+  assert.equal(await head(), "01/08");
+  assert.match(await p.textContent("#dk-vinfo"), /\d\d\.\d\d\.\d\d/);
+  for (let k = 2; k <= 8; k++) { await press("ArrowRight"); assert.equal(await head(), String(k).padStart(2, "0") + "/08"); }
+  await p.waitForFunction(() => document.getElementById("dk-vwait").hidden, null, { timeout: 20000 });
+  assert.match(await p.textContent("#dk-vinfo"), /全曝光/);
+  await press("ArrowRight"); assert.equal(await head(), "08/08", "stops at the end");
+  for (let k = 0; k < 7; k++) await press("ArrowLeft");
+  assert.equal(await head(), "01/08");
+  await press("x"); assert.ok(await p.isHidden("#dk-sheet"), "A does nothing here");
+
+  /* prints: START opens the menu, B cancels it */
+  await press("Enter");
+  assert.deepEqual(await items(), ["单张", "印样", "胶片条"]);
+  assert.equal(await p.textContent("#dk-sheet .sk-b span"), "取消");
+  await press("z"); assert.ok(await p.isHidden("#dk-sheet")); assert.ok(await p.isVisible("#dk-view"));
+  await press("Enter");
+  const single = await save(() => press("x"));
+  assert.match(single.name, /^lopda-print-\d{8}-portrait-400-001-01\.png$/);
+  assert.deepEqual(pngSize(single.buf), [1600, 1400]);
+  await toast(/照片存好了/);
+  await press("Enter"); await press("ArrowDown");
+  const card = await save(() => press("x"));
+  assert.match(card.name, /^lopda-contact-\d{8}-portrait-400-001\.png$/);
+  assert.deepEqual(pngSize(card.buf), [1080, 1440]);
+  await press("Enter"); await press("ArrowDown"); await press("ArrowDown");
+  const strip = await save(() => press("x"));
+  assert.match(strip.name, /^lopda-strip-\d{8}-portrait-400-001\.png$/);
+  assert.deepEqual(pngSize(strip.buf), [200 + 8 * 272 - 16 + 64, 320]);
+  assert.ok((await pngColours(strip.buf)).colours.length > 1000, "the strip is in colour");
+
+  /* back to the box: developed, and the menu opens the pictures */
+  await press("z");
+  await p.waitForSelector("#dk-view", { state: "hidden" });
+  assert.match(await p.textContent("#dk-list li.on"), /已冲洗/);
+  await press("x");
+  assert.deepEqual(await items(), ["看照片", "起名", "导出底片", "扔掉"]);
+
+  /* the negative carries dev: export, throw the roll away, import it, reprint frame 1 */
+  await press("ArrowDown"); await press("ArrowDown"); await press("x");
+  await p.waitForFunction(() => /彩色原片/.test(document.getElementById("dk-sheet").textContent));
+  await press("ArrowUp");
+  const neg = await save(() => press("x"));
+  await toast(/底片导出了/);
+  await press("ArrowDown"); await press("x"); await press("ArrowUp"); await press("x");
+  await toast(/扔掉了/);
+  assert.equal(await idb.doc(p, `data/users/local/rolls/items/${id}`), null);
+  await p.setInputFiles("#dk-file", { name: neg.name, mimeType: "image/png", buffer: neg.buf });
+  await toast(/底片放进胶卷盒了/);
+  assert.deepEqual((await idb.doc(p, `data/users/local/rolls/items/${id}`)).dev, roll.dev);
+  await p.waitForFunction(() => /已冲洗/.test(document.getElementById("dk-list").textContent));
+  await press("x"); await press("x");
+  await p.waitForSelector("#dk-view:not([hidden])");
+  assert.ok(await p.isHidden("#dk-dev"), "a developed roll opens straight to its pictures");
+  await press("Enter");
+  const again = await save(() => press("x"));
+  assert.equal(again.name, single.name);
+  assert.ok(again.buf.equals(single.buf), "a reprint is the first print, byte for byte");
+
+  /* ?debug: one more item, a comparison of all seven stocks, and the roll is left as it was */
+  const before = await idb.doc(p, `data/users/local/rolls/items/${id}`);
+  await p.goto(base + "/runtime/?debug", { waitUntil: "networkidle" });
+  await p.waitForFunction(() => document.getElementById("savestate").textContent !== "启动中…", null, { timeout: 8000 });
+  await p.locator("#home .app", { has: p.locator(".label", { hasText: /^冲洗店$/ }) }).click();
+  await p.waitForFunction(() => /已冲洗/.test(document.getElementById("dk-list").textContent));
+  await press("x");
+  assert.deepEqual(await items(), ["看照片", "起名", "导出底片", "扔掉", "七种片对比"]);
+  for (let i = 0; i < 4; i++) await press("ArrowDown");
+  const cmp = await save(() => press("x"));
+  assert.match(cmp.name, /^lopda-compare-\d{8}-portrait-400-001\.png$/);
+  assert.deepEqual(pngSize(cmp.buf), [250 + 4 * 410 + 10, 70 + 7 * 360 + 10]);
+  assert.deepEqual(await idb.doc(p, `data/users/local/rolls/items/${id}`), before, "comparing changes nothing");
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });

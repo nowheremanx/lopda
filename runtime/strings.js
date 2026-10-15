@@ -217,6 +217,11 @@
       "dk.discarded": "扔掉了。",
       "dk.importing": "读底片…", "dk.imported": "底片放进胶卷盒了。", "dk.have": "这卷已经在胶卷盒里了。",
       "dk.bad": "这张底片冲不出来", "dk.big": "这张底片冲不出来（超过 4 MB）", "dk.savefail": "没放进去，存储空间可能满了。",
+      "dk.dev": "已冲洗", "dk.develop": "冲洗", "dk.view": "看照片", "dk.compare": "七种片对比",
+      "dk.step": "{step} {n}/{size}", "dk.step.dev": "显影", "dk.step.fix": "定影", "dk.step.dry": "晾干",
+      "dk.newer": "这卷是新版冲洗店冲的，升级以后才能看。",
+      "dk.print.title": "出片 · 第 {n} 张", "dk.p.single": "单张", "dk.p.card": "印样", "dk.p.strip": "胶片条",
+      "dk.printing": "出片中…", "dk.printed": "照片存好了。", "dk.comparing": "七种片对比中…", "dk.nocompare": "这卷没有能对比的照片。",
 
       "cart.title": "卡带机", "cart.save": "存档", "cart.load": "读档", "cart.eject": "退卡",
       "cart.insert": "插入卡带 · .gb 文件",
@@ -444,6 +449,11 @@
       "dk.discarded": "Thrown away.",
       "dk.importing": "Reading the negative…", "dk.imported": "The negative is in the film box.", "dk.have": "That roll is already in the film box.",
       "dk.bad": "This negative can't be developed", "dk.big": "This negative can't be developed (over 4 MB)", "dk.savefail": "Couldn't keep it; storage may be full.",
+      "dk.dev": "developed", "dk.develop": "Develop", "dk.view": "View photos", "dk.compare": "Compare 7 stocks",
+      "dk.step": "{step} {n}/{size}", "dk.step.dev": "DEVELOPER", "dk.step.fix": "FIXER", "dk.step.dry": "DRYING",
+      "dk.newer": "A newer darkroom developed this roll. Update to see it.",
+      "dk.print.title": "PRINT · FRAME {n}", "dk.p.single": "Single print", "dk.p.card": "Contact sheet", "dk.p.strip": "Film strip",
+      "dk.printing": "Printing…", "dk.printed": "Print saved.", "dk.comparing": "Comparing 7 stocks…", "dk.nocompare": "No frames on this roll to compare.",
 
       "cart.title": "Cartridge", "cart.save": "Save", "cart.load": "Load", "cart.eject": "Eject",
       "cart.insert": "Insert cart · .gb file",

@@ -337,7 +337,10 @@ $("cam-file").addEventListener("change",function(){
    Frame pixels are written straight into ImageData: Safari can swap red/blue when a
    canvas is drawn onto another canvas right after putImageData.
    o: {pal (four [r,g,b] tones), res, size, loaded, out (when it left the camera), lead (the stock word on the
-   leader), edges (the edge print under even and odd frames)}. The darkroom draws negatives with it (apps/darkroom.js). ---- */
+   leader), edges (the edge print under even and odd frames)}. The darkroom draws negatives with it (apps/darkroom.js).
+   Developed film (darkroom step 2) adds {colour (per frame an RGBA {data, w, h} of FW x FH, drawn instead of px through
+   pal), edgeInk (a CSS colour for the edge print), marks (per frame a short text after its number, the focal length)};
+   pal then only colours the base, the holes and the leader. Without them the strip is exactly the negative's. ---- */
 var STRIP={S:2, H:320, LEAD:200, TRAIL:64, PITCH:272, FW:256, FH:224, FY:48};
 function stripWidth(n){ return STRIP.LEAD + n*STRIP.PITCH - (STRIP.PITCH-STRIP.FW) + STRIP.TRAIL; }
 function buildStrip(frames,o){
@@ -353,19 +356,22 @@ function buildStrip(frames,o){
   frames.forEach(function(fr,k){
     var fx=STRIP.LEAD+k*STRIP.PITCH;
     x.fillStyle=rgb(2); x.font='16px "VT323", monospace'; x.fillText(pad2(k+1),fx,26);
+    if(o.marks && o.marks[k]) x.fillText(o.marks[k],fx+40,26);
   });
   x.fillStyle=rgb(1); x.font='18px "VT323", monospace'; x.fillText("END",c.width-STRIP.TRAIL+12,STRIP.H/2-9);
   /* edge print in the bottom rebate, as on real film: maker, stock, and a frame number every frame */
   x.font='15px "VT323", monospace';
   frames.forEach(function(fr,k){
     var fx=STRIP.LEAD+k*STRIP.PITCH;
-    x.fillStyle=rgb(1); x.fillText(o.edges[k%2],fx+4,STRIP.FY+STRIP.FH+5);
+    x.fillStyle=o.edgeInk||rgb(1); x.fillText(o.edges[k%2],fx+4,STRIP.FY+STRIP.FH+5);
     x.fillStyle=rgb(2); x.fillText(String(k+1)+"▸",fx+STRIP.FW-26,STRIP.FY+STRIP.FH+5);
   });
   /* frames last, as raw pixels at 2x */
   var sc=STRIP.FW/fw;   /* 2 for standard film, 1 for fine grain: the strip geometry stays the same */
   frames.forEach(function(fr,k){
-    var img=x.createImageData(STRIP.FW,STRIP.FH), d=img.data, px=pxFromString(fr.px);
+    var img=x.createImageData(STRIP.FW,STRIP.FH), d=img.data;
+    if(o.colour){ d.set(o.colour[k].data); x.putImageData(img,STRIP.LEAD+k*STRIP.PITCH,STRIP.FY); return; }
+    var px=pxFromString(fr.px);
     for(var y=0;y<STRIP.FH;y++) for(var xx=0;xx<STRIP.FW;xx++){
       var t=PAL[px[Math.floor(y/sc)*fw+Math.floor(xx/sc)]], q=(y*STRIP.FW+xx)*4;
       d[q]=t[0]; d[q+1]=t[1]; d[q+2]=t[2]; d[q+3]=255;
