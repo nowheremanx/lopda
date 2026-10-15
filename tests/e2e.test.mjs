@@ -2430,6 +2430,14 @@ test("darkroom: load a stock, shoot a roll with latent images, unload it to the 
   const lat = await idb.latents(p, id);
   assert.deepEqual(Object.keys(lat).sort(), Array.from({ length: 16 }, (_, k) => `roll/${id}/${String(k + 1).padStart(2, "0")}.jpg`));
   for (const v of Object.values(lat)) { assert.equal(v.w, 800); assert.equal(v.h, 700); assert.equal(v.type, "image/jpeg"); }
+  /* the last frame's latent is the picture, not black: it is drawn before the full roll's menu stops the stream */
+  const brightness = await p.evaluate(async (key) => {
+    const bmp = await createImageBitmap(await window.LopdaPlatform.files.get(key)), c = new OffscreenCanvas(bmp.width, bmp.height), x = c.getContext("2d");
+    x.drawImage(bmp, 0, 0); const d = x.getImageData(0, 0, bmp.width, bmp.height).data; let s = 0;
+    for (let i = 0; i < d.length; i += 4) s += Math.max(d[i], d[i + 1], d[i + 2]);
+    return s / (d.length / 4);
+  }, `roll/${id}/16.jpg`);
+  assert.ok(brightness > 40, "the last latent is not black: mean " + brightness.toFixed(1));
   const f1 = await idb.doc(p, `data/users/local/frames/items/${id}-01`);
   assert.equal(f1.exposure, 1); assert.equal(f1.contrast, 0); assert.equal(f1.dated, true);
 
