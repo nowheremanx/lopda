@@ -368,7 +368,7 @@ test("calendar: month view, today, a day off, the day sheet, and a lunar yearly 
   const plus = p.locator(".cal-step").nth(1).locator("button", { hasText: "+" });
   for (let i = 0; i < 3; i++) await plus.click();
   assert.equal(await p.locator(".cal-step").nth(1).locator("b").textContent(), "初五");
-  await p.click(".cal-keys .ck-a");
+  await p.click("#cal-sheet .sk-a");
   await p.waitForFunction(() => /妈妈生日/.test(document.getElementById("cal-sheet").textContent));
   await p.click("#home-key");
   assert.equal(await p.locator("#home .app", { hasText: "万年历" }).locator(".tag").textContent(), "3天后 妈妈生日");
@@ -398,9 +398,9 @@ test("calendar: a leap-month birthday falls in the regular month in a year witho
   const cur = LUNAR.fromSolar(2026, 1, 10);
   for (let i = 0; i < cur.month - 6; i++) await minus(0).click();
   for (let i = 0; i < cur.day - 15; i++) await minus(1).click();
-  await p.click(".cal-keys .ck-a");
+  await p.click("#cal-sheet .sk-a");
   await p.keyboard.press("z");   /* B closes the day sheet */
-  await p.click("#cal-list-btn");
+  await p.click("#cal-keys .sk-select");
   const row = await p.textContent("#cal-sheet .cal-list li");
   assert.ok(row.includes("闰月生日"), row);
   assert.ok(row.includes(`${days}天后 · ${on.m}/${on.d}`), `${row} (expected ${days}天后 · ${on.m}/${on.d})`);
@@ -458,11 +458,11 @@ test("calendar: START goes to a date, Gregorian or lunar, by keys, keyboard digi
   assert.deepEqual(await sel(), [`${mid.y}年${mid.m}月`, String(mid.d)]);
   assert.match(await p.textContent("#cal-grid .cal-cell.sel span"), /中秋/);
   /* a leap month, on the on-screen pad: 2020 闰四月十五 */
-  await p.click("#cal-ym");
+  await p.click("#cal-keys .sk-start");
   await p.locator("#cal-sheet .cal-kind .btn", { hasText: "按农历" }).click();
   for (const k of "20200415") await p.locator("#cal-sheet .cal-numpad .btn", { hasText: new RegExp("^" + k + "$") }).click();
   await p.locator("#cal-sheet .cal-kind .cal-leap").click();
-  await p.locator("#cal-sheet .cal-keys .ck-a").click();
+  await p.locator("#cal-sheet .sk-a").click();
   const lp = LUNAR.toSolar(2020, 4, 15, true);
   assert.deepEqual(await sel(), [`${lp.y}年${lp.m}月`, String(lp.d)]);
   /* a day past the month's end falls on its last day; a year out of range stays put with a message; B cancels */
@@ -481,6 +481,36 @@ test("calendar: START goes to a date, Gregorian or lunar, by keys, keyboard digi
   /* B in the month view still comes home to today */
   await p.keyboard.press("z");
   assert.deepEqual(await sel(), ["2026年10月", "11"]);
+  assert.deepEqual(notBlocked(c.errors), []);
+});
+
+test("calendar: every soft-key screen fits one row at the smallest screen size", { skip, timeout: 30000 }, async (t) => {
+  const c = await calPage(t);
+  const { p } = c;
+  await c.boot(); await c.open();
+  await p.setViewportSize({ width: 331, height: 359 });
+  const assertOneRow = async (selector) => {
+    const value = await p.locator(selector).evaluate((bar) => {
+      const boxes = [...bar.children].map((slot) => slot.getBoundingClientRect());
+      return { height: bar.getBoundingClientRect().height, widths: boxes.map((box) => box.width), tops: boxes.map((box) => box.top) };
+    });
+    assert.equal(value.height, 44, selector);
+    assert.deepEqual(new Set(value.tops).size, 1, selector);
+    assert.ok(value.widths.every((width) => width === value.widths[0]), selector);
+  };
+  const sheetBar = "#cal-sheet .softkeys";
+  await assertOneRow("#cal-keys");
+  await p.click("#cal-keys .sk-a");
+  await assertOneRow(sheetBar);
+  await p.click("#cal-sheet .sk-a");
+  await assertOneRow(sheetBar);
+  await p.click("#cal-sheet .sk-b");
+  await p.click("#cal-sheet .sk-b");
+  await p.click("#cal-keys .sk-select");
+  await assertOneRow(sheetBar);
+  await p.click("#cal-sheet .sk-b");
+  await p.click("#cal-keys .sk-start");
+  await assertOneRow(sheetBar);
   assert.deepEqual(notBlocked(c.errors), []);
 });
 

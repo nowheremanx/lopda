@@ -178,6 +178,7 @@ function cellText(y,m,d,lu){
   return {t:tr("cal.cellday",{day:list("cal.lday")[lu.day-1]})};
 }
 function render(){
+  renderMainKeys();
   if(!C.cells.length) buildGrid();
   C.todayN=todayN();
   var lu=L.fromSolar(C.y,C.m,C.d);
@@ -229,17 +230,24 @@ function cellTap(i){
 })();
 $("cal-prev").onclick=function(){ if(shiftMonth(-1)) render(); };
 $("cal-next").onclick=function(){ if(shiftMonth(1)) render(); };
-$("cal-today").onclick=function(){ goToday(); };
-$("cal-list-btn").onclick=function(){ openSheet("list"); };
 $("cal-info").onclick=function(){ openSheet("day"); };
 $("cal-ym").onclick=function(){ openJump(); };
 function goToday(){ select(todayN()); render(); }
+function softkey(key,label,disabled){
+  return {label:tr(label),disabled:!!disabled,fn:function(){ calButton(key); }};
+}
+function renderMainKeys(){
+  LP.softkeys($("cal-keys"),{
+    select:softkey("select","sk.anniv"),
+    start:softkey("start","sk.jump"),
+    b:softkey("b","sk.today",selN()===todayN()),
+    a:softkey("a","sk.open")
+  });
+}
 
 /* ---------- sheets: the day, the list of dates, the add form ---------- */
 function el(tag,cls,text){ var e=document.createElement(tag); if(cls) e.className=cls; if(text!=null) e.textContent=text; return e; }
 function btn(cls,text,fn){ var b=el("button",cls,text); b.type="button"; b.onclick=fn; return b; }
-/* an on-screen key with its chin-pad letter, like the camera's */
-function keyBtn(cls,key,label,fn){ var b=btn(cls,null,fn); b.appendChild(el("i","",key)); b.appendChild(document.createTextNode(label)); return b; }
 function openSheet(name){ C.sheet=name; if(name==="list") C.pick=0; renderSheet(); }
 function closeSheet(){ C.sheet=""; C.form=null; render(); }
 function renderSheet(){
@@ -270,9 +278,8 @@ function daySheet(sh){
     row.appendChild(del); body.appendChild(row);
   });
   sh.appendChild(body);
-  var keys=el("div","cal-keys");
-  keys.appendChild(keyBtn("ck","B",tr("cal.back"),function(){ closeSheet(); }));
-  keys.appendChild(keyBtn("ck ck-a","A",tr("cal.add"),function(){ openAdd(); }));
+  var keys=el("div");
+  LP.softkeys(keys,{select:null,start:null,b:softkey("b","sk.back"),a:softkey("a","sk.add")});
   sh.appendChild(keys);
 }
 function upcoming(){
@@ -293,8 +300,11 @@ function listSheet(sh){
     ul.appendChild(li);
   });
   sh.appendChild(ul);
-  var keys=el("div","cal-keys");
-  keys.appendChild(keyBtn("ck","B",tr("cal.back"),function(){ closeSheet(); }));
+  var keys=el("div");
+  LP.softkeys(keys,{
+    select:softkey("select","sk.back"),start:null,
+    b:softkey("b","sk.back"),a:softkey("a","sk.open",!items.length)
+  });
   sh.appendChild(keys);
 }
 function openAdd(){
@@ -334,9 +344,10 @@ function addSheet(sh){
     lp.setAttribute("aria-pressed",F.leap?"true":"false");
     var lr=el("div","cal-step"); lr.appendChild(lp); lr.appendChild(el("small","hint",tr("cal.leapnote"))); sh.appendChild(lr);
   }
-  var keys=el("div","cal-keys");
-  keys.appendChild(keyBtn("ck","B",tr("common.cancel"),function(){ C.sheet="day"; C.form=null; renderSheet(); }));
-  keys.appendChild(keyBtn("ck ck-a","A",tr("common.save"),function(){ saveDate(); }));
+  var keys=el("div");
+  LP.softkeys(keys,{
+    select:null,start:null,b:softkey("b","sk.cancel"),a:softkey("a","sk.save")
+  });
   sh.appendChild(keys);
 }
 function saveDate(){
@@ -426,10 +437,11 @@ function jumpSheet(sh){
   pad.appendChild(btn("btn ghost","0",function(){ jumpType(0); }));
   pad.appendChild(btn("btn ghost","▶",function(){ J.cur=Math.min(7,J.cur+1); renderSheet(); }));
   sh.appendChild(pad);
-  sh.appendChild(el("p","hint cal-jumpkeys",tr("cal.jump.keys")));
-  var keys=el("div","cal-keys");
-  keys.appendChild(keyBtn("ck","B",tr("common.cancel"),function(){ closeSheet(); }));
-  keys.appendChild(keyBtn("ck ck-a","A",tr("cal.jump.go"),function(){ jumpGo(); }));
+  var keys=el("div");
+  LP.softkeys(keys,{
+    select:softkey("select","sk.mode"),start:softkey("start","sk.jump"),
+    b:softkey("b","sk.cancel"),a:softkey("a","sk.go")
+  });
   sh.appendChild(keys);
 }
 /* digits from a keyboard while the panel is open */

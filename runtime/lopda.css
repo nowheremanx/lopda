@@ -228,7 +228,6 @@ textarea::placeholder{color:var(--ink-2)}
 .cal-view{display:flex;flex-direction:column;overflow:hidden;position:relative}
 .cal-head{display:flex;align-items:center;gap:6px;padding:5px 8px;border-bottom:2px solid var(--ink);flex:none}
 .cal-head .ck{min-width:0;padding:6px 9px;font-family:var(--f-pix);font-size:14px}
-.cal-head .btn{padding:5px 8px;font-size:14px}
 .cal-title{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;line-height:1.1;white-space:nowrap;overflow:hidden}
 .cal-title b{font-family:var(--f-pix);font-weight:400;font-size:24px;letter-spacing:.04em}
 .cal-title span{font-size:12px;color:var(--ink-2)}
@@ -257,7 +256,6 @@ textarea::placeholder{color:var(--ink-2)}
 .cal-date b{font-weight:400;font-size:15px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cal-date small{flex:1;font-size:12px;color:var(--ink-2)}
 .cal-date .btn{padding:5px 8px;font-size:13px;flex:none}
-.cal-keys{display:flex;gap:6px;justify-content:center;padding:4px 0 6px;flex:none;margin-top:auto}
 .cal-list{flex:1;min-height:0;overflow:auto}
 .cal-list li span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cal-empty{text-align:center;padding:16px 8px}
@@ -381,8 +379,6 @@ textarea::placeholder{color:var(--ink-2)}
 .cal-preview.err{color:var(--ink-2)}
 .cal-numpad{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;flex:none;width:100%;max-width:300px;align-self:center}
 .cal-numpad .btn{padding:7px 0;font-family:var(--f-pix);font-size:20px}
-.cal-jumpkeys{text-align:center;flex:none}
-@media (pointer:coarse){.cal-jumpkeys{display:none}}
 .cal-kind .cal-leap{flex:none;padding:8px 10px}
 @media (max-height:700px){.cal-numpad{gap:4px}.cal-numpad .btn{padding:4px 0;font-size:18px}.cal-digits button{height:34px;font-size:24px}}
 

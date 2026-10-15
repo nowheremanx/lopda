@@ -32,7 +32,7 @@
       "sk.review": "复习", "sk.reveal": "看释义", "sk.saved": "已收", "sk.save": "保存",
       "sk.note": "想法", "sk.rename": "起名", "sk.export": "导出", "sk.discard": "扔掉",
       "sk.keep": "保留", "sk.delete": "删除", "sk.enable": "启用", "sk.disable": "停用",
-      "sk.nextword": "下一词", "sk.options": "选项",
+      "sk.nextword": "下一词", "sk.options": "选项", "sk.mode": "历法", "sk.go": "前往",
       "sk.addword": "生词+", "sk.skip": "略过", "sk.done": "完成",
       "sk.use": "使用", "sk.unmark": "去线",
 
@@ -161,7 +161,6 @@
       "cal.empty": "还没有纪念日。选一天，按 A 再按「加纪念日」。", "cal.emptynodb": "还没有纪念日。现在存不了档，加了关掉就没了。",
       "cal.jump.title": "跳到日期", "cal.jump.go": "跳转", "cal.jump.sep": "年|月|日", "cal.jump.digit": "第 {n} 位",
       "cal.jump.range": "只能查 1900 到 2100 年", "cal.jump.month": "月份要在 1 到 12 之间", "cal.jump.day": "日期不对",
-      "cal.jump.keys": "◂▸ 移位　▲▼ 改数　SELECT 公历 / 农历",
       "cal.tag": "{n}天后 {name}", "cal.tagtoday": "今天 {name}", "cal.hint": "{n}天后：{name}", "cal.hinttoday": "今天：{name}",
 
 
@@ -259,7 +258,7 @@
       "sk.review": "Review", "sk.reveal": "Reveal", "sk.saved": "Saved", "sk.save": "Save",
       "sk.note": "Note", "sk.rename": "Name", "sk.export": "Export", "sk.discard": "Discard",
       "sk.keep": "Keep", "sk.delete": "Delete", "sk.enable": "Enable", "sk.disable": "Disable",
-      "sk.nextword": "Next", "sk.options": "Options",
+      "sk.nextword": "Next", "sk.options": "Options", "sk.mode": "Mode", "sk.go": "Go",
       "sk.addword": "Add", "sk.skip": "Skip", "sk.done": "Done",
       "sk.use": "Use", "sk.unmark": "Unmark",
 
@@ -389,7 +388,6 @@
       "cal.empty": "No dates yet. Pick a day, press A, then Add date.", "cal.emptynodb": "No dates yet. Can't save right now: new ones are gone when you close.",
       "cal.jump.title": "Go to date", "cal.jump.go": "Go", "cal.jump.sep": "-|-| ", "cal.jump.digit": "Digit {n}",
       "cal.jump.range": "1900 to 2100 only", "cal.jump.month": "Month must be 1 to 12", "cal.jump.day": "No such day",
-      "cal.jump.keys": "◂▸ move · ▲▼ change · SELECT solar / lunar",
       "cal.tag": "{n}d {name}", "cal.tagtoday": "Today {name}", "cal.hint": "{name} in {n} days", "cal.hinttoday": "Today: {name}",
 
 
