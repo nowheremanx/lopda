@@ -728,7 +728,7 @@ function renderLow(){
       });
     }
     LP.softkeys(keys,{
-      select:softkey("select","sk.back"),
+      select:null,
       start:d.results && d.results.length ? {label:tr(LP.dict.inBook(word)?"sk.saved":"sk.addword"),fn:function(){ LP.dict.toggleWord(word); renderLow(); }} : null,
       b:softkey("b","sk.back"),
       a:softkey("a","sk.back")
@@ -740,7 +740,7 @@ function renderLow(){
     page.appendChild(el("b","",tr("reader.thoughts"))); page.appendChild(document.createTextNode("\n"));
     page.appendChild(document.createTextNode(mk && mk.thought ? mk.thought : tr("reader.nothought")));
     LP.softkeys(keys,{
-      select:softkey("select","sk.back"),
+      select:null,
       start:{label:tr(d.armed?"sk.confirm":"sk.delete"),fn:function(){ markDelete(); }},
       b:softkey("b","sk.back"),
       a:{label:tr("sk.note"),fn:function(){ markThought(); }}
@@ -749,7 +749,7 @@ function renderLow(){
     title.appendChild(el("span","",tr("reader.note")));
     page.appendChild(document.createTextNode(d.text));
     LP.softkeys(keys,{
-      select:softkey("select","sk.back"),
+      select:null,
       start:null,
       b:softkey("b","sk.back"),
       a:{label:tr("sk.open"),fn:function(){ jumpLink(d.ch,d.p); }}

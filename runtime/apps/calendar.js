@@ -295,7 +295,7 @@ function listSheet(sh){
   sh.appendChild(ul);
   var keys=el("div");
   LP.softkeys(keys,{
-    select:softkey("select","sk.back"),start:null,
+    select:null,start:null,
     b:softkey("b","sk.back"),a:softkey("a","sk.open",!items.length)
   });
   sh.appendChild(keys);
