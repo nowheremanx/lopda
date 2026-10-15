@@ -268,6 +268,7 @@ textarea::placeholder{color:var(--ink-2)}
 .dict-head input::placeholder{color:var(--ink-2)}
 .dict-head input::-webkit-search-cancel-button{display:none}
 .dict-head .btn{padding:6px 8px;font-size:14px;flex:none}
+.dict-history{flex:none;margin:0;padding:5px 10px 2px;border-bottom:1px solid var(--lcd-3);font-size:13px;line-height:1.2;color:var(--ink-2)}
 .dict-list{flex:1;min-height:0;overflow:auto;padding:2px 0}
 .dict-list li{padding:7px 10px}
 .dict-list li span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -279,13 +280,14 @@ textarea::placeholder{color:var(--ink-2)}
 .dict-sheet .sheet-title{display:flex;gap:8px;align-items:baseline;letter-spacing:.04em;overflow:hidden}
 .dict-sheet .sheet-title span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dict-sheet .sheet-title small{font-size:16px;color:var(--ink-2);flex:none}
-.dict-page{flex:1;min-height:0;overflow:hidden;font-size:16px;line-height:24px;white-space:pre-wrap;word-break:break-word;cursor:pointer}
+.dict-page{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;touch-action:pan-y;user-select:text;-webkit-user-select:text;-webkit-touch-callout:default;font-size:16px;line-height:24px;white-space:pre-wrap;word-break:break-word;cursor:text}
 .dict-page b{display:inline-block;font-weight:400;font-size:13px;line-height:18px;background:var(--ink);color:var(--lcd);padding:0 6px;margin:3px 0}
 .dict-page .big{display:block;text-align:center;font-family:var(--f-pix);font-size:40px;line-height:48px;margin-top:24px}
 .dict-sheet .lcd-menu{flex:1;min-height:0;overflow:auto}
 .dict-sheet .lcd-menu li span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dict-keys{display:flex;gap:6px;justify-content:center;padding:4px 0 6px;flex:none;flex-wrap:wrap}
 .dict-keys .ck{min-width:0}
+.dict-keys .dict-action{min-width:54px}
 
 /* reader: the shelf; a book is whole pages laid out in CSS columns and moved sideways, never scrolled */
 .rd{display:flex;flex-direction:column;overflow:hidden}

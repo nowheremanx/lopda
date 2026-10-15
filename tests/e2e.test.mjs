@@ -501,7 +501,7 @@ test("dictionary: the built-in ECDICT, a word form, history and the word book", 
   assert.deepEqual(lemma, [["run", "lemma"]]);
   await p.click('.gamepad [data-b="a"]');
   await p.fill("#dict-q", "");
-  await p.waitForFunction(() => /最近查过/.test(document.getElementById("dict-list").textContent));
+  await p.waitForFunction(() => /最近查过/.test(document.getElementById("dict-history").textContent));
   assert.match(await p.textContent("#dict-list"), /run[\s\S]*apple/);
   /* review: the word first, A shows the entry */
   await p.click("#dict-words-btn");
@@ -512,6 +512,63 @@ test("dictionary: the built-in ECDICT, a word form, history and the word book", 
   /* LP.dict.lookup for other programs */
   const r = await p.evaluate(() => LP.dict.lookup("Apple").then((r) => r.map((x) => [x.book, x.word, x.how])));
   assert.deepEqual(r[0], ["ecdict", "apple", "exact"]);
+  assert.deepEqual(errors, []);
+});
+
+test("dictionary: browse matches, restore the selected row, and save selected text as a note", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await dictPage(t);
+  await typeWord(p, "a");
+  await p.waitForFunction(() => document.querySelectorAll("#dict-list li:not(.label)").length > 12);
+  await p.evaluate(() => { const list = document.getElementById("dict-list"); list.style.flex = "0 0 140px"; list.style.height = "140px"; });
+  for (let i = 0; i < 10; i++) await p.keyboard.press("ArrowDown");
+  const savedScroll = await p.evaluate(() => document.getElementById("dict-list").scrollTop);
+  assert.ok(savedScroll > 0);
+  const picked = await p.textContent("#dict-list li.on");
+  await p.click("#dict-list li.on");
+  await p.waitForFunction(() => document.querySelector("#dict-sheet .dict-page")?.textContent.length > 0);
+  assert.equal(await p.evaluate(() => getComputedStyle(document.querySelector("#dict-sheet .dict-page")).overflowY), "auto");
+  await p.keyboard.press("ArrowRight");
+  await p.waitForFunction((before) => document.querySelector("#dict-sheet .sheet-title span")?.textContent !== before, picked);
+  const next = await p.textContent("#dict-sheet .sheet-title span");
+  await p.keyboard.press("z");
+  assert.equal(await p.textContent("#dict-list li.on"), next);
+  assert.equal(await p.evaluate(() => document.getElementById("dict-list").scrollTop), savedScroll);
+
+  await p.click("#dict-list li.on");
+  await p.waitForFunction(() => document.querySelector("#dict-sheet .dict-page")?.textContent.length > 0);
+  await p.evaluate(() => {
+    const page = document.querySelector("#dict-sheet .dict-page");
+    const range = document.createRange();
+    range.selectNodeContents(page);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+  });
+  await p.waitForFunction(() => !document.querySelector("#dict-sheet .dict-note").disabled);
+  await p.click("#dict-sheet .dict-copy");
+  await p.waitForFunction(() => /已复制/.test(document.getElementById("toast").textContent));
+  await p.evaluate(() => {
+    const page = document.querySelector("#dict-sheet .dict-page");
+    const range = document.createRange();
+    range.selectNodeContents(page);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+  });
+  await p.waitForFunction(() => !document.querySelector("#dict-sheet .dict-note").disabled);
+  await p.click("#dict-sheet .dict-note");
+  await p.waitForFunction(() => /已存入《词典》笔记/.test(document.getElementById("toast").textContent));
+  await p.keyboard.press("z");
+  await p.fill("#dict-q", "run");
+  await p.press("#dict-q", "Enter");
+  await p.waitForFunction(() => /跑/.test(document.querySelector("#dict-sheet .dict-page")?.textContent || ""));
+  const entryHeight = await p.evaluate(() => {
+    const page = document.querySelector("#dict-sheet .dict-page");
+    return [page.scrollHeight, page.clientHeight];
+  });
+  assert.ok(entryHeight[0] > entryHeight[1], "the long entry has content to scroll");
+  await p.keyboard.press("ArrowDown");
+  assert.ok(await p.evaluate(() => document.querySelector("#dict-sheet .dict-page").scrollTop > 0));
   assert.deepEqual(errors, []);
 });
 

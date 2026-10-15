@@ -67,6 +67,9 @@
 
       "app.dict": "词典",
       "dict.ph": "输入英文单词", "dict.words": "生词本", "dict.books": "词典", "dict.back": "返回", "dict.page": "翻页",
+      "dict.prev": "前词", "dict.next": "后词", "dict.copy": "复制", "dict.note": "笔记",
+      "dict.copied": "已复制", "dict.copyfail": "复制失败", "dict.notename": "《词典》",
+      "dict.notetext": "词条：{word}\n「{text}」", "dict.noted": "已存入《词典》笔记", "dict.notefail": "笔记保存失败",
       "dict.history": "最近查过", "dict.nohistory": "输入单词，候选会出现在这里。A 或回车查词。",
       "dict.loading": "词典读取中…", "dict.loadfail": "词典读不出来：{msg}", "dict.notfound": "查不到「{w}」",
       "dict.lemma": "{w} → {base}", "dict.near": "相近的词",
@@ -276,6 +279,9 @@
 
       "app.dict": "Dict",
       "dict.ph": "Type an English word", "dict.words": "Words", "dict.books": "Books", "dict.back": "Back", "dict.page": "Page",
+      "dict.prev": "Prev", "dict.next": "Next", "dict.copy": "Copy", "dict.note": "Note",
+      "dict.copied": "Copied", "dict.copyfail": "Copy failed", "dict.notename": "Dictionary",
+      "dict.notetext": "Word: {word}\n“{text}”", "dict.noted": "Saved to Dictionary notes", "dict.notefail": "Note could not be saved",
       "dict.history": "Recent", "dict.nohistory": "Type a word; matches show here. A or Enter looks it up.",
       "dict.loading": "Reading dictionaries…", "dict.loadfail": "Cannot read the dictionaries: {msg}", "dict.notfound": "No entry for \"{w}\"",
       "dict.lemma": "{w} → {base}", "dict.near": "Close matches",
