@@ -41,7 +41,39 @@ function roll({ size = 4, res = 1, name = "海边" } = {}) {
 const jpegsFor = (r, len = 3000) => r.frames.map((f, k) => f.blank ? null : jpeg(len + k, k + 1));
 const code = (fn) => { try { fn(); } catch (e) { return e.code; } return "no error"; };
 
-test("written and read back byte for byte: metadata, pixels and every JPEG", () => {
+function pngChunk(bytes, wanted) {
+  for (let o = 8; o + 12 <= bytes.length;) {
+    const len = Buffer.from(bytes).readUInt32BE(o), type = Buffer.from(bytes.subarray(o + 4, o + 8)).toString("ascii");
+    if (type === wanted) return { start: o, data: o + 8, length: len, end: o + 12 + len };
+    o += 12 + len;
+  }
+  return null;
+}
+function withLpDa(pngBytes, payload) {
+  const source = Buffer.from(pngBytes), existing = pngChunk(source, "lpDa");
+  const chunk = Buffer.alloc(12 + payload.length);
+  chunk.writeUInt32BE(payload.length, 0); chunk.write("lpDa", 4, "ascii"); Buffer.from(payload).copy(chunk, 8);
+  chunk.writeUInt32BE(N.crc32(chunk.subarray(4, 8 + payload.length)), 8 + payload.length);
+  if (existing) return new Uint8Array(Buffer.concat([source.subarray(0, existing.start), chunk, source.subarray(existing.end)]));
+  const iend = pngChunk(source, "IEND");
+  return new Uint8Array(Buffer.concat([source.subarray(0, iend.start), chunk, source.subarray(iend.start)]));
+}
+function v1Negative(pngBytes, r, jpegs) {
+  const latent = []; let jpegBytes = 0;
+  jpegs.forEach((j) => {
+    if (j && j.length) { latent.push([jpegBytes, j.length]); jpegBytes += j.length; }
+    else latent.push(null);
+  });
+  const json = Buffer.from(JSON.stringify({ roll: r, latent }), "utf8");
+  const data = Buffer.alloc(14 + json.length + jpegBytes + 4);
+  Buffer.from(N.MAGIC, "ascii").copy(data, 0); data[9] = 1; data.writeUInt32BE(json.length, 10); json.copy(data, 14);
+  let o = 14 + json.length;
+  jpegs.forEach((j) => { if (j && j.length) { Buffer.from(j).copy(data, o); o += j.length; } });
+  data.writeUInt32BE(N.crc32(data, 0, o), o);
+  return withLpDa(pngBytes, data);
+}
+
+test("v2 round trip byte for byte: metadata, pixels and every JPEG", () => {
   for (const M of [N, N5]) {
     const r = roll(), j = jpegsFor(r), out = M.pack(png(), r, j);
     const back = M.unpack(out);
@@ -49,6 +81,30 @@ test("written and read back byte for byte: metadata, pixels and every JPEG", () 
     assert.equal(back.jpegs.length, j.length);
     back.jpegs.forEach((b, k) => { if (j[k] === null) assert.equal(b, null); else assert.ok(Buffer.from(b).equals(Buffer.from(j[k])), "jpeg " + k); });
   }
+});
+
+test("a v1 negative still reads with its original roll and JPEGs", () => {
+  const r = roll(), j = jpegsFor(r), out = v1Negative(png(), r, j);
+  const back = N.unpack(out);
+  assert.deepEqual(plain(back.roll), r);
+  back.jpegs.forEach((b, k) => {
+    if (j[k] === null) assert.equal(b, null);
+    else assert.ok(Buffer.from(b).equals(Buffer.from(j[k])), "jpeg " + k);
+  });
+});
+
+test("v2 packs pixels four per byte, most significant bits first", () => {
+  const r = roll({ size: 1 });
+  r.frames[0].px = "0123" + r.frames[0].px.slice(4);
+  const out = N.pack(png(), r, jpegsFor(r)), chunk = pngChunk(out, "lpDa");
+  const jsonLength = Buffer.from(out).readUInt32BE(chunk.data + 10);
+  assert.equal(out[chunk.data + 14 + jsonLength], 0x1b);
+});
+
+test("packing does not mutate the roll or its frames", () => {
+  const r = roll(), original = r.frames[0].px;
+  N.pack(png(), r, jpegsFor(r));
+  assert.equal(r.frames[0].px, original);
 });
 
 test("the picture stays a valid PNG: the chunk sits right before IEND, every chunk CRC is right, the image data is untouched", () => {
@@ -104,10 +160,20 @@ test("not a negative: a PNG without the chunk, a JPEG, nothing", () => {
 test("a negative from a newer format version is refused, not half read", () => {
   const out = N.pack(png(), roll(), jpegsFor(roll())), c = Buffer.from(out.buffer);
   const at = c.indexOf("LOPDA-NEG", 0, "latin1"), start = c.indexOf("lpDa", 0, "latin1"), len = c.readUInt32BE(start - 4);
-  out[at + 9] = 2;
+  out[at + 9] = 3;
   c.writeUInt32BE(N.crc32(out.subarray(at, at + len - 4)), at + len - 4);
   c.writeUInt32BE(N.crc32(out.subarray(start, start + 4 + len)), start + 4 + len);
   assert.equal(code(() => N.unpack(out)), "version");
+});
+
+test("a v2 chunk truncated inside PIXELS is damaged even with valid lengths and CRCs", () => {
+  const r = roll({ size: 1 }), j = jpegsFor(r), out = N.pack(png(), r, j);
+  const chunk = pngChunk(out, "lpDa"), data = Buffer.from(out.subarray(chunk.data, chunk.data + chunk.length));
+  const jsonEnd = 14 + data.readUInt32BE(10), pixelBytes = 128 * r.res * 112 * r.res / 4;
+  const truncated = Buffer.alloc(jsonEnd + pixelBytes - 1 + 4);
+  data.copy(truncated, 0, 0, jsonEnd + pixelBytes - 1);
+  truncated.writeUInt32BE(N.crc32(truncated, 0, truncated.length - 4), truncated.length - 4);
+  assert.equal(code(() => N.unpack(withLpDa(out, truncated))), "damaged");
 });
 
 test("bad metadata is refused when writing and when reading", () => {
@@ -125,8 +191,10 @@ test("bad metadata is refused when writing and when reading", () => {
 test("a whole fine-grain roll: 16 frames with 120 KB JPEGs writes and reads", () => {
   const r = roll({ size: 16, res: 2 }), j = r.frames.map((f, k) => jpeg(120 * 1024, 100 + k));
   const out = N.pack(png(64, 64), r, j);
-  assert.ok(out.length > 16 * 120 * 1024 + 16 * 256 * 224, "it is all in there: " + out.length);
+  assert.ok(out.length > 16 * 120 * 1024 + 16 * 256 * 224 / 4, "it is all in there: " + out.length);
   assert.ok(out.length < 4 * 1024 * 1024, "under the 4 MB import limit: " + out.length);
+  const old = v1Negative(png(64, 64), r, j);
+  assert.ok(old.length - out.length >= 650 * 1024, "v1 " + old.length + " bytes, v2 " + out.length + " bytes");
   const back = N.unpack(out);
   assert.deepEqual(plain(back.roll), r);
   back.jpegs.forEach((b, k) => assert.ok(Buffer.from(b).equals(Buffer.from(j[k])), "jpeg " + k));

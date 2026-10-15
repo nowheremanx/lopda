@@ -6,15 +6,16 @@
  * docs/design/darkroom.md section 5.
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  *
- * Chunk data, format version 1:
- *   "LOPDA-NEG" (9 bytes) | version (1 byte) | JSON length (uint32 BE) | JSON (UTF-8) | JPEGs end to end | CRC32 (uint32 BE)
- * The CRC covers everything before it. JSON: {roll, latent}; latent[k] is [offset, length] into the JPEG area for
- * frame k, or null (a fogged frame, or one whose latent image was lost).
+ * Chunk data, format version 2:
+ *   "LOPDA-NEG" (9 bytes) | version (1 byte) | JSON length (uint32 BE) | JSON (UTF-8) | 2-bit pixels | JPEGs | CRC32 (uint32 BE)
+ * The CRC covers everything before it. JSON: {roll, latent}, with px omitted from each frame; pixels are packed
+ * four per byte, most significant bits first. latent[k] is [offset, length] into the JPEG area for frame k, or null.
+ * Format version 1 stored each frame's px string in the JSON and put JPEGs immediately after it.
  */
 (function(){
 "use strict";
 
-var MAGIC="LOPDA-NEG", VERSION=1, CHUNK="lpDa";
+var MAGIC="LOPDA-NEG", VERSION=2, CHUNK="lpDa";
 var SIG=[137,80,78,71,13,10,26,10];
 
 /* every failure is one of three: not a Lo-PDA negative at all, a damaged one, or one from a newer handheld */
@@ -100,6 +101,21 @@ function checkRoll(roll){
   return true;
 }
 
+function rollWithoutPixels(roll){
+  var copy={}, key;
+  for(key in roll) if(Object.prototype.hasOwnProperty.call(roll,key)){
+    if(key==="frames"){
+      copy.frames=[];
+      for(var i=0;i<roll.frames.length;i++){
+        var frame={}, source=roll.frames[i];
+        for(var frameKey in source) if(Object.prototype.hasOwnProperty.call(source,frameKey) && frameKey!=="px") frame[frameKey]=source[frameKey];
+        copy.frames.push(frame);
+      }
+    }else copy[key]=roll[key];
+  }
+  return copy;
+}
+
 /* png: the visible negative (any valid PNG). roll: the roll document. jpegs: per frame a Uint8Array or null.
    Returns a new PNG with the lpDa chunk just before IEND (any lpDa already in it is dropped). */
 function pack(png,roll,jpegs){
@@ -110,12 +126,19 @@ function pack(png,roll,jpegs){
     if(j && j.length){ latent.push([bin,j.length]); bin+=j.length; }
     else latent.push(null);
   });
-  var json=utf8(JSON.stringify({roll:roll, latent:latent}));
-  var data=new Uint8Array(MAGIC.length+1+4+json.length+bin+4), o=0;
+  var pixelsPerFrame=128*roll.res*112*roll.res, pixelBytes=roll.frames.length*pixelsPerFrame/4;
+  var json=utf8(JSON.stringify({roll:rollWithoutPixels(roll), latent:latent}));
+  var data=new Uint8Array(MAGIC.length+1+4+json.length+pixelBytes+bin+4), o=0;
   data.set(ascii(MAGIC),0); o=MAGIC.length;
   data[o++]=VERSION;
   setU32(data,o,json.length); o+=4;
   data.set(json,o); o+=json.length;
+  for(var k=0;k<roll.frames.length;k++){
+    var px=roll.frames[k].px;
+    for(var p=0;p<pixelsPerFrame;p+=4){
+      data[o++]=((px.charCodeAt(p)-48)<<6)|((px.charCodeAt(p+1)-48)<<4)|((px.charCodeAt(p+2)-48)<<2)|(px.charCodeAt(p+3)-48);
+    }
+  }
   jpegs.forEach(function(j){ if(j && j.length){ data.set(j,o); o+=j.length; } });
   setU32(data,o,crc32(data,0,o));
   var list=chunks(png), keep=list.filter(function(c){ return c.type!==CHUNK; }), extra=chunkBytes(CHUNK,data);
@@ -128,6 +151,17 @@ function pack(png,roll,jpegs){
   return out;
 }
 
+function unpackPixels(d,start,want){
+  var parts=[], codes=[], end=start+want/4;
+  for(var o=start;o<end;o++){
+    var b=d[o];
+    codes.push(48+(b>>>6),48+((b>>>4)&3),48+((b>>>2)&3),48+(b&3));
+    if(codes.length>=8192){ parts.push(String.fromCharCode.apply(null,codes)); codes=[]; }
+  }
+  if(codes.length) parts.push(String.fromCharCode.apply(null,codes));
+  return parts.join("");
+}
+
 /* bytes of a picked file -> {roll, jpegs}. Throws {code: "notneg" | "damaged" | "version"}. */
 function unpack(u8){
   var list=chunks(u8), c=null;
@@ -136,18 +170,33 @@ function unpack(u8){
   if(crc32(u8,c.start+4,c.data+c.len)!==u32(u8,c.data+c.len)) throw fail("damaged","chunk CRC");
   var d=u8.subarray(c.data,c.data+c.len), head=MAGIC.length+1+4;
   if(d.length<head+4 || asciiAt(d,0,MAGIC.length)!==MAGIC) throw fail("notneg","magic");
-  if(d[MAGIC.length]!==VERSION) throw fail("version","format "+d[MAGIC.length]);
+  var version=d[MAGIC.length];
+  if(version!==1 && version!==2) throw fail("version","format "+version);
   if(crc32(d,0,d.length-4)!==u32(d,d.length-4)) throw fail("damaged","content CRC");
   var jlen=u32(d,MAGIC.length+1);
   if(head+jlen>d.length-4) throw fail("damaged","JSON length");
   var meta;
   try{ meta=JSON.parse(fromUtf8(d.subarray(head,head+jlen))); }catch(e){ throw fail("damaged","JSON"); }
+  var binStart=head+jlen, pixelBytes=0;
+  if(version===2){
+    if(!meta || !meta.roll || !Array.isArray(meta.roll.frames) || !int(meta.roll.size,1,36) ||
+      meta.roll.frames.length!==meta.roll.size || (meta.roll.res!==1 && meta.roll.res!==2)) throw fail("damaged","roll");
+    var pixelsPerFrame=128*meta.roll.res*112*meta.roll.res;
+    pixelBytes=meta.roll.frames.length*pixelsPerFrame/4;
+    if(binStart+pixelBytes>d.length-4) throw fail("damaged","pixels");
+    var pixelStart=binStart;
+    for(var k=0;k<meta.roll.frames.length;k++){
+      if(!meta.roll.frames[k] || typeof meta.roll.frames[k]!=="object") throw fail("damaged","roll");
+      meta.roll.frames[k].px=unpackPixels(d,pixelStart,pixelsPerFrame);
+      pixelStart+=pixelsPerFrame/4;
+    }
+  }
   if(!meta || !checkRoll(meta.roll) || !Array.isArray(meta.latent) || meta.latent.length!==meta.roll.frames.length) throw fail("damaged","roll");
-  var binStart=head+jlen, binLen=d.length-4-binStart;
+  var jpegStart=binStart+pixelBytes, binLen=d.length-4-jpegStart;
   var jpegs=meta.latent.map(function(L){
     if(L===null) return null;
     if(!Array.isArray(L) || !int(L[0],0,binLen) || !int(L[1],4,binLen) || L[0]+L[1]>binLen) throw fail("damaged","latent offsets");
-    var j=d.slice(binStart+L[0],binStart+L[0]+L[1]);
+    var j=d.slice(jpegStart+L[0],jpegStart+L[0]+L[1]);
     if(j[0]!==0xFF || j[1]!==0xD8) throw fail("damaged","not a JPEG");
     return j;
   });
