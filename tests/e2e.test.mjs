@@ -400,7 +400,7 @@ test("calendar: a leap-month birthday falls in the regular month in a year witho
   for (let i = 0; i < cur.day - 15; i++) await minus(1).click();
   await p.click("#cal-sheet .sk-a");
   await p.keyboard.press("z");   /* B closes the day sheet */
-  await p.click("#cal-keys .sk-select");
+  await p.click("#cal-list-btn");
   const row = await p.textContent("#cal-sheet .cal-list li");
   assert.ok(row.includes("闰月生日"), row);
   assert.ok(row.includes(`${days}天后 · ${on.m}/${on.d}`), `${row} (expected ${days}天后 · ${on.m}/${on.d})`);
@@ -458,7 +458,7 @@ test("calendar: START goes to a date, Gregorian or lunar, by keys, keyboard digi
   assert.deepEqual(await sel(), [`${mid.y}年${mid.m}月`, String(mid.d)]);
   assert.match(await p.textContent("#cal-grid .cal-cell.sel span"), /中秋/);
   /* a leap month, on the on-screen pad: 2020 闰四月十五 */
-  await p.click("#cal-keys .sk-start");
+  await p.click("#cal-ym");
   await p.locator("#cal-sheet .cal-kind .btn", { hasText: "按农历" }).click();
   for (const k of "20200415") await p.locator("#cal-sheet .cal-numpad .btn", { hasText: new RegExp("^" + k + "$") }).click();
   await p.locator("#cal-sheet .cal-kind .cal-leap").click();
@@ -484,33 +484,39 @@ test("calendar: START goes to a date, Gregorian or lunar, by keys, keyboard digi
   assert.deepEqual(notBlocked(c.errors), []);
 });
 
-test("calendar: every soft-key screen fits one row at the smallest screen size", { skip, timeout: 30000 }, async (t) => {
+test("calendar: month grid lunar lines fit at small screen sizes", { skip, timeout: 30000 }, async (t) => {
   const c = await calPage(t);
   const { p } = c;
   await c.boot(); await c.open();
-  await p.setViewportSize({ width: 331, height: 359 });
-  const assertOneRow = async (selector) => {
-    const value = await p.locator(selector).evaluate((bar) => {
-      const boxes = [...bar.children].map((slot) => slot.getBoundingClientRect());
-      return { height: bar.getBoundingClientRect().height, widths: boxes.map((box) => box.width), tops: boxes.map((box) => box.top) };
-    });
-    assert.equal(value.height, 44, selector);
-    assert.deepEqual(new Set(value.tops).size, 1, selector);
-    assert.ok(value.widths.every((width) => width === value.widths[0]), selector);
-  };
+  assert.equal(await p.locator("#cal-keys").count(), 0);
+  assert.equal(await p.textContent("#cal-list-btn"), "纪念日");
+  assert.equal(await p.textContent("#cal-today"), "今天");
+  for (const height of [359, 473]) {
+    await p.setViewportSize({ width: 375, height: 844 });
+    await p.evaluate((height) => {
+      const screen = document.getElementById("screen"), status = screen.querySelector(".status");
+      screen.style.flex = "none";
+      screen.style.height = (height + 12 + status.getBoundingClientRect().height) + "px";
+    }, height);
+    assert.equal(await p.locator("#v-cal").evaluate((view) => view.getBoundingClientRect().height), height);
+    const clipped = await p.locator("#cal-grid .cal-cell").evaluateAll((cells) => cells.flatMap((cell) => {
+      const text = cell.querySelector("span"), cellBottom = cell.getBoundingClientRect().bottom;
+      return text.getBoundingClientRect().bottom <= cellBottom + 0.1 ? [] : [{ day: cell.querySelector("b").textContent, text: text.textContent, bottom: text.getBoundingClientRect().bottom, cellBottom }];
+    }));
+    assert.deepEqual(clipped, [], `lunar lines fit at 331x${height}`);
+  }
   const sheetBar = "#cal-sheet .softkeys";
-  await assertOneRow("#cal-keys");
-  await p.click("#cal-keys .sk-a");
-  await assertOneRow(sheetBar);
+  await p.click("#cal-info");
+  assert.equal(await p.locator(sheetBar).count(), 1);
   await p.click("#cal-sheet .sk-a");
-  await assertOneRow(sheetBar);
+  assert.equal(await p.locator(sheetBar).count(), 1);
   await p.click("#cal-sheet .sk-b");
   await p.click("#cal-sheet .sk-b");
-  await p.click("#cal-keys .sk-select");
-  await assertOneRow(sheetBar);
+  await p.click("#cal-list-btn");
+  assert.equal(await p.locator(sheetBar).count(), 1);
   await p.click("#cal-sheet .sk-b");
-  await p.click("#cal-keys .sk-start");
-  await assertOneRow(sheetBar);
+  await p.click("#cal-ym");
+  assert.equal(await p.locator(sheetBar).count(), 1);
   assert.deepEqual(notBlocked(c.errors), []);
 });
 

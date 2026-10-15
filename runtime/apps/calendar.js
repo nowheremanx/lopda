@@ -178,7 +178,6 @@ function cellText(y,m,d,lu){
   return {t:tr("cal.cellday",{day:list("cal.lday")[lu.day-1]})};
 }
 function render(){
-  renderMainKeys();
   if(!C.cells.length) buildGrid();
   C.todayN=todayN();
   var lu=L.fromSolar(C.y,C.m,C.d);
@@ -230,19 +229,13 @@ function cellTap(i){
 })();
 $("cal-prev").onclick=function(){ if(shiftMonth(-1)) render(); };
 $("cal-next").onclick=function(){ if(shiftMonth(1)) render(); };
+$("cal-today").onclick=function(){ goToday(); };
+$("cal-list-btn").onclick=function(){ openSheet("list"); };
 $("cal-info").onclick=function(){ openSheet("day"); };
 $("cal-ym").onclick=function(){ openJump(); };
 function goToday(){ select(todayN()); render(); }
 function softkey(key,label,disabled){
   return {label:tr(label),disabled:!!disabled,fn:function(){ calButton(key); }};
-}
-function renderMainKeys(){
-  LP.softkeys($("cal-keys"),{
-    select:softkey("select","sk.anniv"),
-    start:softkey("start","sk.jump"),
-    b:softkey("b","sk.today",selN()===todayN()),
-    a:softkey("a","sk.open")
-  });
 }
 
 /* ---------- sheets: the day, the list of dates, the add form ---------- */
