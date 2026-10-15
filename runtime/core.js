@@ -28,6 +28,25 @@ var S = {
 var LP = window.LP = {$:$, S:S, I18N:I18N, tr:tr, builtins:[]};
 LP.builtin = function(b){ LP.builtins.push(b); return b; };
 LP.each = function(hook){ var args=Array.prototype.slice.call(arguments,1); LP.builtins.forEach(function(b){ if(b[hook]) b[hook].apply(b,args); }); };
+LP.softkeys = function(container,keys){
+  var names=["select","start","b","a"], labels=["SELECT","START","B","A"];
+  container.textContent="";
+  container.classList.add("softkeys");
+  container.onpointerdown=function(e){
+    var target=document.elementFromPoint(e.clientX,e.clientY);
+    var disabled=target && target.closest && target.closest(".sk:disabled");
+    if(disabled && container.contains(disabled)) sfx("err");
+  };
+  names.forEach(function(name,i){
+    var value=keys[name], empty=!value, disabled=empty || !!value.disabled || typeof value.fn!=="function";
+    var button=document.createElement("button"), key=document.createElement("i"), label=document.createElement("span");
+    button.className="sk sk-"+name; button.type="button"; button.disabled=disabled;
+    key.textContent=labels[i]; label.textContent=empty ? "" : value.label;
+    button.appendChild(key); button.appendChild(label);
+    if(!disabled) button.onclick=value.fn;
+    container.appendChild(button);
+  });
+};
 
 /* ---------- small utils ---------- */
 var EMOJI=/[\p{Extended_Pictographic}\u{1F1E6}-\u{1F1FF}\u{1F3FB}-\u{1F3FF}\u{FE0F}\u{200D}\u{20E3}]/gu;
@@ -151,7 +170,7 @@ function show(name){
 $("home-key").onclick=function(){ LP.flushNote(); show("home"); sfx("home"); };
 
 /* ---------- sound: tiny square-wave chips through Web Audio (the named sounds themselves are in chip.js) ---------- */
-var RUNTIME_VERSION="0.16.0";   /* keep in step with VERSION in sw.js */
+var RUNTIME_VERSION="0.17.0";   /* keep in step with VERSION in sw.js */
 /* One volume, five steps, 0 is off (decisions.md section 10). It sets the master gain and nothing else does.
    Under the master: `ui` for the runtime's own clicks, held at a fraction so they stay as quiet as they always were
    (step 2 gives them 0.11, their level before 0.12.0), and `app` for apps, music and the cartridge at the full step. */

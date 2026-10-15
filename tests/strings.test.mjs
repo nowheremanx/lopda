@@ -36,6 +36,17 @@ test("no empty strings and no emoji", () => {
   }
 });
 
+test("soft-key labels fit in one fixed slot", () => {
+  const labels = Object.keys(S.STR.zh).filter((k) => k.startsWith("sk."));
+  assert.ok(labels.length > 0, "found soft-key labels");
+  for (const lang of S.LANGS) for (const key of labels) {
+    const value = S.STR[lang][key];
+    const cjk = (value.match(/\p{Script=Han}/gu) || []).length;
+    const latin = (value.match(/[A-Za-z]/g) || []).length;
+    assert.ok(cjk <= 4 && latin <= 7, `${lang} ${key} is too long: ${value}`);
+  }
+});
+
 test("every literal tr() key in the runtime scripts exists", () => {
   const code = RUNTIME_JS.map(read).join("\n");
   const keys = new Set([...code.matchAll(/\btr\(\s*"([^"]+)"\s*[,)]/g)].map((m) => m[1]));
