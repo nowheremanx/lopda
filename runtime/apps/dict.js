@@ -26,7 +26,7 @@ var D={
   refs:null, loading:null,
   q:"", cand:[], pick:0,    // the word box, its candidate rows and the highlighted one
   sheet:"", entry:null,     // "entry" | "words" | "books"; the entry on screen {word, results, back}
-  bpick:0, wpick:0, listScroll:0, selectedText:"",
+  bpick:0, wpick:0, listScroll:0, selectedText:"", selectedText:"",
   review:null               // {i, shown}: reviewing the word book from word i
 };
 
@@ -191,7 +191,7 @@ function openEntry(word,back,review,pick){
   $("dict-q").blur();
   D.entry={word:word, results:null, back:back||"", shown:!review, pick:pick==null ? -1 : pick, scrollTop:0};
   D.selectedText="";
-  D.sheet="entry"; renderSheet();
+  D.selectedText=""; D.sheet="entry"; renderSheet();
   var mine=D.entry;
   lookup(word).then(function(r){
     if(D.entry!==mine) return;
@@ -204,6 +204,8 @@ function headOf(e){ var r=e.results; return r && r.length && r[0].how!=="exact" 
 function entrySheet(sh){
   var e=D.entry, word=headOf(e), title=el("p","sheet-title");
   title.appendChild(el("span","",word));
+  var count=el("small","");
+  title.appendChild(count);
   sh.appendChild(title);
   var page=el("div","dict-page"); page.id="dict-page";
   if(!e.shown){ page.appendChild(el("span","big",e.word)); }
@@ -220,7 +222,7 @@ function entrySheet(sh){
     });
   }
   page.scrollTop=e.scrollTop||0;
-  page.addEventListener("scroll",function(){ e.scrollTop=page.scrollTop; });
+  page.addEventListener("scroll",function(){ e.scrollTop=page.scrollTop; updateEntryPosition(e,page,count); });
   sh.appendChild(page);
   var keys=el("div","dict-keys");
   var mark=inBook(word) ? tr("dict.inbook") : tr("dict.add");
@@ -243,7 +245,20 @@ function entrySheet(sh){
   keys.appendChild(copy); keys.appendChild(noteBtn);
   sh.appendChild(keys);
   updateEntryActions();
-  if(D.review) title.appendChild(el("small","",tr("dict.of",{i:D.review.i+1, n:D.set.words.length})));
+  updateEntryPosition(e,page,count);
+}
+function entryPageInfo(page){
+  var step=Math.max(1,Math.floor(page.clientHeight/24)-1)*24;
+  var maxTop=Math.max(0,Math.floor((page.scrollHeight-page.clientHeight)/24)*24);
+  var pages=Math.max(1,Math.ceil(maxTop/step)+1);
+  var current=maxTop && page.scrollTop>=maxTop-1 ? pages : Math.min(pages,Math.floor(page.scrollTop/step)+1);
+  return {step:step, maxTop:maxTop, current:current, pages:pages};
+}
+function updateEntryPosition(e,page,count){
+  var info=entryPageInfo(page), labels=[];
+  if(D.review) labels.push(tr("dict.of",{i:D.review.i+1, n:D.set.words.length}));
+  if(info.pages>1) labels.push(info.current+"/"+info.pages);
+  count.textContent=labels.join(" ");
 }
 function stepMatch(k){
   if(!D.entry || D.entry.pick<0) return;
@@ -256,7 +271,8 @@ function stepMatch(k){
 function scrollEntry(k){
   var page=$("dict-page");
   if(!page) return;
-  page.scrollTop+=k*Math.max(48,Math.floor(page.clientHeight*.8));
+  var info=entryPageInfo(page), aligned=Math.round(page.scrollTop/24)*24;
+  page.scrollTo({top:Math.max(0,Math.min(info.maxTop,aligned+k*info.step)), behavior:"smooth"});
 }
 function selectedEntryText(){
   var page=$("dict-page"), sel=window.getSelection();
@@ -272,9 +288,7 @@ function updateEntryActions(){
   if(copy) copy.disabled=!active;
   if(noteBtn) noteBtn.disabled=!active;
 }
-function selectionChanged(){
-  if(D.sheet==="entry") updateEntryActions();
-}
+function selectionChanged(){ if(D.sheet==="entry") updateEntryActions(); }
 document.addEventListener("selectionchange",selectionChanged);
 function copyOld(text){
   var ta=el("textarea"); ta.value=text; ta.style.position="fixed"; ta.style.opacity="0"; document.body.appendChild(ta); ta.select();

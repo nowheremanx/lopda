@@ -597,11 +597,36 @@ test("dictionary: browse matches, restore the selected row, and save selected te
   await p.waitForFunction(() => /跑/.test(document.querySelector("#dict-sheet .dict-page")?.textContent || ""));
   const entryHeight = await p.evaluate(() => {
     const page = document.querySelector("#dict-sheet .dict-page");
-    return [page.scrollHeight, page.clientHeight];
+    return { height: page.scrollHeight, visible: page.clientHeight, top: page.scrollTop };
   });
-  assert.ok(entryHeight[0] > entryHeight[1], "the long entry has content to scroll");
+  assert.ok(entryHeight.height > entryHeight.visible, "the long entry has content to scroll");
+  const paging = {
+    step: Math.max(1, Math.floor(entryHeight.visible / 24) - 1) * 24,
+    maxTop: Math.max(0, Math.floor((entryHeight.height - entryHeight.visible) / 24) * 24)
+  };
+  const pages = Math.max(1, Math.ceil(paging.maxTop / paging.step) + 1);
+  const target = Math.min(paging.maxTop, Math.round(entryHeight.top / 24) * 24 + paging.step);
   await p.keyboard.press("ArrowDown");
-  assert.ok(await p.evaluate(() => document.querySelector("#dict-sheet .dict-page").scrollTop > 0));
+  await p.waitForFunction((top) => document.querySelector("#dict-sheet .dict-page")?.scrollTop === top, target);
+  assert.equal(await p.evaluate(() => document.querySelector("#dict-sheet .dict-page").scrollTop % 24), 0);
+  assert.equal(await p.textContent("#dict-sheet .sheet-title small"), `2/${pages}`);
+
+  await p.click('.gamepad [data-b="start"]');
+  await p.keyboard.press("z");
+  await p.click("#dict-words-btn");
+  await p.click("#dict-sheet .ck-a");
+  await p.waitForFunction(() => document.querySelector("#dict-sheet .dict-page .big")?.textContent === "run");
+  await p.keyboard.press("x");
+  await p.waitForFunction(() => /跑/.test(document.querySelector("#dict-sheet .dict-page")?.textContent || ""));
+  const reviewPages = await p.evaluate(() => {
+    const page = document.querySelector("#dict-sheet .dict-page");
+    const step = Math.max(1, Math.floor(page.clientHeight / 24) - 1) * 24;
+    const maxTop = Math.max(0, Math.floor((page.scrollHeight - page.clientHeight) / 24) * 24);
+    return Math.max(1, Math.ceil(maxTop / step) + 1);
+  });
+  assert.equal(await p.textContent("#dict-sheet .sheet-title small"), `1/1 1/${reviewPages}`);
+  await p.keyboard.press("ArrowDown");
+  await p.waitForFunction((count) => document.querySelector("#dict-sheet .sheet-title small")?.textContent === `1/1 2/${count}`, reviewPages);
   assert.deepEqual(errors, []);
 });
 
