@@ -109,12 +109,11 @@
     <section class="view dict-view" id="v-dict" hidden>
       <div class="dict-head">
         <input id="dict-q" type="search" enterkeyhint="search" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" maxlength="64" data-i18n-ph="dict.ph" placeholder="输入英文单词">
-        <button class="btn ghost" type="button" id="dict-words-btn" data-i18n="dict.words">生词本</button>
-        <button class="btn ghost" type="button" id="dict-books-btn" data-i18n="dict.books">词典</button>
       </div>
       <p class="hint dict-history" id="dict-history" hidden></p>
       <ul class="lcd-menu dict-list" id="dict-list"></ul>
       <p class="hint dict-note" id="dict-note"></p>
+      <div id="dict-keys"></div>
       <div class="dict-sheet" id="dict-sheet" hidden></div>
       <input type="file" id="dict-file" multiple hidden>
     </section>
@@ -133,6 +132,10 @@
       <div class="rd-book" id="rd-book" hidden>
         <div class="rd-page" id="rd-page"><div class="rd-flow" id="rd-flow"></div></div>
         <div class="rd-foot" id="rd-foot"></div>
+        <div class="rd-keyrow" id="rd-keyrow" hidden>
+          <div id="rd-keys"></div>
+          <button class="rd-copy" id="rd-copy" type="button" hidden data-i18n="reader.copy">复制</button>
+        </div>
         <div class="rd-help" id="rd-help" hidden></div>
       </div>
       <div class="dict-sheet rd-sheet" id="rd-sheet" hidden></div>
@@ -198,10 +201,10 @@
     <section class="view dk" id="v-dark" hidden>
       <div class="bar">
         <h2 data-i18n="dk.title">胶卷盒</h2>
-        <button class="btn" type="button" id="dk-import" data-i18n="dk.import">导入底片</button>
       </div>
       <ul class="lcd-menu dk-list" id="dk-list"></ul>
-      <p class="hint dk-keys" id="dk-keys"></p>
+      <p class="hint dk-status" id="dk-status"></p>
+      <div id="dk-keys"></div>
       <div class="dict-sheet dk-sheet" id="dk-sheet" hidden></div>
       <input type="file" id="dk-file" accept="image/png,image/*" hidden>
     </section>

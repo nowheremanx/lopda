@@ -1,6 +1,6 @@
 {
   "spec": "lopda/1",
-  "generated": "2026-10-14",
+  "generated": "2026-10-15",
   "apps": [
     {
       "spec": "lopda/1",
@@ -141,7 +141,7 @@
         ".0000...........",
         "................"
       ],
-      "version": "1.1.0",
+      "version": "1.1.1",
       "description": "96×96 四色点阵画板：撤销、清空，能导入图片转成点阵，也能导出 PNG。",
       "i18n": {
         "en": {
@@ -155,8 +155,8 @@
         "files"
       ],
       "path": "apps/paint/index.html",
-      "sha256": "0dcc6cb1046e3b86407aef73e07698df5f4089733940980f6929f7f0f7283862",
-      "bytes": 11360
+      "sha256": "0862559f4791dc26a4f0a4c6421bb27aa7f68f693523470c06b40123b4c4ae53",
+      "bytes": 11329
     },
     {
       "spec": "lopda/1",

@@ -52,10 +52,12 @@ var R={
 
 function el(tag,cls,text){ var e=document.createElement(tag); if(cls) e.className=cls; if(text!=null) e.textContent=text; return e; }
 function btn(cls,text,fn){ var b=el("button",cls,text); b.type="button"; b.onclick=fn; return b; }
-function keyBtn(cls,key,label,fn){ var b=btn(cls,null,fn); b.appendChild(el("i","",key)); b.appendChild(document.createTextNode(label)); return b; }
 function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
 function visible(){ return !$("v-reader").hidden; }
 function errMsg(e){ return String((e&&e.message)||(e&&e.code)||e).slice(0,100); }
+function softkey(key,label,disabled){
+  return {label:tr(label), fn:function(){ readerButton(key,true); readerButton(key,false); }};
+}
 function paras(ch){ return R.book.chapters[ch==null?R.ch:ch].paras; }
 function lowerSheet(){ return R.sheet==="def"||R.sheet==="mark"||R.sheet==="note"||R.sheet==="thought"; }
 
@@ -222,6 +224,7 @@ function openBook(id){
     if(!book || !book.chapters || !book.chapters.length) throw new Error("missing");
     R.book=book;
     m.opened=Date.now(); saveMeta(id,true);
+    footer();
     return fontReady().then(function(){
       if(R.id!==id) return;
       var pos=m.pos||{ch:0, p:0, c:0};
@@ -445,19 +448,25 @@ function foot(left,right){
   var f=$("rd-foot"); f.textContent="";
   f.appendChild(el("span","",left)); if(right) f.appendChild(el("b","",right));
 }
-function unitLabel(u){ return tr("reader.units").split("|")[UNITS.indexOf(u)]; }
 function footer(){
   if(!R.book) return;
-  if(R.sel){
-    var f=$("rd-foot"); f.textContent="";
-    f.appendChild(keyBtn("","A",tr("reader.look"),function(){ lookupSel(); }));
-    f.appendChild(keyBtn("","START",tr("reader.quote"),function(){ quote(); }));
-    f.appendChild(keyBtn("","SELECT",unitLabel(R.sel.unit),function(){ cycleUnit(); }));
-    f.appendChild(btn("",tr("reader.copy"),function(){ copySel(); }));
-    return;
+  var selected=!!R.sel, info=$("rd-foot"), row=$("rd-keyrow"), keys=$("rd-keys");
+  info.hidden=selected; row.hidden=!selected;
+  if(selected){
+    LP.softkeys(keys,{
+      select:softkey("select","sk.unit."+({word:"word",sent:"sent",para:"para"}[R.sel.unit]||"word")),
+      start:softkey("start","sk.quote"),
+      b:softkey("b","sk.cancel"),
+      a:softkey("a","sk.lookup")
+    });
+    $("rd-copy").hidden=false;
+  } else {
+    foot(R.back ? tr("reader.linkback") : chapterTitle(R.ch),(R.page+1)+"/"+R.pages);
+    $("rd-copy").hidden=true;
   }
-  foot(R.back ? tr("reader.linkback") : chapterTitle(R.ch),(R.page+1)+"/"+R.pages);
 }
+function copySelection(){ copySel(); }
+$("rd-copy").onclick=copySelection;
 
 /* ---------- touch ----------
    a tap on the sides turns, a swipe turns, a tap in the middle opens the menu; a tap on a link follows it, on an
@@ -678,7 +687,18 @@ function closeLow(quiet){
 function lowTurn(k){ var d=R.low; if(!d) return; var p=d.page+k; if(p<0 || p>=d.pages) return; d.page=p; sfx("move"); renderLow(); }
 /* a paged text box cut to whole lines, as in the dictionary */
 function pageBox(sh,page,count){
-  page.onclick=function(ev){ var r=page.getBoundingClientRect(); lowTurn(ev.clientX<r.left+r.width/3?-1:1); };
+  var x0=null,y0=0,swiped=false;
+  page.addEventListener("pointerdown",function(e){ x0=e.clientX; y0=e.clientY; swiped=false; });
+  page.addEventListener("pointerup",function(e){
+    if(x0===null) return;
+    var dx=e.clientX-x0,dy=e.clientY-y0; x0=null;
+    if(Math.abs(dx)>40 && Math.abs(dx)>Math.abs(dy)*1.2){
+      swiped=true; e.preventDefault(); lowTurn(dx<0?1:-1);
+      setTimeout(function(){ swiped=false; },400);
+    }
+  });
+  page.addEventListener("pointercancel",function(){ x0=null; });
+  page.onclick=function(ev){ if(swiped){ swiped=false; return; } var r=page.getBoundingClientRect(); lowTurn(ev.clientX<r.left+r.width/3?-1:1); };
   var lh=24, h=Math.max(lh,Math.floor(page.clientHeight/lh)*lh), d=R.low;
   page.style.height=h+"px"; page.style.flex="none";
   d.pages=Math.max(1,Math.ceil((page.scrollHeight-2)/h));
@@ -690,7 +710,7 @@ function renderLow(){
   var sh=$("rd-def"); sh.textContent="";
   sh.hidden=!lowerSheet(); if(sh.hidden) return;
   if(R.sheet==="thought") return thoughtSheet(sh);
-  var d=R.low, title=el("p","sheet-title"), count=el("small",""), page=el("div","dict-page"), keys=el("div","dict-keys");
+  var d=R.low, title=el("p","sheet-title"), count=el("small",""), page=el("div","dict-page"), keys=el("div");
   sh.appendChild(title); sh.appendChild(page); sh.appendChild(keys);
   if(R.sheet==="def"){
     var word=headOf(d);
@@ -707,23 +727,33 @@ function renderLow(){
         page.appendChild(document.createTextNode(r.text+"\n"));
       });
     }
-    keys.appendChild(keyBtn("ck","◀▶",tr("dict.page"),function(){ lowTurn(1); }));
-    keys.appendChild(keyBtn("ck","B",tr("dict.back"),function(){ closeLow(); }));
-    if(d.results && d.results.length) keys.appendChild(keyBtn("ck","START",LP.dict.inBook(word) ? tr("dict.inbook") : tr("dict.add"),function(){ LP.dict.toggleWord(word); renderLow(); }));
+    LP.softkeys(keys,{
+      select:null,
+      start:d.results && d.results.length ? {label:tr(LP.dict.inBook(word)?"sk.saved":"sk.addword"),fn:function(){ LP.dict.toggleWord(word); renderLow(); }} : null,
+      b:softkey("b","sk.back"),
+      a:softkey("a","sk.back")
+    });
   } else if(R.sheet==="mark"){
     var mk=markById(d.id);
     title.appendChild(el("span","",tr("reader.mark")));
     page.appendChild(document.createTextNode("「"+(mk ? mk.text : "")+"」\n"));
     page.appendChild(el("b","",tr("reader.thoughts"))); page.appendChild(document.createTextNode("\n"));
     page.appendChild(document.createTextNode(mk && mk.thought ? mk.thought : tr("reader.nothought")));
-    keys.appendChild(keyBtn("ck","B",tr("reader.back"),function(){ closeLow(); }));
-    keys.appendChild(keyBtn("ck ck-a","A",tr("reader.addthought"),function(){ markThought(); }));
-    keys.appendChild(keyBtn(d.armed ? "ck ck-a" : "ck","START",tr(d.armed ? "reader.unmarkconfirm" : "reader.unmark"),function(){ markDelete(); }));
+    LP.softkeys(keys,{
+      select:null,
+      start:{label:tr(d.armed?"sk.confirm":"sk.delete"),fn:function(){ markDelete(); }},
+      b:softkey("b","sk.back"),
+      a:{label:tr("sk.note"),fn:function(){ markThought(); }}
+    });
   } else if(R.sheet==="note"){
     title.appendChild(el("span","",tr("reader.note")));
     page.appendChild(document.createTextNode(d.text));
-    keys.appendChild(keyBtn("ck","B",tr("reader.back"),function(){ closeLow(); }));
-    keys.appendChild(keyBtn("ck ck-a","A",tr("reader.follow"),function(){ jumpLink(d.ch,d.p); }));
+    LP.softkeys(keys,{
+      select:null,
+      start:null,
+      b:softkey("b","sk.back"),
+      a:{label:tr("sk.open"),fn:function(){ jumpLink(d.ch,d.p); }}
+    });
   }
   title.appendChild(count);
   pageBox(sh,page,count);
@@ -779,9 +809,12 @@ function thoughtSheet(sh){
   if(R.low.draft) ta.value=R.low.draft;
   ta.oninput=function(){ if(R.low) R.low.draft=ta.value; };
   sh.appendChild(ta);
-  var keys=el("div","dict-keys");
-  keys.appendChild(keyBtn("ck","B",tr("reader.skip"),function(){ R.low.draft=""; closeLow(); }));
-  keys.appendChild(keyBtn("ck ck-a","A",tr("reader.done"),function(){ closeLow(); }));
+  var keys=el("div");
+  LP.softkeys(keys,{
+    select:null,start:null,
+    b:{label:tr("sk.skip"),fn:function(){ R.low.draft=""; closeLow(); }},
+    a:{label:tr("sk.done"),fn:function(){ closeLow(); }}
+  });
   sh.appendChild(keys);
   /* a real tap brings up the keyboard on a phone; with a keyboard this is where typing goes anyway */
   if(!(window.matchMedia && matchMedia("(pointer: coarse)").matches)) try{ ta.focus({preventScroll:true}); }catch(e){}
@@ -858,7 +891,7 @@ function renderSheet(){
   title.appendChild(el("span","",R.sheet==="toc" ? tr("reader.toc") : R.sheet==="jump" ? tr("reader.jump") : R.sheet==="notes" ? tr("reader.notes") : R.sheet==="font" ? tr("reader.font") : m.title));
   title.appendChild(el("small","",Math.floor(m.pct||0)+"%"));
   sh.appendChild(title);
-  var keys=el("div","dict-keys");
+  var keys=el("div"), keyset=null;
   if(R.sheet==="menu"){
     var ul=el("ul","lcd-menu");
     menuItems().forEach(function(it,i){
@@ -903,19 +936,36 @@ function renderSheet(){
     sh.appendChild(fu);
     var cur=rows[R.fpick];
     sh.appendChild(el("p","hint",R.fbusy || (R.farmed && cur.k===R.farmed ? tr("reader.fontarmed",{name:cur.label}) : tr("reader.fonthint"))));
-    if(cur.k && cur.k!=="+") keys.appendChild(keyBtn(R.farmed===cur.k ? "ck ck-a" : "ck","START",tr(R.farmed===cur.k ? "reader.unmarkconfirm" : "common.delete"),function(){ fontDelete(); }));
+    keyset={
+      select:null,
+      start:cur.k && cur.k!=="+" ? {label:tr(R.farmed===cur.k ? "sk.confirm" : "sk.delete"),fn:function(){ fontDelete(); }} : null,
+      b:softkey("b","sk.back"),
+      a:{label:tr(cur.k==="+"?"sk.import":"sk.use"),fn:function(){ readerButton("a",true); readerButton("a",false); }}
+    };
   } else {
     var box=el("div","rd-jump");
     box.appendChild(el("b","",R.jump+"%"));
     box.appendChild(el("span","",chapterTitle(posAtPct(R.jump).ch)));
-    box.appendChild(el("p","hint",tr("reader.jumpkeys")));
+    box.addEventListener("pointerdown",function(e){ box._sx=e.clientX; box._sy=e.clientY; });
+    box.addEventListener("pointerup",function(e){
+      if(box._sx==null) return;
+      var dx=e.clientX-box._sx,dy=e.clientY-box._sy; box._sx=null;
+      if(Math.abs(dx)>40 && Math.abs(dx)>Math.abs(dy)*1.2){ e.preventDefault(); jumpBy(dx<0?1:-1); }
+    });
     sh.appendChild(box);
-    keys.appendChild(keyBtn("ck","◀","",function(){ jumpBy(-1); }));
-    keys.appendChild(keyBtn("ck","▶","",function(){ jumpBy(1); }));
+    keyset={
+      select:null,
+      start:null,
+      b:softkey("b","sk.cancel"),
+      a:{label:tr("sk.jump"),fn:function(){ readerButton("a",true); readerButton("a",false); }}
+    };
   }
-  keys.appendChild(keyBtn("ck","B",tr("reader.back"),function(){ sheetBack(); }));
-  if(R.sheet==="font") keys.appendChild(keyBtn("ck ck-a","A",tr(fontRows()[R.fpick].k==="+" ? "reader.import" : "reader.use"),function(){ fontA(); }));
-  else if(R.sheet!=="toc" && R.sheet!=="notes") keys.appendChild(keyBtn("ck ck-a","A",tr("reader.go"),function(){ sheetA(); }));
+  if(!keyset){
+    var openLabel=R.sheet==="menu"?"sk.confirm":"sk.open";
+    keyset={select:null,start:null,
+      b:softkey("b","sk.back"),a:{label:tr(openLabel),fn:function(){ readerButton("a",true); readerButton("a",false); }}};
+  }
+  LP.softkeys(keys,keyset);
   sh.appendChild(keys);
   /* only now, with the keys below it, does the list have its final height: keep the highlighted row in view */
   var on=sh.querySelector(".lcd-menu li.on"); if(on && on.scrollIntoView) on.scrollIntoView({block:R.sheet==="toc" ? "center" : "nearest"});
