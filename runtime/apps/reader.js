@@ -15,26 +15,21 @@
  */
 (function(){
 "use strict";
-var LP=window.LP, $=LP.$, S=LP.S, tr=LP.tr, BK=window.LopdaBook, P=window.LopdaPlatform;
+var LP=window.LP, $=LP.$, S=LP.S, tr=LP.tr, BK=window.LopdaBook, P=window.LopdaPlatform, TS=window.LopdaTextSel;
 var own=LP.own, toast=LP.toast, put=LP.put, sfx=LP.sfx, show=LP.show, showPad=LP.showPad, uid=LP.uid;
 
-var SIZES=[16,19,23], GAP=32, LONG_MS=450;
+var SIZES=[16,19,23], GAP=32;
 /* the three layouts: line height (times the text size) and the page's padding; "" keeps the stylesheet's (the default) */
 var LAYOUTS=[{line:1.5, pad:"8px 10px 0"},{line:1.7, pad:""},{line:1.9, pad:"18px 26px 0"}];
 /* e-ink full refresh: ink, then paper, then the page; on a real e-ink screen this clears the ghost of earlier pages */
 var FLASH_EVERY=10, FLASH_INK=120, FLASH_PAPER=80;
 /* a font the user imports: the file's first four bytes say what it is (TrueType 1.0 or "true", OpenType, WOFF, WOFF2) */
 var FONT_MAX=30*1024*1024, FONT_TAGS=["\0\x01\0\0","true","OTTO","wOFF","wOF2"];
-var UNITS=["word","sent","para"];
 /* pictures are dithered at most this wide, then shown at a whole multiple when it fits: pixels, like the camera's */
 var IMG_W=240, IMG_H=320;
 /* public-domain samples (runtime/books/, see LICENSING.md), put on the shelf once */
 var SAMPLES=[{file:"books/alice.txt", title:"Alice’s Adventures in Wonderland", author:"Lewis Carroll"},
   {file:"books/lunyu.txt", title:"論語", author:""}];
-/* a word for the cursor: one CJK character, or a run of letters and digits with inner apostrophes and hyphens */
-var TOK=/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]|(?:(?![\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}])[\p{L}\p{N}])+(?:['’\-](?:(?![\p{Script=Han}])[\p{L}\p{N}])+)*/gu;
-/* where a sentence ends: CJK and Latin stops, then any closing quotes or brackets after them */
-var STOP=/[。！？!?…]/, CLOSE=/[」』”’"')）\]】》]/;
 
 var R={
   set:{size:1, eink:null, seeded:false, helped:false, font:null, layout:1, flash:false},
@@ -46,7 +41,6 @@ var R={
   ch:0, page:0, pages:1, stride:1, colW:1, colH:1, pos:null, back:null,
   sheet:"",          // over the page: "menu" | "toc" | "notes" | "jump" | "help"; lower half: "def" | "mark" | "note" | "thought"
   mpick:0, tpick:0, npick:0, jump:0, drag:null,
-  sel:null,          // the selection: {toks, cur, anc, unit, held, moved}
   low:null           // the lower-half sheet: {page, pages, ...}
 };
 
@@ -216,7 +210,7 @@ function shelfButton(b){
 function mode(read){ $("rd-shelf").hidden=read; $("rd-book").hidden=!read; }
 function openBook(id){
   var m=R.meta[id];
-  R.id=id; R.book=null; R.cum={}; R.sheet=""; R.sel=null; R.low=null; R.back=null;
+  R.id=id; R.book=null; R.cum={}; R.sheet=""; SEL.s=null; R.low=null; R.back=null;
   if(!Array.isArray(m.marks)) m.marks=[];
   mode(true); renderSheet(); renderLow(); $("rd-flow").textContent=""; foot(tr("reader.loading"),"");
   P.files.get("book/"+id).then(function(book){
@@ -240,7 +234,7 @@ function openBook(id){
 function freeUrls(){ for(var k in R.urls) URL.revokeObjectURL(R.urls[k]); R.urls={}; }
 function closeBook(){
   flushMeta(); unmark(); freeUrls();
-  R.id=null; R.book=null; R.sheet=""; R.sel=null; R.low=null; R.back=null; R.pick=0;
+  R.id=null; R.book=null; R.sheet=""; SEL.s=null; R.low=null; R.back=null; R.pick=0;
   mode(false); renderSheet(); renderLow(); $("rd-help").hidden=true; renderShelf();
 }
 function chapterTitle(ch){
@@ -314,20 +308,10 @@ function measure(){
 function origin(){ return $("rd-flow").getBoundingClientRect(); }
 /* which page a rectangle sits on; measured against the flow itself, so a page turn in progress does not matter */
 function pageOf(rect,o){ o=o||origin(); return Math.max(0,Math.floor((rect.left-o.left+1)/R.stride)); }
-function nodeAt(e,c){
-  var w=document.createTreeWalker(e,NodeFilter.SHOW_TEXT), n, at=0, last=null;
-  while((n=w.nextNode())){ if(c<at+n.data.length) return {n:n, o:c-at}; at+=n.data.length; last=n; }
-  return last ? {n:last, o:last.data.length} : null;
-}
-function rangeRects(e,a,b){
-  var s=nodeAt(e,a), t=nodeAt(e,b); if(!s || !t) return [];
-  var r=document.createRange(); r.setStart(s.n,s.o); r.setEnd(t.n,t.o);
-  return r.getClientRects();
-}
 function charPage(e,c,o){
   var len=paras()[+e.getAttribute("data-i")].s.length;
   if(c>=len) c=len-1;
-  var rs=c>=0 ? rangeRects(e,c,c+1) : [];
+  var rs=c>=0 ? TS.rangeRects(e,c,c+1) : [];
   return rs.length ? pageOf(rs[0],o) : pageOf(e.getBoundingClientRect(),o);
 }
 function pageOfPos(pos){
@@ -399,7 +383,7 @@ function relayout(){
   renderChapter(R.ch);
   R.page=pos ? pageOfPos(pos) : 0;
   place(false);
-  if(R.sel) startSel(false,R.sel.unit);
+  if(SEL.s) startSel(false,SEL.s.unit);
 }
 function turn(k){
   if(!R.book) return false;
@@ -450,11 +434,11 @@ function foot(left,right){
 }
 function footer(){
   if(!R.book) return;
-  var selected=!!R.sel, info=$("rd-foot"), row=$("rd-keyrow"), keys=$("rd-keys");
+  var selected=!!SEL.s, info=$("rd-foot"), row=$("rd-keyrow"), keys=$("rd-keys");
   info.hidden=selected; row.hidden=!selected;
   if(selected){
     LP.softkeys(keys,{
-      select:softkey("select","sk.unit."+({word:"word",sent:"sent",para:"para"}[R.sel.unit]||"word")),
+      select:softkey("select","sk.unit."+({word:"word",sent:"sent",para:"para"}[SEL.s.unit]||"word")),
       start:softkey("start","sk.quote"),
       b:softkey("b","sk.cancel"),
       a:softkey("a","sk.lookup")
@@ -468,207 +452,89 @@ function footer(){
 function copySelection(){ copySel(); }
 $("rd-copy").onclick=copySelection;
 
+/* the selection (runtime/textsel.js) over the paragraphs of the chapter; only the words on this page count */
+var SEL=TS.create({
+  root:function(){ return $("rd-flow"); },
+  el:function(i){ return $("rd-flow").children[i]; },
+  text:function(i){ return paras()[i].s; },
+  blocks:function(){
+    var kids=$("rd-flow").children, o=origin(), out=[];
+    for(var i=0;i<kids.length;i++){
+      var rs=kids[i].getClientRects(); if(!rs.length) continue;
+      if(pageOf(rs[rs.length-1],o)<R.page) continue;
+      if(pageOf(rs[0],o)>R.page) break;
+      out.push(i);
+    }
+    return out;
+  },
+  frame:function(){ var o=origin(); return {left:o.left+R.page*R.stride, top:o.top}; },
+  keep:function(r,f){ var m=r.left+r.width/2; return m>=f.left && m<=f.left+R.stride-GAP; },
+  edge:function(back){ turnPage(back?-1:1); },
+  changed:function(){ footer(); },
+  lookup:function(){ lookupSel(); }
+});
+
 /* ---------- touch ----------
    a tap on the sides turns, a swipe turns, a tap in the middle opens the menu; a tap on a link follows it, on an
    underline shows the quote; a long press starts a selection at that word and dragging extends it; while there is a
    selection, a tap ends it and a swipe ends it and turns */
 (function(){
-  var pg=$("rd-page"), t=null, menuTap=false;
-  function cancelLong(){ if(t && t.timer){ clearTimeout(t.timer); t.timer=null; } }
-  pg.addEventListener("pointerdown",function(e){
-    menuTap=false;
-    if(!R.book || R.sheet==="help") return;
-    t={x:e.clientX, y:e.clientY, id:e.pointerId, target:e.target, long:false, timer:null};
-    if(!lowerSheet()) t.timer=setTimeout(function(){
-      if(!t) return;
-      t.timer=null; t.long=true;
-      selectAt(t.x,t.y);
-    },LONG_MS);
-  });
-  pg.addEventListener("pointermove",function(e){
-    if(!t || e.pointerId!==t.id) return;
-    if(t.long){ dragTo(e.clientX,e.clientY); return; }
-    if(Math.abs(e.clientX-t.x)>10 || Math.abs(e.clientY-t.y)>10) cancelLong();
-  });
-  pg.addEventListener("pointercancel",function(){ cancelLong(); t=null; });
-  pg.addEventListener("pointerup",function(e){
-    if(!t || e.pointerId!==t.id || !R.book) return;
-    cancelLong();
-    var dx=e.clientX-t.x, dy=e.clientY-t.y, target=t.target, long=t.long; t=null;
-    if(long){ if(R.sel){ R.sel.held=false; footer(); } return; }
-    if(lowerSheet()){ closeLow(); return; }
-    /* with a selection on the page, a touch first puts it away: a tap does only that, a swipe then turns as usual */
-    if(Math.abs(dx)>40 && Math.abs(dx)>Math.abs(dy)*1.2){ if(R.sel) endSel(); turn(dx<0?1:-1); return; }
-    if(Math.abs(dx)>12 || Math.abs(dy)>12) return;
-    if(R.sel){ endSel(); sfx("tap"); return; }
-    var link=target && target.closest && target.closest("a.ln"), hl=target && target.closest && target.closest("u.hl");
-    if(link){ followLink(link); return; }
-    if(hl){ openMark(hl.getAttribute("data-m")); return; }
-    var r=pg.getBoundingClientRect(), fx=(e.clientX-r.left)/r.width;
-    if(fx<0.3) turnPage(-1); else if(fx>0.7) turnPage(1); else menuTap=true;
+  var pg=$("rd-page"), menuTap=false;
+  SEL.touch(pg,{
+    down:function(){ menuTap=false; if(!R.book || R.sheet==="help") return false; },
+    canHold:function(){ return !lowerSheet(); },
+    hold:function(x,y){ selectAt(x,y); },
+    up:function(e,g){
+      if(!R.book) return;
+      var dx=g.dx, dy=g.dy, target=g.target;
+      if(lowerSheet()){ closeLow(); return; }
+      /* with a selection on the page, a touch first puts it away: a tap does only that, a swipe then turns as usual */
+      if(Math.abs(dx)>40 && Math.abs(dx)>Math.abs(dy)*1.2){ if(SEL.s) endSel(); turn(dx<0?1:-1); return; }
+      if(Math.abs(dx)>12 || Math.abs(dy)>12) return;
+      if(SEL.s){ endSel(); sfx("tap"); return; }
+      var link=target && target.closest && target.closest("a.ln"), hl=target && target.closest && target.closest("u.hl");
+      if(link){ followLink(link); return; }
+      if(hl){ openMark(hl.getAttribute("data-m")); return; }
+      var r=pg.getBoundingClientRect(), fx=(e.clientX-r.left)/r.width;
+      if(fx<0.3) turnPage(-1); else if(fx>0.7) turnPage(1); else menuTap=true;
+    }
   });
   /* the menu opens on the click that follows, not on pointerup: opened earlier, that click would land on a menu row */
   pg.addEventListener("click",function(){ if(menuTap){ menuTap=false; openMenu(); } });
-  pg.addEventListener("contextmenu",function(e){ e.preventDefault(); });
 })();
 function turnPage(k){
-  if(R.sel){ var u=R.sel.unit; unmark(); if(turn(k)) startSel(k<0,u); else paintSel(); return; }
+  if(SEL.s){ var u=SEL.s.unit; SEL.unpaint(); if(turn(k)) SEL.start(k<0,u); else SEL.paint(); return; }
   turn(k);
 }
 
-/* ---------- selection: English moves by word, Chinese by character; A held (or a drag) extends; SELECT widens to
-   the sentence or the paragraph, which may run over the page (the whole chapter is in the DOM) ---------- */
-function pageTokens(){
-  var kids=$("rd-flow").children, o=origin(), left=o.left+R.page*R.stride, right=left+R.stride-GAP, out=[];
-  var ps=paras();
-  for(var i=0;i<kids.length;i++){
-    var rs=kids[i].getClientRects(); if(!rs.length) continue;
-    if(pageOf(rs[rs.length-1],o)<R.page) continue;
-    if(pageOf(rs[0],o)>R.page) break;
-    var s=ps[i].s, m; TOK.lastIndex=0;
-    while((m=TOK.exec(s))){
-      var r=rangeRects(kids[i],m.index,m.index+m[0].length)[0];
-      if(!r || r.left+r.width/2<left || r.left+r.width/2>right) continue;
-      out.push({p:i, a:m.index, b:m.index+m[0].length, x:r.left-left, y:r.top-o.top, w:r.width, h:r.height});
-    }
-  }
-  return out;
-}
-function startSel(fromEnd,unit){
-  var toks=pageTokens();
-  R.sel={toks:toks, cur:fromEnd ? toks.length-1 : 0, anc:null, unit:unit||"word", held:R.sel && R.sel.held, moved:false};
-  paintSel(); footer();
-}
+/* ---------- selection (runtime/textsel.js): only the words on this page count, and the cursor running off the page
+   turns it (unless A is held: an extended selection stays on one page); a sentence or a paragraph may run over the
+   page (the whole chapter is in the DOM) ---------- */
+function startSel(fromEnd,unit){ SEL.start(fromEnd,unit); }
 function enterSel(){
   if(!R.book) return;
   R.sheet=""; renderSheet();
   startSel(false);
-  if(!R.sel.toks.length) toast(tr("reader.nowords"));
+  if(!SEL.s.toks.length) toast(tr("reader.nowords"));
   sfx("tap");
 }
-function endSel(){ unmark(); R.sel=null; closeLow(true); footer(); }
-function cycleUnit(){
-  if(!R.sel) return;
-  R.sel.unit=UNITS[(UNITS.indexOf(R.sel.unit)+1)%UNITS.length];
-  sfx("move"); paintSel(); footer();
-}
-function sentStart(s,a){
-  var i=a-1;
-  while(i>=0 && !(STOP.test(s.charAt(i)) || (s.charAt(i)==="." && /\s/.test(s.charAt(i+1)||" ")))) i--;
-  i++;
-  while(i<a && (CLOSE.test(s.charAt(i)) || /\s/.test(s.charAt(i)))) i++;
-  return i;
-}
-function sentEnd(s,b){
-  var i=b;
-  while(i<s.length && !(STOP.test(s.charAt(i)) || (s.charAt(i)==="." && (i+1>=s.length || /[\s"'”’」』)）]/.test(s.charAt(i+1)))))) i++;
-  if(i>=s.length) return s.length;
-  while(i<s.length && (STOP.test(s.charAt(i)) || s.charAt(i)===".")) i++;
-  while(i<s.length && CLOSE.test(s.charAt(i))) i++;
-  return i;
-}
-/* the selection as character ranges, one per paragraph: from the unit around the first token to the unit around the last */
-function selParts(){
-  var s=R.sel; if(!s || !s.toks.length) return [];
-  var lo=s.toks[s.anc==null ? s.cur : Math.min(s.anc,s.cur)], hi=s.toks[s.anc==null ? s.cur : Math.max(s.anc,s.cur)];
-  var ps=paras(), a=lo.a, b=hi.b;
-  if(s.unit==="sent"){ a=sentStart(ps[lo.p].s,lo.a); b=sentEnd(ps[hi.p].s,hi.b); }
-  else if(s.unit==="para"){ a=0; b=ps[hi.p].s.length; }
-  var parts=[];
-  for(var p=lo.p;p<=hi.p;p++){
-    var len=ps[p].s.length; if(!len) continue;
-    parts.push({p:p, a:p===lo.p ? a : 0, b:p===hi.p ? b : len});
-  }
-  return parts;
-}
-function selText(){
-  var ps=paras();
-  return selParts().map(function(x){ return ps[x.p].s.slice(x.a,x.b); }).join("\n");
-}
-/* wrap characters a..b of a paragraph in an inline element (no padding, so no line moves) */
-function wrap(e,a,b,make){
-  var w=document.createTreeWalker(e,NodeFilter.SHOW_TEXT), list=[], n, at=0;
-  while((n=w.nextNode())){ list.push({n:n, at:at}); at+=n.data.length; }
-  list.forEach(function(x){
-    var s=Math.max(a,x.at), t=Math.min(b,x.at+x.n.data.length); if(s>=t) return;
-    var node=x.n;
-    if(t-x.at<node.data.length) node.splitText(t-x.at);
-    if(s>x.at) node=node.splitText(s-x.at);
-    var mk=make(); node.parentNode.insertBefore(mk,node); mk.appendChild(node);
-  });
-}
-function unwrap(sel){
-  Array.prototype.slice.call($("rd-flow").querySelectorAll(sel)).forEach(function(mk){
-    var p=mk.parentNode; while(mk.firstChild) p.insertBefore(mk.firstChild,mk); p.removeChild(mk); p.normalize();
-  });
-}
-function unmark(){ unwrap("mark"); }
-function paintSel(){
-  unmark(); if(!R.sel) return;
-  var kids=$("rd-flow").children;
-  selParts().forEach(function(x){ wrap(kids[x.p],x.a,x.b,function(){ return document.createElement("mark"); }); });
-}
-/* the line above or below (k = -1 or 1), then the token there nearest the middle of the current one; -1 when there is none */
-function vertical(k){
-  var t=R.sel.toks, c=t[R.sel.cur], cx=c.x+c.w/2, lineY=null, best=-1, bd=Infinity;
-  t.forEach(function(x){ if((x.y-c.y)*k>c.h/2 && (lineY===null || (x.y-lineY)*k<0)) lineY=x.y; });
-  if(lineY===null) return -1;
-  t.forEach(function(x,i){ var d=Math.abs(x.x+x.w/2-cx); if(Math.abs(x.y-lineY)<c.h/2 && d<bd){ bd=d; best=i; } });
-  return best;
-}
-function moveCur(dir){
-  var s=R.sel, t=s.toks, back=dir==="left"||dir==="up";
-  if(!t.length){ turnPage(back?-1:1); return; }
-  var next=dir==="left" ? s.cur-1 : dir==="right" ? s.cur+1 : vertical(back?-1:1);
-  if(next<0 || next>=t.length){
-    /* off the page: turn to the next one, unless A is held (an extended selection stays on one page) */
-    if(s.held) sfx("err"); else turnPage(back?-1:1);
-    return;
-  }
-  if(s.held){ if(s.anc==null) s.anc=s.cur; s.moved=true; } else s.anc=null;
-  s.cur=next; sfx("move"); paintSel();
-}
-function tokenAt(x,y){
-  var o=origin(), left=o.left+R.page*R.stride, px=x-left, py=y-o.top, best=-1, bd=Infinity;
-  R.sel.toks.forEach(function(t,i){
-    var dx=px<t.x ? t.x-px : px>t.x+t.w ? px-t.x-t.w : 0, dy=py<t.y ? t.y-py : py>t.y+t.h ? py-t.y-t.h : 0;
-    var d=dy*4+dx; if(d<bd){ bd=d; best=i; }
-  });
-  return best;
-}
+function endSel(){ SEL.end(); closeLow(true); footer(); }
+function unmark(){ TS.unwrap($("rd-flow"),"mark"); }
+function unwrap(sel){ TS.unwrap($("rd-flow"),sel); }
 /* long press: a new selection from the word under the finger; dragging moves its far end */
 function selectAt(x,y){
   if(R.sheet) { R.sheet=""; renderSheet(); }
-  startSel(false,R.sel ? R.sel.unit : "word");
-  var i=tokenAt(x,y); if(i<0){ toast(tr("reader.nowords")); return; }
-  R.sel.cur=i; R.sel.anc=i; R.sel.held=true;
-  if(navigator.vibrate) try{ navigator.vibrate(8); }catch(e){}
-  sfx("tap"); paintSel(); footer();
+  if(!SEL.select(x,y)) toast(tr("reader.nowords"));
 }
-function dragTo(x,y){
-  if(!R.sel) return;
-  var i=tokenAt(x,y); if(i<0 || i===R.sel.cur) return;
-  R.sel.cur=i; paintSel();
-}
-/* copying text is otherwise impossible here: the handheld turns off the system's text selection */
 function copySel(){
-  var text=selText(); if(!text) return;
-  var done=function(){ toast(tr("reader.copied")); sfx("ok"); };
-  if(navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(text).then(done,function(){ copyOld(text) ? done() : sfx("err"); }); return; }
-  if(copyOld(text)) done(); else sfx("err");
-}
-function copyOld(text){
-  var ta=el("textarea"); ta.value=text; ta.style.position="fixed"; ta.style.opacity="0"; document.body.appendChild(ta); ta.select();
-  var ok=false; try{ ok=document.execCommand("copy"); }catch(e){}
-  ta.remove(); return ok;
+  var text=SEL.text(); if(!text) return;
+  TS.copy(text).then(function(ok){ if(ok){ toast(tr("reader.copied")); sfx("ok"); } else sfx("err"); });
 }
 
 /* ---------- the lower half: a dictionary entry, an underlined quote, a footnote, or a thought being typed ---------- */
 function lookupSel(){
-  if(!R.sel) return;
-  var t=R.sel.toks[R.sel.cur];
-  /* a sentence or a paragraph is no headword: look up the word under the cursor */
-  var w=(R.sel.unit==="word" ? selText() : t ? paras()[t.p].s.slice(t.a,t.b) : "").replace(/’/g,"'").replace(/\s+/g," ").trim();
+  if(!SEL.s) return;
+  var w=SEL.word();
   if(!w) return;
   if(!LP.dict){ toast(tr("reader.nodict")); return; }
   R.low={word:w, results:null, page:0, pages:1};
@@ -764,8 +630,8 @@ function markById(id){ var m=R.meta[R.id]; return m ? m.marks.filter(function(x)
 function noteName(){ return "《"+R.meta[R.id].title+"》"; }
 function quoteHead(ch){ var t=R.book.chapters[ch].title; return noteName()+(t ? " "+t : ""); }
 function quote(){
-  if(!R.sel || !R.book) return;
-  var parts=selParts(), text=selText().trim(); if(!text || !parts.length) return;
+  if(!SEL.s || !R.book) return;
+  var parts=SEL.parts(), text=SEL.text().trim(); if(!text || !parts.length) return;
   if(!LP.notes){ toast(tr("reader.quotefail",{msg:"notes"})); return; }
   var m=R.meta[R.id], first=parts[0], last=parts[parts.length-1];
   var mk={id:uid(), ch:R.ch, p:first.p, a:first.a, p2:last.p, b:last.b, text:text, thought:"", t:Date.now()};
@@ -785,7 +651,7 @@ function underline(){
     for(var p=mk.p;p<=mk.p2;p++){
       var e=kids[p]; if(!e) continue;
       var len=paras()[p].s.length;
-      wrap(e,p===mk.p ? mk.a : 0,p===mk.p2 ? mk.b : len,function(){ var u=document.createElement("u"); u.className="hl"; u.setAttribute("data-m",mk.id); return u; });
+      TS.wrap(e,p===mk.p ? mk.a : 0,p===mk.p2 ? mk.b : len,function(){ var u=document.createElement("u"); u.className="hl"; u.setAttribute("data-m",mk.id); return u; });
     }
   });
 }
@@ -1173,13 +1039,10 @@ function readerButton(b,down){
     return;
   }
   if(R.sheet){ if(down) sheetButton(b); return; }
-  if(R.sel){
-    var s=R.sel;
-    if(b==="a"){ if(down){ s.held=true; s.moved=false; } else if(s.held){ s.held=false; if(!s.moved) lookupSel(); } return; }
+  if(SEL.s){
+    if(SEL.key(b,down)) return;
     if(!down) return;
-    if(b==="left"||b==="right"||b==="up"||b==="down") moveCur(b);
-    else if(b==="select") cycleUnit();
-    else if(b==="b"){ endSel(); sfx("tap"); }
+    if(b==="b"){ endSel(); sfx("tap"); }
     else if(b==="start") quote();
     return;
   }
@@ -1198,7 +1061,7 @@ window.addEventListener("resize",function(){ clearTimeout(R.rz); R.rz=setTimeout
 var ICON=["................","................",".00000000000000.","0333333003333330","0311113003111130","0333333003333330","0311133003111130","0333333003333330","0311113003111130","0333333003333330","0311333003113330","0333333003333330","0000000000000000",".02222222222220.","..000000000000..","................"];
 
 function openReader(){
-  R.sheet=""; R.sel=null; R.low=null; R.armed=null;
+  R.sheet=""; SEL.s=null; R.low=null; R.armed=null;
   if(R.id) closeBook(); else { mode(false); renderSheet(); renderLow(); }
   show("reader"); showPad(true); applyEink(); renderShelf();
   /* the browser may clear a site's data after a while unless it is persistent (a Home Screen app always is) */
@@ -1211,7 +1074,7 @@ LP.builtin({id:"reader", label:"app.reader", icon:function(){ return ICON; }, vi
   leave:function(){
     if(R.sheet==="thought") saveThought();
     flushMeta(); unmark();
-    R.sheet=""; R.sel=null; R.low=null; R.armed=null;
+    R.sheet=""; SEL.s=null; R.low=null; R.armed=null;
     $("rd-sheet").hidden=true; $("rd-def").hidden=true; $("rd-help").hidden=true;
     $("screen").classList.remove("rd-eink");
     var f=$("rd-flash"); if(f) f.hidden=true; $("screen").classList.remove("rd-neg"); R.flashing=false;
