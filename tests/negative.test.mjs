@@ -40,6 +40,7 @@ function roll({ size = 4, res = 1, name = "海边" } = {}) {
 }
 const jpegsFor = (r, len = 3000) => r.frames.map((f, k) => f.blank ? null : jpeg(len + k, k + 1));
 const code = (fn) => { try { fn(); } catch (e) { return e.code; } return "no error"; };
+const err = (fn) => { try { fn(); } catch (e) { return e; } return null; };
 
 function pngChunk(bytes, wanted) {
   for (let o = 8; o + 12 <= bytes.length;) {
@@ -173,7 +174,9 @@ test("a v2 chunk truncated inside PIXELS is damaged even with valid lengths and 
   const truncated = Buffer.alloc(jsonEnd + pixelBytes - 1 + 4);
   data.copy(truncated, 0, 0, jsonEnd + pixelBytes - 1);
   truncated.writeUInt32BE(N.crc32(truncated, 0, truncated.length - 4), truncated.length - 4);
-  assert.equal(code(() => N.unpack(withLpDa(out, truncated))), "damaged");
+  const error = err(() => N.unpack(withLpDa(out, truncated)));
+  assert.equal(error && error.code, "damaged");
+  assert.equal(error && error.message, "pixels");
 });
 
 test("bad metadata is refused when writing and when reading", () => {
