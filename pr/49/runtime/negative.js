@@ -11,6 +11,7 @@
  * The CRC covers everything before it. JSON: {roll, latent}, with px omitted from each frame; pixels are packed
  * four per byte, most significant bits first. latent[k] is [offset, length] into the JPEG area for frame k, or null.
  * Format version 1 stored each frame's px string in the JSON and put JPEGs immediately after it.
+ * A developed roll has roll.dev {v, seed, at} (runtime 0.20.0); it needs no new format version, older runtimes ignore it.
  */
 (function(){
 "use strict";
@@ -78,6 +79,13 @@ function chunkBytes(type,data){
 /* the roll as the darkroom keeps it, checked field by field: an import takes all of it or nothing */
 var FRAME_KEYS={n:1, px:1, taken:1, dated:1, lens:1, exposure:1, contrast:1, blank:1};
 function int(v,a,b){ return typeof v==="number" && v===Math.floor(v) && v>=a && v<=b; }
+/* a developed roll carries how it was developed (darkroom step 2): the algorithm's version, the develop seed and when.
+   A friend who imports the negative prints the same pictures. Older runtimes ignore the key. */
+function checkDev(dev){
+  if(!dev || typeof dev!=="object" || Array.isArray(dev)) return false;
+  for(var key in dev) if(key!=="v" && key!=="seed" && key!=="at") return false;
+  return int(dev.v,1,999) && int(dev.seed,0,4294967295) && int(dev.at,0,1e14);
+}
 function checkRoll(roll){
   var ok=roll && typeof roll==="object" &&
     typeof roll.id==="string" && /^[a-z0-9]{1,40}$/.test(roll.id) &&
@@ -85,7 +93,7 @@ function checkRoll(roll){
     int(roll.size,1,36) && (roll.res===1 || roll.res===2) &&
     int(roll.no,1,999999) && int(roll.seed,0,4294967295) && int(roll.loaded,0,1e14) && int(roll.out,0,1e14) &&
     typeof roll.name==="string" && roll.name.length<=64 &&
-    Array.isArray(roll.frames) && roll.frames.length===roll.size;
+    Array.isArray(roll.frames) && roll.frames.length===roll.size && (roll.dev==null || checkDev(roll.dev));
   if(!ok) return false;
   var want=128*roll.res*112*roll.res;
   for(var k=0;k<roll.frames.length;k++){

@@ -205,6 +205,16 @@
       <ul class="lcd-menu dk-list" id="dk-list"></ul>
       <p class="hint dk-status" id="dk-status"></p>
       <div id="dk-keys"></div>
+      <!-- developing: a four-tone animation over the box -->
+      <div class="dk-full dk-dev" id="dk-dev" hidden>
+        <canvas id="dk-dev-cv" width="128" height="112"></canvas>
+        <p class="dk-dev-step" id="dk-dev-step"></p>
+      </div>
+      <!-- the viewer: the print laid on the glass, the one place the LCD shows colour -->
+      <div class="dk-full dk-view" id="dk-view" hidden>
+        <div class="bar dk-vhead"><h2 id="dk-vno"></h2><span id="dk-vinfo"></span></div>
+        <div class="dk-photo" id="dk-photo"><canvas id="dk-vcv" width="800" height="700"></canvas><p class="dk-wait" id="dk-vwait" hidden></p></div>
+      </div>
       <div class="dict-sheet dk-sheet" id="dk-sheet" hidden></div>
       <input type="file" id="dk-file" accept="image/png,image/*" hidden>
     </section>
@@ -281,6 +291,7 @@
 <script src="chip.js"></script>
 <script src="lenses.js"></script>
 <script src="negative.js"></script>
+<script src="develop.js"></script>
 <script src="core.js"></script>
 <script src="apps/notes.js"></script>
 <script src="apps/calendar.js"></script>

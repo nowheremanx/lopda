@@ -404,6 +404,18 @@ textarea::placeholder{color:var(--ink-2)}
 .dk-sheet .lcd-menu{flex:none}
 .dk-sheet .lcd-menu li{min-height:44px;box-sizing:border-box}
 .dk-sheet .lcd-menu li small{font-family:var(--f-lcd);font-size:14px;max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dk-full{position:absolute;inset:0;z-index:2;background:var(--lcd);display:flex;flex-direction:column}
+.dk-full[hidden]{display:none}
+.dk-dev{align-items:center;justify-content:center;gap:10px;padding:10px}
+.dk-dev canvas{width:min(100%,384px);height:auto;aspect-ratio:8/7;image-rendering:pixelated;border:3px solid var(--ink)}
+.dk-dev-step{margin:0;font-family:var(--f-pix);font-size:20px;letter-spacing:.06em}
+.dk-vhead span{flex:none;font-family:var(--f-pix);font-size:16px;color:var(--ink)}
+.dk-vhead h2{font-family:var(--f-pix);font-size:18px}
+.dk-photo{flex:1;min-height:0;position:relative;display:flex;align-items:center;justify-content:center;padding:10px;box-sizing:border-box}
+/* the print on the glass: colour, on purpose (decisions.md section 19); its white border is the photo paper */
+.dk-photo canvas{display:block;max-width:100%;max-height:100%;width:auto;height:auto;box-sizing:border-box;border:5px solid #f1ece1;box-shadow:3px 3px 0 var(--ink)}
+.dk-wait{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);margin:0;padding:2px 10px;background:var(--ink);color:var(--lcd);font-size:15px;white-space:nowrap}
+.dk-wait[hidden]{display:none}
 .dk-name{display:flex;flex-direction:column;gap:12px;padding-top:6px}
 .dk-name input{font-family:var(--f-lcd);font-size:16px;padding:10px;border:2px solid var(--ink);background:var(--lcd);color:var(--ink);border-radius:0;min-height:44px;box-sizing:border-box;width:100%}
 .dk-name input::placeholder{color:var(--ink-2)}
