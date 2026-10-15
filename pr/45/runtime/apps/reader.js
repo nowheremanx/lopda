@@ -937,8 +937,8 @@ function renderSheet(){
     var cur=rows[R.fpick];
     sh.appendChild(el("p","hint",R.fbusy || (R.farmed && cur.k===R.farmed ? tr("reader.fontarmed",{name:cur.label}) : tr("reader.fonthint"))));
     keyset={
-      select:softkey("select","sk.back"),
-      start:cur.k && cur.k!=="+" ? {label:tr(R.farmed===cur.k?"sk.confirm":"sk.delete"),fn:function(){ fontDelete(); }} : null,
+      select:null,
+      start:null,
       b:softkey("b","sk.back"),
       a:{label:tr(cur.k==="+"?"sk.import":"sk.use"),fn:function(){ readerButton("a",true); readerButton("a",false); }}
     };
@@ -954,15 +954,15 @@ function renderSheet(){
     });
     sh.appendChild(box);
     keyset={
-      select:softkey("select","sk.back"),
-      start:{label:tr("sk.jump"),fn:function(){ readerButton("start",true); readerButton("start",false); }},
+      select:null,
+      start:null,
       b:softkey("b","sk.cancel"),
       a:{label:tr("sk.jump"),fn:function(){ readerButton("a",true); readerButton("a",false); }}
     };
   }
   if(!keyset){
     var openLabel=R.sheet==="menu"?"sk.confirm":"sk.open";
-    keyset={select:softkey("select","sk.back"),start:{label:tr(openLabel),fn:function(){ readerButton("start",true); readerButton("start",false); }},
+    keyset={select:null,start:null,
       b:softkey("b","sk.back"),a:{label:tr(openLabel),fn:function(){ readerButton("a",true); readerButton("a",false); }}};
   }
   LP.softkeys(keys,keyset);
