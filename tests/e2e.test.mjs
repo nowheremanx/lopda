@@ -1131,7 +1131,7 @@ test("reader: whole pages turn by keys, taps and swipes; a new text size keeps t
   assert.deepEqual(errors, []);
 });
 
-test("reader: long-press and drag selects, SELECT widens to the sentence, A looks up, START adds to the word book, copy", { skip, timeout: 60000 }, async (t) => {
+test("reader: long-press and drag selects, SELECT widens to the sentence, A looks up, START adds to the word book, START quotes and copies", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await readerPage(t);
   await p.context().grantPermissions(["clipboard-read", "clipboard-write"]);
   await openRow(p, 2);                                         /* Alice */
@@ -1161,7 +1161,7 @@ test("reader: long-press and drag selects, SELECT widens to the sentence, A look
   assert.equal(await p.$$eval("#rd-flow mark", (l) => l.map((x) => x.textContent).join("")), "sister on the bank");
   assert.ok(await p.isHidden("#rd-def"));
   assert.deepEqual(await p.$$eval("#rd-keys .sk", (l) => l.map((x) => x.textContent)), ["SELECT词", "START摘抄", "B取消", "A查词"]);
-  assert.equal(await p.isVisible("#rd-copy"), true);
+  assert.equal(await p.locator("#rd-copy").count(), 0, "no copy button: START copies");
   /* with a selection, a tap only cancels it: no page turn, no menu */
   const here = await pos(p);
   await press(bx, by, 4); await lift(bx, by, 4);
@@ -1201,9 +1201,9 @@ test("reader: long-press and drag selects, SELECT widens to the sentence, A look
   assert.equal(await p.$$eval("#rd-flow mark", (l) => l.map((x) => x.textContent).join("")), para);
   await p.keyboard.press("Shift");                              /* back to a word */
   assert.equal(await p.textContent("#rd-flow mark"), "sister");
-  /* copy */
-  await p.click("#rd-copy");
-  await p.waitForFunction(() => /已复制/.test(document.getElementById("toast").textContent));
+  /* START quotes and copies: there is no copy of its own */
+  await p.keyboard.press("Enter");
+  await p.waitForFunction(() => /已摘抄并复制/.test(document.getElementById("toast").textContent));
   assert.equal(await p.evaluate(() => navigator.clipboard.readText()), "sister");
   assert.deepEqual(errors, []);
 });

@@ -443,14 +443,10 @@ function footer(){
       b:softkey("b","sk.cancel"),
       a:softkey("a","sk.lookup")
     });
-    $("rd-copy").hidden=false;
   } else {
     foot(R.back ? tr("reader.linkback") : chapterTitle(R.ch),(R.page+1)+"/"+R.pages);
-    $("rd-copy").hidden=true;
   }
 }
-function copySelection(){ copySel(); }
-$("rd-copy").onclick=copySelection;
 
 /* the selection (runtime/textsel.js) over the paragraphs of the chapter; only the words on this page count */
 var SEL=TS.create({
@@ -525,10 +521,6 @@ function unwrap(sel){ TS.unwrap($("rd-flow"),sel); }
 function selectAt(x,y){
   if(R.sheet) { R.sheet=""; renderSheet(); }
   if(!SEL.select(x,y)) toast(tr("reader.nowords"));
-}
-function copySel(){
-  var text=SEL.text(); if(!text) return;
-  TS.copy(text).then(function(ok){ if(ok){ toast(tr("reader.copied")); sfx("ok"); } else sfx("err"); });
 }
 
 /* ---------- the lower half: a dictionary entry, an underlined quote, a footnote, or a thought being typed ---------- */
@@ -625,7 +617,7 @@ function renderLow(){
   pageBox(sh,page,count);
 }
 
-/* ---------- START: quote = underline it in the book + add it to the note 《书名》; then a thought under it ---------- */
+/* ---------- START: quote = underline it in the book + add it to the note 《书名》 + copy it; then a thought under it ---------- */
 function markById(id){ var m=R.meta[R.id]; return m ? m.marks.filter(function(x){ return x.id===id; })[0] : null; }
 function noteName(){ return "《"+R.meta[R.id].title+"》"; }
 function quoteHead(ch){ var t=R.book.chapters[ch].title; return noteName()+(t ? " "+t : ""); }
@@ -633,11 +625,12 @@ function quote(){
   if(!SEL.s || !R.book) return;
   var parts=SEL.parts(), text=SEL.text().trim(); if(!text || !parts.length) return;
   if(!LP.notes){ toast(tr("reader.quotefail",{msg:"notes"})); return; }
-  var m=R.meta[R.id], first=parts[0], last=parts[parts.length-1];
+  var m=R.meta[R.id], first=parts[0], last=parts[parts.length-1], copied=TS.copy(text);
   var mk={id:uid(), ch:R.ch, p:first.p, a:first.a, p2:last.p, b:last.b, text:text, thought:"", t:Date.now()};
   LP.notes.append(noteName(),quoteHead(R.ch)+"\n「"+text+"」").then(function(){
     m.marks.push(mk); saveMeta(R.id,true);
     sfx("ok");
+    copied.then(function(ok){ toast(tr(ok?"sel.quotedcopy":"sel.quoted")); });
     if(!R.book || R.id==null) return;
     endSel(); unwrap("u.hl"); underline();
     R.sheet="thought"; R.low={mark:mk.id, fresh:true}; renderLow();
@@ -1013,7 +1006,7 @@ $("rd-fontfile").addEventListener("change",function(){
    shelf: ▲▼ pick, A open
    page: ◀▲ back a page, ▶▼ or A on, START menu, SELECT selection, B back from a link, else shelf
    (A turns the page: nothing on a page needs confirming, and a right thumb on A reads one-handed; owner 2026-10-11)
-   selection: ◀▶▲▼ move (holding A extends), A (pressed and let go) look up, START quote, SELECT word / sentence /
+   selection: ◀▶▲▼ move (holding A extends), A (pressed and let go) look up, START (let go) quote and copy, SELECT word / sentence /
      paragraph, B leave
    entry: ◀▶▲▼ page, B or A close, START word book (as in the dictionary); quote: A thought, START remove (twice), B close;
    footnote: A go there, B close; help: any key
@@ -1041,9 +1034,10 @@ function readerButton(b,down){
   if(R.sheet){ if(down) sheetButton(b); return; }
   if(SEL.s){
     if(SEL.key(b,down)) return;
+    /* on the release: the copy needs the key's user gesture (a touch's pointerdown is none) */
+    if(b==="start"){ if(!down) quote(); return; }
     if(!down) return;
     if(b==="b"){ endSel(); sfx("tap"); }
-    else if(b==="start") quote();
     return;
   }
   if(!down) return;

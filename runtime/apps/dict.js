@@ -576,7 +576,8 @@ $("dict-file").addEventListener("change",function(){
 
 /* ---------- chin pad ----------
    main: ▲▼ pick, A look up, B clear, SELECT word book, START books
-   entry: ◀▶ nearby matches, ▲▼ scroll, B (or A) back, START word book; review: A show / next, ◀▶ words, ▲▼ scroll, START word book, B back
+   entry: ◀▶ nearby matches, ▲▼ scroll, B (or A) back a level, START word book, SELECT select text (as in the reader:
+     ◀▶▲▼ move, A held extends, A let go opens that word, START let go quotes and copies, SELECT word / sentence / line, B ends); review: A show / next, ◀▶ words, ▲▼ scroll, START word book, B back
    word book: ▲▼ pick, A review, START options, B back; books: ▲▼ pick, A this book, START import, B back */
 function dictButton(b,down){
   if(D.sheet==="entry" && SEL.s){
