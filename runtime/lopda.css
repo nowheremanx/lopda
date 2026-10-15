@@ -392,8 +392,9 @@ textarea::placeholder{color:var(--ink-2)}
 .dk-list li em{font-style:normal;font-size:13px;flex:none}
 .dk-list li.label{cursor:default;font-size:15px;line-height:1.6;color:var(--ink);align-items:flex-start}
 .dk-list li.label::before{display:none}
-.dk-keys{flex:none;padding:4px 8px 6px;border-top:2px solid var(--ink);text-align:center}
-.dk-sheet .dk-keys{border-top:0;margin-top:auto}
+.dk-status{flex:none;margin:0;padding:4px 8px;text-align:center}
+.dk-status:empty{display:none}
+.dk-sheet .softkeys{margin-top:auto}
 .dk-sheet .dk-note{font-size:14px;line-height:1.6;color:var(--ink)}
 .dk-sheet .lcd-menu{flex:none}
 .dk-sheet .lcd-menu li{min-height:44px;box-sizing:border-box}

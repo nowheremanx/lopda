@@ -29,6 +29,9 @@ var D={
 
 function el(tag,cls,text){ var e=document.createElement(tag); if(cls) e.className=cls; if(text!=null) e.textContent=text; return e; }
 function visible(){ return !$("v-dark").hidden; }
+function softkey(key,label,disabled){
+  return {label:tr(label),disabled:!!disabled,fn:function(){ darkButton(key,true); darkButton(key,false); }};
+}
 /* newest out of the camera on top */
 function ids(){ return Object.keys(D.rolls).sort(function(a,b){ return (D.rolls[b].out||0)-(D.rolls[a].out||0); }); }
 function current(){ return D.rolls[ids()[D.pick]]||null; }
@@ -59,8 +62,11 @@ function render(){
     li.onclick=function(){ if(D.busy) return; D.pick=i; sfx("tap"); openMenu(); };
     ul.appendChild(li);
   });
-  $("dk-import").disabled=!!D.busy;
-  $("dk-keys").textContent=D.busy || tr(list.length?"dk.keys":"dk.keys.empty");
+  $("dk-status").textContent=D.busy||"";
+  LP.softkeys($("dk-keys"),{
+    select:null,start:softkey("start","sk.import",!!D.busy),
+    b:null,a:softkey("a","sk.open",!!D.busy||!list.length)
+  });
   var on=ul.querySelector("li.on"); if(on && on.scrollIntoView) on.scrollIntoView({block:"nearest"});
 }
 
@@ -97,20 +103,29 @@ function renderSheet(){
     ul.appendChild(li);
   });
   sh.appendChild(ul);
-  sh.appendChild(el("p","hint dk-keys",D.busy || tr("dk.menu.keys")));
+  var keys=el("div");
+  LP.softkeys(keys,{
+    select:null,start:null,
+    b:softkey("b","sk.back",!!D.busy),
+    a:softkey("a","sk.confirm",!!D.busy)
+  });
+  sh.appendChild(keys);
 }
 function nameSheet(sh,r){
   var form=el("form","dk-name"), input=el("input");
   input.id="dk-name"; input.type="text"; input.maxLength=NAME_MAX; input.value=r.name||""; input.placeholder=tr("dk.name.ph");
   input.autocomplete="off"; input.setAttribute("enterkeyhint","done");
-  var row=el("div","row"), ok=el("button","btn",tr("dk.ok")), no=el("button","btn ghost",tr("common.cancel"));
-  ok.type="submit"; no.type="button";
-  row.appendChild(ok); row.appendChild(no); form.appendChild(input); form.appendChild(row);
+  form.appendChild(input);
   form.onsubmit=function(e){ e.preventDefault(); saveName(); };
-  no.onclick=function(){ cancelName(); };
   input.addEventListener("keydown",function(e){ if(e.key==="Escape"){ e.preventDefault(); cancelName(); } });
   sh.appendChild(form);
-  sh.appendChild(el("p","hint dk-keys",tr("dk.name.keys")));
+  var keys=el("div");
+  LP.softkeys(keys,{
+    select:null,start:null,
+    b:softkey("b","sk.cancel"),
+    a:softkey("a","sk.save")
+  });
+  sh.appendChild(keys);
   /* inside the tap that chose "name", so a phone opens its keyboard */
   input.focus();
 }
@@ -215,7 +230,6 @@ function startImport(){
   if(!S.db){ toast(tr("reader.nodb")); sfx("err"); return; }
   var f=$("dk-file"); f.value=""; f.click();
 }
-$("dk-import").onclick=function(){ startImport(); };
 $("dk-file").addEventListener("change",function(){
   var f=this.files && this.files[0]; this.value="";
   if(!f) return;

@@ -2171,10 +2171,37 @@ test("darkroom: HOME closes a roll menu and reopening returns to the film box", 
     id: "reopen-roll", stock: "sunny", size: 1, frames: [], bytes: 0, name: "Reopen test",
     loaded: Date.now(), out: Date.now()
   });
+  await p.setViewportSize({ width: 331, height: 359 });
+  const assertOneRow = async (selector) => {
+    const value = await p.locator(selector).evaluate((bar) => {
+      const boxes = [...bar.children].map((slot) => slot.getBoundingClientRect());
+      return { height: bar.getBoundingClientRect().height, widths: boxes.map((box) => box.width), tops: boxes.map((box) => box.top) };
+    });
+    assert.equal(value.height, 44, selector);
+    assert.deepEqual(new Set(value.tops).size, 1, selector);
+    assert.ok(value.widths.every((width) => width === value.widths[0]), selector);
+  };
   await p.locator("#home .app", { hasText: "冲洗店" }).click();
   await p.waitForFunction(() => /Reopen test/.test(document.getElementById("dk-list").textContent));
-  await p.keyboard.press("x");
+  await assertOneRow("#dk-keys");
+  assert.equal(await p.textContent("#dk-keys .sk-a span"), "打开");
+  assert.equal(await p.textContent("#dk-keys .sk-start span"), "导入");
+  assert.equal(await p.locator("#dk-import").count(), 0);
+  await p.click("#dk-keys .sk-a");
   await p.waitForSelector("#dk-sheet:not([hidden])");
+  await assertOneRow("#dk-sheet .softkeys");
+  await p.click("#dk-sheet .sk-a");
+  await assertOneRow("#dk-sheet .softkeys");
+  await p.click("#dk-sheet .sk-b");
+  await p.keyboard.press("ArrowDown");
+  await p.click("#dk-sheet .sk-a");
+  await assertOneRow("#dk-sheet .softkeys");
+  await p.click("#dk-sheet .sk-b");
+  await p.keyboard.press("ArrowDown");
+  await p.click("#dk-sheet .sk-a");
+  await assertOneRow("#dk-sheet .softkeys");
+  await p.click("#dk-sheet .sk-b");
+  await p.click("#dk-sheet .sk-b");
   await p.click("#home-key");
   await p.locator("#home .app", { hasText: "冲洗店" }).click();
   await p.waitForFunction(() => /Reopen test/.test(document.getElementById("dk-list").textContent));
@@ -2239,7 +2266,8 @@ test("darkroom: load a stock, shoot a roll with latent images, unload it to the 
   await p.locator("#home .app", { has: p.locator(".label", { hasText: /^冲洗店$/ }) }).click();
   await p.waitForFunction(() => /暖阳 200/.test(document.getElementById("dk-list").textContent));
   assert.match(await p.textContent("#dk-list li.on"), /暖阳 200.*16 张.*未冲洗/);
-  assert.equal(await p.textContent("#dk-keys"), "▲▼ 选　A 打开　START 导入底片");
+  assert.equal(await p.textContent("#dk-keys .sk-a span"), "打开");
+  assert.equal(await p.textContent("#dk-keys .sk-start span"), "导入");
   const rowH = await p.$eval("#dk-list li.on", (e) => e.getBoundingClientRect().height);
   assert.ok(rowH >= 44, "row height " + rowH);
 
@@ -2276,7 +2304,7 @@ test("darkroom: load a stock, shoot a roll with latent images, unload it to the 
   await press("ArrowUp"); await press("x");
   await toast(/扔掉了/);
   await p.waitForFunction(() => /胶卷盒是空的/.test(document.getElementById("dk-list").textContent));
-  assert.equal(await p.textContent("#dk-keys"), "START 导入底片");
+  assert.equal(await p.textContent("#dk-keys .sk-start span"), "导入");
   await p.waitForTimeout(500);
   assert.equal(await idb.doc(p, `data/users/local/rolls/items/${id}`), null);
   assert.deepEqual(await idb.latents(p, id), {});
