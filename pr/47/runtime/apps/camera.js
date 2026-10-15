@@ -302,9 +302,10 @@ function takeFrame(px,latent){
   sfx("shutter"); $("cam-shut").hidden=false; LIVE.hold=Date.now()+320;
   setTimeout(function(){ $("cam-shut").hidden=true; if(!LIVE.on) camIdle(); },160);
   setTimeout(function(){ sfx("tick"); },260); setTimeout(function(){ sfx("tick"); },360);
+  /* the latent first: on the last frame renderCam opens the unload menu, which stops the stream */
+  if(latent && S.db) keepLatent(roll,n,latent());
   renderCam();
   if(S.db) put(S.refs.frames.doc(roll+"-"+pad2(n)),fr).then(function(ok){ if(!ok) toast(tr("cam.lost")); });
-  if(latent && S.db) keepLatent(roll,n,latent());
   if(rollFull()){ toast(tr("cam.last")); stopLive(); }
 }
 $("cam-shutter").onclick=function(){ shoot(); };

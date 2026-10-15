@@ -2,7 +2,7 @@
  * Lo-PDA: developing a roll. Turns a frame's latent image (the colour picture taken with it) into the print the
  * darkroom shows and saves. Pure functions on RGBA pixels, no DOM: the darkroom (apps/darkroom.js) decodes the JPEG
  * and draws the result, tests/develop.test.mjs runs this in node:vm. docs/design/darkroom.md section 4,
- * decisions.md section 18.
+ * decisions.md section 19.
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  *
  * The pipeline, in the order of darkroom.md section 4:

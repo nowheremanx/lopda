@@ -8,7 +8,7 @@
  * images are LopdaPlatform.files "roll/<id>/<nn>.jpg". A negative is a four-tone PNG of the roll laid out like a contact
  * sheet with the whole roll in its lpDa chunk (runtime/negative.js). Developing (runtime/develop.js) writes
  * dev {v, seed, at} once; the pictures are never stored, every look and every print develops them again from the latent
- * images with the same seeds, so a reprint is the first print (decisions.md section 18).
+ * images with the same seeds, so a reprint is the first print (decisions.md section 19).
  *
  * The viewer is the one place where the LCD shows colour: the print laid on the glass. Everything else here is four-tone.
  *

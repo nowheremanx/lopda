@@ -11,7 +11,7 @@ Design history and open questions: `docs/decisions.md`. Read it before changing 
 runtime/        the PWA: index.html, core.js (shared LP object: utils, views, sound, home, chin pad), apps/*.js (one file per
                 built-in), boot.js (loaded last), strings.js (zh/en text), lopda.css, platform.js (IndexedDB store, file export),
                 chip.js (sound chip: MML music, custom sound effects, ambience presets; shared with sdk/dev.html),
-                lenses.js (which physical camera lenses a phone has, pure functions), negative.js (the negative PNG and its lpDa chunk, pure functions),
+                lenses.js (which physical camera lenses a phone has, pure functions), textsel.js (the text selection shared by the reader and the dictionary entry page), negative.js (the negative PNG and its lpDa chunk, pure functions),
                 develop.js (developing a frame: the stocks' looks, grain, halation, leaks, date stamp; pure functions on RGBA), lunar.js (lunar calendar + solar term tables, 1900-2100), stardict.js (StarDict reader), bookparse.js (TXT/EPUB parser),
                 books/ (the reader's two public-domain sample books), sw.js (offline cache),
                 fonts/ (DotGothic16, VT323, OFL), vendor/binjgb/ (Game Boy core, MIT), vendor/holiday-cn/ (China days off, MIT),
@@ -39,12 +39,12 @@ LICENSE NOTICE LICENSING.md CONTRIBUTING.md
   its own database `lopda-files`) for large binary data.
 - Built-ins, one file each in runtime/apps/: notes, calendar (万年历; lunar.js, holiday-cn, the one built-in that may reach
   another site, decisions.md section 14), dict (词典; stardict.js, built-in ECDICT, imported StarDict books in
-  `LopdaPlatform.files`, `LP.dict.lookup(word)` for other programs, decisions.md section 15), reader (阅读器; bookparse.js, books, their dithered pictures and imported fonts in
+  `LopdaPlatform.files`, `LP.dict.lookup(word)` for other programs, decisions.md section 15; its entry page selects text through textsel.js and looks words up level by level, section 18), reader (阅读器; bookparse.js, books, their dithered pictures and imported fonts in
   `LopdaPlatform.files`, layouts and an e-ink full refresh, long-press or SELECT selection that looks up through `LP.dict` and quotes (underline + `LP.notes.append`),
   decisions.md sections 16-17), camera (viewfinder, film stocks, a colour latent image per frame in `LopdaPlatform.files`, SELECT cycles the
   physical lenses found by lenses.js; shares its film helpers as `LP.film`), darkroom (冲洗店: the film box of unloaded rolls,
   negative export and import through negative.js, developing through develop.js (once per roll, `dev` {v, seed, at} in the roll; pictures are
-  never stored, every look and print develops them again), the colour viewer, single / contact sheet / film strip prints; decisions.md section 18), cart (GB), store (app store, preinstalled apps, sandboxed runner, file dialog), settings.
+  never stored, every look and print develops them again), the colour viewer, single / contact sheet / film strip prints; decisions.md section 19), cart (GB), store (app store, preinstalled apps, sandboxed runner, file dialog), settings.
   Paint and the calculator are community apps (`registry/apps/paint`, `calculator`), installed on first start
   (`PREINSTALL` in store.js; their files are in sw.js SHELL). The LCD fonts ship in runtime/fonts/ (OFL). Each registers with
   `LP.builtin({id, label, icon, view, open, ...hooks})`; the home screen draws them in registration order
@@ -136,7 +136,7 @@ node --test                                  # the test suite; must pass
   no chin pad unless the app needs it. Design for 331×359, the smallest screen.
 - Every pixel the user sees on the LCD is one of the four tones. One exception (owner, 2026-10-15): the darkroom's photo
   viewer shows the developed picture in colour, "the print laid on the glass"; the rest of the darkroom, its menus and the
-  develop animation stay four-tone (decisions.md section 18). Output images (prints, strips, contact sheets) are in colour.
+  develop animation stay four-tone (decisions.md section 19). Output images (prints, strips, contact sheets) are in colour.
   No emoji anywhere (the runtime strips them in apps).
 - Write pixels with `putImageData` into ImageData. Do not `drawImage` a canvas onto another canvas
   after `putImageData`: Safari swaps red and blue on that path.

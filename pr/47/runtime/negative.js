@@ -11,7 +11,7 @@
  * The CRC covers everything before it. JSON: {roll, latent}, with px omitted from each frame; pixels are packed
  * four per byte, most significant bits first. latent[k] is [offset, length] into the JPEG area for frame k, or null.
  * Format version 1 stored each frame's px string in the JSON and put JPEGs immediately after it.
- * A developed roll has roll.dev {v, seed, at} (runtime 0.19.0); it needs no new format version, older runtimes ignore it.
+ * A developed roll has roll.dev {v, seed, at} (runtime 0.20.0); it needs no new format version, older runtimes ignore it.
  */
 (function(){
 "use strict";
