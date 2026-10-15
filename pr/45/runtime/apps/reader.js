@@ -938,7 +938,7 @@ function renderSheet(){
     sh.appendChild(el("p","hint",R.fbusy || (R.farmed && cur.k===R.farmed ? tr("reader.fontarmed",{name:cur.label}) : tr("reader.fonthint"))));
     keyset={
       select:null,
-      start:null,
+      start:cur.k && cur.k!=="+" ? {label:tr(R.farmed===cur.k ? "sk.confirm" : "sk.delete"),fn:function(){ fontDelete(); }} : null,
       b:softkey("b","sk.back"),
       a:{label:tr(cur.k==="+"?"sk.import":"sk.use"),fn:function(){ readerButton("a",true); readerButton("a",false); }}
     };
