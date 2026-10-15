@@ -506,14 +506,14 @@ setInterval(function(){
 
 function openCal(){
   select(todayN()); C.sheet=""; C.form=null;
-  show("cal"); showPad(true); render();
+  show("cal"); showPad(true); renderSheet(); render();
   loadHolidays().then(function(){ if(!$("v-cal").hidden) render(); updateHolidays(); });
 }
 
 LP.builtin({id:"calendar", label:"app.calendar", icon:dateIcon, view:"cal", keepPad:true,
   open:function(){ openCal(); },
   tag:tag,
-  leave:function(){ C.sheet=""; C.form=null; },
+  leave:function(){ C.sheet=""; C.form=null; renderSheet(); },
   lang:function(){ if(!$("v-cal").hidden) render(); },
   ready:function(){
     var base=S.db.doc("data/users/local/calendar");

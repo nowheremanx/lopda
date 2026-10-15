@@ -482,7 +482,7 @@ var ICON=["................","...00000000000..","..0111111111110.","..0133333333
 
 function openDict(){
   D.sheet=""; D.entry=null; D.review=null; D.q=""; D.listScroll=0; $("dict-q").value="";
-  show("dict"); showPad(true); note(); update();
+  show("dict"); showPad(true); note(); renderSheet(); update();
   /* the browser may clear a site's data after a while unless it is persistent (a Home Screen app always is) */
   P.persist().catch(function(){});
   if(!D.loading) D.loading=loaded();
@@ -492,7 +492,7 @@ function openDict(){
 LP.dict={lookup:lookup, suggest:suggest, inBook:inBook, toggleWord:toggleWord};
 LP.builtin({id:"dict", label:"app.dict", icon:function(){ return ICON; }, view:"dict", keepPad:true,
   open:function(){ openDict(); },
-  leave:function(){ D.sheet=""; D.entry=null; D.review=null; D.armed=null; var i=$("dict-q"); if(i) i.blur(); },
+  leave:function(){ D.sheet=""; D.entry=null; D.review=null; D.armed=null; D.q=""; var i=$("dict-q"); if(i){ i.value=""; i.blur(); } renderSheet(); },
   lang:function(){ if(!$("v-dict").hidden){ note(); renderSheet(); update(); } },
   ready:function(){
     var base=S.db.doc("data/users/local/dict");

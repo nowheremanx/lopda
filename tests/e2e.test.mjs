@@ -414,6 +414,22 @@ test("calendar: English names", { skip, timeout: 30000 }, async (t) => {
   assert.deepEqual(notBlocked(c.errors), []);
 });
 
+test("calendar: HOME closes a date sheet and reopening returns to the month", { skip, timeout: 30000 }, async (t) => {
+  const c = await calPage(t);
+  await c.boot(); await c.open();
+  await c.p.click("#cal-info");
+  await c.p.waitForSelector("#cal-sheet:not([hidden])");
+  await c.p.click("#home-key");
+  await c.open();
+  assert.ok(await c.p.isVisible("#v-cal"));
+  assert.ok(await c.p.isHidden("#cal-sheet"));
+  const month = await c.p.textContent("#cal-ym");
+  await c.p.keyboard.press("z");
+  assert.equal(await c.p.textContent("#cal-ym"), month);
+  assert.ok(await c.p.isHidden("#cal-sheet"), "B on the first calendar screen leaves the screen unchanged");
+  assert.deepEqual(notBlocked(c.errors), []);
+});
+
 test("calendar: START goes to a date, Gregorian or lunar, by keys, keyboard digits or the on-screen pad", { skip, timeout: 60000 }, async (t) => {
   const c = await calPage(t);
   await c.boot(); await c.open();
@@ -479,6 +495,23 @@ const dictPage = async (t, opts = {}) => {
 const typeWord = async (p, w, want = w) => { await p.fill("#dict-q", w); await p.waitForFunction((want) => {
   const li = document.querySelector("#dict-list li.on"); return li && li.textContent.indexOf(want) >= 0; }, want, { timeout: 10000 }); };
 const entryText = (p) => p.textContent("#dict-sheet .dict-page");
+
+test("dictionary: HOME closes an entry and reopening resets to the word box", { skip, timeout: 30000 }, async (t) => {
+  const { p, errors } = await dictPage(t);
+  await typeWord(p, "apple");
+  await p.press("#dict-q", "Enter");
+  await p.waitForFunction(() => /苹果/.test(document.querySelector("#dict-sheet .dict-page")?.textContent || ""));
+  await p.click("#home-key");
+  await p.locator("#home .app", { hasText: "词典" }).click();
+  assert.ok(await p.isVisible("#v-dict"));
+  assert.ok(await p.isHidden("#dict-sheet"));
+  assert.equal(await p.inputValue("#dict-q"), "");
+  await p.keyboard.press("z");
+  assert.ok(await p.isVisible("#dict-list"), "B on the first dictionary screen keeps the app usable");
+  assert.ok(await p.isHidden("#dict-sheet"));
+  assert.equal(await p.inputValue("#dict-q"), "");
+  assert.deepEqual(errors, []);
+});
 
 test("dictionary: the built-in ECDICT, a word form, history and the word book", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await dictPage(t);
@@ -1963,6 +1996,9 @@ async function pngColours(buf) {
 const idb = {
   doc: (p, path) => p.evaluate((path) => new Promise((res, rej) => { const r = indexedDB.open("lopda"); r.onerror = () => rej(r.error);
     r.onsuccess = () => { const g = r.result.transaction("docs").objectStore("docs").get(path); g.onsuccess = () => { r.result.close(); res(g.result ? g.result.data : null); }; }; }), path),
+  setDoc: (p, path, data) => p.evaluate(({ path, data }) => new Promise((res, rej) => { const r = indexedDB.open("lopda"); r.onerror = () => rej(r.error);
+    r.onsuccess = () => { const tx = r.result.transaction("docs", "readwrite"); tx.objectStore("docs").put({ path, parent: path.slice(0, path.lastIndexOf("/")), data });
+      tx.oncomplete = () => { r.result.close(); res(); }; tx.onerror = () => rej(tx.error); }; }), { path, data }),
   under: (p, parent) => p.evaluate((parent) => new Promise((res) => { const r = indexedDB.open("lopda");
     r.onsuccess = () => { const g = r.result.transaction("docs").objectStore("docs").index("parent").getAll(parent); g.onsuccess = () => { r.result.close(); res(g.result.map((x) => x.data)); }; }; }), parent),
   /* latent images of a roll: {key: {size, w, h, sha}} */
@@ -1978,6 +2014,29 @@ const idb = {
         r.result.close(); res(out);
       }; }; }), id)
 };
+
+test("darkroom: HOME closes a roll menu and reopening returns to the film box", { skip, timeout: 30000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN", serviceWorkers: "block" });
+  await p.route("https://cdn.jsdelivr.net/**", (r) => r.fulfill({ status: 404, body: "not found" }));
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await idb.setDoc(p, "data/users/local/rolls/items/reopen-roll", {
+    id: "reopen-roll", stock: "sunny", size: 1, frames: [], bytes: 0, name: "Reopen test",
+    loaded: Date.now(), out: Date.now()
+  });
+  await p.locator("#home .app", { hasText: "冲洗店" }).click();
+  await p.waitForFunction(() => /Reopen test/.test(document.getElementById("dk-list").textContent));
+  await p.keyboard.press("x");
+  await p.waitForSelector("#dk-sheet:not([hidden])");
+  await p.click("#home-key");
+  await p.locator("#home .app", { hasText: "冲洗店" }).click();
+  await p.waitForFunction(() => /Reopen test/.test(document.getElementById("dk-list").textContent));
+  assert.ok(await p.isVisible("#v-dark"));
+  assert.ok(await p.isHidden("#dk-sheet"));
+  await p.keyboard.press("z");
+  assert.ok(await p.isHidden("#dk-sheet"), "B on the first darkroom screen does not act on the old menu");
+  assert.match(await p.textContent("#dk-list"), /Reopen test/);
+  assert.deepEqual(notBlocked(errors), []);
+});
 
 test("darkroom: load a stock, shoot a roll with latent images, unload it to the film box, name it, export the negative, throw it away, import it back", { skip, timeout: 180000 }, async (t) => {
   const { p, errors, open } = await camPage(t);
