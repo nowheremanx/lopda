@@ -11,7 +11,8 @@ Design history and open questions: `docs/decisions.md`. Read it before changing 
 runtime/        the PWA: index.html, core.js (shared LP object: utils, views, sound, home, chin pad), apps/*.js (one file per
                 built-in), boot.js (loaded last), strings.js (zh/en text), lopda.css, platform.js (IndexedDB store, file export),
                 chip.js (sound chip: MML music, custom sound effects, ambience presets; shared with sdk/dev.html),
-                lenses.js (which physical camera lenses a phone has, pure functions), textsel.js (the text selection shared by the reader and the dictionary entry page), negative.js (the negative PNG and its lpDa chunk, pure functions), lunar.js (lunar calendar + solar term tables, 1900-2100), stardict.js (StarDict reader), bookparse.js (TXT/EPUB parser),
+                lenses.js (which physical camera lenses a phone has, pure functions), textsel.js (the text selection shared by the reader and the dictionary entry page), negative.js (the negative PNG and its lpDa chunk, pure functions),
+                develop.js (developing a frame: the stocks' looks, grain, halation, leaks, date stamp; pure functions on RGBA), lunar.js (lunar calendar + solar term tables, 1900-2100), stardict.js (StarDict reader), bookparse.js (TXT/EPUB parser),
                 books/ (the reader's two public-domain sample books), sw.js (offline cache),
                 fonts/ (DotGothic16, VT323, OFL), vendor/binjgb/ (Game Boy core, MIT), vendor/holiday-cn/ (China days off, MIT),
                 vendor/ecdict/ (abridged ECDICT in StarDict format, MIT + WordNet licence)
@@ -21,7 +22,7 @@ registry/       index.json (generated) + apps/<id>/{manifest.json,index.html,src
 tools/          check-app.mjs, build-index.mjs, bundle-app.mjs (+ lo-game.mjs alias), lo-game-lib.mjs (Node 20+, no deps);
                 gen-lunar.py (one-off generator of the lunar table, needs PyEphem); gen-ecdict.mjs (one-off, ECDICT csv ->
                 vendor/ecdict/) with stardict-write.mjs (StarDict + dictzip writer, also used by tests)
-tests/          node:test suite (no deps): tools, strings, PAD shim, platform store, lo-game, negative, repo rules;
+tests/          node:test suite (no deps): tools, strings, PAD shim, platform store, lo-game, negative, develop, repo rules;
                 runtime-shots.mjs (before/after screenshots of the runtime), hko-compare.mjs (lunar table vs the HKO tables, manual)
 SPEC.md         app spec lopda/1 (MIT)
 LICENSE NOTICE LICENSING.md CONTRIBUTING.md
@@ -42,7 +43,8 @@ LICENSE NOTICE LICENSING.md CONTRIBUTING.md
   `LopdaPlatform.files`, layouts and an e-ink full refresh, long-press or SELECT selection that looks up through `LP.dict` and quotes (underline + `LP.notes.append`),
   decisions.md sections 16-17), camera (viewfinder, film stocks, a colour latent image per frame in `LopdaPlatform.files`, SELECT cycles the
   physical lenses found by lenses.js; shares its film helpers as `LP.film`), darkroom (冲洗店: the film box of unloaded rolls,
-  negative export and import through negative.js; developing is docs/design/darkroom.md step 2), cart (GB), store (app store, preinstalled apps, sandboxed runner, file dialog), settings.
+  negative export and import through negative.js, developing through develop.js (once per roll, `dev` {v, seed, at} in the roll; pictures are
+  never stored, every look and print develops them again), the colour viewer, single / contact sheet / film strip prints; decisions.md section 19), cart (GB), store (app store, preinstalled apps, sandboxed runner, file dialog), settings.
   Paint and the calculator are community apps (`registry/apps/paint`, `calculator`), installed on first start
   (`PREINSTALL` in store.js; their files are in sw.js SHELL). The LCD fonts ship in runtime/fonts/ (OFL). Each registers with
   `LP.builtin({id, label, icon, view, open, ...hooks})`; the home screen draws them in registration order
@@ -132,8 +134,10 @@ node --test                                  # the test suite; must pass
   Only zh and en (see docs/decisions.md section 11).
 - App screens (registry apps, test apps too) follow `sdk/UI.md`: one scrolling main area, 44 px targets, ink text on paper,
   no chin pad unless the app needs it. Design for 331×359, the smallest screen.
-- Every pixel the user sees on the LCD is one of the four tones. Output images (film, cards)
-  may use a roll's tint palette. No emoji anywhere (the runtime strips them in apps).
+- Every pixel the user sees on the LCD is one of the four tones. One exception (owner, 2026-10-15): the darkroom's photo
+  viewer shows the developed picture in colour, "the print laid on the glass"; the rest of the darkroom, its menus and the
+  develop animation stay four-tone (decisions.md section 19). Output images (prints, strips, contact sheets) are in colour.
+  No emoji anywhere (the runtime strips them in apps).
 - Write pixels with `putImageData` into ImageData. Do not `drawImage` a canvas onto another canvas
   after `putImageData`: Safari swaps red and blue on that path.
 - On touch, `pointerdown` does not grant user activation. Anything that opens the share sheet

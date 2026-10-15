@@ -202,3 +202,25 @@ test("a whole fine-grain roll: 16 frames with 120 KB JPEGs writes and reads", ()
   assert.deepEqual(plain(back.roll), r);
   back.jpegs.forEach((b, k) => assert.ok(Buffer.from(b).equals(Buffer.from(j[k])), "jpeg " + k));
 });
+
+/* darkroom step 2: a developed roll carries how it was developed, so a friend's prints are the same pictures */
+test("a developed roll's dev {v, seed, at} goes into the negative and comes back; no new format version", () => {
+  const r = { ...roll(), dev: { v: 1, seed: 4294967295, at: 1791900000000 } }, j = jpegsFor(r);
+  for (const M of [N, N5]) {
+    const out = M.pack(png(), r, j), back = M.unpack(out);
+    assert.deepEqual(plain(back.roll).dev, r.dev);
+    assert.deepEqual(plain(back.roll), r);
+    assert.equal(out[pngChunk(out, "lpDa").data + 9], 2, "still format version 2");
+  }
+  assert.ok(!("dev" in plain(N.unpack(N.pack(png(), roll(), jpegsFor(roll()))).roll)), "an undeveloped roll has none");
+});
+
+test("a bad dev is refused when writing and when reading", () => {
+  const r = roll();
+  for (const dev of [null, { v: 0, seed: 1, at: 1 }, { v: 1000, seed: 1, at: 1 }, { v: 1.5, seed: 1, at: 1 }, { v: 1, seed: -1, at: 1 },
+    { v: 1, seed: 4294967296, at: 1 }, { v: 1, seed: 1, at: 1.5 }, { v: 1, seed: 1 }, { v: 1, seed: 1, at: 1, extra: 1 }, [1, 2, 3], "v1", 7]) {
+    if (dev === null) { assert.ok(N.checkRoll({ ...r, dev })); continue; }   /* null or absent: not developed */
+    assert.equal(code(() => N.pack(png(), { ...r, dev }, jpegsFor(r))), "badroll", JSON.stringify(dev));
+    assert.equal(code(() => N.unpack(v1Negative(png(), { ...r, dev }, jpegsFor(r)))), "damaged", JSON.stringify(dev));
+  }
+});

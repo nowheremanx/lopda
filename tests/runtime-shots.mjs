@@ -29,7 +29,8 @@
 // program does not shift the others. Paint was a built-in up to runtime 0.4.1 and is a preinstalled app
 // since 0.5.0: each tree gets the shots for the paint it has (05-paint* or 05-paint-app*). Likewise the cutter
 // (up to 0.13.x: 10-cam-develop-menu, strip/card/cut downloads, 11-13 cutter) and the darkroom that replaced it
-// (0.14.0+: 10-cam-done-menu, 11-13b darkroom, negative.png).
+// (0.14.0+: 10-cam-done-menu, 11-13b darkroom, negative.png), and its developing (0.20.0+: 13c-13f, print.png,
+// contact.png, filmstrip.png). The roll's seed comes from crypto.getRandomValues, which is seeded as well.
 import { createServer } from "node:http";
 import { readFile, writeFile, mkdir, readdir, rm } from "node:fs/promises";
 import { join, extname, normalize, resolve, dirname, delimiter } from "node:path";
@@ -87,6 +88,9 @@ function initScript() {
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
+  /* the camera draws each roll's seed with crypto (it decides light leaks in the darkroom): seeded too */
+  let c = 0x51ed2701;
+  crypto.getRandomValues = function (arr) { for (let i = 0; i < arr.length; i++) { c = (Math.imul(c, 1664525) + 1013904223) >>> 0; arr[i] = c; } return arr; };
   try {
     Object.defineProperty(navigator, "storage", { configurable: true, value: {
       estimate: () => Promise.resolve({ usage: 123456, quota: 1e9 }),
@@ -211,6 +215,8 @@ async function capture(rootArg, outArg) {
     await shot("11-darkroom-box");
     await p.keyboard.press("x"); await p.waitForSelector("#dk-sheet:not([hidden])");
     await shot("12-darkroom-menu");
+    const developing = (await p.textContent("#dk-sheet li:first-child")) === "冲洗";   /* step 2 (0.20.0+) */
+    if (developing) await p.keyboard.press("ArrowDown");
     await p.keyboard.press("x"); await p.waitForSelector("#dk-name");
     await p.keyboard.type("海边", { delay: 10 });
     await shot("13-darkroom-name");
@@ -221,6 +227,26 @@ async function capture(rootArg, outArg) {
     await p.keyboard.press("ArrowUp");
     await download(() => p.keyboard.press("x"), "negative.png");
     await settle(400);
+    if (developing) {
+      /* darkroom step 2: develop (the animation is timed, so no shot of it), the viewer in colour, the three prints */
+      await p.keyboard.press("ArrowUp"); await p.keyboard.press("ArrowUp"); await p.keyboard.press("x");
+      await p.waitForSelector("#dk-view:not([hidden])", { timeout: 60000 });
+      await p.waitForFunction(() => document.getElementById("dk-vwait").hidden, null, { timeout: 20000 });
+      await shot("13c-darkroom-viewer");
+      await p.keyboard.press("ArrowRight");
+      await p.waitForFunction(() => document.getElementById("dk-vwait").hidden, null, { timeout: 20000 });
+      await shot("13d-darkroom-viewer-2");
+      await p.keyboard.press("ArrowLeft");
+      await p.keyboard.press("Enter"); await p.waitForSelector("#dk-sheet:not([hidden])");
+      await shot("13e-darkroom-print-menu");
+      await download(() => p.keyboard.press("x"), "print.png"); await settle(400);
+      await p.keyboard.press("Enter"); await p.keyboard.press("ArrowDown");
+      await download(() => p.keyboard.press("x"), "contact.png"); await settle(400);
+      await p.keyboard.press("Enter"); await p.keyboard.press("ArrowDown"); await p.keyboard.press("ArrowDown");
+      await download(() => p.keyboard.press("x"), "filmstrip.png"); await settle(400);
+      await p.keyboard.press("z"); await p.waitForSelector("#dk-view", { state: "hidden" });
+      await shot("13f-darkroom-developed");
+    }
   } else {
   await shot("10-cam-develop-menu");
   await download(() => p.click("#menu-list li:nth-child(1)"), "strip.png");      /* 冲洗长条 */
