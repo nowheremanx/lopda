@@ -467,7 +467,10 @@ var SEL=TS.create({
   keep:function(r,f){ var m=r.left+r.width/2; return m>=f.left && m<=f.left+R.stride-GAP; },
   edge:function(back){ turnPage(back?-1:1); },
   changed:function(){ footer(); },
-  lookup:function(){ lookupSel(); }
+  lookup:function(){ lookupSel(); },
+  menuBox:function(){ return $("rd-selmenu"); },
+  quote:function(){ quote(); },
+  done:function(){ endSel(); }
 });
 
 /* ---------- touch ----------
@@ -617,7 +620,8 @@ function renderLow(){
   pageBox(sh,page,count);
 }
 
-/* ---------- START: quote = underline it in the book + add it to the note 《书名》 + copy it; then a thought under it ---------- */
+/* ---------- 摘抄 (START's menu): underline it in the book + add it to the note 《书名》; then a thought under it.
+   The clipboard is 复制's job (decisions.md section 18) ---------- */
 function markById(id){ var m=R.meta[R.id]; return m ? m.marks.filter(function(x){ return x.id===id; })[0] : null; }
 function noteName(){ return "《"+R.meta[R.id].title+"》"; }
 function quoteHead(ch){ var t=R.book.chapters[ch].title; return noteName()+(t ? " "+t : ""); }
@@ -625,12 +629,11 @@ function quote(){
   if(!SEL.s || !R.book) return;
   var parts=SEL.parts(), text=SEL.text().trim(); if(!text || !parts.length) return;
   if(!LP.notes){ toast(tr("reader.quotefail",{msg:"notes"})); return; }
-  var m=R.meta[R.id], first=parts[0], last=parts[parts.length-1], copied=TS.copy(text);
+  var m=R.meta[R.id], first=parts[0], last=parts[parts.length-1];
   var mk={id:uid(), ch:R.ch, p:first.p, a:first.a, p2:last.p, b:last.b, text:text, thought:"", t:Date.now()};
   LP.notes.append(noteName(),quoteHead(R.ch)+"\n「"+text+"」").then(function(){
     m.marks.push(mk); saveMeta(R.id,true);
-    sfx("ok");
-    copied.then(function(ok){ toast(tr(ok?"sel.quotedcopy":"sel.quoted")); });
+    sfx("ok"); toast(tr("sel.quoted"));
     if(!R.book || R.id==null) return;
     endSel(); unwrap("u.hl"); underline();
     R.sheet="thought"; R.low={mark:mk.id, fresh:true}; renderLow();
@@ -1006,8 +1009,8 @@ $("rd-fontfile").addEventListener("change",function(){
    shelf: ▲▼ pick, A open
    page: ◀▲ back a page, ▶▼ or A on, START menu, SELECT selection, B back from a link, else shelf
    (A turns the page: nothing on a page needs confirming, and a right thumb on A reads one-handed; owner 2026-10-11)
-   selection: ◀▶▲▼ move (holding A extends), A (pressed and let go) look up, START (let go) quote and copy, SELECT word / sentence /
-     paragraph, B leave
+   selection: ◀▶▲▼ move (holding A extends), A (pressed and let go) look up, START a menu of 摘抄 (quote) and 复制 (copy;
+     on A's release), SELECT word / sentence / paragraph, B leave
    entry: ◀▶▲▼ page, B or A close, START word book (as in the dictionary); quote: A thought, START remove (twice), B close;
    footnote: A go there, B close; help: any key
    B is "back" on every screen of the handheld, so the quote sits on START, the screen's extra action */
@@ -1034,8 +1037,6 @@ function readerButton(b,down){
   if(R.sheet){ if(down) sheetButton(b); return; }
   if(SEL.s){
     if(SEL.key(b,down)) return;
-    /* on the release: the copy needs the key's user gesture (a touch's pointerdown is none) */
-    if(b==="start"){ if(!down) quote(); return; }
     if(!down) return;
     if(b==="b"){ endSel(); sfx("tap"); }
     return;
@@ -1069,12 +1070,12 @@ LP.builtin({id:"reader", label:"app.reader", icon:function(){ return ICON; }, vi
     if(R.sheet==="thought") saveThought();
     flushMeta(); unmark();
     R.sheet=""; SEL.s=null; R.low=null; R.armed=null;
-    $("rd-sheet").hidden=true; $("rd-def").hidden=true; $("rd-help").hidden=true;
+    $("rd-sheet").hidden=true; $("rd-def").hidden=true; $("rd-help").hidden=true; $("rd-selmenu").hidden=true;
     $("screen").classList.remove("rd-eink");
     var f=$("rd-flash"); if(f) f.hidden=true; $("screen").classList.remove("rd-neg"); R.flashing=false;
   },
   padLayout:function(){ if(visible() && R.book) setTimeout(relayout,0); },
-  lang:function(){ if(!visible()) return; if(R.book){ footer(); renderSheet(); renderLow(); if(R.sheet==="help") openHelp(); } else renderShelf(); },
+  lang:function(){ if(!visible()) return; if(R.book){ footer(); renderSheet(); renderLow(); SEL.drawMenu(); if(R.sheet==="help") openHelp(); } else renderShelf(); },
   ready:function(){
     var base=S.db.doc("data/users/local/reader");
     R.refs={set:base, books:base.collection("books"), fonts:base.collection("fonts")};

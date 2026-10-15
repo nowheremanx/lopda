@@ -852,12 +852,14 @@ const longPress = async (p, w, id) => {
   const [x, y] = await entryWordAt(p, w);
   await entryPointer(p, "pointerdown", x, y, id); await p.waitForTimeout(600); await entryPointer(p, "pointerup", x, y, id);
 };
+/* START's menu over a selection: its rows, the highlighted one marked with "*" */
+const selMenu = (p, where) => p.$$eval(where + " .sel-menu li", (l) => l.map((x) => (x.classList.contains("on") ? "*" : "") + x.textContent));
 const openWord = async (p, w, want) => {
   await typeWord(p, w); await p.press("#dict-q", "Enter");
   await p.waitForFunction((want) => want.test(document.querySelector("#dict-sheet .dict-page")?.textContent || ""), want);
 };
 
-test("dictionary: select on an entry, look up a word in it, B back level by level, quote and copy", { skip, timeout: 90000 }, async (t) => {
+test("dictionary: select on an entry, look up a word in it, B back level by level, START's menu quotes or copies", { skip, timeout: 90000 }, async (t) => {
   const { p, errors } = await dictPage(t, { viewport: { width: 390, height: 600 } });
   await p.addStyleTag({ content: "#dict-sheet .dict-page{flex:0 0 144px}" });
   await p.context().grantPermissions(["clipboard-read", "clipboard-write"]);
@@ -869,7 +871,7 @@ test("dictionary: select on an entry, look up a word in it, B back level by leve
   assert.equal(await marked(p), "fruit");
   await entryPointer(p, "pointermove", yx, yy, 3); await entryPointer(p, "pointerup", yx, yy, 3);
   assert.equal(await marked(p), "fruit with red or yellow");
-  assert.deepEqual(await p.$$eval("#dict-sheet .sk", (l) => l.map((x) => x.textContent)), ["SELECT词", "START摘抄", "B取消", "A查词"]);
+  assert.deepEqual(await p.$$eval("#dict-sheet .sk", (l) => l.map((x) => x.textContent)), ["SELECT词", "START摘抄…", "B取消", "A查词"]);
   /* a tap ends it and stays on the entry */
   await entryPointer(p, "pointerdown", yx, yy, 4); await entryPointer(p, "pointerup", yx, yy, 4);
   assert.equal(await marked(p), "");
@@ -925,15 +927,79 @@ test("dictionary: select on an entry, look up a word in it, B back level by leve
   assert.equal(await entryTitle(p), "green");
   await p.keyboard.press("z");
   assert.ok(await p.isHidden("#dict-sheet"));
-  /* START quotes into the note 《词典》 under the entry's word, and copies */
+  /* START: a menu, 摘抄 then 复制; B goes back to the same selection */
   await openWord(p, "green", /绿色/);
+  await p.evaluate(() => navigator.clipboard.writeText("before"));
   await longPress(p, "pigment", 30);
   await p.keyboard.press("Enter");
-  await p.waitForFunction(() => /已摘抄并复制/.test(document.getElementById("toast").textContent));
+  assert.deepEqual(await selMenu(p, "#dict-sheet"), ["*摘抄", "复制"]);
+  await p.keyboard.press("z");
+  assert.ok(await p.isHidden("#dict-sheet .sel-menu"));
+  assert.equal(await marked(p), "pigment");
+  assert.match(await p.textContent("#dict-sheet .sk-start"), /摘抄…/);
+  /* 摘抄 writes the note 《词典》 under the entry's word and leaves the clipboard alone */
+  await p.keyboard.press("Enter"); await p.keyboard.press("x");
+  await p.waitForFunction(() => /已摘抄/.test(document.getElementById("toast").textContent));
+  assert.equal(await marked(p), "");
+  assert.ok(await p.isHidden("#dict-sheet .sel-menu"));
+  assert.equal(await p.evaluate(() => navigator.clipboard.readText()), "before");
+  const notes = () => p.evaluate(() => LP.S.refs.notes.get().then((q) => q.docs.map((d) => d.data().body)));
+  assert.deepEqual(await notes(), ["《词典》\n\n《词典》 green\n「pigment」"]);
+  /* 复制 copies and writes no note */
+  await longPress(p, "pigment", 31);
+  await p.keyboard.press("Enter"); await p.keyboard.press("ArrowDown");
+  assert.deepEqual(await selMenu(p, "#dict-sheet"), ["摘抄", "*复制"]);
+  await p.keyboard.press("x");
+  await p.waitForFunction(() => /已复制/.test(document.getElementById("toast").textContent));
   assert.equal(await marked(p), "");
   assert.equal(await p.evaluate(() => navigator.clipboard.readText()), "pigment");
-  const notes = await p.evaluate(() => LP.S.refs.notes.get().then((q) => q.docs.map((d) => d.data().body)));
-  assert.deepEqual(notes, ["《词典》\n\n《词典》 green\n「pigment」"]);
+  assert.deepEqual(await notes(), ["《词典》\n\n《词典》 green\n「pigment」"]);
+  assert.deepEqual(errors, []);
+});
+
+/* a touch drag held below the entry scrolls it a line at a time and the selection follows; it stops at the end, and on release */
+test("dictionary: a drag held at the bottom edge of an entry scrolls it and grows the selection; letting go stops it", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await dictPage(t, { viewport: { width: 390, height: 600 } });
+  await p.addStyleTag({ content: "#dict-sheet .dict-page{flex:0 0 144px}" });
+  await openWord(p, "green", /绿色/);
+  const top = () => p.evaluate(() => document.querySelector("#dict-sheet .dict-page").scrollTop);
+  const frame = await p.evaluate(() => { const r = document.querySelector("#dict-sheet .dict-page").getBoundingClientRect(); return { top: r.top, bottom: r.bottom }; });
+  const [x, y] = await entryWordAt(p, "pigment");
+  await entryPointer(p, "pointerdown", x, y, 3); await p.waitForTimeout(600);
+  assert.equal(await marked(p), "pigment");
+  /* above the top while at the top: nothing to scroll */
+  await entryPointer(p, "pointermove", x, frame.top - 30, 3); await p.waitForTimeout(400);
+  assert.equal(await top(), 0);
+  /* inside the frame: no scrolling */
+  await entryPointer(p, "pointermove", x, frame.top + 60, 3); await p.waitForTimeout(400);
+  assert.equal(await top(), 0);
+  /* held below the bottom: the page scrolls by whole lines and the selection grows with it */
+  await entryPointer(p, "pointermove", x, frame.bottom + 30, 3);
+  await p.waitForTimeout(400);
+  const t1 = await top(), m1 = await marked(p);
+  assert.ok(t1 > 0 && t1 % 24 === 0, `scrolled by whole lines (${t1})`);
+  assert.ok(m1.startsWith("pigment") && m1.length > "pigment".length, m1);
+  await p.waitForTimeout(400);
+  const t2 = await top(), m2 = await marked(p);
+  assert.ok(t2 > t1, `it keeps scrolling while held (${t1} -> ${t2})`);
+  assert.ok(m2.length > m1.length, "and the selection keeps growing");
+  /* the selection's far end is under the finger, kept inside the frame: a word on the last line in view */
+  const end = await p.evaluate(() => { const l = [...document.querySelectorAll("#dict-sheet .dict-page mark")].pop().getClientRects(); const r = l[l.length - 1]; return { top: r.top, bottom: r.bottom }; });
+  assert.ok(end.top < frame.bottom - 10 && end.bottom > frame.bottom - 24 - 10, `the far end is on the last line in view (${end.top}..${end.bottom}, frame ends at ${frame.bottom})`);
+  /* let go: it stops */
+  await entryPointer(p, "pointerup", x, frame.bottom + 30, 3);
+  const t3 = await top(), m3 = await marked(p);
+  await p.waitForTimeout(400);
+  assert.equal(await top(), t3);
+  assert.equal(await marked(p), m3);
+  /* held long enough, it stops at the end of the entry */
+  await entryPointer(p, "pointerdown", x, frame.top + 60, 4); await entryPointer(p, "pointerup", x, frame.top + 60, 4);
+  assert.equal(await marked(p), "", "a tap ends it");
+  await entryPointer(p, "pointerdown", x, frame.top + 40, 5); await p.waitForTimeout(600);
+  assert.notEqual(await marked(p), "");
+  await entryPointer(p, "pointermove", x, frame.bottom + 30, 5);
+  await p.waitForFunction(() => { const g = document.querySelector("#dict-sheet .dict-page"); return g.scrollTop >= g.scrollHeight - g.clientHeight - 1; }, null, { timeout: 20000 });
+  await entryPointer(p, "pointerup", x, frame.bottom + 30, 5);
   assert.deepEqual(errors, []);
 });
 
@@ -1131,7 +1197,7 @@ test("reader: whole pages turn by keys, taps and swipes; a new text size keeps t
   assert.deepEqual(errors, []);
 });
 
-test("reader: long-press and drag selects, SELECT widens to the sentence, A looks up, START adds to the word book, START quotes and copies", { skip, timeout: 60000 }, async (t) => {
+test("reader: long-press and drag selects, SELECT widens to the sentence, A looks up, START adds to the word book, START's menu quotes or copies", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await readerPage(t);
   await p.context().grantPermissions(["clipboard-read", "clipboard-write"]);
   await openRow(p, 2);                                         /* Alice */
@@ -1160,8 +1226,8 @@ test("reader: long-press and drag selects, SELECT widens to the sentence, A look
   await move(bx, by); await lift(bx, by);
   assert.equal(await p.$$eval("#rd-flow mark", (l) => l.map((x) => x.textContent).join("")), "sister on the bank");
   assert.ok(await p.isHidden("#rd-def"));
-  assert.deepEqual(await p.$$eval("#rd-keys .sk", (l) => l.map((x) => x.textContent)), ["SELECT词", "START摘抄", "B取消", "A查词"]);
-  assert.equal(await p.locator("#rd-copy").count(), 0, "no copy button: START copies");
+  assert.deepEqual(await p.$$eval("#rd-keys .sk", (l) => l.map((x) => x.textContent)), ["SELECT词", "START摘抄…", "B取消", "A查词"]);
+  assert.equal(await p.locator("#rd-copy").count(), 0, "no copy button: START's menu copies");
   /* with a selection, a tap only cancels it: no page turn, no menu */
   const here = await pos(p);
   await press(bx, by, 4); await lift(bx, by, 4);
@@ -1201,10 +1267,33 @@ test("reader: long-press and drag selects, SELECT widens to the sentence, A look
   assert.equal(await p.$$eval("#rd-flow mark", (l) => l.map((x) => x.textContent).join("")), para);
   await p.keyboard.press("Shift");                              /* back to a word */
   assert.equal(await p.textContent("#rd-flow mark"), "sister");
-  /* START quotes and copies: there is no copy of its own */
+  /* START: a menu, 摘抄 then 复制; B goes back to the same selection */
+  await p.evaluate(() => navigator.clipboard.writeText("before"));
   await p.keyboard.press("Enter");
-  await p.waitForFunction(() => /已摘抄并复制/.test(document.getElementById("toast").textContent));
+  assert.deepEqual(await selMenu(p, "#v-reader"), ["*摘抄", "复制"]);
+  await p.keyboard.press("z");
+  assert.ok(await p.isHidden("#rd-selmenu"));
+  assert.equal(await p.textContent("#rd-flow mark"), "sister");
+  /* 复制, tapped: copies, writes no note, ends the selection */
+  await p.keyboard.press("Enter");
+  await p.click("#rd-selmenu li:nth-child(2)");
+  await p.waitForFunction(() => /已复制/.test(document.getElementById("toast").textContent));
   assert.equal(await p.evaluate(() => navigator.clipboard.readText()), "sister");
+  assert.equal(await p.locator("#rd-flow mark").count(), 0);
+  assert.ok(await p.isHidden("#rd-selmenu"));
+  assert.ok(await p.isHidden("#rd-def"));
+  assert.equal(await p.locator("#rd-flow u.hl").count(), 0);
+  const notes = () => p.evaluate(() => LP.S.refs.notes.get().then((q) => q.docs.map((d) => d.data().body)));
+  assert.deepEqual(await notes(), []);
+  /* 摘抄 (A): the note and the underline, and the clipboard stays as it was */
+  await p.evaluate(() => navigator.clipboard.writeText("before"));
+  await press(sx, sy, 8); await p.waitForTimeout(600); await lift(sx, sy, 8);
+  await p.keyboard.press("Enter"); await p.keyboard.press("x");
+  await p.waitForSelector("#rd-thought");
+  await p.waitForFunction(() => /已摘抄/.test(document.getElementById("toast").textContent));
+  assert.equal(await p.$$eval("#rd-flow u.hl", (l) => l.map((x) => x.textContent).join("")), "sister");
+  assert.equal(await p.evaluate(() => navigator.clipboard.readText()), "before");
+  assert.equal((await notes()).length, 1);
   assert.deepEqual(errors, []);
 });
 
@@ -1219,7 +1308,7 @@ test("reader: START quotes into Notes and underlines it; thoughts; the notes lis
   await p.keyboard.press("Shift");                              /* sentence */
   const sentence = await p.$$eval("#rd-flow mark", (l) => l.map((x) => x.textContent).join(""));
   assert.ok(sentence.length > 40, sentence);
-  await p.keyboard.press("Enter");                              /* START: quote */
+  await p.keyboard.press("Enter"); await p.keyboard.press("x");  /* START, A: 摘抄 */
   await p.waitForSelector("#rd-thought");
   assert.equal(await p.locator("#rd-flow mark").count(), 0, "the selection ends");
   assert.equal(await p.$$eval("#rd-flow u.hl", (l) => l.map((x) => x.textContent).join("")), sentence);
@@ -1616,7 +1705,7 @@ test("reader: a notes-list jump, a link and B back from it are full refreshes", 
   await p.keyboard.press("Shift");
   for (let i = 0; i < 4; i++) await p.keyboard.press("ArrowDown");
   await p.keyboard.press("Shift");
-  await p.keyboard.press("Enter");
+  await p.keyboard.press("Enter"); await p.keyboard.press("x");
   await p.waitForSelector("#rd-thought");
   await p.fill("#rd-thought", "心得。");
   await p.click("#rd-def .sk-a");

@@ -1,7 +1,8 @@
 /*
  * Lo-PDA runtime: the 文曲星-style text selection, shared by the reader and the dictionary's entry page
  * (docs/design/softkeys.md section 3, decisions.md section 18). English moves by word, Chinese by character; holding A
- * (or a drag) extends; SELECT widens to the sentence or the paragraph; the selection is drawn as <mark> (ink, paper text).
+ * (or a drag) extends; SELECT widens to the sentence or the paragraph; the selection is drawn as <mark> (ink, paper text);
+ * START opens a small menu, 摘抄 then 复制.
  * The system's own text selection stays off (body{user-select:none}).
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  *
@@ -15,10 +16,14 @@
  *     keep(rect, frame) a token counts (optional)     edge(back)       the cursor ran off the tokens (A not held)
  *     moved(tok) after the cursor moves (optional)   changed()        after start, unit or hold changes: redraw the keys
  *     lookup() A was pressed and let go without moving
+ *     menuBox()  the element START's small menu is drawn in (摘抄, then 复制)   quote()   摘抄 was chosen: write the note
+ *     done()     复制 was chosen and the text copied: end the selection the program's way
+ *     scroll(back) a touch drag held at the top or bottom edge: scroll one line, false when it cannot (optional; without
+ *                it the drag stops at the edge, as in the reader, where a page turn would drop the selection)
  */
 (function(){
 "use strict";
-var UNITS=["word","sent","para"], LONG_MS=450;
+var UNITS=["word","sent","para"], LONG_MS=450, EDGE_PX=20, EDGE_MS=120;
 /* a word for the cursor: one CJK character, or a run of letters and digits with inner apostrophes and hyphens */
 var TOK=/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]|(?:(?![\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}])[\p{L}\p{N}])+(?:['’\-](?:(?![\p{Script=Han}])[\p{L}\p{N}])+)*/gu;
 /* where a sentence ends: CJK and Latin stops, then any closing quotes or brackets after them. An abbreviation
@@ -113,6 +118,7 @@ function copy(text){
 function create(h){
   var c={s:null};   // s: {toks, cur, anc, unit, held, moved}; a token is {p, a, b, x, y, w, h} in the host's frame
   function sfx(n){ if(window.LP && window.LP.sfx) window.LP.sfx(n); }
+  function tr(k){ return window.LP ? window.LP.tr(k) : k; }
   function changed(){ if(h.changed) h.changed(); }
   function tokens(){
     var f=h.frame(), out=[];
@@ -128,10 +134,10 @@ function create(h){
   }
   c.start=function(fromEnd,unit){
     var t=tokens();
-    c.s={toks:t, cur:fromEnd ? t.length-1 : 0, anc:null, unit:unit||"word", held:c.s && c.s.held, moved:false};
-    c.paint(); changed();
+    c.s={toks:t, cur:fromEnd ? t.length-1 : 0, anc:null, unit:unit||"word", held:c.s && c.s.held, moved:false, menu:null};
+    c.paint(); drawMenu(); changed();
   };
-  c.end=function(){ c.unpaint(); c.s=null; };
+  c.end=function(){ c.unpaint(); c.s=null; drawMenu(); };
   c.parts=function(){
     var s=c.s; if(!s || !s.toks.length) return [];
     var lo=s.toks[s.anc==null ? s.cur : Math.min(s.anc,s.cur)], hi=s.toks[s.anc==null ? s.cur : Math.max(s.anc,s.cur)];
@@ -198,9 +204,62 @@ function create(h){
     var i=c.at(x,y); if(i<0 || i===c.s.cur) return;
     c.s.cur=i; c.paint();
   };
-  /* the keys the selection owns: the D-pad, A (held to extend, let go to look up) and SELECT; true when handled */
+  /* ---------- START: a small menu over the selection, 摘抄 then 复制 (owner 2026-10-15: sometimes only the clipboard
+     is wanted). A confirms, B goes back to the selection as it was. The selection ends after either action ---------- */
+  c.menuOpen=function(){
+    var s=c.s; if(!s) return;
+    if(!c.text().trim()){ sfx("err"); return; }
+    s.menu={pick:0, armed:false}; s.held=false; sfx("tap"); drawMenu();
+  };
+  c.menuClose=function(){ if(c.s) c.s.menu=null; drawMenu(); };
+  function menuPick(i){
+    var s=c.s; if(!s || !s.menu) return;
+    if(i!==s.menu.pick){ s.menu.pick=i; sfx("move"); drawMenu(); }
+  }
+  /* 复制 runs straight from A's release or the item's click, before any promise: Safari refuses a copy outside a gesture */
+  function menuAct(){
+    var s=c.s; if(!s || !s.menu) return;
+    var pick=s.menu.pick; c.menuClose();
+    if(pick===0){ if(h.quote) h.quote(); return; }
+    var job=copy(c.text().trim());
+    if(h.done) h.done(); else c.end();
+    job.then(function(ok){
+      var LP=window.LP; if(!LP) return;
+      if(ok){ LP.toast(tr("sel.copied")); sfx("ok"); } else { LP.toast(tr("sel.copyfail")); sfx("err"); }
+    });
+  }
+  function drawMenu(){
+    var box=h.menuBox && h.menuBox(), m=c.s && c.s.menu, LP=window.LP;
+    if(!box) return;
+    box.hidden=!m; box.textContent=""; if(!m || !LP) return;
+    var ul=document.createElement("ul"); ul.className="lcd-menu";
+    ["sel.quote","sel.copy"].forEach(function(k,i){
+      var li=document.createElement("li"), sp=document.createElement("span");
+      li.className=i===m.pick ? "on" : ""; sp.textContent=tr(k); li.appendChild(sp);
+      li.onclick=function(){ menuPick(i); menuAct(); };
+      ul.appendChild(li);
+    });
+    box.appendChild(ul);
+    var keys=document.createElement("div");
+    LP.softkeys(keys,{select:null, start:null,
+      b:{label:tr("sk.back"), fn:function(){ c.menuClose(); sfx("tap"); }},
+      a:{label:tr("sk.confirm"), fn:menuAct}});
+    box.appendChild(keys);
+  }
+  c.drawMenu=drawMenu;
+  function menuKey(b,down){
+    var m=c.s.menu;
+    if(b==="up"||b==="down"){ if(down) menuPick(b==="up" ? 0 : 1); }
+    else if(b==="a"){ if(down) m.armed=true; else if(m.armed) menuAct(); }
+    else if(b==="b"){ if(down){ c.menuClose(); sfx("tap"); } }
+    return true;
+  }
+
+  /* the keys the selection owns: the D-pad, A (held to extend, let go to look up), START (the menu) and SELECT; true when handled */
   c.key=function(b,down){
     var s=c.s; if(!s) return false;
+    if(s.menu) return menuKey(b,down);
+    if(b==="start"){ if(down) c.menuOpen(); return true; }
     if(b==="a"){ if(down){ s.held=true; s.moved=false; } else if(s.held){ s.held=false; if(!s.moved && h.lookup) h.lookup(); } return true; }
     if(b==="left"||b==="right"||b==="up"||b==="down"){ if(down) c.move(b); return true; }
     if(b==="select"){ if(down) c.cycle(); return true; }
@@ -211,26 +270,43 @@ function create(h){
   c.touch=function(area,opts){
     var t=null;
     function cancelLong(){ if(t && t.timer){ clearTimeout(t.timer); t.timer=null; } }
+    /* a drag held at (or past) the top or bottom edge scrolls, a line every EDGE_MS, and the selection follows to the
+       word under the finger, kept inside what is on screen. Only where the program can scroll (h.scroll) */
+    function zone(y){ var r=area.getBoundingClientRect(); return y<=r.top+EDGE_PX ? -1 : y>=r.bottom-EDGE_PX ? 1 : 0; }
+    function inside(y){ var r=area.getBoundingClientRect(); return Math.max(r.top+EDGE_PX/2,Math.min(r.bottom-EDGE_PX/2,y)); }
+    function stopEdge(){ if(t && t.edge){ clearInterval(t.edge); t.edge=null; } }
+    function follow(){
+      if(!h.scroll){ c.drag(t.lx,t.ly); return; }
+      c.drag(t.lx,inside(t.ly));
+      if(!zone(t.ly)){ stopEdge(); return; }
+      if(!t.edge) t.edge=setInterval(function(){
+        if(!t || !t.long || !c.s || !zone(t.ly) || !h.scroll(zone(t.ly)<0)){ stopEdge(); return; }
+        c.drag(t.lx,inside(t.ly));
+      },EDGE_MS);
+    }
     area.addEventListener("pointerdown",function(e){
       if(opts.down && opts.down(e)===false) return;
-      t={x:e.clientX, y:e.clientY, id:e.pointerId, target:e.target, long:false, timer:null};
+      stopEdge();
+      t={x:e.clientX, y:e.clientY, lx:e.clientX, ly:e.clientY, id:e.pointerId, target:e.target, long:false, timer:null, edge:null};
       if(!opts.canHold || opts.canHold()) t.timer=setTimeout(function(){
         if(!t) return;
         t.timer=null; t.long=true;
         opts.hold(t.x,t.y);
+        /* a mouse would stop reporting once it leaves the area; a finger keeps reporting anyway */
+        if(h.scroll && area.setPointerCapture) try{ area.setPointerCapture(t.id); }catch(x){}
       },LONG_MS);
     });
     area.addEventListener("pointermove",function(e){
       if(!t || e.pointerId!==t.id) return;
-      if(t.long){ c.drag(e.clientX,e.clientY); return; }
+      if(t.long){ t.lx=e.clientX; t.ly=e.clientY; follow(); return; }
       if(Math.abs(e.clientX-t.x)>10 || Math.abs(e.clientY-t.y)>10) cancelLong();
     });
     /* once a long press has started, the finger drags the selection, not the page */
     area.addEventListener("touchmove",function(e){ if(t && t.long && e.cancelable) e.preventDefault(); },{passive:false});
-    area.addEventListener("pointercancel",function(){ cancelLong(); t=null; });
+    area.addEventListener("pointercancel",function(){ cancelLong(); stopEdge(); t=null; });
     area.addEventListener("pointerup",function(e){
       if(!t || e.pointerId!==t.id) return;
-      cancelLong();
+      cancelLong(); stopEdge();
       var g={dx:e.clientX-t.x, dy:e.clientY-t.y, target:t.target}, long=t.long; t=null;
       if(long){ if(c.s){ c.s.held=false; changed(); } return; }
       opts.up(e,g);
@@ -240,6 +316,6 @@ function create(h){
   return c;
 }
 
-window.LopdaTextSel={UNITS:UNITS, LONG_MS:LONG_MS, units:units, sentStart:sentStart, sentEnd:sentEnd, widen:widen, join:join,
+window.LopdaTextSel={UNITS:UNITS, LONG_MS:LONG_MS, EDGE_PX:EDGE_PX, EDGE_MS:EDGE_MS, units:units, sentStart:sentStart, sentEnd:sentEnd, widen:widen, join:join,
   nodeAt:nodeAt, rangeRects:rangeRects, wrap:wrap, unwrap:unwrap, copy:copy, create:create};
 })();
