@@ -26,7 +26,8 @@ var D={
   refs:null, loading:null,
   q:"", cand:[], pick:0,    // the word box, its candidate rows and the highlighted one
   sheet:"", entry:null,     // "entry" | "words" | "books"; the entry on screen {word, results, back}
-  bpick:0, wpick:0, listScroll:0,
+  bpick:0, wpick:0, bmenu:0, listScroll:0,
+  armed:null, wordClearArmed:false, startImportArmed:false,
   review:null               // {i, shown}: reviewing the word book from word i
 };
 
@@ -122,7 +123,17 @@ function toggleWord(word){
 /* ---------- main screen: the word box and its candidates ---------- */
 function el(tag,cls,text){ var e=document.createElement(tag); if(cls) e.className=cls; if(text!=null) e.textContent=text; return e; }
 function btn(cls,text,fn){ var b=el("button",cls,text); b.type="button"; b.onclick=fn; return b; }
-function keyBtn(cls,key,label,fn){ var b=btn(cls,null,fn); b.appendChild(el("i","",key)); b.appendChild(document.createTextNode(label)); return b; }
+function key(key,label,disabled){
+  return {label:tr(label),disabled:!!disabled,fn:function(){ dictButton(key,true); dictButton(key,false); }};
+}
+function renderMainKeys(){
+  LP.softkeys($("dict-keys"),{
+    select:key("select","sk.words"),
+    start:key("start","sk.books"),
+    b:key("b","sk.clear"),
+    a:key("a","sk.lookup")
+  });
+}
 var seq=0;
 function update(){
   var q=D.q.trim(), mine=++seq;
@@ -172,8 +183,6 @@ $("dict-q").addEventListener("keydown",function(e){
   else if(e.key==="ArrowDown"||e.key==="ArrowUp"){ e.preventDefault(); move(e.key==="ArrowUp"?-1:1); }
 });
 function move(k){ if(!D.cand.length) return; D.pick=Math.max(0,Math.min(D.cand.length-1,D.pick+k)); sfx("move"); renderList(true); }
-$("dict-words-btn").onclick=function(){ openSheet("words"); };
-$("dict-books-btn").onclick=function(){ openSheet("books"); };
 
 /* ---------- sheets ---------- */
 function openSheet(name){ D.sheet=name; if(name==="books") D.bpick=0; renderSheet(); }
@@ -188,6 +197,19 @@ function renderSheet(){
   if(D.sheet==="entry") entrySheet(sh);
   else if(D.sheet==="words") wordsSheet(sh);
   else if(D.sheet==="books") booksSheet(sh);
+  else if(D.sheet==="bookmenu") bookMenuSheet(sh);
+  else if(D.sheet==="wordopts") wordOptionsSheet(sh);
+}
+
+function swipePages(page,fn){
+  var x0=null,y0=0;
+  page.addEventListener("pointerdown",function(e){ x0=e.clientX; y0=e.clientY; });
+  page.addEventListener("pointerup",function(e){
+    if(x0===null) return;
+    var dx=e.clientX-x0,dy=e.clientY-y0; x0=null;
+    if(Math.abs(dx)>40 && Math.abs(dx)>Math.abs(dy)*1.2){ e.preventDefault(); fn(dx<0?1:-1); }
+  });
+  page.addEventListener("pointercancel",function(){ x0=null; });
 }
 
 /* an entry: every book's answer, in one scrollable text area */
@@ -226,23 +248,25 @@ function entrySheet(sh){
   }
   page.scrollTop=e.scrollTop||0;
   page.addEventListener("scroll",function(){ e.scrollTop=page.scrollTop; updateEntryPosition(e,page,count); });
+  swipePages(page,function(k){ if(D.review) step(k); else stepMatch(k); });
   sh.appendChild(page);
-  var keys=el("div","dict-keys");
-  var mark=inBook(word) ? tr("dict.inbook") : tr("dict.add");
+  var keys=el("div"), keyset;
   if(D.review){
-    keys.appendChild(keyBtn("ck","◀",tr("dict.prev"),function(){ step(-1); }));
-    keys.appendChild(keyBtn("ck ck-a","A",tr(e.shown?"dict.next":"dict.reveal"),function(){ reviewA(); }));
-    keys.appendChild(keyBtn("ck","START",mark,function(){ toggleWord(word); renderSheet(); }));
-    keys.appendChild(keyBtn("ck","▶",tr("dict.next"),function(){ step(1); }));
+    keyset={
+      select:key("select","sk.back"),
+      start:{label:tr(inBook(word)?"sk.saved":"sk.addword"),fn:function(){ dictButton("start",true); dictButton("start",false); }},
+      b:key("b","sk.back"),
+      a:{label:tr(e.shown?"sk.nextword":"sk.reveal"),fn:function(){ dictButton("a",true); dictButton("a",false); }}
+    };
   } else {
-    var prev=keyBtn("ck dict-prev-match","◀",tr("dict.prev"),function(){ stepMatch(-1); });
-    var next=keyBtn("ck dict-next-match","▶",tr("dict.next"),function(){ stepMatch(1); });
-    prev.disabled=e.pick<=0; next.disabled=e.pick<0 || e.pick>=D.cand.length-1;
-    keys.appendChild(prev);
-    keys.appendChild(keyBtn("ck","B",tr("dict.back"),function(){ closeSheet(); }));
-    if(e.results && e.results.length) keys.appendChild(keyBtn("ck","START",mark,function(){ toggleWord(word); renderSheet(); }));
-    keys.appendChild(next);
+    keyset={
+      select:key("select","sk.back"),
+      start:e.results && e.results.length ? {label:tr(inBook(word)?"sk.saved":"sk.addword"),fn:function(){ dictButton("start",true); dictButton("start",false); }} : null,
+      b:key("b","sk.back"),
+      a:key("a","sk.back")
+    };
   }
+  LP.softkeys(keys,keyset);
   sh.appendChild(keys);
   updateEntryPosition(e,page,count);
 }
@@ -286,9 +310,13 @@ function wordsSheet(sh){
     ul.appendChild(li);
   });
   sh.appendChild(ul);
-  var keys=el("div","dict-keys");
-  keys.appendChild(keyBtn("ck","B",tr("dict.back"),function(){ closeSheet(); }));
-  if(D.set.words.length) keys.appendChild(keyBtn("ck ck-a","A",tr("dict.review"),function(){ startReview(D.wpick); }));
+  var keys=el("div");
+  LP.softkeys(keys,{
+    select:null,
+    start:{label:tr("sk.options"),fn:function(){ dictButton("start",true); dictButton("start",false); }},
+    b:key("b","sk.back"),
+    a:{label:tr("sk.review"),disabled:!D.set.words.length,fn:function(){ dictButton("a",true); dictButton("a",false); }}
+  });
   sh.appendChild(keys);
   var on=ul.querySelector("li.on"); if(on && on.scrollIntoView) on.scrollIntoView({block:"nearest"});
 }
@@ -322,27 +350,84 @@ function booksSheet(sh){
     ul.appendChild(li);
   });
   sh.appendChild(ul);
-  sh.appendChild(el("p","hint",D.busy ? D.busy : tr("dict.bookkeys")));
-  sh.appendChild(el("p","hint",tr("dict.importnote")));
-  var keys=el("div","dict-keys"), cur=ids[D.bpick];
-  keys.appendChild(keyBtn("ck","B",tr("dict.back"),function(){ D.armed=null; closeSheet(); }));
-  var toggle=keyBtn("ck ck-a","A",disabled(cur) ? tr("dict.enable") : tr("dict.disable"),function(){ toggleBook(cur); });
-  toggle.disabled=!!D.busy;
-  keys.appendChild(toggle);
-  keys.appendChild(btn("btn ghost",tr("dict.up"),function(){ shift(-1); }));
-  keys.appendChild(btn("btn ghost",tr("dict.down"),function(){ shift(1); }));
-  var del=btn(D.armed===cur?"btn":"btn ghost",D.armed===cur ? tr("common.confirm",{what:tr("common.delete")}) : tr("common.delete"),function(){
-    if(D.armed===cur){ D.armed=null; removeBook(cur); } else { D.armed=cur; renderSheet(); }
+  if(D.busy) sh.appendChild(el("p","hint",D.busy));
+  if(ids.length<=1) sh.appendChild(el("p","hint",tr("dict.importnote")));
+  var keys=el("div");
+  LP.softkeys(keys,{
+    select:null,
+    start:{label:tr("sk.import"),disabled:!!D.busy,fn:function(){ dictButton("start",true); dictButton("start",false); }},
+    b:{label:tr("sk.back"),fn:function(){ dictButton("b",true); dictButton("b",false); }},
+    a:{label:tr("sk.item"),disabled:!!D.busy,fn:function(){ dictButton("a",true); dictButton("a",false); }}
   });
-  del.disabled=cur===BUILTIN || !!D.busy;
-  keys.appendChild(del);
-  var imp=btn("btn",tr("dict.import"),function(){
-    if(!S.db){ toast(tr("dict.nodb")); sfx("err"); return; }
-    $("dict-file").value=""; $("dict-file").click();
-  });
-  imp.disabled=!!D.busy;
-  keys.appendChild(imp);
   sh.appendChild(keys);
+}
+function bookActions(){
+  var ids=order(), id=ids[D.bpick];
+  return [
+    {k:"toggle",label:disabled(id)?"dict.enable":"dict.disable"},
+    {k:"up",label:"dict.up",disabled:D.bpick<=0},
+    {k:"down",label:"dict.down",disabled:D.bpick>=ids.length-1},
+    id!==BUILTIN ? {k:"delete",label:D.armed===id ? "common.confirm" : "common.delete",disabled:!!D.busy} : null
+  ].filter(Boolean);
+}
+function bookMenuSheet(sh){
+  var ids=order(), id=ids[D.bpick], title=el("p","sheet-title");
+  var meta=id===BUILTIN ? null : D.meta[id];
+  title.appendChild(el("span","",meta ? LP.noEmoji(meta.name) : "ECDICT"));
+  title.appendChild(el("small","",tr(disabled(id)?"dict.off":"dict.on")));
+  sh.appendChild(title);
+  var rows=bookActions(), ul=el("ul","lcd-menu");
+  D.bmenu=Math.max(0,Math.min(D.bmenu,rows.length-1));
+  rows.forEach(function(row,i){
+    var li=el("li",(i===D.bmenu?"on ":"")+(row.disabled||D.busy?"disabled":""));
+    li.appendChild(el("span","",row.k==="delete" && D.armed===id ? tr("common.confirm",{what:tr("common.delete")}) : tr(row.label)));
+    li.onclick=function(){ if(row.disabled||D.busy){ sfx("err"); return; } D.bmenu=i; renderSheet(); };
+    ul.appendChild(li);
+  });
+  sh.appendChild(ul);
+  var action=rows[D.bmenu], keys=el("div");
+  LP.softkeys(keys,{
+    select:null,start:null,
+    b:{label:tr("sk.back"),fn:function(){ dictButton("b",true); dictButton("b",false); }},
+    a:{label:tr("sk.confirm"),disabled:!action || !!action.disabled || !!D.busy,fn:function(){ dictButton("a",true); dictButton("a",false); }}
+  });
+  sh.appendChild(keys);
+}
+function wordOptionsSheet(sh){
+  var title=el("p","sheet-title"); title.appendChild(el("span","",tr("sk.options"))); sh.appendChild(title);
+  var ul=el("ul","lcd-menu"), row=el("li","on");
+  row.appendChild(el("span","",tr(D.wordClearArmed?"dict.cleararmed":"dict.clearwords")));
+  row.onclick=function(){ D.wordClearArmed=!D.wordClearArmed; renderSheet(); };
+  ul.appendChild(row); sh.appendChild(ul);
+  var keys=el("div");
+  LP.softkeys(keys,{
+    select:null,start:null,
+    b:{label:tr("sk.back"),fn:function(){ dictButton("b",true); dictButton("b",false); }},
+    a:{label:tr(D.wordClearArmed?"sk.confirm":"sk.clear"),disabled:!D.set.words.length,fn:function(){ dictButton("a",true); dictButton("a",false); }}
+  });
+  sh.appendChild(keys);
+}
+function startImport(){
+  if(D.busy) return;
+  if(!S.db){ toast(tr("dict.nodb")); sfx("err"); return; }
+  $("dict-file").value=""; $("dict-file").click();
+}
+function bookMenuBack(){ D.sheet="books"; D.armed=null; renderSheet(); }
+function bookAction(){
+  var action=bookActions()[D.bmenu], id=order()[D.bpick];
+  if(!action || action.disabled || D.busy){ sfx("err"); return; }
+  if(action.k==="toggle") toggleBook(id);
+  else if(action.k==="up") shift(-1);
+  else if(action.k==="down") shift(1);
+  else if(action.k==="delete"){
+    if(D.armed===id){ D.armed=null; D.sheet="books"; removeBook(id); }
+    else { D.armed=id; sfx("tap"); renderSheet(); }
+  }
+}
+function clearWords(){
+  if(!D.set.words.length) return;
+  D.set.words=[]; D.wordClearArmed=false; saveSet();
+  D.sheet="words"; renderSheet(); toast(tr("dict.cleared")); sfx("ok");
 }
 function toggleBook(id){
   if(!id || D.busy) return;
@@ -423,9 +508,30 @@ $("dict-file").addEventListener("change",function(){
 /* ---------- chin pad ----------
    main: ▲▼ pick, A look up, B clear, SELECT word book, START books
    entry: ◀▶ nearby matches, ▲▼ scroll, B (or A) back, START word book; review: A show / next, ◀▶ words, ▲▼ scroll, START word book, B back
-   (B is "back" everywhere on the handheld, so the word book sits on START)
-   word book: ▲▼ pick, A review, B back; books: ▲▼ pick, A toggle, B back */
-function dictButton(b){
+   word book: ▲▼ pick, A review, START options, B back; books: ▲▼ pick, A this book, START import, B back */
+function dictButton(b,down){
+  if(b==="start"){
+    if(down){
+      D.startImportArmed=D.sheet==="books";
+      if(D.startImportArmed) return;
+    } else {
+      var importNow=D.startImportArmed; D.startImportArmed=false;
+      if(importNow) startImport();
+      return;
+    }
+  }
+  if(!down) return;
+  if(D.sheet==="bookmenu"){
+    if(b==="up"||b==="down"){ D.bmenu=Math.max(0,Math.min(bookActions().length-1,D.bmenu+(b==="up"?-1:1))); sfx("move"); renderSheet(); }
+    else if(b==="a") bookAction();
+    else if(b==="b") bookMenuBack();
+    return;
+  }
+  if(D.sheet==="wordopts"){
+    if(b==="a"){ if(D.wordClearArmed) clearWords(); else { D.wordClearArmed=true; renderSheet(); } }
+    else if(b==="b"){ D.wordClearArmed=false; D.sheet="words"; renderSheet(); }
+    return;
+  }
   if(b==="select" && D.sheet){ closeSheet(); return; }
   if(D.sheet==="entry"){
     var w=headOf(D.entry), has=D.entry.results && D.entry.results.length;
@@ -447,14 +553,15 @@ function dictButton(b){
     var n=D.set.words.length;
     if(b==="up"||b==="down"){ if(n){ D.wpick=Math.max(0,Math.min(n-1,D.wpick+(b==="up"?-1:1))); sfx("move"); renderSheet(); } }
     else if(b==="a") startReview(D.wpick);
-    else if(b==="b"||b==="start") closeSheet();
+    else if(b==="b") closeSheet();
+    else if(b==="start"){ D.wordClearArmed=false; D.sheet="wordopts"; renderSheet(); }
     return;
   }
   if(D.sheet==="books"){
     var m=order().length;
     if(b==="up"||b==="down"){ D.bpick=Math.max(0,Math.min(m-1,D.bpick+(b==="up"?-1:1))); D.armed=null; sfx("move"); renderSheet(); }
-    else if(b==="a") toggleBook(order()[D.bpick]);
-    else if(b==="b"||b==="start"){ D.armed=null; closeSheet(); }
+    else if(b==="a"){ D.bmenu=0; D.armed=null; D.sheet="bookmenu"; renderSheet(); }
+    else if(b==="b"){ D.armed=null; closeSheet(); }
     return;
   }
   if(b==="up"||b==="down") move(b==="up"?-1:1);
@@ -463,14 +570,14 @@ function dictButton(b){
   else if(b==="select") openSheet("words");
   else if(b==="start") openSheet("books");
 }
-LP.padRoute("dict",function(b,down){ if($("v-dict").hidden) return false; if(down) dictButton(b); return true; });
+LP.padRoute("dict",function(b,down){ if($("v-dict").hidden) return false; dictButton(b,down); return true; });
 
 /* ---------- home icon: a closed book with an A on the cover ---------- */
 var ICON=["................","...00000000000..","..0111111111110.","..0133333333100.","..0133300333100.","..0133033033100.","..0130333303100.","..0130000003100.","..0130333303100.","..0130333303100.","..0133333333100.","..0111111111100.","..0222222222220.","..0233333333330.","...00000000000..","................"];
 
 function openDict(){
   D.sheet=""; D.entry=null; D.review=null; D.q=""; D.listScroll=0; $("dict-q").value="";
-  show("dict"); showPad(true); note(); renderSheet(); update();
+  show("dict"); showPad(true); note(); renderMainKeys(); renderSheet(); update();
   /* the browser may clear a site's data after a while unless it is persistent (a Home Screen app always is) */
   P.persist().catch(function(){});
   if(!D.loading) D.loading=loaded();
@@ -481,7 +588,7 @@ LP.dict={lookup:lookup, suggest:suggest, inBook:inBook, toggleWord:toggleWord};
 LP.builtin({id:"dict", label:"app.dict", icon:function(){ return ICON; }, view:"dict", keepPad:true,
   open:function(){ openDict(); },
   leave:function(){ D.sheet=""; D.entry=null; D.review=null; D.armed=null; D.q=""; var i=$("dict-q"); if(i){ i.value=""; i.blur(); } renderSheet(); },
-  lang:function(){ if(!$("v-dict").hidden){ note(); renderSheet(); update(); } },
+  lang:function(){ if(!$("v-dict").hidden){ note(); renderMainKeys(); renderSheet(); update(); } },
   ready:function(){
     var base=S.db.doc("data/users/local/dict");
     D.refs={set:base, books:base.collection("books")};

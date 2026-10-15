@@ -32,6 +32,7 @@
       "sk.review": "复习", "sk.reveal": "看释义", "sk.saved": "已收", "sk.save": "保存",
       "sk.note": "想法", "sk.rename": "起名", "sk.export": "导出", "sk.discard": "扔掉",
       "sk.keep": "保留", "sk.delete": "删除", "sk.enable": "启用", "sk.disable": "停用",
+      "sk.nextword": "下一词", "sk.options": "选项",
       "sk.addword": "生词+", "sk.skip": "略过", "sk.done": "完成",
       "sk.use": "使用", "sk.unmark": "去线",
 
@@ -81,7 +82,7 @@
       "dict.ph": "输入英文单词", "dict.words": "生词本", "dict.books": "词典", "dict.back": "返回", "dict.page": "翻页",
       "dict.prev": "前词", "dict.next": "后词",
       "dict.history": "最近查过", "dict.nohistory": "输入单词，候选会出现在这里。A 或回车查词。",
-      "dict.alloff": "没有启用的词典。按 START 启用一本。",
+      "dict.alloff": "没有启用的词典。到「词典」打开一本的菜单，选择启用。",
       "dict.loading": "词典读取中…", "dict.loadfail": "词典读不出来：{msg}", "dict.notfound": "查不到「{w}」",
       "dict.lemma": "{w} → {base}", "dict.near": "相近的词",
       "dict.add": "生词本", "dict.added": "已加入生词本", "dict.removed": "已移出生词本", "dict.inbook": "已在生词本",
@@ -95,7 +96,7 @@
       "dict.entries": "{n} 词", "dict.delfail": "删除失败",
       "dict.on": "启用", "dict.off": "停用", "dict.enable": "启用", "dict.disable": "停用",
       "dict.enabled": "已启用「{name}」", "dict.disabled": "已停用「{name}」",
-      "dict.bookkeys": "A 启用/停用　↑↓ 选　B 返回",
+      "dict.clearwords": "清空生词本", "dict.cleararmed": "再按一次确认清空", "dict.cleared": "生词本已清空",
 
       "app.reader": "阅读器",
       "reader.shelf": "书架", "reader.import": "导入", "reader.loading": "读取中…",
@@ -258,6 +259,7 @@
       "sk.review": "Review", "sk.reveal": "Reveal", "sk.saved": "Saved", "sk.save": "Save",
       "sk.note": "Note", "sk.rename": "Name", "sk.export": "Export", "sk.discard": "Discard",
       "sk.keep": "Keep", "sk.delete": "Delete", "sk.enable": "Enable", "sk.disable": "Disable",
+      "sk.nextword": "Next", "sk.options": "Options",
       "sk.addword": "Add", "sk.skip": "Skip", "sk.done": "Done",
       "sk.use": "Use", "sk.unmark": "Unmark",
 
@@ -307,7 +309,7 @@
       "dict.ph": "Type an English word", "dict.words": "Words", "dict.books": "Books", "dict.back": "Back", "dict.page": "Page",
       "dict.prev": "Prev", "dict.next": "Next",
       "dict.history": "Recent", "dict.nohistory": "Type a word; matches show here. A or Enter looks it up.",
-      "dict.alloff": "All dictionaries are off. Press START to enable one.",
+      "dict.alloff": "All dictionaries are off. Open Books, then a book's menu to enable one.",
       "dict.loading": "Reading dictionaries…", "dict.loadfail": "Cannot read the dictionaries: {msg}", "dict.notfound": "No entry for \"{w}\"",
       "dict.lemma": "{w} → {base}", "dict.near": "Close matches",
       "dict.add": "Words", "dict.added": "Added to Words", "dict.removed": "Removed from Words", "dict.inbook": "In Words",
@@ -321,7 +323,7 @@
       "dict.entries": "{n} words", "dict.delfail": "Delete failed",
       "dict.on": "On", "dict.off": "Off", "dict.enable": "Enable", "dict.disable": "Disable",
       "dict.enabled": "{name} enabled", "dict.disabled": "{name} disabled",
-      "dict.bookkeys": "A On/Off · ↑↓ Select · B Back",
+      "dict.clearwords": "Clear word book", "dict.cleararmed": "Press again to confirm", "dict.cleared": "Word book cleared",
 
       "app.reader": "Reader",
       "reader.shelf": "Books", "reader.import": "Import", "reader.loading": "Loading…",
