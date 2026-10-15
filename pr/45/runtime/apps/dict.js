@@ -253,14 +253,14 @@ function entrySheet(sh){
   var keys=el("div"), keyset;
   if(D.review){
     keyset={
-      select:key("select","sk.back"),
+      select:null,
       start:{label:tr(inBook(word)?"sk.saved":"sk.addword"),fn:function(){ dictButton("start",true); dictButton("start",false); }},
       b:key("b","sk.back"),
       a:{label:tr(e.shown?"sk.nextword":"sk.reveal"),fn:function(){ dictButton("a",true); dictButton("a",false); }}
     };
   } else {
     keyset={
-      select:key("select","sk.back"),
+      select:null,
       start:e.results && e.results.length ? {label:tr(inBook(word)?"sk.saved":"sk.addword"),fn:function(){ dictButton("start",true); dictButton("start",false); }} : null,
       b:key("b","sk.back"),
       a:key("a","sk.back")
