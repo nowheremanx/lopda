@@ -177,6 +177,7 @@ test("every preview comment links the runtime, also for a PR that only changes a
 test("the Pages workflow publishes the repo without tests, dependencies or CI files", () => {
   const y = read(".github/workflows/pages.yml");
   for (const ex of ["/tests", "/node_modules", "/_to_delete", "/.github"]) assert.ok(y.includes("--exclude=" + ex), ex);
+  assert.ok(/rsync -a --checksum --delete/.test(y), "same-size generated files are compared by content");
   assert.ok(y.includes("gh-pages") && y.includes(".nojekyll") && y.includes("lopda-preview"));
   /* PRs that change no app, sdk script or runtime file (docs, tests, CI) get no preview and no comment */
   assert.ok(y.includes("id: plan") && y.includes("deploy=false"), "preview only when needed");
