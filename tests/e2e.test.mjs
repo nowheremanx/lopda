@@ -128,6 +128,39 @@ test("files: the runtime's dialog guards PAD.exportFile and PAD.importFile (pain
   assert.deepEqual(errors, []);
 });
 
+test("paint: toolbar stays two rows and canvas keeps its size at 331x473", { skip, timeout: 30000 }, async (t) => {
+  const p = await browser.newPage({ viewport: { width: 375, height: 844 }, locale: "zh-CN" });
+  t.after(() => p.close());
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await p.locator("#home .app", { hasText: "点阵画板" }).click();
+  const frame = p.locator("#run-frame");
+  await frame.waitFor();
+  await frame.evaluate((el) => { el.style.width = "331px"; el.style.height = "473px"; el.style.flex = "none"; });
+  const app = p.frameLocator("#run-frame");
+  await app.locator("#cv").waitFor();
+  const layout = await app.locator("#app").evaluate((root) => {
+    const row = (id) => {
+      const boxes = [...root.querySelector("#" + id).children]
+        .filter((child) => getComputedStyle(child).display !== "none")
+        .map((child) => child.getBoundingClientRect());
+      return { tops: boxes.map((box) => box.top), height: Math.max(...boxes.map((box) => box.bottom)) - Math.min(...boxes.map((box) => box.top)) };
+    };
+    return {
+      width: document.documentElement.clientWidth,
+      height: document.documentElement.clientHeight,
+      first: row("t1"),
+      second: row("t2"),
+      canvas: root.querySelector("#cv").getBoundingClientRect().width
+    };
+  });
+  assert.deepEqual([layout.width, layout.height], [331, 473]);
+  assert.equal(new Set(layout.first.tops.map((top) => Math.round(top))).size, 1, "row 1 controls stay on one line");
+  assert.equal(new Set(layout.second.tops.map((top) => Math.round(top))).size, 1, "row 2 controls stay on one line");
+  assert.equal(layout.first.height, 44);
+  assert.equal(layout.second.height, 44);
+  assert.ok(layout.canvas >= 269, `canvas is at least 20px below the pre-#42 baseline (got ${layout.canvas}px)`);
+});
+
 for (const id of readdirSync(join(ROOT, "registry", "apps"))) {
   test(`app ${id} loads in the dev harness and reports no errors`, { skip }, async (t) => {
     const { p, errors } = await page(t);
