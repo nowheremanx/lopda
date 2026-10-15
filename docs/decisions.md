@@ -98,8 +98,9 @@
   导出的确认写明「底片里含有这一卷的彩色原片」。导出、导入在 A 松开时动作（要打开分享菜单和文件选择）。
 - **底片**（`runtime/negative.js`，darkroom.md 第 5 节）：看得见的是一张只有四个色调的 1080×1440 PNG，按印样卡排这卷的四色底片，
   标题 LO-PDA NEGATIVE，片边交替印 LO-PDA NEGATIVE 和"片名 + 装卷日期"，有格号；字是系统字体画的，画完整张吸附到四个色调。
-  IEND 前一个私有辅助数据块 `lpDa`：魔数 `LOPDA-NEG`、格式版本 1、JSON 长度、JSON（`{roll, latent}`，卷的全部元数据和每格的 px，
-  每张潜影在后面的偏移和长度）、各格 JPEG 首尾相接、整段内容的 CRC32。文件名 `lopda-negative-<装卷日期>-<片名>-<卷号>.png`（片名用英文，如 `lopda-negative-20261013-sunny-200-007.png`）。
+  IEND 前一个私有辅助数据块 `lpDa`：魔数 `LOPDA-NEG`、格式版本 2、JSON 长度、JSON（`{roll, latent}`，卷的全部元数据和每张潜影在 JPEG 区的偏移和长度）、
+  各格像素每像素 2 位、每字节 4 格且高位在前，之后是各格 JPEG 首尾相接，最后是整段内容的 CRC32。格式版本 1（像素字符串在 JSON 中）仍可导入。
+  文件名 `lopda-negative-<装卷日期>-<片名>-<卷号>.png`（片名用英文，如 `lopda-negative-20261013-sunny-200-007.png`）。
   卷号是这台掌机装的第几卷（装卷时加一，记在 `data/users/local/camera`，扔掉的卷号不再用），owner 2026-10-13：同一天导出的几卷不要被系统改名成「(1)」。
   卷号也印在底片最下面（ROLL 007）；导入别人的底片，卷号照原样保留。
 - **导入**：文件选择，上限 4 MB（runtime 自己的导入，不是 PAD 的 2 MB）。PNG 块的 CRC、魔数、版本、内容 CRC、JSON、每一格都校验，
