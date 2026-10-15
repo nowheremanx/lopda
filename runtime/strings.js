@@ -24,7 +24,7 @@
       "common.dpad": "方向键", "common.pwa": "加到主屏，书和词典才不会被系统清掉。",
 
       "sk.select": "选字", "sk.menu": "菜单", "sk.shelf": "书架", "sk.lookup": "查词",
-      "sk.quote": "摘抄", "sk.cancel": "取消", "sk.back": "返回", "sk.confirm": "确定",
+      "sk.quote": "摘抄", "sk.cancel": "取消", "sk.back": "返回", "sk.confirm": "确认",
       "sk.open": "打开", "sk.next": "下一页", "sk.prev": "前一页", "sk.words": "生词本",
       "sk.books": "词典", "sk.clear": "清空", "sk.import": "导入", "sk.item": "本项",
       "sk.add": "新增", "sk.today": "今天", "sk.anniv": "纪念", "sk.jump": "跳转",
@@ -32,6 +32,8 @@
       "sk.review": "复习", "sk.reveal": "看释义", "sk.saved": "已收", "sk.save": "保存",
       "sk.note": "想法", "sk.rename": "起名", "sk.export": "导出", "sk.discard": "扔掉",
       "sk.keep": "保留", "sk.delete": "删除", "sk.enable": "启用", "sk.disable": "停用",
+      "sk.addword": "生词+", "sk.skip": "略过", "sk.done": "完成",
+      "sk.use": "使用", "sk.unmark": "去线",
 
       "store.title": "应用商店", "store.refresh": "刷新",
       "store.note": "每个程序都经过社区审核，在隔离的沙盒里运行，不能联网，也碰不到你的其他数据。装好的版本不会自己变，有新版本时这里会提示更新。",
@@ -248,7 +250,7 @@
       "common.dpad": "D-pad", "common.pwa": "Add to Home Screen so the system keeps your books and dictionaries.",
 
       "sk.select": "Select", "sk.menu": "Menu", "sk.shelf": "Shelf", "sk.lookup": "Lookup",
-      "sk.quote": "Quote", "sk.cancel": "Cancel", "sk.back": "Back", "sk.confirm": "OK",
+      "sk.quote": "Quote", "sk.cancel": "Cancel", "sk.back": "Back", "sk.confirm": "Confirm",
       "sk.open": "Open", "sk.next": "Next", "sk.prev": "Prev", "sk.words": "Words",
       "sk.books": "Books", "sk.clear": "Clear", "sk.import": "Import", "sk.item": "Item",
       "sk.add": "Add", "sk.today": "Today", "sk.anniv": "Anniv", "sk.jump": "Jump",
@@ -256,6 +258,8 @@
       "sk.review": "Review", "sk.reveal": "Reveal", "sk.saved": "Saved", "sk.save": "Save",
       "sk.note": "Note", "sk.rename": "Name", "sk.export": "Export", "sk.discard": "Discard",
       "sk.keep": "Keep", "sk.delete": "Delete", "sk.enable": "Enable", "sk.disable": "Disable",
+      "sk.addword": "Add", "sk.skip": "Skip", "sk.done": "Done",
+      "sk.use": "Use", "sk.unmark": "Unmark",
 
       "store.title": "Store", "store.refresh": "Reload",
       "store.note": "Every program is reviewed by the community and runs sealed off: no network, no reach into your other data. Installed versions never change by themselves; updates show up here.",

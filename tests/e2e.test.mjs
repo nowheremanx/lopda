@@ -881,7 +881,8 @@ test("reader: long-press and drag selects, SELECT widens to the sentence, A look
   await move(bx, by); await lift(bx, by);
   assert.equal(await p.$$eval("#rd-flow mark", (l) => l.map((x) => x.textContent).join("")), "sister on the bank");
   assert.ok(await p.isHidden("#rd-def"));
-  assert.match(await p.textContent("#rd-foot"), /查词[\s\S]*摘抄[\s\S]*词[\s\S]*复制/);
+  assert.deepEqual(await p.$$eval("#rd-keys .sk", (l) => l.map((x) => x.textContent)), ["SELECT词", "START摘抄", "B取消", "A查词"]);
+  assert.equal(await p.isVisible("#rd-copy"), true);
   /* with a selection, a tap only cancels it: no page turn, no menu */
   const here = await pos(p);
   await press(bx, by, 4); await lift(bx, by, 4);
@@ -915,14 +916,14 @@ test("reader: long-press and drag selects, SELECT widens to the sentence, A look
   const sentence = (await p.$$eval("#rd-flow mark", (l) => l.map((x) => x.textContent).join("")));
   assert.match(sentence, /^Alice was beginning to get very tired of sitting by her sister on the bank, and of having nothing to do:/);
   assert.match(sentence, /conversations\?”$/);
-  assert.match(await p.textContent("#rd-foot"), /句/);
+  assert.match(await p.textContent("#rd-keys .sk-select"), /句/);
   await p.keyboard.press("Shift");
   const para = await p.evaluate(() => document.querySelectorAll("#rd-flow > p")[1].textContent);
   assert.equal(await p.$$eval("#rd-flow mark", (l) => l.map((x) => x.textContent).join("")), para);
   await p.keyboard.press("Shift");                              /* back to a word */
   assert.equal(await p.textContent("#rd-flow mark"), "sister");
   /* copy */
-  await p.click("#rd-foot button:last-child");
+  await p.click("#rd-copy");
   await p.waitForFunction(() => /已复制/.test(document.getElementById("toast").textContent));
   assert.equal(await p.evaluate(() => navigator.clipboard.readText()), "sister");
   assert.deepEqual(errors, []);
@@ -944,7 +945,7 @@ test("reader: START quotes into Notes and underlines it; thoughts; the notes lis
   assert.equal(await p.locator("#rd-flow mark").count(), 0, "the selection ends");
   assert.equal(await p.$$eval("#rd-flow u.hl", (l) => l.map((x) => x.textContent).join("")), sentence);
   await p.fill("#rd-thought", "第一句心得。");
-  await p.click("#rd-def .ck-a");
+  await p.click("#rd-def .sk-a");
   await p.waitForFunction(() => /心得已存进记事本/.test(document.getElementById("toast").textContent));
   /* the notes list: one quote with its thought; turn away, then jump back from the list */
   await p.keyboard.press("ArrowRight"); await p.keyboard.press("ArrowRight");
@@ -972,13 +973,13 @@ test("reader: START quotes into Notes and underlines it; thoughts; the notes lis
   await p.keyboard.press("x");                                  /* A: another thought */
   await p.waitForSelector("#rd-thought");
   await p.fill("#rd-thought", "再读一遍。");
-  await p.click("#rd-def .ck-a");                               /* (X would type into the box) */
+  await p.click("#rd-def .sk-a");                               /* (X would type into the box) */
   await p.waitForSelector("#rd-def", { state: "hidden" });
   await p.touchscreen.tap(spot.x, spot.y);
   await p.waitForSelector("#rd-def:not([hidden])");
   assert.match(await p.textContent("#rd-def"), /第一句心得。\s*再读一遍/);
   await p.keyboard.press("Enter");
-  assert.match(await p.textContent("#rd-def"), /确认删除/);
+  assert.match(await p.textContent("#rd-def"), /START确认/);
   await p.keyboard.press("Enter");
   await p.waitForFunction(() => /已删除划线/.test(document.getElementById("toast").textContent));
   assert.equal(await p.locator("#rd-flow u.hl").count(), 0);
@@ -1339,7 +1340,7 @@ test("reader: a notes-list jump, a link and B back from it are full refreshes", 
   await p.keyboard.press("Enter");
   await p.waitForSelector("#rd-thought");
   await p.fill("#rd-thought", "心得。");
-  await p.click("#rd-def .ck-a");
+  await p.click("#rd-def .sk-a");
   await p.waitForFunction(() => /心得已存进记事本/.test(document.getElementById("toast").textContent));
   await einkFlashOn(p);
   await flashHold(p);
