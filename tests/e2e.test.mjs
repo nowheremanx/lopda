@@ -128,6 +128,39 @@ test("files: the runtime's dialog guards PAD.exportFile and PAD.importFile (pain
   assert.deepEqual(errors, []);
 });
 
+test("paint: toolbar stays two rows and canvas keeps its size at 331x473", { skip, timeout: 30000 }, async (t) => {
+  const p = await browser.newPage({ viewport: { width: 375, height: 844 }, locale: "zh-CN" });
+  t.after(() => p.close());
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await p.locator("#home .app", { hasText: "点阵画板" }).click();
+  const frame = p.locator("#run-frame");
+  await frame.waitFor();
+  await frame.evaluate((el) => { el.style.width = "331px"; el.style.height = "473px"; el.style.flex = "none"; });
+  const app = p.frameLocator("#run-frame");
+  await app.locator("#cv").waitFor();
+  const layout = await app.locator("#app").evaluate((root) => {
+    const row = (id) => {
+      const boxes = [...root.querySelector("#" + id).children]
+        .filter((child) => getComputedStyle(child).display !== "none")
+        .map((child) => child.getBoundingClientRect());
+      return { tops: boxes.map((box) => box.top), height: Math.max(...boxes.map((box) => box.bottom)) - Math.min(...boxes.map((box) => box.top)) };
+    };
+    return {
+      width: document.documentElement.clientWidth,
+      height: document.documentElement.clientHeight,
+      first: row("t1"),
+      second: row("t2"),
+      canvas: root.querySelector("#cv").getBoundingClientRect().width
+    };
+  });
+  assert.deepEqual([layout.width, layout.height], [331, 473]);
+  assert.equal(new Set(layout.first.tops.map((top) => Math.round(top))).size, 1, "row 1 controls stay on one line");
+  assert.equal(new Set(layout.second.tops.map((top) => Math.round(top))).size, 1, "row 2 controls stay on one line");
+  assert.equal(layout.first.height, 44);
+  assert.equal(layout.second.height, 44);
+  assert.ok(layout.canvas >= 269, `canvas is at least 20px below the pre-#42 baseline (got ${layout.canvas}px)`);
+});
+
 for (const id of readdirSync(join(ROOT, "registry", "apps"))) {
   test(`app ${id} loads in the dev harness and reports no errors`, { skip }, async (t) => {
     const { p, errors } = await page(t);
@@ -368,7 +401,7 @@ test("calendar: month view, today, a day off, the day sheet, and a lunar yearly 
   const plus = p.locator(".cal-step").nth(1).locator("button", { hasText: "+" });
   for (let i = 0; i < 3; i++) await plus.click();
   assert.equal(await p.locator(".cal-step").nth(1).locator("b").textContent(), "初五");
-  await p.click(".cal-keys .ck-a");
+  await p.click("#cal-sheet .sk-a");
   await p.waitForFunction(() => /妈妈生日/.test(document.getElementById("cal-sheet").textContent));
   await p.click("#home-key");
   assert.equal(await p.locator("#home .app", { hasText: "万年历" }).locator(".tag").textContent(), "3天后 妈妈生日");
@@ -398,7 +431,7 @@ test("calendar: a leap-month birthday falls in the regular month in a year witho
   const cur = LUNAR.fromSolar(2026, 1, 10);
   for (let i = 0; i < cur.month - 6; i++) await minus(0).click();
   for (let i = 0; i < cur.day - 15; i++) await minus(1).click();
-  await p.click(".cal-keys .ck-a");
+  await p.click("#cal-sheet .sk-a");
   await p.keyboard.press("z");   /* B closes the day sheet */
   await p.click("#cal-list-btn");
   const row = await p.textContent("#cal-sheet .cal-list li");
@@ -462,7 +495,7 @@ test("calendar: START goes to a date, Gregorian or lunar, by keys, keyboard digi
   await p.locator("#cal-sheet .cal-kind .btn", { hasText: "按农历" }).click();
   for (const k of "20200415") await p.locator("#cal-sheet .cal-numpad .btn", { hasText: new RegExp("^" + k + "$") }).click();
   await p.locator("#cal-sheet .cal-kind .cal-leap").click();
-  await p.locator("#cal-sheet .cal-keys .ck-a").click();
+  await p.locator("#cal-sheet .sk-a").click();
   const lp = LUNAR.toSolar(2020, 4, 15, true);
   assert.deepEqual(await sel(), [`${lp.y}年${lp.m}月`, String(lp.d)]);
   /* a day past the month's end falls on its last day; a year out of range stays put with a message; B cancels */
@@ -481,6 +514,42 @@ test("calendar: START goes to a date, Gregorian or lunar, by keys, keyboard digi
   /* B in the month view still comes home to today */
   await p.keyboard.press("z");
   assert.deepEqual(await sel(), ["2026年10月", "11"]);
+  assert.deepEqual(notBlocked(c.errors), []);
+});
+
+test("calendar: month grid lunar lines fit at small screen sizes", { skip, timeout: 30000 }, async (t) => {
+  const c = await calPage(t);
+  const { p } = c;
+  await c.boot(); await c.open();
+  assert.equal(await p.locator("#cal-keys").count(), 0);
+  assert.equal(await p.textContent("#cal-list-btn"), "纪念日");
+  assert.equal(await p.textContent("#cal-today"), "今天");
+  for (const height of [359, 473]) {
+    await p.setViewportSize({ width: 375, height: 844 });
+    await p.evaluate((height) => {
+      const screen = document.getElementById("screen"), status = screen.querySelector(".status");
+      screen.style.flex = "none";
+      screen.style.height = (height + 12 + status.getBoundingClientRect().height) + "px";
+    }, height);
+    assert.equal(await p.locator("#v-cal").evaluate((view) => view.getBoundingClientRect().height), height);
+    const clipped = await p.locator("#cal-grid .cal-cell").evaluateAll((cells) => cells.flatMap((cell) => {
+      const text = cell.querySelector("span"), cellBottom = cell.getBoundingClientRect().bottom;
+      return text.getBoundingClientRect().bottom <= cellBottom + 0.1 ? [] : [{ day: cell.querySelector("b").textContent, text: text.textContent, bottom: text.getBoundingClientRect().bottom, cellBottom }];
+    }));
+    assert.deepEqual(clipped, [], `lunar lines fit at 331x${height}`);
+  }
+  const sheetBar = "#cal-sheet .softkeys";
+  await p.click("#cal-info");
+  assert.equal(await p.locator(sheetBar).count(), 1);
+  await p.click("#cal-sheet .sk-a");
+  assert.equal(await p.locator(sheetBar).count(), 1);
+  await p.click("#cal-sheet .sk-b");
+  await p.click("#cal-sheet .sk-b");
+  await p.click("#cal-list-btn");
+  assert.equal(await p.locator(sheetBar).count(), 1);
+  await p.click("#cal-sheet .sk-b");
+  await p.click("#cal-ym");
+  assert.equal(await p.locator(sheetBar).count(), 1);
   assert.deepEqual(notBlocked(c.errors), []);
 });
 
@@ -537,8 +606,8 @@ test("dictionary: the built-in ECDICT, a word form, history and the word book", 
   await p.waitForFunction(() => /最近查过/.test(document.getElementById("dict-history").textContent));
   assert.match(await p.textContent("#dict-list"), /run[\s\S]*apple/);
   /* review: the word first, A shows the entry */
-  await p.click("#dict-words-btn");
-  await p.click("#dict-sheet .ck-a");
+  await p.click("#dict-keys .sk-select");
+  await p.click("#dict-sheet .sk-a");
   assert.equal((await p.textContent("#dict-sheet .dict-page .big")).trim(), "apple");
   await p.click('.gamepad [data-b="a"]');
   await p.waitForFunction(() => /苹果/.test(document.querySelector("#dict-sheet .dict-page")?.textContent || ""));
@@ -560,7 +629,12 @@ test("dictionary: browse matches, restore the selected row, and page entries", {
   await p.click("#dict-list li.on");
   await p.waitForFunction(() => document.querySelector("#dict-sheet .dict-page")?.textContent.length > 0);
   assert.equal(await p.evaluate(() => getComputedStyle(document.querySelector("#dict-sheet .dict-page")).overflowY), "auto");
-  await p.keyboard.press("ArrowRight");
+  const swipeEntry = () => p.evaluate(() => {
+    const page = document.querySelector("#dict-sheet .dict-page"), box = page.getBoundingClientRect();
+    page.dispatchEvent(new PointerEvent("pointerdown", { clientX: box.right - 30, clientY: box.top + 30, bubbles: true, pointerType: "touch" }));
+    page.dispatchEvent(new PointerEvent("pointerup", { clientX: box.left + 30, clientY: box.top + 30, bubbles: true, pointerType: "touch" }));
+  });
+  await swipeEntry();
   await p.waitForFunction((before) => document.querySelector("#dict-sheet .sheet-title span")?.textContent !== before, picked);
   const next = await p.textContent("#dict-sheet .sheet-title span");
   await p.keyboard.press("z");
@@ -599,8 +673,13 @@ test("dictionary: browse matches, restore the selected row, and page entries", {
 
   await p.click('.gamepad [data-b="start"]');
   await p.keyboard.press("z");
-  await p.click("#dict-words-btn");
-  await p.click("#dict-sheet .ck-a");
+  await p.fill("#dict-q", "apple");
+  await p.press("#dict-q", "Enter");
+  await p.waitForFunction(() => document.querySelector("#dict-sheet .sheet-title span")?.textContent === "apple");
+  await p.click('.gamepad [data-b="start"]');
+  await p.keyboard.press("z");
+  await p.click("#dict-keys .sk-select");
+  await p.click("#dict-sheet .lcd-menu li:nth-child(2)");
   await p.waitForFunction(() => document.querySelector("#dict-sheet .dict-page .big")?.textContent === "run");
   await p.keyboard.press("x");
   await p.waitForFunction(() => /跑/.test(document.querySelector("#dict-sheet .dict-page")?.textContent || ""));
@@ -615,21 +694,26 @@ test("dictionary: browse matches, restore the selected row, and page entries", {
     const maxTop = Math.max(0, Math.floor((page.scrollHeight - page.clientHeight) / 24) * 24);
     return Math.max(1, Math.ceil(maxTop / step) + 1);
   });
-  assert.equal(await p.textContent("#dict-sheet .sheet-title small"), `1/1 1/${reviewPages}`);
+  assert.equal(await p.textContent("#dict-sheet .sheet-title small"), `2/2 1/${reviewPages}`);
   await p.keyboard.press("ArrowDown");
-  await p.waitForFunction((count) => document.querySelector("#dict-sheet .sheet-title small")?.textContent === `1/1 2/${count}`, reviewPages);
+  await p.waitForFunction((count) => document.querySelector("#dict-sheet .sheet-title small")?.textContent === `2/2 2/${count}`, reviewPages);
+  const reviewed = await p.textContent("#dict-sheet .sheet-title span");
+  await swipeEntry();
+  await p.waitForFunction((before) => document.querySelector("#dict-sheet .sheet-title span")?.textContent !== before, reviewed);
   assert.deepEqual(errors, []);
 });
 
 test("dictionary: disable books, persist settings, and explain when all are off", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await dictPage(t);
-  await p.click("#dict-books-btn");
+  await p.click("#dict-keys .sk-start");
   assert.equal(await p.textContent("#dict-sheet .lcd-menu li .dict-book-state"), "启用");
-  await p.click('.gamepad [data-b="a"]');
+  await p.click("#dict-sheet .sk-a");
+  await p.click("#dict-sheet .sk-a");
+  await p.click("#dict-sheet .sk-b");
   assert.equal(await p.textContent("#dict-sheet .lcd-menu li .dict-book-state"), "停用");
   assert.deepEqual(await p.evaluate(() => LP.dict.lookup("apple")), []);
   assert.deepEqual(await p.evaluate(() => LP.dict.suggest("app")), []);
-  await p.click("#dict-sheet .dict-keys .ck:first-child");
+  await p.click("#dict-sheet .sk-b");
   await p.waitForFunction(() => document.querySelector("#dict-sheet").hidden);
   await p.fill("#dict-q", "apple");
   await p.waitForFunction(() => document.querySelector("#dict-list .dict-alloff")?.textContent.includes("没有启用的词典"));
@@ -637,11 +721,13 @@ test("dictionary: disable books, persist settings, and explain when all are off"
 
   await p.reload({ waitUntil: "networkidle" });
   await p.locator("#home .app", { hasText: "词典" }).click();
-  await p.waitForFunction(() => document.querySelector("#dict-books-btn") && window.LP.dict);
-  await p.click("#dict-books-btn");
+  await p.waitForFunction(() => document.querySelector("#dict-keys .sk-start") && window.LP.dict);
+  await p.click("#dict-keys .sk-start");
   await p.waitForFunction(() => document.querySelector("#dict-sheet .dict-book-state")?.textContent === "停用");
   assert.deepEqual(await p.evaluate(() => LP.dict.lookup("apple")), []);
-  await p.click('.gamepad [data-b="a"]');
+  await p.click("#dict-sheet .sk-a");
+  await p.click("#dict-sheet .sk-a");
+  await p.click("#dict-sheet .sk-b");
   await p.waitForFunction(() => LP.dict.lookup("apple").then((r) => r.length === 1));
   assert.equal(await p.textContent("#dict-sheet .lcd-menu li .dict-book-state"), "启用");
   assert.deepEqual(errors, []);
@@ -653,12 +739,14 @@ test("dictionary: import a StarDict book (.dict.dz, .syn), order it, delete it; 
   const files = [{ name: "tiny.ifo", mimeType: "text/plain", buffer: Buffer.from(sd.ifo) }, { name: "tiny.idx", mimeType: "application/octet-stream", buffer: sd.idx },
     { name: "tiny.dict.dz", mimeType: "application/octet-stream", buffer: sd.dictdz }, { name: "tiny.syn", mimeType: "application/octet-stream", buffer: sd.syn }];
   const { p, errors } = await dictPage(t);
-  await p.click("#dict-books-btn");
+  await p.click("#dict-keys .sk-start");
   await p.setInputFiles("#dict-file", files);
   await p.waitForFunction(() => /Tiny/.test(document.getElementById("dict-sheet").textContent), null, { timeout: 10000 });
   /* the built-in cannot be deleted */
   await p.click("#dict-sheet .lcd-menu li:nth-child(1)");
-  assert.ok(await p.isDisabled("#dict-sheet .dict-keys .btn.ghost:has-text('删除')"));
+  await p.click("#dict-sheet .sk-a");
+  assert.equal(await p.$$eval("#dict-sheet .lcd-menu li", (l) => l.length), 3);
+  await p.click("#dict-sheet .sk-b");
   const books = () => p.$$eval("#dict-sheet .lcd-menu li span", (l) => l.map((x) => x.textContent));
   assert.deepEqual(await books(), ["ECDICT", "Tiny"]);
   /* reload: the book survives; a synonym finds its headword */
@@ -668,26 +756,38 @@ test("dictionary: import a StarDict book (.dict.dz, .syn), order it, delete it; 
   assert.deepEqual(syn, [["Tiny", "zyzz", "zyzzyva", "a weevil (test)"]]);
   let apple = await p.evaluate(() => LP.dict.lookup("apple").then((r) => r.map((x) => x.name)));
   assert.deepEqual(apple, ["ECDICT", "Tiny"]);
-  await p.click("#dict-books-btn");
+  await p.click("#dict-keys .sk-start");
   await p.click("#dict-sheet .lcd-menu li:nth-child(2)");
-  await p.click("#dict-sheet .ck-a");
+  await p.click("#dict-sheet .sk-a");
+  await p.click("#dict-sheet .sk-a");
+  await p.click("#dict-sheet .sk-b");
   assert.equal(await p.textContent("#dict-sheet .lcd-menu li:nth-child(2) .dict-book-state"), "停用");
   assert.deepEqual(await p.evaluate(() => LP.dict.lookup("zyzz")), []);
   apple = await p.evaluate(() => LP.dict.lookup("apple").then((r) => r.map((x) => x.name)));
   assert.deepEqual(apple, ["ECDICT"]);
-  await p.click("#dict-sheet .ck-a");
+  await p.click("#dict-sheet .sk-a");
+  await p.click("#dict-sheet .sk-b");
+  await p.click("#dict-sheet .sk-a");
+  await p.click("#dict-sheet .sk-a");
+  await p.click("#dict-sheet .sk-b");
   assert.equal(await p.textContent("#dict-sheet .lcd-menu li:nth-child(2) .dict-book-state"), "启用");
   apple = await p.evaluate(() => LP.dict.lookup("apple").then((r) => r.map((x) => x.name)));
   assert.deepEqual(apple, ["ECDICT", "Tiny"]);
   /* move Tiny up: its answer comes first */
   await p.click("#dict-sheet .lcd-menu li:nth-child(2)");
-  await p.click("#dict-sheet .dict-keys .btn:has-text('上移')");
+  await p.click("#dict-sheet .sk-a");
+  await p.click("#dict-sheet .lcd-menu li:nth-child(2)");
+  await p.click("#dict-sheet .sk-a");
+  await p.click("#dict-sheet .sk-b");
   apple = await p.evaluate(() => LP.dict.lookup("apple").then((r) => r.map((x) => x.name)));
   assert.deepEqual(apple, ["Tiny", "ECDICT"]);
   /* delete takes two taps */
-  await p.click("#dict-sheet .dict-keys .btn:has-text('删除')");
-  assert.deepEqual(await books(), ["Tiny", "ECDICT"]);
-  await p.click("#dict-sheet .dict-keys .btn:has-text('确认删除')");
+  await p.click("#dict-sheet .lcd-menu li:first-child");
+  await p.click("#dict-sheet .sk-a");
+  await p.click("#dict-sheet .lcd-menu li:last-child");
+  await p.click("#dict-sheet .sk-a");
+  assert.match(await p.textContent("#dict-sheet .lcd-menu li:last-child"), /确认删除/);
+  await p.click("#dict-sheet .sk-a");
   assert.deepEqual(await books(), ["ECDICT"]);
   apple = await p.evaluate(() => LP.dict.lookup("apple").then((r) => r.map((x) => x.name)));
   assert.deepEqual(apple, ["ECDICT"]);
@@ -697,7 +797,41 @@ test("dictionary: import a StarDict book (.dict.dz, .syn), order it, delete it; 
 test("dictionary: English screen", { skip, timeout: 30000 }, async (t) => {
   const { p, errors } = await dictPage(t, { locale: "en-US" });
   assert.equal(await p.getAttribute("#dict-q", "placeholder"), "Type an English word");
-  assert.equal(await p.textContent("#dict-words-btn"), "Words");
+  assert.equal(await p.textContent("#dict-keys .sk-select span"), "Words");
+  assert.deepEqual(errors, []);
+});
+
+test("dictionary: book soft keys stay in one row at the smallest screen size", { skip, timeout: 30000 }, async (t) => {
+  const { p, errors } = await dictPage(t);
+  await p.setViewportSize({ width: 331, height: 359 });
+  await p.click("#dict-keys .sk-start");
+  const measure = async () => p.evaluate(() => {
+    const bar = document.querySelector("#dict-sheet .softkeys"), slots = [...bar.children];
+    const boxes = slots.map((slot) => slot.getBoundingClientRect());
+    return { height: bar.getBoundingClientRect().height, widths: boxes.map((box) => box.width), tops: boxes.map((box) => box.top) };
+  });
+  const assertOneRow = async () => {
+    const value = await measure();
+    assert.equal(value.height, 44);
+    assert.deepEqual(new Set(value.tops).size, 1);
+    assert.ok(value.widths.every((width) => width === value.widths[0]));
+    return value;
+  };
+  const listBefore = await assertOneRow();
+  await p.click("#dict-sheet .sk-a");
+  const menuBefore = await assertOneRow();
+  await p.click("#dict-sheet .sk-a");
+  const menuDisabled = await assertOneRow();
+  await p.click("#dict-sheet .sk-b");
+  await assertOneRow();
+  await p.click("#dict-sheet .sk-a");
+  await p.click("#dict-sheet .sk-a");
+  const menuEnabled = await assertOneRow();
+  await p.click("#dict-sheet .sk-b");
+  const listAfter = await assertOneRow();
+  assert.deepEqual(menuDisabled.widths, menuBefore.widths);
+  assert.deepEqual(menuEnabled.widths, menuBefore.widths);
+  assert.deepEqual(listAfter.widths, listBefore.widths);
   assert.deepEqual(errors, []);
 });
 
@@ -795,6 +929,30 @@ test("reader: imports TXT in GBK and UTF-8 and an EPUB, splits chapters, keeps t
 test("reader: whole pages turn by keys, taps and swipes; a new text size keeps the place; progress is kept", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await readerPage(t);
   await openRow(p, 2);                   /* Alice */
+  await p.waitForFunction(() => document.getElementById("rd-page").getBoundingClientRect().height > 0);
+  const pageWithoutSelection = await p.locator("#rd-page").evaluate((page) => page.getBoundingClientRect().height);
+  const baselineParts = await p.evaluate(() => ({
+    book: document.getElementById("rd-book").getBoundingClientRect().height,
+    foot: document.getElementById("rd-foot").getBoundingClientRect().height,
+    keysHidden: document.getElementById("rd-keyrow").hidden,
+    statusHidden: document.getElementById("rd-foot").hidden
+  }));
+  assert.equal(baselineParts.keysHidden, true);
+  assert.equal(baselineParts.statusHidden, false);
+  assert.equal(pageWithoutSelection + baselineParts.foot, baselineParts.book, "no-selection page keeps the pre-PR status-footer layout");
+  await p.keyboard.press("Shift");
+  await p.waitForFunction(() => !document.getElementById("rd-keyrow").hidden);
+  const selectionParts = await p.evaluate(() => ({
+    page: document.getElementById("rd-page").getBoundingClientRect().height,
+    book: document.getElementById("rd-book").getBoundingClientRect().height,
+    bar: document.getElementById("rd-keys").getBoundingClientRect().height,
+    statusHidden: document.getElementById("rd-foot").hidden
+  }));
+  assert.equal(selectionParts.statusHidden, true);
+  assert.equal(selectionParts.page + selectionParts.bar, selectionParts.book, "selection page gives the bar its space");
+  assert.equal(pageWithoutSelection - selectionParts.page, selectionParts.bar - baselineParts.foot);
+  await p.keyboard.press("z");
+  assert.equal(await p.locator("#rd-flow mark").count(), 0);
   await p.waitForFunction(() => /Lewis Carroll/.test(document.getElementById("rd-flow").textContent));
   assert.equal(await p.evaluate(() => document.getElementById("rd-page").scrollHeight <= document.getElementById("rd-page").clientHeight + 1), true, "no scrolling");
   await p.keyboard.press("ArrowRight");                         /* the title page, then chapter I */
@@ -881,7 +1039,8 @@ test("reader: long-press and drag selects, SELECT widens to the sentence, A look
   await move(bx, by); await lift(bx, by);
   assert.equal(await p.$$eval("#rd-flow mark", (l) => l.map((x) => x.textContent).join("")), "sister on the bank");
   assert.ok(await p.isHidden("#rd-def"));
-  assert.match(await p.textContent("#rd-foot"), /查词[\s\S]*摘抄[\s\S]*词[\s\S]*复制/);
+  assert.deepEqual(await p.$$eval("#rd-keys .sk", (l) => l.map((x) => x.textContent)), ["SELECT词", "START摘抄", "B取消", "A查词"]);
+  assert.equal(await p.isVisible("#rd-copy"), true);
   /* with a selection, a tap only cancels it: no page turn, no menu */
   const here = await pos(p);
   await press(bx, by, 4); await lift(bx, by, 4);
@@ -915,14 +1074,14 @@ test("reader: long-press and drag selects, SELECT widens to the sentence, A look
   const sentence = (await p.$$eval("#rd-flow mark", (l) => l.map((x) => x.textContent).join("")));
   assert.match(sentence, /^Alice was beginning to get very tired of sitting by her sister on the bank, and of having nothing to do:/);
   assert.match(sentence, /conversations\?”$/);
-  assert.match(await p.textContent("#rd-foot"), /句/);
+  assert.match(await p.textContent("#rd-keys .sk-select"), /句/);
   await p.keyboard.press("Shift");
   const para = await p.evaluate(() => document.querySelectorAll("#rd-flow > p")[1].textContent);
   assert.equal(await p.$$eval("#rd-flow mark", (l) => l.map((x) => x.textContent).join("")), para);
   await p.keyboard.press("Shift");                              /* back to a word */
   assert.equal(await p.textContent("#rd-flow mark"), "sister");
   /* copy */
-  await p.click("#rd-foot button:last-child");
+  await p.click("#rd-copy");
   await p.waitForFunction(() => /已复制/.test(document.getElementById("toast").textContent));
   assert.equal(await p.evaluate(() => navigator.clipboard.readText()), "sister");
   assert.deepEqual(errors, []);
@@ -944,7 +1103,7 @@ test("reader: START quotes into Notes and underlines it; thoughts; the notes lis
   assert.equal(await p.locator("#rd-flow mark").count(), 0, "the selection ends");
   assert.equal(await p.$$eval("#rd-flow u.hl", (l) => l.map((x) => x.textContent).join("")), sentence);
   await p.fill("#rd-thought", "第一句心得。");
-  await p.click("#rd-def .ck-a");
+  await p.click("#rd-def .sk-a");
   await p.waitForFunction(() => /心得已存进记事本/.test(document.getElementById("toast").textContent));
   /* the notes list: one quote with its thought; turn away, then jump back from the list */
   await p.keyboard.press("ArrowRight"); await p.keyboard.press("ArrowRight");
@@ -972,13 +1131,13 @@ test("reader: START quotes into Notes and underlines it; thoughts; the notes lis
   await p.keyboard.press("x");                                  /* A: another thought */
   await p.waitForSelector("#rd-thought");
   await p.fill("#rd-thought", "再读一遍。");
-  await p.click("#rd-def .ck-a");                               /* (X would type into the box) */
+  await p.click("#rd-def .sk-a");                               /* (X would type into the box) */
   await p.waitForSelector("#rd-def", { state: "hidden" });
   await p.touchscreen.tap(spot.x, spot.y);
   await p.waitForSelector("#rd-def:not([hidden])");
   assert.match(await p.textContent("#rd-def"), /第一句心得。\s*再读一遍/);
   await p.keyboard.press("Enter");
-  assert.match(await p.textContent("#rd-def"), /确认删除/);
+  assert.match(await p.textContent("#rd-def"), /START确认/);
   await p.keyboard.press("Enter");
   await p.waitForFunction(() => /已删除划线/.test(document.getElementById("toast").textContent));
   assert.equal(await p.locator("#rd-flow u.hl").count(), 0);
@@ -1339,7 +1498,7 @@ test("reader: a notes-list jump, a link and B back from it are full refreshes", 
   await p.keyboard.press("Enter");
   await p.waitForSelector("#rd-thought");
   await p.fill("#rd-thought", "心得。");
-  await p.click("#rd-def .ck-a");
+  await p.click("#rd-def .sk-a");
   await p.waitForFunction(() => /心得已存进记事本/.test(document.getElementById("toast").textContent));
   await einkFlashOn(p);
   await flashHold(p);
@@ -2075,10 +2234,37 @@ test("darkroom: HOME closes a roll menu and reopening returns to the film box", 
     id: "reopen-roll", stock: "sunny", size: 1, frames: [], bytes: 0, name: "Reopen test",
     loaded: Date.now(), out: Date.now()
   });
+  await p.setViewportSize({ width: 331, height: 359 });
+  const assertOneRow = async (selector) => {
+    const value = await p.locator(selector).evaluate((bar) => {
+      const boxes = [...bar.children].map((slot) => slot.getBoundingClientRect());
+      return { height: bar.getBoundingClientRect().height, widths: boxes.map((box) => box.width), tops: boxes.map((box) => box.top) };
+    });
+    assert.equal(value.height, 44, selector);
+    assert.deepEqual(new Set(value.tops).size, 1, selector);
+    assert.ok(value.widths.every((width) => width === value.widths[0]), selector);
+  };
   await p.locator("#home .app", { hasText: "冲洗店" }).click();
   await p.waitForFunction(() => /Reopen test/.test(document.getElementById("dk-list").textContent));
-  await p.keyboard.press("x");
+  await assertOneRow("#dk-keys");
+  assert.equal(await p.textContent("#dk-keys .sk-a span"), "打开");
+  assert.equal(await p.textContent("#dk-keys .sk-start span"), "导入");
+  assert.equal(await p.locator("#dk-import").count(), 0);
+  await p.click("#dk-keys .sk-a");
   await p.waitForSelector("#dk-sheet:not([hidden])");
+  await assertOneRow("#dk-sheet .softkeys");
+  await p.click("#dk-sheet .sk-a");
+  await assertOneRow("#dk-sheet .softkeys");
+  await p.click("#dk-sheet .sk-b");
+  await p.keyboard.press("ArrowDown");
+  await p.click("#dk-sheet .sk-a");
+  await assertOneRow("#dk-sheet .softkeys");
+  await p.click("#dk-sheet .sk-b");
+  await p.keyboard.press("ArrowDown");
+  await p.click("#dk-sheet .sk-a");
+  await assertOneRow("#dk-sheet .softkeys");
+  await p.click("#dk-sheet .sk-b");
+  await p.click("#dk-sheet .sk-b");
   await p.click("#home-key");
   await p.locator("#home .app", { hasText: "冲洗店" }).click();
   await p.waitForFunction(() => /Reopen test/.test(document.getElementById("dk-list").textContent));
@@ -2143,7 +2329,8 @@ test("darkroom: load a stock, shoot a roll with latent images, unload it to the 
   await p.locator("#home .app", { has: p.locator(".label", { hasText: /^冲洗店$/ }) }).click();
   await p.waitForFunction(() => /暖阳 200/.test(document.getElementById("dk-list").textContent));
   assert.match(await p.textContent("#dk-list li.on"), /暖阳 200.*16 张.*未冲洗/);
-  assert.equal(await p.textContent("#dk-keys"), "▲▼ 选　A 打开　START 导入底片");
+  assert.equal(await p.textContent("#dk-keys .sk-a span"), "打开");
+  assert.equal(await p.textContent("#dk-keys .sk-start span"), "导入");
   const rowH = await p.$eval("#dk-list li.on", (e) => e.getBoundingClientRect().height);
   assert.ok(rowH >= 44, "row height " + rowH);
 
@@ -2180,7 +2367,7 @@ test("darkroom: load a stock, shoot a roll with latent images, unload it to the 
   await press("ArrowUp"); await press("x");
   await toast(/扔掉了/);
   await p.waitForFunction(() => /胶卷盒是空的/.test(document.getElementById("dk-list").textContent));
-  assert.equal(await p.textContent("#dk-keys"), "START 导入底片");
+  assert.equal(await p.textContent("#dk-keys .sk-start span"), "导入");
   await p.waitForTimeout(500);
   assert.equal(await idb.doc(p, `data/users/local/rolls/items/${id}`), null);
   assert.deepEqual(await idb.latents(p, id), {});

@@ -14,8 +14,8 @@ html,body{margin:0;height:100%;overflow:hidden;background:#a3ad7e;font-family:mo
 #stage{flex:1;min-height:0;display:flex;align-items:center;justify-content:center}
 /* the script sets the pixel size (a square as large as the stage allows); the fallback keeps it visible */
 #cv{width:240px;height:240px;image-rendering:pixelated;image-rendering:crisp-edges;border:3px solid #1f2a14;box-shadow:4px 4px 0 #1f2a14;background:#a3ad7e;touch-action:none;display:block}
-.tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:center}
-button{font-family:monospace;font-size:14px;font-weight:bold;min-height:44px;color:#a3ad7e;background:#1f2a14;border:2px solid #1f2a14;padding:8px 12px;cursor:pointer;box-shadow:3px 3px 0 #4a5a32}
+.tools{display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:center}
+button{font-family:monospace;font-size:14px;font-weight:bold;min-height:44px;color:#a3ad7e;background:#1f2a14;border:2px solid #1f2a14;padding:0 8px;cursor:pointer;box-shadow:3px 3px 0 #4a5a32}
 button:active{transform:translate(2px,2px);box-shadow:1px 1px 0 #4a5a32}
 button.ghost{background:transparent;color:#1f2a14;box-shadow:none}
 button.sw{width:44px;height:44px;padding:0;box-shadow:none}
@@ -51,10 +51,10 @@ button.sw[aria-checked="true"]{outline:3px solid #1f2a14;outline-offset:2px}
 /* two languages from PAD.lang; older runtimes have none, so Chinese is the default */
 var LANG=(typeof PAD!=="undefined"&&PAD.lang==="en")?"en":"zh";
 var TXT={
-  zh:{title:"点阵画板",fine:"笔 · 细",bold:"笔 · 粗",undo:"撤销",imp:"导入图片",exp:"导出 PNG",clr:"清空",yes:"确认清空",no:"取消",
+  zh:{title:"点阵画板",fine:"细",bold:"粗",undo:"撤销",imp:"导入图片",exp:"导出 PNG",clr:"清空",yes:"确认清空",no:"取消",
       noundo:"没有可以撤销的了。",imported:"已转成 96×96 四色点阵。",badimg:"这张图读不出来，换一张试试。",
       exported:"导出好了。",fail:"文件操作失败。",saving:"保存中…",saved:"96×96 · 已保存",ink:"墨",dark:"深",mid:"浅",paper:"底色（橡皮）"},
-  en:{title:"Paint",fine:"Pen · fine",bold:"Pen · bold",undo:"Undo",imp:"Import",exp:"Export PNG",clr:"Clear",yes:"Clear it",no:"Cancel",
+  en:{title:"Paint",fine:"Fine",bold:"Bold",undo:"Undo",imp:"Import",exp:"Export PNG",clr:"Clear",yes:"Clear it",no:"Cancel",
       noundo:"Nothing to undo.",imported:"Turned into 96×96, four tones.",badimg:"Can't read that image. Try another.",
       exported:"Exported.",fail:"File action failed.",saving:"Saving…",saved:"96×96 · saved",ink:"Ink",dark:"Dark",mid:"Light",paper:"Paper (eraser)"}
 }[LANG];

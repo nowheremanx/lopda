@@ -96,7 +96,8 @@ jobs:
             EXTRA=""
           fi
           # Not part of the site: git data, dependencies, tests, scratch and CI files.
-          rsync -a --delete $EXTRA \
+          # Generated indexes and version-only edits can keep the same size; compare contents, not checkout mtimes.
+          rsync -a --checksum --delete $EXTRA \
             --exclude=/.git --exclude=/node_modules --exclude=/tests \
             --exclude=/_to_delete --exclude=/.github \
             ./ "$DEST"/
