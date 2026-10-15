@@ -451,7 +451,7 @@ function foot(left,right){
 function footer(){
   if(!R.book) return;
   var selected=!!R.sel, info=$("rd-foot"), row=$("rd-keyrow"), keys=$("rd-keys");
-  info.hidden=selected; row.hidden=false;
+  info.hidden=selected; row.hidden=!selected;
   if(selected){
     LP.softkeys(keys,{
       select:softkey("select","sk.unit."+({word:"word",sent:"sent",para:"para"}[R.sel.unit]||"word")),
@@ -462,12 +462,6 @@ function footer(){
     $("rd-copy").hidden=false;
   } else {
     foot(R.back ? tr("reader.linkback") : chapterTitle(R.ch),(R.page+1)+"/"+R.pages);
-    LP.softkeys(keys,{
-      select:softkey("select","sk.select"),
-      start:softkey("start","sk.menu"),
-      b:softkey("b",R.back ? "sk.back" : "sk.shelf"),
-      a:softkey("a","sk.next")
-    });
     $("rd-copy").hidden=true;
   }
 }

@@ -896,6 +896,30 @@ test("reader: imports TXT in GBK and UTF-8 and an EPUB, splits chapters, keeps t
 test("reader: whole pages turn by keys, taps and swipes; a new text size keeps the place; progress is kept", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await readerPage(t);
   await openRow(p, 2);                   /* Alice */
+  await p.waitForFunction(() => document.getElementById("rd-page").getBoundingClientRect().height > 0);
+  const pageWithoutSelection = await p.locator("#rd-page").evaluate((page) => page.getBoundingClientRect().height);
+  const baselineParts = await p.evaluate(() => ({
+    book: document.getElementById("rd-book").getBoundingClientRect().height,
+    foot: document.getElementById("rd-foot").getBoundingClientRect().height,
+    keysHidden: document.getElementById("rd-keyrow").hidden,
+    statusHidden: document.getElementById("rd-foot").hidden
+  }));
+  assert.equal(baselineParts.keysHidden, true);
+  assert.equal(baselineParts.statusHidden, false);
+  assert.equal(pageWithoutSelection + baselineParts.foot, baselineParts.book, "no-selection page keeps the pre-PR status-footer layout");
+  await p.keyboard.press("Shift");
+  await p.waitForFunction(() => !document.getElementById("rd-keyrow").hidden);
+  const selectionParts = await p.evaluate(() => ({
+    page: document.getElementById("rd-page").getBoundingClientRect().height,
+    book: document.getElementById("rd-book").getBoundingClientRect().height,
+    bar: document.getElementById("rd-keys").getBoundingClientRect().height,
+    statusHidden: document.getElementById("rd-foot").hidden
+  }));
+  assert.equal(selectionParts.statusHidden, true);
+  assert.equal(selectionParts.page + selectionParts.bar, selectionParts.book, "selection page gives the bar its space");
+  assert.equal(pageWithoutSelection - selectionParts.page, selectionParts.bar - baselineParts.foot);
+  await p.keyboard.press("z");
+  assert.equal(await p.locator("#rd-flow mark").count(), 0);
   await p.waitForFunction(() => /Lewis Carroll/.test(document.getElementById("rd-flow").textContent));
   assert.equal(await p.evaluate(() => document.getElementById("rd-page").scrollHeight <= document.getElementById("rd-page").clientHeight + 1), true, "no scrolling");
   await p.keyboard.press("ArrowRight");                         /* the title page, then chapter I */
