@@ -289,6 +289,8 @@ textarea::placeholder{color:var(--ink-2)}
 .dict-sheet .sheet-title small{font-size:16px;color:var(--ink-2);flex:none}
 .dict-page{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;touch-action:pan-y;font-size:16px;line-height:24px;white-space:pre-wrap;word-break:break-word}
 .dict-page b{display:inline-block;font-weight:400;font-size:13px;line-height:18px;background:var(--ink);color:var(--lcd);padding:0 6px;margin:3px 0}
+.dict-page .dl{min-height:24px}
+.dict-page mark{background:var(--ink);color:var(--lcd)}
 .dict-page .big{display:block;text-align:center;font-family:var(--f-pix);font-size:40px;line-height:48px;margin-top:24px}
 .dict-sheet .lcd-menu{flex:1;min-height:0;overflow:auto}
 .dict-sheet .lcd-menu li span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -322,7 +324,6 @@ textarea::placeholder{color:var(--ink-2)}
 .rd-foot b{font-weight:400;font-family:var(--f-pix);font-size:17px}
 .rd-keyrow{display:flex;align-items:center;gap:4px;flex:none}
 .rd-keyrow>div{flex:1;min-width:0}
-.rd-copy{flex:none;width:52px;height:44px;padding:0 2px;background:transparent;border:2px solid var(--ink);font-family:var(--f-lcd);font-size:13px;color:var(--ink)}
 .rd-sheet .lcd-menu li small{font-family:var(--f-lcd);font-size:14px}
 .rd-toc li span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .rd-jump{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center}
