@@ -12,11 +12,11 @@
  */
 (function(){
 "use strict";
-var LP=window.LP, $=LP.$, S=LP.S, tr=LP.tr, SD=window.LopdaStarDict, P=window.LopdaPlatform;
+var LP=window.LP, $=LP.$, S=LP.S, tr=LP.tr, SD=window.LopdaStarDict, P=window.LopdaPlatform, TS=window.LopdaTextSel;
 var own=LP.own, toast=LP.toast, put=LP.put, sfx=LP.sfx, show=LP.show, showPad=LP.showPad, uid=LP.uid;
 
 var BUILTIN="ecdict", VENDOR="vendor/ecdict/ecdict";
-var MAX_HISTORY=50, MAX_WORDS=2000, MAX_CAND=40;
+var MAX_HISTORY=50, MAX_WORDS=2000, MAX_CAND=40, MAX_LEVELS=10;
 
 var D={
   set:{order:[BUILTIN], disabled:[], history:[], words:[]},   // data/users/local/dict: book order, disabled ids, history, word book [{w, t}]
@@ -26,6 +26,7 @@ var D={
   refs:null, loading:null,
   q:"", cand:[], pick:0,    // the word box, its candidate rows and the highlighted one
   sheet:"", entry:null,     // "entry" | "words" | "books"; the entry on screen {word, results, back}
+  stack:[], lines:[],       // entries opened from a selection lead back through the ones before (at most MAX_LEVELS); the entry's text lines
   bpick:0, wpick:0, bmenu:0, listScroll:0,
   armed:null, wordClearArmed:false, startImportArmed:false,
   review:null               // {i, shown}: reviewing the word book from word i
@@ -188,28 +189,18 @@ function move(k){ if(!D.cand.length) return; D.pick=Math.max(0,Math.min(D.cand.l
 function openSheet(name){ D.sheet=name; if(name==="books") D.bpick=0; renderSheet(); }
 function closeSheet(){
   var back=D.entry && D.entry.back;
-  D.entry=null; D.review=null;
+  D.entry=null; D.review=null; D.stack=[];
   if(back){ D.sheet=back; renderSheet(); return; }
   D.sheet=""; renderSheet(); renderList();
 }
 function renderSheet(){
+  if(SEL.s) SEL.end();
   var sh=$("dict-sheet"); sh.hidden=!D.sheet; sh.textContent="";
   if(D.sheet==="entry") entrySheet(sh);
   else if(D.sheet==="words") wordsSheet(sh);
   else if(D.sheet==="books") booksSheet(sh);
   else if(D.sheet==="bookmenu") bookMenuSheet(sh);
   else if(D.sheet==="wordopts") wordOptionsSheet(sh);
-}
-
-function swipePages(page,fn){
-  var x0=null,y0=0;
-  page.addEventListener("pointerdown",function(e){ x0=e.clientX; y0=e.clientY; });
-  page.addEventListener("pointerup",function(e){
-    if(x0===null) return;
-    var dx=e.clientX-x0,dy=e.clientY-y0; x0=null;
-    if(Math.abs(dx)>40 && Math.abs(dx)>Math.abs(dy)*1.2){ e.preventDefault(); fn(dx<0?1:-1); }
-  });
-  page.addEventListener("pointercancel",function(){ x0=null; });
 }
 
 /* an entry: every book's answer, in one scrollable text area */
@@ -233,25 +224,53 @@ function entrySheet(sh){
   title.appendChild(count);
   sh.appendChild(title);
   var page=el("div","dict-page"); page.id="dict-page";
+  D.lines=[];
+  /* one block per line, so a paragraph of the selection is one line of the entry */
+  var line=function(t,cls){ var d=el("div",cls||"",t); page.appendChild(d); return d; };
   if(!e.shown){ page.appendChild(el("span","big",e.word)); }
   else if(!e.results) page.appendChild(document.createTextNode(tr("dict.loading")));
   else if(!e.results.length) page.appendChild(document.createTextNode(e.error ? tr("dict.loadfail",{msg:e.error}) : tr("dict.notfound",{w:e.word})));
   else {
-    if(e.results[0].how==="lemma") page.appendChild(document.createTextNode(tr("dict.lemma",{w:e.word, base:e.results[0].word})+"\n"));
-    if(e.results[0].how==="prefix") page.appendChild(document.createTextNode(tr("dict.notfound",{w:e.word})+" · "+tr("dict.near")+"\n"));
+    if(e.results[0].how==="lemma") line(tr("dict.lemma",{w:e.word, base:e.results[0].word}));
+    if(e.results[0].how==="prefix") line(tr("dict.notfound",{w:e.word})+" · "+tr("dict.near"));
     var last=null;
     e.results.forEach(function(r){
       var label=r.name+(r.word!==word ? " · "+r.word : "")+(r.head && r.head!==r.word ? " → "+r.head : "");
-      if(label!==last){ page.appendChild(el("b","",label)); page.appendChild(document.createTextNode("\n")); last=label; }
-      page.appendChild(document.createTextNode(r.text+"\n"));
+      if(label!==last){ line().appendChild(el("b","",label)); last=label; }
+      r.text.split("\n").forEach(function(t){ D.lines.push({e:line(t,"dl"), s:t}); });
     });
   }
-  page.scrollTop=e.scrollTop||0;
   page.addEventListener("scroll",function(){ e.scrollTop=page.scrollTop; updateEntryPosition(e,page,count); });
-  swipePages(page,function(k){ if(D.review) step(k); else stepMatch(k); });
+  SEL.touch(page,{
+    canHold:canSelect,
+    hold:function(x,y){ SEL.select(x,y); },
+    up:function(ev,g){
+      if(Math.abs(g.dx)>40 && Math.abs(g.dx)>Math.abs(g.dy)*1.2){
+        ev.preventDefault(); if(SEL.s) endSel();
+        var k=g.dx<0?1:-1; if(D.review) step(k); else stepMatch(k);
+        return;
+      }
+      if(SEL.s && Math.abs(g.dx)<=12 && Math.abs(g.dy)<=12){ endSel(); sfx("tap"); }
+    }
+  });
   sh.appendChild(page);
-  var keys=el("div"), keyset;
-  if(D.review){
+  /* only once it is in the page: a detached element keeps no scroll position */
+  page.scrollTop=e.scrollTop||0;
+  D.keys=el("div");
+  entryKeys();
+  sh.appendChild(D.keys);
+  updateEntryPosition(e,page,count);
+}
+function entryKeys(){
+  var e=D.entry, word=headOf(e), keyset;
+  if(SEL.s){
+    keyset={
+      select:key("select","sk.unit."+SEL.s.unit),
+      start:key("start","sk.quote"),
+      b:key("b","sk.cancel"),
+      a:key("a","sk.lookup")
+    };
+  } else if(D.review){
     keyset={
       select:null,
       start:{label:tr(inBook(word)?"sk.saved":"sk.addword"),fn:function(){ dictButton("start",true); dictButton("start",false); }},
@@ -260,15 +279,65 @@ function entrySheet(sh){
     };
   } else {
     keyset={
-      select:null,
+      select:canSelect() ? key("select","sk.select") : null,
       start:e.results && e.results.length ? {label:tr(inBook(word)?"sk.saved":"sk.addword"),fn:function(){ dictButton("start",true); dictButton("start",false); }} : null,
       b:key("b","sk.back"),
       a:key("a","sk.back")
     };
   }
-  LP.softkeys(keys,keyset);
-  sh.appendChild(keys);
-  updateEntryPosition(e,page,count);
+  LP.softkeys(D.keys,keyset);
+}
+
+/* ---------- selection on an entry (runtime/textsel.js, as in the reader): the whole entry is one scrolling block, so
+   the selection may run past what is on screen; the cursor reaching the edge scrolls a line. Not while reviewing ---------- */
+var SEL=TS.create({
+  root:function(){ return $("dict-page"); },
+  el:function(i){ return D.lines[i].e; },
+  text:function(i){ return D.lines[i].s; },
+  blocks:function(){ return D.lines.map(function(x,i){ return i; }); },
+  frame:function(){ var p=$("dict-page"), r=p.getBoundingClientRect(); return {left:r.left+p.clientLeft, top:r.top+p.clientTop-p.scrollTop}; },
+  edge:function(){ sfx("err"); },
+  moved:function(t){ reveal(t); },
+  changed:function(){ if(D.sheet==="entry") entryKeys(); },
+  lookup:function(){ nested(SEL.word()); }
+});
+function canSelect(){ return D.sheet==="entry" && !D.review && !!D.entry && !!D.entry.results && D.entry.results.length>0; }
+/* SELECT: the cursor on the first word on screen */
+function enterSel(){
+  if(!canSelect()) return;
+  SEL.start(false);
+  var top=$("dict-page").scrollTop, t=SEL.s.toks;
+  for(var i=0;i<t.length;i++) if(t[i].y>=top-1){ SEL.s.cur=i; break; }
+  SEL.paint(); sfx("tap");
+}
+function endSel(){ SEL.end(); if(D.sheet==="entry") entryKeys(); }
+function reveal(t){
+  var p=$("dict-page"), top=p.scrollTop, h=p.clientHeight, LINE=24;
+  if(t.y<top) p.scrollTop=Math.max(0,top-LINE*Math.ceil((top-t.y)/LINE));
+  else if(t.y+t.h>top+h) p.scrollTop=top+LINE*Math.ceil((t.y+t.h-top-h)/LINE);
+}
+/* A on a selection: that word's entry, one level deeper; B comes back to this one where it was */
+function nested(word){
+  if(!word) return;
+  var cur=D.entry; SEL.end();
+  cur.scrollTop=$("dict-page").scrollTop;
+  D.stack.push(cur);
+  if(D.stack.length>MAX_LEVELS-1) D.stack.shift();
+  sfx("tap"); openEntry(word,cur.back,false,-1);
+}
+function backEntry(){
+  if(!D.stack.length){ closeSheet(); return; }
+  D.entry=D.stack.pop(); D.sheet="entry"; renderSheet(); sfx("tap");
+}
+/* START on a selection: quote it into the note 《词典》 under the entry's word, and copy it */
+function quoteSel(){
+  var text=SEL.text().trim(); if(!text) return;
+  var copied=TS.copy(text), name=tr("dict.notename");
+  if(!LP.notes){ toast(tr("sel.quotefail",{msg:"notes"})); return; }
+  LP.notes.append(name,name+" "+headOf(D.entry)+"\n「"+text+"」").then(function(){
+    endSel();
+    copied.then(function(ok){ toast(tr(ok?"sel.quotedcopy":"sel.quoted")); sfx("ok"); });
+  },function(e){ toast(tr("sel.quotefail",{msg:String((e&&e.message)||e).slice(0,100)})); sfx("err"); });
 }
 function entryPageInfo(page){
   var step=Math.max(1,Math.floor(page.clientHeight/24)-1)*24;
@@ -510,6 +579,13 @@ $("dict-file").addEventListener("change",function(){
    entry: ◀▶ nearby matches, ▲▼ scroll, B (or A) back, START word book; review: A show / next, ◀▶ words, ▲▼ scroll, START word book, B back
    word book: ▲▼ pick, A review, START options, B back; books: ▲▼ pick, A this book, START import, B back */
 function dictButton(b,down){
+  if(D.sheet==="entry" && SEL.s){
+    if(SEL.key(b,down)) return;
+    /* on the release: the copy needs the key's user gesture */
+    if(b==="start"){ if(!down) quoteSel(); return; }
+    if(down && b==="b"){ endSel(); sfx("tap"); }
+    return;
+  }
   if(b==="start"){
     if(down){
       D.startImportArmed=D.sheet==="books";
@@ -532,6 +608,7 @@ function dictButton(b,down){
     else if(b==="b"){ D.wordClearArmed=false; D.sheet="words"; renderSheet(); }
     return;
   }
+  if(b==="select" && canSelect()){ enterSel(); return; }
   if(b==="select" && D.sheet){ closeSheet(); return; }
   if(D.sheet==="entry"){
     var w=headOf(D.entry), has=D.entry.results && D.entry.results.length;
@@ -545,7 +622,7 @@ function dictButton(b,down){
     }
     if(b==="left"||b==="right") stepMatch(b==="left"?-1:1);
     else if(b==="up"||b==="down") scrollEntry(b==="up"?-1:1);
-    else if(b==="a"||b==="b") closeSheet();
+    else if(b==="a"||b==="b") backEntry();
     else if(b==="start" && has){ toggleWord(w); renderSheet(); }
     return;
   }
@@ -576,7 +653,7 @@ LP.padRoute("dict",function(b,down){ if($("v-dict").hidden) return false; dictBu
 var ICON=["................","...00000000000..","..0111111111110.","..0133333333100.","..0133300333100.","..0133033033100.","..0130333303100.","..0130000003100.","..0130333303100.","..0130333303100.","..0133333333100.","..0111111111100.","..0222222222220.","..0233333333330.","...00000000000..","................"];
 
 function openDict(){
-  D.sheet=""; D.entry=null; D.review=null; D.q=""; D.listScroll=0; $("dict-q").value="";
+  D.sheet=""; D.entry=null; D.review=null; D.stack=[]; D.q=""; D.listScroll=0; $("dict-q").value="";
   show("dict"); showPad(true); note(); renderMainKeys(); renderSheet(); update();
   /* the browser may clear a site's data after a while unless it is persistent (a Home Screen app always is) */
   P.persist().catch(function(){});
@@ -587,7 +664,7 @@ function openDict(){
 LP.dict={lookup:lookup, suggest:suggest, inBook:inBook, toggleWord:toggleWord};
 LP.builtin({id:"dict", label:"app.dict", icon:function(){ return ICON; }, view:"dict", keepPad:true,
   open:function(){ openDict(); },
-  leave:function(){ D.sheet=""; D.entry=null; D.review=null; D.armed=null; D.q=""; var i=$("dict-q"); if(i){ i.value=""; i.blur(); } renderSheet(); },
+  leave:function(){ D.sheet=""; D.entry=null; D.review=null; D.stack=[]; D.armed=null; D.q=""; var i=$("dict-q"); if(i){ i.value=""; i.blur(); } renderSheet(); },
   lang:function(){ if(!$("v-dict").hidden){ note(); renderMainKeys(); renderSheet(); update(); } },
   ready:function(){
     var base=S.db.doc("data/users/local/dict");

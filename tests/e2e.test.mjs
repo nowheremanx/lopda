@@ -835,6 +835,127 @@ test("dictionary: book soft keys stay in one row at the smallest screen size", {
   assert.deepEqual(errors, []);
 });
 
+/* softkeys.md 3.2: the entry page selects as the reader does; A on a word opens its entry, B comes back level by level */
+const entryWordAt = (p, w) => p.evaluate((w) => {
+  for (const d of document.querySelectorAll("#dict-sheet .dict-page .dl")) {
+    const n = d.firstChild, i = n ? n.data.indexOf(w) : -1; if (i < 0) continue;
+    const r = document.createRange(); r.setStart(n, i); r.setEnd(n, i + w.length);
+    const b = r.getClientRects()[0]; return [b.left + b.width / 2, b.top + b.height / 2];
+  }
+  return null;
+}, w);
+const entryPointer = (p, type, x, y, id) => p.evaluate(([type, x, y, id]) => document.querySelector("#dict-sheet .dict-page")
+  .dispatchEvent(new PointerEvent(type, { clientX: x, clientY: y, pointerId: id, bubbles: true, pointerType: "touch" })), [type, x, y, id]);
+const marked = (p) => p.$$eval("#dict-sheet .dict-page mark", (l) => l.map((x) => x.textContent).join(""));
+const entryTitle = (p) => p.textContent("#dict-sheet .sheet-title span");
+const longPress = async (p, w, id) => {
+  const [x, y] = await entryWordAt(p, w);
+  await entryPointer(p, "pointerdown", x, y, id); await p.waitForTimeout(600); await entryPointer(p, "pointerup", x, y, id);
+};
+const openWord = async (p, w, want) => {
+  await typeWord(p, w); await p.press("#dict-q", "Enter");
+  await p.waitForFunction((want) => want.test(document.querySelector("#dict-sheet .dict-page")?.textContent || ""), want);
+};
+
+test("dictionary: select on an entry, look up a word in it, B back level by level, quote and copy", { skip, timeout: 90000 }, async (t) => {
+  const { p, errors } = await dictPage(t, { viewport: { width: 390, height: 600 } });
+  await p.addStyleTag({ content: "#dict-sheet .dict-page{flex:0 0 144px}" });
+  await p.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await openWord(p, "apple", /苹果/);
+  assert.match(await p.textContent("#dict-sheet .sk-select"), /选字/);
+  /* long-press "fruit", drag to "yellow" */
+  const [fx, fy] = await entryWordAt(p, "fruit"), [yx, yy] = await entryWordAt(p, "yellow");
+  await entryPointer(p, "pointerdown", fx, fy, 3); await p.waitForTimeout(600);
+  assert.equal(await marked(p), "fruit");
+  await entryPointer(p, "pointermove", yx, yy, 3); await entryPointer(p, "pointerup", yx, yy, 3);
+  assert.equal(await marked(p), "fruit with red or yellow");
+  assert.deepEqual(await p.$$eval("#dict-sheet .sk", (l) => l.map((x) => x.textContent)), ["SELECT词", "START摘抄", "B取消", "A查词"]);
+  /* a tap ends it and stays on the entry */
+  await entryPointer(p, "pointerdown", yx, yy, 4); await entryPointer(p, "pointerup", yx, yy, 4);
+  assert.equal(await marked(p), "");
+  assert.equal(await entryTitle(p), "apple");
+  /* SELECT widens: the sentence ("n." ends one), the line, back to the word */
+  await longPress(p, "fruit", 5);
+  await p.keyboard.press("Shift");
+  assert.equal(await marked(p), "fruit with red or yellow or green skin and sweet to tart crisp whitish flesh");
+  assert.match(await p.textContent("#dict-sheet .sk-select"), /句/);
+  await p.keyboard.press("Shift");
+  assert.equal(await marked(p), "n. fruit with red or yellow or green skin and sweet to tart crisp whitish flesh");
+  await p.keyboard.press("Shift");
+  assert.equal(await marked(p), "fruit");
+  /* B cancels the selection, not the entry */
+  await p.keyboard.press("z");
+  assert.equal(await marked(p), "");
+  assert.equal(await entryTitle(p), "apple");
+  /* A on "green": its entry, one level down; there the page scrolls, and B comes back to it where it was */
+  await longPress(p, "green", 6);
+  await p.keyboard.press("x");
+  await p.waitForFunction(() => document.querySelector("#dict-sheet .sheet-title span")?.textContent === "green"
+    && /绿色/.test(document.querySelector("#dict-sheet .dict-page").textContent));
+  await p.evaluate(() => { const g = document.querySelector("#dict-sheet .dict-page"); g.scrollTop = 48; g.dispatchEvent(new Event("scroll")); });
+  assert.equal(await p.evaluate(() => document.querySelector("#dict-sheet .dict-page").scrollTop), 48);
+  /* SELECT starts on the first word on screen; the cursor reaching the bottom scrolls a line */
+  await p.keyboard.press("Shift");
+  const first = await p.evaluate(() => {
+    const g = document.querySelector("#dict-sheet .dict-page"), m = g.querySelector("mark");
+    return m.getBoundingClientRect().top - g.getBoundingClientRect().top;
+  });
+  assert.ok(first >= 0 && first < 24, `the cursor starts on the first line on screen (${first})`);
+  const seen = await p.evaluate(() => document.querySelector("#dict-sheet .dict-page").clientHeight);
+  for (let i = 0; i < Math.ceil(seen / 24) + 1; i++) await p.keyboard.press("ArrowDown");
+  const scrolled = await p.evaluate(() => document.querySelector("#dict-sheet .dict-page").scrollTop);
+  assert.ok(scrolled > 48 && scrolled % 24 === 0, `scrolled by whole lines (${scrolled})`);
+  await p.keyboard.press("z");
+  await p.evaluate(() => { const g = document.querySelector("#dict-sheet .dict-page"); g.scrollTop = 48; g.dispatchEvent(new Event("scroll")); });
+  await longPress(p, "green", 7);
+  await p.keyboard.press("x");
+  await p.waitForFunction(() => /绿色/.test(document.querySelector("#dict-sheet .dict-page")?.textContent || "") && !document.querySelector("#dict-sheet mark"));
+  await p.keyboard.press("z");
+  assert.equal(await entryTitle(p), "green");
+  assert.equal(await p.evaluate(() => document.querySelector("#dict-sheet .dict-page").scrollTop), 48, "B restores the scroll");
+  await p.keyboard.press("z");
+  assert.equal(await entryTitle(p), "apple");
+  /* ten levels at most: from apple, "green" ten times over makes eleven, and the oldest (apple) is dropped */
+  for (let i = 0; i < 10; i++) {
+    await longPress(p, "green", 10 + i);
+    await p.keyboard.press("x");
+    await p.waitForFunction(() => /绿色/.test(document.querySelector("#dict-sheet .dict-page")?.textContent || "") && !document.querySelector("#dict-sheet mark"));
+  }
+  for (let i = 0; i < 9; i++) await p.keyboard.press("z");
+  assert.equal(await entryTitle(p), "green");
+  await p.keyboard.press("z");
+  assert.ok(await p.isHidden("#dict-sheet"));
+  /* START quotes into the note 《词典》 under the entry's word, and copies */
+  await openWord(p, "green", /绿色/);
+  await longPress(p, "pigment", 30);
+  await p.keyboard.press("Enter");
+  await p.waitForFunction(() => /已摘抄并复制/.test(document.getElementById("toast").textContent));
+  assert.equal(await marked(p), "");
+  assert.equal(await p.evaluate(() => navigator.clipboard.readText()), "pigment");
+  const notes = await p.evaluate(() => LP.S.refs.notes.get().then((q) => q.docs.map((d) => d.data().body)));
+  assert.deepEqual(notes, ["《词典》\n\n《词典》 green\n「pigment」"]);
+  assert.deepEqual(errors, []);
+});
+
+test("dictionary: no selection while reviewing the word book", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await dictPage(t);
+  await openWord(p, "apple", /苹果/);
+  await p.keyboard.press("Enter");                              /* START: into the word book */
+  await p.keyboard.press("z");
+  await p.click("#dict-keys .sk-select");
+  await p.click("#dict-sheet .sk-a");
+  await p.keyboard.press("x");                                  /* A: show the entry */
+  await p.waitForFunction(() => /苹果/.test(document.querySelector("#dict-sheet .dict-page")?.textContent || ""));
+  assert.equal((await p.textContent("#dict-sheet .sk-select")).trim(), "SELECT");
+  const [x, y] = await entryWordAt(p, "fruit");
+  await entryPointer(p, "pointerdown", x, y, 3); await p.waitForTimeout(600); await entryPointer(p, "pointerup", x, y, 3);
+  assert.equal(await marked(p), "");
+  await p.keyboard.press("Shift");                              /* SELECT leaves the review, as before */
+  assert.equal(await marked(p), "");
+  assert.ok(await p.isVisible("#dict-sheet .lcd-menu"));
+  assert.deepEqual(errors, []);
+});
+
 /* ---------------- reader ---------------- */
 /* query: e.g. "?debug"; init: a function run in the page before its scripts */
 const readerPage = async (t, { query = "", init, ...opts } = {}) => {
