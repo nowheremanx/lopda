@@ -1,4 +1,4 @@
-// runtime/notetext.js: tags, search and snippets, the diary title, front matter, export file names (docs/design/notes.md section 9).
+// runtime/notetext.js: tags, search and snippets, the diary title, diaries by day, front matter, export file names (docs/design/notes.md section 9).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { runScript } from "./helpers.mjs";
@@ -159,4 +159,39 @@ test("file names: cleaned, at most 60 characters, never empty, never hidden; dup
   assert.equal(NT.stem("日记/10月15日.md"), "10月15日");
   assert.equal(NT.stem("notes.v2.txt"), "notes.v2");
   assert.equal(NT.stem(".md"), ".md");
+});
+
+test("diaryIndex: the calendar's days, month days and same-day diaries across years; the trash and plain notes left out", () => {
+  const notes = [
+    { id: "a", day: "2026-10-01", body: "10月1日 周四\n国庆，去爬山。", updated: 5 },
+    { id: "b", day: "2025-10-01", body: "10月1日 周三\n去年国庆\n在家。", updated: 3 },
+    { id: "c", day: "2024-10-01", body: "10月1日 周二\n前年。", updated: 2, deleted: 9 },
+    { id: "d", day: "2023-10-01", body: "10月1日 周日", updated: 1 },
+    { id: "e", day: "2026-10-15", body: "10月15日\n早", updated: 7 },
+    { id: "f", day: "2026-10-15", body: "10月15日\n晚，改过", updated: 8 },
+    { id: "g", day: "2026-11-01", body: "11月1日\n立冬前", updated: 4 },
+    { id: "h", body: "读书笔记\n没有日期", updated: 6 },
+    { id: "i", day: "2026-02-30", body: "坏日期", updated: 1 },
+    { id: "j", day: "2026-10-03", body: "10月3日\n在回收站", updated: 1, deleted: 2 }
+  ];
+  const ix = NT.diaryIndex(notes);
+  assert.deepEqual(Object.keys(ix.days).sort(), ["2023-10-01", "2025-10-01", "2026-10-01", "2026-10-15", "2026-11-01"]);
+  assert.equal(ix.days["2026-10-15"].id, "f", "two diaries on one day: the one changed last");
+  assert.deepEqual(plain(ix.months["2026-10"]), { 1: true, 15: true });
+  assert.deepEqual(plain(ix.months["2026-11"]), { 1: true });
+  assert.equal(ix.months["2024-10"], undefined, "a diary in the trash marks nothing");
+  assert.deepEqual(plain(ix.md["10-01"].map((n) => n.id)), ["a", "b", "d"], "every year, newest first, the trash left out");
+  assert.deepEqual(plain(ix.md["10-15"].map((n) => n.id)), ["f"]);
+  assert.equal(ix.md["10-03"], undefined);
+  /* nothing to index */
+  assert.deepEqual(plain(NT.diaryIndex([])), { days: {}, months: {}, md: {} });
+  assert.deepEqual(plain(NT.diaryIndex(null)), { days: {}, months: {}, md: {} });
+});
+
+test("snippet: the text after the title line, on one line, cut at SNIPPET characters", () => {
+  assert.equal(NT.snippet("10月1日 周三\n去年国庆\n  在家。"), "去年国庆 在家。");
+  assert.equal(NT.snippet("只有标题"), "");
+  assert.equal(NT.snippet(""), "");
+  assert.equal(Array.from(NT.snippet("t\n" + "字".repeat(100) + "𠀀")).length, NT.SNIPPET);
+  assert.equal(NT.snippet("t\nabcdef", 3), "abc");
 });
