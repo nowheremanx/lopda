@@ -22,7 +22,7 @@ function renderSense(){
   var ul=$("set-sense-list"); ul.textContent="";
   var list=LP.sensorGrants ? LP.sensorGrants.list() : [];
   $("set-sense-note").hidden=!list.length;
-  if(!list.length){ var e=document.createElement("li"); e.className="empty"; e.textContent=tr("set.sense.none"); ul.appendChild(e); return; }
+  if(!list.length){ var e=document.createElement("li"); e.className="none"; e.textContent=tr("set.sense.none"); ul.appendChild(e); return; }
   list.forEach(function(g){
     var li=document.createElement("li"), t=document.createElement("span"), b=document.createElement("button");
     t.textContent=g.name+" · "+g.kinds.map(function(k){ return tr("set.sense."+k); }).join(tr("set.sense.and"));
