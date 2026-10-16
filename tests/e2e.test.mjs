@@ -5,10 +5,10 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { readdirSync } from "node:fs";
 import { join, extname, normalize } from "node:path";
-import { ROOT } from "./helpers.mjs";
+import { ROOT, tempDir } from "./helpers.mjs";
 
 let pw = null;
 try { pw = await import("playwright"); } catch {}
@@ -2843,4 +2843,590 @@ test("darkroom: develop a roll with blank frames, walk it in colour, print singl
   assert.deepEqual(pngSize(cmp.buf), [250 + 4 * 410 + 10, 70 + 7 * 360 + 10]);
   assert.deepEqual(await idb.doc(p, `data/users/local/rolls/items/${id}`), before, "comparing changes nothing");
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+/* ---------- notes 2.0 (docs/design/notes.md): today and 那年今日, tags, search, pins, the trash, zip out and in, send ---------- */
+const NOTES_DAY = new Date(2026, 9, 15, 9, 41);    /* Thursday 2026-10-15, lunar 九月初六 */
+const notesPage = async (t, { time = NOTES_DAY, init, ...opts } = {}) => {
+  /* an iPhone SE: with the chin pad the LCD is 331 x 359, the smallest screen */
+  const { p, errors } = await page(t, { locale: "zh-CN", serviceWorkers: "block", viewport: { width: 375, height: 667 }, ...opts });
+  if (init) await p.addInitScript(init);
+  await p.clock.install({ time });
+  await p.goto(base + "/runtime/?debug", { waitUntil: "networkidle" });
+  await p.waitForFunction(() => document.getElementById("savestate").textContent !== "启动中…");
+  const open = async () => {
+    await p.click("#home-key");
+    await p.locator("#home .app", { hasText: "记事本" }).click();
+    await p.locator("#v-notes:not([hidden])").waitFor();
+    await p.waitForTimeout(200);
+  };
+  /* the chin pad, as the pad's own buttons press it */
+  const key = async (...bs) => { for (const b of bs) { await p.evaluate((b) => { LOPDA_DEBUG.setButton(b, true); LOPDA_DEBUG.setButton(b, false); }, b); await p.waitForTimeout(80); } };
+  const rows = () => p.$$eval("#notes-main li", (l) => l.map((x) => (x.classList.contains("on") ? "*" : "") + x.querySelector(".t").textContent));
+  const sheet = () => p.$$eval("#notes-sheet li", (l) => l.map((x) => (x.classList.contains("on") ? "*" : "") + x.textContent));
+  const docs = () => p.evaluate(() => LP.S.refs.notes.get().then((q) => q.docs.map((d) => Object.assign({ id: d.id }, d.data()))));
+  const saved = () => p.waitForFunction(() => document.getElementById("note-state").textContent === "已保存", null, { timeout: 5000 });
+  const write = async (text) => { await key("a"); await p.keyboard.type(text); await saved(); };
+  return { p, errors, open, key, rows, sheet, docs, saved, write };
+};
+/* no horizontal scroll and every tap target at least 44 px tall on the screen now showing */
+const fits = (p) => p.evaluate(() => {
+  const bad = [], view = [...document.querySelectorAll("#screen > .view")].find((v) => !v.hidden);
+  for (const e of [view, ...view.querySelectorAll("*")]) {
+    if (e.closest("[hidden]") || !e.getClientRects().length) continue;
+    if (e.scrollWidth > e.clientWidth + 1 && getComputedStyle(e).overflowX !== "hidden" && e.clientWidth > 0 && !/^(SPAN|SMALL|MARK|P|B|I)$/.test(e.nodeName)) bad.push("scrolls sideways: " + e.className + " " + e.id);
+    const tap = e.matches("button, li[onclick], .lcd-menu li:not(.label), input, textarea");
+    if (tap && e.getBoundingClientRect().height < 43.5) bad.push("under 44 px: " + (e.id || e.className || e.nodeName) + " " + e.textContent.slice(0, 20));
+  }
+  /* soft keys are never cut off by the edge of the view (they were 8 px short on the list: padding inside a fixed 44 px row) */
+  const vr = view.getBoundingClientRect();
+  for (const k of view.querySelectorAll(".softkeys .sk")) {
+    if (k.closest("[hidden]") || !k.getClientRects().length) continue;
+    const r = k.getBoundingClientRect(), box = k.closest(".softkeys").getBoundingClientRect();
+    if (r.bottom > vr.bottom + 0.5 || r.right > vr.right + 0.5 || r.bottom > box.bottom + 0.5) bad.push("cut off: " + k.className + " " + k.textContent);
+  }
+  const s = document.getElementById("screen").getBoundingClientRect();
+  return { bad, w: Math.round(view.getBoundingClientRect().width), h: Math.round(view.getBoundingClientRect().height), screen: [s.width, s.height] };
+});
+
+test("notes: the cursor starts on 今天; A writes today's diary, titled with the date; nothing is left behind by only looking", { skip, timeout: 60000 }, async (t) => {
+  const n = await notesPage(t);
+  await n.open();
+  assert.deepEqual(await n.rows(), ["*今天 · 写点什么", "新建"]);
+  /* open today and go back without typing: no diary */
+  await n.key("a");
+  await n.p.locator("#v-note:not([hidden])").waitFor();
+  assert.equal(await n.p.inputValue("#note-body"), "10月15日 周四 · 九月初六\n");
+  assert.equal(await n.p.evaluate(() => document.activeElement.id), "note-body");
+  assert.ok(await n.p.isHidden("#note-years"));
+  await n.key("b");
+  assert.deepEqual(await n.docs(), []);
+  assert.deepEqual(await n.rows(), ["*今天 · 写点什么", "新建"]);
+  /* now write: the doc comes with the first keystroke, Enter is a newline (not START) */
+  await n.key("a");
+  await n.p.keyboard.type("去公园。");
+  await n.p.keyboard.press("Enter");
+  await n.p.keyboard.type("看了银杏。");
+  await n.saved();
+  assert.ok(await n.p.isHidden("#note-sheet"));
+  await n.key("b");
+  const d = await n.docs();
+  assert.equal(d.length, 1);
+  assert.equal(d[0].body, "10月15日 周四 · 九月初六\n去公园。\n看了银杏。");
+  assert.equal(d[0].day, "2026-10-15");
+  assert.equal(d[0].created, d[0].updated);
+  assert.deepEqual(await n.rows(), ["*今天 · 10月15日 周四", "新建", "10月15日 周四 · 九月初六"]);
+  /* 今天 opens the same diary again */
+  await n.key("a");
+  assert.equal(await n.p.inputValue("#note-body"), d[0].body);
+  await n.key("b");
+  assert.deepEqual(notBlocked(n.errors), []);
+});
+
+test("notes: a year later the diary page shows 那年今日, and A opens that year's diary", { skip, timeout: 60000 }, async (t) => {
+  const n = await notesPage(t, { time: new Date(2025, 9, 15, 21, 0) });
+  await n.open();
+  await n.write("去 Brooklyn 看了展。");
+  await n.key("b");
+  await n.p.clock.setSystemTime(new Date(2026, 9, 15, 8, 0));
+  await n.open();
+  assert.deepEqual(await n.rows(), ["*今天 · 写点什么", "新建", "10月15日 周三 · 八月廿四"]);
+  await n.key("a");
+  assert.deepEqual(await n.p.$$eval("#note-years li", (l) => l.map((x) => x.textContent)), ["那年今日", "2025 · 去 Brooklyn 看了展。"]);
+  /* the keyboard goes away: the page is read, and ▲ from the top of the text goes onto the row */
+  await n.p.evaluate(() => document.activeElement.blur());
+  assert.ok(await n.p.isVisible("#note-read"));
+  await n.key("up");
+  assert.deepEqual(await n.p.$$eval("#note-years li.on", (l) => l.map((x) => x.textContent)), ["2025 · 去 Brooklyn 看了展。"]);
+  await n.key("a");
+  assert.equal(await n.p.inputValue("#note-body"), "10月15日 周三 · 八月廿四\n去 Brooklyn 看了展。");
+  /* still nothing written for 2026 */
+  assert.equal((await n.docs()).length, 1);
+  /* a tap on the row does the same */
+  await n.key("b", "a");
+  await n.p.click("#note-years li:nth-child(2)");
+  assert.equal(await n.p.inputValue("#note-body"), "10月15日 周三 · 八月廿四\n去 Brooklyn 看了展。");
+  assert.deepEqual(notBlocked(n.errors), []);
+});
+
+test("notes: a note from the list opens to read, with no keyboard; a tap on a word writes there; the keyboard going away reads again; A writes at the end", { skip, timeout: 60000 }, async (t) => {
+  const n = await notesPage(t);
+  const body = "读书笔记\n第一章讲的是公园里的银杏和秋天的风。\nThe quick brown fox jumps over the lazy dog.";
+  await n.p.evaluate(async (body) => {
+    await LP.S.refs.notes.doc().set({ body, created: new Date(2025, 9, 14, 9, 0).getTime(), updated: new Date(2025, 9, 15, 21, 4).getTime() });
+    await LP.S.refs.notes.doc().set({ body: "旧笔记\n0.21.0 以前写的", updated: new Date(2026, 2, 5, 8, 0).getTime() });
+    await LP.S.refs.notes.doc().set({ body: "很长\n" + Array.from({ length: 80 }, (_, i) => "第 " + i + " 行").join("\n"), updated: new Date(2024, 0, 1).getTime() });
+  }, body);
+  await n.open();
+  await n.p.click("#notes-list li:has-text('读书笔记') button");
+  await n.p.locator("#v-note:not([hidden])").waitFor();
+  const state = () => n.p.evaluate(() => ({ focus: document.activeElement.id, ro: document.getElementById("note-body").readOnly,
+    reading: !document.getElementById("note-read").hidden, writing: !document.getElementById("note-body").hidden,
+    time: document.getElementById("note-time").hidden ? null : document.getElementById("note-time").textContent,
+    at: document.getElementById("note-body").selectionStart }));
+  let s = await state();
+  assert.deepEqual([s.focus === "note-body", s.ro, s.reading, s.writing], [false, true, true, false]);
+  assert.equal(s.time, "2025年10月15日 周三 21:04");
+  assert.equal(await n.p.textContent("#note-read"), body);
+  /* a tap on "brown": the middle of one of the word's client rects, never of its bounding box (CLAUDE.md) */
+  const word = body.indexOf("brown");
+  const spot = await n.p.evaluate((word) => {
+    const r = document.createRange(), node = document.getElementById("note-read").firstChild;
+    r.setStart(node, word); r.setEnd(node, word + 5);
+    const b = r.getClientRects()[0];
+    return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+  }, word);
+  await n.p.mouse.click(spot.x, spot.y);
+  s = await state();
+  assert.deepEqual([s.focus, s.ro, s.reading, s.writing, s.time], ["note-body", false, false, true, null]);
+  assert.ok(s.at >= word && s.at <= word + 5, "caret " + s.at + " in brown at " + word);
+  assert.ok(await n.p.isVisible("#note-state"));
+  await n.p.keyboard.type("X");
+  await n.saved();
+  assert.match(await n.p.inputValue("#note-body"), /The quick (X?brown|bX?rown|brX?own|broX?wn|browX?n|brownX?) fox/);
+  /* the keyboard goes away: reading again, the line under the bar says when, with the year */
+  await n.p.evaluate(() => document.activeElement.blur());
+  s = await state();
+  assert.deepEqual([s.focus === "note-body", s.ro, s.reading, s.writing], [false, true, true, false]);
+  assert.equal(s.time, "2026年10月15日 周四 09:41");
+  /* A: writing with the caret at the end */
+  await n.key("a");
+  s = await state();
+  const now = await n.p.inputValue("#note-body");
+  assert.deepEqual([s.focus, s.writing, s.at], ["note-body", true, now.length]);
+  /* START: options, with created, modified and the count of characters */
+  await n.key("start");
+  assert.ok(await n.p.isVisible("#note-read"));
+  const count = Array.from(now.replace(/\s+/g, "")).length;
+  assert.equal(await n.p.textContent("#note-sheet .notes-status"), "创建 2025.10.14 09:00 · 修改 2026.10.15 09:41 · " + count + " 字");
+  await n.key("b", "b");
+  /* a note from before 0.21.0 has no created: only 修改 */
+  await n.p.click("#notes-list li:has-text('旧笔记') button");
+  assert.equal(await n.p.textContent("#note-time"), "2026年3月5日 周四 08:00");
+  await n.key("start");
+  assert.equal(await n.p.textContent("#note-sheet .notes-status"), "修改 2026.03.05 08:00 · 13 字");
+  await n.key("b", "b");
+  /* ▲▼ scroll a page while reading */
+  await n.p.click("#notes-list li:has-text('很长') button");
+  const top = () => n.p.evaluate(() => document.getElementById("note-read").scrollTop);
+  assert.equal(await top(), 0);
+  await n.key("down");
+  const page1 = await top();
+  assert.ok(page1 > 150, "scrolled " + page1);
+  await n.key("down");
+  assert.ok(await top() > page1);
+  await n.key("up", "up");
+  assert.equal(await top(), 0);
+  assert.equal(await n.p.evaluate(() => document.activeElement.id), "");
+  await n.key("b");
+  /* 今天 and 新建 still open to write */
+  await n.p.click("#notes-top li:nth-child(1) button");
+  assert.equal(await n.p.evaluate(() => document.activeElement.id), "note-body");
+  await n.key("b");
+  await n.p.click("#notes-top li:nth-child(2) button");
+  assert.equal(await n.p.evaluate(() => document.activeElement.id), "note-body");
+  assert.equal(await n.p.inputValue("#note-body"), "");
+  await n.key("b");
+  assert.deepEqual(notBlocked(n.errors), []);
+});
+
+test("notes: list rows date a note by the time today, the day this year, the full date before", { skip, timeout: 60000 }, async (t) => {
+  const n = await notesPage(t);
+  await n.p.evaluate(async () => {
+    await LP.S.refs.notes.doc().set({ body: "今早\n一", updated: new Date(2026, 9, 15, 8, 5).getTime() });
+    await LP.S.refs.notes.doc().set({ body: "春天\n二", updated: new Date(2026, 2, 5, 21, 4).getTime() });
+    await LP.S.refs.notes.doc().set({ body: "去年\n三", updated: new Date(2025, 9, 15, 21, 4).getTime() });
+  });
+  await n.open();
+  assert.deepEqual(await n.p.$$eval("#notes-list li .d", (l) => l.map((x) => x.textContent)), ["08:05 · 一", "3月5日 · 二", "2025.10.15 · 三"]);
+  /* in English */
+  await n.p.evaluate(() => LP.setLang("en"));
+  await n.p.waitForTimeout(150);
+  assert.deepEqual(await n.p.$$eval("#notes-list li .d", (l) => l.map((x) => x.textContent)), ["08:05 · 一", "5 Mar · 二", "15 Oct 2025 · 三"]);
+  assert.deepEqual(notBlocked(n.errors), []);
+});
+
+test("notes: tags from #words, the 日记 and 摘抄 groups, filtering and B back to all", { skip, timeout: 60000 }, async (t) => {
+  const n = await notesPage(t);
+  await n.open();
+  await n.write("今天 #读书 #散步");
+  await n.key("b");
+  await n.key("down", "a");                                   /* 新建 */
+  await n.p.keyboard.type("书单\n#读书 #Idea 和 ＃idea");
+  await n.saved(); await n.key("b");
+  await n.p.click("#notes-top li:nth-child(2) button");
+  await n.p.keyboard.type("买胶卷 # 不是标签");
+  await n.saved(); await n.key("b");
+  await n.p.evaluate(() => LP.notes.append("《词典》", "《词典》 green\n「pigment」"));
+  await n.key("start");
+  assert.deepEqual(await n.sheet(), ["*标签…", "回收站", "全部导出", "导入", "按键说明"]);
+  await n.key("a");
+  assert.deepEqual(await n.sheet(), ["*日记1", "摘抄1", "#读书2", "#Idea1", "#散步1"]);
+  await n.key("down", "down", "a");
+  assert.equal(await n.p.textContent("#notes-filter"), "#读书 · 2 篇");
+  assert.deepEqual(await n.rows(), ["*书单", "10月15日 周四 · 九月初六"]);
+  assert.match(await n.p.textContent("#notes-keys .sk-b"), /返回/);
+  await n.key("b");
+  assert.ok(await n.p.isHidden("#notes-filter"));
+  assert.equal((await n.rows()).length, 6);
+  assert.match(await n.p.textContent("#notes-keys .sk-b"), /^B$/);
+  /* 摘抄: the note LP.notes.append made */
+  await n.key("start", "a", "down", "a");
+  assert.deepEqual(await n.rows(), ["*《词典》"]);
+  assert.equal(await n.p.textContent("#notes-filter"), "摘抄 · 1 篇");
+  assert.equal((await n.docs()).find((d) => d.body.startsWith("《词典》")).src, "dict");
+  /* 日记 by a tap */
+  await n.key("b", "start", "a");
+  await n.p.click("#notes-sheet li:nth-child(1)");
+  assert.deepEqual(await n.rows(), ["*10月15日 周四 · 九月初六"]);
+  assert.deepEqual(notBlocked(n.errors), []);
+});
+
+test("notes: 摘抄 also holds quotes without src: one written before 0.21.0, and one that came back from an export", { skip, timeout: 60000 }, async (t) => {
+  const n = await notesPage(t);
+  await n.p.evaluate(async () => {
+    await LP.S.refs.notes.doc().set({ body: "《词典》\n\n《词典》 green\n「pigment」", updated: Date.now() - 5000 });
+    await LP.S.refs.notes.doc().set({ body: "读《红楼梦》\n第一回", updated: Date.now() - 6000 });
+  });
+  await n.open();
+  const dir = tempDir(t);
+  await writeFile(join(dir, "quote.md"), "---\ncreated: 2026-10-01T10:00:00+08:00\ntags: []\n---\n《Alice’s Adventures in Wonderland》\n\n《Alice’s Adventures in Wonderland》 I. Down the Rabbit-Hole\n「Alice」\n");
+  await n.p.setInputFiles("#notes-file", join(dir, "quote.md"));
+  await n.p.waitForFunction(() => /导入 1 篇/.test(document.getElementById("toast").textContent));
+  const d = await n.docs();
+  assert.ok(d.every((x) => !("src" in x)), JSON.stringify(d));
+  await n.key("start", "a");
+  assert.deepEqual(await n.sheet(), ["*日记0", "摘抄2"]);
+  await n.key("down", "a");
+  assert.equal(await n.p.textContent("#notes-filter"), "摘抄 · 2 篇");
+  assert.deepEqual(await n.rows(), ["*《词典》", "《Alice’s Adventures in Wonderland》"]);
+  assert.deepEqual(notBlocked(n.errors), []);
+});
+
+test("notes: Chinese search as you type, the hit inverted in a snippet; ▼ to the results; B clears", { skip, timeout: 60000 }, async (t) => {
+  const n = await notesPage(t);
+  await n.p.evaluate(async () => {
+    for (const body of ["买胶卷\n周六去裁片。Film: 8 frames.", "读书笔记\n第一章讲的是公园里的银杏和秋天的风。", "Ｆｉｌｍ 清单"]) {
+      await LP.S.refs.notes.doc().set({ body, updated: Date.now() });
+    }
+  });
+  await n.open();
+  await n.key("select");
+  assert.equal(await n.p.evaluate(() => document.activeElement.id), "notes-q");
+  await n.p.keyboard.type("银杏");
+  await n.p.waitForFunction(() => /找到 1 篇/.test(document.getElementById("notes-filter").textContent));
+  assert.deepEqual(await n.rows(), ["*读书笔记"]);
+  assert.equal(await n.p.textContent("#notes-list .d"), "…记 第一章讲的是公园里的银杏和秋天的风。");
+  assert.equal(await n.p.textContent("#notes-list .d mark"), "银杏");
+  const inverted = await n.p.$eval("#notes-list li.on .d mark", (m) => [getComputedStyle(m).backgroundColor, getComputedStyle(m).color]);
+  assert.deepEqual(inverted, ["rgb(163, 173, 126)", "rgb(31, 42, 20)"], "the hit is inverted inside the inverted row");
+  /* width and case do not matter */
+  await n.p.fill("#notes-q", "film");
+  await n.p.waitForFunction(() => /找到 2 篇/.test(document.getElementById("notes-filter").textContent));
+  await n.p.keyboard.press("ArrowDown");
+  assert.notEqual(await n.p.evaluate(() => document.activeElement.id), "notes-q");
+  assert.equal((await n.rows())[0][0], "*");
+  await n.key("down");
+  assert.equal((await n.rows())[1][0], "*");
+  await n.key("b");
+  assert.equal(await n.p.inputValue("#notes-q"), "");
+  assert.equal((await n.rows()).length, 5);
+  await n.p.fill("#notes-q", "没有的词");
+  await n.p.waitForFunction(() => /没有找到/.test(document.getElementById("notes-empty").textContent));
+  assert.deepEqual(notBlocked(n.errors), []);
+});
+
+test("notes: pinned notes come first; 置顶 and 取消置顶 from the editor's options", { skip, timeout: 60000 }, async (t) => {
+  const n = await notesPage(t);
+  await n.p.evaluate(async () => {
+    let t = Date.now() - 10000;
+    for (const body of ["旧的", "中间", "新的"]) await LP.S.refs.notes.doc().set({ body, updated: t += 1000 });
+  });
+  await n.open();
+  assert.deepEqual((await n.rows()).slice(2).map((x) => x.replace(/^\*/, "")), ["新的", "中间", "旧的"]);
+  await n.key("down", "down", "down", "down", "a");             /* 旧的 */
+  await n.key("start");
+  assert.deepEqual(await n.p.$$eval("#note-sheet li", (l) => l.map((x) => x.textContent)), ["置顶", "发送到…", "删除"]);
+  await n.key("a");
+  await n.p.waitForFunction(() => /已置顶/.test(document.getElementById("toast").textContent));
+  await n.key("b");
+  assert.deepEqual((await n.rows()).slice(2).map((x) => x.replace(/^\*/, "")), ["◆ 旧的", "新的", "中间"]);
+  /* the options button does the same as START */
+  await n.p.click("#notes-list li:nth-child(1) button");
+  await n.p.click("#note-opts");
+  assert.equal(await n.p.textContent("#note-sheet li:nth-child(1)"), "取消置顶");
+  await n.p.click("#note-sheet li:nth-child(1)");
+  await n.key("b");
+  assert.deepEqual((await n.rows()).slice(2).map((x) => x.replace(/^\*/, "")), ["新的", "中间", "旧的"]);
+  assert.ok(!(await n.docs()).some((d) => "pinned" in d));
+  assert.deepEqual(notBlocked(n.errors), []);
+});
+
+test("notes: delete goes to the trash in one press; restore; purge twice; the trash empties itself after 30 days", { skip, timeout: 60000 }, async (t) => {
+  const n = await notesPage(t);
+  await n.p.evaluate(async () => {
+    for (const body of ["一", "二", "三"]) await LP.S.refs.notes.doc().set({ body, updated: Date.now() });
+  });
+  await n.open();
+  const del = async (title) => {
+    await n.p.click(`#notes-list li:has-text("${title}") button`);
+    await n.key("start", "down", "down", "a");
+    await n.p.waitForFunction(() => /已移到回收站/.test(document.getElementById("toast").textContent));
+  };
+  await del("一"); await del("二"); await del("三");
+  assert.deepEqual((await n.rows()).map((x) => x.replace(/^\*/, "")), ["今天 · 写点什么", "新建"]);
+  await n.key("start", "down", "a");
+  assert.deepEqual((await n.sheet()).map((x) => x.replace(/\d+ 天后清除/, "")), ["*三", "二", "一"]);
+  assert.match((await n.sheet())[0], /30 天后清除/);
+  /* restore 三 */
+  await n.key("a", "a");
+  await n.p.waitForFunction(() => /已恢复/.test(document.getElementById("toast").textContent));
+  assert.equal((await n.sheet()).length, 2);
+  /* purge 二: the first A only arms it */
+  await n.key("a", "down", "a");
+  assert.match((await n.sheet())[1], /确认永久删除/);
+  assert.equal((await n.docs()).length, 3);
+  await n.key("a");
+  assert.equal((await n.docs()).length, 2);
+  assert.equal((await n.sheet()).length, 1);
+  await n.key("b", "b");
+  assert.deepEqual((await n.rows()).slice(2).map((x) => x.replace(/^\*/, "")), ["三"]);
+  /* 31 days on, the handheld starts again: 一 is gone for good, 三 stays */
+  await n.p.clock.setSystemTime(new Date(NOTES_DAY.getTime() + 31 * 86400000));
+  await n.p.reload({ waitUntil: "networkidle" });
+  await n.p.waitForFunction(() => document.getElementById("savestate").textContent !== "启动中…");
+  await n.p.waitForFunction(() => LP.S.refs.notes.get().then((q) => q.size === 1));
+  assert.deepEqual((await n.docs()).map((d) => d.body), ["三"]);
+  /* START empties the trash, twice */
+  await n.open();
+  await del("三");
+  await n.key("start", "down", "a", "start");
+  assert.match(await n.p.textContent("#notes-sheet .sk-start"), /确认/);
+  assert.equal((await n.docs()).length, 1);
+  await n.key("start");
+  await n.p.waitForFunction(() => /回收站已清空/.test(document.getElementById("toast").textContent));
+  assert.deepEqual(await n.docs(), []);
+  assert.deepEqual(notBlocked(n.errors), []);
+});
+
+test("notes: 全部导出 writes a zip of .md files, 导入 brings it back after everything was deleted, duplicates skipped", { skip, timeout: 60000 }, async (t) => {
+  const n = await notesPage(t);
+  await n.open();
+  await n.write("今天 #读书");
+  await n.key("b");
+  await n.p.evaluate(async () => {
+    await LP.S.refs.notes.doc().set({ body: "书单\n#读书 三本", updated: Date.now() - 5000, created: Date.now() - 86400000, pinned: true });
+    await LP.S.refs.notes.doc().set({ body: "a/b: c?", updated: Date.now() - 6000 });
+    await LP.S.refs.notes.doc().set({ body: "书单\n另一份", updated: Date.now() - 7000 });
+  });
+  await n.open();
+  const before = (await n.docs()).map(({ id, ...d }) => d).sort((a, b) => (a.body < b.body ? -1 : 1));
+  await n.key("start");
+  assert.equal(await n.p.textContent("#notes-sheet .notes-status"), "还没导出过");
+  const [dl] = await Promise.all([n.p.waitForEvent("download"), n.key("down", "down", "a")]);
+  assert.equal(dl.suggestedFilename(), "lopda-notes-20261015.zip");
+  const file = join(tempDir(t), "notes.zip");
+  await dl.saveAs(file);
+  await n.p.waitForFunction(() => /已导出 4 篇/.test(document.getElementById("toast").textContent));
+  assert.equal(await n.p.textContent("#notes-sheet .notes-status"), "上次导出：今天");
+  await n.key("b");
+  /* the zip: names, the diary folder, front matter, bodies untouched */
+  const zip = await readFile(file), names = [];
+  const eocd = zip.lastIndexOf(Buffer.from("PK\x05\x06"));
+  for (let p = zip.readUInt32LE(eocd + 16), k = 0; k < zip.readUInt16LE(eocd + 10); k++) {
+    const nl = zip.readUInt16LE(p + 28);
+    names.push({ name: zip.subarray(p + 46, p + 46 + nl).toString() });
+    p += 46 + nl;
+  }
+  assert.deepEqual(names.map((x) => x.name), ["书单.md", "日记/10月15日 周四 · 九月初六.md", "ab c.md", "书单 (2).md"]);
+  const text = zip.toString("utf8");
+  assert.match(text, /---\ncreated: 2026-10-14T09:41:\d\d[+-]\d\d:\d\d\nupdated: [^\n]+\ntags: \[读书\]\npinned: true\n---\n书单\n#读书 三本/);
+  assert.match(text, /tags: \[读书\]\ndate: 2026-10-15\n---\n10月15日 周四 · 九月初六\n今天 #读书/);
+  /* delete everything (to the trash), import the zip: the same notes come back */
+  for (let i = 0; i < 4; i++) {
+    await n.p.click("#notes-list li:nth-child(1) button");
+    await n.key("start", "down", "down", "a");
+    await n.p.waitForTimeout(150);
+  }
+  assert.equal((await n.rows()).length, 2);
+  await n.p.setInputFiles("#notes-file", file);
+  await n.p.waitForFunction(() => /导入 4 篇/.test(document.getElementById("toast").textContent));
+  const live = (await n.docs()).filter((d) => !d.deleted).map(({ id, ...d }) => d).sort((a, b) => (a.body < b.body ? -1 : 1));
+  assert.deepEqual(live.map((d) => d.body), before.map((d) => d.body));
+  assert.deepEqual(live.map((d) => [d.day, !!d.pinned]), before.map((d) => [d.day, !!d.pinned]));
+  assert.deepEqual(live.map((d) => d.created), before.map((d) => Math.floor((d.created || d.updated) / 1000) * 1000));
+  /* again: all four are there already */
+  await n.p.setInputFiles("#notes-file", file);
+  await n.p.waitForFunction(() => /导入 0 篇，跳过 4 篇重复/.test(document.getElementById("toast").textContent));
+  /* loose files (ASCII names: Playwright here drops files whose local path is not ASCII): .txt from Apple Notes with its title on the first line, a .md with an empty first line, other files ignored */
+  const dir = tempDir(t);
+  await writeFile(join(dir, "apple-note.txt"), "\uFEFF从备忘录来的\n第二行");
+  await writeFile(join(dir, "untitled.md"), "\n只有正文");
+  await writeFile(join(dir, "photo.png"), "not text");
+  await n.p.setInputFiles("#notes-file", [join(dir, "apple-note.txt"), join(dir, "untitled.md"), join(dir, "photo.png")]);
+  await n.p.waitForFunction(() => /导入 2 篇/.test(document.getElementById("toast").textContent), null, { timeout: 5000 });
+  const bodies = (await n.docs()).filter((d) => !d.deleted).map((d) => d.body);
+  assert.ok(bodies.includes("从备忘录来的\n第二行"));
+  assert.ok(bodies.includes("untitled\n\n只有正文"));
+  assert.deepEqual(notBlocked(n.errors), []);
+});
+
+test("notes: a deflated zip from another program imports; a broken one says so", { skip, timeout: 60000 }, async (t) => {
+  const n = await notesPage(t);
+  await n.open();
+  const { deflateRawSync, crc32 } = await import("node:zlib");
+  const entry = (name, text, off) => {
+    const nm = Buffer.from(name), raw = Buffer.from(text), data = deflateRawSync(raw), h = Buffer.alloc(30), c = Buffer.alloc(46);
+    h.writeUInt32LE(0x04034b50, 0); h.writeUInt16LE(20, 4); h.writeUInt16LE(0x800, 6); h.writeUInt16LE(8, 8); h.writeUInt32LE(crc32(raw), 14);
+    h.writeUInt32LE(data.length, 18); h.writeUInt32LE(raw.length, 22); h.writeUInt16LE(nm.length, 26);
+    c.writeUInt32LE(0x02014b50, 0); c.writeUInt16LE(20, 4); c.writeUInt16LE(20, 6); c.writeUInt16LE(0x800, 8); c.writeUInt16LE(8, 10); c.writeUInt32LE(crc32(raw), 16);
+    c.writeUInt32LE(data.length, 20); c.writeUInt32LE(raw.length, 24); c.writeUInt16LE(nm.length, 28); c.writeUInt32LE(off, 42);
+    return { local: Buffer.concat([h, nm, data]), central: Buffer.concat([c, nm]) };
+  };
+  const parts = [], cds = []; let off = 0;
+  for (const [name, text] of [["Notes/Obsidian 笔记.md", "---\ntags: [x]\n---\nObsidian 笔记\n#x 内容"], ["__MACOSX/Notes/._Obsidian 笔记.md", "junk"], ["Notes/.hidden.md", "hidden"], ["Notes/", ""]]) {
+    const e = entry(name, text, off); parts.push(e.local); cds.push(e.central); off += e.local.length;
+  }
+  const cd = Buffer.concat(cds), end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(cds.length, 8); end.writeUInt16LE(cds.length, 10); end.writeUInt32LE(cd.length, 12); end.writeUInt32LE(off, 16);
+  const dir = tempDir(t);
+  await writeFile(join(dir, "export.zip"), Buffer.concat([...parts, cd, end]));
+  await writeFile(join(dir, "broken.zip"), Buffer.from("PK\x03\x04 this is not really a zip"));
+  await n.p.setInputFiles("#notes-file", join(dir, "export.zip"));
+  await n.p.waitForFunction(() => /导入 1 篇/.test(document.getElementById("toast").textContent));
+  assert.deepEqual((await n.docs()).map((d) => d.body), ["Obsidian 笔记\n#x 内容"]);
+  await n.p.setInputFiles("#notes-file", join(dir, "broken.zip"));
+  await n.p.waitForFunction(() => /导入失败：zip: no end of central directory/.test(document.getElementById("toast").textContent));
+  assert.deepEqual(notBlocked(n.errors), []);
+});
+
+test("notes: a quote from the reader lands in 摘抄; appending to a note in the trash brings it back", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await readerPage(t, { query: "?debug" });
+  await openRow(p, 2);
+  await p.keyboard.press("ArrowRight");
+  await p.waitForFunction(() => /Rabbit-Hole/.test(document.getElementById("rd-foot").textContent));
+  await p.keyboard.press("Shift");
+  await p.keyboard.press("Enter"); await p.keyboard.press("x");   /* START, A: 摘抄 */
+  await p.waitForFunction(() => /已摘抄/.test(document.getElementById("toast").textContent));
+  await p.click("#home-key");
+  await p.locator("#home .app", { hasText: "记事本" }).click();
+  await p.waitForFunction(() => /Alice/.test(document.getElementById("notes-list").textContent));
+  const key = async (...bs) => { for (const b of bs) { await p.evaluate((b) => { LOPDA_DEBUG.setButton(b, true); LOPDA_DEBUG.setButton(b, false); }, b); await p.waitForTimeout(80); } };
+  await key("start", "a", "down", "a");
+  assert.equal(await p.textContent("#notes-filter"), "摘抄 · 1 篇");
+  assert.match(await p.textContent("#notes-list"), /《Alice’s Adventures in Wonderland》/);
+  const docs = () => p.evaluate(() => LP.S.refs.notes.get().then((q) => q.docs.map((d) => d.data())));
+  assert.equal((await docs())[0].src, "reader");
+  /* to the trash, then quote again: the same note comes back with both quotes */
+  await p.click("#notes-list li:nth-child(1) button");
+  await key("start", "down", "down", "a");
+  assert.ok((await docs())[0].deleted);
+  await p.click("#home-key");
+  await p.locator("#home .app", { hasText: "阅读器" }).click();
+  await p.click("#rd-list li:has-text('Alice')");
+  await p.waitForFunction(() => /Alice/.test(document.getElementById("rd-flow").textContent));
+  await p.keyboard.press("Shift");
+  await p.keyboard.press("Enter"); await p.keyboard.press("x");
+  await p.waitForFunction(() => /已摘抄/.test(document.getElementById("toast").textContent));
+  const d = await docs();
+  assert.equal(d.length, 1, JSON.stringify(d));
+  assert.ok(!("deleted" in d[0]));
+  assert.equal(d[0].body.split("「").length, 3);
+  assert.deepEqual(notBlocked(errors), []);
+});
+
+test("notes: 发送到… opens the share sheet with the text, or copies when there is none", { skip, timeout: 60000 }, async (t) => {
+  const n = await notesPage(t, { init: () => {
+    window.__shared = [];
+    if (!/noshare/.test(location.search)) Object.defineProperty(navigator, "share", { configurable: true, value: (d) => { window.__shared.push(d); return Promise.resolve(); } });
+  } });
+  await n.open();
+  await n.write("寄给备忘录");
+  await n.key("start", "down");
+  /* the press alone does nothing (no gesture on a phone); the release shares */
+  await n.p.evaluate(() => LOPDA_DEBUG.setButton("a", true));
+  assert.deepEqual(await n.p.evaluate(() => window.__shared), []);
+  await n.p.evaluate(() => LOPDA_DEBUG.setButton("a", false));
+  assert.deepEqual(await n.p.evaluate(() => window.__shared), [{ text: "10月15日 周四 · 九月初六\n寄给备忘录" }]);
+  assert.ok(await n.p.isHidden("#note-sheet"));
+  /* a tap on the row shares too */
+  await n.p.click("#note-opts");
+  await n.p.click("#note-sheet li:nth-child(2)");
+  assert.equal(await n.p.evaluate(() => window.__shared.length), 2);
+  /* no share sheet: the clipboard */
+  await n.p.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await n.p.evaluate(() => { Object.defineProperty(navigator, "share", { configurable: true, value: undefined }); });
+  await n.p.click("#note-opts");
+  await n.p.click("#note-sheet li:nth-child(2)");
+  await n.p.waitForFunction(() => /已复制/.test(document.getElementById("toast").textContent));
+  assert.equal(await n.p.evaluate(() => navigator.clipboard.readText()), "10月15日 周四 · 九月初六\n寄给备忘录");
+  assert.deepEqual(notBlocked(n.errors), []);
+});
+
+test("notes: with the phone's keyboard up, the LCD takes the visible height and the case cannot be dragged", { skip, timeout: 60000 }, async (t) => {
+  /* iOS does not shrink the page for its keyboard; only the visual viewport loses its height. A stand-in visualViewport
+     plays the keyboard: 380 px of the 667 go under it */
+  const n = await notesPage(t, { hasTouch: true, init: () => {
+    const vv = new EventTarget();
+    vv.height = innerHeight; vv.width = innerWidth; vv.offsetTop = 0;
+    Object.defineProperty(window, "visualViewport", { value: vv });
+    window.__keyboard = (up) => { vv.height = up ? innerHeight - 380 : innerHeight; vv.dispatchEvent(new Event("resize")); };
+  } });
+  await n.open();
+  await n.key("a");
+  assert.equal(await n.p.evaluate(() => document.activeElement.id), "note-body");
+  await n.p.evaluate(() => window.__keyboard(true));
+  await n.p.waitForFunction(() => document.documentElement.classList.contains("kb"));
+  const m = await n.p.evaluate(() => {
+    const r = (s) => document.querySelector(s).getBoundingClientRect();
+    return { device: r(".device").height, screen: r(".screen").bottom, body: r("#note-body").bottom,
+      pad: getComputedStyle(document.getElementById("gamepad")).display, home: getComputedStyle(document.querySelector(".keys")).display };
+  });
+  assert.equal(m.device, 667 - 380);
+  assert.ok(m.screen <= 287 && m.body <= 287, JSON.stringify(m));
+  assert.deepEqual([m.pad, m.home], ["none", "none"]);
+  /* a drag on the bar does nothing; a drag in the text is the text's */
+  const drag = (sel) => n.p.evaluate((sel) => {
+    const e = document.querySelector(sel), r = e.getBoundingClientRect(), x = r.left + 10, y = r.top + 10;
+    const touch = new Touch({ identifier: 1, target: e, clientX: x, clientY: y });
+    const ev = new TouchEvent("touchmove", { touches: [touch], targetTouches: [touch], changedTouches: [touch], bubbles: true, cancelable: true });
+    e.dispatchEvent(ev);
+    return ev.defaultPrevented;
+  }, sel);
+  assert.equal(await drag("#note-back"), true);
+  await n.p.fill("#note-body", Array.from({ length: 40 }, (_, i) => "line " + i).join("\n"));
+  assert.equal(await drag("#note-body"), false);
+  /* the keyboard goes away: the case comes back */
+  await n.p.evaluate(() => { window.__keyboard(false); document.activeElement.blur(); });
+  await n.p.waitForFunction(() => !document.documentElement.classList.contains("kb"));
+  assert.notEqual(await n.p.evaluate(() => getComputedStyle(document.getElementById("gamepad")).display), "none");
+  assert.deepEqual(notBlocked(n.errors), []);
+});
+
+test("notes: every screen fits 331 x 359 with no sideways scroll and 44 px targets", { skip, timeout: 60000 }, async (t) => {
+  /* an iPhone SE gives the notes view 331 x 409 with the chin pad; 50 px less is the 331 x 359 an app gets (sdk/UI.md) */
+  const n = await notesPage(t, { viewport: { width: 375, height: 617 } });
+  await n.p.evaluate(async () => {
+    await LP.S.refs.notes.doc().set({ body: "一个非常非常长的标题，长到一行放不下，看它会不会把列表撑宽 #很长很长很长很长的标签名字超过二十个字了吧", updated: Date.now() });
+    await LP.S.refs.notes.doc().set({ body: "x".repeat(300), updated: Date.now(), deleted: Date.now() });
+  });
+  await n.open();
+  const check = async (what) => { const f = await fits(n.p); assert.deepEqual(f.bad, [], what); return f; };
+  const f = await check("list");
+  assert.deepEqual([f.w, f.h], [331, 359]);
+  await n.key("start"); await check("options");
+  await n.key("a"); await check("tags");
+  await n.key("b", "down", "a"); await check("trash");
+  await n.key("a"); await check("one note in the trash");
+  await n.key("b", "b", "down", "down", "a"); await check("key card");
+  await n.key("b", "b");
+  await n.key("a"); await n.p.keyboard.type("x"); await n.saved(); await check("editor");
+  await n.key("start"); await check("editor options");
+  await n.key("b"); await check("editor, reading");
+  await n.key("b");
+  await n.p.click("#notes-list li:has-text('一个非常') button");
+  assert.ok(await n.p.isVisible("#note-read"));
+  await check("reading a note with a long title");
+  await n.key("start"); await check("its options, with the status line");
+  assert.deepEqual(notBlocked(n.errors), []);
 });

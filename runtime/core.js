@@ -170,7 +170,7 @@ function show(name){
 $("home-key").onclick=function(){ LP.flushNote(); show("home"); sfx("home"); };
 
 /* ---------- sound: tiny square-wave chips through Web Audio (the named sounds themselves are in chip.js) ---------- */
-var RUNTIME_VERSION="0.20.1";   /* keep in step with VERSION in sw.js */
+var RUNTIME_VERSION="0.21.0";   /* keep in step with VERSION in sw.js */
 /* One volume, five steps, 0 is off (decisions.md section 10). It sets the master gain and nothing else does.
    Under the master: `ui` for the runtime's own clicks, held at a fraction so they stay as quiet as they always were
    (step 2 gives them 0.11, their level before 0.12.0), and `app` for apps, music and the cartridge at the full step. */
@@ -372,11 +372,11 @@ function armConfirm(wrapId,btnId,label,onYes){
 }
 
 /* ---------- chin game pad: D-pad, A, B, START, SELECT ----------
-   Routed to the file dialog while it is open, then the cartridge player when it runs, then the camera, the darkroom, the calendar, the dictionary, the reader, otherwise to the running app (PAD.on).
+   Routed to the file dialog while it is open, then the cartridge player when it runs, then the camera, the darkroom, the calendar, the dictionary, the reader, notes, otherwise to the running app (PAD.on).
    A route returns true when it took the button. */
 var PADB={up:false,down:false,left:false,right:false,a:false,b:false,start:false,select:false};
 var PADKEYS={ArrowUp:"up",ArrowDown:"down",ArrowLeft:"left",ArrowRight:"right",x:"a",X:"a",z:"b",Z:"b",Enter:"start",Shift:"select"};
-var PAD_ORDER=["file","cart","cam","dark","cal","dict","reader","run"], padRoutes={};   /* "file": the runtime's file dialog, while it is open */
+var PAD_ORDER=["file","cart","cam","dark","cal","dict","reader","notes","run"], padRoutes={};   /* "file": the runtime's file dialog, while it is open */
 function padRoute(name,fn){ padRoutes[name]=fn; }
 function padOn(){ return !$("gamepad").hidden; }
 function setButton(b,down){
@@ -444,4 +444,41 @@ var share={
   resetConfirm:resetConfirm, padRoute:padRoute, setButton:setButton, releaseButtons:releaseButtons, showPad:showPad
 };
 for(var k in share) LP[k]=share[k];
+
+/* ---------- the phone's keyboard. iOS does not shrink the page for it: the keyboard and its bar cover the bottom of the
+   screen, and the whole handheld can be dragged up under the finger. While a text field has the keyboard, the device is
+   cut to the visible height (--vvh): the LCD fills it, the brand line, the chin pad and HOME step aside (they are under
+   the keyboard anyway), the page is kept at the top, and only things that scroll can be dragged ---------- */
+(function(){
+  var vv=window.visualViewport, root=document.documentElement;
+  if(!vv) return;
+  function field(){
+    var a=document.activeElement;
+    return !!a && (a.tagName==="TEXTAREA" || (a.tagName==="INPUT" && !/^(button|checkbox|radio|range|file|submit)$/i.test(a.type)));
+  }
+  function fit(){
+    /* the layout viewport (clientHeight) keeps its height when the keyboard opens; the visual one loses the keyboard's */
+    var kb=field() && vv.height<root.clientHeight-100;
+    root.classList.toggle("kb",kb);
+    if(kb){
+      root.style.setProperty("--vvh",Math.round(vv.height)+"px");
+      if(window.scrollY || vv.offsetTop) window.scrollTo(0,0);
+    } else root.style.removeProperty("--vvh");
+  }
+  vv.addEventListener("resize",fit);
+  vv.addEventListener("scroll",fit);
+  document.addEventListener("focusin",function(){ setTimeout(fit,60); });
+  document.addEventListener("focusout",function(){ setTimeout(fit,60); });
+  function scrolls(e){
+    for(;e && e!==document.body;e=e.parentElement){
+      var o=getComputedStyle(e).overflowY;
+      if((o==="auto" || o==="scroll") && e.scrollHeight>e.clientHeight+1) return true;
+      if(e.tagName==="TEXTAREA" && e.scrollHeight>e.clientHeight+1) return true;
+    }
+    return false;
+  }
+  document.addEventListener("touchmove",function(ev){
+    if(root.classList.contains("kb") && !scrolls(ev.target)) ev.preventDefault();
+  },{passive:false});
+})();
 })();
