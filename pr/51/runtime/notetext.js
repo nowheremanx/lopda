@@ -8,6 +8,16 @@
 
 function title(body){ return String(body||"").split("\n")[0].trim(); }
 
+/* ---------- the 摘抄 group (owner 2026-10-16): src "reader" or "dict", which LP.notes.append writes on notes it creates;
+   or no src and a title that is 《…》 and nothing else. That covers quotes from before 0.21.0 and quotes that went through
+   an export and an import, with no migration and no front matter field */
+var QUOTE_TITLE=/^《[^《》]+》$/;
+function quote(n){
+  if(!n) return false;
+  if(n.src) return n.src==="reader" || n.src==="dict";
+  return QUOTE_TITLE.test(title(n.body));
+}
+
 /* ---------- tags: # or ＃ followed by letters, digits or _, at most 20 of them. Read from the body every time, never stored.
    A # right after an ASCII letter, digit, & or / is not a tag: C#, page#anchor, &#39;, a/b#c */
 var TAG=/[#＃]([\p{L}\p{N}\p{M}_]+)/gu, NOT_BEFORE=/[A-Za-z0-9&\/]/, TAG_MAX=20;
@@ -148,7 +158,7 @@ function fileName(t,blank,used,dir,ext){
 /* "notes/读书.md" -> "读书" */
 function stem(path){ var b=String(path||"").split("/").pop(); var i=b.lastIndexOf("."); return i>0 ? b.slice(0,i) : b; }
 
-window.LopdaNoteText={title:title, tags:tags, key:key, fold:fold, search:search, AROUND:AROUND,
+window.LopdaNoteText={title:title, quote:quote, tags:tags, key:key, fold:fold, search:search, AROUND:AROUND,
   dayKey:dayKey, parseDay:parseDay, diaryTitle:diaryTitle, iso:iso, frontMatter:frontMatter, parseFront:parseFront,
   cleanName:cleanName, fileName:fileName, stem:stem, TAG_MAX:TAG_MAX, MAX_NAME:MAX_NAME};
 })();
