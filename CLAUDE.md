@@ -11,6 +11,7 @@ Design history and open questions: `docs/decisions.md`. Read it before changing 
 runtime/        the PWA: index.html, core.js (shared LP object: utils, views, sound, home, chin pad), apps/*.js (one file per
                 built-in), boot.js (loaded last), strings.js (zh/en text), lopda.css, platform.js (IndexedDB store, file export),
                 chip.js (sound chip: MML music, custom sound effects, ambience presets; shared with sdk/dev.html),
+                sensors.js (tilt, shake, heading and the microphone's level and pitch for apps, the audio session; shared with sdk/dev.html),
                 lenses.js (which physical camera lenses a phone has, pure functions), textsel.js (the text selection shared by the reader and the dictionary entry page), negative.js (the negative PNG and its lpDa chunk, pure functions),
                 develop.js (developing a frame: the stocks' looks, grain, halation, leaks, date stamp; pure functions on RGBA),
                 notetext.js (notes: tags, search and snippets, the diary title, the diaries by day, front matter, export names; pure functions),
@@ -24,7 +25,7 @@ registry/       index.json (generated) + apps/<id>/{manifest.json,index.html,src
 tools/          check-app.mjs, build-index.mjs, bundle-app.mjs (+ lo-game.mjs alias), lo-game-lib.mjs, stamp-preview.mjs (Node 20+, no deps);
                 gen-lunar.py (one-off generator of the lunar table, needs PyEphem); gen-ecdict.mjs (one-off, ECDICT csv ->
                 vendor/ecdict/) with stardict-write.mjs (StarDict + dictzip writer, also used by tests)
-tests/          node:test suite (no deps): tools, strings, PAD shim, platform store, lo-game, negative, develop, notetext, zip, repo rules;
+tests/          node:test suite (no deps): tools, strings, PAD shim, sensors, platform store, lo-game, negative, develop, notetext, zip, repo rules;
                 runtime-shots.mjs (before/after screenshots of the runtime), hko-compare.mjs (lunar table vs the HKO tables, manual)
 SPEC.md         app spec lopda/1 (MIT)
 LICENSE NOTICE LICENSING.md CONTRIBUTING.md
@@ -105,8 +106,11 @@ node --test                                  # the test suite; must pass
   style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; font-src data:; connect-src 'none'`.
   No network, no eval, no storage APIs, no alert/confirm/prompt, no emoji.
 - Four tones only: ink `#1f2a14`, dark `#4a5a32`, mid `#7d8a58`, paper `#a3ad7e`.
-- Manifest `"permissions"`: `[]` or `["files"]` (`PAD.exportFile` / `PAD.importFile`, each call confirmed by the runtime's
-  own dialog, one file ≤ 2 MB; registry/apps/paint is the example).
+- Manifest `"permissions"`: any of `"files"` (`PAD.exportFile` / `PAD.importFile`, each call confirmed by the runtime's
+  own dialog, one file ≤ 2 MB; registry/apps/paint is the example), `"motion"` and `"mic"` (runtime 0.24.0+, SPEC.md 6.4:
+  `PAD.motion` {start, stop, zero} with `PAD.on("tilt" | "shake")`, `PAD.mic` {start, stop} with `PAD.on("sound")`; coarse
+  readings only, the runtime's dialog on an app's first start(), allowed apps listed in Settings, keys must also work;
+  the mic sets `navigator.audioSession.type` to "play-and-record" and every way out sets "ambient" back; decisions.md section 23).
 - PAD API: `PAD.load/save/remove` (256 KB per app), `PAD.exit`, `PAD.TONES`, `PAD.spec`,
   `PAD.on("press"|"release", fn)`, `PAD.off`, `PAD.isDown`, `PAD.sfx(name)`,
   `PAD.lang` ("zh" | "en", undefined on runtimes before 0.4.0). Manifest may add `i18n.{zh,en}.{name,description}`.

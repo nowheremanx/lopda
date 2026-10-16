@@ -6,7 +6,8 @@ What v1 adds over v0: the chin buttons (`"buttons": true`, `PAD.on`, `PAD.isDown
 system sounds (`PAD.sfx`). Added later within v1, all optional: the player's language
 (`PAD.lang`) and localized store text (manifest `i18n`), see section 6.1; files
 (`"permissions": ["files"]`, `PAD.exportFile`, `PAD.importFile`), see section 6.2; music, sound effects of the
-app's own and ambience (`PAD.music`, `PAD.sfx({...})`, `PAD.ambience`), see section 6.3.
+app's own and ambience (`PAD.music`, `PAD.sfx({...})`, `PAD.ambience`), see section 6.3; tilt, shake, heading and the
+microphone's loudness and pitch (`"permissions": ["motion"]` / `["mic"]`, `PAD.motion`, `PAD.mic`), see section 6.4.
 
 A Lo-PDA app is one self-contained HTML file plus a small manifest. The runtime
 installs it from the registry, pins it to an exact version, and runs it inside
@@ -54,7 +55,7 @@ No other files are loaded. Images, sounds and fonts must be embedded in
 | `i18n` | Optional. Store text in other languages: `{"en": {"name", "description"}, "zh": {...}}`. Only `zh` and `en`, only those two fields, same rules as above. The store and home screen show the entry for the player's language and fall back to `name` / `description`. |
 | `author` | Name or handle. |
 | `license` | One of: `MIT`, `0BSD`, `BSD-2-Clause`, `BSD-3-Clause`, `ISC`, `Apache-2.0`, `CC0-1.0`, `Unlicense`. |
-| `permissions` | Array. Usually empty. The only capability so far is `"files"` (`lopda/1`): the app may export and import files, each time confirmed by the player (section 6.2). The store shows it on the app's entry. Anything else fails the checker. |
+| `permissions` | Array. Usually empty. Three capabilities (`lopda/1`): `"files"`, the app may export and import files, each time confirmed by the player (section 6.2); `"motion"`, tilt, shake and heading; `"mic"`, the microphone's loudness and pitch (both section 6.4, confirmed by the player the first time). The store shows them on the app's entry. Anything else fails the checker. |
 | `buttons` | Optional, `lopda/1` only. `true` shows the chin buttons while the app runs (section 4). Leave it out for touch-only apps. |
 
 ## 3. The screen
@@ -91,6 +92,10 @@ No other files are loaded. Images, sounds and fonts must be embedded in
   built-in programs. During play a game maps A and B however it likes (B may be an attack
   or a jump). START usually pauses or opens a menu; SELECT is free. Do not rely on B to
   leave the app: the handheld's HOME key does that.
+- Tilt and the microphone (section 6.4) are another way to play, never the only one. An app that reads them
+  **must also be playable with keys** (or touch), because the phone may have no sensor, the player may say no,
+  and the desktop has neither; its first screen says how to switch. A tilt app offers a way to recentre
+  (`PAD.motion.zero()`) and never asks the player to lay the phone flat (`sdk/UI.md`).
 - `alert`, `confirm` and `prompt` are unavailable. Build confirmations into the UI.
 - Prefer `PAD.sfx` for sound effects, `PAD.music` for music and `PAD.ambience` for background sound (section 6.3): the runtime plays
   them, so they follow the user's volume (volume 0 is off) and the phone's silent switch, stop
@@ -149,6 +154,16 @@ PAD.ambience(null)                   // fade it out over about 1 s
 // lopda/1 with "permissions": ["files"] (section 6.2); undefined on runtimes before 0.5.0
 await PAD.exportFile({name, type, data})   // -> "saved" | "cancelled"
 await PAD.importFile({accept})             // -> {name, type, data} | null
+
+// lopda/1 with "permissions": ["motion"] / ["mic"] (section 6.4); undefined on runtimes before 0.24.0
+await PAD.motion.start()     // -> "on" | "denied" | "none"
+PAD.motion.stop()
+PAD.motion.zero()            // the way the phone is held now is y = 0
+PAD.on("tilt", fn)           // fn({x, y, heading}), at most 30 a second
+PAD.on("shake", fn)          // fn()
+await PAD.mic.start()        // -> "on" | "denied" | "none"
+PAD.mic.stop()
+PAD.on("sound", fn)          // fn({level, pitch}), at most 20 a second
 ```
 
 Sounds, roughly: `tap` key click, `tick` short tick (timers), `move` cursor step,
@@ -314,6 +329,58 @@ public domain (classical pieces, folk songs) with the source named in a comment 
 No transcriptions of other people's music, including old game soundtracks, however short. Review
 checks this (section 9).
 
+### 6.4 Tilt and the microphone
+
+An app that declares `"permissions": ["motion"]` can read how the handheld is tilted, when it is shaken, and which way
+it faces; one that declares `["mic"]` can hear how loud it is around the player and the pitch of a note sung or
+whistled. The runtime asks the player and the phone, reads the sensors itself and hands the app a few coarse numbers.
+The app never gets a recording, a sound sample, or a raw sensor value. Design notes: `docs/design/pad-sensors.md`.
+
+```js
+if (PAD.motion) {                       // undefined before runtime 0.24.0: play with keys only
+  PAD.on("tilt", function (t) { ball.vx += t.x; ball.vy += t.y; });   // t.heading: 0-348.75 or null
+  PAD.on("shake", function () { dice.roll(); });
+  PAD.motion.start().then(function (r) { if (r !== "on") useKeys(); });
+}
+if (PAD.mic) {
+  PAD.on("sound", function (s) { if (s.level > 0.6) blow(); note.textContent = s.pitch || "-"; });
+  PAD.mic.start();                      // ... and PAD.mic.stop() as soon as the app stops listening
+}
+```
+
+**Readings.** Held upright in portrait, screen towards the player:
+
+| value | meaning |
+|---|---|
+| `x` | left / right tilt, -1 (left) to 1 (right); about 45 degrees reaches the end |
+| `y` | the top edge raised (-1) or lowered (1), counted from how the phone was held at `start()` or the last `zero()` |
+| `heading` | the compass, in 32 steps of 11.25 degrees (0 is north, 90 east); `null` where the phone has no compass |
+| `shake` | one event per shake; at least 0.5 s between two |
+| `level` | loudness 0-1 (-60 dB of full scale is 0, full scale is 1) |
+| `pitch` | the main frequency in Hz, an integer from 50 to 1500, or `null` when no clear note is heard (breath, noise, silence) |
+
+`x`, `y` and `level` come in steps of 1/32. `tilt` comes at most 30 times a second and `sound` at most 20 times, each
+only when a value changed: hold the last one between events.
+
+**Asking.** `start()` can be called at any time; the app does not need a tap of its own. The first time an app asks,
+the handheld shows its own dialog over it (`「迷宫」要用倾斜感应。 允许 / 不允许`; the microphone's adds that the phone's
+silent switch does nothing while it is on). A, or a tap on 允许, allows it and the phone's own prompt may follow; B or
+不允许 resolves `"denied"`, and the next `start()` asks again. An allowed app is remembered (the player can revoke it
+in Settings). The phone may still ask again after the handheld is reopened: then a one-line bar
+(`点一下开启倾斜感应`) waits for the player's tap, because the phone takes the answer only from a tap on the handheld
+itself. `start()` resolves `"on"`, `"denied"` (the player or the phone said no, or the manifest lacks the permission)
+or `"none"` (no such sensor: a desktop, an old phone). Without the permission there is no dialog: `"denied"` at once,
+an error in the dev harness, and the checker fails the app.
+
+**While it runs.** Readings go only to the app on the screen. HOME, another program, the app closing or being removed,
+locking the phone: the sensors stop at once and the microphone is closed (the phone's microphone indicator goes out).
+When the player comes back to the same app, the runtime turns on again what was on (with the bar, if the phone wants a
+tap). While the microphone is on, a small mark shows in the status bar, music and sounds keep playing, and the silent
+switch does not mute them; keep it on only while the app is listening. `PAD.motion.stop()` and `PAD.mic.stop()` are
+always safe to call.
+
+**Keys too.** An app that reads tilt or sound must also be playable with keys or touch (section 4).
+
 ## 7. Size and quality
 
 - `index.html` at most 512 KB (with src/ files and framework copies bundled in; section 11).
@@ -336,7 +403,8 @@ node tools/check-app.mjs registry/apps/<id>
 ```
 
 The checker enforces sections 2 (including `permissions`), 3 (colors), 5 (forbidden APIs and external
-resources) and 7 (size), checks `PAD.sfx` names, and fails `PAD.exportFile` / `importFile` without the `files` permission. Passing it is required before review.
+resources) and 7 (size), checks `PAD.sfx` names, and fails `PAD.exportFile` / `importFile` without the `files` permission,
+and `PAD.motion` or `PAD.on("tilt" | "shake")` without `motion`, `PAD.mic` or `PAD.on("sound")` without `mic`. Passing it is required before review.
 
 Review then reads the app. Besides what the checker cannot see (the button convention in section 4,
 other people's names and characters), it listens to the music and sound effects: they must be original
@@ -348,7 +416,9 @@ To try an app with the chin buttons, serve the repo root and open
 `sdk/dev.html?app=registry/apps/<id>`. The harness skips the confirm dialog: an export downloads
 straight away, and an import waits for the file input it shows next to the app. It plays music and
 custom sound effects with the runtime's own chip (`runtime/chip.js`) at the default volume, logs the named
-sounds without playing them, and logs a song that does not parse as an error.
+sounds without playing them, and logs a song that does not parse as an error. For tilt and the microphone it answers
+`start()` at once from the manifest (no dialog) and stands in for the phone: a square to drag for the tilt (it recentres
+when let go), a Shake button, a compass slider, a loudness slider and a pitch field, or this computer's microphone.
 
 ## 10. Games: lo-game.js (optional)
 
