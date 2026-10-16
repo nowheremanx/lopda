@@ -102,7 +102,19 @@ Contrast of the four tones against each other (WCAG contrast ratio):
 - A confirmation is a small in-app panel with two choices, the safe one selected first. Never `alert`/`confirm`.
 - Prefer a new screen to a crowded one. Two simple screens beat one screen with ten controls.
 
-## 9. Check before you submit
+## 9. Tilt and the microphone (SPEC.md 6.4)
+
+- They are another way to play. Every screen also works with keys or touch, and the first screen says how to switch
+  (`倾斜机身，或用方向键`).
+- A tilt app offers a recentre action (`PAD.motion.zero()`), on a key the footer names (START or SELECT) or a button,
+  and starts with "the way you hold it now is level". Never ask the player to lay the phone flat: nobody plays that way.
+- Show that tilt is live (the ball moves, a small level mark) and what happens when it is not: `"denied"` or `"none"`
+  quietly falls back to keys, with one line saying so.
+- Turn the microphone on only while the app listens for something (a candle to blow out), and off as soon as it is
+  done: while it is on the phone's silent switch does nothing. Say what to do ("对着话筒吹"), and give a key that does
+  the same (hold A to blow).
+
+## 10. Check before you submit
 
 1. Open the app in `sdk/dev.html` and in the runtime at the smallest size (331 × 359 with the pad, 331 × 473
    without) and the largest (386 × 738). In desktop browsers use the device toolbar.

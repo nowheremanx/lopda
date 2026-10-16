@@ -1,6 +1,7 @@
 /*
  * Lo-PDA built-in: the app store (community registry), the preinstalled apps, and the sandboxed runner
- * with its PAD bridge (storage, sounds, music and ambience, buttons, and files behind the runtime's own confirm dialog).
+ * with its PAD bridge (storage, sounds, music and ambience, buttons, files behind the runtime's own confirm dialog, and tilt and
+ * the microphone through runtime/sensors.js, asked for on the same dialog).
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  */
 (function(){
@@ -13,7 +14,7 @@ var own=LP.own, toast=LP.toast, put=LP.put, sfx=LP.sfx, show=LP.show, showPad=LP
 /* community apps that come installed, in this order on the home screen after the built-ins (docs/design/pad-files.md) */
 var PREINSTALL=["calculator","paint"];
 /* capabilities a manifest may ask for (SPEC.md section 2) */
-var PERMISSIONS=["files"];
+var PERMISSIONS=["files","motion","mic"];
 function validPerms(x){ return Array.isArray(x) ? PERMISSIONS.filter(function(p){ return x.indexOf(p)>=0; }) : []; }
 function allowed(a,perm){ return !!(a && a.permissions && a.permissions.indexOf(perm)>=0); }
 
@@ -155,6 +156,7 @@ function loadHtml(a){
 }
 function deleteApp(id){
   dropLocal("apps",id);
+  revokeSense(id);
   if(S.db){ S.refs.apps.doc(id).delete().catch(function(){ toast(tr("store.removefail")); }); S.refs.kv.doc(id).delete().catch(function(){}); S.refs.code.doc(id).delete().catch(function(){}); }
   delete S.kv[id];
 }
@@ -170,6 +172,7 @@ function freshRunFrame(){
 }
 function runApp(a){
   closeAsk(false);
+  sensors.stopAll();   /* the old app's tilt and microphone end with its frame */
   LP.chip.stop();   /* the old app's song and ambience end with its frame */
   S.running=a;
   $("run-title").textContent=appName(a)+" · v"+(a.version||"?");
@@ -179,7 +182,7 @@ function runApp(a){
   showPad(!!a.buttons);
   LP.keepAwake(true);   /* a running app keeps the screen on */
   freshRunFrame();
-  var start=function(h){ $("run-frame").srcdoc=lopdaWrapApp(h,{lang:I18N.lang, music:true, ambience:true}); };
+  var start=function(h){ $("run-frame").srcdoc=lopdaWrapApp(h,{lang:I18N.lang, music:true, ambience:true, sensors:true}); };
   if(a.html){ start(a.html); return; }
   $("run-frame").srcdoc='<body style="margin:0;height:100%;display:flex;align-items:center;justify-content:center;background:#a3ad7e;color:#1f2a14;font:16px monospace">'+tr("run.loading")+'</body>';
   loadHtml(a).then(function(h){
@@ -223,6 +226,8 @@ window.addEventListener("message",function(e){
     show("home");
   } else if(d.op==="file"){
     fileRequest(S.running,f.contentWindow,d);
+  } else if(d.op==="sense"){
+    senseRequest(S.running,f.contentWindow,d);
   } else if(d.op==="sfx"){
     var named=APP_SFX.indexOf(d.name)>=0, custom=!named && d.params && typeof d.params==="object";
     if(!named && !custom) return;
@@ -265,32 +270,46 @@ function dataBlob(data,type){
 function cleanName(n){ var x=LP.noEmoji(n).replace(/[\/\\:*?"<>|\u0000-\u001f]/g,"").replace(/^\.+/,"").slice(-64); return x||"lopda.txt"; }
 function fileRequest(app,win,d){
   var req={app:app, win:win, i:d.i, kind:d.kind};
+  req.ok=function(){ fileOk(req); };
+  req.cancel=function(){ fileReply(req,req.kind==="export"?"cancelled":null); };
   if(!allowed(app,"files")){ fileReply(req,null,'this app has no "files" permission'); return; }
   if(d.kind==="export"){
     if(typeof d.data!=="string" || typeof d.name!=="string"){ fileReply(req,null,"bad request"); return; }
     try{ req.blob=dataBlob(d.data,typeof d.type==="string"?d.type:""); }catch(e){ fileReply(req,null,"bad data"); return; }
     if(req.blob.size>FILE_MAX){ fileReply(req,null,"file too large (2 MB at most)"); return; }
     req.name=cleanName(d.name);
+    req.text=tr("file.export",{name:req.name}); req.okLabel=tr("file.ok");
   } else if(d.kind==="import"){
     req.accept=Array.isArray(d.accept) ? d.accept.filter(function(a){ return typeof a==="string" && /^[\w.+\/*-]{1,64}$/.test(a); }).slice(0,16) : [];
+    req.text=tr("file.import"); req.okLabel=tr("file.pick");
   } else { fileReply(req,null,"bad request"); return; }
   if(ask) closeAsk(true);
   openAsk(req);
 }
+/* The runtime's dialog over a running app: req.text, req.note (optional), req.okLabel, req.noLabel; req.ok() runs inside the
+   tap (or the A release) that confirms, req.cancel() answers no. req.bar: a one-line bar to tap instead of a dialog */
 function openAsk(req){
   ask=req;
   /* the app lets go of every button: the dialog has the pad now */
   req.win.postMessage({pad:1,op:"release-all"},"*");
-  var scrim=document.createElement("div"); scrim.className="file-ask"; scrim.id="file-ask";
+  var scrim=document.createElement("div"); scrim.className="file-ask"+(req.bar?" bar":""); scrim.id="file-ask";
+  req.el=scrim;
+  if(req.bar){
+    var tap=document.createElement("button"); tap.className="btn sense-bar"; tap.type="button"; tap.id="sense-tap"; tap.textContent=req.text;
+    scrim.appendChild(tap); $("screen").appendChild(scrim);
+    onRelease(tap,function(){ askOk(); });
+    return;
+  }
   var box=document.createElement("div"); box.className="box"; box.setAttribute("role","dialog");
-  var p=document.createElement("p"); p.textContent=req.kind==="export" ? tr("file.export",{name:req.name}) : tr("file.import");
+  var p=document.createElement("p"); p.textContent=req.text;
+  box.appendChild(p);
+  if(req.note){ var n=document.createElement("p"); n.className="note"; n.textContent=req.note; box.appendChild(n); }
   var row=document.createElement("div"); row.className="row";
-  var ok=document.createElement("button"); ok.className="btn"; ok.type="button"; ok.id="file-ok"; ok.textContent=tr(req.kind==="export"?"file.ok":"file.pick");
-  var no=document.createElement("button"); no.className="btn ghost"; no.type="button"; no.id="file-no"; no.textContent=tr("common.cancel");
-  row.appendChild(ok); row.appendChild(no); box.appendChild(p); box.appendChild(row);
+  var ok=document.createElement("button"); ok.className="btn"; ok.type="button"; ok.id="file-ok"; ok.textContent=req.okLabel;
+  var no=document.createElement("button"); no.className="btn ghost"; no.type="button"; no.id="file-no"; no.textContent=req.noLabel||tr("common.cancel");
+  row.appendChild(ok); row.appendChild(no); box.appendChild(row);
   if(S.running && S.running.buttons){ var k=document.createElement("small"); k.textContent=tr("file.keys"); box.appendChild(k); }
   scrim.appendChild(box); $("screen").appendChild(scrim);
-  req.el=scrim;
   onRelease(ok,function(){ askOk(); });
   onRelease(no,function(){ closeAsk(true); });
 }
@@ -309,10 +328,10 @@ function closeAsk(answer){
   ask=null;
   /* the tap that closed it may still turn into a click: keep the empty scrim a moment so it can't reach the app */
   var el=req.el; el.textContent=""; setTimeout(function(){ el.remove(); },400);
-  if(answer) fileReply(req,req.kind==="export"?"cancelled":null);
+  if(answer && req.cancel) req.cancel();
 }
-function askOk(){
-  var req=ask; if(!req) return;
+function askOk(){ var req=ask; if(req) req.ok(); }
+function fileOk(req){
   if(req.kind==="export"){
     closeAsk(false);
     LP.S.downloads.save({filename:req.name, data:req.blob}).then(function(r){
@@ -383,6 +402,98 @@ function shrinkImage(f){
     img.src=url;
   });
 }
+/* ---------- tilt and the microphone: PAD.motion / PAD.mic (runtime/sensors.js, decisions.md section 23) ----------
+   Only apps whose manifest has "motion" or "mic". The first start() of an app opens the runtime's dialog; A (on release) or
+   the OK tap allows it and opens the system prompt inside that same tap. An allowed app is remembered (Settings lists
+   them and revokes). iOS may ask again after a relaunch, and its prompt needs a tap on the runtime itself: a start()
+   without one shows a one-line bar to tap. Readings go only to the app in front; every way out stops them, and the
+   microphone's way out always sets the audio session back to "ambient". */
+function frontWin(){ var f=$("run-frame"); return S.running && !$("v-run").hidden && f ? f.contentWindow : null; }
+var micMark=$("mic-mark");
+var sensors=window.LopdaSensors.host({
+  window:window, document:document, navigator:navigator,
+  context:function(make){ return make ? LP.audio() : LP.SND.ctx; },
+  session:function(type){ LP.setSession(type); },
+  owner:frontWin,
+  send:function(win,msg){ msg.pad=1; try{ win.postMessage(msg,"*"); }catch(e){} },
+  mic:function(on){ micMark.hidden=!on; },
+  resume:function(win,kinds){
+    if(!S.running || frontWin()!==win) return;
+    ["motion","mic"].forEach(function(k){ if(kinds[k]) begin({app:S.running, win:win, sense:k, reply:function(){}}); });
+  }
+});
+/* the status bar's "listening" mark: a small microphone in paper on an ink square, drawn once */
+(function(){
+  var rows=["..000..",".00000.",".00000.",".00000.",".00000.","0.000.0","0.....0",".00000.","...0...",".00000."];
+  var c=document.createElement("canvas"); c.width=7; c.height=10;
+  var x=c.getContext("2d"), im=x.createImageData(7,10), t=LP.TONES[3];
+  rows.forEach(function(r,y){ for(var i=0;i<7;i++){ var o=(y*7+i)*4; if(r.charAt(i)==="0"){ im.data[o]=t[0]; im.data[o+1]=t[1]; im.data[o+2]=t[2]; im.data[o+3]=255; } } });
+  x.putImageData(im,0,0); micMark.appendChild(c);
+})();
+/* allowed apps: {apps: {id: {motion: true, mic: true}}} */
+var grants={}, grantsRef=null;
+function granted(id,kind){ return !!(grants[id] && grants[id][kind]); }
+function saveGrants(){ if(grantsRef) put(grantsRef,{apps:grants}); }
+function grant(id,kind){ var g=grants[id]||(grants[id]={}); if(!g[kind]){ g[kind]=true; saveGrants(); } }
+function revokeSense(id){ if(grants[id]){ delete grants[id]; saveGrants(); } }
+LP.sensorGrants={
+  list:function(){
+    return Object.keys(grants).map(function(id){
+      var a=installedOf(id);
+      return {id:id, name:a ? appName(a) : id, kinds:["motion","mic"].filter(function(k){ return granted(id,k); })};
+    }).filter(function(g){ return g.kinds.length; });
+  },
+  revoke:revokeSense
+};
+function senseRequest(app,win,d){
+  var kind=d.kind==="motion" || d.kind==="mic" ? d.kind : null;
+  if(!kind) return;
+  var reply=function(v){ if(S.running===app && $("run-frame").contentWindow===win) win.postMessage({pad:1,op:"sensed",i:d.i,v:v},"*"); };
+  if(d.action==="zero"){ sensors.zero(win); return; }
+  if(d.action==="stop"){
+    if(ask && ask.sense===kind && ask.win===win) closeAsk(true);
+    if(sensors.live[kind]===win){ if(kind==="motion") sensors.stopMotion(); else sensors.stopMic(); }
+    return;
+  }
+  if(d.action!=="start") return;
+  if(!allowed(app,kind)){ reply("denied"); return; }
+  if(!(kind==="motion" ? sensors.motionSupported() : sensors.micSupported())){ reply("none"); return; }
+  if(sensors.live[kind]===win){ reply("on"); return; }
+  var req={app:app, win:win, i:d.i, sense:kind, reply:reply};
+  if(granted(app.id,kind)){ begin(req); return; }
+  req.text=tr("sense."+kind,{name:appName(app)}); req.note=kind==="mic" ? tr("sense.micnote") : "";
+  req.okLabel=tr("sense.allow"); req.noLabel=tr("sense.deny");
+  req.ok=function(){ closeAsk(false); grant(app.id,kind); turnOn(req); };
+  req.cancel=function(){ reply("denied"); };
+  if(ask) closeAsk(true);
+  openAsk(req);
+}
+/* an allowed app: on at once when no system prompt can come (passed already since the page opened, or none on this phone);
+   otherwise the bar, and the prompt in its tap. A tap inside the app does not count: it may not reach the outer page as a
+   gesture (Chromium passes it up, Safari is not known to), so the runtime always uses a tap of its own */
+function begin(req){
+  var mayAsk=req.sense==="motion" ? sensors.motionNeedsAsk() && !sensors.systemOk.motion : !sensors.systemOk.mic;
+  if(!mayAsk){ turnOn(req); return; }
+  req.bar=true; req.text=tr("sense.tap."+req.sense);
+  req.ok=function(){ closeAsk(false); turnOn(req); };
+  req.cancel=function(){ req.reply("denied"); };
+  if(ask) closeAsk(true);
+  openAsk(req);
+}
+/* runs inside the tap: the system prompt, if any, opens here */
+function turnOn(req){
+  var p=req.sense==="motion"
+    ? sensors.askMotion().then(function(r){ return r==="granted" ? sensors.startMotion(req.win) : r==="none" ? "none" : "denied"; })
+    : sensors.startMic(req.win);
+  p.then(req.reply,function(){ req.reply("none"); });
+}
+/* the AudioContext was made again: the microphone goes into the new one */
+LP.builtin({id:"sensors", audio:function(){ sensors.rewire(); },
+  ready:function(){
+    grantsRef=S.db.doc("data/users/local/sensors");
+    grantsRef.get().then(function(sn){ var d=sn.exists && own(sn.data()); if(d && d.apps && typeof d.apps==="object") grants=d.apps; }).catch(function(){});
+  }});
+
 $("store-refresh").onclick=function(){ loadRegistry(true); };
 
 LP.runApp=runApp;
@@ -392,6 +503,7 @@ LP.onData("apps",function(){ if(!$("v-store").hidden) renderStore(); });
 var askA=false;
 LP.padRoute("file",function(b,down){
   if(!ask){ askA=false; return false; }
+  if(ask.bar && b!=="a" && b!=="b") return false;   /* the bar takes A and B only */
   if(b==="a"){ if(down) askA=true; else if(askA){ askA=false; askOk(); } }
   else if(b==="b" && !down) closeAsk(true);
   return true;
@@ -408,7 +520,7 @@ LP.builtin({id:"store", label:"app.store", icon:"store", view:"store",
   ready:function(){ loadRegistry(); }});
 /* the runner owns the run view but has no icon of its own: apps appear on the home screen */
 LP.builtin({id:"run", view:"run", keepPad:true,
-  leave:function(){ closeAsk(false); LP.chip.stop(); LP.keepAwake(false); $("run-frame").srcdoc=""; S.running=null; },
+  leave:function(){ closeAsk(false); sensors.stopAll(); LP.chip.stop(); LP.keepAwake(false); $("run-frame").srcdoc=""; S.running=null; },
   lang:function(){
     /* apps read PAD.lang once at start: a running app is started again in the new language */
     if(S.running && !$("v-run").hidden) runApp(S.running);

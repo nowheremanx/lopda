@@ -83,6 +83,16 @@ Hard rules for index.html:
   selected (drawn inverted), kept in view with scrollIntoView({block:"nearest"}), and a
   one-line footer lists only the keys that work on that screen. Left/Right do one thing on
   the whole screen or nothing.
+- Tilt and the microphone, only if the idea needs them, and always as a second way to play: the app must
+  also work with keys or touch. Check that PAD.motion / PAD.mic exist first (older runtimes lack them):
+    PAD.motion.start()   -> Promise "on" | "denied" | "none"; the runtime asks the player itself, no tap needed
+    PAD.on("tilt", function (t) { ... })   t.x left/right and t.y top edge up/down, -1..1 in 1/32 steps,
+         t.heading compass 0-348.75 or null; at most 30 a second, only on change
+    PAD.on("shake", function () { ... })   PAD.motion.zero() makes the current pose level: offer it on a key
+         and never ask the player to lay the phone flat. PAD.motion.stop()
+    PAD.mic.start()      -> same answers; PAD.on("sound", function (s) { ... }) s.level 0-1, s.pitch Hz or null,
+         at most 20 a second. PAD.mic.stop() as soon as the app stops listening (the silent switch is off meanwhile).
+  "permissions" must list "motion" and/or "mic" for these.
 - Pixel art: draw on a small canvas and scale it up with
   image-rendering: pixelated.
 
@@ -100,7 +110,8 @@ manifest.json must be:
                     "description": "<the sentence in English, at most 80 characters>" } },
   "author": "<my name>",
   "license": "MIT",
-  "permissions": [<leave empty; ["files"] only if the app imports or exports files with PAD.importFile / PAD.exportFile>],
+  "permissions": [<leave empty; "files" only if the app imports or exports files with PAD.importFile / PAD.exportFile;
+                   "motion" only if it uses PAD.motion or the tilt/shake events; "mic" only if it uses PAD.mic or the sound event>],
   "buttons": <true if the app uses PAD.on, otherwise leave this line out>
 }
 

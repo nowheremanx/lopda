@@ -48,6 +48,14 @@
       "store.nostore": "存不进本机", "store.installed": "已安装 {name}。", "store.updated": "已更新 {name}。",
       "store.failed": "安装失败：{msg}", "store.removefail": "卸载失败",
       "store.perm.files": "可导入、导出文件",
+      "store.perm.motion": "会用倾斜感应",
+      "store.perm.mic": "会用麦克风（只听音量和音高，不录音）",
+
+      "sense.motion": "「{name}」要用倾斜感应。", "sense.mic": "「{name}」要用麦克风，只听音量和音高，不录音。",
+      "sense.micnote": "开着麦克风时，手机的静音键不起作用。", "sense.allow": "允许", "sense.deny": "不允许",
+      "sense.tap.motion": "点一下开启倾斜感应", "sense.tap.mic": "点一下开启麦克风", "sense.listening": "麦克风开着",
+      "set.sense": "传感器", "set.sense.none": "还没有程序用过倾斜感应或麦克风。", "set.sense.motion": "倾斜", "set.sense.mic": "麦克风", "set.sense.and": "、",
+      "set.sense.revoke": "撤销", "set.sense.note": "撤销以后，这个程序下次要用时会再问一次。",
 
       "file.export": "导出「{name}」？", "file.import": "从文件导入？", "file.ok": "好", "file.pick": "选文件",
       "file.keys": "A 确定　B 取消", "file.toobig": "文件超过 2 MB，导入不了。", "file.badtype": "这种文件这个程序用不了。",
@@ -312,6 +320,14 @@
       "store.nostore": "can't store it here", "store.installed": "{name} installed.", "store.updated": "{name} updated.",
       "store.failed": "Install failed: {msg}", "store.removefail": "Remove failed",
       "store.perm.files": "Can import and export files",
+      "store.perm.motion": "Uses tilt",
+      "store.perm.mic": "Uses the microphone (loudness and pitch only, never records)",
+
+      "sense.motion": "\u201c{name}\u201d wants to use tilt.", "sense.mic": "\u201c{name}\u201d wants the microphone: loudness and pitch only, never a recording.",
+      "sense.micnote": "While the microphone is on, the phone's silent switch does nothing.", "sense.allow": "Allow", "sense.deny": "Don't allow",
+      "sense.tap.motion": "Tap to turn on tilt", "sense.tap.mic": "Tap to turn on the microphone", "sense.listening": "Microphone on",
+      "set.sense": "Sensors", "set.sense.none": "No program has used tilt or the microphone yet.", "set.sense.motion": "tilt", "set.sense.mic": "microphone", "set.sense.and": ", ",
+      "set.sense.revoke": "Revoke", "set.sense.note": "After a revoke, the program asks again the next time.",
 
       "file.export": "Export \u201c{name}\u201d?", "file.import": "Import a file?", "file.ok": "OK", "file.pick": "Choose",
       "file.keys": "A: OK  B: Cancel", "file.toobig": "That file is over 2 MB.", "file.badtype": "This program can't use that kind of file.",
