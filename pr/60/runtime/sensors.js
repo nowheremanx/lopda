@@ -72,7 +72,8 @@ function pitch(s,rate){
   if(hi<=lo || rms(s,n)<0.01) return null;
   var r=new Float32Array(hi+2), e0=0, i, k;
   for(i=0;i<n;i++) e0+=s[i]*s[i];
-  for(k=lo-1;k<=hi+1;k++){
+  /* from lag 1, so a pitch near the top of the range still sees the curve dip before its peak */
+  for(k=1;k<=hi+1;k++){
     var c=0, ek=0;
     for(i=0;i<n;i++){ c+=s[i]*s[i+k]; ek+=s[i+k]*s[i+k]; }
     r[k]=c/(Math.sqrt(e0*ek)||1);
@@ -80,9 +81,9 @@ function pitch(s,rate){
   var best=-1, max=0, dipped=false;
   for(k=lo;k<=hi;k++) if(r[k]>max) max=r[k];
   if(max<0.6) return null;
-  for(k=lo;k<=hi;k++){
+  for(k=1;k<=hi;k++){
     if(r[k]<0.3*max) dipped=true;
-    if(dipped && r[k]>=0.9*max && r[k]>=r[k-1] && r[k]>=r[k+1]){ best=k; break; }
+    if(k>=lo && dipped && r[k]>=0.9*max && r[k]>=r[k-1] && r[k]>=r[k+1]){ best=k; break; }
   }
   if(best<0) return null;
   var a=r[best-1], b=r[best], c2=r[best+1], d=a-2*b+c2, shift=d ? 0.5*(a-c2)/d : 0;
