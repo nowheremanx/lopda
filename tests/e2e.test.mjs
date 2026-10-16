@@ -3430,3 +3430,173 @@ test("notes: every screen fits 331 x 359 with no sideways scroll and 44 px targe
   await n.key("start"); await check("its options, with the status line");
   assert.deepEqual(notBlocked(n.errors), []);
 });
+
+/* ---------------- calendar × diary (decisions.md section 21) ---------------- */
+const diaryCal = async (t, opts) => {
+  const n = await notesPage(t, opts);
+  const { p } = n;
+  const cal = async () => {
+    await p.click("#home-key");
+    await p.locator("#home .app", { hasText: "万年历" }).click();
+    await p.locator("#v-cal:not([hidden])").waitFor();
+    await p.waitForTimeout(200);
+  };
+  const cell = (d) => p.locator("#cal-grid .cal-cell:not(.out)").nth(d - 1);
+  const marked = () => p.$$eval("#cal-grid .cal-cell.dy:not(.out) b", (l) => l.map((x) => +x.textContent));
+  /* a tap selects the day, a second tap opens its sheet */
+  const day = async (d) => { await cell(d).click(); await cell(d).click(); await p.locator("#cal-sheet:not([hidden])").waitFor(); };
+  const diaryRows = () => p.$$eval("#cal-sheet .cal-diary li", (l) => l.map((x) => x.textContent));
+  const diary = (body, d, extra = {}) => p.evaluate(([body, d, extra]) => LP.S.refs.notes.doc().set(Object.assign({ body, day: d, created: Date.now(), updated: Date.now() }, extra)), [body, d, extra]);
+  const reload = async () => { await p.evaluate(() => LP.refresh("notes")); await p.waitForTimeout(200); };
+  const backOn = async (d) => {
+    await p.locator("#v-cal:not([hidden])").waitFor();
+    assert.ok(await p.isVisible("#cal-sheet"), "the day sheet is open again");
+    assert.equal(await p.textContent("#cal-grid .cal-cell.sel b"), String(d));
+    assert.match(await p.textContent("#cal-sheet .sheet-title"), new RegExp(`10月${d}日`));
+  };
+  return { ...n, cal, cell, marked, day, diaryRows, diary, reload, backOn };
+};
+
+test("calendar: a diary marks its day; the day sheet lists it and earlier years; a tap reads it and B comes back to that day", { skip, timeout: 60000 }, async (t) => {
+  const c = await diaryCal(t, { viewport: { width: 375, height: 617 } });
+  const { p } = c;
+  await c.cal();
+  assert.deepEqual(await c.marked(), []);
+  /* the notes arrive while the calendar is open: the marks are drawn */
+  await c.diary("10月1日 周四 · 八月廿一\n国庆，去爬山。", "2026-10-01");
+  await c.diary("10月1日 周三 · 八月初十\n去年国庆在家。", "2025-10-01");
+  await c.diary("读书笔记\n不是日记", undefined);
+  await c.reload();
+  assert.deepEqual(await c.marked(), [1]);
+  /* today is inverted and the selected day framed: the mark is there too */
+  await c.diary("10月15日 周四 · 九月初六\n今天", "2026-10-15");
+  await c.reload();
+  assert.deepEqual(await c.marked(), [1, 15]);
+  assert.match(await c.cell(15).getAttribute("class"), /today.*sel.*dy/);
+  await c.day(1);
+  assert.deepEqual(await c.diaryRows(), ["日记", "国庆，去爬山。", "2025 · 去年国庆在家。"]);
+  /* the month underneath has its own (older) sizes; the sheet over it fits, its diary rows 44 px tall */
+  const f = await fits(p);
+  assert.deepEqual(f.bad.filter((b) => !/cal-(prev|next|list-btn|today|cell|info)/.test(b)), [], "the day sheet fits 331 x 359");
+  assert.ok((await p.$$eval("#cal-sheet .cal-diary li:not(.label)", (l) => l.map((x) => x.getBoundingClientRect().height))).every((h) => h >= 44));
+  /* a tap opens it to read; B comes back to Oct 1 with the sheet open */
+  await p.click("#cal-sheet .cal-diary li:nth-child(2)");
+  await p.locator("#v-note:not([hidden])").waitFor();
+  assert.ok(await p.isVisible("#note-read"), "an earlier day opens to read");
+  assert.equal(await p.textContent("#note-read"), "10月1日 周四 · 八月廿一\n国庆，去爬山。");
+  await c.key("b");
+  await c.backOn(1);
+  /* a 那年今日 row inside that visit, then B: still back to the calendar */
+  await p.click("#cal-sheet .cal-diary li:nth-child(2)");
+  await p.click("#note-years li:nth-child(2)");
+  assert.equal(await p.textContent("#note-read"), "10月1日 周三 · 八月初十\n去年国庆在家。");
+  await p.click("#note-back");
+  await c.backOn(1);
+  /* the 2025 row opens 2025's diary */
+  await p.click("#cal-sheet .cal-diary li:nth-child(3)");
+  assert.equal(await p.textContent("#note-read"), "10月1日 周三 · 八月初十\n去年国庆在家。");
+  await c.key("b");
+  await c.backOn(1);
+  /* HOME still goes home; the notes program's own B still goes to its list */
+  await p.click("#cal-sheet .cal-diary li:nth-child(2)");
+  await p.click("#home-key");
+  assert.ok(await p.isVisible("#v-home"));
+  await c.open();
+  await p.click("#notes-list li:has-text('10月1日 周四') button");
+  await c.key("b");
+  assert.ok(await p.isVisible("#v-notes"), "a diary opened from the notes list goes back to the list");
+  assert.equal((await c.docs()).length, 4, "only looking writes nothing");
+  assert.deepEqual(notBlocked(c.errors), []);
+});
+
+test("calendar: START on an earlier day starts that day's diary; nothing is kept without typing; a future day has no START", { skip, timeout: 60000 }, async (t) => {
+  const c = await diaryCal(t);
+  const { p } = c;
+  await c.cal();
+  await c.day(3);
+  assert.deepEqual(await c.diaryRows(), ["日记", "写这天的日记"]);
+  assert.equal(await p.textContent("#cal-sheet .sk-start span"), "日记");
+  const title = await p.evaluate(() => LopdaNoteText.diaryTitle("2026-10-03", "zh", LP.tr, LopdaLunar));
+  assert.equal(title, "10月3日 周六 · 八月廿三");
+  /* open and back without typing: no diary */
+  await c.key("start");
+  await p.locator("#v-note:not([hidden])").waitFor();
+  assert.equal(await p.inputValue("#note-body"), title + "\n");
+  assert.equal(await p.evaluate(() => document.activeElement.id), "note-body", "it opens to be written");
+  await c.key("b");
+  await c.backOn(3);
+  assert.deepEqual(await c.docs(), []);
+  assert.deepEqual(await c.marked(), []);
+  /* type: the diary is that day's, created now */
+  await c.key("start");
+  await p.keyboard.type("补记：去看展。");
+  await c.saved();
+  await c.key("b");
+  await c.backOn(3);
+  const d = await c.docs();
+  assert.equal(d.length, 1);
+  assert.equal(d[0].body, title + "\n补记：去看展。");
+  assert.equal(d[0].day, "2026-10-03");
+  assert.ok(d[0].created >= NOTES_DAY.getTime() && d[0].created < NOTES_DAY.getTime() + 60000, "created is when it was written, not the day");
+  assert.deepEqual(await c.marked(), [3]);
+  assert.deepEqual(await c.diaryRows(), ["日记", "补记：去看展。"]);
+  /* the row (or START again) opens it to read */
+  await c.key("start");
+  assert.ok(await p.isVisible("#note-read"));
+  await c.key("b");
+  /* a future day: no 日记 block, an empty START, and START does nothing */
+  await c.key("b");
+  await c.day(20);
+  assert.deepEqual(await c.diaryRows(), []);
+  assert.equal(await p.textContent("#cal-sheet .sk-start span"), "");
+  assert.ok(await p.isDisabled("#cal-sheet .sk-start"));
+  await c.key("start");
+  assert.ok(await p.isVisible("#v-cal"));
+  assert.ok(await p.isVisible("#cal-sheet"));
+  assert.equal(await p.evaluate(() => LP.notes.openDiary("2026-10-20", () => {})), false, "openDiary refuses a future day");
+  assert.ok(await p.isVisible("#v-cal"));
+  /* today: START writes today's diary, as 今天 does */
+  await c.key("b");
+  await c.day(15);
+  await c.key("start");
+  assert.equal(await p.inputValue("#note-body"), "10月15日 周四 · 九月初六\n");
+  assert.equal(await p.evaluate(() => document.activeElement.id), "note-body");
+  await c.key("b");
+  await c.backOn(15);
+  /* the other keys on the sheet are as they were: A adds a date, B closes */
+  await c.key("a");
+  assert.ok(await p.isVisible("#cal-name"));
+  assert.deepEqual(notBlocked(c.errors), []);
+});
+
+test("calendar: a diary moved to the trash loses its mark", { skip, timeout: 60000 }, async (t) => {
+  const c = await diaryCal(t);
+  const { p } = c;
+  await c.diary("10月1日 周四 · 八月廿一\n国庆。", "2026-10-01");
+  await c.diary("10月2日 周五 · 八月廿二\n第二天。", "2026-10-02");
+  await c.reload();
+  await c.cal();
+  assert.deepEqual(await c.marked(), [1, 2]);
+  /* deleted from the editor the calendar opened: back to the calendar, the mark gone */
+  await c.day(1);
+  await p.click("#cal-sheet .cal-diary li:nth-child(2)");
+  await c.key("start", "down", "down", "a");
+  await c.backOn(1);
+  assert.deepEqual(await c.marked(), [2]);
+  assert.deepEqual(await c.diaryRows(), ["日记", "写这天的日记"]);
+  /* deleted in the notes program */
+  await c.open();
+  await p.click("#notes-list li:has-text('10月2日') button");
+  await c.key("start", "down", "down", "a");
+  assert.ok(await p.isVisible("#v-notes"), "the notes program's delete goes back to its list");
+  await c.cal();
+  assert.deepEqual(await c.marked(), []);
+  /* restored from the trash: the mark comes back */
+  await c.open();
+  await c.key("start", "down", "a");
+  await c.key("a", "a");
+  await c.cal();
+  assert.equal((await c.docs()).filter((d) => !d.deleted).length, 1);
+  assert.equal((await c.marked()).length, 1);
+  assert.deepEqual(notBlocked(c.errors), []);
+});

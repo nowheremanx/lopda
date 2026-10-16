@@ -26,6 +26,7 @@ var N={
   reading:false,              // the editor shows the text to read (no keyboard) rather than to write
   opts:false, opick:0,        // the editor's options
   release:null,               // an A press on a menu waits for its release (share sheet, file picker)
+  back:null,                  // a diary opened by another program (LP.notes.openDiary): B goes back there, not to the list
   busy:false
 };
 
@@ -38,6 +39,16 @@ function sorted(list){
   return list.slice().sort(function(a,b){ return ((b.pinned?1:0)-(a.pinned?1:0)) || ((b.updated||0)-(a.updated||0)); });
 }
 function today(){ return NT.dayKey(Date.now()); }
+
+/* ---------- diaries by day for the calendar (decisions.md section 21): an index built in one pass over S.notes when first
+   asked for, dropped whenever the notes change (changed(): save, purge, the store's own reads), never stored. A new
+   S.notes array (dropLocal, a read from the store) drops it too */
+var IDX=null, idxOf=null;
+function index(){
+  if(!IDX || idxOf!==S.notes){ IDX=NT.diaryIndex(S.notes); idxOf=S.notes; }
+  return IDX;
+}
+function changed(){ IDX=null; }
 function todayNote(){
   var k=today(), hit=null;
   live().forEach(function(n){ if(n.day===k && (!hit || (n.updated||0)>(hit.updated||0))) hit=n; });
@@ -47,7 +58,7 @@ function docOf(n){ var d={}; FIELDS.forEach(function(k){ if(n[k]!=null && n[k]!=
 /* write a note as it stands in S.notes; resolves true when it landed */
 function save(n){
   var doc=docOf(n); doc.id=n.id;
-  upsert("notes",doc);
+  upsert("notes",doc); changed();
   if(!S.db) return Promise.resolve(false);
   pending.notes[n.id]=true;
   return put(S.refs.notes.doc(n.id),docOf(n)).then(function(ok){ if(ok) delete pending.notes[n.id]; return ok; });
@@ -304,7 +315,7 @@ function clearTrash(){
 }
 function purge(list){
   list.forEach(function(n){
-    dropLocal("notes",n.id); delete pending.notes[n.id];
+    dropLocal("notes",n.id); delete pending.notes[n.id]; changed();
     if(S.db) S.refs.notes.doc(n.id).delete().catch(function(){ toast(tr("notes.delfail")); });
   });
 }
@@ -377,7 +388,10 @@ function openNew(){
 function openToday(){
   var t=todayNote();
   if(t){ openNote(t,true); return; }
-  var id=S.db?S.refs.notes.doc().id:LP.uid(), k=today();
+  freshDiary(today());
+}
+function freshDiary(k){
+  var id=S.db?S.refs.notes.doc().id:LP.uid();
   S.editing={id:id, body:NT.diaryTitle(k,LP.I18N.lang,tr,window.LopdaLunar)+"\n", fresh:true, day:k};
   startEditor(true);
 }
@@ -471,14 +485,19 @@ function flushNote(){
   if(!n){ n={id:e.id, created:now}; if(e.day) n.day=e.day; }
   n=Object.assign({},n,{body:e.body, updated:now});
   e.fresh=false;
-  if(!S.db){ upsert("notes",n); setState("notes.savedtemp"); return; }
+  if(!S.db){ upsert("notes",n); changed(); setState("notes.savedtemp"); return; }
   setState("common.saving");
   save(n).then(function(ok){
     if(S.editing===e){ setState(ok?"notes.saved":"notes.savefail"); renderOpts(); }
     if(!ok) e.dirty=true;
   });
 }
-function closeEditor(){ flushNote(); S.editing=null; N.opts=false; N.reading=false; show("notes"); }
+function closeEditor(){ flushNote(); S.editing=null; N.opts=false; N.reading=false; leaveEditor(); }
+/* back to the notes list, or to the program that opened the diary (LP.notes.openDiary) */
+function leaveEditor(){
+  var back=N.back; N.back=null;
+  if(back) back(); else show("notes");
+}
 $("note-back").onclick=function(){ closeEditor(); };
 $("note-opts").onclick=function(){ toggleOpts(true); };
 
@@ -527,7 +546,7 @@ function optAct(){
     if(n){ n=Object.assign({},n,{deleted:Date.now()}); save(n); }
     S.editing=null; N.opts=false;
     toast(tr("notes.trashed")); sfx("ok");
-    show("notes");
+    leaveEditor();
   }
 }
 /* 发送到…: the share sheet with the note's text (Notes, mail, messages are in it), else the clipboard. Called from a release
@@ -750,19 +769,46 @@ function purgeOld(){
     var now=Date.now();
     q.docs.forEach(function(d){
       var o=d.data()||{};
-      if(o.deleted && now-o.deleted>TRASH_DAYS*DAY){ dropLocal("notes",d.id); S.refs.notes.doc(d.id).delete().catch(function(){}); }
+      if(o.deleted && now-o.deleted>TRASH_DAYS*DAY){ dropLocal("notes",d.id); changed(); S.refs.notes.doc(d.id).delete().catch(function(){}); }
     });
   }).catch(function(){});
 }
 
 function openNotes(){
-  N.q=""; N.filter=null; N.cur=0; N.sheet=""; N.reminded=false; $("notes-q").value="";
+  N.back=null; N.q=""; N.filter=null; N.cur=0; N.sheet=""; N.reminded=false; $("notes-q").value="";
   show("notes");
 }
 
+/* ---------- the diaries for other programs (the calendar). They see days, years, titles and snippets, never the notes
+   themselves, S.notes or the body format ---------- */
+/* the days of that month that have a diary (not in the trash): {1:true, 15:true} */
+function diaryDays(year,month){
+  var m=index().months[year+"-"+LP.pad2(month)];
+  return m ? Object.assign({},m) : {};
+}
+/* every year's diary of that month and day, newest first: [{day:"2025-10-01", year, title, snippet}] */
+function diariesOn(month,day){
+  return (index().md[LP.pad2(month)+"-"+LP.pad2(day)]||[]).map(function(n){
+    return {day:n.day, year:+n.day.slice(0,4), title:firstLine(n.body), snippet:NT.snippet(n.body)};
+  });
+}
+/* opens the diary of a day ("2026-10-01", today or earlier) as 今天 does: today's to write, an earlier one to read, and a day
+   without one as a fresh diary of that day, which exists only once something is typed. A future day: false. While it is
+   in the editor (also after a 那年今日 row), B and ◂ 列表 call onBack instead of showing the list; HOME goes home */
+function openDiary(day,onBack){
+  if(!NT.parseDay(day) || day>today()) return false;
+  N.opts=false;
+  var n=index().days[day];
+  if(n) openNote(n,day===today());
+  else freshDiary(day);
+  N.back=typeof onBack==="function" ? onBack : null;
+  return true;
+}
+
 LP.flushNote=flushNote;
-LP.notes={append:append};
+LP.notes={append:append, diaryDays:diaryDays, diariesOn:diariesOn, openDiary:openDiary};
 LP.onData("notes",function(){
+  changed();
   if(!$("v-notes").hidden){ render(); if(N.sheet) renderSheet(); remind(); }
   if(!$("v-note").hidden && S.editing){ renderYears(); if(N.reading) renderWhen(); }
 });
@@ -789,5 +835,5 @@ LP.builtin({id:"notes", label:"app.notes", icon:"notes", view:"notes", keepPad:t
 /* the editor is its own view; it keeps the chin pad for B and START */
 LP.builtin({id:"note", view:"note", keepPad:true,
   enter:function(){ LP.showPad(true); },
-  leave:function(){ N.opts=false; renderOpts(); }});
+  leave:function(){ N.opts=false; N.back=null; renderOpts(); }});
 })();

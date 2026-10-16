@@ -286,6 +286,15 @@ textarea::placeholder{color:var(--ink-2)}
 .cal-cell i.work{border:1px solid currentColor;padding:0}
 .cal-cell.today i.off{background:var(--lcd);color:var(--ink)}
 .cal-cell u{position:absolute;left:2px;top:2px;width:5px;height:5px;background:currentColor}
+/* a diary on that day: a folded page corner, a 6 px staircase in 2 px steps at the bottom right, clear of the anniversary
+   square (top left), the 休/班 badge (top right) and the lunar line, which already fills the cell at 331x359. Ink, mid
+   outside the month: backgrounds from the border box, so the cell's overflow:hidden (it clips the text) does not cut them.
+   On today (ink) and the selected day (an ink frame) the same staircase is cut out of the cell, so the paper shows */
+.cal-cell.dy{background-repeat:no-repeat;background-origin:border-box;
+  background-image:linear-gradient(currentColor,currentColor),linear-gradient(currentColor,currentColor),linear-gradient(currentColor,currentColor);
+  background-size:2px 6px,2px 4px,2px 2px;background-position:right 0 bottom 0,right 2px bottom 0,right 4px bottom 0}
+.cal-cell.dy.today,.cal-cell.dy.sel{background-image:none;
+  clip-path:polygon(0 0,100% 0,100% calc(100% - 6px),calc(100% - 2px) calc(100% - 6px),calc(100% - 2px) calc(100% - 4px),calc(100% - 4px) calc(100% - 4px),calc(100% - 4px) calc(100% - 2px),calc(100% - 6px) calc(100% - 2px),calc(100% - 6px) 100%,0 100%)}
 .cal-info{flex:none;background:none;border:0;border-top:2px solid var(--ink);padding:6px 8px;font-family:var(--f-lcd);font-size:13px;color:var(--ink);text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
 .cal-sheet{position:absolute;inset:0;z-index:2;background:var(--lcd);display:flex;flex-direction:column;padding:10px 10px 4px;gap:8px;overflow:hidden}
 .cal-lines{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:6px}
@@ -295,6 +304,11 @@ textarea::placeholder{color:var(--ink-2)}
 .cal-date b{font-weight:400;font-size:15px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cal-date small{flex:1;font-size:12px;color:var(--ink-2)}
 .cal-date .btn{padding:5px 8px;font-size:13px;flex:none}
+.cal-diary{border-top:2px solid var(--ink);gap:0;margin-top:2px}
+.lcd-menu.cal-diary li{min-height:44px;padding:4px 10px;font-size:14px}
+.cal-diary li span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lcd-menu.cal-diary li.label{min-height:0;padding:4px 10px 0;font-size:13px;color:var(--ink-2);cursor:default}
+.cal-diary li::before{display:none}
 .cal-list{flex:1;min-height:0;overflow:auto}
 .cal-list li span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cal-empty{text-align:center;padding:16px 8px}
