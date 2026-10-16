@@ -189,6 +189,7 @@ function move(k){ if(!D.cand.length) return; D.pick=Math.max(0,Math.min(D.cand.l
 function openSheet(name){ D.sheet=name; if(name==="books") D.bpick=0; renderSheet(); }
 function closeSheet(){
   var back=D.entry && D.entry.back;
+  hush();
   D.entry=null; D.review=null; D.stack=[];
   if(back){ D.sheet=back; renderSheet(); return; }
   D.sheet=""; renderSheet(); renderList();
@@ -205,7 +206,7 @@ function renderSheet(){
 
 /* an entry: every book's answer, in one scrollable text area */
 function openEntry(word,back,review,pick){
-  $("dict-q").blur();
+  $("dict-q").blur(); hush();
   D.entry={word:word, results:null, back:back||"", shown:!review, pick:pick==null ? -1 : pick, scrollTop:0};
   D.sheet="entry"; renderSheet();
   var mine=D.entry;
@@ -218,8 +219,10 @@ function openEntry(word,back,review,pick){
 }
 function headOf(e){ var r=e.results; return r && r.length && r[0].how!=="exact" ? r[0].word : e.word; }
 function entrySheet(sh){
-  var e=D.entry, word=headOf(e), title=el("p","sheet-title");
-  title.appendChild(el("span","",word));
+  var e=D.entry, word=headOf(e), title=el("p","sheet-title"), head=el("span","",word);
+  /* a tap on the headword says it, as A does: on click, where iOS lets speech start */
+  head.onclick=function(){ if(canSay()) say(); };
+  title.appendChild(head);
   var count=el("small","");
   title.appendChild(count);
   sh.appendChild(title);
@@ -299,7 +302,7 @@ function entryKeys(){
       select:canSelect() ? key("select","sk.select") : null,
       start:e.results && e.results.length ? {label:tr(inBook(word)?"sk.saved":"sk.addword"),fn:function(){ dictButton("start",true); dictButton("start",false); }} : null,
       b:key("b","sk.back"),
-      a:key("a","sk.back")
+      a:key("a","sk.say",!canSay())
     };
   }
   LP.softkeys(D.keys,keyset);
@@ -349,7 +352,7 @@ function nested(word){
 }
 function backEntry(){
   if(!D.stack.length){ closeSheet(); return; }
-  D.entry=D.stack.pop(); D.sheet="entry"; renderSheet(); sfx("tap");
+  hush(); D.entry=D.stack.pop(); D.sheet="entry"; renderSheet(); sfx("tap");
 }
 /* 摘抄 (START's menu) on a selection: quote it into the note 《词典》 under the entry's word; the clipboard is 复制's job */
 function quoteSel(){
@@ -597,15 +600,54 @@ $("dict-file").addEventListener("change",function(){
     .then(function(){ D.busy=null; D.bpick=order().length-1; if(D.sheet==="books") renderSheet(); });
 });
 
+/* ---------- 发音: the headword read aloud by the phone's own English voice (speechSynthesis, offline) ----------
+   The voice is chosen once: the first whose lang starts with "en", an en-US or en-GB one first. iOS lists its voices
+   late, so until one is found every voiceschanged looks again. The loudness follows the handheld's volume step; step 0,
+   no voice, or a headword that is not Latin letters leave the slot dimmed (decisions.md section 15) */
+var SAY={voice:null};
+function synth(){ return window.speechSynthesis && window.SpeechSynthesisUtterance ? window.speechSynthesis : null; }
+function chooseVoice(){
+  var s=synth(); if(!s || SAY.voice) return;
+  var list=[]; try{ list=s.getVoices()||[]; }catch(e){}
+  var lang=function(v){ return String(v.lang||"").replace(/_/g,"-").toLowerCase(); };
+  var en=list.filter(function(v){ return lang(v).indexOf("en")===0; });
+  SAY.voice=en.filter(function(v){ return /^en-(us|gb)\b/.test(lang(v)); })[0] || en[0] || null;
+  if(SAY.voice && D.sheet==="entry" && !$("v-dict").hidden) entryKeys();
+}
+if(synth()){
+  try{ synth().addEventListener("voiceschanged",chooseVoice); }catch(e){}
+  chooseVoice();
+}
+var LATIN=/^[A-Za-z\u00C0-\u024F]+(?:[ '\u2019.-]+[A-Za-z\u00C0-\u024F]+)*\.?$/;
+function canSay(){
+  var e=D.entry;
+  return !!synth() && !!SAY.voice && LP.SND.vol>0 && D.sheet==="entry" && !D.review && !!e && !!e.results && e.results.length>0 && LATIN.test(headOf(e));
+}
+function say(){
+  if(!canSay()) return false;
+  var s=synth(), u=new SpeechSynthesisUtterance(headOf(D.entry));
+  u.voice=SAY.voice; u.lang=SAY.voice.lang;
+  u.volume=Math.min(1,(LP.VOL_GAIN[LP.SND.vol]||0)/LP.VOL_GAIN[LP.VOL_MAX]);
+  try{ s.cancel(); s.speak(u); }catch(e){ return false; }
+  return true;
+}
+/* stop whatever is being said: a new entry, back, leaving the dictionary */
+function hush(){ var s=synth(); if(s) try{ s.cancel(); }catch(e){} }
+
 /* ---------- chin pad ----------
    main: ▲▼ pick, A look up, B clear, SELECT word book, START books
-   entry: ◀▶ nearby matches, ▲▼ scroll, B (or A) back a level, START word book, SELECT select text (as in the reader:
+   entry: ◀▶ nearby matches, ▲▼ scroll, A says the headword (on release: iOS lets speech start only there), B back a level, START word book, SELECT select text (as in the reader:
      ◀▶▲▼ move, A held extends, A let go opens that word, START a menu of 摘抄 and 复制, SELECT word / sentence / line, B ends); review: A show / next, ◀▶ words, ▲▼ scroll, START word book, B back
    word book: ▲▼ pick, A review, START options, B back; books: ▲▼ pick, A this book, START import, B back */
 function dictButton(b,down){
   if(D.sheet==="entry" && SEL.s){
     if(SEL.key(b,down)) return;
     if(down && b==="b"){ endSel(); sfx("tap"); }
+    return;
+  }
+  if(b==="a" && D.sheet==="entry" && !D.review){
+    if(down){ D.sayArmed=canSay(); if(!D.sayArmed) sfx("err"); }
+    else if(D.sayArmed){ D.sayArmed=false; say(); }
     return;
   }
   if(b==="start"){
@@ -644,7 +686,7 @@ function dictButton(b,down){
     }
     if(b==="left"||b==="right") stepMatch(b==="left"?-1:1);
     else if(b==="up"||b==="down") scrollEntry(b==="up"?-1:1);
-    else if(b==="a"||b==="b") backEntry();
+    else if(b==="b") backEntry();
     else if(b==="start" && has){ toggleWord(w); renderSheet(); }
     return;
   }
@@ -675,6 +717,7 @@ LP.padRoute("dict",function(b,down){ if($("v-dict").hidden) return false; dictBu
 var ICON=["................","...00000000000..","..0111111111110.","..0133333333100.","..0133300333100.","..0133033033100.","..0130333303100.","..0130000003100.","..0130333303100.","..0130333303100.","..0133333333100.","..0111111111100.","..0222222222220.","..0233333333330.","...00000000000..","................"];
 
 function openDict(){
+  chooseVoice();
   D.sheet=""; D.entry=null; D.review=null; D.stack=[]; D.q=""; D.listScroll=0; $("dict-q").value="";
   show("dict"); showPad(true); note(); renderMainKeys(); renderSheet(); update();
   /* the browser may clear a site's data after a while unless it is persistent (a Home Screen app always is) */
@@ -686,9 +729,10 @@ function openDict(){
 LP.dict={lookup:lookup, suggest:suggest, inBook:inBook, toggleWord:toggleWord};
 LP.builtin({id:"dict", label:"app.dict", icon:function(){ return ICON; }, view:"dict", keepPad:true,
   open:function(){ openDict(); },
-  leave:function(){ D.sheet=""; D.entry=null; D.review=null; D.stack=[]; D.armed=null; D.q=""; var i=$("dict-q"); if(i){ i.value=""; i.blur(); } renderSheet(); },
+  leave:function(){ hush(); D.sheet=""; D.entry=null; D.review=null; D.stack=[]; D.armed=null; D.q=""; var i=$("dict-q"); if(i){ i.value=""; i.blur(); } renderSheet(); },
   lang:function(){ if(!$("v-dict").hidden){ note(); renderMainKeys(); renderSheet(); update(); } },
   padLayout:function(){ if(!$("v-dict").hidden) setTimeout(refitEntry,0); },
+  pause:function(){ hush(); },
   ready:function(){
     var base=S.db.doc("data/users/local/dict");
     D.refs={set:base, books:base.collection("books")};
