@@ -173,6 +173,14 @@ textarea::placeholder{color:var(--ink-2)}
 .file-ask .row{display:flex;gap:10px}
 .file-ask .btn{flex:1}
 .file-ask small{font-family:var(--f-pix);font-size:14px;color:var(--ink-2)}
+.file-ask p.note{font-size:14px;color:var(--ink-2)}
+/* "tap to turn on": one line over the bottom of the app, which stays usable around it */
+.file-ask.bar{align-items:flex-end;padding:10px;pointer-events:none}
+.file-ask.bar .sense-bar{pointer-events:auto;width:100%;min-height:44px;font-size:16px}
+/* the status bar's microphone mark while an app listens */
+.status .mic-mark{display:inline-flex;align-items:center;justify-content:center;width:18px;height:20px;background:var(--ink)}
+.status .mic-mark[hidden]{display:none}
+.status .mic-mark canvas{width:7px;height:10px;image-rendering:pixelated}
 /* live viewfinder */
 .finder .live-tag{position:absolute;left:10px;top:8px;font-family:var(--f-pix);font-size:16px;background:var(--ink);color:var(--lcd);padding:0 4px;letter-spacing:.1em}
 .finder{cursor:pointer}

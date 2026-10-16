@@ -204,11 +204,11 @@ document.addEventListener("visibilitychange",function(){
 });
 
 /* ---------- sound: tiny square-wave chips through Web Audio (the named sounds themselves are in chip.js) ---------- */
-var RUNTIME_VERSION="0.23.1";   /* keep in step with VERSION in sw.js */
+var RUNTIME_VERSION="0.24.0";   /* keep in step with VERSION in sw.js */
 /* One volume, five steps, 0 is off (decisions.md section 10). It sets the master gain and nothing else does.
    Under the master: `ui` for the runtime's own clicks, held at a fraction so they stay as quiet as they always were
    (step 2 gives them 0.11, their level before 0.12.0), and `app` for apps, music and the cartridge at the full step. */
-var SND={ctx:null, vol:2, gain:null, ui:null, app:null, stale:false};
+var SND={ctx:null, vol:2, gain:null, ui:null, app:null, stale:false, session:"ambient"};
 var VOL_GAIN=[0,0.12,0.25,0.42,0.6], VOL_MAX=4, UI_LEVEL=0.44;
 function applyLevel(){ if(SND.gain) SND.gain.gain.value=VOL_GAIN[SND.vol]||0; }
 function audio(){
@@ -216,13 +216,20 @@ function audio(){
   var AC=window.AudioContext||window.webkitAudioContext; if(!AC) return null;
   /* "ambient": the speaker follows the ring/silent switch (headphones do not, that is iOS), and it mixes with a podcast
      or music instead of stopping it */
-  try{ if(navigator.audioSession) navigator.audioSession.type="ambient"; }catch(e){}
+  setSession(SND.session);
   var ac=SND.ctx=new AC();
   SND.gain=ac.createGain(); SND.gain.connect(ac.destination);
   SND.ui=ac.createGain(); SND.ui.gain.value=UI_LEVEL; SND.ui.connect(SND.gain);
   SND.app=ac.createGain(); SND.app.connect(SND.gain);
   SND.stale=false; applyLevel();
   return ac;
+}
+/* navigator.audioSession.type (iOS 17+): "ambient" always, except while an app has the microphone on, when iOS needs
+   "play-and-record" (runtime/sensors.js sets that, and sets "ambient" back on every way out; decisions.md section 23).
+   Remembered, so a context made again meanwhile keeps the session the microphone needs */
+function setSession(type){
+  SND.session=type;
+  try{ if(navigator.audioSession) navigator.audioSession.type=type; }catch(e){}
 }
 /* ask a context that is not running to run, whatever stopped it ("suspended", or Safari's "interrupted") */
 function wake(){ var ac=SND.ctx; if(ac && ac.state!=="running" && ac.state!=="closed") try{ ac.resume(); }catch(e){} }
@@ -472,7 +479,7 @@ var share={
   TONES:TONES, BAYER:BAYER, saveCanvas:saveCanvas, saveErr:saveErr, sha256hex:sha256hex,
   upsert:upsert, dropLocal:dropLocal, pending:pending, refresh:refresh, onData:onData,
   setStatus:setStatus, tickClock:tickClock, show:show, keepAwake:keepAwake,
-  RUNTIME_VERSION:RUNTIME_VERSION, SND:SND, VOL_MAX:VOL_MAX, VOL_GAIN:VOL_GAIN, audio:audio, wake:wake, sfx:sfx, appSfx:appSfx, APP_SFX:APP_SFX, chip:chip, sfxCustom:sfxCustom, applyLevel:applyLevel,
+  RUNTIME_VERSION:RUNTIME_VERSION, SND:SND, VOL_MAX:VOL_MAX, VOL_GAIN:VOL_GAIN, audio:audio, wake:wake, setSession:setSession, sfx:sfx, appSfx:appSfx, APP_SFX:APP_SFX, chip:chip, sfxCustom:sfxCustom, applyLevel:applyLevel,
   setLang:setLang, UPD:UPD, renderUpdate:renderUpdate,
   validIcon:validIcon, fillTile:fillTile, appName:appName, appDesc:appDesc, renderHome:renderHome,
   resetConfirm:resetConfirm, padRoute:padRoute, setButton:setButton, releaseButtons:releaseButtons, showPad:showPad
