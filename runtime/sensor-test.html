@@ -84,39 +84,49 @@
 
 <section>
   <h2>3. 麦克风 Microphone</h2>
-  <p class="note">先放音乐（第 2 节），再开麦克风。两种做法各测一次，中间按"关麦克风"。</p>
-  <div class="q">做法 Variant</div>
-  <div id="variant">
-    <button class="ans on" data-v="keep ambient">保持 ambient</button>
-    <button class="ans" data-v="play-and-record first">先设 play-and-record</button>
-  </div>
-  <div class="q">分析用的 AudioContext</div>
-  <div id="actx">
-    <button class="ans on" data-v="music context">和音乐同一个 same</button>
-    <button class="ans" data-v="separate context">另开一个 separate</button>
-  </div>
+  <p class="note">先在第 2 节放音乐，开着别停。然后按顺序做下面两步，每一步都把问题答完。
+  开麦克风前，页面会把 audioSession.type 设成 play-and-record（第一轮实测：保持 ambient 时 iOS 直接拒绝开麦克风）。</p>
+  <div class="q">第一步：开麦克风 Step 1</div>
   <button id="mic-start">开麦克风 Start mic</button>
-  <button id="mic-stop">关麦克风 Stop mic</button>
   <div class="meter"><div id="mic-bar"></div></div>
   <div class="live" id="mic-live">-</div>
-  <div class="q">系统弹了麦克风授权吗？ Mic prompt shown</div>
-  <div data-q="mic prompt" data-variant="1">
+  <div class="q">系统弹了麦克风授权框吗？ Mic prompt shown</div>
+  <div data-q="mic prompt">
     <button class="ans" data-a="yes">弹了 yes</button>
     <button class="ans" data-a="no">没弹 no</button>
   </div>
-  <div class="q">现在音乐怎样？ The music now</div>
-  <div data-q="music" data-variant="1" data-phase="1">
+  <div class="q">音乐现在怎样？ The music, mic on</div>
+  <div data-q="music, mic on">
     <button class="ans" data-a="same">一样 same</button>
     <button class="ans" data-a="quieter">变小 quieter</button>
     <button class="ans" data-a="moved to earpiece">到听筒了 earpiece</button>
     <button class="ans" data-a="stopped">停了 stopped</button>
   </div>
-  <div class="q">静音键还能静音吗？ Silent switch still mutes</div>
-  <div data-q="silent switch still mutes" data-variant="1" data-phase="1">
+  <div class="q">拨一下静音键：能静音吗？ Silent switch mutes, mic on</div>
+  <div data-q="silent switch mutes, mic on">
     <button class="ans" data-a="yes">能 yes</button>
     <button class="ans" data-a="no">不能 no</button>
   </div>
-  <p class="note">开着麦克风答一遍，关掉以后再答一遍（按钮会记下是开着还是关了）。</p>
+  <div class="q">第二步：关麦克风 Step 2</div>
+  <button id="mic-stop">关麦克风 Stop mic</button>
+  <p class="note">关掉后页面把 audioSession.type 设回 ambient（和主程序一样）。</p>
+  <div class="q">音乐现在怎样？ The music, mic off</div>
+  <div data-q="music, mic off">
+    <button class="ans" data-a="same as before the mic">和开麦克风前一样 same</button>
+    <button class="ans" data-a="quieter">变小 quieter</button>
+    <button class="ans" data-a="earpiece">还在听筒 earpiece</button>
+    <button class="ans" data-a="stopped">停了 stopped</button>
+  </div>
+  <div class="q">拨一下静音键：又能静音了吗？ Silent switch mutes, mic off</div>
+  <div data-q="silent switch mutes, mic off">
+    <button class="ans" data-a="yes">能 yes</button>
+    <button class="ans" data-a="no">不能 no</button>
+  </div>
+  <div class="q">屏幕顶上的麦克风橙点灭了吗？ Mic indicator gone</div>
+  <div data-q="mic indicator gone after stop">
+    <button class="ans" data-a="yes">灭了 yes</button>
+    <button class="ans" data-a="no">还亮 no</button>
+  </div>
 </section>
 
 <section>
@@ -166,35 +176,16 @@ function render(){
   $("out").value=lines.concat(R.log).join("\n");
 }
 
-/* answer buttons: each group records its question, with the mic variant and phase when the group asks for them */
-function context(group){
-  var s="";
-  if(group.getAttribute("data-variant")) s+=" ["+variant+", "+ctxChoice;
-  if(group.getAttribute("data-phase")) s+=", mic "+(micOn?"on":"off");
-  if(s) s+="]";
-  return s;
-}
+/* answer buttons: each group records its question and the answer */
 Array.prototype.forEach.call(document.querySelectorAll("[data-q]"),function(group){
   group.addEventListener("click",function(e){
     var b=e.target.closest("button"); if(!b) return;
     Array.prototype.forEach.call(group.querySelectorAll("button"),function(x){ x.classList.toggle("on",x===b); });
     var q=group.getAttribute("data-q"), a=b.getAttribute("data-a");
     if(q==="run"){ R.run=a; log("run: "+a); return; }
-    log("answer: "+q+context(group)+" = "+a);
+    log("answer: "+q+" = "+a);
   });
 });
-function choice(id,set){
-  $(id).addEventListener("click",function(e){
-    var b=e.target.closest("button"); if(!b) return;
-    Array.prototype.forEach.call($(id).querySelectorAll("button"),function(x){ x.classList.toggle("on",x===b); });
-    set(b.getAttribute("data-v"));
-    /* a new variant asks the questions again */
-    Array.prototype.forEach.call(document.querySelectorAll("[data-variant] button"),function(x){ x.classList.remove("on"); });
-  });
-}
-var variant="keep ambient", ctxChoice="music context";
-choice("variant",function(v){ variant=v; log("mic variant: "+v); });
-choice("actx",function(v){ ctxChoice=v; log("analysis context: "+v); });
 
 /* ---------- 1. motion ---------- */
 function Rate(){
@@ -335,10 +326,11 @@ function meter(){
 $("mic-start").addEventListener("click",function(){
   if(micOn){ log("mic already on"); return; }
   if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){ log("no getUserMedia"); return; }
-  var k=micKey="run "+(++micRun)+" ("+variant+", "+ctxChoice+")";
+  var k=micKey="mic "+(++micRun);
   R.mic[k+": audioSession.type before"]=sessType();
   R.mic[k+": music playing"]=!!(chip && chip.playing());
-  if(variant==="play-and-record first"){ setType("play-and-record"); R.mic[k+": audioSession.type after setting play-and-record"]=sessType(); }
+  /* with "ambient" iOS 18.7 refuses capture at once (InvalidStateError, first iPhone run); play-and-record allows it */
+  setType("play-and-record"); R.mic[k+": audioSession.type after setting play-and-record"]=sessType();
   var at=Date.now();
   navigator.mediaDevices.getUserMedia({audio:true}).then(function(s){
     stream=s; micOn=true;
@@ -348,7 +340,7 @@ $("mic-start").addEventListener("click",function(){
     delete st.deviceId; delete st.groupId;
     R.mic[k+": track"]=(tr?tr.label:"none")+" "+JSON.stringify(st);
     var ctx;
-    if(ctxChoice==="music context" && actx) ctx=actx;
+    if(actx) ctx=actx;
     else { actx2=new AC(); ctx=actx2; actx2.onstatechange=function(){ if(actx2) log("analysis context state: "+actx2.state); }; }
     src=ctx.createMediaStreamSource(s); an=ctx.createAnalyser(); an.fftSize=2048; buf=new Float32Array(an.fftSize);
     src.connect(an);   /* not to the speakers */
@@ -359,7 +351,8 @@ $("mic-start").addEventListener("click",function(){
     render();
   },function(e){
     R.mic[k+": getUserMedia"]="failed after "+(Date.now()-at)+" ms: "+e.name+" "+e.message;
-    log("mic failed: "+e.name);
+    setType("ambient");
+    log("mic failed: "+e.name+", audioSession.type back to "+sessType());
   });
 });
 $("mic-stop").addEventListener("click",function(){
@@ -375,7 +368,6 @@ $("mic-stop").addEventListener("click",function(){
   $("mic-bar").style.width="0";
   log("mic off, audioSession.type "+sessType());
   setTimeout(function(){ R.mic[k+": audioSession.type 1 s after stop"]=sessType(); R.mic[k+": music context after stop"]=actx?actx.state+" "+actx.sampleRate+" Hz, chip "+(chip.playing()?"playing":"stopped"):"none"; render(); },1000);
-  Array.prototype.forEach.call(document.querySelectorAll("[data-phase] button"),function(x){ x.classList.remove("on"); });
 });
 
 /* ---------- 4. copy ---------- */
