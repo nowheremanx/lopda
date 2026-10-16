@@ -468,12 +468,12 @@ function senseRequest(app,win,d){
   if(ask) closeAsk(true);
   openAsk(req);
 }
-/* an allowed app: on at once when no system prompt can come (passed already since the page opened, none on this phone,
-   or the runtime has a fresh tap of its own); otherwise the bar, and the prompt in its tap */
+/* an allowed app: on at once when no system prompt can come (passed already since the page opened, or none on this phone);
+   otherwise the bar, and the prompt in its tap. A tap inside the app does not count: it may not reach the outer page as a
+   gesture (Chromium passes it up, Safari is not known to), so the runtime always uses a tap of its own */
 function begin(req){
-  var fresh=!!(navigator.userActivation && navigator.userActivation.isActive);
   var mayAsk=req.sense==="motion" ? sensors.motionNeedsAsk() && !sensors.systemOk.motion : !sensors.systemOk.mic;
-  if(!mayAsk || fresh){ turnOn(req); return; }
+  if(!mayAsk){ turnOn(req); return; }
   req.bar=true; req.text=tr("sense.tap."+req.sense);
   req.ok=function(){ closeAsk(false); turnOn(req); };
   req.cancel=function(){ req.reply("denied"); };

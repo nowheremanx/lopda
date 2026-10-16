@@ -3967,3 +3967,174 @@ test("wake lock: held in the camera's viewfinder, let go on HOME; a refused requ
   await p.waitForTimeout(300);
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
+
+/* ---------- tilt and the microphone (runtime/sensors.js, SPEC.md 6.4) ----------
+   The phone's prompts are stubs: requestPermission counts and grants, getUserMedia hands back an OscillatorNode's 440 Hz
+   stream, navigator.audioSession is a plain object, and the page sends deviceorientation events itself. A small test app
+   with "motion" and "mic" records what reaches it. */
+const SENSE_APP = readFileSync(join(ROOT, "tests/fixtures/sensor-app/index.html"), "utf8");
+const senseInit = () => {
+  window.__asked = 0; window.__gum = 0;
+  const grant = () => { window.__asked++; return Promise.resolve("granted"); };
+  DeviceOrientationEvent.requestPermission = grant;
+  DeviceMotionEvent.requestPermission = grant;
+  Object.defineProperty(navigator, "audioSession", { value: { type: "auto" }, configurable: true });
+  navigator.mediaDevices.getUserMedia = () => {
+    window.__gum++;
+    const ac = new AudioContext(), o = ac.createOscillator(), d = ac.createMediaStreamDestination();
+    o.frequency.value = 440; o.connect(d); o.start();
+    window.__stream = d.stream;
+    return Promise.resolve(d.stream);
+  };
+  setInterval(() => window.dispatchEvent(new DeviceOrientationEvent("deviceorientation", { beta: 40, gamma: 22.5 })), 50);
+};
+async function sensePage(t) {
+  const { p, errors } = await page(t, { locale: "zh-CN" });
+  await p.addInitScript(senseInit);
+  await p.goto(base + "/runtime/?debug", { waitUntil: "networkidle" });
+  await p.waitForFunction(() => window.LP && window.LP.S.db);
+  return { p, errors };
+}
+const runSenseApp = async (p, perms = ["motion", "mic"]) => {
+  await p.evaluate(([html, perms]) => {
+    const a = { id: "sense-test", name: "传感测试", glyph: "感", version: "1.0.0", spec: "lopda/1", buttons: true, permissions: perms, html };
+    window.LP.upsert("apps", a); window.LP.runApp(a);
+  }, [SENSE_APP, perms]);
+  for (let i = 0; i < 50; i++) { const f = p.frames().find((x) => x !== p.mainFrame()); if (f && await f.evaluate(() => !!window.go).catch(() => false)) return f; await p.waitForTimeout(100); }
+  assert.fail("the test app did not start");
+};
+const R = (f) => f.evaluate(() => JSON.parse(JSON.stringify(window.R)));
+const press = async (p, b) => { await p.evaluate((b) => { window.LOPDA_DEBUG.setButton(b, true); window.LOPDA_DEBUG.setButton(b, false); }, b); };
+const until = async (p, fn, what) => { for (let i = 0; i < 100; i++) { if (await fn()) return; await p.waitForTimeout(100); } assert.fail("timed out waiting for " + what); };
+
+test("sensor motion: the confirm dialog, A allows and readings reach the app; a second start skips the dialog", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await sensePage(t);
+  const f = await runSenseApp(p);
+  f.evaluate(() => { go("motion"); });
+  await p.waitForSelector("#file-ask .box");
+  assert.equal(await p.textContent("#file-ask p"), "「传感测试」要用倾斜感应。");
+  assert.equal(await p.locator("#file-ask p.note").count(), 0, "no silent-switch line for tilt");
+  await press(p, "a");
+  await until(p, async () => (await R(f)).results.includes("motion:on"), "motion on");
+  assert.equal(await p.evaluate(() => window.__asked), 2, "orientation and motion asked in the same tap");
+  await until(p, async () => (await R(f)).tilt.length > 0, "a tilt reading");
+  assert.deepEqual((await R(f)).tilt[0], { x: 0.5, y: 0, heading: null });
+  /* stop, start again: remembered, no dialog, no second system prompt */
+  await f.evaluate(() => PAD.motion.stop());
+  await f.evaluate(() => go("motion"));
+  assert.equal(await p.locator("#file-ask .box, #sense-tap").count(), 0);
+  assert.deepEqual((await R(f)).results, ["motion:on", "motion:on"]);
+  assert.equal(await p.evaluate(() => window.__asked), 2);
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("sensor mic: B says denied; allowed, the sound reaches the app, the session and the status mark follow; HOME ends the stream", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await sensePage(t);
+  const f = await runSenseApp(p);
+  f.evaluate(() => { go("mic"); });
+  await p.waitForSelector("#file-ask .box");
+  assert.match(await p.textContent("#file-ask p.note"), /静音键不起作用/);
+  await press(p, "b");
+  await until(p, async () => (await R(f)).results.includes("mic:denied"), "mic denied");
+  assert.equal(await p.evaluate(() => window.__gum), 0, "no system prompt after B");
+  assert.notEqual(await p.evaluate(() => navigator.audioSession.type), "play-and-record", "untouched");
+  /* asked again, and allowed with a tap on the dialog */
+  f.evaluate(() => { go("mic"); });
+  await p.waitForSelector("#file-ask .box");
+  await p.click("#file-ok");
+  await until(p, async () => (await R(f)).results.includes("mic:on"), "mic on");
+  assert.equal(await p.evaluate(() => navigator.audioSession.type), "play-and-record");
+  assert.equal(await p.isVisible("#mic-mark"), true);
+  await until(p, async () => (await R(f)).sound.some((s) => s.pitch && Math.abs(s.pitch - 440) < 9 && s.level > 0), "a 440 Hz reading");
+  /* HOME: the stream's tracks end, the session is ambient again, the mark goes */
+  await p.click("#home-key");
+  assert.equal(await p.evaluate(() => window.__stream.getTracks().every((x) => x.readyState === "ended")), true);
+  assert.equal(await p.evaluate(() => navigator.audioSession.type), "ambient");
+  assert.equal(await p.isVisible("#mic-mark"), false);
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("sensor: HOME stops the tilt feed; removing a mic app ends its stream too", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await sensePage(t);
+  let f = await runSenseApp(p);
+  f.evaluate(() => { go("motion"); });
+  await p.waitForSelector("#file-ask .box"); await p.click("#file-ok");
+  await until(p, async () => (await R(f)).tilt.length > 0, "tilt");
+  await p.click("#home-key");
+  assert.equal(await p.evaluate(() => window.LP.S.running), null);
+  /* the feed is gone: nothing left listening on the page */
+  f = await runSenseApp(p);
+  await p.waitForTimeout(300);
+  assert.deepEqual((await R(f)).tilt, [], "a new run gets nothing before it asks");
+  f.evaluate(() => { go("mic"); });
+  await p.waitForSelector("#file-ask .box"); await p.click("#file-ok");
+  await until(p, async () => (await R(f)).results.includes("mic:on"), "mic on");
+  await p.click("#run-del"); await p.click("#run-del-wrap .btn:not(.ghost)");
+  assert.equal(await p.evaluate(() => window.__stream.getTracks().every((x) => x.readyState === "ended")), true);
+  assert.equal(await p.evaluate(() => navigator.audioSession.type), "ambient");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("sensor: an app without the permission gets denied and no dialog", { skip, timeout: 60000 }, async (t) => {
+  const { p } = await sensePage(t);
+  const f = await runSenseApp(p, []);
+  assert.equal(await f.evaluate(() => go("motion")), "denied");
+  assert.equal(await f.evaluate(() => go("mic")), "denied");
+  assert.equal(await p.locator("#file-ask .box, #sense-tap").count(), 0);
+  assert.equal(await p.evaluate(() => window.__asked + window.__gum), 0);
+});
+
+test("sensor: after a relaunch an allowed app gets the tap bar; settings revoke brings the dialog back", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await sensePage(t);
+  let f = await runSenseApp(p);
+  f.evaluate(() => { go("motion"); });
+  await p.waitForSelector("#file-ask .box"); await p.click("#file-ok");
+  await until(p, async () => (await R(f)).results.includes("motion:on"), "motion on");
+  /* the grant is in IndexedDB: reload, as a relaunch from the home screen would */
+  await until(p, () => p.evaluate(() => new Promise((res) => { const r = indexedDB.open("lopda"); r.onsuccess = () => { const g = r.result.transaction("docs").objectStore("docs").get("data/users/local/sensors"); g.onsuccess = () => { r.result.close(); res(!!(g.result && g.result.data.apps["sense-test"])); }; }; })), "the grant stored");
+  await p.reload({ waitUntil: "networkidle" });
+  await p.waitForFunction(() => window.LP && window.LP.S.db);
+  await p.waitForTimeout(300);
+  f = await runSenseApp(p);
+  f.evaluate(() => { go("motion"); });
+  await p.waitForSelector("#sense-tap");
+  assert.equal(await p.textContent("#sense-tap"), "点一下开启倾斜感应");
+  assert.equal(await p.locator("#file-ask .box").count(), 0, "no dialog: the app was allowed before");
+  await p.click("#sense-tap");
+  await until(p, async () => (await R(f)).results.includes("motion:on"), "motion on after the tap");
+  assert.equal(await p.evaluate(() => window.__asked), 2, "the system prompt ran in the bar's tap");
+  /* settings lists it; revoke, and the next start asks on the dialog again */
+  await p.click("#home-key");
+  await p.locator("#home .app", { has: p.locator(".label", { hasText: /^设置$/ }) }).click();
+  /* the test app is never stored, so the list names it by id once the home screen has re-read the installed apps */
+  assert.match(await p.textContent("#set-sense-list"), /(传感测试|sense-test) · 倾斜/);
+  await p.click('#set-sense-list [data-app="sense-test"]');
+  assert.match(await p.textContent("#set-sense-list"), /还没有程序用过/);
+  f = await runSenseApp(p);
+  f.evaluate(() => { go("motion"); });
+  await p.waitForSelector("#file-ask .box");
+  assert.equal(await p.textContent("#file-ask p"), "「传感测试」要用倾斜感应。");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("sensor: dev.html stands in for the phone: start() follows the manifest, the tilt pad, Shake and the mic sliders", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t);
+  await p.goto(`${base}/sdk/dev.html?app=tests/fixtures/sensor-app`, { waitUntil: "load" });
+  let f;
+  await until(p, async () => { f = p.frames().find((x) => x !== p.mainFrame()); return f && await f.evaluate(() => !!window.go).catch(() => false); }, "the app");
+  /* "motion" is declared, "mic" is not */
+  assert.equal(await f.evaluate(() => go("motion")), "on");
+  assert.equal(await f.evaluate(() => go("mic")), "denied");
+  assert.match(await p.textContent("#log"), /ERROR PAD\.mic\.start\(\) needs "permissions": \["mic"\]/);
+  /* drag the square to the right edge: x = 1; let go: back to 0 */
+  await p.locator("#tiltpad").scrollIntoViewIfNeeded();
+  const box = await p.locator("#tiltpad").boundingBox();
+  await p.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await p.mouse.down();
+  await p.mouse.move(box.x + box.width - 1, box.y + box.height / 2, { steps: 4 });
+  await until(p, async () => (await R(f)).tilt.some((v) => v.x >= 0.95), "x near 1");
+  await p.mouse.up();
+  await until(p, async () => (await R(f)).tilt.at(-1).x === 0, "recentred");
+  await p.click("#shake");
+  await until(p, async () => (await R(f)).shake === 1, "a shake");
+  assert.deepEqual(errors, []);
+});

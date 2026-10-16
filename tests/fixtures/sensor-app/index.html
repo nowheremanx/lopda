@@ -1,0 +1,7 @@
+<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;height:100%}</style></head><body><p id="out">-</p><script>
+  window.R = { results: [], tilt: [], shake: 0, sound: [] };
+  PAD.on("tilt", function (t) { R.tilt.push(t); });
+  PAD.on("shake", function () { R.shake++; });
+  PAD.on("sound", function (s) { R.sound.push(s); });
+  window.go = function (k) { return PAD[k].start().then(function (v) { R.results.push(k + ":" + v); return v; }); };
+</script></body></html>
