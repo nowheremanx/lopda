@@ -10,7 +10,7 @@
 (function(){
 "use strict";
 var LP=window.LP, $=LP.$, S=LP.S, tr=LP.tr, NT=window.LopdaNoteText, Z=window.LopdaZip;
-var put=LP.put, toast=LP.toast, fmt=LP.fmt, show=LP.show, upsert=LP.upsert, dropLocal=LP.dropLocal, pending=LP.pending, sfx=LP.sfx, own=LP.own;
+var put=LP.put, toast=LP.toast, show=LP.show, upsert=LP.upsert, dropLocal=LP.dropLocal, pending=LP.pending, sfx=LP.sfx, own=LP.own;
 
 var DAY=86400000, TRASH_DAYS=30, REMIND_DAYS=30, REMIND_MIN=20, YEARS=3;
 var MAX_FILE=4*1024*1024, MAX_NOTE=256*1024, MAX_IMPORT=2000, SEARCH_WAIT=150;
@@ -23,6 +23,7 @@ var N={
   tpick:0, trpick:0, item:null, armed:"",
   meta:{exported:0, reminded:0}, metaRef:null, reminded:false,
   years:[], ecur:-1,          // the diary's 那年今日 rows and the cursor on them (-1: the text)
+  reading:false,              // the editor shows the text to read (no keyboard) rather than to write
   opts:false, opick:0,        // the editor's options
   release:null,               // an A press on a menu waits for its release (share sheet, file picker)
   busy:false
@@ -93,7 +94,7 @@ function dateLine(n,row){
     return d;
   }
   var r=rest(n.body);
-  d.textContent=fmt(n.updated)+(r ? " · "+r : "");
+  d.textContent=NT.when(n.updated||0,"list",tr)+(r ? " · "+r : "");
   return d;
 }
 function render(ensure){
@@ -361,36 +362,81 @@ function sheetButton(b,down){
 }
 
 /* ---------- the editor ---------- */
-function setState(k){ $("note-state").textContent=tr(k); }
-function openNote(n){
+function setState(k){ var st=$("note-state"); st.textContent=tr(k); st.setAttribute("data-k",k); if(N.reading) renderWhen(); }
+/* a note from the list opens to be read: no keyboard until a tap on the text or A. 今天 and 新建 open to be written */
+function openNote(n,write){
   S.editing={id:n.id, body:n.body||"", fresh:false, day:n.day||""};
-  startEditor();
+  startEditor(write);
 }
 function openNew(){
   var id=S.db?S.refs.notes.doc().id:LP.uid();
   S.editing={id:id, body:"", fresh:true, day:""};
-  startEditor();
+  startEditor(true);
 }
 /* today: the diary of this day, or a fresh one that exists only once something is typed (no empty diaries left behind) */
 function openToday(){
   var t=todayNote();
-  if(t){ openNote(t); return; }
+  if(t){ openNote(t,true); return; }
   var id=S.db?S.refs.notes.doc().id:LP.uid(), k=today();
   S.editing={id:id, body:NT.diaryTitle(k,LP.I18N.lang,tr,window.LopdaLunar)+"\n", fresh:true, day:k};
-  startEditor();
+  startEditor(true);
 }
-function startEditor(){
-  var e=S.editing;
+function startEditor(write){
+  var e=S.editing, ta=$("note-body");
   N.opts=false; N.ecur=-1;
-  $("note-body").value=e.body;
+  ta.value=e.body;
   setState(e.fresh?"notes.fresh":"notes.saved");
   show("note");
   renderYears(); renderOpts();
-  var ta=$("note-body");
-  ta.focus();
-  try{ ta.setSelectionRange(e.body.length,e.body.length); }catch(x){}
-  ta.scrollTop=e.body.length ? ta.scrollHeight : 0;
+  if(write){ writeAt(e.body.length); ta.scrollTop=e.body.length ? ta.scrollHeight : 0; }
+  else { readMode(); $("note-read").scrollTop=0; }
 }
+/* reading: the text in a plain block, so nothing can take focus and bring up the keyboard; the textarea waits, hidden
+   and read-only. The line under the bar says when the note was last changed */
+function readMode(){
+  var ta=$("note-body"), rd=$("note-read");
+  N.reading=true;
+  rd.textContent=S.editing ? S.editing.body : "";
+  rd.setAttribute("data-ph",tr("notes.placeholder"));
+  if(!ta.hidden) rd.scrollTop=ta.scrollTop;
+  ta.readOnly=true; ta.hidden=true; rd.hidden=false;
+  renderWhen();
+}
+/* writing, with the caret at a place in the text. Runs inside the tap's or the key's handler: iOS brings up the
+   keyboard only for a focus() made there */
+function writeAt(at){
+  var ta=$("note-body"), rd=$("note-read"), top=rd.hidden ? ta.scrollTop : rd.scrollTop;
+  N.reading=false; N.ecur=-1; renderYears();
+  ta.readOnly=false; ta.hidden=false; rd.hidden=true;
+  ta.scrollTop=top;
+  ta.focus({preventScroll:true});
+  try{ ta.setSelectionRange(at,at); }catch(x){}
+  renderWhen();
+}
+function renderWhen(){
+  var e=S.editing, n=e && byId(e.id), time=$("note-time"), st=$("note-state");
+  var showTime=N.reading && n && !e.dirty && !/fail|temp/.test(st.getAttribute("data-k")||"");
+  time.textContent=showTime ? NT.when(n.updated||0,"full",tr) : "";
+  time.hidden=!showTime; st.hidden=!!showTime;
+}
+/* where a tap fell in the text: the offset in the body, or the end when the browser cannot say */
+function offsetAt(x,y){
+  var rd=$("note-read"), node=rd.firstChild, at=null;
+  try{
+    if(document.caretPositionFromPoint){ var p=document.caretPositionFromPoint(x,y); if(p && p.offsetNode===node) at=p.offset; }
+    else if(document.caretRangeFromPoint){ var r=document.caretRangeFromPoint(x,y); if(r && r.startContainer===node) at=r.startOffset; }
+  }catch(err){}
+  var len=S.editing ? S.editing.body.length : 0;
+  return at==null || at>len ? len : at;
+}
+$("note-read").addEventListener("click",function(ev){
+  if(!S.editing || !N.reading || N.opts) return;
+  writeAt(offsetAt(ev.clientX,ev.clientY));
+});
+$("note-body").addEventListener("blur",function(){
+  if(!S.editing || N.reading || $("v-note").hidden) return;
+  flushNote(); readMode();
+});
 /* 那年今日: diaries of this month and day in earlier years, newest first, at most YEARS */
 function yearsOf(day){
   var md=day.slice(4), y=day.slice(0,4);
@@ -406,7 +452,7 @@ function renderYears(){
   N.years.forEach(function(n,i){
     var li=el("li",i===N.ecur?"on":"");
     li.appendChild(el("span","",tr("notes.yearrow",{y:n.day.slice(0,4), text:rest(n.body) || label(n)})));
-    li.onclick=function(){ flushNote(); openNote(n); };
+    li.onclick=function(){ flushNote(); openNote(n,false); };
     ul.appendChild(li);
   });
 }
@@ -417,7 +463,6 @@ $("note-body").addEventListener("input",function(){
   setState("notes.editing");
   clearTimeout(noteTimer); noteTimer=setTimeout(flushNote,700);
 });
-$("note-body").addEventListener("focus",function(){ if(N.ecur>=0){ N.ecur=-1; renderYears(); } });
 function flushNote(){
   clearTimeout(noteTimer);
   var e=S.editing; if(!e || !e.dirty) return;
@@ -429,11 +474,11 @@ function flushNote(){
   if(!S.db){ upsert("notes",n); setState("notes.savedtemp"); return; }
   setState("common.saving");
   save(n).then(function(ok){
-    if(S.editing===e) setState(ok?"notes.saved":"notes.savefail");
+    if(S.editing===e){ setState(ok?"notes.saved":"notes.savefail"); renderOpts(); }
     if(!ok) e.dirty=true;
   });
 }
-function closeEditor(){ flushNote(); S.editing=null; N.opts=false; show("notes"); }
+function closeEditor(){ flushNote(); S.editing=null; N.opts=false; N.reading=false; show("notes"); }
 $("note-back").onclick=function(){ closeEditor(); };
 $("note-opts").onclick=function(){ toggleOpts(true); };
 
@@ -453,10 +498,18 @@ function renderOpts(){
   if(!N.opts) return;
   title(sh,tr("sk.options"));
   menuList(sh,optRows(),N.opick,function(r){ return [tr(r.l)]; },function(i){ N.opick=i; optAct(); });
+  sh.appendChild(el("p","hint notes-status",noteStatus()));
   var keys=el("div");
   var k=function(name,lbl){ return {label:tr(lbl),fn:function(){ editorButton(name,true); editorButton(name,false); }}; };
   LP.softkeys(keys,{select:null,start:null,b:k("b","sk.back"),a:k("a","sk.confirm")});
   sh.appendChild(keys);
+}
+/* 创建 … · 修改 … · n 字; a note from before 0.21.0 has no created, so only 修改. A note not saved yet: the count */
+function noteStatus(){
+  var e=S.editing, n=e && byId(e.id), c=NT.count(e ? e.body : "");
+  if(!n) return tr("notes.statusold",{u:"-", n:c});
+  var u=NT.when(e.dirty ? Date.now() : n.updated||0,"stamp",tr);
+  return n.created ? tr("notes.status",{c:NT.when(n.created,"stamp",tr), u:u, n:c}) : tr("notes.statusold",{u:u, n:c});
 }
 function optAct(){
   var r=optRows()[N.opick], e=S.editing; if(!r || !e) return;
@@ -492,8 +545,9 @@ function send(text){
   }
   window.LopdaTextSel.copy(text).then(function(ok){ toast(tr(ok?"notes.copied":"notes.copyfail")); sfx(ok?"ok":"err"); });
 }
-/* editor keys: B back to the list, START options; while the text has no focus ▲▼ walk 那年今日 and A opens one (A on the
-   text puts the cursor back in it). In the options: ▲▼ move, A confirm (on release), B back */
+/* editor keys: B back to the list, START options. Reading: ▲▼ scroll a page (from the top, ▲ goes onto a diary's 那年今日
+   rows), A writes with the caret at the end, or opens the 那年今日 row under the cursor. Writing: the other keys are the
+   text's. In the options: ▲▼ move, A confirm (on release), B back */
 function editorButton(b,down){
   if(N.opts){
     if(b==="a"){
@@ -511,19 +565,33 @@ function editorButton(b,down){
     else if(b==="b" || b==="start") toggleOpts(false);
     return;
   }
+  /* reading, A: on release, so the focus that brings up the keyboard runs inside the gesture */
+  if(b==="a"){
+    if(!N.reading) return;
+    if(down){ N.release="read"; return; }
+    if(N.release!=="read") return;
+    N.release=null;
+    if(N.ecur>=0){ var n=N.years[N.ecur]; flushNote(); openNote(n,false); }
+    else writeAt(S.editing ? S.editing.body.length : 0);
+    return;
+  }
   if(!down) return;
-  var typing=document.activeElement===$("note-body");
   if(b==="b") closeEditor();
   else if(b==="start") toggleOpts(true);
-  else if((b==="up" || b==="down") && !typing && N.years.length){
-    var j=N.ecur+(b==="up"?-1:1);
-    if(j<-1 || j>=N.years.length){ sfx("err"); return; }
-    N.ecur=j; sfx("move"); renderYears();
+  /* writing: every other key belongs to the text. Reading: ▲▼ a page of text; above its top, a diary's 那年今日 rows */
+  else if(N.reading && (b==="up" || b==="down")) readKey(b==="up"?-1:1);
+}
+function readKey(dir){
+  var rd=$("note-read");
+  if(N.ecur>=0 || (dir<0 && rd.scrollTop<=0 && N.years.length)){
+    var j=N.ecur<0 ? N.years.length-1 : N.ecur+dir;
+    if(j<0){ sfx("err"); return; }
+    N.ecur=j>=N.years.length ? -1 : j; sfx("move"); renderYears();
+    return;
   }
-  else if(b==="a" && !typing){
-    if(N.ecur>=0){ var n=N.years[N.ecur]; flushNote(); openNote(n); }
-    else $("note-body").focus();
-  }
+  var before=rd.scrollTop;
+  rd.scrollTop=before+dir*Math.max(24,rd.clientHeight-24);
+  sfx(rd.scrollTop===before ? "err" : "move");
 }
 
 /* ---------- other programs add to a note by its title (its first line), creating it when there is none: the reader's
@@ -554,7 +622,7 @@ function append(t,text,sep){
         n=Object.assign({},hit.o,{id:hit.id, body:String(hit.o.body||"").replace(/\s+$/,"")+(sep==null?"\n\n":sep)+text, updated:now});
         delete n.deleted;
       } else n={id:S.refs.notes.doc().id, body:t+"\n\n"+text, updated:now, created:now, src:srcOf(t)};
-      if(S.editing && S.editing.id===n.id){ S.editing.body=n.body; $("note-body").value=n.body; }
+      if(S.editing && S.editing.id===n.id){ S.editing.body=n.body; $("note-body").value=n.body; if(N.reading) $("note-read").textContent=n.body; }
       return save(n).then(function(ok){
         if(!ok) throw new Error(tr("notes.savefail"));
         return n.id;
@@ -696,7 +764,7 @@ LP.flushNote=flushNote;
 LP.notes={append:append};
 LP.onData("notes",function(){
   if(!$("v-notes").hidden){ render(); if(N.sheet) renderSheet(); remind(); }
-  if(!$("v-note").hidden && S.editing) renderYears();
+  if(!$("v-note").hidden && S.editing){ renderYears(); if(N.reading) renderWhen(); }
 });
 LP.padRoute("notes",function(b,down){
   if(!$("v-notes").hidden){ listButton(b,down); return true; }
@@ -707,7 +775,7 @@ LP.builtin({id:"notes", label:"app.notes", icon:"notes", view:"notes", keepPad:t
   open:openNotes,
   enter:function(){ LP.showPad(true); renderSheet(); render(true); LP.refresh("notes"); remind(); },
   leave:function(){ $("notes-q").blur(); N.sheet=""; N.release=null; renderSheet(); },
-  lang:function(){ if(!$("v-notes").hidden){ render(); renderSheet(); } if(!$("v-note").hidden){ renderYears(); renderOpts(); } },
+  lang:function(){ if(!$("v-notes").hidden){ render(); renderSheet(); } if(!$("v-note").hidden){ renderYears(); renderOpts(); renderWhen(); } },
   ready:function(){
     N.metaRef=S.db.doc("data/users/local/notes-meta");
     N.metaRef.get().then(function(sn){

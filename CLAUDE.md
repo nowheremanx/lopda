@@ -39,7 +39,7 @@ LICENSE NOTICE LICENSING.md CONTRIBUTING.md
 - Storage: IndexedDB through `platform.js`, a small document store (`doc(path)`, `collection(path)`;
   doc paths have an even number of segments, base `data/users/local`), and `files` (get/put/del of Blobs and typed arrays,
   its own database `lopda-files`) for large binary data.
-- Built-ins, one file each in runtime/apps/: notes (记事本 2.0: the list opens on 今天, today's diary with 那年今日; search, tags read
+- Built-ins, one file each in runtime/apps/: notes (记事本 2.0: the list opens on 今天, today's diary with 那年今日; other notes open to read (no keyboard) until a tap or A; search, tags read
   from `#words` with the 日记 and 摘抄 groups, pins, a trash kept 30 days, 发送到… and a zip of .md files out and in through notetext.js
   and zip.js; `LP.notes.append(title, text, sep)` for other programs, which records `src`; docs `notes/<id>` {body, updated, created?,
   pinned?, day?, src?, deleted?}; decisions.md section 20), calendar (万年历; lunar.js, holiday-cn, the one built-in that may reach

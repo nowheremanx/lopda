@@ -95,6 +95,21 @@ test("the diary title: the date, the weekday and the lunar day; a solar term whe
   assert.equal(NT.diaryTitle("1899-12-31", "zh", zh, L), "12月31日 周日");
 });
 
+test("when: the read view's line, the options' stamp, and list rows by today, this year, before; zh and en", () => {
+  const now = new Date(2026, 9, 16, 9, 0).getTime(), at = (...a) => new Date(...a).getTime();
+  const ts = at(2025, 9, 15, 21, 4);
+  assert.equal(NT.when(ts, "full", zh, now), "2025年10月15日 周三 21:04");
+  assert.equal(NT.when(ts, "full", en, now), "Wed 15 Oct 2025, 21:04");
+  assert.equal(NT.when(at(2026, 2, 5, 8, 0), "stamp", zh, now), "2026.03.05 08:00");
+  assert.equal(NT.when(at(2026, 2, 5, 8, 0), "stamp", en, now), "5 Mar 2026, 08:00");
+  const list = (lang) => [at(2026, 9, 16, 7, 5), at(2026, 2, 5, 8, 0), ts, at(2025, 2, 5)].map((x) => NT.when(x, "list", lang, now));
+  assert.deepEqual(list(zh), ["07:05", "3月5日", "2025.10.15", "2025.03.05"]);
+  assert.deepEqual(list(en), ["07:05", "5 Mar", "15 Oct 2025", "5 Mar 2025"]);
+  /* yesterday is a day, not a time */
+  assert.equal(NT.when(at(2026, 9, 15, 23, 59), "list", zh, now), "10月15日");
+  assert.equal(NT.count("一二 three\n\t四 "), 8);
+});
+
 test("dayKey is the local date", () => {
   assert.equal(NT.dayKey(new Date(2026, 9, 5, 23, 59).getTime()), "2026-10-05");
   assert.equal(NT.dayKey(new Date(2026, 0, 1, 0, 0).getTime()), "2026-01-01");

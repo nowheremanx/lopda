@@ -2926,9 +2926,10 @@ test("notes: a year later the diary page shows 那年今日, and A opens that ye
   assert.deepEqual(await n.rows(), ["*今天 · 写点什么", "新建", "10月15日 周三 · 八月廿四"]);
   await n.key("a");
   assert.deepEqual(await n.p.$$eval("#note-years li", (l) => l.map((x) => x.textContent)), ["那年今日", "2025 · 去 Brooklyn 看了展。"]);
-  /* the cursor goes onto the row once the text lets go of the keys */
+  /* the keyboard goes away: the page is read, and ▲ from the top of the text goes onto the row */
   await n.p.evaluate(() => document.activeElement.blur());
-  await n.key("down");
+  assert.ok(await n.p.isVisible("#note-read"));
+  await n.key("up");
   assert.deepEqual(await n.p.$$eval("#note-years li.on", (l) => l.map((x) => x.textContent)), ["2025 · 去 Brooklyn 看了展。"]);
   await n.key("a");
   assert.equal(await n.p.inputValue("#note-body"), "10月15日 周三 · 八月廿四\n去 Brooklyn 看了展。");
@@ -2938,6 +2939,103 @@ test("notes: a year later the diary page shows 那年今日, and A opens that ye
   await n.key("b", "a");
   await n.p.click("#note-years li:nth-child(2)");
   assert.equal(await n.p.inputValue("#note-body"), "10月15日 周三 · 八月廿四\n去 Brooklyn 看了展。");
+  assert.deepEqual(notBlocked(n.errors), []);
+});
+
+test("notes: a note from the list opens to read, with no keyboard; a tap on a word writes there; the keyboard going away reads again; A writes at the end", { skip, timeout: 60000 }, async (t) => {
+  const n = await notesPage(t);
+  const body = "读书笔记\n第一章讲的是公园里的银杏和秋天的风。\nThe quick brown fox jumps over the lazy dog.";
+  await n.p.evaluate(async (body) => {
+    await LP.S.refs.notes.doc().set({ body, created: new Date(2025, 9, 14, 9, 0).getTime(), updated: new Date(2025, 9, 15, 21, 4).getTime() });
+    await LP.S.refs.notes.doc().set({ body: "旧笔记\n0.21.0 以前写的", updated: new Date(2026, 2, 5, 8, 0).getTime() });
+    await LP.S.refs.notes.doc().set({ body: "很长\n" + Array.from({ length: 80 }, (_, i) => "第 " + i + " 行").join("\n"), updated: new Date(2024, 0, 1).getTime() });
+  }, body);
+  await n.open();
+  await n.p.click("#notes-list li:has-text('读书笔记') button");
+  await n.p.locator("#v-note:not([hidden])").waitFor();
+  const state = () => n.p.evaluate(() => ({ focus: document.activeElement.id, ro: document.getElementById("note-body").readOnly,
+    reading: !document.getElementById("note-read").hidden, writing: !document.getElementById("note-body").hidden,
+    time: document.getElementById("note-time").hidden ? null : document.getElementById("note-time").textContent,
+    at: document.getElementById("note-body").selectionStart }));
+  let s = await state();
+  assert.deepEqual([s.focus === "note-body", s.ro, s.reading, s.writing], [false, true, true, false]);
+  assert.equal(s.time, "2025年10月15日 周三 21:04");
+  assert.equal(await n.p.textContent("#note-read"), body);
+  /* a tap on "brown": the middle of one of the word's client rects, never of its bounding box (CLAUDE.md) */
+  const word = body.indexOf("brown");
+  const spot = await n.p.evaluate((word) => {
+    const r = document.createRange(), node = document.getElementById("note-read").firstChild;
+    r.setStart(node, word); r.setEnd(node, word + 5);
+    const b = r.getClientRects()[0];
+    return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+  }, word);
+  await n.p.mouse.click(spot.x, spot.y);
+  s = await state();
+  assert.deepEqual([s.focus, s.ro, s.reading, s.writing, s.time], ["note-body", false, false, true, null]);
+  assert.ok(s.at >= word && s.at <= word + 5, "caret " + s.at + " in brown at " + word);
+  assert.ok(await n.p.isVisible("#note-state"));
+  await n.p.keyboard.type("X");
+  await n.saved();
+  assert.match(await n.p.inputValue("#note-body"), /The quick (X?brown|bX?rown|brX?own|broX?wn|browX?n|brownX?) fox/);
+  /* the keyboard goes away: reading again, the line under the bar says when, with the year */
+  await n.p.evaluate(() => document.activeElement.blur());
+  s = await state();
+  assert.deepEqual([s.focus === "note-body", s.ro, s.reading, s.writing], [false, true, true, false]);
+  assert.equal(s.time, "2026年10月15日 周四 09:41");
+  /* A: writing with the caret at the end */
+  await n.key("a");
+  s = await state();
+  const now = await n.p.inputValue("#note-body");
+  assert.deepEqual([s.focus, s.writing, s.at], ["note-body", true, now.length]);
+  /* START: options, with created, modified and the count of characters */
+  await n.key("start");
+  assert.ok(await n.p.isVisible("#note-read"));
+  const count = Array.from(now.replace(/\s+/g, "")).length;
+  assert.equal(await n.p.textContent("#note-sheet .notes-status"), "创建 2025.10.14 09:00 · 修改 2026.10.15 09:41 · " + count + " 字");
+  await n.key("b", "b");
+  /* a note from before 0.21.0 has no created: only 修改 */
+  await n.p.click("#notes-list li:has-text('旧笔记') button");
+  assert.equal(await n.p.textContent("#note-time"), "2026年3月5日 周四 08:00");
+  await n.key("start");
+  assert.equal(await n.p.textContent("#note-sheet .notes-status"), "修改 2026.03.05 08:00 · 13 字");
+  await n.key("b", "b");
+  /* ▲▼ scroll a page while reading */
+  await n.p.click("#notes-list li:has-text('很长') button");
+  const top = () => n.p.evaluate(() => document.getElementById("note-read").scrollTop);
+  assert.equal(await top(), 0);
+  await n.key("down");
+  const page1 = await top();
+  assert.ok(page1 > 150, "scrolled " + page1);
+  await n.key("down");
+  assert.ok(await top() > page1);
+  await n.key("up", "up");
+  assert.equal(await top(), 0);
+  assert.equal(await n.p.evaluate(() => document.activeElement.id), "");
+  await n.key("b");
+  /* 今天 and 新建 still open to write */
+  await n.p.click("#notes-top li:nth-child(1) button");
+  assert.equal(await n.p.evaluate(() => document.activeElement.id), "note-body");
+  await n.key("b");
+  await n.p.click("#notes-top li:nth-child(2) button");
+  assert.equal(await n.p.evaluate(() => document.activeElement.id), "note-body");
+  assert.equal(await n.p.inputValue("#note-body"), "");
+  await n.key("b");
+  assert.deepEqual(notBlocked(n.errors), []);
+});
+
+test("notes: list rows date a note by the time today, the day this year, the full date before", { skip, timeout: 60000 }, async (t) => {
+  const n = await notesPage(t);
+  await n.p.evaluate(async () => {
+    await LP.S.refs.notes.doc().set({ body: "今早\n一", updated: new Date(2026, 9, 15, 8, 5).getTime() });
+    await LP.S.refs.notes.doc().set({ body: "春天\n二", updated: new Date(2026, 2, 5, 21, 4).getTime() });
+    await LP.S.refs.notes.doc().set({ body: "去年\n三", updated: new Date(2025, 9, 15, 21, 4).getTime() });
+  });
+  await n.open();
+  assert.deepEqual(await n.p.$$eval("#notes-list li .d", (l) => l.map((x) => x.textContent)), ["08:05 · 一", "3月5日 · 二", "2025.10.15 · 三"]);
+  /* in English */
+  await n.p.evaluate(() => LP.setLang("en"));
+  await n.p.waitForTimeout(150);
+  assert.deepEqual(await n.p.$$eval("#notes-list li .d", (l) => l.map((x) => x.textContent)), ["08:05 · 一", "5 Mar · 二", "15 Oct 2025 · 三"]);
   assert.deepEqual(notBlocked(n.errors), []);
 });
 
@@ -3277,5 +3375,11 @@ test("notes: every screen fits 331 x 359 with no sideways scroll and 44 px targe
   await n.key("b", "b");
   await n.key("a"); await n.p.keyboard.type("x"); await n.saved(); await check("editor");
   await n.key("start"); await check("editor options");
+  await n.key("b"); await check("editor, reading");
+  await n.key("b");
+  await n.p.click("#notes-list li:has-text('一个非常') button");
+  assert.ok(await n.p.isVisible("#note-read"));
+  await check("reading a note with a long title");
+  await n.key("start"); await check("its options, with the status line");
   assert.deepEqual(notBlocked(n.errors), []);
 });

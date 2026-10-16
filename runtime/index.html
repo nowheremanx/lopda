@@ -93,10 +93,13 @@
       <div class="editor">
         <div class="bar">
           <button class="btn ghost" id="note-back" type="button" data-i18n="notes.back">◂ 列表</button>
-          <h2 id="note-state">已保存</h2>
           <button class="btn ghost" id="note-opts" type="button" data-i18n="notes.options">选项</button>
         </div>
+        <!-- reading: when the note was last changed; writing: the save state -->
+        <div class="note-when"><span id="note-time"></span><span id="note-state">已保存</span></div>
         <ul class="lcd-menu note-years" id="note-years" hidden></ul>
+        <!-- reading: the text, not editable, never focused (no keyboard); a tap or A writes -->
+        <div class="note-read" id="note-read" hidden></div>
         <textarea id="note-body" data-i18n-ph="notes.placeholder" placeholder="写点什么。自动保存。"></textarea>
       </div>
       <div class="dict-sheet notes-sheet" id="note-sheet" hidden></div>
