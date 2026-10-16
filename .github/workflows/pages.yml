@@ -3,7 +3,7 @@
 #   pull request  -> pr/<n>/:    preview of the dev harness (and of runtime/ when it changed; platform.js gives it
 #                    its own IndexedDB), removed when the PR closes.
 #                    Only when the PR changes something a preview can show (see "Decide what to preview").
-# Only git, rsync and the gh CLI are used; no third-party actions.
+# Only git, rsync, the gh CLI and the runner's own node (tools/stamp-preview.mjs) are used; no third-party actions.
 name: pages
 on:
   push:
@@ -84,7 +84,10 @@ jobs:
           fi
 
       - name: Publish this commit
+        id: publish
         if: steps.plan.outputs.deploy == 'true' && (github.event_name == 'push' || github.event.action != 'closed')
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           if [ "${{ github.event_name }}" = "push" ]; then
             DEST=../site
@@ -94,6 +97,11 @@ jobs:
             DEST=../site/pr/$PR
             mkdir -p "$DEST"
             EXTRA=""
+            # A preview's service worker serves its cache until VERSION changes, and pushes inside a PR rarely bump it,
+            # so stamp both version lines with the head commit (<x>+<sha7>) in the checkout only, never committed.
+            # The tool fails the step if either line is missing: an unstamped preview would leave phones on old code.
+            VERSION=$(node tools/stamp-preview.mjs . "$HEAD_SHA")
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           fi
           # Not part of the site: git data, dependencies, tests, scratch and CI files.
           # Generated indexes and version-only edits can keep the same size; compare contents, not checkout mtimes.
@@ -126,6 +134,7 @@ jobs:
         env:
           APPS: ${{ steps.plan.outputs.apps }}
           RUNTIME: ${{ steps.plan.outputs.runtime }}
+          VERSION: ${{ steps.publish.outputs.version }}
         run: |
           {
             echo '<!-- lopda-preview -->'
@@ -143,6 +152,9 @@ jobs:
             for id in $APPS; do
               echo "- $id (dev harness, desktop / 开发台，电脑上用): $SITE/pr/$PR/sdk/dev.html?app=registry/apps/$id"
             done
+            # Settings -> 检查更新 on the phone shows the version it runs; it should match this one.
+            echo
+            echo "Version / 版本: $VERSION"
             echo
             echo "The preview shares its origin with the real site. Its runtime/ keeps its data in its own IndexedDB (lopda-pr-$PR), separate from the real handheld at the site root. The dev harness keeps PAD saves in localStorage under lopda-dev:<app id>; that is shared by all previews on this origin but not used by the real handheld."
             echo
