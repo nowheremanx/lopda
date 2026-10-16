@@ -100,6 +100,21 @@ function diaryTitle(day,lang,t,lunar,plain){
   return s;
 }
 
+/* ---------- when a note was written: kind "full" (the read view's line: "2025年10月15日 周三 21:04"), "list" (a list row:
+   "21:04" today, "10月15日" this year, "2025.10.15" before), "stamp" (the options' status line: "2025.10.15 21:04").
+   Numbered months and days come from the lists notes.mm and notes.dd, so zh writes 01 and en writes Jan and 1 */
+function when(ts,kind,t,now){
+  var d=new Date(ts), n=new Date(now==null?Date.now():now), list=function(k){ return t(k).split("|"); };
+  var v={y:d.getFullYear(), m:d.getMonth()+1, d:d.getDate(), mon:list("notes.months")[d.getMonth()], w:list("notes.week")[d.getDay()],
+    mm:list("notes.mm")[d.getMonth()], dd:list("notes.dd")[d.getDate()-1], hh:pad2(d.getHours()), mi:pad2(d.getMinutes())};
+  if(kind==="full") return t("notes.whenfull",v);
+  if(kind==="stamp") return t("notes.whenstamp",v);
+  if(dayKey(ts)===dayKey(n.getTime())) return t("notes.whentime",v);
+  return t(v.y===n.getFullYear() ? "notes.whenday" : "notes.whenyear",v);
+}
+/* the 字 of the status line: characters that are not white space */
+function count(body){ return Array.from(String(body||"").replace(/\s+/g,"")).length; }
+
 /* ---------- front matter: a YAML block at the top of each exported file, the body after it untouched ---------- */
 function iso(ts){
   var d=new Date(ts), off=-d.getTimezoneOffset(), a=Math.abs(off);
@@ -159,6 +174,6 @@ function fileName(t,blank,used,dir,ext){
 function stem(path){ var b=String(path||"").split("/").pop(); var i=b.lastIndexOf("."); return i>0 ? b.slice(0,i) : b; }
 
 window.LopdaNoteText={title:title, quote:quote, tags:tags, key:key, fold:fold, search:search, AROUND:AROUND,
-  dayKey:dayKey, parseDay:parseDay, diaryTitle:diaryTitle, iso:iso, frontMatter:frontMatter, parseFront:parseFront,
+  dayKey:dayKey, parseDay:parseDay, when:when, count:count, diaryTitle:diaryTitle, iso:iso, frontMatter:frontMatter, parseFront:parseFront,
   cleanName:cleanName, fileName:fileName, stem:stem, TAG_MAX:TAG_MAX, MAX_NAME:MAX_NAME};
 })();
