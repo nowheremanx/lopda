@@ -16,7 +16,7 @@ var LP=window.LP, $=LP.$, S=LP.S, tr=LP.tr, SD=window.LopdaStarDict, P=window.Lo
 var own=LP.own, toast=LP.toast, put=LP.put, sfx=LP.sfx, show=LP.show, showPad=LP.showPad, uid=LP.uid;
 
 var BUILTIN="ecdict", VENDOR="vendor/ecdict/ecdict";
-var MAX_HISTORY=50, MAX_WORDS=2000, MAX_CAND=40, MAX_LEVELS=10;
+var MAX_HISTORY=50, MAX_WORDS=2000, MAX_CAND=40, MAX_LEVELS=10, LINE=24;   // LINE: an entry's line height (lopda.css .dict-page)
 
 var D={
   set:{order:[BUILTIN], disabled:[], history:[], words:[]},   // data/users/local/dict: book order, disabled ids, history, word book [{w, t}]
@@ -254,13 +254,30 @@ function entrySheet(sh){
     }
   });
   sh.appendChild(page);
-  /* only once it is in the page: a detached element keeps no scroll position */
-  page.scrollTop=e.scrollTop||0;
+  D.menuBox=el("div","sel-menu"); D.menuBox.hidden=true; sh.appendChild(D.menuBox);
   D.keys=el("div");
   entryKeys();
   sh.appendChild(D.keys);
+  fitEntry();
+  /* only once it is in the page and sized: a detached element keeps no scroll position */
+  page.scrollTop=e.scrollTop||0;
   updateEntryPosition(e,page,count);
 }
+/* the entry shows whole lines only, as an LCD would: the page's height is a multiple of LINE, and what is left of the
+   space it gets stays blank below it. Measured again on resize and when the chin pad comes or goes */
+function fitEntry(){
+  var page=$("dict-page"); if(!page || D.sheet!=="entry") return;
+  page.style.flex=""; page.style.height=""; page.style.marginBottom="";
+  var avail=page.getBoundingClientRect().height, h=Math.floor(avail/LINE)*LINE;
+  page.style.flex="none"; page.style.height=h+"px"; page.style.marginBottom=Math.max(0,avail-h)+"px";
+}
+function refitEntry(){
+  var page=$("dict-page"); if(!page || D.sheet!=="entry") return;
+  var top=page.scrollTop; fitEntry(); page.scrollTop=top;
+  var count=document.querySelector("#dict-sheet .sheet-title small");
+  if(count && D.entry) updateEntryPosition(D.entry,page,count);
+}
+window.addEventListener("resize",function(){ clearTimeout(D.fitTimer); D.fitTimer=setTimeout(refitEntry,100); });
 function entryKeys(){
   var e=D.entry, word=headOf(e), keyset;
   if(SEL.s){
@@ -289,7 +306,8 @@ function entryKeys(){
 }
 
 /* ---------- selection on an entry (runtime/textsel.js, as in the reader): the whole entry is one scrolling block, so
-   the selection may run past what is on screen; the cursor reaching the edge scrolls a line. Not while reviewing ---------- */
+   the selection may run past what is on screen; the cursor reaching the edge scrolls a line, and so does a drag held
+   at the top or bottom edge. Not while reviewing ---------- */
 var SEL=TS.create({
   root:function(){ return $("dict-page"); },
   el:function(i){ return D.lines[i].e; },
@@ -299,7 +317,11 @@ var SEL=TS.create({
   edge:function(){ sfx("err"); },
   moved:function(t){ reveal(t); },
   changed:function(){ if(D.sheet==="entry") entryKeys(); },
-  lookup:function(){ nested(SEL.word()); }
+  lookup:function(){ nested(SEL.word()); },
+  menuBox:function(){ return D.sheet==="entry" ? D.menuBox : null; },
+  quote:function(){ quoteSel(); },
+  done:function(){ endSel(); },
+  scroll:function(back){ var p=$("dict-page"), top=p.scrollTop; p.scrollTop=top+(back?-LINE:LINE); return p.scrollTop!==top; }
 });
 function canSelect(){ return D.sheet==="entry" && !D.review && !!D.entry && !!D.entry.results && D.entry.results.length>0; }
 /* SELECT: the cursor on the first word on screen */
@@ -312,7 +334,7 @@ function enterSel(){
 }
 function endSel(){ SEL.end(); if(D.sheet==="entry") entryKeys(); }
 function reveal(t){
-  var p=$("dict-page"), top=p.scrollTop, h=p.clientHeight, LINE=24;
+  var p=$("dict-page"), top=p.scrollTop, h=p.clientHeight;
   if(t.y<top) p.scrollTop=Math.max(0,top-LINE*Math.ceil((top-t.y)/LINE));
   else if(t.y+t.h>top+h) p.scrollTop=top+LINE*Math.ceil((t.y+t.h-top-h)/LINE);
 }
@@ -329,19 +351,20 @@ function backEntry(){
   if(!D.stack.length){ closeSheet(); return; }
   D.entry=D.stack.pop(); D.sheet="entry"; renderSheet(); sfx("tap");
 }
-/* START on a selection: quote it into the note 《词典》 under the entry's word, and copy it */
+/* 摘抄 (START's menu) on a selection: quote it into the note 《词典》 under the entry's word; the clipboard is 复制's job */
 function quoteSel(){
   var text=SEL.text().trim(); if(!text) return;
-  var copied=TS.copy(text), name=tr("dict.notename");
+  var name=tr("dict.notename");
   if(!LP.notes){ toast(tr("sel.quotefail",{msg:"notes"})); return; }
   LP.notes.append(name,name+" "+headOf(D.entry)+"\n「"+text+"」").then(function(){
     endSel();
-    copied.then(function(ok){ toast(tr(ok?"sel.quotedcopy":"sel.quoted")); sfx("ok"); });
+    toast(tr("sel.quoted")); sfx("ok");
   },function(e){ toast(tr("sel.quotefail",{msg:String((e&&e.message)||e).slice(0,100)})); sfx("err"); });
 }
 function entryPageInfo(page){
   var step=Math.max(1,Math.floor(page.clientHeight/24)-1)*24;
-  var maxTop=Math.max(0,Math.floor((page.scrollHeight-page.clientHeight)/24)*24);
+  /* the true end, which need not be a whole line down: the last step goes exactly there */
+  var maxTop=Math.max(0,page.scrollHeight-page.clientHeight);
   var pages=Math.max(1,Math.ceil(maxTop/step)+1);
   var current=maxTop && page.scrollTop>=maxTop-1 ? pages : Math.min(pages,Math.floor(page.scrollTop/step)+1);
   return {step:step, maxTop:maxTop, current:current, pages:pages};
@@ -577,13 +600,11 @@ $("dict-file").addEventListener("change",function(){
 /* ---------- chin pad ----------
    main: ▲▼ pick, A look up, B clear, SELECT word book, START books
    entry: ◀▶ nearby matches, ▲▼ scroll, B (or A) back a level, START word book, SELECT select text (as in the reader:
-     ◀▶▲▼ move, A held extends, A let go opens that word, START let go quotes and copies, SELECT word / sentence / line, B ends); review: A show / next, ◀▶ words, ▲▼ scroll, START word book, B back
+     ◀▶▲▼ move, A held extends, A let go opens that word, START a menu of 摘抄 and 复制, SELECT word / sentence / line, B ends); review: A show / next, ◀▶ words, ▲▼ scroll, START word book, B back
    word book: ▲▼ pick, A review, START options, B back; books: ▲▼ pick, A this book, START import, B back */
 function dictButton(b,down){
   if(D.sheet==="entry" && SEL.s){
     if(SEL.key(b,down)) return;
-    /* on the release: the copy needs the key's user gesture */
-    if(b==="start"){ if(!down) quoteSel(); return; }
     if(down && b==="b"){ endSel(); sfx("tap"); }
     return;
   }
@@ -667,6 +688,7 @@ LP.builtin({id:"dict", label:"app.dict", icon:function(){ return ICON; }, view:"
   open:function(){ openDict(); },
   leave:function(){ D.sheet=""; D.entry=null; D.review=null; D.stack=[]; D.armed=null; D.q=""; var i=$("dict-q"); if(i){ i.value=""; i.blur(); } renderSheet(); },
   lang:function(){ if(!$("v-dict").hidden){ note(); renderMainKeys(); renderSheet(); update(); } },
+  padLayout:function(){ if(!$("v-dict").hidden) setTimeout(refitEntry,0); },
   ready:function(){
     var base=S.db.doc("data/users/local/dict");
     D.refs={set:base, books:base.collection("books")};
