@@ -517,6 +517,27 @@ test("calendar: START goes to a date, Gregorian or lunar, by keys, keyboard digi
   assert.deepEqual(notBlocked(c.errors), []);
 });
 
+test("calendar: at 331x359 every lunar line in the month fits inside its cell, nothing cut", { skip, timeout: 30000 }, async (t) => {
+  const c = await calPage(t);
+  const { p } = c;
+  await c.boot(); await c.open();
+  await p.setViewportSize({ width: 375, height: 844 });
+  await p.evaluate(() => {
+    const screen = document.getElementById("screen"), status = screen.querySelector(".status");
+    screen.style.flex = "none";
+    screen.style.height = (359 + 12 + status.getBoundingClientRect().height) + "px";
+  });
+  assert.deepEqual(await p.locator("#v-cal").evaluate((view) => { const r = view.getBoundingClientRect(); return [r.width, r.height]; }), [331, 359]);
+  const cut = await p.locator("#cal-grid .cal-cell:not(.out)").evaluateAll((cells) => cells.flatMap((cell) => {
+    const text = cell.querySelector("span"), box = cell.getBoundingClientRect();
+    const inner = box.bottom - parseFloat(getComputedStyle(cell).borderBottomWidth), bottom = text.getBoundingClientRect().bottom;
+    return text.scrollHeight <= text.clientHeight && bottom <= inner + 0.1 ? []
+      : [{ day: cell.querySelector("b").textContent, text: text.textContent, scroll: text.scrollHeight, client: text.clientHeight, bottom, inner }];
+  }));
+  assert.equal(await p.locator("#cal-grid .cal-cell:not(.out)").count(), 31);
+  assert.deepEqual(cut, [], "every in-month lunar line fits");
+});
+
 test("calendar: month grid lunar lines fit at small screen sizes", { skip, timeout: 30000 }, async (t) => {
   const c = await calPage(t);
   const { p } = c;
