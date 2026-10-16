@@ -4,6 +4,8 @@
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  *
  * Lunar dates and solar terms come from runtime/lunar.js (a table, 1900-2100).
+ * Diaries come from the notes, read only, through LP.notes.diaryDays, diariesOn and openDiary (decisions.md section 21):
+ * the calendar never reads a note itself. Writing, and starting a diary for an earlier day, happen in 记事本.
  * Days off: holiday-cn (MIT, runtime/vendor/holiday-cn/). The years shipped with the runtime are in BUNDLED.
  * When this year's or next year's file is missing, opening the calendar asks jsDelivr for it, at most once
  * every 7 days. That is the only request a built-in makes to another site (docs/decisions.md section 14):
@@ -177,7 +179,8 @@ function cellText(y,m,d,lu){
   if(lu.day===1) return {t:tr(lu.leap?"cal.cellleap":"cal.cellmonth",{month:lunarMonth(lu)})};
   return {t:tr("cal.cellday",{day:list("cal.lday")[lu.day-1]})};
 }
-function render(){
+/* grid: the month only, leaving an open sheet as it is (the notes changed under an add form) */
+function render(grid){
   if(!C.cells.length) buildGrid();
   C.todayN=todayN();
   var lu=L.fromSolar(C.y,C.m,C.d);
@@ -185,21 +188,24 @@ function render(){
   $("cal-ly").textContent=lu ? yearText(lu.year,"cal.yearhead") : "";
   var wk=$("cal-week"); wk.textContent="";
   list("cal.week").forEach(function(w){ var s=document.createElement("span"); s.textContent=w; wk.appendChild(s); });
-  var first=L.dayNumber(C.y,C.m,1)-L.weekday(C.y,C.m,1), sel=selN(), marks=datesBetween(first,first+41);
+  var first=L.dayNumber(C.y,C.m,1)-L.weekday(C.y,C.m,1), sel=selN(), marks=datesBetween(first,first+41), diaries={};
+  /* the grid shows parts of up to three months: ask the notes once per month */
+  var diaryOn=function(y,m,d){ var k=y*100+m; if(!(k in diaries)) diaries[k]=LP.notes ? LP.notes.diaryDays(y,m) : {}; return !!diaries[k][d]; };
   C.cells.forEach(function(b,i){
     var n=first+i, t=L.fromDayNumber(n), inRange=n>=FIRST && n<=LAST, l=inRange ? L.fromSolar(t.y,t.m,t.d) : null;
     var c=inRange ? cellText(t.y,t.m,t.d,l) : {t:""}, h=C.hol[iso(t.y,t.m,t.d)];
-    b.className="cal-cell"+(t.m!==C.m?" out":"")+(n===C.todayN?" today":"")+(n===sel?" sel":"");
+    var dy=inRange && diaryOn(t.y,t.m,t.d);
+    b.className="cal-cell"+(t.m!==C.m?" out":"")+(n===C.todayN?" today":"")+(n===sel?" sel":"")+(dy?" dy":"");
     b.disabled=!inRange;
     b.firstChild.textContent=inRange ? t.d : "";
     b.childNodes[1].textContent=c.t; b.childNodes[1].className=c.hi?"hi":"";
     while(b.childNodes.length>2) b.removeChild(b.lastChild);
     if(h){ var i2=document.createElement("i"); i2.className=h.off?"off":"work"; i2.textContent=tr(h.off?"cal.badge.off":"cal.badge.work"); b.appendChild(i2); }
     if(marks[n]){ b.appendChild(document.createElement("u")); }
-    b.setAttribute("aria-label",inRange ? dateText(t.y,t.m,t.d)+(l?" "+lunarText(l):"") : "");
+    b.setAttribute("aria-label",inRange ? dateText(t.y,t.m,t.d)+(l?" "+lunarText(l):"")+(dy?" · "+tr("cal.diary"):"") : "");
   });
   $("cal-info").textContent=infoLine();
-  renderSheet();
+  if(!grid) renderSheet();
 }
 function infoLine(){
   var lu=L.fromSolar(C.y,C.m,C.d), parts=[tr("cal.short",{m:C.m, d:C.d, mon:list("cal.months")[C.m-1], w:weekdayName(C.y,C.m,C.d)})];
@@ -270,10 +276,39 @@ function daySheet(sh){
     });
     row.appendChild(del); body.appendChild(row);
   });
+  diaryBlock(body);
   sh.appendChild(body);
   var keys=el("div");
-  LP.softkeys(keys,{select:null,start:null,b:softkey("b","sk.back"),a:softkey("a","sk.add")});
+  LP.softkeys(keys,{select:null,start:canWrite()?softkey("start","sk.diary"):null,b:softkey("b","sk.back"),a:softkey("a","sk.add")});
   sh.appendChild(keys);
+}
+/* 日记, read only: this day's diary (or a row that starts one, today or earlier), then the same month and day in earlier
+   years, newest first. A tap opens the diary in 记事本; its B comes back here, to this day with this sheet open. No cursor:
+   a diary that is open shows its own 那年今日 */
+function canWrite(){ return !!LP.notes && selN()<=todayN(); }
+function diaryBlock(body){
+  if(!LP.notes) return;
+  var day=iso(C.y,C.m,C.d), past=canWrite(), mine=null, earlier=[];
+  LP.notes.diariesOn(C.m,C.d).forEach(function(x){ if(x.day===day) mine=x; else if(x.year<C.y) earlier.push(x); });
+  if(!past && !earlier.length) return;
+  var ul=el("ul","lcd-menu cal-diary");
+  ul.appendChild(el("li","label",tr("cal.diary")));
+  var row=function(text,d){
+    var li=el("li"); li.appendChild(el("span","",text));
+    li.onclick=function(){ openDiary(d); };
+    ul.appendChild(li);
+  };
+  if(past) row(mine ? mine.snippet || mine.title : tr("cal.diarywrite"),day);
+  earlier.forEach(function(x){ row(tr("cal.diaryyear",{y:x.year, text:x.snippet || x.title}),x.day); });
+  body.appendChild(ul);
+}
+function openDiary(day){
+  var y=C.y, m=C.m, d=C.d;
+  var ok=LP.notes && LP.notes.openDiary(day,function(){
+    C.y=y; C.m=m; C.d=d; C.sheet="day"; C.form=null;
+    show("cal"); showPad(true); render();
+  });
+  sfx(ok?"tap":"err");
 }
 function upcoming(){
   var n=todayN();
@@ -444,7 +479,8 @@ document.addEventListener("keydown",function(e){
   else if(e.key==="Backspace"){ e.preventDefault(); C.jump.cur=Math.max(0,C.jump.cur-1); renderSheet(); }
 });
 
-/* ---------- chin pad: arrows move the day, A opens it, START goes to a date, SELECT the list, B goes back (to today in the month view) ---------- */
+/* ---------- chin pad: arrows move the day, A opens it, START goes to a date, SELECT the list, B goes back (to today in the month view).
+   On the day sheet START is 日记: it opens or starts the diary of that day, today or earlier ---------- */
 function calButton(b){
   if(C.sheet==="jump"){
     var J=C.jump;
@@ -466,6 +502,7 @@ function calButton(b){
   if(C.sheet==="day"){
     if(b==="b") closeSheet();
     else if(b==="a") openAdd();
+    else if(b==="start"){ if(canWrite()) openDiary(iso(C.y,C.m,C.d)); }
     else if(b==="left"||b==="right"){ select(selN()+(b==="left"?-1:1)); sfx("move"); render(); }
     return;
   }
@@ -477,7 +514,21 @@ function calButton(b){
   /* the month view is the outermost screen: "back" is back to today; on today it does nothing (HOME leaves) */
   else if(b==="b" && selN()!==todayN()){ goToday(); sfx("tap"); }
 }
-LP.padRoute("cal",function(b,down){ if($("v-cal").hidden) return false; if(down) calButton(b); return true; });
+/* the notes finished loading or changed: redraw the marks */
+LP.onData("notes",function(){ if(!$("v-cal").hidden) render(C.sheet==="add" || C.sheet==="jump"); });
+/* START on the day sheet acts on its release: a diary that opens to be written takes the keyboard, and on a phone only a
+   focus() inside a gesture brings it up (a press is not one) */
+var startHeld=false;
+LP.padRoute("cal",function(b,down){
+  if($("v-cal").hidden) return false;
+  if(b==="start" && C.sheet==="day"){
+    if(down) startHeld=true;
+    else if(startHeld){ startHeld=false; calButton(b); }
+    return true;
+  }
+  if(down){ startHeld=false; calButton(b); }
+  return true;
+});
 
 /* ---------- home icon: a desk calendar page with today's date ---------- */
 var DIGITS=["0110100110011001100110010110","0010011000100010001000100111","0110100100010010010010001111","0110100100010110000110010110",
@@ -518,7 +569,7 @@ function openCal(){
 LP.builtin({id:"calendar", label:"app.calendar", icon:dateIcon, view:"cal", keepPad:true,
   open:function(){ openCal(); },
   tag:tag,
-  leave:function(){ C.sheet=""; C.form=null; renderSheet(); },
+  leave:function(){ C.sheet=""; C.form=null; startHeld=false; renderSheet(); },
   lang:function(){ if(!$("v-cal").hidden) render(); },
   ready:function(){
     var base=S.db.doc("data/users/local/calendar");

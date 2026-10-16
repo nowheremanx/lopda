@@ -36,6 +36,7 @@
       "sk.addword": "生词+", "sk.skip": "略过", "sk.done": "完成",
       "sk.use": "使用", "sk.unmark": "去线",
       "sk.search": "搜索", "sk.filter": "筛选", "sk.thisnote": "这一篇…",
+      "sk.diary": "日记",
 
       "store.title": "应用商店", "store.refresh": "刷新",
       "store.note": "每个程序都经过社区审核，在隔离的沙盒里运行，不能联网，也碰不到你的其他数据。装好的版本不会自己变，有新版本时这里会提示更新。",
@@ -194,6 +195,7 @@
       "cal.jump.title": "跳到日期", "cal.jump.go": "跳转", "cal.jump.sep": "年|月|日", "cal.jump.digit": "第 {n} 位",
       "cal.jump.range": "只能查 1900 到 2100 年", "cal.jump.month": "月份要在 1 到 12 之间", "cal.jump.day": "日期不对",
       "cal.tag": "{n}天后 {name}", "cal.tagtoday": "今天 {name}", "cal.hint": "{n}天后：{name}", "cal.hinttoday": "今天：{name}",
+      "cal.diary": "日记", "cal.diarywrite": "写这天的日记", "cal.diaryyear": "{y} · {text}",
 
 
       "save.declined": "这次没保存。", "save.busy": "上一个保存窗口还没关。",
@@ -298,6 +300,7 @@
       "sk.addword": "Add", "sk.skip": "Skip", "sk.done": "Done",
       "sk.use": "Use", "sk.unmark": "Unmark",
       "sk.search": "Search", "sk.filter": "Filter", "sk.thisnote": "Note…",
+      "sk.diary": "Diary",
 
       "store.title": "Store", "store.refresh": "Reload",
       "store.note": "Every program is reviewed by the community and runs sealed off: no network, no reach into your other data. Installed versions never change by themselves; updates show up here.",
@@ -457,6 +460,7 @@
       "cal.jump.title": "Go to date", "cal.jump.go": "Go", "cal.jump.sep": "-|-| ", "cal.jump.digit": "Digit {n}",
       "cal.jump.range": "1900 to 2100 only", "cal.jump.month": "Month must be 1 to 12", "cal.jump.day": "No such day",
       "cal.tag": "{n}d {name}", "cal.tagtoday": "Today {name}", "cal.hint": "{name} in {n} days", "cal.hinttoday": "Today: {name}",
+      "cal.diary": "Diary", "cal.diarywrite": "Write this day's diary", "cal.diaryyear": "{y} · {text}",
 
 
       "save.declined": "Not saved.", "save.busy": "The last save sheet is still open.",

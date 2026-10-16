@@ -1,6 +1,7 @@
 /*
  * Lo-PDA runtime: the text side of notes (docs/design/notes.md). Pure functions, no DOM, so Node tests run them:
- * tags in a body, search with a snippet, the diary title of a day, front matter for export and import, export file names.
+ * tags in a body, search with a snippet, the diary title of a day, the diaries by day for the calendar, front matter for export
+ * and import, export file names.
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  */
 (function(){
@@ -100,6 +101,31 @@ function diaryTitle(day,lang,t,lunar,plain){
   return s;
 }
 
+/* ---------- diaries by day, for the calendar (decisions.md section 21). One pass over the notes; notes.js keeps the result
+   until the notes change and never stores it. days: "2026-10-01" -> the diary of that day (two on one day: the one changed
+   last, as 今天 picks); months: "2026-10" -> {1:true, ...}; md: "10-01" -> that month and day's diaries in every year,
+   the newest year first. Notes in the trash and notes without a valid day are left out */
+function diaryIndex(notes){
+  var days={}, months={}, md={};
+  (notes||[]).forEach(function(n){
+    if(!n || n.deleted || !parseDay(n.day)) return;
+    var hit=days[n.day];
+    if(!hit || (n.updated||0)>(hit.updated||0)) days[n.day]=n;
+  });
+  Object.keys(days).sort().reverse().forEach(function(k){
+    var ym=k.slice(0,7), m=k.slice(5);
+    (months[ym]=months[ym]||{})[parseDay(k).d]=true;
+    (md[m]=md[m]||[]).push(days[k]);
+  });
+  return {days:days, months:months, md:md};
+}
+/* the start of the text after the title line, on one line: what a list row shows under a diary */
+var SNIPPET=60;
+function snippet(body,max){
+  var s=String(body||"").split("\n").slice(1).join(" ").replace(/\s+/g," ").trim();
+  return Array.from(s).slice(0,max||SNIPPET).join("");
+}
+
 /* ---------- when a note was written: kind "full" (the read view's line: "2025年10月15日 周三 21:04"), "list" (a list row:
    "21:04" today, "10月15日" this year, "2025.10.15" before), "stamp" (the options' status line: "2025.10.15 21:04").
    Numbered months and days come from the lists notes.mm and notes.dd, so zh writes 01 and en writes Jan and 1 */
@@ -174,6 +200,6 @@ function fileName(t,blank,used,dir,ext){
 function stem(path){ var b=String(path||"").split("/").pop(); var i=b.lastIndexOf("."); return i>0 ? b.slice(0,i) : b; }
 
 window.LopdaNoteText={title:title, quote:quote, tags:tags, key:key, fold:fold, search:search, AROUND:AROUND,
-  dayKey:dayKey, parseDay:parseDay, when:when, count:count, diaryTitle:diaryTitle, iso:iso, frontMatter:frontMatter, parseFront:parseFront,
+  dayKey:dayKey, parseDay:parseDay, diaryIndex:diaryIndex, snippet:snippet, SNIPPET:SNIPPET, when:when, count:count, diaryTitle:diaryTitle, iso:iso, frontMatter:frontMatter, parseFront:parseFront,
   cleanName:cleanName, fileName:fileName, stem:stem, TAG_MAX:TAG_MAX, MAX_NAME:MAX_NAME};
 })();

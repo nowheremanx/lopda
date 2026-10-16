@@ -13,7 +13,7 @@ runtime/        the PWA: index.html, core.js (shared LP object: utils, views, so
                 chip.js (sound chip: MML music, custom sound effects, ambience presets; shared with sdk/dev.html),
                 lenses.js (which physical camera lenses a phone has, pure functions), textsel.js (the text selection shared by the reader and the dictionary entry page), negative.js (the negative PNG and its lpDa chunk, pure functions),
                 develop.js (developing a frame: the stocks' looks, grain, halation, leaks, date stamp; pure functions on RGBA),
-                notetext.js (notes: tags, search and snippets, the diary title, front matter, export names; pure functions),
+                notetext.js (notes: tags, search and snippets, the diary title, the diaries by day, front matter, export names; pure functions),
                 zip.js (stored zips written, stored and deflated zips read; pure functions, CRC from negative.js), lunar.js (lunar calendar + solar term tables, 1900-2100), stardict.js (StarDict reader), bookparse.js (TXT/EPUB parser),
                 books/ (the reader's two public-domain sample books), sw.js (offline cache),
                 fonts/ (DotGothic16, VT323, OFL), vendor/binjgb/ (Game Boy core, MIT), vendor/holiday-cn/ (China days off, MIT),
@@ -41,9 +41,12 @@ LICENSE NOTICE LICENSING.md CONTRIBUTING.md
   its own database `lopda-files`) for large binary data.
 - Built-ins, one file each in runtime/apps/: notes (记事本 2.0: the list opens on 今天, today's diary with 那年今日; other notes open to read (no keyboard) until a tap or A; search, tags read
   from `#words` with the 日记 and 摘抄 groups, pins, a trash kept 30 days, 发送到… and a zip of .md files out and in through notetext.js
-  and zip.js; `LP.notes.append(title, text, sep)` for other programs, which records `src`; docs `notes/<id>` {body, updated, created?,
-  pinned?, day?, src?, deleted?}; decisions.md section 20), calendar (万年历; lunar.js, holiday-cn, the one built-in that may reach
-  another site, decisions.md section 14), dict (词典; stardict.js, built-in ECDICT, imported StarDict books in
+  and zip.js; `LP.notes.append(title, text, sep)` for other programs, which records `src`; `LP.notes.diaryDays`, `diariesOn` and
+  `openDiary(day, onBack)` for the calendar, over an index of diaries by day (notetext.js `diaryIndex`, dropped when the notes change,
+  never stored); docs `notes/<id>` {body, updated, created?, pinned?, day?, src?, deleted?}; decisions.md section 20),
+  calendar (万年历; lunar.js, holiday-cn, the one built-in that may reach another site, decisions.md section 14; a folded corner
+  on days with a diary and a read-only 日记 block on the day sheet, START opens or backfills that day's diary in notes, only through
+  those three functions, section 21), dict (词典; stardict.js, built-in ECDICT, imported StarDict books in
   `LopdaPlatform.files`, `LP.dict.lookup(word)` for other programs, decisions.md section 15; its entry page selects text through textsel.js and looks words up level by level, section 18), reader (阅读器; bookparse.js, books, their dithered pictures and imported fonts in
   `LopdaPlatform.files`, layouts and an e-ink full refresh, long-press or SELECT selection that looks up through `LP.dict` and quotes (underline + `LP.notes.append`),
   decisions.md sections 16-17), camera (viewfinder, film stocks, a colour latent image per frame in `LopdaPlatform.files`, SELECT cycles the
