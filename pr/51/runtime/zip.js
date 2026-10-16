@@ -46,10 +46,12 @@ function write(entries,crc32){
   var cdStart=size;
   files.forEach(function(f){
     var h=new Uint8Array(46+f.name.length), v=new DataView(h.buffer);
-    v.setUint32(0,0x02014b50,true); v.setUint16(4,20,true); v.setUint16(6,20,true); v.setUint16(8,0x0800,true); v.setUint16(10,0,true);
+    v.setUint32(0,0x02014b50,true); v.setUint16(4,0x0314,true); v.setUint16(6,20,true); v.setUint16(8,0x0800,true); v.setUint16(10,0,true);
     v.setUint16(12,f.t.time,true); v.setUint16(14,f.t.date,true); v.setUint32(16,f.crc,true);
     v.setUint32(20,f.size,true); v.setUint32(24,f.size,true); v.setUint16(28,f.name.length,true);
-    /* extra, comment, disk, internal attributes stay 0; external attributes 0 too: plain files */
+    /* made by Unix (3), zip 2.0: with "MS-DOS" there, Debian's unzip reads the names as an OEM code page despite bit 11.
+       Unix wants a mode in the external attributes: a plain file, rw-r--r--. Extra, comment, disk, internal attributes stay 0 */
+    v.setUint32(38,0x81a40000,true);
     v.setUint32(42,f.off,true);
     h.set(f.name,46);
     parts.push(h); size+=h.length;
