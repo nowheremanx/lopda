@@ -3212,7 +3212,9 @@ test("notes: delete goes to the trash in one press; restore; purge twice; the tr
 test("notes: 今天 and 新建 read as actions; the 笔记 · n 篇 heading counts notes outside the trash, is never the cursor, and gives way to 找到 while searching", { skip, timeout: 60000 }, async (t) => {
   const n = await notesPage(t);
   await n.p.evaluate(async () => {
-    for (const body of ["一", "二", "三"]) await LP.S.refs.notes.doc().set({ body, updated: Date.now() });
+    /* distinct times, so 三 is surely the newest and the first note under the heading */
+    let i = 0;
+    for (const body of ["一", "二", "三"]) await LP.S.refs.notes.doc().set({ body, updated: Date.now() + 1000 * i++ });
   });
   await n.open();
   const head = () => n.p.evaluate(() => { const h = document.getElementById("notes-count"); return h.hidden ? null : h.textContent; });
