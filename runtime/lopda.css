@@ -335,6 +335,9 @@ textarea::placeholder{color:var(--ink-2)}
 .rd-def textarea{flex:1;min-height:0}
 .rd-def .hint{color:var(--ink)}
 .rd-book{position:relative}
+/* START's menu over a selection (textsel.js), in the reader and on a dictionary entry: the selection stays in view above it */
+.sel-menu{position:absolute;left:0;right:0;bottom:0;z-index:3;background:var(--lcd);border-top:3px solid var(--ink);display:flex;flex-direction:column;gap:4px;padding:6px 10px 4px}
+.sel-menu .lcd-menu li{min-height:44px;box-sizing:border-box}
 .rd-flow p.img{text-indent:0;text-align:center;margin:.4em 0;break-inside:avoid;line-height:0}
 .rd-flow p.img img{display:inline-block;image-rendering:pixelated;image-rendering:crisp-edges}
 .rd-flow p.img.bad{line-height:inherit;color:var(--ink-2)}
