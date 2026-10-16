@@ -1,5 +1,5 @@
 /*
- * Lo-PDA built-in: settings. Volume, language, updates, about.
+ * Lo-PDA built-in: settings. Volume, language, the apps allowed tilt or the microphone, updates, about.
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  */
 (function(){
@@ -17,6 +17,20 @@ function renderSettings(){
     var on=b.getAttribute("data-lang")===I18N.lang; b.className=on?"btn":"btn ghost"; b.setAttribute("aria-checked",on?"true":"false");
   });
 }
+/* the apps allowed tilt or the microphone (apps/store.js): one row each, revoked with a tap; the next start() asks again */
+function renderSense(){
+  var ul=$("set-sense-list"); ul.textContent="";
+  var list=LP.sensorGrants ? LP.sensorGrants.list() : [];
+  $("set-sense-note").hidden=!list.length;
+  if(!list.length){ var e=document.createElement("li"); e.className="empty"; e.textContent=tr("set.sense.none"); ul.appendChild(e); return; }
+  list.forEach(function(g){
+    var li=document.createElement("li"), t=document.createElement("span"), b=document.createElement("button");
+    t.textContent=g.name+" · "+g.kinds.map(function(k){ return tr("set.sense."+k); }).join(tr("set.sense.and"));
+    b.className="btn ghost"; b.type="button"; b.textContent=tr("set.sense.revoke"); b.setAttribute("data-app",g.id);
+    b.onclick=function(){ LP.sensorGrants.revoke(g.id); renderSense(); sfx("ok"); };
+    li.appendChild(t); li.appendChild(b); ul.appendChild(li);
+  });
+}
 /* `sound` is still written for runtimes before 0.12.0, which had a separate switch */
 function saveSettings(){ renderSettings(); if(S.db) put(S.refs.settings,{sound:SND.vol>0, volume:SND.vol, lang:I18N.lang}); }
 Array.prototype.forEach.call(document.querySelectorAll("[data-lang]"),function(b){
@@ -26,7 +40,7 @@ function setVol(v){ SND.vol=v; LP.applyLevel(); saveSettings(); sfx("tap"); }
 $("set-vol-down").onclick=function(){ if(SND.vol>0) setVol(SND.vol-1); };
 $("set-vol-up").onclick=function(){ if(SND.vol<LP.VOL_MAX) setVol(SND.vol+1); };
 function openSettings(){
-  show("settings"); renderSettings(); renderUpdate();
+  show("settings"); renderSettings(); renderSense(); renderUpdate();
   var el=$("set-storage"); el.textContent=tr("set.counting");
   /* the darkroom's film box, in rolls and the space they take (apps/darkroom.js) */
   var box=LP.darkroom ? LP.darkroom.summary().then(function(b){ return tr("set.box",{n:b.n, size:LP.darkroom.size(b.bytes)}); },function(){ return ""; }) : Promise.resolve("");

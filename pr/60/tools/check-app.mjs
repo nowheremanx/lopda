@@ -15,7 +15,7 @@ const LANGS = ["zh", "en"];
 const SOUNDS = ["tap", "tick", "move", "ok", "err", "hit", "miss", "coin", "win", "lose"];
 const AMBIENCES = ["rain", "waves", "waterfall", "wind", "fire", "stream"];
 const MAX_BYTES = 512 * 1024;
-const PERMISSIONS = ["files"];
+const PERMISSIONS = ["files", "motion", "mic"];
 const LICENSES = ["MIT", "0BSD", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Apache-2.0", "CC0-1.0", "Unlicense"];
 const PALETTE = [[0x1f, 0x2a, 0x14], [0x4a, 0x5a, 0x32], [0x7d, 0x8a, 0x58], [0xa3, 0xad, 0x7e]];
 const EMOJI = /[\p{Extended_Pictographic}\u{1F1E6}-\u{1F1FF}]/u;
@@ -184,6 +184,15 @@ function checkApp(dir) {
   const usesFiles = /PAD\.(exportFile|importFile)\b/.test(code);
   if (usesFiles && !(Array.isArray(m.permissions) && m.permissions.includes("files"))) errors.push('PAD.exportFile/importFile need "permissions": ["files"] in manifest.json');
   if (!usesFiles && Array.isArray(m.permissions) && m.permissions.includes("files")) warnings.push('"files" is declared but PAD.exportFile/importFile are never used: drop it');
+  /* tilt and the microphone (SPEC.md 6.4): PAD.motion / PAD.on("tilt"|"shake") need "motion", PAD.mic / PAD.on("sound") need "mic" */
+  const perms = Array.isArray(m.permissions) ? m.permissions : [];
+  const SENSE = { motion: [/PAD\.motion\b/, /PAD\.on\(\s*["'](tilt|shake)["']/], mic: [/PAD\.mic\b/, /PAD\.on\(\s*["']sound["']/] };
+  for (const [perm, res] of Object.entries(SENSE)) {
+    const uses = res.some((re) => re.test(code));
+    const what = perm === "motion" ? 'PAD.motion and the "tilt" / "shake" events' : 'PAD.mic and the "sound" event';
+    if (uses && !perms.includes(perm)) errors.push(`${what} need "permissions": ["${perm}"] in manifest.json`);
+    if (!uses && perms.includes(perm)) warnings.push(`"${perm}" is declared but ${what} are never used: drop it`);
+  }
   if (usesButtons && m.buttons !== true) warnings.push('uses PAD.on but "buttons" is not true, so the chin buttons stay hidden (keyboard still works)');
   return { id, errors, warnings, info };
 }
