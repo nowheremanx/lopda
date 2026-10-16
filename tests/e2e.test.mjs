@@ -669,6 +669,8 @@ test("dictionary: browse matches, restore the selected row, and page entries", {
   await p.keyboard.press("ArrowDown");
   await p.waitForFunction((top) => document.querySelector("#dict-sheet .dict-page")?.scrollTop === top, target);
   assert.equal(await p.evaluate(() => document.querySelector("#dict-sheet .dict-page").scrollTop % 24), 0);
+  /* the counter follows the scroll event, which can come a frame after scrollTop has arrived */
+  await p.waitForFunction((want) => document.querySelector("#dict-sheet .sheet-title small")?.textContent === want, `2/${pages}`, { timeout: 2000 }).catch(() => {});
   assert.equal(await p.textContent("#dict-sheet .sheet-title small"), `2/${pages}`);
 
   await p.click('.gamepad [data-b="start"]');
