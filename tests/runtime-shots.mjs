@@ -151,7 +151,8 @@ async function capture(rootArg, outArg) {
   /* notes */
   await tile("notes"); await p.waitForTimeout(300);
   await shot("02-notes-empty");
-  await p.click("#note-new");
+  /* up to 0.20.1 a 新建 button in the bar; from 0.21.0 the 新建 row under 今天 */
+  await p.click(await p.locator("#note-new").count() ? "#note-new" : "#notes-top li:nth-child(2) button");
   await p.keyboard.type("买胶卷\n周六去裁片。Film: 8 frames.", { delay: 10 });
   await p.waitForFunction(() => document.getElementById("note-state").textContent === "已保存", null, { timeout: 5000 });
   await shot("03-note-editor");

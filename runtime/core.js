@@ -170,7 +170,7 @@ function show(name){
 $("home-key").onclick=function(){ LP.flushNote(); show("home"); sfx("home"); };
 
 /* ---------- sound: tiny square-wave chips through Web Audio (the named sounds themselves are in chip.js) ---------- */
-var RUNTIME_VERSION="0.20.1";   /* keep in step with VERSION in sw.js */
+var RUNTIME_VERSION="0.21.0";   /* keep in step with VERSION in sw.js */
 /* One volume, five steps, 0 is off (decisions.md section 10). It sets the master gain and nothing else does.
    Under the master: `ui` for the runtime's own clicks, held at a fraction so they stay as quiet as they always were
    (step 2 gives them 0.11, their level before 0.12.0), and `app` for apps, music and the cartridge at the full step. */
@@ -372,11 +372,11 @@ function armConfirm(wrapId,btnId,label,onYes){
 }
 
 /* ---------- chin game pad: D-pad, A, B, START, SELECT ----------
-   Routed to the file dialog while it is open, then the cartridge player when it runs, then the camera, the darkroom, the calendar, the dictionary, the reader, otherwise to the running app (PAD.on).
+   Routed to the file dialog while it is open, then the cartridge player when it runs, then the camera, the darkroom, the calendar, the dictionary, the reader, notes, otherwise to the running app (PAD.on).
    A route returns true when it took the button. */
 var PADB={up:false,down:false,left:false,right:false,a:false,b:false,start:false,select:false};
 var PADKEYS={ArrowUp:"up",ArrowDown:"down",ArrowLeft:"left",ArrowRight:"right",x:"a",X:"a",z:"b",Z:"b",Enter:"start",Shift:"select"};
-var PAD_ORDER=["file","cart","cam","dark","cal","dict","reader","run"], padRoutes={};   /* "file": the runtime's file dialog, while it is open */
+var PAD_ORDER=["file","cart","cam","dark","cal","dict","reader","notes","run"], padRoutes={};   /* "file": the runtime's file dialog, while it is open */
 function padRoute(name,fn){ padRoutes[name]=fn; }
 function padOn(){ return !$("gamepad").hidden; }
 function setButton(b,down){

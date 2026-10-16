@@ -64,13 +64,43 @@ textarea::placeholder{color:var(--ink-2)}
 .bar{display:flex;align-items:center;gap:8px;padding:6px 8px;border-bottom:2px solid var(--ink);position:sticky;top:0;background:var(--lcd);z-index:1}
 .bar h2{margin:0;font-size:16px;font-weight:400;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .bar .btn{padding:6px 10px;font-size:14px}
-.notes-list{list-style:none;margin:0;padding:0}
-.notes-list button{width:100%;text-align:left;background:none;border:0;border-bottom:1px dashed var(--ink-2);padding:10px 12px;cursor:pointer;display:flex;flex-direction:column;gap:2px}
-.notes-list .t{font-size:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.notes-list .d{font-family:var(--f-pix);font-size:16px;color:var(--ink-2)}
+/* notes: the search box, one scrolling list, the soft keys; sheets over it (docs/design/notes.md) */
+.notes-view{display:flex;flex-direction:column;overflow:hidden;position:relative}
+.notes-head{flex:none;padding:6px 8px;border-bottom:2px solid var(--ink)}
+.notes-head input{width:100%;min-width:0;min-height:44px;font-family:var(--f-lcd);font-size:17px;color:var(--ink);background:var(--lcd);border:3px solid var(--ink);border-radius:0;padding:6px 8px;-webkit-appearance:none;appearance:none}
+.notes-head input::placeholder{color:var(--ink-2)}
+.notes-head input::-webkit-search-cancel-button{display:none}
+.notes-filter{flex:none;margin:0;padding:4px 10px;font-size:15px;border-bottom:1px dashed var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.notes-main{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch}
+.notes-list{gap:0}
+.notes-main .notes-list li{display:block;padding:0}
+.notes-main .notes-list li::before{display:none}
+.notes-list button{width:100%;min-height:44px;text-align:left;background:none;border:0;border-bottom:1px dashed var(--ink-2);padding:6px 10px;cursor:pointer;display:flex;flex-direction:column;justify-content:center;gap:2px;color:inherit;font:inherit}
+.notes-list li.on button{background:var(--ink);color:var(--lcd)}
+.notes-list .t{font-size:16px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.notes-list .d{font-size:13px;max-width:100%;color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.notes-list li.on .d{color:var(--lcd)}
+.notes-list mark{background:var(--ink);color:var(--lcd)}
+.notes-list li.on mark{background:var(--lcd);color:var(--ink)}
+.notes-empty{padding:16px 12px;text-align:center;font-size:14px;line-height:1.5}
+#notes-keys{flex:none;padding:4px 6px}
+.notes-sheet .notes-status{flex:none;font-size:14px;text-align:center}
+.notes-sheet .notes-peek{flex:none;margin:0;max-height:5.6em;overflow:hidden;font-size:14px;line-height:1.4;white-space:pre-wrap;overflow-wrap:anywhere;border-top:1px dashed var(--ink-2);padding-top:4px}
+.notes-sheet .lcd-menu li{min-height:44px}
+.notes-sheet .lcd-menu li small{font-family:var(--f-lcd);font-size:14px}
+.notes-sheet .softkeys{margin-top:auto}
+.notes-help{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:6px;font-size:14px;line-height:1.45;cursor:pointer}
+.notes-help p{margin:0;overflow-wrap:anywhere}
+.notes-help .hint{text-align:center;margin-top:auto}
+.note-years{flex:none;border-bottom:2px solid var(--ink);gap:0}
+.lcd-menu.note-years li{min-height:44px;padding:4px 10px;font-size:14px}
+.note-years li span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lcd-menu.note-years li.label{min-height:0;padding:4px 10px 0;font-size:13px;color:var(--ink-2);cursor:default}
+.note-years li.label::before{display:none}
 .empty{padding:28px 16px;text-align:center;color:var(--ink-2);font-size:15px;line-height:1.6}
 .editor{display:flex;flex-direction:column;height:100%}
 .editor textarea{flex:1;border:0;border-radius:0;padding:12px;background:transparent}
+.editor .bar .btn{min-height:44px}
 
 /* runner */
 .runner{display:flex;flex-direction:column;height:100%}

@@ -72,22 +72,34 @@
       </div>
     </section>
 
-    <!-- NOTES LIST -->
-    <section class="view" id="v-notes" hidden>
-      <div class="bar"><h2 data-i18n="notes.title">记事本</h2><button class="btn" id="note-new" type="button" data-i18n="notes.new">新建</button></div>
-      <ul class="notes-list" id="notes-list"></ul>
+    <!-- NOTES: the search box over one list (today, new, pinned, the rest); options, tags, the trash and the key card open over it -->
+    <section class="view notes-view" id="v-notes" hidden>
+      <div class="notes-head">
+        <input id="notes-q" type="search" enterkeyhint="search" autocomplete="off" autocorrect="off" spellcheck="false" maxlength="100" data-i18n-ph="notes.search" placeholder="搜索笔记">
+      </div>
+      <p class="notes-filter" id="notes-filter" hidden></p>
+      <div class="notes-main" id="notes-main">
+        <ul class="lcd-menu notes-list" id="notes-top"></ul>
+        <ul class="lcd-menu notes-list" id="notes-list"></ul>
+        <p class="hint notes-empty" id="notes-empty" hidden></p>
+      </div>
+      <div id="notes-keys"></div>
+      <div class="dict-sheet notes-sheet" id="notes-sheet" hidden></div>
+      <input type="file" id="notes-file" multiple hidden accept=".md,.markdown,.txt,.zip,text/plain,text/markdown,application/zip">
     </section>
 
-    <!-- NOTE EDITOR -->
+    <!-- NOTE EDITOR: the whole screen is the text; a diary shows the years before above it -->
     <section class="view" id="v-note" hidden>
       <div class="editor">
         <div class="bar">
           <button class="btn ghost" id="note-back" type="button" data-i18n="notes.back">◂ 列表</button>
           <h2 id="note-state">已保存</h2>
-          <div class="confirm" id="note-del-wrap"><button class="btn ghost" id="note-del" type="button" data-i18n="common.delete">删除</button></div>
+          <button class="btn ghost" id="note-opts" type="button" data-i18n="notes.options">选项</button>
         </div>
+        <ul class="lcd-menu note-years" id="note-years" hidden></ul>
         <textarea id="note-body" data-i18n-ph="notes.placeholder" placeholder="写点什么。自动保存。"></textarea>
       </div>
+      <div class="dict-sheet notes-sheet" id="note-sheet" hidden></div>
     </section>
 
     <!-- CALENDAR: one fixed screen; the day, the list of dates and the add form open over it -->
@@ -292,6 +304,8 @@
 <script src="lenses.js"></script>
 <script src="negative.js"></script>
 <script src="develop.js"></script>
+<script src="notetext.js"></script>
+<script src="zip.js"></script>
 <script src="core.js"></script>
 <script src="apps/notes.js"></script>
 <script src="apps/calendar.js"></script>

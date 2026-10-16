@@ -12,7 +12,9 @@ runtime/        the PWA: index.html, core.js (shared LP object: utils, views, so
                 built-in), boot.js (loaded last), strings.js (zh/en text), lopda.css, platform.js (IndexedDB store, file export),
                 chip.js (sound chip: MML music, custom sound effects, ambience presets; shared with sdk/dev.html),
                 lenses.js (which physical camera lenses a phone has, pure functions), textsel.js (the text selection shared by the reader and the dictionary entry page), negative.js (the negative PNG and its lpDa chunk, pure functions),
-                develop.js (developing a frame: the stocks' looks, grain, halation, leaks, date stamp; pure functions on RGBA), lunar.js (lunar calendar + solar term tables, 1900-2100), stardict.js (StarDict reader), bookparse.js (TXT/EPUB parser),
+                develop.js (developing a frame: the stocks' looks, grain, halation, leaks, date stamp; pure functions on RGBA),
+                notetext.js (notes: tags, search and snippets, the diary title, front matter, export names; pure functions),
+                zip.js (stored zips written, stored and deflated zips read; pure functions, CRC from negative.js), lunar.js (lunar calendar + solar term tables, 1900-2100), stardict.js (StarDict reader), bookparse.js (TXT/EPUB parser),
                 books/ (the reader's two public-domain sample books), sw.js (offline cache),
                 fonts/ (DotGothic16, VT323, OFL), vendor/binjgb/ (Game Boy core, MIT), vendor/holiday-cn/ (China days off, MIT),
                 vendor/ecdict/ (abridged ECDICT in StarDict format, MIT + WordNet licence)
@@ -22,7 +24,7 @@ registry/       index.json (generated) + apps/<id>/{manifest.json,index.html,src
 tools/          check-app.mjs, build-index.mjs, bundle-app.mjs (+ lo-game.mjs alias), lo-game-lib.mjs (Node 20+, no deps);
                 gen-lunar.py (one-off generator of the lunar table, needs PyEphem); gen-ecdict.mjs (one-off, ECDICT csv ->
                 vendor/ecdict/) with stardict-write.mjs (StarDict + dictzip writer, also used by tests)
-tests/          node:test suite (no deps): tools, strings, PAD shim, platform store, lo-game, negative, develop, repo rules;
+tests/          node:test suite (no deps): tools, strings, PAD shim, platform store, lo-game, negative, develop, notetext, zip, repo rules;
                 runtime-shots.mjs (before/after screenshots of the runtime), hko-compare.mjs (lunar table vs the HKO tables, manual)
 SPEC.md         app spec lopda/1 (MIT)
 LICENSE NOTICE LICENSING.md CONTRIBUTING.md
@@ -37,7 +39,10 @@ LICENSE NOTICE LICENSING.md CONTRIBUTING.md
 - Storage: IndexedDB through `platform.js`, a small document store (`doc(path)`, `collection(path)`;
   doc paths have an even number of segments, base `data/users/local`), and `files` (get/put/del of Blobs and typed arrays,
   its own database `lopda-files`) for large binary data.
-- Built-ins, one file each in runtime/apps/: notes, calendar (万年历; lunar.js, holiday-cn, the one built-in that may reach
+- Built-ins, one file each in runtime/apps/: notes (记事本 2.0: the list opens on 今天, today's diary with 那年今日; search, tags read
+  from `#words` with the 日记 and 摘抄 groups, pins, a trash kept 30 days, 发送到… and a zip of .md files out and in through notetext.js
+  and zip.js; `LP.notes.append(title, text, sep)` for other programs, which records `src`; docs `notes/<id>` {body, updated, created?,
+  pinned?, day?, src?, deleted?}; decisions.md section 20), calendar (万年历; lunar.js, holiday-cn, the one built-in that may reach
   another site, decisions.md section 14), dict (词典; stardict.js, built-in ECDICT, imported StarDict books in
   `LopdaPlatform.files`, `LP.dict.lookup(word)` for other programs, decisions.md section 15; its entry page selects text through textsel.js and looks words up level by level, section 18), reader (阅读器; bookparse.js, books, their dithered pictures and imported fonts in
   `LopdaPlatform.files`, layouts and an e-ink full refresh, long-press or SELECT selection that looks up through `LP.dict` and quotes (underline + `LP.notes.append`),
