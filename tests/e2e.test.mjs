@@ -4138,3 +4138,102 @@ test("sensor: dev.html stands in for the phone: start() follows the manifest, th
   await until(p, async () => (await R(f)).shake === 1, "a shake");
   assert.deepEqual(errors, []);
 });
+
+/* ---------- the two demo apps: 滚珠迷宫 (tilt) and 吹蜡烛 (microphone), with the stubbed phone above ----------
+   Each starts its sensor only when play starts and stops it when play pauses or ends; "denied" falls back to keys. */
+const runDemo = async (p, id) => {
+  const man = JSON.parse(readFileSync(join(ROOT, "registry/apps", id, "manifest.json"), "utf8"));
+  const html = readFileSync(join(ROOT, "registry/apps", id, "index.html"), "utf8");
+  await p.evaluate(([man, html]) => { const a = Object.assign({}, man, { html }); window.LP.upsert("apps", a); window.LP.runApp(a); }, [man, html]);
+  let f;
+  await until(p, async () => { f = p.frames().find((x) => x !== p.mainFrame()); return f && await f.evaluate(() => !!window.game).catch(() => false); }, id);
+  await p.waitForTimeout(300);
+  return f;
+};
+const micOn = (p) => p.evaluate(() => !document.getElementById("mic-mark").hidden && navigator.audioSession.type === "play-and-record");
+
+test("tilt-maze: A starts a level and asks for tilt; the tilt rolls the ball; START pauses and stops it", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await sensePage(t);
+  const f = await runDemo(p, "tilt-maze");
+  assert.equal(await f.evaluate(() => mode), "tilt");
+  assert.equal(await p.locator("#file-ask .box").count(), 0, "nothing is asked on the title screen");
+  await press(p, "a");
+  await p.waitForSelector("#file-ask .box");
+  assert.equal(await p.textContent("#file-ask p"), "「滚珠迷宫」要用倾斜感应。");
+  await press(p, "a");
+  await until(p, () => f.evaluate(() => live), "tilt live");
+  const x0 = await f.evaluate(() => S0.x);
+  /* gamma 22.5 is x = 0.5: the ball rolls right, to the wall of the first level */
+  await until(p, () => f.evaluate((x0) => ball.x > x0 + 20 && Math.abs(ball.y - S0.y) < 1, x0), "the ball to roll right");
+  await press(p, "start");
+  await until(p, () => f.evaluate(() => !live && tilt.x === 0), "tilt off while paused");
+  const xp = await f.evaluate(() => ball.x);
+  await p.waitForTimeout(400);
+  assert.equal(await f.evaluate(() => ball.x), xp, "the ball rests while paused");
+  /* 继续: on again, with no dialog (the app is remembered) */
+  await press(p, "a");
+  await until(p, () => f.evaluate(() => live), "tilt live again");
+  assert.equal(await p.locator("#file-ask .box").count(), 0);
+  /* clearing a level stops the tilt too */
+  await f.evaluate(() => { ball.x = G0.x; ball.y = G0.y; });
+  await until(p, () => f.evaluate(() => state === "clear" && !live), "cleared, tilt off");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("tilt-maze: B on the dialog falls back to keys, says so, and the D-pad pushes the ball", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await sensePage(t);
+  const f = await runDemo(p, "tilt-maze");
+  await press(p, "a");
+  await p.waitForSelector("#file-ask .box");
+  await press(p, "b");
+  await until(p, () => f.evaluate(() => mode === "keys" && !live), "keys");
+  assert.equal(await f.evaluate(() => note), "倾斜未允许：用方向键");
+  const x0 = await f.evaluate(() => ball.x);
+  await p.evaluate(() => window.LOPDA_DEBUG.setButton("right", true));
+  await p.waitForTimeout(500);
+  await p.evaluate(() => window.LOPDA_DEBUG.setButton("right", false));
+  assert.ok(await f.evaluate((x0) => ball.x > x0 + 10, x0), "the D-pad moved the ball");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("blow-candles: a round opens the mic, a loud sound puts candles out, the mic closes between rounds and on pause", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await sensePage(t);
+  const f = await runDemo(p, "blow-candles");
+  assert.equal(await micOn(p), false, "no mic on the title screen");
+  await press(p, "a");
+  await p.waitForSelector("#file-ask .box");
+  assert.match(await p.textContent("#file-ask p.note"), /静音键不起作用/);
+  await press(p, "a");
+  await until(p, () => f.evaluate(() => live), "listening");
+  assert.equal(await micOn(p), true);
+  /* the stub's full-scale tone is far above the threshold: the candles go out and the round ends */
+  await until(p, () => f.evaluate(() => R.c.some((c) => !c.lit)), "a candle out");
+  await until(p, () => f.evaluate(() => R.phase === "done"), "the round over");
+  assert.equal(await micOn(p), false, "the mic is off between rounds");
+  assert.equal(await p.evaluate(() => navigator.audioSession.type), "ambient");
+  assert.ok(await f.evaluate(() => score > 0));
+  /* the next round opens it again, without the dialog; START closes it */
+  await p.waitForTimeout(700);
+  await press(p, "a");
+  await until(p, () => f.evaluate(() => R.i === 1 && live), "round 2 listening");
+  assert.equal(await p.locator("#file-ask .box").count(), 0);
+  await press(p, "start");
+  await until(p, async () => !(await micOn(p)) && !(await f.evaluate(() => live)), "the mic off while paused");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("blow-candles: B on the dialog falls back to holding A, says so, and A puts a candle out", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await sensePage(t);
+  const f = await runDemo(p, "blow-candles");
+  await press(p, "a");
+  await p.waitForSelector("#file-ask .box");
+  await press(p, "b");
+  await until(p, () => f.evaluate(() => mode === "keys" && !live), "keys");
+  assert.equal(await f.evaluate(() => note), "话筒未允许：按住 A 吹");
+  assert.equal(await micOn(p), false);
+  await until(p, () => f.evaluate(() => R.phase === "play"), "the clock running");
+  await p.evaluate(() => window.LOPDA_DEBUG.setButton("a", true));
+  await until(p, () => f.evaluate(() => R.c.some((c) => !c.lit)), "a candle out with A held");
+  await p.evaluate(() => window.LOPDA_DEBUG.setButton("a", false));
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
