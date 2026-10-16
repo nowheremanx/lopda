@@ -758,6 +758,38 @@ test("dictionary: disable books, persist settings, and explain when all are off"
   assert.deepEqual(errors, []);
 });
 
+test("dictionary: an import the storage refuses (full, private mode) says so plainly and leaves no half book", { skip, timeout: 60000 }, async (t) => {
+  const { writeStarDict } = await import("../tools/stardict-write.mjs");
+  const sd = writeStarDict({ bookname: "Tiny", entries: [{ word: "zyzzyva", text: "a weevil (test)" }] });
+  const files = [{ name: "tiny.ifo", mimeType: "text/plain", buffer: Buffer.from(sd.ifo) }, { name: "tiny.idx", mimeType: "application/octet-stream", buffer: sd.idx },
+    { name: "tiny.dict.dz", mimeType: "application/octet-stream", buffer: sd.dictdz }];
+  const { p, errors } = await dictPage(t);
+  /* the index goes in, the text does not: storage full */
+  await p.evaluate(() => {
+    const files = window.LopdaPlatform.files, real = files.put;
+    window.__puts = [];
+    files.put = (key, value) => {
+      window.__puts.push(key);
+      if (/\/data$/.test(key)) return Promise.reject(new DOMException("The quota has been exceeded.", "QuotaExceededError"));
+      return real.call(files, key, value);
+    };
+  });
+  await p.click("#dict-keys .sk-start");
+  await p.setInputFiles("#dict-file", files);
+  await p.waitForFunction(() => !document.getElementById("toast").hidden && /空间不够/.test(document.getElementById("toast").textContent), null, { timeout: 10000 });
+  assert.equal(await p.textContent("#toast"), "空间不够，或浏览器不让存（无痕模式）。");
+  const puts = await p.evaluate(() => window.__puts);
+  assert.equal(puts.length, 2, "the index was written, the text refused");
+  assert.deepEqual(await p.evaluate((keys) => Promise.all(keys.map((k) => window.LopdaPlatform.files.get(k))), puts), [undefined, undefined], "nothing of it stays in files");
+  const books = () => p.$$eval("#dict-sheet .lcd-menu li span", (l) => l.map((x) => x.textContent));
+  assert.deepEqual(await books(), ["ECDICT"]);
+  await p.reload({ waitUntil: "networkidle" });
+  await p.locator("#home .app", { hasText: "词典" }).click();
+  await p.click("#dict-keys .sk-start");
+  assert.deepEqual(await books(), ["ECDICT"], "no book doc stays either");
+  assert.deepEqual(errors, []);
+});
+
 test("dictionary: import a StarDict book (.dict.dz, .syn), order it, delete it; ECDICT stays", { skip, timeout: 60000 }, async (t) => {
   const { writeStarDict } = await import("../tools/stardict-write.mjs");
   const sd = writeStarDict({ bookname: "Tiny", entries: [{ word: "zyzzyva", text: "a weevil (test)", syns: ["zyzz"] }, { word: "apple", text: "TINY-APPLE" }] });
