@@ -1,0 +1,429 @@
+{
+  "spec": "lopda/1",
+  "generated": "2026-10-16",
+  "apps": [
+    {
+      "spec": "lopda/1",
+      "id": "blow-candles",
+      "name": "吹蜡烛",
+      "glyph": "烛",
+      "buttons": true,
+      "icon": [
+        "................",
+        ".......1........",
+        "......121.......",
+        "......131.......",
+        "......131.......",
+        ".......1........",
+        "......000.......",
+        "......030.......",
+        "......030.......",
+        "......030.......",
+        "......030.......",
+        "......030.......",
+        "......030.......",
+        "....0000000.....",
+        "..00000000000...",
+        "................"
+      ],
+      "version": "1.0.0",
+      "description": "对着话筒吹灭一排蜡烛，最后唱准一个音把蜡烛点回来。按住 A 也能吹。话筒的示范。",
+      "i18n": {
+        "zh": {
+          "name": "吹蜡烛",
+          "description": "对着话筒吹灭一排蜡烛，最后唱准一个音把蜡烛点回来。按住 A 也能吹。话筒的示范。"
+        },
+        "en": {
+          "name": "Candles",
+          "description": "Blow into the mic to put the candles out, then sing one back alight. Or hold A."
+        }
+      },
+      "author": "Haowei Wu",
+      "license": "MIT",
+      "permissions": [
+        "mic"
+      ],
+      "path": "apps/blow-candles/index.html",
+      "sha256": "5ea831b5b33d277c1a0714f60fc099333d8bfc46b7866b9f152a42880d31b13e",
+      "bytes": 56293
+    },
+    {
+      "spec": "lopda/1",
+      "id": "calculator",
+      "name": "计算器",
+      "glyph": "算",
+      "icon": [
+        "................",
+        "...0000000000...",
+        "...0111111110...",
+        "...0133333310...",
+        "...0133333310...",
+        "...0111111110...",
+        "...0121212120...",
+        "...0111111110...",
+        "...0121212120...",
+        "...0111111110...",
+        "...0121212120...",
+        "...0111111110...",
+        "...0121211120...",
+        "...0111111110...",
+        "...0000000000...",
+        "................"
+      ],
+      "version": "1.1.0",
+      "description": "八位数商务计算器，连续运算、百分比和记忆键。",
+      "i18n": {
+        "en": {
+          "name": "Calc",
+          "description": "Eight-digit business calculator with chain math, percent and memory keys."
+        }
+      },
+      "author": "Haowei Wu",
+      "license": "MIT",
+      "path": "apps/calculator/index.html",
+      "sha256": "a62418629dabce24745cf77d0faf0a9d7224cbfbc1053c2c9c158673054b0691",
+      "bytes": 14545
+    },
+    {
+      "spec": "lopda/1",
+      "id": "gomoku",
+      "name": "五子棋",
+      "glyph": "棋",
+      "icon": [
+        "................",
+        ".1111111111111..",
+        ".1..0..1..0..1..",
+        ".1.000.1.030.1..",
+        ".1000001033301..",
+        ".1.000.0.030.1..",
+        ".1..0.030.0..1..",
+        ".1111033301111..",
+        ".1..1.030.0..1..",
+        ".1..1..0.000.1..",
+        ".1111111000001..",
+        ".1..1..1.000.1..",
+        ".1..1..1..0..1..",
+        ".1111111111111..",
+        "................",
+        "................"
+      ],
+      "version": "1.5.0",
+      "description": "15×15 棋盘，你执黑先手和电脑下，可以悔棋。",
+      "i18n": {
+        "en": {
+          "name": "Gomoku",
+          "description": "15×15 board. You play black and move first against the computer. Undo allowed."
+        }
+      },
+      "author": "Haowei Wu",
+      "license": "MIT",
+      "path": "apps/gomoku/index.html",
+      "sha256": "8c0005208ed3d1f27e7e022a0fc1766ea01e2626f919bfc1c409b80b36e96165",
+      "bytes": 12352
+    },
+    {
+      "spec": "lopda/1",
+      "id": "last-letter",
+      "name": "最后一封信",
+      "glyph": "信",
+      "buttons": true,
+      "icon": [
+        "................",
+        "................",
+        "................",
+        ".00000000000000.",
+        ".03333333333330.",
+        ".00333333333300.",
+        ".03033333333030.",
+        ".03303333330330.",
+        ".03330333303330.",
+        ".03333000033330.",
+        ".03333333333330.",
+        ".03333333333330.",
+        ".00000000000000.",
+        "................",
+        "................",
+        "................"
+      ],
+      "version": "1.1.0",
+      "description": "视觉小说。邮局关门前，一封没有地址的信要送到山上。三个结局。",
+      "i18n": {
+        "zh": {
+          "name": "最后一封信",
+          "description": "视觉小说。邮局关门前，一封没有地址的信要送到山上。三个结局。"
+        },
+        "en": {
+          "name": "Letter",
+          "description": "Visual novel. A letter with no address, up the hill. Three endings."
+        }
+      },
+      "author": "Haowei Wu",
+      "license": "MIT",
+      "path": "apps/last-letter/index.html",
+      "sha256": "96ba6089b7ac7038d4f4258a1b05b30f3e3deefea533474ea1cde1c64438706b",
+      "bytes": 56143
+    },
+    {
+      "spec": "lopda/1",
+      "id": "paint",
+      "name": "点阵画板",
+      "glyph": "画",
+      "icon": [
+        "................",
+        "............000.",
+        "...........0330.",
+        "..........03330.",
+        ".........033300.",
+        "........033300..",
+        ".......03330....",
+        "......03330.....",
+        ".....033300.....",
+        "....011000......",
+        "...011110.......",
+        "..0111110.......",
+        "..011110........",
+        ".0000000........",
+        ".0000...........",
+        "................"
+      ],
+      "version": "1.1.1",
+      "description": "96×96 四色点阵画板：撤销、清空，能导入图片转成点阵，也能导出 PNG。",
+      "i18n": {
+        "en": {
+          "name": "Paint",
+          "description": "96×96 four-tone pixel paint. Import a picture, export PNG."
+        }
+      },
+      "author": "Haowei Wu",
+      "license": "MIT",
+      "permissions": [
+        "files"
+      ],
+      "path": "apps/paint/index.html",
+      "sha256": "0862559f4791dc26a4f0a4c6421bb27aa7f68f693523470c06b40123b4c4ae53",
+      "bytes": 11329
+    },
+    {
+      "spec": "lopda/1",
+      "id": "rain-station",
+      "name": "雨站",
+      "glyph": "雨",
+      "buttons": true,
+      "icon": [
+        "................",
+        "..000000000000..",
+        "..0..........0..",
+        "..0.1..1..1..0..",
+        "..0..1..1..1.0..",
+        "..0.1..1..1..0..",
+        "..0..........0..",
+        "..000000000000..",
+        ".......00.......",
+        ".......00.......",
+        ".......00.......",
+        "..222222222222..",
+        "..2..........2..",
+        "..222222222222..",
+        "..2..........2..",
+        "................"
+      ],
+      "version": "1.2.0",
+      "description": "视觉小说。末班车后的雨夜小站，一张十年前的旧车票。三个结局。",
+      "i18n": {
+        "zh": {
+          "name": "雨站",
+          "description": "视觉小说。末班车后的雨夜小站，一张十年前的旧车票。三个结局。"
+        },
+        "en": {
+          "name": "Rain Stn",
+          "description": "Visual novel. A rainy station, a ten-year-old ticket. Three endings."
+        }
+      },
+      "author": "Haowei Wu",
+      "license": "MIT",
+      "path": "apps/rain-station/index.html",
+      "sha256": "ea690dcc65110c1c63ff1df2b777076490a2c433a6803a814230f1761fb451e3",
+      "bytes": 56845
+    },
+    {
+      "spec": "lopda/1",
+      "id": "sound-board",
+      "name": "声音样本",
+      "glyph": "声",
+      "buttons": true,
+      "version": "1.0.2",
+      "description": "这台机器能发出的每一种声音：两首乐曲、六种环境声、十个具名音效和几个自定义音效，选中就显示写法。",
+      "i18n": {
+        "en": {
+          "name": "Sounds",
+          "description": "Every sound the handheld makes, each with the code that makes it."
+        }
+      },
+      "author": "Haowei Wu",
+      "license": "MIT",
+      "path": "apps/sound-board/index.html",
+      "sha256": "538634b7844cea925073c21f80f8b9fb5d8e93c4c6e6b6c7a9c7fb7e152345bf",
+      "bytes": 9896
+    },
+    {
+      "spec": "lopda/1",
+      "id": "tilt-maze",
+      "name": "滚珠迷宫",
+      "glyph": "珠",
+      "buttons": true,
+      "icon": [
+        "0000000000000000",
+        "0333333303333330",
+        "0333333303333330",
+        "0330000003300330",
+        "0330333333300330",
+        "0330300000333330",
+        "0330303333300000",
+        "0330303113303330",
+        "0330303113303330",
+        "0330300000003330",
+        "0330333333333330",
+        "0330000000000330",
+        "0333333033333330",
+        "0333112033333330",
+        "0333112033333330",
+        "0000000000000000"
+      ],
+      "version": "1.0.0",
+      "description": "倾斜机身让小钢珠滚到终点，别掉进洞。也能用方向键推。倾斜感应的示范。",
+      "i18n": {
+        "zh": {
+          "name": "滚珠迷宫",
+          "description": "倾斜机身让小钢珠滚到终点，别掉进洞。也能用方向键推。倾斜感应的示范。"
+        },
+        "en": {
+          "name": "Marble",
+          "description": "Tilt to roll the ball home past the holes, or push it with the D-pad."
+        }
+      },
+      "author": "Haowei Wu",
+      "license": "MIT",
+      "permissions": [
+        "motion"
+      ],
+      "path": "apps/tilt-maze/index.html",
+      "sha256": "ebb2b5875d062ba3a565b8c75aaea8194a05119d083e9c1baeb8462de5a23afc",
+      "bytes": 61011
+    },
+    {
+      "spec": "lopda/1",
+      "id": "vector-dream",
+      "name": "矢量梦",
+      "glyph": "梦",
+      "buttons": true,
+      "version": "0.2.0",
+      "description": "手写的软件三维渲染：环结、飞越山地、晶体。方向键转视角，A 换场景，B 线框。",
+      "i18n": {
+        "en": {
+          "name": "VecDream",
+          "description": "A hand-made 3D renderer: knot, terrain flyover, crystal. A scene, B wireframe."
+        }
+      },
+      "author": "Haowei Wu",
+      "license": "MIT",
+      "path": "apps/vector-dream/index.html",
+      "sha256": "f02b3bcdc81bc8f85a00dcdd434c3c4dbad1b40e6e8f8383449c1548ec6b4965",
+      "bytes": 35446
+    },
+    {
+      "spec": "lopda/1",
+      "id": "whack-a-mole",
+      "name": "打地鼠",
+      "glyph": "鼠",
+      "icon": [
+        "................",
+        "................",
+        ".....000000.....",
+        "....03333330....",
+        "...0333333330...",
+        "...0303333030...",
+        "...0333003330...",
+        "...0330110330...",
+        "...0333333330...",
+        "..001333333100..",
+        ".01110000000110.",
+        ".01111111111110.",
+        "..011111111110..",
+        "...0000000000...",
+        "................",
+        "................"
+      ],
+      "version": "2.3.0",
+      "description": "30 秒砸地鼠，戴头盔的要砸两下。",
+      "i18n": {
+        "en": {
+          "name": "Mole Bop",
+          "description": "30 seconds of bopping moles. The ones in helmets take two hits."
+        }
+      },
+      "author": "Haowei Wu",
+      "license": "MIT",
+      "path": "apps/whack-a-mole/index.html",
+      "sha256": "a1f16555ee761c6d05c338cd02ec720be696652c6e850088a994fc03ada37c6f",
+      "bytes": 12816
+    },
+    {
+      "spec": "lopda/1",
+      "id": "xiaoyuan",
+      "name": "小院",
+      "glyph": "院",
+      "buttons": true,
+      "icon": [
+        "................",
+        "................",
+        "...0.......0....",
+        "...00.....00....",
+        "...000000000....",
+        "..00000000000...",
+        "..03300000330...",
+        "..03000000030...",
+        "..00000300000...",
+        "..00002220000...",
+        "...000000000....",
+        "....0000000.....",
+        ".....00000......",
+        "................",
+        "................",
+        "................"
+      ],
+      "version": "1.4.0",
+      "description": "lo-game.js 示例：小院和老伯的屋子，摸猫、找钥匙。方向键走，A 互动。",
+      "i18n": {
+        "en": {
+          "name": "The Yard",
+          "description": "lo-game.js example: pet the cat, find the old man's key. D-pad walks, A acts."
+        }
+      },
+      "author": "Haowei Wu",
+      "license": "MIT",
+      "path": "apps/xiaoyuan/index.html",
+      "sha256": "f9dd7972f6706910afcd45be22a022e4fce3d7cc20ef18c786e50ae729ba3dbd",
+      "bytes": 63105
+    },
+    {
+      "spec": "lopda/1",
+      "id": "zhenyao-tower",
+      "name": "镇妖塔·序章",
+      "glyph": "塔",
+      "buttons": true,
+      "version": "0.4.0",
+      "description": "仙侠序章，可通关。卡带内置 LX-3D 协处理器：三维小镇、山道、塔内与斗法。",
+      "i18n": {
+        "en": {
+          "name": "Pagoda",
+          "description": "A xianxia prologue. The cart has an LX-3D chip: 3D town, tower and battles."
+        }
+      },
+      "author": "Haowei Wu",
+      "license": "MIT",
+      "path": "apps/zhenyao-tower/index.html",
+      "sha256": "901fd75decb02770b25df835a3de4b3d76f036dd7409975728824af55c723ef7",
+      "bytes": 297184
+    }
+  ]
+}
