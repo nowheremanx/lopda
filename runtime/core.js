@@ -444,4 +444,41 @@ var share={
   resetConfirm:resetConfirm, padRoute:padRoute, setButton:setButton, releaseButtons:releaseButtons, showPad:showPad
 };
 for(var k in share) LP[k]=share[k];
+
+/* ---------- the phone's keyboard. iOS does not shrink the page for it: the keyboard and its bar cover the bottom of the
+   screen, and the whole handheld can be dragged up under the finger. While a text field has the keyboard, the device is
+   cut to the visible height (--vvh): the LCD fills it, the brand line, the chin pad and HOME step aside (they are under
+   the keyboard anyway), the page is kept at the top, and only things that scroll can be dragged ---------- */
+(function(){
+  var vv=window.visualViewport, root=document.documentElement;
+  if(!vv) return;
+  function field(){
+    var a=document.activeElement;
+    return !!a && (a.tagName==="TEXTAREA" || (a.tagName==="INPUT" && !/^(button|checkbox|radio|range|file|submit)$/i.test(a.type)));
+  }
+  function fit(){
+    /* the layout viewport (clientHeight) keeps its height when the keyboard opens; the visual one loses the keyboard's */
+    var kb=field() && vv.height<root.clientHeight-100;
+    root.classList.toggle("kb",kb);
+    if(kb){
+      root.style.setProperty("--vvh",Math.round(vv.height)+"px");
+      if(window.scrollY || vv.offsetTop) window.scrollTo(0,0);
+    } else root.style.removeProperty("--vvh");
+  }
+  vv.addEventListener("resize",fit);
+  vv.addEventListener("scroll",fit);
+  document.addEventListener("focusin",function(){ setTimeout(fit,60); });
+  document.addEventListener("focusout",function(){ setTimeout(fit,60); });
+  function scrolls(e){
+    for(;e && e!==document.body;e=e.parentElement){
+      var o=getComputedStyle(e).overflowY;
+      if((o==="auto" || o==="scroll") && e.scrollHeight>e.clientHeight+1) return true;
+      if(e.tagName==="TEXTAREA" && e.scrollHeight>e.clientHeight+1) return true;
+    }
+    return false;
+  }
+  document.addEventListener("touchmove",function(ev){
+    if(root.classList.contains("kb") && !scrolls(ev.target)) ev.preventDefault();
+  },{passive:false});
+})();
 })();

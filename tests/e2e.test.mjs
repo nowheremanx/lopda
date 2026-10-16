@@ -2878,6 +2878,13 @@ const fits = (p) => p.evaluate(() => {
     const tap = e.matches("button, li[onclick], .lcd-menu li:not(.label), input, textarea");
     if (tap && e.getBoundingClientRect().height < 43.5) bad.push("under 44 px: " + (e.id || e.className || e.nodeName) + " " + e.textContent.slice(0, 20));
   }
+  /* soft keys are never cut off by the edge of the view (they were 8 px short on the list: padding inside a fixed 44 px row) */
+  const vr = view.getBoundingClientRect();
+  for (const k of view.querySelectorAll(".softkeys .sk")) {
+    if (k.closest("[hidden]") || !k.getClientRects().length) continue;
+    const r = k.getBoundingClientRect(), box = k.closest(".softkeys").getBoundingClientRect();
+    if (r.bottom > vr.bottom + 0.5 || r.right > vr.right + 0.5 || r.bottom > box.bottom + 0.5) bad.push("cut off: " + k.className + " " + k.textContent);
+  }
   const s = document.getElementById("screen").getBoundingClientRect();
   return { bad, w: Math.round(view.getBoundingClientRect().width), h: Math.round(view.getBoundingClientRect().height), screen: [s.width, s.height] };
 });
@@ -3353,6 +3360,46 @@ test("notes: 发送到… opens the share sheet with the text, or copies when th
   await n.p.click("#note-sheet li:nth-child(2)");
   await n.p.waitForFunction(() => /已复制/.test(document.getElementById("toast").textContent));
   assert.equal(await n.p.evaluate(() => navigator.clipboard.readText()), "10月15日 周四 · 九月初六\n寄给备忘录");
+  assert.deepEqual(notBlocked(n.errors), []);
+});
+
+test("notes: with the phone's keyboard up, the LCD takes the visible height and the case cannot be dragged", { skip, timeout: 60000 }, async (t) => {
+  /* iOS does not shrink the page for its keyboard; only the visual viewport loses its height. A stand-in visualViewport
+     plays the keyboard: 380 px of the 667 go under it */
+  const n = await notesPage(t, { hasTouch: true, init: () => {
+    const vv = new EventTarget();
+    vv.height = innerHeight; vv.width = innerWidth; vv.offsetTop = 0;
+    Object.defineProperty(window, "visualViewport", { value: vv });
+    window.__keyboard = (up) => { vv.height = up ? innerHeight - 380 : innerHeight; vv.dispatchEvent(new Event("resize")); };
+  } });
+  await n.open();
+  await n.key("a");
+  assert.equal(await n.p.evaluate(() => document.activeElement.id), "note-body");
+  await n.p.evaluate(() => window.__keyboard(true));
+  await n.p.waitForFunction(() => document.documentElement.classList.contains("kb"));
+  const m = await n.p.evaluate(() => {
+    const r = (s) => document.querySelector(s).getBoundingClientRect();
+    return { device: r(".device").height, screen: r(".screen").bottom, body: r("#note-body").bottom,
+      pad: getComputedStyle(document.getElementById("gamepad")).display, home: getComputedStyle(document.querySelector(".keys")).display };
+  });
+  assert.equal(m.device, 667 - 380);
+  assert.ok(m.screen <= 287 && m.body <= 287, JSON.stringify(m));
+  assert.deepEqual([m.pad, m.home], ["none", "none"]);
+  /* a drag on the bar does nothing; a drag in the text is the text's */
+  const drag = (sel) => n.p.evaluate((sel) => {
+    const e = document.querySelector(sel), r = e.getBoundingClientRect(), x = r.left + 10, y = r.top + 10;
+    const touch = new Touch({ identifier: 1, target: e, clientX: x, clientY: y });
+    const ev = new TouchEvent("touchmove", { touches: [touch], targetTouches: [touch], changedTouches: [touch], bubbles: true, cancelable: true });
+    e.dispatchEvent(ev);
+    return ev.defaultPrevented;
+  }, sel);
+  assert.equal(await drag("#note-back"), true);
+  await n.p.fill("#note-body", Array.from({ length: 40 }, (_, i) => "line " + i).join("\n"));
+  assert.equal(await drag("#note-body"), false);
+  /* the keyboard goes away: the case comes back */
+  await n.p.evaluate(() => { window.__keyboard(false); document.activeElement.blur(); });
+  await n.p.waitForFunction(() => !document.documentElement.classList.contains("kb"));
+  assert.notEqual(await n.p.evaluate(() => getComputedStyle(document.getElementById("gamepad")).display), "none");
   assert.deepEqual(notBlocked(n.errors), []);
 });
 

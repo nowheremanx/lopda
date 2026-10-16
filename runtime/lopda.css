@@ -31,6 +31,9 @@ body{background:var(--case);color:var(--ink);margin:0;display:flex;justify-conte
 .status{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:4px 10px;border-bottom:2px solid var(--ink);font-family:var(--f-pix);font-size:20px;line-height:1;font-variant-numeric:tabular-nums}
 .status .save{font-size:16px;color:var(--ink)}
 .view{flex:1;min-height:0;overflow:auto;position:relative}
+/* the phone's keyboard is up (core.js): the LCD takes the visible height; the case around it steps aside */
+html.kb .device{height:var(--vvh,100dvh);padding-block:calc(env(safe-area-inset-top,0px) + 4px) 4px;gap:0}
+html.kb .brand,html.kb .gamepad,html.kb .keys{display:none!important}
 .view[hidden]{display:none!important}
 .keys{display:flex;align-items:center;justify-content:space-between;padding-inline:8px}
 .grille{display:grid;grid-template-columns:repeat(6,6px);gap:5px}
@@ -83,7 +86,7 @@ textarea::placeholder{color:var(--ink-2)}
 .notes-list mark{background:var(--ink);color:var(--lcd)}
 .notes-list li.on mark{background:var(--lcd);color:var(--ink)}
 .notes-empty{padding:16px 12px;text-align:center;font-size:14px;line-height:1.5}
-#notes-keys{flex:none;padding:4px 6px}
+#notes-keys{flex:none;height:auto;padding:4px 6px}
 .notes-sheet .notes-status{flex:none;font-size:14px;text-align:center}
 .notes-sheet .notes-peek{flex:none;margin:0;max-height:5.6em;overflow:hidden;font-size:14px;line-height:1.4;white-space:pre-wrap;overflow-wrap:anywhere;border-top:1px dashed var(--ink-2);padding-top:4px}
 .notes-sheet .lcd-menu li{min-height:44px}
@@ -100,6 +103,7 @@ textarea::placeholder{color:var(--ink-2)}
 .empty{padding:28px 16px;text-align:center;color:var(--ink-2);font-size:15px;line-height:1.6}
 .editor{display:flex;flex-direction:column;height:100%}
 .editor textarea{flex:1;border:0;border-radius:0;padding:12px;background:transparent}
+.editor textarea:focus-visible{outline:none}
 .editor .bar .btn{min-height:44px}
 .editor .bar{justify-content:space-between}
 .note-when{flex:none;padding:3px 12px;font-size:13px;line-height:18px;color:var(--ink-2);border-bottom:1px solid var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
