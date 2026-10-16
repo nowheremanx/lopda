@@ -517,6 +517,27 @@ test("calendar: START goes to a date, Gregorian or lunar, by keys, keyboard digi
   assert.deepEqual(notBlocked(c.errors), []);
 });
 
+test("calendar: at 331x359 every lunar line in the month fits inside its cell, nothing cut", { skip, timeout: 30000 }, async (t) => {
+  const c = await calPage(t);
+  const { p } = c;
+  await c.boot(); await c.open();
+  await p.setViewportSize({ width: 375, height: 844 });
+  await p.evaluate(() => {
+    const screen = document.getElementById("screen"), status = screen.querySelector(".status");
+    screen.style.flex = "none";
+    screen.style.height = (359 + 12 + status.getBoundingClientRect().height) + "px";
+  });
+  assert.deepEqual(await p.locator("#v-cal").evaluate((view) => { const r = view.getBoundingClientRect(); return [r.width, r.height]; }), [331, 359]);
+  const cut = await p.locator("#cal-grid .cal-cell:not(.out)").evaluateAll((cells) => cells.flatMap((cell) => {
+    const text = cell.querySelector("span"), box = cell.getBoundingClientRect();
+    const inner = box.bottom - parseFloat(getComputedStyle(cell).borderBottomWidth), bottom = text.getBoundingClientRect().bottom;
+    return text.scrollHeight <= text.clientHeight && bottom <= inner + 0.1 ? []
+      : [{ day: cell.querySelector("b").textContent, text: text.textContent, scroll: text.scrollHeight, client: text.clientHeight, bottom, inner }];
+  }));
+  assert.equal(await p.locator("#cal-grid .cal-cell:not(.out)").count(), 31);
+  assert.deepEqual(cut, [], "every in-month lunar line fits");
+});
+
 test("calendar: month grid lunar lines fit at small screen sizes", { skip, timeout: 30000 }, async (t) => {
   const c = await calPage(t);
   const { p } = c;
@@ -734,6 +755,38 @@ test("dictionary: disable books, persist settings, and explain when all are off"
   await p.click("#dict-sheet .sk-b");
   await p.waitForFunction(() => LP.dict.lookup("apple").then((r) => r.length === 1));
   assert.equal(await p.textContent("#dict-sheet .lcd-menu li .dict-book-state"), "启用");
+  assert.deepEqual(errors, []);
+});
+
+test("dictionary: an import the storage refuses (full, private mode) says so plainly and leaves no half book", { skip, timeout: 60000 }, async (t) => {
+  const { writeStarDict } = await import("../tools/stardict-write.mjs");
+  const sd = writeStarDict({ bookname: "Tiny", entries: [{ word: "zyzzyva", text: "a weevil (test)" }] });
+  const files = [{ name: "tiny.ifo", mimeType: "text/plain", buffer: Buffer.from(sd.ifo) }, { name: "tiny.idx", mimeType: "application/octet-stream", buffer: sd.idx },
+    { name: "tiny.dict.dz", mimeType: "application/octet-stream", buffer: sd.dictdz }];
+  const { p, errors } = await dictPage(t);
+  /* the index goes in, the text does not: storage full */
+  await p.evaluate(() => {
+    const files = window.LopdaPlatform.files, real = files.put;
+    window.__puts = [];
+    files.put = (key, value) => {
+      window.__puts.push(key);
+      if (/\/data$/.test(key)) return Promise.reject(new DOMException("The quota has been exceeded.", "QuotaExceededError"));
+      return real.call(files, key, value);
+    };
+  });
+  await p.click("#dict-keys .sk-start");
+  await p.setInputFiles("#dict-file", files);
+  await p.waitForFunction(() => !document.getElementById("toast").hidden && /空间不够/.test(document.getElementById("toast").textContent), null, { timeout: 10000 });
+  assert.equal(await p.textContent("#toast"), "空间不够，或浏览器不让存（无痕模式）。");
+  const puts = await p.evaluate(() => window.__puts);
+  assert.equal(puts.length, 2, "the index was written, the text refused");
+  assert.deepEqual(await p.evaluate((keys) => Promise.all(keys.map((k) => window.LopdaPlatform.files.get(k))), puts), [undefined, undefined], "nothing of it stays in files");
+  const books = () => p.$$eval("#dict-sheet .lcd-menu li span", (l) => l.map((x) => x.textContent));
+  assert.deepEqual(await books(), ["ECDICT"]);
+  await p.reload({ waitUntil: "networkidle" });
+  await p.locator("#home .app", { hasText: "词典" }).click();
+  await p.click("#dict-keys .sk-start");
+  assert.deepEqual(await books(), ["ECDICT"], "no book doc stays either");
   assert.deepEqual(errors, []);
 });
 

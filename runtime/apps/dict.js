@@ -582,9 +582,16 @@ function importOne(g){
     /* the search keys are rebuilt on load; storing them would double the index */
     var stored={info:bk.info, index:{words:ix.words, off:ix.off, len:ix.len, head:ix.head}};
     var meta={name:name, words:bk.info.wordcount, syns:bk.info.synwordcount||0, added:Date.now()};
+    /* any failed write here is storage refusing (full, or Safari's private mode): the parts already written are taken
+       back, so no half book remains, and the user gets one plain line instead of the browser's error */
     return P.files.put("dict/"+id+"/index",stored).then(function(){ return P.files.put("dict/"+id+"/data",blob); })
       .then(function(){ return put(D.refs.books.doc(id),meta); }).then(function(ok){
-        if(!ok) throw new Error(tr("common.savefail",{code:"?"}));
+        if(!ok) throw new Error("not saved");
+      }).catch(function(){
+        var undo=function(q){ return q.then(null,function(){}); };
+        return Promise.all([undo(D.refs.books.doc(id).delete()), undo(P.files.del("dict/"+id+"/index")), undo(P.files.del("dict/"+id+"/data"))])
+          .then(function(){ var err=new Error(tr("dict.nospace")); err.nospace=true; throw err; });
+      }).then(function(){
         D.meta[id]=meta; D.books[id]={info:bk.info, name:bk.name, index:bk.index, data:blob};
         D.set.order=order().concat([id]); saveSet();
         toast(tr("dict.imported",{name:name, n:meta.words})); sfx("ok");
@@ -596,7 +603,7 @@ $("dict-file").addEventListener("change",function(){
   var groups;
   try{ groups=group(files); }catch(e){ toast(tr("dict.importfail",{msg:e.message})); sfx("err"); return; }
   groups.reduce(function(p,g){ return p.then(function(){ return importOne(g); }); },Promise.resolve())
-    .catch(function(e){ toast(tr("dict.importfail",{msg:String((e&&e.message)||(e&&e.code)||e).slice(0,100)})); sfx("err"); })
+    .catch(function(e){ toast(e&&e.nospace ? e.message : tr("dict.importfail",{msg:String((e&&e.message)||(e&&e.code)||e).slice(0,100)})); sfx("err"); })
     .then(function(){ D.busy=null; D.bpick=order().length-1; if(D.sheet==="books") renderSheet(); });
 });
 
