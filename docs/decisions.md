@@ -324,6 +324,7 @@
     **已定**（2026-10-11，runtime 0.5.0）：缓存名是 `VERSION + " " + self.registration.scope`，activate 只删除同一 scope 的旧缓存，
     外加 0.5.0 之前只按版本命名的旧缓存（过渡期内一个还没升级的旧预览仍可能清一次，之后不再发生）。读缓存也只读自己的。
   - 本地地址和 Pages 地址是两个站点，数据互不相通。
+  - **预览带提交号**（2026-10-16）：PR 预览发布前由 `tools/stamp-preview.mjs` 把 `RUNTIME_VERSION` 和 `sw.js` 的 `VERSION` 改成 `<x>+<sha7>`（只改发布的副本，不提交），PR 里每次 push 都换新缓存，手机不再停在旧代码；预览留言写出这个版本，可与设置里的版本对照。push 到 `main` 不加。
 
 ### 12.1 战斗（P2）
 

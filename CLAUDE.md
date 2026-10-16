@@ -21,7 +21,7 @@ runtime/        the PWA: index.html, core.js (shared LP object: utils, views, so
 sdk/            MIT. pad-shim.js (PAD bridge), lo-game.js (game framework), LO-GAME.md, lo-3d.js (3D), LO-3D.md, PROMPT.md, UI.md (app layout rules),
                 dev.html (app harness), template/, template-game/, template-vn/ (visual novel), fonts/ (lopix12, OFL)
 registry/       index.json (generated) + apps/<id>/{manifest.json,index.html,src/ (optional sources)}
-tools/          check-app.mjs, build-index.mjs, bundle-app.mjs (+ lo-game.mjs alias), lo-game-lib.mjs (Node 20+, no deps);
+tools/          check-app.mjs, build-index.mjs, bundle-app.mjs (+ lo-game.mjs alias), lo-game-lib.mjs, stamp-preview.mjs (Node 20+, no deps);
                 gen-lunar.py (one-off generator of the lunar table, needs PyEphem); gen-ecdict.mjs (one-off, ECDICT csv ->
                 vendor/ecdict/) with stardict-write.mjs (StarDict + dictzip writer, also used by tests)
 tests/          node:test suite (no deps): tools, strings, PAD shim, platform store, lo-game, negative, develop, notetext, zip, repo rules;
@@ -71,6 +71,10 @@ node --test                                  # the test suite; must pass
   pad-shim.js, lo-game.js) run in `node:vm` with small fakes (platform.test.mjs has an in-memory
   IndexedDB). It also guards repo rules: index.json in sync, RUNTIME_VERSION = sw.js VERSION,
   zh/en keys complete, lo-game hash released, SHELL files exist, every runtime/*.js is loaded by index.html and listed in SHELL (add new files to both).
+- PR previews (`.github/workflows/pages.yml`, `pr/<n>/`) run `tools/stamp-preview.mjs`, which stamps RUNTIME_VERSION and the sw.js
+  VERSION in the published copy as `<x>+<sha7>` of the PR head, so every push refreshes the phone's cache; the preview comment
+  shows that version (compare it with Settings). Never commit stamped files; pushes to main are not stamped.
+  `tests/stamp-preview.test.mjs` covers it.
 - `tests/app-vm.mjs` runs a bundled app in Node with a fake DOM and a manual clock. `tests/frame-hashes.mjs`
   uses it to prove a change leaves every frame identical (VecDream, and zhenyao-tower's scripted scenes in
   `tests/zhenyao-play.js`); `tests/zhenyao-budget.test.mjs` checks the per-frame triangle and light budget
