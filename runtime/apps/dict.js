@@ -255,13 +255,29 @@ function entrySheet(sh){
   });
   sh.appendChild(page);
   D.menuBox=el("div","sel-menu"); D.menuBox.hidden=true; sh.appendChild(D.menuBox);
-  /* only once it is in the page: a detached element keeps no scroll position */
-  page.scrollTop=e.scrollTop||0;
   D.keys=el("div");
   entryKeys();
   sh.appendChild(D.keys);
+  fitEntry();
+  /* only once it is in the page and sized: a detached element keeps no scroll position */
+  page.scrollTop=e.scrollTop||0;
   updateEntryPosition(e,page,count);
 }
+/* the entry shows whole lines only, as an LCD would: the page's height is a multiple of LINE, and what is left of the
+   space it gets stays blank below it. Measured again on resize and when the chin pad comes or goes */
+function fitEntry(){
+  var page=$("dict-page"); if(!page || D.sheet!=="entry") return;
+  page.style.flex=""; page.style.height=""; page.style.marginBottom="";
+  var avail=page.getBoundingClientRect().height, h=Math.floor(avail/LINE)*LINE;
+  page.style.flex="none"; page.style.height=h+"px"; page.style.marginBottom=Math.max(0,avail-h)+"px";
+}
+function refitEntry(){
+  var page=$("dict-page"); if(!page || D.sheet!=="entry") return;
+  var top=page.scrollTop; fitEntry(); page.scrollTop=top;
+  var count=document.querySelector("#dict-sheet .sheet-title small");
+  if(count && D.entry) updateEntryPosition(D.entry,page,count);
+}
+window.addEventListener("resize",function(){ clearTimeout(D.fitTimer); D.fitTimer=setTimeout(refitEntry,100); });
 function entryKeys(){
   var e=D.entry, word=headOf(e), keyset;
   if(SEL.s){
@@ -347,7 +363,8 @@ function quoteSel(){
 }
 function entryPageInfo(page){
   var step=Math.max(1,Math.floor(page.clientHeight/24)-1)*24;
-  var maxTop=Math.max(0,Math.floor((page.scrollHeight-page.clientHeight)/24)*24);
+  /* the true end, which need not be a whole line down: the last step goes exactly there */
+  var maxTop=Math.max(0,page.scrollHeight-page.clientHeight);
   var pages=Math.max(1,Math.ceil(maxTop/step)+1);
   var current=maxTop && page.scrollTop>=maxTop-1 ? pages : Math.min(pages,Math.floor(page.scrollTop/step)+1);
   return {step:step, maxTop:maxTop, current:current, pages:pages};
@@ -671,6 +688,7 @@ LP.builtin({id:"dict", label:"app.dict", icon:function(){ return ICON; }, view:"
   open:function(){ openDict(); },
   leave:function(){ D.sheet=""; D.entry=null; D.review=null; D.stack=[]; D.armed=null; D.q=""; var i=$("dict-q"); if(i){ i.value=""; i.blur(); } renderSheet(); },
   lang:function(){ if(!$("v-dict").hidden){ note(); renderMainKeys(); renderSheet(); update(); } },
+  padLayout:function(){ if(!$("v-dict").hidden) setTimeout(refitEntry,0); },
   ready:function(){
     var base=S.db.doc("data/users/local/dict");
     D.refs={set:base, books:base.collection("books")};

@@ -662,7 +662,7 @@ test("dictionary: browse matches, restore the selected row, and page entries", {
   assert.ok(entryHeight.height > entryHeight.visible, `the long entry has content to scroll: ${JSON.stringify(entryHeight)}`);
   const paging = {
     step: Math.max(1, Math.floor(entryHeight.visible / 24) - 1) * 24,
-    maxTop: Math.max(0, Math.floor((entryHeight.height - entryHeight.visible) / 24) * 24)
+    maxTop: Math.max(0, entryHeight.height - entryHeight.visible)   /* the true end, not a whole line (0.20.1) */
   };
   const pages = Math.max(1, Math.ceil(paging.maxTop / paging.step) + 1);
   const target = Math.min(paging.maxTop, Math.round(entryHeight.top / 24) * 24 + paging.step);
@@ -691,7 +691,7 @@ test("dictionary: browse matches, restore the selected row, and page entries", {
   const reviewPages = await p.evaluate(() => {
     const page = document.querySelector("#dict-sheet .dict-page");
     const step = Math.max(1, Math.floor(page.clientHeight / 24) - 1) * 24;
-    const maxTop = Math.max(0, Math.floor((page.scrollHeight - page.clientHeight) / 24) * 24);
+    const maxTop = Math.max(0, page.scrollHeight - page.clientHeight);
     return Math.max(1, Math.ceil(maxTop / step) + 1);
   });
   assert.equal(await p.textContent("#dict-sheet .sheet-title small"), `2/2 1/${reviewPages}`);
@@ -1000,6 +1000,73 @@ test("dictionary: a drag held at the bottom edge of an entry scrolls it and grow
   await entryPointer(p, "pointermove", x, frame.bottom + 30, 5);
   await p.waitForFunction(() => { const g = document.querySelector("#dict-sheet .dict-page"); return g.scrollTop >= g.scrollHeight - g.clientHeight - 1; }, null, { timeout: 20000 });
   await entryPointer(p, "pointerup", x, frame.bottom + 30, 5);
+  assert.deepEqual(errors, []);
+});
+
+/* an entry shows whole lines, as an LCD would, and ▼ reaches its true end even when that is not a whole line down
+   (PR #43 stopped at the last whole line, so an entry a few pixels too tall hid half its last line) */
+test("dictionary: the entry page is whole lines high; ▼ reaches the very end, ▲ comes back to the top", { skip, timeout: 120000 }, async (t) => {
+  const { p, errors } = await dictPage(t, { viewport: { width: 390, height: 640 } });
+  const geom = () => p.evaluate(() => { const g = document.querySelector("#dict-sheet .dict-page");
+    return { top: g.scrollTop, max: g.scrollHeight - g.clientHeight, h: g.clientHeight, css: getComputedStyle(g).height }; });
+  const settle = async () => { let a = -1, b = (await geom()).top;
+    while (a !== b) { await p.waitForTimeout(250); a = b; b = (await geom()).top; } };
+  await openWord(p, "fang", /fang|尖牙|牙/);
+  /* whole lines at three window sizes, and the soft keys stay inside the sheet */
+  const keysIn = () => p.evaluate(() => document.querySelector("#dict-sheet .softkeys").getBoundingClientRect().bottom
+    <= document.getElementById("dict-sheet").getBoundingClientRect().bottom + 0.5);
+  for (const [w, h] of [[331, 359], [346, 518], [386, 606]]) {
+    await p.setViewportSize({ width: w, height: h });
+    await p.waitForTimeout(300);
+    const g = await geom();
+    assert.equal(g.h % 24, 0, `whole lines in a ${w}x${h} window (${g.h} px)`);
+    assert.ok(await keysIn(), `the keys stay on screen in a ${w}x${h} window`);
+  }
+  /* and on the smallest screen itself, 331x359 (as the calendar's test sizes it) */
+  await p.setViewportSize({ width: 375, height: 844 });
+  await p.evaluate(() => {
+    const screen = document.getElementById("screen"), status = screen.querySelector(".status");
+    screen.style.flex = "none";
+    screen.style.height = (359 + 12 + status.getBoundingClientRect().height) + "px";
+    window.dispatchEvent(new Event("resize"));
+  });
+  await p.waitForTimeout(300);
+  assert.deepEqual(await p.evaluate(() => { const r = document.getElementById("v-dict").getBoundingClientRect(); return [r.width, r.height]; }), [331, 359]);
+  const small = await geom();
+  assert.ok(small.h > 0 && small.h % 24 === 0, `whole lines on a 331x359 screen (${small.h} px)`);
+  assert.ok(await keysIn(), "the keys stay on screen at 331x359");
+  await p.evaluate(() => { document.getElementById("screen").style.flex = ""; document.getElementById("screen").style.height = ""; });
+  /* a height where the page as it was before (filling all its space) overflows by 1-23 px: measured, not assumed */
+  let found = 0;
+  for (let h = 420; h <= 900 && !found; h++) {
+    await p.setViewportSize({ width: 390, height: h });
+    const over = await p.evaluate(() => {
+      const g = document.querySelector("#dict-sheet .dict-page"), keep = [g.style.flex, g.style.height, g.style.marginBottom];
+      g.style.flex = ""; g.style.height = ""; g.style.marginBottom = "";
+      const o = g.scrollHeight - g.clientHeight;
+      [g.style.flex, g.style.height, g.style.marginBottom] = keep;
+      return o;
+    });
+    if (over >= 1 && over <= 23) found = h;
+  }
+  assert.ok(found, "a height where the old page overflowed by under a line");
+  await p.waitForTimeout(300);
+  const g0 = await geom();
+  assert.equal(g0.h % 24, 0, `whole lines (${g0.h} px)`);
+  assert.ok(g0.max > 0, "the entry runs past the page");
+  /* ▼ to the end: exactly scrollHeight - clientHeight, and the last line shows whole */
+  for (let i = 0; i < 40 && (await geom()).top < g0.max - 0.5; i++) { await p.keyboard.press("ArrowDown"); await settle(); }
+  const end = await geom();
+  assert.ok(Math.abs(end.top - end.max) <= 1, `▼ reaches the end (${end.top} of ${end.max})`);
+  const last = await p.evaluate(() => { const g = document.querySelector("#dict-sheet .dict-page"), l = [...g.querySelectorAll(".dl")].pop();
+    return [l.getBoundingClientRect().bottom, g.getBoundingClientRect().bottom]; });
+  assert.ok(last[0] <= last[1] + 0.5, `the last line is whole (${last[0]} <= ${last[1]})`);
+  const pages = await p.textContent("#dict-sheet .sheet-title small");
+  const m = pages.match(/(\d+)\/(\d+)/);
+  assert.ok(m && m[1] === m[2], `the counter is on its last page (${pages})`);
+  /* ▲ back to the top */
+  for (let i = 0; i < 40 && (await geom()).top > 0; i++) { await p.keyboard.press("ArrowUp"); await settle(); }
+  assert.equal((await geom()).top, 0);
   assert.deepEqual(errors, []);
 });
 
