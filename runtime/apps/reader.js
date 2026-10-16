@@ -207,7 +207,7 @@ function shelfButton(b){
 }
 
 /* ---------- a book: one chapter in the DOM, cut into pages by CSS columns ---------- */
-function mode(read){ $("rd-shelf").hidden=read; $("rd-book").hidden=!read; }
+function mode(read){ $("rd-shelf").hidden=read; $("rd-book").hidden=!read; LP.keepAwake(read); }   /* a book page keeps the screen on */
 function openBook(id){
   var m=R.meta[id];
   R.id=id; R.book=null; R.cum={}; R.sheet=""; SEL.s=null; R.low=null; R.back=null;
@@ -1068,7 +1068,7 @@ LP.builtin({id:"reader", label:"app.reader", icon:function(){ return ICON; }, vi
   open:function(){ openReader(); },
   leave:function(){
     if(R.sheet==="thought") saveThought();
-    flushMeta(); unmark();
+    flushMeta(); unmark(); LP.keepAwake(false);
     R.sheet=""; SEL.s=null; R.low=null; R.armed=null;
     $("rd-sheet").hidden=true; $("rd-def").hidden=true; $("rd-help").hidden=true; $("rd-selmenu").hidden=true;
     $("screen").classList.remove("rd-eink");

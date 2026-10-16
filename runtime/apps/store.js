@@ -177,6 +177,7 @@ function runApp(a){
   $("run-err").hidden=true;
   show("run");
   showPad(!!a.buttons);
+  LP.keepAwake(true);   /* a running app keeps the screen on */
   freshRunFrame();
   var start=function(h){ $("run-frame").srcdoc=lopdaWrapApp(h,{lang:I18N.lang, music:true, ambience:true}); };
   if(a.html){ start(a.html); return; }
@@ -407,7 +408,7 @@ LP.builtin({id:"store", label:"app.store", icon:"store", view:"store",
   ready:function(){ loadRegistry(); }});
 /* the runner owns the run view but has no icon of its own: apps appear on the home screen */
 LP.builtin({id:"run", view:"run", keepPad:true,
-  leave:function(){ closeAsk(false); LP.chip.stop(); $("run-frame").srcdoc=""; S.running=null; },
+  leave:function(){ closeAsk(false); LP.chip.stop(); LP.keepAwake(false); $("run-frame").srcdoc=""; S.running=null; },
   lang:function(){
     /* apps read PAD.lang once at start: a running app is started again in the new language */
     if(S.running && !$("v-run").hidden) runApp(S.running);
