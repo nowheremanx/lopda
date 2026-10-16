@@ -54,7 +54,7 @@
       "sense.motion": "「{name}」要用倾斜感应。", "sense.mic": "「{name}」要用麦克风，只听音量和音高，不录音。",
       "sense.micnote": "开着麦克风时，手机的静音键不起作用。", "sense.allow": "允许", "sense.deny": "不允许",
       "sense.tap.motion": "点一下开启倾斜感应", "sense.tap.mic": "点一下开启麦克风", "sense.listening": "麦克风开着",
-      "set.sense": "传感器", "set.sense.none": "还没有程序用过倾斜感应或麦克风。", "set.sense.motion": "倾斜", "set.sense.mic": "麦克风",
+      "set.sense": "传感器", "set.sense.none": "还没有程序用过倾斜感应或麦克风。", "set.sense.motion": "倾斜", "set.sense.mic": "麦克风", "set.sense.and": "、",
       "set.sense.revoke": "撤销", "set.sense.note": "撤销以后，这个程序下次要用时会再问一次。",
 
       "file.export": "导出「{name}」？", "file.import": "从文件导入？", "file.ok": "好", "file.pick": "选文件",
@@ -326,7 +326,7 @@
       "sense.motion": "\u201c{name}\u201d wants to use tilt.", "sense.mic": "\u201c{name}\u201d wants the microphone: loudness and pitch only, never a recording.",
       "sense.micnote": "While the microphone is on, the phone's silent switch does nothing.", "sense.allow": "Allow", "sense.deny": "Don't allow",
       "sense.tap.motion": "Tap to turn on tilt", "sense.tap.mic": "Tap to turn on the microphone", "sense.listening": "Microphone on",
-      "set.sense": "Sensors", "set.sense.none": "No program has used tilt or the microphone yet.", "set.sense.motion": "tilt", "set.sense.mic": "microphone",
+      "set.sense": "Sensors", "set.sense.none": "No program has used tilt or the microphone yet.", "set.sense.motion": "tilt", "set.sense.mic": "microphone", "set.sense.and": ", ",
       "set.sense.revoke": "Revoke", "set.sense.note": "After a revoke, the program asks again the next time.",
 
       "file.export": "Export \u201c{name}\u201d?", "file.import": "Import a file?", "file.ok": "OK", "file.pick": "Choose",

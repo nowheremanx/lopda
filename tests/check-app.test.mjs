@@ -98,10 +98,16 @@ const FAILS = [
   ["long description", { manifest: (m) => (m.description = "长".repeat(81)) }, /description must be 1-80/],
   ["no author", { manifest: (m) => delete m.author }, /author is required/],
   ["GPL licence", { manifest: (m) => (m.license = "GPL-3.0") }, /license must be one of/],
-  ["unknown permission", { manifest: (m) => (m.permissions = ["camera"]) }, /unknown permission "camera": allowed are files/],
+  ["unknown permission", { manifest: (m) => (m.permissions = ["camera"]) }, /unknown permission "camera": allowed are files, motion, mic/],
   ["permission twice", { manifest: (m) => (m.permissions = ["files", "files"]) }, /the same one twice/],
   ["PAD.exportFile without the files permission", withCode('PAD.exportFile({ name: "a.txt", type: "text/plain", data: "a" });'), /need "permissions": \["files"\]/],
   ["PAD.importFile without the files permission", withCode("PAD.importFile({ accept: ['text/plain'] });"), /need "permissions": \["files"\]/],
+  ["sensor motion: PAD.motion without the motion permission", withCode("if (PAD.motion) PAD.motion.start();"), /PAD\.motion and the "tilt" \/ "shake" events need "permissions": \["motion"\]/],
+  ["sensor motion: a tilt listener without the motion permission", withCode('PAD.on("tilt", function (t) {});'), /need "permissions": \["motion"\]/],
+  ["sensor motion: a shake listener without the motion permission", withCode("PAD.on('shake', function () {});"), /need "permissions": \["motion"\]/],
+  ["sensor mic: PAD.mic without the mic permission", withCode("if (PAD.mic) PAD.mic.start();"), /PAD\.mic and the "sound" event need "permissions": \["mic"\]/],
+  ["sensor mic: a sound listener without the mic permission", withCode('PAD.on("sound", function (s) {});'), /need "permissions": \["mic"\]/],
+  ["sensor mic: motion declared does not cover the mic", { manifest: (m) => (m.permissions = ["motion"]), ...withCode("PAD.motion.start(); PAD.mic.start();") }, /need "permissions": \["mic"\]/],
   ["buttons on lopda/0", { manifest: (m) => (m.spec = "lopda/0") }, /buttons needs spec "lopda\/1"/],
   ["buttons not boolean", { manifest: (m) => (m.buttons = "yes") }, /buttons must be true or false/],
   ["too big", { html: (h) => h + "<!--" + "x".repeat(512 * 1024) + "-->" }, /the limit is 524288/],
@@ -154,6 +160,8 @@ const PASSES = [
   ["a tile-map row is not a colour", withCode('var MAP = ["#bbbbbb#", "#......#"];')],
   ["no i18n is only advice", { manifest: (m) => delete m.i18n }],
   ["the files permission with the file API", { manifest: (m) => (m.permissions = ["files"]), ...withCode("if (PAD.importFile) PAD.importFile({ accept: [] });") }],
+  ["sensor permissions with PAD.motion and PAD.mic", { manifest: (m) => (m.permissions = ["motion", "mic"]),
+    ...withCode('if (PAD.motion) { PAD.motion.start(); PAD.on("tilt", function () {}); } if (PAD.mic) PAD.mic.start();') }],
   ["lopda/0 without buttons or PAD.on", {
     manifest: (m) => { m.spec = "lopda/0"; delete m.buttons; },
     html: (h) => h.replace(/PAD\.sfx\(sound\);/, "").replace(/PAD\.on\("press"[\s\S]*?\n {2}\}\);/, ""),
@@ -180,6 +188,13 @@ test("warns about a files permission the app never uses", (t) => {
   const r = tool("check-app.mjs", counter(t, { manifest: (m) => (m.permissions = ["files"]) }));
   assert.equal(r.code, 0, r.out);
   assert.match(r.out, /"files" is declared but PAD\.exportFile\/importFile are never used/);
+});
+
+test("sensor: warns about a motion or mic permission the app never uses", (t) => {
+  const r = tool("check-app.mjs", counter(t, { manifest: (m) => (m.permissions = ["motion", "mic"]) }));
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /"motion" is declared but PAD\.motion/);
+  assert.match(r.out, /"mic" is declared but PAD\.mic/);
 });
 
 test("info for a manifest without i18n", (t) => {
