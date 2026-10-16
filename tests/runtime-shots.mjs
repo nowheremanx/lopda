@@ -136,10 +136,12 @@ async function capture(rootArg, outArg) {
     const [d] = await Promise.all([p.waitForEvent("download", { timeout: 15000 }), action()]);
     await d.saveAs(join(out, name)); names.push(name);
   };
-  const LABEL = { notes: "记事本", paint: "点阵画板", camera: "点阵相机", cutter: "裁片机", darkroom: "冲洗店", cart: "卡带机", store: "应用商店", settings: "设置" };
+  const LABEL = { calendar: "万年历", notes: "记事本", paint: "点阵画板", camera: "点阵相机", cutter: "裁片机", darkroom: "冲洗店", cart: "卡带机", store: "应用商店", settings: "设置" };
   const tile = (name) => p.locator("#home .app", { has: p.locator(".label", { hasText: new RegExp("^" + LABEL[name] + "$") }) }).click();
   const home = async () => { await p.click("#home-key"); await p.waitForTimeout(200); };
 
+  /* the calendar may ask jsDelivr for a year's days off; answer 404 so a capture never depends on the network */
+  await p.route("https://cdn.jsdelivr.net/**", (r) => r.fulfill({ status: 404, body: "not found" }));
   await p.goto(base + "/runtime/", { waitUntil: "load" });
   await p.waitForFunction(() => window.LopdaPlatform && window.LopdaStrings);
   await p.waitForFunction(() => document.getElementById("savestate").textContent !== "启动中…", null, { timeout: 8000 });
@@ -311,6 +313,32 @@ async function capture(rootArg, outArg) {
   await shot("20-runner");
   await p.click("#run-back"); await p.waitForTimeout(500);
   await shot("21-home-installed");
+
+  /* calendar (0.22.0+): a diary on the 5th, an anniversary added on the 15th through the day sheet, the 20th selected,
+     then the 15th's day sheet. Today is 2026-10-11 (the fixed clock) */
+  if (await p.locator("#home .app", { has: p.locator(".label", { hasText: /^万年历$/ }) }).count()) {
+    await p.evaluate(() => LP.S.refs.notes.doc().set({ body: "10月5日 周一 · 八月廿五\n秋天第一次穿外套。", day: "2026-10-05", created: Date.now(), updated: Date.now() }));
+    await p.evaluate(() => LP.refresh("notes"));
+    await tile("calendar"); await p.locator("#v-cal:not([hidden])").waitFor(); await p.waitForTimeout(400);
+    const cell = (d) => p.locator("#cal-grid .cal-cell:not(.out)").nth(d - 1);
+    await cell(15).click(); await cell(15).click();
+    await p.locator("#cal-sheet:not([hidden])").waitFor();
+    await p.click("#cal-sheet .sk-a");
+    await p.fill("#cal-name", "结婚纪念日");
+    await p.click("#cal-sheet .sk-a");
+    await p.waitForFunction(() => /结婚纪念日/.test(document.getElementById("cal-sheet").textContent));
+    await p.click("#cal-sheet .sk-b"); await p.waitForTimeout(200);
+    await cell(20).click(); await p.waitForTimeout(200);
+    await shot("22-calendar-month");
+    await cell(15).click(); await cell(15).click();
+    await p.locator("#cal-sheet:not([hidden])").waitFor();
+    await shot("23-calendar-day-sheet");
+    await p.click("#cal-sheet .sk-b"); await p.waitForTimeout(200);
+    await cell(5).click(); await cell(5).click();
+    await p.locator("#cal-sheet:not([hidden])").waitFor();
+    await shot("24-calendar-diary-day");
+    await home();
+  }
 
   await browser.close(); server.close();
   await rm(scratch, { recursive: true, force: true });
