@@ -32,7 +32,7 @@ var N={
 function live(){ return S.notes.filter(function(n){ return !n.deleted; }); }
 function byId(id){ for(var i=0;i<S.notes.length;i++) if(S.notes[i].id===id) return S.notes[i]; return null; }
 function createdOf(n){ return n.created || n.updated || 0; }
-function isQuote(n){ return n.src==="reader" || n.src==="dict"; }
+function isQuote(n){ return NT.quote(n); }
 function sorted(list){
   return list.slice().sort(function(a,b){ return ((b.pinned?1:0)-(a.pinned?1:0)) || ((b.updated||0)-(a.updated||0)); });
 }

@@ -2977,6 +2977,27 @@ test("notes: tags from #words, the 日记 and 摘抄 groups, filtering and B bac
   assert.deepEqual(notBlocked(n.errors), []);
 });
 
+test("notes: 摘抄 also holds quotes without src: one written before 0.21.0, and one that came back from an export", { skip, timeout: 60000 }, async (t) => {
+  const n = await notesPage(t);
+  await n.p.evaluate(async () => {
+    await LP.S.refs.notes.doc().set({ body: "《词典》\n\n《词典》 green\n「pigment」", updated: Date.now() - 5000 });
+    await LP.S.refs.notes.doc().set({ body: "读《红楼梦》\n第一回", updated: Date.now() - 6000 });
+  });
+  await n.open();
+  const dir = tempDir(t);
+  await writeFile(join(dir, "quote.md"), "---\ncreated: 2026-10-01T10:00:00+08:00\ntags: []\n---\n《Alice’s Adventures in Wonderland》\n\n《Alice’s Adventures in Wonderland》 I. Down the Rabbit-Hole\n「Alice」\n");
+  await n.p.setInputFiles("#notes-file", join(dir, "quote.md"));
+  await n.p.waitForFunction(() => /导入 1 篇/.test(document.getElementById("toast").textContent));
+  const d = await n.docs();
+  assert.ok(d.every((x) => !("src" in x)), JSON.stringify(d));
+  await n.key("start", "a");
+  assert.deepEqual(await n.sheet(), ["*日记0", "摘抄2"]);
+  await n.key("down", "a");
+  assert.equal(await n.p.textContent("#notes-filter"), "摘抄 · 2 篇");
+  assert.deepEqual(await n.rows(), ["*《词典》", "《Alice’s Adventures in Wonderland》"]);
+  assert.deepEqual(notBlocked(n.errors), []);
+});
+
 test("notes: Chinese search as you type, the hit inverted in a snippet; ▼ to the results; B clears", { skip, timeout: 60000 }, async (t) => {
   const n = await notesPage(t);
   await n.p.evaluate(async () => {

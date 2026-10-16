@@ -9,6 +9,24 @@ const strings = (lang) => { const s = runScript("runtime/strings.js", { navigato
 const zh = strings("zh-CN"), en = strings("en-US");
 const plain = (v) => JSON.parse(JSON.stringify(v));
 
+test("quote: src reader or dict; or no src and a 《…》 title (old quotes, quotes after export and import)", () => {
+  assert.equal(NT.quote({ body: "《Alice》\n\n「text」", src: "reader" }), true);
+  assert.equal(NT.quote({ body: "《词典》", src: "dict" }), true);
+  assert.equal(NT.quote({ body: "anything", src: "dict" }), true);
+  /* written before 0.21.0: no src */
+  assert.equal(NT.quote({ body: "《Alice’s Adventures in Wonderland》\n\n「Down the Rabbit-Hole」", updated: 1 }), true);
+  /* back from an export: front matter parsed off, the body as it was, no src */
+  const back = NT.parseFront("---\ncreated: 2026-10-14T09:41:00+08:00\ntags: []\n---\n《红楼梦》 第一回\n「满纸荒唐言」\n");
+  assert.equal(NT.quote({ body: back.body }), false, "the reader's quote line is not the title");
+  assert.equal(NT.quote({ body: NT.parseFront("---\ntags: []\n---\n《红楼梦》\n\n《红楼梦》 第一回\n「满纸荒唐言」").body }), true);
+  assert.equal(NT.quote({ body: "  《词典》  \n" }), true, "the title is trimmed");
+  /* one or more characters between the brackets, nothing else on the line */
+  for (const body of ["《》", "《红楼梦》读后", "读《红楼梦》", "《红楼梦》《西游记》", "红楼梦", "", "\n《红楼梦》"]) assert.equal(NT.quote({ body }), false, body);
+  /* a src that is not a quote's wins over the title */
+  assert.equal(NT.quote({ body: "《红楼梦》", src: "other" }), false);
+  assert.equal(NT.quote(null), false);
+});
+
 test("tags: # and ＃, Chinese and English, in order, once each", () => {
   assert.deepEqual(plain(NT.tags("今天 #读书 读完了 #idea_1，还有＃想法。#读书 again")), ["读书", "idea_1", "想法"]);
   assert.deepEqual(plain(NT.tags("#Idea and #ｉｄｅａ and #IDEA")), ["Idea"]);
