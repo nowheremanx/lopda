@@ -218,6 +218,8 @@ test("lopdaWrapApp puts CSP and shim first in every shape of document", () => {
   assert.ok(wrap("<p>x</p>", { music: 1 }).includes(")();"), "music only when it is true");
   assert.ok(wrap("<p>x</p>", { lang: "en", music: true, ambience: true }).includes('({"lang":"en","music":true,"ambience":true});'), "passes ambience");
   assert.ok(wrap("<p>x</p>", { ambience: "yes" }).includes(")();"), "ambience only when it is true");
+  assert.ok(wrap("<p>x</p>", { music: true, ambience: true, sensors: true }).includes('({"music":true,"ambience":true,"sensors":true});'), "passes sensors");
+  assert.ok(wrap("<p>x</p>", { sensors: 1 }).includes(")();"), "sensors only when it is true");
   /* the injected shim is the real function source and runs on its own */
   const src = wrap("<p>x</p>").match(/<script>([\s\S]*?)<\/script>/)[1];
   assert.doesNotThrow(() => new vm.Script(src));
@@ -257,4 +259,67 @@ test("file calls reject on the runtime's refusal, bad arguments and files over 2
   const big = "data:image/png;base64," + "A".repeat(2.6 * 1024 * 1024);
   a.PAD.exportFile({ name: "b.png", type: "image/png", data: big });
   assert.equal(a.posted().length, 2);
+});
+
+/* ---------- tilt and the microphone (runtime 0.24.0, SPEC.md 6.4) ---------- */
+test("sensor: PAD.motion and PAD.mic exist only when the runtime offers them", () => {
+  assert.equal(app().PAD.motion, undefined);
+  assert.equal(app({ music: true, ambience: true }).PAD.mic, undefined);
+  const { PAD } = app({ sensors: true });
+  assert.deepEqual(Object.keys(PAD.motion).sort(), ["start", "stop", "zero"]);
+  assert.deepEqual(Object.keys(PAD.mic).sort(), ["start", "stop"]);
+  assert.ok(Object.isFrozen(PAD.motion) && Object.isFrozen(PAD.mic));
+});
+
+test("sensor: start() asks the runtime and settles from its matching reply; stop and zero post", async () => {
+  const a = app({ sensors: true });
+  const m = a.PAD.motion.start(), k = a.PAD.mic.start();
+  a.PAD.motion.zero(); a.PAD.motion.stop(); a.PAD.mic.stop();
+  const [pm, pk, ...rest] = a.posted();
+  assert.deepEqual(pm, { op: "sense", i: pm.i, kind: "motion", action: "start", pad: 1 });
+  assert.deepEqual(pk, { op: "sense", i: pk.i, kind: "mic", action: "start", pad: 1 });
+  assert.deepEqual(rest, [
+    { op: "sense", kind: "motion", action: "zero", pad: 1 },
+    { op: "sense", kind: "motion", action: "stop", pad: 1 },
+    { op: "sense", kind: "mic", action: "stop", pad: 1 },
+  ]);
+  a.fromRuntime({ pad: 1, op: "sensed", i: pk.i, v: "on" }, {});   /* not from the parent: ignored */
+  a.fromRuntime({ pad: 1, op: "sensed", i: pk.i, v: "none" });
+  a.fromRuntime({ pad: 1, op: "sensed", i: pm.i, v: "on" });
+  assert.deepEqual(await Promise.all([m, k]), ["on", "none"]);
+});
+
+test("sensor: without the permission the runtime says denied, and anything odd reads as denied", async () => {
+  const a = app({ sensors: true });
+  const m = a.PAD.motion.start(), k = a.PAD.mic.start();
+  const [pm, pk] = a.posted();
+  a.fromRuntime({ pad: 1, op: "sensed", i: pm.i, v: "denied" });
+  a.fromRuntime({ pad: 1, op: "sensed", i: pk.i, v: { evil: 1 } });
+  assert.deepEqual(await Promise.all([m, k]), ["denied", "denied"]);
+});
+
+test("sensor: tilt, shake and sound events reach PAD.on listeners; malformed ones are dropped", () => {
+  const a = app({ sensors: true }), log = [];
+  a.PAD.on("tilt", (t) => log.push(["tilt", t.x, t.y, t.heading]));
+  a.PAD.on("shake", () => log.push(["shake"]));
+  const snd = (s) => log.push(["sound", s.level, s.pitch]);
+  a.PAD.on("sound", snd);
+  a.fromRuntime({ pad: 1, op: "tilt", x: 0.5, y: -0.25, heading: 90 });
+  a.fromRuntime({ pad: 1, op: "tilt", x: 0, y: 0, heading: null });
+  a.fromRuntime({ pad: 1, op: "tilt", x: 5, y: 0 });                /* out of range */
+  a.fromRuntime({ pad: 1, op: "tilt", x: "1", y: 0 });              /* not a number */
+  a.fromRuntime({ pad: 1, op: "shake" });
+  a.fromRuntime({ pad: 1, op: "sound", level: 0.5, pitch: 440 });
+  a.fromRuntime({ pad: 1, op: "sound", level: 0, pitch: "x" });
+  a.fromRuntime({ pad: 1, op: "shake" }, {});                       /* not from the parent */
+  a.PAD.off("sound", snd);
+  a.fromRuntime({ pad: 1, op: "sound", level: 1, pitch: null });
+  assert.deepEqual(log, [["tilt", 0.5, -0.25, 90], ["tilt", 0, 0, null], ["shake"], ["sound", 0.5, 440], ["sound", 0, null]]);
+});
+
+test("sensor: an app on an older runtime gets no sensor events", () => {
+  const a = app(), log = [];
+  a.PAD.on("tilt", () => log.push(1));
+  a.fromRuntime({ pad: 1, op: "tilt", x: 0, y: 0, heading: null });
+  assert.deepEqual(log, []);
 });

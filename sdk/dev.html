@@ -21,6 +21,11 @@
   html { touch-action:manipulation; }
   #pad, #pad button { touch-action:none; }
   #pad button { min-width:52px; }
+  #sense { display:flex; flex-direction:column; gap:8px; border:1px solid #4a4f45; padding:8px; }
+  #tiltpad { position:relative; width:120px; height:120px; background:#1b1d1a; border:1px solid #4a4f45; touch-action:none; cursor:grab; flex:none; }
+  #tiltpad::before, #tiltpad::after { content:""; position:absolute; background:#4a4f45; }
+  #tiltpad::before { left:50%; top:0; bottom:0; width:1px; } #tiltpad::after { top:50%; left:0; right:0; height:1px; }
+  #tiltdot { position:absolute; width:16px; height:16px; margin:-8px 0 0 -8px; left:50%; top:50%; background:var(--paper); }
 </style>
 </head>
 <body>
@@ -51,6 +56,23 @@
       <input type="range" id="amblevel" min="0" max="1" step="0.05" value="0.6" style="width:120px">
       <span id="amblv">0.60</span>
     </div>
+    <div id="sense">
+      <div>Sensors (PAD.motion, PAD.mic): <span id="sensestate">off</span></div>
+      <div class="row">
+        <div id="tiltpad" title="drag to tilt; let go to recentre"><div id="tiltdot"></div></div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <span id="tiltval">x 0 · y 0</span>
+          <button id="shake" type="button">Shake</button>
+          <label>Heading <input type="range" id="heading" min="0" max="359" value="0" style="width:120px"> <span id="headingv">0</span></label>
+          <label><input type="checkbox" id="nocompass"> no compass (null)</label>
+        </div>
+      </div>
+      <div class="row">
+        <label>Mic level <input type="range" id="miclevel" min="0" max="1" step="0.03125" value="0" style="width:120px"> <span id="miclv">0</span></label>
+        <label>Pitch (Hz, empty = null) <input type="text" id="pitch" value="" style="width:6em"></label>
+      </div>
+      <label><input type="checkbox" id="realmic"> use this computer's microphone</label>
+    </div>
     <div id="filebox" hidden>
       <div id="filewhat"></div>
       <div class="row"><input type="file" id="filein"><button id="filecancel" type="button">Cancel</button></div>
@@ -62,6 +84,8 @@
 <script src="pad-shim.js"></script>
 <!-- the runtime's sound chip, so music, custom sounds and ambience sound here as they do on the handheld -->
 <script src="../runtime/chip.js"></script>
+<!-- the runtime's sensor maths (quantizing, rate limits, level and pitch), so readings here look like the handheld's -->
+<script src="../runtime/sensors.js"></script>
 <script>
   var frame = document.getElementById("app"), html = "", appId = "dev", manifest = {};
   var log = function (s) { var p = document.getElementById("log"); p.textContent = (new Date().toLocaleTimeString() + "  " + s + "\n") + p.textContent; };
@@ -130,7 +154,8 @@
   function run() {
     if (chip) chip.stop();
     if (chip) document.getElementById("amb").value = "";
-    var l = document.getElementById("lang").value, o = { music: !!chip, ambience: !!chip };
+    senseStop("motion"); senseStop("mic");
+    var l = document.getElementById("lang").value, o = { music: !!chip, ambience: !!chip, sensors: true };
     if (l) o.lang = l;
     frame.srcdoc = lopdaWrapApp(html, o);
   }
@@ -144,7 +169,8 @@
     else if (d.op === "save") { s[d.k] = d.v; writeStore(s); }
     else if (d.op === "remove") { delete s[d.k]; writeStore(s); }
     else if (d.op === "error") log("ERROR " + d.msg);
-    else if (d.op === "exit") { log("app asked to exit"); if (chip) chip.stop(); frame.srcdoc = ""; }
+    else if (d.op === "exit") { log("app asked to exit"); if (chip) chip.stop(); senseStop("motion"); senseStop("mic"); frame.srcdoc = ""; }
+    else if (d.op === "sense") sense(d);
     else if (d.op === "sfx" && typeof d.name === "string") {
       log("sfx " + d.name);
       /* the ten named sounds, from the same chip.js table the handheld plays */
@@ -224,6 +250,82 @@
     r.onerror = function () { log("importFile: could not read " + f.name); endImport(null); };
     if (text) r.readAsText(f); else r.readAsDataURL(f);
   };
+  /* PAD.motion / PAD.mic. The handheld asks the player on its own dialog first (and the phone may ask too); here start()
+     answers "on" at once when the manifest declares the permission. The controls above stand in for the phone: the square
+     is the tilt (drag it, let go and it recentres), Shake sends one shake, the slider is the compass, and the mic level and
+     pitch are sent as they are, or measured from this computer's microphone. Same steps and rates as the runtime. */
+  var LS = window.LopdaSensors, sensing = { motion: false, mic: false }, raw = { x: 0, y: 0, y0: 0 };
+  var sendTilt = LS.limiter(LS.TILT_HZ, Date.now, setTimeout), sendSound = LS.limiter(LS.SOUND_HZ, Date.now, setTimeout);
+  var micTimer = null, real = null;
+  var post = function (m) { m.pad = 1; frame.contentWindow.postMessage(m, "*"); };
+  function senseState() { document.getElementById("sensestate").textContent = (sensing.motion ? "motion on" : "motion off") + ", " + (sensing.mic ? "mic on" : "mic off"); }
+  function tilt() {
+    var x = LS.quantize(raw.x), y = LS.quantize(raw.y - raw.y0);
+    var h = document.getElementById("nocompass").checked ? null : LS.heading(+document.getElementById("heading").value);
+    document.getElementById("tiltval").textContent = "x " + x + " · y " + y + " · heading " + h;
+    if (sensing.motion) sendTilt(function (v) { post({ op: "tilt", x: v.x, y: v.y, heading: v.heading }); }, { x: x, y: y, heading: h });
+  }
+  function sound() {
+    var v;
+    if (real) { real.an.getFloatTimeDomainData(real.buf); v = { level: LS.level(real.buf), pitch: LS.pitch(real.buf, real.ctx.sampleRate) }; document.getElementById("miclv").textContent = v.level + " · " + v.pitch; }
+    else {
+      var p = parseInt(document.getElementById("pitch").value, 10);
+      v = { level: Math.round(+document.getElementById("miclevel").value * 32) / 32, pitch: p >= 50 && p <= 1500 ? p : null };
+    }
+    sendSound(function (x) { post({ op: "sound", level: x.level, pitch: x.pitch }); }, v);
+  }
+  function stopReal() { if (!real) return; real.stream.getTracks().forEach(function (t) { t.stop(); }); try { real.ctx.close(); } catch (e) {} real = null; }
+  function startReal() {
+    if (real || !sensing.mic || !document.getElementById("realmic").checked) return;
+    if (!navigator.mediaDevices || !AC) { log("this browser has no microphone access"); return; }
+    navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } }).then(function (stream) {
+      if (!sensing.mic || !document.getElementById("realmic").checked) { stream.getTracks().forEach(function (t) { t.stop(); }); return; }
+      var ctx = new AC(), an = ctx.createAnalyser(); an.fftSize = 2048;
+      ctx.createMediaStreamSource(stream).connect(an);
+      real = { stream: stream, ctx: ctx, an: an, buf: new Float32Array(2048) };
+      log("listening to this computer's microphone");
+    }, function (e) { log("microphone: " + e.name); document.getElementById("realmic").checked = false; });
+  }
+  function senseStop(kind) {
+    if (!sensing[kind]) return;
+    sensing[kind] = false;
+    if (kind === "mic") { clearInterval(micTimer); micTimer = null; stopReal(); }
+    sendTilt.reset(); sendSound.reset(); senseState();
+  }
+  function sense(d) {
+    var kind = d.kind === "motion" || d.kind === "mic" ? d.kind : null, name = "PAD." + kind;
+    if (!kind) return;
+    if (d.action === "stop") { log(name + ".stop()"); senseStop(kind); return; }
+    if (d.action === "zero") { log(name + ".zero()"); if (sensing.motion) { raw.y0 = raw.y; tilt(); } return; }
+    if (d.action !== "start") return;
+    var v = "on";
+    if ((manifest.permissions || []).indexOf(kind) < 0) { log("ERROR " + name + '.start() needs "permissions": ["' + kind + '"] in manifest.json'); v = "denied"; }
+    log(name + ".start() -> " + v);
+    frame.contentWindow.postMessage({ pad: 1, op: "sensed", i: d.i, v: v }, "*");
+    if (v !== "on" || sensing[kind]) return;
+    sensing[kind] = true; senseState();
+    if (kind === "motion") { raw.y0 = raw.y; sendTilt.reset(); tilt(); }
+    else { sendSound.reset(); micTimer = setInterval(sound, 1000 / LS.SOUND_HZ); startReal(); }
+  }
+  (function () {
+    var pad = document.getElementById("tiltpad"), dot = document.getElementById("tiltdot"), id = null;
+    var place = function () { dot.style.left = (50 + raw.x * 50) + "%"; dot.style.top = (50 + raw.y * 50) + "%"; tilt(); };
+    var aim = function (e) {
+      var r = pad.getBoundingClientRect();
+      raw.x = Math.max(-1, Math.min(1, ((e.clientX - r.left) / r.width) * 2 - 1));
+      raw.y = Math.max(-1, Math.min(1, ((e.clientY - r.top) / r.height) * 2 - 1));
+      place();
+    };
+    pad.addEventListener("pointerdown", function (e) { id = e.pointerId; try { pad.setPointerCapture(id); } catch (x) {} aim(e); });
+    pad.addEventListener("pointermove", function (e) { if (e.pointerId === id) aim(e); });
+    ["pointerup", "pointercancel"].forEach(function (t) { pad.addEventListener(t, function (e) { if (e.pointerId !== id) return; id = null; raw.x = 0; raw.y = 0; place(); }); });
+    document.getElementById("shake").onclick = function () { if (sensing.motion) { post({ op: "shake" }); log("shake"); } else log("shake (motion is off: not sent)"); };
+    document.getElementById("heading").oninput = function () { document.getElementById("headingv").textContent = this.value; tilt(); };
+    document.getElementById("nocompass").onchange = tilt;
+    document.getElementById("miclevel").oninput = function () { document.getElementById("miclv").textContent = this.value; };
+    document.getElementById("realmic").onchange = function () { if (this.checked) startReal(); else stopReal(); };
+    senseState();
+  })();
   /* chin buttons: on-screen pad plus keyboard while the harness has focus */
   var press = function (b, down) { frame.contentWindow.postMessage({ pad: 1, op: "button", b: b, down: down }, "*"); };
   Array.prototype.forEach.call(document.querySelectorAll("#pad button"), function (el) {

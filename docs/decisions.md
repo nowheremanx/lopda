@@ -967,3 +967,48 @@ CPU 降速 4 倍（DevTools 的 CPU throttling，粗略代表旧手机）时，�
   「空间不够，或浏览器不让存（无痕模式）。」，不显示浏览器的原始错误。读文件、格式不对、重复的书仍是原来的「导入失败：…」。
 - **runtime-shots 加万年历**：月视图（选中 20 日、5 日有日记、15 日有纪念日）、15 日的弹层、5 日带日记的弹层：
   `22-calendar-month`、`23-calendar-day-sheet`、`24-calendar-diary-day`。jsDelivr 一律回 404，截图不依赖网络。
+
+## 23. 倾斜感应和麦克风（PAD.motion、PAD.mic，0.24.0）
+
+2026-10-16。设计草稿 `docs/design/pad-sensors.md`（第 9 节第 1 步），iPhone 实测见那份文档第 10 节，第 5 条 owner 已定。
+
+- **开放什么**：manifest 的允许列表变成 `["files", "motion", "mic"]`。`motion`：倾斜 `x` / `y`、朝向 `heading`、摇一摇；
+  `mic`：音量 `level` 和音高 `pitch`。不开放 GPS、录音、原始音频、原始传感器数据。`PAD.spec` 仍是 `"lopda/1"`，
+  功能检测就是 `PAD.motion` / `PAD.mic` 存不存在（旧 runtime 和没传 `sensors` 的包装上是 `undefined`）。
+- **代码位置**：`runtime/sensors.js`（纯函数 + `host(env)`，不碰界面，`tests/sensors.test.mjs` 用假的 window / navigator /
+  AudioContext 测）；确认框、点一下开启、授权记录、状态栏记号在 `runtime/apps/store.js`；设置页的列表在 `settings.js`。
+  开发台加载同一个 `sensors.js`，取整、限速、音量、音高和机器上一样。
+- **读数**：倾斜和音量按 1/32 取整；朝向是 32 方位的罗盘（0、11.25、22.5……，北为 0），不是 0–359 的整数：
+  "都按 1/32 一档"，也更像老仪器。读数**只在变了的时候发**，倾斜每秒最多 30 次、声音最多 20 次，太快的那个延后发出，
+  所以最后一个值一定会到。`y` 以 `start()` 后第一个读数为 0，`zero()` 改成"现在"。摇一摇：`acceleration`（不含重力）
+  超过 15 m/s²，之后 0.5 秒内不再算。音量：-60 dB 以下为 0，满幅为 1。音高：归一化自相关，50–1500 Hz，太轻（RMS < 0.01）
+  或者没有明显的峰（比如吹气、噪声）就是 `null`。
+- **没有传感器**：桌面浏览器也有 `DeviceOrientationEvent`，只是不发事件；`start()` 等第一个读数，1 秒内没有就回 `"none"`。
+  麦克风：`NotAllowedError` 回 `"denied"`，其他失败（没有麦克风等）回 `"none"`。
+- **询问**：第一次 `start()` 弹机身确认框（和文件确认框同一个，`openAsk` 改成了通用的：文字、附注、两个按钮的名字、
+  `ok()` 和 `cancel()`）。A 在松开时、或"允许"在 `pointerup` 时同意，系统授权在**这一下点击里**发起；倾斜的两个
+  `requestPermission()` 一起调，只弹一个系统框。B / "不允许"这一次回 `"denied"`，不记住，下次再问。
+  同意过的记在 `data/users/local/sensors`（`{apps: {id: {motion, mic}}}`），设置里"传感器"一栏逐个列出，可以撤销；
+  卸载 app 时一并删掉。
+- **重开以后**：这一次打开页面里系统授权已经过了一次（或者这台机器根本不问，比如 Android、桌面），就直接开；否则屏幕底部出现
+  一行「点一下开启倾斜感应」/「点一下开启麦克风」，点它（或 A）才发起系统授权，B 回 `"denied"`。条只拿 A 和 B，其他键照常给 app。
+  **不看 `navigator.userActivation`**：Chromium 会把 app 里的点击算到外层页面上，Safari 不一定，所以只认主程序自己的点击。
+- **音频模式（第 5 条）**：`getUserMedia` 之前设 `navigator.audioSession.type = "play-and-record"`，轨道停掉后设回 `"ambient"`。
+  core.js 记住当前的类型（`setSession`），AudioContext 被系统停掉、重建时用记住的类型，不会在麦克风开着时把它改回 `"ambient"`；
+  重建后麦克风接进新的 context（`audio` 钩子）。分析用主程序已有的 AudioContext：流 → 分析器 → 音量为 0 的增益 → 输出
+  （Safari 不跑不通向输出的节点），麦克风的声音不会被放出来。
+- **每条退路都恢复 `"ambient"` 并停掉轨道**：`PAD.mic.stop()`；HOME、切到别的程序、app 自己 `exit`、卸载（runner 的 `leave`
+  和 `runApp` 都调 `stopAll()`）；页面隐藏（`visibilitychange`）、`pagehide`。另外每 250 毫秒看一次"现在前台的 app 窗口是不是
+  开传感器的那个"，不是就全停：app 的框架没了、被换掉，或者以后哪条路忘了调 `stopAll()`，都会被它兜住。
+  app 里没捕获的错误**不算**崩溃，不停传感器（app 还在跑）。系统授权框还开着时 app 就离开了，晚到的流立刻停掉，模式回 `"ambient"`。
+  `stopMic()` 即使什么都没开也设一次 `"ambient"`。每条路都有单元测试，HOME 和卸载另有 e2e。
+- **隐藏后回来**：锁屏、切到别的 app 时全停；回来时如果前台还是同一个 app，主程序把刚才开着的重新打开（需要点击时出现那一行）。
+  草稿只说"停"，没说回来怎么办；app 不用自己重新 `start()`。
+- **状态栏记号**：麦克风开着时，时钟和"LP-86"之间有一个墨色小方块，里面是底色的点阵话筒（`#mic-mark`）。
+- **开发台**：不弹确认框，`start()` 按 manifest 直接回 `"on"` 或 `"denied"`（后者在日志里报错）。拖动的小方块就是倾斜（松开回中），
+  "Shake"按钮、朝向滑块（可以选"没有罗盘"）、音量滑块和音高输入框，也可以勾"用这台电脑的麦克风"。
+- **检查器**：用了 `PAD.motion` 或 `PAD.on("tilt" | "shake")` 而没声明 `motion`、用了 `PAD.mic` 或 `PAD.on("sound")` 而没声明 `mic`
+  报错；声明了没用只警告。
+- **规则**：用传感器的 app 必须也能用按键玩（SPEC 第 4 节）；倾斜 app 给一个"校准"（`zero()`），不要求把手机放平（UI.md 第 9 节）。
+- **还没做**：两个示范 app（第 2 步）；iPhone 上整套流程还没有实测（确认框 → 系统框、重开后的那一行、静音键在关麦克风后恢复）；
+  lo-game 的 `tilt` 便捷读数（草稿第 5 节"另议"）。
