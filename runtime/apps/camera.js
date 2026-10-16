@@ -564,6 +564,7 @@ function voidStale(){
 function openCam(){
   CAM.mode=null; camSheet(null);
   show("cam"); showPad(true); renderCam(); camIdle();
+  LP.keepAwake(true);   /* the viewfinder keeps the screen on */
   var go=function(){ voidStale(); camBoot(); renderCam(); startLive(); };
   if(F.ready) go(); else loadFilm().then(go);
 }
@@ -739,7 +740,7 @@ LP.padRoute("cam",function(b,down){ if($("v-cam").hidden) return false; camButto
 LP.builtin({id:"camera", label:"app.camera", icon:"camera", view:"cam",
   open:function(){ openCam(); },
   tag:function(){ return F.roll?(F.frames.length+"/"+F.size):""; },
-  leave:function(){ stopLive(); },
+  leave:function(){ stopLive(); LP.keepAwake(false); },
   lang:function(){ paintRolls(); if(!$("v-cam").hidden) renderCam(); },
   padLayout:function(){ if(!$("v-cam").hidden) camLayout(); },
   ready:function(){ loadFilm().then(function(){ if(!$("v-home").hidden) LP.renderHome(); if(!$("v-cam").hidden) renderCam(); }); },

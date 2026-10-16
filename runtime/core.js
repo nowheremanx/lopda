@@ -169,8 +169,42 @@ function show(name){
 }
 $("home-key").onclick=function(){ LP.flushNote(); show("home"); sfx("home"); };
 
+/* ---------- keeping the screen on (Screen Wake Lock) ----------
+   A view where the hands may rest while the eyes stay on the screen (a book page, a game, the viewfinder, a running app)
+   asks for keepAwake(true) when it opens and keepAwake(false) when it closes; its leave hook covers HOME. The browser
+   drops the lock when the page is hidden: it is asked for again when the page comes back, if still wanted. No setting
+   and no message: where the request is refused (older iOS, some home-screen apps) the screen dims as it always did
+   (decisions.md section 3) */
+var AWAKE={want:false, lock:null, asking:false};
+function letGo(lock){ try{ var r=lock.release(); if(r && r.catch) r.catch(function(){}); }catch(e){} }
+function askAwake(){
+  var wl=navigator.wakeLock;
+  if(!AWAKE.want || AWAKE.lock || AWAKE.asking || document.hidden || !wl || typeof wl.request!=="function") return;
+  AWAKE.asking=true;
+  var p; try{ p=wl.request("screen"); }catch(e){ AWAKE.asking=false; return; }
+  Promise.resolve(p).then(function(lock){
+    AWAKE.asking=false;
+    if(!lock) return;
+    /* the view closed while the browser was answering */
+    if(!AWAKE.want || document.hidden){ letGo(lock); return; }
+    AWAKE.lock=lock;
+    if(lock.addEventListener) lock.addEventListener("release",function(){ if(AWAKE.lock===lock) AWAKE.lock=null; });
+  },function(){ AWAKE.asking=false; });
+}
+function keepAwake(on){
+  AWAKE.want=!!on;
+  if(AWAKE.want){ askAwake(); return; }
+  var lock=AWAKE.lock; AWAKE.lock=null;
+  if(lock) letGo(lock);
+}
+document.addEventListener("visibilitychange",function(){
+  if(!document.hidden){ askAwake(); return; }
+  var lock=AWAKE.lock; AWAKE.lock=null;
+  if(lock) letGo(lock);
+});
+
 /* ---------- sound: tiny square-wave chips through Web Audio (the named sounds themselves are in chip.js) ---------- */
-var RUNTIME_VERSION="0.22.1";   /* keep in step with VERSION in sw.js */
+var RUNTIME_VERSION="0.23.0";   /* keep in step with VERSION in sw.js */
 /* One volume, five steps, 0 is off (decisions.md section 10). It sets the master gain and nothing else does.
    Under the master: `ui` for the runtime's own clicks, held at a fraction so they stay as quiet as they always were
    (step 2 gives them 0.11, their level before 0.12.0), and `app` for apps, music and the cartridge at the full step. */
@@ -437,8 +471,8 @@ var share={
   noEmoji:noEmoji, glyphOf:glyphOf, own:own, uid:uid, toast:toast, put:put, fmt:fmt, pad2:pad2,
   TONES:TONES, BAYER:BAYER, saveCanvas:saveCanvas, saveErr:saveErr, sha256hex:sha256hex,
   upsert:upsert, dropLocal:dropLocal, pending:pending, refresh:refresh, onData:onData,
-  setStatus:setStatus, tickClock:tickClock, show:show,
-  RUNTIME_VERSION:RUNTIME_VERSION, SND:SND, VOL_MAX:VOL_MAX, audio:audio, wake:wake, sfx:sfx, appSfx:appSfx, APP_SFX:APP_SFX, chip:chip, sfxCustom:sfxCustom, applyLevel:applyLevel,
+  setStatus:setStatus, tickClock:tickClock, show:show, keepAwake:keepAwake,
+  RUNTIME_VERSION:RUNTIME_VERSION, SND:SND, VOL_MAX:VOL_MAX, VOL_GAIN:VOL_GAIN, audio:audio, wake:wake, sfx:sfx, appSfx:appSfx, APP_SFX:APP_SFX, chip:chip, sfxCustom:sfxCustom, applyLevel:applyLevel,
   setLang:setLang, UPD:UPD, renderUpdate:renderUpdate,
   validIcon:validIcon, fillTile:fillTile, appName:appName, appDesc:appDesc, renderHome:renderHome,
   resetConfirm:resetConfirm, padRoute:padRoute, setButton:setButton, releaseButtons:releaseButtons, showPad:showPad

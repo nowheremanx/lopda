@@ -47,7 +47,7 @@ LICENSE NOTICE LICENSING.md CONTRIBUTING.md
   calendar (万年历; lunar.js, holiday-cn, the one built-in that may reach another site, decisions.md section 14; a folded corner
   on days with a diary and a read-only 日记 block on the day sheet, START opens or backfills that day's diary in notes, only through
   those three functions, section 21), dict (词典; stardict.js, built-in ECDICT, imported StarDict books in
-  `LopdaPlatform.files`, `LP.dict.lookup(word)` for other programs, decisions.md section 15; its entry page selects text through textsel.js and looks words up level by level, section 18), reader (阅读器; bookparse.js, books, their dithered pictures and imported fonts in
+  `LopdaPlatform.files`, `LP.dict.lookup(word)` for other programs, decisions.md section 15; its entry page selects text through textsel.js and looks words up level by level, section 18; A on an entry says the headword with the phone's English voice), reader (阅读器; bookparse.js, books, their dithered pictures and imported fonts in
   `LopdaPlatform.files`, layouts and an e-ink full refresh, long-press or SELECT selection that looks up through `LP.dict` and quotes (underline + `LP.notes.append`),
   decisions.md sections 16-17), camera (viewfinder, film stocks, a colour latent image per frame in `LopdaPlatform.files`, SELECT cycles the
   physical lenses found by lenses.js; shares its film helpers as `LP.film`), darkroom (冲洗店: the film box of unloaded rolls,
@@ -56,7 +56,8 @@ LICENSE NOTICE LICENSING.md CONTRIBUTING.md
   Paint and the calculator are community apps (`registry/apps/paint`, `calculator`), installed on first start
   (`PREINSTALL` in store.js; their files are in sw.js SHELL). The LCD fonts ship in runtime/fonts/ (OFL). Each registers with
   `LP.builtin({id, label, icon, view, open, ...hooks})`; the home screen draws them in registration order
-  (the order of the script tags). Hooks are listed at the top of core.js.
+  (the order of the script tags). Hooks are listed at the top of core.js. `LP.keepAwake(on)` holds the screen wake lock
+  (the reader's book page, a game, the viewfinder, a running app; decisions.md section 3).
 
 ## Run and test
 

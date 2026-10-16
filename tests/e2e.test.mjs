@@ -554,8 +554,10 @@ test("calendar: month grid lunar lines fit at small screen sizes", { skip, timeo
 });
 
 /* ---------------- dictionary ---------------- */
-const dictPage = async (t, opts = {}) => {
+/* init: a function run in the page before its scripts, with arg */
+const dictPage = async (t, { init, arg, ...opts } = {}) => {
   const { p, errors } = await page(t, { locale: "zh-CN", ...opts });
+  if (init) await p.addInitScript(init, arg);
   await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
   await p.locator("#home .app", { hasText: opts.locale === "en-US" ? "Dict" : "词典" }).click();
   await p.waitForSelector("#v-dict:not([hidden])");
@@ -601,7 +603,7 @@ test("dictionary: the built-in ECDICT, a word form, history and the word book", 
   assert.equal(await p.textContent("#dict-sheet .sheet-title span"), "run");
   const lemma = await p.evaluate(() => LP.dict.lookup("ran").then((r) => r.map((x) => [x.word, x.how])));
   assert.deepEqual(lemma, [["run", "lemma"]]);
-  await p.click('.gamepad [data-b="a"]');
+  await p.click('.gamepad [data-b="b"]');                      /* back (A says the word since 0.23.0) */
   await p.fill("#dict-q", "");
   await p.waitForFunction(() => /最近查过/.test(document.getElementById("dict-history").textContent));
   assert.match(await p.textContent("#dict-list"), /run[\s\S]*apple/);
@@ -1088,6 +1090,113 @@ test("dictionary: no selection while reviewing the word book", { skip, timeout: 
   await p.keyboard.press("Shift");                              /* SELECT leaves the review, as before */
   assert.equal(await marked(p), "");
   assert.ok(await p.isVisible("#dict-sheet .lcd-menu"));
+  assert.deepEqual(errors, []);
+});
+
+/* stands in for the phone's speech: getVoices is empty until voiceschanged, as on iOS; speak and cancel are recorded */
+function fakeSpeech(voices) {
+  const heard = [], said = (window.__said = []);
+  let list = [];
+  window.__cancels = 0;
+  const synth = {
+    speaking: false, pending: false, paused: false,
+    getVoices: () => list.slice(),
+    speak: (u) => said.push({ text: u.text, voice: u.voice && u.voice.name, lang: u.lang, volume: u.volume }),
+    cancel: () => { window.__cancels++; },
+    pause() {}, resume() {},
+    addEventListener: (type, fn) => { if (type === "voiceschanged") heard.push(fn); },
+    removeEventListener() {}
+  };
+  Object.defineProperty(window, "speechSynthesis", { value: synth, configurable: true });
+  window.SpeechSynthesisUtterance = function (text) { this.text = text; this.voice = null; this.lang = ""; this.volume = 1; };
+  setTimeout(() => { list = voices; heard.forEach((fn) => fn({ type: "voiceschanged" })); }, 200);
+}
+const VOICES = [{ name: "Amélie", lang: "fr-FR" }, { name: "Karen", lang: "en-AU" }, { name: "Samantha", lang: "en_US" }, { name: "Daniel", lang: "en-GB" }];
+const said = (p) => p.evaluate(() => window.__said.slice());
+const cancels = (p) => p.evaluate(() => window.__cancels);
+const sayKey = (p) => p.evaluate(() => { const b = document.querySelector("#dict-sheet .sk-a"); return [b.textContent.replace(/^A/, ""), b.disabled]; });
+/* the voices arrive after the entry is open: the slot lights up once they do */
+const sayReady = (p) => p.waitForFunction(() => { const b = document.querySelector("#dict-sheet .sk-a"); return b && !b.disabled; });
+
+test("dictionary: A on an entry says the headword with an English voice; a tap on the headword too; leaving stops it", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await dictPage(t, { init: fakeSpeech, arg: VOICES });
+  await openWord(p, "apple", /苹果/);
+  await sayReady(p);
+  assert.deepEqual(await sayKey(p), ["发音", false]);
+  assert.match(await p.textContent("#dict-sheet .sk-b"), /返回/);
+  await p.keyboard.press("x");
+  /* en-US (or en-GB) before any other English voice; the default volume step is 2 of 4: 0.25 of the top gain 0.6 */
+  const first = (await said(p))[0];
+  assert.deepEqual([first.text, first.voice, first.lang], ["apple", "Samantha", "en_US"]);
+  assert.ok(Math.abs(first.volume - 0.25 / 0.6) < 1e-9, "volume " + first.volume);
+  assert.ok(await p.isVisible("#dict-sheet"), "A no longer goes back");
+  /* the soft key and the headword in the title say it too */
+  await p.click("#dict-sheet .sk-a");
+  await p.click("#dict-sheet .sheet-title span");
+  assert.deepEqual((await said(p)).map((x) => x.text), ["apple", "apple", "apple"]);
+  /* a word form: the entry is for the lemma, and so is the voice */
+  await p.keyboard.press("z");
+  await openWord(p, "ran", /跑/);
+  await p.keyboard.press("x");
+  assert.equal((await said(p)).at(-1).text, "run");
+  /* B back, HOME: anything being said stops */
+  let c = await cancels(p);
+  await p.keyboard.press("z");
+  assert.ok(await cancels(p) > c, "back cancels");
+  await openWord(p, "apple", /苹果/);
+  c = await cancels(p);
+  await p.click("#home-key");
+  assert.ok(await cancels(p) > c, "HOME cancels");
+  assert.deepEqual(errors, []);
+});
+
+test("dictionary: the say slot is dimmed at volume 0 and without an English voice; review keeps A", { skip, timeout: 60000 }, async (t) => {
+  {
+    const { p, errors } = await dictPage(t, { init: fakeSpeech, arg: [{ name: "Amélie", lang: "fr-FR" }, { name: "Tingting", lang: "zh-CN" }] });
+    await openWord(p, "apple", /苹果/);
+    await p.waitForTimeout(400);
+    assert.deepEqual(await sayKey(p), ["发音", true]);
+    await p.keyboard.press("x");
+    await p.click("#dict-sheet .sheet-title span");
+    assert.deepEqual(await said(p), []);
+    assert.ok(await p.isVisible("#dict-sheet"));
+    assert.deepEqual(errors, []);
+  }
+  const { p, errors } = await dictPage(t, { init: fakeSpeech, arg: VOICES });
+  /* volume 0 in Settings */
+  await p.click("#home-key");
+  await p.locator("#home .app", { hasText: "设置" }).click();
+  await p.click("#set-vol-down"); await p.click("#set-vol-down");
+  assert.equal(await p.evaluate(() => LP.SND.vol), 0);
+  await p.click("#home-key");
+  await p.locator("#home .app", { hasText: "词典" }).click();
+  await openWord(p, "apple", /苹果/);
+  await p.waitForTimeout(400);
+  assert.deepEqual(await sayKey(p), ["发音", true]);
+  await p.keyboard.press("x");
+  assert.deepEqual(await said(p), []);
+  /* back to step 1: the slot works, quietly */
+  await p.click("#home-key");
+  await p.locator("#home .app", { hasText: "设置" }).click();
+  await p.click("#set-vol-up");
+  await p.click("#home-key");
+  await p.locator("#home .app", { hasText: "词典" }).click();
+  await openWord(p, "apple", /苹果/);
+  await sayReady(p);
+  await p.keyboard.press("x");
+  assert.ok(Math.abs((await said(p))[0].volume - 0.12 / 0.6) < 1e-9);
+  /* review: A shows the entry, then the next word, and says nothing */
+  await p.keyboard.press("Enter");                              /* START: into the word book */
+  await p.keyboard.press("z");
+  await p.click("#dict-keys .sk-select");
+  await p.click("#dict-sheet .sk-a");
+  assert.equal((await p.textContent("#dict-sheet .dict-page .big")).trim(), "apple");
+  assert.match(await p.textContent("#dict-sheet .sk-a"), /看释义/);
+  await p.keyboard.press("x");
+  await p.waitForFunction(() => /苹果/.test(document.querySelector("#dict-sheet .dict-page")?.textContent || ""));
+  assert.match(await p.textContent("#dict-sheet .sk-a"), /下一词/);
+  await p.click("#dict-sheet .sheet-title span");
+  assert.equal((await said(p)).length, 1);
   assert.deepEqual(errors, []);
 });
 
@@ -3691,4 +3800,117 @@ test("calendar: a diary moved to the trash loses its mark", { skip, timeout: 600
   assert.equal((await c.docs()).filter((d) => !d.deleted).length, 1);
   assert.equal((await c.marked()).length, 1);
   assert.deepEqual(notBlocked(c.errors), []);
+});
+
+/* ---------------- keeping the screen on ---------------- */
+/* stands in for the Screen Wake Lock API: each request and release is logged; document.hidden can be set from the test */
+function fakeWakeLock() {
+  const log = (window.__wl = []);
+  window.__hidden = false;
+  Object.defineProperty(document, "hidden", { get: () => window.__hidden, configurable: true });
+  Object.defineProperty(document, "visibilityState", { get: () => (window.__hidden ? "hidden" : "visible"), configurable: true });
+  Object.defineProperty(navigator, "wakeLock", { configurable: true, value: { request: async (type) => {
+    log.push("request:" + type);
+    const lock = new EventTarget();
+    lock.type = type; lock.released = false;
+    lock.release = async () => { if (lock.released) return; lock.released = true; log.push("release"); lock.dispatchEvent(new Event("release")); };
+    window.__lock = lock;
+    return lock;
+  } } });
+}
+const wl = (p) => p.evaluate(() => window.__wl.slice());
+const wlClear = (p) => p.evaluate(() => { window.__wl.length = 0; });
+const held = (p) => p.evaluate(() => !!window.__lock && !window.__lock.released);
+const tile = (p, label) => p.locator("#home .app", { has: p.locator(".label", { hasText: new RegExp("^" + label + "$") }) }).click();
+/* a 32 KB cartridge that only loops (JR -2 at the entry point), with a good header checksum: no game */
+function loopRom() {
+  const rom = new Uint8Array(0x8000);
+  rom.set([0x00, 0x18, 0xfe], 0x100);
+  rom.set(Buffer.from("LOOP"), 0x134);
+  let x = 0; for (let i = 0x134; i <= 0x14c; i++) x = (x - rom[i] - 1) & 0xff;
+  rom[0x14d] = x;
+  return Buffer.from(rom);
+}
+
+test("wake lock: held on a book page, a game, a running app; let go on HOME; asked again when the page is shown; never in notes, calendar or settings", { skip, timeout: 90000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN" });
+  await p.addInitScript(fakeWakeLock);
+  await p.route(/jsdelivr/, (r) => r.abort());
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await p.waitForFunction(() => window.LP && window.LP.S.db);
+  for (const label of ["记事本", "万年历", "设置"]) {
+    await tile(p, label);
+    await p.waitForTimeout(300);
+    await p.click("#home-key");
+  }
+  assert.deepEqual(await wl(p), [], "notes, calendar and settings leave the screen alone");
+  /* the reader: the shelf no, a book page yes */
+  await tile(p, "阅读器");
+  await p.waitForFunction(() => document.querySelectorAll("#rd-list li:not(.label)").length === 2, null, { timeout: 10000 });
+  assert.deepEqual(await wl(p), []);
+  await openRow(p, 1);
+  assert.deepEqual(await wl(p), ["request:screen"]);
+  assert.ok(await held(p));
+  /* hidden: the browser lets go (here the runtime does); shown again: asked for again */
+  await p.evaluate(() => { window.__hidden = true; document.dispatchEvent(new Event("visibilitychange")); });
+  await p.waitForFunction(() => window.__lock.released);
+  await p.evaluate(() => { window.__hidden = false; document.dispatchEvent(new Event("visibilitychange")); });
+  await p.waitForFunction(() => !window.__lock.released);
+  assert.deepEqual(await wl(p), ["request:screen", "release", "request:screen"]);
+  /* B back to the shelf lets go */
+  await p.keyboard.press("z");
+  await p.waitForSelector("#rd-shelf:not([hidden])");
+  assert.equal(await held(p), false);
+  await openRow(p, 1);
+  assert.ok(await held(p));
+  await p.click("#home-key");
+  assert.equal(await held(p), false, "HOME lets go of the book page");
+  /* not asked for again while the page comes back to the home screen */
+  await wlClear(p);
+  await p.evaluate(() => { window.__hidden = true; document.dispatchEvent(new Event("visibilitychange")); window.__hidden = false; document.dispatchEvent(new Event("visibilitychange")); });
+  await p.waitForTimeout(100);
+  assert.deepEqual(await wl(p), []);
+  /* the cartridge: the library no, a game yes */
+  await tile(p, "卡带机");
+  await p.setInputFiles("#cart-file", { name: "loop.gb", mimeType: "application/octet-stream", buffer: loopRom() });
+  await p.waitForSelector("#cart-list .btn:not(.ghost)");
+  assert.deepEqual(await wl(p), []);
+  await p.click("#cart-list .btn:not(.ghost)");
+  await p.waitForSelector("#cart-play:not([hidden])", { timeout: 10000 });
+  await p.waitForFunction(() => window.__lock && !window.__lock.released);
+  await p.click("#cart-eject");
+  assert.equal(await held(p), false, "ejecting lets go");
+  await p.click("#cart-list .btn:not(.ghost)");
+  await p.waitForFunction(() => !window.__lock.released);
+  await p.click("#home-key");
+  assert.equal(await held(p), false, "HOME lets go of the game");
+  /* a store app */
+  await wlClear(p);
+  await runInRuntime(p, "quiet", "<!doctype html><html><body>quiet</body></html>");
+  await p.waitForFunction(() => !window.__lock.released);
+  assert.deepEqual(await wl(p), ["request:screen"]);
+  await p.click("#home-key");
+  assert.equal(await held(p), false, "HOME lets go of the app");
+  assert.deepEqual(notBlocked(errors), []);
+});
+
+test("wake lock: held in the camera's viewfinder, let go on HOME; a refused request is silent", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors, open } = await camPage(t, fakeWakeLock);
+  await open();
+  await p.waitForSelector("#v-cam:not([hidden])");
+  await p.waitForFunction(() => window.__lock && !window.__lock.released);
+  await p.click("#home-key");
+  assert.equal(await held(p), false);
+  /* refused (older iOS, a home-screen app): no toast, no error, the camera works as before */
+  await p.evaluate(() => { navigator.wakeLock.request = () => Promise.reject(new DOMException("refused", "NotAllowedError")); });
+  await p.locator("#home .app", { has: p.locator(".label", { hasText: /^点阵相机$/ }) }).click();
+  await p.waitForSelector("#v-cam:not([hidden])");
+  await p.waitForTimeout(300);
+  assert.ok(await p.isHidden("#toast"));
+  /* and without the API at all */
+  await p.click("#home-key");
+  await p.evaluate(() => { delete navigator.wakeLock; Object.defineProperty(navigator, "wakeLock", { value: undefined, configurable: true }); });
+  await p.locator("#home .app", { has: p.locator(".label", { hasText: /^点阵相机$/ }) }).click();
+  await p.waitForTimeout(300);
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
