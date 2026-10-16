@@ -3509,6 +3509,59 @@ test("calendar: a diary marks its day; the day sheet lists it and earlier years;
   assert.deepEqual(notBlocked(c.errors), []);
 });
 
+test("calendar: the diary mark is drawn inside the cell in all five states; the cell is never clipped, the selection frame stays whole", { skip, timeout: 60000 }, async (t) => {
+  const c = await diaryCal(t);
+  const { p } = c;
+  for (const d of ["2026-10-01", "2026-10-03", "2026-10-15", "2026-11-01"]) await c.diary("t\nx", d);
+  await c.reload();
+  await c.cal();
+  const INK = [31, 42, 20], PAPER = [163, 173, 126];
+  /* pixels of a cell's screenshot, read back through a canvas in the page: [r, g, b] at (x, y) from its bottom right.
+     The cell sits at fractional pixels, so the outermost row and column of the shot can be the gap: sample 1 px in */
+  const pixels = async (loc, at) => {
+    const png = (await loc.screenshot()).toString("base64");
+    return p.evaluate(async ([png, at]) => {
+      const img = await createImageBitmap(await (await fetch("data:image/png;base64," + png)).blob());
+      const cv = document.createElement("canvas"); cv.width = img.width; cv.height = img.height;
+      const g = cv.getContext("2d"); g.drawImage(img, 0, 0);
+      return at.map(([dx, dy]) => Array.from(g.getImageData(img.width - 1 - dx, img.height - 1 - dy, 1, 1).data.slice(0, 3)));
+    }, [png, at]);
+  };
+  const near = (a, b) => a.every((v, i) => Math.abs(v - b[i]) <= 3);
+  const state = (loc) => loc.evaluate((e) => { const s = getComputedStyle(e);
+    return { cls: e.className, clip: s.clipPath, widths: [s.borderTopWidth, s.borderRightWidth, s.borderBottomWidth, s.borderLeftWidth],
+      colors: [s.borderTopColor, s.borderRightColor, s.borderBottomColor, s.borderLeftColor] }; });
+  const out = p.locator("#cal-grid .cal-cell.out.dy");
+  await c.cell(1).click();
+  const cells = { normal: c.cell(3), selected: c.cell(1), today: c.cell(15), out };
+  for (const [name, loc] of Object.entries(cells)) {
+    const s = await state(loc);
+    assert.match(s.cls, /\bdy\b/, name);
+    assert.equal(s.clip, "none", name + ": the cell is not clipped");
+    assert.deepEqual(s.widths, ["2px", "2px", "2px", "2px"], name + ": the border box is whole");
+  }
+  /* the selected cell: the frame is ink on all four sides, its bottom-right corner pixel too, and the staircase sits inside it */
+  const sel = await state(cells.selected);
+  assert.equal(new Set(sel.colors).size, 1, "one colour all round");
+  let [corner, edge, inside, above] = await pixels(cells.selected, [[1, 1], [1, 6], [3, 3], [3, 9]]);
+  assert.ok(near(corner, INK) && near(edge, INK), "the frame's bottom-right corner is ink: " + corner + " " + edge);
+  assert.ok(near(inside, INK), "the staircase is inside the frame: " + inside);
+  assert.ok(!near(above, INK), "the staircase is 6 px high: " + above);
+  /* normal: ink at the very corner; today: paper on the ink, the ink block whole around it */
+  assert.ok(near((await pixels(cells.normal, [[1, 1]]))[0], INK));
+  [corner, edge] = await pixels(cells.today, [[1, 1], [9, 1]]);
+  assert.ok(near(corner, PAPER) && near(edge, INK), "today: a paper staircase on the ink: " + corner + " " + edge);
+  /* today and selected: paper staircase 2 px inside the ink frame */
+  await c.cell(15).click();
+  const ts = await state(c.cell(15));
+  assert.match(ts.cls, /today.*sel.*dy/);
+  assert.equal(ts.clip, "none");
+  [corner, inside] = await pixels(c.cell(15), [[1, 1], [3, 3]]);
+  assert.ok(near(corner, INK) && near(inside, PAPER), "today and selected: " + corner + " " + inside);
+  assert.equal(await p.evaluate(() => [...document.styleSheets].some((s) => { try { return [...s.cssRules].some((r) => /clip-path/.test(r.cssText) && /cal-cell/.test(r.cssText)); } catch { return false; } })), false, "no clip-path rule for the cells");
+  assert.deepEqual(notBlocked(c.errors), []);
+});
+
 test("calendar: START on an earlier day starts that day's diary; nothing is kept without typing; a future day has no START", { skip, timeout: 60000 }, async (t) => {
   const c = await diaryCal(t);
   const { p } = c;
