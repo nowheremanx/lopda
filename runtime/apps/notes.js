@@ -86,9 +86,11 @@ function buildRows(){
   return rows;
 }
 function el(tag,cls,text){ var e=document.createElement(tag); if(cls) e.className=cls; if(text!=null) e.textContent=text; return e; }
-function rowEl(i,title,sub){
-  var li=el("li",i===N.cur?"on":""), b=el("button");
+/* mark: the 今天 and 新建 rows lead with a sign and drop the rule under them, so they read as actions, not notes */
+function rowEl(i,title,sub,mark){
+  var li=el("li",(i===N.cur?"on":"")+(mark?" act":"")), b=el("button");
   b.type="button";
+  if(mark) b.appendChild(el("span","mk",mark));
   b.appendChild(el("span","t",title));
   if(sub) b.appendChild(sub);
   b.onclick=function(){ N.cur=i; activate(); };
@@ -112,14 +114,14 @@ function render(ensure){
   if($("v-notes").hidden) return;
   N.rows=buildRows();
   N.cur=Math.max(0,Math.min(N.cur,N.rows.length-1));
-  var top=$("notes-top"), ul=$("notes-list"), empty=$("notes-empty"), f=$("notes-filter");
+  var top=$("notes-top"), ul=$("notes-list"), empty=$("notes-empty"), f=$("notes-filter"), head=$("notes-count");
   top.textContent=""; ul.textContent="";
   var q=N.q.trim(), notes=0;
   N.rows.forEach(function(row,i){
     if(row.k==="today"){
       var t=todayNote(), date=NT.diaryTitle(today(),LP.I18N.lang,tr,window.LopdaLunar,true);
-      top.appendChild(rowEl(i,tr(t?"notes.today":"notes.todayblank",{date:date})));
-    } else if(row.k==="new") top.appendChild(rowEl(i,tr("notes.newnote")));
+      top.appendChild(rowEl(i,tr(t?"notes.today":"notes.todayblank",{date:date}),null,"▶"));
+    } else if(row.k==="new") top.appendChild(rowEl(i,tr("notes.newnote"),null,"＋"));
     else {
       notes++;
       var li=rowEl(i,(row.n.pinned?"◆ ":"")+label(row.n),dateLine(row.n,row));
@@ -132,6 +134,10 @@ function render(ensure){
     f.textContent=tr("notes.filter",{name:filterName(N.filter), n:n})+(q ? " · "+tr("notes.found",{n:notes}) : "");
   } else f.textContent=q ? tr("notes.found",{n:notes}) : "";
   f.hidden=!f.textContent;
+  /* the heading over the notes is only for the whole list; searching or filtering, the line above says it instead */
+  var all=q || N.filter ? 0 : live().length;
+  head.textContent=all ? tr("notes.count",{n:all}) : "";
+  head.hidden=!all;
   var msg=q ? (notes ? "" : tr("notes.nofound")) : N.filter || live().length ? "" : tr(S.db?"notes.empty":"notes.emptynodb");
   empty.textContent=msg; empty.hidden=!msg;
   renderKeys();

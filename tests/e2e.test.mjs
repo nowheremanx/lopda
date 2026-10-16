@@ -3209,6 +3209,45 @@ test("notes: delete goes to the trash in one press; restore; purge twice; the tr
   assert.deepEqual(notBlocked(n.errors), []);
 });
 
+test("notes: 今天 and 新建 read as actions; the 笔记 · n 篇 heading counts notes outside the trash, is never the cursor, and gives way to 找到 while searching", { skip, timeout: 60000 }, async (t) => {
+  const n = await notesPage(t);
+  await n.p.evaluate(async () => {
+    /* distinct times, so 三 is surely the newest and the first note under the heading */
+    let i = 0;
+    for (const body of ["一", "二", "三"]) await LP.S.refs.notes.doc().set({ body, updated: Date.now() + 1000 * i++ });
+  });
+  await n.open();
+  const head = () => n.p.evaluate(() => { const h = document.getElementById("notes-count"); return h.hidden ? null : h.textContent; });
+  assert.equal(await head(), "笔记 · 3 篇");
+  assert.deepEqual(await n.p.$$eval("#notes-top .mk", (l) => l.map((x) => x.textContent)), ["▶", "＋"]);
+  assert.equal(await n.p.$$eval("#notes-top .d", (l) => l.length), 0, "no second line on the action rows");
+  const looks = await n.p.$$eval("#notes-top button", (l) => l.map((b) => [Math.round(b.getBoundingClientRect().height), getComputedStyle(b).borderBottomStyle]));
+  assert.deepEqual(looks, [[44, "none"], [44, "none"]]);
+  assert.equal(await n.p.$eval("#notes-count", (h) => h.tabIndex), -1);
+  /* ▼ from 新建 lands on the first note, ▲ comes back */
+  await n.key("down");
+  assert.equal((await n.rows())[1], "*新建");
+  await n.key("down");
+  assert.equal((await n.rows())[2], "*三");
+  await n.key("up");
+  assert.equal((await n.rows())[1], "*新建");
+  /* a delete takes one off, a restore puts it back */
+  await n.p.click('#notes-list li:has-text("二") button');
+  await n.key("start", "down", "down", "a");
+  await n.p.waitForFunction(() => /已移到回收站/.test(document.getElementById("toast").textContent));
+  assert.equal(await head(), "笔记 · 2 篇");
+  await n.key("start", "down", "a", "a", "a");
+  await n.p.waitForFunction(() => /已恢复/.test(document.getElementById("toast").textContent));
+  await n.key("b", "b");
+  assert.equal(await head(), "笔记 · 3 篇");
+  /* searching, one line: 找到 instead of the heading */
+  await n.key("select");
+  await n.p.keyboard.type("三");
+  await n.p.waitForFunction(() => /找到 1 篇/.test(document.getElementById("notes-filter").textContent));
+  assert.equal(await head(), null);
+  assert.deepEqual(notBlocked(n.errors), []);
+});
+
 test("notes: 全部导出 writes a zip of .md files, 导入 brings it back after everything was deleted, duplicates skipped", { skip, timeout: 60000 }, async (t) => {
   const n = await notesPage(t);
   await n.open();
