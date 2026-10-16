@@ -85,6 +85,10 @@ textarea::placeholder{color:var(--ink-2)}
 .notes-list li.on .d{color:var(--lcd)}
 .notes-list mark{background:var(--ink);color:var(--lcd)}
 .notes-list li.on mark{background:var(--lcd);color:var(--ink)}
+.notes-list li.act button{flex-direction:row;align-items:center;justify-content:flex-start;gap:0;border-bottom:0}
+.notes-list .mk{flex:none;width:1em;text-align:center;font-size:12px}
+.notes-list li.act .mk+.t{margin-left:.25em}
+.notes-count{margin:0;padding:8px 10px 2px;font-size:14px;color:var(--ink-2);border-bottom:1px dashed var(--ink-2);cursor:default}
 .notes-empty{padding:16px 12px;text-align:center;font-size:14px;line-height:1.5}
 #notes-keys{flex:none;height:auto;padding:4px 6px}
 .notes-sheet .notes-status{flex:none;font-size:14px;text-align:center}
