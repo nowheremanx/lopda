@@ -4190,9 +4190,8 @@ test("tilt-maze: B on the dialog falls back to keys, says so, and the D-pad push
   assert.equal(await f.evaluate(() => note), "倾斜未允许：用方向键");
   const x0 = await f.evaluate(() => ball.x);
   await p.evaluate(() => window.LOPDA_DEBUG.setButton("right", true));
-  await p.waitForTimeout(500);
+  await until(p, () => f.evaluate((x0) => ball.x > x0 + 10, x0), "the D-pad to move the ball");
   await p.evaluate(() => window.LOPDA_DEBUG.setButton("right", false));
-  assert.ok(await f.evaluate((x0) => ball.x > x0 + 10, x0), "the D-pad moved the ball");
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
