@@ -883,6 +883,7 @@ CPU 降速 4 倍（DevTools 的 CPU throttling，粗略代表旧手机）时，�
 - **导出**：`lopda-notes-YYYYMMDD.zip`，经 `S.downloads.save`（和 saveCanvas 同一条路），platform.js 给 `.zip`、`.md` 加了 MIME 类型。
   文件名去掉 `/\:*?"<>|` 和控制字符，开头的点和末尾的点、空格也去掉（导入时跳过以点开头的文件，Windows 不认末尾的点），重名按不分大小写算。
   日记在 `日记/`（英文界面 `Diary/`）。导出成功后记在 `data/users/local/notes-meta`（`exported`、`reminded`），选项菜单底部写上次导出。
+- **zip 的"制作系统"写 Unix**（文件属性 rw-r--r--）：写成 MS-DOS 时，Debian/Ubuntu 的 unzip 在 UTF-8 环境下不管第 11 位，把中文文件名当 OEM 代码页读成乱码（CI 上发现的）。
 - **导入**：选一个或多个文件，`.md`、`.markdown`、`.txt` 或 `.zip`；zip 里的"存储"条目直接读，deflate 用 `DecompressionStream("deflate-raw")`。
   zip 里没有 UTF-8 标志位的文件名，是合法 UTF-8 就按 UTF-8 读（Mac 的归档工具这样写），不然按单字节读。
   front matter 只认开头一段、全是 `key: value` 行（或键下面的列表项）的块，别的照原样当正文。去重只和不在回收站的笔记比

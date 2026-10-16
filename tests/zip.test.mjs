@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { deflateRawSync, inflateRawSync, crc32 as zcrc } from "node:zlib";
 import { spawnSync } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { writeFileSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { runScript, tempDir } from "./helpers.mjs";
 
@@ -84,14 +84,21 @@ test("write: unzip -l and unzip -p read it, when unzip is installed", (t) => {
   if (spawnSync("unzip", ["-v"]).status !== 0) { t.skip("unzip is not installed"); return; }
   const dir = tempDir(t), file = join(dir, "notes.zip");
   writeFileSync(file, Z.write(FILES));
-  const l = spawnSync("unzip", ["-l", file], { encoding: "utf8" });
+  /* a UTF-8 locale, as the CI runner has: Debian's unzip mangled our names there until the zip said "made by Unix" */
+  const env = { ...process.env, LC_ALL: "C.UTF-8", LANG: "C.UTF-8" };
+  const l = spawnSync("unzip", ["-l", file], { encoding: "utf8", env });
   assert.equal(l.status, 0, l.stderr);
   for (const f of FILES) assert.ok(l.stdout.includes(f.name), f.name + " in\n" + l.stdout);
-  const tst = spawnSync("unzip", ["-t", file], { encoding: "utf8" });
+  const tst = spawnSync("unzip", ["-t", file], { encoding: "utf8", env });
   assert.equal(tst.status, 0, tst.stdout + tst.stderr);
   assert.match(tst.stdout, /No errors detected/);
-  const one = spawnSync("unzip", ["-p", file, "日记/10月15日 周四.md"], { encoding: "utf8" });
+  const one = spawnSync("unzip", ["-p", file, "日记/10月15日 周四.md"], { encoding: "utf8", env });
   assert.equal(one.stdout, FILES[1].data);
+  /* extracted files are plain rw-r--r-- files */
+  const out = join(dir, "out");
+  assert.equal(spawnSync("unzip", ["-q", file, "-d", out], { env }).status, 0);
+  assert.equal(statSync(join(out, "日记/10月15日 周四.md")).mode & 0o777, 0o644);
+  assert.equal(readFileSync(join(out, "读书 (2).md"), "utf8"), FILES[0].data);
 });
 
 test("read: our own zip back, entry by entry", async () => {
