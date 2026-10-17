@@ -63,6 +63,22 @@
           <ul class="set-sense-list" id="set-sense-list"></ul>
           <p class="hint" id="set-sense-note" data-i18n="set.sense.note">撤销以后，这个程序下次要用时会再问一次。</p>
         </div>
+        <div class="set-backup" id="set-backup">
+          <div class="set-row">
+            <span data-i18n="bk.label">全部数据</span>
+            <div class="row">
+              <button class="btn ghost" id="set-backup-go" type="button" data-i18n="bk.go">备份</button>
+              <button class="btn ghost" id="set-restore-go" type="button" data-i18n="rs.go">恢复</button>
+            </div>
+          </div>
+          <p class="hint" id="set-backup-last" aria-live="polite"></p>
+          <div class="set-backup-box" id="set-backup-box" role="alertdialog" aria-live="assertive" hidden>
+            <p id="set-backup-msg"></p>
+            <p class="hint" id="set-backup-warn" hidden></p>
+            <div class="row" id="set-backup-btns"></div>
+          </div>
+          <input type="file" id="set-restore-file" accept=".zip,application/zip" hidden>
+        </div>
         <div class="set-row">
           <span id="upd-label">系统版本</span>
           <button class="btn ghost" id="set-update" type="button" data-i18n="upd.check">检查更新</button>
@@ -318,6 +334,7 @@
 <script src="develop.js"></script>
 <script src="notetext.js"></script>
 <script src="zip.js"></script>
+<script src="backup.js"></script>
 <script src="core.js"></script>
 <script src="apps/notes.js"></script>
 <script src="apps/calendar.js"></script>

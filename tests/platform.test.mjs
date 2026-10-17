@@ -32,31 +32,39 @@ function fakeIndexedDB(opts = {}) {
       return req;
     },
   };
+  /* a failed or aborted transaction leaves the store as it was before the transaction, as in a browser */
   function transaction(s, mode) {
-    let pending = 0, failed = null;
-    const t = {};
+    let pending = 0, failed = null, done = false;
+    const before = new Map(s.rows), t = {};
+    const finish = (fn) => { if (done) return; done = true; fn(); };
     const settle = () => later(() => {
-      if (pending) return;
-      if (failed) { t.error = failed; t.onabort && t.onabort(); }
-      else t.oncomplete && t.oncomplete();
+      if (pending || done) return;
+      if (failed) finish(() => { s.rows = before; t.error = failed; t.onabort && t.onabort(); });
+      else finish(() => t.oncomplete && t.oncomplete());
     });
+    t.abort = () => { if (!failed) failed = Object.assign(new Error("aborted"), { name: "AbortError" }); settle(); };
     const request = (fn) => {
       const r = {}; pending++;
       later(() => {
-        try { r.result = fn(); r.onsuccess && r.onsuccess(); } catch (e) { failed = e; }
+        if (!failed) try { r.result = fn(); r.onsuccess && r.onsuccess(); } catch (e) { failed = e; }
         pending--; settle();
       });
       return r;
     };
     const write = () => { if (mode !== "readwrite") throw Object.assign(new Error("read only"), { name: "ReadOnlyError" }); };
+    const sorted = () => [...s.rows.entries()].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
     t.objectStore = () => ({
       get: (k) => request(() => structuredClone(s.rows.get(k))),
+      getAll: () => request(() => sorted().map((e) => structuredClone(e[1]))),
+      getAllKeys: () => request(() => sorted().map((e) => e[0])),
       put: (v, k) => request(() => {
         write();
         if (opts.quota && JSON.stringify(v).length > opts.quota) throw Object.assign(new Error("full"), { name: "QuotaExceededError" });
+        if (opts.failPut && opts.failPut(v, k)) throw Object.assign(new Error("disk"), { name: "UnknownError" });
         s.rows.set(s.keyPath ? v[s.keyPath] : k, structuredClone(v));
       }),
       delete: (k) => request(() => { write(); s.rows.delete(k); }),
+      clear: () => request(() => { write(); s.rows.clear(); }),
       index: (iname) => ({
         getAll: (key) => request(() => [...s.rows.values()].filter((v) => v[s.indexes[iname]] === key).map((v) => structuredClone(v))),
       }),
@@ -212,6 +220,7 @@ test("on a phone, save() opens the share sheet with a typed file", async () => {
   assert.deepEqual(plain(await x.save({ filename: "film.PNG", data: new Uint8Array([1, 2]) })), { status: "saved" });
   assert.equal(shared[0].files[0].type, "image/png");
   assert.equal(shared[0].files[0].name, "film.PNG");
+  assert.deepEqual(Object.keys(shared[0]), ["files"], "no title or text: iOS would save it as a text file beside the file");
   assert.equal(x.clicked.length, 0);
 });
 
@@ -234,4 +243,82 @@ test("files: binary values round-trip in their own database, apart from the docu
   assert.equal(await P.files.get("dict/x/index"), undefined);
   await P.db.doc(BASE + "/notes/items/x").get();
   assert.deepEqual(names, ["lopda-files", "lopda"]);
+});
+
+/* ---------------- whole-device dump and load ---------------- */
+
+async function fill(P) {
+  await P.db.doc(NOTES + "/n1").set({ body: "hello", updated: 1 });
+  await P.db.doc(BASE + "/settings").set({ volume: 3, lang: "en" });
+  await P.db.doc(BASE + "/calendar/days/2026-10-17").set({ text: "x" });
+  await P.files.put("roll/r1/01.jpg", new Blob([new Uint8Array([255, 216, 1, 2])], { type: "image/jpeg" }));
+  await P.files.put("dict/d1/index", { info: { name: "d" }, index: { words: ["a", "b"], off: new Uint32Array([0, 7]), head: {} } });
+}
+/* JSON, with typed arrays named, so values from either realm compare */
+const typed = (v) => JSON.parse(JSON.stringify(v, (k, x) => (ArrayBuffer.isView(x) ? { [Object.prototype.toString.call(x)]: [...x] } : x)));
+async function plainDump(P) {
+  const d = await P.dumpAll();
+  const files = [];
+  for (const f of d.files) {
+    const v = f.value;
+    files.push({ key: f.key, value: Object.prototype.toString.call(v) === "[object Blob]" ? { blob: v.type, bytes: [...new Uint8Array(await v.arrayBuffer())] } : typed(v) });
+  }
+  return { docs: plain(d.docs), files };
+}
+
+test("dumpAll reads every document and every file, in key order", async () => {
+  const { P } = platform();
+  await fill(P);
+  const d = await P.dumpAll();
+  assert.deepEqual(d.docs.map((x) => x.path), [BASE + "/calendar/days/2026-10-17", NOTES + "/n1", BASE + "/settings"]);
+  assert.deepEqual(plain(d.docs[1].data), { body: "hello", updated: 1 });
+  assert.deepEqual(d.files.map((x) => x.key), ["dict/d1/index", "roll/r1/01.jpg"]);
+  assert.equal(Object.prototype.toString.call(d.files[0].value.index.off), "[object Uint32Array]");
+});
+
+test("dump, replace, dump gives the same result, and the stores keep working", async () => {
+  const a = platform().P, b = platform().P;
+  await fill(a);
+  await b.db.doc(NOTES + "/old").set({ body: "gone after the replace" });
+  await b.files.put("font/f1", new Blob(["x"]));
+  const first = await a.dumpAll();
+  await b.replaceAll(first);
+  assert.deepEqual(await plainDump(b), await plainDump(a));
+  assert.equal((await b.db.doc(NOTES + "/old").get()).exists, false);
+  assert.equal(await b.files.get("font/f1"), undefined);
+  /* the parent index is rebuilt: collections list the restored documents */
+  assert.deepEqual((await b.db.collection(NOTES).get()).docs.map((x) => x.id), ["n1"]);
+  await b.replaceAll(await b.dumpAll());
+  assert.deepEqual(await plainDump(b), await plainDump(a));
+});
+
+test("replaceAll with nothing empties both databases", async () => {
+  const { P } = platform();
+  await fill(P);
+  await P.replaceAll({ docs: [], files: [] });
+  assert.deepEqual(plain(await P.dumpAll()), { docs: [], files: [] });
+});
+
+test("a failed write leaves that database as it was", async () => {
+  const { P } = platform({ failPut: (v, k) => k === "dict/d1/index" && opts.armed });
+  const opts = { armed: false };
+  await fill(P);
+  const before = await plainDump(P);
+  opts.armed = true;
+  const next = await P.dumpAll();
+  next.docs.push({ path: NOTES + "/n2", data: { body: "new" } });
+  await assert.rejects(P.replaceAll(next), (e) => e.code === "unavailable");
+  opts.armed = false;
+  /* the documents' transaction had already committed; the files' one rolled back */
+  const after = await plainDump(P);
+  assert.deepEqual(after.files, before.files);
+  assert.equal(after.docs.length, before.docs.length + 1);
+});
+
+test("replaceAll refuses a bad document path before writing anything", async () => {
+  const { P } = platform();
+  await fill(P);
+  const before = await plainDump(P);
+  await assert.rejects(P.replaceAll({ docs: [{ path: NOTES + "/ok", data: {} }, { path: BASE + "/notes/items", data: {} }], files: [] }), (e) => e.code === "invalid_argument");
+  assert.deepEqual(await plainDump(P), before);
 });
