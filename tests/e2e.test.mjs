@@ -4207,8 +4207,15 @@ test("blow-candles: a round opens the mic, a loud sound puts candles out, the mi
   await press(p, "a");
   await until(p, () => f.evaluate(() => live), "listening");
   assert.equal(await micOn(p), true);
-  /* the microphone changes the phone's audio route: the context is made again and the fire goes on in it (iPhone, 0.24.1) */
-  assert.ok(await p.evaluate(() => LP.SND.ctx !== window.__ctx0 && LP.SND.ctx.state === "running" && LP.chip.state().ambience === "fire"));
+  /* the context that was playing is kept, and a stopped one runs again without a touch (0.24.2) */
+  await p.waitForTimeout(800);
+  assert.ok(await p.evaluate(() => LP.SND.ctx === window.__ctx0 && LP.SND.ctx.state === "running" && LP.chip.state().ambience === "fire"));
+  await p.evaluate(() => LP.SND.ctx.suspend());
+  await press(p, "start");
+  await until(p, async () => !(await micOn(p)), "the mic off while paused");
+  await until(p, () => p.evaluate(() => LP.SND.ctx.state === "running" && LP.chip.state().ambience === "fire"), "the fire running again");
+  await press(p, "a");
+  await until(p, () => f.evaluate(() => live), "listening again");
   /* the stub's full-scale tone is far above the threshold: the candles go out and the round ends */
   await until(p, () => f.evaluate(() => R.c.some((c) => !c.lit)), "a candle out");
   await until(p, () => f.evaluate(() => R.phase === "done"), "the round over");
