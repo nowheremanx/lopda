@@ -220,6 +220,7 @@ test("on a phone, save() opens the share sheet with a typed file", async () => {
   assert.deepEqual(plain(await x.save({ filename: "film.PNG", data: new Uint8Array([1, 2]) })), { status: "saved" });
   assert.equal(shared[0].files[0].type, "image/png");
   assert.equal(shared[0].files[0].name, "film.PNG");
+  assert.deepEqual(Object.keys(shared[0]), ["files"], "no title or text: iOS would save it as a text file beside the file");
   assert.equal(x.clicked.length, 0);
 });
 

@@ -184,7 +184,8 @@
     return Promise.resolve({ status: "saved" });
   }
   function share(file) {
-    return navigator.share({ files: [file], title: file.name }).then(function () { return { status: "saved" }; });
+    /* files only: with a title as well, iOS "Save to Files" saves the title as a text file next to the file */
+    return navigator.share({ files: [file] }).then(function () { return { status: "saved" }; });
   }
   /* Safari only allows share() during a tap. When the file took a moment to build, the tap is
      gone, so we show a one-tap "save" button and share from that tap instead. */

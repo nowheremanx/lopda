@@ -1079,6 +1079,8 @@ CPU 降速 4 倍（DevTools 的 CPU throttling，粗略代表旧手机）时，�
   `replaceAll(备份)`。任何写入失败就 `replaceAll(内存里的旧数据)`，说"恢复失败，什么都没有改。"；连写回也失败（很少见），
   就说清楚，并提供把旧数据存成备份文件。成功后说"恢复好了，正在重新开机…"，0.8 秒后重新载入页面，每个程序从恢复的数据开始。
   不做合并（v1.md 第 3 节）。
+- **分享菜单只交文件**（owner 2026-10-17 在 iPhone 上发现）：以前 `navigator.share` 同时带了 `title`，iOS 存到"文件"时会在
+  文件旁边多存一个只写着文件名的文本文件。现在只传 `files`，所有走 `S.downloads.save` 的导出（记事本 zip、底片、.sav、出片、备份）都一样。
 - **传感器授权**原样恢复；iOS 的系统框可能再问一次，这没关系。
 - **测试**：`tests/platform.test.mjs`（dumpAll / replaceAll 往返、失败的事务不留半截；内存 IndexedDB 加了 getAll、getAllKeys、clear、
   abort 和失败回滚），`tests/backup.test.mjs`（manifest、各种值往返、各种坏文件被拒），e2e 两条：几个程序造数据 → 备份 → 清空两个
