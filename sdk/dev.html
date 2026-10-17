@@ -25,6 +25,8 @@
   #tiltpad { position:relative; width:120px; height:120px; background:#1b1d1a; border:1px solid #4a4f45; touch-action:none; cursor:grab; flex:none; }
   #tiltpad::before, #tiltpad::after { content:""; position:absolute; background:#4a4f45; }
   #tiltpad::before { left:50%; top:0; bottom:0; width:1px; } #tiltpad::after { top:50%; left:0; right:0; height:1px; }
+  #snapbox { display:flex; flex-direction:column; gap:8px; border:1px solid #4a4f45; padding:8px; }
+  #snapcv { width:256px; max-width:100%; aspect-ratio:128/112; image-rendering:pixelated; background:#1b1d1a; display:block; }
   #tiltdot { position:absolute; width:16px; height:16px; margin:-8px 0 0 -8px; left:50%; top:50%; background:var(--paper); }
 </style>
 </head>
@@ -73,6 +75,18 @@
       </div>
       <label><input type="checkbox" id="realmic"> use this computer's microphone</label>
     </div>
+    <div id="snapbox">
+      <div>Camera (PAD.camera.snap): <span id="snapstate">closed</span></div>
+      <div class="row">
+        <canvas id="snapcv" width="128" height="112"></canvas>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <button id="snapshoot" type="button" disabled>Shutter (A)</button>
+          <button id="snapcancel" type="button" disabled>Cancel (B)</button>
+          <label><input type="checkbox" id="realcam"> use this computer's camera</label>
+        </div>
+      </div>
+      <video id="snapvideo" playsinline muted autoplay hidden></video>
+    </div>
     <div class="row">
       <label for="notesans">PAD.notes.append answers</label>
       <select id="notesans" style="width:auto"><option value="saved">saved (the player pressed A)</option><option value="denied">denied (the player pressed B)</option></select>
@@ -93,6 +107,8 @@
 <!-- the runtime's rules for notes from apps (limits, the dialog's preview) and its speech (voices, limits) -->
 <script src="../runtime/notetext.js"></script>
 <script src="../runtime/speech.js"></script>
+<!-- the runtime's viewfinder look (luma, the Bayer dither, exposure and contrast), so a snap here gives the handheld's tones -->
+<script src="../runtime/finder.js"></script>
 <script>
   var frame = document.getElementById("app"), html = "", appId = "dev", manifest = {};
   var log = function (s) { var p = document.getElementById("log"); p.textContent = (new Date().toLocaleTimeString() + "  " + s + "\n") + p.textContent; };
@@ -161,8 +177,8 @@
   function run() {
     if (chip) chip.stop();
     if (chip) document.getElementById("amb").value = "";
-    senseStop("motion"); senseStop("mic"); speech.stop();
-    var l = document.getElementById("lang").value, o = { music: !!chip, ambience: !!chip, sensors: true, notes: true, say: true };
+    senseStop("motion"); senseStop("mic"); speech.stop(); snapEnd(null);
+    var l = document.getElementById("lang").value, o = { music: !!chip, ambience: !!chip, sensors: true, notes: true, say: true, camera: true };
     if (l) o.lang = l;
     frame.srcdoc = lopdaWrapApp(html, o);
   }
@@ -176,10 +192,11 @@
     else if (d.op === "save") { s[d.k] = d.v; writeStore(s); }
     else if (d.op === "remove") { delete s[d.k]; writeStore(s); }
     else if (d.op === "error") log("ERROR " + d.msg);
-    else if (d.op === "exit") { log("app asked to exit"); if (chip) chip.stop(); senseStop("motion"); senseStop("mic"); speech.stop(); frame.srcdoc = ""; }
+    else if (d.op === "exit") { log("app asked to exit"); if (chip) chip.stop(); senseStop("motion"); senseStop("mic"); speech.stop(); snapEnd(null); frame.srcdoc = ""; }
     else if (d.op === "notes") notesOp(d);
     else if (d.op === "say") sayOp(d);
     else if (d.op === "sense") sense(d);
+    else if (d.op === "snap") snapOp(d);
     else if (d.op === "sfx" && typeof d.name === "string") {
       log("sfx " + d.name);
       /* the ten named sounds, from the same chip.js table the handheld plays */
@@ -358,8 +375,79 @@
     document.getElementById("realmic").onchange = function () { if (this.checked) startReal(); else stopReal(); };
     senseState();
   })();
-  /* chin buttons: on-screen pad plus keyboard while the harness has focus */
-  var press = function (b, down) { frame.contentWindow.postMessage({ pad: 1, op: "button", b: b, down: down }, "*"); };
+  /* PAD.camera.snap. The handheld asks the player once on its own dialog, then opens its own viewfinder over the app for every
+     snap; here the viewfinder is the panel on the right: a moving test pattern (or this computer's camera, if ticked) dithered
+     with the runtime's own finder.js. Shutter (or A) answers {w, h, px}, Cancel (or B) answers null. */
+  var FINDER = window.LopdaFinder, snapping = null, snapGrab = null;
+  var snapCv = document.getElementById("snapcv"), snapCtx = snapCv.getContext("2d");
+  function snapState(t) { document.getElementById("snapstate").textContent = t; }
+  /* luma 0-1 for a test card: a grey ramp, bars, and a disc that drifts, so the finder looks alive */
+  function pattern(w, h, t) {
+    var lum = new Float32Array(w * h), cx = w * (0.5 + 0.3 * Math.sin(t / 900)), cy = h * 0.45, r = h * 0.2;
+    for (var y = 0; y < h; y++) for (var x = 0; x < w; x++) {
+      var v = y < h * 0.7 ? x / (w - 1) : (Math.floor(x / (w / 8)) % 2 ? 0.85 : 0.15);
+      var dx = x - cx, dy = y - cy;
+      if (dx * dx + dy * dy < r * r) v = 1 - v * 0.6;
+      lum[y * w + x] = v;
+    }
+    return lum;
+  }
+  function snapFrame() {
+    var s = snapping, v = document.getElementById("snapvideo");
+    var lum = s.stream && v.videoWidth ? snapGrab(v, v.videoWidth, v.videoHeight, s.w, s.h, false) : pattern(s.w, s.h, Date.now());
+    return FINDER.ditherLuma(lum, s.w, s.h, 0, 0);
+  }
+  function snapDraw() {
+    if (!snapping) return;
+    var px = snapFrame(), img = snapCtx.createImageData(snapping.w, snapping.h), T = [[31, 42, 20], [74, 90, 50], [125, 138, 88], [163, 173, 126]];
+    for (var i = 0; i < px.length; i++) { var c = T[px[i]]; img.data[i * 4] = c[0]; img.data[i * 4 + 1] = c[1]; img.data[i * 4 + 2] = c[2]; img.data[i * 4 + 3] = 255; }
+    snapCtx.putImageData(img, 0, 0);
+  }
+  function snapCamera() {
+    if (!snapping || snapping.stream || !document.getElementById("realcam").checked) return;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { log("this browser has no camera access: the test pattern stays"); return; }
+    var s = snapping;
+    navigator.mediaDevices.getUserMedia({ video: true, audio: false }).then(function (stream) {
+      if (snapping !== s) { stream.getTracks().forEach(function (t) { t.stop(); }); return; }
+      s.stream = stream; var v = document.getElementById("snapvideo"); v.srcObject = stream; v.play().catch(function () {});
+      if (!snapGrab) snapGrab = FINDER.grabber();
+    }, function (e) { log("camera: " + e.name + " (the test pattern stays)"); document.getElementById("realcam").checked = false; });
+  }
+  function snapEnd(v) {
+    var s = snapping; if (!s) return;
+    snapping = null; clearInterval(s.timer);
+    if (s.stream) s.stream.getTracks().forEach(function (t) { t.stop(); });
+    document.getElementById("snapvideo").srcObject = null;
+    document.getElementById("snapshoot").disabled = document.getElementById("snapcancel").disabled = true;
+    snapState("closed");
+    log("camera.snap -> " + (v ? "{w: " + v.w + ", h: " + v.h + ", px: Uint8Array(" + v.px.length + ")}" : "null"));
+    if (v) frame.contentWindow.postMessage({ pad: 1, op: "snapped", i: s.i, v: v }, "*", [v.px.buffer]);
+    else frame.contentWindow.postMessage({ pad: 1, op: "snapped", i: s.i, v: null }, "*");
+  }
+  function snapOp(d) {
+    var reply = function (v) { frame.contentWindow.postMessage({ pad: 1, op: "snapped", i: d.i, v: v }, "*"); };
+    if ((manifest.permissions || []).indexOf("camera") < 0) { log('ERROR PAD.camera.snap needs "permissions": ["camera"] in manifest.json'); reply(null); return; }
+    if (snapping) { log("camera.snap: one is open already -> null"); reply(null); return; }
+    var size = FINDER.SIZES[d.size] || FINDER.SIZES.small;
+    snapping = { i: d.i, w: size.w, h: size.h, stream: null, timer: setInterval(snapDraw, 80) };
+    snapCv.width = size.w; snapCv.height = size.h;
+    document.getElementById("snapshoot").disabled = document.getElementById("snapcancel").disabled = false;
+    snapState("open, " + size.w + "x" + size.h + ": Shutter (A) or Cancel (B)");
+    log("camera.snap(" + d.size + "): the handheld asks once, then opens its viewfinder; here, the panel on the right");
+    snapDraw(); snapCamera();
+  }
+  document.getElementById("snapshoot").onclick = function () { if (snapping) { var s = snapping; snapEnd({ w: s.w, h: s.h, px: snapFrame() }); } };
+  document.getElementById("snapcancel").onclick = function () { snapEnd(null); };
+  document.getElementById("realcam").onchange = function () {
+    if (this.checked) snapCamera();
+    else if (snapping && snapping.stream) { snapping.stream.getTracks().forEach(function (t) { t.stop(); }); snapping.stream = null; }
+  };
+  /* chin buttons: on-screen pad plus keyboard while the harness has focus. While the viewfinder is open, A shoots and B cancels,
+     and nothing reaches the app, as on the handheld */
+  var press = function (b, down) {
+    if (snapping) { if (down && b === "a") document.getElementById("snapshoot").onclick(); else if (down && b === "b") snapEnd(null); return; }
+    frame.contentWindow.postMessage({ pad: 1, op: "button", b: b, down: down }, "*");
+  };
   Array.prototype.forEach.call(document.querySelectorAll("#pad button"), function (el) {
     var b = el.getAttribute("data-b");
     el.addEventListener("pointerdown", function (e) { e.preventDefault(); press(b, true); });

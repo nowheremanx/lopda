@@ -14,8 +14,10 @@
 (function(){
 "use strict";
 var LP=window.LP, $=LP.$, S=LP.S, I18N=LP.I18N, tr=LP.tr;
-var TONES=LP.TONES, BAYER=LP.BAYER, own=LP.own, toast=LP.toast, put=LP.put, pad2=LP.pad2, sfx=LP.sfx, show=LP.show, showPad=LP.showPad;
+var TONES=LP.TONES, own=LP.own, toast=LP.toast, put=LP.put, pad2=LP.pad2, sfx=LP.sfx, show=LP.show, showPad=LP.showPad;
 var FILES=window.LopdaPlatform.files;
+/* the look of the finder and of every frame: runtime/finder.js, shared with the viewfinder apps open (apps/snap.js) */
+var FINDER=window.LopdaFinder, ditherLuma=FINDER.ditherLuma;
 
 /* ---------- pixel camera: a roll of film. Frames are fixed once taken; a finished roll goes to the darkroom. ---------- */
 var CW=128, CH=112;
@@ -62,23 +64,6 @@ function lumaOf(img,w,h){
   var d=x.getImageData(0,0,w,h).data, lum=new Float32Array(w*h);
   for(var i=0;i<lum.length;i++) lum[i]=(0.2126*d[i*4]+0.7152*d[i*4+1]+0.0722*d[i*4+2])/255;
   return lum;
-}
-function ditherLuma(lum,w,h,exposure,contrast){
-  var hist=new Uint32Array(256), N=lum.length;
-  for(var q=0;q<N;q++) hist[Math.min(255,Math.max(0,(lum[q]*255)|0))]++;
-  var pct=function(f){ var want=N*f, acc=0; for(var b=0;b<256;b++){ acc+=hist[b]; if(acc>want) return b/255; } return 1; };
-  var lo=pct(0.02), hi=pct(0.98), span=Math.max(0.05,hi-lo);
-  var out=new Uint8Array(w*h), gain=Math.pow(1.35,exposure);
-  for(var y=0;y<h;y++) for(var x=0;x<w;x++){
-    var k=y*w+x, v=(lum[k]-lo)/span;
-    var nb=0,n=0; if(x>0){nb+=lum[k-1];n++} if(x<w-1){nb+=lum[k+1];n++} if(y>0){nb+=lum[k-w];n++} if(y<h-1){nb+=lum[k+w];n++}
-    v+= ((lum[k]-nb/n)/span)*0.6;
-    if(contrast) v=0.5+(v-0.5)*Math.pow(1.3,contrast);
-    v=Math.pow(Math.max(0,Math.min(1,v)),1/gain);
-    var t=(BAYER[(y%4)*4+(x%4)]+0.5)/16-0.5;
-    out[k]=Math.max(0,Math.min(3,Math.round(v*3+t)));
-  }
-  return out;
 }
 function pxFromString(str){ var px=new Uint8Array(str.length); for(var i=0;i<str.length;i++) px[i]=str.charCodeAt(i)-48; return px; }
 function stampOf(ts){ var d=new Date(ts); return String(d.getFullYear()).slice(2)+"."+String(d.getMonth()+1).padStart(2,"0")+"."+String(d.getDate()).padStart(2,"0")+" "+String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0"); }
@@ -167,19 +152,8 @@ function loadRoll(){
    Lenses: the phone's physical cameras (LopdaLenses, runtime/lenses.js), found once after the first permission.
    lens is the id the user last chose ("uw" "w" "t" "f"), kept in the film doc; lenses stays null until found. */
 var LENS=window.LopdaLenses;
-var LIVE={stream:null, on:false, opening:false, gen:0, raf:0, last:0, lens:"w", lenses:null, hold:0, failed:false, swapping:0,
-  cv:document.createElement("canvas"), ctx:null};
-LIVE.ctx=LIVE.cv.getContext("2d",{willReadFrequently:true});
-function lumaFrom(src,sw,sh,w,h,mirror){
-  var ar=w/h, cw=sw, ch=sw/ar; if(ch>sh){ ch=sh; cw=sh*ar; }
-  if(LIVE.cv.width!==w||LIVE.cv.height!==h){ LIVE.cv.width=w; LIVE.cv.height=h; }
-  var x=LIVE.ctx; x.save(); x.imageSmoothingEnabled=true;
-  if(mirror){ x.translate(w,0); x.scale(-1,1); }
-  x.drawImage(src,(sw-cw)/2,(sh-ch)/2,cw,ch,0,0,w,h); x.restore();
-  var d=x.getImageData(0,0,w,h).data, lum=new Float32Array(w*h);
-  for(var i=0;i<lum.length;i++) lum[i]=(0.2126*d[i*4]+0.7152*d[i*4+1]+0.0722*d[i*4+2])/255;
-  return lum;
-}
+var LIVE={stream:null, on:false, opening:false, gen:0, raf:0, last:0, lens:"w", lenses:null, hold:0, failed:false, swapping:0};
+var lumaFrom=FINDER.grabber();
 function liveSupported(){ return !!(window.isSecureContext && navigator.mediaDevices && navigator.mediaDevices.getUserMedia); }
 function camModeLabel(){
   var has=!!F.roll && !rollFull();
@@ -735,7 +709,9 @@ window.addEventListener("resize",camLayout);
 LP.film={STOCKS:STOCKS, STOCK_ORDER:STOCK_ORDER, stockLabel:stockLabel, stockPrint:stockPrint, LATENT:LATENT, latentKey:latentKey,
   STRIP:STRIP, stripWidth:stripWidth, buildStrip:buildStrip, CARD:CARD, buildCard:buildCard, putFrame:putFrame, fontsReady:fontsReady,
   stampOf:stampOf, fileStamp:fileStamp,
-  ditherLuma:ditherLuma};   /* the reader dithers book pictures with the same look */
+  ditherLuma:ditherLuma,   /* the reader dithers book pictures with the same look */
+  /* the snap viewfinder (apps/snap.js) starts from the lenses found so far (or null), names them and opens them the same way */
+  lenses:function(){ return LIVE.lenses; }, lensName:lensName, videoFor:videoFor};
 LP.padRoute("cam",function(b,down){ if($("v-cam").hidden) return false; camButton(b,down); return true; });
 LP.builtin({id:"camera", label:"app.camera", icon:"camera", view:"cam",
   open:function(){ openCam(); },

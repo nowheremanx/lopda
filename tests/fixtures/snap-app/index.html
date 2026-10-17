@@ -1,0 +1,10 @@
+<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;height:100%}</style></head><body><p id="out">-</p><script>
+  window.R = { results: [] };
+  /* what came back, summed up: null, or the size, the length and which tones appear */
+  var sum = function (v) {
+    if (!v) return null;
+    var seen = [0, 0, 0, 0]; for (var i = 0; i < v.px.length; i++) seen[v.px[i]] = 1;
+    return { w: v.w, h: v.h, n: v.px.length, typed: v.px instanceof Uint8Array, tones: seen };
+  };
+  window.snap = function (size) { return PAD.camera.snap(size ? { size: size } : undefined).then(function (v) { var s = sum(v); R.results.push(s); return s; }); };
+</script></body></html>
