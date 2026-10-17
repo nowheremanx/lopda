@@ -4571,8 +4571,18 @@ test("photo puzzle: a photo from the fake camera, shown first, then a 3x3 solved
   for (const k of keys.slice(0, -1)) await ppPress(p, f, k);
   await p.waitForTimeout(1100);   /* a scripted player is faster than the 20 sounds a second an app may play */
   await ppPress(p, f, keys.at(-1));
+  /* solved: the last piece drops in and the cuts melt into the whole photo, then 继续 goes to the result */
   s = await ppState(f);
-  assert.deepEqual([s.screen, s.moves], ["won", keys.length + 2]);
+  assert.deepEqual([s.screen, s.moves, s.animDone], ["solved", keys.length + 2, false]);
+  const during = await shot();
+  await until(p, async () => (await ppState(f)).animDone, "the end of the animation");
+  const whole = await shot();
+  assert.notEqual(whole, during, "the picture changes as it comes together");
+  assert.equal(await f.textContent("#msg"), "拼好了！");
+  assert.deepEqual(await f.$$eval("#menu button", (bs) => bs.map((b) => b.textContent)), ["继续"]);
+  await press(p, "a");
+  await until(p, async () => (await ppState(f)).screen === "won", "the result");
+  assert.equal(await shot(), whole, "the animation ends on exactly the whole photo");
   assert.match(await f.textContent("#msg"), new RegExp(`^拼好了！${keys.length + 2} 步。 新纪录！ 下一局是 4×4。$`));
   assert.ok(await p.evaluate(() => window.LOPDA_DEBUG.sfxLog.includes("win")));
   /* a new start remembers the best and the 4x4 */
@@ -4596,7 +4606,11 @@ test("photo puzzle: without a photo it plays the built-in picture and says why (
     assert.equal(await f.textContent("#msg"), line);
     const keys = solve3(s.tiles);
     for (const k of keys) await ppPress(p, f, k);
-    assert.equal((await ppState(f)).screen, "won");
+    assert.equal((await ppState(f)).screen, "solved");
+    await press(p, "a");   /* A skips the animation, a second A goes on */
+    await until(p, async () => (await ppState(f)).animDone, "the animation skipped");
+    await press(p, "a");
+    await until(p, async () => (await ppState(f)).screen === "won", "the result");
   };
   /* B on the runtime's dialog: snap gives null */
   let f = await runPuzzle(p);
