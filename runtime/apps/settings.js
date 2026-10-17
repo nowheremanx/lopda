@@ -67,6 +67,7 @@ function box(msg,buttons,warn){
     b.onclick=bt.go; row.appendChild(b);
   });
   $("set-backup-go").disabled=$("set-restore-go").disabled=BS.busy;
+  var el=$("set-backup-box"); if(el.scrollIntoView) el.scrollIntoView({block:"nearest"});
 }
 function closeBox(){ BS.busy=false; BS.backup=null; BS.file=null; $("set-backup-box").hidden=true; $("set-backup-go").disabled=$("set-restore-go").disabled=false; }
 function okBox(msg,then){ BS.busy=false; box(msg,[{label:tr("bk.ok"), main:true, go:function(){ sfx("tap"); (then||closeBox)(); }}]); }
