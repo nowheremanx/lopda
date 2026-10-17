@@ -1,7 +1,8 @@
 /*
  * Lo-PDA built-in: the app store (community registry), the preinstalled apps, and the sandboxed runner
  * with its PAD bridge (storage, sounds, music and ambience, buttons, files behind the runtime's own confirm dialog, tilt and
- * the microphone through runtime/sensors.js, asked for on the same dialog, writing into notes on that dialog too, and speech).
+ * the microphone through runtime/sensors.js, asked for on the same dialog, writing into notes on that dialog too, speech, and one
+ * photo at a time through the runtime's own viewfinder, apps/snap.js).
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  */
 (function(){
@@ -14,7 +15,7 @@ var own=LP.own, toast=LP.toast, put=LP.put, sfx=LP.sfx, show=LP.show, showPad=LP
 /* community apps that come installed, in this order on the home screen after the built-ins (docs/design/pad-files.md) */
 var PREINSTALL=["calculator","paint"];
 /* capabilities a manifest may ask for (SPEC.md section 2) */
-var PERMISSIONS=["files","motion","mic","notes"];
+var PERMISSIONS=["files","motion","mic","notes","camera"];
 function validPerms(x){ return Array.isArray(x) ? PERMISSIONS.filter(function(p){ return x.indexOf(p)>=0; }) : []; }
 function allowed(a,perm){ return !!(a && a.permissions && a.permissions.indexOf(perm)>=0); }
 
@@ -172,6 +173,7 @@ function freshRunFrame(){
 }
 function runApp(a){
   closeAsk(false);
+  LP.snap.cancel();   /* the old app's viewfinder closes with its frame */
   LP.speech.stop();   /* and its speech */
   sensors.stopAll();   /* the old app's tilt and microphone end with its frame */
   LP.chip.stop();   /* the old app's song and ambience end with its frame */
@@ -183,7 +185,7 @@ function runApp(a){
   showPad(!!a.buttons);
   LP.keepAwake(true);   /* a running app keeps the screen on */
   freshRunFrame();
-  var start=function(h){ $("run-frame").srcdoc=lopdaWrapApp(h,{lang:I18N.lang, music:true, ambience:true, sensors:true, notes:true, say:true}); };
+  var start=function(h){ $("run-frame").srcdoc=lopdaWrapApp(h,{lang:I18N.lang, music:true, ambience:true, sensors:true, notes:true, say:true, camera:true}); };
   if(a.html){ start(a.html); return; }
   $("run-frame").srcdoc='<body style="margin:0;height:100%;display:flex;align-items:center;justify-content:center;background:#a3ad7e;color:#1f2a14;font:16px monospace">'+tr("run.loading")+'</body>';
   loadHtml(a).then(function(h){
@@ -233,6 +235,8 @@ window.addEventListener("message",function(e){
     notesRequest(S.running,f.contentWindow,d);
   } else if(d.op==="say"){
     sayRequest(S.running,f.contentWindow,d);
+  } else if(d.op==="snap"){
+    snapRequest(S.running,f.contentWindow,d);
   } else if(d.op==="sfx"){
     var named=APP_SFX.indexOf(d.name)>=0, custom=!named && d.params && typeof d.params==="object";
     if(!named && !custom) return;
@@ -439,7 +443,7 @@ var sensors=window.LopdaSensors.host({
   rows.forEach(function(r,y){ for(var i=0;i<7;i++){ var o=(y*7+i)*4; if(r.charAt(i)==="0"){ im.data[o]=t[0]; im.data[o+1]=t[1]; im.data[o+2]=t[2]; im.data[o+3]=255; } } });
   x.putImageData(im,0,0); micMark.appendChild(c);
 })();
-/* allowed apps: {apps: {id: {motion: true, mic: true}}} */
+/* allowed apps: {apps: {id: {motion: true, mic: true, camera: true}}} (the camera's grant: PAD.camera.snap below) */
 var grants={}, grantsRef=null;
 function granted(id,kind){ return !!(grants[id] && grants[id][kind]); }
 function saveGrants(){ if(grantsRef) put(grantsRef,{apps:grants}); }
@@ -449,7 +453,7 @@ LP.sensorGrants={
   list:function(){
     return Object.keys(grants).map(function(id){
       var a=installedOf(id);
-      return {id:id, name:a ? appName(a) : id, kinds:["motion","mic"].filter(function(k){ return granted(id,k); })};
+      return {id:id, name:a ? appName(a) : id, kinds:["motion","mic","camera"].filter(function(k){ return granted(id,k); })};
     }).filter(function(g){ return g.kinds.length; });
   },
   revoke:revokeSense
@@ -522,6 +526,44 @@ function notesRequest(app,win,d){
   openAsk(req);
 }
 
+/* ---------- the camera: PAD.camera.snap (apps/snap.js, decisions.md section 28) ----------
+   Only apps whose manifest has "camera". The first snap() of an app opens the runtime's dialog; A (on release) or the OK tap
+   allows it, and the viewfinder opens inside that same tap so the phone's own prompt can come. An allowed app is remembered
+   with the sensors (Settings lists and revokes it). iOS may ask again after a relaunch: without a camera opened since the page
+   opened, the one-line bar comes first. Every snap() opens the viewfinder; the player shoots (A) or cancels (B). The app gets
+   {w, h, px} (px: w*h tone indices 0-3, its buffer transferred) or null: refused, cancelled, no camera, or a snap already open */
+function snapRequest(app,win,d){
+  var reply=function(v){
+    if(S.running!==app || $("run-frame").contentWindow!==win) return;
+    if(v) win.postMessage({pad:1,op:"snapped",i:d.i,v:v},"*",[v.px.buffer]);
+    else win.postMessage({pad:1,op:"snapped",i:d.i,v:null},"*");
+  };
+  if(!allowed(app,"camera") || LP.snap.isOpen() || (ask && ask.snap)){ reply(null); return; }
+  if(!LP.snap.supported()){ toast(tr("snap.none")); reply(null); return; }
+  var req={app:app, win:win, snap:true, size:d.size==="large" ? "large" : "small", reply:reply};
+  req.cancel=function(){ reply(null); };
+  if(granted(app.id,"camera")){ snapBegin(req); return; }
+  req.text=tr("snap.ask",{name:appName(app)}); req.note=tr("snap.asknote");
+  req.okLabel=tr("sense.allow"); req.noLabel=tr("sense.deny");
+  req.ok=function(){ closeAsk(false); grant(app.id,"camera"); snapOpen(req); };
+  if(ask) closeAsk(true);
+  openAsk(req);
+}
+/* an allowed app: the finder at once when the phone has let the runtime use a camera since the page opened; otherwise the bar,
+   and the finder (with the phone's prompt) in its tap */
+function snapBegin(req){
+  if(LP.snap.systemOk()){ snapOpen(req); return; }
+  req.bar=true; req.text=tr("snap.tap");
+  req.ok=function(){ closeAsk(false); snapOpen(req); };
+  if(ask) closeAsk(true);
+  openAsk(req);
+}
+function snapOpen(req){
+  /* the app lets go of every button: the viewfinder has the pad now */
+  req.win.postMessage({pad:1,op:"release-all"},"*");
+  LP.snap.open({name:appName(req.app), size:req.size, owner:function(){ return frontWin()===req.win; }, done:req.reply});
+}
+
 /* ---------- speech: PAD.say (runtime/speech.js, decisions.md section 25). No permission: the voice follows the volume
    (step 0 says nothing), an app speaks once a second at most, 200 characters, a new call stops the one speaking, and HOME,
    another app or the page going away stops it ---------- */
@@ -565,7 +607,7 @@ LP.builtin({id:"store", label:"app.store", icon:"store", view:"store",
   ready:function(){ loadRegistry(); }});
 /* the runner owns the run view but has no icon of its own: apps appear on the home screen */
 LP.builtin({id:"run", view:"run", keepPad:true,
-  leave:function(){ closeAsk(false); LP.speech.stop(); sensors.stopAll(); LP.chip.stop(); LP.keepAwake(false); $("run-frame").srcdoc=""; S.running=null; },
+  leave:function(){ closeAsk(false); LP.snap.cancel(); LP.speech.stop(); sensors.stopAll(); LP.chip.stop(); LP.keepAwake(false); $("run-frame").srcdoc=""; S.running=null; },
   lang:function(){
     /* apps read PAD.lang once at start: a running app is started again in the new language */
     if(S.running && !$("v-run").hidden) runApp(S.running);

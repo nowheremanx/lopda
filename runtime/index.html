@@ -59,7 +59,7 @@
           </div>
         </div>
         <div class="set-sense" id="set-sense">
-          <span data-i18n="set.sense">传感器</span>
+          <span data-i18n="set.sense">传感器与相机</span>
           <ul class="set-sense-list" id="set-sense-list"></ul>
           <p class="hint" id="set-sense-note" data-i18n="set.sense.note">撤销以后，这个程序下次要用时会再问一次。</p>
         </div>
@@ -300,6 +300,24 @@
       </div>
     </section>
 
+    <!-- PAD.camera.snap: the runtime's own viewfinder over a running app (apps/snap.js); one screen, no scrolling -->
+    <div class="snap cam-view" id="snap" hidden role="dialog" data-i18n-label="cam.finder" aria-label="取景器">
+      <div class="cam-lcd"><span id="snap-who"></span><span id="snap-exp">亮±0 对±0</span></div>
+      <div class="finder-box" id="snap-box">
+        <div class="finder" id="snap-finder">
+          <canvas id="snap-cv" width="128" height="112"></canvas>
+          <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+          <span class="live-tag" id="snap-lens" hidden></span>
+          <div class="shut" id="snap-shut" hidden></div>
+          <video id="snap-video" playsinline muted autoplay hidden></video>
+        </div>
+      </div>
+      <div class="cam-keys">
+        <button class="ck" type="button" id="snap-no"><i>B</i><span data-i18n="common.cancel">取消</span></button>
+        <button class="ck ck-a" type="button" id="snap-ok" data-i18n-label="cam.a.shoot" aria-label="拍照"><i>A</i><span data-i18n="cam.k.shoot">拍</span></button>
+      </div>
+    </div>
+
     <div class="toast" id="toast" hidden></div>
   </div>
   <div class="gamepad" id="gamepad" hidden>
@@ -331,6 +349,7 @@
 <script src="sensors.js"></script>
 <script src="speech.js"></script>
 <script src="lenses.js"></script>
+<script src="finder.js"></script>
 <script src="negative.js"></script>
 <script src="develop.js"></script>
 <script src="notetext.js"></script>
@@ -344,6 +363,7 @@
 <script src="apps/camera.js"></script>
 <script src="apps/darkroom.js"></script>
 <script src="apps/cart.js"></script>
+<script src="apps/snap.js"></script>
 <script src="apps/store.js"></script>
 <script src="apps/settings.js"></script>
 <script src="boot.js"></script>

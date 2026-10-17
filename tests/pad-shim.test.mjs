@@ -373,3 +373,49 @@ test("say: the text is cut to 200 characters, lang is zh or en and PAD.lang by d
   zh.fromRuntime({ pad: 1, op: "said", i: s3.i, v: "boom" });
   assert.deepEqual(await Promise.all([r1, r2, r3]), ["stopped", "done", "unavailable"]);
 });
+
+/* ---------- the camera (SPEC.md 6.6, decisions.md section 28) ---------- */
+test("camera: PAD.camera exists only when the runtime offers it, and the wrapper passes camera", () => {
+  assert.equal(app().PAD.camera, undefined);
+  assert.equal(app({ sensors: true, notes: true, say: true }).PAD.camera, undefined);
+  const { PAD } = app({ camera: true });
+  assert.deepEqual(Object.keys(PAD.camera), ["snap"]);
+  assert.ok(Object.isFrozen(PAD.camera));
+  const { lopdaWrapApp: wrap } = runScript("sdk/pad-shim.js", {});
+  assert.match(wrap("<p>x</p>", { say: true, camera: true }), /\(\{"say":true,"camera":true\}\);/);
+});
+
+test("camera: snap asks for small or large, and the picture comes back as {w, h, px} with tones 0-3", async () => {
+  const a = app({ camera: true });
+  const U8 = vm.runInContext("Uint8Array", a.ctx);   /* what a postMessage into the app's frame makes */
+  const one = a.PAD.camera.snap(), two = a.PAD.camera.snap({ size: "large" }), three = a.PAD.camera.snap({ size: "huge" });
+  const [p1, p2, p3] = a.posted();
+  assert.deepEqual(p1, { op: "snap", size: "small", i: p1.i, pad: 1 });
+  assert.deepEqual([p2.size, p3.size], ["large", "small"]);
+  const small = new U8(128 * 112).map((_, i) => i % 4), large = new U8(256 * 224).fill(3);
+  a.fromRuntime({ pad: 1, op: "snapped", i: p1.i, v: { w: 128, h: 112, px: small } }, {});   /* not from the parent: ignored */
+  a.fromRuntime({ pad: 1, op: "snapped", i: p1.i, v: { w: 128, h: 112, px: small } });
+  a.fromRuntime({ pad: 1, op: "snapped", i: p2.i, v: { w: 256, h: 224, px: large } });
+  a.fromRuntime({ pad: 1, op: "snapped", i: p3.i, v: null });
+  const [r1, r2, r3] = await Promise.all([one, two, three]);
+  assert.deepEqual([r1.w, r1.h, r1.px.length, r1.px[5]], [128, 112, 128 * 112, 1]);
+  assert.equal(r1.px, small, "the same array, not a copy");
+  assert.deepEqual([r2.w, r2.h, r2.px.length], [256, 224, 256 * 224]);
+  assert.equal(r3, null);
+});
+
+test("camera: null without the permission; anything that is not a proper picture reads as null", async () => {
+  const a = app({ camera: true });
+  const U8 = vm.runInContext("Uint8Array", a.ctx);
+  const bad = [
+    null,                                                   /* the runtime: no "camera", cancelled, no camera */
+    { w: 128, h: 112, px: new U8(10) },                     /* wrong length */
+    { w: 100, h: 100, px: new U8(10000) },                  /* not one of the two sizes */
+    { w: 128, h: 112, px: new U8(128 * 112).fill(4) },      /* a tone that does not exist */
+    { w: 128, h: 112, px: Array.from({ length: 128 * 112 }, () => 0) },   /* not a Uint8Array */
+    "photo",
+  ];
+  const calls = bad.map(() => a.PAD.camera.snap());
+  a.posted().forEach((p, k) => a.fromRuntime({ pad: 1, op: "snapped", i: p.i, v: bad[k] }));
+  assert.deepEqual(await Promise.all(calls), bad.map(() => null));
+});

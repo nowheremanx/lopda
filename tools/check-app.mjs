@@ -16,7 +16,7 @@ const LANGS = ["zh", "en"];
 const SOUNDS = ["tap", "tick", "move", "ok", "err", "hit", "miss", "coin", "win", "lose"];
 const AMBIENCES = ["rain", "waves", "waterfall", "wind", "fire", "stream"];
 const MAX_BYTES = 512 * 1024;
-const PERMISSIONS = ["files", "motion", "mic", "notes"];
+const PERMISSIONS = ["files", "motion", "mic", "notes", "camera"];
 const LICENSES = ["MIT", "0BSD", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Apache-2.0", "CC0-1.0", "Unlicense"];
 const PALETTE = [[0x1f, 0x2a, 0x14], [0x4a, 0x5a, 0x32], [0x7d, 0x8a, 0x58], [0xa3, 0xad, 0x7e]];
 const EMOJI = /[\p{Extended_Pictographic}\u{1F1E6}-\u{1F1FF}]/u;
@@ -198,6 +198,10 @@ export function checkApp(dir) {
   const usesNotes = /PAD\.notes\b/.test(code);
   if (usesNotes && !perms.includes("notes")) errors.push('PAD.notes.append needs "permissions": ["notes"] in manifest.json');
   if (!usesNotes && perms.includes("notes")) warnings.push('"notes" is declared but PAD.notes.append is never used: drop it');
+  /* the camera (SPEC.md 6.6): PAD.camera needs "camera" */
+  const usesCamera = /PAD\.camera\b/.test(code);
+  if (usesCamera && !perms.includes("camera")) errors.push('PAD.camera.snap needs "permissions": ["camera"] in manifest.json');
+  if (!usesCamera && perms.includes("camera")) warnings.push('"camera" is declared but PAD.camera.snap is never used: drop it');
   if (usesButtons && m.buttons !== true) warnings.push('uses PAD.on but "buttons" is not true, so the chin buttons stay hidden (keyboard still works)');
   return { id, errors, warnings, info };
 }
