@@ -4207,8 +4207,7 @@ test("blow-candles: a round opens the mic, a loud sound puts candles out, the mi
   await press(p, "a");
   await until(p, () => f.evaluate(() => live), "listening");
   assert.equal(await micOn(p), true);
-  /* the context that was playing is kept (one made while the microphone is on is much quieter on the iPhone, 0.24.2),
-     and a stopped one runs again without a touch */
+  /* the context that was playing is kept, and a stopped one runs again without a touch (0.24.2) */
   await p.waitForTimeout(800);
   assert.ok(await p.evaluate(() => LP.SND.ctx === window.__ctx0 && LP.SND.ctx.state === "running" && LP.chip.state().ambience === "fire"));
   await p.evaluate(() => LP.SND.ctx.suspend());

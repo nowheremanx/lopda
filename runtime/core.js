@@ -275,10 +275,9 @@ function rebuild(){
   LP.each("audio");
 }
 /* The microphone going on or off: iOS changes the audio route, and the system prompt interrupts the audio session, so the
-   context may be left stopped with nobody touching the screen (blowing at a candle). Step 0 heard a context made before the
-   microphone keep its full volume; one made while the microphone is on came out much quieter (owner's iPhone, 0.24.1,
-   2026-10-17: probably the phone's voice route). So the context is kept: a moment later a stopped one is asked to run, and
-   only one whose clock still stands is made again. */
+   context may be left stopped with nobody touching the screen (blowing at a candle). So a moment later a stopped one is asked
+   to run, and only one whose clock still stands is made again. (While the microphone is on iOS plays everything quieter,
+   whichever context: the system's doing, accepted; decisions.md section 23.) */
 function micRoute(){
   var ac=SND.ctx; if(!ac) return;
   setTimeout(function(){
