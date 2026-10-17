@@ -51,6 +51,121 @@ test("the runtime boots without errors and shows the home screen", { skip }, asy
   assert.deepEqual(errors, []);
 });
 
+test("the add-to-home card is iOS Safari only, remembers dismissal, and boot asks for no permissions", { skip, timeout: 30000 }, async (t) => {
+  const ios = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1";
+  const { p, errors } = await page(t, { locale: "en-US", userAgent: ios });
+  await p.addInitScript((standalone) => {
+    Object.defineProperty(navigator, "standalone", { configurable: true, value: standalone });
+    window.__permissionCalls = { camera: 0, motion: 0, notification: 0 };
+    if (!navigator.mediaDevices) Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: {} });
+    Object.defineProperty(navigator.mediaDevices, "getUserMedia", { configurable: true, value: () => {
+      window.__permissionCalls.camera++; return Promise.reject(new Error("unexpected camera prompt"));
+    } });
+    ["DeviceOrientationEvent", "DeviceMotionEvent"].forEach((name) => {
+      Object.defineProperty(window, name, { configurable: true, value: {
+        requestPermission: () => { window.__permissionCalls.motion++; return Promise.resolve("granted"); }
+      } });
+    });
+    Object.defineProperty(window, "Notification", { configurable: true, value: {
+      requestPermission: () => { window.__permissionCalls.notification++; return Promise.resolve("granted"); }
+    } });
+  }, false);
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await p.waitForSelector("#home-add-tip");
+  assert.match(await p.locator("#home-add-tip").innerText(), /Add to Home Screen\. Play like a real handheld\./);
+  assert.deepEqual(await p.evaluate(() => window.__permissionCalls), { camera: 0, motion: 0, notification: 0 });
+
+  await p.keyboard.press("x");
+  await p.waitForSelector("#home-add-tip", { state: "detached" });
+  const dismissed = await p.evaluate(() => new Promise((resolve, reject) => {
+    const req = indexedDB.open("lopda");
+    req.onerror = () => reject(req.error);
+    req.onsuccess = () => {
+      const db = req.result, get = db.transaction("docs").objectStore("docs").get("data/users/local/settings");
+      get.onsuccess = () => { db.close(); resolve(!!(get.result && get.result.data.homeTipDismissed)); };
+      get.onerror = () => { db.close(); reject(get.error); };
+    };
+  }));
+  assert.equal(dismissed, true);
+  await p.reload({ waitUntil: "networkidle" });
+  await p.waitForFunction(() => window.LopdaPlatform && document.querySelectorAll("#home .builtin").length === 9);
+  assert.equal(await p.locator("#home-add-tip").count(), 0);
+  assert.deepEqual(await p.evaluate(() => window.__permissionCalls), { camera: 0, motion: 0, notification: 0 });
+  await p.locator("#home .app.builtin").nth(8).click();
+  await p.locator("#set-vol-up").click();
+  await p.waitForFunction(() => new Promise((resolve, reject) => {
+    const req = indexedDB.open("lopda");
+    req.onerror = () => reject(req.error);
+    req.onsuccess = () => {
+      const db = req.result, get = db.transaction("docs").objectStore("docs").get("data/users/local/settings");
+      get.onsuccess = () => {
+        const data = get.result && get.result.data;
+        db.close(); resolve(!!(data && data.homeTipDismissed && data.volume === 3));
+      };
+      get.onerror = () => { db.close(); reject(get.error); };
+    };
+  }));
+  await p.click("#home-key");
+  await p.reload({ waitUntil: "networkidle" });
+  await p.waitForFunction(() => window.LopdaPlatform && document.querySelectorAll("#home .builtin").length === 9);
+  assert.equal(await p.locator("#home-add-tip").count(), 0, "saving Settings keeps the dismissal");
+  assert.deepEqual(await p.evaluate(() => window.__permissionCalls), { camera: 0, motion: 0, notification: 0 });
+  assert.deepEqual(errors, []);
+
+  const { p: buttonPage } = await page(t, { locale: "en-US", userAgent: ios });
+  await buttonPage.addInitScript(() => Object.defineProperty(navigator, "standalone", { configurable: true, value: false }));
+  await buttonPage.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await buttonPage.waitForSelector("#home-add-tip");
+  await buttonPage.click("#home-tip-dismiss");
+  await buttonPage.waitForSelector("#home-add-tip", { state: "detached" });
+});
+
+test("the add-to-home card stays hidden in standalone mode and on desktop", { skip, timeout: 30000 }, async (t) => {
+  const ios = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1";
+  const ipad = "Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1";
+  const desktop = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
+  const android = "Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36";
+  const cases = [[ios, true, false, false], [ios, false, true, false], [desktop, false, false, false],
+    [ipad, false, false, true], [android, false, false, false]];
+  for (const [userAgent, standalone, displayMode, expected] of cases) {
+    const { p } = await page(t, { userAgent });
+    await p.addInitScript((state) => {
+      Object.defineProperty(navigator, "standalone", { configurable: true, value: state.standalone });
+      if (state.displayMode) {
+        const native = window.matchMedia.bind(window);
+        window.matchMedia = (query) => query === "(display-mode: standalone)"
+          ? { matches: true, media: query }
+          : native(query);
+      }
+    }, { standalone, displayMode });
+    await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+    await p.waitForFunction(() => window.LopdaPlatform && document.querySelectorAll("#home .builtin").length === 9);
+    assert.equal(await p.locator("#home-add-tip").count(), expected ? 1 : 0, userAgent);
+  }
+});
+
+test("each built-in's fresh-profile first screen has visible content", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "en-US" });
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await p.waitForFunction(() => document.querySelectorAll("#home .app.builtin").length === 9);
+  const ids = ["notes", "cal", "dict", "reader", "cam", "dark", "cart", "store", "settings"];
+  const firstScreens = [];
+  for (let i = 0; i < ids.length; i++) {
+    await p.locator("#home .app.builtin").nth(i).click();
+    await p.waitForFunction((id) => {
+      const view = document.getElementById("v-" + id);
+      return view && !view.hidden;
+    }, ids[i]);
+    const text = (await p.locator("#v-" + ids[i]).innerText()).trim();
+    assert.ok(text, `${ids[i]} first screen is blank`);
+    firstScreens.push(`${ids[i]}: ${text.replace(/\s+/g, " ").slice(0, 100)}`);
+    if (ids[i] === "cam" && await p.locator("#cam-boot").isVisible()) await p.locator("#cam-boot").click();
+    await p.click("#home-key");
+  }
+  assert.deepEqual(errors, []);
+  assert.equal(firstScreens.length, 9);
+});
+
 test("the runtime asks nothing of other sites: fonts and everything else come from its own origin", { skip }, async (t) => {
   const { p, errors } = await page(t);
   const away = [];

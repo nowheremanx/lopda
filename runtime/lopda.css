@@ -45,6 +45,9 @@ button{font-family:inherit;color:inherit}
 
 /* home grid */
 .home{padding:16px 12px;display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:16px 10px;align-content:start}
+.home-tip{grid-column:1/-1;display:grid;gap:6px;padding:10px;border:2px solid var(--ink);background:var(--lcd);color:var(--ink);font-size:14px;line-height:1.35}
+.home-tip strong{font-size:15px;font-weight:600}
+.home-tip-dismiss{justify-self:start;min-height:44px;padding:8px 14px}
 .app{display:flex;flex-direction:column;align-items:center;gap:6px;background:none;border:0;padding:0;cursor:pointer;min-width:0}
 .tile{width:64px;height:64px;border:3px solid var(--ink);background:var(--lcd-2);display:flex;align-items:center;justify-content:center;font-size:32px;box-shadow:4px 4px 0 var(--ink);position:relative;overflow:hidden}
 .app:active .tile{transform:translate(2px,2px);box-shadow:2px 2px 0 var(--ink)}
