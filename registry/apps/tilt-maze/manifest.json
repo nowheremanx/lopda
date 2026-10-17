@@ -3,7 +3,7 @@
   "id": "tilt-maze",
   "name": "滚珠迷宫",
   "glyph": "珠",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "倾斜机身让小钢珠滚到终点，别掉进洞。也能用方向键推。倾斜感应的示范。",
   "i18n": {
     "zh": {
