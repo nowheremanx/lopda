@@ -8,7 +8,7 @@ import { createServer } from "node:http";
 import { readFile, writeFile } from "node:fs/promises";
 import { readdirSync } from "node:fs";
 import { join, extname, normalize } from "node:path";
-import { ROOT, tempDir } from "./helpers.mjs";
+import { ROOT, tempDir, runScript } from "./helpers.mjs";
 
 let pw = null;
 try { pw = await import("playwright"); } catch {}
@@ -4400,4 +4400,217 @@ test("cart: the ROM in the emulator stays whole across eject, play again and a .
   await playAndCheck("after a .sav import");
   await playAndCheck("after another eject");
   assert.deepEqual(notBlocked(errors), []);
+});
+
+/* ---------------- whole-device backup and restore (Settings) ---------------- */
+
+/* both databases read straight from IndexedDB, Blobs and typed arrays as their bytes in hex: what "byte for byte" compares */
+const dumpRaw = (p) => p.evaluate(async () => {
+  const hex = (u8) => Array.from(u8, (b) => b.toString(16).padStart(2, "0")).join("");
+  const all = (name, store) => new Promise((res, rej) => {
+    const r = indexedDB.open(name); r.onerror = () => rej(r.error);
+    r.onsuccess = () => { const s = r.result.transaction(store).objectStore(store), k = s.getAllKeys(), v = s.getAll();
+      v.onsuccess = () => { r.result.close(); res(k.result.map((key, i) => [key, v.result[i]])); }; v.onerror = () => rej(v.error); };
+  });
+  const canon = async (v) => {
+    const t = Object.prototype.toString.call(v);
+    if (t === "[object Blob]" || t === "[object File]") return { blob: v.type, name: v.name, hex: hex(new Uint8Array(await v.arrayBuffer())) };
+    if (ArrayBuffer.isView(v)) return { view: t, hex: hex(new Uint8Array(v.buffer, v.byteOffset, v.byteLength)) };
+    if (Array.isArray(v)) return Promise.all(v.map(canon));
+    if (v && typeof v === "object") { const o = {}; for (const k of Object.keys(v)) o[k] = await canon(v[k]); return o; }
+    return v;
+  };
+  const docs = await all("lopda", "docs"), files = await all("lopda-files", "files");
+  return { docs: Object.fromEntries(docs.map(([k, v]) => [k, v.data])), files: Object.fromEntries(await Promise.all(files.map(async ([k, v]) => [k, await canon(v)]))) };
+});
+/* zip.js on Node's side, to look inside a backup */
+const zipReader = () => {
+  const neg = runScript("runtime/negative.js", { TextEncoder, TextDecoder }).LopdaNegative;
+  return runScript("runtime/zip.js", { TextEncoder, TextDecoder, LopdaNegative: neg }).LopdaZip;
+};
+const wipeRaw = (p) => p.evaluate(() => Promise.all([["lopda", "docs"], ["lopda-files", "files"]].map(([name, store]) => new Promise((res, rej) => {
+  const r = indexedDB.open(name); r.onerror = () => rej(r.error);
+  r.onsuccess = () => { const tx = r.result.transaction(store, "readwrite"); tx.objectStore(store).clear(); tx.oncomplete = () => { r.result.close(); res(); }; tx.onerror = () => rej(tx.error); };
+}))));
+
+/* a page with a mouse (on a desktop the backup downloads) and the downloads kept */
+async function backupPage(t) {
+  const p = await browser.newPage({ viewport: { width: 390, height: 844 }, acceptDownloads: true, locale: "zh-CN" });
+  t.after(() => p.close());
+  const errors = [];
+  p.on("pageerror", (e) => errors.push(e.message));
+  p.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
+  await p.route(/jsdelivr/, (r) => r.abort());
+  const boot = async (how = "goto") => {
+    if (how === "goto") await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+    await p.waitForFunction(() => window.LP && window.LP.S.db && document.querySelectorAll("#home .app:not(.builtin)").length >= 2, null, { timeout: 15000 });
+    await p.waitForTimeout(600);   /* let the programs' first reads and writes settle */
+  };
+  const settings = async () => { await p.click("#home-key"); await tile(p, "设置"); await p.waitForSelector("#v-settings:not([hidden])"); };
+  const msg = () => p.textContent("#set-backup-msg");
+  const backup = async () => {
+    await p.click("#set-backup-go");
+    await p.waitForFunction(() => /^备份全部数据，约 .+。$/.test(document.getElementById("set-backup-msg").textContent), null, { timeout: 20000 });
+    const [dl] = await Promise.all([p.waitForEvent("download"), p.click("#set-backup-btns .btn:not(.ghost)")]);
+    await p.waitForSelector("#set-backup-box", { state: "hidden" });
+    return { name: dl.suggestedFilename(), bytes: await readFile(await dl.path()) };
+  };
+  const pick = async (buffer) => {
+    const [fc] = await Promise.all([p.waitForEvent("filechooser"), p.click("#set-restore-go")]);
+    await fc.setFiles({ name: "lopda-backup.zip", mimeType: "application/zip", buffer });
+  };
+  return { p, errors, boot, settings, msg, backup, pick };
+}
+
+/* data made by several programs: a note, an anniversary, a roll with a latent, a word in the word book, an app's PAD.save,
+   a cartridge with a save; and things the programs only read (a sensor grant, the volume) */
+async function makeData(p, tag) {
+  const { createHash } = await import("node:crypto");
+  const rom = savRom(), id = createHash("sha256").update(rom).digest("hex").slice(0, 24);
+  await p.evaluate((tag) => LP.notes.append("备份 " + tag, "这一篇要回来。"), tag);
+  await p.evaluate(async ({ tag, id }) => {
+    const db = LP.S.db, now = new Date();
+    LP.dict.toggleWord("serendipity");
+    await db.doc("data/users/local/calendar/days/bk" + tag).set({ name: "纪念 " + tag, month: now.getMonth() + 1, day: now.getDate(), lunar: false, leap: false });
+    const c = new OffscreenCanvas(80, 70), x = c.getContext("2d"); x.fillStyle = "#c84"; x.fillRect(0, 0, 80, 70);
+    await window.LopdaPlatform.files.put("roll/rbk" + tag + "/01.jpg", await c.convertToBlob({ type: "image/jpeg" }));
+    await LP.put(LP.S.refs.rolls.doc("rbk" + tag), { id: "rbk" + tag, no: 1, stock: "sunny", seed: 7, size: 1, res: 1, loaded: 1, out: 2, name: "卷 " + tag, bytes: 100,
+      frames: [{ n: 1, px: "2".repeat(128 * 112), taken: 3, dated: false, exposure: 0, contrast: 0 }] });
+    await LP.put(LP.S.refs.cartsave.doc(id), { sram: btoa("\x5a".repeat(64)) });
+    /* anything else in the files database: a structured value with a typed array, as an imported dictionary's index */
+    await window.LopdaPlatform.files.put("probe/" + tag, { words: ["a", "b"], off: new Uint32Array([1, 2]), at: new Date(5) });
+    await db.doc("data/users/local/sensors").set({ apps: { probe: { motion: true } } });
+  }, { tag, id });
+  /* the cartridge, through the cartridge player; then an app that keeps a value with PAD.save */
+  await p.click("#home-key"); await tile(p, "卡带机");
+  await p.setInputFiles("#cart-file", { name: "savtest.gb", mimeType: "application/octet-stream", buffer: rom });
+  await p.waitForSelector("#cart-list li.cart-item");
+  await p.click("#home-key");
+  await runInRuntime(p, "probe", `<!doctype html><html><body><script>PAD.save("k", ${JSON.stringify("值 " + tag)});</script></body></html>`);
+  await p.waitForFunction(() => window.LP.S.refs.kv.doc("probe").get().then((s) => s.exists), null, { timeout: 5000 });
+  await p.click("#home-key");
+  return { id };
+}
+
+test("backup: Settings saves every document and file; after a wipe, restore brings each back byte for byte and the programs show it", { skip, timeout: 120000 }, async (t) => {
+  const { p, errors, boot, settings, msg, backup, pick } = await backupPage(t);
+  await boot();
+  await makeData(p, "1");
+  /* start once with the data, so what a start writes once (the calendar's daily hint) is in the backup already */
+  await p.waitForTimeout(800);
+  await p.reload({ waitUntil: "networkidle" }); await boot("reload");
+  await settings();
+  assert.match(await p.textContent("#set-backup-last"), /还没有备份过/);
+  const file = await backup();
+  assert.match(file.name, /^lopda-backup-\d{8}\.zip$/);
+  assert.match(await p.textContent("#set-backup-last"), /^上次备份：今天$/);
+  const before = await dumpRaw(p);
+  assert.equal(before.docs["data/users/local/backup-meta"].last > 0, true);
+  assert.ok(Object.keys(before.files).some((k) => k.startsWith("roll/rbk1/")));
+  /* the zip: stored entries, the manifest, the documents */
+  const { inflateRawSync } = await import("node:zlib");
+  const Z = zipReader();
+  const list = Z.list(new Uint8Array(file.bytes));
+  assert.deepEqual([...list.slice(0, 2).map((e) => e.name)], ["manifest.json", "docs.json"]);
+  const manifest = JSON.parse(new TextDecoder().decode(await Z.read(new Uint8Array(file.bytes), list[0], (u) => new Uint8Array(inflateRawSync(u)))));
+  assert.equal(manifest.format, 1);
+  assert.equal(manifest.runtime, await p.evaluate(() => LP.RUNTIME_VERSION));
+  assert.equal(manifest.docs, Object.keys(before.docs).length);
+  assert.deepEqual(manifest.files.map((f) => f.key).sort(), Object.keys(before.files).sort());
+
+  /* wipe both databases, start again: the handheld is new */
+  await wipeRaw(p);
+  await p.reload({ waitUntil: "networkidle" }); await boot("reload");
+  await settings();
+  assert.match(await p.textContent("#set-backup-last"), /还没有备份过/);
+  await pick(file.bytes);
+  await p.waitForFunction(() => /^这个备份做于 /.test(document.getElementById("set-backup-msg").textContent), null, { timeout: 20000 });
+  assert.match(await msg(), new RegExp(`${manifest.docs} 份文档、${manifest.files.length} 个文件`));
+  assert.deepEqual(await p.$$eval("#set-backup-btns .btn", (bs) => bs.map((b) => b.textContent)), ["恢复", "先备份现在的数据", "取消"]);
+  await p.click("#set-backup-btns .btn:not(.ghost)");
+  assert.match(await msg(), /现在的数据会全部被替换/);
+  await Promise.all([p.waitForEvent("load", { timeout: 20000 }), p.click("#set-backup-btns .btn:not(.ghost)")]);
+  await boot("reload");
+  const after = await dumpRaw(p);
+  assert.deepEqual(after.files, before.files);
+  assert.deepEqual(after.docs, before.docs);
+  /* the programs start from the restored data */
+  assert.equal(await p.evaluate(() => LP.dict.inBook("serendipity")), true);
+  await tile(p, "记事本");
+  await p.waitForFunction(() => /备份 1/.test(document.getElementById("v-notes").textContent), null, { timeout: 5000 });
+  await p.click("#home-key"); await tile(p, "万年历"); await p.click("#cal-list-btn");
+  await p.waitForFunction(() => /纪念 1/.test(document.getElementById("v-cal").textContent), null, { timeout: 5000 });
+  await p.click("#home-key"); await tile(p, "冲洗店");
+  await p.waitForFunction(() => /卷 1/.test(document.getElementById("dk-list").textContent), null, { timeout: 5000 });
+  await p.click("#home-key"); await tile(p, "卡带机");
+  await p.waitForSelector("#cart-list li.cart-item");
+  assert.equal(await p.$eval("#cart-list li.cart-item .cart-acts .btn:nth-child(1)", (b) => b.disabled), false, "the cartridge's save is there");
+  await p.click("#home-key");
+  assert.deepEqual(await p.evaluate(() => LP.S.refs.kv.doc("probe").get().then((s) => s.data().kv)), { k: "值 1" }, "the app's PAD.save data");
+  assert.equal(await p.evaluate(() => LP.sensorGrants.list().map((g) => g.id).join()), "probe");
+  await settings();
+  assert.match(await p.textContent("#set-backup-last"), /^上次备份：今天$/, "the restored handheld knows when its data was saved");
+  assert.deepEqual(notBlocked(errors), []);
+});
+
+test("backup: a damaged, foreign or newer backup is refused and nothing changes; a write failing halfway puts the old data back", { skip, timeout: 120000 }, async (t) => {
+  const { p, errors, boot, settings, msg, backup, pick } = await backupPage(t);
+  await boot();
+  await makeData(p, "1");
+  await p.waitForTimeout(800);
+  await settings();
+  const file = await backup();
+  /* the handheld moves on after the backup: what is on it now must survive every failed restore */
+  await makeData(p, "2");
+  await p.evaluate(() => LP.notes.append("只在现在", "备份里没有这一篇。"));
+  await p.waitForTimeout(800);
+  await settings();
+  const now = await dumpRaw(p);
+  assert.ok(Object.keys(now.files).some((k) => k.startsWith("roll/rbk2/")));
+  const refused = async (buffer, re) => {
+    await pick(buffer);
+    await p.waitForFunction((src) => new RegExp(src).test(document.getElementById("set-backup-msg").textContent), re.source, { timeout: 20000 });
+    assert.deepEqual(await p.$$eval("#set-backup-btns .btn", (bs) => bs.map((b) => b.textContent)), ["好"]);
+    await p.click("#set-backup-btns .btn");
+    await p.waitForSelector("#set-backup-box", { state: "hidden" });
+    assert.deepEqual(await dumpRaw(p), now);
+  };
+  const Z = zipReader(), u8 = new Uint8Array(file.bytes), list = Z.list(u8);
+  /* one byte of a stored file changed */
+  const bad = Buffer.from(file.bytes), f0 = list.find((e) => e.name === "files/0");
+  bad[f0.offset + 30 + "files/0".length] ^= 0xff;
+  await refused(bad, /^这个备份文件不完整或已损坏$/);
+  /* cut short, and not a zip at all */
+  await refused(Buffer.from(file.bytes).subarray(0, file.bytes.length >> 1), /^这个备份文件不完整或已损坏$/);
+  await refused(Buffer.from("hello, this is not a backup"), /^这个备份文件不完整或已损坏$/);
+  /* a listed file missing; a newer format (the zip itself is sound in both) */
+  const entries = await Promise.all(list.map(async (e) => ({ name: e.name, data: new Uint8Array(await Z.read(u8, e)) })));
+  await refused(Buffer.from(Z.write(entries.filter((e) => e.name !== "files/0"))), /^这个备份文件不完整或已损坏$/);
+  const m = JSON.parse(new TextDecoder().decode(entries[0].data)); m.format = 2;
+  await refused(Buffer.from(Z.write([{ name: "manifest.json", data: JSON.stringify(m) }].concat(entries.slice(1)))), /^这个备份来自更新的版本/);
+
+  /* 先备份现在的数据: saves the current data, then comes back to the same question */
+  await pick(file.bytes);
+  await p.waitForFunction(() => /^这个备份做于 /.test(document.getElementById("set-backup-msg").textContent), null, { timeout: 20000 });
+  await p.click("#set-backup-btns .btn:nth-child(2)");
+  await p.waitForFunction(() => /^备份全部数据，约 /.test(document.getElementById("set-backup-msg").textContent), null, { timeout: 20000 });
+  const [dl] = await Promise.all([p.waitForEvent("download"), p.click("#set-backup-btns .btn:not(.ghost)")]);
+  assert.match(dl.suggestedFilename(), /^lopda-backup-\d{8}\.zip$/);
+  await p.waitForFunction(() => /^这个备份做于 /.test(document.getElementById("set-backup-msg").textContent), null, { timeout: 20000 });
+  const current = await dumpRaw(p);   /* backup-meta now says today */
+
+  /* the files database refuses a write: the documents were already replaced, so all of it is written back */
+  await p.evaluate(() => {
+    const put = IDBObjectStore.prototype.put; let n = 0; window.__arm = true;
+    IDBObjectStore.prototype.put = function (...a) {
+      if (window.__arm && this.name === "files" && ++n === 1) { window.__arm = false; throw new DOMException("stubbed failure", "UnknownError"); }
+      return put.apply(this, a);
+    };
+  });
+  await p.click("#set-backup-btns .btn:not(.ghost)");
+  await p.click("#set-backup-btns .btn:not(.ghost)");
+  await p.waitForFunction(() => /^恢复失败，什么都没有改。$/.test(document.getElementById("set-backup-msg").textContent), null, { timeout: 20000 });
+  assert.equal(await p.evaluate(() => window.__arm), false, "the stub did fire");
+  assert.deepEqual(await dumpRaw(p), current);
+  assert.deepEqual(notBlocked(errors).filter((e) => !/restore failed|stubbed failure/.test(e)), []);
 });

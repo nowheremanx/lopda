@@ -1,5 +1,5 @@
 /*
- * Lo-PDA runtime: zip files for notes export and import. Pure functions on Uint8Array, no DOM.
+ * Lo-PDA runtime: zip files for notes export and import, and the whole-device backup. Pure functions on Uint8Array, no DOM.
  * Writes the "stored" method only (notes are small text; no compressor to carry), names in UTF-8 with general purpose
  * flag bit 11 set. Reads a zip's central directory and its entries: stored ones here, deflated ones through an inflate
  * function the caller passes (DecompressionStream("deflate-raw") in the browser, zlib in the tests).
@@ -28,13 +28,14 @@ function dosTime(ts){
   return {time:(d.getHours()<<11)|(d.getMinutes()<<5)|(d.getSeconds()>>1), date:((Math.min(y,2107)-1980)<<9)|((d.getMonth()+1)<<5)|d.getDate()};
 }
 
-/* entries: [{name, data (Uint8Array or string), time}] -> the zip as one Uint8Array */
-function write(entries,crc32){
+/* entries: [{name, data (Uint8Array or string), time, crc}] -> the zip as a list of byte arrays, in order; new Blob(parts)
+   makes a big zip (a whole-device backup) without one more copy of it in memory. A known crc saves computing it again */
+function writeParts(entries,crc32){
   var crc=crcOf(crc32), parts=[], size=0, files=[];
   if(entries.length>65535) throw new Error("zip: too many files");
   entries.forEach(function(en){
     var name=utf8(en.name), data=typeof en.data==="string" ? utf8(en.data) : en.data, t=dosTime(en.time);
-    var c=crc(data,0,data.length);
+    var c=en.crc!=null ? en.crc>>>0 : crc(data,0,data.length);
     var h=new Uint8Array(30+name.length), v=new DataView(h.buffer);
     v.setUint32(0,0x04034b50,true); v.setUint16(4,20,true); v.setUint16(6,0x0800,true); v.setUint16(8,0,true);
     v.setUint16(10,t.time,true); v.setUint16(12,t.date,true); v.setUint32(14,c,true);
@@ -59,7 +60,13 @@ function write(entries,crc32){
   var end=new Uint8Array(22), ev=new DataView(end.buffer);
   ev.setUint32(0,0x06054b50,true); ev.setUint16(8,files.length,true); ev.setUint16(10,files.length,true);
   ev.setUint32(12,size-cdStart,true); ev.setUint32(16,cdStart,true);
-  parts.push(end); size+=22;
+  parts.push(end);
+  return parts;
+}
+/* entries: [{name, data (Uint8Array or string), time}] -> the zip as one Uint8Array */
+function write(entries,crc32){
+  var parts=writeParts(entries,crc32), size=0;
+  parts.forEach(function(p){ size+=p.length; });
   var out=new Uint8Array(size), o=0;
   parts.forEach(function(p){ out.set(p,o); o+=p.length; });
   return out;
@@ -123,5 +130,5 @@ function read(u8,entry,inflate,crc32){
   });
 }
 
-window.LopdaZip={write:write, list:list, read:read, dosTime:dosTime};
+window.LopdaZip={write:write, writeParts:writeParts, list:list, read:read, dosTime:dosTime};
 })();
