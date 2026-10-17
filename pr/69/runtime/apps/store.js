@@ -307,6 +307,8 @@ function openAsk(req){
   }
   var box=document.createElement("div"); box.className="box"; box.setAttribute("role","dialog");
   var p=document.createElement("p"); p.textContent=req.text;
+  /* the notes dialog's line names an app and a note: keep each name whole on its line */
+  if(req.quote) p.className="names";
   box.appendChild(p);
   /* the words an app wants to write, as they will read (PAD.notes.append) */
   if(req.quote){ var q=document.createElement("p"); q.className="quote"; q.id="file-quote"; q.textContent=req.quote; box.appendChild(q); }
