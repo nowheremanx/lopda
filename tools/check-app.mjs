@@ -3,6 +3,7 @@
 // Exit code 0 when every app passes, 1 otherwise. No dependencies.
 import { readFileSync, existsSync, statSync, readdirSync } from "node:fs";
 import { join, basename, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { sha, fontBlock, fillSrc, released, FONT_BLOCK, LIB_BLOCK, LIB3D_BLOCK, SRC_BLOCK } from "./lo-game-lib.mjs";
 
 const ROOT = join(import.meta.dirname, "..");
@@ -88,7 +89,7 @@ function srcFiles(dir) {
   return out;
 }
 
-function checkApp(dir) {
+export function checkApp(dir) {
   const errors = [], warnings = [], info = [];
   const id = basename(resolve(dir));
   const mPath = join(dir, "manifest.json"), hPath = join(dir, "index.html");
@@ -201,16 +202,18 @@ function checkApp(dir) {
   return { id, errors, warnings, info };
 }
 
-const dirs = process.argv.slice(2);
-if (!dirs.length) { console.error("usage: node tools/check-app.mjs registry/apps/<id> [...]"); process.exit(2); }
-let failed = 0;
-for (const d of dirs) {
-  const r = checkApp(d);
-  const ok = r.errors.length === 0;
-  if (!ok) failed++;
-  console.log(`${ok ? "PASS" : "FAIL"}  ${r.id}`);
-  r.errors.forEach((e) => console.log(`  error: ${e}`));
-  r.warnings.forEach((w) => console.log(`  warn:  ${w}`));
-  (r.info || []).forEach((w) => console.log(`  info:  ${w}`));
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const dirs = process.argv.slice(2);
+  if (!dirs.length) { console.error("usage: node tools/check-app.mjs registry/apps/<id> [...]"); process.exit(2); }
+  let failed = 0;
+  for (const d of dirs) {
+    const r = checkApp(d);
+    const ok = r.errors.length === 0;
+    if (!ok) failed++;
+    console.log(`${ok ? "PASS" : "FAIL"}  ${r.id}`);
+    r.errors.forEach((e) => console.log(`  error: ${e}`));
+    r.warnings.forEach((w) => console.log(`  warn:  ${w}`));
+    (r.info || []).forEach((w) => console.log(`  info:  ${w}`));
+  }
+  process.exit(failed ? 1 : 0);
 }
-process.exit(failed ? 1 : 0);

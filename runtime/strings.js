@@ -15,6 +15,9 @@
       "app.notes": "记事本", "app.camera": "点阵相机", "app.darkroom": "冲洗店",
       "app.cart": "卡带机", "app.store": "应用商店", "app.settings": "设置", "app.unnamed": "无名",
       "home.updates": "有更新",
+      "home.add.title": "加到主屏，像真的掌机一样用",
+      "home.add.how": "分享 → 添加到主屏幕",
+      "home.add.dismiss": "知道了",
 
       "status.boot": "启动中…", "status.saved": "本机存档", "status.unsaved": "未存档", "status.readfail": "读档失败",
 
@@ -302,6 +305,9 @@
       "app.notes": "Notes", "app.camera": "Camera", "app.darkroom": "Darkroom",
       "app.cart": "Cartridge", "app.store": "Store", "app.settings": "Settings", "app.unnamed": "Untitled",
       "home.updates": "UPDATE",
+      "home.add.title": "Add to Home Screen. Play like a real handheld.",
+      "home.add.how": "Share → Add to Home Screen",
+      "home.add.dismiss": "Got it",
 
       "status.boot": "BOOT…", "status.saved": "SAVED", "status.unsaved": "NO SAVE", "status.readfail": "READ ERR",
 

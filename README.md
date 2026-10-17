@@ -75,7 +75,7 @@ cloudflared tunnel --url http://localhost:8086
 
 or publish the repository with GitHub Pages.
 
-## Write an app
+## Make an app in 10 minutes / 10 分钟做一个 app
 
 ```sh
 cp -r sdk/template registry/apps/my-app       # then edit manifest.json: "id": "my-app"
@@ -88,6 +88,10 @@ node tools/build-index.mjs
 For games, use `sdk/lo-game.js` (see `sdk/LO-GAME.md`, which doubles as the AI
 prompt) and start from `sdk/template-game/`, or `sdk/template-vn/` for a visual novel
 (the story is a data block of lines, choices and flags).
+The online harness can load registry apps directly:
+`https://nowheremanx.github.io/lopda/sdk/dev.html?app=registry/apps/<id>`.
+线上开发台也可直接加载 app；完整双语步骤和投稿清单见
+[`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Layout
 

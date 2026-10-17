@@ -33,7 +33,14 @@ function renderSense(){
   });
 }
 /* `sound` is still written for runtimes before 0.12.0, which had a separate switch */
-function saveSettings(){ renderSettings(); if(S.db) put(S.refs.settings,{sound:SND.vol>0, volume:SND.vol, lang:I18N.lang}); }
+function saveSettings(){
+  renderSettings();
+  if(S.db){
+    var data={sound:SND.vol>0, volume:SND.vol, lang:I18N.lang};
+    if(S.homeTipDismissed) data.homeTipDismissed=true;
+    put(S.refs.settings,data);
+  }
+}
 Array.prototype.forEach.call(document.querySelectorAll("[data-lang]"),function(b){
   b.onclick=function(){ setLang(b.getAttribute("data-lang")); saveSettings(); sfx("ok"); };
 });
