@@ -1,7 +1,7 @@
 /*
  * Lo-PDA built-in: the app store (community registry), the preinstalled apps, and the sandboxed runner
- * with its PAD bridge (storage, sounds, music and ambience, buttons, files behind the runtime's own confirm dialog, and tilt and
- * the microphone through runtime/sensors.js, asked for on the same dialog).
+ * with its PAD bridge (storage, sounds, music and ambience, buttons, files behind the runtime's own confirm dialog, tilt and
+ * the microphone through runtime/sensors.js, asked for on the same dialog, writing into notes on that dialog too, and speech).
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  */
 (function(){
@@ -14,7 +14,7 @@ var own=LP.own, toast=LP.toast, put=LP.put, sfx=LP.sfx, show=LP.show, showPad=LP
 /* community apps that come installed, in this order on the home screen after the built-ins (docs/design/pad-files.md) */
 var PREINSTALL=["calculator","paint"];
 /* capabilities a manifest may ask for (SPEC.md section 2) */
-var PERMISSIONS=["files","motion","mic"];
+var PERMISSIONS=["files","motion","mic","notes"];
 function validPerms(x){ return Array.isArray(x) ? PERMISSIONS.filter(function(p){ return x.indexOf(p)>=0; }) : []; }
 function allowed(a,perm){ return !!(a && a.permissions && a.permissions.indexOf(perm)>=0); }
 
@@ -172,6 +172,7 @@ function freshRunFrame(){
 }
 function runApp(a){
   closeAsk(false);
+  LP.speech.stop();   /* and its speech */
   sensors.stopAll();   /* the old app's tilt and microphone end with its frame */
   LP.chip.stop();   /* the old app's song and ambience end with its frame */
   S.running=a;
@@ -182,7 +183,7 @@ function runApp(a){
   showPad(!!a.buttons);
   LP.keepAwake(true);   /* a running app keeps the screen on */
   freshRunFrame();
-  var start=function(h){ $("run-frame").srcdoc=lopdaWrapApp(h,{lang:I18N.lang, music:true, ambience:true, sensors:true}); };
+  var start=function(h){ $("run-frame").srcdoc=lopdaWrapApp(h,{lang:I18N.lang, music:true, ambience:true, sensors:true, notes:true, say:true}); };
   if(a.html){ start(a.html); return; }
   $("run-frame").srcdoc='<body style="margin:0;height:100%;display:flex;align-items:center;justify-content:center;background:#a3ad7e;color:#1f2a14;font:16px monospace">'+tr("run.loading")+'</body>';
   loadHtml(a).then(function(h){
@@ -228,6 +229,10 @@ window.addEventListener("message",function(e){
     fileRequest(S.running,f.contentWindow,d);
   } else if(d.op==="sense"){
     senseRequest(S.running,f.contentWindow,d);
+  } else if(d.op==="notes"){
+    notesRequest(S.running,f.contentWindow,d);
+  } else if(d.op==="say"){
+    sayRequest(S.running,f.contentWindow,d);
   } else if(d.op==="sfx"){
     var named=APP_SFX.indexOf(d.name)>=0, custom=!named && d.params && typeof d.params==="object";
     if(!named && !custom) return;
@@ -302,7 +307,11 @@ function openAsk(req){
   }
   var box=document.createElement("div"); box.className="box"; box.setAttribute("role","dialog");
   var p=document.createElement("p"); p.textContent=req.text;
+  /* the notes dialog's line names an app and a note: keep each name whole on its line */
+  if(req.quote) p.className="names";
   box.appendChild(p);
+  /* the words an app wants to write, as they will read (PAD.notes.append) */
+  if(req.quote){ var q=document.createElement("p"); q.className="quote"; q.id="file-quote"; q.textContent=req.quote; box.appendChild(q); }
   if(req.note){ var n=document.createElement("p"); n.className="note"; n.textContent=req.note; box.appendChild(n); }
   var row=document.createElement("div"); row.className="row";
   var ok=document.createElement("button"); ok.className="btn"; ok.type="button"; ok.id="file-ok"; ok.textContent=req.okLabel;
@@ -487,6 +496,42 @@ function turnOn(req){
     : sensors.startMic(req.win);
   p.then(req.reply,function(){ req.reply("none"); });
 }
+/* ---------- notes: PAD.notes.append (decisions.md section 25) ----------
+   Only apps whose manifest has "notes". Every call opens the runtime's dialog with the app's name, the note's title and the
+   text (its first lines); A (on release) or the OK tap writes, B or the other button refuses. Writing is never silent.
+   The app writes only into a note it made itself (LP.notes.appendApp). One dialog at a time per app: a call while its
+   dialog is open is refused. Refusals and anything that cannot be written answer "denied" */
+function notesRequest(app,win,d){
+  var reply=function(v){ if(S.running===app && $("run-frame").contentWindow===win) win.postMessage({pad:1,op:"noted",i:d.i,v:v},"*"); };
+  var NT=window.LopdaNoteText;
+  if(!allowed(app,"notes") || NT.appCheck(d.title,d.text) || !S.db || !LP.notes){ reply("denied"); return; }
+  if(ask && ask.notes && ask.app===app){ reply("denied"); return; }
+  var title=LP.noEmoji(d.title), text=LP.noEmoji(d.text);
+  if(!title || !text){ reply("denied"); return; }
+  var req={app:app, win:win, notes:true};
+  req.text=tr("notes.ask",{name:appName(app), title:title}); req.quote=NT.preview(text);
+  req.okLabel=tr("notes.askok"); req.noLabel=tr("notes.askno");
+  req.ok=function(){
+    closeAsk(false);
+    LP.notes.appendApp(app.id,title,text).then(function(){
+      toast(tr("notes.asked",{title:title})); reply("saved");
+    },function(e){ toast((e && e.message) || tr("notes.savefail")); sfx("err"); reply("denied"); });
+  };
+  req.cancel=function(){ reply("denied"); };
+  if(ask) closeAsk(true);
+  openAsk(req);
+}
+
+/* ---------- speech: PAD.say (runtime/speech.js, decisions.md section 25). No permission: the voice follows the volume
+   (step 0 says nothing), an app speaks once a second at most, 200 characters, a new call stops the one speaking, and HOME,
+   another app or the page going away stops it ---------- */
+function sayRequest(app,win,d){
+  var lang=d.lang==="zh" || d.lang==="en" ? d.lang : I18N.lang;
+  LP.speech.say(app.id,typeof d.text==="string" ? LP.noEmoji(d.text) : "",lang).then(function(v){
+    if(S.running===app && $("run-frame").contentWindow===win) win.postMessage({pad:1,op:"said",i:d.i,v:v},"*");
+  });
+}
+
 /* the AudioContext was made again: the microphone goes into the new one */
 LP.builtin({id:"sensors", audio:function(){ sensors.rewire(); },
   ready:function(){
@@ -520,7 +565,7 @@ LP.builtin({id:"store", label:"app.store", icon:"store", view:"store",
   ready:function(){ loadRegistry(); }});
 /* the runner owns the run view but has no icon of its own: apps appear on the home screen */
 LP.builtin({id:"run", view:"run", keepPad:true,
-  leave:function(){ closeAsk(false); sensors.stopAll(); LP.chip.stop(); LP.keepAwake(false); $("run-frame").srcdoc=""; S.running=null; },
+  leave:function(){ closeAsk(false); LP.speech.stop(); sensors.stopAll(); LP.chip.stop(); LP.keepAwake(false); $("run-frame").srcdoc=""; S.running=null; },
   lang:function(){
     /* apps read PAD.lang once at start: a running app is started again in the new language */
     if(S.running && !$("v-run").hidden) runApp(S.running);

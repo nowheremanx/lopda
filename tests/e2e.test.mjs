@@ -4614,3 +4614,230 @@ test("backup: a damaged, foreign or newer backup is refused and nothing changes;
   assert.deepEqual(await dumpRaw(p), current);
   assert.deepEqual(notBlocked(errors).filter((e) => !/restore failed|stubbed failure/.test(e)), []);
 });
+
+/* ---------- PAD.notes.append and PAD.say (decisions.md section 25) ----------
+   A small test app with "notes" records every answer. speechSynthesis is a stub: speak() records the utterance and starts it,
+   __end() finishes it, cancel() interrupts it. The voices are an iPhone's: Cantonese before Mandarin. */
+const NOTES_APP = readFileSync(join(ROOT, "tests/fixtures/notes-app/index.html"), "utf8");
+const speechInit = () => {
+  window.__said = [];
+  let cur = null;
+  const voices = [{ name: "Sin-ji", lang: "zh-HK" }, { name: "Tingting", lang: "zh-CN" }, { name: "Samantha", lang: "en-US" }];
+  const synth = {
+    getVoices: () => voices, addEventListener() {},
+    speak(u) { window.__said.push({ text: u.text, voice: u.voice.name, lang: u.lang, volume: u.volume }); cur = u; setTimeout(() => u.onstart && u.onstart(), 0); },
+    cancel() { const u = cur; cur = null; window.__said.push("cancel"); if (u && u.onerror) u.onerror({ error: "interrupted" }); },
+  };
+  window.__end = () => { const u = cur; cur = null; if (u) u.onend(); };
+  Object.defineProperty(window, "speechSynthesis", { value: synth, configurable: true });
+  window.SpeechSynthesisUtterance = function (text) { this.text = text; };
+};
+const runNotesApp = async (p, perms = ["notes"]) => {
+  await p.evaluate(([html, perms]) => {
+    const a = { id: "notes-app", name: "记事测试", glyph: "记", version: "1.0.0", spec: "lopda/1", buttons: true, permissions: perms, html };
+    /* stored like an installed app, so the notes list finds its name after HOME reads the apps again */
+    const { html: _, ...meta } = a;
+    window.LP.S.refs.apps.doc(a.id).set(meta);
+    window.LP.upsert("apps", a); window.LP.runApp(a);
+  }, [NOTES_APP, perms]);
+  let f;
+  await until(p, async () => { f = p.frames().find((x) => x !== p.mainFrame()); return f && await f.evaluate(() => !!window.note).catch(() => false); }, "the test app");
+  return f;
+};
+const appNotes = (n) => n.docs().then((d) => d.filter((x) => x.src === "app:notes-app"));
+
+test("notes: an app's append shows the runtime's dialog; A writes its own note, a second append adds to it, B refuses; the player's note with that title is never touched", { skip, timeout: 60000 }, async (t) => {
+  const n = await notesPage(t, { init: speechInit });
+  const p = n.p;
+  await p.evaluate(() => LP.S.refs.notes.doc("mine").set({ body: "战绩\n\n我自己的", updated: Date.now() - 9000 }));
+  const f = await runNotesApp(p);
+  f.evaluate(() => { note("战绩", "第一局 120\n2\n3\n4\n5\n6\n7\n8"); });
+  await p.waitForSelector("#file-ask .box");
+  assert.equal(await p.textContent("#file-ask p"), "「记事测试」要写进记事本「战绩」：");
+  assert.equal(await p.textContent("#file-quote"), "第一局 120\n2\n3\n4\n5\n6…", "the first 6 lines");
+  assert.equal(await p.textContent("#file-ok"), "写入");
+  assert.equal(await p.textContent("#file-no"), "不写");
+  await n.key("a");
+  await until(p, async () => (await R(f)).notes.length === 1, "the answer");
+  assert.deepEqual((await R(f)).notes, ["saved"]);
+  let mine = await appNotes(n);
+  assert.equal(mine.length, 1);
+  assert.equal(mine[0].body, "战绩\n\n第一局 120\n2\n3\n4\n5\n6\n7\n8");
+  /* the second goes into the same note, here by a tap */
+  f.evaluate(() => { note("战绩", "第二局 130"); });
+  await p.waitForSelector("#file-ask .box");
+  await p.click("#file-ok");
+  await until(p, async () => (await R(f)).notes.length === 2, "the second answer");
+  mine = await appNotes(n);
+  assert.equal(mine.length, 1);
+  assert.equal(mine[0].body, "战绩\n\n第一局 120\n2\n3\n4\n5\n6\n7\n8\n\n第二局 130");
+  /* B refuses and writes nothing */
+  f.evaluate(() => { note("战绩", "第三局"); });
+  await p.waitForSelector("#file-ask .box");
+  await n.key("b");
+  await until(p, async () => (await R(f)).notes.length === 3, "the third answer");
+  assert.deepEqual((await R(f)).notes, ["saved", "saved", "denied"]);
+  assert.doesNotMatch((await appNotes(n))[0].body, /第三局/);
+  const user = (await n.docs()).find((d) => d.id === "mine");
+  assert.equal(user.body, "战绩\n\n我自己的");
+  assert.equal(user.src, undefined);
+  /* in notes: the row names the app; 来自 app is a group; it is not a quote */
+  await n.open();
+  const line = await p.$$eval("#notes-main li", (l) => l.map((x) => x.textContent));
+  assert.ok(line.some((x) => /^战绩记事测试 · /.test(x)), line.join(" | "));
+  assert.ok(line.some((x) => /^战绩\d\d:\d\d · 我自己的/.test(x)), "the player's note has no app name");
+  await n.key("start", "a");
+  assert.deepEqual(await n.sheet(), ["*日记0", "摘抄0", "来自 app1"]);
+  await n.key("down", "down", "a");
+  assert.equal(await p.textContent("#notes-filter"), "来自 app · 1 篇");
+  assert.deepEqual(await n.rows(), ["*战绩"]);
+  assert.deepEqual(notBlocked(n.errors), []);
+});
+
+test("notes: an app's note round-trips through export and import with source: app:<id>; 来自 app holds it again", { skip, timeout: 60000 }, async (t) => {
+  const n = await notesPage(t);
+  await n.p.evaluate(async () => {
+    await LP.S.refs.notes.doc().set({ body: "战绩\n\n120", updated: Date.now() - 1000, created: Date.now() - 2000, src: "app:notes-app" });
+    await LP.S.refs.notes.doc().set({ body: "日常\n\n买菜", updated: Date.now() - 1000 });
+    await LP.S.refs.notes.doc().set({ body: "《词典》\n\ngreen", updated: Date.now() - 1000, src: "dict" });
+  });
+  await n.open();
+  await n.key("start");
+  const [dl] = await Promise.all([n.p.waitForEvent("download"), n.key("down", "down", "a")]);
+  const file = join(tempDir(t), "notes.zip");
+  await dl.saveAs(file);
+  await n.key("b");
+  const text = (await readFile(file)).toString("utf8");
+  assert.match(text, /\nsource: app:notes-app\n---\n战绩\n\n120/);
+  assert.equal(text.match(/source:/g).length, 1, "only the app's note has a source");
+  /* delete everything, import: the app's note is the app's again, the quote a quote by its title */
+  for (let i = 0; i < 3; i++) {
+    await n.p.click("#notes-list li:nth-child(1) button");
+    await n.key("start", "down", "down", "a");
+    await n.p.waitForTimeout(150);
+  }
+  await n.p.setInputFiles("#notes-file", file);
+  await n.p.waitForFunction(() => /导入 3 篇/.test(document.getElementById("toast").textContent));
+  const live = (await n.docs()).filter((d) => !d.deleted);
+  assert.equal(live.find((d) => d.body.startsWith("战绩")).src, "app:notes-app");
+  assert.equal(live.find((d) => d.body.startsWith("日常")).src, undefined);
+  assert.equal(live.find((d) => d.body.startsWith("《词典》")).src, undefined);
+  await n.key("start", "a");
+  assert.deepEqual(await n.sheet(), ["*日记0", "摘抄1", "来自 app1"]);
+  assert.deepEqual(notBlocked(n.errors), []);
+});
+
+test("notes: an app is denied without the permission, past the limits, and while its dialog is open; no dialog for those", { skip, timeout: 60000 }, async (t) => {
+  const n = await notesPage(t);
+  const p = n.p;
+  let f = await runNotesApp(p, []);
+  assert.equal(await f.evaluate(() => note("t", "x")), "denied");
+  assert.equal(await p.locator("#file-ask .box").count(), 0);
+  f = await runNotesApp(p);
+  assert.equal(await f.evaluate(() => note("字".repeat(65), "x")), "denied");
+  assert.equal(await f.evaluate(() => note("t", "a".repeat(4097))), "denied");
+  assert.equal(await f.evaluate(() => note("a\nb", "x")), "denied");
+  assert.equal(await f.evaluate(() => note("t", "")), "denied");
+  assert.equal(await p.locator("#file-ask .box").count(), 0);
+  /* 64 characters and 4 KB exactly are fine: the dialog opens */
+  f.evaluate(() => { note("字".repeat(64), "a".repeat(4096)); });
+  await p.waitForSelector("#file-ask .box");
+  /* one dialog per app: a second call while it is open is denied at once, and the first still waits */
+  assert.equal(await f.evaluate(() => note("t", "again")), "denied");
+  assert.equal(await p.locator("#file-ask .box").count(), 1);
+  await n.key("b");
+  await until(p, async () => (await R(f)).notes.length === 6, "every answer");
+  assert.deepEqual((await R(f)).notes, ["denied", "denied", "denied", "denied", "denied", "denied"]);
+  assert.deepEqual(await appNotes(n), []);
+  /* HOME with the dialog open: closed, nothing written */
+  f = await runNotesApp(p);
+  f.evaluate(() => { note("t", "x"); });
+  await p.waitForSelector("#file-ask .box");
+  await p.click("#home-key");
+  await p.waitForTimeout(500);
+  assert.equal(await p.locator("#file-ask .box").count(), 0);
+  assert.deepEqual(await appNotes(n), []);
+});
+
+test("notes: the dialog fits 331 x 359 with a long title and text", { skip, timeout: 60000 }, async (t) => {
+  const n = await notesPage(t);
+  const p = n.p;
+  const f = await runNotesApp(p);
+  f.evaluate(() => { note("一个很长很长的标题".repeat(7).slice(0, 64), Array.from({ length: 12 }, (_, i) => "第" + i + "行 " + "很长的文字".repeat(12)).join("\n")); });
+  await p.waitForSelector("#file-ask .box");
+  /* the smallest screen, sized as the calendar's test sizes it */
+  await p.setViewportSize({ width: 375, height: 844 });
+  const r = await p.evaluate(() => {
+    const screen = document.getElementById("screen"), status = screen.querySelector(".status");
+    screen.style.flex = "none";
+    screen.style.height = (359 + 12 + status.getBoundingClientRect().height) + "px";
+    const v = document.getElementById("v-run").getBoundingClientRect(), s = screen.getBoundingClientRect();
+    const b = document.querySelector("#file-ask .box").getBoundingClientRect(), ok = document.getElementById("file-ok").getBoundingClientRect();
+    return { view: [Math.round(v.width), Math.round(v.height)], inside: b.top >= s.top - 0.5 && b.bottom <= s.bottom + 0.5 && b.left >= s.left - 0.5 && b.right <= s.right + 0.5, ok: ok.height, box: [b.top - s.top, s.bottom - b.bottom] };
+  });
+  assert.deepEqual(r.view, [331, 359]);
+  assert.ok(r.inside, "the dialog is inside the screen: " + r.box);
+  assert.ok(r.ok >= 43.5);
+});
+
+test("say: the zh voice is Mandarin, en is en; the volume follows the handheld step (2 of 4: 0.25 / 0.6), 0 is unavailable; once a second; a new call stops the old; HOME stops it", { skip, timeout: 60000 }, async (t) => {
+  const n = await notesPage(t, { init: speechInit });
+  const p = n.p;
+  const f = await runNotesApp(p);
+  const said = () => p.evaluate(() => window.__said);
+  const r1 = f.evaluate(() => say("你好"));
+  await until(p, async () => (await said()).length > 0, "speech");
+  await p.evaluate(() => window.__end());
+  assert.equal(await r1, "done");
+  assert.deepEqual((await said()).filter((x) => x !== "cancel"), [{ text: "你好", voice: "Tingting", lang: "zh-CN", volume: 0.25 / 0.6 }]);
+  /* within the same second: unavailable, nothing said */
+  assert.equal(await f.evaluate(() => say("again")), "unavailable");
+  await p.clock.fastForward(1000);
+  const r2 = f.evaluate(() => say("hello", { lang: "en" }));
+  await until(p, async () => (await said()).some((x) => x.voice === "Samantha"), "the English voice");
+  await p.clock.fastForward(1000);
+  const r3 = f.evaluate(() => say("next", { lang: "en" }));
+  r3.catch(() => {});   /* HOME below takes its frame away before it settles */
+  assert.equal(await r2, "stopped", "the new call stopped the old one");
+  await until(p, async () => (await said()).some((x) => x.text === "next"), "the next one");
+  /* volume 0: silent and unavailable; the one speaking goes on */
+  await p.evaluate(() => { LP.SND.vol = 0; });
+  await p.clock.fastForward(1000);
+  const before = (await said()).length;
+  assert.equal(await f.evaluate(() => say("quiet")), "unavailable");
+  assert.equal((await said()).length, before);
+  assert.equal(await p.evaluate(() => LP.speech.speaking()), true);
+  /* HOME stops it */
+  await p.evaluate(() => { LP.SND.vol = 2; });
+  await p.click("#home-key");
+  assert.equal(await p.evaluate(() => LP.speech.speaking()), false);
+  assert.equal((await said()).at(-1), "cancel");
+  assert.deepEqual(notBlocked(n.errors), []);
+});
+
+test("say: the page going hidden stops it; dev.html logs notes and says, and answers as its select says", { skip, timeout: 60000 }, async (t) => {
+  const n = await notesPage(t, { init: speechInit });
+  const f = await runNotesApp(n.p);
+  const r = f.evaluate(() => say("hidden"));
+  await until(n.p, async () => (await n.p.evaluate(() => window.__said.length)) > 0, "speech");
+  await n.p.evaluate(() => { Object.defineProperty(document, "hidden", { value: true, configurable: true }); document.dispatchEvent(new Event("visibilitychange")); });
+  assert.equal(await r, "stopped");
+  /* dev.html */
+  const { p, errors } = await page(t);
+  await p.addInitScript(speechInit);
+  await p.goto(`${base}/sdk/dev.html?app=tests/fixtures/notes-app`, { waitUntil: "load" });
+  let d;
+  await until(p, async () => { d = p.frames().find((x) => x !== p.mainFrame()); return d && await d.evaluate(() => !!window.note).catch(() => false); }, "the app");
+  assert.equal(await d.evaluate(() => note("战绩", "第一局 120")), "saved");
+  assert.match(await p.textContent("#log"), /notes\.append dialog: 「记事测试」要写进记事本「战绩」：\n第一局 120\n  -> saved/);
+  await p.selectOption("#notesans", "denied");
+  assert.equal(await d.evaluate(() => note("战绩", "x")), "denied");
+  assert.equal(await d.evaluate(() => note("战绩", "a".repeat(5000))), "denied");
+  assert.match(await p.textContent("#log"), /ERROR PAD\.notes\.append: the text is at most 4 KB/);
+  const s = d.evaluate(() => say("hello", { lang: "en" }));
+  await until(p, async () => (await p.evaluate(() => window.__said.length)) > 0, "speech in dev.html");
+  await p.evaluate(() => window.__end());
+  assert.equal(await s, "done");
+  assert.match(await p.textContent("#log"), /say \(en\): hello/);
+  assert.deepEqual(errors, []);
+});

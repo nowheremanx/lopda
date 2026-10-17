@@ -73,6 +73,10 @@
       </div>
       <label><input type="checkbox" id="realmic"> use this computer's microphone</label>
     </div>
+    <div class="row">
+      <label for="notesans">PAD.notes.append answers</label>
+      <select id="notesans" style="width:auto"><option value="saved">saved (the player pressed A)</option><option value="denied">denied (the player pressed B)</option></select>
+    </div>
     <div id="filebox" hidden>
       <div id="filewhat"></div>
       <div class="row"><input type="file" id="filein"><button id="filecancel" type="button">Cancel</button></div>
@@ -86,6 +90,9 @@
 <script src="../runtime/chip.js"></script>
 <!-- the runtime's sensor maths (quantizing, rate limits, level and pitch), so readings here look like the handheld's -->
 <script src="../runtime/sensors.js"></script>
+<!-- the runtime's rules for notes from apps (limits, the dialog's preview) and its speech (voices, limits) -->
+<script src="../runtime/notetext.js"></script>
+<script src="../runtime/speech.js"></script>
 <script>
   var frame = document.getElementById("app"), html = "", appId = "dev", manifest = {};
   var log = function (s) { var p = document.getElementById("log"); p.textContent = (new Date().toLocaleTimeString() + "  " + s + "\n") + p.textContent; };
@@ -154,8 +161,8 @@
   function run() {
     if (chip) chip.stop();
     if (chip) document.getElementById("amb").value = "";
-    senseStop("motion"); senseStop("mic");
-    var l = document.getElementById("lang").value, o = { music: !!chip, ambience: !!chip, sensors: true };
+    senseStop("motion"); senseStop("mic"); speech.stop();
+    var l = document.getElementById("lang").value, o = { music: !!chip, ambience: !!chip, sensors: true, notes: true, say: true };
     if (l) o.lang = l;
     frame.srcdoc = lopdaWrapApp(html, o);
   }
@@ -169,7 +176,9 @@
     else if (d.op === "save") { s[d.k] = d.v; writeStore(s); }
     else if (d.op === "remove") { delete s[d.k]; writeStore(s); }
     else if (d.op === "error") log("ERROR " + d.msg);
-    else if (d.op === "exit") { log("app asked to exit"); if (chip) chip.stop(); senseStop("motion"); senseStop("mic"); frame.srcdoc = ""; }
+    else if (d.op === "exit") { log("app asked to exit"); if (chip) chip.stop(); senseStop("motion"); senseStop("mic"); speech.stop(); frame.srcdoc = ""; }
+    else if (d.op === "notes") notesOp(d);
+    else if (d.op === "say") sayOp(d);
     else if (d.op === "sense") sense(d);
     else if (d.op === "sfx" && typeof d.name === "string") {
       log("sfx " + d.name);
@@ -210,6 +219,29 @@
     sel.onchange = go; lv.onchange = go;
     lv.oninput = function () { shown.textContent = (+lv.value).toFixed(2); };
   })();
+  /* PAD.notes.append. The handheld shows the player its own dialog (the app's name, the title, the first lines of the text)
+     and writes on A; here the dialog's words go to the log and the call answers as the select on the right says. Nothing is
+     stored. The limits and the permission are the runtime's (runtime/notetext.js). */
+  function notesOp(d) {
+    var NT = window.LopdaNoteText, reply = function (v) { frame.contentWindow.postMessage({ pad: 1, op: "noted", i: d.i, v: v }, "*"); };
+    if ((manifest.permissions || []).indexOf("notes") < 0) { log('ERROR PAD.notes.append needs "permissions": ["notes"] in manifest.json'); reply("denied"); return; }
+    var bad = NT.appCheck(d.title, d.text);
+    if (bad) { log("ERROR PAD.notes.append: " + bad + " (denied)"); reply("denied"); return; }
+    var v = document.getElementById("notesans").value === "saved" ? "saved" : "denied";
+    log("notes.append dialog: 「" + (manifest.name || appId) + "」要写进记事本「" + d.title.trim() + "」：\n" + NT.preview(d.text) + "\n  -> " + v);
+    reply(v);
+  }
+  /* PAD.say: this computer's voices when the browser has them, at the handheld's default volume step; otherwise the log only */
+  var speech = window.LopdaSpeech.host({ window: window, volume: function () { return 0.42; } });
+  document.addEventListener("visibilitychange", function () { if (document.hidden) speech.stop(); });
+  function sayOp(d) {
+    log("say (" + d.lang + "): " + d.text + (speech.synth() ? "" : "  [no speechSynthesis here: logged only]"));
+    speech.say(appId, d.text, d.lang).then(function (v) {
+      if (v === "unavailable") log("say -> unavailable" + (!speech.synth() ? "" : !speech.voice(d.lang) ? " (no " + d.lang + " voice on this computer)" : " (once a second at most)"));
+      else log("say -> " + v);
+      frame.contentWindow.postMessage({ pad: 1, op: "said", i: d.i, v: v }, "*");
+    });
+  }
   /* PAD.exportFile / importFile. The handheld asks the player on its own dialog first; here an export
      downloads straight away and an import waits for the file input on the right. */
   var FILE_MAX = 2 * 1024 * 1024, pendingImport = null;
