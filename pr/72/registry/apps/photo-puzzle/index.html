@@ -319,15 +319,38 @@
     /* the peek lasts while A is held */
     PAD.on("release", function (b) { if (b === "a" && S.peek) { S.peek = false; paint(); } });
   }
-  /* touch: tap a piece next to the gap */
-  cv.addEventListener("click", function (e) {
-    if (S.screen === "solved") { if (S.anim.done) { S.sel = 0; choose(); } else endAnim(); return; }
-    if (S.screen !== "play") return;
+  /* touch: tap a piece next to the gap, or swipe a piece towards the gap. A swipe that points anywhere else is refused
+     with the error sound, like a key with nothing to push */
+  function cellAt(e) {
     var r = cv.getBoundingClientRect(), x = (e.clientX - r.left) / r.width * W, y = (e.clientY - r.top) / r.height * H;
     var xs = edges(S.n, W), ys = edges(S.n, H), c = 0, row = 0;
     while (c < S.n - 1 && x >= xs[c + 1]) c++;
     while (row < S.n - 1 && y >= ys[row + 1]) row++;
-    slide(row * S.n + c);
+    return row * S.n + c;
+  }
+  var touch = null, swallow = false, SWIPE = 12;   /* CSS px: less than this is a tap */
+  cv.addEventListener("pointerdown", function (e) {
+    if (S.screen !== "play") return;
+    touch = { id: e.pointerId, x: e.clientX, y: e.clientY, cell: cellAt(e) };
+    try { cv.setPointerCapture(e.pointerId); } catch (err) {}
+  });
+  cv.addEventListener("pointercancel", function () { touch = null; });
+  cv.addEventListener("pointerup", function (e) {
+    var t = touch; touch = null;
+    if (!t || t.id !== e.pointerId || S.screen !== "play") return;
+    swallow = true;   /* the click that follows belongs to this touch, even when it solved the puzzle */
+    var dx = e.clientX - t.x, dy = e.clientY - t.y;
+    if (Math.abs(dx) < SWIPE && Math.abs(dy) < SWIPE) { slide(t.cell); return; }
+    var n = S.n, r = Math.floor(t.cell / n), c = t.cell % n, to;
+    if (Math.abs(dx) > Math.abs(dy)) to = dx > 0 ? (c < n - 1 ? t.cell + 1 : -1) : (c > 0 ? t.cell - 1 : -1);
+    else to = dy > 0 ? (r < n - 1 ? t.cell + n : -1) : (r > 0 ? t.cell - n : -1);
+    if (to !== S.gap) { sfx("err"); return; }
+    slide(t.cell);
+  });
+  /* after the puzzle: a tap skips the animation, then goes on */
+  cv.addEventListener("click", function () {
+    if (swallow) { swallow = false; return; }
+    if (S.screen === "solved") { if (S.anim.done) { S.sel = 0; choose(); } else endAnim(); }
   });
 
   /* for tests/e2e.test.mjs: where the pieces are, so a test can solve the puzzle with real key presses */
