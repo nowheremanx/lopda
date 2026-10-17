@@ -67,6 +67,7 @@ function box(msg,buttons,warn){
     b.onclick=bt.go; row.appendChild(b);
   });
   $("set-backup-go").disabled=$("set-restore-go").disabled=BS.busy;
+  var el=$("set-backup-box"); if(el.scrollIntoView) el.scrollIntoView({block:"nearest"});
 }
 function closeBox(){ BS.busy=false; BS.backup=null; BS.file=null; $("set-backup-box").hidden=true; $("set-backup-go").disabled=$("set-restore-go").disabled=false; }
 function okBox(msg,then){ BS.busy=false; box(msg,[{label:tr("bk.ok"), main:true, go:function(){ sfx("tap"); (then||closeBox)(); }}]); }
@@ -141,8 +142,7 @@ function doRestore(bk){
       if(window.console) console.error("Lo-PDA restore failed, writing the old data back", e);
       return P.replaceAll(old).then(function(){ sfx("err"); okBox(tr("rs.failed")); },function(e2){
         if(window.console) console.error("Lo-PDA rollback failed", e2);
-        sfx("err"); BS.busy=false;
-        box(tr("rs.lost"),[{label:tr("bk.save"), main:true, go:function(){ sfx("tap"); startBackup(function(){ box(tr("rs.lost"),[]); renderLostRetry(old); },old); }}]);
+        sfx("err"); BS.busy=false; renderLostRetry(old);
       });
     });
   },function(){ sfx("err"); okBox(tr("rs.failed")); });

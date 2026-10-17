@@ -9,7 +9,8 @@ Design history and open questions: `docs/decisions.md`. Read it before changing 
 
 ```
 runtime/        the PWA: index.html, core.js (shared LP object: utils, views, sound, home, chin pad), apps/*.js (one file per
-                built-in), boot.js (loaded last), strings.js (zh/en text), lopda.css, platform.js (IndexedDB store, file export),
+                built-in), boot.js (loaded last), strings.js (zh/en text), lopda.css, platform.js (IndexedDB store, file export,
+                dumpAll / replaceAll of both databases for the backup), backup.js (the whole-device backup zip: pack, check and unpack; pure functions),
                 chip.js (sound chip: MML music, custom sound effects, ambience presets; shared with sdk/dev.html),
                 sensors.js (tilt, shake, heading and the microphone's level and pitch for apps, the audio session; shared with sdk/dev.html),
                 lenses.js (which physical camera lenses a phone has, pure functions), textsel.js (the text selection shared by the reader and the dictionary entry page), negative.js (the negative PNG and its lpDa chunk, pure functions),
@@ -25,7 +26,7 @@ registry/       index.json (generated) + apps/<id>/{manifest.json,index.html,src
 tools/          check-app.mjs, build-index.mjs, bundle-app.mjs (+ lo-game.mjs alias), lo-game-lib.mjs, stamp-preview.mjs (Node 20+, no deps);
                 gen-lunar.py (one-off generator of the lunar table, needs PyEphem); gen-ecdict.mjs (one-off, ECDICT csv ->
                 vendor/ecdict/) with stardict-write.mjs (StarDict + dictzip writer, also used by tests)
-tests/          node:test suite (no deps): tools, strings, PAD shim, sensors, platform store, lo-game, negative, develop, notetext, zip, repo rules;
+tests/          node:test suite (no deps): tools, strings, PAD shim, sensors, platform store, backup, lo-game, negative, develop, notetext, zip, repo rules;
                 runtime-shots.mjs (before/after screenshots of the runtime), hko-compare.mjs (lunar table vs the HKO tables, manual)
 SPEC.md         app spec lopda/1 (MIT)
 LICENSE NOTICE LICENSING.md CONTRIBUTING.md
@@ -53,7 +54,9 @@ LICENSE NOTICE LICENSING.md CONTRIBUTING.md
   decisions.md sections 16-17), camera (viewfinder, film stocks, a colour latent image per frame in `LopdaPlatform.files`, SELECT cycles the
   physical lenses found by lenses.js; shares its film helpers as `LP.film`), darkroom (冲洗店: the film box of unloaded rolls,
   negative export and import through negative.js, developing through develop.js (once per roll, `dev` {v, seed, at} in the roll; pictures are
-  never stored, every look and print develops them again), the colour viewer, single / contact sheet / film strip prints; decisions.md section 19), cart (GB), store (app store, preinstalled apps, sandboxed runner, file dialog), settings.
+  never stored, every look and print develops them again), the colour viewer, single / contact sheet / film strip prints; decisions.md section 19), cart (GB), store (app store, preinstalled apps, sandboxed runner, file dialog), settings (also 备份 / 恢复: the whole
+  device as one `lopda-backup-YYYYMMDD.zip` through backup.js, every check before a restore replaces everything, the old data
+  written back if a write fails; `data/users/local/backup-meta` {last}; decisions.md section 24).
   Paint and the calculator are community apps (`registry/apps/paint`, `calculator`), installed on first start
   (`PREINSTALL` in store.js; their files are in sw.js SHELL). The LCD fonts ship in runtime/fonts/ (OFL). Each registers with
   `LP.builtin({id, label, icon, view, open, ...hooks})`; the home screen draws them in registration order
