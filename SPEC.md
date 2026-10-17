@@ -8,7 +8,8 @@ system sounds (`PAD.sfx`). Added later within v1, all optional: the player's lan
 (`"permissions": ["files"]`, `PAD.exportFile`, `PAD.importFile`), see section 6.2; music, sound effects of the
 app's own and ambience (`PAD.music`, `PAD.sfx({...})`, `PAD.ambience`), see section 6.3; tilt, shake, heading and the
 microphone's loudness and pitch (`"permissions": ["motion"]` / `["mic"]`, `PAD.motion`, `PAD.mic`), see section 6.4;
-writing into the player's notes (`"permissions": ["notes"]`, `PAD.notes.append`) and speech (`PAD.say`), see section 6.5.
+writing into the player's notes (`"permissions": ["notes"]`, `PAD.notes.append`) and speech (`PAD.say`), see section 6.5;
+one photo taken by the player (`"permissions": ["camera"]`, `PAD.camera.snap`), see section 6.6.
 
 A Lo-PDA app is one self-contained HTML file plus a small manifest. The runtime
 installs it from the registry, pins it to an exact version, and runs it inside
@@ -56,7 +57,7 @@ No other files are loaded. Images, sounds and fonts must be embedded in
 | `i18n` | Optional. Store text in other languages: `{"en": {"name", "description"}, "zh": {...}}`. Only `zh` and `en`, only those two fields, same rules as above. The store and home screen show the entry for the player's language and fall back to `name` / `description`. |
 | `author` | Name or handle. |
 | `license` | One of: `MIT`, `0BSD`, `BSD-2-Clause`, `BSD-3-Clause`, `ISC`, `Apache-2.0`, `CC0-1.0`, `Unlicense`. |
-| `permissions` | Array. Usually empty. Four capabilities (`lopda/1`): `"files"`, the app may export and import files, each time confirmed by the player (section 6.2); `"motion"`, tilt, shake and heading; `"mic"`, the microphone's loudness and pitch (both section 6.4, confirmed by the player the first time); `"notes"`, the app may add text to a note of its own in the player's notes, each time confirmed by the player (section 6.5). The store shows them on the app's entry. Anything else fails the checker. |
+| `permissions` | Array. Usually empty. Five capabilities (`lopda/1`): `"files"`, the app may export and import files, each time confirmed by the player (section 6.2); `"motion"`, tilt, shake and heading; `"mic"`, the microphone's loudness and pitch (both section 6.4, confirmed by the player the first time); `"notes"`, the app may add text to a note of its own in the player's notes, each time confirmed by the player (section 6.5); `"camera"`, the app may ask for a photo, which the player takes in the runtime's viewfinder and the app gets as a small four-tone picture (section 6.6, allowed by the player the first time). The store shows them on the app's entry. Anything else fails the checker. |
 | `buttons` | Optional, `lopda/1` only. `true` shows the chin buttons while the app runs (section 4). Leave it out for touch-only apps. |
 
 ## 3. The screen
@@ -169,6 +170,9 @@ PAD.on("sound", fn)          // fn({level, pitch}), at most 20 a second
 // lopda/1 (section 6.5); undefined on runtimes before 0.26.0
 await PAD.notes.append(title, text)   // -> "saved" | "denied"   (needs "permissions": ["notes"])
 await PAD.say(text, {lang})           // -> "done" | "stopped" | "unavailable"   (no permission)
+
+// lopda/1 with "permissions": ["camera"] (section 6.6); undefined on runtimes before 0.28.0
+await PAD.camera.snap({size})         // size "small" (128x112) | "large" (256x224) -> {w, h, px} | null
 ```
 
 Sounds, roughly: `tap` key click, `tick` short tick (timers), `move` cursor step,
@@ -429,6 +433,41 @@ No permission. Use it for a word or a line the player wants to hear, and always 
   `"unavailable"` when there is no voice for the language, the volume is 0, the call came too soon, or the phone would
   not speak. "unavailable" is normal on many phones: an app must work the same without the voice.
 
+### 6.6 The camera
+
+An app that declares `"permissions": ["camera"]` can ask the player for one photo (runtime 0.28.0 and later). The runtime
+opens its own viewfinder, the player takes the picture, and the app gets a small four-tone image. Nothing else: the app
+never sees the camera's picture, its colours or a stream, and the runtime keeps no copy.
+
+```js
+if (PAD.camera) {                        // undefined before runtime 0.28.0
+  PAD.camera.snap({ size: "small" }).then(function (photo) {
+    if (!photo) return;                  // cancelled, refused, no camera, or a snap already open
+    // photo.w, photo.h: 128 x 112 ("small", the default) or 256 x 224 ("large")
+    // photo.px: a Uint8Array of w*h tone indices, row by row, 0 = ink ... 3 = paper (PAD.TONES)
+  });
+}
+```
+
+- **Consent.** The first `snap()` of an app shows the handheld's own dialog (the same one as files, sensors and notes):
+  `「<app>」想用相机拍一张照片。照片只以四色小图交给它。` A (on release) or 允许 allows it, and the phone's own camera prompt,
+  if any, comes in that tap; B or 不允许 resolves `null` and is not remembered. An allowed app is remembered; Settings →
+  传感器与相机 lists it and can revoke it. After a relaunch the phone may need to ask again: the runtime then shows a one-line
+  bar, 点一下开启相机, first.
+- **Every shot is the player's.** Every `snap()`, allowed or not, opens the viewfinder over the app with the app's name on
+  top. It looks like the camera program: the live picture dithered at the size asked for, A shutter, SELECT the next lens
+  (the phone's physical lenses, focal length shown), up / down exposure, left / right contrast, B cancel, and on-screen
+  shutter and cancel buttons. The chin pad shows while it is open; no key reaches the app. The front camera is mirrored.
+- **What the app receives.** `{w, h, px}`: exactly what the viewfinder showed when the shutter went, at 128 x 112 or 256 x 224
+  (8:7, the camera's two film formats). No date stamp. Draw it with the four tones, store it with `PAD.save` (256 KB per app:
+  pack it, four pixels to a byte, a small one is 3.5 KB), or turn it into whatever the app makes of it.
+- **`null`** when the player cancels (B), refuses the dialog, leaves (HOME, another program, the app closing), the page is
+  hidden, the phone has no camera or refuses it (the handheld says 相机用不了), a snap of this app is already open, or the
+  app has no `"camera"` permission (an error in the dev harness; the checker fails an app that calls `PAD.camera` without
+  declaring it).
+- Show the player what they took and let them take it again (`sdk/UI.md`). An app must have a use without the camera, or
+  say plainly that it needs one.
+
 ## 7. Size and quality
 
 - `index.html` at most 512 KB (with src/ files and framework copies bundled in; section 11).
@@ -452,7 +491,7 @@ node tools/check-app.mjs registry/apps/<id>
 
 The checker enforces sections 2 (including `permissions`), 3 (colors), 5 (forbidden APIs and external
 resources) and 7 (size), checks `PAD.sfx` names, and fails `PAD.exportFile` / `importFile` without the `files` permission,
-and `PAD.motion` or `PAD.on("tilt" | "shake")` without `motion`, `PAD.mic` or `PAD.on("sound")` without `mic`, `PAD.notes` without `notes`.
+and `PAD.motion` or `PAD.on("tilt" | "shake")` without `motion`, `PAD.mic` or `PAD.on("sound")` without `mic`, `PAD.notes` without `notes`, `PAD.camera` without `camera`.
 Passing it is required before review.
 
 Review then reads the app. Besides what the checker cannot see (the button convention in section 4,
