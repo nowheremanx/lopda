@@ -19,6 +19,7 @@
   #msg.note { background: #1f2a14; color: #a3ad7e; padding: 2px 8px; }
   #menu { flex: none; width: 100%; max-width: 360px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   #menu:empty { display: none; }
+  #menu button:only-child { grid-column: 1 / -1; }
   #menu button { font: inherit; font-size: 16px; font-weight: bold; min-height: 44px; width: 100%; background: #a3ad7e; color: #1f2a14; border: 2px solid #1f2a14; }
   #menu button.on { background: #1f2a14; color: #a3ad7e; }
   #menu button.off { color: #4a5a32; border-style: dashed; }
@@ -46,12 +47,12 @@
       resume: "继续", next: "下一局", newphoto: "拍新照片", moves: "{n} 步", best: "最佳 {n}", taking: "拍照中…",
       intro: "拍一张照片，切成方块打乱，再拼回来。", nocam: "这台掌机不能拍照，用内置图片玩。", nophoto: "没拿到照片，用内置图片玩。",
       look: "就用这张吗？", won: "拼好了！{n} 步。", record: "新纪录！", unlocked: "下一局是 4×4。", locked: "先拼好一次 3×3",
-      kTitle: "↑↓ 选　A 确定", kPreview: "A 用这张　B 重拍", kPlay: "方向键 推方块　A 按住看原图　START 菜单", kMenu: "↑↓ 选　A 确定　B 返回", kWon: "↑↓ 选　A 确定" },
+      kTitle: "↑↓ 选　A 确定", kPreview: "A 用这张　B 重拍", kPlay: "方向键 推方块　A 按住看原图　START 菜单", kMenu: "↑↓ 选　A 确定　B 返回", kWon: "↑↓ 选　A 确定", kSolved: "A 继续", solved: "拼好了！", cont: "继续" },
     en: { title: "SNAPTILE", snap: "Take a photo", builtin: "Built-in picture", use: "Use this", retake: "Retake", again: "Restart", size: "Size",
       resume: "Resume", next: "Next", newphoto: "New photo", moves: "{n} moves", best: "best {n}", taking: "Camera…",
       intro: "Take a photo, it is cut up and shuffled: slide it back.", nocam: "No camera here: playing with the built-in picture.", nophoto: "No photo: playing with the built-in picture.",
       look: "Use this one?", won: "Solved in {n} moves!", record: "New record!", unlocked: "Next one is 4×4.", locked: "Solve a 3×3 first",
-      kTitle: "↑↓ pick  A ok", kPreview: "A use  B retake", kPlay: "D-pad slide  hold A peek  START menu", kMenu: "↑↓ pick  A ok  B back", kWon: "↑↓ pick  A ok" }
+      kTitle: "↑↓ pick  A ok", kPreview: "A use  B retake", kPlay: "D-pad slide  hold A peek  START menu", kMenu: "↑↓ pick  A ok  B back", kWon: "↑↓ pick  A ok", kSolved: "A continue", solved: "Solved!", cont: "Continue" }
   }[LANG];
   function tx(key, n) { return TXT[key].replace("{n}", n); }
   document.documentElement.lang = LANG === "zh" ? "zh-CN" : "en"; document.title = TXT.title;
@@ -164,14 +165,32 @@
     /* a short tune of our own for the win; PAD.music is undefined before runtime 0.11.0 */
     if (HAS_PAD && PAD.music) PAD.music.play({ bpm: 150, p1: "@1 v12 o5 l16 c e g >c8 r <g >c4", tri: "v11 o3 l8 c g >c4" }, { loop: false });
     S.unlockedNow = first;   /* the next puzzle is 4x4; the moves line still shows this one until then */
-    go("won");
+    S.anim = { t0: 0, landed: false, done: false };
+    go("solved");
+    requestAnimationFrame(tick);
   }
+
+  /* ---------- the solved picture: the last piece drops in, the cuts melt away, a glint runs over it ----------
+     Times in ms from the start; then the whole photo stays until the player goes on (A or the button) */
+  var DROP = 450, MELT = 1050, GLINT = 1600;
+  function tick(t) {
+    var a = S.anim; if (S.screen !== "solved" || !a || a.done) return;
+    if (!a.t0) a.t0 = t;
+    a.ms = t - a.t0;
+    if (!a.landed && a.ms >= DROP) { a.landed = true; sfx("ok"); }
+    if (a.ms >= GLINT) { endAnim(); return; }
+    paint();
+    requestAnimationFrame(tick);
+  }
+  /* A or a tap during the animation jumps to its end */
+  function endAnim() { S.anim.done = true; S.anim.ms = GLINT; draw(); }
 
   /* ---------- drawing: the picture, cut into cells, written with putImageData ---------- */
   var cv = document.getElementById("cv"), ctx = cv.getContext("2d"), img = ctx.createImageData(W, H);
   function edges(n, size) { var e = []; for (var i = 0; i <= n; i++) e.push(Math.round(i * size / n)); return e; }
   function frame() {
     var pic = S.screen === "preview" ? S.shot : S.pic, src = pic.px;
+    if (S.screen === "solved") return solvedFrame(src);
     if ((S.screen !== "play" && S.screen !== "menu") || S.peek) return src;
     var n = S.n, xs = edges(n, W), ys = edges(n, H), out = new Uint8Array(W * H);
     for (var p = 0; p < n * n; p++) {
@@ -184,6 +203,29 @@
         else v = src[(ys[tr] + Math.floor(y * sh / dh)) * W + xs[tc] + Math.floor(x * sw / dw)];
         out[o] = v;
       }
+    }
+    return out;
+  }
+  function solvedFrame(src) {
+    var a = S.anim, ms = a.done ? GLINT : a.ms || 0;
+    if (ms >= GLINT) return src;
+    var n = S.n, xs = edges(n, W), ys = edges(n, H), out = new Uint8Array(W * H);
+    var drop = Math.min(1, ms / DROP), ease = 1 - (1 - drop) * (1 - drop);
+    var melt = Math.max(0, Math.min(1, (ms - DROP) / (MELT - DROP)));
+    var glint = ms > MELT ? (ms - MELT) / (GLINT - MELT) * (W + H + 24) - 12 : -99;
+    var g = n * n - 1, gx = xs[g % n], gy = ys[Math.floor(g / n)], gw = xs[g % n + 1] - gx, gh = ys[Math.floor(g / n) + 1] - gy;
+    var off = Math.round((1 - ease) * gh);   /* the last piece slides down into its place */
+    for (var y = 0; y < H; y++) for (var x = 0; x < W; x++) {
+      var o = y * W + x, v = src[o];
+      if (x >= gx && x < gx + gw && y >= gy && y < gy + gh) {
+        var yy = y - gy + off;
+        v = yy < gh ? src[(gy + yy) * W + x] : ((x + y) % 4 === 0 ? 0 : 1);
+      }
+      var line = (xs.indexOf(x) > 0 && xs.indexOf(x) < n) || (ys.indexOf(y) > 0 && ys.indexOf(y) < n);
+      if (line && (BAYER[(y % 4) * 4 + (x % 4)] + 0.5) / 16 >= melt) v = 0;   /* the cuts melt away in the dither's order */
+      var dg = x + y - glint;
+      if (dg > -6 && dg < 6) v = Math.min(3, v + (dg > -3 && dg < 3 ? 2 : 1));   /* the glint */
+      out[o] = v;
     }
     return out;
   }
@@ -209,19 +251,21 @@
     if (S.screen === "preview") return [["use", TXT.use], ["retake", TXT.retake]];
     if (S.screen === "menu") return [["resume", TXT.resume]].concat(camera ? [["retake", TXT.retake]] : [])
       .concat([["size", TXT.size, !S.big], ["again", TXT.again]]);
+    if (S.screen === "solved") return S.anim && S.anim.done ? [["cont", TXT.cont]] : [];
     if (S.screen === "won") return [["next", TXT.next]].concat(camera ? [["newphoto", TXT.newphoto]] : []);
     return [];
   }
   function draw() {
     var sc = S.screen, best = S.best[String(S.n)];
-    document.getElementById("info").textContent = sc === "play" || sc === "menu" || sc === "won"
+    document.getElementById("info").textContent = sc === "play" || sc === "menu" || sc === "solved" || sc === "won"
       ? S.n + "×" + S.n + "  " + tx("moves", S.moves) + (best ? "  " + tx("best", best) : "") : "";
     if (sc === "title") msg(HAS_PAD && PAD.camera ? TXT.intro : TXT.nocam, !(HAS_PAD && PAD.camera));
     else if (sc === "preview") msg(TXT.look, false);
     else if (sc === "play") msg(S.note, !!S.note);
     else if (sc === "menu") msg("", false);
+    else if (sc === "solved") msg(S.anim && S.anim.done ? TXT.solved : "", false);
     else if (sc === "won") msg(tx("won", S.moves) + (S.record ? " " + TXT.record : "") + (S.unlockedNow ? " " + TXT.unlocked : ""), false);
-    document.getElementById("ft").textContent = TXT[{ title: "kTitle", preview: "kPreview", play: "kPlay", menu: "kMenu", won: "kWon" }[sc]];
+    document.getElementById("ft").textContent = TXT[{ title: "kTitle", preview: "kPreview", play: "kPlay", menu: "kMenu", solved: "kSolved", won: "kWon" }[sc]];
     S.items = menuItems();
     var box = document.getElementById("menu"); box.textContent = "";
     S.items.forEach(function (it, i) {
@@ -244,6 +288,7 @@
     else if (id === "again") { sfx("tap"); newGame(); }
     else if (id === "size") { S.n = S.n === 3 ? 4 : 3; sfx("tick"); newGame(); }
     else if (id === "next") { S.note = ""; newGame(); }
+    else if (id === "cont") { sfx("tap"); go("won"); }
   }
 
   /* ---------- keys and touch ---------- */
@@ -255,6 +300,10 @@
         if (b === "up" || b === "down" || b === "left" || b === "right") push(b);
         else if (b === "a") { S.peek = true; paint(); }
         else if (b === "start") { sfx("tap"); go("menu"); }
+        return;
+      }
+      if (sc === "solved") {
+        if (b === "a") { if (S.anim.done) choose(); else endAnim(); }
         return;
       }
       if (sc === "preview") {
@@ -272,6 +321,7 @@
   }
   /* touch: tap a piece next to the gap */
   cv.addEventListener("click", function (e) {
+    if (S.screen === "solved") { if (S.anim.done) { S.sel = 0; choose(); } else endAnim(); return; }
     if (S.screen !== "play") return;
     var r = cv.getBoundingClientRect(), x = (e.clientX - r.left) / r.width * W, y = (e.clientY - r.top) / r.height * H;
     var xs = edges(S.n, W), ys = edges(S.n, H), c = 0, row = 0;
@@ -281,7 +331,7 @@
   });
 
   /* for tests/e2e.test.mjs: where the pieces are, so a test can solve the puzzle with real key presses */
-  window.PUZZLE = { state: function () { return { screen: S.screen, n: S.n, tiles: S.tiles.slice(), gap: S.gap, moves: S.moves, fromCamera: S.pic !== BUILTIN }; } };
+  window.PUZZLE = { state: function () { return { screen: S.screen, n: S.n, tiles: S.tiles.slice(), gap: S.gap, moves: S.moves, fromCamera: S.pic !== BUILTIN, animDone: !!(S.anim && S.anim.done) }; } };
 
   draw();
 })();
