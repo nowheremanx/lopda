@@ -204,7 +204,7 @@ document.addEventListener("visibilitychange",function(){
 });
 
 /* ---------- sound: tiny square-wave chips through Web Audio (the named sounds themselves are in chip.js) ---------- */
-var RUNTIME_VERSION="0.24.2+160b20c";   /* keep in step with VERSION in sw.js */
+var RUNTIME_VERSION="0.24.2+abe168c";   /* keep in step with VERSION in sw.js */
 /* One volume, five steps, 0 is off (decisions.md section 10). It sets the master gain and nothing else does.
    Under the master: `ui` for the runtime's own clicks, held at a fraction so they stay as quiet as they always were
    (step 2 gives them 0.11, their level before 0.12.0), and `app` for apps, music and the cartridge at the full step. */
@@ -275,10 +275,9 @@ function rebuild(){
   LP.each("audio");
 }
 /* The microphone going on or off: iOS changes the audio route, and the system prompt interrupts the audio session, so the
-   context may be left stopped with nobody touching the screen (blowing at a candle). Step 0 heard a context made before the
-   microphone keep its full volume; one made while the microphone is on came out much quieter (owner's iPhone, 0.24.1,
-   2026-10-17: probably the phone's voice route). So the context is kept: a moment later a stopped one is asked to run, and
-   only one whose clock still stands is made again. */
+   context may be left stopped with nobody touching the screen (blowing at a candle). So a moment later a stopped one is asked
+   to run, and only one whose clock still stands is made again. (While the microphone is on iOS plays everything quieter,
+   whichever context: the system's doing, accepted; decisions.md section 23.) */
 function micRoute(){
   var ac=SND.ctx; if(!ac) return;
   setTimeout(function(){
