@@ -1,7 +1,52 @@
 {
   "spec": "lopda/1",
-  "generated": "2026-10-15",
+  "generated": "2026-10-16",
   "apps": [
+    {
+      "spec": "lopda/1",
+      "id": "blow-candles",
+      "name": "吹蜡烛",
+      "glyph": "烛",
+      "buttons": true,
+      "icon": [
+        "................",
+        ".......1........",
+        "......121.......",
+        "......131.......",
+        "......131.......",
+        ".......1........",
+        "......000.......",
+        "......030.......",
+        "......030.......",
+        "......030.......",
+        "......030.......",
+        "......030.......",
+        "......030.......",
+        "....0000000.....",
+        "..00000000000...",
+        "................"
+      ],
+      "version": "1.0.0",
+      "description": "对着话筒吹灭一排蜡烛，最后唱准一个音把蜡烛点回来。按住 A 也能吹。话筒的示范。",
+      "i18n": {
+        "zh": {
+          "name": "吹蜡烛",
+          "description": "对着话筒吹灭一排蜡烛，最后唱准一个音把蜡烛点回来。按住 A 也能吹。话筒的示范。"
+        },
+        "en": {
+          "name": "Candles",
+          "description": "Blow into the mic to put the candles out, then sing one back alight. Or hold A."
+        }
+      },
+      "author": "Haowei Wu",
+      "license": "MIT",
+      "permissions": [
+        "mic"
+      ],
+      "path": "apps/blow-candles/index.html",
+      "sha256": "5ea831b5b33d277c1a0714f60fc099333d8bfc46b7866b9f152a42880d31b13e",
+      "bytes": 56293
+    },
     {
       "spec": "lopda/1",
       "id": "calculator",
@@ -219,6 +264,51 @@
       "path": "apps/sound-board/index.html",
       "sha256": "538634b7844cea925073c21f80f8b9fb5d8e93c4c6e6b6c7a9c7fb7e152345bf",
       "bytes": 9896
+    },
+    {
+      "spec": "lopda/1",
+      "id": "tilt-maze",
+      "name": "滚珠迷宫",
+      "glyph": "珠",
+      "buttons": true,
+      "icon": [
+        "0000000000000000",
+        "0333333303333330",
+        "0333333303333330",
+        "0330000003300330",
+        "0330333333300330",
+        "0330300000333330",
+        "0330303333300000",
+        "0330303113303330",
+        "0330303113303330",
+        "0330300000003330",
+        "0330333333333330",
+        "0330000000000330",
+        "0333333033333330",
+        "0333112033333330",
+        "0333112033333330",
+        "0000000000000000"
+      ],
+      "version": "1.0.0",
+      "description": "倾斜机身让小钢珠滚到终点，别掉进洞。也能用方向键推。倾斜感应的示范。",
+      "i18n": {
+        "zh": {
+          "name": "滚珠迷宫",
+          "description": "倾斜机身让小钢珠滚到终点，别掉进洞。也能用方向键推。倾斜感应的示范。"
+        },
+        "en": {
+          "name": "Marble",
+          "description": "Tilt to roll the ball home past the holes, or push it with the D-pad."
+        }
+      },
+      "author": "Haowei Wu",
+      "license": "MIT",
+      "permissions": [
+        "motion"
+      ],
+      "path": "apps/tilt-maze/index.html",
+      "sha256": "ebb2b5875d062ba3a565b8c75aaea8194a05119d083e9c1baeb8462de5a23afc",
+      "bytes": 61011
     },
     {
       "spec": "lopda/1",

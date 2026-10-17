@@ -997,6 +997,10 @@ CPU 降速 4 倍（DevTools 的 CPU throttling，粗略代表旧手机）时，�
   core.js 记住当前的类型（`setSession`），AudioContext 被系统停掉、重建时用记住的类型，不会在麦克风开着时把它改回 `"ambient"`；
   重建后麦克风接进新的 context（`audio` 钩子）。分析用主程序已有的 AudioContext：流 → 分析器 → 音量为 0 的增益 → 输出
   （Safari 不跑不通向输出的节点），麦克风的声音不会被放出来。
+- **麦克风开了，声音要重新接上（0.24.1）**：iPhone 上开麦克风会换音频线路（`"play-and-record"`，采样率也可能变），之前建的
+  AudioContext 还说自己在 "running"，声音却再也听不到了（owner 实测：吹蜡烛的柴火声在麦克风开了以后没了，2026-10-17）。所以麦克风一开，
+  core.js 的 `micRoute(true)` 立刻重建 context：音乐从原来的拍子接着放，环境声用原来的预设和音量淡入，麦克风接进新的 context
+  （麦克风开着时 iOS 允许页面不经点击出声）。麦克风关掉时 `micRoute(false)` 只在 400 毫秒后时钟没走才重建，否则照旧等下一次点击。
 - **每条退路都恢复 `"ambient"` 并停掉轨道**：`PAD.mic.stop()`；HOME、切到别的程序、app 自己 `exit`、卸载（runner 的 `leave`
   和 `runApp` 都调 `stopAll()`）；页面隐藏（`visibilitychange`）、`pagehide`。另外每 250 毫秒看一次"现在前台的 app 窗口是不是
   开传感器的那个"，不是就全停：app 的框架没了、被换掉，或者以后哪条路忘了调 `stopAll()`，都会被它兜住。
