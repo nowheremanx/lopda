@@ -4248,3 +4248,114 @@ test("blow-candles: B on the dialog falls back to holding A, says so, and A puts
   await p.evaluate(() => window.LOPDA_DEBUG.setButton("a", false));
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
+
+/* a 32 KB MBC3 cartridge with a clock, 8 KB of RAM and a battery (type 0x10): it switches the RAM on, writes 0x5A at the
+   first RAM byte and 0xC3 at the last, then loops. Built here, no game. */
+function savRom() {
+  const rom = new Uint8Array(0x8000);
+  rom.set([0x00, 0xc3, 0x50, 0x01], 0x100);
+  rom.set([0x3e, 0x0a, 0xea, 0x00, 0x00, 0x3e, 0x00, 0xea, 0x00, 0x40, 0x3e, 0x5a, 0xea, 0x00, 0xa0, 0x3e, 0xc3, 0xea, 0xff, 0xbf, 0x18, 0xfe], 0x150);
+  rom.set(Buffer.from("SAV TEST"), 0x134);
+  rom[0x147] = 0x10; rom[0x148] = 0x00; rom[0x149] = 0x02;
+  let x = 0; for (let i = 0x134; i <= 0x14c; i++) x = (x - rom[i] - 1) & 0xff;
+  rom[0x14d] = x;
+  return Buffer.from(rom);
+}
+
+test("cart: the battery save goes out as a .sav and comes back in; a wrong size changes nothing; tossing a cart keeps its saves", { skip, timeout: 90000 }, async (t) => {
+  const { createHash } = await import("node:crypto");
+  const { p, errors } = await page(t, { locale: "zh-CN", viewport: { width: 331, height: 359 } });
+  await p.route(/jsdelivr/, (r) => r.abort());
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await p.waitForFunction(() => window.LP && window.LP.S.db);
+  const rom = savRom(), id = createHash("sha256").update(rom).digest("hex").slice(0, 24);
+  const doc = () => p.evaluate((id) => window.LP.S.refs.cartsave.doc(id).get().then((sn) => {
+    if (!sn.exists) return null;
+    const d = sn.data(), bin = d.sram ? atob(d.sram) : "";
+    return { sram: Array.from(bin, (c) => c.charCodeAt(0)), state: !!d.state, stateAt: d.stateAt };
+  }), id);
+  const toastIs = (re) => p.waitForFunction((src) => { const el = document.getElementById("toast"); return !el.hidden && new RegExp(src).test(el.textContent); }, re.source, { timeout: 10000 });
+  let chooserOpened = 0; p.on("filechooser", () => chooserOpened++);
+  let downloaded = 0; p.on("download", () => downloaded++);
+  const press = (sel) => p.$eval(sel, (el) => {
+    const r = el.getBoundingClientRect();
+    el.dispatchEvent(new PointerEvent("pointerdown", { clientX: r.left + 5, clientY: r.top + 5, bubbles: true, pointerType: "touch" }));
+  });
+  const exp = "#cart-list li.cart-item .cart-acts .btn:nth-child(1)", imp = "#cart-list li.cart-item .cart-imp",
+    toss = "#cart-list li.cart-item .cart-acts .btn:nth-child(3)", note = "#cart-list li.cart-item .cart-note";
+  const pick = async (buffer) => {
+    const [fc] = await Promise.all([p.waitForEvent("filechooser"), p.click(imp)]);
+    await fc.setFiles({ name: "SAVE.sav", mimeType: "application/octet-stream", buffer });
+  };
+
+  await tile(p, "卡带机");
+  await p.setInputFiles("#cart-file", { name: "savtest.gb", mimeType: "application/octet-stream", buffer: rom });
+  await p.waitForSelector("#cart-list li.cart-item");
+  assert.ok(await p.$eval(exp, (b) => b.disabled), "no battery save yet: export is off");
+  /* the three actions sit in one row under the cartridge, inside the smallest screen */
+  const boxes = await p.$$eval("#cart-list li.cart-item .cart-acts .btn", (bs) => bs.map((b) => b.getBoundingClientRect().toJSON()));
+  assert.equal(new Set(boxes.map((b) => Math.round(b.top))).size, 1);
+  assert.ok(boxes.every((b) => b.right <= 331 && b.height >= 44));
+
+  /* play: the game writes its RAM, eject keeps it; a quick save too */
+  await p.click("#cart-list .acts .btn");
+  await p.waitForSelector("#cart-play:not([hidden])", { timeout: 10000 });
+  await p.waitForTimeout(500);
+  await p.click("#cart-save");
+  await p.click("#cart-eject");
+  await p.waitForFunction(() => !document.querySelector("#cart-list li.cart-item .cart-acts .btn").disabled);
+  let d = await doc();
+  assert.equal(d.sram.length, 8192, "the core's battery file is the 8 KB RAM, no clock after it");
+  assert.equal(d.sram[0], 0x5a); assert.equal(d.sram[8191], 0xc3);
+  assert.ok(d.state);
+
+  /* export: nothing on the press, the file on the click (release) */
+  await press(exp); await p.waitForTimeout(300);
+  assert.equal(downloaded, 0);
+  const [dl] = await Promise.all([p.waitForEvent("download"), p.click(exp)]);
+  assert.equal(dl.suggestedFilename(), "SAV_TEST.sav");
+  const { readFile: rf } = await import("node:fs/promises");
+  assert.deepEqual(Array.from(await rf(await dl.path())), d.sram);
+
+  /* import: the picker opens on the click, not the press */
+  await press(imp); await p.waitForTimeout(300);
+  assert.equal(chooserOpened, 0);
+  /* a wrong size is refused and changes nothing */
+  await pick(Buffer.alloc(100, 1));
+  await toastIs(/这个存档和卡带对不上/);
+  assert.equal(await p.textContent(imp), "导入存档");
+  assert.deepEqual(await doc(), d);
+  /* size + 48 (a clock footer): asks first, then takes the first 8 KB and empties the quick save */
+  const withClock = Buffer.alloc(8192 + 48, 0xee); withClock.fill(0x11, 0, 8192); withClock[0] = 0x22;
+  await pick(withClock);
+  await p.waitForFunction((sel) => document.querySelector(sel).textContent === "确认导入", imp);
+  assert.match(await p.textContent(note), /即时存档也会清空/);
+  assert.deepEqual(await doc(), d, "nothing changes before the second tap");
+  await p.click(imp);
+  await toastIs(/存档换好了/);
+  d = await doc();
+  assert.equal(d.sram.length, 8192); assert.equal(d.sram[0], 0x22); assert.equal(d.sram[8191], 0x11);
+  assert.equal(d.state, false); assert.equal(d.stateAt, undefined);
+  /* the exact size */
+  const plain = Buffer.alloc(8192, 0x33);
+  await pick(plain);
+  await p.waitForFunction((sel) => document.querySelector(sel).textContent === "确认导入", imp);
+  await p.click(imp);
+  await toastIs(/存档换好了/);
+  await p.waitForFunction((id) => window.LP.S.refs.cartsave.doc(id).get().then((sn) => atob(sn.data().sram).charCodeAt(0) === 0x33), id);
+  assert.ok(chooserOpened >= 3);
+
+  /* toss: the confirmation says the saves stay; they do, and the same ROM finds them again */
+  await p.click(toss);
+  assert.equal(await p.textContent(toss), "确认扔掉");
+  assert.equal(await p.textContent(note), "存档会留着，重新导入这张卡带就能接着玩。");
+  await p.click(toss);
+  await p.waitForSelector("#cart-list li.empty");
+  assert.equal((await doc()).sram[0], 0x33, "cartsave stays");
+  await p.setInputFiles("#cart-file", { name: "savtest.gb", mimeType: "application/octet-stream", buffer: rom });
+  await p.waitForSelector("#cart-list li.cart-item");
+  assert.equal(await p.$eval(exp, (b) => b.disabled), false, "the save is found by the ROM's hash");
+  const [dl2] = await Promise.all([p.waitForEvent("download"), p.click(exp)]);
+  assert.deepEqual(Array.from(await rf(await dl2.path())), Array.from(plain));
+  assert.deepEqual(notBlocked(errors), []);
+});
