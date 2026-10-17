@@ -4202,9 +4202,13 @@ test("blow-candles: a round opens the mic, a loud sound puts candles out, the mi
   await press(p, "a");
   await p.waitForSelector("#file-ask .box");
   assert.match(await p.textContent("#file-ask p.note"), /静音键不起作用/);
+  await until(p, () => p.evaluate(() => LP.chip.state().ambience === "fire"), "the fire ambience");
+  await p.evaluate(() => { window.__ctx0 = LP.SND.ctx; });
   await press(p, "a");
   await until(p, () => f.evaluate(() => live), "listening");
   assert.equal(await micOn(p), true);
+  /* the microphone changes the phone's audio route: the context is made again and the fire goes on in it (iPhone, 0.24.1) */
+  assert.ok(await p.evaluate(() => LP.SND.ctx !== window.__ctx0 && LP.SND.ctx.state === "running" && LP.chip.state().ambience === "fire"));
   /* the stub's full-scale tone is far above the threshold: the candles go out and the round ends */
   await until(p, () => f.evaluate(() => R.c.some((c) => !c.lit)), "a candle out");
   await until(p, () => f.evaluate(() => R.phase === "done"), "the round over");
