@@ -416,7 +416,7 @@ var sensors=window.LopdaSensors.host({
   session:function(type){ LP.setSession(type); },
   owner:frontWin,
   send:function(win,msg){ msg.pad=1; try{ win.postMessage(msg,"*"); }catch(e){} },
-  mic:function(on){ micMark.hidden=!on; LP.micRoute(); },
+  mic:function(on){ micMark.hidden=!on; LP.micRoute(on); },
   resume:function(win,kinds){
     if(!S.running || frontWin()!==win) return;
     ["motion","mic"].forEach(function(k){ if(kinds[k]) begin({app:S.running, win:win, sense:k, reply:function(){}}); });
