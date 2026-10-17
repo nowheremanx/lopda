@@ -102,6 +102,13 @@ Hard rules for index.html:
 - Speech, if the idea needs a word read aloud (no permission). Check that PAD.say exists first:
     PAD.say(text, {lang: "zh" | "en"}) -> Promise "done" | "stopped" | "unavailable". At most 200 characters,
          once a second; a new call stops the one speaking. "unavailable" (volume 0, no voice) is normal: show the text too.
+- A photo, only if the idea needs one the player takes (a portrait for a card, a picture to play with). Check that
+  PAD.camera exists first:
+    PAD.camera.snap({size: "small" | "large"}) -> Promise {w, h, px} | null. The runtime opens its own viewfinder
+         and the player shoots or cancels; small is 128x112 (default), large 256x224; px is a Uint8Array of w*h tone
+         indices, 0 = ink ... 3 = paper (PAD.TONES), row by row. null (cancelled, refused, no camera) is normal:
+         the app must still work. Show the picture the player took and offer to take it again.
+  "permissions" must list "camera" for this.
 - Pixel art: draw on a small canvas and scale it up with
   image-rendering: pixelated.
 
@@ -121,7 +128,7 @@ manifest.json must be:
   "license": "MIT",
   "permissions": [<leave empty; "files" only if the app imports or exports files with PAD.importFile / PAD.exportFile;
                    "motion" only if it uses PAD.motion or the tilt/shake events; "mic" only if it uses PAD.mic or the sound event;
-                   "notes" only if it uses PAD.notes.append>],
+                   "notes" only if it uses PAD.notes.append; "camera" only if it uses PAD.camera.snap>],
   "buttons": <true if the app uses PAD.on, otherwise leave this line out>
 }
 

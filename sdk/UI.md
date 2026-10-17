@@ -114,7 +114,17 @@ Contrast of the four tones against each other (WCAG contrast ratio):
   done: while it is on the phone's silent switch does nothing. Say what to do ("对着话筒吹"), and give a key that does
   the same (hold A to blow).
 
-## 10. Check before you submit
+## 10. The camera (SPEC.md 6.6)
+
+- Ask for a photo when the player chooses to (a "拍一张" button or key), never on start: every `snap()` covers the app
+  with the runtime's viewfinder.
+- Show the picture the player took, as it is, before using it, with two choices: use it (A) and take it again (B, which
+  calls `snap()` once more). People blink.
+- `null` is normal (cancelled, no camera, refused): go back to where the player was, with one line at most, and keep a way
+  to play without a photo (a drawn face, a built-in picture).
+- Draw the picture with the four tones at whole-pixel scale (`image-rendering: pixelated`), never smoothed.
+
+## 11. Check before you submit
 
 1. Open the app in `sdk/dev.html` and in the runtime at the smallest size (331 × 359 with the pad, 331 × 473
    without) and the largest (386 × 738). In desktop browsers use the device toolbar.
