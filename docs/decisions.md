@@ -1039,3 +1039,51 @@ CPU 降速 4 倍（DevTools 的 CPU throttling，粗略代表旧手机）时，�
 - **规则**：用传感器的 app 必须也能用按键玩（SPEC 第 4 节）；倾斜 app 给一个"校准"（`zero()`），不要求把手机放平（UI.md 第 9 节）。
 - **还没做**：两个示范 app（第 2 步）；iPhone 上整套流程还没有实测（确认框 → 系统框、重开后的那一行、静音键在关麦克风后恢复）；
   lo-game 的 `tilt` 便捷读数（草稿第 5 节"另议"）。
+
+## 24. 整机备份和恢复（设置 → 备份 / 恢复，0.25.0）
+
+2026-10-17，runtime 0.25.0。docs/design/v1.md 第 3 节是规格（owner 2026-10-17：进 1.0，很重要）；这里记实现时定下的规则。
+
+- **备份里有什么**：runtime 存下的全部东西，别的都不要。文档库（`lopda` 数据库，`data/users/local/...` 下每一份文档：笔记、胶卷、
+  相机里的胶卷、纪念日、词典设置和单词本、书的信息和进度、卡带列表和存档、装好的 app 的代码和 `PAD.save`、传感器授权、设置、
+  notes-meta、backup-meta……）和 `LopdaPlatform.files`（`lopda-files` 数据库：潜影 JPEG、导入的词典和书、书里的图、字体，以后放进去的也算）。
+  卡带 ROM 在文档库里（base64），所以也在。runtime 不用 localStorage、sessionStorage、cookie，没有别的存储；离线缓存（service worker 的
+  Cache）不是数据，不备份。PR 预览用自己的数据库（第 3 节），在预览里备份的是预览的数据。
+- **`platform.js`**：`dumpAll()` → `{docs: [{path, data}], files: [{key, value}]}`，每个数据库一个只读事务，读到的是同一时刻的全部；
+  `replaceAll({docs, files})` 每个数据库一个读写事务：`clear()` 再全部 `put`，所以每个数据库要么全旧、要么全新。两个数据库没法放进
+  同一个事务，第二个失败时第一个已经换掉了，由调用的一方写回旧数据（下面的回滚）。`files` 里不只是 Blob（词典的索引、书是带
+  typed array 的对象），所以字段叫 `value`，不是草稿里的 `blob`。顺手修了一处：事务里的请求当场抛错（存不下的值）时，现在会
+  `abort()` 整个事务，以前其余的写入照样提交。
+- **文件格式** `lopda-backup-YYYYMMDD.zip`（本地日期），zip.js 写，只用 stored：
+  - `manifest.json`：`{format: 1, runtime, created (ISO), docs: n, files: [{key, type, mime?, name?, size, crc32}]}`；
+  - `docs.json`：`[{path, data}]`；
+  - `files/<i>`：manifest 里第 i 个文件的字节。`type` 说明字节怎么变回存的值：`blob`（Blob；有 `name` 就是 File）、`ArrayBuffer`
+    或 typed array 的名字（原始字节）、`json`（结构化的值写成 JSON）。
+  - JSON 装不下的东西用标记对象表示，键是 `"$lp"`：Blob、typed array、DataView、ArrayBuffer 用 base64，还有 Date、NaN、±Infinity、-0、
+    undefined。数据自己的键如果正好是 `"$lp"`、`"$lp$"`……写出时多加一个 `$`，读回时去掉一个。文档库存的本来就是 JSON 副本，
+    所以 `docs.json` 实际上没有标记。存不了的值（Map、循环引用）让备份失败，不悄悄丢数据。
+  - 没有 ZIP64：超过 4 GB 不备份，说一句"数据超过 4 GB"。zip.js 加了 `writeParts`，大备份是 `new Blob(parts)`，内存里不再多拷一份。
+- **备份**：按「备份」→ 读出全部数据、打包，显示"备份全部数据，约 38 MB。"，超过 200 MB 多一行提醒（还是可以存）；按「保存」
+  （松开 / click，iPhone 的分享菜单要求）走和其他导出同一条路 `S.downloads.save`。保存成功才记 `data/users/local/backup-meta`
+  `{last}`，设置里写"上次备份：今天 / n 天前"，从没备份过写"还没有备份过"。**备份里的 backup-meta 就是这次备份的时间**，
+  所以恢复以后显示的是这份数据存下的时间。
+- **记事本提醒**（第 20 节）把整机备份算作导出：提醒看 notes-meta 的 `exported` 和 backup-meta 的 `last` 里较新的那个。
+  记事本菜单里的"上次导出"仍然只说记事本自己的 zip，没有改写 notes-meta。
+- **恢复：先全部检查，再动数据**。选一个文件（浏览器读得了多大就多大，整个读进内存），检查：是 zip、有 manifest 和 docs.json、
+  format 是 ≤ 1 的整数（更大的说"这个备份来自更新的版本"）、manifest 里每个文件都在且大小和 CRC 对得上（zip 自己的 CRC 也查）、
+  docs.json 能解析、份数和 manifest 一致、每个路径都在 `data/users/local/` 下（偶数段、没有空段、没有重复）、每个值都能解码。
+  任何一条不过都只说"这个备份文件不完整或已损坏"，现有数据不动。
+- **两次确认**：第一次写备份的时间、文档和文件数、大小，说"恢复会把这台掌机上的全部数据换成备份里的"，按钮「恢复」
+  「先备份现在的数据」「取消」；「先备份现在的数据」走一遍备份，存好或取消后回到这个问题。第二次"确定吗？……不能撤销"「全部替换」。
+- **回滚**：先 `dumpAll()` 现有数据放在内存里（从数据库读出的 Blob 先拷进内存，免得清空数据库后读不到），再
+  `replaceAll(备份)`。任何写入失败就 `replaceAll(内存里的旧数据)`，说"恢复失败，什么都没有改。"；连写回也失败（很少见），
+  就说清楚，并提供把旧数据存成备份文件。成功后说"恢复好了，正在重新开机…"，0.8 秒后重新载入页面，每个程序从恢复的数据开始。
+  不做合并（v1.md 第 3 节）。
+- **分享菜单只交文件**（owner 2026-10-17 在 iPhone 上发现）：以前 `navigator.share` 同时带了 `title`，iOS 存到"文件"时会在
+  文件旁边多存一个只写着文件名的文本文件。现在只传 `files`，所有走 `S.downloads.save` 的导出（记事本 zip、底片、.sav、出片、备份）都一样。
+- **传感器授权**原样恢复；iOS 的系统框可能再问一次，这没关系。
+- **测试**：`tests/platform.test.mjs`（dumpAll / replaceAll 往返、失败的事务不留半截；内存 IndexedDB 加了 getAll、getAllKeys、clear、
+  abort 和失败回滚），`tests/backup.test.mjs`（manifest、各种值往返、各种坏文件被拒），e2e 两条：几个程序造数据 → 备份 → 清空两个
+  数据库 → 恢复，文档和文件逐字节相同、程序里都看得到；坏的、缺文件的、版本更新的备份被拒、数据不变；files 数据库写到一半
+  抛错，全部写回原样。
+- **还没做**：iPhone 上实测（分享菜单存几百 MB 的文件、从"文件"选备份、恢复后重新开机、内存够不够）。

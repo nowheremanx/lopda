@@ -676,10 +676,11 @@ function exportAll(){
   },function(e){ toast(LP.saveErr(e)); sfx("err"); });
 }
 function saveMeta(){ if(N.metaRef) put(N.metaRef,{exported:N.meta.exported||0, reminded:N.meta.reminded||0}); }
-/* the backup reminder: 20 notes or more and no export for 30 days, at most once in 30 days */
+/* the backup reminder: 20 notes or more and no export for 30 days, at most once in 30 days. A whole-device backup
+   (Settings, apps/settings.js) counts as an export */
 function remind(){
   if(N.reminded || !N.metaRef || !N.metaLoaded) return;
-  var count=live().length, now=Date.now(), last=N.meta.exported||0;
+  var count=live().length, now=Date.now(), last=Math.max(N.meta.exported||0, N.backedUp||0, LP.backup ? LP.backup.last() : 0);
   if(count<REMIND_MIN) return;
   N.reminded=true;
   if(last && now-last<REMIND_DAYS*DAY) return;
@@ -830,8 +831,9 @@ LP.builtin({id:"notes", label:"app.notes", icon:"notes", view:"notes", keepPad:t
   lang:function(){ if(!$("v-notes").hidden){ render(); renderSheet(); } if(!$("v-note").hidden){ renderYears(); renderOpts(); renderWhen(); } },
   ready:function(){
     N.metaRef=S.db.doc("data/users/local/notes-meta");
-    N.metaRef.get().then(function(sn){
-      var d=sn.exists ? own(sn.data()) : null;
+    var bk=S.db.doc("data/users/local/backup-meta").get().then(function(sn){ var d=sn.exists ? own(sn.data()) : null; N.backedUp=d && +d.last || 0; },function(){});
+    Promise.all([N.metaRef.get(),bk]).then(function(r){
+      var sn=r[0], d=sn.exists ? own(sn.data()) : null;
       if(d) N.meta={exported:+d.exported||0, reminded:+d.reminded||0};
       N.metaLoaded=true;
       if(!$("v-notes").hidden){ remind(); if(N.sheet==="menu") renderSheet(); }

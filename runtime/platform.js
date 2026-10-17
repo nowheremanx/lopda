@@ -9,6 +9,8 @@
  *                            doc(path) / collection(path), get / set / update / delete / where
  *   LopdaPlatform.files      a key-value store for large binary data (dictionaries): get / put / del
  *   LopdaPlatform.downloads  save({filename, data}) -> share sheet on phones, download elsewhere
+ *   LopdaPlatform.dumpAll()  -> {docs: [{path, data}], files: [{key, value}]}, everything both databases hold
+ *   LopdaPlatform.replaceAll({docs, files})  clears both databases and writes these back
  */
 (function () {
   "use strict";
@@ -37,7 +39,8 @@
     return open().then(function (db) {
       return new Promise(function (resolve, reject) {
         var t = db.transaction(STORE, mode), os = t.objectStore(STORE), out;
-        out = fn(os);
+        /* a request that throws at once (a value that cannot be stored) must not let the rest commit */
+        try { out = fn(os); } catch (e) { try { t.abort(); } catch (x) {} reject(err("unavailable", e)); return; }
         t.oncomplete = function () { resolve(out && "result" in out ? out.result : undefined); };
         t.onerror = function () { reject(err("unavailable", t.error)); };
         t.onabort = function () { reject(err(t.error && t.error.name === "QuotaExceededError" ? "quota_exceeded" : "unavailable", t.error)); };
@@ -123,7 +126,8 @@
   function filesTx(mode, fn) {
     return openFiles().then(function (fdb) {
       return new Promise(function (resolve, reject) {
-        var t = fdb.transaction("files", mode), r = fn(t.objectStore("files"));
+        var t = fdb.transaction("files", mode), r;
+        try { r = fn(t.objectStore("files")); } catch (e) { try { t.abort(); } catch (x) {} reject(err("unavailable", e)); return; }
         t.oncomplete = function () { resolve(r && "result" in r ? r.result : undefined); };
         t.onerror = function () { reject(err("unavailable", t.error)); };
         t.onabort = function () { reject(err(t.error && t.error.name === "QuotaExceededError" ? "quota_exceeded" : "unavailable", t.error)); };
@@ -135,6 +139,34 @@
     put: function (key, value) { return filesTx("readwrite", function (os) { return os.put(value, key); }).then(function () {}); },
     del: function (key) { return filesTx("readwrite", function (os) { return os.delete(key); }).then(function () {}); }
   };
+
+  /* ---------------- whole-device dump and load (the backup in Settings) ----------------
+     One transaction per database: a dump reads every document, or every file, at one moment; a load clears a store and
+     writes it back in the same transaction, so each database is either all old or all new. The two databases cannot share
+     a transaction; when the second one fails, the caller writes its own copy of the old data back (apps/settings.js). */
+  function dumpAll() {
+    var docs = tx("readonly", function (os) { return os.getAll(); }).then(function (recs) {
+      return (recs || []).map(function (r) { return { path: r.path, data: r.data }; });
+    });
+    var fl = filesTx("readonly", function (os) {
+      var keys = os.getAllKeys(), vals = os.getAll();
+      return { get result() { return (keys.result || []).map(function (k, i) { return { key: k, value: vals.result[i] }; }); } };
+    });
+    return Promise.all([docs, fl]).then(function (r) { return { docs: r[0], files: r[1] }; });
+  }
+  function replaceAll(all) {
+    var docs = (all && all.docs) || [], fl = (all && all.files) || [];
+    try { docs.forEach(function (d) { checkPath(d.path, true); }); } catch (e) { return Promise.reject(e); }
+    return tx("readwrite", function (os) {
+      os.clear();
+      docs.forEach(function (d) { os.put({ path: d.path, parent: d.path.slice(0, d.path.lastIndexOf("/")), data: d.data }); });
+    }).then(function () {
+      return filesTx("readwrite", function (os) {
+        os.clear();
+        fl.forEach(function (f) { os.put(f.value, f.key); });
+      });
+    }).then(function () {});
+  }
 
   /* ---------------- file export ---------------- */
   var MIME = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", txt: "text/plain", md: "text/markdown", zip: "application/zip", json: "application/json", html: "text/html" };
@@ -152,7 +184,8 @@
     return Promise.resolve({ status: "saved" });
   }
   function share(file) {
-    return navigator.share({ files: [file], title: file.name }).then(function () { return { status: "saved" }; });
+    /* files only: with a title as well, iOS "Save to Files" saves the title as a text file next to the file */
+    return navigator.share({ files: [file] }).then(function () { return { status: "saved" }; });
   }
   /* Safari only allows share() during a tap. When the file took a moment to build, the tap is
      gone, so we show a one-tap "save" button and share from that tap instead. */
@@ -190,5 +223,5 @@
     return Promise.resolve(false);
   }
 
-  window.LopdaPlatform = { db: db, files: files, downloads: downloads, persist: persist, user: { id: function () { return Promise.resolve("local"); } } };
+  window.LopdaPlatform = { db: db, files: files, downloads: downloads, persist: persist, dumpAll: dumpAll, replaceAll: replaceAll, user: { id: function () { return Promise.resolve("local"); } } };
 })();
