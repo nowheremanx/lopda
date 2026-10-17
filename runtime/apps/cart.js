@@ -52,11 +52,13 @@ function asMono(u8){
   var x=0; for(var i=0x134;i<=0x14C;i++) x=(x-r[i]-1)&0xFF; r[0x14D]=x;
   return r;
 }
+/* the cartridge's battery saves, by cart id, as stored in cartsave/<id>: {sram, state, stateAt} */
+var SAVES={};
 function renderCarts(){
   var ul=$("cart-list"); ul.textContent="";
   if(!CARTS.length){ var e=document.createElement("li"); e.className="empty"; e.textContent=tr(S.db?"cart.empty":"cart.emptynodb"); ul.appendChild(e); return; }
   CARTS.slice().sort(function(a,b){ return (b.played||b.added||0)-(a.played||a.added||0); }).forEach(function(c){
-    var li=document.createElement("li"); li.className="store-item";
+    var li=document.createElement("li"); li.className="store-item cart-item"; li.dataset.id=c.id;
     var tile=document.createElement("span"); tile.className="tile"; tile.textContent=Array.from(c.name||"?")[0].toUpperCase();
     var body=document.createElement("div"); body.className="store-body";
     var t=document.createElement("b"); t.textContent=c.name;
@@ -65,23 +67,99 @@ function renderCarts(){
     var acts=document.createElement("div"); acts.className="acts";
     var play=document.createElement("button"); play.type="button"; play.className="btn"; play.textContent=tr("cart.play");
     play.onclick=function(){ gbPlay(c); };
+    acts.appendChild(play);
+    /* this cartridge's other actions, in a row under it: the battery save out and in, and tossing it */
+    var row=document.createElement("div"); row.className="row cart-acts";
+    var note=document.createElement("p"); note.className="hint cart-note"; note.hidden=true;
+    var exp=document.createElement("button"); exp.type="button"; exp.className="btn ghost"; exp.textContent=tr("cart.export");
+    exp.disabled=!(S.db && SAVES[c.id] && SAVES[c.id].sram);
+    exp.onclick=function(){ exportSav(c); };
+    var imp=document.createElement("button"); imp.type="button"; imp.className="btn ghost cart-imp"; imp.textContent=tr("cart.import");
+    imp.disabled=!S.db;
+    imp.onclick=function(){
+      if(imp.dataset.armed){ importSav(c); return; }
+      PENDING={cart:c}; var f=$("cart-sav-file"); f.value=""; f.click();
+    };
     var del=document.createElement("button"); del.type="button"; del.className="btn ghost"; del.textContent=tr("cart.toss");
     del.onclick=function(){
       if(del.dataset.armed){ deleteCart(c); return; }
-      del.dataset.armed="1"; del.textContent=tr("cart.tossgo"); setTimeout(function(){ if(del.isConnected){ delete del.dataset.armed; del.textContent=tr("cart.toss"); } },3000);
+      arm(del,"cart.toss","cart.tossgo",note,"cart.tossnote");
     };
-    acts.appendChild(play); acts.appendChild(del);
-    li.appendChild(tile); li.appendChild(body); li.appendChild(acts); ul.appendChild(li);
+    row.appendChild(exp); row.appendChild(imp); row.appendChild(del);
+    li.appendChild(tile); li.appendChild(body); li.appendChild(acts); li.appendChild(row); li.appendChild(note); ul.appendChild(li);
   });
+}
+/* the second tap of a two-tap confirm: the button asks, the note under the cartridge says what will happen.
+   One question at a time per cartridge. */
+function arm(btn,label,ask,note,say){
+  disarm(btn.parentNode,note);
+  btn.dataset.armed="1"; btn.dataset.label=label; btn.textContent=tr(ask); note.textContent=tr(say); note.hidden=false;
+  setTimeout(function(){ if(btn.isConnected && btn.dataset.armed) disarm(btn.parentNode,note); },5000);
+}
+function disarm(row,note){
+  Array.prototype.forEach.call(row.querySelectorAll("[data-armed]"),function(b){ delete b.dataset.armed; b.textContent=tr(b.dataset.label); });
+  note.hidden=true;
 }
 function loadCarts(){
   if(!S.db) return Promise.resolve();
-  return S.refs.carts.get().then(function(q){ CARTS=q.docs.map(function(d){ var o=own(d.data()); o.id=d.id; return o; }); renderCarts(); }).catch(function(){ toast(tr("cart.shelffail")); });
+  return Promise.all([S.refs.carts.get(), S.refs.cartsave.get().catch(function(){ return {docs:[]}; })]).then(function(r){
+    CARTS=r[0].docs.map(function(d){ var o=own(d.data()); o.id=d.id; return o; });
+    SAVES={}; r[1].docs.forEach(function(d){ SAVES[d.id]=own(d.data()); });
+    renderCarts();
+  }).catch(function(){ toast(tr("cart.shelffail")); });
 }
+/* the cartridge goes; its saves stay in cartsave/<id>, found again by the ROM's hash when it comes back */
 function deleteCart(c){
   CARTS=CARTS.filter(function(x){ return x.id!==c.id; }); renderCarts();
-  if(S.db){ S.refs.carts.doc(c.id).delete(); S.refs.roms.doc(c.id).delete(); S.refs.cartsave.doc(c.id).delete(); }
+  if(S.db){ S.refs.carts.doc(c.id).delete(); S.refs.roms.doc(c.id).delete(); }
   toast(tr("cart.tossed",{name:c.name}));
+}
+/* ---------- the battery save as a .sav file: the raw cartridge RAM, as other emulators keep it ---------- */
+function savName(c){ return (String(c.title||"").replace(/[^A-Za-z0-9]+/g,"_").replace(/^_+|_+$/g,"")||"CART")+".sav"; }
+function exportSav(c){
+  var sv=SAVES[c.id]; if(!sv || !sv.sram || !S.downloads) return;
+  S.downloads.save({filename:savName(c), data:new Blob([unb64(sv.sram)],{type:"application/octet-stream"})})
+    .then(function(res){ if(res && res.status==="saved") sfx("ok"); },function(e){ if(!(e && e.code==="declined")){ toast(LP.saveErr(e)); sfx("err"); } });
+}
+function romOf(c){
+  return c.mem ? Promise.resolve(c.mem) : S.refs.roms.doc(c.id).get().then(function(sn){ if(!sn.exists) throw new Error(tr("cart.norom")); return unb64(own(sn.data()).rom); });
+}
+/* the cartridge RAM size, as the core counts it: the cartridge powered on for a moment with nothing run */
+function ramSize(c){
+  return Promise.all([gbModule(),romOf(c)]).then(function(r){
+    var m=r[0], data=asMono(r[1]), size=(data.length+0x7fff)&~0x7fff, p=m._malloc(size), e=0;
+    try{
+      var h=new Uint8Array(m.HEAP8.buffer,p,size); h.fill(0); h.set(data);
+      e=m._emulator_new_simple(p,size,44100,GB_AUDIO_FRAMES,0);
+      if(!e) throw new Error(tr("cart.badrom"));
+      var fd=m._ext_ram_file_data_new(e), n=m._get_file_data_size(fd); m._file_data_delete(fd);
+      return n;
+    } finally { m._emulator_delete(e); }   /* the core owns the ROM copy once it has it (see gbStop) */
+  });
+}
+/* the cartridge the picker was opened for, and then the bytes it brought back, waiting for the second tap */
+var PENDING=null;
+$("cart-sav-file").onchange=function(){
+  var f=this.files&&this.files[0], job=PENDING; this.value="";
+  if(!f || !job) return;
+  ramSize(job.cart).then(function(n){
+    /* the RAM itself, or the RAM with the 44 or 48 byte clock footer other emulators add (the core keeps no clock in it) */
+    if(!n || [n,n+44,n+48].indexOf(f.size)<0){ toast(tr("cart.savmismatch")); sfx("err"); return; }
+    return f.arrayBuffer().then(function(b){
+      var li=document.querySelector('#cart-list li[data-id="'+job.cart.id+'"]');
+      if(PENDING!==job || $("cart-lib").hidden || !li) return;
+      job.bytes=new Uint8Array(b,0,n);
+      arm(li.querySelector(".cart-imp"),"cart.import","cart.importgo",li.querySelector(".cart-note"),"cart.importnote");
+    });
+  }).catch(function(e){ toast(tr("cart.badfile",{msg:(e&&e.message)||e})); sfx("err"); });
+};
+/* the new RAM replaces the old; the quick save goes too, since loading it would bring the old RAM back */
+function importSav(c){
+  var bytes=PENDING && PENDING.cart.id===c.id && PENDING.bytes; PENDING=null;
+  if(!bytes || !S.db) return;
+  var sv=SAVES[c.id]||{}; sv.sram=b64(bytes); delete sv.state; delete sv.stateAt; SAVES[c.id]=sv;
+  put(S.refs.cartsave.doc(c.id),sv).then(function(ok){ if(!ok) return; toast(tr("cart.imported")); sfx("ok"); });
+  renderCarts();
 }
 $("cart-file").onchange=function(){
   var f=this.files&&this.files[0]; this.value=""; if(!f) return;
@@ -120,7 +198,7 @@ function cartLayout(){
 window.addEventListener("resize",function(){ if(!$("v-cart").hidden) cartLayout(); });
 function gbPlay(c){
   $("cart-state").textContent=tr("cart.reading");
-  var romP = c.mem ? Promise.resolve(c.mem) : S.refs.roms.doc(c.id).get().then(function(sn){ if(!sn.exists) throw new Error(tr("cart.norom")); return unb64(own(sn.data()).rom); });
+  var romP = romOf(c);
   var saveP = S.db ? S.refs.cartsave.doc(c.id).get().then(function(sn){ return sn.exists ? own(sn.data()) : {}; }).catch(function(){ return {}; }) : Promise.resolve({});
   audio();   /* this tap unlocks sound on phones */
   if(SND.ctx && SND.ctx.state==="suspended") SND.ctx.resume();
@@ -135,11 +213,11 @@ function gbStart(c,rom,save){
   GB.rom=m._malloc(size); var h=heap(GB.rom,size); h.fill(0); h.set(data);
   GB.rate=ac?ac.sampleRate:44100;   /* the emulator's rate, kept even if the AudioContext is replaced with another rate */
   GB.e=m._emulator_new_simple(GB.rom,size,GB.rate,GB_AUDIO_FRAMES,0);
-  if(!GB.e){ m._free(GB.rom); GB.rom=0; throw new Error(tr("cart.badrom")); }
+  if(!GB.e){ GB.rom=0; throw new Error(tr("cart.badrom")); }   /* a failed start has freed the ROM copy already (see gbStop) */
   GB.joy=m._joypad_new(); m._emulator_set_default_joypad_callback(GB.e,GB.joy);
   var col=function(t){ var c=TONES[t]; return ((255<<24)|(c[2]<<16)|(c[1]<<8)|c[0])>>>0; };
   for(var p=0;p<3;p++) m._emulator_set_bw_palette_simple(GB.e,p,col(3),col(2),col(1),col(0));
-  GB.cart=c; GB.save=save||{};
+  GB.cart=c; GB.save=save||{}; SAVES[c.id]=GB.save;
   if(GB.save.sram) gbWithFile(m._ext_ram_file_data_new(GB.e),function(fd,buf){ var s=unb64(GB.save.sram); if(s.length===buf.length){ buf.set(s); m._emulator_read_ext_ram(GB.e,fd); } });
   var cv=$("cart-cv"); GB.ctx=cv.getContext("2d"); GB.img=GB.ctx.createImageData(160,144);
   GB.ctx.fillStyle="rgb("+TONES[3].join(",")+")"; GB.ctx.fillRect(0,0,160,144);
@@ -203,7 +281,9 @@ function gbStop(){
   if(GB.dirty) gbSaveSram();
   var m=GB.mod; cancelAnimationFrame(GB.raf); clearInterval(GB.timer);
   if(GB.gain){ try{ GB.gain.disconnect(); }catch(e){} GB.gain=null; }
-  m._emulator_delete(GB.e); m._joypad_delete(GB.joy); m._free(GB.rom);
+  /* emulator_delete frees the ROM copy too (binjgb: file_data_delete(&e->file_data)); freeing it again here corrupted the
+     heap, and the next start could get its ROM copy overlapped by another buffer: a blank screen until a reload */
+  m._emulator_delete(GB.e); m._joypad_delete(GB.joy);
   GB.e=0; GB.joy=0; GB.rom=0; GB.cart=null;
   releaseButtons(); LP.keepAwake(false);
 }
