@@ -1,0 +1,5 @@
+<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;height:100%}</style></head><body><p id="out">-</p><script>
+  window.R = { notes: [], say: [] };
+  window.note = function (t, x) { return PAD.notes.append(t, x).then(function (v) { R.notes.push(v); return v; }); };
+  window.say = function (x, o) { return PAD.say(x, o).then(function (v) { R.say.push(v); return v; }); };
+</script></body></html>

@@ -1,0 +1,11 @@
+{
+  "spec": "lopda/1",
+  "id": "notes-app",
+  "name": "记事测试",
+  "glyph": "记",
+  "version": "1.0.0",
+  "description": "A test app for the PAD.notes and PAD.say tests: it records every answer.",
+  "author": "Haowei Wu",
+  "license": "MIT",
+  "permissions": ["notes"]
+}
