@@ -14,7 +14,8 @@ runtime/        the PWA: index.html, core.js (shared LP object: utils, views, so
                 chip.js (sound chip: MML music, custom sound effects, ambience presets; shared with sdk/dev.html),
                 speech.js (the phone's voices for the dictionary's 发音 and PAD.say; shared with sdk/dev.html),
                 sensors.js (tilt, shake, heading and the microphone's level and pitch for apps, the audio session; shared with sdk/dev.html),
-                lenses.js (which physical camera lenses a phone has, pure functions), textsel.js (the text selection shared by the reader and the dictionary entry page), negative.js (the negative PNG and its lpDa chunk, pure functions),
+                lenses.js (which physical camera lenses a phone has, pure functions), finder.js (the viewfinder's look: luma, the Bayer dither,
+                exposure and contrast; shared by the camera, the snap viewfinder, the reader and sdk/dev.html), textsel.js (the text selection shared by the reader and the dictionary entry page), negative.js (the negative PNG and its lpDa chunk, pure functions),
                 develop.js (developing a frame: the stocks' looks, grain, halation, leaks, date stamp; pure functions on RGBA),
                 notetext.js (notes: tags, search and snippets, the diary title, the diaries by day, front matter, export names, the rules for app notes; pure functions),
                 zip.js (stored zips written, stored and deflated zips read; pure functions, CRC from negative.js), lunar.js (lunar calendar + solar term tables, 1900-2100), stardict.js (StarDict reader), bookparse.js (TXT/EPUB parser),
@@ -53,7 +54,8 @@ LICENSE NOTICE LICENSING.md CONTRIBUTING.md
   `LopdaPlatform.files`, `LP.dict.lookup(word)` for other programs, decisions.md section 15; its entry page selects text through textsel.js and looks words up level by level, section 18; A on an entry says the headword with the phone's English voice), reader (阅读器; bookparse.js, books, their dithered pictures and imported fonts in
   `LopdaPlatform.files`, layouts and an e-ink full refresh, long-press or SELECT selection that looks up through `LP.dict` and quotes (underline + `LP.notes.append`),
   decisions.md sections 16-17), camera (viewfinder, film stocks, a colour latent image per frame in `LopdaPlatform.files`, SELECT cycles the
-  physical lenses found by lenses.js; shares its film helpers as `LP.film`), darkroom (冲洗店: the film box of unloaded rolls,
+  physical lenses found by lenses.js; shares its film helpers as `LP.film`, its dither in finder.js), snap (apps/snap.js: the viewfinder an app opens with
+  `PAD.camera.snap` over the running app, `LP.snap`; keeps nothing; decisions.md section 28), darkroom (冲洗店: the film box of unloaded rolls,
   negative export and import through negative.js, developing through develop.js (once per roll, `dev` {v, seed, at} in the roll; pictures are
   never stored, every look and print develops them again), the colour viewer, single / contact sheet / film strip prints; decisions.md section 19), cart (GB), store (app store, preinstalled apps, sandboxed runner, file dialog), settings (also 备份 / 恢复: the whole
   device as one `lopda-backup-YYYYMMDD.zip` through backup.js, every check before a restore replaces everything, the old data
@@ -116,7 +118,10 @@ node --test                                  # the test suite; must pass
   readings only, the runtime's dialog on an app's first start(), allowed apps listed in Settings, keys must also work;
   the mic sets `navigator.audioSession.type` to "play-and-record" and every way out sets "ambient" back; decisions.md section 23),
   `"notes"` (runtime 0.26.0+, SPEC.md 6.5: `PAD.notes.append(title, text)` -> "saved" | "denied", the runtime's dialog on every
-  call, only into a note the app made itself, src `app:<id>`, title ≤ 64 characters, text ≤ 4 KB; decisions.md section 25).
+  call, only into a note the app made itself, src `app:<id>`, title ≤ 64 characters, text ≤ 4 KB; decisions.md section 25),
+  `"camera"` (runtime 0.28.0+, SPEC.md 6.6: `PAD.camera.snap({size})` -> {w, h, px} | null, px a Uint8Array of tone indices 0-3,
+  "small" 128×112 or "large" 256×224; the runtime's dialog on an app's first snap (granted with the sensors, Settings → 传感器与相机),
+  then its own viewfinder for every shot, the player presses the shutter; the runtime keeps nothing; decisions.md section 28).
 - `PAD.say(text, {lang})` (runtime 0.26.0+, no permission, SPEC.md 6.5): the phone's voice through `runtime/speech.js` (shared with
   the dictionary's 发音), follows the volume, ≤ 200 characters, once a second, stops on HOME or a hidden page.
 - PAD API: `PAD.load/save/remove` (256 KB per app), `PAD.exit`, `PAD.TONES`, `PAD.spec`,
