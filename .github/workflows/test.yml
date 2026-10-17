@@ -19,3 +19,14 @@ jobs:
           node-version: 22
       - run: npm i --no-save playwright && npx playwright install --with-deps chromium
       - run: node --test tests/e2e.test.mjs
+  registry:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node tools/check-changed-apps.mjs

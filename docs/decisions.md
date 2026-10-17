@@ -1121,3 +1121,11 @@ CPU 降速 4 倍（DevTools 的 CPU throttling，粗略代表旧手机）时，�
   `say` 用这台电脑的语音（有的话），音量按默认档，日志里都记一行。
 - **检查器**：用了 `PAD.notes` 没声明 `notes` 报错，声明了没用警告；`PAD.say` 不需要权限，但 `lopda/0` 不能用。
 - **还没做**：示范 app（v1.md 第 6 节）；iPhone 实测（确认框、朗读的手势、静音键下朗读出不出声）。
+
+## 26. 第一次打开（1.0）
+
+2026-10-17：iOS Safari 非独立模式的主屏显示一次可关闭的「加到主屏」卡片，关闭状态保存在 `data/users/local/settings`；其余平台不显示，启动时不请求权限。
+
+## 27. 社区 app 投稿流程（1.0）
+
+2026-10-17：app PR 通过模板、变更 app 的 CI 检查、审核清单和双语快速入门引导；CI 只用 step summary 与 annotations，不评论 PR、不使用 `pull_request_target`。

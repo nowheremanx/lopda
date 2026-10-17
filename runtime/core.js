@@ -13,6 +13,7 @@ var I18N = window.LopdaStrings, tr = I18N.t;
 var S = {
   db:null, refs:{}, downloads:null,
   apps:[], notes:[],
+  homeTipDismissed:null,
   kv:{},                  // appId -> {key:value}
   running:null, editing:null,
   registry:null           // last fetched registry/index.json
@@ -204,7 +205,7 @@ document.addEventListener("visibilitychange",function(){
 });
 
 /* ---------- sound: tiny square-wave chips through Web Audio (the named sounds themselves are in chip.js) ---------- */
-var RUNTIME_VERSION="0.26.0";   /* keep in step with VERSION in sw.js */
+var RUNTIME_VERSION="0.27.0";   /* keep in step with VERSION in sw.js */
 /* One volume, five steps, 0 is off (decisions.md section 10). It sets the master gain and nothing else does.
    Under the master: `ui` for the runtime's own clicks, held at a fraction so they stay as quiet as they always were
    (step 2 gives them 0.11, their level before 0.12.0), and `app` for apps, music and the cartridge at the full step. */
@@ -402,9 +403,44 @@ function fillTile(tile,app,builtinIcon){
 /* manifest name and description in the current language, when the app has them (manifest "i18n") */
 function appName(a){ return noEmoji(I18N.field(a,"name"))||tr("app.unnamed"); }
 function appDesc(a){ return noEmoji(I18N.field(a,"description")); }
+function showAddHomeTip(){
+  var ua=navigator.userAgent||"";
+  var ios=/iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints>1);
+  var safari=/Safari/.test(ua) && !/(CriOS|FxiOS|EdgiOS|OPiOS|DuckDuckGo|GSA)/.test(ua);
+  var standalone=navigator.standalone===true || !!(window.matchMedia && matchMedia("(display-mode: standalone)").matches);
+  return ios && safari && !standalone && S.homeTipDismissed===false;
+}
+var homeTipSaving=false;
+function dismissAddHomeTip(){
+  if(homeTipSaving || S.homeTipDismissed || !S.refs.settings) return;
+  homeTipSaving=true;
+  var button=$("home-tip-dismiss");
+  if(button) button.disabled=true;
+  S.refs.settings.get().then(function(sn){
+    var data=sn.exists ? own(sn.data())||{} : {};
+    data.homeTipDismissed=true;
+    return put(S.refs.settings,data);
+  }).then(function(ok){
+    homeTipSaving=false;
+    if(ok){ S.homeTipDismissed=true; if(!$("v-home").hidden) renderHome(); }
+    else if(button) button.disabled=false;
+  },function(e){
+    homeTipSaving=false;
+    toast(tr("common.readfail",{msg:String((e&&e.code)||(e&&e.message)||e)}));
+    if(button) button.disabled=false;
+  });
+}
 /* built-ins first, in the order they registered, then the preinstalled apps in their list order, then installed apps by install time */
 function renderHome(){
   var h=$("home"); h.textContent="";
+  if(showAddHomeTip()){
+    var card=document.createElement("aside"); card.className="home-tip"; card.id="home-add-tip";
+    var title=document.createElement("strong"); title.textContent=tr("home.add.title");
+    var how=document.createElement("span"); how.textContent=tr("home.add.how");
+    var dismiss=document.createElement("button"); dismiss.type="button"; dismiss.className="btn home-tip-dismiss";
+    dismiss.id="home-tip-dismiss"; dismiss.textContent=tr("home.add.dismiss"); dismiss.onclick=dismissAddHomeTip;
+    card.appendChild(title); card.appendChild(how); card.appendChild(dismiss); h.appendChild(card);
+  }
   function add(cls,app,label,tag,onclick,builtinIcon){
     var b=document.createElement("button"); b.type="button"; b.className="app "+cls;
     var tile=document.createElement("span"); tile.className="tile"; fillTile(tile,app,builtinIcon);
@@ -442,8 +478,12 @@ function armConfirm(wrapId,btnId,label,onYes){
    A route returns true when it took the button. */
 var PADB={up:false,down:false,left:false,right:false,a:false,b:false,start:false,select:false};
 var PADKEYS={ArrowUp:"up",ArrowDown:"down",ArrowLeft:"left",ArrowRight:"right",x:"a",X:"a",z:"b",Z:"b",Enter:"start",Shift:"select"};
-var PAD_ORDER=["file","cart","cam","dark","cal","dict","reader","notes","run"], padRoutes={};   /* "file": the runtime's file dialog, while it is open */
+var PAD_ORDER=["home","file","cart","cam","dark","cal","dict","reader","notes","run"], padRoutes={};   /* "file": the runtime's file dialog, while it is open */
 function padRoute(name,fn){ padRoutes[name]=fn; }
+padRoute("home",function(b,down){
+  if(b!=="a" || !down || $("v-home").hidden || !$("home-add-tip")) return false;
+  dismissAddHomeTip(); return true;
+});
 function padOn(){ return !$("gamepad").hidden; }
 function setButton(b,down){
   if(!(b in PADB) || PADB[b]===down) return;
@@ -490,10 +530,11 @@ $("gamepad").addEventListener("touchend",function(e){ if(e.cancelable) e.prevent
   ["pointerup","pointercancel","lostpointercapture"].forEach(function(t){ dp.addEventListener(t,end); });
 })();
 document.addEventListener("keydown",function(e){
-  var b=PADKEYS[e.key]; if(!b || !padOn() || /INPUT|TEXTAREA/.test(e.target.nodeName)) return;
+  var b=PADKEYS[e.key], homeTip=b==="a" && !$("v-home").hidden && $("home-add-tip");
+  if(!b || (!padOn() && !homeTip) || /INPUT|TEXTAREA/.test(e.target.nodeName)) return;
   e.preventDefault(); if(!e.repeat) setButton(b,true);
 });
-document.addEventListener("keyup",function(e){ var b=PADKEYS[e.key]; if(b && padOn()) setButton(b,false); });
+document.addEventListener("keyup",function(e){ var b=PADKEYS[e.key]; if(b && (padOn() || PADB[b])) setButton(b,false); });
 window.addEventListener("blur",releaseButtons);
 
 if(/[?&]debug\b/.test(location.search)) window.LOPDA_DEBUG={setButton:setButton, sfxLog:[]};
