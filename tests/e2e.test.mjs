@@ -4568,12 +4568,23 @@ test("photo puzzle: a photo from the fake camera, shown first, then a 3x3 solved
   const tap = (cell) => f.locator("#cv").click({ position: { x: ((cell % 3) + 0.5) * box.width / 3, y: (Math.floor(cell / 3) + 0.5) * box.height / 3 } });
   await tap(q); await until(p, async () => (await ppState(f)).gap === q, "the tap");
   await tap(g); await until(p, async () => (await ppState(f)).gap === g, "the tap back");
+  /* a swipe moves the piece it starts on, only towards the gap; any other way is refused with the error sound */
+  const fb = await f.locator("#cv").boundingBox(), cx = (cell) => fb.x + ((cell % 3) + 0.5) * fb.width / 3, cy = (cell) => fb.y + (Math.floor(cell / 3) + 0.5) * fb.height / 3;
+  const swipe = async (cell, dx, dy) => { await p.mouse.move(cx(cell), cy(cell)); await p.mouse.down(); await p.mouse.move(cx(cell) + dx / 2, cy(cell) + dy / 2); await p.mouse.move(cx(cell) + dx, cy(cell) + dy); await p.mouse.up(); };
+  const toward = (from, to) => [Math.sign((to % 3) - (from % 3)) * 40, Math.sign(Math.floor(to / 3) - Math.floor(from / 3)) * 40];
+  const errs = () => p.evaluate(() => window.LOPDA_DEBUG.sfxLog.filter((x) => x === "err").length);
+  const e0 = await errs();
+  await swipe(q, ...toward(q, g).map((v) => -v));   /* away from the gap */
+  await until(p, async () => (await errs()) === e0 + 1, "the error sound");
+  assert.equal((await ppState(f)).gap, g, "nothing moved");
+  await swipe(q, ...toward(q, g)); await until(p, async () => (await ppState(f)).gap === q, "the swipe");
+  await swipe(g, ...toward(g, q)); await until(p, async () => (await ppState(f)).gap === g, "the swipe back");
   for (const k of keys.slice(0, -1)) await ppPress(p, f, k);
   await p.waitForTimeout(1100);   /* a scripted player is faster than the 20 sounds a second an app may play */
   await ppPress(p, f, keys.at(-1));
   /* solved: the last piece drops in and the cuts melt into the whole photo, then 继续 goes to the result */
   s = await ppState(f);
-  assert.deepEqual([s.screen, s.moves, s.animDone], ["solved", keys.length + 2, false]);
+  assert.deepEqual([s.screen, s.moves, s.animDone], ["solved", keys.length + 4, false]);
   const during = await shot();
   await until(p, async () => (await ppState(f)).animDone, "the end of the animation");
   const whole = await shot();
@@ -4583,14 +4594,14 @@ test("photo puzzle: a photo from the fake camera, shown first, then a 3x3 solved
   await press(p, "a");
   await until(p, async () => (await ppState(f)).screen === "won", "the result");
   assert.equal(await shot(), whole, "the animation ends on exactly the whole photo");
-  assert.match(await f.textContent("#msg"), new RegExp(`^拼好了！${keys.length + 2} 步。 新纪录！ 下一局是 4×4。$`));
+  assert.match(await f.textContent("#msg"), new RegExp(`^拼好了！${keys.length + 4} 步。 新纪录！ 下一局是 4×4。$`));
   assert.ok(await p.evaluate(() => window.LOPDA_DEBUG.sfxLog.includes("win")));
   /* a new start remembers the best and the 4x4 */
   await p.click("#home-key");
   f = await runPuzzle(p);
   await press(p, "down"); await press(p, "a");   /* 用内置图片 */
   await until(p, async () => (await ppState(f)).screen === "play", "a game");
-  assert.match(await f.textContent("#info"), new RegExp(`最佳 ${keys.length + 2}$`));
+  assert.match(await f.textContent("#info"), new RegExp(`最佳 ${keys.length + 4}$`));
   await press(p, "start");
   await until(p, async () => (await ppState(f)).screen === "menu", "the menu");
   assert.deepEqual(await f.$$eval("#menu button", (bs) => bs.map((b) => b.textContent + (b.classList.contains("off") ? " off" : ""))), ["继续", "重拍", "换难度", "重来"]);
