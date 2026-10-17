@@ -1,0 +1,131 @@
+# Prompt: write a Lo-PDA app with an AI
+
+Making a game? Use `sdk/LO-GAME.md` instead: paste that file into the assistant.
+It covers the game framework and all the rules below.
+
+Only want one language? Bilingual apps are recommended, not required: delete the
+two-language rule and the "i18n" line from the prompt, and say which language.
+
+The layout rules in the prompt are a summary of `sdk/UI.md`; paste that file too if your app has more
+than one screen or a list.
+
+Copy everything in the box below into Claude, ChatGPT or any coding assistant,
+then replace the last line with your idea. Save the two files it gives you in
+`registry/apps/<id>/` and run `node tools/check-app.mjs registry/apps/<id>`.
+
+---
+
+```
+You are writing an app for Lo-PDA, a fictional 1986 handheld with a four-tone
+green LCD. Output exactly two files: manifest.json and index.html.
+
+Hard rules for index.html:
+- One self-contained HTML file, at most 512 KB. No external scripts, styles,
+  fonts, images or network requests of any kind. No eval or new Function.
+- html,body{margin:0;height:100%;overflow:hidden}. Portrait screen: as small as
+  331x359 px (iPhone SE with the hardware buttons), as big as 386x738. Layout:
+  body is a flex column of a short fixed header, ONE main area
+  {flex:1;min-height:0;overflow-y:auto} that holds the content and is the only
+  thing that scrolls, and an optional one-line footer. Never a small scrolling
+  box inside fixed controls. No horizontal scrolling.
+- Taps: every tappable thing at least 44 px tall, rows full width, 8 px apart.
+- Text: normal text #1f2a14 on #a3ad7e, at least 15 px; secondary text #4a5a32
+  at 13 px or more; never #7d8a58 text on #a3ad7e (too faint). Inputs at least
+  16 px font, or iPhone zooms. Selected item: #1f2a14 background, #a3ad7e text.
+- Only these four colors, written as hex: #1f2a14 (ink), #4a5a32 (dark),
+  #7d8a58 (mid), #a3ad7e (paper, the background). No other colors, no opacity
+  tricks that create new colors, no gradients between other colors.
+- Font: monospace only. No emoji anywhere.
+- Touch input with pointer events. Keyboard optional. Never use alert, confirm
+  or prompt; build any confirmation into the page.
+- Opens with one short line of instructions and a start button.
+- Text short, in two languages: Chinese and English. The runtime sets PAD.lang
+  to "zh" or "en"; older runtimes leave it undefined, so fall back to Chinese.
+  Keep all text in one small table and pick from it:
+    var TXT = { zh: {...}, en: {...} }[PAD.lang === "en" ? "en" : "zh"];
+  The English should be terse, like labels on an old device, not a literal
+  translation.
+- To remember things (high scores, settings), use the global PAD object that the
+  runtime provides. Do not use localStorage, cookies or IndexedDB.
+    await PAD.load(key)   -> saved value or null
+    PAD.save(key, value)  -> any JSON-serializable value
+    PAD.remove(key)
+    PAD.exit()            -> close the app
+  Save on meaningful events (game over, setting changed), not every frame.
+- Sound: call PAD.sfx(name) with one of "tap", "tick", "move", "ok", "err",
+  "hit", "miss", "coin", "win", "lose". Do not create your own AudioContext.
+  Newer runtimes also play the app's own sounds and music; PAD.music is undefined
+  on older ones, so check it first and stay silent without it:
+    PAD.sfx({ wave: "square", duty: 2, from: 440, to: 880, ms: 90 })   wave: square, triangle or noise;
+         from/to in Hz (the pitch slides), ms up to 1500, attack/decay in ms, vol 0-1,
+         vibrato: { depth: 0.5, rate: 6 } (semitones 0-2, Hz 1-20) makes the pitch wobble
+    PAD.music.play({ bpm: 120, p1: "...", p2: "...", tri: "...", noise: "..." })   loops; {loop: false} plays once
+    PAD.music.stop()
+  Background ambience, where PAD.ambience exists (check it first, like PAD.music):
+    PAD.ambience("rain", 0.6)   one of rain, waves, waterfall, wind, fire, stream; level 0-1.
+         Calling again fades to the new preset or level; PAD.ambience(null) fades it out.
+         One at a time, under the music. Call it when a scene changes, not every frame.
+  Channels are MML: notes c d e f g a b (+ sharp, - flat), r rest, lengths c8 c4. c2,
+  l8 sets the default length, o0-o7 or < > the octave (o4 a = 440 Hz), & ties, v0-v15 volume,
+  @0-@3 pulse width (p1, p2), [ ... ]3 repeats; the noise channel plays x (short) and X (long).
+  Write original music only: no tunes from other games, films or songs, however short.
+  Public-domain classical or folk tunes are fine with the source named in a comment.
+- Games may use the handheld's hardware buttons (D-pad, A, B, START, SELECT):
+    PAD.on("press", function (b) { ... })   b is "up","down","left","right","a","b","start" or "select"
+    PAD.on("release", function (b) { ... })
+    PAD.isDown("left")                      -> true while held
+  The keyboard is mapped for you (arrows, X=A, Z=B, Enter=START); do not add
+  your own key handlers for those keys. Say on the start screen which button does what.
+  In menus, lists, dialogs and pause screens: A confirms, B goes back or cancels. During play,
+  A and B can do anything the game needs. START usually pauses. HOME (not B) leaves the app.
+  The buttons take about 120 px of the screen: only turn them on ("buttons": true) for games
+  and cursor-driven apps, not for apps you use by tapping. With them on, one item is always
+  selected (drawn inverted), kept in view with scrollIntoView({block:"nearest"}), and a
+  one-line footer lists only the keys that work on that screen. Left/Right do one thing on
+  the whole screen or nothing.
+- Tilt and the microphone, only if the idea needs them, and always as a second way to play: the app must
+  also work with keys or touch. Check that PAD.motion / PAD.mic exist first (older runtimes lack them):
+    PAD.motion.start()   -> Promise "on" | "denied" | "none"; the runtime asks the player itself, no tap needed
+    PAD.on("tilt", function (t) { ... })   t.x left/right and t.y top edge up/down, -1..1 in 1/32 steps,
+         t.heading compass 0-348.75 or null; at most 30 a second, only on change
+    PAD.on("shake", function () { ... })   PAD.motion.zero() makes the current pose level: offer it on a key
+         and never ask the player to lay the phone flat. PAD.motion.stop()
+    PAD.mic.start()      -> same answers; PAD.on("sound", function (s) { ... }) s.level 0-1, s.pitch Hz or null,
+         at most 20 a second. PAD.mic.stop() as soon as the app stops listening (the silent switch is off meanwhile).
+  "permissions" must list "motion" and/or "mic" for these.
+- Writing into the player's notes, only if the idea needs a record the player keeps (a diary line, a score
+  log). Check that PAD.notes exists first:
+    PAD.notes.append(title, text) -> Promise "saved" | "denied". The runtime shows the player the text and asks
+         every time, so call it once at a natural moment (the end of a round), never in a loop. The title is one line,
+         at most 64 characters; the text at most 4 KB. The app adds only to the note it made with that title.
+  "permissions" must list "notes" for this.
+- Speech, if the idea needs a word read aloud (no permission). Check that PAD.say exists first:
+    PAD.say(text, {lang: "zh" | "en"}) -> Promise "done" | "stopped" | "unavailable". At most 200 characters,
+         once a second; a new call stops the one speaking. "unavailable" (volume 0, no voice) is normal: show the text too.
+- Pixel art: draw on a small canvas and scale it up with
+  image-rendering: pixelated.
+
+manifest.json must be:
+{
+  "spec": "lopda/1",
+  "id": "<3-32 chars, a-z 0-9 and hyphens>",
+  "name": "<1-8 characters, no emoji>",
+  "glyph": "<exactly one character, no emoji>",
+  "icon": [<16 strings of 16 characters each, a pixel icon: 0 ink, 1 dark,
+           2 mid, 3 paper, . transparent. Draw something recognizable.>],
+  "version": "0.1.0",
+  "description": "<one sentence in Chinese, at most 80 characters>",
+  "i18n": { "en": { "name": "<English name, 1-8 characters>",
+                    "description": "<the sentence in English, at most 80 characters>" } },
+  "author": "<my name>",
+  "license": "MIT",
+  "permissions": [<leave empty; "files" only if the app imports or exports files with PAD.importFile / PAD.exportFile;
+                   "motion" only if it uses PAD.motion or the tilt/shake events; "mic" only if it uses PAD.mic or the sound event;
+                   "notes" only if it uses PAD.notes.append>],
+  "buttons": <true if the app uses PAD.on, otherwise leave this line out>
+}
+
+Keep the code under 400 lines and make sure it has no syntax errors.
+
+My idea: <describe your app here>
+```
