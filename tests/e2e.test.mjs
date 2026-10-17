@@ -4503,6 +4503,133 @@ test("camera snap: dev.html shows a test pattern and returns a real picture; wit
   assert.deepEqual(errors, []);
 });
 
+/* ---------- the camera demo app: 拍照拼图 (registry/apps/photo-puzzle), on the fake camera above ---------- */
+const PP_DIR = join(ROOT, "registry/apps/photo-puzzle");
+const PP = { ...JSON.parse(readFileSync(join(PP_DIR, "manifest.json"), "utf8")), html: readFileSync(join(PP_DIR, "index.html"), "utf8") };
+/* as the store runs it; `html` may be swapped to stand in for an older runtime */
+const runPuzzle = async (p, html = PP.html) => {
+  await p.evaluate((a) => { window.LP.upsert("apps", a); window.LP.runApp(a); }, { ...PP, html });
+  let f;
+  await until(p, async () => { f = p.frames().find((x) => x !== p.mainFrame()); return f && await f.evaluate(() => !!window.PUZZLE).catch(() => false); }, "the puzzle");
+  return f;
+};
+const ppState = (f) => f.evaluate(() => window.PUZZLE.state());
+/* the shortest way home for a 3x3, breadth first over the gap's moves; returns the keys to press. A direction pushes the
+   piece on that side of the gap into it, so "up" moves the gap down a row */
+function solve3(tiles) {
+  const goal = "012345678", start = tiles.join(""), prev = new Map([[start, null]]), queue = [start];
+  for (let i = 0; i < queue.length && !prev.has(goal); i++) {
+    const s = queue[i], g = s.indexOf("8"), r = Math.floor(g / 3), c = g % 3;
+    for (const [key, q, ok] of [["up", g + 3, r < 2], ["down", g - 3, r > 0], ["left", g + 1, c < 2], ["right", g - 1, c > 0]]) {
+      if (!ok) continue;
+      const a = s.split(""); a[g] = a[q]; a[q] = "8"; const n = a.join("");
+      if (!prev.has(n)) { prev.set(n, [s, key]); queue.push(n); }
+    }
+  }
+  const keys = []; for (let s = goal; prev.get(s); s = prev.get(s)[0]) keys.unshift(prev.get(s)[1]);
+  return keys;
+}
+const ppPress = async (p, f, b) => { const before = (await ppState(f)).moves; await press(p, b); await until(p, async () => (await ppState(f)).moves === before + 1, "the slide " + b); };
+
+test("photo puzzle: a photo from the fake camera, shown first, then a 3x3 solved by keys; the best is kept and 4x4 opens", { skip, timeout: 90000 }, async (t) => {
+  const { p, errors } = await snapPage(t);
+  let f = await runPuzzle(p);
+  assert.equal(await f.textContent("#msg"), "拍一张照片，切成方块打乱，再拼回来。");
+  await press(p, "a");   /* 拍一张 */
+  await p.waitForSelector("#file-ask .box");
+  assert.equal(await p.textContent("#file-ask p"), "「拍照拼图」想用相机拍一张照片。");
+  await press(p, "a");
+  await finderLive(p); await p.waitForTimeout(300);
+  await press(p, "a");   /* the shutter */
+  await until(p, async () => (await ppState(f)).screen === "preview", "the photo shown first");
+  assert.equal(await allEnded(p), true, "the camera is off once the photo is taken");
+  assert.equal(await f.textContent("#msg"), "就用这张吗？");
+  /* B takes it again, then A uses the second one */
+  await press(p, "b");
+  await finderLive(p); await p.waitForTimeout(300);
+  await press(p, "a");
+  await until(p, async () => (await ppState(f)).screen === "preview", "the retake shown");
+  await press(p, "a");
+  let s = await ppState(f);
+  assert.deepEqual([s.screen, s.n, s.fromCamera, s.moves], ["play", 3, true, 0]);
+  assert.notDeepEqual(s.tiles, [0, 1, 2, 3, 4, 5, 6, 7, 8], "shuffled");
+  /* a key with nothing to push is refused and counts nothing; a tap on a piece not next to the gap neither */
+  const keys = solve3(s.tiles);
+  assert.ok(keys.length > 0 && keys.length <= 31);
+  /* A held shows the whole picture; letting go shows the pieces again */
+  const shot = () => f.evaluate(() => document.getElementById("cv").toDataURL());
+  const pieces = await shot();
+  await p.evaluate(() => window.LOPDA_DEBUG.setButton("a", true));
+  await until(p, async () => (await shot()) !== pieces, "the peek");
+  await p.evaluate(() => window.LOPDA_DEBUG.setButton("a", false));
+  await until(p, async () => (await shot()) === pieces, "the pieces again");
+  /* a tap on the piece next to the gap slides it, and a tap back puts it where it was */
+  const g = s.gap, q = g % 3 < 2 ? g + 1 : g - 1, box = await f.locator("#cv").boundingBox();
+  const tap = (cell) => f.locator("#cv").click({ position: { x: ((cell % 3) + 0.5) * box.width / 3, y: (Math.floor(cell / 3) + 0.5) * box.height / 3 } });
+  await tap(q); await until(p, async () => (await ppState(f)).gap === q, "the tap");
+  await tap(g); await until(p, async () => (await ppState(f)).gap === g, "the tap back");
+  for (const k of keys.slice(0, -1)) await ppPress(p, f, k);
+  await p.waitForTimeout(1100);   /* a scripted player is faster than the 20 sounds a second an app may play */
+  await ppPress(p, f, keys.at(-1));
+  s = await ppState(f);
+  assert.deepEqual([s.screen, s.moves], ["won", keys.length + 2]);
+  assert.match(await f.textContent("#msg"), new RegExp(`^拼好了！${keys.length + 2} 步。 新纪录！ 下一局是 4×4。$`));
+  assert.ok(await p.evaluate(() => window.LOPDA_DEBUG.sfxLog.includes("win")));
+  /* a new start remembers the best and the 4x4 */
+  await p.click("#home-key");
+  f = await runPuzzle(p);
+  await press(p, "down"); await press(p, "a");   /* 用内置图片 */
+  await until(p, async () => (await ppState(f)).screen === "play", "a game");
+  assert.match(await f.textContent("#info"), new RegExp(`最佳 ${keys.length + 2}$`));
+  await press(p, "start");
+  await until(p, async () => (await ppState(f)).screen === "menu", "the menu");
+  assert.deepEqual(await f.$$eval("#menu button", (bs) => bs.map((b) => b.textContent + (b.classList.contains("off") ? " off" : ""))), ["继续", "重拍", "换难度", "重来"]);
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("photo puzzle: without a photo it plays the built-in picture and says why (cancelled, no camera, an older runtime)", { skip, timeout: 90000 }, async (t) => {
+  const { p, errors } = await snapPage(t);
+  const playable = async (f, line) => {
+    await until(p, async () => (await ppState(f)).screen === "play", "a game");
+    const s = await ppState(f);
+    assert.deepEqual([s.n, s.fromCamera], [3, false]);
+    assert.equal(await f.textContent("#msg"), line);
+    const keys = solve3(s.tiles);
+    for (const k of keys) await ppPress(p, f, k);
+    assert.equal((await ppState(f)).screen, "won");
+  };
+  /* B on the runtime's dialog: snap gives null */
+  let f = await runPuzzle(p);
+  await press(p, "a");
+  await p.waitForSelector("#file-ask .box"); await press(p, "b");
+  await playable(f, "没拿到照片，用内置图片玩。");
+  /* B in the viewfinder */
+  await p.click("#home-key");
+  f = await runPuzzle(p);
+  await press(p, "a");
+  await p.waitForSelector("#file-ask .box"); await press(p, "a");
+  await finderLive(p); await press(p, "b");
+  await until(p, async () => (await ppState(f)).screen === "play", "a game");
+  assert.equal(await f.textContent("#msg"), "没拿到照片，用内置图片玩。");
+  /* no camera on the phone */
+  await p.click("#home-key");
+  await p.evaluate(() => { navigator.mediaDevices.getUserMedia = () => Promise.reject(new DOMException("no camera", "NotFoundError")); });
+  f = await runPuzzle(p);
+  await press(p, "a");   /* allowed once already: no dialog this time */
+  await until(p, async () => (await ppState(f)).screen === "play", "a game");
+  assert.equal(await p.textContent("#toast"), "相机用不了");
+  assert.equal(await f.textContent("#msg"), "没拿到照片，用内置图片玩。");
+  /* a runtime before 0.28.0 has no PAD.camera: the title says so, the only choice is the built-in picture */
+  await p.click("#home-key");
+  const old = PP.html.replace("<script>", "<script>window.PAD = Object.assign({}, PAD, { camera: undefined });</script>\n<script>");
+  f = await runPuzzle(p, old);
+  assert.equal(await f.textContent("#msg"), "这台掌机不能拍照，用内置图片玩。");
+  assert.deepEqual(await f.$$eval("#menu button", (bs) => bs.map((b) => b.textContent)), ["用内置图片"]);
+  await press(p, "a");
+  await playable(f, "这台掌机不能拍照，用内置图片玩。");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
 /* ---------- the two demo apps: 滚珠迷宫 (tilt) and 吹蜡烛 (microphone), with the stubbed phone above ----------
    Each starts its sensor only when play starts and stops it when play pauses or ends; "denied" falls back to keys. */
 const runDemo = async (p, id) => {
