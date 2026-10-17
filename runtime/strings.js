@@ -54,11 +54,14 @@
       "store.perm.motion": "会用倾斜感应",
       "store.perm.mic": "会用麦克风（只听音量和音高，不录音）",
       "store.perm.notes": "可往记事本里写字（每次都会问）",
+      "store.perm.camera": "会用相机拍照（每次由你按快门）",
 
       "sense.motion": "「{name}」要用倾斜感应。", "sense.mic": "「{name}」要用麦克风，只听音量和音高，不录音。",
       "sense.micnote": "开着麦克风时，手机的静音键不起作用。", "sense.allow": "允许", "sense.deny": "不允许",
       "sense.tap.motion": "点一下开启倾斜感应", "sense.tap.mic": "点一下开启麦克风", "sense.listening": "麦克风开着",
-      "set.sense": "传感器", "set.sense.none": "还没有程序用过倾斜感应或麦克风。", "set.sense.motion": "倾斜", "set.sense.mic": "麦克风", "set.sense.and": "、",
+      "set.sense": "传感器与相机", "set.sense.none": "还没有程序用过倾斜感应、麦克风或相机。", "set.sense.motion": "倾斜", "set.sense.mic": "麦克风", "set.sense.camera": "相机", "set.sense.and": "、",
+      "snap.ask": "「{name}」想用相机拍一张照片。", "snap.asknote": "照片只以四色小图交给它。", "snap.tap": "点一下开启相机",
+      "snap.who": "「{name}」要一张照片", "snap.none": "相机用不了",
       "set.sense.revoke": "撤销", "set.sense.note": "撤销以后，这个程序下次要用时会再问一次。",
 
       "file.export": "导出「{name}」？", "file.import": "从文件导入？", "file.ok": "好", "file.pick": "选文件",
@@ -344,11 +347,14 @@
       "store.perm.motion": "Uses tilt",
       "store.perm.mic": "Uses the microphone (loudness and pitch only, never records)",
       "store.perm.notes": "Can write in your notes (asks every time)",
+      "store.perm.camera": "Takes photos (you press the shutter each time)",
 
       "sense.motion": "\u201c{name}\u201d wants to use tilt.", "sense.mic": "\u201c{name}\u201d wants the microphone: loudness and pitch only, never a recording.",
       "sense.micnote": "While the microphone is on, the phone's silent switch does nothing.", "sense.allow": "Allow", "sense.deny": "Don't allow",
       "sense.tap.motion": "Tap to turn on tilt", "sense.tap.mic": "Tap to turn on the microphone", "sense.listening": "Microphone on",
-      "set.sense": "Sensors", "set.sense.none": "No program has used tilt or the microphone yet.", "set.sense.motion": "tilt", "set.sense.mic": "microphone", "set.sense.and": ", ",
+      "set.sense": "Sensors and camera", "set.sense.none": "No program has used tilt, the microphone or the camera yet.", "set.sense.motion": "tilt", "set.sense.mic": "microphone", "set.sense.camera": "camera", "set.sense.and": ", ",
+      "snap.ask": "\u201c{name}\u201d wants to take one photo with the camera.", "snap.asknote": "It only gets the photo as a small four-tone picture.", "snap.tap": "Tap to turn on the camera",
+      "snap.who": "\u201c{name}\u201d wants a photo", "snap.none": "The camera is not available",
       "set.sense.revoke": "Revoke", "set.sense.note": "After a revoke, the program asks again the next time.",
 
       "file.export": "Export \u201c{name}\u201d?", "file.import": "Import a file?", "file.ok": "OK", "file.pick": "Choose",

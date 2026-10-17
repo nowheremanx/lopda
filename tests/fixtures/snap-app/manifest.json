@@ -1,0 +1,11 @@
+{
+  "spec": "lopda/1",
+  "id": "snap-app",
+  "name": "拍照测试",
+  "glyph": "拍",
+  "version": "1.0.0",
+  "description": "A test app for the camera tests: it records what every PAD.camera.snap returns.",
+  "author": "Haowei Wu",
+  "license": "MIT",
+  "permissions": ["camera"]
+}
