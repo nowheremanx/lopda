@@ -204,7 +204,7 @@ document.addEventListener("visibilitychange",function(){
 });
 
 /* ---------- sound: tiny square-wave chips through Web Audio (the named sounds themselves are in chip.js) ---------- */
-var RUNTIME_VERSION="0.25.0";   /* keep in step with VERSION in sw.js */
+var RUNTIME_VERSION="0.26.0";   /* keep in step with VERSION in sw.js */
 /* One volume, five steps, 0 is off (decisions.md section 10). It sets the master gain and nothing else does.
    Under the master: `ui` for the runtime's own clicks, held at a fraction so they stay as quiet as they always were
    (step 2 gives them 0.11, their level before 0.12.0), and `app` for apps, music and the cartridge at the full step. */
@@ -317,6 +317,11 @@ document.addEventListener("visibilitychange",function(){
   if(document.hidden){ chip.pause(); return; }
   chip.resume(); setTimeout(checkLater,300);
 });
+/* ---------- speech: the phone's own voices (runtime/speech.js) for the dictionary's 发音 and PAD.say. As loud as the handheld's
+   volume step, relative to the loudest (0.2, 0.42, 0.7, 1); step 0 is silence. An app's speech stops when the page is hidden
+   (the dictionary stops its own) ---------- */
+var speech=window.LopdaSpeech.host({window:window, volume:function(){ return Math.min(1,(VOL_GAIN[SND.vol]||0)/VOL_GAIN[VOL_MAX]); }});
+document.addEventListener("visibilitychange",function(){ if(document.hidden) speech.stop(); });
 /* every button gets a key click, except the ones that make their own sound */
 document.addEventListener("pointerdown",function(e){
   var b=e.target.closest && e.target.closest("button,label.btn,.app");
@@ -499,7 +504,7 @@ var share={
   TONES:TONES, BAYER:BAYER, saveCanvas:saveCanvas, saveErr:saveErr, sha256hex:sha256hex,
   upsert:upsert, dropLocal:dropLocal, pending:pending, refresh:refresh, onData:onData,
   setStatus:setStatus, tickClock:tickClock, show:show, keepAwake:keepAwake,
-  RUNTIME_VERSION:RUNTIME_VERSION, SND:SND, VOL_MAX:VOL_MAX, VOL_GAIN:VOL_GAIN, audio:audio, wake:wake, setSession:setSession, micRoute:micRoute, sfx:sfx, appSfx:appSfx, APP_SFX:APP_SFX, chip:chip, sfxCustom:sfxCustom, applyLevel:applyLevel,
+  RUNTIME_VERSION:RUNTIME_VERSION, SND:SND, VOL_MAX:VOL_MAX, VOL_GAIN:VOL_GAIN, audio:audio, wake:wake, setSession:setSession, micRoute:micRoute, sfx:sfx, appSfx:appSfx, APP_SFX:APP_SFX, chip:chip, sfxCustom:sfxCustom, applyLevel:applyLevel, speech:speech,
   setLang:setLang, UPD:UPD, renderUpdate:renderUpdate,
   validIcon:validIcon, fillTile:fillTile, appName:appName, appDesc:appDesc, renderHome:renderHome,
   resetConfirm:resetConfirm, padRoute:padRoute, setButton:setButton, releaseButtons:releaseButtons, showPad:showPad

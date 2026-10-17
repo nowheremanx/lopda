@@ -323,3 +323,53 @@ test("sensor: an app on an older runtime gets no sensor events", () => {
   a.fromRuntime({ pad: 1, op: "tilt", x: 0, y: 0, heading: null });
   assert.deepEqual(log, []);
 });
+
+test("notes: PAD.notes and PAD.say exist only when the runtime offers them", () => {
+  assert.equal(app().PAD.notes, undefined);
+  assert.equal(app().PAD.say, undefined);
+  assert.equal(app({ sensors: true }).PAD.notes, undefined);
+  const { PAD } = app({ notes: true, say: true });
+  assert.deepEqual(Object.keys(PAD.notes), ["append"]);
+  assert.ok(Object.isFrozen(PAD.notes));
+  assert.equal(typeof PAD.say, "function");
+  const { lopdaWrapApp: wrap } = runScript("sdk/pad-shim.js", {});
+  assert.match(wrap("<p>x</p>", { notes: true, say: true, nope: true }), /\(\{"notes":true,"say":true\}\);/);
+});
+
+test("notes: append asks the runtime with strings and settles from its matching reply", async () => {
+  const a = app({ notes: true });
+  const one = a.PAD.notes.append("Scores", "Mon 120"), two = a.PAD.notes.append(42, null);
+  const [p1, p2] = a.posted();
+  assert.deepEqual(p1, { op: "notes", title: "Scores", text: "Mon 120", i: p1.i, pad: 1 });
+  assert.deepEqual(p2, { op: "notes", title: "42", text: "", i: p2.i, pad: 1 });
+  a.fromRuntime({ pad: 1, op: "noted", i: p1.i, v: "saved" }, {});   /* not from the parent: ignored */
+  a.fromRuntime({ pad: 1, op: "noted", i: p2.i, v: "denied" });
+  a.fromRuntime({ pad: 1, op: "noted", i: p1.i, v: "saved" });
+  assert.deepEqual(await Promise.all([one, two]), ["saved", "denied"]);
+});
+
+test("notes: without the permission or past the limits the runtime says denied; anything odd reads as denied", async () => {
+  const a = app({ notes: true });
+  const one = a.PAD.notes.append("t", "x".repeat(5000)), two = a.PAD.notes.append("t", "x");
+  const [p1, p2] = a.posted();
+  assert.equal(p1.text.length, 5000, "the shim sends the text whole: the runtime is the one that checks");
+  a.fromRuntime({ pad: 1, op: "noted", i: p1.i, v: "denied" });
+  a.fromRuntime({ pad: 1, op: "noted", i: p2.i, v: { saved: true } });
+  assert.deepEqual(await Promise.all([one, two]), ["denied", "denied"]);
+});
+
+test("say: the text is cut to 200 characters, lang is zh or en and PAD.lang by default; the reply settles it", async () => {
+  const zh = app({ say: true, lang: "zh" }), en = app({ say: true, lang: "en" }), old = app({ say: true });
+  const long = "测".repeat(150) + "😀".repeat(100);
+  const r1 = zh.PAD.say(long), r2 = zh.PAD.say("hello", { lang: "en" }), r3 = zh.PAD.say("x", { lang: "fr" });
+  en.PAD.say("hi"); old.PAD.say("hi");
+  const [s1, s2, s3] = zh.posted();
+  assert.equal(Array.from(s1.text).length, 200);
+  assert.equal(s1.text, "测".repeat(150) + "😀".repeat(50), "cut by characters, never inside a surrogate pair");
+  assert.deepEqual([s1.lang, s2.lang, s3.lang, en.posted()[0].lang, old.posted()[0].lang], ["zh", "en", "zh", "en", "zh"]);
+  assert.deepEqual(s2, { op: "say", text: "hello", lang: "en", i: s2.i, pad: 1 });
+  zh.fromRuntime({ pad: 1, op: "said", i: s1.i, v: "stopped" });
+  zh.fromRuntime({ pad: 1, op: "said", i: s2.i, v: "done" });
+  zh.fromRuntime({ pad: 1, op: "said", i: s3.i, v: "boom" });
+  assert.deepEqual(await Promise.all([r1, r2, r3]), ["stopped", "done", "unavailable"]);
+});

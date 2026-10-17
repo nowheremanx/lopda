@@ -98,7 +98,7 @@ const FAILS = [
   ["long description", { manifest: (m) => (m.description = "长".repeat(81)) }, /description must be 1-80/],
   ["no author", { manifest: (m) => delete m.author }, /author is required/],
   ["GPL licence", { manifest: (m) => (m.license = "GPL-3.0") }, /license must be one of/],
-  ["unknown permission", { manifest: (m) => (m.permissions = ["camera"]) }, /unknown permission "camera": allowed are files, motion, mic/],
+  ["unknown permission", { manifest: (m) => (m.permissions = ["camera"]) }, /unknown permission "camera": allowed are files, motion, mic, notes/],
   ["permission twice", { manifest: (m) => (m.permissions = ["files", "files"]) }, /the same one twice/],
   ["PAD.exportFile without the files permission", withCode('PAD.exportFile({ name: "a.txt", type: "text/plain", data: "a" });'), /need "permissions": \["files"\]/],
   ["PAD.importFile without the files permission", withCode("PAD.importFile({ accept: ['text/plain'] });"), /need "permissions": \["files"\]/],
@@ -107,6 +107,9 @@ const FAILS = [
   ["sensor motion: a shake listener without the motion permission", withCode("PAD.on('shake', function () {});"), /need "permissions": \["motion"\]/],
   ["sensor mic: PAD.mic without the mic permission", withCode("if (PAD.mic) PAD.mic.start();"), /PAD\.mic and the "sound" event need "permissions": \["mic"\]/],
   ["sensor mic: a sound listener without the mic permission", withCode('PAD.on("sound", function (s) {});'), /need "permissions": \["mic"\]/],
+  ["notes: PAD.notes.append without the notes permission", withCode('if (PAD.notes) PAD.notes.append("Scores", "100");'), /PAD\.notes\.append needs "permissions": \["notes"\]/],
+  ["notes: files declared does not cover notes", { manifest: (m) => (m.permissions = ["files"]), ...withCode('PAD.importFile({}); PAD.notes.append("a", "b");') }, /needs "permissions": \["notes"\]/],
+  ["say: PAD.say on lopda/0", { manifest: (m) => { m.spec = "lopda/0"; delete m.buttons; }, ...withCode('PAD.say("hi");') }, /say need spec "lopda\/1"/],
   ["sensor mic: motion declared does not cover the mic", { manifest: (m) => (m.permissions = ["motion"]), ...withCode("PAD.motion.start(); PAD.mic.start();") }, /need "permissions": \["mic"\]/],
   ["buttons on lopda/0", { manifest: (m) => (m.spec = "lopda/0") }, /buttons needs spec "lopda\/1"/],
   ["buttons not boolean", { manifest: (m) => (m.buttons = "yes") }, /buttons must be true or false/],
@@ -135,11 +138,11 @@ const FAILS = [
   ["named colour", { html: (h) => h.replace("color: #1f2a14", "color: red") }, /color: red/],
   ["unknown sound", withCode('PAD.sfx("boom");'), /PAD\.sfx\("boom"\) is not a known sound/],
   ["unknown ambience", withCode('if (PAD.ambience) PAD.ambience("thunder", 1);'), /PAD\.ambience\("thunder"\) is not a known ambience/],
-  ["buttons on lopda/0 code", { manifest: (m) => { m.spec = "lopda/0"; delete m.buttons; } }, /PAD\.on\/isDown\/sfx\/music\/ambience need spec "lopda\/1"/],
+  ["buttons on lopda/0 code", { manifest: (m) => { m.spec = "lopda/0"; delete m.buttons; } }, /PAD\.on\/isDown\/sfx\/music\/ambience\/say need spec "lopda\/1"/],
   /* the template's own PAD.on and PAD.sfx are renamed away, so PAD.music alone trips the rule */
   ["music on lopda/0 code", { manifest: (m) => { m.spec = "lopda/0"; delete m.buttons; },
     html: (h) => withCode("if (PAD.music) PAD.music.play({ p1: \"c\" });").html(h).replace(/PAD\.(on|sfx)\(/g, "noPad(") },
-    /PAD\.on\/isDown\/sfx\/music\/ambience need spec "lopda\/1"/],
+    /PAD\.on\/isDown\/sfx\/music\/ambience\/say need spec "lopda\/1"/],
 ];
 
 for (const [name, change, want] of FAILS) {
@@ -162,6 +165,8 @@ const PASSES = [
   ["the files permission with the file API", { manifest: (m) => (m.permissions = ["files"]), ...withCode("if (PAD.importFile) PAD.importFile({ accept: [] });") }],
   ["sensor permissions with PAD.motion and PAD.mic", { manifest: (m) => (m.permissions = ["motion", "mic"]),
     ...withCode('if (PAD.motion) { PAD.motion.start(); PAD.on("tilt", function () {}); } if (PAD.mic) PAD.mic.start();') }],
+  ["notes: the notes permission with PAD.notes.append", { manifest: (m) => (m.permissions = ["notes"]), ...withCode('if (PAD.notes) PAD.notes.append("Scores", "100");') }],
+  ["say: PAD.say needs no permission", withCode('if (PAD.say) PAD.say("hello", { lang: "en" });')],
   ["lopda/0 without buttons or PAD.on", {
     manifest: (m) => { m.spec = "lopda/0"; delete m.buttons; },
     html: (h) => h.replace(/PAD\.sfx\(sound\);/, "").replace(/PAD\.on\("press"[\s\S]*?\n {2}\}\);/, ""),
@@ -195,6 +200,12 @@ test("sensor: warns about a motion or mic permission the app never uses", (t) =>
   assert.equal(r.code, 0, r.out);
   assert.match(r.out, /"motion" is declared but PAD\.motion/);
   assert.match(r.out, /"mic" is declared but PAD\.mic/);
+});
+
+test("notes: warns about a notes permission the app never uses", (t) => {
+  const r = tool("check-app.mjs", counter(t, { manifest: (m) => (m.permissions = ["notes"]) }));
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /"notes" is declared but PAD\.notes\.append is never used/);
 });
 
 test("info for a manifest without i18n", (t) => {

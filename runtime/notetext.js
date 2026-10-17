@@ -1,7 +1,7 @@
 /*
  * Lo-PDA runtime: the text side of notes (docs/design/notes.md). Pure functions, no DOM, so Node tests run them:
  * tags in a body, search with a snippet, the diary title of a day, the diaries by day for the calendar, front matter for export
- * and import, export file names.
+ * and import, export file names, and the rules for notes that apps write.
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  */
 (function(){
@@ -17,6 +17,41 @@ function quote(n){
   if(!n) return false;
   if(n.src) return n.src==="reader" || n.src==="dict";
   return QUOTE_TITLE.test(title(n.body));
+}
+
+/* ---------- notes written by community apps (PAD.notes.append, decisions.md section 25): src "app:<id>". An app writes only
+   into a note it made itself: the one with its own src and that title. The title is one line of at most 64 characters, the
+   text at most 4 KB (UTF-8) */
+var APP_ID=/^app:([a-z0-9-]{3,32})$/, APP_TITLE=64, APP_TEXT=4096;
+function appSrc(id){ return "app:"+id; }
+/* the app's id from a note's src (or a front matter value), or null */
+function appOf(n){ var m=APP_ID.exec(String(n && typeof n==="object" ? n.src||"" : n||"")); return m ? m[1] : null; }
+function utf8(s){ return unescape(encodeURIComponent(s)).length; }
+/* why an append cannot be written, or "" */
+function appCheck(t,text){
+  if(typeof t!=="string" || typeof text!=="string") return "title and text must be strings";
+  if(!t.trim()) return "the title is empty";
+  if(/[\r\n]/.test(t)) return "the title is one line";
+  if(Array.from(t).length>APP_TITLE) return "the title is at most "+APP_TITLE+" characters";
+  if(!text.trim()) return "the text is empty";
+  if(utf8(text)>APP_TEXT) return "the text is at most 4 KB";
+  return "";
+}
+/* the note this app may add to: its own, with that title; one outside the trash first, then the newest. null: make one */
+function appNote(notes,id,t){
+  var hit=null, src=appSrc(id);
+  (notes||[]).forEach(function(n){
+    if(!n || n.src!==src || title(n.body)!==String(t).trim()) return;
+    if(!hit || (!n.deleted && hit.deleted) || (!n.deleted===!hit.deleted && (n.updated||0)>(hit.updated||0))) hit=n;
+  });
+  return hit;
+}
+/* the text as the runtime's dialog shows it: the first 6 lines, at most 240 characters, … when there is more */
+function preview(text,lines,chars){
+  var all=String(text||"").replace(/\r\n?/g,"\n").replace(/\s+$/,""), rows=all.split("\n");
+  var out=rows.slice(0,lines||6).join("\n"), cp=Array.from(out), max=chars||240;
+  if(cp.length>max) out=cp.slice(0,max).join("");
+  return out.length<all.length ? out.replace(/\s+$/,"")+"…" : out;
 }
 
 /* ---------- tags: # or ＃ followed by letters, digits or _, at most 20 of them. Read from the body every time, never stored.
@@ -148,7 +183,7 @@ function iso(ts){
     (off<0?"-":"+")+pad2(Math.floor(a/60))+":"+pad2(a%60);
 }
 function yamlString(s){ return /^[\p{L}\p{N}_]+$/u.test(s) && !/^(true|false|null|yes|no|on|off|~|\d+(\.\d+)?)$/i.test(s) ? s : JSON.stringify(s); }
-/* meta: {created, updated (times), tags [..], pinned, date "2026-10-15"}; pinned and date only when there */
+/* meta: {created, updated (times), tags [..], pinned, date "2026-10-15", source "app:<id>"}; the last three only when there */
 function frontMatter(meta){
   var lines=["---"];
   if(meta.created!=null) lines.push("created: "+iso(meta.created));
@@ -156,12 +191,13 @@ function frontMatter(meta){
   lines.push("tags: ["+(meta.tags||[]).map(yamlString).join(", ")+"]");
   if(meta.pinned) lines.push("pinned: true");
   if(meta.date) lines.push("date: "+meta.date);
+  if(meta.source) lines.push("source: "+meta.source);
   lines.push("---","");
   return lines.join("\n");
 }
 /* the other way: {meta, body}. Only a block that opens the text with ---, closes with ---, and holds nothing but
    "key: value" lines (or list items under a key) counts; anything else is body, as it was. Reads created, updated,
-   pinned, date; tags stay in the body, where they already are */
+   pinned, date, and source (only "app:<id>": a note an app wrote); tags stay in the body, where they already are */
 function parseFront(text){
   var s=String(text||"").replace(/^﻿/,"");
   var m=/^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(s);
@@ -176,6 +212,7 @@ function parseFront(text){
     if(k==="created" || k==="updated"){ var t=Date.parse(v); if(isFinite(t)) meta[k]=t; }
     else if(k==="pinned") meta.pinned=/^(true|yes)$/i.test(v);
     else if(k==="date"){ var d=/^(\d{4}-\d{2}-\d{2})/.exec(v); if(d && parseDay(d[1])) meta.date=d[1]; }
+    else if(k==="source" && appOf(v)) meta.source=v;
   }
   return {meta:meta, body:s.slice(m[0].length)};
 }
@@ -199,7 +236,7 @@ function fileName(t,blank,used,dir,ext){
 /* "notes/读书.md" -> "读书" */
 function stem(path){ var b=String(path||"").split("/").pop(); var i=b.lastIndexOf("."); return i>0 ? b.slice(0,i) : b; }
 
-window.LopdaNoteText={title:title, quote:quote, tags:tags, key:key, fold:fold, search:search, AROUND:AROUND,
+window.LopdaNoteText={title:title, quote:quote, appSrc:appSrc, appOf:appOf, appCheck:appCheck, appNote:appNote, preview:preview, APP_TITLE:APP_TITLE, APP_TEXT:APP_TEXT, tags:tags, key:key, fold:fold, search:search, AROUND:AROUND,
   dayKey:dayKey, parseDay:parseDay, diaryIndex:diaryIndex, snippet:snippet, SNIPPET:SNIPPET, when:when, count:count, diaryTitle:diaryTitle, iso:iso, frontMatter:frontMatter, parseFront:parseFront,
   cleanName:cleanName, fileName:fileName, stem:stem, TAG_MAX:TAG_MAX, MAX_NAME:MAX_NAME};
 })();

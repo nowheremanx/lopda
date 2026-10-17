@@ -195,3 +195,52 @@ test("snippet: the text after the title line, on one line, cut at SNIPPET charac
   assert.equal(Array.from(NT.snippet("t\n" + "字".repeat(100) + "𠀀")).length, NT.SNIPPET);
   assert.equal(NT.snippet("t\nabcdef", 3), "abc");
 });
+
+test("app notes: src app:<id>; the checks on a title and a text; never a quote", () => {
+  assert.equal(NT.appSrc("tilt-maze"), "app:tilt-maze");
+  assert.equal(NT.appOf({ src: "app:tilt-maze" }), "tilt-maze");
+  assert.equal(NT.appOf("app:tilt-maze"), "tilt-maze");
+  for (const src of ["reader", "dict", "app:", "app:AB", "app:x", "app:../x", "app:a b", undefined]) assert.equal(NT.appOf({ src }), null, String(src));
+  assert.equal(NT.quote({ body: "《战绩》\n\n120", src: "app:tilt-maze" }), false, "an app's 《…》 note is not a quote");
+  assert.equal(NT.appCheck("Scores", "Mon 120"), "");
+  assert.equal(NT.appCheck("字".repeat(64), "x"), "", "64 characters, not bytes");
+  assert.match(NT.appCheck("字".repeat(65), "x"), /64/);
+  assert.equal(NT.appCheck("t", "字".repeat(1365)), "", "4095 bytes of UTF-8");
+  assert.match(NT.appCheck("t", "字".repeat(1366)), /4 KB/);
+  assert.equal(NT.appCheck("t", "a".repeat(4096)), "");
+  assert.match(NT.appCheck("t", "a".repeat(4097)), /4 KB/);
+  for (const [t, x] of [["", "x"], ["  ", "x"], ["a\nb", "x"], ["a\rb", "x"], ["t", ""], ["t", " \n "], [1, "x"], ["t", null]]) assert.ok(NT.appCheck(t, x), JSON.stringify([t, x]));
+});
+
+test("app notes: an app adds only to its own note with that title, the one outside the trash first, then the newest", () => {
+  const notes = [
+    { id: "u", body: "Scores\n\nmine", updated: 9 },                             /* the player's note */
+    { id: "o", body: "Scores\n\nother app", updated: 9, src: "app:other" },       /* another app's */
+    { id: "q", body: "Scores\n\nquote", updated: 9, src: "reader" },
+    { id: "t", body: "Scores\n\nold", updated: 8, src: "app:maze", deleted: 5 },
+    { id: "a", body: "Scores\n\n120", updated: 3, src: "app:maze" },
+    { id: "b", body: "Scores\n\n130", updated: 4, src: "app:maze" },
+    { id: "c", body: "Other\n\n1", updated: 7, src: "app:maze" },
+  ];
+  assert.equal(NT.appNote(notes, "maze", "Scores").id, "b");
+  assert.equal(NT.appNote(notes, "maze", " Scores ").id, "b");
+  assert.equal(NT.appNote(notes.filter((n) => n.id !== "a" && n.id !== "b"), "maze", "Scores").id, "t", "one in the trash comes back");
+  assert.equal(NT.appNote(notes, "new-app", "Scores"), null);
+  assert.equal(NT.appNote(notes.slice(0, 3), "maze", "Scores"), null, "never the player's or another app's");
+});
+
+test("app notes: the dialog's preview is the first 6 lines and at most 240 characters, … when there is more", () => {
+  assert.equal(NT.preview("one\ntwo"), "one\ntwo");
+  assert.equal(NT.preview("1\n2\n3\n4\n5\n6\n7\n8"), "1\n2\n3\n4\n5\n6…");
+  assert.equal(NT.preview("1\n2\n3\n4\n5\n6\n\n"), "1\n2\n3\n4\n5\n6", "trailing blank lines are nothing more");
+  assert.equal(NT.preview("字".repeat(300)), "字".repeat(240) + "…");
+  assert.equal(NT.preview("a\r\nb"), "a\nb");
+});
+
+test("app notes: front matter carries source: app:<id> and reads it back; nothing else counts as a source", () => {
+  const fm = NT.frontMatter({ created: 0, updated: 0, tags: [], source: "app:tilt-maze" });
+  assert.match(fm, /\nsource: app:tilt-maze\n---\n$/);
+  assert.equal(NT.parseFront(fm + "Scores\n\n120").meta.source, "app:tilt-maze");
+  assert.doesNotMatch(NT.frontMatter({ created: 0, updated: 0, tags: [] }), /source/);
+  for (const v of ["reader", "dict", "app:", "app:Bad Id", "x"]) assert.equal(NT.parseFront("---\nsource: " + v + "\n---\nx").meta.source, undefined, v);
+});
