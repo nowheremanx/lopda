@@ -485,7 +485,7 @@ textarea::placeholder{color:var(--ink-2)}
 .dk-list li b{font-weight:400;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dk-list li>span small{margin:0;font-family:var(--f-lcd);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .dk-list li em{font-style:normal;font-size:13px;flex:none}
-.dk-list li.label{cursor:default;font-size:15px;line-height:1.6;color:var(--ink);align-items:flex-start}
+.dk-list li.label{cursor:default;font-size:15px;line-height:1.6;color:var(--ink);align-items:flex-start;white-space:normal;overflow:visible}
 .dk-list li.label::before{display:none}
 .dk-status{flex:none;margin:0;padding:4px 8px;text-align:center}
 .dk-status:empty{display:none}
