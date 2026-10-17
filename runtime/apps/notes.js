@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  *
  * A note is notes/<id> {body, updated} plus optional created, pinned, day ("2026-10-15": a diary), src ("reader" | "dict":
- * written by LP.notes.append) and deleted (the time it went to the trash). The title is the first line of the body and
+ * written by LP.notes.append; "app:<id>": written by a community app through PAD.notes.append) and deleted (the time it went to the trash). The title is the first line of the body and
  * tags are read from it (runtime/notetext.js), never stored. Old notes have only {body, updated}: created reads as updated.
  */
 (function(){
@@ -17,7 +17,7 @@ var MAX_FILE=4*1024*1024, MAX_NOTE=256*1024, MAX_IMPORT=2000, SEARCH_WAIT=150;
 var FIELDS=["body","updated","created","pinned","day","src","deleted"];
 
 var N={
-  q:"", filter:null,          // the search text; a filter {k:"tag", key, name} | {k:"diary"} | {k:"quote"}
+  q:"", filter:null,          // the search text; a filter {k:"tag", key, name} | {k:"diary"} | {k:"quote"} | {k:"app"}
   rows:[], cur:0,             // the list's rows (today, new, notes) and the cursor
   sheet:"", pick:0,           // "menu" | "tags" | "trash" | "item" | "help" over the list, and its cursor
   tpick:0, trpick:0, item:null, armed:"",
@@ -35,6 +35,14 @@ function live(){ return S.notes.filter(function(n){ return !n.deleted; }); }
 function byId(id){ for(var i=0;i<S.notes.length;i++) if(S.notes[i].id===id) return S.notes[i]; return null; }
 function createdOf(n){ return n.created || n.updated || 0; }
 function isQuote(n){ return NT.quote(n); }
+/* written by a community app (PAD.notes.append): the 来自 app group */
+function fromApp(n){ return !!NT.appOf(n); }
+/* that app's name as the home screen shows it; its id once it is removed */
+function appLabel(n){
+  var id=NT.appOf(n), a=null;
+  S.apps.forEach(function(x){ if(x.id===id) a=x; });
+  return a ? LP.appName(a) : id;
+}
 function sorted(list){
   return list.slice().sort(function(a,b){ return ((b.pinned?1:0)-(a.pinned?1:0)) || ((b.updated||0)-(a.updated||0)); });
 }
@@ -74,9 +82,10 @@ function matches(n,f){
   if(!f) return true;
   if(f.k==="diary") return !!n.day;
   if(f.k==="quote") return isQuote(n);
+  if(f.k==="app") return fromApp(n);
   return tagKeys(n).indexOf(f.key)>=0;
 }
-function filterName(f){ return f.k==="diary" ? tr("notes.diary") : f.k==="quote" ? tr("notes.quotes") : "#"+f.name; }
+function filterName(f){ return f.k==="diary" ? tr("notes.diary") : f.k==="quote" ? tr("notes.quotes") : f.k==="app" ? tr("notes.fromapp") : "#"+f.name; }
 function buildRows(){
   var q=N.q.trim(), list=live().filter(function(n){ return matches(n,N.filter); }), hits={};
   if(q) list=list.filter(function(n){ var h=NT.search(n.body,q); if(h) hits[n.id]=h; return !!h; });
@@ -107,7 +116,8 @@ function dateLine(n,row){
     return d;
   }
   var r=rest(n.body);
-  d.textContent=NT.when(n.updated||0,"list",tr)+(r ? " · "+r : "");
+  /* a note an app wrote says which app, first */
+  d.textContent=(fromApp(n) ? appLabel(n)+" · " : "")+NT.when(n.updated||0,"list",tr)+(r ? " · "+r : "");
   return d;
 }
 function render(ensure){
@@ -201,6 +211,9 @@ function tagRows(){
   var count={}, name={}, list=live();
   list.forEach(function(n){ tagKeys(n).forEach(function(k,i){ count[k]=(count[k]||0)+1; if(!name[k]) name[k]=NT.tags(n.body)[i]; }); });
   var rows=[{k:"diary", n:list.filter(function(n){ return !!n.day; }).length},{k:"quote", n:list.filter(isQuote).length}];
+  /* 来自 app only once an app has written something: most players never see it */
+  var apps=list.filter(fromApp).length;
+  if(apps) rows.push({k:"app", n:apps});
   Object.keys(count).sort(function(a,b){ return (count[b]-count[a]) || (a<b?-1:a>b?1:0); })
     .forEach(function(k){ rows.push({k:"tag", key:k, name:name[k], n:count[k]}); });
   return rows;
@@ -244,7 +257,7 @@ function renderSheet(){
     title(sh,tr("notes.tags"));
     var tags=tagRows(); N.tpick=Math.max(0,Math.min(N.tpick,tags.length-1));
     ul=menuList(sh,tags,N.tpick,function(r){ return [r.k==="tag" ? "#"+r.name : filterName(r), String(r.n)]; },function(i){ N.tpick=i; tagAct(); });
-    if(tags.length<=2) sh.appendChild(el("p","hint",tr("notes.notags")));
+    if(!tags.some(function(r){ return r.k==="tag"; })) sh.appendChild(el("p","hint",tr("notes.notags")));
     LP.softkeys(keys,{select:null,start:null,b:sheetKey("b","sk.back"),a:sheetKey("a","sk.filter")});
   } else if(N.sheet==="trash"){
     var trash=trashRows();
@@ -631,22 +644,42 @@ function srcOf(t){
   return names.indexOf(t)>=0 ? "dict" : "reader";
 }
 function append(t,text,sep){
+  return addTo(function(docs){
+    var hit=null;
+    docs.forEach(function(d){
+      var o=d.o;
+      if(firstLine(o.body)!==t) return;
+      var better=!hit || (!o.deleted && hit.o.deleted) || (!o.deleted===!hit.o.deleted && (o.updated||0)>(hit.o.updated||0));
+      if(better) hit=d;
+    });
+    return hit;
+  },{body:t+"\n\n"+text, src:srcOf(t)},text,sep);
+}
+/* PAD.notes.append (decisions.md section 25), after the player said yes on the runtime's dialog: an app adds only to a note
+   it made itself (src "app:<id>" and that title), never to the player's notes or another app's, even with the same title;
+   without one it makes one. The store.js runner has already checked the permission and the limits */
+function appendApp(id,t,text){
+  t=String(t).trim();
+  return addTo(function(docs){
+    var n=NT.appNote(docs.map(function(d){ return Object.assign({},d.o,{id:d.id}); }),id,t);
+    if(!n) return null;
+    var hit=null;
+    docs.forEach(function(d){ if(d.id===n.id) hit=d; });
+    return hit;
+  },{body:t+"\n\n"+text, src:NT.appSrc(id)},text);
+}
+/* one append: find(docs) picks the note ({id, o}) to add to, or null for a new one made from `fresh` {body, src} */
+function addTo(find,fresh,text,sep){
   var job=appending.then(function(){
     if(!S.db) throw new Error(tr("notes.nodb"));
     flushNote();
     return S.refs.notes.get().then(function(q){
-      var hit=null;
-      q.docs.forEach(function(d){
-        var o=own(d.data())||{};
-        if(firstLine(o.body)!==t) return;
-        var better=!hit || (!o.deleted && hit.o.deleted) || (!o.deleted===!hit.o.deleted && (o.updated||0)>(hit.o.updated||0));
-        if(better) hit={id:d.id, o:o};
-      });
+      var hit=find(q.docs.map(function(d){ return {id:d.id, o:own(d.data())||{}}; }));
       var now=Date.now(), n;
       if(hit){
         n=Object.assign({},hit.o,{id:hit.id, body:String(hit.o.body||"").replace(/\s+$/,"")+(sep==null?"\n\n":sep)+text, updated:now});
         delete n.deleted;
-      } else n={id:S.refs.notes.doc().id, body:t+"\n\n"+text, updated:now, created:now, src:srcOf(t)};
+      } else n={id:S.refs.notes.doc().id, body:fresh.body, updated:now, created:now, src:fresh.src};
       if(S.editing && S.editing.id===n.id){ S.editing.body=n.body; $("note-body").value=n.body; if(N.reading) $("note-read").textContent=n.body; }
       return save(n).then(function(ok){
         if(!ok) throw new Error(tr("notes.savefail"));
@@ -664,7 +697,7 @@ function exportAll(){
   if(!list.length){ toast(tr("notes.nothing")); sfx("err"); return; }
   var used={}, dir=NT.cleanName(tr("notes.diary"),"diary")+"/";
   var entries=list.map(function(n){
-    var meta={created:createdOf(n), updated:n.updated||createdOf(n), tags:NT.tags(n.body), pinned:!!n.pinned, date:n.day||""};
+    var meta={created:createdOf(n), updated:n.updated||createdOf(n), tags:NT.tags(n.body), pinned:!!n.pinned, date:n.day||"", source:fromApp(n) ? n.src : ""};
     return {name:NT.fileName(firstLine(n.body),tr("notes.untitled"),used,n.day?dir:"",".md"), data:NT.frontMatter(meta)+String(n.body||""), time:n.updated};
   });
   var zip=Z.write(entries), name="lopda-notes-"+today().replace(/-/g,"")+".zip";
@@ -747,6 +780,7 @@ function importFiles(files){
       var n={id:S.refs.notes.doc().id, body:body, created:created, updated:fm.meta.updated || created};
       if(fm.meta.pinned) n.pinned=true;
       if(fm.meta.date) n.day=fm.meta.date;
+      if(fm.meta.source) n.src=fm.meta.source;   /* a note an app wrote stays that app's */
       added.push(n);
     });
     return Promise.all(added.map(save));
@@ -813,7 +847,7 @@ function openDiary(day,onBack){
 }
 
 LP.flushNote=flushNote;
-LP.notes={append:append, diaryDays:diaryDays, diariesOn:diariesOn, openDiary:openDiary};
+LP.notes={append:append, appendApp:appendApp, diaryDays:diaryDays, diariesOn:diariesOn, openDiary:openDiary};
 LP.onData("notes",function(){
   changed();
   if(!$("v-notes").hidden){ render(); if(N.sheet) renderSheet(); remind(); }

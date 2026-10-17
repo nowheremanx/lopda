@@ -15,7 +15,7 @@ const LANGS = ["zh", "en"];
 const SOUNDS = ["tap", "tick", "move", "ok", "err", "hit", "miss", "coin", "win", "lose"];
 const AMBIENCES = ["rain", "waves", "waterfall", "wind", "fire", "stream"];
 const MAX_BYTES = 512 * 1024;
-const PERMISSIONS = ["files", "motion", "mic"];
+const PERMISSIONS = ["files", "motion", "mic", "notes"];
 const LICENSES = ["MIT", "0BSD", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Apache-2.0", "CC0-1.0", "Unlicense"];
 const PALETTE = [[0x1f, 0x2a, 0x14], [0x4a, 0x5a, 0x32], [0x7d, 0x8a, 0x58], [0xa3, 0xad, 0x7e]];
 const EMOJI = /[\p{Extended_Pictographic}\u{1F1E6}-\u{1F1FF}]/u;
@@ -180,7 +180,7 @@ function checkApp(dir) {
   for (const mm of code.matchAll(/PAD\.sfx\(\s*["']([^"']*)["']/g)) if (!SOUNDS.includes(mm[1])) errors.push(`PAD.sfx("${mm[1]}") is not a known sound: ${SOUNDS.join(", ")}`);
   for (const mm of code.matchAll(/(PAD|game)\.ambience\(\s*["']([^"']*)["']/g)) if (!AMBIENCES.includes(mm[2])) errors.push(`${mm[1]}.ambience("${mm[2]}") is not a known ambience: ${AMBIENCES.join(", ")}`);
   const usesButtons = /PAD\.(on|isDown)\s*\(/.test(code);
-  if (m.spec === "lopda/0" && /PAD\.(on|off|isDown|sfx)\s*\(|PAD\.(music|ambience)\b/.test(code)) errors.push('PAD.on/isDown/sfx/music/ambience need spec "lopda/1"');
+  if (m.spec === "lopda/0" && /PAD\.(on|off|isDown|sfx)\s*\(|PAD\.(music|ambience|say)\b/.test(code)) errors.push('PAD.on/isDown/sfx/music/ambience/say need spec "lopda/1"');
   const usesFiles = /PAD\.(exportFile|importFile)\b/.test(code);
   if (usesFiles && !(Array.isArray(m.permissions) && m.permissions.includes("files"))) errors.push('PAD.exportFile/importFile need "permissions": ["files"] in manifest.json');
   if (!usesFiles && Array.isArray(m.permissions) && m.permissions.includes("files")) warnings.push('"files" is declared but PAD.exportFile/importFile are never used: drop it');
@@ -193,6 +193,10 @@ function checkApp(dir) {
     if (uses && !perms.includes(perm)) errors.push(`${what} need "permissions": ["${perm}"] in manifest.json`);
     if (!uses && perms.includes(perm)) warnings.push(`"${perm}" is declared but ${what} are never used: drop it`);
   }
+  /* notes (SPEC.md 6.5): PAD.notes needs "notes" */
+  const usesNotes = /PAD\.notes\b/.test(code);
+  if (usesNotes && !perms.includes("notes")) errors.push('PAD.notes.append needs "permissions": ["notes"] in manifest.json');
+  if (!usesNotes && perms.includes("notes")) warnings.push('"notes" is declared but PAD.notes.append is never used: drop it');
   if (usesButtons && m.buttons !== true) warnings.push('uses PAD.on but "buttons" is not true, so the chin buttons stay hidden (keyboard still works)');
   return { id, errors, warnings, info };
 }

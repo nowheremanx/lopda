@@ -5,10 +5,10 @@
  * injects it as the first script of every app, so it must stay self-contained:
  * no closures over outer variables, no imports.
  *
- * The runtime calls it with options: lopdaPadShim({lang:"zh"|"en", music:true, ambience:true, sensors:true}). Older runtimes pass none,
- * so PAD.lang is undefined there and apps fall back to their own default; PAD.music is likewise undefined
- * unless the runtime can play it (runtime 0.11.0 and later, and sdk/dev.html), PAD.ambience (0.13.0 and later), and
- * PAD.motion and PAD.mic (0.24.0 and later).
+ * The runtime calls it with options: lopdaPadShim({lang:"zh"|"en", music:true, ambience:true, sensors:true, notes:true, say:true}).
+ * Older runtimes pass none, so PAD.lang is undefined there and apps fall back to their own default; PAD.music is likewise undefined
+ * unless the runtime can play it (runtime 0.11.0 and later, and sdk/dev.html), PAD.ambience (0.13.0 and later),
+ * PAD.motion and PAD.mic (0.24.0 and later), and PAD.notes and PAD.say (0.26.0 and later).
  *
  * Messages app -> runtime:  {pad:1, op:"save"|"load"|"remove"|"error"|"exit", ...}
  *                           {pad:1, op:"sfx", name}  or  {pad:1, op:"sfx", params:{wave, duty, from, to, ms, attack, decay, vol, vibrato:{depth, rate}}}
@@ -18,19 +18,24 @@
  *                           {pad:1, op:"file", i, kind:"import", accept}
  *                           {pad:1, op:"sense", i, kind:"motion"|"mic", action:"start"}   (needs "motion" / "mic")
  *                           {pad:1, op:"sense", kind, action:"stop"|"zero"}
+ *                           {pad:1, op:"notes", i, title, text}   (needs "notes")
+ *                           {pad:1, op:"say", i, text, lang}
  * Messages runtime -> app:  {pad:1, op:"loaded", i, v}
  *                           {pad:1, op:"filed", i, v}  or  {pad:1, op:"filed", i, error}
  *                           {pad:1, op:"sensed", i, v}   v: "on" | "denied" | "none"
+ *                           {pad:1, op:"noted", i, v}   v: "saved" | "denied"
+ *                           {pad:1, op:"said", i, v}    v: "done" | "stopped" | "unavailable"
  *                           {pad:1, op:"tilt", x, y, heading}  {pad:1, op:"shake"}  {pad:1, op:"sound", level, pitch}
  *                           {pad:1, op:"button", b, down}   (chin buttons, lopda/1)
  *                           {pad:1, op:"release-all"}
  */
 function lopdaPadShim(opts) {
-  var seq = 0, waiting = {}, filing = {}, sensing = {};
+  var seq = 0, waiting = {}, filing = {}, sensing = {}, noting = {}, saying = {};
   var post = function (msg) { msg.pad = 1; parent.postMessage(msg, "*"); };
   var TONES = ["#1f2a14", "#4a5a32", "#7d8a58", "#a3ad7e"];
   var LANG = opts && (opts.lang === "zh" || opts.lang === "en") ? opts.lang : undefined;
   var MUSIC = !!(opts && opts.music === true), AMBIENCE = !!(opts && opts.ambience === true), SENSORS = !!(opts && opts.sensors === true);
+  var NOTES = !!(opts && opts.notes === true), SAY = !!(opts && opts.say === true);
 
   /* Buttons (lopda/1): the runtime forwards the chin keys; the keyboard works too. */
   var BUTTONS = ["up", "down", "left", "right", "a", "b", "start", "select"];
@@ -109,6 +114,25 @@ function lopdaPadShim(opts) {
     start: function () { return senseStart("mic"); },
     stop: function () { senseCall("mic", "stop"); }
   });
+  /* Notes ("permissions": ["notes"]): every append shows the runtime's own dialog with the text; the player says yes or no.
+     The runtime checks the title (one line, at most 64 characters) and the text (at most 4 KB) and answers "denied" past them.
+     append(title, text) -> Promise<"saved" | "denied"> */
+  var ask = function (table, msg) {
+    return new Promise(function (resolve) {
+      var i = ++seq; table[i] = resolve;
+      msg.i = i; post(msg);
+    });
+  };
+  var str = function (v) { return typeof v === "string" ? v : v == null ? "" : String(v); };
+  var notes = !NOTES ? undefined : Object.freeze({
+    append: function (title, text) { return ask(noting, { op: "notes", title: str(title), text: str(text) }); }
+  });
+  /* say(text, {lang}) -> Promise<"done" | "stopped" | "unavailable">: the phone's own voice, no permission. lang "zh" or "en",
+     PAD.lang by default; at most 200 characters (the rest is cut), once a second; a new call stops the one speaking */
+  var say = !SAY ? undefined : function (text, o) {
+    var l = o && (o.lang === "zh" || o.lang === "en") ? o.lang : LANG || "zh";
+    return ask(saying, { op: "say", text: Array.from(str(text)).slice(0, 200).join(""), lang: l });
+  };
   var num = function (v, lo, hi) { return typeof v === "number" && v >= lo && v <= hi; };
 
   var fileOp = function (msg) {
@@ -142,6 +166,8 @@ function lopdaPadShim(opts) {
     ambience: ambience,
     motion: motion,
     mic: mic,
+    notes: notes,
+    say: say,
     on: function (type, fn) { if (on[type] && typeof fn === "function") on[type].push(fn); },
     off: function (type, fn) { if (on[type]) on[type] = on[type].filter(function (f) { return f !== fn; }); },
     isDown: function (b) { return !!held[b]; },
@@ -170,6 +196,8 @@ function lopdaPadShim(opts) {
       var r = sensing[d.i]; delete sensing[d.i];
       r(d.v === "on" || d.v === "none" ? d.v : "denied");
     }
+    else if (d.op === "noted" && noting[d.i]) { var n = noting[d.i]; delete noting[d.i]; n(d.v === "saved" ? "saved" : "denied"); }
+    else if (d.op === "said" && saying[d.i]) { var w = saying[d.i]; delete saying[d.i]; w(d.v === "done" || d.v === "stopped" ? d.v : "unavailable"); }
     else if (d.op === "tilt" && SENSORS && num(d.x, -1, 1) && num(d.y, -1, 1))
       emit("tilt", { x: d.x, y: d.y, heading: num(d.heading, 0, 360) ? d.heading : null });
     else if (d.op === "shake" && SENSORS) emit("shake");
@@ -224,13 +252,15 @@ var LOPDA_APP_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src '
 
 /* Wrap an app's HTML: CSP meta first, then the bridge, then the app.
    opts.lang ("zh" | "en") becomes PAD.lang inside the app; opts.music (true) gives it PAD.music, opts.ambience (true) PAD.ambience,
-   opts.sensors (true) PAD.motion and PAD.mic. */
+   opts.sensors (true) PAD.motion and PAD.mic, opts.notes (true) PAD.notes, opts.say (true) PAD.say. */
 function lopdaWrapApp(html, opts) {
   var o = {};
   if (opts && (opts.lang === "zh" || opts.lang === "en")) o.lang = opts.lang;
   if (opts && opts.music === true) o.music = true;
   if (opts && opts.ambience === true) o.ambience = true;
   if (opts && opts.sensors === true) o.sensors = true;
+  if (opts && opts.notes === true) o.notes = true;
+  if (opts && opts.say === true) o.say = true;
   var head = '<meta http-equiv="Content-Security-Policy" content="' + LOPDA_APP_CSP + '">' +
     "<style>*{touch-action:manipulation;-webkit-tap-highlight-color:transparent}</style>" +
     "<script>(" + lopdaPadShim.toString() + ")(" + (Object.keys(o).length ? JSON.stringify(o) : "") + ");<\/script>";

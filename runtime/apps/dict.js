@@ -612,13 +612,11 @@ $("dict-file").addEventListener("change",function(){
    late, so until one is found every voiceschanged looks again. The loudness follows the handheld's volume step; step 0,
    no voice, or a headword that is not Latin letters leave the slot dimmed (decisions.md section 15) */
 var SAY={voice:null};
-function synth(){ return window.speechSynthesis && window.SpeechSynthesisUtterance ? window.speechSynthesis : null; }
+/* the voice and the volume come from core.js (runtime/speech.js, shared with PAD.say) */
+function synth(){ return LP.speech.synth(); }
 function chooseVoice(){
-  var s=synth(); if(!s || SAY.voice) return;
-  var list=[]; try{ list=s.getVoices()||[]; }catch(e){}
-  var lang=function(v){ return String(v.lang||"").replace(/_/g,"-").toLowerCase(); };
-  var en=list.filter(function(v){ return lang(v).indexOf("en")===0; });
-  SAY.voice=en.filter(function(v){ return /^en-(us|gb)\b/.test(lang(v)); })[0] || en[0] || null;
+  if(!synth() || SAY.voice) return;
+  SAY.voice=LP.speech.voice("en");
   if(SAY.voice && D.sheet==="entry" && !$("v-dict").hidden) entryKeys();
 }
 if(synth()){
@@ -634,7 +632,7 @@ function say(){
   if(!canSay()) return false;
   var s=synth(), u=new SpeechSynthesisUtterance(headOf(D.entry));
   u.voice=SAY.voice; u.lang=SAY.voice.lang;
-  u.volume=Math.min(1,(LP.VOL_GAIN[LP.SND.vol]||0)/LP.VOL_GAIN[LP.VOL_MAX]);
+  u.volume=LP.speech.volume();
   try{ s.cancel(); s.speak(u); }catch(e){ return false; }
   return true;
 }
