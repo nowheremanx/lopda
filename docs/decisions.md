@@ -1087,3 +1087,37 @@ CPU 降速 4 倍（DevTools 的 CPU throttling，粗略代表旧手机）时，�
   数据库 → 恢复，文档和文件逐字节相同、程序里都看得到；坏的、缺文件的、版本更新的备份被拒、数据不变；files 数据库写到一半
   抛错，全部写回原样。
 - **还没做**：iPhone 上实测（分享菜单存几百 MB 的文件、从"文件"选备份、恢复后重新开机、内存够不够）。
+
+## 25. 写进记事本和朗读（PAD.notes.append、PAD.say，0.26.0）
+
+2026-10-17，runtime 0.26.0。docs/design/v1.md 第 2 节（owner 2026-10-17：两个都进 1.0）。`PAD.camera.snap` 另做。
+
+- **开放什么**：manifest 的允许列表变成 `["files", "motion", "mic", "notes"]`。`PAD.notes.append(title, text)` → `"saved" | "denied"`；
+  `PAD.say(text, {lang})` → `"done" | "stopped" | "unavailable"`，不需要权限。功能检测：`PAD.notes`、`PAD.say` 存不存在
+  （包装时传 `notes: true`、`say: true`，和 music、sensors 一样）。
+- **每次都问**：每次 `append` 都弹机身确认框（和文件、传感器同一个 `openAsk`，加了一个可选的 `quote` 段落显示文字）：
+  `「迷宫」要写进记事本「战绩」：`，下面是文字的前 6 行、最多 240 个字（多了加 `…`），按钮 写入 / 不写。A 松开时或点「写入」写，
+  B 或「不写」回 `"denied"`。写完提示条 `已写进记事本「战绩」`。不记住"同意过"：写字是改玩家的数据，和导出文件一样每次问。
+- **只写自己的笔记**：app 写的笔记记 `src: "app:<id>"`。找 `src` 是自己、第一行（去掉前后空白）等于标题的那一篇（不在回收站的优先，
+  再按修改时间最新），追加空行和文字；回收站里的那篇会被恢复，和 `LP.notes.append` 一样。找不到就新建（标题、空行、文字）。
+  **不碰玩家的笔记和别的 app 的笔记**，同名也不碰，另建一篇。规则在 notetext.js（`appNote`、`appCheck`），写入在 notes.js 的
+  `LP.notes.appendApp(id, title, text)`；`LP.notes.append` 和它共用排队和写入（`addTo`），阅读器和词典的行为不变。
+  反过来，阅读器、词典的 `LP.notes.append` 仍按标题找、不看 `src`，理论上会追加到同名的 app 笔记里；它们的标题是《书名》《词典》，没有改。
+- **限制**：标题一行、1–64 个字（码点）；文字 1 个字到 4 KB（UTF-8）；每个 app 同时只有一个确认框，开着时再调用直接 `"denied"`。
+  超出限制、没有权限、存不了档：直接 `"denied"`，不弹框。emoji 去掉（`noEmoji`）。app 读不到笔记。
+- **记事本**：标签列表里 日记、摘抄 后面加「来自 app」，**只在有 app 写过笔记时出现**（大多数玩家永远看不到这一行）；
+  这些笔记的列表行第二行开头写 app 的名字（`迷宫 · 21:04 · …`），app 卸载后写它的 id。app 的笔记不算摘抄（有 `src`）。
+  导出的 front matter 只给这些笔记加 `source: app:<id>`，导入时读回 `src`；`source` 的别的值不认。摘抄仍靠《…》规则，没有加字段。
+- **朗读**：词典的语音代码搬到 `runtime/speech.js`（`LopdaSpeech.host`，没有 DOM，开发台也加载），core.js 建一个 `LP.speech`。
+  词典只换了取语音和音量的地方，挑语音的规则（en-US、en-GB 优先）、音量、按键都不变。`PAD.say`：`zh` 选第一个 `zh-CN`（没有就第一个
+  `zh` 开头的：iPhone 列表里粤语 `zh-HK` 常在普通话前面，所以优先 `zh-CN`，和英文优先 en-US / en-GB 同理），`en` 同词典。
+  音量 = 这一档的总增益 / 最大档；0 档回 `"unavailable"`。最多 200 个字（shim 和 runtime 都截），每个 app 每秒最多一次（多的回
+  `"unavailable"`，不说），新的调用停掉正在说的（旧的回 `"stopped"`）。HOME、换 app、app 退出、页面隐藏都停。
+- **iOS 的手势**：iOS 只在用户手势里允许页面第一次开口；app 里的点击通过 postMessage 到外层页面时算不算手势，没有把握
+  （传感器那边 Chromium 算、Safari 不一定）。所以 `say` 等 3 秒还没开始说就回 `"unavailable"`，promise 不会一直挂着。
+  用过一次词典发音以后同一个页面里应该都能说。**需要 owner 在 iPhone 上试**；如果 app 里点一下也说不出来，下一步像传感器那样加一行「点一下开启朗读」。
+  没有在开 app 时用空语音"预热"：那可能打断玩家正在听的播客。
+- **开发台**：`notes.append` 不弹框，把确认框的文字写进日志，按右边的下拉（saved / denied）回答，不存东西；限制和权限检查同 runtime。
+  `say` 用这台电脑的语音（有的话），音量按默认档，日志里都记一行。
+- **检查器**：用了 `PAD.notes` 没声明 `notes` 报错，声明了没用警告；`PAD.say` 不需要权限，但 `lopda/0` 不能用。
+- **还没做**：示范 app（v1.md 第 6 节）；iPhone 实测（确认框、朗读的手势、静音键下朗读出不出声）。

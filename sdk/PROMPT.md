@@ -93,6 +93,15 @@ Hard rules for index.html:
     PAD.mic.start()      -> same answers; PAD.on("sound", function (s) { ... }) s.level 0-1, s.pitch Hz or null,
          at most 20 a second. PAD.mic.stop() as soon as the app stops listening (the silent switch is off meanwhile).
   "permissions" must list "motion" and/or "mic" for these.
+- Writing into the player's notes, only if the idea needs a record the player keeps (a diary line, a score
+  log). Check that PAD.notes exists first:
+    PAD.notes.append(title, text) -> Promise "saved" | "denied". The runtime shows the player the text and asks
+         every time, so call it once at a natural moment (the end of a round), never in a loop. The title is one line,
+         at most 64 characters; the text at most 4 KB. The app adds only to the note it made with that title.
+  "permissions" must list "notes" for this.
+- Speech, if the idea needs a word read aloud (no permission). Check that PAD.say exists first:
+    PAD.say(text, {lang: "zh" | "en"}) -> Promise "done" | "stopped" | "unavailable". At most 200 characters,
+         once a second; a new call stops the one speaking. "unavailable" (volume 0, no voice) is normal: show the text too.
 - Pixel art: draw on a small canvas and scale it up with
   image-rendering: pixelated.
 
@@ -111,7 +120,8 @@ manifest.json must be:
   "author": "<my name>",
   "license": "MIT",
   "permissions": [<leave empty; "files" only if the app imports or exports files with PAD.importFile / PAD.exportFile;
-                   "motion" only if it uses PAD.motion or the tilt/shake events; "mic" only if it uses PAD.mic or the sound event>],
+                   "motion" only if it uses PAD.motion or the tilt/shake events; "mic" only if it uses PAD.mic or the sound event;
+                   "notes" only if it uses PAD.notes.append>],
   "buttons": <true if the app uses PAD.on, otherwise leave this line out>
 }
 
