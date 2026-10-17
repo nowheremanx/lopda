@@ -4210,9 +4210,10 @@ test("blow-candles: a round opens the mic, a loud sound puts candles out, the mi
   /* the context that was playing is kept, and a stopped one runs again without a touch (0.24.2) */
   await p.waitForTimeout(800);
   assert.ok(await p.evaluate(() => LP.SND.ctx === window.__ctx0 && LP.SND.ctx.state === "running" && LP.chip.state().ambience === "fire"));
-  await p.evaluate(() => LP.SND.ctx.suspend());
+  /* the mic off: the context that played beside it is replaced, so iOS leaves the phone-call session (0.24.3) */
   await press(p, "start");
   await until(p, async () => !(await micOn(p)), "the mic off while paused");
+  await until(p, () => p.evaluate(() => LP.SND.ctx !== window.__ctx0 && window.__ctx0.state === "closed"), "a new context");
   await until(p, () => p.evaluate(() => LP.SND.ctx.state === "running" && LP.chip.state().ambience === "fire"), "the fire running again");
   await press(p, "a");
   await until(p, () => f.evaluate(() => live), "listening again");
