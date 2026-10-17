@@ -204,7 +204,7 @@ document.addEventListener("visibilitychange",function(){
 });
 
 /* ---------- sound: tiny square-wave chips through Web Audio (the named sounds themselves are in chip.js) ---------- */
-var RUNTIME_VERSION="0.24.0";   /* keep in step with VERSION in sw.js */
+var RUNTIME_VERSION="0.24.1";   /* keep in step with VERSION in sw.js */
 /* One volume, five steps, 0 is off (decisions.md section 10). It sets the master gain and nothing else does.
    Under the master: `ui` for the runtime's own clicks, held at a fraction so they stay as quiet as they always were
    (step 2 gives them 0.11, their level before 0.12.0), and `app` for apps, music and the cartridge at the full step. */
@@ -273,6 +273,20 @@ function rebuild(){
   if(!audio()) return;
   chip.rebuild();
   LP.each("audio");
+}
+/* The microphone going on changes the phone's audio route (iOS turns to "play-and-record" and may change the sample
+   rate): a context made before plays on into the old route and is heard no more, though it still says "running"
+   (owner's iPhone, 2026-10-17: the fire ambience went silent once the microphone came on). So when the microphone goes on
+   the context is made again at once (while the microphone is on, iOS lets a page start sound without a touch); when it
+   goes off, it is made again only if its clock has stopped (else the next touch does it, as before). */
+function micRoute(on){
+  if(!SND.ctx) return;
+  if(on){ rebuild(); return; }
+  var ac=SND.ctx, t=ac.currentTime;
+  setTimeout(function(){
+    if(ac!==SND.ctx || document.hidden) return;
+    if(ac.state!=="running" || ac.currentTime<=t) rebuild();
+  },400);
 }
 function checkLater(){
   var ac=SND.ctx; if(!ac || document.hidden) return;
@@ -479,7 +493,7 @@ var share={
   TONES:TONES, BAYER:BAYER, saveCanvas:saveCanvas, saveErr:saveErr, sha256hex:sha256hex,
   upsert:upsert, dropLocal:dropLocal, pending:pending, refresh:refresh, onData:onData,
   setStatus:setStatus, tickClock:tickClock, show:show, keepAwake:keepAwake,
-  RUNTIME_VERSION:RUNTIME_VERSION, SND:SND, VOL_MAX:VOL_MAX, VOL_GAIN:VOL_GAIN, audio:audio, wake:wake, setSession:setSession, sfx:sfx, appSfx:appSfx, APP_SFX:APP_SFX, chip:chip, sfxCustom:sfxCustom, applyLevel:applyLevel,
+  RUNTIME_VERSION:RUNTIME_VERSION, SND:SND, VOL_MAX:VOL_MAX, VOL_GAIN:VOL_GAIN, audio:audio, wake:wake, setSession:setSession, micRoute:micRoute, sfx:sfx, appSfx:appSfx, APP_SFX:APP_SFX, chip:chip, sfxCustom:sfxCustom, applyLevel:applyLevel,
   setLang:setLang, UPD:UPD, renderUpdate:renderUpdate,
   validIcon:validIcon, fillTile:fillTile, appName:appName, appDesc:appDesc, renderHome:renderHome,
   resetConfirm:resetConfirm, padRoute:padRoute, setButton:setButton, releaseButtons:releaseButtons, showPad:showPad
