@@ -1,6 +1,6 @@
 {
   "spec": "lopda/1",
-  "generated": "2026-10-16",
+  "generated": "2026-10-17",
   "apps": [
     {
       "spec": "lopda/1",
@@ -26,7 +26,7 @@
         "..00000000000...",
         "................"
       ],
-      "version": "1.0.0",
+      "version": "1.1.0",
       "description": "对着话筒吹灭一排蜡烛，最后唱准一个音把蜡烛点回来。按住 A 也能吹。话筒的示范。",
       "i18n": {
         "zh": {
@@ -44,8 +44,8 @@
         "mic"
       ],
       "path": "apps/blow-candles/index.html",
-      "sha256": "5ea831b5b33d277c1a0714f60fc099333d8bfc46b7866b9f152a42880d31b13e",
-      "bytes": 56293
+      "sha256": "37155aab6ec064679f3b9df8c6b6ebb433c53ad23f47d37f1c722f5f4f1b02d1",
+      "bytes": 58794
     },
     {
       "spec": "lopda/1",
@@ -289,7 +289,7 @@
         "0333112033333330",
         "0000000000000000"
       ],
-      "version": "1.0.0",
+      "version": "1.1.0",
       "description": "倾斜机身让小钢珠滚到终点，别掉进洞。也能用方向键推。倾斜感应的示范。",
       "i18n": {
         "zh": {
@@ -307,8 +307,8 @@
         "motion"
       ],
       "path": "apps/tilt-maze/index.html",
-      "sha256": "ebb2b5875d062ba3a565b8c75aaea8194a05119d083e9c1baeb8462de5a23afc",
-      "bytes": 61011
+      "sha256": "8c9c6e317482db6db1aa62d8aad429a711b4553396c66e14cc59a4ff6422b18e",
+      "bytes": 63815
     },
     {
       "spec": "lopda/1",
