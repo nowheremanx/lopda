@@ -4359,3 +4359,45 @@ test("cart: the battery save goes out as a .sav and comes back in; a wrong size 
   assert.deepEqual(Array.from(await rf(await dl2.path())), Array.from(plain));
   assert.deepEqual(notBlocked(errors), []);
 });
+
+/* emulator_delete frees the ROM copy itself; the player freed it a second time, and the next start could find another buffer
+   (the save being loaded) written over its ROM: a blank screen with the sound on, until a reload */
+test("cart: the ROM in the emulator stays whole across eject, play again and a .sav import", { skip, timeout: 90000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN" });
+  await p.route(/jsdelivr/, (r) => r.abort());
+  await p.goto(base + "/runtime/?debug", { waitUntil: "networkidle" });
+  await p.waitForFunction(() => window.LP && window.LP.S.db);
+  /* 1 MB, MBC5 + 32 KB RAM + battery: switches the RAM on, adds one to its first byte, loops; the rest is a known pattern */
+  const SZ = 0x100000, rom = new Uint8Array(SZ);
+  for (let i = 0x200; i < SZ; i++) rom[i] = (i * 7) & 0xff;
+  rom.set([0x00, 0xc3, 0x50, 0x01], 0x100);
+  rom.set([0x3e, 0x0a, 0xea, 0x00, 0x00, 0x3e, 0x00, 0xea, 0x00, 0x40, 0xfa, 0x00, 0xa0, 0x3c, 0xea, 0x00, 0xa0, 0x18, 0xfe], 0x150);
+  rom.set(Buffer.from("PATTERN"), 0x134); rom[0x147] = 0x1b; rom[0x148] = 0x05; rom[0x149] = 0x03;
+  let x = 0; for (let i = 0x134; i <= 0x14c; i++) x = (x - rom[i] - 1) & 0xff;
+  rom[0x14d] = x;
+  await tile(p, "卡带机");
+  await p.setInputFiles("#cart-file", { name: "pattern.gb", mimeType: "application/octet-stream", buffer: Buffer.from(rom) });
+  await p.waitForSelector("#cart-list li.cart-item");
+  const playAndCheck = async (when) => {
+    await p.click("#cart-list .acts .btn");
+    await p.waitForSelector("#cart-play:not([hidden])", { timeout: 10000 });
+    await p.waitForTimeout(300);
+    const bad = await p.evaluate((n) => {
+      const G = window.LOPDA_DEBUG.GB, h = new Uint8Array(G.mod.HEAP8.buffer, G.rom, n);
+      let bad = 0; for (let i = 0x200; i < n; i++) if (h[i] !== ((i * 7) & 0xff)) bad++;
+      return bad;
+    }, SZ);
+    assert.equal(bad, 0, "ROM bytes changed " + when);
+    await p.click("#cart-eject");
+    await p.waitForSelector("#cart-lib:not([hidden])");
+  };
+  await playAndCheck("on the first start");
+  await playAndCheck("after an eject");
+  const [fc] = await Promise.all([p.waitForEvent("filechooser"), p.click("#cart-list .cart-imp")]);
+  await fc.setFiles({ name: "PATTERN.sav", mimeType: "application/octet-stream", buffer: Buffer.alloc(32768, 7) });
+  await p.waitForFunction(() => document.querySelector("#cart-list .cart-imp").textContent === "确认导入");
+  await p.click("#cart-list .cart-imp");
+  await playAndCheck("after a .sav import");
+  await playAndCheck("after another eject");
+  assert.deepEqual(notBlocked(errors), []);
+});

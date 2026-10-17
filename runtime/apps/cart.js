@@ -134,7 +134,7 @@ function ramSize(c){
       if(!e) throw new Error(tr("cart.badrom"));
       var fd=m._ext_ram_file_data_new(e), n=m._get_file_data_size(fd); m._file_data_delete(fd);
       return n;
-    } finally { if(e) m._emulator_delete(e); m._free(p); }
+    } finally { m._emulator_delete(e); }   /* the core owns the ROM copy once it has it (see gbStop) */
   });
 }
 /* the cartridge the picker was opened for, and then the bytes it brought back, waiting for the second tap */
@@ -213,7 +213,7 @@ function gbStart(c,rom,save){
   GB.rom=m._malloc(size); var h=heap(GB.rom,size); h.fill(0); h.set(data);
   GB.rate=ac?ac.sampleRate:44100;   /* the emulator's rate, kept even if the AudioContext is replaced with another rate */
   GB.e=m._emulator_new_simple(GB.rom,size,GB.rate,GB_AUDIO_FRAMES,0);
-  if(!GB.e){ m._free(GB.rom); GB.rom=0; throw new Error(tr("cart.badrom")); }
+  if(!GB.e){ GB.rom=0; throw new Error(tr("cart.badrom")); }   /* a failed start has freed the ROM copy already (see gbStop) */
   GB.joy=m._joypad_new(); m._emulator_set_default_joypad_callback(GB.e,GB.joy);
   var col=function(t){ var c=TONES[t]; return ((255<<24)|(c[2]<<16)|(c[1]<<8)|c[0])>>>0; };
   for(var p=0;p<3;p++) m._emulator_set_bw_palette_simple(GB.e,p,col(3),col(2),col(1),col(0));
@@ -281,7 +281,9 @@ function gbStop(){
   if(GB.dirty) gbSaveSram();
   var m=GB.mod; cancelAnimationFrame(GB.raf); clearInterval(GB.timer);
   if(GB.gain){ try{ GB.gain.disconnect(); }catch(e){} GB.gain=null; }
-  m._emulator_delete(GB.e); m._joypad_delete(GB.joy); m._free(GB.rom);
+  /* emulator_delete frees the ROM copy too (binjgb: file_data_delete(&e->file_data)); freeing it again here corrupted the
+     heap, and the next start could get its ROM copy overlapped by another buffer: a blank screen until a reload */
+  m._emulator_delete(GB.e); m._joypad_delete(GB.joy);
   GB.e=0; GB.joy=0; GB.rom=0; GB.cart=null;
   releaseButtons(); LP.keepAwake(false);
 }
