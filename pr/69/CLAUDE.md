@@ -12,10 +12,11 @@ runtime/        the PWA: index.html, core.js (shared LP object: utils, views, so
                 built-in), boot.js (loaded last), strings.js (zh/en text), lopda.css, platform.js (IndexedDB store, file export,
                 dumpAll / replaceAll of both databases for the backup), backup.js (the whole-device backup zip: pack, check and unpack; pure functions),
                 chip.js (sound chip: MML music, custom sound effects, ambience presets; shared with sdk/dev.html),
+                speech.js (the phone's voices for the dictionary's 发音 and PAD.say; shared with sdk/dev.html),
                 sensors.js (tilt, shake, heading and the microphone's level and pitch for apps, the audio session; shared with sdk/dev.html),
                 lenses.js (which physical camera lenses a phone has, pure functions), textsel.js (the text selection shared by the reader and the dictionary entry page), negative.js (the negative PNG and its lpDa chunk, pure functions),
                 develop.js (developing a frame: the stocks' looks, grain, halation, leaks, date stamp; pure functions on RGBA),
-                notetext.js (notes: tags, search and snippets, the diary title, the diaries by day, front matter, export names; pure functions),
+                notetext.js (notes: tags, search and snippets, the diary title, the diaries by day, front matter, export names, the rules for app notes; pure functions),
                 zip.js (stored zips written, stored and deflated zips read; pure functions, CRC from negative.js), lunar.js (lunar calendar + solar term tables, 1900-2100), stardict.js (StarDict reader), bookparse.js (TXT/EPUB parser),
                 books/ (the reader's two public-domain sample books), sw.js (offline cache),
                 fonts/ (DotGothic16, VT323, OFL), vendor/binjgb/ (Game Boy core, MIT), vendor/holiday-cn/ (China days off, MIT),
@@ -26,7 +27,7 @@ registry/       index.json (generated) + apps/<id>/{manifest.json,index.html,src
 tools/          check-app.mjs, build-index.mjs, bundle-app.mjs (+ lo-game.mjs alias), lo-game-lib.mjs, stamp-preview.mjs (Node 20+, no deps);
                 gen-lunar.py (one-off generator of the lunar table, needs PyEphem); gen-ecdict.mjs (one-off, ECDICT csv ->
                 vendor/ecdict/) with stardict-write.mjs (StarDict + dictzip writer, also used by tests)
-tests/          node:test suite (no deps): tools, strings, PAD shim, sensors, platform store, backup, lo-game, negative, develop, notetext, zip, repo rules;
+tests/          node:test suite (no deps): tools, strings, PAD shim, sensors, speech, platform store, backup, lo-game, negative, develop, notetext, zip, repo rules;
                 runtime-shots.mjs (before/after screenshots of the runtime), hko-compare.mjs (lunar table vs the HKO tables, manual)
 SPEC.md         app spec lopda/1 (MIT)
 LICENSE NOTICE LICENSING.md CONTRIBUTING.md
@@ -42,7 +43,7 @@ LICENSE NOTICE LICENSING.md CONTRIBUTING.md
   doc paths have an even number of segments, base `data/users/local`), and `files` (get/put/del of Blobs and typed arrays,
   its own database `lopda-files`) for large binary data.
 - Built-ins, one file each in runtime/apps/: notes (记事本 2.0: the list opens on 今天, today's diary with 那年今日; other notes open to read (no keyboard) until a tap or A; search, tags read
-  from `#words` with the 日记 and 摘抄 groups, pins, a trash kept 30 days, 发送到… and a zip of .md files out and in through notetext.js
+  from `#words` with the 日记 and 摘抄 groups (and 来自 app once an app has written, PAD.notes.append), pins, a trash kept 30 days, 发送到… and a zip of .md files out and in through notetext.js
   and zip.js; `LP.notes.append(title, text, sep)` for other programs, which records `src`; `LP.notes.diaryDays`, `diariesOn` and
   `openDiary(day, onBack)` for the calendar, over an index of diaries by day (notetext.js `diaryIndex`, dropped when the notes change,
   never stored); docs `notes/<id>` {body, updated, created?, pinned?, day?, src?, deleted?}; decisions.md section 20),
@@ -113,7 +114,11 @@ node --test                                  # the test suite; must pass
   own dialog, one file ≤ 2 MB; registry/apps/paint is the example), `"motion"` and `"mic"` (runtime 0.24.0+, SPEC.md 6.4:
   `PAD.motion` {start, stop, zero} with `PAD.on("tilt" | "shake")`, `PAD.mic` {start, stop} with `PAD.on("sound")`; coarse
   readings only, the runtime's dialog on an app's first start(), allowed apps listed in Settings, keys must also work;
-  the mic sets `navigator.audioSession.type` to "play-and-record" and every way out sets "ambient" back; decisions.md section 23).
+  the mic sets `navigator.audioSession.type` to "play-and-record" and every way out sets "ambient" back; decisions.md section 23),
+  `"notes"` (runtime 0.26.0+, SPEC.md 6.5: `PAD.notes.append(title, text)` -> "saved" | "denied", the runtime's dialog on every
+  call, only into a note the app made itself, src `app:<id>`, title ≤ 64 characters, text ≤ 4 KB; decisions.md section 25).
+- `PAD.say(text, {lang})` (runtime 0.26.0+, no permission, SPEC.md 6.5): the phone's voice through `runtime/speech.js` (shared with
+  the dictionary's 发音), follows the volume, ≤ 200 characters, once a second, stops on HOME or a hidden page.
 - PAD API: `PAD.load/save/remove` (256 KB per app), `PAD.exit`, `PAD.TONES`, `PAD.spec`,
   `PAD.on("press"|"release", fn)`, `PAD.off`, `PAD.isDown`, `PAD.sfx(name)`,
   `PAD.lang` ("zh" | "en", undefined on runtimes before 0.4.0). Manifest may add `i18n.{zh,en}.{name,description}`.

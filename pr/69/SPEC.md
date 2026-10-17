@@ -7,7 +7,8 @@ system sounds (`PAD.sfx`). Added later within v1, all optional: the player's lan
 (`PAD.lang`) and localized store text (manifest `i18n`), see section 6.1; files
 (`"permissions": ["files"]`, `PAD.exportFile`, `PAD.importFile`), see section 6.2; music, sound effects of the
 app's own and ambience (`PAD.music`, `PAD.sfx({...})`, `PAD.ambience`), see section 6.3; tilt, shake, heading and the
-microphone's loudness and pitch (`"permissions": ["motion"]` / `["mic"]`, `PAD.motion`, `PAD.mic`), see section 6.4.
+microphone's loudness and pitch (`"permissions": ["motion"]` / `["mic"]`, `PAD.motion`, `PAD.mic`), see section 6.4;
+writing into the player's notes (`"permissions": ["notes"]`, `PAD.notes.append`) and speech (`PAD.say`), see section 6.5.
 
 A Lo-PDA app is one self-contained HTML file plus a small manifest. The runtime
 installs it from the registry, pins it to an exact version, and runs it inside
@@ -55,7 +56,7 @@ No other files are loaded. Images, sounds and fonts must be embedded in
 | `i18n` | Optional. Store text in other languages: `{"en": {"name", "description"}, "zh": {...}}`. Only `zh` and `en`, only those two fields, same rules as above. The store and home screen show the entry for the player's language and fall back to `name` / `description`. |
 | `author` | Name or handle. |
 | `license` | One of: `MIT`, `0BSD`, `BSD-2-Clause`, `BSD-3-Clause`, `ISC`, `Apache-2.0`, `CC0-1.0`, `Unlicense`. |
-| `permissions` | Array. Usually empty. Three capabilities (`lopda/1`): `"files"`, the app may export and import files, each time confirmed by the player (section 6.2); `"motion"`, tilt, shake and heading; `"mic"`, the microphone's loudness and pitch (both section 6.4, confirmed by the player the first time). The store shows them on the app's entry. Anything else fails the checker. |
+| `permissions` | Array. Usually empty. Four capabilities (`lopda/1`): `"files"`, the app may export and import files, each time confirmed by the player (section 6.2); `"motion"`, tilt, shake and heading; `"mic"`, the microphone's loudness and pitch (both section 6.4, confirmed by the player the first time); `"notes"`, the app may add text to a note of its own in the player's notes, each time confirmed by the player (section 6.5). The store shows them on the app's entry. Anything else fails the checker. |
 | `buttons` | Optional, `lopda/1` only. `true` shows the chin buttons while the app runs (section 4). Leave it out for touch-only apps. |
 
 ## 3. The screen
@@ -164,6 +165,10 @@ PAD.on("shake", fn)          // fn()
 await PAD.mic.start()        // -> "on" | "denied" | "none"
 PAD.mic.stop()
 PAD.on("sound", fn)          // fn({level, pitch}), at most 20 a second
+
+// lopda/1 (section 6.5); undefined on runtimes before 0.26.0
+await PAD.notes.append(title, text)   // -> "saved" | "denied"   (needs "permissions": ["notes"])
+await PAD.say(text, {lang})           // -> "done" | "stopped" | "unavailable"   (no permission)
 ```
 
 Sounds, roughly: `tap` key click, `tick` short tick (timers), `move` cursor step,
@@ -381,6 +386,49 @@ always safe to call.
 
 **Keys too.** An app that reads tilt or sound must also be playable with keys or touch (section 4).
 
+### 6.5 Notes and speech
+
+Two small ways to reach outside the app, both added in runtime 0.26.0. Check that they exist first.
+
+```js
+if (PAD.notes) {                        // undefined before runtime 0.26.0
+  PAD.notes.append("滚珠迷宫 战绩", "10月17日  第 3 关  42 秒").then(function (r) {
+    // r: "saved", or "denied" when the player said no (or the call broke a rule below)
+  });
+}
+if (PAD.say) PAD.say("apple", { lang: "en" });   // -> "done" | "stopped" | "unavailable"
+```
+
+**`PAD.notes.append(title, text)`** adds text to a note in the handheld's notes (记事本), for a record the player keeps:
+a line in a diary, a log of scores, words to learn. Use it at a natural moment, the end of a round or a "save to notes"
+choice, never in a loop.
+
+- **The runtime asks every time.** Each call shows the handheld's own dialog over the app, the same one as files and
+  sensors: the app's name, the note's title and the first lines of the text (`「迷宫」要写进记事本「战绩」： 写入 / 不写`).
+  A (on release) or 写入 writes; B or 不写 refuses and resolves `"denied"`. Writing is never silent, and there is no
+  prompt at install.
+- **Only the app's own note.** The first call with a title makes a new note: the title, a blank line, the text. Later calls
+  with the same title add a blank line and the text to the end of that note. The app never writes into the player's own
+  notes or another app's, even one with the same title: it gets a note of its own. In the notes, these notes are in the
+  group 来自 app and their row shows the app's name. The app cannot read notes.
+- **Limits.** The title is one line, 1 to 64 characters; the text is 1 character to 4 KB (UTF-8). One dialog at a time:
+  a call while the app's dialog is still open resolves `"denied"`. Past a limit: `"denied"` at once, no dialog, and an
+  error in the dev harness. Emoji are taken out.
+- Without the permission: `"denied"` at once and an error in the dev harness; the checker fails an app that calls
+  `PAD.notes` without declaring `"notes"`.
+
+**`PAD.say(text, {lang})`** reads a short text aloud with the phone's own voice (the one the dictionary uses), offline.
+No permission. Use it for a word or a line the player wants to hear, and always show the text too.
+
+- `lang` is `"zh"` or `"en"`, `PAD.lang` by default. The runtime picks the phone's first voice for that language
+  (Mandarin `zh-CN`, `en-US` or `en-GB` first).
+- It follows the handheld's volume; at volume 0 it says nothing and resolves `"unavailable"`.
+- At most 200 characters (the rest is cut) and one call a second per app: a call within a second of the last resolves
+  `"unavailable"` and says nothing. A new call stops the one speaking, which resolves `"stopped"`.
+- `"done"` when it finished; `"stopped"` when a new call, HOME, leaving the app or the phone locking cut it short;
+  `"unavailable"` when there is no voice for the language, the volume is 0, the call came too soon, or the phone would
+  not speak. "unavailable" is normal on many phones: an app must work the same without the voice.
+
 ## 7. Size and quality
 
 - `index.html` at most 512 KB (with src/ files and framework copies bundled in; section 11).
@@ -404,7 +452,8 @@ node tools/check-app.mjs registry/apps/<id>
 
 The checker enforces sections 2 (including `permissions`), 3 (colors), 5 (forbidden APIs and external
 resources) and 7 (size), checks `PAD.sfx` names, and fails `PAD.exportFile` / `importFile` without the `files` permission,
-and `PAD.motion` or `PAD.on("tilt" | "shake")` without `motion`, `PAD.mic` or `PAD.on("sound")` without `mic`. Passing it is required before review.
+and `PAD.motion` or `PAD.on("tilt" | "shake")` without `motion`, `PAD.mic` or `PAD.on("sound")` without `mic`, `PAD.notes` without `notes`.
+Passing it is required before review.
 
 Review then reads the app. Besides what the checker cannot see (the button convention in section 4,
 other people's names and characters), it listens to the music and sound effects: they must be original
@@ -419,6 +468,8 @@ custom sound effects with the runtime's own chip (`runtime/chip.js`) at the defa
 sounds without playing them, and logs a song that does not parse as an error. For tilt and the microphone it answers
 `start()` at once from the manifest (no dialog) and stands in for the phone: a square to drag for the tilt (it recentres
 when let go), a Shake button, a compass slider, a loudness slider and a pitch field, or this computer's microphone.
+`PAD.notes.append` writes the dialog's words in the log and answers as the select on the right says (`saved` or `denied`);
+`PAD.say` uses this computer's voices when the browser has them, and logs the text either way.
 
 ## 10. Games: lo-game.js (optional)
 
