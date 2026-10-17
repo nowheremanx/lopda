@@ -142,8 +142,7 @@ function doRestore(bk){
       if(window.console) console.error("Lo-PDA restore failed, writing the old data back", e);
       return P.replaceAll(old).then(function(){ sfx("err"); okBox(tr("rs.failed")); },function(e2){
         if(window.console) console.error("Lo-PDA rollback failed", e2);
-        sfx("err"); BS.busy=false;
-        box(tr("rs.lost"),[{label:tr("bk.save"), main:true, go:function(){ sfx("tap"); startBackup(function(){ box(tr("rs.lost"),[]); renderLostRetry(old); },old); }}]);
+        sfx("err"); BS.busy=false; renderLostRetry(old);
       });
     });
   },function(){ sfx("err"); okBox(tr("rs.failed")); });
