@@ -11,9 +11,8 @@ var MAX=200,        // PAD.say speaks at most this many characters; the rest is 
   START_WAIT=3000;  // a phone that refuses to speak (no tap, iOS) may say nothing at all: give up when nothing started by then
 
 function langOf(v){ return String(v && v.lang || "").replace(/_/g,"-").toLowerCase(); }
-/* the voice for "en" or "zh": the first whose lang starts with it, a common one first (en-US or en-GB; zh-CN, the
-   Mandarin of Simplified Chinese, over Cantonese zh-HK) */
-var PREFER={en:/^en-(us|gb)\b/, zh:/^zh-(cn|hans)\b/};
+/* Prefer the usual regional voice when a phone offers several choices. */
+var PREFER={en:/^en-(us|gb)\b/, zh:/^zh-(cn|hans)\b/, ja:/^ja-jp\b/};
 function pick(list,lang){
   var all=(list||[]).filter(function(v){ return langOf(v).indexOf(lang)===0; });
   return all.filter(function(v){ return PREFER[lang] && PREFER[lang].test(langOf(v)); })[0] || all[0] || null;
@@ -46,7 +45,8 @@ function host(env){
       var t=now();
       if(last[who]!=null && t-last[who]<GAP){ resolve("unavailable"); return; }
       last[who]=t;
-      var s=synth(), v=s && voice(lang==="en"?"en":"zh"), vol=env.volume(), words=cut(text);
+      var language=lang==="en" || lang==="ja" ? lang : "zh";
+      var s=synth(), v=s && voice(language), vol=env.volume(), words=cut(text);
       if(!s || !v || !(vol>0)){ resolve("unavailable"); return; }
       if(!words.trim()){ resolve("done"); return; }
       stop();

@@ -168,6 +168,48 @@
     },
     {
       "spec": "lopda/1",
+      "id": "kana-cards",
+      "name": "かな卡",
+      "glyph": "仮",
+      "buttons": true,
+      "icon": [
+        "................",
+        "................",
+        "....000000......",
+        "...01111110.....",
+        "...01222110.....",
+        "...012.2110.....",
+        "...01222110.....",
+        "...01111110.....",
+        "....000000......",
+        "................",
+        ".....0..0.......",
+        "......00........",
+        ".....0..0.......",
+        "................",
+        "................",
+        "................"
+      ],
+      "version": "1.0.0",
+      "description": "学习平假名和片假名，听发音，再做四选一小测。",
+      "i18n": {
+        "zh": {
+          "name": "かな卡",
+          "description": "学习平假名和片假名，听发音，再做四选一小测。"
+        },
+        "en": {
+          "name": "Kana",
+          "description": "Study hiragana and katakana, hear each one, then take a quick quiz."
+        }
+      },
+      "author": "Haowei Wu",
+      "license": "MIT",
+      "path": "apps/kana-cards/index.html",
+      "sha256": "3ac8cda3e7be8bdac1fe5c20eff9bf78865005acfb35fa2d90e88871bac0ff80",
+      "bytes": 11048
+    },
+    {
+      "spec": "lopda/1",
       "id": "last-letter",
       "name": "最后一封信",
       "glyph": "信",

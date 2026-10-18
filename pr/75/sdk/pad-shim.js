@@ -8,7 +8,8 @@
  * The runtime calls it with options: lopdaPadShim({lang:"zh"|"en", music:true, ambience:true, sensors:true, notes:true, say:true, camera:true}).
  * Older runtimes pass none, so PAD.lang is undefined there and apps fall back to their own default; PAD.music is likewise undefined
  * unless the runtime can play it (runtime 0.11.0 and later, and sdk/dev.html), PAD.ambience (0.13.0 and later),
- * PAD.motion and PAD.mic (0.24.0 and later), PAD.notes and PAD.say (0.26.0 and later), and PAD.camera (0.28.0 and later).
+ * PAD.motion and PAD.mic (0.24.0 and later), PAD.notes and PAD.say (0.26.0 and later; Japanese say in 0.29.0),
+ * and PAD.camera (0.28.0 and later).
  *
  * Messages app -> runtime:  {pad:1, op:"save"|"load"|"remove"|"error"|"exit", ...}
  *                           {pad:1, op:"sfx", name}  or  {pad:1, op:"sfx", params:{wave, duty, from, to, ms, attack, decay, vol, vibrato:{depth, rate}}}
@@ -129,12 +130,13 @@ function lopdaPadShim(opts) {
   var notes = !NOTES ? undefined : Object.freeze({
     append: function (title, text) { return ask(noting, { op: "notes", title: str(title), text: str(text) }); }
   });
-  /* say(text, {lang}) -> Promise<"done" | "stopped" | "unavailable">: the phone's own voice, no permission. lang "zh" or "en",
-     PAD.lang by default; at most 200 characters (the rest is cut), once a second; a new call stops the one speaking */
+  /* say(text, {lang}) -> Promise<"done" | "stopped" | "unavailable">: the phone's own voice, no permission. lang "zh", "en"
+     or "ja", PAD.lang by default; at most 200 characters (the rest is cut), once a second; a new call stops the one speaking */
   var say = !SAY ? undefined : function (text, o) {
-    var l = o && (o.lang === "zh" || o.lang === "en") ? o.lang : LANG || "zh";
+    var l = o && (o.lang === "zh" || o.lang === "en" || o.lang === "ja") ? o.lang : LANG || "zh";
     return ask(saying, { op: "say", text: Array.from(str(text)).slice(0, 200).join(""), lang: l });
   };
+  if (say) say.languages = Object.freeze(["zh", "en", "ja"]);
   /* The camera ("permissions": ["camera"]): every snap opens the runtime's own viewfinder over the app; the player shoots or
      cancels. snap({size}) -> Promise<{w, h, px} | null>, size "small" (128x112, the default) or "large" (256x224); px is a
      Uint8Array of w*h tone indices, 0 = ink ... 3 = paper (PAD.TONES), row by row. null: refused, cancelled, no camera,

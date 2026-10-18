@@ -1119,7 +1119,8 @@ CPU 降速 4 倍（DevTools 的 CPU throttling，粗略代表旧手机）时，�
   导出的 front matter 只给这些笔记加 `source: app:<id>`，导入时读回 `src`；`source` 的别的值不认。摘抄仍靠《…》规则，没有加字段。
 - **朗读**：词典的语音代码搬到 `runtime/speech.js`（`LopdaSpeech.host`，没有 DOM，开发台也加载），core.js 建一个 `LP.speech`。
   词典只换了取语音和音量的地方，挑语音的规则（en-US、en-GB 优先）、音量、按键都不变。`PAD.say`：`zh` 选第一个 `zh-CN`（没有就第一个
-  `zh` 开头的：iPhone 列表里粤语 `zh-HK` 常在普通话前面，所以优先 `zh-CN`，和英文优先 en-US / en-GB 同理），`en` 同词典。
+  `zh` 开头的：iPhone 列表里粤语 `zh-HK` 常在普通话前面，所以优先 `zh-CN`，和英文优先 en-US / en-GB 同理），`en` 同词典；runtime 0.29.0 起
+  `ja` 优先 `ja-JP`，没有对应语音时 `"unavailable"`。新版 `PAD.say.languages` 列出支持语言，旧 runtime 的 app 可据此隐藏尚不支持的朗读操作。
   音量 = 这一档的总增益 / 最大档；0 档回 `"unavailable"`。最多 200 个字（shim 和 runtime 都截），每个 app 每秒最多一次（多的回
   `"unavailable"`，不说），新的调用停掉正在说的（旧的回 `"stopped"`）。HOME、换 app、app 退出、页面隐藏都停。
 - **iOS 的手势**：iOS 只在用户手势里允许页面第一次开口；app 里的点击通过 postMessage 到外层页面时算不算手势，没有把握
@@ -1173,6 +1174,12 @@ CPU 降速 4 倍（DevTools 的 CPU throttling，粗略代表旧手机）时，�
 - **没有相机**：页面不是 HTTPS、没有 `getUserMedia`，或者打开失败（拒绝、没有摄像头）：屏幕上一行「相机用不了」，回 `null`。
 - **开发台**：不弹确认框；`snap()` 在右边打开一个取景框，画一张会动的测试图（灰阶、色条、一个移动的圆），勾选后可用这台电脑的摄像头，
   同样用 `finder.js` 抖动；「Shutter (A)」交出真的 `{w, h, px}`，「Cancel (B)」回 `null`。manifest 没有 `camera`：`null`，日志里报错。
+
+## 29. 日语假名卡片
+
+2026-10-18，runtime 0.29.0：`PAD.say` 支持 `ja`，有多个日语声音时优先 `ja-JP`。设备没有日语语音时正常返回 `"unavailable"`；学习与测验不依赖朗读。`PAD.say.languages` 用于检查本 runtime 支持的语言；`kana-cards` 检查此列表，避免在旧版本上把日语请求当成中文。
+
+新增 `kana-cards` 社区 app：中英双语界面，原创新手用假名卡片，覆盖现代基础 46 个平假名和对应片假名；A/点按朗读、方向键浏览、B/START 进入或退出四选一测验、SELECT 切换字表。学习进度存于该 app 的 `PAD` 私有存储。不是完整日语词典，不打包第三方词表或仿制 Midori 的素材与界面。
 - **检查器**：用了 `PAD.camera` 没声明 `camera` 报错，声明了没用警告。
 - **规则**（SPEC 6.6、UI.md 第 10 节）：玩家自己决定什么时候拍，不在开始时就调；拍完先给玩家看，可以重拍；`null` 是正常的，app 没有照片也要能玩。
 - **示范 app**：拍照拼图（`registry/apps/photo-puzzle`）。拍一张小图，先给玩家看（用这张 / 重拍），再切成 3×3 滑块拼图（拼好一次后 4×4），

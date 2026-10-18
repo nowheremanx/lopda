@@ -100,7 +100,7 @@ Hard rules for index.html:
          at most 64 characters; the text at most 4 KB. The app adds only to the note it made with that title.
   "permissions" must list "notes" for this.
 - Speech, if the idea needs a word read aloud (no permission). Check that PAD.say exists first:
-    PAD.say(text, {lang: "zh" | "en"}) -> Promise "done" | "stopped" | "unavailable". At most 200 characters,
+    PAD.say(text, {lang: "zh" | "en" | "ja"}) -> Promise "done" | "stopped" | "unavailable". At most 200 characters,
          once a second; a new call stops the one speaking. "unavailable" (volume 0, no voice) is normal: show the text too.
 - A photo, only if the idea needs one the player takes (a portrait for a card, a picture to play with). Check that
   PAD.camera exists first:
