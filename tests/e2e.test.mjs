@@ -2638,7 +2638,7 @@ test("ambience in the dev harness: the rain station's rain waits for a key; the 
 
 /* camera lenses (docs/decisions.md section 4): Chromium's fake camera is one unnamed device, so the camera keeps
    the plain back/front pair; a faked device list stands in for an iPhone's four cameras */
-async function camPage(t, init, arg) {
+async function camPage(t, init, arg, query = "") {
   const cam = await pw.chromium.launch({ args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"] });
   t.after(() => cam.close());
   const ctx = await cam.newContext({ viewport: { width: 390, height: 844 }, locale: "zh-CN", reducedMotion: "reduce", serviceWorkers: "block", permissions: ["camera"] });
@@ -2648,7 +2648,7 @@ async function camPage(t, init, arg) {
   p.on("pageerror", (e) => errors.push(e.message));
   p.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
   const open = async () => {
-    await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+    await p.goto(base + "/runtime/" + query, { waitUntil: "networkidle" });
     await p.waitForFunction(() => document.getElementById("savestate").textContent !== "启动中…", null, { timeout: 8000 });
     await p.locator("#home .app", { has: p.locator(".label", { hasText: /^点阵相机$/ }) }).click();
   };
@@ -2726,6 +2726,130 @@ test("camera: names in another language, capabilities only on the tracks: each c
   assert.deepEqual(await p.evaluate(() => window.__opened), ["front", "dualwide", "ultrawide", "wide", "wide"]);
   await select("LIVE 前置"); await select("LIVE 13mm");
   assert.equal(await p.evaluate(() => window.__opened.at(-1)), "ultrawide");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+/* the finder's three states (docs/decisions.md section 4): live, starting, none. Only "none" may open the system camera.
+   cameraHooks counts the clicks on #cam-file (and swallows them: no file chooser), can hold getUserMedia until
+   __releaseCamera(), and can keep the video from ever giving a picture (videoWidth 0) */
+function cameraHooks({ hold, noFrames, noMedia }) {
+  window.__fileClicks = 0;
+  const click = HTMLElement.prototype.click;
+  HTMLElement.prototype.click = function () { if (this.id === "cam-file") { window.__fileClicks++; return; } return click.call(this); };
+  if (noMedia) { Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: undefined }); return; }
+  const md = navigator.mediaDevices;
+  if (hold) {
+    const gum = md.getUserMedia.bind(md);
+    let open; const gate = new Promise((r) => { open = r; });
+    window.__releaseCamera = open; window.__gum = 0;
+    md.getUserMedia = (c) => { window.__gum++; return gate.then(() => gum(c)); };
+    /* the page can be "hidden" by a test: document.hidden follows __hidden */
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => !!window.__hidden });
+  }
+  if (noFrames) {
+    const w = Object.getOwnPropertyDescriptor(HTMLVideoElement.prototype, "videoWidth");
+    Object.defineProperty(HTMLVideoElement.prototype, "videoWidth", { configurable: true, get() { return this.id === "cam-video" ? 0 : w.get.call(this); } });
+  }
+}
+const camLog = (p) => p.evaluate(() => (window.LOPDA_DEBUG.cam || []).slice());
+const pressA = async (p) => { await p.keyboard.down("x"); await p.waitForTimeout(60); await p.keyboard.up("x"); };
+/* a photo from the system camera: a small grey PNG */
+const photo = async (p) => ({ name: "photo.png", mimeType: "image/png", buffer: Buffer.from(await p.evaluate(() => {
+  const c = document.createElement("canvas"); c.width = 64; c.height = 48; const x = c.getContext("2d");
+  x.fillStyle = "#888"; x.fillRect(0, 0, 64, 48); x.fillStyle = "#222"; x.fillRect(8, 8, 24, 24);
+  return c.toDataURL("image/png").split(",")[1];
+}), "base64") });
+
+test("camera: a shutter press while the camera is still opening never opens the system camera", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors, open, tag } = await camPage(t, cameraHooks, { hold: true }, "?debug");
+  await open();
+  await p.waitForSelector("#cam-load:not([hidden])"); await p.click("#roll-go");
+  await p.waitForFunction(() => (window.LOPDA_DEBUG.cam || []).includes("starting"));
+  /* the phone's prompt is up: A (press and release) and the 拍 key, quickly, a few times */
+  for (let i = 0; i < 3; i++) { await pressA(p); await p.click("#cam-shutter"); }
+  assert.equal(await p.evaluate(() => window.__fileClicks), 0, "no system camera while the finder starts");
+  assert.ok((await camLog(p)).filter((s) => s === "shutter: starting").length >= 6);
+  assert.match(await p.textContent("#cam-count"), /^01\//);
+  /* the prompt is answered: the finder comes, and A shoots on the press */
+  await p.evaluate(() => window.__releaseCamera());
+  await tag("LIVE 后置");
+  await p.waitForFunction(() => (window.LOPDA_DEBUG.cam || []).includes("live"));
+  await p.keyboard.down("x");
+  await p.waitForFunction(() => (window.LOPDA_DEBUG.cam || []).includes("shutter: live"));
+  await p.keyboard.up("x");
+  await p.waitForFunction(() => /^02\//.test(document.getElementById("cam-count").textContent));
+  assert.equal(await p.evaluate(() => window.__fileClicks), 0);
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("camera: the page hidden and shown while the phone's prompt is up asks only once, and the finder comes", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors, open, tag } = await camPage(t, cameraHooks, { hold: true }, "?debug");
+  const flip = (h) => p.evaluate((h) => { window.__hidden = h; document.dispatchEvent(new Event("visibilitychange")); }, h);
+  await open();
+  await p.waitForSelector("#cam-load:not([hidden])"); await p.click("#roll-go");
+  await p.waitForFunction(() => window.__gum === 1);
+  await flip(true); await p.waitForTimeout(100); await flip(false); await p.waitForTimeout(300);
+  assert.equal(await p.evaluate(() => window.__gum), 1, "one request, not a second prompt");
+  assert.ok((await camLog(p)).includes("hidden while opening"));
+  await p.evaluate(() => window.__releaseCamera());
+  await tag("LIVE 后置");
+  await p.waitForFunction(() => (window.LOPDA_DEBUG.cam || []).includes("live"));
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("camera: a stream that never gives a picture is played again, restarted once, then the system camera takes over", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors, open } = await camPage(t, cameraHooks, { noFrames: true }, "?debug");
+  await open();
+  await p.waitForSelector("#cam-load:not([hidden])"); await p.click("#roll-go");
+  await p.waitForFunction(() => (window.LOPDA_DEBUG.cam || []).includes("stream on"));
+  /* LIVE but no picture: A does nothing yet */
+  await pressA(p);
+  assert.equal(await p.evaluate(() => window.__fileClicks), 0);
+  await p.waitForFunction(() => (window.LOPDA_DEBUG.cam || []).includes("none: no frame"), null, { timeout: 12000 });
+  const log = await camLog(p);
+  assert.ok(log.some((s) => s.startsWith("play ok: watchdog") || s.startsWith("play refused: watchdog")), "play() asked again");
+  assert.ok(log.includes("restart: no frame"), "restarted once");
+  assert.equal(log.filter((s) => s === "stream on").length, 2, "one restart, not more");
+  assert.equal(await p.isHidden("#cam-live-tag"), true);
+  assert.match(await p.textContent("#cam-mode"), /系统相机/);
+  /* now A opens the system camera, on the release */
+  await p.keyboard.down("x"); await p.waitForTimeout(60);
+  assert.equal(await p.evaluate(() => window.__fileClicks), 0, "not on the press");
+  await p.keyboard.up("x");
+  assert.equal(await p.evaluate(() => window.__fileClicks), 1, "on the release");
+  await p.setInputFiles("#cam-file", await photo(p));
+  await p.waitForFunction(() => /^02\//.test(document.getElementById("cam-count").textContent));
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("camera: a track that ends restarts the finder, and it shoots again", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors, open, tag } = await camPage(t, cameraHooks, {}, "?debug");
+  await open();
+  await p.waitForSelector("#cam-load:not([hidden])"); await p.click("#roll-go");
+  await tag("LIVE 后置");
+  await p.waitForFunction(() => (window.LOPDA_DEBUG.cam || []).includes("live"));
+  await p.evaluate(() => { const k = document.getElementById("cam-video").srcObject.getVideoTracks()[0]; k.stop(); k.dispatchEvent(new Event("ended")); });
+  await p.waitForFunction(() => { const l = window.LOPDA_DEBUG.cam || []; const i = l.indexOf("restart: ended"); return i >= 0 && l.indexOf("live", i) > i; }, null, { timeout: 10000 });
+  await p.click("#cam-shutter");
+  await p.waitForFunction(() => /^02\//.test(document.getElementById("cam-count").textContent));
+  assert.equal(await p.evaluate(() => window.__fileClicks), 0);
+  assert.ok(!(await camLog(p)).some((s) => s.startsWith("none")));
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("camera: with no live finder at all (no mediaDevices) A still opens the system camera on the release", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors, open } = await camPage(t, cameraHooks, { noMedia: true }, "?debug");
+  await open();
+  await p.waitForSelector("#cam-load:not([hidden])"); await p.click("#roll-go");
+  await p.waitForFunction(() => /HTTPS/.test(document.getElementById("cam-mode").textContent));
+  await p.keyboard.down("x"); await p.waitForTimeout(60);
+  assert.equal(await p.evaluate(() => window.__fileClicks), 0, "not on the press");
+  await p.keyboard.up("x");
+  assert.equal(await p.evaluate(() => window.__fileClicks), 1);
+  await p.click("#cam-shutter");
+  assert.equal(await p.evaluate(() => window.__fileClicks), 2, "the 拍 key too");
+  await p.setInputFiles("#cam-file", await photo(p));
+  await p.waitForFunction(() => /^02\//.test(document.getElementById("cam-count").textContent));
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
@@ -4443,6 +4567,45 @@ test("camera snap: no camera on this page says 相机用不了 and gives null", 
   assert.equal((await R(f)).results[0], null);
   assert.equal(await p.textContent("#toast"), "相机用不了");
   assert.equal(await p.evaluate(() => document.getElementById("snap").hidden), true);
+});
+
+/* the camera program's watchdog in the snap viewfinder too (decisions.md section 4) */
+test("camera snap: a stream that never gives a picture is restarted once, then the app gets null and every track ends", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await snapPage(t);
+  await p.evaluate(() => {
+    const w = Object.getOwnPropertyDescriptor(HTMLVideoElement.prototype, "videoWidth");
+    Object.defineProperty(HTMLVideoElement.prototype, "videoWidth", { configurable: true, get() { return this.id === "snap-video" ? 0 : w.get.call(this); } });
+  });
+  const f = await runSnapApp(p);
+  f.evaluate(() => { snap(); });
+  await p.waitForSelector("#file-ask .box"); await p.click("#file-ok");
+  await finderLive(p);
+  await press(p, "a");   /* no picture yet: the shutter does nothing */
+  assert.equal((await R(f)).results.length, 0);
+  await until(p, async () => (await R(f)).results.length === 1, "null after the watchdog");
+  assert.equal((await R(f)).results[0], null);
+  const log = await p.evaluate(() => window.LOPDA_DEBUG.snap);
+  assert.ok(log.includes("restart: no frame") && log.includes("none: no frame"), log.join(" | "));
+  assert.equal(await p.evaluate(() => window.__streams.length), 2, "one restart, not more");
+  assert.equal(await allEnded(p), true);
+  assert.equal(await p.textContent("#toast"), "相机用不了");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("camera snap: a track that ends restarts the stream, and the shutter still works", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await snapPage(t);
+  const f = await runSnapApp(p);
+  f.evaluate(() => { snap(); });
+  await p.waitForSelector("#file-ask .box"); await p.click("#file-ok");
+  await finderLive(p);
+  await p.waitForFunction(() => (window.LOPDA_DEBUG.snap || []).includes("live"));
+  await p.evaluate(() => { const k = document.getElementById("snap-video").srcObject.getVideoTracks()[0]; k.stop(); k.dispatchEvent(new Event("ended")); });
+  await p.waitForFunction(() => { const l = window.LOPDA_DEBUG.snap || []; const i = l.indexOf("restart: ended"); return i >= 0 && l.indexOf("live", i) > i; }, null, { timeout: 10000 });
+  await press(p, "a");
+  await until(p, async () => (await R(f)).results.length === 1, "the picture");
+  assert.equal((await R(f)).results[0].w, 128);
+  assert.equal(await allEnded(p), true);
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
 test("camera snap: the camera program's loaded roll, frames, film box and latent images are exactly as before", { skip, timeout: 90000 }, async (t) => {
