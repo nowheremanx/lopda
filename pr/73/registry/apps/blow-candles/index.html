@@ -1,0 +1,1045 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>吹蜡烛</title>
+<!-- Candles: blow into the microphone (PAD.mic, SPEC.md 6.4) or hold A. lo-game.js. MIT License. -->
+</head>
+<body>
+<script data-lo-game="1.4.0">
+/*
+ * lo-game.js 1.4.0, a tiny game framework for Lo-PDA apps.
+ * MIT License. Copyright (c) 2026 Haowei Wu. See sdk/LICENSE.
+ *
+ * Paste-in library: an app carries its own copy inside a script tag marked
+ * data-lo-game="1.4.0", and `node tools/lo-game.mjs registry/apps/<id>` fills it in.
+ * The same tool adds a pixel-font block holding just the characters the app uses.
+ * Do not edit the copy inside an app; the checker verifies it.
+ *
+ * Everything is drawn into a four-tone indexed framebuffer (values 0-3), so
+ * nothing can ever show a colour outside the palette or a blurred edge.
+ * Reference: sdk/LO-GAME.md
+ */
+var LoGame = (function () {
+  "use strict";
+
+  var VERSION = "1.4.0";
+  var TONES = ["#1f2a14", "#4a5a32", "#7d8a58", "#a3ad7e"];
+  var INK = 0, DARK = 1, MID = 2, PAPER = 3;
+  var CLEAR = 255;
+  var BUTTONS = ["up", "down", "left", "right", "a", "b", "start", "select"];
+  var KEYS = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right",
+    x: "a", X: "a", z: "b", Z: "b", Enter: "start", Shift: "select" };
+  var HAS_PAD = typeof PAD !== "undefined";
+  var BITMAP_FONT = null;   /* set by LoGame.font(data), from the data-lo-font block */
+  function font(data) { BITMAP_FONT = data; }
+  function b64bits(str, n) {
+    var bin = atob(str), out = new Uint8Array(n);
+    for (var i = 0; i < n; i++) out[i] = (bin.charCodeAt(i >> 3) >> (7 - (i & 7))) & 1;
+    return out;
+  }
+
+  /* bilingual text (1.2.0): t({zh: "...", en: "..."}, vars) picks PAD.lang, else the fallback
+     language, else whichever the app wrote. Plain strings pass through. "{name}" is filled from vars. */
+  function padLang() { var l = HAS_PAD && PAD.lang; return l === "zh" || l === "en" ? l : null; }
+  function pick(text, lang, vars) {
+    var s = text;
+    if (s && typeof s === "object") { s = s[lang]; if (s == null) s = text.zh != null ? text.zh : text.en; }
+    s = s == null ? "" : String(s);
+    return vars ? s.replace(/\{(\w+)\}/g, function (m, k) { return vars[k] == null ? "" : String(vars[k]); }) : s;
+  }
+  function t(text, vars) { return pick(text, padLang() || "zh", vars); }
+
+  function rgbOf(hex) { return [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)]; }
+  var RGB = TONES.map(rgbOf);
+
+  /* ---------------- small helpers ---------------- */
+  function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+  function lerp(a, b, t) { return a + (b - a) * t; }
+  function approach(v, target, step) { return v < target ? Math.min(v + step, target) : Math.max(v - step, target); }
+  function rng(seed) {
+    var s = (seed >>> 0) || 0x9e3779b9;
+    var next = function () { s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; };
+    return {
+      next: next,
+      int: function (a, b) { return a + Math.floor(next() * (b - a + 1)); },
+      pick: function (arr) { return arr[Math.floor(next() * arr.length)]; },
+      chance: function (p) { return next() < p; }
+    };
+  }
+  var EASE = {
+    linear: function (t) { return t; },
+    out: function (t) { return 1 - (1 - t) * (1 - t); },
+    "in": function (t) { return t * t; },
+    inOut: function (t) { return t < 0.5 ? 2 * t * t : 1 - 2 * (1 - t) * (1 - t); }
+  };
+
+  /* ---------------- sprites: rows of "0123." ---------------- */
+  function sprite(rows) {
+    if (!Array.isArray(rows) || !rows.length) throw new Error("sprite: give an array of strings");
+    var h = rows.length, w = rows[0].length, px = new Uint8Array(w * h);
+    for (var y = 0; y < h; y++) {
+      if (rows[y].length !== w) throw new Error("sprite: row " + y + " is " + rows[y].length + " wide, expected " + w);
+      for (var x = 0; x < w; x++) {
+        var c = rows[y].charCodeAt(x) - 48;
+        px[y * w + x] = c >= 0 && c <= 3 ? c : CLEAR;
+      }
+    }
+    return { w: w, h: h, px: px };
+  }
+  function sprites(table) { var out = {}; Object.keys(table).forEach(function (k) { out[k] = sprite(table[k]); }); return out; }
+
+  /* ---------------- tile maps ---------------- */
+  function tilemap(opt) {
+    var rows = opt.map.slice(), size = opt.size || 8, tiles = opt.tiles || {}, solid = opt.solid || "";
+    var cols = rows[0].length;
+    rows.forEach(function (r, i) { if (r.length !== cols) throw new Error("tilemap: row " + i + " is " + r.length + " wide, expected " + cols); });
+    var map = {
+      size: size, cols: cols, rows: rows.length, width: cols * size, height: rows.length * size,
+      get: function (tx, ty) { return ty < 0 || ty >= rows.length || tx < 0 || tx >= cols ? null : rows[ty][tx]; },
+      set: function (tx, ty, ch) { if (map.get(tx, ty) === null) return; rows[ty] = rows[ty].slice(0, tx) + ch + rows[ty].slice(tx + 1); },
+      solid: function (tx, ty) { var c = map.get(tx, ty); return c === null || solid.indexOf(c) >= 0; },
+      find: function (ch) { var out = []; rows.forEach(function (r, y) { for (var x = 0; x < r.length; x++) if (r[x] === ch) out.push({ x: x, y: y }); }); return out; },
+      at: function (px, py) { return { x: Math.floor(px / size), y: Math.floor(py / size) }; },
+      draw: function (g, camX, camY) {
+        camX = Math.round(camX || 0); camY = Math.round(camY || 0);
+        var x0 = Math.max(0, Math.floor(camX / size)), y0 = Math.max(0, Math.floor(camY / size));
+        var x1 = Math.min(cols - 1, Math.floor((camX + g.width - 1) / size)), y1 = Math.min(rows.length - 1, Math.floor((camY + g.height - 1) / size));
+        for (var ty = y0; ty <= y1; ty++) for (var tx = x0; tx <= x1; tx++) {
+          var t = tiles[rows[ty][tx]];
+          if (t) g.sprite(t, tx * size - camX, ty * size - camY);
+        }
+      }
+    };
+    return map;
+  }
+  /* top-left of a camera that keeps (x, y) centred inside a world */
+  function camera(x, y, viewW, viewH, worldW, worldH) {
+    return {
+      x: worldW <= viewW ? Math.round((worldW - viewW) / 2) : clamp(Math.round(x - viewW / 2), 0, worldW - viewW),
+      y: worldH <= viewH ? Math.round((worldH - viewH) / 2) : clamp(Math.round(y - viewH / 2), 0, worldH - viewH)
+    };
+  }
+
+  /* ---------------- the game ---------------- */
+  function create(opt) {
+    opt = opt || {};
+    var W = opt.width || 160, H = opt.height || 144;
+    var LANG = padLang() || (opt.lang === "en" ? "en" : "zh");   /* opt.lang: the app's own default */
+    var STEP = 1 / 60;
+    var fontOpt = opt.font || {};
+    /* text: the pixel font when the app carries one, the phone's own font otherwise */
+    var BF = fontOpt.system ? null : BITMAP_FONT;
+    var FONT = { size: fontOpt.size || 12, family: fontOpt.family || "sans-serif", weight: fontOpt.weight || "400",
+      threshold: fontOpt.threshold || 0.45 };
+    FONT.line = BF ? BF.line : FONT.size + 2;
+    FONT.cell = BF ? BF.cell : FONT.line;
+
+    /* --- page and canvas --- */
+    var parent = opt.parent || document.body;
+    var border = opt.border == null ? PAPER : opt.border;
+    if (!opt.parent) {
+      var st = document.createElement("style");
+      st.textContent = "html,body{margin:0;height:100%;overflow:hidden;background:" + TONES[border] + "}" +
+        "body{display:flex;align-items:center;justify-content:center;touch-action:none;-webkit-user-select:none;user-select:none}";
+      document.head.appendChild(st);
+    }
+    var canvas = document.createElement("canvas");
+    canvas.width = W; canvas.height = H;
+    canvas.style.cssText = "display:block;image-rendering:pixelated;image-rendering:crisp-edges;touch-action:none";
+    parent.appendChild(canvas);
+    var ctx = canvas.getContext("2d");
+    var image = ctx.createImageData(W, H);
+    function fit() {
+      var aw = parent.clientWidth || innerWidth, ah = parent.clientHeight || innerHeight;
+      var dpr = window.devicePixelRatio || 1, best = Math.min(aw / W, ah / H), k = Math.floor(best * dpr) / dpr;
+      if (k < best * 0.9) k = best;   /* small screens: size beats perfectly even pixels */
+      k = Math.max(0.5, k);
+      canvas.style.width = Math.round(W * k) + "px"; canvas.style.height = Math.round(H * k) + "px";
+      game.scale = k;
+    }
+
+    /* --- framebuffer and drawing --- */
+    var buf = new Uint8Array(W * H);
+    var ox = 0, oy = 0, cx0 = 0, cy0 = 0, cx1 = W, cy1 = H;
+    function put(x, y, c) { if (x >= cx0 && y >= cy0 && x < cx1 && y < cy1) buf[y * W + x] = c; }
+
+    var fc = document.createElement("canvas"), fx = null, glyphs = {}, baseline = 0;
+    function fontCtx() {
+      if (fx) return fx;
+      fc.width = FONT.size * 3; fc.height = FONT.line + 4;
+      fx = fc.getContext("2d", { willReadFrequently: true });
+      fx.font = FONT.weight + " " + FONT.size + "px " + FONT.family;
+      fx.textBaseline = "alphabetic"; fx.fillStyle = TONES[INK];
+      var m = fx.measureText("国");
+      baseline = BF ? BF.cell - 2 : Math.round(m.actualBoundingBoxAscent || FONT.size * 0.88);
+      return fx;
+    }
+    /* a glyph is the system font at its native pixel size, thresholded to one bit */
+    function glyph(ch) {
+      var g = glyphs[ch]; if (g) return g;
+      var bf = BF && BF.glyphs[ch];
+      if (bf) {
+        var cut = bf.indexOf(":"), adv0 = +bf.slice(0, cut);
+        return (glyphs[ch] = { w: adv0, adv: adv0, h: BF.cell, bits: b64bits(bf.slice(cut + 1), adv0 * BF.cell) });
+      }
+      var x = fontCtx(), adv = Math.max(1, Math.round(x.measureText(ch).width));
+      x.clearRect(0, 0, fc.width, fc.height);
+      x.fillText(ch, 0, baseline);
+      var h = FONT.cell, w = Math.min(adv, fc.width), d = x.getImageData(0, 0, w, h).data, bits = new Uint8Array(w * h), lim = FONT.threshold * 255;
+      for (var i = 0; i < w * h; i++) bits[i] = d[i * 4 + 3] >= lim ? 1 : 0;
+      g = glyphs[ch] = { w: w, adv: adv, h: h, bits: bits };
+      return g;
+    }
+    function measure(str) { var w = 0; Array.from(String(str)).forEach(function (ch) { if (ch !== "\n") w += glyph(ch).adv; }); return w; }
+    var NO_START = "，。！？、；：）」』》,.!?;:)]%";
+    function wrap(str, width) {
+      var lines = [];
+      String(str).split("\n").forEach(function (para) {
+        var tokens = para.match(/[A-Za-z0-9'_\-]+|\s|./gu) || [""], line = "", lw = 0;
+        tokens.forEach(function (t) {
+          var tw = measure(t);
+          if (lw + tw > width && line && NO_START.indexOf(t) < 0) {
+            lines.push(line.replace(/\s+$/, "")); line = ""; lw = 0;
+            if (/^\s$/.test(t)) return;
+          }
+          line += t; lw += tw;
+        });
+        lines.push(line);
+      });
+      return lines;
+    }
+
+    var g = {
+      width: W, height: H, INK: INK, DARK: DARK, MID: MID, PAPER: PAPER,
+      clear: function (c) { buf.fill(c == null ? PAPER : c); },
+      origin: function (x, y) { ox = Math.round(x || 0); oy = Math.round(y || 0); },
+      clip: function (x, y, w, h) {
+        if (x == null) { cx0 = 0; cy0 = 0; cx1 = W; cy1 = H; return; }
+        cx0 = clamp(Math.round(x + ox), 0, W); cy0 = clamp(Math.round(y + oy), 0, H);
+        cx1 = clamp(Math.round(x + ox + w), 0, W); cy1 = clamp(Math.round(y + oy + h), 0, H);
+      },
+      pixel: function (x, y, c) { put(Math.round(x) + ox, Math.round(y) + oy, c); },
+      get: function (x, y) { x = Math.round(x) + ox; y = Math.round(y) + oy; return x < 0 || y < 0 || x >= W || y >= H ? null : buf[y * W + x]; },
+      rect: function (x, y, w, h, c) {
+        x = Math.round(x) + ox; y = Math.round(y) + oy;
+        var xa = Math.max(x, cx0), ya = Math.max(y, cy0), xb = Math.min(x + Math.round(w), cx1), yb = Math.min(y + Math.round(h), cy1);
+        for (var yy = ya; yy < yb; yy++) buf.fill(c, yy * W + xa, yy * W + Math.max(xa, xb));
+      },
+      frame: function (x, y, w, h, c) {
+        g.rect(x, y, w, 1, c); g.rect(x, y + h - 1, w, 1, c); g.rect(x, y, 1, h, c); g.rect(x + w - 1, y, 1, h, c);
+      },
+      line: function (x0, y0, x1, y1, c) {
+        x0 = Math.round(x0); y0 = Math.round(y0); x1 = Math.round(x1); y1 = Math.round(y1);
+        var dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1, e = dx + dy;
+        for (;;) { put(x0 + ox, y0 + oy, c); if (x0 === x1 && y0 === y1) break; var e2 = 2 * e; if (e2 >= dy) { e += dy; x0 += sx; } if (e2 <= dx) { e += dx; y0 += sy; } }
+      },
+      circle: function (cx, cy, r, c, fill) {
+        cx = Math.round(cx); cy = Math.round(cy);
+        for (var y = -r; y <= r; y++) {
+          var span = Math.round(Math.sqrt(r * r + r - y * y));
+          if (fill) g.rect(cx - span, cy + y, span * 2 + 1, 1, c);
+          else { g.pixel(cx - span, cy + y, c); g.pixel(cx + span, cy + y, c); }
+        }
+        if (!fill) for (var x = -r; x <= r; x++) { var s2 = Math.round(Math.sqrt(r * r + r - x * x)); g.pixel(cx + x, cy - s2, c); g.pixel(cx + x, cy + s2, c); }
+      },
+      /* level 0-4: 0 nothing, 2 checkerboard, 4 solid */
+      dither: function (x, y, w, h, c, level) {
+        level = clamp(level == null ? 2 : level, 0, 4);
+        x = Math.round(x); y = Math.round(y);
+        for (var yy = 0; yy < h; yy++) for (var xx = 0; xx < w; xx++) {
+          var px = (x + xx) & 1, py = (y + yy) & 1;
+          var on = level === 4 || (level === 3 && !(px && py)) || (level === 2 && px === py) || (level === 1 && !px && !py);
+          if (on) put(x + xx + ox, y + yy + oy, c);
+        }
+      },
+      /* opts: {flip, flipY, color (paint every opaque pixel one tone), map: [t0,t1,t2,t3]} */
+      sprite: function (s, x, y, o) {
+        o = o || {};
+        x = Math.round(x) + ox; y = Math.round(y) + oy;
+        var w = s.w, h = s.h, px = s.px, one = o.color, map = o.map;
+        for (var yy = 0; yy < h; yy++) {
+          var dy = y + yy; if (dy < cy0 || dy >= cy1) continue;
+          var sy = o.flipY ? h - 1 - yy : yy;
+          for (var xx = 0; xx < w; xx++) {
+            var dx = x + xx; if (dx < cx0 || dx >= cx1) continue;
+            var v = px[sy * w + (o.flip ? w - 1 - xx : xx)];
+            if (v === CLEAR) continue;
+            buf[dy * W + dx] = one != null ? one : map ? map[v] : v;
+          }
+        }
+      },
+      /* opts: {color, align: "left"|"center"|"right", width (wrap), shadow: tone} -> height drawn */
+      text: function (str, x, y, o) {
+        o = o || {};
+        var color = o.color == null ? INK : o.color;
+        var lines = o.width ? wrap(str, o.width) : String(str).split("\n"), yy = Math.round(y);
+        lines.forEach(function (ln) {
+          /* with a width, align inside x..x+width; without one, x is the centre or the right edge */
+          var lw = measure(ln), box = o.width || 0, xx = Math.round(x);
+          if (o.align === "center") xx = Math.round(box ? x + (box - lw) / 2 : x - lw / 2);
+          else if (o.align === "right") xx = Math.round(box ? x + box - lw : x - lw);
+          Array.from(ln).forEach(function (ch) {
+            var gl = glyph(ch);
+            for (var j = 0; j < gl.h; j++) for (var i = 0; i < gl.w; i++) if (gl.bits[j * gl.w + i]) {
+              if (o.shadow != null) put(xx + i + 1 + ox, yy + j + 1 + oy, o.shadow);
+              put(xx + i + ox, yy + j + oy, color);
+            }
+            xx += gl.adv;
+          });
+          yy += FONT.line;
+        });
+        return lines.length * FONT.line;
+      },
+      measure: measure,
+      wrap: wrap,
+      lineHeight: FONT.line,
+      /* the standard window: paper inside, ink border with cut corners */
+      window: function (x, y, w, h, o) {
+        o = o || {};
+        g.rect(x + 1, y + 1, w - 2, h - 2, o.fill == null ? PAPER : o.fill);
+        var c = o.border == null ? INK : o.border;
+        g.rect(x + 1, y, w - 2, 1, c); g.rect(x + 1, y + h - 1, w - 2, 1, c);
+        g.rect(x, y + 1, 1, h - 2, c); g.rect(x + w - 1, y + 1, 1, h - 2, c);
+        if (!o.thin) { g.rect(x + 2, y + 2, w - 4, 1, MID); }
+      },
+      /* a small arrow used by menus and "more" markers */
+      arrow: function (x, y, dir, c) {
+        c = c == null ? INK : c;
+        for (var i = 0; i < 4; i++) {
+          if (dir === "down") g.rect(x + i, y + i, 7 - 2 * i, 1, c);
+          else g.rect(x + i, y + i, 1, 7 - 2 * i, c);
+        }
+      }
+    };
+
+    /* --- palette effects: every frame the indexed buffer goes through this map --- */
+    var pal = [0, 1, 2, 3], fadeLevel = 0, fadeTo = PAPER, flashT = 0, shakeT = 0, shakeA = 0, sx = 0, sy = 0;
+    function present() {
+      var map = pal.slice();
+      if (fadeLevel) for (var i = 0; i < 4; i++) map[i] = fadeTo === PAPER ? Math.min(3, i + fadeLevel) : Math.max(0, i - fadeLevel);
+      if (flashT > 0) map = map.map(function (v) { return 3 - v; });
+      var d = image.data, n = W * H;
+      if (shakeT > 0) { sx = Math.round((Math.random() * 2 - 1) * shakeA); sy = Math.round((Math.random() * 2 - 1) * shakeA); } else { sx = sy = 0; }
+      for (var y = 0; y < H; y++) for (var x = 0; x < W; x++) {
+        var srcX = x - sx, srcY = y - sy, v = srcX < 0 || srcY < 0 || srcX >= W || srcY >= H ? PAPER : buf[srcY * W + srcX];
+        var c = RGB[map[v]], o = (y * W + x) * 4;
+        d[o] = c[0]; d[o + 1] = c[1]; d[o + 2] = c[2]; d[o + 3] = 255;
+      }
+      ctx.putImageData(image, 0, 0);
+      return n;
+    }
+
+    /* --- input: chin buttons through PAD, keyboard as a fallback, and the pointer --- */
+    var held = {}, heldFor = {}, queued = {}, pressedNow = {}, releasedNow = {}, queuedUp = {};
+    function down(b) { if (held[b]) return; held[b] = true; heldFor[b] = 0; queued[b] = true; }
+    function up(b) { if (!held[b]) return; held[b] = false; queuedUp[b] = true; }
+    if (HAS_PAD && PAD.on) { PAD.on("press", down); PAD.on("release", up); }
+    else {
+      addEventListener("keydown", function (e) { var b = KEYS[e.key]; if (b) { e.preventDefault(); if (!e.repeat) down(b); } });
+      addEventListener("keyup", function (e) { var b = KEYS[e.key]; if (b) up(b); });
+    }
+    addEventListener("blur", function () { BUTTONS.forEach(up); });
+    var pointer = { x: 0, y: 0, down: false, pressed: false, released: false }, pQueued = false, pQueuedUp = false;
+    function toScreen(e) {
+      var r = canvas.getBoundingClientRect();
+      pointer.x = Math.floor((e.clientX - r.left) * W / r.width); pointer.y = Math.floor((e.clientY - r.top) * H / r.height);
+    }
+    canvas.addEventListener("pointerdown", function (e) { e.preventDefault(); try { canvas.setPointerCapture(e.pointerId); } catch (x) {} toScreen(e); pointer.down = true; pQueued = true; });
+    canvas.addEventListener("pointermove", function (e) { toScreen(e); });
+    ["pointerup", "pointercancel"].forEach(function (t) { canvas.addEventListener(t, function (e) { toScreen(e); if (pointer.down) { pointer.down = false; pQueuedUp = true; } }); });
+    function inputBegin() {
+      pressedNow = queued; queued = {}; releasedNow = queuedUp; queuedUp = {};
+      pointer.pressed = pQueued; pQueued = false; pointer.released = pQueuedUp; pQueuedUp = false;
+    }
+    function inputEnd() { BUTTONS.forEach(function (b) { if (held[b]) heldFor[b] += STEP; }); }
+
+    /* --- timers and tweens (owned by the scene stack; cleared by game.go) --- */
+    var timers = [], tweens = [];
+    function runTimers() {
+      for (var i = 0; i < timers.length; i++) {
+        var t = timers[i]; t.left -= STEP;
+        if (t.left <= 0 && !t.dead) { t.fn(); if (t.every) t.left += t.every; else t.dead = true; }
+      }
+      timers = timers.filter(function (t) { return !t.dead; });
+      for (i = 0; i < tweens.length; i++) {
+        var w = tweens[i]; w.t = Math.min(1, w.t + STEP / w.dur);
+        var k = w.ease(w.t);
+        for (var p in w.to) w.obj[p] = lerp(w.from[p], w.to[p], k);
+        if (w.t >= 1) { w.dead = true; w.done(); }
+      }
+      tweens = tweens.filter(function (w) { return !w.dead; });
+    }
+
+    /* --- scenes: a stack; only the top one updates, all of them draw --- */
+    var scenes = {}, stack = [], busy = false;
+    function sceneOf(s) { if (typeof s === "string") { if (!scenes[s]) throw new Error("no scene named " + s); return scenes[s]; } return s; }
+    function enter(s, args) { var e = { scene: s, args: args, resolve: null }; stack.push(e); if (s.enter) s.enter(args); return e; }
+
+    var game = {
+      VERSION: VERSION, width: W, height: H, g: g, time: 0, frame: 0, scale: 1, pointer: pointer, lang: LANG,
+      t: function (text, vars) { return pick(text, LANG, vars); },
+      INK: INK, DARK: DARK, MID: MID, PAPER: PAPER,
+
+      scene: function (name, def) { scenes[name] = def; return def; },
+      start: function (name, args) { stack = []; enter(sceneOf(name), args); loop(); },
+      go: function (name, args, o) {
+        o = o || {};
+        var next = sceneOf(name);
+        var swap = function () {
+          while (stack.length) { var e = stack.pop(); if (e.scene.exit) e.scene.exit(); if (e.resolve) e.resolve(null); }
+          timers = []; tweens = [];
+          enter(next, args);
+        };
+        if (o.fade === false) { swap(); return Promise.resolve(); }
+        busy = true;
+        return game.fade("out", o.time || 0.25, o.to).then(function () { swap(); return game.fade("in", o.time || 0.25, o.to); }).then(function () { busy = false; });
+      },
+      /* overlays: game.push(scene) resolves with the value given to game.pop(value) */
+      push: function (s, args) { return new Promise(function (res) { enter(sceneOf(s), args).resolve = res; }); },
+      pop: function (value) {
+        var e = stack.pop(); if (!e) return;
+        if (e.scene.exit) e.scene.exit();
+        if (e.resolve) e.resolve(value);
+      },
+      top: function () { var e = stack[stack.length - 1]; return e && e.scene; },
+
+      btn: function (b) { return !!held[b]; },
+      pressed: function (b) { return !!pressedNow[b]; },
+      released: function (b) { return !!releasedNow[b]; },
+      /* true when first pressed, then again every `rate` seconds after `delay` (menus, cursors) */
+      repeat: function (b, delay, rate) {
+        if (pressedNow[b]) return true;
+        if (!held[b]) return false;
+        delay = delay == null ? 0.32 : delay; rate = rate == null ? 0.09 : rate;
+        var t = heldFor[b] - delay; return t >= 0 && Math.floor(t / rate) !== Math.floor((t - STEP) / rate);
+      },
+      /* A, START or a tap: "carry on" */
+      ok: function () { return !!(pressedNow.a || pressedNow.start || pointer.pressed); },
+      /* the D-pad as a direction: {x, y}, one step per press with repeat */
+      dir: function (delay, rate) {
+        return { x: (game.repeat("right", delay, rate) ? 1 : 0) - (game.repeat("left", delay, rate) ? 1 : 0),
+                 y: (game.repeat("down", delay, rate) ? 1 : 0) - (game.repeat("up", delay, rate) ? 1 : 0) };
+      },
+
+      after: function (sec, fn) { var t = { left: sec, fn: fn }; timers.push(t); return function () { t.dead = true; }; },
+      every: function (sec, fn) { var t = { left: sec, every: sec, fn: fn }; timers.push(t); return function () { t.dead = true; }; },
+      wait: function (sec) { return new Promise(function (res) { game.after(sec, res); }); },
+      tween: function (obj, to, sec, ease) {
+        return new Promise(function (res) {
+          var from = {}; for (var p in to) from[p] = obj[p];
+          tweens.push({ obj: obj, from: from, to: to, dur: Math.max(STEP, sec), t: 0, ease: EASE[ease || "out"] || EASE.out, done: res });
+        });
+      },
+
+      /* screen effects */
+      fade: function (dir, sec, to) {
+        fadeTo = to == null ? PAPER : to;
+        var steps = 3, each = (sec == null ? 0.25 : sec) / steps, i = 0;
+        return new Promise(function (res) {
+          var tick = function () {
+            i++; fadeLevel = dir === "out" ? i : steps - i;
+            if (i >= steps) { if (dir !== "out") fadeLevel = 0; res(); } else game.after(each, tick);
+          };
+          if (dir !== "out") fadeLevel = steps;
+          game.after(each, tick);
+        });
+      },
+      flash: function (sec) { flashT = sec == null ? 0.08 : sec; },
+      shake: function (amount, sec) { shakeA = amount == null ? 2 : amount; shakeT = sec == null ? 0.25 : sec; },
+
+      /* sound. sfx("coin") or sfx({wave, from, to, ms, ...}); music(song, {loop}) and musicStop() (1.3.0).
+         Runtimes without PAD.music (before 0.11.0) have no music and no custom sounds: those calls do nothing. */
+      sfx: function (s) { if (HAS_PAD && PAD.sfx && (typeof s === "string" || PAD.music)) PAD.sfx(s); },
+      music: function (song, o) { if (HAS_PAD && PAD.music) PAD.music.play(song, o); },
+      musicStop: function () { if (HAS_PAD && PAD.music) PAD.music.stop(); },
+      /* ambience("rain", 0.6), ambience(null) to fade it out (1.4.0); nothing on runtimes before 0.13.0 */
+      ambience: function (name, level) { if (HAS_PAD && PAD.ambience) PAD.ambience(name, level); },
+      save: function (key, value) { if (HAS_PAD) PAD.save(key, value); else memory[key] = JSON.parse(JSON.stringify(value)); },
+      load: function (key) { return HAS_PAD ? PAD.load(key) : Promise.resolve(key in memory ? memory[key] : null); },
+      remove: function (key) { if (HAS_PAD) PAD.remove(key); else delete memory[key]; },
+
+      /* dialogue: resolves when the player has read every page */
+      say: function (text, o) { return game.push(dialogScene(text, o || {})); },
+      /* menu: resolves with the chosen index, or -1 when cancelled with B */
+      choose: function (items, o) { return game.push(menuScene(items, o || {})); }
+    };
+    var memory = {};
+
+    /* --- built-in overlay: dialogue box with a typewriter --- */
+    function dialogScene(text, o) {
+      var pages = [], boxH = o.lines ? o.lines * FONT.line + 10 : 3 * FONT.line + 10, innerW = W - 16;
+      (Array.isArray(text) ? text : [text]).forEach(function (t) {
+        var ls = wrap(t, innerW), per = Math.floor((boxH - 10) / FONT.line);
+        for (var i = 0; i < ls.length; i += per) pages.push(ls.slice(i, i + per));
+      });
+      var page = 0, shown = 0, speed = o.speed || 40, blip = o.blip !== false, y = o.top ? 0 : H - boxH, sinceBlip = 0;
+      function total() { return Array.from(pages[page].join("")).length; }
+      return {
+        update: function () {
+          if (shown < total()) {
+            var before = Math.floor(shown);
+            shown = Math.min(total(), shown + speed * STEP);
+            if (blip && Math.floor(shown) !== before && (sinceBlip++ % 3 === 0)) game.sfx("tick");
+            if (game.ok() || game.pressed("b")) shown = total();
+          } else if (game.ok() || game.pressed("b")) {
+            if (page < pages.length - 1) { page++; shown = 0; game.sfx("move"); }
+            else { game.sfx("move"); game.pop(true); }
+          }
+        },
+        draw: function (gg) {
+          gg.origin(0, 0); gg.clip();
+          var top = y;
+          if (o.name) {
+            var nw = measure(o.name) + 10, ny = o.top ? boxH - 1 : top - FONT.line - 3;
+            gg.window(4, ny, nw, FONT.line + 4, { thin: true });
+            gg.text(o.name, 9, ny + 2);
+          }
+          gg.window(0, top, W, boxH);
+          var left = Math.floor(shown), ty = top + 5;
+          pages[page].forEach(function (ln) {
+            var part = Array.from(ln).slice(0, Math.max(0, left)).join("");
+            left -= Array.from(ln).length;
+            gg.text(part, 8, ty); ty += FONT.line;
+          });
+          if (shown >= total() && Math.floor(game.time * 3) % 2 === 0) gg.arrow(W - 13, top + boxH - 7, "down");
+        }
+      };
+    }
+
+    /* --- built-in overlay: a vertical menu --- */
+    function menuScene(items, o) {
+      var sel = clamp(o.index || 0, 0, items.length - 1), pad = 6, rowH = FONT.line + 2;
+      var w = o.width || Math.max.apply(null, items.map(measure).concat([o.title ? measure(o.title) : 0])) + pad * 2 + 10;
+      var h = items.length * rowH + pad * 2 - 2 + (o.title ? rowH : 0);
+      var x = o.x == null ? Math.round((W - w) / 2) : o.x, y = o.y == null ? Math.round((H - h) / 2) : o.y;
+      var cancel = o.cancel !== false;
+      return {
+        update: function () {
+          var d = game.dir();
+          if (d.y) { sel = (sel + d.y + items.length) % items.length; game.sfx("move"); }
+          if (game.pressed("a") || game.pressed("start")) { game.sfx("tap"); game.pop(sel); return; }
+          if (cancel && game.pressed("b")) { game.sfx("miss"); game.pop(-1); return; }
+          if (pointer.pressed) {
+            var r = Math.floor((pointer.y - y - pad - (o.title ? rowH : 0)) / rowH);
+            if (pointer.x >= x && pointer.x < x + w && r >= 0 && r < items.length) { sel = r; game.sfx("tap"); game.pop(sel); }
+            else if (cancel) { game.sfx("miss"); game.pop(-1); }
+          }
+        },
+        draw: function (gg) {
+          gg.origin(0, 0); gg.clip();
+          gg.window(x, y, w, h);
+          var ty = y + pad;
+          if (o.title) { gg.text(o.title, x + pad, ty, { color: DARK }); ty += rowH; }
+          items.forEach(function (it, i) {
+            if (i === sel) gg.arrow(x + pad - 1, ty + 3, "right");
+            gg.text(it, x + pad + 8, ty);
+            ty += rowH;
+          });
+        }
+      };
+    }
+
+    /* --- the loop: fixed 60 steps a second, one draw per screen refresh --- */
+    var last = 0, acc = 0, running = false;
+    function tick() {
+      inputBegin();
+      runTimers();
+      var top = stack[stack.length - 1];
+      if (top && top.scene.update && !busy) top.scene.update(STEP);
+      if (flashT > 0) flashT -= STEP;
+      if (shakeT > 0) shakeT -= STEP;
+      game.time += STEP; game.frame++;
+      inputEnd();
+    }
+    function render() {
+      g.origin(0, 0); g.clip();
+      for (var i = 0; i < stack.length; i++) { var s = stack[i].scene; g.origin(0, 0); g.clip(); if (s.draw) s.draw(g); }
+      present();
+    }
+    function frame(ts) {
+      requestAnimationFrame(frame);
+      if (!last) last = ts;
+      acc += Math.min(0.1, (ts - last) / 1000); last = ts;
+      var n = 0;
+      while (acc >= STEP && n < 6) { tick(); acc -= STEP; n++; }
+      if (n) render();
+    }
+    function loop() {
+      if (running) return; running = true;
+      fit(); addEventListener("resize", fit);
+      document.addEventListener("visibilitychange", function () { last = 0; });
+      requestAnimationFrame(frame);
+    }
+    g.clear();
+    return game;
+  }
+
+  return {
+    VERSION: VERSION, TONES: TONES.slice(), font: font, INK: INK, DARK: DARK, MID: MID, PAPER: PAPER, BUTTONS: BUTTONS.slice(),
+    create: create, sprite: sprite, sprites: sprites, tilemap: tilemap, camera: camera, rng: rng,
+    clamp: clamp, lerp: lerp, approach: approach, t: t
+  };
+})();
+</script>
+<script data-lo-font="lopix12">
+/*
+lopix12: a 12-pixel bitmap font for Lo-PDA apps.
+
+lopix12 is a Modified Version of Fusion Pixel Font (12px, proportional,
+Simplified Chinese; upstream release 2026.08.11): its glyphs were rasterized at
+their native size into one-bit bitmaps, and apps carry only the characters they
+use. It is distributed under the SIL Open Font License 1.1, below, and only
+under that license. It is not named Fusion Pixel, which is a Reserved Font Name.
+
+Fusion Pixel Font: https://github.com/TakWolf/fusion-pixel-font
+Copyright (c) 2022, TakWolf (https://takwolf.com), with Reserved Font Name 'Fusion Pixel'.
+It combines glyphs from these OFL-licensed fonts:
+- Ark Pixel Font, Copyright (c) 2021, TakWolf (https://takwolf.com).
+- Cubic 11, including JF Dot M+H 12, Copyright(c) 2005 M+ FONTS PROJECT,
+  and M+ BITMAP FONTS, Copyright (C) 2002-2004 COZ.
+- Galmuri, Copyright (c) 2019-2025 Lee Minseo (quiple@quiple.dev).
+
+-----------------------------------------------------------
+SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
+-----------------------------------------------------------
+
+PREAMBLE
+The goals of the Open Font License (OFL) are to stimulate worldwide
+development of collaborative font projects, to support the font creation
+efforts of academic and linguistic communities, and to provide a free and
+open framework in which fonts may be shared and improved in partnership
+with others.
+
+The OFL allows the licensed fonts to be used, studied, modified and
+redistributed freely as long as they are not sold by themselves. The
+fonts, including any derivative works, can be bundled, embedded,
+redistributed and/or sold with any software provided that any reserved
+names are not used by derivative works. The fonts and derivatives,
+however, cannot be released under any other type of license. The
+requirement for fonts to remain under this license does not apply
+to any document created using the fonts or their derivatives.
+
+DEFINITIONS
+"Font Software" refers to the set of files released by the Copyright
+Holder(s) under this license and clearly marked as such. This may
+include source files, build scripts and documentation.
+
+"Reserved Font Name" refers to any names specified as such after the
+copyright statement(s).
+
+"Original Version" refers to the collection of Font Software components as
+distributed by the Copyright Holder(s).
+
+"Modified Version" refers to any derivative made by adding to, deleting,
+or substituting -- in part or in whole -- any of the components of the
+Original Version, by changing formats or by porting the Font Software to a
+new environment.
+
+"Author" refers to any designer, engineer, programmer, technical
+writer or other person who contributed to the Font Software.
+
+PERMISSION & CONDITIONS
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of the Font Software, to use, study, copy, merge, embed, modify,
+redistribute, and sell modified and unmodified copies of the Font
+Software, subject to the following conditions:
+
+1) Neither the Font Software nor any of its individual components,
+in Original or Modified Versions, may be sold by itself.
+
+2) Original or Modified Versions of the Font Software may be bundled,
+redistributed and/or sold with any software, provided that each copy
+contains the above copyright notice and this license. These can be
+included either as stand-alone text files, human-readable headers or
+in the appropriate machine-readable metadata fields within text or
+binary files as long as those fields can be easily viewed by the user.
+
+3) No Modified Version of the Font Software may use the Reserved Font
+Name(s) unless explicit written permission is granted by the corresponding
+Copyright Holder. This restriction only applies to the primary font name as
+presented to the users.
+
+4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font
+Software shall not be used to promote, endorse or advertise any
+Modified Version, except to acknowledge the contribution(s) of the
+Copyright Holder(s) and the Author(s) or with their explicit written
+permission.
+
+5) The Font Software, modified or unmodified, in part or in whole,
+must be distributed entirely under this license, and must not be
+distributed under any other license. The requirement for fonts to
+remain under this license does not apply to any document created
+using the Font Software.
+
+TERMINATION
+This license becomes null and void if any of the above conditions are
+not met.
+
+DISCLAIMER
+THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT
+OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
+DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
+OTHER DEALINGS IN THE FONT SOFTWARE.
+*/
+LoGame.font({"name":"lopix12","cell":13,"line":14,"glyphs":{"0":"6:AAciimqyiicAAA==","1":"6:AAIYIIIIIIcAAA==","2":"6:AAciCCEIQg+AAA==","3":"6:AAciCCMCCicAAA==","4":"6:AAEMMUUk+EEAAA==","5":"6:AA+ggg8CCicAAA==","6":"6:AAcigg8iiicAAA==","7":"6:AA+CCEEIIIIAAA==","8":"6:AAciiiciiicAAA==","9":"6:AAciiieCCicAAA=="," ":"6:AAAAAAAAAAAAAA==","!":"4:AEREREBAAA==","\"":"6:AAUUUAAAAAAAAA==","#":"7:AAEiT8kSJPyRIAAA","$":"6:AIcqoocKKqcIAA==","%":"8:AABEpEgIECAkSkQAAA==","&":"7:AADCRIYZSokR0AAA","'":"4:AERAAAAAAA==","(":"6:AEIIQQQQQIIEAA==",")":"6:AQIIEEEEEIIQAA==","*":"6:AAAAAIqcqIAAAA==","+":"6:AAAAAII+IIAAAA==",",":"4:AAAAAABEgA==","-":"6:AAAAAAA+AAAAAA==",".":"4:AAAAAABAAA==","/":"6:ACCEEIIIQQggAA==",":":"4:AAAEAABAAA==",";":"4:AAAEAABEgA==","<":"5:AAABERBBBAAA","=":"6:AAAAAA+A+AAAAA==",">":"5:AAAIIIIiIAAA","?":"6:AAciCCEIIAIAAA==","@":"8:AAA4RJqqqqqqtkA8AA==","A":"8:AAAQECgoRHxEgoIAAA==","B":"7:AAPkKFC+QoUL4AAA","C":"7:AADiKBAgQICI4AAA","D":"7:AAPESFChQoUTwAAA","E":"7:AAP0CBA+QIED8AAA","F":"7:AAP0CBA+QIECAAAA","G":"7:AADiKBAgRoSI8AAA","H":"7:AAIUKFC/QoUKEAAA","I":"4:AORERETgAA==","J":"6:AACCCCCCiicAAA==","K":"7:AAIUSRQwUJESEAAA","L":"6:AAgggggggg+AAA==","M":"8:AACCgsbGqqqSkpIAAA==","N":"7:AAIWKlSlSo0aEAAA","O":"8:AAA4RIKCgoKCRDgAAA==","P":"7:AAPkKFC+QIECAAAA","Q":"8:AAA4RIKCgoKKRDoAAA==","R":"7:AAPkKFC+SIkSEAAA","S":"7:AAHkKAgMBAUJ4AAA","T":"8:AAD+EBAQEBAQEBAAAA==","U":"7:AAIUKFChQoUJ4AAA","V":"8:AACCgkRERCgoEBAAAA==","W":"10:AAAIiiKIlUVRVCIIgiAAAAA=","X":"8:AACCREQoEChERIIAAA==","Y":"8:AACCREQoKBAQEBAAAA==","Z":"7:AAPwIIIIEEED8AAA","[":"6:AcQQQQQQQQQcAA==","\\":"6:AggQQIIIEECCAA==","]":"6:AcEEEEEEEEEcAA==","^":"6:AAIUiAAAAAAAAA==","_":"6:AAAAAAAAAAAA+A==","`":"5:ABBAAAAAAAAA","a":"6:AAAAAcCeiieAAA==","b":"6:AAggg8iiii8AAA==","c":"6:AAAAAciggicAAA==","d":"6:AACCCeiiiieAAA==","e":"6:AAAAAci+gicAAA==","f":"5:AAyEeQhCEAAA","g":"6:AAAAAeiiiieCcA==","h":"6:AAgggsyiiiiAAA==","i":"4:AEAMRETgAA==","j":"4:ACAOIiIiwA==","k":"6:AAgggiswokiAAA==","l":"4:AMRERERgAA==","m":"8:AAAAAADskpKSkpIAAA==","n":"6:AAAAAsyiiiiAAA==","o":"6:AAAAAciiiicAAA==","p":"6:AAAAA8iiii8ggA==","q":"6:AAAAAeiiiieCCA==","r":"5:AAAAWxCEIAAA","s":"6:AAAAAciYEicAAA==","t":"5:ABCEeQhCDAAA","u":"6:AAAAAiiiimaAAA==","v":"6:AAAAAiiUUIIAAA==","w":"8:AAAAAACSkqqqREQAAA==","x":"6:AAAAAiUIIUiAAA==","y":"6:AAAAAiiiUUIIwA==","z":"6:AAAAA+EIQg+AAA==","{":"7:ADCBAgQQECBAgMAA","|":"4:BEREREREAA==","}":"7:AMBAgQICCBAgQwAA","~":"6:AAAAAQqEAAAAAA==","…":"12:AAAAAAAAAAAAZmZmAAAAAAAAAAA=","一":"12:AAAAAAAAAAAA/+AAAAAAAAAAAAA=","个":"12:AABACgEQIIxGBABABABABABAAAA=","了":"12:AAf8AEAIAQAgAgAgAgAgAgDgAAA=","住":"12:AAIgIQX+QQwQQQT8QQQQQQX+AAA=","余":"12:AADgEQII32BABAf8BAJIxGDAAAA=","停":"12:AAIgP+SET8wAX+UCT8QQQQRwAAA=","允":"12:AABACAEQIIf8EUEQEQESISweAAA=","再":"12:AA/+BAf8REf8RERE/+QEQEQcAAA=","准":"12:AAhQRIT+GID+CISIT+SIiIj+AAA=","分":"12:AAEQEQIIIIQEv6CICIEIIIwwAAA=","剩":"12:AADCcKEK/qVK1qVK1qOCVCkuAAA=","加":"12:AAIAIe/SJSJSJSJSJSRSRSmeAAA=","升":"12:AADIcIEIEIEI/+EIEIEIIIwIAAA=","口":"12:AAAAf8QEQEQEQEQEQEQEf8AAAAA=","台":"12:AACAEAIIQE/6ACf8QEQEQEf8AAA=","后":"12:AAA8fAQAQAf+QAX8UEUEUEn8AAA=","含":"12:AADgMYxGAgf8AIAQf8QEQEf8AAA=","听":"12:AAAM7wqAqAr+qIqIqI6ICIEIAAA=","吹":"12:AABA5Ap+qCsUoQoQoo4oBEGCAAA=","哨":"12:AACS5UoQr+qCr+qCr+6CCCCGAAA=","唱":"12:AAB85Ep8pEp8oAr+qC7+CCD+AAA=","回":"12:AA/+gCgCnykSkSkSnygCgC/+AAA=","在":"12:AACACA/+EAEQIQb+oQIQIQL+AAA=","备":"12:AAEAP40QDgMYwGf8REf8REf8AAA=","始":"12:AAIQIQ8kVEX6UAl+VCJCVCh+AAA=","对":"12:AAAE8EF+kEUEVEIkIkUEUEgcAAA=","开":"12:AA/+IIIIIIII/+IIIIQIQIgIAAA=","总":"12:AAIIEQf8QEQEf8AAVEUikKD4AAA=","或":"12:AAAoAk/+AgekSkSoeQASGq5GAAA=","按":"12:AAQQT+6CQQQQb+wkREQoQYzmAAA=","掌":"12:AAJI/+gCP4IIf8BAf8BA/+BAAAA=","支":"12:AABABA/+BABAf8IIEQDgMYwGAAA=","时":"12:AAAE8El+kEkE9EkkkkkE8EAcAAA=","暂":"12:AAIG+4Qgo++kJEf8QEf8QEf8AAA=","最":"12:AAf8QEf8QE/+SAe+SiXU6IC2AAA=","有":"12:AACA/+EAIAP8YEv8IEP8IEIcAAA=","未":"12:AABABAf8BABA/+FQFQJIxGBAAAA=","机":"12:AAJ4JI9IJIJIZIdIpIJKJKKOAAA=","来":"12:AABAf8BAJIFQ/+DgFQJIxGBAAAA=","标":"12:AAJ8IA8AL+IQYQdUpSJSKSIwAAA=","正":"12:AA/+BABABAJAJ8JAJAJAJA/+AAA=","没":"12:AAR4JIBIhIWOAAD8SERIgwnOAAA=","法":"12:AAQQIQD8gQQQH+AgREREianiAAA=","灭":"12:AA/+BABAJEJERICgCgEQIIwGAAA=","点":"12:AABAB+BABAf8QEQEf8AAUkiSAAA=","烛":"12:AAIQIQr+uSqSKSL+IQUUUajiAAA=","玩":"12:AAD84AQAQAX+5IRIRIaKyKEOAAA=","着":"12:AAEQ/+CAf8EA/+IEYEv8IEP8AAA=","第":"12:AAQge+lIf8BEf8RAf+FCJCxMAAA=","等":"12:AAQge+lIf8BA/+AI/+EICIA4AAA=","筒":"12:AAQge+lIf8QEX0QEX0UUX0QMAAA=","继":"12:AASISqicqIy+SIic6qCIKAz+AAA=","续":"12:AAQQR8gQr+xCSohI7+AQIkzCAAA=","蜡":"12:AAIUI++UqUr+qA++IiK+Oiy+AAA=","许":"12:AAiAT8EQAQwQX+QQQQQQYQQQAAA=","话":"12:AAgMTwAQAQz+QQQQR8VEZER8AAA=","轮":"12:AAIQ8oREqCpA9EJINw5CJCI+AAA=","这":"12:AAggQQH+AExEQoQQQoTGoAn+AAA=","重":"12:AAf8BA/+REf8REf8BAf8BA/+AAA=","键":"12:AAQIe+iK7+UKW+6IS+WIbIU+AAA=","间":"12:AAn+QCACnykSkSnykSkSnygGAAA=","音":"12:AABAf8IIEQ/+AAP4IIP4IIP4AAA=","题":"12:AA++iI++ii+qAq+IIUui4An+AAA=","高":"12:AABA/+IIP4AA/+gCnykSnygGAAA=","！":"12:AAAAIAcAcAcAIAIAIAAAIAAAAAA=","，":"12:AAAAAAAAAAAAAAAAMAMAEAIAAAA=","：":"12:AAAAAAMAMAAAAAAAAAMAMAAAAAA="}});
+</script>
+<script>
+var game = LoGame.create({ width: 160, height: 176, lang: "zh" });
+var T = game.t;
+document.documentElement.lang = game.lang === "zh" ? "zh-CN" : "en";
+
+var HUD = 16, TABLE = 112, FOOT = 160;
+var ROUNDS = [{ n: 3, sec: 10 }, { n: 5, sec: 10 }, { n: 7, sec: 12 }, { n: 9, sec: 12, thick: true }];
+var BONUS_SEC = 15, HOLD_NOTE = 1.5;       /* the last round: hold the note this long to light the candle */
+
+/* ---- the microphone: one way to play, never the only one (SPEC.md 4 and 6.4) ---- */
+var HAS_MIC = typeof PAD !== "undefined" && !!PAD.mic;
+var mode = HAS_MIC ? "mic" : "keys";
+var live = false, wanted = false, asking = false;
+var heard = { level: 0, pitch: null }, floor = 0.3;
+var note = "", noteUntil = 0;
+
+function say(text, sec) { note = text; noteUntil = game.time + (sec || 3); }
+/* on only while a round listens: while it is on the phone's silent switch does nothing */
+function micOn() {
+  if (mode !== "mic" || !HAS_MIC) return;
+  wanted = true; asking = true;
+  PAD.mic.start().then(function (r) {
+    asking = false;
+    if (!wanted) { PAD.mic.stop(); return; }
+    if (r === "on") { live = true; return; }
+    mode = "keys";                                      /* for now: the player can switch back, and start() asks again */
+    say(r === "none" ? T({ zh: "没有话筒：按住 A 吹", en: "No mic: hold A to blow" })
+                     : T({ zh: "话筒未允许：按住 A 吹", en: "Mic off: hold A to blow" }), 4);
+  });
+}
+function micOff() {
+  wanted = false; live = false; heard.level = 0; heard.pitch = null;
+  if (HAS_MIC) PAD.mic.stop();
+}
+if (HAS_MIC) PAD.on("sound", function (s) {
+  if (!wanted) return;
+  heard.level = s.level; heard.pitch = s.pitch;
+  /* the room's own noise: follow it down at once, up slowly, so a fan or traffic does not count as a breath */
+  floor = s.level < floor ? s.level : Math.min(floor + 0.004, 0.6);
+});
+function threshold() { return Math.max(0.5, floor + 0.2); }
+
+var best = 0;
+game.load("best").then(function (v) { if (typeof v === "number") best = v; });
+game.load("mode").then(function (v) { if (v === "keys" || (v === "mic" && HAS_MIC)) mode = v; });
+
+/* ---- sounds of our own ---- */
+var PUFF = { wave: "noise", from: 1400, to: 300, ms: 200, attack: 4, decay: 190, vol: 0.55 };
+var LIGHT = { wave: "square", duty: 1, from: 330, to: 990, ms: 260, attack: 5, decay: 240, vol: 0.45 };
+var REF = { wave: "triangle", from: 440, to: 440, ms: 900, attack: 30, decay: 300, vol: 0.6 };   /* the note to sing: A */
+var fireAt = -1;
+function fire(lit) { if (lit === fireAt) return; fireAt = lit; game.ambience(lit > 0 ? "fire" : null, Math.min(0.7, 0.15 + lit * 0.06)); }
+
+/* ---- art ---- */
+var FLAME = [
+  LoGame.sprite(["...1...", "...1...", "..121..", "..131..", ".12321.", ".13331.", "1233321", "1333331", "1333331", ".13331.", "..111.."]),
+  LoGame.sprite(["....1..", "...11..", "..121..", "..1331.", ".12321.", ".13331.", "1233321", "1333331", "1333331", ".13331.", "..111.."])
+];
+var SMALL = LoGame.sprite(["..1..", ".121.", ".131.", "13331", ".131.", "..1.."]);
+
+/* ---- the round ---- */
+var R, score = 0;
+function newRound(i) {
+  var bonus = i >= ROUNDS.length, spec = ROUNDS[Math.min(i, ROUNDS.length - 1)], n = bonus ? 1 : spec.n;
+  var c = [], gap = 160 / (n + 1);
+  for (var k = 0; k < n; k++) {
+    var thick = !bonus && spec.thick && (k === 0 || k === n - 1);
+    c.push({ x: Math.round(gap * (k + 1)), h: 22 + Math.floor(Math.random() * 18), w: thick ? 12 : 8, hard: thick ? 1.8 : 0.8 + Math.random() * 0.5,
+             life: bonus ? 0 : 1, lit: !bonus, smoke: 0 });
+  }
+  return { i: i, bonus: bonus, c: c, left: bonus ? BONUS_SEC : spec.sec, phase: "ready", t: 0, wind: 0, held: 0, lung: 1,
+           semi: -6, hold: 0, refUntil: 0, got: 0, timeBonus: 0, ticked: 0 };
+}
+function litCount() { return R.c.filter(function (c) { return c.lit; }).length; }
+
+function begin() { R.phase = "play"; R.t = 0; if (R.bonus) playRef(); }
+function playRef() { game.sfx(REF); R.refUntil = game.time + 1.2; }
+
+function end() {
+  micOff();                                             /* listening is over: give the silent switch back */
+  R.phase = "done"; R.t = 0;
+  if (R.bonus) { R.got = R.c[0].lit ? 50 : 0; }
+  else {
+    R.got = (R.c.length - litCount()) * 10;
+    R.timeBonus = litCount() === 0 ? Math.ceil(R.left) * 5 : 0;
+  }
+  score += R.got + R.timeBonus;
+  game.sfx(R.got + R.timeBonus > 0 ? "win" : "lose");
+  fire(R.bonus && R.c[0].lit ? 1 : 0);
+  if (R.bonus && score > best) { best = score; game.save("best", best); }
+}
+
+/* blowing: how hard, 0-1, from the microphone or from A held down */
+function blowing(dt) {
+  var target = 0;
+  if (live) {
+    var th = threshold();
+    if (heard.level > th) target = Math.min(1, (heard.level - th) / (0.95 - th) * 0.8 + 0.2);
+  }
+  if (game.btn("a") && R.lung > 0) {                     /* the longer A is held, the harder: until the breath runs out */
+    R.held += dt; R.lung = Math.max(0, R.lung - dt / 3);
+    target = Math.max(target, Math.min(1, 0.3 + R.held * 0.45));
+  } else if (!game.btn("a")) { R.held = 0; R.lung = Math.min(1, R.lung + dt / 2); }
+  R.wind += (target - R.wind) * Math.min(1, dt * (target > R.wind ? 12 : 6));
+  if (R.wind < 0.01) R.wind = 0;
+}
+
+function blowOut(dt) {
+  var w = R.wind, half = (R.c.length - 1) / 2 || 1, out = 0;
+  R.c.forEach(function (c, k) {
+    if (c.smoke > 0) c.smoke -= dt;
+    if (!c.lit) return;
+    var far = Math.abs(k - half) / half;                /* the breath is aimed at the middle: a loud one reaches the ends */
+    var reach = w * (1.15 - far * 0.55);
+    if (reach > 0.25) c.life -= (reach - 0.15) * dt * 1.6 / c.hard;
+    else c.life = Math.min(1, c.life + dt * 0.5);       /* a flame that is let be stands up again */
+    if (c.life <= 0) { c.lit = false; c.smoke = 1.2; out++; }
+  });
+  if (out) { game.sfx(PUFF); fire(litCount()); }
+}
+
+function sing(dt) {
+  var c = R.c[0];
+  if (c.lit) return;
+  var semi = null;
+  if (live && heard.pitch) {                           /* readings come only when they change: hold the last one */
+    var s = 12 * Math.log(heard.pitch / 440) / Math.LN2;
+    semi = ((s % 12) + 18) % 12 - 6;                     /* any octave counts: sing it, hum it or whistle it */
+  }
+  if (game.btn("a")) R.semi = Math.min(6, R.semi + dt * 7);          /* keys: A raises the note, letting go lowers it */
+  else if (semi === null) R.semi = Math.max(-6, R.semi - dt * 5);
+  if (semi !== null) R.semi += (semi - R.semi) * Math.min(1, dt * 10);
+  var on = Math.abs(R.semi) < 1 && game.time > R.refUntil && (semi !== null || game.btn("a"));
+  R.hold = on ? R.hold + dt : Math.max(0, R.hold - dt * 0.5);
+  if (R.hold >= HOLD_NOTE) { c.lit = true; c.life = 1; c.smoke = 0; game.sfx(LIGHT); fire(1); end(); }
+}
+
+async function pause() {
+  micOff();                                             /* paused: nothing to listen for */
+  game.sfx("tap");
+  var acts = [["go", { zh: "继续", en: "Resume" }], ["again", { zh: "重来", en: "Start over" }]];
+  if (HAS_MIC) acts.push(["mode", mode === "mic" ? { zh: "按键玩法", en: "Play with keys" } : { zh: "话筒玩法", en: "Play with mic" }]);
+  acts.push(["quit", { zh: "回标题", en: "Title" }]);
+  var i = await game.choose(acts.map(function (a) { return T(a[1]); }), { title: T({ zh: "暂停", en: "Paused" }) });
+  var act = i < 0 ? "go" : acts[i][0];
+  if (act === "quit") { game.go("title"); return; }
+  if (act === "again") { game.go("round", { i: 0, fresh: true }); return; }
+  if (act === "mode") {
+    mode = mode === "mic" ? "keys" : "mic"; game.save("mode", mode);
+    say(mode === "mic" ? T({ zh: "对着话筒吹", en: "Blow into the mic" }) : T({ zh: "按住 A 吹", en: "Hold A to blow" }), 2);
+  }
+  micOn();
+}
+
+/* ---- drawing ---- */
+function drawCandles(g) {
+  var half = (R.c.length - 1) / 2 || 1;
+  R.c.forEach(function (c, k) {
+    var top = TABLE - c.h, x = c.x - (c.w >> 1);
+    g.rect(x, top, c.w, c.h, g.PAPER); g.frame(x, top, c.w, c.h, g.INK);
+    g.rect(x + 1, top + 1, 2, c.h - 2, g.MID);
+    if (c.lit || c.smoke > 0 || R.bonus) g.line(c.x, top - 3, c.x, top - 1, g.INK);       /* the wick */
+    if (c.lit) {
+      var side = k < half ? -1 : k > half ? 1 : (Math.floor(game.time * 3) % 2 ? 1 : -1);
+      var lean = Math.round(R.wind * 3 * side * (0.4 + 0.6 * c.life));
+      var f = c.life > 0.45 ? FLAME[Math.floor(game.time * 6 + k) % 2] : SMALL;
+      g.sprite(f, c.x - (f.w >> 1) + lean, top - 3 - f.h, { flip: side < 0 && lean !== 0 });
+    } else if (c.smoke > 0 && !R.bonus) {
+      var u = 1.2 - c.smoke;
+      for (var j = 0; j < 4; j++) {
+        var yy = top - 5 - j * 4 - u * 14, xx = c.x + Math.round(Math.sin(game.time * 4 + j) * 1.5);
+        if (yy > HUD) g.pixel(xx, yy, j % 2 ? g.MID : g.DARK);
+      }
+    }
+  });
+}
+
+function bar(g, x, y, w, v, mark) {
+  g.frame(x, y, w, 8, g.INK);
+  g.rect(x + 1, y + 1, Math.round((w - 2) * Math.max(0, Math.min(1, v))), 6, g.DARK);
+  if (mark != null) g.rect(x + 1 + Math.round((w - 2) * mark), y - 1, 1, 10, g.INK);
+}
+
+function drawPitch(g) {
+  /* the note meter: the target in the middle, the note heard as a marker, an octave across */
+  var x = 14, w = 132, y = 122;
+  g.frame(x, y, w, 10, g.INK);
+  g.rect(x + w / 2 - 11, y + 1, 22, 8, g.MID);
+  var m = x + w / 2 + Math.round(R.semi / 6 * (w / 2 - 3));
+  g.rect(m - 1, y - 2, 3, 14, g.INK);
+  bar(g, x, y + 16, w, R.hold / HOLD_NOTE);
+}
+
+function foot(g, text) {
+  var n = game.time < noteUntil;                        /* a line about the microphone takes the footer for a moment */
+  g.rect(0, FOOT, 160, 176 - FOOT, n ? g.INK : g.PAPER); g.rect(0, FOOT, 160, 1, g.INK);
+  g.text(n ? note : text, 80, FOOT + 2, { align: "center", color: n ? g.PAPER : g.INK });
+}
+
+/* ---- the title: a cake that blows its own candles out and lights them again, then the keys with their pictures ---- */
+var ICON = {
+  mic: LoGame.sprite(["..000..", ".01110.", ".01110.", ".01110.", "0.000.0", "0.....0", ".00000.", "...0...", ".00000."]),
+  a: LoGame.sprite(["..00000..", ".0111110.", "011131110", "011313110", "011333110", "011313110", ".0111110.", "..00000.."]),
+  pill: LoGame.sprite([".000000000.", "01111111110", "01111111110", "01111111110", ".000000000."]),
+  note: LoGame.sprite(["...0000", "...0..0", "...0..0", "...0..0", ".000.00", "0000000", ".00..0."])
+};
+var CAKE_X = [48, 64, 80, 96, 112], CYCLE = 7;
+
+function drawCake(g) {
+  var t = game.time % CYCLE;
+  g.dither(0, 18, 160, 36, g.MID, 1);                   /* the dim wall */
+  g.rect(0, 74, 160, 1, g.INK);                         /* the table's edge */
+  g.dither(0, 75, 160, 3, g.MID, 2);
+  g.rect(26, 71, 108, 3, g.INK); g.rect(28, 71, 104, 1, g.PAPER);   /* the plate */
+  g.rect(36, 54, 88, 17, g.DARK); g.frame(36, 54, 88, 17, g.INK);
+  g.rect(37, 63, 86, 2, g.MID);                         /* the filling */
+  g.rect(36, 51, 88, 5, g.PAPER); g.frame(36, 51, 88, 5, g.INK);    /* the icing, with drips */
+  for (var dx = 40; dx < 122; dx += 9) g.rect(dx, 56, 3, 2 + (dx * 7 % 3), g.PAPER);
+  var blowing = t > 2.4 && t < 4.6;
+  if (blowing) for (var w = 0; w < 3; w++) {             /* a breath from the right */
+    var wx = 160 - ((t - 2.4) * 90 + w * 23) % 70;
+    g.rect(Math.round(wx), 28 + w * 5, 8 - w * 2, 1, g.INK);
+  }
+  CAKE_X.forEach(function (x, k) {
+    var top = 38, out = 3.0 + (4 - k) * 0.3, back = 5.6 + k * 0.25;
+    g.rect(x - 3, top, 6, 13, g.PAPER); g.frame(x - 3, top, 6, 13, g.INK);
+    g.rect(x - 2, top + 1, 1, 11, g.MID);
+    g.line(x, top - 3, x, top - 1, g.INK);
+    var lit = t < out || t >= back;
+    if (lit) {
+      var f = t >= back && t < back + 0.15 ? SMALL : FLAME[Math.floor(game.time * 6 + k) % 2];
+      var lean = blowing ? -2 : 0;
+      g.sprite(f, x - (f.w >> 1) + lean, top - 3 - f.h, { flip: lean !== 0 });
+    } else if (t < out + 1.4) {                         /* smoke from a wick just out */
+      var u = t - out;
+      for (var j = 0; j < 4; j++) {
+        var yy = top - 5 - j * 4 - u * 10, xx = x + Math.round(Math.sin(game.time * 4 + j) * 1.5);
+        if (yy > 19) g.pixel(xx, Math.round(yy), j % 2 ? g.MID : g.DARK);
+      }
+    }
+  });
+}
+
+function keyRow(g, icon, name, what, y) {
+  var s = ICON[icon];
+  g.sprite(s, 13 - (s.w >> 1), y + 7 - (s.h >> 1));
+  if (name) g.text(name, 24, y, { color: g.DARK });
+  g.text(what, name ? 70 : 24, y);
+}
+
+/* ---- scenes ---- */
+game.scene("title", {
+  enter: function () { micOff(); fire(0); },
+  update: function () {
+    if (game.pressed("select") && HAS_MIC) { mode = mode === "mic" ? "keys" : "mic"; game.save("mode", mode); game.sfx("tick"); }
+    if (game.pressed("a") || game.pressed("start") || game.pointer.pressed) { game.sfx("ok"); game.go("round", { i: 0, fresh: true }); }
+  },
+  draw: function (g) {
+    g.clear(g.PAPER);
+    drawCake(g);
+    g.rect(0, 0, 160, 18, g.INK);
+    var title = T({ zh: "吹蜡烛", en: "CANDLES" }), tw = g.measure(title);
+    g.text(title, 80, 2, { align: "center", color: g.PAPER });
+    g.sprite(SMALL, 80 - (tw >> 1) - 12, 6); g.sprite(SMALL, 80 + (tw >> 1) + 7, 6);
+    var cap = HAS_MIC ? T({ zh: "对着话筒吹灭蜡烛", en: "Blow them out" }) : T({ zh: "按住 A 吹灭蜡烛", en: "Hold A to blow" }), cw = g.measure(cap) + 11;
+    if (HAS_MIC) g.sprite(ICON.mic, 80 - (cw >> 1), 82);
+    g.text(cap, HAS_MIC ? 80 - (cw >> 1) + 11 : 80, 80, HAS_MIC ? {} : { align: "center" });
+    g.rect(8, 95, 144, 1, g.MID);
+    var y = 98;
+    keyRow(g, "a", "A", T({ zh: "按住吹", en: "hold, blow" }), y); y += 14;
+    keyRow(g, "pill", "START", T({ zh: "暂停", en: "pause" }), y); y += 14;
+    if (HAS_MIC) keyRow(g, "pill", "SELECT", mode === "mic" ? T({ zh: "玩法：话筒", en: "play: MIC" }) : T({ zh: "玩法：按键", en: "play: KEYS" }), y);
+    else g.text(T({ zh: "这台掌机没有话筒", en: "No mic here" }), 24, y, { color: g.DARK });
+    y += 14;
+    keyRow(g, "note", "", T({ zh: "最后一轮：唱个音点回来", en: "Last: sing one back" }), y);
+    g.rect(0, 158, 160, 18, g.INK);
+    g.text(T({ zh: "最高 {n}", en: "Best {n}" }, { n: best }), 6, 160, { color: g.PAPER });
+    if (Math.floor(game.time * 2) % 2 === 0) g.text(T({ zh: "按 A 开始", en: "Press A" }), 154, 160, { align: "right", color: g.PAPER });
+  }
+});
+
+game.scene("round", {
+  enter: function (a) {
+    if (a && a.fresh) score = 0;
+    R = newRound(a ? a.i : 0);
+    micOn();                                             /* asks now, so the answer is in before the clock starts */
+    fire(R.bonus ? 0 : litCount());
+  },
+  exit: function () { micOff(); },
+  update: function (dt) {
+    R.t += dt;
+    if (R.phase !== "done" && game.pressed("start")) { pause(); return; }
+    if (R.phase === "ready") { if (R.t > 1.6 && !asking) begin(); R.c.forEach(function (c) { if (c.smoke > 0) c.smoke -= dt; }); return; }
+    if (R.phase === "done") {
+      if (R.t > 0.6 && (game.pressed("a") || game.pointer.pressed)) {
+        game.sfx("ok");
+        if (R.bonus) game.go("title"); else game.go("round", { i: R.i + 1 });
+      }
+      return;
+    }
+    R.left -= dt;
+    if (R.left < 3.5 && Math.ceil(R.left) !== R.ticked) { R.ticked = Math.ceil(R.left); if (R.ticked > 0) game.sfx("tick"); }
+    if (R.bonus) {
+      if (game.pressed("b") && game.time > R.refUntil) playRef();
+      sing(dt);
+    } else {
+      blowing(dt);
+      blowOut(dt);
+      if (!litCount()) { end(); return; }
+    }
+    if (R.left <= 0 && R.phase === "play") { R.left = 0; end(); }
+  },
+  draw: function (g) {
+    g.clear(g.PAPER);
+    g.rect(0, 0, 160, HUD, g.INK);
+    g.text(R.bonus ? T({ zh: "加时", en: "Bonus" }) : T({ zh: "第{n}轮", en: "Round {n}" }, { n: R.i + 1 }), 3, 1, { color: g.PAPER });
+    g.text(T({ zh: "分{n}", en: "{n} pts" }, { n: score }), 80, 1, { color: g.PAPER, align: "center" });
+    g.text(String(Math.ceil(R.left)), 157, 1, { color: g.PAPER, align: "right" });
+    g.dither(0, HUD, 160, 40, g.MID, 1);                 /* a dim wall behind the table */
+    g.rect(0, TABLE, 160, 2, g.INK); g.rect(0, TABLE + 2, 160, 4, g.DARK);
+    drawCandles(g);
+    var y = 124;
+    if (R.phase === "ready") {
+      var t = R.bonus ? T({ zh: "最后一轮：唱准这个音", en: "Last: sing this note" })
+                      : T({ zh: "{n} 支蜡烛，准备", en: "{n} candles, ready" }, { n: R.c.length });
+      g.text(asking ? T({ zh: "等话筒…", en: "Waiting for the mic..." }) : t, 80, y, { align: "center" });
+    } else if (R.phase === "play") {
+      if (R.bonus) drawPitch(g);
+      else if (live) {
+        g.text(T({ zh: "正在听：对着话筒吹", en: "Listening: blow!" }), 80, y - 2, { align: "center" });
+        bar(g, 14, y + 14, 132, heard.level, threshold());
+      } else {
+        g.text(T({ zh: "按住 A 吹", en: "Hold A to blow" }), 80, y - 2, { align: "center" });
+        bar(g, 14, y + 14, 132, R.lung);
+      }
+    } else {
+      var txt = R.bonus ? (R.c[0].lit ? T({ zh: "点着了！+50", en: "Alight! +50" }) : T({ zh: "没点着", en: "No light" }))
+              : T({ zh: "吹灭 {a}/{b}  +{p}", en: "Out {a}/{b}  +{p}" }, { a: R.c.length - litCount(), b: R.c.length, p: R.got + R.timeBonus });
+      g.window(10, 20, 140, 36);                        /* above the flames, so the candles show what happened */
+      g.text(txt, 80, 24, { align: "center" });
+      if (R.timeBonus) g.text(T({ zh: "含剩余时间 +{t}", en: "incl. time +{t}" }, { t: R.timeBonus }), 80, 39, { align: "center", color: g.DARK });
+      if (R.bonus) g.text(T({ zh: "总分 {s}  最高 {b}", en: "Total {s}  Best {b}" }, { s: score, b: best }), 80, 39, { align: "center" });
+    }
+    var f = R.phase === "done" ? T({ zh: "A 继续", en: "A next" })
+          : R.bonus && R.phase === "play" ? (live ? T({ zh: "唱或吹口哨  B 再听", en: "Sing or whistle  B hear" }) : T({ zh: "按住 A 升高  B 再听", en: "Hold A: higher  B hear" }))
+          : live ? T({ zh: "对着话筒吹  START 暂停", en: "Blow  START pause" }) : T({ zh: "按住 A 吹  START 暂停", en: "Hold A  START pause" });
+    foot(g, f);
+  }
+});
+
+game.start("title");
+</script>
+</body>
+</html>
