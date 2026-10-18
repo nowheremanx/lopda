@@ -1,0 +1,1 @@
+{"author":"Haowei Wu","buttons":true,"description":"一个已经死去的人，今晚给你发来了一条消息。","glyph":"遗","i18n":{"en":{"description":"Someone who died three years ago just sent you a message.","name":"Midnight"}},"id":"midnight-will","license":"MIT","name":"凌晨零点的遗嘱","permissions":["mic","motion","notes","camera"],"spec":"lopda/1","version":"1.0.0"}
