@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>拍照拼图</title>
+<!-- Lo-PDA example app (lopda/1): a sliding puzzle cut from a photo the player takes with PAD.camera.snap
+     (SPEC.md 6.6). Shows the photo before using it and allows a retake (sdk/UI.md section 10), and plays just as well
+     with a built-in picture when there is no camera. Chin buttons, touch, PAD.save, PAD.sfx and a short PAD.music jingle.
+     MIT License. -->
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #a3ad7e; color: #1f2a14; font-family: monospace; }
+  body { display: flex; flex-direction: column; }
+  header { flex: none; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 6px 10px; border-bottom: 2px solid #1f2a14; font-size: 15px; }
+  header b { font-size: 17px; letter-spacing: 2px; }
+  main { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 8px 10px; box-sizing: border-box; }
+  #stage { flex: 1; min-height: 120px; width: 100%; display: flex; align-items: center; justify-content: center; }
+  canvas { display: block; image-rendering: pixelated; image-rendering: crisp-edges; border: 3px solid #1f2a14; touch-action: none; }
+  #msg { margin: 0; font-size: 15px; line-height: 1.4; text-align: center; min-height: 1.4em; overflow-wrap: anywhere; }
+  #msg.note { background: #1f2a14; color: #a3ad7e; padding: 2px 8px; }
+  #menu { flex: none; width: 100%; max-width: 360px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  #menu:empty { display: none; }
+  #menu button:only-child { grid-column: 1 / -1; }
+  #menu button { font: inherit; font-size: 16px; font-weight: bold; min-height: 44px; width: 100%; background: #a3ad7e; color: #1f2a14; border: 2px solid #1f2a14; }
+  #menu button.on { background: #1f2a14; color: #a3ad7e; }
+  #menu button.off { color: #4a5a32; border-style: dashed; }
+  footer { flex: none; padding: 4px 10px 6px; border-top: 2px solid #1f2a14; font-size: 13px; color: #4a5a32; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+</style>
+</head>
+<body>
+<header><b id="ttl">拍照拼图</b><span id="info"></span></header>
+<main>
+  <div id="stage"><canvas id="cv" width="128" height="112"></canvas></div>
+  <p id="msg"></p>
+  <div id="menu"></div>
+</main>
+<footer id="ft"></footer>
+<script>
+(function () {
+  var HAS_PAD = typeof PAD !== "undefined";
+  var TONES = [[31, 42, 20], [74, 90, 50], [125, 138, 88], [163, 173, 126]];   /* PAD.TONES as RGB: 0 ink ... 3 paper */
+  var W = 128, H = 112;   /* PAD.camera.snap({size: "small"}): the camera's standard film, 8:7 */
+
+  /* two languages: PAD.lang from the runtime; older runtimes have none, so Chinese is the default */
+  var LANG = HAS_PAD && PAD.lang === "en" ? "en" : "zh";
+  var TXT = {
+    zh: { title: "拍照拼图", snap: "拍一张", builtin: "用内置图片", use: "用这张", retake: "重拍", again: "重来", size: "换难度",
+      resume: "继续", next: "下一局", newphoto: "拍新照片", moves: "{n} 步", best: "最佳 {n}", taking: "拍照中…",
+      intro: "拍一张照片，切成方块打乱，再拼回来。", nocam: "这台掌机不能拍照，用内置图片玩。", nophoto: "没拿到照片，用内置图片玩。",
+      look: "就用这张吗？", won: "拼好了！{n} 步。", record: "新纪录！", unlocked: "下一局是 4×4。", locked: "先拼好一次 3×3",
+      kTitle: "↑↓ 选　A 确定", kPreview: "A 用这张　B 重拍", kPlay: "方向键 推方块　A 按住看原图　START 菜单", kMenu: "↑↓ 选　A 确定　B 返回", kWon: "↑↓ 选　A 确定", kSolved: "A 继续", solved: "拼好了！", cont: "继续" },
+    en: { title: "SNAPTILE", snap: "Take a photo", builtin: "Built-in picture", use: "Use this", retake: "Retake", again: "Restart", size: "Size",
+      resume: "Resume", next: "Next", newphoto: "New photo", moves: "{n} moves", best: "best {n}", taking: "Camera…",
+      intro: "Take a photo, it is cut up and shuffled: slide it back.", nocam: "No camera here: playing with the built-in picture.", nophoto: "No photo: playing with the built-in picture.",
+      look: "Use this one?", won: "Solved in {n} moves!", record: "New record!", unlocked: "Next one is 4×4.", locked: "Solve a 3×3 first",
+      kTitle: "↑↓ pick  A ok", kPreview: "A use  B retake", kPlay: "D-pad slide  hold A peek  START menu", kMenu: "↑↓ pick  A ok  B back", kWon: "↑↓ pick  A ok", kSolved: "A continue", solved: "Solved!", cont: "Continue" }
+  }[LANG];
+  function tx(key, n) { return TXT[key].replace("{n}", n); }
+  document.documentElement.lang = LANG === "zh" ? "zh-CN" : "en"; document.title = TXT.title;
+  document.getElementById("ttl").textContent = TXT.title;
+
+  /* ---------- the built-in picture: original art, drawn here, dithered like the camera so it looks taken ---------- */
+  var BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+  function builtin() {
+    var px = new Uint8Array(W * H);
+    for (var y = 0; y < H; y++) for (var x = 0; x < W; x++) {
+      var v;
+      var ridge1 = 62 - Math.abs(x - 44) * 0.75, ridge2 = 70 - Math.abs(x - 98) * 0.6;   /* two hills */
+      var sun = (x - 96) * (x - 96) + (y - 24) * (y - 24);
+      if (y >= 84) {                                       /* the lake: ripples, and the hills upside down */
+        var ry = 168 - y;
+        v = 0.55 + 0.25 * Math.sin(x * 0.35 + y * 1.7);
+        if (ry > ridge1 || ry > ridge2) v -= 0.3;
+        if (y % 6 === 0) v = 0.95;
+      } else if (y > ridge1 || y > ridge2) {               /* the hills, snow on the high one, a little house on the shore */
+        v = 0.3 - (y - Math.min(ridge1, ridge2)) * 0.004;
+        if (y > ridge1 && y < ridge1 + 6 && ridge1 < 44) v = 0.9;
+        if (x >= 18 && x < 34 && y >= 72 && y < 84) v = (x === 25 || x === 26) && y >= 77 ? 0 : 0.85;
+        if (y >= 64 && y < 72 && Math.abs(x - 26) <= 10 - (y - 64)) v = 0.05;
+      } else if (sun < 144) {                              /* the sun */
+        v = 1;
+      } else {                                             /* the sky: darker at the top, a ring of light round the sun */
+        v = 0.35 + y * 0.006 + (sun < 260 ? 0.25 : 0);
+        if ((x === 20 && y === 30) || (x === 21 && y === 31) || (x === 22 && y === 30) || (x === 60 && y === 18) || (x === 61 && y === 19) || (x === 62 && y === 18)) v = 0;   /* two birds */
+      }
+      var t = (BAYER[(y % 4) * 4 + (x % 4)] + 0.5) / 16 - 0.5;
+      px[y * W + x] = Math.max(0, Math.min(3, Math.round(v * 3 + t)));
+    }
+    return { w: W, h: H, px: px };
+  }
+  var BUILTIN = builtin();
+
+  /* ---------- state ---------- */
+  var S = { screen: "title", sel: 0, items: [], pic: BUILTIN, shot: null, note: "", busy: false,
+    n: 3, tiles: [], gap: 0, moves: 0, peek: false, big: false, best: {}, record: false };
+  if (HAS_PAD) PAD.load("puzzle").then(function (d) {
+    if (d && typeof d === "object") { S.best = d.best && typeof d.best === "object" ? d.best : {}; S.big = d.big === true; }
+    draw();
+  });
+  function save() { if (HAS_PAD) PAD.save("puzzle", { best: S.best, big: S.big }); }
+  function sfx(name) { if (HAS_PAD) PAD.sfx(name); }
+
+  /* ---------- the camera: PAD.camera.snap ----------
+     snap() opens the runtime's own viewfinder over this app. The player presses the shutter (or cancels); the promise
+     then gives {w, h, px}: px is a Uint8Array of w*h tone indices, row by row, 0 = ink ... 3 = paper, the same order as
+     PAD.TONES. It gives null when the player cancels or says no, there is no camera, or a snap is already open; null is
+     normal, so the app always has a way on without a photo. PAD.camera is undefined on runtimes before 0.28.0, and the
+     manifest must list "permissions": ["camera"]. */
+  function takePhoto() {
+    if (!HAS_PAD || !PAD.camera) { useBuiltin(TXT.nocam); return; }
+    if (S.busy) return;
+    S.busy = true; msg(TXT.taking, false);
+    PAD.camera.snap({ size: "small" }).then(function (photo) {
+      S.busy = false;
+      if (!photo) { useBuiltin(TXT.nophoto); return; }
+      /* show it first, as it is: the player may have blinked (sdk/UI.md section 10) */
+      S.shot = photo; sfx("ok"); go("preview");
+    });
+  }
+  function useBuiltin(line) { S.pic = BUILTIN; S.note = line; sfx("err"); newGame(); }
+
+  /* ---------- the puzzle: tiles[position] = which piece is there; piece n*n-1 is the gap ---------- */
+  function newGame() {
+    var n = S.n, N = n * n;
+    S.tiles = []; for (var i = 0; i < N; i++) S.tiles.push(i);
+    S.gap = N - 1; S.moves = 0; S.peek = false; S.record = false;
+    /* shuffle with legal moves only, never straight back: every puzzle can be solved */
+    var back = -1, steps = n === 3 ? 80 : 200;
+    for (var k = 0; k < steps || solved(); k++) {
+      var opts = neighbours(S.gap).filter(function (p) { return p !== back; });
+      var p = opts[Math.floor(Math.random() * opts.length)];
+      back = S.gap; swap(p);
+    }
+    go("play");
+  }
+  function neighbours(g) {
+    var n = S.n, r = Math.floor(g / n), c = g % n, out = [];
+    if (r > 0) out.push(g - n); if (r < n - 1) out.push(g + n);
+    if (c > 0) out.push(g - 1); if (c < n - 1) out.push(g + 1);
+    return out;
+  }
+  function swap(p) { S.tiles[S.gap] = S.tiles[p]; S.tiles[p] = S.n * S.n - 1; S.gap = p; }
+  function solved() { for (var i = 0; i < S.tiles.length; i++) if (S.tiles[i] !== i) return false; return true; }
+  /* the piece at p slides into the gap, if it is next to it */
+  function slide(p) {
+    if (neighbours(S.gap).indexOf(p) < 0) { sfx("err"); return; }
+    swap(p); S.moves++; sfx("move");
+    if (solved()) win(); else draw();
+  }
+  /* a direction pushes the piece on that side of the gap towards it: up moves the piece below the gap up */
+  function push(dir) {
+    var n = S.n, r = Math.floor(S.gap / n), c = S.gap % n;
+    var p = dir === "up" ? (r < n - 1 ? S.gap + n : -1) : dir === "down" ? (r > 0 ? S.gap - n : -1)
+      : dir === "left" ? (c < n - 1 ? S.gap + 1 : -1) : (c > 0 ? S.gap - 1 : -1);
+    if (p < 0) { sfx("err"); return; }
+    slide(p);
+  }
+  function win() {
+    var key = String(S.n), best = S.best[key];
+    S.record = !best || S.moves < best;
+    if (S.record) S.best[key] = S.moves;
+    var first = S.n === 3 && !S.big;
+    if (first) S.big = true;
+    save();
+    sfx("win");
+    /* a short tune of our own for the win; PAD.music is undefined before runtime 0.11.0 */
+    if (HAS_PAD && PAD.music) PAD.music.play({ bpm: 150, p1: "@1 v12 o5 l16 c e g >c8 r <g >c4", tri: "v11 o3 l8 c g >c4" }, { loop: false });
+    S.unlockedNow = first;   /* the next puzzle is 4x4; the moves line still shows this one until then */
+    S.anim = { t0: 0, landed: false, done: false };
+    go("solved");
+    requestAnimationFrame(tick);
+  }
+
+  /* ---------- the solved picture: the last piece drops in, the cuts melt away, a glint runs over it ----------
+     Times in ms from the start; then the whole photo stays until the player goes on (A or the button) */
+  var DROP = 450, MELT = 1050, GLINT = 1600;
+  function tick(t) {
+    var a = S.anim; if (S.screen !== "solved" || !a || a.done) return;
+    if (!a.t0) a.t0 = t;
+    a.ms = t - a.t0;
+    if (!a.landed && a.ms >= DROP) { a.landed = true; sfx("ok"); }
+    if (a.ms >= GLINT) { endAnim(); return; }
+    paint();
+    requestAnimationFrame(tick);
+  }
+  /* A or a tap during the animation jumps to its end */
+  function endAnim() { S.anim.done = true; S.anim.ms = GLINT; draw(); }
+
+  /* ---------- drawing: the picture, cut into cells, written with putImageData ---------- */
+  var cv = document.getElementById("cv"), ctx = cv.getContext("2d"), img = ctx.createImageData(W, H);
+  function edges(n, size) { var e = []; for (var i = 0; i <= n; i++) e.push(Math.round(i * size / n)); return e; }
+  function frame() {
+    var pic = S.screen === "preview" ? S.shot : S.pic, src = pic.px;
+    if (S.screen === "solved") return solvedFrame(src);
+    if ((S.screen !== "play" && S.screen !== "menu") || S.peek) return src;
+    var n = S.n, xs = edges(n, W), ys = edges(n, H), out = new Uint8Array(W * H);
+    for (var p = 0; p < n * n; p++) {
+      var pr = Math.floor(p / n), pc = p % n, t = S.tiles[p], tr = Math.floor(t / n), tc = t % n;
+      var dw = xs[pc + 1] - xs[pc], dh = ys[pr + 1] - ys[pr], sw = xs[tc + 1] - xs[tc], sh = ys[tr + 1] - ys[tr];
+      for (var y = 0; y < dh; y++) for (var x = 0; x < dw; x++) {
+        var o = (ys[pr] + y) * W + xs[pc] + x, v;
+        if (t === n * n - 1) v = (x + y) % 4 === 0 ? 0 : 1;                    /* the gap */
+        else if (x === 0 || y === 0) v = 0;                                     /* a line between pieces */
+        else v = src[(ys[tr] + Math.floor(y * sh / dh)) * W + xs[tc] + Math.floor(x * sw / dw)];
+        out[o] = v;
+      }
+    }
+    return out;
+  }
+  function solvedFrame(src) {
+    var a = S.anim, ms = a.done ? GLINT : a.ms || 0;
+    if (ms >= GLINT) return src;
+    var n = S.n, xs = edges(n, W), ys = edges(n, H), out = new Uint8Array(W * H);
+    var drop = Math.min(1, ms / DROP), ease = 1 - (1 - drop) * (1 - drop);
+    var melt = Math.max(0, Math.min(1, (ms - DROP) / (MELT - DROP)));
+    var glint = ms > MELT ? (ms - MELT) / (GLINT - MELT) * (W + H + 24) - 12 : -99;
+    var g = n * n - 1, gx = xs[g % n], gy = ys[Math.floor(g / n)], gw = xs[g % n + 1] - gx, gh = ys[Math.floor(g / n) + 1] - gy;
+    var off = Math.round((1 - ease) * gh);   /* the last piece slides down into its place */
+    for (var y = 0; y < H; y++) for (var x = 0; x < W; x++) {
+      var o = y * W + x, v = src[o];
+      if (x >= gx && x < gx + gw && y >= gy && y < gy + gh) {
+        var yy = y - gy + off;
+        v = yy < gh ? src[(gy + yy) * W + x] : ((x + y) % 4 === 0 ? 0 : 1);
+      }
+      var line = (xs.indexOf(x) > 0 && xs.indexOf(x) < n) || (ys.indexOf(y) > 0 && ys.indexOf(y) < n);
+      if (line && (BAYER[(y % 4) * 4 + (x % 4)] + 0.5) / 16 >= melt) v = 0;   /* the cuts melt away in the dither's order */
+      var dg = x + y - glint;
+      if (dg > -6 && dg < 6) v = Math.min(3, v + (dg > -3 && dg < 3 ? 2 : 1));   /* the glint */
+      out[o] = v;
+    }
+    return out;
+  }
+  function paint() {
+    var px = frame(), d = img.data;
+    for (var i = 0; i < px.length; i++) { var c = TONES[px[i]]; d[i * 4] = c[0]; d[i * 4 + 1] = c[1]; d[i * 4 + 2] = c[2]; d[i * 4 + 3] = 255; }
+    ctx.putImageData(img, 0, 0);
+  }
+  /* the canvas as large as the stage allows, 8:7 */
+  function layout() {
+    var st = document.getElementById("stage"), w = st.clientWidth - 6, h = st.clientHeight - 6;
+    var k = Math.max(1, Math.min(w / W, h / H));
+    cv.style.width = Math.floor(W * k) + "px"; cv.style.height = Math.floor(H * k) + "px";
+  }
+  window.addEventListener("resize", layout);
+
+  /* ---------- screens ---------- */
+  function msg(text, note) { var m = document.getElementById("msg"); m.textContent = text; m.className = note ? "note" : ""; }
+  function go(screen) { S.screen = screen; S.sel = 0; draw(); }
+  function menuItems() {
+    var camera = HAS_PAD && !!PAD.camera;
+    if (S.screen === "title") return camera ? [["snap", TXT.snap], ["builtin", TXT.builtin]] : [["builtin", TXT.builtin]];
+    if (S.screen === "preview") return [["use", TXT.use], ["retake", TXT.retake]];
+    if (S.screen === "menu") return [["resume", TXT.resume]].concat(camera ? [["retake", TXT.retake]] : [])
+      .concat([["size", TXT.size, !S.big], ["again", TXT.again]]);
+    if (S.screen === "solved") return S.anim && S.anim.done ? [["cont", TXT.cont]] : [];
+    if (S.screen === "won") return [["next", TXT.next]].concat(camera ? [["newphoto", TXT.newphoto]] : []);
+    return [];
+  }
+  function draw() {
+    var sc = S.screen, best = S.best[String(S.n)];
+    document.getElementById("info").textContent = sc === "play" || sc === "menu" || sc === "solved" || sc === "won"
+      ? S.n + "×" + S.n + "  " + tx("moves", S.moves) + (best ? "  " + tx("best", best) : "") : "";
+    if (sc === "title") msg(HAS_PAD && PAD.camera ? TXT.intro : TXT.nocam, !(HAS_PAD && PAD.camera));
+    else if (sc === "preview") msg(TXT.look, false);
+    else if (sc === "play") msg(S.note, !!S.note);
+    else if (sc === "menu") msg("", false);
+    else if (sc === "solved") msg(S.anim && S.anim.done ? TXT.solved : "", false);
+    else if (sc === "won") msg(tx("won", S.moves) + (S.record ? " " + TXT.record : "") + (S.unlockedNow ? " " + TXT.unlocked : ""), false);
+    document.getElementById("ft").textContent = TXT[{ title: "kTitle", preview: "kPreview", play: "kPlay", menu: "kMenu", solved: "kSolved", won: "kWon" }[sc]];
+    S.items = menuItems();
+    var box = document.getElementById("menu"); box.textContent = "";
+    S.items.forEach(function (it, i) {
+      var b = document.createElement("button"); b.type = "button"; b.textContent = it[1];
+      b.className = (i === S.sel ? "on" : "") + (it[2] ? " off" : "");
+      b.onclick = function () { S.sel = i; choose(); };
+      box.appendChild(b);
+    });
+    paint(); layout();
+  }
+  function choose() {
+    var it = S.items[S.sel]; if (!it || S.busy) return;
+    if (it[2]) { sfx("err"); msg(TXT.locked, true); return; }
+    var id = it[0];
+    if (S.unlockedNow && (id === "next" || id === "newphoto")) { S.n = 4; S.unlockedNow = false; }
+    if (id === "snap" || id === "retake" || id === "newphoto") { sfx("tap"); takePhoto(); }
+    else if (id === "builtin") { S.pic = BUILTIN; S.note = HAS_PAD && PAD.camera ? "" : TXT.nocam; sfx("ok"); newGame(); }
+    else if (id === "use") { S.pic = S.shot; S.note = ""; newGame(); }
+    else if (id === "resume") { sfx("tap"); go("play"); }
+    else if (id === "again") { sfx("tap"); newGame(); }
+    else if (id === "size") { S.n = S.n === 3 ? 4 : 3; sfx("tick"); newGame(); }
+    else if (id === "next") { S.note = ""; newGame(); }
+    else if (id === "cont") { sfx("tap"); go("won"); }
+  }
+
+  /* ---------- keys and touch ---------- */
+  if (HAS_PAD) {
+    PAD.on("press", function (b) {
+      if (S.busy) return;
+      var sc = S.screen;
+      if (sc === "play") {
+        if (b === "up" || b === "down" || b === "left" || b === "right") push(b);
+        else if (b === "a") { S.peek = true; paint(); }
+        else if (b === "start") { sfx("tap"); go("menu"); }
+        return;
+      }
+      if (sc === "solved") {
+        if (b === "a") { if (S.anim.done) choose(); else endAnim(); }
+        return;
+      }
+      if (sc === "preview") {
+        if (b === "a") { S.sel = 0; choose(); } else if (b === "b") { S.sel = 1; choose(); }
+        return;
+      }
+      if (b === "up" || b === "down" || b === "left" || b === "right") {   /* the buttons sit two to a row: any arrow walks them */
+        var n = S.items.length; if (!n) return;
+        S.sel = (S.sel + (b === "down" || b === "right" ? 1 : n - 1)) % n; sfx("move"); draw();
+      } else if (b === "a") choose();
+      else if (b === "b" && sc === "menu") { sfx("tap"); go("play"); }
+    });
+    /* the peek lasts while A is held */
+    PAD.on("release", function (b) { if (b === "a" && S.peek) { S.peek = false; paint(); } });
+  }
+  /* touch: tap a piece next to the gap, or swipe a piece towards the gap. A swipe that points anywhere else is refused
+     with the error sound, like a key with nothing to push */
+  function cellAt(e) {
+    var r = cv.getBoundingClientRect(), x = (e.clientX - r.left) / r.width * W, y = (e.clientY - r.top) / r.height * H;
+    var xs = edges(S.n, W), ys = edges(S.n, H), c = 0, row = 0;
+    while (c < S.n - 1 && x >= xs[c + 1]) c++;
+    while (row < S.n - 1 && y >= ys[row + 1]) row++;
+    return row * S.n + c;
+  }
+  var touch = null, swallow = false, SWIPE = 12;   /* CSS px: less than this is a tap */
+  cv.addEventListener("pointerdown", function (e) {
+    if (S.screen !== "play") return;
+    touch = { id: e.pointerId, x: e.clientX, y: e.clientY, cell: cellAt(e) };
+    try { cv.setPointerCapture(e.pointerId); } catch (err) {}
+  });
+  cv.addEventListener("pointercancel", function () { touch = null; });
+  cv.addEventListener("pointerup", function (e) {
+    var t = touch; touch = null;
+    if (!t || t.id !== e.pointerId || S.screen !== "play") return;
+    swallow = true;   /* the click that follows belongs to this touch, even when it solved the puzzle */
+    var dx = e.clientX - t.x, dy = e.clientY - t.y;
+    if (Math.abs(dx) < SWIPE && Math.abs(dy) < SWIPE) { slide(t.cell); return; }
+    var n = S.n, r = Math.floor(t.cell / n), c = t.cell % n, to;
+    if (Math.abs(dx) > Math.abs(dy)) to = dx > 0 ? (c < n - 1 ? t.cell + 1 : -1) : (c > 0 ? t.cell - 1 : -1);
+    else to = dy > 0 ? (r < n - 1 ? t.cell + n : -1) : (r > 0 ? t.cell - n : -1);
+    if (to !== S.gap) { sfx("err"); return; }
+    slide(t.cell);
+  });
+  /* after the puzzle: a tap skips the animation, then goes on */
+  cv.addEventListener("click", function () {
+    if (swallow) { swallow = false; return; }
+    if (S.screen === "solved") { if (S.anim.done) { S.sel = 0; choose(); } else endAnim(); }
+  });
+
+  /* for tests/e2e.test.mjs: where the pieces are, so a test can solve the puzzle with real key presses */
+  window.PUZZLE = { state: function () { return { screen: S.screen, n: S.n, tiles: S.tiles.slice(), gap: S.gap, moves: S.moves, fromCamera: S.pic !== BUILTIN, animDone: !!(S.anim && S.anim.done) }; } };
+
+  draw();
+})();
+</script>
+</body>
+</html>

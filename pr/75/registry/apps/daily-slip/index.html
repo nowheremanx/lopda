@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>每日一签</title>
+<!-- Lo-PDA app (lopda/1): draw one slip a day and save it to the notes with PAD.notes.append.
+     The title is kept the same so one note keeps collecting each day's fortune in the app's own section.
+     MIT License. -->
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #a3ad7e; color: #1f2a14; font-family: monospace; }
+  body { display: flex; flex-direction: column; }
+  header { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 10px 12px 8px; border-bottom: 2px solid #1f2a14; font-size: 15px; }
+  header b { font-size: 17px; letter-spacing: 2px; }
+  main { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 6px 12px 8px; box-sizing: border-box; }
+  body.has-slip #cup { display: none; }
+  #cup { position: relative; width: 210px; height: 120px; }
+  .cup-body { position: absolute; left: 26px; right: 26px; bottom: 0; height: 64px; border: 3px solid #1f2a14; border-top: 0; background: #7d8a58; border-radius: 0 0 18px 18px; box-shadow: inset 0 0 0 2px #a3ad7e; }
+  .cup-rim { position: absolute; left: 12px; right: 12px; top: 18px; height: 12px; border: 3px solid #1f2a14; background: #a3ad7e; border-radius: 10px; }
+  .cup-base { position: absolute; left: 12px; right: 12px; bottom: -10px; height: 16px; border: 3px solid #1f2a14; background: #4a5a32; border-radius: 10px; }
+  #stick { position: absolute; left: 104px; bottom: 60px; width: 8px; height: 72px; background: #1f2a14; transform-origin: bottom center; border-radius: 4px; opacity: 0; }
+  #cup.shake .cup-body { animation: shake 0.6s linear 1; }
+  #cup.drop #stick { animation: drop 0.9s ease-in-out 1; }
+  @keyframes shake { 0%,100% { transform: translateX(0); } 20% { transform: translateX(-6px); } 40% { transform: translateX(6px); } 60% { transform: translateX(-5px); } 80% { transform: translateX(5px); } }
+  @keyframes drop { 0% { opacity: 0; transform: translateY(-10px) scaleY(0.8); } 10% { opacity: 1; } 70% { opacity: 1; transform: translateY(35px) scaleY(1); } 100% { opacity: 0; transform: translateY(60px) scaleY(0.5); } }
+  #slip { width: 100%; max-width: 280px; background: #a3ad7e; border: 3px solid #1f2a14; padding: 10px 12px; box-sizing: border-box; display: none; }
+  #slip.show { display: block; }
+  #slip h2 { margin: 0 0 6px; font-size: 16px; }
+  #slip .grade { display: inline-block; margin-left: 6px; font-size: 15px; }
+  #slip .verse { margin: 0; font-size: 14px; line-height: 1.3; }
+  #slip .meaning { margin: 6px 0 0; font-size: 13px; line-height: 1.3; }
+  #actions { display: flex; gap: 8px; width: 100%; max-width: 280px; }
+  #actions button { flex: 1; min-height: 44px; background: #1f2a14; color: #a3ad7e; border: 2px solid #1f2a14; font: inherit; font-size: 15px; font-weight: bold; }
+  #actions button.secondary { background: #a3ad7e; color: #1f2a14; }
+  #footer { min-height: 1.4em; text-align: center; color: #4a5a32; font-size: 13px; line-height: 1.4; }
+</style>
+</head>
+<body>
+<header><b id="title">每日一签</b><span id="today"></span></header>
+<main>
+  <div id="cup" aria-label="fortune cup">
+    <div class="cup-body">
+      <div class="cup-rim"></div>
+      <div class="cup-base"></div>
+    </div>
+    <div id="stick"></div>
+  </div>
+  <div id="slip" aria-live="polite">
+    <h2><span id="num">第十二签</span><span id="grade" class="grade">上上</span></h2>
+    <p id="verse" class="verse"></p>
+    <p id="meaning" class="meaning"></p>
+  </div>
+  <div id="actions">
+    <button id="drawBtn" type="button">抽签</button>
+    <button id="writeBtn" class="secondary" type="button">写进记事本</button>
+  </div>
+  <div id="footer"></div>
+</main>
+<script>
+(function () {
+  var LANG = (typeof PAD !== "undefined" && PAD.lang === "en") ? "en" : "zh";
+  var DRAW_KEY = "daily-slip";
+  var DATA = [
+    { num: 1, grade: { zh: "上上", en: "Excellent" }, verse: { zh: ["朝露落在木门边", "门内有人正熬一锅热茶", "先把心安住，日子就长了"], en: ["Dew settles by the gate", "Someone is warming tea inside", "Settle your mind first, and the day grows gentle"] }, meaning: { zh: "一日里最稳的，总是先安过心。", en: "The surest start is a calm heart before the small errands." } },
+    { num: 2, grade: { zh: "上上", en: "Excellent" }, verse: { zh: ["小雨拂过旧墙", "青苔都在笑着亮一亮", "路边的风景也会替你答应"], en: ["Fine rain brushes an old wall", "Moss shines with a sly smile", "Even the roadside looks ready to agree"] }, meaning: { zh: "别急着挑谁，机缘会先把门敲响。", en: "Don’t rush the choice; the right opening will knock first." } },
+    { num: 3, grade: { zh: "上", en: "Good" }, verse: { zh: ["纸伞撑开在巷口", "风不急，步子也不急", "随便走走，晚餐就会更香"], en: ["A paper umbrella opens by the lane", "The breeze is gentle, your steps are too", "A slow walk makes supper taste sweeter"] }, meaning: { zh: "脚下多走一步，心里也会松一口气。", en: "A little more walking lets the mind loosen its knot." } },
+    { num: 4, grade: { zh: "上", en: "Good" }, verse: { zh: ["天边有雁回头", "顺着它的路，写一封清淡的信", "心事会落在最熟悉的地方"], en: ["A flock turns at the horizon", "Write a plain letter along that route", "The feeling lands where it is most familiar"] }, meaning: { zh: "合适的话可以从最简单的句子开始。", en: "A fitting sentence can start with the plainest words." } },
+    { num: 5, grade: { zh: "中", en: "Fair" }, verse: { zh: ["街口的灯亮了一点", "有些事不是必须立刻想明白", "先去买一串香葱，一切会顺过来"], en: ["The lamp at the corner glows a little", "Some things need not be solved right away", "First buy a bunch of scallions and the day settles"] }, meaning: { zh: "缓一缓，不是拖延，是让路径显出来。", en: "Pausing is not delay; it lets the path appear." } },
+    { num: 6, grade: { zh: "上", en: "Good" }, verse: { zh: ["窗外一只乌鸦站了站", "你也别急着给结论", "明早的朝阳，先给你个好心情"], en: ["A crow settles outside the window", "Do not rush a conclusion", "Tomorrow’s sunrise will greet you kindly first"] }, meaning: { zh: "今天不必全盘定论，明天是另一个答案。", en: "Today need not decide everything; tomorrow holds another answer." } },
+    { num: 7, grade: { zh: "上上", en: "Excellent" }, verse: { zh: ["白墙上一片天色", "一阵轻风从左边吹过", "把烦恼都吹成了树叶的声响"], en: ["The white wall holds the sky", "A light wind slips from the left", "It turns worry into the sound of leaves"] }, meaning: { zh: "让烦心事先变小一点，风会替你带走。", en: "Shrink worries down a little and the wind will carry them off." } },
+    { num: 8, grade: { zh: "中", en: "Fair" }, verse: { zh: ["饭店门口有人晒衣服", "口袋里还剩一枚硬币", "先去喝口水，明白的事会慢慢浮上来"], en: ["Clothes dry outside a noodle shop", "A coin remains in your pocket", "First drink some water; understanding rises slowly"] }, meaning: { zh: "先照顾最现实的一点，想法会更稳。", en: "Take care of the practical need first; thoughts will settle." } },
+    { num: 9, grade: { zh: "上", en: "Good" }, verse: { zh: ["田埂上的路明明没什么新鲜", "却像有人给它打了个招呼", "走过去时，心也活络开了"], en: ["The lane by the field is plain", "Yet it feels as if someone called it by name", "When you walk it, your heart wakes up too"] }, meaning: { zh: "不必追求惊喜，熟路也能酿出温柔。", en: "You do not need a grand surprise; even a familiar path can be kind." } },
+    { num: 10, grade: { zh: "上上", en: "Excellent" }, verse: { zh: ["旧书页夹着一撮芬芳", "有一处看起来像你要的答案", "别急着合上，先把字读透"], en: ["A familiar book holds a hint of scent", "There is a place that looks like your answer", "Do not close it yet; read the page through"] }, meaning: { zh: "答案常在你已看到的地方，只差一步认真。", en: "The answer is often where you already are; you only need one honest look." } },
+    { num: 11, grade: { zh: "中", en: "Fair" }, verse: { zh: ["水缸里的水静静翻动", "一次小小的换位", "就能把视线从一头甩到另一头"], en: ["The water in the jar stirs softly", "A slight adjustment changes the view", "Your eyes then fall on a different side"] }, meaning: { zh: "换个方向看，也许你已经接近了答案。", en: "A different angle may be all you need." } },
+    { num: 12, grade: { zh: "上上", en: "Excellent" }, verse: { zh: ["青石板被人踩得很平", "你今天的事也差不多", "只要顺着脚步走，不怕它太长"], en: ["The slate path is worn smooth", "So are the steps before you today", "Carry on in order and it will not feel so long"] }, meaning: { zh: "继续向前，比追赶一时的焦躁更有力。", en: "Keeping your steps steady is stronger than chasing without rest." } },
+    { num: 13, grade: { zh: "上", en: "Good" }, verse: { zh: ["山里的云一层一层放轻", "一口气慢一点，你就会听到鸟鸣", "哪怕是小事也通了"], en: ["Clouds rise in layers over the hill", "Take one breath slower and the birds come clear", "Even the smallest task opens up"] }, meaning: { zh: "慢下来，事情会先从声音里说明白。", en: "Slow down and the task will explain itself in time." } },
+    { num: 14, grade: { zh: "中", en: "Fair" }, verse: { zh: ["隔壁有人在修水龙头", "你也不必急着吵", "等它按时滴水，屋里就都会亮"], en: ["A neighbor repairs a faucet nearby", "You need not rush to argue either", "When it drips on time, the room grows bright"] }, meaning: { zh: "把小麻烦先处理掉，日子会自然通畅。", en: "Fix the small snag and the rest of the day feels easier." } },
+    { num: 15, grade: { zh: "上", en: "Good" }, verse: { zh: ["晚风吹过小院门口", "窗纸有一点点微亮", "你要做的事，原来只差一口气"], en: ["Evening wind passes the gate", "The paper window glows a little", "The task before you is only one breath away"] }, meaning: { zh: "别把今天的事想得太重，动作先来。", en: "Do not make the task heavier than it is; start with the motion." } },
+    { num: 16, grade: { zh: "上上", en: "Excellent" }, verse: { zh: ["雨停时，瓦片上有一片亮光", "就像有人给你留了个记号", "你会在那一瞬找到出口"], en: ["When the rain stops, a bright patch remains on the tile", "It feels like a sign left for you", "In that moment, the exit appears"] }, meaning: { zh: "你不是走丢了，你只是看见出口了。", en: "You are not lost; you have simply seen the exit." } },
+    { num: 17, grade: { zh: "中", en: "Fair" }, verse: { zh: ["橘子皮飘下来，落在案头", "看着像一道分界", "你要么往前，要么先把自己照照"], en: ["An orange peel falls onto the table", "It looks like a line divided in two", "You either step forward or take a proper look at yourself"] }, meaning: { zh: "先看清自己的节奏，再决定迈哪一步。", en: "Check your own rhythm before you decide the next step." } },
+    { num: 18, grade: { zh: "上", en: "Good" }, verse: { zh: ["一只小船在河边一歇", "岸边的人也放慢了脚步", "原来好事就是一不追一不赶"], en: ["A small boat rests by the river", "The people on shore slow their steps", "Good fortune is simply not hurrying"] }, meaning: { zh: "顺其自然，反而更像你想要的生活。", en: "Letting things happen naturally fits the life you want." } },
+    { num: 19, grade: { zh: "上上", en: "Excellent" }, verse: { zh: ["旧窗玻璃里有一点暮色", "你拿起书，把字慢慢放平", "有些东西从来不是撞出来的"], en: ["There is a dusk glow in the old window", "You pick up a book and set the words down gently", "Some things do not arrive by collision"] }, meaning: { zh: "一步步来，比一次猛冲更可靠。", en: "Taking it gently is more reliable than one hard rush." } },
+    { num: 20, grade: { zh: "中", en: "Fair" }, verse: { zh: ["路上有人停下来看树", "你也学着停一停", "几分钟之后，旧念头就不那么尖了"], en: ["Someone pauses to look at a tree", "You pause too", "A few minutes later, old thoughts are not so sharp"] }, meaning: { zh: "让自己停一下，情绪会先回到身体里。", en: "Pause for a minute and your feeling will return to the body." } },
+    { num: 21, grade: { zh: "上", en: "Good" }, verse: { zh: ["红色的花落在石阶上", "花期不长，但有人记得拍一张照片", "把今天也保存成温柔的样子"], en: ["A red blossom falls onto the stone steps", "Its bloom is brief, but someone remembers to take a photo", "And keeps today in a gentle form"] }, meaning: { zh: "今天不必太大，能保存的温暖就够了。", en: "Today need not be grand; gentle warmth is enough to keep." } },
+    { num: 22, grade: { zh: "上上", en: "Excellent" }, verse: { zh: ["一声远处的叫卖", "像是把街道喊醒了", "你也会顺着这声音，重新落地"], en: ["A distant vendor calls out", "It wakes the street and wakes you too", "In that sound, you settle back to the ground"] }, meaning: { zh: "把外界的噪音当作提醒，回到真实的脚步。", en: "Treat the noise as a reminder to return to your real footing." } },
+    { num: 23, grade: { zh: "中", en: "Fair" }, verse: { zh: ["一片白云压在屋檐下", "你把热水壶的蒸汽看得太认真", "其实只是在提醒你慢一点"], en: ["A cloud hangs low by the eaves", "You watch the kettle’s steam with too much care", "It is only reminding you to go gently"] }, meaning: { zh: "别把一道小事看得太重，今天还长着呢。", en: "Do not take one small thing too seriously; today is still unfolding." } },
+    { num: 24, grade: { zh: "上", en: "Good" }, verse: { zh: ["篮子里放了几颗葡萄", "一颗一颗都像是提醒你", "做事也可以有一点轻松的节奏"], en: ["A basket holds a few grapes", "Each one looks like a small reminder", "Work can keep a light rhythm too"] }, meaning: { zh: "适度放松，反而让结果更稳。", en: "Leaning into ease often makes the outcome steadier." } },
+    { num: 25, grade: { zh: "上上", en: "Excellent" }, verse: { zh: ["你在门口收了一片落叶", "它还留着一点点余温", "算是今天给你的好消息"], en: ["You gather one fallen leaf at the gate", "It still holds a trace of warmth", "That is today’s little bit of good news"] }, meaning: { zh: "一个小小的好消息，足够支撑你过一整天。", en: "One small good sign is enough to carry you through the day." } },
+    { num: 26, grade: { zh: "中", en: "Fair" }, verse: { zh: ["枯树上的鸟把铃铛挂住", "叮当声不大，却顺着风进了院子", "提醒你，别把心事吵大"], en: ["A bird hangs a bell from a bare branch", "The chime is small, but it carries in the wind", "It reminds you not to make a fuss of it"] }, meaning: { zh: "小事先放一放，心会更清楚。", en: "Set the small things aside and your mind will become clearer." } },
+    { num: 27, grade: { zh: "上", en: "Good" }, verse: { zh: ["你想起一个很早的约定", "那天的地面还没晒热", "今天就按它的样子走一遍"], en: ["You remember an old promise", "The ground was not yet warm then", "Today, walk it in that same spirit"] }, meaning: { zh: "老约定里藏着你想保留的那份安稳。", en: "The old promise holds the steadiness you still want to keep." } },
+    { num: 28, grade: { zh: "上上", en: "Excellent" }, verse: { zh: ["收音机里播着远处的歌", "声音不大，却把屋子一点点填满", "在这柔和的地方，想法都能落下"], en: ["A radio glows with a distant song", "The sound is soft, but it fills the room", "In that gentleness, thoughts finally settle"] }, meaning: { zh: "让环境安静一点，心里就会有地方落脚。", en: "Make the room a little quieter and your mind will find a place to rest." } },
+    { num: 29, grade: { zh: "中", en: "Fair" }, verse: { zh: ["一页日历翻过一页", "你忽然想起要把某件事放下来", "那是今天最好的安排"], en: ["One page of the calendar turns", "You remember you can leave something for later", "That is the best arrangement for today"] }, meaning: { zh: "不是放弃，而是让优先级先理顺。", en: "This is not giving up; it is sorting the priorities first." } },
+    { num: 30, grade: { zh: "上", en: "Good" }, verse: { zh: ["院里有人种了几竿青竹", "它们在风里轻轻摇", "一直盯着你，就像在提醒：别太紧"], en: ["Someone planted bamboo in the courtyard", "They sway lightly in the wind", "They seem to tell you: do not hold so tightly"] }, meaning: { zh: "放松一点，事情总会换一种更顺的方式。", en: "Relax a little; the task will likely find a smoother way." } },
+    { num: 31, grade: { zh: "上上", en: "Excellent" }, verse: { zh: ["一只小狗牵着旧绳子跑过", "它看起来没想太多", "你也跟着轻一点，今天就过了"], en: ["A small dog runs by with an old leash", "It seems to think of nothing at all", "Follow that lightness and the day will pass smoothly"] }, meaning: { zh: "别给今天提前背上太重的担子。", en: "Do not carry too much worry before the day is even underway." } },
+    { num: 32, grade: { zh: "上", en: "Good" }, verse: { zh: ["门口晒着一块旧布", "它还保留着昨天的太阳", "你拿起来，就像拿到了一个好理由"], en: ["An old cloth dries by the gate", "It still keeps yesterday’s warmth", "You lift it and find your reason for the day"] }, meaning: { zh: "把小小的顺手当作出发，日子会跟着顺。", en: "Use the small, easy task as your start and the day will follow suit." } }
+  ];
+
+  var TXT = {
+    zh: { title: "每日一签", draw: "抽签", write: "写进记事本", written: "已写入", denied: "没有写入", old: "这台掌机太老，不能写记事本。", noteTitle: "每日一签", all: "全部", plus: "已写入", noWrite: "不能写入" },
+    en: { title: "Fortune", draw: "Draw", write: "Write to notes", written: "Saved", denied: "Not saved", old: "This handheld is too old to write notes.", noteTitle: "Daily fortune", all: "All", plus: "Saved", noWrite: "Not saved" }
+  }[LANG];
+
+  var state = { dateKey: todayKey(), slip: null, written: false, animating: false };
+  var drawBtn = document.getElementById("drawBtn");
+  var writeBtn = document.getElementById("writeBtn");
+  var slip = document.getElementById("slip");
+  var foot = document.getElementById("footer");
+  var cup = document.getElementById("cup");
+  var todayEl = document.getElementById("today");
+  var numEl = document.getElementById("num");
+  var gradeEl = document.getElementById("grade");
+  var verseEl = document.getElementById("verse");
+  var meaningEl = document.getElementById("meaning");
+  var num = 0;
+
+  function todayKey() {
+    var d = new Date();
+    return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
+  }
+  function pad(v) { return v < 10 ? "0" + v : String(v); }
+  function slotFor(dateKey) {
+    var sum = 0, i;
+    for (i = 0; i < dateKey.length; i++) sum += dateKey.charCodeAt(i) * (i + 1);
+    return sum % DATA.length;
+  }
+  function setFooter(text) { foot.textContent = text; }
+  function titleFor(dateKey) {
+    return dateKey + "  第" + DATA[state.slip].num + "签  " + DATA[state.slip].grade[LANG] + "\n" + DATA[state.slip].verse[LANG].join("\n") + "\n" + DATA[state.slip].meaning[LANG];
+  }
+  function showSlip() {
+    var item = DATA[state.slip];
+    document.title = TXT.title;
+    numEl.textContent = "第" + item.num + "签";
+    gradeEl.textContent = item.grade[LANG];
+    verseEl.innerHTML = item.verse[LANG].map(function (line) { return line + "<br>"; }).join("");
+    meaningEl.textContent = item.meaning[LANG];
+    slip.classList.add("show");
+    drawBtn.textContent = TXT.draw;
+    if (typeof PAD !== "undefined" && PAD.notes) {
+      if (state.written) {
+        writeBtn.textContent = TXT.written;
+        writeBtn.disabled = true;
+      } else {
+        writeBtn.textContent = TXT.write;
+        writeBtn.disabled = false;
+      }
+      writeBtn.style.display = "inline-block";
+      setFooter("");
+    } else {
+      writeBtn.style.display = "none";
+      setFooter(TXT.old);
+    }
+    todayEl.textContent = state.dateKey;
+  }
+  function render() {
+    if (state.slip == null) {
+      document.body.classList.remove("has-slip");
+      slip.classList.remove("show");
+      writeBtn.style.display = "none";
+      setFooter("");
+      drawBtn.textContent = TXT.draw;
+      todayEl.textContent = state.dateKey;
+      return;
+    }
+    document.body.classList.toggle("has-slip", !state.animating);
+    showSlip();
+  }
+  function saveState() {
+    if (typeof PAD === "undefined" || !PAD.save) return;
+    PAD.save(DRAW_KEY, { dateKey: state.dateKey, slip: state.slip, written: state.written });
+  }
+  function loadState() {
+    if (typeof PAD === "undefined" || !PAD.load) return Promise.resolve(null);
+    return PAD.load(DRAW_KEY).then(function (d) {
+      if (!d || !d.dateKey || d.dateKey !== state.dateKey) {
+        state.slip = null;
+        state.written = false;
+        return;
+      }
+      state.slip = d.slip;
+      state.written = !!d.written;
+    });
+  }
+  function doDraw() {
+    if (state.animating || state.slip !== null) return;
+    state.animating = true;
+    cup.classList.remove("drop");
+    cup.classList.add("shake");
+    if (typeof PAD !== "undefined" && PAD.sfx) PAD.sfx("tick");
+    setTimeout(function () {
+      cup.classList.remove("shake");
+      cup.classList.add("drop");
+      state.slip = slotFor(state.dateKey);
+      state.written = false;
+      saveState();
+      render();
+      if (typeof PAD !== "undefined" && PAD.sfx) PAD.sfx("ok");
+      setTimeout(function () {
+        cup.classList.remove("drop");
+        state.animating = false;
+        render();
+      }, 900);
+    }, 520);
+  }
+  function appendNote() {
+    if (state.slip == null || typeof PAD === "undefined" || !PAD.notes) {
+      if (typeof PAD !== "undefined" && !PAD.notes) setFooter(TXT.old);
+      return;
+    }
+    var title = LANG === "en" ? "Daily fortune" : "每日一签";
+    var text = titleFor(state.dateKey);
+    /* PAD.notes.append is used only on the player's explicit choice: the app does not append automatically
+       and the note title stays the same so every day adds to the app's single note. "denied" means the runtime
+       blocked the append (no permission, limit hit, or the player pressed B in the own dialog). */
+    PAD.notes.append(title, text).then(function (result) {
+      if (result === "saved") {
+        state.written = true;
+        saveState();
+        render();
+        setFooter(TXT.written);
+      } else {
+        state.written = false;
+        saveState();
+        if (typeof PAD !== "undefined" && PAD.notes) {
+          writeBtn.textContent = TXT.write;
+          writeBtn.disabled = false;
+        }
+        setFooter(TXT.denied);
+      }
+    });
+  }
+  function pressA() { doDraw(); }
+  function pressB() {
+    if (state.slip !== null && typeof PAD !== "undefined" && PAD.notes && !state.written) {
+      appendNote();
+    }
+  }
+  function handleKey(e) {
+    var k = e.key;
+    if (k === "x" || k === "X") { e.preventDefault(); pressA(); }
+    else if (k === "z" || k === "Z") { e.preventDefault(); if (state.slip !== null && typeof PAD !== "undefined" && PAD.notes) { appendNote(); } }
+    else if (k === "Enter") { e.preventDefault(); appendNote(); }
+    else if (k === "ArrowRight" || k === "ArrowLeft") { e.preventDefault(); if (state.slip === null) doDraw(); }
+  }
+  if (typeof PAD !== "undefined" && PAD.on) {
+    PAD.on("press", function (button) {
+      if (button === "a") pressA();
+      else if (button === "b") pressB();
+      else if (button === "start") appendNote();
+    });
+  }
+  document.addEventListener("keydown", handleKey, false);
+  drawBtn.addEventListener("click", function () { doDraw(); });
+  writeBtn.addEventListener("click", function () { appendNote(); });
+  document.getElementById("title").textContent = TXT.title;
+  document.documentElement.lang = LANG === "en" ? "en" : "zh-CN";
+  todayEl.textContent = state.dateKey;
+  loadState().then(function () {
+    if (state.slip == null) {
+      drawBtn.textContent = TXT.draw;
+      writeBtn.style.display = "none";
+      render();
+      return;
+    }
+    render();
+  });
+})();
+</script>
+</body>
+</html>
