@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>单词卡</title>
+<!-- Lo-PDA app (lopda/1): a small flash-card deck practicing words with PAD.say and PAD.save.
+     The text stays visible while the voice speaks; the app does not block on unavailable voices.
+     MIT License. -->
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #a3ad7e; color: #1f2a14; font-family: monospace; }
+  body { display: flex; flex-direction: column; }
+  header { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; border-bottom: 2px solid #1f2a14; font-size: 15px; }
+  header b { font-size: 17px; letter-spacing: 2px; }
+  main { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 8px 12px 10px; box-sizing: border-box; }
+  .deck { position: relative; width: 100%; max-width: 290px; height: 180px; perspective: 1200px; }
+  .card { position: absolute; inset: 0; border: 3px solid #1f2a14; background: #a3ad7e; box-sizing: border-box; transform-style: preserve-3d; transition: transform 0.26s ease; }
+  .card.flipped { transform: rotateY(180deg); }
+  .face { position: absolute; inset: 0; backface-visibility: hidden; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 8px; box-sizing: border-box; }
+  .back { transform: rotateY(180deg); }
+  .word { font-size: 26px; font-weight: bold; letter-spacing: 1px; }
+  .hint { font-size: 14px; opacity: 0.8; margin-top: 4px; }
+  .mean { font-size: 18px; }
+  .controls { width: 100%; max-width: 290px; display: grid; grid-template-columns: repeat(2,1fr); gap: 8px; }
+  .controls button { min-height: 44px; font: inherit; font-size: 15px; font-weight: bold; background: #1f2a14; color: #a3ad7e; border: 2px solid #1f2a14; }
+  .controls button.secondary { background: #a3ad7e; color: #1f2a14; }
+  #meta { width: 100%; max-width: 290px; display: flex; justify-content: space-between; font-size: 12px; color: #4a5a32; }
+  #status { min-height: 1.4em; width: 100%; max-width: 290px; text-align: center; color: #4a5a32; font-size: 13px; line-height: 1.4; }
+</style>
+</head>
+<body>
+<header><b id="title">单词卡</b><span id="count">1/1</span></header>
+<main>
+  <div class="deck">
+    <div id="card" class="card" aria-live="polite">
+      <div class="face front">
+        <div id="word" class="word">apple</div>
+        <div id="hint" class="hint">/ˈæpəl/</div>
+      </div>
+      <div class="face back">
+        <div id="mean" class="mean">苹果</div>
+      </div>
+    </div>
+  </div>
+  <div id="meta"><span id="tag">All</span><span id="known">0/0</span></div>
+  <div class="controls">
+    <button id="sayBtn" type="button">A 听</button>
+    <button id="flipBtn" class="secondary" type="button">B 翻</button>
+  </div>
+  <div id="status"></div>
+</main>
+<script>
+(function () {
+  var LANG = (typeof PAD !== "undefined" && PAD.lang === "en") ? "en" : "zh";
+  var KEY = "word-cards-state";
+  var EN = [
+    { word: "apple", phon: "/ˈæpəl/", mean: "苹果" }, { word: "bread", phon: "/bred/", mean: "面包" }, { word: "rain", phon: "/reɪn/", mean: "雨" }, { word: "clock", phon: "/klɒk/", mean: "钟" }, { word: "door", phon: "/dɔːr/", mean: "门" }, { word: "window", phon: "/ˈwɪndoʊ/", mean: "窗户" }, { word: "garden", phon: "/ˈɡɑːrdn/", mean: "花园" }, { word: "tea", phon: "/tiː/", mean: "茶" }, { word: "coffee", phon: "/ˈkɔːfi/", mean: "咖啡" }, { word: "food", phon: "/fuːd/", mean: "食物" }, { word: "water", phon: "/ˈwɔːtər/", mean: "水" }, { word: "paper", phon: "/ˈpeɪpər/", mean: "纸" }, { word: "mouse", phon: "/maʊs/", mean: "老鼠" }, { word: "chair", phon: "/tʃer/", mean: "椅子" }, { word: "table", phon: "/ˈteɪbəl/", mean: "桌子" }, { word: "light", phon: "/laɪt/", mean: "灯" }, { word: "night", phon: "/naɪt/", mean: "夜晚" }, { word: "morning", phon: "/ˈmɔːrnɪŋ/", mean: "早晨" }, { word: "friend", phon: "/frend/", mean: "朋友" }, { word: "letter", phon: "/ˈletər/", mean: "信件" }, { word: "market", phon: "/ˈmɑːrkɪt/", mean: "市场" }, { word: "street", phon: "/striːt/", mean: "街道" }, { word: "sun", phon: "/sʌn/", mean: "太阳" }, { word: "cloud", phon: "/klaʊd/", mean: "云" }, { word: "song", phon: "/sɔŋ/", mean: "歌" }, { word: "book", phon: "/bʊk/", mean: "书" }, { word: "phone", phon: "/foʊn/", mean: "电话" }, { word: "brush", phon: "/brʌʃ/", mean: "刷子" }, { word: "plate", phon: "/pleɪt/", mean: "盘子" }, { word: "cloth", phon: "/klɔθ/", mean: "布" }, { word: "smile", phon: "/smaɪl/", mean: "微笑" }, { word: "walk", phon: "/wɔːk/", mean: "走路" }, { word: "quiet", phon: "/ˈkwaɪət/", mean: "安静" }, { word: "weather", phon: "/ˈwɛðər/", mean: "天气" }, { word: "garden", phon: "/ˈɡɑːrdn/", mean: "花园" }, { word: "kitchen", phon: "/ˈkɪtʃən/", mean: "厨房" }, { word: "shirt", phon: "/ʃɝt/", mean: "衬衫" }, { word: "shoe", phon: "/ʃuː/", mean: "鞋" }, { word: "soup", phon: "/suːp/", mean: "汤" }, { word: "fruit", phon: "/fruːt/", mean: "水果" }, { word: "music", phon: "/ˈmjuːzɪk/", mean: "音乐" }, { word: "story", phon: "/ˈstɔːri/", mean: "故事" }, { word: "train", phon: "/treɪn/", mean: "火车" }, { word: "river", phon: "/ˈrɪvər/", mean: "河流" }, { word: "stone", phon: "/stoʊn/", mean: "石头" }, { word: "bird", phon: "/bɝd/", mean: "鸟" }, { word: "peace", phon: "/piːs/", mean: "平静" }, { word: "green", phon: "/ɡriːn/", mean: "绿色" }, { word: "yellow", phon: "/ˈjɛloʊ/", mean: "黄色" }
+  ];
+  var ZH = [
+    { word: "雨", pinyin: "yǔ", mean: "rain" }, { word: "风", pinyin: "fēng", mean: "wind" }, { word: "茶", pinyin: "chá", mean: "tea" }, { word: "门", pinyin: "mén", mean: "door" }, { word: "窗", pinyin: "chuāng", mean: "window" }, { word: "书", pinyin: "shū", mean: "book" }, { word: "桌", pinyin: "zhuō", mean: "table" }, { word: "椅", pinyin: "yǐ", mean: "chair" }, { word: "灯", pinyin: "dēng", mean: "light" }, { word: "夜", pinyin: "yè", mean: "night" }, { word: "晨", pinyin: "chén", mean: "morning" }, { word: "地", pinyin: "dì", mean: "ground" }, { word: "山", pinyin: "shān", mean: "mountain" }, { word: "河", pinyin: "hé", mean: "river" }, { word: "石", pinyin: "shí", mean: "stone" }, { word: "路", pinyin: "lù", mean: "road" }, { word: "鸟", pinyin: "niǎo", mean: "bird" }, { word: "花", pinyin: "huā", mean: "flower" }, { word: "草", pinyin: "cǎo", mean: "grass" }, { word: "水", pinyin: "shuǐ", mean: "water" }, { word: "米", pinyin: "mǐ", mean: "rice" }, { word: "面", pinyin: "miàn", mean: "noodles" }, { word: "纸", pinyin: "zhǐ", mean: "paper" }, { word: "笔", pinyin: "bǐ", mean: "pen" }, { word: "衣", pinyin: "yī", mean: "clothes" }, { word: "鞋", pinyin: "xié", mean: "shoe" }, { word: "歌", pinyin: "gē", mean: "song" }, { word: "笑", pinyin: "xiào", mean: "smile" }, { word: "走", pinyin: "zǒu", mean: "walk" }, { word: "静", pinyin: "jìng", mean: "quiet" }, { word: "天", pinyin: "tiān", mean: "weather" }, { word: "菜", pinyin: "cài", mean: "vegetable" }, { word: "锅", pinyin: "guō", mean: "pot" }, { word: "盘", pinyin: "pán", mean: "plate" }, { word: "布", pinyin: "bù", mean: "cloth" }, { word: "树", pinyin: "shù", mean: "tree" }, { word: "果", pinyin: "guǒ", mean: "fruit" }, { word: "音", pinyin: "yīn", mean: "sound" }, { word: "乐", pinyin: "yuè", mean: "music" }, { word: "事", pinyin: "shì", mean: "matter" }, { word: "信", pinyin: "xìn", mean: "letter" }, { word: "市", pinyin: "shì", mean: "market" }, { word: "街", pinyin: "jiē", mean: "street" }, { word: "日", pinyin: "rì", mean: "sun" }, { word: "云", pinyin: "yún", mean: "cloud" }, { word: "绿", pinyin: "lǜ", mean: "green" }, { word: "黄", pinyin: "huáng", mean: "yellow" }, { word: "安", pinyin: "ān", mean: "peace" }
+  ];
+  var deck = LANG === "en" ? ZH : EN;
+  var state = { index: 0, flipped: false, showUnknown: false, known: {}, voiceMissing: false, lastSpeak: 0 };
+  var card = document.getElementById("card");
+  var wordEl = document.getElementById("word");
+  var hintEl = document.getElementById("hint");
+  var meanEl = document.getElementById("mean");
+  var countEl = document.getElementById("count");
+  var tagEl = document.getElementById("tag");
+  var knownEl = document.getElementById("known");
+  var statusEl = document.getElementById("status");
+  var sayBtn = document.getElementById("sayBtn");
+  var flipBtn = document.getElementById("flipBtn");
+
+  function loadState() {
+    if (typeof PAD === "undefined" || !PAD.load) return Promise.resolve();
+    return PAD.load(KEY).then(function (v) {
+      if (v && typeof v === "object") state.known = v.known || {};
+      if (v && typeof v === "object" && typeof v.showUnknown === "boolean") state.showUnknown = v.showUnknown;
+    });
+  }
+  function saveState() {
+    if (typeof PAD === "undefined" || !PAD.save) return;
+    PAD.save(KEY, { known: state.known, showUnknown: state.showUnknown });
+  }
+  function visibleCards() {
+    var out = [];
+    deck.forEach(function (item, i) {
+      if (!state.showUnknown || !state.known[item.word]) out.push({ item: item, index: i });
+    });
+    return out;
+  }
+  function currentCard() {
+    var list = visibleCards();
+    if (!list.length) return null;
+    while (state.index >= list.length) state.index = list.length - 1;
+    while (state.index < 0) state.index = 0;
+    return list[state.index];
+  }
+  function render() {
+    var list = visibleCards();
+    var cardInfo = currentCard();
+    if (!cardInfo) {
+      wordEl.textContent = "—";
+      hintEl.textContent = LANG === "en" ? "No cards left" : "没卡了";
+      meanEl.textContent = LANG === "en" ? "All marked known" : "都记住了";
+      countEl.textContent = "0/0";
+      tagEl.textContent = state.showUnknown ? (LANG === "en" ? "Unknown" : "未学") : (LANG === "en" ? "All" : "全部");
+      knownEl.textContent = "0/" + deck.length;
+      card.classList.remove("flipped");
+      state.flipped = false;
+      return;
+    }
+    var item = cardInfo.item;
+    if (LANG === "en") {
+      wordEl.textContent = item.word;
+      hintEl.textContent = item.pinyin;
+      meanEl.textContent = item.mean;
+    } else {
+      wordEl.textContent = item.word;
+      hintEl.textContent = item.phon;
+      meanEl.textContent = item.mean;
+    }
+    countEl.textContent = (cardInfo.index + 1) + "/" + deck.length;
+    tagEl.textContent = state.showUnknown ? (LANG === "en" ? "Unknown" : "未学") : (LANG === "en" ? "All" : "全部");
+    var knownCount = 0;
+    deck.forEach(function (it) { if (state.known[it.word]) knownCount++; });
+    knownEl.textContent = knownCount + "/" + deck.length;
+    if (state.flipped) card.classList.add("flipped"); else card.classList.remove("flipped");
+  }
+  function speakCard() {
+    var info = currentCard();
+    if (!info) return;
+    var item = info.item;
+    if (typeof PAD === "undefined" || !PAD.say) {
+      if (!state.voiceMissing) {
+        state.voiceMissing = true;
+        statusEl.textContent = LANG === "en" ? "This phone can't read it aloud." : "这台手机读不出来。";
+      }
+      return;
+    }
+    var now = Date.now();
+    if (now - state.lastSpeak < 1000) return;
+    state.lastSpeak = now;
+    var lang = (LANG === "en") ? "zh" : "en";
+    if (LANG === "zh") lang = "en";
+    var text = item.word;
+    /* PAD.say reports the result: "done" means the voice started, "stopped" means the app left or the call was replaced,
+       and "unavailable" means there is no voice for that language or the volume is 0. That result is shown without blocking the app. */
+    PAD.say(text, { lang: lang }).then(function (result) {
+      if (result === "unavailable") {
+        statusEl.textContent = LANG === "en" ? "This phone can't read it aloud (no voice for that language, or the volume is 0)." : "这台手机读不出来（没有该语言的声音，或者音量是 0）";
+      } else if (result === "done" || result === "stopped") {
+        statusEl.textContent = "";
+      }
+    });
+  }
+  function flip() {
+    state.flipped = !state.flipped;
+    card.classList.toggle("flipped", state.flipped);
+  }
+  function nextStep(dir) {
+    var list = visibleCards();
+    if (!list.length) return;
+    state.index += dir;
+    if (state.index < 0) state.index = 0;
+    if (state.index >= list.length) state.index = list.length - 1;
+    state.flipped = false;
+    render();
+  }
+  function toggleKnown() {
+    var info = currentCard();
+    if (!info) return;
+    var key = info.item.word;
+    state.known[key] = !state.known[key];
+    saveState();
+    if (state.showUnknown && state.known[key]) {
+      var list = visibleCards();
+      if (!list.length) state.index = 0; else if (state.index >= list.length) state.index = list.length - 1;
+    }
+    render();
+  }
+  function toggleFilter() {
+    state.showUnknown = !state.showUnknown;
+    state.index = 0;
+    saveState();
+    render();
+  }
+  function handlePress(button) {
+    if (button === "left") nextStep(-1);
+    else if (button === "right") nextStep(1);
+    else if (button === "a") speakCard();
+    else if (button === "b") flip();
+    else if (button === "start") toggleKnown();
+    else if (button === "select") toggleFilter();
+  }
+  document.addEventListener("keydown", function (e) {
+    var k = e.key;
+    if (k === "ArrowLeft") { e.preventDefault(); nextStep(-1); }
+    else if (k === "ArrowRight") { e.preventDefault(); nextStep(1); }
+    else if (k === "x" || k === "X") { e.preventDefault(); speakCard(); }
+    else if (k === "z" || k === "Z") { e.preventDefault(); flip(); }
+    else if (k === "Enter") { e.preventDefault(); toggleKnown(); }
+    else if (k === "Shift") { e.preventDefault(); toggleFilter(); }
+  }, false);
+  if (typeof PAD !== "undefined" && PAD.on) {
+    PAD.on("press", function (button) { handlePress(button); });
+  }
+  sayBtn.addEventListener("click", speakCard);
+  flipBtn.addEventListener("click", flip);
+  document.getElementById("title").textContent = LANG === "en" ? "WordCard" : "单词卡";
+  document.documentElement.lang = LANG === "en" ? "en" : "zh-CN";
+  loadState().then(function () {
+    render();
+  });
+})();
+</script>
+</body>
+</html>
