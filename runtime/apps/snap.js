@@ -18,10 +18,15 @@
 "use strict";
 var LP=window.LP, $=LP.$, tr=LP.tr, sfx=LP.sfx, toast=LP.toast, TONES=LP.TONES;
 var FINDER=window.LopdaFinder, LENS=window.LopdaLenses;
-/* the safety net looks every quarter second, like the sensors' (decisions.md section 23) */
-var WATCH_MS=250;
+/* the safety net looks every quarter second, like the sensors' (decisions.md section 23). It also watches the stream, as
+   the camera program's watchdog does (decisions.md section 4): no picture after REPLAY_MS asks play() again, after
+   NOFRAME_MS (or a track that ends, or stays muted MUTE_MS) the stream restarts once; a second failure closes with null */
+var WATCH_MS=250, REPLAY_MS=1500, NOFRAME_MS=3000, MUTE_MS=1000;
 var SN={req:null, stream:null, gen:0, raf:0, last:0, watch:null, lens:"w", lenses:null, exposure:0, contrast:0,
-  swapping:0, swapTimer:null, systemOk:false, padWas:false, blink:null};
+  swapping:0, swapTimer:null, systemOk:false, padWas:false, blink:null,
+  since:0, seen:false, replayed:false, muted:0, restarts:0};
+/* ?debug: what the finder did (LOPDA_DEBUG.snap) */
+function log(s){ var d=window.LOPDA_DEBUG; if(d) (d.snap=d.snap||[]).push(s); }
 var cv=$("snap-cv"), ctx=cv.getContext("2d"), img=ctx.createImageData(cv.width,cv.height);
 var grab=FINDER.grabber();
 
@@ -63,7 +68,7 @@ function open(o){
   var size=FINDER.SIZES[o.size] || FINDER.SIZES.small;
   clearTimeout(SN.blink); $("snap-shut").hidden=true;
   SN.req={o:o, w:size.w, h:size.h};
-  SN.exposure=0; SN.contrast=0;
+  SN.exposure=0; SN.contrast=0; SN.restarts=0;
   if(cv.width!==size.w || cv.height!==size.h){ cv.width=size.w; cv.height=size.h; img=ctx.createImageData(size.w,size.h); }
   idle();
   $("snap").hidden=false;
@@ -71,7 +76,15 @@ function open(o){
   SN.padWas=!$("gamepad").hidden; LP.showPad(true);
   render(); layout();
   /* whatever way the app left the front (HOME, another program, closed, removed, its frame gone), the next look lets go */
-  SN.watch=setInterval(function(){ if(SN.req && !SN.req.o.owner()) cancel(); },WATCH_MS);
+  SN.watch=setInterval(function(){
+    if(SN.req && !SN.req.o.owner()){ cancel(); return; }
+    if(!SN.stream) return;
+    if(SN.muted && Date.now()-SN.muted>=MUTE_MS){ restart("muted"); return; }
+    if(SN.seen) return;
+    var t=Date.now()-SN.since;
+    if(t>=NOFRAME_MS) restart("no frame");
+    else if(t>=REPLAY_MS && !SN.replayed){ SN.replayed=true; play("watchdog"); }
+  },WATCH_MS);
   startStream();
 }
 /* getUserMedia runs at once, inside the tap that opened the finder (or the SELECT that changed the lens) */
@@ -81,7 +94,13 @@ function startStream(){
   Promise.resolve(p).then(function(stream){
     if(gen!==SN.gen || !SN.req){ stopTracks(stream); return; }
     SN.systemOk=true; SN.stream=stream;
-    var v=$("snap-video"); v.srcObject=stream; var pl=v.play(); if(pl && pl.catch) pl.catch(function(){});
+    SN.since=Date.now(); SN.seen=false; SN.replayed=false; SN.muted=0; log("stream on");
+    stream.getVideoTracks().forEach(function(k){
+      k.addEventListener("ended",function(){ if(gen===SN.gen){ log("track ended"); restart("ended"); } });
+      k.addEventListener("mute",function(){ if(gen===SN.gen){ log("track muted"); SN.muted=Date.now(); } });
+      k.addEventListener("unmute",function(){ if(gen===SN.gen){ log("track unmuted"); SN.muted=0; } });
+    });
+    $("snap-video").srcObject=stream; play("start");
     SN.last=0; SN.raf=requestAnimationFrame(tick);
     if(!lenses()) findLenses(gen);
     render();
@@ -89,8 +108,23 @@ function startStream(){
     if(gen!==SN.gen || !SN.req) return;
     /* a lens the list remembered is gone: the plain back / front pair, once */
     if(L.deviceId && e && (e.name==="OverconstrainedError" || e.name==="NotFoundError")){ SN.lenses=LENS.FALLBACK; SN.lens="w"; startStream(); return; }
+    log("open failed: "+((e&&e.name)||""));
     toast(tr("snap.none")); sfx("err"); finish(null);
   });
+}
+function play(why){
+  var v=$("snap-video"), pl;
+  if(!SN.stream) return;
+  try{ pl=v.play(); }catch(e){ pl=Promise.reject(e); }
+  Promise.resolve(pl).then(function(){ log("play ok: "+why); },function(e){ log("play refused: "+why+" "+((e&&e.name)||"")); });
+}
+/* the stream gave no picture, ended or stayed muted: once more, then the app hears null */
+function restart(why){
+  if(!SN.req) return;
+  if(SN.restarts>=1){ log("none: "+why); toast(tr("snap.none")); sfx("err"); finish(null); return; }
+  SN.restarts++; log("restart: "+why);
+  cancelAnimationFrame(SN.raf); stopTracks(SN.stream); SN.stream=null;
+  startStream();
 }
 /* names come once the camera is allowed: read the list, never open the other cameras while this one runs */
 function findLenses(gen){
@@ -110,6 +144,7 @@ function tick(t){
   var v=$("snap-video");
   if(v.readyState<2 || !v.videoWidth) return;
   draw(frame(v));
+  if(!SN.seen){ SN.seen=true; SN.restarts=0; log("live"); }
   if(SN.swapping && Date.now()>=SN.swapping) endSwap();
 }
 function frame(v){
@@ -168,6 +203,10 @@ LP.padRoute("snap",function(b,down){
 });
 /* locked, another app, the page going away: the camera lets go and the app gets null; nothing comes back */
 document.addEventListener("visibilitychange",function(){ if(document.hidden) cancel(); });
+/* iOS may refuse play() outside a gesture: any tap or key while the stream waits for its first picture asks again */
+["pointerup","keydown"].forEach(function(ev){
+  document.addEventListener(ev,function(){ if(SN.stream && !SN.seen) play("gesture"); },true);
+});
 window.addEventListener("pagehide",cancel);
 
 LP.snap={supported:supported, systemOk:function(){ return SN.systemOk; }, open:open, cancel:cancel, isOpen:function(){ return !!SN.req; }};
