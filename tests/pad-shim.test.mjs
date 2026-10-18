@@ -332,6 +332,7 @@ test("notes: PAD.notes and PAD.say exist only when the runtime offers them", () 
   assert.deepEqual(Object.keys(PAD.notes), ["append"]);
   assert.ok(Object.isFrozen(PAD.notes));
   assert.equal(typeof PAD.say, "function");
+  assert.deepEqual([...PAD.say.languages], ["zh", "en", "ja"]);
   const { lopdaWrapApp: wrap } = runScript("sdk/pad-shim.js", {});
   assert.match(wrap("<p>x</p>", { notes: true, say: true, nope: true }), /\(\{"notes":true,"say":true\}\);/);
 });
@@ -358,20 +359,22 @@ test("notes: without the permission or past the limits the runtime says denied; 
   assert.deepEqual(await Promise.all([one, two]), ["denied", "denied"]);
 });
 
-test("say: the text is cut to 200 characters, lang is zh or en and PAD.lang by default; the reply settles it", async () => {
+test("say: the text is cut to 200 characters, lang is zh, en or ja and PAD.lang by default; the reply settles it", async () => {
   const zh = app({ say: true, lang: "zh" }), en = app({ say: true, lang: "en" }), old = app({ say: true });
-  const long = "测".repeat(150) + "😀".repeat(100);
-  const r1 = zh.PAD.say(long), r2 = zh.PAD.say("hello", { lang: "en" }), r3 = zh.PAD.say("x", { lang: "fr" });
+  const long = "測".repeat(150) + "😀".repeat(100);
+  const r1 = zh.PAD.say(long), r2 = zh.PAD.say("hello", { lang: "en" }), r3 = zh.PAD.say("あ", { lang: "ja" }), r4 = zh.PAD.say("x", { lang: "fr" });
   en.PAD.say("hi"); old.PAD.say("hi");
-  const [s1, s2, s3] = zh.posted();
+  const [s1, s2, s3, s4] = zh.posted();
   assert.equal(Array.from(s1.text).length, 200);
-  assert.equal(s1.text, "测".repeat(150) + "😀".repeat(50), "cut by characters, never inside a surrogate pair");
-  assert.deepEqual([s1.lang, s2.lang, s3.lang, en.posted()[0].lang, old.posted()[0].lang], ["zh", "en", "zh", "en", "zh"]);
+  assert.equal(s1.text, "測".repeat(150) + "😀".repeat(50), "cut by characters, never inside a surrogate pair");
+  assert.deepEqual([s1.lang, s2.lang, s3.lang, s4.lang, en.posted()[0].lang, old.posted()[0].lang], ["zh", "en", "ja", "zh", "en", "zh"]);
   assert.deepEqual(s2, { op: "say", text: "hello", lang: "en", i: s2.i, pad: 1 });
+  assert.deepEqual(s3, { op: "say", text: "あ", lang: "ja", i: s3.i, pad: 1 });
   zh.fromRuntime({ pad: 1, op: "said", i: s1.i, v: "stopped" });
   zh.fromRuntime({ pad: 1, op: "said", i: s2.i, v: "done" });
-  zh.fromRuntime({ pad: 1, op: "said", i: s3.i, v: "boom" });
-  assert.deepEqual(await Promise.all([r1, r2, r3]), ["stopped", "done", "unavailable"]);
+  zh.fromRuntime({ pad: 1, op: "said", i: s3.i, v: "done" });
+  zh.fromRuntime({ pad: 1, op: "said", i: s4.i, v: "boom" });
+  assert.deepEqual(await Promise.all([r1, r2, r3, r4]), ["stopped", "done", "done", "unavailable"]);
 });
 
 /* ---------- the camera (SPEC.md 6.6, decisions.md section 28) ---------- */

@@ -566,11 +566,11 @@ function snapOpen(req){
   LP.snap.open({name:appName(req.app), size:req.size, owner:function(){ return frontWin()===req.win; }, done:req.reply});
 }
 
-/* ---------- speech: PAD.say (runtime/speech.js, decisions.md section 25). No permission: the voice follows the volume
+/* ---------- speech: PAD.say (runtime/speech.js, decisions.md sections 25 and 29). No permission: the voice follows the volume
    (step 0 says nothing), an app speaks once a second at most, 200 characters, a new call stops the one speaking, and HOME,
    another app or the page going away stops it ---------- */
 function sayRequest(app,win,d){
-  var lang=d.lang==="zh" || d.lang==="en" ? d.lang : I18N.lang;
+  var lang=d.lang==="zh" || d.lang==="en" || d.lang==="ja" ? d.lang : I18N.lang;
   LP.speech.say(app.id,typeof d.text==="string" ? LP.noEmoji(d.text) : "",lang).then(function(v){
     if(S.running===app && $("run-frame").contentWindow===win) win.postMessage({pad:1,op:"said",i:d.i,v:v},"*");
   });

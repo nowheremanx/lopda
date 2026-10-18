@@ -5301,7 +5301,7 @@ const NOTES_APP = readFileSync(join(ROOT, "tests/fixtures/notes-app/index.html")
 const speechInit = () => {
   window.__said = [];
   let cur = null;
-  const voices = [{ name: "Sin-ji", lang: "zh-HK" }, { name: "Tingting", lang: "zh-CN" }, { name: "Samantha", lang: "en-US" }];
+  const voices = [{ name: "Sin-ji", lang: "zh-HK" }, { name: "Tingting", lang: "zh-CN" }, { name: "Samantha", lang: "en-US" }, { name: "Kyoko", lang: "ja-JP" }];
   const synth = {
     getVoices: () => voices, addEventListener() {},
     speak(u) { window.__said.push({ text: u.text, voice: u.voice.name, lang: u.lang, volume: u.volume }); cur = u; setTimeout(() => u.onstart && u.onstart(), 0); },
@@ -5518,5 +5518,40 @@ test("say: the page going hidden stops it; dev.html logs notes and says, and ans
   await p.evaluate(() => window.__end());
   assert.equal(await s, "done");
   assert.match(await p.textContent("#log"), /say \(en\): hello/);
+  assert.deepEqual(errors, []);
+});
+
+test("kana-cards: browse both kana scripts, read Japanese aloud when supported, and answer a quiz", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t);
+  await p.addInitScript(speechInit);
+  await p.goto(`${base}/sdk/dev.html?app=registry/apps/kana-cards`, { waitUntil: "load" });
+  await p.waitForFunction(() => /loaded |load failed/.test(document.getElementById("log").textContent), null, { timeout: 5000 });
+  let f;
+  await until(p, async () => { f = p.frames().find((x) => x !== p.mainFrame()); return f && await f.evaluate(() => !!window.PAD && !!PAD.say).catch(() => false); }, "kana app");
+  await f.waitForFunction(() => document.documentElement.lang === "en", null, { timeout: 5000 });
+  await p.locator("#app").evaluate((el) => { el.style.width = "331px"; el.style.height = "359px"; el.style.flex = "none"; });
+  assert.deepEqual(await f.evaluate(() => [...PAD.say.languages]), ["zh", "en", "ja"]);
+  const insideScreen = async () => f.evaluate(() => {
+    const root = document.documentElement;
+    const visible = ["header", "main", "#meta", "#card", "#prompt", "#options", "#controls", "#status"]
+      .map((s) => document.querySelector(s)).filter((el) => getComputedStyle(el).display !== "none");
+    return { size: [root.clientWidth, root.clientHeight], inside: visible.every((el) => {
+      const r = el.getBoundingClientRect();
+      return r.top >= 0 && r.bottom <= root.clientHeight && r.left >= 0 && r.right <= root.clientWidth;
+    }) };
+  });
+  assert.deepEqual(await insideScreen(), { size: [331, 359], inside: true });
+  await f.click("#hear");
+  await until(p, async () => /say \(ja\): あ/.test(await p.textContent("#log")), "Japanese say request");
+  await until(p, async () => (await p.evaluate(() => window.__said.some((x) => x && x.text === "あ"))), "Japanese speech");
+  assert.deepEqual((await p.evaluate(() => window.__said.filter((x) => x !== "cancel")))[0], { text: "あ", voice: "Kyoko", lang: "ja-JP", volume: 0.42 });
+  await f.click("#script");
+  assert.equal(await f.textContent("#kana"), "ア");
+  await f.click("#quiz");
+  assert.equal(await f.locator("#options button").count(), 4);
+  assert.deepEqual(await insideScreen(), { size: [331, 359], inside: true });
+  const target = Number((await f.textContent("#count")).split("/")[0]) - 1;
+  await f.locator(`#options button[data-index="${target}"]`).click();
+  await f.waitForFunction(() => /Correct|正确/.test(document.getElementById("status").textContent), null, { timeout: 3000 });
   assert.deepEqual(errors, []);
 });
