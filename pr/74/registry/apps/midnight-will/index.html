@@ -1,0 +1,853 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>凌晨零点的遗嘱</title>
+<!-- The Will at Midnight: a multi-ending visual novel for Lo-PDA. MIT License. -->
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #a3ad7e; color: #1f2a14; font-family: monospace; }
+  body { display: flex; flex-direction: column; }
+  header { flex: none; display: flex; justify-content: space-between; padding: 6px 10px 4px; border-bottom: 2px solid #1f2a14; font-size: 15px; }
+  header .dim { color: #4a5a32; font-size: 13px; }
+  main { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 8px 10px; }
+  footer { flex: none; padding: 5px 10px; border-top: 2px solid #1f2a14; font-size: 13px; color: #4a5a32; min-height: 18px; }
+  #art { display: block; width: 100%; max-width: 340px; margin: 0 auto 8px; background: #1f2a14; image-rendering: pixelated; }
+  #portrait { display: block; margin: 0 auto 6px; image-rendering: pixelated; }
+  .dlg { border: 2px solid #1f2a14; padding: 8px 10px; min-height: 84px; font-size: 16px; line-height: 1.7; overflow-wrap: anywhere; white-space: pre-wrap; }
+  .dlg .who { font-size: 13px; color: #4a5a32; margin-bottom: 2px; }
+  .dlg .cont { text-align: right; font-size: 13px; color: #4a5a32; margin-top: 4px; }
+  .choices { margin-top: 8px; }
+  .choice { display: block; width: 100%; box-sizing: border-box; text-align: left; min-height: 44px; margin: 0 0 8px; padding: 10px 12px; font-family: monospace; font-size: 16px; background: #a3ad7e; color: #1f2a14; border: 2px solid #1f2a14; cursor: pointer; }
+  .choice.sel { background: #1f2a14; color: #a3ad7e; }
+  .choice:disabled { color: #4a5a32; border-style: dashed; }
+  .big { font-size: 20px; text-align: center; padding: 14px 8px; }
+  .center { text-align: center; }
+  .small { font-size: 13px; color: #4a5a32; }
+  .glitch { animation: gl 0.12s steps(2) infinite; }
+  @keyframes gl { 0% { transform: translate(0); } 25% { transform: translate(-2px, 1px); } 50% { transform: translate(2px, -1px); } 75% { transform: translate(-1px, -1px); } 100% { transform: translate(0); } }
+  .hidden { display: none; }
+  #sysmsg { font-size: 13px; color: #4a5a32; text-align: center; margin-top: 6px; min-height: 16px; }
+</style>
+</head>
+<body>
+<header><span id="clock">23:47</span><span class="dim" id="scene">LO-PDA</span></header>
+<main id="main">
+  <canvas id="art" width="300" height="132"></canvas>
+  <canvas id="portrait" class="hidden" width="96" height="128"></canvas>
+  <div class="dlg" id="dlg"><div class="who" id="who"></div><div id="text"></div><div class="cont" id="cont"></div></div>
+  <div class="choices" id="choices"></div>
+  <div id="sysmsg"></div>
+</main>
+<footer id="footer">A 继续</footer>
+<script>
+"use strict";
+var PADOK = typeof PAD !== "undefined";
+var LANG = (PADOK && PAD.lang === "en") ? "en" : "zh";
+var TXT = {
+  zh: { cont: "A 继续", choose: "↑↓ 选择　A 确认", back: "B 返回", start: "START 菜单", tap: "点按继续", resume: "继续", restart: "从头开始", title: "回到标题", ffOn: "快进已读：开", ffOff: "快进已读：关", menu: "菜单", endings: "结局回顾", newGame: "开始游戏", contGame: "继续游戏", trueGame: "TRUE", locked: "？？？", endA: "结局 A · 删除", endB: "结局 B · 保留", endC: "结局 C · 我不知道", endD: "结局 D · 这不是你的问题", endT: "真结局 · 不要替我回答", seen: "已读", delQ: "DELETE MEMORY?", delBtn: "DELETE", keepBtn: "KEEP", photo: "拍照", skip: "跳过", blow: "按 A 吹气", hum: "按 A 哼一个音", tiltHint: "← → 移动　或倾斜手机", saved: "已保存" },
+  en: { cont: "A Continue", choose: "Up/Down select, A confirm", back: "B Back", start: "START Menu", tap: "Tap to continue", resume: "Resume", restart: "Restart", title: "Title", ffOn: "Skip read: ON", ffOff: "Skip read: OFF", menu: "Menu", endings: "Endings", newGame: "New Game", contGame: "Continue", trueGame: "TRUE", locked: "???", endA: "Ending A - DELETE", endB: "Ending B - KEEP", endC: "Ending C - I DON'T KNOW", endD: "Ending D - NOT YOUR QUESTION", endT: "True Ending", seen: "seen", delQ: "DELETE MEMORY?", delBtn: "DELETE", keepBtn: "KEEP", photo: "Photo", skip: "Skip", blow: "Press A to blow", hum: "Press A to hum", tiltHint: "Left/Right to move, or tilt phone", saved: "Saved" }
+}[LANG];
+function T(k) { return TXT[k]; }
+var INK = "#1f2a14", DARK = "#4a5a32", MID = "#7d8a58", PAPER = "#a3ad7e";
+var $ = function (id) { return document.getElementById(id); };
+function sfx(name) { try { if (PADOK) PAD.sfx(name); } catch (e) {} }
+function csfx(o) { try { if (PADOK && PAD.sfx) PAD.sfx(o); } catch (e) {} }
+function music(name) {
+  try {
+    if (!PADOK || !PAD.music) return;
+    var M = MUSIC[name];
+    if (!M) { PAD.music.stop(); return; }
+    PAD.music.play({ bpm: M.bpm, p1: M.p1, p2: M.p2, tri: M.tri, noise: M.noise }, { loop: M.loop !== false });
+  } catch (e) {}
+}
+function amb(name, level) {
+  try { if (PADOK && PAD.ambience) PAD.ambience(name, level); } catch (e) {}
+}
+function ambOff() { try { if (PADOK && PAD.ambience) PAD.ambience(null); } catch (e) {} }
+function save() {
+  try { if (PADOK) PAD.save("midnight-will", S); } catch (e) {}
+}
+function load(cb) {
+  try {
+    if (!PADOK) { cb(null); return; }
+    var r = PAD.load("midnight-will");
+    if (r && r.then) r.then(function (v) { cb(v); }, function () { cb(null); });
+    else cb(r);
+  } catch (e) { cb(null); }
+}
+/* ---- original music: short MML phrases, written for this game ---- */
+var MUSIC = {
+  theme: { bpm: 84, p1: "o4 l8 c e g a g e d c d e c", p2: "o3 l8 c g c g a g f e d c", tri: "o2 l4 c g a g f e d c", noise: "r1" },
+  room: { bpm: 70, p1: "o4 l2 c r r g r r", p2: "o3 l2 c r r e r r", tri: "o2 l2 c r r g r r", noise: "r1" },
+  memory: { bpm: 76, p1: "o4 l8 c e g e f e d c e g e f- e d c", p2: "o3 l8 c g c g a g f e d c", tri: "o2 l4 c g f e d c", noise: "r1" },
+  late: { bpm: 60, p1: "o5 l1 c r r r", p2: "o4 l1 e r r r", tri: "o3 l1 c r r r", noise: "r1" },
+  endA: { bpm: 72, p1: "o4 l4 a c e2", p2: "o3 l4 a c e2", tri: "o2 l4 a c e2", noise: "r1", loop: false },
+  endB: { bpm: 72, p1: "o4 l4 c e a2", p2: "o3 l4 c e a2", tri: "o2 l4 c e a2", noise: "r1", loop: false },
+  endC: { bpm: 72, p1: "o4 l4 e g b2", p2: "o3 l4 e g b2", tri: "o2 l4 e g b2", noise: "r1", loop: false },
+  endD: { bpm: 90, p1: "o4 l8 c e- g- e- c", p2: "o3 l8 c e- g- e- c", tri: "o2 l8 c e- g- e- c", noise: "x x x x", loop: false },
+  endT: { bpm: 60, p1: "o4 l4 c g c2", p2: "o3 l4 c g c2", tri: "o2 l4 c g c2", noise: "r1", loop: false }
+};
+/* ---- pixel art: portraits 12x16, drawn scaled ---- */
+var PORTRAITS = {
+  normal: ["...0000.....", "..011110....", ".01111110...", ".01333310...", ".03033030...", ".03333330...", "..033330....", "...0330.....", "..022220....", ".02222220...", ".02222220...", ".02222220...", ".02222220...", "..022220....", "..02..20....", "..00..00...."],
+  smile: ["...0000.....", "..011110....", ".01111110...", ".01333310...", ".03033030...", ".03333330...", "..033330....", "...0330.....", "..022220....", ".02222220...", ".02022220...", ".02122220...", ".02222220...", "..022220....", "..02..20....", "..00..00...."],
+  sad: ["...0000.....", "..011110....", ".01111110...", ".01333310...", ".03033030...", ".03333330...", "..033330....", "...0330.....", "..022220....", ".02222220...", ".02222220...", ".02212220...", ".02222220...", "..022220....", "..02..20....", "..00..00...."],
+  angry: ["...0000.....", "..011110....", ".01111110...", ".01333310...", ".03033030...", ".03333330...", "..033330....", "...0330.....", "..022220....", ".02222220...", ".02122220...", ".02222220...", ".02222220...", "..022220....", "..02..20....", "..00..00...."],
+  glitch: ["...0000.....", "..011110....", ".01111110...", ".01333310...", ".03033030...", ".03333330...", "..033330....", "...0330.....", "..022220....", ".02222220...", ".02222220...", ".02222220...", ".02222220...", "..022220....", "..02..20....", "..00..00...."],
+  empty: ["............", "............", "............", "............", "............", "............", "............", "............", "............", "............", "............", "............", "............", "............", "............", "............"]
+};
+var TONE = { "0": INK, "1": DARK, "2": MID, "3": PAPER, ".": null };
+function drawPortrait(state) {
+  var cv = $("portrait"), ctx = cv.getContext("2d"), art = PORTRAITS[state || "normal"];
+  ctx.fillStyle = PAPER; ctx.fillRect(0, 0, 96, 128);
+  for (var y = 0; y < 16; y++) for (var x = 0; x < 12; x++) {
+    var c = TONE[art[y].charAt(x)];
+    if (c) { ctx.fillStyle = c; ctx.fillRect(x * 8, y * 8, 8, 8); }
+  }
+  if (state === "glitch") {
+    for (var i = 0; i < 10; i++) {
+      ctx.fillStyle = (i % 2) ? INK : PAPER;
+      ctx.fillRect(Math.floor(Math.random() * 88), Math.floor(Math.random() * 120), 8 + Math.floor(Math.random() * 16), 4);
+    }
+  }
+  cv.classList.remove("hidden");
+}
+/* ---- scene art on the main canvas ---- */
+var ART = $("art"), ACTX = ART.getContext("2d");
+function clearArt() { ACTX.fillStyle = INK; ACTX.fillRect(0, 0, 300, 132); }
+function px(x, y, w, h, c) { ACTX.fillStyle = c; ACTX.fillRect(x, y, w, h); }
+function drawScene(name, opt) {
+  opt = opt || {};
+  clearArt();
+  if (name === "black") { return; }
+  if (name === "boot") {
+    ACTX.fillStyle = PAPER; ACTX.font = "16px monospace"; ACTX.textAlign = "center";
+    ACTX.fillText("LO-PDA", 150, 60); ACTX.font = "12px monospace";
+    ACTX.fillText("MEMORY RECOVERY", 150, 84);
+    return;
+  }
+  if (name === "lamp") {
+    px(0, 0, 300, 132, PAPER); px(0, 100, 300, 32, MID);
+    px(140, 20, 20, 26, DARK); px(128, 46, 44, 8, INK);
+    if (opt.on) { px(128, 54, 44, 40, "#a3ad7e"); px(138, 64, 24, 20, PAPER); px(120, 46, 60, 4, DARK); }
+    else { px(128, 54, 44, 40, DARK); px(120, 46, 60, 4, INK); }
+    return;
+  }
+  if (name === "candle") {
+    px(0, 0, 300, 132, INK); px(120, 80, 60, 40, MID); px(144, 60, 12, 22, PAPER);
+    var f = opt.flame || 0;
+    if (f > 0) { px(142, 44 - f * 2, 16, 14 + f * 3, PAPER); px(147, 48 - f * 2, 6, 8, INK); }
+    return;
+  }
+  if (name === "map") {
+    px(0, 0, 300, 132, PAPER);
+    var rooms = [["lab", 20, 20, 120, 40], ["arch", 160, 20, 120, 40], ["roof", 90, 80, 120, 36]];
+    for (var i = 0; i < 3; i++) {
+      var r = rooms[i];
+      px(r[1], r[2], r[3], r[4], (opt.sel === i) ? INK : PAPER);
+      ACTX.fillStyle = (opt.sel === i) ? PAPER : INK; ACTX.font = "13px monospace"; ACTX.textAlign = "center";
+      ACTX.fillText(r[0] === "lab" ? "实验室" : r[0] === "arch" ? "档案室" : "天台", r[1] + r[3] / 2, r[2] + r[4] / 2 + 5);
+      if (opt.done && opt.done[i]) { ACTX.fillText("✓", r[1] + r[3] - 12, r[2] + 14); }
+    }
+    return;
+  }
+  if (name === "lab") {
+    px(0, 0, 300, 132, PAPER); px(0, 90, 300, 42, MID);
+    px(40, 50, 60, 30, INK); px(46, 56, 48, 18, PAPER);
+    px(130, 60, 30, 20, DARK); px(180, 55, 20, 26, INK); px(230, 40, 40, 30, PAPER);
+    px(230, 40, 40, 30, PAPER); px(240, 48, 20, 14, DARK);
+    return;
+  }
+  if (name === "archive") {
+    px(0, 0, 300, 132, PAPER);
+    var bars = [200, 140, 230, 90, 170, 120];
+    for (var i = 0; i < 6; i++) { px(20, 12 + i * 20, bars[i], 12, (i % 2) ? DARK : INK); }
+    return;
+  }
+  if (name === "roof") {
+    px(0, 0, 300, 132, PAPER);
+    for (var i = 0; i < 5; i++) { px(10 + i * 30, 20 + i * 18, 60, 3, MID); px(40 + i * 30, 30 + i * 18, 40, 3, DARK); }
+    px(0, 110, 300, 22, DARK); px(60, 60, 10, 50, INK);
+    return;
+  }
+  if (name === "frag") {
+    px(0, 0, 300, 132, PAPER);
+    var n = opt.n || 0;
+    if (n === 0) { px(60, 40, 40, 50, DARK); px(180, 40, 40, 50, INK); px(130, 70, 40, 20, MID); }
+    if (n === 1) { px(120, 30, 60, 70, DARK); px(135, 50, 8, 8, INK); px(157, 50, 8, 8, INK); px(140, 72, 20, 6, INK); }
+    if (n === 2) { px(120, 30, 60, 70, INK); px(135, 50, 8, 8, PAPER); px(157, 50, 8, 8, PAPER); px(140, 76, 20, 4, PAPER); px(130, 88, 40, 3, PAPER); }
+    if (n === 3) { px(40, 40, 220, 50, MID); px(60, 55, 60, 20, INK); px(180, 55, 60, 20, DARK); }
+    if (n === 4) { px(90, 40, 120, 40, INK); px(110, 52, 80, 16, PAPER); ACTX.fillStyle = PAPER; ACTX.font = "13px monospace"; ACTX.textAlign = "center"; ACTX.fillText("DELETE", 150, 64); }
+    return;
+  }
+  if (name === "tilt") {
+    px(0, 0, 300, 132, PAPER); px(20, 66, 260, 3, INK);
+    px(20, 40, 3, 52, INK); px(277, 40, 3, 52, INK);
+    var x = 20 + (opt.p || 0) * 260;
+    px(x - 6, 58, 12, 12, INK); px(x - 2, 62, 4, 4, PAPER);
+    return;
+  }
+  if (name === "title") {
+    px(0, 0, 300, 132, PAPER); px(120, 20, 60, 90, INK); px(128, 28, 44, 30, PAPER);
+    px(135, 66, 30, 4, DARK); px(135, 76, 30, 4, DARK); px(135, 86, 30, 4, DARK);
+    return;
+  }
+  if (name === "photo") {
+    px(0, 0, 300, 132, PAPER);
+    if (opt.pximg) { drawPixels(opt.pximg, 86, 10, 128, 112); }
+    return;
+  }
+}
+function drawPixels(img, dx, dy, dw, dh) {
+  var w = img.w, h = img.h, data = img.px;
+  var sx = dw / w, sy = dh / h;
+  for (var y = 0; y < h; y++) for (var x = 0; x < w; x++) {
+    var v = data[y * w + x];
+    ACTX.fillStyle = v < 64 ? INK : v < 128 ? DARK : v < 192 ? MID : PAPER;
+    ACTX.fillRect(dx + Math.floor(x * sx), dy + Math.floor(y * sy), Math.ceil(sx), Math.ceil(sy));
+  }
+}
+/* ---- script: the story is data. who: lan / you / sys ---- */
+function L(w, t) { return { w: w, t: t }; }
+var SCRIPT = {
+  s01: { clock: "23:47", art: "black", music: "theme", lines: [
+    L("sys", "23:47"), L("sys", "LO-PDA"), L("sys", "MEMORY RECOVERY"), L("sys", "NEW MESSAGE\nFROM: LAN")
+  ], next: "s02" },
+  s02: { clock: "23:47", art: "black", lines: [
+    L("lan", "如果你看到这条消息，\n说明我已经死了。"),
+    L("lan", "不用害怕。\n我只需要你帮我\n做三件很小的事情。"),
+    L("lan", "第一件：\n把灯关掉。")
+  ], choice: [
+    { text: "继续", goto: "s03" },
+    { text: "返回", goto: "s02b" }
+  ] },
+  s02b: { clock: "23:47", art: "black", lines: [ L("sys", "没有返回。\n从来就没有。") ], next: "s03" },
+  s03: { clock: "23:47", art: "lamp", artOpt: { on: true }, amb: ["rain", 0.25], lines: [
+    L("sys", "一间黑暗的房间。\n只有一盏灯还亮着。"), L("sys", "关灯？")
+  ], choice: [
+    { text: "是", goto: "s04" },
+    { text: "不是", goto: "s03b" }
+  ] },
+  s03b: { clock: "23:47", art: "lamp", artOpt: { on: true }, lines: [
+    L("sys", "灯还亮着。她没有催你。"), L("sys", "关灯？")
+  ], choice: [ { text: "是", goto: "s04" } ] },
+  s04: { clock: "23:48", art: "lamp", artOpt: { on: false }, fx: "glitch", lines: [
+    L("sys", "屏幕突然变暗。"), L("lan", "谢谢。"), L("lan", "我以前总觉得，\n你关灯的时候很温柔。"),
+    L("lan", "第二件事情。"), L("lan", "把蜡烛吹灭。\n不要用手。")
+  ], next: "blow" },
+  blow: { type: "blow", clock: "23:49", art: "candle", amb: ["fire", 0.35], next: "s05" },
+  s05: { clock: "23:51", art: "black", fx: "glitch", music: null, lines: [
+    L("sys", "黑屏持续了 2 秒。"), L("sys", "23:51\nMEMORY ERROR\nTIME:\n2023-08-14"),
+    L("lan", "你记得这一天吗？")
+  ], choice: [
+    { text: "记得", goto: "s05a" },
+    { text: "不记得", goto: "s05b" },
+    { text: "什么都不说", goto: "s05c" }
+  ] },
+  s05a: { clock: "23:51", art: "black", lines: [ L("lan", "骗人。") ], next: "s06", set: { remember: true } },
+  s05b: { clock: "23:51", art: "black", lines: [ L("lan", "这次是真的。") ], next: "s06", set: { remember: false } },
+  s05c: { clock: "23:51", art: "black", lines: [ L("lan", "你果然还是这样。") ], next: "s06", set: { remember: false } },
+  s06: { clock: "23:52", art: "black", lines: [
+    L("sys", "三年前。"), L("sys", "一间办公室。你可以在三个地点之间移动。\n先去哪里，由你决定。")
+  ], next: "map" },
+  map: { type: "map", clock: "23:52", art: "map", next: "s08" },
+  lab1: { clock: "23:53", art: "lab", amb: null, lines: [ L("sys", "一张实验台。上面有四样东西。") ], choice: [
+    { text: "调查 LO-PDA", goto: "labPda" },
+    { text: "调查录音机", goto: "labRec" },
+    { text: "调查钥匙", goto: "labKey" },
+    { text: "调查照片", goto: "labPhoto" },
+    { text: "离开", goto: "mapBack" }
+  ] },
+  labPda: { clock: "23:53", art: "lab", lines: [ L("sys", "LO-PDA"), L("sys", "LAST USER:\nLAN") ], next: "lab1" },
+  labRec: { clock: "23:53", art: "lab", lines: [ L("sys", "录音机"), L("sys", "没有录音文件。\n只有："), L("sys", "REC 0001\nREC 0002\nREC 0003\nALL DELETED") ], next: "lab1" },
+  labKey: { clock: "23:53", art: "lab", lines: [ L("sys", "一把钥匙。\n不知道开哪扇门。") ], next: "lab1" },
+  labPhoto: { clock: "23:53", art: "lab", lines: [ L("sys", "一张四个人的照片。"), L("sys", "林澜　你　周野　？"), L("sys", "第四个人的脸被涂黑了。") ], next: "lab1" },
+  arch1: { clock: "23:54", art: "archive", amb: null, lines: [
+    L("sys", "大量文件。都被压缩成四种状态。"),
+    L("sys", "PROJECT MORROW\nSUBJECT: LAN\nSTATUS:\nDECEASED"),
+    L("sys", "CAUSE OF DEATH:\nUNKNOWN"),
+    L("sys", "WITNESS:\nYOU")
+  ], next: "mapBack" },
+  roof1: { clock: "23:55", art: "roof", amb: ["wind", 0.65], music: null, lines: [
+    L("sys", "这里没有任何互动。\n只有风。"),
+    L("lan", "我很喜欢这里。"), L("lan", "因为这里的风很大。"), L("lan", "说话的时候，\n不用害怕别人听见。"),
+    L("lan", "你知道吗？"), L("lan", "我其实没有死。")
+  ], next: "mapBack" },
+  mapBack: { type: "back", next: "map" },
+  s08: { clock: "23:57", art: "black", fx: "glitch", music: "memory", amb: null, lines: [
+    L("lan", "死的是三年前的我。"), L("sys", "23:57"),
+    L("lan", "现在和你说话的这个我……"), L("lan", "是你留下来的。")
+  ], next: "s09" },
+  s09: { clock: "23:57", art: "black", lines: [
+    L("sys", "Morrow 项目的真正目的不是保存记忆。"),
+    L("sys", "而是把一个人的“决策模式”保存下来。\n它可以模拟一个人。"),
+    L("sys", "但存在一个问题：\n模拟体不知道自己是模拟体。"),
+    L("sys", "因此项目规定：\n如果模拟体发现自己已经死亡，\n必须在 10 分钟内被删除。"),
+    L("sys", "三年前，林澜发现自己即将被删除。"),
+    L("sys", "于是她把自己的一部分复制到了：\n你的 Lo-PDA。")
+  ], next: "s10" },
+  s10: { clock: "23:58", art: "black", portrait: "sad", lines: [
+    L("sys", "你不是受害者。"), L("sys", "三年前，是你亲手删除了林澜。"),
+    L("sys", "因为林澜要求你这么做。"),
+    L("sys", "她知道自己已经不是原来的自己。\n她害怕继续存在。"),
+    L("lan", "如果有一天我开始问你，\n我是不是我。"),
+    L("lan", "不要回答。"), L("lan", "把我删掉。"),
+    L("sys", "你照做了。")
+  ], next: "s11" },
+  s11: { clock: "23:58", art: "black", portrait: "normal", lines: [
+    L("sys", "但是你没有完全删除。"),
+    L("sys", "你偷偷留下了：\n最后 10 分钟。"),
+    L("sys", "不是因为舍不得。"),
+    L("sys", "而是因为你想知道：\n如果林澜知道自己不是原来的林澜，\n她还会不会选择死亡。"),
+    L("sys", "所以三年来，\n这台 Lo-PDA 一直没有被打开。"),
+    L("sys", "直到今天。")
+  ], next: "frags" }
+};
+SCRIPT.frags = { type: "frags", clock: "23:58", art: "frag", next: "hum" };
+SCRIPT.hum = { type: "hum", clock: "23:59", art: "black", next: "photo" };
+SCRIPT.photo = { type: "photo", clock: "23:59", art: "black", next: "s15" };
+SCRIPT.s15 = { clock: "23:59", art: "black", music: "late", amb: null, lines: [
+  L("sys", "23:59:40。"),
+  L("lan", "你还记得我第一次见你的时候吗？")
+], choice: [
+  { text: "记得", goto: "s15a" },
+  { text: "不记得", goto: "s15b" }
+] };
+SCRIPT.s15a = { clock: "23:59", art: "black", lines: [
+  L("lan", "你记错了。"), L("sys", "停顿。"), L("lan", "这就对了。"), L("sys", "屏幕变黑。"),
+  L("sys", "前面所有关于“记忆”的对话，\n都不一定可信。"),
+  L("lan", "那么现在的我呢？")
+], next: "s16" };
+SCRIPT.s15b = { clock: "23:59", art: "black", lines: [
+  L("lan", "嗯。"), L("sys", "又停顿。"), L("lan", "这就对了。"), L("sys", "屏幕变黑。"),
+  L("sys", "前面所有关于“记忆”的对话，\n都不一定可信。"),
+  L("lan", "那么现在的我呢？")
+], next: "s16" };
+SCRIPT.s16 = { clock: "23:59", art: "black", portrait: "normal", lines: [
+  L("lan", "如果一个人拥有\n她全部的记忆，\n全部的习惯，\n全部的爱，\n全部的恐惧，"),
+  L("lan", "但是她不是原来的那个人……\n她还是她吗？")
+], choice: [
+  { text: "是", goto: "tilt", set: { identity: "yes" } },
+  { text: "不是", goto: "tilt", set: { identity: "no" } },
+  { text: "我不知道", goto: "endC", set: { identity: "unknown" } },
+  { text: "这不是你的问题", goto: "endD", set: { identity: "confront" } }
+] };
+SCRIPT.tilt = { type: "tilt", clock: "23:59", art: "tilt", next: "delQ" };
+SCRIPT.delQ = { clock: "23:59", art: "black", lines: [
+  L("lan", "还有最后一件事情。"), L("lan", "把我送回去。"),
+  L("sys", "23:59:30。"), L("lan", "你可以现在删除我。"),
+  L("sys", "DELETE MEMORY?")
+], choice: [
+  { text: "DELETE", goto: "endA" },
+  { text: "KEEP", goto: "endB" }
+] };
+SCRIPT.endA = { type: "ending", ending: "delete", clock: "00:00", art: "black", music: "endA", lines: [
+  L("sys", "屏幕逐渐清空。"), L("lan", "谢谢。"), L("sys", "停顿。"), L("lan", "这次是真的。"),
+  L("sys", "00:00\nMEMORY:\nEMPTY"), L("sys", "一声非常轻的：coin。"), L("sys", "不是胜利音。\n更像某种东西被确认。")
+], card: "ENDING A · DELETE", notes: true };
+SCRIPT.endB = { type: "ending", ending: "keep", clock: "00:00", art: "black", music: "endB", lines: [
+  L("lan", "我就知道。"), L("lan", "你还是会这样。"),
+  L("sys", "00:00\nMEMORY STATUS:\nACTIVE"),
+  L("sys", "画面重新亮起来。"), L("lan", "那么……"), L("lan", "明天见。"), L("sys", "黑屏。")
+], card: "ENDING B · KEEP", notes: false };
+SCRIPT.endC = { type: "ending", ending: "unknown", clock: "00:00", art: "black", music: "endC", lines: [
+  L("lan", "好。"), L("lan", "那我自己决定。"),
+  L("sys", "MEMORY DELETED BY SUBJECT"),
+  L("sys", "这是全游戏唯一一个：\n林澜自己按下 DELETE。"),
+  L("lan", "这次不用你替我做决定了。")
+], card: "ENDING C · I DON'T KNOW", notes: false };
+SCRIPT.endD = { type: "ending", ending: "confront", clock: "00:00", art: "black", music: "endD", portrait: "angry", lines: [
+  L("lan", "对。"), L("lan", "这不是我的问题。"), L("lan", "这是你的。"),
+  L("sys", "她开始播放三年前最后一段记录。"),
+  L("sys", "你听到：自己的声音。"),
+  L("you", "如果你醒过来……"), L("you", "千万不要相信我。"),
+  L("lan", "为什么？"),
+  L("you", "因为我不知道……"), L("you", "我到底有没有把真正的你删掉。"),
+  L("sys", "画面结束。"), L("sys", "THE END\n?")
+], card: "ENDING D · NOT YOUR QUESTION", notes: false };
+SCRIPT.trueIntro = { clock: "23:47", art: "black", music: "theme", lines: [
+  L("sys", "NEW MESSAGE\nFROM: YOU"),
+  L("you", "如果你正在看到这条消息……"),
+  L("you", "说明我们终于把她忘掉了。"),
+  L("sys", "MEMORY FRAGMENT:\nSUBJECT:\nUNKNOWN"),
+  L("you", "谁才是林澜？")
+], choice: [
+  { text: "林澜", goto: "trueEnd" },
+  { text: "我", goto: "trueEnd" },
+  { text: "都不是", goto: "trueEnd" },
+  { text: "不重要", goto: "trueEnd" }
+] };
+SCRIPT.trueEnd = { type: "ending", ending: "true", clock: "00:00", art: "black", music: "endT", lines: [
+  L("sys", "无论选择什么。"), L("sys", "00:00"),
+  L("sys", "THANK YOU\nFOR REMEMBERING")
+], card: "TRUE ENDING · 不要替我回答", notes: true, tts: true };
+/* ---- engine ---- */
+var S = { node: "boot", flags: { endings: {} }, seen: {}, ff: false, visited: {}, lastEnding: null, started: false };
+var CUR = null, LINE = 0, MODE = "boot", CHOICE = 0, CHOICES = [], MENU = false, MENUCHOICE = 0;
+var FRAG = 0, FRAGSEEN = {}, FLAME = 3, TILTP = 1, HUM = { on: false, samples: [] };
+var MAPCUR = 0, LASTBLOW = 0;
+var WHO = { lan: "林澜", you: "你", sys: "" };
+function setFooter(t) { $("footer").textContent = t; }
+function setClock(t) { $("clock").textContent = t; }
+function showLines(lines, done) {
+  var cur = lines[LINE];
+  if (!cur) { done(); return; }
+  $("who").textContent = WHO[cur.w] || "";
+  $("text").textContent = cur.t;
+  $("cont").textContent = (LINE < lines.length - 1) ? "▽" : "";
+  if (cur.w === "lan") drawPortrait(CUR.portrait || "normal"); else $("portrait").classList.add("hidden");
+  if (S.seen[CUR.id] && S.ff && MODE === "lines") setTimeout(function () { if (MODE === "lines") advance(); }, 160);
+}
+function renderChoices(list) {
+  CHOICES = list;
+  var box = $("choices"); box.innerHTML = "";
+  for (var i = 0; i < list.length; i++) {
+    (function (i) {
+      var b = document.createElement("button");
+      b.className = "choice" + (i === CHOICE ? " sel" : "");
+      b.textContent = list[i].text;
+      b.onclick = function () { if (MENU) { MENUCHOICE = i; menuPick(); } else { CHOICE = i; pick(); } };
+      box.appendChild(b);
+    })(i);
+  }
+}
+function renderNode() {
+  CUR = SCRIPT[S.node] || SCRIPT.s01;
+  LINE = 0; CHOICE = 0; MODE = "lines";
+  if (CUR.set) { for (var k in CUR.set) S.flags[k] = CUR.set[k]; }
+  if (CUR.clock) setClock(CUR.clock);
+  if (CUR.fx === "glitch") {
+    $("main").classList.add("glitch"); csfx({ wave: "noise", from: 200, to: 60, ms: 200 });
+    setTimeout(function () { $("main").classList.remove("glitch"); }, 600);
+  }
+  if (CUR.hasOwnProperty("music")) music(CUR.music);
+  if (CUR.hasOwnProperty("amb")) { if (CUR.amb) amb(CUR.amb[0], CUR.amb[1]); else ambOff(); }
+  if (CUR.type === "blow") return startBlow();
+  if (CUR.type === "hum") return startHum();
+  if (CUR.type === "tilt") return startTilt();
+  if (CUR.type === "photo") return startPhoto();
+  if (CUR.type === "map") return startMap();
+  if (CUR.type === "frags") return startFrags();
+  if (CUR.type === "back") { go("map"); return; }
+  if (CUR.type === "ending") return startEnding();
+  if (CUR.art) drawScene(CUR.art, CUR.artOpt);
+  $("choices").innerHTML = "";
+  setFooter(T("cont") + "　START " + T("menu"));
+  showLines(CUR.lines || [], afterLines);
+}
+function advance() {
+  if (MENU) return;
+  if (MODE !== "lines") return;
+  LINE++;
+  showLines(CUR.lines || [], afterLines);
+  sfx("tap");
+}
+function pick() {
+  if (MENU) return;
+  var c = CHOICES[CHOICE];
+  if (!c) return;
+  sfx("ok");
+  if (c.goto) go(c.goto);
+}
+function go(id) {
+  S.node = id;
+  if (CUR && CUR.id) S.seen[CUR.id] = true;
+  var n = SCRIPT[id]; if (n) n.id = id;
+  S.started = true;
+  save();
+  renderNode();
+}
+function moveChoice(d) {
+  if (MODE !== "choice" && !MENU) return;
+  var n = MENU ? 3 : CHOICES.length;
+  if (MENU) { MENUCHOICE = (MENUCHOICE + d + 3) % 3; paintMenu(); return; }
+  CHOICE = (CHOICE + d + CHOICES.length) % CHOICES.length;
+  var btns = $("choices").children;
+  for (var i = 0; i < btns.length; i++) btns[i].className = "choice" + (i === CHOICE ? " sel" : "");
+  sfx("move");
+}
+function openMenu() {
+  if (MENU) { closeMenu(); return; }
+  MENU = true; MENUCHOICE = 0;
+  renderChoices([
+    { text: T("resume"), act: "resume" },
+    { text: S.ff ? T("ffOn") : T("ffOff"), act: "ff" },
+    { text: T("title"), act: "title" }
+  ]);
+  paintMenu();
+  setFooter(T("choose") + "　B " + T("back"));
+}
+function paintMenu() {
+  var btns = $("choices").children;
+  for (var i = 0; i < btns.length; i++) btns[i].className = "choice" + (i === MENUCHOICE ? " sel" : "");
+}
+function closeMenu() {
+  MENU = false;
+  if (MODE === "choice") { renderChoices(CUR.choice || CHOICES); setFooter(T("choose") + "　START " + T("menu")); }
+  else { $("choices").innerHTML = ""; setFooter(T("cont") + "　START " + T("menu")); }
+}
+function menuPick() {
+  var acts = ["resume", "ff", "title"];
+  var a = acts[MENUCHOICE];
+  if (a === "resume") { closeMenu(); }
+  if (a === "ff") { S.ff = !S.ff; save(); closeMenu(); }
+  if (a === "title") { MENU = false; showTitle(); }
+  sfx("ok");
+}
+function onPress(b) {
+  if (b === "start") { if (MODE === "lines" || MODE === "choice") openMenu(); else if (MENU) closeMenu(); return; }
+  if (MENU) {
+    if (b === "up") moveChoice(-1);
+    else if (b === "down") moveChoice(1);
+    else if (b === "a") menuPick();
+    else if (b === "b") closeMenu();
+    return;
+  }
+  if (SPECIAL && SPECIAL.key) { SPECIAL.key(b); return; }
+  if (b === "a") { if (MODE === "lines") advance(); else if (MODE === "choice") pick(); }
+  else if (b === "up") moveChoice(-1);
+  else if (b === "down") moveChoice(1);
+}
+if (PADOK) { PAD.on("press", onPress); }
+$("dlg").addEventListener("pointerup", function () {
+  if (MENU) return;
+  if (SPECIAL) SPECIAL.key("a");
+  else if (MODE === "lines") advance();
+});
+var SPECIAL = null;
+function endSpecial() { SPECIAL = null; }
+/* ---- revised navigation: apply node flags before saving; choices may carry actions ---- */
+function go(id) {
+  endSpecial();
+  if (CUR && CUR.id) S.seen[CUR.id] = true;
+  var n = SCRIPT[id]; if (n) { n.id = id; if (n.set) { for (var k in n.set) S.flags[k] = n.set[k]; } }
+  S.node = id;
+  if (id !== "title") S.resumeNode = id;
+  S.started = true;
+  save();
+  renderNode();
+}
+function pick() {
+  if (MENU) return;
+  var c = CHOICES[CHOICE];
+  if (!c) return;
+  sfx("ok");
+  if (c.act === "photo") { doPhoto(); return; }
+  if (c.act === "skip") { endSpecial(); go(CUR.next); return; }
+  if (c.act === "notes") { doNotes(); return; }
+  if (c.act === "skipnotes") { endingTitleChoice(); return; }
+  if (c.act === "title") { endSpecial(); showTitle(); return; }
+  if (c.act === "newgame") { newGame(); return; }
+  if (c.act === "continue") { endSpecial(); go(S.resumeNode || "s01"); return; }
+  if (c.act === "gallery") { showGallery(); return; }
+  if (c.act === "gallery-item") { showGalleryItem(c.ending); return; }
+  if (c.room) { S.visited[c.room] = true; save(); }
+  if (c.goto) go(c.goto);
+}
+/* ---- special nodes ---- */
+function setDlg(who, text, cont) {
+  $("who").textContent = who || "";
+  $("text").textContent = text;
+  $("cont").textContent = cont || "";
+  $("choices").innerHTML = "";
+}
+function doBlow() {
+  var now = Date.now();
+  if (Date.now() - LASTBLOW < 700) return;
+  LASTBLOW = now;
+  FLAME--;
+  if (FLAME === 2) { setDlg("林澜", "你还是不会吹蜡烛。"); }
+  else if (FLAME === 1) { setDlg("林澜", "你以前每次都吹得太用力。"); }
+  else if (FLAME <= 0) {
+    stopMic();
+    drawScene("black");
+    setDlg("", "蜡烛熄灭了。\n屏幕完全黑。", "▽");
+    SPECIAL = { key: function (b) { if (b === "a") { endSpecial(); go(CUR.next); } } };
+    setFooter(T("cont"));
+    return;
+  }
+  drawScene("candle", { flame: FLAME });
+  sfx("tick");
+}
+function micStart() {
+  try {
+    if (!PADOK || !PAD.mic) return "none";
+    var r = PAD.mic.start();
+    if (r && r.then) { r.then(function (v) { MICSTATUS = v; }, function () { MICSTATUS = "denied"; }); return "pending"; }
+    return r;
+  } catch (e) { return "none"; }
+}
+var MICSTATUS = "none";
+function stopMic() { try { if (PADOK && PAD.mic) PAD.mic.stop(); } catch (e) {} }
+function startBlow() {
+  FLAME = 3; LASTBLOW = 0;
+  drawScene("candle", { flame: 3 });
+  setDlg("", "请对着手机吹气。");
+  setFooter(T("blow") + "　START " + T("menu"));
+  MODE = "special";
+  SPECIAL = { key: function (b) { if (b === "a") doBlow(); } };
+  var st = micStart();
+  if (st === "on" || st === "pending") {
+    try { PAD.on("sound", function (e) { if (S.node === "blow" && e && e.level > 0.6) doBlow(); }); } catch (e) {}
+  }
+  S.flags.microphoneUsed = true; save();
+}
+function startHum() {
+  HUM = { on: true, samples: [], t0: Date.now() };
+  setDlg("林澜", "如果你还记得我的声音……\n唱给我听。\n\n请哼一个音。♪");
+  setFooter(T("hum") + "　START " + T("menu"));
+  MODE = "special";
+  var done = false;
+  function finish() {
+    if (done) return; done = true;
+    HUM.on = false;
+    stopMic();
+    var ok = false, vals = [];
+    for (var i = 0; i < HUM.samples.length; i++) { var p = HUM.samples[i]; if (p > 80 && p < 1200) vals.push(p); }
+    if (vals.length >= 4) {
+      var mn = Math.min.apply(null, vals), mx = Math.max.apply(null, vals);
+      if (mx - mn < 150) ok = true;
+    }
+    S.flags.humCompleted = true; save();
+    setDlg("林澜", ok ? "……\n对。\n就是这个声音。" : "你唱歌还是很难听。\n\n不过，我记得。");
+    SPECIAL = { key: function (b) { if (b === "a") { endSpecial(); go(CUR.next); } } };
+    setFooter(T("cont"));
+  }
+  SPECIAL = { key: function (b) { if (b === "a") finish(); } };
+  var st = micStart();
+  if (st === "on" || st === "pending") {
+    try { PAD.on("sound", function (e) { if (S.node === "hum" && HUM.on && e && e.level > 0.25 && e.pitch) HUM.samples.push(e.pitch); }); } catch (e) {}
+  }
+  setTimeout(function () { if (HUM.on) { HUM.on = false; finish(); } }, 5000);
+}
+function startTilt() {
+  TILTP = 1;
+  drawScene("tilt", { p: TILTP });
+  setDlg("", "把她送回去。\n向左倾斜手机，或按 ← / A。");
+  setFooter(T("tiltHint") + "　START " + T("menu"));
+  MODE = "special";
+  var said = false, tdone = false;
+  function step(d) {
+    if (tdone) return;
+    TILTP += d;
+    if (TILTP > 1) TILTP = 1;
+    if (TILTP < 0) TILTP = 0;
+    if (TILTP < 0.5 && !said) { said = true; setDlg("林澜", "再一点。"); }
+    if (TILTP <= 0) {
+      tdone = true;
+      stopMotion();
+      S.flags.motionCompleted = true; save();
+      setDlg("林澜", "好了。\n你可以放下了。");
+      SPECIAL = { key: function (b) { if (b === "a") { endSpecial(); go(CUR.next); } } };
+      setFooter(T("cont"));
+      return;
+    }
+    drawScene("tilt", { p: TILTP });
+  }
+  SPECIAL = { key: function (b) {
+    if (b === "left" || b === "a") step(-0.09);
+    if (b === "right") step(0.05);
+  } };
+  try {
+    if (PADOK && PAD.motion) {
+      var r = PAD.motion.start();
+      var on = function () { try { PAD.on("tilt", function (e) { if (S.node === "tilt" && e && e.x < -0.12) step(-0.03); }); } catch (e) {} };
+      if (r && r.then) r.then(function (v) { if (v === "on") on(); }); else if (r === "on") on();
+    }
+  } catch (e) {}
+}
+function stopMotion() { try { if (PADOK && PAD.motion) PAD.motion.stop(); } catch (e) {} }
+function startPhoto() {
+  drawScene("black");
+  setDlg("林澜", "你最后一次看见我的时候，\n我是什么样子？");
+  MODE = "choice"; CHOICE = 0;
+  renderChoices([{ text: T("photo"), act: "photo" }, { text: T("skip"), act: "skip" }]);
+  setFooter(T("choose"));
+}
+function doPhoto() {
+  $("choices").innerHTML = "";
+  setDlg("", "……");
+  try {
+    if (!PADOK || !PAD.camera) { setDlg("林澜", "没关系。"); afterPhoto(); return; }
+    var r = PAD.camera.snap({ size: "small" });
+    var handle = function (img) {
+      if (img && img.px) {
+        S.flags.photoTaken = true; save();
+        drawScene("photo", { pximg: img });
+        setDlg("林澜", "……\n\n原来你现在是这个样子。");
+      } else { setDlg("林澜", "没关系。"); }
+      afterPhoto();
+    };
+    if (r && r.then) r.then(handle, function () { setDlg("林澜", "没关系。"); afterPhoto(); });
+    else handle(r);
+  } catch (e) { setDlg("林澜", "没关系。"); afterPhoto(); }
+  function afterPhoto() {
+    SPECIAL = { key: function (b) { if (b === "a") { endSpecial(); go(CUR.next); } } };
+    setFooter(T("cont"));
+  }
+}
+function startMap() {
+  MODE = "choice"; CHOICE = 0;
+  var rooms = [
+    { key: "lab", label: "实验室", goto: "lab1" },
+    { key: "arch", label: "档案室", goto: "arch1" },
+    { key: "roof", label: "天台", goto: "roof1" }
+  ];
+  var opts = [];
+  var all = true;
+  for (var i = 0; i < rooms.length; i++) {
+    if (!S.visited[rooms[i].key]) { all = false; opts.push({ text: (S.visited[rooms[i].key] ? "✓ " : "") + rooms[i].label, goto: rooms[i].goto, room: rooms[i].key }); }
+  }
+  if (all) opts.push({ text: "离开", goto: CUR.next });
+  drawScene("map", { sel: 0, done: S.visited });
+  setDlg("", "办公室。三个地点。先去哪里？");
+  renderChoices(opts);
+  setFooter(T("choose") + "　START " + T("menu"));
+}
+function startFrags() {
+  FRAG = 0; FRAGSEEN = {};
+  var caps = ["两个人吃饭。", "林澜在笑。", "主人公在哭。", "实验室。", "删除按钮。"];
+  function show() {
+    FRAGSEEN[FRAG] = true;
+    drawScene("frag", { n: FRAG });
+    setDlg("", "MEMORY FRAGMENT 0" + (FRAG + 1) + " / 05\n" + caps[FRAG]);
+    setFooter("← → 浏览　A 继续");
+  }
+  MODE = "special";
+  show();
+  SPECIAL = { key: function (b) {
+    if (b === "left") { FRAG = (FRAG + 4) % 5; show(); sfx("move"); }
+    else if (b === "right") { FRAG = (FRAG + 1) % 5; show(); sfx("move"); }
+    else if (b === "a") {
+      var n = 0; for (var k in FRAGSEEN) n++;
+      if (n >= 5) { endSpecial(); go(CUR.next); }
+      else { setDlg("", "还有碎片没看完。"); sfx("err"); setTimeout(show, 900); }
+    }
+  } };
+}
+function afterLines() {
+  if (CUR.type === "ending") { showEndingCard(); return; }
+  if (CUR.choice) {
+    MODE = "choice"; CHOICE = 0;
+    renderChoices(CUR.choice);
+    setFooter(T("choose") + "　START " + T("menu"));
+  } else if (CUR.next) { go(CUR.next); }
+}
+function showEndingCard() {
+  setDlg("", CUR.card);
+  MODE = "choice"; CHOICE = 0;
+  if (CUR.notes) renderChoices([{ text: "写入记事本", act: "notes" }, { text: "不写", act: "skipnotes" }]);
+  else renderChoices([{ text: T("title"), act: "title" }]);
+  setFooter(T("choose"));
+  sfx("coin");
+}
+function startEnding() {
+  S.flags.endings[CUR.ending] = true;
+  S.lastEnding = CUR.ending;
+  save();
+  if (CUR.tts) { try { if (PADOK) PAD.say("晚安。", { lang: "zh" }); } catch (e) {} }
+  if (CUR.art) drawScene(CUR.art, CUR.artOpt);
+  setFooter(T("cont") + "　START " + T("menu"));
+  MODE = "lines"; LINE = 0;
+  showLines(CUR.lines || [], afterLines);
+}
+function doNotes() {
+  $("choices").innerHTML = "";
+  setDlg("", "正在写入……");
+  try {
+    if (PADOK && PAD.notes) {
+      var r = PAD.notes.append("凌晨零点的遗嘱", "林澜已经走了。\n至少这一次。");
+      var done = function () { endingTitleChoice(); };
+      if (r && r.then) r.then(done, done); else done();
+      return;
+    }
+  } catch (e) {}
+  endingTitleChoice();
+}
+function endingTitleChoice() {
+  setDlg("", CUR.card);
+  MODE = "choice"; CHOICE = 0;
+  renderChoices([{ text: T("title"), act: "title" }]);
+  setFooter(T("choose"));
+}
+function newGame() {
+  var e = S.flags.endings;
+  endSpecial();
+  if (e["delete"] && e["keep"] && e["unknown"] && !e["true"]) go("trueIntro");
+  else go("s01");
+}
+function showTitle() {
+  endSpecial();
+  MODE = "title"; MENU = false;
+  S.node = "title";
+  var e = S.flags.endings, n = 0;
+  for (var k in e) if (e[k]) n++;
+  drawScene("title");
+  $("portrait").classList.add("hidden");
+  setClock("23:47");
+  setDlg("", "凌晨零点的遗嘱\nThe Will at Midnight\n\n" + (n > 0 ? "结局 " + n + " / 5" : ""));
+  var opts = [{ text: T("newGame"), act: "newgame" }];
+  if (S.started && S.resumeNode && S.resumeNode !== "title") opts.push({ text: T("contGame"), act: "continue" });
+  if (n > 0) opts.push({ text: T("endings"), act: "gallery" });
+  MODE = "choice"; CHOICE = 0;
+  renderChoices(opts);
+  setFooter(T("choose"));
+}
+function showGallery() {
+  var defs = [
+    { k: "delete", label: T("endA") }, { k: "keep", label: T("endB") },
+    { k: "unknown", label: T("endC") }, { k: "confront", label: T("endD") },
+    { k: "true", label: T("endT") }
+  ];
+  MODE = "choice"; CHOICE = 0;
+  setDlg("", T("endings"));
+  var opts = [];
+  for (var i = 0; i < defs.length; i++) {
+    opts.push({ text: S.flags.endings[defs[i].k] ? defs[i].label : T("locked"), act: "gallery-item", ending: defs[i].k });
+  }
+  opts.push({ text: T("title"), act: "title" });
+  renderChoices(opts);
+  setFooter(T("choose"));
+}
+function showGalleryItem(k) {
+  var cards = {
+    delete: "ENDING A · DELETE\n\n谢谢。\n这次是真的。",
+    keep: "ENDING B · KEEP\n\n明天见。",
+    unknown: "ENDING C · I DON'T KNOW\n\n这次不用你替我做决定了。",
+    confront: "ENDING D · NOT YOUR QUESTION\n\n因为我不知道……\n我到底有没有把真正的你删掉。",
+    "true": "TRUE ENDING\n\nTHANK YOU\nFOR REMEMBERING"
+  };
+  setDlg("", S.flags.endings[k] ? cards[k] : T("locked"));
+  MODE = "choice"; CHOICE = 0;
+  renderChoices([{ text: T("title"), act: "title" }]);
+  setFooter(T("choose"));
+}
+function showBeat(lines, nextFn) {
+  var i = 0;
+  MODE = "lines";
+  drawScene("black");
+  $("portrait").classList.add("hidden");
+  function step() {
+    if (i >= lines.length) { nextFn(); return; }
+    setDlg("", lines[i]);
+    setFooter(T("cont"));
+    SPECIAL = { key: function (b) { if (b === "a") { i++; endSpecial(); step(); } } };
+  }
+  step();
+}
+function boot() {
+  load(function (v) {
+    if (v) { for (var k in v) S[k] = v[k]; }
+    var e = S.flags.endings || {};
+    var any = e["delete"] || e["keep"] || e["unknown"] || e["confront"] || e["true"];
+    if (S.lastEnding === "keep") {
+      showBeat(["23:47\nNEW MESSAGE\nFROM: LAN", "你今天为什么这么晚？"], showTitle);
+    } else if (any) {
+      showBeat(["LAST SESSION\n23:47 → 00:00", "MEMORY FRAGMENT\nRECOVERED", "你真的觉得我是她吗？"], showTitle);
+    } else { showTitle(); }
+  });
+}
+boot();
+</script>
+</body>
+</html>
