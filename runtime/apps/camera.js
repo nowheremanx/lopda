@@ -152,9 +152,51 @@ function loadRoll(){
    Lenses: the phone's physical cameras (LopdaLenses, runtime/lenses.js), found once after the first permission.
    lens is the id the user last chose ("uw" "w" "t" "f"), kept in the film doc; lenses stays null until found. */
 var LENS=window.LopdaLenses;
-var LIVE={stream:null, on:false, opening:false, gen:0, raf:0, last:0, lens:"w", lenses:null, hold:0, failed:false, swapping:0};
+var LIVE={stream:null, on:false, opening:false, gen:0, raf:0, last:0, lens:"w", lenses:null, hold:0, failed:false, swapping:0,
+  why:"", since:0, seen:false, replayed:false, muted:0, restarts:0, watch:null, picker:false};
 var lumaFrom=FINDER.grabber();
 function liveSupported(){ return !!(window.isSecureContext && navigator.mediaDevices && navigator.mediaDevices.getUserMedia); }
+/* The finder's state, decided here and nowhere else (decisions.md section 4): "live" pictures are coming; "starting" the
+   stream is opening (the phone's prompt may be up) or is on with no picture yet; "none" this phone has no live finder (no
+   HTTPS, no getUserMedia, or it failed for good after one restart). Only "none" may open the system camera: a finder that
+   is not ready yet is never a phone without one. */
+function liveState(){
+  if(!liveSupported() || LIVE.failed) return "none";
+  var v=$("cam-video");
+  return LIVE.on && v.readyState>=2 && v.videoWidth ? "live" : "starting";
+}
+/* ?debug: what the finder did, for a test or a look on the phone (LOPDA_DEBUG.cam) */
+function camLog(s){ var d=window.LOPDA_DEBUG; if(d) (d.cam=d.cam||[]).push(s); }
+/* The watchdog: a stream that gives no picture is asked to play again after REPLAY_MS (iOS can refuse play() while its
+   prompt or a transition is up) and restarted once after NOFRAME_MS; a track that ends, or stays muted for MUTE_MS (the
+   system camera took the hardware), restarts it too. A second failure is "none". */
+var WATCH_MS=250, REPLAY_MS=1500, NOFRAME_MS=3000, MUTE_MS=1000;
+function playLive(why){
+  var v=$("cam-video"), pl;
+  if(!LIVE.on) return;
+  try{ pl=v.play(); }catch(e){ pl=Promise.reject(e); }
+  Promise.resolve(pl).then(function(){ camLog("play ok: "+why); },function(e){ camLog("play refused: "+why+" "+((e&&e.name)||"")); });
+}
+function watchLive(gen){
+  clearInterval(LIVE.watch);
+  LIVE.watch=setInterval(function(){
+    if(gen!==LIVE.gen || !LIVE.on){ clearInterval(LIVE.watch); return; }
+    if(LIVE.muted && Date.now()-LIVE.muted>=MUTE_MS){ restartLive("muted"); return; }
+    if(LIVE.seen) return;
+    var t=Date.now()-LIVE.since;
+    if(t>=NOFRAME_MS) restartLive("no frame");
+    else if(t>=REPLAY_MS && !LIVE.replayed){ LIVE.replayed=true; playLive("watchdog"); }
+  },WATCH_MS);
+}
+function restartLive(why){
+  if(LIVE.restarts>=1){
+    camLog("none: "+why);
+    stopLive(); LIVE.failed=true; LIVE.why=why; camModeLabel(); camIdle();
+    return;
+  }
+  LIVE.restarts++; camLog("restart: "+why);
+  stopLive(); startLive();
+}
 function camModeLabel(){
   var has=!!F.roll && !rollFull();
   $("cam-mode").textContent = !has ? "" : LIVE.on ? "" :
@@ -200,26 +242,34 @@ function findLenses(alive){
 function startLive(){
   if(LIVE.on || LIVE.opening || !liveSupported() || !F.roll || rollFull()) { camModeLabel(); return; }
   /* every stopLive starts a new generation: an answer for an older one is thrown away */
-  var gen=++LIVE.gen; LIVE.opening=true;
-  var alive=function(){ return gen===LIVE.gen && !$("v-cam").hidden && !!F.roll && !rollFull(); };
+  var gen=++LIVE.gen; LIVE.opening=true; LIVE.failed=false; camLog("starting");
+  /* a stream that comes while the page is hidden is let go: the next resume opens one, and the phone has said yes by then */
+  var alive=function(){ return gen===LIVE.gen && !document.hidden && !$("v-cam").hidden && !!F.roll && !rollFull(); };
   (LIVE.lenses ? Promise.resolve() : findLenses(alive)).then(function(){
     return alive() ? navigator.mediaDevices.getUserMedia(videoFor(lensNow())) : null;
   }).then(function(stream){
     if(!stream) return;
     if(!alive()){ stopStream(stream); return; }
     LIVE.opening=false; LIVE.stream=stream; LIVE.on=true; LIVE.failed=false;
-    var v=$("cam-video"); v.srcObject=stream; var pl=v.play(); if(pl&&pl.catch) pl.catch(function(){});
-    camModeLabel(); LIVE.raf=requestAnimationFrame(liveTick);
+    LIVE.since=Date.now(); LIVE.seen=false; LIVE.replayed=false; LIVE.muted=0; camLog("stream on");
+    stream.getVideoTracks().forEach(function(k){
+      k.addEventListener("ended",function(){ if(gen===LIVE.gen){ camLog("track ended"); restartLive("ended"); } });
+      k.addEventListener("mute",function(){ if(gen===LIVE.gen){ camLog("track muted"); LIVE.muted=Date.now(); } });
+      k.addEventListener("unmute",function(){ if(gen===LIVE.gen){ camLog("track unmuted"); LIVE.muted=0; } });
+    });
+    $("cam-video").srcObject=stream; playLive("start");
+    camModeLabel(); LIVE.raf=requestAnimationFrame(liveTick); watchLive(gen);
   }).catch(function(e){
     if(gen!==LIVE.gen) return;
-    /* the remembered camera list is stale (a camera went away): find the lenses again next time */
+    camLog("open failed: "+((e&&e.name)||""));
+    /* the remembered camera list is stale (a camera went away): find the lenses again */
     if(e && (e.name==="OverconstrainedError" || e.name==="NotFoundError")) LIVE.lenses=null;
-    LIVE.failed=true; camModeLabel();
-    if(e && e.name==="NotAllowedError") toast(tr("cam.denied"));
+    if(e && e.name==="NotAllowedError"){ LIVE.failed=true; LIVE.why=e.name; camModeLabel(); toast(tr("cam.denied")); return; }
+    restartLive((e&&e.name)||"error");
   }).then(function(){ if(gen===LIVE.gen) LIVE.opening=false; });
 }
 function stopLive(){
-  cancelAnimationFrame(LIVE.raf); LIVE.on=false; LIVE.opening=false; LIVE.gen++;
+  cancelAnimationFrame(LIVE.raf); clearInterval(LIVE.watch); LIVE.on=false; LIVE.opening=false; LIVE.gen++; LIVE.muted=0;
   if(LIVE.stream){ stopStream(LIVE.stream); LIVE.stream=null; }
   var v=$("cam-video"); if(v) v.srcObject=null;
   if(!$("v-cam").hidden) camModeLabel();
@@ -233,6 +283,7 @@ function liveTick(t){
   if(Date.now()<LIVE.hold || v.readyState<2 || !v.videoWidth) return;
   var lum=lumaFrom(v,v.videoWidth,v.videoHeight,CW,CH,mirrored());
   drawPx(cctx,cimg,ditherLuma(lum,CW,CH,F.exposure,F.contrast));
+  if(!LIVE.seen){ LIVE.seen=true; LIVE.restarts=0; camLog("live"); }
   if(LIVE.swapping) endSwap();
 }
 /* SELECT: the next lens. The finder goes dark, as for the shutter, until the new lens gives a picture. */
@@ -285,17 +336,38 @@ function takeFrame(px,latent){
 $("cam-shutter").onclick=function(){ shoot(); };
 function shoot(){
   if(!F.roll || rollFull() || !$("cam-shut").hidden) return;
-  var v=$("cam-video");
-  if(LIVE.on && v.videoWidth){
+  var v=$("cam-video"), st=liveState();
+  if(st==="live"){
+    camLog("shutter: live");
     var w=v.videoWidth, h=v.videoHeight, m=mirrored();
     var lum=lumaFrom(v,w,h,CW,CH,m);
     takeFrame(ditherLuma(lum,CW,CH,F.exposure,F.contrast),function(){ return latentFrom(v,w,h,m); });
     return;
   }
-  $("cam-file").click();
+  /* starting: the shutter is not cocked yet; a tick, and the press is a gesture to ask the stream to play */
+  if(st==="starting"){ camLog("shutter: starting"); sfx("tick"); if(LIVE.on && !LIVE.seen) playLive("shutter"); return; }
+  camLog("shutter: system camera");
+  LIVE.picker=true; $("cam-file").click();
 }
+/* Back from the system camera (a photo, cancel, or the page getting focus again): iOS may have taken the hardware, so a
+   stream that was on restarts, and a finder that failed the way the system camera makes it fail tries again. */
+var PICKER_TOOK={ended:1, muted:1, NotReadableError:1, AbortError:1};
+function pickerBack(why){
+  if(!LIVE.picker) return;
+  LIVE.picker=false; camLog("system camera closed: "+why);
+  if($("v-cam").hidden || CAM.mode || LIVE.opening) return;
+  if(LIVE.on){ LIVE.restarts=0; stopLive(); startLive(); }
+  else if(LIVE.failed && PICKER_TOOK[LIVE.why]){ LIVE.restarts=0; startLive(); }
+}
+$("cam-file").addEventListener("cancel",function(){ pickerBack("cancel"); });
+window.addEventListener("focus",function(){ pickerBack("focus"); });
+/* iOS may refuse play() outside a gesture: any tap or key while the stream waits for its first picture asks again */
+["pointerup","keydown"].forEach(function(ev){
+  document.addEventListener(ev,function(){ if(LIVE.on && !LIVE.seen && !$("v-cam").hidden) playLive("gesture"); },true);
+});
 $("cam-file").addEventListener("change",function(){
   var f=this.files && this.files[0]; this.value="";
+  pickerBack("photo");
   if(!f || !F.roll || rollFull()) return;
   $("cam-dev").hidden=false;
   var url=URL.createObjectURL(f), img=new Image();
@@ -536,7 +608,7 @@ function voidStale(){
   toast(tr("cam.void"));
 }
 function openCam(){
-  CAM.mode=null; camSheet(null);
+  CAM.mode=null; camSheet(null); LIVE.restarts=0;
   show("cam"); showPad(true); renderCam(); camIdle();
   LP.keepAwake(true);   /* the viewfinder keeps the screen on */
   var go=function(){ voidStale(); camBoot(); renderCam(); startLive(); };
@@ -546,7 +618,7 @@ function openCam(){
 /* ---- camera controls: the screen is one fixed panel; the back opens for rolls and menus.
    Chin buttons, after the Game Boy Camera: A shutter, up/down brightness, left/right contrast,
    START body menu, SELECT the next lens. The key strip on screen does the same by touch. ---- */
-var CAM={mode:null, menu:null, sel:0, busy:false, roll:0};
+var CAM={mode:null, menu:null, sel:0, busy:false, roll:0, aNone:false};
 function camSheet(name){
   CAM.mode=name;
   $("cam-load").hidden=name!=="load";
@@ -691,7 +763,13 @@ function camButton(b,down){
     return;
   }
   if(!F.roll || rollFull()) return;
-  if(b==="a"){ if(down===LIVE.on) shoot(); return; }   /* live: on press; system camera: on release */
+  /* A: the live finder shoots on the press; the system camera opens on the release, and only if the press found no
+     finder either (liveState); while the finder starts, the press only ticks */
+  if(b==="a"){
+    if(down){ CAM.aNone=liveState()==="none"; if(!CAM.aNone) shoot(); }
+    else if(CAM.aNone){ CAM.aNone=false; if(liveState()==="none") shoot(); }
+    return;
+  }
   if(!down) return;
   if(b==="up") setExposure(F.exposure+1); else if(b==="down") setExposure(F.exposure-1);
   else if(b==="right") setContrast(F.contrast+1); else if(b==="left") setContrast(F.contrast-1);
@@ -721,6 +799,8 @@ LP.builtin({id:"camera", label:"app.camera", icon:"camera", view:"cam",
   padLayout:function(){ if(!$("v-cam").hidden) camLayout(); },
   ready:function(){ loadFilm().then(function(){ if(!$("v-home").hidden) LP.renderHome(); if(!$("v-cam").hidden) renderCam(); }); },
   nostore:function(){ F.ready=true; },
-  pause:function(){ stopLive(); },
-  resume:function(){ if(!$("v-cam").hidden) startLive(); }});
+  /* hidden while getUserMedia is pending (the phone's prompt): the request is left to finish, so the phone is not asked
+     twice; a stream that comes while hidden is let go (startLive's alive) */
+  pause:function(){ if(LIVE.opening){ camLog("hidden while opening"); return; } stopLive(); },
+  resume:function(){ if(!$("v-cam").hidden && !CAM.mode){ LIVE.restarts=0; startLive(); } }});
 })();

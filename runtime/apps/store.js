@@ -559,6 +559,8 @@ function snapBegin(req){
   openAsk(req);
 }
 function snapOpen(req){
+  /* askOk already answers once (closeAsk clears ask first); this keeps a second OK from opening a second finder all the same */
+  if(req.opened) return; req.opened=true;
   /* the app lets go of every button: the viewfinder has the pad now */
   req.win.postMessage({pad:1,op:"release-all"},"*");
   LP.snap.open({name:appName(req.app), size:req.size, owner:function(){ return frontWin()===req.win; }, done:req.reply});
