@@ -5565,13 +5565,72 @@ test("kana-cards: browse both kana scripts, read Japanese aloud when supported, 
   await until(p, async () => /say \(ja\): あ/.test(await p.textContent("#log")), "Japanese say request");
   await until(p, async () => (await p.evaluate(() => window.__said.some((x) => x && x.text === "あ"))), "Japanese speech");
   assert.deepEqual((await p.evaluate(() => window.__said.filter((x) => x !== "cancel")))[0], { text: "あ", voice: "Kyoko", lang: "ja-JP", volume: 0.42 });
+  await f.click("#view");
+  assert.equal(await f.locator("#reference button").count(), 46);
+  assert.deepEqual(await f.locator("#reference button").evaluateAll((buttons) => buttons.slice(0, 5).map((b) => b.getAttribute("aria-label"))),
+    ["あ a", "い i", "う u", "え e", "お o"]);
+  const ya = await f.locator("#reference button[aria-label='や ya']").boundingBox();
+  const yu = await f.locator("#reference button[aria-label='ゆ yu']").boundingBox();
+  const yo = await f.locator("#reference button[aria-label='よ yo']").boundingBox();
+  const ra = await f.locator("#reference button[aria-label='ら ra']").boundingBox();
+  assert.ok(ya.y === yu.y && yu.y === yo.y && ya.x < yu.x && yu.x < yo.x, "ya-row kana follow gojuon column order");
+  assert.ok(ra.y > ya.y, "the ra row follows the ya row");
+  await f.locator("#reference button[aria-label='ん n']").click();
+  assert.equal(await f.textContent("#kana"), "ん", "the last kana is reachable by scrolling the reference list");
+  await f.click("#view");
+  await f.locator("#reference button[aria-label='よ yo']").click();
+  assert.equal(await f.textContent("#kana"), "よ");
   await f.click("#script");
-  assert.equal(await f.textContent("#kana"), "ア");
+  assert.equal(await f.textContent("#kana"), "ヨ");
+  await f.click("#view");
+  assert.equal(await f.locator("#reference button").count(), 46);
+  assert.deepEqual(await f.locator("#reference button").evaluateAll((buttons) => buttons.slice(0, 5).map((b) => b.getAttribute("aria-label"))),
+    ["ア a", "イ i", "ウ u", "エ e", "オ o"]);
+  await f.click("#view");
+  assert.equal(await f.textContent("#kana"), "ヨ");
   await f.click("#quiz");
   assert.equal(await f.locator("#options button").count(), 4);
+  assert.equal(await f.textContent("#guide"), "Arrows move · A answer · B back");
+  assert.equal(await f.textContent("#prompt"), "Choose this kana's romaji");
   assert.deepEqual(await insideScreen(), { size: [331, 359], inside: true });
+  const noQuizOverlap = await f.evaluate(() => {
+    const items = ["#meta", "#card", "#prompt", "#options", "#controls", "#status"]
+      .map((s) => document.querySelector(s)).filter((el) => getComputedStyle(el).display !== "none");
+    const rects = items.map((el) => el.getBoundingClientRect());
+    return rects.every((a, i) => rects.slice(i + 1).every((b) => a.bottom <= b.top || b.bottom <= a.top));
+  });
+  assert.equal(noQuizOverlap, true, "quiz sections do not overlap");
+  const selectedChoice = async () => Number(await f.locator("#options button.selected").getAttribute("data-index"));
+  const choiceBefore = await selectedChoice();
+  await p.locator('#pad [data-b="down"]').click();
+  await f.waitForFunction((index) => Number(document.querySelector("#options button.selected").getAttribute("data-index")) !== index, choiceBefore);
+  assert.notEqual(await selectedChoice(), choiceBefore, "down moves the quiz option");
+  await p.locator('#pad [data-b="up"]').click();
+  await f.waitForFunction((index) => Number(document.querySelector("#options button.selected").getAttribute("data-index")) === index, choiceBefore);
+  assert.equal(await selectedChoice(), choiceBefore, "up returns to the original quiz row");
+  await p.locator('#pad [data-b="right"]').click();
+  await f.waitForFunction((index) => Number(document.querySelector("#options button.selected").getAttribute("data-index")) !== index, choiceBefore);
+  assert.notEqual(await selectedChoice(), choiceBefore, "right moves between quiz columns");
   const target = Number((await f.textContent("#count")).split("/")[0]) - 1;
   await f.locator(`#options button[data-index="${target}"]`).click();
   await f.waitForFunction(() => /Correct|正确/.test(document.getElementById("status").textContent), null, { timeout: 3000 });
   assert.deepEqual(errors, []);
+
+  const zh = await page(t, { locale: "zh-CN" });
+  await zh.p.goto(`${base}/sdk/dev.html?app=registry/apps/kana-cards&lang=zh`, { waitUntil: "load" });
+  await zh.p.waitForFunction(() => /loaded |load failed/.test(document.getElementById("log").textContent), null, { timeout: 5000 });
+  let zhFrame;
+  await until(zh.p, async () => { zhFrame = zh.p.frames().find((x) => x !== zh.p.mainFrame()); return zhFrame && await zhFrame.evaluate(() => !!window.PAD).catch(() => false); }, "Chinese kana app");
+  await zh.p.locator("#app").evaluate((el) => { el.style.width = "331px"; el.style.height = "359px"; el.style.flex = "none"; });
+  await zhFrame.click("#quiz");
+  assert.equal(await zhFrame.textContent("#guide"), "↑↓←→ 移动 · A 确认 · B 返回");
+  assert.equal(await zhFrame.textContent("#prompt"), "选出这个假名的罗马字");
+  const zhNoOverlap = await zhFrame.evaluate(() => {
+    const items = ["#meta", "#card", "#prompt", "#options", "#controls", "#status"]
+      .map((s) => document.querySelector(s)).filter((el) => getComputedStyle(el).display !== "none");
+    const rects = items.map((el) => el.getBoundingClientRect());
+    return rects.every((a, i) => rects.slice(i + 1).every((b) => a.bottom <= b.top || b.bottom <= a.top));
+  });
+  assert.equal(zhNoOverlap, true, "Chinese quiz sections do not overlap at the smallest screen");
+  assert.deepEqual(zh.errors, []);
 });
