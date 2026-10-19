@@ -5565,6 +5565,26 @@ test("kana-cards: browse both kana scripts, read Japanese aloud when supported, 
   await until(p, async () => /say \(ja\): あ/.test(await p.textContent("#log")), "Japanese say request");
   await until(p, async () => (await p.evaluate(() => window.__said.some((x) => x && x.text === "あ"))), "Japanese speech");
   assert.deepEqual((await p.evaluate(() => window.__said.filter((x) => x !== "cancel")))[0], { text: "あ", voice: "Kyoko", lang: "ja-JP", volume: 0.42 });
+  await f.click("#prev");
+  assert.equal(await f.textContent("#kana"), "ん", "previous wraps from the first kana to the last");
+  await f.click("#next");
+  assert.equal(await f.textContent("#kana"), "あ", "next returns to the first kana");
+  await f.click("#next");
+  assert.equal(await f.textContent("#kana"), "い", "next advances exactly one kana");
+  await f.click("#view");
+  const selectedKana = () => f.locator("#reference button[aria-selected='true']");
+  assert.equal(await selectedKana().getAttribute("aria-label"), "い i");
+  assert.equal(await selectedKana().evaluate((el) => getComputedStyle(el).backgroundColor), "rgb(31, 42, 20)");
+  assert.equal(await f.locator("#reference button[aria-selected='false']").first().evaluate((el) => getComputedStyle(el).backgroundColor), "rgb(163, 173, 126)");
+  await p.locator('#pad [data-b="down"]').click();
+  await f.waitForFunction(() => document.querySelector("#reference button[aria-selected='true']").getAttribute("aria-label") === "き ki");
+  await p.locator('#pad [data-b="up"]').click();
+  await f.waitForFunction(() => document.querySelector("#reference button[aria-selected='true']").getAttribute("aria-label") === "い i");
+  await p.locator('#pad [data-b="right"]').click();
+  await f.waitForFunction(() => document.querySelector("#reference button[aria-selected='true']").getAttribute("aria-label") === "う u");
+  await p.locator('#pad [data-b="a"]').click();
+  await f.waitForFunction(() => document.body.classList.contains("reference") === false);
+  assert.equal(await f.textContent("#kana"), "う", "A opens the selected kana");
   await f.click("#view");
   assert.equal(await f.locator("#reference button").count(), 46);
   assert.deepEqual(await f.locator("#reference button").evaluateAll((buttons) => buttons.slice(0, 5).map((b) => b.getAttribute("aria-label"))),
