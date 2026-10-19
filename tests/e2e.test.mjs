@@ -5562,12 +5562,12 @@ test("kana-cards: browse both kana scripts, read Japanese aloud when supported, 
   });
   assert.deepEqual(await insideScreen(), { size: [331, 359], inside: true });
   assert.equal(await f.evaluate(() => document.body.classList.contains("list")), true, "the app opens on the kana list");
-  assert.equal(await f.locator("#reference button").count(), 46);
+  assert.equal(await f.locator("#reference button").count(), 71);
   await p.locator('#pad [data-b="b"]').click();
   assert.equal(await f.evaluate(() => document.body.classList.contains("list")), true, "B on the list does not start a quiz");
   await p.locator('#pad [data-b="start"]').click();
   await f.waitForFunction(() => document.body.classList.contains("quiz"));
-  assert.equal(await f.textContent("#count"), "1/46", "START begins a quiz for the selected kana");
+  assert.equal(await f.textContent("#count"), "1/71", "START begins a quiz for the selected kana");
   await p.locator('#pad [data-b="b"]').click();
   await f.waitForFunction(() => document.body.classList.contains("list"));
   assert.equal(await f.locator("#view").textContent(), "START Quiz");
@@ -5605,7 +5605,7 @@ test("kana-cards: browse both kana scripts, read Japanese aloud when supported, 
   assert.equal(await f.textContent("#kana"), "う", "A opens the selected kana");
   await p.locator('#pad [data-b="b"]').click();
   await f.waitForFunction(() => document.body.classList.contains("list"));
-  assert.equal(await f.locator("#reference button").count(), 46);
+  assert.equal(await f.locator("#reference button").count(), 71);
   assert.deepEqual(await f.locator("#reference button").evaluateAll((buttons) => buttons.slice(0, 5).map((b) => b.getAttribute("aria-label"))),
     ["あ a", "い i", "う u", "え e", "お o"]);
   const ya = await f.locator("#reference button[aria-label='や ya']").boundingBox();
@@ -5625,7 +5625,7 @@ test("kana-cards: browse both kana scripts, read Japanese aloud when supported, 
   await f.click("#script");
   assert.equal(await f.textContent("#kana"), "ヨ");
   assert.equal(await f.evaluate(() => document.body.classList.contains("list")), true);
-  assert.equal(await f.locator("#reference button").count(), 46);
+  assert.equal(await f.locator("#reference button").count(), 71);
   assert.deepEqual(await f.locator("#reference button").evaluateAll((buttons) => buttons.slice(0, 5).map((b) => b.getAttribute("aria-label"))),
     ["ア a", "イ i", "ウ u", "エ e", "オ o"]);
   await f.click("#script");
@@ -5634,7 +5634,7 @@ test("kana-cards: browse both kana scripts, read Japanese aloud when supported, 
   assert.equal(await f.locator("#options button").count(), 4);
   assert.equal(await f.textContent("#guide"), "Arrows choose · A answer · B list");
   assert.equal(await f.textContent("#prompt"), "Choose this kana's romaji");
-  assert.equal(await f.textContent("#count"), "38/46", "START quiz tests the list cursor kana");
+  assert.equal(await f.textContent("#count"), "63/71", "START quiz tests the list cursor kana");
   assert.deepEqual(await insideScreen(), { size: [331, 359], inside: true });
   const noQuizOverlap = await f.evaluate(() => {
     const items = ["#meta", "#card", "#prompt", "#options", "#controls", "#status"]

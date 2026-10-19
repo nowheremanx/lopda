@@ -190,23 +190,23 @@
         "................",
         "................"
       ],
-      "version": "1.0.0",
-      "description": "学习平假名和片假名，听发音，再做四选一小测。",
+      "version": "1.1.0",
+      "description": "学习平假名和片假名（含浊音、半浊音），听发音，再做四选一小测。",
       "i18n": {
         "zh": {
           "name": "かな卡",
-          "description": "学习平假名和片假名，听发音，再做四选一小测。"
+          "description": "学习平假名和片假名（含浊音、半浊音），听发音，再做四选一小测。"
         },
         "en": {
           "name": "Kana",
-          "description": "Study hiragana and katakana, hear each one, then take a quick quiz."
+          "description": "Study hiragana and katakana with voiced kana, hear each one, then take a quiz."
         }
       },
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/kana-cards/index.html",
-      "sha256": "94f71bf3514d123a828bbbda70f2f79237c4769de18efbde2824ca3eaa2ebe52",
-      "bytes": 16774
+      "sha256": "6e11b8461e790565c81aabf9384ccfa133dd79e7315ee8da16e9f3383b3de853",
+      "bytes": 18339
     },
     {
       "spec": "lopda/1",
@@ -498,48 +498,6 @@
       "path": "apps/whack-a-mole/index.html",
       "sha256": "a1f16555ee761c6d05c338cd02ec720be696652c6e850088a994fc03ada37c6f",
       "bytes": 12816
-    },
-    {
-      "spec": "lopda/1",
-      "id": "word-cards",
-      "name": "单词卡",
-      "glyph": "词",
-      "buttons": true,
-      "icon": [
-        "................",
-        "................",
-        "....000000......",
-        "...01111110.....",
-        "...01222110.....",
-        "...01222110.....",
-        "...01222110.....",
-        "...01222110.....",
-        "...01111110.....",
-        "....000000......",
-        "................",
-        "......0..0......",
-        "......0..0......",
-        "......0..0......",
-        "................",
-        "................"
-      ],
-      "version": "1.0.0",
-      "description": "一小叠生词卡，按 A 听发音，按 B 翻卡。朗读接口的示范。",
-      "i18n": {
-        "zh": {
-          "name": "单词卡",
-          "description": "一小叠生词卡，按 A 听发音，按 B 翻卡。朗读接口的示范。"
-        },
-        "en": {
-          "name": "WordCard",
-          "description": "Flash cards for words, with A to say them aloud and B to flip. A PAD.say demo."
-        }
-      },
-      "author": "Haowei Wu",
-      "license": "MIT",
-      "path": "apps/word-cards/index.html",
-      "sha256": "fd6fb9504ea42e6496c0352b013ebdc9647934403e8acc15bb1c70274f8719b4",
-      "bytes": 14377
     },
     {
       "spec": "lopda/1",
