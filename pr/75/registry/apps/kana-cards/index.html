@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
-<title>かな卡</title>
+<title>五十音图</title>
 <!-- Lo-PDA app (lopda/1): original kana flash cards, a small quiz, and optional Japanese speech. MIT License. -->
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #a3ad7e; color: #1f2a14; font-family: monospace; }
@@ -54,7 +54,7 @@
 </head>
 <body>
 <header>
-  <b id="title">かな卡</b>
+  <b id="title">五十音图</b>
   <button id="script" class="secondary" type="button">平假名</button>
   <button id="view" class="secondary" type="button">START 小测</button>
   <span id="count">1/71</span>
@@ -86,7 +86,7 @@
   var KATA = ["ア","イ","ウ","エ","オ","カ","キ","ク","ケ","コ","サ","シ","ス","セ","ソ","タ","チ","ツ","テ","ト","ナ","ニ","ヌ","ネ","ノ","ハ","ヒ","フ","ヘ","ホ","マ","ミ","ム","メ","モ","ヤ","ユ","ヨ","ラ","リ","ル","レ","ロ","ワ","ヲ","ン","ガ","ギ","グ","ゲ","ゴ","ザ","ジ","ズ","ゼ","ゾ","ダ","ヂ","ヅ","デ","ド","バ","ビ","ブ","ベ","ボ","パ","ピ","プ","ペ","ポ"];
   var ROMA = ["a","i","u","e","o","ka","ki","ku","ke","ko","sa","shi","su","se","so","ta","chi","tsu","te","to","na","ni","nu","ne","no","ha","hi","fu","he","ho","ma","mi","mu","me","mo","ya","yu","yo","ra","ri","ru","re","ro","wa","wo","n","ga","gi","gu","ge","go","za","ji","zu","ze","zo","da","ji","zu","de","do","ba","bi","bu","be","bo","pa","pi","pu","pe","po"];
   var TXT = {
-    zh: { title: "かな卡", hira: "平假名", kata: "片假名", list: "字表", card: "卡片", quiz: "小测", startQuiz: "START 小测", backList: "B 字表", quizGuide: "↑↓←→ 选项 · A 确认 · B 字表", cardGuide: "← → 翻页 · A 朗读 · B 字表", listGuide: "↑↓←→ 选择 · A 卡片 · START 小测", question: "选出这个假名的罗马字", hear: "A 听", confirm: "A 确认", mastered: "正确", missed: "再看看：", noVoice: "日语朗读暂不可用；仍可继续学习。", legacy: "此版本不支持日语朗读；仍可继续学习。", prev: "前", next: "后" },
+    zh: { title: "五十音图", hira: "平假名", kata: "片假名", list: "字表", card: "卡片", quiz: "小测", startQuiz: "START 小测", backList: "B 字表", quizGuide: "↑↓←→ 选项 · A 确认 · B 字表", cardGuide: "← → 翻页 · A 朗读 · B 字表", listGuide: "↑↓←→ 选择 · A 卡片 · START 小测", question: "选出这个假名的罗马字", hear: "A 听", confirm: "A 确认", mastered: "正确", missed: "再看看：", noVoice: "日语朗读暂不可用；仍可继续学习。", legacy: "此版本不支持日语朗读；仍可继续学习。", prev: "前", next: "后" },
     en: { title: "Kana", hira: "Hiragana", kata: "Katakana", list: "List", card: "Card", quiz: "Quiz", startQuiz: "START Quiz", backList: "B List", quizGuide: "Arrows choose · A answer · B list", cardGuide: "← → browse · A hear · B list", listGuide: "Arrows move · A card · START quiz", question: "Choose this kana's romaji", hear: "A Hear", confirm: "A OK", mastered: "Correct", missed: "Review: ", noVoice: "Japanese speech is unavailable; you can keep studying.", legacy: "Japanese speech needs a newer handheld; keep studying.", prev: "Prev", next: "Next" }
   }[LANG];
   var data = { script: "hira", index: 0, screen: "list", target: 0, choices: [], choice: 0, locked: false };
