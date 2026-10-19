@@ -29,7 +29,8 @@
   #reference button { min-width: 0; min-height: 56px; padding: 2px 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; }
   #reference button span:first-child { font-size: 25px; line-height: 1; }
   #reference button span:last-child { font-size: 12px; line-height: 1; }
-  #reference button.selected { background: #1f2a14; color: #a3ad7e; }
+  #reference button { background: #a3ad7e; color: #1f2a14; }
+  #reference button.selected { background: #1f2a14; color: #a3ad7e; border-width: 4px; }
   body.quiz main { justify-content: flex-start; gap: 5px; padding-top: 5px; padding-bottom: 5px; }
   body.quiz #meta { flex: none; }
   body.quiz #card { height: 72px; }
@@ -121,6 +122,7 @@
           b.type = "button"; b.setAttribute("role", "listitem"); b.setAttribute("aria-label", list[index] + " " + ROMA[index]);
           b.style.gridRow = String(r + 1); b.style.gridColumn = String(GRID_COLS[r][c] + 1);
           b.className = index === data.index ? "selected" : "";
+          b.setAttribute("aria-selected", index === data.index ? "true" : "false");
           kana.textContent = list[index]; roma.textContent = ROMA[index];
           b.appendChild(kana); b.appendChild(roma);
           b.addEventListener("click", function () { data.index = index; data.reference = false; statusEl.textContent = ""; save(); render(); });
@@ -182,13 +184,13 @@
         if (dir === "up" || dir === "down") data.choice = (data.choice + (dir === "up" ? -2 : 2) + data.choices.length) % data.choices.length;
         else {
           var rowStart = Math.floor(data.choice / 2) * 2;
-          data.choice = rowStart + (1 - data.choice % 2);
+          data.choice = rowStart + (data.choice % 2 + (dir === "left" ? 1 : 1)) % 2;
         }
         render();
       }
       return;
     }
-    data.index = (data.index + dir + 46) % 46;
+    data.index = (data.index + (dir === "left" || dir === "up" ? -1 : 1) + 46) % 46;
     statusEl.textContent = ""; save(); render();
   }
   function newQuestion() {
