@@ -5583,7 +5583,7 @@ test("kana-cards: browse both kana scripts, read Japanese aloud when supported, 
   await until(p, async () => (await p.evaluate(() => window.__said.some((x) => x && x.text === "あ"))), "Japanese speech");
   assert.deepEqual((await p.evaluate(() => window.__said.filter((x) => x !== "cancel")))[0], { text: "あ", voice: "Kyoko", lang: "ja-JP", volume: 0.42 });
   await f.click("#prev");
-  assert.equal(await f.textContent("#kana"), "ん", "previous wraps from the first kana to the last");
+  assert.equal(await f.textContent("#kana"), "ぽ", "previous wraps from the first kana to the last");
   await f.click("#next");
   assert.equal(await f.textContent("#kana"), "あ", "next returns to the first kana");
   await f.click("#next");
@@ -5634,7 +5634,7 @@ test("kana-cards: browse both kana scripts, read Japanese aloud when supported, 
   assert.equal(await f.locator("#options button").count(), 4);
   assert.equal(await f.textContent("#guide"), "Arrows choose · A answer · B list");
   assert.equal(await f.textContent("#prompt"), "Choose this kana's romaji");
-  assert.equal(await f.textContent("#count"), "63/71", "START quiz tests the list cursor kana");
+  assert.equal(await f.textContent("#count"), "38/71", "START quiz tests the list cursor kana");
   assert.deepEqual(await insideScreen(), { size: [331, 359], inside: true });
   const noQuizOverlap = await f.evaluate(() => {
     const items = ["#meta", "#card", "#prompt", "#options", "#controls", "#status"]
@@ -5680,4 +5680,32 @@ test("kana-cards: browse both kana scripts, read Japanese aloud when supported, 
   });
   assert.equal(zhNoOverlap, true, "Chinese quiz sections do not overlap at the smallest screen");
   assert.deepEqual(zh.errors, []);
+});
+
+test("kana-cards: the header buttons hold their place as the count grows", { skip, timeout: 60000 }, async (t) => {
+  /* 9/71 -> 10/71 is one character wider; the script and START quiz buttons must not shift with it. */
+  const { p, errors } = await page(t);
+  await p.goto(`${base}/sdk/dev.html?app=registry/apps/kana-cards`, { waitUntil: "load" });
+  await p.waitForFunction(() => /loaded |load failed/.test(document.getElementById("log").textContent), null, { timeout: 5000 });
+  let f;
+  await until(p, async () => { f = p.frames().find((x) => x !== p.mainFrame()); return f && await f.evaluate(() => !!window.PAD && !!PAD.say).catch(() => false); }, "kana app");
+  await f.waitForFunction(() => document.querySelector("#count").textContent === "1/71");
+  const boxes = () => f.evaluate(() => ["#script", "#view", "#count"].map((s) => {
+    const r = document.querySelector(s).getBoundingClientRect();
+    return [Math.round(r.left * 100), Math.round(r.width * 100)];
+  }));
+  const atCount = async (text) => {
+    await f.waitForFunction((want) => document.querySelector("#count").textContent === want, text);
+    return boxes();
+  };
+  const one = await atCount("1/71");
+  for (let i = 0; i < 4; i++) await p.locator('#pad [data-b="right"]').click();
+  await p.locator('#pad [data-b="down"]').click();
+  await p.locator('#pad [data-b="left"]').click();
+  const nine = await atCount("9/71");
+  await p.locator('#pad [data-b="right"]').click();
+  const ten = await atCount("10/71");
+  assert.deepEqual(nine, ten, "the buttons do not move from 9/71 to 10/71");
+  assert.deepEqual(one, ten, "the buttons stay put from the first kana to the tenth");
+  assert.deepEqual(errors, []);
 });
