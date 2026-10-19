@@ -3,7 +3,7 @@
   "id": "daily-slip",
   "name": "每日一签",
   "glyph": "签",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "抽一支签，读一段今天的顺便话。写进记事本接口的示范。",
   "i18n": {
     "zh": {

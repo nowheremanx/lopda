@@ -108,7 +108,7 @@
         "................",
         "................"
       ],
-      "version": "1.0.0",
+      "version": "1.1.0",
       "description": "抽一支签，读一段今天的顺便话。写进记事本接口的示范。",
       "i18n": {
         "zh": {
@@ -126,8 +126,8 @@
         "notes"
       ],
       "path": "apps/daily-slip/index.html",
-      "sha256": "ac92f9e03dd74d91a4b7c7bfcf1ae2b89657518ebba04d56affd6e72f7979c1b",
-      "bytes": 24544
+      "sha256": "e1dcd40c7dd45e272d5025985a2aa4b2525d914dca72433d0cddb64612d82ff1",
+      "bytes": 31855
     },
     {
       "spec": "lopda/1",
