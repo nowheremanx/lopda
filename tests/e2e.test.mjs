@@ -5682,6 +5682,68 @@ test("kana-cards: browse both kana scripts, read Japanese aloud when supported, 
   assert.deepEqual(zh.errors, []);
 });
 
+test("kana-cards: the guide row stays put while only the kana grid scrolls", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t);
+  await p.goto(`${base}/sdk/dev.html?app=registry/apps/kana-cards`, { waitUntil: "load" });
+  await p.waitForFunction(() => /loaded |load failed/.test(document.getElementById("log").textContent), null, { timeout: 5000 });
+  let f;
+  await until(p, async () => { f = p.frames().find((x) => x !== p.mainFrame()); return f && await f.evaluate(() => !!window.PAD).catch(() => false); }, "kana app");
+  await p.locator("#app").evaluate((el) => { el.style.width = "331px"; el.style.height = "359px"; el.style.flex = "none"; });
+  await f.waitForFunction(() => document.body.classList.contains("list"));
+  const geo = () => f.evaluate(() => {
+    const meta = document.querySelector("#meta").getBoundingClientRect();
+    const reference = document.querySelector("#reference");
+    return { guideTop: Math.round(meta.top), scroll: reference.scrollTop, scrollable: reference.scrollHeight > reference.clientHeight };
+  });
+  const before = await geo();
+  assert.equal(before.scrollable, true, "the kana grid is taller than the screen");
+  assert.equal(before.scroll, 0, "the grid starts at the top");
+  await f.evaluate(() => { document.querySelector("#reference").scrollTop = 500; });
+  await f.waitForFunction(() => document.querySelector("#reference").scrollTop > 0);
+  const after = await geo();
+  assert.ok(after.scroll > 0, "only the grid scrolled");
+  assert.equal(after.guideTop, before.guideTop, "the guide row did not move");
+  assert.deepEqual(errors, []);
+});
+
+test("kana-cards: a miss waits for confirmation, and the score shows on the card", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t);
+  await p.goto(`${base}/sdk/dev.html?app=registry/apps/kana-cards`, { waitUntil: "load" });
+  await p.waitForFunction(() => /loaded |load failed/.test(document.getElementById("log").textContent), null, { timeout: 5000 });
+  let f;
+  await until(p, async () => { f = p.frames().find((x) => x !== p.mainFrame()); return f && await f.evaluate(() => !!window.PAD).catch(() => false); }, "kana app");
+  await f.waitForFunction(() => document.documentElement.lang === "en", null, { timeout: 5000 });
+  await p.locator("#app").evaluate((el) => { el.style.width = "331px"; el.style.height = "359px"; el.style.flex = "none"; });
+  await f.waitForFunction(() => document.body.classList.contains("list"));
+
+  await p.locator('#pad [data-b="a"]').click();
+  await f.waitForFunction(() => document.body.classList.contains("card"));
+  assert.equal(await f.textContent("#rate"), "Accuracy —", "a fresh card has no score yet");
+  await p.locator('#pad [data-b="b"]').click();
+  await f.waitForFunction(() => document.body.classList.contains("list"));
+
+  await p.locator('#pad [data-b="start"]').click();
+  await f.waitForFunction(() => document.body.classList.contains("quiz"));
+  const target = Number((await f.textContent("#count")).split("/")[0]) - 1;
+  await f.evaluate((tgt) => {
+    const b = [...document.querySelectorAll("#options button")].find((x) => Number(x.getAttribute("data-index")) !== tgt);
+    b.click();
+  }, target);
+  await f.waitForFunction(() => /Review|再看看/.test(document.getElementById("status").textContent));
+  assert.match(await f.textContent("#status"), /Review: a/, "the miss shows the right answer");
+  assert.equal(Number((await f.textContent("#count")).split("/")[0]) - 1, target, "the miss stays until the user confirms");
+  await p.locator('#pad [data-b="a"]').click();
+  await f.waitForFunction((want) => document.querySelector("#count").textContent !== want, `${target + 1}/71`);
+  assert.notEqual(Number((await f.textContent("#count")).split("/")[0]) - 1, target, "confirming moves to a different kana");
+
+  await p.locator('#pad [data-b="b"]').click();
+  await f.waitForFunction(() => document.body.classList.contains("list"));
+  await p.locator('#pad [data-b="a"]').click();
+  await f.waitForFunction(() => document.body.classList.contains("card"));
+  assert.equal(await f.textContent("#rate"), "Accuracy 0% (0/1)", "the single miss is recorded");
+  assert.deepEqual(errors, []);
+});
+
 test("kana-cards: the header buttons hold their place as the count grows", { skip, timeout: 60000 }, async (t) => {
   /* 9/71 -> 10/71 is one character wider; the script and START quiz buttons must not shift with it. */
   const { p, errors } = await page(t);
