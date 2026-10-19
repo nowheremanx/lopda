@@ -5373,6 +5373,26 @@ test("notes: an app's append shows the runtime's dialog; A writes its own note, 
   assert.deepEqual(notBlocked(n.errors), []);
 });
 
+test("daily-slip: B does not write; START opens notes and a saved slip stays in the app", { skip, timeout: 30000 }, async (t) => {
+  const { p, errors } = await page(t);
+  await p.goto(`${base}/sdk/dev.html?app=registry/apps/daily-slip`, { waitUntil: "load" });
+  await p.waitForFunction(() => /loaded |load failed/.test(document.getElementById("log").textContent), null, { timeout: 5000 });
+  const app = p.frameLocator("#app");
+  await app.locator("#drawBtn").click();
+  await app.locator("#slip.show").waitFor();
+  assert.equal(await app.locator("#writeBtn").textContent(), "START Notes");
+  await p.locator('#pad [data-b="b"]').click();
+  await p.waitForTimeout(100);
+  assert.equal(await p.locator("#log").evaluate((el) => (el.textContent.match(/notes\.append dialog:/g) || []).length), 0);
+  await p.locator('#pad [data-b="start"]').click();
+  await p.waitForFunction(() => /notes\.append dialog:/.test(document.getElementById("log").textContent), null, { timeout: 5000 });
+  await p.waitForFunction(() => /-> saved/.test(document.getElementById("log").textContent), null, { timeout: 5000 });
+  assert.equal(await app.locator("#writeBtn").isDisabled(), true);
+  assert.equal(await app.locator("#slip.show").count(), 1, "saving does not leave the app");
+  assert.doesNotMatch(await p.textContent("#log"), /ERROR|load failed/);
+  assert.deepEqual(errors, []);
+});
+
 test("notes: an app's note round-trips through export and import with source: app:<id>; 来自 app holds it again", { skip, timeout: 60000 }, async (t) => {
   const n = await notesPage(t);
   await n.p.evaluate(async () => {

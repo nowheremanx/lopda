@@ -96,8 +96,8 @@
   ];
 
   var TXT = {
-    zh: { title: "每日一签", draw: "抽签", write: "写进记事本", written: "已写入", denied: "没有写入", old: "这台掌机太老，不能写记事本。", noteTitle: "每日一签", all: "全部", plus: "已写入", noWrite: "不能写入" },
-    en: { title: "Fortune", draw: "Draw", write: "Write to notes", written: "Saved", denied: "Not saved", old: "This handheld is too old to write notes.", noteTitle: "Daily fortune", all: "All", plus: "Saved", noWrite: "Not saved" }
+    zh: { title: "每日一签", draw: "抽签", write: "START 写入", written: "已写入", denied: "没有写入", old: "这台掌机太老，不能写记事本。", noteTitle: "每日一签", all: "全部", plus: "已写入", noWrite: "不能写入" },
+    en: { title: "Fortune", draw: "Draw", write: "START Notes", written: "Saved", denied: "Not saved", old: "This handheld is too old to write notes.", noteTitle: "Daily fortune", all: "All", plus: "Saved", noWrite: "Not saved" }
   }[LANG];
 
   var state = { dateKey: todayKey(), slip: null, written: false, animating: false };
@@ -230,26 +230,18 @@
     });
   }
   function pressA() { doDraw(); }
-  function pressB() {
-    if (state.slip !== null && typeof PAD !== "undefined" && PAD.notes && !state.written) {
-      appendNote();
-    }
-  }
   function handleKey(e) {
     var k = e.key;
     if (k === "x" || k === "X") { e.preventDefault(); pressA(); }
-    else if (k === "z" || k === "Z") { e.preventDefault(); if (state.slip !== null && typeof PAD !== "undefined" && PAD.notes) { appendNote(); } }
     else if (k === "Enter") { e.preventDefault(); appendNote(); }
     else if (k === "ArrowRight" || k === "ArrowLeft") { e.preventDefault(); if (state.slip === null) doDraw(); }
   }
   if (typeof PAD !== "undefined" && PAD.on) {
     PAD.on("press", function (button) {
       if (button === "a") pressA();
-      else if (button === "b") pressB();
       else if (button === "start") appendNote();
     });
-  }
-  document.addEventListener("keydown", handleKey, false);
+  } else document.addEventListener("keydown", handleKey, false);
   drawBtn.addEventListener("click", function () { doDraw(); });
   writeBtn.addEventListener("click", function () { appendNote(); });
   document.getElementById("title").textContent = TXT.title;
