@@ -1,6 +1,6 @@
 {
   "spec": "lopda/1",
-  "generated": "2026-10-17",
+  "generated": "2026-10-20",
   "apps": [
     {
       "spec": "lopda/1",
@@ -86,6 +86,51 @@
     },
     {
       "spec": "lopda/1",
+      "id": "daily-slip",
+      "name": "每日一签",
+      "glyph": "签",
+      "buttons": true,
+      "icon": [
+        "................",
+        ".......00.......",
+        "..00...03.......",
+        "..03...00...00..",
+        "..00...03...03..",
+        "..03...03...00..",
+        "..000000000000..",
+        "..033333333330..",
+        "..033333322220..",
+        "..033333322220..",
+        "..033333322220..",
+        "..033333322220..",
+        "...0333332220...",
+        "...0333332220...",
+        "....00000000....",
+        "................"
+      ],
+      "version": "1.1.1",
+      "description": "抽一支签，读一段今天的顺便话。写进记事本接口的示范。",
+      "i18n": {
+        "zh": {
+          "name": "每日一签",
+          "description": "抽一支签，读一段今天的顺便话。写进记事本接口的示范。"
+        },
+        "en": {
+          "name": "Fortune",
+          "description": "Draw a slip, read a gentle note for the day. A PAD.notes.append demo."
+        }
+      },
+      "author": "Haowei Wu",
+      "license": "MIT",
+      "permissions": [
+        "notes"
+      ],
+      "path": "apps/daily-slip/index.html",
+      "sha256": "c19da202736bdcfd460a05253ceacfe972dea9b4887cf25788d9bd69bc0e88a2",
+      "bytes": 33124
+    },
+    {
+      "spec": "lopda/1",
       "id": "gomoku",
       "name": "五子棋",
       "glyph": "棋",
@@ -120,6 +165,48 @@
       "path": "apps/gomoku/index.html",
       "sha256": "8c0005208ed3d1f27e7e022a0fc1766ea01e2626f919bfc1c409b80b36e96165",
       "bytes": 12352
+    },
+    {
+      "spec": "lopda/1",
+      "id": "kana-cards",
+      "name": "五十音图",
+      "glyph": "あ",
+      "buttons": true,
+      "icon": [
+        "................",
+        "......0.........",
+        "......0.........",
+        "..000000000000..",
+        ".....000........",
+        "......0.....0...",
+        "......0000.00...",
+        "....0000.0000...",
+        "...00.0...0.00..",
+        "..00..0..00..00.",
+        ".00...0..0....0.",
+        ".0....0.0.....0.",
+        ".0....00......0.",
+        ".0...00......0..",
+        "..000..0....0...",
+        ".........000...."
+      ],
+      "version": "1.4.0",
+      "description": "学习平假名和片假名（含浊音、半浊音），听发音，再做四选一小测。",
+      "i18n": {
+        "zh": {
+          "name": "五十音图",
+          "description": "学习平假名和片假名（含浊音、半浊音），听发音，再做四选一小测。"
+        },
+        "en": {
+          "name": "Kana",
+          "description": "Study hiragana and katakana with voiced kana, hear each one, then take a quiz."
+        }
+      },
+      "author": "Haowei Wu",
+      "license": "MIT",
+      "path": "apps/kana-cards/index.html",
+      "sha256": "8a7ae828c7a0b5e1885c8732530dd237abd1302e1dc290e9603d5b5d5a3421ca",
+      "bytes": 21949
     },
     {
       "spec": "lopda/1",
