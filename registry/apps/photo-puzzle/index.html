@@ -35,6 +35,117 @@
   <div id="menu"></div>
 </main>
 <footer id="ft"></footer>
+<script data-src="src/solver.js">
+/* The solver behind 看它解 / SELECT / the tutorial: rows first, then columns, then the last 2×2 -- the way a person
+   solves it, not the shortest way. Every stage is a small breadth-first search over the cells that still matter:
+   the pieces this stage is placing and the gap. Pieces already home are walls, and every other piece is
+   interchangeable, which keeps the search at a few thousand states (a few milliseconds on a phone) and makes the
+   plan easy to explain in one line. No DOM, no PAD: tests/solver.test.mjs plays a thousand boards with it.
+
+   Board layout: tiles[position] = piece, pieces 0 … n*n-2 are the picture, n*n-1 is the gap. */
+var Solver = (function () {
+  "use strict";
+
+  /* Each stage places one or two pieces; after it they are locked and never move again. */
+  function stages(n) {
+    if (n === 3) return [
+      [{ p: 0, at: 0 }],                                            /* row 1: 1 */
+      [{ p: 1, at: 1 }, { p: 2, at: 2 }],                           /* row 1: 2 and 3 together */
+      [{ p: 3, at: 3 }, { p: 6, at: 6 }],                           /* column 1: 4 and 7 together */
+      [{ p: 4, at: 4 }, { p: 5, at: 5 }, { p: 7, at: 7 }],          /* the last 2×2 */
+    ];
+    return [
+      [{ p: 0, at: 0 }], [{ p: 1, at: 1 }], [{ p: 2, at: 2 }, { p: 3, at: 3 }],
+      [{ p: 4, at: 4 }], [{ p: 5, at: 5 }], [{ p: 6, at: 6 }, { p: 7, at: 7 }],
+      [{ p: 8, at: 8 }, { p: 12, at: 12 }],                         /* the last two rows, column by column */
+      [{ p: 9, at: 9 }, { p: 13, at: 13 }],
+      [{ p: 10, at: 10 }, { p: 11, at: 11 }, { p: 14, at: 14 }],
+    ];
+  }
+
+  function neighbours(n, g) {
+    var r = (g / n) | 0, c = g % n, out = [];
+    if (r > 0) out.push(g - n);
+    if (r < n - 1) out.push(g + n);
+    if (c > 0) out.push(g - 1);
+    if (c < n - 1) out.push(g + 1);
+    return out;
+  }
+
+  /* One stage: BFS over (positions of the pieces being placed, gap). Returns the cells to slide, in order, or null.
+     `locked` holds the pieces finished in earlier stages: they are walls, which is what makes the search small.
+     Merely being at home does not lock a piece -- a wall can pinch the free cells into a path where the goal is
+     out of reach, so only finished stages may block (found by the thousand-board test). */
+  function find(n, tiles, targets, locked) {
+    var N = n * n, gapPiece = N - 1, gap = tiles.indexOf(gapPiece);
+    var start = [], want = [], i, k;
+    for (i = 0; i < targets.length; i++) { start.push(tiles.indexOf(targets[i].p)); want.push(targets[i].at); }
+
+    if (start.join() === want.join()) return [];
+
+    var wall = {};
+    for (i = 0; i < (locked || []).length; i++) wall[tiles.indexOf(locked[i])] = true;
+
+    function done(pos) {
+      for (k = 0; k < want.length; k++) if (pos[k] !== want[k]) return false;
+      return true;
+    }
+
+    var key0 = start.join(",") + "|" + gap;
+    var prev = new Map(); prev.set(key0, null);
+    var queue = [{ pos: start, gap: gap, key: key0 }];
+    for (var qi = 0; qi < queue.length; qi++) {
+      var cur = queue[qi], g = cur.gap, nb = neighbours(n, g);
+      for (var j = 0; j < nb.length; j++) {
+        var q = nb[j];
+        if (wall[q]) continue;
+        var pos = cur.pos.slice(), hit = -1;
+        for (k = 0; k < pos.length; k++) if (pos[k] === q) { hit = k; break; }
+        if (hit >= 0) pos[hit] = g;
+        var key = pos.join(",") + "|" + q;
+        if (prev.has(key)) continue;
+        prev.set(key, [cur.key, q]);
+        if (done(pos)) {
+          var out = [];
+          for (var s = key; prev.get(s); s = prev.get(s)[0]) out.push(prev.get(s)[1]);
+          out.reverse();
+          return out;
+        }
+        queue.push({ pos: pos, gap: q, key: key });
+      }
+    }
+    return null;
+  }
+
+  /* the piece at q slides into the gap */
+  function step(tiles, n, q) {
+    var gap = tiles.indexOf(n * n - 1);
+    tiles[gap] = tiles[q];
+    tiles[q] = n * n - 1;
+  }
+
+  /* the whole board, as [{p, stage}] where p is the cell to slide; null if a stage cannot be planned */
+  function solve(n, tiles) {
+    var work = tiles.slice(), out = [], plan = stages(n), locked = [];
+    for (var s = 0; s < plan.length; s++) {
+      var moves = find(n, work, plan[s], locked);
+      if (!moves) return null;
+      for (var i = 0; i < moves.length; i++) { out.push({ p: moves[i], stage: s }); step(work, n, moves[i]); }
+      for (var j = 0; j < plan[s].length; j++) locked.push(plan[s][j].p);
+    }
+    return out;
+  }
+
+  /* one custom goal, for a tutorial lesson: [{p: piece, at: position}], with `keep` pieces left where they are */
+  function goalPlan(n, tiles, targets, keep) {
+    var moves = find(n, tiles, targets, keep);
+    if (!moves) return null;
+    return moves.map(function (p) { return { p: p, stage: 0 }; });
+  }
+
+  return { stages: stages, solve: solve, goalPlan: goalPlan };
+})();
+</script>
 <script>
 (function () {
   var HAS_PAD = typeof PAD !== "undefined";
@@ -47,26 +158,36 @@
     zh: { title: "拍照拼图", snap: "拍一张", builtin: "用内置图片", imp: "导入图片", use: "用这张", retake: "重拍",
       other: "换一张", again: "重来", size: "换难度", resume: "继续", fresh: "新的一局", next: "下一局",
       newphoto: "拍新照片", moves: "{n} 步", best: "最佳 {n}", taking: "拍照中…", importing: "读图片…",
+      watch: "看它解", helped: "助",
       intro: "拍一张照片，切成方块打乱，再拼回来。", nocam: "这台掌机不能拍照，用内置图片玩。",
       nophoto: "没拿到照片，用内置图片玩。", nofile: "没选图片。", badimg: "这张图读不出来。",
       saved: "上次那盘还在这里。", look: "就用这张吗？", won: "拼好了！{n} 步。", record: "新纪录！",
       unlocked: "下一局是 4×4。", locked: "先拼好一次 3×3",
       kTitle: "↑↓ 选　A 确定", kPreview: "A 用这张　B 重拍", kPreviewFile: "A 用这张　B 换一张",
-      kPlay: "方向键 推方块　A 按住看原图　START 菜单", kMenu: "↑↓ 选　A 确定　B 返回", kWon: "↑↓ 选　A 确定",
-      kSolved: "A 继续", solved: "拼好了！", cont: "继续" },
+      kPlay: "方向键 推　A 看原图　START 菜单　SELECT 提示", kMenu: "↑↓ 选　A 确定　B 返回", kWon: "↑↓ 选　A 确定",
+      kSolved: "A 继续", solved: "拼好了！", cont: "继续",
+      stage3: ["第 1 行：送 1 号块", "第 1 行：最后两块一起", "第 1 列：3、6 一起", "最后 2×2：转到位"],
+      stage4: ["第 1 行：送 1 号块", "第 1 行：送 2 号块", "第 1 行：最后两块一起", "第 2 行：送 5 号块",
+        "第 2 行：送 6 号块", "第 2 行：最后两块一起", "最后两行：9、13 一起", "最后两行：10、14 一起",
+        "最后 2×2：转到位"] },
     en: { title: "SNAPTILE", snap: "Take a photo", builtin: "Built-in picture", imp: "Import a picture", use: "Use this",
       retake: "Retake", other: "Choose another", again: "Restart", size: "Size", resume: "Resume", fresh: "New puzzle",
       next: "Next", newphoto: "New photo", moves: "{n} moves", best: "best {n}", taking: "Camera…",
-      importing: "Reading…", intro: "Take a photo, it is cut up and shuffled: slide it back.",
+      importing: "Reading…", watch: "Watch it solve", helped: "aid", intro: "Take a photo, it is cut up and shuffled: slide it back.",
       nocam: "No camera here: playing with the built-in picture.", nophoto: "No photo: playing with the built-in picture.",
       nofile: "No picture chosen.", badimg: "That picture could not be read.",
       saved: "Your last puzzle is here.", look: "Use this one?", won: "Solved in {n} moves!", record: "New record!",
       unlocked: "Next one is 4×4.", locked: "Solve a 3×3 first",
       kTitle: "↑↓ pick  A ok", kPreview: "A use  B retake", kPreviewFile: "A use  B choose another",
-      kPlay: "D-pad slide  hold A peek  START menu", kMenu: "↑↓ pick  A ok  B back", kWon: "↑↓ pick  A ok",
-      kSolved: "A continue", solved: "Solved!", cont: "Continue" }
+      kPlay: "D-pad slide  A peek  START menu  SELECT hint", kMenu: "↑↓ pick  A ok  B back", kWon: "↑↓ pick  A ok",
+      kSolved: "A continue", solved: "Solved!", cont: "Continue",
+      stage3: ["Row 1: bring tile 1", "Row 1: last two together", "Column 1: 3 and 6 together", "Last 2×2: turn it home"],
+      stage4: ["Row 1: bring tile 1", "Row 1: bring tile 2", "Row 1: last two together", "Row 2: bring tile 5",
+        "Row 2: bring tile 6", "Row 2: last two together", "Last rows: 9 and 13 together", "Last rows: 10 and 14 together",
+        "Last 2×2: turn it home"] }
   }[LANG];
   function tx(key, n) { return TXT[key].replace("{n}", n); }
+  function stageText(n, i) { var a = n === 3 ? TXT.stage3 : TXT.stage4; return a[i] || ""; }
   document.documentElement.lang = LANG === "zh" ? "zh-CN" : "en"; document.title = TXT.title;
   document.getElementById("ttl").textContent = TXT.title;
 
@@ -104,7 +225,7 @@
   /* ---------- state ---------- */
   var S = { screen: "title", sel: 0, items: [], pic: BUILTIN, shot: null, note: "", titleNote: "", busy: false,
     n: 3, tiles: [], gap: 0, moves: 0, peek: false, big: false, best: {}, record: false,
-    src: "builtin", helped: false, saved: null, previewFrom: "camera" };
+    src: "builtin", helped: false, saved: null, previewFrom: "camera", demo: null, hint: null, hintOn: false, hintTimer: 0 };
   function sfx(name) { if (HAS_PAD) PAD.sfx(name); }
   function savePuzzle() { if (HAS_PAD) PAD.save("puzzle", { best: S.best, big: S.big }); }
 
@@ -270,6 +391,7 @@
   function solved() { for (var i = 0; i < S.tiles.length; i++) if (S.tiles[i] !== i) return false; return true; }
   /* the piece at p slides into the gap, if it is next to it */
   function slide(p) {
+    clearHint();
     if (neighbours(S.gap).indexOf(p) < 0) { sfx("err"); return; }
     swap(p); S.moves++; sfx("move");
     if (solved()) win(); else { saveGame(); draw(); }
@@ -284,7 +406,8 @@
   }
   function win() {
     var key = String(S.n), best = S.best[key];
-    S.record = !best || S.moves < best;
+    S.demo = null; S.note = "";
+    S.record = !S.helped && (!best || S.moves < best);
     if (S.record) S.best[key] = S.moves;
     var first = S.n === 3 && !S.big;
     if (first) S.big = true;
@@ -361,6 +484,12 @@
       if (t === gapPiece) slot(out, R, p); else tile(out, src, R, p, t, 0);
     }
   }
+  /* the hint's frame: the next piece's cell, inverted for a moment */
+  function ring(out, R, p) {
+    var x0 = R.x[p], y0 = R.y[p], w = R.w[p], h = R.h[p], x, y;
+    for (x = 0; x < w; x++) { out[y0 * W + x0 + x] = 3 - out[y0 * W + x0 + x]; out[(y0 + h - 1) * W + x0 + x] = 3 - out[(y0 + h - 1) * W + x0 + x]; }
+    for (y = 0; y < h; y++) { out[(y0 + y) * W + x0] = 3 - out[(y0 + y) * W + x0]; out[(y0 + y) * W + x0 + w - 1] = 3 - out[(y0 + y) * W + x0 + w - 1]; }
+  }
   var MASKS = {};
   function edgeMask(n) {
     if (MASKS[n]) return MASKS[n];
@@ -388,6 +517,7 @@
     if ((S.screen !== "play" && S.screen !== "menu") || S.peek) return src;
     var n = S.n, out = new Uint8Array(W * H);
     board(out, src, n, S.tiles);
+    if (S.hint && S.hintOn) ring(out, rects(n), S.hint.p);
     return out;
   }
   function solvedFrame(src) {
@@ -424,9 +554,54 @@
   }
   window.addEventListener("resize", layout);
 
+  /* ---------- watching it solve, and one hint ----------
+     Both use the Solver's row-by-row plan for the board as it is now. The demo plays it at three moves a second with
+     the stage as a subtitle; any key or tap stops it and leaves the player right there, to go on by hand. A game that
+     watched or asked for a hint keeps its moves, its music and its unlock, but gets no best score (the header shows
+     助). One rule, no extra setting. */
+  function startDemo() {
+    if (S.demo) return;
+    var plan = Solver.solve(S.n, S.tiles);
+    if (!plan || !plan.length) { sfx("err"); return; }
+    S.helped = true; saveGame();
+    clearHint();
+    S.demo = { steps: plan, i: 0, timer: 0 };
+    demoStep();
+  }
+  function demoStep() {
+    var d = S.demo; if (!d) return;
+    if (d.i >= d.steps.length) { stopDemo(); return; }
+    var st = d.steps[d.i++];
+    S.note = stageText(S.n, st.stage);
+    slide(st.p);
+    if (S.demo) d.timer = setTimeout(demoStep, 333);
+  }
+  function stopDemo() {
+    if (!S.demo) return;
+    clearTimeout(S.demo.timer); S.demo = null;
+    S.note = ""; draw();
+  }
+  /* SELECT: flash the piece the next step would push, but do not push it */
+  function hint() {
+    if (S.hint || S.screen !== "play") return;
+    var plan = Solver.solve(S.n, S.tiles);
+    if (!plan || !plan.length) { sfx("err"); return; }
+    S.helped = true; saveGame();
+    S.hint = { p: plan[0].p }; S.hintOn = true; draw();   /* draw, not paint: the header gains 助 */
+    var k = 0;
+    S.hintTimer = setInterval(function () {
+      k++; S.hintOn = !S.hintOn; paint();
+      if (k >= 4) clearHint();   /* two flashes */
+    }, 150);
+  }
+  function clearHint() {
+    if (S.hintTimer) { clearInterval(S.hintTimer); S.hintTimer = 0; }
+    if (S.hint) { S.hint = null; S.hintOn = false; paint(); }
+  }
+
   /* ---------- screens ---------- */
   function msg(text, note) { var m = document.getElementById("msg"); m.textContent = text; m.className = note ? "note" : ""; }
-  function go(screen) { S.screen = screen; S.sel = 0; draw(); }
+  function go(screen) { clearHint(); S.screen = screen; S.sel = 0; draw(); }
   function menuItems() {
     var camera = HAS_PAD && !!PAD.camera, files = HAS_PAD && typeof PAD.importFile === "function";
     if (S.screen === "title") {
@@ -439,16 +614,17 @@
     }
     if (S.screen === "preview") return [["use", TXT.use], ["other", S.previewFrom === "file" ? TXT.other : TXT.retake]];
     if (S.screen === "menu") return [["resume", TXT.resume]].concat(camera ? [["retake", TXT.retake]] : [])
-      .concat([["size", TXT.size, !S.big], ["again", TXT.again]]);
+      .concat([["size", TXT.size, !S.big], ["again", TXT.again], ["watch", TXT.watch]]);
     if (S.screen === "solved") return S.anim && S.anim.done ? [["goon", TXT.cont]] : [];
     if (S.screen === "won") return [["next", TXT.next]].concat(camera ? [["newphoto", TXT.newphoto]] : []);
     return [];
   }
   function infoText() {
     var sc = S.screen, best = S.best[String(S.n)];
-    if (sc === "title") return S.saved ? S.n + "×" + S.n + "  " + tx("moves", S.moves) : "";
+    var aid = S.helped ? "  " + TXT.helped : "";
+    if (sc === "title") return S.saved ? S.n + "×" + S.n + "  " + tx("moves", S.moves) + aid : "";
     if (sc !== "play" && sc !== "menu" && sc !== "solved" && sc !== "won") return "";
-    return S.n + "×" + S.n + "  " + tx("moves", S.moves) + (best ? "  " + tx("best", best) : "");
+    return S.n + "×" + S.n + "  " + tx("moves", S.moves) + (best ? "  " + tx("best", best) : "") + aid;
   }
   function draw() {
     var sc = S.screen, camera = HAS_PAD && !!PAD.camera;
@@ -494,6 +670,7 @@
     else if (id === "again") { sfx("tap"); newGame(); }
     else if (id === "size") { S.n = S.n === 3 ? 4 : 3; sfx("tick"); newGame(); }
     else if (id === "next") { S.note = ""; newGame(); }
+    else if (id === "watch") { sfx("tap"); go("play"); startDemo(); }
     else if (id === "goon") { sfx("tap"); go("won"); }
   }
 
@@ -501,10 +678,12 @@
   if (HAS_PAD) {
     PAD.on("press", function (b) {
       if (S.busy) return;
+      if (S.demo) { stopDemo(); return; }   /* the key that stops the demo does not also move a piece */
       var sc = S.screen;
       if (sc === "play") {
         if (b === "up" || b === "down" || b === "left" || b === "right") push(b);
         else if (b === "a") { S.peek = true; paint(); }
+        else if (b === "select") hint();
         else if (b === "start") { sfx("tap"); go("menu"); }
         return;
       }
@@ -536,6 +715,7 @@
   }
   var touch = null, swallow = false, SWIPE = 12;   /* CSS px: less than this is a tap */
   cv.addEventListener("pointerdown", function (e) {
+    if (S.demo) { stopDemo(); return; }
     if (S.screen !== "play") return;
     touch = { id: e.pointerId, x: e.clientX, y: e.clientY, cell: cellAt(e) };
     try { cv.setPointerCapture(e.pointerId); } catch (err) {}
@@ -560,7 +740,7 @@
   });
 
   /* for tests/e2e.test.mjs: where the pieces are, so a test can solve the puzzle with real key presses */
-  window.PUZZLE = { state: function () { return { screen: S.screen, n: S.n, tiles: S.tiles.slice(), gap: S.gap, moves: S.moves, fromCamera: S.pic !== BUILTIN, src: S.src, helped: S.helped, saved: !!S.saved, animDone: !!(S.anim && S.anim.done) }; } };
+  window.PUZZLE = { state: function () { return { screen: S.screen, n: S.n, tiles: S.tiles.slice(), gap: S.gap, moves: S.moves, fromCamera: S.pic !== BUILTIN, src: S.src, helped: S.helped, saved: !!S.saved, demo: !!S.demo, hint: !!S.hint, animDone: !!(S.anim && S.anim.done) }; } };
 
   draw();
 })();

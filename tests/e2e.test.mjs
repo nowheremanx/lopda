@@ -4764,7 +4764,9 @@ test("photo puzzle: a photo from the fake camera, shown first, then a 3x3 solved
   await until(p, async () => (await ppState(f)).screen === "won", "the result");
   assert.equal(await shot(), whole, "the animation ends on exactly the whole photo");
   assert.match(await f.textContent("#msg"), new RegExp(`^拼好了！${keys.length + 4} 步。 新纪录！ 下一局是 4×4。$`));
-  assert.ok(await p.evaluate(() => window.LOPDA_DEBUG.sfxLog.includes("win")));
+  await p.waitForTimeout(400);
+  const sfxLog = await p.evaluate(() => window.LOPDA_DEBUG.sfxLog.slice());
+  assert.ok(sfxLog.includes("win"), JSON.stringify(sfxLog));
   /* a new start remembers the best and the 4x4 */
   await p.click("#home-key");
   f = await runPuzzle(p);
@@ -4773,7 +4775,7 @@ test("photo puzzle: a photo from the fake camera, shown first, then a 3x3 solved
   assert.match(await f.textContent("#info"), new RegExp(`最佳 ${keys.length + 4}$`));
   await press(p, "start");
   await until(p, async () => (await ppState(f)).screen === "menu", "the menu");
-  assert.deepEqual(await f.$$eval("#menu button", (bs) => bs.map((b) => b.textContent + (b.classList.contains("off") ? " off" : ""))), ["继续", "重拍", "换难度", "重来"]);
+  assert.deepEqual(await f.$$eval("#menu button", (bs) => bs.map((b) => b.textContent + (b.classList.contains("off") ? " off" : ""))), ["继续", "重拍", "换难度", "重来", "看它解"]);
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
@@ -4902,6 +4904,66 @@ test("photo puzzle: an unfinished game waits on the title after a restart; 继�
   await press(p, "down"); await press(p, "a");   /* 用内置图片 */
   await until(p, async () => (await ppState(f)).screen === "play", "a new game");
   assert.equal((await ppState(f)).moves, 0);
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("photo puzzle: 看它解 plays by itself and any key stops it; SELECT flashes one piece; help keeps no best", { skip, timeout: 120000 }, async (t) => {
+  const { p, errors } = await snapPage(t);
+  let f = await runPuzzle(p); await ppNewTitle(p, f);
+  await press(p, "down"); await press(p, "a");   /* 用内置图片 */
+  await until(p, async () => (await ppState(f)).screen === "play", "a game");
+  /* 看它解, from the board as it is, three moves a second */
+  await press(p, "start");
+  await until(p, async () => (await ppState(f)).screen === "menu", "the menu");
+  for (let i = 0; i < 4; i++) await press(p, "down");
+  await press(p, "a");
+  let s = await ppState(f);
+  assert.deepEqual([s.screen, s.demo, s.helped], ["play", true, true]);
+  await until(p, async () => (await ppState(f)).moves >= 3, "the demo's moves");
+  assert.match(await f.textContent("#msg"), /^第 1 行/);
+  /* any key stops it, and that key does not also push a piece */
+  await press(p, "up");
+  const stopped = (await ppState(f)).moves;
+  assert.equal((await ppState(f)).demo, false);
+  assert.equal(await f.textContent("#msg"), "", "the caption is gone");
+  await p.waitForTimeout(700);
+  assert.equal((await ppState(f)).moves, stopped, "no more moves after the stop");
+  const dir = (st) => { const n = st.n, r = Math.floor(st.gap / n), c = st.gap % n;
+    return r < n - 1 ? "up" : c < n - 1 ? "left" : "right"; };
+  await ppPress(p, f, dir(await ppState(f)));
+  assert.equal((await ppState(f)).moves, stopped + 1, "the player carries on");
+  assert.match(await f.textContent("#info"), /助$/);
+  /* a helped game is still solved with animation, music and the unlock, but records no best */
+  const keys = solve3((await ppState(f)).tiles);
+  for (const k of keys.slice(0, -1)) await ppPress(p, f, k);
+  await p.waitForTimeout(1100);   /* the runtime drops app sounds over 20 a second: let the window clear */
+  await ppPress(p, f, keys[keys.length - 1]);
+  await until(p, async () => (await ppState(f)).screen === "solved", "solved");
+  await press(p, "a"); await until(p, async () => (await ppState(f)).animDone, "the animation");
+  await press(p, "a");
+  await until(p, async () => (await ppState(f)).screen === "won", "the result");
+  assert.doesNotMatch(await f.textContent("#msg"), /新纪录/);
+  await p.waitForTimeout(400);
+  const sfxLog = await p.evaluate(() => window.LOPDA_DEBUG.sfxLog.slice());
+  assert.ok(sfxLog.includes("win"), JSON.stringify(sfxLog));
+  await p.waitForTimeout(700);
+  const saved = await f.evaluate(() => new Promise((r) => PAD.load("puzzle").then(r)));
+  assert.equal(saved && saved.best && saved.best["3"], undefined, "no best for a helped game");
+  /* SELECT: the next piece's frame flashes twice and goes away; the piece itself does not move */
+  await p.click("#home-key");
+  f = await runPuzzle(p); await ppNewTitle(p, f);
+  await press(p, "down"); await press(p, "a");
+  await until(p, async () => (await ppState(f)).screen === "play", "a second game");
+  const shot = () => f.evaluate(() => document.getElementById("cv").toDataURL());
+  const plain = await shot(), gap0 = (await ppState(f)).gap, moves0 = (await ppState(f)).moves;
+  await press(p, "select");
+  await until(p, async () => (await shot()) !== plain, "the flashing frame");
+  assert.equal((await ppState(f)).hint, true);
+  await p.waitForTimeout(900);
+  assert.equal(await shot(), plain, "the frame is gone again");
+  const after = await ppState(f);
+  assert.deepEqual([after.gap, after.moves, after.hint, after.helped], [gap0, moves0, false, true]);
+  assert.match(await f.textContent("#info"), /助$/);
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
