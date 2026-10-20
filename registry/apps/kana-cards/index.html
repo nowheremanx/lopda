@@ -90,10 +90,10 @@
   var KATA = ["ア","イ","ウ","エ","オ","カ","キ","ク","ケ","コ","サ","シ","ス","セ","ソ","タ","チ","ツ","テ","ト","ナ","ニ","ヌ","ネ","ノ","ハ","ヒ","フ","ヘ","ホ","マ","ミ","ム","メ","モ","ヤ","ユ","ヨ","ラ","リ","ル","レ","ロ","ワ","ヲ","ン","ガ","ギ","グ","ゲ","ゴ","ザ","ジ","ズ","ゼ","ゾ","ダ","ヂ","ヅ","デ","ド","バ","ビ","ブ","ベ","ボ","パ","ピ","プ","ペ","ポ"];
   var ROMA = ["a","i","u","e","o","ka","ki","ku","ke","ko","sa","shi","su","se","so","ta","chi","tsu","te","to","na","ni","nu","ne","no","ha","hi","fu","he","ho","ma","mi","mu","me","mo","ya","yu","yo","ra","ri","ru","re","ro","wa","wo","n","ga","gi","gu","ge","go","za","ji","zu","ze","zo","da","ji","zu","de","do","ba","bi","bu","be","bo","pa","pi","pu","pe","po"];
   var TXT = {
-    zh: { title: "五十音图", hira: "平假名", kata: "片假名", list: "字表", card: "卡片", quiz: "小测", startQuiz: "START 小测", backList: "B 字表", quizGuide: "↑↓←→ 选项 · A 确认 · B 字表", cardGuide: "← → 翻页 · A 朗读 · B 字表", listGuide: "↑↓←→ 选择 · A 卡片 · START 小测", question: "选出这个假名的罗马字", hear: "A 听", confirm: "A 确认", mastered: "正确", missed: "再看看：", cont: "（A 继续）", rate: "正确率 {pct}%（{hits}/{tries}）", noStats: "正确率 —", noVoice: "日语朗读暂不可用；仍可继续学习。", legacy: "此版本不支持日语朗读；仍可继续学习。", prev: "前", next: "后" },
-    en: { title: "Kana", hira: "Hiragana", kata: "Katakana", list: "List", card: "Card", quiz: "Quiz", startQuiz: "START Quiz", backList: "B List", quizGuide: "Arrows choose · A answer · B list", cardGuide: "← → browse · A hear · B list", listGuide: "Arrows move · A card · START quiz", question: "Choose this kana's romaji", hear: "A Hear", confirm: "A OK", mastered: "Correct", missed: "Review: ", cont: " (A next)", rate: "Accuracy {pct}% ({hits}/{tries})", noStats: "Accuracy —", noVoice: "Japanese speech is unavailable; you can keep studying.", legacy: "Japanese speech needs a newer handheld; keep studying.", prev: "Prev", next: "Next" }
+    zh: { title: "五十音图", hira: "平假名", kata: "片假名", list: "字表", card: "卡片", quiz: "小测", startQuiz: "START 小测", backList: "B 字表", quizGuide: "↑↓←→ 选项 · A 确认 · B 字表", cardGuide: "← → 翻页 · A 朗读 · B 字表", listGuide: "↑↓←→ 选择 · A 卡片 · START 小测", question: "选出这个假名的罗马字", hear: "A 听", confirm: "A 确认", mastered: "正确", missed: "再看看：", cont: "（A 继续）", done: "本轮每个假名都练过两次了（B 回字表）", rate: "正确率 {pct}%（{hits}/{tries}）", noStats: "正确率 —", noVoice: "日语朗读暂不可用；仍可继续学习。", legacy: "此版本不支持日语朗读；仍可继续学习。", prev: "前", next: "后" },
+    en: { title: "Kana", hira: "Hiragana", kata: "Katakana", list: "List", card: "Card", quiz: "Quiz", startQuiz: "START Quiz", backList: "B List", quizGuide: "Arrows choose · A answer · B list", cardGuide: "← → browse · A hear · B list", listGuide: "Arrows move · A card · START quiz", question: "Choose this kana's romaji", hear: "A Hear", confirm: "A OK", mastered: "Correct", missed: "Review: ", cont: " (A next)", done: "Every kana has been asked twice this round (B list)", rate: "Accuracy {pct}% ({hits}/{tries})", noStats: "Accuracy —", noVoice: "Japanese speech is unavailable; you can keep studying.", legacy: "Japanese speech needs a newer handheld; keep studying.", prev: "Prev", next: "Next" }
   }[LANG];
-  var data = { script: "hira", index: 0, screen: "list", target: 0, choices: [], choice: 0, locked: false, awaitConfirm: false, reveal: -1, stats: {}, recent: [] };
+  var data = { script: "hira", index: 0, screen: "list", target: 0, choices: [], choice: 0, locked: false, awaitConfirm: false, reveal: -1, stats: {}, recent: [], seen: {} };
   var kanaEl = document.getElementById("kana"), romaEl = document.getElementById("romaji");
   var rateEl = document.getElementById("rate");
   var scriptBtn = document.getElementById("script"), statusEl = document.getElementById("status");
@@ -107,16 +107,11 @@
   function save() {
     if (typeof PAD !== "undefined" && PAD.save) PAD.save(KEY, { script: data.script, index: data.index, stats: data.stats });
   }
-  /* how many quiz answers were given in total, and how many were right */
-  function totals() {
-    var tries = 0, hits = 0, k, s;
-    for (k in data.stats) { s = data.stats[k]; tries += s[0]; hits += s[1]; }
-    return { tries: tries, hits: hits };
-  }
-  function rateText() {
-    var t = totals();
-    if (!t.tries) return TXT.noStats;
-    return TXT.rate.replace("{pct}", String(Math.round(t.hits * 100 / t.tries))).replace("{hits}", String(t.hits)).replace("{tries}", String(t.tries));
+  /* each kana has its own score; a card never shows another kana's accuracy */
+  function rateText(index) {
+    var s = data.stats[index];
+    if (!s || !s[0]) return TXT.noStats;
+    return TXT.rate.replace("{pct}", String(Math.round(s[1] * 100 / s[0]))).replace("{hits}", String(s[1])).replace("{tries}", String(s[0]));
   }
   function current() { return table()[data.index]; }
   function render() {
@@ -131,7 +126,7 @@
     document.getElementById("guide").textContent = data.screen === "list" ? TXT.listGuide : data.screen === "card" ? TXT.cardGuide : TXT.quizGuide;
     kanaEl.textContent = list[currentIndex];
     romaEl.textContent = ROMA[currentIndex];
-    rateEl.textContent = rateText();
+    rateEl.textContent = rateText(currentIndex);
     viewBtn.textContent = data.screen === "list" ? TXT.startQuiz : TXT.backList;
     viewBtn.style.display = "inline-block";
     document.getElementById("prev").textContent = TXT.prev;
@@ -247,31 +242,37 @@
   function rememberTarget(index) {
     data.recent.push(index);
     while (data.recent.length > 3) data.recent.shift();
+    data.seen[index] = (data.seen[index] || 0) + 1;
   }
   /* pick the next kana: never-seen and low-accuracy kana weigh more, and the last few tested are
-     skipped so the same kana is not asked over and over */
+     skipped so the same kana is not asked over and over. A kana appears at most twice per quiz
+     round, so a weak kana is repeated but never becomes tiresome. */
   function pickTarget() {
     var count = table().length, pool = [], total = 0, i, s, w, r;
-    for (i = 0; i < count; i++) {
-      if (data.recent.indexOf(i) >= 0) continue;
-      s = data.stats[i];
+    for (i = 0; i < count; i++) if ((data.seen[i] || 0) < 2 && data.recent.indexOf(i) < 0) pool.push(i);
+    /* if only the last few kana are left, ask one of them rather than ending the round early */
+    if (!pool.length) for (i = 0; i < count; i++) if ((data.seen[i] || 0) < 2) pool.push(i);
+    if (!pool.length) return -1;
+    for (i = 0; i < pool.length; i++) {
+      s = data.stats[pool[i]];
       w = (!s || !s[0]) ? 1 : Math.max(0.15, 1 - s[1] / s[0]);
-      pool.push([i, w]); total += w;
+      pool[i] = [pool[i], w]; total += w;
     }
-    if (!pool.length) { for (i = 0; i < count; i++) { pool.push([i, 1]); total += 1; } }
     r = Math.random() * total;
     for (i = 0; i < pool.length; i++) { r -= pool[i][1]; if (r < 0) return pool[i][0]; }
     return pool[pool.length - 1][0];
   }
   function advance() {
-    data.target = pickTarget();
+    var next = pickTarget();
+    if (next < 0) { data.locked = true; data.awaitConfirm = false; statusEl.textContent = TXT.done; return; }
+    data.target = next;
     rememberTarget(data.target);
     newQuestion(); statusEl.textContent = ""; render();
   }
   function startQuiz() {
     if (data.screen !== "list") return;
     data.screen = "quiz"; data.target = data.index;
-    data.recent = []; rememberTarget(data.target);
+    data.recent = []; data.seen = {}; rememberTarget(data.target);
     newQuestion(); statusEl.textContent = ""; render();
   }
   function answer() {

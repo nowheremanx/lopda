@@ -5738,9 +5738,49 @@ test("kana-cards: a miss waits for confirmation, and the score shows on the card
 
   await p.locator('#pad [data-b="b"]').click();
   await f.waitForFunction(() => document.body.classList.contains("list"));
-  await p.locator('#pad [data-b="a"]').click();
+  await f.locator("#reference button[aria-label='あ a']").click();
   await f.waitForFunction(() => document.body.classList.contains("card"));
-  assert.equal(await f.textContent("#rate"), "Accuracy 0% (0/1)", "the single miss is recorded");
+  assert.equal(await f.textContent("#rate"), "Accuracy 0% (0/1)", "the single miss is recorded on that kana's card");
+  await p.locator('#pad [data-b="b"]').click();
+  await f.waitForFunction(() => document.body.classList.contains("list"));
+  await f.locator("#reference button[aria-label='い i']").click();
+  await f.waitForFunction(() => document.body.classList.contains("card"));
+  assert.equal(await f.textContent("#rate"), "Accuracy —", "another kana does not inherit the first kana's score");
+  assert.deepEqual(errors, []);
+});
+
+test("kana-cards: a quiz round asks each kana at most twice", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t);
+  await p.goto(`${base}/sdk/dev.html?app=registry/apps/kana-cards`, { waitUntil: "load" });
+  await p.waitForFunction(() => /loaded |load failed/.test(document.getElementById("log").textContent), null, { timeout: 5000 });
+  let f;
+  await until(p, async () => { f = p.frames().find((x) => x !== p.mainFrame()); return f && await f.evaluate(() => !!window.PAD).catch(() => false); }, "kana app");
+  await f.waitForFunction(() => document.documentElement.lang === "en", null, { timeout: 5000 });
+  await f.waitForFunction(() => document.body.classList.contains("list"));
+  /* make the round deterministic (the lowest eligible kana each time) and skip the answer pause */
+  await f.evaluate(() => {
+    Math.random = function () { return 0; };
+    var later = window.setTimeout;
+    window.setTimeout = function (fn, ms) { return later(fn, Math.min(ms, 5)); };
+  });
+  await p.locator('#pad [data-b="start"]').click();
+  await f.waitForFunction(() => document.body.classList.contains("quiz"));
+  const seen = {};
+  for (let q = 0; q < 150; q++) {
+    const status = await f.textContent("#status");
+    if (/twice/.test(status)) break;
+    const target = Number((await f.textContent("#count")).split("/")[0]) - 1;
+    seen[target] = (seen[target] || 0) + 1;
+    assert.ok(seen[target] <= 2, `kana ${target} is asked at most twice in a round`);
+    const before = await f.textContent("#count");
+    await f.evaluate((wanted) => {
+      [...document.querySelectorAll("#options button")].find((b) => Number(b.getAttribute("data-index")) === wanted).click();
+    }, target);
+    await f.waitForFunction((prev) => document.querySelector("#count").textContent !== prev ||
+      /twice/.test(document.getElementById("status").textContent), before, { timeout: 3000 });
+  }
+  assert.equal(Object.keys(seen).length, 71, "the round covers every kana");
+  assert.equal(await f.textContent("#status"), "Every kana has been asked twice this round (B list)");
   assert.deepEqual(errors, []);
 });
 
