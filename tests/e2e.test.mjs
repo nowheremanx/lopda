@@ -4699,6 +4699,16 @@ function solve3(tiles) {
   return keys;
 }
 const ppPress = async (p, f, b) => { const before = (await ppState(f)).moves; await press(p, b); await until(p, async () => (await ppState(f)).moves === before + 1, "the slide " + b); };
+/* a Solver plan lists the cells to slide; the pad takes directions. Walk the board to translate. */
+function ppDirs(tiles, plan, n = 3) {
+  const t = tiles.slice(), gapPiece = n * n - 1, out = [];
+  for (const st of plan) {
+    const g = t.indexOf(gapPiece), p = st.p;
+    out.push(p === g + n ? "up" : p === g - n ? "down" : p === g + 1 ? "left" : "right");
+    t[g] = t[p]; t[p] = gapPiece;
+  }
+  return out;
+}
 
 test("photo puzzle: a photo from the fake camera, shown first, then a 3x3 solved by keys; the best is kept and 4x4 opens", { skip, timeout: 90000 }, async (t) => {
   const { p, errors } = await snapPage(t);
@@ -4775,7 +4785,7 @@ test("photo puzzle: a photo from the fake camera, shown first, then a 3x3 solved
   assert.match(await f.textContent("#info"), new RegExp(`最佳 ${keys.length + 4}$`));
   await press(p, "start");
   await until(p, async () => (await ppState(f)).screen === "menu", "the menu");
-  assert.deepEqual(await f.$$eval("#menu button", (bs) => bs.map((b) => b.textContent + (b.classList.contains("off") ? " off" : ""))), ["继续", "重拍", "换难度", "重来", "看它解"]);
+  assert.deepEqual(await f.$$eval("#menu button", (bs) => bs.map((b) => b.textContent + (b.classList.contains("off") ? " off" : ""))), ["继续", "重拍", "换难度", "重来", "看它解", "怎么玩"]);
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
@@ -4820,7 +4830,7 @@ test("photo puzzle: without a photo it plays the built-in picture and says why (
   const old = PP.html.replace("<script>", "<script>window.PAD = Object.assign({}, PAD, { camera: undefined });</script>\n<script>");
   f = await runPuzzle(p, old); await ppNewTitle(p, f);
   assert.equal(await f.textContent("#msg"), "这台掌机不能拍照，用内置图片玩。");
-  assert.deepEqual(await f.$$eval("#menu button", (bs) => bs.map((b) => b.textContent)), ["用内置图片", "导入图片"]);
+  assert.deepEqual(await f.$$eval("#menu button", (bs) => bs.map((b) => b.textContent)), ["用内置图片", "导入图片", "怎么玩"]);
   await press(p, "a");
   await playable(f, "这台掌机不能拍照，用内置图片玩。");
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
@@ -4831,7 +4841,7 @@ test("photo puzzle: import a picture, see it first, then play it; the four-tone 
   const { makePng } = await import("./book-fixtures.mjs");
   let f = await runPuzzle(p); await ppNewTitle(p, f);
   const titles = () => f.$$eval("#menu button", (bs) => bs.map((b) => b.textContent));
-  assert.deepEqual(await titles(), ["拍一张", "用内置图片", "导入图片"]);
+  assert.deepEqual(await titles(), ["拍一张", "用内置图片", "导入图片", "怎么玩"]);
   /* 导入图片: the runtime's own dialog first, then the system picker */
   const png = makePng(320, 280, (x, y) => [x % 256, (x + y) % 256, y % 256, 255]);
   await press(p, "down"); await press(p, "down"); await press(p, "a");
@@ -4900,7 +4910,7 @@ test("photo puzzle: an unfinished game waits on the title after a restart; 继�
   await press(p, "down"); await press(p, "a");
   s = await ppState(f);
   assert.deepEqual([s.screen, s.saved, s.moves], ["title", false, 0]);
-  assert.deepEqual(await f.$$eval("#menu button", (bs) => bs.map((b) => b.textContent)), ["拍一张", "用内置图片", "导入图片"]);
+  assert.deepEqual(await f.$$eval("#menu button", (bs) => bs.map((b) => b.textContent)), ["拍一张", "用内置图片", "导入图片", "怎么玩"]);
   await press(p, "down"); await press(p, "a");   /* 用内置图片 */
   await until(p, async () => (await ppState(f)).screen === "play", "a new game");
   assert.equal((await ppState(f)).moves, 0);
@@ -4964,6 +4974,81 @@ test("photo puzzle: 看它解 plays by itself and any key stops it; SELECT flash
   const after = await ppState(f);
   assert.deepEqual([after.gap, after.moves, after.hint, after.helped], [gap0, moves0, false, true]);
   assert.match(await f.textContent("#info"), /助$/);
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("photo puzzle: 怎么玩 teaches four lessons; a lesson never wins or saves, and lesson 4 is a demo", { skip, timeout: 120000 }, async (t) => {
+  const { p, errors } = await snapPage(t);
+  let f = await runPuzzle(p); await ppNewTitle(p, f);
+  const titles = () => f.$$eval("#menu button", (bs) => bs.map((b) => b.textContent));
+  assert.deepEqual(await titles(), ["拍一张", "用内置图片", "导入图片", "怎么玩"]);
+  for (let i = 0; i < 3; i++) await press(p, "down");
+  await press(p, "a");
+  await until(p, async () => (await ppState(f)).screen === "lesson", "lesson 1");
+  let s = await ppState(f);
+  assert.deepEqual([s.mode, s.lesson, s.n, s.moves], ["tutorial", 0, 3, 0]);
+  assert.equal(await f.textContent("#info"), "第 1 课  0 步");
+  assert.match(await f.textContent("#msg"), /方向键/);
+  /* lesson 1 is the two moves from solved: finishing it is not a win, a save, a best or an unlock */
+  for (const k of solve3(s.tiles)) await ppPress(p, f, k);
+  s = await ppState(f);
+  assert.deepEqual([s.screen, s.lessonDone, s.moves], ["lesson", true, 2]);
+  assert.equal(await f.textContent("#msg"), "做到了！");
+  const log = await p.evaluate(() => window.LOPDA_DEBUG.sfxLog.slice());
+  assert.ok(!log.includes("win"), "no win sound in a lesson: " + JSON.stringify(log));
+  assert.equal(await f.evaluate(() => PAD.load("game")), null, "a lesson never writes the saved game");
+  assert.equal((await f.evaluate(() => PAD.load("puzzle")))?.best?.["3"], undefined, "and never a best");
+  /* 下一课: lesson 2, one piece to the corner */
+  assert.deepEqual(await titles(), ["下一课"]);
+  await press(p, "a");
+  await until(p, async () => (await ppState(f)).lesson === 1, "lesson 2");
+  s = await ppState(f);
+  assert.deepEqual([s.n, s.tiles], [3, [2, 1, 4, 3, 8, 0, 7, 5, 6]]);
+  let plan = await f.evaluate(() => Solver.goalPlan(3, window.PUZZLE.state().tiles, [{ p: 0, at: 0 }], []));
+  for (const d of ppDirs(s.tiles, plan)) await ppPress(p, f, d);
+  s = await ppState(f);
+  assert.deepEqual([s.tiles[0], s.lessonDone], [0, true]);
+  /* lesson 3: the last two of a row, and piece 0 must stay put */
+  await press(p, "a");
+  await until(p, async () => (await ppState(f)).lesson === 2, "lesson 3");
+  s = await ppState(f);
+  assert.deepEqual([s.n, s.tiles], [3, [0, 4, 7, 1, 8, 6, 3, 2, 5]]);
+  plan = await f.evaluate(() => Solver.goalPlan(3, window.PUZZLE.state().tiles, [{ p: 1, at: 1 }, { p: 2, at: 2 }], [0]));
+  for (const d of ppDirs(s.tiles, plan)) await ppPress(p, f, d);
+  s = await ppState(f);
+  assert.deepEqual([s.tiles[0], s.tiles[1], s.tiles[2], s.lessonDone], [0, 1, 2, true]);
+  /* lesson 4: a 4×4 demo; any key stops it and the lesson is over */
+  await press(p, "a");
+  await until(p, async () => (await ppState(f)).lesson === 3, "lesson 4");
+  assert.equal((await ppState(f)).n, 4);
+  await until(p, async () => (await ppState(f)).demo, "the 4×4 demo");
+  await press(p, "up");
+  await until(p, async () => (await ppState(f)).lessonDone, "the demo lesson done");
+  assert.equal(await f.textContent("#msg"), "看完了：拼好一行，再拼下一行。");
+  assert.deepEqual(await titles(), ["回到标题"]);
+  await press(p, "a");
+  await until(p, async () => (await ppState(f)).screen === "title", "back on the title");
+  assert.equal((await ppState(f)).mode, "normal");
+  assert.deepEqual(await titles(), ["拍一张", "用内置图片", "导入图片", "怎么玩"]);
+  /* entered from a game, leaving the lessons returns to that game, not to the title */
+  await press(p, "down"); await press(p, "a");   /* 用内置图片 */
+  await until(p, async () => (await ppState(f)).screen === "play", "a game");
+  const dir = (st) => { const n = st.n, r = Math.floor(st.gap / n), c = st.gap % n;
+    return r < n - 1 ? "up" : c < n - 1 ? "left" : "right"; };
+  await ppPress(p, f, dir(await ppState(f)));
+  const before = await ppState(f);
+  await press(p, "start");
+  await until(p, async () => (await ppState(f)).screen === "menu", "the menu");
+  for (let i = 0; i < 5; i++) await press(p, "down");   /* 怎么玩 is last */
+  await press(p, "a");
+  await until(p, async () => (await ppState(f)).screen === "lesson", "a lesson from the game");
+  await press(p, "start");
+  await until(p, async () => (await ppState(f)).screen === "menu", "the lesson's menu");
+  assert.deepEqual(await titles(), ["继续", "退出教程"]);
+  await press(p, "down"); await press(p, "a");
+  await until(p, async () => (await ppState(f)).screen === "play", "back to the game");
+  s = await ppState(f);
+  assert.deepEqual([s.mode, s.n, s.tiles, s.moves], ["normal", before.n, before.tiles, before.moves]);
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
