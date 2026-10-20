@@ -26,15 +26,17 @@
   .cup-rim { position: absolute; left: 28px; bottom: 94px; width: 124px; height: 17px; box-sizing: border-box; border: 3px solid #1f2a14; border-radius: 9px; background: #a3ad7e; }
   .cup-rim::after { content: ""; position: absolute; left: 5px; right: 5px; top: 4px; height: 2px; background: #4a5a32; }
   .sticks { position: absolute; left: 50%; bottom: 24px; width: 100px; height: 112px; margin-left: -50px; }
-  .stick { position: absolute; bottom: 0; width: 9px; box-sizing: border-box; border: 2px solid #1f2a14; border-radius: 3px 3px 2px 2px; background: #a3ad7e; transform-origin: 50% 100%; transform: rotate(var(--r)); animation: sway 5s ease-in-out var(--d) infinite; }
+  .stick { --swing: 3.5deg; --sway: 1.6deg; position: absolute; bottom: 0; width: 9px; box-sizing: border-box; border: 2px solid #1f2a14; border-radius: 3px 3px 2px 2px; background: #a3ad7e; transform-origin: 50% 100%; transform: rotate(var(--r)); animation: sway 5s ease-in-out var(--d) infinite; }
   .stick::after { content: ""; position: absolute; left: 0; right: 0; top: 10px; height: 2px; background: #4a5a32; }
-  .s1 { left: 8px; height: 116px; --r: -8deg; --d: -0.4s; }
-  .s2 { left: 22px; height: 98px; --r: 5deg; --d: -1.9s; }
-  .s3 { left: 36px; height: 128px; --r: -3deg; --d: -3.1s; }
-  .s4 { left: 47px; height: 108px; --r: 1deg; --d: -0.9s; }
-  .s5 { left: 59px; height: 122px; --r: 6deg; --d: -2.5s; }
-  .s6 { left: 73px; height: 104px; --r: -5deg; --d: -4.2s; }
-  .s7 { left: 86px; height: 112px; --r: 9deg; --d: -1.2s; }
+  /* The outer sticks lean against the rim, so they sway and rattle less; even at their
+     widest they stay inside the rim's inner edge (31-149 from the cup's left edge). */
+  .s1 { left: 10px; height: 110px; --r: -6deg; --d: -0.4s; --swing: 1.4deg; --sway: 0.8deg; }
+  .s2 { left: 24px; height: 96px; --r: 4deg; --d: -1.9s; --swing: 2.6deg; --sway: 1.2deg; }
+  .s3 { left: 38px; height: 124px; --r: -2deg; --d: -3.1s; }
+  .s4 { left: 49px; height: 106px; --r: 1deg; --d: -0.9s; }
+  .s5 { left: 61px; height: 118px; --r: 5deg; --d: -2.5s; }
+  .s6 { left: 75px; height: 102px; --r: -4deg; --d: -4.2s; --swing: 2.6deg; --sway: 1.2deg; }
+  .s7 { left: 87px; height: 108px; --r: 3.5deg; --d: -1.2s; --swing: 1.4deg; --sway: 0.8deg; }
   #hero { position: absolute; left: 50%; bottom: 24px; width: 10px; height: 128px; margin-left: -5px; box-sizing: border-box; border: 2px solid #1f2a14; border-radius: 3px 3px 2px 2px; background: #a3ad7e; transform-origin: 50% 100%; opacity: 0; }
   #hero::after { content: ""; position: absolute; left: 0; right: 0; top: 11px; height: 2px; background: #4a5a32; }
   .cup-hint { position: absolute; left: 0; right: 0; bottom: 0; text-align: center; font-size: 13px; color: #4a5a32; letter-spacing: 1px; }
@@ -48,7 +50,7 @@
   #cup.lift #hero { opacity: 1; animation: heroLift 0.62s cubic-bezier(0.16, 0.7, 0.25, 1) forwards; }
 
   @keyframes idle { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
-  @keyframes sway { 0%, 100% { transform: rotate(var(--r)); } 50% { transform: rotate(calc(var(--r) + 1.6deg)); } }
+  @keyframes sway { 0%, 100% { transform: rotate(var(--r)); } 50% { transform: rotate(calc(var(--r) + var(--sway))); } }
   @keyframes cupShake {
     0%, 100% { transform: translateX(0) rotate(0); }
     8% { transform: translateX(-5px) rotate(-1.3deg); }
@@ -64,8 +66,8 @@
   }
   @keyframes rattle {
     0%, 100% { transform: rotate(var(--r)); }
-    30% { transform: rotate(calc(var(--r) - 3.5deg)); }
-    65% { transform: rotate(calc(var(--r) + 3.5deg)); }
+    30% { transform: rotate(calc(var(--r) - var(--swing))); }
+    65% { transform: rotate(calc(var(--r) + var(--swing))); }
   }
   @keyframes cupSink { to { transform: translateY(9px) scale(0.94); opacity: 0; } }
   @keyframes heroLift {
