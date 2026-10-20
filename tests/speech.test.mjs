@@ -1,4 +1,4 @@
-// runtime/speech.js: the voice for zh and en, the volume, PAD.say's limits (200 characters, once a second), a new call
+// runtime/speech.js: voices for zh, en and ja, the volume, PAD.say's limits (200 characters, once a second), a new call
 // stopping the old one, and stop() for HOME and a hidden page. A fake speechSynthesis stands in for the phone's.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -8,7 +8,8 @@ const SP = runScript("runtime/speech.js", {}).LopdaSpeech;
 
 const VOICES = [
   { name: "Mei-Jia", lang: "zh-TW" }, { name: "Sin-ji", lang: "zh-HK" }, { name: "Tingting", lang: "zh-CN" },
-  { name: "Daniel", lang: "en-GB" }, { name: "Karen", lang: "en_AU" }, { name: "Thomas", lang: "fr-FR" },
+  { name: "Daniel", lang: "en-GB" }, { name: "Karen", lang: "en_AU" }, { name: "Kyoko", lang: "ja-JP" },
+  { name: "Otoya", lang: "ja-JP" }, { name: "Thomas", lang: "fr-FR" },
 ];
 /* a phone: speak() starts at once and ends when the test says; cancel() interrupts what is speaking */
 function phone({ voices = VOICES, volume = 0.42, starts = true } = {}) {
@@ -51,8 +52,10 @@ function phone({ voices = VOICES, volume = 0.42, starts = true } = {}) {
 test("speech: the voice for zh is zh-CN before zh-TW and zh-HK; for en en-US or en-GB first; none for other languages", () => {
   assert.equal(SP.pick(VOICES, "zh").name, "Tingting");
   assert.equal(SP.pick(VOICES, "en").name, "Daniel");
+  assert.equal(SP.pick(VOICES, "ja").name, "Kyoko");
   assert.equal(SP.pick([{ lang: "en_AU" }, { lang: "zh-TW" }], "en").lang, "en_AU", "any en voice when there is no US or GB one");
   assert.equal(SP.pick([{ lang: "zh-HK" }], "zh").lang, "zh-HK");
+  assert.equal(SP.pick([{ lang: "ja" }], "ja").lang, "ja");
   assert.equal(SP.pick(VOICES.filter((v) => !/^zh/.test(v.lang)), "zh"), null);
   assert.equal(SP.pick([], "en"), null);
   assert.equal(SP.cut("x".repeat(300)).length, 200);
@@ -71,10 +74,16 @@ test("speech: say speaks with the voice, the language and the volume, and resolv
   assert.equal(await r, "done");
   assert.equal(p.host.speaking(), false);
   p.advance(1000);
-  const r2 = p.host.say("maze", "hello", "en");
-  assert.equal(p.spoken[1].voice.name, "Daniel");
+  const r2 = p.host.say("kana", "あ", "ja");
+  assert.equal(p.spoken[1].voice.name, "Kyoko");
+  assert.equal(p.spoken[1].lang, "ja-JP");
   p.end();
   assert.equal(await r2, "done");
+  p.advance(1000);
+  const r3 = p.host.say("maze", "hello", "en");
+  assert.equal(p.spoken[2].voice.name, "Daniel");
+  p.end();
+  assert.equal(await r3, "done");
 });
 
 test("speech: volume 0, no voice for the language, or no speechSynthesis is unavailable, silently", async () => {
@@ -84,6 +93,9 @@ test("speech: volume 0, no voice for the language, or no speechSynthesis is unav
   const q = phone({ voices: [{ lang: "en-US" }] });
   assert.equal(await q.host.say("a", "你好", "zh"), "unavailable");
   assert.equal(q.spoken.length, 0);
+  const noJapanese = phone({ voices: [{ lang: "en-US" }] });
+  assert.equal(await noJapanese.host.say("a", "あ", "ja"), "unavailable");
+  assert.equal(noJapanese.spoken.length, 0);
   const none = SP.host({ window: {}, volume: () => 1 });
   assert.equal(await none.say("a", "hi", "en"), "unavailable");
   assert.equal(none.voice("en"), null);

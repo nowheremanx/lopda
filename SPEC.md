@@ -424,8 +424,10 @@ choice, never in a loop.
 **`PAD.say(text, {lang})`** reads a short text aloud with the phone's own voice (the one the dictionary uses), offline.
 No permission. Use it for a word or a line the player wants to hear, and always show the text too.
 
-- `lang` is `"zh"` or `"en"`, `PAD.lang` by default. The runtime picks the phone's first voice for that language
-  (Mandarin `zh-CN`, `en-US` or `en-GB` first).
+- `lang` is `"zh"`, `"en"` or `"ja"`, `PAD.lang` by default. The runtime picks the phone's first voice for that language
+  (Mandarin `zh-CN`, `en-US` or `en-GB` first, and `ja-JP` first for Japanese). If the phone has no voice for that
+  language, the call is unavailable; the app should remain usable without speech. `PAD.say.languages` lists the
+  languages supported by this runtime; Japanese support starts in runtime 0.29.0.
 - It follows the handheld's volume; at volume 0 it says nothing and resolves `"unavailable"`.
 - At most 200 characters (the rest is cut) and one call a second per app: a call within a second of the last resolves
   `"unavailable"` and says nothing. A new call stops the one speaking, which resolves `"stopped"`.
