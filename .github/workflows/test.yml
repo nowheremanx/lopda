@@ -18,7 +18,7 @@ jobs:
         with:
           node-version: 22
       - run: npm i --no-save playwright && npx playwright install --with-deps chromium
-      - run: node --test tests/e2e.test.mjs
+      - run: node --test tests/e2e.test.mjs tests/fourm.test.mjs
   registry:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
