@@ -1191,3 +1191,26 @@ CPU 降速 4 倍（DevTools 的 CPU throttling，粗略代表旧手机）时，�
   只用合法的步打乱，所以一定拼得回去。没拿到照片（取消、拒绝、没有相机、0.28.0 以前的主程序）就用自带的一张原创四色图，屏幕上说一行为什么。
   用到 `PAD.camera` 的地方写了注释，给别的 app 作者参考。e2e 用假摄像头拍照、按键解一盘 3×3、再走每条没照片的退路。
 - **还没做**：iPhone 上实测（确认框 → 系统框在同一下点击里、重开后的那一行、镜头切换、前置镜像），用拍照拼图测。
+
+## 30. PoC：4d4y 论坛阅读器（0.30.0，分支 poc/hipda-client）
+
+2026-10-19，技术探针，不是正式客户端。要回答的问题只有一个：builtin app 能不能在 Lo-PDA 的浏览器架构里
+直接读取 4d4y 的首页 HTML，并解析出论坛、主题和帖子。
+
+- **形态**：`runtime/apps/fourm.js`（UI）+ `runtime/fourmparse.js`（DOMParser + querySelector，纯解析）。
+  不改社区 app 的 sandbox（`connect-src 'none'` 保持），不加登录、cookie、发帖、回复、代理或 Cloudflare 绕过。
+- **第二个第三方地址**：`https://www.4d4y.com/`（以及同站链接）。只在打开这个 app 时请求；`credentials:"omit"`、
+  `referrerPolicy:"no-referrer"`；失败不静默：UI 列出 URL、浏览器错误、能读到的 HTTP 状态/响应头，并用
+  `robots.txt` 探测 DNS/TLS/CORS。`tests/repo.test.mjs` 的外部地址白名单已加上它。
+- **结论**（2026-10-19，本机 EWR 出口）：4d4y 对所有论坛 URL（首页、forumdisplay、viewthread、mobile、RSS）
+  返回 Cloudflare `403` + `cf-mitigated: challenge`；challenge 响应没有 `Access-Control-Allow-Origin`，
+  浏览器 `fetch` 只能得到 `TypeError: Failed to fetch`。`robots.txt` 是 `200` + `ACAO: *`，说明 DNS/HTTPS/CORS
+  本身正常，被拦的是论坛 HTML。**builtin 能发请求，但纯浏览器读不到响应；在当前网络下不可行。**
+  换一个 Cloudflare 放行的网络可能可行，但本机无法验证。
+- **parser**：以 HiPDA·NG 的选择器和 stock Discuz X3 为准，兼容 `td.author`/`td.nums`/`td.lastpost` 与
+  `td.by`/`td.num`；只取标题、作者、最后回复时间、回复数、帖子的作者/时间/纯文本。fixture 是合成的，
+  因为 live HTML 抓不到（见 `docs/handoff/4d4y-poc.md`）。
+- **UI**：一个 builtin，无下巴按键；首页/版块列表、主题列表、主题页（最多 8 帖）；失败页显示真实错误；
+  另有一个始终标注「不是 live 4d4y」的离线示例，只用于在没有网络时验证 parser 和界面。
+- **去留**：这是探针，不是产品。若不继续做 4d4y 客户端，合并前删除；若要保留，owner 需要明确同意第二个
+  第三方地址、接受离线示例，并决定是否探索服务端中转（报告里列为超出本 PoC 的选项）。

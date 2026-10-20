@@ -13,6 +13,8 @@ import { ROOT, tempDir, runScript } from "./helpers.mjs";
 let pw = null;
 try { pw = await import("playwright"); } catch {}
 const skip = pw ? false : "playwright is not installed";
+const FOURM_INDEX = readFileSync(join(ROOT, "tests/fixtures/fourm-index.html"), "utf8");
+const FOURM_THREAD = readFileSync(join(ROOT, "tests/fixtures/fourm-thread.html"), "utf8");
 
 const TYPES = { ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css", ".json": "application/json",
   ".png": "image/png", ".wasm": "application/wasm", ".webmanifest": "application/manifest+json" };
@@ -88,7 +90,7 @@ test("the add-to-home card is iOS Safari only, remembers dismissal, and boot ask
   }));
   assert.equal(dismissed, true);
   await p.reload({ waitUntil: "networkidle" });
-  await p.waitForFunction(() => window.LopdaPlatform && document.querySelectorAll("#home .builtin").length === 9);
+  await p.waitForFunction(() => window.LopdaPlatform && document.querySelectorAll("#home .builtin").length === 10);
   assert.equal(await p.locator("#home-add-tip").count(), 0);
   assert.deepEqual(await p.evaluate(() => window.__permissionCalls), { camera: 0, motion: 0, notification: 0 });
   await p.locator("#home .app.builtin").nth(8).click();
@@ -107,7 +109,7 @@ test("the add-to-home card is iOS Safari only, remembers dismissal, and boot ask
   }));
   await p.click("#home-key");
   await p.reload({ waitUntil: "networkidle" });
-  await p.waitForFunction(() => window.LopdaPlatform && document.querySelectorAll("#home .builtin").length === 9);
+  await p.waitForFunction(() => window.LopdaPlatform && document.querySelectorAll("#home .builtin").length === 10);
   assert.equal(await p.locator("#home-add-tip").count(), 0, "saving Settings keeps the dismissal");
   assert.deepEqual(await p.evaluate(() => window.__permissionCalls), { camera: 0, motion: 0, notification: 0 });
   assert.deepEqual(errors, []);
@@ -139,16 +141,17 @@ test("the add-to-home card stays hidden in standalone mode and on desktop", { sk
       }
     }, { standalone, displayMode });
     await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
-    await p.waitForFunction(() => window.LopdaPlatform && document.querySelectorAll("#home .builtin").length === 9);
+    await p.waitForFunction(() => window.LopdaPlatform && document.querySelectorAll("#home .builtin").length === 10);
     assert.equal(await p.locator("#home-add-tip").count(), expected ? 1 : 0, userAgent);
   }
 });
 
 test("each built-in's fresh-profile first screen has visible content", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await page(t, { locale: "en-US" });
+  await p.route("https://www.4d4y.com/**", (r) => r.fulfill({ status: 200, contentType: "text/html; charset=utf-8", headers: { "access-control-allow-origin": "*" }, body: FOURM_INDEX }));
   await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
-  await p.waitForFunction(() => document.querySelectorAll("#home .app.builtin").length === 9);
-  const ids = ["notes", "cal", "dict", "reader", "cam", "dark", "cart", "store", "settings"];
+  await p.waitForFunction(() => document.querySelectorAll("#home .app.builtin").length === 10);
+  const ids = ["notes", "cal", "dict", "reader", "cam", "dark", "cart", "store", "settings", "4d4y"];
   const firstScreens = [];
   for (let i = 0; i < ids.length; i++) {
     await p.locator("#home .app.builtin").nth(i).click();
@@ -163,7 +166,76 @@ test("each built-in's fresh-profile first screen has visible content", { skip, t
     await p.click("#home-key");
   }
   assert.deepEqual(errors, []);
-  assert.equal(firstScreens.length, 9);
+  assert.equal(firstScreens.length, 10);
+});
+
+/* ---- the 4d4y PoC: mocked pages prove the parser and UI; the live endpoint is not part of the test ---- */
+const htmlPage = (body, status = 200) => ({ status, contentType: "text/html; charset=utf-8", headers: { "access-control-allow-origin": "*" }, body });
+async function fourmPage(t, handler) {
+  const { p, errors } = await page(t, { locale: "en-US" });
+  await p.route(/^https:\/\/www\.4d4y\.com\//, handler);
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await p.waitForFunction(() => document.querySelectorAll("#home .app.builtin").length === 10);
+  await p.locator("#home .app.builtin", { hasText: "4d4y" }).click();
+  await p.waitForFunction(() => !document.getElementById("v-4d4y").hidden);
+  return { p, errors };
+}
+
+test("4d4y: a mocked forum page and thread render; back returns to the list", { skip, timeout: 30000 }, async (t) => {
+  const { p, errors } = await fourmPage(t, (r) => {
+    const u = r.request().url();
+    return r.fulfill(htmlPage(/viewthread|tid=/.test(u) ? FOURM_THREAD : FOURM_INDEX));
+  });
+  await p.waitForFunction(() => document.querySelectorAll("#fm-main .fm-row").length >= 3);
+  const list = await p.locator("#fm-main").innerText();
+  assert.match(list, /Discovery/);
+  assert.match(list, /今天收到一台老掌机/);
+  await p.locator("#fm-main .fm-row").nth(1).click();
+  await p.waitForFunction(() => document.querySelectorAll("#fm-main .fm-post").length === 2);
+  const thread = await p.locator("#fm-main").innerText();
+  assert.match(thread, /alice/);
+  assert.match(thread, /四格电/);
+  await p.click("#fm-back");
+  await p.waitForFunction(() => document.querySelectorAll("#fm-main .fm-row").length >= 3);
+  assert.deepEqual(errors, []);
+});
+
+test("4d4y: a blocked request shows the real error and leaves the runtime working", { skip, timeout: 30000 }, async (t) => {
+  const { p, errors } = await fourmPage(t, (r) => r.abort("failed"));
+  await p.waitForFunction(() => /Network Error/.test(document.getElementById("fm-main").innerText), null, { timeout: 15000 });
+  const text = await p.locator("#fm-main").innerText();
+  assert.match(text, /https:\/\/www\.4d4y\.com\//);
+  assert.match(text, /TypeError|Failed to fetch/);
+  await p.waitForFunction(() => /robots\.txt/.test(document.getElementById("fm-main").innerText), null, { timeout: 15000 });
+  assert.deepEqual(await p.locator("#fm-main .fm-actions button").allInnerTexts(), ["Retry", "Offline sample"]);
+  await p.locator("#fm-main .fm-actions button").nth(1).click();
+  await p.waitForFunction(() => document.querySelectorAll("#fm-main .fm-row").length >= 2);
+  assert.match(await p.locator("#fm-main").innerText(), /Offline sample/);
+  await p.click("#home-key");
+  await p.waitForFunction(() => !document.getElementById("v-home").hidden);
+  await p.locator("#home .app.builtin").nth(0).click();
+  await p.waitForFunction(() => !document.getElementById("v-notes").hidden);
+  const noise = /Failed to load resource|net::ERR_FAILED|ERR_FAILED/;
+  assert.deepEqual(errors.filter((e) => !noise.test(e)), []);
+});
+
+test("4d4y: a Cloudflare challenge is named, not parsed as an empty forum", { skip, timeout: 30000 }, async (t) => {
+  const challenge = "<!doctype html><html><head><title>Just a moment...</title></head><body><script>window._cf_chl_opt={}</script></body></html>";
+  const { p } = await fourmPage(t, (r) => r.fulfill(htmlPage(challenge, 403)));
+  await p.waitForFunction(() => /Cloudflare Challenge/.test(document.getElementById("fm-main").innerText), null, { timeout: 15000 });
+  const text = await p.locator("#fm-main").innerText();
+  assert.match(text, /403/);
+  assert.doesNotMatch(text, /Nothing found/);
+});
+
+test("4d4y: malformed HTML shows a Parse Error and does not crash the runtime", { skip, timeout: 30000 }, async (t) => {
+  const seen = [];
+  const broken = "<!doctype html><html><body><p>not a forum</p></body></html>";
+  const { p } = await fourmPage(t, (r) => { seen.push(r.request().url()); return r.fulfill(htmlPage(broken)); });
+  await p.waitForFunction(() => /Parse Error/.test(document.getElementById("fm-main").innerText), null, { timeout: 15000 });
+  assert.ok(seen.some((u) => u.endsWith("/forum.php")), "the homepage fallback was tried");
+  await p.click("#home-key");
+  await p.waitForFunction(() => !document.getElementById("v-home").hidden);
 });
 
 test("the runtime asks nothing of other sites: fonts and everything else come from its own origin", { skip }, async (t) => {

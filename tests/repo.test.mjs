@@ -142,15 +142,16 @@ test("the holiday-cn year files the calendar ships are valid, pre-cached, and th
   assert.deepEqual(files, Object.values(bundled).map((p) => p.split("/").pop()).sort());
 });
 
-/* The handheld asks no other site for anything, with one exception: the calendar's holiday file (decisions.md section 14).
-   Comments are stripped, strings kept. */
-test("the only other site a runtime script names is the calendar's holiday address", () => {
+/* The handheld asks no other site for anything, with two exceptions: the calendar's holiday file (decisions.md section 14)
+   and the 4d4y PoC reader (decisions.md section 30). Comments are stripped, strings kept. */
+test("the only other sites a runtime script names are the calendar's holiday address and 4d4y's", () => {
   const found = [];
   for (const f of RUNTIME_JS) {
     const code = read(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
     for (const m of code.matchAll(/"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/g)) if (/https?:\/\//.test(m[0])) found.push(f + " " + m[0]);
   }
-  assert.deepEqual(found, ['runtime/apps/calendar.js "https://cdn.jsdelivr.net/gh/NateScarlet/holiday-cn@master/"']);
+  assert.deepEqual(found, ['runtime/apps/calendar.js "https://cdn.jsdelivr.net/gh/NateScarlet/holiday-cn@master/"',
+    'runtime/fourmparse.js "https://www.4d4y.com"']);
 });
 
 test("build-index refuses an app that fails the checker", (t) => {

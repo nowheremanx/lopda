@@ -94,6 +94,18 @@
       </div>
     </section>
 
+    <!-- 4d4y: the PoC network reader (live 4d4y, or a labelled offline sample); one scrolling list -->
+    <section class="view fm-view" id="v-4d4y" hidden>
+      <div class="fm-head">
+        <button class="ck fm-back" id="fm-back" type="button" data-i18n-label="fourm.back" aria-label="返回" hidden>◀</button>
+        <div class="fm-ht">
+          <b id="fm-title">4d4y</b>
+          <span id="fm-state" aria-live="polite"></span>
+        </div>
+      </div>
+      <div class="fm-main" id="fm-main"></div>
+    </section>
+
     <!-- NOTES: the search box over one list (today, new, pinned, the rest); options, tags, the trash and the key card open over it -->
     <section class="view notes-view" id="v-notes" hidden>
       <div class="notes-head">
@@ -353,6 +365,7 @@
 <script src="develop.js"></script>
 <script src="notetext.js"></script>
 <script src="zip.js"></script>
+<script src="fourmparse.js"></script>
 <script src="backup.js"></script>
 <script src="core.js"></script>
 <script src="apps/notes.js"></script>
@@ -365,6 +378,7 @@
 <script src="apps/snap.js"></script>
 <script src="apps/store.js"></script>
 <script src="apps/settings.js"></script>
+<script src="apps/fourm.js"></script>
 <script src="boot.js"></script>
 </body>
 </html>

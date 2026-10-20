@@ -294,7 +294,7 @@ async function capture(rootArg, outArg) {
   await settings("16-settings-en");
   await home(); await p.waitForTimeout(300);
   await shot("17-home-en");
-  await p.locator("#home .app.builtin").last().click(); await p.waitForTimeout(500);   /* Settings, labelled in English now */
+  await p.locator("#home .app.builtin").nth(8).click(); await p.waitForTimeout(500);   /* Settings (the 10th built-in, 4d4y, is last) */
   await p.click("[data-lang=zh]"); await p.waitForTimeout(400);
   await home();
 
