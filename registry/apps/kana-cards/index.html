@@ -114,6 +114,11 @@
     return TXT.rate.replace("{pct}", String(Math.round(s[1] * 100 / s[0]))).replace("{hits}", String(s[1])).replace("{tries}", String(s[0]));
   }
   function current() { return table()[data.index]; }
+  /* keep the selected kana inside the scrolling grid */
+  function revealSelected(block) {
+    var selected = referenceEl.querySelector(".selected");
+    if (selected) selected.scrollIntoView({ block: block || "nearest" });
+  }
   function render() {
     var list = table(), currentIndex = data.screen === "quiz" ? data.target : data.index;
     document.body.classList.toggle("quiz", data.screen === "quiz");
@@ -149,6 +154,7 @@
           referenceEl.appendChild(b);
         });
       });
+      revealSelected();
     }
     if (data.screen === "quiz") {
       data.choices.forEach(function (index, i) {
@@ -174,8 +180,7 @@
     statusEl.textContent = "";
     save();
     render();
-    var selected = referenceEl.querySelector(".selected");
-    if (selected) selected.scrollIntoView({ block: "nearest" });
+    revealSelected();
   }
   function openCard() {
     data.screen = "card"; statusEl.textContent = ""; save(); render();
@@ -200,8 +205,7 @@
     }
     save();
     render();
-    var selected = referenceEl.querySelector(".selected");
-    if (selected) selected.scrollIntoView({ block: "nearest" });
+    revealSelected();
   }
   function move(dir) {
     if (data.screen === "quiz") {
@@ -354,8 +358,9 @@
         }
       }
       render();
+      revealSelected("center");
     });
-  } else render();
+  } else { render(); revealSelected("center"); }
 })();
 </script>
 </body>

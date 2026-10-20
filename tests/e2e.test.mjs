@@ -5706,6 +5706,41 @@ test("kana-cards: the guide row stays put while only the kana grid scrolls", { s
   assert.deepEqual(errors, []);
 });
 
+test("kana-cards: opening the app scrolls the saved kana into view", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t);
+  await p.goto(`${base}/sdk/dev.html?app=registry/apps/kana-cards`, { waitUntil: "load" });
+  await p.waitForFunction(() => /loaded |load failed/.test(document.getElementById("log").textContent), null, { timeout: 5000 });
+  let f;
+  await until(p, async () => { f = p.frames().find((x) => x !== p.mainFrame()); return f && await f.evaluate(() => !!window.PAD).catch(() => false); }, "kana app");
+  await f.waitForFunction(() => document.documentElement.lang === "en", null, { timeout: 5000 });
+  await p.locator("#app").evaluate((el) => { el.style.width = "331px"; el.style.height = "359px"; el.style.flex = "none"; });
+  await f.waitForFunction(() => document.body.classList.contains("list"));
+
+  /* put the cursor on the very last kana, then reopen the app */
+  await f.locator("#reference button[aria-label='ぽ po']").click();
+  await f.waitForFunction(() => document.body.classList.contains("card"));
+  await p.waitForFunction(() => {
+    const saved = JSON.parse(localStorage.getItem("lopda-dev:kana-cards") || "{}")["kana-cards-state"];
+    return saved && saved.index === 70;
+  }, null, { timeout: 5000 });
+  await p.reload({ waitUntil: "load" });
+  await p.waitForFunction(() => /loaded |load failed/.test(document.getElementById("log").textContent), null, { timeout: 5000 });
+  await until(p, async () => { f = p.frames().find((x) => x !== p.mainFrame()); return f && await f.evaluate(() => !!window.PAD && document.body.classList.contains("list")).catch(() => false); }, "reopened kana app");
+  const opened = await f.evaluate(() => {
+    const ref = document.querySelector("#reference");
+    const selected = document.querySelector("#reference button[aria-selected='true']");
+    const r = selected.getBoundingClientRect(), v = ref.getBoundingClientRect();
+    return {
+      label: selected.getAttribute("aria-label"), scroll: ref.scrollTop,
+      visible: r.top >= v.top - 1 && r.bottom <= v.bottom + 1
+    };
+  });
+  assert.equal(opened.label, "ぽ po", "the saved cursor is still selected");
+  assert.ok(opened.scroll > 0, "the grid scrolled down to the saved kana");
+  assert.equal(opened.visible, true, "the selected kana is visible when the app opens");
+  assert.deepEqual(errors, []);
+});
+
 test("kana-cards: a miss waits for confirmation, and the score shows on the card", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await page(t);
   await p.goto(`${base}/sdk/dev.html?app=registry/apps/kana-cards`, { waitUntil: "load" });
