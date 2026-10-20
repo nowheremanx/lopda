@@ -40,23 +40,27 @@
   .cup-hint { position: absolute; left: 0; right: 0; bottom: 0; text-align: center; font-size: 13px; color: #4a5a32; letter-spacing: 1px; }
   body.has-slip #cup { display: none; }
 
-  #cup.shake .cup-idle { animation: cupShake 0.52s ease-in-out; }
-  #cup.shake .stick { animation: rattle 0.17s linear infinite; }
-  #cup.shake .s2, #cup.shake .s5 { animation-delay: -0.08s; }
-  #cup.shake .s3, #cup.shake .s6 { animation-delay: -0.12s; }
-  #cup.lift .cup-idle { animation: cupSink 0.4s ease-in forwards; }
-  #cup.lift #hero { opacity: 1; animation: heroLift 0.4s cubic-bezier(0.2, 0.8, 0.3, 1) forwards; }
+  #cup.shake .cup-idle { animation: cupShake 0.82s ease-in-out; }
+  #cup.shake .stick { animation: rattle 0.13s linear infinite; }
+  #cup.shake .s2, #cup.shake .s5 { animation-delay: -0.06s; }
+  #cup.shake .s3, #cup.shake .s6 { animation-delay: -0.09s; }
+  #cup.lift .cup-idle { animation: cupSink 0.62s ease-in forwards; }
+  #cup.lift #hero { opacity: 1; animation: heroLift 0.62s cubic-bezier(0.16, 0.7, 0.25, 1) forwards; }
 
   @keyframes idle { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
   @keyframes sway { 0%, 100% { transform: rotate(var(--r)); } 50% { transform: rotate(calc(var(--r) + 1.6deg)); } }
   @keyframes cupShake {
     0%, 100% { transform: translateX(0) rotate(0); }
-    12% { transform: translateX(-6px) rotate(-1.4deg); }
-    28% { transform: translateX(6px) rotate(1.4deg); }
-    44% { transform: translateX(-5px) rotate(-1deg); }
-    60% { transform: translateX(5px) rotate(1deg); }
-    76% { transform: translateX(-3px) rotate(-0.6deg); }
-    90% { transform: translateX(2px) rotate(0.4deg); }
+    8% { transform: translateX(-5px) rotate(-1.3deg); }
+    18% { transform: translateX(6px) rotate(1.3deg); }
+    28% { transform: translateX(-6px) rotate(-1.1deg); }
+    38% { transform: translateX(5px) rotate(1.1deg); }
+    48% { transform: translateX(-5px) rotate(-0.9deg); }
+    58% { transform: translateX(4px) rotate(0.9deg); }
+    68% { transform: translateX(-4px) rotate(-0.7deg); }
+    78% { transform: translateX(3px) rotate(0.7deg); }
+    88% { transform: translateX(-2px) rotate(-0.4deg); }
+    94% { transform: translateX(2px) rotate(0.4deg); }
   }
   @keyframes rattle {
     0%, 100% { transform: rotate(var(--r)); }
@@ -74,20 +78,21 @@
      from the middle like a stick being unrolled, and the lines follow one another. */
   #slip { display: none; position: relative; width: 100%; max-width: 300px; box-sizing: border-box; padding: 11px 13px 12px; background: #a3ad7e; border: 3px solid #1f2a14; box-shadow: 4px 4px 0 #4a5a32; }
   #slip::before { content: ""; position: absolute; left: 4px; right: 4px; top: 4px; bottom: 4px; border: 1px solid #4a5a32; pointer-events: none; }
-  #slip.show { display: block; animation: unroll 0.52s cubic-bezier(0.2, 0.75, 0.2, 1) both; }
+  #slip.show { display: block; animation: unroll 0.64s cubic-bezier(0.2, 0.75, 0.2, 1) both; }
   .slip-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
   #num { font-size: 15px; letter-spacing: 2px; }
   #grade { flex: none; padding: 2px 7px; background: #1f2a14; color: #a3ad7e; font-size: 13px; font-weight: bold; letter-spacing: 2px; transform: rotate(-3deg); }
   #verse { margin-top: 9px; text-align: center; font-size: 15px; line-height: 1.5; }
   #verse .line { display: block; }
-  #slip.show #verse .line { animation: lineIn 0.32s ease-out both; }
-  #slip.show #verse .line:nth-child(2) { animation-delay: 0.14s; }
-  #slip.show #verse .line:nth-child(3) { animation-delay: 0.24s; }
+  #slip.show #verse .line { animation: lineIn 0.34s ease-out both; }
+  #slip.show #verse .line:nth-child(2) { animation-delay: 0.26s; }
+  #slip.show #verse .line:nth-child(3) { animation-delay: 0.4s; }
   .rule { height: 0; margin: 9px 0 7px; border-top: 2px dotted #4a5a32; }
   #meaning { margin: 0; text-align: center; font-size: 14px; line-height: 1.4; }
+  #slip.show #meaning { animation: lineIn 0.36s ease-out 0.54s both; }
   @keyframes unroll {
-    0% { clip-path: inset(0 46% 0 46%); transform: translateY(-8px); opacity: 0.3; }
-    45% { opacity: 1; }
+    0% { clip-path: inset(0 0 94% 0); transform: translateY(-10px); opacity: 0.4; }
+    30% { opacity: 1; }
     100% { clip-path: inset(0 0 0 0); transform: translateY(0); opacity: 1; }
   }
   @keyframes lineIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
@@ -98,6 +103,8 @@
   #actions button:active:not(:disabled) { transform: translateY(1px); }
   #actions button:disabled { background: #7d8a58; border-color: #4a5a32; color: #4a5a32; }
   #actions button:focus-visible { outline: 2px solid #1f2a14; outline-offset: 2px; }
+  body.has-slip #writeBtn { animation: actionIn 0.32s ease-out 0.42s both; }
+  @keyframes actionIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
   #footer { flex: none; min-height: 1.4em; padding: 0 12px 7px; text-align: center; color: #4a5a32; font-size: 13px; line-height: 1.4; }
 
   @media (max-height: 380px) {
@@ -107,11 +114,11 @@
     .rule { margin: 7px 0 6px; }
   }
   @media (prefers-reduced-motion: reduce) {
-    .cup-idle, .stick, #cup.lift .cup-idle, #cup.lift #hero, #slip.show, #slip.show #verse .line { animation: none; }
+    .cup-idle, .stick, #cup.lift .cup-idle, #cup.lift #hero, #slip.show, #slip.show #verse .line, #slip.show #meaning, body.has-slip #writeBtn { animation: none; }
     #cup.shake .cup-idle { transform: translateX(0); }
     #cup.lift .cup-idle { opacity: 0; }
     #slip.show { clip-path: none; opacity: 1; transform: none; }
-    #slip.show #verse .line { opacity: 1; }
+    #slip.show #verse .line, #slip.show #meaning, body.has-slip #writeBtn { opacity: 1; transform: none; }
   }
 </style>
 </head>
@@ -297,16 +304,20 @@
     cup.classList.add("shake");
     sfx("tick");
     if (!REDUCED) {
-      setTimeout(function () { sfx("tick"); }, 170);
-      setTimeout(function () { sfx("tick"); }, 340);
+      setTimeout(function () { sfx("tick"); }, 210);
+      setTimeout(function () { sfx("tick"); }, 420);
+      setTimeout(function () { sfx("tick"); }, 620);
     }
-    var shake = REDUCED ? 20 : 520;
-    var lift = REDUCED ? 20 : 400;
+    /* shake, a short stillness, the stick lifting, then the paper. The stillness is
+       what makes the draw feel considered instead of rushed. */
+    var shake = REDUCED ? 30 : 820;
+    var settle = REDUCED ? 10 : 160;
+    var lift = REDUCED ? 30 : 620;
+    setTimeout(function () { cup.classList.remove("shake"); }, shake);
     setTimeout(function () {
-      cup.classList.remove("shake");
       cup.classList.add("lift");
-      sfx("ok");
-    }, shake);
+      sfx("tick");
+    }, shake + settle);
     setTimeout(function () {
       state.slip = slotFor(state.dateKey);
       state.written = false;
@@ -316,7 +327,8 @@
       cup.classList.remove("lift");
       state.animating = false;
       drawBtn.disabled = false;
-    }, shake + lift);
+      sfx("ok");
+    }, shake + settle + lift);
   }
   function appendNote() {
     if (state.slip == null || typeof PAD === "undefined" || !PAD.notes) {
