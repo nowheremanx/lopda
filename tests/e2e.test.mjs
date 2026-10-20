@@ -4677,6 +4677,12 @@ const runPuzzle = async (p, html = PP.html) => {
   return f;
 };
 const ppState = (f) => f.evaluate(() => window.PUZZLE.state());
+/* an unfinished game is kept now: reopening shows it with 继续 / 新的一局, so a test that wants the title's buttons
+   presses 新的一局 first */
+const ppNewTitle = async (p, f) => {
+  await p.waitForTimeout(400);   /* PAD.load has answered by then */
+  if ((await ppState(f)).saved) { await press(p, "down"); await press(p, "a"); }
+};
 /* the shortest way home for a 3x3, breadth first over the gap's moves; returns the keys to press. A direction pushes the
    piece on that side of the gap into it, so "up" moves the gap down a row */
 function solve3(tiles) {
@@ -4787,13 +4793,13 @@ test("photo puzzle: without a photo it plays the built-in picture and says why (
     await until(p, async () => (await ppState(f)).screen === "won", "the result");
   };
   /* B on the runtime's dialog: snap gives null */
-  let f = await runPuzzle(p);
+  let f = await runPuzzle(p); await ppNewTitle(p, f);
   await press(p, "a");
   await p.waitForSelector("#file-ask .box"); await press(p, "b");
   await playable(f, "没拿到照片，用内置图片玩。");
   /* B in the viewfinder */
   await p.click("#home-key");
-  f = await runPuzzle(p);
+  f = await runPuzzle(p); await ppNewTitle(p, f);
   await press(p, "a");
   await p.waitForSelector("#file-ask .box"); await press(p, "a");
   await finderLive(p); await press(p, "b");
@@ -4802,7 +4808,7 @@ test("photo puzzle: without a photo it plays the built-in picture and says why (
   /* no camera on the phone */
   await p.click("#home-key");
   await p.evaluate(() => { navigator.mediaDevices.getUserMedia = () => Promise.reject(new DOMException("no camera", "NotFoundError")); });
-  f = await runPuzzle(p);
+  f = await runPuzzle(p); await ppNewTitle(p, f);
   await press(p, "a");   /* allowed once already: no dialog this time */
   await until(p, async () => (await ppState(f)).screen === "play", "a game");
   assert.equal(await p.textContent("#toast"), "相机用不了");
@@ -4810,11 +4816,92 @@ test("photo puzzle: without a photo it plays the built-in picture and says why (
   /* a runtime before 0.28.0 has no PAD.camera: the title says so, the only choice is the built-in picture */
   await p.click("#home-key");
   const old = PP.html.replace("<script>", "<script>window.PAD = Object.assign({}, PAD, { camera: undefined });</script>\n<script>");
-  f = await runPuzzle(p, old);
+  f = await runPuzzle(p, old); await ppNewTitle(p, f);
   assert.equal(await f.textContent("#msg"), "这台掌机不能拍照，用内置图片玩。");
-  assert.deepEqual(await f.$$eval("#menu button", (bs) => bs.map((b) => b.textContent)), ["用内置图片"]);
+  assert.deepEqual(await f.$$eval("#menu button", (bs) => bs.map((b) => b.textContent)), ["用内置图片", "导入图片"]);
   await press(p, "a");
   await playable(f, "这台掌机不能拍照，用内置图片玩。");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("photo puzzle: import a picture, see it first, then play it; the four-tone picture is kept with the game", { skip, timeout: 90000 }, async (t) => {
+  const { p, errors } = await snapPage(t);
+  const { makePng } = await import("./book-fixtures.mjs");
+  let f = await runPuzzle(p); await ppNewTitle(p, f);
+  const titles = () => f.$$eval("#menu button", (bs) => bs.map((b) => b.textContent));
+  assert.deepEqual(await titles(), ["拍一张", "用内置图片", "导入图片"]);
+  /* 导入图片: the runtime's own dialog first, then the system picker */
+  const png = makePng(320, 280, (x, y) => [x % 256, (x + y) % 256, y % 256, 255]);
+  await press(p, "down"); await press(p, "down"); await press(p, "a");
+  await p.waitForSelector("#file-ask .box");
+  assert.equal(await p.textContent("#file-ask p"), "从文件导入？");
+  const [chooser] = await Promise.all([p.waitForEvent("filechooser"), p.click("#file-ok")]);
+  await chooser.setFiles({ name: "view.png", mimeType: "image/png", buffer: Buffer.from(png) });
+  await until(p, async () => (await ppState(f)).screen === "preview", "the imported picture shown first");
+  assert.equal(await f.textContent("#msg"), "就用这张吗？");
+  assert.deepEqual(await titles(), ["用这张", "换一张"]);
+  await press(p, "a");
+  await until(p, async () => (await ppState(f)).screen === "play", "a game from the file");
+  let s = await ppState(f);
+  assert.deepEqual([s.n, s.src, s.moves], [3, "file", 0]);
+  assert.notDeepEqual(s.tiles, [0, 1, 2, 3, 4, 5, 6, 7, 8], "shuffled");
+  /* the picture travels with the saved game, four pixels a byte */
+  const g = await f.evaluate(() => new Promise((r) => PAD.load("game").then(r)));
+  assert.equal(g.src, "file");
+  assert.equal(Buffer.from(g.pic, "base64").length, 128 * 112 / 4);   /* four tones a byte */
+  /* 新的一局 is not final: backing out of the chooser leaves the old game in the store */
+  await p.waitForTimeout(700);
+  await p.click("#home-key");
+  f = await runPuzzle(p); await p.waitForTimeout(400);
+  assert.equal((await ppState(f)).saved, true);
+  await press(p, "down"); await press(p, "a");   /* 新的一局 */
+  await press(p, "down"); await press(p, "down"); await press(p, "a");   /* 导入图片 */
+  await p.waitForSelector("#file-ask .box");
+  await p.click("#file-no");
+  await until(p, async () => (await f.textContent("#msg")) === "没选图片。", "the cancelled import");
+  assert.deepEqual([(await ppState(f)).screen, (await ppState(f)).saved], ["title", false]);
+  const kept = await f.evaluate(() => new Promise((r) => PAD.load("game").then(r)));
+  assert.deepEqual(kept.tiles, g.tiles);
+  assert.equal(kept.moves, 0);
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("photo puzzle: an unfinished game waits on the title after a restart; 继续 returns to it, 新的一局 starts clean", { skip, timeout: 90000 }, async (t) => {
+  const { p, errors } = await snapPage(t);
+  let f = await runPuzzle(p); await ppNewTitle(p, f);
+  await press(p, "down"); await press(p, "a");   /* 用内置图片 */
+  await until(p, async () => (await ppState(f)).screen === "play", "a game");
+  /* two real slides */
+  const dir = (s) => {
+    const n = s.n, r = Math.floor(s.gap / n), c = s.gap % n;
+    return r < n - 1 ? "up" : c < n - 1 ? "left" : "right";
+  };
+  for (let i = 0; i < 2; i++) await ppPress(p, f, dir(await ppState(f)));
+  const before = await ppState(f);
+  assert.equal(before.moves, 2);
+  await p.waitForTimeout(700);   /* the store writes 0.5 s after the last PAD.save */
+  await p.click("#home-key");
+  f = await runPuzzle(p); await p.waitForTimeout(400);
+  let s = await ppState(f);
+  assert.equal(s.saved, true);
+  assert.equal(await f.textContent("#msg"), "上次那盘还在这里。");
+  assert.deepEqual(await f.$$eval("#menu button", (bs) => bs.map((b) => b.textContent)), ["继续", "新的一局"]);
+  assert.equal(await f.textContent("#info"), "3×3  2 步");
+  await press(p, "a");   /* 继续 is the default */
+  await until(p, async () => (await ppState(f)).screen === "play", "the game carried on");
+  s = await ppState(f);
+  assert.deepEqual([s.tiles, s.moves, s.saved], [before.tiles, 2, false]);
+  /* the save is still there: reopen and take 新的一局 instead, which only clears the title */
+  await p.click("#home-key");
+  f = await runPuzzle(p); await p.waitForTimeout(400);
+  assert.equal((await ppState(f)).saved, true);
+  await press(p, "down"); await press(p, "a");
+  s = await ppState(f);
+  assert.deepEqual([s.screen, s.saved, s.moves], ["title", false, 0]);
+  assert.deepEqual(await f.$$eval("#menu button", (bs) => bs.map((b) => b.textContent)), ["拍一张", "用内置图片", "导入图片"]);
+  await press(p, "down"); await press(p, "a");   /* 用内置图片 */
+  await until(p, async () => (await ppState(f)).screen === "play", "a new game");
+  assert.equal((await ppState(f)).moves, 0);
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 

@@ -4,9 +4,10 @@
 <meta charset="utf-8">
 <title>拍照拼图</title>
 <!-- Lo-PDA example app (lopda/1): a sliding puzzle cut from a photo the player takes with PAD.camera.snap
-     (SPEC.md 6.6). Shows the photo before using it and allows a retake (sdk/UI.md section 10), and plays just as well
-     with a built-in picture when there is no camera. Chin buttons, touch, PAD.save, PAD.sfx and a short PAD.music jingle.
-     MIT License. -->
+     (SPEC.md 6.6) or imports with PAD.importFile (6.2). Shows the photo before using it and allows a retake
+     (sdk/UI.md section 10), and plays just as well with a built-in picture when there is no camera. The unfinished
+     puzzle is kept with PAD.save, so closing the handheld does not lose it. Chin buttons, touch, PAD.sfx and a short
+     PAD.music jingle. MIT License. -->
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #a3ad7e; color: #1f2a14; font-family: monospace; }
   body { display: flex; flex-direction: column; }
@@ -43,16 +44,27 @@
   /* two languages: PAD.lang from the runtime; older runtimes have none, so Chinese is the default */
   var LANG = HAS_PAD && PAD.lang === "en" ? "en" : "zh";
   var TXT = {
-    zh: { title: "拍照拼图", snap: "拍一张", builtin: "用内置图片", use: "用这张", retake: "重拍", again: "重来", size: "换难度",
-      resume: "继续", next: "下一局", newphoto: "拍新照片", moves: "{n} 步", best: "最佳 {n}", taking: "拍照中…",
-      intro: "拍一张照片，切成方块打乱，再拼回来。", nocam: "这台掌机不能拍照，用内置图片玩。", nophoto: "没拿到照片，用内置图片玩。",
-      look: "就用这张吗？", won: "拼好了！{n} 步。", record: "新纪录！", unlocked: "下一局是 4×4。", locked: "先拼好一次 3×3",
-      kTitle: "↑↓ 选　A 确定", kPreview: "A 用这张　B 重拍", kPlay: "方向键 推方块　A 按住看原图　START 菜单", kMenu: "↑↓ 选　A 确定　B 返回", kWon: "↑↓ 选　A 确定", kSolved: "A 继续", solved: "拼好了！", cont: "继续" },
-    en: { title: "SNAPTILE", snap: "Take a photo", builtin: "Built-in picture", use: "Use this", retake: "Retake", again: "Restart", size: "Size",
-      resume: "Resume", next: "Next", newphoto: "New photo", moves: "{n} moves", best: "best {n}", taking: "Camera…",
-      intro: "Take a photo, it is cut up and shuffled: slide it back.", nocam: "No camera here: playing with the built-in picture.", nophoto: "No photo: playing with the built-in picture.",
-      look: "Use this one?", won: "Solved in {n} moves!", record: "New record!", unlocked: "Next one is 4×4.", locked: "Solve a 3×3 first",
-      kTitle: "↑↓ pick  A ok", kPreview: "A use  B retake", kPlay: "D-pad slide  hold A peek  START menu", kMenu: "↑↓ pick  A ok  B back", kWon: "↑↓ pick  A ok", kSolved: "A continue", solved: "Solved!", cont: "Continue" }
+    zh: { title: "拍照拼图", snap: "拍一张", builtin: "用内置图片", imp: "导入图片", use: "用这张", retake: "重拍",
+      other: "换一张", again: "重来", size: "换难度", resume: "继续", fresh: "新的一局", next: "下一局",
+      newphoto: "拍新照片", moves: "{n} 步", best: "最佳 {n}", taking: "拍照中…", importing: "读图片…",
+      intro: "拍一张照片，切成方块打乱，再拼回来。", nocam: "这台掌机不能拍照，用内置图片玩。",
+      nophoto: "没拿到照片，用内置图片玩。", nofile: "没选图片。", badimg: "这张图读不出来。",
+      saved: "上次那盘还在这里。", look: "就用这张吗？", won: "拼好了！{n} 步。", record: "新纪录！",
+      unlocked: "下一局是 4×4。", locked: "先拼好一次 3×3",
+      kTitle: "↑↓ 选　A 确定", kPreview: "A 用这张　B 重拍", kPreviewFile: "A 用这张　B 换一张",
+      kPlay: "方向键 推方块　A 按住看原图　START 菜单", kMenu: "↑↓ 选　A 确定　B 返回", kWon: "↑↓ 选　A 确定",
+      kSolved: "A 继续", solved: "拼好了！", cont: "继续" },
+    en: { title: "SNAPTILE", snap: "Take a photo", builtin: "Built-in picture", imp: "Import a picture", use: "Use this",
+      retake: "Retake", other: "Choose another", again: "Restart", size: "Size", resume: "Resume", fresh: "New puzzle",
+      next: "Next", newphoto: "New photo", moves: "{n} moves", best: "best {n}", taking: "Camera…",
+      importing: "Reading…", intro: "Take a photo, it is cut up and shuffled: slide it back.",
+      nocam: "No camera here: playing with the built-in picture.", nophoto: "No photo: playing with the built-in picture.",
+      nofile: "No picture chosen.", badimg: "That picture could not be read.",
+      saved: "Your last puzzle is here.", look: "Use this one?", won: "Solved in {n} moves!", record: "New record!",
+      unlocked: "Next one is 4×4.", locked: "Solve a 3×3 first",
+      kTitle: "↑↓ pick  A ok", kPreview: "A use  B retake", kPreviewFile: "A use  B choose another",
+      kPlay: "D-pad slide  hold A peek  START menu", kMenu: "↑↓ pick  A ok  B back", kWon: "↑↓ pick  A ok",
+      kSolved: "A continue", solved: "Solved!", cont: "Continue" }
   }[LANG];
   function tx(key, n) { return TXT[key].replace("{n}", n); }
   document.documentElement.lang = LANG === "zh" ? "zh-CN" : "en"; document.title = TXT.title;
@@ -90,14 +102,80 @@
   var BUILTIN = builtin();
 
   /* ---------- state ---------- */
-  var S = { screen: "title", sel: 0, items: [], pic: BUILTIN, shot: null, note: "", busy: false,
-    n: 3, tiles: [], gap: 0, moves: 0, peek: false, big: false, best: {}, record: false };
-  if (HAS_PAD) PAD.load("puzzle").then(function (d) {
-    if (d && typeof d === "object") { S.best = d.best && typeof d.best === "object" ? d.best : {}; S.big = d.big === true; }
-    draw();
-  });
-  function save() { if (HAS_PAD) PAD.save("puzzle", { best: S.best, big: S.big }); }
+  var S = { screen: "title", sel: 0, items: [], pic: BUILTIN, shot: null, note: "", titleNote: "", busy: false,
+    n: 3, tiles: [], gap: 0, moves: 0, peek: false, big: false, best: {}, record: false,
+    src: "builtin", helped: false, saved: null, previewFrom: "camera" };
   function sfx(name) { if (HAS_PAD) PAD.sfx(name); }
+  function savePuzzle() { if (HAS_PAD) PAD.save("puzzle", { best: S.best, big: S.big }); }
+
+  /* ---------- the unfinished puzzle: PAD.save("game") ----------
+     tiles are positions -> pieces, the gap is tile n*n-1 (so no separate gap field can disagree), and the picture
+     is four pixels a byte in base64 (about 4.8 KB). Finished puzzles remove the key; a new puzzle overwrites it when
+     it actually starts, so backing out of the picture chooser leaves the old one alone. */
+  function packPic(px) {
+    var out = new Uint8Array((px.length + 3) >> 2), s = "";
+    for (var i = 0; i < px.length; i++) out[i >> 2] |= px[i] << ((i % 4) * 2);
+    for (var j = 0; j < out.length; j += 4096) s += String.fromCharCode.apply(null, out.subarray(j, j + 4096));
+    return btoa(s);
+  }
+  function unpackPic(str) {
+    var s = atob(str), px = new Uint8Array(s.length * 4);
+    for (var i = 0; i < s.length; i++) {
+      var b = s.charCodeAt(i);
+      px[i * 4] = b & 3; px[i * 4 + 1] = (b >> 2) & 3; px[i * 4 + 2] = (b >> 4) & 3; px[i * 4 + 3] = (b >> 6) & 3;
+    }
+    return px;
+  }
+  function saveGame() {
+    if (!HAS_PAD || !S.tiles.length) return;
+    var g = { v: 1, n: S.n, tiles: S.tiles.slice(), moves: S.moves, src: S.src, helped: S.helped };
+    if (S.src !== "builtin") g.pic = packPic(S.pic.px);
+    PAD.save("game", g);
+  }
+  function dropGame() { if (HAS_PAD) PAD.remove("game"); }
+  /* anything wrong with a stored game means "no game", quietly: a tampered or half-written record must not stick */
+  function checkGame(g) {
+    if (!g || typeof g !== "object" || g.v !== 1) return null;
+    var n = g.n, N = n * n, i, j;
+    if (n !== 3 && n !== 4) return null;
+    if (!Array.isArray(g.tiles) || g.tiles.length !== N) return null;
+    var seen = {}, inv = 0;
+    for (i = 0; i < N; i++) {
+      var v = g.tiles[i];
+      if (typeof v !== "number" || v !== (v | 0) || v < 0 || v >= N || seen[v]) return null;
+      seen[v] = true;
+      if (v !== N - 1) for (j = 0; j < i; j++) if (g.tiles[j] !== N - 1 && g.tiles[j] > v) inv++;
+    }
+    var gap = g.tiles.indexOf(N - 1);
+    if (n % 2 === 1) { if (inv % 2) return null; }
+    else if ((inv + (n - ((gap / n) | 0))) % 2 !== 1) return null;   /* blank row from the bottom, 1-based */
+    if (typeof g.moves !== "number" || g.moves !== (g.moves | 0) || g.moves < 0) return null;
+    if (["camera", "file", "builtin"].indexOf(g.src) < 0) return null;
+    var px = null;
+    if (g.src !== "builtin") {
+      if (typeof g.pic !== "string") return null;
+      try { px = unpackPic(g.pic); } catch (e) { return null; }
+      if (px.length !== W * H) return null;
+    }
+    return { n: n, tiles: g.tiles, moves: g.moves, src: g.src, px: px, helped: g.helped === true };
+  }
+  function restore(g) {
+    S.saved = g; S.n = g.n; S.tiles = g.tiles; S.gap = g.tiles.indexOf(g.n * g.n - 1);
+    S.moves = g.moves; S.src = g.src; S.helped = g.helped;
+    if (g.px) S.pic = { w: W, h: H, px: g.px };
+  }
+  if (HAS_PAD) {
+    Promise.all([
+      PAD.load("puzzle").catch(function () { return null; }),
+      PAD.load("game").catch(function () { return null; })
+    ]).then(function (r) {
+      var d = r[0];
+      if (d && typeof d === "object") { S.best = d.best && typeof d.best === "object" ? d.best : {}; S.big = d.big === true; }
+      var g = checkGame(r[1]);
+      if (g) restore(g); else if (r[1]) dropGame();
+      draw();
+    });
+  }
 
   /* ---------- the camera: PAD.camera.snap ----------
      snap() opens the runtime's own viewfinder over this app. The player presses the shutter (or cancels); the promise
@@ -113,16 +191,65 @@
       S.busy = false;
       if (!photo) { useBuiltin(TXT.nophoto); return; }
       /* show it first, as it is: the player may have blinked (sdk/UI.md section 10) */
-      S.shot = photo; sfx("ok"); go("preview");
+      S.shot = photo; S.previewFrom = "camera"; sfx("ok"); go("preview");
     });
   }
-  function useBuiltin(line) { S.pic = BUILTIN; S.note = line; sfx("err"); newGame(); }
+  function useBuiltin(line) { S.pic = BUILTIN; S.src = "builtin"; S.note = line; sfx("err"); newGame(); }
+
+  /* ---------- imported pictures: PAD.importFile ----------
+     The runtime asks the player first, then its file picker (photos, camera, Files) hands back a data: URL, already
+     scaled under 2 MB. Crop to the film's 8:7, stretch the contrast between the 1st and 99th percentile of brightness
+     (one white speck must not flatten the picture), then Bayer-dither to the four tones: the same recipe as the
+     camera, so an imported picture looks taken by this machine too. Nothing of the original is kept. */
+  function importPhoto() {
+    if (!HAS_PAD || typeof PAD.importFile !== "function" || S.busy) return;
+    S.busy = true; msg(TXT.importing, false);
+    PAD.importFile({ accept: ["image/*"] }).then(function (f) {
+      S.busy = false;
+      if (!f || typeof f.data !== "string") { S.titleNote = TXT.nofile; go("title"); return; }
+      var im = new Image();
+      im.onload = function () {
+        var px = photoFrom(im);
+        if (!px) { S.titleNote = TXT.badimg; go("title"); return; }
+        S.shot = { w: W, h: H, px: px }; S.previewFrom = "file"; sfx("ok"); go("preview");
+      };
+      im.onerror = function () { S.titleNote = TXT.badimg; go("title"); };
+      im.src = f.data;
+    }).catch(function () { S.busy = false; S.titleNote = TXT.badimg; go("title"); });
+  }
+  function photoFrom(im) {
+    var iw = im.naturalWidth || im.width, ih = im.naturalHeight || im.height;
+    if (!iw || !ih) return null;
+    var c = document.createElement("canvas"); c.width = W; c.height = H;
+    var x = c.getContext("2d"), aim = W / H, sw, sh, sx, sy;
+    if (iw / ih > aim) { sh = ih; sw = ih * aim; sx = (iw - sw) / 2; sy = 0; }
+    else { sw = iw; sh = iw / aim; sx = 0; sy = (ih - sh) / 2; }
+    x.imageSmoothingEnabled = true;
+    x.drawImage(im, sx, sy, sw, sh, 0, 0, W, H);
+    var d = x.getImageData(0, 0, W, H).data, lum = new Float32Array(W * H), hist = new Uint32Array(256), i;
+    for (i = 0; i < lum.length; i++) {
+      var v = 0.2126 * d[i * 4] + 0.7152 * d[i * 4 + 1] + 0.0722 * d[i * 4 + 2];
+      lum[i] = v; hist[Math.round(v)]++;
+    }
+    var total = lum.length, lo = 0, hi = 255, acc = 0;
+    for (i = 0; i < 256; i++) { acc += hist[i]; if (acc >= total * 0.01) { lo = i; break; } }
+    acc = 0;
+    for (i = 255; i >= 0; i--) { acc += hist[i]; if (acc >= total * 0.01) { hi = i; break; } }
+    var span = Math.max(8, hi - lo), px = new Uint8Array(W * H);
+    for (i = 0; i < px.length; i++) {
+      var v2 = Math.max(0, Math.min(1, (lum[i] - lo) / span));
+      var t = (BAYER[((i / W | 0) % 4) * 4 + (i % W) % 4] + 0.5) / 16 - 0.5;
+      px[i] = Math.max(0, Math.min(3, Math.round(v2 * 3 + t)));
+    }
+    return px;
+  }
 
   /* ---------- the puzzle: tiles[position] = which piece is there; piece n*n-1 is the gap ---------- */
   function newGame() {
     var n = S.n, N = n * n;
     S.tiles = []; for (var i = 0; i < N; i++) S.tiles.push(i);
-    S.gap = N - 1; S.moves = 0; S.peek = false; S.record = false;
+    S.gap = N - 1; S.moves = 0; S.peek = false; S.record = false; S.helped = false;
+    S.saved = null; S.titleNote = "";
     /* shuffle with legal moves only, never straight back: every puzzle can be solved */
     var back = -1, steps = n === 3 ? 80 : 200;
     for (var k = 0; k < steps || solved(); k++) {
@@ -130,6 +257,7 @@
       var p = opts[Math.floor(Math.random() * opts.length)];
       back = S.gap; swap(p);
     }
+    saveGame();
     go("play");
   }
   function neighbours(g) {
@@ -144,7 +272,7 @@
   function slide(p) {
     if (neighbours(S.gap).indexOf(p) < 0) { sfx("err"); return; }
     swap(p); S.moves++; sfx("move");
-    if (solved()) win(); else draw();
+    if (solved()) win(); else { saveGame(); draw(); }
   }
   /* a direction pushes the piece on that side of the gap towards it: up moves the piece below the gap up */
   function push(dir) {
@@ -160,7 +288,7 @@
     if (S.record) S.best[key] = S.moves;
     var first = S.n === 3 && !S.big;
     if (first) S.big = true;
-    save();
+    savePuzzle(); dropGame();
     sfx("win");
     /* a short tune of our own for the win; PAD.music is undefined before runtime 0.11.0 */
     if (HAS_PAD && PAD.music) PAD.music.play({ bpm: 150, p1: "@1 v12 o5 l16 c e g >c8 r <g >c4", tri: "v11 o3 l8 c g >c4" }, { loop: false });
@@ -185,47 +313,101 @@
   /* A or a tap during the animation jumps to its end */
   function endAnim() { S.anim.done = true; S.anim.ms = GLINT; draw(); }
 
-  /* ---------- drawing: the picture, cut into cells, written with putImageData ---------- */
+  /* ---------- drawing: the picture, cut into cells, written with putImageData ----------
+     A piece is a raised plastic tile: 1 px of paper on its top and left, 1 px of ink on its bottom and right (the old
+     cut line, now the shadow side). The empty slot is a hole: 3-4 px of ink shadow on the top and left, 1 px of lit
+     paper on the bottom and right, and a flat dark floor. Shape, not colour, so it reads even on a dark photo. */
   var cv = document.getElementById("cv"), ctx = cv.getContext("2d"), img = ctx.createImageData(W, H);
   function edges(n, size) { var e = []; for (var i = 0; i <= n; i++) e.push(Math.round(i * size / n)); return e; }
+  var RECTS = {};
+  function rects(n) {
+    if (RECTS[n]) return RECTS[n];
+    var xs = edges(n, W), ys = edges(n, H), x = [], y = [], w = [], h = [];
+    for (var p = 0; p < n * n; p++) {
+      var c = p % n, r = (p / n) | 0;
+      x.push(xs[c]); y.push(ys[r]); w.push(xs[c + 1] - xs[c]); h.push(ys[r + 1] - ys[r]);
+    }
+    RECTS[n] = { xs: xs, ys: ys, x: x, y: y, w: w, h: h };
+    return RECTS[n];
+  }
+  function put(out, X, Y, v, stop) {
+    if (X < 0 || X >= W || Y < 0 || Y >= H || (stop && Y >= stop)) return;
+    out[Y * W + X] = v;
+  }
+  /* piece t drawn into cell p; dy slides it down (the last piece dropping into its slot) */
+  function tile(out, src, R, p, t, dy) {
+    var x0 = R.x[p], y0 = R.y[p], w = R.w[p], h = R.h[p], sx = R.x[t], sy = R.y[t];
+    var bottom = dy ? y0 + h : 0, x, y, oy = dy || 0;
+    for (y = 1; y < h - 1; y++) for (x = 1; x < w - 1; x++) put(out, x0 + x, y0 + y + oy, src[(sy + y) * W + sx + x], bottom);
+    for (x = 1; x < w - 1; x++) { put(out, x0 + x, y0 + oy, 3, bottom); put(out, x0 + x, y0 + h - 1 + oy, 0, bottom); }
+    for (y = 1; y < h - 1; y++) { put(out, x0, y0 + y + oy, 3, bottom); put(out, x0 + w - 1, y0 + y + oy, 0, bottom); }
+    put(out, x0, y0 + oy, 3, bottom); put(out, x0 + w - 1, y0 + oy, 0, bottom);
+    put(out, x0, y0 + h - 1 + oy, 0, bottom); put(out, x0 + w - 1, y0 + h - 1 + oy, 0, bottom);
+  }
+  /* the empty slot is a hole: an ink floor, with 1 px of lit paper on its bottom and right walls. The floor is ink
+     rather than the dark tone on purpose: on a bright picture a dark-green floor reads as a raised plate, while an
+     ink hole with a lit lip reads as a hole on bright and dark pictures alike (see the screenshots in the PR). */
+  function slot(out, R, p) {
+    var x0 = R.x[p], y0 = R.y[p], w = R.w[p], h = R.h[p];
+    for (var y = 0; y < h; y++) for (var x = 0; x < w; x++) {
+      var v = x >= w - 1 || y >= h - 1 ? 3 : 0;
+      out[(y0 + y) * W + x0 + x] = v;
+    }
+  }
+  function board(out, src, n, tiles) {
+    var R = rects(n), gapPiece = n * n - 1;
+    for (var p = 0; p < n * n; p++) {
+      var t = tiles[p];
+      if (t === gapPiece) slot(out, R, p); else tile(out, src, R, p, t, 0);
+    }
+  }
+  var MASKS = {};
+  function edgeMask(n) {
+    if (MASKS[n]) return MASKS[n];
+    var R = rects(n), m = new Uint8Array(W * H), x, y, k;
+    for (x = 0; x < W; x++) { m[x] = 1; m[(H - 1) * W + x] = 1; }
+    for (y = 0; y < H; y++) { m[y * W] = 1; m[y * W + W - 1] = 1; }
+    for (k = 1; k < n; k++) {
+      x = R.xs[k];
+      for (y = 0; y < H; y++) { m[y * W + x] = 1; m[y * W + x - 1] = 1; }
+      y = R.ys[k];
+      for (x = 0; x < W; x++) { m[y * W + x] = 1; m[(y - 1) * W + x] = 1; }
+    }
+    MASKS[n] = m;
+    return m;
+  }
   function frame() {
     var pic = S.screen === "preview" ? S.shot : S.pic, src = pic.px;
     if (S.screen === "solved") return solvedFrame(src);
-    if ((S.screen !== "play" && S.screen !== "menu") || S.peek) return src;
-    var n = S.n, xs = edges(n, W), ys = edges(n, H), out = new Uint8Array(W * H);
-    for (var p = 0; p < n * n; p++) {
-      var pr = Math.floor(p / n), pc = p % n, t = S.tiles[p], tr = Math.floor(t / n), tc = t % n;
-      var dw = xs[pc + 1] - xs[pc], dh = ys[pr + 1] - ys[pr], sw = xs[tc + 1] - xs[tc], sh = ys[tr + 1] - ys[tr];
-      for (var y = 0; y < dh; y++) for (var x = 0; x < dw; x++) {
-        var o = (ys[pr] + y) * W + xs[pc] + x, v;
-        if (t === n * n - 1) v = (x + y) % 4 === 0 ? 0 : 1;                    /* the gap */
-        else if (x === 0 || y === 0) v = 0;                                     /* a line between pieces */
-        else v = src[(ys[tr] + Math.floor(y * sh / dh)) * W + xs[tc] + Math.floor(x * sw / dw)];
-        out[o] = v;
-      }
+    if (S.screen === "title") {
+      if (!S.saved) return src;
+      var t = new Uint8Array(W * H);
+      board(t, src, S.n, S.tiles);
+      return t;
     }
+    if ((S.screen !== "play" && S.screen !== "menu") || S.peek) return src;
+    var n = S.n, out = new Uint8Array(W * H);
+    board(out, src, n, S.tiles);
     return out;
   }
   function solvedFrame(src) {
     var a = S.anim, ms = a.done ? GLINT : a.ms || 0;
     if (ms >= GLINT) return src;
-    var n = S.n, xs = edges(n, W), ys = edges(n, H), out = new Uint8Array(W * H);
+    var n = S.n, R = rects(n), out = new Uint8Array(W * H);
+    board(out, src, n, S.tiles);
+    var g = n * n - 1, gh = R.h[g];
     var drop = Math.min(1, ms / DROP), ease = 1 - (1 - drop) * (1 - drop);
+    var off = Math.round((1 - ease) * gh);
+    if (off > 0) tile(out, src, R, g, g, off);
     var melt = Math.max(0, Math.min(1, (ms - DROP) / (MELT - DROP)));
+    if (melt > 0) {
+      var mask = edgeMask(n), th = melt * 16;
+      for (var i = 0; i < out.length; i++) if (mask[i] && BAYER[((i / W | 0) % 4) * 4 + (i % W) % 4] + 0.5 >= th) out[i] = src[i];
+    }
     var glint = ms > MELT ? (ms - MELT) / (GLINT - MELT) * (W + H + 24) - 12 : -99;
-    var g = n * n - 1, gx = xs[g % n], gy = ys[Math.floor(g / n)], gw = xs[g % n + 1] - gx, gh = ys[Math.floor(g / n) + 1] - gy;
-    var off = Math.round((1 - ease) * gh);   /* the last piece slides down into its place */
     for (var y = 0; y < H; y++) for (var x = 0; x < W; x++) {
-      var o = y * W + x, v = src[o];
-      if (x >= gx && x < gx + gw && y >= gy && y < gy + gh) {
-        var yy = y - gy + off;
-        v = yy < gh ? src[(gy + yy) * W + x] : ((x + y) % 4 === 0 ? 0 : 1);
-      }
-      var line = (xs.indexOf(x) > 0 && xs.indexOf(x) < n) || (ys.indexOf(y) > 0 && ys.indexOf(y) < n);
-      if (line && (BAYER[(y % 4) * 4 + (x % 4)] + 0.5) / 16 >= melt) v = 0;   /* the cuts melt away in the dither's order */
       var dg = x + y - glint;
-      if (dg > -6 && dg < 6) v = Math.min(3, v + (dg > -3 && dg < 3 ? 2 : 1));   /* the glint */
-      out[o] = v;
+      if (dg > -6 && dg < 6) { var o = y * W + x; out[o] = Math.min(3, out[o] + (dg > -3 && dg < 3 ? 2 : 1)); }
     }
     return out;
   }
@@ -246,26 +428,45 @@
   function msg(text, note) { var m = document.getElementById("msg"); m.textContent = text; m.className = note ? "note" : ""; }
   function go(screen) { S.screen = screen; S.sel = 0; draw(); }
   function menuItems() {
-    var camera = HAS_PAD && !!PAD.camera;
-    if (S.screen === "title") return camera ? [["snap", TXT.snap], ["builtin", TXT.builtin]] : [["builtin", TXT.builtin]];
-    if (S.screen === "preview") return [["use", TXT.use], ["retake", TXT.retake]];
+    var camera = HAS_PAD && !!PAD.camera, files = HAS_PAD && typeof PAD.importFile === "function";
+    if (S.screen === "title") {
+      if (S.saved) return [["cont", TXT.cont], ["fresh", TXT.fresh]];
+      var out = [];
+      if (camera) out.push(["snap", TXT.snap]);
+      out.push(["builtin", TXT.builtin]);
+      if (files) out.push(["import", TXT.imp]);
+      return out;
+    }
+    if (S.screen === "preview") return [["use", TXT.use], ["other", S.previewFrom === "file" ? TXT.other : TXT.retake]];
     if (S.screen === "menu") return [["resume", TXT.resume]].concat(camera ? [["retake", TXT.retake]] : [])
       .concat([["size", TXT.size, !S.big], ["again", TXT.again]]);
-    if (S.screen === "solved") return S.anim && S.anim.done ? [["cont", TXT.cont]] : [];
+    if (S.screen === "solved") return S.anim && S.anim.done ? [["goon", TXT.cont]] : [];
     if (S.screen === "won") return [["next", TXT.next]].concat(camera ? [["newphoto", TXT.newphoto]] : []);
     return [];
   }
-  function draw() {
+  function infoText() {
     var sc = S.screen, best = S.best[String(S.n)];
-    document.getElementById("info").textContent = sc === "play" || sc === "menu" || sc === "solved" || sc === "won"
-      ? S.n + "×" + S.n + "  " + tx("moves", S.moves) + (best ? "  " + tx("best", best) : "") : "";
-    if (sc === "title") msg(HAS_PAD && PAD.camera ? TXT.intro : TXT.nocam, !(HAS_PAD && PAD.camera));
+    if (sc === "title") return S.saved ? S.n + "×" + S.n + "  " + tx("moves", S.moves) : "";
+    if (sc !== "play" && sc !== "menu" && sc !== "solved" && sc !== "won") return "";
+    return S.n + "×" + S.n + "  " + tx("moves", S.moves) + (best ? "  " + tx("best", best) : "");
+  }
+  function draw() {
+    var sc = S.screen, camera = HAS_PAD && !!PAD.camera;
+    document.getElementById("info").textContent = infoText();
+    if (sc === "title") {
+      if (S.saved) msg(TXT.saved, false);
+      else if (S.titleNote) msg(S.titleNote, false);
+      else msg(camera ? TXT.intro : TXT.nocam, !camera);
+    }
     else if (sc === "preview") msg(TXT.look, false);
     else if (sc === "play") msg(S.note, !!S.note);
     else if (sc === "menu") msg("", false);
     else if (sc === "solved") msg(S.anim && S.anim.done ? TXT.solved : "", false);
     else if (sc === "won") msg(tx("won", S.moves) + (S.record ? " " + TXT.record : "") + (S.unlockedNow ? " " + TXT.unlocked : ""), false);
-    document.getElementById("ft").textContent = TXT[{ title: "kTitle", preview: "kPreview", play: "kPlay", menu: "kMenu", solved: "kSolved", won: "kWon" }[sc]];
+    document.getElementById("ft").textContent = TXT[{
+      title: "kTitle", preview: S.previewFrom === "file" ? "kPreviewFile" : "kPreview",
+      play: "kPlay", menu: "kMenu", solved: "kSolved", won: "kWon"
+    }[sc]];
     S.items = menuItems();
     var box = document.getElementById("menu"); box.textContent = "";
     S.items.forEach(function (it, i) {
@@ -280,15 +481,20 @@
     var it = S.items[S.sel]; if (!it || S.busy) return;
     if (it[2]) { sfx("err"); msg(TXT.locked, true); return; }
     var id = it[0];
+    if (id === "title" || id === "play") S.titleNote = "";
     if (S.unlockedNow && (id === "next" || id === "newphoto")) { S.n = 4; S.unlockedNow = false; }
     if (id === "snap" || id === "retake" || id === "newphoto") { sfx("tap"); takePhoto(); }
-    else if (id === "builtin") { S.pic = BUILTIN; S.note = HAS_PAD && PAD.camera ? "" : TXT.nocam; sfx("ok"); newGame(); }
-    else if (id === "use") { S.pic = S.shot; S.note = ""; newGame(); }
+    else if (id === "import") { sfx("tap"); importPhoto(); }
+    else if (id === "builtin") { S.pic = BUILTIN; S.src = "builtin"; S.note = HAS_PAD && PAD.camera ? "" : TXT.nocam; sfx("ok"); newGame(); }
+    else if (id === "use") { S.pic = S.shot; S.src = S.previewFrom === "file" ? "file" : "camera"; S.note = ""; newGame(); }
+    else if (id === "other") { if (S.previewFrom === "file") importPhoto(); else takePhoto(); }
+    else if (id === "cont") { sfx("tap"); S.saved = null; S.titleNote = ""; go("play"); }
+    else if (id === "fresh") { sfx("tap"); S.saved = null; S.tiles = []; S.moves = 0; S.helped = false; S.pic = BUILTIN; S.src = "builtin"; S.titleNote = ""; go("title"); }
     else if (id === "resume") { sfx("tap"); go("play"); }
     else if (id === "again") { sfx("tap"); newGame(); }
     else if (id === "size") { S.n = S.n === 3 ? 4 : 3; sfx("tick"); newGame(); }
     else if (id === "next") { S.note = ""; newGame(); }
-    else if (id === "cont") { sfx("tap"); go("won"); }
+    else if (id === "goon") { sfx("tap"); go("won"); }
   }
 
   /* ---------- keys and touch ---------- */
@@ -354,7 +560,7 @@
   });
 
   /* for tests/e2e.test.mjs: where the pieces are, so a test can solve the puzzle with real key presses */
-  window.PUZZLE = { state: function () { return { screen: S.screen, n: S.n, tiles: S.tiles.slice(), gap: S.gap, moves: S.moves, fromCamera: S.pic !== BUILTIN, animDone: !!(S.anim && S.anim.done) }; } };
+  window.PUZZLE = { state: function () { return { screen: S.screen, n: S.n, tiles: S.tiles.slice(), gap: S.gap, moves: S.moves, fromCamera: S.pic !== BUILTIN, src: S.src, helped: S.helped, saved: !!S.saved, animDone: !!(S.anim && S.anim.done) }; } };
 
   draw();
 })();
