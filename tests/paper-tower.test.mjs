@@ -36,9 +36,9 @@ function reach(n, opts) {
   return seen;
 }
 
-test("the tower is 24 rectangular pages of known tiles, with one way in and one way up", () => {
-  assert.equal(D.FLOORS.length, 24);
-  for (let n = 1; n <= 24; n++) {
+test("the tower is 50 rectangular pages of known tiles, with one way in and one way up", () => {
+  assert.equal(D.FLOORS.length, 50);
+  for (let n = 1; n <= 50; n++) {
     const f = D.FLOORS[n - 1], map = f.map;
     assert.equal(f.n, n);
     assert.equal(map.length, 11, `page ${n}`);
@@ -51,46 +51,47 @@ test("the tower is 24 rectangular pages of known tiles, with one way in and one 
     assert.equal(map[0], "###########", `page ${n} top wall`);
     assert.equal(map[10], "###########", `page ${n} bottom wall`);
     assert.equal(map.join("").split("<").length - 1, 1, `page ${n} down stairs`);
-    if (n < 24) assert.equal(map.join("").split(">").length - 1, 1, `page ${n} up stairs`);
+    if (n < 50) assert.equal(map.join("").split(">").length - 1, 1, `page ${n} up stairs`);
     else assert.equal(map.join("").split("L").length - 1, 1, "the lamp");
   }
 });
 
 test("the boss stands on the only way to the next zone's page", () => {
-  for (const [n, ch] of [[6, "z"], [12, "z"], [18, "z"], [24, "Z"]]) {
+  for (const [n, ch] of [[10, "z"], [20, "z"], [30, "z"], [40, "z"], [50, "Z"]]) {
     assert.equal(D.FLOORS[n - 1].map.join("").split(ch).length - 1, 1, `page ${n}`);
     assert.ok(D.BOSSES[n], `boss ${n}`);
   }
-  for (let n = 1; n <= 24; n++) {
+  for (let n = 1; n <= 50; n++) {
     const z = D.zoneOf(n);
     for (const row of D.FLOORS[n - 1].map) for (const ch of row) {
       if (ch === "z" || ch === "Z") continue;
       if (D.isMonster(ch)) assert.ok(D.monsterAt(ch, z), `page ${n}: ${ch} has no zone-${z + 1} stats`);
     }
   }
-  assert.equal(D.zoneOf(1), 0); assert.equal(D.zoneOf(6), 0);
-  assert.equal(D.zoneOf(7), 1); assert.equal(D.zoneOf(18), 2); assert.equal(D.zoneOf(24), 3);
+  assert.equal(D.zoneOf(1), 0); assert.equal(D.zoneOf(10), 0);
+  assert.equal(D.zoneOf(11), 1); assert.equal(D.zoneOf(20), 1);
+  assert.equal(D.zoneOf(21), 2); assert.equal(D.zoneOf(40), 3); assert.equal(D.zoneOf(41), 4); assert.equal(D.zoneOf(50), 4);
 });
 
 test("every page's stairs are reachable without opening a fold", () => {
-  for (let n = 1; n <= 24; n++) {
+  for (let n = 1; n <= 50; n++) {
     const s = reach(n), rows = D.FLOORS[n - 1].map;
     let goal = null;
-    for (let y = 0; y < 11 && !goal; y++) for (let x = 0; x < 11 && !goal; x++) if (rows[y][x] === (n === 24 ? "L" : ">")) goal = x + "," + y;
+    for (let y = 0; y < 11 && !goal; y++) for (let x = 0; x < 11 && !goal; x++) if (rows[y][x] === (n === 50 ? "L" : ">")) goal = x + "," + y;
     assert.ok(s.has(goal), `page ${n}: the way up is cut off`);
   }
 });
 
-test("shops, people and fountains stand where the data says, and the three wicks are behind folds", () => {
-  const shops = [4, 10, 16, 20], npcs = [3, 8, 14, 23], fountains = [2, 8, 12, 14, 18, 20, 24];
+test("shops, people and fountains stand where the data says, and the five wicks are behind folds", () => {
+  const shops = [5, 15, 25, 35, 45], npcs = [3, 13, 23, 33, 43], fountains = [2, 8, 12, 18, 22, 28, 32, 38, 42, 48];
   for (const n of shops) assert.equal(D.FLOORS[n - 1].map.join("").split("m").length - 1, 1, `shop ${n}`);
   for (const n of npcs) assert.equal(D.FLOORS[n - 1].map.join("").split("n").length - 1, 1, `person ${n}`);
   for (const n of fountains) assert.equal(D.FLOORS[n - 1].map.join("").split("f").length - 1, 1, `spring ${n}`);
   for (const n of shops) assert.ok(D.SHOPS[n], `shop data ${n}`);
   for (const n of npcs) assert.ok(D.NPCS[n], `person data ${n}`);
   const wicks = [];
-  for (let n = 1; n <= 24; n++) for (let y = 0; y < 11; y++) for (let x = 0; x < 11; x++) if (D.FLOORS[n - 1].map[y][x] === "*") wicks.push({ n, x, y });
-  assert.deepEqual(wicks.map((w) => w.n), [7, 13, 19]);
+  for (let n = 1; n <= 50; n++) for (let y = 0; y < 11; y++) for (let x = 0; x < 11; x++) if (D.FLOORS[n - 1].map[y][x] === "*") wicks.push({ n, x, y });
+  assert.deepEqual(wicks.map((w) => w.n), [7, 17, 27, 37, 47]);
   for (const w of wicks) {
     const closed = reach(w.n), open = reach(w.n, { seams: true });
     assert.ok(!closed.has(w.x + "," + w.y), `wick on page ${w.n} is not hidden`);
@@ -104,7 +105,7 @@ test("every sprite the data names exists, and every shop line is sane", () => {
   for (const b of Object.values(D.BOSSES)) assert.ok(art[b.art], b.art);
   for (const i of Object.values(D.ITEMS)) assert.ok(art[i.art], i.art);
   for (const p of Object.values(D.NPCS)) assert.ok(art[p.art], p.art);
-  for (const key of ["heroDown", "heroUp", "heroSide", "floor0", "floor3", "wall0", "wall3", "doorY", "lamp"]) assert.ok(art[key], key);
+  for (const key of ["heroDown", "heroUp", "heroSide", "floor0", "floor4", "wall0", "wall4", "doorY", "lamp", "lord", "ferryman"]) assert.ok(art[key], key);
   for (const [n, shop] of Object.entries(D.SHOPS)) {
     assert.ok(shop.stock.length > 0, n);
     for (const it of shop.stock) {
@@ -133,6 +134,7 @@ test("fighting, keys, doors, stones, springs and the fold change the state", () 
   const S = R.newGame();
   assert.equal(S.floor, 1);
   S.atk = 20; S.def = 10; S.hp = 100;
+  R.setTile(S, 7, 9, "i");
   const hp0 = S.hp, gold0 = S.gold, kills0 = S.kills;
   const win = R.fight(S, "i", 7, 9);
   assert.equal(win.ok, true);
@@ -150,11 +152,11 @@ test("fighting, keys, doors, stones, springs and the fold change the state", () 
   assert.equal(R.tile(S, 5, 5), ".");
   assert.equal(R.openDoor(S, 5, 5).ok, false);
 
-  S.floor = 1; S.x = 8; S.y = 8;
+  S.floor = 1; S.x = 8; S.y = 8; R.setTile(S, 8, 8, "y");
   const keys = S.keys.y;
   const got = R.take(S, "y");
   assert.equal(got.kind, "key"); assert.equal(S.keys.y, keys + 1); assert.equal(R.tile(S, 8, 8), ".");
-  S.x = 5; S.y = 2;
+  S.x = 5; S.y = 2; R.setTile(S, 5, 2, "a");
   const atk = S.atk;
   assert.equal(R.take(S, "a").amount, 3); assert.equal(S.atk, atk + 3);
 
@@ -169,21 +171,21 @@ test("fighting, keys, doors, stones, springs and the fold change the state", () 
   assert.equal(S.hp, S.hpMax);
   assert.equal(R.drink(S), false);
 
-  S.floor = 6; S.hp = 1; S.gold = 100;
-  const rv = R.revive(S), down = R.findChar(6, "<");
+  S.floor = 10; S.hp = 1; S.gold = 100;
+  const rv = R.revive(S), down = R.findChar(10, "<");
   assert.equal(rv.x, down.x); assert.equal(rv.y, down.y);
   assert.equal(S.gold, 80); assert.equal(S.hp, S.hpMax); assert.equal(S.deaths, 1);
 });
 
 test("shops keep their stock per page, and the last purchase cannot repeat", () => {
   const S = R.newGame();
-  S.floor = 4; S.gold = 1000;
+  S.floor = 5; S.gold = 1000;
   const atk = S.atk;
   const r = R.buy(S, 0);
   assert.equal(r.ok, true);
-  assert.equal(S.atk, atk + 4);
+  assert.equal(S.atk, atk + 3);
   assert.equal(S.gold, 985);
-  assert.equal(R.stockLeft(S, 0), 3);
+  assert.equal(R.stockLeft(S, 0), 5);
   for (let i = 0; i < 10; i++) R.buy(S, 0);
   assert.equal(R.stockLeft(S, 0), 0);
   assert.equal(R.buy(S, 0).reason, "sold");
@@ -193,7 +195,7 @@ test("shops keep their stock per page, and the last purchase cannot repeat", () 
   assert.ok(S.hpMax > 1000 && S.hp > 1000);
 });
 
-test("floors, the four folds, the lamp and saves keep their promises", () => {
+test("floors, the five folds, the lamp and saves keep their promises", () => {
   const S = R.newGame();
   assert.equal(R.nextFloor(S), true);
   assert.equal(S.floor, 2);
@@ -202,25 +204,25 @@ test("floors, the four folds, the lamp and saves keep their promises", () => {
   assert.equal(S.x, R.findChar(1, ">").x); assert.equal(S.y, R.findChar(1, ">").y);
   assert.ok(S.visited["1"] && S.visited["2"]);
   assert.equal(R.travelTargets(S).length, 0);
-  S.visited["7"] = true; S.floor = 8;
-  assert.deepEqual(plain(R.travelTargets(S)), [1, 7]);
-  assert.equal(R.travel(S, 7), true);
-  assert.equal(S.floor, 7);
-  assert.equal(R.travel(S, 13), false);
+  S.visited["11"] = true; S.floor = 12;
+  assert.deepEqual(plain(R.travelTargets(S)), [1, 11]);
+  assert.equal(R.travel(S, 11), true);
+  assert.equal(S.floor, 11);
+  assert.equal(R.travel(S, 21), false);
   const copy = R.hydrate(plain(S));
   assert.deepEqual(plain(copy), plain(S));
   assert.equal(R.hydrate({ v: 999 }), null);
 });
 
-test("three wicks make the last keeper weaker, and only there", () => {
+test("five wicks make the last keeper weaker, and only there", () => {
   const S = R.newGame();
-  S.floor = 24;
+  S.floor = 50;
   const strong = R.monsterFor(S, "Z");
-  S.wicks = 3;
+  S.wicks = 5;
   const soft = R.monsterFor(S, "Z");
   assert.ok(soft.weakened);
   assert.ok(soft.atk < strong.atk && soft.def < strong.def);
-  S.floor = 18;
+  S.floor = 40;
   assert.equal(R.monsterFor(S, "Z"), null);
   assert.ok(R.monsterFor(S, "z"));
 });
@@ -326,14 +328,14 @@ function walk(opt) {
   for (let step = 0; step < 400; step++) {
     let progress = false;
     for (let i = 0; i < 80; i++) { if (gain()) progress = true; else break; }
-    if (S.floor === 24) {
+    if (S.floor === 50) {
       const open = seen();
       const lamp = [...open].some((k) => { const [x, y] = k.split(",").map(Number); return T(x, y) === "L"; });
       if (lamp) return { won: true, S, visits, log, purchases };
     }
     const open = seen();
     const up = [...open].find((k) => { const [x, y] = k.split(",").map(Number); return T(x, y) === ">"; });
-    if (up && S.floor < 24) {
+    if (up && S.floor < 50) {
       S.x = +up.split(",")[0]; S.y = +up.split(",")[1];
       R.nextFloor(S); visits.push(S.floor); continue;
     }
@@ -343,17 +345,17 @@ function walk(opt) {
   return { won: false, S, visits, log, purchases };
 }
 
-test("a greedy walker climbs all 24 pages, takes the three wicks and lights the lamp", () => {
+test("a greedy walker climbs all 50 pages, takes the five wicks and lights the lamp", () => {
   const r = walk();
   assert.equal(r.won, true, `stopped on page ${r.S.floor} with ${r.S.hp} HP, ${r.S.atk} ATK, ${r.S.def} DEF`);
-  assert.deepEqual(r.visits, Array.from({ length: 24 }, (_, i) => i + 1));
-  assert.ok(r.S.wicks >= 3, `wicks ${r.S.wicks}`);
-  assert.ok(r.S.kills > 40, `kills ${r.S.kills}`);
+  assert.deepEqual(r.visits, Array.from({ length: 50 }, (_, i) => i + 1));
+  assert.ok(r.S.wicks >= 5, `wicks ${r.S.wicks}`);
+  assert.ok(r.S.kills > 150, `kills ${r.S.kills}`);
   assert.ok(r.S.hp > 0);
-  assert.ok(r.purchases >= 12, `the walker made ${r.purchases} purchases`);
+  assert.ok(r.purchases >= 30, `the walker made ${r.purchases} purchases`);
 });
 
-test("a player who never opens a fold can still finish, without the three wicks", () => {
+test("a player who never opens a fold can still finish, without the five wicks", () => {
   const r = walk({ seams: false });
   assert.equal(r.won, true, `stopped on page ${r.S.floor} with ${r.S.hp} HP, ${r.S.atk} ATK, ${r.S.def} DEF`);
   assert.equal(r.S.wicks, 0);
