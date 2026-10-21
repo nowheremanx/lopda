@@ -6,7 +6,7 @@ var PT = PT || {};
 PT.RULES = (function () {
   "use strict";
   var D = PT.DATA;
-  var VERSION = 1;
+  var VERSION = 2;
 
   function start() { return findChar(1, "<") || { x: 2, y: 9 }; }
 
@@ -14,7 +14,7 @@ PT.RULES = (function () {
     var p = start();
     return {
       v: VERSION, floor: 1, x: p.x, y: p.y,
-      hp: 1000, hpMax: 1000, atk: 10, def: 10, gold: 0,
+      hp: 1200, hpMax: 1200, atk: 10, def: 10, gold: 0,
       keys: { y: 1, b: 0, r: 0 },
       mods: {}, flags: {}, visited: { "1": true },
       kills: 0, steps: 0, time: 0, wicks: 0, deaths: 0
@@ -60,14 +60,14 @@ PT.RULES = (function () {
   function monsterFor(S, ch) {
     var zone = D.zoneOf(S.floor), m = null;
     if (ch === "z" || ch === "Z") {
-      if ((ch === "Z") !== (S.floor === 24)) return null;
+      if ((ch === "Z") !== (S.floor === 50)) return null;
       m = D.bossAt(S.floor);
     } else m = D.monsterAt(ch, zone);
     if (!m) return null;
-    if (m.boss && S.floor === 24 && S.wicks >= D.WICKS) {
+    if (m.boss && S.floor === 50 && S.wicks >= D.WICKS) {
       m = clone(m);
-      m.atk = Math.round(m.atk * 0.85);
-      m.def = Math.round(m.def * 0.85);
+      m.atk = Math.round(m.atk * 0.8);
+      m.def = Math.round(m.def * 0.8);
       m.weakened = true;
     }
     return m;
@@ -195,7 +195,7 @@ PT.RULES = (function () {
 
   /* fast travel: only the four folds, and only once they have been visited */
   function travelTargets(S) {
-    return [1, 7, 13, 19].filter(function (n) { return n !== S.floor && S.visited[String(n)]; });
+    return [1, 11, 21, 31, 41].filter(function (n) { return n !== S.floor && S.visited[String(n)]; });
   }
   function travel(S, n) {
     if (travelTargets(S).indexOf(n) < 0) return false;
@@ -207,7 +207,7 @@ PT.RULES = (function () {
   }
 
   function score(S) {
-    return (S.floor - 1) * 100 + S.kills * 10 + S.wicks * 500 + (S.flags["boss:24"] ? 5000 : 0);
+    return (S.floor - 1) * 100 + S.kills * 10 + S.wicks * 500 + (S.flags["boss:50"] ? 5000 : 0);
   }
 
   return {

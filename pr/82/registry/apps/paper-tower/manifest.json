@@ -3,12 +3,12 @@
   "id": "paper-tower",
   "name": "纸塔",
   "glyph": "纸",
-  "version": "1.0.0",
-  "description": "爬过二十四页纸塔：钥匙、宝石、商店与墨兽。爽快而不刁难的爬塔冒险。",
+  "version": "1.1.0",
+  "description": "爬过五十页纸塔：钥匙、宝石、商店与墨兽。五区十页，爽快而不刁难的爬塔冒险。",
   "i18n": {
     "en": {
       "name": "Paper",
-      "description": "Climb 24 pages of keys, gems and ink beasts. A generous climb."
+      "description": "Climb 50 pages of keys, gems and ink beasts. A generous tower climb."
     }
   },
   "author": "Haowei Wu",

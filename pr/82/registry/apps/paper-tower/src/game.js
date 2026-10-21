@@ -1,4 +1,4 @@
-/* Paper Tower: the game. A 24-page tower-climbing RPG in the classic key-and-door tradition:
+/* Paper Tower: the game. A 50-page tower-climbing RPG in the classic key-and-door tradition:
    walk, open doors, take stones, fight with arithmetic, buy from four shops, find the folds.
    Everything visible is drawn on lo-game's 160x144 four-tone screen. MIT License. */
 var game = LoGame.create({ width: 160, height: 144, lang: "zh" });
@@ -182,8 +182,8 @@ game.scene("play", {
     if (!S.flags.intro) {
       S.flags.intro = true; saveAuto(); busy = true; bannerT = 0;
       game.say([
-        t("纸塔的灯灭了。纸开始发软，边角往里卷。", "The tower's lamp is out. The paper is going soft, curling at the edges."),
-        t("你是阿折，送信人。带着最后一根火柴，从第一页往上爬。", "You are A Zhe, a courier. Carry the last match up from the first page."),
+        t("纸塔的灯灭了。五十页纸一起发软，边角往里卷。", "The tower's lamp is out. Fifty pages are going soft, curling at the edges."),
+        t("你是阿折，送信人。带着最后一根火柴，从第一页爬到灯座。", "You are A Zhe, a courier. Carry the last match from page one to the lamp stand."),
         t("方向键走。A 开门、说话、打怪。START 菜单，SELECT 让折缝显形。", "Arrows walk. A opens, talks and fights. START menu, SELECT shows seams."),
         t("打不过就回墨铺。败北只回本页入口，金币少两成。", "Stuck? Go back to a shop. Falling only returns you here, minus a fifth of your gold.")
       ], { name: t("纸塔", "Paper Tower") }).then(function () { busy = false; });
@@ -332,7 +332,7 @@ function revealSecrets() {
   saveAuto();
 }
 function reachLamp() {
-  if (!S.flags["boss:24"]) { sfx("denied"); toast(t("蠹王还坐在灯座上。", "The King still sits on the lamp stand.")); return; }
+  if (!S.flags["boss:50"]) { sfx("denied"); toast(t("蠹王还坐在灯座上。", "The King still sits on the lamp stand.")); return; }
   game.go("ending", null, { fade: true, to: game.INK });
 }
 
@@ -480,8 +480,8 @@ function drawThing(g, ch, x, y, z) {
     return;
   }
   if (ch === "L") {
-    g.sprite(S.flags["boss:24"] ? A.lampLit : A.lamp, px, py);
-    if (S.flags["boss:24"] && Math.floor(game.time * 6) % 2 === 0) g.rect(px + 7, py + 4, 2, 2, 3);
+    g.sprite(S.flags["boss:50"] ? A.lampLit : A.lamp, px, py);
+    if (S.flags["boss:50"] && Math.floor(game.time * 6) % 2 === 0) g.rect(px + 7, py + 4, 2, 2, 3);
     return;
   }
   if (ch === "n") {
@@ -510,8 +510,8 @@ function drawHUD(g) {
   g.window(0, 0, 160, HUD, { thin: true });
   g.sprite(A.heart, 4, 4);
   g.text(S.hp + "/" + S.hpMax, 14, 2);
-  g.sprite(A.coinIcon, 104, 4);
-  g.text(short(S.gold), 114, 2);
+  g.sprite(A.coinIcon, 106, 4);
+  g.text(short(S.gold), 116, 2);
   g.sprite(A.keyIcon, 4, 17);
   g.text(S.keys.y + "/" + S.keys.b + "/" + S.keys.r, 14, 16);
   g.sprite(A.swordIcon, 70, 17);
@@ -546,7 +546,7 @@ async function openMenu() {
   busy = true;
   var items = [t("状态", "Status"), t("图鉴", "Bestiary"), t("地图", "Map")];
   var acts = ["status", "bestiary", "map"];
-  if (S.visited["7"]) { items.push(t("纸鸢", "Paper kite")); acts.push("travel"); }
+  if (S.visited["11"]) { items.push(t("纸鸢", "Paper kite")); acts.push("travel"); }
   items.push(t("存档", "Save")); acts.push("save");
   items.push(t("说明", "How to play")); acts.push("help");
   items.push(t("回标题", "Title")); acts.push("title");
@@ -568,13 +568,13 @@ async function openMenu() {
 async function helpPages() {
   await game.say([
     t("你是阿折，纸塔里的送信人。塔顶的长明灯灭了，纸开始发软。", "You are A Zhe, a courier in the paper tower. The Everlamp is out, and the paper is going soft."),
-    t("爬上二十四页，把灯点回来。蠹王在灯座上。", "Climb twenty-four pages and light it again. The Bookworm King sits on the lamp stand."),
+    t("爬上五十页，把灯点回来。蠹王在灯座上。", "Climb fifty pages and light it again. The Bookworm King sits on the lamp stand."),
     t("方向键走。A 说话、开门、打怪。START 或 B 打开菜单。", "Arrows walk. A talks, opens and fights. START or B opens the menu."),
     t("SELECT 让这一页的折缝显形。撞一撞可疑的墙也行。", "SELECT shows this page's seams. Bumping a suspicious wall works too."),
     t("走进怪物会开战。左上角写着这一战会损耗多少。", "Walking into a monster starts a fight. The corner shows what it will cost."),
     t("打不过就回商店。四间墨铺不涨价，货卖完为止。", "Stuck? Go back to a shop. Four ink shops, fixed prices, while stock lasts."),
     t("败北不会结束游戏：塔把你折回本页入口，只收两成金币。", "Defeat is not the end: the tower folds you back to this page's entrance and takes a fifth of your gold."),
-    t("三根灯芯在第七、十三、十九页的折缝里。带齐了，蠹王会弱一些。", "Three wicks wait in the seams of pages seven, thirteen and nineteen. With all three, the King is weaker.")
+    t("五根灯芯在第七、十七、二十七、三十七、四十七页的折缝里。带齐了，蠹王会弱一些。", "Five wicks wait in the seams of pages seven, seventeen, twenty-seven, thirty-seven and forty-seven. With all five, the King is weaker.")
   ], { name: t("怎么玩", "How to play") });
 }
 
@@ -605,7 +605,7 @@ function bestiaryScene() {
     var m = D.monsterAt(ch, z);
     if (m) rows.push({ ch: ch, m: m });
   });
-  if (D.BOSSES[S.floor]) rows.push({ ch: S.floor === 24 ? "Z" : "z", m: R.monsterFor(S, S.floor === 24 ? "Z" : "z") });
+  if (D.BOSSES[S.floor]) rows.push({ ch: S.floor === 50 ? "Z" : "z", m: R.monsterFor(S, S.floor === 50 ? "Z" : "z") });
   return {
     update: function () {
       var d = game.dir(0.3, 0.1);
@@ -699,7 +699,7 @@ function shopScene() {
       if (game.pressed("b") || game.pressed("start")) { game.pop(); return; }
       var tapped = game.pointer.pressed;
       if (tapped) {
-        var row = Math.floor((game.pointer.y - 19) / 17);
+        var row = Math.floor((game.pointer.y - 30) / 16);
         if (row < 0 || row >= sh.stock.length) { game.pop(); return; }
         sel = row;
       }
@@ -712,10 +712,10 @@ function shopScene() {
     },
     draw: function (g) {
       g.clear(g.PAPER); g.window(2, 2, 156, 140, { thin: true });
-      g.text(tname(sh.name), 80, 5, { align: "center" });
-      g.text(t("金 {g}", "Gold {g}").replace("{g}", S.gold), 148, 5, { align: "right", color: g.DARK });
+      g.text(tname(sh.name), 80, 4, { align: "center" });
+      g.text(t("金 {g}", "Gold {g}").replace("{g}", S.gold), 152, 16, { align: "right", color: g.DARK });
       for (var i = 0; i < sh.stock.length; i++) {
-        var it = sh.stock[i], left = R.stockLeft(S, i), y = 19 + i * 17;
+        var it = sh.stock[i], left = R.stockLeft(S, i), y = 30 + i * 16;
         if (i === sel) g.rect(5, y - 1, 150, 15, g.INK);
         var col = i === sel ? g.PAPER : g.INK;
         g.text(label(it), 10, y, { color: col });
@@ -892,19 +892,19 @@ game.scene("ending", {
   enter: async function () {
     endingPhase = "intro";
     music("ending"); game.ambience("fire", 0.3);
-    var many = S.wicks >= 3;
+    var many = S.wicks >= D.WICKS;
     await game.say([
       t("你踩上灯座。蠹王化成一小撮墨灰，落在纸上。", "You step onto the lamp stand. The King crumbles into a pinch of ink ash."),
-      t("三根灯芯一起点着了。纸塔轻轻响了一声，像合上一本书。", "Three wicks catch together. The tower makes one soft sound, like a book closing."),
+      t("五根灯芯一起点着了。纸塔轻轻响了一声，像合上一本书。", "Five wicks catch together. The tower makes one soft sound, like a book closing."),
       t("守灯人从灯影里走出来。她说，塔不必再折了。", "The lamp keeper steps out of the shadow. She says the tower need not fold again."),
       t("你把最后一封信放在灯下。收信人写着：下一个爬上来的人。", "You leave the last letter under the lamp. It is addressed to whoever climbs next.")
     ], { name: t("长明灯", "The Everlamp") });
     if (S.wicks === 0) {
       await game.say(t("你只带了那根火柴。火苗很小，但够亮。", "You had only the match. The flame is small, but it is enough."), { name: t("守灯人", "Lamp Keeper") });
     } else if (!many) {
-      await game.say(t("灯芯不够三根。火苗矮一点，像在打盹。", "Fewer than three wicks. The flame is shorter, as if dozing."), { name: t("守灯人", "Lamp Keeper") });
+      await game.say(t("灯芯不够五根。火苗矮一点，像在打盹。", "Fewer than five wicks. The flame is shorter, as if dozing."), { name: t("守灯人", "Lamp Keeper") });
     }
-    S.flags.cleared = true; S.flags["boss:24"] = true;
+    S.flags.cleared = true; S.flags["boss:50"] = true;
     saveAuto();
     var old = await game.load("meta");
     var best = Math.max((old && old.best) || 0, R.score(S));

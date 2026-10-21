@@ -7,6 +7,7 @@
      zone 1 G minor, 100 bpm: seal paste and red doors.
      zone 2 E minor, 112 bpm: creases underfoot.
      zone 3 C minor, 76 bpm: the wick burning low.
+     zone 4 D minor, 72 bpm: the Ink Sea, slow and deep.
      battle A minor, 150 bpm: short, pushing, no introduction.
      boss   D minor with a flat second, 132 bpm: the King on the lamp stand.
      ending F major, 70 bpm: the lamp is lit. */
@@ -69,6 +70,17 @@ PT.MUSIC = {
         "| r c e- g r e- g e- | r c e- g r e- g e- | r d f a- r d f d | r c e- g r c e- c",
       tri: "v11 o2 l4 | c g c g | c g c g | f >c f c< | e- b- e- b- | c g c g | c g c g | d a- >d< a- | c g c g",
       noise: "l8 [v3 x r r v2 x r]7 | v3 X4 r2"
+    },
+    {
+      bpm: 72,
+      p1: "@1 v9 o4 l8" +
+        "| d4 f4 a4 g4 | f4 e4 d4. r | d4 f4 g4 a4 | >c4 <a4 g4. r" +
+        "| d4 f4 a4 >d4 | <c4 a4 f4. r | g4 f4 e4 d4 | d2. r4",
+      p2: "@0 v5 o3 l8" +
+        "| r d f a r f a f | r d f a r f a f | r d g b- r g b- g | r e g >c< r g >c< g" +
+        "| r d f a r f a f | r d f a r f a f | r c e g r c e c | r d f a r d f d",
+      tri: "v11 o2 l4 | d a d a | d a d a | <b- >f b- f< | c g >c< g | d a d a | d a d a | c g >c< g | d a d a",
+      noise: "l8 [v3 X4 r r v2 x r]7 | v3 X4 r2"
     }
   ],
   battle: {
