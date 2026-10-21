@@ -6,8 +6,8 @@
 <!-- Lo-PDA example app (lopda/1): a sliding puzzle cut from a photo the player takes with PAD.camera.snap
      (SPEC.md 6.6), or from six original four-tone pictures drawn in this file. Shows the photo before using it and
      allows a retake (sdk/UI.md section 10). Normal and arcade games, an opening cut, a self-solving picture on the
-     main menu, and an unfinished game kept with PAD.save. Chin buttons, touch, PAD.sfx and a short PAD.music jingle.
-     MIT License. -->
+     main menu, a hint that numbers every piece and points an arrow at the hole, and an unfinished game kept with
+     PAD.save. Chin buttons, touch, PAD.sfx and a short PAD.music jingle. MIT License. -->
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #a3ad7e; color: #1f2a14; font-family: monospace; }
   body { display: flex; flex-direction: column; }
@@ -187,9 +187,9 @@ var Solver = (function () {
       kPlay: "方向键 推　A 看原图　START 菜单　SELECT 提示", kMenu: "方向键 选　A 确定　B 返回",
       kLesson: "方向键 推　SELECT 提示　START 退出", kLessonDone: "A 下一课　START 退出", kSolved: "A 继续", kWon: "方向键 选　A 确定", kLost: "方向键 选　A 确定",
       lessonDone: "做到了！", lessonN: "第 {n} 课",
-      lesson1: "方向键把空格旁边的块推进空格。把这盘拼好。",
-      lesson2: "把 1 号块送到左上角。",
-      lesson3: "一行最后两块：把 3 放到 2 下面，再一起转进去。",
+      lesson1: "方向键把空格旁边的块推进空格。箭头指着第一步：先推 5 号块，再推 8 号块；按 SELECT 可再看。",
+      lesson2: "把 1 号块送到左上角。编号就在每块左上角，按 SELECT 可以再看箭头。",
+      lesson3: "一行最后两块：把 3 号块放到 2 号块下面，再一起转进去。",
       lesson4: "一行拼好就别再动它。最后两行按列来。先看一遍。",
       demoEnd: "看完了：拼好一行，再拼下一行。",
       stage3: ["第 1 行：送 1 号块", "第 1 行：最后两块一起", "第 1 列：3 和 6 一起", "最后 2×2：转到位"],
@@ -214,9 +214,9 @@ var Solver = (function () {
       kPlay: "D-pad slide  A peek  START menu  SELECT hint", kMenu: "Arrows pick  A ok  B back",
       kLesson: "D-pad slide  SELECT hint  START leave", kLessonDone: "A next  START leave", kSolved: "A continue", kWon: "Arrows pick  A ok", kLost: "Arrows pick  A ok",
       lessonDone: "Done!", lessonN: "Lesson {n}",
-      lesson1: "The arrows push the piece next to the gap into it. Solve this one.",
-      lesson2: "Bring tile 1 to the top-left corner.",
-      lesson3: "The last two in a row: put 3 under 2, then turn them in together.",
+      lesson1: "The arrows push the piece next to the gap into it. The arrow marks the first move: push tile 5 up, then tile 8 left. Press SELECT to see it again.",
+      lesson2: "Bring tile 1 to the top-left corner. Each number sits in its tile's top-left corner; SELECT shows the arrow again.",
+      lesson3: "The last two in a row: put tile 3 under tile 2, then turn them in together.",
       lesson4: "Once a row is done, leave it alone. The last two rows go column by column. Just watch.",
       demoEnd: "That is the idea: one row, then the next.",
       stage3: ["Row 1: bring tile 1", "Row 1: last two together", "Column 1: 3 and 6 together", "Last 2×2: turn it home"],
@@ -458,7 +458,7 @@ var Solver = (function () {
     arcade: false, gameArcade: false, left: 0, arcadeTotal: 0,
     clockAt: 0, clockTimer: 0, clockLow: -1,
     mode: "normal", lesson: 0, lessonDone: false, doneText: "", beforeTutorial: null, lessonTimer: 0,
-    demo: null, hint: null, hintOn: false, hintTimer: 0,
+    demo: null, hint: null,
     intro: null, introTimer: 0, attract: null, attractTimer: 0, attractIndex: 0,
     galleryIndex: 0, menuFrom: "play", unlockedNow: false };
 
@@ -789,6 +789,60 @@ var Solver = (function () {
     for (x = 0; x < w; x++) { out[y0 * W + x0 + x] = 3 - out[y0 * W + x0 + x]; out[(y0 + h - 1) * W + x0 + x] = 3 - out[(y0 + h - 1) * W + x0 + x]; }
     for (y = 0; y < h; y++) { out[(y0 + y) * W + x0] = 3 - out[(y0 + y) * W + x0]; out[(y0 + y) * W + x0 + w - 1] = 3 - out[(y0 + y) * W + x0 + w - 1]; }
   }
+  /* ---------- the hint overlay: a numbered badge on every piece and an arrow from the piece to the hole ----------
+     Numbers are drawn here, not in CSS: the board is a 128×112 four-tone image. A 5×7 numeral at 2× sits on a
+     paper plate with an ink rim, so it stays readable over both the light and the dark parts of a picture. */
+  var DIGIT = {
+    "0": ["01110", "10001", "10011", "10101", "11001", "10001", "01110"],
+    "1": ["00100", "01100", "00100", "00100", "00100", "00100", "01110"],
+    "2": ["01110", "10001", "00001", "00010", "00100", "01000", "11111"],
+    "3": ["11111", "00010", "00100", "00010", "00001", "10001", "01110"],
+    "4": ["00010", "00110", "01010", "10010", "11111", "00010", "00010"],
+    "5": ["11111", "10000", "11110", "00001", "00001", "10001", "01110"],
+    "6": ["00110", "01000", "10000", "11110", "10001", "10001", "01110"],
+    "7": ["11111", "00001", "00010", "00100", "01000", "01000", "01000"],
+    "8": ["01110", "10001", "10001", "01110", "10001", "10001", "01110"],
+    "9": ["01110", "10001", "10001", "01111", "00001", "00010", "01100"]
+  };
+  function badge(out, R, p, num) {
+    var text = String(num), scale = 2, kern = 1, pad = 2, i, r, c, xx, yy;
+    var tw = text.length * 5 * scale + (text.length - 1) * kern, th = 7 * scale;
+    var bw = tw + pad * 2 + 2, bh = th + pad * 2 + 2;
+    var bx = R.x[p] + 3, by = R.y[p] + 3;
+    for (r = 0; r < bh; r++) for (c = 0; c < bw; c++)
+      put(out, bx + c, by + r, r === 0 || r === bh - 1 || c === 0 || c === bw - 1 ? 0 : 3);
+    for (i = 0; i < text.length; i++) {
+      var g = DIGIT[text.charAt(i)], ox = bx + 1 + pad + i * (5 * scale + kern), oy = by + 1 + pad;
+      for (r = 0; r < 7; r++) for (c = 0; c < 5; c++) if (g[r].charAt(c) === "1")
+        for (yy = 0; yy < scale; yy++) for (xx = 0; xx < scale; xx++) put(out, ox + c * scale + xx, oy + r * scale + yy, 0);
+    }
+  }
+  function numbers(out, n, tiles) {
+    var R = rects(n), gapPiece = n * n - 1;
+    for (var p = 0; p < n * n; p++) if (tiles[p] !== gapPiece) badge(out, R, p, tiles[p] + 1);
+  }
+  /* an arrow from the piece's centre, a quarter of the way in, to the centre of the hole; ink rim, paper body */
+  function arrowShape(cb, x0, y0, dx, dy, len, headLen, shaftHalf, headHalf) {
+    for (var s = 0; s < len; s++) {
+      var hw = s >= len - headLen ? Math.max(0, Math.round(headHalf * (len - s) / headLen)) : shaftHalf;
+      for (var w = -hw; w <= hw; w++) cb(x0 + dx * s + (dy ? w : 0), y0 + dy * s + (dx ? w : 0));
+    }
+  }
+  function hintArrow(out, R, from, to) {
+    var fx = R.x[from] + (R.w[from] >> 1), fy = R.y[from] + (R.h[from] >> 1);
+    var tx = R.x[to] + (R.w[to] >> 1), ty = R.y[to] + (R.h[to] >> 1);
+    var dx = tx > fx ? 1 : tx < fx ? -1 : 0, dy = ty > fy ? 1 : ty < fy ? -1 : 0;
+    var cell = Math.min(R.w[from], R.h[from]), off = Math.round(cell / 4);
+    var sx = fx + dx * off, sy = fy + dy * off;
+    var len = Math.abs(tx - sx) + Math.abs(ty - sy);
+    if (len < 4) return;
+    var half = Math.max(1, Math.round(cell / 14));
+    var headHalf = Math.max(half + 2, Math.round(cell / 5));
+    var headLen = Math.max(5, Math.round(cell / 3));
+    arrowShape(function (x, y) { put(out, x, y, 0); }, sx, sy, dx, dy, len + 2, headLen + 2, half + 1, headHalf + 1);
+    arrowShape(function (x, y) { put(out, x, y, 3); }, sx, sy, dx, dy, len + 1, headLen + 1, half, headHalf);
+  }
+  function showNumbers() { return (S.screen === "lesson" && S.mode === "tutorial") || !!S.hint; }
   var MASKS = {};
   function edgeMask(n) {
     if (MASKS[n]) return MASKS[n];
@@ -868,7 +922,12 @@ var Solver = (function () {
       if (S.peek && (sc === "play" || sc === "lesson")) return pic.px;
       var out = new Uint8Array(W * H);
       board(out, pic.px, S.n, S.tiles);
-      if (S.hint && S.hintOn && (sc === "play" || sc === "lesson")) ring(out, rects(S.n), S.hint.p);
+      if (S.hint && (sc === "play" || sc === "lesson")) {
+        ring(out, rects(S.n), S.hint.p);
+        hintArrow(out, rects(S.n), S.hint.p, S.hint.gap);
+      }
+      /* numbers last, so the arrow's tail never hides a digit */
+      if (showNumbers()) numbers(out, S.n, S.tiles);
       return out;
     }
     return pic.px;
@@ -948,7 +1007,8 @@ var Solver = (function () {
     draw();
   }
   function hint() {
-    if (S.hint || S.lessonDone || (S.screen !== "play" && S.screen !== "lesson")) return;
+    if (S.lessonDone || (S.screen !== "play" && S.screen !== "lesson")) return;
+    if (S.hint) { clearHint(); return; }   /* SELECT again puts the picture back */
     var plan;
     if (S.mode === "tutorial") {
       var L = LESSONS[S.lesson];
@@ -956,16 +1016,10 @@ var Solver = (function () {
     } else plan = Solver.solve(S.n, S.tiles);
     if (!plan || !plan.length) { sfx("err"); return; }
     if (S.mode !== "tutorial") { S.helped = true; saveGame(); }
-    S.hint = { p: plan[0].p }; S.hintOn = true; draw();
-    var k = 0;
-    S.hintTimer = setInterval(function () {
-      k++; S.hintOn = !S.hintOn; paint();
-      if (k >= 4) clearHint();
-    }, 150);
+    S.hint = { p: plan[0].p, gap: S.gap }; draw();
   }
   function clearHint() {
-    if (S.hintTimer) { clearInterval(S.hintTimer); S.hintTimer = 0; }
-    if (S.hint) { S.hint = null; S.hintOn = false; paint(); }
+    if (S.hint) { S.hint = null; paint(); }
   }
 
   /* ---------- the four lessons (怎么玩) ---------- */
@@ -1033,6 +1087,8 @@ var Solver = (function () {
       if (L.demo !== undefined && !S.lessonDone && S.moves === 0) S.lessonTimer = setTimeout(function () {
         if (S.mode === "tutorial" && S.screen === "lesson" && S.lesson === at && !S.lessonDone && S.moves === 0) startDemo(L.demo);
       }, 600);
+      /* a lesson opens with its first move already marked: ring, number and arrow, until the first slide */
+      if (L.demo === undefined && !S.lessonDone) hint();
     }
   }
   function menuItems() {
@@ -1263,6 +1319,7 @@ var Solver = (function () {
     return { screen: S.screen, n: S.n, nextN: S.nextN, tiles: S.tiles.slice(), gap: S.gap, moves: S.moves,
       fromCamera: S.src === "camera", src: S.src, picKey: S.picKey, helped: S.helped, hasSave: S.hasSave, saved: S.hasSave,
       sel: S.sel, items: S.items.map(function (it) { return it[1]; }), demo: !!S.demo, hint: !!S.hint,
+      hintAt: S.hint ? { p: S.hint.p, gap: S.hint.gap } : null, numbers: showNumbers(),
       mode: S.mode, lesson: S.lesson, lessonDone: S.lessonDone, animDone: !!(S.anim && S.anim.done),
       arcade: S.arcade, gameArcade: S.gameArcade, left: S.left, arcadeTotal: S.arcadeTotal,
       best: S.best[String(S.n)] || 0, bestTime: S.bestTime[String(S.n)] || 0,

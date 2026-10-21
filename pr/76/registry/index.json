@@ -314,7 +314,7 @@
         ".00000000000000.",
         "................"
       ],
-      "version": "1.2.0",
+      "version": "1.3.0",
       "description": "拍一张照片，或从六张内置图片里挑一张，切成滑块拼图再拼回来。普通和街机两种玩法。",
       "i18n": {
         "zh": {
@@ -332,8 +332,8 @@
         "camera"
       ],
       "path": "apps/photo-puzzle/index.html",
-      "sha256": "569012bf97fcd424f0fc080b6124bc4382b4718e9d69880ff2ef56828a849060",
-      "bytes": 65756
+      "sha256": "9fa0eddf5804438265feacbece06cc2eb1dc33ca7a0ab586cee7f624b196eec3",
+      "bytes": 69852
     },
     {
       "spec": "lopda/1",
