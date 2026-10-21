@@ -1,0 +1,1915 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>滥竽充数</title>
+<!-- Lo-PDA one-key rhythm game (lopda/1 + lo-game.js). MIT License. Copyright (c) 2026 Haowei Wu. -->
+</head>
+<body>
+<!-- The framework. Leave this block alone: node tools/bundle-app.mjs <folder> fills it in, plus a font block after it. -->
+<script data-lo-game="1.4.0">
+/*
+ * lo-game.js 1.4.0, a tiny game framework for Lo-PDA apps.
+ * MIT License. Copyright (c) 2026 Haowei Wu. See sdk/LICENSE.
+ *
+ * Paste-in library: an app carries its own copy inside a script tag marked
+ * data-lo-game="1.4.0", and `node tools/lo-game.mjs registry/apps/<id>` fills it in.
+ * The same tool adds a pixel-font block holding just the characters the app uses.
+ * Do not edit the copy inside an app; the checker verifies it.
+ *
+ * Everything is drawn into a four-tone indexed framebuffer (values 0-3), so
+ * nothing can ever show a colour outside the palette or a blurred edge.
+ * Reference: sdk/LO-GAME.md
+ */
+var LoGame = (function () {
+  "use strict";
+
+  var VERSION = "1.4.0";
+  var TONES = ["#1f2a14", "#4a5a32", "#7d8a58", "#a3ad7e"];
+  var INK = 0, DARK = 1, MID = 2, PAPER = 3;
+  var CLEAR = 255;
+  var BUTTONS = ["up", "down", "left", "right", "a", "b", "start", "select"];
+  var KEYS = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right",
+    x: "a", X: "a", z: "b", Z: "b", Enter: "start", Shift: "select" };
+  var HAS_PAD = typeof PAD !== "undefined";
+  var BITMAP_FONT = null;   /* set by LoGame.font(data), from the data-lo-font block */
+  function font(data) { BITMAP_FONT = data; }
+  function b64bits(str, n) {
+    var bin = atob(str), out = new Uint8Array(n);
+    for (var i = 0; i < n; i++) out[i] = (bin.charCodeAt(i >> 3) >> (7 - (i & 7))) & 1;
+    return out;
+  }
+
+  /* bilingual text (1.2.0): t({zh: "...", en: "..."}, vars) picks PAD.lang, else the fallback
+     language, else whichever the app wrote. Plain strings pass through. "{name}" is filled from vars. */
+  function padLang() { var l = HAS_PAD && PAD.lang; return l === "zh" || l === "en" ? l : null; }
+  function pick(text, lang, vars) {
+    var s = text;
+    if (s && typeof s === "object") { s = s[lang]; if (s == null) s = text.zh != null ? text.zh : text.en; }
+    s = s == null ? "" : String(s);
+    return vars ? s.replace(/\{(\w+)\}/g, function (m, k) { return vars[k] == null ? "" : String(vars[k]); }) : s;
+  }
+  function t(text, vars) { return pick(text, padLang() || "zh", vars); }
+
+  function rgbOf(hex) { return [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)]; }
+  var RGB = TONES.map(rgbOf);
+
+  /* ---------------- small helpers ---------------- */
+  function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+  function lerp(a, b, t) { return a + (b - a) * t; }
+  function approach(v, target, step) { return v < target ? Math.min(v + step, target) : Math.max(v - step, target); }
+  function rng(seed) {
+    var s = (seed >>> 0) || 0x9e3779b9;
+    var next = function () { s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; };
+    return {
+      next: next,
+      int: function (a, b) { return a + Math.floor(next() * (b - a + 1)); },
+      pick: function (arr) { return arr[Math.floor(next() * arr.length)]; },
+      chance: function (p) { return next() < p; }
+    };
+  }
+  var EASE = {
+    linear: function (t) { return t; },
+    out: function (t) { return 1 - (1 - t) * (1 - t); },
+    "in": function (t) { return t * t; },
+    inOut: function (t) { return t < 0.5 ? 2 * t * t : 1 - 2 * (1 - t) * (1 - t); }
+  };
+
+  /* ---------------- sprites: rows of "0123." ---------------- */
+  function sprite(rows) {
+    if (!Array.isArray(rows) || !rows.length) throw new Error("sprite: give an array of strings");
+    var h = rows.length, w = rows[0].length, px = new Uint8Array(w * h);
+    for (var y = 0; y < h; y++) {
+      if (rows[y].length !== w) throw new Error("sprite: row " + y + " is " + rows[y].length + " wide, expected " + w);
+      for (var x = 0; x < w; x++) {
+        var c = rows[y].charCodeAt(x) - 48;
+        px[y * w + x] = c >= 0 && c <= 3 ? c : CLEAR;
+      }
+    }
+    return { w: w, h: h, px: px };
+  }
+  function sprites(table) { var out = {}; Object.keys(table).forEach(function (k) { out[k] = sprite(table[k]); }); return out; }
+
+  /* ---------------- tile maps ---------------- */
+  function tilemap(opt) {
+    var rows = opt.map.slice(), size = opt.size || 8, tiles = opt.tiles || {}, solid = opt.solid || "";
+    var cols = rows[0].length;
+    rows.forEach(function (r, i) { if (r.length !== cols) throw new Error("tilemap: row " + i + " is " + r.length + " wide, expected " + cols); });
+    var map = {
+      size: size, cols: cols, rows: rows.length, width: cols * size, height: rows.length * size,
+      get: function (tx, ty) { return ty < 0 || ty >= rows.length || tx < 0 || tx >= cols ? null : rows[ty][tx]; },
+      set: function (tx, ty, ch) { if (map.get(tx, ty) === null) return; rows[ty] = rows[ty].slice(0, tx) + ch + rows[ty].slice(tx + 1); },
+      solid: function (tx, ty) { var c = map.get(tx, ty); return c === null || solid.indexOf(c) >= 0; },
+      find: function (ch) { var out = []; rows.forEach(function (r, y) { for (var x = 0; x < r.length; x++) if (r[x] === ch) out.push({ x: x, y: y }); }); return out; },
+      at: function (px, py) { return { x: Math.floor(px / size), y: Math.floor(py / size) }; },
+      draw: function (g, camX, camY) {
+        camX = Math.round(camX || 0); camY = Math.round(camY || 0);
+        var x0 = Math.max(0, Math.floor(camX / size)), y0 = Math.max(0, Math.floor(camY / size));
+        var x1 = Math.min(cols - 1, Math.floor((camX + g.width - 1) / size)), y1 = Math.min(rows.length - 1, Math.floor((camY + g.height - 1) / size));
+        for (var ty = y0; ty <= y1; ty++) for (var tx = x0; tx <= x1; tx++) {
+          var t = tiles[rows[ty][tx]];
+          if (t) g.sprite(t, tx * size - camX, ty * size - camY);
+        }
+      }
+    };
+    return map;
+  }
+  /* top-left of a camera that keeps (x, y) centred inside a world */
+  function camera(x, y, viewW, viewH, worldW, worldH) {
+    return {
+      x: worldW <= viewW ? Math.round((worldW - viewW) / 2) : clamp(Math.round(x - viewW / 2), 0, worldW - viewW),
+      y: worldH <= viewH ? Math.round((worldH - viewH) / 2) : clamp(Math.round(y - viewH / 2), 0, worldH - viewH)
+    };
+  }
+
+  /* ---------------- the game ---------------- */
+  function create(opt) {
+    opt = opt || {};
+    var W = opt.width || 160, H = opt.height || 144;
+    var LANG = padLang() || (opt.lang === "en" ? "en" : "zh");   /* opt.lang: the app's own default */
+    var STEP = 1 / 60;
+    var fontOpt = opt.font || {};
+    /* text: the pixel font when the app carries one, the phone's own font otherwise */
+    var BF = fontOpt.system ? null : BITMAP_FONT;
+    var FONT = { size: fontOpt.size || 12, family: fontOpt.family || "sans-serif", weight: fontOpt.weight || "400",
+      threshold: fontOpt.threshold || 0.45 };
+    FONT.line = BF ? BF.line : FONT.size + 2;
+    FONT.cell = BF ? BF.cell : FONT.line;
+
+    /* --- page and canvas --- */
+    var parent = opt.parent || document.body;
+    var border = opt.border == null ? PAPER : opt.border;
+    if (!opt.parent) {
+      var st = document.createElement("style");
+      st.textContent = "html,body{margin:0;height:100%;overflow:hidden;background:" + TONES[border] + "}" +
+        "body{display:flex;align-items:center;justify-content:center;touch-action:none;-webkit-user-select:none;user-select:none}";
+      document.head.appendChild(st);
+    }
+    var canvas = document.createElement("canvas");
+    canvas.width = W; canvas.height = H;
+    canvas.style.cssText = "display:block;image-rendering:pixelated;image-rendering:crisp-edges;touch-action:none";
+    parent.appendChild(canvas);
+    var ctx = canvas.getContext("2d");
+    var image = ctx.createImageData(W, H);
+    function fit() {
+      var aw = parent.clientWidth || innerWidth, ah = parent.clientHeight || innerHeight;
+      var dpr = window.devicePixelRatio || 1, best = Math.min(aw / W, ah / H), k = Math.floor(best * dpr) / dpr;
+      if (k < best * 0.9) k = best;   /* small screens: size beats perfectly even pixels */
+      k = Math.max(0.5, k);
+      canvas.style.width = Math.round(W * k) + "px"; canvas.style.height = Math.round(H * k) + "px";
+      game.scale = k;
+    }
+
+    /* --- framebuffer and drawing --- */
+    var buf = new Uint8Array(W * H);
+    var ox = 0, oy = 0, cx0 = 0, cy0 = 0, cx1 = W, cy1 = H;
+    function put(x, y, c) { if (x >= cx0 && y >= cy0 && x < cx1 && y < cy1) buf[y * W + x] = c; }
+
+    var fc = document.createElement("canvas"), fx = null, glyphs = {}, baseline = 0;
+    function fontCtx() {
+      if (fx) return fx;
+      fc.width = FONT.size * 3; fc.height = FONT.line + 4;
+      fx = fc.getContext("2d", { willReadFrequently: true });
+      fx.font = FONT.weight + " " + FONT.size + "px " + FONT.family;
+      fx.textBaseline = "alphabetic"; fx.fillStyle = TONES[INK];
+      var m = fx.measureText("国");
+      baseline = BF ? BF.cell - 2 : Math.round(m.actualBoundingBoxAscent || FONT.size * 0.88);
+      return fx;
+    }
+    /* a glyph is the system font at its native pixel size, thresholded to one bit */
+    function glyph(ch) {
+      var g = glyphs[ch]; if (g) return g;
+      var bf = BF && BF.glyphs[ch];
+      if (bf) {
+        var cut = bf.indexOf(":"), adv0 = +bf.slice(0, cut);
+        return (glyphs[ch] = { w: adv0, adv: adv0, h: BF.cell, bits: b64bits(bf.slice(cut + 1), adv0 * BF.cell) });
+      }
+      var x = fontCtx(), adv = Math.max(1, Math.round(x.measureText(ch).width));
+      x.clearRect(0, 0, fc.width, fc.height);
+      x.fillText(ch, 0, baseline);
+      var h = FONT.cell, w = Math.min(adv, fc.width), d = x.getImageData(0, 0, w, h).data, bits = new Uint8Array(w * h), lim = FONT.threshold * 255;
+      for (var i = 0; i < w * h; i++) bits[i] = d[i * 4 + 3] >= lim ? 1 : 0;
+      g = glyphs[ch] = { w: w, adv: adv, h: h, bits: bits };
+      return g;
+    }
+    function measure(str) { var w = 0; Array.from(String(str)).forEach(function (ch) { if (ch !== "\n") w += glyph(ch).adv; }); return w; }
+    var NO_START = "，。！？、；：）」』》,.!?;:)]%";
+    function wrap(str, width) {
+      var lines = [];
+      String(str).split("\n").forEach(function (para) {
+        var tokens = para.match(/[A-Za-z0-9'_\-]+|\s|./gu) || [""], line = "", lw = 0;
+        tokens.forEach(function (t) {
+          var tw = measure(t);
+          if (lw + tw > width && line && NO_START.indexOf(t) < 0) {
+            lines.push(line.replace(/\s+$/, "")); line = ""; lw = 0;
+            if (/^\s$/.test(t)) return;
+          }
+          line += t; lw += tw;
+        });
+        lines.push(line);
+      });
+      return lines;
+    }
+
+    var g = {
+      width: W, height: H, INK: INK, DARK: DARK, MID: MID, PAPER: PAPER,
+      clear: function (c) { buf.fill(c == null ? PAPER : c); },
+      origin: function (x, y) { ox = Math.round(x || 0); oy = Math.round(y || 0); },
+      clip: function (x, y, w, h) {
+        if (x == null) { cx0 = 0; cy0 = 0; cx1 = W; cy1 = H; return; }
+        cx0 = clamp(Math.round(x + ox), 0, W); cy0 = clamp(Math.round(y + oy), 0, H);
+        cx1 = clamp(Math.round(x + ox + w), 0, W); cy1 = clamp(Math.round(y + oy + h), 0, H);
+      },
+      pixel: function (x, y, c) { put(Math.round(x) + ox, Math.round(y) + oy, c); },
+      get: function (x, y) { x = Math.round(x) + ox; y = Math.round(y) + oy; return x < 0 || y < 0 || x >= W || y >= H ? null : buf[y * W + x]; },
+      rect: function (x, y, w, h, c) {
+        x = Math.round(x) + ox; y = Math.round(y) + oy;
+        var xa = Math.max(x, cx0), ya = Math.max(y, cy0), xb = Math.min(x + Math.round(w), cx1), yb = Math.min(y + Math.round(h), cy1);
+        for (var yy = ya; yy < yb; yy++) buf.fill(c, yy * W + xa, yy * W + Math.max(xa, xb));
+      },
+      frame: function (x, y, w, h, c) {
+        g.rect(x, y, w, 1, c); g.rect(x, y + h - 1, w, 1, c); g.rect(x, y, 1, h, c); g.rect(x + w - 1, y, 1, h, c);
+      },
+      line: function (x0, y0, x1, y1, c) {
+        x0 = Math.round(x0); y0 = Math.round(y0); x1 = Math.round(x1); y1 = Math.round(y1);
+        var dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1, e = dx + dy;
+        for (;;) { put(x0 + ox, y0 + oy, c); if (x0 === x1 && y0 === y1) break; var e2 = 2 * e; if (e2 >= dy) { e += dy; x0 += sx; } if (e2 <= dx) { e += dx; y0 += sy; } }
+      },
+      circle: function (cx, cy, r, c, fill) {
+        cx = Math.round(cx); cy = Math.round(cy);
+        for (var y = -r; y <= r; y++) {
+          var span = Math.round(Math.sqrt(r * r + r - y * y));
+          if (fill) g.rect(cx - span, cy + y, span * 2 + 1, 1, c);
+          else { g.pixel(cx - span, cy + y, c); g.pixel(cx + span, cy + y, c); }
+        }
+        if (!fill) for (var x = -r; x <= r; x++) { var s2 = Math.round(Math.sqrt(r * r + r - x * x)); g.pixel(cx + x, cy - s2, c); g.pixel(cx + x, cy + s2, c); }
+      },
+      /* level 0-4: 0 nothing, 2 checkerboard, 4 solid */
+      dither: function (x, y, w, h, c, level) {
+        level = clamp(level == null ? 2 : level, 0, 4);
+        x = Math.round(x); y = Math.round(y);
+        for (var yy = 0; yy < h; yy++) for (var xx = 0; xx < w; xx++) {
+          var px = (x + xx) & 1, py = (y + yy) & 1;
+          var on = level === 4 || (level === 3 && !(px && py)) || (level === 2 && px === py) || (level === 1 && !px && !py);
+          if (on) put(x + xx + ox, y + yy + oy, c);
+        }
+      },
+      /* opts: {flip, flipY, color (paint every opaque pixel one tone), map: [t0,t1,t2,t3]} */
+      sprite: function (s, x, y, o) {
+        o = o || {};
+        x = Math.round(x) + ox; y = Math.round(y) + oy;
+        var w = s.w, h = s.h, px = s.px, one = o.color, map = o.map;
+        for (var yy = 0; yy < h; yy++) {
+          var dy = y + yy; if (dy < cy0 || dy >= cy1) continue;
+          var sy = o.flipY ? h - 1 - yy : yy;
+          for (var xx = 0; xx < w; xx++) {
+            var dx = x + xx; if (dx < cx0 || dx >= cx1) continue;
+            var v = px[sy * w + (o.flip ? w - 1 - xx : xx)];
+            if (v === CLEAR) continue;
+            buf[dy * W + dx] = one != null ? one : map ? map[v] : v;
+          }
+        }
+      },
+      /* opts: {color, align: "left"|"center"|"right", width (wrap), shadow: tone} -> height drawn */
+      text: function (str, x, y, o) {
+        o = o || {};
+        var color = o.color == null ? INK : o.color;
+        var lines = o.width ? wrap(str, o.width) : String(str).split("\n"), yy = Math.round(y);
+        lines.forEach(function (ln) {
+          /* with a width, align inside x..x+width; without one, x is the centre or the right edge */
+          var lw = measure(ln), box = o.width || 0, xx = Math.round(x);
+          if (o.align === "center") xx = Math.round(box ? x + (box - lw) / 2 : x - lw / 2);
+          else if (o.align === "right") xx = Math.round(box ? x + box - lw : x - lw);
+          Array.from(ln).forEach(function (ch) {
+            var gl = glyph(ch);
+            for (var j = 0; j < gl.h; j++) for (var i = 0; i < gl.w; i++) if (gl.bits[j * gl.w + i]) {
+              if (o.shadow != null) put(xx + i + 1 + ox, yy + j + 1 + oy, o.shadow);
+              put(xx + i + ox, yy + j + oy, color);
+            }
+            xx += gl.adv;
+          });
+          yy += FONT.line;
+        });
+        return lines.length * FONT.line;
+      },
+      measure: measure,
+      wrap: wrap,
+      lineHeight: FONT.line,
+      /* the standard window: paper inside, ink border with cut corners */
+      window: function (x, y, w, h, o) {
+        o = o || {};
+        g.rect(x + 1, y + 1, w - 2, h - 2, o.fill == null ? PAPER : o.fill);
+        var c = o.border == null ? INK : o.border;
+        g.rect(x + 1, y, w - 2, 1, c); g.rect(x + 1, y + h - 1, w - 2, 1, c);
+        g.rect(x, y + 1, 1, h - 2, c); g.rect(x + w - 1, y + 1, 1, h - 2, c);
+        if (!o.thin) { g.rect(x + 2, y + 2, w - 4, 1, MID); }
+      },
+      /* a small arrow used by menus and "more" markers */
+      arrow: function (x, y, dir, c) {
+        c = c == null ? INK : c;
+        for (var i = 0; i < 4; i++) {
+          if (dir === "down") g.rect(x + i, y + i, 7 - 2 * i, 1, c);
+          else g.rect(x + i, y + i, 1, 7 - 2 * i, c);
+        }
+      }
+    };
+
+    /* --- palette effects: every frame the indexed buffer goes through this map --- */
+    var pal = [0, 1, 2, 3], fadeLevel = 0, fadeTo = PAPER, flashT = 0, shakeT = 0, shakeA = 0, sx = 0, sy = 0;
+    function present() {
+      var map = pal.slice();
+      if (fadeLevel) for (var i = 0; i < 4; i++) map[i] = fadeTo === PAPER ? Math.min(3, i + fadeLevel) : Math.max(0, i - fadeLevel);
+      if (flashT > 0) map = map.map(function (v) { return 3 - v; });
+      var d = image.data, n = W * H;
+      if (shakeT > 0) { sx = Math.round((Math.random() * 2 - 1) * shakeA); sy = Math.round((Math.random() * 2 - 1) * shakeA); } else { sx = sy = 0; }
+      for (var y = 0; y < H; y++) for (var x = 0; x < W; x++) {
+        var srcX = x - sx, srcY = y - sy, v = srcX < 0 || srcY < 0 || srcX >= W || srcY >= H ? PAPER : buf[srcY * W + srcX];
+        var c = RGB[map[v]], o = (y * W + x) * 4;
+        d[o] = c[0]; d[o + 1] = c[1]; d[o + 2] = c[2]; d[o + 3] = 255;
+      }
+      ctx.putImageData(image, 0, 0);
+      return n;
+    }
+
+    /* --- input: chin buttons through PAD, keyboard as a fallback, and the pointer --- */
+    var held = {}, heldFor = {}, queued = {}, pressedNow = {}, releasedNow = {}, queuedUp = {};
+    function down(b) { if (held[b]) return; held[b] = true; heldFor[b] = 0; queued[b] = true; }
+    function up(b) { if (!held[b]) return; held[b] = false; queuedUp[b] = true; }
+    if (HAS_PAD && PAD.on) { PAD.on("press", down); PAD.on("release", up); }
+    else {
+      addEventListener("keydown", function (e) { var b = KEYS[e.key]; if (b) { e.preventDefault(); if (!e.repeat) down(b); } });
+      addEventListener("keyup", function (e) { var b = KEYS[e.key]; if (b) up(b); });
+    }
+    addEventListener("blur", function () { BUTTONS.forEach(up); });
+    var pointer = { x: 0, y: 0, down: false, pressed: false, released: false }, pQueued = false, pQueuedUp = false;
+    function toScreen(e) {
+      var r = canvas.getBoundingClientRect();
+      pointer.x = Math.floor((e.clientX - r.left) * W / r.width); pointer.y = Math.floor((e.clientY - r.top) * H / r.height);
+    }
+    canvas.addEventListener("pointerdown", function (e) { e.preventDefault(); try { canvas.setPointerCapture(e.pointerId); } catch (x) {} toScreen(e); pointer.down = true; pQueued = true; });
+    canvas.addEventListener("pointermove", function (e) { toScreen(e); });
+    ["pointerup", "pointercancel"].forEach(function (t) { canvas.addEventListener(t, function (e) { toScreen(e); if (pointer.down) { pointer.down = false; pQueuedUp = true; } }); });
+    function inputBegin() {
+      pressedNow = queued; queued = {}; releasedNow = queuedUp; queuedUp = {};
+      pointer.pressed = pQueued; pQueued = false; pointer.released = pQueuedUp; pQueuedUp = false;
+    }
+    function inputEnd() { BUTTONS.forEach(function (b) { if (held[b]) heldFor[b] += STEP; }); }
+
+    /* --- timers and tweens (owned by the scene stack; cleared by game.go) --- */
+    var timers = [], tweens = [];
+    function runTimers() {
+      for (var i = 0; i < timers.length; i++) {
+        var t = timers[i]; t.left -= STEP;
+        if (t.left <= 0 && !t.dead) { t.fn(); if (t.every) t.left += t.every; else t.dead = true; }
+      }
+      timers = timers.filter(function (t) { return !t.dead; });
+      for (i = 0; i < tweens.length; i++) {
+        var w = tweens[i]; w.t = Math.min(1, w.t + STEP / w.dur);
+        var k = w.ease(w.t);
+        for (var p in w.to) w.obj[p] = lerp(w.from[p], w.to[p], k);
+        if (w.t >= 1) { w.dead = true; w.done(); }
+      }
+      tweens = tweens.filter(function (w) { return !w.dead; });
+    }
+
+    /* --- scenes: a stack; only the top one updates, all of them draw --- */
+    var scenes = {}, stack = [], busy = false;
+    function sceneOf(s) { if (typeof s === "string") { if (!scenes[s]) throw new Error("no scene named " + s); return scenes[s]; } return s; }
+    function enter(s, args) { var e = { scene: s, args: args, resolve: null }; stack.push(e); if (s.enter) s.enter(args); return e; }
+
+    var game = {
+      VERSION: VERSION, width: W, height: H, g: g, time: 0, frame: 0, scale: 1, pointer: pointer, lang: LANG,
+      t: function (text, vars) { return pick(text, LANG, vars); },
+      INK: INK, DARK: DARK, MID: MID, PAPER: PAPER,
+
+      scene: function (name, def) { scenes[name] = def; return def; },
+      start: function (name, args) { stack = []; enter(sceneOf(name), args); loop(); },
+      go: function (name, args, o) {
+        o = o || {};
+        var next = sceneOf(name);
+        var swap = function () {
+          while (stack.length) { var e = stack.pop(); if (e.scene.exit) e.scene.exit(); if (e.resolve) e.resolve(null); }
+          timers = []; tweens = [];
+          enter(next, args);
+        };
+        if (o.fade === false) { swap(); return Promise.resolve(); }
+        busy = true;
+        return game.fade("out", o.time || 0.25, o.to).then(function () { swap(); return game.fade("in", o.time || 0.25, o.to); }).then(function () { busy = false; });
+      },
+      /* overlays: game.push(scene) resolves with the value given to game.pop(value) */
+      push: function (s, args) { return new Promise(function (res) { enter(sceneOf(s), args).resolve = res; }); },
+      pop: function (value) {
+        var e = stack.pop(); if (!e) return;
+        if (e.scene.exit) e.scene.exit();
+        if (e.resolve) e.resolve(value);
+      },
+      top: function () { var e = stack[stack.length - 1]; return e && e.scene; },
+
+      btn: function (b) { return !!held[b]; },
+      pressed: function (b) { return !!pressedNow[b]; },
+      released: function (b) { return !!releasedNow[b]; },
+      /* true when first pressed, then again every `rate` seconds after `delay` (menus, cursors) */
+      repeat: function (b, delay, rate) {
+        if (pressedNow[b]) return true;
+        if (!held[b]) return false;
+        delay = delay == null ? 0.32 : delay; rate = rate == null ? 0.09 : rate;
+        var t = heldFor[b] - delay; return t >= 0 && Math.floor(t / rate) !== Math.floor((t - STEP) / rate);
+      },
+      /* A, START or a tap: "carry on" */
+      ok: function () { return !!(pressedNow.a || pressedNow.start || pointer.pressed); },
+      /* the D-pad as a direction: {x, y}, one step per press with repeat */
+      dir: function (delay, rate) {
+        return { x: (game.repeat("right", delay, rate) ? 1 : 0) - (game.repeat("left", delay, rate) ? 1 : 0),
+                 y: (game.repeat("down", delay, rate) ? 1 : 0) - (game.repeat("up", delay, rate) ? 1 : 0) };
+      },
+
+      after: function (sec, fn) { var t = { left: sec, fn: fn }; timers.push(t); return function () { t.dead = true; }; },
+      every: function (sec, fn) { var t = { left: sec, every: sec, fn: fn }; timers.push(t); return function () { t.dead = true; }; },
+      wait: function (sec) { return new Promise(function (res) { game.after(sec, res); }); },
+      tween: function (obj, to, sec, ease) {
+        return new Promise(function (res) {
+          var from = {}; for (var p in to) from[p] = obj[p];
+          tweens.push({ obj: obj, from: from, to: to, dur: Math.max(STEP, sec), t: 0, ease: EASE[ease || "out"] || EASE.out, done: res });
+        });
+      },
+
+      /* screen effects */
+      fade: function (dir, sec, to) {
+        fadeTo = to == null ? PAPER : to;
+        var steps = 3, each = (sec == null ? 0.25 : sec) / steps, i = 0;
+        return new Promise(function (res) {
+          var tick = function () {
+            i++; fadeLevel = dir === "out" ? i : steps - i;
+            if (i >= steps) { if (dir !== "out") fadeLevel = 0; res(); } else game.after(each, tick);
+          };
+          if (dir !== "out") fadeLevel = steps;
+          game.after(each, tick);
+        });
+      },
+      flash: function (sec) { flashT = sec == null ? 0.08 : sec; },
+      shake: function (amount, sec) { shakeA = amount == null ? 2 : amount; shakeT = sec == null ? 0.25 : sec; },
+
+      /* sound. sfx("coin") or sfx({wave, from, to, ms, ...}); music(song, {loop}) and musicStop() (1.3.0).
+         Runtimes without PAD.music (before 0.11.0) have no music and no custom sounds: those calls do nothing. */
+      sfx: function (s) { if (HAS_PAD && PAD.sfx && (typeof s === "string" || PAD.music)) PAD.sfx(s); },
+      music: function (song, o) { if (HAS_PAD && PAD.music) PAD.music.play(song, o); },
+      musicStop: function () { if (HAS_PAD && PAD.music) PAD.music.stop(); },
+      /* ambience("rain", 0.6), ambience(null) to fade it out (1.4.0); nothing on runtimes before 0.13.0 */
+      ambience: function (name, level) { if (HAS_PAD && PAD.ambience) PAD.ambience(name, level); },
+      save: function (key, value) { if (HAS_PAD) PAD.save(key, value); else memory[key] = JSON.parse(JSON.stringify(value)); },
+      load: function (key) { return HAS_PAD ? PAD.load(key) : Promise.resolve(key in memory ? memory[key] : null); },
+      remove: function (key) { if (HAS_PAD) PAD.remove(key); else delete memory[key]; },
+
+      /* dialogue: resolves when the player has read every page */
+      say: function (text, o) { return game.push(dialogScene(text, o || {})); },
+      /* menu: resolves with the chosen index, or -1 when cancelled with B */
+      choose: function (items, o) { return game.push(menuScene(items, o || {})); }
+    };
+    var memory = {};
+
+    /* --- built-in overlay: dialogue box with a typewriter --- */
+    function dialogScene(text, o) {
+      var pages = [], boxH = o.lines ? o.lines * FONT.line + 10 : 3 * FONT.line + 10, innerW = W - 16;
+      (Array.isArray(text) ? text : [text]).forEach(function (t) {
+        var ls = wrap(t, innerW), per = Math.floor((boxH - 10) / FONT.line);
+        for (var i = 0; i < ls.length; i += per) pages.push(ls.slice(i, i + per));
+      });
+      var page = 0, shown = 0, speed = o.speed || 40, blip = o.blip !== false, y = o.top ? 0 : H - boxH, sinceBlip = 0;
+      function total() { return Array.from(pages[page].join("")).length; }
+      return {
+        update: function () {
+          if (shown < total()) {
+            var before = Math.floor(shown);
+            shown = Math.min(total(), shown + speed * STEP);
+            if (blip && Math.floor(shown) !== before && (sinceBlip++ % 3 === 0)) game.sfx("tick");
+            if (game.ok() || game.pressed("b")) shown = total();
+          } else if (game.ok() || game.pressed("b")) {
+            if (page < pages.length - 1) { page++; shown = 0; game.sfx("move"); }
+            else { game.sfx("move"); game.pop(true); }
+          }
+        },
+        draw: function (gg) {
+          gg.origin(0, 0); gg.clip();
+          var top = y;
+          if (o.name) {
+            var nw = measure(o.name) + 10, ny = o.top ? boxH - 1 : top - FONT.line - 3;
+            gg.window(4, ny, nw, FONT.line + 4, { thin: true });
+            gg.text(o.name, 9, ny + 2);
+          }
+          gg.window(0, top, W, boxH);
+          var left = Math.floor(shown), ty = top + 5;
+          pages[page].forEach(function (ln) {
+            var part = Array.from(ln).slice(0, Math.max(0, left)).join("");
+            left -= Array.from(ln).length;
+            gg.text(part, 8, ty); ty += FONT.line;
+          });
+          if (shown >= total() && Math.floor(game.time * 3) % 2 === 0) gg.arrow(W - 13, top + boxH - 7, "down");
+        }
+      };
+    }
+
+    /* --- built-in overlay: a vertical menu --- */
+    function menuScene(items, o) {
+      var sel = clamp(o.index || 0, 0, items.length - 1), pad = 6, rowH = FONT.line + 2;
+      var w = o.width || Math.max.apply(null, items.map(measure).concat([o.title ? measure(o.title) : 0])) + pad * 2 + 10;
+      var h = items.length * rowH + pad * 2 - 2 + (o.title ? rowH : 0);
+      var x = o.x == null ? Math.round((W - w) / 2) : o.x, y = o.y == null ? Math.round((H - h) / 2) : o.y;
+      var cancel = o.cancel !== false;
+      return {
+        update: function () {
+          var d = game.dir();
+          if (d.y) { sel = (sel + d.y + items.length) % items.length; game.sfx("move"); }
+          if (game.pressed("a") || game.pressed("start")) { game.sfx("tap"); game.pop(sel); return; }
+          if (cancel && game.pressed("b")) { game.sfx("miss"); game.pop(-1); return; }
+          if (pointer.pressed) {
+            var r = Math.floor((pointer.y - y - pad - (o.title ? rowH : 0)) / rowH);
+            if (pointer.x >= x && pointer.x < x + w && r >= 0 && r < items.length) { sel = r; game.sfx("tap"); game.pop(sel); }
+            else if (cancel) { game.sfx("miss"); game.pop(-1); }
+          }
+        },
+        draw: function (gg) {
+          gg.origin(0, 0); gg.clip();
+          gg.window(x, y, w, h);
+          var ty = y + pad;
+          if (o.title) { gg.text(o.title, x + pad, ty, { color: DARK }); ty += rowH; }
+          items.forEach(function (it, i) {
+            if (i === sel) gg.arrow(x + pad - 1, ty + 3, "right");
+            gg.text(it, x + pad + 8, ty);
+            ty += rowH;
+          });
+        }
+      };
+    }
+
+    /* --- the loop: fixed 60 steps a second, one draw per screen refresh --- */
+    var last = 0, acc = 0, running = false;
+    function tick() {
+      inputBegin();
+      runTimers();
+      var top = stack[stack.length - 1];
+      if (top && top.scene.update && !busy) top.scene.update(STEP);
+      if (flashT > 0) flashT -= STEP;
+      if (shakeT > 0) shakeT -= STEP;
+      game.time += STEP; game.frame++;
+      inputEnd();
+    }
+    function render() {
+      g.origin(0, 0); g.clip();
+      for (var i = 0; i < stack.length; i++) { var s = stack[i].scene; g.origin(0, 0); g.clip(); if (s.draw) s.draw(g); }
+      present();
+    }
+    function frame(ts) {
+      requestAnimationFrame(frame);
+      if (!last) last = ts;
+      acc += Math.min(0.1, (ts - last) / 1000); last = ts;
+      var n = 0;
+      while (acc >= STEP && n < 6) { tick(); acc -= STEP; n++; }
+      if (n) render();
+    }
+    function loop() {
+      if (running) return; running = true;
+      fit(); addEventListener("resize", fit);
+      document.addEventListener("visibilitychange", function () { last = 0; });
+      requestAnimationFrame(frame);
+    }
+    g.clear();
+    return game;
+  }
+
+  return {
+    VERSION: VERSION, TONES: TONES.slice(), font: font, INK: INK, DARK: DARK, MID: MID, PAPER: PAPER, BUTTONS: BUTTONS.slice(),
+    create: create, sprite: sprite, sprites: sprites, tilemap: tilemap, camera: camera, rng: rng,
+    clamp: clamp, lerp: lerp, approach: approach, t: t
+  };
+})();
+</script>
+<script data-lo-font="lopix12">
+/*
+lopix12: a 12-pixel bitmap font for Lo-PDA apps.
+
+lopix12 is a Modified Version of Fusion Pixel Font (12px, proportional,
+Simplified Chinese; upstream release 2026.08.11): its glyphs were rasterized at
+their native size into one-bit bitmaps, and apps carry only the characters they
+use. It is distributed under the SIL Open Font License 1.1, below, and only
+under that license. It is not named Fusion Pixel, which is a Reserved Font Name.
+
+Fusion Pixel Font: https://github.com/TakWolf/fusion-pixel-font
+Copyright (c) 2022, TakWolf (https://takwolf.com), with Reserved Font Name 'Fusion Pixel'.
+It combines glyphs from these OFL-licensed fonts:
+- Ark Pixel Font, Copyright (c) 2021, TakWolf (https://takwolf.com).
+- Cubic 11, including JF Dot M+H 12, Copyright(c) 2005 M+ FONTS PROJECT,
+  and M+ BITMAP FONTS, Copyright (C) 2002-2004 COZ.
+- Galmuri, Copyright (c) 2019-2025 Lee Minseo (quiple@quiple.dev).
+
+-----------------------------------------------------------
+SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
+-----------------------------------------------------------
+
+PREAMBLE
+The goals of the Open Font License (OFL) are to stimulate worldwide
+development of collaborative font projects, to support the font creation
+efforts of academic and linguistic communities, and to provide a free and
+open framework in which fonts may be shared and improved in partnership
+with others.
+
+The OFL allows the licensed fonts to be used, studied, modified and
+redistributed freely as long as they are not sold by themselves. The
+fonts, including any derivative works, can be bundled, embedded,
+redistributed and/or sold with any software provided that any reserved
+names are not used by derivative works. The fonts and derivatives,
+however, cannot be released under any other type of license. The
+requirement for fonts to remain under this license does not apply
+to any document created using the fonts or their derivatives.
+
+DEFINITIONS
+"Font Software" refers to the set of files released by the Copyright
+Holder(s) under this license and clearly marked as such. This may
+include source files, build scripts and documentation.
+
+"Reserved Font Name" refers to any names specified as such after the
+copyright statement(s).
+
+"Original Version" refers to the collection of Font Software components as
+distributed by the Copyright Holder(s).
+
+"Modified Version" refers to any derivative made by adding to, deleting,
+or substituting -- in part or in whole -- any of the components of the
+Original Version, by changing formats or by porting the Font Software to a
+new environment.
+
+"Author" refers to any designer, engineer, programmer, technical
+writer or other person who contributed to the Font Software.
+
+PERMISSION & CONDITIONS
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of the Font Software, to use, study, copy, merge, embed, modify,
+redistribute, and sell modified and unmodified copies of the Font
+Software, subject to the following conditions:
+
+1) Neither the Font Software nor any of its individual components,
+in Original or Modified Versions, may be sold by itself.
+
+2) Original or Modified Versions of the Font Software may be bundled,
+redistributed and/or sold with any software, provided that each copy
+contains the above copyright notice and this license. These can be
+included either as stand-alone text files, human-readable headers or
+in the appropriate machine-readable metadata fields within text or
+binary files as long as those fields can be easily viewed by the user.
+
+3) No Modified Version of the Font Software may use the Reserved Font
+Name(s) unless explicit written permission is granted by the corresponding
+Copyright Holder. This restriction only applies to the primary font name as
+presented to the users.
+
+4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font
+Software shall not be used to promote, endorse or advertise any
+Modified Version, except to acknowledge the contribution(s) of the
+Copyright Holder(s) and the Author(s) or with their explicit written
+permission.
+
+5) The Font Software, modified or unmodified, in part or in whole,
+must be distributed entirely under this license, and must not be
+distributed under any other license. The requirement for fonts to
+remain under this license does not apply to any document created
+using the Font Software.
+
+TERMINATION
+This license becomes null and void if any of the above conditions are
+not met.
+
+DISCLAIMER
+THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT
+OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
+DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
+OTHER DEALINGS IN THE FONT SOFTWARE.
+*/
+LoGame.font({"name":"lopix12","cell":13,"line":14,"glyphs":{"0":"6:AAciimqyiicAAA==","1":"6:AAIYIIIIIIcAAA==","2":"6:AAciCCEIQg+AAA==","3":"6:AAciCCMCCicAAA==","4":"6:AAEMMUUk+EEAAA==","5":"6:AA+ggg8CCicAAA==","6":"6:AAcigg8iiicAAA==","7":"6:AA+CCEEIIIIAAA==","8":"6:AAciiiciiicAAA==","9":"6:AAciiieCCicAAA=="," ":"6:AAAAAAAAAAAAAA==","!":"4:AEREREBAAA==","\"":"6:AAUUUAAAAAAAAA==","#":"7:AAEiT8kSJPyRIAAA","$":"6:AIcqoocKKqcIAA==","%":"8:AABEpEgIECAkSkQAAA==","&":"7:AADCRIYZSokR0AAA","'":"4:AERAAAAAAA==","(":"6:AEIIQQQQQIIEAA==",")":"6:AQIIEEEEEIIQAA==","*":"6:AAAAAIqcqIAAAA==","+":"6:AAAAAII+IIAAAA==",",":"4:AAAAAABEgA==","-":"6:AAAAAAA+AAAAAA==",".":"4:AAAAAABAAA==","/":"6:ACCEEIIIQQggAA==",":":"4:AAAEAABAAA==",";":"4:AAAEAABEgA==","<":"5:AAABERBBBAAA","=":"6:AAAAAA+A+AAAAA==",">":"5:AAAIIIIiIAAA","?":"6:AAciCCEIIAIAAA==","@":"8:AAA4RJqqqqqqtkA8AA==","A":"8:AAAQECgoRHxEgoIAAA==","B":"7:AAPkKFC+QoUL4AAA","C":"7:AADiKBAgQICI4AAA","D":"7:AAPESFChQoUTwAAA","E":"7:AAP0CBA+QIED8AAA","F":"7:AAP0CBA+QIECAAAA","G":"7:AADiKBAgRoSI8AAA","H":"7:AAIUKFC/QoUKEAAA","I":"4:AORERETgAA==","J":"6:AACCCCCCiicAAA==","K":"7:AAIUSRQwUJESEAAA","L":"6:AAgggggggg+AAA==","M":"8:AACCgsbGqqqSkpIAAA==","N":"7:AAIWKlSlSo0aEAAA","O":"8:AAA4RIKCgoKCRDgAAA==","P":"7:AAPkKFC+QIECAAAA","Q":"8:AAA4RIKCgoKKRDoAAA==","R":"7:AAPkKFC+SIkSEAAA","S":"7:AAHkKAgMBAUJ4AAA","T":"8:AAD+EBAQEBAQEBAAAA==","U":"7:AAIUKFChQoUJ4AAA","V":"8:AACCgkRERCgoEBAAAA==","W":"10:AAAIiiKIlUVRVCIIgiAAAAA=","X":"8:AACCREQoEChERIIAAA==","Y":"8:AACCREQoKBAQEBAAAA==","Z":"7:AAPwIIIIEEED8AAA","[":"6:AcQQQQQQQQQcAA==","\\":"6:AggQQIIIEECCAA==","]":"6:AcEEEEEEEEEcAA==","^":"6:AAIUiAAAAAAAAA==","_":"6:AAAAAAAAAAAA+A==","`":"5:ABBAAAAAAAAA","a":"6:AAAAAcCeiieAAA==","b":"6:AAggg8iiii8AAA==","c":"6:AAAAAciggicAAA==","d":"6:AACCCeiiiieAAA==","e":"6:AAAAAci+gicAAA==","f":"5:AAyEeQhCEAAA","g":"6:AAAAAeiiiieCcA==","h":"6:AAgggsyiiiiAAA==","i":"4:AEAMRETgAA==","j":"4:ACAOIiIiwA==","k":"6:AAgggiswokiAAA==","l":"4:AMRERERgAA==","m":"8:AAAAAADskpKSkpIAAA==","n":"6:AAAAAsyiiiiAAA==","o":"6:AAAAAciiiicAAA==","p":"6:AAAAA8iiii8ggA==","q":"6:AAAAAeiiiieCCA==","r":"5:AAAAWxCEIAAA","s":"6:AAAAAciYEicAAA==","t":"5:ABCEeQhCDAAA","u":"6:AAAAAiiiimaAAA==","v":"6:AAAAAiiUUIIAAA==","w":"8:AAAAAACSkqqqREQAAA==","x":"6:AAAAAiUIIUiAAA==","y":"6:AAAAAiiiUUIIwA==","z":"6:AAAAA+EIQg+AAA==","{":"7:ADCBAgQQECBAgMAA","|":"4:BEREREREAA==","}":"7:AMBAgQICCBAgQwAA","~":"6:AAAAAQqEAAAAAA==","—":"12:AAAAAAAAAAAA/+AAAAAAAAAAAAA=","…":"12:AAAAAAAAAAAAZmZmAAAAAAAAAAA=","←":"12:AAAAAAAAIAQA/+QAIAAAAAAAAAA=","↑":"12:AABADgFQBABABABABABABABAAAA=","→":"12:AAAAAAAAAIAE/+AEAIAAAAAAAAA=","↓":"12:AABABABABABABABABAFQDgBAAAA=","　":"12:AAAAAAAAAAAAAAAAAAAAAAAAAAA=","。":"12:AAAAAAAAAAAAAAAAMASASAMAAAA=","《":"12:AAAkAkBIBICQCQCQBIBIAkAkAAA=","》":"12:AASASAJAJAEgEgEgJAJASASAAAA=","一":"12:AAAAAAAAAAAA/+AAAAAAAAAAAAA=","万":"12:AA/+CACACAD8CECEEEEEIEwYAAA=","三":"12:AAf8AAAAAAAAP4AAAAAAAA/+AAA=","上":"12:AABABABABAB8BABABABABA/+AAA=","下":"12:AA/+BABABABQBIBEBABABABAAAA=","不":"12:AA/+AgBADAFQJIxEBCBABABAAAA=","个":"12:AABACgEQIIxGBABABABABABAAAA=","中":"12:AABABA/+hChChC/+BABABABAAAA=","么":"12:AACACAEQEQIgQghACEEEIafiAAA=","乐":"12:AAAcfgQARAhA/+BAJIREhCHAAAA=","了":"12:AAf8AEAIAQAgAgAgAgAgAgDgAAA=","于":"12:AAf8BABABABA/+BABABABAHAAAA=","人":"12:AABABABABACgCgEQEQIIQEgCAAA=","从":"12:AAEQEQEQEQEQKoKoKoREREiCAAA=","他":"12:AAIQKQSWS63SSSSWSQSCSCR+AAA=","众":"12:AABACgMYwGEQEQEQKoKoREiCAAA=","会":"12:AABACgMYwGP4AAAA/+EAIIf0AAA=","住":"12:AAIgIQX+QQwQQQT8QQQQQQX+AAA=","你":"12:AAKAL+SCUSwQRURUSSUSQQQwAAA=","充":"12:AABA/+CAEQIIf8EUEQEQISweAAA=","先":"12:AAJAJAP8RABA/+EQEQESISweAAA=","全":"12:AABACgMYwGP4BABAf8BABA/+AAA=","兴":"12:AACEREJIIIAQAA/+AAEQIIwGAAA=","再":"12:AA/+BAf8REf8RERE/+QEQEQcAAA=","准":"12:AAhQRIT+GID+CISIT+SIiIj+AAA=","凑":"12:AAggT8QgD8BAH+SkUiT8hQmMAAA=","出":"12:AABAREREREf8BABAhChChC/+AAA=","击":"12:AABABAf8BABA/+BAREREREf8AAA=","分":"12:AAEQEQIIIIQEv6CICIEIIIwwAAA=","别":"12:AA/ChShS/SIS/SJSJSRCRCmOAAA=","到":"12:AA/iEKIKRK+qEKEK/qECHi4OAAA=","剧":"12:AAfiQqQqfqSKfqSKfqYioivuAAA=","功":"12:AAAg8gL+IiIiIiIiMixCBCCMAAA=","千":"12:AAA8fABABABA/+BABABABABAAAA=","升":"12:AADIcIEIEIEI/+EIEIEIIIwIAAA=","南":"12:AABA/+BA/+kSiiv6hCv6hChOAAA=","去":"12:AABABAf8BABA/+CAEIEII0fEAAA=","又":"12:AAf8QEQEIIIIEQCgBACgMYwGAAA=","只":"12:AAf8QEQEQEQEf8AAAAIIQEgCAAA=","台":"12:AACAEAIIQE/6ACf8QEQEQEf8AAA=","合":"12:AABACgMYwGP4AAf8QEQEQEf8AAA=","名":"12:AACAD8EEaIBQAgH+8CECECH+AAA=","后":"12:AAA8fAQAQAf+QAX8UEUEUEn8AAA=","听":"12:AAAM7wqAqAr+qIqIqI6ICIEIAAA=","吹":"12:AABA5Ap+qCsUoQoQoo4oBEGCAAA=","喂":"12:AAD+6Sr+qSr+oAv+qQ6KCkDCAAA=","喝":"12:AAD86Er8qEr8pAr+sS6qD6AGAAA=","回":"12:AA/+gCgCnykSkSkSnygCgC/+AAA=","国":"12:AA/+gCv6hChCnyhChSv6gC/+AAA=","在":"12:AACACA/+EAEQIQb+oQIQIQL+AAA=","场":"12:AAT8QIQQ4gT+QqRKaSwSAiBMAAA=","备":"12:AAEAP40QDgMYwGf8REf8REf8AAA=","多":"12:AABAD4cICQBoGe4iHCAkAYPgAAA=","奏":"12:AABAf8CAf8EA/+LoREv6CgMYAAA=","好":"12:AAJ8IE8IUQUQX+kQUQIQUQhwAAA=","始":"12:AAIQIQ8kVEX6UAl+VCJCVCh+AAA=","完":"12:AABA/+gCv6AAAA/+EQEQISweAAA=","宣":"12:AABA/+gCv6AAP4IIPIJ4AA/+AAA=","宫":"12:AABA/+gCv6IIP4AAf8QEQEf8AAA=","寡":"12:AABA/+oKP4II/+QEv6CIEIYwAAA=","小":"12:AABABABAJIJERERChCBABAHAAAA=","就":"12:AAIU+SAQ/+iQio+oIoqqqqZOAAA=","尾":"12:AAf+QCf+QYXgQ8XgQ+XgQig+AAA=","居":"12:AAf8QEQEf8Qgf+QgX8UEUEn8AAA=","山":"12:AABABABAhChChChChChChC/+AAA=","己":"12:AAf8AEAEAEAEf8QAQAQCQCP+AAA=","师":"12:AAL+oQoQr+qSqSqSKSKWQQgQAAA=","幕":"12:AAEQ/+EQf8QE/+JIf8pKJYBAAAA=","底":"12:AAAgf+QEX4UQUQX+UQUIVKmmAAA=","廷":"12:AA4MLwQQgQ7+IQoQoQT+YAn+AAA=","开":"12:AA/+IIIIIIII/+IIIIQIQIgIAAA=","录":"12:AAf8AEf8AE/+BAREJoDQNIzGAAA=","彩":"12:AABi+EIokgRCEE/oOAVCkkEIAAA=","得":"12:AAL8SEj8KET8wAX+QIX+SIRYAAA=","怀":"12:AAL+IIoQsQo0pSKSIQIQIQIQAAA=","怎":"12:AAIAP+SAj8CAD8CAVEUikKD4AAA=","悄":"12:AAKSJUoQr+uCr+KCL+KCKCKGAAA=","懂":"12:AAJEL+pEsQr+pUJ8JUL+IQL+AAA=","成":"12:AAAoAkf+QgekSkSoSQWSQqjGAAA=","我":"12:AAGU4SIQ/+IQIUOU4IIKIWYiAAA=","手":"12:AAA8fABABAf8BABA/+BABAHAAAA=","抱":"12:AASAT88ET0SUaUz0SMSASCx+AAA=","指":"12:AASCSM7wSCR+YAz+SCT+SCz+AAA=","按":"12:AAQQT+6CQQQQb+wkREQoQYzmAAA=","挥":"12:AAT+SC4gT+RAaQz+QQT+QQwQAAA=","排":"12:AAQoQo7uQoQobuwoQoTuQowoAAA=","数":"12:AAlQWQ/eMkWUlUIU/UJIOUxiAAA=","新":"12:AAEG/YRQKQ/eEU/UEUVUkkMkAAA=","早":"12:AAf8QEf8QEf8BABA/+BABABAAAA=","时":"12:AAAE8El+kEkE9EkkkkkE8EAcAAA=","星":"12:AAf8QEf8QEf8RAf8hAf8BA/+AAA=","曲":"12:AAEQEQ/+kSkSkS/+kSkSkS/+AAA=","最":"12:AAf8QEf8QE/+SAe+SiXU6IC2AAA=","有":"12:AACA/+EAIAP8YEv8IEP8IEIcAAA=","未":"12:AABABAf8BABA/+FQFQJIxGBAAAA=","杂":"12:AAEA/wEQISweBA/+BAJIxGDAAAA=","条":"12:AAEAH4II0QDg8eBAf8BAJIzGAAA=","来":"12:AABAf8BAJIFQ/+DgFQJIxGBAAAA=","松":"12:AAIoIo9EJEKCYgcgpEJEKaLiAAA=","标":"12:AAJ8IA8AL+IQYQdUpSJSKSIwAAA=","格":"12:AAIgI89EKoIQYobGt8JEJEJ8AAA=","次":"12:AAhARAR+CCEUAQQQQoQohEmCAAA=","欢":"12:AABA9AF+lCWUUQIQIoUoVEiCAAA=","此":"12:AAEQEQESUUXYUQUQUQUSXS4OAAA=","殿":"12:AA/chU/UgUqm/Aq+/igUqIR2AAA=","法":"12:AAQQIQD8gQQQH+AgREREianiAAA=","涨":"12:AAnSRSBUnYUQE+HYRURUhSmaAAA=","混":"12:AAn8UEH8kEX8AAESXcUQlSmOAAA=","满":"12:AAhIX+BIn+RIH+FKVKW2kCkGAAA=","滥":"12:AAhQVQFelgVIBEAAT+Sqiqn+AAA=","漏":"12:AAn+UCH+kAV+EIF+VuValupaAAA=","演":"12:AAgQX+ECj8QQD8CUT8SUj8mGAAA=","热":"12:AAIQ98IUIUNk4kJSZKAAUkiSAAA=","然":"12:AAQUeST8qQEQUoJEyCAAUkiSAAA=","父":"12:AAEQIIQEoKIIEQCgBACgMYwGAAA=","独":"12:AAoQQQT+qSKSKSb+oQIUIaziAAA=","王":"12:AA/+BABABABAf8BABABABA/+AAA=","玩":"12:AAD84AQAQAX+5IRIRIaKyKEOAAA=","生":"12:AARARAf8RAhABAf8BABABA/+AAA=","略":"12:AAAQ+eqirUqI+Uriq+qi+iA+AAA=","疑":"12:AAm+4CiU+IQ+eKoI+uIoVYjGAAA=","登":"12:AAekCoUQIKf8gCP4IIP4EQ/+AAA=","百":"12:AA/+BACAf8QEQEf8QEQEQEf8AAA=","的":"12:AAIgQg++jCiCiS+KiKiCiC+MAAA=","目":"12:AAf8QEQEf8QEQEQEf8QEQEf8AAA=","看":"12:AAf8BAf8CA/+IEf8oEP8IEP8AAA=","真":"12:AABAf8BAP4IIP4IIII/+IIwGAAA=","眼":"12:AA78qEr86EqEr86SqUqI6kDCAAA=","着":"12:AAEQ/+CAf8EA/+IEYEv8IEP8AAA=","睁":"12:AA5Ap4qI78oUv+4Ur8oQ4QBwAAA=","睛":"12:AA4Qr8oQ78oQv+6Er8qE78CEAAA=","知":"12:AAQAfeUSkSES/SESKSJSRegAAAA=","破":"12:AA8IJ+JKRId+1CViVUVIdUCiAAA=","确":"12:AA8gI8JET+dS1+VSV+VSdSCWAAA=","竖":"12:AAF+lCkkkYlmEABAf8IIEQ/+AAA=","站":"12:AAQQIQ+eAQkQUQV+JCPCxCB+AAA=","童":"12:AABAf8EQ/+JIP4JIJIf8BA/+AAA=","竽":"12:AAQge+lIAAf8BABA/+BABAHAAAA=","符":"12:AAQge+lIIAIIT+wISIRIQIQ4AAA=","纪":"12:AAT8QEgEoEwET8iA6ACCKCx+AAA=","线":"12:AAIUISQelw4QIeRw8SAMMazmAAA=","终":"12:AARAR8iEtIwwRImG5gAYLAw8AAA=","给":"12:AAQQQohEqCx8QAj+6CCCKCz+AAA=","继":"12:AASISqicqIy+SIic6qCIKAz+AAA=","续":"12:AAQQR8gQr+xCSohI7+AQIkzCAAA=","美":"12:AAEQ/+BAf8BA/+BA/+CgMYwGAAA=","职":"12:AA++UiciUiUic+UAUAek0iFCAAA=","自":"12:AABACAf8QEf8QEQEf8QEQEf8AAA=","至":"12:AA/+CAEQIIf0BEBAf8BABA/+AAA=","芬":"12:AAEQ/+EQAAEQIIwGP4CIEIYYAAA=","被":"12:AAgQT+6SKQT+XC6iWUSISUViAAA=","观":"12:AAB89EFUlUVUVUJUIQUqVKiOAAA=","角":"12:AAIAPwQQ/8REf8REf8REREhMAAA=","认":"12:AAQQIQAQAQ4QIQIoIoJENEKCAAA=","记":"12:AAj8QEAEAEwET8SASAWCaCR+AAA=","识":"12:AAj8SECECEyET8QAQARIaEUCAAA=","谁":"12:AAhQRID+GIz+SISIT+WIaIT+AAA=","谢":"12:AAhETkC+DkykT0SsXkRkakVsAAA=","谣":"12:AAQGL4CSxUSAT+QQT+QQaST+AAA=","谱":"12:AAiEX+BIDM3+QAT8SEX8aET8AAA=","贝":"12:AAf8QERERERERERERECgMYwGAAA=","赶":"12:AAE+fIEIEI++EIUIXIUIsAj+AAA=","越":"12:AAEKe+EoEq+qEkUsW2UqsAj+AAA=","跟":"12:AA9+lCl+9CJCJ+tIpKpEtUxiAAA=","过":"12:AAgIQIH+AIyIRIRIQIQ4oAn+AAA=","返":"12:AAgOTwCACAz+TCSkSYVmoAn+AAA=","连":"12:AAggX+BACQyQT+QQX+QQoQn+AAA=","选":"12:AAiQT8EQAQ3+RIRISKUOoAn+AAA=","道":"12:AAhIX+AgD8yET8SESET8oAn+AAA=","郭":"12:AAEe/yRSfUAUfSCSFy+cEQMQAAA=","都":"12:AAIe9SKSMU/UISfSxSfcRQfQAAA=","里":"12:AAf8REREf8REREf8BAf8BA/+AAA=","重":"12:AAf8BA/+REf8REf8BAf8BA/+AAA=","错":"12:AARIb8hI5IX+QA78SET8aET8AAA=","长":"12:AAIIIQIgLAIA/+JAIgIQKIMGAAA=","闹":"12:AAn+QCBCv6hCv6pKpKpahChGAAA=","露":"12:AAf8BA/+pK98nE84LGt8pE98AAA=","音":"12:AABAf8IIEQ/+AAP4IIP4IIP4AAA=","页":"12:AA/+BAf8QERERERERECgMYwGAAA=","颂":"12:AAU+UIi+iiBqQqQqUqkIqUyiAAA=","题":"12:AA++iI++ii+qAq+IIUui4An+AAA=","馅":"12:AAQgY8pEGIQgTOSCTuSCaCT+AAA=","首":"12:AAIIEQ/+BAf8QEf8QEf8QEf8AAA=","马":"12:AAf4AIIIIIIIP+ACAC/yACAcAAA=","高":"12:AABA/+IIP4AA/+gCnykSnygGAAA=","魔":"12:AAAgf+SIf+XcaqX8UkX8RSueAAA=","齐":"12:AABA/+IIEQDgMYwGIIIIIIQIAAA=","！":"12:AAAAIAcAcAcAIAIAIAAAIAAAAAA=","，":"12:AAAAAAAAAAAAAAAAMAMAEAIAAAA=","：":"12:AAAAAAMAMAAAAAAAAAMAMAAAAAA=","？":"12:AAAAcAiAiACAEAIAIAAAIAAAAAA="}});
+</script>
+<!-- melodies, arrangements and the chart generated from the same notes; the tool fills this block -->
+<script data-src="src/music.js">
+/* fake-yu / music.js — three public-domain tunes arranged for Lo-PDA's four channels.
+ *
+ * Every chart is generated from the same note list that writes the melody channel, so what the
+ * player hears and what the player hits cannot drift apart. One A key, one line of notes; the
+ * pitch is only a picture on the staff.
+ *
+ * Sources (all public domain, arrangements written for this app):
+ *   小星星 / Twinkle — "Ah! vous dirai-je, maman", French folk song, 1761.
+ *   欢乐颂 / Ode to Joy — Beethoven, Symphony No. 9, fourth movement, 1824.
+ *   山魔王的宫殿 / In the Hall of the Mountain King — Grieg, Peer Gynt Suite No. 1, 1875.
+ * MML is described in SPEC.md 6.3. The score strings here are original reductions for this chip.
+ */
+
+var FAKE_SONGS = (function () {
+  "use strict";
+
+  var CH = {
+    C: ["c4", "e4", "g4"], G: ["g3", "b3", "d4"], Am: ["a3", "c4", "e4"],
+    F: ["f3", "a3", "c4"], Dm: ["d4", "f4", "a4"], Em: ["e4", "g4", "b4"],
+    Bm: ["b3", "d4", "f+4"], A: ["a3", "c+4", "e4"], D: ["d4", "f+4", "a4"],
+    E: ["e4", "g+4", "b4"], B: ["b3", "d+4", "f+4"], Gm: ["g3", "b-3", "d4"],
+    Bb: ["b-3", "d4", "f4"], Cm: ["c4", "e-4", "g4"]
+  };
+
+  var P2_PAT = {
+    sparse: [0, "r", 2, "r", 1, "r", 2, "r"],
+    alberti: [0, 2, 1, 2, 0, 2, 1, 2],
+    offbeat: [0, 0, 1, 2, 0, 0, 1, 2],
+    rolling: [0, 1, 2, 1, 0, 1, 2, 1]
+  };
+  var TRI_PAT = { soft: [0, 2, 0, 2], walk: [0, 2, 0, 2], pump: [0, 0, 2, 2], low: [0, 0, 0, 2] };
+  var NOISE_PAT = {
+    soft: ["X", "r", "x", "r", "X", "r", "x", "x"],
+    march: ["X", "x", "x", "x", "X", "x", "x", "x"],
+    gallop: ["X", "x", "x", "x", "X", "x", "x", "x"],
+    wild: ["X", "x", "X", "x", "X", "x", "X", "x"]
+  };
+
+  var LEN = { 0.25: "16", 0.5: "8", 0.75: "8.", 1: "4", 1.5: "4.", 1.75: "4..", 2: "2", 3: "2.", 4: "1", 6: "1." };
+
+  function noteParts(n) {
+    var m = /^([a-g])([+-]?)(\d)$/.exec(n);
+    if (!m) throw new Error("bad note " + n);
+    return { letter: m[1], acc: m[2], oct: +m[3] };
+  }
+  function semitone(letter) {
+    return { c: 0, d: 2, e: 4, f: 5, g: 7, a: 9, b: 11 }[letter];
+  }
+  function midi(n) {
+    var p = noteParts(n);
+    return (p.oct + 1) * 12 + semitone(p.letter) + (p.acc === "+" ? 1 : p.acc === "-" ? -1 : 0);
+  }
+  function freq(n) { return 440 * Math.pow(2, (midi(n) - 69) / 12); }
+  function shift(n, octaves) {
+    var p = noteParts(n);
+    return p.letter + p.acc + (p.oct + octaves);
+  }
+  function tone(t, def) {
+    if (t === def) return "";
+    var s = LEN[t];
+    if (!s) throw new Error("unsupported length " + t);
+    return s;
+  }
+  function event(s) {
+    var m = /^([a-gr])([+-]?)(\d)?:([0-9.]+)([!~]?)$/.exec(s);
+    if (!m) throw new Error("bad event " + s);
+    return {
+      n: m[1] === "r" ? "r" : m[1] + m[2] + m[3],
+      d: +m[4],
+      chart: m[5] === "!" ? 0 : 1,
+      hold: m[5] === "~"
+    };
+  }
+  function events(text) { return text.trim().split(/\s+/).map(event); }
+
+  /* melody channel: one octave command only when the octave changes */
+  function melodyMML(evs, header) {
+    var out = header, oct = null;
+    evs.forEach(function (e) {
+      if (e.n === "r") { out += " r" + tone(e.d, 0.5); return; }
+      var p = noteParts(e.n);
+      if (p.oct !== oct) { out += " o" + p.oct; oct = p.oct; }
+      out += " " + p.letter + p.acc + tone(e.d, 0.5);
+    });
+    return out;
+  }
+
+  /* a list of [note, beats] pairs to MML, for the backing channels */
+  function channelMML(list, header, def) {
+    var out = header, oct = null;
+    list.forEach(function (it) {
+      var n = it[0], d = it[1];
+      if (n === "r") { out += " r" + tone(d, def); return; }
+      if (n === "x" || n === "X") { out += " " + n + tone(d, def); return; }
+      var p = noteParts(n);
+      if (p.oct !== oct) { out += " o" + p.oct; oct = p.oct; }
+      out += " " + p.letter + p.acc + tone(d, def);
+    });
+    return out;
+  }
+
+  function backing(bars, style) {
+    var p2 = [], tri = [], noise = [], p2pat = P2_PAT[style.p2] || P2_PAT.alberti;
+    var tripat = TRI_PAT[style.tri] || TRI_PAT.walk, npat = NOISE_PAT[style.noise] || NOISE_PAT.soft;
+    bars.forEach(function (name) {
+      var c = CH[name];
+      if (!c) throw new Error("unknown chord " + name);
+      p2pat.forEach(function (i) { p2.push(i === "r" ? ["r", 0.5] : [c[i], 0.5]); });
+      tripat.forEach(function (i) { tri.push([shift(c[i], -2), 1]); });
+      npat.forEach(function (t, i) {
+        if (t === "r") noise.push(["r", 0.5, 0]);
+        else noise.push([t, 0.5, i === 0 || i === 4 ? (style.loud || 5) : 3]);
+      });
+    });
+    return {
+      p2: channelMML(p2, "@0 v" + (style.p2vol || 7) + " l8", 0.5),
+      tri: channelMML(tri, "v" + (style.trivol || 11) + " l4", 1),
+      noise: noiseMML(noise)
+    };
+  }
+  function noiseMML(list) {
+    var out = "l8";
+    list.forEach(function (it) {
+      if (it[0] === "r") out += " r" + tone(it[1], 0.5);
+      else out += " v" + it[2] + " " + it[0] + tone(it[1], 0.5);
+    });
+    return out;
+  }
+
+  function inWatch(t, d, watch) {
+    return watch.some(function (w) { return t < w[1] && t + d > w[0]; });
+  }
+
+  function build(def) {
+    var evs = events(def.events), beat = 0;
+    evs.forEach(function (e) { e.t = beat; beat += e.d; });
+    if (beat % 4) throw new Error(def.id + ": " + beat + " beats is not a whole number of bars");
+    if (def.bars.length !== beat / 4) throw new Error(def.id + ": " + def.bars.length + " chords for " + beat / 4 + " bars");
+    var bpm = def.bpm, beatSec = 60 / bpm;
+    var watch = def.watch || [];
+    var chart = [];
+    evs.forEach(function (e) {
+      if (!e.chart || e.n === "r") return;
+      if (inWatch(e.t, e.d, watch)) return;
+      chart.push({ t: e.t * beatSec, end: (e.t + e.d) * beatSec, d: e.d, hold: e.hold, note: e.n, f: freq(e.n) });
+    });
+    for (var i = 1; i < chart.length; i++) {
+      if (chart[i].t < chart[i - 1].end - 0.001) throw new Error(def.id + ": notes overlap at chart " + i);
+    }
+    var back = backing(def.bars, def.style);
+    return {
+      id: def.id, name: def.name, short: def.short, credit: def.credit, bpm: bpm,
+      difficulty: def.difficulty, seconds: beat * beatSec,
+      music: { bpm: bpm, p1: melodyMML(evs, "@" + (def.duty == null ? 1 : def.duty) + " v" + (def.sound || 11) + " l8"), p2: back.p2, tri: back.tri, noise: back.noise },
+      chart: chart, watch: watch.map(function (w) { return [w[0] * beatSec, w[1] * beatSec]; }), totalBeats: beat
+    };
+  }
+
+  /* ---- 1. Twinkle, 100 bpm, 16 bars: 2 intro + 12 melody + 2 outro ---- */
+  var twinkle = build({
+    id: "twinkle", bpm: 100, difficulty: 1, duty: 1, sound: 11,
+    name: { zh: "小星星", en: "Twinkle" }, short: { zh: "小星星", en: "Twinkle" },
+    credit: { zh: "法国童谣 1761", en: "French folk 1761" },
+    watch: [[32, 36]],
+    bars: ["C", "G", "C", "C", "F", "C", "G", "G", "G", "G", "C", "C", "F", "C", "G", "C"],
+    style: { p2: "sparse", tri: "soft", noise: "soft", p2vol: 6, trivol: 11, loud: 4 },
+    events: [
+      "r:4 r:4",
+      "c4:1 c4:1 g4:1 g4:1 a4:1 a4:1 g4:1.5~ r:0.5",
+      "f4:1 f4:1 e4:1 e4:1 d4:1 d4:1 c4:1.5~ r:0.5",
+      "g4:1 g4:1 f4:1 f4:1 e4:1 e4:1 d4:1.5~ r:0.5",
+      "g4:1 g4:1 f4:1 f4:1 e4:1 e4:1 d4:1.5~ r:0.5",
+      "c4:1 c4:1 g4:1 g4:1 a4:1 a4:1 g4:1.5~ r:0.5",
+      "f4:1 f4:1 e4:1 e4:1 d4:1 d4:1 c4:1.5~ r:0.5",
+      "c4:1! e4:1! g4:2! c5:4!"
+    ].join(" ")
+  });
+
+  /* ---- 2. Ode to Joy, 112 bpm, 20 bars: 2 intro + 16 melody + 2 outro ---- */
+  var ode = build({
+    id: "ode", bpm: 112, difficulty: 2, duty: 2, sound: 12,
+    name: { zh: "欢乐颂", en: "Ode to Joy" }, short: { zh: "欢乐颂", en: "Ode" },
+    credit: { zh: "贝多芬 1824", en: "Beethoven 1824" },
+    watch: [[48, 52], [60, 64]],
+    bars: ["C", "G", "C", "G", "C", "G", "Am", "C",
+           "C", "G", "C", "G", "C", "G", "Am", "C",
+           "G", "C", "G", "C"],
+    style: { p2: "alberti", tri: "walk", noise: "march", p2vol: 7, trivol: 11, loud: 5 },
+    events: [
+      "r:4 r:4",
+      "e4:1 e4:1 f4:1 g4:1",
+      "g4:1 f4:1 e4:1 d4:1",
+      "c4:1 c4:1 d4:1 e4:1",
+      "e4:1.5 d4:0.5 d4:1.5~ r:0.5",
+      "e4:1 e4:1 f4:1 g4:1",
+      "g4:1 f4:1 e4:1 d4:1",
+      "c4:1 c4:1 d4:1 e4:1",
+      "d4:1.5 c4:0.5 c4:1.5~ r:0.5",
+      "e4:1 e4:1 f4:1 g4:1",
+      "g4:1 f4:1 e4:1 d4:1",
+      "c4:1 c4:1 d4:1 e4:1",
+      "e4:1.5 d4:0.5 d4:1.5~ r:0.5",
+      "e4:1 e4:1 f4:1 g4:1",
+      "g4:1 f4:1 e4:1 d4:1",
+      "c4:1 c4:1 d4:1 e4:1",
+      "d4:1.5 c4:0.5 c4:1.5~ r:0.5",
+      "c4:1! e4:1! g4:2! c5:4!"
+    ].join(" ")
+  });
+
+  /* ---- 3. Mountain King, 144 bpm, 28 bars: 2 intro + 24 melody + 2 outro ---- */
+  var mountain = build({
+    id: "mountain", bpm: 144, difficulty: 3, duty: 1, sound: 12,
+    name: { zh: "山魔王的宫殿", en: "Mountain King" }, short: { zh: "山魔王", en: "Mountain" },
+    credit: { zh: "格里格 1875", en: "Grieg 1875" },
+    watch: [[56, 60]],
+    bars: ["Bm", "Bm",
+           "Bm", "Bm", "Bm", "Bm", "A", "A", "Bm", "Bm",
+           "Bm", "Bm", "Bm", "Bm", "A", "A", "Bm", "Bm",
+           "Bm", "Bm", "G", "G", "D", "D", "A", "Bm",
+           "Bm", "Bm"],
+    style: { p2: "offbeat", tri: "pump", noise: "gallop", p2vol: 7, trivol: 11, loud: 6 },
+    events: [
+      "r:4 r:4",
+      /* A: quarter-note statement */
+      "b3:1 d4:1 e4:1 f+4:1", "f+4:1 e4:1 d4:1 b3:1",
+      "b3:1 d4:1 e4:1 f+4:1", "f+4:1 e4:1 d4:1 b3:1",
+      "a3:1 c+4:1 d4:1 e4:1", "e4:1 d4:1 c+4:1 a3:1",
+      "b3:1 d4:1 e4:1 f+4:1", "f+4:1 e4:1 d4:1 b3:1",
+      /* B: the original eighth-note gallop, chart on the quarters */
+      "b3:0.5 d4:0.5! e4:0.5 f+4:0.5! f+4:0.5 e4:0.5! d4:0.5 b3:0.5!",
+      "b3:0.5 d4:0.5! e4:0.5 f+4:0.5! f+4:0.5 e4:0.5! d4:0.5 b3:0.5!",
+      "b3:0.5 d4:0.5! e4:0.5 f+4:0.5! f+4:0.5 e4:0.5! d4:0.5 b3:0.5!",
+      "b3:0.5 d4:0.5! e4:0.5 f+4:0.5! f+4:0.5 e4:0.5! d4:0.5 b3:0.5!",
+      "a3:0.5 c+4:0.5! d4:0.5 e4:0.5! e4:0.5 d4:0.5! c+4:0.5 a3:0.5!",
+      "a3:0.5 c+4:0.5! d4:0.5 e4:0.5! e4:0.5 d4:0.5! c+4:0.5 a3:0.5!",
+      "b3:0.5 d4:0.5! e4:0.5 f+4:0.5! f+4:0.5 e4:0.5! d4:0.5 b3:0.5!",
+      "b3:0.5 d4:0.5! e4:0.5 f+4:0.5! f+4:0.5 e4:0.5! d4:0.5 b3:0.5!",
+      /* C: up an octave, quarter notes, the roof comes off */
+      "b4:1 d5:1 e5:1 f+5:1", "f+5:1 e5:1 d5:1 b4:1",
+      "b4:1 d5:1 e5:1 f+5:1", "f+5:1 e5:1 d5:1 b4:1",
+      "a4:1 c+5:1 d5:1 e5:1", "e5:1 d5:1 c+5:1 a4:1",
+      "b4:1 d5:1 e5:1 f+5:1", "f+5:1 e5:1 d5:1 b4:1",
+      "b3:1! d4:1! f+4:2! b3:4!"
+    ].join(" ")
+  });
+
+  return [twinkle, ode, mountain];
+})();
+
+if (typeof module !== "undefined" && module.exports) module.exports = { FAKE_SONGS: FAKE_SONGS };
+</script>
+<!-- the stage, the timing and the comedy; the tool fills this block -->
+<script data-src="src/game.js">
+/* fake-yu / game.js — 滥竽充数, a one-key rhythm game for Lo-PDA.
+ *
+ * The joke is the mechanic: you are the extra player at the back of a 300-player royal
+ * orchestra. Play the notes, but when the king's eye opens, freeze. The music and the chart
+ * come from src/music.js; this file is the stage, the timing and the comedy.
+ *
+ * MIT License. Copyright (c) 2026 Haowei Wu.
+ */
+
+var game = LoGame.create({ width: 160, height: 144, lang: "zh" });
+var T = game.t;
+document.documentElement.lang = game.lang === "zh" ? "zh-CN" : "en";
+var INK = 0, DARK = 1, MID = 2, PAPER = 3;
+var SAVE_KEY = "save";
+var PERFECT = 0.10, GOOD = 0.20, EARLY = 0.35;
+
+var profile = { best: {}, cleared: {}, ending: false, finaled: false };
+var loaded = false;
+
+function tt(zh, en) { return T({ zh: zh, en: en }); }
+
+var TX = {
+  title: { zh: "滥竽充数", en: "Fake Yu" },
+  subtitle: { zh: "南郭先生升职记", en: "Royal orchestra" },
+  start: { zh: "开始演奏", en: "Perform" },
+  songs: { zh: "选曲", en: "Songs" },
+  howto: { zh: "怎么玩", en: "How to play" },
+  titleKeys: { zh: "↑↓ 选　A 好", en: "UP/DOWN pick  A ok" },
+  songKeys: { zh: "↑↓ 选　A 演奏　B 返回", en: "UP/DOWN  A play  B back" },
+  fresh: { zh: "未演", en: "NEW" },
+  howTitle: { zh: "怎么玩", en: "How to play" },
+  howKeys: { zh: "A 下一页　B 返回", en: "A next  B back" },
+  howDone: { zh: "A 回标题", en: "A title" },
+  how1: { zh: "音符到竖线时按 A。长条按住，到尾再松。", en: "Press A as a note crosses the line. Hold long bars to the end." },
+  how2: { zh: "国王的眼睛睁开时，千万别按。按一次涨怀疑，满 100 就露馅。", en: "Eye open? Don't press. Presses raise suspicion; at 100 you're caught." },
+  how3: { zh: "混在三百人里，连击越高，观众越高兴。三首演完，南郭就升职。", en: "Blend into the crowd. A long combo pleases them. Finish all three songs to get promoted." },
+  ready: { zh: "准备", en: "READY" },
+  go: { zh: "开始！", en: "GO!" },
+  watchWarn: { zh: "王上看过来了", en: "King is watching" },
+  watch: { zh: "别吹！", en: "DON'T PLAY!" },
+  again: { zh: "继续", en: "AGAIN" },
+  caught: { zh: "露馅！", en: "CAUGHT!" },
+  perfect: { zh: "完美", en: "PERFECT" },
+  good: { zh: "不错", en: "GOOD" },
+  miss: { zh: "漏了", en: "MISS" },
+  early: { zh: "早了", en: "EARLY" },
+  noise: { zh: "杂音", en: "NOISE" },
+  broken: { zh: "破了", en: "BROKEN" },
+  hold: { zh: "按住", en: "HOLD" },
+  cheer: { zh: "全场喝彩", en: "CHEERS!" },
+  success: { zh: "演出成功", en: "PERFORMANCE!" },
+  failed: { zh: "被赶出宫", en: "THROWN OUT" },
+  score: { zh: "得分", en: "SCORE" },
+  maxCombo: { zh: "最高连击", en: "MAX COMBO" },
+  accuracy: { zh: "准确", en: "ACCURACY" },
+  suspicion: { zh: "怀疑", en: "SUSPICION" },
+  next: { zh: "下一曲", en: "Next" },
+  retry: { zh: "重来", en: "Retry" },
+  choose: { zh: "选曲", en: "Songs" },
+  curtain: { zh: "谢幕", en: "End" },
+  resultKeys: { zh: "←→ 选　A 好　B 选曲", en: "←→ pick  A ok  B songs" },
+  failTip: { zh: "国王睁眼时，别按。", en: "King looks? Freeze." },
+  newBest: { zh: "新纪录", en: "NEW BEST" },
+  endingTitle: { zh: "剧终", en: "THE END" },
+  end1: { zh: "齐湣王：你居然真会吹。", en: "King Min: So you can actually play." },
+  end2: { zh: "南郭：……略懂。", en: "Nan Guo: ...A little." },
+  end3: { zh: "从此，南郭先生成了宫廷乐师。至于他到底会不会吹，只有他自己知道。", en: "And so Nan Guo became court musician. Whether he could really play, only he knows." },
+  endSeen: { zh: "南郭先生又回到了台上。", en: "Nan Guo is back on stage." }
+};
+
+/* ---------- tiny 3x5 pixel type for big numbers, ranks and key caps ---------- */
+var F35 = {
+  "0": ["111", "101", "101", "101", "111"], "1": ["010", "110", "010", "010", "111"],
+  "2": ["111", "001", "111", "100", "111"], "3": ["111", "001", "111", "001", "111"],
+  "4": ["101", "101", "111", "001", "001"], "5": ["111", "100", "111", "001", "111"],
+  "6": ["111", "100", "111", "101", "111"], "7": ["111", "001", "010", "010", "010"],
+  "8": ["111", "101", "111", "101", "111"], "9": ["111", "101", "111", "001", "111"],
+  "A": ["010", "101", "111", "101", "101"], "B": ["110", "101", "110", "101", "110"],
+  "C": ["011", "100", "100", "100", "011"], "S": ["011", "100", "010", "001", "110"],
+  "X": ["101", "101", "010", "101", "101"], "!": ["010", "010", "010", "000", "010"],
+  "?": ["111", "001", "011", "000", "010"], "-": ["000", "000", "111", "000", "000"]
+};
+function glyph(g, ch, x, y, s, tone) {
+  var rows = F35[ch];
+  if (!rows) return 4 * s;
+  for (var r = 0; r < 5; r++) for (var c = 0; c < 3; c++) {
+    if (rows[r].charAt(c) === "1") g.rect(x + c * s, y + r * s, s, s, tone);
+  }
+  return 4 * s;
+}
+function bigText(g, str, x, y, s, tone, align) {
+  var w = str.length * 4 * s - s;
+  var cx = x;
+  if (align === "center") cx = Math.round(x - w / 2);
+  else if (align === "right") cx = x - w;
+  for (var i = 0; i < str.length; i++) { glyph(g, str.charAt(i), cx, y, s, tone); cx += 4 * s; }
+  return w;
+}
+function keycap(g, label, x, y, s) {
+  var w = 3 * s + 4, h = 5 * s + 4;
+  g.rect(x, y, w, h, PAPER); g.frame(x, y, w, h, INK);
+  glyph(g, label, x + 2, y + 2, s, INK);
+  return w;
+}
+
+/* ---------- save ---------- */
+function loadProfile() {
+  return game.load(SAVE_KEY).then(function (v) {
+    if (v && typeof v === "object") {
+      profile.best = v.best || {};
+      profile.cleared = v.cleared || {};
+      profile.ending = !!v.ending;
+      profile.finaled = !!v.finaled;
+    }
+    loaded = true;
+  }).catch(function () { loaded = true; });
+}
+function saveProfile() { game.save(SAVE_KEY, profile); }
+function clearedCount() { var n = 0; FAKE_SONGS.forEach(function (s) { if (profile.cleared[s.id]) n++; }); return n; }
+function rankLetter(acc, miss, suspicion, failed) {
+  if (failed) return "C";
+  if (acc >= 0.95 && miss <= 2 && suspicion <= 20) return "S";
+  if (acc >= 0.86) return "A";
+  if (acc >= 0.70) return "B";
+  return "C";
+}
+function rankName(r) { return tt({ S: "名角", A: "好手", B: "凑合", C: "露馅" }[r] || "露馅", { S: "STAR", A: "GOOD", B: "OK", C: "OOPS" }[r] || "OOPS"); }
+
+/* ---------- shared art ---------- */
+function drawDrape(g, x, w) {
+  g.rect(x, 16, w, 82, INK);
+  for (var i = 2; i < w; i += 4) g.rect(x + i, 16, 2, 82, DARK);
+  for (i = 0; i < w; i += 6) {
+    g.rect(x + i, 92, 6, 2, MID);
+    g.rect(x + i + 1, 94, 4, 2, INK);
+  }
+}
+function drawKing(g, cx, cy, open, look) {
+  /* a silhouette with a crown; open: 0 closed, 1 a slit, 2 wide */
+  g.rect(cx - 7, cy + 2, 14, 7, INK);
+  g.rect(cx - 5, cy - 2, 10, 5, INK);
+  g.rect(cx - 5, cy - 5, 2, 2, INK); g.rect(cx - 1, cy - 6, 2, 3, INK); g.rect(cx + 3, cy - 5, 2, 2, INK);
+  if (open) {
+    var h = open === 1 ? 1 : 3;
+    g.rect(cx - 4, cy, 3, h, PAPER);
+    g.rect(cx + 1, cy, 3, h, PAPER);
+    if (open === 2) { g.rect(cx - 3 + (look || 0), cy, 1, h, INK); g.rect(cx + 2 + (look || 0), cy, 1, h, INK); }
+  } else {
+    g.rect(cx - 4, cy + 1, 3, 1, MID); g.rect(cx + 1, cy + 1, 3, 1, MID);
+  }
+}
+function drawEye(g, x, y, w, h, lid) {
+  /* an almond eye; lid 0 closed ... 1 open */
+  var open = Math.max(0, Math.min(1, lid));
+  var hh = Math.max(1, Math.round(h * open));
+  var cy = y + Math.round(h / 2);
+  for (var i = 0; i < w; i++) {
+    var u = (i + 0.5) / w, half = Math.round((hh / 2) * Math.sin(Math.PI * u));
+    if (half < 1) { g.pixel(x + i, cy, INK); continue; }
+    g.rect(x + i, cy - half, 1, half * 2 + 1, PAPER);
+    g.pixel(x + i, cy - half, INK);
+    g.pixel(x + i, cy + half, INK);
+  }
+  if (open > 0.45) {
+    var px = x + Math.round(w / 2), r = Math.max(1, Math.round(hh / 4));
+    g.circle(px, cy, r, INK, true);
+    g.rect(px - r, cy, Math.max(1, r - 1), 1, INK);
+    g.pixel(px - 1, cy - 1, PAPER);
+  }
+}
+function drawPlayer(g, x, y, puff, sweat, arms) {
+  /* 24x28, facing right; the sheng is the little bundle at the mouth */
+  g.rect(x + 4, y + 24, 4, 4, INK); g.rect(x + 12, y + 24, 4, 4, INK);
+  g.rect(x + 2, y + 13, 16, 12, MID); g.frame(x + 2, y + 13, 16, 12, INK);
+  g.rect(x + 4, y + 6, 12, 8, PAPER); g.frame(x + 4, y + 6, 12, 8, INK);
+  g.rect(x + 6, y + 9, 2, 2, INK); g.rect(x + 11, y + 9, 2, 2, INK);
+  g.rect(x + 7, y + 13, 5, 1, INK);
+  g.rect(x + 1, y + 2, 18, 4, INK);
+  g.rect(x + 3, y, 14, 3, INK);
+  /* arms and sheng */
+  var ay = puff ? y + 9 : y + 12;
+  g.rect(x + 15, ay, 7, 2, INK);
+  g.rect(x + 20, y + 2, 2, 10, INK);
+  g.rect(x + 22, y + 1, 2, 12, MID);
+  g.rect(x + 24, y + 4, 2, 7, INK);
+  if (puff) {
+    g.circle(x + 17, y + 9, 2, MID, true);
+    g.rect(x + 26, y + 8, 3, 1, INK);
+    g.rect(x + 28, y + 7, 2, 1, MID);
+    g.rect(x + 28, y + 10, 2, 1, MID);
+  }
+  if (sweat) { g.rect(x + 15, y + 5, 1, 2, PAPER); g.rect(x + 16, y + 7, 1, 1, PAPER); }
+  if (arms) { g.rect(x + 1, y + 2, 2, 7, INK); g.rect(x + 19, y + 2, 2, 7, INK); }
+}
+function drawConductor(g, x, y, beat, tone) {
+  tone = tone == null ? INK : tone;
+  var swing = Math.sin(beat * Math.PI * 2);
+  g.rect(x + 5, y + 8, 12, 14, tone);
+  g.rect(x + 6, y + 2, 10, 7, PAPER); g.frame(x + 6, y + 2, 10, 7, INK);
+  g.rect(x + 8, y + 4, 1, 1, INK); g.rect(x + 12, y + 4, 1, 1, INK);
+  g.rect(x + 4, y + 1, 14, 3, tone);
+  g.rect(x + 3, y + 10, 5, 2, tone);
+  g.line(x + 3, y + 11, x - 3 + Math.round(swing * 2), y + 1 + Math.round(swing * 5), MID);
+  g.rect(x - 2 + Math.round(swing * 2), y + Math.round(swing * 5), 2, 2, tone);
+  g.rect(x + 8, y + 22, 3, 3, tone); g.rect(x + 13, y + 22, 3, 3, tone);
+}
+function drawAudience(g, beat, happy, clap) {
+  g.rect(0, 120, 160, 24, INK);
+  g.rect(0, 120, 160, 2, DARK);
+  for (var row = 0; row < 2; row++) {
+    for (var i = 0; i < 8; i++) {
+      var x = 2 + i * 20 + (row ? 10 : 0), y = 126 + row * 8;
+      var b = Math.round(Math.sin((beat + i * 0.13 + row * 0.3) * Math.PI * 2) * 1);
+      g.circle(x + 5, y + 3 + b, 4, DARK, true);
+      g.rect(x + 1, y + 6 + b, 9, 5, DARK);
+      if (happy) { g.rect(x - 2, y + 1 + b, 3, 1, MID); g.rect(x + 10, y + 1 + b, 3, 1, MID); }
+      if (clap && Math.floor(beat * 4 + i) % 2) { g.rect(x + 2, y + 6 + b, 2, 2, MID); }
+    }
+  }
+}
+function drawHall(g, beat, opts) {
+  opts = opts || {};
+  g.clear(PAPER);
+  g.rect(0, 16, 160, 80, DARK);
+  g.rect(0, 16, 160, 1, INK);
+  for (var x = 14; x < 148; x += 34) {
+    g.frame(x, 20, 28, 60, MID);
+    g.rect(x + 2, 22, 24, 56, DARK);
+    g.rect(x + 12, 24, 4, 54, MID);
+  }
+  g.rect(0, 92, 160, 28, INK);
+  g.rect(0, 92, 160, 2, MID);
+  drawDrape(g, 0, 14); drawDrape(g, 146, 14);
+  /* royal box */
+  g.rect(54, 17, 52, 17, PAPER);
+  g.frame(54, 17, 52, 17, INK);
+  g.rect(55, 18, 2, 15, DARK); g.rect(103, 18, 2, 15, DARK);
+  drawKing(g, 80, 25, opts.kingEye || 0, opts.look || 0);
+  /* chandelier */
+  g.line(80, 16, 80, 20, INK);
+  g.rect(74, 20, 13, 2, INK);
+  g.rect(76, 22, 1, 3, MID); g.rect(80, 22, 1, 4, MID); g.rect(84, 22, 1, 3, MID);
+  drawAudience(g, beat, opts.happy, opts.clap);
+}
+function drawScroll(g) {
+  g.rect(3, 34, 154, 60, PAPER);
+  g.frame(3, 34, 154, 60, INK);
+  g.rect(0, 36, 4, 56, MID); g.rect(156, 36, 4, 56, MID);
+  g.frame(6, 37, 148, 54, MID);
+  for (var i = 0; i < 5; i++) g.rect(10, 48 + i * 8, 138, 1, MID);
+  /* rolled ends */
+  g.rect(0, 35, 4, 2, INK); g.rect(0, 93, 4, 2, INK);
+  g.rect(156, 35, 4, 2, INK); g.rect(156, 93, 4, 2, INK);
+  /* a little flourish at the left end of the staff */
+  g.line(8, 48, 8, 80, DARK);
+  g.circle(8, 64, 2, DARK, false);
+}
+function drawMouth(g, puff) {
+  g.rect(36, 84, 6, 3, INK);
+  g.rect(34, 86, 4, 3, MID);
+  if (puff) { g.rect(42, 84, 3, 1, INK); g.rect(43, 86, 2, 1, INK); }
+}
+function drawSuspicion(g, value) {
+  /* an eye, then five pips; value 0..100 */
+  var x = 112, y = 5;
+  drawEye(g, x, y, 9, 5, 1);
+  for (var i = 0; i < 5; i++) {
+    var on = value > i * 20;
+    g.rect(124 + i * 6, 4, 5, 7, PAPER);
+    g.frame(124 + i * 6, 4, 5, 7, MID);
+    if (on) g.rect(125 + i * 6, 5, 3, 5, INK);
+  }
+}
+
+/* ---------- boot ---------- */
+game.scene("boot", {
+  enter: function () {
+    if (loaded) { game.go("title", null, { fade: false }); return; }
+    loadProfile().then(function () { game.go("title", null, { fade: false }); });
+  },
+  draw: function (g) {
+    g.clear(PAPER);
+    g.text(tt("登录中", "Loading"), 80, 66, { align: "center" });
+    for (var i = 0; i < 3; i++) g.rect(70 + i * 8, 82, 4, 4, Math.floor(game.time * 4) % 3 === i ? INK : MID);
+  }
+});
+
+/* ---------- title ---------- */
+var titleSel = 0, titleLock = 0;
+game.scene("title", {
+  enter: function () {
+    titleSel = 0;
+    titleLock = game.time + 0.12;
+    game.musicStop();
+    game.ambience(null);
+  },
+  update: function () {
+    var d = game.dir().y;
+    if (d) { titleSel = (titleSel + d + 3) % 3; game.sfx("move"); }
+    var canGo = game.time >= titleLock;
+    var go = canGo && (game.pressed("a") || game.pressed("start"));
+    if (canGo && game.pointer.pressed && game.pointer.y >= 95) {
+      var i = Math.floor((game.pointer.y - 95) / 16);
+      if (i >= 0 && i < 3 && game.pointer.y < 143) { titleSel = i; go = true; }
+    }
+    if (go) {
+      game.sfx("tap");
+      if (titleSel === 0) startNext();
+      else if (titleSel === 1) game.go("select");
+      else game.go("howto");
+    }
+  },
+  draw: function (g) {
+    var beat = game.time * 0.8;
+    drawHall(g, beat, { happy: clearedCount() === 3, kingEye: 0 });
+    /* top strip: keys and the three cleared lights */
+    g.text(T(TX.titleKeys), 5, 2, { color: DARK });
+    for (var k = 0; k < 3; k++) {
+      var lit = profile.cleared[FAKE_SONGS[k].id];
+      g.rect(130 + k * 8, 5, 6, 5, lit ? INK : MID);
+    }
+    /* title plaque */
+    g.window(24, 21, 112, 33);
+    g.text(T(TX.title), 80, 25, { align: "center" });
+    g.text(T(TX.subtitle), 80, 38, { align: "center", color: DARK });
+    /* the two would-be musicians */
+    drawPlayer(g, 10, 62, false, false, false);
+    drawConductor(g, 132, 64, beat);
+    g.text(tt("三百人齐奏", "300 players"), 80, 66, { align: "center", color: PAPER });
+    g.text(tt("多一个，谁知道？", "Who notices?"), 80, 79, { align: "center", color: PAPER });
+    /* menu */
+    g.rect(10, 92, 140, 52, PAPER);
+    g.frame(10, 92, 140, 52, INK);
+    var items = [T(TX.start), T(TX.songs), T(TX.howto)];
+    for (var i = 0; i < 3; i++) {
+      var y = 95 + i * 16;
+      if (i === titleSel) {
+        g.rect(14, y, 132, 15, INK);
+        g.text(items[i], 80, y + 2, { align: "center", color: PAPER });
+        g.arrow(18, y + 6, "right", PAPER);
+      } else g.text(items[i], 80, y + 2, { align: "center" });
+    }
+  }
+});
+function startNext() {
+  var next = null;
+  for (var i = 0; i < FAKE_SONGS.length; i++) if (!profile.cleared[FAKE_SONGS[i].id]) { next = i; break; }
+  if (next === null) next = 0;   /* an encore run starts from the top, story and all */
+  goBrief(next);
+}
+function goBrief(i) {
+  game.go("brief", { i: i }, { fade: true, to: PAPER });
+}
+
+/* ---------- a line of story before a song ---------- */
+var briefI = 0;
+var BRIEF = [
+  { name: { zh: "齐宣王", en: "King Xuan" }, pages: [
+    { zh: "寡人有三百个乐师。人多，热闹。", en: "I have three hundred musicians. Such a crowd." },
+    { zh: "南郭先生抱着竽，悄悄站到最后一排。", en: "Nan Guo takes his sheng to the very back row." }] },
+  { name: { zh: "齐湣王", en: "King Min" }, pages: [
+    { zh: "父王听合奏。寡人，只听独奏。", en: "My father liked the ensemble. I listen to solos." },
+    { zh: "南郭：……完了。", en: "Nan Guo: ...I am finished." }] },
+  { name: { zh: "齐湣王", en: "King Min" }, pages: [
+    { zh: "给寡人吹《山魔王的宫殿》。吹错一个音，去喂马。", en: "Play The Mountain King. One wrong note and you feed the horses." },
+    { zh: "南郭：我连谱都不认识。", en: "Nan Guo: I cannot even read music." }] }
+];
+game.scene("brief", {
+  enter: function (a) {
+    var i = a.i;
+    game.musicStop();
+    briefI = i;
+    var pages = BRIEF[i].pages;
+    game.after(0.18, function () {
+      game.say(pages.map(function (p) { return T(p); }), { name: T(BRIEF[i].name), speed: 32 }).then(function () {
+        game.go("play", { i: i }, { fade: false });
+      });
+    });
+  },
+  draw: function (g) {
+    var beat = game.time * 0.6;
+    drawHall(g, beat, { kingEye: 1 });
+    drawPlayer(g, 18, 68, false, false, true);
+    drawConductor(g, 124, 70, beat);
+    g.window(34, 60, 92, 20);
+    g.text(T(FAKE_SONGS[briefI || 0].short), 80, 64, { align: "center", color: DARK });
+  }
+});
+
+/* ---------- song select ---------- */
+var selectSel = 0, selectLock = 0;
+game.scene("select", {
+  enter: function () {
+    selectSel = 0;
+    for (var i = 0; i < FAKE_SONGS.length; i++) if (!profile.cleared[FAKE_SONGS[i].id]) { selectSel = i; break; }
+    selectLock = game.time + 0.2;
+    game.musicStop();
+  },
+  update: function () {
+    var canGo = game.time >= selectLock;
+    var d = game.dir().y;
+    if (d) { selectSel = (selectSel + d + FAKE_SONGS.length) % FAKE_SONGS.length; game.sfx("move"); }
+    var go = canGo && (game.pressed("a") || game.pressed("start"));
+    if (canGo && game.pointer.pressed) {
+      var i = Math.floor((game.pointer.y - 24) / 28);
+      if (i >= 0 && i < FAKE_SONGS.length) { selectSel = i; go = true; }
+    }
+    if (game.pressed("b")) { game.sfx("miss"); game.go("title"); return; }
+    if (go) { game.sfx("tap"); goBrief(selectSel); }
+  },
+  draw: function (g) {
+    g.clear(PAPER);
+    g.rect(0, 0, 160, 18, INK);
+    g.text(tt("曲目", "Songs"), 6, 2, { color: PAPER });
+    g.text(tt("三场演出", "3 songs"), 154, 2, { align: "right", color: PAPER });
+    for (var i = 0; i < FAKE_SONGS.length; i++) {
+      var s = FAKE_SONGS[i], y = 24 + i * 28, on = i === selectSel;
+      if (on) { g.rect(3, y, 154, 26, INK); }
+      g.text((i + 1) + ". " + T(s.name), 8, y + 2, { color: on ? PAPER : INK });
+      var b = profile.best[s.id];
+      var rank = b ? b.rank : T(TX.fresh);
+      g.text(rank, 152, y + 2, { align: "right", color: on ? PAPER : DARK });
+      for (var k = 0; k < 3; k++) g.rect(8 + k * 7, y + 20, 4, 4, k < s.difficulty ? (on ? PAPER : INK) : MID);
+      if (b) g.text(String(b.score), 152, y + 16, { align: "right", color: on ? PAPER : DARK });
+    }
+    var s = FAKE_SONGS[selectSel];
+    g.rect(0, 110, 160, 1, INK);
+    g.text(T(s.credit), 80, 116, { align: "center", color: DARK });
+    g.text(T(TX.songKeys), 80, 132, { align: "center" });
+  }
+});
+
+/* ---------- how to play ---------- */
+var howPage = 0, howLock = 0;
+game.scene("howto", {
+  enter: function () { howPage = 0; howLock = game.time + 0.2; game.musicStop(); },
+  update: function () {
+    var canGo = game.time >= howLock;
+    if (game.pressed("b")) { game.sfx("miss"); game.go("title"); return; }
+    if (canGo && (game.pressed("a") || game.pressed("start") || game.pointer.pressed)) {
+      game.sfx("tap");
+      if (howPage < 2) howPage++;
+      else game.go("title");
+    }
+  },
+  draw: function (g) {
+    g.clear(PAPER);
+    g.rect(0, 0, 160, 18, INK);
+    g.text(T(TX.howTitle), 6, 2, { color: PAPER });
+    g.text((howPage + 1) + "/3", 154, 2, { align: "right", color: PAPER });
+    g.window(4, 20, 152, 112);
+    var txt = [T(TX.how1), T(TX.how2), T(TX.how3)][howPage];
+    g.text(txt, 9, 25, { width: 142 });
+    /* a live little demonstration under the words */
+    if (howPage === 0) {
+      for (var r = 0; r < 5; r++) g.rect(10, 92 + r * 7, 140, 1, MID);
+      g.rect(46, 86, 2, 34, INK);
+      for (var i = 0; i < 3; i++) {
+        var x = 154 - ((game.time * 34 + i * 42) % 112);
+        var y = 92 + (i % 3) * 7;
+        g.circle(x, y, 2, INK, true);
+        g.rect(x + 2, y - 5, 1, 5, INK);
+      }
+      keycap(g, "A", 14, 103, 2);
+    } else if (howPage === 1) {
+      g.rect(9, 84, 142, 40, INK);
+      var lid = 0.55 + 0.45 * Math.abs(Math.sin(game.time * 1.6));
+      drawEye(g, 24, 92, 52, 24, lid);
+      g.text(T(TX.watch), 114, 97, { align: "center", color: PAPER });
+    } else {
+      g.rect(9, 84, 142, 40, INK);
+      for (var k = 0; k < 6; k++) {
+        var hx = 18 + k * 24, b = Math.round(Math.sin((game.time * 2 + k * 0.2) * Math.PI * 2) * 2);
+        g.circle(hx, 104 + b, 4, PAPER, true);
+        g.rect(hx - 4, 109 + b, 9, 8, PAPER);
+        g.rect(hx - 3, 111 + b, 1, 1, INK); g.rect(hx + 2, 111 + b, 1, 1, INK);
+      }
+      for (k = 0; k < 5; k++) {
+        var cy = 88 + Math.round((Math.sin(game.time * 2.2 + k) + 1) * 3);
+        g.rect(12 + k * 34, cy, 2, 2, k % 2 ? MID : PAPER);
+      }
+      g.text(T(TX.cheer), 80, 87, { align: "center", color: PAPER });
+    }
+    g.text(howPage < 2 ? T(TX.howKeys) : T(TX.howDone), 80, 132, { align: "center", color: DARK });
+  }
+});
+
+/* ---------- performance ---------- */
+var P = null;
+
+function buildPlay(i) {
+  var s = FAKE_SONGS[i];
+  var lo = 127, hi = 0;
+  s.chart.forEach(function (n) {
+    var m = midiOfNote(n.note);
+    if (m < lo) lo = m; if (m > hi) hi = m;
+  });
+  if (hi - lo < 8) { var c = (hi + lo) / 2; lo = c - 4; hi = c + 4; }
+  lo -= 1; hi += 1;
+  return {
+    i: i, song: s, start: game.time, t: 0, lo: lo, hi: hi,
+    combo: 0, maxCombo: 0, score: 0, perfect: 0, good: 0, miss: 0, noise: 0, caught: 0,
+    suspicion: 0, total: s.chart.length, judged: {}, hold: null,
+    puffs: [], bits: [], judge: null, judgeUntil: 0,
+    warned: {}, inEye: {}, eye: false, banner: "", bannerUntil: 0,
+    ended: false, failed: false, endAt: 0, resultAt: 0,
+    lastBeat: -1, flash: 0, shake: 0, startPuff: 0, sweat: 0, clap: false
+  };
+}
+function midiOfNote(n) {
+  var m = /^([a-g])([+-]?)(\d)$/.exec(n);
+  return (parseInt(m[3], 10) + 1) * 12 + { c: 0, d: 2, e: 4, f: 5, g: 7, a: 9, b: 11 }[m[1]] + (m[2] === "+" ? 1 : m[2] === "-" ? -1 : 0);
+}
+function noteY(P, note) {
+  var m = midiOfNote(note.note);
+  return Math.round(80 - (m - P.lo) / (P.hi - P.lo) * 32);
+}
+function inWatch(P, t) {
+  return P.song.watch.some(function (w) { return t >= w[0] && t < w[1]; });
+}
+function addSuspicion(P, n) {
+  P.suspicion = Math.max(0, Math.min(100, P.suspicion + n));
+  if (P.suspicion >= 100) fail(P);
+}
+function setJudge(P, text, tone, sec) {
+  P.judge = { text: text, tone: tone == null ? INK : tone };
+  P.judgeUntil = game.time + (sec || 0.55);
+}
+function puffAt(P, y, kind) {
+  P.puffs.push({ x: 40, y: y, t: 0, kind: kind || 0 });
+  for (var i = 0; i < 5; i++) {
+    P.bits.push({ x: 40, y: y, vx: 0.6 + Math.random() * 1.2, vy: (Math.random() - 0.5) * 1.6, life: 0.35, tone: Math.random() < 0.5 ? INK : DARK });
+  }
+}
+function blip(P, note, perfect) {
+  if (!note) return;
+  game.sfx({ wave: "square", duty: perfect ? 1 : 2, from: Math.round(note.f * 1.03), to: Math.round(note.f), ms: perfect ? 85 : 65, attack: 2, decay: perfect ? 78 : 58, vol: perfect ? 0.46 : 0.34 });
+}
+function hitSound(fail) {
+  if (fail) game.sfx({ wave: "noise", from: 520, to: 120, ms: 140, vol: 0.42 });
+  else game.sfx({ wave: "square", duty: 3, from: 180, to: 90, ms: 90, vol: 0.2 });
+}
+function scoreHit(P, note, perfect) {
+  P.combo++;
+  if (P.combo > P.maxCombo) P.maxCombo = P.combo;
+  var gain = (perfect ? 100 : 55) + Math.min(50, P.combo * 2);
+  P.score += gain;
+  if (perfect) P.perfect++; else P.good++;
+  P.suspicion = Math.max(0, P.suspicion - (perfect ? 1.6 : 0.8));
+  setJudge(P, perfect ? T(TX.perfect) : T(TX.good), INK, 0.45);
+  puffAt(P, note ? noteY(P, note) : 64, perfect ? 1 : 0);
+  blip(P, note, perfect);
+  if (P.combo > 0 && P.combo % 10 === 0) {
+    game.flash(0.05); game.shake(1, 0.12); game.sfx("coin");
+    setJudge(P, T(TX.cheer), INK, 0.8);
+    for (var i = 0; i < 12; i++) P.bits.push({ x: Math.random() * 160, y: 30 + Math.random() * 40, vx: (Math.random() - 0.5) * 1.4, vy: 0.4 + Math.random() * 1.4, life: 1.2, tone: i % 2 ? MID : PAPER });
+  }
+}
+function missNote(P, note, why) {
+  if (!note) return;
+  P.judged[note.t] = "miss";
+  P.miss++;
+  P.combo = 0;
+  addSuspicion(P, why === "break" ? 10 : 9);
+  setJudge(P, why === "break" ? T(TX.broken) : T(TX.miss), INK, 0.6);
+  hitSound(true);
+  game.shake(1, 0.1);
+  P.sweat = 1.2;
+  if (why === "break") P.puffs.push({ x: 40, y: noteY(P, note), t: 0, kind: 2 });
+}
+function wrongPress(P) {
+  P.noise++;
+  P.combo = 0;
+  addSuspicion(P, 7);
+  setJudge(P, T(TX.noise), INK, 0.5);
+  hitSound(true);
+  game.shake(1, 0.08);
+}
+function caught(P) {
+  if (P.caughtCool > 0) return;
+  P.caughtCool = 0.7;
+  P.caught++;
+  P.combo = 0;
+  addSuspicion(P, 16);
+  setJudge(P, T(TX.caught), INK, 0.8);
+  game.sfx("err"); game.flash(0.09); game.shake(3, 0.25);
+  P.sweat = 1.5;
+}
+function fail(P) {
+  if (P.ended) return;
+  P.ended = true; P.failed = true;
+  P.endAt = game.time;
+  game.musicStop();
+  game.sfx("lose");
+  game.shake(4, 0.6);
+  game.flash(0.12);
+}
+function finish(P) {
+  if (P.ended) return;
+  P.ended = true; P.failed = false;
+  P.endAt = game.time;
+  game.musicStop();
+  game.sfx("win");
+  for (var i = 0; i < 14; i++) {
+    game.after(i * 0.055, function () {
+      game.sfx({ wave: "noise", from: 1800 + Math.random() * 1200, to: 900, ms: 40, attack: 2, decay: 36, vol: 0.12 });
+    });
+  }
+  for (i = 0; i < 24; i++) P.bits.push({ x: Math.random() * 160, y: 20 + Math.random() * 30, vx: (Math.random() - 0.5) * 1.2, vy: 0.5 + Math.random() * 1.5, life: 1.8, tone: i % 2 ? MID : PAPER });
+}
+function resultStats(P) {
+  var acc = P.total ? (P.perfect + P.good * 0.6) / P.total : 0;
+  var rank = rankLetter(acc, P.miss, P.suspicion, P.failed);
+  return { score: P.score, maxCombo: P.maxCombo, perfect: P.perfect, good: P.good, miss: P.miss, noise: P.noise, caught: P.caught, suspicion: Math.round(P.suspicion), total: P.total, acc: acc, rank: rank, failed: P.failed };
+}
+
+game.scene("play", {
+  enter: function (a) {
+    P = buildPlay(a.i);
+    P.caughtCool = 0;
+    game.music(P.song.music, { loop: false });
+    game.ambience(null);
+  },
+  update: function () {
+    if (!P) return;
+    var dt = 1 / 60;
+    P.t = game.time - P.start;
+    var t = P.t, beat = t * P.song.bpm / 60;
+    var beatSec = 60 / P.song.bpm;
+    if (P.caughtCool > 0) P.caughtCool -= dt;
+    if (P.sweat > 0) P.sweat -= dt;
+    if (P.flash > 0) P.flash -= dt;
+
+    /* note particles */
+    for (var i = P.bits.length - 1; i >= 0; i--) {
+      var b = P.bits[i]; b.life -= dt; b.x += b.vx; b.y += b.vy; b.vy += 0.02;
+      if (b.life <= 0) P.bits.splice(i, 1);
+    }
+    for (i = P.puffs.length - 1; i >= 0; i--) { P.puffs[i].t += dt; if (P.puffs[i].t > 0.3) P.puffs.splice(i, 1); }
+
+    if (!P.ended) {
+      /* watch warnings and the eye */
+      for (i = 0; i < P.song.watch.length; i++) {
+        var w = P.song.watch[i];
+        if (!P.warned[i] && t >= w[0] - 2 * beatSec && t < w[0]) {
+          P.warned[i] = true;
+          P.banner = T(TX.watchWarn); P.bannerUntil = w[0] + 0.2;
+          game.sfx({ wave: "square", duty: 2, from: 880, to: 880, ms: 70, vol: 0.4 });
+        }
+        if (!P.inEye[i] && t >= w[0] && t < w[1]) {
+          P.inEye[i] = true;
+          P.banner = T(TX.watch); P.bannerUntil = w[1];
+          game.sfx({ wave: "triangle", from: 120, to: 80, ms: 280, vol: 0.5 });
+          if (P.hold) { missNote(P, P.hold.note, "break"); P.hold = null; }
+        }
+        if (P.inEye[i] && t >= w[1]) {
+          P.inEye[i] = false;
+          P.banner = T(TX.again); P.bannerUntil = t + 0.6;
+          game.sfx("tick");
+        }
+      }
+      var eye = inWatch(P, t);
+      P.eye = eye;
+
+      var down = game.pressed("a") || game.pointer.pressed;
+      var up = game.released("a") || game.pointer.released;
+
+      if (eye) {
+        if (down) caught(P);
+      } else if (down) {
+        var note = nearestNote(P, t);
+        if (note) {
+          if (t < note.t - GOOD) {
+            setJudge(P, T(TX.early), DARK, 0.35);
+            game.sfx("tick");
+          } else {
+            var perfect = Math.abs(t - note.t) <= PERFECT;
+            if (note.hold) {
+              P.hold = { note: note, perfect: perfect, start: t };
+              P.judged[note.t] = "hold";
+              setJudge(P, T(TX.hold), DARK, 0.35);
+              blip(P, note, perfect);
+              puffAt(P, noteY(P, note), 0);
+            } else {
+              P.judged[note.t] = "hit";
+              scoreHit(P, note, perfect);
+            }
+          }
+        } else if (t > P.song.chart[0].t - 0.35 && t < P.song.chart[P.song.chart.length - 1].end + GOOD) {
+          wrongPress(P);
+        }
+      }
+
+      if (P.hold) {
+        var hn = P.hold.note;
+        if (up) {
+          if (t >= hn.end - GOOD) {
+            P.judged[hn.t] = "hit";
+            scoreHit(P, hn, P.hold.perfect && Math.abs(t - hn.end) <= 0.12);
+            P.hold = null;
+          } else {
+            P.judged[hn.t] = "miss";
+            missNote(P, hn, "break");
+            P.hold = null;
+          }
+        } else if (t >= hn.end) {
+          /* held through the end: count it, and keep the button bookkeeping tidy */
+          P.judged[hn.t] = "hit";
+          scoreHit(P, hn, P.hold.perfect);
+          P.hold = null;
+        }
+      }
+
+      /* unplayed taps that have gone past the window */
+      for (i = 0; i < P.song.chart.length; i++) {
+        var n = P.song.chart[i];
+        if (P.judged[n.t]) continue;
+        if (n.t + GOOD < t) {
+          missNote(P, n, "miss");
+          if (P.ended) return;
+        }
+      }
+
+      /* natural cool-down: a clean player becomes boring again */
+      if (!eye) P.suspicion = Math.max(0, P.suspicion - dt * 0.55);
+
+      /* let the coda finish; the uncharted last bar is part of the performance */
+      if (t > P.song.seconds + 0.25) finish(P);
+    } else if (game.time - P.endAt > (P.failed ? 1.05 : 1.5)) {
+      var stats = resultStats(P);
+      if (!P.failed) {
+        var b = profile.best[P.song.id];
+        stats.newBest = !b || stats.score > b.score;
+        if (stats.newBest) profile.best[P.song.id] = { score: stats.score, rank: stats.rank, acc: stats.acc, combo: stats.maxCombo };
+        profile.cleared[P.song.id] = true;
+        if (clearedCount() === FAKE_SONGS.length) profile.ending = true;
+      }
+      saveProfile();
+      game.go("result", { i: P.i, stats: stats }, { fade: true, to: PAPER });
+    }
+    /* a beat marker for the drawing code */
+    var bi = Math.floor(beat);
+    if (bi !== P.lastBeat) { P.lastBeat = bi; P.startPuff = 0.08; }
+    if (P.startPuff > 0) P.startPuff -= dt;
+  },
+  draw: function (g) {
+    if (!P) return;
+    var t = P.t, beat = t * P.song.bpm / 60;
+    drawHall(g, beat, { kingEye: P.suspicion > 55 || P.eye ? 2 : P.suspicion > 22 ? 1 : 0, look: P.suspicion > 70 ? 1 : 0, happy: P.maxCombo >= 25, clap: P.ended && !P.failed });
+    drawScroll(g);
+    drawMouth(g, P.startPuff > 0 || (P.hold && Math.sin(game.time * 20) > 0));
+    /* staff and notes */
+    g.rect(38, 42, 1, 42, DARK);
+    g.rect(37, 42, 3, 42, P.eye ? MID : PAPER);
+    g.rect(38, 42, 1, 42, P.eye ? MID : DARK);
+    if (P.eye) drawEye(g, 49, 46, 62, 26, Math.min(1, 0.3 + Math.min(1, (t - watchStart(P)) * 5)));
+    else {
+      for (var i = 0; i < P.song.chart.length; i++) {
+        var n = P.song.chart[i];
+        if (P.judged[n.t] && P.judged[n.t] !== "hold") continue;
+        var lead = 2.2, x = 40 + (n.t - t) * (118 / lead);
+        if (x < 34 || x > 162) continue;
+        var y = noteY(P, n);
+        var near = x - 40 < 8 && x - 40 > -4;
+        if (n.hold) {
+          var xe = 40 + (n.end - t) * (118 / lead);
+          if (xe < 36) continue;
+          g.rect(x, y - 2, Math.max(3, xe - x), 5, near ? INK : DARK);
+          g.frame(x, y - 2, Math.max(3, xe - x), 5, INK);
+          g.circle(x, y, 2, near ? PAPER : MID, true);
+          g.circle(x, y, 2, INK, false);
+        } else {
+          g.circle(x, y, near ? 3 : 2, near ? INK : DARK, true);
+          g.circle(x, y, near ? 3 : 2, INK, false);
+          g.rect(x + (near ? 2 : 1), y - 5, 1, 5, INK);
+        }
+      }
+      /* active hold: draw a filled progress bar */
+      if (P.hold) {
+        var hn = P.hold.note, hx = 40 + (hn.t - t) * (118 / lead);
+        var hxe = 40 + (hn.end - t) * (118 / lead);
+        var frac = Math.max(0, Math.min(1, (t - hn.t) / (hn.end - hn.t)));
+        g.rect(hx, noteY(P, hn) - 3, Math.max(2, hxe - hx), 1, INK);
+        g.rect(hx, noteY(P, hn) + 2, Math.max(2, Math.round((hxe - hx) * frac)), 1, INK);
+      }
+    }
+    /* puffs */
+    P.puffs.forEach(function (p) {
+      var r = Math.round(p.t * 44);
+      if (p.kind === 2) { g.line(p.x - 4, p.y - 4, p.x + 4, p.y + 4, INK); g.line(p.x + 4, p.y - 4, p.x - 4, p.y + 4, INK); }
+      else { g.circle(p.x + r, p.y, Math.max(1, r), p.kind ? INK : MID, false); }
+    });
+    /* particles */
+    P.bits.forEach(function (b) { if (b.life > 0) g.rect(Math.round(b.x), Math.round(b.y), 1, 1, b.tone); });
+    /* people */
+    drawPlayer(g, 8, 90, P.startPuff > 0 || (P.hold && Math.sin(game.time * 24) > 0), P.sweat > 0, false);
+    for (i = 0; i < 4; i++) {
+      var mx = 58 + i * 22, mb = Math.round(Math.sin((beat + i * 0.2) * Math.PI * 2) * 1);
+      g.circle(mx + 4, 102 + mb, 3, MID, true);
+      g.rect(mx, 106 + mb, 9, 10, DARK);
+      g.line(mx + 8, 108 + mb, mx + 14, 104 + mb, MID);
+      g.rect(mx + 1, 116 + mb, 2, 4, DARK); g.rect(mx + 6, 116 + mb, 2, 4, DARK);
+    }
+    drawConductor(g, 136, 96, beat, DARK);
+    /* HUD */
+    g.rect(0, 0, 160, 16, PAPER);
+    g.rect(0, 15, 160, 1, INK);
+    g.text(T(P.song.short), 4, 1);
+    if (P.combo >= 2) {
+      bigText(g, String(P.combo), 72, 3, 2, INK, "center");
+      g.text(tt("连", "x"), 88, 2, { color: DARK });
+    } else {
+      keycap(g, "A", 66, 3, 1);
+      g.text(tt("吹", "play"), 79, 2, { color: DARK });
+    }
+    drawSuspicion(g, P.suspicion);
+    /* banner */
+    if (P.banner && t < P.bannerUntil) {
+      g.window(26, 18, 108, 17);
+      g.text(P.banner, 80, 21, { align: "center" });
+    }
+    /* judge word */
+    if (P.judge && game.time < P.judgeUntil) {
+      var jw = g.measure(P.judge.text) + 10;
+      g.window(80 - Math.round(jw / 2), 84, jw, 15);
+      g.text(P.judge.text, 80, 86, { align: "center", color: P.judge.tone });
+    }
+    /* intro count: a thin strip above the staff, never over the approaching notes */
+    var first = P.song.chart[0].t;
+    if (t < first && !P.ended) {
+      var beatsLeft = (first - t) / (60 / P.song.bpm);
+      g.window(8, 18, 144, 22);
+      g.text(beatsLeft > 1 ? T(TX.ready) : T(TX.go), 12, 22);
+      g.text(tt("跟着指挥", "follow the baton"), 148, 22, { align: "right", color: DARK });
+    }
+    /* fail */
+    if (P.ended && P.failed) {
+      g.rect(0, 24, 160, 44, PAPER); g.frame(0, 24, 160, 44, INK);
+      g.text(T(TX.failed), 80, 34, { align: "center" });
+      g.text(T(TX.failTip), 80, 50, { align: "center", color: DARK });
+    }
+    /* success flash */
+    if (P.ended && !P.failed && game.time - P.endAt < 1.4) {
+      g.rect(0, 30, 160, 36, PAPER); g.frame(0, 30, 160, 36, INK);
+      g.text(T(TX.success), 80, 35, { align: "center" });
+      g.text(T(TX.cheer), 80, 50, { align: "center", color: DARK });
+    }
+  }
+});
+function watchStart(P) {
+  for (var i = 0; i < P.song.watch.length; i++) if (P.t >= P.song.watch[i][0] && P.t < P.song.watch[i][1]) return P.song.watch[i][0];
+  return P.t;
+}
+function nearestNote(P, t) {
+  var best = null, bd = 1e9;
+  for (var i = 0; i < P.song.chart.length; i++) {
+    var n = P.song.chart[i];
+    if (P.judged[n.t]) continue;
+    var d = n.t - t;
+    if (d < -GOOD) continue;
+    if (d > EARLY) break;
+    var ad = Math.abs(d);
+    if (ad < bd) { bd = ad; best = n; }
+  }
+  return best;
+}
+
+/* ---------- result ---------- */
+var resultSel = 0, resultItems = [], resultArgs = null, resultLock = 0;
+function resultOptions(stats, i) {
+  var last = i === FAKE_SONGS.length - 1;
+  if (stats.failed) return ["retry", "choose"];
+  if (last) return ["curtain", "retry", "choose"];
+  return ["next", "retry", "choose"];
+}
+game.scene("result", {
+  enter: function (a) {
+    resultArgs = a;
+    resultItems = resultOptions(a.stats, a.i);
+    resultSel = 0;
+    resultLock = game.time + 0.2;
+    game.musicStop();
+  },
+  update: function () {
+    var canGo = game.time >= resultLock;
+    var d = game.dir().x;
+    if (d) { resultSel = (resultSel + d + resultItems.length) % resultItems.length; game.sfx("move"); }
+    var act = canGo && (game.pressed("a") || game.pressed("start"));
+    if (canGo && game.pointer.pressed) {
+      var n = resultItems.length, bw = n === 3 ? 44 : 66, gap = n === 3 ? 2 : 4;
+      var bx = Math.round((160 - (n * bw + (n - 1) * gap)) / 2);
+      if (game.pointer.y >= 104 && game.pointer.y < 124) {
+        for (var k = 0; k < n; k++) {
+          var x = bx + k * (bw + gap);
+          if (game.pointer.x >= x && game.pointer.x < x + bw) { resultSel = k; act = true; break; }
+        }
+      }
+    }
+    if (game.pressed("b")) { game.sfx("miss"); game.go("select"); return; }
+    if (act) {
+      game.sfx("tap");
+      var what = resultItems[resultSel];
+      if (what === "next") goBrief(resultArgs.i + 1);
+      else if (what === "retry") game.go("play", { i: resultArgs.i }, { fade: false });
+      else if (what === "curtain") game.go("ending");
+      else game.go("select");
+    }
+  },
+  draw: function (g) {
+    var st = resultArgs.stats;
+    var beat = game.time * 1.6;
+    drawHall(g, beat, { happy: !st.failed, clap: !st.failed, kingEye: st.failed ? 2 : 0, look: 1 });
+    if (!st.failed) {
+      for (var i = 0; i < 18; i++) g.rect((i * 37 + Math.floor(game.time * 10)) % 160, 2 + (i * 5) % 12, 2, 2, i % 2 ? MID : INK);
+    }
+    g.window(8, 20, 144, 110);
+    g.text(T(st.failed ? TX.failed : TX.success), 80, 25, { align: "center" });
+    var panelY = 41;
+    g.text(T(TX.score) + " " + st.score, 16, panelY, { color: DARK });
+    g.text(T(TX.maxCombo) + " " + st.maxCombo, 16, panelY + 12, { color: DARK });
+    g.text(T(TX.accuracy) + " " + Math.round(st.acc * 100) + "%", 16, panelY + 24, { color: DARK });
+    g.text(T(TX.suspicion) + " " + st.suspicion, 16, panelY + 36, { color: DARK });
+    bigText(g, st.rank, 126, 38, 4, INK, "center");
+    g.text(rankName(st.rank), 126, 62, { align: "center", color: DARK });
+    if (!st.failed && st.newBest) g.text(T(TX.newBest), 80, 91, { align: "center", color: DARK });
+    /* one row of three wide buttons: easy to hit with a thumb */
+    var names = { next: TX.next, retry: TX.retry, choose: TX.choose, curtain: TX.curtain };
+    var n = resultItems.length, bw = n === 3 ? 44 : 66, gap = n === 3 ? 2 : 4;
+    var bx = Math.round((160 - (n * bw + (n - 1) * gap)) / 2);
+    for (var k = 0; k < n; k++) {
+      var x = bx + k * (bw + gap), on = k === resultSel;
+      if (on) g.rect(x, 104, bw, 18, INK);
+      else g.frame(x, 104, bw, 18, DARK);
+      g.text(T(names[resultItems[k]]), x + Math.round(bw / 2), 107, { align: "center", color: on ? PAPER : INK });
+    }
+    g.rect(0, 130, 160, 14, PAPER);
+    g.text(T(TX.resultKeys), 80, 131, { align: "center", color: DARK });
+  }
+});
+
+/* ---------- ending ---------- */
+game.scene("ending", {
+  enter: function () {
+    game.musicStop();
+    var first = !profile.finaled;
+    var pages = first ? [T(TX.end1), T(TX.end2), T(TX.end3)] : [T(TX.endSeen)];
+    game.after(0.2, function () {
+      game.say(pages, { speed: 34 }).then(function () {
+        if (first) { profile.finaled = true; saveProfile(); }
+        game.go("title", null, { fade: true, to: PAPER });
+      });
+    });
+  },
+  draw: function (g) {
+    drawHall(g, game.time * 0.8, { happy: true, clap: true, kingEye: 0 });
+    g.window(36, 24, 88, 22);
+    g.text(T(TX.endingTitle), 80, 29, { align: "center" });
+    drawPlayer(g, 58, 82, false, false, false);
+    drawConductor(g, 108, 82, game.time * 0.8);
+    bigText(g, "S", 80, 110, 2, INK, "center");
+  }
+});
+
+game.start("boot");
+</script>
+</body>
+</html>
