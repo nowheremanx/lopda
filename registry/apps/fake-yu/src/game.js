@@ -1,8 +1,10 @@
-/* fake-yu / game.js — 滥竽充数, a one-key rhythm game for Lo-PDA.
+/* fake-yu / game.js — 滥竽充数, a rhythm game about hiding in a royal orchestra.
  *
- * The joke is the mechanic: you are the extra player at the back of a 300-player royal
- * orchestra. Play the notes, but when the king's eye opens, freeze. The music and the chart
- * come from src/music.js; this file is the stage, the timing and the comedy.
+ * The joke is the mechanic: you are the extra player at the back of a 300-player court
+ * orchestra. Play the notes, but when the king's eye opens, freeze. A is the sheng, B is
+ * the chime; shaking the handheld (or SELECT) covers a mistake with a cough, and a bow
+ * (tilt forward, or DOWN) makes the king's stare less dangerous. Ten songs, three acts,
+ * four endings. The music and chart come from src/music.js; the story from src/story.js.
  *
  * MIT License. Copyright (c) 2026 Haowei Wu.
  */
@@ -13,27 +15,32 @@ document.documentElement.lang = game.lang === "zh" ? "zh-CN" : "en";
 var INK = 0, DARK = 1, MID = 2, PAPER = 3;
 var SAVE_KEY = "save";
 var PERFECT = 0.10, GOOD = 0.20, EARLY = 0.35;
+var SONGS = FAKE_SONGS;
+var CAST = STORY.CAST;
 
-var profile = { best: {}, cleared: {}, ending: false, finaled: false };
+var profile = { best: {}, cleared: {}, story: 0, truth: false, endings: {}, finaled: false };
 var loaded = false;
 
 function tt(zh, en) { return T({ zh: zh, en: en }); }
 
 var TX = {
   title: { zh: "滥竽充数", en: "Fake Yu" },
-  subtitle: { zh: "南郭先生升职记", en: "Royal orchestra" },
-  start: { zh: "开始演奏", en: "Perform" },
+  subtitle: { zh: "南郭先生升职记", en: "The royal orchestra" },
+  story: { zh: "故事", en: "Story" },
+  storyStart: { zh: "开始故事", en: "Begin story" },
+  storyContinue: { zh: "继续故事", en: "Continue" },
   songs: { zh: "选曲", en: "Songs" },
   howto: { zh: "怎么玩", en: "How to play" },
-  titleKeys: { zh: "↑↓ 选　A 好", en: "UP/DOWN pick  A ok" },
-  songKeys: { zh: "↑↓ 选　A 演奏　B 返回", en: "UP/DOWN  A play  B back" },
+  titleKeys: { zh: "↑↓选 A好", en: "UP/DOWN A ok" },
+  songKeys: { zh: "↑↓选　A演奏　B返回", en: "UP/DOWN  A play  B back" },
   fresh: { zh: "未演", en: "NEW" },
   howTitle: { zh: "怎么玩", en: "How to play" },
   howKeys: { zh: "A 下一页　B 返回", en: "A next  B back" },
   howDone: { zh: "A 回标题", en: "A title" },
-  how1: { zh: "音符到竖线时按 A。长条按住，到尾再松。", en: "Press A as a note crosses the line. Hold long bars to the end." },
-  how2: { zh: "国王的眼睛睁开时，千万别按。按一次涨怀疑，满 100 就露馅。", en: "Eye open? Don't press. Presses raise suspicion; at 100 you're caught." },
-  how3: { zh: "混在三百人里，连击越高，观众越高兴。三首演完，南郭就升职。", en: "Blend into the crowd. A long combo pleases them. Finish all three songs to get promoted." },
+  how1: { zh: "音符到竖线时按 A。长条要按住，到尾再松。", en: "Press A as a note crosses the line. Hold long bars to the end." },
+  how2: { zh: "国王的眼睛睁开时，千万别按。按一次涨怀疑，满 100 就露馅。开始前两拍会警告。", en: "King's eye open? Don't press. Pressing adds suspicion; 100 catches you. Two beats' warning." },
+  how3: { zh: "菱形音符是磬，按 B。A 是竽，B 是磬；手忙脚乱时，先看清形状。", en: "Diamond notes are chimes: press B. A is sheng, B is chime. Read the shape first." },
+  how4: { zh: "摇一摇 / SELECT 咳嗽：-14 怀疑，每曲 3 次。倾斜 / ↓ 躬身：被盯时少罚一半。没有感应也能玩。", en: "Shake / SELECT coughs: -14 suspicion, 3 a song. Tilt / DOWN bows: half penalty. Keys work too." },
   ready: { zh: "准备", en: "READY" },
   go: { zh: "开始！", en: "GO!" },
   watchWarn: { zh: "王上看过来了", en: "King is watching" },
@@ -47,8 +54,12 @@ var TX = {
   noise: { zh: "杂音", en: "NOISE" },
   broken: { zh: "破了", en: "BROKEN" },
   hold: { zh: "按住", en: "HOLD" },
+  chew: { zh: "咳！", en: "COUGH!" },
+  noCough: { zh: "还不用咳", en: "Not yet" },
+  bowGood: { zh: "稳住了", en: "STEADY" },
+  chime: { zh: "敲磬", en: "CHIME" },
   cheer: { zh: "全场喝彩", en: "CHEERS!" },
-  success: { zh: "演出成功", en: "PERFORMANCE!" },
+  success: { zh: "演出成功", en: "SUCCESS!" },
   failed: { zh: "被赶出宫", en: "THROWN OUT" },
   score: { zh: "得分", en: "SCORE" },
   maxCombo: { zh: "最高连击", en: "MAX COMBO" },
@@ -58,14 +69,38 @@ var TX = {
   retry: { zh: "重来", en: "Retry" },
   choose: { zh: "选曲", en: "Songs" },
   curtain: { zh: "谢幕", en: "End" },
-  resultKeys: { zh: "←→ 选　A 好　B 选曲", en: "←→ pick  A ok  B songs" },
+  resultKeys: { zh: "←→ 选　A 好　B 选曲", en: "LEFT/RIGHT  A ok  B songs" },
   failTip: { zh: "国王睁眼时，别按。", en: "King looks? Freeze." },
-  newBest: { zh: "新纪录", en: "NEW BEST" },
+  newBest: { zh: "新纪录", en: "BEST" },
   endingTitle: { zh: "剧终", en: "THE END" },
-  end1: { zh: "齐湣王：你居然真会吹。", en: "King Min: So you can actually play." },
-  end2: { zh: "南郭：……略懂。", en: "Nan Guo: ...A little." },
-  end3: { zh: "从此，南郭先生成了宫廷乐师。至于他到底会不会吹，只有他自己知道。", en: "And so Nan Guo became court musician. Whether he could really play, only he knows." },
-  endSeen: { zh: "南郭先生又回到了台上。", en: "Nan Guo is back on stage." }
+  endSeen: { zh: "南郭先生又回到了台上。", en: "Nan Guo is back on stage." },
+  act: { zh: "第 {n} 幕", en: "Act {n}" },
+  chapter: { zh: "第 {n} 章", en: "Chapter {n}" },
+  actShort: { zh: "第{n}幕", en: "Act {n}" },
+  chapterShort: { zh: "第{n}章", en: "Ch{n}" },
+  progress: { zh: "{act} · {chapter}", en: "{act} · {chapter}" },
+  endingCount: { zh: "结局 {e}/4", en: "Endings {e}/4" },
+  endingsSeen: { zh: "已看结局 {e}/4", en: "Endings {e}/4" },
+  storyKeys: { zh: "A / 点画面 继续", en: "A / tap: continue" },
+  choiceTitle: { zh: "要对湣王说实话吗？", en: "Tell the king the truth?" },
+  choice0: { zh: "坦白：我不会吹竽", en: "Confess: I cannot play" },
+  choice1: { zh: "继续装：我还能写", en: "Keep pretending" },
+  sensorsOn: { zh: "摇=咳　倾=躬身", en: "shake cough / tilt bow" },
+  sensorsKeys: { zh: "SELECT=咳　↓=躬身", en: "SELECT cough / DOWN bow" },
+  chimeHint: { zh: "B 键：敲磬", en: "B: chime" },
+  touchCough: { zh: "咳", en: "cough" },
+  touchB: { zh: "B 敲", en: "B chime" },
+  actProgress: { zh: "第 {a}/{b} 首", en: "Song {a}/{b}" },
+  pct: { zh: "{n}%", en: "{n}%" },
+  bHits: { zh: "敲磬", en: "CHIMES" },
+  coughs: { zh: "咳嗽", en: "COUGHS" },
+  best: { zh: "最好", en: "BEST" },
+  locked: { zh: "未演", en: "NEW" },
+  noSong: { zh: "没有曲目", en: "No songs" },
+  rankS: { zh: "名角", en: "STAR" },
+  rankA: { zh: "好手", en: "GOOD" },
+  rankB: { zh: "凑合", en: "OK" },
+  rankC: { zh: "露馅", en: "OOPS" }
 };
 
 /* ---------- tiny 3x5 pixel type for big numbers, ranks and key caps ---------- */
@@ -102,6 +137,32 @@ function keycap(g, label, x, y, s) {
   glyph(g, label, x + 2, y + 2, s, INK);
   return w;
 }
+function inBox(p, b) { return p.x >= b.x && p.x < b.x + b.w && p.y >= b.y && p.y < b.y + b.h; }
+
+/* ---------- sensors: one more way to play, never the only way (SPEC 4 / 6.4) ---------- */
+var HAS_MOTION = typeof PAD !== "undefined" && !!PAD.motion;
+var tilt = { x: 0, y: 0 }, sensorLive = false, sensorWanted = false, sensorAsking = false, shook = false;
+var sensorMsg = "";
+
+if (HAS_MOTION) {
+  PAD.on("tilt", function (v) { if (sensorWanted) { tilt.x = v.x; tilt.y = v.y; } });
+  PAD.on("shake", function () { if (sensorWanted) shook = true; });
+}
+function sensorOn() {
+  if (!HAS_MOTION) return;
+  sensorWanted = true; sensorAsking = true; sensorMsg = "";
+  PAD.motion.start().then(function (r) {
+    sensorAsking = false;
+    if (!sensorWanted) { PAD.motion.stop(); return; }
+    if (r === "on") { sensorLive = true; PAD.motion.zero(); return; }
+    sensorLive = false;
+    sensorMsg = r === "none" ? tt("没有感应：用 ↓ 躬身", "No sensor: DOWN bows") : tt("感应未允许：用 ↓ 躬身", "No sensor: DOWN bows");
+  });
+}
+function sensorOff() {
+  sensorWanted = false; sensorLive = false; sensorAsking = false; shook = false; tilt.x = tilt.y = 0;
+  if (HAS_MOTION) PAD.motion.stop();
+}
 
 /* ---------- save ---------- */
 function loadProfile() {
@@ -109,14 +170,17 @@ function loadProfile() {
     if (v && typeof v === "object") {
       profile.best = v.best || {};
       profile.cleared = v.cleared || {};
-      profile.ending = !!v.ending;
+      profile.endings = v.endings || {};
+      profile.truth = !!v.truth;
       profile.finaled = !!v.finaled;
+      profile.story = Math.max(0, Math.min(SONGS.length, v.story | 0));
     }
     loaded = true;
   }).catch(function () { loaded = true; });
 }
 function saveProfile() { game.save(SAVE_KEY, profile); }
-function clearedCount() { var n = 0; FAKE_SONGS.forEach(function (s) { if (profile.cleared[s.id]) n++; }); return n; }
+function clearedCount() { var n = 0; SONGS.forEach(function (s) { if (profile.cleared[s.id]) n++; }); return n; }
+function endingsCount() { var n = 0; Object.keys(profile.endings).forEach(function (k) { if (profile.endings[k]) n++; }); return n; }
 function rankLetter(acc, miss, suspicion, failed) {
   if (failed) return "C";
   if (acc >= 0.95 && miss <= 2 && suspicion <= 20) return "S";
@@ -124,153 +188,10 @@ function rankLetter(acc, miss, suspicion, failed) {
   if (acc >= 0.70) return "B";
   return "C";
 }
-function rankName(r) { return tt({ S: "名角", A: "好手", B: "凑合", C: "露馅" }[r] || "露馅", { S: "STAR", A: "GOOD", B: "OK", C: "OOPS" }[r] || "OOPS"); }
-
-/* ---------- shared art ---------- */
-function drawDrape(g, x, w) {
-  g.rect(x, 16, w, 82, INK);
-  for (var i = 2; i < w; i += 4) g.rect(x + i, 16, 2, 82, DARK);
-  for (i = 0; i < w; i += 6) {
-    g.rect(x + i, 92, 6, 2, MID);
-    g.rect(x + i + 1, 94, 4, 2, INK);
-  }
-}
-function drawKing(g, cx, cy, open, look) {
-  /* a silhouette with a crown; open: 0 closed, 1 a slit, 2 wide */
-  g.rect(cx - 7, cy + 2, 14, 7, INK);
-  g.rect(cx - 5, cy - 2, 10, 5, INK);
-  g.rect(cx - 5, cy - 5, 2, 2, INK); g.rect(cx - 1, cy - 6, 2, 3, INK); g.rect(cx + 3, cy - 5, 2, 2, INK);
-  if (open) {
-    var h = open === 1 ? 1 : 3;
-    g.rect(cx - 4, cy, 3, h, PAPER);
-    g.rect(cx + 1, cy, 3, h, PAPER);
-    if (open === 2) { g.rect(cx - 3 + (look || 0), cy, 1, h, INK); g.rect(cx + 2 + (look || 0), cy, 1, h, INK); }
-  } else {
-    g.rect(cx - 4, cy + 1, 3, 1, MID); g.rect(cx + 1, cy + 1, 3, 1, MID);
-  }
-}
-function drawEye(g, x, y, w, h, lid) {
-  /* an almond eye; lid 0 closed ... 1 open */
-  var open = Math.max(0, Math.min(1, lid));
-  var hh = Math.max(1, Math.round(h * open));
-  var cy = y + Math.round(h / 2);
-  for (var i = 0; i < w; i++) {
-    var u = (i + 0.5) / w, half = Math.round((hh / 2) * Math.sin(Math.PI * u));
-    if (half < 1) { g.pixel(x + i, cy, INK); continue; }
-    g.rect(x + i, cy - half, 1, half * 2 + 1, PAPER);
-    g.pixel(x + i, cy - half, INK);
-    g.pixel(x + i, cy + half, INK);
-  }
-  if (open > 0.45) {
-    var px = x + Math.round(w / 2), r = Math.max(1, Math.round(hh / 4));
-    g.circle(px, cy, r, INK, true);
-    g.rect(px - r, cy, Math.max(1, r - 1), 1, INK);
-    g.pixel(px - 1, cy - 1, PAPER);
-  }
-}
-function drawPlayer(g, x, y, puff, sweat, arms) {
-  /* 24x28, facing right; the sheng is the little bundle at the mouth */
-  g.rect(x + 4, y + 24, 4, 4, INK); g.rect(x + 12, y + 24, 4, 4, INK);
-  g.rect(x + 2, y + 13, 16, 12, MID); g.frame(x + 2, y + 13, 16, 12, INK);
-  g.rect(x + 4, y + 6, 12, 8, PAPER); g.frame(x + 4, y + 6, 12, 8, INK);
-  g.rect(x + 6, y + 9, 2, 2, INK); g.rect(x + 11, y + 9, 2, 2, INK);
-  g.rect(x + 7, y + 13, 5, 1, INK);
-  g.rect(x + 1, y + 2, 18, 4, INK);
-  g.rect(x + 3, y, 14, 3, INK);
-  /* arms and sheng */
-  var ay = puff ? y + 9 : y + 12;
-  g.rect(x + 15, ay, 7, 2, INK);
-  g.rect(x + 20, y + 2, 2, 10, INK);
-  g.rect(x + 22, y + 1, 2, 12, MID);
-  g.rect(x + 24, y + 4, 2, 7, INK);
-  if (puff) {
-    g.circle(x + 17, y + 9, 2, MID, true);
-    g.rect(x + 26, y + 8, 3, 1, INK);
-    g.rect(x + 28, y + 7, 2, 1, MID);
-    g.rect(x + 28, y + 10, 2, 1, MID);
-  }
-  if (sweat) { g.rect(x + 15, y + 5, 1, 2, PAPER); g.rect(x + 16, y + 7, 1, 1, PAPER); }
-  if (arms) { g.rect(x + 1, y + 2, 2, 7, INK); g.rect(x + 19, y + 2, 2, 7, INK); }
-}
-function drawConductor(g, x, y, beat, tone) {
-  tone = tone == null ? INK : tone;
-  var swing = Math.sin(beat * Math.PI * 2);
-  g.rect(x + 5, y + 8, 12, 14, tone);
-  g.rect(x + 6, y + 2, 10, 7, PAPER); g.frame(x + 6, y + 2, 10, 7, INK);
-  g.rect(x + 8, y + 4, 1, 1, INK); g.rect(x + 12, y + 4, 1, 1, INK);
-  g.rect(x + 4, y + 1, 14, 3, tone);
-  g.rect(x + 3, y + 10, 5, 2, tone);
-  g.line(x + 3, y + 11, x - 3 + Math.round(swing * 2), y + 1 + Math.round(swing * 5), MID);
-  g.rect(x - 2 + Math.round(swing * 2), y + Math.round(swing * 5), 2, 2, tone);
-  g.rect(x + 8, y + 22, 3, 3, tone); g.rect(x + 13, y + 22, 3, 3, tone);
-}
-function drawAudience(g, beat, happy, clap) {
-  g.rect(0, 120, 160, 24, INK);
-  g.rect(0, 120, 160, 2, DARK);
-  for (var row = 0; row < 2; row++) {
-    for (var i = 0; i < 8; i++) {
-      var x = 2 + i * 20 + (row ? 10 : 0), y = 126 + row * 8;
-      var b = Math.round(Math.sin((beat + i * 0.13 + row * 0.3) * Math.PI * 2) * 1);
-      g.circle(x + 5, y + 3 + b, 4, DARK, true);
-      g.rect(x + 1, y + 6 + b, 9, 5, DARK);
-      if (happy) { g.rect(x - 2, y + 1 + b, 3, 1, MID); g.rect(x + 10, y + 1 + b, 3, 1, MID); }
-      if (clap && Math.floor(beat * 4 + i) % 2) { g.rect(x + 2, y + 6 + b, 2, 2, MID); }
-    }
-  }
-}
-function drawHall(g, beat, opts) {
-  opts = opts || {};
-  g.clear(PAPER);
-  g.rect(0, 16, 160, 80, DARK);
-  g.rect(0, 16, 160, 1, INK);
-  for (var x = 14; x < 148; x += 34) {
-    g.frame(x, 20, 28, 60, MID);
-    g.rect(x + 2, 22, 24, 56, DARK);
-    g.rect(x + 12, 24, 4, 54, MID);
-  }
-  g.rect(0, 92, 160, 28, INK);
-  g.rect(0, 92, 160, 2, MID);
-  drawDrape(g, 0, 14); drawDrape(g, 146, 14);
-  /* royal box */
-  g.rect(54, 17, 52, 17, PAPER);
-  g.frame(54, 17, 52, 17, INK);
-  g.rect(55, 18, 2, 15, DARK); g.rect(103, 18, 2, 15, DARK);
-  drawKing(g, 80, 25, opts.kingEye || 0, opts.look || 0);
-  /* chandelier */
-  g.line(80, 16, 80, 20, INK);
-  g.rect(74, 20, 13, 2, INK);
-  g.rect(76, 22, 1, 3, MID); g.rect(80, 22, 1, 4, MID); g.rect(84, 22, 1, 3, MID);
-  drawAudience(g, beat, opts.happy, opts.clap);
-}
-function drawScroll(g) {
-  g.rect(3, 34, 154, 60, PAPER);
-  g.frame(3, 34, 154, 60, INK);
-  g.rect(0, 36, 4, 56, MID); g.rect(156, 36, 4, 56, MID);
-  g.frame(6, 37, 148, 54, MID);
-  for (var i = 0; i < 5; i++) g.rect(10, 48 + i * 8, 138, 1, MID);
-  /* rolled ends */
-  g.rect(0, 35, 4, 2, INK); g.rect(0, 93, 4, 2, INK);
-  g.rect(156, 35, 4, 2, INK); g.rect(156, 93, 4, 2, INK);
-  /* a little flourish at the left end of the staff */
-  g.line(8, 48, 8, 80, DARK);
-  g.circle(8, 64, 2, DARK, false);
-}
-function drawMouth(g, puff) {
-  g.rect(36, 84, 6, 3, INK);
-  g.rect(34, 86, 4, 3, MID);
-  if (puff) { g.rect(42, 84, 3, 1, INK); g.rect(43, 86, 2, 1, INK); }
-}
-function drawSuspicion(g, value) {
-  /* an eye, then five pips; value 0..100 */
-  var x = 112, y = 5;
-  drawEye(g, x, y, 9, 5, 1);
-  for (var i = 0; i < 5; i++) {
-    var on = value > i * 20;
-    g.rect(124 + i * 6, 4, 5, 7, PAPER);
-    g.frame(124 + i * 6, 4, 5, 7, MID);
-    if (on) g.rect(125 + i * 6, 5, 3, 5, INK);
-  }
-}
+function rankName(r) { return T({ S: TX.rankS, A: TX.rankA, B: TX.rankB, C: TX.rankC }[r] || TX.rankC); }
+function actOf(i) { return Math.min(STORY.ACTS.length, Math.max(1, SONGS[i].act)); }
+function isActStart(i) { return i === 0 || SONGS[i].act !== SONGS[i - 1].act; }
+function venueOf(i) { return SONGS[i].venue || "hall"; }
 
 /* ---------- boot ---------- */
 game.scene("boot", {
@@ -291,6 +212,7 @@ game.scene("title", {
   enter: function () {
     titleSel = 0;
     titleLock = game.time + 0.12;
+    sensorOff();
     game.musicStop();
     game.ambience(null);
   },
@@ -299,133 +221,250 @@ game.scene("title", {
     if (d) { titleSel = (titleSel + d + 3) % 3; game.sfx("move"); }
     var canGo = game.time >= titleLock;
     var go = canGo && (game.pressed("a") || game.pressed("start"));
-    if (canGo && game.pointer.pressed && game.pointer.y >= 95) {
-      var i = Math.floor((game.pointer.y - 95) / 16);
-      if (i >= 0 && i < 3 && game.pointer.y < 143) { titleSel = i; go = true; }
+    if (canGo && game.pointer.pressed && game.pointer.y >= 104 && game.pointer.y < 140) {
+      var i = Math.floor((game.pointer.y - 104) / 11);
+      if (i >= 0 && i < 3) { titleSel = i; go = true; }
     }
     if (go) {
       game.sfx("tap");
-      if (titleSel === 0) startNext();
+      if (titleSel === 0) startStory();
       else if (titleSel === 1) game.go("select");
       else game.go("howto");
     }
   },
   draw: function (g) {
     var beat = game.time * 0.8;
-    drawHall(g, beat, { happy: clearedCount() === 3, kingEye: 0 });
-    /* top strip: keys and the three cleared lights */
+    ART.hall(g, beat, { happy: clearedCount() === SONGS.length, kingEye: 0, petals: true, spot: true });
+    /* title strip */
+    g.rect(0, 0, 160, 14, PAPER);
+    g.rect(0, 13, 160, 1, INK);
     g.text(T(TX.titleKeys), 5, 2, { color: DARK });
-    for (var k = 0; k < 3; k++) {
-      var lit = profile.cleared[FAKE_SONGS[k].id];
-      g.rect(130 + k * 8, 5, 6, 5, lit ? INK : MID);
-    }
-    /* title plaque */
-    g.window(24, 21, 112, 33);
-    g.text(T(TX.title), 80, 25, { align: "center" });
-    g.text(T(TX.subtitle), 80, 38, { align: "center", color: DARK });
-    /* the two would-be musicians */
-    drawPlayer(g, 10, 62, false, false, false);
-    drawConductor(g, 132, 64, beat);
-    g.text(tt("三百人齐奏", "300 players"), 80, 66, { align: "center", color: PAPER });
-    g.text(tt("多一个，谁知道？", "Who notices?"), 80, 79, { align: "center", color: PAPER });
+    g.text(tt("十首·三幕", "10 songs"), 155, 2, { align: "right", color: DARK });
+    /* the plaque */
+    g.window(14, 17, 132, 43);
+    g.text(T(TX.title), 80, 20, { align: "center" });
+    g.text(T(TX.subtitle), 80, 33, { align: "center", color: DARK });
+    g.text(tt("三百人齐奏，谁听得出？", "who can tell?"), 80, 46, { align: "center", color: DARK });
+    /* two would-be musicians */
+    ART.player(g, 8, 59, { mood: "sly" });
+    ART.conductor(g, 132, 60, beat);
+    ART.musician(g, 48, 64, "sheng", beat, "");
+    ART.musician(g, 66, 64, "qin", beat + 0.1, "");
+    ART.musician(g, 84, 64, "drum", beat + 0.2, "");
+    ART.musician(g, 104, 64, "flute", beat + 0.3, "");
+    /* story progress on its own strip, clear of the stage */
+    g.rect(0, 89, 160, 13, PAPER);
+    var actN = Math.min(3, SONGS[Math.min(profile.story, SONGS.length - 1)].act);
+    g.text(T(TX.progress, {
+      act: T(TX.actShort, { n: actN }),
+      chapter: T(TX.chapterShort, { n: Math.min(profile.story + 1, SONGS.length) })
+    }), 5, 90, { color: DARK });
+    g.text(T(TX.endingCount, { e: endingsCount() }), 155, 90, { align: "right", color: DARK });
     /* menu */
-    g.rect(10, 92, 140, 52, PAPER);
-    g.frame(10, 92, 140, 52, INK);
-    var items = [T(TX.start), T(TX.songs), T(TX.howto)];
+    g.rect(10, 104, 140, 36, PAPER);
+    g.frame(10, 104, 140, 36, INK);
+    var items = [profile.story > 0 ? T(TX.storyContinue) : T(TX.storyStart), T(TX.songs), T(TX.howto)];
     for (var i = 0; i < 3; i++) {
-      var y = 95 + i * 16;
+      var y = 106 + i * 11;
       if (i === titleSel) {
-        g.rect(14, y, 132, 15, INK);
-        g.text(items[i], 80, y + 2, { align: "center", color: PAPER });
-        g.arrow(18, y + 6, "right", PAPER);
-      } else g.text(items[i], 80, y + 2, { align: "center" });
+        g.rect(13, y - 1, 134, 11, INK);
+        g.text(items[i], 80, y, { align: "center", color: PAPER });
+      } else g.text(items[i], 80, y, { align: "center" });
     }
   }
 });
-function startNext() {
-  var next = null;
-  for (var i = 0; i < FAKE_SONGS.length; i++) if (!profile.cleared[FAKE_SONGS[i].id]) { next = i; break; }
-  if (next === null) next = 0;   /* an encore run starts from the top, story and all */
-  goBrief(next);
+function startStory() {
+  if (profile.story >= SONGS.length) profile.story = 0;
+  if (profile.story === 0) profile.truth = false;
+  goStory(profile.story, "pre");
 }
-function goBrief(i) {
-  game.go("brief", { i: i }, { fade: true, to: PAPER });
+function goStory(i, kind, stats) {
+  game.go("story", { i: i, kind: kind, stats: stats }, { fade: true, to: PAPER });
 }
 
-/* ---------- a line of story before a song ---------- */
-var briefI = 0;
-var BRIEF = [
-  { name: { zh: "齐宣王", en: "King Xuan" }, pages: [
-    { zh: "寡人有三百个乐师。人多，热闹。", en: "I have three hundred musicians. Such a crowd." },
-    { zh: "南郭先生抱着竽，悄悄站到最后一排。", en: "Nan Guo takes his sheng to the very back row." }] },
-  { name: { zh: "齐湣王", en: "King Min" }, pages: [
-    { zh: "父王听合奏。寡人，只听独奏。", en: "My father liked the ensemble. I listen to solos." },
-    { zh: "南郭：……完了。", en: "Nan Guo: ...I am finished." }] },
-  { name: { zh: "齐湣王", en: "King Min" }, pages: [
-    { zh: "给寡人吹《山魔王的宫殿》。吹错一个音，去喂马。", en: "Play The Mountain King. One wrong note and you feed the horses." },
-    { zh: "南郭：我连谱都不认识。", en: "Nan Guo: I cannot even read music." }] }
-];
-game.scene("brief", {
+/* ---------- story: act cards, portraits and chapters ---------- */
+var storyView = { i: 0, speaker: "narr", mood: "calm", venue: "hall", card: false, cardAct: 1, cardAt: 0, busy: false };
+
+function lineMood(who, mood) {
+  if (mood) return mood;
+  if (who === "min") return "angry";
+  if (who === "narr") return "calm";
+  if (who === "nanguo") return "worried";
+  return "calm";
+}
+async function tell(lines) {
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+    storyView.speaker = line.who;
+    storyView.mood = lineMood(line.who, line.mood);
+    await game.say(T(line.text), { name: T(CAST[line.who].name), speed: 34 });
+  }
+}
+async function actCard(n) {
+  storyView.card = true; storyView.cardAct = n; storyView.cardAt = game.time;
+  game.sfx("win");
+  await game.wait(2.1);
+  storyView.card = false;
+}
+function chapterPre(i) {
+  if (i === 8 || i === 9) {
+    return profile.truth ? STORY.CHAPTERS[i].beforeTruth || STORY.CHAPTERS[i].before : STORY.CHAPTERS[i].beforeLie || STORY.CHAPTERS[i].before;
+  }
+  return STORY.CHAPTERS[i].before;
+}
+async function runStory(a) {
+  var i = a.i;
+  if (a.kind === "pre") {
+    if (isActStart(i)) await actCard(actOf(i));
+    await tell(chapterPre(i));
+    game.go("play", { i: i, story: true }, { fade: false });
+    return;
+  }
+  await tell(STORY.CHAPTERS[i].after || []);
+  var ch = STORY.CHAPTERS[i];
+  if (ch.choice) {
+    var pick = await game.choose([T(TX.choice0), T(TX.choice1)], { title: T(TX.choiceTitle), cancel: false });
+    profile.truth = pick === 0;
+    saveProfile();
+  }
+  if (i + 1 < SONGS.length) {
+    if (isActStart(i + 1)) await actCard(actOf(i + 1));
+    await tell(chapterPre(i + 1));
+    game.go("play", { i: i + 1, story: true }, { fade: false });
+  } else {
+    game.go("ending", { stats: a.stats || null });
+  }
+}
+game.scene("story", {
   enter: function (a) {
-    var i = a.i;
+    storyView.i = a.i;
+    storyView.speaker = "narr";
+    storyView.mood = "calm";
+    storyView.venue = venueOf(a.i);
+    storyView.card = false;
     game.musicStop();
-    briefI = i;
-    var pages = BRIEF[i].pages;
-    game.after(0.18, function () {
-      game.say(pages.map(function (p) { return T(p); }), { name: T(BRIEF[i].name), speed: 32 }).then(function () {
-        game.go("play", { i: i }, { fade: false });
-      });
-    });
+    game.ambience(venueOf(a.i) === "throne" ? "wind" : venueOf(a.i) === "moon" || venueOf(a.i) === "night" ? "wind" : null, 0.18);
+    runStory(a);
+  },
+  update: function () {
+    if (storyView.card) return;
   },
   draw: function (g) {
-    var beat = game.time * 0.6;
-    drawHall(g, beat, { kingEye: 1 });
-    drawPlayer(g, 18, 68, false, false, true);
-    drawConductor(g, 124, 70, beat);
-    g.window(34, 60, 92, 20);
-    g.text(T(FAKE_SONGS[briefI || 0].short), 80, 64, { align: "center", color: DARK });
+    var t = game.time;
+    ART.venue(g, storyView.venue, t * 0.45, { kingEye: 0, mood: "calm" });
+    if (storyView.card) {
+      drawActCard(g, storyView.cardAct);
+      return;
+    }
+    if (storyView.speaker !== "narr") {
+      g.window(50, 12, 60, 68, { thin: true });
+      g.dither(51, 13, 58, 66, MID, 1);
+      ART.portrait(g, storyView.speaker, storyView.mood, 56, 18);
+    } else {
+      /* a small ink-brush mark so the narrator still has a face */
+      g.window(60, 26, 40, 26, { thin: true });
+      ART.inkSplash(g, 80, 38, 10, MID);
+      g.text(tt("旁白", "NARRATOR"), 80, 41, { align: "center", color: DARK });
+    }
+    g.rect(0, 137, 160, 7, PAPER);
+    g.text(T(TX.storyKeys), 80, 132, { align: "center", color: DARK });
   }
 });
+function drawActCard(g, n) {
+  var act = STORY.ACTS[n - 1];
+  var k = Math.min(1, (game.time - storyView.cardAt) / 0.45);
+  /* curtains sweep in from both sides */
+  var cw = Math.round(50 * (1 - k) + 8 * k);
+  g.rect(0, 0, cw, 144, INK);
+  g.rect(160 - cw, 0, cw, 144, INK);
+  for (var x = 0; x < cw; x += 4) {
+    g.rect(x, 0, 1, 144, DARK);
+    g.rect(159 - x, 0, 1, 144, DARK);
+  }
+  g.dither(0, 0, 160, 144, INK, 1);
+  g.window(8, 22, 144, 96);
+  bigText(g, String(n), 20, 32, 4, INK, "center");
+  g.rect(36, 32, 1, 24, INK);
+  var th = g.text(T(act.title), 40, 30, { width: 112 });
+  var sy = 30 + th + 2;
+  var sh = g.text(T(act.sub), 40, sy, { color: DARK, width: 112 });
+  var qy = sy + sh + 6;
+  var qh = g.text(T(act.color), 12, qy, { color: DARK, width: 136 });
+  g.text(tt("三百人，一个人，一支曲。", "A crowd, a man, a tune."), 80, qy + qh + 4, { align: "center", color: DARK });
+}
 
-/* ---------- song select ---------- */
-var selectSel = 0, selectLock = 0;
+/* ---------- song select: a scrolling list of ten ---------- */
+var selectSel = 0, selectTop = 0, selectLock = 0;
+var ROW_H = 23, VIEW_ROWS = 4, LIST_Y = 20;
 game.scene("select", {
-  enter: function () {
-    selectSel = 0;
-    for (var i = 0; i < FAKE_SONGS.length; i++) if (!profile.cleared[FAKE_SONGS[i].id]) { selectSel = i; break; }
-    selectLock = game.time + 0.2;
+  enter: function (a) {
+    selectSel = Math.max(0, Math.min(SONGS.length - 1, a && a.i != null ? a.i : profile.story));
+    if (selectSel >= SONGS.length) selectSel = 0;
+    selectTop = Math.max(0, Math.min(SONGS.length - VIEW_ROWS, selectSel - 1));
+    selectLock = game.time + 0.18;
+    sensorOff();
     game.musicStop();
+    game.ambience(null);
   },
   update: function () {
     var canGo = game.time >= selectLock;
     var d = game.dir().y;
-    if (d) { selectSel = (selectSel + d + FAKE_SONGS.length) % FAKE_SONGS.length; game.sfx("move"); }
+    if (d) {
+      selectSel = (selectSel + d + SONGS.length) % SONGS.length;
+      game.sfx("move");
+    }
+    if (selectSel < selectTop) selectTop = selectSel;
+    if (selectSel >= selectTop + VIEW_ROWS) selectTop = selectSel - VIEW_ROWS + 1;
+    selectTop = Math.max(0, Math.min(SONGS.length - VIEW_ROWS, selectTop));
     var go = canGo && (game.pressed("a") || game.pressed("start"));
     if (canGo && game.pointer.pressed) {
-      var i = Math.floor((game.pointer.y - 24) / 28);
-      if (i >= 0 && i < FAKE_SONGS.length) { selectSel = i; go = true; }
+      var row = Math.floor((game.pointer.y - LIST_Y) / ROW_H);
+      if (row >= 0 && row < VIEW_ROWS && game.pointer.y >= LIST_Y && game.pointer.y < LIST_Y + VIEW_ROWS * ROW_H) {
+        selectSel = selectTop + row; go = true;
+      }
     }
     if (game.pressed("b")) { game.sfx("miss"); game.go("title"); return; }
-    if (go) { game.sfx("tap"); goBrief(selectSel); }
+    if (go) {
+      game.sfx("tap");
+      game.go("play", { i: selectSel, story: false }, { fade: true, to: PAPER });
+    }
   },
   draw: function (g) {
     g.clear(PAPER);
     g.rect(0, 0, 160, 18, INK);
     g.text(tt("曲目", "Songs"), 6, 2, { color: PAPER });
-    g.text(tt("三场演出", "3 songs"), 154, 2, { align: "right", color: PAPER });
-    for (var i = 0; i < FAKE_SONGS.length; i++) {
-      var s = FAKE_SONGS[i], y = 24 + i * 28, on = i === selectSel;
-      if (on) { g.rect(3, y, 154, 26, INK); }
-      g.text((i + 1) + ". " + T(s.name), 8, y + 2, { color: on ? PAPER : INK });
+    g.text((selectSel + 1) + "/" + SONGS.length, 154, 2, { align: "right", color: PAPER });
+    for (var row = 0; row < VIEW_ROWS; row++) {
+      var i = selectTop + row;
+      if (i >= SONGS.length) break;
+      var s = SONGS[i], y = LIST_Y + row * ROW_H, on = i === selectSel;
+      if (on) g.rect(2, y, 156, ROW_H - 1, INK);
+      else if (row % 2) g.rect(2, y, 156, ROW_H - 1, MID);
+      /* act badge */
+      var act = "I".repeat(Math.max(1, s.act));
+      g.text(act, 6, y + 1, { color: on ? PAPER : DARK });
+      g.text((i + 1) + "." + T(s.name), 20, y + 1, { color: on ? PAPER : INK });
       var b = profile.best[s.id];
-      var rank = b ? b.rank : T(TX.fresh);
-      g.text(rank, 152, y + 2, { align: "right", color: on ? PAPER : DARK });
-      for (var k = 0; k < 3; k++) g.rect(8 + k * 7, y + 20, 4, 4, k < s.difficulty ? (on ? PAPER : INK) : MID);
-      if (b) g.text(String(b.score), 152, y + 16, { align: "right", color: on ? PAPER : DARK });
+      g.text(b ? b.rank : T(TX.fresh), 154, y + 1, { align: "right", color: on ? PAPER : DARK });
+      for (var k = 0; k < 5; k++) g.rect(20 + k * 6, y + 15, 4, 2, k < s.difficulty ? (on ? PAPER : INK) : MID);
+      if (b) g.text(String(b.score), 154, y + 12, { align: "right", color: on ? PAPER : DARK });
+      if (i === profile.story) {
+        var mk = on ? PAPER : INK;
+        g.rect(4, y + 15, 5, 1, mk);
+        g.rect(5, y + 14, 3, 1, mk);
+        g.rect(6, y + 16, 2, 1, mk);
+        g.rect(7, y + 17, 1, 1, mk);
+      }
     }
-    var s = FAKE_SONGS[selectSel];
-    g.rect(0, 110, 160, 1, INK);
-    g.text(T(s.credit), 80, 116, { align: "center", color: DARK });
+    /* scroll rail */
+    if (SONGS.length > VIEW_ROWS) {
+      var railH = Math.round(VIEW_ROWS * ROW_H * VIEW_ROWS / SONGS.length);
+      var railY = LIST_Y + Math.round((VIEW_ROWS * ROW_H - railH) * selectTop / (SONGS.length - VIEW_ROWS));
+      g.rect(159, LIST_Y, 1, VIEW_ROWS * ROW_H, MID);
+      g.rect(158, railY, 2, railH, INK);
+    }
+    var sel = SONGS[selectSel];
+    g.text("(" + (selectSel + 1) + ") " + T(sel.credit), 80, 114, { align: "center", color: DARK });
     g.text(T(TX.songKeys), 80, 132, { align: "center" });
   }
 });
@@ -433,13 +472,13 @@ game.scene("select", {
 /* ---------- how to play ---------- */
 var howPage = 0, howLock = 0;
 game.scene("howto", {
-  enter: function () { howPage = 0; howLock = game.time + 0.2; game.musicStop(); },
+  enter: function () { howPage = 0; howLock = game.time + 0.2; sensorOff(); game.musicStop(); },
   update: function () {
     var canGo = game.time >= howLock;
     if (game.pressed("b")) { game.sfx("miss"); game.go("title"); return; }
     if (canGo && (game.pressed("a") || game.pressed("start") || game.pointer.pressed)) {
       game.sfx("tap");
-      if (howPage < 2) howPage++;
+      if (howPage < 3) howPage++;
       else game.go("title");
     }
   },
@@ -447,49 +486,64 @@ game.scene("howto", {
     g.clear(PAPER);
     g.rect(0, 0, 160, 18, INK);
     g.text(T(TX.howTitle), 6, 2, { color: PAPER });
-    g.text((howPage + 1) + "/3", 154, 2, { align: "right", color: PAPER });
-    g.window(4, 20, 152, 112);
-    var txt = [T(TX.how1), T(TX.how2), T(TX.how3)][howPage];
+    g.text((howPage + 1) + "/4", 154, 2, { align: "right", color: PAPER });
+    g.window(4, 20, 152, 110);
+    var txt = [T(TX.how1), T(TX.how2), T(TX.how3), T(TX.how4)][howPage];
     g.text(txt, 9, 25, { width: 142 });
-    /* a live little demonstration under the words */
+    var top = 84;
     if (howPage === 0) {
-      for (var r = 0; r < 5; r++) g.rect(10, 92 + r * 7, 140, 1, MID);
-      g.rect(46, 86, 2, 34, INK);
+      g.rect(9, 84, 142, 40, INK);
+      for (var r = 0; r < 4; r++) g.rect(10, 92 + r * 7, 140, 1, MID);
+      g.rect(46, 88, 2, 32, PAPER);
       for (var i = 0; i < 3; i++) {
         var x = 154 - ((game.time * 34 + i * 42) % 112);
         var y = 92 + (i % 3) * 7;
-        g.circle(x, y, 2, INK, true);
-        g.rect(x + 2, y - 5, 1, 5, INK);
+        g.circle(x, y, 2, PAPER, true);
+        g.rect(x + 2, y - 5, 1, 5, PAPER);
       }
-      keycap(g, "A", 14, 103, 2);
+      keycap(g, "A", 14, 90, 2);
+      g.text(tt("长条 = 按住", "bar = hold"), 48, 100, { color: PAPER });
     } else if (howPage === 1) {
-      g.rect(9, 84, 142, 40, INK);
+      g.rect(9, 84, 142, 38, INK);
       var lid = 0.55 + 0.45 * Math.abs(Math.sin(game.time * 1.6));
-      drawEye(g, 24, 92, 52, 24, lid);
-      g.text(T(TX.watch), 114, 97, { align: "center", color: PAPER });
+      drawEye(g, 24, 90, 52, 24, lid);
+      g.text(T(TX.watch), 114, 96, { align: "center", color: PAPER });
+    } else if (howPage === 2) {
+      g.rect(9, 84, 142, 40, INK);
+      g.rect(38, 86, 2, 34, PAPER);
+      for (i = 0; i < 3; i++) {
+        x = 148 - ((game.time * 30 + i * 40) % 106);
+        y = 90 + (i % 2) * 10;
+        if (i === 1) {
+          g.rect(x - 2, y, 5, 1, PAPER); g.rect(x - 1, y - 1, 3, 3, PAPER); g.rect(x, y - 2, 1, 5, PAPER);
+          g.frame(x - 2, y - 2, 5, 5, MID);
+        } else {
+          g.circle(x, y, 2, PAPER, true);
+          g.rect(x + 2, y - 5, 1, 5, PAPER);
+        }
+      }
+      keycap(g, "A", 14, 106, 1);
+      g.text(tt("竽", "sheng"), 28, 107, { color: PAPER });
+      keycap(g, "B", 60, 106, 1);
+      g.text(tt("磬", "chime"), 74, 107, { color: PAPER });
     } else {
       g.rect(9, 84, 142, 40, INK);
-      for (var k = 0; k < 6; k++) {
-        var hx = 18 + k * 24, b = Math.round(Math.sin((game.time * 2 + k * 0.2) * Math.PI * 2) * 2);
-        g.circle(hx, 104 + b, 4, PAPER, true);
-        g.rect(hx - 4, 109 + b, 9, 8, PAPER);
-        g.rect(hx - 3, 111 + b, 1, 1, INK); g.rect(hx + 2, 111 + b, 1, 1, INK);
-      }
-      for (k = 0; k < 5; k++) {
-        var cy = 88 + Math.round((Math.sin(game.time * 2.2 + k) + 1) * 3);
-        g.rect(12 + k * 34, cy, 2, 2, k % 2 ? MID : PAPER);
-      }
-      g.text(T(TX.cheer), 80, 87, { align: "center", color: PAPER });
+      g.clip(9, 84, 142, 40);
+      ART.portrait(g, "nanguo", "worried", 14, 74);
+      g.clip();
+      g.text(tt("摇 = 咳", "shake = cough"), 68, 84, { color: PAPER });
+      g.text(tt("倾 = 躬身", "tilt = bow"), 68, 96, { color: PAPER });
+      g.text(tt("按键也能玩", "keys work too"), 68, 108, { color: PAPER });
     }
-    g.text(howPage < 2 ? T(TX.howKeys) : T(TX.howDone), 80, 132, { align: "center", color: DARK });
+    g.text(howPage < 3 ? T(TX.howKeys) : T(TX.howDone), 80, 132, { align: "center", color: DARK });
   }
 });
 
 /* ---------- performance ---------- */
 var P = null;
 
-function buildPlay(i) {
-  var s = FAKE_SONGS[i];
+function buildPlay(i, storyMode) {
+  var s = SONGS[i];
   var lo = 127, hi = 0;
   s.chart.forEach(function (n) {
     var m = midiOfNote(n.note);
@@ -497,14 +551,20 @@ function buildPlay(i) {
   });
   if (hi - lo < 8) { var c = (hi + lo) / 2; lo = c - 4; hi = c + 4; }
   lo -= 1; hi += 1;
+  var firstB = null;
+  s.chart.forEach(function (n) { if (n.lane === "b" && firstB === null) firstB = n.t; });
   return {
-    i: i, song: s, start: game.time, t: 0, lo: lo, hi: hi,
+    i: i, song: s, story: !!storyMode, start: game.time, t: 0, lo: lo, hi: hi,
     combo: 0, maxCombo: 0, score: 0, perfect: 0, good: 0, miss: 0, noise: 0, caught: 0,
     suspicion: 0, total: s.chart.length, judged: {}, hold: null,
     puffs: [], bits: [], judge: null, judgeUntil: 0,
     warned: {}, inEye: {}, eye: false, banner: "", bannerUntil: 0,
-    ended: false, failed: false, endAt: 0, resultAt: 0,
-    lastBeat: -1, flash: 0, shake: 0, startPuff: 0, sweat: 0, clap: false
+    ended: false, failed: false, endAt: 0,
+    lastBeat: -1, startPuff: 0, sweat: 0, clap: false,
+    hasB: firstB !== null, firstB: firstB === null ? 1e9 : firstB,
+    bHinted: false, bHits: 0, coughs: 3, coughCool: 0, coughFlash: 0, coughSaved: 0,
+    bow: false, eyeBowed: 0, eyeCaught: false, bowBonus: 0, touchA: false,
+    caughtCool: 0, sensorNote: ""
   };
 }
 function midiOfNote(n) {
@@ -514,6 +574,9 @@ function midiOfNote(n) {
 function noteY(P, note) {
   var m = midiOfNote(note.note);
   return Math.round(80 - (m - P.lo) / (P.hi - P.lo) * 32);
+}
+function noteScreenY(P, note) {
+  return note.lane === "b" ? 45 : noteY(P, note);
 }
 function inWatch(P, t) {
   return P.song.watch.some(function (w) { return t >= w[0] && t < w[1]; });
@@ -526,6 +589,7 @@ function setJudge(P, text, tone, sec) {
   P.judge = { text: text, tone: tone == null ? INK : tone };
   P.judgeUntil = game.time + (sec || 0.55);
 }
+function setBanner(P, text, until) { P.banner = text; P.bannerUntil = until; }
 function puffAt(P, y, kind) {
   P.puffs.push({ x: 40, y: y, t: 0, kind: kind || 0 });
   for (var i = 0; i < 5; i++) {
@@ -534,21 +598,30 @@ function puffAt(P, y, kind) {
 }
 function blip(P, note, perfect) {
   if (!note) return;
+  if (note.lane === "b") {
+    game.sfx({ wave: "triangle", duty: 3, from: Math.round(note.f * 2), to: Math.round(note.f * 2), ms: perfect ? 240 : 180, attack: 2, decay: perfect ? 220 : 160, vol: perfect ? 0.4 : 0.3 });
+    return;
+  }
   game.sfx({ wave: "square", duty: perfect ? 1 : 2, from: Math.round(note.f * 1.03), to: Math.round(note.f), ms: perfect ? 85 : 65, attack: 2, decay: perfect ? 78 : 58, vol: perfect ? 0.46 : 0.34 });
 }
 function hitSound(fail) {
   if (fail) game.sfx({ wave: "noise", from: 520, to: 120, ms: 140, vol: 0.42 });
   else game.sfx({ wave: "square", duty: 3, from: 180, to: 90, ms: 90, vol: 0.2 });
 }
+function coughSound() {
+  game.sfx({ wave: "noise", from: 900, to: 240, ms: 150, attack: 2, decay: 140, vol: 0.42 });
+  game.sfx({ wave: "square", duty: 2, from: 220, to: 110, ms: 90, vol: 0.22 });
+}
 function scoreHit(P, note, perfect) {
   P.combo++;
   if (P.combo > P.maxCombo) P.maxCombo = P.combo;
   var gain = (perfect ? 100 : 55) + Math.min(50, P.combo * 2);
+  if (note && note.lane === "b") { gain += 15; P.bHits++; }
   P.score += gain;
   if (perfect) P.perfect++; else P.good++;
   P.suspicion = Math.max(0, P.suspicion - (perfect ? 1.6 : 0.8));
-  setJudge(P, perfect ? T(TX.perfect) : T(TX.good), INK, 0.45);
-  puffAt(P, note ? noteY(P, note) : 64, perfect ? 1 : 0);
+  setJudge(P, note && note.lane === "b" ? T(TX.chime) : perfect ? T(TX.perfect) : T(TX.good), INK, 0.45);
+  puffAt(P, note ? noteScreenY(P, note) : 64, perfect ? 1 : 0);
   blip(P, note, perfect);
   if (P.combo > 0 && P.combo % 10 === 0) {
     game.flash(0.05); game.shake(1, 0.12); game.sfx("coin");
@@ -566,7 +639,7 @@ function missNote(P, note, why) {
   hitSound(true);
   game.shake(1, 0.1);
   P.sweat = 1.2;
-  if (why === "break") P.puffs.push({ x: 40, y: noteY(P, note), t: 0, kind: 2 });
+  if (why === "break") P.puffs.push({ x: 40, y: noteScreenY(P, note), t: 0, kind: 2 });
 }
 function wrongPress(P) {
   P.noise++;
@@ -581,10 +654,26 @@ function caught(P) {
   P.caughtCool = 0.7;
   P.caught++;
   P.combo = 0;
-  addSuspicion(P, 16);
+  P.eyeCaught = true;
+  addSuspicion(P, P.bow ? 8 : 16);
   setJudge(P, T(TX.caught), INK, 0.8);
   game.sfx("err"); game.flash(0.09); game.shake(3, 0.25);
   P.sweat = 1.5;
+}
+function doCough(P) {
+  if (P.ended || P.coughCool > 0) { game.sfx("tick"); return; }
+  if (P.suspicion < 8) { setJudge(P, T(TX.noCough), DARK, 0.5); game.sfx("tick"); return; }
+  if (P.coughs <= 0) { game.sfx("err"); return; }
+  P.coughs--;
+  P.coughCool = 6;
+  var before = P.suspicion;
+  P.suspicion = Math.max(0, P.suspicion - 14);
+  P.coughSaved += before - P.suspicion;
+  P.coughFlash = 0.9;
+  setJudge(P, T(TX.chew), INK, 0.7);
+  setBanner(P, T(TX.chew), game.time + 0.7);
+  coughSound();
+  game.sfx("tick");
 }
 function fail(P) {
   if (P.ended) return;
@@ -611,16 +700,60 @@ function finish(P) {
 function resultStats(P) {
   var acc = P.total ? (P.perfect + P.good * 0.6) / P.total : 0;
   var rank = rankLetter(acc, P.miss, P.suspicion, P.failed);
-  return { score: P.score, maxCombo: P.maxCombo, perfect: P.perfect, good: P.good, miss: P.miss, noise: P.noise, caught: P.caught, suspicion: Math.round(P.suspicion), total: P.total, acc: acc, rank: rank, failed: P.failed };
+  return {
+    score: P.score, maxCombo: P.maxCombo, perfect: P.perfect, good: P.good, miss: P.miss,
+    noise: P.noise, caught: P.caught, suspicion: Math.round(P.suspicion), total: P.total,
+    acc: acc, rank: rank, failed: P.failed, bHits: P.bHits, coughs: 3 - P.coughs,
+    coughSaved: Math.round(P.coughSaved), bowBonus: P.bowBonus
+  };
+}
+function nearestNote(P, t, lane) {
+  var best = null, bd = 1e9;
+  for (var i = 0; i < P.song.chart.length; i++) {
+    var n = P.song.chart[i];
+    if (P.judged[n.t] || n.lane !== lane) continue;
+    var d = n.t - t;
+    if (d < -GOOD) continue;
+    if (d > EARLY) break;
+    var ad = Math.abs(d);
+    if (ad < bd) { bd = ad; best = n; }
+  }
+  return best;
+}
+function pressLane(P, t, lane) {
+  var note = nearestNote(P, t, lane);
+  if (note) {
+    if (t < note.t - GOOD) {
+      setJudge(P, T(TX.early), DARK, 0.35);
+      game.sfx("tick");
+      return;
+    }
+    var perfect = Math.abs(t - note.t) <= PERFECT;
+    if (note.hold) {
+      P.hold = { note: note, perfect: perfect, start: t };
+      P.judged[note.t] = "hold";
+      setJudge(P, T(TX.hold), DARK, 0.35);
+      blip(P, note, perfect);
+      puffAt(P, noteY(P, note), 0);
+    } else {
+      P.judged[note.t] = "hit";
+      scoreHit(P, note, perfect);
+    }
+    return;
+  }
+  if (t > P.song.chart[0].t - 0.35 && t < P.song.chart[P.song.chart.length - 1].end + GOOD) wrongPress(P);
 }
 
 game.scene("play", {
   enter: function (a) {
-    P = buildPlay(a.i);
+    P = buildPlay(a.i, a.story);
     P.caughtCool = 0;
+    P.sensorNote = sensorMsg;
     game.music(P.song.music, { loop: false });
-    game.ambience(null);
+    game.ambience(P.song.venue === "throne" ? "wind" : P.song.venue === "night" || P.song.venue === "moon" ? "wind" : null, 0.14);
+    sensorOn();
   },
+  exit: function () { sensorOff(); },
   update: function () {
     if (!P) return;
     var dt = 1 / 60;
@@ -629,7 +762,9 @@ game.scene("play", {
     var beatSec = 60 / P.song.bpm;
     if (P.caughtCool > 0) P.caughtCool -= dt;
     if (P.sweat > 0) P.sweat -= dt;
-    if (P.flash > 0) P.flash -= dt;
+    if (P.coughCool > 0) P.coughCool -= dt;
+    if (P.coughFlash > 0) P.coughFlash -= dt;
+    P.sensorNote = sensorMsg || P.sensorNote;
 
     /* note particles */
     for (var i = P.bits.length - 1; i >= 0; i--) {
@@ -639,56 +774,63 @@ game.scene("play", {
     for (i = P.puffs.length - 1; i >= 0; i--) { P.puffs[i].t += dt; if (P.puffs[i].t > 0.3) P.puffs.splice(i, 1); }
 
     if (!P.ended) {
+      /* sensor cough */
+      if (shook) { shook = false; if (sensorWanted) doCough(P); }
+      P.bow = game.btn("down") || (sensorLive && tilt.y > 0.35);
+
       /* watch warnings and the eye */
       for (i = 0; i < P.song.watch.length; i++) {
         var w = P.song.watch[i];
         if (!P.warned[i] && t >= w[0] - 2 * beatSec && t < w[0]) {
           P.warned[i] = true;
-          P.banner = T(TX.watchWarn); P.bannerUntil = w[0] + 0.2;
+          setBanner(P, T(TX.watchWarn), w[0] + 0.2);
           game.sfx({ wave: "square", duty: 2, from: 880, to: 880, ms: 70, vol: 0.4 });
         }
         if (!P.inEye[i] && t >= w[0] && t < w[1]) {
           P.inEye[i] = true;
-          P.banner = T(TX.watch); P.bannerUntil = w[1];
+          P.eyeBowed = 0; P.eyeCaught = false;
+          setBanner(P, T(TX.watch), w[1]);
           game.sfx({ wave: "triangle", from: 120, to: 80, ms: 280, vol: 0.5 });
           if (P.hold) { missNote(P, P.hold.note, "break"); P.hold = null; }
         }
         if (P.inEye[i] && t >= w[1]) {
           P.inEye[i] = false;
-          P.banner = T(TX.again); P.bannerUntil = t + 0.6;
+          if (!P.eyeCaught && P.eyeBowed >= (w[1] - w[0]) * 0.5) {
+            P.bowBonus++;
+            P.score += 180;
+            setJudge(P, T(TX.bowGood), INK, 0.8);
+            game.sfx("coin");
+          }
+          setBanner(P, T(TX.again), t + 0.6);
           game.sfx("tick");
         }
       }
       var eye = inWatch(P, t);
       P.eye = eye;
+      if (eye && P.bow) P.eyeBowed += dt;
 
-      var down = game.pressed("a") || game.pointer.pressed;
-      var up = game.released("a") || game.pointer.released;
+      /* touch: the screen is A, except the two little buttons */
+      var p = game.pointer;
+      var tB = false, tCough = false;
+      var touchUp = p.released && P.touchA;
+      if (p.pressed) {
+        if (inBox(p, TOUCH_COUGH)) tCough = true;
+        else if (P.hasB && inBox(p, TOUCH_B)) tB = true;
+        else P.touchA = true;
+      }
+      if (p.released) P.touchA = false;
+      if (tCough) doCough(P);
+
+      var down = game.pressed("a") || (p.pressed && !inBox(p, TOUCH_B) && !inBox(p, TOUCH_COUGH));
+      var bdown = game.pressed("b") || tB;
+      var up = game.released("a") || touchUp;
+      if (game.pressed("select")) doCough(P);
 
       if (eye) {
-        if (down) caught(P);
-      } else if (down) {
-        var note = nearestNote(P, t);
-        if (note) {
-          if (t < note.t - GOOD) {
-            setJudge(P, T(TX.early), DARK, 0.35);
-            game.sfx("tick");
-          } else {
-            var perfect = Math.abs(t - note.t) <= PERFECT;
-            if (note.hold) {
-              P.hold = { note: note, perfect: perfect, start: t };
-              P.judged[note.t] = "hold";
-              setJudge(P, T(TX.hold), DARK, 0.35);
-              blip(P, note, perfect);
-              puffAt(P, noteY(P, note), 0);
-            } else {
-              P.judged[note.t] = "hit";
-              scoreHit(P, note, perfect);
-            }
-          }
-        } else if (t > P.song.chart[0].t - 0.35 && t < P.song.chart[P.song.chart.length - 1].end + GOOD) {
-          wrongPress(P);
-        }
+        if (down || bdown) caught(P);
+      } else if (!P.ended) {
+        if (down) pressLane(P, t, "a");
+        if (bdown) pressLane(P, t, "b");
       }
 
       if (P.hold) {
@@ -704,11 +846,17 @@ game.scene("play", {
             P.hold = null;
           }
         } else if (t >= hn.end) {
-          /* held through the end: count it, and keep the button bookkeeping tidy */
           P.judged[hn.t] = "hit";
           scoreHit(P, hn, P.hold.perfect);
           P.hold = null;
         }
+      }
+
+      /* first chime hint */
+      if (P.hasB && !P.bHinted && t >= P.firstB - 1.6 && t < P.firstB + 0.4) {
+        P.bHinted = true;
+        setBanner(P, T(TX.chimeHint), P.firstB + 0.5);
+        game.sfx("tick");
       }
 
       /* unplayed taps that have gone past the window */
@@ -721,10 +869,7 @@ game.scene("play", {
         }
       }
 
-      /* natural cool-down: a clean player becomes boring again */
       if (!eye) P.suspicion = Math.max(0, P.suspicion - dt * 0.55);
-
-      /* let the coda finish; the uncharted last bar is part of the performance */
       if (t > P.song.seconds + 0.25) finish(P);
     } else if (game.time - P.endAt > (P.failed ? 1.05 : 1.5)) {
       var stats = resultStats(P);
@@ -733,12 +878,12 @@ game.scene("play", {
         stats.newBest = !b || stats.score > b.score;
         if (stats.newBest) profile.best[P.song.id] = { score: stats.score, rank: stats.rank, acc: stats.acc, combo: stats.maxCombo };
         profile.cleared[P.song.id] = true;
-        if (clearedCount() === FAKE_SONGS.length) profile.ending = true;
+        if (P.story) profile.story = Math.max(profile.story, P.i + 1);
+        if (clearedCount() === SONGS.length) profile.finaled = true;
       }
       saveProfile();
-      game.go("result", { i: P.i, stats: stats }, { fade: true, to: PAPER });
+      game.go("result", { i: P.i, stats: stats, story: P.story }, { fade: true, to: PAPER });
     }
-    /* a beat marker for the drawing code */
     var bi = Math.floor(beat);
     if (bi !== P.lastBeat) { P.lastBeat = bi; P.startPuff = 0.08; }
     if (P.startPuff > 0) P.startPuff -= dt;
@@ -746,23 +891,38 @@ game.scene("play", {
   draw: function (g) {
     if (!P) return;
     var t = P.t, beat = t * P.song.bpm / 60;
-    drawHall(g, beat, { kingEye: P.suspicion > 55 || P.eye ? 2 : P.suspicion > 22 ? 1 : 0, look: P.suspicion > 70 ? 1 : 0, happy: P.maxCombo >= 25, clap: P.ended && !P.failed });
-    drawScroll(g);
-    drawMouth(g, P.startPuff > 0 || (P.hold && Math.sin(game.time * 20) > 0));
-    /* staff and notes */
+    var mood = P.ended && !P.failed ? "happy" : P.suspicion > 55 || P.eye ? "shock" : P.maxCombo >= 25 ? "happy" : "calm";
+    ART.venue(g, P.song.venue, beat, {
+      kingEye: P.suspicion > 55 || P.eye ? 2 : P.suspicion > 22 ? 1 : 0,
+      look: P.suspicion > 70 ? 1 : 0, mood: mood, clap: P.ended && !P.failed,
+      kingMood: P.suspicion > 55 ? "angry" : "calm", petals: P.song.venue === "garden"
+    });
+    ART.scroll(g, { eye: P.eye, act: P.song.act });
+    /* the mouth and the staff */
+    g.rect(36, 84, 6, 3, INK);
+    g.rect(34, 86, 4, 3, MID);
+    if (P.startPuff > 0 || (P.hold && Math.sin(game.time * 20) > 0)) { g.rect(42, 84, 3, 1, INK); g.rect(43, 86, 2, 1, INK); }
     g.rect(38, 42, 1, 42, DARK);
     g.rect(37, 42, 3, 42, P.eye ? MID : PAPER);
     g.rect(38, 42, 1, 42, P.eye ? MID : DARK);
-    if (P.eye) drawEye(g, 49, 46, 62, 26, Math.min(1, 0.3 + Math.min(1, (t - watchStart(P)) * 5)));
-    else {
+    /* lane labels */
+    g.text("A", 10, 82, { color: DARK });
+    if (P.hasB) g.text("B", 10, 41, { color: DARK });
+    if (P.eye) {
+      var ws = watchStart(P);
+      drawEye(g, 49, 46, 62, 26, Math.min(1, 0.3 + Math.min(1, (t - ws) * 5)));
+      g.text(T(TX.watch), 80, 76, { align: "center", color: INK });
+    } else {
       for (var i = 0; i < P.song.chart.length; i++) {
         var n = P.song.chart[i];
         if (P.judged[n.t] && P.judged[n.t] !== "hold") continue;
         var lead = 2.2, x = 40 + (n.t - t) * (118 / lead);
         if (x < 34 || x > 162) continue;
-        var y = noteY(P, n);
+        var y = noteScreenY(P, n);
         var near = x - 40 < 8 && x - 40 > -4;
-        if (n.hold) {
+        if (n.lane === "b") {
+          drawDiamond(g, x, y, near ? 3 : 2, near ? INK : DARK);
+        } else if (n.hold) {
           var xe = 40 + (n.end - t) * (118 / lead);
           if (xe < 36) continue;
           g.rect(x, y - 2, Math.max(3, xe - x), 5, near ? INK : DARK);
@@ -775,7 +935,6 @@ game.scene("play", {
           g.rect(x + (near ? 2 : 1), y - 5, 1, 5, INK);
         }
       }
-      /* active hold: draw a filled progress bar */
       if (P.hold) {
         var hn = P.hold.note, hx = 40 + (hn.t - t) * (118 / lead);
         var hxe = 40 + (hn.end - t) * (118 / lead);
@@ -784,24 +943,20 @@ game.scene("play", {
         g.rect(hx, noteY(P, hn) + 2, Math.max(2, Math.round((hxe - hx) * frac)), 1, INK);
       }
     }
-    /* puffs */
+    /* puffs and particles */
     P.puffs.forEach(function (p) {
       var r = Math.round(p.t * 44);
       if (p.kind === 2) { g.line(p.x - 4, p.y - 4, p.x + 4, p.y + 4, INK); g.line(p.x + 4, p.y - 4, p.x - 4, p.y + 4, INK); }
       else { g.circle(p.x + r, p.y, Math.max(1, r), p.kind ? INK : MID, false); }
     });
-    /* particles */
     P.bits.forEach(function (b) { if (b.life > 0) g.rect(Math.round(b.x), Math.round(b.y), 1, 1, b.tone); });
     /* people */
-    drawPlayer(g, 8, 90, P.startPuff > 0 || (P.hold && Math.sin(game.time * 24) > 0), P.sweat > 0, false);
-    for (i = 0; i < 4; i++) {
-      var mx = 58 + i * 22, mb = Math.round(Math.sin((beat + i * 0.2) * Math.PI * 2) * 1);
-      g.circle(mx + 4, 102 + mb, 3, MID, true);
-      g.rect(mx, 106 + mb, 9, 10, DARK);
-      g.line(mx + 8, 108 + mb, mx + 14, 104 + mb, MID);
-      g.rect(mx + 1, 116 + mb, 2, 4, DARK); g.rect(mx + 6, 116 + mb, 2, 4, DARK);
+    ART.player(g, 8, 90, { puff: P.startPuff > 0 || (P.hold && Math.sin(game.time * 24) > 0), sweat: P.sweat > 0, bow: P.bow, mood: P.suspicion > 50 ? "worried" : "calm" });
+    var kinds = ["sheng", "qin", "drum", "bell", "flute"];
+    for (i = 0; i < 5; i++) {
+      ART.musician(g, 52 + i * 18, 100, kinds[i], beat + i * 0.08, P.eye ? "worried" : "");
     }
-    drawConductor(g, 136, 96, beat, DARK);
+    ART.conductor(g, 136, 96, beat, DARK);
     /* HUD */
     g.rect(0, 0, 160, 16, PAPER);
     g.rect(0, 15, 160, 1, INK);
@@ -810,28 +965,39 @@ game.scene("play", {
       bigText(g, String(P.combo), 72, 3, 2, INK, "center");
       g.text(tt("连", "x"), 88, 2, { color: DARK });
     } else {
-      keycap(g, "A", 66, 3, 1);
-      g.text(tt("吹", "play"), 79, 2, { color: DARK });
+      keycap(g, "A", 62, 3, 1);
+      g.text(tt("吹", "play"), 74, 2, { color: DARK });
+      if (P.hasB) { keycap(g, "B", 92, 3, 1); g.text(tt("敲", "hit"), 104, 2, { color: DARK }); }
     }
     drawSuspicion(g, P.suspicion);
+    /* touch buttons */
+    if (P.hasB) touchButton(g, TOUCH_B, T(TX.touchB), false);
+    touchButton(g, TOUCH_COUGH, T(TX.touchCough) + " " + P.coughs, P.coughCool > 0 || P.coughs <= 0);
     /* banner */
     if (P.banner && t < P.bannerUntil) {
-      g.window(26, 18, 108, 17);
+      g.window(22, 18, 116, 16);
       g.text(P.banner, 80, 21, { align: "center" });
     }
-    /* judge word */
+    /* judge */
     if (P.judge && game.time < P.judgeUntil) {
       var jw = g.measure(P.judge.text) + 10;
       g.window(80 - Math.round(jw / 2), 84, jw, 15);
       g.text(P.judge.text, 80, 86, { align: "center", color: P.judge.tone });
     }
-    /* intro count: a thin strip above the staff, never over the approaching notes */
+    /* cough bubble */
+    if (P.coughFlash > 0) {
+      g.window(44, 72, 32, 15);
+      g.text(T(TX.chew), 60, 74, { align: "center" });
+    }
+    /* intro */
     var first = P.song.chart[0].t;
     if (t < first && !P.ended) {
       var beatsLeft = (first - t) / (60 / P.song.bpm);
-      g.window(8, 18, 144, 22);
-      g.text(beatsLeft > 1 ? T(TX.ready) : T(TX.go), 12, 22);
-      g.text(tt("跟着指挥", "follow the baton"), 148, 22, { align: "right", color: DARK });
+      g.window(6, 16, 148, 32);
+      g.text(beatsLeft > 1 ? T(TX.ready) : T(TX.go), 12, 19);
+      g.text(T(P.song.name), 148, 19, { align: "right", color: DARK });
+      var hint = sensorLive ? T(TX.sensorsOn) : sensorMsg || T(TX.sensorsKeys);
+      g.text(hint, 80, 34, { align: "center", color: DARK });
     }
     /* fail */
     if (P.ended && P.failed) {
@@ -839,7 +1005,6 @@ game.scene("play", {
       g.text(T(TX.failed), 80, 34, { align: "center" });
       g.text(T(TX.failTip), 80, 50, { align: "center", color: DARK });
     }
-    /* success flash */
     if (P.ended && !P.failed && game.time - P.endAt < 1.4) {
       g.rect(0, 30, 160, 36, PAPER); g.frame(0, 30, 160, 36, INK);
       g.text(T(TX.success), 80, 35, { align: "center" });
@@ -847,39 +1012,68 @@ game.scene("play", {
     }
   }
 });
+var TOUCH_B = { x: 120, y: 122, w: 36, h: 20 };
+var TOUCH_COUGH = { x: 80, y: 122, w: 36, h: 20 };
+function touchButton(g, b, label, off) {
+  g.rect(b.x, b.y, b.w, b.h, PAPER);
+  g.frame(b.x, b.y, b.w, b.h, off ? MID : INK);
+  g.text(label, b.x + Math.round(b.w / 2), b.y + 3, { align: "center", color: off ? MID : INK });
+}
+function drawDiamond(g, x, y, r, tone) {
+  g.rect(x - r, y, r * 2 + 1, 1, tone);
+  g.rect(x - r + 1, y - 1, r * 2 - 1, 3, tone);
+  g.rect(x, y - r, 1, r * 2 + 1, tone);
+  g.rect(x - 1, y - 1, 3, 3, PAPER);
+  g.frame(x - r, y - 1, r * 2 + 1, 3, tone);
+}
 function watchStart(P) {
   for (var i = 0; i < P.song.watch.length; i++) if (P.t >= P.song.watch[i][0] && P.t < P.song.watch[i][1]) return P.song.watch[i][0];
   return P.t;
 }
-function nearestNote(P, t) {
-  var best = null, bd = 1e9;
-  for (var i = 0; i < P.song.chart.length; i++) {
-    var n = P.song.chart[i];
-    if (P.judged[n.t]) continue;
-    var d = n.t - t;
-    if (d < -GOOD) continue;
-    if (d > EARLY) break;
-    var ad = Math.abs(d);
-    if (ad < bd) { bd = ad; best = n; }
+function drawEye(g, x, y, w, h, lid) {
+  var open = Math.max(0, Math.min(1, lid));
+  var hh = Math.max(1, Math.round(h * open));
+  var cy = y + Math.round(h / 2);
+  for (var i = 0; i < w; i++) {
+    var u = (i + 0.5) / w, half = Math.round((hh / 2) * Math.sin(Math.PI * u));
+    if (half < 1) { g.pixel(x + i, cy, INK); continue; }
+    g.rect(x + i, cy - half, 1, half * 2 + 1, PAPER);
+    g.pixel(x + i, cy - half, INK);
+    g.pixel(x + i, cy + half, INK);
   }
-  return best;
+  if (open > 0.45) {
+    var px = x + Math.round(w / 2), r = Math.max(1, Math.round(hh / 4));
+    g.circle(px, cy, r, INK, true);
+    g.rect(px - r, cy, Math.max(1, r - 1), 1, INK);
+    g.pixel(px - 1, cy - 1, PAPER);
+  }
+}
+function drawSuspicion(g, value) {
+  var x = 112, y = 5;
+  drawEye(g, x, y, 9, 5, 1);
+  for (var i = 0; i < 5; i++) {
+    var on = value > i * 20;
+    g.rect(124 + i * 6, 4, 5, 7, PAPER);
+    g.frame(124 + i * 6, 4, 5, 7, MID);
+    if (on) g.rect(125 + i * 6, 5, 3, 5, INK);
+  }
 }
 
 /* ---------- result ---------- */
 var resultSel = 0, resultItems = [], resultArgs = null, resultLock = 0;
-function resultOptions(stats, i) {
-  var last = i === FAKE_SONGS.length - 1;
+function resultOptions(stats, i, story) {
   if (stats.failed) return ["retry", "choose"];
-  if (last) return ["curtain", "retry", "choose"];
+  if (story && i === SONGS.length - 1) return ["curtain", "retry", "choose"];
   return ["next", "retry", "choose"];
 }
 game.scene("result", {
   enter: function (a) {
     resultArgs = a;
-    resultItems = resultOptions(a.stats, a.i);
+    resultItems = resultOptions(a.stats, a.i, a.story);
     resultSel = 0;
     resultLock = game.time + 0.2;
     game.musicStop();
+    sensorOff();
   },
   update: function () {
     var canGo = game.time >= resultLock;
@@ -889,76 +1083,124 @@ game.scene("result", {
     if (canGo && game.pointer.pressed) {
       var n = resultItems.length, bw = n === 3 ? 44 : 66, gap = n === 3 ? 2 : 4;
       var bx = Math.round((160 - (n * bw + (n - 1) * gap)) / 2);
-      if (game.pointer.y >= 104 && game.pointer.y < 124) {
+      if (game.pointer.y >= 94 && game.pointer.y < 114) {
         for (var k = 0; k < n; k++) {
           var x = bx + k * (bw + gap);
           if (game.pointer.x >= x && game.pointer.x < x + bw) { resultSel = k; act = true; break; }
         }
       }
     }
-    if (game.pressed("b")) { game.sfx("miss"); game.go("select"); return; }
+    if (game.pressed("b")) { game.sfx("miss"); game.go("select", { i: resultArgs.i }); return; }
     if (act) {
       game.sfx("tap");
       var what = resultItems[resultSel];
-      if (what === "next") goBrief(resultArgs.i + 1);
-      else if (what === "retry") game.go("play", { i: resultArgs.i }, { fade: false });
-      else if (what === "curtain") game.go("ending");
-      else game.go("select");
+      if (what === "next") {
+        if (resultArgs.story) game.go("story", { i: resultArgs.i, kind: "post", stats: resultArgs.stats }, { fade: true, to: PAPER });
+        else {
+          var nxt = (resultArgs.i + 1) % SONGS.length;
+          game.go("play", { i: nxt, story: false }, { fade: false });
+        }
+      } else if (what === "retry") game.go("play", { i: resultArgs.i, story: resultArgs.story }, { fade: false });
+      else if (what === "curtain") game.go("ending", { stats: resultArgs.stats });
+      else game.go("select", { i: resultArgs.i });
     }
   },
   draw: function (g) {
-    var st = resultArgs.stats;
+    var st = resultArgs.stats, s = SONGS[resultArgs.i];
     var beat = game.time * 1.6;
-    drawHall(g, beat, { happy: !st.failed, clap: !st.failed, kingEye: st.failed ? 2 : 0, look: 1 });
-    if (!st.failed) {
-      for (var i = 0; i < 18; i++) g.rect((i * 37 + Math.floor(game.time * 10)) % 160, 2 + (i * 5) % 12, 2, 2, i % 2 ? MID : INK);
-    }
-    g.window(8, 20, 144, 110);
-    g.text(T(st.failed ? TX.failed : TX.success), 80, 25, { align: "center" });
-    var panelY = 41;
-    g.text(T(TX.score) + " " + st.score, 16, panelY, { color: DARK });
-    g.text(T(TX.maxCombo) + " " + st.maxCombo, 16, panelY + 12, { color: DARK });
-    g.text(T(TX.accuracy) + " " + Math.round(st.acc * 100) + "%", 16, panelY + 24, { color: DARK });
-    g.text(T(TX.suspicion) + " " + st.suspicion, 16, panelY + 36, { color: DARK });
-    bigText(g, st.rank, 126, 38, 4, INK, "center");
-    g.text(rankName(st.rank), 126, 62, { align: "center", color: DARK });
-    if (!st.failed && st.newBest) g.text(T(TX.newBest), 80, 91, { align: "center", color: DARK });
-    /* one row of three wide buttons: easy to hit with a thumb */
+    ART.venue(g, s.venue, beat, { mood: st.failed ? "shock" : "happy", clap: !st.failed, kingEye: st.failed ? 2 : 0, look: 1 });
+    if (!st.failed) ART.confetti(g, game.time, 20);
+    g.window(6, 16, 148, 100);
+    g.text(T(st.failed ? TX.failed : TX.success), 80, 20, { align: "center" });
+    if (!st.failed && st.newBest) g.text(T(TX.newBest), 146, 20, { align: "right", color: DARK });
+    g.text(T(TX.score) + " " + st.score, 14, 34, { color: DARK });
+    g.text(T(TX.maxCombo) + " " + st.maxCombo, 14, 46, { color: DARK });
+    g.text(T(TX.accuracy) + " " + Math.round(st.acc * 100) + "%", 14, 58, { color: DARK });
+    g.text(T(TX.suspicion) + " " + st.suspicion, 14, 70, { color: DARK });
+    g.text(T(TX.bHits) + " " + st.bHits + "  " + T(TX.coughs) + " " + st.coughs, 14, 82, { color: DARK });
+    bigText(g, st.rank, 126, 32, 4, INK, "center");
+    g.text(rankName(st.rank), 126, 56, { align: "center", color: DARK });
     var names = { next: TX.next, retry: TX.retry, choose: TX.choose, curtain: TX.curtain };
     var n = resultItems.length, bw = n === 3 ? 44 : 66, gap = n === 3 ? 2 : 4;
     var bx = Math.round((160 - (n * bw + (n - 1) * gap)) / 2);
     for (var k = 0; k < n; k++) {
       var x = bx + k * (bw + gap), on = k === resultSel;
-      if (on) g.rect(x, 104, bw, 18, INK);
-      else g.frame(x, 104, bw, 18, DARK);
-      g.text(T(names[resultItems[k]]), x + Math.round(bw / 2), 107, { align: "center", color: on ? PAPER : INK });
+      if (on) g.rect(x, 94, bw, 18, INK);
+      else g.frame(x, 94, bw, 18, DARK);
+      g.text(T(names[resultItems[k]]), x + Math.round(bw / 2), 97, { align: "center", color: on ? PAPER : INK });
     }
-    g.rect(0, 130, 160, 14, PAPER);
     g.text(T(TX.resultKeys), 80, 131, { align: "center", color: DARK });
   }
 });
 
-/* ---------- ending ---------- */
+/* ---------- endings ---------- */
+var endingKey = "trueSong";
 game.scene("ending", {
-  enter: function () {
+  enter: function (a) {
+    sensorOff();
     game.musicStop();
-    var first = !profile.finaled;
-    var pages = first ? [T(TX.end1), T(TX.end2), T(TX.end3)] : [T(TX.endSeen)];
-    game.after(0.2, function () {
-      game.say(pages, { speed: 34 }).then(function () {
-        if (first) { profile.finaled = true; saveProfile(); }
+    endingKey = STORY.endingFor(profile.truth, a && a.stats);
+    var e = STORY.ENDINGS[endingKey];
+    /* record the ending before the dialogue so quitting mid-scene still counts it */
+    profile.endings[endingKey] = true;
+    profile.finaled = true;
+    profile.story = 0;
+    saveProfile();
+    game.ambience(endingKey === "trueSong" || endingKey === "home" ? "stream" : null, 0.15);
+    if (endingKey === "trueSong") game.music({ bpm: 72, p1: "@1 v9 o4 l4 a c e d", p2: "@0 v5 o3 l4 a c e d", tri: "v8 o2 l4 a a e e", noise: "l8 v2 x r x r" }, { loop: true });
+    game.after(0.25, function () {
+      game.say(e.pages.map(function (p) { return T(p); }), { speed: 30 }).then(function () {
         game.go("title", null, { fade: true, to: PAPER });
       });
     });
   },
   draw: function (g) {
-    drawHall(g, game.time * 0.8, { happy: true, clap: true, kingEye: 0 });
-    g.window(36, 24, 88, 22);
-    g.text(T(TX.endingTitle), 80, 29, { align: "center" });
-    drawPlayer(g, 58, 82, false, false, false);
-    drawConductor(g, 108, 82, game.time * 0.8);
-    bigText(g, "S", 80, 110, 2, INK, "center");
+    var e = STORY.ENDINGS[endingKey];
+    drawEndingArt(g, endingKey, game.time);
+    g.window(20, 10, 120, 44);
+    g.text(T(e.title), 80, 14, { align: "center" });
+    g.text(T(TX.endingTitle), 80, 28, { align: "center", color: DARK });
+    g.text(T(TX.endingsSeen, { e: endingsCount() }), 80, 40, { align: "center", color: DARK });
   }
 });
+function drawEndingArt(g, key, t) {
+  if (key === "horses") {
+    g.clear(INK);
+    g.rect(0, 0, 160, 76, DARK);
+    for (var i = 0; i < 5; i++) {
+      g.rect(i * 34, 8, 2, 76, INK);
+      g.rect(i * 34 + 8, 18, 1, 58, MID);
+    }
+    /* horse */
+    g.rect(68, 58, 36, 14, INK);
+    g.rect(96, 44, 10, 16, INK);
+    g.rect(101, 39, 4, 6, INK);
+    g.rect(72, 48, 18, 10, INK);
+    g.rect(76, 72, 4, 12, INK); g.rect(92, 72, 4, 12, INK);
+    g.line(68, 62, 60, 56, INK);
+    g.pixel(103, 44, PAPER);
+    /* Nan Guo and a lantern */
+    ART.player(g, 20, 82, { mood: "sad" });
+    ART.lantern(g, 140, 50, t);
+    g.rect(0, 112, 160, 4, MID);
+  } else if (key === "home") {
+    ART.dawn(g, t * 0.6, { petals: true });
+    ART.player(g, 28, 88, { mood: "happy" });
+    for (var k = 0; k < 3; k++) {
+      ART.crowdHead(g, 78 + k * 18, 100, 3, DARK, "happy");
+      g.rect(75 + k * 18, 103, 7, 8, DARK);
+    }
+    ART.musician(g, 130, 88, "sheng", t, "");
+  } else if (key === "chief") {
+    ART.hall(g, t * 0.8, { kingEye: 0, mood: "calm", spot: true, spotTone: PAPER });
+    ART.player(g, 68, 64, { mood: "sly", roamed: true });
+    for (var n = 0; n < 5; n++) ART.musician(g, 34 + n * 20, 106, "sheng", t + n * 0.1, "empty");
+  } else {
+    ART.dawn(g, t * 0.6, { petals: true, spot: true });
+    ART.player(g, 34, 88, { mood: "happy" });
+    ART.musician(g, 72, 90, "qin", t, "");
+    ART.portrait(g, "min", "calm", 108, 32);
+  }
+}
 
 game.start("boot");

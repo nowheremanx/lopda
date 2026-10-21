@@ -153,19 +153,22 @@
         "................",
         "................"
       ],
-      "version": "1.0.0",
-      "description": "单键音游：跟着乐队吹，国王睁眼时千万别按。三首古典曲。",
+      "version": "2.0.0",
+      "description": "节奏故事：十首古典曲、三幕剧情、四种结局。按 A 吹竽、B 敲磬，国王睁眼时别动；摇一摇咳嗽，倾斜躬身。",
       "i18n": {
         "en": {
           "name": "Fake Yu",
-          "description": "A one-key rhythm game: play, but freeze when the king looks. Three tunes."
+          "description": "A rhythm story: ten tunes, three acts, four endings. Freeze when the king looks."
         }
       },
       "author": "Haowei Wu",
       "license": "MIT",
+      "permissions": [
+        "motion"
+      ],
       "path": "apps/fake-yu/index.html",
-      "sha256": "4b59fc8580657a6b07a951cfb70902fbbc98ad7b17f2984dc274e5e6e370e6fc",
-      "bytes": 96677
+      "sha256": "9f48fda51e4637bba55a14404161ba7b8325a004e00f544c554726169a8095fc",
+      "bytes": 176259
     },
     {
       "spec": "lopda/1",

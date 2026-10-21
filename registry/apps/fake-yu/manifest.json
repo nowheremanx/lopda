@@ -3,17 +3,17 @@
   "id": "fake-yu",
   "name": "滥竽充数",
   "glyph": "竽",
-  "version": "1.0.0",
-  "description": "单键音游：跟着乐队吹，国王睁眼时千万别按。三首古典曲。",
+  "version": "2.0.0",
+  "description": "节奏故事：十首古典曲、三幕剧情、四种结局。按 A 吹竽、B 敲磬，国王睁眼时别动；摇一摇咳嗽，倾斜躬身。",
   "i18n": {
     "en": {
       "name": "Fake Yu",
-      "description": "A one-key rhythm game: play, but freeze when the king looks. Three tunes."
+      "description": "A rhythm story: ten tunes, three acts, four endings. Freeze when the king looks."
     }
   },
   "author": "Haowei Wu",
   "license": "MIT",
-  "permissions": [],
+  "permissions": ["motion"],
   "buttons": true,
   "icon": [
     "................",
