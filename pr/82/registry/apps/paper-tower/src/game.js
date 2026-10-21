@@ -33,7 +33,8 @@ function zoneMusic(n) { return "zone" + D.zoneOf(n); }
 function setAmbience(n) {
   var z = D.zoneOf(n);
   if (z === 2) game.ambience("wind", 0.13);
-  else if (z === 3) game.ambience("fire", 0.18);
+  else if (z === 3) game.ambience("waves", 0.15);
+  else if (z === 4) game.ambience("fire", 0.2);
   else game.ambience(null);
 }
 function pack() { var o = R.clone(S); o.savedAt = Date.now(); return o; }
