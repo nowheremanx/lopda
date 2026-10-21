@@ -4763,10 +4763,14 @@ test("photo puzzle: a 2×2 main menu, a four-item game menu that fits 331×359, 
   await until(p, async () => (await ppState(f)).screen === "gallery", "the gallery");
   assert.deepEqual(await ppLabels(f), ["上一张", "开始", "下一张"]);
   assert.equal(await f.textContent("#info"), "3×3  图 1/6  山湖");
+  /* the pad reaches the app through a postMessage: read the state only once the press has landed */
   await press(p, "right");
+  await until(p, async () => (await ppState(f)).gallery === 1, "the next picture");
   assert.deepEqual([(await ppState(f)).gallery, await f.textContent("#info")], [1, "3×3  图 2/6  灯塔"]);
-  await press(p, "up"); assert.equal((await ppState(f)).nextN, 4);
-  await press(p, "down"); assert.equal((await ppState(f)).nextN, 3);
+  await press(p, "up");
+  await until(p, async () => (await ppState(f)).nextN === 4, "the 4×4 size");
+  await press(p, "down");
+  await until(p, async () => (await ppState(f)).nextN === 3, "the 3×3 size");
   await press(p, "a");
   await until(p, async () => (await ppState(f)).screen === "cut", "the opening cut");
   s = await ppState(f);
