@@ -826,14 +826,13 @@ var ART = (function () {
     g.circle(140, 59, 2, PAPER, true);
     g.rect(144, 57, 4, 1, MID);
     /* punching bag */
-    g.rect(150, 2, 8, 4, INK);
-    g.rect(152, 6, 1, 8, INK);
-    g.rect(144, 14, 11, 26, MID);
-    g.frame(144, 14, 11, 26, INK);
-    g.rect(146, 18, 7, 1, INK);
-    g.rect(146, 26, 7, 1, INK);
-    g.rect(147, 21, 5, 4, PAPER);
-    g.rect(149, 22, 2, 2, INK);
+    g.rect(148, 2, 8, 4, INK);
+    g.rect(150, 6, 1, 8, INK);
+    g.rect(140, 14, 16, 28, MID);
+    g.frame(140, 14, 16, 28, INK);
+    g.rect(142, 18, 12, 1, INK);
+    g.rect(142, 26, 12, 1, INK);
+    g.text(T({ zh: "马", en: "MA" }), 142, 20, { color: INK });
     /* basin on a nail */
     g.rect(52, 28, 1, 7, INK);
     g.circle(52, 39, 7, PAPER, true);

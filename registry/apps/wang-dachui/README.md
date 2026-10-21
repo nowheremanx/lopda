@@ -2,10 +2,19 @@
 
 A Lo-PDA visual novel in six chapters and five endings. The story is a free adaptation of
 大咕咕鸡's short piece 「亲子贴：我的儿子王大锤」: a father narrates his eleven-year-old son's
-grandiose campaign to prove that spiritual power is real. The adaptation keeps the father's
-deadpan voice, the midnight meal, the enamel basin and the final alley, and rewrites the rest
-for a family-friendly screen: the son's "spiritual exercises" are daydreaming and standing
-with a basin on his head, not anything sexual.
+grandiose campaign to prove that spiritual power is real.
+
+The adaptation keeps the father's deadpan voice, the midnight meal, the enamel basin and the
+final alley. A second pass pulls the non-explicit narration closer to the original's phrasing
+and rhythm: the opening "不学好啊，头疼死了", "身在茅草屋，心怀凌云志", the third-grade
+assembly, "不卑不亢", the wave speech and the streetlight statue. It is still a paraphrase,
+not a reproduction. The original's sexual passages are replaced: the son's "spiritual
+exercises" are daydreaming and standing with a basin on his head.
+
+**The original story and its characters remain 大咕咕鸡's property.** This app does not
+reproduce the original text verbatim, and it should not be merged without the author's
+permission. If permission is not available, treat it as an original homage: change the names
+and the remaining specifics before publishing.
 
 ## Story map
 
@@ -89,7 +98,9 @@ The story graph can be walked without a browser with `tests/wang-dachui-story.te
 
 ## Credits
 
-- Story: free adaptation of 大咕咕鸡's 「亲子贴：我的儿子王大锤」. The original's characters and
-  best lines are the source; the adaptation and all new scenes are by Haowei Wu.
+- Story: free adaptation of 大咕咕鸡's 「亲子贴：我的儿子王大锤」. The original story and
+  characters remain the author's property; this is not a licensed reproduction. The adaptation
+  paraphrases the non-explicit passages and replaces the sexual ones. The adaptation and all
+  new scenes are by Haowei Wu.
 - Code, art, music: Haowei Wu, MIT.
 - Framework: `sdk/lo-game.js` (MIT), font lopix12 (SIL OFL 1.1).
