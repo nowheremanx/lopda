@@ -1,6 +1,6 @@
 {
   "spec": "lopda/1",
-  "generated": "2026-10-20",
+  "generated": "2026-10-21",
   "apps": [
     {
       "spec": "lopda/1",
@@ -314,27 +314,26 @@
         ".00000000000000.",
         "................"
       ],
-      "version": "1.1.0",
-      "description": "拍一张照片，或导入一张图片，切成滑块拼图再拼回来。没有相机也能用内置图片玩。相机与文件导入的示范。",
+      "version": "1.2.0",
+      "description": "拍一张照片，或从六张内置图片里挑一张，切成滑块拼图再拼回来。普通和街机两种玩法。",
       "i18n": {
         "zh": {
           "name": "拍照拼图",
-          "description": "拍一张照片，或导入一张图片，切成滑块拼图再拼回来。没有相机也能用内置图片玩。相机与文件导入的示范。"
+          "description": "拍一张照片，或从六张内置图片里挑一张，切成滑块拼图再拼回来。普通和街机两种玩法。"
         },
         "en": {
           "name": "SnapTile",
-          "description": "Snap or import a picture, then slide its tiles back. A camera and files demo."
+          "description": "Snap a photo or pick a built-in picture, then slide it back. Normal or arcade."
         }
       },
       "author": "Haowei Wu",
       "license": "MIT",
       "permissions": [
-        "camera",
-        "files"
+        "camera"
       ],
       "path": "apps/photo-puzzle/index.html",
-      "sha256": "f55b4480b563c3323ae9b22d1442e8c4ddfe60c0a9e132e230aba3b5cbfbec80",
-      "bytes": 46824
+      "sha256": "569012bf97fcd424f0fc080b6124bc4382b4718e9d69880ff2ef56828a849060",
+      "bytes": 65756
     },
     {
       "spec": "lopda/1",

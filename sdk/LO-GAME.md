@@ -76,7 +76,8 @@ map, talking to a cat, a choice, picking up an item, and saving, in Chinese and 
 - The phone screen around your canvas is 331×359 CSS px at the smallest (iPhone SE with the chin pad).
   Text drawn with `g.text` must stay readable there: with the default 160×144 canvas, ink or paper text
   only, never `g.MID` text on `g.PAPER`. Menus and dialogues follow `sdk/UI.md` sections 5 and 6:
-  the selected item inverted, a hint line with only the keys that work, Left/Right doing one thing.
+  the selected item inverted, a hint line with only the keys that work, and arrows moving through a grid
+  by rows and columns, not one item at a time in reading order.
 
 ## 3. Drawing: `g`
 
