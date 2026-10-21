@@ -1,7 +1,7 @@
 /* Chapter 3: the platform, ten years ago, and the pair ticket. */
 
 SCRIPT.push(
-  { chapter: { zh: "第三章", en: "Chapter Three" }, sub: { zh: "十年前的站台", en: "The Platform Ten Years Ago" } },
+  { chapter: { zh: "第三章", en: "Chapter Three" }, sub: { zh: "十年前的站台", en: "The Old Platform" } },
   { bg: "platform" },
   { say: null, text: { zh: "站长提灯走在前面。灯罩上有一道裂纹，光从缝里漏出来。", en: "The stationmaster leads with the lamp. There is a crack in the glass; light leaks through it." } },
   { say: null, text: { zh: "站台没有顶。雨直接落在铁轨上，溅起细小的白点。", en: "The platform has no roof. Rain falls straight onto the rails and breaks into small white points." } },

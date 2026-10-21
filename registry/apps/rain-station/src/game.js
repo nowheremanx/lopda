@@ -172,8 +172,9 @@ function drawChapter(g) {
   g.clear(g.PAPER);
   g.dither(0, 0, 160, 144, g.MID, 1);
   g.rect(20, 58, 120, 1, g.INK);
-  var h = g.text(cur.title, 80, 38, { align: "center", width: 144 });
-  g.text(cur.sub, 80, 66, { align: "center", width: 144, color: g.INK });
+  /* with width, align centers inside x..x+width: start the box at 8, not at the screen centre */
+  var h = g.text(cur.title, 8, 38, { align: "center", width: 144 });
+  g.text(cur.sub, 8, 66, { align: "center", width: 144, color: g.INK });
   g.text(T({ zh: "按 A 继续", en: "A: continue" }), 80, 118, { align: "center", color: g.INK });
   return h;
 }
