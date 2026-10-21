@@ -109,11 +109,10 @@ game.scene("title", {
   draw: function (g) {
     g.clear(g.INK);
     titleTower(g, game.time);
-    g.dither(0, 82, 160, 56, 0, 3);
+    g.dither(0, 82, 160, 62, 0, 3);
     bigText(g, "PAPER TOWER", 80, 88, 2, g.PAPER);
-    g.text(t("纸 塔", "a paper climb"), 80, 108, { align: "center", color: g.PAPER });
-    if (titleMeta && titleMeta.cleared) g.text(t("灯已点亮", "the lamp is lit"), 80, 118, { align: "center", color: g.MID });
-    if (Math.floor(game.time * 2) % 2 === 0) g.text(t("按 A 开始", "PRESS A"), 80, 131, { align: "center", color: g.PAPER });
+    g.text(titleMeta && titleMeta.cleared ? t("灯已点亮", "the lamp is lit") : t("纸 塔", "a paper climb"), 80, 108, { align: "center", color: g.PAPER });
+    if (Math.floor(game.time * 2) % 2 === 0) g.text(t("按 A 开始", "PRESS A"), 80, 130, { align: "center", color: g.PAPER });
   }
 });
 async function titleMenu() {
