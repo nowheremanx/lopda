@@ -2087,11 +2087,21 @@ function arrive() {
   }
   if (ch === "L") { reachLamp(); return; }
 }
-function goFloor(delta) {
-  var ok = delta > 0 ? R.nextFloor(S) : R.prevFloor(S);
-  if (!ok) return;
-  saveAuto(); sfx("page"); busy = true;
-  game.go("play", null, { fade: true, time: 0.16 });
+async function goFloor(delta) {
+  if (delta > 0 && S.floor >= 50) return;
+  if (delta < 0 && S.floor <= 1) return;
+  sfx("page"); busy = true;
+  /* Cover the old page first, then change it. The outgoing scene must never be
+     redrawn after S.floor has moved: it would show the next page's number, and
+     the next page's untouched monsters, under the old floor's banner. */
+  await game.fade("out", 0.16);
+  var moved = delta > 0 ? R.nextFloor(S) : R.prevFloor(S);
+  if (!moved) { await game.fade("in", 0.16); busy = false; return; }
+  saveAuto();
+  await game.go("play", null, { fade: false });
+  busy = true;
+  await game.fade("in", 0.16);
+  busy = false;
 }
 async function fightAt(x, y, ch) {
   busy = true;
