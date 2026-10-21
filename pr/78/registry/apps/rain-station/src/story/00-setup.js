@@ -35,8 +35,8 @@ var BACKDROPS = {
     }
     g.rect(0, 72, 160, 16, g.DARK); g.line(0, 72, 160, 72, g.INK);
     g.rect(54, 34, 52, 38, g.DARK); g.frame(54, 34, 52, 38, g.INK);
-    g.rect(58, 12, 44, 12, g.PAPER); g.frame(58, 12, 44, 12, g.INK);
-    g.text(T({ zh: "雨站", en: "RAIN STN" }), 80, 13, { align: "center", color: g.INK });
+    g.rect(50, 8, 60, 16, g.PAPER); g.frame(50, 8, 60, 16, g.INK);
+    g.text(T({ zh: "雨站", en: "RAIN STN" }), 80, 10, { align: "center", color: g.INK });
     g.rect(66, 44, 10, 12, g.PAPER); g.frame(66, 44, 10, 12, g.INK);
     g.rect(84, 44, 10, 12, g.PAPER); g.frame(84, 44, 10, 12, g.INK);
     g.rect(70, 62, 20, 10, g.INK);
@@ -88,8 +88,8 @@ var BACKDROPS = {
     for (var s = 4; s < 160; s += 16) { g.rect(s, 76, 6, 4, g.MID); }
     g.rect(128, 20, 3, 44, g.INK); g.rect(122, 16, 15, 9, g.INK); g.circle(129, 20, 3, g.PAPER, true);
     g.dither(120, 12, 19, 17, g.PAPER, 1);
-    g.rect(14, 24, 34, 9, g.PAPER); g.frame(14, 24, 34, 9, g.INK);
-    g.text(T({ zh: "雨站", en: "RAIN STN" }), 31, 25, { align: "center", color: g.INK });
+    g.rect(2, 20, 58, 16, g.PAPER); g.frame(2, 20, 58, 16, g.INK);
+    g.text(T({ zh: "雨站", en: "RAIN STN" }), 31, 22, { align: "center", color: g.INK });
     g.rect(10, 48, 26, 3, g.INK); g.rect(12, 51, 2, 13, g.INK); g.rect(32, 51, 2, 13, g.INK);
   },
   memory: function (g) {
@@ -99,8 +99,8 @@ var BACKDROPS = {
     for (var s = 4; s < 160; s += 16) g.rect(s, 76, 6, 4, g.PAPER);
     g.rect(128, 20, 3, 44, g.INK); g.rect(122, 16, 15, 9, g.INK); g.circle(129, 20, 3, g.PAPER, true);
     g.dither(120, 12, 19, 17, g.PAPER, 3);
-    g.rect(14, 24, 34, 9, g.PAPER); g.frame(14, 24, 34, 9, g.INK);
-    g.text(T({ zh: "雨站", en: "RAIN STN" }), 31, 25, { align: "center", color: g.INK });
+    g.rect(2, 20, 58, 16, g.PAPER); g.frame(2, 20, 58, 16, g.INK);
+    g.text(T({ zh: "雨站", en: "RAIN STN" }), 31, 22, { align: "center", color: g.INK });
     g.rect(10, 48, 26, 3, g.INK); g.rect(12, 51, 2, 13, g.INK); g.rect(32, 51, 2, 13, g.INK);
     g.rect(78, 50, 16, 18, g.DARK); g.frame(78, 50, 16, 18, g.INK);
     g.rect(96, 52, 2, 16, g.INK);
@@ -132,8 +132,8 @@ var BACKDROPS = {
     g.rect(0, 78, 160, 2, g.INK); g.rect(0, 84, 160, 2, g.INK);
     for (var s = 4; s < 160; s += 16) g.rect(s, 80, 6, 3, g.MID);
     g.rect(54, 42, 52, 30, g.DARK); g.frame(54, 42, 52, 30, g.INK);
-    g.rect(58, 24, 44, 10, g.PAPER); g.frame(58, 24, 44, 10, g.INK);
-    g.text(T({ zh: "雨站", en: "RAIN STN" }), 80, 24, { align: "center", color: g.INK });
+    g.rect(50, 18, 60, 16, g.PAPER); g.frame(50, 18, 60, 16, g.INK);
+    g.text(T({ zh: "雨站", en: "RAIN STN" }), 80, 20, { align: "center", color: g.INK });
     g.rect(66, 50, 10, 10, g.PAPER); g.frame(66, 50, 10, 10, g.INK);
     g.rect(84, 50, 10, 10, g.PAPER); g.frame(84, 50, 10, 10, g.INK);
     g.rect(0, 66, 40, 3, g.PAPER); g.rect(50, 68, 18, 2, g.PAPER); g.rect(110, 66, 30, 3, g.PAPER);

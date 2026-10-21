@@ -210,3 +210,4 @@
 - 背景：`station`、`waiting`、`platform`、`memory`、`train`、`dawn`、`empty`。
 - 环境音：标题 `rain 0.4`，站外 `rain 0.7`，候车室 `rain 0.5`，十年站台 `rain 0.15`，站台 `rain 0.8`，车厢 `rain 0.3`，天亮/拆站时静音。
 - 只用具名音效：`tick`（钟/翻页）、`coin`（剪票）、`move`（选择移动）、`tap`（确认）、`win`（结局）。
+- 排版注意：`g.text` 带 `width` 时，`align: "center"` 是在 `x..x+width` 里居中，不是以 `x` 为中心；整屏居中要用 `x = (160 - width) / 2`（例如 `x: 8, width: 144`）。12px 字模要放进至少 16px 高的框，文字 `y` 比框顶低 2px；英文站名 `RAIN STN` 宽 54px，框至少 58px。
