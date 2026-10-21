@@ -4694,7 +4694,15 @@ const ppStartBuiltin = async (p, f) => {
   await until(p, async () => (await ppState(f)).screen === "play", "a game");
 };
 const ppShot = (f) => f.evaluate(() => document.getElementById("cv").toDataURL());
+/* the hole is ink except its last row/column (the lit lip); sample 2 px in from the top-left so the hint arrow
+   in the middle of the hole does not colour this pixel */
 const ppGapPixel = (f) => f.evaluate(() => {
+  const s = window.PUZZLE.state(), c = document.getElementById("cv"), x = c.getContext("2d");
+  const col = s.gap % s.n, row = Math.floor(s.gap / s.n);
+  return Array.from(x.getImageData(Math.floor(col * 128 / s.n) + 2, Math.floor(row * 112 / s.n) + 2, 1, 1).data);
+});
+/* the middle of the hole: ink, or paper when the hint arrow is drawn into it */
+const ppGapCenter = (f) => f.evaluate(() => {
   const s = window.PUZZLE.state(), c = document.getElementById("cv"), x = c.getContext("2d");
   const col = s.gap % s.n, row = Math.floor(s.gap / s.n);
   return Array.from(x.getImageData(Math.floor((col + 0.5) * 128 / s.n), Math.floor((row + 0.5) * 112 / s.n), 1, 1).data);
@@ -4977,7 +4985,7 @@ test("photo puzzle: an unfinished game waits on the title after a restart; 主�
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
-test("photo puzzle: 看它解 plays by itself and any key stops it; SELECT flashes one piece; help keeps no best", { skip, timeout: 120000 }, async (t) => {
+test("photo puzzle: 看它解 plays by itself and any key stops it; SELECT marks one piece; help keeps no best", { skip, timeout: 120000 }, async (t) => {
   const { p, errors } = await snapPage(t);
   let f = await runPuzzle(p); await ppToMain(p, f);
   await ppStartBuiltin(p, f);
@@ -5015,18 +5023,27 @@ test("photo puzzle: 看它解 plays by itself and any key stops it; SELECT flash
   await p.waitForTimeout(700);
   const saved = await f.evaluate(() => new Promise((r) => PAD.load("puzzle").then(r)));
   assert.equal(saved && saved.best && saved.best["3"], undefined, "no best for a helped game");
-  /* SELECT: the next piece's frame flashes twice and goes away; the piece itself does not move */
+  /* SELECT: the next piece is ringed, every piece gets its number, and an arrow points into the hole.
+     The picture stays marked until the next slide; SELECT again puts it back. The piece itself does not move. */
   await p.click("#home-key");
   f = await runPuzzle(p); await ppToMain(p, f);
   await ppStartBuiltin(p, f);
   const plain = await ppShot(f), gap0 = (await ppState(f)).gap, moves0 = (await ppState(f)).moves;
+  assert.equal((await ppGapCenter(f)).join(), "31,42,20,255", "the empty hole is ink");
   await press(p, "select");
-  await until(p, async () => (await ppShot(f)) !== plain, "the flashing frame");
-  assert.equal((await ppState(f)).hint, true);
+  await until(p, async () => (await ppShot(f)) !== plain, "the marked piece");
+  const hinted = await ppState(f);
+  assert.equal(hinted.hint, true);
+  assert.equal(hinted.numbers, true);
+  assert.equal((await ppGapCenter(f)).join(), "163,173,126,255", "the arrow reaches into the hole");
+  const marked = await ppShot(f);
   await p.waitForTimeout(900);
-  assert.equal(await ppShot(f), plain, "the frame is gone again");
+  assert.equal(await ppShot(f), marked, "the mark is steady, not a blink");
+  assert.equal((await ppState(f)).hint, true, "still marked after a while");
+  await press(p, "select");
+  await until(p, async () => (await ppShot(f)) === plain, "SELECT again clears the mark");
   const after = await ppState(f);
-  assert.deepEqual([after.gap, after.moves, after.hint, after.helped], [gap0, moves0, false, true]);
+  assert.deepEqual([after.gap, after.moves, after.hint, after.numbers, after.helped], [gap0, moves0, false, false, true]);
   assert.match(await f.textContent("#info"), /助$/);
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
@@ -5043,11 +5060,17 @@ test("photo puzzle: 怎么玩 teaches four lessons; the board shows its gap; a l
   assert.equal(await f.textContent("#info"), "第 1 课  0 步");
   assert.match(await f.textContent("#msg"), /方向键/);
   /* the bug this test exists for: the lesson used to draw the whole picture, with no hole */
-  assert.equal((await ppGapPixel(f)).join(), "31,42,20,255", "the centre of lesson 1 is the ink floor of the hole");
+  assert.equal((await ppGapPixel(f)).join(), "31,42,20,255", "2 px into the hole is still its ink floor");
+  /* a lesson opens with its first move marked: all pieces numbered, the piece ringed, an arrow into the hole */
+  assert.equal(s.numbers, true, "every piece shows its number in a lesson");
+  assert.deepEqual(s.hintAt, { p: 7, gap: 4 }, "the first lesson's first move: piece 4 (tile 5) up into the hole");
+  assert.equal((await ppGapCenter(f)).join(), "163,173,126,255", "the arrow reaches into the hole");
   /* lesson 1 is the two moves from solved: finishing it is not a win, a save, a best or an unlock */
   for (const k of solve3(s.tiles)) await ppPress(p, f, k);
   s = await ppState(f);
   assert.deepEqual([s.screen, s.lessonDone, s.moves], ["lesson", true, 2]);
+  assert.equal(s.hint, false, "the opening mark is gone after the first slide");
+  assert.equal(s.numbers, true, "the numbers stay, so the lesson's words keep their meaning");
   assert.equal(await f.textContent("#msg"), "做到了！");
   const log = await p.evaluate(() => window.LOPDA_DEBUG.sfxLog.slice());
   assert.ok(!log.includes("win"), "no win sound in a lesson: " + JSON.stringify(log));
@@ -5061,6 +5084,9 @@ test("photo puzzle: 怎么玩 teaches four lessons; the board shows its gap; a l
   s = await ppState(f);
   assert.deepEqual([s.n, s.tiles], [3, [2, 1, 4, 3, 8, 0, 7, 5, 6]]);
   let plan = await f.evaluate(() => Solver.goalPlan(3, window.PUZZLE.state().tiles, [{ p: 0, at: 0 }], []));
+  assert.equal(s.hint, true, "lesson 2 also opens with its first move marked");
+  assert.equal(s.numbers, true, "tile 1 now has a visible 1 on it");
+  assert.equal(s.hintAt.p, plan[0].p, "the arrow starts from the first piece of the lesson's plan");
   for (const d of ppDirs(s.tiles, plan)) await ppPress(p, f, d);
   s = await ppState(f);
   assert.deepEqual([s.tiles[0], s.lessonDone], [0, true]);
