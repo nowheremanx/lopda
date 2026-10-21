@@ -4,11 +4,11 @@
   "name": "滥竽充数",
   "glyph": "竽",
   "version": "2.0.0",
-  "description": "节奏故事：十首古典曲、三幕剧情、四种结局。按 A 吹竽、B 敲磬，国王睁眼时别动；摇一摇咳嗽，倾斜躬身。",
+  "description": "节奏故事：十首古典曲、三幕剧情、四种结局。A 吹竽、B 敲磬；国王睁眼时停手，摇一摇跳舞蒙混过关。",
   "i18n": {
     "en": {
       "name": "Fake Yu",
-      "description": "A rhythm story: ten tunes, three acts, four endings. Freeze when the king looks."
+      "description": "A rhythm story: ten tunes, three acts, four endings. Dance when the king looks."
     }
   },
   "author": "Haowei Wu",

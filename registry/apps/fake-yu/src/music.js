@@ -162,16 +162,35 @@ var FAKE_SONGS = (function () {
       if (inWatch(e.t, e.d, watch)) return;
       chart.push({ t: e.t * beatSec, end: (e.t + e.d) * beatSec, d: e.d, hold: e.hold, lane: e.lane, note: e.n, f: freq(e.n) });
     });
+    /* the king's gaze is the body-percussion section: A and B must stop, but a shake or
+       SELECT keeps the performance going. One dance beat, two for a four-beat stare. */
+    watch.forEach(function (w) {
+      [0.5, 2.5].forEach(function (off) {
+        var b = w[0] + off;
+        if (b >= w[1] - 0.001) return;
+        chart.push({ t: b * beatSec, end: (b + 1) * beatSec, d: 1, hold: false, lane: "s", body: true, note: "c4", f: freq("c4") });
+      });
+    });
+    chart.sort(function (a, b) { return a.t - b.t; });
     for (var i = 1; i < chart.length; i++) {
       if (chart[i].t < chart[i - 1].end - 0.001) throw new Error(def.id + ": notes overlap at chart " + i);
     }
     var back = backing(def.bars, def.style);
+    var header = "@" + (def.duty == null ? 1 : def.duty) + " v" + (def.sound || 11) + " l8";
+    function resumeAt(startBeat) {
+      startBeat = Math.max(0, Math.min(beat - 4, Math.floor(startBeat / 4) * 4));
+      var rest = evs.filter(function (e) { return e.t >= startBeat; });
+      var bars = def.bars.slice(startBeat / 4);
+      var b2 = backing(bars, def.style);
+      return { bpm: bpm, p1: melodyMML(rest, header), p2: b2.p2, tri: b2.tri, noise: b2.noise };
+    }
     return {
       id: def.id, act: def.act || 1, venue: def.venue || "hall",
       name: def.name, short: def.short, credit: def.credit, bpm: bpm,
       difficulty: def.difficulty, seconds: beat * beatSec,
       tag: def.tag || { zh: "", en: "" },
-      music: { bpm: bpm, p1: melodyMML(evs, "@" + (def.duty == null ? 1 : def.duty) + " v" + (def.sound || 11) + " l8"), p2: back.p2, tri: back.tri, noise: back.noise },
+      music: { bpm: bpm, p1: melodyMML(evs, header), p2: back.p2, tri: back.tri, noise: back.noise },
+      resumeAt: resumeAt,
       chart: chart, watch: watch.map(function (w) { return [w[0] * beatSec, w[1] * beatSec]; }), totalBeats: beat
     };
   }
