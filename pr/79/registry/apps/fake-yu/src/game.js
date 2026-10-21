@@ -14,7 +14,7 @@ var INK = 0, DARK = 1, MID = 2, PAPER = 3;
 var SAVE_KEY = "save";
 var PERFECT = 0.10, GOOD = 0.20, EARLY = 0.35;
 
-var profile = { best: {}, cleared: {}, seen: {}, ending: false, finaled: false };
+var profile = { best: {}, cleared: {}, ending: false, finaled: false };
 var loaded = false;
 
 function tt(zh, en) { return T({ zh: zh, en: en }); }
@@ -58,7 +58,7 @@ var TX = {
   retry: { zh: "重来", en: "Retry" },
   choose: { zh: "选曲", en: "Songs" },
   curtain: { zh: "谢幕", en: "End" },
-  resultKeys: { zh: "↑↓ 选　A 好　B 选曲", en: "↑↓ pick  A ok  B songs" },
+  resultKeys: { zh: "←→ 选　A 好　B 选曲", en: "←→ pick  A ok  B songs" },
   failTip: { zh: "国王睁眼时，别按。", en: "King looks? Freeze." },
   newBest: { zh: "新纪录", en: "NEW BEST" },
   endingTitle: { zh: "剧终", en: "THE END" },
@@ -109,7 +109,6 @@ function loadProfile() {
     if (v && typeof v === "object") {
       profile.best = v.best || {};
       profile.cleared = v.cleared || {};
-      profile.seen = v.seen || {};
       profile.ending = !!v.ending;
       profile.finaled = !!v.finaled;
     }
@@ -300,9 +299,9 @@ game.scene("title", {
     if (d) { titleSel = (titleSel + d + 3) % 3; game.sfx("move"); }
     var canGo = game.time >= titleLock;
     var go = canGo && (game.pressed("a") || game.pressed("start"));
-    if (canGo && game.pointer.pressed && game.pointer.y >= 93) {
-      var i = Math.floor((game.pointer.y - 93) / 16);
-      if (i >= 0 && i < 3 && game.pointer.y < 141) { titleSel = i; go = true; }
+    if (canGo && game.pointer.pressed && game.pointer.y >= 95) {
+      var i = Math.floor((game.pointer.y - 95) / 16);
+      if (i >= 0 && i < 3 && game.pointer.y < 143) { titleSel = i; go = true; }
     }
     if (go) {
       game.sfx("tap");
@@ -322,8 +321,8 @@ game.scene("title", {
     }
     /* title plaque */
     g.window(24, 21, 112, 33);
-    g.text(T(TX.title), 80, 27, { align: "center" });
-    g.text(T(TX.subtitle), 80, 40, { align: "center", color: DARK });
+    g.text(T(TX.title), 80, 25, { align: "center" });
+    g.text(T(TX.subtitle), 80, 38, { align: "center", color: DARK });
     /* the two would-be musicians */
     drawPlayer(g, 10, 62, false, false, false);
     drawConductor(g, 132, 64, beat);
@@ -334,7 +333,7 @@ game.scene("title", {
     g.frame(10, 92, 140, 52, INK);
     var items = [T(TX.start), T(TX.songs), T(TX.howto)];
     for (var i = 0; i < 3; i++) {
-      var y = 93 + i * 16;
+      var y = 95 + i * 16;
       if (i === titleSel) {
         g.rect(14, y, 132, 15, INK);
         g.text(items[i], 80, y + 2, { align: "center", color: PAPER });
@@ -346,7 +345,7 @@ game.scene("title", {
 function startNext() {
   var next = null;
   for (var i = 0; i < FAKE_SONGS.length; i++) if (!profile.cleared[FAKE_SONGS[i].id]) { next = i; break; }
-  if (next === null) { game.go("select"); return; }
+  if (next === null) next = 0;   /* an encore run starts from the top, story and all */
   goBrief(next);
 }
 function goBrief(i) {
@@ -368,12 +367,10 @@ var BRIEF = [
 ];
 game.scene("brief", {
   enter: function (a) {
-    var i = a.i, s = FAKE_SONGS[i];
+    var i = a.i;
     game.musicStop();
     briefI = i;
     var pages = BRIEF[i].pages;
-    if (profile.seen[s.id]) { game.go("play", { i: i }, { fade: false }); return; }
-    profile.seen[s.id] = true; saveProfile();
     game.after(0.18, function () {
       game.say(pages.map(function (p) { return T(p); }), { name: T(BRIEF[i].name), speed: 32 }).then(function () {
         game.go("play", { i: i }, { fade: false });
@@ -828,13 +825,13 @@ game.scene("play", {
       g.window(80 - Math.round(jw / 2), 84, jw, 15);
       g.text(P.judge.text, 80, 86, { align: "center", color: P.judge.tone });
     }
-    /* intro count */
+    /* intro count: a thin strip above the staff, never over the approaching notes */
     var first = P.song.chart[0].t;
     if (t < first && !P.ended) {
       var beatsLeft = (first - t) / (60 / P.song.bpm);
-      g.window(28, 42, 104, 32);
-      g.text(beatsLeft > 1 ? T(TX.ready) : T(TX.go), 80, 47, { align: "center" });
-      g.text(tt("跟着指挥", "follow the baton"), 80, 60, { align: "center", color: DARK });
+      g.window(8, 18, 144, 22);
+      g.text(beatsLeft > 1 ? T(TX.ready) : T(TX.go), 12, 22);
+      g.text(tt("跟着指挥", "follow the baton"), 148, 22, { align: "right", color: DARK });
     }
     /* fail */
     if (P.ended && P.failed) {
@@ -844,9 +841,9 @@ game.scene("play", {
     }
     /* success flash */
     if (P.ended && !P.failed && game.time - P.endAt < 1.4) {
-      g.rect(0, 30, 160, 30, PAPER); g.frame(0, 30, 160, 30, INK);
-      g.text(T(TX.success), 80, 39, { align: "center" });
-      g.text(T(TX.cheer), 80, 52, { align: "center", color: DARK });
+      g.rect(0, 30, 160, 36, PAPER); g.frame(0, 30, 160, 36, INK);
+      g.text(T(TX.success), 80, 35, { align: "center" });
+      g.text(T(TX.cheer), 80, 50, { align: "center", color: DARK });
     }
   }
 });
@@ -886,7 +883,7 @@ game.scene("result", {
   },
   update: function () {
     var canGo = game.time >= resultLock;
-    var d = game.dir().y;
+    var d = game.dir().x;
     if (d) { resultSel = (resultSel + d + resultItems.length) % resultItems.length; game.sfx("move"); }
     var act = canGo && (game.pressed("a") || game.pressed("start"));
     if (canGo && game.pointer.pressed) {
