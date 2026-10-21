@@ -2,8 +2,10 @@
 
 SCRIPT.push(
   { label: "stay_beg" },
-  { chapter: { zh: "第六章", en: "Chapter Six" }, sub: { zh: "天亮", en: "Daybreak" } },
+  { id: "ch6b", chapter: { zh: "第六章", en: "Chapter Six" }, sub: { zh: "天亮", en: "Daybreak" } },
   { bg: "platform" },
+  { hide: "right" },
+  { show: "right", who: "conductor" },
   { say: null, text: { zh: "「留下来吧。」你说。", en: "\"Stay,\" you say." } },
   { say: null, text: { zh: "小梅看着车门。列车员没有催，只把怀表拨到 0:47。", en: "Mei looks at the door. The conductor doesn't hurry her. He only sets his watch to 0:47." } },
   { say: null, text: { zh: "雨开始变小。站长说：「雨停了，车就走。」", en: "The rain begins to thin. The stationmaster says, \"When the rain stops, the train goes.\"" } },

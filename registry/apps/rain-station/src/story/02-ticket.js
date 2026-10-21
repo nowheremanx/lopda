@@ -1,7 +1,7 @@
 /* Chapter 1: the old ticket, the rules, and the cassette. */
 
 SCRIPT.push(
-  { chapter: { zh: "第一章", en: "Chapter One" }, sub: { zh: "旧票", en: "The Old Ticket" } },
+  { id: "ch1", chapter: { zh: "第一章", en: "Chapter One" }, sub: { zh: "旧票", en: "The Old Ticket" } },
   { say: null, text: { zh: "老人把一只搪瓷杯放在你面前。水是热的，杯口缺了一小块。", en: "The old man sets a tin cup in front of you. The water is hot; a small piece is missing from the rim." } },
   { say: "old", text: { zh: "明天拆站。最后一班车，今晚 0:47。", en: "The station closes tomorrow. The last train is tonight, 0:47." } },
   { say: null, text: { zh: "「时刻表上不是 23:40 吗？」", en: "\"Doesn't the timetable say 23:40?\"" } },

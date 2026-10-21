@@ -1,7 +1,7 @@
 /* Prologue: after the last bus, the station, and the first choice. */
 
 SCRIPT.push(
-  { chapter: { zh: "序章", en: "Prologue" }, sub: { zh: "末班车之后", en: "After the Last Train" } },
+  { id: "prologue", chapter: { zh: "序章", en: "Prologue" }, sub: { zh: "末班车之后", en: "After the Last Train" } },
   { bg: "station" },
   { say: null, text: { zh: "雨从下午开始下，山路的柏油被洗得发亮。你背着录音包，包里有一台旧录音机、两节备用电池，和一盒没有封面的磁带。", en: "The rain started in the afternoon and washed the mountain road bright. You carry a recorder bag: an old machine, two spare batteries, and a cassette with no cover." } },
   { say: null, text: { zh: "末班车刚走。尾灯拐过弯，只剩两盏红点，很快被雨吞掉。", en: "The last bus has just gone. Its taillights turn the bend, two red dots, swallowed by the rain." } },

@@ -1,6 +1,6 @@
 /* Shared data for the story. The chapter files push into SCRIPT; game.js plays it. */
 
-var STORY_VERSION = 2;
+var STORY_VERSION = 3;
 
 var TITLE = { zh: "雨站", en: "Rain Station" };
 

@@ -1,8 +1,9 @@
 /* Chapter 2: the waiting room, Mei's brother, and the cassette. */
 
 SCRIPT.push(
-  { chapter: { zh: "第二章", en: "Chapter Two" }, sub: { zh: "候车室", en: "The Waiting Room" } },
+  { id: "ch2", chapter: { zh: "第二章", en: "Chapter Two" }, sub: { zh: "候车室", en: "The Waiting Room" } },
   { bg: "waiting" },
+  { hide: "right" },
   { say: null, text: { zh: "站长去里屋添水。壶盖碰着炉子，响了一声。", en: "The stationmaster goes to the back room to fill the kettle. The lid knocks against the stove." } },
   { say: null, text: { zh: "候车室里只剩你们两个人。雨在窗外，像一层厚厚的帘子。", en: "Only the two of you are left in the waiting room. Outside, the rain is a thick curtain." } },
   { say: "mei", text: { zh: "你录雨做什么？", en: "What do you record the rain for?" } },
@@ -85,6 +86,7 @@ SCRIPT.push(
   { say: null, text: { zh: "钟响了一声。", en: "The clock strikes once." } },
 
   { label: "tape_end" },
+  { show: "right", who: "old" },
   { say: null, text: { zh: "站长从里屋出来，手里提着灯。", en: "The stationmaster comes out with a lamp in his hand." } },
   { say: "old", text: { zh: "我去看信号。你们要不要来？", en: "I'm going to check the signal. Coming?" } },
   { say: null, text: { zh: "小梅站起来。她把票放进上衣口袋，动作很慢。", en: "Mei stands. She puts the ticket in her coat pocket, slowly." } },

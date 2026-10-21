@@ -2,7 +2,7 @@
 
 SCRIPT.push(
   { label: "board_train" },
-  { chapter: { zh: "第五章", en: "Chapter Five" }, sub: { zh: "车厢", en: "The Carriage" } },
+  { id: "ch5", chapter: { zh: "第五章", en: "Chapter Five" }, sub: { zh: "车厢", en: "The Carriage" } },
   { bg: "train" },
   { say: null, text: { zh: "你走上车。小梅跟在你后面。", en: "You step on. Mei follows." } },
   { say: null, text: { zh: "车门在你们身后合上。雨声忽然远了，像隔着一层很厚的玻璃。", en: "The door closes behind you. The rain suddenly sounds far away, as if behind thick glass." } },

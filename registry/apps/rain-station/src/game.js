@@ -3,19 +3,69 @@ var T = game.t;
 document.documentElement.lang = game.lang === "zh" ? "zh-CN" : "en";
 
 /* ---- the engine: plays SCRIPT. You should not need to change anything below. ---- */
-var ART = {}, LABELS = {};
+var ART = {}, LABELS = {}, CHAPTERS = [];
 function big(rows) { return rows.map(function (r) { return r.replace(/./g, "$&$&"); }).reduce(function (a, r) { a.push(r, r); return a; }, []); }
 Object.keys(CAST).forEach(function (k) { ART[k] = LoGame.sprite(big(CAST[k].art)); });
-SCRIPT.forEach(function (s, i) { if (s.label) LABELS[s.label] = i; });
+SCRIPT.forEach(function (s, i) {
+  if (s.label) LABELS[s.label] = i;
+  if (s.chapter) CHAPTERS.push({ id: s.id || ("ch" + i), pc: i, chapter: s.chapter, sub: s.sub });
+});
 
 var BOX_Y = 88, LINES = 3, SPEED = 30;
-var S;          /* saved: { v, pc, flags, bg, left, right } */
+var S;          /* saved: { v, pc, flags, bg, left, right, chapter } */
 var log = [];   /* backlog: [{ who, text }] */
 var cur = null; /* what waits for the player: { kind: "say"|"choice"|"chapter"|"end", ... } */
 var view = "play", logTop = 0;
 
-function fresh() { return { v: STORY_VERSION, pc: 0, flags: {}, bg: null, left: null, right: null }; }
+/* chapter snapshots are script positions, so they expire with the story version */
+var PROGRESS_VERSION = STORY_VERSION;
+var progress = { v: PROGRESS_VERSION, done: {} };
+var progressLoaded = false;
+
+function fresh() { return { v: STORY_VERSION, pc: 0, flags: {}, bg: null, left: null, right: null, chapter: null }; }
 function who(id) { return id && CAST[id] ? T(CAST[id].name) : ""; }
+function copyFlags(f) {
+  var out = {};
+  for (var k in f) if (Object.prototype.hasOwnProperty.call(f, k)) out[k] = f[k];
+  return out;
+}
+
+/* Chapter progress survives endings, so it has its own save. Each entry is the
+   state at that chapter's card, not at its end: replaying a chapter should not
+   inherit choices made inside it. */
+function loadProgress() {
+  if (progressLoaded) return;
+  game.load("chapters").then(function (p) {
+    progressLoaded = true;
+    if (!p || p.v !== PROGRESS_VERSION || !p.done) return;
+    for (var id in p.done) {
+      if (Object.prototype.hasOwnProperty.call(p.done, id) && !progress.done[id]) progress.done[id] = p.done[id];
+    }
+  });
+}
+function chapterList() {
+  return CHAPTERS.filter(function (c) { return !!progress.done[c.id]; });
+}
+function hasChapters() { return chapterList().length > 0; }
+function finishChapter(c) {
+  if (!c || !c.id || progress.done[c.id]) return;
+  progress.done[c.id] = {
+    flags: copyFlags(c.flags || {}), bg: c.bg || null,
+    left: c.left || null, right: c.right || null
+  };
+  game.save("chapters", progress);
+}
+function playChapter(c) {
+  var r = progress.done[c.id];
+  if (!r) return;
+  var st = fresh();
+  st.pc = c.pc;
+  st.flags = copyFlags(r.flags || {});
+  st.bg = r.bg || null;
+  st.left = r.left || null;
+  st.right = r.right || null;
+  game.go("play", st);
+}
 
 /* the backdrop decides the weather; "dawn" and "empty" are quiet */
 var heard = "";
@@ -32,8 +82,13 @@ function jump(label) { if (!(label in LABELS)) throw new Error("no label " + lab
 function run() {
   for (var guard = 0; guard < 10000; guard++) {
     var s = SCRIPT[S.pc];
-    if (!s) { cur = { kind: "end", title: "", sub: "" }; return; }
+    if (!s) { finishChapter(S.chapter); cur = { kind: "end", title: "", sub: "" }; return; }
     if (s.chapter) {
+      finishChapter(S.chapter);
+      S.chapter = {
+        id: s.id || ("ch" + S.pc), flags: copyFlags(S.flags), bg: S.bg,
+        left: S.left, right: S.right
+      };
       S.pc++;
       game.save("vn", S);
       cur = { kind: "chapter", title: T(s.chapter), sub: s.sub ? T(s.sub) : "" };
@@ -54,6 +109,7 @@ function run() {
       return;
     } else if (s.choice) { game.save("vn", S); cur = { kind: "choice", items: s.choice, idx: 0 }; return; }
     else if (s.end) {
+      finishChapter(S.chapter);
       game.remove("vn");
       game.sfx("win");
       cur = { kind: "end", title: s.title ? T(s.title) : "", sub: s.sub ? T(s.sub) : "" };
@@ -103,6 +159,11 @@ game.scene("play", {
     run();
   },
   update: function (dt) {
+    if (game.pressed("select") && hasChapters()) {
+      game.sfx("tap");
+      game.go("chapters", "play");
+      return;
+    }
     if (view === "log") {
       if (game.repeat("up")) logTop = Math.max(0, logTop - 1);
       if (game.repeat("down")) logTop = Math.min(Math.max(0, log.length - 1), logTop + 1);
@@ -197,10 +258,16 @@ var saved = null, menuIdx = 0;
 game.scene("title", {
   enter: function () {
     saved = null; menuIdx = 0;
+    loadProgress();
     game.load("vn").then(function (v) { saved = v && v.v === STORY_VERSION ? v : null; });
     listen("title");
   },
   update: function () {
+    if (game.pressed("select") && hasChapters()) {
+      game.sfx("tap");
+      game.go("chapters", "title");
+      return;
+    }
     var n = saved ? 2 : 1;
     if (game.repeat("up") || game.repeat("down")) { menuIdx = (menuIdx + 1) % n; game.sfx("move"); }
     if (game.pointer.pressed) {
@@ -232,7 +299,68 @@ game.scene("title", {
     g.line(0, 112, 160, 112, g.INK);
     var hasSave = !!saved;
     g.text(T(hasSave ? { zh: "↑↓ 选  A 确定", en: "Up/Dn  A: OK" } : { zh: "A 开始", en: "A: start" }), 80, 115, { align: "center", color: g.INK });
-    g.text(T({ zh: "剧情中 A 前进 B 回看", en: "Story: A next  B log" }), 80, 128, { align: "center", color: g.INK });
+    var hint = hasChapters()
+      ? { zh: "SELECT 选章  B 回看", en: "SELECT chapters  B log" }
+      : { zh: "剧情中 A 前进 B 回看", en: "Story: A next  B log" };
+    g.text(T(hint), 80, 128, { align: "center", color: g.INK });
+  }
+});
+
+/* Chapter select: only chapters that have been finished appear here. */
+var chIdx = 0, chTop = 0, chFrom = "title", chBack = null;
+var CH_VISIBLE = 4, CH_ROW = 26;
+function leaveChapters() {
+  if (chFrom === "play" && chBack) game.go("play", chBack);
+  else game.go("title");
+}
+game.scene("chapters", {
+  enter: function (from) {
+    chFrom = from || "title";
+    chBack = chFrom === "play" ? S : null;
+    chIdx = 0; chTop = 0;
+    var list = chapterList();
+    if (chFrom === "play" && S && S.chapter) {
+      for (var i = 0; i < list.length; i++) if (list[i].id === S.chapter.id) { chIdx = i; break; }
+      if (chIdx >= CH_VISIBLE) chTop = chIdx - CH_VISIBLE + 1;
+    }
+  },
+  update: function () {
+    var list = chapterList();
+    if (!list.length) {
+      if (game.pressed("a") || game.pressed("b") || game.pressed("start") || game.pressed("select")) {
+        game.sfx("tap"); leaveChapters();
+      }
+      return;
+    }
+    if (game.repeat("up")) { chIdx = (chIdx + list.length - 1) % list.length; game.sfx("move"); }
+    if (game.repeat("down")) { chIdx = (chIdx + 1) % list.length; game.sfx("move"); }
+    if (chIdx < chTop) chTop = chIdx;
+    if (chIdx >= chTop + CH_VISIBLE) chTop = chIdx - CH_VISIBLE + 1;
+    if (game.pressed("a") || game.pressed("start")) {
+      game.sfx("ok"); playChapter(list[chIdx]); return;
+    }
+    if (game.pressed("b") || game.pressed("select")) { game.sfx("tap"); leaveChapters(); }
+  },
+  draw: function (g) {
+    g.clear(g.PAPER);
+    g.dither(0, 0, 160, 144, g.MID, 1);
+    g.rect(0, 0, 160, 16, g.INK);
+    g.text(T({ zh: "选择章节", en: "Chapters" }), 4, 1, { color: g.PAPER });
+    var list = chapterList();
+    if (!list.length) {
+      g.text(T({ zh: "还没有读完的章节", en: "No chapters finished yet" }), 80, 62, { align: "center", color: g.INK });
+      g.text(T({ zh: "B 返回", en: "B: back" }), 80, 130, { align: "center", color: g.INK });
+      return;
+    }
+    for (var k = 0; k < CH_VISIBLE && chTop + k < list.length; k++) {
+      var c = list[chTop + k], y = 18 + k * CH_ROW, selected = chTop + k === chIdx;
+      if (selected) g.rect(4, y, 152, CH_ROW, g.INK);
+      else { g.rect(4, y, 152, CH_ROW, g.PAPER); g.frame(4, y, 152, CH_ROW, g.INK); }
+      var col = selected ? g.PAPER : g.INK;
+      g.text(T(c.chapter), 8, y + 1, { color: col });
+      if (c.sub) g.text(T(c.sub), 8, y + 13, { color: col });
+    }
+    g.text(T({ zh: "↑↓ 选  A 进入  B 返回", en: "Up/Dn  A: go  B: back" }), 80, 130, { align: "center", color: g.INK });
   }
 });
 game.start("title");

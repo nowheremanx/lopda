@@ -2,8 +2,9 @@
 
 SCRIPT.push(
   { label: "true_dawn" },
-  { chapter: { zh: "终章", en: "Final Chapter" }, sub: { zh: "雨停", en: "The Rain Stops" } },
+  { id: "final", chapter: { zh: "终章", en: "Final Chapter" }, sub: { zh: "雨停", en: "The Rain Stops" } },
   { bg: "train" },
+  { hide: "right" },
   { show: "left", who: "mei" },
   { say: null, text: { zh: "车停了。窗外是现在的站台。", en: "The train stops. Outside is the platform as it is now." } },
   { say: null, text: { zh: "雨停了。", en: "The rain has stopped." } },
