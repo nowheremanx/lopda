@@ -222,7 +222,7 @@
     - 开发台固定用默认音量档（0.11），具名音效仍然只记日志不发声。Pages 预览：`runtime/chip.js` 改了也会列出所有 app 的开发台链接。
     - 小院 1.3.0：一首原创的 40 秒循环曲（F 大调五声，96 bpm，A、B 两段各 8 小节），摸猫和捡钥匙换成自己的音效；在旧 runtime 上退回原来的 `coin` / `ok`。
       曲谱在 `registry/apps/xiaoyuan/src/music.js`。其他用 lo-game 的 app 只是重新打包（版本号升了补丁号），`tests/frame-hashes.mjs` 证明画面逐帧不变
-      （新增的通用脚本模式覆盖小院、last-letter、rain-station）。
+      （新增的通用脚本模式覆盖小院、rain-station）。
 - **一个音量、声音保活**（2026-10-12，runtime 0.12.0）。owner 在 iPhone 上试小院后提的三件事：
     - **静音键**：保留 `ambient`。外放跟随静音键，耳机不受影响（iOS 的规矩，大多数游戏也这样），也不打断正在放的播客。
       考虑过 `playback`（只认 Lo-PDA 自己的音量），但它一出声就会停掉用户的播客，owner 正是边听播客边用，所以不选。设置里的说明改成
