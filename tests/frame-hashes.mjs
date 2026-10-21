@@ -4,7 +4,7 @@
 //   node tests/frame-hashes.mjs registry/apps/zhenyao-tower/index.html --compare before.json
 // zhenyao-tower plays the scenes in tests/zhenyao-play.js; vector-dream runs a fixed 145-frame script
 // (three scenes, solid and wireframe, zoom and turning). Every frame is hashed as it reaches the canvas.
-// Any other app (the small lo-game ones: xiaoyuan, last-letter, rain-station) gets a fixed 900-frame script of
+// Any other app (the small lo-game ones: xiaoyuan, rain-station) gets a fixed 900-frame script of
 // presses and holds through a fake PAD that records every sound, music and ambience call, so a framework release can show
 // that the old apps draw exactly what they drew before.
 import { readFileSync } from "node:fs";

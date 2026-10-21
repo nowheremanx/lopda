@@ -210,9 +210,9 @@ test("the rain station: rain under the title and the station, lighter on the tra
   assert.deepEqual(withAmb.frames, without.frames);
   const amb = withAmb.calls.filter((c) => c[0] === "ambience").map((c) => c[1] + " " + c[2]);
   assert.deepEqual(amb.slice(0, 2), ["rain 0.4", "rain 0.7"], "the title, then the station");
-  for (const a of amb) assert.match(a, /^(rain (0\.4|0\.7|0\.3)|null 0)$/);
+  for (const a of amb) assert.match(a, /^(rain (0\.4|0\.7|0\.5|0\.8|0\.15|0\.3)|null 0)$/);
   assert.ok(!without.calls.some((c) => c[0] === "ambience"), "an old runtime: no calls");
-  /* two whole stories: A only (the night train, back to the title), and DOWN before each A (stay, to dawn) */
+  /* Two whole stories, driven fast: A only (the night train), and two DOWNs before A (stay, to dawn). */
   const story = async (keys) => {
     const on = { press: [], release: [] }, down = new Set(), heard = [];
     const pad = { lang: "zh", spec: "lopda/1", on: (type, f) => { if (on[type]) on[type].push(f); }, off() {}, isDown: (b) => down.has(b),
@@ -220,14 +220,17 @@ test("the rain station: rain under the title and the station, lighter on the tra
       ambience: (n, l) => heard.push(n ? n + " " + l : "quiet") };
     const app = boot(file, { pad });
     const run = async (n) => { for (let i = 0; i < n; i++) { app.frame(); await app.ctx.get("__yield")(); } };
-    await run(10);
-    for (let i = 0; i < 40; i++) for (const k of keys) {
-      down.add(k); on.press.forEach((f) => f(k)); await run(2); down.delete(k); on.release.forEach((f) => f(k)); await run(80);
+    const tap = async (k) => { down.add(k); on.press.forEach((f) => f(k)); await run(2); down.delete(k); on.release.forEach((f) => f(k)); await run(1); };
+    await run(30);
+    for (let i = 0; i < 800; i++) {
+      for (const k of keys) await tap(k);
+      const cur = app.ctx.get("cur");
+      if (cur && cur.kind === "end") break;
     }
     return heard;
   };
-  assert.deepEqual((await story(["a"])).slice(0, 7), ["rain 0.4", "rain 0.7", "rain 0.3", "rain 0.4", "rain 0.7", "rain 0.3", "rain 0.4"]);
-  assert.deepEqual((await story(["down", "a"])).slice(0, 4), ["rain 0.4", "rain 0.7", "quiet", "rain 0.4"]);
+  assert.deepEqual(await story(["a"]), ["rain 0.4", "rain 0.7", "rain 0.5", "rain 0.8", "rain 0.15", "rain 0.8", "rain 0.3", "rain 0.15"]);
+  assert.deepEqual(await story(["down", "down", "a"]), ["rain 0.4", "rain 0.7", "rain 0.5", "rain 0.8", "rain 0.15", "rain 0.8", "rain 0.5", "quiet"]);
 });
 
 test("the yard draws the same frames with and without music, and plays its tune and its own sounds", async () => {
