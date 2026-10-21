@@ -930,7 +930,14 @@ var Solver = (function () {
     if (!A) return S.pic.px;
     if (A.phase === "done") return A.pic.px;
     var out = new Uint8Array(W * H);
-    board(out, A.pic.px, A.n, A.tiles);
+    if (A.anim) {
+      var M = A.anim, R = rects(A.n);
+      board(out, A.pic.px, A.n, A.tiles, M.to);
+      var tt = M.ms >= MOVE_MS ? 1 : M.ms / MOVE_MS, ease = tt * tt * (3 - 2 * tt);
+      var dx = Math.round((R.x[M.to] - R.x[M.from]) * ease);
+      var dy = Math.round((R.y[M.to] - R.y[M.from]) * ease);
+      tile(out, A.pic.px, R, M.from, M.piece, dy, dx, true);
+    } else board(out, A.pic.px, A.n, A.tiles);
     return out;
   }
   function frame() {
@@ -979,34 +986,60 @@ var Solver = (function () {
   window.addEventListener("resize", function () { layout(); updateFuse(); });
 
   /* ---------- the main menu's attract mode: the built-in pictures solve themselves, then rest a moment ---------- */
+  var attractRaf = 0;
   function startAttract() {
     stopAttract();
     if (S.screen !== "main") return;
     attractRound(S.attractIndex);
   }
   function attractRound(i) {
+    clearAttractAnim();
     var n = 3, k = i % BUILTINS.length, b = BUILTINS[k], sh = shuffleTiles(n);
     var plan = Solver.solve(n, sh.tiles) || [];
-    S.attract = { n: n, index: k, pic: b.pic, tiles: sh.tiles, gap: sh.gap, plan: plan, i: 0, phase: plan.length ? "solve" : "done", timer: 0 };
+    S.attract = { n: n, index: k, pic: b.pic, tiles: sh.tiles, gap: sh.gap, plan: plan, i: 0, phase: plan.length ? "solve" : "done", timer: 0, anim: null };
     S.attractIndex = (k + 1) % BUILTINS.length;
     paint();
     scheduleAttract(plan.length ? 260 : 2600);
   }
   function scheduleAttract(ms) { if (S.attract) S.attract.timer = setTimeout(attractStep, ms); }
+  function attractAnim(A, from, to, piece) {
+    if (attractRaf) { cancelAnimationFrame(attractRaf); attractRaf = 0; }
+    A.anim = { from: from, to: to, piece: piece, t0: 0, ms: 0 };
+    attractRaf = requestAnimationFrame(attractTick);
+  }
+  function attractTick(t) {
+    attractRaf = 0;
+    var A = S.attract;
+    if (!A || !A.anim || S.screen !== "main") return;
+    if (!A.anim.t0) A.anim.t0 = t;
+    A.anim.ms = t - A.anim.t0;
+    if (A.anim.ms >= MOVE_MS) { A.anim = null; paint(); return; }
+    paint();
+    attractRaf = requestAnimationFrame(attractTick);
+  }
+  function clearAttractAnim() {
+    if (attractRaf) { cancelAnimationFrame(attractRaf); attractRaf = 0; }
+    if (S.attract) S.attract.anim = null;
+  }
   function attractStep() {
     var A = S.attract; if (!A || S.screen !== "main") return;
     if (A.phase === "solve") {
       if (A.i < A.plan.length) {
-        var p = A.plan[A.i++].p, N = A.n * A.n;
+        var p = A.plan[A.i++].p, N = A.n * A.n, from = p, to = A.gap, piece = A.tiles[p];
         A.tiles[A.gap] = A.tiles[p]; A.tiles[p] = N - 1; A.gap = p;
+        attractAnim(A, from, to, piece);
         paint();
         scheduleAttract(160);
         return;
       }
+      clearAttractAnim();
       A.phase = "done"; paint(); scheduleAttract(2600);
     } else attractRound(A.index + 1);
   }
-  function stopAttract() { if (S.attract) { clearTimeout(S.attract.timer); S.attract = null; } }
+  function stopAttract() {
+    if (attractRaf) { cancelAnimationFrame(attractRaf); attractRaf = 0; }
+    if (S.attract) { clearTimeout(S.attract.timer); S.attract = null; }
+  }
 
   /* ---------- watching it solve, and one hint ---------- */
   function startDemo(limit) {
@@ -1361,7 +1394,7 @@ var Solver = (function () {
       best: S.best[String(S.n)] || 0, bestTime: S.bestTime[String(S.n)] || 0,
       gallery: S.galleryIndex, pictures: BUILTINS.map(picName), fuse: document.getElementById("fuse").className,
       intro: S.intro ? { phase: S.intro.ms < 300 ? "cut" : S.intro.ms < 600 ? "drop" : "mix", ms: S.intro.ms, gap: S.gap, total: S.intro.total } : null,
-      attract: S.attract ? { index: S.attract.index, n: S.attract.n, phase: S.attract.phase, moves: S.attract.i, plan: S.attract.plan.length } : null };
+      attract: S.attract ? { index: S.attract.index, n: S.attract.n, phase: S.attract.phase, moves: S.attract.i, plan: S.attract.plan.length, moving: !!S.attract.anim } : null };
   } };
 
   if (!HAS_PAD) go("main"); else draw();
