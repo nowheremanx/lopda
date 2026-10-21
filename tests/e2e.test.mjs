@@ -5045,6 +5045,12 @@ test("photo puzzle: 看它解 plays by itself and any key stops it; SELECT marks
   const after = await ppState(f);
   assert.deepEqual([after.gap, after.moves, after.hint, after.numbers, after.helped], [gap0, moves0, false, false, true]);
   assert.match(await f.textContent("#info"), /助$/);
+  /* a slide is animated: the board is marked as moving, then settles on the new cell */
+  await press(p, ppDir(after));
+  const sliding = await ppState(f);
+  assert.deepEqual([sliding.moves, sliding.moving], [moves0 + 1, true], "the slide starts a short animation");
+  await until(p, async () => !(await ppState(f)).moving, "the slide animation to finish");
+  assert.notEqual(await ppShot(f), plain, "the piece ended on its new cell");
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 

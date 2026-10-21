@@ -458,7 +458,7 @@ var Solver = (function () {
     arcade: false, gameArcade: false, left: 0, arcadeTotal: 0,
     clockAt: 0, clockTimer: 0, clockLow: -1,
     mode: "normal", lesson: 0, lessonDone: false, doneText: "", beforeTutorial: null, lessonTimer: 0,
-    demo: null, hint: null,
+    demo: null, hint: null, animMove: null,
     intro: null, introTimer: 0, attract: null, attractTimer: 0, attractIndex: 0,
     galleryIndex: 0, menuFrom: "play", unlockedNow: false };
 
@@ -645,10 +645,35 @@ var Solver = (function () {
     if (p < 0) { sfx("err"); return; }
     slide(p);
   }
+  /* ---------- a slide takes 140 ms: the board's logical state changes at once, and the moved piece is drawn
+     between its two cells until the animation ends. Input during the animation simply starts the next one. ---------- */
+  var MOVE_MS = 140, moveRaf = 0;
+  function startMoveAnim(from, to, piece) {
+    if (moveRaf) { cancelAnimationFrame(moveRaf); moveRaf = 0; }
+    S.animMove = { from: from, to: to, piece: piece, t0: 0, ms: 0 };
+    moveRaf = requestAnimationFrame(moveTick);
+  }
+  function moveTick(t) {
+    moveRaf = 0;
+    var A = S.animMove; if (!A) return;
+    if (!A.t0) A.t0 = t;
+    A.ms = t - A.t0;
+    if (A.ms >= MOVE_MS) { S.animMove = null; paint(); return; }
+    paint();
+    moveRaf = requestAnimationFrame(moveTick);
+  }
+  function clearMoveAnim() {
+    if (moveRaf) { cancelAnimationFrame(moveRaf); moveRaf = 0; }
+    S.animMove = null;
+  }
+  function moveAt(screen) { return S.animMove && (screen === "play" || screen === "lesson") ? S.animMove : null; }
+
   function slide(p) {
     clearHint();
     if (neighbours(S.n, S.gap).indexOf(p) < 0) { sfx("err"); return; }
+    var from = p, to = S.gap, piece = S.tiles[p];
     swap(p); S.moves++; sfx("move");
+    if (S.screen === "play" || S.screen === "lesson") startMoveAnim(from, to, piece);
     if (S.mode === "tutorial") {
       if (!S.lessonDone && goalMet()) { S.lessonDone = true; S.doneText = TXT.lessonDone; sfx("ok"); }
       draw();
@@ -764,9 +789,9 @@ var Solver = (function () {
     if (X < 0 || X >= W || Y < 0 || Y >= H || (stop && Y >= stop)) return;
     out[Y * W + X] = v;
   }
-  function tile(out, src, R, p, t, dy) {
-    var x0 = R.x[p], y0 = R.y[p], w = R.w[p], h = R.h[p], sx = R.x[t], sy = R.y[t];
-    var bottom = dy ? y0 + h : 0, x, y, oy = dy || 0;
+  function tile(out, src, R, p, t, dy, dx, noClip) {
+    var x0 = R.x[p] + (dx || 0), y0 = R.y[p], w = R.w[p], h = R.h[p], sx = R.x[t], sy = R.y[t];
+    var bottom = !noClip && dy ? y0 + h : 0, x, y, oy = dy || 0;
     for (y = 1; y < h - 1; y++) for (x = 1; x < w - 1; x++) put(out, x0 + x, y0 + y + oy, src[(sy + y) * W + sx + x], bottom);
     for (x = 1; x < w - 1; x++) { put(out, x0 + x, y0 + oy, 3, bottom); put(out, x0 + x, y0 + h - 1 + oy, 0, bottom); }
     for (y = 1; y < h - 1; y++) { put(out, x0, y0 + y + oy, 3, bottom); put(out, x0 + w - 1, y0 + y + oy, 0, bottom); }
@@ -777,11 +802,11 @@ var Solver = (function () {
     var x0 = R.x[p], y0 = R.y[p], w = R.w[p], h = R.h[p];
     for (var y = 0; y < h; y++) for (var x = 0; x < w; x++) out[(y0 + y) * W + x0 + x] = x >= w - 1 || y >= h - 1 ? 3 : 0;
   }
-  function board(out, src, n, tiles) {
+  function board(out, src, n, tiles, hide) {
     var R = rects(n), gapPiece = n * n - 1;
     for (var p = 0; p < n * n; p++) {
       var t = tiles[p];
-      if (t === gapPiece) slot(out, R, p); else tile(out, src, R, p, t, 0);
+      if (t === gapPiece || p === hide) slot(out, R, p); else tile(out, src, R, p, t, 0);
     }
   }
   function ring(out, R, p) {
@@ -804,11 +829,10 @@ var Solver = (function () {
     "8": ["01110", "10001", "10001", "01110", "10001", "10001", "01110"],
     "9": ["01110", "10001", "10001", "01111", "00001", "00010", "01100"]
   };
-  function badge(out, R, p, num) {
+  function badgeAt(out, bx, by, num) {
     var text = String(num), scale = 2, kern = 1, pad = 2, i, r, c, xx, yy;
     var tw = text.length * 5 * scale + (text.length - 1) * kern, th = 7 * scale;
     var bw = tw + pad * 2 + 2, bh = th + pad * 2 + 2;
-    var bx = R.x[p] + 3, by = R.y[p] + 3;
     for (r = 0; r < bh; r++) for (c = 0; c < bw; c++)
       put(out, bx + c, by + r, r === 0 || r === bh - 1 || c === 0 || c === bw - 1 ? 0 : 3);
     for (i = 0; i < text.length; i++) {
@@ -817,9 +841,10 @@ var Solver = (function () {
         for (yy = 0; yy < scale; yy++) for (xx = 0; xx < scale; xx++) put(out, ox + c * scale + xx, oy + r * scale + yy, 0);
     }
   }
-  function numbers(out, n, tiles) {
+  function badge(out, R, p, num) { badgeAt(out, R.x[p] + 3, R.y[p] + 3, num); }
+  function numbers(out, n, tiles, skip) {
     var R = rects(n), gapPiece = n * n - 1;
-    for (var p = 0; p < n * n; p++) if (tiles[p] !== gapPiece) badge(out, R, p, tiles[p] + 1);
+    for (var p = 0; p < n * n; p++) if (tiles[p] !== gapPiece && p !== skip) badge(out, R, p, tiles[p] + 1);
   }
   /* an arrow from the piece's centre, a quarter of the way in, to the centre of the hole; ink rim, paper body */
   function arrowShape(cb, x0, y0, dx, dy, len, headLen, shaftHalf, headHalf) {
@@ -920,14 +945,23 @@ var Solver = (function () {
     if (sc === "title" && !S.hasSave) return pic.px;
     if (sc === "title" || sc === "play" || sc === "menu" || sc === "lesson" || sc === "lost") {
       if (S.peek && (sc === "play" || sc === "lesson")) return pic.px;
-      var out = new Uint8Array(W * H);
-      board(out, pic.px, S.n, S.tiles);
+      var out = new Uint8Array(W * H), R = rects(S.n), A = moveAt(sc), dx = 0, dy = 0;
+      if (A) {
+        board(out, pic.px, S.n, S.tiles, A.to);   /* the destination is still a hole while the piece is in the air */
+        var tt = A.ms >= MOVE_MS ? 1 : A.ms / MOVE_MS, ease = tt * tt * (3 - 2 * tt);
+        dx = Math.round((R.x[A.to] - R.x[A.from]) * ease);
+        dy = Math.round((R.y[A.to] - R.y[A.from]) * ease);
+        tile(out, pic.px, R, A.from, A.piece, dy, dx, true);
+      } else board(out, pic.px, S.n, S.tiles);
       if (S.hint && (sc === "play" || sc === "lesson")) {
-        ring(out, rects(S.n), S.hint.p);
-        hintArrow(out, rects(S.n), S.hint.p, S.hint.gap);
+        ring(out, R, S.hint.p);
+        hintArrow(out, R, S.hint.p, S.hint.gap);
       }
-      /* numbers last, so the arrow's tail never hides a digit */
-      if (showNumbers()) numbers(out, S.n, S.tiles);
+      /* numbers last, so the arrow's tail never hides a digit; a moving piece carries its badge with it */
+      if (showNumbers()) {
+        numbers(out, S.n, S.tiles, A ? A.to : -1);
+        if (A) badgeAt(out, R.x[A.from] + 3 + dx, R.y[A.from] + 3 + dy, A.piece + 1);
+      }
       return out;
     }
     return pic.px;
@@ -1075,6 +1109,7 @@ var Solver = (function () {
   function go(screen) {
     if (S.screen === "play" && screen !== "play") { stopClock(screen !== "solved" && screen !== "won" && screen !== "lost"); S.note = ""; }
     clearHint();
+    clearMoveAnim();
     stopAttract();
     if (S.demo) { clearTimeout(S.demo.timer); S.demo = null; }
     S.screen = screen; S.sel = defaultSel(screen); S.peek = false;
@@ -1320,6 +1355,7 @@ var Solver = (function () {
       fromCamera: S.src === "camera", src: S.src, picKey: S.picKey, helped: S.helped, hasSave: S.hasSave, saved: S.hasSave,
       sel: S.sel, items: S.items.map(function (it) { return it[1]; }), demo: !!S.demo, hint: !!S.hint,
       hintAt: S.hint ? { p: S.hint.p, gap: S.hint.gap } : null, numbers: showNumbers(),
+      moving: !!S.animMove,
       mode: S.mode, lesson: S.lesson, lessonDone: S.lessonDone, animDone: !!(S.anim && S.anim.done),
       arcade: S.arcade, gameArcade: S.gameArcade, left: S.left, arcadeTotal: S.arcadeTotal,
       best: S.best[String(S.n)] || 0, bestTime: S.bestTime[String(S.n)] || 0,
