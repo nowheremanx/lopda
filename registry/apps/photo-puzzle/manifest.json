@@ -3,21 +3,23 @@
   "id": "photo-puzzle",
   "name": "拍照拼图",
   "glyph": "拼",
-  "version": "1.0.0",
-  "description": "拍一张照片，切成滑块拼图再拼回来。没有相机也能用内置图片玩。相机接口的示范。",
+  "version": "1.5.0",
+  "description": "拍一张照片，或从六张内置图片里挑一张，切成滑块拼图再拼回来。普通和街机两种玩法。",
   "i18n": {
     "zh": {
       "name": "拍照拼图",
-      "description": "拍一张照片，切成滑块拼图再拼回来。没有相机也能用内置图片玩。相机接口的示范。"
+      "description": "拍一张照片，或从六张内置图片里挑一张，切成滑块拼图再拼回来。普通和街机两种玩法。"
     },
     "en": {
       "name": "SnapTile",
-      "description": "Snap a photo, slide its tiles back in place. No camera? A built-in picture."
+      "description": "Snap a photo or pick a built-in picture, then slide it back. Normal or arcade."
     }
   },
   "author": "Haowei Wu",
   "license": "MIT",
-  "permissions": ["camera"],
+  "permissions": [
+    "camera"
+  ],
   "buttons": true,
   "icon": [
     "................",
