@@ -154,11 +154,11 @@
         "................"
       ],
       "version": "2.0.0",
-      "description": "节奏故事：十首古典曲、三幕剧情、四种结局。按 A 吹竽、B 敲磬，国王睁眼时别动；摇一摇咳嗽，倾斜躬身。",
+      "description": "节奏故事：十首古典曲、三幕剧情、四种结局。A 吹竽、B 敲磬；国王睁眼时停手，摇一摇跳舞蒙混过关。",
       "i18n": {
         "en": {
           "name": "Fake Yu",
-          "description": "A rhythm story: ten tunes, three acts, four endings. Freeze when the king looks."
+          "description": "A rhythm story: ten tunes, three acts, four endings. Dance when the king looks."
         }
       },
       "author": "Haowei Wu",
@@ -167,8 +167,8 @@
         "motion"
       ],
       "path": "apps/fake-yu/index.html",
-      "sha256": "9f48fda51e4637bba55a14404161ba7b8325a004e00f544c554726169a8095fc",
-      "bytes": 176259
+      "sha256": "54c983ecf8539791965b0295b0d2dff21e886824c989f5564de7f508d0781a4a",
+      "bytes": 184073
     },
     {
       "spec": "lopda/1",
