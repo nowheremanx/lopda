@@ -74,6 +74,10 @@ Contrast of the four tones against each other (WCAG contrast ratio):
 - One thing is selected at all times, drawn **inverted** (ink background, paper text). Never only an outline
   or a small arrow: those vanish on a bright screen.
 - Up and Down move the selection; it wraps or stops at the ends, the same in every list of the app.
+- When the buttons sit in more than one row, treat them as a grid, not one long list: Left and Right move along
+  the row, Up and Down move between rows (same column, clamped when the last row is shorter). A button that spans
+  the full width is its own row. Never make every arrow walk a two-column grid one item at a time in reading order:
+  Down then visibly goes Right, and choices in the lower row look unreachable.
 - When the selection moves, keep it on screen: `el.scrollIntoView({ block: "nearest" })`.
 - A confirms, B goes back or cancels (SPEC section 4). The pad and touch do the same things: tapping a row
   selects it and acts, like A.
@@ -140,4 +144,5 @@ Contrast of the four tones against each other (WCAG contrast ratio):
 |---|---|
 | A test app with three big buttons and the result in a small scrolling box below them, plus a chin pad it did not need | No pad; the result is `main` and scrolls; the buttons go in the header in one row |
 | A catalogue whose Left/Right changed a level on some rows and jumped sections on others | Left/Right only change the level; SELECT goes to the next group |
+| A two-column button grid where every arrow moved to the next button in reading order: Down went right, and the lower rows sat below the fold | Keep the screen fixed, use 4 buttons in a 2×2 grid, and make Up/Down move a row (section 5) |
 | Hints in 12 px dark text on paper | 13 px or more, or ink |

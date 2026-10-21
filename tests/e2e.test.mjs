@@ -4677,8 +4677,37 @@ const runPuzzle = async (p, html = PP.html) => {
   return f;
 };
 const ppState = (f) => f.evaluate(() => window.PUZZLE.state());
-/* the shortest way home for a 3x3, breadth first over the gap's moves; returns the keys to press. A direction pushes the
-   piece on that side of the gap into it, so "up" moves the gap down a row */
+const ppLabels = (f) => f.$$eval("#menu button", (bs) => bs.map((b) => b.textContent + (b.classList.contains("off") ? " off" : "")));
+const ppClick = async (f, text) => { await f.locator("#menu button", { hasText: text }).click(); };
+/* an unfinished game is kept: opening the app shows 继续 / 主菜单, so a test that wants the main menu presses 主菜单 */
+const ppToMain = async (p, f) => {
+  await p.waitForTimeout(400);
+  if ((await ppState(f)).screen === "title") { await press(p, "down"); await press(p, "a"); }
+};
+/* a game from the built-in pictures, skipping the opening cut so the test spends its time on the puzzle */
+const ppStartBuiltin = async (p, f) => {
+  await ppClick(f, "内置图片");
+  await until(p, async () => (await ppState(f)).screen === "gallery", "the gallery");
+  await press(p, "a");
+  await until(p, async () => (await ppState(f)).screen === "cut", "the opening cut");
+  await press(p, "a");
+  await until(p, async () => (await ppState(f)).screen === "play", "a game");
+};
+const ppShot = (f) => f.evaluate(() => document.getElementById("cv").toDataURL());
+/* the hole is ink except its last row/column (the lit lip); sample 2 px in from the top-left so the hint arrow
+   in the middle of the hole does not colour this pixel */
+const ppGapPixel = (f) => f.evaluate(() => {
+  const s = window.PUZZLE.state(), c = document.getElementById("cv"), x = c.getContext("2d");
+  const col = s.gap % s.n, row = Math.floor(s.gap / s.n);
+  return Array.from(x.getImageData(Math.floor(col * 128 / s.n) + 2, Math.floor(row * 112 / s.n) + 2, 1, 1).data);
+});
+/* the middle of the hole: ink, or paper when the hint arrow is drawn into it */
+const ppGapCenter = (f) => f.evaluate(() => {
+  const s = window.PUZZLE.state(), c = document.getElementById("cv"), x = c.getContext("2d");
+  const col = s.gap % s.n, row = Math.floor(s.gap / s.n);
+  return Array.from(x.getImageData(Math.floor((col + 0.5) * 128 / s.n), Math.floor((row + 0.5) * 112 / s.n), 1, 1).data);
+});
+/* the shortest way home for a 3x3, breadth first over the gap's moves; returns the keys to press */
 function solve3(tiles) {
   const goal = "012345678", start = tiles.join(""), prev = new Map([[start, null]]), queue = [start];
   for (let i = 0; i < queue.length && !prev.has(goal); i++) {
@@ -4693,12 +4722,89 @@ function solve3(tiles) {
   return keys;
 }
 const ppPress = async (p, f, b) => { const before = (await ppState(f)).moves; await press(p, b); await until(p, async () => (await ppState(f)).moves === before + 1, "the slide " + b); };
+/* a Solver plan lists the cells to slide; the pad takes directions. Walk the board to translate. */
+function ppDirs(tiles, plan, n = 3) {
+  const t = tiles.slice(), gapPiece = n * n - 1, out = [];
+  for (const st of plan) {
+    const g = t.indexOf(gapPiece), p = st.p;
+    out.push(p === g + n ? "up" : p === g - n ? "down" : p === g + 1 ? "left" : "right");
+    t[g] = t[p]; t[p] = gapPiece;
+  }
+  return out;
+}
+const ppDir = (s) => { const n = s.n, r = Math.floor(s.gap / n), c = s.gap % n;
+  return r < n - 1 ? "up" : c < n - 1 ? "left" : "right"; };
 
-test("photo puzzle: a photo from the fake camera, shown first, then a 3x3 solved by keys; the best is kept and 4x4 opens", { skip, timeout: 90000 }, async (t) => {
+const PP_SAVE = (left) => ({ v: 1, n: 3, tiles: [0, 1, 2, 3, 8, 5, 6, 4, 7], moves: 0, src: "builtin", picKey: "lake",
+  helped: false, arcade: true, left: left });
+
+test("photo puzzle: a 2×2 main menu, a four-item game menu that fits 331×359, and a gallery that picks picture and size", { skip, timeout: 120000 }, async (t) => {
   const { p, errors } = await snapPage(t);
-  let f = await runPuzzle(p);
-  assert.equal(await f.textContent("#msg"), "拍一张照片，切成方块打乱，再拼回来。");
-  await press(p, "a");   /* 拍一张 */
+  await p.setViewportSize({ width: 375, height: 667 });   /* the smallest LCD with the chin pad is 331×359 */
+  const f = await runPuzzle(p);
+  await p.waitForTimeout(600);
+  assert.equal((await ppState(f)).screen, "main");
+  assert.deepEqual(await ppLabels(f), ["拍一张", "内置图片", "模式 普通", "怎么玩"]);
+  assert.equal(await f.textContent("#msg"), "拍一张，或挑一张。");
+  assert.equal((await ppState(f)).sel, 0);
+  /* a grid, not a list: Down goes to the button below, not to the next one in reading order */
+  await press(p, "down"); assert.equal((await ppState(f)).sel, 2);
+  await press(p, "right"); assert.equal((await ppState(f)).sel, 3);
+  await press(p, "up"); assert.equal((await ppState(f)).sel, 1);
+  await press(p, "left"); assert.equal((await ppState(f)).sel, 0);
+  /* the mode button toggles in place */
+  await press(p, "down"); await press(p, "a");
+  let s = await ppState(f);
+  assert.deepEqual([s.screen, s.arcade, s.items[2]], ["main", true, "模式 街机"]);
+  await press(p, "a");
+  assert.deepEqual([(await ppState(f)).arcade, (await ppState(f)).items[2]], [false, "模式 普通"]);
+  /* the gallery: left/right browse, up/down changes the size, A starts the picture on screen */
+  await ppClick(f, "内置图片");
+  await until(p, async () => (await ppState(f)).screen === "gallery", "the gallery");
+  assert.deepEqual(await ppLabels(f), ["上一张", "开始", "下一张"]);
+  assert.equal(await f.textContent("#info"), "3×3  图 1/6  山湖");
+  await press(p, "right");
+  assert.deepEqual([(await ppState(f)).gallery, await f.textContent("#info")], [1, "3×3  图 2/6  灯塔"]);
+  await press(p, "up"); assert.equal((await ppState(f)).nextN, 4);
+  await press(p, "down"); assert.equal((await ppState(f)).nextN, 3);
+  await press(p, "a");
+  await until(p, async () => (await ppState(f)).screen === "cut", "the opening cut");
+  s = await ppState(f);
+  assert.deepEqual([s.n, s.gap, s.picKey], [3, 8, "lighthouse"], "the cut starts with the bottom-right cell missing");
+  assert.equal((await ppLabels(f)).length, 0, "no buttons during the cut");
+  assert.equal(await f.textContent("#ft"), "A 跳过");
+  await press(p, "a");
+  await until(p, async () => (await ppState(f)).screen === "play", "a game");
+  s = await ppState(f);
+  assert.deepEqual([s.n, s.picKey, s.hasSave], [3, "lighthouse", true]);
+  /* four buttons in two rows, all inside the fixed screen, all 44 px tall */
+  await press(p, "start");
+  await until(p, async () => (await ppState(f)).screen === "menu", "the game menu");
+  assert.deepEqual(await ppLabels(f), ["继续", "难度 3×3", "看它解", "主菜单"]);
+  const layout = await f.evaluate(() => {
+    const m = document.querySelector("main"), menu = document.getElementById("menu"), mb = m.getBoundingClientRect(), nb = menu.getBoundingClientRect();
+    return { w: innerWidth, h: innerHeight, scrollH: m.scrollHeight, clientH: m.clientHeight, menuBottom: nb.bottom, mainBottom: mb.bottom,
+      buttons: [...menu.querySelectorAll("button")].map((b) => b.getBoundingClientRect().height) };
+  });
+  assert.deepEqual([layout.w, layout.h >= 350 && layout.h <= 359], [331, true]);
+  assert.ok(layout.scrollH <= layout.clientH + 1, `the game screen does not scroll (${layout.scrollH} > ${layout.clientH})`);
+  assert.ok(layout.menuBottom <= layout.mainBottom + 1, "the last row of buttons is above the footer");
+  assert.ok(layout.buttons.every((h) => h >= 44), JSON.stringify(layout.buttons));
+  /* the game menu follows the same grid: down goes to the lower-left, not the next item */
+  assert.equal((await ppState(f)).sel, 0);
+  await press(p, "down"); assert.equal((await ppState(f)).sel, 2);
+  await press(p, "right"); assert.equal((await ppState(f)).sel, 3);
+  await press(p, "up"); assert.equal((await ppState(f)).sel, 1);
+  await press(p, "left"); assert.equal((await ppState(f)).sel, 0);
+  await press(p, "b");
+  await until(p, async () => (await ppState(f)).screen === "play", "back to the game");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("photo puzzle: a photo from the fake camera, shown first, then a 3x3 solved by keys; the best is kept and 4x4 is next", { skip, timeout: 120000 }, async (t) => {
+  const { p, errors } = await snapPage(t);
+  let f = await runPuzzle(p); await ppToMain(p, f);
+  await press(p, "a");   /* 拍一张 is the default */
   await p.waitForSelector("#file-ask .box");
   assert.equal(await p.textContent("#file-ask p"), "「拍照拼图」想用相机拍一张照片。");
   await press(p, "a");
@@ -4713,19 +4819,20 @@ test("photo puzzle: a photo from the fake camera, shown first, then a 3x3 solved
   await press(p, "a");
   await until(p, async () => (await ppState(f)).screen === "preview", "the retake shown");
   await press(p, "a");
+  await until(p, async () => (await ppState(f)).screen === "cut", "the opening cut");
+  await press(p, "a");
+  await until(p, async () => (await ppState(f)).screen === "play", "a game");
   let s = await ppState(f);
-  assert.deepEqual([s.screen, s.n, s.fromCamera, s.moves], ["play", 3, true, 0]);
+  assert.deepEqual([s.n, s.fromCamera, s.moves], [3, true, 0]);
   assert.notDeepEqual(s.tiles, [0, 1, 2, 3, 4, 5, 6, 7, 8], "shuffled");
-  /* a key with nothing to push is refused and counts nothing; a tap on a piece not next to the gap neither */
   const keys = solve3(s.tiles);
   assert.ok(keys.length > 0 && keys.length <= 31);
   /* A held shows the whole picture; letting go shows the pieces again */
-  const shot = () => f.evaluate(() => document.getElementById("cv").toDataURL());
-  const pieces = await shot();
+  const pieces = await ppShot(f);
   await p.evaluate(() => window.LOPDA_DEBUG.setButton("a", true));
-  await until(p, async () => (await shot()) !== pieces, "the peek");
+  await until(p, async () => (await ppShot(f)) !== pieces, "the peek");
   await p.evaluate(() => window.LOPDA_DEBUG.setButton("a", false));
-  await until(p, async () => (await shot()) === pieces, "the pieces again");
+  await until(p, async () => (await ppShot(f)) === pieces, "the pieces again");
   /* a tap on the piece next to the gap slides it, and a tap back puts it where it was */
   const g = s.gap, q = g % 3 < 2 ? g + 1 : g - 1, box = await f.locator("#cv").boundingBox();
   const tap = (cell) => f.locator("#cv").click({ position: { x: ((cell % 3) + 0.5) * box.width / 3, y: (Math.floor(cell / 3) + 0.5) * box.height / 3 } });
@@ -4737,86 +4844,405 @@ test("photo puzzle: a photo from the fake camera, shown first, then a 3x3 solved
   const toward = (from, to) => [Math.sign((to % 3) - (from % 3)) * 40, Math.sign(Math.floor(to / 3) - Math.floor(from / 3)) * 40];
   const errs = () => p.evaluate(() => window.LOPDA_DEBUG.sfxLog.filter((x) => x === "err").length);
   const e0 = await errs();
-  await swipe(q, ...toward(q, g).map((v) => -v));   /* away from the gap */
+  await swipe(q, ...toward(q, g).map((v) => -v));
   await until(p, async () => (await errs()) === e0 + 1, "the error sound");
   assert.equal((await ppState(f)).gap, g, "nothing moved");
   await swipe(q, ...toward(q, g)); await until(p, async () => (await ppState(f)).gap === q, "the swipe");
   await swipe(g, ...toward(g, q)); await until(p, async () => (await ppState(f)).gap === g, "the swipe back");
   for (const k of keys.slice(0, -1)) await ppPress(p, f, k);
-  await p.waitForTimeout(1100);   /* a scripted player is faster than the 20 sounds a second an app may play */
+  await p.waitForTimeout(1100);   /* the runtime drops app sounds over 20 a second */
   await ppPress(p, f, keys.at(-1));
-  /* solved: the last piece drops in and the cuts melt into the whole photo, then 继续 goes to the result */
   s = await ppState(f);
   assert.deepEqual([s.screen, s.moves, s.animDone], ["solved", keys.length + 4, false]);
-  const during = await shot();
+  const during = await ppShot(f);
   await until(p, async () => (await ppState(f)).animDone, "the end of the animation");
-  const whole = await shot();
+  const whole = await ppShot(f);
   assert.notEqual(whole, during, "the picture changes as it comes together");
   assert.equal(await f.textContent("#msg"), "拼好了！");
-  assert.deepEqual(await f.$$eval("#menu button", (bs) => bs.map((b) => b.textContent)), ["继续"]);
+  assert.deepEqual(await ppLabels(f), ["继续"]);
   await press(p, "a");
   await until(p, async () => (await ppState(f)).screen === "won", "the result");
-  assert.equal(await shot(), whole, "the animation ends on exactly the whole photo");
+  assert.equal(await ppShot(f), whole, "the animation ends on exactly the whole photo");
   assert.match(await f.textContent("#msg"), new RegExp(`^拼好了！${keys.length + 4} 步。 新纪录！ 下一局是 4×4。$`));
-  assert.ok(await p.evaluate(() => window.LOPDA_DEBUG.sfxLog.includes("win")));
-  /* a new start remembers the best and the 4x4 */
+  assert.deepEqual(await ppLabels(f), ["下一局", "主菜单"]);
+  await p.waitForTimeout(400);
+  const sfxLog = await p.evaluate(() => window.LOPDA_DEBUG.sfxLog.slice());
+  assert.ok(sfxLog.includes("win"), JSON.stringify(sfxLog));
+  await p.waitForTimeout(600);
+  assert.equal(await f.evaluate(() => PAD.load("game")), null, "a finished game removes the saved one");
+  /* the best and the 4×4 choice survive a new start; the gallery now says 4×4 */
   await p.click("#home-key");
-  f = await runPuzzle(p);
-  await press(p, "down"); await press(p, "a");   /* 用内置图片 */
-  await until(p, async () => (await ppState(f)).screen === "play", "a game");
-  assert.match(await f.textContent("#info"), new RegExp(`最佳 ${keys.length + 4}$`));
+  f = await runPuzzle(p); await p.waitForTimeout(600);
+  s = await ppState(f);
+  assert.deepEqual([s.screen, s.hasSave, s.best, s.nextN], ["main", false, keys.length + 4, 4]);
+  await ppClick(f, "内置图片");
+  await until(p, async () => (await ppState(f)).screen === "gallery", "the gallery");
+  assert.match(await f.textContent("#info"), /^4×4  图 1\/6  山湖$/);
+  await press(p, "a");
+  await until(p, async () => (await ppState(f)).screen === "cut", "the next cut");
+  assert.equal((await ppState(f)).gap, 15, "a 4×4 cut starts with the bottom-right cell missing");
+  await press(p, "a");
+  await until(p, async () => (await ppState(f)).screen === "play", "a 4×4 game");
+  assert.equal((await ppState(f)).n, 4);
   await press(p, "start");
-  await until(p, async () => (await ppState(f)).screen === "menu", "the menu");
-  assert.deepEqual(await f.$$eval("#menu button", (bs) => bs.map((b) => b.textContent + (b.classList.contains("off") ? " off" : ""))), ["继续", "重拍", "换难度", "重来"]);
+  await until(p, async () => (await ppState(f)).screen === "menu", "the 4×4 menu");
+  assert.deepEqual(await ppLabels(f), ["继续", "难度 4×4", "看它解", "主菜单"]);
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
-test("photo puzzle: without a photo it plays the built-in picture and says why (cancelled, no camera, an older runtime)", { skip, timeout: 90000 }, async (t) => {
+test("photo puzzle: without a photo it plays a built-in picture and says why; no camera leaves a disabled snap button", { skip, timeout: 120000 }, async (t) => {
   const { p, errors } = await snapPage(t);
-  const playable = async (f, line) => {
-    await until(p, async () => (await ppState(f)).screen === "play", "a game");
-    const s = await ppState(f);
-    assert.deepEqual([s.n, s.fromCamera], [3, false]);
-    assert.equal(await f.textContent("#msg"), line);
-    const keys = solve3(s.tiles);
-    for (const k of keys) await ppPress(p, f, k);
-    assert.equal((await ppState(f)).screen, "solved");
-    await press(p, "a");   /* A skips the animation, a second A goes on */
-    await until(p, async () => (await ppState(f)).animDone, "the animation skipped");
-    await press(p, "a");
-    await until(p, async () => (await ppState(f)).screen === "won", "the result");
-  };
   /* B on the runtime's dialog: snap gives null */
-  let f = await runPuzzle(p);
+  let f = await runPuzzle(p); await ppToMain(p, f);
   await press(p, "a");
   await p.waitForSelector("#file-ask .box"); await press(p, "b");
-  await playable(f, "没拿到照片，用内置图片玩。");
+  await until(p, async () => (await ppState(f)).screen === "cut", "the cut after a cancelled snap");
+  await press(p, "a");
+  await until(p, async () => (await ppState(f)).screen === "play", "a game without a photo");
+  let s = await ppState(f);
+  assert.deepEqual([s.n, s.fromCamera], [3, false]);
+  assert.equal(await f.textContent("#msg"), "没拿到照片，用内置图片玩。");
+  assert.equal((await ppState(f)).picKey, "lake");
   /* B in the viewfinder */
   await p.click("#home-key");
-  f = await runPuzzle(p);
+  f = await runPuzzle(p); await ppToMain(p, f);
   await press(p, "a");
   await p.waitForSelector("#file-ask .box"); await press(p, "a");
   await finderLive(p); await press(p, "b");
-  await until(p, async () => (await ppState(f)).screen === "play", "a game");
+  await until(p, async () => (await ppState(f)).screen === "play", "a game after the viewfinder closed");
   assert.equal(await f.textContent("#msg"), "没拿到照片，用内置图片玩。");
-  /* no camera on the phone */
+  /* the phone has no working camera: the snap still opens, then falls back with the runtime's toast */
   await p.click("#home-key");
   await p.evaluate(() => { navigator.mediaDevices.getUserMedia = () => Promise.reject(new DOMException("no camera", "NotFoundError")); });
-  f = await runPuzzle(p);
-  await press(p, "a");   /* allowed once already: no dialog this time */
-  await until(p, async () => (await ppState(f)).screen === "play", "a game");
+  f = await runPuzzle(p); await ppToMain(p, f);
+  await press(p, "a");   /* allowed already: no dialog this time */
+  await until(p, async () => (await ppState(f)).screen === "play", "the fallback game");
   assert.equal(await p.textContent("#toast"), "相机用不了");
   assert.equal(await f.textContent("#msg"), "没拿到照片，用内置图片玩。");
-  /* a runtime before 0.28.0 has no PAD.camera: the title says so, the only choice is the built-in picture */
+  /* a runtime before 0.28.0 has no PAD.camera: the snap button is disabled, the gallery still plays */
   await p.click("#home-key");
   const old = PP.html.replace("<script>", "<script>window.PAD = Object.assign({}, PAD, { camera: undefined });</script>\n<script>");
-  f = await runPuzzle(p, old);
-  assert.equal(await f.textContent("#msg"), "这台掌机不能拍照，用内置图片玩。");
-  assert.deepEqual(await f.$$eval("#menu button", (bs) => bs.map((b) => b.textContent)), ["用内置图片"]);
+  f = await runPuzzle(p, old); await ppToMain(p, f);
+  assert.deepEqual(await ppLabels(f), ["拍一张 off", "内置图片", "模式 普通", "怎么玩"]);
   await press(p, "a");
-  await playable(f, "这台掌机不能拍照，用内置图片玩。");
+  assert.equal(await f.textContent("#msg"), "这台掌机不能拍照。");
+  await ppClick(f, "内置图片");
+  await until(p, async () => (await ppState(f)).screen === "gallery", "the gallery without a camera");
+  await press(p, "a");
+  await until(p, async () => (await ppState(f)).screen === "cut", "the cut without a camera");
+  await press(p, "a");
+  await until(p, async () => (await ppState(f)).screen === "play", "a built-in game without a camera");
+  s = await ppState(f);
+  assert.deepEqual([s.n, s.fromCamera, s.src], [3, false, "builtin"]);
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
+
+test("photo puzzle: an unfinished game waits on the title after a restart; 主菜单 keeps it; an old file save still opens", { skip, timeout: 120000 }, async (t) => {
+  const { p, errors } = await snapPage(t);
+  let f = await runPuzzle(p); await ppToMain(p, f);
+  await ppStartBuiltin(p, f);
+  /* two real slides */
+  for (let i = 0; i < 2; i++) await ppPress(p, f, ppDir(await ppState(f)));
+  const before = await ppState(f);
+  assert.equal(before.moves, 2);
+  await p.waitForTimeout(700);   /* the store writes 0.5 s after the last PAD.save */
+  await p.click("#home-key");
+  f = await runPuzzle(p); await p.waitForTimeout(400);
+  let s = await ppState(f);
+  assert.deepEqual([s.screen, s.hasSave], ["title", true]);
+  assert.equal(await f.textContent("#msg"), "上次那盘还在这里。");
+  assert.deepEqual(await ppLabels(f), ["继续", "主菜单"]);
+  assert.equal(await f.textContent("#info"), "3×3  2 步");
+  await press(p, "a");   /* 继续 is the default */
+  await until(p, async () => (await ppState(f)).screen === "play", "the game carried on");
+  s = await ppState(f);
+  assert.deepEqual([s.tiles, s.moves, s.hasSave], [before.tiles, 2, true]);
+  /* 主菜单 does not drop the game: B goes back to the title and 继续 is still there */
+  await press(p, "start");
+  await until(p, async () => (await ppState(f)).screen === "menu", "the game menu");
+  await ppClick(f, "主菜单");
+  await until(p, async () => (await ppState(f)).screen === "main", "the main menu");
+  assert.equal((await ppState(f)).hasSave, true);
+  await press(p, "b");
+  await until(p, async () => (await ppState(f)).screen === "title", "the title");
+  await press(p, "a");
+  await until(p, async () => (await ppState(f)).screen === "play", "the same game again");
+  s = await ppState(f);
+  assert.deepEqual([s.tiles, s.moves], [before.tiles, 2]);
+  /* a 1.1 save with an imported picture still opens; only the import button is gone */
+  const pic = Buffer.alloc(128 * 112 / 4).toString("base64");   /* 3584 bytes = 14336 two-bit pixels */
+  await f.evaluate((g) => PAD.save("game", g), { v: 1, n: 3, tiles: [0, 1, 2, 3, 8, 5, 6, 4, 7], moves: 3,
+    src: "file", pic: pic, helped: false, arcade: false, left: 0 });
+  await p.waitForTimeout(900);
+  await p.click("#home-key");
+  f = await runPuzzle(p); await p.waitForTimeout(500);
+  assert.equal((await ppState(f)).screen, "title");
+  await press(p, "a");
+  await until(p, async () => (await ppState(f)).screen === "play", "the old file game");
+  s = await ppState(f);
+  assert.deepEqual([s.src, s.moves, s.tiles], ["file", 3, [0, 1, 2, 3, 8, 5, 6, 4, 7]]);
+  assert.doesNotMatch(await f.textContent("#ft"), /导入/);
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("photo puzzle: 看它解 plays by itself and any key stops it; SELECT marks one piece; help keeps no best", { skip, timeout: 120000 }, async (t) => {
+  const { p, errors } = await snapPage(t);
+  let f = await runPuzzle(p); await ppToMain(p, f);
+  await ppStartBuiltin(p, f);
+  /* 看它解 is the third of four buttons: down once from 继续, then A */
+  await press(p, "start");
+  await until(p, async () => (await ppState(f)).screen === "menu", "the menu");
+  await press(p, "down"); await press(p, "a");
+  let s = await ppState(f);
+  assert.deepEqual([s.screen, s.demo, s.helped], ["play", true, true]);
+  await until(p, async () => (await ppState(f)).moves >= 3, "the demo's moves");
+  assert.match(await f.textContent("#msg"), /^第 1 行/);
+  /* any key stops it, and that key does not also push a piece */
+  await press(p, "up");
+  const stopped = (await ppState(f)).moves;
+  assert.equal((await ppState(f)).demo, false);
+  assert.equal(await f.textContent("#msg"), "", "the caption is gone");
+  await p.waitForTimeout(700);
+  assert.equal((await ppState(f)).moves, stopped, "no more moves after the stop");
+  await ppPress(p, f, ppDir(await ppState(f)));
+  assert.equal((await ppState(f)).moves, stopped + 1, "the player carries on");
+  assert.match(await f.textContent("#info"), /助$/);
+  /* a helped game is still solved with animation, music and the unlock, but records no best */
+  const keys = solve3((await ppState(f)).tiles);
+  for (const k of keys.slice(0, -1)) await ppPress(p, f, k);
+  await p.waitForTimeout(1100);
+  await ppPress(p, f, keys[keys.length - 1]);
+  await until(p, async () => (await ppState(f)).screen === "solved", "solved");
+  await press(p, "a"); await until(p, async () => (await ppState(f)).animDone, "the animation");
+  await press(p, "a");
+  await until(p, async () => (await ppState(f)).screen === "won", "the result");
+  assert.doesNotMatch(await f.textContent("#msg"), /新纪录/);
+  await p.waitForTimeout(400);
+  const sfxLog = await p.evaluate(() => window.LOPDA_DEBUG.sfxLog.slice());
+  assert.ok(sfxLog.includes("win"), JSON.stringify(sfxLog));
+  await p.waitForTimeout(700);
+  const saved = await f.evaluate(() => new Promise((r) => PAD.load("puzzle").then(r)));
+  assert.equal(saved && saved.best && saved.best["3"], undefined, "no best for a helped game");
+  /* SELECT: the next piece is ringed, every piece gets its number, and an arrow points into the hole.
+     The picture stays marked until the next slide; SELECT again puts it back. The piece itself does not move. */
+  await p.click("#home-key");
+  f = await runPuzzle(p); await ppToMain(p, f);
+  await ppStartBuiltin(p, f);
+  const plain = await ppShot(f), gap0 = (await ppState(f)).gap, moves0 = (await ppState(f)).moves;
+  assert.equal((await ppGapCenter(f)).join(), "31,42,20,255", "the empty hole is ink");
+  await press(p, "select");
+  await until(p, async () => (await ppShot(f)) !== plain, "the marked piece");
+  const hinted = await ppState(f);
+  assert.equal(hinted.hint, true);
+  assert.equal(hinted.numbers, true);
+  assert.equal((await ppGapCenter(f)).join(), "163,173,126,255", "the arrow reaches into the hole");
+  const marked = await ppShot(f);
+  await p.waitForTimeout(900);
+  assert.equal(await ppShot(f), marked, "the mark is steady, not a blink");
+  assert.equal((await ppState(f)).hint, true, "still marked after a while");
+  await press(p, "select");
+  await until(p, async () => (await ppShot(f)) === plain, "SELECT again clears the mark");
+  const after = await ppState(f);
+  assert.deepEqual([after.gap, after.moves, after.hint, after.numbers, after.helped], [gap0, moves0, false, false, true]);
+  assert.match(await f.textContent("#info"), /助$/);
+  /* a slide is animated: the board is marked as moving, then settles on the new cell */
+  await press(p, ppDir(after));
+  const sliding = await ppState(f);
+  assert.deepEqual([sliding.moves, sliding.moving], [moves0 + 1, true], "the slide starts a short animation");
+  await until(p, async () => !(await ppState(f)).moving, "the slide animation to finish");
+  assert.notEqual(await ppShot(f), plain, "the piece ended on its new cell");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("photo puzzle: 怎么玩 teaches four lessons; the board shows its gap; a lesson never wins or saves; 主菜单 keeps the game", { skip, timeout: 120000 }, async (t) => {
+  const { p, errors } = await snapPage(t);
+  let f = await runPuzzle(p); await ppToMain(p, f);
+  const labels = () => ppLabels(f);
+  assert.deepEqual(await labels(), ["拍一张", "内置图片", "模式 普通", "怎么玩"]);
+  await ppClick(f, "怎么玩");
+  await until(p, async () => (await ppState(f)).screen === "lesson", "lesson 1");
+  let s = await ppState(f);
+  assert.deepEqual([s.mode, s.lesson, s.n, s.moves], ["tutorial", 0, 3, 0]);
+  assert.equal(await f.textContent("#info"), "第 1 课  0 步");
+  assert.match(await f.textContent("#msg"), /方向键/);
+  /* the bug this test exists for: the lesson used to draw the whole picture, with no hole */
+  assert.equal((await ppGapPixel(f)).join(), "31,42,20,255", "2 px into the hole is still its ink floor");
+  /* a lesson opens with its first move marked: all pieces numbered, the piece ringed, an arrow into the hole */
+  assert.equal(s.numbers, true, "every piece shows its number in a lesson");
+  assert.deepEqual(s.hintAt, { p: 7, gap: 4 }, "the first lesson's first move: piece 4 (tile 5) up into the hole");
+  assert.equal((await ppGapCenter(f)).join(), "163,173,126,255", "the arrow reaches into the hole");
+  /* lesson 1 is the two moves from solved: finishing it is not a win, a save, a best or an unlock */
+  for (const k of solve3(s.tiles)) await ppPress(p, f, k);
+  s = await ppState(f);
+  assert.deepEqual([s.screen, s.lessonDone, s.moves], ["lesson", true, 2]);
+  assert.equal(s.hint, false, "the opening mark is gone after the first slide");
+  assert.equal(s.numbers, true, "the numbers stay, so the lesson's words keep their meaning");
+  assert.equal(await f.textContent("#msg"), "做到了！");
+  const log = await p.evaluate(() => window.LOPDA_DEBUG.sfxLog.slice());
+  assert.ok(!log.includes("win"), "no win sound in a lesson: " + JSON.stringify(log));
+  assert.equal(await f.evaluate(() => PAD.load("game")), null, "a lesson never writes the saved game");
+  assert.equal((await f.evaluate(() => PAD.load("puzzle")))?.best?.["3"], undefined, "and never a best");
+  /* 下一课: lesson 2, one piece to the corner */
+  assert.deepEqual(await labels(), ["下一课"]);
+  assert.match(await f.textContent("#ft"), /^A 下一课/);
+  await press(p, "a");
+  await until(p, async () => (await ppState(f)).lesson === 1, "lesson 2");
+  s = await ppState(f);
+  assert.deepEqual([s.n, s.tiles], [3, [2, 1, 4, 3, 8, 0, 7, 5, 6]]);
+  let plan = await f.evaluate(() => Solver.goalPlan(3, window.PUZZLE.state().tiles, [{ p: 0, at: 0 }], []));
+  assert.equal(s.hint, true, "lesson 2 also opens with its first move marked");
+  assert.equal(s.numbers, true, "tile 1 now has a visible 1 on it");
+  assert.equal(s.hintAt.p, plan[0].p, "the arrow starts from the first piece of the lesson's plan");
+  for (const d of ppDirs(s.tiles, plan)) await ppPress(p, f, d);
+  s = await ppState(f);
+  assert.deepEqual([s.tiles[0], s.lessonDone], [0, true]);
+  /* lesson 3: the last two of a row, and piece 0 must stay put */
+  await press(p, "a");
+  await until(p, async () => (await ppState(f)).lesson === 2, "lesson 3");
+  s = await ppState(f);
+  assert.deepEqual([s.n, s.tiles], [3, [0, 4, 7, 1, 8, 6, 3, 2, 5]]);
+  plan = await f.evaluate(() => Solver.goalPlan(3, window.PUZZLE.state().tiles, [{ p: 1, at: 1 }, { p: 2, at: 2 }], [0]));
+  for (const d of ppDirs(s.tiles, plan)) await ppPress(p, f, d);
+  s = await ppState(f);
+  assert.deepEqual([s.tiles[0], s.tiles[1], s.tiles[2], s.lessonDone], [0, 1, 2, true]);
+  /* lesson 4: a 4×4 demo; any key stops it and the lesson is over */
+  await press(p, "a");
+  await until(p, async () => (await ppState(f)).lesson === 3, "lesson 4");
+  assert.equal((await ppState(f)).n, 4);
+  await until(p, async () => (await ppState(f)).demo, "the 4×4 demo");
+  await press(p, "up");
+  await until(p, async () => (await ppState(f)).lessonDone, "the demo lesson done");
+  assert.equal(await f.textContent("#msg"), "看完了：拼好一行，再拼下一行。");
+  assert.deepEqual(await labels(), ["回主菜单"]);
+  await press(p, "a");
+  await until(p, async () => (await ppState(f)).screen === "main", "back on the main menu");
+  assert.equal((await ppState(f)).mode, "normal");
+  assert.deepEqual(await labels(), ["拍一张", "内置图片", "模式 普通", "怎么玩"]);
+  /* entered with an unfinished game, leaving the lessons puts that game back untouched */
+  await ppStartBuiltin(p, f);
+  await ppPress(p, f, ppDir(await ppState(f)));
+  const before = await ppState(f);
+  await press(p, "start");
+  await until(p, async () => (await ppState(f)).screen === "menu", "the game menu");
+  await ppClick(f, "主菜单");
+  await until(p, async () => (await ppState(f)).screen === "main", "the main menu");
+  await ppClick(f, "怎么玩");
+  await until(p, async () => (await ppState(f)).screen === "lesson", "a lesson from the main menu");
+  await press(p, "start");
+  await until(p, async () => (await ppState(f)).screen === "menu", "the lesson's menu");
+  assert.deepEqual(await labels(), ["继续", "退出教程"]);
+  await press(p, "down"); await press(p, "a");
+  await until(p, async () => (await ppState(f)).screen === "main", "back on the main menu");
+  await press(p, "b");
+  await until(p, async () => (await ppState(f)).screen === "title", "the title");
+  await press(p, "a");
+  await until(p, async () => (await ppState(f)).screen === "play", "the game before the lessons");
+  s = await ppState(f);
+  assert.deepEqual([s.mode, s.n, s.tiles, s.moves], ["normal", before.n, before.tiles, before.moves]);
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("photo puzzle: the main menu solves the built-in pictures by itself; the opening cut starts from the bottom-right hole", { skip, timeout: 120000 }, async (t) => {
+  const { p, errors } = await snapPage(t);
+  let f = await runPuzzle(p); await ppToMain(p, f);
+  let a = (await ppState(f)).attract;
+  assert.ok(a && a.n === 3 && a.plan > 0, JSON.stringify(a));
+  const first = a.moves;
+  await until(p, async () => (await ppState(f)).attract.moves > first, "the attract mode's first moves");
+  /* each attract step is a 140 ms slide, not a jump: sample across the next step or two */
+  let sliding = false;
+  for (let i = 0; i < 8 && !sliding; i++) {
+    await p.waitForTimeout(25);
+    const at = (await ppState(f)).attract;
+    sliding = !!at && at.phase === "solve" && at.moving;
+  }
+  assert.ok(sliding, "the attract mode slides its pieces");
+  let done = false;
+  for (let i = 0; i < 40 && !done; i++) { await p.waitForTimeout(300); done = (await ppState(f)).attract?.phase === "done"; }
+  assert.ok(done, "the attract game finishes");
+  const index = (await ppState(f)).attract.index;
+  await p.waitForTimeout(3200);
+  a = (await ppState(f)).attract;
+  assert.ok(a && a.index !== index && a.phase === "solve", JSON.stringify(a));
+  /* the opening cut: original picture, cut lines, then the bottom-right cell drops out */
+  await ppClick(f, "内置图片");
+  await until(p, async () => (await ppState(f)).screen === "gallery", "the gallery");
+  await press(p, "a");
+  await until(p, async () => (await ppState(f)).screen === "cut", "the cut");
+  let s = await ppState(f);
+  assert.deepEqual([s.gap, s.n], [8, 3]);
+  assert.match(s.intro.phase, /^(cut|drop)$/);
+  assert.equal(await f.textContent("#ft"), "A 跳过");
+  await until(p, async () => (await ppState(f)).intro?.phase === "drop", "the bottom-right tile dropping");
+  await until(p, async () => (await ppState(f)).intro?.phase === "mix", "the shuffle dissolving in");
+  await press(p, "a");   /* skip the rest */
+  await until(p, async () => (await ppState(f)).screen === "play", "the game after the cut");
+  s = await ppState(f);
+  assert.equal(s.hasSave, true);
+  assert.notDeepEqual(s.tiles, [0, 1, 2, 3, 4, 5, 6, 7, 8], "the board is shuffled");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("photo puzzle: arcade counts down on the screen-edge fuse, pauses in the menu, and loses at zero", { skip, timeout: 120000 }, async (t) => {
+  const { p, errors } = await snapPage(t);
+  let f = await runPuzzle(p); await ppToMain(p, f);
+  await ppClick(f, "模式 普通");
+  await until(p, async () => (await ppState(f)).arcade, "arcade mode");
+  await ppStartBuiltin(p, f);
+  let s = await ppState(f);
+  assert.deepEqual([s.gameArcade, s.arcadeTotal, s.fuse], [true, 120, "on"]);
+  assert.ok(s.left > 118 && s.left <= 120, String(s.left));
+  await p.waitForTimeout(1400);
+  s = await ppState(f);
+  assert.ok(s.left < 119, "the fuse burns " + s.left);
+  /* START is the pause: the clock stops while the menu is open */
+  await press(p, "start");
+  await until(p, async () => (await ppState(f)).screen === "menu", "the pause menu");
+  const paused = (await ppState(f)).left;
+  await p.waitForTimeout(1300);
+  assert.ok(Math.abs((await ppState(f)).left - paused) < 0.2, "the clock is paused in the menu");
+  await press(p, "b");
+  await until(p, async () => (await ppState(f)).screen === "play", "back to play");
+  await p.waitForTimeout(800);
+  assert.ok((await ppState(f)).left < paused - 0.4, "the clock runs again");
+  /* a save with 60 s left shows the fuse half burnt; one with 2 s runs out */
+  await press(p, "start");
+  await until(p, async () => (await ppState(f)).screen === "menu", "the menu");
+  await ppClick(f, "主菜单");
+  await until(p, async () => (await ppState(f)).screen === "main", "the main menu");
+  await f.evaluate((g) => PAD.save("game", g), PP_SAVE(60));
+  await p.waitForTimeout(900);
+  await p.click("#home-key");
+  f = await runPuzzle(p); await p.waitForTimeout(500);
+  await press(p, "a");
+  await until(p, async () => (await ppState(f)).screen === "play", "the half-burnt game");
+  const widths = await f.evaluate(() => {
+    const w = (s) => document.querySelector("#fuse i" + s).getBoundingClientRect().width;
+    const h = (s) => document.querySelector("#fuse i" + s).getBoundingClientRect().height;
+    return { t: w(".t"), r: h(".r"), b: w(".b"), l: h(".l"), w: innerWidth, h: innerHeight };
+  });
+  assert.ok(widths.t < 2 && widths.b > widths.w - 2, JSON.stringify(widths));
+  await press(p, "start");
+  await until(p, async () => (await ppState(f)).screen === "menu", "the menu");
+  await ppClick(f, "主菜单");
+  await until(p, async () => (await ppState(f)).screen === "main", "the main menu");
+  await f.evaluate((g) => PAD.save("game", g), PP_SAVE(2));
+  await p.waitForTimeout(900);
+  await p.click("#home-key");
+  f = await runPuzzle(p); await p.waitForTimeout(500);
+  await press(p, "a");
+  await until(p, async () => (await ppState(f)).screen === "play", "the last two seconds");
+  assert.match((await ppState(f)).fuse, /low/);
+  await until(p, async () => (await ppState(f)).screen === "lost", "the end of the fuse");
+  s = await ppState(f);
+  assert.deepEqual([s.left, s.hasSave, s.fuse], [0, false, ""]);
+  assert.deepEqual(await ppLabels(f), ["再来一局", "主菜单"]);
+  assert.equal(await f.textContent("#msg"), "时间到。");
+  await p.waitForTimeout(600);
+  assert.equal(await f.evaluate(() => PAD.load("game")), null, "a lost game is not kept");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
 
 /* ---------- the two demo apps: 滚珠迷宫 (tilt) and 吹蜡烛 (microphone), with the stubbed phone above ----------
    Each starts its sensor only when play starts and stops it when play pauses or ends; "denied" falls back to keys. */
