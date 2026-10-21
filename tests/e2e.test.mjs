@@ -5149,6 +5149,14 @@ test("photo puzzle: the main menu solves the built-in pictures by itself; the op
   assert.ok(a && a.n === 3 && a.plan > 0, JSON.stringify(a));
   const first = a.moves;
   await until(p, async () => (await ppState(f)).attract.moves > first, "the attract mode's first moves");
+  /* each attract step is a 140 ms slide, not a jump: sample across the next step or two */
+  let sliding = false;
+  for (let i = 0; i < 8 && !sliding; i++) {
+    await p.waitForTimeout(25);
+    const at = (await ppState(f)).attract;
+    sliding = !!at && at.phase === "solve" && at.moving;
+  }
+  assert.ok(sliding, "the attract mode slides its pieces");
   let done = false;
   for (let i = 0; i < 40 && !done; i++) { await p.waitForTimeout(300); done = (await ppState(f)).attract?.phase === "done"; }
   assert.ok(done, "the attract game finishes");
