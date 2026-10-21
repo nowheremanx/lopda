@@ -201,11 +201,13 @@
 - 每段多为 15–45 字，约一至两页；整条真结局约 360 页，按每页 4–5 秒计，加上 6 个选择和回看，约 24–30 分钟。
 - 提前结局「雨里」42 段、约 3–5 分钟，随时可以重来。
 - 每一章开头用章节卡（标题 + 副标题），按 A 继续；结局用结局卡（标题 + 一句副标题）。
+- 已读完的章节可以在标题或剧情中按 SELECT 打开章节选择；只列出已经读完的章节，B/SELECT 返回，最多显示四行，上下滚动。
 
 ## 9. 实现约定
 
 - 源文件按章节拆分：`src/story/00-setup.js`、`01-arrival.js`、`02-ticket.js`、`03-waiting.js`、`04-memory.js`、`05-night-train.js`、`06-train.js`、`07-alone.js`、`08-stay.js`、`09-ending.js`，最后由 `src/game.js` 播放。
 - 存档带 `v` 字段；旧版本的存档（没有 `v` 或 `v` 不等于 `STORY_VERSION`）不读取，避免剧本改动后跳错位置。
+- 章节选择用独立的 `chapters` 存档，和会因结局删除的 `vn` 分开。章节在进入下一章章节卡或到达结局时记为完成；快照保存该章章节卡出现时的 `flags`、`bg`、`left`、`right`，从章节选择进入时恢复这些值，避免把章内选择带进重玩。
 - 选择标记：`asked`、`quiet`、`tape`、`truth`、`kind`、`boarded`、`alone`、`stayedNight`、`gaveTape`。
 - 背景：`station`、`waiting`、`platform`、`memory`、`train`、`dawn`、`empty`。
 - 环境音：标题 `rain 0.4`，站外 `rain 0.7`，候车室 `rain 0.5`，十年站台 `rain 0.15`，站台 `rain 0.8`，车厢 `rain 0.3`，天亮/拆站时静音。

@@ -1,7 +1,7 @@
 /* Chapter 3: the platform, ten years ago, and the pair ticket. */
 
 SCRIPT.push(
-  { chapter: { zh: "第三章", en: "Chapter Three" }, sub: { zh: "十年前的站台", en: "The Old Platform" } },
+  { id: "ch3", chapter: { zh: "第三章", en: "Chapter Three" }, sub: { zh: "十年前的站台", en: "The Old Platform" } },
   { bg: "platform" },
   { say: null, text: { zh: "站长提灯走在前面。灯罩上有一道裂纹，光从缝里漏出来。", en: "The stationmaster leads with the lamp. There is a crack in the glass; light leaks through it." } },
   { say: null, text: { zh: "站台没有顶。雨直接落在铁轨上，溅起细小的白点。", en: "The platform has no roof. Rain falls straight onto the rails and breaks into small white points." } },
@@ -37,8 +37,9 @@ SCRIPT.push(
   { say: null, text: { zh: "他把她背回镇上。一路上她只说了一句：「我没让他回来。」", en: "He carried her back to town. All the way she said only one thing: \"I didn't let him come back.\"" } },
   { say: null, text: { zh: "小梅在家躺了三天。第四天，她起来给母亲做饭，像什么也没发生。", en: "Mei lay at home for three days. On the fourth she got up and cooked for her mother, as if nothing had happened." } },
   { say: null, text: { zh: "从那以后，她再没当着人哭过。", en: "After that, she never cried in front of anyone again." } },
-  { hide: "yuan" },
+  { hide: "right" },
   { bg: "platform" },
+  { show: "right", who: "old" },
   { say: null, text: { zh: "现在的小梅站在你旁边，看着同一段铁轨。", en: "The Mei beside you now looks at the same rails." } },
   { say: "mei", text: { zh: "我把那句道歉在心里排了十年。还是不知道怎么开口。", en: "I've rehearsed that apology for ten years. I still don't know how to begin." } },
   { say: null, text: { zh: "「你恨他吗？」", en: "\"Do you hate him?\"" } },

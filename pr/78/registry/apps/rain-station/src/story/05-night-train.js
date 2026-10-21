@@ -1,8 +1,9 @@
 /* Chapter 4: the night train, the conductor, and the three ways to answer. */
 
 SCRIPT.push(
-  { chapter: { zh: "第四章", en: "Chapter Four" }, sub: { zh: "夜车", en: "The Night Train" } },
+  { id: "ch4", chapter: { zh: "第四章", en: "Chapter Four" }, sub: { zh: "夜车", en: "The Night Train" } },
   { bg: "platform" },
+  { show: "right", who: "old" },
   { say: null, text: { zh: "0:47。", en: "0:47." } },
   { sfx: "tick" },
   { say: null, text: { zh: "雨忽然变大。站台的灯在雨里抖，光晕一圈一圈散开。", en: "The rain suddenly thickens. The platform lights shake in it, their halos spreading in rings." } },

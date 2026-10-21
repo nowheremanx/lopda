@@ -2,7 +2,7 @@
 
 SCRIPT.push(
   { label: "alone_wait" },
-  { chapter: { zh: "第六章", en: "Chapter Six" }, sub: { zh: "月台", en: "The Platform" } },
+  { id: "ch6a", chapter: { zh: "第六章", en: "Chapter Six" }, sub: { zh: "月台", en: "The Platform" } },
   { bg: "platform" },
   { say: null, text: { zh: "小梅上了车。她在门口停了一下，回头看你。", en: "Mei boards. She pauses in the doorway and looks back." } },
   { say: null, text: { zh: "你朝她点头。", en: "You nod." } },
