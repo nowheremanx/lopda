@@ -210,48 +210,6 @@
     },
     {
       "spec": "lopda/1",
-      "id": "last-letter",
-      "name": "最后一封信",
-      "glyph": "信",
-      "buttons": true,
-      "icon": [
-        "................",
-        "................",
-        "................",
-        ".00000000000000.",
-        ".03333333333330.",
-        ".00333333333300.",
-        ".03033333333030.",
-        ".03303333330330.",
-        ".03330333303330.",
-        ".03333000033330.",
-        ".03333333333330.",
-        ".03333333333330.",
-        ".00000000000000.",
-        "................",
-        "................",
-        "................"
-      ],
-      "version": "1.1.0",
-      "description": "视觉小说。邮局关门前，一封没有地址的信要送到山上。三个结局。",
-      "i18n": {
-        "zh": {
-          "name": "最后一封信",
-          "description": "视觉小说。邮局关门前，一封没有地址的信要送到山上。三个结局。"
-        },
-        "en": {
-          "name": "Letter",
-          "description": "Visual novel. A letter with no address, up the hill. Three endings."
-        }
-      },
-      "author": "Haowei Wu",
-      "license": "MIT",
-      "path": "apps/last-letter/index.html",
-      "sha256": "96ba6089b7ac7038d4f4258a1b05b30f3e3deefea533474ea1cde1c64438706b",
-      "bytes": 56143
-    },
-    {
-      "spec": "lopda/1",
       "id": "paint",
       "name": "点阵画板",
       "glyph": "画",
@@ -359,23 +317,23 @@
         "..2..........2..",
         "................"
       ],
-      "version": "1.2.0",
-      "description": "视觉小说。末班车后的雨夜小站，一张十年前的旧车票。三个结局。",
+      "version": "2.0.0",
+      "description": "视觉小说。雨夜小站，一张十年前的旧车票。七章，五个结局。",
       "i18n": {
         "zh": {
           "name": "雨站",
-          "description": "视觉小说。末班车后的雨夜小站，一张十年前的旧车票。三个结局。"
+          "description": "视觉小说。雨夜小站，一张十年前的旧车票。七章，五个结局。"
         },
         "en": {
           "name": "Rain Stn",
-          "description": "Visual novel. A rainy station, a ten-year-old ticket. Three endings."
+          "description": "Visual novel. A rainy station, a ten-year-old ticket. 7 chapters, 5 endings."
         }
       },
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/rain-station/index.html",
-      "sha256": "ea690dcc65110c1c63ff1df2b777076490a2c433a6803a814230f1761fb451e3",
-      "bytes": 56845
+      "sha256": "ffae5645ed2913d841b2793d49f6a13ee3ed81cc75113e5d4a66f3cbf935ba8b",
+      "bytes": 173113
     },
     {
       "spec": "lopda/1",
