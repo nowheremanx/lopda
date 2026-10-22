@@ -3,6 +3,7 @@
   "id": "whack-a-mole",
   "name": "打地鼠",
   "glyph": "鼠",
+  "category": "game",
   "icon": [
     "................",
     "................",
