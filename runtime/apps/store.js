@@ -276,8 +276,9 @@ function runApp(a){
   sensors.stopAll();   /* the old app's tilt and microphone end with its frame */
   LP.chip.stop();   /* the old app's song and ambience end with its frame */
   S.running=a;
-  $("run-title").textContent=appName(a)+" · v"+(a.version||"?");
-  LP.resetConfirm("run-del-wrap","run-del",tr("run.remove"),function(){ if(S.running){ var n=appName(S.running); deleteApp(S.running.id); show("home"); toast(tr("run.removed",{name:n})); } });
+  $("run-title").textContent=a.local ? appName(a) : appName(a)+" · v"+(a.version||"?");
+  $("run-del-wrap").hidden=!!a.local;   /* local scripts are removed in the scripts app, not here */
+  if(!a.local) LP.resetConfirm("run-del-wrap","run-del",tr("run.remove"),function(){ if(S.running){ var n=appName(S.running); deleteApp(S.running.id); show("home"); toast(tr("run.removed",{name:n})); } });
   $("run-err").hidden=true;
   show("run");
   showPad(!!a.buttons);
@@ -291,11 +292,20 @@ function runApp(a){
     if(h) start(h); else toast(tr("run.missing"));
   }).catch(function(e){ if(S.running===a) toast(tr("run.loadfail",{code:(e&&e.code)||tr("common.unknown")})); });
 }
-$("run-back").onclick=function(){ show("home"); };
+$("run-back").onclick=function(){ show(S.running && S.running.back || "home"); };
 $("run-err-close").onclick=function(){ $("run-err").hidden=true; };
 
+/* Local scripts live in the scripts app but have their own storage document, one per script.
+   The iframe never names the script: the runner decides from S.running.scriptId. */
+function localScriptId(appId){
+  return S.running && S.running.local && S.running.id===appId ? S.running.scriptId : null;
+}
 function getKv(appId){
   if(S.kv[appId]) return Promise.resolve(S.kv[appId]);
+  var sid=localScriptId(appId);
+  if(sid && LP.scripts){
+    return LP.scripts.loadData(sid).then(function(kv){ S.kv[appId]=kv||{}; return S.kv[appId]; },function(){ S.kv[appId]={}; return S.kv[appId]; });
+  }
   if(!S.db){ S.kv[appId]=S.kv[appId]||{}; return Promise.resolve(S.kv[appId]); }
   return S.refs.kv.doc(appId).get().then(function(s){ S.kv[appId]=(s.exists && own(s.data()).kv)||{}; return S.kv[appId]; }).catch(function(){ S.kv[appId]={}; return S.kv[appId]; });
 }
@@ -303,7 +313,17 @@ var kvTimers={};
 function saveKvSoon(appId){
   if(!S.db) return;
   clearTimeout(kvTimers[appId]);
+  var sid=localScriptId(appId);
+  if(sid && LP.scripts){ kvTimers[appId]=setTimeout(function(){ LP.scripts.saveData(sid, S.kv[appId]); },500); return; }
   kvTimers[appId]=setTimeout(function(){ put(S.refs.kv.doc(appId),{kv:S.kv[appId]}); },500);
+}
+/* leaving a run must not lose the last 500 ms of saves */
+function flushKv(appId){
+  clearTimeout(kvTimers[appId]);
+  if(!S.db || !Object.prototype.hasOwnProperty.call(S.kv,appId)) return Promise.resolve(true);
+  var sid=localScriptId(appId);
+  if(sid && LP.scripts) return LP.scripts.saveData(sid, S.kv[appId]);
+  return put(S.refs.kv.doc(appId),{kv:S.kv[appId]});
 }
 window.addEventListener("message",function(e){
   var f=$("run-frame");
@@ -324,7 +344,7 @@ window.addEventListener("message",function(e){
     $("run-err-msg").textContent=String(d.msg).slice(0,300);
     $("run-err").hidden=false;
   } else if(d.op==="exit"){
-    show("home");
+    show(S.running && S.running.back || "home");
   } else if(d.op==="file"){
     fileRequest(S.running,f.contentWindow,d);
   } else if(d.op==="sense"){
@@ -707,7 +727,10 @@ LP.builtin({id:"store", label:"app.store", icon:"store", view:"store",
   ready:function(){ loadRegistry(); }});
 /* the runner owns the run view but has no icon of its own: apps appear on the home screen */
 LP.builtin({id:"run", view:"run", keepPad:true,
-  leave:function(){ closeAsk(false); LP.snap.cancel(); LP.speech.stop(); sensors.stopAll(); LP.chip.stop(); LP.keepAwake(false); $("run-frame").srcdoc=""; S.running=null; },
+  leave:function(){
+    if(S.running) flushKv(S.running.id);
+    closeAsk(false); LP.snap.cancel(); LP.speech.stop(); sensors.stopAll(); LP.chip.stop(); LP.keepAwake(false); $("run-frame").srcdoc=""; S.running=null;
+  },
   lang:function(){
     /* apps read PAD.lang once at start: a running app is started again in the new language */
     if(S.running && !$("v-run").hidden) runApp(S.running);

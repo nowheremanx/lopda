@@ -6336,3 +6336,60 @@ test("kana-cards: the header buttons hold their place as the count grows", { ski
   assert.deepEqual(one, ten, "the buttons stay put from the first kana to the tenth");
   assert.deepEqual(errors, []);
 });
+
+test("scripts: copy the AI prompt, paste an HTML file, run it, and keep data per script", { skip, timeout: 45000 }, async (t) => {
+  const { p, errors } = await page(t);
+  await p.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: base });
+  await p.goto(base + "/runtime/", { waitUntil: "load" });
+  await p.waitForFunction(() => window.LP && LP.show);
+  await p.evaluate(() => LP.show("scripts"));
+  await p.waitForFunction(() => !document.getElementById("v-scripts").hidden);
+
+  await p.fill("#scripts-idea", "a pomodoro");
+  await p.click("#scripts-copy");
+  const prompt = await p.evaluate(() => navigator.clipboard.readText());
+  assert.match(prompt, /a pomodoro/);
+  assert.match(prompt, /PAD\.save/);
+
+  await p.evaluate(() => navigator.clipboard.writeText(
+    "<!doctype html><title>Local Test</title><body><script>PAD.save('x',42);PAD.load('x').then(function(v){document.body.textContent='X='+v;});<" + "/script></body>"
+  ));
+  await p.click("#scripts-paste");
+  await p.waitForFunction(() => !document.getElementById("v-script-edit").hidden);
+  assert.equal(await p.inputValue("#script-name"), "Local Test");
+  assert.match(await p.inputValue("#script-code"), /PAD\.save/);
+
+  await p.click("#script-run");
+  await p.waitForFunction(() => !document.getElementById("v-run").hidden);
+  await p.waitForTimeout(900);
+  assert.equal(await p.frameLocator("#run-frame").locator("body").textContent(), "X=42");
+
+  await p.click("#run-back");
+  await p.waitForFunction(() => !document.getElementById("v-script-edit").hidden);
+  await p.waitForFunction(() => /Data|存档/.test(document.getElementById("script-hint").textContent));
+
+  /* the data overview shows the size and clears it without touching the source */
+  await p.click("#script-back");
+  await p.waitForFunction(() => !document.getElementById("v-scripts").hidden);
+  await p.click("#scripts-data");
+  await p.waitForFunction(() => !document.getElementById("v-script-data").hidden);
+  await p.waitForFunction(() => /data|存档/i.test(document.getElementById("data-summary").textContent));
+  assert.equal(await p.locator("#data-list .t").textContent(), "Local Test");
+  await p.click("#data-list button");
+  await p.click("#data-ask-yes");
+  await p.waitForFunction(() => /0 B|0 /.test(document.getElementById("data-summary").textContent));
+  await p.click("#data-back");
+  await p.waitForFunction(() => !document.getElementById("v-scripts").hidden);
+  await p.click("#scripts-list button");
+  await p.waitForFunction(() => !document.getElementById("v-script-edit").hidden);
+  await p.waitForFunction(() => /No data|没有存档/.test(document.getElementById("script-hint").textContent));
+
+  await p.click("#script-menu");
+  await p.click("#script-delete");
+  await p.click("#script-ask-yes");
+  await p.waitForFunction(() => !document.getElementById("v-scripts").hidden);
+  /* the first-open Pomodoro example stays; only the test script is deleted */
+  assert.equal(await p.locator("#scripts-list button").count(), 1);
+  assert.notEqual(await p.locator("#scripts-list .t").textContent(), "Local Test");
+  assert.deepEqual(errors, []);
+});
