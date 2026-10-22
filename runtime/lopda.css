@@ -539,9 +539,19 @@ textarea::placeholder{color:var(--ink-2)}
 .scripts-card{border:3px solid var(--ink);background:var(--lcd-2);padding:10px;display:flex;flex-direction:column;gap:8px}
 .scripts-card b{font-size:17px;font-weight:400}
 .scripts-card .hint{line-height:1.35}
-.scripts-card input{width:100%;min-height:44px;font-family:var(--f-lcd);font-size:16px;color:var(--ink);background:var(--lcd);border:3px solid var(--ink);border-radius:0;padding:6px 8px;-webkit-appearance:none;appearance:none}
-.scripts-card input::placeholder{color:var(--ink-2)}
 .scripts-card .btn{min-height:44px}
+/* the idea page: one long prompt, its own screen, and a clear button that asks twice */
+.idea-main{flex:1;min-height:0;display:flex;flex-direction:column;gap:8px;padding:8px;overflow:hidden}
+.idea-main .hint{flex:none}
+#scripts-idea{flex:1;min-height:0;width:100%;font-family:var(--f-lcd);font-size:16px;line-height:1.45;color:var(--ink);background:var(--lcd);border:3px solid var(--ink);border-radius:0;padding:10px;resize:none;-webkit-appearance:none;appearance:none}
+#scripts-idea::placeholder{color:var(--ink-2)}
+#scripts-idea:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.idea-actions{flex:none;display:flex;gap:8px;padding:6px 8px;border-top:2px solid var(--ink)}
+.idea-actions .btn{flex:1;min-height:44px}
+#idea-status{min-height:18px;line-height:1.3}
+#idea-clear:disabled{color:var(--mid);border-color:var(--mid);background:transparent;box-shadow:none;cursor:default}
+#idea-ask{bottom:58px}
+#idea-ask p{margin:0 0 2px;font-size:15px;line-height:1.35}
 .scripts-list{gap:0}
 .scripts-list li{display:block;padding:0}
 .scripts-list button{width:100%;min-height:52px;text-align:left;background:none;border:0;border-bottom:1px dashed var(--ink-2);padding:6px 10px;cursor:pointer;display:flex;flex-direction:column;justify-content:center;gap:2px;color:inherit;font:inherit}

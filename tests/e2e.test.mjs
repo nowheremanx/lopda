@@ -6345,8 +6345,22 @@ test("scripts: copy the AI prompt, paste an HTML file, run it, and keep data per
   await p.evaluate(() => LP.show("scripts"));
   await p.waitForFunction(() => !document.getElementById("v-scripts").hidden);
 
+  await p.click("#scripts-write");
+  await p.waitForFunction(() => !document.getElementById("v-script-idea").hidden);
+  /* the page gives a long prompt a real textarea, not a 200-character single line */
+  const longIdea = "一个切水果游戏，滑动切开水果，切到炸弹结束。".repeat(40);
+  await p.fill("#scripts-idea", longIdea);
+  assert.equal((await p.inputValue("#scripts-idea")).length, longIdea.length);
+  const ideaBox = await p.evaluate(() => {
+    const ta = document.getElementById("scripts-idea").getBoundingClientRect();
+    const view = document.getElementById("v-script-idea").getBoundingClientRect();
+    const copy = document.getElementById("idea-copy").getBoundingClientRect();
+    return { height: ta.height, viewBottom: view.bottom, copyBottom: copy.bottom };
+  });
+  assert.ok(ideaBox.height >= 140, "the idea textarea fills the page: " + JSON.stringify(ideaBox));
+  assert.ok(ideaBox.copyBottom <= ideaBox.viewBottom + 1, "the actions stay inside the page");
   await p.fill("#scripts-idea", "a pomodoro");
-  await p.click("#scripts-copy");
+  await p.click("#idea-copy");
   const prompt = await p.evaluate(() => navigator.clipboard.readText());
   assert.match(prompt, /a pomodoro/);
   assert.match(prompt, /PAD\.save/);
@@ -6356,10 +6370,31 @@ test("scripts: copy the AI prompt, paste an HTML file, run it, and keep data per
   assert.match(prompt, /hitSegment/);
   assert.match(prompt, /Math\.PI \* 2/);
 
+  /* the draft survives leaving the page, and clear asks once before it empties the field */
+  await p.click("#idea-back");
+  await p.waitForFunction(() => !document.getElementById("v-scripts").hidden);
+  await p.click("#scripts-write");
+  await p.waitForFunction(() => !document.getElementById("v-script-idea").hidden);
+  assert.equal(await p.inputValue("#scripts-idea"), "a pomodoro");
+
+  /* the draft is saved, so a reload keeps a prompt the player spent time on */
+  await p.reload({ waitUntil: "load" });
+  await p.waitForFunction(() => window.LP && LP.show);
+  await p.evaluate(() => LP.show("scripts"));
+  await p.waitForFunction(() => !document.getElementById("v-scripts").hidden);
+  await p.click("#scripts-write");
+  await p.waitForFunction(() => !document.getElementById("v-script-idea").hidden);
+  assert.equal(await p.inputValue("#scripts-idea"), "a pomodoro");
+
+  await p.click("#idea-clear");
+  await p.waitForFunction(() => !document.getElementById("idea-ask").hidden);
+  await p.click("#idea-ask-yes");
+  assert.equal(await p.inputValue("#scripts-idea"), "");
+
   await p.evaluate(() => navigator.clipboard.writeText(
     "<!doctype html><title>Local Test</title><body><script>PAD.save('x',42);PAD.load('x').then(function(v){document.body.textContent='X='+v;});<" + "/script></body>"
   ));
-  await p.click("#scripts-paste");
+  await p.click("#idea-paste");
   await p.waitForFunction(() => !document.getElementById("v-script-edit").hidden);
   assert.equal(await p.inputValue("#script-name"), "Local Test");
   assert.match(await p.inputValue("#script-code"), /PAD\.save/);

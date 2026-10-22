@@ -88,7 +88,7 @@ requestAnimationFrame(frame);
 
 ### 4.3 运行器
 
-- 内置“脚本”程序：脚本库（名字、类型、更新时间、大小）、编辑器（textarea/等宽）、运行页、导入/导出。
+- 内置“脚本”程序：脚本库（名字、类型、更新时间、大小）、AI 需求页（长 prompt 草稿、清空、复制）、编辑器（textarea/等宽）、运行页、导入/导出。
 - 运行页复用商店的 `run` 视图或抽一个共享 runner：
   - iframe 每次新建，防止状态残留；
   - 错误面板显示 `window.onerror` 的行/列/消息；
@@ -116,6 +116,7 @@ requestAnimationFrame(frame);
 
 ```
 data/users/local/scripts                   设置：{v, lastId, sort}
+data/users/local/script-idea                AI 需求草稿：{v, text, updated}
 data/users/local/scripts/items/<scriptId>  脚本源文件：{v, id, name, kind, body, created, updated}
 data/users/local/scripts/data/<scriptId>   脚本存档：{v, kv, updated, bytes}
 ```
