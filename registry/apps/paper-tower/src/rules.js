@@ -150,6 +150,29 @@ PT.RULES = (function () {
     return out;
   }
 
+  /* A person's advice follows the page: a line that points at a monster or a treasure
+     disappears once that tile has changed, and the Folder speaks differently after folding. */
+  function lineShown(S, cond) {
+    var i, t;
+    if (cond.tile && tile(S, cond.tile[0], cond.tile[1]) !== cond.tile[2]) return false;
+    if (cond.tiles) for (i = 0; i < cond.tiles.length; i++) {
+      t = cond.tiles[i];
+      if (tile(S, t[0], t[1]) !== t[2]) return false;
+    }
+    if (cond.wicksBelow != null && S.wicks >= cond.wicksBelow) return false;
+    return true;
+  }
+  function npcLines(S) {
+    var npc = D.NPCS[S.floor], src, out = [];
+    if (!npc) return out;
+    src = npc.after && S.flags["gift:" + S.floor] ? npc.after : npc.lines;
+    for (var i = 0; i < src.length; i++) {
+      if (src[i].while && !lineShown(S, src[i].while)) continue;
+      out.push(src[i].text || src[i]);
+    }
+    return out;
+  }
+
   /* shops: stock counts live in flags, so an undo or a reload cannot buy twice */
   function shopAt(S) { return D.SHOPS[S.floor] || null; }
   function bought(S, i) { return S.flags["shop:" + S.floor + ":" + i] || 0; }
@@ -242,7 +265,7 @@ PT.RULES = (function () {
   return {
     VERSION: VERSION, newGame: newGame, clone: clone, hydrate: hydrate, findChar: findChar,
     tile: tile, setTile: setTile, inside: inside, isSolid: isSolid, walkable: walkable,
-    monsterFor: monsterFor, forecast: forecast, fight: fight, take: take, doorAt: doorAt,
+    npcLines: npcLines, monsterFor: monsterFor, forecast: forecast, fight: fight, take: take, doorAt: doorAt,
     openDoor: openDoor, reveal: reveal, secrets: secrets, shopAt: shopAt, stockLeft: stockLeft,
     bought: bought, price: price, buy: buy, drink: drink, poison: poison, useBomb: useBomb, useHoly: useHoly,
     revive: revive, nextFloor: nextFloor, prevFloor: prevFloor, score: score

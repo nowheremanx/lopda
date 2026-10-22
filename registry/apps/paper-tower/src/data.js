@@ -100,26 +100,40 @@ PT.DATA = (function () {
     ] }
   };
 
+  /* A person is keyed by the page they stand on. A line is either text or { text, while }:
+     the page's own state decides whether it still makes sense. `tile` shows the line while
+     that tile is unchanged; `tiles` needs every tile unchanged; `wicksBelow` hides the hint
+     once enough wicks are carried. After the Folder's gift, `after` replaces `lines`. */
   var NPCS = {
     2: { art: "keeper", name: L("守页人", "Page Keeper"), lines: [
       L("十二页，三道门。别把钥匙花在错的地方。", "Twelve pages, three gates. Do not spend a key on the wrong one."),
       L("打不过就回墨铺。钱只够买几样。", "Stuck? Go back to the shop. Your purse only covers a few things."),
       L("第一页的墨滴、这页的纸虫，都是绕不过去的门槛。", "The Ink Drop on page one and the Paper Mite here are both hard gates."),
       L("钉书虫有甲，灰蛾先手。先看损耗，再决定打不打。", "Staple bugs wear armor; moths strike first. Read the cost before you swing."),
-      L("右边那间宝屋门口有甲虫。里面的盾值不值这点血，自己算。", "That treasure room to the right has an armored bug at the door. Decide what the shield is worth."),
+      { text: L("右边那间宝屋门口有甲虫。里面的盾值不值这点血，自己算。", "That treasure room to the right has an armored bug at the door. Decide what the shield is worth."),
+        while: { tile: [8, 8, "S"] } },
       L("可疑的墙撞一撞。折缝不会自己开。", "Bump the suspicious walls. The folds do not open themselves.")
     ] },
     5: { art: "folder", name: L("折纸匠", "The Folder"), gift: 6, lines: [
       L("我只折一次。伸出手。", "I fold once only. Hold out your hand."),
-      L("左边钉书虫有甲，右边灰蛾先手。", "The left lane has an armored staple; the right has a first-striking moth."),
-      L("你的炸弹只够解决一个。先想好留哪个。", "Your one bomb only removes one of them. Choose."),
+      { text: L("左边钉书虫有甲，右边灰蛾先手。", "The left lane has an armored staple; the right has a first-striking moth."),
+        while: { tiles: [[3, 4, "k"], [7, 4, "w"]] } },
+      { text: L("你的炸弹只够解决一个。先想好留哪个。", "Your one bomb only removes one of them. Choose."),
+        while: { tiles: [[3, 4, "k"], [7, 4, "w"]] } },
       L("要更利的边，还是更韧的面？", "A sharper edge, or a tougher face?")
+    ], after: [
+      L("折好了。边是边，面是面，别再折回去。", "Folded. Edge stays edge, face stays face. Do not fold it back."),
+      { text: L("再往上没有第二双手替你折。灯芯在折缝里，钥匙省着用。", "No second pair of hands will fold for you higher up. Wicks hide in the seams; spare your keys."),
+        while: { wicksBelow: 3 } },
+      L("打不过就回墨铺。纸塔不笑话回头的人。", "Stuck? Go back to a shop. The tower does not laugh at those who turn back.")
     ], choice: [L("更利的边　攻 +6", "Sharper: ATK +6"), L("更韧的面　守 +6", "Tougher: DEF +6")] },
     9: { art: "ferryman", name: L("渡墨人", "Ink Ferryman"), lines: [
       L("墨海下面没有底，只有沉下去的页。", "Under the Ink Sea there is no bottom, only sunken pages."),
       L("墨海的怪会先手、会吸血。先打弱的，再看损耗。", "The Ink Sea monsters strike first or drain. Take the weak ones first, and read the cost."),
-      L("圣水在守卫室里。门口那只残页魂，打不打由你。", "The holy water is in the guard room. Whether to fight the wraith at its door is your call."),
-      L("三根灯芯在三、七、十一页的折缝里。", "Three wicks wait in the folds of pages three, seven and eleven."),
+      { text: L("圣水在守卫室里。门口那只残页魂，打不打由你。", "The holy water is in the guard room. Whether to fight the wraith at its door is your call."),
+        while: { tile: [8, 8, "W"] } },
+      { text: L("三根灯芯在三、七、十一页的折缝里。", "Three wicks wait in the folds of pages three, seven and eleven."),
+        while: { wicksBelow: 3 } },
       L("第十页是最后一家铺子。钱要留一点。", "Page ten is the last shop. Keep some coin.")
     ] }
   };
@@ -139,7 +153,7 @@ PT.DATA = (function () {
     ] },
     { n: 3, map: [
       "###########", "#....>....#", "#..f...k..#", "#.........#", "#.###%###.#",
-      "#.#...o.#.#", "#.#.*.a.#.#", "#.#...d.#.#", "#.#######.#", "#.<..n....#", "###########"
+      "#.#...o.#.#", "#.#.*.a.#.#", "#.#...d.#.#", "#.#######.#", "#.<.......#", "###########"
     ] },
     { n: 4, map: [
       "###########", "#....>....#", "#..H...a..#", "#.........#", "#..d...S..#",
@@ -155,7 +169,7 @@ PT.DATA = (function () {
     ] },
     { n: 7, map: [
       "###########", "#....>....#", "#..f...u..#", "#.........#", "#.###%###.#",
-      "#~#...c.#k#", "#~#.*.a.#.#", "#~#...d.#.#", "#.#######.#", "#.<..n....#", "###########"
+      "#~#...c.#k#", "#~#.*.a.#.#", "#~#...d.#.#", "#.#######.#", "#.<.......#", "###########"
     ] },
     { n: 8, map: [
       "###########", "#....>....#", "#..H...a..#", "#.........#", "#..d...S..#",

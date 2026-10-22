@@ -591,29 +591,36 @@ function drawForecast(g) {
 async function openMenu() {
   if (busy) return;
   busy = true;
-  var items = [t("状态", "Status"), t("图鉴", "Bestiary"), t("地图", "Map")];
-  var acts = ["status", "bestiary", "map"];
-  if (S.items.bomb + S.items.holy > 0) { items.push(t("道具", "Items")); acts.push("items"); }
-  items.push(t("存档", "Save")); acts.push("save");
-  items.push(t("说明", "How to play")); acts.push("help");
-  items.push(t("回标题", "Title")); acts.push("title");
-  var i = await game.choose(items, { title: t("第 {n} 页　{name}", "Page {n}　{name}").replace("{n}", S.floor).replace("{name}", tname(D.FLOOR_NAMES[S.floor - 1])) });
-  if (i < 0) { busy = false; return; }
-  var act = acts[i];
-  if (act === "status") await game.push(statusScene());
-  else if (act === "bestiary") await game.push(bestiaryScene());
-  else if (act === "map") await game.push(mapScene());
-  else if (act === "items") await game.push(itemScene());
-  else if (act === "save") { await game.push(slotsScene("save")); }
-  else if (act === "help") await helpPages();
-  else if (act === "title") {
-    var c = await game.choose([t("存好并回去", "Save and go"), t("留在这里", "Stay")], { title: t("回标题？", "Back to the title?") });
-    if (c === 0) { saveAuto(); busy = false; music("title"); game.go("title", null, { fade: true }); return; }
+  var sel = 0, lastAct = null;
+  while (true) {
+    var items = [t("状态", "Status"), t("图鉴", "Bestiary"), t("地图", "Map")];
+    var acts = ["status", "bestiary", "map"];
+    if (S.items.bomb + S.items.holy > 0) { items.push(t("道具", "Items")); acts.push("items"); }
+    items.push(t("存档", "Save")); acts.push("save");
+    items.push(t("说明", "How to play")); acts.push("help");
+    items.push(t("回标题", "Title")); acts.push("title");
+    /* Coming back from a submenu puts the cursor on the entry that opened it. */
+    var at = lastAct == null ? sel : acts.indexOf(lastAct);
+    if (at < 0) at = Math.min(sel, items.length - 1);
+    var i = await game.choose(items, { index: at, title: t("第 {n} 页　{name}", "Page {n}　{name}").replace("{n}", S.floor).replace("{name}", tname(D.FLOOR_NAMES[S.floor - 1])) });
+    if (i < 0) break;
+    sel = i; lastAct = acts[i];
+    var act = acts[i];
+    if (act === "status") await game.push(statusScene());
+    else if (act === "bestiary") await game.push(bestiaryScene());
+    else if (act === "map") await game.push(mapScene());
+    else if (act === "items") await game.push(itemScene());
+    else if (act === "save") { await game.push(slotsScene("save")); }
+    else if (act === "help") await helpPages();
+    else if (act === "title") {
+      var c = await game.choose([t("存好并回去", "Save and go"), t("留在这里", "Stay")], { title: t("回标题？", "Back to the title?") });
+      if (c === 0) { saveAuto(); busy = false; music("title"); game.go("title", null, { fade: true }); return; }
+    }
   }
   busy = false;
 }
 async function helpPages() {
-  await game.say([
+  await game.push(helpScene([
     t("你是阿折，纸塔里的送信人。塔顶的长明灯灭了，纸开始发软。", "You are A Zhe, a courier in the paper tower. The Everlamp is out, and the paper is going soft."),
     t("爬上十二页，把灯点回来。蠹王在灯座上。", "Climb twelve pages and light it again. The Bookworm King sits on the lamp stand."),
     t("方向键走。A 说话、开门、打怪。START 或 B 打开菜单。", "Arrows walk. A talks, opens and fights. START or B opens the menu."),
@@ -625,7 +632,39 @@ async function helpPages() {
     t("打不过就回商店。三间墨铺，越买越贵，货也有限。", "Stuck? Go back to a shop. Three shops, rising prices, limited stock."),
     t("败北不会结束游戏：塔把你折回本页入口，只收两成金币。", "Defeat is not the end: the tower folds you back to this page's entrance and takes a fifth of your gold."),
     t("三根灯芯在三、七、十一页的折缝里。带齐了，蠹王会弱一些。", "Three wicks wait in the seams of pages three, seven and eleven. With all three, the King is weaker.")
-  ], { name: t("怎么玩", "How to play") });
+  ]));
+}
+/* The instructions are a plain paged sheet, not a story: A turns the page, START or B leaves. */
+function helpScene(tips) {
+  var lh = game.g.lineHeight, per = 3, lines = [], pages = [], i, j;
+  for (i = 0; i < tips.length; i++) {
+    var wrapped = game.g.wrap(tname(tips[i]), game.width - 16);
+    for (j = 0; j < wrapped.length; j++) lines.push(wrapped[j]);
+  }
+  for (i = 0; i < lines.length; i += per) pages.push(lines.slice(i, i + per));
+  var page = 0, boxH = per * lh + 10, top = game.height - boxH;
+  var name = t("怎么玩", "How to play");
+  var hint = t("A 翻页　START / B 结束", "A next　START / B end");
+  return {
+    update: function () {
+      if (game.pressed("start") || game.pressed("b")) { sfx("miss"); game.pop(true); return; }
+      if (game.pressed("a") || game.pointer.pressed) {
+        if (page < pages.length - 1) { page++; sfx("move"); }
+        else { sfx("move"); game.pop(true); }
+      }
+    },
+    draw: function (g) {
+      g.origin(0, 0); g.clip();
+      var ny = top - lh - 3, nw = g.measure(name) + 10;
+      g.window(4, ny, nw, lh + 4, { thin: true });
+      g.text(name, 9, ny + 2);
+      var hw = g.measure(hint) + 10;
+      g.window(game.width - 4 - hw, 4, hw, lh + 4, { thin: true });
+      g.text(hint, game.width - 4 - hw + 5, 6, { color: g.DARK });
+      g.window(0, top, game.width, boxH);
+      for (var k = 0; k < pages[page].length; k++) g.text(pages[page][k], 8, top + 5 + k * lh);
+    }
+  };
 }
 
 function statusScene() {
@@ -891,7 +930,7 @@ async function talk() {
   var npc = D.NPCS[S.floor];
   if (!npc) return;
   busy = true;
-  await game.say(npc.lines.map(function (l) { return tname(l); }), { name: tname(npc.name) });
+  await game.say(R.npcLines(S).map(function (l) { return tname(l); }), { name: tname(npc.name) });
   if (npc.choice && !S.flags["gift:" + S.floor]) {
     var i = await game.choose(npc.choice.map(function (c) { return tname(c); }), { title: tname(npc.name) });
     if (i === 0) { S.atk += npc.gift; sfx("gem"); toast(t("攻 +{n}", "ATK +{n}").replace("{n}", npc.gift)); }
