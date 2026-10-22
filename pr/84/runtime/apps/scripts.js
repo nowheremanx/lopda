@@ -327,7 +327,7 @@ function promptIdea(){
 var PAD_USE=/\bPAD\s*\.\s*(?:isDown|BUTTONS)\b|\bPAD\s*\.\s*on\s*\(\s*['"`](?:press|release)['"`]/;
 function usesPad(code){ return PAD_USE.test(String(code||"")); }
 function copyPrompt(){
-  saveIdeaSoon();
+  if(M.ideaTouched || M.idea) saveIdeaSoon();
   var text=tr("scripts.prompt",{idea:promptIdea()});
   copyText(text).then(function(){
     var box=$("scripts-prompt-box"); if(box) box.hidden=true;
@@ -633,7 +633,7 @@ LP.builtin({id:"scripts", label:"app.scripts", icon:function(){ return ICON; }, 
 });
 LP.builtin({id:"script-idea", view:"script-idea", keepPad:false,
   enter:function(){ renderIdea(); },
-  leave:function(){ closeIdeaAsk(); saveIdeaNow(); },
+  leave:function(){ closeIdeaAsk(); if(M.ideaTouched || M.idea) saveIdeaNow(); },
   lang:function(){ if(!$("v-script-idea").hidden) renderIdea(); }
 });
 LP.builtin({id:"script-edit", view:"script-edit", keepPad:false,
