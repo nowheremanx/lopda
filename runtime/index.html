@@ -242,7 +242,6 @@
       </div>
       <ul class="lcd-menu dk-list" id="dk-list"></ul>
       <p class="hint dk-status" id="dk-status"></p>
-      <div id="dk-keys"></div>
       <!-- developing: a four-tone animation over the box -->
       <div class="dk-full dk-dev" id="dk-dev" hidden>
         <canvas id="dk-dev-cv" width="128" height="112"></canvas>
@@ -254,6 +253,9 @@
         <div class="dk-photo" id="dk-photo"><canvas id="dk-vcv" width="800" height="700"></canvas><p class="dk-wait" id="dk-vwait" hidden></p></div>
       </div>
       <div class="dict-sheet dk-sheet" id="dk-sheet" hidden></div>
+      <!-- one key row for every darkroom screen: the box, the viewer, developing and every sheet.
+           The overlays stop 44 px above the bottom so this row never moves (owner 2026-10-21). -->
+      <div id="dk-keys"></div>
       <input type="file" id="dk-file" accept="image/png,image/*" hidden>
     </section>
 

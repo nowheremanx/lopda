@@ -12,10 +12,13 @@
  *
  * The viewer is the one place where the LCD shows colour: the print laid on the glass. Everything else here is four-tone.
  *
- * Keys: the film box ▲▼ pick, A the roll's menu, START import a negative; the menu ▲▼ A B; naming A keeps, B cancels.
- * Developing ignores every key. The viewer: ◀▶ previous / next frame, START prints, B back to the box, A nothing.
- * The print menu ▲▼ A B. Export, import and prints open the share sheet or the file picker, so they act on A's release
- * (a press is not a gesture).
+ * Keys: the film box ▲▼ pick, A or START the roll's menu, SELECT import a negative; the menu ▲▼ A B; naming A keeps,
+ * B cancels. Developing ignores every key. The viewer: ◀▶ previous / next frame, START prints, B back to the box,
+ * A nothing. The print menu ▲▼ A B. Export, import and prints open the share sheet or the file picker, so they act
+ * on a release (a press is not a gesture).
+ *
+ * One key row (#dk-keys) at the bottom of every darkroom screen: the box, the viewer, developing and every sheet.
+ * The overlays stop 44 px above it, so its four cells never move (owner 2026-10-21).
  */
 (function(){
 "use strict";
@@ -59,6 +62,26 @@ function load(){
     D.rolls=fresh; D.loaded=true;
   }).catch(function(){ D.loaded=true; });
 }
+/*
+ * The one key row. Every screen draws it through here, so the four cells keep their box: the box, the viewer,
+ * developing (no keys) and the sheets (A confirms, B goes back; naming saves or cancels).
+ */
+function renderKeys(){
+  var empty=!ids().length, keys;
+  if(D.mode==="dev"){
+    keys={select:null,start:null,b:null,a:null};
+  }else if(D.sheet==="name"){
+    keys={select:null,start:null,b:softkey("b","sk.cancel"),a:softkey("a","sk.save")};
+  }else if(D.sheet){
+    keys={select:null,start:null,b:softkey("b",D.sheet==="print"?"sk.cancel":"sk.back",!!D.busy),a:softkey("a","sk.confirm",!!D.busy)};
+  }else if(D.mode==="view"){
+    keys={select:null,start:softkey("start","sk.print",!!D.busy),b:softkey("b","sk.back",!!D.busy),a:null};
+  }else{
+    keys={select:softkey("select","sk.import",!!D.busy),start:softkey("start","sk.open",!!D.busy||empty),
+      b:null,a:softkey("a","sk.open",!!D.busy||empty)};
+  }
+  LP.softkeys($("dk-keys"),keys);
+}
 function render(){
   var list=ids(), ul=$("dk-list"); ul.textContent="";
   D.pick=Math.max(0,Math.min(D.pick,list.length-1));
@@ -74,10 +97,7 @@ function render(){
     ul.appendChild(li);
   });
   $("dk-status").textContent=D.busy||"";
-  LP.softkeys($("dk-keys"),{
-    select:null,start:softkey("start","sk.import",!!D.busy),
-    b:null,a:softkey("a","sk.open",!!D.busy||!list.length)
-  });
+  renderKeys();
   var on=ul.querySelector("li.on"); if(on && on.scrollIntoView) on.scrollIntoView({block:"nearest"});
 }
 
@@ -113,7 +133,7 @@ function renderSheet(){
   head.appendChild(el("span","",top));
   if(top!==FILM.stockLabel(r.stock)) head.appendChild(el("small","",FILM.stockLabel(r.stock)));
   sh.appendChild(head);
-  if(D.sheet==="name"){ nameSheet(sh,r); return; }
+  if(D.sheet==="name"){ nameSheet(sh,r); renderKeys(); return; }
   if(D.sheet==="export" || D.sheet==="discard") sh.appendChild(el("p","hint dk-note",tr(D.sheet==="export"?"dk.export.note":"dk.discard.note")));
   var ul=el("ul","lcd-menu");
   sheetItems().forEach(function(it,i){
@@ -123,13 +143,7 @@ function renderSheet(){
     ul.appendChild(li);
   });
   sh.appendChild(ul);
-  var keys=el("div");
-  LP.softkeys(keys,{
-    select:null,start:null,
-    b:softkey("b",D.sheet==="print"?"sk.cancel":"sk.back",!!D.busy),
-    a:softkey("a","sk.confirm",!!D.busy)
-  });
-  sh.appendChild(keys);
+  renderKeys();
 }
 function nameSheet(sh,r){
   var form=el("form","dk-name"), input=el("input");
@@ -139,13 +153,6 @@ function nameSheet(sh,r){
   form.onsubmit=function(e){ e.preventDefault(); saveName(); };
   input.addEventListener("keydown",function(e){ if(e.key==="Escape"){ e.preventDefault(); cancelName(); } });
   sh.appendChild(form);
-  var keys=el("div");
-  LP.softkeys(keys,{
-    select:null,start:null,
-    b:softkey("b","sk.cancel"),
-    a:softkey("a","sk.save")
-  });
-  sh.appendChild(keys);
   /* inside the tap that chose "name", so a phone opens its keyboard */
   input.focus();
 }
@@ -176,7 +183,7 @@ function pick(){
 function back(){
   if(D.sheet==="menu"){ sfx("miss"); closeSheet(); }
   else if(D.sheet==="name") cancelName();
-  else if(D.sheet==="print"){ sfx("miss"); D.sheet=""; renderSheet(); }
+  else if(D.sheet==="print"){ sfx("miss"); D.sheet=""; renderSheet(); renderKeys(); }
   else if(D.sheet){ sfx("miss"); var was=D.sheet; toMenu(was); D.neg=null; renderSheet(); }
 }
 function busy(text){ D.busy=text; renderSheet(); render(); }
@@ -380,7 +387,7 @@ function startDevelop(r){
   var gen=++D.gen, at=Date.now(), dev={v:DEV.VERSION, seed:DEV.devSeed(r.id,at), at:at};
   var pics={id:r.id, img:[], job:[]}, work={done:0, total:r.frames.length, end:false}, t0=now(), last=-1;
   D.sheet=""; renderSheet(); D.mode="dev"; D.pics=pics;
-  $("dk-dev").hidden=false; $("dk-view").hidden=true;
+  $("dk-dev").hidden=false; $("dk-view").hidden=true; renderKeys();
   (function next(k){
     if(gen!==D.gen) return;
     if(k>=work.total){
@@ -411,7 +418,7 @@ function openViewer(r){
   D.sheet=""; renderSheet();
   if(!D.pics || D.pics.id!==r.id) D.pics={id:r.id, img:[], job:[]};
   D.mode="view"; D.idx=0;
-  $("dk-dev").hidden=true; $("dk-view").hidden=false;
+  $("dk-dev").hidden=true; $("dk-view").hidden=false; renderKeys();
   showFrame(); prefetch(r);
 }
 /* the pictures are developed again each time the roll is opened, never stored: one at a time, the one on screen first */
@@ -515,10 +522,10 @@ function printOut(kind){
     },function(e){ if(!(e && e.code==="declined")){ toast(LP.saveErr(e)); sfx("err"); } });
   };
   D.sheet=""; renderSheet();
-  if(job && job.out){ sfx("tap"); save(job.out); return; }
-  sfx("tap"); D.busy=tr("dk.printing"); viewWait(D.busy);
+  if(job && job.out){ sfx("tap"); renderKeys(); save(job.out); return; }
+  sfx("tap"); D.busy=tr("dk.printing"); viewWait(D.busy); renderKeys();
   (job ? job.promise : buildPrint(kind,r,D.idx)).then(save,function(e){ toast(tr("save.failed",{code:(e&&e.message)||"?"})); sfx("err"); }).then(function(){
-    D.busy=null; if(D.mode==="view") viewWait(D.pics && D.pics.img[D.idx] ? null : "…");
+    D.busy=null; if(D.mode==="view") viewWait(D.pics && D.pics.img[D.idx] ? null : "…"); renderKeys();
   });
 }
 
@@ -581,7 +588,8 @@ function darkButton(b,down){
   }
   if(D.mode==="view"){ viewButton(b,down); return; }
   var count=ids().length;
-  if(b==="start"){ if(!down) startImport(); return; }   /* on release: the file picker */
+  if(b==="select"){ if(!down) startImport(); return; }   /* on release: the file picker */
+  if(b==="start"){ if(down && count){ sfx("tap"); openMenu(); } return; }
   if(!down) return;
   if((b==="up"||b==="down") && count){ D.pick=Math.max(0,Math.min(count-1,D.pick+(b==="up"?-1:1))); sfx("move"); render(); }
   else if(b==="a" && count){ sfx("tap"); openMenu(); }
