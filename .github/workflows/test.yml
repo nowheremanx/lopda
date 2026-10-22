@@ -1,5 +1,18 @@
 name: test
-on: [push, pull_request]
+# A push to a branch that has an open PR already runs this workflow as pull_request;
+# triggering on every push as well ran the whole suite twice per push. `push` now
+# means main (a merge, or a direct commit), so each change is tested once.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A new push to the same PR makes the run before it pointless: cancel that one.
+# Pushes to main keep their own group so a merge never cancels another merge's run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     runs-on: ubuntu-latest
