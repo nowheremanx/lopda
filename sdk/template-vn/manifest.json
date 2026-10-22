@@ -3,6 +3,7 @@
   "id": "my-vn",
   "name": "小剧场",
   "glyph": "剧",
+  "category": "story",
   "version": "0.1.0",
   "description": "视觉小说模板：立绘、背景、打字机文字、选项、回看、存档。改成你自己的故事。",
   "i18n": {

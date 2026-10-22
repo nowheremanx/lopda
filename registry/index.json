@@ -7,6 +7,7 @@
       "id": "blow-candles",
       "name": "吹蜡烛",
       "glyph": "烛",
+      "category": "game",
       "buttons": true,
       "icon": [
         "................",
@@ -52,6 +53,7 @@
       "id": "calculator",
       "name": "计算器",
       "glyph": "算",
+      "category": "productivity",
       "icon": [
         "................",
         "...0000000000...",
@@ -89,6 +91,7 @@
       "id": "daily-slip",
       "name": "每日一签",
       "glyph": "签",
+      "category": "life",
       "buttons": true,
       "icon": [
         "................",
@@ -134,6 +137,7 @@
       "id": "fake-yu",
       "name": "滥竽充数",
       "glyph": "竽",
+      "category": "game",
       "buttons": true,
       "icon": [
         "................",
@@ -172,6 +176,7 @@
       "id": "gomoku",
       "name": "五子棋",
       "glyph": "棋",
+      "category": "game",
       "icon": [
         "................",
         ".1111111111111..",
@@ -209,6 +214,7 @@
       "id": "kana-cards",
       "name": "五十音图",
       "glyph": "あ",
+      "category": "education",
       "buttons": true,
       "icon": [
         "................",
@@ -251,6 +257,7 @@
       "id": "paint",
       "name": "点阵画板",
       "glyph": "画",
+      "category": "create",
       "icon": [
         "................",
         "............000.",
@@ -291,6 +298,7 @@
       "id": "paper-tower",
       "name": "纸塔",
       "glyph": "纸",
+      "category": "game",
       "buttons": true,
       "icon": [
         "................",
@@ -329,6 +337,7 @@
       "id": "photo-puzzle",
       "name": "拍照拼图",
       "glyph": "拼",
+      "category": "game",
       "buttons": true,
       "icon": [
         "................",
@@ -374,6 +383,7 @@
       "id": "rain-station",
       "name": "雨站",
       "glyph": "雨",
+      "category": "story",
       "buttons": true,
       "icon": [
         "................",
@@ -416,6 +426,7 @@
       "id": "sound-board",
       "name": "声音样本",
       "glyph": "声",
+      "category": "education",
       "buttons": true,
       "version": "1.0.2",
       "description": "这台机器能发出的每一种声音：两首乐曲、六种环境声、十个具名音效和几个自定义音效，选中就显示写法。",
@@ -436,6 +447,7 @@
       "id": "tilt-maze",
       "name": "滚珠迷宫",
       "glyph": "珠",
+      "category": "game",
       "buttons": true,
       "icon": [
         "0000000000000000",
@@ -481,6 +493,7 @@
       "id": "vector-dream",
       "name": "矢量梦",
       "glyph": "梦",
+      "category": "create",
       "buttons": true,
       "version": "0.2.0",
       "description": "手写的软件三维渲染：环结、飞越山地、晶体。方向键转视角，A 换场景，B 线框。",
@@ -501,6 +514,7 @@
       "id": "whack-a-mole",
       "name": "打地鼠",
       "glyph": "鼠",
+      "category": "game",
       "icon": [
         "................",
         "................",
@@ -538,6 +552,7 @@
       "id": "xiaoyuan",
       "name": "小院",
       "glyph": "院",
+      "category": "game",
       "buttons": true,
       "icon": [
         "................",
@@ -576,6 +591,7 @@
       "id": "zhenyao-tower",
       "name": "镇妖塔·序章",
       "glyph": "塔",
+      "category": "game",
       "buttons": true,
       "version": "0.4.0",
       "description": "仙侠序章，可通关。卡带内置 LX-3D 协处理器：三维小镇、山道、塔内与斗法。",

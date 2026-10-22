@@ -3,6 +3,7 @@
   "id": "vector-dream",
   "name": "矢量梦",
   "glyph": "梦",
+  "category": "create",
   "version": "0.2.0",
   "description": "手写的软件三维渲染：环结、飞越山地、晶体。方向键转视角，A 换场景，B 线框。",
   "i18n": {

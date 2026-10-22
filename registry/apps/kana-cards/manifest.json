@@ -3,6 +3,7 @@
   "id": "kana-cards",
   "name": "五十音图",
   "glyph": "あ",
+  "category": "education",
   "version": "1.4.0",
   "description": "学习平假名和片假名（含浊音、半浊音），听发音，再做四选一小测。",
   "i18n": {
