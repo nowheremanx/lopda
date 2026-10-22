@@ -2,7 +2,7 @@
 
 A four-tone handheld that lives on your phone. Hi-PDA's low-fidelity cousin.
 
-一台住在手机里的四色掌机，Hi-PDA 的低保真表亲。
+**[中文介绍 / 中文截图 →](README.zh.md)**
 
 **Try it:** https://nowheremanx.github.io/lopda/ — open it on a phone and "Add to Home Screen".
 
@@ -31,7 +31,7 @@ as a four-tone negative PNG that carries the colour originals inside, and come b
 
 ## What's inside
 
-![Notes with today's diary, the calendar with lunar dates and a folded corner on days with a diary, a dictionary entry, and a page of the Analects in the reader](docs/images/builtins.png)
+![Notes with today's diary, the calendar with lunar dates and a folded corner on days with a diary, a dictionary entry, and a page of Alice in Wonderland in the reader](docs/images/builtins.png)
 
 | Built-in | 内置 | What it does |
 |---|---|---|
@@ -60,7 +60,7 @@ Fifteen apps today, all open source and all made for Lo-PDA:
 
 Preinstalled apps are ordinary store apps: remove them and they stay removed; the store has them again.
 
-## Make an app / 做一个 app
+## Make an app
 
 An app is one HTML file of up to 512 KB and a `manifest.json`. It runs in a sandboxed iframe with no network
 and no storage of its own, and talks to the handheld through a small `PAD` object:
@@ -88,7 +88,7 @@ node tools/build-index.mjs
 - The online harness loads any registry app with buttons and a log, nothing to install:
   `https://nowheremanx.github.io/lopda/sdk/dev.html?app=registry/apps/<id>`.
 - To submit, open a pull request; [`CONTRIBUTING.md`](CONTRIBUTING.md) has the steps in English and Chinese, and
-  [`docs/REVIEW.md`](docs/REVIEW.md) says what a review looks for. 完整双语步骤和投稿清单见 CONTRIBUTING.md。
+  [`docs/REVIEW.md`](docs/REVIEW.md) says what a review looks for.
 
 ## Your data
 
@@ -129,7 +129,7 @@ or publish the repository with GitHub Pages.
 runtime/     the PWA: index.html, core.js, apps/ (one file per built-in), boot.js, strings.js, platform.js, sw.js, fonts, vendor
 sdk/         MIT: PAD bridge, lo-game.js, lo-3d.js, templates, dev harness, AI prompts
 registry/    index.json + apps/<id>/{manifest.json,index.html}
-tools/       check-app.mjs, build-index.mjs, bundle-app.mjs, readme-shots.mjs (Node 20+, no dependencies)
+tools/       check-app.mjs, build-index.mjs, bundle-app.mjs (Node 20+, no dependencies), readme-shots.mjs (needs Playwright)
 tests/       run with `node --test`
 docs/        decisions.md (why things are the way they are), design notes, review rules
 SPEC.md      app specification lopda/1
@@ -141,7 +141,7 @@ Every change should take a decision away from the user, or at least not add one.
 no previews, one development per roll, frames you can't edit. The limits are the point.
 Why things are the way they are: [`docs/decisions.md`](docs/decisions.md).
 
-<sub>The screenshots were made in a desktop browser by `tools/readme-shots.mjs`, with the camera fed a lake drawn in code.</sub>
+<sub>The screenshots were made in a desktop browser by `tools/readme-shots.mjs` (`--lang=zh` for the Chinese ones), with the camera fed a lake drawn in code.</sub>
 
 ## License
 

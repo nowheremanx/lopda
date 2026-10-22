@@ -1,11 +1,12 @@
 // The README's pictures: drives the runtime in Chromium and writes docs/images/.
 // Needs Playwright (not a dependency: npm i --no-save playwright, or a global install found through NODE_PATH).
 //
-//   node tools/readme-shots.mjs [outDir] [--raw] [--only=camera,notes,calendar,dict,reader,store,games]
+//   node tools/readme-shots.mjs [outDir] [--lang=en|zh] [--raw] [--only=camera,notes,calendar,dict,reader,store,games]
 //
-// Writes screens.png, builtins.png, apps.png (four screens each), contact-sheet.png and film-strip.png into outDir
-// (default docs/images). --raw keeps every single screen in <outDir>/raw/; --only runs some parts (a row whose
-// screens are missing is skipped).
+// Writes screens.png, builtins.png, apps.png (four screens each) into outDir, plus contact-sheet.png and film-strip.png
+// in English (the prints are the same in both languages). The default outDir is docs/images for English (README.md)
+// and docs/images/zh for Chinese (README.zh.md). --raw keeps every single screen in <outDir>/raw/; --only runs some
+// parts (a row whose screens are missing is skipped).
 //
 // The camera is Chromium's fake device fed from tools/readme-scene.mjs (a lake drawn in code), so the photos
 // belong to nobody. The clock, Math.random and crypto are fixed as in tests/runtime-shots.mjs, so two runs give
@@ -59,7 +60,23 @@ function initScript() {
 }
 
 const args = process.argv.slice(2);
-const OUT = resolve(args.find((a) => !a.startsWith("--")) || join(ROOT, "docs", "images"));
+const LANG = (args.find((a) => a.startsWith("--lang=")) || "--lang=en").slice(7);
+if (LANG !== "en" && LANG !== "zh") { console.error("--lang is en or zh"); process.exit(2); }
+const OUT = resolve(args.find((a) => !a.startsWith("--")) || join(ROOT, "docs", "images", LANG === "zh" ? "zh" : ""));
+
+/* what the script reads on the screen, and what it writes into the notes, in each language */
+const T = {
+  zh: { boot: "启动中…", open: "打开", camera: "点阵相机", darkroom: "冲洗店", notes: "记事本", calendar: "万年历", dict: "词典",
+        reader: "阅读器", book: "論語", store: "应用商店", puzzle: "拍照拼图", tower: "纸塔", yu: "滥竽充数", rain: "雨站",
+        today: "去湖边拍完了一卷胶卷。船从左边划到右边，正好八张。", earlier: "秋天第一次穿外套。",
+        quote: "《論語》\n學而時習之，不亦說乎。#摘抄", todo: "买胶卷\n周六去冲洗店。#待办" },
+  en: { boot: "BOOT…", open: "Open", camera: "Camera", darkroom: "Darkroom", notes: "Notes", calendar: "Calendar", dict: "Dict",
+        reader: "Reader", book: "Alice", store: "Store", puzzle: "SnapTile", tower: "Paper", yu: "Fake Yu", rain: "Rain Stn",
+        today: "Shot a whole roll by the lake. The boat crossed from left to right, eight frames exactly.",
+        earlier: "First cold morning. Wore a coat.",
+        quote: "Alice\u2019s Adventures in Wonderland\n\u201cCuriouser and curiouser!\u201d cried Alice. #quotes",
+        todo: "Buy film\nTake the roll to the darkroom on Saturday. #todo" },
+}[LANG];
 const RAW = join(OUT, "raw");
 const KEEP_RAW = args.includes("--raw");
 
@@ -77,7 +94,7 @@ const browser = await pw.chromium.launch({ args: [
   "--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream", `--use-file-for-fake-video-capture=${cam}`,
   "--force-color-profile=srgb", "--font-render-hinting=none"] });
 const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1, hasTouch: false,
-  reducedMotion: "reduce", timezoneId: "Asia/Shanghai", locale: "zh-CN", serviceWorkers: "block", acceptDownloads: true,
+  reducedMotion: "reduce", timezoneId: "Asia/Shanghai", locale: LANG === "zh" ? "zh-CN" : "en-US", serviceWorkers: "block", acceptDownloads: true,
   permissions: ["camera"] });
 await ctx.addInitScript(initScript);
 const p = await ctx.newPage();
@@ -100,7 +117,7 @@ const key = async (k, n = 1, gap = 120) => { for (let i = 0; i < n; i++) { await
 
 await p.goto(base + "/runtime/", { waitUntil: "load" });
 await p.waitForFunction(() => window.LopdaPlatform && window.LopdaStrings);
-await p.waitForFunction(() => document.getElementById("savestate").textContent !== "启动中…", null, { timeout: 8000 });
+await p.waitForFunction((boot) => document.getElementById("savestate").textContent !== boot, T.boot, { timeout: 8000 });
 await p.waitForLoadState("networkidle");
 await p.waitForTimeout(800);
 
@@ -109,7 +126,7 @@ const want = (name) => !ONLY.length || ONLY.includes(name);
 
 /* ---- camera: a roll of 8, shot while the boat crosses the lake, unloaded into the film box ---- */
 if (want("camera")) {
-await tile("点阵相机");
+await tile(T.camera);
 await p.waitForSelector("#cam-load:not([hidden])"); await p.waitForTimeout(700);
 await p.click("#roll-count"); await p.click("#roll-count");   /* 12 -> 16 -> 8 */
 await p.click("#roll-go");
@@ -127,7 +144,7 @@ await p.waitForSelector("#cam-load:not([hidden])");
 await settle(400);
 
 /* ---- darkroom: develop, the colour viewer, the contact sheet and the film strip ---- */
-await home(); await tile("冲洗店");
+await home(); await tile(T.darkroom);
 await p.waitForSelector("#dk-list li.on"); await p.waitForTimeout(300);
 await key("x"); await p.waitForSelector("#dk-sheet:not([hidden])");
 await key("x");                                               /* 冲洗 */
@@ -147,37 +164,38 @@ await home();
 
 /* ---- notes: today's diary, so the calendar has a folded corner on it too ---- */
 if (want("notes") || want("calendar")) {
-  await p.evaluate(() => {
+  await p.evaluate((T) => {
     const now = Date.now(), d = (n) => now - n * 864e5, day = (n) => new Date(d(n) + 8 * 36e5).toISOString().slice(0, 10);
+    const title = (k) => LopdaNoteText.diaryTitle(k, LP.I18N.lang, LP.tr, window.LopdaLunar);
     const notes = LP.S.refs.notes;
-    notes.doc().set({ body: "10月22日 周四 · 九月十三\n去湖边拍完了一卷胶卷。船从左边划到右边，正好八张。", day: day(0), created: d(0), updated: d(0) });
-    notes.doc().set({ body: "10月18日 周日 · 九月初九\n秋天第一次穿外套。", day: day(4), created: d(4), updated: d(4) });
-    notes.doc().set({ body: "《論語》\n學而時習之，不亦說乎。#摘抄", src: "reader", created: d(2), updated: d(2) });
-    notes.doc().set({ body: "买胶卷\n周六去冲洗店。#待办", created: d(1), updated: d(1) });
-  });
+    notes.doc().set({ body: title(day(0)) + "\n" + T.today, day: day(0), created: d(0), updated: d(0) });
+    notes.doc().set({ body: title(day(4)) + "\n" + T.earlier, day: day(4), created: d(4), updated: d(4) });
+    notes.doc().set({ body: T.quote, src: "reader", created: d(2), updated: d(2) });
+    notes.doc().set({ body: T.todo, created: d(1), updated: d(1) });
+  }, T);
   await p.evaluate(() => LP.refresh("notes"));
 }
 if (want("notes")) {
-  await home(); await tile("记事本"); await p.waitForTimeout(500);
+  await home(); await tile(T.notes); await p.waitForTimeout(500);
   await shot("notes");
 }
 if (want("calendar")) {
-  await home(); await tile("万年历"); await p.locator("#v-cal:not([hidden])").waitFor(); await p.waitForTimeout(500);
+  await home(); await tile(T.calendar); await p.locator("#v-cal:not([hidden])").waitFor(); await p.waitForTimeout(500);
   await shot("calendar");
 }
 
 /* ---- dictionary: one entry from the built-in ECDICT ---- */
 if (want("dict")) {
-  await home(); await tile("词典"); await p.waitForTimeout(800);
+  await home(); await tile(T.dict); await p.waitForTimeout(800);
   await p.fill("#dict-q", "film"); await p.waitForTimeout(600);
   await p.keyboard.press("Enter"); await p.waitForTimeout(800);
   await shot("dict");
 }
 
-/* ---- reader: the first sample book, a few pages in ---- */
+/* ---- reader: a sample book (the Analects in Chinese, Alice in English), a few pages in ---- */
 if (want("reader")) {
-  await home(); await tile("阅读器"); await p.waitForSelector("#rd-list li", { timeout: 10000 }); await p.waitForTimeout(500);
-  await p.locator("#rd-list li").first().click();
+  await home(); await tile(T.reader); await p.waitForSelector("#rd-list li", { timeout: 10000 }); await p.waitForTimeout(500);
+  await p.locator("#rd-list li", { hasText: T.book }).first().click();
   await p.waitForSelector("#rd-book:not([hidden])", { timeout: 15000 }); await p.waitForTimeout(800);
   await key("ArrowRight", 3, 400);
   await shot("reader", 800);
@@ -185,21 +203,21 @@ if (want("reader")) {
 
 /* ---- store ---- */
 if (want("store")) {
-  await home(); await tile("应用商店");
+  await home(); await tile(T.store);
   await p.waitForSelector("#store-list .store-item", { timeout: 10000 }); await p.waitForTimeout(500);
   await shot("store");
 }
 
 /* ---- store apps: install, run, a few presses into play ---- */
 const play = async (label, steps) => {
-  await home(); await tile("应用商店");
+  await home(); await tile(T.store);
   await p.waitForSelector("#store-list .store-item", { timeout: 10000 });
   await p.waitForLoadState("networkidle"); await p.waitForTimeout(800);   /* the list draws again once the index arrives */
   const item = p.locator("#store-list .store-item", { hasText: label }).first();
   await item.scrollIntoViewIfNeeded();
-  if ((await item.locator("button").textContent()) !== "打开") {
+  if ((await item.locator("button").textContent()) !== T.open) {
     await item.locator("button").click();
-    await p.waitForFunction((l) => { const li = [...document.querySelectorAll("#store-list .store-item")].find((e) => e.textContent.includes(l)); return li && li.querySelector("button").textContent === "打开"; }, label, { timeout: 15000 });
+    await p.waitForFunction(([l, open]) => { const li = [...document.querySelectorAll("#store-list .store-item")].find((e) => e.textContent.includes(l)); return li && li.querySelector("button").textContent === open; }, [label, T.open], { timeout: 15000 });
     await settle(300);
   }
   await item.locator("button").click();
@@ -212,10 +230,10 @@ const play = async (label, steps) => {
 };
 /* "name" takes a screenshot called name; a number waits; anything else is a key */
 const GAMES = [
-  ["拍照拼图", ["x", 800, "x", 1500, "x", 1500, "x", 2500, "puzzle"]],          /* allow the camera, shoot the lake, use it */
-  ["纸塔", ["x", 800, "x", 800, "x", 800, "paper-tower"]],
-  ["滥竽充数", ["ArrowDown", "x", 800, "x", 8000, "fake-yu"]],                  /* 选曲, the first song, mid-song */
-  ["雨站", ["x", 800, "x", 800, "rain-station"]],
+  [T.puzzle, ["x", 800, "x", 1500, "x", 1500, "x", 2500, "puzzle"]],          /* allow the camera, shoot the lake, use it */
+  [T.tower, ["x", 800, "x", 800, "x", 800, "paper-tower"]],
+  [T.yu, ["ArrowDown", "x", 800, "x", 8000, "fake-yu"]],                  /* 选曲, the first song, mid-song */
+  [T.rain, ["x", 800, "x", 3000, "rain-station"]],
 ];
 for (const [label, steps] of GAMES) if (want("games")) await play(label, steps);
 
@@ -241,7 +259,7 @@ for (const [file, names] of Object.entries(ROWS)) {
   await writeFile(join(OUT, file), Buffer.from(out, "base64")); console.log("wrote", file);
 }
 /* the prints at the size the README shows them (the darkroom writes them at 2x and 3x) */
-for (const [from, to, w, h] of [["contact.png", "contact-sheet.png", 720, 960], ["filmstrip.png", "film-strip.png", 1212, 160]]) {
+if (LANG === "en") for (const [from, to, w, h] of [["contact.png", "contact-sheet.png", 720, 960], ["filmstrip.png", "film-strip.png", 1212, 160]]) {
   if (!existsSync(join(RAW, from))) continue;
   const out = await p.evaluate(async ([png, w, h]) => {
     const b = await createImageBitmap(await (await fetch("data:image/png;base64," + png)).blob());
