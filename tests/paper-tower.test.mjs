@@ -95,6 +95,18 @@ function upOf(n) {
   for (let y = 0; y < 11; y++) for (let x = 0; x < 11; x++) if (rows[y][x] === (n === 12 ? "L" : ">")) return x + "," + y;
 }
 
+
+test("the guarded treasure rooms cannot be entered without beating the guard", () => {
+  for (const [n, guard, loot] of [[2, "7,9", "8,8"], [4, "7,9", "8,8"], [6, "7,9", "8,8"], [9, "7,9", "8,8"]]) {
+    const rows = D.FLOORS[n - 1].map;
+    const gch = rows[9][7];
+    assert.ok(D.isMonster(gch), `page ${n}: no guard at 7,9`);
+    const lch = rows[8][8];
+    assert.ok(D.isItem(lch) || D.isMonster(lch), `page ${n}: no treasure at 8,8`);
+    assert.ok(!reachBlocked(n, new Set([guard])).has(loot), `page ${n}: treasure room is open without the guard`);
+  }
+});
+
 test("the named gatekeepers sit on the only way up", () => {
   for (const [n, gate, ch] of [[1, "5,5", "i"], [2, "5,5", "p"], [6, "5,5", "w"]]) {
     const rows = D.FLOORS[n - 1].map;
