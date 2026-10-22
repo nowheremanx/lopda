@@ -19,6 +19,16 @@ The run is deliberately short and the purse deliberately tight:
 - A fall is not a game over: the tower folds the player back to the page's entrance and takes a
   fifth of the gold.
 
+## The order of the keepers
+
+The pages are not a flat field of optional monsters. Like the old tower games, the route is
+choked: the Ink Drop sits in the only doorway on page 1, the Paper Mite in the only doorway on
+page 2, and the Moth in the only doorway on page 6. Page 5 makes the player choose between an
+armored Staple in the left lane and a first-striking Moth in the right, with one bomb to remove
+one of them. Page 7 offers a poison corridor or an armored guard. The keepers close each zone.
+The Page Keeper, the Folder and the Ink Ferryman name the order and the tricks; the bestiary
+records only what has actually been met.
+
 A fight is deterministic:
 
 ```
