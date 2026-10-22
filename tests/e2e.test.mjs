@@ -6353,6 +6353,8 @@ test("scripts: copy the AI prompt, paste an HTML file, run it, and keep data per
   assert.match(prompt, /331.473/);
   assert.match(prompt, /PAD\.isDown/);
   assert.match(prompt, /pointerdown/);
+  assert.match(prompt, /hitSegment/);
+  assert.match(prompt, /Math\.PI \* 2/);
 
   await p.evaluate(() => navigator.clipboard.writeText(
     "<!doctype html><title>Local Test</title><body><script>PAD.save('x',42);PAD.load('x').then(function(v){document.body.textContent='X='+v;});<" + "/script></body>"
