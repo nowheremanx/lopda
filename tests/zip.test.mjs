@@ -86,9 +86,16 @@ test("write: unzip -l and unzip -p read it, when unzip is installed", (t) => {
   writeFileSync(file, Z.write(FILES));
   /* a UTF-8 locale, as the CI runner has: Debian's unzip mangled our names there until the zip said "made by Unix" */
   const env = { ...process.env, LC_ALL: "C.UTF-8", LANG: "C.UTF-8" };
-  const l = spawnSync("unzip", ["-l", file], { encoding: "utf8", env });
-  assert.equal(l.status, 0, l.stderr);
-  for (const f of FILES) assert.ok(l.stdout.includes(f.name), f.name + " in\n" + l.stdout);
+  const l = spawnSync("unzip", ["-l", file], { env });
+  assert.equal(l.status, 0, l.stderr.toString());
+  /* Apple's unzip 6.00 prints every byte in 0x80-0x9F (the C1 range) as "?": 读书 survives,
+     while 日 and 月 come out as "\xe6?\xa5" — the entries themselves are right, as -p and the
+     extraction below prove. Compare with that same substitution on both sides so the listing
+     check means the same thing on a Mac and on the Linux runner. */
+  const shown = (u8) => Buffer.from(u8).map((b) => (b >= 0x80 && b <= 0x9f ? 0x3f : b));
+  for (const f of FILES) {
+    assert.ok(shown(l.stdout).includes(shown(Buffer.from(f.name, "utf8"))), f.name + " in\n" + l.stdout);
+  }
   const tst = spawnSync("unzip", ["-t", file], { encoding: "utf8", env });
   assert.equal(tst.status, 0, tst.stdout + tst.stderr);
   assert.match(tst.stdout, /No errors detected/);
