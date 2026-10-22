@@ -2928,24 +2928,25 @@ test("darkroom: HOME closes a roll menu and reopening returns to the film box", 
   await p.waitForFunction(() => /Reopen test/.test(document.getElementById("dk-list").textContent));
   await assertOneRow("#dk-keys");
   assert.equal(await p.textContent("#dk-keys .sk-a span"), "打开");
-  assert.equal(await p.textContent("#dk-keys .sk-start span"), "导入");
+  assert.equal(await p.textContent("#dk-keys .sk-start span"), "打开");
+  assert.equal(await p.textContent("#dk-keys .sk-select span"), "导入");
   assert.equal(await p.locator("#dk-import").count(), 0);
   await p.click("#dk-keys .sk-a");
   await p.waitForSelector("#dk-sheet:not([hidden])");
-  await assertOneRow("#dk-sheet .softkeys");
+  await assertOneRow("#dk-keys");
   await p.keyboard.press("ArrowDown");                              /* past 冲洗 (step 2) to 起名 */
-  await p.click("#dk-sheet .sk-a");
-  await assertOneRow("#dk-sheet .softkeys");
-  await p.click("#dk-sheet .sk-b");
+  await p.click("#dk-keys .sk-a");
+  await assertOneRow("#dk-keys");
+  await p.click("#dk-keys .sk-b");
   await p.keyboard.press("ArrowDown");
-  await p.click("#dk-sheet .sk-a");
-  await assertOneRow("#dk-sheet .softkeys");
-  await p.click("#dk-sheet .sk-b");
+  await p.click("#dk-keys .sk-a");
+  await assertOneRow("#dk-keys");
+  await p.click("#dk-keys .sk-b");
   await p.keyboard.press("ArrowDown");
-  await p.click("#dk-sheet .sk-a");
-  await assertOneRow("#dk-sheet .softkeys");
-  await p.click("#dk-sheet .sk-b");
-  await p.click("#dk-sheet .sk-b");
+  await p.click("#dk-keys .sk-a");
+  await assertOneRow("#dk-keys");
+  await p.click("#dk-keys .sk-b");
+  await p.click("#dk-keys .sk-b");
   await p.click("#home-key");
   await p.locator("#home .app", { hasText: "冲洗店" }).click();
   await p.waitForFunction(() => /Reopen test/.test(document.getElementById("dk-list").textContent));
@@ -3019,7 +3020,8 @@ test("darkroom: load a stock, shoot a roll with latent images, unload it to the 
   await p.waitForFunction(() => /暖阳 200/.test(document.getElementById("dk-list").textContent));
   assert.match(await p.textContent("#dk-list li.on"), /暖阳 200.*16 张.*未冲洗/);
   assert.equal(await p.textContent("#dk-keys .sk-a span"), "打开");
-  assert.equal(await p.textContent("#dk-keys .sk-start span"), "导入");
+  assert.equal(await p.textContent("#dk-keys .sk-start span"), "打开");
+  assert.equal(await p.textContent("#dk-keys .sk-select span"), "导入");
   const rowH = await p.$eval("#dk-list li.on", (e) => e.getBoundingClientRect().height);
   assert.ok(rowH >= 44, "row height " + rowH);
 
@@ -3056,7 +3058,8 @@ test("darkroom: load a stock, shoot a roll with latent images, unload it to the 
   await press("ArrowUp"); await press("x");
   await toast(/扔掉了/);
   await p.waitForFunction(() => /胶卷盒是空的/.test(document.getElementById("dk-list").textContent));
-  assert.equal(await p.textContent("#dk-keys .sk-start span"), "导入");
+  assert.equal(await p.textContent("#dk-keys .sk-start span"), "打开");
+  assert.equal(await p.textContent("#dk-keys .sk-select span"), "导入");
   await p.waitForTimeout(500);
   assert.equal(await idb.doc(p, `data/users/local/rolls/items/${id}`), null);
   assert.deepEqual(await idb.latents(p, id), {});
@@ -3126,6 +3129,7 @@ test("darkroom: develop a roll with blank frames, walk it in colour, print singl
   const save = async (action) => { const [d] = await Promise.all([p.waitForEvent("download", { timeout: 60000 }), action()]); return { name: d.suggestedFilename(), buf: await fs.readFile(await d.path()) }; };
   const items = () => p.$$eval("#dk-sheet li", (ls) => ls.map((l) => l.querySelector("span").textContent));
   const head = () => p.textContent("#dk-vno");
+  const keyRect = () => p.evaluate(() => { const r = document.getElementById("dk-keys").getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; });
 
   /* an 8-frame PORTRAIT roll: 6 shots, then rewound, so frames 7 and 8 are blank */
   await open();
@@ -3151,6 +3155,7 @@ test("darkroom: develop a roll with blank frames, walk it in colour, print singl
   await p.click("#home-key");
   await p.locator("#home .app", { has: p.locator(".label", { hasText: /^冲洗店$/ }) }).click();
   await p.waitForFunction(() => /人像 400/.test(document.getElementById("dk-list").textContent));
+  const boxKeys = await keyRect();
   await press("x");
   assert.deepEqual(await items(), ["冲洗", "起名", "导出底片", "扔掉"], "no debug item without ?debug");
   const t0 = Date.now();
@@ -3169,6 +3174,9 @@ test("darkroom: develop a roll with blank frames, walk it in colour, print singl
 
   /* the viewer: colour, the header names frame, lens and date; ◀▶ walk, the blank frames too */
   await p.waitForFunction(() => document.getElementById("dk-vwait").hidden, null, { timeout: 20000 });
+  assert.deepEqual(await keyRect(), boxKeys, "the key row keeps its box from the film box to the viewer");
+  assert.equal(await p.textContent("#dk-keys .sk-start span"), "出片");
+  assert.equal(await p.textContent("#dk-keys .sk-b span"), "返回");
   const colours = await p.evaluate(() => { const c = document.getElementById("dk-vcv"), d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data, s = new Set();
     for (let i = 0; i < d.length; i += 4 * 7) s.add(d[i] << 16 | d[i + 1] << 8 | d[i + 2]); return s.size; });
   assert.ok(colours > 500, "colour on the LCD: " + colours + " colours");
@@ -3185,8 +3193,10 @@ test("darkroom: develop a roll with blank frames, walk it in colour, print singl
   /* prints: START opens the menu, B cancels it */
   await press("Enter");
   assert.deepEqual(await items(), ["单张", "印样", "胶片条"]);
-  assert.equal(await p.textContent("#dk-sheet .sk-b span"), "取消");
+  assert.equal(await p.textContent("#dk-keys .sk-b span"), "取消");
   await press("z"); assert.ok(await p.isHidden("#dk-sheet")); assert.ok(await p.isVisible("#dk-view"));
+  assert.equal(await p.textContent("#dk-keys .sk-b span"), "返回", "cancelling the print menu puts the viewer's keys back");
+  assert.equal(await p.textContent("#dk-keys .sk-start span"), "出片");
   await press("Enter");
   const single = await save(() => press("x"));
   assert.match(single.name, /^lopda-print-\d{8}-portrait-400-001-01\.png$/);
