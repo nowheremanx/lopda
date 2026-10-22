@@ -46,7 +46,7 @@ function loadRegistry(force){
       var icon=validIcon(r.icon)?r.icon:a.icon, i18n=validI18n(r.i18n);
       if(JSON.stringify(a.icon)!==JSON.stringify(icon) || JSON.stringify(a.i18n)!==JSON.stringify(i18n)){ a.icon=icon; a.i18n=i18n; saveApp(a); }
     });
-    renderStore(); if(!$("v-home").hidden) renderHome();
+    renderStore(true); if(!$("v-home").hidden) renderHome();
     preinstall();
   }).catch(function(e){
     $("store-state").textContent=tr("store.offline");
@@ -121,26 +121,31 @@ function categoryHead(c,n){
   var s=document.createElement("small"); s.textContent=n;
   li.appendChild(b); li.appendChild(s); return li;
 }
-function renderStore(){
-  var ul=$("store-list"), filters=$("store-filters");
+/* keepScroll: preserve the view's position when the list is rebuilt after an install or an update;
+   leaving the store or picking another category starts at the top */
+function renderStore(keepScroll){
+  var ul=$("store-list"), filters=$("store-filters"), view=$("v-store"), scroll=keepScroll ? view.scrollTop : 0;
   ul.textContent="";
   if(!S.registry){
     filters.textContent=""; filters.hidden=true;
     $("store-updates").textContent=""; $("store-updates").hidden=true;
-    var e=document.createElement("li"); e.className="empty"; e.textContent=tr("store.waiting"); ul.appendChild(e); return;
+    var e=document.createElement("li"); e.className="empty"; e.textContent=tr("store.waiting"); ul.appendChild(e);
+  } else {
+    filters.hidden=false;
+    renderFilters(); renderUpdates();
+    if(storeCat==="all"){
+      CATEGORIES.concat(["other"]).forEach(function(c){
+        var group=registryApps().filter(function(r){ return categoryOf(r)===c; });
+        if(!group.length) return;
+        ul.appendChild(categoryHead(c,group.length));
+        group.forEach(function(r){ ul.appendChild(storeItem(r)); });
+      });
+    } else {
+      registryApps().filter(function(r){ return categoryOf(r)===storeCat; }).forEach(function(r){ ul.appendChild(storeItem(r)); });
+    }
   }
-  filters.hidden=false;
-  renderFilters(); renderUpdates();
-  if(storeCat==="all"){
-    CATEGORIES.concat(["other"]).forEach(function(c){
-      var group=registryApps().filter(function(r){ return categoryOf(r)===c; });
-      if(!group.length) return;
-      ul.appendChild(categoryHead(c,group.length));
-      group.forEach(function(r){ ul.appendChild(storeItem(r)); });
-    });
-    return;
-  }
-  registryApps().filter(function(r){ return categoryOf(r)===storeCat; }).forEach(function(r){ ul.appendChild(storeItem(r)); });
+  /* emptying the list clamps the view to the top: put it back after the rebuild */
+  view.scrollTop=scroll;
 }
 /* one button for every update: one at a time, the catalogue order, a failed one does not stop the rest */
 function updateAll(){
@@ -148,7 +153,7 @@ function updateAll(){
   var todo=outdatedApps();
   if(!todo.length) return;
   updating={done:0, total:todo.length};
-  renderStore();
+  renderStore(true);
   var i=0, failed=0;
   var next=function(){
     if(i>=todo.length){
@@ -156,13 +161,13 @@ function updateAll(){
       updating=null;
       toast(failed ? tr("store.updatedsome",{n:n,m:failed}) : tr("store.updatedall",{n:n}));
       sfx(failed ? "err" : "ok");
-      renderStore(); if(!$("v-home").hidden) renderHome();
+      renderStore(true); if(!$("v-home").hidden) renderHome();
       return;
     }
     var r=todo[i++];
-    updating.done=i-1; renderStore();
+    updating.done=i-1; renderStore(true);
     fetchApp(r).then(function(){},function(){ failed++; }).then(function(){
-      updating.done=i; renderStore();
+      updating.done=i; renderStore(true);
       next();
     });
   };
@@ -173,7 +178,7 @@ function install(r,btn){
   btn.disabled=true; btn.textContent=tr("store.downloading");
   fetchApp(r).then(function(prev){
     toast(tr(prev?"store.updated":"store.installed",{name:appName(r)})); sfx("ok");
-    renderStore();
+    renderStore(true);
   }).catch(function(e){
     toast(tr("store.failed",{msg:e.message})); sfx("err"); btn.disabled=false; btn.textContent=tr("store.retry");
   });
@@ -226,7 +231,7 @@ function preinstall(){
           if(!r) return;                                     /* not in this registry: try again later */
           return fetchApp(r,{preinstalled:PREINSTALL.indexOf(id)+1}).then(function(){ done.push(id); }, function(){});
         });
-      },Promise.resolve()).then(function(){ return put(ref,{ids:done}); }).then(function(){ renderStore(); if(!$("v-home").hidden) renderHome(); });
+      },Promise.resolve()).then(function(){ return put(ref,{ids:done}); }).then(function(){ renderStore(true); if(!$("v-home").hidden) renderHome(); });
     });
   }).catch(function(){}).then(function(){ preBusy=false; });
 }
@@ -679,7 +684,7 @@ LP.builtin({id:"sensors", audio:function(){ sensors.rewire(); },
 $("store-refresh").onclick=function(){ loadRegistry(true); };
 
 LP.runApp=runApp;
-LP.onData("apps",function(){ if(!$("v-store").hidden) renderStore(); });
+LP.onData("apps",function(){ if(!$("v-store").hidden) renderStore(true); });
 /* the chin pad reaches a running app only when its manifest asks for buttons */
 /* while the file dialog is open it has the pad: a fresh A press confirms on release, B cancels */
 var askA=false;

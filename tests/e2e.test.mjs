@@ -235,7 +235,7 @@ test("store: category filters split the catalogue, and one button updates every 
   assert.equal(await p.locator("#store-list .store-cat").count(), 6, "one section per category");
   assert.match(await p.locator("#store-updates").innerText(), /2 个程序有新版本/);
   await p.locator(".store-filter", { hasText: "游戏" }).click();
-  assert.equal(await p.locator("#store-list .store-item").count(), 8);
+  assert.equal(await p.locator("#store-list .store-item").count(), 9);
   assert.equal(await p.locator("#store-list .store-cat").count(), 0, "a filter shows one flat list");
   await p.locator(".store-filter", { hasText: "全部" }).click();
 
@@ -244,6 +244,17 @@ test("store: category filters split the catalogue, and one button updates every 
   assert.match(await p.locator("#toast").innerText(), /全部更新好了（2 个）/);
   const labels = await p.locator("#store-list .store-item .btn").allInnerTexts();
   assert.equal(labels.filter((x) => x === "打开").length, 2, "both apps are current now");
+  /* installing further down the list must not throw the page back to the top */
+  await p.evaluate(() => { document.getElementById("v-store").scrollTop = 500; });
+  await p.waitForTimeout(100);
+  const scrolled = await p.evaluate(() => document.getElementById("v-store").scrollTop);
+  await p.evaluate(() => {
+    const li = [...document.querySelectorAll("#store-list .store-item")].find((x) => x.textContent.includes("纸塔"));
+    li.querySelector("button").click();
+  });
+  await p.waitForFunction(() => [...document.querySelectorAll("#store-list .store-item")]
+    .some((x) => x.textContent.includes("纸塔") && x.querySelector("button").textContent === "打开"), null, { timeout: 15000 });
+  assert.equal(await p.evaluate(() => document.getElementById("v-store").scrollTop), scrolled, "the list stays where it was");
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
