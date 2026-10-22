@@ -614,6 +614,7 @@ async function helpPages() {
     t("SELECT 摸身边的折缝；也能直接撞可疑的墙。", "SELECT feels for a seam beside you; bumping a suspicious wall works too."),
     t("走进怪物会开战。左上角写着这一战会损耗多少。", "Walking into a monster starts a fight. The corner shows what it will cost."),
     t("守门的怪是排好的：墨滴、纸虫、有甲的钉书虫、先手的灰蛾……先看损耗，再决定打不打。", "The gatekeepers come in order: ink drops, paper mites, armored staples, first-striking moths... Read the cost before you swing."),
+    t("有些小房间门口站着怪，里面是宝物。先看损耗，再决定进不进。", "Some small rooms keep a monster at the door and treasure inside. Read the cost before you enter."),
     t("菜单里的「道具」能用炸弹和圣水。炸弹对守页的怪无效。", "The Items entry spends bombs and holy water. Bombs do not work on keepers."),
     t("打不过就回商店。三间墨铺，越买越贵，货也有限。", "Stuck? Go back to a shop. Three shops, rising prices, limited stock."),
     t("败北不会结束游戏：塔把你折回本页入口，只收两成金币。", "Defeat is not the end: the tower folds you back to this page's entrance and takes a fifth of your gold."),
