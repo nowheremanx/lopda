@@ -34,6 +34,7 @@ No other files are loaded. Images, sounds and fonts must be embedded in
   "id": "whack-a-mole",
   "name": "打地鼠",
   "glyph": "鼠",
+  "category": "game",
   "icon": ["................", "...16 rows of 16 characters..."],
   "version": "1.0.0",
   "description": "点黑格子里的地鼠，20 秒。",
@@ -51,6 +52,7 @@ No other files are loaded. Images, sounds and fonts must be embedded in
 | `id` | 3 to 32 characters: `a-z`, `0-9`, `-`. Same as the folder name. Never changes once published. |
 | `name` | Shown under the icon. 1 to 8 characters. No emoji. |
 | `glyph` | Exactly one character (a CJK character, letter or digit), used when there is no `icon` and for screen readers. No emoji. |
+| `category` | Optional. One of `game`, `productivity`, `education`, `create`, `story`, `life`. The store files the app under it and offers that category as a filter; without it the app shows under Other. |
 | `icon` | Optional. A 16×16 pixel icon: an array of 16 strings, each 16 characters long. `0` ink, `1` dark, `2` mid, `3` paper, `.` transparent (the tile shows through). |
 | `version` | Semantic version `MAJOR.MINOR.PATCH`. Bump it on every change. |
 | `description` | One sentence, 80 characters at most. |

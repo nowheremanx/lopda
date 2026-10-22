@@ -17,6 +17,7 @@ const SOUNDS = ["tap", "tick", "move", "ok", "err", "hit", "miss", "coin", "win"
 const AMBIENCES = ["rain", "waves", "waterfall", "wind", "fire", "stream"];
 const MAX_BYTES = 512 * 1024;
 const PERMISSIONS = ["files", "motion", "mic", "notes", "camera"];
+const CATEGORIES = ["game", "productivity", "education", "create", "story", "life"];
 const LICENSES = ["MIT", "0BSD", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Apache-2.0", "CC0-1.0", "Unlicense"];
 const PALETTE = [[0x1f, 0x2a, 0x14], [0x4a, 0x5a, 0x32], [0x7d, 0x8a, 0x58], [0xa3, 0xad, 0x7e]];
 const EMOJI = /[\p{Extended_Pictographic}\u{1F1E6}-\u{1F1FF}]/u;
@@ -108,6 +109,9 @@ export function checkApp(dir) {
   const chars = (s) => Array.from(String(s || ""));
   if (!m.name || chars(m.name).length > 8) errors.push("name must be 1-8 characters");
   if (chars(m.glyph).length !== 1) errors.push("glyph must be exactly one character");
+  if (m.category !== undefined) {
+    if (typeof m.category !== "string" || !CATEGORIES.includes(m.category)) errors.push(`category must be one of ${CATEGORIES.join(", ")}`);
+  } else info.push("no category: the store files it under Other");
   if (m.icon !== undefined) {
     const okIcon = Array.isArray(m.icon) && m.icon.length === 16 && m.icon.every((r) => typeof r === "string" && /^[.0-3]{16}$/.test(r));
     if (!okIcon) errors.push('icon must be 16 strings of 16 characters, each one of ".0123"');

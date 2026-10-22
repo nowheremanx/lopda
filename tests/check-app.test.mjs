@@ -88,6 +88,7 @@ const FAILS = [
   ["id differs from folder", { manifest: (m) => (m.id = "other-app") }, /must match the folder name/],
   ["long name", { manifest: (m) => (m.name = "九个字的名字太长了") }, /name must be 1-8 characters/],
   ["two-char glyph", { manifest: (m) => (m.glyph = "计数") }, /glyph must be exactly one character/],
+  ["unknown category", { manifest: (m) => (m.category = "music") }, /category must be one of game, productivity, education, create, story, life/],
   ["bad icon", { manifest: (m) => (m.icon = ["0123"]) }, /icon must be 16 strings/],
   ["emoji in name", { manifest: (m) => (m.name = "计\u{1F600}") }, /name contains emoji/],
   ["unsupported i18n language", { manifest: (m) => (m.i18n = { fr: { name: "Compteur" } }) }, /i18n\.fr: only zh, en/],

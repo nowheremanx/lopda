@@ -208,6 +208,45 @@ test("preinstalled apps: installed on first start after the built-ins, and a rem
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
+test("store: category filters split the catalogue, and one button updates every app", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN" });
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await p.waitForFunction(() => document.querySelectorAll("#home .app:not(.builtin)").length === 2);
+  /* make the two preinstalled apps look like older builds */
+  const age = (id) => p.evaluate((id) => new Promise((resolve, reject) => {
+    const req = indexedDB.open("lopda");
+    req.onerror = () => reject(req.error);
+    req.onsuccess = () => {
+      const db = req.result, tx = db.transaction("docs", "readwrite"), store = tx.objectStore("docs");
+      const get = store.get("data/users/local/apps/items/" + id);
+      get.onerror = () => reject(get.error);
+      get.onsuccess = () => { const v = get.result; v.data.sha256 = "old-" + id; store.put(v); };
+      tx.oncomplete = () => { db.close(); resolve(); };
+      tx.onerror = () => reject(tx.error);
+    };
+  }), id);
+  for (const id of ["calculator", "paint"]) await age(id);
+  await p.reload({ waitUntil: "networkidle" });
+  await p.waitForFunction(() => document.querySelectorAll("#home .app:not(.builtin)").length === 2);
+  await p.locator("#home .app.builtin", { hasText: "应用商店" }).click();
+  await p.waitForSelector("#store-list .store-item");
+
+  assert.equal(await p.locator(".store-filter").count(), 7, "all + six categories");
+  assert.equal(await p.locator("#store-list .store-cat").count(), 6, "one section per category");
+  assert.match(await p.locator("#store-updates").innerText(), /2 个程序有新版本/);
+  await p.locator(".store-filter", { hasText: "游戏" }).click();
+  assert.equal(await p.locator("#store-list .store-item").count(), 8);
+  assert.equal(await p.locator("#store-list .store-cat").count(), 0, "a filter shows one flat list");
+  await p.locator(".store-filter", { hasText: "全部" }).click();
+
+  await p.locator("#store-updates .btn").click();
+  await p.waitForFunction(() => document.getElementById("store-updates").hidden, null, { timeout: 30000 });
+  assert.match(await p.locator("#toast").innerText(), /全部更新好了（2 个）/);
+  const labels = await p.locator("#store-list .store-item .btn").allInnerTexts();
+  assert.equal(labels.filter((x) => x === "打开").length, 2, "both apps are current now");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
 test("files: the runtime's dialog guards PAD.exportFile and PAD.importFile (paint)", { skip, timeout: 30000 }, async (t) => {
   /* a mouse, not touch: on a coarse pointer the runtime saves through the share sheet, which headless Chromium lacks */
   const p = await browser.newPage({ viewport: { width: 390, height: 844 }, acceptDownloads: true, locale: "zh-CN" });

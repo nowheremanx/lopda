@@ -57,7 +57,7 @@ LICENSE NOTICE LICENSING.md CONTRIBUTING.md
   physical lenses found by lenses.js; shares its film helpers as `LP.film`, its dither in finder.js), snap (apps/snap.js: the viewfinder an app opens with
   `PAD.camera.snap` over the running app, `LP.snap`; keeps nothing; decisions.md section 28), darkroom (冲洗店: the film box of unloaded rolls,
   negative export and import through negative.js, developing through develop.js (once per roll, `dev` {v, seed, at} in the roll; pictures are
-  never stored, every look and print develops them again), the colour viewer, single / contact sheet / film strip prints; decisions.md section 19), cart (GB), store (app store, preinstalled apps, sandboxed runner, file dialog), settings (also 备份 / 恢复: the whole
+  never stored, every look and print develops them again), the colour viewer, single / contact sheet / film strip prints; decisions.md section 19), cart (GB), store (app store: categories from the manifest's `category` (missing goes to Other), category filters, single and "update all" installs, preinstalled apps, sandboxed runner, file dialog), settings (also 备份 / 恢复: the whole
   device as one `lopda-backup-YYYYMMDD.zip` through backup.js, every check before a restore replaces everything, the old data
   written back if a write fails; `data/users/local/backup-meta` {last}; decisions.md section 24).
   Paint and the calculator are community apps (`registry/apps/paint`, `calculator`), installed on first start

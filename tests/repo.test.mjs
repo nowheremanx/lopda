@@ -39,6 +39,16 @@ test("registry apps use an allowed licence", () => {
   for (const id of APP_IDS) assert.ok(ok.includes(readJSON(`registry/apps/${id}/manifest.json`).license), id);
 });
 
+test("every registry app sits in one of the store's categories", () => {
+  const cats = ["game", "productivity", "education", "create", "story", "life"];
+  const index = readJSON("registry/index.json");
+  for (const id of APP_IDS) {
+    const m = readJSON(`registry/apps/${id}/manifest.json`);
+    assert.ok(cats.includes(m.category), `${id}: ${m.category}`);
+    assert.equal(index.apps.find((a) => a.id === id).category, m.category, id);
+  }
+});
+
 test("RUNTIME_VERSION and the service worker VERSION move together", () => {
   const rt = read("runtime/core.js").match(/var RUNTIME_VERSION="([^"]+)"/)[1];
   const sw = read("runtime/sw.js").match(/var VERSION = "lopda-v([^"]+)"/)[1];
