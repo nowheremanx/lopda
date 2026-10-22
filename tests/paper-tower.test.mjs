@@ -150,6 +150,50 @@ test("shops, people, springs and the three hidden wicks stand where the data say
   assert.ok(D.FLOORS[6].map.join("").includes("~"), "poison page");
 });
 
+test("every person and shop drawn on a page has data behind it", () => {
+  for (let n = 1; n <= 12; n++) {
+    const flat = D.FLOORS[n - 1].map.join("");
+    if (flat.includes("n")) assert.ok(D.NPCS[n], `page ${n}: a person nobody can see`);
+    if (flat.includes("m")) assert.ok(D.SHOPS[n], `page ${n}: a shop with no stock`);
+  }
+});
+
+test("people stop pointing at things that are already gone", () => {
+  const S = R.newGame();
+
+  S.floor = 2;
+  assert.ok(R.npcLines(S).some((l) => l.zh.includes("宝屋")), "the shield hint is there at first");
+  S.x = 8; S.y = 8;
+  assert.equal(R.take(S, "S").kind, "def");
+  assert.ok(!R.npcLines(S).some((l) => l.zh.includes("宝屋")), "the shield hint goes with the shield");
+
+  S.floor = 9;
+  assert.ok(R.npcLines(S).some((l) => l.zh.includes("圣水")), "the holy water hint is there at first");
+  S.x = 8; S.y = 8;
+  assert.equal(R.take(S, "W").kind, "holy");
+  assert.ok(!R.npcLines(S).some((l) => l.zh.includes("圣水")), "the holy water hint goes with the bottle");
+  assert.ok(R.npcLines(S).some((l) => l.zh.includes("灯芯")), "the wick hint is there while wicks are missing");
+  S.wicks = 3;
+  assert.ok(!R.npcLines(S).some((l) => l.zh.includes("灯芯")), "the wick hint goes when all three are carried");
+
+  S.floor = 5;
+  assert.ok(R.npcLines(S).some((l) => l.zh.includes("炸弹")), "the lane advice is there while both lanes are blocked");
+  R.setTile(S, 3, 4, ".");
+  assert.ok(!R.npcLines(S).some((l) => l.zh.includes("炸弹")), "the lane advice goes once a lane is open");
+});
+
+test("the Folder speaks differently after the fold", () => {
+  const S = R.newGame();
+  S.floor = 5;
+  const before = R.npcLines(S);
+  assert.ok(before.some((l) => l.zh.includes("伸出手")));
+  S.flags["gift:5"] = true;
+  const after = R.npcLines(S);
+  assert.ok(after.length > 0);
+  assert.ok(!after.some((l) => l.zh.includes("伸出手")), "he no longer asks for a hand");
+  assert.ok(!after.some((l) => l.zh.includes("更利的边")), "he no longer asks the question");
+});
+
 test("every sprite the data names exists, and every shop line is sane", () => {
   const art = runScript("registry/apps/paper-tower/src/art.js", { LoGame: { sprites: (table) => table } }).PT.ART;
   for (const m of Object.values(D.MONSTERS)) assert.ok(art[m.art], m.art);
