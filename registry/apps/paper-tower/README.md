@@ -1,40 +1,46 @@
 # 纸塔 (Paper Tower)
 
-A 50-page tower-climbing RPG for Lo-PDA. Walk, open doors, take stones, fight with arithmetic,
-buy from five ink shops, and find the folds. It follows the classic key-and-door tradition, but
-every page, name, line of text, sprite and note here is original to this game. No map, character,
-story or music is copied from another tower game.
+A twelve-page tower-climbing RPG for Lo-PDA, built for one 10–15 minute sitting. Walk, open
+doors, take stones, fight with arithmetic, and decide what to leave behind. It follows the classic
+key-and-door tradition, but every page, name, line of text, sprite and note here is original to
+this game. No map, character, story or music is copied from another tower game.
 
 ## The tower
 
-Five zones of ten pages. A keeper stands in front of the way up on pages 10, 20 and 30; the Ink Sea Lord guards page 40
-and the Bookworm King waits on page 50, on the lamp stand. The
-five wicks are in the folds of pages 7, 17, 27, 37 and 47; with all five the King is weaker
-(20% ATK and DEF), but a player who never opens a fold can still finish the climb.
+Three zones of four pages. A keeper stands in front of the way up on pages 4, 8 and 12. The three
+wicks are in the folds of pages 3, 7 and 11; with all three the Bookworm King is weaker (20% ATK
+and DEF), but the tower can be finished without them.
 
-The economy is the "generous" kind: shop prices are fixed, stock never refills, fountains heal
-to full, and a fall is not a game over. The tower folds the player back to the page's entrance
-and takes a fifth of the gold. A fight is always deterministic:
+The run is deliberately short and the purse deliberately tight:
+
+- Three shops (2, 6, 10), each with limited stock whose price rises with every purchase.
+- Three springs (3, 7, 11), one full heal each.
+- Three hidden folds; three wicks; three special pages with a bomb, holy water and poison.
+- A fall is not a game over: the tower folds the player back to the page's entrance and takes a
+  fifth of the gold.
+
+A fight is deterministic:
 
 ```
-damage per hit = ATK - monster DEF
-hits           = ceil(monster HP / damage per hit)
+damage per hit = ATK - monster DEF (or 75% of it against armor)
+hits           = ceil(HP / damage per hit) (or 125% of HP against drain)
 cost           = max(0, monster ATK - DEF) * hits
 ```
 
-The forecast on the map, the bestiary and the walker test all use this one function. If damage is
-zero the fight cannot start; if the cost is greater than or equal to current HP it is a fall.
+Abilities change the cost, never the outcome of the dice (there are no dice): **armor** cuts hero
+damage by a quarter, **first** adds one enemy hit, **pierce** makes hero DEF count for half,
+**drain** adds 25% monster HP, and **poison** costs 8% of max HP after a win.
 
 ## Files
 
 ```
 manifest.json     store entry (buttons: true, no permissions)
 index.html        bundled app; do not edit by hand
-src/data.js       fifty pages assembled from ten original floor plans, plus monsters, bosses, items, shops, people
-src/rules.js      state, movement, fights, doors, shops, fountains, saves (pure functions)
+src/data.js       twelve pages, monsters, bosses, items, shops, people (pure data)
+src/rules.js      state, movement, fights, doors, shops, springs, items, poison (pure functions)
 src/art.js        16x16 sprites and tiles, four tones, original
-src/music.js      nine original MML songs and custom effects
-src/game.js       scenes, drawing, menus, touch, save slots, battle and ending
+src/music.js      original MML songs and custom effects
+src/game.js       scenes, drawing, menus, touch, items, save slots, battle and ending
 ```
 
 ## Playing and checking
@@ -45,7 +51,7 @@ node tools/check-app.mjs registry/apps/paper-tower
 node --test tests/paper-tower.test.mjs
 ```
 
-`tests/paper-tower.test.mjs` checks the page geometry, the stairs without folds, the wicks being
-hidden, the battle arithmetic, shops, saves, music parsing, and runs a greedy walker from page 1
-to the lamp. It also runs the same walker without revealing any fold, which must still finish
-(without the five wicks), so the game never depends on a secret.
+`tests/paper-tower.test.mjs` checks the page geometry, the stairs without folds, the hidden wicks,
+the battle arithmetic and abilities, shops with rising prices, bombs, holy water, poison, saves,
+music parsing, and two careful walks from page 1 to the lamp: one taking the three wicks, one
+without opening a single fold. Both must reach the top, so a secret is a reward, never a lock.

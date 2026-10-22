@@ -310,19 +310,19 @@
         "................",
         "................"
       ],
-      "version": "1.1.0",
-      "description": "爬过五十页纸塔：钥匙、宝石、商店与墨兽。五区十页，爽快而不刁难的爬塔冒险。",
+      "version": "2.0.0",
+      "description": "十二页纸塔，十分钟一轮：钥匙、墨铺、怪物特技、炸弹与圣水，每一步都要取舍。",
       "i18n": {
         "en": {
           "name": "Paper",
-          "description": "Climb 50 pages of keys, gems and ink beasts. A generous tower climb."
+          "description": "Twelve pages, a tight ten-minute climb: keys, shops, tricks, bombs, holy water."
         }
       },
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/paper-tower/index.html",
-      "sha256": "cd7e7b1f46e7da7d789aa590ca7d338972ba0954676f5dd10419f005a23b4229",
-      "bytes": 156987
+      "sha256": "0855760af72ea9c759e0fe26b650dd21890170aaca814e17dcd77857337b73df",
+      "bytes": 152838
     },
     {
       "spec": "lopda/1",
