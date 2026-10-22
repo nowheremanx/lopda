@@ -17,6 +17,8 @@ The app fills the handheld's LCD, an iframe. Measured in the runtime (CSS pixels
 - **The chin pad costs about 120 px of height**, a fifth of the screen. Set `"buttons": true` only when the
   app needs the pad: games, and apps whose main way of working is moving a cursor. An app driven by taps
   (a form, a list you tap, a tool with on-screen buttons) must leave it out and use the space.
+  Local scripts in the Scripts app follow the same rule without a manifest: their runner shows the pad only when
+  the code reads `PAD.isDown`, `PAD.on("press")`, `PAD.on("release")` or `PAD.BUTTONS`.
 - Design for **331 × 359** (the smallest) and check at **386 × 738** (the largest). Nothing may be cut off at
   the smallest size, and nothing may look lost at the largest.
 
