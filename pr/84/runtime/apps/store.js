@@ -16,8 +16,12 @@ var own=LP.own, toast=LP.toast, put=LP.put, sfx=LP.sfx, show=LP.show, showPad=LP
 var PREINSTALL=["calculator","paint"];
 /* capabilities a manifest may ask for (SPEC.md section 2) */
 var PERMISSIONS=["files","motion","mic","notes","camera"];
+/* store sections, in the order the catalogue shows them; an app without a known category goes last */
+var CATEGORIES=["game","productivity","education","create","story","life"];
 function validPerms(x){ return Array.isArray(x) ? PERMISSIONS.filter(function(p){ return x.indexOf(p)>=0; }) : []; }
 function allowed(a,perm){ return !!(a && a.permissions && a.permissions.indexOf(perm)>=0); }
+function categoryOf(r){ return r && CATEGORIES.indexOf(r.category)>=0 ? r.category : "other"; }
+function catLabel(c){ return tr("store.cat."+c); }
 
 /* ---------- store: the community registry ---------- */
 function validI18n(x){
@@ -42,7 +46,7 @@ function loadRegistry(force){
       var icon=validIcon(r.icon)?r.icon:a.icon, i18n=validI18n(r.i18n);
       if(JSON.stringify(a.icon)!==JSON.stringify(icon) || JSON.stringify(a.i18n)!==JSON.stringify(i18n)){ a.icon=icon; a.i18n=i18n; saveApp(a); }
     });
-    renderStore(); if(!$("v-home").hidden) renderHome();
+    renderStore(true); if(!$("v-home").hidden) renderHome();
     preinstall();
   }).catch(function(e){
     $("store-state").textContent=tr("store.offline");
@@ -51,36 +55,130 @@ function loadRegistry(force){
   return regLoading;
 }
 function installedOf(id){ for(var i=0;i<S.apps.length;i++) if(S.apps[i].id===id) return S.apps[i]; return null; }
-function updatesAvailable(){
-  if(!S.registry) return false;
-  return S.registry.apps.some(function(r){ var a=installedOf(r.id); return a && a.sha256!==r.sha256; });
+function registryApps(){ return (S.registry && S.registry.apps) || []; }
+/* installed apps whose registry copy is a different build, in catalogue order */
+function outdatedApps(){
+  return registryApps().filter(function(r){ var a=installedOf(r.id); return a && a.sha256!==r.sha256; });
 }
-function renderStore(){
-  var ul=$("store-list"); ul.textContent="";
-  if(!S.registry){ var e=document.createElement("li"); e.className="empty"; e.textContent=tr("store.waiting"); ul.appendChild(e); return; }
-  S.registry.apps.forEach(function(r){
-    var li=document.createElement("li"); li.className="store-item";
-    var tile=document.createElement("span"); tile.className="tile"; fillTile(tile,r);
-    var body=document.createElement("div"); body.className="store-body";
-    var t=document.createElement("b"); t.textContent=appName(r)+"  v"+r.version;
-    var d=document.createElement("span"); d.textContent=appDesc(r);
-    var m=document.createElement("small"); m.textContent=(r.author||tr("store.anon"))+" · "+(r.license||"")+" · "+Math.max(1,Math.round((r.bytes||0)/1024))+" KB";
-    body.appendChild(t); body.appendChild(d); body.appendChild(m);
-    validPerms(r.permissions).forEach(function(p){ var x=document.createElement("small"); x.textContent=tr("store.perm."+p); body.appendChild(x); });
-    var a=installedOf(r.id), btn=document.createElement("button"); btn.type="button";
-    if(!a){ btn.className="btn"; btn.textContent=tr("store.install"); }
-    else if(a.sha256!==r.sha256){ btn.className="btn"; btn.textContent=tr("store.update"); }
-    else { btn.className="btn ghost"; btn.textContent=tr("store.open"); }
-    btn.onclick=function(){ if(a && a.sha256===r.sha256) runApp(a); else install(r,btn); };
-    li.appendChild(tile); li.appendChild(body); li.appendChild(btn); ul.appendChild(li);
-  });
+function updatesAvailable(){ return outdatedApps().length>0; }
+/* the selected category stays while the store is open; "all" groups the list into sections */
+var storeCat="all", updating=null;
+function renderFilters(){
+  var box=$("store-filters"), counts={all:registryApps().length};
+  registryApps().forEach(function(r){ var c=categoryOf(r); counts[c]=(counts[c]||0)+1; });
+  if(storeCat!=="all" && !counts[storeCat]) storeCat="all";
+  var scroll=box.scrollLeft;
+  box.textContent="";
+  var add=function(id,label,n){
+    var b=document.createElement("button"); b.type="button"; b.className="store-filter";
+    b.setAttribute("aria-pressed", storeCat===id ? "true" : "false");
+    b.appendChild(document.createTextNode(label));
+    var s=document.createElement("span"); s.textContent=n; b.appendChild(s);
+    b.onclick=function(){ if(storeCat===id) return; storeCat=id; sfx("tick"); renderStore(); };
+    box.appendChild(b);
+  };
+  add("all",tr("store.all"),counts.all);
+  CATEGORIES.forEach(function(c){ if(counts[c]) add(c,catLabel(c),counts[c]); });
+  if(counts.other) add("other",catLabel("other"),counts.other);
+  box.scrollLeft=scroll;
+}
+/* "3 to update" and one button that does all of them, above the list */
+function renderUpdates(){
+  var box=$("store-updates"), todo=outdatedApps();
+  box.textContent="";
+  if(!todo.length && !updating){ box.hidden=true; return; }
+  box.hidden=false;
+  var text=document.createElement("span");
+  text.textContent = updating
+    ? tr("store.updating",{i:Math.min(updating.done+1,updating.total), n:updating.total})
+    : tr("store.updates",{n:todo.length});
+  var btn=document.createElement("button"); btn.type="button"; btn.className="btn";
+  btn.textContent=tr("store.updateall"); btn.disabled=!!updating;
+  if(!updating) btn.onclick=updateAll;
+  box.appendChild(text); box.appendChild(btn);
+}
+function storeItem(r){
+  var li=document.createElement("li"); li.className="store-item";
+  var tile=document.createElement("span"); tile.className="tile"; fillTile(tile,r);
+  var body=document.createElement("div"); body.className="store-body";
+  var t=document.createElement("b"); t.textContent=appName(r)+"  v"+r.version;
+  var d=document.createElement("span"); d.textContent=appDesc(r);
+  var m=document.createElement("small"); m.textContent=(r.author||tr("store.anon"))+" · "+(r.license||"")+" · "+Math.max(1,Math.round((r.bytes||0)/1024))+" KB";
+  body.appendChild(t); body.appendChild(d); body.appendChild(m);
+  validPerms(r.permissions).forEach(function(p){ var x=document.createElement("small"); x.textContent=tr("store.perm."+p); body.appendChild(x); });
+  var a=installedOf(r.id), btn=document.createElement("button"); btn.type="button";
+  if(!a){ btn.className="btn"; btn.textContent=tr("store.install"); }
+  else if(a.sha256!==r.sha256){ btn.className="btn"; btn.textContent=tr("store.update"); }
+  else { btn.className="btn ghost"; btn.textContent=tr("store.open"); }
+  if(updating) btn.disabled=true;   /* one update at a time */
+  else btn.onclick=function(){ if(a && a.sha256===r.sha256) runApp(a); else install(r,btn); };
+  li.appendChild(tile); li.appendChild(body); li.appendChild(btn);
+  return li;
+}
+function categoryHead(c,n){
+  var li=document.createElement("li"); li.className="store-cat";
+  var b=document.createElement("b"); b.textContent=catLabel(c);
+  var s=document.createElement("small"); s.textContent=n;
+  li.appendChild(b); li.appendChild(s); return li;
+}
+/* keepScroll: preserve the view's position when the list is rebuilt after an install or an update;
+   leaving the store or picking another category starts at the top */
+function renderStore(keepScroll){
+  var ul=$("store-list"), filters=$("store-filters"), view=$("v-store"), scroll=keepScroll ? view.scrollTop : 0;
+  ul.textContent="";
+  if(!S.registry){
+    filters.textContent=""; filters.hidden=true;
+    $("store-updates").textContent=""; $("store-updates").hidden=true;
+    var e=document.createElement("li"); e.className="empty"; e.textContent=tr("store.waiting"); ul.appendChild(e);
+  } else {
+    filters.hidden=false;
+    renderFilters(); renderUpdates();
+    if(storeCat==="all"){
+      CATEGORIES.concat(["other"]).forEach(function(c){
+        var group=registryApps().filter(function(r){ return categoryOf(r)===c; });
+        if(!group.length) return;
+        ul.appendChild(categoryHead(c,group.length));
+        group.forEach(function(r){ ul.appendChild(storeItem(r)); });
+      });
+    } else {
+      registryApps().filter(function(r){ return categoryOf(r)===storeCat; }).forEach(function(r){ ul.appendChild(storeItem(r)); });
+    }
+  }
+  /* emptying the list clamps the view to the top: put it back after the rebuild */
+  view.scrollTop=scroll;
+}
+/* one button for every update: one at a time, the catalogue order, a failed one does not stop the rest */
+function updateAll(){
+  if(updating || !S.registry) return;
+  var todo=outdatedApps();
+  if(!todo.length) return;
+  updating={done:0, total:todo.length};
+  renderStore(true);
+  var i=0, failed=0;
+  var next=function(){
+    if(i>=todo.length){
+      var n=todo.length-failed;
+      updating=null;
+      toast(failed ? tr("store.updatedsome",{n:n,m:failed}) : tr("store.updatedall",{n:n}));
+      sfx(failed ? "err" : "ok");
+      renderStore(true); if(!$("v-home").hidden) renderHome();
+      return;
+    }
+    var r=todo[i++];
+    updating.done=i-1; renderStore(true);
+    fetchApp(r).then(function(){},function(){ failed++; }).then(function(){
+      updating.done=i; renderStore(true);
+      next();
+    });
+  };
+  next();
 }
 /* install exactly the file the registry describes: the hash must match */
 function install(r,btn){
   btn.disabled=true; btn.textContent=tr("store.downloading");
   fetchApp(r).then(function(prev){
     toast(tr(prev?"store.updated":"store.installed",{name:appName(r)})); sfx("ok");
-    renderStore();
+    renderStore(true);
   }).catch(function(e){
     toast(tr("store.failed",{msg:e.message})); sfx("err"); btn.disabled=false; btn.textContent=tr("store.retry");
   });
@@ -133,7 +231,7 @@ function preinstall(){
           if(!r) return;                                     /* not in this registry: try again later */
           return fetchApp(r,{preinstalled:PREINSTALL.indexOf(id)+1}).then(function(){ done.push(id); }, function(){});
         });
-      },Promise.resolve()).then(function(){ return put(ref,{ids:done}); }).then(function(){ renderStore(); if(!$("v-home").hidden) renderHome(); });
+      },Promise.resolve()).then(function(){ return put(ref,{ids:done}); }).then(function(){ renderStore(true); if(!$("v-home").hidden) renderHome(); });
     });
   }).catch(function(){}).then(function(){ preBusy=false; });
 }
@@ -612,7 +710,7 @@ LP.builtin({id:"sensors", audio:function(){ sensors.rewire(); },
 $("store-refresh").onclick=function(){ loadRegistry(true); };
 
 LP.runApp=runApp;
-LP.onData("apps",function(){ if(!$("v-store").hidden) renderStore(); });
+LP.onData("apps",function(){ if(!$("v-store").hidden) renderStore(true); });
 /* the chin pad reaches a running app only when its manifest asks for buttons */
 /* while the file dialog is open it has the pad: a fresh A press confirms on release, B cancels */
 var askA=false;
@@ -631,7 +729,7 @@ LP.padRoute("run",function(b,down){
 LP.builtin({id:"store", label:"app.store", icon:"store", view:"store",
   open:function(){ show("store"); },
   tag:function(){ return updatesAvailable()?tr("home.updates"):""; },
-  enter:function(){ renderStore(); loadRegistry(); },
+  enter:function(){ storeCat="all"; renderStore(); loadRegistry(); },
   ready:function(){ loadRegistry(); }});
 /* the runner owns the run view but has no icon of its own: apps appear on the home screen */
 LP.builtin({id:"run", view:"run", keepPad:true,
