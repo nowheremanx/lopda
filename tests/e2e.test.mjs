@@ -88,10 +88,10 @@ test("the add-to-home card is iOS Safari only, remembers dismissal, and boot ask
   }));
   assert.equal(dismissed, true);
   await p.reload({ waitUntil: "networkidle" });
-  await p.waitForFunction(() => window.LopdaPlatform && document.querySelectorAll("#home .builtin").length === 9);
+  await p.waitForFunction(() => window.LopdaPlatform && window.LP && LP.builtins.filter((b) => b.icon).length > 0 && document.querySelectorAll("#home .app.builtin").length === LP.builtins.filter((b) => b.icon).length);
   assert.equal(await p.locator("#home-add-tip").count(), 0);
   assert.deepEqual(await p.evaluate(() => window.__permissionCalls), { camera: 0, motion: 0, notification: 0 });
-  await p.locator("#home .app.builtin").nth(8).click();
+  await p.locator("#home .app.builtin").last().click();
   await p.locator("#set-vol-up").click();
   await p.waitForFunction(() => new Promise((resolve, reject) => {
     const req = indexedDB.open("lopda");
@@ -107,7 +107,7 @@ test("the add-to-home card is iOS Safari only, remembers dismissal, and boot ask
   }));
   await p.click("#home-key");
   await p.reload({ waitUntil: "networkidle" });
-  await p.waitForFunction(() => window.LopdaPlatform && document.querySelectorAll("#home .builtin").length === 9);
+  await p.waitForFunction(() => window.LopdaPlatform && window.LP && LP.builtins.filter((b) => b.icon).length > 0 && document.querySelectorAll("#home .app.builtin").length === LP.builtins.filter((b) => b.icon).length);
   assert.equal(await p.locator("#home-add-tip").count(), 0, "saving Settings keeps the dismissal");
   assert.deepEqual(await p.evaluate(() => window.__permissionCalls), { camera: 0, motion: 0, notification: 0 });
   assert.deepEqual(errors, []);
@@ -139,7 +139,7 @@ test("the add-to-home card stays hidden in standalone mode and on desktop", { sk
       }
     }, { standalone, displayMode });
     await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
-    await p.waitForFunction(() => window.LopdaPlatform && document.querySelectorAll("#home .builtin").length === 9);
+    await p.waitForFunction(() => window.LopdaPlatform && window.LP && LP.builtins.filter((b) => b.icon).length > 0 && document.querySelectorAll("#home .app.builtin").length === LP.builtins.filter((b) => b.icon).length);
     assert.equal(await p.locator("#home-add-tip").count(), expected ? 1 : 0, userAgent);
   }
 });
@@ -147,8 +147,8 @@ test("the add-to-home card stays hidden in standalone mode and on desktop", { sk
 test("each built-in's fresh-profile first screen has visible content", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await page(t, { locale: "en-US" });
   await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
-  await p.waitForFunction(() => document.querySelectorAll("#home .app.builtin").length === 9);
-  const ids = ["notes", "cal", "dict", "reader", "cam", "dark", "cart", "store", "settings"];
+  await p.waitForFunction(() => window.LP && LP.builtins.filter((b) => b.icon).length > 0 && document.querySelectorAll("#home .app.builtin").length === LP.builtins.filter((b) => b.icon).length);
+  const ids = await p.evaluate(() => LP.builtins.filter((b) => b.icon).map((b) => b.view));
   const firstScreens = [];
   for (let i = 0; i < ids.length; i++) {
     await p.locator("#home .app.builtin").nth(i).click();
@@ -163,7 +163,7 @@ test("each built-in's fresh-profile first screen has visible content", { skip, t
     await p.click("#home-key");
   }
   assert.deepEqual(errors, []);
-  assert.equal(firstScreens.length, 9);
+  assert.equal(firstScreens.length, ids.length);
 });
 
 test("the runtime asks nothing of other sites: fonts and everything else come from its own origin", { skip }, async (t) => {
@@ -6350,6 +6350,9 @@ test("scripts: copy the AI prompt, paste an HTML file, run it, and keep data per
   const prompt = await p.evaluate(() => navigator.clipboard.readText());
   assert.match(prompt, /a pomodoro/);
   assert.match(prompt, /PAD\.save/);
+  assert.match(prompt, /331.473/);
+  assert.match(prompt, /PAD\.isDown/);
+  assert.match(prompt, /pointerdown/);
 
   await p.evaluate(() => navigator.clipboard.writeText(
     "<!doctype html><title>Local Test</title><body><script>PAD.save('x',42);PAD.load('x').then(function(v){document.body.textContent='X='+v;});<" + "/script></body>"
@@ -6363,6 +6366,7 @@ test("scripts: copy the AI prompt, paste an HTML file, run it, and keep data per
   await p.waitForFunction(() => !document.getElementById("v-run").hidden);
   await p.waitForTimeout(900);
   assert.equal(await p.frameLocator("#run-frame").locator("body").textContent(), "X=42");
+  assert.equal(await p.evaluate(() => document.getElementById("gamepad").hidden), true, "a touch-only script hides the chin pad");
 
   await p.click("#run-back");
   await p.waitForFunction(() => !document.getElementById("v-script-edit").hidden);
@@ -6391,5 +6395,23 @@ test("scripts: copy the AI prompt, paste an HTML file, run it, and keep data per
   /* the first-open Pomodoro example stays; only the test script is deleted */
   assert.equal(await p.locator("#scripts-list button").count(), 1);
   assert.notEqual(await p.locator("#scripts-list .t").textContent(), "Local Test");
+  assert.deepEqual(errors, []);
+});
+
+test("scripts: a script that reads the buttons gets the chin pad", { skip, timeout: 45000 }, async (t) => {
+  const { p, errors } = await page(t);
+  await p.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: base });
+  await p.goto(base + "/runtime/", { waitUntil: "load" });
+  await p.waitForFunction(() => window.LP && LP.show);
+  await p.evaluate(() => LP.show("scripts"));
+  await p.waitForFunction(() => !document.getElementById("v-scripts").hidden);
+  await p.evaluate(() => navigator.clipboard.writeText(
+    "<!doctype html><title>Pad Script</title><body><script>PAD.on('press',function(b){document.body.textContent=b;});<" + "/script></body>"
+  ));
+  await p.click("#scripts-paste");
+  await p.waitForFunction(() => !document.getElementById("v-script-edit").hidden);
+  await p.click("#script-run");
+  await p.waitForFunction(() => !document.getElementById("v-run").hidden);
+  assert.equal(await p.evaluate(() => document.getElementById("gamepad").hidden), false, "the chin pad is shown");
   assert.deepEqual(errors, []);
 });

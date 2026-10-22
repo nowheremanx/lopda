@@ -273,6 +273,11 @@ function promptIdea(){
   var idea=v && v.value ? v.value.trim() : "";
   return idea || tr("scripts.idea.default");
 }
+/* The chin pad is opt-in for local scripts: showing it costs about 120 px of height, and a
+   touch-only game (fruit ninja) does not need it. It appears only when the code reads the pad.
+   PAD.on("tilt"/"shake"/"sound") is not a button, so it leaves the pad hidden. */
+var PAD_USE=/\bPAD\s*\.\s*(?:isDown|BUTTONS)\b|\bPAD\s*\.\s*on\s*\(\s*['"`](?:press|release)['"`]/;
+function usesPad(code){ return PAD_USE.test(String(code||"")); }
 function copyPrompt(){
   var text=tr("scripts.prompt",{idea:promptIdea()});
   copyText(text).then(function(){
@@ -384,7 +389,7 @@ function runCurrent(){
         scriptId:M.current.id,
         name:M.current.name,
         html:html,
-        buttons:true,
+        buttons:usesPad(M.current.body),
         permissions:["files","motion","mic","notes","camera"],
         back:"script-edit"
       });

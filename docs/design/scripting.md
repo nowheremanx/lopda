@@ -50,7 +50,7 @@ Lua 是技术上的备选：小、快、易嵌入、游戏脚本成熟。但 age
 - 一个自包含 HTML 文件，和商店 app 同规格：≤ 512 KB、无外部资源、四色、无 emoji。
 - 用 `lopdaWrapApp(html, opts)` 注入 CSP + `pad-shim`，放进 `iframe sandbox="allow-scripts"`。
 - 可直接用 `sdk/lo-game.js`（用 `tools/bundle-app.mjs` 打进 HTML），做游戏。
-- 不需要 manifest；本地运行器给一个默认的 `buttons: true` 和权限集合（见 4.4）。
+- 不需要 manifest；本地运行器默认不显示手柄，只有代码读取 `PAD.isDown` / `PAD.on('press'/'release')` / `PAD.BUTTONS` 时才显示（纯触屏游戏因此多出约 120px 高度）；权限集合全开（见 4.4）。
 
 ### 4.2 `.js` 脚本
 
