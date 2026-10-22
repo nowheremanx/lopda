@@ -104,14 +104,19 @@ PT.DATA = (function () {
     2: { art: "keeper", name: L("守页人", "Page Keeper"), lines: [
       L("十二页，三道门。别把钥匙花在错的地方。", "Twelve pages, three gates. Do not spend a key on the wrong one."),
       L("打不过就回墨铺。钱只够买几样。", "Stuck? Go back to the shop. Your purse only covers a few things."),
+      L("第一页的墨滴、这页的纸虫，都是绕不过去的门槛。", "The Ink Drop on page one and the Paper Mite here are both hard gates."),
+      L("钉书虫有甲，灰蛾先手。先看损耗，再决定打不打。", "Staple bugs wear armor; moths strike first. Read the cost before you swing."),
       L("可疑的墙撞一撞。折缝不会自己开。", "Bump the suspicious walls. The folds do not open themselves.")
     ] },
     5: { art: "folder", name: L("折纸匠", "The Folder"), gift: 6, lines: [
       L("我只折一次。伸出手。", "I fold once only. Hold out your hand."),
+      L("左边钉书虫有甲，右边灰蛾先手。", "The left lane has an armored staple; the right has a first-striking moth."),
+      L("你的炸弹只够解决一个。先想好留哪个。", "Your one bomb only removes one of them. Choose."),
       L("要更利的边，还是更韧的面？", "A sharper edge, or a tougher face?")
     ], choice: [L("更利的边　攻 +6", "Sharper: ATK +6"), L("更韧的面　守 +6", "Tougher: DEF +6")] },
     9: { art: "ferryman", name: L("渡墨人", "Ink Ferryman"), lines: [
       L("墨海下面没有底，只有沉下去的页。", "Under the Ink Sea there is no bottom, only sunken pages."),
+      L("墨海的怪会先手、会吸血。先打弱的，再看损耗。", "The Ink Sea monsters strike first or drain. Take the weak ones first, and read the cost."),
       L("三根灯芯在三、七、十一页的折缝里。", "Three wicks wait in the folds of pages three, seven and eleven."),
       L("第十页是最后一家铺子。钱要留一点。", "Page ten is the last shop. Keep some coin.")
     ] }
@@ -124,11 +129,11 @@ PT.DATA = (function () {
   var FLOORS = [
     { n: 1, map: [
       "###########", "#....>....#", "#..s...h..#", "#.........#", "#####Y#####",
-      "#.........#", "#..i...d..#", "#......####", "#..a...#g##", "#.<..y.%.##", "###########"
+      "#....i....#", "#..g...d..#", "#......####", "#..a...#g##", "#.<..y.%.##", "###########"
     ] },
     { n: 2, map: [
       "###########", "#....>....#", "#..S...a..#", "#.........#", "#####Y#####",
-      "#.........#", "#..m...n..#", "#.........#", "#..g...i..#", "#.<.......#", "###########"
+      "#....p....#", "#..m...n..#", "#.........#", "#..g...g..#", "#.<.......#", "###########"
     ] },
     { n: 3, map: [
       "###########", "#....>....#", "#..f...k..#", "#.........#", "#.###%###.#",
@@ -144,7 +149,7 @@ PT.DATA = (function () {
     ] },
     { n: 6, map: [
       "###########", "#....>....#", "#..S...b..#", "#.........#", "#####Y#####",
-      "#.........#", "#..m...w..#", "#.........#", "#..g.y.i..#", "#.<.......#", "###########"
+      "#....w....#", "#..m...g..#", "#.........#", "#..g.y.i..#", "#.<.......#", "###########"
     ] },
     { n: 7, map: [
       "###########", "#....>....#", "#..f...u..#", "#.........#", "#.###%###.#",

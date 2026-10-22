@@ -321,8 +321,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/paper-tower/index.html",
-      "sha256": "0855760af72ea9c759e0fe26b650dd21890170aaca814e17dcd77857337b73df",
-      "bytes": 152838
+      "sha256": "49c471d42f67cda1d0ea967cbc135e041da561f5bb153fba37a7ffeb8b7d2a45",
+      "bytes": 155024
     },
     {
       "spec": "lopda/1",

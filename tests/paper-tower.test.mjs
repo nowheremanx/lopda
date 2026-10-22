@@ -312,6 +312,7 @@ function walk(opt) {
       if (D.isMonster(ch) || ch === "z" || ch === "Z") {
         const m = R.monsterFor(S, ch), f = R.forecast(S, m);
         if (f.can && f.win) { if (R.fight(S, ch, x, y).ok) did = true; }
+        else if (S.items.bomb > 0 && m && !m.boss) { if (R.useBomb(S, ch, x, y).ok) did = true; }
       }
     }
     for (const k of edge) {

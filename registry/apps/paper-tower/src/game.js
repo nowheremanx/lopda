@@ -148,7 +148,7 @@ function goPlay() {
 }
 
 /* ---------- the play scene ---------- */
-var p = { px: 0, py: 0, dir: "down", moving: null, autoPath: null, autoAct: null, autoT: 0 };
+var p = { px: 0, py: 0, dir: "down", moving: null, autoPath: null, autoAct: null, autoT: 0, holdT: 0, lastDir: null };
 function syncHeroBase() {
   if (!S) return;
   p.px = S.x * TS; p.py = S.y * TS; p.moving = null; p.autoPath = null; p.autoAct = null;
@@ -173,6 +173,12 @@ function tileText(ch, x, y) {
   if (D.isStair(ch)) return ch === ">" ? t("上一页。", "Up a page.") : t("下一页。", "Down a page.");
   return null;
 }
+function heldDir() {
+  var dirs = ["up", "down", "left", "right"];
+  if (p.lastDir && game.btn(p.lastDir)) return p.lastDir;
+  for (var i = 0; i < dirs.length; i++) if (game.btn(dirs[i])) return dirs[i];
+  return null;
+}
 game.scene("play", {
   enter: function () {
     busy = false; syncHeroBase();
@@ -185,6 +191,7 @@ game.scene("play", {
         t("纸塔的灯灭了。十二页纸一起发软，边角往里卷。", "The tower's lamp is out. Twelve pages are going soft, curling at the edges."),
         t("你是阿折，送信人。带着最后一根火柴，从第一页爬到灯座。", "You are A Zhe, a courier. Carry the last match from page one to the lamp stand."),
         t("方向键走。A 开门、说话、打怪。START 菜单，SELECT 摸身边的墙。", "Arrows walk. A opens, talks and fights. START menu, SELECT feels the wall."),
+        t("有些怪守在门口，绕不过去；先看损耗再动手。", "Some monsters hold a doorway. You cannot walk around them; read the cost first."),
         t("打不过就回墨铺。败北只回本页入口，金币少两成。", "Stuck? Go back to a shop. Falling only returns you here, minus a fifth of your gold.")
       ], { name: t("纸塔", "Paper Tower") }).then(function () { busy = false; });
     }
@@ -194,12 +201,22 @@ game.scene("play", {
     S.time += dt;
     if (bannerT > 0) bannerT -= dt;
     if (toastT > 0) toastT -= dt;
+    if (p.holdT > 0) p.holdT -= dt;
     if (busy) return;
     if (p.moving) { advanceMove(dt); return; }
     var d = game.dir();
     if (d.x || d.y) {
       p.autoPath = null; p.autoAct = null;
-      if (d.y) tryMove(d.y < 0 ? "up" : "down"); else tryMove(d.x < 0 ? "left" : "right");
+      p.lastDir = d.y ? (d.y < 0 ? "up" : "down") : (d.x < 0 ? "left" : "right");
+      if (tryMove(p.lastDir)) p.holdT = 0; else p.holdT = 0.12;
+      return;
+    }
+    var hd = heldDir();
+    if (hd) {
+      p.autoPath = null; p.autoAct = null;
+      if (p.holdT <= 0) {
+        if (tryMove(hd)) p.holdT = 0; else p.holdT = 0.12;
+      }
       return;
     }
     if (p.autoPath) {
@@ -216,7 +233,7 @@ game.scene("play", {
 });
 function advanceMove(dt) {
   var m = p.moving;
-  m.t += dt / 0.115;
+  m.t += dt / 0.1;
   if (m.t >= 1) {
     p.px = m.tx * TS; p.py = m.ty * TS; p.dir = m.dir; p.moving = null;
     arrive();
@@ -233,21 +250,22 @@ function walkTo(nx, ny, dir) {
 function tryMove(dir) {
   var d = DIRS[dir]; p.dir = dir;
   var nx = S.x + d[0], ny = S.y + d[1];
-  if (!R.inside(nx, ny)) return;
+  if (!R.inside(nx, ny)) return false;
   var ch = R.tile(S, nx, ny);
   if (ch === "%") {
-    R.reveal(S, nx, ny); sfx("secret"); toast(t("折缝开了。", "The seam opens.")); saveAuto(); return;
+    R.reveal(S, nx, ny); sfx("secret"); toast(t("折缝开了。", "The seam opens.")); saveAuto(); return false;
   }
-  if (ch === "#") { sfx("bump"); return; }
-  if (ch === "m" || ch === "n") { sfx("bump"); toast(tileText(ch, nx, ny)); return; }
-  if (D.isMonster(ch) || ch === "z" || ch === "Z") { fightAt(nx, ny, ch); return; }
+  if (ch === "#") { sfx("bump"); return false; }
+  if (ch === "m" || ch === "n") { sfx("bump"); toast(tileText(ch, nx, ny)); return false; }
+  if (D.isMonster(ch) || ch === "z" || ch === "Z") { fightAt(nx, ny, ch); return false; }
   if (D.isDoor(ch)) {
     var r = R.openDoor(S, nx, ny);
     if (r.ok) { sfx("door"); toast(t("门开了。", "The door opens.")); saveAuto(); }
     else { sfx("denied"); toast(t("没有{key}。", "No {key}.").replace("{key}", tname(D.KEY_NAMES[r.key]))); }
-    return;
+    return false;
   }
   walkTo(nx, ny, dir);
+  return true;
 }
 function arrive() {
   S.steps++;
@@ -595,6 +613,7 @@ async function helpPages() {
     t("方向键走。A 说话、开门、打怪。START 或 B 打开菜单。", "Arrows walk. A talks, opens and fights. START or B opens the menu."),
     t("SELECT 摸身边的折缝；也能直接撞可疑的墙。", "SELECT feels for a seam beside you; bumping a suspicious wall works too."),
     t("走进怪物会开战。左上角写着这一战会损耗多少。", "Walking into a monster starts a fight. The corner shows what it will cost."),
+    t("守门的怪是排好的：墨滴、纸虫、有甲的钉书虫、先手的灰蛾……先看损耗，再决定打不打。", "The gatekeepers come in order: ink drops, paper mites, armored staples, first-striking moths... Read the cost before you swing."),
     t("打不过就回商店。三间墨铺，越买越贵，货也有限。", "Stuck? Go back to a shop. Three shops, rising prices, limited stock."),
     t("败北不会结束游戏：塔把你折回本页入口，只收两成金币。", "Defeat is not the end: the tower folds you back to this page's entrance and takes a fifth of your gold."),
     t("三根灯芯在三、七、十一页的折缝里。带齐了，蠹王会弱一些。", "Three wicks wait in the seams of pages three, seven and eleven. With all three, the King is weaker.")
