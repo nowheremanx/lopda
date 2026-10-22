@@ -71,6 +71,45 @@ test("three zones of four pages, and only the three keepers block the way up", (
   }
 });
 
+
+function reachBlocked(n, blocked) {
+  const rows = D.FLOORS[n - 1].map, seen = new Set();
+  let start = null;
+  for (let y = 0; y < 11; y++) for (let x = 0; x < 11; x++) if (rows[y][x] === "<") start = { x, y };
+  seen.add(start.x + "," + start.y);
+  const q = [start];
+  while (q.length) {
+    const { x, y } = q.shift();
+    for (const [dx, dy] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
+      const nx = x + dx, ny = y + dy, k = nx + "," + ny;
+      if (nx < 0 || ny < 0 || nx > 10 || ny > 10 || seen.has(k) || blocked.has(k)) continue;
+      const ch = rows[ny][nx];
+      if (ch === "#" || ch === "%") continue;
+      seen.add(k); q.push({ x: nx, y: ny });
+    }
+  }
+  return seen;
+}
+function upOf(n) {
+  const rows = D.FLOORS[n - 1].map;
+  for (let y = 0; y < 11; y++) for (let x = 0; x < 11; x++) if (rows[y][x] === (n === 12 ? "L" : ">")) return x + "," + y;
+}
+
+test("the named gatekeepers sit on the only way up", () => {
+  for (const [n, gate, ch] of [[1, "5,5", "i"], [2, "5,5", "p"], [6, "5,5", "w"]]) {
+    const rows = D.FLOORS[n - 1].map;
+    assert.equal(rows[5][5], ch, `page ${n} gate`);
+    assert.ok(!reachBlocked(n, new Set([gate])).has(upOf(n)), `page ${n} gate is bypassable`);
+  }
+  // page 5: either lane can be opened, but not both without a bomb
+  const over = new Set(["3,4", "7,4"]);
+  assert.ok(reachBlocked(5, over).has(upOf(5)) === false);
+  assert.ok(reachBlocked(5, new Set(["3,4"])).has(upOf(5)));
+  assert.ok(reachBlocked(5, new Set(["7,4"])).has(upOf(5)));
+  // page 7: the armored right lane can be avoided through the poison left lane
+  assert.ok(reachBlocked(7, new Set(["9,5"])).has(upOf(7)));
+});
+
 test("every page's stairs are reachable without opening a fold", () => {
   for (let n = 1; n <= 12; n++) {
     const rows = D.FLOORS[n - 1].map;
