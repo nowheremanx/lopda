@@ -34,6 +34,7 @@ Developing in colour comes next (`docs/design/darkroom.md`); the pictures below 
 | 点阵相机 | Film camera | Live dithered viewfinder. Load a roll (8, 12 or 16 frames, standard or fine grain, one of seven film stocks). No previews; every frame also keeps a colour latent image. A finished roll is unloaded into the darkroom. Chin buttons after the Game Boy Camera. |
 | 冲洗店 | Darkroom | The film box: every unloaded roll, named, exported as a negative PNG (the colour originals inside) and imported back. Developing comes in the next step. |
 | 卡带机 | Cartridge player | Plays black-and-white Game Boy files you supply, with the chin buttons. No games are included. |
+| 脚本 | Scripts | Local HTML/JS programs: copy a prompt for an AI, paste the code back, run it in the sandbox. Comes with a Pomodoro example; every script has its own data, with a data page to clear it. |
 | 应用商店 | App store | Install, update and run community apps from `registry/`. |
 | 设置 | Settings | Sound, volume, storage, and updating to the newest version. |
 

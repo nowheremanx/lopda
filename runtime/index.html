@@ -287,6 +287,105 @@
       </div>
     </section>
 
+    <!-- SCRIPTS: local HTML/JS programs, edited on the device or pasted from a phone/AI -->
+    <section class="view scripts-view" id="v-scripts" hidden>
+      <div class="bar">
+        <h2 data-i18n="scripts.title">脚本</h2>
+        <button class="btn ghost" id="scripts-data" type="button" data-i18n="scripts.data.button">存档</button>
+        <button class="btn ghost" id="scripts-import" type="button" data-i18n="scripts.import">导入</button>
+        <button class="btn ghost" id="scripts-new" type="button" data-i18n="scripts.new">新建</button>
+      </div>
+      <div class="scripts-main">
+        <div class="scripts-card">
+          <b data-i18n="scripts.start">让 AI 写一个</b>
+          <p class="hint" data-i18n="scripts.startnote">写下想要什么，复制提示词交给 AI，再把代码粘贴回来。</p>
+          <button class="btn" id="scripts-write" type="button" data-i18n="scripts.write">写需求</button>
+          <button class="btn ghost" id="scripts-paste" type="button" data-i18n="scripts.paste">粘贴代码</button>
+          <p class="hint" id="scripts-status" aria-live="polite"></p>
+        </div>
+        <p class="hint scripts-empty" id="scripts-empty" hidden></p>
+        <ul class="lcd-menu scripts-list" id="scripts-list"></ul>
+      </div>
+      <input type="file" id="scripts-file" accept=".html,.htm,.js,.txt,text/html,text/javascript" hidden>
+    </section>
+
+    <!-- SCRIPT IDEA: a full page for a long prompt to hand to an AI -->
+    <section class="view scripts-view" id="v-script-idea" hidden>
+      <div class="bar">
+        <button class="btn ghost" id="idea-back" type="button" aria-label="返回">◂</button>
+        <h2 data-i18n="scripts.idea.title">让 AI 写一个</h2>
+        <button class="btn ghost" id="idea-clear" type="button" data-i18n="scripts.idea.clear" disabled>清空</button>
+      </div>
+      <div class="idea-main">
+        <p class="hint" data-i18n="scripts.idea.hint">写清楚玩法、操作、画面和规则；可以写很长，越具体越好。</p>
+        <textarea id="scripts-idea" maxlength="8000" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" data-i18n-ph="scripts.idea.ph" placeholder="例如：一个切水果游戏。手指滑动切开水果，切到炸弹就结束；有分数和最高分。"></textarea>
+        <p class="hint" id="idea-status" aria-live="polite"></p>
+        <textarea id="scripts-prompt-box" hidden readonly aria-label="AI prompt"></textarea>
+      </div>
+      <div class="idea-actions">
+        <button class="btn ghost" id="idea-paste" type="button" data-i18n="scripts.paste">粘贴代码</button>
+        <button class="btn" id="idea-copy" type="button" data-i18n="scripts.copy">复制 AI 提示词</button>
+      </div>
+      <div class="script-menu" id="idea-ask" hidden>
+        <p data-i18n="scripts.idea.confirm">清空这段需求？</p>
+        <div class="row">
+          <button class="btn" id="idea-ask-yes" type="button" data-i18n="scripts.yes">确认</button>
+          <button class="btn ghost" id="idea-ask-no" type="button" data-i18n="common.cancel">取消</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- SCRIPT EDITOR: one textarea, a name, and paste/run -->
+    <section class="view" id="v-script-edit" hidden>
+      <div class="editor">
+        <div class="bar">
+          <button class="btn ghost" id="script-back" type="button" aria-label="返回">◂</button>
+          <input id="script-name" type="text" maxlength="40" autocomplete="off" autocorrect="off" spellcheck="false" data-i18n-ph="scripts.name" placeholder="名字">
+          <button class="btn ghost" id="script-menu" type="button" data-i18n="scripts.menu">选项</button>
+        </div>
+        <textarea id="script-code" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" data-i18n-ph="scripts.code" placeholder="把 AI 写的 HTML 粘贴到这里"></textarea>
+        <div class="script-actions">
+          <button class="btn ghost" id="script-paste" type="button" data-i18n="scripts.paste">粘贴</button>
+          <button class="btn" id="script-run" type="button" data-i18n="scripts.run">保存并运行</button>
+        </div>
+        <p class="hint" id="script-hint" aria-live="polite"></p>
+        <div class="script-menu" id="script-menu-panel" hidden>
+          <button class="btn ghost" id="script-copy" type="button" data-i18n="scripts.copy">复制提示词</button>
+          <button class="btn ghost" id="script-export" type="button" data-i18n="scripts.export">导出脚本</button>
+          <button class="btn ghost" id="script-clear" type="button" data-i18n="scripts.clear">清除存档</button>
+          <button class="btn ghost" id="script-delete" type="button" data-i18n="scripts.delete">删除脚本</button>
+        </div>
+        <div class="script-menu" id="script-ask" hidden>
+          <p id="script-ask-msg"></p>
+          <div class="row">
+            <button class="btn" id="script-ask-yes" type="button" data-i18n="scripts.yes">确认</button>
+            <button class="btn ghost" id="script-ask-no" type="button" data-i18n="common.cancel">取消</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SCRIPT DATA: every script's storage, and a way to clear it -->
+    <section class="view scripts-view" id="v-script-data" hidden>
+      <div class="bar">
+        <button class="btn ghost" id="data-back" type="button" aria-label="返回">◂</button>
+        <h2 data-i18n="scripts.data.title">脚本存档</h2>
+        <button class="btn ghost" id="data-clear-all" type="button" data-i18n="scripts.data.clearall" disabled>清空</button>
+      </div>
+      <div class="scripts-main">
+        <p class="hint" id="data-summary"></p>
+        <ul class="lcd-menu scripts-list" id="data-list"></ul>
+        <p class="hint scripts-empty" id="data-empty" hidden></p>
+      </div>
+      <div class="script-menu" id="data-ask" hidden>
+        <p id="data-ask-msg"></p>
+        <div class="row">
+          <button class="btn" id="data-ask-yes" type="button" data-i18n="scripts.yes">确认</button>
+          <button class="btn ghost" id="data-ask-no" type="button" data-i18n="common.cancel">取消</button>
+        </div>
+      </div>
+    </section>
+
     <!-- RUNNER -->
     <section class="view" id="v-run" hidden>
       <div class="runner">
@@ -368,6 +467,8 @@
 <script src="apps/cart.js"></script>
 <script src="apps/snap.js"></script>
 <script src="apps/store.js"></script>
+<script src="apps/scripts-templates.js"></script>
+<script src="apps/scripts.js"></script>
 <script src="apps/settings.js"></script>
 <script src="boot.js"></script>
 </body>
