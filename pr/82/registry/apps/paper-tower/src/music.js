@@ -8,8 +8,8 @@
      zone 2 E minor, 112 bpm: creases underfoot.
      zone 3 C minor, 76 bpm: the wick burning low.
      zone 4 D minor, 72 bpm: the Ink Sea, slow and deep.
-     battle A minor, 150 bpm: short, pushing, no introduction.
-     boss   D minor with a flat second, 132 bpm: the King on the lamp stand.
+     battle A minor, 150 bpm: the keeper pages 4 and 8; short, pushing, no introduction.
+     boss   D minor with a flat second, 132 bpm: page 12, the King on the lamp stand.
      ending F major, 70 bpm: the lamp is lit. */
 var PT = PT || {};
 PT.MUSIC = {
