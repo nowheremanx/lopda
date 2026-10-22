@@ -1,4 +1,4 @@
-/* Paper Tower: the game. A 50-page tower-climbing RPG in the classic key-and-door tradition:
+/* Paper Tower: the game. A twelve-page tower-climbing RPG in the classic key-and-door tradition:
    walk, open doors, take stones, fight with arithmetic, buy from four shops, find the folds.
    Everything visible is drawn on lo-game's 160x144 four-tone screen. MIT License. */
 var game = LoGame.create({ width: 160, height: 144, lang: "zh" });
@@ -32,9 +32,8 @@ function music(id) {
 function zoneMusic(n) { return "zone" + D.zoneOf(n); }
 function setAmbience(n) {
   var z = D.zoneOf(n);
-  if (z === 2) game.ambience("wind", 0.13);
-  else if (z === 3) game.ambience("waves", 0.15);
-  else if (z === 4) game.ambience("fire", 0.2);
+  if (z === 1) game.ambience("wind", 0.13);
+  else if (z === 2) game.ambience("fire", 0.2);
   else game.ambience(null);
 }
 function pack() { var o = R.clone(S); o.savedAt = Date.now(); return o; }
@@ -112,7 +111,7 @@ game.scene("title", {
     titleTower(g, game.time);
     g.dither(0, 82, 160, 62, 0, 3);
     bigText(g, "PAPER TOWER", 80, 88, 2, g.PAPER);
-    g.text(titleMeta && titleMeta.cleared ? t("灯已点亮", "the lamp is lit") : t("纸 塔", "a paper climb"), 80, 108, { align: "center", color: g.PAPER });
+    g.text(titleMeta && titleMeta.cleared ? t("灯已点亮", "the lamp is lit") : t("纸 塔", "a twelve-page climb"), 80, 108, { align: "center", color: g.PAPER });
     if (Math.floor(game.time * 2) % 2 === 0) g.text(t("按 A 开始", "PRESS A"), 80, 130, { align: "center", color: g.PAPER });
   }
 });
@@ -183,9 +182,9 @@ game.scene("play", {
     if (!S.flags.intro) {
       S.flags.intro = true; saveAuto(); busy = true; bannerT = 0;
       game.say([
-        t("纸塔的灯灭了。五十页纸一起发软，边角往里卷。", "The tower's lamp is out. Fifty pages are going soft, curling at the edges."),
+        t("纸塔的灯灭了。十二页纸一起发软，边角往里卷。", "The tower's lamp is out. Twelve pages are going soft, curling at the edges."),
         t("你是阿折，送信人。带着最后一根火柴，从第一页爬到灯座。", "You are A Zhe, a courier. Carry the last match from page one to the lamp stand."),
-        t("方向键走。A 开门、说话、打怪。START 菜单，SELECT 让折缝显形。", "Arrows walk. A opens, talks and fights. START menu, SELECT shows seams."),
+        t("方向键走。A 开门、说话、打怪。START 菜单，SELECT 摸身边的墙。", "Arrows walk. A opens, talks and fights. START menu, SELECT feels the wall."),
         t("打不过就回墨铺。败北只回本页入口，金币少两成。", "Stuck? Go back to a shop. Falling only returns you here, minus a fifth of your gold.")
       ], { name: t("纸塔", "Paper Tower") }).then(function () { busy = false; });
     }
@@ -253,6 +252,11 @@ function tryMove(dir) {
 function arrive() {
   S.steps++;
   var ch = R.tile(S, S.x, S.y);
+  if (ch === "~") {
+    var lost = R.poison(S);
+    sfx("hurt"); toast(t("毒页 -{n}", "Poison -{n}").replace("{n}", lost));
+    return;
+  }
   if (D.isItem(ch)) {
     var got = R.take(S, ch);
     if (got) {
@@ -260,6 +264,8 @@ function arrive() {
       else if (got.kind === "gold") { sfx("gold"); toast(tname(got.name) + " +" + got.amount); }
       else if (got.kind === "wick") { sfx("secret"); toast(t("灯芯 +1", "Wick +1") + "　" + S.wicks + "/3"); saveAuto(); }
       else if (got.kind === "hp") { sfx("potion"); toast(tname(got.name) + " +" + got.amount); }
+      else if (got.kind === "bomb") { sfx("coin"); toast(t("炸弹 +1　菜单里使用", "Bomb +1　use it from the menu")); }
+      else if (got.kind === "holy") { sfx("heal"); toast(t("圣水 +1　菜单里使用", "Holy water +1　use it from the menu")); }
       else { sfx("gem"); toast(tname(got.name) + " +" + got.amount); }
     }
     return;
@@ -278,7 +284,7 @@ function arrive() {
   if (ch === "L") { reachLamp(); return; }
 }
 async function goFloor(delta) {
-  if (delta > 0 && S.floor >= 50) return;
+  if (delta > 0 && S.floor >= 12) return;
   if (delta < 0 && S.floor <= 1) return;
   sfx("page"); busy = true;
   /* Cover the old page first, then change it. The outgoing scene must never be
@@ -336,14 +342,17 @@ async function actFacing() {
   else toast(t("第 {n} 页　{name}", "Page {n}　{name}").replace("{n}", S.floor).replace("{name}", tname(D.FLOOR_NAMES[S.floor - 1])));
 }
 function revealSecrets() {
-  var list = R.secrets(S);
-  if (!list.length) { sfx("bump"); toast(t("这一页没有折缝。", "No seams on this page.")); return; }
-  for (var i = 0; i < list.length; i++) R.reveal(S, list[i].x, list[i].y);
-  sfx("secret"); toast(t("折缝显出来了：{n} 道。", "{n} seams show themselves.").replace("{n}", list.length));
-  saveAuto();
+  /* no free map-wide reveal: feel the wall next to you, or bump into it */
+  var dirs = [[0, -1], [0, 1], [-1, 0], [1, 0]], found = 0;
+  for (var i = 0; i < dirs.length; i++) {
+    var x = S.x + dirs[i][0], y = S.y + dirs[i][1];
+    if (R.reveal(S, x, y)) found++;
+  }
+  if (found) { sfx("secret"); toast(t("身边的折缝开了。", "A seam opens beside you.")); saveAuto(); }
+  else { sfx("bump"); toast(t("身边没有折缝。撞一撞可疑的墙。", "No seam here. Bump a suspicious wall.")); }
 }
 function reachLamp() {
-  if (!S.flags["boss:50"]) { sfx("denied"); toast(t("蠹王还坐在灯座上。", "The King still sits on the lamp stand.")); return; }
+  if (!S.flags["boss:12"]) { sfx("denied"); toast(t("蠹王还坐在灯座上。", "The King still sits on the lamp stand.")); return; }
   game.go("ending", null, { fade: true, to: game.INK });
 }
 
@@ -480,6 +489,7 @@ function drawCrack(g, x, y) {
 function drawThing(g, ch, x, y, z) {
   var px = x * TS, py = y * TS, bob = Math.floor(game.time * 3 + x + y) % 2;
   if (ch === ".") return;
+  if (ch === "~") { g.sprite(A.poison, px, py); return; }
   if (ch === ">") { g.sprite(A.up, px, py); return; }
   if (ch === "<") { g.sprite(A.down, px, py); return; }
   if (ch === "Y") { g.sprite(A.doorY, px, py); return; }
@@ -491,8 +501,8 @@ function drawThing(g, ch, x, y, z) {
     return;
   }
   if (ch === "L") {
-    g.sprite(S.flags["boss:50"] ? A.lampLit : A.lamp, px, py);
-    if (S.flags["boss:50"] && Math.floor(game.time * 6) % 2 === 0) g.rect(px + 7, py + 4, 2, 2, 3);
+    g.sprite(S.flags["boss:12"] ? A.lampLit : A.lamp, px, py);
+    if (S.flags["boss:12"] && Math.floor(game.time * 6) % 2 === 0) g.rect(px + 7, py + 4, 2, 2, 3);
     return;
   }
   if (ch === "n") {
@@ -545,8 +555,10 @@ function drawForecast(g) {
   var f = facingTile(), ch = R.tile(S, f.x, f.y);
   if (!(D.isMonster(ch) || ch === "z" || ch === "Z")) return;
   var m = R.monsterFor(S, ch), fc = R.forecast(S, m);
+  var tag = fc.ability ? tname(D.ABILITY_NAMES[fc.ability]) : "";
   var text = !fc.can ? t("攻不破", "No damage") : fc.win ? t("损耗 {n}", "Lose {n}").replace("{n}", fc.loss) : t("会倒下", "You would fall");
-  var w = 62;
+  if (tag) text += " " + tag;
+  var w = 70;
   g.window(VIEW_W - w - 2, HUD + 4, w, 18, { thin: true });
   g.text(text, VIEW_W - w + 4, HUD + 7);
 }
@@ -557,7 +569,7 @@ async function openMenu() {
   busy = true;
   var items = [t("状态", "Status"), t("图鉴", "Bestiary"), t("地图", "Map")];
   var acts = ["status", "bestiary", "map"];
-  if (S.visited["11"]) { items.push(t("纸鸢", "Paper kite")); acts.push("travel"); }
+  if (S.items.bomb + S.items.holy > 0) { items.push(t("道具", "Items")); acts.push("items"); }
   items.push(t("存档", "Save")); acts.push("save");
   items.push(t("说明", "How to play")); acts.push("help");
   items.push(t("回标题", "Title")); acts.push("title");
@@ -567,7 +579,7 @@ async function openMenu() {
   if (act === "status") await game.push(statusScene());
   else if (act === "bestiary") await game.push(bestiaryScene());
   else if (act === "map") await game.push(mapScene());
-  else if (act === "travel") await travelMenu();
+  else if (act === "items") await game.push(itemScene());
   else if (act === "save") { await game.push(slotsScene("save")); }
   else if (act === "help") await helpPages();
   else if (act === "title") {
@@ -579,13 +591,13 @@ async function openMenu() {
 async function helpPages() {
   await game.say([
     t("你是阿折，纸塔里的送信人。塔顶的长明灯灭了，纸开始发软。", "You are A Zhe, a courier in the paper tower. The Everlamp is out, and the paper is going soft."),
-    t("爬上五十页，把灯点回来。蠹王在灯座上。", "Climb fifty pages and light it again. The Bookworm King sits on the lamp stand."),
+    t("爬上十二页，把灯点回来。蠹王在灯座上。", "Climb twelve pages and light it again. The Bookworm King sits on the lamp stand."),
     t("方向键走。A 说话、开门、打怪。START 或 B 打开菜单。", "Arrows walk. A talks, opens and fights. START or B opens the menu."),
-    t("SELECT 让这一页的折缝显形。撞一撞可疑的墙也行。", "SELECT shows this page's seams. Bumping a suspicious wall works too."),
+    t("SELECT 摸身边的折缝；也能直接撞可疑的墙。", "SELECT feels for a seam beside you; bumping a suspicious wall works too."),
     t("走进怪物会开战。左上角写着这一战会损耗多少。", "Walking into a monster starts a fight. The corner shows what it will cost."),
-    t("打不过就回商店。四间墨铺不涨价，货卖完为止。", "Stuck? Go back to a shop. Four ink shops, fixed prices, while stock lasts."),
+    t("打不过就回商店。三间墨铺，越买越贵，货也有限。", "Stuck? Go back to a shop. Three shops, rising prices, limited stock."),
     t("败北不会结束游戏：塔把你折回本页入口，只收两成金币。", "Defeat is not the end: the tower folds you back to this page's entrance and takes a fifth of your gold."),
-    t("五根灯芯在第七、十七、二十七、三十七、四十七页的折缝里。带齐了，蠹王会弱一些。", "Five wicks wait in the seams of pages seven, seventeen, twenty-seven, thirty-seven and forty-seven. With all five, the King is weaker.")
+    t("三根灯芯在三、七、十一页的折缝里。带齐了，蠹王会弱一些。", "Three wicks wait in the seams of pages three, seven and eleven. With all three, the King is weaker.")
   ], { name: t("怎么玩", "How to play") });
 }
 
@@ -601,9 +613,66 @@ function statusScene() {
       g.text(t("攻击　{a}　　守　{d}", "ATK　{a}　　DEF　{d}").replace("{a}", S.atk).replace("{d}", S.def), 12, y); y += lh;
       g.text(t("金币　{g}　　灯芯　{w}/3", "Gold　{g}　　Wicks　{w}/3").replace("{g}", S.gold).replace("{w}", S.wicks), 12, y); y += lh;
       g.text(t("黄 {y}　蓝 {b}　红 {r}", "Keys {y}/{b}/{r}").replace("{y}", S.keys.y).replace("{b}", S.keys.b).replace("{r}", S.keys.r), 12, y); y += lh;
-      g.text(t("击败 {k}　步数 {s}", "Wins {k}　Steps {s}").replace("{k}", S.kills).replace("{s}", S.steps), 12, y); y += lh;
+      g.text(t("炸弹 {b}　圣水 {h}", "Bombs {b}　Holy {h}").replace("{b}", S.items.bomb).replace("{h}", S.items.holy), 12, y); y += lh;
       g.text(t("用时 {t}　倒下 {d}", "Time {t}　Falls {d}").replace("{t}", clock(S.time)).replace("{d}", S.deaths), 12, y);
       g.text(t("A / B 关", "A / B close"), 80, 124, { align: "center", color: g.DARK });
+    }
+  };
+}
+
+function itemScene() {
+  var sel = 0, msg = null, msgT = 0;
+  function list() {
+    var out = [];
+    if (S.items.bomb > 0) out.push({ id: "bomb", name: t("炸弹", "Bomb"), n: S.items.bomb, art: A.bomb });
+    if (S.items.holy > 0) out.push({ id: "holy", name: t("圣水", "Holy water"), n: S.items.holy, art: A.holyWater });
+    return out;
+  }
+  return {
+    update: function (dt) {
+      if (msgT > 0) msgT -= dt;
+      var rows = list();
+      if (!rows.length) { if (game.ok() || game.pressed("b") || game.pressed("start")) game.pop(); return; }
+      sel = LoGame.clamp(sel, 0, rows.length - 1);
+      var d = game.dir(0.25, 0.1);
+      if (d.y) { sel = (sel + d.y + rows.length) % rows.length; sfx("move"); }
+      if (game.pressed("b") || game.pressed("start")) { game.pop(); return; }
+      var tapped = game.pointer.pressed;
+      if (tapped) {
+        var row = Math.floor((game.pointer.y - 30) / 22);
+        if (row >= 0 && row < rows.length) sel = row;
+      }
+      if (game.pressed("a") || tapped) {
+        if (rows[sel].id === "bomb") {
+          var f = facingTile(), ch = R.tile(S, f.x, f.y), m = R.monsterFor(S, ch);
+          if (!m) { sfx("denied"); msg = t("面前没有怪。", "No monster in front."); msgT = 1.4; }
+          else if (m.boss) { sfx("denied"); msg = t("守页的怪不吃炸弹。", "The keeper ignores bombs."); msgT = 1.4; }
+          else {
+            var r = R.useBomb(S, ch, f.x, f.y);
+            if (r.ok) { sfx("win"); saveAuto(); msg = t("炸掉了{n}。", "Bombed {n}.").replace("{n}", tname(r.monster.name)); msgT = 1.4; }
+            else { sfx("denied"); msg = t("用不了。", "Cannot use it."); msgT = 1.2; }
+          }
+        } else {
+          var h = R.useHoly(S);
+          if (h.ok) { sfx("heal"); saveAuto(); msg = t("生命满了，折缝开了。", "HP full, seams open."); msgT = 1.4; }
+          else { sfx("denied"); msg = t("用不了。", "Cannot use it."); msgT = 1.2; }
+        }
+      }
+    },
+    draw: function (g) {
+      g.clear(g.PAPER); g.window(2, 2, 156, 140, { thin: true });
+      g.text(t("道 具", "ITEMS"), 80, 5, { align: "center" });
+      var rows = list();
+      if (!rows.length) { g.text(t("用完了。", "All used."), 80, 64, { align: "center" }); return; }
+      for (var i = 0; i < rows.length; i++) {
+        var y = 30 + i * 22;
+        if (i === sel) g.rect(5, y - 2, 150, 20, g.INK);
+        var col = i === sel ? g.PAPER : g.INK;
+        g.sprite(rows[i].art, 8, y - 1);
+        g.text(rows[i].name, 28, y, { color: col });
+        g.text("x" + rows[i].n, 150, y, { color: col, align: "right" });
+      }
+      g.text(msg || t("A 用　B 走", "A use　B leave"), 80, 124, { align: "center", color: g.DARK });
     }
   };
 }
@@ -614,9 +683,11 @@ function bestiaryScene() {
   var z = D.zoneOf(S.floor);
   Object.keys(D.MONSTERS).forEach(function (ch) {
     var m = D.monsterAt(ch, z);
-    if (m) rows.push({ ch: ch, m: m });
+    if (m && S.flags["seen:" + ch]) rows.push({ ch: ch, m: m });
   });
-  if (D.BOSSES[S.floor]) rows.push({ ch: S.floor === 50 ? "Z" : "z", m: R.monsterFor(S, S.floor === 50 ? "Z" : "z") });
+  if (D.BOSSES[S.floor] && S.flags["seen:" + (S.floor === 12 ? "Z" : "z")]) {
+    rows.push({ ch: S.floor === 12 ? "Z" : "z", m: R.monsterFor(S, S.floor === 12 ? "Z" : "z") });
+  }
   return {
     update: function () {
       var d = game.dir(0.3, 0.1);
@@ -636,12 +707,18 @@ function bestiaryScene() {
       g.text(t("图鉴　第 {n} 区", "BESTIARY　zone {n}").replace("{n}", z + 1), 80, 5, { align: "center" });
       g.text(t("名", "name"), 22, 18, { color: g.DARK });
       g.text(t("损耗", "cost"), 150, 18, { align: "right", color: g.DARK });
+      if (!rows.length) {
+        g.text(t("还没遇到怪物。", "No monster met yet."), 80, 66, { align: "center" });
+        g.text(t("A / B 关", "A / B close"), 80, 130, { align: "center", color: g.DARK });
+        return;
+      }
       for (var i = top; i < Math.min(rows.length, top + per); i++) {
         var r = rows[i], y = 31 + (i - top) * 14;
         if (i === sel) g.rect(4, y - 2, 152, 14, g.INK);
         var col = i === sel ? g.PAPER : g.INK;
         g.sprite(A[r.m.art], 4, y - 2);
         g.text(tname(r.m.name), 22, y, { color: col });
+        if (r.m.ability) g.text(tname(D.ABILITY_NAMES[r.m.ability]), 122, y, { color: i === sel ? g.PAPER : g.DARK, align: "right" });
         var f = R.forecast(S, r.m);
         g.text(!f.can ? t("-", "-") : String(f.loss), 150, y, { color: col, align: "right" });
       }
@@ -650,7 +727,7 @@ function bestiaryScene() {
         var ff = R.forecast(S, cur.m);
         g.text(t("HP {h}　攻 {a}　守 {d}", "HP {h}　ATK {a}　DEF {d}").replace("{h}", cur.m.hp).replace("{a}", cur.m.atk).replace("{d}", cur.m.def), 80, 115, { align: "center", color: g.DARK });
         if (!ff.can) g.text(t("攻不破", "no damage"), 80, 127, { align: "center", color: g.INK });
-        else g.text(t("这一战会损耗 {n}", "this fight costs {n}").replace("{n}", ff.loss), 80, 127, { align: "center", color: g.INK });
+        else g.text(t("损耗 {n}　{ab}", "costs {n}　{ab}").replace("{n}", ff.loss).replace("{ab}", cur.m.ability ? tname(D.ABILITY_NAMES[cur.m.ability]) : t("-", "-")), 80, 127, { align: "center", color: g.INK });
       }
     }
   };
@@ -682,16 +759,6 @@ function mapScene() {
       g.rect(ox + S.x * k + 3, oy + S.y * k + 3, 4, 4, g.PAPER);
     }
   };
-}
-
-async function travelMenu() {
-  var hubs = R.travelTargets(S);
-  if (!hubs.length) { toast(t("还没有别的折页可去。", "No other fold to visit yet.")); return; }
-  var items = hubs.map(function (n) { return t("第 {n} 页　{name}", "Page {n}　{name}").replace("{n}", n).replace("{name}", tname(D.FLOOR_NAMES[n - 1])); });
-  var i = await game.choose(items, { title: t("纸鸢", "Paper kite") });
-  if (i < 0) return;
-  R.travel(S, hubs[i]); saveAuto(); sfx("page");
-  game.go("play", null, { fade: true });
 }
 
 function shopScene() {
@@ -730,7 +797,7 @@ function shopScene() {
         if (i === sel) g.rect(5, y - 1, 150, 15, g.INK);
         var col = i === sel ? g.PAPER : g.INK;
         g.text(label(it), 10, y, { color: col });
-        g.text(left ? it.price + "g" : t("售罄", "sold"), 110, y, { color: col });
+        g.text(left ? R.price(S, i) + "g" : t("售罄", "sold"), 110, y, { color: col });
         g.text("x" + left, 150, y, { color: col, align: "right" });
       }
       g.text(msg || t("A 买　B 走", "A buy　B leave"), 80, 126, { align: "center", color: g.DARK });
@@ -898,24 +965,30 @@ function finishBattle() {
   game.pop({ won: result === "win", blocked: result === "blocked", loss: loss, gold: B.gold, boss: !!B.m.boss });
 }
 
+function rankOf(S) {
+  var score = (S.flags["boss:12"] ? 2000 : 0) + S.wicks * 1000 + Math.floor(S.hp / 50) + S.gold * 2 - S.steps * 5 - S.deaths * 300;
+  return { score: score, rank: score >= 8000 ? "S" : score >= 7000 ? "A" : score >= 6000 ? "B" : "C" };
+}
+
 /* ---------- the lamp ---------- */
 game.scene("ending", {
   enter: async function () {
     endingPhase = "intro";
     music("ending"); game.ambience("fire", 0.3);
     var many = S.wicks >= D.WICKS;
+    endingRank = rankOf(S);
     await game.say([
       t("你踩上灯座。蠹王化成一小撮墨灰，落在纸上。", "You step onto the lamp stand. The King crumbles into a pinch of ink ash."),
-      t("五根灯芯一起点着了。纸塔轻轻响了一声，像合上一本书。", "Five wicks catch together. The tower makes one soft sound, like a book closing."),
+      t("三根灯芯一起点着了。纸塔轻轻响了一声，像合上一本书。", "Three wicks catch together. The tower makes one soft sound, like a book closing."),
       t("守灯人从灯影里走出来。她说，塔不必再折了。", "The lamp keeper steps out of the shadow. She says the tower need not fold again."),
       t("你把最后一封信放在灯下。收信人写着：下一个爬上来的人。", "You leave the last letter under the lamp. It is addressed to whoever climbs next.")
     ], { name: t("长明灯", "The Everlamp") });
     if (S.wicks === 0) {
       await game.say(t("你只带了那根火柴。火苗很小，但够亮。", "You had only the match. The flame is small, but it is enough."), { name: t("守灯人", "Lamp Keeper") });
     } else if (!many) {
-      await game.say(t("灯芯不够五根。火苗矮一点，像在打盹。", "Fewer than five wicks. The flame is shorter, as if dozing."), { name: t("守灯人", "Lamp Keeper") });
+      await game.say(t("灯芯不够三根。火苗矮一点，像在打盹。", "Fewer than three wicks. The flame is shorter, as if dozing."), { name: t("守灯人", "Lamp Keeper") });
     }
-    S.flags.cleared = true; S.flags["boss:50"] = true;
+    S.flags.cleared = true; S.flags["boss:12"] = true;
     saveAuto();
     var old = await game.load("meta");
     var best = Math.max((old && old.best) || 0, R.score(S));
@@ -949,12 +1022,12 @@ game.scene("ending", {
       g.pixel(fx, fy, i % 2 ? 3 : 2);
     }
     if (endingPhase === "done") {
-      g.text(t("长 明 灯", "THE EVERLAMP"), 80, 98, { align: "center", color: g.PAPER });
+      g.text(t("长 明 灯　{rank}", "THE EVERLAMP　{rank}").replace("{rank}", endingRank.rank), 80, 98, { align: "center", color: g.PAPER });
       g.text(t("第{n}页　胜{k}　灯芯{w}/3", "p{n}　wins {k}　wicks {w}/3").replace("{n}", S.floor).replace("{k}", S.kills).replace("{w}", S.wicks), 80, 114, { align: "center", color: g.MID });
       if (Math.floor(game.time * 2) % 2 === 0) g.text(t("A 回到封面", "A to the cover"), 80, 130, { align: "center", color: g.PAPER });
     }
   }
 });
-var endingPhase = "intro";
+var endingPhase = "intro", endingRank = { score: 0, rank: "C" };
 
 game.start("title");
