@@ -137,5 +137,6 @@ PT.SFX = {
   buy: { wave: "square", duty: 3, from: 1000, to: 1500, ms: 120, attack: 2, decay: 100, vol: 0.45 },
   denied: { wave: "square", duty: 0, from: 220, to: 160, ms: 160, attack: 2, decay: 140, vol: 0.45 },
   flame: { wave: "noise", from: 900, to: 200, ms: 800, attack: 80, decay: 700, vol: 0.5 },
-  page: { wave: "noise", from: 1800, to: 700, ms: 120, attack: 2, decay: 100, vol: 0.3 }
+  page: { wave: "noise", from: 1800, to: 700, ms: 120, attack: 2, decay: 100, vol: 0.3 },
+  encounter: { wave: "square", duty: 2, from: 260, to: 880, ms: 220, attack: 3, decay: 190, vol: 0.48 }
 };

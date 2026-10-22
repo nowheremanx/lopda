@@ -1697,7 +1697,8 @@ PT.SFX = {
   buy: { wave: "square", duty: 3, from: 1000, to: 1500, ms: 120, attack: 2, decay: 100, vol: 0.45 },
   denied: { wave: "square", duty: 0, from: 220, to: 160, ms: 160, attack: 2, decay: 140, vol: 0.45 },
   flame: { wave: "noise", from: 900, to: 200, ms: 800, attack: 80, decay: 700, vol: 0.5 },
-  page: { wave: "noise", from: 1800, to: 700, ms: 120, attack: 2, decay: 100, vol: 0.3 }
+  page: { wave: "noise", from: 1800, to: 700, ms: 120, attack: 2, decay: 100, vol: 0.3 },
+  encounter: { wave: "square", duty: 2, from: 260, to: 880, ms: 220, attack: 3, decay: 190, vol: 0.48 }
 };
 </script>
 <script data-src="src/game.js">
@@ -1733,6 +1734,13 @@ function music(id) {
   if (song) game.music(song); else if (id === null) game.musicStop();
 }
 function zoneMusic(n) { return "zone" + D.zoneOf(n); }
+/* Music belongs to a place, not to a fight. Normal pages keep their zone track through short
+   battles; the keeper pages carry their own track from the moment the page is entered, so a
+   two-second fight never cuts a track in and out. */
+function musicForFloor(n) {
+  if (D.BOSSES[n] && !S.flags["boss:" + n]) return n === 12 ? "boss" : "battle";
+  return zoneMusic(n);
+}
 function setAmbience(n) {
   var z = D.zoneOf(n);
   if (z === 1) game.ambience("wind", 0.13);
@@ -1887,7 +1895,7 @@ game.scene("play", {
     busy = false; syncHeroBase();
     toastT = 0; toastMsg = null;
     banner = D.FLOOR_NAMES[S.floor - 1]; bannerT = 1.8;
-    music(zoneMusic(S.floor)); setAmbience(S.floor);
+    music(musicForFloor(S.floor)); setAmbience(S.floor);
     if (!S.flags.intro) {
       S.flags.intro = true; saveAuto(); busy = true; bannerT = 0;
       game.say([
@@ -2027,7 +2035,6 @@ async function fightAt(x, y, ch) {
   var res = await game.push("battle", { ch: ch, x: x, y: y });
   busy = false;
   syncHero();
-  music(zoneMusic(S.floor));
   if (!res) return;
   if (res.won) {
     saveAuto();
@@ -2605,7 +2612,7 @@ game.scene("battle", {
     var m = R.monsterFor(S, args.ch), f = R.forecast(S, m);
     B = { m: m, f: f, args: args, phase: "intro", hero0: S.hp, hero1: S.hp, foe0: m.hp, foe1: m.hp, heroShown: S.hp, foeShown: m.hp,
       result: null, loss: 0, gold: 0, float: null, floatT: 0, floatX: 80, floatY: 70, t: 0 };
-    music(m.boss ? "boss" : "battle"); sfx("page");
+    sfx("encounter");
     if (m.boss) await game.say(m.say.map(function (l) { return tname(l); }), { name: tname(m.name) });
     if (!f.can) {
       B.phase = "result"; B.result = "blocked"; await game.wait(0.45);

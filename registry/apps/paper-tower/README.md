@@ -47,6 +47,13 @@ Abilities change the cost, never the outcome of the dice (there are no dice): **
 damage by a quarter, **first** adds one enemy hit, **pierce** makes hero DEF count for half,
 **drain** adds 25% monster HP, and **poison** costs 8% of max HP after a win.
 
+## Music
+
+Music belongs to a place, not to a fight. A normal page keeps its zone track through a short
+encounter; the encounter gets a short rising sting instead of a new song. Pages 4 and 8 carry the
+mid-keeper track from the moment they are entered, and page 12 carries the King's track, so a
+fight never cuts a song in and out. The track changes only when the page changes.
+
 ## Files
 
 ```
