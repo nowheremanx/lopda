@@ -13,9 +13,10 @@ var CODE_MAX=512*1024;
 var DATA_MAX=256*1024;
 
 var M={
-  base:null, items:null, data:null,
+  base:null, items:null, data:null, ideaDoc:null,
   list:[], sizes:{}, cache:{},
-  current:null, seq:0, saveTimer:0, dirty:false, askYes:null, dataAskYes:null, seedPromise:null
+  current:null, seq:0, saveTimer:0, dirty:false, askYes:null, dataAskYes:null, seedPromise:null,
+  idea:"", ideaLoaded:false, ideaTouched:false, ideaTimer:0
 };
 
 var ICON=["................","..000000000000..","..033333333330..","..030000000030..","..030333330030..","..030300030030..","..030300330030..","..030333000030..","..030000000030..","..030333300030..","..030000000030..","..033333333330..","..000000000000..","................","................","................"];
@@ -25,6 +26,7 @@ function refs(){
     M.base=S.db.doc("data/users/local/scripts");
     M.items=M.base.collection("items");
     M.data=M.base.collection("data");
+    M.ideaDoc=S.db.doc("data/users/local/script-idea");
   }
   return M.base;
 }
@@ -35,8 +37,56 @@ function sizeBytes(n){
 }
 function dataLabel(n){ return n ? tr("scripts.data",{size:sizeBytes(n)}) : tr("scripts.nodata"); }
 function scriptId(){ return "s"+uid(); }
-function setStatus(s){ var el=$("scripts-status"); if(el) el.textContent=s||""; }
+function setStatus(s){
+  var a=$("scripts-status"); if(a) a.textContent=s||"";
+  var b=$("idea-status"); if(b) b.textContent=s||"";
+}
 function setHint(s){ var el=$("script-hint"); if(el) el.textContent=s||""; }
+
+/* ---------- the idea draft: a document of its own, so a long prompt survives HOME and a reload ---------- */
+function loadIdea(){
+  if(M.ideaLoaded) return Promise.resolve(M.idea);
+  if(!refs()) return Promise.resolve(M.idea);
+  return M.ideaDoc.get().then(function(sn){
+    var d=sn.exists ? own(sn.data()) : null;
+    if(d && typeof d.text==="string" && !M.ideaTouched) M.idea=d.text;
+    M.ideaLoaded=true;
+    return M.idea;
+  },function(){ M.ideaLoaded=true; return M.idea; });
+}
+function saveIdeaNow(){
+  clearTimeout(M.ideaTimer);
+  if(!refs()) return Promise.resolve(false);
+  return put(M.ideaDoc,{v:1, text:M.idea||"", updated:Date.now()});
+}
+function saveIdeaSoon(){
+  clearTimeout(M.ideaTimer);
+  M.ideaTimer=setTimeout(saveIdeaNow,600);
+}
+function updateIdeaButtons(){
+  var b=$("idea-clear"); if(b) b.disabled=!M.idea.trim();
+  var c=$("idea-copy"); if(c) c.disabled=false;
+}
+function renderIdea(){
+  closeIdeaAsk();
+  var ta=$("scripts-idea");
+  if(ta) ta.value=M.idea;
+  updateIdeaButtons();
+  var box=$("scripts-prompt-box"); if(box) box.hidden=true;
+  setStatus("");
+  loadIdea().then(function(){
+    if(ta && !M.ideaTouched) ta.value=M.idea;
+    updateIdeaButtons();
+  });
+}
+function clearIdea(){
+  M.idea=""; M.ideaTouched=true;
+  var ta=$("scripts-idea"); if(ta){ ta.value=""; ta.focus(); }
+  updateIdeaButtons();
+  saveIdeaNow();
+  setStatus(tr("scripts.idea.cleared"));
+  sfx("ok");
+}
 
 /* ---------- script source documents ---------- */
 function listScripts(){
@@ -269,9 +319,7 @@ function readClipboard(){
   return Promise.reject(new Error("clipboard"));
 }
 function promptIdea(){
-  var v=$("scripts-idea");
-  var idea=v && v.value ? v.value.trim() : "";
-  return idea || tr("scripts.idea.default");
+  return (M.idea||"").trim() || tr("scripts.idea.default");
 }
 /* The chin pad is opt-in for local scripts: showing it costs about 120 px of height, and a
    touch-only game (fruit ninja) does not need it. It appears only when the code reads the pad.
@@ -279,13 +327,18 @@ function promptIdea(){
 var PAD_USE=/\bPAD\s*\.\s*(?:isDown|BUTTONS)\b|\bPAD\s*\.\s*on\s*\(\s*['"`](?:press|release)['"`]/;
 function usesPad(code){ return PAD_USE.test(String(code||"")); }
 function copyPrompt(){
+  saveIdeaSoon();
   var text=tr("scripts.prompt",{idea:promptIdea()});
   copyText(text).then(function(){
     var box=$("scripts-prompt-box"); if(box) box.hidden=true;
     setStatus(tr("scripts.copied")); sfx("ok");
+    if($("v-script-idea").hidden) toast(tr("scripts.copied"));
   },function(){
     var box=$("scripts-prompt-box");
-    if(box){ box.value=text; box.hidden=false; box.focus(); box.select(); }
+    if(box){
+      if($("v-script-idea").hidden) show("script-idea");
+      box.value=text; box.hidden=false; box.focus(); box.select();
+    }
     setStatus(tr("scripts.copyfail")); sfx("err");
   });
 }
@@ -455,6 +508,12 @@ function ask(msg,yes){
   $("script-ask").hidden=false;
 }
 function closeAsk(){ M.askYes=null; $("script-ask").hidden=true; }
+function openIdeaAsk(){
+  if(!M.idea.trim()) return;
+  $("idea-ask").hidden=false;
+  sfx("tap");
+}
+function closeIdeaAsk(){ var el=$("idea-ask"); if(el) el.hidden=true; }
 
 /* ---------- import / export ---------- */
 function baseName(name){
@@ -494,8 +553,20 @@ function exportCurrent(){
 function init(){
   refs();
   $("scripts-new").onclick=function(){ newScript(true); };
-  $("scripts-copy").onclick=copyPrompt;
+  $("scripts-write").onclick=function(){ show("script-idea"); };
   $("scripts-paste").onclick=function(){ pasteNew(); };
+  $("idea-back").onclick=function(){ saveIdeaNow(); show("scripts"); };
+  $("idea-copy").onclick=copyPrompt;
+  $("idea-paste").onclick=function(){ pasteNew(); };
+  $("idea-clear").onclick=openIdeaAsk;
+  $("idea-ask-yes").onclick=function(){ closeIdeaAsk(); clearIdea(); };
+  $("idea-ask-no").onclick=closeIdeaAsk;
+  $("scripts-idea").addEventListener("input",function(){
+    M.idea=this.value; M.ideaTouched=true;
+    updateIdeaButtons();
+    saveIdeaSoon();
+  });
+  $("scripts-idea").addEventListener("blur",function(){ saveIdeaNow(); });
   $("scripts-data").onclick=function(){ show("script-data"); };
   $("data-back").onclick=function(){ show("scripts"); };
   $("data-clear-all").onclick=function(){
@@ -511,7 +582,6 @@ function init(){
   $("data-ask-no").onclick=closeDataAsk;
   $("scripts-import").onclick=function(){ var f=$("scripts-file"); if(f){ f.value=""; f.click(); } };
   $("scripts-file").addEventListener("change",function(){ var f=this.files && this.files[0]; this.value=""; if(f) importFile(f); });
-  $("scripts-idea").addEventListener("keydown",function(e){ if(e.key==="Enter"){ e.preventDefault(); copyPrompt(); } });
 
   $("script-back").onclick=function(){
     saveCurrent(true).then(function(){ show("scripts"); renderLibrary(); });
@@ -556,10 +626,15 @@ function init(){
 /* ---------- built-in registration ---------- */
 LP.builtin({id:"scripts", label:"app.scripts", icon:function(){ return ICON; }, view:"scripts",
   open:function(){ show("scripts"); },
-  ready:function(){ refs(); ensureSeed().then(function(){ if(!$("v-scripts").hidden) renderLibrary(); }); },
-  enter:function(){ ensureSeed().then(function(){ if(!$("v-scripts").hidden) renderLibrary(); }); renderLibrary(); },
+  ready:function(){ refs(); loadIdea(); ensureSeed().then(function(){ if(!$("v-scripts").hidden) renderLibrary(); }); },
+  enter:function(){ refs(); loadIdea(); ensureSeed().then(function(){ if(!$("v-scripts").hidden) renderLibrary(); }); renderLibrary(); },
   leave:function(){ setStatus(""); },
   lang:function(){ if(!$("v-scripts").hidden) renderLibrary(); }
+});
+LP.builtin({id:"script-idea", view:"script-idea", keepPad:false,
+  enter:function(){ renderIdea(); },
+  leave:function(){ closeIdeaAsk(); saveIdeaNow(); },
+  lang:function(){ if(!$("v-script-idea").hidden) renderIdea(); }
 });
 LP.builtin({id:"script-edit", view:"script-edit", keepPad:false,
   enter:function(){ renderEditor(); },
