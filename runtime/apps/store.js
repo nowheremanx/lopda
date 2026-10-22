@@ -341,7 +341,13 @@ window.addEventListener("message",function(e){
       S.kv[appId]=next; saveKvSoon(appId);
     });
   } else if(d.op==="error"){
-    $("run-err-msg").textContent=String(d.msg).slice(0,300);
+    var msg=String(d.msg||tr("common.unknown")).slice(0,300);
+    if(d.line) msg+="\n" + tr("run.line",{line:d.line,col:d.col||0});
+    if(d.stack){
+      var frames=String(d.stack).split("\n").slice(0,4).join("\n");
+      msg+="\n"+frames.slice(0,500);
+    }
+    $("run-err-msg").textContent=msg;
     $("run-err").hidden=false;
   } else if(d.op==="exit"){
     show(S.running && S.running.back || "home");

@@ -286,11 +286,22 @@ function copyPrompt(){
 }
 function cleanCode(raw){
   var s=String(raw||"").replace(/\r\n/g,"\n").replace(/\r/g,"\n").trim();
-  var fence=/```(?:html|htm|javascript|js)?\s*\n?([\s\S]*?)```/i.exec(s);
-  if(fence) s=fence[1].trim();
+  /* an AI reply often has prose and more than one fence: take the block that
+     starts a document, otherwise the longest one */
+  var re=/```(?:html|htm|javascript|js)?\s*\n?([\s\S]*?)```/gi, m, best="";
+  while((m=re.exec(s))){
+    var b=m[1].trim();
+    if(/<!doctype\s+html|<html[\s>]/i.test(b)){ best=b; break; }
+    if(b.length>best.length) best=b;
+  }
+  if(best) s=best;
   s=s.replace(/^```[a-z]*\s*/i,"").replace(/```\s*$/i,"").trim();
-  var start=/<(?:!doctype\s+html|html|head|body|div|main|section|canvas|style|script|svg)\b/i.exec(s);
-  if(start && start.index>0) s=s.slice(start.index);
+  var doc=/<!doctype\s+html|<html[\s>]/i.exec(s);
+  if(doc && doc.index>0) s=s.slice(doc.index);
+  else {
+    var start=/<(?:head|body|div|main|section|canvas|style|script|svg)\b/i.exec(s);
+    if(start && start.index>0 && !/^\s*[<!(]/.test(s)) s=s.slice(start.index);
+  }
   var end=s.toLowerCase().lastIndexOf("</html>");
   if(end>=0) s=s.slice(0,end+7);
   return s.trim();
