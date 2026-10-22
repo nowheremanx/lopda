@@ -1,10 +1,10 @@
 /* fake-yu / game.js — 滥竽充数, a rhythm game about hiding in a royal orchestra.
  *
  * The joke is the mechanic: you are the extra player at the back of a 300-player court
- * orchestra. Play the notes, but when the king's eye opens, stop A and B and switch to
- * body percussion: shake the handheld (or SELECT / the 摇 button) on the dancer notes.
- * Ten songs, three acts, four endings. The music and chart come from src/music.js; the
- * story from src/story.js.
+ * orchestra. Play the notes, but when the king's eye opens, everything stops. The last
+ * hold before the gaze ends exactly when the eye opens, and the first note after it
+ * begins exactly when the eye closes. Ten songs, three acts, four endings. The music
+ * and chart come from src/music.js; the story from src/story.js.
  *
  * MIT License. Copyright (c) 2026 Haowei Wu.
  */
@@ -38,13 +38,13 @@ var TX = {
   howKeys: { zh: "A 下一页　B 返回", en: "A next  B back" },
   howDone: { zh: "A 回标题", en: "A title" },
   how1: { zh: "音符到竖线时按 A。长条要按住，到尾再松。START 暂停。", en: "Press A as a note crosses the line. Hold long bars to the end. START pauses." },
-  how2: { zh: "国王的眼睛睁开时，A、B 都别按。看准人形音符，摇一摇或按 SELECT 跳一拍。按错照样涨怀疑。", en: "King's eye? Stop A/B. Shake or SELECT on the dancer notes. Wrong presses still count." },
+  how2: { zh: "国王的眼睛睁开时，A、B 都别按。空心音符是假的，按了就露馅；眼睛闭上再起手。", en: "King's eye? Stop A/B. Hollow notes are fake; don't press. Resume when it closes." },
   how3: { zh: "菱形音符是磬，按 B。A 是竽，B 是磬；手忙脚乱时，先看清形状。", en: "Diamond notes are chimes: press B. A is sheng, B is chime. Read the shape first." },
-  how4: { zh: "人形音符是舞点：摇一摇、按 SELECT，或点底部「摇」。王上盯着时也能跳，声音会故意歪一点。", en: "Dancer notes: shake, SELECT, or tap SHAKE. Dance under the king's eye; the note wobbles." },
+  how4: { zh: "长音会在眼睛睁开时结束：松手。眼睛闭上时接下一个音符。后面的曲子会假闭眼，别提前按。", en: "Holds end when the eye opens: release. Resume on the next note. Later songs fake a blink: wait." },
   ready: { zh: "准备", en: "READY" },
   go: { zh: "开始！", en: "GO!" },
   watchWarn: { zh: "王上看过来了", en: "King is watching" },
-  watch: { zh: "别吹！摇起来", en: "STOP & DANCE" },
+  watch: { zh: "别吹！", en: "DON'T PLAY!" },
   again: { zh: "继续", en: "AGAIN" },
   caught: { zh: "露馅！", en: "CAUGHT!" },
   perfect: { zh: "完美", en: "PERFECT" },
@@ -54,7 +54,6 @@ var TX = {
   noise: { zh: "杂音", en: "NOISE" },
   broken: { zh: "破了", en: "BROKEN" },
   hold: { zh: "按住", en: "HOLD" },
-  dance: { zh: "舞", en: "DANCE" },
   chime: { zh: "敲磬", en: "CHIME" },
   cheer: { zh: "全场喝彩", en: "CHEERS!" },
   success: { zh: "演出成功", en: "SUCCESS!" },
@@ -69,7 +68,7 @@ var TX = {
   curtain: { zh: "谢幕", en: "End" },
   resultKeys: { zh: "←→ 选　A 好　B 选曲", en: "LEFT/RIGHT  A ok  B songs" },
   resultKeysFail: { zh: "←→ 选　A 好　B 主菜单", en: "LEFT/RIGHT  A ok  B menu" },
-  failTip: { zh: "睁眼时：A/B 停，摇一摇", en: "King's eye: stop A/B, dance" },
+  failTip: { zh: "睁眼时：A/B 都别按", en: "King's eye: no A/B" },
   newBest: { zh: "新纪录", en: "BEST" },
   endingTitle: { zh: "剧终", en: "THE END" },
   endSeen: { zh: "南郭先生又回到了台上。", en: "Nan Guo is back on stage." },
@@ -84,15 +83,11 @@ var TX = {
   choiceTitle: { zh: "要对湣王说实话吗？", en: "Tell the king the truth?" },
   choice0: { zh: "坦白：我不会吹竽", en: "Confess: I cannot play" },
   choice1: { zh: "继续装：我还能写", en: "Keep pretending" },
-  sensorsOn: { zh: "摇=舞　SELECT=舞", en: "shake / SELECT dance" },
-  sensorsKeys: { zh: "SELECT=舞", en: "SELECT dances" },
   chimeHint: { zh: "B 键：敲磬", en: "B: chime" },
-  touchShake: { zh: "摇", en: "SHAKE" },
   touchB: { zh: "B 敲", en: "B chime" },
   actProgress: { zh: "第 {a}/{b} 首", en: "Song {a}/{b}" },
   pct: { zh: "{n}%", en: "{n}%" },
   bHits: { zh: "敲磬", en: "CHIMES" },
-  bodyHits: { zh: "舞", en: "DANCES" },
   best: { zh: "最好", en: "BEST" },
   locked: { zh: "未演", en: "NEW" },
   noSong: { zh: "没有曲目", en: "No songs" },
@@ -146,30 +141,6 @@ function keycap(g, label, x, y, s) {
 }
 function inBox(p, b) { return p.x >= b.x && p.x < b.x + b.w && p.y >= b.y && p.y < b.y + b.h; }
 
-/* ---------- sensors: one more way to play, never the only way (SPEC 4 / 6.4) ---------- */
-var HAS_MOTION = typeof PAD !== "undefined" && !!PAD.motion;
-var sensorLive = false, sensorWanted = false, sensorAsking = false, shook = false;
-var sensorMsg = "";
-
-if (HAS_MOTION) {
-  PAD.on("shake", function () { if (sensorWanted) shook = true; });
-}
-function sensorOn() {
-  if (!HAS_MOTION) return;
-  sensorWanted = true; sensorAsking = true; sensorMsg = "";
-  PAD.motion.start().then(function (r) {
-    sensorAsking = false;
-    if (!sensorWanted) { PAD.motion.stop(); return; }
-    if (r === "on") { sensorLive = true; return; }
-    sensorLive = false;
-    sensorMsg = r === "none" ? tt("没有感应：用 SELECT 跳舞", "No sensor: SELECT dances") : tt("感应未允许：用 SELECT 跳舞", "No sensor: SELECT dances");
-  });
-}
-function sensorOff() {
-  sensorWanted = false; sensorLive = false; sensorAsking = false; shook = false;
-  if (HAS_MOTION) PAD.motion.stop();
-}
-
 /* ---------- save ---------- */
 function loadProfile() {
   return game.load(SAVE_KEY).then(function (v) {
@@ -218,7 +189,6 @@ game.scene("title", {
   enter: function () {
     titleSel = 0;
     titleLock = game.time + 0.12;
-    sensorOff();
     game.musicStop();
     game.ambience(null);
   },
@@ -405,7 +375,6 @@ game.scene("select", {
     if (selectSel >= SONGS.length) selectSel = 0;
     selectTop = Math.max(0, Math.min(SONGS.length - VIEW_ROWS, selectSel - 1));
     selectLock = game.time + 0.18;
-    sensorOff();
     game.musicStop();
     game.ambience(null);
   },
@@ -475,7 +444,7 @@ game.scene("select", {
 /* ---------- how to play ---------- */
 var howPage = 0, howLock = 0;
 game.scene("howto", {
-  enter: function () { howPage = 0; howLock = game.time + 0.2; sensorOff(); game.musicStop(); },
+  enter: function () { howPage = 0; howLock = game.time + 0.2; game.musicStop(); },
   update: function () {
     var canGo = game.time >= howLock;
     if (game.pressed("b")) { game.sfx("miss"); game.go("title"); return; }
@@ -510,7 +479,7 @@ game.scene("howto", {
       g.rect(9, 84, 142, 38, INK);
       var lid = 0.55 + 0.45 * Math.abs(Math.sin(game.time * 1.6));
       drawEye(g, 24, 90, 52, 24, lid);
-      g.text(tt("摇起来", "DANCE!"), 114, 96, { align: "center", color: PAPER });
+      g.text(tt("别按", "FREEZE"), 114, 96, { align: "center", color: PAPER });
     } else if (howPage === 2) {
       g.rect(9, 84, 142, 40, INK);
       g.rect(38, 86, 2, 34, PAPER);
@@ -531,12 +500,10 @@ game.scene("howto", {
       g.text(tt("磬", "chime"), 74, 107, { color: PAPER });
     } else {
       g.rect(9, 84, 142, 40, INK);
-      g.clip(9, 84, 142, 40);
-      ART.portrait(g, "nanguo", "worried", 14, 74);
-      g.clip();
-      g.text(tt("摇 = 舞", "shake = dance"), 68, 84, { color: PAPER });
-      g.text(tt("SEL = 舞", "SEL = dance"), 68, 96, { color: PAPER });
-      g.text(tt("按键也能玩", "keys work too"), 68, 108, { color: PAPER });
+      drawEye(g, 16, 88, 48, 22, 1);
+      g.text(tt("停", "STOP"), 114, 86, { align: "center", color: PAPER });
+      g.text(tt("等", "WAIT"), 114, 98, { align: "center", color: PAPER });
+      g.text(tt("起", "GO"), 114, 110, { align: "center", color: PAPER });
     }
     g.text(howPage < 3 ? T(TX.howKeys) : T(TX.howDone), 80, 132, { align: "center", color: DARK });
   }
@@ -549,7 +516,6 @@ function buildPlay(i, storyMode) {
   var s = SONGS[i];
   var lo = 127, hi = 0;
   s.chart.forEach(function (n) {
-    if (n.lane === "s") return;
     var m = midiOfNote(n.note);
     if (m < lo) lo = m; if (m > hi) hi = m;
   });
@@ -566,8 +532,8 @@ function buildPlay(i, storyMode) {
     ended: false, failed: false, endAt: 0,
     lastBeat: -1, startPuff: 0, sweat: 0, clap: false,
     hasB: firstB !== null, firstB: firstB === null ? 1e9 : firstB,
-    bHinted: false, bHits: 0, sHits: 0,
-    touchA: false, caughtCool: 0, sensorNote: "", pause: null
+    bHinted: false, bHits: 0, eyeHeld: 0, eyeCaught: false,
+    touchA: false, caughtCool: 0, pause: null
   };
 }
 function midiOfNote(n) {
@@ -579,7 +545,7 @@ function noteY(P, note) {
   return Math.round(80 - (m - P.lo) / (P.hi - P.lo) * 32);
 }
 function noteScreenY(P, note) {
-  return note.lane === "b" ? 45 : note.lane === "s" ? 82 : noteY(P, note);
+  return note.lane === "b" ? 45 : noteY(P, note);
 }
 function inWatch(P, t) {
   return P.song.watch.some(function (w) { return t >= w[0] && t < w[1]; });
@@ -605,40 +571,21 @@ function blip(P, note, perfect) {
     game.sfx({ wave: "triangle", duty: 3, from: Math.round(note.f * 2), to: Math.round(note.f * 2), ms: perfect ? 240 : 180, attack: 2, decay: perfect ? 220 : 160, vol: perfect ? 0.4 : 0.3 });
     return;
   }
-  if (note.lane === "s") {
-    /* body percussion: a slap outside the gaze, a deliberately wobbly note under it */
-    if (P.eye) {
-      game.sfx({ wave: "triangle", duty: 2, from: Math.round(note.f * 0.92), to: Math.round(note.f * 1.08), ms: 230, attack: 2, decay: 210, vol: 0.38, vibrato: { depth: 28, rate: 7 } });
-    } else {
-      game.sfx({ wave: "noise", from: 900, to: 520, ms: 55, attack: 2, decay: 48, vol: 0.34 });
-      game.sfx({ wave: "square", duty: 2, from: Math.round(note.f), to: Math.round(note.f), ms: 60, attack: 1, decay: 52, vol: 0.16 });
-    }
-    return;
-  }
   game.sfx({ wave: "square", duty: perfect ? 1 : 2, from: Math.round(note.f * 1.03), to: Math.round(note.f), ms: perfect ? 85 : 65, attack: 2, decay: perfect ? 78 : 58, vol: perfect ? 0.46 : 0.34 });
 }
 function hitSound(fail) {
   if (fail) game.sfx({ wave: "noise", from: 520, to: 120, ms: 140, vol: 0.42 });
   else game.sfx({ wave: "square", duty: 3, from: 180, to: 90, ms: 90, vol: 0.2 });
 }
-function wrongBody(P) {
-  P.noise++;
-  P.combo = 0;
-  addSuspicion(P, 4);
-  setJudge(P, T(TX.noise), INK, 0.5);
-  game.sfx("tick");
-  game.shake(1, 0.06);
-}
 function scoreHit(P, note, perfect) {
   P.combo++;
   if (P.combo > P.maxCombo) P.maxCombo = P.combo;
   var gain = (perfect ? 100 : 55) + Math.min(50, P.combo * 2);
   if (note && note.lane === "b") { gain += 15; P.bHits++; }
-  if (note && note.lane === "s") { gain += 22; P.sHits++; if (P.eye) gain += 20; }
   P.score += gain;
   if (perfect) P.perfect++; else P.good++;
-  P.suspicion = Math.max(0, P.suspicion - (note && note.lane === "s" && P.eye ? 3.2 : perfect ? 1.6 : 0.8));
-  setJudge(P, note && note.lane === "s" ? T(TX.dance) : note && note.lane === "b" ? T(TX.chime) : perfect ? T(TX.perfect) : T(TX.good), INK, 0.45);
+  P.suspicion = Math.max(0, P.suspicion - (perfect ? 1.6 : 0.8));
+  setJudge(P, note && note.lane === "b" ? T(TX.chime) : perfect ? T(TX.perfect) : T(TX.good), INK, 0.45);
   puffAt(P, note ? noteScreenY(P, note) : 64, perfect ? 1 : 0);
   blip(P, note, perfect);
   if (P.combo > 0 && P.combo % 10 === 0) {
@@ -672,6 +619,7 @@ function caught(P) {
   P.caughtCool = 0.7;
   P.caught++;
   P.combo = 0;
+  P.eyeCaught = true;
   addSuspicion(P, 16);
   setJudge(P, T(TX.caught), INK, 0.8);
   game.sfx("err"); game.flash(0.09); game.shake(3, 0.25);
@@ -705,7 +653,7 @@ function resultStats(P) {
   return {
     score: P.score, maxCombo: P.maxCombo, perfect: P.perfect, good: P.good, miss: P.miss,
     noise: P.noise, caught: P.caught, suspicion: Math.round(P.suspicion), total: P.total,
-    acc: acc, rank: rank, failed: P.failed, bHits: P.bHits, sHits: P.sHits
+    acc: acc, rank: rank, failed: P.failed, bHits: P.bHits
   };
 }
 function nearestNote(P, t, lane) {
@@ -742,9 +690,7 @@ function pressLane(P, t, lane) {
     }
     return;
   }
-  if (t > P.song.chart[0].t - 0.35 && t < P.song.chart[P.song.chart.length - 1].end + GOOD) {
-    if (lane === "s") wrongBody(P); else wrongPress(P);
-  }
+  if (t > P.song.chart[0].t - 0.35 && t < P.song.chart[P.song.chart.length - 1].end + GOOD) wrongPress(P);
 }
 
 var PAUSE_LINES = {
@@ -884,8 +830,6 @@ game.scene("play", {
   enter: function (a) {
     P = buildPlay(a.i, a.story);
     P.caughtCool = 0;
-    P.sensorNote = sensorMsg;
-    sensorOn();
     game.ambience(P.song.venue === "throne" ? "wind" : P.song.venue === "night" || P.song.venue === "moon" ? "wind" : null, 0.14);
     if (a.retry) {
       P.pause = { kind: "talk", sel: 0, action: "retry", resumeBeat: 0, countAt: 0 };
@@ -898,7 +842,6 @@ game.scene("play", {
       game.music(P.song.music, { loop: false });
     }
   },
-  exit: function () { sensorOff(); },
   update: function () {
     if (!P) return;
     if (P.pause) { updatePause(P); return; }
@@ -909,7 +852,6 @@ game.scene("play", {
     var beatSec = 60 / P.song.bpm;
     if (P.caughtCool > 0) P.caughtCool -= dt;
     if (P.sweat > 0) P.sweat -= dt;
-    P.sensorNote = sensorMsg || P.sensorNote;
 
     /* note particles */
     for (var i = P.bits.length - 1; i >= 0; i--) {
@@ -919,10 +861,6 @@ game.scene("play", {
     for (i = P.puffs.length - 1; i >= 0; i--) { P.puffs[i].t += dt; if (P.puffs[i].t > 0.3) P.puffs.splice(i, 1); }
 
     if (!P.ended) {
-      /* body percussion: shake, SELECT, or the 摇 button */
-      var sdown = false;
-      if (shook) { shook = false; if (sensorWanted) sdown = true; }
-
       /* watch warnings and the eye */
       for (i = 0; i < P.song.watch.length; i++) {
         var w = P.song.watch[i];
@@ -933,12 +871,16 @@ game.scene("play", {
         }
         if (!P.inEye[i] && t >= w[0] && t < w[1]) {
           P.inEye[i] = true;
+          P.eyeHeld = 0;
+          P.eyeCaught = false;
           setBanner(P, T(TX.watch), w[1]);
           game.sfx({ wave: "triangle", from: 120, to: 80, ms: 280, vol: 0.5 });
-          if (P.hold) { missNote(P, P.hold.note, "break"); P.hold = null; }
+          /* a hold ending at the gaze is the release cue; only longer holds break */
+          if (P.hold && P.hold.note.end > w[0] + 0.06) { missNote(P, P.hold.note, "break"); P.hold = null; }
         }
         if (P.inEye[i] && t >= w[1]) {
           P.inEye[i] = false;
+          P.eyeHeld = 0;
           setBanner(P, T(TX.playOn), t + 0.6);
           game.sfx("tick");
         }
@@ -946,30 +888,30 @@ game.scene("play", {
       var eye = inWatch(P, t);
       P.eye = eye;
 
-      /* touch: the screen is A, except the two little buttons */
+      /* touch: the screen is A, except the chime button */
       var p = game.pointer;
-      var tB = false, tShake = false;
+      var tB = false;
       var touchUp = p.released && P.touchA;
       if (p.pressed) {
-        if (inBox(p, TOUCH_SHAKE)) tShake = true;
-        else if (P.hasB && inBox(p, TOUCH_B)) tB = true;
+        if (P.hasB && inBox(p, TOUCH_B)) tB = true;
         else P.touchA = true;
       }
       if (p.released) P.touchA = false;
-      if (tShake) sdown = true;
 
-      var down = game.pressed("a") || (p.pressed && !inBox(p, TOUCH_B) && !inBox(p, TOUCH_SHAKE));
+      var down = game.pressed("a") || (p.pressed && !inBox(p, TOUCH_B));
       var bdown = game.pressed("b") || tB;
       var up = game.released("a") || touchUp;
-      if (game.pressed("select")) sdown = true;
 
       if (eye) {
         if (down || bdown) caught(P);
-        if (sdown) pressLane(P, t, "s");
+        var holding = game.btn("a") || game.btn("b");
+        if (holding) {
+          P.eyeHeld += dt;
+          if (!P.eyeCaught && P.eyeHeld > 0.12) { caught(P); P.eyeCaught = true; }
+        } else P.eyeHeld = 0;
       } else if (!P.ended) {
         if (down) pressLane(P, t, "a");
         if (bdown) pressLane(P, t, "b");
-        if (sdown) pressLane(P, t, "s");
       }
 
       if (P.hold) {
@@ -991,7 +933,7 @@ game.scene("play", {
         }
       }
 
-      /* first chime and first dance hints */
+      /* first chime hint */
       if (P.hasB && !P.bHinted && t >= P.firstB - 1.6 && t < P.firstB + 0.4) {
         P.bHinted = true;
         setBanner(P, T(TX.chimeHint), P.firstB + 0.5);
@@ -1048,22 +990,34 @@ game.scene("play", {
     g.text("A", 10, 82, { color: DARK });
     if (P.hasB) g.text("B", 10, 41, { color: DARK });
     if (P.eye) {
-      var ws = watchStart(P);
-      drawEye(g, 49, 38, 62, 22, Math.min(1, 0.3 + Math.min(1, (t - ws) * 5)));
-      g.text(tt("摇一摇 / SELECT", "SHAKE / SELECT"), 80, 64, { align: "center", color: INK });
+      var ws = watchStart(P), we = watchEnd(P);
+      var u = we > ws ? (t - ws) / (we - ws) : 0;
+      var lid = Math.min(1, 0.3 + Math.min(1, (t - ws) * 5));
+      /* later songs fake a blink: the lid dips but the gaze is still on */
+      if (P.song.act >= 2 && u > 0.42 && u < 0.62) {
+        var k = (u - 0.42) / 0.20;
+        lid *= 1 - Math.sin(k * Math.PI) * 0.82;
+      }
+      drawEye(g, 49, 38, 62, 22, lid);
+      g.text(tt("别按", "FREEZE"), 80, 64, { align: "center", color: INK });
+      for (var gi = 0; gi < 4; gi++) {
+        var gt = ws + 0.35 + gi * 0.65;
+        if (gt >= we) break;
+        var gx = 40 + (gt - t) * (118 / 2.2);
+        if (gx < 34 || gx > 162) continue;
+        drawGhost(g, gx, gi % 2 ? 86 : 78, DARK);
+      }
     }
     var lead = 2.2;
     for (var i = 0; i < P.song.chart.length; i++) {
       var n = P.song.chart[i];
       if (P.judged[n.t] && P.judged[n.t] !== "hold") continue;
-      if (P.eye ? n.lane !== "s" : n.lane === "s") continue;
+      if (P.eye) continue;
       var x = 40 + (n.t - t) * (118 / lead);
       if (x < 34 || x > 162) continue;
       var y = noteScreenY(P, n);
       var near = x - 40 < 8 && x - 40 > -4;
-      if (n.lane === "s") {
-        drawDancer(g, x, y, near ? 3 : 2, near ? INK : DARK);
-      } else if (n.lane === "b") {
+      if (n.lane === "b") {
         drawDiamond(g, x, y, near ? 3 : 2, near ? INK : DARK);
       } else if (n.hold) {
         var xe = 40 + (n.end - t) * (118 / lead);
@@ -1112,9 +1066,8 @@ game.scene("play", {
       if (P.hasB) { keycap(g, "B", 92, 3, 1); g.text(tt("敲", "hit"), 104, 2, { color: DARK }); }
     }
     drawSuspicion(g, P.suspicion);
-    /* touch buttons */
+    /* touch button */
     if (P.hasB) touchButton(g, TOUCH_B, T(TX.touchB), false);
-    touchButton(g, TOUCH_SHAKE, T(TX.touchShake), false);
     /* banner */
     if (P.banner && t < P.bannerUntil) {
       g.window(22, 18, 116, 16);
@@ -1134,8 +1087,7 @@ game.scene("play", {
       g.window(6, 16, 148, 32);
       g.text(beatsLeft > 1 ? T(TX.ready) : T(TX.go), 12, 19);
       g.text(T(P.song.name), 148, 19, { align: "right", color: DARK });
-      var hint = sensorLive ? T(TX.sensorsOn) : sensorMsg || T(TX.sensorsKeys);
-      g.text(hint, 80, 34, { align: "center", color: DARK });
+      g.text(tt("王上睁眼：别按", "Eye open: freeze"), 80, 34, { align: "center", color: DARK });
     }
     /* fail */
     if (P.ended && P.failed) {
@@ -1152,7 +1104,6 @@ game.scene("play", {
   }
 });
 var TOUCH_B = { x: 120, y: 122, w: 36, h: 20 };
-var TOUCH_SHAKE = { x: 80, y: 122, w: 36, h: 20 };
 function touchButton(g, b, label, off) {
   g.rect(b.x, b.y, b.w, b.h, PAPER);
   g.frame(b.x, b.y, b.w, b.h, off ? MID : INK);
@@ -1165,19 +1116,19 @@ function drawDiamond(g, x, y, r, tone) {
   g.rect(x - 1, y - 1, 3, 3, PAPER);
   g.frame(x - r, y - 1, r * 2 + 1, 3, tone);
 }
-/* a tiny dancer: the third instrument, played by shaking or SELECT */
-function drawDancer(g, x, y, r, tone) {
-  var arm = r >= 3 ? 3 : 2;
-  g.rect(x - 4, y - 7, 9, 11, PAPER);
-  g.frame(x - 4, y - 7, 9, 11, MID);
-  g.rect(x, y - 6, 1, 2, tone);
-  g.rect(x - arm, y - 4, arm * 2 + 1, 1, tone);
-  g.rect(x, y - 4, 1, 5, tone);
-  g.rect(x - arm, y + 1, arm, 1, tone);
-  g.rect(x + 1, y + 1, arm, 1, tone);
+/* a tempting note that must not be played while the king looks */
+function drawGhost(g, x, y, tone) {
+  g.circle(x, y, 2, PAPER, true);
+  g.circle(x, y, 2, tone, false);
+  g.line(x - 1, y - 1, x + 1, y + 1, tone);
+  g.line(x + 1, y - 1, x - 1, y + 1, tone);
 }
 function watchStart(P) {
   for (var i = 0; i < P.song.watch.length; i++) if (P.t >= P.song.watch[i][0] && P.t < P.song.watch[i][1]) return P.song.watch[i][0];
+  return P.t;
+}
+function watchEnd(P) {
+  for (var i = 0; i < P.song.watch.length; i++) if (P.t >= P.song.watch[i][0] && P.t < P.song.watch[i][1]) return P.song.watch[i][1];
   return P.t;
 }
 function drawEye(g, x, y, w, h, lid) {
@@ -1223,7 +1174,6 @@ game.scene("result", {
     resultSel = 0;
     resultLock = game.time + 0.2;
     game.musicStop();
-    sensorOff();
   },
   update: function () {
     var canGo = game.time >= resultLock;
@@ -1273,7 +1223,7 @@ game.scene("result", {
     g.text(T(TX.maxCombo) + " " + st.maxCombo, 14, 46, { color: DARK });
     g.text(T(TX.accuracy) + " " + Math.round(st.acc * 100) + "%", 14, 58, { color: DARK });
     g.text(T(TX.suspicion) + " " + st.suspicion, 14, 70, { color: DARK });
-    g.text(T(TX.bHits) + " " + st.bHits + "  " + T(TX.bodyHits) + " " + st.sHits, 14, 82, { color: DARK });
+    g.text(T(TX.bHits) + " " + st.bHits, 14, 82, { color: DARK });
     bigText(g, st.rank, 126, 32, 4, INK, "center");
     g.text(rankName(st.rank), 126, 56, { align: "center", color: DARK });
     var names = { next: TX.next, retry: TX.retry, choose: TX.choose, curtain: TX.curtain, title: TX.menu };
@@ -1293,7 +1243,6 @@ game.scene("result", {
 var endingKey = "trueSong";
 game.scene("ending", {
   enter: function (a) {
-    sensorOff();
     game.musicStop();
     endingKey = STORY.endingFor(profile.truth, a && a.stats);
     var e = STORY.ENDINGS[endingKey];

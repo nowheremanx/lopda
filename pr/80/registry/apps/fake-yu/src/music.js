@@ -162,16 +162,21 @@ var FAKE_SONGS = (function () {
       if (inWatch(e.t, e.d, watch)) return;
       chart.push({ t: e.t * beatSec, end: (e.t + e.d) * beatSec, d: e.d, hold: e.hold, lane: e.lane, note: e.n, f: freq(e.n) });
     });
-    /* the king's gaze is the body-percussion section: A and B must stop, but a shake or
-       SELECT keeps the performance going. One dance beat, two for a four-beat stare. */
+    /* The gaze sits on a musical boundary: the last note before it is a hold that ends
+       when the eye opens, and the first note after it is a hold that begins when the
+       eye closes. That gives the player a release cue and a re-entry cue without any
+       extra sensor. */
     watch.forEach(function (w) {
-      [0.5, 2.5].forEach(function (off) {
-        var b = w[0] + off;
-        if (b >= w[1] - 0.001) return;
-        chart.push({ t: b * beatSec, end: (b + 1) * beatSec, d: 1, hold: false, lane: "s", body: true, note: "c4", f: freq("c4") });
+      var ws = w[0] * beatSec, we = w[1] * beatSec;
+      var pre = null, post = null;
+      chart.forEach(function (n) {
+        if (n.lane !== "a") return;
+        if (n.end <= ws + 0.001 && n.end >= ws - 0.08) pre = n;
+        if (Math.abs(n.t - we) <= 0.02) post = n;
       });
+      if (pre) { pre.hold = true; pre.end = ws; }
+      if (post) post.hold = true;
     });
-    chart.sort(function (a, b) { return a.t - b.t; });
     for (var i = 1; i < chart.length; i++) {
       if (chart[i].t < chart[i - 1].end - 0.001) throw new Error(def.id + ": notes overlap at chart " + i);
     }
@@ -201,7 +206,7 @@ var FAKE_SONGS = (function () {
     name: { zh: "小星星", en: "Twinkle" }, short: { zh: "小星星", en: "Twinkle" },
     credit: { zh: "法国童谣 1761", en: "French folk 1761" },
     tag: { zh: "第一课", en: "First lesson" },
-    watch: [[32, 36]],
+    watch: [[31.5, 36]],
     bars: ["C", "G", "C", "C", "F", "C", "G", "G", "G", "G", "C", "C", "F", "C", "G", "C"],
     style: { p2: "sparse", tri: "soft", noise: "soft", p2vol: 6, trivol: 11, loud: 4 },
     events: [
@@ -320,7 +325,7 @@ var FAKE_SONGS = (function () {
     name: { zh: "山魔王的宫殿", en: "Mountain King" }, short: { zh: "山魔王", en: "Mountain" },
     credit: { zh: "格里格 1875", en: "Grieg 1875" },
     tag: { zh: "加速", en: "Accelerando" },
-    watch: [[56, 60]],
+    watch: [[55.5, 60]],
     bars: ["Bm", "Bm",
            "Bm", "Bm", "Bm", "Bm", "A", "A", "Bm", "Bm",
            "Bm", "Bm", "Bm", "Bm", "A", "A", "Bm", "Bm",
