@@ -235,7 +235,7 @@ test("store: category filters split the catalogue, and one button updates every 
   assert.equal(await p.locator("#store-list .store-cat").count(), 6, "one section per category");
   assert.match(await p.locator("#store-updates").innerText(), /2 个程序有新版本/);
   await p.locator(".store-filter", { hasText: "游戏" }).click();
-  assert.equal(await p.locator("#store-list .store-item").count(), 9);
+  assert.equal(await p.locator("#store-list .store-item").count(), 8);
   assert.equal(await p.locator("#store-list .store-cat").count(), 0, "a filter shows one flat list");
   await p.locator(".store-filter", { hasText: "全部" }).click();
 
@@ -2190,7 +2190,7 @@ async function chipPage(t) {
   const { p, errors } = await page(t);
   await p.setContent("<!doctype html><html><body></body></html>");
   await p.addScriptTag({ content: await readFile(join(ROOT, "runtime/chip.js"), "utf8") });
-  await p.addScriptTag({ content: await readFile(join(ROOT, "registry/apps/xiaoyuan/src/music.js"), "utf8") });
+  await p.addScriptTag({ content: await readFile(join(ROOT, "registry/apps/paper-tower/src/music.js"), "utf8") });
   await p.evaluate(() => {
     window.render = async (seconds, fn, gain = 1) => {
       const sr = 22050, oc = new OfflineAudioContext(1, Math.ceil(sr * seconds), sr);
@@ -2230,16 +2230,16 @@ test("chip: a looping song comes round again; music sits at about half a sound e
   const { p, errors } = await chipPage(t);
   const r = await p.evaluate(async () => {
     const loop = await render(5, song({ bpm: 120, p1: "c r r r" }, true, 5));
-    const yard = await render(40, song(YARD_SONG));
+    const tune = await render(30, song(PT.MUSIC.title));
     const fx = await render(1, (c) => c.sfx(LopdaChip.sfxParams({ ms: 400 })));
-    const mute = await render(40, song(YARD_SONG), 0);
+    const mute = await render(30, song(PT.MUSIC.title), 0);
     const muteFx = await render(1, (c) => c.sfx(LopdaChip.sfxParams({ ms: 400 })), 0);
-    return { loop: [loop.at(0, 0.5), loop.at(0.6, 1.9), loop.at(2, 2.5), loop.at(4, 4.5)], yardEnd: yard.last,
-      ratio: yard.rms / fx.rms, mute: mute.peak, muteFx: muteFx.peak };
+    return { loop: [loop.at(0, 0.5), loop.at(0.6, 1.9), loop.at(2, 2.5), loop.at(4, 4.5)], tuneEnd: tune.last,
+      ratio: tune.rms / fx.rms, mute: mute.peak, muteFx: muteFx.peak };
   });
   assert.ok(r.loop[0] > 0.02 && r.loop[1] === 0 && r.loop[2] > 0.02 && r.loop[3] > 0.02, "c at 0 s, 2 s and 4 s: " + r.loop);
-  assert.ok(Math.abs(r.yardEnd - 40) < 0.05, "the yard tune is 40 s: " + r.yardEnd);
-  assert.ok(r.ratio > 0.3 && r.ratio < 0.65, "the whole yard tune against one default effect, by rms: " + r.ratio);
+  assert.ok(Math.abs(r.tuneEnd - 30) < 0.05, "the paper tower's title tune is 30 s: " + r.tuneEnd);
+  assert.ok(r.ratio > 0.3 && r.ratio < 0.65, "the whole title tune against one default effect, by rms: " + r.ratio);
   assert.equal(r.mute, 0); assert.equal(r.muteFx, 0);
   assert.deepEqual(errors, []);
 });
@@ -2338,8 +2338,8 @@ test("music: starts on the first key, stops on HOME and when another app starts,
   await p.waitForFunction(() => window.LP && window.LP.S.db);
   const state = () => p.evaluate(() => LP.chip.state());
   const until = async (fn, what) => { for (let i = 0; i < 100; i++) { if (fn(await state())) return; await p.waitForTimeout(50); } assert.fail("timed out waiting for " + what); };
-  const yard = await readFile(join(ROOT, "registry/apps/xiaoyuan/index.html"), "utf8");
-  await runInRuntime(p, "xiaoyuan", yard);
+  const tower = await readFile(join(ROOT, "registry/apps/paper-tower/index.html"), "utf8");
+  await runInRuntime(p, "paper-tower", tower);
   /* the title asks for the tune at once; nobody has touched anything yet, so it waits */
   await until((s) => s.waiting, "the tune to be held");
   assert.equal((await state()).playing, false);
@@ -2349,13 +2349,13 @@ test("music: starts on the first key, stops on HOME and when another app starts,
   await p.click("#home-key");
   assert.deepEqual(await state(), QUIET);
   /* again, then switch straight to another app */
-  await runInRuntime(p, "xiaoyuan", yard);
+  await runInRuntime(p, "paper-tower", tower);
   await until((s) => s.playing, "the tune to start again (audio is unlocked now)");
   await runInRuntime(p, "quiet", "<!doctype html><html><body>quiet</body></html>");
   assert.deepEqual(await state(), QUIET);
   /* at volume 0 (off) the song keeps going, silently */
   await p.evaluate(() => { LP.SND.vol = 0; });
-  await runInRuntime(p, "xiaoyuan", yard);
+  await runInRuntime(p, "paper-tower", tower);
   await until((s) => s.playing, "the tune under the sound switch");
   assert.equal(await p.evaluate(() => LP.SND.gain.gain.value), 0);
   await p.click("#home-key");
@@ -2366,8 +2366,8 @@ test("sound: a context the phone stopped is woken or replaced on the next touch,
   const { p, errors } = await page(t, { locale: "zh-CN" });
   await p.goto(base + "/runtime/", { waitUntil: "load" });
   await p.waitForFunction(() => window.LP && window.LP.S.db);
-  const yard = await readFile(join(ROOT, "registry/apps/xiaoyuan/index.html"), "utf8");
-  await runInRuntime(p, "xiaoyuan", yard);
+  const tower = await readFile(join(ROOT, "registry/apps/paper-tower/index.html"), "utf8");
+  await runInRuntime(p, "paper-tower", tower);
   await p.keyboard.press("x");
   await p.waitForFunction(() => LP.chip.state().playing && LP.chip.beat() > 2);
   /* a check found it dead (its clock stood still): the next key replaces it, inside the key press */
@@ -2430,10 +2430,10 @@ test("music: a score with a mistake is shown in the error box, with its column; 
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
-test("music in the dev harness: the yard's tune waits for a key, then plays; a reload stops it and the new run starts it again", { skip, timeout: 30000 }, async (t) => {
+test("music in the dev harness: the paper tower's tune waits for a key, then plays; a reload stops it and the new run starts it again", { skip, timeout: 30000 }, async (t) => {
   const { p, errors } = await page(t);
   await p.addInitScript(() => Object.defineProperty(navigator, "userActivation", { value: { hasBeenActive: false, isActive: false } }));
-  await p.goto(`${base}/sdk/dev.html?app=registry/apps/xiaoyuan`, { waitUntil: "load" });
+  await p.goto(`${base}/sdk/dev.html?app=registry/apps/paper-tower`, { waitUntil: "load" });
   await p.waitForFunction(() => /music play/.test(document.getElementById("log").textContent), null, { timeout: 5000 });
   assert.match(await p.textContent("#log"), /music play, looping \(waits for a touch or key, as on the handheld\)/);
   await p.keyboard.press("x");
@@ -2507,9 +2507,9 @@ test("ambience: six presets, each audible and each its own; the same every time;
     const mid = (Math.max(...half) + Math.min(...half)) / 2;
     let crests = 0; for (let i = 1; i < half.length; i++) if (half[i - 1] < mid && half[i] >= mid) crests++;
     out.crests = crests;
-    /* the yard's tune through the same output, start to end */
-    const yard = await render(40, song(YARD_SONG));
-    out.yard = yard.rms;
+    /* the paper tower's title tune through the same output, start to end */
+    const tune = await render(30, song(PT.MUSIC.title));
+    out.tune = tune.rms;
     return out;
   });
   const names = ["rain", "waves", "waterfall", "wind", "fire", "stream"];
@@ -2518,7 +2518,7 @@ test("ambience: six presets, each audible and each its own; the same every time;
     assert.ok(r[n].rms > 0.01, n + " is audible: " + r[n].rms);
     assert.equal(r[n].mute, 0, n + " at level 0");
     /* §5: under the music, with room to spare */
-    assert.ok(r[n].rms < 0.7 * r.yard, `${n} (${r[n].rms}) is under the yard's tune (${r.yard})`);
+    assert.ok(r[n].rms < 0.7 * r.tune, `${n} (${r[n].rms}) is under the paper tower's title tune (${r.tune})`);
   }
   assert.ok(r.same, "seeded, not Math.random: two renders are the same sample for sample");
   /* every two presets differ by at least a third in at least one measure: brightness (zero crossings), movement

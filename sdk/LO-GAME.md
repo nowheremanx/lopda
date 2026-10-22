@@ -270,7 +270,7 @@ var song = { bpm: 96,
 ```
 
 The MML, the sound fields and the rules are in SPEC.md section 6.3. Keep a long score in its own
-file under `src/` (section 11 of SPEC.md); `registry/apps/xiaoyuan/src/music.js` is the worked example.
+file under `src/` (section 11 of SPEC.md); `registry/apps/paper-tower/src/music.js` is the worked example.
 `game.music` asked for before the player has touched the screen waits and starts on the first tap or key.
 On runtimes before 0.11.0 there is no music and no custom sounds: those calls do nothing, and named
 sounds still play.

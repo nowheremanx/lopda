@@ -1,5 +1,5 @@
 // runtime/chip.js: the MML parser and the custom sound parameters (pure functions), and how the shim, lo-game
-// and the yard example use them. Synthesis itself is rendered in Chromium (tests/e2e.test.mjs, OfflineAudioContext).
+// and the paper tower example use them. Synthesis itself is rendered in Chromium (tests/e2e.test.mjs, OfflineAudioContext).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
@@ -195,13 +195,20 @@ test("ambience in the host: it goes on in a new context with the same preset and
   assert.deepEqual([plain(host.state()).ambience, plain(host.state()).level], ["waterfall", 0.35]);
 });
 
-test("the yard's tune parses: four channels, 40 seconds, every channel the same length", () => {
-  const ctx = runScript("registry/apps/xiaoyuan/src/music.js", {});
-  const song = ctx.YARD_SONG;
-  for (const ch of C.CHANNELS) assert.equal(parse({ bpm: song.bpm, [ch]: song[ch] }).song.beats, 64, ch);
-  const r = parse(song);
-  assert.equal(r.song.seconds, 40);
-  assert.ok(JSON.stringify(song).length < C.MAX_TEXT);
+test("the paper tower's tunes parse: four channels each, and the title tune is 30 seconds", () => {
+  const M = runScript("registry/apps/paper-tower/src/music.js").PT.MUSIC;
+  const songs = [M.title, M.battle, M.boss, M.ending].concat(M.zone);
+  for (const song of songs) {
+    const r = parse(song);
+    assert.ok(!r.error, r.error);
+    assert.ok(r.song.seconds > 0);
+    for (const ch of C.CHANNELS) {
+      assert.ok(song[ch], ch);
+      assert.ok(!parse({ bpm: song.bpm, [ch]: song[ch] }).error, ch);
+    }
+    assert.ok(JSON.stringify(song).length < C.MAX_TEXT);
+  }
+  assert.equal(parse(M.title).song.seconds, 30);
 });
 
 test("the rain station: rain under the title and the station, lighter on the train, none at dawn; the same frames", async () => {
@@ -292,12 +299,13 @@ test("the rain station: a finished chapter unlocks in Select and replays from it
   assert.deepEqual(plain(app.ctx.get("S").flags), { tape: true, truth: true });
 });
 
-test("the yard draws the same frames with and without music, and plays its tune and its own sounds", async () => {
-  const file = join(ROOT, "registry/apps/xiaoyuan/index.html");
+test("the paper tower draws the same frames with and without music, and plays its tunes and its own sounds", async () => {
+  const file = join(ROOT, "registry/apps/paper-tower/index.html");
   const without = await scripted(file), withMusic = await scripted(file, { music: true });
   assert.deepEqual(withMusic.frames, without.frames);
   const kinds = (calls) => calls.map((c) => c[0] + ":" + (typeof c[1] === "object" ? "object" : c[1]));
-  assert.equal(withMusic.calls.filter((c) => c[0] === "play").length, 1, "the tune starts once");
-  assert.ok(parse(withMusic.calls.find((c) => c[0] === "play")[1]).song);
+  const plays = withMusic.calls.filter((c) => c[0] === "play");
+  assert.ok(plays.length >= 1, "the title's tune, then the climb's");
+  for (const p of plays) assert.ok(parse(p[1]).song);
   assert.ok(!kinds(without.calls).some((k) => /object|play/.test(k)), "an old runtime gets named sounds only");
 });
