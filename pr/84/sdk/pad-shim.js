@@ -234,10 +234,21 @@ function lopdaPadShim(opts) {
   addEventListener("keyup", function (e) { var b = KEYS[e.key]; if (b) setButton(b, false); });
   addEventListener("blur", releaseAll);
   addEventListener("error", function (e) {
-    post({ op: "error", msg: String(e.message) + " @" + e.lineno + ":" + e.colno });
+    post({
+      op: "error",
+      msg: String(e.message) + " @" + e.lineno + ":" + e.colno,
+      line: e.lineno || 0,
+      col: e.colno || 0,
+      stack: e.error && e.error.stack ? String(e.error.stack) : ""
+    });
   });
   addEventListener("unhandledrejection", function (e) {
-    var r = e.reason; post({ op: "error", msg: "Promise: " + String((r && r.message) || r) });
+    var r = e.reason;
+    post({
+      op: "error",
+      msg: "Promise: " + String((r && r.message) || r),
+      stack: r && r.stack ? String(r.stack) : ""
+    });
   });
 
   /* The screen has no colour glyphs: strip emoji from DOM text and canvas text. */
