@@ -26,6 +26,7 @@ sdk/            MIT. pad-shim.js (PAD bridge), lo-game.js (game framework), LO-G
                 dev.html (app harness), template/, template-game/, template-vn/ (visual novel), fonts/ (lopix12, OFL)
 registry/       index.json (generated) + apps/<id>/{manifest.json,index.html,src/ (optional sources)}
 tools/          check-app.mjs, build-index.mjs, bundle-app.mjs (+ lo-game.mjs alias), lo-game-lib.mjs, stamp-preview.mjs (Node 20+, no deps);
+                readme-shots.mjs (the README's pictures in docs/images/, needs Playwright) with readme-scene.mjs (the lake the fake camera sees);
                 gen-lunar.py (one-off generator of the lunar table, needs PyEphem); gen-ecdict.mjs (one-off, ECDICT csv ->
                 vendor/ecdict/) with stardict-write.mjs (StarDict + dictzip writer, also used by tests)
 tests/          node:test suite (no deps): tools, strings, PAD shim, sensors, speech, platform store, backup, lo-game, negative, develop, notetext, zip, repo rules;
