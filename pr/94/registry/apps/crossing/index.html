@@ -44,16 +44,31 @@
   #note { flex: none; width: 100%; height: 22px; line-height: 22px; font-size: 14px; overflow: hidden; white-space: nowrap;
     text-overflow: ellipsis; text-align: center; padding: 0 4px; box-sizing: border-box; }
   footer { flex: none; height: 20px; line-height: 20px; font-size: 13px; text-align: center; white-space: nowrap; overflow: hidden; }
-  #cover { position: fixed; inset: 0; background: #a3ad7e; display: flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: 14px; padding: 18px; box-sizing: border-box; text-align: center; }
+  #cover { position: fixed; inset: 0; z-index: 5; background: #a3ad7e; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 14px; padding: 18px; box-sizing: border-box; text-align: center; overflow-y: auto; }
   #cover[hidden] { display: none; }
   #cover p { margin: 0; font-size: 16px; line-height: 1.55; max-width: 300px; white-space: pre-line; }
   #cover.help p { text-align: left; font-size: 14px; line-height: 1.45; }
   #cover button { font: inherit; font-size: 17px; font-weight: bold; min-height: 44px; padding: 8px 22px; background: #1f2a14;
     color: #a3ad7e; border: 0; box-shadow: 3px 3px 0 #4a5a32; touch-action: manipulation; }
   #cover button[hidden] { display: none; }
+  #cover-list { list-style: none; margin: 0; padding: 0; width: 100%; max-width: 300px; text-align: left; font-size: 14px; }
+  #cover-list[hidden] { display: none; }
+  #cover-list li { height: 24px; line-height: 24px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-bottom: 1px solid #7d8a58; }
+  #cover-list b { display: inline-block; min-width: 76px; letter-spacing: 1px; }
+  #cover-list li.sum { border: 0; color: #4a5a32; }
   @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-3px); } 75% { transform: translateX(3px); } }
   .shake { animation: shake 0.22s linear; }
+  /* A letter landing in its cell: it grows past its size and settles, in ink for a moment. The colours change in
+     steps (step-end), never as a fade, so every pixel stays one of the four tones; only the size eases. */
+  @keyframes pop { 0% { transform: scale(0.3); } 55% { transform: scale(1.3); } 100% { transform: scale(1); } }
+  @keyframes ink { 0% { background: #1f2a14; color: #a3ad7e; border-color: #1f2a14; } }
+  .cell.pop { animation: pop 0.3s ease-out, ink 0.3s step-end; position: relative; z-index: 1; }
+  #hint.pop { animation: pop 0.35s ease-out; }
+  /* the round is clear: the whole grid blinks twice */
+  @keyframes flash { 0%, 50% { background: #1f2a14; color: #a3ad7e; border-color: #1f2a14; }
+    25%, 75% { background: #7d8a58; color: #1f2a14; border-color: #1f2a14; } }
+  #board.flash .cell { animation: flash 1s step-end; }
 </style>
 </head>
 <body>
@@ -72,6 +87,7 @@
 <footer id="goal"></footer>
 <div id="cover">
   <p id="cover-text"></p>
+  <ul id="cover-list" hidden></ul>
   <button id="cover-btn" type="button"></button>
 </div>
 <script>
@@ -88,9 +104,10 @@
       demo: "看：按住字母，划过 {w}",
       demoEnd: "拼对了，词就填进格子，下面显示中文，还会读出来。\n\n轮到你了：找出格子里剩下的词。",
       start: "开始",
-      help: "玩法\n\n按住字母盘上的一个字母，不松手划过别的字母，拼出一个英文单词，松手提交。\n拼对格子里的词，它就填进格子，下面显示中文并读出来。填满格子就过关。\n不在格子里的真词是奖励词，每个换 1 个提示。点「提示」看一个空词的中文。\n按键：←→ 选字母，A 加上，B 删掉一个，START 提交，SELECT 打乱字母。",
+      help: "玩法\n\n按住字母盘上的一个字母，不松手划过别的字母，拼出一个英文单词，松手提交。\n拼对格子里的词，它就填进格子，下面显示中文并读出来。填满格子就过关。\n不在格子里的真词是奖励词，每个换 1 个提示。点「提示」看一个空词的中文。\n按键：方向键选字母，A 加上，B 删掉一个，START 提交，SELECT 打乱字母。",
       ok: "知道了",
-      done: "第 {n} 关完成", doneBtn: "下一关", bonus: "奖励词：提示 +1",
+      done: "第 {n} 关完成", doneBtn: "下一关", bonus: "奖励词 {w}：提示 +1",
+      sum: "奖励词 {b} 个 · 提示 {n}",
       noHints: "先找奖励词换提示", hintHead: "提示：", noEntry: "词典里没有这个词",
       noWord: "不是这里的词", again: "这个词已经填上了", againBonus: "这个奖励词已经算过了"
     },
@@ -101,9 +118,10 @@
       demo: "Watch: hold and slide {w}",
       demoEnd: "A right word fills in, its Chinese shows below, and you hear it.\n\nYour turn: find the other words in the grid.",
       start: "START",
-      help: "HOW TO PLAY\n\nHold a letter on the wheel and slide across others to spell an English word. Let go to send it.\nA word in the grid fills in, with its Chinese below, read aloud. Fill the grid to clear the round.\nA real word that is not in the grid is a bonus word and earns 1 hint. Tap HINT to see an open word's Chinese.\nKeys: Left/Right pick, A add, B delete, START send, SELECT shuffle.",
+      help: "HOW TO PLAY\n\nHold a letter on the wheel and slide across others to spell an English word. Let go to send it.\nA grid word fills in, with its Chinese below, read aloud. Fill the grid to clear the round.\nAny other real word is a bonus word: 1 hint. HINT shows an open word's Chinese.\nKeys: arrows pick, A add, B delete, START send, SELECT shuffle.",
       ok: "OK",
-      done: "ROUND {n} CLEAR", doneBtn: "NEXT ROUND", bonus: "Bonus word: hint +1",
+      done: "ROUND {n} CLEAR", doneBtn: "NEXT ROUND", bonus: "Bonus word {w}: hint +1",
+      sum: "Bonus words {b} · hints {n}",
       noHints: "Earn a hint with a bonus word", hintHead: "HINT: ", noEntry: "No entry in the dictionary",
       noWord: "Not a word here", again: "Already in the grid", againBonus: "Bonus word already counted"
     }
@@ -131,15 +149,16 @@
   var noteEl = document.getElementById("note"), goalEl = document.getElementById("goal");
   var linesEl = document.getElementById("lines"), fingerEl = document.getElementById("finger");
   var coverEl = document.getElementById("cover"), coverText = document.getElementById("cover-text"), coverBtn = document.getElementById("cover-btn");
-  var entryEl = document.getElementById("entry");
+  var entryEl = document.getElementById("entry"), coverList = document.getElementById("cover-list");
 
-  var phase = "load";           /* load | demo | demoEnd | play | help | done | error */
+  var phase = "load";           /* load | demo | demoEnd | play | clear (the blink and the tune) | help | done | error */
   var state = {
     round: 1, hints: 0, done: [],
     seed: "", wheel: [], placed: [], words: [], wordSet: {},
     entry: [], cursor: 0,
     view: null, cells: {},
-    hinted: [], hintTurn: 0
+    hinted: [], hintTurn: 0,
+    zh: {}                      /* word -> the Chinese line, kept from each lookup for the round's results card */
   };
   /* a small read-only window on the round, for a curious player and for the e2e test (the app needs no globals) */
   Object.defineProperty(state, "phase", { get: function () { return phase; }, enumerable: true });
@@ -149,6 +168,7 @@
   var keyMode = false;          /* the cursor square shows only once the player uses the keys: on touch it looked like a pick */
   var pos = [];                 /* the centre of each wheel letter, in the wheel's own pixels, for the line */
   var demoTimers = [], demoWord = null, helpBack = null;
+  var fxTimers = [], results = null;   /* the letters landing and the clear; the results card, kept for the ? page */
   var savedRound = null, savedHints = 0, savedDone = [];
   var pending = { round: 1, hints: 0, done: [] };   /* what to ask for again after a dictionary error */
 
@@ -302,8 +322,20 @@
     showCover(TXT.error, TXT.retry);
   }
 
-  function showCover(text, button) {
+  /* rows: the results card's lines ([{word, zh}] and a last {sum}), or nothing for a plain card */
+  function showCover(text, button, rows) {
     coverText.textContent = text;
+    coverList.innerHTML = "";
+    coverList.hidden = !rows;
+    (rows || []).forEach(function (row) {
+      var li = document.createElement("li"), b;
+      if (row.sum) { li.className = "sum"; li.textContent = row.sum; }
+      else {
+        b = document.createElement("b"); b.textContent = row.word.toUpperCase();
+        li.appendChild(b); li.appendChild(document.createTextNode(row.zh || ""));
+      }
+      coverList.appendChild(li);
+    });
     coverBtn.textContent = button || "";
     coverBtn.hidden = !button;
     coverEl.hidden = false;
@@ -313,7 +345,8 @@
   function startRound(round, hints, done) {
     pending = { round: round, hints: hints, done: done.slice() };
     state.round = round; state.hints = hints; state.done = done.slice(); state.entry = []; state.cursor = 0;
-    state.hinted = []; state.hintTurn = 0; hintBusy = false;
+    state.hinted = []; state.hintTurn = 0; state.zh = {}; hintBusy = false; results = null;
+    fxTimers.forEach(clearTimeout); fxTimers = []; boardEl.classList.remove("flash");
     state.seed = ""; state.wheel = []; state.placed = []; state.words = []; state.wordSet = {}; state.view = null; state.cells = {};
     updateHeader();
     setNote("");
@@ -339,7 +372,7 @@
       state.done = done.filter(function (w) { return state.wordSet[w] || state.placed.some(function (p) { return p.word === w; }); });
       renderBoard(); renderKeys(); updateHeader();
       if (!taught) runDemo();
-      else { phase = "play"; hideCover(); renderKeys(); checkComplete(); }   /* a saved round whose words are all filled opens on its clear screen */
+      else { phase = "play"; hideCover(); renderKeys(); checkComplete(true); }   /* a saved round whose words are all filled opens on its results */
     }, function () {
       if (token === gen) fail();
     });
@@ -435,14 +468,6 @@
     return state.entry.map(function (i) { return state.wheel[i]; }).join("");
   }
 
-  function advanceCursor() {
-    var n = state.wheel.length, i;
-    for (i = 1; i <= n; i++) {
-      var at = (state.cursor + i) % n;
-      if (state.entry.indexOf(at) < 0) { state.cursor = at; return; }
-    }
-  }
-
   function shake() {
     boardEl.classList.remove("shake"); wheelEl.classList.remove("shake");
     void boardEl.offsetWidth;
@@ -467,17 +492,45 @@
     setNote(TXT.noWord); PAD.sfx("err"); shake();
   }
 
+  /* the cell element at grid row r, column c (the board draws the rows of the view left to right) */
+  function cellAt(r, c) {
+    var v = state.view;
+    return boardEl.children[(r - v.minR) * (v.maxC - v.minC + 1) + (c - v.minC)] || null;
+  }
+
+  /* A filled word lands letter by letter: each cell pops in with one rising note. The notes are custom sounds
+     (PAD.sfx with an object, SPEC.md 6.3): a short square-wave blip each, up a pentatonic scale, so a longer word
+     climbs higher. 80 ms apart is at most 13 sounds a second, under the limit of 20. */
+  var NOTES = [523, 587, 659, 784, 880, 1047, 1175];
+  function land(p) {
+    var dr = p.dir === "v" ? 1 : 0, dc = p.dir === "h" ? 1 : 0, i, cells = [];
+    for (i = 0; i < p.word.length; i++) {
+      var el = cellAt(p.r + dr * i, p.c + dc * i);
+      if (!el) continue;
+      el.className = "cell"; el.textContent = "";
+      cells.push(el);
+    }
+    cells.forEach(function (el, k) {
+      fxTimers.push(setTimeout(function () {
+        el.className = "cell on pop"; el.textContent = p.word.charAt(k).toUpperCase();
+        var last = k === cells.length - 1;
+        PAD.sfx({ wave: "square", duty: 1, from: NOTES[k % NOTES.length], ms: last ? 220 : 90, decay: last ? 200 : 70, vol: 0.5 });
+      }, k * 80));
+    });
+    return cells.length * 80 + 300;   /* how long the landing takes, for the clear that may follow */
+  }
+
   function fillWord(p) {
     state.done.push(p.word);
     setNote("");
     renderBoard(); updateHeader();
-    PAD.sfx("ok");
+    var ms = land(p);
     /* PAD.dict.lookup gives the Chinese line; PAD.say reads the word with the phone's English voice.
        Both may answer null (dictionary unreadable, or more than 10 calls a second): then the line stays empty. */
     lookupLine(p.word);
     if (PAD.say) { try { var s = PAD.say(p.word, { lang: "en" }); if (s && s.then) s.then(null, function () {}); } catch (e) {} }
     save();
-    checkComplete();
+    checkComplete(false, ms);
   }
 
   function lookupLine(word) {
@@ -486,7 +539,8 @@
     PAD.dict.lookup(word).then(function (e) {
       if (token !== lookupSeq || phase === "error" || phase === "load") return;
       if (!e || !e.zh || !e.zh.length) { setNote(""); return; }
-      setNote(e.zh[0]);
+      state.zh[word] = e.zh[0];
+      if (phase === "play" || phase === "demo") setNote(e.zh[0]);
     }, function () { if (token === lookupSeq) setNote(""); });
   }
 
@@ -494,18 +548,57 @@
     state.done.push(word);
     state.hints++;
     PAD.sfx("coin");
-    setNote(TXT.bonus);
+    setNote(TXT.bonus.replace("{w}", word.toUpperCase()));
     updateHeader(); save();
+    /* the hint counter jumps, so the player sees where the bonus went */
+    hintEl.classList.remove("pop"); void hintEl.offsetWidth; hintEl.classList.add("pop");
   }
 
-  function checkComplete() {
+  /* The last word in: let its letters land, blink the grid twice with a short tune, then the results card with
+     every word of the round and its Chinese, and NEXT ROUND. quiet: a saved round that was already clear, straight
+     to its card. after: how long the last word's letters still need to land. */
+  function checkComplete(quiet, after) {
     if (phase !== "play") return;
     var all = state.placed.length > 0 && state.placed.every(function (p) { return state.done.indexOf(p.word) >= 0; });
     if (!all) return;
-    phase = "done";
-    PAD.sfx("win");
+    phase = "clear";
     save();
-    showCover(tx("done", state.round), TXT.doneBtn);
+    var token = gen, wait = quiet ? 0 : (after || 0) + 1100, t0 = Date.now();
+    if (!quiet) fxTimers.push(setTimeout(function () {
+      boardEl.classList.remove("flash"); void boardEl.offsetWidth; boardEl.classList.add("flash");
+      clearTune();
+    }, after || 0));
+    /* the Chinese of the words not looked up yet (a word filled before the app was reopened); at most 6 calls,
+       inside the limit of 10 a second. A null is fine: that row shows the word alone. */
+    var missing = state.placed.filter(function (p) { return !state.zh[p.word]; });
+    Promise.all(missing.map(function (p) {
+      return PAD.dict && PAD.dict.lookup ? PAD.dict.lookup(p.word).then(function (e) {
+        if (e && e.zh && e.zh.length) state.zh[p.word] = e.zh[0];
+      }, function () {}) : null;
+    })).then(function () {
+      fxTimers.push(setTimeout(function () {
+        if (token !== gen || phase !== "clear") return;
+        boardEl.classList.remove("flash");
+        var bonus = state.done.filter(function (w) { return !state.placed.some(function (p) { return p.word === w; }); }).length;
+        results = state.placed.map(function (p) { return { word: p.word, zh: state.zh[p.word] || "" }; });
+        results.push({ sum: TXT.sum.replace("{b}", bonus).replace("{n}", state.hints) });
+        phase = "done";
+        setNote("");
+        showCover(tx("done", state.round), TXT.doneBtn, results);
+      }, Math.max(0, wait - (Date.now() - t0))));
+    });
+  }
+
+  /* An original four-bar fanfare for the clear (PAD.music, SPEC.md 6.3, played once): the square channels climb a
+     C major arpeggio and the triangle walks the bass up under it. Runtimes without PAD.music get the named "win". */
+  function clearTune() {
+    if (PAD.music && PAD.music.play) {
+      try {
+        PAD.music.play({ bpm: 160, p1: "@1 v12 o5 l16 c e g >c8 <g8 a b >c4", p2: "@2 v8 o4 l16 g >c e g8 e8 f d e4", tri: "v11 o3 l8 c e g >c4" }, { loop: false });
+        return;
+      } catch (e) {}
+    }
+    PAD.sfx("win");
   }
 
   /* HINT is the only way to spend a hint. Each paid hint marks its word, so a second hint shows another open
@@ -536,6 +629,7 @@
         state.hinted.push(word);
         updateHeader(); save();
       } else state.hintTurn++;
+      state.zh[word] = e.zh[0];
       setNote(TXT.hintHead + e.zh[0]);
     }, function () { hintBusy = false; setNote(TXT.noEntry); });
   }
@@ -596,7 +690,7 @@
   function closeHelp() {
     coverEl.classList.remove("help");
     phase = helpBack || "play"; helpBack = null;
-    if (phase === "done") showCover(tx("done", state.round), TXT.doneBtn); else hideCover();
+    if (phase === "done") showCover(tx("done", state.round), TXT.doneBtn, results); else hideCover();
     renderKeys();
   }
 
@@ -668,8 +762,29 @@
   document.addEventListener("pointerup", endDrag);
   document.addEventListener("pointercancel", function (e) { if (dragging && e.pointerId === dragging.id) { dragging = null; state.entry = []; renderKeys(); } });
 
-  /* The chin pad: Left/Right move around the wheel, A adds the letter, B removes the last, START submits,
-     SELECT shuffles. Also the keyboard on a computer (X = A, Z = B, Enter = START, Shift = SELECT). */
+  /* The arrows move the cursor the way they point, as on a map of the wheel: Up goes to the letter above, Left to
+     the one on the left. The best letter is the one most nearly in that direction (within about 60 degrees), then
+     the nearest; if none is, any letter on that side; at the edge of the wheel the cursor stays. */
+  var DIRS = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
+  function aim(at, b) {
+    var d = DIRS[b], from = pos[at], best = -1, bestS = Infinity, wide = -1, wideS = Infinity, j;
+    if (!from || !d) return at;
+    for (j = 0; j < pos.length; j++) {
+      if (j === at) continue;
+      var dx = pos[j].x - from.x, dy = pos[j].y - from.y;
+      var along = dx * d[0] + dy * d[1], across = Math.abs(dx * d[1] - dy * d[0]), sc = along + 2 * across;
+      if (along < 2) continue;
+      if (across <= along * 1.8 && sc < bestS) { bestS = sc; best = j; }
+      if (sc < wideS) { wideS = sc; wide = j; }
+    }
+    if (best < 0) best = wide;
+    return best >= 0 ? best : at;
+  }
+  function stepCursor(b) { state.cursor = aim(state.cursor, b); }
+  Object.defineProperty(state, "aim", { value: aim });   /* where an arrow would go from a letter, for the e2e test */
+
+  /* The chin pad: the arrows pick a letter, A adds it, B removes the last, START submits, SELECT shuffles.
+     Also the keyboard on a computer (X = A, Z = B, Enter = START, Shift = SELECT). */
   PAD.on("press", function (b) {
     if (phase === "demo") { demoEnd(); return; }
     if (phase === "demoEnd") { if (b === "a" || b === "start") startPlay(); return; }
@@ -677,15 +792,15 @@
     if (phase === "error") { if (b === "a" || b === "start") coverBtn.click(); return; }
     if (phase === "done") { if (b === "a" || b === "start") nextRound(); return; }
     if (phase !== "play") return;
-    var n = state.wheel.length;
+    var n = state.wheel.length, shown = keyMode;
     keyMode = true;                        /* from now on the cursor square shows, until the next touch on the wheel */
-    if (b === "left" && n) { state.cursor = (state.cursor + n - 1) % n; renderKeys(); }
-    else if (b === "right" && n) { state.cursor = (state.cursor + 1) % n; renderKeys(); }
-    else if (b === "a") {
+    if (DIRS[b] && n) {
+      if (shown) stepCursor(b);            /* the first arrow only shows where the cursor is */
+      renderKeys();
+    } else if (b === "a") {
       if (!n) return;
       if (state.entry.indexOf(state.cursor) >= 0) { PAD.sfx("err"); return; }
-      state.entry.push(state.cursor);
-      advanceCursor();
+      state.entry.push(state.cursor);      /* the cursor stays where it is: the arrows, not the app, decide where it goes next */
       renderKeys();
     } else if (b === "b") {
       if (!state.entry.length) return;        /* hints are spent only from the HINT button */

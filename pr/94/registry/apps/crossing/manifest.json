@@ -4,7 +4,7 @@
   "name": "拼字格",
   "glyph": "字",
   "category": "game",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "在字母盘上拼出单词，填满小小字谜格。拼对后中文显示在格下，再读出英文。",
   "i18n": {
     "zh": {
