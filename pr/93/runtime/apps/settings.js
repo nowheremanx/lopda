@@ -40,12 +40,17 @@ var AIP="data/users/local/ai", AI={key:"", model:"", seen:[]};
 var AIH=window.LopdaAI.host({fetch:function(u,o){ return fetch(u,o); }});
 function aiChanged(){ renderAi(); AI.seen.forEach(function(f){ try{ f(); }catch(e){} }); }
 function aiErr(e){ return tr("ai.err."+(e && e.code || "http")); }
+/* the row in Settings says whether the line is up; the page behind it (v-set-ai) holds the two labelled fields */
 function renderAi(msg){
   var on=!!AI.key;
+  $("set-ai-open").textContent=tr(on ? "ai.row.on" : "ai.row.off");
   $("set-ai-state").textContent=msg || (on ? tr("ai.on",{key:AI.key.slice(-4), model:AI.model || window.LopdaAI.MODEL}) : tr("ai.off"));
-  $("set-ai-key").hidden=on; $("set-ai-test").hidden=!on; $("set-ai-del").hidden=!on;
+  $("set-ai-key").placeholder=on ? tr("ai.key.saved",{key:AI.key.slice(-4)}) : tr("ai.key.ph");
+  $("set-ai-test").hidden=!on; $("set-ai-del").hidden=!on;
   if(document.activeElement!==$("set-ai-model")) $("set-ai-model").value=AI.model;
 }
+$("set-ai-open").onclick=function(){ sfx("tap"); show("set-ai"); };
+$("set-ai-back").onclick=function(){ sfx("tap"); openSettings(); };
 function saveAi(){
   var key=$("set-ai-key").value.trim(), model=$("set-ai-model").value.trim();
   if(!AI.key && !key){ renderAi(tr("ai.nokey")); sfx("err"); return; }
@@ -226,6 +231,10 @@ function openSettings(){
   } else box.then(function(t){ el.textContent=tr("set.nousage")+t; });
 }
 
+LP.builtin({id:"set-ai", view:"set-ai",
+  enter:function(){ $("set-ai-key").value=""; renderAi(); },
+  lang:function(){ renderAi(); }
+});
 LP.builtin({id:"settings", label:"app.settings", icon:"settings", view:"settings",
   open:function(){ openSettings(); },
   lang:function(){ renderSettings(); renderLast(); if(!$("v-settings").hidden) openSettings(); },
