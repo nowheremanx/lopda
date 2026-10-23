@@ -6612,7 +6612,7 @@ test("AI line: while the AI is slow the hint counts time, says what the line is 
 /* ---------- 拼字格 / Crossing (registry/apps/crossing): PAD.dict builds the round, a demo fills one word, the chin keys fill another ---------- */
 test("crossing: round 1 shows a grid, a demo spells one word, words typed with the arrows fill in, the results card leads on", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await page(t);
-  await p.goto(`${base}/sdk/dev.html?app=registry/apps/crossing`, { waitUntil: "load" });
+  await p.goto(`${base}/sdk/dev.html?app=registry/apps/crossing&lang=zh`, { waitUntil: "load" });
   await p.waitForFunction(() => /loaded |load failed/.test(document.getElementById("log").textContent), null, { timeout: 5000 });
   let f;
   await until(p, async () => {
@@ -6632,7 +6632,7 @@ test("crossing: round 1 shows a grid, a demo spells one word, words typed with t
   assert.equal(round.wheel.split("").sort().join(""), round.seed.split("").sort().join(""), "the wheel holds the seed's letters");
   const layout = await f.evaluate(() => {
     const root = document.documentElement;
-    const fits = ["header", "main", "footer", "#wheel", "#board"].every((s) => {
+    const fits = ["header", "main", "footer", "#wheel", "#board", "#note"].every((s) => {
       const r = document.querySelector(s).getBoundingClientRect();
       return r.top >= 0 && r.bottom <= root.clientHeight && r.left >= 0 && r.right <= root.clientWidth;
     });
@@ -6710,10 +6710,22 @@ test("crossing: round 1 shows a grid, a demo spells one word, words typed with t
   assert.equal(await f.evaluate(() => game.phase), "help");
   await p.locator('#pad [data-b="b"]').click();
   await f.waitForFunction(() => game.phase === "play");
-  /* the first lookup unpacks the book; the Chinese line lands a moment later, and the word is read aloud */
-  await until(p, async () => (await f.textContent("#note")).length > 0, "the Chinese line");
+  /* the first lookup unpacks the book; the line lands a moment later, and the word is read aloud */
+  await until(p, async () => (await f.textContent("#note")).length > 0, "the line under the grid");
   assert.notEqual((await f.textContent("#note")).trim(), "");
   await until(p, async () => new RegExp("say \\(en\\): " + target).test(await p.textContent("#log")), "the spoken word");
+  /* tapping a filled cell shows its line again and reads the word a second time: the middle of one of the seed's cells */
+  const seedCell = await f.evaluate(() => {
+    const v = game.view, cols = v.maxC - v.minC + 1, p = game.placed.find((x) => x.word === game.seed);
+    const i = Math.floor(p.word.length / 2);
+    const r = p.r + (p.dir === "v" ? i : 0), c = p.c + (p.dir === "h" ? i : 0);
+    return (r - v.minR) * cols + (c - v.minC);
+  });
+  const sayLine = "say (en): " + target;
+  const saysBefore = (await p.textContent("#log")).split(sayLine).length - 1;
+  await f.locator("#board > div").nth(seedCell).tap();
+  await until(p, async () => (await p.textContent("#log")).split(sayLine).length - 1 > saysBefore, "the tapped word to be read aloud");
+  assert.notEqual((await f.textContent("#note")).trim(), "", "the tapped word shows its line again");
   const saved = await p.evaluate(() => (JSON.parse(localStorage.getItem("lopda-dev:crossing") || "{}").game) || null);
   assert.equal(saved && saved.round, 1);
   assert.ok(saved && saved.done.includes(target), "PAD.save kept the found word");
@@ -6736,5 +6748,36 @@ test("crossing: round 1 shows a grid, a demo spells one word, words typed with t
   assert.match(await p.textContent("#log"), /music play once/, "the clear plays its tune");
   await press("a");
   await until(p, () => f.evaluate(() => game.phase === "play" && game.round === 2), "round 2");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("crossing: in English the line under the grid is an English definition", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "en-US" });
+  await p.goto(`${base}/sdk/dev.html?app=registry/apps/crossing&lang=en`, { waitUntil: "load" });
+  await p.waitForFunction(() => /loaded |load failed/.test(document.getElementById("log").textContent), null, { timeout: 5000 });
+  let f;
+  await until(p, async () => {
+    f = p.frames().find((x) => x !== p.mainFrame());
+    return f && await f.evaluate(() => !!(window.game && game.phase === "demo")).catch(() => false);
+  }, "the first round and its demo");
+  await p.locator("#app").evaluate((el) => { el.style.width = "331px"; el.style.height = "359px"; el.style.flex = "none"; });
+  await until(p, () => f.evaluate(() => game.phase === "demoEnd"), "the demo to end on its your-turn card");
+  await p.locator('#pad [data-b="a"]').click();
+  await f.waitForFunction(() => game.phase === "play");
+  /* the demo filled a word; with PAD.lang = en its line under the grid is the English definition */
+  await until(p, async () => (await f.textContent("#note")).trim().length > 0, "the English line");
+  const note = (await f.textContent("#note")).trim();
+  assert.ok(!/[\u4e00-\u9fff]/.test(note), "the line is English, not Chinese: " + note);
+  assert.match(note, /[A-Za-z]/, "the line has an English definition: " + note);
+  /* the ? page is near full: the new tap sentence must not make it scroll at 331x359 */
+  await f.click("#help");
+  await f.waitForFunction(() => game.phase === "help");
+  const help = await f.evaluate(() => {
+    const el = document.getElementById("cover");
+    return { scroll: el.scrollHeight, client: el.clientHeight };
+  });
+  assert.ok(help.scroll <= help.client, "the English help does not scroll: " + JSON.stringify(help));
+  await p.locator('#pad [data-b="b"]').click();
+  await f.waitForFunction(() => game.phase === "play");
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });

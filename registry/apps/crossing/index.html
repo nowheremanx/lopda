@@ -6,9 +6,9 @@
 <title>拼字格</title>
 <!-- Lo-PDA example app (lopda/1): 拼字格 / Crossing. MIT License, see LICENSE.
      A letter wheel and a small crossword. The words come from PAD.dict (SPEC.md 6.7), the built-in ECDICT:
-     words() picks the seed word and the real words that fit its letters, lookup() gives the Chinese line.
-     No permission: PAD.dict is read-only, like PAD.say. The player can turn ECDICT off in 词典管理 and this
-     app still works. Everything is plain DOM, no canvas, no framework. -->
+     words() picks the seed word and the real words that fit its letters, lookup() gives the line in the
+     player's language. No permission: PAD.dict is read-only, like PAD.say. The player can turn ECDICT off in
+     词典管理 and this app still works. Everything is plain DOM, no canvas, no framework. -->
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #a3ad7e; color: #1f2a14; font-family: monospace; }
   body { display: flex; flex-direction: column; -webkit-user-select: none; user-select: none; }
@@ -38,11 +38,14 @@
     letter-spacing: 3px; white-space: nowrap; }
   #board { display: grid; gap: 1px; }
   .cell { box-sizing: border-box; display: flex; align-items: center; justify-content: center; font-weight: bold; line-height: 1;
-    background: #a3ad7e; color: #1f2a14; border: 1px solid #7d8a58; }
+    background: #a3ad7e; color: #1f2a14; border: 1px solid #7d8a58; touch-action: manipulation; }
   .cell.on { background: #7d8a58; border-color: #1f2a14; }
   .gap { visibility: hidden; }
-  #note { flex: none; width: 100%; height: 22px; line-height: 22px; font-size: 14px; overflow: hidden; white-space: nowrap;
-    text-overflow: ellipsis; text-align: center; padding: 0 4px; box-sizing: border-box; }
+  #note { flex: none; width: 100%; height: 36px; display: flex; align-items: center; justify-content: center;
+    padding: 0 4px; box-sizing: border-box; overflow: hidden; }
+  #note-text { display: -webkit-box; width: 100%; overflow: hidden; white-space: normal; overflow-wrap: anywhere;
+    -webkit-box-orient: vertical; -webkit-line-clamp: 2; text-overflow: ellipsis; text-align: center;
+    font-size: 14px; line-height: 18px; }
   footer { flex: none; height: 20px; line-height: 20px; font-size: 13px; text-align: center; white-space: nowrap; overflow: hidden; }
   #cover { position: fixed; inset: 0; z-index: 5; background: #a3ad7e; display: flex; flex-direction: column; align-items: center; justify-content: center;
     gap: 14px; padding: 18px; box-sizing: border-box; text-align: center; overflow-y: auto; }
@@ -82,7 +85,7 @@
     <div id="wheel" aria-label="字母盘"><div id="disc"></div><svg id="lines" width="154" height="154"></svg><div id="finger" hidden></div></div>
     <div id="board" aria-label="格子"></div>
   </div>
-  <div id="note"></div>
+  <div id="note"><span id="note-text"></span></div>
 </main>
 <footer id="goal"></footer>
 <div id="cover">
@@ -104,7 +107,7 @@
       demo: "看：按住字母，划过 {w}",
       demoEnd: "拼对了，词就填进格子，下面显示中文，还会读出来。\n\n轮到你了：找出格子里剩下的词。",
       start: "开始",
-      help: "玩法\n\n按住字母盘上的一个字母，不松手划过别的字母，拼出一个英文单词，松手提交。\n拼对格子里的词，它就填进格子，下面显示中文并读出来。填满格子就过关。\n不在格子里的真词是奖励词，每个换 1 个提示。点「提示」看一个空词的中文。\n按键：方向键选字母，A 加上，B 删掉一个，START 提交，SELECT 打乱字母。",
+      help: "玩法\n\n按住字母盘上的一个字母，不松手划过别的字母，拼出一个英文单词，松手提交。\n拼对格子里的词，它就填进格子，下面显示中文并读出来；填上的词点一下可以再看一遍。填满格子就过关。\n不在格子里的真词是奖励词，每个换 1 个提示。点「提示」看一个空词的中文。\n按键：方向键选字母，A 加上，B 删掉一个，START 提交，SELECT 打乱字母。",
       ok: "知道了",
       done: "第 {n} 关完成", doneBtn: "下一关", bonus: "奖励词 {w}：提示 +1",
       sum: "奖励词 {b} 个 · 提示 {n}",
@@ -116,9 +119,9 @@
       error: "This handheld's dictionary won't open.", retry: "TRY AGAIN",
       goal: "Swipe letters into words to fill the grid",
       demo: "Watch: hold and slide {w}",
-      demoEnd: "A right word fills in, its Chinese shows below, and you hear it.\n\nYour turn: find the other words in the grid.",
+      demoEnd: "A right word fills in, its meaning shows below, and you hear it.\n\nYour turn: find the other words in the grid.",
       start: "START",
-      help: "HOW TO PLAY\n\nHold a letter on the wheel and slide across others to spell an English word. Let go to send it.\nA grid word fills in, with its Chinese below, read aloud. Fill the grid to clear the round.\nAny other real word is a bonus word: 1 hint. HINT shows an open word's Chinese.\nKeys: arrows pick, A add, B delete, START send, SELECT shuffle.",
+      help: "HOW TO PLAY\n\nHold a letter, slide across others to spell; let go to send it.\nA right word fills in with its meaning, read aloud. Tap a filled word to see it again. Fill the grid to clear.\nAny other real word is a bonus word: 1 hint; HINT shows an open word's meaning.\nKeys: arrows pick, A add, B delete, START send, SELECT shuffle.",
       ok: "OK",
       done: "ROUND {n} CLEAR", doneBtn: "NEXT ROUND", bonus: "Bonus word {w}: hint +1",
       sum: "Bonus words {b} · hints {n}",
@@ -146,7 +149,7 @@
 
   var roundEl = document.getElementById("round"), hintEl = document.getElementById("hint"), helpEl = document.getElementById("help");
   var wheelEl = document.getElementById("wheel"), boardEl = document.getElementById("board");
-  var noteEl = document.getElementById("note"), goalEl = document.getElementById("goal");
+  var noteTextEl = document.getElementById("note-text"), goalEl = document.getElementById("goal");
   var linesEl = document.getElementById("lines"), fingerEl = document.getElementById("finger");
   var coverEl = document.getElementById("cover"), coverText = document.getElementById("cover-text"), coverBtn = document.getElementById("cover-btn");
   var entryEl = document.getElementById("entry"), coverList = document.getElementById("cover-list");
@@ -158,13 +161,15 @@
     entry: [], cursor: 0,
     view: null, cells: {},
     hinted: [], hintTurn: 0,
-    zh: {}                      /* word -> the Chinese line, kept from each lookup for the round's results card */
+    mean: {}                    /* word -> the line in the player's language, kept from each lookup for the round's results card */
   };
   /* a small read-only window on the round, for a curious player and for the e2e test (the app needs no globals) */
   Object.defineProperty(state, "phase", { get: function () { return phase; }, enumerable: true });
   window.game = state;
 
-  var rnd = mulberry32(1), gen = 0, taught = false, dragging = null, lookupSeq = 0, hintBusy = false;
+  var rnd = mulberry32(1), gen = 0, taught = false, dragging = null, noteSeq = 0, hintBusy = false;
+  var noteKind = "", noteWord = "";   /* what the newest note action was: "tap" remembers its word */
+  var tapCell = "", tapTurn = 0, tapDown = null, tapPending = {};   /* a filled word tapped: the cell, which word, a guard for one lookup */
   var keyMode = false;          /* the cursor square shows only once the player uses the keys: on touch it looked like a pick */
   var pos = [];                 /* the centre of each wheel letter, in the wheel's own pixels, for the line */
   var demoTimers = [], demoWord = null, helpBack = null;
@@ -181,7 +186,72 @@
     hintEl.textContent = tx("hint", state.hints);
     hintEl.classList.toggle("off", state.hints < 1);
   }
-  function setNote(s) { noteEl.textContent = s || ""; }
+  /* The note has one order: the newest action wins. A sync write or the start of an async lookup bumps noteSeq;
+     an answer writes only while its token is current. A tap also records its word, so a second tap on the same
+     uncached word waits for the one lookup already on its way and still shows that line when it arrives. */
+  function noteStart(kind, word) {
+    noteSeq++;
+    noteKind = kind || "";
+    noteWord = word || "";
+    return noteSeq;
+  }
+  function setNote(s, kind, word) {
+    noteStart(kind, word);
+    noteTextEl.textContent = s || "";
+  }
+
+  /* The line under the grid follows the player's language. PAD.lang is fixed when the app starts, so this is the
+     same choice for the whole round. English entries carry WordNet definitions in en; the Chinese ones are in zh.
+     A missing first choice falls back to the other, and a missing entry is an empty line. */
+  function meaning(entry) {
+    if (!entry) return "";
+    var zh = entry.zh && entry.zh.length ? entry.zh[0] : "";
+    var en = entry.en && entry.en.length ? entry.en[0] : "";
+    return LANG === "en" ? (en || zh) : (zh || en);
+  }
+
+  /* A hint must not give its own answer away: "river" cannot appear as "a river of..." in the line. The word's
+     simple forms (a final s, es, ed or ing taken off) count too. Take the first English line that has none of
+     them; if every line has one, mask them in the first line, so the player still gets a usable definition. */
+  function formsOf(word) {
+    var w = String(word || "").toLowerCase(), out = [], tails = ["ing", "ed", "es", "s"], i, stem;
+    if (!w) return out;
+    out.push(w);
+    for (i = 0; i < tails.length; i++) {
+      if (w.length > tails[i].length && w.slice(-tails[i].length) === tails[i]) {
+        stem = w.slice(0, -tails[i].length);
+        /* one-letter stems ("s" from "sing") are not forms of the word; two-letter ones ("do" from "does") are */
+        if (stem.length >= 2) out.push(stem);
+      }
+    }
+    return out;
+  }
+  function hasForm(text, forms) {
+    var t = String(text || ""), lower = t.toLowerCase(), i, f;
+    for (i = 0; i < forms.length; i++) {
+      f = forms[i];
+      if (!f) continue;
+      /* a short form is a whole word ("do" is in "do", not in "document"); longer forms may sit inside one */
+      if (f.length < 4 ? new RegExp("\\b" + f + "\\b", "i").test(t) : lower.indexOf(f) >= 0) return true;
+    }
+    return false;
+  }
+  function maskForms(text, forms) {
+    var list = forms.filter(Boolean).sort(function (a, b) { return b.length - a.length; });
+    var parts = list.map(function (f) { return f.length < 4 ? "\\b" + f + "\\b" : f; });
+    return parts.length ? String(text || "").replace(new RegExp(parts.join("|"), "gi"), "___") : String(text || "");
+  }
+  function hintMeaning(entry, word) {
+    if (!entry) return "";
+    var zh = entry.zh && entry.zh.length ? entry.zh[0] : "";
+    var en = entry.en || [], forms, i;
+    /* the line meaning() would show: only an English one may give the answer away */
+    if (LANG !== "en" && zh) return zh;
+    if (!en.length) return meaning(entry);
+    forms = formsOf(word);
+    for (i = 0; i < en.length; i++) if (!hasForm(en[i], forms)) return en[i];
+    return maskForms(en[0], forms);
+  }
 
   /* ---------- the dictionary calls: PAD.dict.words and PAD.dict.lookup ---------- */
 
@@ -322,7 +392,7 @@
     showCover(TXT.error, TXT.retry);
   }
 
-  /* rows: the results card's lines ([{word, zh}] and a last {sum}), or nothing for a plain card */
+  /* rows: the results card's lines ([{word, mean}] and a last {sum}), or nothing for a plain card */
   function showCover(text, button, rows) {
     coverText.textContent = text;
     coverList.innerHTML = "";
@@ -332,7 +402,7 @@
       if (row.sum) { li.className = "sum"; li.textContent = row.sum; }
       else {
         b = document.createElement("b"); b.textContent = row.word.toUpperCase();
-        li.appendChild(b); li.appendChild(document.createTextNode(row.zh || ""));
+        li.appendChild(b); li.appendChild(document.createTextNode(row.mean || ""));
       }
       coverList.appendChild(li);
     });
@@ -345,7 +415,7 @@
   function startRound(round, hints, done) {
     pending = { round: round, hints: hints, done: done.slice() };
     state.round = round; state.hints = hints; state.done = done.slice(); state.entry = []; state.cursor = 0;
-    state.hinted = []; state.hintTurn = 0; state.zh = {}; hintBusy = false; results = null;
+    state.hinted = []; state.hintTurn = 0; state.mean = {}; hintBusy = false; results = null; tapPending = {};
     fxTimers.forEach(clearTimeout); fxTimers = []; boardEl.classList.remove("flash");
     state.seed = ""; state.wheel = []; state.placed = []; state.words = []; state.wordSet = {}; state.view = null; state.cells = {};
     updateHeader();
@@ -428,6 +498,7 @@
 
   function renderBoard() {
     boardEl.innerHTML = "";
+    tapCell = ""; tapTurn = 0;
     if (!state.view) return;
     layoutSizes();
     var cols = state.view.maxC - state.view.minC + 1;
@@ -443,6 +514,7 @@
         if (state.cells[k]) {
           el.className = "cell" + (filled[k] ? " on" : "");
           el.textContent = filled[k] ? filled[k].toUpperCase() : "";
+          el.setAttribute("data-r", String(r)); el.setAttribute("data-c", String(c));
         } else el.className = "gap";
         boardEl.appendChild(el);
       }
@@ -525,24 +597,85 @@
     setNote("");
     renderBoard(); updateHeader();
     var ms = land(p);
-    /* PAD.dict.lookup gives the Chinese line; PAD.say reads the word with the phone's English voice.
-       Both may answer null (dictionary unreadable, or more than 10 calls a second): then the line stays empty. */
+    /* PAD.dict.lookup gives the line in the player's language; PAD.say reads the word with the phone's English
+       voice. Both may answer null (dictionary unreadable, or more than 10 calls a second): then the line stays empty. */
     lookupLine(p.word);
-    if (PAD.say) { try { var s = PAD.say(p.word, { lang: "en" }); if (s && s.then) s.then(null, function () {}); } catch (e) {} }
+    sayWord(p.word);
     save();
     checkComplete(false, ms);
   }
 
+  function sayWord(word) {
+    if (!PAD.say) return;
+    try { var s = PAD.say(word, { lang: "en" }); if (s && s.then) s.then(null, function () {}); } catch (e) {}
+  }
+
   function lookupLine(word) {
-    var token = ++lookupSeq;
+    var token = noteStart("fill", word);
     if (!PAD.dict || !PAD.dict.lookup) { setNote(""); return; }
     PAD.dict.lookup(word).then(function (e) {
-      if (token !== lookupSeq || phase === "error" || phase === "load") return;
-      if (!e || !e.zh || !e.zh.length) { setNote(""); return; }
-      state.zh[word] = e.zh[0];
-      if (phase === "play" || phase === "demo") setNote(e.zh[0]);
-    }, function () { if (token === lookupSeq) setNote(""); });
+      if (token !== noteSeq || phase === "error" || phase === "load") return;
+      var m = meaning(e);
+      if (!m) { setNote(""); return; }
+      state.mean[word] = m;
+      if (phase === "play" || phase === "demo") setNote(m);
+    }, function () { if (token === noteSeq) setNote(""); });
   }
+
+  /* A filled word can be tapped to see its meaning again. A cell where two words cross shows the horizontal word
+     first and the vertical one on the next tap. The lookup runs only when the round's cache has no line for the
+     word, and a word already asked for is not asked again while its answer is on the way (10 calls a second). */
+  function wordsAt(r, c) {
+    var out = [];
+    state.placed.forEach(function (p) {
+      if (state.done.indexOf(p.word) < 0) return;
+      var dr = p.dir === "v" ? 1 : 0, dc = p.dir === "h" ? 1 : 0;
+      for (var i = 0; i < p.word.length; i++) {
+        if (p.r + dr * i === r && p.c + dc * i === c) { out.push({ word: p.word, dir: p.dir }); return; }
+      }
+    });
+    /* the board draws both words under one cell; "h" before "v" is the order the player reads them */
+    return out.sort(function (a, b) { return a.dir === b.dir ? 0 : a.dir === "h" ? -1 : 1; });
+  }
+  function showMeaning(word) {
+    /* the tap is a note action even when the line is cached: it must invalidate any older lookup still in flight */
+    var token = noteStart("tap", word);
+    sayWord(word);
+    if (state.mean[word]) { setNote(state.mean[word], "tap", word); return; }
+    if (!PAD.dict || !PAD.dict.lookup || tapPending[word]) return;
+    tapPending[word] = true;
+    PAD.dict.lookup(word).then(function (e) {
+      tapPending[word] = false;
+      var m = meaning(e);
+      /* the token is stale after a second tap on this word, but that tap still wants this one answer */
+      var newest = token === noteSeq || (noteKind === "tap" && noteWord === word);
+      if (!m) { if (newest && phase === "play") setNote("", "tap", word); return; }
+      state.mean[word] = m;
+      if (newest && phase === "play") setNote(m, "tap", word);
+    }, function () {
+      tapPending[word] = false;
+      if ((token === noteSeq || (noteKind === "tap" && noteWord === word)) && phase === "play") setNote("", "tap", word);
+    });
+  }
+  /* pointerup, not pointerdown: a press on the grid may still turn into a scroll, and only a tap should answer.
+     The pointerdown only remembers where the tap began, so a drag that ends over a cell is not a tap. */
+  boardEl.addEventListener("pointerdown", function (e) {
+    var el = phase === "play" && e.target && e.target.closest ? e.target.closest(".cell.on") : null;
+    tapDown = el && boardEl.contains(el) ? { el: el, x: e.clientX, y: e.clientY, id: e.pointerId } : null;
+  });
+  boardEl.addEventListener("pointerup", function (e) {
+    var down = tapDown;
+    tapDown = null;
+    if (!down || phase !== "play" || e.pointerId !== down.id) return;
+    var el = e.target && e.target.closest ? e.target.closest(".cell.on") : null;
+    if (el !== down.el || Math.abs(e.clientX - down.x) + Math.abs(e.clientY - down.y) > 12) return;
+    var r = +el.getAttribute("data-r"), c = +el.getAttribute("data-c");
+    var words = wordsAt(r, c), key = r + "," + c;
+    if (!words.length) return;
+    if (tapCell !== key) { tapCell = key; tapTurn = 0; } else tapTurn = (tapTurn + 1) % words.length;
+    showMeaning(words[tapTurn].word);
+  });
+  boardEl.addEventListener("pointercancel", function () { tapDown = null; });
 
   function bonusWord(word) {
     state.done.push(word);
@@ -555,7 +688,7 @@
   }
 
   /* The last word in: let its letters land, blink the grid twice with a short tune, then the results card with
-     every word of the round and its Chinese, and NEXT ROUND. quiet: a saved round that was already clear, straight
+     every word of the round and its meaning, and NEXT ROUND. quiet: a saved round that was already clear, straight
      to its card. after: how long the last word's letters still need to land. */
   function checkComplete(quiet, after) {
     if (phase !== "play") return;
@@ -568,19 +701,20 @@
       boardEl.classList.remove("flash"); void boardEl.offsetWidth; boardEl.classList.add("flash");
       clearTune();
     }, after || 0));
-    /* the Chinese of the words not looked up yet (a word filled before the app was reopened); at most 6 calls,
+    /* the lines of the words not looked up yet (a word filled before the app was reopened); at most 6 calls,
        inside the limit of 10 a second. A null is fine: that row shows the word alone. */
-    var missing = state.placed.filter(function (p) { return !state.zh[p.word]; });
+    var missing = state.placed.filter(function (p) { return !state.mean[p.word]; });
     Promise.all(missing.map(function (p) {
       return PAD.dict && PAD.dict.lookup ? PAD.dict.lookup(p.word).then(function (e) {
-        if (e && e.zh && e.zh.length) state.zh[p.word] = e.zh[0];
+        var m = meaning(e);
+        if (m) state.mean[p.word] = m;
       }, function () {}) : null;
     })).then(function () {
       fxTimers.push(setTimeout(function () {
         if (token !== gen || phase !== "clear") return;
         boardEl.classList.remove("flash");
         var bonus = state.done.filter(function (w) { return !state.placed.some(function (p) { return p.word === w; }); }).length;
-        results = state.placed.map(function (p) { return { word: p.word, zh: state.zh[p.word] || "" }; });
+        results = state.placed.map(function (p) { return { word: p.word, mean: state.mean[p.word] || "" }; });
         results.push({ sum: TXT.sum.replace("{b}", bonus).replace("{n}", state.hints) });
         phase = "done";
         setNote("");
@@ -618,20 +752,23 @@
       word = open[state.hintTurn % open.length].word;
     }
     if (!PAD.dict || !PAD.dict.lookup) { setNote(TXT.noEntry); return; }
+    var token = noteStart("hint", word);
     hintBusy = true;
     PAD.dict.lookup(word).then(function (e) {
       hintBusy = false;
       if (phase !== "play" || state.done.indexOf(word) >= 0) return;
-      if (!e || !e.zh || !e.zh.length) { setNote(TXT.noEntry); return; }
+      var m = meaning(e), line = hintMeaning(e, word);
+      if (!line) { if (token === noteSeq) setNote(TXT.noEntry); return; }
+      if (token !== noteSeq) return;       /* a newer note took the line: a hint not shown is not charged */
       if (paid) {
         if (state.hints < 1) return;
         state.hints--;
         state.hinted.push(word);
         updateHeader(); save();
       } else state.hintTurn++;
-      state.zh[word] = e.zh[0];
-      setNote(TXT.hintHead + e.zh[0]);
-    }, function () { hintBusy = false; setNote(TXT.noEntry); });
+      if (m) state.mean[word] = m;         /* the results card shows the plain line, not the hint's masked one */
+      if (token === noteSeq) setNote(TXT.hintHead + line);
+    }, function () { hintBusy = false; if (token === noteSeq) setNote(TXT.noEntry); });
   }
 
   function save() {
@@ -643,7 +780,7 @@
   /* ---------- tutorial, error, next round ---------- */
 
   /* The first round teaches by showing: a finger slides over the letters of one grid word (the shortest open one,
-     never the seed), the line follows it, the word fills in with its Chinese and its voice. Then "your turn".
+     never the seed), the line follows it, the word fills in with its meaning and its voice. Then "your turn".
      Any key or a tap skips to the end. Shown once (saved as taught); the ? page has the rules after that. */
   function later(ms, f) { demoTimers.push(setTimeout(f, ms)); }
   function fingerTo(i) { fingerEl.style.transform = "translate(" + Math.round(pos[i].x - WHEEL_H / 2) + "px," + Math.round(pos[i].y - WHEEL_H / 2) + "px)"; }
