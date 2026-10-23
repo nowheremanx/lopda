@@ -65,6 +65,13 @@
           <ul class="set-sense-list" id="set-sense-list"></ul>
           <p class="hint" id="set-sense-note" data-i18n="set.sense.note">撤销以后，这个程序下次要用时会再问一次。</p>
         </div>
+        <div class="set-ai" id="set-ai">
+          <div class="set-row">
+            <span data-i18n="ai.label">AI 线路</span>
+            <button class="btn ghost" id="set-ai-open" type="button">未接上 ›</button>
+          </div>
+          <p class="hint" data-i18n="ai.note">接上以后，脚本里的「生成」直接请 AI 写程序。key 只存在这台手机上，不进备份；请用设了额度上限的 key。</p>
+        </div>
         <div class="set-backup" id="set-backup">
           <div class="set-row">
             <span data-i18n="bk.label">全部数据</span>
@@ -92,6 +99,31 @@
           <span id="set-storage" data-i18n="set.counting">本机存档：计算中…</span>
           <span>MIT License · Copyright (c) 2026 Haowei Wu</span>
           <span>github.com/nowheremanx/lopda</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- AI LINE: the OpenRouter key and model, opened from Settings (decisions.md section 34) -->
+    <section class="view" id="v-set-ai" hidden>
+      <div class="bar">
+        <button class="btn ghost" id="set-ai-back" type="button" aria-label="返回">◂</button>
+        <h2 data-i18n="ai.label">AI 线路</h2>
+      </div>
+      <div class="settings set-ai-page">
+        <p class="hint" id="set-ai-state" aria-live="polite"></p>
+        <label class="set-ai-field">
+          <span data-i18n="ai.key">OpenRouter 的 key</span>
+          <input id="set-ai-key" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="200" data-i18n-ph="ai.key.ph" placeholder="sk-or-…">
+        </label>
+        <label class="set-ai-field">
+          <span data-i18n="ai.model">模型</span>
+          <input id="set-ai-model" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="100" placeholder="openrouter/auto">
+        </label>
+        <p class="hint" data-i18n="ai.model.hint">填 openrouter.ai/models 上的模型名，例如 anthropic/claude-sonnet-4.5；空着就让 OpenRouter 自动选。</p>
+        <div class="row">
+          <button class="btn" id="set-ai-save" type="button" data-i18n="ai.save">保存</button>
+          <button class="btn ghost" id="set-ai-test" type="button" data-i18n="ai.test" hidden>试一下</button>
+          <button class="btn ghost" id="set-ai-del" type="button" data-i18n="ai.del" hidden>删除 key</button>
         </div>
       </div>
     </section>
@@ -298,12 +330,13 @@
       <div class="scripts-main">
         <div class="scripts-card">
           <b data-i18n="scripts.start">让 AI 写一个</b>
-          <p class="hint" data-i18n="scripts.startnote">写下想要什么，复制提示词交给 AI，再把代码粘贴回来。</p>
+          <p class="hint" id="scripts-startnote" data-i18n="scripts.startnote">写下想要什么，复制提示词交给 AI，再把代码粘贴回来。</p>
           <button class="btn" id="scripts-write" type="button" data-i18n="scripts.write">写需求</button>
           <button class="btn ghost" id="scripts-paste" type="button" data-i18n="scripts.paste">粘贴代码</button>
           <p class="hint" id="scripts-status" aria-live="polite"></p>
         </div>
         <p class="hint scripts-empty" id="scripts-empty" hidden></p>
+        <h3 class="scripts-count" id="scripts-count" hidden></h3>
         <ul class="lcd-menu scripts-list" id="scripts-list"></ul>
       </div>
       <input type="file" id="scripts-file" accept=".html,.htm,.js,.txt,text/html,text/javascript" hidden>
@@ -354,6 +387,7 @@
           <button class="btn ghost" id="script-export" type="button" data-i18n="scripts.export">导出脚本</button>
           <button class="btn ghost" id="script-clear" type="button" data-i18n="scripts.clear">清除存档</button>
           <button class="btn ghost" id="script-delete" type="button" data-i18n="scripts.delete">删除脚本</button>
+          <button class="btn ghost" id="script-menu-close" type="button" data-i18n="common.cancel">取消</button>
         </div>
         <div class="script-menu" id="script-ask" hidden>
           <p id="script-ask-msg"></p>
@@ -457,6 +491,7 @@
 <script src="notetext.js"></script>
 <script src="zip.js"></script>
 <script src="backup.js"></script>
+<script src="ai.js"></script>
 <script src="core.js"></script>
 <script src="apps/notes.js"></script>
 <script src="apps/calendar.js"></script>
