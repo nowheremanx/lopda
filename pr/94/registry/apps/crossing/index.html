@@ -1,0 +1,622 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>拼字格</title>
+<!-- Lo-PDA example app (lopda/1): 拼字格 / Crossing. MIT License, see LICENSE.
+     A letter wheel and a small crossword. The words come from PAD.dict (SPEC.md 6.7), the built-in ECDICT:
+     words() picks the seed word and the real words that fit its letters, lookup() gives the Chinese line.
+     No permission: PAD.dict is read-only, like PAD.say. The player can turn ECDICT off in 词典管理 and this
+     app still works. Everything is plain DOM, no canvas, no framework. -->
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #a3ad7e; color: #1f2a14; font-family: monospace; }
+  body { display: flex; flex-direction: column; -webkit-user-select: none; user-select: none; }
+  header { flex: none; height: 44px; display: flex; align-items: center; justify-content: space-between; padding: 0 4px; box-sizing: border-box; font-size: 16px; }
+  #round { font-weight: bold; }
+  #hint { font: inherit; font-size: 15px; min-width: 84px; height: 44px; padding: 0 8px; box-sizing: border-box; background: #1f2a14; color: #a3ad7e; border: 0; box-shadow: 2px 2px 0 #4a5a32; touch-action: manipulation; }
+  #hint:active { transform: translate(1px, 1px); box-shadow: 1px 1px 0 #4a5a32; }
+  #hint.off { background: #a3ad7e; color: #4a5a32; border: 1px dashed #4a5a32; box-shadow: none; }
+  main { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 4px; box-sizing: border-box; }
+  #stage { width: 100%; display: flex; align-items: center; justify-content: center; gap: 6px; }
+  #wheel { position: relative; flex: none; width: 154px; height: 154px; touch-action: none; }
+  .key { position: absolute; left: 50%; top: 50%; width: 44px; height: 44px; margin: -22px 0 0 -22px; box-sizing: border-box;
+    font: inherit; font-size: 20px; font-weight: bold; line-height: 1; padding: 0; border: 2px solid #1f2a14;
+    background: #a3ad7e; color: #1f2a14; touch-action: none; }
+  .key.on { background: #7d8a58; border-width: 3px; }
+  .key.cur { background: #1f2a14; color: #a3ad7e; border-color: #1f2a14; }
+  #entry { position: absolute; left: 50%; top: 50%; width: 70px; margin: -11px 0 0 -35px; height: 22px; line-height: 22px;
+    text-align: center; font-size: 15px; font-weight: bold; letter-spacing: 1px; pointer-events: none; white-space: nowrap; }
+  #board { display: grid; gap: 1px; }
+  .cell { box-sizing: border-box; display: flex; align-items: center; justify-content: center; font-weight: bold; line-height: 1;
+    background: #a3ad7e; color: #1f2a14; border: 1px solid #7d8a58; }
+  .cell.on { background: #7d8a58; border-color: #1f2a14; }
+  .gap { visibility: hidden; }
+  #note { flex: none; width: 100%; height: 22px; line-height: 22px; font-size: 14px; overflow: hidden; white-space: nowrap;
+    text-overflow: ellipsis; text-align: center; padding: 0 4px; box-sizing: border-box; }
+  footer { flex: none; height: 20px; line-height: 20px; font-size: 13px; text-align: center; white-space: nowrap; overflow: hidden; }
+  #cover { position: fixed; inset: 0; background: #a3ad7e; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 14px; padding: 18px; box-sizing: border-box; text-align: center; }
+  #cover[hidden] { display: none; }
+  #cover p { margin: 0; font-size: 16px; line-height: 1.55; max-width: 300px; }
+  #cover button { font: inherit; font-size: 17px; font-weight: bold; min-height: 44px; padding: 8px 22px; background: #1f2a14;
+    color: #a3ad7e; border: 0; box-shadow: 3px 3px 0 #4a5a32; touch-action: manipulation; }
+  #cover button[hidden] { display: none; }
+  @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-3px); } 75% { transform: translateX(3px); } }
+  .shake { animation: shake 0.22s linear; }
+</style>
+</head>
+<body>
+<header>
+  <span id="round">第 1 关</span>
+  <button id="hint" type="button">提示 0</button>
+</header>
+<main>
+  <div id="stage">
+    <div id="wheel" aria-label="字母盘"></div>
+    <div id="board" aria-label="格子"></div>
+  </div>
+  <div id="note"></div>
+</main>
+<footer id="keys"></footer>
+<div id="cover">
+  <p id="cover-text"></p>
+  <button id="cover-btn" type="button"></button>
+</div>
+<script>
+(function () {
+  "use strict";
+
+  /* two languages: PAD.lang is "zh" or "en"; a runtime before 0.4.0 has none, so Chinese is the default */
+  var LANG = typeof PAD !== "undefined" && PAD.lang === "en" ? "en" : "zh";
+  var TXT = {
+    zh: {
+      round: "第 {n} 关", hint: "提示 {n}", loading: "翻字典…",
+      error: "这台掌机的词典打不开", retry: "再试一次",
+      tut1: "在字母盘上拖动字母拼出单词，松手提交。也可以用左右键选字母，A 加上。",
+      tut2: "拼对格子里的词，格子会填上，下面显示中文，掌机会把它读出来。",
+      tut3: "不在格子里的真词算奖励词，能换提示：点右上角的「提示」，看一个词的中文，它不会告诉你字母。",
+      next: "下一步", start: "开始", keys: "←→ 选　A 加　B 删　START 提交　SELECT 换",
+      done: "第 {n} 关完成", doneBtn: "下一关", bonus: "奖励词：提示 +1",
+      noHints: "先找奖励词换提示", hintHead: "提示：", noEntry: "词典里没有这个词",
+      noWord: "不是这里的词", again: "这个词已经找到了"
+    },
+    en: {
+      round: "ROUND {n}", hint: "HINT {n}", loading: "Looking up…",
+      error: "This handheld's dictionary won't open.", retry: "TRY AGAIN",
+      tut1: "Drag across the letter wheel to spell a word, then let go to send it. Or use Left/Right and A.",
+      tut2: "A word in the grid fills in, its Chinese shows below, and the handheld says it out loud.",
+      tut3: "Real words that are not in the grid earn hints: tap HINT to see one grid word's Chinese, never its letters.",
+      next: "NEXT", start: "START", keys: "←→ pick A add B del START send SELECT mix",
+      done: "ROUND {n} CLEAR", doneBtn: "NEXT ROUND", bonus: "Bonus word: hint +1",
+      noHints: "Earn a hint with a bonus word", hintHead: "HINT: ", noEntry: "No entry in the dictionary",
+      noWord: "Not a word here", again: "Already found"
+    }
+  }[LANG];
+  function tx(key, n) { return TXT[key].replace("{n}", n); }
+  document.documentElement.lang = LANG === "zh" ? "zh-CN" : "en";
+
+  var INK = "#1f2a14", MID = "#7d8a58";
+  var GRID = 7;                 /* the puzzle's grid is at most 7x7, so the letters stay readable on 331x359 */
+  var WHEEL_R = 52, WHEEL_H = 154;
+
+  /* mulberry32: a tiny seeded random. The round number seeds it, so round 37 is the same puzzle on every phone. */
+  function mulberry32(a) {
+    return function () {
+      a |= 0; a = a + 0x6D2B79F5 | 0;
+      var t = Math.imul(a ^ a >>> 15, 1 | a);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  function isWord(w) { return typeof w === "string" && /^[a-z]{3,7}$/.test(w); }
+
+  var roundEl = document.getElementById("round"), hintEl = document.getElementById("hint");
+  var wheelEl = document.getElementById("wheel"), boardEl = document.getElementById("board");
+  var noteEl = document.getElementById("note"), keysEl = document.getElementById("keys");
+  var coverEl = document.getElementById("cover"), coverText = document.getElementById("cover-text"), coverBtn = document.getElementById("cover-btn");
+  var entryEl = document.createElement("div"); entryEl.id = "entry"; wheelEl.appendChild(entryEl);
+
+  var phase = "load";           /* load | tutorial | play | done | error */
+  var state = {
+    round: 1, hints: 0, done: [],
+    seed: "", wheel: [], placed: [], words: [], wordSet: {},
+    entry: [], cursor: 0,
+    view: null, cells: {},
+    tutorial: 0, hinted: [], hintTurn: 0
+  };
+  /* a small read-only window on the round, for a curious player and for the e2e test (the app needs no globals) */
+  Object.defineProperty(state, "phase", { get: function () { return phase; }, enumerable: true });
+  window.game = state;
+
+  var rnd = mulberry32(1), gen = 0, firstOpen = true, dragging = null, lookupSeq = 0, hintBusy = false;
+  var savedRound = null, savedHints = 0, savedDone = [];
+  var pending = { round: 1, hints: 0, done: [] };   /* what to ask for again after a dictionary error */
+
+  keysEl.textContent = TXT.keys;
+
+  function keyOf(r, c) { return r + "," + c; }
+
+  function updateHeader() {
+    roundEl.textContent = tx("round", state.round);
+    hintEl.textContent = tx("hint", state.hints);
+    hintEl.classList.toggle("off", state.hints < 1);
+  }
+  function setNote(s) { noteEl.textContent = s || ""; }
+
+  /* ---------- the dictionary calls: PAD.dict.words and PAD.dict.lookup ---------- */
+
+  function wait(ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); }
+
+  /* PAD.dict.words({len, level, max}) -> {words, more} | null. level 1 is the most common 2000 words, so the
+     seed is a word everyone knows; level 3 (the most common 10000) gives enough short words for the grid.
+     A seed whose letters do not cross into a grid of 4 or more words is not a dictionary failure: walk on to
+     the next seed. Eight letter queries and the seed query make nine calls in a second (the limit is ten);
+     before a ninth letter query, wait out the window. Only a null or a rejected call is a dictionary error. */
+  function pickSeed(L) {
+    return PAD.dict.words({ len: L, level: 1, max: 500 }).then(function (page) {
+      if (!page || !page.words || !page.words.length) return null;
+      var seeds = page.words, start = Math.floor(rnd() * seeds.length), at = 0, burst = 0;
+      function attempt() {
+        if (burst >= 8) { burst = 0; return wait(1100).then(tryOne); }
+        return tryOne();
+        function tryOne() {
+          burst++;
+          var seed = seeds[(start + at) % seeds.length];
+          at++;
+          return PAD.dict.words({ letters: seed, len: [3, L], level: 3, max: 500 }).then(function (r) {
+            if (!r || !r.words) return null;                 /* unreadable: the error screen, not another seed */
+            var words = r.words.slice();
+            if (words.indexOf(seed) < 0) words.unshift(seed);
+            var built = buildGrid(seed, words);
+            if (built.placed.length < 4) return attempt();   /* too few crossings: try the next seed */
+            return { seed: seed, words: words, built: built };
+          });
+        }
+      }
+      return attempt();
+    });
+  }
+
+  /* ---------- the puzzle: place words greedily, longest first, each crossing a placed word ---------- */
+
+  function fitsAt(map, word, r, c, dir) {
+    var dr = dir === "v" ? 1 : 0, dc = dir === "h" ? 1 : 0;
+    var i, rr, cc, ch, cross = 0;
+    /* the cell just before and just after the word must stay empty: no two words end to end */
+    var br = r - dr, bc = c - dc;
+    if (br >= 0 && br < GRID && bc >= 0 && bc < GRID && map[keyOf(br, bc)]) return -1;
+    var ar = r + dr * word.length, ac = c + dc * word.length;
+    if (ar >= 0 && ar < GRID && ac >= 0 && ac < GRID && map[keyOf(ar, ac)]) return -1;
+    for (i = 0; i < word.length; i++) {
+      rr = r + dr * i; cc = c + dc * i;
+      if (rr < 0 || rr >= GRID || cc < 0 || cc >= GRID) return -1;
+      ch = map[keyOf(rr, cc)];
+      if (ch) {
+        if (ch !== word.charAt(i)) return -1;
+        cross++;
+      } else {
+        /* no letter beside a non-crossing cell: two words may touch only where they cross */
+        var r1 = dir === "h" ? rr - 1 : rr, c1 = dir === "h" ? cc : cc - 1;
+        var r2 = dir === "h" ? rr + 1 : rr, c2 = dir === "h" ? cc : cc + 1;
+        if (r1 >= 0 && r1 < GRID && c1 >= 0 && c1 < GRID && map[keyOf(r1, c1)]) return -1;
+        if (r2 >= 0 && r2 < GRID && c2 >= 0 && c2 < GRID && map[keyOf(r2, c2)]) return -1;
+      }
+    }
+    return cross;
+  }
+
+  function boundsOf(placed) {
+    var minR = GRID, maxR = -1, minC = GRID, maxC = -1;
+    placed.forEach(function (p) {
+      var dr = p.dir === "v" ? 1 : 0, dc = p.dir === "h" ? 1 : 0;
+      for (var i = 0; i < p.word.length; i++) {
+        minR = Math.min(minR, p.r + dr * i); maxR = Math.max(maxR, p.r + dr * i);
+        minC = Math.min(minC, p.c + dc * i); maxC = Math.max(maxC, p.c + dc * i);
+      }
+    });
+    return { minR: minR, maxR: maxR, minC: minC, maxC: maxC };
+  }
+
+  /* the best crossing for one word: more crossings and a tighter grid win; ties go to the seeded random */
+  function bestPlacement(map, placed, word) {
+    var best = null, bestScore = -Infinity, ties = 0, k, rr, cc, ch, idx, d, dir, r, c, cross;
+    for (k in map) {
+      if (!Object.prototype.hasOwnProperty.call(map, k)) continue;
+      rr = +k.split(",")[0]; cc = +k.split(",")[1]; ch = map[k];
+      idx = -1;
+      while ((idx = word.indexOf(ch, idx + 1)) >= 0) {
+        for (d = 0; d < 2; d++) {
+          dir = d ? "v" : "h";
+          r = dir === "v" ? rr - idx : rr;
+          c = dir === "h" ? cc - idx : cc;
+          cross = fitsAt(map, word, r, c, dir);
+          if (cross < 1) continue;
+          var b = boundsOf(placed);
+          var dr = dir === "v" ? 1 : 0, dc = dir === "h" ? 1 : 0, i;
+          for (i = 0; i < word.length; i++) {
+            b.minR = Math.min(b.minR, r + dr * i); b.maxR = Math.max(b.maxR, r + dr * i);
+            b.minC = Math.min(b.minC, c + dc * i); b.maxC = Math.max(b.maxC, c + dc * i);
+          }
+          var area = (b.maxR - b.minR + 1) * (b.maxC - b.minC + 1);
+          var score = cross * 10 - area;
+          if (score > bestScore) { bestScore = score; best = { word: word, r: r, c: c, dir: dir }; ties = 1; }
+          else if (score === bestScore) { ties++; if (rnd() < 1 / ties) best = { word: word, r: r, c: c, dir: dir }; }
+        }
+      }
+    }
+    return best;
+  }
+
+  function buildGrid(seed, words) {
+    var map = {}, placed = [], i;
+    var c0 = Math.floor((GRID - seed.length) / 2), r0 = Math.floor((GRID - seed.length) / 2);
+    for (i = 0; i < seed.length; i++) map[keyOf(r0, c0 + i)] = seed.charAt(i);
+    placed.push({ word: seed, r: r0, c: c0, dir: "h" });
+    /* longest first, so the big words get the room; the word list's own order breaks ties */
+    var cand = words.map(function (w, n) { return { w: w, n: n }; })
+      .filter(function (x) { return x.w !== seed; })
+      .sort(function (a, b) { return b.w.length - a.w.length || a.n - b.n; });
+    for (i = 0; i < cand.length && placed.length < 6; i++) {
+      var p = bestPlacement(map, placed, cand[i].w);
+      if (!p) continue;
+      var dr = p.dir === "v" ? 1 : 0, dc = p.dir === "h" ? 1 : 0, j;
+      for (j = 0; j < p.word.length; j++) map[keyOf(p.r + dr * j, p.c + dc * j)] = p.word.charAt(j);
+      placed.push(p);
+    }
+    return { placed: placed, map: map };
+  }
+
+  /* ---------- starting a round ---------- */
+
+  function lenFor(round) { return round <= 10 ? 5 : round <= 30 ? 6 : 7; }
+
+  function fail() {
+    /* null (unreadable dictionary, or more than 10 calls a second) and a rejected call both land here */
+    phase = "error";
+    setNote("");
+    showCover(TXT.error, TXT.retry);
+  }
+
+  function showCover(text, button) {
+    coverText.textContent = text;
+    coverBtn.textContent = button || "";
+    coverBtn.hidden = !button;
+    coverEl.hidden = false;
+  }
+  function hideCover() { coverEl.hidden = true; }
+
+  function startRound(round, hints, done) {
+    pending = { round: round, hints: hints, done: done.slice() };
+    state.round = round; state.hints = hints; state.done = done.slice(); state.entry = []; state.cursor = 0;
+    state.hinted = []; state.hintTurn = 0; hintBusy = false;
+    state.seed = ""; state.wheel = []; state.placed = []; state.words = []; state.wordSet = {}; state.view = null; state.cells = {};
+    updateHeader();
+    setNote("");
+    phase = "load";
+    showCover(TXT.loading, "");
+    var token = ++gen;
+    var L = lenFor(round);
+    rnd = mulberry32(round);
+    if (!PAD.dict || !PAD.dict.words) { fail(); return; }
+    pickSeed(L).then(function (out) {
+      if (token !== gen) return;
+      if (!out) { fail(); return; }
+      state.seed = out.seed;
+      state.words = out.words;
+      state.placed = out.built.placed;
+      state.view = boundsOf(state.placed);
+      state.cells = out.built.map;
+      state.wordSet = {};
+      out.words.forEach(function (w) { state.wordSet[w] = true; });
+      state.wheel = out.seed.split("");
+      shuffleWheel(false);
+      state.entry = []; state.cursor = 0;
+      state.done = done.filter(function (w) { return state.wordSet[w] || state.placed.some(function (p) { return p.word === w; }); });
+      renderBoard(); renderKeys(); updateHeader();
+      if (firstOpen) { phase = "tutorial"; state.tutorial = 0; showTutorial(); }
+      else { phase = "play"; hideCover(); }
+      checkComplete();                 /* a saved round whose words are all filled opens on its clear screen */
+    }, function () {
+      if (token === gen) fail();
+    });
+  }
+
+  /* ---------- drawing ---------- */
+
+  function shuffleWheel(clear) {
+    var a = state.wheel.slice(), i, j, t;
+    for (i = a.length - 1; i > 0; i--) { j = Math.floor(rnd() * (i + 1)); t = a[i]; a[i] = a[j]; a[j] = t; }
+    state.wheel = a;
+    if (clear) { state.entry = []; state.cursor = 0; }
+    buildWheel();
+    renderKeys();
+  }
+
+  function buildWheel() {
+    while (wheelEl.firstChild && wheelEl.firstChild !== entryEl) wheelEl.removeChild(wheelEl.firstChild);
+    var n = state.wheel.length, i, b, a, dx, dy;
+    for (i = 0; i < n; i++) {
+      b = document.createElement("button");
+      b.type = "button"; b.className = "key"; b.setAttribute("data-i", String(i));
+      a = -Math.PI / 2 + i * 2 * Math.PI / n;
+      dx = Math.round(WHEEL_R * Math.cos(a)); dy = Math.round(WHEEL_R * Math.sin(a));
+      b.style.transform = "translate(" + dx + "px," + dy + "px)";
+      wheelEl.appendChild(b);
+    }
+    wheelEl.appendChild(entryEl);          /* the typed word, in the middle of the wheel */
+  }
+
+  function renderKeys() {
+    var keys = wheelEl.querySelectorAll(".key"), i;
+    for (i = 0; i < keys.length; i++) {
+      var idx = +keys[i].getAttribute("data-i");
+      keys[i].textContent = (state.wheel[idx] || "").toUpperCase();
+      keys[i].className = "key" + (state.entry.indexOf(idx) >= 0 ? " on" : "") + (idx === state.cursor && phase === "play" ? " cur" : "");
+      keys[i].setAttribute("aria-label", "letter " + (state.wheel[idx] || "") + (state.entry.indexOf(idx) >= 0 ? ", used" : ""));
+    }
+    entryEl.textContent = state.entry.map(function (i) { return state.wheel[i]; }).join("").toUpperCase();
+  }
+
+  function renderBoard() {
+    boardEl.innerHTML = "";
+    if (!state.view) return;
+    layoutSizes();
+    var cols = state.view.maxC - state.view.minC + 1;
+    var filled = {};
+    state.placed.forEach(function (p) {
+      if (state.done.indexOf(p.word) < 0) return;
+      var dr = p.dir === "v" ? 1 : 0, dc = p.dir === "h" ? 1 : 0;
+      for (var i = 0; i < p.word.length; i++) filled[keyOf(p.r + dr * i, p.c + dc * i)] = p.word.charAt(i);
+    });
+    for (var r = state.view.minR; r <= state.view.maxR; r++) {
+      for (var c = state.view.minC; c <= state.view.maxC; c++) {
+        var k = keyOf(r, c), el = document.createElement("div");
+        if (state.cells[k]) {
+          el.className = "cell" + (filled[k] ? " on" : "");
+          el.textContent = filled[k] ? filled[k].toUpperCase() : "";
+        } else el.className = "gap";
+        boardEl.appendChild(el);
+      }
+    }
+    boardEl.setAttribute("aria-label", cols + " by " + (state.view.maxR - state.view.minR + 1) + " grid");
+  }
+  /* the cell size comes from the space beside the wheel: it changes with the screen, not with each cell */
+  function layoutSizes() {
+    if (!state.view) return;
+    var cols = state.view.maxC - state.view.minC + 1, rows = state.view.maxR - state.view.minR + 1;
+    var availW = boardEl.parentNode.clientWidth - WHEEL_H - 8;   /* the 1px gaps are taken out below */
+    var cell = Math.floor(Math.min(30, (availW - cols + 1) / cols, (WHEEL_H - rows + 1) / rows));
+    if (!isFinite(cell) || cell < 12) cell = 12;
+    boardEl.style.gridTemplateColumns = "repeat(" + cols + ", " + cell + "px)";
+    boardEl.style.gridAutoRows = cell + "px";
+    boardEl.style.fontSize = Math.max(12, Math.min(17, cell - 5)) + "px";
+  }
+  window.addEventListener("resize", function () { layoutSizes(); renderBoard(); });
+
+  /* ---------- play ---------- */
+
+  function entryWord() {
+    return state.entry.map(function (i) { return state.wheel[i]; }).join("");
+  }
+
+  function advanceCursor() {
+    var n = state.wheel.length, i;
+    for (i = 1; i <= n; i++) {
+      var at = (state.cursor + i) % n;
+      if (state.entry.indexOf(at) < 0) { state.cursor = at; return; }
+    }
+  }
+
+  function shake() {
+    boardEl.classList.remove("shake"); wheelEl.classList.remove("shake");
+    void boardEl.offsetWidth;
+    boardEl.classList.add("shake"); wheelEl.classList.add("shake");
+    setTimeout(function () { boardEl.classList.remove("shake"); wheelEl.classList.remove("shake"); }, 260);
+  }
+
+  function submit() {
+    if (phase !== "play") return;
+    var word = entryWord();
+    state.entry = []; state.cursor = 0; renderKeys();
+    if (!word || word.length < 3) { PAD.sfx("err"); shake(); return; }
+    if (state.done.indexOf(word) >= 0) { setNote(TXT.again); PAD.sfx("err"); shake(); return; }
+    var at = -1, i;
+    for (i = 0; i < state.placed.length; i++) if (state.placed[i].word === word) { at = i; break; }
+    if (at >= 0) { fillWord(state.placed[at]); return; }
+    if (state.wordSet[word]) { bonusWord(word); return; }
+    setNote(TXT.noWord); PAD.sfx("err"); shake();
+  }
+
+  function fillWord(p) {
+    state.done.push(p.word);
+    setNote("");
+    renderBoard(); updateHeader();
+    PAD.sfx("ok");
+    /* PAD.dict.lookup gives the Chinese line; PAD.say reads the word with the phone's English voice.
+       Both may answer null (dictionary unreadable, or more than 10 calls a second): then the line stays empty. */
+    lookupLine(p.word);
+    if (PAD.say) { try { var s = PAD.say(p.word, { lang: "en" }); if (s && s.then) s.then(null, function () {}); } catch (e) {} }
+    save();
+    checkComplete();
+  }
+
+  function lookupLine(word) {
+    var token = ++lookupSeq;
+    if (!PAD.dict || !PAD.dict.lookup) { setNote(""); return; }
+    PAD.dict.lookup(word).then(function (e) {
+      if (token !== lookupSeq || phase === "error" || phase === "load") return;
+      if (!e || !e.zh || !e.zh.length) { setNote(""); return; }
+      setNote(e.zh[0]);
+    }, function () { if (token === lookupSeq) setNote(""); });
+  }
+
+  function bonusWord(word) {
+    state.done.push(word);
+    state.hints++;
+    PAD.sfx("coin");
+    setNote(TXT.bonus);
+    updateHeader(); save();
+  }
+
+  function checkComplete() {
+    if (phase !== "play") return;
+    var all = state.placed.length > 0 && state.placed.every(function (p) { return state.done.indexOf(p.word) >= 0; });
+    if (!all) return;
+    phase = "done";
+    PAD.sfx("win");
+    save();
+    showCover(tx("done", state.round), TXT.doneBtn);
+  }
+
+  /* HINT is the only way to spend a hint. Each paid hint marks its word, so a second hint shows another open
+     word. Once every open word has been hinted, HINT cycles through them again without charging. */
+  function hint() {
+    if (phase !== "play" || hintBusy) return;
+    var open = state.placed.filter(function (p) { return state.done.indexOf(p.word) < 0; });
+    if (!open.length) return;
+    var fresh = open.filter(function (p) { return state.hinted.indexOf(p.word) < 0; })
+      .sort(function (a, b) { return b.word.length - a.word.length; });
+    var word, paid = false;
+    if (fresh.length) {
+      if (state.hints < 1) { PAD.sfx("err"); setNote(TXT.noHints); return; }
+      word = fresh[0].word;
+      paid = true;
+    } else {
+      word = open[state.hintTurn % open.length].word;
+    }
+    if (!PAD.dict || !PAD.dict.lookup) { setNote(TXT.noEntry); return; }
+    hintBusy = true;
+    PAD.dict.lookup(word).then(function (e) {
+      hintBusy = false;
+      if (phase !== "play" || state.done.indexOf(word) >= 0) return;
+      if (!e || !e.zh || !e.zh.length) { setNote(TXT.noEntry); return; }
+      if (paid) {
+        if (state.hints < 1) return;
+        state.hints--;
+        state.hinted.push(word);
+        updateHeader(); save();
+      } else state.hintTurn++;
+      setNote(TXT.hintHead + e.zh[0]);
+    }, function () { hintBusy = false; setNote(TXT.noEntry); });
+  }
+
+  function save() {
+    /* PAD.save keeps one value under the app's own id (256 KB at most) and PAD.load gives it back on the next open */
+    var data = { round: state.round, hints: state.hints, done: state.done.slice() };
+    try { var p = PAD.save("game", data); if (p && p.then) p.then(null, function () {}); } catch (e) {}
+  }
+
+  /* ---------- tutorial, error, next round ---------- */
+
+  var TUT = ["tut1", "tut2", "tut3"];
+  function showTutorial() {
+    coverText.textContent = TXT[TUT[state.tutorial]];
+    coverBtn.textContent = state.tutorial < 2 ? TXT.next : TXT.start;
+    coverBtn.hidden = false;
+    coverEl.hidden = false;
+  }
+
+  function nextRound() {
+    startRound(state.round + 1, state.hints, []);
+    save();
+  }
+
+  coverBtn.addEventListener("click", function () {
+    if (phase === "tutorial") {
+      state.tutorial++;
+      if (state.tutorial < 3) showTutorial();
+      else { firstOpen = false; phase = "play"; hideCover(); save(); renderKeys(); }
+    } else if (phase === "error") {
+      startRound(pending.round, pending.hints, pending.done);
+    } else if (phase === "done") nextRound();
+  });
+  hintEl.addEventListener("click", hint);
+
+  /* ---------- the wheel: drag to spell, or keys ---------- */
+
+  function keyIndexFrom(target) {
+    var el = target && target.closest ? target.closest(".key") : null;
+    return el && wheelEl.contains(el) ? +el.getAttribute("data-i") : -1;
+  }
+  /* On a move, take a letter only near the middle of its 44px key, not in a corner: a line drawn between two
+     letters should not pick up a third one it merely grazes. */
+  function keyNear(x, y) {
+    var keys = wheelEl.querySelectorAll(".key"), best = -1, bestD = 24 * 24, i, b, dx, dy, d;
+    for (i = 0; i < keys.length; i++) {
+      b = keys[i].getBoundingClientRect();
+      dx = x - (b.left + b.width / 2); dy = y - (b.top + b.height / 2); d = dx * dx + dy * dy;
+      if (d < bestD) { bestD = d; best = +keys[i].getAttribute("data-i"); }
+    }
+    return best;
+  }
+  function addIndex(i) {
+    if (i < 0 || state.entry.indexOf(i) >= 0) return;
+    state.entry.push(i);
+    state.cursor = i;
+    renderKeys();
+  }
+
+  wheelEl.addEventListener("pointerdown", function (e) {
+    if (phase !== "play") return;
+    var i = keyIndexFrom(e.target);
+    if (i < 0) return;
+    e.preventDefault();
+    dragging = { id: e.pointerId };
+    state.entry = [];
+    addIndex(i);
+  });
+  document.addEventListener("pointermove", function (e) {
+    if (!dragging || e.pointerId !== dragging.id) return;
+    e.preventDefault();
+    addIndex(keyNear(e.clientX, e.clientY));
+  }, { passive: false });
+  function endDrag(e) {
+    if (!dragging || e.pointerId !== dragging.id) return;
+    dragging = null;
+    if (state.entry.length > 1) submit();
+    else { state.entry = []; renderKeys(); }
+  }
+  document.addEventListener("pointerup", endDrag);
+  document.addEventListener("pointercancel", function (e) { if (dragging && e.pointerId === dragging.id) { dragging = null; state.entry = []; renderKeys(); } });
+
+  /* The chin pad: Left/Right move around the wheel, A adds the letter, B removes the last, START submits,
+     SELECT shuffles. Also the keyboard on a computer (X = A, Z = B, Enter = START, Shift = SELECT). */
+  PAD.on("press", function (b) {
+    if (phase === "tutorial") { if (b === "a" || b === "start") coverBtn.click(); return; }
+    if (phase === "done") { if (b === "a" || b === "start") nextRound(); return; }
+    if (phase !== "play") return;
+    var n = state.wheel.length;
+    if (b === "left" && n) { state.cursor = (state.cursor + n - 1) % n; renderKeys(); }
+    else if (b === "right" && n) { state.cursor = (state.cursor + 1) % n; renderKeys(); }
+    else if (b === "a") {
+      if (!n) return;
+      if (state.entry.indexOf(state.cursor) >= 0) { PAD.sfx("err"); return; }
+      state.entry.push(state.cursor);
+      advanceCursor();
+      renderKeys();
+    } else if (b === "b") {
+      if (!state.entry.length) return;        /* hints are spent only from the HINT button */
+      state.cursor = state.entry.pop();
+      renderKeys();
+    } else if (b === "start") submit();
+    else if (b === "select" && n) { PAD.sfx("ok"); shuffleWheel(true); }
+  });
+
+  /* ---------- boot ---------- */
+
+  updateHeader();
+  showCover(TXT.loading, "");          /* no blank screen while the saved round is read */
+  PAD.load("game").then(function (v) {
+    if (v && typeof v === "object") {
+      savedRound = typeof v.round === "number" && v.round % 1 === 0 && v.round >= 1 ? v.round : 1;
+      savedHints = typeof v.hints === "number" && v.hints >= 0 ? Math.floor(v.hints) : 0;
+      savedDone = Array.isArray(v.done) ? v.done.filter(isWord) : [];
+      firstOpen = false;
+    }
+    startRound(savedRound || 1, savedHints, savedDone);
+  }, function () { startRound(1, 0, []); });
+})();
+</script>
+</body>
+</html>
