@@ -584,6 +584,7 @@
      SELECT shuffles. Also the keyboard on a computer (X = A, Z = B, Enter = START, Shift = SELECT). */
   PAD.on("press", function (b) {
     if (phase === "tutorial") { if (b === "a" || b === "start") coverBtn.click(); return; }
+    if (phase === "error") { if (b === "a" || b === "start") coverBtn.click(); return; }
     if (phase === "done") { if (b === "a" || b === "start") nextRound(); return; }
     if (phase !== "play") return;
     var n = state.wheel.length;
