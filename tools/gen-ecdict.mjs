@@ -113,7 +113,7 @@ const lemmaText = [...lemma].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([f, b])
 writeFileSync(join(OUT, "ecdict.lemma.gz"), gzipSync(lemmaText, { level: 9 }));
 /* the app word list: plain a-z, with a vowel (km, kg), not only an abbreviation or a name, not blocked; picked is in rank order */
 /* a word has a sense with a part of speech that is not only a name (伊恩（男子名）) or a numeral (罗马数字3) */
-const isSense = (l) => /^(?!abbr\.)[a-z]+\.\s/.test(l) && !/^[a-z]+\.\s*\S+（(男子名|女子名|人名|姓氏)）$|罗马数字/.test(l);
+const isSense = (l) => /^(?!abbr\.)[a-z]+\.\s/.test(l) && !/^[a-z]+\.\s*[^,，]*[（(][^）)]*(男子名|女子名|男名|女名|人名|姓氏|地名)|罗马数字/.test(l);
 const notWord = (r) => !chinese(r).some(isSense);
 const appWords = picked.map((r) => get(r, "word")).filter((w, i) =>
   /^[a-z]+$/.test(w) && /[aeiouy]/.test(w) && !BLOCK.has(w) && !notWord(picked[i]));

@@ -79,7 +79,7 @@
       next: "下一步", start: "开始", keys: "←→ 选　A 加　B 删　START 提交　SELECT 换",
       done: "第 {n} 关完成", doneBtn: "下一关", bonus: "奖励词：提示 +1",
       noHints: "先找奖励词换提示", hintHead: "提示：", noEntry: "词典里没有这个词",
-      noWord: "不是这里的词", again: "这个词已经找到了"
+      noWord: "不是这里的词", again: "这个词已经填上了", againBonus: "这个奖励词已经算过了"
     },
     en: {
       round: "ROUND {n}", hint: "HINT {n}", loading: "Looking up…",
@@ -90,7 +90,7 @@
       next: "NEXT", start: "START", keys: "←→ pick A add B del START send SELECT mix",
       done: "ROUND {n} CLEAR", doneBtn: "NEXT ROUND", bonus: "Bonus word: hint +1",
       noHints: "Earn a hint with a bonus word", hintHead: "HINT: ", noEntry: "No entry in the dictionary",
-      noWord: "Not a word here", again: "Already found"
+      noWord: "Not a word here", again: "Already in the grid", againBonus: "Bonus word already counted"
     }
   }[LANG];
   function tx(key, n) { return TXT[key].replace("{n}", n); }
@@ -149,26 +149,31 @@
   function wait(ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); }
 
   /* PAD.dict.words({len, level, max}) -> {words, more} | null. level 1 is the most common 2000 words, so the
-     seed is a word everyone knows; level 3 (the most common 10000) gives enough short words for the grid.
+     seed is a word everyone knows. The grid takes only level 2 (the most common 5000), so every word to find is
+     one a learner may know; any real word from the whole list (level 5) counts as a bonus word.
      A seed whose letters do not cross into a grid of 4 or more words is not a dictionary failure: walk on to
-     the next seed. Eight letter queries and the seed query make nine calls in a second (the limit is ten);
-     before a ninth letter query, wait out the window. Only a null or a rejected call is a dictionary error. */
+     the next seed. Each seed costs two calls, so four seeds and the seed query make nine calls in a second (the
+     limit is ten); before a fifth seed, wait out the window. Only a null or a rejected call is a dictionary error. */
   function pickSeed(L) {
     return PAD.dict.words({ len: L, level: 1, max: 500 }).then(function (page) {
       if (!page || !page.words || !page.words.length) return null;
       var seeds = page.words, start = Math.floor(rnd() * seeds.length), at = 0, burst = 0;
       function attempt() {
-        if (burst >= 8) { burst = 0; return wait(1100).then(tryOne); }
+        if (burst >= 4) { burst = 0; return wait(1100).then(tryOne); }
         return tryOne();
         function tryOne() {
           burst++;
           var seed = seeds[(start + at) % seeds.length];
           at++;
-          return PAD.dict.words({ letters: seed, len: [3, L], level: 3, max: 500 }).then(function (r) {
-            if (!r || !r.words) return null;                 /* unreadable: the error screen, not another seed */
-            var words = r.words.slice();
+          return Promise.all([
+            PAD.dict.words({ letters: seed, len: [3, L], level: 2, max: 500 }),   /* the grid's words */
+            PAD.dict.words({ letters: seed, len: [3, L], level: 5, max: 500 })    /* every real word: bonus words */
+          ]).then(function (rs) {
+            if (!rs[0] || !rs[0].words || !rs[1] || !rs[1].words) return null;   /* unreadable: the error screen, not another seed */
+            var common = rs[0].words.slice(), words = rs[1].words.slice();
+            if (common.indexOf(seed) < 0) common.unshift(seed);
             if (words.indexOf(seed) < 0) words.unshift(seed);
-            var built = buildGrid(seed, words);
+            var built = buildGrid(seed, common);
             if (built.placed.length < 4) return attempt();   /* too few crossings: try the next seed */
             return { seed: seed, words: words, built: built };
           });
@@ -420,7 +425,11 @@
     var word = entryWord();
     state.entry = []; state.cursor = 0; renderKeys();
     if (!word || word.length < 3) { PAD.sfx("err"); shake(); return; }
-    if (state.done.indexOf(word) >= 0) { setNote(TXT.again); PAD.sfx("err"); shake(); return; }
+    if (state.done.indexOf(word) >= 0) {
+      /* a bonus word is not shown in the grid, so say which kind it was: "already found" alone reads as a bug */
+      var inGrid = state.placed.some(function (p) { return p.word === word; });
+      setNote(inGrid ? TXT.again : TXT.againBonus); PAD.sfx("err"); shake(); return;
+    }
     var at = -1, i;
     for (i = 0; i < state.placed.length; i++) if (state.placed[i].word === word) { at = i; break; }
     if (at >= 0) { fillWord(state.placed[at]); return; }
