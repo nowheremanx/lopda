@@ -235,7 +235,8 @@ function renderLibrary(){
       li.appendChild(b); ul.appendChild(li);
     });
     empty.hidden=r.list.length>0;
-    if(!r.list.length) empty.textContent=tr("scripts.empty");
+    if(!r.list.length) empty.textContent=tr(aiOn() ? "scripts.empty.ai" : "scripts.empty");
+    var count=$("scripts-count"); count.hidden=!r.list.length; count.textContent=tr("scripts.count",{n:r.list.length});
   }).catch(function(){ if(seq===M.seq) toast(tr("common.readfail",{msg:tr("common.unknown")})); });
 }
 
@@ -561,10 +562,12 @@ function renderData(){
       };
       li.appendChild(b); ul.appendChild(li);
     });
-    $("data-summary").textContent=tr("scripts.data.summary",{n:n,size:sizeBytes(total)});
+    /* nothing stored: one line says so, without a "0 scripts, 0 B" above it or a 清空 with nothing to clear */
+    $("data-summary").textContent=n ? tr("scripts.data.summary",{n:n,size:sizeBytes(total)}) : "";
+    $("data-summary").hidden=!n;
     $("data-empty").hidden=n>0;
     if(!n) $("data-empty").textContent=tr("scripts.data.none");
-    $("data-clear-all").disabled=!n;
+    $("data-clear-all").disabled=!n; $("data-clear-all").hidden=!n;
     M.dataRows={n:n,total:total};
   },function(){ $("data-summary").textContent=tr("scripts.data.fail"); });
 }
@@ -666,6 +669,7 @@ function init(){
     $("script-ask").hidden=true;
   };
   $("script-copy").onclick=copyPrompt;
+  $("script-menu-close").onclick=function(){ $("script-menu-panel").hidden=true; };
   $("script-export").onclick=exportCurrent;
   $("script-paste").onclick=function(){ if(generating()) G.job.stop(); else pasteEditor(); };
   $("script-run").onclick=runCurrent;
