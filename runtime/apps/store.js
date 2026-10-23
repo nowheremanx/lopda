@@ -1,8 +1,9 @@
 /*
  * Lo-PDA built-in: the app store (community registry), the preinstalled apps, and the sandboxed runner
  * with its PAD bridge (storage, sounds, music and ambience, buttons, files behind the runtime's own confirm dialog, tilt and
- * the microphone through runtime/sensors.js, asked for on the same dialog, writing into notes on that dialog too, speech, and one
- * photo at a time through the runtime's own viewfinder, apps/snap.js).
+ * the microphone through runtime/sensors.js, asked for on the same dialog, writing into notes on that dialog too, speech, one
+ * photo at a time through the runtime's own viewfinder, apps/snap.js, and read-only dictionary queries through
+ * runtime/wordlist.js and the dictionary program's copy of the built-in ECDICT).
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  */
 (function(){
@@ -262,6 +263,7 @@ function deleteApp(id){
 
 /* ---------- runner: sandboxed iframe + PAD bridge (sdk/pad-shim.js) ---------- */
 var KV_BUDGET=256*1024;
+var dictLimit=null;   /* PAD.dict's 10 calls a second: a new limiter for every app start */
 /* A new iframe for every run. Desktop Chrome can leave a reused sandboxed frame unpainted
    (scripts run, nothing shows); a fresh one also means no state carries over between apps. */
 function freshRunFrame(){
@@ -276,6 +278,7 @@ function runApp(a){
   sensors.stopAll();   /* the old app's tilt and microphone end with its frame */
   LP.chip.stop();   /* the old app's song and ambience end with its frame */
   S.running=a;
+  dictLimit=window.LopdaWordList ? window.LopdaWordList.limiter() : null;
   $("run-title").textContent=a.local ? appName(a) : appName(a)+" · v"+(a.version||"?");
   $("run-del-wrap").hidden=!!a.local;   /* local scripts are removed in the scripts app, not here */
   if(!a.local) LP.resetConfirm("run-del-wrap","run-del",tr("run.remove"),function(){ if(S.running){ var n=appName(S.running); deleteApp(S.running.id); show("home"); toast(tr("run.removed",{name:n})); } });
@@ -284,7 +287,7 @@ function runApp(a){
   showPad(!!a.buttons);
   LP.keepAwake(true);   /* a running app keeps the screen on */
   freshRunFrame();
-  var start=function(h){ $("run-frame").srcdoc=lopdaWrapApp(h,{lang:I18N.lang, music:true, ambience:true, sensors:true, notes:true, say:true, camera:true}); };
+  var start=function(h){ $("run-frame").srcdoc=lopdaWrapApp(h,{lang:I18N.lang, music:true, ambience:true, sensors:true, notes:true, say:true, camera:true, dict:true}); };
   if(a.html){ start(a.html); return; }
   $("run-frame").srcdoc='<body style="margin:0;height:100%;display:flex;align-items:center;justify-content:center;background:#a3ad7e;color:#1f2a14;font:16px monospace">'+tr("run.loading")+'</body>';
   loadHtml(a).then(function(h){
@@ -359,6 +362,8 @@ window.addEventListener("message",function(e){
     notesRequest(S.running,f.contentWindow,d);
   } else if(d.op==="say"){
     sayRequest(S.running,f.contentWindow,d);
+  } else if(d.op==="dict"){
+    dictRequest(S.running,f.contentWindow,d);
   } else if(d.op==="snap"){
     snapRequest(S.running,f.contentWindow,d);
   } else if(d.op==="sfx"){
@@ -698,6 +703,27 @@ function sayRequest(app,win,d){
   LP.speech.say(app.id,typeof d.text==="string" ? LP.noEmoji(d.text) : "",lang).then(function(v){
     if(S.running===app && $("run-frame").contentWindow===win) win.postMessage({pad:1,op:"said",i:d.i,v:v},"*");
   });
+}
+
+/* ---------- the dictionary: PAD.dict (runtime/wordlist.js, SPEC.md 6.7, decisions.md section 35). No permission: the data is
+   the built-in ECDICT, public and the same on every phone. Only the word list is read for words(); lookup() shares the copy the
+   dictionary program already loads. At most 10 calls a second per app, words and lookup together; past that, null. A bad query
+   comes back as {error} and the app's promise rejects; a file that cannot be read answers null ---------- */
+function dictRequest(app,win,d){
+  var reply=function(v,error){
+    /* the app may have closed meanwhile: answer only the frame that asked */
+    if(S.running!==app || $("run-frame").contentWindow!==win) return;
+    win.postMessage(error ? {pad:1,op:"dicted",i:d.i,error:error} : {pad:1,op:"dicted",i:d.i,v:v},"*");
+  };
+  var api=LP.dict && LP.dict.apps, kind=d.kind;
+  if(!api || (kind!=="words" && kind!=="lookup")){ reply(null); return; }
+  if(!dictLimit){ if(!window.LopdaWordList){ reply(null); return; } dictLimit=window.LopdaWordList.limiter(); }
+  if(!dictLimit(Date.now())){ reply(null); return; }
+  var p=kind==="words" ? api.words(d.q) : api.lookup(d.word);
+  p.then(function(v){
+    if(v && v.error) reply(null,String(v.error));
+    else reply(v==null ? null : v);
+  },function(){ reply(null); });
 }
 
 /* the AudioContext was made again: the microphone goes into the new one */

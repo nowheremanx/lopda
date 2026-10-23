@@ -185,7 +185,7 @@ export function checkApp(dir) {
   for (const mm of code.matchAll(/PAD\.sfx\(\s*["']([^"']*)["']/g)) if (!SOUNDS.includes(mm[1])) errors.push(`PAD.sfx("${mm[1]}") is not a known sound: ${SOUNDS.join(", ")}`);
   for (const mm of code.matchAll(/(PAD|game)\.ambience\(\s*["']([^"']*)["']/g)) if (!AMBIENCES.includes(mm[2])) errors.push(`${mm[1]}.ambience("${mm[2]}") is not a known ambience: ${AMBIENCES.join(", ")}`);
   const usesButtons = /PAD\.(on|isDown)\s*\(/.test(code);
-  if (m.spec === "lopda/0" && /PAD\.(on|off|isDown|sfx)\s*\(|PAD\.(music|ambience|say)\b/.test(code)) errors.push('PAD.on/isDown/sfx/music/ambience/say need spec "lopda/1"');
+  if (m.spec === "lopda/0" && /PAD\.(on|off|isDown|sfx)\s*\(|PAD\.(music|ambience|say|dict)\b/.test(code)) errors.push('PAD.on/isDown/sfx/music/ambience/say/dict need spec "lopda/1"');
   const usesFiles = /PAD\.(exportFile|importFile)\b/.test(code);
   if (usesFiles && !(Array.isArray(m.permissions) && m.permissions.includes("files"))) errors.push('PAD.exportFile/importFile need "permissions": ["files"] in manifest.json');
   if (!usesFiles && Array.isArray(m.permissions) && m.permissions.includes("files")) warnings.push('"files" is declared but PAD.exportFile/importFile are never used: drop it');

@@ -9,6 +9,8 @@
  * Other programs look words up with LP.dict.lookup(word) -> Promise<[{book, name, word, head, how, text}]>
  * (and use the word book through LP.dict.inBook(word), LP.dict.toggleWord(word)),
  * how = "exact" | "lemma" | "prefix" (a .syn entry reports its headword in head).
+ * Community apps ask through PAD.dict (SPEC.md 6.7): runtime/wordlist.js over the built-in ECDICT only, with the word list
+ * as one small file and the book shared with this program, both lent out as LP.dict.apps (runtime/apps/store.js relays).
  */
 (function(){
 "use strict";
@@ -730,8 +732,20 @@ function openDict(){
   if(!D.loading) D.loading=loaded();
 }
 
+/* ---------- PAD.dict: the built-in book for community apps (runtime/wordlist.js, SPEC.md 6.7) ----------
+   One source for every app: words() reads only the 88 KB word list, and the book is the copy this program loads, so an app's
+   lookup never unpacks ECDICT twice. book(BUILTIN) ignores the disabled switch on purpose: that switch is for this program and
+   the reader (docs/decisions.md section 35) */
+var APPS=window.LopdaWordList.source({
+  words:function(){
+    return fetch(VENDOR+".words.gz").then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.arrayBuffer(); })
+      .then(SD.gunzip).then(function(b){ return new TextDecoder().decode(b); });
+  },
+  book:function(){ return book(BUILTIN).then(function(b){ return {book:b, lemma:D.lemma}; }); }
+});
+
 /* the reader shares the word book: START on an entry there adds or removes it, as here */
-LP.dict={lookup:lookup, suggest:suggest, inBook:inBook, toggleWord:toggleWord};
+LP.dict={lookup:lookup, suggest:suggest, inBook:inBook, toggleWord:toggleWord, apps:APPS};
 LP.builtin({id:"dict", label:"app.dict", icon:function(){ return ICON; }, view:"dict", keepPad:true,
   open:function(){ openDict(); },
   leave:function(){ hush(); D.sheet=""; D.entry=null; D.review=null; D.stack=[]; D.armed=null; D.q=""; var i=$("dict-q"); if(i){ i.value=""; i.blur(); } renderSheet(); },

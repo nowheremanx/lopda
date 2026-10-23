@@ -102,6 +102,9 @@
 <script src="pad-shim.js"></script>
 <!-- the runtime's sound chip, so music, custom sounds and ambience sound here as they do on the handheld -->
 <script src="../runtime/chip.js"></script>
+<!-- the runtime's StarDict reader and word list, so PAD.dict here answers from the same ECDICT as the handheld -->
+<script src="../runtime/stardict.js"></script>
+<script src="../runtime/wordlist.js"></script>
 <!-- the runtime's sensor maths (quantizing, rate limits, level and pitch), so readings here look like the handheld's -->
 <script src="../runtime/sensors.js"></script>
 <!-- the runtime's rules for notes from apps (limits, the dialog's preview) and its speech (voices, limits) -->
@@ -116,6 +119,30 @@
   var readStore = function () { try { return JSON.parse(localStorage.getItem(key()) || "{}"); } catch (e) { return {}; } };
   var writeStore = function (s) { localStorage.setItem(key(), JSON.stringify(s)); showStore(); };
   var showStore = function () { document.getElementById("store").textContent = JSON.stringify(readStore(), null, 2); };
+  /* PAD.dict (SPEC.md 6.7): the same wordlist.js source the handheld builds in runtime/apps/dict.js, over the same ECDICT
+     files. words() reads only the 88 KB word list; the book loads on the first lookup and only once. No permission. */
+  var SD = window.LopdaStarDict, WL = window.LopdaWordList;
+  var fetchBytes = function (url) {
+    return fetch(url).then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.arrayBuffer(); })
+      .then(function (b) { return new Uint8Array(b); });
+  };
+  var dict = WL.source({
+    words: function () {
+      return fetchBytes("../runtime/vendor/ecdict/ecdict.words.gz").then(SD.gunzip)
+        .then(function (b) { return new TextDecoder().decode(b); });
+    },
+    book: function () {
+      var P = "../runtime/vendor/ecdict/ecdict";
+      return Promise.all([
+        fetch(P + ".ifo").then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.text(); }),
+        fetchBytes(P + ".idx"), fetchBytes(P + ".dict.dz"), fetchBytes(P + ".lemma.gz").then(SD.gunzip)
+      ]).then(function (a) {
+        var lemma = SD.parseLemma(new TextDecoder().decode(a[3]));
+        return SD.open({ ifo: a[0], idx: a[1], dict: a[2] }).then(function (b) { return { book: b, lemma: lemma }; });
+      });
+    }
+  });
+  var dictLimit = null;   /* PAD.dict's 10 calls a second, like the handheld: a new one for every app start */
 
   function load() {
     var base = document.getElementById("path").value.replace(/\/+$/, "");
@@ -178,7 +205,8 @@
     if (chip) chip.stop();
     if (chip) document.getElementById("amb").value = "";
     senseStop("motion"); senseStop("mic"); speech.stop(); snapEnd(null);
-    var l = document.getElementById("lang").value, o = { music: !!chip, ambience: !!chip, sensors: true, notes: true, say: true, camera: true };
+    dictLimit = WL.limiter();
+    var l = document.getElementById("lang").value, o = { music: !!chip, ambience: !!chip, sensors: true, notes: true, say: true, camera: true, dict: true };
     if (l) o.lang = l;
     frame.srcdoc = lopdaWrapApp(html, o);
   }
@@ -197,6 +225,7 @@
     else if (d.op === "say") sayOp(d);
     else if (d.op === "sense") sense(d);
     else if (d.op === "snap") snapOp(d);
+    else if (d.op === "dict") dictOp(d);
     else if (d.op === "sfx" && typeof d.name === "string") {
       log("sfx " + d.name);
       /* the ten named sounds, from the same chip.js table the handheld plays */
@@ -257,6 +286,26 @@
       if (v === "unavailable") log("say -> unavailable" + (!speech.synth() ? "" : !speech.voice(d.lang) ? " (no " + d.lang + " voice on this computer)" : " (once a second at most)"));
       else log("say -> " + v);
       frame.contentWindow.postMessage({ pad: 1, op: "said", i: d.i, v: v }, "*");
+    });
+  }
+  /* PAD.dict: the handheld answers from the built-in ECDICT; here the same files under ../runtime/vendor/ecdict/ stand in and
+     the answer goes to the log instead of the screen. No permission. A bad query answers {error} (the app's promise rejects);
+     a file that cannot be read and the 10-calls-a-second limit answer null, as on the handheld. */
+  function dictOp(d) {
+    var reply = function (v, error) {
+      frame.contentWindow.postMessage(error ? { pad: 1, op: "dicted", i: d.i, error: error } : { pad: 1, op: "dicted", i: d.i, v: v }, "*");
+    };
+    if (d.kind !== "words" && d.kind !== "lookup") { reply(null); return; }
+    if (!dictLimit || !dictLimit(Date.now())) { log("dict." + d.kind + " -> null (over 10 a second)"); reply(null); return; }
+    var p = d.kind === "words" ? dict.words(d.q) : dict.lookup(d.word);
+    p.then(function (v) {
+      if (v && v.error) { log("ERROR PAD.dict." + d.kind + ": " + v.error); reply(null, v.error); return; }
+      if (d.kind === "words") log("dict.words " + JSON.stringify(d.q) + " -> " + (v ? v.words.length + " words" + (v.more ? " (more)" : "") : "null"));
+      else log("dict.lookup " + d.word + " -> " + (v ? v.word : "null"));
+      reply(v == null ? null : v);
+    }, function (e) {
+      log("dict." + d.kind + " -> null (" + String((e && e.message) || e) + ")");
+      reply(null);
     });
   }
   /* PAD.exportFile / importFile. The handheld asks the player on its own dialog first; here an export
