@@ -434,8 +434,13 @@ function pasteEditor(){
 
 /* ---------- generate: the idea sent down the AI line, the code streamed into a new script (decisions.md section 34) ----------
    One at a time. The answer goes into the editor as it arrives, read-only, with 粘贴 turned into 停止; the script is saved
-   once the whole answer is in, even if the user has left the editor meanwhile. A stop or a failure keeps what came in. */
-var G={job:null, s:null};
+   once the whole answer is in, even if the user has left the editor meanwhile. A stop or a failure keeps what came in.
+   A program often takes minutes, most of it the model thinking, so the hint line never sits still: a clock that counts
+   every second, what the line is doing (dialling, connected, thinking, writing), a mark that flips on every signal
+   that really arrives, and how long it has been quiet. The clock shows the screen is alive; the mark and the quiet
+   count show whether the line is (ai.js hangs up after a minute of nothing). Leaving the page drops the line on iPhone,
+   so the hint asks the user to stay, and a failure after leaving says so. */
+var G={job:null, s:null, t0:0, last:0, sig:null, mark:false, tick:0, left:false};
 function aiOn(){ return !!(LP.ai && LP.ai.on()); }
 function generating(){ return !!G.job && !!M.current && M.current===G.s; }
 function renderGen(){
@@ -443,22 +448,36 @@ function renderGen(){
   $("script-code").readOnly=on;
   $("script-run").disabled=on;
   $("script-paste").textContent=tr(on ? "scripts.gen.stop" : "scripts.paste");
+  $("script-code").placeholder=tr(on ? "scripts.gen.ph" : "scripts.code");
 }
-function genHint(){ setHint(G.s && G.s.body ? tr("scripts.gen.busy",{n:G.s.body.length}) : tr("scripts.gen.dial")); }
+function clock(ms){ var t=Math.floor(Math.max(0,ms)/1000); return Math.floor(t/60)+":"+LP.pad2(t%60); }
+function genHint(){
+  if(!generating() || $("v-script-edit").hidden) return;
+  var now=Date.now(), q=G.sig, t=clock(now-G.t0), quiet=Math.floor((now-G.last)/1000);
+  var line=!q ? tr("scripts.gen.dial",{t:t})
+    : q.phase==="write" ? tr("scripts.gen.busy",{n:q.text, t:t})
+    : q.phase==="think" ? tr("scripts.gen.think",{n:q.think, t:t})
+    : tr("scripts.gen.wait",{t:t});
+  if(q && quiet>=10) line+=" · "+tr("scripts.gen.quiet",{s:quiet});
+  setHint((G.mark ? "▮ " : "▯ ")+line+"\n"+tr("scripts.gen.stay"));
+}
 function generate(){
   if(G.job){ toast(tr("scripts.gen.one")); M.current=G.s; show("script-edit"); return; }
   if(M.ideaTouched || M.idea) saveIdeaNow();
   var s=newScript(false);
-  G.s=s;
-  G.job=LP.ai.ask({messages:[{role:"user", content:tr("scripts.prompt",{idea:promptIdea()})}], onText:function(piece,all){
-    s.body=all;
-    if(M.current!==s || $("v-script-edit").hidden) return;
-    var c=$("script-code"); c.value=all; c.scrollTop=c.scrollHeight;
-    genHint();
-  }});
+  G.s=s; G.t0=G.last=Date.now(); G.sig=null; G.left=false;
+  G.job=LP.ai.ask({messages:[{role:"user", content:tr("scripts.prompt",{idea:promptIdea()})}],
+    onSignal:function(q){ G.sig=q; G.last=Date.now(); G.mark=!G.mark; genHint(); },
+    onText:function(piece,all){
+      s.body=all;
+      if(M.current!==s || $("v-script-edit").hidden) return;
+      var c=$("script-code"); c.value=all; c.scrollTop=c.scrollHeight;
+    }});
   renderGen(); genHint(); sfx("tap");
+  G.tick=setInterval(genHint,1000);
   LP.keepAwake(true);   /* a phone that sleeps drops the line */
   function end(){
+    clearInterval(G.tick);
     G.job=null; G.s=null;
     if(!$("v-script-edit").hidden){ renderGen(); LP.keepAwake(false); }
   }
@@ -469,17 +488,20 @@ function generate(){
     return saveScript(s).then(function(){
       var here=M.current===s && !$("v-script-edit").hidden;
       end();
-      if(here){ $("script-code").value=code; $("script-name").value=s.name; M.dirty=false; setHint(tr("scripts.gen.done")); }
-      else toast(tr("scripts.gen.done"));
+      if(here){ $("script-code").value=code; $("script-name").value=s.name; M.dirty=false; setHint(tr("scripts.gen.done",{t:clock(Date.now()-G.t0)})); }
+      else toast(tr("scripts.gen.done",{t:clock(Date.now()-G.t0)}));
       sfx("ok");
     });
   }).catch(function(e){
-    var why=tr("scripts.gen.fail",{why:LP.ai.err(e)}), here=M.current===s && !$("v-script-edit").hidden;
+    var code=e && e.code, why=tr("scripts.gen.fail",{why:G.left && code!=="stopped" ? tr("scripts.gen.left") : LP.ai.err(e)}),
+      here=M.current===s && !$("v-script-edit").hidden;
     end();
     if(here) setHint(why); else toast(why);
     sfx("err");
   });
 }
+/* iOS suspends a hidden page, and the request with it */
+document.addEventListener("visibilitychange",function(){ if(document.hidden && G.job) G.left=true; });
 
 /* ---------- run ---------- */
 function runCurrent(){

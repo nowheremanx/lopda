@@ -6477,16 +6477,26 @@ test("AI line: a key in Settings turns 复制 into 生成, the code streams into
   /* Settings: paste a key, test the line; only the last four characters are shown */
   await p.evaluate(() => LP.builtins.filter((b) => b.id === "settings")[0].open());
   await p.waitForFunction(() => !document.getElementById("v-settings").hidden);
-  assert.match(await p.locator("#set-ai-state").innerText(), /没有接上/);
+  assert.equal(await p.locator("#set-ai-open").innerText(), "未接上 ›");
+  await p.click("#set-ai-open");
+  await p.waitForFunction(() => !document.getElementById("v-set-ai").hidden);
+  assert.match(await p.locator("#set-ai-state").innerText(), /还没接上/);
+  /* each field has its label */
+  assert.deepEqual(await p.locator(".set-ai-field > span").allInnerTexts(), ["OpenRouter 的 key", "模型"]);
   await p.fill("#set-ai-key", "sk-or-secret-1234");
   await p.click("#set-ai-save");
   assert.match(await p.locator("#set-ai-state").innerText(), /key …1234 · 模型 openrouter\/auto/);
-  assert.ok(!(await p.locator("#v-settings").innerText()).includes("secret"));
-  assert.ok(await p.locator("#set-ai-key").isHidden());
+  assert.ok(!(await p.locator("#v-set-ai").innerText()).includes("secret"));
+  assert.equal(await p.inputValue("#set-ai-key"), "");
+  assert.equal(await p.getAttribute("#set-ai-key", "placeholder"), "已保存 …1234；粘贴新的就替换");
   await p.click("#set-ai-test");
   await p.waitForFunction(() => /线路正常/.test(document.getElementById("set-ai-state").textContent));
   assert.match(await p.locator("#set-ai-state").innerText(), /「OK」（test\/model）/);
   assert.equal(asked[0].auth, "Bearer sk-or-secret-1234");
+
+  await p.click("#set-ai-back");
+  await p.waitForFunction(() => !document.getElementById("v-settings").hidden);
+  assert.equal(await p.locator("#set-ai-open").innerText(), "已接上 ›");
 
   /* the backup leaves the key out */
   const docs = await p.evaluate(async () => {
@@ -6509,7 +6519,7 @@ test("AI line: a key in Settings turns 复制 into 生成, the code streams into
   await p.fill("#scripts-idea", "一个番茄钟");
   await p.click("#idea-copy");
   await p.waitForFunction(() => !document.getElementById("v-script-edit").hidden);
-  await p.waitForFunction(() => /写好了/.test(document.getElementById("script-hint").textContent));
+  await p.waitForFunction(() => /写好了（用时 0:0\d）/.test(document.getElementById("script-hint").textContent));
   assert.equal(await p.inputValue("#script-code"), "<!doctype html><title>番茄钟</title><body>tick</body></html>");
   assert.equal(await p.inputValue("#script-name"), "番茄钟");
   assert.equal(await p.locator("#script-paste").innerText(), "粘贴代码");
@@ -6520,5 +6530,69 @@ test("AI line: a key in Settings turns 复制 into 生成, the code streams into
   assert.match(sent.messages[0].content, /我想做的是：一个番茄钟/);
   await p.click("#script-back");
   await p.waitForFunction(() => [...document.querySelectorAll("#scripts-list .t")].some((e) => e.textContent === "番茄钟"));
+  assert.deepEqual(errors, []);
+});
+
+test("AI line: while the AI is slow the hint counts time, says what the line is doing and flips on every signal; leaving the screen is named", { skip, timeout: 45000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN" });
+  /* a hand-driven OpenRouter: the test opens the line and pushes each piece */
+  await p.addInitScript(() => {
+    const real = window.fetch;
+    window.fetch = (u, o) => {
+      if (!String(u).startsWith("https://openrouter.ai/")) return real(u, o);
+      return new Promise((resolve, reject) => {
+        let ctl;
+        const body = new ReadableStream({ start(c) { ctl = c; } });
+        o.signal.addEventListener("abort", () => { reject(new DOMException("aborted", "AbortError")); try { ctl.error(new DOMException("aborted", "AbortError")); } catch {} });
+        window.__line = {
+          open: () => resolve(new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } })),
+          push: (s) => ctl.enqueue(new TextEncoder().encode(s)),
+          drop: () => { reject(new TypeError("Load failed")); try { ctl.error(new TypeError("Load failed")); } catch {} },
+        };
+      });
+    };
+  });
+  await p.goto(base + "/runtime/", { waitUntil: "load" });
+  await p.waitForFunction(() => window.LP && LP.ai);
+  await p.evaluate(() => LopdaPlatform.db.doc("data/users/local/ai").set({ v: 1, key: "sk-or-x", model: "" }));
+  await p.reload({ waitUntil: "load" });
+  await p.waitForFunction(() => window.LP && LP.ai && LP.ai.on());
+  await p.evaluate(() => LP.show("scripts"));
+  await p.click("#scripts-write");
+  await p.fill("#scripts-idea", "一个番茄钟");
+  await p.click("#idea-copy");
+  const hint = () => p.locator("#script-hint").innerText();
+  await p.waitForFunction(() => /正在连线… 0:0\d/.test(document.getElementById("script-hint").textContent));
+  assert.match(await hint(), /^▯ 正在连线… 0:0\d\n写一个程序常要几分钟。请留在这个画面，别锁屏、别切走。$/);
+  /* the clock moves on its own */
+  await p.waitForFunction(() => /0:0[1-9]/.test(document.getElementById("script-hint").textContent));
+
+  await p.evaluate(() => { __line.open(); });
+  await p.waitForFunction(() => /^▮ 已接通，AI 在想…/.test(document.getElementById("script-hint").textContent));
+  await p.evaluate(() => __line.push(": OPENROUTER PROCESSING\n\n"));
+  await p.waitForFunction(() => /^▯ 已接通/.test(document.getElementById("script-hint").textContent));
+  await p.evaluate(() => __line.push('data: {"choices":[{"delta":{"reasoning":"hmm, "}}]}\n\n'));
+  await p.waitForFunction(() => /^▮ AI 在想… 已想 5 字 · 0:\d\d/.test(document.getElementById("script-hint").textContent));
+  await p.evaluate(() => __line.push('data: {"choices":[{"delta":{"content":"<html>"}}]}\n\n'));
+  await p.waitForFunction(() => /^▯ AI 在写… 6 字 · 0:\d\d/.test(document.getElementById("script-hint").textContent));
+  assert.equal(await p.inputValue("#script-code"), "<html>");
+  assert.equal(await p.locator("#script-paste").innerText(), "停止");
+  await p.click("#script-paste");
+  await p.waitForFunction(() => /没写完：已停止。/.test(document.getElementById("script-hint").textContent));
+  assert.equal(await p.inputValue("#script-code"), "<html>", "what came in stays");
+
+  /* the page hidden during a generation (iOS drops the request): the failure says why */
+  await p.click("#script-back");
+  await p.click("#scripts-write");
+  await p.click("#idea-copy");
+  await p.waitForFunction(() => window.__line && /正在连线/.test(document.getElementById("script-hint").textContent));
+  await p.evaluate(() => {
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
+    document.dispatchEvent(new Event("visibilitychange"));
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => false });
+    document.dispatchEvent(new Event("visibilitychange"));
+    __line.drop();
+  });
+  await p.waitForFunction(() => /没写完：离开了画面，线路断了，请重新生成。/.test(document.getElementById("script-hint").textContent));
   assert.deepEqual(errors, []);
 });

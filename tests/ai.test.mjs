@@ -112,3 +112,19 @@ test("a minute with nothing new hangs up as timeout", async () => {
   live[0].f();
   await assert.rejects(p, { code: "timeout" });
 });
+
+test("every piece is a signal: the line opening, keep-alive comments, thinking, then writing", async () => {
+  const think = (t) => event({ choices: [{ delta: { reasoning: t } }] });
+  const { h } = host((u, o) => stream([": OPENROUTER PROCESSING\n\n", think("hmm, "), think("ok"), ": OPENROUTER PROCESSING\n\n", piece("<html>"), "data: [DONE]\n\n"], o.signal));
+  const seen = [];
+  assert.equal(await h.ask({ key: "k", messages: [], onSignal: (s) => seen.push(s.phase + " " + s.think + " " + s.text) }), "<html>");
+  assert.deepEqual(seen, ["open 0 0", "open 0 0", "think 5 0", "think 7 0", "think 7 0", "write 7 6", "write 7 6"]);
+});
+
+test("an abort the browser reports as a DOMException (code 20) is still stopped", async () => {
+  const { h } = host((u, o) => new Promise((_, no) => o.signal.addEventListener("abort", () => no(Object.assign(new Error("aborted"), { name: "AbortError", code: 20 })))));
+  const p = h.ask({ key: "k", messages: [] });
+  await new Promise((r) => setTimeout(r, 10));
+  p.stop();
+  await assert.rejects(p, { code: "stopped" });
+});
