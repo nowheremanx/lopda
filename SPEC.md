@@ -520,7 +520,8 @@ reviewed list of slurs, swearing and sexual words: an app can show anything `wor
 filtered: a word left out of that list can still be looked up.
 
 The list, its order and `level` are the same on every phone, and frozen within `lopda/1`; `PAD.dict.version` is
-`"ecdict-1"`. Do not shape an app around one version: ask for what it needs. `words` reads only a small word list
+`"ecdict-1"`. An app may rely on this: a seeded puzzle made from words() is the same on every phone.
+A different version string would mean a different list. `words` reads only a small word list
 (88 KB) on its first call; `lookup` unpacks the whole book the first time (it is the copy the dictionary program
 already loads, so never twice), which takes a moment.
 
