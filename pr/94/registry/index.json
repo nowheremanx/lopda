@@ -111,7 +111,7 @@
         "................",
         "................"
       ],
-      "version": "1.0.1",
+      "version": "1.1.0",
       "description": "在字母盘上拼出单词，填满小小字谜格。拼对后中文显示在格下，再读出英文。",
       "i18n": {
         "zh": {
@@ -126,8 +126,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/crossing/index.html",
-      "sha256": "63e5f0be6a45181113eb8860123f4d9e6350bcbda4a0c60c43c3bb73f294ad7f",
-      "bytes": 30198
+      "sha256": "e0465f66e66c7493e66877626bc7e623b9cff525a2aac608a2186d6f1022d5e6",
+      "bytes": 35882
     },
     {
       "spec": "lopda/1",
