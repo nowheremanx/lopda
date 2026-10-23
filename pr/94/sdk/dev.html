@@ -120,7 +120,7 @@
   var writeStore = function (s) { localStorage.setItem(key(), JSON.stringify(s)); showStore(); };
   var showStore = function () { document.getElementById("store").textContent = JSON.stringify(readStore(), null, 2); };
   /* PAD.dict (SPEC.md 6.7): the same wordlist.js source the handheld builds in runtime/apps/dict.js, over the same ECDICT
-     files. words() reads only the 88 KB word list; the book loads on the first lookup and only once. No permission. */
+     files. words() reads only the 87 KB word list; the book loads on the first lookup and only once. No permission. */
   var SD = window.LopdaStarDict, WL = window.LopdaWordList;
   var fetchBytes = function (url) {
     return fetch(url).then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.arrayBuffer(); })

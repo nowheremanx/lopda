@@ -733,7 +733,7 @@ function openDict(){
 }
 
 /* ---------- PAD.dict: the built-in book for community apps (runtime/wordlist.js, SPEC.md 6.7) ----------
-   One source for every app: words() reads only the 88 KB word list, and the book is the copy this program loads, so an app's
+   One source for every app: words() reads only the 87 KB word list, and the book is the copy this program loads, so an app's
    lookup never unpacks ECDICT twice. book(BUILTIN) ignores the disabled switch on purpose: that switch is for this program and
    the reader (docs/decisions.md section 35) */
 var APPS=window.LopdaWordList.source({

@@ -515,14 +515,14 @@ calls. Every field is optional:
 The words come in commonness order, the most common first. `more` is `true` when more words matched than were returned,
 so a later page has some.
 
-The list is 22,869 English words written with `a-z`, lower case. It leaves out names, abbreviations and numerals, and a
+The list is 22,656 English words written with `a-z`, lower case. It leaves out names, abbreviations and numerals, and a
 reviewed list of slurs, swearing and sexual words: an app can show anything `words()` returns. `lookup()` is not
 filtered: a word left out of that list can still be looked up.
 
 The list, its order and `level` are the same on every phone, and frozen within `lopda/1`; `PAD.dict.version` is
 `"ecdict-1"`. An app may rely on this: a seeded puzzle made from words() is the same on every phone.
 A different version string would mean a different list. `words` reads only a small word list
-(88 KB) on its first call; `lookup` unpacks the whole book the first time (it is the copy the dictionary program
+(87 KB) on its first call; `lookup` unpacks the whole book the first time (it is the copy the dictionary program
 already loads, so never twice), which takes a moment.
 
 **`lookup(word)`** resolves one entry, or `null` when the word is not in the dictionary. `word` is 1-32 letters, upper or
