@@ -65,6 +65,18 @@
           <ul class="set-sense-list" id="set-sense-list"></ul>
           <p class="hint" id="set-sense-note" data-i18n="set.sense.note">撤销以后，这个程序下次要用时会再问一次。</p>
         </div>
+        <div class="set-ai" id="set-ai">
+          <span data-i18n="ai.label">AI 线路</span>
+          <p class="hint" id="set-ai-state" aria-live="polite"></p>
+          <input id="set-ai-key" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="200" data-i18n-ph="ai.key.ph" placeholder="OpenRouter 的 key（sk-or-…）">
+          <input id="set-ai-model" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="100" data-i18n-ph="ai.model.ph" placeholder="模型（空着就自动选）">
+          <div class="row">
+            <button class="btn" id="set-ai-save" type="button" data-i18n="ai.save">保存</button>
+            <button class="btn ghost" id="set-ai-test" type="button" data-i18n="ai.test" hidden>试一下</button>
+            <button class="btn ghost" id="set-ai-del" type="button" data-i18n="ai.del" hidden>删除 key</button>
+          </div>
+          <p class="hint" data-i18n="ai.note">接上以后，脚本里的「生成」直接请 AI 写程序。key 只存在这台手机上，不进备份；请用设了额度上限的 key。</p>
+        </div>
         <div class="set-backup" id="set-backup">
           <div class="set-row">
             <span data-i18n="bk.label">全部数据</span>
@@ -298,7 +310,7 @@
       <div class="scripts-main">
         <div class="scripts-card">
           <b data-i18n="scripts.start">让 AI 写一个</b>
-          <p class="hint" data-i18n="scripts.startnote">写下想要什么，复制提示词交给 AI，再把代码粘贴回来。</p>
+          <p class="hint" id="scripts-startnote" data-i18n="scripts.startnote">写下想要什么，复制提示词交给 AI，再把代码粘贴回来。</p>
           <button class="btn" id="scripts-write" type="button" data-i18n="scripts.write">写需求</button>
           <button class="btn ghost" id="scripts-paste" type="button" data-i18n="scripts.paste">粘贴代码</button>
           <p class="hint" id="scripts-status" aria-live="polite"></p>
@@ -457,6 +469,7 @@
 <script src="notetext.js"></script>
 <script src="zip.js"></script>
 <script src="backup.js"></script>
+<script src="ai.js"></script>
 <script src="core.js"></script>
 <script src="apps/notes.js"></script>
 <script src="apps/calendar.js"></script>

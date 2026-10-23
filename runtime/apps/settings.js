@@ -1,5 +1,5 @@
 /*
- * Lo-PDA built-in: settings. Volume, language, the apps allowed tilt or the microphone, the whole-device backup and restore,
+ * Lo-PDA built-in: settings. Volume, language, the apps allowed tilt or the microphone, the AI line, the whole-device backup and restore,
  * updates, about.
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  */
@@ -32,6 +32,53 @@ function renderSense(){
     li.appendChild(t); li.appendChild(b); ul.appendChild(li);
   });
 }
+/* ---------- the AI line (runtime/ai.js, decisions.md section 34) ----------
+   The user's OpenRouter key and model in one document of their own. The key never leaves this phone except in the
+   request itself: it is kept out of the backup, and a restore leaves the one already here. Settings shows its last
+   four characters only. LP.ai is what other programs use (apps/scripts.js): on(), ask(o), watch(fn). */
+var AIP="data/users/local/ai", AI={key:"", model:"", seen:[]};
+var AIH=window.LopdaAI.host({fetch:function(u,o){ return fetch(u,o); }});
+function aiChanged(){ renderAi(); AI.seen.forEach(function(f){ try{ f(); }catch(e){} }); }
+function aiErr(e){ return tr("ai.err."+(e && e.code || "http")); }
+function renderAi(msg){
+  var on=!!AI.key;
+  $("set-ai-state").textContent=msg || (on ? tr("ai.on",{key:AI.key.slice(-4), model:AI.model || window.LopdaAI.MODEL}) : tr("ai.off"));
+  $("set-ai-key").hidden=on; $("set-ai-test").hidden=!on; $("set-ai-del").hidden=!on;
+  if(document.activeElement!==$("set-ai-model")) $("set-ai-model").value=AI.model;
+}
+function saveAi(){
+  var key=$("set-ai-key").value.trim(), model=$("set-ai-model").value.trim();
+  if(!AI.key && !key){ renderAi(tr("ai.nokey")); sfx("err"); return; }
+  if(key) AI.key=key;
+  AI.model=model;
+  $("set-ai-key").value="";
+  if(S.db) put(S.db.doc(AIP),{v:1, key:AI.key, model:AI.model});
+  aiChanged(); sfx("ok");
+}
+$("set-ai-save").onclick=saveAi;
+$("set-ai-del").onclick=function(){
+  AI.key=""; AI.model=""; $("set-ai-model").value="";
+  if(S.db) S.db.doc(AIP).delete().catch(function(){});
+  aiChanged(); sfx("ok");
+};
+$("set-ai-test").onclick=function(){
+  var b=this; if(b.disabled) return;
+  b.disabled=true; renderAi(tr("ai.testing")); sfx("tap");
+  var used="";
+  LP.ai.ask({messages:[{role:"user", content:"Reply with the single word OK."}], max:16, onModel:function(m){ used=m; }}).then(function(t){
+    renderAi(tr("ai.tested",{text:t.trim().slice(0,40), model:used || AI.model || window.LopdaAI.MODEL})); sfx("ok");
+  },function(e){ renderAi(aiErr(e)); sfx("err"); }).then(function(){ b.disabled=false; });
+};
+LP.ai={
+  PATH:AIP,
+  on:function(){ return !!AI.key; },
+  /* o: {messages, max, onText, onModel}; the key and the model are added here */
+  ask:function(o){ var q={}; for(var k in o) q[k]=o[k]; q.key=AI.key; q.model=AI.model; return AIH.ask(q); },
+  err:aiErr,
+  watch:function(f){ AI.seen.push(f); },
+  saved:function(){ return AI.key ? {v:1, key:AI.key, model:AI.model} : null; }
+};
+
 /* `sound` is still written for runtimes before 0.12.0, which had a separate switch */
 function saveSettings(){
   renderSettings();
@@ -85,7 +132,7 @@ function startBackup(after,dump){
   BS.busy=true; box(tr("bk.reading"));
   (dump ? Promise.resolve(dump) : P.dumpAll()).then(function(d){
     /* the backup carries its own time, so a restored handheld says when its data was saved */
-    var docs=d.docs.filter(function(x){ return x.path!==BMETA; }).concat([{path:BMETA, data:{last:now}}]);
+    var docs=d.docs.filter(function(x){ return x.path!==BMETA && x.path!==AIP; }).concat([{path:BMETA, data:{last:now}}]);
     return BK.pack({docs:docs, files:d.files},{runtime:RUNTIME_VERSION, now:now});
   }).then(function(pk){
     box(tr("bk.ready",{size:sizeText(pk.size)}),[
@@ -141,8 +188,11 @@ function detach(dump){
 }
 function doRestore(bk){
   box(tr("rs.working"));
+  /* the AI key is never in a backup: the one on this phone stays, whatever the file holds */
+  var mine=LP.ai.saved(), docs=bk.docs.filter(function(x){ return x.path!==AIP; });
+  if(mine) docs.push({path:AIP, data:mine});
   P.dumpAll().then(detach).then(function(old){
-    return P.replaceAll(bk).then(function(){
+    return P.replaceAll({docs:docs, files:bk.files}).then(function(){
       box(tr("rs.done")); sfx("ok");
       setTimeout(function(){ location.reload(); },800);
     },function(e){
@@ -163,7 +213,7 @@ function renderLostRetry(old){
 LP.backup={last:function(){ return BS.last; }};
 
 function openSettings(){
-  show("settings"); renderSettings(); renderSense(); renderUpdate(); renderLast();
+  show("settings"); renderSettings(); renderSense(); renderAi(); renderUpdate(); renderLast();
   if(!BS.busy) $("set-backup-box").hidden=true;
   var el=$("set-storage"); el.textContent=tr("set.counting");
   /* the darkroom's film box, in rolls and the space they take (apps/darkroom.js) */
@@ -180,6 +230,10 @@ LP.builtin({id:"settings", label:"app.settings", icon:"settings", view:"settings
   open:function(){ openSettings(); },
   lang:function(){ renderSettings(); renderLast(); if(!$("v-settings").hidden) openSettings(); },
   ready:function(){
+    S.db.doc(AIP).get().then(function(sn){
+      var d=sn.exists ? LP.own(sn.data()) : null;
+      if(d && typeof d.key==="string" && d.key){ AI.key=d.key; AI.model=typeof d.model==="string" ? d.model : ""; aiChanged(); }
+    }).catch(function(){});
     S.db.doc(BMETA).get().then(function(sn){ var d=sn.exists ? LP.own(sn.data()) : null; BS.last=d && +d.last || 0; renderLast(); }).catch(function(){});
   }});
 })();

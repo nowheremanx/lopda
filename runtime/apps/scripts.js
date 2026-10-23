@@ -65,7 +65,9 @@ function saveIdeaSoon(){
 }
 function updateIdeaButtons(){
   var b=$("idea-clear"); if(b) b.disabled=!M.idea.trim();
-  var c=$("idea-copy"); if(c) c.disabled=false;
+  /* with the AI line connected the main button writes the code here; the prompt can still be copied from the editor's 选项 */
+  var c=$("idea-copy"); if(c){ c.disabled=false; c.textContent=tr(aiOn() ? "scripts.gen" : "scripts.copy"); }
+  var n=$("scripts-startnote"); if(n) n.textContent=tr(aiOn() ? "scripts.startnote.ai" : "scripts.startnote");
 }
 function renderIdea(){
   closeIdeaAsk();
@@ -259,9 +261,11 @@ function renderEditor(){
   $("script-code").value=M.current.body||"";
   $("script-menu-panel").hidden=true;
   $("script-ask").hidden=true;
+  renderGen();
+  if(generating()){ genHint(); return; }
   var id=M.current.id;
   loadData(id).then(function(){
-    if(M.current && M.current.id===id) setHint(dataLabel(M.sizes[id]||0));
+    if(M.current && M.current.id===id && !generating()) setHint(dataLabel(M.sizes[id]||0));
   },function(){ setHint(tr("scripts.newer")); });
 }
 
@@ -428,6 +432,55 @@ function pasteEditor(){
   });
 }
 
+/* ---------- generate: the idea sent down the AI line, the code streamed into a new script (decisions.md section 34) ----------
+   One at a time. The answer goes into the editor as it arrives, read-only, with 粘贴 turned into 停止; the script is saved
+   once the whole answer is in, even if the user has left the editor meanwhile. A stop or a failure keeps what came in. */
+var G={job:null, s:null};
+function aiOn(){ return !!(LP.ai && LP.ai.on()); }
+function generating(){ return !!G.job && !!M.current && M.current===G.s; }
+function renderGen(){
+  var on=generating();
+  $("script-code").readOnly=on;
+  $("script-run").disabled=on;
+  $("script-paste").textContent=tr(on ? "scripts.gen.stop" : "scripts.paste");
+}
+function genHint(){ setHint(G.s && G.s.body ? tr("scripts.gen.busy",{n:G.s.body.length}) : tr("scripts.gen.dial")); }
+function generate(){
+  if(G.job){ toast(tr("scripts.gen.one")); M.current=G.s; show("script-edit"); return; }
+  if(M.ideaTouched || M.idea) saveIdeaNow();
+  var s=newScript(false);
+  G.s=s;
+  G.job=LP.ai.ask({messages:[{role:"user", content:tr("scripts.prompt",{idea:promptIdea()})}], onText:function(piece,all){
+    s.body=all;
+    if(M.current!==s || $("v-script-edit").hidden) return;
+    var c=$("script-code"); c.value=all; c.scrollTop=c.scrollHeight;
+    genHint();
+  }});
+  renderGen(); genHint(); sfx("tap");
+  LP.keepAwake(true);   /* a phone that sleeps drops the line */
+  function end(){
+    G.job=null; G.s=null;
+    if(!$("v-script-edit").hidden){ renderGen(); LP.keepAwake(false); }
+  }
+  G.job.then(function(all){
+    var code=cleanCode(all);
+    if(!code) throw {code:"empty"};
+    s.body=code; s.name=deriveName(code,s.name);
+    return saveScript(s).then(function(){
+      var here=M.current===s && !$("v-script-edit").hidden;
+      end();
+      if(here){ $("script-code").value=code; $("script-name").value=s.name; M.dirty=false; setHint(tr("scripts.gen.done")); }
+      else toast(tr("scripts.gen.done"));
+      sfx("ok");
+    });
+  }).catch(function(e){
+    var why=tr("scripts.gen.fail",{why:LP.ai.err(e)}), here=M.current===s && !$("v-script-edit").hidden;
+    end();
+    if(here) setHint(why); else toast(why);
+    sfx("err");
+  });
+}
+
 /* ---------- run ---------- */
 function runCurrent(){
   if(!M.current) return;
@@ -556,7 +609,7 @@ function init(){
   $("scripts-write").onclick=function(){ show("script-idea"); };
   $("scripts-paste").onclick=function(){ pasteNew(); };
   $("idea-back").onclick=function(){ saveIdeaNow(); show("scripts"); };
-  $("idea-copy").onclick=copyPrompt;
+  $("idea-copy").onclick=function(){ if(aiOn()) generate(); else copyPrompt(); };
   $("idea-paste").onclick=function(){ pasteNew(); };
   $("idea-clear").onclick=openIdeaAsk;
   $("idea-ask-yes").onclick=function(){ closeIdeaAsk(); clearIdea(); };
@@ -592,7 +645,7 @@ function init(){
   };
   $("script-copy").onclick=copyPrompt;
   $("script-export").onclick=exportCurrent;
-  $("script-paste").onclick=pasteEditor;
+  $("script-paste").onclick=function(){ if(generating()) G.job.stop(); else pasteEditor(); };
   $("script-run").onclick=runCurrent;
   $("script-clear").onclick=function(){
     if(!M.current) return;
@@ -626,10 +679,10 @@ function init(){
 /* ---------- built-in registration ---------- */
 LP.builtin({id:"scripts", label:"app.scripts", icon:function(){ return ICON; }, view:"scripts",
   open:function(){ show("scripts"); },
-  ready:function(){ refs(); loadIdea(); ensureSeed().then(function(){ if(!$("v-scripts").hidden) renderLibrary(); }); },
-  enter:function(){ refs(); loadIdea(); ensureSeed().then(function(){ if(!$("v-scripts").hidden) renderLibrary(); }); renderLibrary(); },
+  ready:function(){ if(LP.ai) LP.ai.watch(updateIdeaButtons); refs(); loadIdea(); ensureSeed().then(function(){ if(!$("v-scripts").hidden) renderLibrary(); }); },
+  enter:function(){ refs(); loadIdea(); ensureSeed().then(function(){ if(!$("v-scripts").hidden) renderLibrary(); }); renderLibrary(); updateIdeaButtons(); },
   leave:function(){ setStatus(""); },
-  lang:function(){ if(!$("v-scripts").hidden) renderLibrary(); }
+  lang:function(){ updateIdeaButtons(); if(!$("v-scripts").hidden) renderLibrary(); }
 });
 LP.builtin({id:"script-idea", view:"script-idea", keepPad:false,
   enter:function(){ renderIdea(); },
@@ -638,8 +691,8 @@ LP.builtin({id:"script-idea", view:"script-idea", keepPad:false,
 });
 LP.builtin({id:"script-edit", view:"script-edit", keepPad:false,
   enter:function(){ renderEditor(); },
-  leave:function(){ flushSource(); },
-  lang:function(){ if(!$("v-script-edit").hidden && M.current) setHint(dataLabel(M.sizes[M.current.id]||0)); }
+  leave:function(){ flushSource(); if(G.job) LP.keepAwake(false); },
+  lang:function(){ if($("v-script-edit").hidden || !M.current) return; renderGen(); if(generating()) genHint(); else setHint(dataLabel(M.sizes[M.current.id]||0)); }
 });
 LP.builtin({id:"script-data", view:"script-data", keepPad:false,
   enter:function(){ closeDataAsk(); renderData(); },

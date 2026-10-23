@@ -6452,3 +6452,73 @@ test("scripts: a script that reads the buttons gets the chin pad", { skip, timeo
   assert.equal(await p.evaluate(() => document.getElementById("gamepad").hidden), false, "the chin pad is shown");
   assert.deepEqual(errors, []);
 });
+
+test("AI line: a key in Settings turns 复制 into 生成, the code streams into a new script, and the key stays out of the backup", { skip, timeout: 45000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN" });
+  const asked = [];
+  const CORS = { "access-control-allow-origin": "*", "access-control-allow-headers": "authorization, content-type", "access-control-allow-methods": "POST" };
+  await p.route("https://openrouter.ai/**", async (r) => {
+    if (r.request().method() === "OPTIONS") return r.fulfill({ status: 204, headers: CORS });
+    const body = JSON.parse(r.request().postData());
+    asked.push({ auth: r.request().headers().authorization, body });
+    const ev = (o) => "data: " + JSON.stringify(o) + "\n\n";
+    const text = body.max_tokens ? ["OK"] : ["Sure:\n```html\n<!doctype html><title>番茄", "钟</title><body>tick</body></html>\n```"];
+    await r.fulfill({ status: 200, headers: { ...CORS, "content-type": "text/event-stream" },
+      body: ": OPENROUTER PROCESSING\n\n" + text.map((c) => ev({ model: "test/model", choices: [{ delta: { content: c } }] })).join("") + "data: [DONE]\n\n" });
+  });
+  await p.goto(base + "/runtime/", { waitUntil: "load" });
+  await p.waitForFunction(() => window.LP && LP.show && LP.ai);
+
+  /* no key: the idea page still copies the prompt */
+  await p.evaluate(() => LP.show("scripts"));
+  await p.click("#scripts-write");
+  assert.equal(await p.locator("#idea-copy").innerText(), "复制 AI 提示词");
+
+  /* Settings: paste a key, test the line; only the last four characters are shown */
+  await p.evaluate(() => LP.builtins.filter((b) => b.id === "settings")[0].open());
+  await p.waitForFunction(() => !document.getElementById("v-settings").hidden);
+  assert.match(await p.locator("#set-ai-state").innerText(), /没有接上/);
+  await p.fill("#set-ai-key", "sk-or-secret-1234");
+  await p.click("#set-ai-save");
+  assert.match(await p.locator("#set-ai-state").innerText(), /key …1234 · 模型 openrouter\/auto/);
+  assert.ok(!(await p.locator("#v-settings").innerText()).includes("secret"));
+  assert.ok(await p.locator("#set-ai-key").isHidden());
+  await p.click("#set-ai-test");
+  await p.waitForFunction(() => /线路正常/.test(document.getElementById("set-ai-state").textContent));
+  assert.match(await p.locator("#set-ai-state").innerText(), /「OK」（test\/model）/);
+  assert.equal(asked[0].auth, "Bearer sk-or-secret-1234");
+
+  /* the backup leaves the key out */
+  const docs = await p.evaluate(async () => {
+    const pack = LopdaBackup.pack; let seen = null;
+    LopdaBackup.pack = (d, o) => { seen = d.docs.map((x) => x.path); return pack(d, o); };
+    document.getElementById("set-backup-go").click();
+    while (!seen) await new Promise((r) => setTimeout(r, 50));
+    LopdaBackup.pack = pack;
+    return seen;
+  });
+  assert.ok(docs.length > 0);
+  assert.ok(!docs.includes("data/users/local/ai"), docs.join(" "));
+  assert.ok(await p.evaluate(() => LopdaPlatform.dumpAll().then((d) => d.docs.some((x) => x.path === "data/users/local/ai" && x.data.key === "sk-or-secret-1234"))));
+
+  /* Scripts: 生成 sends the prompt with the idea and fills a new script with the cleaned code */
+  await p.evaluate(() => LP.show("scripts"));
+  assert.match(await p.locator("#scripts-startnote").innerText(), /按「生成」/);
+  await p.click("#scripts-write");
+  assert.equal(await p.locator("#idea-copy").innerText(), "生成");
+  await p.fill("#scripts-idea", "一个番茄钟");
+  await p.click("#idea-copy");
+  await p.waitForFunction(() => !document.getElementById("v-script-edit").hidden);
+  await p.waitForFunction(() => /写好了/.test(document.getElementById("script-hint").textContent));
+  assert.equal(await p.inputValue("#script-code"), "<!doctype html><title>番茄钟</title><body>tick</body></html>");
+  assert.equal(await p.inputValue("#script-name"), "番茄钟");
+  assert.equal(await p.locator("#script-paste").innerText(), "粘贴代码");
+  assert.ok(await p.locator("#script-run").isEnabled());
+  const sent = asked[1].body;
+  assert.equal(sent.stream, true);
+  assert.equal(sent.model, "openrouter/auto");
+  assert.match(sent.messages[0].content, /我想做的是：一个番茄钟/);
+  await p.click("#script-back");
+  await p.waitForFunction(() => [...document.querySelectorAll("#scripts-list .t")].some((e) => e.textContent === "番茄钟"));
+  assert.deepEqual(errors, []);
+});
