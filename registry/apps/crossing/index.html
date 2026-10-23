@@ -55,11 +55,22 @@
   #cover button { font: inherit; font-size: 17px; font-weight: bold; min-height: 44px; padding: 8px 22px; background: #1f2a14;
     color: #a3ad7e; border: 0; box-shadow: 3px 3px 0 #4a5a32; touch-action: manipulation; }
   #cover button[hidden] { display: none; }
-  #cover-list { list-style: none; margin: 0; padding: 0; width: 100%; max-width: 300px; text-align: left; font-size: 14px; }
+  #cover-list { list-style: none; margin: 0; padding: 0; width: 100%; max-width: 280px; text-align: left; font-size: 15px; }
   #cover-list[hidden] { display: none; }
-  #cover-list li { height: 24px; line-height: 24px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-bottom: 1px solid #7d8a58; }
-  #cover-list b { display: inline-block; min-width: 76px; letter-spacing: 1px; }
-  #cover-list li.sum { border: 0; color: #4a5a32; }
+  #cover-list li { box-sizing: border-box; height: 24px; line-height: 24px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    border-bottom: 1px solid #7d8a58; letter-spacing: 2px; text-transform: uppercase; touch-action: manipulation; }
+  /* The results card is its own calm column: the list, the chosen word's whole line below it, then NEXT ROUND.
+     The detail box keeps its three lines whichever item is chosen, so nothing jumps as the cursor moves. */
+  #cover.done { gap: 8px; padding: 8px 12px; }
+  #cover.done #cover-text { font-size: 16px; line-height: 1.3; }
+  #cover.done #cover-list li { padding: 0 6px; }
+  #cover.done #cover-list li.sel { background: #1f2a14; color: #a3ad7e; border-bottom-color: #1f2a14; }
+  #cover-detail { display: none; width: 100%; max-width: 280px; box-sizing: border-box; height: 66px; padding: 6px;
+    overflow: hidden; text-align: left; font-size: 14px; line-height: 18px; overflow-wrap: anywhere; text-overflow: ellipsis;
+    color: #1f2a14; box-shadow: inset 0 1px 0 #4a5a32; }
+  #cover-detail.dark { color: #4a5a32; }
+  #cover.done #cover-detail { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+  #cover.done #cover-btn.outline { background: #a3ad7e; color: #1f2a14; border: 2px solid #1f2a14; box-shadow: none; padding: 8px 20px; }
   @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-3px); } 75% { transform: translateX(3px); } }
   .shake { animation: shake 0.22s linear; }
   /* A letter landing in its cell: it grows past its size and settles, in ink for a moment. The colours change in
@@ -91,6 +102,7 @@
 <div id="cover">
   <p id="cover-text"></p>
   <ul id="cover-list" hidden></ul>
+  <div id="cover-detail"></div>
   <button id="cover-btn" type="button"></button>
 </div>
 <script>
@@ -152,7 +164,7 @@
   var noteTextEl = document.getElementById("note-text"), goalEl = document.getElementById("goal");
   var linesEl = document.getElementById("lines"), fingerEl = document.getElementById("finger");
   var coverEl = document.getElementById("cover"), coverText = document.getElementById("cover-text"), coverBtn = document.getElementById("cover-btn");
-  var entryEl = document.getElementById("entry"), coverList = document.getElementById("cover-list");
+  var entryEl = document.getElementById("entry"), coverList = document.getElementById("cover-list"), detailEl = document.getElementById("cover-detail");
 
   var phase = "load";           /* load | demo | demoEnd | play | clear (the blink and the tune) | help | done | error */
   var state = {
@@ -170,10 +182,11 @@
   var rnd = mulberry32(1), gen = 0, taught = false, dragging = null, noteSeq = 0, hintBusy = false;
   var noteKind = "", noteWord = "";   /* what the newest note action was: "tap" remembers its word */
   var tapCell = "", tapTurn = 0, tapDown = null, tapPending = {};   /* a filled word tapped: the cell, which word, a guard for one lookup */
+  var rowDown = null;           /* a pointerdown on a results row: only a tap on it selects the word */
   var keyMode = false;          /* the cursor square shows only once the player uses the keys: on touch it looked like a pick */
   var pos = [];                 /* the centre of each wheel letter, in the wheel's own pixels, for the line */
   var demoTimers = [], demoWord = null, helpBack = null;
-  var fxTimers = [], results = null;   /* the letters landing and the clear; the results card, kept for the ? page */
+  var fxTimers = [], results = null, resultSum = "", pick = 0;   /* the results card, the summary line, and the ring's cursor (0 = NEXT) */
   var savedRound = null, savedHints = 0, savedDone = [];
   var pending = { round: 1, hints: 0, done: [] };   /* what to ask for again after a dictionary error */
 
@@ -392,25 +405,66 @@
     showCover(TXT.error, TXT.retry);
   }
 
-  /* rows: the results card's lines ([{word, mean}] and a last {sum}), or nothing for a plain card */
-  function showCover(text, button, rows) {
+  /* The plain card: the loading line, the tutorial's last page, the rules, an error. The results card has its
+     own shape and is drawn by showResults. */
+  function showCover(text, button) {
+    coverEl.classList.remove("done");
     coverText.textContent = text;
     coverList.innerHTML = "";
-    coverList.hidden = !rows;
-    (rows || []).forEach(function (row) {
-      var li = document.createElement("li"), b;
-      if (row.sum) { li.className = "sum"; li.textContent = row.sum; }
-      else {
-        b = document.createElement("b"); b.textContent = row.word.toUpperCase();
-        li.appendChild(b); li.appendChild(document.createTextNode(row.mean || ""));
-      }
-      coverList.appendChild(li);
-    });
+    coverList.hidden = true;
     coverBtn.textContent = button || "";
     coverBtn.hidden = !button;
+    coverBtn.classList.remove("outline");
     coverEl.hidden = false;
   }
   function hideCover() { coverEl.hidden = true; }
+
+  /* The results card. One row a grid word, no meaning in the row; the word under the cursor shows its whole
+     line in the detail box, and NEXT ROUND shows the bonus/hint summary there instead. reset puts the cursor
+     back on NEXT when the card first opens; the ? page comes back to the item the player had chosen. */
+  function showResults(reset) {
+    if (reset) pick = 0;
+    coverEl.classList.add("done");
+    coverText.textContent = tx("done", state.round);
+    coverList.innerHTML = "";
+    results.forEach(function (row, i) {
+      var li = document.createElement("li");
+      li.setAttribute("data-pick", String(i + 1));
+      li.textContent = row.word.toUpperCase();
+      coverList.appendChild(li);
+    });
+    coverList.hidden = false;
+    coverBtn.textContent = TXT.doneBtn;
+    coverBtn.hidden = false;
+    coverEl.hidden = false;
+    renderPick();
+  }
+  /* the four states of the card that change with the cursor: the inverted row, the detail line, and whether
+     the button is the chosen thing (ink) or merely drawn (outlined) */
+  function renderPick() {
+    var rows = coverList.querySelectorAll("li"), i, row = pick > 0 ? results[pick - 1] : null;
+    for (i = 0; i < rows.length; i++) rows[i].classList.toggle("sel", i + 1 === pick);
+    if (row) {
+      detailEl.textContent = row.mean || row.word.toUpperCase();
+      detailEl.classList.toggle("dark", !row.mean);
+    } else {
+      detailEl.textContent = resultSum;
+      detailEl.classList.add("dark");
+    }
+    coverBtn.classList.toggle("outline", pick > 0);
+  }
+  function movePick(by) {
+    var n = results.length + 1;
+    pick = (pick + by + n) % n;
+    renderPick();
+    PAD.sfx("tick");
+  }
+  function pickWord(i) {
+    var row = results[i - 1];
+    if (!row) return;
+    if (pick !== i) { pick = i; renderPick(); PAD.sfx("tick"); }
+    sayWord(row.word);
+  }
 
   function startRound(round, hints, done) {
     pending = { round: round, hints: hints, done: done.slice() };
@@ -714,11 +768,11 @@
         if (token !== gen || phase !== "clear") return;
         boardEl.classList.remove("flash");
         var bonus = state.done.filter(function (w) { return !state.placed.some(function (p) { return p.word === w; }); }).length;
+        resultSum = TXT.sum.replace("{b}", bonus).replace("{n}", state.hints);
         results = state.placed.map(function (p) { return { word: p.word, mean: state.mean[p.word] || "" }; });
-        results.push({ sum: TXT.sum.replace("{b}", bonus).replace("{n}", state.hints) });
         phase = "done";
         setNote("");
-        showCover(tx("done", state.round), TXT.doneBtn, results);
+        showResults(true);
       }, Math.max(0, wait - (Date.now() - t0))));
     });
   }
@@ -827,7 +881,7 @@
   function closeHelp() {
     coverEl.classList.remove("help");
     phase = helpBack || "play"; helpBack = null;
-    if (phase === "done") showCover(tx("done", state.round), TXT.doneBtn, results); else hideCover();
+    if (phase === "done") showResults(false); else hideCover();
     renderKeys();
   }
 
@@ -843,6 +897,21 @@
       startRound(pending.round, pending.hints, pending.done);
     } else if (phase === "done") nextRound();
   });
+  /* The word rows are 24 px tall, below the 44 px touch rule, so the whole row width is the target. Like the
+     grid, the tap counts only on pointerup and only when it did not travel: a scroll must not pick a word. */
+  coverList.addEventListener("pointerdown", function (e) {
+    var li = phase === "done" && e.target && e.target.closest ? e.target.closest("li") : null;
+    rowDown = li && coverList.contains(li) ? { li: li, x: e.clientX, y: e.clientY, id: e.pointerId } : null;
+  });
+  coverList.addEventListener("pointerup", function (e) {
+    var down = rowDown;
+    rowDown = null;
+    if (!down || phase !== "done" || e.pointerId !== down.id) return;
+    var li = e.target && e.target.closest ? e.target.closest("li") : null;
+    if (li !== down.li || Math.abs(e.clientX - down.x) + Math.abs(e.clientY - down.y) > 12) return;
+    pickWord(+li.getAttribute("data-pick"));
+  });
+  coverList.addEventListener("pointercancel", function () { rowDown = null; });
   hintEl.addEventListener("click", hint);
   helpEl.addEventListener("click", openHelp);
 
@@ -927,7 +996,17 @@
     if (phase === "demoEnd") { if (b === "a" || b === "start") startPlay(); return; }
     if (phase === "help") { if (b === "a" || b === "b" || b === "start") closeHelp(); return; }
     if (phase === "error") { if (b === "a" || b === "start") coverBtn.click(); return; }
-    if (phase === "done") { if (b === "a" || b === "start") nextRound(); return; }
+    if (phase === "done") {
+      /* the ring is [NEXT, word1 .. wordN]; it starts on NEXT and Up/Down cycle. START always starts the next round. */
+      if (b === "down" || b === "up") { movePick(b === "down" ? 1 : -1); return; }
+      if (b === "a") {
+        if (pick === 0) nextRound();
+        else sayWord(results[pick - 1].word);
+        return;
+      }
+      if (b === "start") nextRound();
+      return;
+    }
     if (phase !== "play") return;
     var n = state.wheel.length, shown = keyMode;
     keyMode = true;                        /* from now on the cursor square shows, until the next touch on the wheel */

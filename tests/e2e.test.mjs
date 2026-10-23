@@ -6741,10 +6741,62 @@ test("crossing: round 1 shows a grid, a demo spells one word, words typed with t
     await p.waitForTimeout(1100);   /* the PAD.dict limit is 10 calls a second; a player is slower than this anyway */
   }
   await until(p, () => f.evaluate(() => game.phase === "done"), "the results card");
-  const card = await f.evaluate(() => [...document.querySelectorAll("#cover-list li:not(.sum)")].map((li) => li.textContent));
-  assert.equal(card.length, round.placed.length, "one row a word: " + card.join(" | "));
-  round.placed.forEach((w, i) => assert.ok(card[i].startsWith(w.toUpperCase()), card[i]));
-  assert.ok(card.filter((t) => /[\u4e00-\u9fff]/.test(t)).length >= round.placed.length - 1, "the rows carry their Chinese");
+  /* the results card: words only in the rows, NEXT selected first, the summary in the detail box; the whole
+     card fits the smallest screen, and the card's own cursor cycles over [NEXT, word1 .. wordN] */
+  const cardState = () => f.evaluate(() => {
+    const rows = [...document.querySelectorAll("#cover-list li")];
+    const sel = rows.map((li) => li.classList.contains("sel"));
+    const detail = document.getElementById("cover-detail");
+    const root = document.documentElement;
+    return {
+      words: rows.map((li) => li.textContent),
+      sel,
+      picked: sel.indexOf(true),
+      detail: detail.textContent,
+      dark: detail.classList.contains("dark"),
+      outline: document.getElementById("cover-btn").classList.contains("outline"),
+      title: document.getElementById("cover-text").textContent,
+      size: [root.clientWidth, root.clientHeight],
+      fit: [document.getElementById("cover-text"), ...rows, detail, document.getElementById("cover-btn")].every((el) => {
+        const r = el.getBoundingClientRect();
+        return r.top >= 0 && r.left >= 0 && r.bottom <= root.clientHeight && r.right <= root.clientWidth;
+      }),
+      scroll: document.getElementById("cover").scrollHeight,
+      client: document.getElementById("cover").clientHeight,
+    };
+  });
+  const first = await cardState();
+  assert.equal(first.title, "第 1 关完成");
+  assert.equal(first.words.length, round.placed.length, "one row a word: " + first.words.join(" | "));
+  round.placed.forEach((w, i) => assert.equal(first.words[i], w.toUpperCase(), "the rows are the round's words in order"));
+  assert.ok(first.words.every((w) => !/[\u4e00-\u9fff]/.test(w)), "the rows carry words only, no meanings");
+  assert.equal(first.picked, -1, "the card opens with NEXT selected");
+  assert.equal(first.outline, false, "NEXT looks chosen as it does today");
+  assert.match(first.detail, /奖励词/, "the detail box shows the bonus/hint summary");
+  assert.equal(first.dark, true, "the summary is in the dark tone");
+  assert.deepEqual(first.size, [331, 359]);
+  assert.equal(first.fit, true, "every part of the card stays inside 331x359");
+  assert.ok(first.scroll <= first.client, "the card needs no scrolling: " + first.scroll + " <= " + first.client);
+  const summary = first.detail;
+  await press("down");
+  const word1 = await cardState();
+  assert.equal(word1.picked, 0, "Down from NEXT goes to the first word");
+  assert.equal(word1.outline, true, "NEXT is outlined while a word is selected");
+  assert.ok(word1.detail.length > 0, "the first word shows its line");
+  assert.notEqual(word1.detail, summary, "the detail box is not the summary on a word");
+  await press("up");
+  const backToNext = await cardState();
+  assert.equal(backToNext.picked, -1, "Up from the first word goes back to NEXT");
+  assert.equal(backToNext.detail, summary, "NEXT shows the summary again");
+  await press("up");
+  const lastWord = await cardState();
+  assert.equal(lastWord.picked, round.placed.length - 1, "Up from NEXT goes to the last word");
+  assert.ok(lastWord.detail.length > 0, "the last word has a line of its own");
+  assert.notEqual(lastWord.detail, summary, "the last word's line is not the summary either");
+  await press("down");
+  const ring = await cardState();
+  assert.equal(ring.picked, -1, "Down from the last word wraps to NEXT");
+  assert.equal(ring.outline, false);
   assert.match(await p.textContent("#log"), /music play once/, "the clear plays its tune");
   await press("a");
   await until(p, () => f.evaluate(() => game.phase === "play" && game.round === 2), "round 2");
