@@ -154,13 +154,14 @@ test("the holiday-cn year files the calendar ships are valid, pre-cached, and th
 
 /* The handheld asks no other site for anything, with one exception: the calendar's holiday file (decisions.md section 14).
    Comments are stripped, strings kept. */
-test("the only other site a runtime script names is the calendar's holiday address", () => {
+/* each address is written down in decisions.md: the holidays (section 14) and the AI line (section 34) */
+test("the only other sites a runtime script names are the calendar's holiday address and the AI line", () => {
   const found = [];
   for (const f of RUNTIME_JS) {
     const code = read(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
     for (const m of code.matchAll(/"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/g)) if (/https?:\/\//.test(m[0])) found.push(f + " " + m[0]);
   }
-  assert.deepEqual(found, ['runtime/apps/calendar.js "https://cdn.jsdelivr.net/gh/NateScarlet/holiday-cn@master/"']);
+  assert.deepEqual(found.sort(), ['runtime/ai.js "https://openrouter.ai/api/v1/chat/completions"', 'runtime/apps/calendar.js "https://cdn.jsdelivr.net/gh/NateScarlet/holiday-cn@master/"']);
 });
 
 test("build-index refuses an app that fails the checker", (t) => {

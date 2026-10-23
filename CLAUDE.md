@@ -13,6 +13,7 @@ runtime/        the PWA: index.html, core.js (shared LP object: utils, views, so
                 dumpAll / replaceAll of both databases for the backup), backup.js (the whole-device backup zip: pack, check and unpack; pure functions),
                 chip.js (sound chip: MML music, custom sound effects, ambience presets; shared with sdk/dev.html),
                 speech.js (the phone's voices for the dictionary's 发音 and PAD.say; shared with sdk/dev.html),
+                ai.js (the AI line: OpenRouter chat completions streamed with the user's own key, for the scripts' 生成; decisions.md section 34),
                 sensors.js (tilt, shake, heading and the microphone's level and pitch for apps, the audio session; shared with sdk/dev.html),
                 lenses.js (which physical camera lenses a phone has, pure functions), finder.js (the viewfinder's look: luma, the Bayer dither,
                 exposure and contrast; shared by the camera, the snap viewfinder, the reader and sdk/dev.html), textsel.js (the text selection shared by the reader and the dictionary entry page), negative.js (the negative PNG and its lpDa chunk, pure functions),
