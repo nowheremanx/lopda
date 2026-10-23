@@ -6610,7 +6610,7 @@ test("AI line: while the AI is slow the hint counts time, says what the line is 
 });
 
 /* ---------- 拼字格 / Crossing (registry/apps/crossing): PAD.dict builds the round, a demo fills one word, the chin keys fill another ---------- */
-test("crossing: round 1 shows a grid, a demo spells one word, and a word typed with the keys fills in", { skip, timeout: 60000 }, async (t) => {
+test("crossing: round 1 shows a grid, a demo spells one word, words typed with the arrows fill in, the results card leads on", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await page(t);
   await p.goto(`${base}/sdk/dev.html?app=registry/apps/crossing`, { waitUntil: "load" });
   await p.waitForFunction(() => /loaded |load failed/.test(document.getElementById("log").textContent), null, { timeout: 5000 });
@@ -6663,26 +6663,48 @@ test("crossing: round 1 shows a grid, a demo spells one word, and a word typed w
   await p.locator('#pad [data-b="a"]').click();
   await f.waitForFunction(() => game.phase === "play");
 
-  /* spell the seed word with the wheel keys: Left/Right pick a letter, A adds it, START sends it */
+  /* spell a word with the chin keys: the arrows move the cursor the way they point on the wheel, A adds the letter,
+     START sends it. The first arrow only shows the cursor. The shortest run of arrows to each letter comes from the
+     app's own rule (game.aim), and every letter is reached in a few presses. */
+  const press = async (b) => { await p.locator(`#pad [data-b="${b}"]`).click(); await p.waitForTimeout(20); };
+  await press("right");
+  const typeWord = async (word) => {
+    for (const ch of word) {
+      for (let k = 0; ; k++) {
+        const go = await f.evaluate((ch) => {
+          const want = game.wheel.findIndex((c, i) => c === ch && game.entry.indexOf(i) < 0);
+          if (want === game.cursor) return null;
+          const seen = { [game.cursor]: true }, queue = [[game.cursor, null]];
+          while (queue.length) {
+            const [at, first] = queue.shift();
+            for (const b of ["up", "down", "left", "right"]) {
+              const to = game.aim(at, b);
+              if (seen[to]) continue;
+              if (to === want) return first || b;
+              seen[to] = true; queue.push([to, first || b]);
+            }
+          }
+          return "none";
+        }, ch);
+        assert.notEqual(go, "none", "every letter can be reached with the arrows");
+        if (!go) break;
+        assert.ok(k < 4, "the arrows reach " + ch + " within a few presses");
+        await press(go);
+      }
+      await press("a");
+    }
+  };
   const target = round.seed;
-  for (const ch of target) {
-    const steps = await f.evaluate((ch) => {
-      const n = game.wheel.length; let i = game.cursor, k = 0;
-      while (k < n && (game.entry.indexOf(i) >= 0 || game.wheel[i] !== ch)) { i = (i + 1) % n; k++; }
-      return k;
-    }, ch);
-    for (let j = 0; j < steps; j++) { await p.locator('#pad [data-b="right"]').click(); await p.waitForTimeout(20); }
-    await p.locator('#pad [data-b="a"]').click();
-    await p.waitForTimeout(20);
-  }
+  await typeWord(target);
   assert.equal(await f.textContent("#entry"), target.toUpperCase(), "the typed word shows in the middle of the wheel");
-  await p.locator('#pad [data-b="start"]').click();
+  await press("start");
   await until(p, () => f.evaluate((w) => game.done.indexOf(w) >= 0, target), "the word to fill in");
-  const filled = await f.evaluate((w) => {
+  const cellsOf = (w) => f.evaluate((w) => {
     const v = game.view, cols = v.maxC - v.minC + 1, p = game.placed.find((x) => x.word === w), cells = document.querySelectorAll("#board > div");
     return w.split("").map((_, i) => cells[(p.r + (p.dir === "v" ? i : 0) - v.minR) * cols + (p.c + (p.dir === "h" ? i : 0) - v.minC)].textContent).join("");
-  }, target);
-  assert.equal(filled, target.toUpperCase(), "the grid shows the letters");
+  }, w);
+  /* the letters land one by one, 80 ms apart */
+  await until(p, async () => (await cellsOf(target)) === target.toUpperCase(), "the grid to show the letters");
   /* the rules are one tap away, and B goes back to the round */
   await f.click("#help");
   assert.equal(await f.evaluate(() => game.phase), "help");
@@ -6696,5 +6718,23 @@ test("crossing: round 1 shows a grid, a demo spells one word, and a word typed w
   assert.equal(saved && saved.round, 1);
   assert.ok(saved && saved.done.includes(target), "PAD.save kept the found word");
   assert.equal(saved && saved.taught, true, "the demo is not shown again");
+
+  /* the rest of the grid with the keys; the last word blinks the grid, plays the tune, then the results card lists
+     every word of the round with its Chinese, and A starts round 2 */
+  const rest = round.placed.filter((w) => w !== target && w !== demo[0]);
+  for (const w of rest) {
+    await typeWord(w);
+    await press("start");
+    await until(p, () => f.evaluate((w) => game.done.indexOf(w) >= 0, w), "the word " + w + " to fill in");
+    await p.waitForTimeout(1100);   /* the PAD.dict limit is 10 calls a second; a player is slower than this anyway */
+  }
+  await until(p, () => f.evaluate(() => game.phase === "done"), "the results card");
+  const card = await f.evaluate(() => [...document.querySelectorAll("#cover-list li:not(.sum)")].map((li) => li.textContent));
+  assert.equal(card.length, round.placed.length, "one row a word: " + card.join(" | "));
+  round.placed.forEach((w, i) => assert.ok(card[i].startsWith(w.toUpperCase()), card[i]));
+  assert.ok(card.filter((t) => /[\u4e00-\u9fff]/.test(t)).length >= round.placed.length - 1, "the rows carry their Chinese");
+  assert.match(await p.textContent("#log"), /music play once/, "the clear plays its tune");
+  await press("a");
+  await until(p, () => f.evaluate(() => game.phase === "play" && game.round === 2), "round 2");
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
