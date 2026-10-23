@@ -37,6 +37,9 @@ function renderSense(){
    request itself: it is kept out of the backup, and a restore leaves the one already here. Settings shows its last
    four characters only. LP.ai is what other programs use (apps/scripts.js): on(), ask(o), watch(fn). */
 var AIP="data/users/local/ai", AI={key:"", model:"", seen:[]};
+/* A saved key shows as dots in its field (a password field shows any value as dots): this stand-in, never the key itself.
+   Tapping the field empties it for a new key; leaving it empty puts the dots back. */
+var KEPT="lopda-key-kept!!";
 var AIH=window.LopdaAI.host({fetch:function(u,o){ return fetch(u,o); }});
 function aiChanged(){ renderAi(); AI.seen.forEach(function(f){ try{ f(); }catch(e){} }); }
 function aiErr(e){ return tr("ai.err."+(e && e.code || "http")); }
@@ -46,21 +49,24 @@ function renderAi(msg){
   $("set-ai-open").textContent=tr(on ? "ai.row.on" : "ai.row.off");
   $("set-ai-state").textContent=msg || (on ? tr("ai.on",{key:AI.key.slice(-4), model:AI.model || window.LopdaAI.MODEL}) : tr("ai.off"));
   $("set-ai-key").placeholder=on ? tr("ai.key.saved",{key:AI.key.slice(-4)}) : tr("ai.key.ph");
+  if(document.activeElement!==$("set-ai-key")) $("set-ai-key").value=on ? KEPT : "";
   $("set-ai-test").hidden=!on; $("set-ai-del").hidden=!on;
   if(document.activeElement!==$("set-ai-model")) $("set-ai-model").value=AI.model;
 }
 $("set-ai-open").onclick=function(){ sfx("tap"); show("set-ai"); };
 $("set-ai-back").onclick=function(){ sfx("tap"); openSettings(); };
 function saveAi(){
-  var key=$("set-ai-key").value.trim(), model=$("set-ai-model").value.trim();
+  var v=$("set-ai-key").value.trim(), key=v===KEPT ? "" : v, model=$("set-ai-model").value.trim();
   if(!AI.key && !key){ renderAi(tr("ai.nokey")); sfx("err"); return; }
   if(key) AI.key=key;
   AI.model=model;
-  $("set-ai-key").value="";
   if(S.db) put(S.db.doc(AIP),{v:1, key:AI.key, model:AI.model});
+  $("set-ai-key").blur();
   aiChanged(); sfx("ok");
 }
 $("set-ai-save").onclick=saveAi;
+$("set-ai-key").addEventListener("focus",function(){ if(this.value===KEPT) this.value=""; });
+$("set-ai-key").addEventListener("blur",function(){ if(!this.value && AI.key) this.value=KEPT; });
 $("set-ai-del").onclick=function(){
   AI.key=""; AI.model=""; $("set-ai-model").value="";
   if(S.db) S.db.doc(AIP).delete().catch(function(){});
@@ -232,7 +238,7 @@ function openSettings(){
 }
 
 LP.builtin({id:"set-ai", view:"set-ai",
-  enter:function(){ $("set-ai-key").value=""; renderAi(); },
+  enter:function(){ renderAi(); },
   lang:function(){ renderAi(); }
 });
 LP.builtin({id:"settings", label:"app.settings", icon:"settings", view:"settings",

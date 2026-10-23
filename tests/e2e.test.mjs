@@ -6418,7 +6418,8 @@ test("scripts: copy the AI prompt, paste an HTML file, run it, and keep data per
   assert.equal(await p.locator("#data-list .t").textContent(), "Local Test");
   await p.click("#data-list button");
   await p.click("#data-ask-yes");
-  await p.waitForFunction(() => /0 B|0 /.test(document.getElementById("data-summary").textContent));
+  /* nothing left: one line says so, with no "0 scripts, 0 B" and no 清空 */
+  await p.waitForFunction(() => !document.getElementById("data-empty").hidden && document.getElementById("data-summary").hidden && document.getElementById("data-clear-all").hidden);
   await p.click("#data-back");
   await p.waitForFunction(() => !document.getElementById("v-scripts").hidden);
   await p.click("#scripts-list button");
@@ -6487,8 +6488,19 @@ test("AI line: a key in Settings turns 复制 into 生成, the code streams into
   await p.click("#set-ai-save");
   assert.match(await p.locator("#set-ai-state").innerText(), /key …1234 · 模型 openrouter\/auto/);
   assert.ok(!(await p.locator("#v-set-ai").innerText()).includes("secret"));
-  assert.equal(await p.inputValue("#set-ai-key"), "");
+  /* the saved key shows as dots: a stand-in in the password field, never the key */
+  assert.equal(await p.getAttribute("#set-ai-key", "type"), "password");
+  const shown = await p.inputValue("#set-ai-key");
+  assert.ok(shown.length > 0 && !shown.includes("1234"), shown);
+  await p.focus("#set-ai-key");
+  assert.equal(await p.inputValue("#set-ai-key"), "", "a tap empties it for a new key");
   assert.equal(await p.getAttribute("#set-ai-key", "placeholder"), "已保存 …1234；粘贴新的就替换");
+  await p.focus("#set-ai-model");
+  assert.equal(await p.inputValue("#set-ai-key"), shown, "left empty, the dots come back");
+  /* saving the model alone keeps the key */
+  await p.fill("#set-ai-model", "a/b"); await p.click("#set-ai-save");
+  assert.match(await p.locator("#set-ai-state").innerText(), /key …1234 · 模型 a\/b/);
+  await p.fill("#set-ai-model", ""); await p.click("#set-ai-save");
   await p.click("#set-ai-test");
   await p.waitForFunction(() => /线路正常/.test(document.getElementById("set-ai-state").textContent));
   assert.match(await p.locator("#set-ai-state").innerText(), /「OK」（test\/model）/);

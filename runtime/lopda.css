@@ -561,10 +561,12 @@ textarea::placeholder{color:var(--ink-2)}
 #idea-ask p{margin:0 0 2px;font-size:15px;line-height:1.35}
 .scripts-list{gap:0}
 .scripts-list li{display:block;padding:0}
+.scripts-list li::before{display:none}
 .scripts-list button{width:100%;min-height:52px;text-align:left;background:none;border:0;border-bottom:1px dashed var(--ink-2);padding:6px 10px;cursor:pointer;display:flex;flex-direction:column;justify-content:center;gap:2px;color:inherit;font:inherit}
 .scripts-list .t{font-size:16px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .scripts-list .d{font-size:13px;max-width:100%;color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .scripts-empty{padding:10px 4px;text-align:center;line-height:1.4}
+.scripts-count{margin:6px 10px -4px;font-size:15px;font-weight:normal;color:var(--ink-2)}
 #v-script-edit .editor{position:relative}
 #script-name{flex:1;min-width:0;min-height:44px;font-family:var(--f-lcd);font-size:16px;color:var(--ink);background:var(--lcd);border:3px solid var(--ink);border-radius:0;padding:4px 8px}
 #script-code{flex:1;min-height:0;width:100%;font-family:var(--f-lcd);font-size:14px;line-height:1.45;color:var(--ink);background:transparent;border:0;border-radius:0;padding:10px;resize:none}
