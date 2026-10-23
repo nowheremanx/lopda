@@ -1,6 +1,6 @@
 {
   "spec": "lopda/1",
-  "generated": "2026-10-22",
+  "generated": "2026-10-23",
   "apps": [
     {
       "spec": "lopda/1",
@@ -85,6 +85,49 @@
       "path": "apps/calculator/index.html",
       "sha256": "a62418629dabce24745cf77d0faf0a9d7224cbfbc1053c2c9c158673054b0691",
       "bytes": 14545
+    },
+    {
+      "spec": "lopda/1",
+      "id": "crossing",
+      "name": "拼字格",
+      "glyph": "字",
+      "category": "game",
+      "buttons": true,
+      "icon": [
+        "................",
+        "................",
+        "................",
+        "...0000000000...",
+        "...0111011110...",
+        "...0111011110...",
+        "...0000000000...",
+        "...0111011110...",
+        "...0111011110...",
+        "...0000000000...",
+        "...0111011110...",
+        "...0111011110...",
+        "...0000000000...",
+        "................",
+        "................",
+        "................"
+      ],
+      "version": "1.0.0",
+      "description": "在字母盘上拼出单词，填满小小字谜格。拼对后中文显示在格下，再读出英文。",
+      "i18n": {
+        "zh": {
+          "name": "拼字格",
+          "description": "在字母盘上拼出单词，填满小小字谜格。拼对后中文显示在格下，再读出英文。"
+        },
+        "en": {
+          "name": "Crossing",
+          "description": "Spell words on a wheel to fill a crossword; see the Chinese, hear the word."
+        }
+      },
+      "author": "Haowei Wu",
+      "license": "MIT",
+      "path": "apps/crossing/index.html",
+      "sha256": "e7f1fec830eee7dd82547ef380e5e23993bdc6d9649640f2d479ab7443f5a247",
+      "bytes": 29368
     },
     {
       "spec": "lopda/1",
