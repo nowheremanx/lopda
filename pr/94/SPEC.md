@@ -175,6 +175,11 @@ await PAD.say(text, {lang})           // -> "done" | "stopped" | "unavailable"  
 
 // lopda/1 with "permissions": ["camera"] (section 6.6); undefined on runtimes before 0.28.0
 await PAD.camera.snap({size})         // size "small" (128x112) | "large" (256x224) -> {w, h, px} | null
+
+// lopda/1 (section 6.7); undefined on runtimes before 0.34.0
+await PAD.dict.words(q)               // q: {len, pattern, letters, level, max, offset} -> {words, more} | null
+await PAD.dict.lookup(word)           // -> {word, form?, zh, en} | null
+PAD.dict.version                      // "ecdict-1"
 ```
 
 Sounds, roughly: `tap` key click, `tick` short tick (timers), `move` cursor step,
@@ -471,6 +476,74 @@ if (PAD.camera) {                        // undefined before runtime 0.28.0
   declaring it).
 - Show the player what they took and let them take it again (`sdk/UI.md`). An app must have a use without the camera, or
   say plainly that it needs one.
+
+### 6.7 The dictionary
+
+An app can look words up in the handheld's built-in English-Chinese dictionary (ECDICT): read-only, no permission, nothing
+to declare in `manifest.json` and no dialog, as with `PAD.say` (runtime 0.34.0 and later). Only the built-in book is
+visible: imported dictionaries and the player's word book are not, and switching the built-in ECDICT off in
+词典 → 词典管理 does not affect apps (that switch is for the dictionary program and the reader). Check that `PAD.dict`
+exists first.
+
+```js
+if (PAD.dict) {                                  // undefined before runtime 0.34.0
+  PAD.dict.words({ pattern: "?a???", level: 1, max: 200 }).then(function (r) {
+    if (!r) return;                              // the dictionary could not be read, or too many calls
+    // r.words: ["party", "large", "water", ...], the most common first
+    // r.more: true when more words match than were returned
+  });
+  PAD.dict.words({ letters: "planet", len: [3, 6] });
+  PAD.dict.lookup("ran").then(function (e) {
+    // e: {word: "run", form: "ran", zh: ["n. 跑, 赛跑, ...", ...], en: ["..."]}, or null
+  });
+  PAD.dict.version;                              // "ecdict-1"
+}
+```
+
+**`words(query)`** resolves `{words, more}`, or `null` when the dictionary cannot be read or the app has made too many
+calls. Every field is optional:
+
+| field | meaning |
+|---|---|
+| `len` | the word's length: a whole number 2-15, or `[min, max]` (each 2-15, min not more than max). Default 2-15 |
+| `pattern` | 2-15 characters of `a-z` and `?`: `?` is any letter, the others must match. It sets the length, and must agree with `len` when both are given |
+| `letters` | 1-15 letters `a-z` to build the word from: each may be used at most as often as it appears here, and need not all be used. `{letters: "planet"}` finds "plant", "plane", "ant", "net" … |
+| `level` | 1-5: words from the most common 2000 / 5000 / 10000 / 15000, or from the whole list (5, the default) |
+| `max` | how many words to return, 1-500. Default 100 |
+| `offset` | how many matching words to skip first (0 or more). For the next page: ask again with `offset` grown by `max` |
+
+The words come in commonness order, the most common first. `more` is `true` when more words matched than were returned,
+so a later page has some.
+
+The list is 22,869 English words written with `a-z`, lower case. It leaves out names, abbreviations and numerals, and a
+reviewed list of slurs, swearing and sexual words: an app can show anything `words()` returns. `lookup()` is not
+filtered: a word left out of that list can still be looked up.
+
+The list, its order and `level` are the same on every phone, and frozen within `lopda/1`; `PAD.dict.version` is
+`"ecdict-1"`. Do not shape an app around one version: ask for what it needs. `words` reads only a small word list
+(88 KB) on its first call; `lookup` unpacks the whole book the first time (it is the copy the dictionary program
+already loads, so never twice), which takes a moment.
+
+**`lookup(word)`** resolves one entry, or `null` when the word is not in the dictionary. `word` is 1-32 letters, upper or
+lower case.
+
+- The exact spelling is tried first, then the dictionary's base forms: `lookup("ran")` gives the entry `run` with
+  `form: "ran"`. `form` is the word as asked, present only when it was found this way. There is no "nearest word"
+  guessing: a word that is neither in the book nor a form of one resolves `null`.
+- `word` is the entry's headword (it can differ from what was asked). `zh` is a list of Chinese lines, each with its part
+  of speech (`n. 河, 江`, `vt. 跑`), at most 8; lines marked `abbr.` are dropped, and a word with no such line gets its
+  first two lines without the `[计]`-style labels. `en` is a list of English senses, mostly WordNet. Either list can be empty.
+- The data is ECDICT (MIT) with WordNet senses, see `LICENSING.md`. An app may show the senses it gets: they are short
+  glosses, not a dictionary to copy out.
+
+**`null` and the limit.** `null` when the dictionary cannot be read (a missing offline cache file, for example), when
+more than 10 calls were made in a second (words and lookup together, per app), and when `lookup` finds no entry.
+`null` is normal: the app must still work. On a runtime before 0.34.0 there is no `PAD.dict` at all, so check for it.
+
+**Bad arguments reject**, as `PAD.exportFile` rejects bad arguments: the promise rejects with an `Error` whose message
+starts `PAD.dict.words: ` or `PAD.dict.lookup: `, for example
+`PAD.dict.words: len is a whole number from 2 to 15, or [min, max]` or
+`PAD.dict.lookup: the word is 1 to 32 letters a-z`. Left unhandled, it shows in the runtime's error box.
 
 ## 7. Size and quality
 
