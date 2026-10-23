@@ -14,19 +14,28 @@
   body { display: flex; flex-direction: column; -webkit-user-select: none; user-select: none; }
   header { flex: none; height: 44px; display: flex; align-items: center; justify-content: space-between; padding: 0 4px; box-sizing: border-box; font-size: 16px; }
   #round { font-weight: bold; }
+  .btns { display: flex; gap: 6px; }
+  #help { font: inherit; font-size: 18px; font-weight: bold; width: 44px; height: 44px; padding: 0; background: #a3ad7e; color: #1f2a14;
+    border: 2px solid #1f2a14; touch-action: manipulation; }
   #hint { font: inherit; font-size: 15px; min-width: 84px; height: 44px; padding: 0 8px; box-sizing: border-box; background: #1f2a14; color: #a3ad7e; border: 0; box-shadow: 2px 2px 0 #4a5a32; touch-action: manipulation; }
   #hint:active { transform: translate(1px, 1px); box-shadow: 1px 1px 0 #4a5a32; }
   #hint.off { background: #a3ad7e; color: #4a5a32; border: 1px dashed #4a5a32; box-shadow: none; }
   main { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 4px; box-sizing: border-box; }
   #stage { width: 100%; display: flex; align-items: center; justify-content: center; gap: 6px; }
   #wheel { position: relative; flex: none; width: 154px; height: 154px; touch-action: none; }
+  /* the wheel is a dial: a disc under the letters, and a line through the letters picked so far */
+  #disc { position: absolute; inset: 0; border-radius: 50%; background: #7d8a58; }
+  #lines { position: absolute; left: 0; top: 0; pointer-events: none; }
+  #finger { position: absolute; left: 50%; top: 50%; width: 22px; height: 22px; margin: -11px 0 0 -11px; box-sizing: border-box;
+    border-radius: 50%; background: #1f2a14; border: 3px solid #a3ad7e; pointer-events: none; transition: transform 0.3s ease-out; z-index: 2; }
+  #finger[hidden] { display: none; }
   .key { position: absolute; left: 50%; top: 50%; width: 44px; height: 44px; margin: -22px 0 0 -22px; box-sizing: border-box;
     font: inherit; font-size: 20px; font-weight: bold; line-height: 1; padding: 0; border: 2px solid #1f2a14;
     background: #a3ad7e; color: #1f2a14; touch-action: none; }
-  .key.on { background: #7d8a58; border-width: 3px; }
+  .key.on { background: #4a5a32; color: #a3ad7e; border-width: 3px; }
   .key.cur { background: #1f2a14; color: #a3ad7e; border-color: #1f2a14; }
-  #entry { position: absolute; left: 50%; top: 50%; width: 70px; margin: -11px 0 0 -35px; height: 22px; line-height: 22px;
-    text-align: center; font-size: 15px; font-weight: bold; letter-spacing: 1px; pointer-events: none; white-space: nowrap; }
+  #typed { flex: none; width: 100%; height: 26px; line-height: 26px; text-align: center; font-size: 22px; font-weight: bold;
+    letter-spacing: 3px; white-space: nowrap; }
   #board { display: grid; gap: 1px; }
   .cell { box-sizing: border-box; display: flex; align-items: center; justify-content: center; font-weight: bold; line-height: 1;
     background: #a3ad7e; color: #1f2a14; border: 1px solid #7d8a58; }
@@ -38,7 +47,8 @@
   #cover { position: fixed; inset: 0; background: #a3ad7e; display: flex; flex-direction: column; align-items: center; justify-content: center;
     gap: 14px; padding: 18px; box-sizing: border-box; text-align: center; }
   #cover[hidden] { display: none; }
-  #cover p { margin: 0; font-size: 16px; line-height: 1.55; max-width: 300px; }
+  #cover p { margin: 0; font-size: 16px; line-height: 1.55; max-width: 300px; white-space: pre-line; }
+  #cover.help p { text-align: left; font-size: 14px; line-height: 1.45; }
   #cover button { font: inherit; font-size: 17px; font-weight: bold; min-height: 44px; padding: 8px 22px; background: #1f2a14;
     color: #a3ad7e; border: 0; box-shadow: 3px 3px 0 #4a5a32; touch-action: manipulation; }
   #cover button[hidden] { display: none; }
@@ -49,16 +59,17 @@
 <body>
 <header>
   <span id="round">第 1 关</span>
-  <button id="hint" type="button">提示 0</button>
+  <span class="btns"><button id="help" type="button" aria-label="玩法">?</button><button id="hint" type="button">提示 0</button></span>
 </header>
 <main>
+  <div id="typed"><span id="entry"></span></div>
   <div id="stage">
-    <div id="wheel" aria-label="字母盘"></div>
+    <div id="wheel" aria-label="字母盘"><div id="disc"></div><svg id="lines" width="154" height="154"></svg><div id="finger" hidden></div></div>
     <div id="board" aria-label="格子"></div>
   </div>
   <div id="note"></div>
 </main>
-<footer id="keys"></footer>
+<footer id="goal"></footer>
 <div id="cover">
   <p id="cover-text"></p>
   <button id="cover-btn" type="button"></button>
@@ -73,10 +84,12 @@
     zh: {
       round: "第 {n} 关", hint: "提示 {n}", loading: "翻字典…",
       error: "这台掌机的词典打不开", retry: "再试一次",
-      tut1: "在字母盘上拖动字母拼出单词，松手提交。也可以用左右键选字母，A 加上。",
-      tut2: "拼对格子里的词，格子会填上，下面显示中文，掌机会把它读出来。",
-      tut3: "不在格子里的真词算奖励词，能换提示：点右上角的「提示」，看一个词的中文，它不会告诉你字母。",
-      next: "下一步", start: "开始", keys: "←→ 选　A 加　B 删　START 提交　SELECT 换",
+      goal: "划过字母拼单词，填满右边的格子",
+      demo: "看：按住字母，划过 {w}",
+      demoEnd: "拼对了，词就填进格子，下面显示中文，还会读出来。\n\n轮到你了：找出格子里剩下的词。",
+      start: "开始",
+      help: "玩法\n\n按住字母盘上的一个字母，不松手划过别的字母，拼出一个英文单词，松手提交。\n拼对格子里的词，它就填进格子，下面显示中文并读出来。填满格子就过关。\n不在格子里的真词是奖励词，每个换 1 个提示。点「提示」看一个空词的中文。\n按键：←→ 选字母，A 加上，B 删掉一个，START 提交，SELECT 打乱字母。",
+      ok: "知道了",
       done: "第 {n} 关完成", doneBtn: "下一关", bonus: "奖励词：提示 +1",
       noHints: "先找奖励词换提示", hintHead: "提示：", noEntry: "词典里没有这个词",
       noWord: "不是这里的词", again: "这个词已经填上了", againBonus: "这个奖励词已经算过了"
@@ -84,10 +97,12 @@
     en: {
       round: "ROUND {n}", hint: "HINT {n}", loading: "Looking up…",
       error: "This handheld's dictionary won't open.", retry: "TRY AGAIN",
-      tut1: "Drag across the letter wheel to spell a word, then let go to send it. Or use Left/Right and A.",
-      tut2: "A word in the grid fills in, its Chinese shows below, and the handheld says it out loud.",
-      tut3: "Real words that are not in the grid earn hints: tap HINT to see one grid word's Chinese, never its letters.",
-      next: "NEXT", start: "START", keys: "←→ pick A add B del START send SELECT mix",
+      goal: "Swipe letters into words to fill the grid",
+      demo: "Watch: hold and slide {w}",
+      demoEnd: "A right word fills in, its Chinese shows below, and you hear it.\n\nYour turn: find the other words in the grid.",
+      start: "START",
+      help: "HOW TO PLAY\n\nHold a letter on the wheel and slide across others to spell an English word. Let go to send it.\nA word in the grid fills in, with its Chinese below, read aloud. Fill the grid to clear the round.\nA real word that is not in the grid is a bonus word and earns 1 hint. Tap HINT to see an open word's Chinese.\nKeys: Left/Right pick, A add, B delete, START send, SELECT shuffle.",
+      ok: "OK",
       done: "ROUND {n} CLEAR", doneBtn: "NEXT ROUND", bonus: "Bonus word: hint +1",
       noHints: "Earn a hint with a bonus word", hintHead: "HINT: ", noEntry: "No entry in the dictionary",
       noWord: "Not a word here", again: "Already in the grid", againBonus: "Bonus word already counted"
@@ -111,29 +126,33 @@
   }
   function isWord(w) { return typeof w === "string" && /^[a-z]{3,7}$/.test(w); }
 
-  var roundEl = document.getElementById("round"), hintEl = document.getElementById("hint");
+  var roundEl = document.getElementById("round"), hintEl = document.getElementById("hint"), helpEl = document.getElementById("help");
   var wheelEl = document.getElementById("wheel"), boardEl = document.getElementById("board");
-  var noteEl = document.getElementById("note"), keysEl = document.getElementById("keys");
+  var noteEl = document.getElementById("note"), goalEl = document.getElementById("goal");
+  var linesEl = document.getElementById("lines"), fingerEl = document.getElementById("finger");
   var coverEl = document.getElementById("cover"), coverText = document.getElementById("cover-text"), coverBtn = document.getElementById("cover-btn");
-  var entryEl = document.createElement("div"); entryEl.id = "entry"; wheelEl.appendChild(entryEl);
+  var entryEl = document.getElementById("entry");
 
-  var phase = "load";           /* load | tutorial | play | done | error */
+  var phase = "load";           /* load | demo | demoEnd | play | help | done | error */
   var state = {
     round: 1, hints: 0, done: [],
     seed: "", wheel: [], placed: [], words: [], wordSet: {},
     entry: [], cursor: 0,
     view: null, cells: {},
-    tutorial: 0, hinted: [], hintTurn: 0
+    hinted: [], hintTurn: 0
   };
   /* a small read-only window on the round, for a curious player and for the e2e test (the app needs no globals) */
   Object.defineProperty(state, "phase", { get: function () { return phase; }, enumerable: true });
   window.game = state;
 
-  var rnd = mulberry32(1), gen = 0, firstOpen = true, dragging = null, lookupSeq = 0, hintBusy = false;
+  var rnd = mulberry32(1), gen = 0, taught = false, dragging = null, lookupSeq = 0, hintBusy = false;
+  var keyMode = false;          /* the cursor square shows only once the player uses the keys: on touch it looked like a pick */
+  var pos = [];                 /* the centre of each wheel letter, in the wheel's own pixels, for the line */
+  var demoTimers = [], demoWord = null, helpBack = null;
   var savedRound = null, savedHints = 0, savedDone = [];
   var pending = { round: 1, hints: 0, done: [] };   /* what to ask for again after a dictionary error */
 
-  keysEl.textContent = TXT.keys;
+  goalEl.textContent = TXT.goal;
 
   function keyOf(r, c) { return r + "," + c; }
 
@@ -319,9 +338,8 @@
       state.entry = []; state.cursor = 0;
       state.done = done.filter(function (w) { return state.wordSet[w] || state.placed.some(function (p) { return p.word === w; }); });
       renderBoard(); renderKeys(); updateHeader();
-      if (firstOpen) { phase = "tutorial"; state.tutorial = 0; showTutorial(); }
-      else { phase = "play"; hideCover(); }
-      checkComplete();                 /* a saved round whose words are all filled opens on its clear screen */
+      if (!taught) runDemo();
+      else { phase = "play"; hideCover(); renderKeys(); checkComplete(); }   /* a saved round whose words are all filled opens on its clear screen */
     }, function () {
       if (token === gen) fail();
     });
@@ -339,17 +357,28 @@
   }
 
   function buildWheel() {
-    while (wheelEl.firstChild && wheelEl.firstChild !== entryEl) wheelEl.removeChild(wheelEl.firstChild);
-    var n = state.wheel.length, i, b, a, dx, dy;
+    var old = wheelEl.querySelectorAll(".key"), i;
+    for (i = 0; i < old.length; i++) wheelEl.removeChild(old[i]);
+    var n = state.wheel.length, b, a, dx, dy;
+    pos = [];
     for (i = 0; i < n; i++) {
       b = document.createElement("button");
       b.type = "button"; b.className = "key"; b.setAttribute("data-i", String(i));
       a = -Math.PI / 2 + i * 2 * Math.PI / n;
       dx = Math.round(WHEEL_R * Math.cos(a)); dy = Math.round(WHEEL_R * Math.sin(a));
       b.style.transform = "translate(" + dx + "px," + dy + "px)";
+      pos.push({ x: WHEEL_H / 2 + dx, y: WHEEL_H / 2 + dy });
       wheelEl.appendChild(b);
     }
-    wheelEl.appendChild(entryEl);          /* the typed word, in the middle of the wheel */
+  }
+
+  /* the line through the picked letters, and on to the finger while it drags (an SVG polyline in the dark tone) */
+  function drawLines() {
+    var pts = state.entry.map(function (i) { return pos[i]; }).filter(Boolean);
+    if (dragging && dragging.x != null && pts.length) pts.push({ x: dragging.x, y: dragging.y });
+    linesEl.innerHTML = pts.length < 2 ? "" :
+      '<polyline fill="none" stroke="' + INK + '" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" points="' +
+      pts.map(function (q) { return Math.round(q.x) + "," + Math.round(q.y); }).join(" ") + '"/>';
   }
 
   function renderKeys() {
@@ -357,10 +386,11 @@
     for (i = 0; i < keys.length; i++) {
       var idx = +keys[i].getAttribute("data-i");
       keys[i].textContent = (state.wheel[idx] || "").toUpperCase();
-      keys[i].className = "key" + (state.entry.indexOf(idx) >= 0 ? " on" : "") + (idx === state.cursor && phase === "play" ? " cur" : "");
+      keys[i].className = "key" + (state.entry.indexOf(idx) >= 0 ? " on" : "") + (keyMode && idx === state.cursor && phase === "play" ? " cur" : "");
       keys[i].setAttribute("aria-label", "letter " + (state.wheel[idx] || "") + (state.entry.indexOf(idx) >= 0 ? ", used" : ""));
     }
     entryEl.textContent = state.entry.map(function (i) { return state.wheel[i]; }).join("").toUpperCase();
+    drawLines();
   }
 
   function renderBoard() {
@@ -421,7 +451,7 @@
   }
 
   function submit() {
-    if (phase !== "play") return;
+    if (phase !== "play" && phase !== "demo") return;
     var word = entryWord();
     state.entry = []; state.cursor = 0; renderKeys();
     if (!word || word.length < 3) { PAD.sfx("err"); shake(); return; }
@@ -512,18 +542,62 @@
 
   function save() {
     /* PAD.save keeps one value under the app's own id (256 KB at most) and PAD.load gives it back on the next open */
-    var data = { round: state.round, hints: state.hints, done: state.done.slice() };
+    var data = { round: state.round, hints: state.hints, done: state.done.slice(), taught: taught };
     try { var p = PAD.save("game", data); if (p && p.then) p.then(null, function () {}); } catch (e) {}
   }
 
   /* ---------- tutorial, error, next round ---------- */
 
-  var TUT = ["tut1", "tut2", "tut3"];
-  function showTutorial() {
-    coverText.textContent = TXT[TUT[state.tutorial]];
-    coverBtn.textContent = state.tutorial < 2 ? TXT.next : TXT.start;
-    coverBtn.hidden = false;
-    coverEl.hidden = false;
+  /* The first round teaches by showing: a finger slides over the letters of one grid word (the shortest open one,
+     never the seed), the line follows it, the word fills in with its Chinese and its voice. Then "your turn".
+     Any key or a tap skips to the end. Shown once (saved as taught); the ? page has the rules after that. */
+  function later(ms, f) { demoTimers.push(setTimeout(f, ms)); }
+  function fingerTo(i) { fingerEl.style.transform = "translate(" + Math.round(pos[i].x - WHEEL_H / 2) + "px," + Math.round(pos[i].y - WHEEL_H / 2) + "px)"; }
+  function runDemo() {
+    var open = state.placed.filter(function (q) { return state.done.indexOf(q.word) < 0 && q.word !== state.seed; })
+      .sort(function (a, b) { return a.word.length - b.word.length; });
+    if (!open.length) { taught = true; phase = "play"; hideCover(); renderKeys(); return; }
+    var w = open[0].word, idx = [], used = {};
+    w.split("").forEach(function (ch) {
+      for (var i = 0; i < state.wheel.length; i++) if (!used[i] && state.wheel[i] === ch) { used[i] = true; idx.push(i); return; }
+    });
+    demoWord = open[0];
+    phase = "demo"; hideCover();
+    state.entry = []; renderKeys();
+    setNote(TXT.demo.replace("{w}", w.toUpperCase().split("").join("-")));
+    fingerEl.style.transition = "none"; fingerTo(idx[0]); void fingerEl.offsetWidth; fingerEl.style.transition = "";
+    later(500, function () { fingerEl.hidden = false; });
+    idx.forEach(function (i, k) {
+      later(900 + k * 550, function () { fingerTo(i); });
+      later(1200 + k * 550, function () { addIndex(i); PAD.sfx("tick"); });
+    });
+    later(1200 + idx.length * 550 + 300, function () { fingerEl.hidden = true; submit(); });
+    later(1200 + idx.length * 550 + 2600, demoEnd);
+  }
+  function demoEnd() {
+    demoTimers.forEach(clearTimeout); demoTimers = [];
+    fingerEl.hidden = true;
+    if (phase !== "demo") return;
+    if (demoWord && state.done.indexOf(demoWord.word) < 0) { state.entry = []; fillWord(demoWord); }   /* skipped: fill it now */
+    phase = "demoEnd";
+    showCover(TXT.demoEnd, TXT.start);
+  }
+  function startPlay() {
+    taught = true; phase = "play"; hideCover(); save(); renderKeys(); checkComplete();
+  }
+
+  /* the rules, any time: the ? button. A, B or START (or the button) go back to the round */
+  function openHelp() {
+    if (phase !== "play" && phase !== "done") return;
+    helpBack = phase; phase = "help";
+    coverEl.classList.add("help");
+    showCover(TXT.help, TXT.ok);
+  }
+  function closeHelp() {
+    coverEl.classList.remove("help");
+    phase = helpBack || "play"; helpBack = null;
+    if (phase === "done") showCover(tx("done", state.round), TXT.doneBtn); else hideCover();
+    renderKeys();
   }
 
   function nextRound() {
@@ -532,15 +606,14 @@
   }
 
   coverBtn.addEventListener("click", function () {
-    if (phase === "tutorial") {
-      state.tutorial++;
-      if (state.tutorial < 3) showTutorial();
-      else { firstOpen = false; phase = "play"; hideCover(); save(); renderKeys(); }
-    } else if (phase === "error") {
+    if (phase === "demoEnd") startPlay();
+    else if (phase === "help") closeHelp();
+    else if (phase === "error") {
       startRound(pending.round, pending.hints, pending.done);
     } else if (phase === "done") nextRound();
   });
   hintEl.addEventListener("click", hint);
+  helpEl.addEventListener("click", openHelp);
 
   /* ---------- the wheel: drag to spell, or keys ---------- */
 
@@ -566,19 +639,25 @@
     renderKeys();
   }
 
+  function wheelXY(e) { var b = wheelEl.getBoundingClientRect(); return { x: e.clientX - b.left, y: e.clientY - b.top }; }
   wheelEl.addEventListener("pointerdown", function (e) {
+    if (phase === "demo") { demoEnd(); return; }
     if (phase !== "play") return;
     var i = keyIndexFrom(e.target);
     if (i < 0) return;
     e.preventDefault();
-    dragging = { id: e.pointerId };
+    keyMode = false;
+    var xy = wheelXY(e);
+    dragging = { id: e.pointerId, x: xy.x, y: xy.y };
     state.entry = [];
     addIndex(i);
   });
   document.addEventListener("pointermove", function (e) {
     if (!dragging || e.pointerId !== dragging.id) return;
     e.preventDefault();
-    addIndex(keyNear(e.clientX, e.clientY));
+    var xy = wheelXY(e); dragging.x = xy.x; dragging.y = xy.y;
+    var i = keyNear(e.clientX, e.clientY);
+    if (i >= 0 && state.entry.indexOf(i) < 0) addIndex(i); else drawLines();
   }, { passive: false });
   function endDrag(e) {
     if (!dragging || e.pointerId !== dragging.id) return;
@@ -592,11 +671,14 @@
   /* The chin pad: Left/Right move around the wheel, A adds the letter, B removes the last, START submits,
      SELECT shuffles. Also the keyboard on a computer (X = A, Z = B, Enter = START, Shift = SELECT). */
   PAD.on("press", function (b) {
-    if (phase === "tutorial") { if (b === "a" || b === "start") coverBtn.click(); return; }
+    if (phase === "demo") { demoEnd(); return; }
+    if (phase === "demoEnd") { if (b === "a" || b === "start") startPlay(); return; }
+    if (phase === "help") { if (b === "a" || b === "b" || b === "start") closeHelp(); return; }
     if (phase === "error") { if (b === "a" || b === "start") coverBtn.click(); return; }
     if (phase === "done") { if (b === "a" || b === "start") nextRound(); return; }
     if (phase !== "play") return;
     var n = state.wheel.length;
+    keyMode = true;                        /* from now on the cursor square shows, until the next touch on the wheel */
     if (b === "left" && n) { state.cursor = (state.cursor + n - 1) % n; renderKeys(); }
     else if (b === "right" && n) { state.cursor = (state.cursor + 1) % n; renderKeys(); }
     else if (b === "a") {
@@ -622,7 +704,7 @@
       savedRound = typeof v.round === "number" && v.round % 1 === 0 && v.round >= 1 ? v.round : 1;
       savedHints = typeof v.hints === "number" && v.hints >= 0 ? Math.floor(v.hints) : 0;
       savedDone = Array.isArray(v.done) ? v.done.filter(isWord) : [];
-      firstOpen = false;
+      taught = v.taught === true;          /* saves from 1.0.0 have no flag: those players see the demo once too */
     }
     startRound(savedRound || 1, savedHints, savedDone);
   }, function () { startRound(1, 0, []); });

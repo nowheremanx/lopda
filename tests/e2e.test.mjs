@@ -6609,16 +6609,16 @@ test("AI line: while the AI is slow the hint counts time, says what the line is 
   assert.deepEqual(errors, []);
 });
 
-/* ---------- 拼字格 / Crossing (registry/apps/crossing): PAD.dict builds the round, the chin keys fill a word ---------- */
-test("crossing: round 1 shows a grid and a word typed with the keys fills in", { skip, timeout: 60000 }, async (t) => {
+/* ---------- 拼字格 / Crossing (registry/apps/crossing): PAD.dict builds the round, a demo fills one word, the chin keys fill another ---------- */
+test("crossing: round 1 shows a grid, a demo spells one word, and a word typed with the keys fills in", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await page(t);
   await p.goto(`${base}/sdk/dev.html?app=registry/apps/crossing`, { waitUntil: "load" });
   await p.waitForFunction(() => /loaded |load failed/.test(document.getElementById("log").textContent), null, { timeout: 5000 });
   let f;
   await until(p, async () => {
     f = p.frames().find((x) => x !== p.mainFrame());
-    return f && await f.evaluate(() => !!(window.game && game.phase === "tutorial")).catch(() => false);
-  }, "the first round and its three-step tutorial");
+    return f && await f.evaluate(() => !!(window.game && game.phase === "demo")).catch(() => false);
+  }, "the first round and its demo");
   /* the smallest screen, as on an iPhone SE with the chin pad */
   await p.locator("#app").evaluate((el) => { el.style.width = "331px"; el.style.height = "359px"; el.style.flex = "none"; });
   await p.waitForTimeout(200);
@@ -6653,12 +6653,14 @@ test("crossing: round 1 shows a grid and a word typed with the keys fills in", {
   assert.equal(layout.keys44, true, "every wheel letter is a 44px target");
   assert.ok(layout.rows <= 7 && layout.cols <= 7, "a small grid: " + layout.rows + "x" + layout.cols);
 
-  /* the tutorial: three steps, A each time */
-  for (let i = 0; i < 3; i++) {
-    assert.ok((await f.textContent("#cover-text")).length > 0);
-    await p.locator('#pad [data-b="a"]').click();
-    await p.waitForTimeout(80);
-  }
+  /* the demo: a finger spells the shortest grid word that is not the seed, the line follows, the word fills in */
+  await until(p, () => f.evaluate(() => game.entry.length >= 2 && document.querySelector("#lines polyline") !== null), "the line through the picked letters");
+  await until(p, () => f.evaluate(() => game.phase === "demoEnd"), "the demo to end on its your-turn card");
+  const demo = await f.evaluate(() => game.done.slice());
+  assert.equal(demo.length, 1, "the demo filled one word: " + demo.join(" "));
+  assert.notEqual(demo[0], round.seed);
+  assert.ok(round.placed.includes(demo[0]));
+  await p.locator('#pad [data-b="a"]').click();
   await f.waitForFunction(() => game.phase === "play");
 
   /* spell the seed word with the wheel keys: Left/Right pick a letter, A adds it, START sends it */
@@ -6676,8 +6678,16 @@ test("crossing: round 1 shows a grid and a word typed with the keys fills in", {
   assert.equal(await f.textContent("#entry"), target.toUpperCase(), "the typed word shows in the middle of the wheel");
   await p.locator('#pad [data-b="start"]').click();
   await until(p, () => f.evaluate((w) => game.done.indexOf(w) >= 0, target), "the word to fill in");
-  const filled = await f.evaluate(() => [...document.querySelectorAll("#board .cell.on")].map((e) => e.textContent).join(""));
+  const filled = await f.evaluate((w) => {
+    const v = game.view, cols = v.maxC - v.minC + 1, p = game.placed.find((x) => x.word === w), cells = document.querySelectorAll("#board > div");
+    return w.split("").map((_, i) => cells[(p.r + (p.dir === "v" ? i : 0) - v.minR) * cols + (p.c + (p.dir === "h" ? i : 0) - v.minC)].textContent).join("");
+  }, target);
   assert.equal(filled, target.toUpperCase(), "the grid shows the letters");
+  /* the rules are one tap away, and B goes back to the round */
+  await f.click("#help");
+  assert.equal(await f.evaluate(() => game.phase), "help");
+  await p.locator('#pad [data-b="b"]').click();
+  await f.waitForFunction(() => game.phase === "play");
   /* the first lookup unpacks the book; the Chinese line lands a moment later, and the word is read aloud */
   await until(p, async () => (await f.textContent("#note")).length > 0, "the Chinese line");
   assert.notEqual((await f.textContent("#note")).trim(), "");
@@ -6685,5 +6695,6 @@ test("crossing: round 1 shows a grid and a word typed with the keys fills in", {
   const saved = await p.evaluate(() => (JSON.parse(localStorage.getItem("lopda-dev:crossing") || "{}").game) || null);
   assert.equal(saved && saved.round, 1);
   assert.ok(saved && saved.done.includes(target), "PAD.save kept the found word");
+  assert.equal(saved && saved.taught, true, "the demo is not shown again");
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
