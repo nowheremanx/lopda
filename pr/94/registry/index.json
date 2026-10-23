@@ -111,7 +111,7 @@
         "................",
         "................"
       ],
-      "version": "1.2.0",
+      "version": "1.3.0",
       "description": "在字母盘上拼出单词，填满小小字谜格。拼对后中文显示在格下，再读出英文。",
       "i18n": {
         "zh": {
@@ -120,14 +120,14 @@
         },
         "en": {
           "name": "Crossing",
-          "description": "Spell words on a wheel to fill a crossword; see the Chinese, hear the word."
+          "description": "Spell words on a wheel to fill a crossword; see the meaning, hear the word."
         }
       },
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/crossing/index.html",
-      "sha256": "1e702265e78765b57c61f01a6565984f8f6349c6d6a67cce1a5aa57e5e631f44",
-      "bytes": 43277
+      "sha256": "a6486104a32eb0ba40e80c12beac696e1c95b7deabf4a43a0c3d8cc7cd3605da",
+      "bytes": 50760
     },
     {
       "spec": "lopda/1",
