@@ -7,31 +7,35 @@ var game = LoGame.create({ width: 216, height: 240, lang: "zh" });
 var T = game.t;
 document.documentElement.lang = game.lang === "zh" ? "zh-CN" : "en";
 
-var W = game.width, CX = W / 2, CY = 120, RING = 84;
-var PANEL_X = 14, PANEL_Y = 34, PANEL_W = 188, PANEL_H = 170;
+var W = game.width, CX = W / 2, CY = 112, RING = 76;
+var PANEL_X = 14, PANEL_Y = 34, PANEL_W = 188, PANEL_H = 156;
 
+/* English display data only: Chinese dates use 月/日, so these names are not passed through T(). */
 var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 var DIRS = [
   T({ zh: "北", en: "N" }), T({ zh: "东北", en: "NE" }), T({ zh: "东", en: "E" }), T({ zh: "东南", en: "SE" }),
   T({ zh: "南", en: "S" }), T({ zh: "西南", en: "SW" }), T({ zh: "西", en: "W" }), T({ zh: "西北", en: "NW" })
 ];
-/* the three names are the almanac's own terms; English gets a romanisation, the meaning
-   goes in the A panel */
+/* The three names stay Chinese in both languages, like the 干支: they are the almanac's own
+   terms, and the A panel explains what each is said to bring in English. The dial uses the
+   one-character short form so a pair on one direction stays apart at every heading; the
+   bottom line and the A panel write the full name. */
 var GODS = [
-  { name: T({ zh: "喜神", en: "Xishen" }), bring: T({ zh: "喜事、人缘", en: "joy, friends" }) },
-  { name: T({ zh: "财神", en: "Caishen" }), bring: T({ zh: "财路、生意", en: "money, trade" }) },
-  { name: T({ zh: "福神", en: "Fushen" }), bring: T({ zh: "平安、福气", en: "peace, luck" }) }
+  { short: T({ zh: "喜", en: "喜" }), name: T({ zh: "喜神", en: "喜神" }), bring: T({ zh: "喜事、人缘", en: "joy, friends" }) },
+  { short: T({ zh: "财", en: "财" }), name: T({ zh: "财神", en: "财神" }), bring: T({ zh: "财路、生意", en: "money, trade" }) },
+  { short: T({ zh: "福", en: "福" }), name: T({ zh: "福神", en: "福神" }), bring: T({ zh: "平安、福气", en: "peace, luck" }) }
 ];
 var NO_COMPASS = T({ zh: "没有指南针：用左右键转", en: "No compass: use Left/Right" });
 var MOTION_OFF = T({ zh: "感应未允许：用左右键转", en: "Motion off: use Left/Right" });
-var HINT = T({ zh: "旧历书上的说法，图个吉利", en: "An old almanac custom, just for luck." });
+var HINT = T({ zh: "旧历书上的说法，图个吉利", en: "Old almanac lore, just for luck." });
+var KEY_LINE = T({ zh: "A 说明 · 上下换日 · START 今天", en: "A info · ↑↓ day · START today" });
 var PANEL_TITLE = T({ zh: "这一天的三位", en: "That day's three" });
 var PANEL_HINT = T({ zh: "平放手机；方向不对就把手机画几个 8 字", en: "Hold it flat; if it is off, wave the phone in a figure 8." });
 var PANEL_CLOSE = T({ zh: "A/B 关闭 · 上下换日", en: "A/B close · ↑↓ day" });
 
 /* ---- what the screen is showing ---- */
 var offset = 0;                 /* days from today; today is derived every frame so midnight needs no timer */
-var panel = false, lastFaced = 0;
+var panel = false, lastFaced;   /* undefined until the first real sector is known */
 
 function shownDate() {
   var now = new Date();
@@ -67,7 +71,7 @@ function headerText(dt, p) {
    The wanted flag is the same pattern as tilt-maze: a start() that answers after a pause
    must stop instead of leaving the sensor on. */
 var HAS_MOTION = typeof PAD !== "undefined" && !!PAD.motion;
-var wanted = false, wasWanted = false, live = false, denied = false;
+var wanted = false, wasWanted = false, live = false, denied = false, startSeq = 0;
 var heading = null, lastHeading = null, compass = false, keyHeading = 0;
 
 function sfx(name) { if (typeof PAD !== "undefined" && PAD.sfx) PAD.sfx(name); }
@@ -83,13 +87,18 @@ function onTilt(t) {
   if (!wanted) return;
   var h = t && typeof t.heading === "number" ? t.heading : null;
   if (h === null) { heading = null; lastHeading = null; return; }
+  if (lastHeading === null) { heading = h; lastHeading = h; aimDial(-h); return; }   /* first reading: no tick */
   if (h !== lastHeading) { lastHeading = h; sfx("tick"); aimDial(-h); }
   heading = h;
 }
 function sensorStart() {
   if (!HAS_MOTION) return;
   wanted = true;
+  var seq = ++startSeq;
   PAD.motion.start().then(function (r) {
+    /* A second start() makes the runtime cancel the first dialog and answer it "denied".
+       Ignore that stale answer, and never stop the sensor: a newer request owns it now. */
+    if (seq !== startSeq) return;
     if (!wanted) { PAD.motion.stop(); return; }      /* paused while the player was asked */
     live = r === "on";
     denied = r === "denied";
@@ -99,6 +108,7 @@ function sensorStart() {
       aimDial(0);
     }
   }, function () {
+    if (seq !== startSeq) return;
     if (!wanted) return;
     wanted = false; live = false; denied = true;
     heading = null; lastHeading = null; keyHeading = 0;
@@ -123,7 +133,8 @@ if (HAS_MOTION) {
     else sensorResume();
   });
   window.addEventListener("pagehide", sensorPause);
-  window.addEventListener("pageshow", sensorResume);
+  /* pageshow also fires on the first load; only a bfcache return needs a resume */
+  window.addEventListener("pageshow", function (e) { if (e && e.persisted) sensorResume(); });
 }
 
 /* ---- easing: each 11.25-degree step glides in about 150 ms, with a tick ---- */
@@ -170,14 +181,23 @@ function update(dt) {
     if (game.pressed("up")) { offset--; sfx("move"); }        /* yesterday */
     if (game.pressed("down")) { offset++; sfx("move"); }      /* tomorrow */
     if (!panel && !compass) {
-      if (game.pressed("left")) { keyHeading = (keyHeading + 315) % 360; aimDial(-keyHeading); sfx("tick"); }
-      if (game.pressed("right")) { keyHeading = (keyHeading + 45) % 360; aimDial(-keyHeading); sfx("tick"); }
+      if (game.pressed("left")) {
+        keyHeading = (keyHeading + 315) % 360; aimDial(-keyHeading); sfx("tick");
+        if (lastFaced === undefined) lastFaced = LUCK.sector(keyHeading);
+      }
+      if (game.pressed("right")) {
+        keyHeading = (keyHeading + 45) % 360; aimDial(-keyHeading); sfx("tick");
+        if (lastFaced === undefined) lastFaced = LUCK.sector(keyHeading);
+      }
     }
   }
 
-  /* one coin when the sector under the needle gains a god; not when the app opens */
+  /* one coin when the sector under the needle gains a god; the first sector is silent.
+     While a compass reading may still arrive, wait for it instead of recording the key fallback north. */
   var faced = LUCK.sector(compass ? heading : keyHeading);
-  if (faced !== lastFaced) {
+  if (lastFaced === undefined) {
+    if (compass || !HAS_MOTION || !wanted) lastFaced = faced;
+  } else if (faced !== lastFaced) {
     lastFaced = faced;
     if (faced !== null && godList(stem, faced).length) sfx("coin");
   }
@@ -197,23 +217,29 @@ function polar(deg, r) {
 function drawDial(g, stem) {
   g.circle(CX, CY, RING, g.INK, false);
   for (var i = 0; i < 16; i++) {
-    var a = i * 22.5, p0 = polar(a, RING), p1 = polar(a, 80);
+    var a = i * 22.5, p0 = polar(a, RING), p1 = polar(a, 74);
     g.line(p0.x, p0.y, p1.x, p1.y, i % 2 ? g.MID : g.INK);
   }
   for (i = 0; i < 8; i++) {
-    var pos = polar(i * 45, 65);
+    var pos = polar(i * 45, 60);
     g.text(DIRS[i], pos.x, pos.y - 6, { align: "center", color: g.INK });
   }
+  /* the fixed needle: straight up is the way the player faces. Draw it before the gods,
+     so a stacked label near the centre covers its tip rather than the text. */
+  g.line(CX, CY + 5, CX, CY - 6, g.INK);
+  g.line(CX, CY - 6, CX - 3, CY - 2, g.INK);
+  g.line(CX, CY - 6, CX + 3, CY - 2, g.INK);
+  g.circle(CX, CY, 1, g.INK, true);
 
   var faced = LUCK.sector(compass ? heading : keyHeading);
   for (i = 0; i < 8; i++) {
     var deg = i * 45, list = godList(stem, deg);
     if (!list.length) continue;
     /* two gods on one direction stack inward; the table never puts three there */
-    var radii = list.length === 1 ? [33] : list.length === 2 ? [17, 39] : [15, 27, 39];
+    var radii = list.length === 1 ? [36] : list.length === 2 ? [17, 36] : [17, 26, 36];
     for (var j = 0; j < list.length; j++) {
       var gp = polar(deg, radii[j]);
-      var name = GODS[list[j]].name, tw = g.measure(name), ty = gp.y - 6;
+      var name = GODS[list[j]].short, tw = g.measure(name), ty = gp.y - 6;
       if (faced === deg) {
         g.rect(gp.x - tw / 2 - 2, ty - 1, tw + 4, 14, g.INK);
         g.text(name, gp.x, ty, { align: "center", color: g.PAPER });
@@ -222,19 +248,13 @@ function drawDial(g, stem) {
       }
     }
   }
-
-  /* the fixed needle: straight up is the way the player faces */
-  g.line(CX, CY + 6, CX, CY - 8, g.INK);
-  g.line(CX, CY - 8, CX - 3, CY - 4, g.INK);
-  g.line(CX, CY - 8, CX + 3, CY - 4, g.INK);
-  g.circle(CX, CY, 1, g.INK, true);
 }
 function drawFaced(g, stem) {
   var deg = LUCK.sector(compass ? heading : keyHeading);
   if (deg === null) return;
-  var list = godList(stem, deg), line = dirName(deg);
+  var list = godList(stem, deg), line = T({ zh: "面向 ", en: "Facing " }) + dirName(deg);
   for (var i = 0; i < list.length; i++) line += (i ? " " : " · ") + GODS[list[i]].name;
-  g.text(line, CX, 207, { align: "center", color: g.INK });
+  g.text(line, CX, 193, { align: "center", color: g.INK });
 }
 function drawPanel(g, stem) {
   g.window(PANEL_X, PANEL_Y, PANEL_W, PANEL_H);
@@ -255,10 +275,11 @@ game.scene("compass", {
     g.clear(g.PAPER);
     g.text(headerText(dt, p), CX, 3, { align: "center", color: g.INK });
     var why = fallbackLine();
-    if (why) g.text(why, CX, 19, { align: "center", color: g.DARK });
+    if (why) g.text(why, CX, 18, { align: "center", color: g.DARK });
     drawDial(g, p.stem);
     drawFaced(g, p.stem);
-    g.text(HINT, CX, 224, { align: "center", color: g.DARK });
+    g.text(KEY_LINE, CX, 209, { align: "center", color: g.DARK });
+    g.text(HINT, CX, 225, { align: "center", color: g.DARK });
     if (panel) drawPanel(g, p.stem);
   }
 });
