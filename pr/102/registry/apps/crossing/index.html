@@ -1,0 +1,1681 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>拼字格</title>
+<!-- Lo-PDA example app (lopda/1): 拼字格 / Crossing. MIT License, see LICENSE.
+     A letter wheel and a small crossword. The words come from PAD.dict (SPEC.md 6.7), the built-in ECDICT:
+     words() picks the seed word and the real words that fit its letters, lookup() gives the line in the
+     player's language. The results card can add a word to the player's word book, which needs the
+     "wordbook" permission (SPEC.md 6.7); on the card A adds one word, B takes it out, SELECT toggles, and a
+     tap on the row's right end toggles. The player can turn ECDICT off in 词典管理 and this app still works.
+     Everything is plain DOM, no canvas, no framework. -->
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #a3ad7e; color: #1f2a14; font-family: monospace; }
+  body { display: flex; flex-direction: column; -webkit-user-select: none; user-select: none; }
+  header { flex: none; height: 44px; display: flex; align-items: center; justify-content: space-between; padding: 0 4px; box-sizing: border-box; font-size: 16px; }
+  #round { font-weight: bold; }
+  /* a random round has no number: an inverted little badge stands where the round number would be */
+  #round.badge { background: #1f2a14; color: #a3ad7e; padding: 2px; }
+  .btns { display: flex; gap: 6px; }
+  #help { font: inherit; font-size: 18px; font-weight: bold; width: 44px; height: 44px; padding: 0; background: #a3ad7e; color: #1f2a14;
+    border: 2px solid #1f2a14; touch-action: manipulation; }
+  #hint { font: inherit; font-size: 15px; min-width: 84px; height: 44px; padding: 0 8px; box-sizing: border-box; background: #1f2a14; color: #a3ad7e; border: 0; box-shadow: 2px 2px 0 #4a5a32; touch-action: manipulation; }
+  #hint:active { transform: translate(1px, 1px); box-shadow: 1px 1px 0 #4a5a32; }
+  #hint.off { background: #a3ad7e; color: #4a5a32; border: 1px dashed #4a5a32; box-shadow: none; }
+  main { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 4px; box-sizing: border-box; }
+  #stage { width: 100%; display: flex; align-items: center; justify-content: center; gap: 6px; }
+  #wheel { position: relative; flex: none; width: 154px; height: 154px; touch-action: none; }
+  /* the wheel is a dial: a disc under the letters, and a line through the letters picked so far */
+  #disc { position: absolute; inset: 0; border-radius: 50%; background: #7d8a58; }
+  #lines { position: absolute; left: 0; top: 0; pointer-events: none; }
+  #finger { position: absolute; left: 50%; top: 50%; width: 22px; height: 22px; margin: -11px 0 0 -11px; box-sizing: border-box;
+    border-radius: 50%; background: #1f2a14; border: 3px solid #a3ad7e; pointer-events: none; transition: transform 0.3s ease-out; z-index: 2; }
+  #finger[hidden] { display: none; }
+  .key { position: absolute; left: 50%; top: 50%; width: 44px; height: 44px; margin: -22px 0 0 -22px; box-sizing: border-box;
+    font: inherit; font-size: 20px; font-weight: bold; line-height: 1; padding: 0; border: 2px solid #1f2a14;
+    background: #a3ad7e; color: #1f2a14; touch-action: none; }
+  .key.on { background: #4a5a32; color: #a3ad7e; border-width: 3px; }
+  .key.cur { background: #1f2a14; color: #a3ad7e; border-color: #1f2a14; }
+  #typed { flex: none; width: 100%; height: 26px; line-height: 26px; text-align: center; font-size: 22px; font-weight: bold;
+    letter-spacing: 3px; white-space: nowrap; }
+  #board { display: grid; gap: 1px; }
+  .cell { box-sizing: border-box; display: flex; align-items: center; justify-content: center; font-weight: bold; line-height: 1;
+    background: #a3ad7e; color: #1f2a14; border: 1px solid #7d8a58; touch-action: manipulation; }
+  .cell.on { background: #7d8a58; border-color: #1f2a14; }
+  .gap { visibility: hidden; }
+  #note { flex: none; width: 100%; height: 36px; display: flex; align-items: center; justify-content: center;
+    padding: 0 4px; box-sizing: border-box; overflow: hidden; }
+  #note-text { display: -webkit-box; width: 100%; overflow: hidden; white-space: normal; overflow-wrap: anywhere;
+    -webkit-box-orient: vertical; -webkit-line-clamp: 2; text-overflow: ellipsis; text-align: center;
+    font-size: 14px; line-height: 18px; }
+  footer { flex: none; height: 20px; line-height: 20px; font-size: 13px; text-align: center; white-space: nowrap; overflow: hidden; }
+  #cover { position: fixed; inset: 0; z-index: 5; background: #a3ad7e; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 14px; padding: 18px; box-sizing: border-box; text-align: center; overflow-y: auto; }
+  #cover[hidden] { display: none; }
+  #cover p { margin: 0; font-size: 16px; line-height: 1.55; max-width: 300px; white-space: pre-line; }
+  #cover.help p { text-align: left; font-size: 14px; line-height: 1.45; }
+  #cover button { font: inherit; font-size: 17px; font-weight: bold; min-height: 44px; padding: 8px 22px; background: #1f2a14;
+    color: #a3ad7e; border: 0; box-shadow: 3px 3px 0 #4a5a32; touch-action: manipulation; }
+  #cover button[hidden] { display: none; }
+  #cover-list { list-style: none; margin: 0; padding: 0; width: 100%; max-width: 280px; text-align: left; font-size: 15px; }
+  #cover-list[hidden] { display: none; }
+  #cover-list li { box-sizing: border-box; height: 24px; line-height: 24px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    border-bottom: 1px solid #7d8a58; letter-spacing: 2px; text-transform: uppercase; touch-action: manipulation; }
+  #cover-foot { font-size: 13px; line-height: 1.4; color: #4a5a32; text-align: center; white-space: pre-line; }
+  #cover-foot[hidden] { display: none; }
+  /* The title and the round picker use the results card's own cover column, so every screen speaks the same
+     language: paper, ink, one inverted cursor. The title rows are taller than the results rows because a
+     finger picks them. */
+  /* The title is a centred column: the little crossword, then (in Chinese) the name, the menu and the keys.
+     The art uses the board's own .cell look, so it reads as a puzzle the player has already met. */
+  #cover.title { gap: 8px; padding: 10px 12px; justify-content: center; }
+  #title-art { display: none; }
+  #cover.title #title-art { display: grid; grid-template-columns: repeat(8, 20px); grid-auto-rows: 20px; gap: 1px; }
+  #cover.title #title-art .cell { font-size: 13px; }
+  #cover.title #title-art .cell.pending { color: #4a5a32; }
+  #cover.title #cover-text { font-size: 22px; font-weight: bold; letter-spacing: 4px; line-height: 1.2; margin: 0; }
+  #cover.title #cover-list { display: flex; flex-direction: column; gap: 8px; max-width: 240px; font-size: 15px; }
+  #cover.title #cover-list li { box-sizing: border-box; height: 44px; line-height: 1; padding: 0 8px 0 14px; border-bottom: 0;
+    letter-spacing: 0; text-transform: none; display: flex; align-items: center; text-align: left; }
+  #cover.title #cover-list li .ico { flex: none; width: 16px; height: 16px; display: flex; }
+  #cover.title #cover-list li .rname { margin-left: 12px; text-align: left; }
+  #cover.title #cover-list li .label { margin-left: 12px; display: flex; flex-direction: column; align-items: flex-start; line-height: 1.2; }
+  #cover.title #cover-list li .prog { margin-left: auto; font-size: 13px; color: #4a5a32; }
+  #cover.title #cover-list li.sel { background: #1f2a14; color: #a3ad7e; }
+  #cover.title #cover-list li.sel .prog { color: #a3ad7e; }
+  #cover.title #cover-list li.locked { padding-left: 12px; color: #4a5a32; border: 2px dashed #4a5a32; }
+  /* the locked row's name sits in .label, which already has the icon's 12px gap: its own margin would double it */
+  #cover.title #cover-list li.locked .label .rname { margin-left: 0; }
+  #cover.title #cover-list li.locked .lock { font-size: 12px; }
+  #cover.title #cover-list li.locked.sel { color: #a3ad7e; border-color: #a3ad7e; }
+  #cover.pick { gap: 6px; padding: 8px; }
+  #cover.pick #cover-text { font-size: 13px; line-height: 1.2; }
+  #cover.pick #cover-list { display: grid; grid-template-columns: repeat(5, 44px); gap: 8px; width: auto; max-width: none; }
+  #cover.pick #cover-list li { width: 44px; height: 44px; line-height: 40px; padding: 0; text-align: center; font-size: 17px;
+    font-weight: bold; letter-spacing: 0; text-transform: none; border: 2px solid transparent; }
+  #cover.pick #cover-list li.cleared { background: #7d8a58; color: #1f2a14; }
+  #cover.pick #cover-list li.next { background: #a3ad7e; color: #1f2a14; border: 2px dashed #1f2a14; }
+  #cover.pick #cover-list li.locked { background: #a3ad7e; color: #4a5a32; }
+  #cover.pick #cover-list li.sel { background: #1f2a14; color: #a3ad7e; border-color: #1f2a14; }
+  #cover.pick #cover-list li.sel.next { border-color: #a3ad7e; }
+  /* a refused locked round says why in the footer for a moment; ink keeps it above the page hint's tone */
+  #cover-foot.ink { color: #1f2a14; }
+  /* the way out of a round: a small panel on top of the round, not a whole screen */
+  #cover.confirm { inset: auto; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 268px; max-width: calc(100% - 24px);
+    padding: 16px; gap: 10px; border: 2px solid #1f2a14; box-shadow: 6px 6px 0 #4a5a32; overflow: visible; }
+  /* two choices side by side, each a full finger target; the buttons carry the keys, so there is no footer */
+  #cover-actions { display: flex; gap: 8px; justify-content: center; }
+  #cover-actions[hidden] { display: none; }
+  #cover.confirm #cover-actions button { box-sizing: border-box; min-width: 96px; min-height: 44px; padding: 0 12px; }
+  #cover.confirm #cover-btn2 { background: #a3ad7e; color: #1f2a14; border: 2px solid #1f2a14; box-shadow: none; }
+  /* The results card is its own calm column: the list, the chosen word's whole line below it, then NEXT ROUND.
+     The detail box keeps its three lines whichever item is chosen, so nothing jumps as the cursor moves. */
+  #cover.done { gap: 8px; padding: 8px 12px; }
+  #cover.done #cover-text { font-size: 16px; line-height: 1.3; }
+  #cover.done #cover-list li { padding: 0 24px 0 6px; position: relative; }
+  #cover.done #cover-list li.sel { background: #1f2a14; color: #a3ad7e; border-bottom-color: #1f2a14; }
+  /* the word book mark at the right end of a row: a 10x14 ribbon with a V notch, drawn in CSS.
+     In the book it is solid ink; not in the book (or unknown) it is a hollow dashed outline in the
+     dark tone. On the selected, inverted row both become paper so they stay visible. */
+  .mark { position: absolute; right: 6px; top: 4.5px; width: 10px; height: 14px; box-sizing: border-box;
+    border: 1px dashed #4a5a32; border-bottom: 0; pointer-events: none; }
+  /* the pseudo-elements sit in the 8x13 padding box (1px side and top borders), so the notch runs
+     border-box (0,14) -> (5,10.64) -> (10,14), the same V as the filled ribbon's clip-path */
+  .mark::before, .mark::after { content: ""; position: absolute; width: 6px; height: 1px; border-top: 1px dashed #4a5a32; }
+  .mark::before { left: 4px; top: 9.6px; transform-origin: 0 0; transform: rotate(34deg); }
+  .mark::after { left: -1px; top: 13px; transform-origin: 0 0; transform: rotate(-34deg); }
+  .mark.book { border: 0; background: #1f2a14;
+    clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 76%, 0 100%); }
+  .mark.book::before, .mark.book::after { display: none; }
+  #cover.done #cover-list li.sel .mark { border-color: #a3ad7e; }
+  #cover.done #cover-list li.sel .mark::before, #cover.done #cover-list li.sel .mark::after { border-top-color: #a3ad7e; }
+  #cover.done #cover-list li.sel .mark.book { background: #a3ad7e; }
+  #cover-detail { display: none; width: 100%; max-width: 280px; box-sizing: border-box; height: 66px; padding: 6px;
+    overflow: hidden; text-align: left; font-size: 14px; line-height: 18px; overflow-wrap: anywhere; text-overflow: ellipsis;
+    color: #1f2a14; box-shadow: inset 0 1px 0 #4a5a32; }
+  #cover-detail.dark { color: #4a5a32; }
+  #cover.done #cover-detail { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+  #cover.done #cover-btn.outline { background: #a3ad7e; color: #1f2a14; border: 2px solid #1f2a14; box-shadow: none; padding: 8px 20px; }
+  @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-3px); } 75% { transform: translateX(3px); } }
+  .shake { animation: shake 0.22s linear; }
+  /* A letter landing in its cell: it grows past its size and settles, in ink for a moment. The colours change in
+     steps (step-end), never as a fade, so every pixel stays one of the four tones; only the size eases. */
+  @keyframes pop { 0% { transform: scale(0.3); } 55% { transform: scale(1.3); } 100% { transform: scale(1); } }
+  @keyframes ink { 0% { background: #1f2a14; color: #a3ad7e; border-color: #1f2a14; } }
+  .cell.pop { animation: pop 0.3s ease-out, ink 0.3s step-end; position: relative; z-index: 1; }
+  #hint.pop { animation: pop 0.35s ease-out; }
+  /* the round is clear: the whole grid blinks twice */
+  @keyframes flash { 0%, 50% { background: #1f2a14; color: #a3ad7e; border-color: #1f2a14; }
+    25%, 75% { background: #7d8a58; color: #1f2a14; border-color: #1f2a14; } }
+  #board.flash .cell { animation: flash 1s step-end; }
+</style>
+</head>
+<body>
+<header>
+  <span id="round">第 1 关</span>
+  <span class="btns"><button id="help" type="button" aria-label="玩法">?</button><button id="hint" type="button">提示 0</button></span>
+</header>
+<main>
+  <div id="typed"><span id="entry"></span></div>
+  <div id="stage">
+    <div id="wheel" aria-label="字母盘"><div id="disc"></div><svg id="lines" width="154" height="154"></svg><div id="finger" hidden></div></div>
+    <div id="board" aria-label="格子"></div>
+  </div>
+  <div id="note"><span id="note-text"></span></div>
+</main>
+<footer id="goal"></footer>
+<div id="cover">
+  <div id="title-art" aria-hidden="true"></div>
+  <p id="cover-text"></p>
+  <ul id="cover-list" hidden></ul>
+  <div id="cover-detail"></div>
+  <div id="cover-actions"><button id="cover-btn" type="button"></button><button id="cover-btn2" type="button" hidden></button></div>
+  <div id="cover-foot" hidden></div>
+</div>
+<script>
+(function () {
+  "use strict";
+
+  /* two languages: PAD.lang is "zh" or "en"; a runtime before 0.4.0 has none, so Chinese is the default */
+  var LANG = typeof PAD !== "undefined" && PAD.lang === "en" ? "en" : "zh";
+  var TXT = {
+    zh: {
+      round: "第 {n} 关", hint: "提示 {n}", loading: "翻字典…",
+      error: "这台掌机的词典打不开", retry: "再试一次",
+      appName: "拼字格", cont: "继续 · 第 {n} 关", rounds: "选关", random: "随机关", randomLock: "通关 100 关后开放",
+      howto: "玩法", pickHead: "第 {a}-{b} 关", pickFoot: "◄ ► 翻页", titleKeys: "↑↓ 选 · A 打开",
+      lockedRound: "先过第 {n} 关",
+      replay: " · 重玩", badge: "随机", doneRandom: "随机关完成",
+      practice: "练习", practiceTitle: "会玩了！", practiceBack: "回主界面",
+      practiceKeys: "方向键选字母，A 加上，B 删掉一个，START 提交，SELECT 打乱。\n结算卡上 A 收进生词本，B 移出。\n关卡里没输入字母时按 B 回主界面。",
+      leave: "回到主界面？", leaveYes: "回去", leaveNo: "留下",
+      goal: "划过字母拼单词，填满右边的格子",
+      demo: "看：按住字母，划过 {w}",
+      demoEnd: "拼对了，词就填进格子，下面显示中文，还会读出来。\n\n轮到你了：找出格子里剩下的词。",
+      start: "开始",
+      help: "玩法\n\n按住字母盘上的一个字母，不松手划过别的字母，拼出一个英文单词，松手提交。\n拼对格子里的词，它就填进格子，下面显示中文并读出来；填上的词点一下可以再看一遍。填满格子就过关。\n不在格子里的真词是奖励词，每个换 1 个提示。点「提示」看一个空词的中文。\n按键：方向键选字母，A 加上，B 删掉一个，START 提交，SELECT 打乱字母。\n结算卡：A 收进生词本，B 移出。",
+      ok: "知道了",
+      done: "第 {n} 关完成", doneBtn: "下一关", bonus: "奖励词 {w}：提示 +1", bonusPractice: "奖励词 {w}：练习不加提示",
+      sum: "奖励词 {b} 个 · 提示 {n}",
+      bookAdded: "已加入生词本", bookRemoved: "已移出生词本", bookDenied: "没有允许使用生词本", bookFull: "生词本满了",
+      bookTip: "A 收进生词本 · B 移出",
+      noHints: "先找奖励词换提示", hintHead: "提示：", noEntry: "词典里没有这个词",
+      noWord: "不是这里的词", again: "这个词已经填上了", againBonus: "这个奖励词已经算过了"
+    },
+    en: {
+      round: "ROUND {n}", hint: "HINT {n}", loading: "Looking up…",
+      error: "This handheld's dictionary won't open.", retry: "TRY AGAIN",
+      appName: "CROSSING", cont: "CONTINUE · ROUND {n}", rounds: "ROUNDS", random: "RANDOM", randomLock: "Opens after round 100",
+      howto: "HOW TO PLAY", pickHead: "ROUNDS {a}-{b}", pickFoot: "◄ ► page", titleKeys: "↑↓ pick · A open",
+      lockedRound: "Clear round {n} first",
+      replay: " · REPLAY", badge: "RANDOM", doneRandom: "RANDOM CLEAR",
+      practice: "PRACTICE", practiceTitle: "You've got it!", practiceBack: "BACK TO TITLE",
+      practiceKeys: "Arrows pick a letter, A adds, B deletes, START sends, SELECT shuffles.\nOn the results card A adds to the word book, B removes.\nB with nothing typed goes back to the title.",
+      leave: "Back to the title?", leaveYes: "LEAVE", leaveNo: "STAY",
+      goal: "Swipe letters into words to fill the grid",
+      demo: "Watch: hold and slide {w}",
+      demoEnd: "A right word fills in, its meaning shows below, and you hear it.\n\nYour turn: find the other words in the grid.",
+      start: "START",
+      help: "HOW TO PLAY\n\nHold a letter, slide across others to spell; let go to send it.\nA right word fills in, its meaning below. Tap it to hear it again. Fill the grid to clear.\nAny other real word is a bonus: 1 hint; HINT shows an open word.\nKeys: arrows pick, A add, B delete, START send, SELECT shuffle.\nResults: A adds, B removes.",
+      ok: "OK",
+      done: "ROUND {n} CLEAR", doneBtn: "NEXT ROUND", bonus: "Bonus word {w}: hint +1", bonusPractice: "Bonus word {w}: no hint in practice",
+      sum: "Bonus words {b} · hints {n}",
+      bookAdded: "Added to word book", bookRemoved: "Removed from word book", bookDenied: "Word book not allowed", bookFull: "The word book is full",
+      bookTip: "A: add to word book · B: remove",
+      noHints: "Earn a hint with a bonus word", hintHead: "HINT: ", noEntry: "No entry in the dictionary",
+      noWord: "Not a word here", again: "Already in the grid", againBonus: "Bonus word already counted"
+    }
+  }[LANG];
+  function tx(key, n) { return TXT[key].replace("{n}", n); }
+  document.documentElement.lang = LANG === "zh" ? "zh-CN" : "en";
+
+  var INK = "#1f2a14", MID = "#7d8a58";
+  var GRID = 7;                 /* the puzzle's grid is at most 7x7, so the letters stay readable on 331x359 */
+  var WHEEL_R = 52, WHEEL_H = 154;
+  /* The practice round is built without PAD.dict.words: a fixed seed's letters and a fixed short list. The seed
+     1986 places exactly four words (star, rats, arts, tar), so the demo has a three-letter word to spell and the
+     rest is a short hunt. The same rnd seed gives everyone the same grid and the same wheel order. */
+  var PRACTICE = ["star", "rats", "arts", "tar", "rat", "art", "sat"];
+  var PRACTICE_SEED = 1986;
+
+  /* The title menu's pixel icons: 8x8 strings, "#" a filled pixel, drawn at 2 px each as inline SVG rects. */
+  var ICONS = {
+    continue: [".#......", ".##.....", ".###....", ".####...", ".####...", ".###....", ".##.....", ".#......"],
+    rounds: ["###.###.", "#.#.#.#.", "###.###.", "........", "###.###.", "#.#.#.#.", "###.###.", "........"],
+    random: ["#######.", "#.....#.", "#.#...#.", "#..#..#.", "#...#.#.", "#.....#.", "#######.", "........"],
+    howto: ["..###...", ".#...#..", ".....#..", "....#...", "...#....", "...#....", "........", "...#...."]
+  };
+  function iconSvg(name) {
+    var px = ICONS[name], out = '<svg viewBox="0 0 16 16" width="16" height="16" shape-rendering="crispEdges" aria-hidden="true" focusable="false">', y, x;
+    for (y = 0; y < 8; y++) for (x = 0; x < 8; x++) {
+      if (px && px[y].charAt(x) === "#") out += '<rect x="' + (x * 2) + '" y="' + (y * 2) + '" width="2" height="2" fill="currentColor"/>';
+    }
+    return out + "</svg>";
+  }
+
+  /* mulberry32: a tiny seeded random. The round number seeds it, so round 37 is the same puzzle on every phone. */
+  function mulberry32(a) {
+    return function () {
+      a |= 0; a = a + 0x6D2B79F5 | 0;
+      var t = Math.imul(a ^ a >>> 15, 1 | a);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  function isWord(w) { return typeof w === "string" && /^[a-z]{3,7}$/.test(w); }
+
+  var roundEl = document.getElementById("round"), hintEl = document.getElementById("hint"), helpEl = document.getElementById("help");
+  var wheelEl = document.getElementById("wheel"), boardEl = document.getElementById("board");
+  var noteTextEl = document.getElementById("note-text"), goalEl = document.getElementById("goal");
+  var linesEl = document.getElementById("lines"), fingerEl = document.getElementById("finger");
+  var coverEl = document.getElementById("cover"), coverText = document.getElementById("cover-text"), coverBtn = document.getElementById("cover-btn");
+  var coverBtn2 = document.getElementById("cover-btn2"), coverActions = document.getElementById("cover-actions");
+  var titleArt = document.getElementById("title-art");
+  var entryEl = document.getElementById("entry"), coverList = document.getElementById("cover-list"), detailEl = document.getElementById("cover-detail");
+  var footEl = document.getElementById("cover-foot");
+
+  var phase = "load";           /* load | demo | demoEnd | play | clear (the blink and the tune) | help | done | practice
+                                   | error | title | pick | leave (the small way-out question) */
+  var state = {
+    round: 1, hints: 0, done: [],
+    cleared: 0,                 /* the highest fixed round cleared, 0-100 */
+    random: 0,                  /* how many random rounds cleared */
+    mode: "fixed",              /* "fixed", "random" or "practice": practice is a visit from the title that is never saved */
+    seed: "", wheel: [], placed: [], words: [], wordSet: {},
+    entry: [], cursor: 0,
+    view: null, cells: {},
+    hinted: [], hintTurn: 0,
+    mean: {}                    /* word -> the line in the player's language, kept from each lookup for the round's results card */
+  };
+  /* a small read-only window on the round, for a curious player and for the e2e test (the app needs no globals) */
+  Object.defineProperty(state, "phase", { get: function () { return phase; }, enumerable: true });
+  window.game = state;
+
+  var rnd = mulberry32(1), gen = 0, taught = false, dragging = null, noteSeq = 0, hintBusy = false;
+  var noteKind = "", noteWord = "";   /* what the newest note action was: "tap" remembers its word */
+  var tapCell = "", tapTurn = 0, tapDown = null, tapPending = {};   /* a filled word tapped: the cell, which word, a guard for one lookup */
+  var rowDown = null;           /* a pointerdown on a results row: only a tap on it selects the word */
+  var keyMode = false;          /* the cursor square shows only once the player uses the keys: on touch it looked like a pick */
+  var pos = [];                 /* the centre of each wheel letter, in the wheel's own pixels, for the line */
+  var demoTimers = [], demoWord = null, helpBack = null;
+  var fxTimers = [], results = null, resultSum = "", pick = 0;   /* the results card, the summary line, and the ring's cursor (0 = NEXT) */
+  var bookMarks = [], bookBusy = false, bookRefreshed = false, bookSeq = 0;   /* which result words are in the player's word book */
+  var bookTip = false;         /* the one-time A/B hint: shown once, then remembered in the save */
+  var bookTap = false;         /* a bookmark-end tap is selecting to toggle: its answer, not the hint, takes the box */
+  var dictAt = 0;              /* when the last PAD.dict call was made or settled: all share the 10-a-second limit */
+  var bookTimer = null, pickSeq = 0;   /* the detail box's word-book line, and a token so a moving cursor wins */
+  var savedRound = 1, savedHints = 0, savedDone = [];
+  var pending = { round: 1, hints: 0, done: [] };   /* what to ask for again after a dictionary error */
+  /* the main line, the one save() writes: a replay's found words stay in memory, and a random round is not saved
+     as a round number, so both leave these alone */
+  var replay = false, mainRound = 1, mainDone = [];
+  var titleRows = [], titlePick = 0, pickPage = 0, pickAt = 0, pickMsgTimer = null;
+  var titleGuardAt = 0;   /* a cover just closed onto the title: its rows are under the same finger for a moment */
+
+  goalEl.textContent = TXT.goal;
+
+  function keyOf(r, c) { return r + "," + c; }
+
+  function updateHeader() {
+    if (state.mode === "practice") {
+      roundEl.textContent = TXT.practice;
+      roundEl.className = "badge";
+    } else if (state.mode === "random") {
+      roundEl.textContent = TXT.badge;
+      roundEl.className = "badge";
+    } else {
+      roundEl.textContent = tx("round", state.round) + (replay ? TXT.replay : "");
+      roundEl.className = "";
+    }
+    /* hints and the rules page belong to a round: practice is the how-to, and its hint/bonus rules would contradict it */
+    hintEl.hidden = state.mode === "practice";
+    helpEl.hidden = state.mode === "practice";
+    hintEl.textContent = tx("hint", state.hints);
+    hintEl.classList.toggle("off", state.hints < 1);
+  }
+  /* The note has one order: the newest action wins. A sync write or the start of an async lookup bumps noteSeq;
+     an answer writes only while its token is current. A tap also records its word, so a second tap on the same
+     uncached word waits for the one lookup already on its way and still shows that line when it arrives. */
+  function noteStart(kind, word) {
+    noteSeq++;
+    noteKind = kind || "";
+    noteWord = word || "";
+    return noteSeq;
+  }
+  function setNote(s, kind, word) {
+    noteStart(kind, word);
+    noteTextEl.textContent = s || "";
+  }
+
+  /* The line under the grid follows the player's language. PAD.lang is fixed when the app starts, so this is the
+     same choice for the whole round. English entries carry WordNet definitions in en; the Chinese ones are in zh.
+     A missing first choice falls back to the other, and a missing entry is an empty line. */
+  function meaning(entry) {
+    if (!entry) return "";
+    var zh = entry.zh && entry.zh.length ? entry.zh[0] : "";
+    var en = entry.en && entry.en.length ? entry.en[0] : "";
+    return LANG === "en" ? (en || zh) : (zh || en);
+  }
+
+  /* A hint must not give its own answer away: "river" cannot appear as "a river of..." in the line. The word's
+     simple forms (a final s, es, ed or ing taken off) count too. Take the first English line that has none of
+     them; if every line has one, mask them in the first line, so the player still gets a usable definition. */
+  function formsOf(word) {
+    var w = String(word || "").toLowerCase(), out = [], tails = ["ing", "ed", "es", "s"], i, stem;
+    if (!w) return out;
+    out.push(w);
+    for (i = 0; i < tails.length; i++) {
+      if (w.length > tails[i].length && w.slice(-tails[i].length) === tails[i]) {
+        stem = w.slice(0, -tails[i].length);
+        /* one-letter stems ("s" from "sing") are not forms of the word; two-letter ones ("do" from "does") are */
+        if (stem.length >= 2) out.push(stem);
+      }
+    }
+    return out;
+  }
+  function hasForm(text, forms) {
+    var t = String(text || ""), lower = t.toLowerCase(), i, f;
+    for (i = 0; i < forms.length; i++) {
+      f = forms[i];
+      if (!f) continue;
+      /* a short form is a whole word ("do" is in "do", not in "document"); longer forms may sit inside one */
+      if (f.length < 4 ? new RegExp("\\b" + f + "\\b", "i").test(t) : lower.indexOf(f) >= 0) return true;
+    }
+    return false;
+  }
+  function maskForms(text, forms) {
+    var list = forms.filter(Boolean).sort(function (a, b) { return b.length - a.length; });
+    var parts = list.map(function (f) { return f.length < 4 ? "\\b" + f + "\\b" : f; });
+    return parts.length ? String(text || "").replace(new RegExp(parts.join("|"), "gi"), "___") : String(text || "");
+  }
+  function hintMeaning(entry, word) {
+    if (!entry) return "";
+    var zh = entry.zh && entry.zh.length ? entry.zh[0] : "";
+    var en = entry.en || [], forms, i;
+    /* the line meaning() would show: only an English one may give the answer away */
+    if (LANG !== "en" && zh) return zh;
+    if (!en.length) return meaning(entry);
+    forms = formsOf(word);
+    for (i = 0; i < en.length; i++) if (!hasForm(en[i], forms)) return en[i];
+    return maskForms(en[0], forms);
+  }
+
+  /* ---------- the dictionary calls: PAD.dict.words and PAD.dict.lookup ---------- */
+
+  function wait(ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); }
+
+  /* A round build spends up to nine PAD.dict calls, lookups and the word book spend more, and the limit is ten a
+     second for the whole app. Every call records when it settled, so startRound can wait that window out before
+     its own first call. The calls themselves and their seeds are untouched. */
+  function dictSettled(p) {
+    dictAt = Date.now();         /* stamped when made and again when answered, so a slow answer still gets its full second */
+    if (!p || !p.then) return p;
+    return p.then(function (v) { dictAt = Date.now(); return v; },
+                  function (e) { dictAt = Date.now(); throw e; });
+  }
+  function dictWords(q) { return dictSettled(PAD.dict.words(q)); }
+  function dictLookup(w) { return dictSettled(PAD.dict.lookup(w)); }
+
+  /* PAD.dict.words({len, level, max}) -> {words, more} | null. level 1 is the most common 2000 words, so the
+     seed is a word everyone knows. The grid takes only level 2 (the most common 5000), so every word to find is
+     one a learner may know; any real word from the whole list (level 5) counts as a bonus word.
+     A seed whose letters do not cross into a grid of 4 or more words is not a dictionary failure: walk on to
+     the next seed. Each seed costs two calls, so four seeds and the seed query make nine calls in a second (the
+     limit is ten); before a fifth seed, wait out the window. Only a null or a rejected call is a dictionary error. */
+  function pickSeed(L) {
+    return dictWords({ len: L, level: 1, max: 500 }).then(function (page) {
+      if (!page || !page.words || !page.words.length) return null;
+      var seeds = page.words, start = Math.floor(rnd() * seeds.length), at = 0, burst = 0;
+      function attempt() {
+        if (burst >= 4) { burst = 0; return wait(1100).then(tryOne); }
+        return tryOne();
+        function tryOne() {
+          burst++;
+          var seed = seeds[(start + at) % seeds.length];
+          at++;
+          return Promise.all([
+            dictWords({ letters: seed, len: [3, L], level: 2, max: 500 }),   /* the grid's words */
+            dictWords({ letters: seed, len: [3, L], level: 5, max: 500 })    /* every real word: bonus words */
+          ]).then(function (rs) {
+            if (!rs[0] || !rs[0].words || !rs[1] || !rs[1].words) return null;   /* unreadable: the error screen, not another seed */
+            var common = rs[0].words.slice(), words = rs[1].words.slice();
+            if (common.indexOf(seed) < 0) common.unshift(seed);
+            if (words.indexOf(seed) < 0) words.unshift(seed);
+            var built = buildGrid(seed, common);
+            if (built.placed.length < 4) return attempt();   /* too few crossings: try the next seed */
+            return { seed: seed, words: words, built: built };
+          });
+        }
+      }
+      return attempt();
+    });
+  }
+
+  /* ---------- the puzzle: place words greedily, longest first, each crossing a placed word ---------- */
+
+  function fitsAt(map, word, r, c, dir) {
+    var dr = dir === "v" ? 1 : 0, dc = dir === "h" ? 1 : 0;
+    var i, rr, cc, ch, cross = 0;
+    /* the cell just before and just after the word must stay empty: no two words end to end */
+    var br = r - dr, bc = c - dc;
+    if (br >= 0 && br < GRID && bc >= 0 && bc < GRID && map[keyOf(br, bc)]) return -1;
+    var ar = r + dr * word.length, ac = c + dc * word.length;
+    if (ar >= 0 && ar < GRID && ac >= 0 && ac < GRID && map[keyOf(ar, ac)]) return -1;
+    for (i = 0; i < word.length; i++) {
+      rr = r + dr * i; cc = c + dc * i;
+      if (rr < 0 || rr >= GRID || cc < 0 || cc >= GRID) return -1;
+      ch = map[keyOf(rr, cc)];
+      if (ch) {
+        if (ch !== word.charAt(i)) return -1;
+        cross++;
+      } else {
+        /* no letter beside a non-crossing cell: two words may touch only where they cross */
+        var r1 = dir === "h" ? rr - 1 : rr, c1 = dir === "h" ? cc : cc - 1;
+        var r2 = dir === "h" ? rr + 1 : rr, c2 = dir === "h" ? cc : cc + 1;
+        if (r1 >= 0 && r1 < GRID && c1 >= 0 && c1 < GRID && map[keyOf(r1, c1)]) return -1;
+        if (r2 >= 0 && r2 < GRID && c2 >= 0 && c2 < GRID && map[keyOf(r2, c2)]) return -1;
+      }
+    }
+    return cross;
+  }
+
+  function boundsOf(placed) {
+    var minR = GRID, maxR = -1, minC = GRID, maxC = -1;
+    placed.forEach(function (p) {
+      var dr = p.dir === "v" ? 1 : 0, dc = p.dir === "h" ? 1 : 0;
+      for (var i = 0; i < p.word.length; i++) {
+        minR = Math.min(minR, p.r + dr * i); maxR = Math.max(maxR, p.r + dr * i);
+        minC = Math.min(minC, p.c + dc * i); maxC = Math.max(maxC, p.c + dc * i);
+      }
+    });
+    return { minR: minR, maxR: maxR, minC: minC, maxC: maxC };
+  }
+
+  /* the best crossing for one word: more crossings and a tighter grid win; ties go to the seeded random */
+  function bestPlacement(map, placed, word) {
+    var best = null, bestScore = -Infinity, ties = 0, k, rr, cc, ch, idx, d, dir, r, c, cross;
+    for (k in map) {
+      if (!Object.prototype.hasOwnProperty.call(map, k)) continue;
+      rr = +k.split(",")[0]; cc = +k.split(",")[1]; ch = map[k];
+      idx = -1;
+      while ((idx = word.indexOf(ch, idx + 1)) >= 0) {
+        for (d = 0; d < 2; d++) {
+          dir = d ? "v" : "h";
+          r = dir === "v" ? rr - idx : rr;
+          c = dir === "h" ? cc - idx : cc;
+          cross = fitsAt(map, word, r, c, dir);
+          if (cross < 1) continue;
+          var b = boundsOf(placed);
+          var dr = dir === "v" ? 1 : 0, dc = dir === "h" ? 1 : 0, i;
+          for (i = 0; i < word.length; i++) {
+            b.minR = Math.min(b.minR, r + dr * i); b.maxR = Math.max(b.maxR, r + dr * i);
+            b.minC = Math.min(b.minC, c + dc * i); b.maxC = Math.max(b.maxC, c + dc * i);
+          }
+          var area = (b.maxR - b.minR + 1) * (b.maxC - b.minC + 1);
+          var score = cross * 10 - area;
+          if (score > bestScore) { bestScore = score; best = { word: word, r: r, c: c, dir: dir }; ties = 1; }
+          else if (score === bestScore) { ties++; if (rnd() < 1 / ties) best = { word: word, r: r, c: c, dir: dir }; }
+        }
+      }
+    }
+    return best;
+  }
+
+  function buildGrid(seed, words) {
+    var map = {}, placed = [], i;
+    var c0 = Math.floor((GRID - seed.length) / 2), r0 = Math.floor((GRID - seed.length) / 2);
+    for (i = 0; i < seed.length; i++) map[keyOf(r0, c0 + i)] = seed.charAt(i);
+    placed.push({ word: seed, r: r0, c: c0, dir: "h" });
+    /* longest first, so the big words get the room; the word list's own order breaks ties */
+    var cand = words.map(function (w, n) { return { w: w, n: n }; })
+      .filter(function (x) { return x.w !== seed; })
+      .sort(function (a, b) { return b.w.length - a.w.length || a.n - b.n; });
+    for (i = 0; i < cand.length && placed.length < 6; i++) {
+      var p = bestPlacement(map, placed, cand[i].w);
+      if (!p) continue;
+      var dr = p.dir === "v" ? 1 : 0, dc = p.dir === "h" ? 1 : 0, j;
+      for (j = 0; j < p.word.length; j++) map[keyOf(p.r + dr * j, p.c + dc * j)] = p.word.charAt(j);
+      placed.push(p);
+    }
+    return { placed: placed, map: map };
+  }
+
+  /* ---------- starting a round ---------- */
+
+  function lenFor(round) { return round <= 10 ? 5 : round <= 40 ? 6 : 7; }
+
+  function fail() {
+    /* null (unreadable dictionary, or more than 10 calls a second) and a rejected call both land here */
+    phase = "error";
+    setNote("");
+    showCover(TXT.error, TXT.retry);
+  }
+
+  /* The plain card: the loading line, the tutorial's last page, the rules, an error. The results card has its
+     own shape and is drawn by showResults. The title and the picker have their own classes too. */
+  function showCover(text, button) {
+    coverEl.classList.remove("done", "title", "pick", "confirm");
+    coverText.hidden = false;
+    coverText.textContent = text;
+    coverList.innerHTML = "";
+    coverList.hidden = true;
+    coverBtn.textContent = button || "";
+    coverBtn.hidden = !button;
+    coverBtn.classList.remove("outline");
+    coverBtn2.hidden = true;
+    coverActions.hidden = !button;
+    footEl.hidden = true;
+    footEl.classList.remove("ink");
+    coverEl.hidden = false;
+  }
+  function hideCover() { coverEl.hidden = true; footEl.hidden = true; footEl.classList.remove("ink"); }
+
+  /* The results card. One row a grid word, no meaning in the row; the word under the cursor shows its whole
+     line in the detail box, and NEXT ROUND shows the bonus/hint summary there instead. reset puts the cursor
+     back on NEXT when the card first opens; the ? page comes back to the item the player had chosen. */
+  function showResults(reset) {
+    if (reset) pick = 0;
+    coverEl.classList.remove("title", "pick", "confirm", "help");
+    coverEl.classList.add("done");
+    coverText.hidden = false;
+    coverText.textContent = state.mode === "random" ? TXT.doneRandom : tx("done", state.round);
+    footEl.hidden = true;
+    footEl.classList.remove("ink");
+    coverList.innerHTML = "";
+    results.forEach(function (row, i) {
+      var li = document.createElement("li"), mark = document.createElement("span");
+      li.setAttribute("data-pick", String(i + 1));
+      li.textContent = row.word.toUpperCase();
+      mark.className = "mark";       /* the word book ribbon, drawn in CSS */
+      li.appendChild(mark);
+      coverList.appendChild(li);
+    });
+    if (reset) {
+      bookBusy = false;              /* a toggle still pending from the last card must not lock this one */
+      bookSeq++;                     /* nor may its answer (and its row index) land on this card */
+      bookMarks = results.map(function () { return false; });
+      bookRefreshed = false;
+      readBookMarks(false);
+    }
+    renderMarks();
+    coverList.hidden = false;
+    coverBtn.textContent = TXT.doneBtn;
+    coverBtn.hidden = false;
+    coverBtn2.hidden = true;
+    coverActions.hidden = false;
+    coverEl.hidden = false;
+    renderPick();
+  }
+  /* the four states of the card that change with the cursor: the inverted row, the detail line, and whether
+     the button is the chosen thing (ink) or merely drawn (outlined) */
+  function renderPick() {
+    var rows = coverList.querySelectorAll("li"), i, row = pick > 0 ? results[pick - 1] : null;
+    pickSeq++;
+    if (bookTimer) { clearTimeout(bookTimer); bookTimer = null; }
+    for (i = 0; i < rows.length; i++) rows[i].classList.toggle("sel", i + 1 === pick);
+    if (row) {
+      detailEl.textContent = row.mean || row.word.toUpperCase();
+      detailEl.classList.toggle("dark", !row.mean);
+    } else {
+      detailEl.textContent = resultSum;
+      detailEl.classList.add("dark");
+    }
+    coverBtn.classList.toggle("outline", pick > 0);
+    /* The first word the card selects teaches A and B once. It is saved the moment it shows, so it does not
+       come back; a word-book answer or a tap that reads the word still takes the box over (pickSeq). A tap on
+       a row's bookmark end is a toggle, not a read, so it waits for that answer instead. */
+    if (row && !bookTip && !bookTap) {
+      bookTip = true;
+      save();
+      flashDetail(TXT.bookTip);
+    }
+  }
+  function movePick(by) {
+    var n = results.length + 1;
+    pick = (pick + by + n) % n;
+    renderPick();
+    PAD.sfx("tick");
+  }
+  function pickWord(i, quiet) {
+    var row = results[i - 1];
+    if (!row) return;
+    if (pick !== i) { pick = i; renderPick(); PAD.sfx("tick"); }
+    if (!quiet) sayWord(row.word);
+  }
+
+  /* ---------- the word book, on the results card ---------- */
+
+  /* One PAD.dict.inBook call when the card opens, and one more after the first word is saved (the grant now
+     exists, so the other rows can say what they are). No grant yet, no permission or over the limit: null,
+     and every row stays hollow, which means "not in the book". */
+  function readBookMarks(refresh) {
+    if (!results || !results.length) return;
+    if (!PAD.dict || !PAD.dict.inBook) { if (!refresh) { bookMarks = results.map(function () { return false; }); renderMarks(); } return; }
+    var token = gen, seq = bookSeq, words = results.map(function (row) { return row.word; });
+    dictSettled(PAD.dict.inBook(words)).then(function (v) {
+      if (token !== gen || seq !== bookSeq || !Array.isArray(v) || v.length !== words.length) return;
+      bookMarks = v.map(function (b) { return b === true; });
+      renderMarks();
+    }, function () {});
+  }
+  function renderMarks() {
+    var rows = coverList.querySelectorAll("li"), i, mark;
+    for (i = 0; i < rows.length; i++) {
+      mark = rows[i].querySelector(".mark");
+      if (mark) mark.classList.toggle("book", bookMarks[i] === true);
+    }
+  }
+  /* The word book's answer in the detail box, then the chosen word's own line again. The box keeps its
+     height, so nothing moves; a cursor move or another answer takes the box over. */
+  function flashDetail(text) {
+    if (bookTimer) { clearTimeout(bookTimer); bookTimer = null; }
+    pickSeq++;
+    var seq = pickSeq;
+    detailEl.textContent = text;
+    detailEl.classList.add("dark");
+    bookTimer = setTimeout(function () {
+      bookTimer = null;
+      if (seq !== pickSeq || phase !== "done") return;
+      renderPick();
+    }, 1200);
+  }
+  /* The word book for one row: on adds it, off takes it out. The card's A, B and SELECT and the bookmarked end
+     of a row all come here. NEXT selected does nothing; a second call while one is pending is ignored, so the
+     row never disagrees with the word book. The guards stay: the card must still be up. */
+  function setBook(i, on) {
+    if (phase !== "done" || bookBusy) return;
+    var row = results && results[i];
+    if (!row || !PAD.dict || !PAD.dict.addWord || !PAD.dict.removeWord) return;
+    var was = bookMarks[i] === true;
+    if (on === was) return;
+    bookBusy = true;
+    var seq = ++bookSeq;       /* a read from before this change must not land on top of its answer */
+    var call = dictSettled(was ? PAD.dict.removeWord(row.word) : PAD.dict.addWord(row.word));
+    call.then(function (v) {
+      if (seq !== bookSeq) return;     /* the card is gone: touch nothing, not even bookBusy */
+      bookBusy = false;
+      if (phase !== "done") return;
+      if (v === "saved") {
+        bookMarks[i] = !was;
+        renderMarks();
+        PAD.sfx("ok");
+        /* an add means the player has met the word book: no one-time A/B hint any more (a tap add counts too) */
+        if (!was && !bookTip) { bookTip = true; save(); }
+        if (pick === i + 1) flashDetail(was ? TXT.bookRemoved : TXT.bookAdded);
+        if (!bookRefreshed) { bookRefreshed = true; readBookMarks(true); }
+      } else if (v === "denied") { PAD.sfx("err"); if (pick === i + 1) flashDetail(TXT.bookDenied); }
+      else if (v === "full") { PAD.sfx("err"); if (pick === i + 1) flashDetail(TXT.bookFull); }
+      else { PAD.sfx("err"); }         /* null: nothing changes */
+    }, function () {
+      if (seq !== bookSeq) return;     /* the card is gone: touch nothing, not even bookBusy */
+      bookBusy = false;
+      if (phase !== "done") return;
+      PAD.sfx("err");
+    });
+  }
+  /* SELECT flips the selected row; A only adds and B only removes, so the card never guesses. */
+  function toggleBook() {
+    if (phase !== "done" || pick === 0) return;
+    setBook(pick - 1, bookMarks[pick - 1] !== true);
+  }
+
+  /* ---------- the title, the round picker, the way out ---------- */
+
+  /* The title is a short menu, not a round: the results card's own column, its rows inverted like its cursor.
+     Once round 100 is cleared there is no round 101 to continue, so RANDOM takes the first place. */
+  function showTitle() {
+    clearPickMsg();
+    phase = "title";
+    coverEl.classList.remove("done", "help", "pick", "confirm");
+    coverEl.classList.add("title");
+    /* the art already spells CROSSING, so the English title needs no word under it */
+    coverText.textContent = LANG === "zh" ? TXT.appName : "";
+    coverText.hidden = LANG !== "zh";
+    buildTitleArt();
+    var firstRandom = state.cleared >= 100 && mainRound > 100;
+    titleRows = [];
+    if (firstRandom) titleRows.push({ kind: "random" });
+    else titleRows.push({ kind: "continue" });
+    titleRows.push({ kind: "pick" });
+    if (!firstRandom) titleRows.push({ kind: "random", locked: state.cleared < 100 });
+    titleRows.push({ kind: "help" });
+    if (titlePick >= titleRows.length) titlePick = 0;
+    coverList.innerHTML = "";
+    titleRows.forEach(function (row, i) {
+      var li = document.createElement("li"), name = "", prog = "", icon = row.kind;
+      li.setAttribute("data-row", String(i));
+      if (row.kind === "continue") name = tx("cont", mainRound);
+      else if (row.kind === "pick") name = TXT.rounds;
+      else if (row.kind === "random") name = TXT.random;
+      else name = TXT.howto;
+      if (icon === "pick") icon = "rounds";
+      if (icon === "help") icon = "howto";
+      /* Once round 100 is behind, the random count is the only number still moving, so it takes the place the
+         rounds' progress had. A count of none stays hidden, as a bare "×0" would only look like a bug. */
+      if (row.kind === "pick" && !firstRandom && state.cleared > 0) prog = state.cleared + "/100";
+      if (row.kind === "random" && firstRandom && state.random > 0) prog = "×" + state.random;
+      if (row.locked) {
+        /* locked looks locked even before the cursor lands on it: dark words, a dashed box, and the reason in it */
+        li.className = "locked";
+        li.innerHTML = '<span class="ico">' + iconSvg("random") + '</span><span class="label"><span class="rname">' +
+          TXT.random + '</span><span class="lock">' + TXT.randomLock + "</span></span>";
+      } else {
+        li.innerHTML = '<span class="ico">' + iconSvg(icon) + '</span><span class="rname">' + name + "</span>" +
+          (prog ? '<span class="prog">' + prog + "</span>" : "");
+      }
+      coverList.appendChild(li);
+    });
+    coverList.hidden = false;
+    coverBtn.hidden = true;
+    coverBtn2.hidden = true;
+    coverActions.hidden = true;
+    footEl.textContent = TXT.titleKeys;
+    footEl.hidden = false;
+    coverEl.hidden = false;
+    renderTitle();
+  }
+  /* W over the I of CROSSING and N under it: a tiny board that already says the game's name. */
+  function buildTitleArt() {
+    titleArt.innerHTML = "";
+    function artCell(ch, on, r, c) {
+      var el = document.createElement("div");
+      el.className = "cell" + (on ? " on" : " pending");
+      el.textContent = ch;
+      el.style.gridRow = String(r);
+      el.style.gridColumn = String(c);
+      titleArt.appendChild(el);
+    }
+    artCell("W", false, 1, 6);
+    "CROSSING".split("").forEach(function (ch, i) { artCell(ch, true, 2, i + 1); });
+    artCell("N", false, 3, 6);
+  }
+  function renderTitle() {
+    var rows = coverList.querySelectorAll("li"), i;
+    for (i = 0; i < rows.length; i++) rows[i].classList.toggle("sel", i === titlePick);
+  }
+  /* one menu row: the first row START would open, and what A or a tap does */
+  function openTitleRow(i) {
+    var row = titleRows[i];
+    if (!row) return;
+    titlePick = i;
+    renderTitle();
+    if (row.kind === "continue") { PAD.sfx("ok"); openRound(mainRound); }
+    else if (row.kind === "pick") { PAD.sfx("tap"); showPick(); }
+    else if (row.kind === "random") {
+      if (row.locked) { PAD.sfx("err"); return; }
+      PAD.sfx("ok"); startRandom();
+    } else { PAD.sfx("ok"); startPractice(); }
+  }
+  /* HOW TO PLAY teaches by doing: the fixed short round below, then a card of the keys. It is a visit, not a
+     round of the main line, so it leaves the save alone and can run as often as the player likes. */
+  function startPractice() {
+    startRound(1, state.hints, [], { practice: true });
+  }
+
+  /* A click on a locked round plays err and says why in the footer for 1.5 s; a newer press or page turn brings
+     the paging hint back at once, and leaving the picker drops the timer with the screen. */
+  function clearPickMsg() {
+    if (pickMsgTimer) { clearTimeout(pickMsgTimer); pickMsgTimer = null; }
+    if (phase === "pick") { footEl.classList.remove("ink"); footEl.textContent = TXT.pickFoot; }
+  }
+  function showLockedMsg() {
+    if (pickMsgTimer) clearTimeout(pickMsgTimer);
+    footEl.textContent = TXT.lockedRound.replace("{n}", state.cleared + 1);
+    footEl.classList.add("ink");
+    pickMsgTimer = setTimeout(function () {
+      pickMsgTimer = null;
+      if (phase !== "pick") return;
+      footEl.classList.remove("ink");
+      footEl.textContent = TXT.pickFoot;
+    }, 1500);
+  }
+
+  /* The picker: four pages of twenty-five, the cleared rounds solid on mid, the next one dashed on paper, the
+     later ones dark and closed. The borders and fills are the only difference between the three, so a glance
+     down the page says how far the player has come. */
+  function showPick() {
+    phase = "pick";
+    coverEl.classList.remove("title", "done", "help", "confirm");
+    coverEl.classList.add("pick");
+    coverText.hidden = false;
+    /* the cursor starts on the round to continue; after round 100 that is the last one, which is already cleared */
+    var focus = Math.max(1, Math.min(100, state.cleared + 1));
+    pickPage = Math.floor((focus - 1) / 25);
+    pickAt = (focus - 1) % 25;
+    fillPicker();
+    coverBtn.hidden = true;
+    coverBtn2.hidden = true;
+    coverActions.hidden = true;
+    footEl.classList.remove("ink");
+    footEl.textContent = TXT.pickFoot;
+    footEl.hidden = false;
+    coverEl.hidden = false;
+  }
+  function fillPicker() {
+    var first = pickPage * 25, i, n, li;
+    coverList.innerHTML = "";
+    for (i = 0; i < 25; i++) {
+      n = first + i + 1;
+      li = document.createElement("li");
+      li.setAttribute("data-n", String(n));
+      li.textContent = String(n);
+      li.className = n <= state.cleared ? "cleared" : n === state.cleared + 1 ? "next" : "locked";
+      coverList.appendChild(li);
+    }
+    coverText.textContent = TXT.pickHead.replace("{a}", first + 1).replace("{b}", first + 25);
+    coverList.hidden = false;
+    renderPicker();
+  }
+  function renderPicker() {
+    var rows = coverList.querySelectorAll("li"), i;
+    for (i = 0; i < rows.length; i++) rows[i].classList.toggle("sel", i === pickAt);
+  }
+  /* Arrows move in the 5x5; Left on the first column and Right on the last turn the page and keep the row, so
+     the four pages are one long shelf the player walks along. */
+  function movePickCursor(b) {
+    clearPickMsg();
+    var row = Math.floor(pickAt / 5), col = pickAt % 5;
+    if (b === "up") row = Math.max(0, row - 1);
+    else if (b === "down") row = Math.min(4, row + 1);
+    else if (b === "left") {
+      if (col === 0) { pickPage = (pickPage + 3) % 4; pickAt = row * 5 + 4; fillPicker(); PAD.sfx("tick"); return; }
+      col--;
+    } else if (b === "right") {
+      if (col === 4) { pickPage = (pickPage + 1) % 4; pickAt = row * 5; fillPicker(); PAD.sfx("tick"); return; }
+      col++;
+    }
+    pickAt = row * 5 + col;
+    renderPicker();
+    PAD.sfx("tick");
+  }
+  function openPicked() {
+    var n = pickPage * 25 + pickAt + 1;
+    if (n > state.cleared + 1) { PAD.sfx("err"); showLockedMsg(); return; }   /* a locked round says why */
+    clearPickMsg();
+    PAD.sfx("ok");
+    openRound(n);
+  }
+
+  /* One way in for the title, the picker and NEXT ROUND: a cleared round is a replay, the next one is the main
+     line, and anything later is locked (the picker guards it; this is the second lock). */
+  function openRound(n) {
+    if (n > 100) { startRandom(); return; }
+    if (n <= state.cleared) startRound(n, state.hints, [], { replay: true });
+    else if (n === state.cleared + 1) startRound(n, state.hints, n === mainRound ? mainDone.slice() : []);
+    else showPick();
+  }
+  function startRandom() {
+    /* a number outside 1-100, so a random round can never be mistaken for a fixed one */
+    startRound(101, state.hints, [], { random: true, seed: Date.now() });
+  }
+
+  /* B in an empty entry asks once: the words found are saved after every one, but a thumb can find B by accident */
+  function showLeave() {
+    phase = "leave";
+    coverEl.classList.remove("title", "pick", "done", "help");
+    coverEl.classList.add("confirm");
+    coverText.hidden = false;
+    coverText.textContent = TXT.leave;
+    coverList.innerHTML = "";
+    coverList.hidden = true;
+    /* the two buttons carry their keys, so the panel needs no footer to explain them */
+    coverBtn.textContent = "A " + TXT.leaveYes;
+    coverBtn.hidden = false;
+    coverBtn.classList.remove("outline");
+    coverBtn2.textContent = "B " + TXT.leaveNo;
+    coverBtn2.hidden = false;
+    coverActions.hidden = false;
+    footEl.hidden = true;
+    footEl.classList.remove("ink");
+    coverEl.hidden = false;
+  }
+  function leaveToTitle() {
+    coverEl.classList.remove("confirm");
+    hideCover();
+    save();
+    /* a practice round ends here too: nothing on the title may still read its mode */
+    if (state.mode === "practice") { state.mode = "fixed"; updateHeader(); }
+    titleGuardAt = Date.now() + 300;
+    showTitle();
+  }
+  function cancelLeave() {
+    coverEl.classList.remove("confirm");
+    hideCover();
+    phase = "play";
+    renderKeys();
+  }
+
+  function startRound(round, hints, done, opts) {
+    opts = opts || {};
+    var random = opts.random === true;
+    var practice = opts.practice === true;
+    replay = opts.replay === true;
+    state.mode = practice ? "practice" : random ? "random" : "fixed";
+    /* only a round of the main line moves the saved round; a replay, a random round and practice are extra visits */
+    if (!random && !replay && !practice) mainRound = round;
+    var seed = practice ? PRACTICE_SEED : random ? (opts.seed || Date.now()) : round;
+    pending = {
+      round: round, hints: hints, done: done.slice(),
+      opts: { random: random, replay: replay, practice: practice, seed: seed }
+    };
+    state.round = random ? 101 : practice ? 1 : round; state.hints = hints; state.done = done.slice(); state.entry = []; state.cursor = 0;
+    if (!random && !replay && !practice) mainDone = state.done;   /* so a save before the grid builds still carries the new round */
+    state.hinted = []; state.hintTurn = 0; state.mean = {}; hintBusy = false; results = null; tapPending = {};
+    fxTimers.forEach(clearTimeout); fxTimers = []; boardEl.classList.remove("flash");
+    state.seed = ""; state.wheel = []; state.placed = []; state.words = []; state.wordSet = {}; state.view = null; state.cells = {};
+    updateHeader();
+    setNote("");
+    phase = "load";
+    showCover(TXT.loading, "");
+    var token = ++gen;
+    var L = random ? 7 : lenFor(round);
+    rnd = mulberry32(seed);
+    /* practice needs no word list: its letters and words are fixed, so it still runs without a dictionary */
+    if (!practice && (!PAD.dict || !PAD.dict.words)) { fail(); return; }
+    /* Every PAD.dict call shares the 10-a-second limit, and a build is most of a second's budget: wait out the
+       window since the last call settled, or a quick re-entry opens the round on the error card. The wait sits
+       before pickSeed, so the seeded random and the grid a round produces do not change. Practice asks no
+       dictionary for its build, so it needs none of that wait. */
+    var left = !practice && dictAt ? 1100 - (Date.now() - dictAt) : 0;
+    (left > 0 ? wait(left) : Promise.resolve()).then(function () {
+      if (token !== gen) return null;
+      if (practice) return { seed: "star", words: PRACTICE.slice(), built: buildGrid("star", PRACTICE) };
+      return pickSeed(L);
+    }).then(function (out) {
+      if (token !== gen) return;
+      if (!out) { fail(); return; }
+      state.seed = out.seed;
+      state.words = out.words;
+      state.placed = out.built.placed;
+      state.view = boundsOf(state.placed);
+      state.cells = out.built.map;
+      state.wordSet = {};
+      out.words.forEach(function (w) { state.wordSet[w] = true; });
+      state.wheel = out.seed.split("");
+      shuffleWheel(false);
+      state.entry = []; state.cursor = 0;
+      state.done = done.filter(function (w) { return state.wordSet[w] || state.placed.some(function (p) { return p.word === w; }); });
+      if (!random && !replay && !practice) mainDone = state.done;   /* the array save() writes; a replay's words stay in memory */
+      renderBoard(); renderKeys(); updateHeader();
+      /* the practice round always shows the finger demo, even for a player who has already been taught */
+      if (practice || !taught) runDemo();
+      else { phase = "play"; hideCover(); renderKeys(); checkComplete(true); }   /* a saved round whose words are all filled opens on its results */
+    }, function () {
+      if (token === gen) fail();
+    });
+  }
+
+  /* ---------- drawing ---------- */
+
+  function shuffleWheel(clear) {
+    var a = state.wheel.slice(), i, j, t;
+    for (i = a.length - 1; i > 0; i--) { j = Math.floor(rnd() * (i + 1)); t = a[i]; a[i] = a[j]; a[j] = t; }
+    state.wheel = a;
+    if (clear) { state.entry = []; state.cursor = 0; }
+    buildWheel();
+    renderKeys();
+  }
+
+  function buildWheel() {
+    var old = wheelEl.querySelectorAll(".key"), i;
+    for (i = 0; i < old.length; i++) wheelEl.removeChild(old[i]);
+    var n = state.wheel.length, b, a, dx, dy;
+    pos = [];
+    for (i = 0; i < n; i++) {
+      b = document.createElement("button");
+      b.type = "button"; b.className = "key"; b.setAttribute("data-i", String(i));
+      a = -Math.PI / 2 + i * 2 * Math.PI / n;
+      dx = Math.round(WHEEL_R * Math.cos(a)); dy = Math.round(WHEEL_R * Math.sin(a));
+      b.style.transform = "translate(" + dx + "px," + dy + "px)";
+      pos.push({ x: WHEEL_H / 2 + dx, y: WHEEL_H / 2 + dy });
+      wheelEl.appendChild(b);
+    }
+  }
+
+  /* the line through the picked letters, and on to the finger while it drags (an SVG polyline in the dark tone) */
+  function drawLines() {
+    var pts = state.entry.map(function (i) { return pos[i]; }).filter(Boolean);
+    if (dragging && dragging.x != null && pts.length) pts.push({ x: dragging.x, y: dragging.y });
+    linesEl.innerHTML = pts.length < 2 ? "" :
+      '<polyline fill="none" stroke="' + INK + '" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" points="' +
+      pts.map(function (q) { return Math.round(q.x) + "," + Math.round(q.y); }).join(" ") + '"/>';
+  }
+
+  function renderKeys() {
+    var keys = wheelEl.querySelectorAll(".key"), i;
+    for (i = 0; i < keys.length; i++) {
+      var idx = +keys[i].getAttribute("data-i");
+      keys[i].textContent = (state.wheel[idx] || "").toUpperCase();
+      keys[i].className = "key" + (state.entry.indexOf(idx) >= 0 ? " on" : "") + (keyMode && idx === state.cursor && phase === "play" ? " cur" : "");
+      keys[i].setAttribute("aria-label", "letter " + (state.wheel[idx] || "") + (state.entry.indexOf(idx) >= 0 ? ", used" : ""));
+    }
+    entryEl.textContent = state.entry.map(function (i) { return state.wheel[i]; }).join("").toUpperCase();
+    drawLines();
+  }
+
+  function renderBoard() {
+    boardEl.innerHTML = "";
+    tapCell = ""; tapTurn = 0;
+    if (!state.view) return;
+    layoutSizes();
+    var cols = state.view.maxC - state.view.minC + 1;
+    var filled = {};
+    state.placed.forEach(function (p) {
+      if (state.done.indexOf(p.word) < 0) return;
+      var dr = p.dir === "v" ? 1 : 0, dc = p.dir === "h" ? 1 : 0;
+      for (var i = 0; i < p.word.length; i++) filled[keyOf(p.r + dr * i, p.c + dc * i)] = p.word.charAt(i);
+    });
+    for (var r = state.view.minR; r <= state.view.maxR; r++) {
+      for (var c = state.view.minC; c <= state.view.maxC; c++) {
+        var k = keyOf(r, c), el = document.createElement("div");
+        if (state.cells[k]) {
+          el.className = "cell" + (filled[k] ? " on" : "");
+          el.textContent = filled[k] ? filled[k].toUpperCase() : "";
+          el.setAttribute("data-r", String(r)); el.setAttribute("data-c", String(c));
+        } else el.className = "gap";
+        boardEl.appendChild(el);
+      }
+    }
+    boardEl.setAttribute("aria-label", cols + " by " + (state.view.maxR - state.view.minR + 1) + " grid");
+  }
+  /* the cell size comes from the space beside the wheel: it changes with the screen, not with each cell */
+  function layoutSizes() {
+    if (!state.view) return;
+    var cols = state.view.maxC - state.view.minC + 1, rows = state.view.maxR - state.view.minR + 1;
+    var availW = boardEl.parentNode.clientWidth - WHEEL_H - 8;   /* the 1px gaps are taken out below */
+    var cell = Math.floor(Math.min(30, (availW - cols + 1) / cols, (WHEEL_H - rows + 1) / rows));
+    if (!isFinite(cell) || cell < 12) cell = 12;
+    boardEl.style.gridTemplateColumns = "repeat(" + cols + ", " + cell + "px)";
+    boardEl.style.gridAutoRows = cell + "px";
+    boardEl.style.fontSize = Math.max(12, Math.min(17, cell - 5)) + "px";
+  }
+  window.addEventListener("resize", function () { layoutSizes(); renderBoard(); });
+
+  /* ---------- play ---------- */
+
+  function entryWord() {
+    return state.entry.map(function (i) { return state.wheel[i]; }).join("");
+  }
+
+  function shake() {
+    boardEl.classList.remove("shake"); wheelEl.classList.remove("shake");
+    void boardEl.offsetWidth;
+    boardEl.classList.add("shake"); wheelEl.classList.add("shake");
+    setTimeout(function () { boardEl.classList.remove("shake"); wheelEl.classList.remove("shake"); }, 260);
+  }
+
+  function submit() {
+    if (phase !== "play" && phase !== "demo") return;
+    var word = entryWord();
+    state.entry = []; state.cursor = 0; renderKeys();
+    if (!word || word.length < 3) { PAD.sfx("err"); shake(); return; }
+    if (state.done.indexOf(word) >= 0) {
+      /* a bonus word is not shown in the grid, so say which kind it was: "already found" alone reads as a bug */
+      var inGrid = state.placed.some(function (p) { return p.word === word; });
+      setNote(inGrid ? TXT.again : TXT.againBonus); PAD.sfx("err"); shake(); return;
+    }
+    var at = -1, i;
+    for (i = 0; i < state.placed.length; i++) if (state.placed[i].word === word) { at = i; break; }
+    if (at >= 0) { fillWord(state.placed[at]); return; }
+    if (state.wordSet[word]) { bonusWord(word); return; }
+    setNote(TXT.noWord); PAD.sfx("err"); shake();
+  }
+
+  /* the cell element at grid row r, column c (the board draws the rows of the view left to right) */
+  function cellAt(r, c) {
+    var v = state.view;
+    return boardEl.children[(r - v.minR) * (v.maxC - v.minC + 1) + (c - v.minC)] || null;
+  }
+
+  /* A filled word lands letter by letter: each cell pops in with one rising note. The notes are custom sounds
+     (PAD.sfx with an object, SPEC.md 6.3): a short square-wave blip each, up a pentatonic scale, so a longer word
+     climbs higher. 80 ms apart is at most 13 sounds a second, under the limit of 20. */
+  var NOTES = [523, 587, 659, 784, 880, 1047, 1175];
+  function land(p) {
+    var dr = p.dir === "v" ? 1 : 0, dc = p.dir === "h" ? 1 : 0, i, cells = [];
+    for (i = 0; i < p.word.length; i++) {
+      var el = cellAt(p.r + dr * i, p.c + dc * i);
+      if (!el) continue;
+      el.className = "cell"; el.textContent = "";
+      cells.push(el);
+    }
+    cells.forEach(function (el, k) {
+      fxTimers.push(setTimeout(function () {
+        el.className = "cell on pop"; el.textContent = p.word.charAt(k).toUpperCase();
+        var last = k === cells.length - 1;
+        PAD.sfx({ wave: "square", duty: 1, from: NOTES[k % NOTES.length], ms: last ? 220 : 90, decay: last ? 200 : 70, vol: 0.5 });
+      }, k * 80));
+    });
+    return cells.length * 80 + 300;   /* how long the landing takes, for the clear that may follow */
+  }
+
+  function fillWord(p) {
+    state.done.push(p.word);
+    setNote("");
+    renderBoard(); updateHeader();
+    var ms = land(p);
+    /* PAD.dict.lookup gives the line in the player's language; PAD.say reads the word with the phone's English
+       voice. Both may answer null (dictionary unreadable, or more than 10 calls a second): then the line stays empty. */
+    lookupLine(p.word);
+    sayWord(p.word);
+    save();
+    checkComplete(false, ms);
+  }
+
+  function sayWord(word) {
+    if (!PAD.say) return;
+    try { var s = PAD.say(word, { lang: "en" }); if (s && s.then) s.then(null, function () {}); } catch (e) {}
+  }
+
+  function lookupLine(word) {
+    var token = noteStart("fill", word);
+    if (!PAD.dict || !PAD.dict.lookup) { setNote(""); return; }
+    dictLookup(word).then(function (e) {
+      if (token !== noteSeq || phase === "error" || phase === "load") return;
+      var m = meaning(e);
+      if (!m) { setNote(""); return; }
+      state.mean[word] = m;
+      if (phase === "play" || phase === "demo") setNote(m);
+    }, function () { if (token === noteSeq) setNote(""); });
+  }
+
+  /* A filled word can be tapped to see its meaning again. A cell where two words cross shows the horizontal word
+     first and the vertical one on the next tap. The lookup runs only when the round's cache has no line for the
+     word, and a word already asked for is not asked again while its answer is on the way (10 calls a second). */
+  function wordsAt(r, c) {
+    var out = [];
+    state.placed.forEach(function (p) {
+      if (state.done.indexOf(p.word) < 0) return;
+      var dr = p.dir === "v" ? 1 : 0, dc = p.dir === "h" ? 1 : 0;
+      for (var i = 0; i < p.word.length; i++) {
+        if (p.r + dr * i === r && p.c + dc * i === c) { out.push({ word: p.word, dir: p.dir }); return; }
+      }
+    });
+    /* the board draws both words under one cell; "h" before "v" is the order the player reads them */
+    return out.sort(function (a, b) { return a.dir === b.dir ? 0 : a.dir === "h" ? -1 : 1; });
+  }
+  function showMeaning(word) {
+    /* the tap is a note action even when the line is cached: it must invalidate any older lookup still in flight */
+    var token = noteStart("tap", word);
+    sayWord(word);
+    if (state.mean[word]) { setNote(state.mean[word], "tap", word); return; }
+    if (!PAD.dict || !PAD.dict.lookup || tapPending[word]) return;
+    tapPending[word] = true;
+    dictLookup(word).then(function (e) {
+      tapPending[word] = false;
+      var m = meaning(e);
+      /* the token is stale after a second tap on this word, but that tap still wants this one answer */
+      var newest = token === noteSeq || (noteKind === "tap" && noteWord === word);
+      if (!m) { if (newest && phase === "play") setNote("", "tap", word); return; }
+      state.mean[word] = m;
+      if (newest && phase === "play") setNote(m, "tap", word);
+    }, function () {
+      tapPending[word] = false;
+      if ((token === noteSeq || (noteKind === "tap" && noteWord === word)) && phase === "play") setNote("", "tap", word);
+    });
+  }
+  /* pointerup, not pointerdown: a press on the grid may still turn into a scroll, and only a tap should answer.
+     The pointerdown only remembers where the tap began, so a drag that ends over a cell is not a tap. */
+  boardEl.addEventListener("pointerdown", function (e) {
+    var el = phase === "play" && e.target && e.target.closest ? e.target.closest(".cell.on") : null;
+    tapDown = el && boardEl.contains(el) ? { el: el, x: e.clientX, y: e.clientY, id: e.pointerId } : null;
+  });
+  boardEl.addEventListener("pointerup", function (e) {
+    var down = tapDown;
+    tapDown = null;
+    if (!down || phase !== "play" || e.pointerId !== down.id) return;
+    var el = e.target && e.target.closest ? e.target.closest(".cell.on") : null;
+    if (el !== down.el || Math.abs(e.clientX - down.x) + Math.abs(e.clientY - down.y) > 12) return;
+    var r = +el.getAttribute("data-r"), c = +el.getAttribute("data-c");
+    var words = wordsAt(r, c), key = r + "," + c;
+    if (!words.length) return;
+    if (tapCell !== key) { tapCell = key; tapTurn = 0; } else tapTurn = (tapTurn + 1) % words.length;
+    showMeaning(words[tapTurn].word);
+  });
+  boardEl.addEventListener("pointercancel", function () { tapDown = null; });
+
+  function bonusWord(word) {
+    state.done.push(word);
+    /* a practice round has no hints to give: the word still counts for the message, and nothing is saved */
+    if (state.mode === "practice") {
+      PAD.sfx("coin");
+      setNote(TXT.bonusPractice.replace("{w}", word.toUpperCase()));
+      return;
+    }
+    state.hints++;
+    PAD.sfx("coin");
+    setNote(TXT.bonus.replace("{w}", word.toUpperCase()));
+    updateHeader(); save();
+    /* the hint counter jumps, so the player sees where the bonus went */
+    hintEl.classList.remove("pop"); void hintEl.offsetWidth; hintEl.classList.add("pop");
+  }
+
+  /* The last word in: let its letters land, blink the grid twice with a short tune, then the results card with
+     every word of the round and its meaning, and NEXT ROUND. quiet: a saved round that was already clear, straight
+     to its card. after: how long the last word's letters still need to land. */
+  function checkComplete(quiet, after) {
+    if (phase !== "play") return;
+    var all = state.placed.length > 0 && state.placed.every(function (p) { return state.done.indexOf(p.word) >= 0; });
+    if (!all) return;
+    phase = "clear";
+    /* the round is over: the main line walks on to the next round, a random round only adds to its count, and a
+       replay changes neither. Practice is not a round of the main line either: it only shows its card. mainDone
+       is empty for the next round; the card still reads state.done. */
+    if (!replay && state.mode !== "practice") {
+      if (state.mode === "random") state.random++;
+      else {
+        state.cleared = Math.max(state.cleared, Math.min(100, state.round));
+        mainRound = Math.min(101, state.round + 1);
+        mainDone = [];
+      }
+    }
+    save();
+    var token = gen, wait = quiet ? 0 : (after || 0) + 1100, t0 = Date.now();
+    if (!quiet) fxTimers.push(setTimeout(function () {
+      boardEl.classList.remove("flash"); void boardEl.offsetWidth; boardEl.classList.add("flash");
+      clearTune();
+    }, after || 0));
+    /* the lines of the words not looked up yet (a word filled before the app was reopened); at most 6 calls,
+       inside the limit of 10 a second. A null is fine: that row shows the word alone. */
+    var missing = state.placed.filter(function (p) { return !state.mean[p.word]; });
+    Promise.all(missing.map(function (p) {
+      return PAD.dict && PAD.dict.lookup ? dictLookup(p.word).then(function (e) {
+        var m = meaning(e);
+        if (m) state.mean[p.word] = m;
+      }, function () {}) : null;
+    })).then(function () {
+      fxTimers.push(setTimeout(function () {
+        if (token !== gen || phase !== "clear") return;
+        boardEl.classList.remove("flash");
+        if (state.mode === "practice") { phase = "practice"; setNote(""); showPracticeCard(); return; }
+        var bonus = state.done.filter(function (w) { return !state.placed.some(function (p) { return p.word === w; }); }).length;
+        resultSum = TXT.sum.replace("{b}", bonus).replace("{n}", state.hints);
+        results = state.placed.map(function (p) { return { word: p.word, mean: state.mean[p.word] || "" }; });
+        phase = "done";
+        setNote("");
+        showResults(true);
+      }, Math.max(0, wait - (Date.now() - t0))));
+    });
+  }
+
+  /* An original four-bar fanfare for the clear (PAD.music, SPEC.md 6.3, played once): the square channels climb a
+     C major arpeggio and the triangle walks the bass up under it. Runtimes without PAD.music get the named "win". */
+  function clearTune() {
+    if (PAD.music && PAD.music.play) {
+      try {
+        PAD.music.play({ bpm: 160, p1: "@1 v12 o5 l16 c e g >c8 <g8 a b >c4", p2: "@2 v8 o4 l16 g >c e g8 e8 f d e4", tri: "v11 o3 l8 c e g >c4" }, { loop: false });
+        return;
+      } catch (e) {}
+    }
+    PAD.sfx("win");
+  }
+
+  /* HINT is the only way to spend a hint. Each paid hint marks its word, so a second hint shows another open
+     word. Once every open word has been hinted, HINT cycles through them again without charging. */
+  function hint() {
+    if (phase !== "play" || hintBusy) return;
+    var open = state.placed.filter(function (p) { return state.done.indexOf(p.word) < 0; });
+    if (!open.length) return;
+    var fresh = open.filter(function (p) { return state.hinted.indexOf(p.word) < 0; })
+      .sort(function (a, b) { return b.word.length - a.word.length; });
+    var word, paid = false;
+    if (fresh.length) {
+      if (state.hints < 1) { PAD.sfx("err"); setNote(TXT.noHints); return; }
+      word = fresh[0].word;
+      paid = true;
+    } else {
+      word = open[state.hintTurn % open.length].word;
+    }
+    if (!PAD.dict || !PAD.dict.lookup) { setNote(TXT.noEntry); return; }
+    var token = noteStart("hint", word);
+    hintBusy = true;
+    dictLookup(word).then(function (e) {
+      hintBusy = false;
+      if (phase !== "play" || state.done.indexOf(word) >= 0) return;
+      var m = meaning(e), line = hintMeaning(e, word);
+      if (!line) { if (token === noteSeq) setNote(TXT.noEntry); return; }
+      if (token !== noteSeq) return;       /* a newer note took the line: a hint not shown is not charged */
+      if (paid) {
+        if (state.hints < 1) return;
+        state.hints--;
+        state.hinted.push(word);
+        updateHeader(); save();
+      } else state.hintTurn++;
+      if (m) state.mean[word] = m;         /* the results card shows the plain line, not the hint's masked one */
+      if (token === noteSeq) setNote(TXT.hintHead + line);
+    }, function () { hintBusy = false; if (token === noteSeq) setNote(TXT.noEntry); });
+  }
+
+  function save() {
+    /* PAD.save keeps one value under the app's own id (256 KB at most) and PAD.load gives it back on the next open.
+       round is always the main line's next round; done is that round's own, never a replay's or a random round's. */
+    var data = {
+      round: mainRound, hints: state.hints, done: mainDone.slice(), taught: taught,
+      cleared: state.cleared, random: state.random, bookTip: bookTip
+    };
+    try { var p = PAD.save("game", data); if (p && p.then) p.then(null, function () {}); } catch (e) {}
+  }
+
+  /* ---------- tutorial, error, next round ---------- */
+
+  /* The first round teaches by showing: a finger slides over the letters of one grid word (the shortest open one,
+     never the seed), the line follows it, the word fills in with its meaning and its voice. Then "your turn".
+     Any key or a tap skips to the end. Shown once (saved as taught); the ? page has the rules after that. */
+  function later(ms, f) { demoTimers.push(setTimeout(f, ms)); }
+  function fingerTo(i) { fingerEl.style.transform = "translate(" + Math.round(pos[i].x - WHEEL_H / 2) + "px," + Math.round(pos[i].y - WHEEL_H / 2) + "px)"; }
+  function runDemo() {
+    var open = state.placed.filter(function (q) { return state.done.indexOf(q.word) < 0 && q.word !== state.seed; })
+      .sort(function (a, b) { return a.word.length - b.word.length; });
+    if (!open.length) { taught = true; phase = "play"; hideCover(); renderKeys(); return; }
+    var w = open[0].word, idx = [], used = {};
+    w.split("").forEach(function (ch) {
+      for (var i = 0; i < state.wheel.length; i++) if (!used[i] && state.wheel[i] === ch) { used[i] = true; idx.push(i); return; }
+    });
+    demoWord = open[0];
+    phase = "demo"; hideCover();
+    state.entry = []; renderKeys();
+    setNote(TXT.demo.replace("{w}", w.toUpperCase().split("").join("-")));
+    fingerEl.style.transition = "none"; fingerTo(idx[0]); void fingerEl.offsetWidth; fingerEl.style.transition = "";
+    later(500, function () { fingerEl.hidden = false; });
+    idx.forEach(function (i, k) {
+      later(900 + k * 550, function () { fingerTo(i); });
+      later(1200 + k * 550, function () { addIndex(i); PAD.sfx("tick"); });
+    });
+    later(1200 + idx.length * 550 + 300, function () { fingerEl.hidden = true; submit(); });
+    later(1200 + idx.length * 550 + 2600, demoEnd);
+  }
+  function demoEnd() {
+    demoTimers.forEach(clearTimeout); demoTimers = [];
+    fingerEl.hidden = true;
+    if (phase !== "demo") return;
+    if (demoWord && state.done.indexOf(demoWord.word) < 0) { state.entry = []; fillWord(demoWord); }   /* skipped: fill it now */
+    phase = "demoEnd";
+    showCover(TXT.demoEnd, TXT.start);
+  }
+  function startPlay() {
+    taught = true; phase = "play"; hideCover(); save(); renderKeys(); checkComplete();
+  }
+
+  /* The practice round's card: the plain cover, the same look as the tutorial's last page, with the keys a
+     player needs next and one way out. No results, no word book, so practice never touches the save. */
+  function showPracticeCard() {
+    showCover(TXT.practiceTitle + "\n\n" + TXT.practiceKeys, TXT.practiceBack);
+  }
+  function practiceToTitle() {
+    PAD.sfx("tap");
+    /* a B pressed during the demo must stop its clock: no stray fill or demoEnd may land on the title */
+    demoTimers.forEach(clearTimeout); demoTimers = [];
+    fingerEl.hidden = true;
+    if (state.mode === "practice") { state.mode = "fixed"; updateHeader(); }
+    /* the closed cover still has its rows under the same finger: ignore its second tap and keys for a moment */
+    titleGuardAt = Date.now() + 300;
+    hideCover();
+    showTitle();
+  }
+
+  /* the rules page, any time: the ? button. A, B or START (or the button) go back to the round (or the title). */
+  function openHelp() {
+    if (phase !== "play" && phase !== "done" && phase !== "title") return;
+    helpBack = phase; phase = "help";
+    coverEl.classList.remove("title", "pick", "confirm", "done");
+    coverEl.classList.add("help");
+    showCover(TXT.help, TXT.ok);
+  }
+  function closeHelp() {
+    coverEl.classList.remove("help");
+    var back = helpBack || "play";
+    helpBack = null;
+    if (back === "title") { showTitle(); return; }
+    phase = back;
+    if (phase === "done") showResults(false); else { hideCover(); renderKeys(); }
+  }
+
+  function nextRound() {
+    /* a random round's NEXT is another one, at a new seed */
+    if (state.mode === "random") { startRandom(); save(); return; }
+    /* a replay walks the book: the next round if it is open, else back to the picker to choose */
+    if (replay) {
+      var n = state.round + 1;
+      if (n > 100 || n === state.cleared + 1) openRound(n);
+      else if (n <= state.cleared) startRound(n, state.hints, [], { replay: true });
+      else { showPick(); return; }
+      save();
+      return;
+    }
+    if (state.round >= 100) { startRandom(); save(); return; }
+    startRound(state.round + 1, state.hints, []);
+    save();
+  }
+
+  coverBtn.addEventListener("click", function () {
+    if (phase === "demoEnd") startPlay();
+    else if (phase === "practice") practiceToTitle();
+    else if (phase === "help") closeHelp();
+    else if (phase === "error") {
+      startRound(pending.round, pending.hints, pending.done, pending.opts);
+    } else if (phase === "leave") leaveToTitle();
+    else if (phase === "done") nextRound();
+  });
+  coverBtn2.addEventListener("click", function () {
+    if (phase === "leave") cancelLeave();
+  });
+  /* The word rows are 24 px tall, below the 44 px touch rule, so the whole row width is the target. A tap on
+     the right 44 px is the word book toggle (and selects the word); a tap elsewhere selects and reads it.
+     Like the grid, the tap counts only on pointerup and only when it did not travel: a scroll must not pick.
+     The title's and the picker's rows take a tap the same way, as A would. */
+  coverList.addEventListener("pointerdown", function (e) {
+    var here = phase === "done" || phase === "title" || phase === "pick";
+    var li = here && e.target && e.target.closest ? e.target.closest("li") : null;
+    rowDown = li && coverList.contains(li) ? { li: li, x: e.clientX, y: e.clientY, id: e.pointerId } : null;
+  });
+  coverList.addEventListener("pointerup", function (e) {
+    var down = rowDown;
+    rowDown = null;
+    if (!down || e.pointerId !== down.id) return;
+    if (phase !== "done" && phase !== "title" && phase !== "pick") return;
+    /* the cover that just closed may still be under the finger: this tap is that one, not a new choice */
+    if (phase === "title" && Date.now() < titleGuardAt) return;
+    var li = e.target && e.target.closest ? e.target.closest("li") : null;
+    if (li !== down.li || Math.abs(e.clientX - down.x) + Math.abs(e.clientY - down.y) > 12) return;
+    if (phase === "title") { openTitleRow(+li.getAttribute("data-row")); return; }
+    if (phase === "pick") {
+      pickAt = (+li.getAttribute("data-n") - 1) % 25;
+      renderPicker();
+      openPicked();
+      return;
+    }
+    var n = +li.getAttribute("data-pick"), box = li.getBoundingClientRect();
+    if (e.clientX >= box.right - 44) {
+      /* the bookmark end of the row: it toggles. Its own answer takes the detail box, so no hint on the way;
+         an add that succeeds then remembers the hint for good (setBook). */
+      bookTap = true;
+      pickWord(n, true);
+      bookTap = false;
+      toggleBook();
+    } else pickWord(n);
+  });
+  coverList.addEventListener("pointercancel", function () { rowDown = null; });
+  hintEl.addEventListener("click", hint);
+  helpEl.addEventListener("click", openHelp);
+
+  /* ---------- the wheel: drag to spell, or keys ---------- */
+
+  function keyIndexFrom(target) {
+    var el = target && target.closest ? target.closest(".key") : null;
+    return el && wheelEl.contains(el) ? +el.getAttribute("data-i") : -1;
+  }
+  /* On a move, take a letter only near the middle of its 44px key, not in a corner: a line drawn between two
+     letters should not pick up a third one it merely grazes. */
+  function keyNear(x, y) {
+    var keys = wheelEl.querySelectorAll(".key"), best = -1, bestD = 24 * 24, i, b, dx, dy, d;
+    for (i = 0; i < keys.length; i++) {
+      b = keys[i].getBoundingClientRect();
+      dx = x - (b.left + b.width / 2); dy = y - (b.top + b.height / 2); d = dx * dx + dy * dy;
+      if (d < bestD) { bestD = d; best = +keys[i].getAttribute("data-i"); }
+    }
+    return best;
+  }
+  function addIndex(i) {
+    if (i < 0 || state.entry.indexOf(i) >= 0) return;
+    state.entry.push(i);
+    state.cursor = i;
+    renderKeys();
+  }
+
+  function wheelXY(e) { var b = wheelEl.getBoundingClientRect(); return { x: e.clientX - b.left, y: e.clientY - b.top }; }
+  wheelEl.addEventListener("pointerdown", function (e) {
+    if (phase === "demo") { demoEnd(); return; }
+    if (phase !== "play") return;
+    var i = keyIndexFrom(e.target);
+    if (i < 0) return;
+    e.preventDefault();
+    keyMode = false;
+    var xy = wheelXY(e);
+    dragging = { id: e.pointerId, x: xy.x, y: xy.y };
+    state.entry = [];
+    addIndex(i);
+  });
+  document.addEventListener("pointermove", function (e) {
+    if (!dragging || e.pointerId !== dragging.id) return;
+    e.preventDefault();
+    var xy = wheelXY(e); dragging.x = xy.x; dragging.y = xy.y;
+    var i = keyNear(e.clientX, e.clientY);
+    if (i >= 0 && state.entry.indexOf(i) < 0) addIndex(i); else drawLines();
+  }, { passive: false });
+  function endDrag(e) {
+    if (!dragging || e.pointerId !== dragging.id) return;
+    dragging = null;
+    if (state.entry.length > 1) submit();
+    else { state.entry = []; renderKeys(); }
+  }
+  document.addEventListener("pointerup", endDrag);
+  document.addEventListener("pointercancel", function (e) { if (dragging && e.pointerId === dragging.id) { dragging = null; state.entry = []; renderKeys(); } });
+
+  /* The arrows move the cursor the way they point, as on a map of the wheel: Up goes to the letter above, Left to
+     the one on the left. The best letter is the one most nearly in that direction (within about 60 degrees), then
+     the nearest; if none is, any letter on that side; at the edge of the wheel the cursor stays. */
+  var DIRS = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
+  function aim(at, b) {
+    var d = DIRS[b], from = pos[at], best = -1, bestS = Infinity, wide = -1, wideS = Infinity, j;
+    if (!from || !d) return at;
+    for (j = 0; j < pos.length; j++) {
+      if (j === at) continue;
+      var dx = pos[j].x - from.x, dy = pos[j].y - from.y;
+      var along = dx * d[0] + dy * d[1], across = Math.abs(dx * d[1] - dy * d[0]), sc = along + 2 * across;
+      if (along < 2) continue;
+      if (across <= along * 1.8 && sc < bestS) { bestS = sc; best = j; }
+      if (sc < wideS) { wideS = sc; wide = j; }
+    }
+    if (best < 0) best = wide;
+    return best >= 0 ? best : at;
+  }
+  function stepCursor(b) { state.cursor = aim(state.cursor, b); }
+  Object.defineProperty(state, "aim", { value: aim });   /* where an arrow would go from a letter, for the e2e test */
+
+  /* The chin pad: the arrows pick a letter, A adds it, B removes the last, START submits, SELECT shuffles.
+     Also the keyboard on a computer (X = A, Z = B, Enter = START, Shift = SELECT). */
+  PAD.on("press", function (b) {
+    if (phase === "title") {
+      /* a cover that just closed onto the title eats the same finger's next press, as it does its next tap */
+      if (Date.now() < titleGuardAt) return;
+      /* a short menu: Up/Down cycle, A or a tap opens, START opens the first row, B does nothing */
+      if (b === "up" || b === "down") {
+        titlePick = (titlePick + (b === "down" ? 1 : -1) + titleRows.length) % titleRows.length;
+        renderTitle();
+        PAD.sfx("tick");
+      } else if (b === "a") openTitleRow(titlePick);
+      else if (b === "start") openTitleRow(0);
+      return;
+    }
+    if (phase === "pick") {
+      clearPickMsg();                    /* a newer press wins over the locked round's line */
+      if (DIRS[b]) movePickCursor(b);
+      else if (b === "a") openPicked();
+      else if (b === "b") { PAD.sfx("tap"); showTitle(); }
+      return;
+    }
+    if (phase === "leave") {
+      if (b === "a" || b === "start") leaveToTitle();
+      else if (b === "b") cancelLeave();
+      return;
+    }
+    /* before practice starts nothing has been done: B leaves it straight away, with no confirm */
+    if (phase === "demo") {
+      if (b === "b" && state.mode === "practice") { practiceToTitle(); return; }
+      demoEnd(); return;
+    }
+    if (phase === "demoEnd") {
+      if (b === "b" && state.mode === "practice") { practiceToTitle(); return; }
+      if (b === "a" || b === "start") startPlay();
+      return;
+    }
+    if (phase === "help") { if (b === "a" || b === "b" || b === "start") closeHelp(); return; }
+    if (phase === "error") { if (b === "a" || b === "start") coverBtn.click(); return; }
+    /* the practice card is the end of the visit: any of the card's keys goes back to the title */
+    if (phase === "practice") { if (b === "a" || b === "b" || b === "start") practiceToTitle(); return; }
+    if (phase === "done") {
+      /* the ring is [NEXT, word1 .. wordN]; it starts on NEXT and Up/Down cycle. START always starts the next round.
+         On a word row: A adds a hollow word or reads a filled one, B only removes, SELECT flips it; Left and Right
+         are quiet. B on NEXT is quiet too. Touch keeps its two ends: the right 44 px toggles, the rest reads. */
+      if (b === "down" || b === "up") { movePick(b === "down" ? 1 : -1); return; }
+      if (b === "select") { toggleBook(); return; }
+      if (b === "a") {
+        if (pick === 0) nextRound();
+        else if (bookMarks[pick - 1] === true) sayWord(results[pick - 1].word);
+        else setBook(pick - 1, true);
+        return;
+      }
+      if (b === "b") { if (pick > 0 && bookMarks[pick - 1] === true) setBook(pick - 1, false); return; }
+      if (b === "start") nextRound();
+      return;
+    }
+    if (phase !== "play") return;
+    var n = state.wheel.length, shown = keyMode;
+    keyMode = true;                        /* from now on the cursor square shows, until the next touch on the wheel */
+    if (DIRS[b] && n) {
+      if (shown) stepCursor(b);            /* the first arrow only shows where the cursor is */
+      renderKeys();
+    } else if (b === "a") {
+      if (!n) return;
+      if (state.entry.indexOf(state.cursor) >= 0) { PAD.sfx("err"); return; }
+      state.entry.push(state.cursor);      /* the cursor stays where it is: the arrows, not the app, decide where it goes next */
+      renderKeys();
+    } else if (b === "b") {
+      if (!state.entry.length) {
+        /* nothing to delete: the way out of the round, one question first (the words found are already saved) */
+        if (!dragging) showLeave();
+        return;
+      }
+      state.cursor = state.entry.pop();
+      renderKeys();
+    } else if (b === "start") submit();
+    else if (b === "select" && n) { PAD.sfx("ok"); shuffleWheel(true); }
+  });
+
+  /* ---------- boot ---------- */
+
+  updateHeader();
+  showCover(TXT.loading, "");          /* no blank screen while the save is read */
+  PAD.load("game").then(function (v) {
+    if (v && typeof v === "object") {
+      savedRound = typeof v.round === "number" && v.round % 1 === 0 && v.round >= 1 ? Math.min(101, v.round) : 1;
+      savedHints = typeof v.hints === "number" && v.hints >= 0 ? Math.floor(v.hints) : 0;
+      savedDone = Array.isArray(v.done) ? v.done.filter(isWord) : [];
+      taught = v.taught === true;          /* saves from 1.0.0 have no flag: those players see the demo once too */
+      /* a save from before 1.6.0 has no cleared: every round before its round was cleared, which is what cleared
+         means. After the hundredth, round is 101 and the title offers a random round instead of a number. */
+      state.cleared = typeof v.cleared === "number" && v.cleared >= 0 ? Math.min(100, Math.floor(v.cleared)) : Math.min(100, savedRound - 1);
+      state.random = typeof v.random === "number" && v.random >= 0 ? Math.floor(v.random) : 0;
+      bookTip = v.bookTip === true;    /* 1.5.0 saves have no flag: those players get the card's A/B hint once */
+    }
+    mainRound = Math.max(1, Math.min(savedRound, state.cleared < 100 ? state.cleared + 1 : 101));
+    mainDone = savedDone.slice();
+    state.round = mainRound; state.hints = savedHints; state.done = savedDone.slice();
+    showTitle();                         /* the title on every open; the round is built when the player opens it */
+  }, function () { showTitle(); });
+})();
+</script>
+</body>
+</html>
