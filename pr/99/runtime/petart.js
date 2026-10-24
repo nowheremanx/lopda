@@ -159,6 +159,123 @@ function frames(o){
   });
 }
 
+/* ---------- the standard poses every species pack must provide ----------
+ * A play pack (runtime/petplay.js) may only ask for these names, never for a species' own action names, so every
+ * future species can play every game:
+ *   front: idle, happy, sad, jump (arms up), fall, catch (holding up)
+ *   side:  walk1, walk2, jump, flap1, flap2      (all facing right; the left view is mirror(grid))
+ * Every pose is a 16 x 16 grid of .kdmp. A pack's poses are functions of the rolled marks, so the antenna, pattern
+ * and eyes show in every pose. The side view is ready for later side games; no side game ships yet. */
+var POSE_NAMES={front:["idle","happy","sad","jump","fall","catch"],side:["walk1","walk2","jump","flap1","flap2"]};
+/* the chip's side, facing right: one eye near the snout, the body's pins as legs, the same antenna and marks */
+var SIDE_BASE=[
+"................",
+"........kkk.....",
+".........k......",
+"..kkkkkkkkkkkk..",
+"..kddddddddddk..",
+"..kdmmmmmmmmdk..",
+"..kdmmmmmmmmdk..",
+"..kdmmmmmmmmdk..",
+"..kdmmmmmmmmdk..",
+"..kdmmmmmmmmdk..",
+"..kddddddddddk..",
+"..kddddddddddk..",
+"..kkkkkkkkkkkk..",
+"...k.k....k.k...",
+"...k.k....k.k...",
+"................"];
+var SIDE_ANT={
+  ball:["........kkk.....",".........k......"],
+  stick:[".........k......",".........k......"],
+  fork:["........k.k.....",".........k......"],
+  bent:["..........kk....",".........k......"],
+  droop:["................","..........k....."]
+};
+var SIDE_PAT={
+  plain:function(a){},
+  dot:function(a){ setc(a,9,5,"p"); },
+  stripe:function(a){ for(var c=4;c<12;c++) setc(a,4,c,"p"); },
+  trace:function(a){ [[10,4],[10,7],[10,10],[11,5],[11,11]].forEach(function(p){ setc(a,p[0],p[1],"p"); }); }
+};
+var SIDE_EYE={
+  dot:function(a){ [[5,10],[5,11],[6,10],[6,11]].forEach(function(p){ setc(a,p[0],p[1],"k"); }); },
+  bar:function(a){ for(var c=9;c<12;c++) setc(a,6,c,"k"); },
+  big:function(a){ for(var r=5;r<7;r++) for(var c=9;c<12;c++) setc(a,r,c,(c===9&&r===5)?"p":"k"); }
+};
+function shiftUp(g,n){
+  var w=String(g[0]).length, blank="", out=[], r;
+  for(r=0;r<w;r++) blank+=".";
+  for(r=0;r<g.length;r++) out.push(r+n<g.length ? g[r+n] : blank);
+  return out;
+}
+function shiftDown(g,n){
+  var w=String(g[0]).length, blank="", out=[], r;
+  for(r=0;r<w;r++) blank+=".";
+  for(r=0;r<g.length;r++) out.push(r-n>=0 ? g[r-n] : blank);
+  return out;
+}
+function sidePose(marks,name){
+  var m=marks||{}, a=rows(SIDE_BASE);
+  var ant=SIDE_ANT[m.ant||"ball"]||SIDE_ANT.ball;
+  a[0]=ant[0].split(""); a[1]=ant[1].split("");
+  (SIDE_PAT[m.pat||"dot"]||SIDE_PAT.dot)(a);
+  (SIDE_EYE[m.eye||"dot"]||SIDE_EYE.dot)(a);
+  /* the mouth and a small snout make the facing direction read at 16 px */
+  setc(a,8,10,"k"); setc(a,8,11,"k");
+  setc(a,7,14,"k"); setc(a,8,14,"k");
+  if(name==="walk1"){ a[13]="...k.k....k.k...".split(""); a[14]="..k...k..k...k..".split(""); }
+  if(name==="walk2"){ a[13]="...k.k....k.k...".split(""); a[14]="....kk....kk....".split(""); }
+  var g=join(a);
+  if(name==="walk2") g=shiftDown(g,1);               /* the second step sits a pixel lower */
+  if(name==="jump") g=shiftUp(g,1);
+  if(name==="flap1" || name==="flap2"){
+    g=shiftUp(g,1);
+    var f=rows(g), r=name==="flap1"?10:12;
+    [[r,0],[r,1],[r+1,0],[r,14],[r,15],[r+1,15]].forEach(function(p){ setc(f,p[0],p[1],"k"); });
+    g=join(f);
+  }
+  return g;
+}
+function frontPose(marks,name){
+  var m=marks||{}, o={ant:m.ant||"ball",pat:m.pat||"dot",eye:m.eye||"dot"}, g, a;
+  if(name==="happy") g=frames({ant:o.ant,pat:o.pat,eye:o.eye,face:"happy"});
+  else if(name==="sad") g=frames({ant:o.ant,pat:o.pat,eye:o.eye,face:"wait"});
+  else if(name==="jump"){
+    g=build({ant:o.ant,pat:o.pat,eye:o.eye,face:"happy",mouth:"open"});
+    a=rows(g);
+    [[2,1],[3,1],[2,14],[3,14]].forEach(function(p){ setc(a,p[0],p[1],"k"); });
+    setc(a,1,1,"p"); setc(a,1,14,"p");
+    g=join(a);
+  } else if(name==="fall"){
+    g=build({ant:"droop",pat:o.pat,eye:o.eye,face:"wow",mouth:"o",legs:"dangle"});
+  } else if(name==="catch"){
+    g=frames({ant:o.ant,pat:o.pat,eye:o.eye,face:"happy",mouth:"open"});
+    a=rows(g);
+    [[1,1],[2,1],[3,1],[1,14],[2,14],[3,14]].forEach(function(p){ setc(a,p[0],p[1],"k"); });
+    setc(a,0,1,"p"); setc(a,0,14,"p");
+    g=join(a);
+  } else g=frames({ant:o.ant,pat:o.pat,eye:o.eye,face:"idle1"});
+  return g;
+}
+var CHIP_POSES={front:{},side:{}};
+POSE_NAMES.front.forEach(function(n){ CHIP_POSES.front[n]=function(m){ return frontPose(m,n); }; });
+POSE_NAMES.side.forEach(function(n){ CHIP_POSES.side[n]=function(m){ return sidePose(m,n); }; });
+/* one pose for a view; a pack that is missing one falls back to the chip's, never to a blank screen */
+function pose(pack,marks,view,name){
+  var set=(pack && pack.poses && pack.poses[view]) || CHIP_POSES[view];
+  var fn=set && set[name];
+  if(!fn){ set=CHIP_POSES[view]; fn=set[name] || set[view==="side"?"walk1":"idle"]; }
+  return typeof fn==="function" ? fn(marks||{}) : fn;
+}
+/* the left-facing view is the right-facing grid with every row reversed */
+function mirror(grid){
+  if(!grid) return grid;
+  var out=[];
+  for(var r=0;r<grid.length;r++) out.push(String(grid[r]).split("").reverse().join(""));
+  return out;
+}
+
 var CHIP_EGG=[
 "................",
 "......kkkk......",
@@ -922,6 +1039,7 @@ var CHIP_PACK={
   name:{zh:"芯仔",en:"Chip"},
   faces:["idle1","idle2","blink","eat1","eat2","happy","walk1","walk2","sleep","wait","surprised","hold"],
   frames:frames,
+  poses:CHIP_POSES,
   adult:adult,
   egg:CHIP_EGG,
   eggCrack:CHIP_EGG_CRACK,
@@ -952,6 +1070,9 @@ window.LopdaPetArt={
   digitGrid:digitGrid,
   numberGrid:numberGrid,
   rows:rows,
-  join:join
+  join:join,
+  POSE_NAMES:POSE_NAMES,
+  pose:pose,
+  mirror:mirror
 };
 })();

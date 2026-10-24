@@ -20,7 +20,8 @@ runtime/        the PWA: index.html, core.js (shared LP object: utils, views, so
                 develop.js (developing a frame: the stocks' looks, grain, halation, leaks, date stamp; pure functions on RGBA),
                 notetext.js (notes: tags, search and snippets, the diary title, the diaries by day, front matter, export names, the rules for app notes; pure functions),
                 petsim.js (the built-in pet's rules: catch-up, sleep, hunger and joy, growth, the day's outing, souvenir checks; pure functions),
-                petart.js (the pet's species pack "chip": sprite grids and frame builder, props, icons, souvenirs and the 81 x 60 room painter into a tone buffer; pure functions),
+                petart.js (the pet's species pack "chip": sprite grids and frame builder, the standard front and side poses, props, icons, souvenirs and the 81 x 60 room painter into a tone buffer; pure functions),
+                petplay.js (the pet's play packs: catch, bounce and climb, deterministic 50 ms ticks over the standard poses and the 81 x 60 tone buffer; pure functions),
                 zip.js (stored zips written, stored and deflated zips read; pure functions, CRC from negative.js), lunar.js (lunar calendar + solar term tables, 1900-2100), stardict.js (StarDict reader), wordlist.js (the word list and the entries behind PAD.dict: check/query/entry and one source, shared by apps/dict.js, sdk/dev.html and the tests, SPEC.md 6.7), bookparse.js (TXT/EPUB parser),
                 books/ (the reader's two public-domain sample books), sw.js (offline cache),
                 fonts/ (DotGothic16, VT323, OFL), vendor/binjgb/ (Game Boy core, MIT), vendor/holiday-cn/ (China days off, MIT),
@@ -32,7 +33,7 @@ tools/          check-app.mjs, build-index.mjs, bundle-app.mjs (+ lo-game.mjs al
                 readme-shots.mjs (the README pictures: docs/images/ in English, --lang=zh into docs/images/zh/ for README.zh.md; needs Playwright) with readme-scene.mjs (the lake the fake camera sees);
                 gen-lunar.py (one-off generator of the lunar table, needs PyEphem); gen-ecdict.mjs (one-off, ECDICT csv ->
                 vendor/ecdict/) with stardict-write.mjs (StarDict + dictzip writer, also used by tests)
-tests/          node:test suite (no deps): tools, strings, PAD shim, sensors, speech, platform store, backup, lo-game, negative, develop, notetext, zip, repo rules;
+tests/          node:test suite (no deps): tools, strings, PAD shim, sensors, speech, platform store, backup, lo-game, negative, develop, notetext, zip, repo rules, petplay;
                 runtime-shots.mjs (before/after screenshots of the runtime), hko-compare.mjs (lunar table vs the HKO tables, manual)
 SPEC.md         app spec lopda/1 (MIT)
 README.md (English, the homepage) README.zh.md (Chinese) LICENSE NOTICE LICENSING.md CONTRIBUTING.md
