@@ -372,6 +372,9 @@
       "studio.kit": "换鼓组：{kit}", "studio.kit.soft": "软鼓", "studio.kit.chip": "芯片",
       "studio.hush": "静音键开着就听不到外放",
       "studio.bad": "这盘磁带读不出来，换了一盘新的",
+      "studio.tour.skip": "跳过", "studio.tour.next": "下一步", "studio.tour.done": "好了",
+      "studio.tour.play": "按 ▸ 听听", "studio.tour.grid": "点亮一格，加一下底鼓",
+      "studio.tour.drums": "换一只鼓试试", "studio.tour.bpm": "−、+ 改快慢；HOME 随时离开，会自动保存",
 
       "boot.nostore": "这台浏览器不让存档，关掉页面后内容会丢。"
     },
@@ -738,6 +741,9 @@
       "studio.kit": "Kit: {kit}", "studio.kit.soft": "Soft", "studio.kit.chip": "Chip",
       "studio.hush": "With the silent switch on, the speaker stays quiet",
       "studio.bad": "That tape couldn't be read; here is a fresh one",
+      "studio.tour.skip": "Skip", "studio.tour.next": "Next", "studio.tour.done": "Done",
+      "studio.tour.play": "Press ▸ to listen", "studio.tour.grid": "Light a square to add a kick",
+      "studio.tour.drums": "Try another drum", "studio.tour.bpm": "− and + set the speed. HOME leaves any time; it saves itself",
 
       "boot.nostore": "This browser won't keep data. It's lost when the page closes."
     }

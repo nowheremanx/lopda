@@ -618,3 +618,14 @@ textarea::placeholder{color:var(--ink-2)}
 .st-ask p{margin:0}
 .st-ask .row{gap:10px}
 .st-ask .btn{flex:1;min-height:44px}
+/* the tour: four dither panels leave a hole around the highlighted element, the box sits in the other half */
+.studio.st-touring .st-bar{position:static}
+.st-tour-hi{position:relative;z-index:44;outline:3px solid var(--ink);outline-offset:0}
+.st-tour{position:absolute;inset:0;z-index:40;pointer-events:none}
+.st-tour-cover{position:absolute;display:block;pointer-events:auto;background-color:var(--lcd);background-image:repeating-conic-gradient(var(--lcd) 0deg 90deg,var(--lcd-2) 90deg 180deg,var(--lcd-3) 180deg 270deg,var(--ink-2) 270deg 360deg);background-size:4px 4px}
+.st-tour-box{position:absolute;left:4px;right:4px;z-index:48;background:var(--lcd);color:var(--ink);border:3px solid var(--ink);padding:4px 6px;display:flex;flex-direction:column;gap:4px;pointer-events:auto}
+.st-tour-text{margin:0;font-size:14px;line-height:1.25}
+.st-tour-btns{display:flex;gap:6px}
+.st-tour-btns button{flex:1;min-height:44px;padding:4px 8px;border:2px solid var(--ink);font-family:var(--f-lcd);font-size:16px;line-height:1.1;cursor:pointer}
+.st-tour-skip{background:transparent;color:var(--ink)}
+.st-tour-next{background:var(--ink);color:var(--lcd)}
