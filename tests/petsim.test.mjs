@@ -36,9 +36,9 @@ test("dayKey and hourOf: local time from the passed offset, not the machine's zo
 /* ---------- a new egg ---------- */
 test("fresh: the save of design.md 8, plus lastMeal, today's counters and the carried awake minutes", () => {
   const now = at(2026, 10, 20, 8, 0), s = P.fresh(now, P.rng(7));
-  assert.deepEqual(Object.keys(s).sort(), ["awakeHunger", "awakeJoy", "born", "close", "form", "hunger", "joy", "last", "lastDay", "lastMeal",
-    "light", "marks", "mess", "opened", "room", "species", "stage", "today", "trait", "travel", "v"].sort());
-  assert.deepEqual(Object.keys(s.today).sort(), ["back", "burp", "day", "out", "pats", "played", "shown", "snacks"]);
+  assert.deepEqual(Object.keys(s).sort(), ["aiUse", "awakeHunger", "awakeJoy", "born", "close", "form", "hunger", "joy", "last", "lastDay", "lastMeal",
+    "light", "marks", "mess", "opened", "room", "seenUse", "species", "stage", "today", "trait", "travel", "v"].sort());
+  assert.deepEqual(Object.keys(s.today).sort(), ["ai", "back", "burp", "day", "out", "pats", "pick", "picked", "played", "rewarded", "shown", "shownYesterday", "snacks", "used"]);
   assert.deepEqual([s.v, s.species, s.room, s.born, s.last, s.hunger, s.joy, s.mess, s.close, s.opened, s.lastDay, s.awakeHunger, s.awakeJoy],
     [1, "chip", "chip", now, now, 5, 5, 0, 0, 0, null, 0, 0]);
   assert.deepEqual([s.stage, s.form, s.light, s.travel, s.lastMeal], ["egg", null, true, false, null]);
@@ -533,4 +533,48 @@ test("aiPrompt: ctx.words is never a word source when ctx.word is absent", () =>
   const s = JSON.stringify(P.aiPrompt({ lang: "en", words: ["alpha", "beta", "gamma"], recent: ["Ticket"] }).messages);
   for (const w of ["alpha", "beta", "gamma"]) assert.ok(!s.includes(w), w);
   assert.ok(s.includes("Ticket"));
+});
+
+test("aiPrompt: the last five souvenir names fit, the sixth is left behind", () => {
+  const s = JSON.stringify(P.aiPrompt({ lang: "en", recent: ["N1", "N2", "N3", "N4", "N5", "N6"] }).messages);
+  for (const n of ["N2", "N3", "N4", "N5", "N6"]) assert.ok(s.includes(n), n);
+  assert.ok(!s.includes("N1"), "only the last five");
+});
+
+/* ---------- the AI's small vocabulary ---------- */
+test("moodWord: one word from hunger and joy, in both languages", () => {
+  assert.equal(P.moodWord(0, 5, false), "hungry");
+  assert.equal(P.moodWord(5, 0, false), "low");
+  assert.equal(P.moodWord(4, 5, false), "happy");
+  assert.equal(P.moodWord(5, 3, false), "calm");
+  assert.equal(P.moodWord(3, 3, false), "content");
+  assert.equal(P.moodWord(0, 5, true), "有点饿");
+  for (const [h, j] of [[0, 0], [5, 5], [-3, 9], [2.6, 2.4]]) assert.ok(typeof P.moodWord(h, j, false) === "string");
+});
+
+test("aiCategories: only the fixed words whose usage counts grew", () => {
+  const before = { reader: 3, cam: 0, dict: 2, notes: 1, darkroom: 0, apps: 4 };
+  const after = { reader: 3, cam: 2, dict: 4, notes: 1, darkroom: 1, apps: 4 };
+  assert.deepEqual([...P.aiCategories(before, after)], ["took photos", "studied words", "developed film"]);
+  assert.deepEqual([...P.aiCategories({}, {})], []);
+  assert.deepEqual([...P.aiCategories(null, { reader: 1 })], ["read"]);
+  /* nothing outside the fixed vocabulary can come out, whatever the counts are called */
+  assert.deepEqual([...P.aiCategories({}, { secret: 9, reader: 1 })], ["read"]);
+});
+
+test("a new day keeps yesterday's kind and clears the pick and its counters", () => {
+  const now = at(2026, 10, 20, 21, 30), s = P.fresh(now, P.rng(9));
+  s.today = { ...s.today, day: "2026-10-20", shown: "word", picked: true, pick: { kind: "word", word: "光" }, used: true, ai: true, snacks: 2 };
+  const next = P.openDay(s, "2026-10-21", null);
+  assert.equal(next.today.day, "2026-10-21");
+  assert.equal(next.today.shownYesterday, "word");
+  assert.equal(next.today.shown, null);
+  assert.equal(next.today.picked, false);
+  assert.equal(next.today.pick, null);
+  assert.equal(next.today.used, false);
+  assert.equal(next.today.ai, false);
+  assert.equal(next.today.snacks, 0);
+  /* the previous save is untouched */
+  assert.equal(s.today.day, "2026-10-20");
+  assert.equal(s.today.used, true);
 });
