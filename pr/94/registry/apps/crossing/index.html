@@ -8,13 +8,16 @@
      A letter wheel and a small crossword. The words come from PAD.dict (SPEC.md 6.7), the built-in ECDICT:
      words() picks the seed word and the real words that fit its letters, lookup() gives the line in the
      player's language. The results card can add a word to the player's word book, which needs the
-     "wordbook" permission (SPEC.md 6.7); the app adds one word at a time on SELECT. The player can turn
-     ECDICT off in 词典管理 and this app still works. Everything is plain DOM, no canvas, no framework. -->
+     "wordbook" permission (SPEC.md 6.7); on the card A adds one word, B takes it out, SELECT toggles, and a
+     tap on the row's right end toggles. The player can turn ECDICT off in 词典管理 and this app still works.
+     Everything is plain DOM, no canvas, no framework. -->
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #a3ad7e; color: #1f2a14; font-family: monospace; }
   body { display: flex; flex-direction: column; -webkit-user-select: none; user-select: none; }
   header { flex: none; height: 44px; display: flex; align-items: center; justify-content: space-between; padding: 0 4px; box-sizing: border-box; font-size: 16px; }
   #round { font-weight: bold; }
+  /* a random round has no number: an inverted little badge stands where the round number would be */
+  #round.badge { background: #1f2a14; color: #a3ad7e; padding: 2px; }
   .btns { display: flex; gap: 6px; }
   #help { font: inherit; font-size: 18px; font-weight: bold; width: 44px; height: 44px; padding: 0; background: #a3ad7e; color: #1f2a14;
     border: 2px solid #1f2a14; touch-action: manipulation; }
@@ -60,6 +63,34 @@
   #cover-list[hidden] { display: none; }
   #cover-list li { box-sizing: border-box; height: 24px; line-height: 24px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     border-bottom: 1px solid #7d8a58; letter-spacing: 2px; text-transform: uppercase; touch-action: manipulation; }
+  #cover-foot { font-size: 13px; line-height: 1.4; color: #4a5a32; text-align: center; white-space: pre-line; }
+  #cover-foot[hidden] { display: none; }
+  /* The title and the round picker use the results card's own cover column, so every screen speaks the same
+     language: paper, ink, one inverted cursor. The title rows are taller than the results rows because a
+     finger picks them. */
+  #cover.title { gap: 6px; padding: 12px; justify-content: center; }
+  #cover.title #cover-text { font-size: 22px; font-weight: bold; letter-spacing: 4px; line-height: 1.2; margin-bottom: 10px; }
+  #cover.title #cover-list { display: flex; flex-direction: column; gap: 8px; max-width: 240px; font-size: 15px; }
+  #cover.title #cover-list li { height: 44px; line-height: 44px; padding: 0 6px; border-bottom: 0; letter-spacing: 0;
+    text-transform: none; text-align: center; }
+  #cover.title #cover-list li.sel { background: #1f2a14; color: #a3ad7e; }
+  #cover.title #cover-list li.locked { box-sizing: border-box; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 1px; line-height: 1.2; color: #4a5a32; border: 2px dashed #4a5a32; }
+  #cover.title #cover-list li.locked .lock { font-size: 12px; }
+  #cover.title #cover-list li.locked.sel { color: #a3ad7e; border-color: #a3ad7e; }
+  #cover.pick { gap: 6px; padding: 8px; }
+  #cover.pick #cover-text { font-size: 13px; line-height: 1.2; }
+  #cover.pick #cover-list { display: grid; grid-template-columns: repeat(5, 44px); gap: 8px; width: auto; max-width: none; }
+  #cover.pick #cover-list li { width: 44px; height: 44px; line-height: 40px; padding: 0; text-align: center; font-size: 17px;
+    font-weight: bold; letter-spacing: 0; text-transform: none; border: 2px solid transparent; }
+  #cover.pick #cover-list li.cleared { background: #7d8a58; color: #1f2a14; }
+  #cover.pick #cover-list li.next { background: #a3ad7e; color: #1f2a14; border: 2px dashed #1f2a14; }
+  #cover.pick #cover-list li.locked { background: #a3ad7e; color: #4a5a32; }
+  #cover.pick #cover-list li.sel { background: #1f2a14; color: #a3ad7e; border-color: #1f2a14; }
+  #cover.pick #cover-list li.sel.next { border-color: #a3ad7e; }
+  /* the way out of a round: a small panel on top of the round, not a whole screen */
+  #cover.confirm { inset: auto; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 268px; max-width: calc(100% - 24px);
+    padding: 16px; gap: 10px; border: 2px solid #1f2a14; box-shadow: 6px 6px 0 #4a5a32; overflow: visible; }
   /* The results card is its own calm column: the list, the chosen word's whole line below it, then NEXT ROUND.
      The detail box keeps its three lines whichever item is chosen, so nothing jumps as the cursor moves. */
   #cover.done { gap: 8px; padding: 8px 12px; }
@@ -121,6 +152,7 @@
   <ul id="cover-list" hidden></ul>
   <div id="cover-detail"></div>
   <button id="cover-btn" type="button"></button>
+  <div id="cover-foot" hidden></div>
 </div>
 <script>
 (function () {
@@ -132,30 +164,40 @@
     zh: {
       round: "第 {n} 关", hint: "提示 {n}", loading: "翻字典…",
       error: "这台掌机的词典打不开", retry: "再试一次",
+      appName: "拼字格", cont: "继续 · 第 {n} 关", rounds: "选关", random: "随机关", randomLock: "通关 100 关后开放",
+      howto: "玩法", pickHead: "第 {a}-{b} 关", pickFoot: "◄ ► 翻页", titleKeys: "↑↓ 选 · A 打开",
+      replay: " · 重玩", badge: "随机", doneRandom: "随机关完成",
+      leave: "回到主界面？", leaveYes: "回去", leaveKeys: "A 是 · B 否",
       goal: "划过字母拼单词，填满右边的格子",
       demo: "看：按住字母，划过 {w}",
       demoEnd: "拼对了，词就填进格子，下面显示中文，还会读出来。\n\n轮到你了：找出格子里剩下的词。",
       start: "开始",
-      help: "玩法\n\n按住字母盘上的一个字母，不松手划过别的字母，拼出一个英文单词，松手提交。\n拼对格子里的词，它就填进格子，下面显示中文并读出来；填上的词点一下可以再看一遍。填满格子就过关。\n不在格子里的真词是奖励词，每个换 1 个提示。点「提示」看一个空词的中文。\n按键：方向键选字母，A 加上，B 删掉一个，START 提交，SELECT 打乱字母。",
+      help: "玩法\n\n按住字母盘上的一个字母，不松手划过别的字母，拼出一个英文单词，松手提交。\n拼对格子里的词，它就填进格子，下面显示中文并读出来；填上的词点一下可以再看一遍。填满格子就过关。\n不在格子里的真词是奖励词，每个换 1 个提示。点「提示」看一个空词的中文。\n按键：方向键选字母，A 加上，B 删掉一个，START 提交，SELECT 打乱字母。\n结算卡：A 收进生词本，B 移出。",
       ok: "知道了",
       done: "第 {n} 关完成", doneBtn: "下一关", bonus: "奖励词 {w}：提示 +1",
       sum: "奖励词 {b} 个 · 提示 {n}",
       bookAdded: "已加入生词本", bookRemoved: "已移出生词本", bookDenied: "没有允许使用生词本", bookFull: "生词本满了",
+      bookTip: "A 收进生词本 · B 移出",
       noHints: "先找奖励词换提示", hintHead: "提示：", noEntry: "词典里没有这个词",
       noWord: "不是这里的词", again: "这个词已经填上了", againBonus: "这个奖励词已经算过了"
     },
     en: {
       round: "ROUND {n}", hint: "HINT {n}", loading: "Looking up…",
       error: "This handheld's dictionary won't open.", retry: "TRY AGAIN",
+      appName: "CROSSING", cont: "CONTINUE · ROUND {n}", rounds: "ROUNDS", random: "RANDOM", randomLock: "Opens after round 100",
+      howto: "HOW TO PLAY", pickHead: "ROUNDS {a}-{b}", pickFoot: "◄ ► page", titleKeys: "↑↓ pick · A open",
+      replay: " · REPLAY", badge: "RANDOM", doneRandom: "RANDOM CLEAR",
+      leave: "Back to the title?", leaveYes: "LEAVE", leaveKeys: "A: yes · B: no",
       goal: "Swipe letters into words to fill the grid",
       demo: "Watch: hold and slide {w}",
       demoEnd: "A right word fills in, its meaning shows below, and you hear it.\n\nYour turn: find the other words in the grid.",
       start: "START",
-      help: "HOW TO PLAY\n\nHold a letter, slide across others to spell; let go to send it.\nA right word fills in with its meaning, read aloud. Tap a filled word to see it again. Fill the grid to clear.\nAny other real word is a bonus word: 1 hint; HINT shows an open word's meaning.\nKeys: arrows pick, A add, B delete, START send, SELECT shuffle.",
+      help: "HOW TO PLAY\n\nHold a letter, slide across others to spell; let go to send it.\nA right word fills in, its meaning below. Tap it to hear it again. Fill the grid to clear.\nAny other real word is a bonus: 1 hint; HINT shows an open word.\nKeys: arrows pick, A add, B delete, START send, SELECT shuffle.\nResults: A adds, B removes.",
       ok: "OK",
       done: "ROUND {n} CLEAR", doneBtn: "NEXT ROUND", bonus: "Bonus word {w}: hint +1",
       sum: "Bonus words {b} · hints {n}",
       bookAdded: "Added to word book", bookRemoved: "Removed from word book", bookDenied: "Word book not allowed", bookFull: "The word book is full",
+      bookTip: "A: add to word book · B: remove",
       noHints: "Earn a hint with a bonus word", hintHead: "HINT: ", noEntry: "No entry in the dictionary",
       noWord: "Not a word here", again: "Already in the grid", againBonus: "Bonus word already counted"
     }
@@ -184,10 +226,15 @@
   var linesEl = document.getElementById("lines"), fingerEl = document.getElementById("finger");
   var coverEl = document.getElementById("cover"), coverText = document.getElementById("cover-text"), coverBtn = document.getElementById("cover-btn");
   var entryEl = document.getElementById("entry"), coverList = document.getElementById("cover-list"), detailEl = document.getElementById("cover-detail");
+  var footEl = document.getElementById("cover-foot");
 
-  var phase = "load";           /* load | demo | demoEnd | play | clear (the blink and the tune) | help | done | error */
+  var phase = "load";           /* load | demo | demoEnd | play | clear (the blink and the tune) | help | done | error
+                                   | title | pick | leave (the small way-out question) */
   var state = {
     round: 1, hints: 0, done: [],
+    cleared: 0,                 /* the highest fixed round cleared, 0-100 */
+    random: 0,                  /* how many random rounds cleared */
+    mode: "fixed",              /* "fixed" or "random": a random round has no round number to save */
     seed: "", wheel: [], placed: [], words: [], wordSet: {},
     entry: [], cursor: 0,
     view: null, cells: {},
@@ -207,17 +254,29 @@
   var demoTimers = [], demoWord = null, helpBack = null;
   var fxTimers = [], results = null, resultSum = "", pick = 0;   /* the results card, the summary line, and the ring's cursor (0 = NEXT) */
   var bookMarks = [], bookBusy = false, bookRefreshed = false, bookSeq = 0;   /* which result words are in the player's word book */
-  var bookAt = 0;              /* when the last word book call was made: those calls share PAD.dict's 10-a-second limit */
+  var bookTip = false;         /* the one-time A/B hint: shown once, then remembered in the save */
+  var bookTap = false;         /* a bookmark-end tap is selecting to toggle: its answer, not the hint, takes the box */
+  var dictAt = 0;              /* when the last PAD.dict call was made or settled: all share the 10-a-second limit */
   var bookTimer = null, pickSeq = 0;   /* the detail box's word-book line, and a token so a moving cursor wins */
-  var savedRound = null, savedHints = 0, savedDone = [];
+  var savedRound = 1, savedHints = 0, savedDone = [];
   var pending = { round: 1, hints: 0, done: [] };   /* what to ask for again after a dictionary error */
+  /* the main line, the one save() writes: a replay's found words stay in memory, and a random round is not saved
+     as a round number, so both leave these alone */
+  var replay = false, mainRound = 1, mainDone = [];
+  var titleRows = [], titlePick = 0, pickPage = 0, pickAt = 0;
 
   goalEl.textContent = TXT.goal;
 
   function keyOf(r, c) { return r + "," + c; }
 
   function updateHeader() {
-    roundEl.textContent = tx("round", state.round);
+    if (state.mode === "random") {
+      roundEl.textContent = TXT.badge;
+      roundEl.className = "badge";
+    } else {
+      roundEl.textContent = tx("round", state.round) + (replay ? TXT.replay : "");
+      roundEl.className = "";
+    }
     hintEl.textContent = tx("hint", state.hints);
     hintEl.classList.toggle("off", state.hints < 1);
   }
@@ -292,6 +351,18 @@
 
   function wait(ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); }
 
+  /* A round build spends up to nine PAD.dict calls, lookups and the word book spend more, and the limit is ten a
+     second for the whole app. Every call records when it settled, so startRound can wait that window out before
+     its own first call. The calls themselves and their seeds are untouched. */
+  function dictSettled(p) {
+    dictAt = Date.now();         /* stamped when made and again when answered, so a slow answer still gets its full second */
+    if (!p || !p.then) return p;
+    return p.then(function (v) { dictAt = Date.now(); return v; },
+                  function (e) { dictAt = Date.now(); throw e; });
+  }
+  function dictWords(q) { return dictSettled(PAD.dict.words(q)); }
+  function dictLookup(w) { return dictSettled(PAD.dict.lookup(w)); }
+
   /* PAD.dict.words({len, level, max}) -> {words, more} | null. level 1 is the most common 2000 words, so the
      seed is a word everyone knows. The grid takes only level 2 (the most common 5000), so every word to find is
      one a learner may know; any real word from the whole list (level 5) counts as a bonus word.
@@ -299,7 +370,7 @@
      the next seed. Each seed costs two calls, so four seeds and the seed query make nine calls in a second (the
      limit is ten); before a fifth seed, wait out the window. Only a null or a rejected call is a dictionary error. */
   function pickSeed(L) {
-    return PAD.dict.words({ len: L, level: 1, max: 500 }).then(function (page) {
+    return dictWords({ len: L, level: 1, max: 500 }).then(function (page) {
       if (!page || !page.words || !page.words.length) return null;
       var seeds = page.words, start = Math.floor(rnd() * seeds.length), at = 0, burst = 0;
       function attempt() {
@@ -310,8 +381,8 @@
           var seed = seeds[(start + at) % seeds.length];
           at++;
           return Promise.all([
-            PAD.dict.words({ letters: seed, len: [3, L], level: 2, max: 500 }),   /* the grid's words */
-            PAD.dict.words({ letters: seed, len: [3, L], level: 5, max: 500 })    /* every real word: bonus words */
+            dictWords({ letters: seed, len: [3, L], level: 2, max: 500 }),   /* the grid's words */
+            dictWords({ letters: seed, len: [3, L], level: 5, max: 500 })    /* every real word: bonus words */
           ]).then(function (rs) {
             if (!rs[0] || !rs[0].words || !rs[1] || !rs[1].words) return null;   /* unreadable: the error screen, not another seed */
             var common = rs[0].words.slice(), words = rs[1].words.slice();
@@ -418,7 +489,7 @@
 
   /* ---------- starting a round ---------- */
 
-  function lenFor(round) { return round <= 10 ? 5 : round <= 30 ? 6 : 7; }
+  function lenFor(round) { return round <= 10 ? 5 : round <= 40 ? 6 : 7; }
 
   function fail() {
     /* null (unreadable dictionary, or more than 10 calls a second) and a rejected call both land here */
@@ -428,26 +499,29 @@
   }
 
   /* The plain card: the loading line, the tutorial's last page, the rules, an error. The results card has its
-     own shape and is drawn by showResults. */
+     own shape and is drawn by showResults. The title and the picker have their own classes too. */
   function showCover(text, button) {
-    coverEl.classList.remove("done");
+    coverEl.classList.remove("done", "title", "pick", "confirm");
     coverText.textContent = text;
     coverList.innerHTML = "";
     coverList.hidden = true;
     coverBtn.textContent = button || "";
     coverBtn.hidden = !button;
     coverBtn.classList.remove("outline");
+    footEl.hidden = true;
     coverEl.hidden = false;
   }
-  function hideCover() { coverEl.hidden = true; }
+  function hideCover() { coverEl.hidden = true; footEl.hidden = true; }
 
   /* The results card. One row a grid word, no meaning in the row; the word under the cursor shows its whole
      line in the detail box, and NEXT ROUND shows the bonus/hint summary there instead. reset puts the cursor
      back on NEXT when the card first opens; the ? page comes back to the item the player had chosen. */
   function showResults(reset) {
     if (reset) pick = 0;
+    coverEl.classList.remove("title", "pick", "confirm", "help");
     coverEl.classList.add("done");
-    coverText.textContent = tx("done", state.round);
+    coverText.textContent = state.mode === "random" ? TXT.doneRandom : tx("done", state.round);
+    footEl.hidden = true;
     coverList.innerHTML = "";
     results.forEach(function (row, i) {
       var li = document.createElement("li"), mark = document.createElement("span");
@@ -486,6 +560,14 @@
       detailEl.classList.add("dark");
     }
     coverBtn.classList.toggle("outline", pick > 0);
+    /* The first word the card selects teaches A and B once. It is saved the moment it shows, so it does not
+       come back; a word-book answer or a tap that reads the word still takes the box over (pickSeq). A tap on
+       a row's bookmark end is a toggle, not a read, so it waits for that answer instead. */
+    if (row && !bookTip && !bookTap) {
+      bookTip = true;
+      save();
+      flashDetail(TXT.bookTip);
+    }
   }
   function movePick(by) {
     var n = results.length + 1;
@@ -509,8 +591,7 @@
     if (!results || !results.length) return;
     if (!PAD.dict || !PAD.dict.inBook) { if (!refresh) { bookMarks = results.map(function () { return false; }); renderMarks(); } return; }
     var token = gen, seq = bookSeq, words = results.map(function (row) { return row.word; });
-    bookAt = Date.now();
-    PAD.dict.inBook(words).then(function (v) {
+    dictSettled(PAD.dict.inBook(words)).then(function (v) {
       if (token !== gen || seq !== bookSeq || !Array.isArray(v) || v.length !== words.length) return;
       bookMarks = v.map(function (b) { return b === true; });
       renderMarks();
@@ -537,17 +618,18 @@
       renderPick();
     }, 1200);
   }
-  /* SELECT, Left or Right: add the selected word, or take it out again. NEXT selected does nothing; a second
-     toggle while one is pending is ignored, so the row never disagrees with the word book. */
-  function toggleBook() {
-    if (phase !== "done" || pick === 0 || bookBusy) return;
-    var i = pick - 1, row = results && results[i];
+  /* The word book for one row: on adds it, off takes it out. The card's A, B and SELECT and the bookmarked end
+     of a row all come here. NEXT selected does nothing; a second call while one is pending is ignored, so the
+     row never disagrees with the word book. The guards stay: the card must still be up. */
+  function setBook(i, on) {
+    if (phase !== "done" || bookBusy) return;
+    var row = results && results[i];
     if (!row || !PAD.dict || !PAD.dict.addWord || !PAD.dict.removeWord) return;
     var was = bookMarks[i] === true;
+    if (on === was) return;
     bookBusy = true;
-    var seq = ++bookSeq;       /* a read from before this toggle must not land on top of its answer */
-    bookAt = Date.now();
-    var call = was ? PAD.dict.removeWord(row.word) : PAD.dict.addWord(row.word);
+    var seq = ++bookSeq;       /* a read from before this change must not land on top of its answer */
+    var call = dictSettled(was ? PAD.dict.removeWord(row.word) : PAD.dict.addWord(row.word));
     call.then(function (v) {
       if (seq !== bookSeq) return;     /* the card is gone: touch nothing, not even bookBusy */
       bookBusy = false;
@@ -556,6 +638,8 @@
         bookMarks[i] = !was;
         renderMarks();
         PAD.sfx("ok");
+        /* an add means the player has met the word book: no one-time A/B hint any more (a tap add counts too) */
+        if (!was && !bookTip) { bookTip = true; save(); }
         if (pick === i + 1) flashDetail(was ? TXT.bookRemoved : TXT.bookAdded);
         if (!bookRefreshed) { bookRefreshed = true; readBookMarks(true); }
       } else if (v === "denied") { PAD.sfx("err"); if (pick === i + 1) flashDetail(TXT.bookDenied); }
@@ -568,10 +652,183 @@
       PAD.sfx("err");
     });
   }
+  /* SELECT flips the selected row; A only adds and B only removes, so the card never guesses. */
+  function toggleBook() {
+    if (phase !== "done" || pick === 0) return;
+    setBook(pick - 1, bookMarks[pick - 1] !== true);
+  }
 
-  function startRound(round, hints, done) {
-    pending = { round: round, hints: hints, done: done.slice() };
-    state.round = round; state.hints = hints; state.done = done.slice(); state.entry = []; state.cursor = 0;
+  /* ---------- the title, the round picker, the way out ---------- */
+
+  /* The title is a short menu, not a round: the results card's own column, its rows inverted like its cursor.
+     Once round 100 is cleared there is no round 101 to continue, so RANDOM takes the first place. */
+  function showTitle() {
+    phase = "title";
+    coverEl.classList.remove("done", "help", "pick", "confirm");
+    coverEl.classList.add("title");
+    coverText.textContent = TXT.appName;
+    var firstRandom = state.cleared >= 100 && mainRound > 100;
+    titleRows = [];
+    if (firstRandom) titleRows.push({ kind: "random" });
+    else titleRows.push({ kind: "continue" });
+    titleRows.push({ kind: "pick" });
+    if (!firstRandom) titleRows.push({ kind: "random", locked: state.cleared < 100 });
+    titleRows.push({ kind: "help" });
+    if (titlePick >= titleRows.length) titlePick = 0;
+    coverList.innerHTML = "";
+    titleRows.forEach(function (row, i) {
+      var li = document.createElement("li");
+      li.setAttribute("data-row", String(i));
+      if (row.locked) {
+        /* locked looks locked even before the cursor lands on it: dark words, a dashed box, and the reason in it */
+        li.className = "locked";
+        li.innerHTML = '<span class="rname">' + TXT.random + '</span><span class="lock">' + TXT.randomLock + "</span>";
+      } else if (row.kind === "continue") li.textContent = tx("cont", mainRound);
+      else if (row.kind === "pick") li.textContent = TXT.rounds;
+      else if (row.kind === "random") li.textContent = TXT.random;
+      else li.textContent = TXT.howto;
+      coverList.appendChild(li);
+    });
+    coverList.hidden = false;
+    coverBtn.hidden = true;
+    footEl.textContent = TXT.titleKeys;
+    footEl.hidden = false;
+    coverEl.hidden = false;
+    renderTitle();
+  }
+  function renderTitle() {
+    var rows = coverList.querySelectorAll("li"), i;
+    for (i = 0; i < rows.length; i++) rows[i].classList.toggle("sel", i === titlePick);
+  }
+  /* one menu row: the first row START would open, and what A or a tap does */
+  function openTitleRow(i) {
+    var row = titleRows[i];
+    if (!row) return;
+    titlePick = i;
+    renderTitle();
+    if (row.kind === "continue") { PAD.sfx("ok"); openRound(mainRound); }
+    else if (row.kind === "pick") { PAD.sfx("tap"); showPick(); }
+    else if (row.kind === "random") {
+      if (row.locked) { PAD.sfx("err"); return; }
+      PAD.sfx("ok"); startRandom();
+    } else { PAD.sfx("tap"); openHelp(); }
+  }
+
+  /* The picker: four pages of twenty-five, the cleared rounds solid on mid, the next one dashed on paper, the
+     later ones dark and closed. The borders and fills are the only difference between the three, so a glance
+     down the page says how far the player has come. */
+  function showPick() {
+    phase = "pick";
+    coverEl.classList.remove("title", "done", "help", "confirm");
+    coverEl.classList.add("pick");
+    /* the cursor starts on the round to continue; after round 100 that is the last one, which is already cleared */
+    var focus = Math.max(1, Math.min(100, state.cleared + 1));
+    pickPage = Math.floor((focus - 1) / 25);
+    pickAt = (focus - 1) % 25;
+    fillPicker();
+    coverBtn.hidden = true;
+    footEl.textContent = TXT.pickFoot;
+    footEl.hidden = false;
+    coverEl.hidden = false;
+  }
+  function fillPicker() {
+    var first = pickPage * 25, i, n, li;
+    coverList.innerHTML = "";
+    for (i = 0; i < 25; i++) {
+      n = first + i + 1;
+      li = document.createElement("li");
+      li.setAttribute("data-n", String(n));
+      li.textContent = String(n);
+      li.className = n <= state.cleared ? "cleared" : n === state.cleared + 1 ? "next" : "locked";
+      coverList.appendChild(li);
+    }
+    coverText.textContent = TXT.pickHead.replace("{a}", first + 1).replace("{b}", first + 25);
+    coverList.hidden = false;
+    renderPicker();
+  }
+  function renderPicker() {
+    var rows = coverList.querySelectorAll("li"), i;
+    for (i = 0; i < rows.length; i++) rows[i].classList.toggle("sel", i === pickAt);
+  }
+  /* Arrows move in the 5x5; Left on the first column and Right on the last turn the page and keep the row, so
+     the four pages are one long shelf the player walks along. */
+  function movePickCursor(b) {
+    var row = Math.floor(pickAt / 5), col = pickAt % 5;
+    if (b === "up") row = Math.max(0, row - 1);
+    else if (b === "down") row = Math.min(4, row + 1);
+    else if (b === "left") {
+      if (col === 0) { pickPage = (pickPage + 3) % 4; pickAt = row * 5 + 4; fillPicker(); PAD.sfx("tick"); return; }
+      col--;
+    } else if (b === "right") {
+      if (col === 4) { pickPage = (pickPage + 1) % 4; pickAt = row * 5; fillPicker(); PAD.sfx("tick"); return; }
+      col++;
+    }
+    pickAt = row * 5 + col;
+    renderPicker();
+    PAD.sfx("tick");
+  }
+  function openPicked() {
+    var n = pickPage * 25 + pickAt + 1;
+    if (n > state.cleared + 1) { PAD.sfx("err"); return; }   /* a locked round says why only by refusing */
+    PAD.sfx("ok");
+    openRound(n);
+  }
+
+  /* One way in for the title, the picker and NEXT ROUND: a cleared round is a replay, the next one is the main
+     line, and anything later is locked (the picker guards it; this is the second lock). */
+  function openRound(n) {
+    if (n > 100) { startRandom(); return; }
+    if (n <= state.cleared) startRound(n, state.hints, [], { replay: true });
+    else if (n === state.cleared + 1) startRound(n, state.hints, n === mainRound ? mainDone.slice() : []);
+    else showPick();
+  }
+  function startRandom() {
+    /* a number outside 1-100, so a random round can never be mistaken for a fixed one */
+    startRound(101, state.hints, [], { random: true, seed: Date.now() });
+  }
+
+  /* B in an empty entry asks once: the words found are saved after every one, but a thumb can find B by accident */
+  function showLeave() {
+    phase = "leave";
+    coverEl.classList.remove("title", "pick", "done", "help");
+    coverEl.classList.add("confirm");
+    coverText.textContent = TXT.leave;
+    coverList.innerHTML = "";
+    coverList.hidden = true;
+    coverBtn.textContent = TXT.leaveYes;
+    coverBtn.hidden = false;
+    coverBtn.classList.remove("outline");
+    footEl.textContent = TXT.leaveKeys;
+    footEl.hidden = false;
+    coverEl.hidden = false;
+  }
+  function leaveToTitle() {
+    coverEl.classList.remove("confirm");
+    hideCover();
+    save();
+    showTitle();
+  }
+  function cancelLeave() {
+    coverEl.classList.remove("confirm");
+    hideCover();
+    phase = "play";
+    renderKeys();
+  }
+
+  function startRound(round, hints, done, opts) {
+    opts = opts || {};
+    var random = opts.random === true;
+    replay = opts.replay === true;
+    state.mode = random ? "random" : "fixed";
+    /* only a round of the main line moves the saved round; a replay and a random round are extra visits */
+    if (!random && !replay) mainRound = round;
+    var seed = random ? (opts.seed || Date.now()) : round;
+    pending = {
+      round: round, hints: hints, done: done.slice(),
+      opts: { random: random, replay: replay, seed: seed }
+    };
+    state.round = random ? 101 : round; state.hints = hints; state.done = done.slice(); state.entry = []; state.cursor = 0;
+    if (!random && !replay) mainDone = state.done;   /* so a save before the grid builds still carries the new round */
     state.hinted = []; state.hintTurn = 0; state.mean = {}; hintBusy = false; results = null; tapPending = {};
     fxTimers.forEach(clearTimeout); fxTimers = []; boardEl.classList.remove("flash");
     state.seed = ""; state.wheel = []; state.placed = []; state.words = []; state.wordSet = {}; state.view = null; state.cells = {};
@@ -580,13 +837,13 @@
     phase = "load";
     showCover(TXT.loading, "");
     var token = ++gen;
-    var L = lenFor(round);
-    rnd = mulberry32(round);
+    var L = random ? 7 : lenFor(round);
+    rnd = mulberry32(seed);
     if (!PAD.dict || !PAD.dict.words) { fail(); return; }
-    /* A word book call from the results card counts toward PAD.dict's 10 a second: wait out its window before
-       this round's first words() call, or START just after a toggle would open the round on the error card.
-       The wait sits before pickSeed, so the seeded random and the grid a round produces do not change. */
-    var left = bookAt ? 1100 - (Date.now() - bookAt) : 0;
+    /* Every PAD.dict call shares the 10-a-second limit, and a build is most of a second's budget: wait out the
+       window since the last call settled, or a quick re-entry opens the round on the error card. The wait sits
+       before pickSeed, so the seeded random and the grid a round produces do not change. */
+    var left = dictAt ? 1100 - (Date.now() - dictAt) : 0;
     (left > 0 ? wait(left) : Promise.resolve()).then(function () {
       return token === gen ? pickSeed(L) : null;
     }).then(function (out) {
@@ -603,6 +860,7 @@
       shuffleWheel(false);
       state.entry = []; state.cursor = 0;
       state.done = done.filter(function (w) { return state.wordSet[w] || state.placed.some(function (p) { return p.word === w; }); });
+      if (!random && !replay) mainDone = state.done;   /* the array save() writes; a replay's words stay in memory */
       renderBoard(); renderKeys(); updateHeader();
       if (!taught) runDemo();
       else { phase = "play"; hideCover(); renderKeys(); checkComplete(true); }   /* a saved round whose words are all filled opens on its results */
@@ -776,7 +1034,7 @@
   function lookupLine(word) {
     var token = noteStart("fill", word);
     if (!PAD.dict || !PAD.dict.lookup) { setNote(""); return; }
-    PAD.dict.lookup(word).then(function (e) {
+    dictLookup(word).then(function (e) {
       if (token !== noteSeq || phase === "error" || phase === "load") return;
       var m = meaning(e);
       if (!m) { setNote(""); return; }
@@ -807,7 +1065,7 @@
     if (state.mean[word]) { setNote(state.mean[word], "tap", word); return; }
     if (!PAD.dict || !PAD.dict.lookup || tapPending[word]) return;
     tapPending[word] = true;
-    PAD.dict.lookup(word).then(function (e) {
+    dictLookup(word).then(function (e) {
       tapPending[word] = false;
       var m = meaning(e);
       /* the token is stale after a second tap on this word, but that tap still wants this one answer */
@@ -858,6 +1116,16 @@
     var all = state.placed.length > 0 && state.placed.every(function (p) { return state.done.indexOf(p.word) >= 0; });
     if (!all) return;
     phase = "clear";
+    /* the round is over: the main line walks on to the next round, a random round only adds to its count, and a
+       replay changes neither. mainDone is empty for the next round; the card still reads state.done. */
+    if (!replay) {
+      if (state.mode === "random") state.random++;
+      else {
+        state.cleared = Math.max(state.cleared, Math.min(100, state.round));
+        mainRound = Math.min(101, state.round + 1);
+        mainDone = [];
+      }
+    }
     save();
     var token = gen, wait = quiet ? 0 : (after || 0) + 1100, t0 = Date.now();
     if (!quiet) fxTimers.push(setTimeout(function () {
@@ -868,7 +1136,7 @@
        inside the limit of 10 a second. A null is fine: that row shows the word alone. */
     var missing = state.placed.filter(function (p) { return !state.mean[p.word]; });
     Promise.all(missing.map(function (p) {
-      return PAD.dict && PAD.dict.lookup ? PAD.dict.lookup(p.word).then(function (e) {
+      return PAD.dict && PAD.dict.lookup ? dictLookup(p.word).then(function (e) {
         var m = meaning(e);
         if (m) state.mean[p.word] = m;
       }, function () {}) : null;
@@ -917,7 +1185,7 @@
     if (!PAD.dict || !PAD.dict.lookup) { setNote(TXT.noEntry); return; }
     var token = noteStart("hint", word);
     hintBusy = true;
-    PAD.dict.lookup(word).then(function (e) {
+    dictLookup(word).then(function (e) {
       hintBusy = false;
       if (phase !== "play" || state.done.indexOf(word) >= 0) return;
       var m = meaning(e), line = hintMeaning(e, word);
@@ -935,8 +1203,12 @@
   }
 
   function save() {
-    /* PAD.save keeps one value under the app's own id (256 KB at most) and PAD.load gives it back on the next open */
-    var data = { round: state.round, hints: state.hints, done: state.done.slice(), taught: taught };
+    /* PAD.save keeps one value under the app's own id (256 KB at most) and PAD.load gives it back on the next open.
+       round is always the main line's next round; done is that round's own, never a replay's or a random round's. */
+    var data = {
+      round: mainRound, hints: state.hints, done: mainDone.slice(), taught: taught,
+      cleared: state.cleared, random: state.random, bookTip: bookTip
+    };
     try { var p = PAD.save("game", data); if (p && p.then) p.then(null, function () {}); } catch (e) {}
   }
 
@@ -980,21 +1252,37 @@
     taught = true; phase = "play"; hideCover(); save(); renderKeys(); checkComplete();
   }
 
-  /* the rules, any time: the ? button. A, B or START (or the button) go back to the round */
+  /* the rules, any time: the ? button, or the title's HOW TO PLAY row. A, B or START (or the button) go back
+     to whichever screen opened them. */
   function openHelp() {
-    if (phase !== "play" && phase !== "done") return;
+    if (phase !== "play" && phase !== "done" && phase !== "title") return;
     helpBack = phase; phase = "help";
+    coverEl.classList.remove("title", "pick", "confirm", "done");
     coverEl.classList.add("help");
     showCover(TXT.help, TXT.ok);
   }
   function closeHelp() {
     coverEl.classList.remove("help");
-    phase = helpBack || "play"; helpBack = null;
-    if (phase === "done") showResults(false); else hideCover();
-    renderKeys();
+    var back = helpBack || "play";
+    helpBack = null;
+    if (back === "title") { showTitle(); return; }
+    phase = back;
+    if (phase === "done") showResults(false); else { hideCover(); renderKeys(); }
   }
 
   function nextRound() {
+    /* a random round's NEXT is another one, at a new seed */
+    if (state.mode === "random") { startRandom(); save(); return; }
+    /* a replay walks the book: the next round if it is open, else back to the picker to choose */
+    if (replay) {
+      var n = state.round + 1;
+      if (n > 100 || n === state.cleared + 1) openRound(n);
+      else if (n <= state.cleared) startRound(n, state.hints, [], { replay: true });
+      else { showPick(); return; }
+      save();
+      return;
+    }
+    if (state.round >= 100) { startRandom(); save(); return; }
     startRound(state.round + 1, state.hints, []);
     save();
   }
@@ -1003,25 +1291,42 @@
     if (phase === "demoEnd") startPlay();
     else if (phase === "help") closeHelp();
     else if (phase === "error") {
-      startRound(pending.round, pending.hints, pending.done);
-    } else if (phase === "done") nextRound();
+      startRound(pending.round, pending.hints, pending.done, pending.opts);
+    } else if (phase === "leave") leaveToTitle();
+    else if (phase === "done") nextRound();
   });
   /* The word rows are 24 px tall, below the 44 px touch rule, so the whole row width is the target. A tap on
      the right 44 px is the word book toggle (and selects the word); a tap elsewhere selects and reads it.
-     Like the grid, the tap counts only on pointerup and only when it did not travel: a scroll must not pick. */
+     Like the grid, the tap counts only on pointerup and only when it did not travel: a scroll must not pick.
+     The title's and the picker's rows take a tap the same way, as A would. */
   coverList.addEventListener("pointerdown", function (e) {
-    var li = phase === "done" && e.target && e.target.closest ? e.target.closest("li") : null;
+    var here = phase === "done" || phase === "title" || phase === "pick";
+    var li = here && e.target && e.target.closest ? e.target.closest("li") : null;
     rowDown = li && coverList.contains(li) ? { li: li, x: e.clientX, y: e.clientY, id: e.pointerId } : null;
   });
   coverList.addEventListener("pointerup", function (e) {
     var down = rowDown;
     rowDown = null;
-    if (!down || phase !== "done" || e.pointerId !== down.id) return;
+    if (!down || e.pointerId !== down.id) return;
+    if (phase !== "done" && phase !== "title" && phase !== "pick") return;
     var li = e.target && e.target.closest ? e.target.closest("li") : null;
     if (li !== down.li || Math.abs(e.clientX - down.x) + Math.abs(e.clientY - down.y) > 12) return;
+    if (phase === "title") { openTitleRow(+li.getAttribute("data-row")); return; }
+    if (phase === "pick") {
+      pickAt = (+li.getAttribute("data-n") - 1) % 25;
+      renderPicker();
+      openPicked();
+      return;
+    }
     var n = +li.getAttribute("data-pick"), box = li.getBoundingClientRect();
-    if (e.clientX >= box.right - 44) { pickWord(n, true); toggleBook(); }   /* the bookmark end of the row */
-    else pickWord(n);
+    if (e.clientX >= box.right - 44) {
+      /* the bookmark end of the row: it toggles. Its own answer takes the detail box, so no hint on the way;
+         an add that succeeds then remembers the hint for good (setBook). */
+      bookTap = true;
+      pickWord(n, true);
+      bookTap = false;
+      toggleBook();
+    } else pickWord(n);
   });
   coverList.addEventListener("pointercancel", function () { rowDown = null; });
   hintEl.addEventListener("click", hint);
@@ -1104,20 +1409,44 @@
   /* The chin pad: the arrows pick a letter, A adds it, B removes the last, START submits, SELECT shuffles.
      Also the keyboard on a computer (X = A, Z = B, Enter = START, Shift = SELECT). */
   PAD.on("press", function (b) {
+    if (phase === "title") {
+      /* a short menu: Up/Down cycle, A or a tap opens, START opens the first row, B does nothing */
+      if (b === "up" || b === "down") {
+        titlePick = (titlePick + (b === "down" ? 1 : -1) + titleRows.length) % titleRows.length;
+        renderTitle();
+        PAD.sfx("tick");
+      } else if (b === "a") openTitleRow(titlePick);
+      else if (b === "start") openTitleRow(0);
+      return;
+    }
+    if (phase === "pick") {
+      if (DIRS[b]) movePickCursor(b);
+      else if (b === "a") openPicked();
+      else if (b === "b") { PAD.sfx("tap"); showTitle(); }
+      return;
+    }
+    if (phase === "leave") {
+      if (b === "a" || b === "start") leaveToTitle();
+      else if (b === "b") cancelLeave();
+      return;
+    }
     if (phase === "demo") { demoEnd(); return; }
     if (phase === "demoEnd") { if (b === "a" || b === "start") startPlay(); return; }
     if (phase === "help") { if (b === "a" || b === "b" || b === "start") closeHelp(); return; }
     if (phase === "error") { if (b === "a" || b === "start") coverBtn.click(); return; }
     if (phase === "done") {
       /* the ring is [NEXT, word1 .. wordN]; it starts on NEXT and Up/Down cycle. START always starts the next round.
-         SELECT, Left and Right toggle the selected word's place in the word book. */
+         On a word row: A adds a hollow word or reads a filled one, B only removes, SELECT flips it; Left and Right
+         are quiet. B on NEXT is quiet too. Touch keeps its two ends: the right 44 px toggles, the rest reads. */
       if (b === "down" || b === "up") { movePick(b === "down" ? 1 : -1); return; }
-      if (b === "left" || b === "right" || b === "select") { toggleBook(); return; }
+      if (b === "select") { toggleBook(); return; }
       if (b === "a") {
         if (pick === 0) nextRound();
-        else sayWord(results[pick - 1].word);
+        else if (bookMarks[pick - 1] === true) sayWord(results[pick - 1].word);
+        else setBook(pick - 1, true);
         return;
       }
+      if (b === "b") { if (pick > 0 && bookMarks[pick - 1] === true) setBook(pick - 1, false); return; }
       if (b === "start") nextRound();
       return;
     }
@@ -1133,7 +1462,11 @@
       state.entry.push(state.cursor);      /* the cursor stays where it is: the arrows, not the app, decide where it goes next */
       renderKeys();
     } else if (b === "b") {
-      if (!state.entry.length) return;        /* hints are spent only from the HINT button */
+      if (!state.entry.length) {
+        /* nothing to delete: the way out of the round, one question first (the words found are already saved) */
+        if (!dragging) showLeave();
+        return;
+      }
       state.cursor = state.entry.pop();
       renderKeys();
     } else if (b === "start") submit();
@@ -1143,16 +1476,24 @@
   /* ---------- boot ---------- */
 
   updateHeader();
-  showCover(TXT.loading, "");          /* no blank screen while the saved round is read */
+  showCover(TXT.loading, "");          /* no blank screen while the save is read */
   PAD.load("game").then(function (v) {
     if (v && typeof v === "object") {
-      savedRound = typeof v.round === "number" && v.round % 1 === 0 && v.round >= 1 ? v.round : 1;
+      savedRound = typeof v.round === "number" && v.round % 1 === 0 && v.round >= 1 ? Math.min(101, v.round) : 1;
       savedHints = typeof v.hints === "number" && v.hints >= 0 ? Math.floor(v.hints) : 0;
       savedDone = Array.isArray(v.done) ? v.done.filter(isWord) : [];
       taught = v.taught === true;          /* saves from 1.0.0 have no flag: those players see the demo once too */
+      /* a save from before 1.6.0 has no cleared: every round before its round was cleared, which is what cleared
+         means. After the hundredth, round is 101 and the title offers a random round instead of a number. */
+      state.cleared = typeof v.cleared === "number" && v.cleared >= 0 ? Math.min(100, Math.floor(v.cleared)) : Math.min(100, savedRound - 1);
+      state.random = typeof v.random === "number" && v.random >= 0 ? Math.floor(v.random) : 0;
+      bookTip = v.bookTip === true;    /* 1.5.0 saves have no flag: those players get the card's A/B hint once */
     }
-    startRound(savedRound || 1, savedHints, savedDone);
-  }, function () { startRound(1, 0, []); });
+    mainRound = Math.max(1, Math.min(savedRound, state.cleared < 100 ? state.cleared + 1 : 101));
+    mainDone = savedDone.slice();
+    state.round = mainRound; state.hints = savedHints; state.done = savedDone.slice();
+    showTitle();                         /* the title on every open; the round is built when the player opens it */
+  }, function () { showTitle(); });
 })();
 </script>
 </body>
