@@ -59,7 +59,7 @@ No other files are loaded. Images, sounds and fonts must be embedded in
 | `i18n` | Optional. Store text in other languages: `{"en": {"name", "description"}, "zh": {...}}`. Only `zh` and `en`, only those two fields, same rules as above. The store and home screen show the entry for the player's language and fall back to `name` / `description`. |
 | `author` | Name or handle. |
 | `license` | One of: `MIT`, `0BSD`, `BSD-2-Clause`, `BSD-3-Clause`, `ISC`, `Apache-2.0`, `CC0-1.0`, `Unlicense`. |
-| `permissions` | Array. Usually empty. Five capabilities (`lopda/1`): `"files"`, the app may export and import files, each time confirmed by the player (section 6.2); `"motion"`, tilt, shake and heading; `"mic"`, the microphone's loudness and pitch (both section 6.4, confirmed by the player the first time); `"notes"`, the app may add text to a note of its own in the player's notes, each time confirmed by the player (section 6.5); `"camera"`, the app may ask for a photo, which the player takes in the runtime's viewfinder and the app gets as a small four-tone picture (section 6.6, allowed by the player the first time). The store shows them on the app's entry. Anything else fails the checker. |
+| `permissions` | Array. Usually empty. Six capabilities (`lopda/1`): `"files"`, the app may export and import files, each time confirmed by the player (section 6.2); `"motion"`, tilt, shake and heading; `"mic"`, the microphone's loudness and pitch (both section 6.4, confirmed by the player the first time); `"notes"`, the app may add text to a note of its own in the player's notes, each time confirmed by the player (section 6.5); `"camera"`, the app may ask for a photo, which the player takes in the runtime's viewfinder and the app gets as a small four-tone picture (section 6.6, allowed by the player the first time); `"wordbook"`, the app may read and change the player's word book, allowed by the player the first time it adds or removes a word (section 6.7). The store shows them on the app's entry. Anything else fails the checker. |
 | `buttons` | Optional, `lopda/1` only. `true` shows the chin buttons while the app runs (section 4). Leave it out for touch-only apps. |
 
 ## 3. The screen
@@ -180,6 +180,11 @@ await PAD.camera.snap({size})         // size "small" (128x112) | "large" (256x2
 await PAD.dict.words(q)               // q: {len, pattern, letters, level, max, offset} -> {words, more} | null
 await PAD.dict.lookup(word)           // -> {word, form?, zh, en} | null
 PAD.dict.version                      // "ecdict-1"
+
+// lopda/1 with "permissions": ["wordbook"] (section 6.7); undefined on runtimes before 0.34.0
+await PAD.dict.inBook(words)          // 1-20 words -> boolean[] | null
+await PAD.dict.addWord(word)          // -> "saved" | "denied" | "full" | null
+await PAD.dict.removeWord(word)       // -> "saved" | "denied" | "full" | null
 ```
 
 Sounds, roughly: `tap` key click, `tick` short tick (timers), `move` cursor step,
@@ -481,9 +486,9 @@ if (PAD.camera) {                        // undefined before runtime 0.28.0
 
 An app can look words up in the handheld's built-in English-Chinese dictionary (ECDICT): read-only, no permission, nothing
 to declare in `manifest.json` and no dialog, as with `PAD.say` (runtime 0.34.0 and later). Only the built-in book is
-visible: imported dictionaries and the player's word book are not, and switching the built-in ECDICT off in
-词典 → 词典管理 does not affect apps (that switch is for the dictionary program and the reader). Check that `PAD.dict`
-exists first.
+visible: imported dictionaries are not, and the player's word book only through the separate permission below. Switching
+the built-in ECDICT off in 词典 → 词典管理 does not affect apps (that switch is for the dictionary program and the reader).
+Check that `PAD.dict` exists first.
 
 ```js
 if (PAD.dict) {                                  // undefined before runtime 0.34.0
@@ -538,13 +543,55 @@ lower case.
   glosses, not a dictionary to copy out.
 
 **`null` and the limit.** `null` when the dictionary cannot be read (a missing offline cache file, for example), when
-more than 10 calls were made in a second (words and lookup together, per app), and when `lookup` finds no entry.
-`null` is normal: the app must still work. On a runtime before 0.34.0 there is no `PAD.dict` at all, so check for it.
+more than 10 calls were made in a second (words, lookup and the word book together, per app), and when `lookup` finds no
+entry. `null` is normal: the app must still work. On a runtime before 0.34.0 there is no `PAD.dict` at all, so check for it.
 
 **Bad arguments reject**, as `PAD.exportFile` rejects bad arguments: the promise rejects with an `Error` whose message
 starts `PAD.dict.words: ` or `PAD.dict.lookup: `, for example
 `PAD.dict.words: len is a whole number from 2 to 15, or [min, max]` or
 `PAD.dict.lookup: the word is 1 to 32 letters a-z`. Left unhandled, it shows in the runtime's error box.
+
+#### The word book
+
+An app that declares `"permissions": ["wordbook"]` can read and change the player's word book (生词本), the same list the
+dictionary program and the reader use (runtime 0.34.0 and later). It holds at most 2000 words, newest first, and only
+headwords: `addWord("ran")` stores `run`, the entry's headword. An app never sees the imported dictionaries or the
+player's history.
+
+```js
+if (PAD.dict && PAD.dict.inBook) {               // the word book calls arrive with runtime 0.34.0
+  PAD.dict.inBook(["cat", "run"]).then(function (yes) {
+    // yes: [true, true], or null (no grant yet, no permission, or too many calls)
+  });
+  PAD.dict.addWord("ran").then(function (r) {
+    // r: "saved", "denied", "full" (the book already has 2000 words), or null
+  });
+  PAD.dict.removeWord("cat");
+}
+```
+
+- **One grant per app.** The first `addWord` or `removeWord` shows the handheld's own dialog once:
+  `「<app>」想把单词加入你的生词本` (`<app> wants to add words to your word book`). A (on release) or 允许 allows it and
+  the call goes ahead; B or 不允许 resolves `"denied"` for that call and is not remembered, so the next call asks again.
+  Settings → 传感器与相机 lists the app with 生词本 and can revoke it. The dialog is asked once, not per word: a dialog
+  for every word would stop the game.
+- **Reading needs the grant too.** `inBook()` resolves `null` until the player has allowed the app, and when the manifest
+  lacks `"wordbook"`. An app cannot read the book before the player knows. It never opens a dialog of its own.
+- **Answers.** `addWord` / `removeWord` resolve `"saved"` (the book changed or already had that state), `"denied"` (the
+  player said no, or the manifest lacks the permission), `"full"` (adding to a book of 2000 words), or `null` (no grant,
+  over the rate limit, or the word is not in ECDICT, so there is no headword to store). `inBook` resolves an array of
+  booleans the same length as its argument, or `null` (no grant, no permission, over the limit).
+- **Headwords, and case.** `addWord` stores the ECDICT headword: `addWord("ran")` stores `run`, and a word
+  that `lookup` does not find resolves `null` without a dialog. `inBook` and `removeWord` do not look words up: they
+  compare ignoring case, so a stored `London` matches `inBook(["london"])` and `removeWord("LONDON")`, and
+  `inBook(["run"])` is `true` after `addWord("ran")` stored `run`; `inBook(["ran"])` is still `false`, because the
+  stored word is the headword. Pass headwords (the `word` from `lookup`) to all three calls.
+- **Bad arguments reject** with an `Error` whose message starts `PAD.dict.inBook: `, `PAD.dict.addWord: ` or
+  `PAD.dict.removeWord: `: `inBook` takes an array of 1-20 words, and every word is 1-32 letters a-z.
+- **The same limiter.** All `PAD.dict` calls — words, lookup and the word book — count together: at most 10 a second per
+  app, and past that `null`.
+- **Shared, and the player's.** The dictionary program's START and the reader's START change this same list; the word book
+  screen shows what the app added. Revoking the grant in Settings removes only the permission, not the words.
 
 ## 7. Size and quality
 
@@ -569,7 +616,8 @@ node tools/check-app.mjs registry/apps/<id>
 
 The checker enforces sections 2 (including `permissions`), 3 (colors), 5 (forbidden APIs and external
 resources) and 7 (size), checks `PAD.sfx` names, and fails `PAD.exportFile` / `importFile` without the `files` permission,
-and `PAD.motion` or `PAD.on("tilt" | "shake")` without `motion`, `PAD.mic` or `PAD.on("sound")` without `mic`, `PAD.notes` without `notes`, `PAD.camera` without `camera`.
+and `PAD.motion` or `PAD.on("tilt" | "shake")` without `motion`, `PAD.mic` or `PAD.on("sound")` without `mic`, `PAD.notes` without `notes`, `PAD.camera` without `camera`,
+`PAD.dict.addWord` / `removeWord` / `inBook` without `wordbook`.
 Passing it is required before review.
 
 Review then reads the app. Besides what the checker cannot see (the button convention in section 4,

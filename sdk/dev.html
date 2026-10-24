@@ -95,6 +95,10 @@
       <div id="filewhat"></div>
       <div class="row"><input type="file" id="filein"><button id="filecancel" type="button">Cancel</button></div>
     </div>
+    <div id="wordbookbox" hidden>
+      <div id="wordbookwhat"></div>
+      <div class="row"><button id="wordbookyes" type="button">Allow</button><button id="wordbookno" type="button">Don't allow</button></div>
+    </div>
     <div>Manifest</div><pre id="manifest"></pre>
     <div>PAD storage (this harness keeps it in localStorage)</div><pre id="store"></pre>
     <div>Errors and events</div><pre id="log"></pre>
@@ -145,6 +149,9 @@
   var dictLimit = null;   /* PAD.dict's 10 calls a second, like the handheld: a new one for every app start */
 
   function load() {
+    runToken++;
+    wbGranted = false; wbAsk = null;
+    document.getElementById("wordbookbox").hidden = true;
     var base = document.getElementById("path").value.replace(/\/+$/, "");
     Promise.all([fetch("../" + base + "/manifest.json").then(function (r) { return r.json(); }),
                  fetch("../" + base + "/index.html").then(function (r) { return r.text(); })])
@@ -202,9 +209,12 @@
   document.addEventListener("visibilitychange", function () { if (!chip) return; if (document.hidden) chip.pause(); else chip.resume(); });
   /* like the runtime, a language change starts the app again */
   function run() {
+    runToken++;
     if (chip) chip.stop();
     if (chip) document.getElementById("amb").value = "";
     senseStop("motion"); senseStop("mic"); speech.stop(); snapEnd(null);
+    /* a word book answer still pending belongs to the frame that is going away: drop it rather than post into the next one */
+    if (wbAsk) { wbAsk = null; document.getElementById("wordbookbox").hidden = true; }
     dictLimit = WL.limiter();
     var l = document.getElementById("lang").value, o = { music: !!chip, ambience: !!chip, sensors: true, notes: true, say: true, camera: true, dict: true };
     if (l) o.lang = l;
@@ -220,7 +230,7 @@
     else if (d.op === "save") { s[d.k] = d.v; writeStore(s); }
     else if (d.op === "remove") { delete s[d.k]; writeStore(s); }
     else if (d.op === "error") log("ERROR " + d.msg);
-    else if (d.op === "exit") { log("app asked to exit"); if (chip) chip.stop(); senseStop("motion"); senseStop("mic"); speech.stop(); snapEnd(null); frame.srcdoc = ""; }
+    else if (d.op === "exit") { runToken++; wbAsk = null; document.getElementById("wordbookbox").hidden = true; log("app asked to exit"); if (chip) chip.stop(); senseStop("motion"); senseStop("mic"); speech.stop(); snapEnd(null); frame.srcdoc = ""; }
     else if (d.op === "notes") notesOp(d);
     else if (d.op === "say") sayOp(d);
     else if (d.op === "sense") sense(d);
@@ -289,14 +299,101 @@
     });
   }
   /* PAD.dict: the handheld answers from the built-in ECDICT; here the same files under ../runtime/vendor/ecdict/ stand in and
-     the answer goes to the log instead of the screen. No permission. A bad query answers {error} (the app's promise rejects);
-     a file that cannot be read and the 10-calls-a-second limit answer null, as on the handheld. */
+     the answer goes to the log instead of the screen. words() and lookup() need no permission. A bad query answers {error}
+     (the app's promise rejects); a file that cannot be read and the 10-calls-a-second limit answer null, as on the handheld.
+     The player's word book is localStorage "lopda-dev-wordbook" (an array, newest first). The first add or remove shows the
+     permission box below once, as the handheld shows its own dialog once per app; reading needs that answer too. */
+  var WB_KEY = "lopda-dev-wordbook", wbGranted = false, wbAsk = null;
+  var runToken = 0;   /* a new run, a new load or an exit makes every answer still in flight stale */
+  function readBook() {
+    try { var a = JSON.parse(localStorage.getItem(WB_KEY) || "[]"); return Array.isArray(a) ? a.filter(function (w) { return typeof w === "string"; }) : []; }
+    catch (e) { return []; }
+  }
+  function writeBook(a) { localStorage.setItem(WB_KEY, JSON.stringify(a)); }
+  function wbReply(d, token, v) {
+    if (token !== runToken) return;
+    frame.contentWindow.postMessage({ pad: 1, op: "dicted", i: d.i, v: v }, "*");
+  }
+  function wbHas(book, w) {
+    var k = w.toLowerCase();
+    return book.some(function (x) { return x.toLowerCase() === k; });
+  }
+  /* the same book the runtime keeps: one entry per word, headwords only, ignoring case */
+  function wbApply(d, token, head) {
+    if (token !== runToken) return;
+    var book = readBook();
+    if (d.kind === "add") {
+      if (!wbHas(book, head)) {
+        if (book.length >= 2000) { log("dict.add " + head + " -> full"); wbReply(d, token, "full"); return; }
+        book.unshift(head); writeBook(book);
+      }
+      log("dict.add " + head + " -> saved"); wbReply(d, token, "saved"); return;
+    }
+    var k = head.toLowerCase();
+    writeBook(book.filter(function (x) { return x.toLowerCase() !== k; }));
+    log("dict.remove " + head + " -> saved"); wbReply(d, token, "saved");
+  }
+  /* one permission box for the first add or remove, as the handheld shows its own dialog once per app */
+  function wbAllow(d, token, head) {
+    if (token !== runToken) return;
+    if (wbGranted) { wbApply(d, token, head); return; }
+    if (wbAsk) { log("dict." + d.kind + " -> null (the word book dialog is open)"); wbReply(d, token, null); return; }
+    wbAsk = { d: d, token: token, head: head };
+    document.getElementById("wordbookwhat").textContent = "「" + (manifest.name || appId) + "」想把单词加入你的生词本 / This app wants to use your word book: " + (d.kind === "remove" ? "remove " : "add ") + head;
+    document.getElementById("wordbookbox").hidden = false;
+    log("word book dialog: Allow or Don't allow on the right");
+  }
+  document.getElementById("wordbookyes").onclick = function () {
+    var a = wbAsk; if (!a || a.token !== runToken) return;
+    wbAsk = null; document.getElementById("wordbookbox").hidden = true; wbGranted = true;
+    log("word book allowed"); wbApply(a.d, a.token, a.head);
+  };
+  document.getElementById("wordbookno").onclick = function () {
+    var a = wbAsk; if (!a || a.token !== runToken) return;
+    wbAsk = null; document.getElementById("wordbookbox").hidden = true;
+    log("word book not allowed"); wbReply(a.d, a.token, "denied");
+  };
+  /* an add looks the word up first, as the runtime does: a word ECDICT does not know never opens the box */
+  function wbAdd(d, token) {
+    var w = d.word.toLowerCase();
+    dict.lookup(w).then(function (e) {
+      if (token !== runToken) return;
+      if (!e || !e.word) { log("dict.add " + w + " -> null (not in the dictionary)"); wbReply(d, token, null); return; }
+      wbAllow(d, token, e.word);
+    }, function () {
+      if (token !== runToken) return;
+      log("dict.add " + w + " -> null (the dictionary could not be read)"); wbReply(d, token, null);
+    });
+  }
   function dictOp(d) {
+    var token = runToken;
     var reply = function (v, error) {
+      if (token !== runToken) return;
       frame.contentWindow.postMessage(error ? { pad: 1, op: "dicted", i: d.i, error: error } : { pad: 1, op: "dicted", i: d.i, v: v }, "*");
     };
-    if (d.kind !== "words" && d.kind !== "lookup") { reply(null); return; }
+    var book = d.kind === "inBook" || d.kind === "add" || d.kind === "remove";
+    if (d.kind !== "words" && d.kind !== "lookup" && !book) { reply(null); return; }
     if (!dictLimit || !dictLimit(Date.now())) { log("dict." + d.kind + " -> null (over 10 a second)"); reply(null); return; }
+    if (book) {
+      var method = d.kind === "inBook" ? "inBook" : d.kind === "add" ? "addWord" : "removeWord";
+      if ((manifest.permissions || []).indexOf("wordbook") < 0) {
+        log('ERROR PAD.dict.' + method + ' needs "permissions": ["wordbook"] in manifest.json');
+        reply(d.kind === "inBook" ? null : "denied"); return;
+      }
+      if (d.kind === "inBook") {
+        var ok = Array.isArray(d.words) && d.words.length >= 1 && d.words.length <= 20 &&
+          d.words.every(function (w) { return typeof w === "string" && /^[A-Za-z]{1,32}$/.test(w); });
+        if (!ok) { reply(null); return; }
+        if (!wbGranted) { log("dict.inBook -> null (no grant yet)"); reply(null); return; }
+        var stored = readBook(), out = d.words.map(function (w) { return wbHas(stored, w); });
+        log("dict.inBook " + JSON.stringify(d.words) + " -> " + JSON.stringify(out));
+        reply(out); return;
+      }
+      if (typeof d.word !== "string" || !/^[A-Za-z]{1,32}$/.test(d.word)) { reply(null); return; }
+      if (d.kind === "add") wbAdd(d, token);
+      else wbAllow(d, token, d.word);
+      return;
+    }
     var p = d.kind === "words" ? dict.words(d.q) : dict.lookup(d.word);
     p.then(function (v) {
       if (v && v.error) { log("ERROR PAD.dict." + d.kind + ": " + v.error); reply(null, v.error); return; }

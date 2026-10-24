@@ -4585,11 +4585,61 @@ test("camera snap: without the permission null and no dialog; Settings lists the
   assert.equal(await p.textContent("#set-sense > span"), "传感器与相机");
   assert.match(await p.textContent("#set-sense-list"), /(拍照测试|snap-test) · 相机/);
   await p.click('#set-sense-list [data-app="snap-test"]');
-  assert.match(await p.textContent("#set-sense-list"), /还没有程序用过倾斜感应、麦克风或相机/);
+  assert.match(await p.textContent("#set-sense-list"), /还没有程序用过倾斜感应、麦克风、相机或生词本/);
   f = await runSnapApp(p);
   f.evaluate(() => { snap(); });
   await p.waitForSelector("#file-ask .box");
   assert.equal(await p.textContent("#file-ask p"), "「拍照测试」想用相机拍一张照片。");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+/* ---------- the word book for apps: PAD.dict.inBook / addWord / removeWord, "permissions": ["wordbook"] ----------
+   A small test app records what each call returned; the runtime's own dialog is driven with A and B. */
+const BOOK_APP = `<!doctype html><html><body><script>
+window.R = { log: [] };
+window.book = function (words) { return PAD.dict.inBook(words).then(function (v) { R.log.push({ call: "inBook", words: words, v: v }); return v; }); };
+window.add = function (w) { return PAD.dict.addWord(w).then(function (v) { R.log.push({ call: "add", word: w, v: v }); return v; }); };
+window.remove = function (w) { return PAD.dict.removeWord(w).then(function (v) { R.log.push({ call: "remove", word: w, v: v }); return v; }); };
+<\/script></body></html>`;
+const runBookApp = async (p, perms = ["wordbook"], id = "book-test", name = "生词测试") => {
+  await p.evaluate(([html, perms, id, name]) => {
+    const a = { id, name, glyph: "词", version: "1.0.0", spec: "lopda/1", permissions: perms, html };
+    window.LP.upsert("apps", a); window.LP.runApp(a);
+  }, [BOOK_APP, perms, id, name]);
+  for (let i = 0; i < 50; i++) { const f = p.frames().find((x) => x !== p.mainFrame()); if (f && await f.evaluate(() => !!window.book).catch(() => false)) return f; await p.waitForTimeout(100); }
+  assert.fail("the test app did not start");
+};
+
+test("word book: null before the grant; B denies, A allows and stores the headword; remove, Settings lists and revokes", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN" });
+  await p.goto(base + "/runtime/?debug", { waitUntil: "networkidle" });
+  await p.waitForFunction(() => window.LP && window.LP.S.db);
+  let f = await runBookApp(p);
+  /* before the grant, reading answers null and never opens a dialog */
+  assert.equal(await f.evaluate(() => book(["cat"])), null);
+  assert.equal(await p.locator("#file-ask").count(), 0);
+  /* the first add asks once: B denies this call only */
+  f.evaluate(() => { add("Cats"); });
+  await p.waitForSelector("#file-ask .box");
+  assert.equal(await p.textContent("#file-ask p"), "「生词测试」想把单词加入你的生词本");
+  await press(p, "b");
+  await until(p, async () => (await R(f)).log.some((x) => x.call === "add" && x.v === "denied"), "denied");
+  /* asked again, A allows: store the ECDICT headword, so "Cats" is "cat" */
+  f.evaluate(() => { add("Cats"); });
+  await p.waitForSelector("#file-ask .box");
+  await press(p, "a");
+  await until(p, async () => (await R(f)).log.some((x) => x.call === "add" && x.v === "saved"), "saved");
+  assert.deepEqual(await f.evaluate(() => book(["cat", "dog"])), [true, false]);
+  assert.equal(await p.evaluate(() => LP.sensorGrants.list().some((g) => g.id === "book-test" && g.kinds.indexOf("wordbook") >= 0)), true);
+  assert.equal(await f.evaluate(() => remove("cat")), "saved");
+  /* let the 10-a-second limiter forget the burst, then revoke: reading is null again */
+  await p.waitForTimeout(1100);
+  await p.evaluate(() => LP.sensorGrants.revoke("book-test"));
+  assert.equal(await f.evaluate(() => book(["cat"])), null);
+  /* an app without "wordbook": add is denied and no dialog opens */
+  f = await runBookApp(p, [], "book-none", "无词测试");
+  assert.equal(await f.evaluate(() => add("cat")), "denied");
+  assert.equal(await p.locator("#file-ask .box").count(), 0);
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
