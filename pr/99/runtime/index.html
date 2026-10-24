@@ -324,6 +324,17 @@
       </div>
     </section>
 
+    <!-- PET: one hardware screen, the room (81 x 60 at 4 px), eight icons and the soft keys; sub-screens open over the room -->
+    <section class="view pet-view" id="v-pet" hidden>
+      <div class="pet-stage" id="pet-stage">
+        <canvas class="pet-cv" id="pet-cv" width="81" height="60" data-i18n-label="pet.room" aria-label="宠物的房间"></canvas>
+        <div class="pet-panel" id="pet-panel" hidden></div>
+        <div class="pet-away" id="pet-away" hidden></div>
+      </div>
+      <div class="pet-icons" id="pet-icons"></div>
+      <div class="pet-keys" id="pet-keys"></div>
+    </section>
+
     <!-- SCRIPTS: local HTML/JS programs, edited on the device or pasted from a phone/AI -->
     <section class="view scripts-view" id="v-scripts" hidden>
       <div class="bar">
@@ -495,6 +506,8 @@
 <script src="negative.js"></script>
 <script src="develop.js"></script>
 <script src="notetext.js"></script>
+<script src="petsim.js"></script>
+<script src="petart.js"></script>
 <script src="zip.js"></script>
 <script src="backup.js"></script>
 <script src="ai.js"></script>
@@ -506,6 +519,7 @@
 <script src="apps/camera.js"></script>
 <script src="apps/darkroom.js"></script>
 <script src="apps/cart.js"></script>
+<script src="apps/pet.js"></script>
 <script src="apps/snap.js"></script>
 <script src="apps/store.js"></script>
 <script src="apps/scripts-templates.js"></script>
