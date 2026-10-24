@@ -187,7 +187,7 @@ function show(name){
   var target=null;
   LP.builtins.forEach(function(b){ if(!b.view) return; if(b.view===name) target=b; else if(b.leave) b.leave(); });
   if(!(target && target.keepPad)) showPad(false);
-  if(target && target.id) countUse(target.id);
+  if(target && target.id && target.id!=="run") countUse(target.id);
   if(name==="run") countUse("apps");   /* community app (and local script) runs */
   if(name==="home"){ renderHome(); refresh("apps"); }
   if(target && target.enter) target.enter();
@@ -229,7 +229,7 @@ document.addEventListener("visibilitychange",function(){
 });
 
 /* ---------- sound: tiny square-wave chips through Web Audio (the named sounds themselves are in chip.js) ---------- */
-var RUNTIME_VERSION="0.37.0+cbdd951";   /* keep in step with VERSION in sw.js */
+var RUNTIME_VERSION="0.37.0+cbbe642";   /* keep in step with VERSION in sw.js */
 /* One volume, five steps, 0 is off (decisions.md section 10). It sets the master gain and nothing else does.
    Under the master: `ui` for the runtime's own clicks, held at a fraction so they stay as quiet as they always were
    (step 2 gives them 0.11, their level before 0.12.0), and `app` for apps, music and the cartridge at the full step. */
