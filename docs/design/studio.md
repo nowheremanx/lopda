@@ -1,6 +1,6 @@
 # 设计草稿：四轨机（lofi 音乐工作站，内置程序）
 
-状态：草稿（2026-10-24）。owner 已定方向（下表）；第 0 步（iPhone 实测）结果在第 9 节。研究报告（范围三档、iOS 资料、风险）在项目文档里，
+状态：草稿（2026-10-24）。owner 已定方向（下表）；第 0 步（iPhone 实测）结果在第 9 节，已并进第 4 节；第 1a 步的实现说明在第 11 节。研究报告（范围三档、iOS 资料、风险）在项目文档里，
 这里只写要做的东西。
 
 ## 已定的事（owner，2026-10-24）
@@ -73,13 +73,18 @@
 
 ## 4. 录音
 
-- AudioWorklet 取 PCM（不用 MediaRecorder）；录音前 `setSession("play-and-record")`，停后设回 `"ambient"` 并按 0.24.3 的做法重建 context，
-  伴奏从当前拍子接着放（chip.js 已有 `beat()` / `from` 的思路）。
-- **对齐**：第一次录音前做一次「对拍」校准（外放几声哔、麦克风听回来算往返延迟；戴耳机时让用户跟着哔声点 4 下），
-  每种输出（外放 / 有线 / 蓝牙）存一个值。混音时扣掉，用户看不到。录完提供 ±10 ms 微调，这是唯一一个手动参数。
-- 录音界面提示「戴耳机更好」；`getUserMedia` 关 echoCancellation / noiseSuppression / autoGainControl（是否生效看第 0 步）。
-- 开麦时页面声音变小（第 23 节，已接受）：如果戴耳机时也变小，录音界面加一个只在录音时生效的「监听音量」。
-- 静音键：保持 `"ambient"`，第一次播放时提醒一句「静音键开着就听不到外放」（网页读不到静音键）。
+按第 0 步的实测定下（第 9 节；owner 2026-10-24 不再补测，按这些做）：
+
+- AudioWorklet 取 PCM（不用 MediaRecorder），存 16 kHz μ-law。锁屏实测不丢样本；边录边分块写入照做（来电没测）。
+- 录音前 `setSession("play-and-record")`，停后设回 `"ambient"` 并按 0.24.3 的做法重建 context，伴奏从当前拍子接着放。
+  **只在进出录音屏时开关麦克风**，不在每一段之间开关（蓝牙耳机开关麦会切通话模式，音量跟着变）。
+- **对齐**：
+  - 外放：开麦后自动放几声哔、听回来量往返（iPhone 实测 73–76 ms，很稳），用户不用做什么。
+  - 戴耳机：量不了往返，用「跟拍」：麦克风**开着**时听哔点屏幕，丢掉前 3 下，取后面的平均。
+  - 每种输出（外放 / 有线 / 蓝牙）存一个值；混音时扣掉。录完给 ±10 ms 微调，这是唯一一个手动参数。
+- `getUserMedia` 只设 `echoCancellation`（iOS 只认这一个），默认开。录音屏提示「戴有线耳机更好」：蓝牙开麦后是 24 kHz 通话音质。
+- 开麦时声音变小（第 23 节，已接受）。实测蓝牙开麦时不变小，不做「监听音量」。
+- 静音键：保持 `"ambient"`，静音键照常起作用（实测开关麦以后也是），第一次播放时提醒一句「静音键开着就听不到外放」。
 - `LP.keepAwake(true)` 防止录音时自动锁屏。
 
 ## 5. 文件
@@ -109,7 +114,7 @@
 | 步 | 内容 | 估计 | 完成后 |
 |---|---|---|---|
 | 0 | iPhone 实测页（第 8 节），不合并 | 1–2 天 | 决定第 4 节的做法 |
-| 1a | 合成器 + 音序器 + 节奏器屏 + 教程框架 + 存工程 | 约 1 周 | 能玩节奏 |
+| 1a | 合成器 + 音序器 + 节奏器屏 + 教程框架 + 存工程（细节见第 11 节） | 约 1 周 | 能玩节奏 |
 | 1b | 贝斯 / 和弦 / 旋律屏、调音台、磁带味 + swing、导出 WAV | 约 1 周 | **能做独奏曲（可发布）** |
 | 2 | 录音、校准、重录一段、人声混入 WAV | 1–1.5 周 | 能伴奏 + 唱 |
 | 3 | 歌曲屏、弹奏（loop 叠加）、工程 / MIDI 导入导出、MML | 约 1 周 | 格式齐全 |
@@ -153,7 +158,7 @@ iPhone，iOS 18.7，2026-10-24，测试页 PR #101。两轮：外放（Safari）
 其他：`AudioWorklet`、`AudioEncoder`、`MediaRecorder`（`audio/mp4`、`audio/webm` 是，`audio/wav` 否）都有。蓝牙开麦后，麦克风轨道是
 **24 kHz**（`getSettings().sampleRate`），说明耳机切到了通话模式（HFP）；`getUserMedia` 用了 2.1–2.4 秒（外放 0.6–1.5 秒）。
 
-对第 4 节的影响（Claude 的判断，待 owner 认可）：
+对第 4 节的影响（已并进第 4 节）：
 
 - 取音照原计划：AudioWorklet 取 PCM。锁屏不丢样本，但边录边分块写入照做（来电等别的打断没测）。
 - 外放的对齐可以全自动：开麦后放几声哔，量一次往返（约 75 ms），很稳。
@@ -164,7 +169,104 @@ iPhone，iOS 18.7，2026-10-24，测试页 PR #101。两轮：外放（Safari）
 - 回声消除照「默认开」：只有这一个开关，效果 owner 听着都可以。外放唱歌时伴奏会不会被削掉，还要在外放下再听一次。
 - 静音键：和第 23 节一样，`"ambient"` 跟着静音键走，保留「静音键开着就听不到外放」的提醒。
 
-还要补测（不挡第 1 步）：有线耳机的第 2、5 节；外放下第 4 节的听感；第 6 节录满 3 分钟。
+没测的几项（有线耳机的第 2、5 节，外放下第 4 节的听感，录满 3 分钟）owner 决定不再补测（2026-10-24），第 2 步做出来以后在真机上一起看。
+
+## 11. 第 1a 步：节奏器（写给实现的人）
+
+目标：主屏多一个程序，打开就是一个已经在响的 lofi 鼓节奏，零基础的人点几下方块就能改成自己的。只做鼓；其他轨的数据结构先有，界面在 1b。
+估计约 1 周。runtime 改动，跳 minor 版本（0.36.0 → 0.37.0，`core.js` 的 RUNTIME_VERSION 和 `sw.js` 的 VERSION 一起）。
+
+### 11.1 不能改的
+
+- 第「不变的东西」一节全部：`chip.js`、PAD 接口、商店 app 的权限、audio session 规则。
+- 其他内置程序的画面和行为：`tests/runtime-shots.mjs` 对比 main，除主屏多一个图标外逐像素相同。
+- `platform.js`、`backup.js`：工程文档放在 `data/users/local/studio/...` 下，整机备份自然带上，不改备份代码。
+- 不加采样、不加第三方代码、不碰麦克风（录音是第 2 步）。
+
+### 11.2 新文件
+
+| 文件 | 是什么 | 测试 |
+|---|---|---|
+| `runtime/studio-song.js` | `window.LopdaSong`，纯函数：常量、`newSong()`、`validate(song)` → `{song}` 或 `{error}`、`toggle(song, p, track, key, step)`、调度用的 `events(song, p, fromTick, toTick)`（含 swing）、`degreeToMidi(key, scale, deg, oct)` | `tests/studio-song.test.mjs`（node，无依赖） |
+| `runtime/studio-synth.js` | `window.LopdaStudioSynth`：`create(ctx, out)` → `{hit(kit, drum, at, vel), dispose()}`。1a 只有两套鼓：`chip`（方波 / 噪声；chip.js 没有导出波形函数，照它的做法自己写，不改 chip.js）和 `soft`（正弦滑音底鼓、滤波噪声军鼓 / 镲、短促的打击） | e2e 里用 OfflineAudioContext 渲染：每只鼓都出声、峰值不超过 0.9、不比 `PAD.music` 的曲子响太多（和第 10 节环境声同样的办法） |
+| `runtime/apps/studio.js` | 内置程序：`LP.builtin({id:"studio", view:"studio", ...})`，节奏器屏、教程、存取工程、播放循环 | e2e |
+
+三个文件都加进 `index.html`（`studio-song.js`、`studio-synth.js` 放在 `core.js` 前面，`apps/studio.js` 放在 `apps/darkroom.js` 后面）和 `sw.js` 的 SHELL；
+`tests/repo.test.mjs` 会检查。图标加进 `core.js` 的 `ICONS`（16×16 四色：一盘磁带）。所有文字进 `strings.js`，中英两份。
+
+### 11.3 数据（第 3 节的五条落到 1a）
+
+```js
+// data/users/local/studio/<id>
+{ v: 1, name: "", bpm: 82, key: 9, scale: "minor-penta", swing: 0.55, tape: 2, kit: "soft",
+  tracks: [ {id:"drums", kind:"drum"}, {id:"bass", kind:"note"}, {id:"chords", kind:"chord"},
+            {id:"melody", kind:"note"}, {id:"voice", kind:"voice"} ],
+  patterns: [ { len: 16, notes: { drums: [ {t:0, len:24, key:"kick", vel:1}, ... ], bass: [], chords: [], melody: [] } } ],
+  song: [0], clips: [], updated: 0 }
+// data/users/local/studio-meta  { current: "<id>", toured: {rhythm: true}, hushTip: true }
+```
+
+- 时间单位 tick，每拍 96（`TPB`），一步 24（`STEP`），一个 pattern 16 步。鼓的 `key` 是 `"kick" | "snare" | "hat" | "perc"`。
+- `validate` 拒收：`v` 比自己新、bpm 不在 60–140、tick 越界、未知的鼓或轨道种类。读到坏工程不覆盖它，开一个新的并 toast 一句。
+- 1a 只有一个工程：第一次打开时用 `newSong()` 建一个（自带演示节奏），之后一直打开它。菜单里「新磁带」清空成默认节奏（A 确认、B 取消）。工程列表在第 3 步。
+- 改动后 1 秒内存一次（防抖），离开时立刻存。
+
+### 11.4 声音和播放
+
+- 输出接 `LP.SND.app`（跟随掌机 5 档音量），`audio()` 钩子里重建 synth 接到新的 context。
+- 播放循环自己调度：每 25 ms 看一次，排未来 0.1 s 内的鼓（`events()` 给 tick，换算成秒）。不借用 chip.js 的音乐通道。
+- **swing**：每一对 16 分里的后一个（第 2、4、6…… 步，从 0 数是奇数下标）推后 `(swing − 0.5) × 2 × STEP` tick；默认 0.55 即推后 2.4 tick。公式写在 `events()` 的注释里，测试锁住；1a 没有旋钮。
+- 播放时 `LP.keepAwake(true)`，停了放掉。`leave()`、`pause()`（页面隐藏）都停；回来不自动播。
+- 第一次按播放时 toast 一句「静音键开着就听不到外放」，记在 `studio-meta.hushTip`，只说一次。
+- BPM 60–140，默认 82，步长 2；`−` / `+` 按住连续变。
+
+### 11.5 节奏器屏（331×359，全触屏）
+
+```
+┌────────────────────────────┐
+│ ▶  82 BPM  − +       ?  ≡ │  顶栏：播放/停止、BPM、教程、菜单（新磁带、换鼓组）
+│ [底鼓][军鼓][ 镲 ][打击]  │  选鼓：点一下选中并试听；选中的反色
+│ ┌──┐┌──┐┌──┐┌──┐         │
+│ │■ ││  ││  ││  │  1–4    │  4×4 方块 = 16 步，一行一拍
+│ └──┘└──┘└──┘└──┘         │  亮（墨色）= 这只鼓在这一步响
+│ ……                        │  正在播放的那一步：整块反色闪一下
+└────────────────────────────┘
+```
+
+- 方块按可用宽度算，最小 56 px；在 331×359 上约 64–70 px。每一行（一拍）左边一个很淡的拍号，或者每行第一块边框加粗，帮人数拍子。
+- 点方块：切换，并立刻试听这一声（没播放时也响）。选鼓的标签下面用一个小点表示「这只鼓有内容」。
+- 实体键：方向键移动一个焦点框、A 切换、START 播放 / 停止、SELECT 换下一只鼓、B 关掉菜单 / 教程（照冲洗店的按键处理）。不显示机身按键。
+
+### 11.6 教程（每屏都会用到的小框架，先在节奏器上用）
+
+- `studio.js` 里一个小函数 `tour(steps)`：每步 = 高亮一个元素 + 一句话 + 「做完什么才进下一步」的检查（或「下一步」按钮）。
+  可以「跳过」；看完记进 `studio-meta.toured[屏名]`；顶栏的「?」重看。不做成通用的 `LP` 接口（只有这一个程序用，等第二个再说）。
+- 节奏器的四步：①「按 ▶ 听听」（等播放）②「点亮一格，加一下底鼓」（等一次切换）③「换一只鼓试试」（等换鼓）④「−、+ 改快慢；HOME 随时离开，会自动保存」（按钮结束）。
+- 画法：其余部分盖一层底色网点（四色，`putImageData` 或 CSS 的四色图案），被高亮的元素露出来；文字框墨色字、底色底，放在不挡住高亮的那一半。
+
+### 11.7 演示节奏
+
+`newSong()` 自带的原创节奏（82 BPM、软鼓、swing 0.55）：底鼓第 1、8、11 步，军鼓第 5、13 步，镲每个奇数步（第 1、3、5…… 步）、第 15 步不响，打击第 16 步。数字写在 `studio-song.js` 的一个常量里。
+
+### 11.8 测试和验收
+
+- `node --test tests/studio-song.test.mjs`：新工程能通过 `validate`；坏工程各种情况被拒；`toggle` 加了再点一次就没；`events()` 按 tick 排序、跨 pattern 末尾正确回绕、swing 的偏移是公式算出的值；`degreeToMidi` 几个调式的已知值。
+- e2e（`tests/e2e.test.mjs` 加几条）：打开四轨机 → 有 16 个方块、演示节奏亮着 → 点一块 → 重新载入页面后还在；播放 / 停止不报错；HOME 后播放停止。
+  OfflineAudioContext 渲染每只鼓一次，检查不是静音、不削波。
+- `tests/runtime-shots.mjs`：加四轨机的两张截图（打开时、教程第 2 步）；main 对比：其他画面不变。
+- 全套 `node --test` 只在最后跑一次。
+- owner 的 iPhone 清单（PR 里写中文）：第一次打开能听到节奏；点方块马上有声；教程四步走得通；锁屏回来不乱响；音量键和静音键管用；拖到后台再回来，节奏还在。
+
+### 11.9 怎么分给 DeepSeek
+
+| 部分 | 内容 | 只跑的测试 |
+|---|---|---|
+| A | `studio-song.js` + 单元测试 | `tests/studio-song.test.mjs` |
+| B | `studio-synth.js` 两套鼓 + e2e 渲染检查 | e2e 里新加的那几条 |
+| C | `apps/studio.js` 节奏器屏、存取、播放循环、图标、strings、版本号、SHELL | `tests/repo.test.mjs`、`tests/strings.test.mjs`、新 e2e |
+| D | 教程 `tour()` 和节奏器的四步、runtime-shots | 新 e2e + runtime-shots 对比 |
+
+每部分推一次；A 推完开草稿 PR。Claude 审每一部分（尤其 B 的音量和 C 的生命周期：HOME、锁屏、context 重建），最后的全套测试由审查方决定。
 
 ## 10. 还没定的
 
