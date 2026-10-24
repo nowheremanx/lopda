@@ -8,8 +8,9 @@
      A letter wheel and a small crossword. The words come from PAD.dict (SPEC.md 6.7), the built-in ECDICT:
      words() picks the seed word and the real words that fit its letters, lookup() gives the line in the
      player's language. The results card can add a word to the player's word book, which needs the
-     "wordbook" permission (SPEC.md 6.7); the app adds one word at a time on SELECT. The player can turn
-     ECDICT off in 词典管理 and this app still works. Everything is plain DOM, no canvas, no framework. -->
+     "wordbook" permission (SPEC.md 6.7); on the card A adds one word, B takes it out, SELECT toggles, and a
+     tap on the row's right end toggles. The player can turn ECDICT off in 词典管理 and this app still works.
+     Everything is plain DOM, no canvas, no framework. -->
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #a3ad7e; color: #1f2a14; font-family: monospace; }
   body { display: flex; flex-direction: column; -webkit-user-select: none; user-select: none; }
@@ -171,11 +172,12 @@
       demo: "看：按住字母，划过 {w}",
       demoEnd: "拼对了，词就填进格子，下面显示中文，还会读出来。\n\n轮到你了：找出格子里剩下的词。",
       start: "开始",
-      help: "玩法\n\n按住字母盘上的一个字母，不松手划过别的字母，拼出一个英文单词，松手提交。\n拼对格子里的词，它就填进格子，下面显示中文并读出来；填上的词点一下可以再看一遍。填满格子就过关。\n不在格子里的真词是奖励词，每个换 1 个提示。点「提示」看一个空词的中文。\n按键：方向键选字母，A 加上，B 删掉一个，START 提交，SELECT 打乱字母。",
+      help: "玩法\n\n按住字母盘上的一个字母，不松手划过别的字母，拼出一个英文单词，松手提交。\n拼对格子里的词，它就填进格子，下面显示中文并读出来；填上的词点一下可以再看一遍。填满格子就过关。\n不在格子里的真词是奖励词，每个换 1 个提示。点「提示」看一个空词的中文。\n按键：方向键选字母，A 加上，B 删掉一个，START 提交，SELECT 打乱字母。\n结算卡：A 收进生词本，B 移出。",
       ok: "知道了",
       done: "第 {n} 关完成", doneBtn: "下一关", bonus: "奖励词 {w}：提示 +1",
       sum: "奖励词 {b} 个 · 提示 {n}",
       bookAdded: "已加入生词本", bookRemoved: "已移出生词本", bookDenied: "没有允许使用生词本", bookFull: "生词本满了",
+      bookTip: "A 收进生词本 · B 移出",
       noHints: "先找奖励词换提示", hintHead: "提示：", noEntry: "词典里没有这个词",
       noWord: "不是这里的词", again: "这个词已经填上了", againBonus: "这个奖励词已经算过了"
     },
@@ -190,11 +192,12 @@
       demo: "Watch: hold and slide {w}",
       demoEnd: "A right word fills in, its meaning shows below, and you hear it.\n\nYour turn: find the other words in the grid.",
       start: "START",
-      help: "HOW TO PLAY\n\nHold a letter, slide across others to spell; let go to send it.\nA right word fills in with its meaning, read aloud. Tap a filled word to see it again. Fill the grid to clear.\nAny other real word is a bonus word: 1 hint; HINT shows an open word's meaning.\nKeys: arrows pick, A add, B delete, START send, SELECT shuffle.",
+      help: "HOW TO PLAY\n\nHold a letter, slide across others to spell; let go to send it.\nA right word fills in, its meaning below. Tap it to hear it again. Fill the grid to clear.\nAny other real word is a bonus: 1 hint; HINT shows an open word.\nKeys: arrows pick, A add, B delete, START send, SELECT shuffle.\nResults: A adds, B removes.",
       ok: "OK",
       done: "ROUND {n} CLEAR", doneBtn: "NEXT ROUND", bonus: "Bonus word {w}: hint +1",
       sum: "Bonus words {b} · hints {n}",
       bookAdded: "Added to word book", bookRemoved: "Removed from word book", bookDenied: "Word book not allowed", bookFull: "The word book is full",
+      bookTip: "A: add to word book · B: remove",
       noHints: "Earn a hint with a bonus word", hintHead: "HINT: ", noEntry: "No entry in the dictionary",
       noWord: "Not a word here", again: "Already in the grid", againBonus: "Bonus word already counted"
     }
@@ -251,6 +254,8 @@
   var demoTimers = [], demoWord = null, helpBack = null;
   var fxTimers = [], results = null, resultSum = "", pick = 0;   /* the results card, the summary line, and the ring's cursor (0 = NEXT) */
   var bookMarks = [], bookBusy = false, bookRefreshed = false, bookSeq = 0;   /* which result words are in the player's word book */
+  var bookTip = false;         /* the one-time A/B hint: shown once, then remembered in the save */
+  var bookTap = false;         /* a bookmark-end tap is selecting to toggle: its answer, not the hint, takes the box */
   var dictAt = 0;              /* when the last PAD.dict call was made or settled: all share the 10-a-second limit */
   var bookTimer = null, pickSeq = 0;   /* the detail box's word-book line, and a token so a moving cursor wins */
   var savedRound = 1, savedHints = 0, savedDone = [];
@@ -555,6 +560,14 @@
       detailEl.classList.add("dark");
     }
     coverBtn.classList.toggle("outline", pick > 0);
+    /* The first word the card selects teaches A and B once. It is saved the moment it shows, so it does not
+       come back; a word-book answer or a tap that reads the word still takes the box over (pickSeq). A tap on
+       a row's bookmark end is a toggle, not a read, so it waits for that answer instead. */
+    if (row && !bookTip && !bookTap) {
+      bookTip = true;
+      save();
+      flashDetail(TXT.bookTip);
+    }
   }
   function movePick(by) {
     var n = results.length + 1;
@@ -605,15 +618,17 @@
       renderPick();
     }, 1200);
   }
-  /* SELECT, Left or Right: add the selected word, or take it out again. NEXT selected does nothing; a second
-     toggle while one is pending is ignored, so the row never disagrees with the word book. */
-  function toggleBook() {
-    if (phase !== "done" || pick === 0 || bookBusy) return;
-    var i = pick - 1, row = results && results[i];
+  /* The word book for one row: on adds it, off takes it out. The card's A, B and SELECT and the bookmarked end
+     of a row all come here. NEXT selected does nothing; a second call while one is pending is ignored, so the
+     row never disagrees with the word book. The guards stay: the card must still be up. */
+  function setBook(i, on) {
+    if (phase !== "done" || bookBusy) return;
+    var row = results && results[i];
     if (!row || !PAD.dict || !PAD.dict.addWord || !PAD.dict.removeWord) return;
     var was = bookMarks[i] === true;
+    if (on === was) return;
     bookBusy = true;
-    var seq = ++bookSeq;       /* a read from before this toggle must not land on top of its answer */
+    var seq = ++bookSeq;       /* a read from before this change must not land on top of its answer */
     var call = dictSettled(was ? PAD.dict.removeWord(row.word) : PAD.dict.addWord(row.word));
     call.then(function (v) {
       if (seq !== bookSeq) return;     /* the card is gone: touch nothing, not even bookBusy */
@@ -623,6 +638,8 @@
         bookMarks[i] = !was;
         renderMarks();
         PAD.sfx("ok");
+        /* an add means the player has met the word book: no one-time A/B hint any more (a tap add counts too) */
+        if (!was && !bookTip) { bookTip = true; save(); }
         if (pick === i + 1) flashDetail(was ? TXT.bookRemoved : TXT.bookAdded);
         if (!bookRefreshed) { bookRefreshed = true; readBookMarks(true); }
       } else if (v === "denied") { PAD.sfx("err"); if (pick === i + 1) flashDetail(TXT.bookDenied); }
@@ -634,6 +651,11 @@
       if (phase !== "done") return;
       PAD.sfx("err");
     });
+  }
+  /* SELECT flips the selected row; A only adds and B only removes, so the card never guesses. */
+  function toggleBook() {
+    if (phase !== "done" || pick === 0) return;
+    setBook(pick - 1, bookMarks[pick - 1] !== true);
   }
 
   /* ---------- the title, the round picker, the way out ---------- */
@@ -1185,7 +1207,7 @@
        round is always the main line's next round; done is that round's own, never a replay's or a random round's. */
     var data = {
       round: mainRound, hints: state.hints, done: mainDone.slice(), taught: taught,
-      cleared: state.cleared, random: state.random
+      cleared: state.cleared, random: state.random, bookTip: bookTip
     };
     try { var p = PAD.save("game", data); if (p && p.then) p.then(null, function () {}); } catch (e) {}
   }
@@ -1297,8 +1319,14 @@
       return;
     }
     var n = +li.getAttribute("data-pick"), box = li.getBoundingClientRect();
-    if (e.clientX >= box.right - 44) { pickWord(n, true); toggleBook(); }   /* the bookmark end of the row */
-    else pickWord(n);
+    if (e.clientX >= box.right - 44) {
+      /* the bookmark end of the row: it toggles. Its own answer takes the detail box, so no hint on the way;
+         an add that succeeds then remembers the hint for good (setBook). */
+      bookTap = true;
+      pickWord(n, true);
+      bookTap = false;
+      toggleBook();
+    } else pickWord(n);
   });
   coverList.addEventListener("pointercancel", function () { rowDown = null; });
   hintEl.addEventListener("click", hint);
@@ -1408,14 +1436,17 @@
     if (phase === "error") { if (b === "a" || b === "start") coverBtn.click(); return; }
     if (phase === "done") {
       /* the ring is [NEXT, word1 .. wordN]; it starts on NEXT and Up/Down cycle. START always starts the next round.
-         SELECT, Left and Right toggle the selected word's place in the word book. */
+         On a word row: A adds a hollow word or reads a filled one, B only removes, SELECT flips it; Left and Right
+         are quiet. B on NEXT is quiet too. Touch keeps its two ends: the right 44 px toggles, the rest reads. */
       if (b === "down" || b === "up") { movePick(b === "down" ? 1 : -1); return; }
-      if (b === "left" || b === "right" || b === "select") { toggleBook(); return; }
+      if (b === "select") { toggleBook(); return; }
       if (b === "a") {
         if (pick === 0) nextRound();
-        else sayWord(results[pick - 1].word);
+        else if (bookMarks[pick - 1] === true) sayWord(results[pick - 1].word);
+        else setBook(pick - 1, true);
         return;
       }
+      if (b === "b") { if (pick > 0 && bookMarks[pick - 1] === true) setBook(pick - 1, false); return; }
       if (b === "start") nextRound();
       return;
     }
@@ -1456,6 +1487,7 @@
          means. After the hundredth, round is 101 and the title offers a random round instead of a number. */
       state.cleared = typeof v.cleared === "number" && v.cleared >= 0 ? Math.min(100, Math.floor(v.cleared)) : Math.min(100, savedRound - 1);
       state.random = typeof v.random === "number" && v.random >= 0 ? Math.floor(v.random) : 0;
+      bookTip = v.bookTip === true;    /* 1.5.0 saves have no flag: those players get the card's A/B hint once */
     }
     mainRound = Math.max(1, Math.min(savedRound, state.cleared < 100 ? state.cleared + 1 : 101));
     mainDone = savedDone.slice();

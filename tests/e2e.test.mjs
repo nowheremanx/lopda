@@ -6865,23 +6865,52 @@ test("crossing: round 1 shows a grid, a demo spells one word, words typed with t
   const word1 = await cardState();
   assert.equal(word1.picked, 0, "Down from NEXT goes to the first word");
   assert.equal(word1.outline, true, "NEXT is outlined while a word is selected");
-  assert.ok(word1.detail.length > 0, "the first word shows its line");
-  assert.notEqual(word1.detail, summary, "the detail box is not the summary on a word");
-  /* the word book: the card asked once when it opened, and with no grant yet every row is hollow. SELECT on
-     the first word opens the dev page's permission box (as the handheld asks once per app); allowed, the word
-     is added and its ribbon fills in, and the dev log says so. Right takes it out again and the ribbon empties. */
+  /* the first word selected on the card teaches A and B for 1.2 s, then the meaning comes back */
+  assert.equal(word1.detail, "A 收进生词本 · B 移出", "the one-time hint shows on the first word");
+  assert.equal(word1.dark, true, "the hint is in the dark tone");
+  await p.waitForTimeout(1300);
+  const word1b = await cardState();
+  assert.ok(word1b.detail.length > 0, "the first word shows its line after the hint");
+  assert.notEqual(word1b.detail, summary, "the detail box is not the summary on a word");
+  assert.notEqual(word1b.detail, "A 收进生词本 · B 移出", "the hint gives the meaning back");
+  const tipSaved = await p.evaluate(() => (JSON.parse(localStorage.getItem("lopda-dev:crossing") || "{}").game) || null);
+  assert.equal(tipSaved && tipSaved.bookTip, true, "the hint is remembered once it has shown");
+  /* The word book: the card asked once when it opened, and with no grant yet every row is hollow. A on the
+     first word opens the dev page's permission box (as the handheld asks once per app); allowed, the word is
+     added and its ribbon fills in. A on it again reads it aloud; B takes it out and the ribbon empties. */
   const markOn = (i) => f.evaluate((i) => document.querySelectorAll("#cover-list li")[i].querySelector(".mark").classList.contains("book"), i);
   await until(p, async () => /dict\.inBook/.test(await p.textContent("#log")), "the card's inBook call");
   assert.equal((await p.textContent("#log")).split("dict.inBook").length - 1, 1, "one inBook call when the card opens");
   assert.equal(await markOn(0), false, "without a grant no row is in the book");
   const bookWord = round.placed[0];
-  await press("select");
+  await press("a");
   await p.waitForSelector("#wordbookyes", { state: "visible" });
   await p.click("#wordbookyes");
   await until(p, async () => new RegExp("dict\\.add " + bookWord + " -> saved").test(await p.textContent("#log")), "the first word to be added");
   await until(p, () => markOn(0), "the first row's bookmark to fill in");
+  const addSaved = await p.evaluate(() => (JSON.parse(localStorage.getItem("lopda-dev:crossing") || "{}").game) || null);
+  assert.equal(addSaved && addSaved.bookTip, true, "an add also remembers the hint");
+  /* Left and Right no longer move the cursor or touch the word book. Check them now that the grant exists:
+     with the 1.5.0 toggle back, Right would remove the word; before the grant it only opened the permission box. */
+  await p.waitForTimeout(1300);        /* let "added" hand the detail box back to the meaning */
+  const bookCalls = async () => ((await p.textContent("#log")).match(/dict\.(add|remove) /g) || []).length;
+  const callsBefore = await bookCalls();
+  const beforeLR = await cardState();
   await press("right");
-  await until(p, async () => new RegExp("dict\\.remove " + bookWord + " -> saved").test(await p.textContent("#log")), "the first word to be removed");
+  await press("left");
+  const afterLR = await cardState();
+  assert.equal(await p.locator("#wordbookyes").isVisible(), false, "Left and Right open no permission box");
+  assert.equal(await bookCalls(), callsBefore, "Left and Right make no word book call");
+  assert.equal(afterLR.picked, 0, "Left and Right leave the cursor where it is");
+  assert.equal(afterLR.detail, beforeLR.detail, "Left and Right change nothing on the card");
+  assert.equal(await markOn(0), true, "Left and Right leave the ribbon as it was");
+  const bookSayLine = "say (en): " + bookWord;
+  const bookSaysBefore = (await p.textContent("#log")).split(bookSayLine).length - 1;
+  await press("a");
+  await until(p, async () => (await p.textContent("#log")).split(bookSayLine).length - 1 > bookSaysBefore, "the filled word to be read aloud by A");
+  assert.equal(await markOn(0), true, "reading a word already in the book leaves it there");
+  await press("b");
+  await until(p, async () => new RegExp("dict\\.remove " + bookWord + " -> saved").test(await p.textContent("#log")), "the first word to be removed by B");
   await until(p, async () => !(await markOn(0)), "the first row's bookmark to empty again");
   const afterBook = await cardState();
   assert.equal(afterBook.fit, true, "the bookmarks do not push the card out of 331x359");
@@ -6890,6 +6919,12 @@ test("crossing: round 1 shows a grid, a demo spells one word, words typed with t
   const backToNext = await cardState();
   assert.equal(backToNext.picked, -1, "Up from the first word goes back to NEXT");
   assert.equal(backToNext.detail, summary, "NEXT shows the summary again");
+  /* B on NEXT does nothing: the card stays, and no word book call is made */
+  await press("b");
+  const afterBNext = await cardState();
+  assert.equal(afterBNext.picked, -1, "B on NEXT leaves the cursor on NEXT");
+  assert.equal(await f.evaluate(() => game.phase), "done", "B on NEXT keeps the results card up");
+  assert.equal(afterBNext.detail, summary, "B on NEXT changes nothing");
   await press("up");
   const lastWord = await cardState();
   assert.equal(lastWord.picked, round.placed.length - 1, "Up from NEXT goes to the last word");
@@ -7015,6 +7050,57 @@ test("crossing: round 1 shows a grid, a demo spells one word, words typed with t
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
+/* ---------- 拼字格 / Crossing: the card's first word-book action is a tap on the row's bookmark end ---------- */
+test("crossing: a tap on a row's bookmark end adds the first word and settles the one-time hint", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t);
+  const press = async (b) => { await p.locator(`#pad [data-b="${b}"]`).click(); await p.waitForTimeout(20); };
+  const title = async () => {
+    await p.waitForFunction(() => /loaded |load failed/.test(document.getElementById("log").textContent), null, { timeout: 5000 });
+    let f;
+    await until(p, async () => {
+      f = p.frames().find((x) => x !== p.mainFrame());
+      return f && await f.evaluate(() => !!(window.game && game.phase === "title")).catch(() => false);
+    }, "the title screen");
+    await p.locator("#app").evaluate((el) => { el.style.width = "331px"; el.style.height = "359px"; el.style.flex = "none"; });
+    return f;
+  };
+  await p.goto(`${base}/sdk/dev.html?app=registry/apps/crossing&lang=zh`, { waitUntil: "load" });
+  /* learn round 1's grid once, then open it again as a finished round on a save with no bookTip */
+  await p.evaluate(() => localStorage.setItem("lopda-dev:crossing", JSON.stringify({ game: { round: 1, cleared: 0, taught: true } })));
+  await p.reload({ waitUntil: "load" });
+  let f = await title();
+  await press("a");
+  await until(p, () => f.evaluate(() => game.phase === "play" && game.round === 1), "round 1");
+  const placed = await f.evaluate(() => game.placed.map((x) => x.word));
+  assert.ok(placed.length >= 2, "the grid has words to walk through: " + placed.join(" "));
+  await p.evaluate((s) => localStorage.setItem("lopda-dev:crossing", JSON.stringify({ game: s })),
+    { round: 1, cleared: 0, taught: true, hints: 0, done: placed });
+  await p.reload({ waitUntil: "load" });
+  f = await title();
+  await press("a");
+  await until(p, () => f.evaluate(() => game.phase === "done"), "the finished round's card");
+  /* this page load has no word book grant, as the handheld's first add does not, so the ribbon starts hollow */
+  await p.waitForTimeout(1200);          /* the round's lookups and the card's inBook share the 10-a-second window */
+  const markOn = (i) => f.evaluate((i) => document.querySelectorAll("#cover-list li")[i].querySelector(".mark").classList.contains("book"), i);
+  assert.equal(await markOn(0), false, "without a grant the row is hollow");
+  /* the first selection is a tap on the right 44 px: it asks once, then adds the word */
+  const row = f.locator("#cover-list li").first();
+  const box = await row.boundingBox();
+  await row.tap({ position: { x: box.width - 22, y: box.height / 2 } });
+  await p.waitForSelector("#wordbookyes", { state: "visible" });
+  await p.click("#wordbookyes");
+  await until(p, async () => new RegExp("dict\\.add " + placed[0] + " -> saved").test(await p.textContent("#log")), "the tap's word to be added");
+  await until(p, () => markOn(0), "the ribbon to fill from the tap");
+  const saved = await p.evaluate(() => (JSON.parse(localStorage.getItem("lopda-dev:crossing") || "{}").game) || null);
+  assert.equal(saved && saved.bookTip, true, "a tap add remembers the one-time hint");
+  /* Down to another word: with bookTip set the meaning shows; without the add's flag the hint would take the box */
+  await press("down");
+  const detail = await f.evaluate(() => document.getElementById("cover-detail").textContent);
+  assert.ok(detail.length > 0, "the next word shows its line");
+  assert.notEqual(detail, "A 收进生词本 · B 移出", "the tap's add settled the hint for the card");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
 test("crossing: in English the line under the grid is an English definition", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await page(t, { locale: "en-US" });
   await p.goto(`${base}/sdk/dev.html?app=registry/apps/crossing&lang=en`, { waitUntil: "load" });
@@ -7134,5 +7220,26 @@ test("crossing: an old save, a replay and a quick re-entry", { skip, timeout: 60
   await f.waitForFunction(() => game.phase === "title");
   await press("a");
   await until(p, () => f.evaluate(() => game.phase === "play" && game.round === 2), "the quick re-entry to reach play");
+
+  /* d. a save that already has bookTip true: the card's first word selection shows its meaning, not the hint */
+  const placed2 = await f.evaluate(() => game.placed.map((x) => x.word));
+  await p.evaluate((s) => localStorage.setItem("lopda-dev:crossing", JSON.stringify({ game: s })),
+    { round: 2, cleared: 1, taught: true, hints: 0, done: placed2, bookTip: true });
+  await p.reload({ waitUntil: "load" });
+  await p.waitForFunction(() => /loaded |load failed/.test(document.getElementById("log").textContent), null, { timeout: 5000 });
+  await until(p, async () => {
+    f = p.frames().find((x) => x !== p.mainFrame());
+    return f && await f.evaluate(() => !!(window.game && window.game.phase === "title")).catch(() => false);
+  }, "the title after the bookTip reload");
+  await p.locator("#app").evaluate((el) => { el.style.width = "331px"; el.style.height = "359px"; el.style.flex = "none"; });
+  await p.waitForTimeout(100);
+  await press("a");
+  await until(p, () => f.evaluate(() => game.phase === "done"), "the finished round's card");
+  await press("down");
+  await p.waitForTimeout(200);
+  const noTip = await f.evaluate(() => document.getElementById("cover-detail").textContent);
+  assert.ok(noTip.length > 0, "the word's meaning is in the detail box");
+  assert.notEqual(noTip, "A 收进生词本 · B 移出", "a save with bookTip true never shows the hint again");
+
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
