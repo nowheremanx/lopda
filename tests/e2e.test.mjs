@@ -4374,7 +4374,8 @@ test("sensor motion: the confirm dialog, A allows and readings reach the app; a 
   await until(p, async () => (await R(f)).results.includes("motion:on"), "motion on");
   assert.equal(await p.evaluate(() => window.__asked), 2, "orientation and motion asked in the same tap");
   await until(p, async () => (await R(f)).tilt.length > 0, "a tilt reading");
-  assert.deepEqual((await R(f)).tilt[0], { x: 0.5, y: 0, heading: null });
+  /* flat is counted from lying face up, so the fake phone held at its start pose still reads its real tilt (0.35.0) */
+  assert.deepEqual((await R(f)).tilt[0], { x: 0.5, y: 0, heading: null, flat: { x: 0.5, y: -0.875 } });
   /* stop, start again: remembered, no dialog, no second system prompt */
   await f.evaluate(() => PAD.motion.stop());
   await f.evaluate(() => go("motion"));

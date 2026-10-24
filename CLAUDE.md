@@ -116,7 +116,8 @@ node --test                                  # the test suite; must pass
 - Four tones only: ink `#1f2a14`, dark `#4a5a32`, mid `#7d8a58`, paper `#a3ad7e`.
 - Manifest `"permissions"`: any of `"files"` (`PAD.exportFile` / `PAD.importFile`, each call confirmed by the runtime's
   own dialog, one file ≤ 2 MB; registry/apps/paint is the example), `"motion"` and `"mic"` (runtime 0.24.0+, SPEC.md 6.4:
-  `PAD.motion` {start, stop, zero} with `PAD.on("tilt" | "shake")`, `PAD.mic` {start, stop} with `PAD.on("sound")`; coarse
+  `PAD.motion` {start, stop, zero} with `PAD.on("tilt" | "shake")` (tilt `flat` is the absolute tilt from lying flat,
+  runtime 0.35.0+), `PAD.mic` {start, stop} with `PAD.on("sound")`; coarse
   readings only, the runtime's dialog on an app's first start(), allowed apps listed in Settings, keys must also work;
   the mic sets `navigator.audioSession.type` to "play-and-record" and every way out sets "ambient" back; decisions.md section 23),
   `"notes"` (runtime 0.26.0+, SPEC.md 6.5: `PAD.notes.append(title, text)` -> "saved" | "denied", the runtime's dialog on every

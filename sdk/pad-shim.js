@@ -28,7 +28,8 @@
  *                           {pad:1, op:"noted", i, v}   v: "saved" | "denied"
  *                           {pad:1, op:"said", i, v}    v: "done" | "stopped" | "unavailable"
  *                           {pad:1, op:"snapped", i, v}  v: {w, h, px: Uint8Array of w*h tones 0-3} | null
- *                           {pad:1, op:"tilt", x, y, heading}  {pad:1, op:"shake"}  {pad:1, op:"sound", level, pitch}
+ *                           {pad:1, op:"tilt", x, y, heading, flat:{x, y}}  {pad:1, op:"shake"}  {pad:1, op:"sound", level, pitch}
+ *                           (flat is runtime 0.35.0 and later; older runtimes send no flat)
  *                           {pad:1, op:"button", b, down}   (chin buttons, lopda/1)
  *                           {pad:1, op:"release-all"}
  */
@@ -218,8 +219,11 @@ function lopdaPadShim(opts) {
     else if (d.op === "noted" && noting[d.i]) { var n = noting[d.i]; delete noting[d.i]; n(d.v === "saved" ? "saved" : "denied"); }
     else if (d.op === "said" && saying[d.i]) { var w = saying[d.i]; delete saying[d.i]; w(d.v === "done" || d.v === "stopped" ? d.v : "unavailable"); }
     else if (d.op === "snapped" && snapping[d.i]) { var c = snapping[d.i]; delete snapping[d.i]; c(picture(d.v)); }
-    else if (d.op === "tilt" && SENSORS && num(d.x, -1, 1) && num(d.y, -1, 1))
-      emit("tilt", { x: d.x, y: d.y, heading: num(d.heading, 0, 360) ? d.heading : null });
+    else if (d.op === "tilt" && SENSORS && num(d.x, -1, 1) && num(d.y, -1, 1)) {
+      var t = { x: d.x, y: d.y, heading: num(d.heading, 0, 360) ? d.heading : null };
+      if (d.flat && typeof d.flat === "object" && num(d.flat.x, -1, 1) && num(d.flat.y, -1, 1)) t.flat = { x: d.flat.x, y: d.flat.y };
+      emit("tilt", t);
+    }
     else if (d.op === "shake" && SENSORS) emit("shake");
     else if (d.op === "sound" && SENSORS && num(d.level, 0, 1))
       emit("sound", { level: d.level, pitch: num(d.pitch, 1, 20000) ? d.pitch : null });

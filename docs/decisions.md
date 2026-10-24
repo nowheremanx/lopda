@@ -1313,3 +1313,20 @@ CPU 降速 4 倍（DevTools 的 CPU throttling，粗略代表旧手机）时，�
   这一版不做「把报错发回去修一修」和选字菜单里的「问 AI」，等 owner 用过这一处再定。
 - **代码**：`runtime/ai.js`（`window.LopdaAI`，纯函数加注入的 fetch，`tests/ai.test.mjs`）；`apps/settings.js` 里的 `LP.ai`
   {on, ask, err, watch, saved, PATH}；`apps/scripts.js` 的 `generate()`。e2e 用 Playwright 拦下 OpenRouter 的地址，伪造流式回答。
+
+## 36. 平放读数 flat（0.35.0）
+
+2026-10-24。指南针 app（另一个 PR）想画气泡水平仪，引导玩家把手机平放；但 `y` 从 `start()` 或 `zero()` 时的姿势算起，
+app 不知道手机什么时候才是平的。
+
+- **读数**：每个倾斜事件多一个 `flat: {x, y}`，就是手机平放（屏幕朝上）时的倾斜，刻度和正负跟 `x` / `y` 一样：
+  `flat.x = quantize(gamma / 45)`（与 `x` 相同），`flat.y = quantize(-beta / 45)`（上沿抬起为负，同 `y`），
+  也是 1/32 一档，由 `quantize()` 夹在 -1..1。`{x: 0, y: 0}` 表示平放误差约 1.4 度以内；立着拿时 `flat.y` 是 -1。
+- **绝对读数，不能归零**：`flat` 直接来自手机相对重力的角度，`start()` 和 `zero()` 都不改它；`x` / `y` / `heading`
+  的算法、速率和取整都不变。`flat` 随同一个事件发送，限速器的比较键里也有它。
+- **旧的 runtime**：0.35.0 以前的事件没有 `flat`，app 要自己判断（`if (t.flat)`）；`PAD.on("tilt")` 的类型写成
+  `{x, y, heading, flat}`。
+- **游戏仍然不许要求平放**：第 4 节和 `sdk/UI.md` 的规则照旧；只有本来就要平着用的 app（指南针、水平仪）可以说，
+  并可以用 `flat` 引导玩家。
+- **代码**：`runtime/sensors.js` 的 `tilt()` 和 `feedTilt()`、`sdk/pad-shim.js` 的 `tilt` 消息、`sdk/dev.html` 的方块
+  （方块的原始位置就是绝对倾斜）、`tests/sensors.test.mjs` 和 `tests/pad-shim.test.mjs`。
