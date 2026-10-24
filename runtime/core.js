@@ -158,6 +158,28 @@ function setStatus(key){ statusKey=key; $("savestate").textContent=tr(key); }
 function tickClock(){ var d=new Date(); $("clock").textContent=String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0"); }
 
 /* ---------- views ---------- */
+/* how often a built-in was opened: the pet reads this to decide its adult form (design.md 6). One debounced
+   read-modify-write of data/users/local/usage; a failed write is ignored and never holds up a view. */
+var useCounts={}, useTimer=0;
+function flushUsage(){
+  if(!S.db) return;
+  var inc=useCounts; useCounts={};
+  var ref=S.db.doc("data/users/local/usage");
+  ref.get().then(function(sn){
+    var d=sn.exists ? (own(sn.data())||{}) : {};
+    if(!d.counts || typeof d.counts!=="object") d.counts={};
+    Object.keys(inc).forEach(function(k){ d.counts[k]=(+d.counts[k]||0)+inc[k]; });
+    return ref.set(d);
+  }).catch(function(){
+    Object.keys(inc).forEach(function(k){ useCounts[k]=(useCounts[k]||0)+inc[k]; });
+  });
+}
+function countUse(id){
+  if(!id) return;
+  useCounts[id]=(useCounts[id]||0)+1;
+  if(!S.db || useTimer) return;
+  useTimer=setTimeout(function(){ useTimer=0; flushUsage(); },800);
+}
 /* every view leaves first (the runner blanks its frame, the cartridge stops, the camera lets go
    of the lens), then the chin pad goes away unless the new view keeps it, then the view opens */
 function show(name){
@@ -165,6 +187,8 @@ function show(name){
   var target=null;
   LP.builtins.forEach(function(b){ if(!b.view) return; if(b.view===name) target=b; else if(b.leave) b.leave(); });
   if(!(target && target.keepPad)) showPad(false);
+  if(target && target.id) countUse(target.id);
+  if(name==="run") countUse("apps");   /* community app (and local script) runs */
   if(name==="home"){ renderHome(); refresh("apps"); }
   if(target && target.enter) target.enter();
 }
@@ -205,7 +229,7 @@ document.addEventListener("visibilitychange",function(){
 });
 
 /* ---------- sound: tiny square-wave chips through Web Audio (the named sounds themselves are in chip.js) ---------- */
-var RUNTIME_VERSION="0.36.0";   /* keep in step with VERSION in sw.js */
+var RUNTIME_VERSION="0.37.0";   /* keep in step with VERSION in sw.js */
 /* One volume, five steps, 0 is off (decisions.md section 10). It sets the master gain and nothing else does.
    Under the master: `ui` for the runtime's own clicks, held at a fraction so they stay as quiet as they always were
    (step 2 gives them 0.11, their level before 0.12.0), and `app` for apps, music and the cartridge at the full step. */
@@ -479,7 +503,7 @@ function armConfirm(wrapId,btnId,label,onYes){
    A route returns true when it took the button. */
 var PADB={up:false,down:false,left:false,right:false,a:false,b:false,start:false,select:false};
 var PADKEYS={ArrowUp:"up",ArrowDown:"down",ArrowLeft:"left",ArrowRight:"right",x:"a",X:"a",z:"b",Z:"b",Enter:"start",Shift:"select"};
-var PAD_ORDER=["home","snap","file","cart","cam","dark","cal","dict","reader","notes","run"], padRoutes={};   /* "snap": an app's viewfinder (apps/snap.js), "file": the runtime's file dialog, while they are open */
+var PAD_ORDER=["home","snap","file","cart","cam","dark","cal","dict","reader","notes","pet","run"], padRoutes={};   /* "snap": an app's viewfinder (apps/snap.js), "file": the runtime's file dialog, while they are open */
 function padRoute(name,fn){ padRoutes[name]=fn; }
 padRoute("home",function(b,down){
   if(b!=="a" || !down || $("v-home").hidden || !$("home-add-tip")) return false;

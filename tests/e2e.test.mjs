@@ -3363,6 +3363,183 @@ test("darkroom: develop a roll with blank frames, walk it in colour, print singl
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
+/* ---------- the pet (runtime/apps/pet.js; briefs/pet/design.md) ---------- */
+const PET_TONES = [[31, 42, 20], [74, 90, 50], [125, 138, 88], [163, 173, 126]].map((t) => t.concat(255).join(","));
+
+test("pet: hatch, meal, wash, look, the light at night, travel and the postcard; four tones only; fits 331 wide", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN", serviceWorkers: "block", viewport: { width: 375, height: 667 } });
+  await p.clock.install({ time: new Date(2026, 9, 11, 9, 0) });
+  await p.goto(base + "/runtime/?debug", { waitUntil: "networkidle" });
+  await p.waitForFunction(() => document.getElementById("savestate").textContent !== "启动中…");
+  const key = async (...bs) => { for (const b of bs) { await p.evaluate((b) => { LOPDA_DEBUG.setButton(b, true); LOPDA_DEBUG.setButton(b, false); }, b); await p.waitForTimeout(100); } };
+  const save = () => p.evaluate(() => LOPDA_DEBUG.pet.save());
+  const openPet = async () => {
+    await p.locator("#home .app", { hasText: "宠物" }).click();
+    await p.locator("#v-pet:not([hidden])").waitFor();
+    await p.waitForTimeout(150);
+  };
+  const avgRooms = () => p.evaluate(() => {
+    const c = document.getElementById("pet-cv"), d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data;
+    let s = 0, n = 0;
+    for (let i = 0; i < d.length; i += 4) { s += d[i]; n++; }
+    return s / n;
+  });
+  await openPet();
+  await p.waitForFunction(() => window.LOPDA_DEBUG.pet && LOPDA_DEBUG.pet.save());
+  assert.equal((await save()).stage, "egg");
+  assert.equal(await p.locator(".sk-start").isDisabled(), true, "START 信 waits for Part D");
+  /* an egg left alone for days does not travel or have an outing */
+  const egg = await p.evaluate(() => LOPDA_DEBUG.pet.advance(96));
+  assert.equal(egg.stage, "egg");
+  assert.equal(egg.travel, false);
+  await p.evaluate(() => LOPDA_DEBUG.pet.hatch());
+  assert.equal((await save()).stage, "baby");
+
+  /* food: a two-item choice, A takes the meal; the soft keys say what the sub-screen does */
+  await p.locator(".pet-ikey").nth(0).click();
+  await p.waitForSelector("#pet-panel:not([hidden])");
+  assert.match(await p.locator("#pet-panel").innerText(), /吃什么/);
+  assert.equal(await p.locator(".sk-start").isDisabled(), true);
+  assert.equal(await p.locator(".sk-a span").innerText(), "选");
+  assert.equal(await p.locator(".sk-b span").innerText(), "返回");
+  await key("a");
+  let s = await save();
+  assert.ok(s.lastMeal > 0, "a meal was eaten");
+  assert.ok(await p.isHidden("#pet-panel"));
+  assert.equal(await p.locator(".sk-a span").innerText(), "用");
+
+  /* wash is the water icon (third) */
+  const close = (await save()).close;
+  await p.locator(".pet-ikey").nth(2).click();
+  s = await save();
+  assert.equal(s.mess, 0);
+  assert.ok(s.close > close);
+
+  /* look, then long-press A: the runtime's two-step confirm, every button 44 px; B goes back */
+  await p.locator(".pet-ikey").nth(4).click();
+  assert.match(await p.locator("#pet-panel").innerText(), /年龄/);
+  await p.evaluate(() => LOPDA_DEBUG.setButton("a", true));
+  await p.waitForTimeout(750);
+  await p.evaluate(() => LOPDA_DEBUG.setButton("a", false));
+  let buttons = await p.$$eval("#pet-confirm .btn", (b) => b.map((x) => x.getBoundingClientRect().height));
+  assert.ok(buttons.length >= 1 && buttons.every((h) => h >= 44), "the restart button is 44 px: " + buttons);
+  await key("a");                      /* arms the runtime confirmation */
+  buttons = await p.$$eval("#pet-confirm .btn", (b) => b.map((x) => x.getBoundingClientRect().height));
+  assert.ok(buttons.length >= 2 && buttons.every((h) => h >= 44), "confirm / cancel are 44 px: " + buttons);
+  await key("b");
+  assert.ok(await p.isHidden("#pet-panel"));
+
+  /* the call icon is mid while all is well and ink once it wants food */
+  const inkPixels = (i) => p.evaluate((i) => {
+    const c = document.querySelectorAll(".pet-ikey canvas")[i], d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data;
+    let n = 0;
+    for (let j = 0; j < d.length; j += 4) if (d[j] === 31 && d[j + 1] === 42 && d[j + 2] === 20) n++;
+    return n;
+  }, i);
+  const callMid = await inkPixels(7);
+  assert.equal(callMid, 0, "the call icon starts in the mid tone");
+  await p.evaluate(() => LOPDA_DEBUG.pet.advance(40));
+  const hungry = (await save()).hunger;
+  assert.ok(hungry <= 1, "40 hours without a meal makes it hungry: " + hungry);
+  assert.ok(await inkPixels(7) > callMid, "the call icon turns ink when it wants something");
+
+  /* 21:00 with the light off is a darker room */
+  await p.clock.setSystemTime(new Date(2026, 9, 11, 21, 0));
+  await p.evaluate(() => LP.builtins.find((b) => b.id === "pet").lang());
+  const bright = await avgRooms();
+  await p.locator(".pet-ikey").nth(3).click();
+  assert.equal((await save()).light, false);
+  const dark = await avgRooms();
+  assert.ok(dark < bright - 10, `the room got darker (${bright} -> ${dark})`);
+
+  /* 80 hours away: the empty room and the sign; A brings it in with a postcard */
+  assert.equal(await p.evaluate(() => LOPDA_DEBUG.pet.advance(80).travel), true);
+  await p.click("#home-key");
+  await openPet();
+  assert.ok(await p.locator("#pet-away").isVisible());
+  assert.match(await p.locator("#pet-away").innerText(), /去远行了/);
+  await key("a");
+  await p.waitForFunction(() => LOPDA_DEBUG.pet.save().travel === false);
+  assert.equal(await p.evaluate(() => LP.builtins.find((b) => b.id === "pet").tag()), "带回了");
+
+  /* the box: one postcard, one page, a real 16 x 16 picture, and the souvenir document */
+  await p.locator(".pet-ikey").nth(5).click();
+  const box = await p.locator("#pet-panel").innerText();
+  assert.match(box, /明信片/);
+  assert.match(box, /1\/1/);
+  const picture = await p.evaluate(() => {
+    const c = document.querySelector(".pet-souvcv"), d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data;
+    const set = new Set();
+    for (let i = 0; i < d.length; i += 4) set.add([d[i], d[i + 1], d[i + 2]].join(","));
+    return [...set];
+  });
+  assert.ok(picture.length >= 2, "the souvenir is a picture, not a blank square: " + picture);
+  const souv = await idb.under(p, "data/users/local/pet/souvenirs");
+  assert.equal(souv.length, 1);
+  assert.equal(souv[0].name, "明信片");
+  assert.equal(souv[0].ai, false);
+  assert.equal(souv[0].px.length, 256);
+  assert.equal(await p.evaluate(() => LP.builtins.find((b) => b.id === "pet").tag()), "");
+
+  /* every canvas on the screen is four-tone only */
+  const colours = await p.evaluate(() => {
+    const out = new Set();
+    document.querySelectorAll("#v-pet canvas").forEach((c) => {
+      const d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data;
+      for (let i = 0; i < d.length; i += 4) out.add([d[i], d[i + 1], d[i + 2], d[i + 3]].join(","));
+    });
+    return [...out];
+  });
+  assert.deepEqual(colours.filter((c) => !PET_TONES.includes(c)), [], "no fifth colour");
+
+  /* the hardware view: the LCD is exactly 331 x 359 on a small phone (375 x 587 browser), no scrolling,
+     eight 44 px icons, the room at 4 px a pixel */
+  await p.setViewportSize({ width: 375, height: 587 });
+  await p.waitForTimeout(150);
+  const fit = await p.evaluate(() => {
+    const v = document.getElementById("v-pet"), cv = document.getElementById("pet-cv"), s = document.getElementById("screen");
+    return {
+      screen: [s.clientWidth, s.clientHeight],
+      w: v.clientWidth, scrollH: v.scrollHeight, clientH: v.clientHeight, scrollW: v.scrollWidth,
+      room: [cv.getBoundingClientRect().width, cv.getBoundingClientRect().height],
+      icons: [...document.querySelectorAll(".pet-ikey")].map((b) => {
+        const r = b.getBoundingClientRect();
+        return [r.width, r.height, r.left, r.top, r.bottom];
+      })
+    };
+  });
+  assert.deepEqual(fit.screen, [331, 359], "the smallest LCD");
+  assert.ok(Math.abs(fit.w - 331) <= 1, "331 px wide LCD: " + fit.w);
+  assert.ok(fit.scrollH <= fit.clientH, `the view does not scroll (${fit.scrollH} <= ${fit.clientH})`);
+  assert.ok(fit.scrollW <= fit.w);
+  assert.deepEqual(fit.room, [324, 240]);
+  assert.equal(fit.icons.length, 8);
+  for (const [w, h, left, top, bottom] of fit.icons) {
+    assert.ok(w >= 44 && h >= 44, `icon target ${w} x ${h}`);
+    assert.ok(left >= 0 && top >= 0 && bottom <= 587, "icon visible");
+  }
+
+  /* the box's seen marker is saved: after a reload the tag stays away and the souvenir is still there */
+  let petDoc = null;
+  for (let i = 0; i < 100; i++) {
+    petDoc = await idb.doc(p, "data/users/local/pet");
+    if (petDoc && petDoc.boxSeen === 1) break;
+    await p.waitForTimeout(50);
+  }
+  assert.equal(petDoc.boxSeen, 1, "boxSeen is stored");
+  await p.click("#home-key");
+  await p.reload({ waitUntil: "networkidle" });
+  await p.waitForFunction(() => document.getElementById("savestate").textContent !== "启动中…");
+  await p.waitForFunction(() => window.LOPDA_DEBUG && LOPDA_DEBUG.pet && LOPDA_DEBUG.pet.save() && LOPDA_DEBUG.pet.save().boxSeen === 1);
+  assert.equal(await p.evaluate(() => LP.builtins.find((b) => b.id === "pet").tag()), "", "the tag stays cleared after a reload");
+  assert.equal((await idb.under(p, "data/users/local/pet/souvenirs")).length, 1);
+  await openPet();
+  await p.locator(".pet-ikey").nth(5).click();
+  assert.match(await p.locator("#pet-panel").innerText(), /明信片/);
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+
 /* ---------- notes 2.0 (docs/design/notes.md): today and 那年今日, tags, search, pins, the trash, zip out and in, send ---------- */
 const NOTES_DAY = new Date(2026, 9, 15, 9, 41);    /* Thursday 2026-10-15, lunar 九月初六 */
 const notesPage = async (t, { time = NOTES_DAY, init, ...opts } = {}) => {
