@@ -615,6 +615,8 @@ textarea::placeholder{color:var(--ink-2)}
 .pet-souvline{font-size:14px;line-height:1.35;overflow-wrap:anywhere}
 .pet-souvdate{font-family:var(--f-pix);font-size:14px;color:var(--ink-2)}
 .pet-souvfoot{display:flex;justify-content:space-between;gap:8px;font-size:14px;color:var(--ink-2)}
+.pet-wordbig{margin:8px 0 0;font-family:var(--f-pix);font-size:40px;line-height:1.1;overflow-wrap:anywhere}
+.pet-meaning{margin:2px 0 0;font-size:14px;line-height:1.4;overflow-wrap:anywhere;overflow:hidden;display:-webkit-box;-webkit-line-clamp:7;-webkit-box-orient:vertical}
 .pet-icons{flex:none;display:flex;justify-content:center;height:44px;overflow:hidden}
 .pet-ikey{flex:none;width:44px;height:44px;margin-left:-3px;padding:0;display:flex;align-items:center;justify-content:center;background:transparent;border:0;cursor:pointer;position:relative}
 .pet-ikey:first-child{margin-left:0}

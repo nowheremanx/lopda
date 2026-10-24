@@ -8,8 +8,12 @@
  *   lastMeal    the time of the last meal, for the poop 2-3 hours after it; null when nothing is waiting.
  *   awakeHunger, awakeJoy  awake minutes already counted toward the next hunger / joy loss. They are carried in the
  *               save so opening every two hours loses the same as one long catch-up; travel zeroes both.
- *   today       {day, shown, out, back, snacks, pats, played, burp}: the day's pick and outing, its counters, and a
- *               one-shot burp flag the program clears after its animation. Everything under today resets on a new day.
+ *   today       {day, shown, shownYesterday, picked, pick, used, ai, out, back, snacks, pats, played, burp}: the day's
+ *               pick (kind, in, day, id, word), whether it was decided/used and whether the day's one AI call was made,
+ *               its outing and counters, and a one-shot burp flag the program clears after its animation. Everything
+ *               under today resets on a new day; shownYesterday carries the kind across the reset so it is not repeated.
+ *   seenUse     {reader, dict, notes, darkroom}: the usage counts at the last first-open of a day, for the day's joy.
+ *   aiUse       the usage counts at the last AI call, so categories are only what happened since (null before one).
  *
  * API (the save-taking functions return new saves; the input save is never changed):
  *   rng(seed)                    deterministic floats in [0,1), mulberry32
@@ -31,6 +35,8 @@
  *   validateSouvenir(input)      a clean {name, line, px: 256 chars} or null
  *   builtinSouvenir(rnd, recentNames, table) one entry of table, avoiding recent names when possible
  *   aiPrompt(ctx)                {messages, max} for one LP.ai.ask call, with only design.md 7's allowed facts
+ *   moodWord(hunger, joy, zh)    the one mood word the prompt may carry
+ *   aiCategories(before, after)  the fixed category words whose usage counts grew
  *
  * SPECIES holds every number a species owns. Adding a pack means adding an entry there; no id below is special-cased.
  */
@@ -101,17 +107,18 @@ function pack(sp){
 function speciesOf(save){ return pack(save && save.species); }
 function traitsOf(sp){ return Object.keys(sp.traits || {normal:{outing:0.5, idle:2}}); }
 function traitOf(sp,trait){ return (sp.traits && sp.traits[trait]) || sp.traits[traitsOf(sp)[0]]; }
-function blankToday(day){
-  return {day:day, shown:null, out:null, back:false, snacks:0, pats:0, played:0, burp:false};
+function blankToday(day,shownYesterday){
+  return {day:day, shown:null, shownYesterday:shownYesterday||null, picked:false, pick:null, used:false,
+    rewarded:false, ai:false, out:null, back:false, snacks:0, pats:0, played:0, burp:false};
 }
 function clone(s){ return s==null ? s : JSON.parse(JSON.stringify(s)); }
 function ensureToday(s,key){
-  if(!s.today || (key && s.today.day!==key)) s.today=blankToday(key || null);
+  if(!s.today || (key && s.today.day!==key)) s.today=blankToday(key || null, s.today && s.today.shown);
   return s.today;
 }
 function rollToday(s,tz){
   var k=dayKey(s.last,tz);
-  if(!s.today || s.today.day!==k) s.today=blankToday(k);
+  if(!s.today || s.today.day!==k) s.today=blankToday(k, s.today && s.today.shown);
 }
 function roll(r,n){ var i=Math.floor(num(r())*n); return i<0 ? 0 : i>=n ? n-1 : i; }
 
@@ -126,7 +133,8 @@ function fresh(now,rnd,species){
     awakeHunger:0, awakeJoy:0,
     stage:"egg", form:null,
     marks:{ant:roll(r,sp.marks.ant), pat:roll(r,sp.marks.pat), eye:roll(r,sp.marks.eye)},
-    trait:trait, light:true, today:blankToday(null), lastMeal:null, travel:false
+    trait:trait, light:true, today:blankToday(null), lastMeal:null, travel:false,
+    seenUse:null, aiUse:null
   };
 }
 function hatch(save){
@@ -177,7 +185,7 @@ function catchUp(save,now,ctx){
     s.hunger=3; s.joy=3; s.mess=0;
     s.awakeHunger=0; s.awakeJoy=0;
     s.lastMeal=null; s.last=now;
-    s.today=blankToday(dayKey(now,tz)); s.today.back=true;
+    s.today=blankToday(dayKey(now,tz), s.today && s.today.shown); s.today.back=true;
     events.push("travel");
     return {save:s, events:events};
   }
@@ -233,7 +241,7 @@ function openDay(save,key,counts){
   var s=clone(save);
   if(!s || !key) return s;
   var sp=speciesOf(s);
-  if(!s.today || s.today.day!==key) s.today=blankToday(key);
+  if(!s.today || s.today.day!==key) s.today=blankToday(key, s.today && s.today.shown);
   if(s.lastDay===key) return s;
   s.lastDay=key;
   s.close=(s.close||0)+1;
@@ -465,7 +473,7 @@ function aiPrompt(ctx){
   }
   var recent=[];
   var names=Array.isArray(ctx.recent) ? ctx.recent : (Array.isArray(ctx.recentNames) ? ctx.recentNames : []);
-  names.slice(Math.max(0,names.length-3)).forEach(function(n){
+  names.slice(Math.max(0,names.length-5)).forEach(function(n){
     var s=shortText(n,8);
     if(s && recent.indexOf(s)<0) recent.push(s);
   });
@@ -502,6 +510,31 @@ function aiPrompt(ctx){
   ], max:512};
 }
 
+/* ---------- the AI's small vocabulary ---------- */
+/* One mood word, drawn from the two numbers the pet already has. */
+function moodWord(hunger,joy,zh){
+  var h=clampInt(hunger,0,5), j=clampInt(joy,0,5);
+  if(h<=1) return zh ? "有点饿" : "hungry";
+  if(j<=1) return zh ? "有点低落" : "low";
+  if(j>=4) return zh ? "开心" : "happy";
+  if(h>=4) return zh ? "安静" : "calm";
+  return zh ? "平常" : "content";
+}
+/* Which of the fixed AI category words grew between two usage snapshots. Programs map to the same six words the
+   prompt accepts; no count, program id or name ever leaves this function. */
+var AI_USE=[["read",["reader"]], ["took photos",["camera","cam"]], ["studied words",["dict"]],
+  ["wrote a diary",["notes"]], ["developed film",["darkroom"]], ["played",["apps","cart"]]];
+function usageN(counts,key){ var n=counts && +counts[key]; return isFinite(n) && n>0 ? n : 0; }
+function aiCategories(before,after){
+  var out=[];
+  AI_USE.forEach(function(row){
+    var grew=false;
+    row[1].forEach(function(k){ if(usageN(after,k)>usageN(before,k)) grew=true; });
+    if(grew && AI_CATS.indexOf(row[0])>=0) out.push(row[0]);
+  });
+  return out;
+}
+
 window.LopdaPet={
   SPECIES:SPECIES,
   rng:rng, daySeed:daySeed, dayKey:dayKey, hourOf:hourOf,
@@ -509,6 +542,7 @@ window.LopdaPet={
   openDay:openDay, adultForm:adultForm,
   feed:feed, play:play, wash:wash, pat:pat, setLight:setLight, wants:wants,
   outingToday:outingToday, pickOfDay:pickOfDay,
-  validateSouvenir:validateSouvenir, builtinSouvenir:builtinSouvenir, aiPrompt:aiPrompt
+  validateSouvenir:validateSouvenir, builtinSouvenir:builtinSouvenir, aiPrompt:aiPrompt,
+  moodWord:moodWord, aiCategories:aiCategories
 };
 })();

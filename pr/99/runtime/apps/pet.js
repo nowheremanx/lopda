@@ -6,18 +6,24 @@
  * Screen: the room is an 81 x 60 canvas at 4 CSS pixels a pixel (324 x 240), then eight 44 px icon targets and the
  * soft keys; 328 px of content, so it fits the 331 x 359 LCD with nothing to scroll. Everything on the canvas is
  * putImageData from a Uint8Array of tone indices: never drawImage after putImageData (Safari swaps red and blue).
- * Sub-screens (food, play, look, box) open over the room at the same 324 x 240, on paper with ink text.
+ * Sub-screens (food, play, look, box, word) open over the room at the same 324 x 240, on paper with ink text.
  *
- * Storage: data/users/local/pet (design.md 8 plus petsim's lastMeal, awakeHunger, awakeJoy and today, plus boxSeen
- * and today's outing phase/remaining/hour) and data/users/local/pet/souvenirs/<id> {name, line, px, at, ai:false}.
- * A failed read is not "no pet": the program then keeps an in-memory pet and never writes an egg over a save it
- * could not read (the status bar says 未存档).
+ * Storage: data/users/local/pet (design.md 8 plus petsim's lastMeal, awakeHunger, awakeJoy, today, seenUse and aiUse;
+ * boxSeen and today's pick/outing phase/remaining/hour/ai flag) and data/users/local/pet/souvenirs/<id>
+ * {name, line, px, at, ai:false|true}. A failed read is not "no pet": the program then keeps an in-memory pet and never
+ * writes an egg over a save it could not read (the status bar says 未存档).
+ *
+ * The day: on the first open of a day (and after hatching) the program asks the read-only summaries for the day's one
+ * pick: an upcoming calendar date (a count of days, never a name), a diary after 20:00, the word book, a book not opened
+ * for a week, or waiting film. LopdaPet.pickOfDay chooses (about half the days nothing); the pet holds the matching prop
+ * and 信 lights. A/START opens the summary's own program, then the pick is used for the day. The AI souvenir, when the
+ * line is on, is one call at the day's outing (30 s cap) and silently falls back to the built-in table.
  */
 (function(){
 "use strict";
 
 var LP=window.LP, $=LP.$, S=LP.S, tr=LP.tr, I18N=LP.I18N;
-var Pet=window.LopdaPet, Art=window.LopdaPetArt;
+var Pet=window.LopdaPet, Art=window.LopdaPetArt, L=window.LopdaLunar;
 
 var HOUR=3600000, DAY=86400000, SCALE=4;
 var ROOM_W=81, ROOM_H=60;
@@ -52,7 +58,8 @@ var P={
   eggMs:0, action:null, actionUntil:0, heartUntil:0,
   washUntil:0, flash:null, outing:null, foodSel:0, play:null, boxPage:0,
   confirmStage:0, panelKey:"",
-  saveTimer:0, lastWants:null, bringing:false
+  saveTimer:0, lastWants:null, bringing:false,
+  pickSeq:0, wordWord:"", wordMeaning:null, wordBusy:false, aiJob:null
 };
 var ctx=null, buf=null, im=null, iconCvs={}, iconBuilt=false;
 
@@ -150,7 +157,14 @@ function normalize(save){
   if(!save.marks || typeof save.marks!=="object") save.marks={ant:0,pat:1,eye:0};
   if(save.light===undefined) save.light=true;
   if(save.boxSeen==null) save.boxSeen=0;
-  if(!save.today || typeof save.today!=="object") save.today={day:null,shown:null,out:null,back:false,snacks:0,pats:0,played:0,burp:false};
+  if(!save.today || typeof save.today!=="object") save.today={day:null,shown:null,picked:false,pick:null,used:false,rewarded:false,ai:false,out:null,back:false,snacks:0,pats:0,played:0,burp:false};
+  var td=save.today;
+  if(td.picked===undefined) td.picked=!!td.pick;
+  if(td.pick===undefined) td.pick=null;
+  if(td.used===undefined) td.used=false;
+  if(td.rewarded===undefined) td.rewarded=false;
+  if(td.ai===undefined) td.ai=false;
+  if(td.shownYesterday===undefined) td.shownYesterday=null;
   return save;
 }
 function packOf(save){
@@ -257,6 +271,138 @@ function refreshTime(){
   handleEvents(r.events);
   saveSoon();
   checkOuting();
+  buildPick();
+}
+
+/* ---------- the pick of the day (design.md 6) ---------- */
+var USE_KEYS=["reader","dict","notes","darkroom"];
+function activePick(){
+  var td=P.save && P.save.today;
+  return td && !td.used && td.pick && td.pick.kind ? td.pick : null;
+}
+function dayNumberNow(){
+  try{
+    var d=localDate(now());
+    if(L && L.dayNumber) return L.dayNumber(d.getUTCFullYear(),d.getUTCMonth()+1,d.getUTCDate());
+  }catch(e){}
+  return null;
+}
+/* The usage counts are re-read when the screen opens. Growth since the last look makes it a little happier, once a
+   day (today.rewarded), and seenUse then moves to the fresh counts. Never a message. */
+function rewardUse(){
+  var s=P.save, td=s && s.today, counts=P.usage, seen=s && s.seenUse, grew=false, i;
+  if(!s || !td || !counts || s.stage==="egg") return;
+  if(!td.rewarded && seen) for(i=0;i<USE_KEYS.length;i++) if((+counts[USE_KEYS[i]]||0)>(+seen[USE_KEYS[i]]||0)) grew=true;
+  if(grew){
+    var sp=Pet.SPECIES[s.species]||Pet.SPECIES.chip;
+    s.joy=Math.min(sp.joyMax,(+s.joy||0)+1);
+    td.rewarded=true;
+  }
+  s.seenUse={};
+  for(i=0;i<USE_KEYS.length;i++) s.seenUse[USE_KEYS[i]]=+counts[USE_KEYS[i]]||0;
+}
+function usageArrived(){
+  if(!P.save || !isOpen()) return;
+  rewardUse();
+  saveSoon();
+  if(P.save.today && !P.save.today.picked) buildPick();
+}
+/* readUsage is the only way the pet learns what happened in other programs; call it on every enter/resume */
+function refreshUsage(){
+  return readUsage().then(function(){ usageArrived(); },function(){});
+}
+/* One candidate per source, each guarded: a missing or broken summary just drops its candidate. */
+function pickCandidates(){
+  var list=[], t=now(), key=dayKey(t), d=localDate(t);
+  try{
+    if(LP.calendar && typeof LP.calendar.upcoming==="function"){
+      var up=LP.calendar.upcoming(7)||[];
+      if(up.length && typeof up[0].in==="number" && up[0].in>=0){
+        var todayN=dayNumberNow();
+        if(todayN!==null) list.push({kind:"date", urgency:up[0].in<=1?0:up[0].in, in:up[0].in, day:todayN+up[0].in});
+      }
+    }
+  }catch(e){}
+  try{
+    if(hourNow()>=20 && LP.notes && typeof LP.notes.diaryDays==="function"){
+      var days=LP.notes.diaryDays(d.getUTCFullYear(),d.getUTCMonth()+1)||{};
+      if(!days[d.getUTCDate()]) list.push({kind:"diary", urgency:1});
+    }
+  }catch(e){}
+  try{
+    if(LP.dict && typeof LP.dict.bookSummary==="function" && typeof LP.dict.pickWord==="function"){
+      var bs=LP.dict.bookSummary();
+      if(bs && bs.n>0){
+        var word=LP.dict.pickWord((Pet.daySeed(P.save.born,key)^0x51ed270b)>>>0);
+        if(word) list.push({kind:"word", urgency:2, word:String(word)});
+      }
+    }
+  }catch(e){}
+  try{
+    if(LP.reader && typeof LP.reader.current==="function"){
+      var cur=LP.reader.current();
+      if(cur && cur.id && (+cur.opened||0)<=t-7*DAY) list.push({kind:"book", urgency:3, id:String(cur.id)});
+    }
+  }catch(e){}
+  return list;
+}
+function cleanPick(o){
+  if(!o || !o.kind) return null;
+  var f={kind:o.kind};
+  if(typeof o.in==="number") f.in=o.in;
+  if(typeof o.day==="number") f.day=o.day;
+  if(o.id!=null) f.id=String(o.id);
+  if(o.word) f.word=String(o.word);
+  return f;
+}
+/* The film box is the one asynchronous summary; the others are in memory. The decision waits for all of them. */
+function buildPick(){
+  var save=P.save;
+  if(!save || save.stage==="egg") return;
+  var td=save.today;
+  if(!td) return;
+  if(td.picked){ addLateDiary(td); return; }
+  var seq=++P.pickSeq, list=pickCandidates(), film=null;
+  try{
+    if(LP.darkroom && typeof LP.darkroom.summary==="function"){
+      film=Promise.resolve(LP.darkroom.summary()).then(function(s){
+        if(s && +s.n>0) list.push({kind:"film", urgency:4});
+      },function(){});
+    }
+  }catch(e){ film=null; }
+  Promise.resolve(film).then(function(){
+    if(seq!==P.pickSeq) return;
+    var cur=P.save && P.save.today;
+    /* a care action clones the save while the film summary is in flight: decide against today's new object, not the
+       captured one, so the pick is not silently lost */
+    if(!cur || cur.picked || cur.day!==td.day) return;
+    cur.picked=true;
+    var pick=Pet.pickOfDay(list, cur.shownYesterday||null, Pet.daySeed(P.save.born, cur.day));
+    cur.pick=cleanPick(pick);
+    cur.shown=cur.pick ? cur.pick.kind : null;
+    cur.used=false;
+    saveSoon(); renderKeys(); render();
+  });
+}
+/* A day decided before 20:00 had no diary candidate. Opening it again later may add the diary only when that day's
+   pick was null; a pick already shown is never replaced. */
+function addLateDiary(td){
+  if(td.pick || td.used || hourNow()<20) return;
+  if(td.shownYesterday==="diary") return;              /* never repeat yesterday's kind, not even late */
+  if(!LP.notes || typeof LP.notes.diaryDays!=="function") return;
+  try{
+    var d=localDate(now()), days=LP.notes.diaryDays(d.getUTCFullYear(),d.getUTCMonth()+1)||{};
+    if(days[d.getUTCDate()]) return;
+    td.pick={kind:"diary"};
+    td.shown="diary";
+    td.used=false;
+    saveSoon(); renderKeys(); render();
+  }catch(e){}
+}
+function finishPick(){
+  if(!P.save || !P.save.today) return;
+  P.save.today.used=true;
+  saveNow(); renderKeys(); render();
 }
 
 /* ---------- the day's outing ---------- */
@@ -292,7 +438,7 @@ function makeSouvenir(entry){
   return {
     id:LP.uid(), name:txt.name, line:txt.line,
     px:entry && entry.px ? String(entry.px) : pxFromGrid(entry && entry.grid),
-    at:now(), ai:!(entry && entry.ai===false)
+    at:now(), ai:!!(entry && entry.ai)
   };
 }
 function pushSouvenir(s){
@@ -306,8 +452,7 @@ function pushSouvenir(s){
 function addSouvenir(entry){
   if(!entry) return Promise.resolve(null);
   var s=makeSouvenir(entry);
-  s.ai=false;
-  var data={name:s.name, line:s.line, px:s.px, at:s.at, ai:false};
+  var data={name:s.name, line:s.line, px:s.px, at:s.at, ai:s.ai};
   if(P.nostore || !P.refs){
     pushSouvenir(s);
     return Promise.resolve(s);
@@ -325,6 +470,126 @@ function outingSouvenir(){
   var seed=(Pet.daySeed(P.save.born,dayKey(now()))^0x5bd1e995)>>>0;
   return Pet.builtinSouvenir(Pet.rng(seed),recentNames(),souvenirTable(packOf(P.save)));
 }
+/* ---------- the AI souvenir (design.md 7; decisions.md section 34 stays: no PAD.ai for apps) ---------- */
+var FORM_WORD={book:"bookish",walk:"walker",scholar:"scholar",diary:"diarist",monster:"little monster",plain:"plain"};
+function formWord(){
+  var s=P.save;
+  if(!s) return "";
+  return s.stage==="adult" ? (FORM_WORD[s.form]||"plain") : s.stage;
+}
+function seasonWord(){
+  var s=seasonOf(now());
+  return I18N.lang==="zh" ? ({spring:"春天",summer:"夏天",autumn:"秋天",winter:"冬天"})[s] : s;
+}
+/* 立冬 is term index 20; the pet wears the scarf on it and the next six days. 中秋 is lunar 8/15. */
+function isLidong(t){
+  try{
+    var d=localDate(t);
+    if(d.getUTCMonth()+1!==11 || !L || !L.termDay) return false;
+    var day=L.termDay(d.getUTCFullYear(),20);
+    return !!day && d.getUTCDate()>=day && d.getUTCDate()<=day+6;
+  }catch(e){ return false; }
+}
+function lunarToday(t){
+  try{
+    var d=localDate(t);
+    return L && L.fromSolar ? L.fromSolar(d.getUTCFullYear(),d.getUTCMonth()+1,d.getUTCDate()) : null;
+  }catch(e){ return null; }
+}
+function isMidAutumn(t){ var lu=lunarToday(t); return !!lu && !lu.leap && lu.month===8 && lu.day===15; }
+/* Today's solar-term name, or 中秋; the calendar's holiday-cn files are not exposed to the pet, so nothing else. */
+function termName(t){
+  try{
+    var d=localDate(t);
+    if(L && L.term){
+      var i=L.term(d.getUTCFullYear(),d.getUTCMonth()+1,d.getUTCDate());
+      if(i>=0){ var names=tr("cal.terms").split("|"); if(names[i]) return names[i]; }
+    }
+    if(isMidAutumn(t)) return tr("cal.f.midautumn");
+  }catch(e){}
+  return "";
+}
+function copyCounts(c){
+  var out={};
+  if(c) for(var k in c) if(isFinite(+c[k])) out[k]=+c[k];
+  return out;
+}
+function aiContext(){
+  var s=P.save, t=now(), key=dayKey(t), zh=I18N.lang==="zh", word=null;
+  try{
+    if(LP.dict && typeof LP.dict.bookSummary==="function" && typeof LP.dict.pickWord==="function" && LP.dict.bookSummary().n>0)
+      word=LP.dict.pickWord((Pet.daySeed(s.born,key)^0x2545f491)>>>0);
+  }catch(e){}
+  return {
+    form:formWord(),
+    age:Math.max(0,Math.floor((t-(+s.born||t))/DAY)),
+    mood:Pet.moodWord(s.hunger,s.joy,zh),
+    hour:hourNow(), season:seasonWord(), term:termName(t),
+    categories:Pet.aiCategories(P.save.aiUse||{},P.usage||{}),
+    recent:recentNames(), word:word||"", lang:I18N.lang
+  };
+}
+function stripFence(text){
+  var s=String(text==null?"":text).trim();
+  if(s.slice(0,3)==="```"){
+    var nl=s.indexOf("\n");
+    s=nl>=0 ? s.slice(nl+1) : s.slice(3);
+    var end=s.lastIndexOf("```");
+    if(end>=0) s=s.slice(0,end);
+  }
+  return s.trim();
+}
+/* One call a day, fired when the outing starts. today.ai is written first, so a reload never asks twice; the walking-back
+   moment waits for the answer (up to 30 s), and anything other than a valid souvenir becomes the built-in one. */
+function stopAiJob(){
+  var job=P.aiJob;
+  P.aiJob=null;
+  if(!job) return;
+  if(job.timer){ clearTimeout(job.timer); job.timer=0; }
+  if(!job.done){
+    job.done=true; job.result=null;
+    if(job.stop) job.stop();
+  }
+}
+function beginAiSouvenir(){
+  var td=P.save && P.save.today, ai=LP.ai;
+  if(!td || td.ai) return;
+  if(!ai || typeof ai.on!=="function" || !ai.on() || typeof ai.ask!=="function") return;
+  td.ai=true;
+  saveNow();
+  var job={done:false,result:null,timer:0,stop:null};
+  P.aiJob=job;
+  var fire=function(){
+    if(P.aiJob!==job || job.done || !P.save || !P.save.today || P.save.today.day!==td.day) return;
+    var prompt;
+    try{ prompt=Pet.aiPrompt(aiContext()); }catch(e){ job.done=true; return; }
+    P.save.aiUse=copyCounts(P.usage);
+    saveNow();
+    var pr;
+    try{ pr=ai.ask(prompt); }catch(e){ job.done=true; return; }
+    job.stop=function(){ try{ if(pr && typeof pr.stop==="function") pr.stop(); }catch(e){} };
+    job.timer=setTimeout(function(){
+      job.timer=0; job.done=true; job.result=null; job.stop();
+      if(isOpen()) render();
+    },30000);
+    Promise.resolve(pr).then(function(text){
+      if(job.done) return;
+      if(job.timer){ clearTimeout(job.timer); job.timer=0; }
+      job.done=true;
+      var v=null;
+      try{ v=Pet.validateSouvenir(stripFence(text)); }catch(e){ v=null; }
+      job.result=v ? {name:v.name, line:v.line, px:v.px, ai:true} : null;
+      if(isOpen()) render();
+    },function(){
+      if(job.done) return;
+      if(job.timer){ clearTimeout(job.timer); job.timer=0; }
+      job.done=true; job.result=null;
+      if(isOpen()) render();
+    });
+  };
+  /* a fresh usage read, so the categories are what happened since the last AI call, not boot */
+  readUsage().then(fire, fire);
+}
 /* The outing's phase lives in today so leaving or reloading during the ~20 s does not eat the day's souvenir:
    `outPhase`/`outLeft`/`outHour` are resumed on the next visit; `out`/`back` are written only once the souvenir
    document has landed. */
@@ -338,12 +603,15 @@ function persistOuting(){
 }
 function startOuting(hour){
   if(!P.save) return;
-  if(!P.save.today) P.save.today={day:dayKey(now()),shown:null,out:null,back:false,snacks:0,pats:0,played:0,burp:false};
+  if(!P.save.today) P.save.today={day:dayKey(now()),shown:null,picked:false,pick:null,used:false,rewarded:false,ai:false,out:null,back:false,snacks:0,pats:0,played:0,burp:false};
   var left=Math.max(1,Math.round(OUT_MS/500));
   P.save.today.outPhase="out"; P.save.today.outLeft=left; P.save.today.outHour=hour;
+  stopAiJob();
   P.outing={phase:"out", left:left, souv:null, hour:hour, done:false, day:dayKey(now())};
   P.resumeOuting=false;
-  saveSoon(); render();
+  saveSoon();
+  beginAiSouvenir();
+  render();
 }
 function resumeOuting(){
   var td=P.save && P.save.today;
@@ -373,9 +641,14 @@ function finishOuting(){
 }
 function stepOuting(){
   if(!P.outing || P.outing.done) return;
-  P.outing.left--;
+  if(P.outing.left>0) P.outing.left--;
   if(P.outing.phase==="out" && P.outing.left<=0){
-    P.outing.phase="back"; P.outing.left=4; P.outing.souv=outingSouvenir();
+    /* the room stays empty until the one AI answer is in (or its 30 s cap is up) */
+    if(P.aiJob && !P.aiJob.done){ persistOuting(); render(); return; }
+    var job=P.aiJob;
+    P.outing.phase="back"; P.outing.left=4;
+    P.outing.souv=(job && job.result) ? job.result : outingSouvenir();
+    P.aiJob=null;
     persistOuting(); saveSoon(); render();
   } else if(P.outing.phase==="back" && P.outing.left<=0){
     persistOuting();
@@ -459,6 +732,7 @@ function hatchNow(silent){
     if(isOpen() && LP.chip && LP.chip.music) LP.chip.music({action:"play",song:JINGLE,loop:false});
   }
   saveNow(); render();
+  buildPick();
   if(!$("v-home").hidden) LP.renderHome();
 }
 function restartPet(){
@@ -466,6 +740,7 @@ function restartPet(){
   P.save.boxSeen=P.souv.length;              /* the box is kept and already seen */
   P.eggMs=0; P.sub=null; P.confirmStage=0; P.action=null; P.outing=null; P.play=null;
   P.lastWants=null; P.boxPage=0; P.bringing=false;
+  stopAiJob();
   saveNow(); beep("ok"); LP.toast(tr("pet.restart.done")); renderKeys(); render();
 }
 
@@ -544,7 +819,7 @@ function useSelected(){
     case 3: toggleLight(); break;
     case 4: openLook(); break;
     case 5: openBox(); break;
-    case 6: /* 信 is dark until Part D */ break;
+    case 6: usePick(); break;
     case 7: callPet(); break;
   }
 }
@@ -558,6 +833,7 @@ function pressA(){
   }
   if(P.sub==="look"){ confirmNext(); return; }
   if(P.sub==="box"){ pasteSouvenir(); return; }
+  if(P.sub==="word"){ lookupWord(); return; }
   if(P.sub) return;
   if(P.save.travel){ bringBack(); return; }
   useSelected();
@@ -565,10 +841,65 @@ function pressA(){
 function back(){
   if(P.sub){
     P.sub=null; P.confirmStage=0; P.play=null;
+    P.wordWord=""; P.wordMeaning=null; P.wordBusy=false;
     beep("tap"); renderKeys(); render();
   }
 }
-function mailKey(){ /* START 信: the mail is dark in Part C */ }
+function mailKey(){ if(!P.sub) usePick(); }
+
+/* ---------- 信: the pick's own program, or the word card ---------- */
+function usePick(){
+  var pick=activePick();
+  if(P.sub || !pick || !P.save || P.save.travel || P.outing || P.save.stage==="egg") return;
+  if(pick.kind==="date"){
+    if(typeof pick.day!=="number" || !LP.calendar || typeof LP.calendar.open!=="function") return;
+    finishPick();
+    LP.calendar.open(pick.day);
+    return;
+  }
+  if(pick.kind==="diary"){
+    if(!LP.notes || typeof LP.notes.openDiary!=="function") return;
+    var ok=LP.notes.openDiary(dayKey(now()),function(){
+      LP.show("pet"); LP.showPad(true);
+    });
+    if(ok) finishPick();
+    return;
+  }
+  if(pick.kind==="word"){
+    P.sub="word"; P.wordWord=pick.word||""; P.wordMeaning=null; P.wordBusy=false;
+    finishPick(); beep("tap"); renderKeys(); render();
+    return;
+  }
+  if(pick.kind==="book"){
+    if(!LP.reader || typeof LP.reader.open!=="function" || !pick.id) return;
+    if(LP.reader.open(pick.id)) finishPick();
+    return;
+  }
+  if(pick.kind==="film"){
+    var open=null, i;
+    for(i=0;LP.builtins && i<LP.builtins.length;i++) if(LP.builtins[i].id==="darkroom"){ open=LP.builtins[i].open; break; }
+    if(typeof open!=="function") return;
+    finishPick();
+    open();
+  }
+}
+function fitText(text,max){
+  var s=String(text==null?"":text).replace(/\s+/g," ").trim(), cp=Array.from(s);
+  return cp.length>max ? cp.slice(0,max).join("")+"…" : s;
+}
+function lookupWord(){
+  if(!P.wordWord || P.wordBusy) return;
+  if(P.wordMeaning!=null) return;
+  P.wordBusy=true; render();
+  var done=function(text){
+    P.wordBusy=false; P.wordMeaning=text; render();
+  };
+  if(!LP.dict || typeof LP.dict.lookup!=="function"){ done(tr("pet.word.none")); return; }
+  LP.dict.lookup(P.wordWord).then(function(results){
+    var text=results && results.length ? fitText(results[0].text,260) : "";
+    done(text || tr("pet.word.none"));
+  },function(){ done(tr("pet.word.none")); });
+}
 
 /* ---------- room ---------- */
 function seasonOf(t){
@@ -607,6 +938,63 @@ function petGrid(save,pack,t,asleepNow){
     ant:marks.ant, pat:marks.pat, eye:marks.eye, face:face
   }),0);
 }
+function overlayGrid(base,top,x,y){
+  if(!base || !top) return base;
+  var out=[], r, c, row, ch;
+  for(r=0;r<base.length;r++) out.push(String(base[r]).split(""));
+  for(r=0;r<top.length;r++){
+    row=String(top[r]);
+    if(!out[y+r]) out[y+r]=[];
+    for(c=0;c<row.length;c++){
+      ch=row.charAt(c);
+      if(ch!==".") out[y+r][x+c]=ch;
+    }
+  }
+  return out.map(function(a){ return a.join(""); });
+}
+/* 立冬's scarf is worn, not held: it is laid over the pet grid, so a pick's prop can sit beside it. */
+function wearScarf(pet){
+  var scarf=((packOf(P.save).props)||Art.PROPS||{}).scarf;
+  if(!pet || !scarf) return pet;
+  var w=Art.gridWidth ? Art.gridWidth(pet) : String(pet[0]||"").length;
+  var x=Math.max(0,Math.floor((w-String(scarf[0]).length)/2));
+  return overlayGrid(pet,scarf,x,Math.floor(pet.length*0.55));
+}
+/* the little flag: flagBlank with numberGrid laid in its paper; two digits may touch the border, the paper shows */
+function flagWithNumber(n){
+  var props=(packOf(P.save).props)||Art.PROPS||{};
+  var base=props.flagBlank||props.flag;
+  if(!base) return null;
+  var num=Art.numberGrid ? Art.numberGrid(Math.max(0,Math.min(99,+n||0))) : null;
+  if(!num) return base;
+  var w=String(num[0]).length, x=Math.max(1,Math.floor((8-w)/2));
+  return overlayGrid(base,num,x,2);
+}
+function deskWithPen(){
+  var props=(packOf(P.save).props)||Art.PROPS||{};
+  if(!props.desk) return props.pen||null;
+  return props.pen ? overlayGrid(props.desk,props.pen,14,0) : props.desk;
+}
+function gridFromPx(px){
+  var rows=[], r, c, line, out;
+  for(r=0;r<16;r++){
+    line=String(px||""); out="";
+    for(c=0;c<16;c++){ var ch=line.charAt(r*16+c); out+=/[0-3]/.test(ch)?ch:"3"; }
+    rows.push(out);
+  }
+  return rows;
+}
+/* kind -> prop; the date flag counts the days, the diary is a desk with a pen, the rest are single grids */
+function pickProp(pick){
+  var props=(packOf(P.save).props)||Art.PROPS||{};
+  if(!pick || !pick.kind) return null;
+  if(pick.kind==="date") return flagWithNumber(typeof pick.in==="number"?pick.in:0);
+  if(pick.kind==="word") return props.card||null;
+  if(pick.kind==="book") return props.books||null;
+  if(pick.kind==="film") return props.film||null;
+  if(pick.kind==="diary") return deskWithPen();
+  return null;
+}
 function roomScene(){
   var save=P.save, t=now(), pack=packOf(save), h=hourNow(), min=localDate(t).getUTCMinutes();
   var night=h<6 || h>=19;
@@ -640,15 +1028,21 @@ function roomScene(){
         face:P.frame?"walk2":"walk1"
       }),0);
     }
-    scene.prop=P.outing.souv ? P.outing.souv.grid : null;
+    scene.prop=P.outing.souv ? (P.outing.souv.grid || gridFromPx(P.outing.souv.px)) : null;
     px=Math.max(0,px);
-  } else if(w==="food" || P.lookAt==="food"){
-    px=16; py=40;
-  } else if(w==="wash" || P.lookAt==="wash"){
-    px=20; py=40;
+  } else {
+    var pick=activePick();
+    if(pick) scene.prop=pickProp(pick);
+    if(w==="food" || P.lookAt==="food"){
+      px=16; py=40;
+    } else if(w==="wash" || P.lookAt==="wash"){
+      px=20; py=40;
+    }
   }
   scene.petX=px; scene.petY=py;
+  if(save.stage!=="egg" && isLidong(t)) scene.pet=wearScarf(scene.pet);
   if(P.heartUntil>t) scene.prop=(pack.props||{}).heart;
+  else if(!scene.prop && isMidAutumn(t)) scene.prop=(pack.props||{}).mooncake;
   if(asleepNow && save.stage!=="egg") scene.zz=true;
   return scene;
 }
@@ -670,7 +1064,7 @@ function renderRoom(){
 
 /* ---------- icons ---------- */
 function iconTone(i){
-  if(i===6) return 1;                                   /* 信: dark (disabled until Part D) */
+  if(i===6) return activePick()?0:1;                    /* 信: ink only while there is a pick */
   if(i===7) return wantsOf()?0:2;                        /* 呼唤: ink only when it wants something */
   if(P.flash && P.flash.i===i && P.flash.left%2===0) return 0;
   return 2;
@@ -706,6 +1100,7 @@ function renderIcons(){
     var cv=iconCvs[name]; if(!cv) return;
     paintGrid(cv,icons[name]||[],iconTone(i),3);
     var b=kids[i]; if(!b) return;
+    if(name==="mail") b.setAttribute("aria-disabled",activePick()?"false":"true");
     if(i===P.sel) b.classList.add("on"); else b.classList.remove("on");
     b.setAttribute("aria-pressed",i===P.sel?"true":"false");
   });
@@ -720,7 +1115,8 @@ function boxes(n){
 function panelKey(){
   var s=P.save||{};
   return [P.sub,P.foodSel,P.boxPage,P.confirmStage,I18N.lang,P.souv.length,
-    JSON.stringify(P.play), s.stage,s.hunger,s.joy,s.opened,s.born,s.close,s.travel,s.light].join("|");
+    JSON.stringify(P.play),P.wordWord,P.wordMeaning,P.wordBusy,
+    s.stage,s.hunger,s.joy,s.opened,s.born,s.close,s.travel,s.light].join("|");
 }
 function buildFood(panel){
   panel.appendChild(el("p","pet-ptitle",tr("pet.food.title")));
@@ -768,6 +1164,13 @@ function buildLook(panel){
   panel.appendChild(el("p","pet-phint",tr("pet.look.hint")));
   var c=el("div","pet-confirm"); c.id="pet-confirm"; panel.appendChild(c);
 }
+function buildWord(panel){
+  panel.appendChild(el("p","pet-ptitle",tr("pet.word.title")));
+  panel.appendChild(el("p","pet-wordbig",P.wordWord||""));
+  if(P.wordBusy) panel.appendChild(el("p","pet-pinfo",tr("pet.word.loading")));
+  else if(P.wordMeaning!=null) panel.appendChild(el("p","pet-meaning",P.wordMeaning));
+  panel.appendChild(el("p","pet-phint",tr(P.wordMeaning!=null?"pet.word.back":"pet.word.hint")));
+}
 function buildBox(panel){
   panel.appendChild(el("p","pet-ptitle",tr("pet.box.title")));
   if(!P.souv.length){ panel.appendChild(el("p","pet-pempty",tr("pet.box.empty"))); return; }
@@ -801,6 +1204,7 @@ function renderPanel(){
   else if(P.sub==="play") buildPlay(panel);
   else if(P.sub==="look") buildLook(panel);
   else if(P.sub==="box") buildBox(panel);
+  else if(P.sub==="word") buildWord(panel);
   if(P.sub==="look" && P.confirmStage){
     LP.resetConfirm("pet-confirm","pet-confirm-btn",tr("pet.look.restart"),restartPet);
     if(P.confirmStage===2){
@@ -827,6 +1231,7 @@ function aKeyLabel(){
   if(P.sub==="play") return "pet.sk.guess";
   if(P.sub==="look") return "pet.sk.hold";
   if(P.sub==="box") return "pet.sk.paste";
+  if(P.sub==="word") return "pet.sk.lookup";
   return "pet.sk.use";
 }
 function renderKeys(){
@@ -834,7 +1239,7 @@ function renderKeys(){
   if(!wrap) return;
   LP.softkeys(wrap,{
     select:null,
-    start:{label:tr("pet.sk.mail"),disabled:true},     /* 信 is wired in Part D */
+    start:{label:tr("pet.sk.mail"),disabled:!!P.sub || !activePick(),fn:mailKey},
     b:{label:tr("sk.back"),fn:back},
     a:{label:tr(aKeyLabel()),fn:function(){
       if(P.holdFired){ P.holdFired=false; clearHold(); return; }
@@ -897,6 +1302,7 @@ function enter(){
   refreshTime();
   render();
   startTimer();
+  refreshUsage();
 }
 function leave(){
   persistOuting();
@@ -904,6 +1310,8 @@ function leave(){
   if(P.roomHold){ clearTimeout(P.roomHold); P.roomHold=0; }
   P.holdFired=false;
   P.sub=null; P.confirmStage=0; P.play=null; P.outing=null;
+  P.wordWord=""; P.wordMeaning=null; P.wordBusy=false;
+  stopAiJob();
   saveNow();
   if(LP.chip && LP.chip.music) LP.chip.music({action:"stop"});
 }
@@ -912,12 +1320,13 @@ function pause(){
   P.holdFired=false; clearHold();
   persistOuting();
   stopTimer(); saveNow();
+  stopAiJob();
   if(LP.chip && LP.chip.music) LP.chip.music({action:"stop"});
 }
 function resume(){
   if(!isOpen()) return;
   P.resumeOuting=true;
-  refreshTime(); render(); startTimer();
+  refreshTime(); render(); startTimer(); refreshUsage();
 }
 function openPet(){
   LP.show("pet");
@@ -1026,8 +1435,26 @@ if(/[?&]debug\b/.test(location.search)){
     },
     forcePick:function(kind){
       if(!P.save) return null;
-      if(P.save.today) P.save.today.shown=kind||null;
-      saveSoon(); render();
+      P.pickSeq++;
+      var td=P.save.today;
+      if(!td) return null;
+      td.picked=true; td.used=false; td.shown=null; td.pick=null;
+      if(kind==="date" || kind==="diary" || kind==="word" || kind==="book" || kind==="film"){
+        var pick={kind:kind};
+        if(kind==="date"){
+          var n=dayNumberNow();
+          pick.in=2; pick.day=(n===null?0:n+2);
+        } else if(kind==="word"){
+          var w=null;
+          try{ if(LP.dict && LP.dict.bookSummary && LP.dict.bookSummary().n>0 && LP.dict.pickWord) w=LP.dict.pickWord(1); }catch(e){}
+          pick.word=w||tr("pet.word.demo");
+        } else if(kind==="book"){
+          try{ var cur=LP.reader && LP.reader.current && LP.reader.current(); if(cur && cur.id) pick.id=cur.id; }catch(e){}
+          if(!pick.id) pick.id="demo";
+        }
+        td.pick=pick; td.shown=kind;
+      }
+      saveSoon(); renderKeys(); render();
       return P.save;
     },
     save:function(){ return P.save ? JSON.parse(JSON.stringify(P.save)) : null; }
