@@ -589,6 +589,8 @@ textarea::placeholder{color:var(--ink-2)}
 .studio{display:flex;flex-direction:column;overflow:hidden;background:var(--lcd)}
 .st-bar{flex:none;display:flex;align-items:center;gap:4px;padding:4px 6px;border-bottom:2px solid var(--ink)}
 .st-play{flex:none;width:44px;height:44px;display:flex;align-items:center;justify-content:center;padding:0;background:var(--ink);color:var(--lcd);border:2px solid var(--ink);font-family:var(--f-pix);font-size:22px;line-height:1;cursor:pointer}
+#studio-play-glyph{display:block;width:0;height:0;margin-left:3px;border-left:14px solid currentColor;border-top:9px solid transparent;border-bottom:9px solid transparent}
+.st-play[data-playing="true"] #studio-play-glyph{width:13px;height:13px;margin-left:0;border:0;background:currentColor}
 .st-play[data-playing="true"]{background:var(--lcd);color:var(--ink)}
 .st-bpm{flex:none;min-width:52px;text-align:center;font-family:var(--f-pix);font-size:18px;line-height:1;white-space:nowrap;font-variant-numeric:tabular-nums}
 .st-step,.st-mini{flex:none;width:44px;height:44px;display:flex;align-items:center;justify-content:center;padding:0;background:transparent;color:var(--ink);border:2px solid var(--ink);font-family:var(--f-pix);font-size:24px;line-height:1;cursor:pointer}
@@ -629,3 +631,5 @@ textarea::placeholder{color:var(--ink-2)}
 .st-tour-btns button{flex:1;min-height:44px;padding:4px 8px;border:2px solid var(--ink);font-family:var(--f-lcd);font-size:16px;line-height:1.1;cursor:pointer}
 .st-tour-skip{background:transparent;color:var(--ink)}
 .st-tour-next{background:var(--ink);color:var(--lcd)}
+/* the tour's cover sits above the screen, so the hush toast has to rise above it */
+.st-tour-on #toast{z-index:60}
