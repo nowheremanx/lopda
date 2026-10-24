@@ -6732,15 +6732,26 @@ test("crossing: round 1 shows a grid, a demo spells one word, words typed with t
   /* a fresh start: the name over a short menu, the first row inverted, RANDOM dashed and closed */
   const title = await f.evaluate(() => {
     const root = document.documentElement, rows = [...document.querySelectorAll("#cover-list li")], cover = document.getElementById("cover");
+    const art = [...document.querySelectorAll("#title-art .cell")];
+    const artBox = document.getElementById("title-art").getBoundingClientRect();
     return {
       name: document.getElementById("cover-text").textContent,
       rows: rows.map((li) => li.textContent),
       sel: rows.map((li) => li.classList.contains("sel")),
       locked: rows.map((li) => li.classList.contains("locked")),
       dashed: rows[2] ? getComputedStyle(rows[2]).borderTopStyle : "",
+      icons: rows.map((li) => !!li.querySelector("svg") && li.querySelectorAll("svg rect").length > 0),
+      art: {
+        cells: art.length,
+        filled: art.filter((c) => c.classList.contains("on")).length,
+        word: art.filter((c) => c.classList.contains("on")).map((c) => c.textContent).join(""),
+        open: art.filter((c) => c.classList.contains("pending")).map((c) => c.textContent).join(""),
+        w: Math.round(artBox.width), h: Math.round(artBox.height),
+      },
+      progress: [...document.querySelectorAll("#cover-list .prog")].map((el) => el.textContent),
       size: [root.clientWidth, root.clientHeight],
       gaps: rows.slice(1).map((li, i) => li.getBoundingClientRect().top - rows[i].getBoundingClientRect().bottom),
-      fit: [document.getElementById("cover-text"), ...rows, document.getElementById("cover-foot")].every((el) => {
+      fit: [document.getElementById("title-art"), document.getElementById("cover-text"), ...rows, document.getElementById("cover-foot")].every((el) => {
         const r = el.getBoundingClientRect();
         return r.top >= 0 && r.left >= 0 && r.bottom <= root.clientHeight && r.right <= root.clientWidth;
       }),
@@ -6753,8 +6764,15 @@ test("crossing: round 1 shows a grid, a demo spells one word, words typed with t
   assert.deepEqual(title.sel, [true, false, false, false], "the title opens on CONTINUE");
   assert.deepEqual(title.locked, [false, false, true, false], "RANDOM is locked before round 100");
   assert.equal(title.dashed, "dashed", "the locked row has a dashed border");
+  assert.deepEqual(title.icons, [true, true, true, true], "every title row has its pixel icon");
+  assert.deepEqual(title.art.cells, 10, "the art is W, CROSSING and N");
+  assert.equal(title.art.filled, 8, "the eight CROSSING cells use the filled-cell look");
+  assert.equal(title.art.word, "CROSSING", "the across word is CROSSING");
+  assert.equal(title.art.open, "WN", "W and N wait to be found");
+  assert.deepEqual([title.art.w, title.art.h], [167, 62], "20 px cells with the board's 1 px gaps");
+  assert.deepEqual(title.progress, [], "a fresh start has no progress on the ROUNDS row");
   assert.ok(title.gaps.length === 3 && title.gaps.every((g) => g >= 8), "the menu rows keep 8 px apart: " + title.gaps);
-  assert.equal(title.fit, true, "the title stays inside 331x359");
+  assert.equal(title.fit, true, "the title and its art stay inside 331x359");
   assert.ok(title.scroll <= title.client, "the title needs no scrolling: " + title.scroll + " <= " + title.client);
   /* START opens the first row: round 1 and its demo */
   await p.locator('#pad [data-b="start"]').click();
@@ -6997,26 +7015,47 @@ test("crossing: round 1 shows a grid, a demo spells one word, words typed with t
   await press("a");
   await until(p, () => f.evaluate(() => game.phase === "play" && game.round === 2), "round 2");
 
-  /* the way out: B with an empty entry asks first; A goes to the title, which now continues at round 2 */
+  /* the way out: B with an empty entry asks first; two buttons carry the keys, and a tap on either acts as its key */
   await press("b");
   await f.waitForFunction(() => game.phase === "leave");
   const leave = await f.evaluate(() => {
     const root = document.documentElement, box = document.getElementById("cover").getBoundingClientRect();
+    const btns = [...document.querySelectorAll("#cover-actions button")].map((b) => {
+      const r = b.getBoundingClientRect();
+      return { text: b.textContent, w: r.width, h: r.height, left: r.left, right: r.right, top: r.top, bottom: r.bottom };
+    });
     return {
       text: document.getElementById("cover-text").textContent,
-      keys: document.getElementById("cover-foot").textContent,
+      footHidden: document.getElementById("cover-foot").hidden,
+      buttons: btns,
+      gap: btns.length > 1 ? btns[1].left - btns[0].right : -1,
       box: [box.left, box.top, box.right, box.bottom],
       size: [root.clientWidth, root.clientHeight],
     };
   });
   assert.match(leave.text, /回到主界面/, "the confirm asks before leaving");
-  assert.match(leave.keys, /A 是 · B 否/, "the confirm names its two keys");
+  assert.equal(leave.footHidden, true, "the buttons carry the keys, so the old footer line is gone");
+  assert.deepEqual(leave.buttons.map((b) => b.text), ["A 回去", "B 留下"], "two buttons, each naming its key");
+  assert.ok(leave.buttons.length === 2 && leave.buttons.every((b) => b.w >= 96 && b.h >= 44), "each button is a finger target");
+  assert.ok(leave.gap >= 8, "the buttons keep 8 px apart: " + leave.gap);
   assert.deepEqual(leave.size, [331, 359]);
+  assert.ok(leave.buttons.every((b) => b.left >= leave.box[0] && b.right <= leave.box[2] && b.top >= leave.box[1] && b.bottom <= leave.box[3]),
+    "both buttons sit inside the confirm panel");
   assert.ok(leave.box[0] >= 0 && leave.box[1] >= 0 && leave.box[2] <= 331 && leave.box[3] <= 359, "the confirm fits 331x359: " + leave.box);
-  await press("a");
+  /* B STAY, tapped, goes back to the round; the next B asks again and A LEAVE, tapped, goes to the title */
+  await f.locator("#cover-btn2").tap();
+  await f.waitForFunction(() => game.phase === "play");
+  await press("b");
+  await f.waitForFunction(() => game.phase === "leave");
+  await f.locator("#cover-btn").tap();
   await f.waitForFunction(() => game.phase === "title");
   const continued = await f.evaluate(() => [...document.querySelectorAll("#cover-list li")].map((li) => li.textContent));
   assert.equal(continued[0], "继续 · 第 2 关", "the title continues at round 2");
+  const progress = await f.evaluate(() => {
+    const row = document.querySelector('#cover-list li[data-row="1"]'), prog = row && row.querySelector(".prog");
+    return prog ? prog.textContent : "";
+  });
+  assert.equal(progress, "1/100", "the ROUNDS row shows how far the player has come");
   const saved2 = await p.evaluate(() => (JSON.parse(localStorage.getItem("lopda-dev:crossing") || "{}").game) || null);
   assert.equal(saved2.cleared, 1, "round 1 is recorded cleared");
   assert.equal(saved2.round, 2, "the save continues at round 2");
@@ -7061,6 +7100,19 @@ test("crossing: round 1 shows a grid, a demo spells one word, words typed with t
   await press("a");
   await f.waitForFunction(() => game.phase === "pick");
   assert.equal((await picker()).sel, 2, "a locked round does not open");
+  const lockedMsg = await f.evaluate(() => {
+    const foot = document.getElementById("cover-foot");
+    return { text: foot.textContent, ink: getComputedStyle(foot).color };
+  });
+  assert.equal(lockedMsg.text, "先过第 2 关", "a locked round says which one to clear first");
+  assert.equal(lockedMsg.ink, "rgb(31, 42, 20)", "the reason is ink, not the page hint's dark tone");
+  await p.waitForTimeout(1600);
+  const pagedBack = await f.evaluate(() => {
+    const foot = document.getElementById("cover-foot");
+    return { text: foot.textContent, ink: foot.classList.contains("ink") };
+  });
+  assert.equal(pagedBack.text, "◄ ► 翻页", "the page hint comes back after 1.5 s");
+  assert.equal(pagedBack.ink, false, "the reason's ink goes with it");
   await press("b");
   await f.waitForFunction(() => game.phase === "title");
 
@@ -7168,14 +7220,23 @@ test("crossing: in English the line under the grid is an English definition", { 
     return f && await f.evaluate(() => !!(window.game && game.phase === "title")).catch(() => false);
   }, "the title screen");
   await p.locator("#app").evaluate((el) => { el.style.width = "331px"; el.style.height = "359px"; el.style.flex = "none"; });
-  assert.equal(await f.textContent("#cover-text"), "CROSSING", "the English title");
+  /* the art spells CROSSING itself, so no separate English word sits under it */
+  const enTitleName = await f.evaluate(() => {
+    const text = document.getElementById("cover-text");
+    const art = [...document.querySelectorAll("#title-art .cell.on")].map((c) => c.textContent).join("");
+    return { text: text.textContent, hidden: text.hidden, art, cells: document.querySelectorAll("#title-art .cell").length };
+  });
+  assert.equal(enTitleName.art, "CROSSING", "the English title art says CROSSING");
+  assert.equal(enTitleName.cells, 10, "the English art has the same ten cells");
+  assert.equal(enTitleName.hidden, true, "no English word repeats the art");
   /* the English locked row is the longest label: it, the rows' 8 px gaps and the footer still fit 331x359 */
   const enTitle = await f.evaluate(() => {
     const root = document.documentElement, rows = [...document.querySelectorAll("#cover-list li")], cover = document.getElementById("cover");
     return {
       size: [root.clientWidth, root.clientHeight],
+      icons: rows.map((li) => !!li.querySelector("svg") && li.querySelectorAll("svg rect").length > 0),
       gaps: rows.slice(1).map((li, i) => li.getBoundingClientRect().top - rows[i].getBoundingClientRect().bottom),
-      fit: [document.getElementById("cover-text"), ...rows, document.getElementById("cover-foot")].every((el) => {
+      fit: [document.getElementById("title-art"), ...rows, document.getElementById("cover-foot")].every((el) => {
         const r = el.getBoundingClientRect();
         return r.top >= 0 && r.left >= 0 && r.bottom <= root.clientHeight && r.right <= root.clientWidth;
       }),
@@ -7183,8 +7244,9 @@ test("crossing: in English the line under the grid is an English definition", { 
     };
   });
   assert.deepEqual(enTitle.size, [331, 359]);
+  assert.deepEqual(enTitle.icons, [true, true, true, true], "the English rows have icons too");
   assert.ok(enTitle.gaps.every((g) => g >= 8), "the English menu rows keep 8 px apart: " + enTitle.gaps);
-  assert.equal(enTitle.fit, true, "the English title stays inside 331x359");
+  assert.equal(enTitle.fit, true, "the English title and its art stay inside 331x359");
   assert.ok(enTitle.scroll <= enTitle.client, "the English title needs no scrolling");
   await p.locator('#pad [data-b="start"]').click();
   await until(p, async () => {
