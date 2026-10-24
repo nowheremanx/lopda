@@ -1,5 +1,5 @@
 /*
- * Lo-PDA built-in: settings. Volume, language, the apps allowed tilt or the microphone, the AI line, the whole-device backup and restore,
+ * Lo-PDA built-in: settings. Volume, language, the apps allowed tilt, the microphone, the camera or the word book, the AI line, the whole-device backup and restore,
  * updates, about.
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  */
@@ -18,7 +18,7 @@ function renderSettings(){
     var on=b.getAttribute("data-lang")===I18N.lang; b.className=on?"btn":"btn ghost"; b.setAttribute("aria-checked",on?"true":"false");
   });
 }
-/* the apps allowed tilt or the microphone (apps/store.js): one row each, revoked with a tap; the next start() asks again */
+/* the apps allowed tilt, the microphone, the camera or the word book (apps/store.js): one row each, revoked with a tap; the next start() asks again */
 function renderSense(){
   var ul=$("set-sense-list"); ul.textContent="";
   var list=LP.sensorGrants ? LP.sensorGrants.list() : [];

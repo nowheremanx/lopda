@@ -16,7 +16,7 @@ const LANGS = ["zh", "en"];
 const SOUNDS = ["tap", "tick", "move", "ok", "err", "hit", "miss", "coin", "win", "lose"];
 const AMBIENCES = ["rain", "waves", "waterfall", "wind", "fire", "stream"];
 const MAX_BYTES = 512 * 1024;
-const PERMISSIONS = ["files", "motion", "mic", "notes", "camera"];
+const PERMISSIONS = ["files", "motion", "mic", "notes", "camera", "wordbook"];
 const CATEGORIES = ["game", "productivity", "education", "create", "story", "life"];
 const LICENSES = ["MIT", "0BSD", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Apache-2.0", "CC0-1.0", "Unlicense"];
 const PALETTE = [[0x1f, 0x2a, 0x14], [0x4a, 0x5a, 0x32], [0x7d, 0x8a, 0x58], [0xa3, 0xad, 0x7e]];
@@ -206,6 +206,10 @@ export function checkApp(dir) {
   const usesCamera = /PAD\.camera\b/.test(code);
   if (usesCamera && !perms.includes("camera")) errors.push('PAD.camera.snap needs "permissions": ["camera"] in manifest.json');
   if (!usesCamera && perms.includes("camera")) warnings.push('"camera" is declared but PAD.camera.snap is never used: drop it');
+  /* the player's word book (SPEC.md 6.7): PAD.dict.addWord / removeWord / inBook need "wordbook" */
+  const usesWordbook = /PAD\.dict\.(addWord|removeWord|inBook)\b/.test(code);
+  if (usesWordbook && !perms.includes("wordbook")) errors.push('PAD.dict.addWord/removeWord/inBook need "permissions": ["wordbook"] in manifest.json');
+  if (!usesWordbook && perms.includes("wordbook")) warnings.push('"wordbook" is declared but PAD.dict.addWord/removeWord/inBook are never used: drop it');
   if (usesButtons && m.buttons !== true) warnings.push('uses PAD.on but "buttons" is not true, so the chin buttons stay hidden (keyboard still works)');
   return { id, errors, warnings, info };
 }

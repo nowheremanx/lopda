@@ -1319,8 +1319,9 @@ CPU 降速 4 倍（DevTools 的 CPU throttling，粗略代表旧手机）时，�
 （SPEC.md 6.7）。开始写社区 app 以后，拼字、猜词、单词卡这类点子在「要一份词表」和「要一句中文」上都会撞到同一件事；
 让每个 app 自带词表既重复，也带不来同一份逐条审查过的表（黑名单、人名和缩写都筛掉），而中文释义又放不进 app 的 512 KB，所以由 runtime 借出一份。
 
-- **不要权限**：数据是内置的 ECDICT，公开、每台机器一样，也不读玩家的任何东西（生词本、查词历史、导入的词典都不碰）。
-  像 `PAD.say` 一样，manifest 里不用声明，也没有确认框：一份静态词典没有可同意的内容，多一个对话框只会让玩家习惯点「允许」。
+- **不要权限（只限查词）**：数据是内置的 ECDICT，公开、每台机器一样；`words()` 和 `lookup()` 不读玩家的任何东西
+  （不碰生词本、查词历史、导入的词典）。像 `PAD.say` 一样，manifest 里不用声明，也没有确认框：一份静态词典没有可同意的内容，
+  多一个对话框只会让玩家习惯点「允许」。生词本是玩家自己的数据，见下面单独的一条。
 - **只有内置 ECDICT**：导入的词典每台手机不同（同一个查询在不同手机上给出不同答案），许可也是玩家自己的，不能转给 app。
   app 看到的是随 runtime 发布、已经审查过的那一份（第 15 节）。
 - **不理会停用开关**：词典管理里关掉内置 ECDICT 是给词典程序和阅读器的（第 15 节）。app 的查询应该和本机设置无关：
@@ -1332,11 +1333,16 @@ CPU 降速 4 倍（DevTools 的 CPU throttling，粗略代表旧手机）时，�
 - **词表随 lopda/1 冻结**：`runtime/wordlist.js` 的 `VERSION` 是 `ecdict-1`，`PAD.dict.version` 报的就是它。排序和
   `level` 的 2000 / 5000 / 10000 / 15000 分档都是行为的一部分，app 会按它设计关卡；lopda/1 期间不换词表，
   真要换就是新的 spec 或版本，并把 `version` 改掉。
-- **生词本暂时不给 app**：`LP.dict.inBook` / `toggleWord` 是玩家自己的清单（词典程序和阅读器共用），读写它要新的决定和单独的权限。
-  这一版 app 只能查，不能加词，也读不到它。以后要开放，按第 25、28 节的样子加权限和对话框。
+- **生词本对 app 开放（owner 2026-10-24）**：生词本是玩家自己的数据，所以要新权限 `"wordbook"`；像相机一样一个 app
+  只问一次，第一个 add/remove 时弹 runtime 自己的确认框（「{app}」想把单词加入你的生词本），A/允许记住授权，B/不允许只拒绝这一次，
+  下次再问。不做「每加一个词问一次」：那样会不停打断游戏。读取 `inBook` 也要这个授权，所以 app 不可能在玩家不知道的情况下读生词本；
+  没有授权时 `inBook` 回 `null`，不弹框。三个调用是 `PAD.dict.addWord(word)` / `removeWord(word)` ->
+  `"saved" | "denied" | "full" | null`、`PAD.dict.inBook(words)` -> `boolean[] | null`；和词典程序、阅读器同一个
+  2000 词上限、同一条存储路径，只存 ECDICT 的词条头词（`lookup` 后的 `word`，不在 ECDICT 里就 `null`），没有 toast、没有声音。
+  设置 → 传感器与相机 列出被授权的 app（生词本），撤销只收回权限，不动已经加进去的词。所有 `PAD.dict` 调用共用每秒 10 次的限制。
 - **实现**：`runtime/wordlist.js`（`window.LopdaWordList`，纯函数加一个 source，`tests/wordlist.test.mjs`）；
   `runtime/apps/dict.js` 建一个 `LopdaWordList.source` 交给 `LP.dict.apps`，`book(BUILTIN)` 和 `D.lemma` 用的就是词典程序那份，
   lookup 第一次才解包整本书，不会加载两次。`runtime/apps/store.js` 的 `dictRequest` 负责转发：每个 app 一个
-  `LopdaWordList.limiter()`（每秒 10 次，words 和 lookup 合计），超出直接回 `null`；坏参数回 `{error}`，app 的 promise 以
+  `LopdaWordList.limiter()`（每秒 10 次，words、lookup 和生词本合计），超出直接回 `null`；坏参数回 `{error}`，app 的 promise 以
   `PAD.dict.words: …` / `PAD.dict.lookup: …` 拒绝；文件读不出来回 `null`。`sdk/pad-shim.js` 里只有 `dict: true` 才给 `PAD.dict`，
   回来的数据再检查一遍，不是预期的形状一律当 `null`。`sdk/dev.html` 自带一份 source，开发台里也能试。

@@ -7,7 +7,8 @@
  * offline cache each start and never stored twice; imported books keep their index and their text in
  * LopdaPlatform.files ("dict/<id>/index", "dict/<id>/data" as a Blob, read entry by entry).
  * Other programs look words up with LP.dict.lookup(word) -> Promise<[{book, name, word, head, how, text}]>
- * (and use the word book through LP.dict.inBook(word), LP.dict.toggleWord(word)),
+ * (and use the word book through LP.dict.inBook(word), LP.dict.inBookMany(words), LP.dict.toggleWord(word),
+ * LP.dict.setWord(word, on)),
  * how = "exact" | "lemma" | "prefix" (a .syn entry reports its headword in head).
  * Community apps ask through PAD.dict (SPEC.md 6.7): runtime/wordlist.js over the built-in ECDICT only, with the word list
  * as one small file and the book shared with this program, both lent out as LP.dict.apps (runtime/apps/store.js relays).
@@ -25,7 +26,7 @@ var D={
   meta:{},                  // imported book id -> {name, words, syns, added}
   books:{},                 // id -> loaded book (stardict.js), or a promise while loading
   lemma:null,               // ECDICT word forms: form -> lemma
-  refs:null, loading:null,
+  refs:null, loading:null, loaded:false,
   q:"", cand:[], pick:0,    // the word box, its candidate rows and the highlighted one
   sheet:"", entry:null,     // "entry" | "words" | "books"; the entry on screen {word, results, back}
   stack:[], lines:[],       // entries opened from a selection lead back through the ones before (at most MAX_LEVELS); the entry's text lines
@@ -121,6 +122,31 @@ function toggleWord(word){
   if(inBook(word)){ D.set.words=D.set.words.filter(function(x){ return x.w!==word; }); toast(tr("dict.removed")); sfx("tap"); }
   else { D.set.words=[{w:word, t:Date.now()}].concat(D.set.words).slice(0,MAX_WORDS); toast(tr("dict.added")); sfx("ok"); }
   saveSet();
+}
+/* other programs (the reader, and apps through PAD.dict): the same book and the same save path, but no toast and no sound.
+   -> "saved" | "full" | null (no word). Removing a word that is not there is still "saved". These compare ignoring case:
+   the dictionary program stores headwords as ECDICT spells them (London), while apps wordOf() their input lower-case */
+function sameWord(a,b){ return String(a).toLowerCase()===String(b).toLowerCase(); }
+function setWord(word,on){
+  if(!D.refs || !D.loaded) return null;   // the stored book is not in memory yet: never write the defaults over it
+  var w=String(word==null?"":word).trim();
+  if(!w) return null;
+  var has=D.set.words.some(function(x){ return sameWord(x.w,w); });
+  if(on){
+    if(!has){
+      if(D.set.words.length>=MAX_WORDS) return "full";
+      D.set.words=[{w:w, t:Date.now()}].concat(D.set.words).slice(0,MAX_WORDS);
+      saveSet();
+    }
+  } else if(has){
+    D.set.words=D.set.words.filter(function(x){ return !sameWord(x.w,w); });
+    saveSet();
+  }
+  return "saved";
+}
+function inBookMany(words){
+  if(!D.refs || !D.loaded || !Array.isArray(words)) return null;
+  return words.map(function(w){ return D.set.words.some(function(x){ return sameWord(x.w,w); }); });
 }
 
 /* ---------- main screen: the word box and its candidates ---------- */
@@ -745,7 +771,7 @@ var APPS=window.LopdaWordList.source({
 });
 
 /* the reader shares the word book: START on an entry there adds or removes it, as here */
-LP.dict={lookup:lookup, suggest:suggest, inBook:inBook, toggleWord:toggleWord, apps:APPS};
+LP.dict={lookup:lookup, suggest:suggest, inBook:inBook, inBookMany:inBookMany, toggleWord:toggleWord, setWord:setWord, apps:APPS};
 LP.builtin({id:"dict", label:"app.dict", icon:function(){ return ICON; }, view:"dict", keepPad:true,
   open:function(){ openDict(); },
   leave:function(){ hush(); D.sheet=""; D.entry=null; D.review=null; D.stack=[]; D.armed=null; D.q=""; var i=$("dict-q"); if(i){ i.value=""; i.blur(); } renderSheet(); },
@@ -768,6 +794,7 @@ LP.builtin({id:"dict", label:"app.dict", icon:function(){ return ICON; }, view:"
       order().forEach(function(id){ if(D.set.order.indexOf(id)<0) D.set.order.push(id); });
       for(var id in D.meta) if(D.set.order.indexOf(id)<0) D.set.order.push(id);
       D.set.disabled=D.set.disabled.filter(function(id){ return order().indexOf(id)>=0; });
+      D.loaded=true;
       if(!$("v-dict").hidden){ renderSheet(); update(); }
     }).catch(function(){});
   }});

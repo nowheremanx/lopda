@@ -12,7 +12,7 @@
   var VERSION = "ecdict-1";             // changes only if the word list does; frozen with lopda/1
   var LEVELS = [2000, 5000, 10000, 15000, Infinity];   // level n: the most common LEVELS[n-1] words
   var SHORTEST = 2, LONGEST = 15, MAX = 500, DEFAULT_MAX = 100, LETTERS = 15, WORD = 32, ZH_LINES = 8;
-  var RATE = 10;                        // calls a second per app, words and lookup together
+  var RATE = 10;                        // calls a second per app, words, lookup and the word book together
 
   function parseWords(text) {
     return String(text).split("\n").filter(function (w) { return /^[a-z]+$/.test(w); });

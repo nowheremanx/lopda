@@ -519,7 +519,7 @@ function runCurrent(){
         name:M.current.name,
         html:html,
         buttons:usesPad(M.current.body),
-        permissions:["files","motion","mic","notes","camera"],
+        permissions:["files","motion","mic","notes","camera","wordbook"],
         back:"script-edit"
       });
     },function(){ toast(tr("scripts.newer")); });

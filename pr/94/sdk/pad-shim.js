@@ -23,13 +23,16 @@
  *                           {pad:1, op:"say", i, text, lang}
  *                           {pad:1, op:"snap", i, size:"small"|"large"}   (needs "camera")
  *                           {pad:1, op:"dict", i, kind:"words", q}  or  {pad:1, op:"dict", i, kind:"lookup", word}
+ *                           {pad:1, op:"dict", i, kind:"inBook", words}  (needs "wordbook")
+ *                           {pad:1, op:"dict", i, kind:"add"|"remove", word}   (needs "wordbook")
  * Messages runtime -> app:  {pad:1, op:"loaded", i, v}
  *                           {pad:1, op:"filed", i, v}  or  {pad:1, op:"filed", i, error}
  *                           {pad:1, op:"sensed", i, v}   v: "on" | "denied" | "none"
  *                           {pad:1, op:"noted", i, v}   v: "saved" | "denied"
  *                           {pad:1, op:"said", i, v}    v: "done" | "stopped" | "unavailable"
  *                           {pad:1, op:"snapped", i, v}  v: {w, h, px: Uint8Array of w*h tones 0-3} | null
- *                           {pad:1, op:"dicted", i, v}  or  {pad:1, op:"dicted", i, error}   v: a words page, an entry or null
+ *                           {pad:1, op:"dicted", i, v}  or  {pad:1, op:"dicted", i, error}
+ *                                                        v: a words page, an entry, booleans, "saved"|"denied"|"full" or null
  *                           {pad:1, op:"tilt", x, y, heading}  {pad:1, op:"shake"}  {pad:1, op:"sound", level, pitch}
  *                           {pad:1, op:"button", b, down}   (chin buttons, lopda/1)
  *                           {pad:1, op:"release-all"}
@@ -155,13 +158,17 @@ function lopdaPadShim(opts) {
     return { w: v.w, h: v.h, px: v.px };
   };
   var num = function (v, lo, hi) { return typeof v === "number" && v >= lo && v <= hi; };
-  /* The dictionary (runtime 0.34.0, SPEC.md 6.7): read-only queries on the built-in ECDICT, no permission and no dialog.
-     words(q) -> Promise<{words, more} | null>, lookup(word) -> Promise<{word, form?, zh, en} | null>; null: the dictionary
-     cannot be read, or more than 10 calls in a second (words and lookup together). A bad query rejects, as PAD.exportFile
-     rejects bad arguments; unhandled it reaches the runtime's error box. */
-  var dictAsk = function (kind, msg) {
+  /* The dictionary (runtime 0.34.0, SPEC.md 6.7): words(q) and lookup(word) are read-only queries on the built-in ECDICT,
+     no permission and no dialog. words(q) -> Promise<{words, more} | null>, lookup(word) -> Promise<{word, form?, zh, en} | null>;
+     null: the dictionary cannot be read, or more than 10 calls in a second (words, lookup and the word book together). A bad
+     query rejects, as PAD.exportFile rejects bad arguments; unhandled it reaches the runtime's error box.
+     The word book (runtime 0.34.0, "permissions": ["wordbook"]): inBook(words) -> Promise<boolean[] | null>,
+     addWord(word) / removeWord(word) -> Promise<"saved" | "denied" | "full" | null>. The first add or remove shows the
+     runtime's own dialog once per app; inBook is null until that grant exists. Null is normal (no grant, no permission,
+     over the limit, or the word is not in the dictionary). A bad argument rejects. */
+  var dictAsk = function (kind, msg, n) {
     return new Promise(function (resolve, reject) {
-      var i = ++seq; dicting[i] = { resolve: resolve, reject: reject, kind: kind };
+      var i = ++seq; dicting[i] = { resolve: resolve, reject: reject, kind: kind, n: n };
       msg.op = "dict"; msg.kind = kind; msg.i = i; post(msg);
     });
   };
@@ -171,6 +178,19 @@ function lopdaPadShim(opts) {
     for (var i = 0; i < a.length; i++) if (typeof a[i] !== "string") return null;
     return a.slice();
   };
+  var boolsOnly = function (a, n) {
+    if (!Array.isArray(a) || a.length !== n) return null;
+    for (var i = 0; i < a.length; i++) if (typeof a[i] !== "boolean") return null;
+    return a.slice();
+  };
+  var savedWord = function (v) { return v === "saved" || v === "denied" || v === "full" ? v : null; };
+  /* a word as LopdaWordList.wordOf takes it: 1 to 32 letters a-z, any case */
+  var dictWord = function (kind, w) {
+    if (typeof w !== "string" || w.length < 1 || w.length > 32 || !/^[A-Za-z]+$/.test(w))
+      return "PAD.dict." + kind + ": the word is 1 to 32 letters a-z";
+    return null;
+  };
+  var dictErr = { inBook: "inBook", add: "addWord", remove: "removeWord" };
   var wordPage = function (v) {
     if (!v || typeof v !== "object") return null;
     var words = stringsOnly(v.words);
@@ -196,7 +216,25 @@ function lopdaPadShim(opts) {
   var dict = !DICT ? undefined : Object.freeze({
     version: "ecdict-1",
     words: function (q) { return dictAsk("words", { q: queryOf(q) }); },
-    lookup: function (word) { return dictAsk("lookup", { word: str(word) }); }
+    lookup: function (word) { return dictAsk("lookup", { word: str(word) }); },
+    /* 1 to 20 words: an array of booleans, or null */
+    inBook: function (words) {
+      if (!Array.isArray(words) || words.length < 1 || words.length > 20)
+        return Promise.reject(new Error("PAD.dict.inBook: words is an array of 1 to 20 words"));
+      for (var i = 0; i < words.length; i++) {
+        var bad = dictWord("inBook", words[i]);
+        if (bad) return Promise.reject(new Error(bad));
+      }
+      return dictAsk("inBook", { words: words.slice() }, words.length);
+    },
+    addWord: function (word) {
+      var bad = dictWord("addWord", word);
+      return bad ? Promise.reject(new Error(bad)) : dictAsk("add", { word: word });
+    },
+    removeWord: function (word) {
+      var bad = dictWord("removeWord", word);
+      return bad ? Promise.reject(new Error(bad)) : dictAsk("remove", { word: word });
+    }
   });
 
   var fileOp = function (msg) {
@@ -267,7 +305,9 @@ function lopdaPadShim(opts) {
     else if (d.op === "snapped" && snapping[d.i]) { var c = snapping[d.i]; delete snapping[d.i]; c(picture(d.v)); }
     else if (d.op === "dicted" && dicting[d.i]) {
       var g = dicting[d.i]; delete dicting[d.i];
-      if (d.error != null) g.reject(new Error("PAD.dict." + g.kind + ": " + String(d.error)));
+      if (d.error != null) g.reject(new Error("PAD.dict." + (dictErr[g.kind] || g.kind) + ": " + String(d.error)));
+      else if (g.kind === "inBook") g.resolve(boolsOnly(d.v, g.n));
+      else if (g.kind === "add" || g.kind === "remove") g.resolve(savedWord(d.v));
       else g.resolve(g.kind === "words" ? wordPage(d.v) : wordEntry(d.v));
     }
     else if (d.op === "tilt" && SENSORS && num(d.x, -1, 1) && num(d.y, -1, 1))
