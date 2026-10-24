@@ -3,21 +3,28 @@
  * The rules live in petsim.js (window.LopdaPet) and the art in petart.js (window.LopdaPetArt); this file owns the
  * screen, the keys, the timers and the storage. One IIFE, ES5 style, talks to the rest only through window.LP.
  *
- * Screen: the room is an 81 x 60 canvas at 4 CSS pixels a pixel (324 x 240), then eight 44 px icon targets and the
+ * Screen: the room is an 81 x 60 canvas at 4 CSS pixels a pixel (324 x 240), then five 44 px icon targets and the
  * soft keys; 328 px of content, so it fits the 331 x 359 LCD with nothing to scroll. Everything on the canvas is
  * putImageData from a Uint8Array of tone indices: never drawImage after putImageData (Safari swaps red and blue).
- * Sub-screens (food, play, look, box, word) open over the room at the same 324 x 240, on paper with ink text.
+ * Sub-screens (food, play, the START menu, look, box, word) open over the room at the same 324 x 240, on paper with ink text.
  *
  * Storage: data/users/local/pet (design.md 8 plus petsim's lastMeal, awakeHunger, awakeJoy, today, seenUse and aiUse;
- * boxSeen and today's pick/outing phase/remaining/hour/ai flag) and data/users/local/pet/souvenirs/<id>
- * {name, line, px, at, ai:false|true}. A failed read is not "no pet": the program then keeps an in-memory pet and never
- * writes an egg over a save it could not read (the status bar says 未存档).
+ * boxSeen and today's pick/outing phase/remaining/hour/ai flag, and outSouv — the souvenir a background trip is
+ * bringing in — and data/users/local/pet/souvenirs/<id> {name, line, px, at, ai, day}. A failed read is not
+ * "no pet": the program then keeps an in-memory pet and never writes an egg over a save it could not read (the status
+ * bar says 未存档).
  *
  * The day: on the first open of a day (and after hatching) the program asks the read-only summaries for the day's one
  * pick: an upcoming calendar date (a count of days, never a name), a diary after 20:00, the word book, a book not opened
  * for a week, or waiting film. LopdaPet.pickOfDay chooses (about half the days nothing); the pet holds the matching prop
- * and 信 lights. A/START opens the summary's own program, then the pick is used for the day. The AI souvenir, when the
- * line is on, is one call at the day's outing (30 s cap) and silently falls back to the built-in table.
+ * and 信 lights. START opens the small menu (信 / 看看 / 纪念品箱); A on 信 opens the summary's own program, then the pick
+ * is used for the day. The AI souvenir, when the line is on, is one call at the day's outing (30 s cap) and silently
+ * falls back to the built-in table.
+ *
+ * From boot: the pet lives without its screen. On storage ready, whenever the home screen draws its icon and on resume,
+ * it catches up, rolls the day, decides the pick and the outing and, once the outing hour has come, makes the day's one
+ * AI call and saves the souvenir. No sound, toast, popup or animation happens outside the pet's screen; growth days
+ * (openDay) and the 60 s hatch still count only time on the screen.
  */
 (function(){
 "use strict";
@@ -27,7 +34,7 @@ var Pet=window.LopdaPet, Art=window.LopdaPetArt, L=window.LopdaLunar;
 
 var HOUR=3600000, DAY=86400000, SCALE=4;
 var ROOM_W=81, ROOM_H=60;
-var ICON_NAMES=["food", "play", "wash", "light", "look", "box", "mail", "call"];
+var ICON_NAMES=["food", "play", "wash", "light", "call"];
 var TONE_OF={k:0,d:1,m:2,p:3, "0":0, "1":1, "2":2, "3":3};
 var ICON_ROWS=[
   "................",
@@ -51,15 +58,18 @@ var JINGLE={bpm:180, p1:"o6 l8 e g c8 > c < b g e c4", p2:"o5 l8 c e g8 e d c4",
 var SWEEP_MS=1000, EGG_MS=60000, OUT_MS=20000, HOLD_MS=600;
 
 var P={
-  save:null, loaded:false, nostore:false, readTried:false, readFailed:false,
+  save:null, loaded:false, nostore:false, readTried:false, readFailed:false, inView:false,
   refs:null, souv:[], usage:null, resumeOuting:false,
-  sub:null, sel:0, frame:0,
+  sub:null, sel:0, menuSel:0, frame:0,
   anim:0, hold:0, roomHold:0, holdFired:false,
   eggMs:0, action:null, actionUntil:0, heartUntil:0,
   washUntil:0, washStart:0, flash:null, outing:null, foodSel:0, play:null, boxPage:0,
   confirmStage:0, panelKey:"",
   saveTimer:0, lastWants:null, bringing:false,
-  pickSeq:0, wordWord:"", wordMeaning:null, wordBusy:false, aiJob:null
+  pickSeq:0, wordWord:"", wordMeaning:null, wordBusy:false, aiJob:null,
+  weatherOverride:null, ambName:null,
+  bgTimer:0, bgRun:false, outResolving:null, homeSig:"",
+  restoring:false, restoreTimer:0
 };
 var ctx=null, buf=null, im=null, iconCvs={}, iconBuilt=false;
 
@@ -177,6 +187,8 @@ function normalize(save){
   if(td.rewarded===undefined) td.rewarded=false;
   if(td.ai===undefined) td.ai=false;
   if(td.shownYesterday===undefined) td.shownYesterday=null;
+  if(td.outSouv===undefined) td.outSouv=null;
+  if(td.outHour===undefined) td.outHour=null;
   return save;
 }
 function packOf(save){
@@ -184,13 +196,13 @@ function packOf(save){
   return Art.PACKS[sp] || Art.PACKS[defaultSpecies()];
 }
 function saveSoon(){
-  if(P.nostore || !P.refs || !P.save) return;
+  if(P.restoring || P.nostore || !P.refs || !P.save) return;
   if(P.saveTimer) return;
   P.saveTimer=setTimeout(function(){ P.saveTimer=0; saveNow(); },1000);
 }
 function saveNow(){
   if(P.saveTimer){ clearTimeout(P.saveTimer); P.saveTimer=0; }
-  if(P.nostore || !P.refs || !P.save) return;
+  if(P.restoring || P.nostore || !P.refs || !P.save) return;
   var data=JSON.parse(JSON.stringify(P.save));
   P.refs.doc.set(data).catch(function(){ P.nostore=true; LP.setStatus("status.unsaved"); });
 }
@@ -208,7 +220,7 @@ function backfillForm(){
   saveSoon();
 }
 function ensurePet(){
-  if(P.save || !P.loaded || P.nostore) return false;
+  if(P.save || !P.loaded || P.restoring) return false;
   P.save=freshSave();
   saveNow();
   return true;
@@ -228,7 +240,7 @@ function loadStorage(){
     q.docs.forEach(function(doc){
       var o=LP.own(doc.data())||{};
       if(!o.name || !o.line || typeof o.px!=="string" || o.px.length!==256) return;
-      list.push({id:doc.id, name:String(o.name), line:String(o.line), px:o.px, at:+o.at||0, ai:!!o.ai});
+      list.push({id:doc.id, name:String(o.name), line:String(o.line), px:o.px, at:+o.at||0, ai:!!o.ai, day:o.day?String(o.day):""});
     });
     list.sort(function(a,b){ return (a.at||0)-(b.at||0); });
     P.souv=list;
@@ -238,14 +250,14 @@ function loadStorage(){
     if(bad){
       P.readFailed=true; P.nostore=true;
       LP.setStatus("status.unsaved");
-      if(!P.save) P.save=freshSave();
     } else if(P.save){
       P.nostore=false;
     }
     readUsage().then(function(){
       backfillForm();
       if(isOpen()){ ensurePet(); refreshTime(); renderKeys(); render(); }
-      if(!$("v-home").hidden) LP.renderHome();
+      else { backgroundDay(); }
+      homeMaybeRender();
     });
   });
 }
@@ -284,6 +296,43 @@ function refreshTime(){
   saveSoon();
   checkOuting();
   buildPick();
+}
+
+/* ---------- the day without the screen ---------- */
+/* On storage ready, whenever the home screen asks for the icon and on resume, the pet catches up, rolls the day,
+   decides its pick and its outing, and makes the day's one AI call at the outing hour. No sound, no toast, no
+   animation: only a few promises and a save. Growth days stay with the screen (openDay is not called here). */
+function noteWants(){
+  var w=wantsOf();
+  P.lastWants=w;
+}
+function dayWork(){
+  if(P.restoring || P.nostore || P.readFailed) return Promise.resolve();
+  if(!P.save) return Promise.resolve();
+  if(P.save.stage==="egg"){ P.save.last=now(); saveSoon(); return Promise.resolve(); }
+  var r=Pet.catchUp(P.save,now(),{tz:tz()});
+  P.save=r.save;
+  if(P.save.stage==="adult" && !P.save.form && P.usage) P.save.form=Pet.adultForm(P.usage,P.save.species);
+  noteWants();
+  saveSoon();
+  buildPick();
+  return backgroundOuting();
+}
+function backgroundDay(){
+  if(P.restoring || !P.loaded || !P.save || P.nostore || P.readFailed || isOpen() || document.hidden) return Promise.resolve();
+  if(P.bgRun) return P.bgRun;
+  P.bgRun=Promise.resolve().then(dayWork).then(function(){
+    P.bgRun=null;
+    homeMaybeRender();
+  },function(){
+    P.bgRun=null;
+  });
+  return P.bgRun;
+}
+/* The home screen calls icon(): that is the moment the pet notices it is being looked at and runs its day. */
+function scheduleBackground(){
+  if(P.bgTimer || P.bgRun || !$("v-home") || $("v-home").hidden) return;
+  P.bgTimer=setTimeout(function(){ P.bgTimer=0; backgroundDay(); },0);
 }
 
 /* ---------- the pick of the day (design.md 6) ---------- */
@@ -383,7 +432,7 @@ function buildPick(){
     }
   }catch(e){ film=null; }
   Promise.resolve(film).then(function(){
-    if(seq!==P.pickSeq) return;
+    if(seq!==P.pickSeq || P.restoring) return;
     var cur=P.save && P.save.today;
     /* a care action clones the save while the film summary is in flight: decide against today's new object, not the
        captured one, so the pick is not silently lost */
@@ -393,7 +442,9 @@ function buildPick(){
     cur.pick=cleanPick(pick);
     cur.shown=cur.pick ? cur.pick.kind : null;
     cur.used=false;
-    saveSoon(); renderKeys(); render();
+    saveSoon();
+    if(isOpen()){ renderKeys(); render(); }
+    homeMaybeRender();
   });
 }
 /* A day decided before 20:00 had no diary candidate. Opening it again later may add the diary only when that day's
@@ -408,7 +459,9 @@ function addLateDiary(td){
     td.pick={kind:"diary"};
     td.shown="diary";
     td.used=false;
-    saveSoon(); renderKeys(); render();
+    saveSoon();
+    if(isOpen()){ renderKeys(); render(); }
+    homeMaybeRender();
   }catch(e){}
 }
 function finishPick(){
@@ -450,31 +503,53 @@ function makeSouvenir(entry){
   return {
     id:LP.uid(), name:txt.name, line:txt.line,
     px:entry && entry.px ? String(entry.px) : pxFromGrid(entry && entry.grid),
-    at:now(), ai:!!(entry && entry.ai)
+    at:now(), ai:!!(entry && entry.ai),
+    day:entry && entry.day ? String(entry.day) : dayKey(now())
   };
 }
 function pushSouvenir(s){
+  if(P.restoring) return;
   P.souv.push(s);
   P.souv.sort(function(a,b){ return (a.at||0)-(b.at||0); });
-  if(!$("v-home").hidden) LP.renderHome();
+  homeMaybeRender();
+}
+function findSouv(id){
+  for(var i=0;i<P.souv.length;i++) if(P.souv[i].id===id) return P.souv[i];
+  return null;
+}
+function souvForDay(day){
+  for(var i=P.souv.length-1;i>=0;i--) if(P.souv[i].day && P.souv[i].day===day) return P.souv[i];
+  return null;
+}
+/* The souvenir document can land while the pet save does not (quota, a closed page). The next run finds it by its day
+   and only marks the day, instead of bringing a second one. */
+function markDayWithSouvenir(s,hour,day){
+  if(!s || !P.save || !P.save.today || P.save.today.day!==day) return false;
+  var td=P.save.today;
+  td.out=hour; td.outHour=hour; td.back=false;
+  td.outPhase="back"; td.outLeft=4; td.outSouv=s.id;
+  saveNow();
+  return true;
 }
 /* Returns a promise for the saved souvenir, or null when the write failed. The souvenir enters the box only after
    the document landed: the programme marks the trip/outing done on that promise, so a failed write is retried on
    the next visit instead of losing the souvenir with the day marked complete. */
 function addSouvenir(entry){
+  if(P.restoring) return Promise.resolve(null);
   if(!entry) return Promise.resolve(null);
   var s=makeSouvenir(entry);
-  var data={name:s.name, line:s.line, px:s.px, at:s.at, ai:s.ai};
+  var data={name:s.name, line:s.line, px:s.px, at:s.at, ai:s.ai, day:s.day};
   if(P.nostore || !P.refs){
     pushSouvenir(s);
     return Promise.resolve(s);
   }
   return P.refs.souv.doc(s.id).set(data).then(function(){
+    if(P.restoring) return null;
     pushSouvenir(s);
     return s;
   },function(){
     LP.setStatus("status.unsaved");
-    if(!$("v-home").hidden) LP.renderHome();
+    homeMaybeRender();
     return null;
   });
 }
@@ -551,8 +626,14 @@ function stripFence(text){
   }
   return s.trim();
 }
-/* One call a day, fired when the outing starts. today.ai is written first, so a reload never asks twice; the walking-back
-   moment waits for the answer (up to 30 s), and anything other than a valid souvenir becomes the built-in one. */
+/* One call a day. today.ai is written first, so a reload never asks twice; the answer may arrive while the pet's
+   screen is closed (the day's outing is decided in the background too). Anything other than a valid souvenir becomes
+   the built-in one; leaving the screen stops a request that is still running. */
+function aiAvailable(){
+  if(P.restoring || P.nostore || P.readFailed) return false;
+  var ai=LP.ai;
+  return !!(ai && typeof ai.on==="function" && ai.on() && typeof ai.ask==="function");
+}
 function stopAiJob(){
   var job=P.aiJob;
   P.aiJob=null;
@@ -561,50 +642,56 @@ function stopAiJob(){
   if(!job.done){
     job.done=true; job.result=null;
     if(job.stop) job.stop();
+    if(job.resolve) job.resolve(null);
   }
 }
-function beginAiSouvenir(){
-  var td=P.save && P.save.today, ai=LP.ai;
-  if(!td || td.ai) return;
-  if(!ai || typeof ai.on!=="function" || !ai.on() || typeof ai.ask!=="function") return;
+/* The job stays in P.aiJob until P.aiJob=null by its caller, so the out phase can see the answer. */
+function startAiJob(td){
+  var ai=LP.ai;
+  if(!td || td.ai || !aiAvailable()) return null;
   td.ai=true;
   saveNow();
-  var job={done:false,result:null,timer:0,stop:null};
+  var job={done:false,result:null,timer:0,stop:null,resolve:null};
+  job.promise=new Promise(function(resolve){ job.resolve=resolve; });
   P.aiJob=job;
+  var finish=function(result){
+    if(job.done) return;
+    if(job.timer){ clearTimeout(job.timer); job.timer=0; }
+    job.done=true; job.result=result;
+    job.resolve(result);
+    if(isOpen()) render();
+  };
   var fire=function(){
-    if(P.aiJob!==job || job.done || !P.save || !P.save.today || P.save.today.day!==td.day) return;
+    if(P.aiJob!==job || job.done || !P.save || !P.save.today || P.save.today.day!==td.day){ finish(null); return; }
     var prompt;
-    try{ prompt=Pet.aiPrompt(aiContext()); }catch(e){ job.done=true; return; }
+    try{ prompt=Pet.aiPrompt(aiContext()); }catch(e){ finish(null); return; }
     P.save.aiUse=copyCounts(P.usage);
     saveNow();
     var pr;
-    try{ pr=ai.ask(prompt); }catch(e){ job.done=true; return; }
+    try{ pr=ai.ask(prompt); }catch(e){ finish(null); return; }
     job.stop=function(){ try{ if(pr && typeof pr.stop==="function") pr.stop(); }catch(e){} };
     job.timer=setTimeout(function(){
-      job.timer=0; job.done=true; job.result=null; job.stop();
-      if(isOpen()) render();
+      job.timer=0;
+      if(job.stop) job.stop();
+      finish(null);
     },30000);
     Promise.resolve(pr).then(function(text){
       if(job.done) return;
-      if(job.timer){ clearTimeout(job.timer); job.timer=0; }
-      job.done=true;
       var v=null;
       try{ v=Pet.validateSouvenir(stripFence(text)); }catch(e){ v=null; }
-      job.result=v ? {name:v.name, line:v.line, px:v.px, ai:true} : null;
-      if(isOpen()) render();
-    },function(){
-      if(job.done) return;
-      if(job.timer){ clearTimeout(job.timer); job.timer=0; }
-      job.done=true; job.result=null;
-      if(isOpen()) render();
-    });
+      finish(v ? {name:v.name, line:v.line, px:v.px, ai:true} : null);
+    },function(){ finish(null); });
   };
   /* a fresh usage read, so the categories are what happened since the last AI call, not boot */
   readUsage().then(fire, fire);
+  return job;
+}
+function beginAiSouvenir(){
+  startAiJob(P.save && P.save.today);
 }
 /* The outing's phase lives in today so leaving or reloading during the ~20 s does not eat the day's souvenir:
    `outPhase`/`outLeft`/`outHour` are resumed on the next visit; `out`/`back` are written only once the souvenir
-   document has landed. */
+   document has landed. `outSouv` names the souvenir a background trip is bringing in. */
 function persistOuting(){
   if(!P.save || !P.save.today) return;
   if(P.outing){
@@ -614,12 +701,19 @@ function persistOuting(){
   }
 }
 function startOuting(hour){
+  if(P.restoring || P.nostore || P.readFailed) return;
   if(!P.save) return;
+  var had=souvForDay(dayKey(now()));
+  if(had){
+    if(markDayWithSouvenir(had,hour,dayKey(now())) && !P.outing) resumeOuting();
+    render();
+    return;
+  }
   if(!P.save.today) P.save.today={day:dayKey(now()),shown:null,picked:false,pick:null,used:false,rewarded:false,ai:false,out:null,back:false,snacks:0,pats:0,played:0,burp:false};
   var left=Math.max(1,Math.round(OUT_MS/500));
   P.save.today.outPhase="out"; P.save.today.outLeft=left; P.save.today.outHour=hour;
   stopAiJob();
-  P.outing={phase:"out", left:left, souv:null, hour:hour, done:false, day:dayKey(now())};
+  P.outing={phase:"out", left:left, souv:null, hour:hour, done:false, saved:false, day:dayKey(now())};
   P.resumeOuting=false;
   saveSoon();
   beginAiSouvenir();
@@ -629,23 +723,35 @@ function resumeOuting(){
   var td=P.save && P.save.today;
   if(!td || !td.outPhase || td.back || td.day!==dayKey(now())) return false;
   var left=Math.max(1,+td.outLeft||1), back=td.outPhase==="back";
-  P.outing={phase:back?"back":"out", left:back?4:left, souv:back?outingSouvenir():null,
-    hour:+td.outHour||hourNow(), done:false, day:td.day};
+  var souv=null, saved=false;
+  if(back){
+    souv=findSouv(td.outSouv);
+    saved=!!souv;
+    if(!souv) souv=outingSouvenir();
+    left=4;
+  }
+  P.outing={phase:back?"back":"out", left:left, souv:souv, hour:+td.outHour||hourNow(),
+    done:false, saved:saved, day:td.day};
   render();
   return true;
+}
+function markOutingDone(o){
+  if(P.save && P.save.today){
+    P.save.today.out=o.hour;
+    P.save.today.back=true;
+    P.save.today.outPhase=""; P.save.today.outLeft=0; P.save.today.outSouv=null;
+  }
+  P.outing=null;
+  P.action="happy"; P.actionUntil=now()+2000;
+  beep("coin"); saveNow(); render(); homeMaybeRender();
 }
 function finishOuting(){
   var o=P.outing; if(!o || o.done) return;
   o.done=true;
+  if(o.saved){ markOutingDone(o); return; }
   addSouvenir(o.souv).then(function(saved){
-    if(saved && P.save && P.save.today){
-      P.save.today.out=o.hour;
-      P.save.today.back=true;
-      P.save.today.outPhase=""; P.save.today.outLeft=0;
-      P.outing=null;
-      P.action="happy"; P.actionUntil=now()+2000;
-      beep("coin"); saveNow(); render();
-    } else {
+    if(saved) markOutingDone(o);
+    else {
       /* leave the phase in today: the next visit tries the write again */
       P.outing=null; P.resumeOuting=false; render();
     }
@@ -660,6 +766,7 @@ function stepOuting(){
     var job=P.aiJob;
     P.outing.phase="back"; P.outing.left=4;
     P.outing.souv=(job && job.result) ? job.result : outingSouvenir();
+    P.outing.saved=false;
     P.aiJob=null;
     persistOuting(); saveSoon(); render();
   } else if(P.outing.phase==="back" && P.outing.left<=0){
@@ -669,17 +776,87 @@ function stepOuting(){
     persistOuting(); render();
   }
 }
+/* The day's souvenir decided without the screen: the AI (one call, 30 s cap) or the built-in table, saved through the
+   same addSouvenir, then a short walk-back is left in today for the next visit. */
+function decideOuting(hour, day){
+  if(P.restoring || P.nostore || P.readFailed) return Promise.resolve(false);
+  if(P.outResolving) return P.outResolving;
+  P.outResolving=Promise.resolve().then(function(){
+    var td=P.save && P.save.today;
+    if(!td || td.day!==day || td.out!=null || td.back) return {skip:true};
+    var had=souvForDay(day);
+    if(had) return {skip:true, done:markDayWithSouvenir(had,hour,day)};
+    td.outHour=hour;
+    saveSoon();
+    if(!td.ai && aiAvailable()){
+      var job=startAiJob(td);
+      if(job) return job.promise.then(function(entry){
+        if(P.aiJob===job) P.aiJob=null;
+        return {entry:entry};
+      });
+    }
+    return {entry:null};
+  }).then(function(res){
+    if(res && res.skip) return !!res.done;
+    if(P.restoring || P.nostore || P.readFailed) return false;
+    var entry=res ? res.entry : null;
+    var td=P.save && P.save.today;
+    if(!td || td.day!==day || td.out!=null || td.back) return false;
+    var pickSouv=entry || outingSouvenir();
+    if(!pickSouv) return false;
+    pickSouv.day=day;
+    return addSouvenir(pickSouv).then(function(saved){
+      if(!saved){
+        td.outPhase=""; td.outLeft=0;
+        saveSoon();
+        return false;
+      }
+      return markDayWithSouvenir(saved,hour,day);
+    });
+  }).then(function(ok){
+    P.outResolving=null;
+    if(ok && isOpen() && !P.outing && P.resumeOuting){ resumeOuting(); render(); }
+    homeMaybeRender();
+    return ok;
+  },function(){
+    P.outResolving=null;
+    return false;
+  });
+  return P.outResolving;
+}
+function backgroundOuting(){
+  if(P.restoring || P.nostore || P.readFailed) return Promise.resolve(false);
+  if(!P.save || P.save.travel || P.save.stage==="egg" || P.outResolving) return P.outResolving||Promise.resolve();
+  var td=P.save.today||{};
+  if(td.back || td.out!=null) return Promise.resolve();
+  var key=dayKey(now()), hour=null, o=null;
+  if(td.outPhase){
+    /* an outing started on the screen, then left: the souvenir is decided now, not after another empty wait */
+    if(td.outPhase==="back" && td.outSouv && findSouv(td.outSouv)) return Promise.resolve();
+    hour=(+td.outHour>=0) ? +td.outHour : null;
+    if(hour==null){ o=Pet.outingToday(P.save,key); hour=o?o.hour:hourNow(); }
+  } else {
+    o=Pet.outingToday(P.save,key);
+    if(!o || hourNow()<o.hour) return Promise.resolve();
+    hour=o.hour;
+  }
+  return decideOuting(hour,key);
+}
 function checkOuting(){
-  if(!P.save || P.outing || P.save.travel || P.save.stage==="egg") return;
+  if(P.restoring || P.nostore || P.readFailed) return;
+  if(!P.save || P.outing || P.save.travel || P.save.stage==="egg" || P.outResolving) return;
   var td=P.save.today||{};
   if(td.outPhase && !td.back){
     if(P.resumeOuting){ P.resumeOuting=false; resumeOuting(); }
     return;
   }
   if(td.out!=null) return;
-  var key=dayKey(now()), h=hourNow();
+  var key=dayKey(now()), t=localDate(now());
   var o=Pet.outingToday(P.save,key);
-  if(o && o.hour===h) startOuting(h);
+  if(!o) return;
+  var mins=t.getUTCHours()*60+t.getUTCMinutes();
+  if(mins>o.hour*60){ decideOuting(o.hour,key); return; }        /* already decided: a short walk-back, never a wait */
+  if(mins===o.hour*60) startOuting(o.hour);
 }
 
 /* ---------- actions ---------- */
@@ -752,7 +929,7 @@ function hatchNow(silent){
   }
   saveNow(); renderKeys(); render();
   buildPick();
-  if(!$("v-home").hidden) LP.renderHome();
+  homeMaybeRender();
 }
 function restartPet(){
   P.save=freshSave();
@@ -768,7 +945,7 @@ function openLook(){ P.sub="look"; P.confirmStage=0; renderKeys(); beep("tap"); 
 function openBox(){
   P.sub="box"; P.boxPage=0;
   if(P.save){ P.save.boxSeen=P.souv.length; saveNow(); }
-  if(!$("v-home").hidden) LP.renderHome();
+  homeMaybeRender();
   renderKeys(); beep("tap"); render();
 }
 function openFood(){ P.sub="food"; P.foodSel=0; renderKeys(); beep("tap"); render(); }
@@ -827,9 +1004,14 @@ function nav(dir){
     P.boxPage=Math.max(0,Math.min(P.souv.length-1,P.boxPage+dir));
     beep("move"); render(); return;
   }
+  if(P.sub==="menu"){
+    var items=menuItems(), i=P.menuSel, n=items.length;
+    for(var k=0;k<n;k++){ i=(i+dir+n)%n; if(items[i].enabled){ P.menuSel=i; break; } }
+    beep("move"); render(); return;
+  }
   if(P.sub) return;
   if(isEgg()) return;
-  P.sel=(P.sel+dir+8)%8;
+  P.sel=(P.sel+dir+ICON_NAMES.length)%ICON_NAMES.length;
   beep("move"); renderKeys(); render();
 }
 function useSelected(){
@@ -839,10 +1021,7 @@ function useSelected(){
     case 1: openPlay(); break;
     case 2: washPet(); break;
     case 3: toggleLight(); break;
-    case 4: openLook(); break;
-    case 5: openBox(); break;
-    case 6: usePick(); break;
-    case 7: callPet(); break;
+    case 4: callPet(); break;
   }
 }
 function pressA(){
@@ -854,6 +1033,7 @@ function pressA(){
     if(P.play && P.play.done){ P.sub=null; renderKeys(); render(); return; }
     playRound(); return;
   }
+  if(P.sub==="menu"){ chooseMenuItem(P.menuSel); return; }
   if(P.sub==="look"){ confirmNext(); return; }
   if(P.sub==="box"){ pasteSouvenir(); return; }
   if(P.sub==="word"){ lookupWord(); return; }
@@ -868,7 +1048,26 @@ function back(){
     beep("tap"); renderKeys(); render();
   }
 }
-function mailKey(){ if(!P.sub) usePick(); }
+/* START opens the small menu over the room; A on 信 uses the day's pick. */
+function menuItems(){
+  return [
+    {id:"mail", enabled:!!activePick()},
+    {id:"look", enabled:true},
+    {id:"box", enabled:true}
+  ];
+}
+function openMenu(){
+  if(P.sub || !P.save || isEgg()) return;
+  P.sub="menu"; P.menuSel=activePick()?0:1; P.confirmStage=0;
+  beep("tap"); renderKeys(); render();
+}
+function chooseMenuItem(i){
+  var item=menuItems()[i];
+  if(!item || !item.enabled){ beep("err"); return; }
+  if(item.id==="mail"){ P.sub=null; renderKeys(); usePick(); }
+  else if(item.id==="look") openLook();
+  else openBox();
+}
 
 /* ---------- 信: the pick's own program, or the word card ---------- */
 function usePick(){
@@ -931,6 +1130,27 @@ function seasonOf(t){
   if(m>=6 && m<=8) return "summer";
   if(m>=9 && m<=11) return "autumn";
   return "winter";
+}
+/* The day's weather by season, seeded by the pet and the day; the debug hook may pin it for a picture. */
+function weatherNow(){
+  if(P.weatherOverride) return P.weatherOverride;
+  if(!P.save) return "sun";
+  return Pet.weatherOf(P.save.born,dayKey(now()),seasonOf(now()));
+}
+/* Rain and wind are the only weathers with a voice; it belongs to the pet's screen and stops when it leaves. */
+function silenceWeather(){
+  if(!P.ambName) return;
+  P.ambName=null;
+  if(LP.chip && typeof LP.chip.ambience==="function") LP.chip.ambience({name:null,level:0});
+}
+function syncWeatherSound(){
+  if(!isOpen() || document.hidden){ silenceWeather(); return; }
+  var w=weatherNow();
+  var name=w==="rain" ? "rain" : w==="wind" ? "wind" : null;
+  if(name===P.ambName) return;
+  P.ambName=name;
+  if(LP.chip && typeof LP.chip.ambience==="function")
+    LP.chip.ambience(name ? {name:name,level:0.16} : {name:null,level:0});
 }
 function markNames(save,pack){
   var m=save.marks||{}, out={};
@@ -1036,7 +1256,7 @@ function roomScene(){
   var night=h<6 || h>=19;
   var asleepNow=save ? Pet.asleep(save,h,min) : false;
   var scene={
-    pack:pack, night:night, season:seasonOf(t),
+    pack:pack, night:night, season:seasonOf(t), weather:weatherNow(),
     dayOfMonth:localDate(t).getUTCDate(),
     lightOff:!!(save && save.light===false && asleepNow),
     bowlFull:save ? save.hunger>=2 : true,
@@ -1109,13 +1329,13 @@ function renderRoom(){
 /* every icon is mid when nothing is special, ink when it is lit (信 with a pick, 呼唤 when it wants something) and
    faint while it cannot be used (信 with no pick, everything on an egg). Selected is the frame, not a tone. */
 function iconTone(i){
-  if(i===6) return activePick()?0:2;                    /* 信: ink only while there is a pick */
-  if(i===7) return wantsOf()?0:2;                       /* 呼唤: ink only when it wants something */
+  var name=ICON_NAMES[i];
+  if(name==="call") return wantsOf()?0:2;                /* 呼唤: ink only when it wants something */
   if(P.flash && P.flash.i===i && P.flash.left%2===0) return 0;
   return 2;
 }
 function iconFaint(name){
-  return isEgg() || (name==="mail" && !activePick());
+  return isEgg();
 }
 function buildIcons(){
   var wrap=$("pet-icons");
@@ -1125,7 +1345,6 @@ function buildIcons(){
     var b=el("button","pet-ikey"); b.type="button";
     b.setAttribute("aria-label",tr("pet.icon."+name));
     b.setAttribute("aria-pressed","false");
-    if(name==="mail") b.setAttribute("aria-disabled","true");
     var cv=el("canvas","pet-icv"); cv.width=8; cv.height=8; cv.setAttribute("aria-hidden","true");
     iconCvs[name]=cv; b.appendChild(cv);
     b.onclick=function(){
@@ -1150,8 +1369,7 @@ function renderIcons(){
     var faint=iconFaint(name);
     paintGrid(cv,icons[name]||[],iconTone(i),3,faint);
     var b=kids[i]; if(!b) return;
-    /* only 信 without a pick advertises its no-op; the egg's icons still take a tap so it can answer with err */
-    b.setAttribute("aria-disabled",(name==="mail" && !activePick() && !isEgg())?"true":"false");
+    b.setAttribute("aria-disabled","false");
     if(i===P.sel) b.classList.add("on"); else b.classList.remove("on");
     b.setAttribute("aria-pressed",i===P.sel?"true":"false");
   });
@@ -1165,9 +1383,23 @@ function boxes(n){
 }
 function panelKey(){
   var s=P.save||{};
-  return [P.sub,P.foodSel,P.boxPage,P.confirmStage,I18N.lang,P.souv.length,
+  return [P.sub,P.foodSel,P.boxPage,P.menuSel,P.confirmStage,I18N.lang,P.souv.length,activePick()?1:0,
     JSON.stringify(P.play),P.wordWord,P.wordMeaning,P.wordBusy,
     s.stage,s.hunger,s.joy,s.opened,s.born,s.close,s.travel,s.light].join("|");
+}
+function buildMenu(panel){
+  panel.appendChild(el("p","pet-ptitle",tr("pet.menu.title")));
+  var items=menuItems();
+  items.forEach(function(it,i){
+    var b=el("button","pet-menu"+(i===P.menuSel?" on":"")+(it.enabled?"":" dim"));
+    b.type="button";
+    if(it.id==="mail" && it.enabled) b.appendChild(el("i","pet-dot"));
+    b.appendChild(el("span","",tr("pet.menu."+it.id)));
+    b.disabled=!it.enabled;
+    b.setAttribute("aria-disabled",it.enabled?"false":"true");
+    b.onclick=function(){ if(!it.enabled) return; P.menuSel=i; chooseMenuItem(i); };
+    panel.appendChild(b);
+  });
 }
 function buildFood(panel){
   panel.appendChild(el("p","pet-ptitle",tr("pet.food.title")));
@@ -1253,6 +1485,7 @@ function renderPanel(){
   panel.textContent="";
   if(P.sub==="food") buildFood(panel);
   else if(P.sub==="play") buildPlay(panel);
+  else if(P.sub==="menu") buildMenu(panel);
   else if(P.sub==="look") buildLook(panel);
   else if(P.sub==="box") buildBox(panel);
   else if(P.sub==="word") buildWord(panel);
@@ -1276,11 +1509,13 @@ function render(){
     away.hidden=!trv;
     if(trv) away.textContent=tr("pet.away")+" · "+tr("pet.away.hint");
   }
+  syncWeatherSound();
 }
 /* The main screen's A names what the selected icon will do; a sub-screen keeps its own A. */
 function aKeyLabel(){
   if(P.sub==="food") return "pet.sk.pick";
   if(P.sub==="play") return "pet.sk.guess";
+  if(P.sub==="menu") return "pet.sk.open";
   if(P.sub==="look") return "pet.sk.hold";
   if(P.sub==="box") return "pet.sk.paste";
   if(P.sub==="word") return "pet.sk.lookup";
@@ -1291,10 +1526,7 @@ function aKeyLabel(){
     case 1: return "pet.act.play";
     case 2: return "pet.act.wash";
     case 3: return P.save.light===false ? "pet.act.lighton" : "pet.act.lightoff";
-    case 4: return "pet.act.look";
-    case 5: return "pet.act.box";
-    case 6: return "pet.act.mail";
-    case 7: return "pet.act.call";
+    case 4: return "pet.act.call";
   }
   return "pet.sk.use";
 }
@@ -1304,7 +1536,7 @@ function renderKeys(){
   var label=aKeyLabel(), egg=isEgg();
   LP.softkeys(wrap,{
     select:null,                           /* reserved for switching rooms when more species come (visits) */
-    start:{label:tr("pet.sk.mail"),disabled:!!P.sub || !activePick() || egg,fn:mailKey},
+    start:{label:egg ? "" : tr("pet.sk.menu"),disabled:!!P.sub || egg,fn:openMenu},
     b:{label:tr("sk.back"),fn:back},
     a:{label:label?tr(label):"",disabled:egg,fn:function(){
       if(P.holdFired){ P.holdFired=false; clearHold(); return; }
@@ -1382,6 +1614,7 @@ function leave(){
   P.sub=null; P.confirmStage=0; P.play=null; P.outing=null;
   P.wordWord=""; P.wordMeaning=null; P.wordBusy=false;
   stopAiJob();
+  silenceWeather();
   saveNow();
   stopJingle();
 }
@@ -1398,12 +1631,16 @@ function pause(){
   persistOuting();
   stopTimer(); saveNow();
   stopAiJob();
+  silenceWeather();
   stopJingle();
 }
 function resume(){
-  if(!isOpen()) return;
   P.resumeOuting=true;
-  refreshTime(); render(); startTimer(); refreshUsage();
+  if(isOpen()){
+    refreshTime(); render(); startTimer(); refreshUsage();
+  } else {
+    backgroundDay();
+  }
 }
 function openPet(){
   LP.show("pet");
@@ -1416,8 +1653,53 @@ function lang(){
   render();
 }
 
-/* ---------- home icon, tag and registration ---------- */
-function icon(){ return ICON_ROWS.slice(); }
+/* ---------- home icon and the background day ---------- */
+function iconState(){
+  var s=P.save;
+  if(!s || s.stage==="egg") return "egg";
+  if(s.travel) return "away";
+  if(Pet.asleep(s,hourNow(),localDate(now()).getUTCMinutes())) return "sleep";
+  if(Pet.wants(s)) return "need";
+  return "face";
+}
+/* The pack's grids are k/d/m/p; the home screen's icon function wants 0-3 and dots. */
+function coreRows(grid){
+  var out=[], r, c, ch, t;
+  if(!grid || grid.length!==16) return null;
+  for(r=0;r<16;r++){
+    var line=String(grid[r]), row="";
+    if(line.length!==16) return null;
+    for(c=0;c<16;c++){
+      ch=line.charAt(c);
+      t=ch==="." ? "." : TONE_OF[ch];
+      if(t===undefined) t=".";
+      row+=String(t);
+    }
+    out.push(row);
+  }
+  return out;
+}
+function homeState(){
+  var s=P.save;
+  if(!s) return "none";
+  return [s.stage,s.travel,iconState(),P.souv.length,+s.boxSeen||0].join("|");
+}
+function homeMaybeRender(){
+  var h=$("v-home");
+  if(!h || h.hidden) return;
+  var sig=homeState();
+  if(sig===P.homeSig) return;
+  P.homeSig=sig;
+  LP.renderHome();
+}
+function icon(){
+  var pack=packOf(P.save), set=(pack && pack.homeIcons)||{};
+  var rows=set[iconState()] || null;
+  if(!rows || rows.length!==16) rows=ICON_ROWS;
+  P.homeSig=homeState();
+  scheduleBackground();
+  return coreRows(rows) || ICON_ROWS.slice();
+}
 function tag(){
   if(!P.save) return "";
   return P.souv.length > (+P.save.boxSeen||0) ? tr("pet.tag") : "";
@@ -1455,23 +1737,53 @@ LP.padRoute("pet",function(b,down){
   if(!down) return true;
   if(b==="up" || b==="left" || b==="down" || b==="right"){ nav(b==="up" || b==="left"?-1:1); return true; }
   if(b==="b"){ back(); return true; }
-  if(b==="start"){ mailKey(); return true; }
+  if(b==="start"){ openMenu(); return true; }
   /* SELECT stays empty: reserved for switching rooms when more species come (visits) */
   if(b==="select"){ return true; }
   return true;
 });
 
+/* The home screen stays visible across 22:00 and the day's outing hour; the runtime's existing clock tick is the
+   only timer, and on it we ask for the pet's day only when the icon or the day has actually changed. No new timer. */
+function clockHome(){
+  if(P.restoring || P.bgRun || !$("v-home") || $("v-home").hidden) return;
+  var s=P.save;
+  if(!s || s.stage==="egg") return;
+  var key=dayKey(now()), td=s.today||{}, need=false;
+  if(td.day!==key) need=true;
+  if(!need && !P.outing && !td.back && td.out==null){
+    var o=Pet.outingToday(s,key);
+    if(o && hourNow()>=o.hour) need=true;
+  }
+  if(!need && homeState()!==P.homeSig) need=true;
+  if(!need) return;
+  backgroundDay();
+  homeMaybeRender();
+}
+
 LP.builtin({
   id:"pet", label:"app.pet", icon:icon, view:"pet",
   open:openPet, enter:enter, leave:leave, tag:tag, lang:lang,
   ready:loadStorage, nostore:function(){
-    P.nostore=true; P.readFailed=true;
-    if(!P.save) P.save=freshSave();
+    P.nostore=true; P.readFailed=true; P.loaded=true; P.readTried=true;
     LP.setStatus("status.unsaved");
-    if(isOpen()) render();
-    if(!$("v-home").hidden) LP.renderHome();
+    if(isOpen()){ ensurePet(); render(); }
+    homeMaybeRender();
   },
-  pause:pause, resume:resume
+  clock:clockHome,
+  pause:pause, resume:resume,
+  restore:function(){
+    /* the restore is about to replace every document: nothing may write the old or a fresh pet over it */
+    P.restoring=true;
+    if(P.restoreTimer) clearTimeout(P.restoreTimer);
+    /* a successful restore reloads at once; if it fails instead, let writes come back rather than leave the pet mute forever */
+    P.restoreTimer=setTimeout(function(){ P.restoring=false; P.restoreTimer=0; },60000);
+    if(P.saveTimer){ clearTimeout(P.saveTimer); P.saveTimer=0; }
+    if(P.bgTimer){ clearTimeout(P.bgTimer); P.bgTimer=0; }
+    P.pickSeq++;
+    P.outing=null;
+    stopAiJob();
+  }
 });
 
 /* ---------- ?debug: see every state without waiting days ---------- */
@@ -1508,7 +1820,7 @@ if(/[?&]debug\b/.test(location.search)){
     forceOuting:function(){
       if(!P.save || P.save.stage==="egg") return P.save;
       startOuting(hourNow());
-      P.outing.left=2;
+      if(P.outing) P.outing.left=2;
       return P.save;
     },
     forcePick:function(kind){
@@ -1534,6 +1846,11 @@ if(/[?&]debug\b/.test(location.search)){
       }
       saveSoon(); renderKeys(); render();
       return P.save;
+    },
+    setWeather:function(w){
+      P.weatherOverride=(w==="sun"||w==="cloud"||w==="rain"||w==="snow"||w==="wind") ? w : null;
+      render();
+      return weatherNow();
     },
     save:function(){ return P.save ? JSON.parse(JSON.stringify(P.save)) : null; }
   };

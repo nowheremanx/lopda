@@ -20,6 +20,7 @@
  *   daySeed(born, dayKey)        an integer seed for one pet and one local day
  *   dayKey(now, tzOffsetMin)     "YYYY-MM-DD" in local time; tzOffsetMin is minutes east of UTC
  *   hourOf(now, tzOffsetMin)     local hour 0-23
+ *   weatherOf(born, dayKey, season)  "sun", "cloud", "rain", "snow" or "wind", by season and the day's seed
  *   fresh(now, rnd, species)     a new egg; marks and trait rolled from rnd
  *   hatch(save)                  egg -> baby (the program calls it after the 60 s hatch)
  *   asleep(save, hour, minute)   the sleep window by trait, or the light off after 20:00
@@ -99,6 +100,32 @@ function dayKey(now,tz){
 }
 function hourOf(now,tz){ return local(now,tz).h; }
 
+/* ---------- the day's weather ---------- */
+/* One weather a day, seeded by the pet and the day, with the season's own odds. Snow never falls outside winter;
+   every table adds up to 100, and the last entry catches the rounding edge. */
+var WEATHER_ODDS={
+  spring:[["sun",35],["cloud",25],["rain",25],["wind",15]],
+  summer:[["sun",50],["cloud",15],["rain",25],["wind",10]],
+  autumn:[["sun",30],["cloud",25],["rain",15],["wind",30]],
+  winter:[["sun",20],["cloud",25],["rain",10],["snow",25],["wind",20]]
+};
+function seasonOf(season){
+  var s=String(season||"").toLowerCase();
+  if(/春|spring/.test(s)) return "spring";
+  if(/夏|summer/.test(s)) return "summer";
+  if(/秋|autumn|fall/.test(s)) return "autumn";
+  return "winter";
+}
+function weatherOf(born,key,season){
+  var table=WEATHER_ODDS[seasonOf(season)], r=rng((daySeed(born,key)^0x27d4eb2d)>>>0);
+  var v=r()*100, acc=0, i;
+  for(i=0;i<table.length;i++){
+    acc+=table[i][1];
+    if(v<acc) return table[i][0];
+  }
+  return table[table.length-1][0];
+}
+
 /* ---------- the species pack and the empty day ---------- */
 function pack(sp){
   if(sp && typeof sp==="object") return sp.id && SPECIES[sp.id] ? SPECIES[sp.id] : sp;
@@ -144,6 +171,11 @@ function hatch(save){
     /* the egg's days were not growth days: the hatch day can be opened again as day one */
     s.opened=0;
     s.lastDay=null;
+    /* a fresh pet is a little hungry and a little bored, so the first meal visibly does something */
+    s.hunger=2;
+    s.joy=3;
+    s.awakeHunger=0;
+    s.awakeJoy=0;
   }
   return s;
 }
@@ -537,7 +569,7 @@ function aiCategories(before,after){
 
 window.LopdaPet={
   SPECIES:SPECIES,
-  rng:rng, daySeed:daySeed, dayKey:dayKey, hourOf:hourOf,
+  rng:rng, daySeed:daySeed, dayKey:dayKey, hourOf:hourOf, weatherOf:weatherOf,
   fresh:fresh, hatch:hatch, asleep:asleep, catchUp:catchUp,
   openDay:openDay, adultForm:adultForm,
   feed:feed, play:play, wash:wash, pat:pat, setLight:setLight, wants:wants,

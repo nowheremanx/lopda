@@ -248,6 +248,47 @@ var CHIP_CHILD=[
 "....k.k..k.k....",
 "................"];
 
+/* ---------- the home screen's 16 x 16 icon states: egg, asleep, needing something, away, and the everyday face ---------- */
+var HOME_ICONS={
+  egg:CHIP_EGG,
+  sleep:frames({face:"sleep",ant:"ball"}),
+  face:frames({face:"idle1",ant:"ball",pat:"dot",eye:"dot"}),
+  need:[
+  "................",
+  "................",
+  ".......kk.......",
+  ".......kk.......",
+  ".......kk.......",
+  ".......kk.......",
+  ".......kk.......",
+  "................",
+  ".......kk.......",
+  ".......kk.......",
+  "................",
+  "...kkkkkkkkkk...",
+  "...k........k...",
+  "....kkkkkkkk....",
+  "................",
+  "................"],
+  away:[
+  "................",
+  "..kkkkkkkkkkkk..",
+  "..k..........k..",
+  "..k..........k..",
+  "..k..........k..",
+  "..k...kkkk...k..",
+  "..k...kppk...k..",
+  "..k...kkkk...k..",
+  "..k....kk....k..",
+  "..k....kk....k..",
+  "..k..........k..",
+  "..k..........k..",
+  "..k..........k..",
+  "..kkkkkkkkkkkk..",
+  "................",
+  "................"]
+};
+
 /* ---------- adult forms: accessories in base coordinates, then the base lifted onto a 20 x 20 canvas at (2,4) ---------- */
 var ADULT={
   plain:{name:"普通",acc:[]},
@@ -695,11 +736,48 @@ function darken(buf){
   return buf;
 }
 var CLOUD=["..pppp....",".pppppp.pp","pppppppppp"];
+var CLOUD2=["..pppp..",".pppppp.","pppppppp"];
 var Moon=["..pp.","...pp","...pp","..pp."];
 var STARS=[[8,9],[11,15],[20,17],[9,18]];
+var SUN=["..p..",".ppp.","ppppp",".ppp.","..p.."];
 var BOOKS=[[58,15,"d",3],[61,13,"m",2],[63,16,"k",3],[66,14,"d",2],[68,12,"m",3],[71,15,"d",2],[73,16,"m",3],
            [58,30,"m",2],[60,28,"k",3],[63,31,"d",2],[65,29,"m",3],[68,30,"d",2],[70,28,"m",3],[73,31,"k",3]];
 var POOPS=[[22,51],[27,52],[32,51]];
+
+/* The day's weather, inside the window's inner pane only (x 6-23, y 7-20). "sun" clears the default cloud;
+   rain and snow fall at night too; wind is a few bent lines. */
+function weatherMark(buf,w,h,weather,night){
+  var s=String(weather||""), r, c, x, y, t=night?3:0;
+  if(!s) return;
+  if(s==="sun" && !night){
+    blit(buf,w,h,SUN,16,8);
+    for(r=0;r<3;r++){ put(buf,w,h,15+r*3,7,3); put(buf,w,h,15+r*3,14,3); }
+    put(buf,w,h,14,9,3); put(buf,w,h,14,12,3); put(buf,w,h,21,9,3); put(buf,w,h,21,12,3);
+  } else if(s==="cloud"){
+    blit(buf,w,h,night?CLOUD2:CLOUD,night?7:8,night?8:9);
+    blit(buf,w,h,CLOUD2,14,16);
+  } else if(s==="rain"){
+    if(night) blit(buf,w,h,CLOUD2,7,8);
+    else blit(buf,w,h,CLOUD,7,8);
+    for(y=11;y<20;y++){
+      x=7+((y*5)%11);
+      put(buf,w,h,x,y,t);
+      if(y+1<20) put(buf,w,h,x,(y+1),t);
+    }
+  } else if(s==="snow"){
+    var flakes=[[8,9],[12,11],[19,9],[10,14],[15,13],[21,15],[9,18],[17,18],[13,19]];
+    for(var i=0;i<flakes.length;i++){
+      put(buf,w,h,flakes[i][0],flakes[i][1],3);
+      put(buf,w,h,flakes[i][0]+1,flakes[i][1],3);
+      put(buf,w,h,flakes[i][0],flakes[i][1]+1,3);
+    }
+  } else if(s==="wind"){
+    for(y=9;y<20;y+=3){
+      x=7+((y*3)%5);
+      for(c=0;c<9;c++) put(buf,w,h,x+c,y+(c%3===0?-1:0),night?3:1);
+    }
+  }
+}
 
 /* A small seasonal mark in the window, so the room notices the year without a new layout. */
 function seasonMark(buf,w,h,season){
@@ -727,17 +805,19 @@ function paintRoom(buf,w,h,scene,pack){
   for(y=47;y<h;y+=4) rect(buf,w,h,0,y,w,1,1);
   for(row=0;row<4;row++) for(x=(row%2?4:12);x<w;x+=18) rect(buf,w,h,x,44+row*4+1,1,3,1);
 
-  /* window: day sky with a cloud, or night with the moon and a few stars */
+  /* window: day sky with the day's weather, or night with the moon and a few stars */
   rect(buf,w,h,5,6,20,16,0);
+  var weather=String(scene.weather||"");
   if(scene.night){
     rect(buf,w,h,6,7,18,14,0);
     blit(buf,w,h,Moon,17,9);
     STARS.forEach(function(p){ put(buf,w,h,p[0],p[1],3); });
   } else {
     rect(buf,w,h,6,7,18,14,2);
-    blit(buf,w,h,CLOUD,9,10);
+    if(weather!=="sun") blit(buf,w,h,CLOUD,9,10);
   }
   seasonMark(buf,w,h,scene.season);
+  weatherMark(buf,w,h,weather,!!scene.night);
   rect(buf,w,h,14,7,1,14,1);
   rect(buf,w,h,6,13,18,1,1);
 
@@ -852,6 +932,7 @@ var CHIP_PACK={
   props:PROPS,
   room:CHIP_ROOM,
   icons:ICONS,
+  homeIcons:HOME_ICONS,
   souvenirs:SOUV
 };
 var PACKS={chip:CHIP_PACK};

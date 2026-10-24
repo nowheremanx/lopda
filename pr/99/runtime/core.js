@@ -25,6 +25,8 @@ var S = {
      lang()                            redraw after the language changes
      padLayout()                       the chin pad appeared or went away
      ready(), nostore(), pause(), resume()   storage opened / failed, page hidden / shown (boot.js)
+     restore()                         a backup restore is about to replace everything: stop writes and reload
+     clock()                           the status bar clock ticked (every 15 s): cheap checks only, no timers of its own
      audio()                           the AudioContext was replaced (the phone had stopped it): reconnect into LP.SND.app */
 var LP = window.LP = {$:$, S:S, I18N:I18N, tr:tr, builtins:[]};
 LP.builtin = function(b){ LP.builtins.push(b); return b; };
@@ -155,7 +157,7 @@ function refresh(kind){
 /* ---------- clock & status ---------- */
 var statusKey="status.boot";
 function setStatus(key){ statusKey=key; $("savestate").textContent=tr(key); }
-function tickClock(){ var d=new Date(); $("clock").textContent=String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0"); }
+function tickClock(){ var d=new Date(); $("clock").textContent=String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0"); LP.each("clock"); }
 
 /* ---------- views ---------- */
 /* how often a built-in was opened: the pet reads this to decide its adult form (design.md 6). One debounced
@@ -229,7 +231,7 @@ document.addEventListener("visibilitychange",function(){
 });
 
 /* ---------- sound: tiny square-wave chips through Web Audio (the named sounds themselves are in chip.js) ---------- */
-var RUNTIME_VERSION="0.37.0+7bb8291";   /* keep in step with VERSION in sw.js */
+var RUNTIME_VERSION="0.37.0+8a4dcb3";   /* keep in step with VERSION in sw.js */
 /* One volume, five steps, 0 is off (decisions.md section 10). It sets the master gain and nothing else does.
    Under the master: `ui` for the runtime's own clicks, held at a fraction so they stay as quiet as they always were
    (step 2 gives them 0.11, their level before 0.12.0), and `app` for apps, music and the cartridge at the full step. */
