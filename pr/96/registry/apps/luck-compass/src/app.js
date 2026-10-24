@@ -11,6 +11,9 @@ var W = game.width, CX = W / 2, CY = 106;      /* 216 x 240; the luopan sits on 
 var PLATE = 180, PLATE_X = (W - PLATE) / 2, PLATE_Y = 16;
 var DIAL_OUT = 88, DIAL_IN = 86, TRI_IN = 72, TICK_IN = 68, LABEL_R = 58, WELL = 22;
 var PANEL_X = 8, PANEL_Y = 32, PANEL_W = 200, PANEL_H = 163;
+var V_CX = 32, V_CY = 176;                     /* bubble vial on the free 地盘 corner */
+var LEVEL = 2 / 32, BUBBLE_MAX = 5;            /* bubble edge reaches the paper at 0.25 */
+var BUBBLE_SCALE = BUBBLE_MAX / 0.25;
 
 /* English display data only: Chinese dates use 月/日, so these names are not passed through T(). */
 var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -57,6 +60,7 @@ var GRAIN = [
 ];
 var NO_COMPASS = T({ zh: "没有指南针：用左右键转", en: "No compass: use Left/Right" });
 var MOTION_OFF = T({ zh: "感应未允许：用左右键转", en: "Motion off: use Left/Right" });
+var LAY_FLAT = T({ zh: "放平一点，让气泡回到中间", en: "Lay it flat: bubble to the middle" });
 var HINT = T({ zh: "旧历书上的说法，图个吉利", en: "Old almanac lore, just for luck." });
 var KEY_LINE = T({ zh: "A 说明 · 上下换日 · START 今天", en: "A info · ↑↓ day · START today" });
 var PANEL_TITLE = T({ zh: "这一天的五位", en: "That day's five" });
@@ -105,6 +109,9 @@ function headerText(dt, p) {
 var HAS_MOTION = typeof PAD !== "undefined" && !!PAD.motion;
 var wanted = false, wasWanted = false, live = false, denied = false, startSeq = 0;
 var heading = null, lastHeading = null, compass = false, keyHeading = 0;
+/* The heading is only right when the phone lies flat; flat is absolute, unlike y,
+   which is relative to start()/zero(). */
+var flat = null, flatBadT = 0, bubbleX = 0, bubbleY = 0;
 
 function sfx(name) { if (typeof PAD !== "undefined" && PAD.sfx) PAD.sfx(name); }
 function aimDial(deg) {
@@ -117,6 +124,10 @@ function aimDial(deg) {
 }
 function onTilt(t) {
   if (!wanted) return;
+  var f = t && t.flat;
+  if (f && typeof f === "object" && typeof f.x === "number" && typeof f.y === "number" &&
+      isFinite(f.x) && isFinite(f.y)) flat = { x: f.x, y: f.y };
+  else flat = null;                       /* older runtime: no level at all */
   var h = t && typeof t.heading === "number" ? t.heading : null;
   if (h === null) { heading = null; lastHeading = null; return; }
   if (lastHeading === null) { heading = h; lastHeading = h; aimDial(-h); return; }   /* first reading: no tick */
@@ -150,7 +161,7 @@ function sensorStart() {
 function sensorPause() {
   if (wanted) wasWanted = true;
   wanted = false;
-  live = false; heading = null; lastHeading = null;
+  live = false; heading = null; lastHeading = null; flatBadT = 0;
   if (HAS_MOTION) PAD.motion.stop();
 }
 function sensorResume() {
@@ -176,6 +187,15 @@ function fallbackLine() {
   if (compass) return "";
   if (HAS_MOTION && wanted && !live && !denied) return "";   /* the dialog is still up */
   return denied ? MOTION_OFF : NO_COMPASS;
+}
+function flatLevel() {
+  return !!flat && Math.abs(flat.x) <= LEVEL && Math.abs(flat.y) <= LEVEL;
+}
+function noticeText() {
+  var why = fallbackLine();
+  if (why) return why;                                      /* no compass wins */
+  if (compass && flat && !flatLevel() && flatBadT > 0.5) return LAY_FLAT;
+  return "";
 }
 function inDial(x, y) { var dx = x - CX, dy = y - CY; return dx * dx + dy * dy <= (DIAL_OUT + 4) * (DIAL_OUT + 4); }
 function openPanel() { panel = true; sfx("tap"); }
@@ -233,6 +253,18 @@ function update(dt) {
     lastFaced = faced;
     if (faced !== null && godList(stem, faced).length) sfx("coin");
   }
+
+  flatBadT = compass && flat && !flatLevel() ? flatBadT + dt : 0;
+  var tx = 0, ty = 0;
+  if (flat) {
+    tx = -flat.x * BUBBLE_SCALE;              /* real bubbles run to the high side */
+    ty = flat.y * BUBBLE_SCALE;
+    var len = Math.sqrt(tx * tx + ty * ty);
+    if (len > BUBBLE_MAX) { tx = tx / len * BUBBLE_MAX; ty = ty / len * BUBBLE_MAX; }
+  }
+  var bk = Math.min(1, dt * 10);              /* about 100 ms */
+  bubbleX += (tx - bubbleX) * bk;
+  bubbleY += (ty - bubbleY) * bk;
 
   if (dialT < 1) {
     dialT = Math.min(1, dialT + dt / 0.15);
@@ -366,6 +398,19 @@ function drawDial(g, stem) {
   drawSeals(g, stem);
   drawWell(g);
 }
+function drawVial(g) {
+  /* a bubble level on the 地盘: it shows when the heading can be trusted */
+  if (!flat) return;
+  g.circle(V_CX, V_CY, 8, g.INK, true);
+  g.circle(V_CX, V_CY, 7, g.PAPER, true);
+  if (flatLevel()) g.circle(V_CX, V_CY, 3, g.INK, true);
+  else g.circle(V_CX, V_CY, 3, g.INK, false);
+  g.pixel(V_CX - 4, V_CY, g.INK); g.pixel(V_CX + 4, V_CY, g.INK);
+  g.pixel(V_CX, V_CY - 4, g.INK); g.pixel(V_CX, V_CY + 4, g.INK);
+  var bx = Math.round(V_CX + bubbleX), by = Math.round(V_CY + bubbleY);
+  g.circle(bx, by, 2, g.INK, true);
+  g.circle(bx, by, 1, g.PAPER, true);
+}
 function blocked(x, y) {
   var i, b;
   for (i = 0; i < sealBoxes.length; i++) {
@@ -398,8 +443,8 @@ function drawFaceMark(g) {
   g.line(CX - 4, PLATE_Y + 1, CX, PLATE_Y + 6, g.INK);
   g.line(CX + 4, PLATE_Y + 1, CX, PLATE_Y + 6, g.INK);
 }
-function drawFallback(g) {
-  var why = fallbackLine();
+function drawNotice(g) {
+  var why = noticeText();
   if (!why) return;
   var tw = g.measure(why), x = Math.round(CX - tw / 2 - 4), y = PLATE_Y, w = tw + 8, h = 15;
   g.rect(x, y, w, h, g.PAPER);
@@ -433,9 +478,10 @@ game.scene("compass", {
     drawHeader(g, headerText(dt, p));
     drawPlate(g);
     drawDial(g, p.stem);
+    drawVial(g);
     drawThreads(g);
     drawFaceMark(g);
-    drawFallback(g);
+    drawNotice(g);
     drawFaced(g, p.stem);
     g.text(KEY_LINE, CX, 212, { align: "center", color: g.DARK });
     g.text(HINT, CX, 226, { align: "center", color: g.DARK });
