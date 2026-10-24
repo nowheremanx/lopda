@@ -136,7 +136,7 @@ async function capture(rootArg, outArg) {
     const [d] = await Promise.all([p.waitForEvent("download", { timeout: 15000 }), action()]);
     await d.saveAs(join(out, name)); names.push(name);
   };
-  const LABEL = { calendar: "万年历", notes: "记事本", paint: "点阵画板", camera: "点阵相机", cutter: "裁片机", darkroom: "冲洗店", cart: "卡带机", store: "应用商店", settings: "设置" };
+  const LABEL = { calendar: "万年历", notes: "记事本", paint: "点阵画板", camera: "点阵相机", cutter: "裁片机", darkroom: "冲洗店", cart: "卡带机", store: "应用商店", settings: "设置", studio: "四轨机" };
   const tile = (name) => p.locator("#home .app", { has: p.locator(".label", { hasText: new RegExp("^" + LABEL[name] + "$") }) }).click();
   const home = async () => { await p.click("#home-key"); await p.waitForTimeout(200); };
 
@@ -271,6 +271,25 @@ async function capture(rootArg, outArg) {
   await p.waitForFunction(() => !document.getElementById("cut-go").disabled);
   await download(() => p.click("#cut-go"), "cut-edge.png");
   await settle(400);
+  }
+
+  /* TAPE4 (0.37.0+): the first open shows tour step 1; PLAY then START-to-stop leaves step 2. The playing
+     look is timed, so playback is stopped before the shot. */
+  if (await p.locator("#v-studio").count() > 0) {
+    await home(); await tile("studio");
+    await p.waitForSelector("#v-studio:not([hidden])");
+    await p.waitForSelector("#v-studio .st-tour-box");
+    await p.waitForFunction(() => document.querySelectorAll("#v-studio .st-cell").length === 16);
+    await shot("13g-studio-open");
+    await p.click("#studio-play");
+    await p.waitForFunction(() => document.getElementById("v-studio").getAttribute("data-playing") === "true");
+    await p.waitForFunction(() => document.getElementById("studio-grid").classList.contains("st-tour-hi"));
+    /* the play button is covered by step 2's tour, so START (Enter) stops it */
+    await p.evaluate(() => document.activeElement && document.activeElement.blur());
+    await p.keyboard.press("Enter");
+    await p.waitForFunction(() => document.getElementById("v-studio").getAttribute("data-playing") === "false");
+    await p.waitForFunction(() => !document.querySelector("#v-studio .st-cell.playing"));
+    await shot("13h-studio-tour-2");
   }
 
   /* cartridge player, empty library */

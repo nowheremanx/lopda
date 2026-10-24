@@ -7,7 +7,7 @@
  * The screen: a top bar (play/stop, BPM, − and +, ?, ≡), four drum tabs with a dot under each drum that has a hit,
  * and the selected drum's 16 steps as a 4x4 grid, one row per beat, the first cell of a row heavier. On = ink.
  * The step being heard turns mid (empty) or dark (lit) while it sounds. The menu holds "new tape" (A / 确认 confirms, B / 取消 cancels)
- * and the kit (soft / chip). The "?" is wired by the tutorial in a later part.
+ * and the kit (soft / chip). The "?" replays the tour; the first open runs it by itself (docs/design/studio.md 11.6).
  *
  * Keys (the chin pad is hidden): arrows move a dashed focus box, X = A toggles that cell, Enter = START plays and
  * stops, Shift = SELECT picks the next drum, Z = B closes the menu or its confirmation. HOME is the runtime's.
@@ -34,7 +34,7 @@ var T={
   sheet:"", built:false,
   playing:false, loop:0, ctx:null, synth:null,
   startAt:0, lastTick:0, heard:0, painted:-1,
-  repeats:[]
+  repeats:[], tour:null
 };
 
 function visible(){ return !$("v-studio").hidden; }
@@ -205,6 +205,7 @@ function startPlay(){
   paintPlaying(0);
   hushTip();
   loop();
+  tourEvent("play");
 }
 function stopPlay(){
   var was=T.playing;
@@ -283,13 +284,14 @@ function build(){
       b.setAttribute("data-drum",drum);
       b.appendChild(el("span","st-tab-name"));
       b.appendChild(el("i","st-dot"));
-      b.onclick=function(){ pickDrum(drum,true); };
+      b.onclick=function(){ pickDrum(drum,true,true); };
       tabs.appendChild(b);
     })(SONGS.DRUMS[i]);
   }
   bindRepeat($("studio-minus"),-SONGS.BPM_STEP);
   bindRepeat($("studio-plus"),SONGS.BPM_STEP);
   $("studio-play").onclick=function(){ togglePlay(); };
+  $("studio-tour").onclick=function(){ startTour(); };
   $("studio-menu").onclick=function(){ openSheet("menu"); };
   if(window.ResizeObserver) new ResizeObserver(function(){ layout(); }).observe($("studio-board"));
   else window.addEventListener("resize",layout);
@@ -307,6 +309,7 @@ function layout(){
   grid.style.height=total+"px";
   grid.style.gridTemplateColumns="repeat(4,"+cell+"px)";
   grid.style.gridTemplateRows="repeat(4,"+cell+"px)";
+  if(T.tour) tourPlace();
 }
 function renderBar(){
   var bpm=T.song ? T.song.bpm : SONGS.BPM_DEFAULT;
@@ -351,6 +354,105 @@ function renderGrid(){
 function renderAll(){
   build();
   renderBar(); renderTabs(); renderGrid(); renderSheet();
+}
+/* ---------- the tour ----------
+   Not an LP interface: only this program uses tour(); docs/design/studio.md 11.6. One step is
+   {el:function(){ return element }, text:"studio.tour.x", done:"play"|"toggle"|"drum"|null}. The screen reports
+   the named event with tourEvent(); a null done shows a Next button (Done on the last step). Every step skips.
+   The cover is four dither panels around the highlighted element, so only that element and the box take taps. */
+function rhythmTour(){
+  return [
+    {el:function(){ return $("studio-play"); }, text:"studio.tour.play", done:"play"},
+    {el:function(){ return $("studio-grid"); }, text:"studio.tour.grid", done:"toggle"},
+    {el:function(){ return $("studio-tabs"); }, text:"studio.tour.drums", done:"drum"},
+    /* the readout between − and + stands for the BPM controls */
+    {el:function(){ return $("studio-bpm"); }, text:"studio.tour.bpm", done:null}
+  ];
+}
+function startTour(){ if(T.built) tour("rhythm",rhythmTour()); }
+function maybeTour(){
+  if(!visible() || T.tour || !T.built || !T.meta) return;
+  if(T.meta.toured && T.meta.toured.rhythm) return;
+  startTour();
+}
+function tour(screen,steps){
+  tourEnd(false);
+  if(!steps || !steps.length) return;
+  var view=$("v-studio"), i;
+  var root=el("div","st-tour"), box=el("div","st-tour-box"), covers=[];
+  for(i=0;i<4;i++){ var c=el("i","st-tour-cover"); root.appendChild(c); covers.push(c); }
+  var text=el("p","st-tour-text");
+  var row=el("div","st-tour-btns");
+  var skip=el("button","st-tour-skip"), next=el("button","st-tour-next");
+  skip.type="button"; next.type="button";
+  row.appendChild(skip); row.appendChild(next);
+  box.appendChild(text); box.appendChild(row);
+  view.appendChild(root); view.appendChild(box);
+  view.classList.add("st-touring");
+  T.tour={screen:screen, steps:steps, i:0, root:root, box:box, text:text, skip:skip, next:next, covers:covers, hi:null};
+  skip.onclick=function(){ sfx("miss"); tourEnd(true); };
+  next.onclick=function(){ sfx("tap"); tourNext(); };
+  tourShow(0);
+}
+function tourShow(i){
+  var t=T.tour;
+  if(!t || !t.steps[i]) return;
+  t.i=i;
+  if(t.hi) t.hi.classList.remove("st-tour-hi");
+  var node=t.steps[i].el ? t.steps[i].el() : null;
+  t.hi=node || null;
+  if(node) node.classList.add("st-tour-hi");
+  /* step 2 is the kick grid, so the kick tab has to be the one picked when it starts */
+  if(i===1 && T.drum!=="kick") pickDrum("kick",false,false);
+  t.text.textContent=tr(t.steps[i].text);
+  t.skip.textContent=tr("studio.tour.skip");
+  t.next.textContent=tr(i===t.steps.length-1 ? "studio.tour.done" : "studio.tour.next");
+  t.next.hidden=!!t.steps[i].done;
+  tourPlace();
+}
+/* four cover panels leave the hole; the box sits in the other half of the screen */
+function tourPlace(){
+  var t=T.tour;
+  if(!t || !t.hi) return;
+  var view=$("v-studio"), v=view.getBoundingClientRect(), r=t.hi.getBoundingClientRect();
+  if(!v.width || !v.height) return;
+  var pad=4;
+  var x0=Math.max(0,r.left-v.left-pad), y0=Math.max(0,r.top-v.top-pad);
+  var x1=Math.min(v.width,r.right-v.left+pad), y1=Math.min(v.height,r.bottom-v.top+pad);
+  var ch=Math.max(0,y1-y0), c=t.covers;
+  c[0].style.cssText="left:0;top:0;right:0;height:"+y0+"px";
+  c[1].style.cssText="left:0;top:"+y1+"px;right:0;bottom:0";
+  c[2].style.cssText="left:0;top:"+y0+"px;width:"+x0+"px;height:"+ch+"px";
+  c[3].style.cssText="left:"+x1+"px;right:0;top:"+y0+"px;height:"+ch+"px";
+  var upper=(r.top-v.top)+r.height/2 < v.height/2;
+  t.box.style.top=upper ? "auto" : "4px";
+  t.box.style.bottom=upper ? "4px" : "auto";
+}
+function tourNext(){
+  var t=T.tour;
+  if(!t) return;
+  if(t.i>=t.steps.length-1){ tourEnd(true); return; }
+  tourShow(t.i+1);
+}
+function tourEvent(name){
+  var t=T.tour;
+  if(!t) return;
+  var step=t.steps[t.i];
+  if(step && step.done===name) tourNext();
+}
+function tourEnd(seen){
+  var t=T.tour;
+  if(!t) return;
+  T.tour=null;
+  if(t.hi) t.hi.classList.remove("st-tour-hi");
+  $("v-studio").classList.remove("st-touring");
+  if(t.root.parentNode) t.root.parentNode.removeChild(t.root);
+  if(t.box.parentNode) t.box.parentNode.removeChild(t.box);
+  if(seen && T.meta && t.screen){
+    T.meta.toured=T.meta.toured || {};
+    T.meta.toured[t.screen]=true;
+    saveMeta();
+  }
 }
 /* ---------- sheets: the menu and the new-tape question ---------- */
 function openSheet(name){ T.sheet=name; renderSheet(); }
@@ -417,16 +519,18 @@ function cellTap(step){
   touch();
   renderTabs(); renderGrid();
   audition();
+  tourEvent("toggle");
 }
-function pickDrum(drum,play){
+function pickDrum(drum,play,byUser){
   if(SONGS.DRUMS.indexOf(drum)<0) return;
   T.drum=drum;
   renderTabs(); renderGrid();
   if(play) audition();
+  if(byUser) tourEvent("drum");
 }
 function nextDrum(){
   var i=SONGS.DRUMS.indexOf(T.drum);
-  pickDrum(SONGS.DRUMS[(i+1)%SONGS.DRUMS.length],true);
+  pickDrum(SONGS.DRUMS[(i+1)%SONGS.DRUMS.length],true,true);
 }
 function stopRepeatAll(){
   for(var i=0;i<T.repeats.length;i++) T.repeats[i]();
@@ -463,7 +567,7 @@ document.addEventListener("keydown",function(e){
   else if(key==="x"||key==="X"){ if(e.repeat) return; if(T.sheet==="new") newTape(); else if(!T.sheet) cellTap(T.focus); }
   else if(key==="Enter"){ if(e.repeat) return; togglePlay(); }
   else if(key==="Shift"){ if(e.repeat) return; nextDrum(); }
-  else if(key==="z"||key==="Z"){ if(e.repeat) return; closeSheet(); }
+  else if(key==="z"||key==="Z"){ if(e.repeat) return; if(T.tour) tourEnd(true); else closeSheet(); }
   else done=false;
   if(done) e.preventDefault();
 });
@@ -484,12 +588,13 @@ function open(){
   renderAll();
   layout();
   setTimeout(layout,0);
-  if(S.db) loadStore();
-  else if(!T.song) ensureLocal();
+  if(S.db) loadStore().then(function(){ if(visible()) maybeTour(); });
+  else { if(!T.song) ensureLocal(); setTimeout(maybeTour,0); }
 }
 function leave(){
   stopRepeatAll();
   stopPlay();
+  tourEnd(false);
   flush();
   T.sheet="";
   if(T.built) renderSheet();
@@ -500,7 +605,7 @@ function leave(){
 LP.builtin({id:"studio", label:"app.studio", icon:function(){ return ICON; }, view:"studio",
   open:open,
   leave:leave,
-  lang:function(){ if(visible()){ renderAll(); layout(); } },
+  lang:function(){ if(visible()){ renderAll(); layout(); if(T.tour) tourShow(T.tour.i); } },
   pause:function(){ stopRepeatAll(); stopPlay(); flush(); },
   resume:function(){},
   audio:function(){ onAudio(); },

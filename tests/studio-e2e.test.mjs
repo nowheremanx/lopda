@@ -248,6 +248,21 @@ async function studioOpen(p, locale = "zh-CN") {
   await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
   await openTile(p, locale);
 }
+const tourBox = (p) => p.locator("#v-studio .st-tour-box");
+const tourText = (p) => p.textContent("#v-studio .st-tour-box p");
+/* existing tests that need the whole screen press B once; the first open's tour would cover it */
+async function skipTour(p) {
+  if (await tourBox(p).count()) {
+    await p.keyboard.press("z");
+    await p.waitForSelector("#v-studio .st-tour-box", { state: "detached" });
+  }
+}
+async function waitTour(p, re) {
+  await p.waitForFunction((src) => {
+    const t = document.querySelector("#v-studio .st-tour-box p");
+    return t && new RegExp(src).test(t.textContent);
+  }, re.source);
+}
 const cellOn = (p, step) => p.locator(`#v-studio .st-cell[data-step="${step}"]`).evaluate((c) => c.classList.contains("on"));
 async function cellWidths(p) {
   return p.$$eval("#v-studio .st-cell", (cells) => cells.map((c) => {
@@ -272,6 +287,7 @@ test("studio: the tape opens from home with the demo beat's kick on the grid", {
 test("studio: a tapped cell stays on after leaving and reloading", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await rtPage(t);
   await studioOpen(p);
+  await skipTour(p);
   assert.equal(await cellOn(p, 1), false);
   await p.locator('#v-studio .st-cell[data-step="1"]').click();
   assert.equal(await cellOn(p, 1), true, "the cell turned on");
@@ -334,5 +350,141 @@ test("studio: at 375x667 the screen does not scroll and every cell is at least 5
   assert.equal(cells.length, 16);
   const small = cells.filter((c) => c.w < 56 || c.h < 56);
   assert.deepEqual(small, [], `every cell is at least 56 px: ${JSON.stringify(cells.map((c) => Math.round(c.w)))}`);
+  assert.deepEqual(errors, []);
+});
+
+/* ---------------- the tour (runtime/apps/studio.js, docs/design/studio.md 11.6) ---------------- */
+const touredRhythm = (p) => p.evaluate(async () => {
+  const doc = await LopdaPlatform.db.doc("data/users/local/studio").get();
+  return !!(doc.exists && doc.data().toured && doc.data().toured.rhythm === true);
+});
+async function firstOpenTour(p) {
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await openTile(p);
+  await p.waitForSelector("#v-studio .st-tour-box");
+}
+
+test("studio tour: the first open walks play, a cell, a drum and Done", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await firstOpenTour(p);
+  assert.match(await tourText(p), /按 ▸ 听听/);
+  assert.equal(await p.locator("#v-studio .st-tour-hi").getAttribute("id"), "studio-play");
+  assert.equal(await p.locator("#v-studio .st-tour-next").isVisible(), false, "an action step has no Next");
+  assert.equal(await p.locator("#v-studio .st-tour-skip").isVisible(), true, "every step can skip");
+
+  await p.click("#studio-play");
+  await waitTour(p, /点亮一格/);
+  assert.equal(await p.locator("#v-studio .st-tour-hi").getAttribute("id"), "studio-grid");
+  assert.equal(await p.locator("#studio-tabs .st-tab.on").getAttribute("data-drum"), "kick", "step 2 always starts on the kick");
+  await p.evaluate(() => document.activeElement && document.activeElement.blur());
+  await p.keyboard.press("Enter");
+  await p.waitForFunction(() => document.querySelector("#v-studio").getAttribute("data-playing") === "false");
+
+  assert.equal(await cellOn(p, 1), false);
+  await p.locator('#v-studio .st-cell[data-step="1"]').click();
+  await waitTour(p, /换一只鼓/);
+  assert.equal(await cellOn(p, 1), true, "the tap that moved the tour on also toggled the cell");
+  assert.equal(await p.locator("#v-studio .st-tour-hi").getAttribute("id"), "studio-tabs");
+
+  await p.locator('#studio-tabs .st-tab[data-drum="snare"]').click();
+  await waitTour(p, /改快慢/);
+  assert.equal(await p.locator("#v-studio .st-tour-hi").getAttribute("id"), "studio-bpm");
+  assert.equal(await p.textContent("#v-studio .st-tour-next"), "好了", "the last step says Done");
+
+  await p.locator("#v-studio .st-tour-next").click();
+  await p.waitForSelector("#v-studio .st-tour-box", { state: "detached" });
+  await p.waitForFunction(async () => {
+    const doc = await LopdaPlatform.db.doc("data/users/local/studio").get();
+    return !!(doc.exists && doc.data().toured && doc.data().toured.rhythm === true);
+  });
+  assert.deepEqual(errors, []);
+});
+
+test("studio tour: after Done a reopen has no tour; ? replays it", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await firstOpenTour(p);
+  await p.locator("#v-studio .st-tour-skip").click();
+  await p.waitForSelector("#v-studio .st-tour-box", { state: "detached" });
+  await p.waitForFunction(async () => {
+    const doc = await LopdaPlatform.db.doc("data/users/local/studio").get();
+    return !!(doc.exists && doc.data().toured && doc.data().toured.rhythm === true);
+  });
+
+  await p.click("#home-key");
+  await p.waitForTimeout(250);
+  await openTile(p);
+  assert.equal(await tourBox(p).count(), 0, "the tour does not come back by itself");
+
+  await p.click("#studio-tour");
+  await p.waitForSelector("#v-studio .st-tour-box");
+  assert.match(await tourText(p), /按 ▸ 听听/, "? starts again from step 1");
+  await p.keyboard.press("z");
+  await p.waitForSelector("#v-studio .st-tour-box", { state: "detached" });
+  assert.deepEqual(errors, []);
+});
+
+test("studio tour: Skip ends it and a reload stays quiet", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await firstOpenTour(p);
+  await p.locator("#v-studio .st-tour-skip").click();
+  await p.waitForSelector("#v-studio .st-tour-box", { state: "detached" });
+  await p.waitForFunction(async () => {
+    const doc = await LopdaPlatform.db.doc("data/users/local/studio").get();
+    return !!(doc.exists && doc.data().toured && doc.data().toured.rhythm === true);
+  });
+
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await openTile(p);
+  assert.equal(await tourBox(p).count(), 0, "a reload does not bring it back");
+  assert.equal(await touredRhythm(p), true);
+  assert.deepEqual(errors, []);
+});
+
+test("studio tour: z ends it", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await firstOpenTour(p);
+  await p.keyboard.press("z");
+  await p.waitForSelector("#v-studio .st-tour-box", { state: "detached" });
+  assert.equal(await p.locator("#studio-sheet").isHidden(), true, "B closed the tour, not a sheet");
+  await p.waitForFunction(async () => {
+    const doc = await LopdaPlatform.db.doc("data/users/local/studio").get();
+    return !!(doc.exists && doc.data().toured && doc.data().toured.rhythm === true);
+  });
+  assert.deepEqual(errors, []);
+});
+
+test("studio tour: HOME ends it unseen, so the next open shows it again", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await firstOpenTour(p);
+  await p.click("#home-key");
+  await p.waitForTimeout(250);
+  assert.equal(await touredRhythm(p), false, "HOME does not record the tour as seen");
+  await openTile(p);
+  await p.waitForSelector("#v-studio .st-tour-box");
+  assert.match(await tourText(p), /按 ▸ 听听/);
+  await p.keyboard.press("z");
+  await p.waitForSelector("#v-studio .st-tour-box", { state: "detached" });
+  assert.deepEqual(errors, []);
+});
+
+test("studio tour: taps outside the highlighted element do nothing", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await firstOpenTour(p);
+  assert.match(await tourText(p), /按 ▸ 听听/);
+
+  const menu = await p.locator("#studio-menu").boundingBox();
+  await p.mouse.click(menu.x + menu.width / 2, menu.y + menu.height / 2);
+  await p.waitForTimeout(150);
+  assert.equal(await p.locator("#studio-sheet").isHidden(), true, "the covered menu never opened");
+  assert.equal(await p.getAttribute("#v-studio", "data-playing"), "false", "playback did not start");
+  assert.match(await tourText(p), /按 ▸ 听听/, "the tour is still on step 1");
+
+  const cell = await p.locator('#v-studio .st-cell[data-step="5"]').boundingBox();
+  await p.mouse.click(cell.x + cell.width / 2, cell.y + cell.height / 2);
+  await p.waitForTimeout(150);
+  assert.equal(await cellOn(p, 5), false, "the covered cell did not toggle");
+  assert.match(await tourText(p), /按 ▸ 听听/, "still step 1");
+  await p.keyboard.press("z");
+  await p.waitForSelector("#v-studio .st-tour-box", { state: "detached" });
   assert.deepEqual(errors, []);
 });
