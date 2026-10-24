@@ -729,7 +729,7 @@ function hatchNow(silent){
   P.eggMs=0; P.action="happy"; P.actionUntil=now()+3000;
   if(!silent){
     beep("ok");
-    if(isOpen() && LP.chip && LP.chip.music) LP.chip.music({action:"play",song:JINGLE,loop:false});
+    if(isOpen() && LP.chip && LP.chip.music){ LP.chip.music({action:"play",song:JINGLE,loop:false}); P.jingle=true; }
   }
   saveNow(); render();
   buildPick();
@@ -1301,6 +1301,7 @@ function tick(){
 
 /* ---------- hooks ---------- */
 function enter(){
+  P.inView=true;
   initCanvas();
   renderKeys();
   buildIcons();
@@ -1311,7 +1312,10 @@ function enter(){
   startTimer();
   refreshUsage();
 }
+/* show() calls every built-in's leave when any view opens: only the pet's own leaving does anything */
 function leave(){
+  if(!P.inView) return;
+  P.inView=false;
   persistOuting();
   stopTimer(); clearHold();
   if(P.roomHold){ clearTimeout(P.roomHold); P.roomHold=0; }
@@ -1320,15 +1324,22 @@ function leave(){
   P.wordWord=""; P.wordMeaning=null; P.wordBusy=false;
   stopAiJob();
   saveNow();
+  stopJingle();
+}
+/* only the pet's own jingle: music calls are rate-limited, and another program's song is not the pet's to stop */
+function stopJingle(){
+  if(!P.jingle) return;
+  P.jingle=false;
   if(LP.chip && LP.chip.music) LP.chip.music({action:"stop"});
 }
 function pause(){
+  if(!P.inView) return;
   if(P.roomHold){ clearTimeout(P.roomHold); P.roomHold=0; }
   P.holdFired=false; clearHold();
   persistOuting();
   stopTimer(); saveNow();
   stopAiJob();
-  if(LP.chip && LP.chip.music) LP.chip.music({action:"stop"});
+  stopJingle();
 }
 function resume(){
   if(!isOpen()) return;

@@ -187,7 +187,7 @@ function show(name){
   var target=null;
   LP.builtins.forEach(function(b){ if(!b.view) return; if(b.view===name) target=b; else if(b.leave) b.leave(); });
   if(!(target && target.keepPad)) showPad(false);
-  if(target && target.id) countUse(target.id);
+  if(target && target.id && target.id!=="run") countUse(target.id);
   if(name==="run") countUse("apps");   /* community app (and local script) runs */
   if(name==="home"){ renderHome(); refresh("apps"); }
   if(target && target.enter) target.enter();

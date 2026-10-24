@@ -5244,7 +5244,7 @@ test("camera snap: the camera program's loaded roll, frames, film box and latent
   await p.click("#home-key");
   const camState = () => p.evaluate(async () => {
     const all = await window.LopdaPlatform.dumpAll();
-    const docs = all.docs.filter((d) => !/\/(sensors|settings|apps|code|kv|preinstall)(\/|$)/.test(d.path)).map((d) => d.path + " " + JSON.stringify(d.data));
+    const docs = all.docs.filter((d) => !/\/(sensors|settings|apps|code|kv|preinstall|usage)(\/|$)/.test(d.path)).map((d) => d.path + " " + JSON.stringify(d.data));
     return { docs: docs.sort(), files: all.files.map((f) => f.key).sort() };
   });
   const before = await camState();
@@ -6138,6 +6138,9 @@ test("cart: the ROM in the emulator stays whole across eject, play again and a .
 /* ---------------- whole-device backup and restore (Settings) ---------------- */
 
 /* both databases read straight from IndexedDB, Blobs and typed arrays as their bytes in hex: what "byte for byte" compares */
+/* the open counts (data/users/local/usage, the pet's adult form) grow every time the test opens a program between two
+   dumps; they are backed up and restored like any document, but not compared byte for byte */
+const noUsage = (d) => ({ ...d, docs: Object.fromEntries(Object.entries(d.docs).filter(([k]) => k !== "data/users/local/usage")) });
 const dumpRaw = (p) => p.evaluate(async () => {
   const hex = (u8) => Array.from(u8, (b) => b.toString(16).padStart(2, "0")).join("");
   const all = (name, store) => new Promise((res, rej) => {
@@ -6266,7 +6269,7 @@ test("backup: Settings saves every document and file; after a wipe, restore brin
   await boot("reload");
   const after = await dumpRaw(p);
   assert.deepEqual(after.files, before.files);
-  assert.deepEqual(after.docs, before.docs);
+  assert.deepEqual(noUsage(after).docs, noUsage(before).docs);
   /* the programs start from the restored data */
   assert.equal(await p.evaluate(() => LP.dict.inBook("serendipity")), true);
   await tile(p, "记事本");
@@ -6306,7 +6309,7 @@ test("backup: a damaged, foreign or newer backup is refused and nothing changes;
     assert.deepEqual(await p.$$eval("#set-backup-btns .btn", (bs) => bs.map((b) => b.textContent)), ["好"]);
     await p.click("#set-backup-btns .btn");
     await p.waitForSelector("#set-backup-box", { state: "hidden" });
-    assert.deepEqual(await dumpRaw(p), now);
+    assert.deepEqual(noUsage(await dumpRaw(p)), noUsage(now));
   };
   const Z = zipReader(), u8 = new Uint8Array(file.bytes), list = Z.list(u8);
   /* one byte of a stored file changed */
@@ -6344,7 +6347,7 @@ test("backup: a damaged, foreign or newer backup is refused and nothing changes;
   await p.click("#set-backup-btns .btn:not(.ghost)");
   await p.waitForFunction(() => /^恢复失败，什么都没有改。$/.test(document.getElementById("set-backup-msg").textContent), null, { timeout: 20000 });
   assert.equal(await p.evaluate(() => window.__arm), false, "the stub did fire");
-  assert.deepEqual(await dumpRaw(p), current);
+  assert.deepEqual(noUsage(await dumpRaw(p)), noUsage(current));
   assert.deepEqual(notBlocked(errors).filter((e) => !/restore failed|stubbed failure/.test(e)), []);
 });
 
