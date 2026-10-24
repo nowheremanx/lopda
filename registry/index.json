@@ -1,6 +1,6 @@
 {
   "spec": "lopda/1",
-  "generated": "2026-10-22",
+  "generated": "2026-10-24",
   "apps": [
     {
       "spec": "lopda/1",
@@ -251,6 +251,48 @@
       "path": "apps/kana-cards/index.html",
       "sha256": "8a7ae828c7a0b5e1885c8732530dd237abd1302e1dc290e9603d5b5d5a3421ca",
       "bytes": 21949
+    },
+    {
+      "spec": "lopda/1",
+      "id": "luck-compass",
+      "name": "神位罗盘",
+      "glyph": "吉",
+      "category": "life",
+      "buttons": true,
+      "icon": [
+        "................",
+        ".....000000.....",
+        "...0033333300...",
+        "..033000000330..",
+        ".03300000000330.",
+        ".03000000000030.",
+        "0300001000000030",
+        "0300011100000030",
+        "0300111110000030",
+        "0300011100000030",
+        "0300001000000030",
+        ".03000000000030.",
+        ".03300000000330.",
+        "..033000000330..",
+        "...0033333300...",
+        ".....000000....."
+      ],
+      "version": "1.0.0",
+      "description": "平放手机当罗盘，看今天喜神、财神、福神在哪个方向。旧历书上的说法，图个吉利。指南针的示范。",
+      "i18n": {
+        "en": {
+          "name": "LuckyWay",
+          "description": "Hold the phone flat like a compass to find today's lucky directions."
+        }
+      },
+      "author": "Haowei Wu",
+      "license": "MIT",
+      "permissions": [
+        "motion"
+      ],
+      "path": "apps/luck-compass/index.html",
+      "sha256": "17a5ff7b6f5327f3fef76526ef539641a9d7b6996c697d2ff9fac49b2371c62c",
+      "bytes": 55745
     },
     {
       "spec": "lopda/1",
