@@ -620,7 +620,11 @@ textarea::placeholder{color:var(--ink-2)}
 .pet-souvfoot{display:flex;justify-content:space-between;gap:8px;font-size:14px;color:var(--ink-2)}
 .pet-wordbig{margin:8px 0 0;font-family:var(--f-pix);font-size:40px;line-height:1.1;overflow-wrap:anywhere}
 .pet-meaning{margin:2px 0 0;font-size:14px;line-height:1.4;overflow-wrap:anywhere;overflow:hidden;display:-webkit-box;-webkit-line-clamp:7;-webkit-box-orient:vertical}
+.pet-eggline{flex:none;display:flex;align-items:center;justify-content:center;height:44px;margin:0;padding:0 10px;text-align:center;font-size:14px;line-height:1.3;color:var(--ink-2)}
+.pet-eggline[hidden]{display:none}
 .pet-icons{flex:none;display:flex;justify-content:space-around;align-items:center;height:44px;overflow:hidden}
+.pet-icons[hidden]{display:none}
+.pet-keys[hidden]{display:none}
 .pet-ikey{flex:none;width:44px;height:44px;padding:0;display:flex;align-items:center;justify-content:center;background:transparent;border:0;cursor:pointer;position:relative}
 .pet-ikey.on{box-shadow:inset 0 0 0 2px var(--ink)}
 .pet-icv{display:block;width:24px;height:24px;image-rendering:pixelated;image-rendering:crisp-edges}
