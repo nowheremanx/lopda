@@ -49,12 +49,18 @@ test("sensor: quantize to 1/32 steps, clamped to -1..1", () => {
 });
 
 test("sensor motion: tilt from beta and gamma, y from the start pose, about 45 degrees to the end", () => {
-  assert.deepEqual({ ...LS.tilt(40, 0, 40) }, { x: 0, y: 0 });
-  assert.deepEqual({ ...LS.tilt(40, 45, 40) }, { x: 1, y: 0 });
-  assert.deepEqual({ ...LS.tilt(40, -90, 40) }, { x: -1, y: 0 });
+  assert.deepEqual(JSON.parse(JSON.stringify(LS.tilt(40, 0, 40))), { x: 0, y: 0, flat: { x: 0, y: -0.875 } });
+  assert.deepEqual(JSON.parse(JSON.stringify(LS.tilt(40, 45, 40))), { x: 1, y: 0, flat: { x: 1, y: -0.875 } });
+  assert.deepEqual(JSON.parse(JSON.stringify(LS.tilt(40, -90, 40))), { x: -1, y: 0, flat: { x: -1, y: -0.875 } });
   /* the top edge raised (beta grows) is -1, lowered is +1 */
   assert.equal(LS.tilt(62.5, 0, 40).y, -0.5);
   assert.equal(LS.tilt(17.5, 0, 40).y, 0.5);
+  /* flat is absolute: lying face up is {0, 0}, upright is -1, tilted right is positive, beta0 does not move it */
+  assert.deepEqual({ ...LS.tilt(0, 0, 0).flat }, { x: 0, y: 0 });
+  assert.deepEqual({ ...LS.tilt(0, 0, 40).flat }, { x: 0, y: 0 }, "beta0 does not change flat");
+  assert.equal(LS.tilt(90, 0, 0).flat.y, -1, "upright");
+  assert.equal(LS.tilt(0, 9, 0).flat.x, 0.1875, "9/45 = 0.2, in 1/32 steps");
+  assert.equal(LS.tilt(0, 9, 0).flat.x, LS.tilt(0, 9, 0).x, "flat.x is x");
 });
 
 test("sensor motion: heading on a 32-point compass, null without one", () => {
@@ -177,7 +183,7 @@ test("sensor motion: one tap asks orientation and motion together, then readings
   const started = w.host.startMotion(w.app);
   w.orient(40, 10.1, 91);
   assert.equal(await started, "on");
-  assert.deepEqual({ ...w.msgs("tilt")[0] }, { op: "tilt", x: 0.21875, y: 0, heading: 90 });
+  assert.deepEqual(JSON.parse(JSON.stringify(w.msgs("tilt")[0])), { op: "tilt", x: 0.21875, y: 0, heading: 90, flat: { x: 0.21875, y: -0.875 } });
   for (let i = 0; i < 60; i++) { w.orient(40 + i / 4, 10, null); w.c.advance(1000 / 60); }
   const n = w.msgs("tilt").length;
   assert.ok(n <= 32, "at most about 30 a second: " + n);
@@ -199,10 +205,13 @@ test("sensor motion: zero() makes the pose now y = 0", async () => {
   const p = w.host.startMotion(w.app); w.orient(40, 0); await p;
   w.c.advance(100); w.orient(62.5, 0);
   assert.equal(w.msgs("tilt").at(-1).y, -0.5);
+  assert.equal(w.msgs("tilt").at(-1).flat.y, -1, "flat does not count from the start pose");
   w.c.advance(100); w.host.zero(w.app);
   assert.equal(w.msgs("tilt").at(-1).y, 0);
+  assert.equal(w.msgs("tilt").at(-1).flat.y, -1, "zero() does not change flat");
   w.c.advance(100); w.orient(40, 0);
   assert.equal(w.msgs("tilt").at(-1).y, 0.5);
+  assert.equal(w.msgs("tilt").at(-1).flat.y, -0.875, "flat follows beta only");
   w.host.zero(w.other);   /* not the app that has motion: ignored */
   assert.equal(w.msgs("tilt").at(-1).y, 0.5);
 });
