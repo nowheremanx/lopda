@@ -587,7 +587,10 @@ textarea::placeholder{color:var(--ink-2)}
 
 /* pet (runtime/apps/pet.js): one hardware screen, the room at 4 px a room pixel, eight 44 px icons, soft keys */
 .pet-view{display:flex;flex-direction:column;overflow:hidden;padding:0}
-.pet-stage{position:relative;flex:none;width:324px;height:240px;margin:0 auto;overflow:hidden;background:var(--lcd)}
+/* the room keeps 4 CSS px a room pixel and is centred in whatever height is left above the icons: the spare height is paper,
+   and the soft keys sit on the very bottom of the LCD like the calendar's and the dictionary's */
+.pet-stage{flex:1;min-height:240px;display:flex;align-items:center;justify-content:center;overflow:hidden;background:var(--lcd)}
+.pet-room{position:relative;flex:none;width:324px;height:240px;overflow:hidden}
 .pet-cv{display:block;width:324px;height:240px;image-rendering:pixelated;image-rendering:crisp-edges}
 .pet-panel{position:absolute;inset:0;background:var(--lcd);color:var(--ink);padding:8px 10px;display:flex;flex-direction:column;gap:4px;overflow:hidden;font-size:14px;line-height:1.35}
 .pet-panel p{margin:0}

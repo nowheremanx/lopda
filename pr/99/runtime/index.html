@@ -328,9 +328,11 @@
     <!-- PET: one hardware screen, the room (81 x 60 at 4 px), eight icons and the soft keys; sub-screens open over the room -->
     <section class="view pet-view" id="v-pet" hidden>
       <div class="pet-stage" id="pet-stage">
-        <canvas class="pet-cv" id="pet-cv" width="81" height="60" data-i18n-label="pet.room" aria-label="宠物的房间"></canvas>
-        <div class="pet-panel" id="pet-panel" hidden></div>
-        <div class="pet-away" id="pet-away" hidden></div>
+        <div class="pet-room">
+          <canvas class="pet-cv" id="pet-cv" width="81" height="60" data-i18n-label="pet.room" aria-label="宠物的房间"></canvas>
+          <div class="pet-panel" id="pet-panel" hidden></div>
+          <div class="pet-away" id="pet-away" hidden></div>
+        </div>
       </div>
       <div class="pet-icons" id="pet-icons"></div>
       <div class="pet-keys" id="pet-keys"></div>
