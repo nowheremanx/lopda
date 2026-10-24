@@ -67,6 +67,9 @@ var P={
   eggMs:0, action:null, actionUntil:0, heartUntil:0,
   washUntil:0, washStart:0, flash:null, outing:null, foodSel:0, boxPage:0,
   game:null, gameSel:0, gameTimer:0, gameLabel:"", gameHeld:{left:false,right:false,a:false}, gamePress:{left:false,right:false,a:false}, gameTouch:null,
+  gameSeed:null,
+  angryUntil:0, moodClearUntil:0, callTaps:[],
+  idle:null, idleRng:null,
   confirmStage:0, panelKey:"",
   saveTimer:0, lastWants:null, bringing:false,
   pickSeq:0, wordWord:"", wordMeaning:null, wordBusy:false, aiJob:null,
@@ -869,6 +872,7 @@ function patPet(){
   P.save=Pet.pat(P.save,dayKey(now()));
   if((P.save.today ? P.save.today.pats : 0)!==before){
     P.action="happy"; P.actionUntil=now()+2000; P.heartUntil=now()+2000;
+    P.moodClearUntil=now()+8000; P.angryUntil=0; P.idle=null;   /* a pat lifts the low mood at once */
     beep("ok"); saveSoon(); render();
   }
 }
@@ -885,6 +889,7 @@ function feed(kind){
   P.save=Pet.feed(P.save,kind,t,dayKey(t));
   if(kind==="snack" && P.save.today && P.save.today.burp){ burp=true; P.save.today.burp=false; }
   P.sub=null; P.action=burp?"burp":"eat"; P.actionUntil=t+(burp?1200:2000);
+  P.moodClearUntil=t+8000; P.angryUntil=0; P.idle=null;       /* a meal lifts the low mood at once */
   beep(burp?"err":"ok");
   saveSoon(); renderKeys(); render();
 }
@@ -896,13 +901,25 @@ function washPet(){
 }
 function toggleLight(){
   if(!P.save) return;
+  var t=now(), h=hourNow(), night=h<6 || h>=19, mins=localDate(t).getUTCMinutes();
+  var waking=!!(P.save.light===false && night && Pet.asleep(P.save,h,mins));   /* the light woke it */
   P.save=Pet.setLight(P.save,!P.save.light);
-  P.action=null; P.actionUntil=0;
+  P.action=null; P.actionUntil=0; P.idle=null;
+  if(waking) P.angryUntil=t+1500;                             /* brief, and never carried to tomorrow */
   beep("tick"); saveSoon(); renderKeys(); render();
 }
 function callPet(){
-  var w=wantsOf();
-  if(!w) return;
+  var t=now(), w=wantsOf();
+  if(!w){
+    /* Tapping 呼唤 when it wants nothing: the first two are a small noise, the third in a minute is a short anger. */
+    P.callTaps=(P.callTaps||[]).filter(function(x){ return t-x<60000; });
+    P.callTaps.push(t);
+    if(P.callTaps.length>=3){ P.callTaps=[]; P.angryUntil=t+1500; beep("err"); }
+    else beep("tick");
+    P.idle=null; render();
+    return;
+  }
+  P.callTaps=[];
   if(w==="food"){ P.lookAt="food"; P.action="wait"; }
   else { P.lookAt="wash"; P.action="wait"; }
   P.actionUntil=now()+3000;
@@ -973,7 +990,7 @@ function startGame(id){
   if(!g) return;
   stopGameTimer();
   P.sub="game";
-  P.game={id:g.id, state:g.init((now()>>>0)), applied:false};
+  P.game={id:g.id, state:g.init(P.gameSeed!=null ? (P.gameSeed>>>0) : (now()>>>0)), applied:false};
   P.gameHeld={left:false,right:false,a:false};
   P.gamePress={left:false,right:false,a:false};
   P.gameLabel="";
@@ -1237,29 +1254,61 @@ function eggGrid(pack){
   else if(P.eggMs>=EGG_MS/3 && cracks[0]) g=cracks[0];
   return g;
 }
+/* Moods are read from the two numbers the pet already has, plus the short anger timers. They never last: a pat or
+   a meal lifts the low mood at once, and anger is only ever a second and a half. */
+function moodFace(t){
+  if(!P.save || P.save.stage==="egg") return null;
+  if(Pet.asleep(P.save,Pet.hourOf(t,tz()),localDate(t).getUTCMinutes())) return null;
+  if(P.angryUntil>t) return "angry";
+  if(P.moodClearUntil>t) return null;
+  if((+P.save.hunger||0)<=1) return "sad";
+  if((+P.save.joy||0)<=1) return "sulk";
+  return null;
+}
+function idleFace(){
+  if(!P.idle) return null;
+  if(P.idle.kind==="blink") return "blink";
+  if(P.idle.kind==="sit") return "idle2";
+  return "idle1";
+}
 function petGrid(save,pack,t,asleepNow){
   if(save.stage==="egg") return shift(eggGrid(pack), P.frame?1:0);
-  if(save.stage==="baby") return shift(pack.baby, P.frame?1:0);
-  if(save.stage==="child") return shift(pack.child, P.frame?1:0);
   var marks=markNames(save,pack), a=P.action || "idle";
+  var idle=idleFace(), mood=null;
   var face="idle1";
   if(a==="eat") face=P.frame?"eat2":"eat1";
   else if(a==="happy" || a==="burp") face="happy";
   else if(a==="sleep" || asleepNow) face="sleep";
   else if(a==="wait") face="wait";
   else if(a==="wash" || a==="woke") face=P.frame?"surprised":"happy";
-  else face=P.frame?"idle2":"idle1";
+  else {
+    mood=(a==="idle") ? moodFace(t) : null;
+    face=mood || (P.idle ? (idle||"idle1") : (P.frame?"idle2":"idle1"));
+  }
+  var look=(P.idle && (P.idle.kind==="lookL"||P.idle.kind==="lookR")) ? (P.idle.kind==="lookL"?-1:1) : 0;
+  /* Baby and child have their own small bodies, but the same face vocabulary: moods, blinks and game poses all
+     read there too (the owner sees these stages for the first ten days). */
+  if(save.stage==="baby" || save.stage==="child"){
+    var smallStage=Art.stagePose(pack,save.stage,marks,"front",face);
+    if(a==="shake") return shiftX(smallStage,P.frame?1:-1);
+    return look ? shiftX(smallStage,look) : smallStage;
+  }
   if(save.stage==="adult"){
-    var g=pack.adult(save.form||"plain",marks);
+    var opts={ant:marks.ant, pat:marks.pat, eye:marks.eye};
+    if(mood) opts.face=mood;
+    if(face==="idle2" && !mood) opts.squat=true;
+    if(face==="blink" && !mood) opts.face="closed";
+    var g=pack.adult(save.form||"plain",opts);
     if(a==="shake") return shiftX(g,P.frame?1:-1);
     if(face==="happy") return shift(g,-1);
-    if(face==="sleep" || face==="wait") return g;
-    return shift(g,P.frame?1:0);
+    if(face==="sleep" || face==="wait" || mood) return look?shiftX(g,look):g;
+    return look?shiftX(g,look):shift(g,P.frame?1:0);
   }
   var small=pack.frames({
     ant:marks.ant, pat:marks.pat, eye:marks.eye, face:face
   });
-  return a==="shake" ? shiftX(small,P.frame?1:-1) : shift(small,0);
+  if(a==="shake") return shiftX(small,P.frame?1:-1);
+  return look ? shiftX(small,look) : shift(small,0);
 }
 function overlayGrid(base,top,x,y){
   if(!base || !top) return base;
@@ -1348,7 +1397,7 @@ function roomScene(){
     if(save.stage==="egg"){
       scene.pet=shift(eggGrid(pack), P.frame?1:0);
     } else if(save.stage==="baby" || save.stage==="child"){
-      scene.pet=shift(save.stage==="baby"?pack.baby:pack.child, P.frame?1:0);
+      scene.pet=Art.stagePose(pack,save.stage,markNames(save,pack),"front",P.frame?"walk1":"walk2");
     } else {
       scene.pet=shift(pack.frames({
         ant:markNames(save,pack).ant, pat:markNames(save,pack).pat, eye:markNames(save,pack).eye,
@@ -1402,7 +1451,9 @@ function renderGame(){
   var g=gameById(P.game.id), st=gameState();
   if(!g || !st) return;
   var pack=packOf(P.save), marks=P.save ? markNames(P.save,pack) : {};
-  g.draw(st,buf,ROOM_W,ROOM_H,pack,function(view,name){ return Art.pose(pack,marks,view,name); });
+  g.draw(st,buf,ROOM_W,ROOM_H,pack,function(view,name){
+    return Art.stagePose(pack,P.save ? P.save.stage : "adult",marks,view,name);
+  });
   paintRoomBuffer();
 }
 
@@ -1441,9 +1492,12 @@ function buildIcons(){
   iconBuilt=true;
 }
 function renderIcons(){
+  var wrap=$("pet-icons"); if(!wrap) return;
+  /* An egg has no icon row at all: not faint icons, no buttons. The line below the room says what is happening. */
+  if(isEgg()){ wrap.hidden=true; wrap.textContent=""; iconBuilt=false; iconCvs={}; return; }
+  wrap.hidden=false;
   if(!iconBuilt) buildIcons();
   var pack=packOf(P.save), icons=(pack&&pack.icons)||{};
-  var wrap=$("pet-icons"); if(!wrap) return;
   var kids=wrap.children;
   ICON_NAMES.forEach(function(name,i){
     var cv=iconCvs[name]; if(!cv) return;
@@ -1584,6 +1638,7 @@ function renderPanel(){
 function render(){
   if(P.sub==="game" && P.game) renderGame();
   else { renderRoom(); renderIcons(); }
+  renderEggLine();
   renderPanel();
   var away=$("pet-away");
   if(away){
@@ -1617,10 +1672,20 @@ function aKeyLabel(){
   }
   return "pet.sk.use";
 }
+function renderEggLine(){
+  var line=$("pet-eggline");
+  if(!line) return;
+  var egg=isEgg();
+  line.hidden=!egg;
+  line.textContent=egg ? tr("pet.eggline") : "";
+}
 function renderKeys(){
   var wrap=$("pet-keys");
   if(!wrap) return;
   var label=aKeyLabel(), egg=isEgg();
+  /* While it is an egg the soft keys are hidden, not greyed: a calm screen with HOME as the only way out. */
+  if(egg){ wrap.hidden=true; wrap.textContent=""; return; }
+  wrap.hidden=false;
   var inGame=P.sub==="game" && !gameDone();
   LP.softkeys(wrap,{
     select:null,                           /* reserved for switching rooms when more species come (visits) */
@@ -1651,6 +1716,19 @@ function startHold(){
 function clearHold(){ if(P.hold){ clearTimeout(P.hold); P.hold=0; } }
 
 /* ---------- timers ---------- */
+/* Idle variety: a blink, a look to one side, or a short sit, seeded from the pet so a session has its own rhythm.
+   The room tick is 500 ms (2 fps), and every action is one or two frames, so nothing ever flickers. */
+function idleAllowed(){
+  return !!(P.save && P.save.stage!=="egg" && !P.sub && !P.action && !P.idle && !P.save.travel && !P.outing);
+}
+function idleRoll(t){
+  if(!idleAllowed()) return;
+  if(!P.idleRng) P.idleRng=Pet.rng(((+P.save.born||1)^0x6d2b79f5)>>>0);
+  if(P.idleRng()>=0.22) return;
+  var r=P.idleRng();
+  var kind=r<0.45?"blink":r<0.7?"lookL":r<0.9?"lookR":"sit";
+  P.idle={kind:kind, until:t+(kind==="blink"?500:1000)};
+}
 function startTimer(){
   stopTimer();
   P.anim=setInterval(tick,500);
@@ -1671,6 +1749,9 @@ function tick(){
     if(P.eggMs>=EGG_MS) hatchNow(false);
   }
   if(P.actionUntil && t>=P.actionUntil){ P.action=""; P.actionUntil=0; P.lookAt=""; }
+  if(P.action) P.idle=null;
+  if(P.idle && t>=P.idle.until) P.idle=null;
+  idleRoll(t);
   if(P.heartUntil && t>=P.heartUntil) P.heartUntil=0;
   if(P.washUntil && t>=P.washUntil) P.washUntil=0;
   if(P.outing){ stepOuting(); }
@@ -1947,6 +2028,17 @@ if(/[?&]debug\b/.test(location.search)){
       return P.save;
     },
     hatch:function(){ hatchNow(true); return P.save; },
+    /* a fixed seed for a play pack (tests and the owner can replay the same round) */
+    gameSeed:function(n){ P.gameSeed=(n==null?null:(+n>>>0)); return P.gameSeed; },
+    gameState:function(){ var st=gameState(); return st?JSON.parse(JSON.stringify(st)):null; },
+    mood:function(){ return moodFace(now()); },
+    setStats:function(h,j){
+      if(!P.save) return null;
+      if(h!=null) P.save.hunger=Math.max(0,Math.min(5,Math.floor(+h||0)));
+      if(j!=null) P.save.joy=Math.max(0,Math.min(5,Math.floor(+j||0)));
+      P.moodClearUntil=0; P.angryUntil=0; saveSoon(); render();
+      return P.save;
+    },
     forceOuting:function(){
       if(!P.save || P.save.stage==="egg") return P.save;
       startOuting(hourNow());

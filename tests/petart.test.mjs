@@ -37,14 +37,14 @@ function frameGrids() {
   return out;
 }
 
-test("the pack is one chip species with 4 x 4 x 3 markings, 6 adult forms, 12 actions and a room", () => {
+test("the pack is one chip species with 4 x 4 x 3 markings, 6 adult forms, 15 actions and a room", () => {
   assert.equal(P.id, "chip");
   assert.deepEqual(A.PACKS.chip, P);
   assert.deepEqual([...P.marks.ant], ["ball", "stick", "fork", "bent"]);
   assert.deepEqual([...P.marks.pat], ["plain", "dot", "stripe", "trace"]);
   assert.deepEqual([...P.marks.eye], ["dot", "bar", "big"]);
   assert.deepEqual([...P.forms], ["book", "walk", "scholar", "diary", "monster", "plain"]);
-  assert.deepEqual([...P.faces], ["idle1", "idle2", "blink", "eat1", "eat2", "happy", "walk1", "walk2", "sleep", "wait", "surprised", "hold"]);
+  assert.deepEqual([...P.faces], ["idle1", "idle2", "blink", "eat1", "eat2", "happy", "walk1", "walk2", "sleep", "wait", "surprised", "sad", "angry", "sulk", "hold"]);
   assert.deepEqual([...A.TONES], ["#1f2a14", "#4a5a32", "#7d8a58", "#a3ad7e"]);
   assert.equal(P.room.w, 81);
   assert.equal(P.room.h, 60);
@@ -93,7 +93,7 @@ test("floor props: the full and empty bowls are the same bowl, and a pile uses m
 
 test("frames: every action with all 48 markings is 16 x 16", () => {
   for (const [name, g] of frameGrids()) assertGrid(name, g, 16, 16);
-  assert.equal(frameGrids().length, 12 * 4 * 4 * 3);
+  assert.equal(frameGrids().length, 15 * 4 * 4 * 3);
   /* the two resting postures use a drooped antenna, so the rolled mark does not show there */
   assert.deepEqual(P.frames({ face: "sleep", ant: "fork" }), P.frames({ face: "sleep", ant: "ball" }));
   assert.notDeepEqual(P.frames({ face: "idle1", ant: "fork" }), P.frames({ face: "idle1", ant: "ball" }));
@@ -302,7 +302,7 @@ test("drawRoom: night and season change only the window", () => {
 
 test("poses: every standard pose exists for every mark combination, 16 x 16, only .kdmp", () => {
   assert.deepEqual(Object.keys(A.POSE_NAMES).sort(), ["front", "side"]);
-  assert.deepEqual([...A.POSE_NAMES.front], ["idle", "happy", "sad", "jump", "fall", "catch"]);
+  assert.deepEqual([...A.POSE_NAMES.front], ["idle", "happy", "sad", "angry", "sulk", "blink", "jump", "fall", "catch"]);
   assert.deepEqual([...A.POSE_NAMES.side], ["walk1", "walk2", "jump", "flap1", "flap2"]);
   for (const view of Object.keys(A.POSE_NAMES)) {
     assert.deepEqual(Object.keys(P.poses[view]).sort(), [...A.POSE_NAMES[view]].sort(), `the pack provides every ${view} pose`);
@@ -315,6 +315,52 @@ test("poses: every standard pose exists for every mark combination, 16 x 16, onl
     A.pose(P, { ant: "fork", pat: "stripe", eye: "big" }, "side", "walk1"));
   const pictures = new Set(A.POSE_NAMES.front.map((n) => A.pose(P, {}, "front", n).join("\n")));
   assert.equal(pictures.size, A.POSE_NAMES.front.length, "the six front poses differ");
+});
+
+test("moods: sad, angry and sulk are real faces, different from idle and from each other, marks included", () => {
+  const idle = A.pose(P, {}, "front", "idle");
+  const sad = A.pose(P, {}, "front", "sad");
+  const angry = A.pose(P, {}, "front", "angry");
+  const sulk = A.pose(P, {}, "front", "sulk");
+  for (const [name, g] of [["sad", sad], ["angry", angry], ["sulk", sulk]]) {
+    assertGrid(name, g, 16, 16);
+    assert.notDeepEqual(g, idle, `${name} is not the neutral wait face`);
+  }
+  assert.notDeepEqual(sad, angry); assert.notDeepEqual(sad, sulk); assert.notDeepEqual(angry, sulk);
+  /* the mouth turns down (corners lower than the middle) and the sad eyes are not the old flat wait eyes */
+  assert.notDeepEqual(sad, A.pose(P, {}, "front", "idle"));
+  const mouth = (g) => g[9].split("").map((c, i) => c !== "." ? i : -1).filter((i) => i >= 0);
+  assert.ok(mouth(sad).includes(6) && mouth(sad).includes(9), "the sad mouth has low corners");
+  assert.equal(angry[4][4], "k", "anger draws a slanted brow");
+  assert.equal(angry[6][4], "k", "and a narrowed eye below it");
+  /* every mark combination still shows its antenna and pattern */
+  for (const ant of P.marks.ant) for (const pat of P.marks.pat) for (const eye of P.marks.eye) {
+    const g = A.pose(P, { ant, pat, eye }, "front", "angry");
+    assertGrid(`angry ${ant}/${pat}/${eye}`, g, 16, 16);
+  }
+  assert.notDeepEqual(A.pose(P, { ant: "fork", pat: "trace" }, "front", "sad"),
+    A.pose(P, { ant: "ball", pat: "plain" }, "front", "sad"), "the marks still show in a mood");
+});
+test("baby and child: moods, idle and every game pose use their own small body", () => {
+  const marks = { ant: "fork", pat: "trace", eye: "big" };
+  for (const stage of ["baby", "child"]) {
+    const pose = (name) => A.stagePose(P, stage, marks, "front", name);
+    const idle = pose("idle");
+    assertGrid(stage + " idle", idle, 16, 16);
+    for (const name of ["sad", "angry", "sulk", "blink", "happy", "jump", "fall", "catch", "walk1", "walk2"]) {
+      const g = pose(name);
+      assertGrid(stage + " " + name, g, 16, 16);
+      assert.notDeepEqual(g, idle, stage + " " + name + " differs from idle");
+    }
+    assert.notDeepEqual(pose("sad"), pose("angry"));
+    assert.notDeepEqual(pose("sad"), pose("sulk"));
+    assert.notDeepEqual(pose("angry"), pose("sulk"));
+    /* the game asks for the side walk: the stage still answers with its own body, not the full chip */
+    assert.deepEqual(A.stagePose(P, stage, marks, "side", "walk1"), pose("walk1"));
+    assert.notDeepEqual(pose("walk1"), A.pose(P, marks, "side", "walk1"));
+    /* the face really changes inside the same body: the outline row is untouched */
+    assert.equal(pose("sad")[6], idle[6], stage + " keeps its body outline");
+  }
 });
 
 test("mirror: reverses every row, twice is the original", () => {

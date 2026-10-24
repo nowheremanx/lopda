@@ -13,9 +13,11 @@
  * number is an integer room pixel, so the same seed and input script give the same round on every device.
  * LopdaPet.rng seeds every random choice.
  *
- * Games may only ask a species pack for the standard poses (petart.js): front idle / happy / sad / jump /
- * fall / catch and side walk1 / walk2 / jump / flap1 / flap2. A pack that has the poses can play every game,
- * so a new species needs no game code. No side game ships yet: the side poses are drawn and ready for later.
+ * Games may only ask a species pack for the standard poses (petart.js): front idle / happy / sad / angry / sulk /
+ * blink / jump / fall / catch and side walk1 / walk2 / jump / flap1 / flap2. A pack that has the poses can play every
+ * game, so a new species needs no game code. No side game ships yet: the side poses are drawn and ready for later.
+ * A game's reactions are a pure table (reaction(id, event, state)): the tick names a moment, the table names a pose,
+ * and the pose lasts a few ticks before the movement pose takes over again.
  *
  * A finished state is {done:true, score, joy}; joy is +1, or +2 at the game's threshold, and never negative.
  * There is no losing state and no losing message: the program shows the score and 再来 / Again.
@@ -70,9 +72,50 @@ function blit(buf,w,h,grid,x,y){
 function poseOf(poseFor,view,name){
   try{ return poseFor(view,name); }catch(e){ return null; }
 }
-function base(id,seed){
-  return {id:id, seed:seed>>>0, rn:0, acc:0, tick:0, done:false, score:0, joy:0, events:[]};
+function mirrorGrid(grid){
+  if(!grid) return grid;
+  var out=[];
+  for(var r=0;r<grid.length;r++) out.push(String(grid[r]).split("").reverse().join(""));
+  return out;
 }
+function base(id,seed){
+  return {id:id, seed:seed>>>0, rn:0, acc:0, tick:0, done:false, score:0, joy:0, events:[],
+    react:null, reactUntil:0};
+}
+/* ---------- reactions: one small table per game, a pure function of the moment and the round ----------
+ * The tick calls this with the event it just added; the answer is a standard pose or null. Durations are in ticks
+ * (50 ms), short on purpose: the pet answers the moment, then goes back to moving. */
+var REACT_TICKS={happy:6,fall:6,sad:8,jump:8,blink:4};
+var REACT={
+  catch:function(event,state){
+    if(event==="catch") return state.catches>0 && state.catches%5===0 ? "jump" : "happy";
+    if(event==="miss") return state.misses>=2 ? "sad" : "fall";
+    return null;
+  },
+  bounce:function(event,state){
+    if(event==="return") return (state.rally||0)>=5 ? "happy" : null;
+    if(event==="miss") return "fall";
+    return null;
+  },
+  climb:function(event,state){
+    if(event==="record") return "happy";
+    if(event==="blink") return "blink";
+    return null;
+  }
+};
+function reaction(id,event,state){
+  var f=REACT[id];
+  return f ? (f(String(event||""),state||{}) || null) : null;
+}
+function note(s,event){
+  s.events.push(event);
+  var pose=reaction(s.id,event,s);
+  if(pose){
+    s.react=pose;
+    s.reactUntil=s.tick+(REACT_TICKS[pose]||6);
+  }
+}
+function reacting(s){ return !!(s.react && s.tick<s.reactUntil); }
 function joyFor(id,score){ return num(score)>=JOY2[id] ? 2 : 1; }
 function finish(state,score){
   if(!state || state.done) return state;
@@ -107,7 +150,7 @@ var THINGS=[
 ];
 function catchInit(seed){
   var s=base("catch",seed);
-  s.petX=32; s.petY=42; s.things=[]; s.misses=0; s.next=14;
+  s.petX=32; s.petY=42; s.things=[]; s.misses=0; s.catches=0; s.next=14;
   return s;
 }
 function catchTick(s,inp){
@@ -124,10 +167,10 @@ function catchTick(s,inp){
     o.y+=2;                                            /* 40 px a second: a short fall, time to walk over */
     var bottom=o.y+o.h, ox=o.x+o.w/2;
     if(bottom>=s.petY+4 && bottom<=s.petY+15 && ox>=s.petX+1 && ox<=s.petX+15){
-      s.things.splice(i,1); s.score++; s.events.push("catch");
+      s.things.splice(i,1); s.score++; s.catches++; note(s,"catch");
       continue;
     }
-    if(o.y>H){ s.things.splice(i,1); s.misses++; s.events.push("miss"); }
+    if(o.y>H){ s.things.splice(i,1); s.misses++; note(s,"miss"); }
   }
   if(s.misses>=3) finish(s);
   if(s.tick>=600) finish(s);                            /* 30 s at most, then the score stands */
@@ -141,7 +184,8 @@ function catchDraw(s,buf,w,h,pack,poseFor){
     var o=s.things[i];
     if(o.y>s.petY-24 && o.y<s.petY && Math.abs(o.x+o.w/2-(s.petX+8))<10) near=true;
   }
-  blit(buf,w,h,poseOf(poseFor,"front",near?"catch":"idle"),s.petX,s.petY);
+  var pose=reacting(s) ? s.react : (near?"catch":"idle");
+  blit(buf,w,h,poseOf(poseFor,"front",pose),s.petX,s.petY);
   for(i=0;i<s.things.length;i++){
     var t=THINGS[s.things[i].k]||THINGS[0];
     blit(buf,w,h,t.grid,s.things[i].x,s.things[i].y);
@@ -155,7 +199,7 @@ function bounceInit(seed){
   var s=base("bounce",seed);
   s.petX=32; s.petY=2;
   s.paddleX=33; s.paddleY=55; s.paddleW=15;
-  s.ball=null; s.reload=0; s.misses=0;
+  s.ball=null; s.reload=0; s.misses=0; s.rally=0; s.petFace=1;
   return s;
 }
 function bounceLaunch(s){
@@ -167,8 +211,8 @@ function bounceTick(s,inp){
   if(dir) s.paddleX=clamp(s.paddleX+dir*3,1,W-2-s.paddleW);   /* 60 px a second */
   if(s.tick%2===0 && s.ball){
     var target=clamp(s.ball.x-6,2,W-18);
-    if(target>s.petX) s.petX++;
-    else if(target<s.petX) s.petX--;
+    if(target>s.petX){ s.petX++; s.petDir=1; }
+    else if(target<s.petX){ s.petX--; s.petDir=-1; }
   }
   if(!s.ball){
     if(s.reload>0){
@@ -183,15 +227,15 @@ function bounceTick(s,inp){
     if(b.x>W-4){ b.x=W-4; b.vx=-1; }
     /* the pet is the top wall: a return is a point, a miss is only one of three */
     if(b.vy<0 && b.y<=s.petY+16 && b.y+3>=s.petY && b.x+3>=s.petX && b.x<=s.petX+15){
-      b.y=s.petY+16; b.vy=1; s.score++; s.events.push("return");
+      b.y=s.petY+16; b.vy=1; s.score++; s.rally++; note(s,"return");
     } else if(b.y<-4){
-      s.ball=null; s.reload=20; s.misses++; s.events.push("miss");
+      s.ball=null; s.reload=20; s.misses++; s.rally=0; note(s,"miss");
     }
     if(b && b.vy>0 && b.y+3>=s.paddleY && b.y<=s.paddleY+3 && b.x+3>=s.paddleX && b.x<=s.paddleX+s.paddleW){
       b.y=s.paddleY-3; b.vy=-1; b.vx=b.x+1<s.paddleX+s.paddleW/2?-1:1;
-      s.score++; s.events.push("return");
+      s.score++; s.rally++; note(s,"return");
     } else if(b && b.y>H){
-      s.ball=null; s.reload=20; s.misses++; s.events.push("miss");
+      s.ball=null; s.reload=20; s.misses++; s.rally=0; note(s,"miss");
     }
   }
   if(s.misses>=3) finish(s);
@@ -200,7 +244,15 @@ function bounceTick(s,inp){
 function bounceDraw(s,buf,w,h,pack,poseFor){
   clear(buf);
   rect(buf,w,h,0,0,1,h,2); rect(buf,w,h,w-1,0,1,h,2);
-  blit(buf,w,h,poseOf(poseFor,"front",s.ball&&s.ball.vy<0?"jump":"idle"),s.petX,s.petY);
+  var grid;
+  if(reacting(s)){
+    grid=poseOf(poseFor,"front",s.react);
+  } else {
+    /* the pet on top keeps pace with the ball: two walk frames, mirrored when it moves left */
+    grid=poseOf(poseFor,"side",s.tick%2?"walk2":"walk1");
+    if(s.petDir<0) grid=mirrorGrid(grid);
+  }
+  blit(buf,w,h,grid,s.petX,s.petY);
   rect(buf,w,h,s.paddleX,s.paddleY,s.paddleW,2,0);
   rect(buf,w,h,s.paddleX+1,s.paddleY+2,s.paddleW-2,1,1);
   if(s.ball){
@@ -210,52 +262,127 @@ function bounceDraw(s,buf,w,h,pack,poseFor){
   for(var i=0;i<s.misses;i++) rect(buf,w,h,1+i*3,1,2,1,0);
 }
 
-/* ---------- climb: the pet jumps on its own, the screen scrolls, the score is the height ---------- */
+/* ---------- climb: the pet jumps on its own, the screen scrolls, the score is the height ----------
+ * The body is 16 x 16, but only its bottom row is the feet: columns 3-12 at row 14. Collision and the sprite's x
+ * bounds use those feet, never the full 16 px box: a sprite whose empty corners hang over a platform is not on it.
+ * A jump rises 15 px (vy -6, +1 a tick) and the air time to a platform up to 12 px higher is 8 ticks, so the
+ * player can cross at most 16 px; every next platform is generated inside that reach. Steps are 9-12 px apart
+ * so they read as separate bars rather than a ladder of overlapping lines. */
+var C_RISE=15, C_RUN=16, C_GAP_MIN=9, C_GAP_MAX=12, C_JITTER=6;
+var C_JUMP=-6, C_CAM=15;                              /* camera only climbs above row 15 */
+var FEET_L=3, FEET_R=13, FEET_BOTTOM=14;               /* x+3 .. x+12 inclusive, y+14 */
+var START_PLAT={x:24,y:46,w:28};
+function feetOverlapX(s,p){ return s.pet.x+FEET_R>p.x && s.pet.x+FEET_L<p.x+p.w; }
+function platformUnderFeet(s){
+  var bottom=s.pet.y+FEET_BOTTOM, i, p;
+  for(i=0;i<s.plats.length;i++){
+    p=s.plats[i];
+    if(p.y===bottom && feetOverlapX(s,p)) return p;
+  }
+  return null;
+}
 function climbInit(seed){
   var s=base("climb",seed);
-  s.pet={x:32,y:30,vy:-5};
-  s.plats=[{x:24,y:46,w:28}];
+  s.pet={x:32,y:30,vy:C_JUMP,onPlat:false,rest:0};
+  s.plats=[{x:START_PLAT.x,y:START_PLAT.y,w:START_PLAT.w}];
   s.height=0;
   s.moved=false;
+  s.side=0;                                            /* while untouched, the chain stays on one side */
+  s.bestAlt=H-START_PLAT.y;                            /* world altitude of the start platform */
+  s.records=0;
+  s.landings=0;
   return s;
 }
-function climbPlatformX(s,pw){
-  if(s.moved) return 1+Math.floor(rand(s)*(W-2-pw));
-  /* Until the player actually steers, no higher platform may sit over the start platform's x range,
-     so a round with no input bounces on the start platform and never climbs. */
-  var leftMax=24-pw, rightMin=53, rightMax=W-1-pw;
-  if(leftMax>=1 && (rightMin>rightMax || rand(s)<0.5)) return 1+Math.floor(rand(s)*leftMax);
-  if(rightMin<=rightMax) return rightMin+Math.floor(rand(s)*(rightMax-rightMin+1));
-  return 1+Math.floor(rand(s)*(W-2-pw));
+function platformAlt(s,p){ return s.height+(H-p.y); }
+/* The next platform is reachable from the previous one: the same centred column, a small sideways step, and
+   clamped to the screen. Before the first steer the whole chain stays clear of the start platform's x range,
+   so a round with no input bounces on the start platform and never climbs. */
+function climbPlatformX(s,pw,from,first){
+  var maxX=W-1-pw, x;
+  if(from && !s.moved){
+    if(!s.side) s.side=rand(s)<0.5 ? -1 : 1;
+    if(s.side<0){
+      /* right edge < 24; the first one sits at the start platform's edge, inside the first jump's reach */
+      x=first ? START_PLAT.x-pw-1 : 1+Math.floor(rand(s)*Math.max(1,(START_PLAT.x-pw)));
+      return Math.max(1,x);
+    }
+    var lo=START_PLAT.x+START_PLAT.w+1;                                            /* left edge > 52 */
+    if(first) return Math.min(maxX,lo);
+    return lo+Math.floor(rand(s)*Math.max(1,maxX-lo+1));
+  }
+  if(!from) return 1+Math.floor(rand(s)*Math.max(1,maxX));
+  var center=from.x+Math.round((from.w-pw)/2);
+  var lo=Math.max(1,center-C_JITTER), hi=Math.min(maxX,center+C_JITTER);
+  if(hi<lo) return Math.max(1,Math.min(maxX,center));
+  return lo+Math.floor(rand(s)*(hi-lo+1));
+}
+/* The reachability the generator promises, also used by the tests: vertical gap at most jump height - 2,
+   horizontal gap coverable inside the air time. It answers whether some takeoff spot on `a` can land on `b`. */
+function climbReachable(a,b){
+  if(!a || !b) return false;
+  var rise=a.y-b.y;
+  if(rise<C_GAP_MIN || rise>C_RISE-2) return false;
+  var a0=Math.max(1,a.x), a1=Math.min(W-17,a.x+a.w-1);            /* takeoff x */
+  var b0=b.x-FEET_R+1, b1=b.x+b.w-FEET_L-1;                       /* x that puts the feet over b */
+  var gap=a1<b0 ? b0-a1 : b1<a0 ? a0-b1 : 0;
+  return gap<=C_RUN;
 }
 function climbTick(s,inp){
   var dir=(inp.right?1:0)-(inp.left?1:0), i;
-  /* The camera only climbs while the pet is high on the screen (above row 20). On the start platform
-     the automatic jump peaks at y=20, so doing nothing never scrolls and never scores. */
-  var dy=s.pet.y<20 ? Math.min(1,20-s.pet.y) : 0;
+  /* The camera only climbs while the pet is high on the screen (above row 15). On the start platform the
+     automatic jump peaks at y=15, so doing nothing never scrolls and never scores. */
+  var dy=s.pet.y<C_CAM ? Math.min(1,C_CAM-s.pet.y) : 0;
   if(dy>0){
     s.pet.y+=dy;
     s.height+=dy;
     for(i=0;i<s.plats.length;i++) s.plats[i].y+=dy;
   }
-  s.pet.x=clamp(s.pet.x+dir*2,1,W-17);
-  if(dir) s.moved=true;
-  /* gravity, and a landing springs the next jump */
-  s.pet.vy=Math.min(5,s.pet.vy+1);
-  s.pet.y+=s.pet.vy;
-  for(i=0;i<s.plats.length;i++){
-    var p=s.plats[i], bottom=s.pet.y+16;
-    if(s.pet.vy>0 && bottom>=p.y && bottom<=p.y+5 && s.pet.x+15>=p.x && s.pet.x<=p.x+p.w){
-      s.pet.y=p.y-16; s.pet.vy=-5; s.events.push("land");
-      break;
+  /* A standing pet checks its own platform every tick: if it is gone (scrolled away, or moved in a test),
+     the pet falls instead of hanging in the air. */
+  if(s.pet.onPlat){
+    var under=platformUnderFeet(s);
+    if(!under){
+      s.pet.onPlat=false; s.pet.vy=Math.max(1,s.pet.vy||0);
+    } else if(s.pet.rest>0){
+      s.pet.rest--;
+    } else {
+      if(!reacting(s) && rand(s)<0.2) note(s,"blink");             /* a small blink while standing */
+      s.pet.onPlat=false; s.pet.vy=C_JUMP;                        /* the next automatic jump */
     }
   }
+  s.pet.x=clamp(s.pet.x+dir*2,1,W-17);
+  if(dir && !s.moved){ s.moved=true; s.side=0; }
+  var prevBottom=s.pet.y+FEET_BOTTOM;
+  if(!s.pet.onPlat){
+    s.pet.vy=Math.min(5,s.pet.vy+1);
+    s.pet.y+=s.pet.vy;
+  }
+  var bottom=s.pet.y+FEET_BOTTOM, landing=null;
+  if(!s.pet.onPlat && s.pet.vy>0){
+    /* Swept: a fast fall may pass the platform's whole 3 px thickness in one tick. Land on the highest
+       platform the feet crossed on the way down, not only on one inside a 5 px window. */
+    for(i=0;i<s.plats.length;i++){
+      var p=s.plats[i];
+      if(prevBottom<=p.y && bottom>=p.y && feetOverlapX(s,p) && (!landing || p.y<landing.y)) landing=p;
+    }
+  }
+  if(landing){
+    s.pet.y=landing.y-FEET_BOTTOM; s.pet.vy=0; s.pet.onPlat=true; s.pet.rest=1;
+    s.landings++;
+    note(s,"land");
+    var alt=platformAlt(s,landing);
+    if(alt>s.bestAlt){ s.bestAlt=alt; s.records++; note(s,"record"); }
+  }
   for(i=s.plats.length-1;i>=0;i--) if(s.plats[i].y>H+2) s.plats.splice(i,1);
-  var top=H;
-  for(i=0;i<s.plats.length;i++) if(s.plats[i].y<top) top=s.plats[i].y;
+  var top=H, above=null, first=true;
+  for(i=0;i<s.plats.length;i++) if(s.plats[i].y<top){ top=s.plats[i].y; above=s.plats[i]; }
   while(top>18){
-    var pw=10+Math.floor(rand(s)*9), py=top-6-Math.floor(rand(s)*4);
-    s.plats.push({x:climbPlatformX(s,pw), y:py, w:pw});
+    var pw=10+Math.floor(rand(s)*9), gap=C_GAP_MIN+Math.floor(rand(s)*(C_GAP_MAX-C_GAP_MIN+1));
+    var py=top-gap;
+    var np={x:climbPlatformX(s,pw,above,first), y:py, w:pw};
+    s.plats.push(np);
+    above=np;
+    first=false;
     top=py;
   }
   s.score=Math.max(s.score,s.height);
@@ -269,7 +396,12 @@ function climbDraw(s,buf,w,h,pack,poseFor){
     rect(buf,w,h,p.x,p.y,p.w,3,0);
     rect(buf,w,h,p.x+1,p.y+1,p.w-2,1,2);
   }
-  if(s.pet) blit(buf,w,h,poseOf(poseFor,"front",s.pet.vy<0?"jump":"fall"),s.pet.x,s.pet.y);
+  if(!s.pet) return;
+  var pose;
+  if(reacting(s)) pose=s.react;
+  else if(s.pet.onPlat) pose="idle";
+  else pose=s.pet.vy<0?"jump":"fall";
+  blit(buf,w,h,poseOf(poseFor,"front",pose),s.pet.x,s.pet.y);
 }
 
 /* ---------- the three packs ---------- */
@@ -284,6 +416,9 @@ window.LopdaPetPlay={
   GAMES:[CATCH,BOUNCE,CLIMB],
   W:W, H:H, TICK:TICK,
   joyFor:joyFor,
-  finish:finish
+  finish:finish,
+  reaction:reaction,
+  climbReachable:climbReachable,
+  CLIMB:{RISE:C_RISE, RUN:C_RUN, GAP_MIN:C_GAP_MIN, GAP_MAX:C_GAP_MAX, FEET_L:FEET_L, FEET_R:FEET_R, FEET_BOTTOM:FEET_BOTTOM}
 };
 })();

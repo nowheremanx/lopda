@@ -109,6 +109,10 @@ var FACE={
   sleep:{face:"sleep",mouth:"none",ant:"droop"},
   wait:{face:"down",mouth:"flat",ant:"droop"},
   surprised:{face:"wow",mouth:"o"},
+  /* the moods: a real sad face, a short anger, and the turned-away sulk (never for long; no grudges) */
+  sad:{face:"sad",mouth:"frown"},
+  angry:{face:"angry",mouth:"tight"},
+  sulk:{face:"sulk",mouth:"frown"},
   hold:{}
 };
 /* the raw frame builder, kept close to art/chipart.js so the grids above stay the single source */
@@ -123,12 +127,32 @@ function build(o){
   if(face==="happy"){ [5,10].forEach(function(c){ setc(a,5,c,"k"); setc(a,6,c-1,"k"); setc(a,6,c+1,"k"); }); }
   if(face==="down"){ [5,10].forEach(function(c){ setc(a,6,c,"k"); setc(a,7,c,"k"); }); }
   if(face==="wow"){ [[5,6],[9,10]].forEach(function(p){ setc(a,5,p[0],"k"); setc(a,5,p[1],"k"); setc(a,6,p[0],"k"); setc(a,6,p[1],"k"); }); }
+  /* sad: the outer corners of the eyes droop, with a small lifted brow; the mouth turns down */
+  if(face==="sad"){
+    setc(a,4,4,"k"); setc(a,5,5,"k"); setc(a,6,6,"k");
+    setc(a,4,11,"k"); setc(a,5,10,"k"); setc(a,6,9,"k");
+  }
+  /* angry: slanted brows over narrowed eyes, and a puff of steam beside the cheek */
+  if(face==="angry"){
+    setc(a,4,4,"k"); setc(a,4,5,"k"); setc(a,5,6,"k");
+    setc(a,4,11,"k"); setc(a,4,10,"k"); setc(a,5,9,"k");
+    setc(a,6,4,"k"); setc(a,6,5,"k"); setc(a,6,10,"k"); setc(a,6,11,"k");
+    setc(a,7,13,"m"); setc(a,8,13,"m");
+  }
+  /* sulk: turned a little away, both eyes shifted to one side and looking down */
+  if(face==="sulk"){
+    setc(a,5,7,"k"); setc(a,6,7,"k"); setc(a,7,6,"k");
+    setc(a,5,12,"k"); setc(a,6,12,"k"); setc(a,7,11,"k");
+    setc(a,4,8,"m");
+  }
   var m=o.mouth||"smile";
   if(m==="smile"){ setc(a,8,7,"k"); setc(a,8,8,"k"); }
   if(m==="open"){ setc(a,8,7,"k"); setc(a,8,8,"k"); setc(a,9,7,"k"); setc(a,9,8,"k"); setc(a,8,6,"k"); setc(a,8,9,"k"); }
   if(m==="chew"){ for(var c=6;c<10;c++) setc(a,8,c,"k"); }
   if(m==="flat"){ setc(a,9,7,"k"); setc(a,9,8,"k"); }
   if(m==="o"){ setc(a,8,7,"k"); setc(a,8,8,"k"); setc(a,9,7,"k"); setc(a,9,8,"k"); }
+  if(m==="frown"){ setc(a,8,7,"k"); setc(a,8,8,"k"); setc(a,9,6,"k"); setc(a,9,9,"k"); }
+  if(m==="tight"){ setc(a,9,7,"k"); setc(a,9,8,"k"); setc(a,8,6,"k"); setc(a,8,9,"k"); }
   if(m==="fang"){ setc(a,8,6,"k"); setc(a,8,7,"k"); setc(a,8,8,"k"); setc(a,8,9,"k"); setc(a,9,6,"p"); setc(a,9,9,"p"); }
   if(o.legs==="walk1"){ a[13]="...k.k....k.k...".split(""); a[14]="..k...k..k...k..".split(""); }
   if(o.legs==="walk2"){ a[13]="...k.k....k.k...".split(""); a[14]="....kk....kk....".split(""); }
@@ -162,11 +186,11 @@ function frames(o){
 /* ---------- the standard poses every species pack must provide ----------
  * A play pack (runtime/petplay.js) may only ask for these names, never for a species' own action names, so every
  * future species can play every game:
- *   front: idle, happy, sad, jump (arms up), fall, catch (holding up)
+ *   front: idle, happy, sad, angry, sulk, blink, jump (arms up), fall, catch (holding up)
  *   side:  walk1, walk2, jump, flap1, flap2      (all facing right; the left view is mirror(grid))
  * Every pose is a 16 x 16 grid of .kdmp. A pack's poses are functions of the rolled marks, so the antenna, pattern
  * and eyes show in every pose. The side view is ready for later side games; no side game ships yet. */
-var POSE_NAMES={front:["idle","happy","sad","jump","fall","catch"],side:["walk1","walk2","jump","flap1","flap2"]};
+var POSE_NAMES={front:["idle","happy","sad","angry","sulk","blink","jump","fall","catch"],side:["walk1","walk2","jump","flap1","flap2"]};
 /* the chip's side, facing right: one eye near the snout, the body's pins as legs, the same antenna and marks */
 var SIDE_BASE=[
 "................",
@@ -240,7 +264,10 @@ function sidePose(marks,name){
 function frontPose(marks,name){
   var m=marks||{}, o={ant:m.ant||"ball",pat:m.pat||"dot",eye:m.eye||"dot"}, g, a;
   if(name==="happy") g=frames({ant:o.ant,pat:o.pat,eye:o.eye,face:"happy"});
-  else if(name==="sad") g=frames({ant:o.ant,pat:o.pat,eye:o.eye,face:"wait"});
+  else if(name==="sad") g=frames({ant:o.ant,pat:o.pat,eye:o.eye,face:"sad"});
+  else if(name==="angry") g=frames({ant:o.ant,pat:o.pat,eye:o.eye,face:"angry"});
+  else if(name==="sulk") g=frames({ant:o.ant,pat:o.pat,eye:o.eye,face:"sulk"});
+  else if(name==="blink") g=frames({ant:o.ant,pat:o.pat,eye:o.eye,face:"blink"});
   else if(name==="jump"){
     g=build({ant:o.ant,pat:o.pat,eye:o.eye,face:"happy",mouth:"open"});
     a=rows(g);
@@ -365,6 +392,87 @@ var CHIP_CHILD=[
 "....k.k..k.k....",
 "................"];
 
+/* ---------- the baby and the child: the same face vocabulary on their smaller bodies ----------
+ * The owner sees these for the first ten days, so every mood, idle and game pose must show here too. The body
+ * grids keep their shape; the baked eyes and mouth are cleared and redrawn at the stage's own coordinates, which
+ * keeps every expression (and a one-pixel nod, jump or dangle) readable without a second art set. */
+var MINI={
+  /* the baby's face is 6 x 5 pixels: its eyes go one row up (7-8) so a row stays free between them and the mouth
+     (10-11), or every mood melts into one blob; `bake` lists the drawing's own eye pixels to clear */
+  baby:{base:CHIP_BABY, top:7, bottom:8, left:6, right:9, mouth:11, bake:[[8,6],[9,6],[8,9],[9,9]]},
+  child:{base:CHIP_CHILD, top:7, bottom:8, left:6, right:9, mouth:9}
+};
+function miniBase(stage){
+  var c=MINI[stage], a=rows(c.base);
+  setc(a,c.top,c.left,"m"); setc(a,c.top,c.right,"m");
+  setc(a,c.bottom,c.left,"m"); setc(a,c.bottom,c.right,"m");
+  setc(a,c.mouth,7,"m"); setc(a,c.mouth,8,"m");
+  (c.bake||[]).forEach(function(q){ setc(a,q[0],q[1],"m"); });
+  return a;
+}
+function miniEyes(a,c,face){
+  var T=c.top, B=c.bottom, L=c.left, R=c.right;
+  if(face==="closed" || face==="sleep" || face==="blink"){
+    setc(a,B,L,"k"); setc(a,B,L+1,"k"); setc(a,B,R-1,"k"); setc(a,B,R,"k");
+  } else if(face==="happy"){
+    setc(a,T,L,"k"); setc(a,B,L+1,"k"); setc(a,T,R,"k"); setc(a,B,R-1,"k");
+  } else if(face==="sad"){
+    setc(a,T,L+1,"k"); setc(a,B,L,"k"); setc(a,T,R-1,"k"); setc(a,B,R,"k");
+  } else if(face==="wow"){
+    setc(a,T,L,"k"); setc(a,T,L+1,"k"); setc(a,B,L,"k"); setc(a,B,L+1,"k");
+    setc(a,T,R-1,"k"); setc(a,T,R,"k"); setc(a,B,R-1,"k"); setc(a,B,R,"k");
+  } else if(face==="down"){
+    setc(a,B,L,"k"); setc(a,B+1,L,"k"); setc(a,B,R,"k"); setc(a,B+1,R,"k");
+  } else if(face==="angry"){
+    /* eyes slanting down toward the middle; on these small faces there is no row above them for brows */
+    setc(a,T,L,"k"); setc(a,B,L+1,"k"); setc(a,T,R,"k"); setc(a,B,R-1,"k");
+  } else if(face==="sulk"){
+    /* half-lidded, both eyes shifted to one side: looking down and a little away */
+    setc(a,B,L+1,"k"); setc(a,B,R+1,"k");
+  } else {
+    setc(a,T,L,"k"); setc(a,B,L,"k"); setc(a,T,R,"k"); setc(a,B,R,"k");
+  }
+}
+function miniMouth(a,c,stage,mouth){
+  var M=c.mouth;
+  var smileC=stage==="baby" ? M-1 : M, smileM=stage==="baby" ? M : M+1;
+  if(mouth==="smile"){
+    setc(a,smileC,6,"k"); setc(a,smileC,9,"k"); setc(a,smileM,7,"k"); setc(a,smileM,8,"k");
+  } else if(mouth==="frown"){
+    setc(a,smileM,6,"k"); setc(a,smileM,9,"k"); setc(a,smileC,7,"k"); setc(a,smileC,8,"k");
+  } else if(mouth==="open" || mouth==="chew"){
+    for(var x=6;x<10;x++) setc(a,M,x,"k");
+  } else if(mouth==="o"){
+    setc(a,M,7,"k"); setc(a,M,8,"k"); setc(a,M+1,7,"k"); setc(a,M+1,8,"k");
+  } else if(mouth==="flat" || mouth==="tight"){
+    setc(a,M,7,"k"); setc(a,M,8,"k");
+  }
+}
+/* name -> the face and the one-pixel movement that makes the pose read at 16 px (the standard pose vocabulary) */
+var MINI_POSE={
+  idle:{}, idle1:{}, idle2:{mouth:"smile",down:1},
+  blink:{face:"closed"}, eat1:{mouth:"open"}, eat2:{mouth:"chew"},
+  happy:{face:"happy",mouth:"open"}, sleep:{face:"closed",mouth:"none"},
+  wait:{face:"down",mouth:"flat"}, surprised:{face:"wow",mouth:"o"},
+  sad:{face:"sad",mouth:"frown"}, angry:{face:"angry",mouth:"tight"}, sulk:{face:"sulk",mouth:"flat"},
+  jump:{face:"happy",mouth:"open",up:1}, fall:{face:"wow",mouth:"o",down:1},
+  catch:{face:"happy",mouth:"open",up:2},
+  walk1:{up:1}, walk2:{down:1}, flap1:{up:1}, flap2:{up:2}
+};
+function miniFrame(stage,name){
+  var c=MINI[stage], p=MINI_POSE[name] || MINI_POSE.idle, a=miniBase(stage), g;
+  miniEyes(a,c,p.face||"open");
+  miniMouth(a,c,stage,p.mouth||"smile");
+  g=join(a);
+  if(p.up) g=shiftUp(g,p.up);
+  if(p.down) g=shiftDown(g,p.down);
+  return g;
+}
+function stagePose(pack,stage,marks,view,name){
+  if(stage==="baby" || stage==="child") return miniFrame(stage,name);
+  return pose(pack,marks,view,name);
+}
+
 /* ---------- the home screen's 16 x 16 icon states: egg, asleep, needing something, away, and the everyday face ---------- */
 var HOME_ICONS={
   egg:CHIP_EGG,
@@ -419,9 +527,10 @@ function adult(id,o){
   var A=ADULT[id]||ADULT.plain, x={};
   if(o) for(var k in o) if(Object.prototype.hasOwnProperty.call(o,k)) x[k]=o[k];
   if(A.mouth) x.mouth=A.mouth;
-  if(A.face==="none") x.face="none";
+  var moodFace=x.face==="sad"||x.face==="angry"||x.face==="sulk";
+  if(A.face==="none" && !moodFace) x.face="none";
   var g=rows(build(x));
-  if(A.face==="none"){ setc(g,6,5,"k"); setc(g,6,10,"k"); }
+  if(A.face==="none" && !moodFace){ setc(g,6,5,"k"); setc(g,6,10,"k"); }
   if(A.clearAnt){ g[0]=BLANK16.split(""); g[1]=BLANK16.split(""); }
   var out=[], r, c;
   for(r=0;r<20;r++) out.push(blankGrid(20,1,".")[0].split(""));
@@ -1037,7 +1146,7 @@ var CHIP_ROOM={
 var CHIP_PACK={
   id:"chip",
   name:{zh:"芯仔",en:"Chip"},
-  faces:["idle1","idle2","blink","eat1","eat2","happy","walk1","walk2","sleep","wait","surprised","hold"],
+  faces:["idle1","idle2","blink","eat1","eat2","happy","walk1","walk2","sleep","wait","surprised","sad","angry","sulk","hold"],
   frames:frames,
   poses:CHIP_POSES,
   adult:adult,
@@ -1073,6 +1182,7 @@ window.LopdaPetArt={
   join:join,
   POSE_NAMES:POSE_NAMES,
   pose:pose,
+  stagePose:stagePose,
   mirror:mirror
 };
 })();

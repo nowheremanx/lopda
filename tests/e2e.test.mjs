@@ -3386,22 +3386,29 @@ test("pet: the first phone feedback - an inert egg, a full screen, a vertical fo
   await p.waitForFunction(() => window.LOPDA_DEBUG.pet && LOPDA_DEBUG.pet.save());
   assert.equal((await save()).stage, "egg");
 
-  /* an egg: every icon is the faintest tone and does nothing, START is off and A says nothing */
-  for (let i = 0; i < 5; i++) assert.equal(await inkPixels(i), 0, `egg icon ${i} is faint, not ink`);
-  for (let i = 0; i < 5; i++) {
-    await p.locator(".pet-ikey").nth(i).click();
-    await p.waitForTimeout(60);
-    assert.ok(await p.isHidden("#pet-panel"), `egg icon ${i} opens nothing`);
-  }
+  /* an egg: no icon row at all (not even faint icons), no soft keys, one quiet line under the room */
   assert.equal((await save()).stage, "egg");
-  assert.equal(await p.locator("#pet-keys .sk-start").isDisabled(), true, "START is disabled on an egg");
-  assert.equal(await p.locator("#pet-keys .sk-start span").innerText(), "", "START has no label on an egg");
-  assert.equal(await p.locator("#pet-keys .sk-a").isDisabled(), true, "A is disabled on an egg");
-  assert.equal(await p.locator("#pet-keys .sk-a span").innerText(), "", "A has no label on an egg");
+  assert.equal(await p.locator(".pet-ikey").count(), 0, "the egg screen builds no icon buttons");
+  assert.ok(await p.isHidden("#pet-icons"), "the icon row is hidden");
+  assert.ok(await p.isHidden("#pet-keys"), "the soft keys are hidden");
+  assert.equal(await p.locator("#pet-keys .sk").count(), 0, "no soft-key buttons at all");
+  assert.ok(await p.locator("#pet-eggline").isVisible(), "the quiet egg line is shown");
+  assert.match(await p.locator("#pet-eggline").innerText(), /蛋在暖暖地睡着/);
+  assert.ok(await p.isHidden("#pet-panel"));
+  /* the crack stage is drawn on the egg itself, and the room keeps its size */
+  const eggFrame = await p.evaluate(() => {
+    const c = document.getElementById("pet-cv"), d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data;
+    return { room: [c.width, c.height], px: [...d].filter((_, i) => i % 4 === 0).join("") };
+  });
+  assert.deepEqual(eggFrame.room, [81, 60]);
 
   await p.evaluate(() => LOPDA_DEBUG.pet.hatch());
   await p.waitForTimeout(120);
   assert.equal((await save()).stage, "baby");
+  assert.ok(await p.isHidden("#pet-eggline"), "the egg line goes away");
+  assert.equal(await p.locator(".pet-ikey").count(), 5, "the icon row is back after the hatch");
+  assert.equal(await p.isHidden("#pet-icons"), false);
+  assert.equal(await p.isHidden("#pet-keys"), false);
   assert.equal(await p.locator("#pet-keys .sk-a span").innerText(), "喂食", "A names 喂食 on the food icon");
   await p.keyboard.press("ArrowRight");
   await p.waitForTimeout(80);
@@ -3540,7 +3547,8 @@ test("pet: hatch, meal, wash, look, the light at night, travel and the postcard;
   await openPet();
   await p.waitForFunction(() => window.LOPDA_DEBUG.pet && LOPDA_DEBUG.pet.save());
   assert.equal((await save()).stage, "egg");
-  assert.equal(await p.locator(".sk-start").isDisabled(), true, "START is off on an egg");
+  assert.ok(await p.isHidden("#pet-keys"), "an egg has no soft keys");
+  assert.equal(await p.locator(".pet-ikey").count(), 0, "an egg has no icon row");
   /* an egg left alone for days does not travel or have an outing */
   const egg = await p.evaluate(() => LOPDA_DEBUG.pet.advance(96));
   assert.equal(egg.stage, "egg");
@@ -4261,6 +4269,72 @@ test("pet: games - the play list opens each pack, the canvas moves at 20 fps, B 
   await key("a");
   assert.ok(await p.isHidden("#pet-panel"), "A during the outing does not open the play list");
   assert.equal(await p.evaluate(() => LOPDA_DEBUG.pet.save().today.outPhase), "out", "the outing is still running");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("pet: third phone feedback - holding right climbs to a higher platform, and hunger 0 draws the sad face", { skip, timeout: 90000 }, async (t) => {
+  const { p, errors } = await page(t, { ...pw.devices["iPhone 13"], locale: "zh-CN", serviceWorkers: "block" });
+  await p.clock.install({ time: new Date(2026, 9, 11, 9, 0) });
+  await p.goto(base + "/runtime/?debug", { waitUntil: "networkidle" });
+  await p.waitForFunction(() => document.getElementById("savestate").textContent !== "启动中…");
+  const save = () => p.evaluate(() => LOPDA_DEBUG.pet.save());
+  const key = async (b) => { await p.evaluate((b) => { LOPDA_DEBUG.setButton(b, true); LOPDA_DEBUG.setButton(b, false); }, b); await p.waitForTimeout(90); };
+  const sig = () => p.evaluate(() => {
+    const c = document.getElementById("pet-cv"), d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data;
+    let h = 0;
+    for (let i = 0; i < d.length; i += 4) h = (Math.imul(h, 131) + d[i] + d[i + 1] * 3 + d[i + 2] * 7) | 0;
+    return h;
+  });
+  /* the room area both a hungry pet (at the bowl) and a fed pet (on the rug) occupy */
+  const petSig = () => p.evaluate(() => {
+    const c = document.getElementById("pet-cv"), d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data;
+    let h = 0;
+    for (let y = 38; y < 57; y++) for (let x = 13; x < 60; x++) {
+      const i = (y * c.width + x) * 4;
+      h = (Math.imul(h, 131) + d[i] + d[i + 1] * 3 + d[i + 2] * 7) | 0;
+    }
+    return h;
+  });
+  await p.locator("#home .app", { hasText: "宠物" }).click();
+  await p.locator("#v-pet:not([hidden])").waitFor();
+  await p.evaluate(() => LOPDA_DEBUG.pet.hatch());
+  await p.waitForTimeout(120);
+
+  /* climb, seed 9: holding right from the first frame gets it onto a platform above the start one */
+  await p.keyboard.press("ArrowRight");                    /* 食物 -> 玩 */
+  await p.waitForTimeout(80);
+  await key("a");
+  await p.waitForSelector("#pet-panel:not([hidden])");
+  await p.evaluate(() => LOPDA_DEBUG.pet.gameSeed(9));
+  await p.keyboard.press("ArrowDown");
+  await p.keyboard.press("ArrowDown");
+  await p.waitForTimeout(80);
+  await key("a");
+  await p.waitForTimeout(120);
+  await p.keyboard.down("ArrowRight");
+  await p.waitForTimeout(4200);
+  await p.keyboard.up("ArrowRight");
+  const climb = await p.evaluate(() => LOPDA_DEBUG.pet.gameState());
+  assert.ok(climb, "a climb round is running");
+  assert.ok(climb.records >= 1, "holding right reached a platform above the start: " + JSON.stringify({ h: climb.height, best: climb.bestAlt, records: climb.records, done: climb.done }));
+  assert.ok(climb.bestAlt > 14, "the higher platform raised the world altitude: " + climb.bestAlt);
+  await key("b");
+
+  /* hunger 0 on a freshly hatched BABY is a real sad face; a meal lifts it and the pet's part of the room changes */
+  assert.equal((await save()).stage, "baby", "this is the stage the owner sees first");
+  await p.evaluate(() => LOPDA_DEBUG.pet.setStats(0, 3));
+  await p.waitForTimeout(150);
+  assert.equal(await p.evaluate(() => LOPDA_DEBUG.pet.mood()), "sad", "hunger 0 draws the sad face");
+  const hungry = await petSig();
+  assert.equal((await save()).hunger, 0);
+  await p.locator(".pet-ikey").nth(0).click();             /* food */
+  await p.waitForSelector("#pet-panel:not([hidden])");
+  await key("a");                                          /* a meal */
+  await p.waitForTimeout(2400);
+  assert.ok((await save()).hunger >= 2, "the meal was eaten");
+  assert.equal(await p.evaluate(() => LOPDA_DEBUG.pet.mood()), null, "a meal clears the sad face at once");
+  const fed = await petSig();
+  assert.notEqual(fed, hungry, "the hungry baby and the fed baby differ around the pet");
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
