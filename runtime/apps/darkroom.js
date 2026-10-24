@@ -14,8 +14,10 @@
  *
  * Keys: the film box ▲▼ pick, A or START the roll's menu, SELECT import a negative; the menu ▲▼ A B; naming A keeps,
  * B cancels. Developing ignores every key. The viewer: ◀▶ previous / next frame, START prints, B back to the box,
- * A nothing. The print menu ▲▼ A B. Export, import and prints open the share sheet or the file picker, so they act
- * on a release (a press is not a gesture).
+ * A nothing. The print follows a horizontal drag 1:1: past a quarter of its width, or a flick, it slides to the next
+ * frame, otherwise it springs back; at either end it moves a third of the finger and springs back with err. A tap on
+ * the left or right third turns a page the same way, and reduced motion skips the slide. The print menu ▲▼ A B.
+ * Export, import and prints open the share sheet or the file picker, so they act on a release (a press is not a gesture).
  *
  * One key row (#dk-keys) at the bottom of every darkroom screen: the box, the viewer, developing and every sheet.
  * The overlays stop 44 px above it, so its four cells never move (owner 2026-10-21).
@@ -428,44 +430,153 @@ function pic(r,k){
   if(!pics.job[k]) pics.job[k]=developFrame(r,r.dev,k,1).then(null,function(){ return DEV.develop(null,devOpts(r,r.frames[k],r.dev,1)); }).then(function(img){ pics.img[k]=img; return img; });
   return pics.job[k];
 }
+/* the frame on the glass, then the two that can slide in next, then the rest of the roll */
 function prefetch(r){
-  var pics=D.pics, gen=D.gen;
-  (function next(k){
-    if(gen!==D.gen || D.pics!==pics || k>=r.frames.length) return;
-    pic(r,k).then(function(){ setTimeout(function(){ next(k+1); },0); });
+  var pics=D.pics, gen=D.gen, order=[D.idx], i;
+  if(D.idx>0) order.push(D.idx-1);
+  if(D.idx+1<r.frames.length) order.push(D.idx+1);
+  for(i=0;i<r.frames.length;i++) if(order.indexOf(i)<0) order.push(i);
+  (function next(j){
+    if(gen!==D.gen || D.pics!==pics || j>=order.length) return;
+    pic(r,order[j]).then(function(){ setTimeout(function(){ next(j+1); },0); });
   })(0);
 }
 function viewWait(text){ var w=$("dk-vwait"); w.hidden=!text; w.textContent=text||""; }
-function showFrame(){
-  var r=current(); if(!r || D.mode!=="view") return;
+
+/* ---------- pushing the print: the one on the glass and its neighbours, moved together ---------- */
+/* the three cards are siblings 800x700 canvases; #dk-vcv is the middle one (tests read it) */
+var VCARD=[$("dk-vprev"), $("dk-vcv").parentNode, $("dk-vnext")];
+var STILL=!!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+var V={on:false, id:null, x0:0, y0:0, lastX:0, lastT:0, v:0, horiz:null, slide:false, timer:null};
+
+function vCanvas(card){ return card.getElementsByTagName("canvas")[0]; }
+function putImg(cv,im){ var x=cv.getContext("2d"), img=x.createImageData(im.w,im.h); img.data.set(im.data); x.putImageData(img,0,0); }
+function paper(cv){ var x=cv.getContext("2d"); x.fillStyle="#f1ece1"; x.fillRect(0,0,cv.width,cv.height); }
+/* a card is a whole photo box wide, the 12 px gap is what the next one is offset by */
+function span(){ return $("dk-photo").clientWidth+12; }
+function placeCards(off,ms){
+  var sp=span(), i;
+  for(i=0;i<VCARD.length;i++){
+    VCARD[i].style.transition=ms?"transform "+ms+"ms cubic-bezier(.2,.7,.3,1)":"none";
+    VCARD[i].style.transform="translateX("+((i-1)*sp+off)+"px)";
+  }
+}
+function showHead(){
+  var r=current(); if(!r) return;
   var k=D.idx, f=r.frames[k];
   $("dk-vno").textContent=pad2(k+1)+"/"+pad2(r.size);
   $("dk-vinfo").textContent=[lensText(f), f.blank ? tr(f.blank==="dark"?"cam.unexposed":"cam.fogged") : FILM.stampOf(f.taken).slice(0,8)].filter(Boolean).join(" · ");
-  var put1=function(im){ var cv=$("dk-vcv"), x=cv.getContext("2d"), img=x.createImageData(im.w,im.h); img.data.set(im.data); x.putImageData(img,0,0); };
-  if(D.pics.img[k]){ put1(D.pics.img[k]); viewWait(D.busy); return; }
-  viewWait(D.busy||"…");
-  pic(r,k).then(function(im){ if(D.mode==="view" && D.idx===k){ put1(im); viewWait(D.busy); } });
 }
-function step(d){
+/* paint what is developed, bare paper where it is not; the ends have no card at all */
+function fillCards(){
+  var r=current(), i, k, card, cv, im;
+  for(i=0;i<VCARD.length;i++){
+    card=VCARD[i]; cv=vCanvas(card); k=D.idx+i-1;
+    if(!r || k<0 || k>=r.frames.length){ card.style.visibility="hidden"; continue; }
+    card.style.visibility="";
+    im=D.pics && D.pics.img[k];
+    if(im){ putImg(cv,im); continue; }
+    paper(cv);
+    /* ask for the neighbour itself, so a frame that arrives while we look paints the card it will slide from */
+    if(i!==1) (function(i,k){
+      pic(r,k).then(function(im){ if(D.mode==="view" && D.idx+i-1===k && D.pics && D.pics.img[k]) putImg(vCanvas(VCARD[i]),im); });
+    })(i,k);
+  }
+}
+function showFrame(){
+  var r=current(); if(!r || D.mode!=="view") return;
+  var k=D.idx;
+  showHead();
+  /* the one on the glass is asked for before fillCards asks for its neighbours, so it develops first */
+  if(D.pics.img[k]) viewWait(D.busy);
+  else {
+    viewWait(D.busy||"…");
+    pic(r,k).then(function(im){ if(D.mode==="view" && D.idx===k){ putImg($("dk-vcv"),im); viewWait(D.busy); } });
+  }
+  fillCards();
+  placeCards(0,0);
+}
+/* the slide has landed: the new print is on the glass, so refill and reset without a transition.
+   Called by the transition's end or by its timer, whichever comes first. */
+function finishSlide(){
+  if(!V.slide) return;
+  V.slide=false;
+  if(V.timer){ clearTimeout(V.timer); V.timer=null; }
+  showFrame();
+}
+function slideTo(d){
   var r=current(), n=D.idx+d;
-  if(!r || n<0 || n>=r.frames.length){ sfx("err"); return; }
-  D.idx=n; sfx("move"); showFrame();
+  if(!r || n<0 || n>=r.frames.length){ sfx("err"); return false; }
+  /* the header follows the print as it leaves; the canvases catch up when the slide lands */
+  D.idx=n; sfx("move"); showHead();
+  if(STILL){ showFrame(); return true; }
+  V.slide=true;
+  placeCards(-d*span(),200);
+  V.timer=setTimeout(finishSlide,220);
+  return true;
 }
+function step(d){ finishSlide(); slideTo(d); }
 function closeViewer(){ D.mode="box"; $("dk-view").hidden=true; render(); }
 /* HOME, or reopening: everything developing or printing stops, nothing is kept */
 function closeFull(){ D.gen++; D.mode="box"; D.pics=null; D.prints=null; $("dk-dev").hidden=true; $("dk-view").hidden=true; }
 function viewButton(b,down){
   if(!down) return;
+  finishSlide();                                   /* a key during a slide lands it first, so none is dropped */
   if(b==="left"||b==="right") step(b==="right"?1:-1);
   else if(b==="b"){ sfx("miss"); closeViewer(); }
   else if(b==="start"){ sfx("tap"); D.sheet="print"; D.sel=0; renderSheet(); preparePrints(current()); }
 }
-/* touch: the left or right third of the picture steps back or on */
-$("dk-photo").addEventListener("pointerup",function(e){
+/* touch: push the print across the glass. The card follows the finger 1:1, a quarter of the width or a flick turns the
+   page, and the ends are heavy paper (dx/3, then err and spring back). A tap on the left or right third still turns. */
+function dragOff(r,dx){
+  if(!r) return dx;
+  if((D.idx===0 && dx>0) || (D.idx===r.frames.length-1 && dx<0)) return dx/3;
+  return dx;
+}
+$("dk-photo").addEventListener("pointerdown",function(e){
   if(D.mode!=="view" || D.sheet || D.busy) return;
-  var box=this.getBoundingClientRect(), at=(e.clientX-box.left)/box.width;
-  if(at<1/3) step(-1); else if(at>2/3) step(1);
+  if(e.button && e.button!==0) return;
+  finishSlide();                                   /* a press while the last slide runs lands on the new print */
+  V.on=true; V.id=e.pointerId; V.x0=e.clientX; V.y0=e.clientY; V.v=0; V.horiz=null;
+  V.lastX=e.clientX; V.lastT=now();
+  try{ this.setPointerCapture(e.pointerId); }catch(_){}
 });
+$("dk-photo").addEventListener("pointermove",function(e){
+  if(!V.on || e.pointerId!==V.id) return;
+  var dx=e.clientX-V.x0, dy=e.clientY-V.y0, t=now();
+  if(V.horiz===null && (Math.abs(dx)>8 || Math.abs(dy)>8)) V.horiz=Math.abs(dx)>Math.abs(dy);
+  if(!V.horiz) return;
+  /* px/ms of the last move, the same reading as the prototype's flick */
+  if(t>V.lastT){ V.v=(e.clientX-V.lastX)/(t-V.lastT); V.lastT=t; }
+  V.lastX=e.clientX;
+  placeCards(dragOff(current(),dx),0);
+});
+$("dk-photo").addEventListener("pointerup",function(e){
+  if(!V.on || e.pointerId!==V.id) return;
+  V.on=false;
+  var r=current(), dx=e.clientX-V.x0, dy=e.clientY-V.y0, box=this.getBoundingClientRect();
+  if(Math.abs(dx)<12 && Math.abs(dy)<12){
+    var at=(e.clientX-box.left)/box.width;
+    if(at<1/3) slideTo(-1); else if(at>2/3) slideTo(1); else placeCards(0,0);
+    return;
+  }
+  if(V.horiz!==true){ placeCards(0,0); return; }
+  /* a flick only counts in the direction the finger was already going */
+  var fling=Math.abs(V.v)>0.5 && (V.v>0)===(dx>0);
+  if(Math.abs(dx)>span()/4 || fling){
+    if(!slideTo(dx<0?1:-1)) placeCards(0,STILL?0:180);
+  }else{
+    if(r && ((D.idx===0 && dx>0) || (D.idx===r.frames.length-1 && dx<0))) sfx("err");
+    placeCards(0,STILL?0:180);
+  }
+});
+$("dk-photo").addEventListener("pointercancel",function(e){
+  if(!V.on || e.pointerId!==V.id) return;
+  V.on=false;
+  placeCards(0,STILL?0:180);
+});
+VCARD.forEach(function(c){ c.addEventListener("transitionend",function(e){ if(e.propertyName==="transform") finishSlide(); }); });
+window.addEventListener("resize",function(){ if(D.mode==="view" && !V.slide && !V.on) placeCards(0,0); });
 
 /* ---------- prints (darkroom.md "出片"): single 1600x1400, the contact sheet, the film strip ---------- */
 function fileBase(kind,r){ return "lopda-"+kind+"-"+FILM.fileStamp(r.loaded)+"-"+FILM.stockPrint(r.stock).replace(/\s+/g,"-").toLowerCase()+"-"+rollNo(r); }

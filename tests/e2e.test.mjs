@@ -3238,6 +3238,63 @@ test("darkroom: develop a roll with blank frames, walk it in colour, print singl
   await press("ArrowRight"); assert.equal(await head(), "08/08", "stops at the end");
   for (let k = 0; k < 7; k++) await press("ArrowLeft");
   assert.equal(await head(), "01/08");
+
+  /* pushing the print: the drag follows the finger, a quarter of the width or a flick turns the page, taps slide too */
+  const photoBox = () => p.evaluate(() => { const r = document.getElementById("dk-photo").getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
+  const photoPixels = () => p.evaluate(() => { const c = document.getElementById("dk-vcv"), x = c.getContext("2d");
+    return [[40, 40], [400, 350], [760, 660]].map(([px, py]) => Array.from(x.getImageData(px, py, 1, 1).data).join(",")); });
+  const drag = async (from, to, steps = 8, delay = 0) => {
+    const b = await photoBox(), y = b.y + b.h / 2, x0 = b.x + b.w * from, x1 = b.x + b.w * to;
+    await p.mouse.move(x0, y); await p.mouse.down();
+    for (let i = 1; i <= steps; i++) { await p.mouse.move(x0 + (x1 - x0) * i / steps, y); if (delay) await p.waitForTimeout(delay); }
+    await p.mouse.up(); await p.waitForTimeout(280);
+  };
+  const tapAt = async (at) => { const b = await photoBox(), x = b.x + b.w * at, y = b.y + b.h / 2;
+    await p.mouse.move(x, y); await p.mouse.down(); await p.mouse.up(); await p.waitForTimeout(280); };
+  await p.waitForTimeout(300);                       /* the last ◀ has landed */
+  await p.waitForFunction(() => document.getElementById("dk-vwait").hidden, null, { timeout: 20000 });
+  const px01 = await photoPixels();
+  await press("ArrowRight"); await p.waitForTimeout(300);
+  await p.waitForFunction(() => document.getElementById("dk-vwait").hidden, null, { timeout: 20000 });
+  assert.equal(await head(), "02/08");
+  const px02 = await photoPixels();
+  await press("ArrowLeft"); await p.waitForTimeout(300);
+
+  await drag(0.8, 0.3);                              /* left, half the width */
+  assert.equal(await head(), "02/08");
+  assert.deepEqual(await photoPixels(), px02, "a drag shows the frame the keys show");
+  await drag(0.2, 0.7);                              /* right, half the width */
+  assert.equal(await head(), "01/08");
+  assert.deepEqual(await photoPixels(), px01, "a right drag goes back");
+  /* regression: it used to step by where the finger lifted; now it pushes the print */
+  await drag(0.75, 0.2);
+  assert.equal(await head(), "02/08", "starting right and lifting left still goes on");
+  await drag(0.5, 0.4, 10, 40);                      /* 10% of the width, slowly: no quarter, no flick */
+  assert.equal(await head(), "02/08", "a short slow drag springs back");
+  await drag(0.2, 0.7);
+  assert.equal(await head(), "01/08");
+  await drag(0.3, 0.8);                              /* past the first print */
+  assert.equal(await head(), "01/08", "the first print does not go back");
+  for (let k = 0; k < 7; k++) await press("ArrowRight");
+  await p.waitForTimeout(300);
+  await p.waitForFunction(() => document.getElementById("dk-vwait").hidden, null, { timeout: 20000 });
+  assert.equal(await head(), "08/08");
+  const px08 = await photoPixels();
+  await drag(0.8, 0.2);                              /* past the last print */
+  assert.equal(await head(), "08/08", "the last print does not go on");
+  assert.deepEqual(await photoPixels(), px08);
+  await press("ArrowLeft"); await p.waitForTimeout(300);
+  assert.equal(await head(), "07/08");
+  await tapAt(0.5);
+  assert.equal(await head(), "07/08", "a tap in the middle does nothing");
+  await tapAt(0.85);
+  await p.waitForFunction(() => document.getElementById("dk-vwait").hidden, null, { timeout: 20000 });
+  assert.equal(await head(), "08/08", "a tap on the right third steps on");
+  assert.deepEqual(await photoPixels(), px08, "the tapped frame is the frame the keys show");
+  for (let k = 0; k < 7; k++) await press("ArrowLeft");
+  await p.waitForTimeout(300);
+  assert.equal(await head(), "01/08");
+
   await press("x"); assert.ok(await p.isHidden("#dk-sheet"), "A does nothing here");
 
   /* prints: START opens the menu, B cancels it */
