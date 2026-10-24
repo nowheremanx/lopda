@@ -2,10 +2,11 @@
  * Lo-PDA runtime: tilt, shake, heading and the microphone for apps (docs/design/pad-sensors.md, decisions.md section 23).
  * The sandboxed apps cannot ask for sensors themselves: the runtime asks, reads, and hands each app a few coarse numbers
  * through PAD. Nothing raw leaves this file: no angles finer than 1/32, no acceleration, and never a sound sample.
+ * x and y are counted from start()/zero(); flat is always the tilt from lying face up, so an app can guide the phone level.
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  *
  * window.LopdaSensors:
- *   pure (tests/sensors.test.mjs): quantize(v), tilt(beta, gamma, beta0) -> {x, y}, heading(compass) -> 0..348.75 or null,
+ *   pure (tests/sensors.test.mjs): quantize(v), tilt(beta, gamma, beta0) -> {x, y, flat}, heading(compass) -> 0..348.75 or null,
  *     shaker(now) -> fn(acc) -> true when it is a shake, limiter(hz, now, later) -> fn(send, value),
  *     level(samples) -> 0..1, pitch(samples, sampleRate) -> Hz (integer) or null
  *   host(env) -> the runtime's one set of sensors. env:
@@ -23,9 +24,12 @@ var PITCH_LO=50, PITCH_HI=1500, WINDOW=1024;
 /* every reading is coarse: 1/32 steps, like an old sensor, and too coarse to tell one phone from another */
 function quantize(v){ v=Math.max(-1,Math.min(1,+v||0)); var q=Math.round(v*STEP)/STEP; return q===0 ? 0 : q; }
 /* the handheld held upright in portrait: x is left / right (gamma), y is the top edge raised (-1) or lowered (+1) from where
-   the player held it at start() or zero(); about 45 degrees reaches the end */
+   the player held it at start() or zero(); about 45 degrees reaches the end. flat has the same scale and signs but is always
+   measured from lying flat, face up (flat.y -1 is upright, {x: 0, y: 0} is level), so start() and zero() never change it */
 function tilt(beta,gamma,beta0){
-  return { x: quantize((+gamma||0)/TILT_DEG), y: quantize(-((+beta||0)-(+beta0||0))/TILT_DEG) };
+  var b=+beta||0, g=+gamma||0;
+  return { x: quantize(g/TILT_DEG), y: quantize(-(b-(+beta0||0))/TILT_DEG),
+    flat: { x: quantize(g/TILT_DEG), y: quantize(-b/TILT_DEG) } };
 }
 /* a 32-point compass: north 0, then 11.25-degree steps; null where the phone gives no heading */
 function heading(h){
@@ -150,7 +154,7 @@ function host(env){
   }
   function feedTilt(win){
     var t=tilt(M.beta,M.gamma,M.beta0);
-    M.send(function(v){ if(live.motion===win) env.send(win,{op:"tilt", x:v.x, y:v.y, heading:v.heading}); },{x:t.x, y:t.y, heading:M.heading});
+    M.send(function(v){ if(live.motion===win) env.send(win,{op:"tilt", x:v.x, y:v.y, heading:v.heading, flat:v.flat}); },{x:t.x, y:t.y, heading:M.heading, flat:t.flat});
   }
   function onMotion(e){
     var win=live.motion; if(!win) return;
