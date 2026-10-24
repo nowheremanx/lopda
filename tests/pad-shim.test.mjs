@@ -317,6 +317,22 @@ test("sensor: tilt, shake and sound events reach PAD.on listeners; malformed one
   assert.deepEqual(log, [["tilt", 0.5, -0.25, 90], ["tilt", 0, 0, null], ["shake"], ["sound", 0.5, 440], ["sound", 0, null]]);
 });
 
+test("sensor: the tilt's absolute flat reading passes through when valid, undefined on older runtimes", () => {
+  const a = app({ sensors: true }), log = [];
+  a.PAD.on("tilt", (t) => log.push(t));
+  a.fromRuntime({ pad: 1, op: "tilt", x: 0.5, y: -0.25, heading: 90, flat: { x: 0.25, y: -0.5 } });
+  a.fromRuntime({ pad: 1, op: "tilt", x: 0.5, y: -0.25, heading: 90 });                     /* an older runtime */
+  a.fromRuntime({ pad: 1, op: "tilt", x: 0.5, y: -0.25, heading: 90, flat: { x: 5, y: 0 } });  /* out of range */
+  a.fromRuntime({ pad: 1, op: "tilt", x: 0.5, y: -0.25, heading: 90, flat: { x: "0.25", y: 0 } });  /* not a number */
+  a.fromRuntime({ pad: 1, op: "tilt", x: 0.5, y: -0.25, heading: 90, flat: null });             /* no object */
+  assert.equal(log.length, 5);
+  assert.deepEqual(JSON.parse(JSON.stringify(log[0])), { x: 0.5, y: -0.25, heading: 90, flat: { x: 0.25, y: -0.5 } });
+  for (const t of log.slice(1)) {
+    assert.equal(t.flat, undefined);
+    assert.deepEqual({ x: t.x, y: t.y, heading: t.heading }, { x: 0.5, y: -0.25, heading: 90 }, "x, y and heading still arrive");
+  }
+});
+
 test("sensor: an app on an older runtime gets no sensor events", () => {
   const a = app(), log = [];
   a.PAD.on("tilt", () => log.push(1));

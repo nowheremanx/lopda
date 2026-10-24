@@ -63,7 +63,7 @@
       <div class="row">
         <div id="tiltpad" title="drag to tilt; let go to recentre"><div id="tiltdot"></div></div>
         <div style="display:flex;flex-direction:column;gap:6px">
-          <span id="tiltval">x 0 · y 0</span>
+          <span id="tiltval">x 0 · y 0 · flat 0 · 0</span>
           <button id="shake" type="button">Shake</button>
           <label>Heading <input type="range" id="heading" min="0" max="359" value="0" style="width:120px"> <span id="headingv">0</span></label>
           <label><input type="checkbox" id="nocompass"> no compass (null)</label>
@@ -447,18 +447,19 @@
   };
   /* PAD.motion / PAD.mic. The handheld asks the player on its own dialog first (and the phone may ask too); here start()
      answers "on" at once when the manifest declares the permission. The controls above stand in for the phone: the square
-     is the tilt (drag it, let go and it recentres), Shake sends one shake, the slider is the compass, and the mic level and
-     pitch are sent as they are, or measured from this computer's microphone. Same steps and rates as the runtime. */
+     is the tilt (drag it, let go and it recentres); its raw position is also the absolute tilt from lying flat, so flat comes
+     from raw, while x and y are counted from the pose at start(). Shake sends one shake, the slider is the compass, and the
+     mic level and pitch are sent as they are, or measured from this computer's microphone. Same steps and rates as the runtime. */
   var LS = window.LopdaSensors, sensing = { motion: false, mic: false }, raw = { x: 0, y: 0, y0: 0 };
   var sendTilt = LS.limiter(LS.TILT_HZ, Date.now, setTimeout), sendSound = LS.limiter(LS.SOUND_HZ, Date.now, setTimeout);
   var micTimer = null, real = null;
   var post = function (m) { m.pad = 1; frame.contentWindow.postMessage(m, "*"); };
   function senseState() { document.getElementById("sensestate").textContent = (sensing.motion ? "motion on" : "motion off") + ", " + (sensing.mic ? "mic on" : "mic off"); }
   function tilt() {
-    var x = LS.quantize(raw.x), y = LS.quantize(raw.y - raw.y0);
+    var x = LS.quantize(raw.x), y = LS.quantize(raw.y - raw.y0), flat = { x: LS.quantize(raw.x), y: LS.quantize(raw.y) };
     var h = document.getElementById("nocompass").checked ? null : LS.heading(+document.getElementById("heading").value);
-    document.getElementById("tiltval").textContent = "x " + x + " · y " + y + " · heading " + h;
-    if (sensing.motion) sendTilt(function (v) { post({ op: "tilt", x: v.x, y: v.y, heading: v.heading }); }, { x: x, y: y, heading: h });
+    document.getElementById("tiltval").textContent = "x " + x + " · y " + y + " · flat " + flat.x + " · " + flat.y + " · heading " + h;
+    if (sensing.motion) sendTilt(function (v) { post({ op: "tilt", x: v.x, y: v.y, heading: v.heading, flat: v.flat }); }, { x: x, y: y, heading: h, flat: flat });
   }
   function sound() {
     var v;

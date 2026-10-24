@@ -99,7 +99,8 @@ No other files are loaded. Images, sounds and fonts must be embedded in
 - Tilt and the microphone (section 6.4) are another way to play, never the only one. An app that reads them
   **must also be playable with keys** (or touch), because the phone may have no sensor, the player may say no,
   and the desktop has neither; its first screen says how to switch. A tilt app offers a way to recentre
-  (`PAD.motion.zero()`) and never asks the player to lay the phone flat (`sdk/UI.md`).
+  (`PAD.motion.zero()`) and never asks the player to lay the phone flat, unless the app is meant to be used lying flat
+  (a compass, a level): it may say so and guide the player with `flat` (`sdk/UI.md`).
 - `alert`, `confirm` and `prompt` are unavailable. Build confirmations into the UI.
 - Prefer `PAD.sfx` for sound effects, `PAD.music` for music and `PAD.ambience` for background sound (section 6.3): the runtime plays
   them, so they follow the user's volume (volume 0 is off) and the phone's silent switch, stop
@@ -163,7 +164,7 @@ await PAD.importFile({accept})             // -> {name, type, data} | null
 await PAD.motion.start()     // -> "on" | "denied" | "none"
 PAD.motion.stop()
 PAD.motion.zero()            // the way the phone is held now is y = 0
-PAD.on("tilt", fn)           // fn({x, y, heading}), at most 30 a second
+PAD.on("tilt", fn)           // fn({x, y, heading, flat}), at most 30 a second; flat is runtime 0.35.0+ (undefined before)
 PAD.on("shake", fn)          // fn()
 await PAD.mic.start()        // -> "on" | "denied" | "none"
 PAD.mic.stop()
@@ -176,12 +177,12 @@ await PAD.say(text, {lang})           // -> "done" | "stopped" | "unavailable"  
 // lopda/1 with "permissions": ["camera"] (section 6.6); undefined on runtimes before 0.28.0
 await PAD.camera.snap({size})         // size "small" (128x112) | "large" (256x224) -> {w, h, px} | null
 
-// lopda/1 (section 6.7); undefined on runtimes before 0.34.0
+// lopda/1 (section 6.7); undefined on runtimes before 0.36.0
 await PAD.dict.words(q)               // q: {len, pattern, letters, level, max, offset} -> {words, more} | null
 await PAD.dict.lookup(word)           // -> {word, form?, zh, en} | null
 PAD.dict.version                      // "ecdict-1"
 
-// lopda/1 with "permissions": ["wordbook"] (section 6.7); undefined on runtimes before 0.34.0
+// lopda/1 with "permissions": ["wordbook"] (section 6.7); undefined on runtimes before 0.36.0
 await PAD.dict.inBook(words)          // 1-20 words -> boolean[] | null
 await PAD.dict.addWord(word)          // -> "saved" | "denied" | "full" | null
 await PAD.dict.removeWord(word)       // -> "saved" | "denied" | "full" | null
@@ -359,7 +360,7 @@ The app never gets a recording, a sound sample, or a raw sensor value. Design no
 
 ```js
 if (PAD.motion) {                       // undefined before runtime 0.24.0: play with keys only
-  PAD.on("tilt", function (t) { ball.vx += t.x; ball.vy += t.y; });   // t.heading: 0-348.75 or null
+  PAD.on("tilt", function (t) { ball.vx += t.x; ball.vy += t.y; });   // t.heading: 0-348.75 or null; t.flat on 0.35.0+
   PAD.on("shake", function () { dice.roll(); });
   PAD.motion.start().then(function (r) { if (r !== "on") useKeys(); });
 }
@@ -375,12 +376,13 @@ if (PAD.mic) {
 |---|---|
 | `x` | left / right tilt, -1 (left) to 1 (right); about 45 degrees reaches the end |
 | `y` | the top edge raised (-1) or lowered (1), counted from how the phone was held at `start()` or the last `zero()` |
+| `flat` | `{x, y}`, the tilt from lying flat, face up, on the same scale and signs as `x` and `y`: `{x: 0, y: 0}` is level within about 1.4 degrees, upright is `y` -1; never affected by `start()` or `zero()` (runtime 0.35.0+; undefined before, so check for it) |
 | `heading` | the compass, in 32 steps of 11.25 degrees (0 is north, 90 east); `null` where the phone has no compass |
 | `shake` | one event per shake; at least 0.5 s between two |
 | `level` | loudness 0-1 (-60 dB of full scale is 0, full scale is 1) |
 | `pitch` | the main frequency in Hz, an integer from 50 to 1500, or `null` when no clear note is heard (breath, noise, silence) |
 
-`x`, `y` and `level` come in steps of 1/32. `tilt` comes at most 30 times a second and `sound` at most 20 times, each
+`x`, `y`, `flat` and `level` come in steps of 1/32. `tilt` comes at most 30 times a second and `sound` at most 20 times, each
 only when a value changed: hold the last one between events.
 
 **Asking.** `start()` can be called at any time; the app does not need a tap of its own. The first time an app asks,
@@ -485,13 +487,13 @@ if (PAD.camera) {                        // undefined before runtime 0.28.0
 ### 6.7 The dictionary
 
 An app can look words up in the handheld's built-in English-Chinese dictionary (ECDICT): read-only, no permission, nothing
-to declare in `manifest.json` and no dialog, as with `PAD.say` (runtime 0.34.0 and later). Only the built-in book is
+to declare in `manifest.json` and no dialog, as with `PAD.say` (runtime 0.36.0 and later). Only the built-in book is
 visible: imported dictionaries are not, and the player's word book only through the separate permission below. Switching
 the built-in ECDICT off in 词典 → 词典管理 does not affect apps (that switch is for the dictionary program and the reader).
 Check that `PAD.dict` exists first.
 
 ```js
-if (PAD.dict) {                                  // undefined before runtime 0.34.0
+if (PAD.dict) {                                  // undefined before runtime 0.36.0
   PAD.dict.words({ pattern: "?a???", level: 1, max: 200 }).then(function (r) {
     if (!r) return;                              // the dictionary could not be read, or too many calls
     // r.words: ["party", "large", "water", ...], the most common first
@@ -544,7 +546,7 @@ lower case.
 
 **`null` and the limit.** `null` when the dictionary cannot be read (a missing offline cache file, for example), when
 more than 10 calls were made in a second (words, lookup and the word book together, per app), and when `lookup` finds no
-entry. `null` is normal: the app must still work. On a runtime before 0.34.0 there is no `PAD.dict` at all, so check for it.
+entry. `null` is normal: the app must still work. On a runtime before 0.36.0 there is no `PAD.dict` at all, so check for it.
 
 **Bad arguments reject**, as `PAD.exportFile` rejects bad arguments: the promise rejects with an `Error` whose message
 starts `PAD.dict.words: ` or `PAD.dict.lookup: `, for example
@@ -554,12 +556,12 @@ starts `PAD.dict.words: ` or `PAD.dict.lookup: `, for example
 #### The word book
 
 An app that declares `"permissions": ["wordbook"]` can read and change the player's word book (生词本), the same list the
-dictionary program and the reader use (runtime 0.34.0 and later). It holds at most 2000 words, newest first, and only
+dictionary program and the reader use (runtime 0.36.0 and later). It holds at most 2000 words, newest first, and only
 headwords: `addWord("ran")` stores `run`, the entry's headword. An app never sees the imported dictionaries or the
 player's history.
 
 ```js
-if (PAD.dict && PAD.dict.inBook) {               // the word book calls arrive with runtime 0.34.0
+if (PAD.dict && PAD.dict.inBook) {               // the word book calls arrive with runtime 0.36.0
   PAD.dict.inBook(["cat", "run"]).then(function (yes) {
     // yes: [true, true], or null (no grant yet, no permission, or too many calls)
   });
