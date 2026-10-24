@@ -86,6 +86,8 @@
   #cover.title #cover-list li.sel { background: #1f2a14; color: #a3ad7e; }
   #cover.title #cover-list li.sel .prog { color: #a3ad7e; }
   #cover.title #cover-list li.locked { padding-left: 12px; color: #4a5a32; border: 2px dashed #4a5a32; }
+  /* the locked row's name sits in .label, which already has the icon's 12px gap: its own margin would double it */
+  #cover.title #cover-list li.locked .label .rname { margin-left: 0; }
   #cover.title #cover-list li.locked .lock { font-size: 12px; }
   #cover.title #cover-list li.locked.sel { color: #a3ad7e; border-color: #a3ad7e; }
   #cover.pick { gap: 6px; padding: 8px; }
@@ -186,6 +188,8 @@
       howto: "玩法", pickHead: "第 {a}-{b} 关", pickFoot: "◄ ► 翻页", titleKeys: "↑↓ 选 · A 打开",
       lockedRound: "先过第 {n} 关",
       replay: " · 重玩", badge: "随机", doneRandom: "随机关完成",
+      practice: "练习", practiceTitle: "会玩了！", practiceBack: "回主界面",
+      practiceKeys: "方向键选字母，A 加上，B 删掉一个，START 提交，SELECT 打乱。\n结算卡上 A 收进生词本，B 移出。\n关卡里没输入字母时按 B 回主界面。",
       leave: "回到主界面？", leaveYes: "回去", leaveNo: "留下",
       goal: "划过字母拼单词，填满右边的格子",
       demo: "看：按住字母，划过 {w}",
@@ -193,7 +197,7 @@
       start: "开始",
       help: "玩法\n\n按住字母盘上的一个字母，不松手划过别的字母，拼出一个英文单词，松手提交。\n拼对格子里的词，它就填进格子，下面显示中文并读出来；填上的词点一下可以再看一遍。填满格子就过关。\n不在格子里的真词是奖励词，每个换 1 个提示。点「提示」看一个空词的中文。\n按键：方向键选字母，A 加上，B 删掉一个，START 提交，SELECT 打乱字母。\n结算卡：A 收进生词本，B 移出。",
       ok: "知道了",
-      done: "第 {n} 关完成", doneBtn: "下一关", bonus: "奖励词 {w}：提示 +1",
+      done: "第 {n} 关完成", doneBtn: "下一关", bonus: "奖励词 {w}：提示 +1", bonusPractice: "奖励词 {w}：练习不加提示",
       sum: "奖励词 {b} 个 · 提示 {n}",
       bookAdded: "已加入生词本", bookRemoved: "已移出生词本", bookDenied: "没有允许使用生词本", bookFull: "生词本满了",
       bookTip: "A 收进生词本 · B 移出",
@@ -207,6 +211,8 @@
       howto: "HOW TO PLAY", pickHead: "ROUNDS {a}-{b}", pickFoot: "◄ ► page", titleKeys: "↑↓ pick · A open",
       lockedRound: "Clear round {n} first",
       replay: " · REPLAY", badge: "RANDOM", doneRandom: "RANDOM CLEAR",
+      practice: "PRACTICE", practiceTitle: "You've got it!", practiceBack: "BACK TO TITLE",
+      practiceKeys: "Arrows pick a letter, A adds, B deletes, START sends, SELECT shuffles.\nOn the results card A adds to the word book, B removes.\nB with nothing typed goes back to the title.",
       leave: "Back to the title?", leaveYes: "LEAVE", leaveNo: "STAY",
       goal: "Swipe letters into words to fill the grid",
       demo: "Watch: hold and slide {w}",
@@ -214,7 +220,7 @@
       start: "START",
       help: "HOW TO PLAY\n\nHold a letter, slide across others to spell; let go to send it.\nA right word fills in, its meaning below. Tap it to hear it again. Fill the grid to clear.\nAny other real word is a bonus: 1 hint; HINT shows an open word.\nKeys: arrows pick, A add, B delete, START send, SELECT shuffle.\nResults: A adds, B removes.",
       ok: "OK",
-      done: "ROUND {n} CLEAR", doneBtn: "NEXT ROUND", bonus: "Bonus word {w}: hint +1",
+      done: "ROUND {n} CLEAR", doneBtn: "NEXT ROUND", bonus: "Bonus word {w}: hint +1", bonusPractice: "Bonus word {w}: no hint in practice",
       sum: "Bonus words {b} · hints {n}",
       bookAdded: "Added to word book", bookRemoved: "Removed from word book", bookDenied: "Word book not allowed", bookFull: "The word book is full",
       bookTip: "A: add to word book · B: remove",
@@ -228,6 +234,11 @@
   var INK = "#1f2a14", MID = "#7d8a58";
   var GRID = 7;                 /* the puzzle's grid is at most 7x7, so the letters stay readable on 331x359 */
   var WHEEL_R = 52, WHEEL_H = 154;
+  /* The practice round is built without PAD.dict.words: a fixed seed's letters and a fixed short list. The seed
+     1986 places exactly four words (star, rats, arts, tar), so the demo has a three-letter word to spell and the
+     rest is a short hunt. The same rnd seed gives everyone the same grid and the same wheel order. */
+  var PRACTICE = ["star", "rats", "arts", "tar", "rat", "art", "sat"];
+  var PRACTICE_SEED = 1986;
 
   /* The title menu's pixel icons: 8x8 strings, "#" a filled pixel, drawn at 2 px each as inline SVG rects. */
   var ICONS = {
@@ -265,13 +276,13 @@
   var entryEl = document.getElementById("entry"), coverList = document.getElementById("cover-list"), detailEl = document.getElementById("cover-detail");
   var footEl = document.getElementById("cover-foot");
 
-  var phase = "load";           /* load | demo | demoEnd | play | clear (the blink and the tune) | help | done | error
-                                   | title | pick | leave (the small way-out question) */
+  var phase = "load";           /* load | demo | demoEnd | play | clear (the blink and the tune) | help | done | practice
+                                   | error | title | pick | leave (the small way-out question) */
   var state = {
     round: 1, hints: 0, done: [],
     cleared: 0,                 /* the highest fixed round cleared, 0-100 */
     random: 0,                  /* how many random rounds cleared */
-    mode: "fixed",              /* "fixed" or "random": a random round has no round number to save */
+    mode: "fixed",              /* "fixed", "random" or "practice": practice is a visit from the title that is never saved */
     seed: "", wheel: [], placed: [], words: [], wordSet: {},
     entry: [], cursor: 0,
     view: null, cells: {},
@@ -301,19 +312,26 @@
      as a round number, so both leave these alone */
   var replay = false, mainRound = 1, mainDone = [];
   var titleRows = [], titlePick = 0, pickPage = 0, pickAt = 0, pickMsgTimer = null;
+  var titleGuardAt = 0;   /* a cover just closed onto the title: its rows are under the same finger for a moment */
 
   goalEl.textContent = TXT.goal;
 
   function keyOf(r, c) { return r + "," + c; }
 
   function updateHeader() {
-    if (state.mode === "random") {
+    if (state.mode === "practice") {
+      roundEl.textContent = TXT.practice;
+      roundEl.className = "badge";
+    } else if (state.mode === "random") {
       roundEl.textContent = TXT.badge;
       roundEl.className = "badge";
     } else {
       roundEl.textContent = tx("round", state.round) + (replay ? TXT.replay : "");
       roundEl.className = "";
     }
+    /* hints and the rules page belong to a round: practice is the how-to, and its hint/bonus rules would contradict it */
+    hintEl.hidden = state.mode === "practice";
+    helpEl.hidden = state.mode === "practice";
     hintEl.textContent = tx("hint", state.hints);
     hintEl.classList.toggle("off", state.hints < 1);
   }
@@ -788,7 +806,12 @@
     else if (row.kind === "random") {
       if (row.locked) { PAD.sfx("err"); return; }
       PAD.sfx("ok"); startRandom();
-    } else { PAD.sfx("tap"); openHelp(); }
+    } else { PAD.sfx("ok"); startPractice(); }
+  }
+  /* HOW TO PLAY teaches by doing: the fixed short round below, then a card of the keys. It is a visit, not a
+     round of the main line, so it leaves the save alone and can run as often as the player likes. */
+  function startPractice() {
+    startRound(1, state.hints, [], { practice: true });
   }
 
   /* A click on a locked round plays err and says why in the footer for 1.5 s; a newer press or page turn brings
@@ -912,6 +935,9 @@
     coverEl.classList.remove("confirm");
     hideCover();
     save();
+    /* a practice round ends here too: nothing on the title may still read its mode */
+    if (state.mode === "practice") { state.mode = "fixed"; updateHeader(); }
+    titleGuardAt = Date.now() + 300;
     showTitle();
   }
   function cancelLeave() {
@@ -924,17 +950,18 @@
   function startRound(round, hints, done, opts) {
     opts = opts || {};
     var random = opts.random === true;
+    var practice = opts.practice === true;
     replay = opts.replay === true;
-    state.mode = random ? "random" : "fixed";
-    /* only a round of the main line moves the saved round; a replay and a random round are extra visits */
-    if (!random && !replay) mainRound = round;
-    var seed = random ? (opts.seed || Date.now()) : round;
+    state.mode = practice ? "practice" : random ? "random" : "fixed";
+    /* only a round of the main line moves the saved round; a replay, a random round and practice are extra visits */
+    if (!random && !replay && !practice) mainRound = round;
+    var seed = practice ? PRACTICE_SEED : random ? (opts.seed || Date.now()) : round;
     pending = {
       round: round, hints: hints, done: done.slice(),
-      opts: { random: random, replay: replay, seed: seed }
+      opts: { random: random, replay: replay, practice: practice, seed: seed }
     };
-    state.round = random ? 101 : round; state.hints = hints; state.done = done.slice(); state.entry = []; state.cursor = 0;
-    if (!random && !replay) mainDone = state.done;   /* so a save before the grid builds still carries the new round */
+    state.round = random ? 101 : practice ? 1 : round; state.hints = hints; state.done = done.slice(); state.entry = []; state.cursor = 0;
+    if (!random && !replay && !practice) mainDone = state.done;   /* so a save before the grid builds still carries the new round */
     state.hinted = []; state.hintTurn = 0; state.mean = {}; hintBusy = false; results = null; tapPending = {};
     fxTimers.forEach(clearTimeout); fxTimers = []; boardEl.classList.remove("flash");
     state.seed = ""; state.wheel = []; state.placed = []; state.words = []; state.wordSet = {}; state.view = null; state.cells = {};
@@ -945,13 +972,17 @@
     var token = ++gen;
     var L = random ? 7 : lenFor(round);
     rnd = mulberry32(seed);
-    if (!PAD.dict || !PAD.dict.words) { fail(); return; }
+    /* practice needs no word list: its letters and words are fixed, so it still runs without a dictionary */
+    if (!practice && (!PAD.dict || !PAD.dict.words)) { fail(); return; }
     /* Every PAD.dict call shares the 10-a-second limit, and a build is most of a second's budget: wait out the
        window since the last call settled, or a quick re-entry opens the round on the error card. The wait sits
-       before pickSeed, so the seeded random and the grid a round produces do not change. */
-    var left = dictAt ? 1100 - (Date.now() - dictAt) : 0;
+       before pickSeed, so the seeded random and the grid a round produces do not change. Practice asks no
+       dictionary for its build, so it needs none of that wait. */
+    var left = !practice && dictAt ? 1100 - (Date.now() - dictAt) : 0;
     (left > 0 ? wait(left) : Promise.resolve()).then(function () {
-      return token === gen ? pickSeed(L) : null;
+      if (token !== gen) return null;
+      if (practice) return { seed: "star", words: PRACTICE.slice(), built: buildGrid("star", PRACTICE) };
+      return pickSeed(L);
     }).then(function (out) {
       if (token !== gen) return;
       if (!out) { fail(); return; }
@@ -966,9 +997,10 @@
       shuffleWheel(false);
       state.entry = []; state.cursor = 0;
       state.done = done.filter(function (w) { return state.wordSet[w] || state.placed.some(function (p) { return p.word === w; }); });
-      if (!random && !replay) mainDone = state.done;   /* the array save() writes; a replay's words stay in memory */
+      if (!random && !replay && !practice) mainDone = state.done;   /* the array save() writes; a replay's words stay in memory */
       renderBoard(); renderKeys(); updateHeader();
-      if (!taught) runDemo();
+      /* the practice round always shows the finger demo, even for a player who has already been taught */
+      if (practice || !taught) runDemo();
       else { phase = "play"; hideCover(); renderKeys(); checkComplete(true); }   /* a saved round whose words are all filled opens on its results */
     }, function () {
       if (token === gen) fail();
@@ -1206,6 +1238,12 @@
 
   function bonusWord(word) {
     state.done.push(word);
+    /* a practice round has no hints to give: the word still counts for the message, and nothing is saved */
+    if (state.mode === "practice") {
+      PAD.sfx("coin");
+      setNote(TXT.bonusPractice.replace("{w}", word.toUpperCase()));
+      return;
+    }
     state.hints++;
     PAD.sfx("coin");
     setNote(TXT.bonus.replace("{w}", word.toUpperCase()));
@@ -1223,8 +1261,9 @@
     if (!all) return;
     phase = "clear";
     /* the round is over: the main line walks on to the next round, a random round only adds to its count, and a
-       replay changes neither. mainDone is empty for the next round; the card still reads state.done. */
-    if (!replay) {
+       replay changes neither. Practice is not a round of the main line either: it only shows its card. mainDone
+       is empty for the next round; the card still reads state.done. */
+    if (!replay && state.mode !== "practice") {
       if (state.mode === "random") state.random++;
       else {
         state.cleared = Math.max(state.cleared, Math.min(100, state.round));
@@ -1250,6 +1289,7 @@
       fxTimers.push(setTimeout(function () {
         if (token !== gen || phase !== "clear") return;
         boardEl.classList.remove("flash");
+        if (state.mode === "practice") { phase = "practice"; setNote(""); showPracticeCard(); return; }
         var bonus = state.done.filter(function (w) { return !state.placed.some(function (p) { return p.word === w; }); }).length;
         resultSum = TXT.sum.replace("{b}", bonus).replace("{n}", state.hints);
         results = state.placed.map(function (p) { return { word: p.word, mean: state.mean[p.word] || "" }; });
@@ -1358,8 +1398,24 @@
     taught = true; phase = "play"; hideCover(); save(); renderKeys(); checkComplete();
   }
 
-  /* the rules, any time: the ? button, or the title's HOW TO PLAY row. A, B or START (or the button) go back
-     to whichever screen opened them. */
+  /* The practice round's card: the plain cover, the same look as the tutorial's last page, with the keys a
+     player needs next and one way out. No results, no word book, so practice never touches the save. */
+  function showPracticeCard() {
+    showCover(TXT.practiceTitle + "\n\n" + TXT.practiceKeys, TXT.practiceBack);
+  }
+  function practiceToTitle() {
+    PAD.sfx("tap");
+    /* a B pressed during the demo must stop its clock: no stray fill or demoEnd may land on the title */
+    demoTimers.forEach(clearTimeout); demoTimers = [];
+    fingerEl.hidden = true;
+    if (state.mode === "practice") { state.mode = "fixed"; updateHeader(); }
+    /* the closed cover still has its rows under the same finger: ignore its second tap and keys for a moment */
+    titleGuardAt = Date.now() + 300;
+    hideCover();
+    showTitle();
+  }
+
+  /* the rules page, any time: the ? button. A, B or START (or the button) go back to the round (or the title). */
   function openHelp() {
     if (phase !== "play" && phase !== "done" && phase !== "title") return;
     helpBack = phase; phase = "help";
@@ -1395,6 +1451,7 @@
 
   coverBtn.addEventListener("click", function () {
     if (phase === "demoEnd") startPlay();
+    else if (phase === "practice") practiceToTitle();
     else if (phase === "help") closeHelp();
     else if (phase === "error") {
       startRound(pending.round, pending.hints, pending.done, pending.opts);
@@ -1418,6 +1475,8 @@
     rowDown = null;
     if (!down || e.pointerId !== down.id) return;
     if (phase !== "done" && phase !== "title" && phase !== "pick") return;
+    /* the cover that just closed may still be under the finger: this tap is that one, not a new choice */
+    if (phase === "title" && Date.now() < titleGuardAt) return;
     var li = e.target && e.target.closest ? e.target.closest("li") : null;
     if (li !== down.li || Math.abs(e.clientX - down.x) + Math.abs(e.clientY - down.y) > 12) return;
     if (phase === "title") { openTitleRow(+li.getAttribute("data-row")); return; }
@@ -1519,6 +1578,8 @@
      Also the keyboard on a computer (X = A, Z = B, Enter = START, Shift = SELECT). */
   PAD.on("press", function (b) {
     if (phase === "title") {
+      /* a cover that just closed onto the title eats the same finger's next press, as it does its next tap */
+      if (Date.now() < titleGuardAt) return;
       /* a short menu: Up/Down cycle, A or a tap opens, START opens the first row, B does nothing */
       if (b === "up" || b === "down") {
         titlePick = (titlePick + (b === "down" ? 1 : -1) + titleRows.length) % titleRows.length;
@@ -1540,10 +1601,20 @@
       else if (b === "b") cancelLeave();
       return;
     }
-    if (phase === "demo") { demoEnd(); return; }
-    if (phase === "demoEnd") { if (b === "a" || b === "start") startPlay(); return; }
+    /* before practice starts nothing has been done: B leaves it straight away, with no confirm */
+    if (phase === "demo") {
+      if (b === "b" && state.mode === "practice") { practiceToTitle(); return; }
+      demoEnd(); return;
+    }
+    if (phase === "demoEnd") {
+      if (b === "b" && state.mode === "practice") { practiceToTitle(); return; }
+      if (b === "a" || b === "start") startPlay();
+      return;
+    }
     if (phase === "help") { if (b === "a" || b === "b" || b === "start") closeHelp(); return; }
     if (phase === "error") { if (b === "a" || b === "start") coverBtn.click(); return; }
+    /* the practice card is the end of the visit: any of the card's keys goes back to the title */
+    if (phase === "practice") { if (b === "a" || b === "b" || b === "start") practiceToTitle(); return; }
     if (phase === "done") {
       /* the ring is [NEXT, word1 .. wordN]; it starts on NEXT and Up/Down cycle. START always starts the next round.
          On a word row: A adds a hollow word or reads a filled one, B only removes, SELECT flips it; Left and Right

@@ -7060,6 +7060,8 @@ test("crossing: round 1 shows a grid, a demo spells one word, words typed with t
   assert.equal(saved2.cleared, 1, "round 1 is recorded cleared");
   assert.equal(saved2.round, 2, "the save continues at round 2");
 
+  /* the way out just closed onto the title: let its 300 ms tap guard run out before using the menu */
+  await p.waitForTimeout(350);
   /* ROUNDS opens the picker on the next round: 1 solid, 2 dashed, 3 locked; A on 3 is refused */
   await press("down");
   await press("a");
@@ -7337,6 +7339,7 @@ test("crossing: an old save, a replay and a quick re-entry", { skip, timeout: 60
   await f.waitForFunction(() => game.phase === "leave");
   await press("a");
   await f.waitForFunction(() => game.phase === "title");
+  await p.waitForTimeout(350);        /* the title's tap guard after the leave */
   await press("a");
   await until(p, () => f.evaluate(() => game.phase === "play" && game.round === 2), "the quick re-entry to reach play");
 
@@ -7359,6 +7362,225 @@ test("crossing: an old save, a replay and a quick re-entry", { skip, timeout: 60
   const noTip = await f.evaluate(() => document.getElementById("cover-detail").textContent);
   assert.ok(noTip.length > 0, "the word's meaning is in the detail box");
   assert.notEqual(noTip, "A 收进生词本 · B 移出", "a save with bookTip true never shows the hint again");
+
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+/* ---------- 拼字格 / Crossing: HOW TO PLAY is a fixed practice round, not the text page, and leaves the save alone ---------- */
+test("crossing: HOW TO PLAY runs the fixed practice round and leaves the save alone", { skip, timeout: 90000 }, async (t) => {
+  const { p, errors } = await page(t);
+  const press = async (b) => { await p.locator(`#pad [data-b="${b}"]`).click(); await p.waitForTimeout(20); };
+  await p.goto(`${base}/sdk/dev.html?app=registry/apps/crossing&lang=zh`, { waitUntil: "load" });
+  await p.waitForFunction(() => /loaded |load failed/.test(document.getElementById("log").textContent), null, { timeout: 5000 });
+  let f;
+  await until(p, async () => {
+    f = p.frames().find((x) => x !== p.mainFrame());
+    return f && await f.evaluate(() => !!(window.game && game.phase === "title")).catch(() => false);
+  }, "the title screen");
+  await p.locator("#app").evaluate((el) => { el.style.width = "331px"; el.style.height = "359px"; el.style.flex = "none"; });
+  await p.waitForTimeout(150);
+  /* the injected save uses save()'s own key order and every value save() will write back, so the bytes can be compared */
+  const injected = { round: 3, hints: 2, done: [], taught: true, cleared: 2, random: 0, bookTip: true };
+  await p.evaluate((s) => localStorage.setItem("lopda-dev:crossing", JSON.stringify({ game: s })), injected);
+  await p.reload({ waitUntil: "load" });
+  await p.waitForFunction(() => /loaded |load failed/.test(document.getElementById("log").textContent), null, { timeout: 5000 });
+  await until(p, async () => {
+    f = p.frames().find((x) => x !== p.mainFrame());
+    return f && await f.evaluate(() => !!(window.game && game.phase === "title")).catch(() => false);
+  }, "the title after the save");
+  await p.locator("#app").evaluate((el) => { el.style.width = "331px"; el.style.height = "359px"; el.style.flex = "none"; });
+  await p.waitForTimeout(150);
+  const readSave = async () => (await p.evaluate(() => (JSON.parse(localStorage.getItem("lopda-dev:crossing") || "{}").game) || null));
+  const withoutTaught = (g) => { const c = Object.assign({}, g); delete c.taught; return c; };
+  const beforeSave = withoutTaught(await readSave());
+  const titleRows = await f.evaluate(() => [...document.querySelectorAll("#cover-list li")].map((li) => {
+    const r = li.getBoundingClientRect();
+    return {
+      row: +li.getAttribute("data-row"), text: li.textContent, locked: li.classList.contains("locked"),
+      l: r.left, t: r.top, r: r.right, b: r.bottom,
+    };
+  }));
+  const wordsCallsBefore = ((await p.textContent("#log")).match(/dict\.words/g) || []).length;
+  /* the HOW TO PLAY row keeps its place and its icon, and A starts the practice round */
+  const helpRow = await f.evaluate(() => {
+    const li = document.querySelector('#cover-list li[data-row="3"]');
+    return { text: li.textContent, icons: li.querySelectorAll("svg rect").length > 0 };
+  });
+  assert.equal(helpRow.text, "玩法", "the fourth row is still HOW TO PLAY");
+  assert.equal(helpRow.icons, true, "the row keeps its icon");
+  const enterPractice = async () => {
+    await f.locator('#cover-list li[data-row="3"]').tap();
+    await until(p, () => f.evaluate(() => game.phase === "demo"), "the practice demo");
+  };
+  await enterPractice();
+  const head = await f.evaluate(() => {
+    const badge = document.getElementById("round"), hint = document.getElementById("hint"), help = document.getElementById("help");
+    const root = document.documentElement, box = badge.getBoundingClientRect();
+    return {
+      badge: badge.textContent, cls: badge.className,
+      hintHidden: hint.hidden, hintDisplay: getComputedStyle(hint).display,
+      helpHidden: help.hidden, helpDisplay: getComputedStyle(help).display,
+      mode: game.mode, round: game.round, seed: game.seed, wheel: game.wheel.join(""),
+      placed: game.placed.map((q) => q.word),
+      positions: game.placed.map((q) => ({ word: q.word, r: q.r, c: q.c, dir: q.dir })),
+      size: [root.clientWidth, root.clientHeight],
+      fit: box.top >= 0 && box.left >= 0 && box.bottom <= root.clientHeight && box.right <= root.clientWidth,
+    };
+  });
+  assert.equal(head.badge, "练习", "the practice badge takes the round number's place");
+  assert.equal(head.cls, "badge", "it uses the random badge's inverted look");
+  assert.equal(head.hintHidden, true, "HINT is hidden during practice");
+  assert.equal(head.hintDisplay, "none", "the hidden HINT button takes no room");
+  assert.equal(head.helpHidden, true, "the ? page is hidden during practice");
+  assert.equal(head.helpDisplay, "none", "the hidden ? button takes no room");
+  assert.equal(head.mode, "practice");
+  assert.equal(head.round, 1, "practice is not a saved round number");
+  assert.equal(head.seed, "star", "the practice wheel is the fixed seed");
+  assert.deepEqual(head.placed, ["star", "rats", "arts", "tar"], "the fixed grid is the same every time");
+  assert.deepEqual(head.positions, [
+    { word: "star", r: 1, c: 1, dir: "h" },
+    { word: "rats", r: 0, c: 3, dir: "v" },
+    { word: "arts", r: 3, c: 0, dir: "h" },
+    { word: "tar", r: 2, c: 0, dir: "v" },
+  ], "the practice grid's cells");
+  assert.deepEqual(head.size, [331, 359]);
+  assert.equal(head.fit, true, "the badge stays inside 331x359");
+  assert.equal(((await p.textContent("#log")).match(/dict\.words/g) || []).length, wordsCallsBefore,
+    "practice never asks PAD.dict.words: the words are fixed");
+
+  /* B before practice has begun leaves it at once, with no confirm and without touching the save */
+  await press("b");
+  await f.waitForFunction(() => game.phase === "title");
+  assert.equal(await f.evaluate(() => game.mode), "fixed", "leaving practice clears its mode");
+  assert.deepEqual(withoutTaught(await readSave()), beforeSave, "B during the practice demo leaves the save alone");
+  await p.waitForTimeout(400);          /* the title's tap guard has run out */
+
+  /* the demo runs even though the save says taught, and ends on the your-turn card */
+  await enterPractice();
+  await until(p, () => f.evaluate(() => game.phase === "demoEnd"), "the practice demo to end on its card");
+  const demoCard = await f.evaluate(() => ({
+    text: document.getElementById("cover-text").textContent,
+    button: document.getElementById("cover-btn").textContent,
+    done: game.done.slice(),
+  }));
+  assert.match(demoCard.text, /^拼对了/, "the demo ends on the usual your-turn card");
+  assert.equal(demoCard.button, "开始");
+  assert.equal(demoCard.done.length, 1, "the demo filled one word");
+  assert.equal(demoCard.done[0], "tar", "the demo spells the shortest grid word that is not the seed");
+  await press("start");
+  await f.waitForFunction(() => game.phase === "play");
+
+  /* (a) mid-play, B asks and LEAVE returns to the title without saving anything */
+  await press("b");
+  await f.waitForFunction(() => game.phase === "leave");
+  assert.match(await f.textContent("#cover-text"), /回到主界面/);
+  await press("a");
+  await f.waitForFunction(() => game.phase === "title");
+  assert.equal(await f.evaluate(() => game.mode), "fixed", "the leave also clears the practice mode");
+  assert.deepEqual(withoutTaught(await readSave()), beforeSave, "leaving mid-play saved nothing new");
+  await p.waitForTimeout(400);
+
+  /* a third visit completes the round; a practice-list word outside the grid is a bonus for the message only */
+  await enterPractice();
+  await until(p, () => f.evaluate(() => game.phase === "demoEnd"), "the third practice demo to end");
+  await press("start");
+  await f.waitForFunction(() => game.phase === "play");
+  const grid = head.placed;
+  const bonus = ["sat", "rat", "art"].find((w) => !grid.includes(w));
+  assert.ok(bonus, "the practice list has a word outside the grid: " + grid.join(" "));
+  const hintsBefore = await f.evaluate(() => game.hints);
+  await press("right");
+  const typeWord = async (word) => {
+    for (const ch of word) {
+      for (let k = 0; ; k++) {
+        const go = await f.evaluate((ch) => {
+          const want = game.wheel.findIndex((c, i) => c === ch && game.entry.indexOf(i) < 0);
+          if (want === game.cursor) return null;
+          const seen = { [game.cursor]: true }, queue = [[game.cursor, null]];
+          while (queue.length) {
+            const [at, first] = queue.shift();
+            for (const b of ["up", "down", "left", "right"]) {
+              const to = game.aim(at, b);
+              if (seen[to]) continue;
+              if (to === want) return first || b;
+              seen[to] = true; queue.push([to, first || b]);
+            }
+          }
+          return "none";
+        }, ch);
+        assert.notEqual(go, "none", "every letter can be reached with the arrows");
+        if (!go) break;
+        assert.ok(k < 4, "the arrows reach " + ch + " within a few presses");
+        await press(go);
+      }
+      await press("a");
+    }
+  };
+  await typeWord(bonus);
+  await press("start");
+  await until(p, () => f.evaluate((w) => game.done.indexOf(w) >= 0, bonus), "the bonus word to count");
+  const bonusNow = await f.evaluate(() => ({
+    hints: game.hints, hidden: document.getElementById("hint").hidden,
+    note: document.getElementById("note-text").textContent,
+  }));
+  assert.equal(bonusNow.hints, hintsBefore, "a practice bonus adds no hint");
+  assert.match(bonusNow.note, /奖励词/, "the bonus word still says so");
+  assert.deepEqual(withoutTaught(await readSave()), beforeSave, "the bonus word did not save anything");
+
+  /* the rest of the grid with the keys: the usual blink and tune, then the practice card */
+  for (const w of grid.filter((x) => !demoCard.done.includes(x))) {
+    await typeWord(w);
+    await press("start");
+    await until(p, () => f.evaluate((w) => game.done.indexOf(w) >= 0, w), "the word " + w + " to fill in");
+    await p.waitForTimeout(1100);
+  }
+  await until(p, () => f.evaluate(() => game.phase === "practice"), "the practice card");
+  const card = await f.evaluate(() => {
+    const root = document.documentElement, cover = document.getElementById("cover"), text = document.getElementById("cover-text");
+    const btn = document.getElementById("cover-btn"), r = btn.getBoundingClientRect();
+    return {
+      text: text.textContent, button: btn.textContent, plain: !cover.classList.contains("done"),
+      hintHidden: document.getElementById("hint").hidden, helpHidden: document.getElementById("help").hidden,
+      size: [root.clientWidth, root.clientHeight],
+      fit: r.top >= 0 && r.left >= 0 && r.bottom <= root.clientHeight && r.right <= root.clientWidth,
+      scroll: cover.scrollHeight, client: cover.clientHeight,
+      btn: { l: r.left, t: r.top, r: r.right, b: r.bottom },
+    };
+  });
+  assert.match(card.text, /^会玩了！/, "the card's title");
+  assert.match(card.text, /方向键选字母，A 加上，B 删掉一个，START 提交，SELECT 打乱。/);
+  assert.match(card.text, /结算卡上 A 收进生词本，B 移出。/);
+  assert.match(card.text, /关卡里没输入字母时按 B 回主界面。/);
+  assert.equal(card.button, "回主界面", "one button goes back to the title");
+  assert.equal(card.plain, true, "the practice card uses the plain cover, not the results card");
+  assert.equal(card.hintHidden, true, "HINT stays hidden through the card");
+  assert.equal(card.helpHidden, true, "? stays hidden through the card");
+  assert.deepEqual(card.size, [331, 359]);
+  assert.equal(card.fit, true, "the card's button stays inside 331x359");
+  assert.ok(card.scroll <= card.client, "the practice card needs no scrolling: " + card.scroll + " <= " + card.client);
+
+  /* (d) the card's button closes onto the title; a tap at the same spot within 100 ms is that same press, not a row */
+  const overlap = titleRows.map((row) => {
+    if (row.locked) return null;
+    const l = Math.max(card.btn.l, row.l), r = Math.min(card.btn.r, row.r);
+    const t = Math.max(card.btn.t, row.t), b = Math.min(card.btn.b, row.b);
+    if (r - l < 4 || b - t < 4) return null;
+    return { row: row.row, x: (l + r) / 2 - row.l, y: (t + b) / 2 - row.t, area: (r - l) * (b - t) };
+  }).filter(Boolean).sort((a, b) => b.area - a.area)[0];
+  assert.ok(overlap, "the card's button sits over a title row: " + JSON.stringify(titleRows.map((r) => [r.row, r.locked, r.t, r.b])));
+  await f.locator("#cover-btn").tap();
+  await f.locator(`#cover-list li[data-row="${overlap.row}"]`).tap({ position: { x: overlap.x, y: overlap.y } });
+  await p.waitForTimeout(100);
+  assert.equal(await f.evaluate(() => game.phase), "title", "the tap under the old button opens nothing");
+  assert.equal(await f.evaluate(() => game.mode), "fixed", "closing the card clears the practice mode");
+  assert.deepEqual(withoutTaught(await readSave()), beforeSave, "practice leaves round, cleared, hints, done, random and bookTip untouched");
+  const kept = await readSave();
+  assert.equal(kept.round, 3);
+  assert.equal(kept.cleared, 2);
+  assert.equal(kept.hints, 2);
+  assert.deepEqual(kept.done, []);
+  assert.equal(kept.random, 0);
+  assert.equal(kept.bookTip, true);
 
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
