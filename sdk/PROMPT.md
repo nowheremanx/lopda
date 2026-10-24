@@ -102,6 +102,21 @@ Hard rules for index.html:
 - Speech, if the idea needs a word read aloud (no permission). Check that PAD.say exists first:
     PAD.say(text, {lang: "zh" | "en" | "ja"}) -> Promise "done" | "stopped" | "unavailable". At most 200 characters,
          once a second; a new call stops the one speaking. "unavailable" (volume 0, no voice) is normal: show the text too.
+- Words from the handheld's built-in English dictionary, if the idea needs a word list or a meaning (no permission).
+  Check that PAD.dict exists first (runtime 0.36.0 and later):
+    PAD.dict.words({len: 5, pattern: "?a???", letters: "planet", level: 1, max: 100}) -> Promise {words, more} | null
+         every field optional: len 2-15 or [min, max]; pattern is a-z and ? and sets the length; letters up to 15,
+         each used at most as often as given; level 1-5 (the most common 2000, 5000, 10000, 15000 or all);
+         max 1-500 (default 100); offset skips matches. Words are lower-case a-z, most common first; the list has
+         no names, abbreviations, numerals or rude words.
+    PAD.dict.lookup("ran") -> Promise {word: "run", form: "ran", zh: [...], en: [...]} | null
+         exact spelling first, else its base form, which is then in form; zh lines carry a part of speech; there is
+         no nearest-word guessing. Show the senses you get, not a copied dictionary.
+  null means the dictionary could not be read or the app asked more than 10 times in a second (words, lookup and the
+  word book together): the app must still work. A bad query rejects with an error; catch it.
+  With "permissions": ["wordbook"], PAD.dict.inBook(words) -> Promise boolean[] | null and PAD.dict.addWord(word) /
+  removeWord(word) -> Promise "saved" | "denied" | "full" | null use the player's own word book (headwords only, 2000 at
+  most, shared with the dictionary); the first add or remove asks the player once, and inBook needs that answer too.
 - A photo, only if the idea needs one the player takes (a portrait for a card, a picture to play with). Check that
   PAD.camera exists first:
     PAD.camera.snap({size: "small" | "large"}) -> Promise {w, h, px} | null. The runtime opens its own viewfinder
@@ -128,7 +143,8 @@ manifest.json must be:
   "license": "MIT",
   "permissions": [<leave empty; "files" only if the app imports or exports files with PAD.importFile / PAD.exportFile;
                    "motion" only if it uses PAD.motion or the tilt/shake events; "mic" only if it uses PAD.mic or the sound event;
-                   "notes" only if it uses PAD.notes.append; "camera" only if it uses PAD.camera.snap>],
+                   "notes" only if it uses PAD.notes.append; "camera" only if it uses PAD.camera.snap;
+                   "wordbook" only if it uses PAD.dict.addWord, removeWord or inBook>],
   "buttons": <true if the app uses PAD.on, otherwise leave this line out>
 }
 

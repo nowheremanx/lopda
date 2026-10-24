@@ -99,7 +99,7 @@ const FAILS = [
   ["long description", { manifest: (m) => (m.description = "长".repeat(81)) }, /description must be 1-80/],
   ["no author", { manifest: (m) => delete m.author }, /author is required/],
   ["GPL licence", { manifest: (m) => (m.license = "GPL-3.0") }, /license must be one of/],
-  ["unknown permission", { manifest: (m) => (m.permissions = ["location"]) }, /unknown permission "location": allowed are files, motion, mic, notes, camera/],
+  ["unknown permission", { manifest: (m) => (m.permissions = ["location"]) }, /unknown permission "location": allowed are files, motion, mic, notes, camera, wordbook/],
   ["permission twice", { manifest: (m) => (m.permissions = ["files", "files"]) }, /the same one twice/],
   ["PAD.exportFile without the files permission", withCode('PAD.exportFile({ name: "a.txt", type: "text/plain", data: "a" });'), /need "permissions": \["files"\]/],
   ["PAD.importFile without the files permission", withCode("PAD.importFile({ accept: ['text/plain'] });"), /need "permissions": \["files"\]/],
@@ -110,8 +110,14 @@ const FAILS = [
   ["sensor mic: a sound listener without the mic permission", withCode('PAD.on("sound", function (s) {});'), /need "permissions": \["mic"\]/],
   ["notes: PAD.notes.append without the notes permission", withCode('if (PAD.notes) PAD.notes.append("Scores", "100");'), /PAD\.notes\.append needs "permissions": \["notes"\]/],
   ["camera: PAD.camera.snap without the camera permission", withCode('if (PAD.camera) PAD.camera.snap({ size: "small" });'), /PAD\.camera\.snap needs "permissions": \["camera"\]/],
+  ["wordbook: PAD.dict.addWord without the wordbook permission", withCode('if (PAD.dict) PAD.dict.addWord("cat");'), /PAD\.dict\.addWord\/removeWord\/inBook need "permissions": \["wordbook"\]/],
+  ["wordbook: PAD.dict.removeWord without the wordbook permission", withCode('if (PAD.dict) PAD.dict.removeWord("cat");'), /PAD\.dict\.addWord\/removeWord\/inBook need "permissions": \["wordbook"\]/],
+  ["wordbook: PAD.dict.inBook without the wordbook permission", withCode('if (PAD.dict) PAD.dict.inBook(["cat"]);'), /PAD\.dict\.addWord\/removeWord\/inBook need "permissions": \["wordbook"\]/],
   ["notes: files declared does not cover notes", { manifest: (m) => (m.permissions = ["files"]), ...withCode('PAD.importFile({}); PAD.notes.append("a", "b");') }, /needs "permissions": \["notes"\]/],
-  ["say: PAD.say on lopda/0", { manifest: (m) => { m.spec = "lopda/0"; delete m.buttons; }, ...withCode('PAD.say("hi");') }, /say need spec "lopda\/1"/],
+  ["say: PAD.say on lopda/0", { manifest: (m) => { m.spec = "lopda/0"; delete m.buttons; }, ...withCode('PAD.say("hi");') }, /say\/dict need spec "lopda\/1"/],
+  ["dict: PAD.dict on lopda/0", { manifest: (m) => { m.spec = "lopda/0"; delete m.buttons; },
+    html: (h) => withCode('if (PAD.dict) PAD.dict.words({ len: 5 });').html(h).replace(/PAD\.(on|sfx)\(/g, "noPad(") },
+    /say\/dict need spec "lopda\/1"/],
   ["sensor mic: motion declared does not cover the mic", { manifest: (m) => (m.permissions = ["motion"]), ...withCode("PAD.motion.start(); PAD.mic.start();") }, /need "permissions": \["mic"\]/],
   ["buttons on lopda/0", { manifest: (m) => (m.spec = "lopda/0") }, /buttons needs spec "lopda\/1"/],
   ["buttons not boolean", { manifest: (m) => (m.buttons = "yes") }, /buttons must be true or false/],
@@ -140,11 +146,11 @@ const FAILS = [
   ["named colour", { html: (h) => h.replace("color: #1f2a14", "color: red") }, /color: red/],
   ["unknown sound", withCode('PAD.sfx("boom");'), /PAD\.sfx\("boom"\) is not a known sound/],
   ["unknown ambience", withCode('if (PAD.ambience) PAD.ambience("thunder", 1);'), /PAD\.ambience\("thunder"\) is not a known ambience/],
-  ["buttons on lopda/0 code", { manifest: (m) => { m.spec = "lopda/0"; delete m.buttons; } }, /PAD\.on\/isDown\/sfx\/music\/ambience\/say need spec "lopda\/1"/],
+  ["buttons on lopda/0 code", { manifest: (m) => { m.spec = "lopda/0"; delete m.buttons; } }, /PAD\.on\/isDown\/sfx\/music\/ambience\/say\/dict need spec "lopda\/1"/],
   /* the template's own PAD.on and PAD.sfx are renamed away, so PAD.music alone trips the rule */
   ["music on lopda/0 code", { manifest: (m) => { m.spec = "lopda/0"; delete m.buttons; },
     html: (h) => withCode("if (PAD.music) PAD.music.play({ p1: \"c\" });").html(h).replace(/PAD\.(on|sfx)\(/g, "noPad(") },
-    /PAD\.on\/isDown\/sfx\/music\/ambience\/say need spec "lopda\/1"/],
+    /PAD\.on\/isDown\/sfx\/music\/ambience\/say\/dict need spec "lopda\/1"/],
 ];
 
 for (const [name, change, want] of FAILS) {
@@ -169,7 +175,10 @@ const PASSES = [
     ...withCode('if (PAD.motion) { PAD.motion.start(); PAD.on("tilt", function () {}); } if (PAD.mic) PAD.mic.start();') }],
   ["notes: the notes permission with PAD.notes.append", { manifest: (m) => (m.permissions = ["notes"]), ...withCode('if (PAD.notes) PAD.notes.append("Scores", "100");') }],
   ["camera: the camera permission with PAD.camera.snap", { manifest: (m) => (m.permissions = ["camera"]), ...withCode('if (PAD.camera) PAD.camera.snap().then(function (p) {});') }],
+  ["wordbook: the wordbook permission with PAD.dict.addWord, removeWord and inBook", { manifest: (m) => (m.permissions = ["wordbook"]),
+    ...withCode('if (PAD.dict) { PAD.dict.inBook(["cat"]); PAD.dict.addWord("cat"); PAD.dict.removeWord("cat"); }') }],
   ["say: PAD.say needs no permission", withCode('if (PAD.say) PAD.say("hello", { lang: "en" });')],
+  ["dict: PAD.dict needs no permission", withCode('if (PAD.dict) PAD.dict.words({ len: 5 }).then(function (r) {});')],
   ["lopda/0 without buttons or PAD.on", {
     manifest: (m) => { m.spec = "lopda/0"; delete m.buttons; },
     html: (h) => h.replace(/PAD\.sfx\(sound\);/, "").replace(/PAD\.on\("press"[\s\S]*?\n {2}\}\);/, ""),
@@ -215,6 +224,12 @@ test("camera: warns about a camera permission the app never uses", (t) => {
   const r = tool("check-app.mjs", counter(t, { manifest: (m) => (m.permissions = ["camera"]) }));
   assert.equal(r.code, 0, r.out);
   assert.match(r.out, /"camera" is declared but PAD\.camera\.snap is never used/);
+});
+
+test("wordbook: warns about a wordbook permission the app never uses", (t) => {
+  const r = tool("check-app.mjs", counter(t, { manifest: (m) => (m.permissions = ["wordbook"]) }));
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /"wordbook" is declared but PAD\.dict\.addWord\/removeWord\/inBook are never used/);
 });
 
 test("info for a manifest without i18n", (t) => {

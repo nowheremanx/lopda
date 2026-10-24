@@ -235,7 +235,7 @@ test("store: category filters split the catalogue, and one button updates every 
   assert.equal(await p.locator("#store-list .store-cat").count(), 6, "one section per category");
   assert.match(await p.locator("#store-updates").innerText(), /2 个程序有新版本/);
   await p.locator(".store-filter", { hasText: "游戏" }).click();
-  assert.equal(await p.locator("#store-list .store-item").count(), 8);
+  assert.equal(await p.locator("#store-list .store-item").count(), 9);
   assert.equal(await p.locator("#store-list .store-cat").count(), 0, "a filter shows one flat list");
   await p.locator(".store-filter", { hasText: "全部" }).click();
 
@@ -4643,11 +4643,61 @@ test("camera snap: without the permission null and no dialog; Settings lists the
   assert.equal(await p.textContent("#set-sense > span"), "传感器与相机");
   assert.match(await p.textContent("#set-sense-list"), /(拍照测试|snap-test) · 相机/);
   await p.click('#set-sense-list [data-app="snap-test"]');
-  assert.match(await p.textContent("#set-sense-list"), /还没有程序用过倾斜感应、麦克风或相机/);
+  assert.match(await p.textContent("#set-sense-list"), /还没有程序用过倾斜感应、麦克风、相机或生词本/);
   f = await runSnapApp(p);
   f.evaluate(() => { snap(); });
   await p.waitForSelector("#file-ask .box");
   assert.equal(await p.textContent("#file-ask p"), "「拍照测试」想用相机拍一张照片。");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+/* ---------- the word book for apps: PAD.dict.inBook / addWord / removeWord, "permissions": ["wordbook"] ----------
+   A small test app records what each call returned; the runtime's own dialog is driven with A and B. */
+const BOOK_APP = `<!doctype html><html><body><script>
+window.R = { log: [] };
+window.book = function (words) { return PAD.dict.inBook(words).then(function (v) { R.log.push({ call: "inBook", words: words, v: v }); return v; }); };
+window.add = function (w) { return PAD.dict.addWord(w).then(function (v) { R.log.push({ call: "add", word: w, v: v }); return v; }); };
+window.remove = function (w) { return PAD.dict.removeWord(w).then(function (v) { R.log.push({ call: "remove", word: w, v: v }); return v; }); };
+<\/script></body></html>`;
+const runBookApp = async (p, perms = ["wordbook"], id = "book-test", name = "生词测试") => {
+  await p.evaluate(([html, perms, id, name]) => {
+    const a = { id, name, glyph: "词", version: "1.0.0", spec: "lopda/1", permissions: perms, html };
+    window.LP.upsert("apps", a); window.LP.runApp(a);
+  }, [BOOK_APP, perms, id, name]);
+  for (let i = 0; i < 50; i++) { const f = p.frames().find((x) => x !== p.mainFrame()); if (f && await f.evaluate(() => !!window.book).catch(() => false)) return f; await p.waitForTimeout(100); }
+  assert.fail("the test app did not start");
+};
+
+test("word book: null before the grant; B denies, A allows and stores the headword; remove, Settings lists and revokes", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN" });
+  await p.goto(base + "/runtime/?debug", { waitUntil: "networkidle" });
+  await p.waitForFunction(() => window.LP && window.LP.S.db);
+  let f = await runBookApp(p);
+  /* before the grant, reading answers null and never opens a dialog */
+  assert.equal(await f.evaluate(() => book(["cat"])), null);
+  assert.equal(await p.locator("#file-ask").count(), 0);
+  /* the first add asks once: B denies this call only */
+  f.evaluate(() => { add("Cats"); });
+  await p.waitForSelector("#file-ask .box");
+  assert.equal(await p.textContent("#file-ask p"), "「生词测试」想把单词加入你的生词本");
+  await press(p, "b");
+  await until(p, async () => (await R(f)).log.some((x) => x.call === "add" && x.v === "denied"), "denied");
+  /* asked again, A allows: store the ECDICT headword, so "Cats" is "cat" */
+  f.evaluate(() => { add("Cats"); });
+  await p.waitForSelector("#file-ask .box");
+  await press(p, "a");
+  await until(p, async () => (await R(f)).log.some((x) => x.call === "add" && x.v === "saved"), "saved");
+  assert.deepEqual(await f.evaluate(() => book(["cat", "dog"])), [true, false]);
+  assert.equal(await p.evaluate(() => LP.sensorGrants.list().some((g) => g.id === "book-test" && g.kinds.indexOf("wordbook") >= 0)), true);
+  assert.equal(await f.evaluate(() => remove("cat")), "saved");
+  /* let the 10-a-second limiter forget the burst, then revoke: reading is null again */
+  await p.waitForTimeout(1100);
+  await p.evaluate(() => LP.sensorGrants.revoke("book-test"));
+  assert.equal(await f.evaluate(() => book(["cat"])), null);
+  /* an app without "wordbook": add is denied and no dialog opens */
+  f = await runBookApp(p, [], "book-none", "无词测试");
+  assert.equal(await f.evaluate(() => add("cat")), "denied");
+  assert.equal(await p.locator("#file-ask .box").count(), 0);
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
@@ -6665,4 +6715,873 @@ test("AI line: while the AI is slow the hint counts time, says what the line is 
   });
   await p.waitForFunction(() => /没写完：离开了画面，线路断了，请重新生成。/.test(document.getElementById("script-hint").textContent));
   assert.deepEqual(errors, []);
+});
+
+/* ---------- 拼字格 / Crossing (registry/apps/crossing): PAD.dict builds the round, a demo fills one word, the chin keys fill another ---------- */
+test("crossing: round 1 shows a grid, a demo spells one word, words typed with the arrows fill in, the results card leads on", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t);
+  await p.goto(`${base}/sdk/dev.html?app=registry/apps/crossing&lang=zh`, { waitUntil: "load" });
+  await p.waitForFunction(() => /loaded |load failed/.test(document.getElementById("log").textContent), null, { timeout: 5000 });
+  let f;
+  await until(p, async () => {
+    f = p.frames().find((x) => x !== p.mainFrame());
+    return f && await f.evaluate(() => !!(window.game && game.phase === "title")).catch(() => false);
+  }, "the title screen");
+  /* the smallest screen, as on an iPhone SE with the chin pad */
+  await p.locator("#app").evaluate((el) => { el.style.width = "331px"; el.style.height = "359px"; el.style.flex = "none"; });
+  await p.waitForTimeout(200);
+  /* a fresh start: the name over a short menu, the first row inverted, RANDOM dashed and closed */
+  const title = await f.evaluate(() => {
+    const root = document.documentElement, rows = [...document.querySelectorAll("#cover-list li")], cover = document.getElementById("cover");
+    const art = [...document.querySelectorAll("#title-art .cell")];
+    const artBox = document.getElementById("title-art").getBoundingClientRect();
+    return {
+      name: document.getElementById("cover-text").textContent,
+      rows: rows.map((li) => li.textContent),
+      sel: rows.map((li) => li.classList.contains("sel")),
+      locked: rows.map((li) => li.classList.contains("locked")),
+      dashed: rows[2] ? getComputedStyle(rows[2]).borderTopStyle : "",
+      icons: rows.map((li) => !!li.querySelector("svg") && li.querySelectorAll("svg rect").length > 0),
+      art: {
+        cells: art.length,
+        filled: art.filter((c) => c.classList.contains("on")).length,
+        word: art.filter((c) => c.classList.contains("on")).map((c) => c.textContent).join(""),
+        open: art.filter((c) => c.classList.contains("pending")).map((c) => c.textContent).join(""),
+        w: Math.round(artBox.width), h: Math.round(artBox.height),
+      },
+      progress: [...document.querySelectorAll("#cover-list .prog")].map((el) => el.textContent),
+      size: [root.clientWidth, root.clientHeight],
+      gaps: rows.slice(1).map((li, i) => li.getBoundingClientRect().top - rows[i].getBoundingClientRect().bottom),
+      fit: [document.getElementById("title-art"), document.getElementById("cover-text"), ...rows, document.getElementById("cover-foot")].every((el) => {
+        const r = el.getBoundingClientRect();
+        return r.top >= 0 && r.left >= 0 && r.bottom <= root.clientHeight && r.right <= root.clientWidth;
+      }),
+      scroll: cover.scrollHeight, client: cover.clientHeight,
+    };
+  });
+  assert.deepEqual(title.size, [331, 359]);
+  assert.equal(title.name, "拼字格");
+  assert.deepEqual(title.rows, ["继续 · 第 1 关", "选关", "随机关通关 100 关后开放", "玩法"]);
+  assert.deepEqual(title.sel, [true, false, false, false], "the title opens on CONTINUE");
+  assert.deepEqual(title.locked, [false, false, true, false], "RANDOM is locked before round 100");
+  assert.equal(title.dashed, "dashed", "the locked row has a dashed border");
+  assert.deepEqual(title.icons, [true, true, true, true], "every title row has its pixel icon");
+  assert.deepEqual(title.art.cells, 10, "the art is W, CROSSING and N");
+  assert.equal(title.art.filled, 8, "the eight CROSSING cells use the filled-cell look");
+  assert.equal(title.art.word, "CROSSING", "the across word is CROSSING");
+  assert.equal(title.art.open, "WN", "W and N wait to be found");
+  assert.deepEqual([title.art.w, title.art.h], [167, 62], "20 px cells with the board's 1 px gaps");
+  assert.deepEqual(title.progress, [], "a fresh start has no progress on the ROUNDS row");
+  assert.ok(title.gaps.length === 3 && title.gaps.every((g) => g >= 8), "the menu rows keep 8 px apart: " + title.gaps);
+  assert.equal(title.fit, true, "the title and its art stay inside 331x359");
+  assert.ok(title.scroll <= title.client, "the title needs no scrolling: " + title.scroll + " <= " + title.client);
+  /* START opens the first row: round 1 and its demo */
+  await p.locator('#pad [data-b="start"]').click();
+  await until(p, async () => {
+    f = p.frames().find((x) => x !== p.mainFrame());
+    return f && await f.evaluate(() => !!(window.game && game.phase === "demo")).catch(() => false);
+  }, "the first round and its demo");
+  const round = await f.evaluate(() => ({
+    placed: game.placed.map((w) => w.word),
+    seed: game.seed,
+    wheel: game.wheel.join(""),
+  }));
+  assert.ok(round.placed.length >= 4 && round.placed.length <= 6, "4 to 6 words: " + round.placed.join(" "));
+  assert.equal(round.seed.length, 5, "round 1 uses a five-letter seed");
+  assert.equal(round.wheel.split("").sort().join(""), round.seed.split("").sort().join(""), "the wheel holds the seed's letters");
+  const layout = await f.evaluate(() => {
+    const root = document.documentElement;
+    const fits = ["header", "main", "footer", "#wheel", "#board", "#note"].every((s) => {
+      const r = document.querySelector(s).getBoundingClientRect();
+      return r.top >= 0 && r.bottom <= root.clientHeight && r.left >= 0 && r.right <= root.clientWidth;
+    });
+    const keys44 = [...document.querySelectorAll(".key")].every((k) => {
+      const r = k.getBoundingClientRect();
+      return r.width >= 44 && r.height >= 44;
+    });
+    const rs = [], cs = [];
+    game.placed.forEach((w) => {
+      for (let i = 0; i < w.word.length; i++) {
+        rs.push(w.r + (w.dir === "v" ? i : 0)); cs.push(w.c + (w.dir === "h" ? i : 0));
+      }
+    });
+    return { size: [root.clientWidth, root.clientHeight], fits, keys44, rows: Math.max(...rs) - Math.min(...rs) + 1, cols: Math.max(...cs) - Math.min(...cs) + 1 };
+  });
+  assert.deepEqual(layout.size, [331, 359]);
+  assert.equal(layout.fits, true, "everything stays inside the smallest screen");
+  assert.equal(layout.keys44, true, "every wheel letter is a 44px target");
+  assert.ok(layout.rows <= 7 && layout.cols <= 7, "a small grid: " + layout.rows + "x" + layout.cols);
+
+  /* the demo: a finger spells the shortest grid word that is not the seed, the line follows, the word fills in */
+  await until(p, () => f.evaluate(() => game.entry.length >= 2 && document.querySelector("#lines polyline") !== null), "the line through the picked letters");
+  await until(p, () => f.evaluate(() => game.phase === "demoEnd"), "the demo to end on its your-turn card");
+  const demo = await f.evaluate(() => game.done.slice());
+  assert.equal(demo.length, 1, "the demo filled one word: " + demo.join(" "));
+  assert.notEqual(demo[0], round.seed);
+  assert.ok(round.placed.includes(demo[0]));
+  await p.locator('#pad [data-b="a"]').click();
+  await f.waitForFunction(() => game.phase === "play");
+
+  /* spell a word with the chin keys: the arrows move the cursor the way they point on the wheel, A adds the letter,
+     START sends it. The first arrow only shows the cursor. The shortest run of arrows to each letter comes from the
+     app's own rule (game.aim), and every letter is reached in a few presses. */
+  const press = async (b) => { await p.locator(`#pad [data-b="${b}"]`).click(); await p.waitForTimeout(20); };
+  await press("right");
+  const typeWord = async (word) => {
+    for (const ch of word) {
+      for (let k = 0; ; k++) {
+        const go = await f.evaluate((ch) => {
+          const want = game.wheel.findIndex((c, i) => c === ch && game.entry.indexOf(i) < 0);
+          if (want === game.cursor) return null;
+          const seen = { [game.cursor]: true }, queue = [[game.cursor, null]];
+          while (queue.length) {
+            const [at, first] = queue.shift();
+            for (const b of ["up", "down", "left", "right"]) {
+              const to = game.aim(at, b);
+              if (seen[to]) continue;
+              if (to === want) return first || b;
+              seen[to] = true; queue.push([to, first || b]);
+            }
+          }
+          return "none";
+        }, ch);
+        assert.notEqual(go, "none", "every letter can be reached with the arrows");
+        if (!go) break;
+        assert.ok(k < 4, "the arrows reach " + ch + " within a few presses");
+        await press(go);
+      }
+      await press("a");
+    }
+  };
+  const target = round.seed;
+  await typeWord(target);
+  assert.equal(await f.textContent("#entry"), target.toUpperCase(), "the typed word shows in the middle of the wheel");
+  await press("start");
+  await until(p, () => f.evaluate((w) => game.done.indexOf(w) >= 0, target), "the word to fill in");
+  const cellsOf = (w) => f.evaluate((w) => {
+    const v = game.view, cols = v.maxC - v.minC + 1, p = game.placed.find((x) => x.word === w), cells = document.querySelectorAll("#board > div");
+    return w.split("").map((_, i) => cells[(p.r + (p.dir === "v" ? i : 0) - v.minR) * cols + (p.c + (p.dir === "h" ? i : 0) - v.minC)].textContent).join("");
+  }, w);
+  /* the letters land one by one, 80 ms apart */
+  await until(p, async () => (await cellsOf(target)) === target.toUpperCase(), "the grid to show the letters");
+  /* the rules are one tap away, and B goes back to the round */
+  await f.click("#help");
+  assert.equal(await f.evaluate(() => game.phase), "help");
+  await p.locator('#pad [data-b="b"]').click();
+  await f.waitForFunction(() => game.phase === "play");
+  /* the first lookup unpacks the book; the line lands a moment later, and the word is read aloud */
+  await until(p, async () => (await f.textContent("#note")).length > 0, "the line under the grid");
+  assert.notEqual((await f.textContent("#note")).trim(), "");
+  await until(p, async () => new RegExp("say \\(en\\): " + target).test(await p.textContent("#log")), "the spoken word");
+  /* tapping a filled cell shows its line again and reads the word a second time: the middle of one of the seed's cells */
+  const seedCell = await f.evaluate(() => {
+    const v = game.view, cols = v.maxC - v.minC + 1, p = game.placed.find((x) => x.word === game.seed);
+    const i = Math.floor(p.word.length / 2);
+    const r = p.r + (p.dir === "v" ? i : 0), c = p.c + (p.dir === "h" ? i : 0);
+    return (r - v.minR) * cols + (c - v.minC);
+  });
+  const sayLine = "say (en): " + target;
+  const saysBefore = (await p.textContent("#log")).split(sayLine).length - 1;
+  await f.locator("#board > div").nth(seedCell).tap();
+  await until(p, async () => (await p.textContent("#log")).split(sayLine).length - 1 > saysBefore, "the tapped word to be read aloud");
+  assert.notEqual((await f.textContent("#note")).trim(), "", "the tapped word shows its line again");
+  const saved = await p.evaluate(() => (JSON.parse(localStorage.getItem("lopda-dev:crossing") || "{}").game) || null);
+  assert.equal(saved && saved.round, 1);
+  assert.ok(saved && saved.done.includes(target), "PAD.save kept the found word");
+  assert.equal(saved && saved.taught, true, "the demo is not shown again");
+
+  /* the rest of the grid with the keys; the last word blinks the grid, plays the tune, then the results card lists
+     every word of the round with its Chinese, and A starts round 2 */
+  const rest = round.placed.filter((w) => w !== target && w !== demo[0]);
+  for (const w of rest) {
+    await typeWord(w);
+    await press("start");
+    await until(p, () => f.evaluate((w) => game.done.indexOf(w) >= 0, w), "the word " + w + " to fill in");
+    await p.waitForTimeout(1100);   /* the PAD.dict limit is 10 calls a second; a player is slower than this anyway */
+  }
+  await until(p, () => f.evaluate(() => game.phase === "done"), "the results card");
+  /* the results card: words only in the rows, NEXT selected first, the summary in the detail box; the whole
+     card fits the smallest screen, and the card's own cursor cycles over [NEXT, word1 .. wordN] */
+  const cardState = () => f.evaluate(() => {
+    const rows = [...document.querySelectorAll("#cover-list li")];
+    const sel = rows.map((li) => li.classList.contains("sel"));
+    const detail = document.getElementById("cover-detail");
+    const root = document.documentElement;
+    return {
+      words: rows.map((li) => li.textContent),
+      sel,
+      picked: sel.indexOf(true),
+      detail: detail.textContent,
+      dark: detail.classList.contains("dark"),
+      outline: document.getElementById("cover-btn").classList.contains("outline"),
+      title: document.getElementById("cover-text").textContent,
+      size: [root.clientWidth, root.clientHeight],
+      fit: [document.getElementById("cover-text"), ...rows, detail, document.getElementById("cover-btn")].every((el) => {
+        const r = el.getBoundingClientRect();
+        return r.top >= 0 && r.left >= 0 && r.bottom <= root.clientHeight && r.right <= root.clientWidth;
+      }),
+      scroll: document.getElementById("cover").scrollHeight,
+      client: document.getElementById("cover").clientHeight,
+    };
+  });
+  const first = await cardState();
+  assert.equal(first.title, "第 1 关完成");
+  assert.equal(first.words.length, round.placed.length, "one row a word: " + first.words.join(" | "));
+  round.placed.forEach((w, i) => assert.equal(first.words[i], w.toUpperCase(), "the rows are the round's words in order"));
+  assert.ok(first.words.every((w) => !/[\u4e00-\u9fff]/.test(w)), "the rows carry words only, no meanings");
+  assert.equal(first.picked, -1, "the card opens with NEXT selected");
+  assert.equal(first.outline, false, "NEXT looks chosen as it does today");
+  assert.match(first.detail, /奖励词/, "the detail box shows the bonus/hint summary");
+  assert.equal(first.dark, true, "the summary is in the dark tone");
+  assert.deepEqual(first.size, [331, 359]);
+  assert.equal(first.fit, true, "every part of the card stays inside 331x359");
+  assert.ok(first.scroll <= first.client, "the card needs no scrolling: " + first.scroll + " <= " + first.client);
+  const summary = first.detail;
+  await press("down");
+  const word1 = await cardState();
+  assert.equal(word1.picked, 0, "Down from NEXT goes to the first word");
+  assert.equal(word1.outline, true, "NEXT is outlined while a word is selected");
+  /* the first word selected on the card teaches A and B for 1.2 s, then the meaning comes back */
+  assert.equal(word1.detail, "A 收进生词本 · B 移出", "the one-time hint shows on the first word");
+  assert.equal(word1.dark, true, "the hint is in the dark tone");
+  await p.waitForTimeout(1300);
+  const word1b = await cardState();
+  assert.ok(word1b.detail.length > 0, "the first word shows its line after the hint");
+  assert.notEqual(word1b.detail, summary, "the detail box is not the summary on a word");
+  assert.notEqual(word1b.detail, "A 收进生词本 · B 移出", "the hint gives the meaning back");
+  const tipSaved = await p.evaluate(() => (JSON.parse(localStorage.getItem("lopda-dev:crossing") || "{}").game) || null);
+  assert.equal(tipSaved && tipSaved.bookTip, true, "the hint is remembered once it has shown");
+  /* The word book: the card asked once when it opened, and with no grant yet every row is hollow. A on the
+     first word opens the dev page's permission box (as the handheld asks once per app); allowed, the word is
+     added and its ribbon fills in. A on it again reads it aloud; B takes it out and the ribbon empties. */
+  const markOn = (i) => f.evaluate((i) => document.querySelectorAll("#cover-list li")[i].querySelector(".mark").classList.contains("book"), i);
+  await until(p, async () => /dict\.inBook/.test(await p.textContent("#log")), "the card's inBook call");
+  assert.equal((await p.textContent("#log")).split("dict.inBook").length - 1, 1, "one inBook call when the card opens");
+  assert.equal(await markOn(0), false, "without a grant no row is in the book");
+  const bookWord = round.placed[0];
+  await press("a");
+  await p.waitForSelector("#wordbookyes", { state: "visible" });
+  await p.click("#wordbookyes");
+  await until(p, async () => new RegExp("dict\\.add " + bookWord + " -> saved").test(await p.textContent("#log")), "the first word to be added");
+  await until(p, () => markOn(0), "the first row's bookmark to fill in");
+  const addSaved = await p.evaluate(() => (JSON.parse(localStorage.getItem("lopda-dev:crossing") || "{}").game) || null);
+  assert.equal(addSaved && addSaved.bookTip, true, "an add also remembers the hint");
+  /* Left and Right no longer move the cursor or touch the word book. Check them now that the grant exists:
+     with the 1.5.0 toggle back, Right would remove the word; before the grant it only opened the permission box. */
+  await p.waitForTimeout(1300);        /* let "added" hand the detail box back to the meaning */
+  const bookCalls = async () => ((await p.textContent("#log")).match(/dict\.(add|remove) /g) || []).length;
+  const callsBefore = await bookCalls();
+  const beforeLR = await cardState();
+  await press("right");
+  await press("left");
+  const afterLR = await cardState();
+  assert.equal(await p.locator("#wordbookyes").isVisible(), false, "Left and Right open no permission box");
+  assert.equal(await bookCalls(), callsBefore, "Left and Right make no word book call");
+  assert.equal(afterLR.picked, 0, "Left and Right leave the cursor where it is");
+  assert.equal(afterLR.detail, beforeLR.detail, "Left and Right change nothing on the card");
+  assert.equal(await markOn(0), true, "Left and Right leave the ribbon as it was");
+  const bookSayLine = "say (en): " + bookWord;
+  const bookSaysBefore = (await p.textContent("#log")).split(bookSayLine).length - 1;
+  await press("a");
+  await until(p, async () => (await p.textContent("#log")).split(bookSayLine).length - 1 > bookSaysBefore, "the filled word to be read aloud by A");
+  assert.equal(await markOn(0), true, "reading a word already in the book leaves it there");
+  await press("b");
+  await until(p, async () => new RegExp("dict\\.remove " + bookWord + " -> saved").test(await p.textContent("#log")), "the first word to be removed by B");
+  await until(p, async () => !(await markOn(0)), "the first row's bookmark to empty again");
+  const afterBook = await cardState();
+  assert.equal(afterBook.fit, true, "the bookmarks do not push the card out of 331x359");
+  assert.ok(afterBook.scroll <= afterBook.client, "the card still needs no scrolling: " + afterBook.scroll + " <= " + afterBook.client);
+  await press("up");
+  const backToNext = await cardState();
+  assert.equal(backToNext.picked, -1, "Up from the first word goes back to NEXT");
+  assert.equal(backToNext.detail, summary, "NEXT shows the summary again");
+  /* B on NEXT does nothing: the card stays, and no word book call is made */
+  await press("b");
+  const afterBNext = await cardState();
+  assert.equal(afterBNext.picked, -1, "B on NEXT leaves the cursor on NEXT");
+  assert.equal(await f.evaluate(() => game.phase), "done", "B on NEXT keeps the results card up");
+  assert.equal(afterBNext.detail, summary, "B on NEXT changes nothing");
+  await press("up");
+  const lastWord = await cardState();
+  assert.equal(lastWord.picked, round.placed.length - 1, "Up from NEXT goes to the last word");
+  assert.ok(lastWord.detail.length > 0, "the last word has a line of its own");
+  assert.notEqual(lastWord.detail, summary, "the last word's line is not the summary either");
+  await press("down");
+  const ring = await cardState();
+  assert.equal(ring.picked, -1, "Down from the last word wraps to NEXT");
+  assert.equal(ring.outline, false);
+  assert.match(await p.textContent("#log"), /music play once/, "the clear plays its tune");
+  /* a word book call just before START shares the 10-a-second PAD.dict limit: the round waits out that window,
+     so the test does not need to pause here */
+  await press("a");
+  await until(p, () => f.evaluate(() => game.phase === "play" && game.round === 2), "round 2");
+
+  /* the way out: B with an empty entry asks first; two buttons carry the keys, and a tap on either acts as its key */
+  await press("b");
+  await f.waitForFunction(() => game.phase === "leave");
+  const leave = await f.evaluate(() => {
+    const root = document.documentElement, box = document.getElementById("cover").getBoundingClientRect();
+    const btns = [...document.querySelectorAll("#cover-actions button")].map((b) => {
+      const r = b.getBoundingClientRect();
+      return { text: b.textContent, w: r.width, h: r.height, left: r.left, right: r.right, top: r.top, bottom: r.bottom };
+    });
+    return {
+      text: document.getElementById("cover-text").textContent,
+      footHidden: document.getElementById("cover-foot").hidden,
+      buttons: btns,
+      gap: btns.length > 1 ? btns[1].left - btns[0].right : -1,
+      box: [box.left, box.top, box.right, box.bottom],
+      size: [root.clientWidth, root.clientHeight],
+    };
+  });
+  assert.match(leave.text, /回到主界面/, "the confirm asks before leaving");
+  assert.equal(leave.footHidden, true, "the buttons carry the keys, so the old footer line is gone");
+  assert.deepEqual(leave.buttons.map((b) => b.text), ["A 回去", "B 留下"], "two buttons, each naming its key");
+  assert.ok(leave.buttons.length === 2 && leave.buttons.every((b) => b.w >= 96 && b.h >= 44), "each button is a finger target");
+  assert.ok(leave.gap >= 8, "the buttons keep 8 px apart: " + leave.gap);
+  assert.deepEqual(leave.size, [331, 359]);
+  assert.ok(leave.buttons.every((b) => b.left >= leave.box[0] && b.right <= leave.box[2] && b.top >= leave.box[1] && b.bottom <= leave.box[3]),
+    "both buttons sit inside the confirm panel");
+  assert.ok(leave.box[0] >= 0 && leave.box[1] >= 0 && leave.box[2] <= 331 && leave.box[3] <= 359, "the confirm fits 331x359: " + leave.box);
+  /* B STAY, tapped, goes back to the round; the next B asks again and A LEAVE, tapped, goes to the title */
+  await f.locator("#cover-btn2").tap();
+  await f.waitForFunction(() => game.phase === "play");
+  await press("b");
+  await f.waitForFunction(() => game.phase === "leave");
+  await f.locator("#cover-btn").tap();
+  await f.waitForFunction(() => game.phase === "title");
+  const continued = await f.evaluate(() => [...document.querySelectorAll("#cover-list li")].map((li) => li.textContent));
+  assert.equal(continued[0], "继续 · 第 2 关", "the title continues at round 2");
+  const progress = await f.evaluate(() => {
+    const row = document.querySelector('#cover-list li[data-row="1"]'), prog = row && row.querySelector(".prog");
+    return prog ? prog.textContent : "";
+  });
+  assert.equal(progress, "1/100", "the ROUNDS row shows how far the player has come");
+  const saved2 = await p.evaluate(() => (JSON.parse(localStorage.getItem("lopda-dev:crossing") || "{}").game) || null);
+  assert.equal(saved2.cleared, 1, "round 1 is recorded cleared");
+  assert.equal(saved2.round, 2, "the save continues at round 2");
+
+  /* the way out just closed onto the title: let its 300 ms tap guard run out before using the menu */
+  await p.waitForTimeout(350);
+  /* ROUNDS opens the picker on the next round: 1 solid, 2 dashed, 3 locked; A on 3 is refused */
+  await press("down");
+  await press("a");
+  await f.waitForFunction(() => game.phase === "pick");
+  const picker = () => f.evaluate(() => {
+    const root = document.documentElement, cells = [...document.querySelectorAll("#cover-list li")];
+    return {
+      head: document.getElementById("cover-text").textContent,
+      foot: document.getElementById("cover-foot").textContent,
+      cells: cells.map((li) => ({
+        n: +li.textContent, cleared: li.classList.contains("cleared"), next: li.classList.contains("next"),
+        locked: li.classList.contains("locked"), bg: getComputedStyle(li).backgroundColor, border: getComputedStyle(li).borderTopStyle,
+      })),
+      sel: cells.findIndex((li) => li.classList.contains("sel")),
+      size: [root.clientWidth, root.clientHeight],
+      fit: [document.getElementById("cover-text"), ...cells, document.getElementById("cover-foot")].every((el) => {
+        const r = el.getBoundingClientRect();
+        return r.top >= 0 && r.left >= 0 && r.bottom <= root.clientHeight && r.right <= root.clientWidth;
+      }),
+      scroll: document.getElementById("cover").scrollHeight, client: document.getElementById("cover").clientHeight,
+    };
+  });
+  const pk = await picker();
+  assert.equal(pk.head, "第 1-25 关");
+  assert.equal(pk.foot, "◄ ► 翻页");
+  assert.equal(pk.cells.length, 25, "five by five");
+  assert.equal(pk.cells[0].cleared, true, "round 1 is cleared");
+  assert.equal(pk.cells[0].bg, "rgb(125, 138, 88)", "a cleared round is solid mid");
+  assert.equal(pk.cells[1].next, true, "round 2 is the one to play");
+  assert.equal(pk.cells[1].border, "dashed", "the next round has a dashed border");
+  assert.equal(pk.cells[2].locked, true, "round 3 is locked");
+  assert.equal(pk.sel, 1, "the picker cursor starts on round 2");
+  assert.deepEqual(pk.size, [331, 359]);
+  assert.equal(pk.fit, true, "the picker stays inside 331x359");
+  assert.ok(pk.scroll <= pk.client, "the picker needs no scrolling: " + pk.scroll + " <= " + pk.client);
+  await press("right");
+  assert.equal((await picker()).sel, 2, "Right moves to round 3");
+  await press("a");
+  await f.waitForFunction(() => game.phase === "pick");
+  assert.equal((await picker()).sel, 2, "a locked round does not open");
+  const lockedMsg = await f.evaluate(() => {
+    const foot = document.getElementById("cover-foot");
+    return { text: foot.textContent, ink: getComputedStyle(foot).color };
+  });
+  assert.equal(lockedMsg.text, "先过第 2 关", "a locked round says which one to clear first");
+  assert.equal(lockedMsg.ink, "rgb(31, 42, 20)", "the reason is ink, not the page hint's dark tone");
+  await p.waitForTimeout(1600);
+  const pagedBack = await f.evaluate(() => {
+    const foot = document.getElementById("cover-foot");
+    return { text: foot.textContent, ink: foot.classList.contains("ink") };
+  });
+  assert.equal(pagedBack.text, "◄ ► 翻页", "the page hint comes back after 1.5 s");
+  assert.equal(pagedBack.ink, false, "the reason's ink goes with it");
+  await press("b");
+  await f.waitForFunction(() => game.phase === "title");
+
+  /* a save after the hundredth round: the title leads with an unlocked RANDOM, and opening it marks the header */
+  await p.evaluate(() => localStorage.setItem("lopda-dev:crossing", JSON.stringify({ game: { round: 101, cleared: 100 } })));
+  await p.reload({ waitUntil: "load" });
+  await p.waitForFunction(() => /loaded |load failed/.test(document.getElementById("log").textContent), null, { timeout: 5000 });
+  await until(p, async () => {
+    f = p.frames().find((x) => x !== p.mainFrame());
+    return f && await f.evaluate(() => !!(window.game && window.game.phase === "title")).catch(() => false);
+  }, "the title after the reload");
+  await p.locator("#app").evaluate((el) => { el.style.width = "331px"; el.style.height = "359px"; el.style.flex = "none"; });
+  await p.waitForTimeout(200);
+  const endTitle = await f.evaluate(() => {
+    const rows = [...document.querySelectorAll("#cover-list li")], badge = document.getElementById("round");
+    return {
+      rows: rows.map((li) => li.textContent),
+      locked: rows.map((li) => li.classList.contains("locked")),
+      sel: rows.map((li) => li.classList.contains("sel")),
+      badge: [badge.textContent, badge.className],
+    };
+  });
+  assert.equal(endTitle.rows[0], "随机关", "after round 100 RANDOM takes the first row");
+  assert.deepEqual(endTitle.locked, [false, false, false], "RANDOM is unlocked");
+  assert.deepEqual(endTitle.sel, [true, false, false], "the cursor starts on it");
+  await press("a");
+  await until(p, () => f.evaluate(() => game.phase === "demo" || game.phase === "play"), "the random round");
+  const rand = await f.evaluate(() => {
+    const badge = document.getElementById("round").getBoundingClientRect(), root = document.documentElement;
+    return {
+      mode: game.mode, len: game.wheel.length, badge: document.getElementById("round").textContent,
+      cls: document.getElementById("round").className, round: game.round,
+      fit: badge.top >= 0 && badge.left >= 0 && badge.bottom <= root.clientHeight && badge.right <= root.clientWidth,
+      size: [root.clientWidth, root.clientHeight],
+    };
+  });
+  assert.equal(rand.mode, "random");
+  assert.equal(rand.len, 7, "a random round uses seven letters");
+  assert.equal(rand.badge, "随机");
+  assert.equal(rand.cls, "badge");
+  assert.equal(rand.round, 101, "a random round is not saved as a round number");
+  assert.deepEqual(rand.size, [331, 359]);
+  assert.equal(rand.fit, true, "the badge stays inside 331x359");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+/* ---------- 拼字格 / Crossing: the card's first word-book action is a tap on the row's bookmark end ---------- */
+test("crossing: a tap on a row's bookmark end adds the first word and settles the one-time hint", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t);
+  const press = async (b) => { await p.locator(`#pad [data-b="${b}"]`).click(); await p.waitForTimeout(20); };
+  const title = async () => {
+    await p.waitForFunction(() => /loaded |load failed/.test(document.getElementById("log").textContent), null, { timeout: 5000 });
+    let f;
+    await until(p, async () => {
+      f = p.frames().find((x) => x !== p.mainFrame());
+      return f && await f.evaluate(() => !!(window.game && game.phase === "title")).catch(() => false);
+    }, "the title screen");
+    await p.locator("#app").evaluate((el) => { el.style.width = "331px"; el.style.height = "359px"; el.style.flex = "none"; });
+    return f;
+  };
+  await p.goto(`${base}/sdk/dev.html?app=registry/apps/crossing&lang=zh`, { waitUntil: "load" });
+  /* learn round 1's grid once, then open it again as a finished round on a save with no bookTip */
+  await p.evaluate(() => localStorage.setItem("lopda-dev:crossing", JSON.stringify({ game: { round: 1, cleared: 0, taught: true } })));
+  await p.reload({ waitUntil: "load" });
+  let f = await title();
+  await press("a");
+  await until(p, () => f.evaluate(() => game.phase === "play" && game.round === 1), "round 1");
+  const placed = await f.evaluate(() => game.placed.map((x) => x.word));
+  assert.ok(placed.length >= 2, "the grid has words to walk through: " + placed.join(" "));
+  await p.evaluate((s) => localStorage.setItem("lopda-dev:crossing", JSON.stringify({ game: s })),
+    { round: 1, cleared: 0, taught: true, hints: 0, done: placed });
+  await p.reload({ waitUntil: "load" });
+  f = await title();
+  await press("a");
+  await until(p, () => f.evaluate(() => game.phase === "done"), "the finished round's card");
+  /* this page load has no word book grant, as the handheld's first add does not, so the ribbon starts hollow */
+  await p.waitForTimeout(1200);          /* the round's lookups and the card's inBook share the 10-a-second window */
+  const markOn = (i) => f.evaluate((i) => document.querySelectorAll("#cover-list li")[i].querySelector(".mark").classList.contains("book"), i);
+  assert.equal(await markOn(0), false, "without a grant the row is hollow");
+  /* the first selection is a tap on the right 44 px: it asks once, then adds the word */
+  const row = f.locator("#cover-list li").first();
+  const box = await row.boundingBox();
+  await row.tap({ position: { x: box.width - 22, y: box.height / 2 } });
+  await p.waitForSelector("#wordbookyes", { state: "visible" });
+  await p.click("#wordbookyes");
+  await until(p, async () => new RegExp("dict\\.add " + placed[0] + " -> saved").test(await p.textContent("#log")), "the tap's word to be added");
+  await until(p, () => markOn(0), "the ribbon to fill from the tap");
+  const saved = await p.evaluate(() => (JSON.parse(localStorage.getItem("lopda-dev:crossing") || "{}").game) || null);
+  assert.equal(saved && saved.bookTip, true, "a tap add remembers the one-time hint");
+  /* Down to another word: with bookTip set the meaning shows; without the add's flag the hint would take the box */
+  await press("down");
+  const detail = await f.evaluate(() => document.getElementById("cover-detail").textContent);
+  assert.ok(detail.length > 0, "the next word shows its line");
+  assert.notEqual(detail, "A 收进生词本 · B 移出", "the tap's add settled the hint for the card");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("crossing: in English the line under the grid is an English definition", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "en-US" });
+  await p.goto(`${base}/sdk/dev.html?app=registry/apps/crossing&lang=en`, { waitUntil: "load" });
+  await p.waitForFunction(() => /loaded |load failed/.test(document.getElementById("log").textContent), null, { timeout: 5000 });
+  let f;
+  await until(p, async () => {
+    f = p.frames().find((x) => x !== p.mainFrame());
+    return f && await f.evaluate(() => !!(window.game && game.phase === "title")).catch(() => false);
+  }, "the title screen");
+  await p.locator("#app").evaluate((el) => { el.style.width = "331px"; el.style.height = "359px"; el.style.flex = "none"; });
+  /* the art spells CROSSING itself, so no separate English word sits under it */
+  const enTitleName = await f.evaluate(() => {
+    const text = document.getElementById("cover-text");
+    const art = [...document.querySelectorAll("#title-art .cell.on")].map((c) => c.textContent).join("");
+    return { text: text.textContent, hidden: text.hidden, art, cells: document.querySelectorAll("#title-art .cell").length };
+  });
+  assert.equal(enTitleName.art, "CROSSING", "the English title art says CROSSING");
+  assert.equal(enTitleName.cells, 10, "the English art has the same ten cells");
+  assert.equal(enTitleName.hidden, true, "no English word repeats the art");
+  /* the English locked row is the longest label: it, the rows' 8 px gaps and the footer still fit 331x359 */
+  const enTitle = await f.evaluate(() => {
+    const root = document.documentElement, rows = [...document.querySelectorAll("#cover-list li")], cover = document.getElementById("cover");
+    return {
+      size: [root.clientWidth, root.clientHeight],
+      icons: rows.map((li) => !!li.querySelector("svg") && li.querySelectorAll("svg rect").length > 0),
+      gaps: rows.slice(1).map((li, i) => li.getBoundingClientRect().top - rows[i].getBoundingClientRect().bottom),
+      fit: [document.getElementById("title-art"), ...rows, document.getElementById("cover-foot")].every((el) => {
+        const r = el.getBoundingClientRect();
+        return r.top >= 0 && r.left >= 0 && r.bottom <= root.clientHeight && r.right <= root.clientWidth;
+      }),
+      scroll: cover.scrollHeight, client: cover.clientHeight,
+    };
+  });
+  assert.deepEqual(enTitle.size, [331, 359]);
+  assert.deepEqual(enTitle.icons, [true, true, true, true], "the English rows have icons too");
+  assert.ok(enTitle.gaps.every((g) => g >= 8), "the English menu rows keep 8 px apart: " + enTitle.gaps);
+  assert.equal(enTitle.fit, true, "the English title and its art stay inside 331x359");
+  assert.ok(enTitle.scroll <= enTitle.client, "the English title needs no scrolling");
+  await p.locator('#pad [data-b="start"]').click();
+  await until(p, async () => {
+    f = p.frames().find((x) => x !== p.mainFrame());
+    return f && await f.evaluate(() => !!(window.game && game.phase === "demo")).catch(() => false);
+  }, "the first round and its demo");
+  await until(p, () => f.evaluate(() => game.phase === "demoEnd"), "the demo to end on its your-turn card");
+  await p.locator('#pad [data-b="a"]').click();
+  await f.waitForFunction(() => game.phase === "play");
+  /* the demo filled a word; with PAD.lang = en its line under the grid is the English definition */
+  await until(p, async () => (await f.textContent("#note")).trim().length > 0, "the English line");
+  const note = (await f.textContent("#note")).trim();
+  assert.ok(!/[\u4e00-\u9fff]/.test(note), "the line is English, not Chinese: " + note);
+  assert.match(note, /[A-Za-z]/, "the line has an English definition: " + note);
+  /* the ? page is near full: the new tap sentence must not make it scroll at 331x359 */
+  await f.click("#help");
+  await f.waitForFunction(() => game.phase === "help");
+  const help = await f.evaluate(() => {
+    const el = document.getElementById("cover");
+    return { scroll: el.scrollHeight, client: el.clientHeight };
+  });
+  assert.ok(help.scroll <= help.client, "the English help does not scroll: " + JSON.stringify(help));
+  await p.locator('#pad [data-b="b"]').click();
+  await f.waitForFunction(() => game.phase === "play");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+/* ---------- 拼字格 / Crossing: a 1.5.0 save, a replay, and PAD.dict's ten-a-second window ---------- */
+test("crossing: an old save, a replay and a quick re-entry", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t);
+  await p.goto(`${base}/sdk/dev.html?app=registry/apps/crossing&lang=zh`, { waitUntil: "load" });
+  await p.waitForFunction(() => /loaded |load failed/.test(document.getElementById("log").textContent), null, { timeout: 5000 });
+  let f;
+  const press = async (b) => { await p.locator(`#pad [data-b="${b}"]`).click(); await p.waitForTimeout(20); };
+  const open = async (save) => {
+    await p.evaluate((s) => localStorage.setItem("lopda-dev:crossing", JSON.stringify({ game: s })), save);
+    await p.reload({ waitUntil: "load" });
+    await p.waitForFunction(() => /loaded |load failed/.test(document.getElementById("log").textContent), null, { timeout: 5000 });
+    await until(p, async () => {
+      f = p.frames().find((x) => x !== p.mainFrame());
+      return f && await f.evaluate(() => !!(window.game && window.game.phase === "title")).catch(() => false);
+    }, "the title screen");
+    await p.locator("#app").evaluate((el) => { el.style.width = "331px"; el.style.height = "359px"; el.style.flex = "none"; });
+    await p.waitForTimeout(100);
+  };
+  const titles = () => f.evaluate(() => [...document.querySelectorAll("#cover-list li")].map((li) => li.textContent));
+  const pickerCells = () => f.evaluate(() => [...document.querySelectorAll("#cover-list li")].map((li) => ({
+    n: +li.textContent,
+    cleared: li.classList.contains("cleared"),
+    next: li.classList.contains("next"),
+    locked: li.classList.contains("locked"),
+  })));
+
+  /* a. a 1.5.0 save has no cleared: every round before its round was cleared, so the title continues at 6 */
+  await open({ round: 6, taught: true, hints: 1, done: [] });
+  assert.equal((await titles())[0], "继续 · 第 6 关", "a save without cleared continues at its round");
+  await press("down");
+  await press("a");
+  await f.waitForFunction(() => game.phase === "pick");
+  const pk = await pickerCells();
+  for (let n = 1; n <= 5; n++) assert.equal(pk[n - 1].cleared, true, "round " + n + " is cleared");
+  assert.equal(pk[5].next, true, "round 6 is the one to play");
+  assert.equal(pk[6].locked, true, "round 7 is locked");
+
+  /* b. a replay says so, and leaving it leaves the main line at round 3 / cleared 2 */
+  await open({ round: 3, cleared: 2, taught: true, hints: 0, done: [] });
+  await press("down");
+  await press("a");
+  await f.waitForFunction(() => game.phase === "pick");
+  await press("left");
+  await press("left");                 /* 2, then 1: a cleared round */
+  await press("a");
+  await until(p, () => f.evaluate(() => game.phase === "play" && game.round === 1), "the replay of round 1");
+  assert.equal(await f.textContent("#round"), "第 1 关 · 重玩", "the header marks the replay");
+  await press("b");
+  await f.waitForFunction(() => game.phase === "leave");
+  await press("a");
+  await f.waitForFunction(() => game.phase === "title");
+  const kept = await p.evaluate(() => JSON.parse(localStorage.getItem("lopda-dev:crossing") || "{}").game);
+  assert.equal(kept.round, 3, "the replay did not lower round");
+  assert.equal(kept.cleared, 2, "the replay did not lower cleared");
+
+  /* c. a quick re-entry waits out PAD.dict's window instead of opening on the error card */
+  await open({ round: 2, cleared: 1, taught: true, hints: 0, done: [] });
+  await press("a");
+  await until(p, () => f.evaluate(() => game.phase === "play" && game.round === 2), "round 2");
+  await press("b");
+  await f.waitForFunction(() => game.phase === "leave");
+  await press("a");
+  await f.waitForFunction(() => game.phase === "title");
+  await p.waitForTimeout(350);        /* the title's tap guard after the leave */
+  await press("a");
+  await until(p, () => f.evaluate(() => game.phase === "play" && game.round === 2), "the quick re-entry to reach play");
+
+  /* d. a save that already has bookTip true: the card's first word selection shows its meaning, not the hint */
+  const placed2 = await f.evaluate(() => game.placed.map((x) => x.word));
+  await p.evaluate((s) => localStorage.setItem("lopda-dev:crossing", JSON.stringify({ game: s })),
+    { round: 2, cleared: 1, taught: true, hints: 0, done: placed2, bookTip: true });
+  await p.reload({ waitUntil: "load" });
+  await p.waitForFunction(() => /loaded |load failed/.test(document.getElementById("log").textContent), null, { timeout: 5000 });
+  await until(p, async () => {
+    f = p.frames().find((x) => x !== p.mainFrame());
+    return f && await f.evaluate(() => !!(window.game && window.game.phase === "title")).catch(() => false);
+  }, "the title after the bookTip reload");
+  await p.locator("#app").evaluate((el) => { el.style.width = "331px"; el.style.height = "359px"; el.style.flex = "none"; });
+  await p.waitForTimeout(100);
+  await press("a");
+  await until(p, () => f.evaluate(() => game.phase === "done"), "the finished round's card");
+  await press("down");
+  await p.waitForTimeout(200);
+  const noTip = await f.evaluate(() => document.getElementById("cover-detail").textContent);
+  assert.ok(noTip.length > 0, "the word's meaning is in the detail box");
+  assert.notEqual(noTip, "A 收进生词本 · B 移出", "a save with bookTip true never shows the hint again");
+
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+/* ---------- 拼字格 / Crossing: HOW TO PLAY is a fixed practice round, not the text page, and leaves the save alone ---------- */
+test("crossing: HOW TO PLAY runs the fixed practice round and leaves the save alone", { skip, timeout: 90000 }, async (t) => {
+  const { p, errors } = await page(t);
+  const press = async (b) => { await p.locator(`#pad [data-b="${b}"]`).click(); await p.waitForTimeout(20); };
+  await p.goto(`${base}/sdk/dev.html?app=registry/apps/crossing&lang=zh`, { waitUntil: "load" });
+  await p.waitForFunction(() => /loaded |load failed/.test(document.getElementById("log").textContent), null, { timeout: 5000 });
+  let f;
+  await until(p, async () => {
+    f = p.frames().find((x) => x !== p.mainFrame());
+    return f && await f.evaluate(() => !!(window.game && game.phase === "title")).catch(() => false);
+  }, "the title screen");
+  await p.locator("#app").evaluate((el) => { el.style.width = "331px"; el.style.height = "359px"; el.style.flex = "none"; });
+  await p.waitForTimeout(150);
+  /* the injected save uses save()'s own key order and every value save() will write back, so the bytes can be compared */
+  const injected = { round: 3, hints: 2, done: [], taught: true, cleared: 2, random: 0, bookTip: true };
+  await p.evaluate((s) => localStorage.setItem("lopda-dev:crossing", JSON.stringify({ game: s })), injected);
+  await p.reload({ waitUntil: "load" });
+  await p.waitForFunction(() => /loaded |load failed/.test(document.getElementById("log").textContent), null, { timeout: 5000 });
+  await until(p, async () => {
+    f = p.frames().find((x) => x !== p.mainFrame());
+    return f && await f.evaluate(() => !!(window.game && game.phase === "title")).catch(() => false);
+  }, "the title after the save");
+  await p.locator("#app").evaluate((el) => { el.style.width = "331px"; el.style.height = "359px"; el.style.flex = "none"; });
+  await p.waitForTimeout(150);
+  const readSave = async () => (await p.evaluate(() => (JSON.parse(localStorage.getItem("lopda-dev:crossing") || "{}").game) || null));
+  const withoutTaught = (g) => { const c = Object.assign({}, g); delete c.taught; return c; };
+  const beforeSave = withoutTaught(await readSave());
+  const titleRows = await f.evaluate(() => [...document.querySelectorAll("#cover-list li")].map((li) => {
+    const r = li.getBoundingClientRect();
+    return {
+      row: +li.getAttribute("data-row"), text: li.textContent, locked: li.classList.contains("locked"),
+      l: r.left, t: r.top, r: r.right, b: r.bottom,
+    };
+  }));
+  const wordsCallsBefore = ((await p.textContent("#log")).match(/dict\.words/g) || []).length;
+  /* the HOW TO PLAY row keeps its place and its icon, and A starts the practice round */
+  const helpRow = await f.evaluate(() => {
+    const li = document.querySelector('#cover-list li[data-row="3"]');
+    return { text: li.textContent, icons: li.querySelectorAll("svg rect").length > 0 };
+  });
+  assert.equal(helpRow.text, "玩法", "the fourth row is still HOW TO PLAY");
+  assert.equal(helpRow.icons, true, "the row keeps its icon");
+  const enterPractice = async () => {
+    await f.locator('#cover-list li[data-row="3"]').tap();
+    await until(p, () => f.evaluate(() => game.phase === "demo"), "the practice demo");
+  };
+  await enterPractice();
+  const head = await f.evaluate(() => {
+    const badge = document.getElementById("round"), hint = document.getElementById("hint"), help = document.getElementById("help");
+    const root = document.documentElement, box = badge.getBoundingClientRect();
+    return {
+      badge: badge.textContent, cls: badge.className,
+      hintHidden: hint.hidden, hintDisplay: getComputedStyle(hint).display,
+      helpHidden: help.hidden, helpDisplay: getComputedStyle(help).display,
+      mode: game.mode, round: game.round, seed: game.seed, wheel: game.wheel.join(""),
+      placed: game.placed.map((q) => q.word),
+      positions: game.placed.map((q) => ({ word: q.word, r: q.r, c: q.c, dir: q.dir })),
+      size: [root.clientWidth, root.clientHeight],
+      fit: box.top >= 0 && box.left >= 0 && box.bottom <= root.clientHeight && box.right <= root.clientWidth,
+    };
+  });
+  assert.equal(head.badge, "练习", "the practice badge takes the round number's place");
+  assert.equal(head.cls, "badge", "it uses the random badge's inverted look");
+  assert.equal(head.hintHidden, true, "HINT is hidden during practice");
+  assert.equal(head.hintDisplay, "none", "the hidden HINT button takes no room");
+  assert.equal(head.helpHidden, true, "the ? page is hidden during practice");
+  assert.equal(head.helpDisplay, "none", "the hidden ? button takes no room");
+  assert.equal(head.mode, "practice");
+  assert.equal(head.round, 1, "practice is not a saved round number");
+  assert.equal(head.seed, "star", "the practice wheel is the fixed seed");
+  assert.deepEqual(head.placed, ["star", "rats", "arts", "tar"], "the fixed grid is the same every time");
+  assert.deepEqual(head.positions, [
+    { word: "star", r: 1, c: 1, dir: "h" },
+    { word: "rats", r: 0, c: 3, dir: "v" },
+    { word: "arts", r: 3, c: 0, dir: "h" },
+    { word: "tar", r: 2, c: 0, dir: "v" },
+  ], "the practice grid's cells");
+  assert.deepEqual(head.size, [331, 359]);
+  assert.equal(head.fit, true, "the badge stays inside 331x359");
+  assert.equal(((await p.textContent("#log")).match(/dict\.words/g) || []).length, wordsCallsBefore,
+    "practice never asks PAD.dict.words: the words are fixed");
+
+  /* B before practice has begun leaves it at once, with no confirm and without touching the save */
+  await press("b");
+  await f.waitForFunction(() => game.phase === "title");
+  assert.equal(await f.evaluate(() => game.mode), "fixed", "leaving practice clears its mode");
+  assert.deepEqual(withoutTaught(await readSave()), beforeSave, "B during the practice demo leaves the save alone");
+  await p.waitForTimeout(400);          /* the title's tap guard has run out */
+
+  /* the demo runs even though the save says taught, and ends on the your-turn card */
+  await enterPractice();
+  await until(p, () => f.evaluate(() => game.phase === "demoEnd"), "the practice demo to end on its card");
+  const demoCard = await f.evaluate(() => ({
+    text: document.getElementById("cover-text").textContent,
+    button: document.getElementById("cover-btn").textContent,
+    done: game.done.slice(),
+  }));
+  assert.match(demoCard.text, /^拼对了/, "the demo ends on the usual your-turn card");
+  assert.equal(demoCard.button, "开始");
+  assert.equal(demoCard.done.length, 1, "the demo filled one word");
+  assert.equal(demoCard.done[0], "tar", "the demo spells the shortest grid word that is not the seed");
+  await press("start");
+  await f.waitForFunction(() => game.phase === "play");
+
+  /* (a) mid-play, B asks and LEAVE returns to the title without saving anything */
+  await press("b");
+  await f.waitForFunction(() => game.phase === "leave");
+  assert.match(await f.textContent("#cover-text"), /回到主界面/);
+  await press("a");
+  await f.waitForFunction(() => game.phase === "title");
+  assert.equal(await f.evaluate(() => game.mode), "fixed", "the leave also clears the practice mode");
+  assert.deepEqual(withoutTaught(await readSave()), beforeSave, "leaving mid-play saved nothing new");
+  await p.waitForTimeout(400);
+
+  /* a third visit completes the round; a practice-list word outside the grid is a bonus for the message only */
+  await enterPractice();
+  await until(p, () => f.evaluate(() => game.phase === "demoEnd"), "the third practice demo to end");
+  await press("start");
+  await f.waitForFunction(() => game.phase === "play");
+  const grid = head.placed;
+  const bonus = ["sat", "rat", "art"].find((w) => !grid.includes(w));
+  assert.ok(bonus, "the practice list has a word outside the grid: " + grid.join(" "));
+  const hintsBefore = await f.evaluate(() => game.hints);
+  await press("right");
+  const typeWord = async (word) => {
+    for (const ch of word) {
+      for (let k = 0; ; k++) {
+        const go = await f.evaluate((ch) => {
+          const want = game.wheel.findIndex((c, i) => c === ch && game.entry.indexOf(i) < 0);
+          if (want === game.cursor) return null;
+          const seen = { [game.cursor]: true }, queue = [[game.cursor, null]];
+          while (queue.length) {
+            const [at, first] = queue.shift();
+            for (const b of ["up", "down", "left", "right"]) {
+              const to = game.aim(at, b);
+              if (seen[to]) continue;
+              if (to === want) return first || b;
+              seen[to] = true; queue.push([to, first || b]);
+            }
+          }
+          return "none";
+        }, ch);
+        assert.notEqual(go, "none", "every letter can be reached with the arrows");
+        if (!go) break;
+        assert.ok(k < 4, "the arrows reach " + ch + " within a few presses");
+        await press(go);
+      }
+      await press("a");
+    }
+  };
+  await typeWord(bonus);
+  await press("start");
+  await until(p, () => f.evaluate((w) => game.done.indexOf(w) >= 0, bonus), "the bonus word to count");
+  const bonusNow = await f.evaluate(() => ({
+    hints: game.hints, hidden: document.getElementById("hint").hidden,
+    note: document.getElementById("note-text").textContent,
+  }));
+  assert.equal(bonusNow.hints, hintsBefore, "a practice bonus adds no hint");
+  assert.match(bonusNow.note, /奖励词/, "the bonus word still says so");
+  assert.deepEqual(withoutTaught(await readSave()), beforeSave, "the bonus word did not save anything");
+
+  /* the rest of the grid with the keys: the usual blink and tune, then the practice card */
+  for (const w of grid.filter((x) => !demoCard.done.includes(x))) {
+    await typeWord(w);
+    await press("start");
+    await until(p, () => f.evaluate((w) => game.done.indexOf(w) >= 0, w), "the word " + w + " to fill in");
+    await p.waitForTimeout(1100);
+  }
+  await until(p, () => f.evaluate(() => game.phase === "practice"), "the practice card");
+  const card = await f.evaluate(() => {
+    const root = document.documentElement, cover = document.getElementById("cover"), text = document.getElementById("cover-text");
+    const btn = document.getElementById("cover-btn"), r = btn.getBoundingClientRect();
+    return {
+      text: text.textContent, button: btn.textContent, plain: !cover.classList.contains("done"),
+      hintHidden: document.getElementById("hint").hidden, helpHidden: document.getElementById("help").hidden,
+      size: [root.clientWidth, root.clientHeight],
+      fit: r.top >= 0 && r.left >= 0 && r.bottom <= root.clientHeight && r.right <= root.clientWidth,
+      scroll: cover.scrollHeight, client: cover.clientHeight,
+      btn: { l: r.left, t: r.top, r: r.right, b: r.bottom },
+    };
+  });
+  assert.match(card.text, /^会玩了！/, "the card's title");
+  assert.match(card.text, /方向键选字母，A 加上，B 删掉一个，START 提交，SELECT 打乱。/);
+  assert.match(card.text, /结算卡上 A 收进生词本，B 移出。/);
+  assert.match(card.text, /关卡里没输入字母时按 B 回主界面。/);
+  assert.equal(card.button, "回主界面", "one button goes back to the title");
+  assert.equal(card.plain, true, "the practice card uses the plain cover, not the results card");
+  assert.equal(card.hintHidden, true, "HINT stays hidden through the card");
+  assert.equal(card.helpHidden, true, "? stays hidden through the card");
+  assert.deepEqual(card.size, [331, 359]);
+  assert.equal(card.fit, true, "the card's button stays inside 331x359");
+  assert.ok(card.scroll <= card.client, "the practice card needs no scrolling: " + card.scroll + " <= " + card.client);
+
+  /* (d) the card's button closes onto the title; a tap at the same spot within 100 ms is that same press, not a row */
+  const overlap = titleRows.map((row) => {
+    if (row.locked) return null;
+    const l = Math.max(card.btn.l, row.l), r = Math.min(card.btn.r, row.r);
+    const t = Math.max(card.btn.t, row.t), b = Math.min(card.btn.b, row.b);
+    if (r - l < 4 || b - t < 4) return null;
+    return { row: row.row, x: (l + r) / 2 - row.l, y: (t + b) / 2 - row.t, area: (r - l) * (b - t) };
+  }).filter(Boolean).sort((a, b) => b.area - a.area)[0];
+  assert.ok(overlap, "the card's button sits over a title row: " + JSON.stringify(titleRows.map((r) => [r.row, r.locked, r.t, r.b])));
+  await f.locator("#cover-btn").tap();
+  await f.locator(`#cover-list li[data-row="${overlap.row}"]`).tap({ position: { x: overlap.x, y: overlap.y } });
+  await p.waitForTimeout(100);
+  assert.equal(await f.evaluate(() => game.phase), "title", "the tap under the old button opens nothing");
+  assert.equal(await f.evaluate(() => game.mode), "fixed", "closing the card clears the practice mode");
+  assert.deepEqual(withoutTaught(await readSave()), beforeSave, "practice leaves round, cleared, hints, done, random and bookTip untouched");
+  const kept = await readSave();
+  assert.equal(kept.round, 3);
+  assert.equal(kept.cleared, 2);
+  assert.equal(kept.hints, 2);
+  assert.deepEqual(kept.done, []);
+  assert.equal(kept.random, 0);
+  assert.equal(kept.bookTip, true);
+
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });

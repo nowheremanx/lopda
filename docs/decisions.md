@@ -659,7 +659,7 @@ CPU 降速 4 倍（DevTools 的 CPU throttling，粗略代表旧手机）时，�
 - **内置程序**（`runtime/apps/dict.js`）：需要大量存储和跨程序调用（以后阅读器查词），沙盒 app 做不了。
   主屏图标排在万年历后面。对外接口 `LP.dict.lookup(word)` → `Promise<[{book, name, word, head, how, text}]>`，
   `how` 是 `exact`、`lemma` 或 `prefix`，同义词条（.syn）的 `head` 是它指向的词头；`LP.dict.suggest(prefix, n)` 给候选。
-  两个接口都只搜索已启用的词典；阅读器的 `LP.dict.lookup` 也遵守这个开关。
+  两个接口都只搜索已启用的词典；阅读器的 `LP.dict.lookup` 也遵守这个开关。app 的 `PAD.dict` 不遵守（第 35 节）：它只读内置 ECDICT，和这个开关无关。
 - **只支持 StarDict**，解析器自己写（`runtime/stardict.js`，`window.LopdaStarDict`，纯函数，在 Node 里测试）：`.ifo`、`.idx`（32 或 64 位偏移，
   也认 `.idx.gz`）、`.dict` 或 `.dict.dz`（整体用 `DecompressionStream("gzip")` 解压，不做 dictzip 的随机访问）、可选的 `.syn`。
   释义里的文字类型（m l g t x y k w h）转成纯文本：标记去掉，`<br>` 变换行，音标加方括号；图片、声音、资源列表跳过。
@@ -1313,6 +1313,40 @@ CPU 降速 4 倍（DevTools 的 CPU throttling，粗略代表旧手机）时，�
   这一版不做「把报错发回去修一修」和选字菜单里的「问 AI」，等 owner 用过这一处再定。
 - **代码**：`runtime/ai.js`（`window.LopdaAI`，纯函数加注入的 fetch，`tests/ai.test.mjs`）；`apps/settings.js` 里的 `LP.ai`
   {on, ask, err, watch, saved, PATH}；`apps/scripts.js` 的 `generate()`。e2e 用 Playwright 拦下 OpenRouter 的地址，伪造流式回答。
+
+## 35. app 查词典（PAD.dict，0.36.0）
+
+2026-10-23，runtime 0.36.0。社区 app 可以只读地查内置 ECDICT：`PAD.dict.words(q)` 找词、`PAD.dict.lookup(word)` 查一个词的释义
+（SPEC.md 6.7）。开始写社区 app 以后，拼字、猜词、单词卡这类点子在「要一份词表」和「要一句中文」上都会撞到同一件事；
+让每个 app 自带词表既重复，也带不来同一份逐条审查过的表（黑名单、人名和缩写都筛掉），而中文释义又放不进 app 的 512 KB，所以由 runtime 借出一份。
+
+- **不要权限（只限查词）**：数据是内置的 ECDICT，公开、每台机器一样；`words()` 和 `lookup()` 不读玩家的任何东西
+  （不碰生词本、查词历史、导入的词典）。像 `PAD.say` 一样，manifest 里不用声明，也没有确认框：一份静态词典没有可同意的内容，
+  多一个对话框只会让玩家习惯点「允许」。生词本是玩家自己的数据，见下面单独的一条。
+- **只有内置 ECDICT**：导入的词典每台手机不同（同一个查询在不同手机上给出不同答案），许可也是玩家自己的，不能转给 app。
+  app 看到的是随 runtime 发布、已经审查过的那一份（第 15 节）。
+- **不理会停用开关**：词典管理里关掉内置 ECDICT 是给词典程序和阅读器的（第 15 节）。app 的查询应该和本机设置无关：
+  换一台手机、换一次设置得到同样的结果，关掉开关的玩家也不会因此弄坏 app。内置 ECDICT 本来就在离线缓存里，开关只是一个筛选。
+- **词表在 gen-ecdict.mjs 里筛过**：22,656 个 a-z 小写词，按常见程度排；人名、缩写、数字不收，另外有一份逐条看过的
+  骂人、脏话和性相关词的黑名单。`words()` 只从这个表里取，所以 app 显示什么都不会出问题。`lookup()` 不过滤：词表和释义是两回事，
+  词典程序本来就能查到这些词，藏起来既没必要，也会弄坏拼写、背单词这类 app。词表小还有一个好处：`words()` 只读 87 KB 的文件，
+  iPhone 上的耗时还有待实测。
+- **词表随 lopda/1 冻结**：`runtime/wordlist.js` 的 `VERSION` 是 `ecdict-1`，`PAD.dict.version` 报的就是它。排序和
+  `level` 的 2000 / 5000 / 10000 / 15000 分档都是行为的一部分，app 会按它设计关卡；lopda/1 期间不换词表，
+  真要换就是新的 spec 或版本，并把 `version` 改掉。
+- **生词本对 app 开放（owner 2026-10-24）**：生词本是玩家自己的数据，所以要新权限 `"wordbook"`；像相机一样一个 app
+  只问一次，第一个 add/remove 时弹 runtime 自己的确认框（「{app}」想把单词加入你的生词本），A/允许记住授权，B/不允许只拒绝这一次，
+  下次再问。不做「每加一个词问一次」：那样会不停打断游戏。读取 `inBook` 也要这个授权，所以 app 不可能在玩家不知道的情况下读生词本；
+  没有授权时 `inBook` 回 `null`，不弹框。三个调用是 `PAD.dict.addWord(word)` / `removeWord(word)` ->
+  `"saved" | "denied" | "full" | null`、`PAD.dict.inBook(words)` -> `boolean[] | null`；和词典程序、阅读器同一个
+  2000 词上限、同一条存储路径，只存 ECDICT 的词条头词（`lookup` 后的 `word`，不在 ECDICT 里就 `null`），没有 toast、没有声音。
+  设置 → 传感器与相机 列出被授权的 app（生词本），撤销只收回权限，不动已经加进去的词。所有 `PAD.dict` 调用共用每秒 10 次的限制。
+- **实现**：`runtime/wordlist.js`（`window.LopdaWordList`，纯函数加一个 source，`tests/wordlist.test.mjs`）；
+  `runtime/apps/dict.js` 建一个 `LopdaWordList.source` 交给 `LP.dict.apps`，`book(BUILTIN)` 和 `D.lemma` 用的就是词典程序那份，
+  lookup 第一次才解包整本书，不会加载两次。`runtime/apps/store.js` 的 `dictRequest` 负责转发：每个 app 一个
+  `LopdaWordList.limiter()`（每秒 10 次，words、lookup 和生词本合计），超出直接回 `null`；坏参数回 `{error}`，app 的 promise 以
+  `PAD.dict.words: …` / `PAD.dict.lookup: …` 拒绝；文件读不出来回 `null`。`sdk/pad-shim.js` 里只有 `dict: true` 才给 `PAD.dict`，
+  回来的数据再检查一遍，不是预期的形状一律当 `null`。`sdk/dev.html` 自带一份 source，开发台里也能试。
 
 ## 36. 平放读数 flat（0.35.0）
 

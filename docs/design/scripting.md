@@ -102,7 +102,7 @@ requestAnimationFrame(frame);
 
 本地脚本没有 manifest，运行器用一个默认权限集合：
 
-- `files`、`notes`、`camera`、`motion`、`mic` 都可用，但每次仍走 runtime 自己的确认框（和商店 app 一样）。
+- `files`、`notes`、`camera`、`motion`、`mic`、`wordbook` 都可用，但每次仍走 runtime 自己的确认框（和商店 app 一样）。
 - 或者更保守：第一版只给 `files` + `motion`，`notes/camera` 以后再加。建议默认给 `files`，其他按需开启。
 - 不提供网络、localStorage、IndexedDB、cookies；存档走 `PAD.save/load`。
 
@@ -292,7 +292,7 @@ PAD.save("sessions", [
 1. **接受“本地 JS/HTML 程序”而不是“新语言解释器”**。我的建议：接受。
 2. 第一版做 **一个内置“脚本”程序**，还是把“本地程序”并进商店？建议独立内置，避免和审核 app 混淆。
 3. `.js` 外壳是否保留？建议保留：它让“脚本”真的像一个脚本，而不是必须写完整 HTML。
-4. 默认权限：只给 `files`，还是把 `notes/camera/motion/mic` 也打开？建议先给 `files`，其余按需。
+4. 默认权限：只给 `files`，还是把 `notes/camera/motion/mic/wordbook` 也打开？建议先给 `files`，其余按需。
 5. 死循环：先接受刷新恢复，还是第一版就上 Worker？建议先接受，分享功能出现后再上 Worker/QuickJS。
 
 ## 8. 验收门槛

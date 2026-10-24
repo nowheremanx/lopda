@@ -5,11 +5,11 @@
  * injects it as the first script of every app, so it must stay self-contained:
  * no closures over outer variables, no imports.
  *
- * The runtime calls it with options: lopdaPadShim({lang:"zh"|"en", music:true, ambience:true, sensors:true, notes:true, say:true, camera:true}).
+ * The runtime calls it with options: lopdaPadShim({lang:"zh"|"en", music:true, ambience:true, sensors:true, notes:true, say:true, camera:true, dict:true}).
  * Older runtimes pass none, so PAD.lang is undefined there and apps fall back to their own default; PAD.music is likewise undefined
  * unless the runtime can play it (runtime 0.11.0 and later, and sdk/dev.html), PAD.ambience (0.13.0 and later),
  * PAD.motion and PAD.mic (0.24.0 and later), PAD.notes and PAD.say (0.26.0 and later; Japanese say in 0.29.0),
- * and PAD.camera (0.28.0 and later).
+ * PAD.camera (0.28.0 and later) and PAD.dict (0.36.0 and later).
  *
  * Messages app -> runtime:  {pad:1, op:"save"|"load"|"remove"|"error"|"exit", ...}
  *                           {pad:1, op:"sfx", name}  or  {pad:1, op:"sfx", params:{wave, duty, from, to, ms, attack, decay, vol, vibrato:{depth, rate}}}
@@ -22,24 +22,30 @@
  *                           {pad:1, op:"notes", i, title, text}   (needs "notes")
  *                           {pad:1, op:"say", i, text, lang}
  *                           {pad:1, op:"snap", i, size:"small"|"large"}   (needs "camera")
+ *                           {pad:1, op:"dict", i, kind:"words", q}  or  {pad:1, op:"dict", i, kind:"lookup", word}
+ *                           {pad:1, op:"dict", i, kind:"inBook", words}  (needs "wordbook")
+ *                           {pad:1, op:"dict", i, kind:"add"|"remove", word}   (needs "wordbook")
  * Messages runtime -> app:  {pad:1, op:"loaded", i, v}
  *                           {pad:1, op:"filed", i, v}  or  {pad:1, op:"filed", i, error}
  *                           {pad:1, op:"sensed", i, v}   v: "on" | "denied" | "none"
  *                           {pad:1, op:"noted", i, v}   v: "saved" | "denied"
  *                           {pad:1, op:"said", i, v}    v: "done" | "stopped" | "unavailable"
  *                           {pad:1, op:"snapped", i, v}  v: {w, h, px: Uint8Array of w*h tones 0-3} | null
+ *                           {pad:1, op:"dicted", i, v}  or  {pad:1, op:"dicted", i, error}
+ *                                                        v: a words page, an entry, booleans, "saved"|"denied"|"full" or null
  *                           {pad:1, op:"tilt", x, y, heading, flat:{x, y}}  {pad:1, op:"shake"}  {pad:1, op:"sound", level, pitch}
  *                           (flat is runtime 0.35.0 and later; older runtimes send no flat)
  *                           {pad:1, op:"button", b, down}   (chin buttons, lopda/1)
  *                           {pad:1, op:"release-all"}
  */
 function lopdaPadShim(opts) {
-  var seq = 0, waiting = {}, filing = {}, sensing = {}, noting = {}, saying = {}, snapping = {};
+  var seq = 0, waiting = {}, filing = {}, sensing = {}, noting = {}, saying = {}, snapping = {}, dicting = {};
   var post = function (msg) { msg.pad = 1; parent.postMessage(msg, "*"); };
   var TONES = ["#1f2a14", "#4a5a32", "#7d8a58", "#a3ad7e"];
   var LANG = opts && (opts.lang === "zh" || opts.lang === "en") ? opts.lang : undefined;
   var MUSIC = !!(opts && opts.music === true), AMBIENCE = !!(opts && opts.ambience === true), SENSORS = !!(opts && opts.sensors === true);
   var NOTES = !!(opts && opts.notes === true), SAY = !!(opts && opts.say === true), CAMERA = !!(opts && opts.camera === true);
+  var DICT = !!(opts && opts.dict === true);
 
   /* Buttons (lopda/1): the runtime forwards the chin keys; the keyboard works too. */
   var BUTTONS = ["up", "down", "left", "right", "a", "b", "start", "select"];
@@ -153,6 +159,84 @@ function lopdaPadShim(opts) {
     return { w: v.w, h: v.h, px: v.px };
   };
   var num = function (v, lo, hi) { return typeof v === "number" && v >= lo && v <= hi; };
+  /* The dictionary (runtime 0.36.0, SPEC.md 6.7): words(q) and lookup(word) are read-only queries on the built-in ECDICT,
+     no permission and no dialog. words(q) -> Promise<{words, more} | null>, lookup(word) -> Promise<{word, form?, zh, en} | null>;
+     null: the dictionary cannot be read, or more than 10 calls in a second (words, lookup and the word book together). A bad
+     query rejects, as PAD.exportFile rejects bad arguments; unhandled it reaches the runtime's error box.
+     The word book (runtime 0.36.0, "permissions": ["wordbook"]): inBook(words) -> Promise<boolean[] | null>,
+     addWord(word) / removeWord(word) -> Promise<"saved" | "denied" | "full" | null>. The first add or remove shows the
+     runtime's own dialog once per app; inBook is null until that grant exists. Null is normal (no grant, no permission,
+     over the limit, or the word is not in the dictionary). A bad argument rejects. */
+  var dictAsk = function (kind, msg, n) {
+    return new Promise(function (resolve, reject) {
+      var i = ++seq; dicting[i] = { resolve: resolve, reject: reject, kind: kind, n: n };
+      msg.op = "dict"; msg.kind = kind; msg.i = i; post(msg);
+    });
+  };
+  /* what comes back is checked here before an app sees it: anything unexpected reads as null */
+  var stringsOnly = function (a) {
+    if (!Array.isArray(a)) return null;
+    for (var i = 0; i < a.length; i++) if (typeof a[i] !== "string") return null;
+    return a.slice();
+  };
+  var boolsOnly = function (a, n) {
+    if (!Array.isArray(a) || a.length !== n) return null;
+    for (var i = 0; i < a.length; i++) if (typeof a[i] !== "boolean") return null;
+    return a.slice();
+  };
+  var savedWord = function (v) { return v === "saved" || v === "denied" || v === "full" ? v : null; };
+  /* a word as LopdaWordList.wordOf takes it: 1 to 32 letters a-z, any case */
+  var dictWord = function (kind, w) {
+    if (typeof w !== "string" || w.length < 1 || w.length > 32 || !/^[A-Za-z]+$/.test(w))
+      return "PAD.dict." + kind + ": the word is 1 to 32 letters a-z";
+    return null;
+  };
+  var dictErr = { inBook: "inBook", add: "addWord", remove: "removeWord" };
+  var wordPage = function (v) {
+    if (!v || typeof v !== "object") return null;
+    var words = stringsOnly(v.words);
+    return words ? { words: words, more: !!v.more } : null;
+  };
+  var wordEntry = function (v) {
+    if (!v || typeof v !== "object" || typeof v.word !== "string") return null;
+    var zh = stringsOnly(v.zh), en = stringsOnly(v.en), out;
+    if (!zh || !en) return null;
+    out = { word: v.word, zh: zh, en: en };
+    if (typeof v.form === "string") out.form = v.form;
+    return out;
+  };
+  /* a words() query as plain data. plain() drops what cannot be copied; len is the one field that is an array,
+     [min, max], and it must stay one for the runtime's check (SPEC.md 6.7) */
+  var queryOf = function (q) {
+    var out = plain(q);
+    if (q && typeof q === "object" && Array.isArray(q.len)) {
+      out.len = q.len.map(function (v) { return typeof v === "number" || typeof v === "string" ? v : String(v); });
+    }
+    return out;
+  };
+  var dict = !DICT ? undefined : Object.freeze({
+    version: "ecdict-1",
+    words: function (q) { return dictAsk("words", { q: queryOf(q) }); },
+    lookup: function (word) { return dictAsk("lookup", { word: str(word) }); },
+    /* 1 to 20 words: an array of booleans, or null */
+    inBook: function (words) {
+      if (!Array.isArray(words) || words.length < 1 || words.length > 20)
+        return Promise.reject(new Error("PAD.dict.inBook: words is an array of 1 to 20 words"));
+      for (var i = 0; i < words.length; i++) {
+        var bad = dictWord("inBook", words[i]);
+        if (bad) return Promise.reject(new Error(bad));
+      }
+      return dictAsk("inBook", { words: words.slice() }, words.length);
+    },
+    addWord: function (word) {
+      var bad = dictWord("addWord", word);
+      return bad ? Promise.reject(new Error(bad)) : dictAsk("add", { word: word });
+    },
+    removeWord: function (word) {
+      var bad = dictWord("removeWord", word);
+      return bad ? Promise.reject(new Error(bad)) : dictAsk("remove", { word: word });
+    }
+  });
 
   var fileOp = function (msg) {
     return new Promise(function (resolve, reject) {
@@ -188,6 +272,7 @@ function lopdaPadShim(opts) {
     notes: notes,
     say: say,
     camera: camera,
+    dict: dict,
     on: function (type, fn) { if (on[type] && typeof fn === "function") on[type].push(fn); },
     off: function (type, fn) { if (on[type]) on[type] = on[type].filter(function (f) { return f !== fn; }); },
     isDown: function (b) { return !!held[b]; },
@@ -219,6 +304,13 @@ function lopdaPadShim(opts) {
     else if (d.op === "noted" && noting[d.i]) { var n = noting[d.i]; delete noting[d.i]; n(d.v === "saved" ? "saved" : "denied"); }
     else if (d.op === "said" && saying[d.i]) { var w = saying[d.i]; delete saying[d.i]; w(d.v === "done" || d.v === "stopped" ? d.v : "unavailable"); }
     else if (d.op === "snapped" && snapping[d.i]) { var c = snapping[d.i]; delete snapping[d.i]; c(picture(d.v)); }
+    else if (d.op === "dicted" && dicting[d.i]) {
+      var g = dicting[d.i]; delete dicting[d.i];
+      if (d.error != null) g.reject(new Error("PAD.dict." + (dictErr[g.kind] || g.kind) + ": " + String(d.error)));
+      else if (g.kind === "inBook") g.resolve(boolsOnly(d.v, g.n));
+      else if (g.kind === "add" || g.kind === "remove") g.resolve(savedWord(d.v));
+      else g.resolve(g.kind === "words" ? wordPage(d.v) : wordEntry(d.v));
+    }
     else if (d.op === "tilt" && SENSORS && num(d.x, -1, 1) && num(d.y, -1, 1)) {
       var t = { x: d.x, y: d.y, heading: num(d.heading, 0, 360) ? d.heading : null };
       if (d.flat && typeof d.flat === "object" && num(d.flat.x, -1, 1) && num(d.flat.y, -1, 1)) t.flat = { x: d.flat.x, y: d.flat.y };
@@ -288,7 +380,7 @@ var LOPDA_APP_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src '
 /* Wrap an app's HTML: CSP meta first, then the bridge, then the app.
    opts.lang ("zh" | "en") becomes PAD.lang inside the app; opts.music (true) gives it PAD.music, opts.ambience (true) PAD.ambience,
    opts.sensors (true) PAD.motion and PAD.mic, opts.notes (true) PAD.notes, opts.say (true) PAD.say,
-   opts.camera (true) PAD.camera. */
+   opts.camera (true) PAD.camera, opts.dict (true) PAD.dict. */
 function lopdaWrapApp(html, opts) {
   var o = {};
   if (opts && (opts.lang === "zh" || opts.lang === "en")) o.lang = opts.lang;
@@ -298,6 +390,7 @@ function lopdaWrapApp(html, opts) {
   if (opts && opts.notes === true) o.notes = true;
   if (opts && opts.say === true) o.say = true;
   if (opts && opts.camera === true) o.camera = true;
+  if (opts && opts.dict === true) o.dict = true;
   var head = '<meta http-equiv="Content-Security-Policy" content="' + LOPDA_APP_CSP + '">' +
     "<style>*{touch-action:manipulation;-webkit-tap-highlight-color:transparent}</style>" +
     "<script>(" + lopdaPadShim.toString() + ")(" + (Object.keys(o).length ? JSON.stringify(o) : "") + ");<\/script>";

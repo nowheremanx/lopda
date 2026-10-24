@@ -10,6 +10,8 @@
 //   Chinese text, which are web translations of unknown origin.
 // Output: ecdict.ifo / .idx / .dict.dz (dictzip) and ecdict.lemma.gz, a gzip of "form<TAB>lemma" lines for the
 // lookup step between an exact match and prefix candidates (running -> run). Forms that are headwords are left out.
+// ecdict.words.gz is the word list apps get through PAD.dict.words (SPEC.md 6.7): the kept words that are plain
+// lowercase a-z, most common first, without abbreviations, first names, numerals and the words in BLOCK.
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { gzipSync } from "node:zlib";
 import { join, dirname } from "node:path";
@@ -21,6 +23,16 @@ if (!csvPath) { console.error("usage: node tools/gen-ecdict.mjs <ecdict.csv> [co
 const COUNT = +countArg || 25000;
 const PROPER_MAX = 8000;     // capitalised words (names, places, days) only when this common
 const EN_LINES = 4;          // English senses kept per word; the Chinese text is what most lookups want
+/* Left out of the app word list (never out of the dictionary itself, which still explains them): slurs, swearing
+   and sexual words, so that a puzzle made from random common words never puts one on a child's screen. Reviewed by
+   hand from the entries that ECDICT or WordNet mark as offensive, obscene, vulgar or sexual; a word whose usual sense
+   is harmless (cock is first a rooster here, but is still left out; tom, paddy and gay stay) was judged one by one. */
+const BLOCK = new Set(`
+anal anus arse ass asshole bastard bitch boob booby brothel bugger bullshit chink clitoris cock coon crap cum cunt
+dick dyke erotic eroticism fag faggot fanny fuck fucker fucking goddamn horny masturbate masturbation negro nigger
+orgasm orgy penis pimp piss pissed porn porno pornographic pornography prostitute prostitution pussy queer rape
+rapist retard retarded semen sexy shag shit shitty slut sodomy sperm tit turd vagina vaginal whore willy
+`.split(/\s+/).filter(Boolean));
 const OUT = join(dirname(fileURLToPath(import.meta.url)), "..", "runtime", "vendor", "ecdict");
 
 /* RFC 4180 CSV, quoted fields may hold commas, quotes and newlines */
@@ -99,6 +111,14 @@ writeFileSync(join(OUT, "ecdict.idx"), sd.idx);
 writeFileSync(join(OUT, "ecdict.dict.dz"), sd.dictdz);
 const lemmaText = [...lemma].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([f, b]) => f + "\t" + b.join("/")).join("\n") + "\n";
 writeFileSync(join(OUT, "ecdict.lemma.gz"), gzipSync(lemmaText, { level: 9 }));
+/* the app word list: plain a-z, with a vowel (km, kg), not only an abbreviation or a name, not blocked; picked is in rank order */
+/* a word has a sense with a part of speech that is not only a name (伊恩（男子名）) or a numeral (罗马数字3) */
+const isSense = (l) => /^(?!abbr\.)[a-z]+\.\s/.test(l) && !/^[a-z]+\.\s*[^,，]*[（(][^）)]*(男子名|女子名|男名|女名|人名|姓氏|地名)|罗马数字/.test(l);
+const notWord = (r) => !chinese(r).some(isSense);
+const appWords = picked.map((r) => get(r, "word")).filter((w, i) =>
+  /^[a-z]+$/.test(w) && /[aeiouy]/.test(w) && !BLOCK.has(w) && !notWord(picked[i]));
+writeFileSync(join(OUT, "ecdict.words.gz"), gzipSync(appWords.join("\n") + "\n", { level: 9 }));
 const kb = (b) => (b.length / 1024).toFixed(0) + " KB";
 console.log(entries.length + " words, last rank " + rank(picked.at(-1)) + ", " + lemma.size + " word forms");
-console.log("idx " + kb(sd.idx) + ", dict.dz " + kb(sd.dictdz) + ", lemma.gz " + kb(readFileSync(join(OUT, "ecdict.lemma.gz"))));
+console.log(appWords.length + " words for apps (" + [...BLOCK].filter((w) => !chosen.has(w)).join(" ") + " not in the book)");
+console.log("idx " + kb(sd.idx) + ", dict.dz " + kb(sd.dictdz) + ", lemma.gz " + kb(readFileSync(join(OUT, "ecdict.lemma.gz"))) + ", words.gz " + kb(readFileSync(join(OUT, "ecdict.words.gz"))));
