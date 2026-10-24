@@ -438,3 +438,138 @@ test("camera: null without the permission; anything that is not a proper picture
   a.posted().forEach((p, k) => a.fromRuntime({ pad: 1, op: "snapped", i: p.i, v: bad[k] }));
   assert.deepEqual(await Promise.all(calls), bad.map(() => null));
 });
+
+/* ---------- the dictionary (SPEC.md 6.7, decisions.md section 35) ---------- */
+test("dict: PAD.dict exists only when the runtime offers it, and the wrapper passes dict", () => {
+  assert.equal(app().PAD.dict, undefined);
+  assert.equal(app({ say: true, camera: true }).PAD.dict, undefined);
+  assert.equal(app({ dict: "yes" }).PAD.dict, undefined);
+  const { PAD } = app({ dict: true });
+  assert.equal(PAD.dict.version, "ecdict-1");
+  assert.deepEqual(Object.keys(PAD.dict).sort(), ["addWord", "inBook", "lookup", "removeWord", "version", "words"]);
+  assert.ok(Object.isFrozen(PAD.dict));
+  const { lopdaWrapApp: wrap } = runScript("sdk/pad-shim.js", {});
+  assert.match(wrap("<p>x</p>", { say: true, dict: true }), /\(\{"say":true,"dict":true\}\);/);
+  assert.ok(wrap("<p>x</p>", { dict: 1 }).includes(")();"), "dict only when it is true");
+});
+
+test("dict: words posts its query as plain data and settles from the matching reply", async () => {
+  const a = app({ dict: true });
+  const one = a.PAD.dict.words({ len: 5, pattern: "?a???", fn: () => 1, nested: { x: 1 }, gone: undefined });
+  const two = a.PAD.dict.words();
+  const three = a.PAD.dict.words({ letters: "planet", len: [3, 6], level: 3 });
+  const [p1, p2, p3] = a.posted();
+  assert.deepEqual(p1, { op: "dict", kind: "words", q: { len: 5, pattern: "?a???", fn: "() => 1", nested: "[object Object]" }, i: p1.i, pad: 1 });
+  assert.deepEqual(p2, { op: "dict", kind: "words", q: {}, i: p2.i, pad: 1 });
+  assert.deepEqual(p3.q, { letters: "planet", len: [3, 6], level: 3 }, "[min, max] stays an array");
+  a.fromRuntime({ pad: 1, op: "dicted", i: p1.i, v: { words: ["spoofed"], more: false } }, {});   /* not from the parent: ignored */
+  a.fromRuntime({ pad: 1, op: "dicted", i: p1.i, v: { words: ["cat", "dog"], more: 1 } });
+  a.fromRuntime({ pad: 1, op: "dicted", i: p2.i, v: { words: [], more: false } });
+  assert.deepEqual(JSON.parse(JSON.stringify(await one)), { words: ["cat", "dog"], more: true });
+  assert.deepEqual(JSON.parse(JSON.stringify(await two)), { words: [], more: false });
+});
+
+test("dict: odd word pages read as null; only strings in words, more is a boolean", async () => {
+  const a = app({ dict: true });
+  const bad = [null, "words", [], { words: "cat" }, { words: ["cat", 7] }, { more: true }];
+  const good = a.PAD.dict.words({});
+  const calls = bad.map(() => a.PAD.dict.words({}));
+  const ps = a.posted();
+  bad.forEach((v, k) => a.fromRuntime({ pad: 1, op: "dicted", i: ps[k + 1].i, v }));
+  a.fromRuntime({ pad: 1, op: "dicted", i: ps[0].i, v: { words: ["cat"], more: "yes" } });
+  assert.deepEqual(await Promise.all(calls), bad.map(() => null));
+  assert.deepEqual(JSON.parse(JSON.stringify(await good)), { words: ["cat"], more: true });
+});
+
+test("dict: lookup posts the word and settles from the matching reply, form only when it is a string", async () => {
+  const a = app({ dict: true });
+  const base = a.PAD.dict.lookup("Ran"), exact = a.PAD.dict.lookup("run"), odd = a.PAD.dict.lookup(42);
+  const [p1, p2, p3] = a.posted();
+  assert.deepEqual(p1, { op: "dict", kind: "lookup", word: "Ran", i: p1.i, pad: 1 });
+  assert.deepEqual(p3, { op: "dict", kind: "lookup", word: "42", i: p3.i, pad: 1 });
+  a.fromRuntime({ pad: 1, op: "dicted", i: p1.i, v: { word: "run", form: "ran", zh: ["v. 跑"], en: ["move quickly"] } });
+  a.fromRuntime({ pad: 1, op: "dicted", i: p2.i, v: { word: "run", form: 7, zh: ["v. 跑"], en: [] } });
+  a.fromRuntime({ pad: 1, op: "dicted", i: p3.i, v: { word: "run", zh: ["v. 跑"], en: [] } });
+  assert.deepEqual(JSON.parse(JSON.stringify(await base)), { word: "run", form: "ran", zh: ["v. 跑"], en: ["move quickly"] });
+  assert.deepEqual(JSON.parse(JSON.stringify(await exact)), { word: "run", zh: ["v. 跑"], en: [] });
+  assert.deepEqual(JSON.parse(JSON.stringify(await odd)), { word: "run", zh: ["v. 跑"], en: [] });
+});
+
+test("dict: odd entries read as null, and a runtime error rejects with the PAD.dict prefix", async () => {
+  const a = app({ dict: true });
+  const bad = [null, "run", {}, { word: 7, zh: [], en: [] }, { word: "run", zh: ["v. 跑"], en: "move" }, { word: "run", zh: [1], en: [] }];
+  const calls = bad.map(() => a.PAD.dict.lookup("run"));
+  const ps = a.posted();
+  bad.forEach((v, k) => a.fromRuntime({ pad: 1, op: "dicted", i: ps[k].i, v }));
+  assert.deepEqual(await Promise.all(calls), bad.map(() => null));
+  const w = a.PAD.dict.words({ len: 1 }), l = a.PAD.dict.lookup("");
+  const [pw, pl] = a.posted().slice(-2);
+  a.fromRuntime({ pad: 1, op: "dicted", i: pw.i, error: "len is a whole number from 2 to 15, or [min, max]" });
+  a.fromRuntime({ pad: 1, op: "dicted", i: pl.i, error: "the word is 1 to 32 letters a-z" });
+  await assert.rejects(w, /PAD\.dict\.words: len is a whole number/);
+  await assert.rejects(l, /PAD\.dict\.lookup: the word is 1 to 32 letters/);
+});
+
+/* ---------- the word book (SPEC.md 6.7, decisions.md section 35) ---------- */
+test("wordbook: inBook posts the words and settles from the matching reply, checked to the same length", async () => {
+  const a = app({ dict: true });
+  const one = a.PAD.dict.inBook(["Cat", "dog"]);
+  const [p1] = a.posted();
+  assert.deepEqual(p1, { op: "dict", kind: "inBook", words: ["Cat", "dog"], i: p1.i, pad: 1 });
+  a.fromRuntime({ pad: 1, op: "dicted", i: p1.i, v: [true, false] }, {});   /* not from the parent: ignored */
+  a.fromRuntime({ pad: 1, op: "dicted", i: p1.i, v: [true, false] });
+  assert.deepEqual(await one, [true, false]);
+
+  /* odd replies read as null: not an array, wrong length, a value that is not a boolean */
+  const bad = [null, "yes", [true], [true, false, true], [true, 1], { 0: true }];
+  const calls = bad.map(() => a.PAD.dict.inBook(["cat", "dog"]));
+  const ps = a.posted().slice(1);
+  bad.forEach((v, k) => a.fromRuntime({ pad: 1, op: "dicted", i: ps[k].i, v }));
+  assert.deepEqual(await Promise.all(calls), bad.map(() => null));
+});
+
+test("wordbook: addWord and removeWord post the word and resolve one of saved, denied, full or null", async () => {
+  const a = app({ dict: true });
+  const add = a.PAD.dict.addWord("Cat"), rem = a.PAD.dict.removeWord("dog");
+  const [pa, pr] = a.posted();
+  assert.deepEqual(pa, { op: "dict", kind: "add", word: "Cat", i: pa.i, pad: 1 });
+  assert.deepEqual(pr, { op: "dict", kind: "remove", word: "dog", i: pr.i, pad: 1 });
+  a.fromRuntime({ pad: 1, op: "dicted", i: pa.i, v: "saved" }, {});   /* not from the parent: ignored */
+  a.fromRuntime({ pad: 1, op: "dicted", i: pa.i, v: "saved" });
+  a.fromRuntime({ pad: 1, op: "dicted", i: pr.i, v: "full" });
+  assert.deepEqual(await Promise.all([add, rem]), ["saved", "full"]);
+
+  /* anything that is not one of the four answers reads as null */
+  const bad = ["weird", true, {}, [], "SAVED", null];
+  const calls = bad.map(() => a.PAD.dict.addWord("cat"));
+  const ps = a.posted().slice(2);
+  bad.forEach((v, k) => a.fromRuntime({ pad: 1, op: "dicted", i: ps[k].i, v }));
+  assert.deepEqual(await Promise.all(calls), bad.map(() => null));
+  assert.deepEqual(await (() => { const p = a.PAD.dict.removeWord("cat"); a.fromRuntime({ pad: 1, op: "dicted", i: a.posted().slice(-1)[0].i, v: "denied" }); return p; })(), "denied");
+});
+
+test("wordbook: bad arguments reject with PAD.dict.<method>, and nothing is posted", async () => {
+  const a = app({ dict: true });
+  await assert.rejects(a.PAD.dict.inBook("cat"), /PAD\.dict\.inBook: words is an array of 1 to 20 words/);
+  await assert.rejects(a.PAD.dict.inBook([]), /PAD\.dict\.inBook: words is an array of 1 to 20 words/);
+  await assert.rejects(a.PAD.dict.inBook(new Array(21).fill("cat")), /PAD\.dict\.inBook: words is an array of 1 to 20 words/);
+  await assert.rejects(a.PAD.dict.inBook(["cat", 7]), /PAD\.dict\.inBook: the word is 1 to 32 letters a-z/);
+  await assert.rejects(a.PAD.dict.inBook(["two words"]), /PAD\.dict\.inBook: the word is 1 to 32 letters a-z/);
+  await assert.rejects(a.PAD.dict.addWord(""), /PAD\.dict\.addWord: the word is 1 to 32 letters a-z/);
+  await assert.rejects(a.PAD.dict.addWord("café"), /PAD\.dict\.addWord: the word is 1 to 32 letters a-z/);
+  await assert.rejects(a.PAD.dict.removeWord("x".repeat(33)), /PAD\.dict\.removeWord: the word is 1 to 32 letters a-z/);
+  await assert.rejects(a.PAD.dict.removeWord(42), /PAD\.dict\.removeWord: the word is 1 to 32 letters a-z/);
+  assert.equal(a.posted().length, 0);
+});
+
+test("wordbook: a runtime error rejects with the method's name, not the message kind", async () => {
+  const a = app({ dict: true });
+  const add = a.PAD.dict.addWord("cat"), rem = a.PAD.dict.removeWord("cat"), book = a.PAD.dict.inBook(["cat"]);
+  const [pa, pr, pb] = a.posted();
+  a.fromRuntime({ pad: 1, op: "dicted", i: pa.i, error: "no word book" });
+  a.fromRuntime({ pad: 1, op: "dicted", i: pr.i, error: "no word book" });
+  a.fromRuntime({ pad: 1, op: "dicted", i: pb.i, error: "no word book" });
+  await assert.rejects(add, /PAD\.dict\.addWord: no word book/);
+  await assert.rejects(rem, /PAD\.dict\.removeWord: no word book/);
+  await assert.rejects(book, /PAD\.dict\.inBook: no word book/);
+});

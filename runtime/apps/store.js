@@ -1,8 +1,10 @@
 /*
  * Lo-PDA built-in: the app store (community registry), the preinstalled apps, and the sandboxed runner
  * with its PAD bridge (storage, sounds, music and ambience, buttons, files behind the runtime's own confirm dialog, tilt and
- * the microphone through runtime/sensors.js, asked for on the same dialog, writing into notes on that dialog too, speech, and one
- * photo at a time through the runtime's own viewfinder, apps/snap.js).
+ * the microphone through runtime/sensors.js, asked for on the same dialog, writing into notes on that dialog too, speech, one
+ * photo at a time through the runtime's own viewfinder, apps/snap.js, read-only dictionary queries through
+ * runtime/wordlist.js and the dictionary program's copy of the built-in ECDICT, and the player's own word book behind one
+ * consent per app).
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  */
 (function(){
@@ -15,7 +17,7 @@ var own=LP.own, toast=LP.toast, put=LP.put, sfx=LP.sfx, show=LP.show, showPad=LP
 /* community apps that come installed, in this order on the home screen after the built-ins (docs/design/pad-files.md) */
 var PREINSTALL=["calculator","paint"];
 /* capabilities a manifest may ask for (SPEC.md section 2) */
-var PERMISSIONS=["files","motion","mic","notes","camera"];
+var PERMISSIONS=["files","motion","mic","notes","camera","wordbook"];
 /* store sections, in the order the catalogue shows them; an app without a known category goes last */
 var CATEGORIES=["game","productivity","education","create","story","life"];
 function validPerms(x){ return Array.isArray(x) ? PERMISSIONS.filter(function(p){ return x.indexOf(p)>=0; }) : []; }
@@ -262,6 +264,7 @@ function deleteApp(id){
 
 /* ---------- runner: sandboxed iframe + PAD bridge (sdk/pad-shim.js) ---------- */
 var KV_BUDGET=256*1024;
+var dictLimit=null;   /* PAD.dict's 10 calls a second: a new limiter for every app start */
 /* A new iframe for every run. Desktop Chrome can leave a reused sandboxed frame unpainted
    (scripts run, nothing shows); a fresh one also means no state carries over between apps. */
 function freshRunFrame(){
@@ -276,6 +279,7 @@ function runApp(a){
   sensors.stopAll();   /* the old app's tilt and microphone end with its frame */
   LP.chip.stop();   /* the old app's song and ambience end with its frame */
   S.running=a;
+  dictLimit=window.LopdaWordList ? window.LopdaWordList.limiter() : null;
   $("run-title").textContent=a.local ? appName(a) : appName(a)+" · v"+(a.version||"?");
   $("run-del-wrap").hidden=!!a.local;   /* local scripts are removed in the scripts app, not here */
   if(!a.local) LP.resetConfirm("run-del-wrap","run-del",tr("run.remove"),function(){ if(S.running){ var n=appName(S.running); deleteApp(S.running.id); show("home"); toast(tr("run.removed",{name:n})); } });
@@ -284,7 +288,7 @@ function runApp(a){
   showPad(!!a.buttons);
   LP.keepAwake(true);   /* a running app keeps the screen on */
   freshRunFrame();
-  var start=function(h){ $("run-frame").srcdoc=lopdaWrapApp(h,{lang:I18N.lang, music:true, ambience:true, sensors:true, notes:true, say:true, camera:true}); };
+  var start=function(h){ $("run-frame").srcdoc=lopdaWrapApp(h,{lang:I18N.lang, music:true, ambience:true, sensors:true, notes:true, say:true, camera:true, dict:true}); };
   if(a.html){ start(a.html); return; }
   $("run-frame").srcdoc='<body style="margin:0;height:100%;display:flex;align-items:center;justify-content:center;background:#a3ad7e;color:#1f2a14;font:16px monospace">'+tr("run.loading")+'</body>';
   loadHtml(a).then(function(h){
@@ -359,6 +363,8 @@ window.addEventListener("message",function(e){
     notesRequest(S.running,f.contentWindow,d);
   } else if(d.op==="say"){
     sayRequest(S.running,f.contentWindow,d);
+  } else if(d.op==="dict"){
+    dictRequest(S.running,f.contentWindow,d);
   } else if(d.op==="snap"){
     snapRequest(S.running,f.contentWindow,d);
   } else if(d.op==="sfx"){
@@ -423,6 +429,7 @@ function fileRequest(app,win,d){
    tap (or the A release) that confirms, req.cancel() answers no. req.bar: a one-line bar to tap instead of a dialog */
 function openAsk(req){
   ask=req;
+  askA=false;   /* an A held from an earlier dialog must not confirm this one */
   /* the app lets go of every button: the dialog has the pad now */
   req.win.postMessage({pad:1,op:"release-all"},"*");
   var scrim=document.createElement("div"); scrim.className="file-ask"+(req.bar?" bar":""); scrim.id="file-ask";
@@ -567,7 +574,8 @@ var sensors=window.LopdaSensors.host({
   rows.forEach(function(r,y){ for(var i=0;i<7;i++){ var o=(y*7+i)*4; if(r.charAt(i)==="0"){ im.data[o]=t[0]; im.data[o+1]=t[1]; im.data[o+2]=t[2]; im.data[o+3]=255; } } });
   x.putImageData(im,0,0); micMark.appendChild(c);
 })();
-/* allowed apps: {apps: {id: {motion: true, mic: true, camera: true}}} (the camera's grant: PAD.camera.snap below) */
+/* allowed apps: {apps: {id: {motion: true, mic: true, camera: true, wordbook: true}}} (the camera's grant: PAD.camera.snap
+   below; the word book's: dictRequest) */
 var grants={}, grantsRef=null;
 function granted(id,kind){ return !!(grants[id] && grants[id][kind]); }
 function saveGrants(){ if(grantsRef) put(grantsRef,{apps:grants}); }
@@ -577,7 +585,7 @@ LP.sensorGrants={
   list:function(){
     return Object.keys(grants).map(function(id){
       var a=installedOf(id);
-      return {id:id, name:a ? appName(a) : id, kinds:["motion","mic","camera"].filter(function(k){ return granted(id,k); })};
+      return {id:id, name:a ? appName(a) : id, kinds:["motion","mic","camera","wordbook"].filter(function(k){ return granted(id,k); })};
     }).filter(function(g){ return g.kinds.length; });
   },
   revoke:revokeSense
@@ -698,6 +706,87 @@ function sayRequest(app,win,d){
   LP.speech.say(app.id,typeof d.text==="string" ? LP.noEmoji(d.text) : "",lang).then(function(v){
     if(S.running===app && $("run-frame").contentWindow===win) win.postMessage({pad:1,op:"said",i:d.i,v:v},"*");
   });
+}
+
+/* ---------- the dictionary: PAD.dict (runtime/wordlist.js, SPEC.md 6.7, decisions.md section 35). The word list and the
+   built-in ECDICT are public and the same on every phone, so words() and lookup() need no permission and no dialog. Only the
+   word list is read for words(); lookup() shares the copy the dictionary program already loads. At most 10 calls a second
+   per app, words, lookup and the word book together; past that, null. A bad query comes back as {error} and the app's promise
+   rejects; a file that cannot be read answers null.
+   The player's word book is their own data: it needs "wordbook" in the manifest, and the first add or remove shows the
+   runtime's own dialog once per app (as the camera's first snap does), because a dialog per word would stop the game.
+   inBook() needs that grant too, so an app cannot read the book before the player knows. addWord stores the ECDICT headword. */
+function dictBookReply(app,win,d,v,error){
+  /* the app may have closed meanwhile: answer only the frame that asked */
+  if(S.running!==app || $("run-frame").contentWindow!==win) return;
+  win.postMessage(error ? {pad:1,op:"dicted",i:d.i,error:error} : {pad:1,op:"dicted",i:d.i,v:v},"*");
+}
+/* the first add or remove of an app: one dialog, then the grant is remembered (Settings lists and revokes it). B or the
+   cancel tap denies this call only; the next one asks again. One dialog at a time: the caller checks that no other runtime
+   dialog or viewfinder is open, so this never closes another program's dialog */
+function wordbookAsk(app,win,d,reply,word,on){
+  /* the app may have closed while the lookup ran: never open a dialog for a frame that is gone */
+  if(S.running!==app || $("run-frame").contentWindow!==win){ reply(null); return; }
+  var req={app:app, win:win, i:d.i, wordbook:true, reply:reply, word:word, on:on};
+  req.text=tr("dict.ask",{name:appName(app)});
+  req.okLabel=tr("sense.allow"); req.noLabel=tr("sense.deny");
+  req.ok=function(){
+    closeAsk(false); grant(app.id,"wordbook");
+    reply(LP.dict.setWord(word,on));
+  };
+  req.cancel=function(){ reply("denied"); };
+  openAsk(req);
+}
+function dictRequest(app,win,d){
+  var reply=function(v,error){ dictBookReply(app,win,d,v,error); };
+  var api=LP.dict && LP.dict.apps, kind=d.kind;
+  var book=kind==="inBook" || kind==="add" || kind==="remove";
+  if(!api || (kind!=="words" && kind!=="lookup" && !book)){ reply(null); return; }
+  if(!dictLimit){ if(!window.LopdaWordList){ reply(null); return; } dictLimit=window.LopdaWordList.limiter(); }
+  if(!dictLimit(Date.now())){ reply(null); return; }
+  if(book){
+    if(!allowed(app,"wordbook")){ reply(kind==="inBook" ? null : "denied"); return; }
+    var W=window.LopdaWordList;
+    if(kind==="inBook"){
+      if(!W || !Array.isArray(d.words) || d.words.length<1 || d.words.length>20){ reply(null); return; }
+      var words=[];
+      for(var i=0;i<d.words.length;i++){
+        var w=W.wordOf(d.words[i]);
+        if(!w){ reply(null); return; }
+        words.push(w);
+      }
+      if(!granted(app.id,"wordbook") || !LP.dict.inBookMany){ reply(null); return; }
+      reply(LP.dict.inBookMany(words));
+      return;
+    }
+    if(!W || !LP.dict.setWord || !LP.dict.apps){ reply(null); return; }
+    var word=W.wordOf(d.word);
+    if(!word){ reply(null); return; }
+    /* the word book dialog must never close another runtime dialog or open over the snap viewfinder: while either is up,
+       no word book call */
+    if(LP.snap.isOpen() || ask){ reply(null); return; }
+    if(kind==="add"){
+      /* store the headword; a word ECDICT does not know has nothing to store, so the player is never asked for it */
+      LP.dict.apps.lookup(word).then(function(e){
+        /* the app may have closed while the lookup ran: stop before touching the book or asking */
+        if(S.running!==app || $("run-frame").contentWindow!==win){ reply(null); return; }
+        if(!e || !e.word){ reply(null); return; }
+        /* a dialog or the viewfinder may have opened while the lookup ran */
+        if(LP.snap.isOpen() || ask){ reply(null); return; }
+        if(granted(app.id,"wordbook")){ reply(LP.dict.setWord(e.word,true)); return; }
+        wordbookAsk(app,win,d,reply,e.word,true);
+      },function(){ reply(null); });
+      return;
+    }
+    if(granted(app.id,"wordbook")){ reply(LP.dict.setWord(word,false)); return; }
+    wordbookAsk(app,win,d,reply,word,false);
+    return;
+  }
+  var p=kind==="words" ? api.words(d.q) : api.lookup(d.word);
+  p.then(function(v){
+    if(v && v.error) reply(null,String(v.error));
+    else reply(v==null ? null : v);
+  },function(){ reply(null); });
 }
 
 /* the AudioContext was made again: the microphone goes into the new one */
