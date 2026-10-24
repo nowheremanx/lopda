@@ -16,6 +16,14 @@ var BPM_MIN=60, BPM_MAX=140, BPM_DEFAULT=82, BPM_STEP=2;
 
 var DRUMS=["kick","snare","hat","perc"], KITS=["chip","soft"], KINDS=["drum","note","chord","voice"];
 
+/* Track ids are the keys of a pattern's notes and of the editor's state, so they are a plain slug: lower-case letters,
+   digits and "-", starting with a letter. That keeps "__proto__" and friends out of plain objects used as maps. */
+var TRACK_ID=/^[a-z][a-z0-9-]{0,15}$/;
+
+/* a pattern is 16 steps in 1a; four bars of off-grid notes are far below this, and a broken file cannot make validate
+   walk millions of notes */
+var NOTES_MAX=1024;
+
 /* "4 instruments + 1 voice" is this constant, not a rule of the format: the stored song keeps its own track list, so a
    file from another writer (or a later version) may carry other tracks. */
 var TRACKS=[
@@ -100,8 +108,15 @@ function newSong(now){
 
 /* ---------- validate: the one gate between storage / a file and the editor ----------
    A too-new file is refused as too new before its fields are judged: the fields we do not know may be the ones that
-   changed, and reporting "broken" would invite a silent overwrite. Same rule as the backup. */
+   changed, and reporting "broken" would invite a silent overwrite. Same rule as the backup.
+   A document that blows the stack (a 20 000-deep unknown field) or throws from a getter is refused rather than allowed
+   to take the editor down: to us it is a document we cannot read, which is "type". */
 function validate(x){
+  try { return check(x); }
+  catch(e){ return {error:"type"}; }
+}
+
+function check(x){
   if(!plain(x)) return {error:"type"};
   if(int(x.v) && x.v>V) return {error:"newer"};
   if(!int(x.v) || x.v<1) return {error:"version"};
@@ -115,11 +130,11 @@ function validate(x){
 
   var i, j, tr, note, list, keys, owner, max, k;
   if(!Array.isArray(x.tracks) || x.tracks.length<1 || x.tracks.length>8) return {error:"tracks"};
-  /* ids are the keys of a pattern's notes, so they are unique and short enough to read; "$" keeps "__proto__" a key */
+  /* ids are the keys of a pattern's notes; "$" keeps even an allowed "constructor" a harmless map key */
   var byId={};
   for(i=0;i<x.tracks.length;i++){
     tr=x.tracks[i];
-    if(!plain(tr) || typeof tr.id!=="string" || !tr.id.length || tr.id.length>16) return {error:"tracks"};
+    if(!plain(tr) || typeof tr.id!=="string" || !TRACK_ID.test(tr.id)) return {error:"tracks"};
     if(KINDS.indexOf(tr.kind)<0) return {error:"tracks"};
     if(Object.prototype.hasOwnProperty.call(byId,"$"+tr.id)) return {error:"tracks"};
     byId["$"+tr.id]=tr;
@@ -137,7 +152,7 @@ function validate(x){
       /* a voice track holds clips, not notes; a notes key with no track is a song this build cannot play */
       if(!owner || owner.kind==="voice") return {error:"notes"};
       list=p.notes[k];
-      if(!Array.isArray(list)) return {error:"notes"};
+      if(!Array.isArray(list) || list.length>NOTES_MAX) return {error:"notes"};
       for(var n=0;n<list.length;n++){
         note=list[n];
         if(!plain(note) || !int(note.t) || note.t<0 || note.t>=max ||
@@ -153,7 +168,8 @@ function validate(x){
   if(!Array.isArray(x.song) || x.song.length<1 || x.song.length>SONG_MAX) return {error:"song"};
   for(i=0;i<x.song.length;i++) if(!int(x.song[i]) || x.song[i]<0 || x.song[i]>=x.patterns.length) return {error:"song"};
   if(!Array.isArray(x.clips)) return {error:"clips"};
-  if(typeof x.name!=="string" || Array.from(x.name).length>NAME_MAX) return {error:"name"};
+  /* code points, not UTF-16 units; the length check first keeps a huge string from being copied into an array */
+  if(typeof x.name!=="string" || x.name.length>NAME_MAX*2 || Array.from(x.name).length>NAME_MAX) return {error:"name"};
   if(!num(x.updated) || x.updated<0) return {error:"updated"};
 
   return {song:clone(x)};
@@ -206,7 +222,9 @@ function events(song,p,fromTick,toTick){
   for(i=0;i<tracks.length;i++) place["$"+tracks[i].id]=i;
 
   var first=Math.floor(fromTick/P), last=Math.floor(toTick/P);
-  for(var loop=first;loop<=last;loop++){
+  /* one loop back too: an off-grid odd step (t up to P-1) swung by 0.75 can land in the next loop, so a range that
+     starts there must still see it. Its earlier events are below fromTick and are dropped by the test below. */
+  for(var loop=first-1;loop<=last;loop++){
     var base=loop*P;
     for(i=0;i<tracks.length;i++){
       var tr=tracks[i];
