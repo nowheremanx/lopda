@@ -278,7 +278,7 @@
         ".....000000....."
       ],
       "version": "1.0.0",
-      "description": "平放手机当罗盘，看今天喜神、财神、福神在哪个方向。旧历书上的说法，图个吉利。指南针的示范。",
+      "description": "平放手机当罗盘，看今天喜神、财神、福神和贵神在哪个方向。旧历书上的说法，图个吉利。指南针的示范。",
       "i18n": {
         "en": {
           "name": "LuckyWay",
@@ -291,8 +291,8 @@
         "motion"
       ],
       "path": "apps/luck-compass/index.html",
-      "sha256": "63dcfab377ce991436bfe86ac7c058f85f377af0b2f08ec2a12715ebbfde8641",
-      "bytes": 57613
+      "sha256": "03a176c976b0c3f8acbdeccd0b8b45ed3c07c13f57310cce019054b7ad3c6f14",
+      "bytes": 65997
     },
     {
       "spec": "lopda/1",

@@ -28,27 +28,29 @@ var LUCK = (function () {
     return { index: i, stem: s, branch: b, name: STEMS[s] + BRANCHES[b] };
   }
 
-  /* The one table used by 6tail's lunar library (default) and lunisolar, in degrees:
+  /* The five positions an old almanac lists together, in degrees:
      0 北, 45 东北, 90 东, 135 东南, 180 南, 225 西南, 270 西, 315 西北.
-     Rows are stems 甲..癸; columns are 喜神, 财神, 福神. The other 福神 school in
-     circulation (not used here) puts 福神 at 甲乙东南, 丙丁正东, 戊正北, 己正南,
-     庚辛西南, 壬西北, 癸正西. */
+     Rows are stems 甲..癸; columns are 喜神, 财神, 福神, 阳贵神, 阴贵神.
+     喜/财/福 match 6tail's LunarUtil.POSITION_XI/CAI/FU (default) and lunisolar;
+     阳贵/阴贵 match LunarUtil.POSITION_YANG_GUI / POSITION_YIN_GUI. The other
+     福神 school in circulation (not used here) puts 福神 at 甲乙东南, 丙丁正东,
+     戊正北, 己正南, 庚辛西南, 壬西北, 癸正西. */
   var GODS = [
-    [45, 45, 0],
-    [315, 45, 225],
-    [225, 225, 315],
-    [180, 225, 135],
-    [135, 0, 45],
-    [45, 0, 0],
-    [315, 90, 225],
-    [225, 90, 315],
-    [180, 180, 135],
-    [135, 180, 45]
+    [45, 45, 0, 225, 45],
+    [315, 45, 225, 225, 0],
+    [225, 225, 315, 270, 315],
+    [180, 225, 135, 315, 270],
+    [135, 0, 45, 45, 225],
+    [45, 0, 0, 0, 225],
+    [315, 90, 225, 180, 45],
+    [225, 90, 315, 45, 180],
+    [180, 180, 135, 90, 135],
+    [135, 180, 45, 135, 90]
   ];
 
   function gods(stem) {
     var row = GODS[((stem % 10) + 10) % 10];
-    return { xi: row[0], cai: row[1], fu: row[2] };
+    return { xi: row[0], cai: row[1], fu: row[2], yang: row[3], yin: row[4] };
   }
 
   /* the 45-degree sector a heading falls in; each sector reaches 22.5 degrees each way,
