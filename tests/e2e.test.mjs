@@ -4096,6 +4096,172 @@ test("pet: START opens the menu, B closes it, and 看看 / 纪念品箱 open fro
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
+test("pet: games - the play list opens each pack, the canvas moves at 20 fps, B returns, a finished round raises joy", { skip, timeout: 90000 }, async (t) => {
+  const { p, errors } = await page(t, { ...pw.devices["iPhone 13"], locale: "zh-CN", serviceWorkers: "block" });
+  await p.clock.install({ time: new Date(2026, 9, 11, 9, 0) });
+  await p.goto(base + "/runtime/?debug", { waitUntil: "networkidle" });
+  await p.waitForFunction(() => document.getElementById("savestate").textContent !== "启动中…");
+  /* count real 50 ms steps and keep the latest pack state, so 20 fps and steering are measured, not assumed */
+  await p.evaluate(() => {
+    window.__steps = 0;
+    window.__gameState = null;
+    window.LopdaPetPlay.GAMES.forEach((g) => {
+      const orig = g.step;
+      g.step = function (state, input, dt) {
+        window.__steps++;
+        const out = orig.call(g, state, input, dt);
+        window.__gameState = state;
+        return out;
+      };
+    });
+  });
+  const steps = () => p.evaluate(() => window.__steps);
+  const save = () => p.evaluate(() => LOPDA_DEBUG.pet.save());
+  const key = async (b) => { await p.evaluate((b) => { LOPDA_DEBUG.setButton(b, true); LOPDA_DEBUG.setButton(b, false); }, b); await p.waitForTimeout(90); };
+  const sig = () => p.evaluate(() => {
+    const c = document.getElementById("pet-cv"), d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data;
+    let h = 0;
+    for (let i = 0; i < d.length; i += 4) h = (Math.imul(h, 31) + d[i] + d[i + 1] * 3 + d[i + 2] * 7) | 0;
+    return h;
+  });
+  const tones = () => p.evaluate(() => {
+    const c = document.getElementById("pet-cv"), d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data;
+    const set = new Set();
+    for (let i = 0; i < d.length; i += 4) set.add([d[i], d[i + 1], d[i + 2], d[i + 3]].join(","));
+    return [...set];
+  });
+  const assertFourTones = async (where) => {
+    assert.deepEqual((await tones()).filter((c) => !PET_TONES.includes(c)), [], where + " uses only four tones");
+  };
+  await p.locator("#home .app", { hasText: "宠物" }).click();
+  await p.locator("#v-pet:not([hidden])").waitFor();
+  await p.evaluate(() => LOPDA_DEBUG.pet.hatch());
+  await p.waitForTimeout(150);
+  await p.keyboard.press("ArrowRight");                    /* 食物 -> 玩 */
+  await p.waitForTimeout(80);
+
+  /* 玩 opens a small vertical list of the three packs */
+  await key("a");
+  await p.waitForSelector("#pet-panel:not([hidden])");
+  const items = await p.$$eval("#pet-panel .pet-menu", (l) => l.map((x) => x.innerText.trim()));
+  assert.deepEqual(items, ["接东西", "弹球", "往上跳"]);
+  assert.equal(await p.locator("#pet-keys .sk-a span").innerText(), "开始");
+
+  /* catch: the 20 fps loop runs while visible, stops while hidden and resumes; the pet's x follows the keys */
+  await key("a");
+  assert.ok(await p.isHidden("#pet-panel"), "a running play pack shows the room canvas");
+  await p.evaluate(() => { window.__steps = 0; });
+  await p.waitForTimeout(1000);
+  const ran = await steps();
+  assert.ok(ran >= 10 && ran <= 35, `about 20 steps in a second: ${ran}`);
+  await p.evaluate(() => {
+    Object.defineProperty(document, "hidden", { value: true, configurable: true });
+    document.dispatchEvent(new Event("visibilitychange"));
+    window.__steps = 0;
+  });
+  await p.waitForTimeout(500);
+  assert.equal(await steps(), 0, "no steps while the page is hidden");
+  await p.evaluate(() => {
+    Object.defineProperty(document, "hidden", { value: false, configurable: true });
+    document.dispatchEvent(new Event("visibilitychange"));
+    window.__steps = 0;
+  });
+  await p.waitForTimeout(500);
+  const resumed = await steps();
+  assert.ok(resumed >= 5 && resumed <= 20, `the loop resumed: ${resumed} steps in half a second`);
+  const c0 = await sig();
+  const x0 = await p.evaluate(() => window.__gameState && window.__gameState.petX);
+  await p.keyboard.down("ArrowRight");
+  await p.waitForTimeout(400);
+  await p.keyboard.up("ArrowRight");
+  await p.keyboard.down("ArrowLeft");
+  await p.waitForTimeout(250);
+  await p.keyboard.up("ArrowLeft");
+  const x1 = await p.evaluate(() => window.__gameState && window.__gameState.petX);
+  assert.ok(x1 > x0, `the pet walked right (${x0} -> ${x1})`);
+  /* holding the right half of the play field also walks it */
+  const tb = await p.locator("#pet-cv").boundingBox();
+  const tx0 = x1;
+  await p.mouse.move(tb.x + tb.width * 0.8, tb.y + tb.height * 0.5);
+  await p.mouse.down();
+  await p.waitForTimeout(300);
+  const tx1 = await p.evaluate(() => window.__gameState && window.__gameState.petX);
+  await p.mouse.up();
+  assert.ok(tx1 > tx0, `holding the right half walks it too (${tx0} -> ${tx1})`);
+  assert.notEqual(await sig(), c0, "catch moves");
+  await assertFourTones("catch");
+  assert.equal(await p.locator("#pet-keys .sk-b span").innerText(), "退出");
+  await key("b");
+  assert.ok(await p.isHidden("#pet-panel"));
+  assert.equal(await p.locator("#pet-keys .sk-b span").innerText(), "返回", "B left the game for the room");
+  await p.evaluate(() => { window.__steps = 0; });
+  await p.waitForTimeout(300);
+  assert.equal(await steps(), 0, "B stopped the 20 fps loop");
+
+  /* bounce: A serves, the ball moves, B leaves */
+  await key("a");
+  await p.waitForSelector("#pet-panel:not([hidden])");
+  await p.keyboard.press("ArrowDown");
+  await p.waitForTimeout(80);
+  await key("a");
+  await p.waitForTimeout(200);
+  const b0 = await sig();
+  await key("a");                                          /* serve */
+  await p.keyboard.down("ArrowLeft");
+  await p.waitForTimeout(600);
+  await p.keyboard.up("ArrowLeft");
+  assert.notEqual(await sig(), b0, "bounce moves");
+  await assertFourTones("bounce");
+  await key("b");
+
+  /* climb: the pet jumps, the camera scrolls, steering moves it, B leaves */
+  await key("a");
+  await p.waitForSelector("#pet-panel:not([hidden])");
+  await p.keyboard.press("ArrowDown");
+  await p.keyboard.press("ArrowDown");
+  await p.waitForTimeout(80);
+  await key("a");
+  await p.waitForTimeout(250);
+  const m0 = await sig();
+  const mx0 = await p.evaluate(() => window.__gameState && window.__gameState.pet.x);
+  await p.keyboard.down("ArrowRight");
+  await p.waitForTimeout(500);
+  await p.keyboard.up("ArrowRight");
+  const mx1 = await p.evaluate(() => window.__gameState && window.__gameState.pet.x);
+  assert.ok(mx1 > mx0, `climb steers right (${mx0} -> ${mx1})`);
+  assert.notEqual(await sig(), m0, "climb moves");
+  await assertFourTones("climb");
+  await key("b");
+
+  /* a real no-input catch round ends by itself, then the score and joy are on screen and in the save */
+  await key("a");                                          /* 玩 */
+  await p.waitForSelector("#pet-panel:not([hidden])");
+  await key("a");                                          /* catch */
+  const before = await save();
+  await p.evaluate(() => { window.__gameState = null; });
+  await p.waitForFunction(() => window.__gameState && window.__gameState.done, null, { timeout: 12000 });
+  await p.waitForTimeout(150);
+  const st = await p.evaluate(() => ({ score: window.__gameState.score, joy: window.__gameState.joy }));
+  const panel = await p.locator("#pet-panel").innerText();
+  assert.match(panel, new RegExp("得分 " + st.score));
+  assert.match(panel, /再来/);
+  assert.match(panel, st.joy === 2 ? /\+2/ : /\+1/);
+  const after = await save();
+  assert.equal(after.today.played, before.today.played + 1, "the real round counted once");
+  assert.equal(after.joy, Math.min(5, before.joy + st.joy), "the real round's joy was applied, once");
+  await key("a");                                          /* 再来: a fresh round */
+  assert.ok(await p.isHidden("#pet-panel"), "A starts the same pack again");
+  await key("b");
+
+  /* during the day's outing, A on 玩 opens nothing and does not freeze the outing */
+  await p.evaluate(() => LOPDA_DEBUG.pet.forceOuting());
+  await p.waitForTimeout(100);
+  await key("a");
+  assert.ok(await p.isHidden("#pet-panel"), "A during the outing does not open the play list");
+  assert.equal(await p.evaluate(() => LOPDA_DEBUG.pet.save().today.outPhase), "out", "the outing is still running");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
 test("pet: the AI souvenir is made and saved with the pet screen never opened; opening plays the short walk-back", { skip, timeout: 120000 }, async (t) => {
   const { p, errors } = await page(t, { locale: "zh-CN", serviceWorkers: "block", viewport: { width: 390, height: 844 } });
   await p.clock.install({ time: new Date(2026, 9, 11, 9, 0) });

@@ -6,7 +6,9 @@
  * Screen: the room is an 81 x 60 canvas at 4 CSS pixels a pixel (324 x 240), then five 44 px icon targets and the
  * soft keys; 328 px of content, so it fits the 331 x 359 LCD with nothing to scroll. Everything on the canvas is
  * putImageData from a Uint8Array of tone indices: never drawImage after putImageData (Safari swaps red and blue).
- * Sub-screens (food, play, the START menu, look, box, word) open over the room at the same 324 x 240, on paper with ink text.
+ * Sub-screens (food, the play pack list, the START menu, look, box, word) open over the room at the same 324 x 240,
+ * on paper with ink text. A play pack runs in the room canvas at 20 fps only while its screen is visible (50 ms
+ * fixed ticks in petplay.js), from the same putImageData buffer as the room; leaving, pausing or HOME stops it.
  *
  * Storage: data/users/local/pet (design.md 8 plus petsim's lastMeal, awakeHunger, awakeJoy, today, seenUse and aiUse;
  * boxSeen and today's pick/outing phase/remaining/hour/ai flag, and outSouv — the souvenir a background trip is
@@ -30,7 +32,7 @@
 "use strict";
 
 var LP=window.LP, $=LP.$, S=LP.S, tr=LP.tr, I18N=LP.I18N;
-var Pet=window.LopdaPet, Art=window.LopdaPetArt, L=window.LopdaLunar;
+var Pet=window.LopdaPet, Art=window.LopdaPetArt, Play=window.LopdaPetPlay, L=window.LopdaLunar;
 
 var HOUR=3600000, DAY=86400000, SCALE=4;
 var ROOM_W=81, ROOM_H=60;
@@ -63,7 +65,8 @@ var P={
   sub:null, sel:0, menuSel:0, frame:0,
   anim:0, hold:0, roomHold:0, holdFired:false,
   eggMs:0, action:null, actionUntil:0, heartUntil:0,
-  washUntil:0, washStart:0, flash:null, outing:null, foodSel:0, play:null, boxPage:0,
+  washUntil:0, washStart:0, flash:null, outing:null, foodSel:0, boxPage:0,
+  game:null, gameSel:0, gameTimer:0, gameLabel:"", gameHeld:{left:false,right:false,a:false}, gamePress:{left:false,right:false,a:false}, gameTouch:null,
   confirmStage:0, panelKey:"",
   saveTimer:0, lastWants:null, bringing:false,
   pickSeq:0, wordWord:"", wordMeaning:null, wordBusy:false, aiJob:null,
@@ -934,7 +937,8 @@ function hatchNow(silent){
 function restartPet(){
   P.save=freshSave();
   P.save.boxSeen=P.souv.length;              /* the box is kept and already seen */
-  P.eggMs=0; P.sub=null; P.confirmStage=0; P.action=null; P.outing=null; P.play=null;
+  P.eggMs=0; P.sub=null; P.confirmStage=0; P.action=null; P.outing=null; P.game=null;
+  stopGameTimer();
   P.lastWants=null; P.boxPage=0; P.bringing=false;
   stopAiJob();
   saveNow(); beep("ok"); LP.toast(tr("pet.restart.done")); renderKeys(); render();
@@ -949,9 +953,77 @@ function openBox(){
   renderKeys(); beep("tap"); render();
 }
 function openFood(){ P.sub="food"; P.foodSel=0; renderKeys(); beep("tap"); render(); }
-function openPlay(){
-  P.sub="play"; P.play={round:1,wins:0,side:0,last:null,done:false};
-  renderKeys(); beep("tap"); render();
+function openGames(){
+  if(P.outing) return;                       /* the pet is out: the icon does nothing, and so does A */
+  stopGameTimer();
+  P.sub="games"; P.gameSel=0; P.game=null; renderKeys(); beep("tap"); render();
+}
+/* A play pack runs on the room canvas: the 20 fps interval exists only while this screen is visible. */
+function gameById(id){
+  var list=(Play && Play.GAMES)||[];
+  for(var i=0;i<list.length;i++) if(list[i].id===id) return list[i];
+  return null;
+}
+function gameState(){ return P.game && P.game.state ? P.game.state : null; }
+function gameDone(){ var st=gameState(); return !!(st && st.done); }
+function startGameTimer(){ stopGameTimer(); P.gameTimer=setInterval(gameTick,50); }
+function startGame(id){
+  if(P.outing) return;
+  var g=gameById(id) || ((Play && Play.GAMES)||[])[0];
+  if(!g) return;
+  stopGameTimer();
+  P.sub="game";
+  P.game={id:g.id, state:g.init((now()>>>0)), applied:false};
+  P.gameHeld={left:false,right:false,a:false};
+  P.gamePress={left:false,right:false,a:false};
+  P.gameLabel="";
+  silenceWeather();
+  beep("tap"); renderKeys(); render();
+  startGameTimer();
+}
+function gameTick(){
+  if(!isOpen() || document.hidden){ stopGameTimer(); return; }
+  if(P.sub!=="game" || !P.game) return;
+  var g=gameById(P.game.id), st=gameState();
+  if(!g || !st || st.done) return;
+  var input={left:P.gameHeld.left, right:P.gameHeld.right, a:P.gameHeld.a,
+    press:{left:P.gamePress.left, right:P.gamePress.right, a:P.gamePress.a}};
+  P.gamePress={left:false,right:false,a:false};
+  g.step(st,input,50);
+  gameSounds(st.events);
+  if(st.done){
+    stopGameTimer();
+    if(!P.game.applied){ P.game.applied=true; applyGameJoy(st); }
+    renderKeys();
+  } else {
+    /* the only label that changes during play: 发球 until the ball is in the air */
+    var lab=(P.game.id==="bounce" && !st.ball) ? "serve" : "";
+    if(lab!==P.gameLabel){ P.gameLabel=lab; renderKeys(); }
+  }
+  render();
+}
+/* the packs name moments, the program names the short original sounds from the four-tone chip */
+function gameSounds(events){
+  (events||[]).forEach(function(e){
+    if(e==="catch" || e==="serve") beep("coin");
+    else if(e==="return") beep("hit");
+    else if(e==="land") beep("tick");
+  });
+}
+function applyGameJoy(st){
+  if(!P.save || !st) return;
+  P.save=Pet.play(P.save,st.joy,dayKey(now()));
+  P.action="happy"; P.actionUntil=now()+2500; P.heartUntil=now()+2500;
+  beep(st.joy>1?"win":"ok"); saveSoon();
+}
+function stopGameTimer(){ if(P.gameTimer){ clearInterval(P.gameTimer); P.gameTimer=0; } }
+function exitGame(){
+  stopGameTimer();
+  P.game=null;
+  P.gameHeld={left:false,right:false,a:false};
+  P.gamePress={left:false,right:false,a:false};
+  P.gameTouch=null;
+  P.sub=null; beep("tap"); renderKeys(); render();
 }
 function openRestart(){
   if(P.sub!=="look") return;
@@ -970,22 +1042,6 @@ function confirmNext(){
     /* the look screen's A is the long press; a tap alone does nothing */
   }
 }
-function playRound(){
-  var pl=P.play; if(!pl || pl.done) return;
-  var guess=pl.side?"right":"left", look=Math.random()<0.5?"left":"right";
-  pl.last={guess:guess,look:look,hit:guess===look};
-  if(pl.last.hit) pl.wins++;
-  if(pl.round>=5){
-    P.save=Pet.play(P.save,pl.wins,dayKey(now()));
-    pl.done=true; pl.result=pl.wins>=3?2:1;
-    P.action="happy"; P.actionUntil=now()+2500; P.heartUntil=now()+2500;
-    beep(pl.wins>=3?"win":"ok"); saveSoon();
-  } else {
-    pl.round++;
-    beep("tick");
-  }
-  render();
-}
 function pasteSouvenir(){
   var s=P.souv[P.boxPage];
   if(!s || !LP.notes) return;
@@ -998,7 +1054,13 @@ function pickFood(kind){ feed(kind==="snack"?"snack":"meal"); }
    horizontal but a thumb on the cross may use either pair */
 function nav(dir){
   if(P.sub==="food"){ P.foodSel=Math.max(0,Math.min(1,P.foodSel+dir)); beep("move"); render(); return; }
-  if(P.sub==="play"){ if(P.play && !P.play.done){ P.play.side=1-P.play.side; beep("move"); render(); } return; }
+  if(P.sub==="games"){
+    var list=(Play && Play.GAMES)||[];
+    if(!list.length) return;
+    P.gameSel=(P.gameSel+dir+list.length)%list.length;
+    beep("move"); render(); return;
+  }
+  if(P.sub==="game") return;
   if(P.sub==="box"){
     if(!P.souv.length) return;
     P.boxPage=Math.max(0,Math.min(P.souv.length-1,P.boxPage+dir));
@@ -1018,7 +1080,7 @@ function useSelected(){
   if(!P.save || isEgg()) return;
   switch(P.sel){
     case 0: openFood(); break;
-    case 1: openPlay(); break;
+    case 1: openGames(); break;
     case 2: washPet(); break;
     case 3: toggleLight(); break;
     case 4: callPet(); break;
@@ -1029,9 +1091,17 @@ function pressA(){
   if(!P.save) return;
   if(isEgg()) return;
   if(P.sub==="food"){ pickFood(P.foodSel?"snack":"meal"); return; }
-  if(P.sub==="play"){
-    if(P.play && P.play.done){ P.sub=null; renderKeys(); render(); return; }
-    playRound(); return;
+  if(P.sub==="games"){
+    var list=(Play && Play.GAMES)||[], g=list[P.gameSel];
+    if(g) startGame(g.id);
+    return;
+  }
+  if(P.sub==="game"){
+    if(!P.game) return;
+    if(gameDone()){ startGame(P.game.id); return; }     /* 再来: the same pack, a fresh round */
+    P.gamePress.a=true;
+    if(P.game.id==="bounce") beep("tick");
+    return;
   }
   if(P.sub==="menu"){ chooseMenuItem(P.menuSel); return; }
   if(P.sub==="look"){ confirmNext(); return; }
@@ -1042,8 +1112,9 @@ function pressA(){
   useSelected();
 }
 function back(){
+  if(P.sub==="game"){ exitGame(); return; }
   if(P.sub){
-    P.sub=null; P.confirmStage=0; P.play=null;
+    P.sub=null; P.confirmStage=0;
     P.wordWord=""; P.wordMeaning=null; P.wordBusy=false;
     beep("tap"); renderKeys(); render();
   }
@@ -1324,6 +1395,16 @@ function renderRoom(){
   if(P.washUntil>now()) drawSweep();
   paintRoomBuffer();
 }
+/* a play pack paints the same 81 x 60 buffer as the room; the pack's own poses come through Art.pose */
+function renderGame(){
+  initCanvas();
+  if(!ctx || !P.game) return;
+  var g=gameById(P.game.id), st=gameState();
+  if(!g || !st) return;
+  var pack=packOf(P.save), marks=P.save ? markNames(P.save,pack) : {};
+  g.draw(st,buf,ROOM_W,ROOM_H,pack,function(view,name){ return Art.pose(pack,marks,view,name); });
+  paintRoomBuffer();
+}
 
 /* ---------- icons ---------- */
 /* every icon is mid when nothing is special, ink when it is lit (信 with a pick, 呼唤 when it wants something) and
@@ -1382,9 +1463,10 @@ function boxes(n){
   return wrap;
 }
 function panelKey(){
-  var s=P.save||{};
+  var s=P.save||{}, st=gameState();
   return [P.sub,P.foodSel,P.boxPage,P.menuSel,P.confirmStage,I18N.lang,P.souv.length,activePick()?1:0,
-    JSON.stringify(P.play),P.wordWord,P.wordMeaning,P.wordBusy,
+    P.gameSel,P.game?P.game.id:"",st?st.score:-1,st&&st.done?1:0,P.game&&P.game.applied?1:0,
+    P.wordWord,P.wordMeaning,P.wordBusy,
     s.stage,s.hunger,s.joy,s.opened,s.born,s.close,s.travel,s.light].join("|");
 }
 function buildMenu(panel){
@@ -1411,28 +1493,26 @@ function buildFood(panel){
   });
   panel.appendChild(el("p","pet-phint",tr("pet.food.hint")));
 }
-function buildPlay(panel){
-  var pl=P.play||{round:1,wins:0,side:0,last:null,done:false};
-  panel.appendChild(el("p","pet-ptitle",tr("pet.play.title")));
-  panel.appendChild(el("p","pet-pinfo",tr("pet.play.round",{n:Math.min(5,pl.round)})));
-  if(pl.done){
-    panel.appendChild(el("p","pet-presult",pl.result>=2?tr("pet.play.joy2"):tr("pet.play.joy1")));
-    panel.appendChild(el("p","pet-phint",tr("pet.play.close")));
-    return;
-  }
-  var row=el("div","pet-leftright");
-  [["left",tr("pet.play.left")],["right",tr("pet.play.right")]].forEach(function(o,i){
-    var b=el("button","pet-choice"+(pl.side===i?" on":""),o[1]);
+function buildGames(panel){
+  panel.appendChild(el("p","pet-ptitle",tr("pet.game.title")));
+  var list=(Play && Play.GAMES)||[];
+  list.forEach(function(g,i){
+    var b=el("button","pet-menu"+(i===P.gameSel?" on":""));
     b.type="button";
-    b.onclick=function(){ pl.side=i; playRound(); };
-    row.appendChild(b);
+    b.appendChild(el("span","",tr(g.labelKey)));
+    b.onclick=function(){ P.gameSel=i; startGame(g.id); };
+    panel.appendChild(b);
   });
-  panel.appendChild(row);
-  if(pl.last){
-    panel.appendChild(el("p","pet-plook",tr("pet.play.looked",{side:tr(pl.last.look==="left"?"pet.play.left":"pet.play.right")})));
-    panel.appendChild(el("p","pet-presult",pl.last.hit?tr("pet.play.hit"):tr("pet.play.miss")));
-  }
-  panel.appendChild(el("p","pet-phint",tr("pet.play.hint")));
+  panel.appendChild(el("p","pet-phint",tr("pet.game.hint")));
+}
+function buildGameOver(panel){
+  var st=gameState(), g=P.game ? gameById(P.game.id) : null;
+  if(!st) return;
+  panel.appendChild(el("p","pet-ptitle",g?tr(g.labelKey):tr("pet.game.title")));
+  panel.appendChild(el("p","pet-pinfo",tr("pet.game.over")));
+  panel.appendChild(el("p","pet-presult",tr("pet.game.score",{n:st.score})));
+  panel.appendChild(el("p","pet-presult",tr(st.joy>=2?"pet.game.joy2":"pet.game.joy1")));
+  panel.appendChild(el("p","pet-phint",tr("pet.game.again")));
 }
 function buildLook(panel){
   var s=P.save||{}, age=Math.max(0,Math.floor((now()-(+s.born||now()))/DAY));
@@ -1478,13 +1558,15 @@ function renderPanel(){
   var panel=$("pet-panel");
   if(!panel) return;
   if(!P.sub){ panel.hidden=true; P.panelKey=""; return; }
+  if(P.sub==="game" && !gameDone()){ panel.hidden=true; P.panelKey=""; return; }
   panel.hidden=false;
   var key=panelKey();
   if(key===P.panelKey) return;
   P.panelKey=key;
   panel.textContent="";
   if(P.sub==="food") buildFood(panel);
-  else if(P.sub==="play") buildPlay(panel);
+  else if(P.sub==="games") buildGames(panel);
+  else if(P.sub==="game") buildGameOver(panel);
   else if(P.sub==="menu") buildMenu(panel);
   else if(P.sub==="look") buildLook(panel);
   else if(P.sub==="box") buildBox(panel);
@@ -1500,21 +1582,26 @@ function renderPanel(){
 
 /* ---------- the screen ---------- */
 function render(){
-  renderRoom();
-  renderIcons();
+  if(P.sub==="game" && P.game) renderGame();
+  else { renderRoom(); renderIcons(); }
   renderPanel();
   var away=$("pet-away");
   if(away){
     var trv=!!(P.save && P.save.travel);
-    away.hidden=!trv;
+    away.hidden=!trv || P.sub==="game";
     if(trv) away.textContent=tr("pet.away")+" · "+tr("pet.away.hint");
   }
-  syncWeatherSound();
+  if(P.sub==="game") silenceWeather(); else syncWeatherSound();
 }
 /* The main screen's A names what the selected icon will do; a sub-screen keeps its own A. */
 function aKeyLabel(){
   if(P.sub==="food") return "pet.sk.pick";
-  if(P.sub==="play") return "pet.sk.guess";
+  if(P.sub==="games") return "pet.sk.start";
+  if(P.sub==="game"){
+    if(gameDone()) return "pet.game.again";
+    var st=gameState();
+    return P.game && P.game.id==="bounce" && st && !st.ball ? "pet.game.serve" : "";
+  }
   if(P.sub==="menu") return "pet.sk.open";
   if(P.sub==="look") return "pet.sk.hold";
   if(P.sub==="box") return "pet.sk.paste";
@@ -1534,10 +1621,11 @@ function renderKeys(){
   var wrap=$("pet-keys");
   if(!wrap) return;
   var label=aKeyLabel(), egg=isEgg();
+  var inGame=P.sub==="game" && !gameDone();
   LP.softkeys(wrap,{
     select:null,                           /* reserved for switching rooms when more species come (visits) */
     start:{label:egg ? "" : tr("pet.sk.menu"),disabled:!!P.sub || egg,fn:openMenu},
-    b:{label:tr("sk.back"),fn:back},
+    b:{label:tr(inGame?"pet.game.exit":"sk.back"),fn:back},
     a:{label:label?tr(label):"",disabled:egg,fn:function(){
       if(P.holdFired){ P.holdFired=false; clearHold(); return; }
       clearHold(); pressA();
@@ -1570,6 +1658,7 @@ function startTimer(){
 function stopTimer(){ if(P.anim){ clearInterval(P.anim); P.anim=0; } }
 function tick(){
   if(!isOpen() || document.hidden) return;
+  if(P.sub==="game"){ render(); return; }      /* the play pack's own 20 fps tick is the only clock it needs */
   P.frame=1-P.frame;
   if(P.flash){ P.flash.left--; if(P.flash.left<=0) P.flash=null; }
   var t=now();
@@ -1608,10 +1697,13 @@ function leave(){
   if(!P.inView) return;
   P.inView=false;
   persistOuting();
-  stopTimer(); clearHold();
+  stopTimer(); stopGameTimer(); clearHold();
   if(P.roomHold){ clearTimeout(P.roomHold); P.roomHold=0; }
   P.holdFired=false;
-  P.sub=null; P.confirmStage=0; P.play=null; P.outing=null;
+  P.sub=null; P.confirmStage=0; P.game=null; P.outing=null;
+  P.gameHeld={left:false,right:false,a:false};
+  P.gamePress={left:false,right:false,a:false};
+  P.gameTouch=null;
   P.wordWord=""; P.wordMeaning=null; P.wordBusy=false;
   stopAiJob();
   silenceWeather();
@@ -1629,7 +1721,7 @@ function pause(){
   if(P.roomHold){ clearTimeout(P.roomHold); P.roomHold=0; }
   P.holdFired=false; clearHold();
   persistOuting();
-  stopTimer(); saveNow();
+  stopTimer(); stopGameTimer(); saveNow();
   stopAiJob();
   silenceWeather();
   stopJingle();
@@ -1638,6 +1730,7 @@ function resume(){
   P.resumeOuting=true;
   if(isOpen()){
     refreshTime(); render(); startTimer(); refreshUsage();
+    if(P.sub==="game" && P.game && !gameDone()) startGameTimer();
   } else {
     backgroundDay();
   }
@@ -1719,12 +1812,49 @@ function bindRoom(){
   ["pointerup","pointercancel","pointerleave"].forEach(function(t){
     cv.addEventListener(t,function(){ if(P.roomHold){ clearTimeout(P.roomHold); P.roomHold=0; } });
   });
+  /* The play field itself moves catch and climb: hold the left or right half, in addition to the chin pad. */
+  cv.style.touchAction="none";
+  function gameSide(e){
+    var r=cv.getBoundingClientRect();
+    var left=e.clientX < r.left + r.width/2;
+    P.gameHeld.left=left; P.gameHeld.right=!left;
+  }
+  function gameTouch(e){
+    if(document.hidden || !isOpen() || P.sub!=="game" || !P.game || gameDone()) return;
+    P.gameTouch=e.pointerId;
+    gameSide(e);
+    try{ if(cv.setPointerCapture) cv.setPointerCapture(e.pointerId); }catch(err){}
+    e.preventDefault();
+  }
+  function gameTouchEnd(e){
+    if(P.gameTouch==null || (e && e.pointerId!==P.gameTouch)) return;
+    P.gameTouch=null;
+    P.gameHeld.left=false; P.gameHeld.right=false;
+  }
+  cv.addEventListener("pointerdown",gameTouch);
+  cv.addEventListener("pointermove",function(e){
+    if(P.gameTouch==null || e.pointerId!==P.gameTouch) return;
+    gameSide(e);
+    e.preventDefault();
+  });
+  ["pointerup","pointercancel","pointerleave"].forEach(function(t){ cv.addEventListener(t,gameTouchEnd); });
   cv.addEventListener("contextmenu",function(e){ e.preventDefault(); });
 }
 bindRoom();
+/* normal boots also get pause/resume from core; this keeps a game's 20 fps loop stopped in nostore mode too */
+document.addEventListener("visibilitychange",function(){
+  if(document.hidden){ stopGameTimer(); return; }
+  if(P.inView && isOpen() && P.sub==="game" && P.game && !gameDone()) startGameTimer();
+});
 
 LP.padRoute("pet",function(b,down){
   if(!isOpen()) return false;
+  if(P.sub==="game"){
+    if(b==="a"){ if(down) pressA(); return true; }
+    if(b==="b"){ if(down) exitGame(); return true; }
+    if(b==="left" || b==="right"){ P.gameHeld[b]=!!down; return true; }
+    return true;                                  /* up/down/start/select do nothing in a play pack */
+  }
   if(b==="a"){
     if(down){ clearHold(); startHold(); }
     else {
@@ -1851,6 +1981,18 @@ if(/[?&]debug\b/.test(location.search)){
       P.weatherOverride=(w==="sun"||w==="cloud"||w==="rain"||w==="snow"||w==="wind") ? w : null;
       render();
       return weatherNow();
+    },
+    finishGame:function(score){
+      if(P.sub!=="game" || !P.game) return null;
+      var st=gameState();
+      if(!st) return null;
+      st.score=Math.max(0,Math.floor(+score||0));
+      st.done=true;
+      st.joy=Play && Play.joyFor ? Play.joyFor(P.game.id,st.score) : 1;
+      stopGameTimer();
+      if(!P.game.applied){ P.game.applied=true; applyGameJoy(st); }
+      renderKeys(); render();
+      return st;
     },
     save:function(){ return P.save ? JSON.parse(JSON.stringify(P.save)) : null; }
   };

@@ -7,7 +7,7 @@
  * share Cache Storage with the real site, and each worker only ever deletes its own scope's old caches. */
 var VERSION = "lopda-v0.37.0";
 var CACHE = VERSION + " " + self.registration.scope;
-var SHELL = ["./", "index.html", "lopda.css", "strings.js", "platform.js", "lunar.js", "stardict.js", "wordlist.js", "bookparse.js", "textsel.js", "chip.js", "sensors.js", "speech.js", "lenses.js", "finder.js", "negative.js", "develop.js", "notetext.js", "petsim.js", "petart.js", "zip.js", "backup.js", "ai.js", "core.js",
+var SHELL = ["./", "index.html", "lopda.css", "strings.js", "platform.js", "lunar.js", "stardict.js", "wordlist.js", "bookparse.js", "textsel.js", "chip.js", "sensors.js", "speech.js", "lenses.js", "finder.js", "negative.js", "develop.js", "notetext.js", "petsim.js", "petart.js", "petplay.js", "zip.js", "backup.js", "ai.js", "core.js",
   "apps/notes.js", "apps/calendar.js", "apps/dict.js", "apps/reader.js", "apps/camera.js", "apps/darkroom.js", "apps/cart.js", "apps/pet.js", "apps/snap.js", "apps/store.js", "apps/scripts-templates.js", "apps/scripts.js", "apps/settings.js", "boot.js", "../sdk/pad-shim.js",
   "fonts/fonts.css", "vendor/holiday-cn/2026.json",
   "vendor/ecdict/ecdict.ifo", "vendor/ecdict/ecdict.idx", "vendor/ecdict/ecdict.dict.dz", "vendor/ecdict/ecdict.lemma.gz", "vendor/ecdict/ecdict.words.gz",

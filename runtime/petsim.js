@@ -28,7 +28,7 @@
  *   openDay(save, dayKey, counts) counts a day opened and grows baby -> child -> adult; counts feeds adultForm
  *   adultForm(counts, species)   book / walk / scholar / diary / monster / plain
  *   feed(save, kind, now, dayKey)      "meal" or "snack"; the 4th snack in a day burps (today.burp)
- *   play(save, wins, dayKey)     >= 3 of 5 right: joy +2, else +1
+ *   play(save, joy, dayKey)      joy +1 or +2 as the play pack ended (clamped to 1-2)
  *   wash(save) / pat(save, dayKey) / setLight(save, on)
  *   wants(save)                  "food", "wash" or null, for the call icon
  *   outingToday(save, dayKey)    {hour} or null; the caller stores the hour in today.out
@@ -322,11 +322,12 @@ function feed(save,kind,now,key){
   s.close=num(s.close)+1;
   return s;
 }
-function play(save,wins,key){
+function play(save,joy,key){
   var s=clone(save);
   if(!s) return s;
   var sp=speciesOf(s), t=ensureToday(s,key);
-  s.joy=Math.min(sp.joyMax,num(s.joy)+(num(wins)>=3?2:1));
+  var gain=clampInt(joy,1,2);
+  s.joy=Math.min(sp.joyMax,num(s.joy)+gain);
   t.played++;
   s.close=num(s.close)+1;
   return s;

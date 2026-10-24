@@ -423,10 +423,12 @@ test("meal: hunger +2 at most 5 and lastMeal set; pats count 3 a day and reset",
 test("play, wash, light: joy in range, mess cleared, close raised, input untouched", () => {
   const s = { ...base(), joy: 4, mess: 2 };
   const before = plain(s);
-  assert.equal(P.play(s, 3).joy, 5);
   assert.equal(P.play(s, 2).joy, 5);
-  assert.equal(P.play({ ...s, joy: 0 }, 5).joy, 2);
-  assert.equal(P.play({ ...s, joy: 0 }, 2).joy, 1);
+  assert.equal(P.play(s, 1).joy, 5);
+  assert.equal(P.play({ ...s, joy: 0 }, 2).joy, 2);
+  assert.equal(P.play({ ...s, joy: 0 }, 1).joy, 1);
+  assert.equal(P.play({ ...s, joy: 0 }, 9).joy, 2, "the amount is clamped to +2");
+  assert.equal(P.play({ ...s, joy: 0 }, 0).joy, 1, "the amount is clamped to +1");
   assert.equal(P.wash(s).mess, 0);
   assert.equal(P.setLight(s, false).light, false);
   assert.equal(P.setLight(s, false).close, s.close + 1);

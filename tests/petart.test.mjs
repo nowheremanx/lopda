@@ -300,6 +300,32 @@ test("drawRoom: night and season change only the window", () => {
   }
 });
 
+test("poses: every standard pose exists for every mark combination, 16 x 16, only .kdmp", () => {
+  assert.deepEqual(Object.keys(A.POSE_NAMES).sort(), ["front", "side"]);
+  assert.deepEqual([...A.POSE_NAMES.front], ["idle", "happy", "sad", "jump", "fall", "catch"]);
+  assert.deepEqual([...A.POSE_NAMES.side], ["walk1", "walk2", "jump", "flap1", "flap2"]);
+  for (const view of Object.keys(A.POSE_NAMES)) {
+    assert.deepEqual(Object.keys(P.poses[view]).sort(), [...A.POSE_NAMES[view]].sort(), `the pack provides every ${view} pose`);
+    for (const name of A.POSE_NAMES[view]) for (const ant of P.marks.ant) for (const pat of P.marks.pat) for (const eye of P.marks.eye) {
+      assertGrid(`${view}/${name} ${ant}/${pat}/${eye}`, A.pose(P, { ant, pat, eye }, view, name), 16, 16);
+    }
+  }
+  /* the marks show in the side view too, and every front pose is its own picture */
+  assert.notDeepEqual(A.pose(P, { ant: "ball", pat: "dot", eye: "dot" }, "side", "walk1"),
+    A.pose(P, { ant: "fork", pat: "stripe", eye: "big" }, "side", "walk1"));
+  const pictures = new Set(A.POSE_NAMES.front.map((n) => A.pose(P, {}, "front", n).join("\n")));
+  assert.equal(pictures.size, A.POSE_NAMES.front.length, "the six front poses differ");
+});
+
+test("mirror: reverses every row, twice is the original", () => {
+  const g = A.pose(P, { ant: "bent", pat: "trace", eye: "big" }, "side", "walk2");
+  const m = A.mirror(g);
+  assert.equal(m.length, 16);
+  for (let r = 0; r < 16; r++) assert.equal(m[r], [...g[r]].reverse().join(""), `row ${r}`);
+  assert.deepEqual(A.mirror(m), g);
+  assert.equal(A.mirror(null), null);
+});
+
 test("blit and darken are bounded and map the four tones", () => {
   const buf = new Uint8Array(5 * 4).fill(3);
   A.blit(buf, 5, 4, ["kd", "mp"], 1, 1);
