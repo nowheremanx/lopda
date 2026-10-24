@@ -68,7 +68,7 @@
 4. 音色和效果做成登记表（`id → 构造函数`），加一种乐器就是加一项。
 5. 工程带格式版本号 `v`；新版读得了旧工程，太新的拒收（同备份的规则）。
 
-存储：工程文档 `studio/<id>`（{v, name, bpm, key, swing, tape, tracks, song, updated}）；人声片段在 `LopdaPlatform.files`
+存储：工程文档 `studio/items/<id>`（{v, name, bpm, key, swing, tape, tracks, song, updated}）；人声片段在 `LopdaPlatform.files`
 （单声道 16 kHz μ-law，3 分钟约 3 MB）。都自动进整机备份。录音**边录边分块写入**，被来电、锁屏打断时保留已录部分。
 
 ## 4. 录音
@@ -197,13 +197,13 @@ iPhone，iOS 18.7，2026-10-24，测试页 PR #101。两轮：外放（Safari）
 ### 11.3 数据（第 3 节的五条落到 1a）
 
 ```js
-// data/users/local/studio/<id>
+// data/users/local/studio/items/<id>   (文档路径要偶数段，所以工程在 studio 文档的 items 集合里)
 { v: 1, name: "", bpm: 82, key: 9, scale: "minor-penta", swing: 0.55, tape: 2, kit: "soft",
   tracks: [ {id:"drums", kind:"drum"}, {id:"bass", kind:"note"}, {id:"chords", kind:"chord"},
             {id:"melody", kind:"note"}, {id:"voice", kind:"voice"} ],
   patterns: [ { len: 16, notes: { drums: [ {t:0, len:24, key:"kick", vel:1}, ... ], bass: [], chords: [], melody: [] } } ],
   song: [0], clips: [], updated: 0 }
-// data/users/local/studio-meta  { current: "<id>", toured: {rhythm: true}, hushTip: true }
+// data/users/local/studio  { current: "<id>", toured: {rhythm: true}, hushTip: true }
 ```
 
 - 时间单位 tick，每拍 96（`TPB`），一步 24（`STEP`），一个 pattern 16 步。鼓的 `key` 是 `"kick" | "snare" | "hat" | "perc"`。

@@ -28,7 +28,7 @@ var BASE="data/users/local/studio", LOOKAHEAD=0.1, LOOP_MS=25, SAVE_MS=1000;
 
 var T={
   song:null, id:"", meta:null,
-  refs:null, loading:null,
+  refs:null, loading:null, loaded:false, metaOk:false,
   dirty:false, saveTimer:0,
   drum:"kick", focus:0, kb:false,
   sheet:"", built:false,
@@ -51,13 +51,14 @@ function refs(){
 }
 function saveMeta(){
   var r=refs();
-  if(!r || !T.meta) return;
+  /* nothing has been read, or the read failed: writing here could erase the real meta */
+  if(!r || !T.meta || !T.metaOk) return;
   /* started here and now: a HOME straight after a change still lands it (a deferred write can lose the race with the page) */
   r.set.set(T.meta).then(null,function(e){ toast(tr("common.savefail",{code:(e&&e.code)||tr("common.unknown")})); });
 }
 function writeItem(data){
   var r=refs();
-  if(!r) return;
+  if(!r || !T.id || !T.metaOk) return;
   r.items.doc(T.id).set(data).then(null,function(e){
     T.dirty=true;
     toast(tr("common.savefail",{code:(e&&e.code)||tr("common.unknown")}));
@@ -67,7 +68,7 @@ function flush(){
   if(T.saveTimer){ clearTimeout(T.saveTimer); T.saveTimer=0; }
   if(!T.dirty || !T.song) return;
   var r=refs();
-  if(!r) return;
+  if(!r || !T.metaOk) return;
   T.dirty=false;
   var data=JSON.parse(JSON.stringify(T.song));
   data.updated=Date.now();
@@ -82,7 +83,7 @@ function touch(){
 /* a tape for the handheld to play, saved under a new id (and pointed at) unless storage is off */
 function freshSong(tell){
   T.id=LP.uid();
-  T.song=SONGS.newSong(Date.now());
+  setSong(SONGS.newSong(Date.now()));
   T.dirty=false;
   if(!T.meta) T.meta={toured:{},hushTip:false};
   T.meta.current=T.id;
@@ -98,18 +99,21 @@ function freshSong(tell){
 function ensureLocal(){
   if(T.song) return;
   T.id=LP.uid();
-  T.song=SONGS.newSong(Date.now());
+  setSong(SONGS.newSong(Date.now()));
   if(!T.meta) T.meta={toured:{},hushTip:false};
   T.meta.current=T.id;
 }
-/* reads the one current tape through validate; a broken or too-new one is left alone */
+/* reads the one current tape through validate; a broken or too-new one is left alone.
+   Once per session: open() must never replace a song that is already loaded. */
 function loadStore(){
+  if(T.loaded) return Promise.resolve();
   var r=refs();
   if(!r){ ensureLocal(); return Promise.resolve(); }
   if(T.loading) return T.loading;
   T.loading=r.set.get().then(function(sn){
     var m=sn.exists ? own(sn.data()) : null;
     T.meta=(m && typeof m==="object" && !Array.isArray(m)) ? m : {};
+    T.metaOk=true;                 /* read OK (or showed none): meta can be written from here */
     if(!T.meta.toured || typeof T.meta.toured!=="object" || Array.isArray(T.meta.toured)) T.meta.toured={};
     T.meta.hushTip=T.meta.hushTip===true;
     var cur=typeof T.meta.current==="string" ? T.meta.current : "";
@@ -122,14 +126,17 @@ function loadStore(){
     return r.items.doc(cur).get().then(function(doc){
       var got=doc.exists ? SONGS.validate(own(doc.data())) : null;
       if(got && got.song){
-        T.song=got.song; T.id=cur; T.dirty=false;
+        setSong(got.song); T.id=cur; T.dirty=false;
       } else freshSong(true);
     });
   }).then(function(){
     T.loading=null;
+    T.loaded=true;
     if(visible()) renderAll();
   },function(e){
     T.loading=null;
+    T.loaded=true;
+    T.metaOk=false;                /* a failed read: keep a local tape, but never write over anything */
     ensureLocal();
     toast(tr("common.readfail",{msg:String((e&&e.code)||(e&&e.message)||e).slice(0,120)}));
     if(visible()) renderAll();
@@ -164,6 +171,21 @@ function heardTick(ac,bpm){
   var sec=ac.currentTime-T.startAt;
   if(sec<0) sec=0;
   return Math.floor(sec*bpm*SONGS.TPB/60);
+}
+/* a swap keeps the ears' tick: startAt is rebuilt from it with the new tempo, and the scheduler never
+   replays ticks it already passed or schedules from the old timeline */
+function reanchor(bpm){
+  if(!T.playing || !T.ctx || !T.song) return;
+  var tick=heardTick(T.ctx,T.song.bpm);
+  T.startAt=T.ctx.currentTime-SONGS.ticksToSec(tick,bpm);
+  T.heard=tick;
+  if(T.lastTick<tick+1) T.lastTick=tick+1;
+  T.painted=-1;
+}
+function setSong(song){
+  if(!song) return;
+  if(T.playing && T.ctx) reanchor(song.bpm);
+  T.song=song;
 }
 function paintPlaying(step){
   if(step===T.painted && T.playing) return;
@@ -211,6 +233,7 @@ function stopPlay(){
   var was=T.playing;
   T.playing=false;
   if(T.loop){ clearInterval(T.loop); T.loop=0; }
+  dropSynth();                       /* silence the hits already scheduled in the look-ahead */
   T.painted=-1;
   if(was) LP.keepAwake(false);
   if(T.built){
@@ -222,14 +245,10 @@ function stopPlay(){
 function togglePlay(){ if(T.playing) stopPlay(); else startPlay(); }
 /* a new tempo keeps the place: the tick being heard stays on its scheduled sound */
 function setBpm(bpm){
-  if(!T.song) return;
+  if(!T.loaded || !T.song) return;
   var next=SONGS.clampBpm(bpm);
   if(next===T.song.bpm) return;
-  if(T.playing && T.ctx){
-    var tick=heardTick(T.ctx,T.song.bpm);
-    T.startAt=T.ctx.currentTime-SONGS.ticksToSec(tick,next);
-    T.heard=tick;
-  }
+  reanchor(next);
   T.song.bpm=next;
   touch();
   renderBar();
@@ -256,7 +275,7 @@ function onAudio(){
   T.synth=SYNTH.create(T.ctx,LP.SND.app);
   if(!was) return;
   T.startAt=T.ctx.currentTime-SONGS.ticksToSec(tick,T.song.bpm);
-  T.lastTick=tick;
+  T.lastTick=tick+1;
   T.heard=tick;
   paintPlaying(Math.floor(tick/SONGS.STEP)%SONGS.STEPS);
   if(!T.loop) T.loop=setInterval(loop,LOOP_MS);
@@ -322,8 +341,6 @@ function renderPlay(){
   if(!b) return;
   b.setAttribute("data-playing",T.playing?"true":"false");
   b.setAttribute("aria-label",tr(T.playing?"studio.stop":"studio.play"));
-  var g=$("studio-play-glyph");
-  if(g) g.textContent=T.playing ? "■" : "▶";
 }
 function renderTabs(){
   var tabs=$("studio-tabs").children, i, d, b, any;
@@ -353,6 +370,7 @@ function renderGrid(){
 }
 function renderAll(){
   build();
+  var v=$("v-studio"); if(v) v.setAttribute("data-loaded",T.loaded?"true":"false");
   renderBar(); renderTabs(); renderGrid(); renderSheet();
 }
 /* ---------- the tour ----------
@@ -371,7 +389,7 @@ function rhythmTour(){
 }
 function startTour(){ if(T.built) tour("rhythm",rhythmTour()); }
 function maybeTour(){
-  if(!visible() || T.tour || !T.built || !T.meta) return;
+  if(!visible() || T.tour || !T.built || !T.loaded || !T.meta) return;
   if(T.meta.toured && T.meta.toured.rhythm) return;
   startTour();
 }
@@ -389,6 +407,7 @@ function tour(screen,steps){
   box.appendChild(text); box.appendChild(row);
   view.appendChild(root); view.appendChild(box);
   view.classList.add("st-touring");
+  document.body.classList.add("st-tour-on");
   T.tour={screen:screen, steps:steps, i:0, root:root, box:box, text:text, skip:skip, next:next, covers:covers, hi:null};
   skip.onclick=function(){ sfx("miss"); tourEnd(true); };
   next.onclick=function(){ sfx("tap"); tourNext(); };
@@ -446,6 +465,7 @@ function tourEnd(seen){
   T.tour=null;
   if(t.hi) t.hi.classList.remove("st-tour-hi");
   $("v-studio").classList.remove("st-touring");
+  document.body.classList.remove("st-tour-on");
   if(t.root.parentNode) t.root.parentNode.removeChild(t.root);
   if(t.box.parentNode) t.box.parentNode.removeChild(t.box);
   if(seen && T.meta && t.screen){
@@ -479,8 +499,8 @@ function renderSheet(){
   sh.appendChild(head);
   if(T.sheet==="menu"){
     var ul=el("ul","lcd-menu");
-    sheetRow(ul,tr("studio.new"),"",function(){ sfx("tap"); openSheet("new"); });
-    if(T.song) sheetRow(ul,tr("studio.kit",{kit:tr("studio.kit."+T.song.kit)}),"",function(){
+    if(T.loaded) sheetRow(ul,tr("studio.new"),"",function(){ sfx("tap"); openSheet("new"); });
+    if(T.song && T.loaded) sheetRow(ul,tr("studio.kit",{kit:tr("studio.kit."+T.song.kit)}),"",function(){
       T.song.kit=T.song.kit==="soft" ? "chip" : "soft";
       touch(); sfx("tap"); renderSheet();
     });
@@ -503,8 +523,9 @@ function renderSheet(){
   sh.appendChild(ask);
 }
 function newTape(){
+  if(!T.loaded) return;
   stopRepeatAll();
-  T.song=SONGS.newSong(Date.now());
+  setSong(SONGS.newSong(Date.now()));
   T.dirty=true;
   T.sheet="";
   flush();
@@ -513,7 +534,7 @@ function newTape(){
 }
 /* ---------- taps and keys ---------- */
 function cellTap(step){
-  if(!T.song) return;
+  if(!T.loaded || !T.song) return;
   T.focus=step;
   T.song=SONGS.toggle(T.song,0,"drums",T.drum,step);
   touch();
@@ -538,7 +559,7 @@ function stopRepeatAll(){
 function bindRepeat(btn,delta){
   var wait=0, every=0;
   function end(){ if(wait){ clearTimeout(wait); wait=0; } if(every){ clearInterval(every); every=0; } }
-  function step(){ setBpm(T.song.bpm+delta); }
+  function step(){ if(!T.song) return; setBpm(T.song.bpm+delta); }
   btn.addEventListener("pointerdown",function(e){
     e.preventDefault();
     try{ btn.setPointerCapture(e.pointerId); }catch(x){}
@@ -571,6 +592,13 @@ document.addEventListener("keydown",function(e){
   else done=false;
   if(done) e.preventDefault();
 });
+/* boot.js only watches visibility once storage opened, so watch it here too: a hidden page never keeps sounding */
+document.addEventListener("visibilitychange",function(){
+  if(!document.hidden || !visible()) return;
+  stopRepeatAll();
+  stopPlay();
+  flush();
+});
 
 /* ---------- home icon: a cassette, open window, two reels ---------- */
 var ICON=["................","................",".00000000000000.",".03333333333330.",".03111111111130.",
@@ -584,12 +612,12 @@ function open(){
   build();
   show("studio");
   showPad(false);
-  if(!T.song && !S.db) ensureLocal();
+  ensureLocal();               /* the demo is visible while the one read is in flight; edits wait for T.loaded */
   renderAll();
   layout();
   setTimeout(layout,0);
-  if(S.db) loadStore().then(function(){ if(visible()) maybeTour(); });
-  else { if(!T.song) ensureLocal(); setTimeout(maybeTour,0); }
+  if(T.loaded) maybeTour();
+  else if(S.db) loadStore().then(function(){ if(visible()) maybeTour(); });
 }
 function leave(){
   stopRepeatAll();
@@ -612,7 +640,12 @@ LP.builtin({id:"studio", label:"app.studio", icon:function(){ return ICON; }, vi
   ready:function(){
     if(!S.db) return;
     refs();
-    if(visible()) loadStore();
+    if(visible()) loadStore().then(function(){ if(visible()) maybeTour(); });
   },
-  nostore:function(){ ensureLocal(); if(visible()) renderAll(); }});
+  nostore:function(){
+    ensureLocal();
+    T.loaded=true;
+    T.metaOk=false;            /* no store: a local tape, playable but never saved */
+    if(visible()){ renderAll(); maybeTour(); }
+  }});
 })();
