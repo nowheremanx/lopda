@@ -479,7 +479,8 @@ function fillCards(){
     paper(cv);
     /* ask for the neighbour itself, so a frame that arrives while we look paints the card it will slide from */
     if(i!==1) (function(i,k){
-      pic(r,k).then(function(im){ if(D.mode==="view" && D.idx+i-1===k && D.pics && D.pics.img[k]) putImg(vCanvas(VCARD[i]),im); });
+      var pics=D.pics;
+      pic(r,k).then(function(im){ if(D.pics===pics && D.mode==="view" && D.idx+i-1===k && D.pics.img[k]) putImg(vCanvas(VCARD[i]),im); });
     })(i,k);
   }
 }
@@ -490,8 +491,9 @@ function showFrame(){
   /* the one on the glass is asked for before fillCards asks for its neighbours, so it develops first */
   if(D.pics.img[k]) viewWait(D.busy);
   else {
+    var pics=D.pics;                               /* a frame from a roll we have left must not land on this one */
     viewWait(D.busy||"…");
-    pic(r,k).then(function(im){ if(D.mode==="view" && D.idx===k){ putImg($("dk-vcv"),im); viewWait(D.busy); } });
+    pic(r,k).then(function(im){ if(D.pics===pics && D.mode==="view" && D.idx===k){ putImg($("dk-vcv"),im); viewWait(D.busy); } });
   }
   fillCards();
   placeCards(0,0);
@@ -535,6 +537,7 @@ function dragOff(r,dx){
 }
 $("dk-photo").addEventListener("pointerdown",function(e){
   if(D.mode!=="view" || D.sheet || D.busy) return;
+  if(V.on) return;                                 /* a second finger must not take the drag over */
   if(e.button && e.button!==0) return;
   finishSlide();                                   /* a press while the last slide runs lands on the new print */
   V.on=true; V.id=e.pointerId; V.x0=e.clientX; V.y0=e.clientY; V.v=0; V.horiz=null;
@@ -554,14 +557,19 @@ $("dk-photo").addEventListener("pointermove",function(e){
 $("dk-photo").addEventListener("pointerup",function(e){
   if(!V.on || e.pointerId!==V.id) return;
   V.on=false;
+  /* START may have opened the print sheet (or a print may be running) while the finger was down */
+  if(D.mode!=="view" || D.sheet || D.busy){ placeCards(0,0); return; }
   var r=current(), dx=e.clientX-V.x0, dy=e.clientY-V.y0, box=this.getBoundingClientRect();
   if(Math.abs(dx)<12 && Math.abs(dy)<12){
     var at=(e.clientX-box.left)/box.width;
-    if(at<1/3) slideTo(-1); else if(at>2/3) slideTo(1); else placeCards(0,0);
+    if(at<1/3){ if(!slideTo(-1)) placeCards(0,STILL?0:180); }
+    else if(at>2/3){ if(!slideTo(1)) placeCards(0,STILL?0:180); }
+    else placeCards(0,0);
     return;
   }
   if(V.horiz!==true){ placeCards(0,0); return; }
-  /* a flick only counts in the direction the finger was already going */
+  /* a flick only counts in the direction the finger was already going, and not after it stopped before lifting */
+  if(now()-V.lastT>100) V.v=0;
   var fling=Math.abs(V.v)>0.5 && (V.v>0)===(dx>0);
   if(Math.abs(dx)>span()/4 || fling){
     if(!slideTo(dx<0?1:-1)) placeCards(0,STILL?0:180);
@@ -573,6 +581,7 @@ $("dk-photo").addEventListener("pointerup",function(e){
 $("dk-photo").addEventListener("pointercancel",function(e){
   if(!V.on || e.pointerId!==V.id) return;
   V.on=false;
+  if(D.mode!=="view" || D.sheet || D.busy){ placeCards(0,0); return; }
   placeCards(0,STILL?0:180);
 });
 VCARD.forEach(function(c){ c.addEventListener("transitionend",function(e){ if(e.propertyName==="transform") finishSlide(); }); });
