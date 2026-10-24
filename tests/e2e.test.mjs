@@ -6667,11 +6667,44 @@ test("crossing: round 1 shows a grid, a demo spells one word, words typed with t
   let f;
   await until(p, async () => {
     f = p.frames().find((x) => x !== p.mainFrame());
-    return f && await f.evaluate(() => !!(window.game && game.phase === "demo")).catch(() => false);
-  }, "the first round and its demo");
+    return f && await f.evaluate(() => !!(window.game && game.phase === "title")).catch(() => false);
+  }, "the title screen");
   /* the smallest screen, as on an iPhone SE with the chin pad */
   await p.locator("#app").evaluate((el) => { el.style.width = "331px"; el.style.height = "359px"; el.style.flex = "none"; });
   await p.waitForTimeout(200);
+  /* a fresh start: the name over a short menu, the first row inverted, RANDOM dashed and closed */
+  const title = await f.evaluate(() => {
+    const root = document.documentElement, rows = [...document.querySelectorAll("#cover-list li")], cover = document.getElementById("cover");
+    return {
+      name: document.getElementById("cover-text").textContent,
+      rows: rows.map((li) => li.textContent),
+      sel: rows.map((li) => li.classList.contains("sel")),
+      locked: rows.map((li) => li.classList.contains("locked")),
+      dashed: rows[2] ? getComputedStyle(rows[2]).borderTopStyle : "",
+      size: [root.clientWidth, root.clientHeight],
+      gaps: rows.slice(1).map((li, i) => li.getBoundingClientRect().top - rows[i].getBoundingClientRect().bottom),
+      fit: [document.getElementById("cover-text"), ...rows, document.getElementById("cover-foot")].every((el) => {
+        const r = el.getBoundingClientRect();
+        return r.top >= 0 && r.left >= 0 && r.bottom <= root.clientHeight && r.right <= root.clientWidth;
+      }),
+      scroll: cover.scrollHeight, client: cover.clientHeight,
+    };
+  });
+  assert.deepEqual(title.size, [331, 359]);
+  assert.equal(title.name, "拼字格");
+  assert.deepEqual(title.rows, ["继续 · 第 1 关", "选关", "随机关通关 100 关后开放", "玩法"]);
+  assert.deepEqual(title.sel, [true, false, false, false], "the title opens on CONTINUE");
+  assert.deepEqual(title.locked, [false, false, true, false], "RANDOM is locked before round 100");
+  assert.equal(title.dashed, "dashed", "the locked row has a dashed border");
+  assert.ok(title.gaps.length === 3 && title.gaps.every((g) => g >= 8), "the menu rows keep 8 px apart: " + title.gaps);
+  assert.equal(title.fit, true, "the title stays inside 331x359");
+  assert.ok(title.scroll <= title.client, "the title needs no scrolling: " + title.scroll + " <= " + title.client);
+  /* START opens the first row: round 1 and its demo */
+  await p.locator('#pad [data-b="start"]').click();
+  await until(p, async () => {
+    f = p.frames().find((x) => x !== p.mainFrame());
+    return f && await f.evaluate(() => !!(window.game && game.phase === "demo")).catch(() => false);
+  }, "the first round and its demo");
   const round = await f.evaluate(() => ({
     placed: game.placed.map((w) => w.word),
     seed: game.seed,
@@ -6871,6 +6904,114 @@ test("crossing: round 1 shows a grid, a demo spells one word, words typed with t
      so the test does not need to pause here */
   await press("a");
   await until(p, () => f.evaluate(() => game.phase === "play" && game.round === 2), "round 2");
+
+  /* the way out: B with an empty entry asks first; A goes to the title, which now continues at round 2 */
+  await press("b");
+  await f.waitForFunction(() => game.phase === "leave");
+  const leave = await f.evaluate(() => {
+    const root = document.documentElement, box = document.getElementById("cover").getBoundingClientRect();
+    return {
+      text: document.getElementById("cover-text").textContent,
+      keys: document.getElementById("cover-foot").textContent,
+      box: [box.left, box.top, box.right, box.bottom],
+      size: [root.clientWidth, root.clientHeight],
+    };
+  });
+  assert.match(leave.text, /回到主界面/, "the confirm asks before leaving");
+  assert.match(leave.keys, /A 是 · B 否/, "the confirm names its two keys");
+  assert.deepEqual(leave.size, [331, 359]);
+  assert.ok(leave.box[0] >= 0 && leave.box[1] >= 0 && leave.box[2] <= 331 && leave.box[3] <= 359, "the confirm fits 331x359: " + leave.box);
+  await press("a");
+  await f.waitForFunction(() => game.phase === "title");
+  const continued = await f.evaluate(() => [...document.querySelectorAll("#cover-list li")].map((li) => li.textContent));
+  assert.equal(continued[0], "继续 · 第 2 关", "the title continues at round 2");
+  const saved2 = await p.evaluate(() => (JSON.parse(localStorage.getItem("lopda-dev:crossing") || "{}").game) || null);
+  assert.equal(saved2.cleared, 1, "round 1 is recorded cleared");
+  assert.equal(saved2.round, 2, "the save continues at round 2");
+
+  /* ROUNDS opens the picker on the next round: 1 solid, 2 dashed, 3 locked; A on 3 is refused */
+  await press("down");
+  await press("a");
+  await f.waitForFunction(() => game.phase === "pick");
+  const picker = () => f.evaluate(() => {
+    const root = document.documentElement, cells = [...document.querySelectorAll("#cover-list li")];
+    return {
+      head: document.getElementById("cover-text").textContent,
+      foot: document.getElementById("cover-foot").textContent,
+      cells: cells.map((li) => ({
+        n: +li.textContent, cleared: li.classList.contains("cleared"), next: li.classList.contains("next"),
+        locked: li.classList.contains("locked"), bg: getComputedStyle(li).backgroundColor, border: getComputedStyle(li).borderTopStyle,
+      })),
+      sel: cells.findIndex((li) => li.classList.contains("sel")),
+      size: [root.clientWidth, root.clientHeight],
+      fit: [document.getElementById("cover-text"), ...cells, document.getElementById("cover-foot")].every((el) => {
+        const r = el.getBoundingClientRect();
+        return r.top >= 0 && r.left >= 0 && r.bottom <= root.clientHeight && r.right <= root.clientWidth;
+      }),
+      scroll: document.getElementById("cover").scrollHeight, client: document.getElementById("cover").clientHeight,
+    };
+  });
+  const pk = await picker();
+  assert.equal(pk.head, "第 1-25 关");
+  assert.equal(pk.foot, "◄ ► 翻页");
+  assert.equal(pk.cells.length, 25, "five by five");
+  assert.equal(pk.cells[0].cleared, true, "round 1 is cleared");
+  assert.equal(pk.cells[0].bg, "rgb(125, 138, 88)", "a cleared round is solid mid");
+  assert.equal(pk.cells[1].next, true, "round 2 is the one to play");
+  assert.equal(pk.cells[1].border, "dashed", "the next round has a dashed border");
+  assert.equal(pk.cells[2].locked, true, "round 3 is locked");
+  assert.equal(pk.sel, 1, "the picker cursor starts on round 2");
+  assert.deepEqual(pk.size, [331, 359]);
+  assert.equal(pk.fit, true, "the picker stays inside 331x359");
+  assert.ok(pk.scroll <= pk.client, "the picker needs no scrolling: " + pk.scroll + " <= " + pk.client);
+  await press("right");
+  assert.equal((await picker()).sel, 2, "Right moves to round 3");
+  await press("a");
+  await f.waitForFunction(() => game.phase === "pick");
+  assert.equal((await picker()).sel, 2, "a locked round does not open");
+  await press("b");
+  await f.waitForFunction(() => game.phase === "title");
+
+  /* a save after the hundredth round: the title leads with an unlocked RANDOM, and opening it marks the header */
+  await p.evaluate(() => localStorage.setItem("lopda-dev:crossing", JSON.stringify({ game: { round: 101, cleared: 100 } })));
+  await p.reload({ waitUntil: "load" });
+  await p.waitForFunction(() => /loaded |load failed/.test(document.getElementById("log").textContent), null, { timeout: 5000 });
+  await until(p, async () => {
+    f = p.frames().find((x) => x !== p.mainFrame());
+    return f && await f.evaluate(() => !!(window.game && window.game.phase === "title")).catch(() => false);
+  }, "the title after the reload");
+  await p.locator("#app").evaluate((el) => { el.style.width = "331px"; el.style.height = "359px"; el.style.flex = "none"; });
+  await p.waitForTimeout(200);
+  const endTitle = await f.evaluate(() => {
+    const rows = [...document.querySelectorAll("#cover-list li")], badge = document.getElementById("round");
+    return {
+      rows: rows.map((li) => li.textContent),
+      locked: rows.map((li) => li.classList.contains("locked")),
+      sel: rows.map((li) => li.classList.contains("sel")),
+      badge: [badge.textContent, badge.className],
+    };
+  });
+  assert.equal(endTitle.rows[0], "随机关", "after round 100 RANDOM takes the first row");
+  assert.deepEqual(endTitle.locked, [false, false, false], "RANDOM is unlocked");
+  assert.deepEqual(endTitle.sel, [true, false, false], "the cursor starts on it");
+  await press("a");
+  await until(p, () => f.evaluate(() => game.phase === "demo" || game.phase === "play"), "the random round");
+  const rand = await f.evaluate(() => {
+    const badge = document.getElementById("round").getBoundingClientRect(), root = document.documentElement;
+    return {
+      mode: game.mode, len: game.wheel.length, badge: document.getElementById("round").textContent,
+      cls: document.getElementById("round").className, round: game.round,
+      fit: badge.top >= 0 && badge.left >= 0 && badge.bottom <= root.clientHeight && badge.right <= root.clientWidth,
+      size: [root.clientWidth, root.clientHeight],
+    };
+  });
+  assert.equal(rand.mode, "random");
+  assert.equal(rand.len, 7, "a random round uses seven letters");
+  assert.equal(rand.badge, "随机");
+  assert.equal(rand.cls, "badge");
+  assert.equal(rand.round, 101, "a random round is not saved as a round number");
+  assert.deepEqual(rand.size, [331, 359]);
+  assert.equal(rand.fit, true, "the badge stays inside 331x359");
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
@@ -6881,9 +7022,32 @@ test("crossing: in English the line under the grid is an English definition", { 
   let f;
   await until(p, async () => {
     f = p.frames().find((x) => x !== p.mainFrame());
+    return f && await f.evaluate(() => !!(window.game && game.phase === "title")).catch(() => false);
+  }, "the title screen");
+  await p.locator("#app").evaluate((el) => { el.style.width = "331px"; el.style.height = "359px"; el.style.flex = "none"; });
+  assert.equal(await f.textContent("#cover-text"), "CROSSING", "the English title");
+  /* the English locked row is the longest label: it, the rows' 8 px gaps and the footer still fit 331x359 */
+  const enTitle = await f.evaluate(() => {
+    const root = document.documentElement, rows = [...document.querySelectorAll("#cover-list li")], cover = document.getElementById("cover");
+    return {
+      size: [root.clientWidth, root.clientHeight],
+      gaps: rows.slice(1).map((li, i) => li.getBoundingClientRect().top - rows[i].getBoundingClientRect().bottom),
+      fit: [document.getElementById("cover-text"), ...rows, document.getElementById("cover-foot")].every((el) => {
+        const r = el.getBoundingClientRect();
+        return r.top >= 0 && r.left >= 0 && r.bottom <= root.clientHeight && r.right <= root.clientWidth;
+      }),
+      scroll: cover.scrollHeight, client: cover.clientHeight,
+    };
+  });
+  assert.deepEqual(enTitle.size, [331, 359]);
+  assert.ok(enTitle.gaps.every((g) => g >= 8), "the English menu rows keep 8 px apart: " + enTitle.gaps);
+  assert.equal(enTitle.fit, true, "the English title stays inside 331x359");
+  assert.ok(enTitle.scroll <= enTitle.client, "the English title needs no scrolling");
+  await p.locator('#pad [data-b="start"]').click();
+  await until(p, async () => {
+    f = p.frames().find((x) => x !== p.mainFrame());
     return f && await f.evaluate(() => !!(window.game && game.phase === "demo")).catch(() => false);
   }, "the first round and its demo");
-  await p.locator("#app").evaluate((el) => { el.style.width = "331px"; el.style.height = "359px"; el.style.flex = "none"; });
   await until(p, () => f.evaluate(() => game.phase === "demoEnd"), "the demo to end on its your-turn card");
   await p.locator('#pad [data-b="a"]').click();
   await f.waitForFunction(() => game.phase === "play");
@@ -6902,5 +7066,73 @@ test("crossing: in English the line under the grid is an English definition", { 
   assert.ok(help.scroll <= help.client, "the English help does not scroll: " + JSON.stringify(help));
   await p.locator('#pad [data-b="b"]').click();
   await f.waitForFunction(() => game.phase === "play");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+/* ---------- 拼字格 / Crossing: a 1.5.0 save, a replay, and PAD.dict's ten-a-second window ---------- */
+test("crossing: an old save, a replay and a quick re-entry", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t);
+  await p.goto(`${base}/sdk/dev.html?app=registry/apps/crossing&lang=zh`, { waitUntil: "load" });
+  await p.waitForFunction(() => /loaded |load failed/.test(document.getElementById("log").textContent), null, { timeout: 5000 });
+  let f;
+  const press = async (b) => { await p.locator(`#pad [data-b="${b}"]`).click(); await p.waitForTimeout(20); };
+  const open = async (save) => {
+    await p.evaluate((s) => localStorage.setItem("lopda-dev:crossing", JSON.stringify({ game: s })), save);
+    await p.reload({ waitUntil: "load" });
+    await p.waitForFunction(() => /loaded |load failed/.test(document.getElementById("log").textContent), null, { timeout: 5000 });
+    await until(p, async () => {
+      f = p.frames().find((x) => x !== p.mainFrame());
+      return f && await f.evaluate(() => !!(window.game && window.game.phase === "title")).catch(() => false);
+    }, "the title screen");
+    await p.locator("#app").evaluate((el) => { el.style.width = "331px"; el.style.height = "359px"; el.style.flex = "none"; });
+    await p.waitForTimeout(100);
+  };
+  const titles = () => f.evaluate(() => [...document.querySelectorAll("#cover-list li")].map((li) => li.textContent));
+  const pickerCells = () => f.evaluate(() => [...document.querySelectorAll("#cover-list li")].map((li) => ({
+    n: +li.textContent,
+    cleared: li.classList.contains("cleared"),
+    next: li.classList.contains("next"),
+    locked: li.classList.contains("locked"),
+  })));
+
+  /* a. a 1.5.0 save has no cleared: every round before its round was cleared, so the title continues at 6 */
+  await open({ round: 6, taught: true, hints: 1, done: [] });
+  assert.equal((await titles())[0], "继续 · 第 6 关", "a save without cleared continues at its round");
+  await press("down");
+  await press("a");
+  await f.waitForFunction(() => game.phase === "pick");
+  const pk = await pickerCells();
+  for (let n = 1; n <= 5; n++) assert.equal(pk[n - 1].cleared, true, "round " + n + " is cleared");
+  assert.equal(pk[5].next, true, "round 6 is the one to play");
+  assert.equal(pk[6].locked, true, "round 7 is locked");
+
+  /* b. a replay says so, and leaving it leaves the main line at round 3 / cleared 2 */
+  await open({ round: 3, cleared: 2, taught: true, hints: 0, done: [] });
+  await press("down");
+  await press("a");
+  await f.waitForFunction(() => game.phase === "pick");
+  await press("left");
+  await press("left");                 /* 2, then 1: a cleared round */
+  await press("a");
+  await until(p, () => f.evaluate(() => game.phase === "play" && game.round === 1), "the replay of round 1");
+  assert.equal(await f.textContent("#round"), "第 1 关 · 重玩", "the header marks the replay");
+  await press("b");
+  await f.waitForFunction(() => game.phase === "leave");
+  await press("a");
+  await f.waitForFunction(() => game.phase === "title");
+  const kept = await p.evaluate(() => JSON.parse(localStorage.getItem("lopda-dev:crossing") || "{}").game);
+  assert.equal(kept.round, 3, "the replay did not lower round");
+  assert.equal(kept.cleared, 2, "the replay did not lower cleared");
+
+  /* c. a quick re-entry waits out PAD.dict's window instead of opening on the error card */
+  await open({ round: 2, cleared: 1, taught: true, hints: 0, done: [] });
+  await press("a");
+  await until(p, () => f.evaluate(() => game.phase === "play" && game.round === 2), "round 2");
+  await press("b");
+  await f.waitForFunction(() => game.phase === "leave");
+  await press("a");
+  await f.waitForFunction(() => game.phase === "title");
+  await press("a");
+  await until(p, () => f.evaluate(() => game.phase === "play" && game.round === 2), "the quick re-entry to reach play");
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
