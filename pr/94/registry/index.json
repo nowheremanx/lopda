@@ -129,8 +129,8 @@
         "wordbook"
       ],
       "path": "apps/crossing/index.html",
-      "sha256": "1efdcf9a1bfe0c0036580f27b6019590286372a2b00e79150367ccc67f39eb79",
-      "bytes": 80004
+      "sha256": "98411be80eb978385ae45e07d645ea353b111d895ef189efe5adf9aaba74c3bb",
+      "bytes": 91231
     },
     {
       "spec": "lopda/1",
@@ -297,6 +297,48 @@
       "path": "apps/kana-cards/index.html",
       "sha256": "8a7ae828c7a0b5e1885c8732530dd237abd1302e1dc290e9603d5b5d5a3421ca",
       "bytes": 21949
+    },
+    {
+      "spec": "lopda/1",
+      "id": "luck-compass",
+      "name": "神位罗盘",
+      "glyph": "吉",
+      "category": "life",
+      "buttons": true,
+      "icon": [
+        "................",
+        ".....000000.....",
+        "...0033333300...",
+        "..033000000330..",
+        ".03300000000330.",
+        ".03000000000030.",
+        "0300001000000030",
+        "0300011100000030",
+        "0300111110000030",
+        "0300011100000030",
+        "0300001000000030",
+        ".03000000000030.",
+        ".03300000000330.",
+        "..033000000330..",
+        "...0033333300...",
+        ".....000000....."
+      ],
+      "version": "1.0.0",
+      "description": "平放手机当罗盘，看今天喜神、财神、福神和贵神在哪个方向。旧历书上的说法，图个吉利。指南针的示范。",
+      "i18n": {
+        "en": {
+          "name": "LuckyWay",
+          "description": "Hold the phone flat like a compass to find today's lucky directions."
+        }
+      },
+      "author": "Haowei Wu",
+      "license": "MIT",
+      "permissions": [
+        "motion"
+      ],
+      "path": "apps/luck-compass/index.html",
+      "sha256": "1d3d990fb41f9a60301599d459ecf83d765803cbf1d19b5f09080ddd504c1916",
+      "bytes": 68468
     },
     {
       "spec": "lopda/1",

@@ -116,7 +116,8 @@ node --test                                  # the test suite; must pass
 - Four tones only: ink `#1f2a14`, dark `#4a5a32`, mid `#7d8a58`, paper `#a3ad7e`.
 - Manifest `"permissions"`: any of `"files"` (`PAD.exportFile` / `PAD.importFile`, each call confirmed by the runtime's
   own dialog, one file ≤ 2 MB; registry/apps/paint is the example), `"motion"` and `"mic"` (runtime 0.24.0+, SPEC.md 6.4:
-  `PAD.motion` {start, stop, zero} with `PAD.on("tilt" | "shake")`, `PAD.mic` {start, stop} with `PAD.on("sound")`; coarse
+  `PAD.motion` {start, stop, zero} with `PAD.on("tilt" | "shake")` (tilt `flat` is the absolute tilt from lying flat,
+  runtime 0.35.0+), `PAD.mic` {start, stop} with `PAD.on("sound")`; coarse
   readings only, the runtime's dialog on an app's first start(), allowed apps listed in Settings, keys must also work;
   the mic sets `navigator.audioSession.type` to "play-and-record" and every way out sets "ambient" back; decisions.md section 23),
   `"notes"` (runtime 0.26.0+, SPEC.md 6.5: `PAD.notes.append(title, text)` -> "saved" | "denied", the runtime's dialog on every
@@ -124,13 +125,13 @@ node --test                                  # the test suite; must pass
   `"camera"` (runtime 0.28.0+, SPEC.md 6.6: `PAD.camera.snap({size})` -> {w, h, px} | null, px a Uint8Array of tone indices 0-3,
   "small" 128×112 or "large" 256×224; the runtime's dialog on an app's first snap (granted with the sensors, Settings → 传感器与相机),
   then its own viewfinder for every shot, the player presses the shutter; the runtime keeps nothing; decisions.md section 28),
-  `"wordbook"` (runtime 0.34.0+, SPEC.md 6.7: `PAD.dict.inBook(words)` -> boolean[] | null and `PAD.dict.addWord` /
+  `"wordbook"` (runtime 0.36.0+, SPEC.md 6.7: `PAD.dict.inBook(words)` -> boolean[] | null and `PAD.dict.addWord` /
   `removeWord(word)` -> "saved" | "denied" | "full" | null, over the player's own word book, the same one the dictionary and
   the reader use; the runtime's dialog on the first add or remove, one grant per app, listed with the sensors in Settings;
   reading needs the grant too; decisions.md section 35).
 - `PAD.say(text, {lang})` (runtime 0.26.0+, no permission, SPEC.md 6.5): the phone's voice through `runtime/speech.js` (shared with
   the dictionary's 发音), follows the volume, ≤ 200 characters, once a second, stops on HOME or a hidden page.
-- `PAD.dict` (runtime 0.34.0+, no permission, SPEC.md 6.7): `PAD.dict.words({len, pattern, letters, level, max, offset})` ->
+- `PAD.dict` (runtime 0.36.0+, no permission, SPEC.md 6.7): `PAD.dict.words({len, pattern, letters, level, max, offset})` ->
   `{words, more}` | null and `PAD.dict.lookup(word)` -> `{word, form?, zh, en}` | null, over the built-in ECDICT only
   (`runtime/wordlist.js`; imported books are not visible, and the ECDICT off switch does not apply),
   words in commonness order, ≤ 10 calls a second together, a bad query rejects, an unreadable dictionary is null;

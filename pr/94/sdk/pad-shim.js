@@ -9,7 +9,7 @@
  * Older runtimes pass none, so PAD.lang is undefined there and apps fall back to their own default; PAD.music is likewise undefined
  * unless the runtime can play it (runtime 0.11.0 and later, and sdk/dev.html), PAD.ambience (0.13.0 and later),
  * PAD.motion and PAD.mic (0.24.0 and later), PAD.notes and PAD.say (0.26.0 and later; Japanese say in 0.29.0),
- * PAD.camera (0.28.0 and later) and PAD.dict (0.34.0 and later).
+ * PAD.camera (0.28.0 and later) and PAD.dict (0.36.0 and later).
  *
  * Messages app -> runtime:  {pad:1, op:"save"|"load"|"remove"|"error"|"exit", ...}
  *                           {pad:1, op:"sfx", name}  or  {pad:1, op:"sfx", params:{wave, duty, from, to, ms, attack, decay, vol, vibrato:{depth, rate}}}
@@ -33,7 +33,8 @@
  *                           {pad:1, op:"snapped", i, v}  v: {w, h, px: Uint8Array of w*h tones 0-3} | null
  *                           {pad:1, op:"dicted", i, v}  or  {pad:1, op:"dicted", i, error}
  *                                                        v: a words page, an entry, booleans, "saved"|"denied"|"full" or null
- *                           {pad:1, op:"tilt", x, y, heading}  {pad:1, op:"shake"}  {pad:1, op:"sound", level, pitch}
+ *                           {pad:1, op:"tilt", x, y, heading, flat:{x, y}}  {pad:1, op:"shake"}  {pad:1, op:"sound", level, pitch}
+ *                           (flat is runtime 0.35.0 and later; older runtimes send no flat)
  *                           {pad:1, op:"button", b, down}   (chin buttons, lopda/1)
  *                           {pad:1, op:"release-all"}
  */
@@ -158,11 +159,11 @@ function lopdaPadShim(opts) {
     return { w: v.w, h: v.h, px: v.px };
   };
   var num = function (v, lo, hi) { return typeof v === "number" && v >= lo && v <= hi; };
-  /* The dictionary (runtime 0.34.0, SPEC.md 6.7): words(q) and lookup(word) are read-only queries on the built-in ECDICT,
+  /* The dictionary (runtime 0.36.0, SPEC.md 6.7): words(q) and lookup(word) are read-only queries on the built-in ECDICT,
      no permission and no dialog. words(q) -> Promise<{words, more} | null>, lookup(word) -> Promise<{word, form?, zh, en} | null>;
      null: the dictionary cannot be read, or more than 10 calls in a second (words, lookup and the word book together). A bad
      query rejects, as PAD.exportFile rejects bad arguments; unhandled it reaches the runtime's error box.
-     The word book (runtime 0.34.0, "permissions": ["wordbook"]): inBook(words) -> Promise<boolean[] | null>,
+     The word book (runtime 0.36.0, "permissions": ["wordbook"]): inBook(words) -> Promise<boolean[] | null>,
      addWord(word) / removeWord(word) -> Promise<"saved" | "denied" | "full" | null>. The first add or remove shows the
      runtime's own dialog once per app; inBook is null until that grant exists. Null is normal (no grant, no permission,
      over the limit, or the word is not in the dictionary). A bad argument rejects. */
@@ -310,8 +311,11 @@ function lopdaPadShim(opts) {
       else if (g.kind === "add" || g.kind === "remove") g.resolve(savedWord(d.v));
       else g.resolve(g.kind === "words" ? wordPage(d.v) : wordEntry(d.v));
     }
-    else if (d.op === "tilt" && SENSORS && num(d.x, -1, 1) && num(d.y, -1, 1))
-      emit("tilt", { x: d.x, y: d.y, heading: num(d.heading, 0, 360) ? d.heading : null });
+    else if (d.op === "tilt" && SENSORS && num(d.x, -1, 1) && num(d.y, -1, 1)) {
+      var t = { x: d.x, y: d.y, heading: num(d.heading, 0, 360) ? d.heading : null };
+      if (d.flat && typeof d.flat === "object" && num(d.flat.x, -1, 1) && num(d.flat.y, -1, 1)) t.flat = { x: d.flat.x, y: d.flat.y };
+      emit("tilt", t);
+    }
     else if (d.op === "shake" && SENSORS) emit("shake");
     else if (d.op === "sound" && SENSORS && num(d.level, 0, 1))
       emit("sound", { level: d.level, pitch: num(d.pitch, 1, 20000) ? d.pitch : null });

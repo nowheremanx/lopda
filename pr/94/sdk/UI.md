@@ -114,6 +114,7 @@ Contrast of the four tones against each other (WCAG contrast ratio):
   (`倾斜机身，或用方向键`).
 - A tilt app offers a recentre action (`PAD.motion.zero()`), on a key the footer names (START or SELECT) or a button,
   and starts with "the way you hold it now is level". Never ask the player to lay the phone flat: nobody plays that way.
+  An app that is meant to be used lying flat (a compass, a level) may say so and guide the player with `flat` (runtime 0.35.0+).
 - Show that tilt is live (the ball moves, a small level mark) and what happens when it is not: `"denied"` or `"none"`
   quietly falls back to keys, with one line saying so.
 - Turn the microphone on only while the app listens for something (a candle to blow out), and off as soon as it is

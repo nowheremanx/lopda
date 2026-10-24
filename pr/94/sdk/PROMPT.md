@@ -103,7 +103,7 @@ Hard rules for index.html:
     PAD.say(text, {lang: "zh" | "en" | "ja"}) -> Promise "done" | "stopped" | "unavailable". At most 200 characters,
          once a second; a new call stops the one speaking. "unavailable" (volume 0, no voice) is normal: show the text too.
 - Words from the handheld's built-in English dictionary, if the idea needs a word list or a meaning (no permission).
-  Check that PAD.dict exists first (runtime 0.34.0 and later):
+  Check that PAD.dict exists first (runtime 0.36.0 and later):
     PAD.dict.words({len: 5, pattern: "?a???", letters: "planet", level: 1, max: 100}) -> Promise {words, more} | null
          every field optional: len 2-15 or [min, max]; pattern is a-z and ? and sets the length; letters up to 15,
          each used at most as often as given; level 1-5 (the most common 2000, 5000, 10000, 15000 or all);
