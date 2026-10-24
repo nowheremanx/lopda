@@ -1,0 +1,27 @@
+Lo-PDA
+Copyright (c) 2026 Haowei Wu
+Source: https://github.com/nowheremanx/lopda
+
+Lo-PDA is licensed under the MIT License (see LICENSE). Versions published
+before the switch to MIT were released under the PolyForm Noncommercial
+License 1.0.0; the copyright holder also makes those versions available under
+the MIT License.
+
+Third-party parts keep their own licenses:
+  runtime/vendor/binjgb/   Game Boy emulator core, MIT, Ben Smith  — see its LICENSE
+  sdk/fonts/               lopix12 pixel font, SIL OFL 1.1          — see LICENSE-lopix12.txt
+  runtime/fonts/           DotGothic16 and VT323, SIL OFL 1.1       — see OFL-DotGothic16.txt, OFL-VT323.txt
+  runtime/vendor/holiday-cn/  China holiday data, MIT, NateScarlet — see its LICENSE
+  runtime/vendor/ecdict/   English-Chinese dictionary (abridged ECDICT), MIT, Linwei (skywind3000)
+                           — see its LICENSE; English senses largely from WordNet 3.0,
+                           Copyright 2006 by Princeton University — see LICENSE-WordNet
+  runtime/books/           Sample books, public domain: Lewis Carroll, Alice's Adventures in Wonderland
+                           (Project Gutenberg eBook #11) and the Analects (論語, Project Gutenberg eBook
+                           #23839); Project Gutenberg's header, footer, licence and trademark removed
+
+Apps under registry/apps/<id>/ are the work of their authors and carry the
+license named in their own manifest.json (one of the permissive licenses
+listed in LICENSING.md).
+
+The name "Lo-PDA" and the Lo-PDA icons are not covered by the MIT License.
+See "Name and icons" in LICENSING.md.
