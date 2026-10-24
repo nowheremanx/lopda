@@ -3366,6 +3366,127 @@ test("darkroom: develop a roll with blank frames, walk it in colour, print singl
 /* ---------- the pet (runtime/apps/pet.js; briefs/pet/design.md) ---------- */
 const PET_TONES = [[31, 42, 20], [74, 90, 50], [125, 138, 88], [163, 173, 126]].map((t) => t.concat(255).join(","));
 
+test("pet: the first phone feedback - an inert egg, a full screen, a vertical food list, a tap that feeds and A's own label", { skip, timeout: 90000 }, async (t) => {
+  const { p, errors } = await page(t, { ...pw.devices["iPhone 13"], locale: "zh-CN", serviceWorkers: "block" });
+  await p.clock.install({ time: new Date(2026, 9, 11, 9, 0) });
+  await p.goto(base + "/runtime/?debug", { waitUntil: "networkidle" });
+  await p.waitForFunction(() => document.getElementById("savestate").textContent !== "启动中…");
+  const save = () => p.evaluate(() => LOPDA_DEBUG.pet.save());
+  const inkPixels = (i) => p.evaluate((i) => {
+    const c = document.querySelectorAll(".pet-ikey canvas")[i], d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data;
+    let n = 0;
+    for (let j = 0; j < d.length; j += 4) if (d[j] === 31 && d[j + 1] === 42 && d[j + 2] === 20) n++;
+    return n;
+  }, i);
+
+  await p.locator("#home .app", { hasText: "宠物" }).click();
+  await p.locator("#v-pet:not([hidden])").waitFor();
+  await p.waitForFunction(() => window.LOPDA_DEBUG.pet && LOPDA_DEBUG.pet.save());
+  assert.equal((await save()).stage, "egg");
+
+  /* an egg: every icon is the faintest tone and does nothing, START is off and A says nothing */
+  for (let i = 0; i < 8; i++) assert.equal(await inkPixels(i), 0, `egg icon ${i} is faint, not ink`);
+  for (let i = 0; i < 8; i++) {
+    await p.locator(".pet-ikey").nth(i).click();
+    await p.waitForTimeout(60);
+    assert.ok(await p.isHidden("#pet-panel"), `egg icon ${i} opens nothing`);
+  }
+  assert.equal((await save()).stage, "egg");
+  assert.equal(await p.locator("#pet-keys .sk-start").isDisabled(), true, "START is disabled on an egg");
+  assert.equal(await p.locator("#pet-keys .sk-a").isDisabled(), true, "A is disabled on an egg");
+  assert.equal(await p.locator("#pet-keys .sk-a span").innerText(), "", "A has no label on an egg");
+
+  await p.evaluate(() => LOPDA_DEBUG.pet.hatch());
+  await p.waitForTimeout(120);
+  assert.equal((await save()).stage, "baby");
+  assert.equal(await p.locator("#pet-keys .sk-a span").innerText(), "喂食", "A names 喂食 on the food icon");
+  await p.keyboard.press("ArrowRight");
+  await p.waitForTimeout(80);
+  assert.equal(await p.locator("#pet-keys .sk-a span").innerText(), "玩", "A names 玩 on the play icon");
+  await p.keyboard.press("ArrowLeft");
+  await p.waitForTimeout(80);
+  assert.equal(await p.locator("#pet-keys .sk-a span").innerText(), "喂食");
+  const framed = await p.evaluate(() => {
+    const b = document.querySelector(".pet-ikey.on");
+    return { index: [...document.querySelectorAll(".pet-ikey")].indexOf(b), shadow: getComputedStyle(b).boxShadow };
+  });
+  assert.equal(framed.index, 0, "the selected icon is the framed one");
+  assert.match(framed.shadow, /inset/, "selection is the frame, not a tone");
+
+  /* 信 is faint with no pick and ink with one */
+  assert.equal(await inkPixels(6), 0, "信 is faint with no pick");
+  await p.evaluate(() => LOPDA_DEBUG.pet.forcePick("word"));
+  await p.waitForTimeout(80);
+  assert.ok(await inkPixels(6) > 0, "信 is ink with a pick");
+  await p.evaluate(() => LOPDA_DEBUG.pet.forcePick(null));
+  await p.waitForTimeout(80);
+  assert.equal(await inkPixels(6), 0, "信 goes faint again");
+
+  /* A right after the hatch: full, so it shakes and the panel closes; nothing is eaten */
+  await p.locator(".pet-ikey").nth(0).tap();
+  await p.waitForSelector("#pet-panel:not([hidden])");
+  await p.keyboard.press("x");
+  await p.waitForTimeout(150);
+  assert.ok(await p.isHidden("#pet-panel"), "A right after the hatch closes the panel");
+  let s = await save();
+  assert.ok(!(s.lastMeal > 0), "a full pet refuses the meal");
+
+  /* ArrowDown then A eats a snack, even at joy 5 */
+  await p.locator(".pet-ikey").nth(0).tap();
+  await p.waitForSelector("#pet-panel:not([hidden])");
+  await p.keyboard.press("ArrowDown");
+  await p.keyboard.press("x");
+  await p.waitForTimeout(150);
+  s = await save();
+  assert.equal(s.today.snacks, 1, "ArrowDown + A eats a snack");
+  assert.ok(await p.isHidden("#pet-panel"));
+
+  /* a tap on 吃饭 feeds once the pet is no longer full: six awake hours in the afternoon leave hunger at 4 */
+  await p.clock.setSystemTime(new Date(2026, 9, 11, 18, 0));
+  await p.evaluate(() => LOPDA_DEBUG.pet.advance(6));
+  assert.ok((await save()).hunger < 5, "the afternoon made it a little hungry");
+  await p.locator(".pet-ikey").nth(0).tap();
+  await p.waitForSelector("#pet-panel:not([hidden])");
+  const meal = p.locator("#pet-panel .pet-choice").nth(0);
+  assert.match(await meal.innerText(), /吃饭/);
+  await meal.tap();
+  await p.waitForTimeout(150);
+  s = await save();
+  assert.ok(s.lastMeal > 0, "a tap on 吃饭 feeds");
+  assert.ok(await p.isHidden("#pet-panel"));
+
+  /* on the iPhone 13 the four soft keys sit on the LCD's bottom edge, the icons right above, and nothing scrolls */
+  const measure = () => p.evaluate(() => {
+    const el = document.getElementById("screen"), v = document.getElementById("v-pet");
+    const r = el.getBoundingClientRect(), b = parseFloat(getComputedStyle(el).borderBottomWidth) || 0;
+    const keys = document.getElementById("pet-keys").getBoundingClientRect();
+    const icons = document.getElementById("pet-icons").getBoundingClientRect();
+    const cv = document.getElementById("pet-cv").getBoundingClientRect();
+    return {
+      lcd: [el.clientWidth, el.clientHeight],
+      gap: r.bottom - b - keys.bottom,
+      keysTop: keys.top, keysBottom: keys.bottom, iconsBottom: icons.bottom,
+      scrollH: v.scrollHeight, scrollW: v.scrollWidth, w: v.clientWidth, h: v.clientHeight,
+      room: [cv.width, cv.height]
+    };
+  });
+  let m = await measure();
+  assert.ok(m.lcd[0] >= 331 && m.lcd[1] > 359, `the iPhone 13 LCD is taller than the smallest one (${m.lcd})`);
+  assert.ok(m.gap >= -0.5 && m.gap <= 2, `the soft keys sit on the screen's bottom (${m.gap} px)`);
+  assert.ok(Math.abs(m.iconsBottom - m.keysTop) <= 1, "the icon row is right above the soft keys");
+  assert.ok(m.scrollH <= m.h && m.scrollW <= m.w, `no scrolling (${m.scrollW}x${m.scrollH} in ${m.w}x${m.h})`);
+  assert.deepEqual(m.room, [324, 240], "the room keeps 4 CSS px a room pixel");
+
+  await p.setViewportSize({ width: 375, height: 587 });
+  await p.waitForTimeout(150);
+  m = await measure();
+  assert.deepEqual(m.lcd, [331, 359], "the smallest LCD");
+  assert.ok(m.gap >= -0.5 && m.gap <= 2, `the soft keys sit on the 331 x 359 screen's bottom (${m.gap} px)`);
+  assert.ok(m.scrollH <= m.h && m.scrollW <= m.w, "still no scrolling at 331 x 359");
+  assert.deepEqual(m.room, [324, 240]);
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
 test("pet: hatch, meal, wash, look, the light at night, travel and the postcard; four tones only; fits 331 wide", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await page(t, { locale: "zh-CN", serviceWorkers: "block", viewport: { width: 375, height: 667 } });
   await p.clock.install({ time: new Date(2026, 9, 11, 9, 0) });
@@ -3395,18 +3516,28 @@ test("pet: hatch, meal, wash, look, the light at night, travel and the postcard;
   await p.evaluate(() => LOPDA_DEBUG.pet.hatch());
   assert.equal((await save()).stage, "baby");
 
-  /* food: a two-item choice, A takes the meal; the soft keys say what the sub-screen does */
+  /* food: a two-item vertical choice; the soft keys say what the sub-screen does */
   await p.locator(".pet-ikey").nth(0).click();
   await p.waitForSelector("#pet-panel:not([hidden])");
   assert.match(await p.locator("#pet-panel").innerText(), /吃什么/);
+  assert.match(await p.locator("#pet-panel").innerText(), /上下选/);
   assert.equal(await p.locator(".sk-start").isDisabled(), true);
   assert.equal(await p.locator(".sk-a span").innerText(), "选");
   assert.equal(await p.locator(".sk-b span").innerText(), "返回");
+  /* freshly hatched it is full: a meal is refused, the panel closes and nothing is eaten */
   await key("a");
   let s = await save();
-  assert.ok(s.lastMeal > 0, "a meal was eaten");
+  assert.ok(!(s.lastMeal > 0), "a full meal is not eaten");
   assert.ok(await p.isHidden("#pet-panel"));
-  assert.equal(await p.locator(".sk-a span").innerText(), "用");
+  assert.equal(await p.locator(".sk-a span").innerText(), "喂食");
+  /* ArrowDown picks the snack, A eats it even at full joy */
+  await p.locator(".pet-ikey").nth(0).click();
+  await p.waitForSelector("#pet-panel:not([hidden])");
+  await p.keyboard.press("ArrowDown");
+  await key("a");
+  s = await save();
+  assert.equal(s.today.snacks, 1, "a snack was eaten");
+  assert.ok(await p.isHidden("#pet-panel"));
 
   /* wash is the water icon (third) */
   const close = (await save()).close;
@@ -3442,6 +3573,12 @@ test("pet: hatch, meal, wash, look, the light at night, travel and the postcard;
   const hungry = (await save()).hunger;
   assert.ok(hungry <= 1, "40 hours without a meal makes it hungry: " + hungry);
   assert.ok(await inkPixels(7) > callMid, "the call icon turns ink when it wants something");
+  /* hungry now, the same A eats a meal */
+  await p.locator(".pet-ikey").nth(0).click();
+  await p.waitForSelector("#pet-panel:not([hidden])");
+  await key("a");
+  assert.ok((await save()).lastMeal > 0, "a meal was eaten when hungry");
+  assert.ok(await p.isHidden("#pet-panel"));
 
   /* 21:00 with the light off is a darker room */
   await p.clock.setSystemTime(new Date(2026, 9, 11, 21, 0));

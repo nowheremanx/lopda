@@ -57,11 +57,37 @@ test("the pack is one chip species with 4 x 4 x 3 markings, 6 adult forms, 12 ac
 test("every grid in the pack is rectangular and uses only .kdmp", () => {
   for (const [name, g] of frameGrids()) assertGrid(name, g);
   for (const id of ["egg", "baby", "child"]) assertGrid(id, P[id]);
+  P.eggCrack.forEach((g, i) => assertGrid("eggCrack " + i, g));
   for (const id of P.forms) assertGrid("adult " + id, P.adult(id));
   for (const id of Object.keys(P.props)) assertGrid("prop " + id, P.props[id]);
   for (const id of ["bowl", "bowlEmpty", "poop", "sign", "zz"]) assertGrid("room " + id, P.room[id]);
   for (const id of Object.keys(P.icons)) assertGrid("icon " + id, P.icons[id]);
   for (const s of P.souvenirs) assertGrid("souvenir " + s.id, s.grid);
+});
+
+test("egg: two cracked stages, same 16 x 16 box as the whole egg, and each one is a different picture", () => {
+  assert.equal(P.eggCrack.length, 2);
+  const whole = P.egg;
+  const [small, big] = P.eggCrack;
+  for (const [name, g] of [["small", small], ["big", big]]) {
+    assertGrid("eggCrack " + name, g, 16, 16);
+    assert.notDeepEqual(g, whole, `${name} crack is not the whole egg`);
+    assert.deepEqual(g.slice(0, 2), whole.slice(0, 2), `${name} keeps the egg's top`);
+    assert.deepEqual(g.slice(14), whole.slice(14), `${name} keeps the egg's bottom`);
+  }
+  assert.notDeepEqual(small, big, "the two stages differ");
+  const changes = (g) => g.reduce((n, row, r) => n + [...row].filter((c, i) => c !== whole[r][i]).length, 0);
+  assert.ok(changes(small) > 0 && changes(big) > changes(small), "the big crack changes more pixels than the small one");
+});
+
+test("floor props: the full and empty bowls are the same bowl, and a pile uses more than one tone", () => {
+  const full = P.props.bowl, empty = P.props.bowlEmpty;
+  assertGrid("bowl", full); assertGrid("bowlEmpty", empty);
+  assert.match(full.slice(0, 3).join(""), /[dm]/, "food sits over the full bowl's rim");
+  assert.match(empty.slice(0, 3).join(""), /^[.]+$/, "nothing sits over the empty bowl");
+  assert.deepEqual(full.slice(3), empty.slice(3), "below the rim the two states are the same bowl");
+  const tones = new Set(P.props.poop.join("").replace(/\./g, "").split(""));
+  assert.ok(tones.has("k") && tones.has("m") && tones.has("d"), "a pile has an ink edge, a mid body and dark turns");
 });
 
 test("frames: every action with all 48 markings is 16 x 16", () => {
@@ -170,6 +196,25 @@ test("drawRoom: a second pack brings its own room props", () => {
   }
   const withChip = room({ mess: 1, dayOfMonth: 24, bowlFull: true });
   assert.notEqual(withChip[55 * W + 12], 3, "the chip room did not draw the fake grid");
+});
+
+test("drawRoom: the rug is a bordered rectangle under the pet, and a full bowl differs from an empty one", () => {
+  const base = { dayOfMonth: 24, mess: 0 };
+  const full = room({ ...base, bowlFull: true });
+  assert.equal(full[48 * W + 38], 0, "the rug's top-left corner is its ink border");
+  assert.equal(full[52 * W + 53], 0, "the rug's bottom-right corner is its ink border");
+  assert.equal(full[49 * W + 39], 3, "the rug has a paper field inside the border");
+  assert.equal(full[50 * W + 46], 1, "the rug has a pattern in the middle");
+  const empty = room({ ...base, bowlFull: false });
+  let changed = 0;
+  for (let y = 47; y < 54; y++) for (let x = 9; x < 19; x++) if (full[y * W + x] !== empty[y * W + x]) changed++;
+  assert.ok(changed > 0, "food in the bowl changes the bowl, not something else");
+  let outside = 0;
+  for (let i = 0; i < W * H; i++) if (full[i] !== empty[i]) {
+    const x = i % W, y = Math.floor(i / W);
+    if (x < 9 || x >= 19 || y < 47 || y >= 54) outside++;
+  }
+  assert.equal(outside, 0, "only the bowl changes with the food");
 });
 
 test("drawRoom: lightOff maps paper-mid-dark-ink one step darker", () => {

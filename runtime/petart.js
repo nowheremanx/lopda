@@ -176,6 +176,43 @@ var CHIP_EGG=[
 "....kpppppmk....",
 ".....kkkkkk.....",
 "................"];
+/* the egg's two cracked stages, same shell and the same 16 x 16 box: a short crack at 20 s, a long one at 40 s */
+var CHIP_EGG_CRACK=[
+[
+"................",
+"......kkkk......",
+".....kppppk.....",
+"....kppmmdpk....",
+"...kpppmdpppk...",
+"...kpppdppppk...",
+"..kppkkkkkkppk..",
+"..kpkkddddkkpk..",
+"..kppkdmmdkppk..",
+"..kpkkdmmdkkpk..",
+"..kppkddddkppk..",
+"..kppkkkkkkppk..",
+"...kppppppppk...",
+"....kpppppmk....",
+".....kkkkkk.....",
+"................"],
+[
+"................",
+"......kkkk......",
+".....kppdpk.....",
+"....kppmmdpk....",
+"...kpppddpppk...",
+"...kppddppppk...",
+"..kppkkpkkkppk..",
+"..kpkkdpddkkpk..",
+"..kppkdmpdkppk..",
+"..kpkkdpmdkkpk..",
+"..kppkddpdkppk..",
+"..kppkkkpkkppk..",
+"...kppppdpppk...",
+"....kppppdmk....",
+".....kkkkkk.....",
+"................"]
+];
 var CHIP_BABY=[
 "................",
 "................",
@@ -251,9 +288,12 @@ var PROPS={
   flagBlank:["kkkkkkkk","kppppppk","kppppppk","kppppppk","kppppppk","kppppppk","kppppppk","kppppppk","kkkkkkkk","k.......","k.......","k.......","k.......","k......."],
   books:["...kkkkkkkk.","...kmmmmmmk.","..kkkkkkkkkk","..kpppppppdk",".kkkkkkkkkk.",".kdddddddmk.","kkkkkkkkkkkk","kmmmmmmmmmpk","kkkkkkkkkkkk"],
   film:[".kkkkk..","kdpddk..","kdddkkkk","kdddkmmk","kdddkkkk","kdddk...",".kkkk..."],
-  bowl:["...dmdm...","..dmdmdd..","kkkkkkkkkk",".kppppppk.","..kkkkkk.."],
-  bowlEmpty:["..........","kkkkkkkkkk",".kppppppk.","..kkkkkk.."],
-  poop:["...k...","..kmk..",".kmmmk.",".kkkkk.","kmmmmmk","kkkkkkk"],
+  /* the same bowl in both states, so the owner can tell which is which: a heap of dark food over the rim, or an empty
+     dark inside; the body is paper, outlined in ink */
+  bowl:["..........","...d.d....","..ddddd...","kkkkkkkkkk","kddddddddk",".kppppppk.","..kkkkkk.."],
+  bowlEmpty:["..........","..........","..........","kkkkkkkkkk","kddddddddk",".kppppppk.","..kkkkkk.."],
+  /* a small coiled pile in three tones, not a smear: ink edge, mid body, dark turns */
+  poop:["..kkk..",".kmmmk.","kmdmmmk","kmmdmmk",".kmmmk.","..kkk.."],
   heart:[".kk.kk.","kddkddk","kdddddk",".kdddk.","..kdk..","...k..."],
   heartE:[".kk.kk.","k..k..k","k.....k",".k...k.","..k.k..","...k..."],
   sign:["kkkkkkkkkkkkkkkk","kppppppppppppppk","kppppppppppppppk","kppppppppppppppk","kppppppppppppppk","kppppppppppppppk","kkkkkkkkkkkkkkkk",".......kk.......",".......kk.......",".......kk.......",".....kkkkkk....."],
@@ -723,11 +763,11 @@ function paintRoom(buf,w,h,scene,pack){
   rect(buf,w,h,4,39,16,4,3);
   rect(buf,w,h,4,39,5,2,2);
 
-  /* the rug: a paper diamond in a checker, so it reads at four tones */
-  for(var ry=0;ry<5;ry++){
-    var half=14-Math.abs(2-ry)*3;
-    for(var rx=-half;rx<half;rx++) if((rx+ry)%2===0) put(buf,w,h,40+rx,46+ry,3);
-  }
+  /* the rug: a small rectangle with an ink border and a simple mid pattern, under the pet's feet */
+  rect(buf,w,h,38,48,16,5,0);
+  rect(buf,w,h,39,49,14,3,3);
+  for(x=40;x<52;x+=4){ put(buf,w,h,x,49,2); put(buf,w,h,x+1,51,2); }
+  put(buf,w,h,46,50,1); put(buf,w,h,47,50,1);
 
   /* bowl and the little piles, from this room's own props */
   var bowlAt=room.bowlAt||[9,47];
@@ -804,6 +844,7 @@ var CHIP_PACK={
   frames:frames,
   adult:adult,
   egg:CHIP_EGG,
+  eggCrack:CHIP_EGG_CRACK,
   baby:CHIP_BABY,
   child:CHIP_CHILD,
   marks:{ant:["ball","stick","fork","bent"],pat:["plain","dot","stripe","trace"],eye:["dot","bar","big"]},

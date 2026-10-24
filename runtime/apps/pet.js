@@ -56,7 +56,7 @@ var P={
   sub:null, sel:0, frame:0,
   anim:0, hold:0, roomHold:0, holdFired:false,
   eggMs:0, action:null, actionUntil:0, heartUntil:0,
-  washUntil:0, flash:null, outing:null, foodSel:0, play:null, boxPage:0,
+  washUntil:0, washStart:0, flash:null, outing:null, foodSel:0, play:null, boxPage:0,
   confirmStage:0, panelKey:"",
   saveTimer:0, lastWants:null, bringing:false,
   pickSeq:0, wordWord:"", wordMeaning:null, wordBusy:false, aiJob:null
@@ -66,6 +66,7 @@ var ctx=null, buf=null, im=null, iconCvs={}, iconBuilt=false;
 function now(){ return Date.now(); }
 function tz(){ return -new Date().getTimezoneOffset(); }
 function isOpen(){ var v=$("v-pet"); return !!v && !v.hidden; }
+function isEgg(){ return !!(P.save && P.save.stage==="egg"); }
 function el(tag,cls,text){ var e=document.createElement(tag); if(cls) e.className=cls; if(text!=null) e.textContent=text; return e; }
 function beep(name){ if(!document.hidden && isOpen()) LP.sfx(name); }
 function localDate(t){ return new Date(t+tz()*60000); }
@@ -79,6 +80,14 @@ function shift(grid,dy){
     if(dy>0) out.push(y<dy ? blank : grid[y-dy]);
     else out.push(y-dy>=h ? blank : grid[y-dy]);
   }
+  return out;
+}
+/* a one-pixel sideways shift: the head shake uses the same sprite, never a new drawing */
+function shiftX(grid,dx){
+  if(!grid || !dx) return grid;
+  var w=String(grid[0]).length, blank="", out=[], r;
+  for(var c=0;c<w;c++) blank+=".";
+  for(r=0;r<grid.length;r++) out.push(dx>0 ? (blank+grid[r]).slice(0,w) : (grid[r]+blank).slice(-w));
   return out;
 }
 /* ---------- tones and canvases ---------- */
@@ -102,8 +111,10 @@ function paintRoomBuffer(){
   }
   ctx.putImageData(im,0,0);
 }
-/* an icon or a souvenir picture: every pixel is paper or one of the four tones, so a canvas holds no stray colours */
-function paintGrid(cv,grid,tone,bg){
+/* an icon or a souvenir picture: every pixel is paper or one of the four tones, so a canvas holds no stray colours.
+   A faint (disabled) glyph is the same drawing in mid with half its pixels dropped in a checker: clearly lighter than
+   the normal mid glyph, and still a shape rather than a blank. */
+function paintGrid(cv,grid,tone,bg,faint){
   var g=grid||[], w=16, h=16, r, c, line, ch, imd, d, rgb=[], i, t;
   if(g.length && String(g[0]).length===8){ w=8; h=8; }
   if(g.length) h=g.length;
@@ -119,6 +130,7 @@ function paintGrid(cv,grid,tone,bg){
       t=TONE_OF[ch];
       if(ch==="k" && tone!==undefined) t=tone;      /* the icon grids are all glyph: tone is the icon's state */
       if(t===undefined) t=(bg===undefined?3:bg);
+      if(faint && ch!==".") t=((r+c)%2===0 ? 2 : 3);
       i=(r*w+c)*4;
       d[i]=rgb[t][0]; d[i+1]=rgb[t][1]; d[i+2]=rgb[t][2]; d[i+3]=255;
     }
@@ -232,7 +244,7 @@ function loadStorage(){
     }
     readUsage().then(function(){
       backfillForm();
-      if(isOpen()){ ensurePet(); refreshTime(); render(); }
+      if(isOpen()){ ensurePet(); refreshTime(); renderKeys(); render(); }
       if(!$("v-home").hidden) LP.renderHome();
     });
   });
@@ -681,8 +693,15 @@ function patPet(){
   }
 }
 function feed(kind){
-  if(!P.save) return;
-  var t=now(), burp=false;
+  if(!P.save || isEgg()) return;
+  var t=now(), burp=false, sp=Pet.SPECIES[P.save.species]||Pet.SPECIES.chip;
+  /* a full pet does not eat a meal: it shakes its head once and the panel closes. A snack still counts at joy 5. */
+  if(kind==="meal" && (+P.save.hunger||0)>=sp.hungerMax){
+    P.sub=null;
+    P.action="shake"; P.actionUntil=t+1200;
+    beep("err"); renderKeys(); render();
+    return;
+  }
   P.save=Pet.feed(P.save,kind,t,dayKey(t));
   if(kind==="snack" && P.save.today && P.save.today.burp){ burp=true; P.save.today.burp=false; }
   P.sub=null; P.action=burp?"burp":"eat"; P.actionUntil=t+(burp?1200:2000);
@@ -692,14 +711,14 @@ function feed(kind){
 function washPet(){
   if(!P.save) return;
   P.save=Pet.wash(P.save);
-  P.washUntil=now()+SWEEP_MS; P.action="wash"; P.actionUntil=now()+SWEEP_MS;
+  P.washStart=now(); P.washUntil=now()+SWEEP_MS; P.action="wash"; P.actionUntil=now()+SWEEP_MS;
   beep("ok"); saveSoon(); render();
 }
 function toggleLight(){
   if(!P.save) return;
   P.save=Pet.setLight(P.save,!P.save.light);
   P.action=null; P.actionUntil=0;
-  beep("tick"); saveSoon(); render();
+  beep("tick"); saveSoon(); renderKeys(); render();
 }
 function callPet(){
   var w=wantsOf();
@@ -731,7 +750,7 @@ function hatchNow(silent){
     beep("ok");
     if(isOpen() && LP.chip && LP.chip.music){ LP.chip.music({action:"play",song:JINGLE,loop:false}); P.jingle=true; }
   }
-  saveNow(); render();
+  saveNow(); renderKeys(); render();
   buildPick();
   if(!$("v-home").hidden) LP.renderHome();
 }
@@ -798,8 +817,10 @@ function pasteSouvenir(){
   },function(){ beep("err"); LP.toast(tr("pet.box.pastefail")); });
 }
 function pickFood(kind){ feed(kind==="snack"?"snack":"meal"); }
+/* dir -1 is up / left and +1 is down / right: the food list is vertical, so both pairs move it, the icon row is
+   horizontal but a thumb on the cross may use either pair */
 function nav(dir){
-  if(P.sub==="food"){ P.foodSel=1-P.foodSel; beep("move"); render(); return; }
+  if(P.sub==="food"){ P.foodSel=Math.max(0,Math.min(1,P.foodSel+dir)); beep("move"); render(); return; }
   if(P.sub==="play"){ if(P.play && !P.play.done){ P.play.side=1-P.play.side; beep("move"); render(); } return; }
   if(P.sub==="box"){
     if(!P.souv.length) return;
@@ -807,11 +828,12 @@ function nav(dir){
     beep("move"); render(); return;
   }
   if(P.sub) return;
+  if(isEgg()) return;
   P.sel=(P.sel+dir+8)%8;
-  beep("move"); render();
+  beep("move"); renderKeys(); render();
 }
 function useSelected(){
-  if(!P.save) return;
+  if(!P.save || isEgg()) return;
   switch(P.sel){
     case 0: openFood(); break;
     case 1: openPlay(); break;
@@ -826,6 +848,7 @@ function useSelected(){
 function pressA(){
   if(P.holdFired){ P.holdFired=false; return; }
   if(!P.save) return;
+  if(isEgg()) return;
   if(P.sub==="food"){ pickFood(P.foodSel?"snack":"meal"); return; }
   if(P.sub==="play"){
     if(P.play && P.play.done){ P.sub=null; renderKeys(); render(); return; }
@@ -916,8 +939,15 @@ function markNames(save,pack){
   out.eye=(pack.marks.eye||["dot"])[m.eye|0] || "dot";
   return out;
 }
+/* the egg over its 60 visible seconds: whole, a small crack, a big crack; then the program hatches it */
+function eggGrid(pack){
+  var cracks=(pack && pack.eggCrack)||[], g=(pack && pack.egg) || null;
+  if(P.eggMs>=EGG_MS*2/3 && cracks[1]) g=cracks[1];
+  else if(P.eggMs>=EGG_MS/3 && cracks[0]) g=cracks[0];
+  return g;
+}
 function petGrid(save,pack,t,asleepNow){
-  if(save.stage==="egg") return shift(pack.egg, P.frame?1:0);
+  if(save.stage==="egg") return shift(eggGrid(pack), P.frame?1:0);
   if(save.stage==="baby") return shift(pack.baby, P.frame?1:0);
   if(save.stage==="child") return shift(pack.child, P.frame?1:0);
   var marks=markNames(save,pack), a=P.action || "idle";
@@ -930,13 +960,15 @@ function petGrid(save,pack,t,asleepNow){
   else face=P.frame?"idle2":"idle1";
   if(save.stage==="adult"){
     var g=pack.adult(save.form||"plain",marks);
+    if(a==="shake") return shiftX(g,P.frame?1:-1);
     if(face==="happy") return shift(g,-1);
     if(face==="sleep" || face==="wait") return g;
     return shift(g,P.frame?1:0);
   }
-  return shift(pack.frames({
+  var small=pack.frames({
     ant:marks.ant, pat:marks.pat, eye:marks.eye, face:face
-  }),0);
+  });
+  return a==="shake" ? shiftX(small,P.frame?1:-1) : shift(small,0);
 }
 function overlayGrid(base,top,x,y){
   if(!base || !top) return base;
@@ -1023,7 +1055,7 @@ function roomScene(){
   if(P.outing && P.outing.phase==="back"){
     px=8+(4-P.outing.left)*9;
     if(save.stage==="egg"){
-      scene.pet=shift(pack.egg, P.frame?1:0);
+      scene.pet=shift(eggGrid(pack), P.frame?1:0);
     } else if(save.stage==="baby" || save.stage==="child"){
       scene.pet=shift(save.stage==="baby"?pack.baby:pack.child, P.frame?1:0);
     } else {
@@ -1053,11 +1085,15 @@ function roomScene(){
   if(asleepNow && save.stage!=="egg") scene.zz=true;
   return scene;
 }
+/* the water sweeps across the floor where the piles are, from the first to the last, never over the bowl */
 function drawSweep(){
-  var x=P.frame?10:20, y;
-  for(y=44;y<59;y++){
-    if(x+2<ROOM_W) buf[y*ROOM_W+x]=3;
-    if(x+3<ROOM_W) buf[y*ROOM_W+x+3]=0;
+  var room=(packOf(P.save)||{}).room||{}, spots=room.poops||[[22,51],[27,52],[32,51]];
+  var x0=spots[0][0]-2, x1=spots[spots.length-1][0]+8;
+  var done=Math.max(0,Math.min(SWEEP_MS,now()-(P.washStart||P.washUntil-SWEEP_MS)));
+  var x=Math.round(x0+(x1-x0)*(done/SWEEP_MS)), y;
+  for(y=45;y<59;y++){
+    if(x>=0 && x<ROOM_W) buf[y*ROOM_W+x]=3;
+    if(x+2>=0 && x+2<ROOM_W) buf[y*ROOM_W+x+2]=0;
   }
 }
 function renderRoom(){
@@ -1070,11 +1106,16 @@ function renderRoom(){
 }
 
 /* ---------- icons ---------- */
+/* every icon is mid when nothing is special, ink when it is lit (信 with a pick, 呼唤 when it wants something) and
+   faint while it cannot be used (信 with no pick, everything on an egg). Selected is the frame, not a tone. */
 function iconTone(i){
-  if(i===6) return activePick()?0:1;                    /* 信: ink only while there is a pick */
-  if(i===7) return wantsOf()?0:2;                        /* 呼唤: ink only when it wants something */
+  if(i===6) return activePick()?0:2;                    /* 信: ink only while there is a pick */
+  if(i===7) return wantsOf()?0:2;                       /* 呼唤: ink only when it wants something */
   if(P.flash && P.flash.i===i && P.flash.left%2===0) return 0;
   return 2;
+}
+function iconFaint(name){
+  return isEgg() || (name==="mail" && !activePick());
 }
 function buildIcons(){
   var wrap=$("pet-icons");
@@ -1089,7 +1130,8 @@ function buildIcons(){
     iconCvs[name]=cv; b.appendChild(cv);
     b.onclick=function(){
       if(P.sub) return;                     /* a sub-screen owns A/B; an icon must not act behind it */
-      P.sel=i; beep("move");
+      if(isEgg()){ beep("err"); return; }   /* an egg has nothing to choose yet */
+      P.sel=i; beep("move"); renderKeys();
       if(P.save && P.save.travel){ bringBack(); return; }
       if(P.outing) return;
       useSelected();
@@ -1105,9 +1147,11 @@ function renderIcons(){
   var kids=wrap.children;
   ICON_NAMES.forEach(function(name,i){
     var cv=iconCvs[name]; if(!cv) return;
-    paintGrid(cv,icons[name]||[],iconTone(i),3);
+    var faint=iconFaint(name);
+    paintGrid(cv,icons[name]||[],iconTone(i),3,faint);
     var b=kids[i]; if(!b) return;
-    if(name==="mail") b.setAttribute("aria-disabled",activePick()?"false":"true");
+    /* only 信 without a pick advertises its no-op; the egg's icons still take a tap so it can answer with err */
+    b.setAttribute("aria-disabled",(name==="mail" && !activePick() && !isEgg())?"true":"false");
     if(i===P.sel) b.classList.add("on"); else b.classList.remove("on");
     b.setAttribute("aria-pressed",i===P.sel?"true":"false");
   });
@@ -1233,22 +1277,36 @@ function render(){
     if(trv) away.textContent=tr("pet.away")+" · "+tr("pet.away.hint");
   }
 }
+/* The main screen's A names what the selected icon will do; a sub-screen keeps its own A. */
 function aKeyLabel(){
   if(P.sub==="food") return "pet.sk.pick";
   if(P.sub==="play") return "pet.sk.guess";
   if(P.sub==="look") return "pet.sk.hold";
   if(P.sub==="box") return "pet.sk.paste";
   if(P.sub==="word") return "pet.sk.lookup";
+  if(!P.save || isEgg()) return "";
+  if(P.save.travel) return "pet.act.call";
+  switch(P.sel){
+    case 0: return "pet.act.feed";
+    case 1: return "pet.act.play";
+    case 2: return "pet.act.wash";
+    case 3: return P.save.light===false ? "pet.act.lighton" : "pet.act.lightoff";
+    case 4: return "pet.act.look";
+    case 5: return "pet.act.box";
+    case 6: return "pet.act.mail";
+    case 7: return "pet.act.call";
+  }
   return "pet.sk.use";
 }
 function renderKeys(){
   var wrap=$("pet-keys");
   if(!wrap) return;
+  var label=aKeyLabel(), egg=isEgg();
   LP.softkeys(wrap,{
-    select:null,
-    start:{label:tr("pet.sk.mail"),disabled:!!P.sub || !activePick(),fn:mailKey},
+    select:null,                           /* reserved for switching rooms when more species come (visits) */
+    start:{label:tr("pet.sk.mail"),disabled:!!P.sub || !activePick() || egg,fn:mailKey},
     b:{label:tr("sk.back"),fn:back},
-    a:{label:tr(aKeyLabel()),fn:function(){
+    a:{label:label?tr(label):"",disabled:egg,fn:function(){
       if(P.holdFired){ P.holdFired=false; clearHold(); return; }
       clearHold(); pressA();
     }}
@@ -1303,11 +1361,12 @@ function tick(){
 function enter(){
   P.inView=true;
   initCanvas();
-  renderKeys();
-  buildIcons();
   P.resumeOuting=true;
+  /* the save decides the A label and the egg state, so it is read before the keys are built */
   ensurePet();
   refreshTime();
+  renderKeys();
+  buildIcons();
   render();
   startTimer();
   refreshUsage();
@@ -1394,9 +1453,10 @@ LP.padRoute("pet",function(b,down){
     return true;
   }
   if(!down) return true;
-  if(b==="left" || b==="right"){ nav(b==="left"?-1:1); return true; }
+  if(b==="up" || b==="left" || b==="down" || b==="right"){ nav(b==="up" || b==="left"?-1:1); return true; }
   if(b==="b"){ back(); return true; }
   if(b==="start"){ mailKey(); return true; }
+  /* SELECT stays empty: reserved for switching rooms when more species come (visits) */
   if(b==="select"){ return true; }
   return true;
 });
