@@ -19,7 +19,7 @@ runtime/        the PWA: index.html, core.js (shared LP object: utils, views, so
                 exposure and contrast; shared by the camera, the snap viewfinder, the reader and sdk/dev.html), textsel.js (the text selection shared by the reader and the dictionary entry page), negative.js (the negative PNG and its lpDa chunk, pure functions),
                 develop.js (developing a frame: the stocks' looks, grain, halation, leaks, date stamp; pure functions on RGBA),
                 notetext.js (notes: tags, search and snippets, the diary title, the diaries by day, front matter, export names, the rules for app notes; pure functions),
-                zip.js (stored zips written, stored and deflated zips read; pure functions, CRC from negative.js), lunar.js (lunar calendar + solar term tables, 1900-2100), stardict.js (StarDict reader), bookparse.js (TXT/EPUB parser),
+                zip.js (stored zips written, stored and deflated zips read; pure functions, CRC from negative.js), lunar.js (lunar calendar + solar term tables, 1900-2100), stardict.js (StarDict reader), wordlist.js (the word list and the entries behind PAD.dict: check/query/entry and one source, shared by apps/dict.js, sdk/dev.html and the tests, SPEC.md 6.7), bookparse.js (TXT/EPUB parser),
                 books/ (the reader's two public-domain sample books), sw.js (offline cache),
                 fonts/ (DotGothic16, VT323, OFL), vendor/binjgb/ (Game Boy core, MIT), vendor/holiday-cn/ (China days off, MIT),
                 vendor/ecdict/ (abridged ECDICT in StarDict format, MIT + WordNet licence)
@@ -124,9 +124,21 @@ node --test                                  # the test suite; must pass
   call, only into a note the app made itself, src `app:<id>`, title ≤ 64 characters, text ≤ 4 KB; decisions.md section 25),
   `"camera"` (runtime 0.28.0+, SPEC.md 6.6: `PAD.camera.snap({size})` -> {w, h, px} | null, px a Uint8Array of tone indices 0-3,
   "small" 128×112 or "large" 256×224; the runtime's dialog on an app's first snap (granted with the sensors, Settings → 传感器与相机),
-  then its own viewfinder for every shot, the player presses the shutter; the runtime keeps nothing; decisions.md section 28).
+  then its own viewfinder for every shot, the player presses the shutter; the runtime keeps nothing; decisions.md section 28),
+  `"wordbook"` (runtime 0.36.0+, SPEC.md 6.7: `PAD.dict.inBook(words)` -> boolean[] | null and `PAD.dict.addWord` /
+  `removeWord(word)` -> "saved" | "denied" | "full" | null, over the player's own word book, the same one the dictionary and
+  the reader use; the runtime's dialog on the first add or remove, one grant per app, listed with the sensors in Settings;
+  reading needs the grant too; decisions.md section 35).
 - `PAD.say(text, {lang})` (runtime 0.26.0+, no permission, SPEC.md 6.5): the phone's voice through `runtime/speech.js` (shared with
   the dictionary's 发音), follows the volume, ≤ 200 characters, once a second, stops on HOME or a hidden page.
+- `PAD.dict` (runtime 0.36.0+, no permission, SPEC.md 6.7): `PAD.dict.words({len, pattern, letters, level, max, offset})` ->
+  `{words, more}` | null and `PAD.dict.lookup(word)` -> `{word, form?, zh, en}` | null, over the built-in ECDICT only
+  (`runtime/wordlist.js`; imported books are not visible, and the ECDICT off switch does not apply),
+  words in commonness order, ≤ 10 calls a second together, a bad query rejects, an unreadable dictionary is null;
+  version "ecdict-1", frozen with lopda/1. With `"permissions": ["wordbook"]`, `PAD.dict.inBook(words)` -> boolean[] | null
+  and `PAD.dict.addWord` / `removeWord(word)` -> "saved" | "denied" | "full" | null use the player's word book (headwords
+  only, 2000 at most, shared with the dictionary and the reader; the runtime's dialog on the first add or remove, one grant
+  per app, reading needs it too; Settings revokes it).
 - PAD API: `PAD.load/save/remove` (256 KB per app), `PAD.exit`, `PAD.TONES`, `PAD.spec`,
   `PAD.on("press"|"release", fn)`, `PAD.off`, `PAD.isDown`, `PAD.sfx(name)`,
   `PAD.lang` ("zh" | "en", undefined on runtimes before 0.4.0). Manifest may add `i18n.{zh,en}.{name,description}`.

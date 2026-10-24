@@ -5,12 +5,12 @@
  * so a first start without network can still install them.
  * The cache is named after this worker's scope as well as its version: GitHub Pages PR previews (pr/<n>/runtime/)
  * share Cache Storage with the real site, and each worker only ever deletes its own scope's old caches. */
-var VERSION = "lopda-v0.35.0+eee89e9";
+var VERSION = "lopda-v0.36.0+2400d0f";
 var CACHE = VERSION + " " + self.registration.scope;
-var SHELL = ["./", "index.html", "lopda.css", "strings.js", "platform.js", "lunar.js", "stardict.js", "bookparse.js", "textsel.js", "chip.js", "sensors.js", "speech.js", "lenses.js", "finder.js", "negative.js", "develop.js", "notetext.js", "zip.js", "backup.js", "ai.js", "core.js",
+var SHELL = ["./", "index.html", "lopda.css", "strings.js", "platform.js", "lunar.js", "stardict.js", "wordlist.js", "bookparse.js", "textsel.js", "chip.js", "sensors.js", "speech.js", "lenses.js", "finder.js", "negative.js", "develop.js", "notetext.js", "zip.js", "backup.js", "ai.js", "core.js",
   "apps/notes.js", "apps/calendar.js", "apps/dict.js", "apps/reader.js", "apps/camera.js", "apps/darkroom.js", "apps/cart.js", "apps/snap.js", "apps/store.js", "apps/scripts-templates.js", "apps/scripts.js", "apps/settings.js", "boot.js", "../sdk/pad-shim.js",
   "fonts/fonts.css", "vendor/holiday-cn/2026.json",
-  "vendor/ecdict/ecdict.ifo", "vendor/ecdict/ecdict.idx", "vendor/ecdict/ecdict.dict.dz", "vendor/ecdict/ecdict.lemma.gz",
+  "vendor/ecdict/ecdict.ifo", "vendor/ecdict/ecdict.idx", "vendor/ecdict/ecdict.dict.dz", "vendor/ecdict/ecdict.lemma.gz", "vendor/ecdict/ecdict.words.gz",
   "books/lunyu.txt", "books/alice.txt",
   "../registry/index.json", "../registry/apps/calculator/index.html", "../registry/apps/paint/index.html",
   "manifest.webmanifest", "vendor/binjgb/binjgb.js", "vendor/binjgb/binjgb.wasm", "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png"];

@@ -88,6 +88,95 @@
     },
     {
       "spec": "lopda/1",
+      "id": "crossing",
+      "name": "拼字格",
+      "glyph": "字",
+      "category": "game",
+      "buttons": true,
+      "icon": [
+        "......1111......",
+        "....11333111....",
+        "..111300031111..",
+        "..111303331111..",
+        ".11113000311111.",
+        ".11111333111111.",
+        "1111110111111111",
+        "1111101111111111",
+        "1111011111111111",
+        "1133311111133311",
+        ".33033111130003.",
+        ".30003000033033.",
+        ".30303111133033.",
+        "..333111111333..",
+        "....11111111....",
+        "......1111......"
+      ],
+      "version": "1.6.0",
+      "description": "在字母盘上拼出单词，填满小小字谜格。拼对后中文显示在格下，再读出英文。",
+      "i18n": {
+        "zh": {
+          "name": "拼字格",
+          "description": "在字母盘上拼出单词，填满小小字谜格。拼对后中文显示在格下，再读出英文。"
+        },
+        "en": {
+          "name": "Crossing",
+          "description": "Spell words on a wheel to fill a crossword; see the meaning, hear the word."
+        }
+      },
+      "author": "Haowei Wu",
+      "license": "MIT",
+      "permissions": [
+        "wordbook"
+      ],
+      "path": "apps/crossing/index.html",
+      "sha256": "98411be80eb978385ae45e07d645ea353b111d895ef189efe5adf9aaba74c3bb",
+      "bytes": 91231
+    },
+    {
+      "spec": "lopda/1",
+      "id": "daily-box",
+      "name": "每日推箱",
+      "glyph": "箱",
+      "category": "game",
+      "buttons": true,
+      "icon": [
+        "................",
+        ".00000000000000.",
+        ".01111111111110.",
+        ".01000000000010.",
+        ".01031111113010.",
+        ".01013111131010.",
+        ".01011311311010.",
+        ".01011133111010.",
+        ".01011133111010.",
+        ".01011311311010.",
+        ".01013111131010.",
+        ".01031111113010.",
+        ".01000000000010.",
+        ".01111111111110.",
+        ".00000000000000.",
+        "................"
+      ],
+      "version": "1.0.0",
+      "description": "每天一关推箱子：把箱子推到记号上，只能推不能拉。有最少步数、撤销和答案。",
+      "i18n": {
+        "zh": {
+          "name": "每日推箱",
+          "description": "每天一关推箱子：把箱子推到记号上，只能推不能拉。有最少步数、撤销和答案。"
+        },
+        "en": {
+          "name": "DailyBox",
+          "description": "One crate-pushing puzzle a day: push every crate onto a mark. Par, undo, answer."
+        }
+      },
+      "author": "Haowei Wu",
+      "license": "MIT",
+      "path": "apps/daily-box/index.html",
+      "sha256": "6ea1c98f123b0b9d4695d2011f986d3dd4ffe7ea475ec91871cd1958958eb868",
+      "bytes": 160006
+    },
+    {
+      "spec": "lopda/1",
       "id": "daily-slip",
       "name": "每日一签",
       "glyph": "签",
