@@ -6834,6 +6834,25 @@ test("crossing: round 1 shows a grid, a demo spells one word, words typed with t
   assert.equal(word1.outline, true, "NEXT is outlined while a word is selected");
   assert.ok(word1.detail.length > 0, "the first word shows its line");
   assert.notEqual(word1.detail, summary, "the detail box is not the summary on a word");
+  /* the word book: the card asked once when it opened, and with no grant yet every row is hollow. SELECT on
+     the first word opens the dev page's permission box (as the handheld asks once per app); allowed, the word
+     is added and its ribbon fills in, and the dev log says so. Right takes it out again and the ribbon empties. */
+  const markOn = (i) => f.evaluate((i) => document.querySelectorAll("#cover-list li")[i].querySelector(".mark").classList.contains("book"), i);
+  await until(p, async () => /dict\.inBook/.test(await p.textContent("#log")), "the card's inBook call");
+  assert.equal((await p.textContent("#log")).split("dict.inBook").length - 1, 1, "one inBook call when the card opens");
+  assert.equal(await markOn(0), false, "without a grant no row is in the book");
+  const bookWord = round.placed[0];
+  await press("select");
+  await p.waitForSelector("#wordbookyes", { state: "visible" });
+  await p.click("#wordbookyes");
+  await until(p, async () => new RegExp("dict\\.add " + bookWord + " -> saved").test(await p.textContent("#log")), "the first word to be added");
+  await until(p, () => markOn(0), "the first row's bookmark to fill in");
+  await press("right");
+  await until(p, async () => new RegExp("dict\\.remove " + bookWord + " -> saved").test(await p.textContent("#log")), "the first word to be removed");
+  await until(p, async () => !(await markOn(0)), "the first row's bookmark to empty again");
+  const afterBook = await cardState();
+  assert.equal(afterBook.fit, true, "the bookmarks do not push the card out of 331x359");
+  assert.ok(afterBook.scroll <= afterBook.client, "the card still needs no scrolling: " + afterBook.scroll + " <= " + afterBook.client);
   await press("up");
   const backToNext = await cardState();
   assert.equal(backToNext.picked, -1, "Up from the first word goes back to NEXT");
@@ -6848,6 +6867,8 @@ test("crossing: round 1 shows a grid, a demo spells one word, words typed with t
   assert.equal(ring.picked, -1, "Down from the last word wraps to NEXT");
   assert.equal(ring.outline, false);
   assert.match(await p.textContent("#log"), /music play once/, "the clear plays its tune");
+  /* a word book call just before START shares the 10-a-second PAD.dict limit: the round waits out that window,
+     so the test does not need to pause here */
   await press("a");
   await until(p, () => f.evaluate(() => game.phase === "play" && game.round === 2), "round 2");
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);

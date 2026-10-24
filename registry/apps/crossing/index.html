@@ -7,8 +7,9 @@
 <!-- Lo-PDA example app (lopda/1): 拼字格 / Crossing. MIT License, see LICENSE.
      A letter wheel and a small crossword. The words come from PAD.dict (SPEC.md 6.7), the built-in ECDICT:
      words() picks the seed word and the real words that fit its letters, lookup() gives the line in the
-     player's language. No permission: PAD.dict is read-only, like PAD.say. The player can turn ECDICT off in
-     词典管理 and this app still works. Everything is plain DOM, no canvas, no framework. -->
+     player's language. The results card can add a word to the player's word book, which needs the
+     "wordbook" permission (SPEC.md 6.7); the app adds one word at a time on SELECT. The player can turn
+     ECDICT off in 词典管理 and this app still works. Everything is plain DOM, no canvas, no framework. -->
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #a3ad7e; color: #1f2a14; font-family: monospace; }
   body { display: flex; flex-direction: column; -webkit-user-select: none; user-select: none; }
@@ -63,8 +64,24 @@
      The detail box keeps its three lines whichever item is chosen, so nothing jumps as the cursor moves. */
   #cover.done { gap: 8px; padding: 8px 12px; }
   #cover.done #cover-text { font-size: 16px; line-height: 1.3; }
-  #cover.done #cover-list li { padding: 0 6px; }
+  #cover.done #cover-list li { padding: 0 24px 0 6px; position: relative; }
   #cover.done #cover-list li.sel { background: #1f2a14; color: #a3ad7e; border-bottom-color: #1f2a14; }
+  /* the word book mark at the right end of a row: a 10x14 ribbon with a V notch, drawn in CSS.
+     In the book it is solid ink; not in the book (or unknown) it is a hollow dashed outline in the
+     dark tone. On the selected, inverted row both become paper so they stay visible. */
+  .mark { position: absolute; right: 6px; top: 4.5px; width: 10px; height: 14px; box-sizing: border-box;
+    border: 1px dashed #4a5a32; border-bottom: 0; pointer-events: none; }
+  /* the pseudo-elements sit in the 8x13 padding box (1px side and top borders), so the notch runs
+     border-box (0,14) -> (5,10.64) -> (10,14), the same V as the filled ribbon's clip-path */
+  .mark::before, .mark::after { content: ""; position: absolute; width: 6px; height: 1px; border-top: 1px dashed #4a5a32; }
+  .mark::before { left: 4px; top: 9.6px; transform-origin: 0 0; transform: rotate(34deg); }
+  .mark::after { left: -1px; top: 13px; transform-origin: 0 0; transform: rotate(-34deg); }
+  .mark.book { border: 0; background: #1f2a14;
+    clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 76%, 0 100%); }
+  .mark.book::before, .mark.book::after { display: none; }
+  #cover.done #cover-list li.sel .mark { border-color: #a3ad7e; }
+  #cover.done #cover-list li.sel .mark::before, #cover.done #cover-list li.sel .mark::after { border-top-color: #a3ad7e; }
+  #cover.done #cover-list li.sel .mark.book { background: #a3ad7e; }
   #cover-detail { display: none; width: 100%; max-width: 280px; box-sizing: border-box; height: 66px; padding: 6px;
     overflow: hidden; text-align: left; font-size: 14px; line-height: 18px; overflow-wrap: anywhere; text-overflow: ellipsis;
     color: #1f2a14; box-shadow: inset 0 1px 0 #4a5a32; }
@@ -123,6 +140,7 @@
       ok: "知道了",
       done: "第 {n} 关完成", doneBtn: "下一关", bonus: "奖励词 {w}：提示 +1",
       sum: "奖励词 {b} 个 · 提示 {n}",
+      bookAdded: "已加入生词本", bookRemoved: "已移出生词本", bookDenied: "没有允许使用生词本", bookFull: "生词本满了",
       noHints: "先找奖励词换提示", hintHead: "提示：", noEntry: "词典里没有这个词",
       noWord: "不是这里的词", again: "这个词已经填上了", againBonus: "这个奖励词已经算过了"
     },
@@ -137,6 +155,7 @@
       ok: "OK",
       done: "ROUND {n} CLEAR", doneBtn: "NEXT ROUND", bonus: "Bonus word {w}: hint +1",
       sum: "Bonus words {b} · hints {n}",
+      bookAdded: "Added to word book", bookRemoved: "Removed from word book", bookDenied: "Word book not allowed", bookFull: "The word book is full",
       noHints: "Earn a hint with a bonus word", hintHead: "HINT: ", noEntry: "No entry in the dictionary",
       noWord: "Not a word here", again: "Already in the grid", againBonus: "Bonus word already counted"
     }
@@ -187,6 +206,9 @@
   var pos = [];                 /* the centre of each wheel letter, in the wheel's own pixels, for the line */
   var demoTimers = [], demoWord = null, helpBack = null;
   var fxTimers = [], results = null, resultSum = "", pick = 0;   /* the results card, the summary line, and the ring's cursor (0 = NEXT) */
+  var bookMarks = [], bookBusy = false, bookRefreshed = false, bookSeq = 0;   /* which result words are in the player's word book */
+  var bookAt = 0;              /* when the last word book call was made: those calls share PAD.dict's 10-a-second limit */
+  var bookTimer = null, pickSeq = 0;   /* the detail box's word-book line, and a token so a moving cursor wins */
   var savedRound = null, savedHints = 0, savedDone = [];
   var pending = { round: 1, hints: 0, done: [] };   /* what to ask for again after a dictionary error */
 
@@ -428,11 +450,21 @@
     coverText.textContent = tx("done", state.round);
     coverList.innerHTML = "";
     results.forEach(function (row, i) {
-      var li = document.createElement("li");
+      var li = document.createElement("li"), mark = document.createElement("span");
       li.setAttribute("data-pick", String(i + 1));
       li.textContent = row.word.toUpperCase();
+      mark.className = "mark";       /* the word book ribbon, drawn in CSS */
+      li.appendChild(mark);
       coverList.appendChild(li);
     });
+    if (reset) {
+      bookBusy = false;              /* a toggle still pending from the last card must not lock this one */
+      bookSeq++;                     /* nor may its answer (and its row index) land on this card */
+      bookMarks = results.map(function () { return false; });
+      bookRefreshed = false;
+      readBookMarks(false);
+    }
+    renderMarks();
     coverList.hidden = false;
     coverBtn.textContent = TXT.doneBtn;
     coverBtn.hidden = false;
@@ -443,6 +475,8 @@
      the button is the chosen thing (ink) or merely drawn (outlined) */
   function renderPick() {
     var rows = coverList.querySelectorAll("li"), i, row = pick > 0 ? results[pick - 1] : null;
+    pickSeq++;
+    if (bookTimer) { clearTimeout(bookTimer); bookTimer = null; }
     for (i = 0; i < rows.length; i++) rows[i].classList.toggle("sel", i + 1 === pick);
     if (row) {
       detailEl.textContent = row.mean || row.word.toUpperCase();
@@ -459,11 +493,80 @@
     renderPick();
     PAD.sfx("tick");
   }
-  function pickWord(i) {
+  function pickWord(i, quiet) {
     var row = results[i - 1];
     if (!row) return;
     if (pick !== i) { pick = i; renderPick(); PAD.sfx("tick"); }
-    sayWord(row.word);
+    if (!quiet) sayWord(row.word);
+  }
+
+  /* ---------- the word book, on the results card ---------- */
+
+  /* One PAD.dict.inBook call when the card opens, and one more after the first word is saved (the grant now
+     exists, so the other rows can say what they are). No grant yet, no permission or over the limit: null,
+     and every row stays hollow, which means "not in the book". */
+  function readBookMarks(refresh) {
+    if (!results || !results.length) return;
+    if (!PAD.dict || !PAD.dict.inBook) { if (!refresh) { bookMarks = results.map(function () { return false; }); renderMarks(); } return; }
+    var token = gen, seq = bookSeq, words = results.map(function (row) { return row.word; });
+    bookAt = Date.now();
+    PAD.dict.inBook(words).then(function (v) {
+      if (token !== gen || seq !== bookSeq || !Array.isArray(v) || v.length !== words.length) return;
+      bookMarks = v.map(function (b) { return b === true; });
+      renderMarks();
+    }, function () {});
+  }
+  function renderMarks() {
+    var rows = coverList.querySelectorAll("li"), i, mark;
+    for (i = 0; i < rows.length; i++) {
+      mark = rows[i].querySelector(".mark");
+      if (mark) mark.classList.toggle("book", bookMarks[i] === true);
+    }
+  }
+  /* The word book's answer in the detail box, then the chosen word's own line again. The box keeps its
+     height, so nothing moves; a cursor move or another answer takes the box over. */
+  function flashDetail(text) {
+    if (bookTimer) { clearTimeout(bookTimer); bookTimer = null; }
+    pickSeq++;
+    var seq = pickSeq;
+    detailEl.textContent = text;
+    detailEl.classList.add("dark");
+    bookTimer = setTimeout(function () {
+      bookTimer = null;
+      if (seq !== pickSeq || phase !== "done") return;
+      renderPick();
+    }, 1200);
+  }
+  /* SELECT, Left or Right: add the selected word, or take it out again. NEXT selected does nothing; a second
+     toggle while one is pending is ignored, so the row never disagrees with the word book. */
+  function toggleBook() {
+    if (phase !== "done" || pick === 0 || bookBusy) return;
+    var i = pick - 1, row = results && results[i];
+    if (!row || !PAD.dict || !PAD.dict.addWord || !PAD.dict.removeWord) return;
+    var was = bookMarks[i] === true;
+    bookBusy = true;
+    var seq = ++bookSeq;       /* a read from before this toggle must not land on top of its answer */
+    bookAt = Date.now();
+    var call = was ? PAD.dict.removeWord(row.word) : PAD.dict.addWord(row.word);
+    call.then(function (v) {
+      if (seq !== bookSeq) return;     /* the card is gone: touch nothing, not even bookBusy */
+      bookBusy = false;
+      if (phase !== "done") return;
+      if (v === "saved") {
+        bookMarks[i] = !was;
+        renderMarks();
+        PAD.sfx("ok");
+        if (pick === i + 1) flashDetail(was ? TXT.bookRemoved : TXT.bookAdded);
+        if (!bookRefreshed) { bookRefreshed = true; readBookMarks(true); }
+      } else if (v === "denied") { PAD.sfx("err"); if (pick === i + 1) flashDetail(TXT.bookDenied); }
+      else if (v === "full") { PAD.sfx("err"); if (pick === i + 1) flashDetail(TXT.bookFull); }
+      else { PAD.sfx("err"); }         /* null: nothing changes */
+    }, function () {
+      if (seq !== bookSeq) return;     /* the card is gone: touch nothing, not even bookBusy */
+      bookBusy = false;
+      if (phase !== "done") return;
+      PAD.sfx("err");
+    });
   }
 
   function startRound(round, hints, done) {
@@ -480,7 +583,13 @@
     var L = lenFor(round);
     rnd = mulberry32(round);
     if (!PAD.dict || !PAD.dict.words) { fail(); return; }
-    pickSeed(L).then(function (out) {
+    /* A word book call from the results card counts toward PAD.dict's 10 a second: wait out its window before
+       this round's first words() call, or START just after a toggle would open the round on the error card.
+       The wait sits before pickSeed, so the seeded random and the grid a round produces do not change. */
+    var left = bookAt ? 1100 - (Date.now() - bookAt) : 0;
+    (left > 0 ? wait(left) : Promise.resolve()).then(function () {
+      return token === gen ? pickSeed(L) : null;
+    }).then(function (out) {
       if (token !== gen) return;
       if (!out) { fail(); return; }
       state.seed = out.seed;
@@ -897,8 +1006,9 @@
       startRound(pending.round, pending.hints, pending.done);
     } else if (phase === "done") nextRound();
   });
-  /* The word rows are 24 px tall, below the 44 px touch rule, so the whole row width is the target. Like the
-     grid, the tap counts only on pointerup and only when it did not travel: a scroll must not pick a word. */
+  /* The word rows are 24 px tall, below the 44 px touch rule, so the whole row width is the target. A tap on
+     the right 44 px is the word book toggle (and selects the word); a tap elsewhere selects and reads it.
+     Like the grid, the tap counts only on pointerup and only when it did not travel: a scroll must not pick. */
   coverList.addEventListener("pointerdown", function (e) {
     var li = phase === "done" && e.target && e.target.closest ? e.target.closest("li") : null;
     rowDown = li && coverList.contains(li) ? { li: li, x: e.clientX, y: e.clientY, id: e.pointerId } : null;
@@ -909,7 +1019,9 @@
     if (!down || phase !== "done" || e.pointerId !== down.id) return;
     var li = e.target && e.target.closest ? e.target.closest("li") : null;
     if (li !== down.li || Math.abs(e.clientX - down.x) + Math.abs(e.clientY - down.y) > 12) return;
-    pickWord(+li.getAttribute("data-pick"));
+    var n = +li.getAttribute("data-pick"), box = li.getBoundingClientRect();
+    if (e.clientX >= box.right - 44) { pickWord(n, true); toggleBook(); }   /* the bookmark end of the row */
+    else pickWord(n);
   });
   coverList.addEventListener("pointercancel", function () { rowDown = null; });
   hintEl.addEventListener("click", hint);
@@ -997,8 +1109,10 @@
     if (phase === "help") { if (b === "a" || b === "b" || b === "start") closeHelp(); return; }
     if (phase === "error") { if (b === "a" || b === "start") coverBtn.click(); return; }
     if (phase === "done") {
-      /* the ring is [NEXT, word1 .. wordN]; it starts on NEXT and Up/Down cycle. START always starts the next round. */
+      /* the ring is [NEXT, word1 .. wordN]; it starts on NEXT and Up/Down cycle. START always starts the next round.
+         SELECT, Left and Right toggle the selected word's place in the word book. */
       if (b === "down" || b === "up") { movePick(b === "down" ? 1 : -1); return; }
+      if (b === "left" || b === "right" || b === "select") { toggleBook(); return; }
       if (b === "a") {
         if (pick === 0) nextRound();
         else sayWord(results[pick - 1].word);
