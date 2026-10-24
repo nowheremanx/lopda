@@ -160,6 +160,16 @@ test("validate: bpm, key, scale, swing, tape, kit, name, updated", () => {
   for (const [mut, code] of cases) assert.equal(broken(mut).error, code, code);
   assert.equal(broken((s) => { s.name = "x".repeat(40); }).error, undefined);
   assert.equal(broken((s) => { s.updated = 0; }).error, undefined);
+  // 40 code points may be 80 UTF-16 units (astral); 41 is refused by the cheap length check before Array.from
+  assert.equal(broken((s) => { s.name = "\u{1D11E}".repeat(40); }).error, undefined);
+  assert.equal(broken((s) => { s.name = "\u{1D11E}".repeat(41); }).error, "name");
+});
+
+test("validate: an absurdly deep unknown field is refused, not thrown", () => {
+  const song = fresh();
+  let node = song;
+  for (let i = 0; i < 20000; i++) { node.deep = {}; node = node.deep; }
+  assert.equal(S.validate(song).error, "type");
 });
 
 test("validate: tracks", () => {
@@ -170,6 +180,10 @@ test("validate: tracks", () => {
     (s) => { s.tracks[0].id = ""; },
     (s) => { s.tracks[0].id = "x".repeat(17); },
     (s) => { s.tracks[0].id = 7; },
+    (s) => { s.tracks[0].id = "__proto__"; },
+    (s) => { s.tracks[0].id = "Drums"; },
+    (s) => { s.tracks[0].id = "1drums"; },
+    (s) => { s.tracks[0].id = "drums_2"; },
     (s) => { s.tracks[1].kind = "pad"; },
     (s) => { delete s.tracks[1].kind; },
     (s) => { s.tracks[1].id = s.tracks[0].id; },
@@ -177,6 +191,13 @@ test("validate: tracks", () => {
     (s) => { s.tracks[0] = []; },
   ];
   for (const mut of cases) assert.equal(broken(mut).error, "tracks");
+
+  // "constructor" is a legal slug and a harmless map key because the lookup adds "$"
+  const ctor = fresh();
+  ctor.tracks[0].id = "constructor";
+  ctor.patterns[0].notes.constructor = ctor.patterns[0].notes.drums;
+  delete ctor.patterns[0].notes.drums;
+  assert.equal(S.validate(ctor).error, undefined);
 });
 
 test("validate: patterns", () => {
@@ -227,6 +248,11 @@ test("validate: notes", () => {
     ];
   }).error, undefined);
   assert.equal(broken((s) => { s.patterns[0].notes.bass = [{ t: 0, len: 24, deg: 32, vel: 1 }]; }).error, undefined);
+
+  // at most 1024 notes in one track of one pattern
+  const many = (n) => Array.from({ length: n }, () => ({ t: 0, len: 1, deg: 0, vel: 1 }));
+  assert.equal(broken((s) => { s.patterns[0].notes.bass = many(1024); }).error, undefined);
+  assert.equal(broken((s) => { s.patterns[0].notes.bass = many(1025); }).error, "notes");
 });
 
 test("validate: song, clips", () => {
@@ -331,6 +357,26 @@ test("events: many loops later, starting mid-loop; empty ranges", () => {
   assert.deepEqual(plain(S.events(song, 0, 10, 10)), []);
   assert.deepEqual(plain(S.events(song, 0, 20, 10)), []);
   assert.deepEqual(plain(S.events(song, 0, 0, 0)), []);
+});
+
+test("events: consecutive ranges equal one big range, with an off-grid swung note and with the demo", () => {
+  const song = fresh();
+  song.swing = 0.75;
+  // t = P-1 sits on step index 15 (odd) and the 12-tick swing carries it into the next loop
+  song.patterns[0].notes.drums.push({ t: P - 1, len: 1, key: "perc", vel: 0.6 });
+  const all = plain(S.events(song, 0, 0, 3 * P));
+  assert.ok(all.some((e) => e.tick === P + 11), "the off-grid note from loop 0 is heard in loop 1");
+
+  const slices = [];
+  for (let a = 0; a < 3 * P; a += 10) slices.push(...plain(S.events(song, 0, a, Math.min(a + 10, 3 * P))));
+  assert.deepEqual(slices, all, "each event exactly once, same order");
+
+  // 7 does not divide the 384-tick pattern, so these slices cut through every swung tick
+  const demo = fresh();
+  const big = plain(S.events(demo, 0, 0, 3 * P));
+  const cut = [];
+  for (let a = 0; a < 3 * P; a += 7) cut.push(...plain(S.events(demo, 0, a, Math.min(a + 7, 3 * P))));
+  assert.deepEqual(cut, big, "the grid demo in 7-tick slices is the same list");
 });
 
 test("events: swing pushes only the odd 16ths, by swingTicks", () => {
