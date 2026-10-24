@@ -235,7 +235,9 @@ test("store: category filters split the catalogue, and one button updates every 
   assert.equal(await p.locator("#store-list .store-cat").count(), 6, "one section per category");
   assert.match(await p.locator("#store-updates").innerText(), /2 个程序有新版本/);
   await p.locator(".store-filter", { hasText: "游戏" }).click();
-  assert.equal(await p.locator("#store-list .store-item").count(), 9);
+  /* counted from the index, so adding a game does not touch this shared file */
+  const games = JSON.parse(readFileSync(join(ROOT, "registry/index.json"), "utf8")).apps.filter((a) => a.category === "game").length;
+  assert.equal(await p.locator("#store-list .store-item").count(), games);
   assert.equal(await p.locator("#store-list .store-cat").count(), 0, "a filter shows one flat list");
   await p.locator(".store-filter", { hasText: "全部" }).click();
 
