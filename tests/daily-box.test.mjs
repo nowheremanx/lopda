@@ -440,7 +440,7 @@ test("daily-box input: a press during an animation is kept, and a goal, dead squ
   assert.equal(BoxInput.press(stopped, "right", 1200), "right", "a fresh press moves again");
 });
 
-function fakePad(initial, fail) {
+function fakePad(initial, fail, failKeys) {
   const data = JSON.parse(JSON.stringify(initial || {}));
   const listeners = {};
   const writes = [];
@@ -456,7 +456,7 @@ function fakePad(initial, fail) {
       writes.push({ key, value: copy });
     },
     load(key) {
-      if (fail) return Promise.reject(new Error("storage is unavailable"));
+      if (fail || (failKeys && failKeys.includes(key))) return Promise.reject(new Error("storage is unavailable"));
       return Promise.resolve(key in data ? JSON.parse(JSON.stringify(data[key])) : null);
     },
     remove(key) { delete data[key]; writes.push({ key, removed: true }); }
@@ -476,8 +476,8 @@ function run(app, frames) {
   for (let i = 0; i < frames; i++) app.frame();
 }
 
-function bootBox(initial, fail) {
-  const pad = fakePad(initial, fail);
+function bootBox(initial, fail, failKeys) {
+  const pad = fakePad(initial, fail, failKeys);
   const app = boot(join(ROOT, APP_REL), { pad: pad.pad, seed: 1 });
   return { app, pad };
 }
@@ -973,10 +973,12 @@ test("daily-box app: the saved box-now keeps only 400 snapshots, undo in the ses
 });
 
 test("daily-box app: a failed save read still starts today's level fresh (app-vm)", async () => {
-  const { app } = bootBox({}, true);
+  const { app, pad } = bootBox({}, true);
   await settleApp();
+  const BOX = app.ctx.get("BOX");
+  if (BOX.state().ui === "help") tapButton(app, pad, "a");
   const level = Board.levelFor(new Date());
-  const s = app.ctx.get("BOX").state();
+  const s = BOX.state();
   assert.equal(s.ui, "play");
   assert.equal(s.par, level.par);
   assert.equal(s.player, Board.create(level).player);
@@ -1009,4 +1011,173 @@ test("daily-box app: the first-start 玩法 names SELECT restart and START menu"
   assert.match(text, /START/);
   assert.match(text, /重来/);
   assert.match(text, /菜单/);
+});
+
+/* --- round 3: peek persistence, same-frame taps, proto bump order, pointer cancel ----------------- */
+
+const BUMP_LEFT = [
+  "##########",
+  "#  @#    #",
+  "#        #",
+  "#   $   .#",
+  "#        #",
+  "#        #",
+  "#        #",
+  "##########",
+];
+
+test("daily-box app: 看答案 survives leaving before the solve and a later solve records peeked (app-vm)", async () => {
+  const first = bootBox({ "box-help": 1 });
+  await settleApp();
+  const BOX = first.app.ctx.get("BOX");
+  run(first.app, 1);
+
+  tapButton(first.app, first.pad, "start");
+  tapButton(first.app, first.pad, "down");
+  tapButton(first.app, first.pad, "down");
+  first.pad.press("a");
+  run(first.app, 1);                  /* 看答案: startReplay, no replay move yet */
+  first.pad.release("a");
+  first.pad.press("b");
+  run(first.app, 1);                  /* stopReplay before the first replay move */
+  first.pad.release("b");
+  run(first.app, 1);
+
+  assert.equal(BOX.state().peeked, true);
+  const savedNow = first.pad.data["box-now"];
+  assert.ok(savedNow, "stopping the answer replay saves the board");
+  assert.equal(savedNow.peeked, true, "box-now carries the peek");
+  assert.equal(savedNow.date, BOX.state().date);
+
+  /* Reload the stopped board, then solve it by hand. */
+  const second = bootBox({ "box-help": 1, "box-now": savedNow });
+  await settleApp();
+  const BOX2 = second.app.ctx.get("BOX");
+  assert.equal(BOX2.state().peeked, true, "box-now restores the peek");
+  assert.equal(BOX2.state().ui, "play");
+
+  const level = Board.levelFor(new Date());
+  const sim = Board.create(level);
+  const names = ["up", "right", "down", "left"];
+  const steps = level.solution.map((code) => {
+    const dir = names[code];
+    const result = Board.step(sim, dir);
+    return { dir, push: result.kind === "push" };
+  });
+  for (const step of steps) {
+    second.pad.press(step.dir);
+    run(second.app, 1);
+    run(second.app, step.push ? 16 : 10);   /* finish the move, but before the 220 ms repeat */
+    second.pad.release(step.dir);
+    run(second.app, 1);
+  }
+  let frames = 0;
+  while (!BOX2.state().solved && frames < 100) {
+    run(second.app, 1);
+    frames++;
+  }
+  assert.ok(BOX2.state().solved, "the manual solve finishes");
+  const day = second.pad.data.box.days[BOX2.state().date];
+  assert.ok(day);
+  assert.equal(day.peeked, true, "the later solve records peeked");
+  assert.equal(BOX2.badge(), "answer", "the card shows 看过答案, never 完美");
+});
+
+test("daily-box app: press + release in one frame is one move, not a held key (app-vm)", async () => {
+  const { app, pad } = bootBox({ "box-help": 1 });
+  await settleApp();
+  const BOX = app.ctx.get("BOX");
+  BOX.load(CAP_MAP);
+  run(app, 1);
+
+  pad.press("right");
+  pad.release("right");
+  run(app, 2);
+  assert.equal(BOX.state().moves, 1);
+  assert.equal(BOX.state().player, 15);
+  run(app, 60);
+  assert.equal(BOX.state().moves, 1, "a quick tap must not auto-walk");
+
+  BOX.load(CAP_MAP);
+  pad.press("right");
+  run(app, 2);
+  assert.equal(BOX.state().moves, 1);
+  pad.press("left");
+  pad.release("left");             /* queued and released inside the walk animation */
+  run(app, 2);
+  run(app, 25);
+  assert.equal(BOX.state().moves, 2);
+  assert.equal(BOX.state().player, 14);
+  run(app, 60);
+  assert.equal(BOX.state().moves, 2, "a queued press runs once, then no repeat");
+});
+
+test("daily-box app: a new direction during a bump clears the stop and repeats (proto order, app-vm)", async () => {
+  const { app, pad } = bootBox({ "box-help": 1 });
+  await settleApp();
+  const BOX = app.ctx.get("BOX");
+  BOX.load(BUMP_LEFT);
+  run(app, 1);
+
+  pad.press("right");
+  run(app, 2);                     /* the bump starts */
+  assert.equal(BOX.state().moves, 0);
+  run(app, 2);                     /* still inside the 90 ms bump */
+  pad.press("left");               /* a new press clears blocked, as in the proto */
+  run(app, 2);
+  pad.release("right");
+  run(app, 30);
+  assert.ok(BOX.state().moves >= 2, "the held direction repeats after the bump");
+  pad.release("left");
+});
+
+test("daily-box app: pointercancel discards a gesture (app-vm)", async () => {
+  const { app } = bootBox({ "box-help": 1 });
+  await settleApp();
+  const BOX = app.ctx.get("BOX");
+  assert.equal(BOX.gesture(20, 20, 20, 8, false), "up");
+  assert.equal(BOX.gesture(20, 20, 20, 8, true), null, "a cancelled gesture never moves");
+  assert.equal(BOX.gesture(20, 20, 22, 21, false), null);
+});
+
+test("daily-box app: a failed box-now read keeps a loaded box (app-vm)", async () => {
+  const key = localKey(new Date());
+  const days = {};
+  days[key] = { pushes: 3, moves: 4, ms: 5000, peeked: false };
+  const { app } = bootBox({ "box-help": 1, "box": { v: 1, days } }, false, ["box-now"]);
+  await settleApp();
+  const BOX = app.ctx.get("BOX");
+  assert.equal(BOX.state().solved, true);
+  assert.equal(BOX.state().ui, "card");
+  assert.equal(BOX.days().days[key].pushes, 3);
+});
+
+test("daily-box app: a failed box read keeps the solve in memory but writes no box (app-vm)", async () => {
+  const { app, pad } = bootBox({ "box-help": 1 }, false, ["box"]);
+  await settleApp();
+  const BOX = app.ctx.get("BOX");
+  BOX.load(ONE_PUSH);
+  pad.press("right");
+  run(app, 22);
+  pad.release("right");
+  assert.equal(BOX.state().solved, true);
+  assert.ok(BOX.days().days[BOX.state().date], "the solve stays in memory");
+  assert.equal(pad.data.box, undefined, "box is not written after a failed read");
+  assert.ok(!pad.writes.some((w) => w.key === "box"), "no box write this session");
+});
+
+test("daily-box app: normalizeBox drops junk day entries (app-vm)", async () => {
+  const days = {
+    "2020-01-01": { pushes: 1, moves: 2, ms: 3, peeked: true },
+    "2020-01-02": null,
+    "2020-01-03": { pushes: "x", moves: 2, ms: 3 },
+    "2020-01-04": { pushes: 1, moves: 2 },
+    "2020-01-05": { pushes: 1, moves: 2, ms: 3, peeked: false, junk: 1 },
+  };
+  const { app } = bootBox({ "box-help": 1, "box": { v: 1, days } });
+  await settleApp();
+  const kept = JSON.parse(JSON.stringify(app.ctx.get("BOX").days().days));
+  assert.deepEqual(Object.keys(kept).sort(), ["2020-01-01", "2020-01-05"]);
+  assert.deepEqual(kept["2020-01-01"], { pushes: 1, moves: 2, ms: 3, peeked: true });
+  assert.deepEqual(kept["2020-01-05"], { pushes: 1, moves: 2, ms: 3, peeked: false });
 });

@@ -2268,6 +2268,7 @@ var W = 10, H = 8, CELLS = W * H, TB = 128, TILE = 16;
 var DIRS = { up: -W, right: 1, down: W, left: -1 };
 var DIR_CODE = ["up", "right", "down", "left"];
 var BUTTON_DIRS = ["up", "down", "left", "right"];
+var ALL_BUTTONS = ["up", "down", "left", "right", "a", "b", "start", "select"];
 var VEC = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
 var MS = BoxInput.MS;
 var WEEK_ZH = ["日", "一", "二", "三", "四", "五", "六"];
@@ -2278,6 +2279,7 @@ var state, inp = BoxInput.create();
 var facing = "down", ui = "loading";
 var solvedFlag = false, solvedRecord = null, peeked = false;
 var saved = { v: 1, days: {} }, seenHelp = false;
+var boxWritable = true;
 var playMs = 0;
 var cardPending = false, cardAt = 0;
 var replay = null, dust = [], swipe = null;
@@ -2285,11 +2287,12 @@ var menuSel = 0, menuBack = "play", confirmBack = "play", helpBack = "play";
 
 /* lo-game's pointer keeps only the latest position in a tick, so a down + move + up inside one tick
    would lose where the finger started. These listeners keep both ends of the gesture. */
-var touchStart = null, touchLast = null;
+var touchStart = null, touchLast = null, touchCancelled = false, touchIgnored = false;
 (function trackTouch() {
   if (typeof document === "undefined" || !document.querySelector) return;
   var canvas = document.querySelector("canvas");
   if (!canvas || !canvas.addEventListener) return;
+  function primary(e) { return e.isPrimary !== false; }
   function point(e) {
     var r = canvas.getBoundingClientRect();
     return {
@@ -2297,11 +2300,36 @@ var touchStart = null, touchLast = null;
       y: Math.floor((e.clientY - r.top) * 144 / (r.height || 1))
     };
   }
-  canvas.addEventListener("pointerdown", function (e) { touchStart = touchLast = point(e); });
-  canvas.addEventListener("pointermove", function (e) { touchLast = point(e); });
-  canvas.addEventListener("pointerup", function (e) { touchLast = point(e); });
-  canvas.addEventListener("pointercancel", function (e) { touchLast = point(e); });
+  canvas.addEventListener("pointerdown", function (e) {
+    if (!primary(e)) {
+      if (!touchStart) touchIgnored = true;   /* do not let a second finger start a swipe */
+      return;
+    }
+    touchIgnored = false;
+    touchCancelled = false;
+    touchStart = touchLast = point(e);
+  });
+  canvas.addEventListener("pointermove", function (e) {
+    if (!primary(e)) return;
+    touchLast = point(e);
+  });
+  canvas.addEventListener("pointerup", function (e) {
+    if (!primary(e)) return;
+    touchLast = point(e);
+  });
+  canvas.addEventListener("pointercancel", function (e) {
+    if (!primary(e)) return;
+    touchCancelled = true;
+    touchStart = touchLast = null;
+  });
 })();
+
+if (typeof document !== "undefined" && document.addEventListener) {
+  document.addEventListener("visibilitychange", function () {
+    if (document.hidden) return;
+    if ((ui === "play" && !solvedFlag) || ui === "done") maybeNewDay();
+  });
+}
 
 /* ---------------- dates and the save files ---------------- */
 
@@ -2318,11 +2346,29 @@ function fmtTime(ms) {
   return Math.floor(s / 60) + ":" + pad2(s % 60);
 }
 
+function validDay(day) {
+  return !!day && typeof day === "object" && !Array.isArray(day) &&
+    typeof day.pushes === "number" && isFinite(day.pushes) && day.pushes >= 0 &&
+    typeof day.moves === "number" && isFinite(day.moves) && day.moves >= 0 &&
+    typeof day.ms === "number" && isFinite(day.ms) && day.ms >= 0;
+}
+
+/* Drop junk days: a bad entry must never become a card or a streak. */
 function normalizeBox(v) {
-  if (!v || v.v !== 1 || !v.days || typeof v.days !== "object" || Array.isArray(v.days)) {
-    return { v: 1, days: {} };
-  }
-  return { v: 1, days: v.days };
+  var out = { v: 1, days: {} };
+  if (!v || v.v !== 1 || !v.days || typeof v.days !== "object" || Array.isArray(v.days)) return out;
+  Object.keys(v.days).forEach(function (key) {
+    var day = v.days[key];
+    if (validDay(day)) {
+      out.days[key] = {
+        pushes: day.pushes,
+        moves: day.moves,
+        ms: day.ms,
+        peeked: !!day.peeked
+      };
+    }
+  });
+  return out;
 }
 
 function trimDays() {
@@ -2340,7 +2386,7 @@ function recordDay(pushes, moves, ms, wasPeeked) {
     peeked: !!wasPeeked
   };
   trimDays();
-  game.save("box", saved);
+  if (boxWritable) game.save("box", saved);   /* a failed read must not overwrite the player's store */
   game.remove("box-now");
   return saved.days[dayK];
 }
@@ -2367,7 +2413,12 @@ function saveNow() {
   var cur = { player: state.player, boxes: state.boxes.slice(), moves: state.moves, pushes: state.pushes };
   var hist = state.history.concat([cur]);
   if (hist.length > 400) hist = hist.slice(hist.length - 400);
-  game.save("box-now", { date: dayK, history: hist, ms: Math.round(playMs) });
+  game.save("box-now", {
+    date: dayK,
+    history: hist,
+    ms: Math.round(playMs),
+    peeked: !!peeked
+  });
 }
 
 function validCell(v) {
@@ -2406,6 +2457,7 @@ function restoreNow(now) {
   state.pushes = cur.pushes;
   state.history = hist;
   if (typeof now.ms === "number" && isFinite(now.ms) && now.ms >= 0) playMs = now.ms;
+  peeked = !!now.peeked;
   return true;
 }
 
@@ -2428,6 +2480,8 @@ function resetBoard(clearNow) {
   dust = [];
   swipe = null;
   touchStart = touchLast = null;
+  touchCancelled = false;
+  touchIgnored = false;
   playMs = 0;
   if (clearNow) game.remove("box-now");
 }
@@ -2438,14 +2492,21 @@ function clearInput() {
   inp.queued = null;
   swipe = null;
   touchStart = touchLast = null;
+  touchCancelled = false;
+  touchIgnored = false;
 }
 
-/* Releases are processed in every screen, overlay or not. */
-function pumpReleases() {
+function releaseDirections() {
   for (var i = 0; i < BUTTON_DIRS.length; i++) {
     var dir = BUTTON_DIRS[i];
     if (game.released(dir)) BoxInput.release(inp, dir);
   }
+}
+
+/* Releases are processed in every screen, overlay or not. In normal play they run after the
+   presses of the same frame, so a quick tap is one move and never a held direction. */
+function pumpReleases() {
+  if (ui !== "play" || solvedFlag || replay) releaseDirections();
   if (ui !== "play" && game.pointer.released && swipe) {
     if (swipe.dir) BoxInput.release(inp, swipe.dir);
     swipe = null;
@@ -2461,13 +2522,60 @@ function freshToday() {
   resetBoard(false);
 }
 
+function anyInput() {
+  for (var i = 0; i < ALL_BUTTONS.length; i++) {
+    if (game.pressed(ALL_BUTTONS[i])) return true;
+  }
+  return game.pointer.pressed;
+}
+
+/* Midnight while the app is open: the next play input, or coming back from HOME, starts the new
+   day. A card already on screen stays until A, as the brief says. */
+function switchDay(now) {
+  today = now;
+  dayK = dayKey(now);
+  setLevel(Board.levelFor(now));
+  peeked = false;
+  resetBoard(false);
+  game.remove("box-now");
+  var rec = saved.days[dayK];
+  if (rec) {
+    for (var i = 0; i < level.solution.length; i++) Board.step(state, level.solution[i]);
+    solvedFlag = true;
+    inp.won = true;
+    solvedRecord = rec;
+    ui = "card";
+  } else {
+    ui = "play";
+  }
+  clearInput();
+  return true;
+}
+
+function maybeNewDay() {
+  var now = new Date();
+  if (dayKey(now) === dayK) return false;
+  if (ui === "card") return false;
+  if (solvedFlag && ui !== "done") return false;
+  return switchDay(now);
+}
+
+/* One key at a time: a failed box-now must not cost a box that did load. */
+function readKey(key) {
+  return game.load(key).then(
+    function (value) { return { ok: true, value: value }; },
+    function () { return { ok: false, value: null }; }
+  );
+}
+
 function loadAll() {
-  Promise.all([game.load("box"), game.load("box-now"), game.load("box-help")]).then(function (r) {
-    saved = normalizeBox(r[0]);
+  Promise.all([readKey("box"), readKey("box-now"), readKey("box-help")]).then(function (r) {
+    boxWritable = r[0].ok;
+    saved = normalizeBox(r[0].value);
     trimDays();
-    seenHelp = !!r[2];
+    seenHelp = !!(r[2].ok && r[2].value);
     freshToday();
-    var now = r[1];
+    var now = r[1].ok ? r[1].value : null;
     var rec = saved.days[dayK];
     if (rec) {
       /* A solved day opens on its finished board: replay the stored moves with no animation. */
@@ -2491,8 +2599,10 @@ function loadAll() {
       ui = "help";
     }
   }).catch(function () {
-    saved = { v: 1, days: {} };
-    freshToday();
+    /* Unexpected only: keep whatever was read, but never leave level/state undefined. */
+    if (!level || !state) {
+      try { freshToday(); } catch (e) {}
+    }
     clearInput();
     ui = "play";
   });
@@ -2558,6 +2668,7 @@ function doMove(dir) {
   a.box = res.kind === "bumpBox";
   a.result = res;
   a.bi = bi;
+  if (kind === "bump") inp.blocked = true;   /* the proto stops repeats when the bump starts */
   if (kind === "walk") sndStep();
   else if (kind === "push") sndPush();
   else sndBump();
@@ -2576,7 +2687,8 @@ function finishAnim(a) {
   } else if (a.kind === "walk") {
     BoxInput.finish(inp, now, "walk", false);
   } else {
-    BoxInput.finish(inp, now, "bump", true);
+    /* A bump set blocked when it began; ending it only sets readyAt, exactly as the proto does. */
+    BoxInput.finish(inp, now, "bump", false);
   }
 }
 
@@ -2596,7 +2708,6 @@ function onSolved() {
 function doUndo() {
   if (inp.anim || solvedFlag || replay) return;
   if (!Board.undo(state)) { game.sfx("miss"); return; }
-  inp.queued = null;
   sndStep();
   saveNow();
 }
@@ -2608,21 +2719,25 @@ function doRestart() {
 }
 
 function startReplay() {
+  var already = !!saved.days[dayK];
   peeked = true;
   /* If the day was already solved, the first result's numbers stay, but it is now a peeked day. */
-  if (saved.days[dayK]) {
+  if (already) {
     saved.days[dayK].peeked = true;
-    game.save("box", saved);
+    if (boxWritable) game.save("box", saved);
   }
   resetBoard(true);
   clearInput();
   ui = "play";
   replay = { i: 0 };
+  /* Keep the peek even if the app is left before the replay is stopped or finished. */
+  if (!already) saveNow();
 }
 
 function stopReplay() {
   replay = null;
   clearInput();
+  saveNow();
   game.sfx("miss");
 }
 
@@ -2755,9 +2870,19 @@ function swipeDirection(x0, y0, x1, y1) {
   return Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "right" : "left") : (dy > 0 ? "down" : "up");
 }
 
+/* A cancelled gesture never becomes a move, however far the finger travelled. */
+function gestureDirection(start, last, cancelled) {
+  if (cancelled || !start || !last) return null;
+  return swipeDirection(start.x, start.y, last.x, last.y);
+}
+
 function pointerSwipe(now) {
   var p = game.pointer;
   if (p.pressed) {
+    if (touchIgnored) {
+      swipe = null;
+      return;
+    }
     var start = touchStart || p;
     swipe = start.y < TB ? { x: start.x, y: start.y, dir: null } : null;
   }
@@ -2765,20 +2890,21 @@ function pointerSwipe(now) {
   /* Resolve on the release position too: a down + move + up inside one tick is still one swipe. */
   if (!swipe.dir) {
     var end = touchLast || p;
-    swipe.dir = swipeDirection(swipe.x, swipe.y, end.x, end.y);
+    swipe.dir = gestureDirection(swipe, end, touchCancelled);
     if (swipe.dir) pressDir(swipe.dir, now);
   }
   if (p.released) {
     if (swipe.dir) BoxInput.release(inp, swipe.dir);
     swipe = null;
     touchStart = touchLast = null;
+    touchCancelled = false;
   }
 }
 
 function handlePlayInput(now) {
-  if (game.pressed("start")) { openMenu(); return; }
-  if (game.pressed("select")) { openConfirm("play"); return; }
-  if (game.pressed("b")) { doUndo(); return; }
+  if (game.pressed("start")) { releaseDirections(); openMenu(); return; }
+  if (game.pressed("select")) { releaseDirections(); openConfirm("play"); return; }
+  if (game.pressed("b")) { releaseDirections(); doUndo(); return; }
 
   pointerSwipe(now);
 
@@ -2786,6 +2912,7 @@ function handlePlayInput(now) {
     var dir = BUTTON_DIRS[i];
     if (game.pressed(dir)) pressDir(dir, now);
   }
+  releaseDirections();          /* after the presses: press + release in one frame = one move */
 
   if (inp.anim) return;
   var move = BoxInput.next(inp, now);
@@ -2801,6 +2928,8 @@ game.scene("play", {
   update: function (dt) {
     var now = game.time * 1000;
     if (ui === "loading") return;
+    if (ui === "play" && !solvedFlag && anyInput() && maybeNewDay()) return;
+    if (ui === "done" && anyInput() && maybeNewDay()) return;
     pumpReleases();
     if (ui === "help") { updateHelp(); return; }
     if (ui === "menu") { updateMenu(); return; }
@@ -2966,7 +3095,8 @@ function helpLines() {
     T({ zh: "把箱子推到记号上。", en: "Push crates to marks." }),
     T({ zh: "只能推，不能拉。", en: "Push, never pull." }),
     T({ zh: "方向键或滑动，B 撤销。", en: "Keys/swipe. B undo." }),
-    T({ zh: "SELECT 重来，START 菜单。", en: "SELECT restart. START menu." }),
+    T({ zh: "SELECT 重来", en: "SELECT restart" }),
+    T({ zh: "START 菜单", en: "START menu" }),
     T({ zh: "一天一关，明天再来。", en: "One puzzle a day." })
   ];
 }
@@ -3116,6 +3246,9 @@ var BOX = {
   confirmA: function () { return confirmARect(); },
   confirmHit: function (x, y) { return confirmAHit(x, y); },
   swipe: function (x0, y0, x1, y1) { return swipeDirection(x0, y0, x1, y1); },
+  gesture: function (x0, y0, x1, y1, cancelled) {
+    return gestureDirection({ x: x0, y: y0 }, { x: x1, y: y1 }, !!cancelled);
+  },
   load: function (rows) {
     if (!today) today = new Date();
     dayK = dayKey(today);
