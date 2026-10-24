@@ -199,13 +199,15 @@ function detach(dump){
 }
 function doRestore(bk){
   box(tr("rs.working"));
+  /* programs stop their own writes before anything is replaced; the page reloads straight after a successful restore */
+  LP.each("restore");
   /* the AI key is never in a backup: the one on this phone stays, whatever the file holds */
   var mine=LP.ai.saved(), docs=bk.docs.filter(function(x){ return x.path!==AIP; });
   if(mine) docs.push({path:AIP, data:mine});
   P.dumpAll().then(detach).then(function(old){
     return P.replaceAll({docs:docs, files:bk.files}).then(function(){
       box(tr("rs.done")); sfx("ok");
-      setTimeout(function(){ location.reload(); },800);
+      location.reload();
     },function(e){
       if(window.console) console.error("Lo-PDA restore failed, writing the old data back", e);
       return P.replaceAll(old).then(function(){ sfx("err"); okBox(tr("rs.failed")); },function(e2){

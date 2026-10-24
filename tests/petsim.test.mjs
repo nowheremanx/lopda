@@ -252,6 +252,16 @@ test("hatch does nothing to a pet that is already out of the egg", () => {
   assert.equal(s.stage, "baby");
 });
 
+test("hatch: a freshly hatched pet starts hungry and a little bored, so the first meal shows", () => {
+  const egg = base();
+  assert.deepEqual([egg.hunger, egg.joy], [5, 5]);
+  const s = P.hatch(egg);
+  assert.deepEqual([s.hunger, s.joy, s.awakeHunger, s.awakeJoy], [2, 3, 0, 0]);
+  const fed = P.feed(s, "meal", at(2026, 10, 20, 8, 5));
+  assert.equal(fed.hunger, 4, "the first meal visibly raises hunger");
+  assert.equal(egg.hunger, 5, "the egg save is untouched");
+});
+
 test("adultForm: the five program groups, 30 %, plain, ties and no uses", () => {
   assert.equal(P.adultForm(null), "plain");
   assert.equal(P.adultForm({}), "plain");
@@ -321,6 +331,27 @@ test("outing: once it left at an hour, the same day returns that hour", () => {
   assert.ok(first, "found a day with an outing");
   const stored = { ...s, today: { ...s.today, day: key, out: first.hour } };
   assert.deepEqual(P.outingToday(stored, key), first);
+});
+
+/* ---------- the day's weather ---------- */
+test("weatherOf: one of the five, deterministic per pet and day, snow only in winter", () => {
+  const born = base().born, keys = Array.from({ length: 240 }, (_, i) => "2026-10-" + String(i % 28 + 1).padStart(2, "0") + "-" + i);
+  const all = ["sun", "cloud", "rain", "snow", "wind"];
+  for (const season of ["spring", "summer", "autumn", "winter"]) {
+    const seen = new Set();
+    for (const key of keys) {
+      const w = P.weatherOf(born, key, season);
+      assert.ok(all.includes(w), season + " " + key + " -> " + w);
+      assert.equal(P.weatherOf(born, key, season), w, "same pet, day and season give the same weather");
+      seen.add(w);
+      if (season !== "winter") assert.notEqual(w, "snow", "snow only in winter");
+    }
+    assert.ok(seen.size >= (season === "winter" ? 5 : 4), `${season} has its own mix: ${[...seen]}`);
+  }
+  assert.ok(all.every((w) => [...keys].some((key) => P.weatherOf(born, key, "winter") === w)), "winter has all five");
+  const other = base().born + 1;
+  assert.ok(keys.some((key) => P.weatherOf(born, key, "spring") !== P.weatherOf(other, key, "spring")), "another pet gets other days");
+  assert.equal(P.weatherOf(born, keys[0], "spring"), P.weatherOf(born, keys[0], "春"), "Chinese season names work too");
 });
 
 /* ---------- the pick of the day ---------- */

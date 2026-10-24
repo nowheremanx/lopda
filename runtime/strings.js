@@ -363,7 +363,8 @@
       "cart.loadfail": "存档读不进去。",
 
       "app.pet": "宠物",
-      "pet.sk.mail": "信", "pet.sk.use": "用",
+      "pet.sk.mail": "信", "pet.sk.use": "用", "pet.sk.menu": "菜单", "pet.sk.open": "打开",
+      "pet.menu.title": "菜单", "pet.menu.mail": "信", "pet.menu.look": "看看", "pet.menu.box": "纪念品箱",
       "pet.act.feed": "喂食", "pet.act.play": "玩", "pet.act.wash": "洗澡",
       "pet.act.lighton": "开灯", "pet.act.lightoff": "关灯",
       "pet.act.look": "看看", "pet.act.box": "箱子", "pet.act.mail": "信", "pet.act.call": "呼唤",
@@ -770,7 +771,8 @@
       "cart.loadfail": "Couldn't load the save.",
 
       "app.pet": "Pet",
-      "pet.sk.mail": "Mail", "pet.sk.use": "Use",
+      "pet.sk.mail": "Mail", "pet.sk.use": "Use", "pet.sk.menu": "Menu", "pet.sk.open": "Open",
+      "pet.menu.title": "Menu", "pet.menu.mail": "Mail", "pet.menu.look": "Look", "pet.menu.box": "Keepsakes",
       "pet.act.feed": "Feed", "pet.act.play": "Play", "pet.act.wash": "Wash",
       "pet.act.lighton": "Light on", "pet.act.lightoff": "Light off",
       "pet.act.look": "Look", "pet.act.box": "Box", "pet.act.mail": "Mail", "pet.act.call": "Call",

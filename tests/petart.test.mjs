@@ -62,6 +62,7 @@ test("every grid in the pack is rectangular and uses only .kdmp", () => {
   for (const id of Object.keys(P.props)) assertGrid("prop " + id, P.props[id]);
   for (const id of ["bowl", "bowlEmpty", "poop", "sign", "zz"]) assertGrid("room " + id, P.room[id]);
   for (const id of Object.keys(P.icons)) assertGrid("icon " + id, P.icons[id]);
+  for (const id of Object.keys(P.homeIcons)) assertGrid("home icon " + id, P.homeIcons[id], 16, 16);
   for (const s of P.souvenirs) assertGrid("souvenir " + s.id, s.grid);
 });
 
@@ -124,6 +125,37 @@ test("souvenirs: exactly 20 original finds, 16 x 16, unique ids, postcard kept",
   }
   assert.ok(seen.has("post"));
   assert.deepEqual(Object.keys(P.icons).sort(), ["box", "call", "food", "light", "look", "mail", "play", "wash"]);
+});
+
+test("homeIcons: five 16 x 16 states, all different, the egg is the pack's egg", () => {
+  const keys = Object.keys(P.homeIcons).sort();
+  assert.deepEqual(keys, ["away", "egg", "face", "need", "sleep"]);
+  for (const key of keys) assertGrid("homeIcons " + key, P.homeIcons[key], 16, 16);
+  assert.deepEqual(P.homeIcons.egg, P.egg, "the egg home icon is the same egg");
+  const seen = new Set(keys.map((k) => P.homeIcons[k].join("\n")));
+  assert.equal(seen.size, keys.length, "each state is a different picture");
+  assert.match(P.homeIcons.need.join(""), /k/, "the need icon has a visible mark");
+  assert.notDeepEqual(P.homeIcons.sleep, P.homeIcons.face, "sleeping closes the eyes");
+});
+
+test("drawRoom: every weather draws only inside the window, day and night", () => {
+  const base = { pet: P.frames({ face: "idle1" }), petX: 32, petY: 31, dayOfMonth: 24, bowlFull: true, mess: 1, season: "" };
+  for (const night of [false, true]) {
+    const before = room({ ...base, night, weather: null });
+    for (const weather of ["sun", "cloud", "rain", "snow", "wind"]) {
+      const after = room({ ...base, night, weather });
+      let inside = 0, outside = 0;
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+        const i = y * W + x;
+        if (before[i] === after[i]) continue;
+        if (x >= 5 && x < 25 && y >= 6 && y < 22) inside++; else outside++;
+      }
+      if(!(night && weather === "sun")) assert.ok(inside > 0, `${weather}${night ? " at night" : ""} draws in the window`);
+      assert.equal(outside, 0, `${weather}${night ? " at night" : ""} changes nothing else`);
+    }
+  }
+  /* a clear night is the same moon, whichever way the day started */
+  assert.deepEqual([...room({ ...base, night: true, weather: "sun" })], [...room({ ...base, night: true, weather: null })]);
 });
 
 test("drawRoom: 81 x 60 and only tone indices 0-3", () => {

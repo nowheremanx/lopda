@@ -25,6 +25,8 @@ var S = {
      lang()                            redraw after the language changes
      padLayout()                       the chin pad appeared or went away
      ready(), nostore(), pause(), resume()   storage opened / failed, page hidden / shown (boot.js)
+     restore()                         a backup restore is about to replace everything: stop writes and reload
+     clock()                           the status bar clock ticked (every 15 s): cheap checks only, no timers of its own
      audio()                           the AudioContext was replaced (the phone had stopped it): reconnect into LP.SND.app */
 var LP = window.LP = {$:$, S:S, I18N:I18N, tr:tr, builtins:[]};
 LP.builtin = function(b){ LP.builtins.push(b); return b; };
@@ -155,7 +157,7 @@ function refresh(kind){
 /* ---------- clock & status ---------- */
 var statusKey="status.boot";
 function setStatus(key){ statusKey=key; $("savestate").textContent=tr(key); }
-function tickClock(){ var d=new Date(); $("clock").textContent=String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0"); }
+function tickClock(){ var d=new Date(); $("clock").textContent=String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0"); LP.each("clock"); }
 
 /* ---------- views ---------- */
 /* how often a built-in was opened: the pet reads this to decide its adult form (design.md 6). One debounced
