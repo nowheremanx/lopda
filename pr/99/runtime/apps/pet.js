@@ -973,7 +973,11 @@ function flagWithNumber(n){
 function deskWithPen(){
   var props=(packOf(P.save).props)||Art.PROPS||{};
   if(!props.desk) return props.pen||null;
-  return props.pen ? overlayGrid(props.desk,props.pen,14,0) : props.desk;
+  if(!props.pen) return props.desk;
+  /* the pen lies on the desk top: its rows go above the desk, so the desk's ink border does not hide it */
+  var w=String(props.desk[0]).length, blank=new Array(w+1).join("."), pad=new Array(15).join("."), top=[], r;
+  for(r=0;r<props.pen.length;r++) top.push((pad+props.pen[r]+blank).slice(0,w));
+  return top.concat(props.desk);
 }
 function gridFromPx(px){
   var rows=[], r, c, line, out;
@@ -1033,6 +1037,9 @@ function roomScene(){
   } else {
     var pick=activePick();
     if(pick) scene.prop=pickProp(pick);
+    /* the desk is wider than the room right of the pet: the pet sits a little right and the desk stands at its left,
+       clear of the bowl */
+    if(pick && pick.kind==="diary" && scene.prop){ px=54; scene.propX=px-String(scene.prop[0]).length-1; }
     if(w==="food" || P.lookAt==="food"){
       px=16; py=40;
     } else if(w==="wash" || P.lookAt==="wash"){
