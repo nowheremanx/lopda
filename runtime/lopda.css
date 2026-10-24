@@ -529,7 +529,9 @@ textarea::placeholder{color:var(--ink-2)}
 .dk-vhead span{flex:none;font-family:var(--f-pix);font-size:16px;color:var(--ink)}
 .dk-vhead h2{font-family:var(--f-pix);font-size:18px}
 /* the print fills the same box as the film box's rows: no side padding, so every screen starts and ends at the same x */
-.dk-photo{flex:1;min-height:0;position:relative;display:flex;align-items:center;justify-content:center;padding:10px 0;box-sizing:border-box}
+.dk-photo{flex:1;min-height:0;position:relative;display:flex;align-items:center;justify-content:center;padding:10px 0;box-sizing:border-box;overflow:hidden;touch-action:none}
+/* the print on the glass and its neighbours: the middle card holds exactly the box the canvas used to sit in */
+.dk-card{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:10px 0;box-sizing:border-box;will-change:transform}
 /* the print on the glass: colour, on purpose (decisions.md section 19); its white border is the photo paper */
 .dk-photo canvas{display:block;max-width:100%;max-height:100%;width:auto;height:auto;box-sizing:border-box;border:5px solid #f1ece1;box-shadow:0 3px 0 var(--ink)}
 .dk-wait{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);margin:0;padding:2px 10px;background:var(--ink);color:var(--lcd);font-size:15px;white-space:nowrap}
