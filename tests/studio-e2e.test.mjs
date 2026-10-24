@@ -75,6 +75,14 @@ async function studioPage(t, withChip) {
       synth.hit(kit, drum, 0.02, 1);
       return stats((await oc.startRendering()).getChannelData(0));
     };
+    /* all four drums on the same step, into a gain of 1: the worst case for headroom */
+    window.renderStep = async (kit, vel = 1) => {
+      const oc = new OfflineAudioContext(1, SR, SR);
+      const out = oc.createGain(); out.gain.value = 1; out.connect(oc.destination);
+      const synth = LopdaStudioSynth.create(oc, out);
+      for (const drum of ["kick", "snare", "hat", "perc"]) synth.hit(kit, drum, 0.02, vel);
+      return stats((await oc.startRendering()).getChannelData(0));
+    };
     /* `seconds` of the DEMO beat from the song data, swing included */
     window.renderBeat = async (kit, seconds) => {
       const song = LopdaSong.newSong();
@@ -128,6 +136,21 @@ test("studio synth: every drum of both kits sounds, peaks under 0.9, and renders
   assert.deepEqual(errors, []);
 });
 
+test("studio synth: all four drums on one step peak under 0.9", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await studioPage(t, false);
+  const r = await p.evaluate(async () => {
+    const out = {};
+    for (const kit of ["chip", "soft"]) out[kit] = await renderStep(kit, 1);
+    return out;
+  });
+  for (const kit of ["chip", "soft"]) {
+    t.diagnostic(`${kit} all four: peak ${r[kit].peak.toFixed(3)}`);
+    assert.ok(r[kit].peak <= 0.85, `${kit}: all four drums together peak <= 0.85, not just 0.9 (${r[kit].peak})`);
+    assert.ok(r[kit].peak > 0.05, `${kit}: the four still sound together (${r[kit].peak})`);
+  }
+  assert.deepEqual(errors, []);
+});
+
 test("studio synth: the demo beat sits near PAD.music", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await studioPage(t, true);
   const r = await p.evaluate(async () => {
@@ -168,7 +191,17 @@ test("studio synth: dispose stops later hits; unknown kit or drum is ignored", {
     } catch (e) { out.threw = true; }
     out.silentPeak = stats((await oc.startRendering()).getChannelData(0)).peak;
 
-    /* a hit before dispose still sounds; the later one does not */
+    /* velocity 0 schedules nothing at all: no envelope starts, so no exponential ramp from zero */
+    oc = new OfflineAudioContext(1, SR, SR);
+    gain = oc.createGain(); gain.gain.value = 1; gain.connect(oc.destination);
+    synth = LopdaStudioSynth.create(oc, gain);
+    try {
+      synth.hit("chip", "kick", 0.02, 0);
+      synth.hit("soft", "snare", 0.02, 0);
+    } catch (e) { out.threw = true; }
+    out.zeroPeak = stats((await oc.startRendering()).getChannelData(0)).peak;
+
+    /* dispose disconnects the master, so a hit already scheduled before it is silenced too, and later hits do nothing */
     oc = new OfflineAudioContext(1, SR, SR);
     gain = oc.createGain(); gain.gain.value = 1; gain.connect(oc.destination);
     synth = LopdaStudioSynth.create(oc, gain);
@@ -178,11 +211,14 @@ test("studio synth: dispose stops later hits; unknown kit or drum is ignored", {
     try { synth.hit("chip", "kick", 0.3, 1); } catch (e) { out.threw = true; }
     const d = (await oc.startRendering()).getChannelData(0);
     const at = (from, to) => { let m = 0; for (let i = Math.floor(from * SR); i < Math.min(d.length, to * SR); i++) m = Math.max(m, Math.abs(d[i])); return m; };
+    out.whole = stats(d).peak;
     out.after = at(0.3, 1);
     return out;
   });
   assert.equal(r.threw, false, "unknown kit or drum and hits after dispose never throw");
   assert.equal(r.silentPeak, 0, "a disposed synth renders silence");
+  assert.equal(r.zeroPeak, 0, "velocity 0 schedules no sound");
+  assert.equal(r.whole, 0, "the hit scheduled before dispose is silenced too (the master is disconnected)");
   assert.equal(r.after, 0, "nothing sounds after dispose");
   assert.deepEqual(errors, []);
 });
