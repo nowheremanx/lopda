@@ -284,7 +284,12 @@
       <!-- the viewer: the print laid on the glass, the one place the LCD shows colour -->
       <div class="dk-full dk-view" id="dk-view" hidden>
         <div class="bar dk-vhead"><h2 id="dk-vno"></h2><span id="dk-vinfo"></span></div>
-        <div class="dk-photo" id="dk-photo"><canvas id="dk-vcv" width="800" height="700"></canvas><p class="dk-wait" id="dk-vwait" hidden></p></div>
+        <div class="dk-photo" id="dk-photo">
+          <div class="dk-card" id="dk-vprev"><canvas width="800" height="700"></canvas></div>
+          <div class="dk-card"><canvas id="dk-vcv" width="800" height="700"></canvas></div>
+          <div class="dk-card" id="dk-vnext"><canvas width="800" height="700"></canvas></div>
+          <p class="dk-wait" id="dk-vwait" hidden></p>
+        </div>
       </div>
       <div class="dict-sheet dk-sheet" id="dk-sheet" hidden></div>
       <!-- one key row for every darkroom screen: the box, the viewer, developing and every sheet.
