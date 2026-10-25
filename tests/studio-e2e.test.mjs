@@ -1226,15 +1226,17 @@ async function walkSongTour(p, visit) {
   await p.locator("#v-studio .st-tour-next").click();
   await waitTour(p, /这一串|This row/);
   await visit(1);
-  /* slot 0 is already selected; tapping it would open its sheet, so the letter below is enough */
-  await p.locator('#studio-letters .st-letter[data-pat="0"]').click();   /* the same letter still counts */
+  /* the sheet hides the bubble: tap the selected slot, then a letter in the slot sheet */
+  await p.locator("#studio-chain .st-chain-cell").nth(0).click();
+  await p.waitForSelector("#studio-sheet:not([hidden])");
+  await p.locator('#studio-sheet .st-pat-btn[data-pat="0"]').click();
   await waitTour(p, /在前面插一段|insert before it/);
   await visit(2);
 }
 const NEW_TOURS = [
   { screen: "bass", key: "notes", first: /16 格还是一小节|16 squares are still one bar/, done: /点一个空格|Tap an empty one/ },
   { screen: "chords", key: "chords", first: /一小节两格|Two squares per bar/, done: /点一个和弦|Tap a chord/ },
-  { screen: "song", key: "song", first: /八段|eight patterns/, done: /加一段|adds a slot/ },
+  { screen: "song", key: "song", first: /十六段|sixteen patterns/, done: /加一段|adds a slot/ },
 ];
 
 test("studio tour: the note, chord and song tours walk their steps to Done; a reopen is quiet and ? replays each", { skip, timeout: 120000 }, async (t) => {
@@ -1289,7 +1291,7 @@ test("studio tour: the note, chord and song tours walk their steps to Done; a re
   await walkSongTour(p, async (i) => {
     if (i === 1) {
       assert.deepEqual((await tourTarget(p)).id, "studio-chain", "step 2 frames the chain");
-      assert.match(await tourText(p), /点下面的字母，换掉选中的那一格|Tap a letter below to change the selected slot/, "step 2 tells the player to use a letter");
+      assert.equal(await tourText(p), "这一串就是整首歌，从左往右放，一行四小节。点一格选中，再点一次换字母。", "step 2's exact text");
       assert.equal(await p.locator("#v-studio .st-tour-next").isVisible(), false, "step 2 waits for a letter tap");
     } else if (i === 2) {
       const target = await tourTarget(p);
@@ -1564,7 +1566,7 @@ test("studio tour: every colour on the new screens and their tours is one of the
   assert.deepEqual(errors, []);
 });
 
-/* ---------------- the eight patterns, the note / chord / song screens and the player (docs/design/studio.md 12) ---------------- */
+/* ---------------- the sixteen patterns, the note / chord / song screens and the player (docs/design/studio.md 12) ---------------- */
 test("studio tour: selecting a rest cell advances the chord tour's first step and auditions nothing", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await hitCountingPage(t);
   await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
@@ -1843,7 +1845,7 @@ test("studio: the pattern sheet switches to C, and copying A over a full C asks 
 
   await p.click("#studio-pat");
   assert.equal(await p.textContent("#studio-sheet .sheet-title"), "第 A 段");
-  assert.equal(await p.locator("#studio-sheet .st-pat-btn").count(), 8, "A-H in the sheet");
+  assert.equal(await p.locator("#studio-sheet .st-pat-btn").count(), 16, "A-P in the sheet");
   await p.locator('#studio-sheet .st-pat-btn[data-pat="2"]').click();
   assert.equal(await p.getAttribute("#v-studio", "data-pat"), "2", "picked C");
   assert.equal(await p.isHidden("#studio-sheet"), true, "the sheet closes after a pick");
@@ -1883,7 +1885,68 @@ test("studio: the pattern sheet switches to C, and copying A over a full C asks 
   assert.deepEqual(errors, []);
 });
 
-test("studio: + appends the edit letter, a letter key changes the selected slot, and the slot sheet inserts, copies and deletes", { skip, timeout: 60000 }, async (t) => {
+test("studio: picking pattern P in the sheet and editing it survives a reload", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await p.click("#studio-pat");
+  await p.waitForSelector("#studio-sheet:not([hidden])");
+  assert.equal(await p.locator("#studio-sheet .st-pat-btn").count(), 16);
+  assert.equal(await p.textContent('#studio-sheet .st-pat-btn[data-pat="15"]'), "P", "the sixteenth letter is P");
+  await p.locator('#studio-sheet .st-pat-btn[data-pat="15"]').click();
+  assert.equal(await p.getAttribute("#v-studio", "data-pat"), "15", "picked P");
+  assert.equal(await p.isHidden("#studio-sheet"), true);
+  assert.equal(await p.locator("#studio-grid .st-cell.on").count(), 0, "P starts empty");
+  await p.locator('#studio-grid .st-cell[data-step="0"]').click();
+  await waitKicks(p, 15, [0]);
+
+  await p.click("#home-key");
+  await p.waitForTimeout(250);
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await openTile(p);
+  await p.click("#studio-pat");
+  await p.locator('#studio-sheet .st-pat-btn[data-pat="15"]').click();
+  assert.equal(await p.getAttribute("#v-studio", "data-pat"), "15", "P is still the edit pattern");
+  assert.equal(await p.locator("#studio-grid .st-cell.on").count(), 1, "P's kick is still there");
+  assert.equal(await cellOn(p, 0), true);
+  assert.deepEqual(errors, []);
+});
+
+test("studio: the song chain renders four equal slots a row at 375x667 and 331x359", { skip, timeout: 120000 }, async (t) => {
+  for (const viewport of [{ width: 375, height: 667 }, { width: 375, height: 503 }]) {
+    const { p, errors } = await rtPage(t, viewport);
+    await studioOpen(p);
+    await skipTour(p);
+    await p.click('#studio-screens .st-scr[data-screen="song"]');
+    await skipScreenTour(p);
+    for (let i = 0; i < 7; i++) await p.click("#studio-add");   /* 8 slots: two rows of four */
+    const rows = await p.evaluate(() => {
+      const chain = document.querySelector("#studio-chain");
+      const out = [];
+      for (const e of chain.querySelectorAll(".st-chain-cell")) {
+        const r = e.getBoundingClientRect();
+        const row = out.find((x) => Math.abs(x.top - r.top) < 1);
+        const item = { l: r.left, w: r.width, h: r.height };
+        if (row) row.items.push(item);
+        else out.push({ top: r.top, items: [item] });
+      }
+      return { rows: out.map((r) => r.items), width: chain.getBoundingClientRect().width };
+    });
+    const where = `${viewport.width}x${viewport.height}`;
+    assert.equal(rows.rows.length, 2, `${where}: two rows`);
+    assert.deepEqual(rows.rows.map((r) => r.length), [4, 4], `${where}: four slots a row`);
+    const widths = rows.rows.flat().map((r) => r.w);
+    assert.ok(Math.max(...widths) - Math.min(...widths) < 1, `${where}: every slot is the same width (${widths})`);
+    assert.ok(widths[0] >= 44 && widths[0] <= rows.width / 4 + 0.5, `${where}: a slot fills a quarter (${widths[0]} of ${rows.width})`);
+    for (const r of rows.rows.flat()) assert.ok(r.h >= 44, `${where}: a slot is at least 44 px tall (${r.h})`);
+    for (let c = 1; c < 4; c++) {
+      assert.ok(Math.abs(rows.rows[0][c].l - rows.rows[1][c].l) < 1, `${where}: column ${c + 1} lines up across the rows`);
+    }
+    assert.deepEqual(errors, []);
+  }
+});
+
+test("studio: + appends the edit letter, a letter in the slot sheet changes the selected slot, and the slot sheet inserts, copies and deletes", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await rtPage(t);
   await studioOpen(p);
   await skipTour(p);
@@ -1899,9 +1962,12 @@ test("studio: + appends the edit letter, a letter key changes the selected slot,
   let chain = await p.$$eval(".st-chain-cell", (els) => els.map((e) => e.textContent));
   assert.deepEqual(chain, ["A", "A"], "+ appends the edit pattern (A)");
 
-  await p.locator('.st-letter[data-pat="1"]').click();
+  await openSlotSheet(p, 1);
+  assert.equal(await p.textContent("#studio-sheet .sheet-title"), "第 2 格：A", "the slot's sheet names the slot and its letter");
+  await p.locator('#studio-sheet .st-pat-btn[data-pat="1"]').click();
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
   chain = await p.$$eval(".st-chain-cell", (els) => els.map((e) => e.textContent));
-  assert.deepEqual(chain, ["A", "B"], "a letter key changes the selected slot");
+  assert.deepEqual(chain, ["A", "B"], "a letter in the slot sheet changes the selected slot");
   await waitStored(p, { song: [0, 1] });
 
   await p.click("#home-key");
@@ -2008,6 +2074,7 @@ test("studio: the slot sheet's edits work while the whole song plays", { skip, t
   await p.click("#studio-add");
   await p.click("#studio-add");
   assert.equal(await p.locator(".st-chain-cell").count(), 3);
+  let chain;
   await p.click("#studio-play");
   await p.waitForFunction(() => document.querySelector("#v-studio").dataset.mode === "song");
 
@@ -2030,6 +2097,16 @@ test("studio: the slot sheet's edits work while the whole song plays", { skip, t
   assert.equal(await p.locator(".st-chain-cell").count(), 3, "the chain shrank while playing");
   assert.equal(await p.getAttribute("#v-studio", "data-playing"), "true");
   await waitStored(p, { song: [0, 0, 0] });
+
+  /* the letters in the slot sheet change a slot while the song plays too */
+  await p.locator(".st-chain-cell").nth(2).click();
+  await p.waitForSelector("#studio-sheet:not([hidden])");
+  await p.locator('#studio-sheet .st-pat-btn[data-pat="2"]').click();
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  await waitStored(p, { song: [0, 0, 2] });
+  chain = await p.$$eval(".st-chain-cell", (els) => els.map((e) => e.textContent));
+  assert.deepEqual(chain, ["A", "A", "C"], "the slot sheet's letter changed the slot while playing");
+  assert.equal(await p.getAttribute("#v-studio", "data-playing"), "true", "the song still plays");
   await p.click("#studio-play");
   await p.waitForFunction(() => document.querySelector("#v-studio").dataset.mode === "");
   assert.deepEqual(errors, []);
@@ -2101,8 +2178,9 @@ test("studio: a chain edit while the song plays freezes the heard bar and acts f
   await preparedTape(p, EDITED, BPM);
   await play();
   await heard("1", "1");
-  await p.locator("#studio-chain .st-chain-cell").nth(1).click();   /* select slot 1 (does not open a sheet) */
-  await p.locator('#studio-letters .st-letter[data-pat="2"]').click();
+  await openSlotSheet(p, 1);                                        /* select slot 1, then its sheet */
+  await p.locator('#studio-sheet .st-pat-btn[data-pat="2"]').click();
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
   assert.equal(await attr("data-play-slot"), "1");
   assert.equal(await attr("data-play-pat"), "1", "the heard B is not replaced mid-bar");
   assert.deepEqual(await chainLetters(p), ["A", "C", "C"]);
@@ -2431,7 +2509,7 @@ test("studio: every screen fits at 375x667 with 44 px buttons and 56 px grid cel
   /* "+" brings the new last slot into the chain's own viewport; the view itself never scrolls */
   await q.click('#studio-screens .st-scr[data-screen="song"]');
   await skipScreenTour(q);
-  for (let i = 0; i < 14; i++) await q.click("#studio-add");
+  for (let i = 0; i < 30; i++) await q.click("#studio-add");
   const chainScroll = await q.evaluate(() => {
     const chain = document.querySelector("#studio-chain");
     const cells = chain.children, last = cells[cells.length - 1];
@@ -2440,7 +2518,7 @@ test("studio: every screen fits at 375x667 with 44 px buttons and 56 px grid cel
     return { count: cells.length, top: chain.scrollTop, lastVisible: lr.top >= cr.top - 1 && lr.bottom <= cr.bottom + 1,
       viewTop: v.scrollTop, viewHeight: v.scrollHeight, viewClient: v.clientHeight };
   });
-  assert.equal(chainScroll.count, 15);
+  assert.equal(chainScroll.count, 31);
   assert.ok(chainScroll.top > 0, "the chain scrolled");
   assert.ok(chainScroll.lastVisible, `the new last slot is in view: ${JSON.stringify(chainScroll)}`);
   assert.equal(chainScroll.viewTop, 0, "only the chain area scrolled");
@@ -2459,6 +2537,11 @@ test("studio: every screen fits at 375x667 with 44 px buttons and 56 px grid cel
     }
     return { out: out.slice(0, 8), hidden: sh.hidden, scroll: sh.scrollHeight, client: sh.clientHeight };
   });
+  /* every button and row a sheet offers is a 44 px target */
+  const sheetSmall = () => q.$$eval("#studio-sheet button, #studio-sheet .lcd-menu li", (els) => els.filter((e) => {
+    const r = e.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 && (r.width < 44 - 0.5 || r.height < 44 - 0.5);
+  }).map((e) => ({ text: e.textContent.trim(), w: e.getBoundingClientRect().width, h: e.getBoundingClientRect().height })));
   await q.click('#studio-screens .st-scr[data-screen="drums"]');
   await skipScreenTour(q);
   await q.click("#studio-pat");
@@ -2466,6 +2549,7 @@ test("studio: every screen fits at 375x667 with 44 px buttons and 56 px grid cel
   assert.equal(sheet.hidden, false);
   assert.deepEqual(sheet.out, [], `the pattern sheet fits at 331x359: ${JSON.stringify(sheet)}`);
   assert.ok(sheet.scroll <= sheet.client);
+  assert.deepEqual(await sheetSmall(), [], "the pattern sheet's buttons are at least 44 px");
   await q.locator("#studio-sheet .st-sheet-btn", { hasText: "返回" }).click();
   assert.equal(await q.isHidden("#studio-sheet"), true, "the pattern sheet's back button closes it");
 
@@ -2480,6 +2564,7 @@ test("studio: every screen fits at 375x667 with 44 px buttons and 56 px grid cel
   sheet = await sheetState();
   assert.deepEqual(sheet.out, [], `the copy question fits at 331x359: ${JSON.stringify(sheet)}`);
   assert.ok(sheet.scroll <= sheet.client);
+  assert.deepEqual(await sheetSmall(), [], "the copy question's buttons are at least 44 px");
   await q.locator("#studio-sheet .st-copy-ask .btn.ghost").click();     /* 取消: back to the copy sheet */
   assert.match(await q.textContent("#studio-sheet .sheet-title"), /复制/, "cancel is a way back to the sheet");
   await q.locator("#studio-sheet .st-sheet-btn", { hasText: "返回" }).click();
@@ -2491,8 +2576,55 @@ test("studio: every screen fits at 375x667 with 44 px buttons and 56 px grid cel
   assert.equal(sheet.hidden, false);
   assert.deepEqual(sheet.out, [], `the menu fits at 331x359: ${JSON.stringify(sheet)}`);
   assert.ok(sheet.scroll <= sheet.client);
+  assert.deepEqual(await sheetSmall(), [], "every menu row is at least 44 px");
   await q.locator("#studio-sheet .lcd-menu li").last().click();          /* 返回 */
   assert.equal(await q.isHidden("#studio-sheet"), true, "the menu's back row closes it");
+
+  /* the slot sheet: the 16 letters, then the four edits two by two; every button is 44 px and all fits */
+  await q.click('#studio-screens .st-scr[data-screen="song"]');
+  await skipScreenTour(q);
+  await q.locator(".st-chain-cell").first().click();
+  assert.equal(await q.isHidden("#studio-sheet"), true, "a tap on another slot only selects it");
+  await q.locator(".st-chain-cell").first().click();
+  await q.waitForSelector("#studio-sheet:not([hidden])");
+  sheet = await sheetState();
+  assert.deepEqual(sheet.out, [], `the slot sheet fits at 331x359: ${JSON.stringify(sheet)}`);
+  assert.ok(sheet.scroll <= sheet.client);
+  const shot = await q.evaluate(() => {
+    const letters = [...document.querySelectorAll("#studio-sheet .st-pat-btn")];
+    const actions = [...document.querySelectorAll("#studio-sheet .st-slot-actions li")];
+    const rect = (e) => e.getBoundingClientRect();
+    const rows = (els) => {
+      const out = [];
+      for (const e of els) {
+        const r = rect(e);
+        const row = out.find((x) => Math.abs(x.top - r.top) < 1);
+        if (row) row.items.push(e);
+        else out.push({ top: r.top, items: [e] });
+      }
+      return out;
+    };
+    return {
+      letters: letters.length,
+      letterRows: rows(letters).map((r) => r.items.length),
+      inverted: letters.filter((e) => e.classList.contains("on")).map((e) => e.dataset.pat),
+      actions: actions.map((e) => e.textContent.trim()),
+      actionRows: rows(actions).map((r) => r.items.length),
+      actionH: Math.min(...actions.map((e) => rect(e).height)),
+    };
+  });
+  assert.equal(shot.letters, 16, "the slot sheet shows the 16 letters");
+  assert.deepEqual(shot.letterRows, [4, 4, 4, 4], "four rows of four letters");
+  assert.deepEqual(shot.inverted, ["0"], "the slot's own letter is inverted");
+  assert.deepEqual(shot.actions, ["前面插一段", "后面复制一段", "删掉这一格", "返回"]);
+  assert.deepEqual(shot.actionRows, [2, 2], "the four edits sit two by two");
+  assert.ok(shot.actionH >= 44, `each slot action is 44 px (${shot.actionH})`);
+  const smallSheet = await sheetSmall();
+  assert.deepEqual(smallSheet, [], `every slot sheet button is at least 44 px: ${JSON.stringify(smallSheet)}`);
+  await q.locator('#studio-sheet .st-pat-btn[data-pat="2"]').click();
+  await q.waitForSelector("#studio-sheet", { state: "hidden" });
+  assert.deepEqual((await q.$$eval(".st-chain-cell", (els) => els.map((e) => e.textContent.slice(0, 1)))).slice(0, 3), ["C", "A", "A"],
+    "the slot sheet's letter works at 331x359");
 
   assert.deepEqual(errors, []);
   assert.deepEqual(errors2, []);

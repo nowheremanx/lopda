@@ -38,7 +38,7 @@ test("constants: format, tracks, scales, demo beat", () => {
   });
   assert.deepEqual([S.SWING_MIN, S.SWING_MAX, S.SWING_DEFAULT], [0.5, 0.75, 0.55]);
   assert.equal(S.TAPE_MAX, 4);
-  assert.equal(S.PATTERNS_MAX, 8);
+  assert.equal(S.PATTERNS_MAX, 16);
   assert.equal(S.SONG_MAX, 64);
   assert.equal(S.NAME_MAX, 40);
   assert.deepEqual(plain(S.DEMO), {
@@ -214,7 +214,7 @@ test("validate: patterns", () => {
   const cases = [
     (s) => { s.patterns = "nope"; },
     (s) => { s.patterns = []; },
-    (s) => { s.patterns = Array.from({ length: 9 }, () => ({ len: 16, notes: {} })); },
+    (s) => { s.patterns = Array.from({ length: 17 }, () => ({ len: 16, notes: {} })); },
     (s) => { s.patterns[0].len = 0; },
     (s) => { s.patterns[0].len = 65; },
     (s) => { s.patterns[0].len = 1.5; },
@@ -225,6 +225,17 @@ test("validate: patterns", () => {
     (s) => { s.patterns[0] = null; },
   ];
   for (const mut of cases) assert.equal(broken(mut).error, "patterns");
+});
+
+test("validate: sixteen patterns are a song, seventeen are not", () => {
+  const song = fresh();
+  song.patterns = Array.from({ length: S.PATTERNS_MAX }, () => S.emptyPattern());
+  song.song = song.patterns.map((_, i) => i);
+  assert.equal(S.PATTERNS_MAX, 16);
+  assert.equal(S.validate(song).error, undefined, "A-P is the format's limit");
+  song.patterns.push(S.emptyPattern());
+  assert.equal(song.patterns.length, 17);
+  assert.equal(S.validate(song).error, "patterns", "a seventeenth pattern is refused");
 });
 
 test("validate: notes", () => {
@@ -607,7 +618,7 @@ test("patterns: emptyPattern is fresh, ensurePattern fills up to the index and l
   assert.deepEqual(plain(song), snapshot, "the input is untouched");
   assert.equal(S.validate(three).error, undefined);
 
-  for (const bad of [-1, 8, 2.5, "2", undefined]) {
+  for (const bad of [-1, 16, 2.5, "2", undefined]) {
     assert.deepEqual(plain(S.ensurePattern(song, bad)), snapshot, String(bad));
   }
 });
@@ -643,11 +654,11 @@ test("copyPattern: copies len and a deep clone of the notes, or leaves the song 
   assert.notEqual(out.patterns[2].notes.bass, out.patterns[0].notes.bass);
   assert.deepEqual(plain(song), snapshot, "the input is untouched");
 
-  // from === to, a missing from, or an index outside A-H: unchanged
+  // from === to, a missing from, or an index outside A-P: unchanged
   assert.deepEqual(plain(S.copyPattern(song, 0, 0)), snapshot);
   assert.deepEqual(plain(S.copyPattern(song, 4, 2)), snapshot);
   assert.deepEqual(plain(S.copyPattern(song, -1, 2)), snapshot);
-  assert.deepEqual(plain(S.copyPattern(song, 0, 8)), snapshot);
+  assert.deepEqual(plain(S.copyPattern(song, 0, 16)), snapshot);
   assert.deepEqual(plain(song), snapshot);
 });
 
@@ -702,7 +713,7 @@ test("setNote: ensures the pattern, but drums, unknown tracks and bad input leav
     [0, "bass", 0, 33, undefined],
     [0, "bass", 0, 0, 2],
     [0, "bass", 0, 0, "0.8"],
-    [8, "bass", 0, 0, undefined],
+    [16, "bass", 0, 0, undefined],
     [-1, "bass", 0, 0, undefined],
   ]) {
     assert.deepEqual(plain(S.setNote(song, p, track, t, deg, vel)), before, `${p} ${track} ${t} ${deg} ${vel}`);
@@ -811,7 +822,7 @@ test("setRest and isRest: a vel-0 note is a rest, it ends the note before it, an
     [0, "bass", -1],
     [0, "bass", P],
     [0, "bass", 0.5],
-    [8, "bass", 0],
+    [16, "bass", 0],
     [-1, "bass", 0],
   ]) {
     assert.deepEqual(plain(S.setRest(song, p, track, t)), before, `${p} ${track} ${t}`);
@@ -849,10 +860,10 @@ test("song chain: setSlot, addSlot and dropSlot copy, ensure the pattern, and ke
   assert.equal(S.addSlot(full, 1).patterns.length, 1, "a refused add does not add a pattern either");
 
   // bad slots, patterns and songs: unchanged copies
-  for (const [i, p] of [[1, 0], [-1, 0], [0, 8], [0, -1], [0, 1.5], ["0", 0], [0, "1"]]) {
+  for (const [i, p] of [[1, 0], [-1, 0], [0, 16], [0, -1], [0, 1.5], ["0", 0], [0, "1"]]) {
     assert.deepEqual(plain(S.setSlot(song, i, p)), before, `${i} ${p}`);
   }
-  for (const p of [-1, 8, 1.5, "1"]) assert.deepEqual(plain(S.addSlot(song, p)), before, String(p));
+  for (const p of [-1, 16, 1.5, "1"]) assert.deepEqual(plain(S.addSlot(song, p)), before, String(p));
 });
 
 test("insertSlot and removeSlot: index 0, the end, the 64 cap, one slot left, bad input", () => {
@@ -880,7 +891,7 @@ test("insertSlot and removeSlot: index 0, the end, the 64 cap, one slot left, ba
   assert.equal(S.insertSlot(full, S.SONG_MAX, 1).patterns.length, 1);
 
   // bad indexes, patterns and songs are unchanged copies
-  for (const [i, p] of [[-1, 1], [2, 1], [1.5, 1], ["1", 1], [0, 8], [0, -1], [0, 1.5], [0, "1"]]) {
+  for (const [i, p] of [[-1, 1], [2, 1], [1.5, 1], ["1", 1], [0, 16], [0, -1], [0, 1.5], [0, "1"]]) {
     assert.deepEqual(plain(S.insertSlot(song, i, p)), before, `${i} ${p}`);
   }
   const noSong = fresh();
@@ -1053,7 +1064,7 @@ test("chainEvents: a dense 64-slot song gives the same events as a straightforwa
   const rand = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
   const pick = (n) => Math.floor(rand() * n);
 
-  // the scheduler's worst accepted song: 8 patterns, 4 tracks of 1024 notes, all 64 slots
+  // the scheduler's worst accepted song: 16 patterns, 4 tracks of 1024 notes, all 64 slots
   const song = fresh();
   song.swing = 0.75;
   song.patterns = [];

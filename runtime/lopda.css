@@ -729,20 +729,17 @@ textarea::placeholder{color:var(--ink-2)}
 .st-chord-key small{font-size:11px;color:var(--ink-2);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .st-chord-key.on{background:var(--ink);color:var(--lcd)}
 .st-chord-key.on small{color:var(--lcd)}
-/* the song screen: only the chain scrolls, and only when it is longer than its box */
+/* the song screen: one row is a four-bar phrase; only the chain scrolls, and only when it outgrows its box */
 .st-song{flex:1;min-height:0;display:flex;flex-direction:column;gap:4px;padding:4px 6px 6px}
-.st-chain{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;touch-action:pan-y;display:grid;grid-template-columns:repeat(6,minmax(0,1fr));grid-auto-rows:44px;gap:4px;align-content:start}
+.st-chain{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;touch-action:pan-y;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));grid-auto-rows:44px;gap:4px;align-content:start}
 .st-chain-cell{min-width:0;min-height:44px;display:flex;align-items:center;justify-content:center;padding:0;background:var(--lcd);color:var(--ink);border:2px solid var(--ink);font-family:var(--f-pix);font-size:20px;line-height:1;cursor:pointer}
 .st-chain-cell.sel{box-shadow:inset 0 0 0 4px var(--ink)}
 .st-chain-cell.playing{background:var(--ink);color:var(--lcd)}
 .st-chain-cell.playing.sel{box-shadow:inset 0 0 0 4px var(--lcd)}
-.st-letters{flex:none;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));grid-auto-rows:44px;gap:4px}
-.st-letter{position:relative;min-height:44px;min-width:0;display:flex;align-items:center;justify-content:center;padding:0 0 6px;background:var(--lcd);color:var(--ink);border:2px solid var(--ink);font-family:var(--f-pix);font-size:20px;line-height:1;cursor:pointer}
-.st-letter .st-dot{position:absolute;left:50%;bottom:4px;margin-left:-2.5px}
 .st-song-btns{flex:none;display:flex;gap:4px}
 .st-song-btn{flex:1;min-width:0;min-height:44px;padding:2px 4px;background:var(--ink);color:var(--lcd);border:2px solid var(--ink);font-family:var(--f-lcd);font-size:13px;line-height:1.15;cursor:pointer}
 .st-song-btn:disabled{background:var(--lcd-3);color:var(--ink-2);border-color:var(--lcd-3);cursor:default}
-/* the pattern sheet: A-H in two rows of four, the current one inverted, a dot when that pattern has notes */
+/* the pattern sheet: A-P in four rows of four, the current one inverted, a dot when that pattern has notes */
 .st-pat-grid{flex:none;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));grid-auto-rows:44px;gap:4px}
 .st-pat-btn{position:relative;min-height:44px;min-width:0;display:flex;align-items:center;justify-content:center;padding:0 0 6px;background:transparent;color:var(--ink);border:2px solid var(--ink);font-family:var(--f-pix);font-size:20px;line-height:1;cursor:pointer}
 .st-pat-btn.on{background:var(--ink);color:var(--lcd)}
@@ -751,5 +748,11 @@ textarea::placeholder{color:var(--ink-2)}
 .st-sheet-btn{min-height:44px;padding:4px 8px;background:transparent;color:var(--ink);border:2px solid var(--ink);font-family:var(--f-lcd);font-size:15px;line-height:1.1;cursor:pointer}
 .st-sheet-row{flex:none;display:flex;gap:4px}
 .st-sheet-row .st-sheet-btn{flex:1;min-width:0}
+/* the slot sheet's four edits sit two by two under the letters, so the whole sheet fits 331x359 */
+.st-slot-actions{flex:none;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px}
+.st-slot-actions li{min-height:44px;box-sizing:border-box;justify-content:center;padding:4px 6px;border:2px solid var(--ink);font-size:14px;line-height:1.15}
+.st-slot-actions li span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center}
 .st-copy-ask{display:flex;flex-direction:column;gap:8px;font-size:15px;line-height:1.4}
 .st-copy-ask p{margin:0}
+.st-copy-ask .row{gap:10px}
+.st-copy-ask .btn{flex:1;min-height:44px}

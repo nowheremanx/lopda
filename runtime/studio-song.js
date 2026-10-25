@@ -133,7 +133,7 @@ var DEMO_SONG={
   song:[0,1,2,3, 0,1,2,3, 4,5,6,7, 4,5,6,7, 0,1,2,3, 4,5,6,7]
 };
 
-var SWING_MIN=0.5, SWING_MAX=0.75, SWING_DEFAULT=0.55, TAPE_MAX=4, PATTERNS_MAX=8, SONG_MAX=64, NAME_MAX=40;
+var SWING_MIN=0.5, SWING_MAX=0.75, SWING_DEFAULT=0.55, TAPE_MAX=4, PATTERNS_MAX=16, SONG_MAX=64, NAME_MAX=40;
 
 /* Which synth voice a track plays (12.6): a constant, not a song field, so a later version can revoice a track without
    migrating files. 12.12 moved the melody from the bright pluck to the flute. */
@@ -482,8 +482,8 @@ function clampBpm(bpm){
   return Math.max(BPM_MIN, Math.min(BPM_MAX, n));
 }
 
-/* ---------- patterns A-H (12.3) ---------- */
-/* A pattern is created on demand up to 8, the number of letter buttons; an empty one is the shape every screen expects. */
+/* ---------- patterns A-P (12.3) ---------- */
+/* A pattern is created on demand up to 16, the number of letter buttons; an empty one is the shape every screen expects. */
 function emptyPattern(){
   return {len:STEPS, notes:{drums:[], bass:[], chords:[], melody:[]}};
 }
