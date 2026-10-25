@@ -1578,6 +1578,9 @@
     } else pickWord(n);
   });
   coverList.addEventListener("pointercancel", function () { rowDown = null; pickSwipe = null; });
+  /* every new press forgets the last one first (capture runs before the list's own pointerdown): a mouse released
+     outside the list never reaches its pointerup, and a stale start must not turn a page or open a row later */
+  document.addEventListener("pointerdown", function () { rowDown = null; pickSwipe = null; }, true);
   hintEl.addEventListener("click", hint);
   helpEl.addEventListener("click", openHelp);
 
