@@ -1,0 +1,3267 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>每日推箱</title>
+<!-- DailyBox (lopda/1): one crate-pushing puzzle a day, the same for everyone. Push every crate onto a
+     mark; par is the exact minimum push count. lo-game.js. MIT License. -->
+</head>
+<body>
+<script data-lo-game="1.4.0">
+/*
+ * lo-game.js 1.4.0, a tiny game framework for Lo-PDA apps.
+ * MIT License. Copyright (c) 2026 Haowei Wu. See sdk/LICENSE.
+ *
+ * Paste-in library: an app carries its own copy inside a script tag marked
+ * data-lo-game="1.4.0", and `node tools/lo-game.mjs registry/apps/<id>` fills it in.
+ * The same tool adds a pixel-font block holding just the characters the app uses.
+ * Do not edit the copy inside an app; the checker verifies it.
+ *
+ * Everything is drawn into a four-tone indexed framebuffer (values 0-3), so
+ * nothing can ever show a colour outside the palette or a blurred edge.
+ * Reference: sdk/LO-GAME.md
+ */
+var LoGame = (function () {
+  "use strict";
+
+  var VERSION = "1.4.0";
+  var TONES = ["#1f2a14", "#4a5a32", "#7d8a58", "#a3ad7e"];
+  var INK = 0, DARK = 1, MID = 2, PAPER = 3;
+  var CLEAR = 255;
+  var BUTTONS = ["up", "down", "left", "right", "a", "b", "start", "select"];
+  var KEYS = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right",
+    x: "a", X: "a", z: "b", Z: "b", Enter: "start", Shift: "select" };
+  var HAS_PAD = typeof PAD !== "undefined";
+  var BITMAP_FONT = null;   /* set by LoGame.font(data), from the data-lo-font block */
+  function font(data) { BITMAP_FONT = data; }
+  function b64bits(str, n) {
+    var bin = atob(str), out = new Uint8Array(n);
+    for (var i = 0; i < n; i++) out[i] = (bin.charCodeAt(i >> 3) >> (7 - (i & 7))) & 1;
+    return out;
+  }
+
+  /* bilingual text (1.2.0): t({zh: "...", en: "..."}, vars) picks PAD.lang, else the fallback
+     language, else whichever the app wrote. Plain strings pass through. "{name}" is filled from vars. */
+  function padLang() { var l = HAS_PAD && PAD.lang; return l === "zh" || l === "en" ? l : null; }
+  function pick(text, lang, vars) {
+    var s = text;
+    if (s && typeof s === "object") { s = s[lang]; if (s == null) s = text.zh != null ? text.zh : text.en; }
+    s = s == null ? "" : String(s);
+    return vars ? s.replace(/\{(\w+)\}/g, function (m, k) { return vars[k] == null ? "" : String(vars[k]); }) : s;
+  }
+  function t(text, vars) { return pick(text, padLang() || "zh", vars); }
+
+  function rgbOf(hex) { return [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)]; }
+  var RGB = TONES.map(rgbOf);
+
+  /* ---------------- small helpers ---------------- */
+  function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+  function lerp(a, b, t) { return a + (b - a) * t; }
+  function approach(v, target, step) { return v < target ? Math.min(v + step, target) : Math.max(v - step, target); }
+  function rng(seed) {
+    var s = (seed >>> 0) || 0x9e3779b9;
+    var next = function () { s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; };
+    return {
+      next: next,
+      int: function (a, b) { return a + Math.floor(next() * (b - a + 1)); },
+      pick: function (arr) { return arr[Math.floor(next() * arr.length)]; },
+      chance: function (p) { return next() < p; }
+    };
+  }
+  var EASE = {
+    linear: function (t) { return t; },
+    out: function (t) { return 1 - (1 - t) * (1 - t); },
+    "in": function (t) { return t * t; },
+    inOut: function (t) { return t < 0.5 ? 2 * t * t : 1 - 2 * (1 - t) * (1 - t); }
+  };
+
+  /* ---------------- sprites: rows of "0123." ---------------- */
+  function sprite(rows) {
+    if (!Array.isArray(rows) || !rows.length) throw new Error("sprite: give an array of strings");
+    var h = rows.length, w = rows[0].length, px = new Uint8Array(w * h);
+    for (var y = 0; y < h; y++) {
+      if (rows[y].length !== w) throw new Error("sprite: row " + y + " is " + rows[y].length + " wide, expected " + w);
+      for (var x = 0; x < w; x++) {
+        var c = rows[y].charCodeAt(x) - 48;
+        px[y * w + x] = c >= 0 && c <= 3 ? c : CLEAR;
+      }
+    }
+    return { w: w, h: h, px: px };
+  }
+  function sprites(table) { var out = {}; Object.keys(table).forEach(function (k) { out[k] = sprite(table[k]); }); return out; }
+
+  /* ---------------- tile maps ---------------- */
+  function tilemap(opt) {
+    var rows = opt.map.slice(), size = opt.size || 8, tiles = opt.tiles || {}, solid = opt.solid || "";
+    var cols = rows[0].length;
+    rows.forEach(function (r, i) { if (r.length !== cols) throw new Error("tilemap: row " + i + " is " + r.length + " wide, expected " + cols); });
+    var map = {
+      size: size, cols: cols, rows: rows.length, width: cols * size, height: rows.length * size,
+      get: function (tx, ty) { return ty < 0 || ty >= rows.length || tx < 0 || tx >= cols ? null : rows[ty][tx]; },
+      set: function (tx, ty, ch) { if (map.get(tx, ty) === null) return; rows[ty] = rows[ty].slice(0, tx) + ch + rows[ty].slice(tx + 1); },
+      solid: function (tx, ty) { var c = map.get(tx, ty); return c === null || solid.indexOf(c) >= 0; },
+      find: function (ch) { var out = []; rows.forEach(function (r, y) { for (var x = 0; x < r.length; x++) if (r[x] === ch) out.push({ x: x, y: y }); }); return out; },
+      at: function (px, py) { return { x: Math.floor(px / size), y: Math.floor(py / size) }; },
+      draw: function (g, camX, camY) {
+        camX = Math.round(camX || 0); camY = Math.round(camY || 0);
+        var x0 = Math.max(0, Math.floor(camX / size)), y0 = Math.max(0, Math.floor(camY / size));
+        var x1 = Math.min(cols - 1, Math.floor((camX + g.width - 1) / size)), y1 = Math.min(rows.length - 1, Math.floor((camY + g.height - 1) / size));
+        for (var ty = y0; ty <= y1; ty++) for (var tx = x0; tx <= x1; tx++) {
+          var t = tiles[rows[ty][tx]];
+          if (t) g.sprite(t, tx * size - camX, ty * size - camY);
+        }
+      }
+    };
+    return map;
+  }
+  /* top-left of a camera that keeps (x, y) centred inside a world */
+  function camera(x, y, viewW, viewH, worldW, worldH) {
+    return {
+      x: worldW <= viewW ? Math.round((worldW - viewW) / 2) : clamp(Math.round(x - viewW / 2), 0, worldW - viewW),
+      y: worldH <= viewH ? Math.round((worldH - viewH) / 2) : clamp(Math.round(y - viewH / 2), 0, worldH - viewH)
+    };
+  }
+
+  /* ---------------- the game ---------------- */
+  function create(opt) {
+    opt = opt || {};
+    var W = opt.width || 160, H = opt.height || 144;
+    var LANG = padLang() || (opt.lang === "en" ? "en" : "zh");   /* opt.lang: the app's own default */
+    var STEP = 1 / 60;
+    var fontOpt = opt.font || {};
+    /* text: the pixel font when the app carries one, the phone's own font otherwise */
+    var BF = fontOpt.system ? null : BITMAP_FONT;
+    var FONT = { size: fontOpt.size || 12, family: fontOpt.family || "sans-serif", weight: fontOpt.weight || "400",
+      threshold: fontOpt.threshold || 0.45 };
+    FONT.line = BF ? BF.line : FONT.size + 2;
+    FONT.cell = BF ? BF.cell : FONT.line;
+
+    /* --- page and canvas --- */
+    var parent = opt.parent || document.body;
+    var border = opt.border == null ? PAPER : opt.border;
+    if (!opt.parent) {
+      var st = document.createElement("style");
+      st.textContent = "html,body{margin:0;height:100%;overflow:hidden;background:" + TONES[border] + "}" +
+        "body{display:flex;align-items:center;justify-content:center;touch-action:none;-webkit-user-select:none;user-select:none}";
+      document.head.appendChild(st);
+    }
+    var canvas = document.createElement("canvas");
+    canvas.width = W; canvas.height = H;
+    canvas.style.cssText = "display:block;image-rendering:pixelated;image-rendering:crisp-edges;touch-action:none";
+    parent.appendChild(canvas);
+    var ctx = canvas.getContext("2d");
+    var image = ctx.createImageData(W, H);
+    function fit() {
+      var aw = parent.clientWidth || innerWidth, ah = parent.clientHeight || innerHeight;
+      var dpr = window.devicePixelRatio || 1, best = Math.min(aw / W, ah / H), k = Math.floor(best * dpr) / dpr;
+      if (k < best * 0.9) k = best;   /* small screens: size beats perfectly even pixels */
+      k = Math.max(0.5, k);
+      canvas.style.width = Math.round(W * k) + "px"; canvas.style.height = Math.round(H * k) + "px";
+      game.scale = k;
+    }
+
+    /* --- framebuffer and drawing --- */
+    var buf = new Uint8Array(W * H);
+    var ox = 0, oy = 0, cx0 = 0, cy0 = 0, cx1 = W, cy1 = H;
+    function put(x, y, c) { if (x >= cx0 && y >= cy0 && x < cx1 && y < cy1) buf[y * W + x] = c; }
+
+    var fc = document.createElement("canvas"), fx = null, glyphs = {}, baseline = 0;
+    function fontCtx() {
+      if (fx) return fx;
+      fc.width = FONT.size * 3; fc.height = FONT.line + 4;
+      fx = fc.getContext("2d", { willReadFrequently: true });
+      fx.font = FONT.weight + " " + FONT.size + "px " + FONT.family;
+      fx.textBaseline = "alphabetic"; fx.fillStyle = TONES[INK];
+      var m = fx.measureText("国");
+      baseline = BF ? BF.cell - 2 : Math.round(m.actualBoundingBoxAscent || FONT.size * 0.88);
+      return fx;
+    }
+    /* a glyph is the system font at its native pixel size, thresholded to one bit */
+    function glyph(ch) {
+      var g = glyphs[ch]; if (g) return g;
+      var bf = BF && BF.glyphs[ch];
+      if (bf) {
+        var cut = bf.indexOf(":"), adv0 = +bf.slice(0, cut);
+        return (glyphs[ch] = { w: adv0, adv: adv0, h: BF.cell, bits: b64bits(bf.slice(cut + 1), adv0 * BF.cell) });
+      }
+      var x = fontCtx(), adv = Math.max(1, Math.round(x.measureText(ch).width));
+      x.clearRect(0, 0, fc.width, fc.height);
+      x.fillText(ch, 0, baseline);
+      var h = FONT.cell, w = Math.min(adv, fc.width), d = x.getImageData(0, 0, w, h).data, bits = new Uint8Array(w * h), lim = FONT.threshold * 255;
+      for (var i = 0; i < w * h; i++) bits[i] = d[i * 4 + 3] >= lim ? 1 : 0;
+      g = glyphs[ch] = { w: w, adv: adv, h: h, bits: bits };
+      return g;
+    }
+    function measure(str) { var w = 0; Array.from(String(str)).forEach(function (ch) { if (ch !== "\n") w += glyph(ch).adv; }); return w; }
+    var NO_START = "，。！？、；：）」』》,.!?;:)]%";
+    function wrap(str, width) {
+      var lines = [];
+      String(str).split("\n").forEach(function (para) {
+        var tokens = para.match(/[A-Za-z0-9'_\-]+|\s|./gu) || [""], line = "", lw = 0;
+        tokens.forEach(function (t) {
+          var tw = measure(t);
+          if (lw + tw > width && line && NO_START.indexOf(t) < 0) {
+            lines.push(line.replace(/\s+$/, "")); line = ""; lw = 0;
+            if (/^\s$/.test(t)) return;
+          }
+          line += t; lw += tw;
+        });
+        lines.push(line);
+      });
+      return lines;
+    }
+
+    var g = {
+      width: W, height: H, INK: INK, DARK: DARK, MID: MID, PAPER: PAPER,
+      clear: function (c) { buf.fill(c == null ? PAPER : c); },
+      origin: function (x, y) { ox = Math.round(x || 0); oy = Math.round(y || 0); },
+      clip: function (x, y, w, h) {
+        if (x == null) { cx0 = 0; cy0 = 0; cx1 = W; cy1 = H; return; }
+        cx0 = clamp(Math.round(x + ox), 0, W); cy0 = clamp(Math.round(y + oy), 0, H);
+        cx1 = clamp(Math.round(x + ox + w), 0, W); cy1 = clamp(Math.round(y + oy + h), 0, H);
+      },
+      pixel: function (x, y, c) { put(Math.round(x) + ox, Math.round(y) + oy, c); },
+      get: function (x, y) { x = Math.round(x) + ox; y = Math.round(y) + oy; return x < 0 || y < 0 || x >= W || y >= H ? null : buf[y * W + x]; },
+      rect: function (x, y, w, h, c) {
+        x = Math.round(x) + ox; y = Math.round(y) + oy;
+        var xa = Math.max(x, cx0), ya = Math.max(y, cy0), xb = Math.min(x + Math.round(w), cx1), yb = Math.min(y + Math.round(h), cy1);
+        for (var yy = ya; yy < yb; yy++) buf.fill(c, yy * W + xa, yy * W + Math.max(xa, xb));
+      },
+      frame: function (x, y, w, h, c) {
+        g.rect(x, y, w, 1, c); g.rect(x, y + h - 1, w, 1, c); g.rect(x, y, 1, h, c); g.rect(x + w - 1, y, 1, h, c);
+      },
+      line: function (x0, y0, x1, y1, c) {
+        x0 = Math.round(x0); y0 = Math.round(y0); x1 = Math.round(x1); y1 = Math.round(y1);
+        var dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1, e = dx + dy;
+        for (;;) { put(x0 + ox, y0 + oy, c); if (x0 === x1 && y0 === y1) break; var e2 = 2 * e; if (e2 >= dy) { e += dy; x0 += sx; } if (e2 <= dx) { e += dx; y0 += sy; } }
+      },
+      circle: function (cx, cy, r, c, fill) {
+        cx = Math.round(cx); cy = Math.round(cy);
+        for (var y = -r; y <= r; y++) {
+          var span = Math.round(Math.sqrt(r * r + r - y * y));
+          if (fill) g.rect(cx - span, cy + y, span * 2 + 1, 1, c);
+          else { g.pixel(cx - span, cy + y, c); g.pixel(cx + span, cy + y, c); }
+        }
+        if (!fill) for (var x = -r; x <= r; x++) { var s2 = Math.round(Math.sqrt(r * r + r - x * x)); g.pixel(cx + x, cy - s2, c); g.pixel(cx + x, cy + s2, c); }
+      },
+      /* level 0-4: 0 nothing, 2 checkerboard, 4 solid */
+      dither: function (x, y, w, h, c, level) {
+        level = clamp(level == null ? 2 : level, 0, 4);
+        x = Math.round(x); y = Math.round(y);
+        for (var yy = 0; yy < h; yy++) for (var xx = 0; xx < w; xx++) {
+          var px = (x + xx) & 1, py = (y + yy) & 1;
+          var on = level === 4 || (level === 3 && !(px && py)) || (level === 2 && px === py) || (level === 1 && !px && !py);
+          if (on) put(x + xx + ox, y + yy + oy, c);
+        }
+      },
+      /* opts: {flip, flipY, color (paint every opaque pixel one tone), map: [t0,t1,t2,t3]} */
+      sprite: function (s, x, y, o) {
+        o = o || {};
+        x = Math.round(x) + ox; y = Math.round(y) + oy;
+        var w = s.w, h = s.h, px = s.px, one = o.color, map = o.map;
+        for (var yy = 0; yy < h; yy++) {
+          var dy = y + yy; if (dy < cy0 || dy >= cy1) continue;
+          var sy = o.flipY ? h - 1 - yy : yy;
+          for (var xx = 0; xx < w; xx++) {
+            var dx = x + xx; if (dx < cx0 || dx >= cx1) continue;
+            var v = px[sy * w + (o.flip ? w - 1 - xx : xx)];
+            if (v === CLEAR) continue;
+            buf[dy * W + dx] = one != null ? one : map ? map[v] : v;
+          }
+        }
+      },
+      /* opts: {color, align: "left"|"center"|"right", width (wrap), shadow: tone} -> height drawn */
+      text: function (str, x, y, o) {
+        o = o || {};
+        var color = o.color == null ? INK : o.color;
+        var lines = o.width ? wrap(str, o.width) : String(str).split("\n"), yy = Math.round(y);
+        lines.forEach(function (ln) {
+          /* with a width, align inside x..x+width; without one, x is the centre or the right edge */
+          var lw = measure(ln), box = o.width || 0, xx = Math.round(x);
+          if (o.align === "center") xx = Math.round(box ? x + (box - lw) / 2 : x - lw / 2);
+          else if (o.align === "right") xx = Math.round(box ? x + box - lw : x - lw);
+          Array.from(ln).forEach(function (ch) {
+            var gl = glyph(ch);
+            for (var j = 0; j < gl.h; j++) for (var i = 0; i < gl.w; i++) if (gl.bits[j * gl.w + i]) {
+              if (o.shadow != null) put(xx + i + 1 + ox, yy + j + 1 + oy, o.shadow);
+              put(xx + i + ox, yy + j + oy, color);
+            }
+            xx += gl.adv;
+          });
+          yy += FONT.line;
+        });
+        return lines.length * FONT.line;
+      },
+      measure: measure,
+      wrap: wrap,
+      lineHeight: FONT.line,
+      /* the standard window: paper inside, ink border with cut corners */
+      window: function (x, y, w, h, o) {
+        o = o || {};
+        g.rect(x + 1, y + 1, w - 2, h - 2, o.fill == null ? PAPER : o.fill);
+        var c = o.border == null ? INK : o.border;
+        g.rect(x + 1, y, w - 2, 1, c); g.rect(x + 1, y + h - 1, w - 2, 1, c);
+        g.rect(x, y + 1, 1, h - 2, c); g.rect(x + w - 1, y + 1, 1, h - 2, c);
+        if (!o.thin) { g.rect(x + 2, y + 2, w - 4, 1, MID); }
+      },
+      /* a small arrow used by menus and "more" markers */
+      arrow: function (x, y, dir, c) {
+        c = c == null ? INK : c;
+        for (var i = 0; i < 4; i++) {
+          if (dir === "down") g.rect(x + i, y + i, 7 - 2 * i, 1, c);
+          else g.rect(x + i, y + i, 1, 7 - 2 * i, c);
+        }
+      }
+    };
+
+    /* --- palette effects: every frame the indexed buffer goes through this map --- */
+    var pal = [0, 1, 2, 3], fadeLevel = 0, fadeTo = PAPER, flashT = 0, shakeT = 0, shakeA = 0, sx = 0, sy = 0;
+    function present() {
+      var map = pal.slice();
+      if (fadeLevel) for (var i = 0; i < 4; i++) map[i] = fadeTo === PAPER ? Math.min(3, i + fadeLevel) : Math.max(0, i - fadeLevel);
+      if (flashT > 0) map = map.map(function (v) { return 3 - v; });
+      var d = image.data, n = W * H;
+      if (shakeT > 0) { sx = Math.round((Math.random() * 2 - 1) * shakeA); sy = Math.round((Math.random() * 2 - 1) * shakeA); } else { sx = sy = 0; }
+      for (var y = 0; y < H; y++) for (var x = 0; x < W; x++) {
+        var srcX = x - sx, srcY = y - sy, v = srcX < 0 || srcY < 0 || srcX >= W || srcY >= H ? PAPER : buf[srcY * W + srcX];
+        var c = RGB[map[v]], o = (y * W + x) * 4;
+        d[o] = c[0]; d[o + 1] = c[1]; d[o + 2] = c[2]; d[o + 3] = 255;
+      }
+      ctx.putImageData(image, 0, 0);
+      return n;
+    }
+
+    /* --- input: chin buttons through PAD, keyboard as a fallback, and the pointer --- */
+    var held = {}, heldFor = {}, queued = {}, pressedNow = {}, releasedNow = {}, queuedUp = {};
+    function down(b) { if (held[b]) return; held[b] = true; heldFor[b] = 0; queued[b] = true; }
+    function up(b) { if (!held[b]) return; held[b] = false; queuedUp[b] = true; }
+    if (HAS_PAD && PAD.on) { PAD.on("press", down); PAD.on("release", up); }
+    else {
+      addEventListener("keydown", function (e) { var b = KEYS[e.key]; if (b) { e.preventDefault(); if (!e.repeat) down(b); } });
+      addEventListener("keyup", function (e) { var b = KEYS[e.key]; if (b) up(b); });
+    }
+    addEventListener("blur", function () { BUTTONS.forEach(up); });
+    var pointer = { x: 0, y: 0, down: false, pressed: false, released: false }, pQueued = false, pQueuedUp = false;
+    function toScreen(e) {
+      var r = canvas.getBoundingClientRect();
+      pointer.x = Math.floor((e.clientX - r.left) * W / r.width); pointer.y = Math.floor((e.clientY - r.top) * H / r.height);
+    }
+    canvas.addEventListener("pointerdown", function (e) { e.preventDefault(); try { canvas.setPointerCapture(e.pointerId); } catch (x) {} toScreen(e); pointer.down = true; pQueued = true; });
+    canvas.addEventListener("pointermove", function (e) { toScreen(e); });
+    ["pointerup", "pointercancel"].forEach(function (t) { canvas.addEventListener(t, function (e) { toScreen(e); if (pointer.down) { pointer.down = false; pQueuedUp = true; } }); });
+    function inputBegin() {
+      pressedNow = queued; queued = {}; releasedNow = queuedUp; queuedUp = {};
+      pointer.pressed = pQueued; pQueued = false; pointer.released = pQueuedUp; pQueuedUp = false;
+    }
+    function inputEnd() { BUTTONS.forEach(function (b) { if (held[b]) heldFor[b] += STEP; }); }
+
+    /* --- timers and tweens (owned by the scene stack; cleared by game.go) --- */
+    var timers = [], tweens = [];
+    function runTimers() {
+      for (var i = 0; i < timers.length; i++) {
+        var t = timers[i]; t.left -= STEP;
+        if (t.left <= 0 && !t.dead) { t.fn(); if (t.every) t.left += t.every; else t.dead = true; }
+      }
+      timers = timers.filter(function (t) { return !t.dead; });
+      for (i = 0; i < tweens.length; i++) {
+        var w = tweens[i]; w.t = Math.min(1, w.t + STEP / w.dur);
+        var k = w.ease(w.t);
+        for (var p in w.to) w.obj[p] = lerp(w.from[p], w.to[p], k);
+        if (w.t >= 1) { w.dead = true; w.done(); }
+      }
+      tweens = tweens.filter(function (w) { return !w.dead; });
+    }
+
+    /* --- scenes: a stack; only the top one updates, all of them draw --- */
+    var scenes = {}, stack = [], busy = false;
+    function sceneOf(s) { if (typeof s === "string") { if (!scenes[s]) throw new Error("no scene named " + s); return scenes[s]; } return s; }
+    function enter(s, args) { var e = { scene: s, args: args, resolve: null }; stack.push(e); if (s.enter) s.enter(args); return e; }
+
+    var game = {
+      VERSION: VERSION, width: W, height: H, g: g, time: 0, frame: 0, scale: 1, pointer: pointer, lang: LANG,
+      t: function (text, vars) { return pick(text, LANG, vars); },
+      INK: INK, DARK: DARK, MID: MID, PAPER: PAPER,
+
+      scene: function (name, def) { scenes[name] = def; return def; },
+      start: function (name, args) { stack = []; enter(sceneOf(name), args); loop(); },
+      go: function (name, args, o) {
+        o = o || {};
+        var next = sceneOf(name);
+        var swap = function () {
+          while (stack.length) { var e = stack.pop(); if (e.scene.exit) e.scene.exit(); if (e.resolve) e.resolve(null); }
+          timers = []; tweens = [];
+          enter(next, args);
+        };
+        if (o.fade === false) { swap(); return Promise.resolve(); }
+        busy = true;
+        return game.fade("out", o.time || 0.25, o.to).then(function () { swap(); return game.fade("in", o.time || 0.25, o.to); }).then(function () { busy = false; });
+      },
+      /* overlays: game.push(scene) resolves with the value given to game.pop(value) */
+      push: function (s, args) { return new Promise(function (res) { enter(sceneOf(s), args).resolve = res; }); },
+      pop: function (value) {
+        var e = stack.pop(); if (!e) return;
+        if (e.scene.exit) e.scene.exit();
+        if (e.resolve) e.resolve(value);
+      },
+      top: function () { var e = stack[stack.length - 1]; return e && e.scene; },
+
+      btn: function (b) { return !!held[b]; },
+      pressed: function (b) { return !!pressedNow[b]; },
+      released: function (b) { return !!releasedNow[b]; },
+      /* true when first pressed, then again every `rate` seconds after `delay` (menus, cursors) */
+      repeat: function (b, delay, rate) {
+        if (pressedNow[b]) return true;
+        if (!held[b]) return false;
+        delay = delay == null ? 0.32 : delay; rate = rate == null ? 0.09 : rate;
+        var t = heldFor[b] - delay; return t >= 0 && Math.floor(t / rate) !== Math.floor((t - STEP) / rate);
+      },
+      /* A, START or a tap: "carry on" */
+      ok: function () { return !!(pressedNow.a || pressedNow.start || pointer.pressed); },
+      /* the D-pad as a direction: {x, y}, one step per press with repeat */
+      dir: function (delay, rate) {
+        return { x: (game.repeat("right", delay, rate) ? 1 : 0) - (game.repeat("left", delay, rate) ? 1 : 0),
+                 y: (game.repeat("down", delay, rate) ? 1 : 0) - (game.repeat("up", delay, rate) ? 1 : 0) };
+      },
+
+      after: function (sec, fn) { var t = { left: sec, fn: fn }; timers.push(t); return function () { t.dead = true; }; },
+      every: function (sec, fn) { var t = { left: sec, every: sec, fn: fn }; timers.push(t); return function () { t.dead = true; }; },
+      wait: function (sec) { return new Promise(function (res) { game.after(sec, res); }); },
+      tween: function (obj, to, sec, ease) {
+        return new Promise(function (res) {
+          var from = {}; for (var p in to) from[p] = obj[p];
+          tweens.push({ obj: obj, from: from, to: to, dur: Math.max(STEP, sec), t: 0, ease: EASE[ease || "out"] || EASE.out, done: res });
+        });
+      },
+
+      /* screen effects */
+      fade: function (dir, sec, to) {
+        fadeTo = to == null ? PAPER : to;
+        var steps = 3, each = (sec == null ? 0.25 : sec) / steps, i = 0;
+        return new Promise(function (res) {
+          var tick = function () {
+            i++; fadeLevel = dir === "out" ? i : steps - i;
+            if (i >= steps) { if (dir !== "out") fadeLevel = 0; res(); } else game.after(each, tick);
+          };
+          if (dir !== "out") fadeLevel = steps;
+          game.after(each, tick);
+        });
+      },
+      flash: function (sec) { flashT = sec == null ? 0.08 : sec; },
+      shake: function (amount, sec) { shakeA = amount == null ? 2 : amount; shakeT = sec == null ? 0.25 : sec; },
+
+      /* sound. sfx("coin") or sfx({wave, from, to, ms, ...}); music(song, {loop}) and musicStop() (1.3.0).
+         Runtimes without PAD.music (before 0.11.0) have no music and no custom sounds: those calls do nothing. */
+      sfx: function (s) { if (HAS_PAD && PAD.sfx && (typeof s === "string" || PAD.music)) PAD.sfx(s); },
+      music: function (song, o) { if (HAS_PAD && PAD.music) PAD.music.play(song, o); },
+      musicStop: function () { if (HAS_PAD && PAD.music) PAD.music.stop(); },
+      /* ambience("rain", 0.6), ambience(null) to fade it out (1.4.0); nothing on runtimes before 0.13.0 */
+      ambience: function (name, level) { if (HAS_PAD && PAD.ambience) PAD.ambience(name, level); },
+      save: function (key, value) { if (HAS_PAD) PAD.save(key, value); else memory[key] = JSON.parse(JSON.stringify(value)); },
+      load: function (key) { return HAS_PAD ? PAD.load(key) : Promise.resolve(key in memory ? memory[key] : null); },
+      remove: function (key) { if (HAS_PAD) PAD.remove(key); else delete memory[key]; },
+
+      /* dialogue: resolves when the player has read every page */
+      say: function (text, o) { return game.push(dialogScene(text, o || {})); },
+      /* menu: resolves with the chosen index, or -1 when cancelled with B */
+      choose: function (items, o) { return game.push(menuScene(items, o || {})); }
+    };
+    var memory = {};
+
+    /* --- built-in overlay: dialogue box with a typewriter --- */
+    function dialogScene(text, o) {
+      var pages = [], boxH = o.lines ? o.lines * FONT.line + 10 : 3 * FONT.line + 10, innerW = W - 16;
+      (Array.isArray(text) ? text : [text]).forEach(function (t) {
+        var ls = wrap(t, innerW), per = Math.floor((boxH - 10) / FONT.line);
+        for (var i = 0; i < ls.length; i += per) pages.push(ls.slice(i, i + per));
+      });
+      var page = 0, shown = 0, speed = o.speed || 40, blip = o.blip !== false, y = o.top ? 0 : H - boxH, sinceBlip = 0;
+      function total() { return Array.from(pages[page].join("")).length; }
+      return {
+        update: function () {
+          if (shown < total()) {
+            var before = Math.floor(shown);
+            shown = Math.min(total(), shown + speed * STEP);
+            if (blip && Math.floor(shown) !== before && (sinceBlip++ % 3 === 0)) game.sfx("tick");
+            if (game.ok() || game.pressed("b")) shown = total();
+          } else if (game.ok() || game.pressed("b")) {
+            if (page < pages.length - 1) { page++; shown = 0; game.sfx("move"); }
+            else { game.sfx("move"); game.pop(true); }
+          }
+        },
+        draw: function (gg) {
+          gg.origin(0, 0); gg.clip();
+          var top = y;
+          if (o.name) {
+            var nw = measure(o.name) + 10, ny = o.top ? boxH - 1 : top - FONT.line - 3;
+            gg.window(4, ny, nw, FONT.line + 4, { thin: true });
+            gg.text(o.name, 9, ny + 2);
+          }
+          gg.window(0, top, W, boxH);
+          var left = Math.floor(shown), ty = top + 5;
+          pages[page].forEach(function (ln) {
+            var part = Array.from(ln).slice(0, Math.max(0, left)).join("");
+            left -= Array.from(ln).length;
+            gg.text(part, 8, ty); ty += FONT.line;
+          });
+          if (shown >= total() && Math.floor(game.time * 3) % 2 === 0) gg.arrow(W - 13, top + boxH - 7, "down");
+        }
+      };
+    }
+
+    /* --- built-in overlay: a vertical menu --- */
+    function menuScene(items, o) {
+      var sel = clamp(o.index || 0, 0, items.length - 1), pad = 6, rowH = FONT.line + 2;
+      var w = o.width || Math.max.apply(null, items.map(measure).concat([o.title ? measure(o.title) : 0])) + pad * 2 + 10;
+      var h = items.length * rowH + pad * 2 - 2 + (o.title ? rowH : 0);
+      var x = o.x == null ? Math.round((W - w) / 2) : o.x, y = o.y == null ? Math.round((H - h) / 2) : o.y;
+      var cancel = o.cancel !== false;
+      return {
+        update: function () {
+          var d = game.dir();
+          if (d.y) { sel = (sel + d.y + items.length) % items.length; game.sfx("move"); }
+          if (game.pressed("a") || game.pressed("start")) { game.sfx("tap"); game.pop(sel); return; }
+          if (cancel && game.pressed("b")) { game.sfx("miss"); game.pop(-1); return; }
+          if (pointer.pressed) {
+            var r = Math.floor((pointer.y - y - pad - (o.title ? rowH : 0)) / rowH);
+            if (pointer.x >= x && pointer.x < x + w && r >= 0 && r < items.length) { sel = r; game.sfx("tap"); game.pop(sel); }
+            else if (cancel) { game.sfx("miss"); game.pop(-1); }
+          }
+        },
+        draw: function (gg) {
+          gg.origin(0, 0); gg.clip();
+          gg.window(x, y, w, h);
+          var ty = y + pad;
+          if (o.title) { gg.text(o.title, x + pad, ty, { color: DARK }); ty += rowH; }
+          items.forEach(function (it, i) {
+            if (i === sel) gg.arrow(x + pad - 1, ty + 3, "right");
+            gg.text(it, x + pad + 8, ty);
+            ty += rowH;
+          });
+        }
+      };
+    }
+
+    /* --- the loop: fixed 60 steps a second, one draw per screen refresh --- */
+    var last = 0, acc = 0, running = false;
+    function tick() {
+      inputBegin();
+      runTimers();
+      var top = stack[stack.length - 1];
+      if (top && top.scene.update && !busy) top.scene.update(STEP);
+      if (flashT > 0) flashT -= STEP;
+      if (shakeT > 0) shakeT -= STEP;
+      game.time += STEP; game.frame++;
+      inputEnd();
+    }
+    function render() {
+      g.origin(0, 0); g.clip();
+      for (var i = 0; i < stack.length; i++) { var s = stack[i].scene; g.origin(0, 0); g.clip(); if (s.draw) s.draw(g); }
+      present();
+    }
+    function frame(ts) {
+      requestAnimationFrame(frame);
+      if (!last) last = ts;
+      acc += Math.min(0.1, (ts - last) / 1000); last = ts;
+      var n = 0;
+      while (acc >= STEP && n < 6) { tick(); acc -= STEP; n++; }
+      if (n) render();
+    }
+    function loop() {
+      if (running) return; running = true;
+      fit(); addEventListener("resize", fit);
+      document.addEventListener("visibilitychange", function () { last = 0; });
+      requestAnimationFrame(frame);
+    }
+    g.clear();
+    return game;
+  }
+
+  return {
+    VERSION: VERSION, TONES: TONES.slice(), font: font, INK: INK, DARK: DARK, MID: MID, PAPER: PAPER, BUTTONS: BUTTONS.slice(),
+    create: create, sprite: sprite, sprites: sprites, tilemap: tilemap, camera: camera, rng: rng,
+    clamp: clamp, lerp: lerp, approach: approach, t: t
+  };
+})();
+</script>
+<script data-lo-font="lopix12">
+/*
+lopix12: a 12-pixel bitmap font for Lo-PDA apps.
+
+lopix12 is a Modified Version of Fusion Pixel Font (12px, proportional,
+Simplified Chinese; upstream release 2026.08.11): its glyphs were rasterized at
+their native size into one-bit bitmaps, and apps carry only the characters they
+use. It is distributed under the SIL Open Font License 1.1, below, and only
+under that license. It is not named Fusion Pixel, which is a Reserved Font Name.
+
+Fusion Pixel Font: https://github.com/TakWolf/fusion-pixel-font
+Copyright (c) 2022, TakWolf (https://takwolf.com), with Reserved Font Name 'Fusion Pixel'.
+It combines glyphs from these OFL-licensed fonts:
+- Ark Pixel Font, Copyright (c) 2021, TakWolf (https://takwolf.com).
+- Cubic 11, including JF Dot M+H 12, Copyright(c) 2005 M+ FONTS PROJECT,
+  and M+ BITMAP FONTS, Copyright (C) 2002-2004 COZ.
+- Galmuri, Copyright (c) 2019-2025 Lee Minseo (quiple@quiple.dev).
+
+-----------------------------------------------------------
+SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
+-----------------------------------------------------------
+
+PREAMBLE
+The goals of the Open Font License (OFL) are to stimulate worldwide
+development of collaborative font projects, to support the font creation
+efforts of academic and linguistic communities, and to provide a free and
+open framework in which fonts may be shared and improved in partnership
+with others.
+
+The OFL allows the licensed fonts to be used, studied, modified and
+redistributed freely as long as they are not sold by themselves. The
+fonts, including any derivative works, can be bundled, embedded,
+redistributed and/or sold with any software provided that any reserved
+names are not used by derivative works. The fonts and derivatives,
+however, cannot be released under any other type of license. The
+requirement for fonts to remain under this license does not apply
+to any document created using the fonts or their derivatives.
+
+DEFINITIONS
+"Font Software" refers to the set of files released by the Copyright
+Holder(s) under this license and clearly marked as such. This may
+include source files, build scripts and documentation.
+
+"Reserved Font Name" refers to any names specified as such after the
+copyright statement(s).
+
+"Original Version" refers to the collection of Font Software components as
+distributed by the Copyright Holder(s).
+
+"Modified Version" refers to any derivative made by adding to, deleting,
+or substituting -- in part or in whole -- any of the components of the
+Original Version, by changing formats or by porting the Font Software to a
+new environment.
+
+"Author" refers to any designer, engineer, programmer, technical
+writer or other person who contributed to the Font Software.
+
+PERMISSION & CONDITIONS
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of the Font Software, to use, study, copy, merge, embed, modify,
+redistribute, and sell modified and unmodified copies of the Font
+Software, subject to the following conditions:
+
+1) Neither the Font Software nor any of its individual components,
+in Original or Modified Versions, may be sold by itself.
+
+2) Original or Modified Versions of the Font Software may be bundled,
+redistributed and/or sold with any software, provided that each copy
+contains the above copyright notice and this license. These can be
+included either as stand-alone text files, human-readable headers or
+in the appropriate machine-readable metadata fields within text or
+binary files as long as those fields can be easily viewed by the user.
+
+3) No Modified Version of the Font Software may use the Reserved Font
+Name(s) unless explicit written permission is granted by the corresponding
+Copyright Holder. This restriction only applies to the primary font name as
+presented to the users.
+
+4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font
+Software shall not be used to promote, endorse or advertise any
+Modified Version, except to acknowledge the contribution(s) of the
+Copyright Holder(s) and the Author(s) or with their explicit written
+permission.
+
+5) The Font Software, modified or unmodified, in part or in whole,
+must be distributed entirely under this license, and must not be
+distributed under any other license. The requirement for fonts to
+remain under this license does not apply to any document created
+using the Font Software.
+
+TERMINATION
+This license becomes null and void if any of the above conditions are
+not met.
+
+DISCLAIMER
+THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT
+OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
+DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
+OTHER DEALINGS IN THE FONT SOFTWARE.
+*/
+LoGame.font({"name":"lopix12","cell":13,"line":14,"glyphs":{"0":"6:AAciimqyiicAAA==","1":"6:AAIYIIIIIIcAAA==","2":"6:AAciCCEIQg+AAA==","3":"6:AAciCCMCCicAAA==","4":"6:AAEMMUUk+EEAAA==","5":"6:AA+ggg8CCicAAA==","6":"6:AAcigg8iiicAAA==","7":"6:AA+CCEEIIIIAAA==","8":"6:AAciiiciiicAAA==","9":"6:AAciiieCCicAAA=="," ":"6:AAAAAAAAAAAAAA==","!":"4:AEREREBAAA==","\"":"6:AAUUUAAAAAAAAA==","#":"7:AAEiT8kSJPyRIAAA","$":"6:AIcqoocKKqcIAA==","%":"8:AABEpEgIECAkSkQAAA==","&":"7:AADCRIYZSokR0AAA","'":"4:AERAAAAAAA==","(":"6:AEIIQQQQQIIEAA==",")":"6:AQIIEEEEEIIQAA==","*":"6:AAAAAIqcqIAAAA==","+":"6:AAAAAII+IIAAAA==",",":"4:AAAAAABEgA==","-":"6:AAAAAAA+AAAAAA==",".":"4:AAAAAABAAA==","/":"6:ACCEEIIIQQggAA==",":":"4:AAAEAABAAA==",";":"4:AAAEAABEgA==","<":"5:AAABERBBBAAA","=":"6:AAAAAA+A+AAAAA==",">":"5:AAAIIIIiIAAA","?":"6:AAciCCEIIAIAAA==","@":"8:AAA4RJqqqqqqtkA8AA==","A":"8:AAAQECgoRHxEgoIAAA==","B":"7:AAPkKFC+QoUL4AAA","C":"7:AADiKBAgQICI4AAA","D":"7:AAPESFChQoUTwAAA","E":"7:AAP0CBA+QIED8AAA","F":"7:AAP0CBA+QIECAAAA","G":"7:AADiKBAgRoSI8AAA","H":"7:AAIUKFC/QoUKEAAA","I":"4:AORERETgAA==","J":"6:AACCCCCCiicAAA==","K":"7:AAIUSRQwUJESEAAA","L":"6:AAgggggggg+AAA==","M":"8:AACCgsbGqqqSkpIAAA==","N":"7:AAIWKlSlSo0aEAAA","O":"8:AAA4RIKCgoKCRDgAAA==","P":"7:AAPkKFC+QIECAAAA","Q":"8:AAA4RIKCgoKKRDoAAA==","R":"7:AAPkKFC+SIkSEAAA","S":"7:AAHkKAgMBAUJ4AAA","T":"8:AAD+EBAQEBAQEBAAAA==","U":"7:AAIUKFChQoUJ4AAA","V":"8:AACCgkRERCgoEBAAAA==","W":"10:AAAIiiKIlUVRVCIIgiAAAAA=","X":"8:AACCREQoEChERIIAAA==","Y":"8:AACCREQoKBAQEBAAAA==","Z":"7:AAPwIIIIEEED8AAA","[":"6:AcQQQQQQQQQcAA==","\\":"6:AggQQIIIEECCAA==","]":"6:AcEEEEEEEEEcAA==","^":"6:AAIUiAAAAAAAAA==","_":"6:AAAAAAAAAAAA+A==","`":"5:ABBAAAAAAAAA","a":"6:AAAAAcCeiieAAA==","b":"6:AAggg8iiii8AAA==","c":"6:AAAAAciggicAAA==","d":"6:AACCCeiiiieAAA==","e":"6:AAAAAci+gicAAA==","f":"5:AAyEeQhCEAAA","g":"6:AAAAAeiiiieCcA==","h":"6:AAgggsyiiiiAAA==","i":"4:AEAMRETgAA==","j":"4:ACAOIiIiwA==","k":"6:AAgggiswokiAAA==","l":"4:AMRERERgAA==","m":"8:AAAAAADskpKSkpIAAA==","n":"6:AAAAAsyiiiiAAA==","o":"6:AAAAAciiiicAAA==","p":"6:AAAAA8iiii8ggA==","q":"6:AAAAAeiiiieCCA==","r":"5:AAAAWxCEIAAA","s":"6:AAAAAciYEicAAA==","t":"5:ABCEeQhCDAAA","u":"6:AAAAAiiiimaAAA==","v":"6:AAAAAiiUUIIAAA==","w":"8:AAAAAACSkqqqREQAAA==","x":"6:AAAAAiUIIUiAAA==","y":"6:AAAAAiiiUUIIwA==","z":"6:AAAAA+EIQg+AAA==","{":"7:ADCBAgQQECBAgMAA","|":"4:BEREREREAA==","}":"7:AMBAgQICCBAgQwAA","~":"6:AAAAAQqEAAAAAA==","。":"12:AAAAAAAAAAAAAAAAMASASAMAAAA=","一":"12:AAAAAAAAAAAA/+AAAAAAAAAAAAA=","三":"12:AAf8AAAAAAAAP4AAAAAAAA/+AAA=","上":"12:AABABABABAB8BABABABABA/+AAA=","不":"12:AA/+AgBADAFQJIxEBCBABABAAAA=","二":"12:AAAAf8AAAAAAAAAAAAAA/+AAAAA=","五":"12:AAf8CACACAf4EIEIEIIIII/+AAA=","今":"12:AABACgMYwGBAAgf8AIAQAgBAAAA=","停":"12:AAIgP+SET8wAX+UCT8QQQQRwAAA=","六":"12:AACABAAA/+AAAAIIIEQEQCgCAAA=","关":"12:AAIIEQf8BABABA/+CgEQIIwGAAA=","再":"12:AA/+BAf8REf8RERE/+QEQEQcAAA=","到":"12:AA/iEKIKRK+qEKEK/qECHi4OAAA=","动":"12:AAAQeQB+AS+SISQSSSmi6iBMAAA=","单":"12:AAIIEQf8REf8REf8BA/+BABAAAA=","取":"12:AA/AS+eiSiSieiSUSUXI6UCiAAA=","只":"12:AAf8QEQEQEQEf8AAAAIIQEgCAAA=","号":"12:AAP4IIIIP4AA/+EAH4AIAIBwAAA=","向":"12:AACAEA/+gCnykSkSkSnygCgOAAA=","周":"12:AAP+IiL6IiL6ICL6KKT6QCgOAAA=","四":"12:AA/+kSkSkSkSkSoewCgCgC/+AAA=","回":"12:AA/+gCgCnykSkSkSnygCgC/+AAA=","天":"12:AAf8BABABA/+BACgCgEQIIwGAAA=","好":"12:AAJ8IE8IUQUQX+kQUQIQUQhwAAA=","子":"12:AAf4AIAQAgBA/+BABABABAHAAAA=","完":"12:AABA/+gCv6AAAA/+EQEQISweAAA=","少":"12:AABABAJIJERChCBIAQBgGA4AAAA=","局":"12:AAf8QEf8QAf+QCXyUSUSXygMAAA=","成":"12:AAAoAkf+QgekSkSoSQWSQqjGAAA=","或":"12:AAAoAk/+AgekSkSoeQASGq5GAAA=","把":"12:AAT+SS6SSSSSb+yASASCSCx+AAA=","拉":"12:AAQgQQ7+QAREZEwkQkQoQIz+AAA=","推":"12:AARQRI7+WIT+aIyIT+SISIz+AAA=","撤":"12:AARIXo6OUqXScq3qUqXkUq1yAAA=","方":"12:AACABA/+CACAD8CEEEEEIEwYAAA=","日":"12:AAf8QEQEQEQEf8QEQEQEQEf8AAA=","时":"12:AAAE8El+kEkE9EkkkkkE8EAcAAA=","明":"12:AA9+lClCl+9ClCl+lC9CCCEOAAA=","暂":"12:AAIG+4Qgo++kJEf8QEf8QEf8AAA=","最":"12:AAf8QEf8QE/+SAe+SiXU6IC2AAA=","来":"12:AABAf8BAJIFQ/+DgFQJIxGBAAAA=","案":"12:AABA/+iCf8EQHg4eBA/+JIxGAAA=","每":"12:AAIAP+QAv8JEIk/+REQkf+AEAAA=","法":"12:AAQQIQD8gQQQH+AgREREianiAAA=","消":"12:AASSJUAQj+SCD+CCT+SCiCiGAAA=","滑":"12:AAT8KEDkikX+ECD8SET8iEiMAAA=","玩":"12:AAD84AQAQAX+5IRIRIaKyKEOAAA=","用":"12:AAf8REREf8REREf8REREREhMAAA=","看":"12:AAf8BAf8CA/+IEf8oEP8IEP8AAA=","答":"12:AAQge+lIDgMY32AAf8QEQEf8AAA=","箱":"12:AAQge+lIAAI++iI+cia+oiI+AAA=","继":"12:AASISqicqIy+SIic6qCIKAz+AAA=","续":"12:AAQQR8gQr+xCSohI7+AQIkzCAAA=","美":"12:AAEQ/+BAf8BA/+BA/+CgMYwGAAA=","能":"12:AAQmk46gAi+eiA+mi4+giimeAAA=","菜":"12:AAEQ/+EQAcfgSEJI/+FQJIxGAAA=","记":"12:AAj8QEAEAEwET8SASAWCaCR+AAA=","过":"12:AAgIQIH+AIyIRIRIQIQ4oAn+AAA=","返":"12:AAgOTwCACAz+TCSkSYVmoAn+AAA=","这":"12:AAggQQH+AExEQoQQQoTGoAn+AAA=","连":"12:AAggX+BACQyQT+QQX+QQoQn+AAA=","重":"12:AAf8BA/+REf8REf8BAf8BA/+AAA=","销":"12:AASSZUgQ7+SCT+6CT+SCaCSGAAA=","键":"12:AAQIe+iK7+UKW+6IS+WIbIU+AAA=","，":"12:AAAAAAAAAAAAAAAAMAMAEAIAAAA=","？":"12:AAAAcAiAiACAEAIAIAAAIAAAAAA="}});
+</script>
+<script data-src="src/levels.js">
+/* 每日推箱 / DailyBox level table. GENERATED by tools/gen-box-levels.mjs -- do not edit by hand.
+   One entry per day, 1099 entries (157 whole weeks), day 0 = 2026-10-26 (a Monday);
+   after the last entry the table wraps, and 1099 % 7 = 0 keeps the weekday (and tier) aligned.
+   Board: 10 wide x 8 tall including the outer wall; only the 8x6 interior is stored.
+   Each entry is standard base64 of these bytes, bits little-endian within a byte:
+     0      par pushes (the exact minimum)
+     1-6    floor mask of the 8x6 interior (cell i = y*8+x, i 0..47)
+     7-12   box mask, same bit order
+     13-18  goal mask, same bit order
+     19     player cell (0..47, same order)
+     20-21  solution length in player moves (uint16, little endian)
+     22-    solution moves, 2 bits each (0 up, 1 right, 2 down, 3 left), low bits first
+   Interior cell i is board cell (x+1, y+1); the outer wall and any border are implicit. */
+var LEVELS = {
+  v: 1,
+  epoch: [2026, 10, 26],
+  w: 10,
+  h: 8,
+  levels: [
+    "DwAcHP4ODwAABCAEAAAAAAACBR4/AM++FgQvpXsEu0uUe7DpFyw=",
+    "EDA+PgYDDwAYAAACAAAAAAQADAQ0AOZPFmzO624NwVI5u24=",
+    "Gfh4eB4eBgAIEAAIAOAAAAAAAAM/AJrOa0wZMJW/6ZMBU+a8BhM=",
+    "Enx8Xx8HAAAAAgwAAEAAQAIAABBBAGZQvg9lAW/pMKn7UMZU5E8B",
+    "FB8fHhwcGAAADAgIAAcBAAAAAAA2AFXqEL9G6RBfqs6AGsQP",
+    "FwAAOPj/3wAAAEAyAAAACABAAx9fAM/b+pMVPZS8Rqz+ZMFSpRP7kNt+we5UPg==",
+    "GAAcPPzw8AAAAGBAQAAMEAAAEB9VAL6Dlc8MmRv8RunETpypBe/ETqkR7wA=",
+    "D3xoaGj4+AAAQAAgEAQACAAAIAJUAJWazgNUCr9qAfFX6lo8wKvaAJTqDg==",
+    "DvB4eHhwMAAAABAwAKAIAAAAACwkAAFM6W+UDqgOxA==",
+    "FDg5Hx0PDgAAGgAAAAAAAAgACghYAGpR+ATlrMZQrq8xFGx6sGsO5D6USbA=",
+    "FADAwP7+/AAAQBQAAACAAAAAFA5hAKb/5E9WBZs+kz9lFgeb/lCvFeBL+bM5lQM=",
+    "IvDwODg/PAAwIAAgAAAACAADBARuALZrxJCUz2oM5fpa+JD5EMHqWsBQzpp+we4X5Q8=",
+    "GA8ODg8fHwAIAAgICAMAAAEABCRIAO8AcarlA8mQrhY7QJy6Fjvxbg==",
+    "GPj/z0MAAABCBgAAACAgQEAAAAhEAFWUwhulE+//GlMV+ZM7rzFV",
+    "Dj8/Dw4HABAYAAAAACAAAAgBAAUiAC/l70PVr5RvDg==",
+    "DwweHh4YGAAAAAgYAAAEGAAAACsoAMHpwJC5xvAamQ4=",
+    "Ev744ODgAARgAAAAAAIIAABAAAEkAFVa8H+Vpg/xpQ==",
+    "FjA8PycuOgAIEAAgAAAAACQAAgpiAGoWMOR+kT9ZsLtPZhYwr1DOVupzFjCk/wo=",
+    "FTAwfHx4eAAQEBAIAAAAAAggYASHAOk+ZfpYMG9aEB9sqg+tRTBb6g+TWgSb/kCrFTzkRr6UvBs=",
+    "H3x8KHh4eAgICAAIACAAABBAIAKhABb5U6aPBfOmBfGpD5E/ZfKaFpz+gGbBMG9qFgzxqekzEPlTJq/WA6UC",
+    "Hjw/Izs/AwAAAAAXACAYAAAAASiUABgw1asTRKW+RwFvv65RFPwvVen7MLU6WZR/FMy7rlEUzNuvBlM=",
+    "DgA4H38eHgAAAAYCAAAgAEAIAAs2AC5vUTqTMan+WMBvVf8G",
+    "EAY+f3hwAAAQDAAAAAAAIQAgAA04AJ/OQ25Z8D7kRsmbWbBP",
+    "EwAePvbw8AAAAGAgAAAIEgAAAAlTAJXakGsFX/pDPK8xWWpY8E78lRrxDg==",
+    "EgcHDxsfHwABBgAAAAAAAAAAExAyAIYWDG/kSy65WcCsFgk=",
+    "FB8fDw8LDwgICAAIABQAAQAABARAAF/OroUPUb45u1YAk/6QuW4=",
+    "FwAAHz96PgAACAQCBAAABABIAilZAAXzVhbzPlnkT6aPBfOmBbH60FoEm/kD",
+    "IAAAxvf+/wAAACAoBAAABgEAARFVAGoF7Q6WUbD5kwW7v0MWlf87cVbl/wM=",
+    "DgMfPj4WHgAAAAYQAAAJAAAACAArAKnpQFzp7FpB7Lgb",
+    "Dfx4ODg4OAAAADAQAMAACAAAAAIuAKlaAFPu21oAk6pDDA==",
+    "FD9+bmwOAAAoAAgAAAEAAAQCAA49APNrxF9lOvG7xgypMZSzpgM=",
+    "EgYHT/8DAAACACIAAAAACMAAABYuAP78RG6vMVnV/5BbBQ==",
+    "FRw+Pz8wAAAABhgAAAQMAQAAAAJTAG5U6hDzagPlpc6DhgWvEftvRenEPw==",
+    "FT8/HwwMDAQEBAQAADAIAAAACANKAKdLsE+V7jDlb5RO6hDw2lD6ZAo=",
+    "GH//8ICAACAYIAAAAEgAgACAABQ6ABH/PlXpxO9TlvWQG6XwBg==",
+    "D3h48PCw8AAAMAAQAAAAAGAAQANFAJX6WMBvkUsupf5A8EauyZCrAQ==",
+    "DwAODh8fHwAACAYAAAAAAAABAxg0AEawZrH+EJRLvpSfU/k=",
+    "Fj///wMDAAAAUAIAABQgAAAAAABHAFXpU+Xz7xowlc5rMFnlz2tMFQ==",
+    "E//o6GBgABBgAAAAAAMAgAAAAAAoAFVpwf9XGbk6EP8=",
+    "Fh8ffPjgAAQIKAAAABAEAABgAABDAFlcypthFvPOUPo81VqcyVsk",
+    "FwEDA39rfgAAACAoIAEBAAIAAh44AP87kFalE/87ZJU+Fvzp",
+    "Gjg4Pz8XAwAANAQAAAAAAiAAAxBbALVGnMWQ7pM/WRG85FLu+5AVbP5sxb4k",
+    "Dn/38OBgYAgAIAAgAEAAEAAAQAQjAO9TlZvpRLA6MQ==",
+    "EAA8Pz8DAwAAFAgAAAAAAAACAxA+AEWlX7B7sEv5LFX5vEtCOQs=",
+    "EwBgwMD//wAAAAAqAABAgAAACA1KAKk++ZM/WeRPVgHqkz9lBZs/ZQA=",
+    "FA8f3Pjg4AAKCAAAAAAAAEAgQABQAKUNb5TJvJllwf4MmbxZWhys/JBb",
+    "FXh/Hx8cABAiEAAAAEgAAAUAAAVFAPk+Ua8/WVDO+mTB5rN5FhCrAw==",
+    "F8D8/MzI+AAIGAAIAAAEAEAAkApDAFXk/xpxRpr+wxSVaw7wRqY7",
+    "GPCw8Pz8wAAAAAhoADAAEAQAABpXAEWlDnHwrjZApV/qPKAGqBHvb0XpxD8=",
+    "DwAYeHx+bgAACBgAAAAAAEBAIAspAGm+T1TkvwVs+lQC",
+    "EODg4Hj4GAAAIEBAAIDAAAAAACcvAEPwps5rTBkwuemTAQ==",
+    "Fx8THz8zMAAQABAQAAEBAQAAAB1vAM9DJb+W8xqUpRPPD1X6YwW/lvMasVNlOvHzGjE=",
+    "FQ8PDxsfDwAACAAMAAQAAQEAABtmALxa7AOVvGsAmTkM+ZPlq8U+UMm7BkN5mb8D",
+    "GwAA539/MAAAABAaAAAAgQwAABVOAP68VRmT7sRvzGvEGpVO/D5ZlE4M",
+    "FWBgYPz+8ABgAEBAACAAAAQSAAU8AJLrWsFD7qcVnM5Aun9U+Q==",
+    "GeDg4Pj4+AAAICAgIICAAEAAEAVhAKmTOm8RLMGm7kNZwFs6MKnuQxlM6s6U5QM=",
+    "DnZ+dh8HAAAYAAIAAAAEQAgAAAFIAKlFsM+mhQ8Vufs+GQW/VProUw==",
+    "D0DA+PjweABAEEAAAAAAAAiACAY1AKY+T2ZxsOkPRb6Uf+YD",
+    "FXNzPz4AAAAQAgQAAGAAABAAAABCAJrFThVs+vQPuZUFk/pk4L8F",
+    "EwAHBh8/fwAABgQAAAAAAAAgUAhNAGlD+loR6w/ZkMlbvfEbZfxG2bwB",
+    "FT8PBw4PDwAABgIABCUAAAAACAA3AKWmA0y1q28BvBmoDsQO",
+    "FGDg+Nj8/AAAABAoQEAAkAAAEAVTAKnuY3HlvE8V/FLpM0XpoL5PBpaBPg==",
+    "HAYeH/vvAAAMAkAAAAAQECgAAAyEALrP1JCrRfCsVDrxqT8UpVn88Eb+a0z1WjBsqc/UWrQPlA==",
+    "Df78/BwYAAAAUBAAAIAgAAAIAAE0AFU6lfOvGQ9pMJXOa0w=",
+    "DvBw4GR8cAAAACBIAIBAgAAAABopAJYFMKn6BMGbajAB",
+    "FQDg8Hh4fwAAAHAAAAAAAAAIERtSABY+kVDOrhboA1HuwS7lHuxS7l9RDg==",
+    "FXb8/DAwAAAAOAAAAEAgAAAgAAFJAFmmQ5SzaxC8lM7k8lY6RDn7ZAI=",
+    "HADA/PT+DgAAKCAIAAAABAAUBBJlAFrQGgWb5w+tRbCv+wSlV8HmD69QWvCXe5QD",
+    "Hn5+Ow8DAAQYCAAAABBAAAYAAAFkAJXFPm8V72vhQ1G+PlDOSpXzu0YR87oB5aw=",
+    "GR4e3vjw8AQEFAAAAAIAAAAAsAFUAK0NWXypE7yRv1HyZj3kZgWbPlOksw==",
+    "DR5+Oh4OAAAoEAAAAAIAAAQCAA45ALs/UPlJuftApV+wvEKlAw==",
+    "Dj83Hg4PDhAABAAIAAgCAAABAAA7AKlFxK+uBQOl+zDlWuyUPg==",
+    "FIDg4Ph8fgAAAAAYBIAAgAAAAikxABU+UQaTof8aU8ak/gM=",
+    "FB5/fwUHBgAAIAAGABAgAAABACkvAAFMWfnPqxkQvJU/Kw==",
+    "Gg8PDxw8OAQACAgIAAgDAAAAIABbAFmsmsWM6YzFDPlTpukMMa8N5aUTq5Eb",
+    "Fv///8AAAAAAagAAABigAAAAAABjAFWVOsSv8Ru/UcZvVKVDvBu/RaUTvFtDuQY=",
+    "GQAEB38/cAAAACAaAAAAAkIAQB45AP+8VenEb8xrGJVO/Ba5AQ==",
+    "DtDwsPD8fABQAAAACAAAACCAEAQvABb5S6X7bxFs7lOUDg==",
+    "Dhw8OP7ugAAACCBAAAAgIAAAgB4sAD/BW7pPBsEbuZmR",
+    "FMf/3NB4YAAACBAQAAAIgAAAQCM5AIFmEPxvVOk+TM9bFkWuAg==",
+    "Fjg48PDw8AAQEAAQAAAAAACAoAM/AEbqBG+kW+T6QPBGupFLyRs=",
+    "FeDg8PDQwAAAYADAAECAgAAAgC47AMFjceoEQ6qDTxbwtlugBg==",
+    "GAIODj78OAAEABQIAAIKAACAAB1OAPrMkMmb1Q+5WfBO7JCpEe/ETlkG",
+    "GT8/Nj4GBgAAAhAGADAwAAAAAClIAMEwVf4aTFk6vOpA8FbpwbsGUw==",
+    "EAwOPj8PAAAAEBgAAAACAAEBABUsAM9rxGpQPkO6lH/5",
+    "Dw8eDB8/HAAABAIEAAACAAAwAAAzAJU6wRup6QOx+pT1kBs=",
+    "F/DwfHwwMAAAEBAQACAgIAAAAARWAKnzFsHmPkXpMKmnA2+UzmTBbMXq+AQ=",
+    "Eh4fGjgYGAAKAAgAAAAAAiAAEAg7AFHpEuxspRO8kW46ELyRKg==",
+    "Gv//DgcAABAsAAAAAOAAAAEAAAxVAPGbQ+W8RlTO++RPFpXzPlXOa0z5mwM=",
+    "GHz88PDg4AAAwEAgAAAcAACAAAJGAFXmvEb8VboG80amD8RX+hoQDw==",
+    "Gnj48PgYGCAAMBAAAEigAAAAABtPAEWwT7ktVDqT7xoQvJHpwesaQKwG",
+    "D+D29v7wAACABAgAAEAAQACAAAk2AFpBlK7zD7kVrQWoM1EK",
+    "DwAGn/+OAAAACiAAAAAAEMAAABclAP77TNZDZvXzVgE=",
+    "FQADA39/HwAAACMAAAAAAAADEBpNAD7BmsXOkFYWv/4EmxacPhgPaUYC",
+    "Ehg4Px8MDAAACAAMAAAAEAQABCo3ABCrMRRserD7VJT75MIb",
+    "Ffj48PDwMAAAMCBAAIiIAAAAAAM6AGmUDpO+6QBxmTpM+hoQDw==",
+    "Ffh4cDBwcAAgEAAwAIAQAABAICY7AA7DVLqTOkGwwpvpRLA6Gg==",
+    "Gvj4Hz84OABICAQAAFAAABIAAANjAFXOq89bWcz7ZBEslfMaU+6SP2Wg6WPBnwY=",
+    "EMD8/PgQAABoAAAAAAAAgAgQAAY9AKbP5E+ZxcGmP5SzUjmQ6wM=",
+    "DfDw8PA4OAAQAFAAAKAAEAAAAAQ0AOmmTwaU8xoBb5TOpA4=",
+    "EwAAPD7+/AAAAAAwCAAAAAICQBIwAGoxlH9plM+Qm8X/WQ==",
+    "FAwMPw88PAAAAAQMAAAAIAAgICQxAA5TqwNvEazJmw1pbwE=",
+    "FHj8/D4cACBgIAAAAAgAAAoEAAY9AF/OroUPUe7BLknlP5tTuQM=",
+    "Fjzk5OT84AAgAECgAAAAIIAIQAKMAJXCr1pZDMnDr1oZ+A9QqcCvWlFw+v4AlcKvWln4/ACVCuX6",
+    "Gjw8ePjggAA4IAAAAAAAAEBggAJsAKVbFvOQawNvlMKbTvBmJT8k+Vo2D0nKG2Uybw==",
+    "Dj4/HxwcGAACEAAQAAAgAAgACAFIAOlT5Fr4kFDua8ZDEuyaDLkWTA==",
+    "DhA4eFh8fAAAEBgAABAwAAAAAAQ8AK5Qpv4TtAaoFjCvMVm6Aw==",
+    "FB4eHAz4+AAAAABYAAAIAAQACCU8AD6gFjsMlOdaFr8DwQpvpg==",
+    "FAAffncXHwAAOAAAAAAAAAEABggxAFXOSln8s65VED+bSwI=",
+    "FDw2Pi4uPAAwEAIAACACAAAIEAI+AJV+wfIKlb4+mFkA8yopbwY=",
+    "FDDw8PD4eAAwABAQAADAAIAIAARUAGnqTxbwBqyVDpPqwKT6ZAFv6QRv+Q==",
+    "GA4OHnx8QAAICAwAAAAAAGAEQBRbAPowpBY7Q8lrlsU+M2Qm82YW+dNDZvMW",
+    "DTA4+PjwgAAAOAAAAAAAABgAgBYrAD7BbuRaxKdPsBkp",
+    "Dv7+7OCAAAAUIAAAAEAAQACAAAExAKUzWUWuE7xPFvlTlgI=",
+    "EgAAMPD//wAAAAAYIAAAAABAwBQtAJk+71NV5P9WwKZPAQ==",
+    "F//f/wMDAAAAQwAAAAQEAAEAAAB2ABpUlX7w/uoQ5SxUpc/7GgRvOkGlH7yuQcEvlT6TCw==",
+    "Fx8fHwsDAwACAgADABgAAAEAAShJAEDBS+lMZc7rGsCUL5XzCuUuwQI=",
+    "HcD43Jzc/AAAAAgMCIAAgAAARCqHAESwVKn+wFSvvhG8lM6kTkBl6g9DRcq/xlTGr1qE/rwBaxY=",
+    "GDAwPz4+HAAwEBAAAAAAIQAGAARNAOlfweY+Zxox5PrQWhCsuxbxs5UD",
+    "DgAAcH8/FwAAAAIUAAAAYBAAACwnAEzGpL8PVYa/MxU=",
+    "DQwfHxsfCAAKBAAAAAAAAAAGCAhQAKYFQ6b+DK1ZBLNLySuUsyW/NiSl",
+    "Ev74+HhgYAAAQCAgAJQAAAAAAAE8AFWlz2sQX6mnA0zpb5QOxA==",
+    "EvD+/gwMAABkAAAAAAAAAAQMAAREAPpTVsEv5R7sUj5LVf68Qjmb",
+    "FwAAfP//5wAAAA4IAAAAAICAghI/AKXvUwVv1fs+VEX+L1XJWxs=",
+    "FHBwePDw8ABAAEBgADAQCAAAAARMAOW6VvClP0C5awVf+gNqAKoRO/E=",
+    "GAA+fvz8AAAEDAQAAAAQAICgAAlUACVvZTH7ZOmPFbzwRq71kNUbv1HGbw==",
+    "DngYPDw/DwAAAAAWAAAQABAIAAM5AKqOTxmwFGz6ZLg+GROlAw==",
+    "DwYGBj4/HwAABBQAAAAAAAAKEAEvAKrFDOmSm0X8vgVsGg==",
+    "HfB2d39jAAAQAgQAAMAAIAAAAAlUAK4xWRFsqfMPuVUw5Zt/ZYD+81ZROg==",
+    "FgDA/v4eAAAAQDAAAABAAAQIAA5HAPmvEeU/6Q+tReT+UFnB5k/GLw==",
+    "FAMHHx8cHAAABAYIAAAHAQAAAABHAGkWO29R6oMW8E7l6UO8U2oQPw==",
+    "GADs/HxwPAAAWAgAAAAEgAAAJApPAFpBOesPWa4xvFGU/05p4UPpDqQ7",
+    "GUZm5v8fAABAIAQIAAYAAIAQAAY1AJq/D2jV/1tUwea/A6kB",
+    "DeCg8Lj4+AAAABAwACCAAIAAAAU2AKXqP7RGgPpkTK0W8JoB",
+    "DsDAwMD+/gAAAABEEAAAAAAAYgY/AKk6+PtUWbAEm75TwaYH+z4=",
+    "FvD42BweDgAAABAMAIAggAAAACFKABbBFKUT++o+0RrBVORP+eqTwQQ=",
+    "FQ4ODix8HAAABAgEAAAAAABQEB1GAD5jqBM8lOoEvJEKb+Ra/ZDbBg==",
+    "GeDg8ND8+AAgQECAAAAAAAAkiBRpAFoGDOmS7gOtFgS8mf4VbO4Dka9nccHyCpXuAw==",
+    "Fgc/Ox8fAAAUAgEAAAABEBAEAAtjAKf+VDBvWjBb+mMF75YF8bNSqU/wbln49Bs=",
+    "HODg/PwMDAAgKAgAAAAAgFQAABJaABZl/D5ZBJv5z1bB7lNGsJkDuT6R/6YD",
+    "Dfj48PBwMAAQEAAQAAAgAKAAAAMsAFbk+gRvpJTrDgRv",
+    "DsDA+Pj4AABAwAAAAEAAAIAQAAYhAOnBuk9pMeSbAw==",
+    "GHz88LDw8AAYABAAAAAAAABAoAJPAJUuwfJW5DrBG2nkS+k+ELyRrg0p",
+    "E8De/vAwAAAAZAAAAIAACCAAAAZVAKk//EZp4cMbmcUXbPpcz1tZsOvElQM=",
+    "GPDw/jo+BgAAKDAAAAAwAAIEABFuAFrBBev60FoFk/oPpcUB5bxCpcPrEpTu6DsVbA4=",
+    "GDw8KD4+MAAIABgIACAAACYAABNeAEyZ+qDFzlsUzJsWzErpX+kEvG5A6ZfOBA==",
+    "HDw8Pyc+DgAAAAIWAAAAMCAACCN2AA68UaXvw1T9alEwvGX6PhBU/kbJ268WM7U6wRvpBg==",
+    "DQ5+fgYGAAAAKAQAAAoCAAAAAAEwAKoBk+W8RuxU5c9rxA==",
+    "EA8JDz4eOAAAAA4AAAAAACAIIABiAJWazgT8Wg+VrhPBrw2V+mS9kTwPla4ZDwk=",
+    "EgAAAj/2/wAAAABQQAAAAgEAAScpAOePxfxOlU78V/oD",
+    "FX4+Ph8fAAACAAICAFAAAAABABg+ABFsqQNTpftvAZs+GTBl6g8=",
+    "GMD89Gx8eAAAQCAoAIBUAAAAAAZqAOnqkwHB/qtZBOoPQ5XxG7+mRRD/lTrEqk8ZAA==",
+    "FRj4fz8OAAAIBBgAAACAQAUAABBQAFWw+dWvMfmTBaUz1fo+tBYX7E7l",
+    "HoCAg4P//wAAAADUAIAAAAIAChBXAKnFWbw/5FZcWQDqv/U/5FbsVPlTlT8=",
+    "Dfi48PBQcBAAEAAQACAIAIAAAAM0AKVO8EauRXDqD7mlD8Q=",
+    "EAA4HHw+PgAAAAQICAAgAEAABAs4AKnOWwQvpTMZk7pPxlT6",
+    "E3D4ODw8PABAIAAgAAAAABAAGA86AM9qDOWsObtWwFDOrpIECw==",
+    "EgAAYP/m/gAAACQABAAAAIAAChgmANVuFcGW/g9Vmw8=",
+    "Fx8fBwcHBAgOAAAAAAQAAAIBBAQ9AK8KUM76kMXuWjBRvg+ZswI=",
+    "FGBwePzg4AAgIEAgAAAQGAQAAAxMAJkDuX6VPgwlrxGrFpw+xKdG7MQ=",
+    "GvPz/w8AACASIAAAABAAAAsAAARIAJm/z5BW/W9RwVa8/j5kReX/sw==",
+    "DggYHPz4wAAAEAgQAAgQBAAAABwkALxZ7IBZ6cTvxA==",
+    "DwAABx//+wAAAAA4AAAAAQQACBAzAGX5vAZxlln8z2tMVjk=",
+    "GP7//8AAAAAAKgAAAIQCAAAAAAFgAJXGb/xGGb9RlQ6Tb/wWlU48rxGfRunE/w==",
+    "Fh8fBwcGBgQEAAQAAAgCAAEAAABIALUmQxbvGhPl+5DFbq4BE+X7UA==",
+    "GOb+/g4AAAAIWAAAAACgAAYAAAFBAFlR/s+aMZXzGpMFpQdv/vQC",
+    "FP//d0MAAAAcAgAAABEgIAAAABI5AEyVTvxXWezzlgX7v8ZUAQ==",
+    "Gfd/BgcGACAoAgAAAIMAAAEAAAQ8APU+b+ZAFuW/E6sGU1H+Ow==",
+    "D3BwfGDg4AAAAEBgAAAARAAAQCctAD4wqRY7kDyUs/llAg==",
+    "DwDA7P6OAgAAQAQEAAAAAACCAhkcAFVE+u/BLuU=",
+    "Ehj4fB8PDwAAAAYIAACQAAAAARhDAJYBS8GmT8ZUvusztRZMhm8+",
+    "FCDw/P/nAAAAGBAAAAAAIMAAAAU7AOrvUxVs/pTvUxGV+gTvFg==",
+    "Hvj44ODg4EBgACAAACAAAEAAwAdkAJ8uwT5lOjFvWXD6RP5kmj4WDOkOMW9ZsKY=",
+    "Fgx8dj4+PgAsAAAIAAAAUgACAAKMALpmAcyW6jNpAbyUxZ/qM+RaAcyW6g8VvJR+6Q+VMamPD2X4",
+    "GSDg+HgfHwAAACAcACAgIAAACCBMAFnBFOUOvulcsOmTP2XBFOXOa0w=",
+    "D///4ODAAAASIAAAAAAAACDAAAA0AEYZv1HGb1HyFvmS5JI=",
+    "DxweHhQfBwAMAAAEAAASCAAAACBCABkF8G4CpfpA5Ks+GTBRvloA",
+    "GB8fCT1/AAAACAgQAAEAAAFAABxRAPkTxPtqVeygP1CUqz9ArhbBsxXvAg==",
+    "EwAAh4ef/wAAAAAMQAAAAAEBgBc2AOr/vFW8D5SvMZRr8ZUF",
+    "FDg4+PDg4AAIUCAAABAQCIAAABNGAMGmoQWnT+RPQ2rxDpk6xE6pAQ==",
+    "F8DA/v7wAADAQEAAAAAACKgAAAZRAOl/FWy+T/5kZTHk+tBa4BSsexZDAg==",
+    "GQcHfn4eHgAGFAAAAAIBACAQAABLAKlF/jSkmwWnz5Bl8e+Qlv5ArBY=",
+    "DRw4eNjwwAAAIFAAAAQgAAAQABYjAF+m8wyxGpNlPg==",
+    "DwAAJj8/MwAAAAIGAAAAIAAAMBgsAFXG/xqT9ZAbJW+R",
+    "FHB4cHDw8ABAAEBAACAYAAAAAARSAKla7AMlQ7prAKrFPlC+BsSnWuxADA==",
+    "Ev7+3AQAAABwAAAAAEgAAAQAAAE1AFWlE/8aUf4+Uc4+Wc4C",
+    "FH/+/sAAABAgRAAAAEQEgAAAAABAAFX5b1SlE/+8Rhm/RaUT/1k=",
+    "FfDw8PjY8AAAEBBQAIAAwAAAgBtTAFGpA0z6BmylzqQ+U7Bl+jNRCm9rAQ==",
+    "GT87PwMDAAAQCwAAAAUiAAAAABJrAMG76RCUHryuQcGvUJU+/BpTvepAlB68a1TBGw==",
+    "DvDw8HBweABAQABAAAAQAAAAKAQxAJVfzroWDOVszkrpQwI=",
+    "DTA4ODw4HgAwEAAAAAAAAAQgAgQbAOnBLrmUbz4=",
+    "JsfH/87AAABAQEAAAAAAgICAAAZyAOm/UxVs/u9UlU78+9QPuVlUpPz71EOuRUX++1QF",
+    "FGBwfHjg4ABAAEBAAAAgBAgAAAU8AKoWOwyZA+meFjuQa7FD/A==",
+    "FQDg8Pz8/AAAAAgwQADAAABAgA1FAKX6MBmT6vNWwKbPFKUzGf6WAQ==",
+    "GXd3fh4OAAAmBAAAAAAAEAwIAABZAGlDmlHwUu7rgxacPgFvpE7wRro2VMEC",
+    "GgBwYP//HAAAAGBQAAAQAAEBBB9CAM7/pRHlA+nuQxnE+lLl/1cO",
+    "EB8fXvhgAAAGCAAAAAAIQIAAAABHACVvVOoEv9ZDblAKr1nGz1C6FQ==",
+    "DcDw+Oh4CABgQAAAAAAAgAAgCAY5AOnBpvtD1JJLOZCrX7C8Ag==",
+    "Fv747jwMAEAgIAAAAAIAAgAIAAFTAJW9FgX/V/mslD5UOb8W8WzpOxW8Jw==",
+    "E2B4fFzwcAAQEBAAAAAACECAAAVHALpP1GuU+mDBkHvk+0R5yZC+Fg==",
+    "FvzwcGD4+AAAIEBgAARAAAAAUCNPABkWA/FfqR7wZjqgPlkwQ+mTmgMp",
+    "FwCwvP7uTAAAGARAAACAAAgEQBI5AKYzVbD5PlHOVslDbhb4Aw==",
+    "GP/74uDgAAAygAAAAIgAQABAABFGAExVSsnzlgV/mg4FK7ypBbgMCQ==",
+    "DQDg/Oz4AABACAgAAAAgAABgABIlAJUFuz5TaXGwSwI=",
+    "D/z8bnwEAABwAAAAAAAAAggEAAI3AJWzVPnP5lTpDyXvQpU+",
+    "EwDgcHD8/AAAAAAYCACAIAAABCI4ABY+ZQQvpTMZk7pPBpn/",
+    "EnB+OODg4AAAAEBgAAASCAAAAB9GAPrAUM7mqQWnDwzlf6UascNQDg==",
+    "GgDA3v5+cAAAADBIAAAADAIAQBFPAGlZ4A+5WRCs78S+USWvEf9G6cQO",
+    "FAMDBw8/HwABAgICAAAAAAApEAA+AGpk+mMFb/CQpvVvBG/ktgU=",
+    "GA8fPzE/MwACEAAwAAgAACEAASxSAPHvQMFL6Uz5UuW/VCX/axXxz1apAQ==",
+    "Dg8eHhwMDwAICAAIAAMAAAAAAQA6AKUWzGvEp0bsxKrGUM6aDw==",
+    "DRg4OHh4AAAQICAAAAAAEEgAAAM6AJoWz5DJmw5psQ+RrxHMCg==",
+    "EnDw0Pz+AABgAEAAAAAAAAQGAAQpAOWsZnGw/uUfVf4D",
+    "EwAAB+7+/AAAAABYAAAAAQIACBA3AGVuxTuxE2cW5b8TZ5U/",
+    "FwwPPz8DAwAAEAoCAAAFIAAAARVHAM+b8dsaEGfOa0wW5T9Evkb9Kw==",
+    "GwYGBgY//wAEAAAMQAIAAAABBi8+AP/Tb5TFPyRDulrsAKk5lQ8=",
+    "HAwMPv7o+AAMCAgAAAQAABAIgAJrAJq8VfpY8LylBZz6EPnTkGslrwU/pMU7ZGnxGg==",
+    "Dfj44ODw8EBgAAAAACAAAACAgAcoAO+TRb6UL+X6RG4=",
+    "Dj8+Hw4OBwAYAAgAAAQAAQAAAQA2AJWUz2uUs2vhA5V/5mwO",
+    "Fg8fH3h4AAAAEBgAAAAKAAAgAB1IAD7YDJmfhsU7DPkblU48r0XpaA==",
+    "E3Bw8HB4OAAQABAgAABggAAAAAROAKW6T0bwEqylw6T6ZAQvpYP6ZDAF",
+    "Ffi+/wcHAAAMEAIAABAQCAAEAANIAKW/PlTB5utDlBGlP79rwdS+kQ==",
+    "Gz4+Lid/AAACBAYAACAIIABAABFoAG5VAP9KOZX6A5Pqk1XAv1SpP0xF/pS7PhlM",
+    "GBx8TF5+fAAABAQMAABwAAAAIBlgABFsleo/gT6ZRcDzVq/Ja8GwmQ5MrT4ZTA==",
+    "DgMPCR8fCQAECAgAAAAAAAACCQs8AM9qWewzVAq/ClTq00Ol+Q==",
+    "EDx8bC4+AAA4AAAAAAQAAAICAAI4AEn5rhXE/FI5rxGrQ6X+",
+    "FMD8+PDAwAAAAEDAAAAECAAAgC4vAAGeTjCkOsR/GqUTPw==",
+    "E37+eHgAACAYAAAAAASAAEAAAAYsAL9PtZX+BG8W8Vuk",
+    "GRj8/ODg4AA4QAAAAAAAhAAAwANDAG4NmV8WvA+5UfIWqTtYwG8p",
+    "GhwMDj9/AwAABBAkABgACAIAACZZAPOzFGz6ZDCpv8ZE6UwG+mtMxmTlz2sA",
+    "HWBwfH4ODwAgGAgAAAAQAAAEAxJ5ABYFm/4+kRVs/mTB/q6FD1FO5bweLJXzLlHuwaZf8AI=",
+    "DQAAA09//wAAAAQEBAAAAEAAghArAGmxD1mW8fNrwWYV",
+    "DQAAA39/BwAAACYAAAAAAQAiABA4ALkWcVn87lMPuRbx6UNl",
+    "EgQ/Hx8PAwAAAAIGAAQwAAAAAAIwAPq2BkxG6jCV/mvAVA==",
+    "EgAEBP7/fwAABAAKAAAAAMCAAAopAFr6+ERV+s9U/VYB",
+    "FD//Dw8AABAOAAAAACDAAAEAAAU5AL/pM1T9G2X8RlnPW/3mAw==",
+    "GGBgf1j4+AAAAgBwAAAAQAiAEBBmAJUaFjCkug/Uq0Xwa0OlOfBrBS+lD0Hu6lQO",
+    "GODw+Hh4eACgQABAAAAAgAAIKAw/AFHOagzlrDm7VsBQzprPSjk=",
+    "Dnx8ePjg4AAYCAAAACAAACCAAAI8ACVvUTr6WDBvNqSRv1GmTw==",
+    "DQAA5/6+8AAAACiAAAAABYAAABUoAP5OnKUxUf47lRY=",
+    "FAAY8vP/NwAAQCAgAAAAIgEAAAs2AGlrFGz+kMW+72BF+b8D",
+    "Ezj46D4eCABIQAAAAAAAAAIQCA9HAM8rlLOlX/BS5fxaxLOlv1HwKg==",
+    "GAd3fwcGBgAEEQQAAAABRAEAAAw0APn7BGsV5b8zlFv1uwY=",
+    "Fnf/fgYAAAAQLAAAABDAEAAAAAQ+APnzVtX/GlM5rxFROrHvUwU=",
+    "GAA+/vj4YAAAAEBwAAACCoAAAC0+ADBk6cTzGvGXlg7xn0bpEA8=",
+    "DXh4GDg4PAAgEAgAAAAAAAAoBBwtAAxJ+S7BpkuwmT7BAg==",
+    "EDA8PDT8+AAgAABIABAAAAQQAAQ/AOmvGYCaxfsMlfyaQTxbajE=",
+    "Ezj//mAAAAAwQAAAAABDAAAAAA4tAPkP5b9FpRP/GaUzAQ==",
+    "HfDw8L/nAAAAEDAAAACgAIAAAARhAJXqQ/CWO75PFcFa6cOkv08VlT4DlcLbawA=",
+    "FH9/ew4CAAAwKAAAAAAKAQACAABXAKmFD1SlX/A+q4UPVP4sVaXPr0U8VT4=",
+    "FCB7f384AAAADgIAACBBABAAAAhDAFoZ/5BbWcD7ThWlg/pMUToT",
+    "G34+DgcHBwACAAIDAGAIAAEAAAFUAKn6ZMBS8FI6U+W/qU8GMJX7pk8GTA==",
+    "EGb++uICAgAwQAAAAACAAAICAAFIAJllwezPSlXpY8FrTP68Qln8rA==",
+    "EBh8fz8DAgAQMAAAAAAACAADAANAAGqxD5GvFfEebOlf8C5R+rM=",
+    "GA8fP3Pw8AAAAABwAAEAAAMAACdNAP4QP69BXKYaFnP6ED9bqRE78c8C",
+    "FHj48PBw8AAQEAAQAAAAAMAAgANCABa5TvCWDSm560DwFrkmQ64G",
+    "FwAMPnp/HwAABAAOAAAAADAQAhGGAGX6YwW7TwUvZbHb+wSRrw2VesCvZfxQZQ7/Ws5Qxq9Z+AQ=",
+    "HMDAx/f/cAAAACYCAMAAQBAAABBSAFpFawGozv+QW0Vrgc4/5FaUAepODA==",
+    "GWBgYHx8fABgACAAEAAAAEAMQAVbAJL66VCw7lNagH7BkOuvDeVUDuS+NpQb",
+    "DuDg+PhweACAYAAAAAAAgAAAKBM8ABkWQ+7Bmj6TFge75FL6kA==",
+    "DnD42Hg4AABwAAAAAAAAGAAIAARUAFLyCuXsahGxfgGvUOo+FgGvFsyW7g==",
+    "Fh7e/uBgYAAEICAAABCAAIAAAA46AD78GlNuZToU7PNWGb7GBA==",
+    "Fgd/fzAQAAAgCBAAAAAAUCAAACRXAET8s1U68Rvz2lBmPG/WQ1byxm+U8Rs=",
+    "FAc/OwsfHwAKAggAAAAECAAEBAxTAK7PQNm8uVbAWbyaz0MypGsZ+ENuGw==",
+    "Gf//w8AAAEBoAAAAAKAQgAAAAAdfAL9flLxPFuV/lU7wPv1rRFnkz/tkUf0+FQ==",
+    "GQcPHz84aAAADggAAAAAADAAKBRiAD4WM29rPWQ2QybvBqXkBvPaUGYy82Y95AY=",
+    "DzA4OB8WHgAAGAAEADAAAAEAAARKAC7l6g/1WgFs6g/1WgGT4epjwQ8=",
+    "Dh8fOzsCAgQKAAAAAAgAAAEAAgAnAFnkTy6lxU78rCk=",
+    "HTg4Hnf/4AAABDAAAAAAAAAQoBF6AGmBPgTlymtlMec/lLwWwKY+RL5WP5TlBs9rPW81lAk=",
+    "EzDw8Nj44AAQABAQAACAIAAAIBtRAJYF/G5QqQOTrw3B6gaVOsS8mgWbAw==",
+    "GhjY+HwfHwAAQDAIAABAIEAABA5fAPk7roUPmQ8RrK4FlPOQW8bvWjCpM9X+Gw==",
+    "FmBwcHDw8ABAAEBgAAAAECCQAAVcAOoaaPEMmbzpkBb7EMmQ7hqgFg/Bphuw",
+    "GgBwf38HAAAAGiAAAAAgAEADAAxCAKX/PlXB5k/uQ20VbP6U4T8L",
+    "EBx8X39wAAAgABIAAAQAQgAAAA4yAO/E+ltQpT5Y8Gy+lQE=",
+    "DTw+PjwMAAAABBgAABQCAAAAAAIjAG6tAXGpg69BPA==",
+    "Gjw8Pw8DPwAIGAAAAAAAAQAAMAJaALbGUOkXvJTzCuX5waYHu0I5u1b9Q24F",
+    "GAAA4P9/DgAAACAYAAAAQAABBBVIAPmvMfmTRVHuF+zuQxblP5Xh/w==",
+    "HPH/PhgYGAASBBAAAMAAEgAAAABXAGZRDpXzGlPurgHB7lNR7pMx6V86wRs=",
+    "GeDw2Fh+fgAAAAgYBADAAAAAKCFQAFZcOe9TZUDw9i5R6g+5ZYD+Plmw",
+    "GQADBx7+/AAAAARECAACAQIAgAhKAKkZZbHPD7lZ8A6pEe/EWVq8Ew8=",
+    "DQ8HBwc/DwAABgIAAAgAAAAgCAAlAKoFTL6RS271bwE=",
+    "Dnjg4ODw8AAAAGCAAAgggAAAAAMrAKVSrk9AfKoGxKoB",
+    "Ehg4ODg+PgAACAAMABAgAAAQAANQAKmTOj5lAS/BWuoAqk8W8JYOTKpP",
+    "E2Bwdz83PAAAAAgGAAAAEQAQAAVOAOrPW2Wg/ljwvEacpc/UWgTBrlAO",
+    "FH9/DwMCAiAsAAAAAAgBAAECAAZCAP9STuW8HuyTUpTvQ2sxr8UK",
+    "FHx//OBAAABQEEAAAAArAAAAACZBAAz/VZ7FzlD+G6XFTjyvRekA",
+    "GR93/v4YAAAQCDAAAAADAAIIAABbAKW1RuwDpcW+D1TyrsVOTGX+TpWzVPk/",
+    "DwIGDg8/PgAAAAAMEAIAAAAgBCQiAPkM+ZtB7JBaDg==",
+    "DgMfFx8fHAAKEAAAAAAQAAIIAAw1AKfPQ65V8Po0pKS8lgUA",
+    "EwA+Pw8OAgAQGAAAAAAIAAQAAg1BAC/l7xNZ7GvhQ1G+PtBqwawC",
+    "EhgbHw8HBwAACAUAAAAAAQAABgM6AOnuE2y9lBFsvg+Z7mDBCg==",
+    "FX58DAwODgAIAAQMABIQAAAABCFBABboExBnrzGUs1Q5r64BTK4C",
+    "FQAefPzsDAAAAHgAAAACQACEAB9IAD4W8ztxWTrxvFnkT/lrDOVsZQ==",
+    "IwAAB/3/fwAAAFQCAAAAAQEBIBCLAGUWZ7H+P1AKr1XsD2Vpwekz81pbEZ8+/VDmO1hU/jtFVf4/",
+    "Dhwc/Pw4cAAQQAgAAAgAAEAAQAIkAKVZ/MJroPVGbg==",
+    "D3h/NwUfHCAgAAAEAEgBAAAAAAYoAD7571oWOzBF6cQ=",
+    "FEDA4P7+4AAAACAoAACAgEAAAAZCAOrpPG+VBbz7VJT6hE9mgD4E",
+    "Fn9/TwMAAAQEBAAAAEBAQAAAAAM7AKcH+1T+GlMV+VO+8xpTFQ==",
+    "GgB8fj4/DwAAAAIWAABoQAAAAApUAKmOTxbwlg6TMZWv/mQwGVOmM+WvAQ==",
+    "GwMHHh5+fAAAABgMAAADAAIAIABTAJnlwmvETpxqEO+UGuUz5GbxvEZ8Gg==",
+    "G+D8/jwwMAAQYAAgAAAABhgAAApjABXlrzH5kwXl+Rds7g/1WhHsPlX+5RoM5Sw=",
+    "EADA4OHx/wAAQECAAAAAgAAACQ40AOnBrlDOpoH+Bbt/Rfk=",
+    "DxYWHh8HBwAABggAAAAAAAAFAgQvAOr7RLC6FkMW+5A5Kw==",
+    "E38/Dw8AACAYAAAAABAAAQEAAAY6AP9J+exa+BDl+jCVs1J+Dg==",
+    "E9z88ODgIAAQoAAAAIAAAEAAIAI4AJlZzBf5Mm9Z5E8WrGsB",
+    "GvDw8LC4+AAQABAgQICgAAAAEARYAJWqD+hbwFLwUjpTvqlPBkz5pk8GlPo=",
+    "FAAAGPj+/gAAABgQIAAAAABMgBM2AJbF+lP/FsFmFvxuwKYF",
+    "HHx+Tg8HBwAACgQEAGACQAAAABtOADD5ugaUs2sY+ERrhE9U5E/5azAF",
+    "D3x/DwYGBAgKAAAAAAQAAAACBAIqAGWxz/pkwVa8zkoK",
+    "DkDgfHh4YAAAIAAwAECABAAAAAYvAOqTgeowGZP+RukQPw==",
+    "Enx8OCguPggAAAAIEAQAAAAgIAIvAGWqDwRvFvEbqby+FQ==",
+    "GeDA8PDwfADAQAAAAAAAgAAADAVYAKUHq2vEkOtDa0Gw7lqE+0C5lJ9/weY=",
+    "FiAgOPj+/gAAAAA4QCAgAACAEAU3AGrpA6gOk6E+bxFs7lMV",
+    "Fnh8fgwPDAA4IAAAAAAAAgABDANCAAqVfsHuwS7lU+XzCuVserAO",
+    "GAAAHzX9/wAAAAAwQgAAAQQAkCZ+APnTD2WexT7wagOlOwX/agNVugH/aoEFf6UWD682ULoD",
+    "DwAPDz4+AAAAABwAAAADAQAAAAg4AKlBfGpYvA+Ur0GsFjvx",
+    "EH/88HBAACAQEAAAAAEAACBAAAAtAJVlMf9XRq4TvJGSAg==",
+    "FT54eGBxfwAAICAAAgIIAAAAASA4AFZRcDrEvEb8lenEl+r/",
+    "Eg///xAYGAAIIAAQAAAABwAAACMmAAZE+T9kFv+zVQ4=",
+    "HT8/Dw8PDgIMAAgAABAAAAIDAABOANUqyZDFr8ZQzprPpgUM5T5TrXkO",
+    "FwMDBz8+PgAAAgoCAAAAAAAkKABTAGpkFutP8JBrQ6bwRq71kMU+ZBr8Gg==",
+    "GH9+HB4UHAQYABAAAAgGAAIAAABEAFVrDmTxqzGU+0xafLoWMFH+",
+    "Dx4eHjg4AAAQABgAAAAACAAoAB0yAD4M5Wqxw0OS6Qas8AY=",
+    "Dvj4HB4aDgBQABAAAEAABAAIAAM3AOUsVT6vMeW+axEM5Wwu",
+    "Ev7+DgAAAEBQAAAAALAAAAAAAAc2AH9+VM67D1X5/BpTvcYE",
+    "F8DA/P4sPABAUAAAAIAAAAIABAZYAKnPWRys+ZP6DGUFm6/PUGXgv5R/Uvo=",
+    "GgAwd38+OAAAAAwUAAAgBQACABBGAGlDFuX6xPNmsRNnBZvvpAXoDw==",
+    "FQCA8PD+/gAAABAUBACAAIBAECFQABbtk0WUDpOhv08Fm/sUlU7wpgdv",
+    "GXNzc38zAAACIAYAAAIBEBAAAABPABquUUHp6PxDbhUFL5n+75BVwUs5",
+    "DQDg+PjwwAAAIDAAAAAAAAgAwA0vAKlPFvCW/kxF7lO5JA==",
+    "D34/PwMAAAACFAAAAEABAAIAAAEsAK4xlfMaMVU6U/qz",
+    "GjDw/PzAwAAAANAAAAAQhAAAAARkAKlTuQbzxm9UpsNQ8hrxvlEa80amw1D+Vxo=",
+    "EgBu/vDwIAAAKBAAAAAgAEAAIBQ/ABf581ZpwWzpjxX8lzxvZSg=",
+    "G2Bw+PgeHgAgAAgYAABAkIAAACFeAFkQwabvUfBSOpNv9To+ZRDspk8GUzmvAQ==",
+    "GAAfPz8wMAAAEBQQAAAHBAAAABVSAD+vEZdO5ekQ8xrxvkWlE/MacaYTDw==",
+    "GUBA/P7+HAAAAABcAEBAAIAAEAZBAOovbwZTGejOazCVkf68xlQB",
+    "Dg8PDw8eHgAIAAgIAAAAAgUAAABWAKVqsQ+UDOmuwVCuFvsQ+RozVPppsQM=",
+    "DQcHHx8ODAAEAwAAAAAAAAEIBBIsAD7BWkO6FrE+DSm5",
+    "FAcfHjwcPAAOAAAAAAAAECAAEABEACVvNqQWnD5DJm+Rmz4Eb7mR",
+    "EgAAB39/BwAAAAQUAAAAAAEKABA8ANkaRfnvA2X9awzlRln8sw==",
+    "FMDA+Pj4+ADAEEAAAAAAAAAIyAZFAJK6z6RFsO5DWbAvlbNL+VS+Aw==",
+    "HDw+PnBwMAAQICAgAAQOAAAAAB5gAO5gMQ8lrxGfmg7MG1H+lWuxQ/BuUH7pxA==",
+    "G35+TgYHBwAKAAICAGQQAAAAAAFXAGlM5bv6ZMBS8FI6U/mb+mQAbvpkwBQ=",
+    "DTDwODw8MAAgIAAIAACAAAQAIA4oALMaU6tO8G5QvpE=",
+    "DTh+/nAwAAAEBBAAACBAgAAAAAkoAGVM/laUzqRO8FY=",
+    "Ev//50IAABAKAAAAACAAQEAAAAVAAL8+VL3xG2X8RpkFK89bWbA=",
+    "FWB/fwcAAAAqAAAAAAAACgEAAAVTAOk/+ZNVweZPFuy+D7UV5T9lwebzOg==",
+    "FwDw8PD8/AAAEAAwCADgAAAABCJKAFYEvKXDlLpPRvBSOkyqTwaU+g8=",
+    "FD9/fgcDAAQAJAIAADAEAAEAABg7AEYE+1T5m0PlvAZTVv68Bg==",
+    "G2Bg/PR8ZABgACAgAEAAAAAQJAVVAJK+PrRWEGzmawCrP9RrRbBLuV+wvAI=",
+    "Dv5+eEBAAAQUAAAAAMAAAEAAAAEnAFX9b1T6TPVGbiQ=",
+    "DQAPPDw8PwAAGAAAEAABAAAgAQgtAJVrEZ8+xKdlDuT6Aw==",
+    "FAAw/n8eAAAAQDAAAAAAgAECABc7AP8akz9ZlO9DaxHsUv5XPg==",
+    "EgcGBh5+fAAEAAAgIAMAAAAABCY8AM8zpGsWvANxqka8A2lZ/g==",
+    "FQ4ODv7s+AAAAFBAQAgABAAIgB9NAPrwDkympQX/TqUxr0Xxp88MpaUB",
+    "FhB8/n8HAAAAAC4AABAAogAAABhDABY+UdX/GlM5rzEZk1H68xox",
+    "GwAAN3d//wAAAAIMEAAAIEAAwBRQAKk/D0m+Vj+U9byVBfpkTP5blPFb",
+    "DQwMDw8fHgAIAAgIAAAAAQQCAAJEAKoW+0DJkO4aFvtAOa8Rq2Hx",
+    "DQB4fx4PDAAABAgIAAAAEQABABAvAFXOa8SnxlAOlfNuPg==",
+    "FOBwfDxwMAAAGAgAAMAAAABAABJFAJZBsOuThU+0RvhEa7g6wRu5AQ==",
+    "FHx8cDBwMBAQABAAACAEAABAAAVKAKdLsE+ZTsxbFpyuDhHsk+nEpwY=",
+    "FgAAMPD//wAAAAAaAgAAAICgCCBNAFbhkz9Z5E8WUTqT71PB5vU+RekD",
+    "FjA+P1j4AAAICBgAAAAAIQCQAB5IAD78lU4Ee7oB+1Tk6gRv5Fr9kA==",
+    "GwYeHgz8fAAACAgQEAAQAACASCVQAO+AZjwMKeWa8RvAmzGpDsEb6Vbt",
+    "EAAAcPg//wAAAAAYQAAAQIAACC8lAD+TMenvU1E6UwE=",
+    "DvD8/AwAAAAQSAAAAICAIAAAAAQtAL7GVM5rBJXO5PtUAQ==",
+    "GcD8/09EAAAoAEAAAAAAgAEEACZKABBs/mTB7k/6kwVbUf5Tkft7sA4=",
+    "E3h/Hx8CAgA0AAAAAAAIAAACAgNFAB5J+ew+mcVQzroPtVI5r1DOAg==",
+    "F/DgYOz+PgBgQAAACEAAAAAEFAQ7AKm5T/1bFOU/WwGUsxqoPw==",
+    "FAAOBg4fPwAABgAKAAAMAAAAKAk8AOlS8gZsarEDk/oWsOmTAQ==",
+    "GP//fuAAAEAGBAAAAAGAAMAAABFRAEUV77MV+7xV/JX1G79Rxm9R8mZDAg==",
+    "DQAHDT9/IgAABAAGAAAAAAhAIClDAAyUvFrBwmtDmcbMaxYl75MV",
+    "DQYfHx8OHgAKAAQAAAAAABAAEgEtAGax+gyRW+Rv5Eu5AQ==",
+    "FwAHJ+d+fAAABgIAAAAAIMAAAAhTAKXwmtXPkMmbZYE+/ZCbRf6UhU+0Bg==",
+    "E0BATP//wAAAABggAAAAQIAAQAZIAKr/kGX8G79Rxm+U8RtVOtNvkQ==",
+    "Fx4+HgYfHwACBAQIABAAAAABGAFAANoaMGXOa1rsDJS7Wz0Ea24=",
+    "GPz43MjAwABwAEAAAAQABAiAAAJUAFXpEiy/RnyVPytVOvGzOVWqA8EbqQ==",
+    "GMD+vv6AAABQEEAAAACAoACAAAZJAKkPX1rwvk9ZDaX/0D5ZFPn7VAE=",
+    "DgDA/tb0/AAAIEQAAAAAAJBAAA5vAKn+D5NaVLDpM7T6QGkWwKY+Q5G/ZvH+QJX8qwU=",
+    "DsDA8PDw8ADAIAAAAAAAAIAAUAYuAJJL7pMRrKvFPlA6Cw==",
+    "FHBweOz/ZwAAAChAAAAAAMAAQARKAKXmE7zpX8G71e9TQakxzWuRDAk=",
+    "Gvj4ODg4OCAgACAAABAAAAgIAANVALUmQxbvGhPl+5DFrmsBE+X7kMVungM=",
+    "Fvh4PB8fHAAICBIAAKAAEAAACBJNAPpkBcHqPpERvJTOVO4+GUzqa8EC",
+    "FTw8GD8cDAAYCBAAAAAAACMABAJEACVv2mvEQDmrMZSz6V/B5pez",
+    "HDc/Nx8GBgAIEAgEAAEUAAAAAhxRAPhFsO/EqUX87FprzJAaQ6XP1OowAQ==",
+    "DgAHDz8zMAACABAQAAAEACgAAB07AM9Pllc68fwaPWTGb5TNGw==",
+    "Dj4+JiYgIAAUBAAAAAAAACIAIAE6AGX8FiXvawzlrFClCvBGCg==",
+    "EgA8NPT+AAAAADAIAAAMAAACAAovAGpBfGqUP5BrsUOsPg==",
+    "FQA8Hhx8fAAAAAAwIAAAAgQACCZHAD5o8Qy5azCUn5Yz5GbxvEacOQ==",
+    "FABA+H5+fgAAAAQYIAAAgFAAEA41AKoPU6k/bxFs7kOV70wB",
+    "F///BQcAAEAqAAAAAAIBAQEAAAdJAP+X8asPtFowW/1SUf6zFVfl/wM=",
+    "Gf//YEBgYAAyAABAAIGAAAAAQCU7AAbM1L/xG2X8FpVO/F9WKg==",
+    "Dfj48Pj4ABAQEAAAAIAAAADAAAMjANVvkW+R60+RJA==",
+    "DQYGBgd/fgAAAAYgAAAAAAAQJBgsAAbBKmlZ7DNv1kNm",
+    "E3x8dHDw4ABAAEAgAAAgBCAAAAI/AKWaxQ4kD+XPVrla7ECuxQ4=",
+    "EwADBn5feAAAAAQMAAAAAAABMAhBAGmlBX86D7llBb8PuVHyZkMC",
+    "FTd/Dw4eAAAQBgIAAAFgAAAQAAQ/APnzVvXLG6U+EGtrwdS+kRs=",
+    "Fx5+fzAwMAAAKCAQAAoAAQAAECU9AA4MuU8l5WsQP68Ra5RO7AA=",
+    "GMDA8Pj+wAAAoCAgAAAAAIgGABRRAK0NWQy5phND7hf5kwWbn/8VbH5lAA==",
+    "DgMHDw8PDgADAgAAAAEAAAgACAAjANqQkukPpL2RGw==",
+    "DQcHDw8DDwAGAgAAAAAAAAgABgAxACVvWuwDpbzWEqxrQwI=",
+    "Ej8/Dw8MAAAABAYAADAgAAAAAAA5AJWeDkzlv1E6TOlvlA5TAQ==",
+    "EsDw8OD+/gBgAAAEAAAAAABAEgZYAKbPpMXBLrlk+v+UVfBS+k9W8O5TUfo=",
+    "GgM/Pz8DAwABAAsAAAEgAQABAABpAOkoZfymQ5SzVDnvaxC8lM5U+e5E5bNrELwWAw==",
+    "GTh+f3cBAAAMGAAAAAACACQBAANcAKXO+1RZMC9l+gy5+0Q5S1H+lfM6Uc6+",
+    "H/j/HwccHEBQAAAIABAAAAEEBAd0AO9fUf4+URb7/pMVbL4PZcFW7L95WuwwpFDOazKk",
+    "DgAAcPj8XAAAAHAAAAAAEACAQBsqABYWs/k+UeRvlLwF",
+    "EH9/YHAwAAAoACAAADAAAAAgABxBAEbA+1S58EbpxPu8VZTOT5YC",
+    "EvwPDwwcGAAEBAAIAIAACAAACCQmAA4wVb/7FKlO8AY=",
+    "E/j4PCw4HBAAAAAYAAgQEAAAACpNAMEEpboDrQXDZvpMUBa/qwX6QJQD",
+    "GXBQ8Pz+DgAQABggAABAACAEBARVAKX6+1TBUvBS6r5PlBHwmuE+vRSV/gM=",
+    "FTw8HBweDggEAAQIAAQYEAAAAAJVAJm6T0bwEmzFu6XDpPpkBC+lg/pkMAE=",
+    "HBw8eHj4eAAAKBAIAAAAAGCAIBZlAPpgMSvwRqaPBfNmQ0rKG6X+QPBGbjbkWr8B",
+    "DwBw/P4OBgAAAEQEAAAgSAAAABk6AFGVz+8a4RNF6fwaUzmvAQ==",
+    "Dn5+MjIAABAKAAAAACAAIAIAAAE1ANVvkcXvS5VO8D5Z5E8B",
+    "EgMDDw8eEAAABgIAAAEBAAAQAAA8AGpowekT+dOQbha8Q2rEOw==",
+    "FA8MDAw/PwAACAAICAQEAAAABABCAKWGa5Q/kAzparEDpGuxA/oG",
+    "FMDE/Pjg4AAACHAAAABAMACAAApHAFYtb5TxG6U+aAFD7pGvFkOuAw==",
+    "FgAwfv/wwAAABFgAAAAgAIEgABE4ABWZ6Uz8pTOR+1NmwT4Z",
+    "Hg4PD/7uAAAADCAEAAADAAQIAB5JAD9D/mYM5afVv1FZ/A+5DllZ/AM=",
+    "DmBgYOB4+AAAIAAgEAAAAIAIgAU4AKmTOm8ULMGavgVs+mRM",
+    "EA8/Pzw4IAICBAAAAAgAACAAIAIxAKnzULs1ZPJW5G+UPgE=",
+    "EgD8/DQ8OABAYAAAAACAAAAIEA86AH9SzvtUOSuvWTCUs+nBCg==",
+    "EhB/f/AwAAAQCgAAAAAJAIAAAAQ9AMobv1HGb5SR6xD/GaUTpwE=",
+    "FQQcFPT8/AAAAAA4CAAABEAEgAI7AKoW7VMPlFb6TL6DlcW/FQ==",
+    "F3hweHjw4ABAIFAAABgAEABAAANWAKXyZqAWO0PJQ8lrxJe+BsSqFjsM5Qk=",
+    "Ggfn/x4YAAIECBAAAAQBEAQAAAJFAD6ZFeX/acy8WezEWVH++5BpAA==",
+    "DRgwMPD8PAAAAABYAAAAIAAADAM7AJnqoE8WLMGafsHmUDmvAQ==",
+    "DQAY+PysCAAAMAAIAAAIAAAgCCshAEwNmcU+W/GOAg==",
+    "EwDA+Pw8HwAAACgQAAAAQAAACRo9AGbgE/Va+JAVbP70SrkPuQM=",
+    "Ffzc/MzAwAAIGAAAAAAAAACAwAJOALZG/ZBbQ6XwawXv1lCpwK+lJEMK",
+    "FAw8PHh4OAAAMAggAAAMDAAAAAJKAKnpwJC5RjkPJa8Rr1rEpw+oQQw=",
+    "H8T//wYEAAAqBAAAAAQAAgIEAAhsAGZgkT/5k0X+ZFWw+ZMFuz+9VZT/lAX7L1X5vw==",
+    "GAd/b+NAAAAgIkAAAABUAIAAAB1AAME/b2SVTvzzVvW/xlTOa0w=",
+    "Dg8ODh4fDwAMBAAAAAAAAAAFAQAkAJWzkuRLkjuV+w==",
+    "DXxE5Px8YABAACBAAAAAAAgQIAJRAGpF+T4DVbpHOfCvWhn/AFW6lHuwAg==",
+    "En5/+wMAACAYAAAAAEBAgAAAAAYgAO9T/bvGVPVW",
+    "FTg/f3hAQAACDAAAAAAAABBAQAhAAFXkOhP5b1HyZj2UKcxrwZY=",
+    "Fj7+fDwMAAgIAAwAAAKASAAAACI6AESwT7nV6xC8WcRv1TqvAQ==",
+    "G3Dw+Hh8PgBgQEAAAAAAEAAEBg9sAL5PUM5KUs4rlLOrRbgPROX6BbxCuTuVn3/B5g==",
+    "GABwPD4/BwAAEBAMAABAAAACBQxdAHk6v0YUbPoFu/tElDHpe7BLOZXzelDOAg==",
+    "Dx8eHjo4AAAAEBgAAAEAAAIQAB0tAD4Qf6kWoxND7iyVAg==",
+    "Dhg8fm4OAAAIIAgAABAACCAAABYoAH+wW+S/FkyG60w=",
+    "EzAwPD8PDAAAEAQIAAAQABAABBg/AJlBuE9kcbDmT4avMfmTBSs=",
+    "FWBg/Pb+BgBgQAAAACAAAAICAAVBALoW8ZCm/0NpBTu4+TsVlf8D",
+    "GGDg4OD+/gAAIAAoQAAAwAAAkAVgAKlT6vM+VRbwEqylDsGb+mTBrJQOvvEbZQ==",
+    "HAAYf//gQAAAMgIAAAAAAEEgQBBIAG1VFv+Q+1UWsw+5T1kPuVEKbw==",
+    "GAAHMzM/PwAAABAUEAAEAgABIBRMAKnPO5XFPm/AphVfweb+wKRm8Q4=",
+    "DYDg+Pj84AAAMAAIAICAAABAACI1ABXBlvrMFKUzGaoPkzEB",
+    "DeD4fDggIABQIAAAAAAABAgAIAUiAOUerE8WbM7mCQ==",
+    "FD4+Lyc+AAAAAgYAAAAAAAA4ABBWAFGl/oNWAe8+GcFbke8+kVQK72s95AY=",
+    "Eg8/PzERAAAUCAAAAAAAICAQAA1FAD5n8fxaD5kNmbzxG2X8FiVvAg==",
+    "FgDA+v7+AAAAEDAQAAAAAAwKABFFABb1WhRsnv9QrxXB7lPl7xflAw==",
+    "FgAAdn7/XwAAABIUAAAAQACgQBROAOmOT7CZP1nkTxb1PhXsPhWlM/kG",
+    "H8DAwMD+/gAAQIAUAAAAAAAAjgZlAKmj/uRPVsUQrBr6kwW7P1mU/5QFQ645kO4D",
+    "EMDAzMz8/AAAQAggAICAAAAAIAYzAJr685BWBuCmTwbo/xY=",
+    "Dhh4+PhwQAAwIAAAAAAAgIAAQAMtALlWsOkzDWktb/VGAg==",
+    "E2B8fw8PAQAoIAAAAAAAQAQAAQVBAOk/WcHmT5H/ps+kxcEupc8C",
+    "Eg4G/w8OBgAAQAICAAgEgAAAABcnAP8Ok75ROqjDVBU=",
+    "Fj9///gAAAAAYkAAAAcAACAAABdSAD7zb1RmMfMa8V9lOrETf2rwG6VDDA==",
+    "Fnb+/hwAAAAYJAAAAGAgCAAAAARJAKXvU8HmPkOWMek+Uxnl82vhQwE=",
+    "GBgY/PzkfAAYEAQAAAAAAACALANGANqQuzVk8tYvlQXvQ25k5PoFCw==",
+    "DwYcHPz84AAAAABoAAAEBAAAIAFGAKlGlT4W/LwGsRqVPhb8TpxlDg==",
+    "DQAAfPjc8AAAIEBAAAAADAAEABYoAH9qBT+bZxHPa8Q=",
+    "FHh4HB4eHgAwABAAACAAAAAIAgNCAJoMSfmsxlDOmrNrBTCpL6UP",
+    "FAAcfHh4cAAAEBgAAAAAAABAYBVGAPOW6UzwRq4VbPpMQxq5vFHyBg==",
+    "FODg8PDgwAAAYCCAAAAAgBAgQBQ2AIZmwJDukxG85FLuwZoB",
+    "Gnx8eHwMDBAAGAgAAAhEQAAAABpTAEWwT7ktVHrw9q4BwZtFfPqUzq4BMQ==",
+    "Gh4eOHg4eAAYCAAIAAAAIHAAAAFJAJVnOhMsb5E6wRvplj4QvJFuawA=",
+    "DgAGdn54cAAABAQQAAAAADIAAAkvAFr9kFtmAS/lf5U+Bg==",
+    "DwMPDw8PHwAGAAgAAAAAAAAIGAA3ALkWsT4NKbkk+VLyZvMW",
+    "EgDO/v54QAAAEAwAAAAAAMAQAA4xAP68VZHrT8zb1pDJWwE=",
+    "FXhw8ND4+AAQABAAEEAAIAAAQANjAJXqbxG8lO5TQ7BW6gDqG8FL6T41VOoQ6xs=",
+    "GB4/PwMDDwAcEAAAAAAAAgAACw1NAP5DUj67pG4A5SxVPu+azZBQzmsC",
+    "FH7+8ODgAAQYIAAAAAgAEICAAAE5AJXFPm8Vl+ljwbzZkJK7AQ==",
+    "GQf//uBAAABUIAAAAAAIAiBAAA9JAP4zb1ZxWrD/Q27FPmS1T2XxlwI=",
+    "Dwx/ex44CAAiAgAAAAAACBAACAhIAEWmP5NWsBX7PkTKa1HsPkS+lg==",
+    "DsDg4MD8fABAAAAgEAAAAACIQAY2AOmT6pPxb1HBkGsOpPsG",
+    "FgBgf38yMgAAEhAAAAAAAEEAAg1EAO6TP1nkT1nB5k+R+7NSpRP/",
+    "Ez4+fnBgAAAgICAAAAYAABAAABY+AH+lEztDyWvE70ZpsUO8Gwk=",
+    "GAcfHD8/BwAACAwEAAAIAAADARhHABnEagy8kZqzVPkMJa+R+1T5Ow==",
+    "G+D42Hx8DAAACAgoACBQgAAAABpvAAWlHvCaAbH6rzGVgQ9Frj6vMVkEv1Tqw9TqkwE=",
+    "IcDA/vJifwBAFCAAAAAAIAAgEROTAGX6P9BqVRAHm745FKxPhmsMBZse7FKu/wNV/2pVwJtQzlKwuTo=",
+    "Df78zgAAAEBQAAAAAAoAAgAAAAchAP9XPktVOvG7Aw==",
+    "DsD8/BwIGABQQAAAAAAAiAAACAYzAOkX7O5DSlH+PlSR+y4=",
+    "FQICHxZ+fgAAAAAYBAAAAwAAIAFSAKpW7FT5/FDJr2HBX6nFH7xrYMGrBQ==",
+    "EgDO/ub8AAAECAQAAAAIACAIAA45AOo/Q1YW7PozVVoc7FLuAw==",
+    "F/DQ8Lz8HAAQABgQAIAAYAQAAASAAKXrPhXsGhOVPpMWwC+V6kNrAb6vMVkB81rpYwHzmj4Z",
+    "FBg8/Pzg4AAAAChgAAAkFAAAAANWAKnxG1XqA29U6oMW8DtxVp4+xF9qEA8=",
+    "GDz+/uCAAAAMJAAAACAAgECAAAlMABY+UZbO8LZVpPxDblnwPuRGyVs=",
+    "ENj4nh8cAAAAAAoIAAAAkAAEABgvAFHp8BbB5j6ZgU9UJA==",
+    "DXx0fFgYGAAACAAYABAAQBAAACs2ABgQ/Fr4UNo6Aa8NZbEL",
+    "FD8f//wAAAQEAgAAACAAgIAAAAMwAPtUqU/wFvlvkdW/VQ==",
+    "FPz8/PzAAAAAAGgAAAAMBAAAAAI7AFWpDvGfxm9R6RC/RunEPw==",
+    "Fzw8Pj8HAQAEDAQAAAAAAggBARFiABbl7xNlAb9k6V/B7xKV/pCU8+rBEuX7Ug4=",
+    "FHz/X34AAAAGCgAAAACAQEIAAAhhAGbhkwW8Uan/M2lVwG/6Q5TxW5S89W/kXgE=",
+    "GAAfP398QAAIDAIAAAAEAGAAQAxWAO+TRf5kOjFvmQVzps/0W+RW5E895AY=",
+    "DhwceHhwYAAAKBAAAAAAACAgIBtDAARvmgX7NORa8pCbBafPkMkb",
+    "DzA4e38PBwAgCAgAAAAAABIABBBCAFnB5vuQReUD6U7lvO5DFvsG",
+    "Ew9//jgAAAAKCAAAAAAEwAAAAAxSALO8VTpxFvvwWhacPv1QZjyvRRm/BQ==",
+    "EhAYGPj4eAAQCBAAAAAAAAiQAARAAK4NaRbrT7BpwemD8ZCmj0U=",
+    "JwDAw8//9wAAQARIAAAAAIAEwBuQAPtkZQVLsOn/TlXB5v9VOf8+9ZBrEWdl4P8+9ZAZv1FWJEOubw==",
+    "FMD8/Oz4wAAoEAgAAACAIAAAwAw0AEW6/gxVv0WuzxSl5JI=",
+    "HmBg/v7wsAAAcAgAAAAAAAIAsBdmAD4+bxVfWvDBWvoz+VNmBXuwPlmw+1Q5KxkJ",
+    "DgAgP30fDAAAAAAOAAAgAkAAAComABjBvxZx1q/BlAE=",
+    "EB8ePDw8DgAAAAgYAAICAAAAAgAzAKW2BhBfmvMaxJfpszk=",
+    "FAcHBw8eDgAABAICAAEBAAAQAABFAKWmA28kQ66lDxCnqwWnD8RqAQ==",
+    "Eg8fDw8DAwABAgIAAAkQAAAAAAAuABqlw6RvOkCl8xpMBQ==",
+    "GQ8PHxo+PAAABBAMAAEDAAgAACRvAA7MmxacPhCnqcU+QyW/ZhCfPsSUuxbx6UOpxQ4=",
+    "GgYGRsb++AAEAAREAAAAQEAAwAFTAKqVBfpkweb8D8mQrlWRO/+QW2X8Fg==",
+    "GPx8YGB4eAAwACBAAOgAAAAAACNJAGXATP0blWsO8EbpxKcaoPqTAQA=",
+    "EAx8fw8BAAAoEAAAAAAAIAEBAA45AD6zUhb7fsFW7ENu/UvlAw==",
+    "D8D+/3oCAgAgCgAAAAAAMAAAAhBDAFFlwa7P9FZR7jO1Fhdszu8r",
+    "FgDwePh+PgAAAAAMBACAAIAAAiE0ABY+FWzlDpMxpe5PxlQ=",
+    "Ffh4OCg+PAAACAAYAKAAAAACABs+AJT6ZABT7kuwlvpTBuBL6Q8=",
+    "GPz84ODgQAhoAAAAAASAAACAQAI7ANVvlBb8GyVvkUsuuUPwFg==",
+    "Gx4fHDx4MAAECBgAAAAAECBAIB1dAA5DajpDsLxR6gbwRupjAb9FvlbyQ25tAQ==",
+    "Gfh+/x8DAAAECAoAAMAAgBAAAANRAKnza0xlBC+lM5W+zxSlM+Vv1f9bAQ==",
+    "DfDgwPz8QAAAAChAAACAAAAEQAQxAKX65E9ZELypTxZs/gM=",
+    "DnhvfwMAAAAoIAAAAAADBAAAAANCAJX+V8HvrxFR6Q8lr+8UUekP",
+    "FwDg4OL6/gAAAAAwBADAAAAAIBlAAFoF+hTBljowqW8Em/sUpQM=",
+    "Ew4PDxwceAAEDAAAAAgAAAAIEBo3AMFs8hZpOsOQKbyRa0Mm",
+    "FQBwOD8/BwAAABIMAAAgAAAwAhg6ALVGEewe5T65D2XhExn+Cw==",
+    "Fz44PHx4cAAAMCgAAAIYBAAAAAFYAJXKmwHxl6oFp89A+RrEqgXzGqgRO/E=",
+    "GfBw8PB4eAAAEGAQAIBAoAAAAARYAKlTuT7BUvBSOlO+qU8GTG76ZBj4UDo=",
+    "Dhw8fn4GAAAEACgAAAAgEAACAAJEAKXOa0wW8JZO8Jb+RFn+wZuz",
+    "DRgYOPw8eAAQCAAIAAAAIIQAAAMkAGk6E2yqMwWbVw==",
+    "FuDw+D84AAAAUCAAAAAAAAEYABNNAGbgEwmlz66FDxHl7hHsLlHuwfoD",
+    "EwAAfnf/4AAAAAYCAAAAACCAgBhUAFbB71YPVakT/K8VvBuUNrwWlMJrbQ==",
+    "Fvj4/PzAAAAAGKAAABhAAACAAANTABqlBvMaxOtbVDq8UToD5bxGrMZQKg==",
+    "FBwcHxcfAgAMCBAAAAAAEAADAgJbALpW8FL6ALlaMOsSpc+TWTBb+kNS+gAl",
+    "JD4/Dw8PDBAcAAAAAAgAAQADAAV6AO8pUM7uE1nsa+FDUb4+0GrBbMW+5FI+WxowUb4PmQ8=",
+    "DQAA4OD//wAAAABUAAAAgAAAKBU0AOpzWcFL6TCpz/tUWbA=",
+    "EAz//z4CAABSAAAAAAAAIAICAAJNAPpkwWax/hBZFr/+kA1Z+kP2S+UD",
+    "E///DggAAAQQCAAAAEgCAAAAABs1AMxUWfyvMfmTRfk+tBYD",
+    "GgcfHhg4eAAAABAYAAAAAAAAWCVXAD4Q+5CpFjsQz5sNmbxR6gbwRq4ZDyk=",
+    "GA8PDQ1/fAAIAAgkAAIBAAAASABlAKplsQO5D1DJu1pAnK4WOxBfulaxP+RW7EMC",
+    "Ff//4wAAAAIWAAAAACEAgQAAAAA4AFX9rzGVz1bFf5UWnD6R",
+    "GQDDz//46AAARgIAAAAAgAAIiAhmAFpZFGz6T1aw6TP9D7kV+5BbpMXzRlZrwRsJ",
+    "DT4/fxwIAAAGBAAAAAAAYAAIAAgxAJYF/Fbk/0bJG2X81gI=",
+    "DTA+PwICAAAYEAAAACAAAQACAAQiAOnPVsHmTxn+Cw==",
+    "FAAwfvZnZwAAAAAmAAAAANAAACBMABZMRW7xrz4ZQ1XqBP9rTGVD5ho=",
+    "Ezs+Hg8HBwAAAgQCACAgCAAAAABOAJm+FgQvpTNlTLrrQ2sBU7nrTMYE",
+    "Gxg/PjcHBwACDAAEAAABAAQBAghOABWZTvxrTJHpxH7BvlTO61oMlLMK",
+    "FTgs7Pz84AAgQIAQAAAMgAAAQBdLAP4DpRb7A6X5Aa9rYKUTv0NaFiw=",
+    "GAMDA3d/fwAAAAAuAAICAAEAAQA6AKoGoLkV74BZlP9OnFX+Dw==",
+    "DwAAwPj8/AAAANAAAAAAAAAEhBY4AO6TWQy5+5BF/mTB5n/5",
+    "EOB4SEh8fAAAAAAYEIAAAEAAICJTAEYZwKT6GwX8CpX6PjVQqR7Ar5bxGw==",
+    "FQCA8PD8fAAAAAAYCACAACAAICJDABY+FeXOGwUvpTNl6O9TlM4b",
+    "FQB4+P4eDAAACAAMAABAoAAAACpLAEzVrzEZwUvpTOk+GVHOvJXzGhM=",
+    "GgfP/vjwgAAEaAAAAACAABAQgA5zAOnPnFnBps/0zJv1kJlZHGz6Q5Evz1sWpc9TrQU+",
+    "GA8f/vjAwAAOQAAAAAAABCAAwABhACVvllXsz0OZW7EPvDaUybwWbFoPuVGSSwI=",
+    "GXD4/t4OAAAAeAAAAAAAAAQOABFnAFlM+pMFS5SXTux7FLy7RJS7R7ArlPsF+1I5",
+    "DgB8fzY2MAAADAAQAABAQQAAAAoyAEbpTPmvMVH+VeoQvAU=",
+    "DwIaHh4+PAAAEAAYAAACBAIAAAFCAFrkrmGxD5TzGrGTGsRqsRMP",
+    "Ewd2fj4OAAAACBgAAAAgACACAAAvAKVF+c+aMUW5T8a/FQ==",
+    "FfDwMDw8OABgACAAAIAAAAQEAAQ9AJoMSfmsBlOurwUM5az55QM=",
+    "FQAAMH///gAAABoEAAAAAECBgBpAAFaw6TP5U1aw6TOV/1X9b1U=",
+    "GX///8AAAABAKgAAAGGAAAAAAABtAFVlOrzxG79Rxm9UpRP/vEZ8pfEbVTqx8xalMwE=",
+    "GQAMDx///gAADggAAAAIAADAgApOALoW8ZCmP0MZv2U9ZDZvFvlT/1YF",
+    "DsDA8PD4cABAQEAAAAAAABAYAAY/AOnBpgeb/pBrEQebfsHuUT4=",
+    "Dg8PHxwODgAACAwAAAgBBAAAABQsAC/l+gQxrw3lpWsA",
+    "FX54eODgwAAAIGAAAAIAAABAgB83AA5DajoD8Z9GKbyRa0Mm",
+    "FQwMDw88fAAAAAQMAAAACAAgQCQ2AA54OsGQ6vAWwaZPWm8F",
+    "FsDA/Pzg8AAAUECAAACAIAAAMBJFAFmcZsCQ7pM/ZaH5EMHqWoCbAw==",
+    "FXh4eB4fDhAIEAgAAAhACAABAANCAOmuERNsxbtUzmtMue5Da4EP",
+    "GDBwfj784AAAABwgAAAAVgAAAARLALrxG6UxlP8acanFDsT6lsUOEyw=",
+    "DgBg8Hh+cAAAIGAAAAAAgAACIA0pAOnBLuU+kftlweQC",
+    "DTA4Pj8PDwAAAAIMACAIAAQAAAQwAPq7xqQFvK0FUwb6Og==",
+    "Ex8fPR8HBwABAAYAAAAIIQAAAABDACqUwmutAcFb5ObwawbBm+oD",
+    "EsDAwMT8/ABAAEBAAAAAAAQEBAZCAKkeLMGmS7DpF2z6vFNZ/JcP",
+    "FMDAwPz8+AAAAAg4AMAAAEAAgBoyAFUGqP4z1WsFoPpMuQU=",
+    "FwAAuPj//wAAAAAMQgAAoAAACSA9AFb4VLCZPxlM6k9RpTMZ+gM=",
+    "GQAfHv703AAAAEBwAAABDAAAEB9aAD+vFpw+EF9apRP/6cNEyasW8elDVT4L",
+    "Du//BwcCAABIBAAAAAEAAgIAAAU1AP68RlwW5f/sWviQUM4C",
+    "Dh98fBwcAAAQIAgAAAJIAAAAAAA1AFVK+bxaoA9UfvpArBoA",
+    "EgA7PzsjAwAAIgACAAAAACAhAAgsAFYkKW/8rsFUlP+s",
+    "F2Bg4OD/DgAAAGAIAABAAABBACAxAFVBsJYO+n9VsPn7VAE=",
+    "FQBwcPz87AAAEHAAAAAgAABADBpVAFmcxfBGmj7jk4VPZsHwCqWjB7uUzwI=",
+    "GSY+NnxWfgAgFBAAAAAKAAAQCAV4AP5aWvD6wJClpf+AWgUPX3rwKlX68FDJr0WsWjD7bg==",
+    "GAAATPz+PgAAAAA0EAAAQBBABC1FAMRvvU/Bpk9UOlG+z5BluM9kAQ==",
+    "DQMPDw8PBgAHAAAAAAAAAQAABgA0AJKbBafPkJLpjxW85JI=",
+    "D6C4+PjwQAAgEBAAAICAAAAAQAUlAMpbGag/Uxm/kQI=",
+    "FBwcHPi48AAACCgAAAwAAAAAgAI7ABppWnD6MxCnblbwO5DmFg==",
+    "FODg/Nz4OAAAUEAAACAAABQAAAVZAHqUm+9DtE+5FgGx6j5QpLxrsRNTpe8A",
+    "GgcHDw8f/gAEAgMAAAABAAAEiBJTAPoQbLoBm8XOkOSSqc+Qkcub1Q9lFg==",
+    "FAAADs//8wAAAAJoAAAABAACMB5YAOnP8K4xUXpZwf5VPg/vGgUvpZNlweY=",
+    "GQAMDw//5gAADAQAQAAAAADgIApTALlrxJBrVc4/5D4U+ZtV/Q+5VT/kFg==",
+    "DgYefnwcHAAIMAAAAAAACAAIBAw5APuQG0kuWbyvhQ9Q5gevAg==",
+    "DyAwfPx4eAAAEAgIACAAAIAAQAUxAK68RemA6mMBv1W/RQI=",
+    "EgMHDw8fHgAAAAgMAAMCAAAAAABHAKkaFvtAOa8BqkHsxE6pFjvEDg==",
+    "Fg8Pe38HAAAIECAAAAQAAQABABVmAPmT7wNUmsU+vGvAZGmx7wOVvGuxE5T5wWsO",
+    "FGDg4HB8PAAgQEAIAGAAAAAQBAU3AOr6ZAHo5hCUs64R4OY+",
+    "GSDg/+8PBwAAEAwCAAAgQoAAAAVCAPr7VGXE/vsaaIRPVJH/a0wF",
+    "JmBwcH/n4AAgEARAAEBAAAAAoBhoAFUR7FLuX2mxA8Gm8u9TlQEvpTPp71NF6Qas",
+    "DgYODgc/LwAEBAQAAAAAAAEwAAspALNS7gasmT9ZtE8B",
+    "DQcOPjwcHAAAABAMAAEAEgAAAAAyAGWW6wOxE6e2FujETgw=",
+    "E///8OAAAAACYAAAAAsAAAAAAAA6AFZUqc+YBfx/pRH/lRrEDw==",
+    "FAgICAz//wAIAAAQBAAAAAAIUAMpAOpuFeX/kFuxz1sB",
+    "FQwOPnx4EAAEFBAAAAAAAEAYEAk7AJE6k5nF7NOQbsU+ZApvJA==",
+    "G/z88PDQcEAwABAAAAgAIABAQAdYAH+6AftU6gRvWboPBG9W8CelS7DpEqw=",
+    "GcDw+LjwcAAgUIAAAIAAAAgAUAxfAG7kWgRD7pHvE63JkAWb82oF+GyuDVT6LA==",
+    "EEDA/Of/4AAAICAIAAAACACAgAYzAKr/UEWuE1+5/7xVkRs=",
+    "EDAwOB8fBwAAABIEAAAAKAAAARg1ALVGweZQsK4x6ftQxpsD",
+    "FuT//wwMAAAADgAAAABhAAAAAAJNABq/UcZvlPGbDvFVzmtMRenPa0wB",
+    "E3B4OHx+PgAwIAAAAAAAAAAGAgQtAFLuwS65JLlPlX/5Aw==",
+    "FD9sfMTg4AIMCAAAACAAAASAgAAtAFWvFWn6BP+QW5G6AQ==",
+    "FPj4+Pj4wAAAQEBQAAgYABAAAANFAFU6r0F8pT6vQVypDsTrRunEAw==",
+    "GBw8N//wAAAABEoAABAIADAAABpVAFiGxTugz1sFs1L6ZbHzUMmvRazPWwE=",
+    "Dj8+Dg4OAAIQAAgAACAABAACAAAyAFmU70P1uhYM5Wx68Ao=",
+    "DwBwfz8OAAAACBgAAABAEAIAAAxAAL7G5E8WUe6T+9BaFJO+D+U=",
+    "FD8/MzoPBwACAAIEACAIABAAAAA0ABpTpe4+wVRk+u7AFKU=",
+    "EwA+/vDAAAAAQGAAAAAiAIAAABc4AP9VOvG88RulxU78RulM",
+    "JQMDA37/PwAAABQEBAAAAgDAIBt5AJc+g/kWzJCaxZfF+z6Bxgyp2T5ZxKcPRhm/UcZvvQE=",
+    "FH5/8xMAAAQaAAAAAAIggBAAAAEtANUvlcW/Ffn/GlNlAQ==",
+    "HAAHBwd/fwAAAAAsIAABAQEACCZNAP6DFs+QuwbEamXxP+Q6pMVOnJUD",
+    "DgMHDx8dHQADAgAAAAAAAAAEEQAuANqQbg2ZvAuV6RNsCQ==",
+    "DwAAAw8/PwAAAAQEBAAAAAAoEBsuAKfzkFuxD7lRNm9vBQ==",
+    "Enjw8Dg4OABAIAAgAAAAAAgICANGAJWvMZSzUjmvazFQzmoM5WyeDg==",
+    "EuB+fn4GAAAAACwAAIAQCAAAAAU7APqvwVQZk77zGkxZ+fMaEw==",
+    "GQMLCw8PHwABAgoAAAAIAAABGABVAGpogfoTDKkOabEPwaYbsGnkxm/ApgE=",
+    "FQADB///fAAAAEQGAAAAAgARQBs+AFcWvz4zZPJmPeRmBb9TbgU=",
+    "GgQMDD8/DwAABBQIAAQAAAAEAxhKAJnBkO6TEaxrgcUP6VLuM2lxsAs=",
+    "DwYODx8PPwACBgAAAAAAABAAJAE4AGn6TFrArJEv2Ru58Rtl",
+    "DRwfHw4GBAAGCAAAAAAAAAQCBAhDAJYRvJTuM2lxwUu+5JJQ7hIs",
+    "FPz84OAAAAgwAAAAAEAAQIAAAAI5AJXFPm8VX7lO8D5Z5E9ZAg==",
+    "En54MBj4+AQQAABAAAIgEAAAAAEsAJXFf6lrQPCmZvEO",
+    "GgBwcPz+DwAAQHAAAAAAAIAEBRpiAFmcxT5Qbv4+URbwlv4VvC9FuV+w6xcslQ8=",
+    "FwcfHzw8IAAAGgQAAAAQADAAIBtaAKEPFrPwWmT6WDDzZjZDZjJvWuRPPeQG",
+    "Gfj48PDw8BAQEAAQACAAAABAwANhAPWWTvBGbupA8EauFXDqD0W+JPmS5EvJuwE=",
+    "DuDwYEjO/gAAAABIIAAQAAgAgCceAA4M5af681YF",
+    "DgAHBR8fHwAABQQAAAAFAAAAEAgpAFoPpWsR6w+YgUYC",
+    "E/j4wOD4+ABQAEAAAAAAAAAIGANXAEalS7DCG6V6sASbvhRserDpF+znVD4=",
+    "EwN6Px8DAwAADAACAAJAIAAAAAA+AKkV7A5WzrsGUxlT7vMaUwU=",
+    "F/jw+Pj4wACAQEAgADgAAACAAANPAFU6r0F8pT6vAaUa/EbpDJSvAXEq",
+    "FXt/f3MAAAAKBgAAABAAADEAAABHALZGZfwPuVWw+5BF5enDO1uRJA==",
+    "GDA8PNzO/gAADAhAAAAAEAQAoARJAL5C6UyqTwZaBZv/vFX9EMGubgE=",
+    "Dg8PCw4OHAAMAgAAAAAAAAACGBNIAD5DUvIKpfAqUOpD5GvJQ+nakA==",
+    "D2Dg4PDwPgBgAEAAAAAAAAAwAgU1AJIrlLOlX/AuUe7+FcEC",
+    "FuBwcHB8fAAAAAAYCIAAAEAAECJGABboUwRb6sBkTKq/EWzuU5TOBA==",
+    "FQMDAw8fDwABAgIAAAAAAAEQCAA/AGqoEwypDmmxD8GmG7Bp/RY=",
+    "FwAOPPz4wAAAABhQAAACACCgACNTABGfzsRplU78zpCbBafPkMkbpTFvGw==",
+    "FQAAYH5+fgAAACgQEAAAIAAEBhxHAGsUbP6kP5QVbL4/VMYv5R6VPw==",
+    "G+Dg4Px+DgAgADAgAABAQABEAAVqAKl+we4+Uf0aEcGW7pMRvJSOPhn+PlEWAa/uBQ==",
+    "DxweDhwcHAAABAgEAAACCAAQABwwAM5MlLMpvFn6wET5ag==",
+    "DX4+DgcHDwAQAAAEAkAAAAABCCo6AAxQ5bzGVL6vMZSzrg3lBg==",
+    "FADA/Nzw8AAAqAAAAAAAABCAEA5pAOk+tBbByvuUZjHk+kCrBcHKqxX+QOlO5UCuAw==",
+    "EgDwcP72ZgAAAAREAACAABIAABkuAJXBlP6vMRXlf6URDw==",
+    "Gh8fPzwgIAAEHAAAAAAAIAggIBV/AD5nMbyUX/pYwL82VAq/1kMW+VoPZQrzWvBvlLxRJvMW",
+    "Fw4PPzMfBwAKEBAAAAAEAQAABhVcAP/BLqkV8Zf+MFHyqhV88FrpP1bB79qQ",
+    "GBgbGz8+HgAACgICAAAAEAA0AAhWAFoRrP6QW1qA+tA6DLmZxZDrQ9mQDAk=",
+    "DgAAOD4/BwAAAAAWAAAAGAAAAiApABY+UZTOrzEZ5c8C",
+    "DxgfHQ0PDgAKAAgAAAAAEAAGAANkAOnrA60WFGzuPlCvFhHsCuUsr2aBPgNlerA=",
+    "FDh/P/sAAAAICgAAAABAIIAAAAM0AOnB/hpTlT5T5P9W5FY=",
+    "EwMDAwc//wAAAwACAAAAAAAhgAAtAGqYPsGQavVvwKZVAQ==",
+    "FQAADn///wAAACYCAAAAAACIkBFYAJn+UGQWr/+QWz1k1W885G5QGvzaUGk=",
+    "Ff//TwMAABAMAgAAAICQAAEAAAUrAL9PVf1b9f8aU/ks",
+    "GcD+/vDAwAAUAMAAAAAgBgCAAAZUAPqTP1nkT1nB5v9VuQb8RunEkPtXpA==",
+    "D8Dw8MDAwAAAwEAAAEAQAIAAAB8nAAy5pgO8UTrxqQY=",
+    "DwAYGB9ffwAACAIAIAAAAAAAByZAAD7Apv9kBZvvQ1mwL5U/W+U=",
+    "ExweHjc3AAAAAhIAAAASAAAQAB1FAA5D+vpkEOymTwYTpQdvrxFnAg==",
+    "FXx4cHDg4AAAQCBAAAQIAAAgAB5HALxpsQPJQ8lrxF/parED8aVrMQ==",
+    "FXju/Dw8BABgQCAAAAAKCAAABA9yAP4+RCW/QmX+Bcu7WnD6EEel7xG8axk/RKX7WOwL",
+    "Fwc/f3cAAAARDAAAAAEAMgAAAA1JAD9v9Tqk0UPmZTHvPkRm/GsEmwE=",
+    "GcD/8X9gAAACMAIAAACJABAAAAg6AFX9r1VRsP9X6cSVz6bBBA==",
+    "DQAOHjw8eAAACAQIAAAAABAQQCJGABHzRmb6jFkw82ZDrvVQJvOmBQ==",
+    "DuDgPPzwgABAAFAAAAAAACCAgAU/AOpZ7MMbJW/WQ26UPFDOuhY=",
+    "FQAPHx97eAAACAQQAAACBBAAAAhFAGnZDJnPa1BqWLzDkPm8xmRpAA==",
+    "EgB4eP7ewAAASEAAAAAgIAAIAB9KAA8vlb9R8jpUzmswWaYTz2tM/gY=",
+    "FwcHBQ9/DwAEAAIDAAABAABQCABJAKWmP2QxvJRm/W8EvDaUrgNmvQE=",
+    "GBweev7gAAAIIDAAAAAACAjAABaBAF86A2+vhWUx7w9R8q5V/xCl8PZaUfL+EOWvVf9QmWdDAg==",
+    "GTg8PDzw8AAgACAwAAAACAAA4CZlAD6gDclDrsVqWLzDQ5nCvBbJkKvWQzKka0MC",
+    "DgAHHx4WPAAAAggEAAAABBAAIAhLAFmpD1rAGymvBTxvZKnPmAU8bxY=",
+    "EAcHBx8fDgAEAAQIAAMAAAABAABJAGky5KpFfPoMlK8BsaoF8xqQ5gM=",
+    "EgcHPzc3MAAEEAAQAAIAIgAAABU7AL8PlK9BVuoQP7sWPlS9Dg==",
+    "EgMDDy8/BwAAAgIBAAABAAAiABI0AOoDwWoWnD5DGrk+UFo=",
+    "GgMDA39/PwABAiIAAAAAAQAIDABmAGpoVaz/EwypDmmxD1kW+7xlwfsQbLpR8vYG",
+    "Fjw8NxweHgAMEAAQAAAgJAAEABBfAGUR/FLyFvlr4QOV6/pkwQPlrBY+lOpDOQ==",
+    "GwAAgPf//wAAAAAaIAAAgCAAERdNAOr/8FoVbP7U81YWPlHGr+E/VeUD",
+    "Dgw8/v7AAAAAIEQAAAAECBAAAAI2AFn+G1XpxG/wa8Rl6cQP",
+    "Dwz/zsCAAABAwAAAAAABAgCAAA8cAP9sTlU68f8=",
+    "GI///wMAAAAAVAAAAIIgAAAAAABHAJXOa1Dlz2tMZVH+Uxn+z2tMFQ==",
+    "FgYfHxsbAwAIAgEAAAAEAQAIAAFSAK6hDhGsFfuQG/lS8q4BwW5ROrGvAw==",
+    "Fv//NhwAAEIwAAAAABQBAgAAAAc8AL9P/mQV5T/5k1rEz1acxQ==",
+    "FP7+cDA4AAQoACAAAEAQAAAYAAFWAJUWnD6XawxR7sE+9W+UCuUsvFGqBws=",
+    "GBgc/PzwQAAYKAAAAAAAADCAQANRAGk6D7kV+xC5W1awPvVDbhacPkNWAg==",
+    "Dj4fPxgYGAAACgAIACIAABAAAAE3AG5UOkz5G6VDfKk6BG8k",
+    "DQwMHh4+HwAIBAIAAAAAAAAgEQIgALnkS0b+RvZe",
+    "EgBAfv78wAAAAAQoAABAAIIAACIzAEyV4Ru/RaUT/5dROhM=",
+    "FDw/Hx8XBQASABAAAAAAAQAABSRCAMxPFiyVs2vhA5XPSvmXszkL",
+    "F+Dg+Pj8HACAABgQAABgQACAAAVWAOXq+1TwUjqToftkMFk5kPtk5M5rMAU=",
+    "FAMHHx8fHgADCgAAAAAAAAARGABJANqQki8lb1oQqw8NmbxFvpS8vQE=",
+    "Gzw8dHcfDwA4IAAAAAQAAAQBCAKPAOWsrkVgsbsPAZXz6loEzEppsftF8CtUOvFsxae6P5QFvJT6Gw==",
+    "DQ5/fwAAAAAGAgAAAABAUAAAAAgqAFbwVv1vlPEbZfwG",
+    "DgcGHh8PDwAGBAAAAAIAAAAACgAxAGlDumsR8ak/BBr5UgI=",
+    "FXx0cGDg4ABAAEBAABgAEAAAAAJNAJWqxQ4kDyWvEV+6WuwAcepa7BAD",
+    "Ewb//7AAAAAIGAAAAAABgQAAAAEpAFlZ/M/mVOnEf1YB",
+    "FDj4uPD48ABgADAAAAAAAACYgA87AOoPQ5JrFvCspA2l7wZsGg==",
+    "FTj8/A8AAABIJAAAAAAQAAcAAA9EAM+7RLnX+0Wwm0PlvMZEWf6z",
+    "GUDAwP7+wAAAAARUAEAAAEAAwBlRAFUG6G/8RpUGv1E6MaT7ZPxbkQSbAg==",
+    "EHh/HwwPAAAQCAgAAEACAAABAAM2AOZQOa8x5b7G8EYa8akP",
+    "Dz///wMAAAAEUAAAACAgCAAAAAAtAGlMZf68xhRl5Q9vAQ==",
+    "EwcPHj8/GAAAABASAAEBAAIAAB1DAPMasRM7sbpRGrETO/FqlE48",
+    "EwcHBh8/fAAGAgAAAAAAAAAgRAA+AKXwpiRDrsmQu9VDbpS8tQU=",
+    "Gg8/f3EgAAAcBAAAAAAAAkEgAABKAGll8T+Us0tZFvO8WQ+5UfJmQwo=",
+    "FABgYOD+/gAAAAA0BABAACAASCE2AFaBPkWwmQ6o8z5VFuwO",
+    "GwDg4PD+/wAAICAgIAAAAAACDRxUAK1RsPmTBbyS7xeVfsHuF+x+VD5V/g==",
+    "EP//8HAAABAUAAAAACAgAEAAAAUnAPtU/1uVTvBmBSs=",
+    "Dj4eHxsaDgACAgIAACAAAAAKABA0AEXpMKW6D5NaALxGvpQ=",
+    "EwAAA//ffwAAAEJAAAAAAAQAJB85AL//kFm8Pg1pWRH/+W+UAQ==",
+    "EmDw9/8HAQBAEAQAAAAAIAIAARA6AFkF5JtD5bw+W0Gl/3vwCg==",
+    "Fn8/bDwMAAAECAwAAFQAIAAAACI/AART/W+lQ1ypB7yR7xow+RM=",
+    "FQcPDhz8/AAEAAxAAAAABAAIoBxgAD4Ww7zZkGn6ZBX7Q24wvJGmD6XF/lDyWg==",
+    "IH5GZj8HBwAEAhIAAGgAAAAABAF9AKlAle4R/Ks+EayuESxQle4Xwf8aU/XrrhEw1as+GTAB",
+    "DQ4OHxsbCAACCAIAAAAIBAAACAEwAKUKv8YUrJS/xkSZDg==",
+    "DRsfHx0AAAAMBAAAAAMAAAEAAAAwAGkWB/tOlT4WvFP5sw==",
+    "EwcdPx8eHwAMEAAAAAEBAAAAARVFAPs8lLxmBbsPlO5gGhb8TqX5Aw==",
+    "Fg8+5Pz8AAAAQGAAAAEQAIAAAABmAKWWFZzO+0Alv1pFrM8OxKdW/UNl/g5W8LwF",
+    "FwAAYH99PwAAAAoQAgAAIAAAGRhzAFqQ+9BalPEbFWz+5P5QrxUV7O4PZU5R7sE+Zfg7",
+    "Fg4+Jj5+JAASBAQAAAAAAABCJA1RAM/b2pBmAc+u1Q+5NVQKv9ZbzUOlAg==",
+    "HgcPD8788AAECgQAAAAAAIJAgABXAGU6MW9bWlmwOT8zZApv5Fpl/A+51RY=",
+    "DgAefh48OAAAABwAAAAKQAAAAAknAKW8GcSnWszU6gA=",
+    "Dc7+/IwMAABACAgAAAAGAIAAAAE3AGVF/m9Rye9rEF/l8xox",
+    "E0DA4Pzc/ABAAEgAAAAAQAAADAZDAKYHq/lD+5QWwab/VbD5Q5QO",
+    "E3h48HBw8AAQEAAQAAAAgAAggAM4ABa5TvCWDanrQPBGavJa",
+    "Fvj+4ODg4BAkACAAAIAQgAAAgAlFAEWlS7C8RaaPBfNmQ2r6QKxGAg==",
+    "FwDw//80BABAKAgAAAAgAQEABBA6AGXxV61RsPlDFvvOUuX/CQ==",
+    "GD4+cHBwMAAEMAAQAAogAABAABZNAD4Wwxu/UWk6Q/xGKbyRazpArEYC",
+    "DRj+0MD4eAAEgAAQAAAIEACAAAkdAEVWuv6UAfED",
+    "DR8fExMAAAAWAAAAAAgAABEAAAAyABkl72sM5SxVPq8xZQk=",
+    "FQQMHx97eAAAABAYAAQAAgAACCVCAD7YDJnPa5SGxTsMmU7skGkO",
+    "Ew4fGPj4OAAAGBAAAAABAACAEAEtAKU2pFm8PhB/qQ1pAQ==",
+    "FA8PGR8eDgQKABAAAAgAEAAQAgNGAKf+UORP+Voasc9Qae5DD5VuDg==",
+    "FcDA+PjwOAAAACBwAABAAFCAACtSAMFUxm9rDJW+U8FL6UOQvga/RcmrAw==",
+    "GgAg4Pj//wAAYEAAIAAgAAABBQ1GALpGwU7p+9BaBLuU/1f5T1X5Dw==",
+    "DSh+PjwMBAAAABgEACgABAAAACokAMBkuAZThs5rxA==",
+    "DSc/PjgAAAAQJAAAAAEkAAAAAAUjAP68WezEmRY7MQ==",
+    "EuDg8PDweAAgwAAAAACAABAACBQ1AFkM6T4ZwUsuuWsR+OYD",
+    "En9/fzAAAAIAIgAAAEADAAAAAAArAFX5v0VpxP8ZpRM/",
+    "FgADHx8fewAACwIAAAABAAQAUAhNANqQyZtFfPoMmbzpQNpQKfxa1kMC",
+    "GWxufDw4OAAkCCAAAAAAABQAGAlYAGmRPw2pxQWb+0NuZsDpM2QKb1Sw+bM=",
+    "HA8PBw4+fgAEAgQCAAAABAAgYBtfAM4MSbmmTwBvpFq/BcMbafoQvGnWQ2bzFg==",
+    "DsDG/PwcAAAACDAAAAAAIIAIAAkqAFll/GtEOZDu+1AL",
+    "DXBwcHh4YABwAAAAAAAAAABAYAQpAJLkS5IvSS5vlLwB",
+    "Ei8/fjgQAAAKCAAAACAAQCAAAAU0AD7LW2XoE/O2NWTyVm8=",
+    "FEBw8Nz8+AAAEAgIAEAAIIAAABpiAGYR8Jb6UxbwS6X+M5kFoPpkAb+bBTGvlgE=",
+    "FHx+fnDgAAAcBAAAAABgAADAAAlLAFYW8C8lbyVv/EZpwxtlMm+GNiQ=",
+    "Inh8bh8fAwAIBAIEAEAQYAAAAANvAO6uEeE+EUXpxP6uET5RkT/lrzFFvubzGpMxGRM=",
+    "Gh8/OwMDAwAOAAIAABEAIAABAABfAJoMSaUzb2Ux75NF/pS/xlDOVsavawCxKw==",
+    "EEDA/Pz4eAAAKBAAAEAAAAAICAY/AKo/0T6lBagPrUWwSy7lXz4=",
+    "Dg8Pz/wcAAAIAEQAAAAEBgAAABYxAPn7MJSrxQ4PSela7AA=",
+    "Ej8/PgYGBgACAgACACAAIAAEAAA5AEbpTKXvBG9Fbq8OBG+kAg==",
+    "E3A4OHDwYAAAEDAAAEAAAACAQB43AA5MvpGmM0wmQ7o2ZPIW",
+    "F/D//2MDAAAYEAIAAGBAAAABAARVAOnPWxXspTHvU1HpY/xG6Uz+rzGUswI=",
+    "HQBgf+9/BwAAEAIkAABACKAAAA1oAL7uA1WR/2+UTpT581RrEez7azBVvVbw+xpM",
+    "GAMDDw8fHwABBgIAAAAAAQAQFABSAGpowekT+dOQbhacPkMauT4YJa8FCw==",
+    "DQAw/v4cFAAAVAAAAAAAAEAAFAwzAOk/WcFmsQ+5PmTB6iw=",
+    "DiBwOHg8HAAAEAgIACBAAEAAABM3ABmo+2QEL6UzGZO6T8YU",
+    "Ehw8Hw8PAwAABAQEAAAwEAAAAAI3AOnp4FNG8Jb7ZEz6azAV",
+    "Ehx+ex8HAAAoIAAAAAAAQQACAA5JAOf7Q5S8WQ+Z+wXLuxY7QaUfvAI=",
+    "Fv/7PwMAABIgBAAAACgAAAMAAABCAGlRlO9D7T7UuxXlH7wWxVkM",
+    "FAAAMP7+7AAAAARYAAAAAAIigBk1AFVa8L/GVFpw+vxVD1kC",
+    "GAwPHzM/BwAGCBAAAAAAAAAjARRMAB9sZv4+QK4WBX/BvlTOq1Xws5I=",
+    "DnBw8PB+cABAQABAAAAQAAAiAARCAKnFPlC+xlCeObsWPlC5D7kP",
+    "EAcGPj4uAAAEBgAAAAMAAAAIAAAyAGlDmsXrA7FqwekDGgk=",
+    "FXM/9wcAAAAGAgAAAEAAwAAAAAA9ANqQlTH5v8ZUkf8aU1kPuQE=",
+    "EhgeHvT8DAAAAFBAABgAAAQAAB8oAOcPqMW+A5OR5js=",
+    "FAA+PwcPDgAADgIAAAASAAQBAAk8ANke7KbFEOXvE/UaseoEbw==",
+    "Fvj8xv7AAEAAQBQAAIgUAAAAABtUABXBXznvu9VDUaoB875WPxTlX6UO8Q==",
+    "GM////gAAAAKCgAAAAgAgKAAAAZDAP78GlNbFbn+TP1bZUHuQ5Ev",
+    "Dhw8Nj4+BgAEAAQQAAAIEAAEAAJHAKXuQxbwuvUaE1TqEPNqA2XqOA==",
+    "DgcPPz0/DAAAAAAWAAAIEAEAAAA7AGWqA5OvDZU6xLNV6bwGEw==",
+    "EwYeBwYeHwAABAAEBAIAAQAAAQE8AGq4RvkDyZCuFjtAuhY7xA==",
+    "FsDA4Od/HwBAAGAAAAAAAAQBBAZNAOlLwab7VwS7lPs+Fu9DblQFm/8D",
+    "FHh4fHxgAAAAGCgAAGAgAABAABJBAEaUpwOTOm8RvJTOpD4Zk0YC",
+    "HgAGdvb+5gAAJEAEAAACQgAIAAlSALlWkJsFz+bvQG5FpY8Fz+bvkEXlDw==",
+    "GHBwch4+PgAgABYAAEAAAgACCBE8AGZBwUvpTK7rQ2kxBKt+5Q==",
+    "DXh4f0MDABAIAAIAAAgAAkAAAAMlAOm/xlTBVrx+RQI=",
+    "ECAgIH7+/gAAIABABAAAAAoAgAUmAOoaFvNfGvH+VgU=",
+    "FExMfj4ODgAAKAAIAAAAABQABAZKALqPxbvGRPk+1JAuWbyvhQ+1BAs=",
+    "EyDgcHB+fgAAABAUACDAAAAAAAVLAKo+WcBbOoDqkz9lwWRMqj8ZTAY=",
+    "FB8/Pz8MDAAAEBwAAAIBAQAEAAA7AFXmz2tQugbE70bpxFf5LA==",
+    "GHN/NzcHAAAGIgAAAAEoABAAAABHANqQFeX/TpXGUM7+rgVTyavDFA==",
+    "Gw8fHz4+BgAAABoQAAkBAQAAAB1DAM686QBxqgFaPpBrsUP8qkE8",
+    "D3h48PDg4AAAAOAAAAgIAACAAAMyAJXKmxY7QHxp8hqxEw8=",
+    "DQAODw8eHgAACAQIAAAEAQEAAAk0AOVroBb7QPkaxKcWO/E=",
+    "Fj4mfHxgYAAgACAgAAwABAAAAAFiAGmVz0Mlv5bFB7/aQKXvMGmVOsTvYEbpxA8=",
+    "EhgePwcGHgAIEgAAAAAUAAAAEBU3AB/sSyq8kVDOa0y5a4Aa",
+    "FQAAAPD/fwAAAAAaAgAAABAAYSBAAFbhkz9Z5E8WUe4X7D4V+f4=",
+    "FgAGP3fz8wAAACJQAAAAAAABQyVLAA5mMfN7sEtSZfoQP7tCOZtQaSQ=",
+    "GXwcGHj4eAAACAAYEEAAAACgCCtJAMEw1bpZ7A4EbyZDutZDZvxG6QM=",
+    "EHj8dHx4YAAAAGAQABiAAAAAAAMuAJW6Bkz/mgFxqTpADA==",
+    "DgwPDx4eHwACCAgAAAAAAAACEQI2AKrFPkT+ZMHmrCT5Uu4F",
+    "Ehx8/GBAQAAgMAAAAABAgAAAQA4vAF86w2sV+0NuRf6UKQ==",
+    "EmDg8PhwfABAIEAAAAAAAAgAJBRMAGYEm/vQWgSzpV/wki9J+UvpQ+4=",
+    "F0Dg8P89HwAAACoQAEAAgFAAABhhAFpFBLu5D6X/UFrEROngqw+tRbgPRb25MwE=",
+    "FAAPDwN/fwAABgACAgAAAABQRAhPALk2JJTzqvWQDLlW/UNuWbRPv1EW",
+    "HOD8ZHx4eAAoQABAAAAAACQICAyNAOkPrRVQzmoM5fpa+JD5EMHqD/VaEaz8WlrAUM6mX7CpD6fFAw==",
+    "DWDg+Pj4GAAAABBQAEAAgAAIAAUtAPrWazBFqQe8Bmr4Aw==",
+    "DgB+el5+GAAAIAAwAAAgAgACAAk6AFU5rzHpGkOljwXP5juVDw==",
+    "EmB+cDA8OAAAIBAgAAACAAAICCI3AAVGsH+pxkA5qzGUs+Y5",
+    "Ej8fHwMBAQACAgABACABAAAAASgzAEDBS+lMlf9S5fMasS4=",
+    "GAbe3v7gAAAAHCAAAAIAAIoAAA5MAPrPkMmblfEPJa8R75SWxRds+lw=",
+    "Gvz8Dg4PDgBYAAgAADAAAAABBAJdAJoMSfksVTnvawzlLFU+rzHlvloAkzqbAw==",
+    "GACAwPD//wAAAAAyAgCAwAAAECBCAG1V+EQZ+OtPWfhEGb/GZKQP",
+    "DgA+fnYmPAAAMAAgAAASAAACABYqAD4Wc/5sxbtpBbED",
+    "Dfz8dHwEAABgQAAAAAgAIAAEAAI9AJWUz7sWxGrhA5XPSukfvAI=",
+    "FsDAxPz03AAAQAgQAAAAgIAgABJJAFYRbPq/FnEFm/tkBgy55rw+VAE=",
+    "E2Dg4PBweAAAIEBAAACAgAAACAVMAOoaUM4SbPpaELyUzqT60Fowufk=",
+    "FwcHBwd/DwAFAgIAAAEAAABoAABgAFK+lLxCKbymA+RaD7kW+ZNFvU895Fq0Tw==",
+    "FQAAc38/DwAAAAYYAAAAQAAEBhBDAFlR/uvTkGuFP1T9khTlPhkT",
+    "GDA/Px8BAQAUCAgAAAAAABUBAAtgAGsUbP6kP5QVbL4/VBbsL+WzVOXzLlT6kA==",
+    "DQcPPiYOBwAEEgAAAAAACAAIARUbAM+82ZAuuTk=",
+    "Dnh+fg4AAAAMCAAAAABCAAQAAAMrAOk+FewaU5QevPks",
+    "EhgcePzoAAAAMAgAAAAEAAAoABopAIVZ/AzplsW8E2cC",
+    "EgcHDw8fFAAEAwAAAAABAAAQBBI3AD7BmsXOkOSS6Q8Z+RsZ",
+    "FQDA4Pz8eAAAQHAAAAAAIAAMEA5ZAKnPWRysuQ/tU1pcsLk/1GtFsPtU+ZcD",
+    "FD4/Px8HAwAAAgoCADIAEAAAAAE6AG69rQGowRSlM6nDpK8xBQ==",
+    "GABw8Px/fwAgYABAAABAAAAJAQ49AOYP6T6ZxVDO+gW7H5WX/wM=",
+    "DcDwsPB8OAAAAEAoAIBAAAAEAAY6AKkH73pApTtMrQW6+2TABA==",
+    "EAMfHw8PHgAKAAAIAAAAAAAFBAAxAJnFzxr5Uq4FQ7lLsAI=",
+    "EgAAA/9/PwAAAAQEBAAAAIBAIBsnAKfzkFX9v1X9bxU=",
+    "EwDAwPzv/wAAAAAKQACAgAAABA41AOr+TxY+UWWg7zNVhv4D",
+    "GX97DwMDAwAYAgEAAAUABAABAABlAGoU8VflvL46RMFLlfNr4UPpuwYUvNtClMUD",
+    "FCAweHj+/gAAAEAMBCAQAAAAQiEvABZBuRbz7lMGrPkVAA==",
+    "GQAAAIf//wAAAABEUAAAAICAoB9dAL7PWewXlfM+9bxlUcbvU/X/FmX8Rhm/AQ==",
+    "DQMPDw4ODgAEAgIAAAAAAAwEAAAxAJoFp8+QyVumD8EbSQI=",
+    "DTg4PD42HgAYAAAQAAAAACIACAMkAEa+ObtWxJD7bg==",
+    "FvDwIDA/PwAgAAASABAAAAAAAwRRAKb6P2UFm0NAOatrALGqP1mw+1T5Aw==",
+    "FHw/PwcAAAAGCAAAAEAgAAIAAAI9AKXvU8HmPpQxlT6/Fj5U/QI=",
+    "FAAAB39/HwAAAC4AAAAAAABgFBBOAEm+VsRZvP5DNuRu9ZDFPuRGGb8F",
+    "FkD8/Bw4OAAgOAAAAEAIRAAAAAY5AL7tQ24U5T9l+KvFTK0OAA==",
+    "GT48EPDw/AAQAEBgABgAAAAQBAFbAFWuWsHmD20MvJGaFpz+ALFqFrwDWvk+",
+    "DgwMPDw4OAAICAAQAAQABAQAAAIyANqQblrAO2R5+hCrEQ8=",
+    "DXj4/xwAAABgEAAAAAAACQQAAAMfAJXPSvlfVPk7",
+    "Ehx8HAwODgAEAAQEAABgAAAABAI2AKn6ZMBS8Fa/qU8GTPkK",
+    "Ex4+fnpgAAAQCBAAAAACBAIAAAE0AGkNmT9blU78RunETvw=",
+    "Fzw/PwMDAwAECgACAAgQAAABARJLAMG+xlTOa0xR6eO8agyUsxpDOSs=",
+    "GX9/BwcDAwAgBwAAAAAAAAEBAxheAFj4BEvlLFX5zyuUuwSbxlDOpi8FL7mUCw==",
+    "HAAAE39/+wAAACIMAAAAEAAQgRBbAFlZ7PxrTJVO/GyVxT6/lQW/D7lFyZsV",
+    "EAz8/mggAAAAUCAAAAwEAAAAACUpAET8O1U68RulE+8A",
+    "DQEdDw8DAwAAAwIAAAARAAABAAAfAFrG5G86UPks",
+    "GQB8fBwfHwAAAAAGAgBAQAAABCBFABboUwRb6sBUrr8RbO5TlA5TAQ==",
+    "FDw4ODhwcAAgADAAAAwAAABAAAJHAKXJmxY7kDyUvEZ86WqxA8SpGw==",
+    "FgADDz8efgAAAggGAAAAACEQQBxDAPpQ/5BbFrMPuUWmP1bwZ28V",
+    "HDAwPz8cPAAAJBIAAAAACCAAMBBYAJZF+GzFkO6TP2URrD4ZrsNkCcHq2pA=",
+    "GeD/39cAAEBgAgAAACCAgBAAAAdIAPuvT0VS6cTvkz9Z5E8WRf4+VQ==",
+    "DQ9OTvxgAAAGAAgAAABAAoAAAAAeABm5VsY/5FYB",
+    "Dn9wcHgYGABgIAAAAAAAUAgAAAA5AFXlrMZQruGvMRFs5kCuAw==",
+    "EwAA5/7+NAAAABBgAAAAAgAIBBA0AGVF+e9DWsZE+b9TVf4=",
+    "FAAAwPz+/wAAAGgAAAAAAABAAxZFAKbP5E+ZxcG6D2XBvvlPVKX/Aw==",
+    "FQ4OHj8/IAAADAQEAAAIAAAwIBRTAM6Qpg/Bm0b+G2X8Bmz6lA1lMm82JA==",
+    "GRwU/z8HAAAASBQAAAAEAwABABczAO/8GlH+PhGU7ixV/g4=",
+    "GCDg8Pg/PwAAAEAMAiCAAAAAJCBKAFYBlfMaoO8+FeU+GZMxGZPu/wY=",
+    "DQcHD39AAAACBAgAAAAACFAAABwnADO8ka/1kFn9vBU=",
+    "D8fn7HwcAABCIAAAAAQBBAAAAAA3AOWZFcEu5f4VbL4PqMUO",
+    "GAAAGP7+9gAAABAUAAAAAAAA4B1ZALOvMVUW6zPkZsHpM2Tyxm+U8VuUvEUC",
+    "E3h+HhQcHAAQEAAEACAIAAAABBxCAPpA5E8WbA6V8y5RvmsBk/4E",
+    "Fw4+fnhwMAAQEBAQAAQmAAAAAAFVAGVrQ5ZO/Aa/UTqxU5ZOvBNfpg6xEwM=",
+    "FgwfHxs+OAAAEAAcAAQFAAAgACVNAD4wZD6vEZdqsQOxU7rBrw2VOhAD",
+    "GAMHHxs/OAAACgICAAMEAAAAEABOAKqVxc4PlDuolcXwvAZqEc9rTFYK",
+    "Dvj8+GAAAABAYAAAAAAMAEAAAB02AAyVfsFL+V/pxLw2lBsJ",
+    "DXx8HA4OAAAwCAAAAAAAEAICAAIiACXlz2oM5ax5Dg==",
+    "FP//4OBAQAAyAAAAAAIAAEAAQABSAEaVvPEbZfwWpfBG6RJs+hD/lZoECw==",
+    "EnwPDw8ODgAAAAIGAGAABAAAAAI7APpGqQ9MGVO9vq0FMLWqAw==",
+    "FADA+Ph8HAAAAFAYAACACKAAACI7AAatUQS7lDvuE1HGb/0aEw==",
+    "Fhx/fwcAAAAOCAAAABBQAAIAAAJZAKXvUwUvpTPpPrQWUTnvPlTl82vhQ/UC",
+    "GPD8/BwYAAAAKBgAAGCgAAAAACNMAEGwrzGVQ6Xzrxn4UOX8GlNrhE8=",
+    "Dnz8uOh4IAgICAAAAEAAACAAIAI7ANVvkaX7Q/BGpvBGpS8FLw==",
+    "Dzg4OBgcHAAIAAgQACAQAAAABCIwABmwFLyUzuSmPhmw5g==",
+    "Ejh4eBwcHgAQGAAAAAgAAAAABho7AEHkUj7rWjCUs+nBLuUeLA==",
+    "FAAwMH9//AAAADgAAAAAAAAIoBhaAGXxZfHBmj6TP2VZMFv6M2kFuw9FrgUL",
+    "FRg4ODg+/gAQCAAMAAAAECAAggM8AJk+qeNTFgz5usUQrBr6VQ==",
+    "FAMfHz8+OAAKAgIAAAAAARAAKABXANqQyVsWvA+ZkfxrQ7lRpk/wblAm8yY=",
+    "G///w8MAAEAKAgAAAAEAgMAAAABcAFVZ7PPGb5TxG2Xxf1Yk+f9rTFWUwhu5",
+    "EDgaNh4eDgAAAAwEADACAAAAAAM+AKnu05C9FgGT6j6UAepO7AA=",
+    "Djw8fOzg4AAAEGAAAAQACAgAAAI2AJXOaxCXZvoQz5YasRMP",
+    "E8DAwPj8/ADAABAAAAAAAAAEhAZCAJJL7j6ZxZC7D1nkTxZs/pcP",
+    "Ej8/NXdAABAMAAAAAAgCAQAAAAVAAL9PFvlT/lr4QGWxP1uVTvw=",
+    "FwAAA+P/9wAAAEBGAAAAAKAQEBBHAGpUVrD/VTn/PvWQa1Fl+Pw+FQ==",
+    "FQDg4P78/AAAgHAAAABAAIAEBBlaAGVxFkO6T/5kRfBSOps+kxYHu5R/ZfgP",
+    "GD5+eODg4AAEQEAgAAoAIAAAIB9IAPrA8BulE1+pFjsMmWuxQ8xrxA==",
+    "DQAAOPx+fgAAAAAMBAAAIIAAICEoABY+EaUz+RpT5W8=",
+    "DRg4GPy8/AAACEgAAAAgAAAEEAM0AKk+EayuBUyaFrz+EOk=",
+    "E//+/sCAAAAAVAAAACEgAAAAAABHAJXGb1SlQ/x/pfFbVDrEvlE6MQ==",
+    "Ew8PDg4eHgAIAAgIAAAHAAAAAABSAKVqsQ+UDOmuAfGpFvtA+RoQqxY7AA==",
+    "GgAHP3d3fAAAACAwIAAAAAQGEB5fAPqgBfPzRlamD/GzlRqxEz+vls0DpfBGLg==",
+    "FAA8Ph4eHwAQBAgQAAAEAAQAAxFGAGZEvD5ZsDm7VjCUs7kHrzmVDw==",
+    "GAAAGBv//wAAAAAdAAAAAAEANBhpAOlkccGmT/5kQe6TEWxmsf8Fm8XOkLvxG2VDAg==",
+    "DQBg+Pi+/gAAAAAMQABACAAABA0mAKoP+pQxGZOR+g8=",
+    "DwAw8PD//wAAQCACAAAAAABAggw8AGoR69OQRq7/T2UFb5S8/g==",
+    "Ff//wMAAAAAKQAAAAEYAAAAAAABLAGX8Rhm/UZU6xP9l/BaVTvxnlA4=",
+    "Ezg8ODh4eAAgACAgABAECAAAAANRAKla7AMlQ7prAKrFPlC+BsSnWuwQAw==",
+    "GB8f/uZgAAIQQEAAAAgDAgAAABdBAP/8pEZ8WRrxD/mTa8RZFv8D",
+    "FQYHDxx+PgAGAAgEAAQAAABAIgEyAJJmOj4Bb6Q2ZPJW7wU=",
+    "HeDw0Nz8+ADgAEAAAAAAEBCAQAV9AKVrDgSb7gOtloE/EOWaPxCp8KoTUJoDKfyqDVDqDj4B",
+    "DQAQHHx/YAAAABAwAAAABAABQB0oAPMacZZO7EPuV5E=",
+    "DTt/fT0BAAAoBAAAAAAACAgBAAA1AFkk+TrxrFRJ+fwrVKUD",
+    "FP///+AAAABACgAAAAADAIAAAABJAFUZ+b/xG2X8FpVO/F9G6cR/VQI=",
+    "FXhYf29jAAAAAiQAAAAAGABAABBFAFU7rzFlBKV/pRPw2vtUsFR6Ag==",
+    "FA8fHB4eDwIOAAAAAAgAAAgQAQA8AKXpE/BGWrwCb6SlX/Bu+Q==",
+    "Fzx+/PDg4AAgECAgAAAOAEAAAAJDAGkNmV/pxLxG/BulE1+Z+kA8",
+    "GMD+/uLgAACUBAAAAMAAQgAAAAlMABbtk5XFkPtfRf7kT1nB+mS4hgE=",
+    "EABwfPxw8AAAGAgAAAAAAIQAgBIvAJYFvD4VueljwZ+RGw==",
+    "DxwXHx8fBgAGAAACABAAEBAAAAI0AFLqz2QW8JqB+kzpzlQ=",
+    "EmB/f0NAAAACCgAAAAAUAQAAAAgwAFXOrzGV8xqTVcHm/w==",
+    "FwAADw//4wAABAgEAAAACAQCABMzALtVFv9D/pSvMVll8T8=",
+    "GODg+Pig4AAAICCgAEBAAAAAoC1VAAX4vEWpD1rAkHuks09ZwFs66JPhUgI=",
+    "GPz8cHAwPAAgEAAwAABQIAAAICpZABUEX/oEy1vpBG+mTjCkOsRUzq6FD7wB",
+    "H+f/ex8BAAAEOAAAAIAAQAEBAABsAFlF+T+7VuE/VPUvlU5EuU/GpO8PVeQv70KV/g==",
+    "Dn9PSBgYGABMAAAAABAAQAgAAAAnAJVTJb+aDjD9Fik=",
+    "D+Dwfj4fHgAgIAAIAAAAAAgBBAxAAFHuwS7lHuyrxT5QUs4rlP4=",
+    "Ffj48BwcHAAAUAAIAMAAAAQAAAMyACmV8/oaBjCVzroGMAU=",
+    "EgA4Pz8PDwAABBgAAAAAAQAAAxA2ABXlf0n57Fr4QOWzUj4L",
+    "GODv/3xwAAAAEDgAAIAEAARAAAVNAPq8VZTrExds+nxlMOm/wW+UTuUD",
+    "Ff//zMAAAABUQAAAACCAgIAAAABdAJVTOZVfOsEb/xrTb5RFKbxPv1EW+fNWAQ==",
+    "GX5/BwMDAwASAAADADIBAAAAAChXAMEQZfz2GupAwVI5lc+vMZXzGlPuawA=",
+    "DQ87Iy8/AAACAAYAAAAAAAEMAABqAJoMSVnqcxbwvKsNUFnq8w5WFvC8rvUQbLoBCw==",
+    "DgABD/7+HwAAAFgAAAAAAAAQEQg1AFauRTxbWfz6QzZk8uYD",
+    "EgAAB///PwAAAFQAAAAAAABCIBA1AGUWf2Xxr08PSVrxv1YB",
+    "GCAweH8fBwAAAAwIACAQEAAAAAVSAOp+wa4PVQ6V8xr4rzGVMRnov8aUAQ==",
+    "GPDw+Dg8MAAAYBAIAAAAACgEECJcAEX4RGsMlX7BSzmvULpH8FrsS7lnDMGq",
+    "FR8fGBB4+AAaAAAgAAAAAAAYiABHAFUKb/xGaboVD8MbpfBmmgNDKg==",
+    "GAcfHz4mPgAFAgACAAAAAQAAHAtoAPNGpo8FC28mQ5am/4BJsPBmMuSq9ZAE69qQ",
+    "DQAAHh4PHwAAAAIEBAAAEBAAEBExAKXOWwQvpTOl+2RMuQE=",
+    "DQDA4Pz8fgAAQEgAAAAAAABQAg5IAKn/k1Uc7FK6z6TFBe8SpQ+5/g==",
+    "Ex4eGPz8GAAQAAAYAAICACAAACs9AExArvUasQPxpWuxQ3xpFgM=",
+    "F3xsNDw+DgAAAAgYAAgAAAAkAAJYAGprDFCpvoMVbL5P1GsEwbtmAfGpPpE=",
+    "FTAwODh8fAAwACAgAAAAGAAQIARVALpmsQ+UA7nmQK4+oQFaPhBsuhbzbgE=",
+    "GQAA4eP/PwAAAGBAAgAAAQECIBVVAKW/z1vFVwUv5b7PDpnFV8Hm++yUxQM=",
+    "GPd/fwAAAAAaIAAAAIBARAAAAAQ/AKX/8FoVbP7U81YWPlFv/xs=",
+    "DWd/X0dEAAAmAAAAAAAAUAAEAAUmAPn+Q5IV+b/1Gwk=",
+    "DgAYPPx4YAAAAAgwAAAAAIBAQCMoAEzkVjoxb1tDJm8=",
+    "Ex4+Pw8PDwAQCAAIAAAAAAAFAgFAAJWvMZSzUvmzkq8VDOVsPps=",
+    "Hwz8/DAwcAAAEDAAAACoAAAAACRdAMHkwhtl8afzkFtx5bymAw9Z/RulE6sGAA==",
+    "Gx4+Hh4PBwACBAoAABggAAAEAAFoAKmUO6hPRvBS8FI6U76lA5OqT0bwUjpMpbtP",
+    "Fhh4fh44OAAADAAYAAAQQAAgICVJAA6TOgHlrG7APhVs+mS0OsEbuQE=",
+    "HDAwfn4vPgAAFAggAAAAAAADChFqAFkEm/n7kBVsvj5QFuzOUuXvwZYWPlD5bOkPCQ==",
+    "DcDA/PzggAAA0AAAAAAAIAAggBIqAFmcxZD6kz9lBWsO",
+    "DjBw8Pj4GAAQAABQACAAAKAAAAQ/AKavMRnBS+mgPkXpwZvzGhM=",
+    "E/z8HBwUAEAwAAAAAAgEAAAEAAcwAL9PFuU/W7FvxkT5uw==",
+    "GQPn/2FjAwAAAkABAABAAAEgACE5AA4Ea1WU/1caQzn781ZlAA==",
+    "FEBgeFj4+AAAEABgQEAAABAIICdUAA6gPlPkq1M5Q8lrFsPrBmzaQOlO5Q==",
+    "FAAAMPj//gAAADAgEAAAAAAJIhQvAPZa/FeVP5BrEc/mPg==",
+    "GQDw8Pw+PwAAAAAcAgCgQAAACChIABU+UekztRYwZc67FqDOZEz6bw==",
+    "DQd/fEwAAAAgFAAAAARAQAAAAA4YAP+8Vb0OWQ==",
+    "EADgeH8/AQAAACQQAACAAAABAQ0vAOnOlDHp/pMF+0uVPw==",
+    "FQADAz8/fwAAAgoAAAAAAAAkQAhZAGqRPw3pWsRZvP40pFnwPmTGb5Txu1UB",
+    "FDg8eFBY+AAgIAAQAAAEAAAAoBY9AOoDQ6pbAac+MJSfagGzugE=",
+    "FXjw4OD8HAAAQGAQABgQAABAACIxABUQX+bpDLEa8anvUwE=",
+    "FNz88PDAwAAQICCAAJAEAAAAQAI+AFlrFOxO5bxG/FW6xvBGGgA=",
+    "Gh4fBwcHHwAMAAAECAAAAAIBEixRAM+QDEn5rMZQzrpawFDOpgevSbCpAQ==",
+    "DgAOHhr+DgAAAAhCAAAAAgIAAiczAD/8CpVOzKsZwbOVTjw=",
+    "DTB/PyMAAAAEBgAAAAAIACEAAAgjAFWk/K8xlcX+LA==",
+    "EwDh/3xgAAAAAigAAAAAKQAAAAgxAFZF+f9V6Uy/RZR/6QA=",
+    "FD48NPDwcAAAECAgAAAABAAQEAEyAJVqoEY8Q2o6QzxbaQ4=",
+    "FAAHBw8P/AAAAAcCAAAAAAANgCA5AFjkT7BmsTMkKW9m1T9DAg==",
+    "Gefn/vgQAAAGIBAAAAAACoAQAABHACVvloVP/UNuWfyVEbzkUv7lLA==",
+    "GMDA4Pzc/AAAAAhQQMCAAAAAIBpOABWl/lgB7/U+1VoB+PZaAeoA+r4F",
+    "DQAQPj50fgAAFCAAAAAQAAAEAgwmACbvU65VzDhb5g8=",
+    "DuDg4PDw8ABgAACAAIAAAAAAMAUnAJJLLvlaAehL+Sw=",
+    "EgDg+PzcAAAAMEAAAAAAAAgUAA09AJbOkLtPlLMU5fkX7HpQzgI=",
+    "FDw8Px8WEAAABgQAACggAAAAABBDABY+FeXOa0wW8EbpTOqgT8YU",
+    "IBs/PwMfHwAAAgALABgBAAAABCJmAD5QvWswwUrlVD6/xlSGz2tMGb46kGbxPuQG",
+    "HPD//wYGAAAYIAIAACAkEAAAAARXAKX/vFXB7lPlUOnB+6vDVDmvEVHpxDo=",
+    "G3x/Dw4HAAgkCAAAAEAABAAFAAJZABblP5W/T7VrhA+ZA0n57Fq4AwnlLsEC",
+    "DQcPDw8fAgAGAgAAAAAAAAASAgA3ACVvrkUwr0W+BFv6EqwZ",
+    "DcDAwPj4cAAAAAAwIAAAQAAAUCwpAEytEeiTBUuwqc8C",
+    "Eh4/c3s4AAAAMgAAAAANAAAAABZFAD4Ws/BG/mtMlF+lPhGfGrETAw==",
+    "FgAEBv7+fgAABFAAAAAAAACAQgpFAJrFz1ZZvM+bRXz6DJm8Vf1bAQ==",
+    "HuDg/Pw8HgAA0CAAAAAAAIQEAhJtAJnBWQzpPvmTFcFLLuV+web+UK8Vwb4k5S/l5wM=",
+    "FDD4+Pz88ABACAgQAAAAAGCAgARMAGmxD7lFuj74ZAFvkb+91VAp/Fo=",
+    "GT8/PQ8FBAIMEAAAABAAAAAFBABFANWSxa/GUK4/UK1Uvl/wa0mwAg==",
+    "Dj4+N38AAAACBBAAABAEACAAAAEzAFXqz1sF/FKpD1OuTwY=",
+    "DgAYHz8+AgAAEgAQAAAAAAEEAgs7APqTVT6Q+2QWH2z6BS/lLw==",
+    "EmD4/wUHAAAwQAAAAACAhAAAAAUiAJn/60NVweZPBQ==",
+    "FD8/Dw4PAgIMAAAAAAQAAAABAgA/ANWSxa9rwVDuM2mxD6nkUj4=",
+    "HP5/XwcHAAACBAYAAOBAAAAAAAhLAEXpTJX/22swGVPl7xowlc5rTBU=",
+    "FXBwfPDw4AAAAGAgQAAQDAAAIARMAKWmA0PuGgzlWjqxD5GvYTF/GvE=",
+    "HTw8Li4PDwAMAAYAABAAICAAAgJLAOlLwabrkwWwa0zGFCmva8AU+RM=",
+    "Dj8/PBwYAAAQEBAAAAEBAAQAAAA6AFU5rxF/lc5rxF9qDOVsDg==",
+    "DQAeHgwPHwAAAAAGAgAQEAAAECAkABYwpe6TQfCWbg==",
+    "FAcGD358eAAAACAwAAICAQAAAABHAKWpFfxO7JCpYcHvxE6ZRvxOPA==",
+    "Eg4ODg7//wAGAAAAQAAAAABQAgE2AEa+lC/l5k9WUf5Tz1sO",
+    "FeDw8PCg+AAg0AAAAAAQAACAKBVQAE4WQ7pPRrCuFswSbLoEa+lfwZC+",
+    "GGB8fD4OBgAQKAgAAABAAAAIBgpTALZGEexS7vsElX7BSzmvULpHsEu+JA==",
+    "HsDg4P7ubgAAICAkAIDgAAAAAAZTAOr4+lBF6eCvM1WUzmSg7sTvU2VMBg==",
+    "Dmh+XhcfAAAMAAAIAAAAQAIQAAMoAObpM1SR7/sWsGk=",
+    "DRwPDwcHBwAAAQAGABAACAAAAQIwAOprELyUzpQx6a8ZTA==",
+    "FPDwcH5wYAAAQAQgAAAAEAAQIBkxAJURPlD5rBarAUM5qwI=",
+    "EnCw/Pzg4AAAEBAgAECAAAAAgAQ/AKnzVsCmTwaTls5kqE/wFik=",
+    "FgcfPzg4OAAECggAAAADACAAIABDAJlZzBvz2lBulLzZkCm86UA8",
+    "Gjw/FxcfBwASAhAAAAAABAADAgJ7AJXP6kMtUb67FgX6PlBQOa8C5awrRKk/JJT68GRaAC8=",
+    "GAAABwd/fwAAAAQoIAAAAgIACiZXAD7vVBb/PlDyavUDpTnwGmbxvEY5VT4=",
+    "DRwcHj4yMAAYBAAAAAwAAAACABEjAEF5+qBBmk78LA==",
+    "Dxj8/Ljg4AAACBAgAACAIACAABtGAExWqQ+8UekzPeRaRL4P1W+UCQ==",
+    "Eng8//8YAAAAAkIAAEAgQAAAABA3AGVMxpT+b1E6TFn5vMYU",
+    "EgAAfHd/fwAAAAIEBAAAQBAACBJLAKU+b1HwUvo+tFXwbg1V6mPgDxU=",
+    "Fw4fCzo6fgAIAgASAAAQACAARBlPAEyUvKWl/8BEqQK8kQqvWv0ApeYF",
+    "FADA7u7+PAAAQCBIAACAAAwACA5GAKbvY/HOUPqkUQUvpTMZ+u9UDg==",
+    "GH9/MPDwcAIaAAAAAAQhIAAAAABMAFXvVCrwRhZ/qRO8kW4W6wPBmxo=",
+    "DQ3//BwAAABSAAAAAAAASAgAAAAuABa5FnEW7z4NabEPCQ==",
+    "DwDA4OD/cAAAAEBCAAAAAACUACArAFVGBLuU+wWbPmcx",
+    "GAzv/wMCAAAMAgAAAAAAAQECAAIqAG4V5f+QO1sV5f8L",
+    "EgDw/z8AAAAACgIAAAAAEAUAABAqABbtk0X5T1mwVL4P",
+    "G+Dw8D89HwBgQCAAAAAAEAgoAAVZAKVf8G67RgwJpc+6/lBmBAUv+ZoDSfkC",
+    "FwAA8Nz/7wAAAAgaAAAAkIAAAhpmAK1PFmX8PlUW8EulPn8VPpT+k+H+ZMFWGf8O",
+    "HPz4OODg4AAAEEBgABSIAAAAAB9TAPoA8ZeqBacPEPtGWvrARPmnGrHDFA==",
+    "DT8/AwMDAwAFAgAAAAwAAAEAAAAkAGowlcU+rzGpOg==",
+    "DwwMPH4eAAAIBAQAAAAEAAASAAIsAGk6PhFsugFrxTvp",
+    "FUDA4Ob/DwBAAEBAAAAAAAAEDAZFAKYHm/77kBtVwUu5/z6RVbD5Aw==",
+    "Fvj/n5sAAAAICgAAAAAAgJAAAANDAOnB/hpTVeSvM9X/ViRUCm8k",
+    "FAAwOD4fHgAAABQEBAAAMAABAhk9AK1RBLuU+wWbPlNrwaTOZAA=",
+    "Ffx8cHDw4CBAAEAgAIAUAAAQAAJBAFWrm8UOJA/lX7la7ECcrsUD",
+    "GgAAH//8wAAAAEBoAAAAEQwAAB9ZAP9XpRO/Ma8F/0aljwV/5VU68RulE+8A",
+    "DQAAcH5+fgAAAAQMAAAAcAAAABQtAOoP9VqBPlMZ+kxlAA==",
+    "EMDg4Gd8cAAAQABgAAAgAAAMABgvAGVZDJS7XwYEu0asPg==",
+    "E//udHwAAABgQAAAABAAACgAAABxAFVJOb9rFcS/a5E/RMm7VuE/RCm8T7kWQTmbfsEC",
+    "FR4+Gh8fHwACAAIEAAQkAAAAABFTABbwSqn+UK8VQKzqM7UW4EOl+kwGMQ==",
+    "Gfx88HBwMFAQABAAAIgAgCAAAAVWAJe+BPuU6cS8ZcHpE/mTme5AzFsWfAo=",
+    "FwYHBzc/PwAEAAAMEAADAAAgIBxIAOlPD8mQrluxD5SvAbFqsQNpbQ==",
+    "IfD+z88HAAAEQgQAADCAgAAAABBdAFFR/lU6xPu6D1FF6cT+OlMV+a87kzFVAQ==",
+    "DwAAZG7+/gAAAABwAAAABAgACBUyAGk+F2z6zGuQWfy8xgQ=",
+    "DQAg8Hx8OAAAABAYAAAAgAAAKA01AKpPRvBSus+kBfoQtc4C",
+    "EwcOfnxwcAAACBgAAAQAAAAAYAA2AKVl8fNmsUNm5DrBGykJ",
+    "Fv///8AAAAAAKgAAAIgEAAAAAABeAFUav/EbZfxGVTpMvvFbVDrxvEasUTrxDw==",
+    "FODgoPj48ADgACAAAAAAgAAYQAVqAFLqF/Bq+kxaHAGvFsyWvhS8lO4XwWsa/NpQDg==",
+    "Hdz88PDw8ABgEAAQAEAAQABAIAZdAD5vpRPzllkcbPpDWhyspj9gwfNWa8GbAg==",
+    "GX9/MzMAAAA2AAAAADEAAQAAAABmAEk5lWswb/wWJe9rDOVUFvv8Uln8V6nDvJUB",
+    "DQD4+PCwAAAQEBAAAAAIACCAAAsiAPWWTvBmBX9GCg==",
+    "DsD8/PDQAACIAEAAAIAAEABAAAZCAPpPWenEkO5DaxHsaxk/lGcA",
+    "EwYG//oOAAAABBgAAAAACwAAAAE7AFpl8f9axKcPVfn8WvgQLA==",
+    "GQAAwP///AAAACoAAAAAAAACFBZuAPrkT/5kkT9ZFWz6TP6UWRys+1AW7Evl/5VPlQ8=",
+    "FAMfHx8PHQAKAgEAAAABABAAEQpDAFuxvwSbbsBW7ENuRe47pJEb",
+    "FHBwYPj4OABgICAAADAAAEBAAAQ8AKVePgFvpA6xqg+tBaA6Uw==",
+    "GwDg4P7+HAAAAGBQAAAgAAAGBA1WAKUOsf4akz9ZRLnvQ1aw+ZMFu0+Vfw4=",
+    "DeD4+PBwQAAwEAAAAIAAABAQAAszAJYFvKU/U71W8JJL+Tk=",
+    "DXx8fHgYGAAAIBgAAEAgAAAIAAImAFXqMOmbDkxZPgs=",
+    "FTz8/KDgYABAAABgAAQQAIAAAC1JAEDpDhb8kJsW8E68W1TqgxbwRgI=",
+    "FHx8QOD8YABoAAAAAAAAAAAEYAI3AFWqAG/8FqXmAG+kLuU/",
+    "FMDg8PDw+AAAYECAAAAggAAAKBQ5AIZmwJDukxGsqwWzUu5DAg==",
+    "FQcHBwcfHwAABAAGCAMAAAAQAQBOAKnha4Aa5TwkDyWvEadr+UCuxQ4A",
+    "Hebn//MAAAAkRAAAAIACARAAAAFOAFpZ+GQBb4Y+/5BbZfE/r1EVbP4P",
+    "DjAw8PD8OAAQIEAAACAAAAAECBQtAMGaFpw+4FK+VP6XAw==",
+    "Dxg4PGx+HAAQKAAAAAAAAAAmAA07AKf5PpBrETBrpPxq8ZBrMQ==",
+    "GBjf8/v4AAACAiAAABAQEAAAAAhWABVp6fhEaxHs868xFWmlP6CGBe+kEQ8=",
+    "Evz0PDw4AAgwAAAAAEAEABAAAAIwANWSxa9rwVDuD9XmOw==",
+    "GAAAwMD//wAAAACqAAAAgAAAYhZTAOqTP/mTRf5kVbD5kz9lBZs/WbD/Fg==",
+    "FHB8fg4KAAAoBAgAAAAQAAQKABE1ABWUPuTuE+UsRXn+HuwC",
+    "GA8P/vzgYAAAAGhAAAgBQgAAAABbAJVW6cT/ZfxGle5gwb8TXxqVPhb8DpYG",
+    "DhwcfHwcHAAQADAAAAAEBAAABAI6AGlSPkPuGgzlWrwaQzlrDg==",
+    "DTw+PhMXHwAABAASACgCAAAAAAIwAG67BmgWwOTbaxYQOw==",
+    "EwAAA39//wAAACoAAAAAAgAAiBBBAJnFl8WvPw1pFryTFfn/FpUB",
+    "ExgYODg+PgAACAAICAAAABAgEANPAKmTOm8RLMGm7lMEW+q8UfBS+j4V",
+    "FwDw8PD8fAAAECBgAACgAEAAEAxBAJr7ZASlw6Q6oG8Em/sUpTMB",
+    "FD7+fGBgQAQcAAAAAAKAAABgAAE0ACVv1kMWf2X/Rslb5JI=",
+    "GAMDGxs/PgAAAAEYEAAAAAIDCCVLAM47Q7DpBqxpsVPlA7kWO28UbD4=",
+    "DRx4OPjwwAAAEABgABBAABAAAAIsAKlBWjrxvBlMWjrx",
+    "DwAcPD4/DgAAGAQAAAAAAAADAhU2APpPUM5KUs4rlOdfsHkO",
+    "E8LD4f8dBwAAQAAMAAABABgAAAFjAK5Vhf+vhQ9V7fxaxBUFm37B7j6nD1gWUT4=",
+    "FyDg///AAAAAACoAAACABgAAAAVWALrxG79Rxm9UpcPkG79FpRP/l1E68Q8=",
+    "FB4WHg8/JgAACAoCAAoAAAAFABhSAGbAkGsOpEDpwbuGa4QPUOkzafpACg==",
+    "FnB8fO8PBgAIOAAAACBAAIAEAApEALVEeTr4rGvEVORP+fqTBUtl",
+    "GAAA4H/+9gAAAAIcAAAAgAGAgBg2AFUZk/9rTBW5Tvxnkb0F",
+    "DQBw8OL+eAAAQCAEAAAgAACACBkzAJZFxLyR6YOR608WbD4=",
+    "DwMDBz8/PAAAAAwCAAABAAABIAAxAGlmsT5Dbha8EzulRQI=",
+    "FfDw8MDwwAAAQECAADCAAAAAACQzAGXAkGs6QLwbaTpArAY=",
+    "Ffj4+PwcAAAACFAAAMBAAAAAAANHAKXukxG8lA5T6e6TAVOWPq/BFA==",
+    "G/D4zOT8cADQAEAAAAAAAACMIASAAJXu/hDtWhnB7g8RJcnvrhXlPg8RpS7lE/BG6n5RDqT7",
+    "HgwMPPj8fAAAECAQEAAAAMCABB5PAJ/OYOW/BTOkFjtDmvpkBG+5T5U/",
+    "HTh4eBg/PwAQAAAKAgAAEBAQECBiAG1FMJGrg/pkBEuwpvmTAUOu6ROQlPPqbwU=",
+    "DQAfHx4eHAAAAAgMAAAFAQAAAAgmAFX6pc8Qq4EaxA8=",
+    "DQAEBwf+PgAAAAYQAAAAAADgAApFAMqbFvmTRf70kGsV7ZM/WeRPAQ==",
+    "FgAf//PwMAAAECBAAAAGIAAAAAhFAJVl8T+vMWWpQfzzGhVnpfMaAA==",
+    "Ehx4fPj4yAAAQAgQAAQABAAACAI3AGX5WxY7xDuxalE6sRM/",
+    "GgDD+//jwAAAYAYAAABAAQggAAhGAGpUWRzskv8PuRVl+L9TVenEDw==",
+    "Gn9/HwMDAwQEBAACAGAwAAAAAANFAKcH+1Tl/xpMlT6vMVX+rgFTAQ==",
+    "Gv7/7uBAQAgyAAAAAAQAgIAAQAg/AFFl8W+9T0XJW+SSO8Fb5Co=",
+    "Dvj4+GAAACAgEAAAABCAAEAAAAYoAPuU6cS8ZcHbb5E=",
+    "DQQMDA8eHgAACAAICAQAAAEAAiQsADPkrgGo5QO5Fjvx",
+    "EgD4+Dg4OABAYAAAAAAgABAAEA84AC/l+5DF7lowUb4PrcmQ",
+    "E/z88PDAwACAQEAAABAEgAAAAAJCAFXpvAZxqWvAb5TOQPkaQ/kP",
+    "FQcHP38HBwAADwAAAAAAAEQBARRAAP5jkT/BasU+UC65VbwPueY=",
+    "FAADY38/BwAAAiAUAAABIAEBABVKAPmfUzmvD/WQqwWnD2Rl/Dpx5Q8=",
+    "HP//4MDAgAJUAAAAABAAAIBAgABrAFW9U2nB6XOR8vPGb5TxG2WZDLkmQ/LzVhZ8Kg==",
+    "DhgYHBx8DgAACAggABAAAABAAiYlAM8sBZs+GehbvQM=",
+    "DwMDBz8+GAAAAggIAAAABAIAEBwpAKfzkFn8POS2WVwC",
+    "E3x8PAwODgAACAgEAEAIBAAAACE2AAYEm64BTOXrRDm7BsEL",
+    "E8DAwML++ABAAEAEAIAAAAAAKBk/AJZFwRKsqU/+ZAXgmj9ZsDk=",
+    "FXBweHj8/AAAAAhwAGAQAAAAIAQ4AKWaDzCpOqBvAZs+GUwG",
+    "FQBuf394cAAEAgwAAAAIAEBAQBA6ANFWkesz/VYW5D4U+RvpBg==",
+    "GAEDAz8fHwABAgICAAAAASAAEgBIAGrVP+SWxfoTbFpw+jCkpT9kkQ==",
+    "DQDA+Pj48AAAkAgAAACACAAAEBMxAFmQ609F/mTBuhbg5gM=",
+    "DQAwfHx4aAAAGBAAAAAAAAAAaAwzAKlPFsyW/kzZkJI7SyU=",
+    "FjDw8PzcGAAQAAAYACAggAAAACtOAEwFbKUOsaOvMQUrlQ6x/hpTlM4E",
+    "Eg4OHD8/AwAADBAAAAAAAAAgAxg3AIVZzPBGrg2Ze7BL+WwV",
+    "FMDw+PDQ+ABAcAAAAAAACAAAOAZdAKnPWRxs+kOuFsTBOislr1DOVvpX8EuZAw==",
+    "FHj48PDw8AAQEACQAECAAEAAQANHAEbpTOoEb+RGug4Eb+SmFuAyJA==",
+    "Gf//zdgYAAQQQAgAAAIABQAIABw9AA4zVRb/Uv6zFadU6cQ/mwI="
+  ]
+};
+</script>
+<script data-src="src/board.js">
+/* 每日推箱 / DailyBox: the board rules, with no DOM and no lo-game so the tests and the app share one copy.
+   The table in levels.js is generated; this file only decodes it, moves the postman, and answers the two
+   date questions. ES5 on purpose: the app is inlined into an iframe and has no module loader.
+
+   A level is the shape Board.decode returns: floor is a 0/1 array of the whole 10x8 board (outer wall
+   included, 1 = floor), boxes and goals are cell indices, player is one cell index, par is the exact
+   minimum push count and solution is an array of direction codes (0 up, 1 right, 2 down, 3 left).
+   A state is what Board.create returns: {player, boxes, moves, pushes, history}; moves counts walks and
+   pushes, bumps change nothing and are not counted. The state also keeps the level and its dead-square map
+   (state.level, state.dead): they belong to the board and the app never saves them. */
+var Board = (function () {
+  "use strict";
+
+  var W = 10, H = 8, CELLS = W * H, IW = 8, IH = 6;
+  var UP = 0, RIGHT = 1, DOWN = 2, LEFT = 3;
+  var DIRS = [-W, 1, W, -1];
+  var B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+  function bad(what) {
+    throw new Error("levels.js: " + what);
+  }
+
+  function fromBase64(text) {
+    var out = [], bits = 0, carry = 0, i, c, v;
+    for (i = 0; i < text.length; i++) {
+      c = text.charAt(i);
+      if (c === "=") break;
+      v = B64.indexOf(c);
+      if (v < 0) bad("bad base64 character");
+      carry = (carry << 6) | v;
+      bits += 6;
+      if (bits >= 8) {
+        bits -= 8;
+        out.push((carry >> bits) & 255);
+        carry &= (1 << bits) - 1;
+      }
+    }
+    return out;
+  }
+
+  function interiorCell(index) {
+    return ((index / IW) | 0) * W + (index % IW) + W + 1;
+  }
+
+  function decode(text) {
+    if (typeof text !== "string" || !text.length) bad("a level is not a string");
+    var bytes = fromBase64(text);
+    if (bytes.length < 22) bad("a level is too short");
+
+    var par = bytes[0];
+    var floor = new Uint8Array(CELLS);
+    var boxes = [], goals = [], i, y, x, bit, cell;
+    for (y = 0; y < IH; y++) {
+      for (x = 0; x < IW; x++) {
+        i = y * IW + x;
+        cell = (y + 1) * W + (x + 1);
+        bit = 1 << (i & 7);
+        if (bytes[1 + (i >> 3)] & bit) floor[cell] = 1;
+        if (bytes[7 + (i >> 3)] & bit) boxes.push(cell);
+        if (bytes[13 + (i >> 3)] & bit) goals.push(cell);
+      }
+    }
+
+    var playerIndex = bytes[19];
+    if (playerIndex >= IW * IH) bad("player outside the interior");
+    var player = interiorCell(playerIndex);
+    var moves = bytes[20] | (bytes[21] << 8);
+    if (bytes.length < 22 + ((moves + 3) >> 2)) bad("solution is truncated");
+    var solution = [], m;
+    for (m = 0; m < moves; m++) solution.push((bytes[22 + (m >> 2)] >> ((m & 3) * 2)) & 3);
+
+    if (!floor[player]) bad("player is not on floor");
+    if (!boxes.length || boxes.length !== goals.length) bad("boxes and goals do not match");
+    if (par < 1) bad("par is missing");
+    for (i = 0; i < boxes.length; i++) {
+      if (!floor[boxes[i]]) bad("box is not on floor");
+      if (!floor[goals[i]]) bad("goal is not on floor");
+    }
+
+    return {
+      w: W, h: H, floor: floor, boxes: boxes, goals: goals, player: player,
+      par: par, solution: solution
+    };
+  }
+
+  /* The static dead-square map: a box on one of these cells can never be pushed to any goal, no matter
+     where the other boxes are. The app uses it for the crack on a box; the solver uses the same idea to
+     prune. Walk pulls backwards from the goals with an empty board. */
+  function deadMap(level) {
+    var live = new Uint8Array(CELLS);
+    var stack = [], i, d, j, player;
+    for (i = 0; i < level.goals.length; i++) {
+      live[level.goals[i]] = 1;
+      stack.push(level.goals[i]);
+    }
+    while (stack.length) {
+      i = stack.pop();
+      for (d = 0; d < 4; d++) {
+        j = i - DIRS[d];
+        player = j - DIRS[d];
+        if (level.floor[j] && level.floor[player] && !live[j]) {
+          live[j] = 1;
+          stack.push(j);
+        }
+      }
+    }
+    var dead = new Uint8Array(CELLS);
+    for (i = 0; i < CELLS; i++) if (level.floor[i] && !live[i]) dead[i] = 1;
+    return dead;
+  }
+
+  function deadSquares(level) {
+    var dead = deadMap(level), out = [], i;
+    for (i = 0; i < CELLS; i++) if (dead[i]) out.push(i);
+    return out;
+  }
+
+  function create(level) {
+    var state = {
+      player: level.player,
+      boxes: level.boxes.slice(),
+      moves: 0,
+      pushes: 0,
+      history: []
+    };
+    state.level = level;
+    state.dead = deadMap(level);
+    return state;
+  }
+
+  function boxAt(state, cell) {
+    for (var i = 0; i < state.boxes.length; i++) if (state.boxes[i] === cell) return i;
+    return -1;
+  }
+
+  function onGoal(level, cell) {
+    for (var i = 0; i < level.goals.length; i++) if (level.goals[i] === cell) return true;
+    return false;
+  }
+
+  function snapshot(state) {
+    return { player: state.player, boxes: state.boxes.slice(), moves: state.moves, pushes: state.pushes };
+  }
+
+  function deltaOf(dir) {
+    if (dir === "up" || dir === 0) return -W;
+    if (dir === "right" || dir === 1) return 1;
+    if (dir === "down" || dir === 2) return W;
+    if (dir === "left" || dir === 3) return -1;
+    throw new Error("Board.step: unknown direction " + dir);
+  }
+
+  /* One key press. A bump leaves the state and the undo history alone: the player did not move, so there is
+     nothing to take back. On a push, `box` is the box's new cell; on bumpBox it is the box that blocked. */
+  function step(state, dir) {
+    var d = deltaOf(dir);
+    var to = state.player + d;
+    if (!state.level.floor[to]) return { kind: "bump" };
+    var index = boxAt(state, to);
+    if (index < 0) {
+      state.history.push(snapshot(state));
+      state.player = to;
+      state.moves++;
+      return { kind: "walk" };
+    }
+    var beyond = to + d;
+    if (!state.level.floor[beyond] || boxAt(state, beyond) >= 0) {
+      return { kind: "bumpBox", box: to };
+    }
+    state.history.push(snapshot(state));
+    state.boxes[index] = beyond;
+    state.player = to;
+    state.moves++;
+    state.pushes++;
+    return {
+      kind: "push",
+      box: beyond,
+      onGoal: onGoal(state.level, beyond),
+      dead: state.dead[beyond] === 1
+    };
+  }
+
+  function undo(state) {
+    if (!state.history.length) return false;
+    var last = state.history.pop();
+    state.player = last.player;
+    state.boxes = last.boxes;
+    state.moves = last.moves;
+    state.pushes = last.pushes;
+    return true;
+  }
+
+  function solved(state) {
+    for (var i = 0; i < state.boxes.length; i++) {
+      if (!onGoal(state.level, state.boxes[i])) return false;
+    }
+    return true;
+  }
+
+  /* Local calendar days, not milliseconds: on a DST change a day is 23 or 25 hours long, and dividing
+     milliseconds would lose or repeat a puzzle. Date.UTC of the local y/m/d components is always exact. */
+  function dayIndex(date) {
+    var when = date || new Date();
+    var y = when.getFullYear(), m = when.getMonth(), d = when.getDate();
+    var epoch = (typeof LEVELS !== "undefined" && LEVELS.epoch) || [2026, 10, 26];
+    var length = (typeof LEVELS !== "undefined" && LEVELS.levels) ? LEVELS.levels.length : 0;
+    if (!length) throw new Error("levels.js is not loaded");
+    var days = Math.round((Date.UTC(y, m, d) - Date.UTC(epoch[0], epoch[1] - 1, epoch[2])) / 86400000);
+    if (days < 0) days = 0;      // before launch, show day 0 rather than a negative index
+    return days % length;
+  }
+
+  function levelFor(date) {
+    if (typeof LEVELS === "undefined" || !LEVELS.levels) throw new Error("levels.js is not loaded");
+    return decode(LEVELS.levels[dayIndex(date)]);
+  }
+
+  return {
+    decode: decode,
+    create: create,
+    step: step,
+    undo: undo,
+    solved: solved,
+    deadSquares: deadSquares,
+    dayIndex: dayIndex,
+    levelFor: levelFor
+  };
+})();
+</script>
+<script data-src="src/art.js">
+/* 每日推箱 / DailyBox: style A tiles and the postman's frames, copied from the brief's
+   art/sprites.js and art/hero.js. Every row is 16 pixels of 0 ink, 1 dark, 2 mid, 3 paper.
+   The postman is drawn on the board, so his paper (3) is his background: it becomes transparent
+   here and the floor shows through. */
+var ART = (function () {
+  "use strict";
+
+  var A = {
+    floor: [
+      "3333333333333333", "3333333333333333", "3333333333333333", "3333333333333333",
+      "3333333333333333", "3333333333333333", "3333333333333333", "3333333233333333",
+      "3333333333333333", "3333333333333333", "3333333333333333", "3333333333333333",
+      "3333333333333333", "3333333333333333", "3333333333333333", "3333333333333333"],
+    wall: [
+      "0000000000000000", "1111111011111110", "1111111011111110", "1111111011111110",
+      "0000000000000000", "1110111111101111", "1110111111101111", "1110111111101111",
+      "0000000000000000", "1111111011111110", "1111111011111110", "1111111011111110",
+      "0000000000000000", "1110111111101111", "1110111111101111", "1110111111101111"],
+    goal: [
+      "3333333333333333", "3333333333333333", "3333333333333333", "3333333333333333",
+      "3333333223333333", "3333332222333333", "3333322332233333", "3333223333223333",
+      "3333223333223333", "3333322332233333", "3333332222333333", "3333333223333333",
+      "3333333333333333", "3333333333333333", "3333333333333333", "3333333333333333"],
+    box: [
+      "3333333333333333", "3000000000000003", "3011111111111103", "3010000000000103",
+      "3010311111130103", "3010131111310103", "3010113113110103", "3010111331110103",
+      "3010111331110103", "3010113113110103", "3010131111310103", "3010311111130103",
+      "3010000000000103", "3011111111111103", "3000000000000003", "3333333333333333"],
+    done: [
+      "3333333333333333", "3000000000000003", "3000000000000003", "3003300000033003",
+      "3003330000333003", "3000333003330003", "3000033333300003", "3000003333000003",
+      "3000003333000003", "3000033333300003", "3000333003330003", "3003330000333003",
+      "3003300000033003", "3000000000000003", "3000000000000003", "3333333333333333"],
+    dead: [
+      "3333333333333333", "3000000000000003", "3011111101111103", "3010000000000103",
+      "3010311100030103", "3010131111010103", "3010113110110103", "3010111303110103",
+      "3010111033110103", "3010110313110103", "3010103111310103", "3010031111130103",
+      "3010000000000103", "3011111111111103", "3000000000000003", "3333333333333333"]
+  };
+
+  var head = ["3333300000033333", "3333000000003333", "3330000000000333", "3333011111103333", "3333010110103333", "3333011111103333", "3333301111033333", "3333330000333333"];
+  var torso = ["3333000220003333", "3330112222110333", "3301012222101033", "3301012222101033"];
+  var back = ["3333300000033333", "3333000000003333", "3330000000000333", "3333000000003333", "3333000000003333", "3333000000003333", "3333300000033333", "3333330000333333"];
+  var btorso = ["3333000000003333", "3330111111110333", "3301011111101033", "3301011111101033"];
+  var side = ["3333300000033333", "3333000000003333", "3333000000000003", "3333011111103333", "3333011110103333", "3333011111103333", "3333301111033333", "3333330000333333",
+    "3333300220333333", "3333012222103333", "3333012222103333", "3333010222103333"];
+  var lean = ["3333333000000333", "3333330000000033", "3333330000000000", "3333333011111103", "3333333011110103", "3333333011111103", "3333333301111033", "3333333330000333",
+    "3333330002200000", "3333301222210000", "3333012222103333", "3333012222103333", "3333000000333333"];
+  var pd = head.concat(["3333000220003333", "3330112222110333", "3330012222100333", "3333012222103333", "3333010000103333"]);
+  var pu = back.concat(["3333000000003333", "3330111111110333", "3330011111100333", "3333011111103333", "3333010000103333"]);
+
+  var HERO = {
+    down0: head.concat(torso, ["3333010000103333", "3333010330103333", "3333000330003333", "3333333333333333"]),
+    down1: head.concat(torso, ["3333010000103333", "3333300330103333", "3333333330003333", "3333333333333333"]),
+    up0: back.concat(btorso, ["3333010000103333", "3333010330103333", "3333000330003333", "3333333333333333"]),
+    up1: back.concat(btorso, ["3333010000103333", "3333010330033333", "3333000333333333", "3333333333333333"]),
+    right0: side.concat(["3333300000333333", "3333301301333333", "3333001300333333", "3333333333333333"]),
+    right1: side.concat(["3333300000333333", "3333013333103333", "3330033333003333", "3333333333333333"]),
+    pushright0: lean.concat(["3330133331033333", "3000333330033333", "3333333333333333"]),
+    pushright1: lean.concat(["3333013310333333", "3333003300333333", "3333333333333333"]),
+    pushdown0: pd.concat(["3330110000110333", "3330000330003333", "3333333333333333"]),
+    pushdown1: pd.concat(["3333110000110333", "3333000333003333", "3333333333333333"]),
+    pushup0: pu.concat(["3330110330110333", "3330000333000333", "3333333333333333"]),
+    pushup1: pu.concat(["3333110333110333", "3333000333003333", "3333333333333333"])
+  };
+
+  function seeThrough(rows) {
+    return rows.map(function (row) { return row.replace(/3/g, "."); });
+  }
+
+  return LoGame.sprites({
+    floor: A.floor,
+    wall: A.wall,
+    goal: A.goal,
+    box: A.box,
+    done: A.done,
+    dead: A.dead,
+    down0: seeThrough(HERO.down0),
+    down1: seeThrough(HERO.down1),
+    up0: seeThrough(HERO.up0),
+    up1: seeThrough(HERO.up1),
+    right0: seeThrough(HERO.right0),
+    right1: seeThrough(HERO.right1),
+    pushright0: seeThrough(HERO.pushright0),
+    pushright1: seeThrough(HERO.pushright1),
+    pushdown0: seeThrough(HERO.pushdown0),
+    pushdown1: seeThrough(HERO.pushdown1),
+    pushup0: seeThrough(HERO.pushup0),
+    pushup1: seeThrough(HERO.pushup1)
+  });
+})();
+</script>
+<script data-src="src/input.js">
+/* 每日推箱 / DailyBox: the input and animation clock, with no DOM and no lo-game so tests can
+   drive it directly. It is a straight port of the owner-approved proto/feel.html; the numbers are
+   the feel and must not be tuned.
+
+   One press moves at once. A press during an animation is remembered (the last one only) and runs
+   when the animation ends. Holding repeats after 220 ms, at the walking pace with no extra gap, and
+   150 ms later after a push. Auto-repeat stops (until the key is released and pressed again) when a
+   box lands on a goal or a dead square, or the postman bumps.
+
+   The caller drives it in this order every frame:
+     var ended = BoxInput.advance(state, dtMs);
+     if (ended) { ...; BoxInput.finish(state, nowMs, ended.kind, stop); }
+     ... handle presses with press()
+     var move = BoxInput.next(state, nowMs);   // a queued or repeated direction
+     if (move) { Board.step(...); BoxInput.begin(state, kind, nowMs); }
+   Times are milliseconds. */
+var BoxInput = (function () {
+  "use strict";
+
+  var MS = {
+    walk: 120,    // one step
+    brace: 50,    // push: lean against the box, it has not moved yet
+    move: 180,    // push: both slide one cell, ease in and out
+    bump: 90,     // knock into a wall, or a box that cannot move
+    hold: 220,    // a held direction starts repeating after this
+    gap: 150,     // extra wait after a push before the next repeated push
+    dust: 140     // two mid pixels behind a pushed box
+  };
+
+  function create() {
+    return {
+      held: null,      // the direction held now
+      holdAt: 0,       // when it went down
+      readyAt: 0,      // no repeat before this (a push adds the gap)
+      blocked: false,  // repeat is off until the key is released and pressed again
+      queued: null,    // the last direction pressed during an animation
+      anim: null,      // { kind, t, dur, ... } - the game adds its own drawing fields
+      won: false
+    };
+  }
+
+  function duration(kind) {
+    return kind === "push" ? MS.brace + MS.move : kind === "bump" ? MS.bump : MS.walk;
+  }
+
+  /* A direction went down. Returns the direction to move now, or null when an animation has to
+     finish first (the direction is then queued). A different direction starts a new hold and
+     clears the auto-stop. */
+  function press(state, dir, now) {
+    if (state.held !== dir) {
+      state.held = dir;
+      state.holdAt = now;
+      state.blocked = false;
+    }
+    if (state.anim || state.won) {
+      state.queued = dir;
+      return null;
+    }
+    return dir;
+  }
+
+  function release(state, dir) {
+    if (state.held === dir) state.held = null;
+  }
+
+  /* The move has been applied to the board: start its animation. */
+  function begin(state, kind, now) {
+    state.anim = { kind: kind, t: 0, dur: duration(kind) };
+    return state.anim;
+  }
+
+  /* Advance the animation; when it finishes, return it (so the caller can see kind and its own
+     drawing fields) and clear state.anim. */
+  function advance(state, dt) {
+    if (!state.anim) return null;
+    state.anim.t += dt;
+    if (state.anim.t < state.anim.dur) return null;
+    var done = state.anim;
+    state.anim = null;
+    return done;
+  }
+
+  /* The animation's consequences: a push holds the repeat back for the gap; a bump, or a push
+     that put the box on a goal or a dead square, stops it until the key is pressed again. */
+  function finish(state, now, kind, stop) {
+    if (kind === "push") state.readyAt = now + MS.gap;
+    else state.readyAt = now;
+    if (stop) state.blocked = true;
+  }
+
+  /* The direction to move this frame: a remembered press first (it is a deliberate press, so its
+     move runs at once), then a held direction once both the hold delay and the push gap are over. */
+  function next(state, now) {
+    if (state.anim || state.won) return null;
+    if (state.queued) {
+      var dir = state.queued;
+      state.queued = null;
+      return { dir: dir, repeat: false };
+    }
+    if (state.held && !state.blocked && now >= state.holdAt + MS.hold && now >= state.readyAt) {
+      return { dir: state.held, repeat: true };
+    }
+    return null;
+  }
+
+  return {
+    MS: MS,
+    create: create,
+    duration: duration,
+    press: press,
+    release: release,
+    begin: begin,
+    advance: advance,
+    finish: finish,
+    next: next
+  };
+})();
+</script>
+<script data-src="src/game.js">
+/* 每日推箱 / DailyBox: one crate-pushing puzzle a day. Board rules live in board.js, the level table in
+   levels.js, the tiles and postman in art.js, and the owner-approved input clock in input.js.
+   This file is the handheld: the day, the drawing, the menus, the result card and the saves.
+
+   Design for 160x144: the 10x8 board is 160x128, the status bar is the last 16 pixels. */
+var game = LoGame.create({ width: 160, height: 144, lang: "zh" });
+var T = game.t;
+document.documentElement.lang = game.lang === "zh" ? "zh-CN" : "en";
+
+var W = 10, H = 8, CELLS = W * H, TB = 128, TILE = 16;
+var DIRS = { up: -W, right: 1, down: W, left: -1 };
+var DIR_CODE = ["up", "right", "down", "left"];
+var BUTTON_DIRS = ["up", "down", "left", "right"];
+var ALL_BUTTONS = ["up", "down", "left", "right", "a", "b", "start", "select"];
+var VEC = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
+var MS = BoxInput.MS;
+var WEEK_ZH = ["日", "一", "二", "三", "四", "五", "六"];
+var WEEK_EN = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+var today, dayK, level, goalMap = new Uint8Array(CELLS);
+var state, inp = BoxInput.create();
+var facing = "down", ui = "loading";
+var solvedFlag = false, solvedRecord = null, peeked = false;
+var saved = { v: 1, days: {} }, seenHelp = false;
+var boxWritable = true;
+var playMs = 0;
+var cardPending = false, cardAt = 0;
+var replay = null, dust = [], swipe = null;
+var menuSel = 0, menuBack = "play", confirmBack = "play", helpBack = "play";
+
+/* lo-game's pointer keeps only the latest position in a tick, so a down + move + up inside one tick
+   would lose where the finger started. These listeners keep both ends of the gesture. */
+var touchStart = null, touchLast = null, touchCancelled = false, touchIgnored = false;
+(function trackTouch() {
+  if (typeof document === "undefined" || !document.querySelector) return;
+  var canvas = document.querySelector("canvas");
+  if (!canvas || !canvas.addEventListener) return;
+  function primary(e) { return e.isPrimary !== false; }
+  function point(e) {
+    var r = canvas.getBoundingClientRect();
+    return {
+      x: Math.floor((e.clientX - r.left) * 160 / (r.width || 1)),
+      y: Math.floor((e.clientY - r.top) * 144 / (r.height || 1))
+    };
+  }
+  canvas.addEventListener("pointerdown", function (e) {
+    if (!primary(e)) {
+      if (!touchStart) touchIgnored = true;   /* do not let a second finger start a swipe */
+      return;
+    }
+    touchIgnored = false;
+    touchCancelled = false;
+    touchStart = touchLast = point(e);
+  });
+  canvas.addEventListener("pointermove", function (e) {
+    if (!primary(e)) return;
+    touchLast = point(e);
+  });
+  canvas.addEventListener("pointerup", function (e) {
+    if (!primary(e)) return;
+    touchLast = point(e);
+  });
+  canvas.addEventListener("pointercancel", function (e) {
+    if (!primary(e)) return;
+    touchCancelled = true;
+    touchStart = touchLast = null;
+  });
+})();
+
+if (typeof document !== "undefined" && document.addEventListener) {
+  document.addEventListener("visibilitychange", function () {
+    if (document.hidden) return;
+    if ((ui === "play" && !solvedFlag) || ui === "done") maybeNewDay();
+  });
+}
+
+/* ---------------- dates and the save files ---------------- */
+
+function pad2(n) { return n < 10 ? "0" + n : "" + n; }
+function dayKey(d) { return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()); }
+
+function dateLabel(d) {
+  if (game.lang === "en") return WEEK_EN[d.getDay()] + " " + (d.getMonth() + 1) + "/" + d.getDate();
+  return (d.getMonth() + 1) + "/" + d.getDate() + " 周" + WEEK_ZH[d.getDay()];
+}
+
+function fmtTime(ms) {
+  var s = Math.max(0, Math.floor(ms / 1000));
+  return Math.floor(s / 60) + ":" + pad2(s % 60);
+}
+
+function validDay(day) {
+  return !!day && typeof day === "object" && !Array.isArray(day) &&
+    typeof day.pushes === "number" && isFinite(day.pushes) && day.pushes >= 0 &&
+    typeof day.moves === "number" && isFinite(day.moves) && day.moves >= 0 &&
+    typeof day.ms === "number" && isFinite(day.ms) && day.ms >= 0;
+}
+
+/* Drop junk days: a bad entry must never become a card or a streak. */
+function normalizeBox(v) {
+  var out = { v: 1, days: {} };
+  if (!v || v.v !== 1 || !v.days || typeof v.days !== "object" || Array.isArray(v.days)) return out;
+  Object.keys(v.days).forEach(function (key) {
+    var day = v.days[key];
+    if (validDay(day)) {
+      out.days[key] = {
+        pushes: day.pushes,
+        moves: day.moves,
+        ms: day.ms,
+        peeked: !!day.peeked
+      };
+    }
+  });
+  return out;
+}
+
+function trimDays() {
+  var keys = Object.keys(saved.days).sort();
+  while (keys.length > 400) delete saved.days[keys.shift()];
+}
+
+/* The first result of the day is the one kept: replaying a solved day never overwrites it. */
+function recordDay(pushes, moves, ms, wasPeeked) {
+  if (saved.days[dayK]) return saved.days[dayK];
+  saved.days[dayK] = {
+    pushes: pushes,
+    moves: moves,
+    ms: Math.max(0, Math.round(ms)),
+    peeked: !!wasPeeked
+  };
+  trimDays();
+  if (boxWritable) game.save("box", saved);   /* a failed read must not overwrite the player's store */
+  game.remove("box-now");
+  return saved.days[dayK];
+}
+
+function streakCount() {
+  if (!today) return 0;
+  var d = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  if (!saved.days[dayKey(d)]) d.setDate(d.getDate() - 1);
+  var n = 0;
+  while (saved.days[dayKey(d)]) {
+    n++;
+    d.setDate(d.getDate() - 1);
+  }
+  return n;
+}
+
+/* `history` is the undo stack with the current position appended as its last entry: board.js's
+   history holds the position before each move, so the board needs one more snapshot to come back.
+   The save is capped at 400 snapshots so 400 moves can never reach the 256 KB budget; undo inside
+   a session stays unlimited (state.history is not trimmed). `ms` keeps the elapsed time across a
+   visit to HOME. */
+function saveNow() {
+  if (!state || solvedFlag) return;
+  var cur = { player: state.player, boxes: state.boxes.slice(), moves: state.moves, pushes: state.pushes };
+  var hist = state.history.concat([cur]);
+  if (hist.length > 400) hist = hist.slice(hist.length - 400);
+  game.save("box-now", {
+    date: dayK,
+    history: hist,
+    ms: Math.round(playMs),
+    peeked: !!peeked
+  });
+}
+
+function validCell(v) {
+  return typeof v === "number" && isFinite(v) && Math.floor(v) === v && v >= 0 && v < CELLS && level.floor[v] === 1;
+}
+
+function validCount(v) {
+  return typeof v === "number" && isFinite(v) && Math.floor(v) === v && v >= 0;
+}
+
+/* Every snapshot is used by B (undo), so a single junk entry must not get in. */
+function validSnapshot(s) {
+  if (!s || typeof s !== "object") return false;
+  if (!validCell(s.player)) return false;
+  if (!Array.isArray(s.boxes) || s.boxes.length !== level.boxes.length) return false;
+  if (!validCount(s.moves) || !validCount(s.pushes)) return false;
+  var seen = {};
+  for (var i = 0; i < s.boxes.length; i++) {
+    var b = s.boxes[i];
+    if (!validCell(b) || b === s.player || seen[b]) return false;
+    seen[b] = 1;
+  }
+  return true;
+}
+
+function restoreNow(now) {
+  if (!now || !Array.isArray(now.history) || !now.history.length) return false;
+  var hist = now.history.slice();
+  for (var i = 0; i < hist.length; i++) {
+    if (!validSnapshot(hist[i])) return false;
+  }
+  var cur = hist.pop();
+  state.player = cur.player;
+  state.boxes = cur.boxes.slice();
+  state.moves = cur.moves;
+  state.pushes = cur.pushes;
+  state.history = hist;
+  if (typeof now.ms === "number" && isFinite(now.ms) && now.ms >= 0) playMs = now.ms;
+  peeked = !!now.peeked;
+  return true;
+}
+
+/* ---------------- the board and its day ---------------- */
+
+function setLevel(lv) {
+  level = lv;
+  goalMap = new Uint8Array(CELLS);
+  for (var i = 0; i < level.goals.length; i++) goalMap[level.goals[i]] = 1;
+}
+
+function resetBoard(clearNow) {
+  state = Board.create(level);
+  inp = BoxInput.create();
+  facing = "down";
+  solvedFlag = false;
+  solvedRecord = null;
+  cardPending = false;
+  replay = null;
+  dust = [];
+  swipe = null;
+  touchStart = touchLast = null;
+  touchCancelled = false;
+  touchIgnored = false;
+  playMs = 0;
+  if (clearNow) game.remove("box-now");
+}
+
+/* No held key may survive an overlay: otherwise the postman walks off on his own when it closes. */
+function clearInput() {
+  inp.held = null;
+  inp.queued = null;
+  swipe = null;
+  touchStart = touchLast = null;
+  touchCancelled = false;
+  touchIgnored = false;
+}
+
+function releaseDirections() {
+  for (var i = 0; i < BUTTON_DIRS.length; i++) {
+    var dir = BUTTON_DIRS[i];
+    if (game.released(dir)) BoxInput.release(inp, dir);
+  }
+}
+
+/* Releases are processed in every screen, overlay or not. In normal play they run after the
+   presses of the same frame, so a quick tap is one move and never a held direction. */
+function pumpReleases() {
+  if (ui !== "play" || solvedFlag || replay) releaseDirections();
+  if (ui !== "play" && game.pointer.released && swipe) {
+    if (swipe.dir) BoxInput.release(inp, swipe.dir);
+    swipe = null;
+  }
+}
+
+/* The day starts fresh: this is also the fallback when a save cannot be read. */
+function freshToday() {
+  today = new Date();
+  dayK = dayKey(today);
+  setLevel(Board.levelFor(today));
+  peeked = false;
+  resetBoard(false);
+}
+
+function anyInput() {
+  for (var i = 0; i < ALL_BUTTONS.length; i++) {
+    if (game.pressed(ALL_BUTTONS[i])) return true;
+  }
+  return game.pointer.pressed;
+}
+
+/* Midnight while the app is open: the next play input, or coming back from HOME, starts the new
+   day. A card already on screen stays until A, as the brief says. */
+function switchDay(now) {
+  today = now;
+  dayK = dayKey(now);
+  setLevel(Board.levelFor(now));
+  peeked = false;
+  resetBoard(false);
+  game.remove("box-now");
+  var rec = saved.days[dayK];
+  if (rec) {
+    for (var i = 0; i < level.solution.length; i++) Board.step(state, level.solution[i]);
+    solvedFlag = true;
+    inp.won = true;
+    solvedRecord = rec;
+    ui = "card";
+  } else {
+    ui = "play";
+  }
+  clearInput();
+  return true;
+}
+
+function maybeNewDay() {
+  var now = new Date();
+  if (dayKey(now) === dayK) return false;
+  if (ui === "card") return false;
+  if (solvedFlag && ui !== "done") return false;
+  return switchDay(now);
+}
+
+/* One key at a time: a failed box-now must not cost a box that did load. */
+function readKey(key) {
+  return game.load(key).then(
+    function (value) { return { ok: true, value: value }; },
+    function () { return { ok: false, value: null }; }
+  );
+}
+
+function loadAll() {
+  Promise.all([readKey("box"), readKey("box-now"), readKey("box-help")]).then(function (r) {
+    boxWritable = r[0].ok;
+    saved = normalizeBox(r[0].value);
+    trimDays();
+    seenHelp = !!(r[2].ok && r[2].value);
+    freshToday();
+    var now = r[1].ok ? r[1].value : null;
+    var rec = saved.days[dayK];
+    if (rec) {
+      /* A solved day opens on its finished board: replay the stored moves with no animation. */
+      for (var i = 0; i < level.solution.length; i++) Board.step(state, level.solution[i]);
+      solvedFlag = true;
+      inp.won = true;
+      solvedRecord = rec;
+      if (now) game.remove("box-now");
+      ui = "card";
+    } else if (now && now.date === dayK && restoreNow(now)) {
+      ui = "play";
+      /* The winning move itself can be in box-now: finish the day instead of showing an unsolved board. */
+      if (Board.solved(state)) onSolved();
+    } else {
+      if (now) game.remove("box-now");
+      ui = "play";
+    }
+    clearInput();
+    if (!seenHelp) {
+      helpBack = ui;
+      ui = "help";
+    }
+  }).catch(function () {
+    /* Unexpected only: keep whatever was read, but never leave level/state undefined. */
+    if (!level || !state) {
+      try { freshToday(); } catch (e) {}
+    }
+    clearInput();
+    ui = "play";
+  });
+}
+
+/* ---------------- sound: all original, and quiet ---------------- */
+
+function sndStep() {
+  game.sfx({ wave: "square", from: 880, to: 880, ms: 18, attack: 1, decay: 17, vol: 0.02 });
+}
+
+function sndPush() {
+  game.after(0.05, function () {
+    game.sfx({ wave: "noise", from: 700, to: 500, ms: 180, attack: 5, decay: 170, vol: 0.18 });
+  });
+}
+
+function sndBump() {
+  game.sfx({ wave: "square", from: 110, to: 80, ms: 60, attack: 2, decay: 58, vol: 0.06 });
+}
+
+function sndGoal() {
+  game.sfx({ wave: "square", from: 660, to: 660, ms: 60, vol: 0.05 });
+  game.after(0.07, function () {
+    game.sfx({ wave: "square", from: 990, to: 990, ms: 90, vol: 0.05 });
+  });
+}
+
+function sndDead() {
+  game.sfx({ wave: "triangle", from: 150, to: 90, ms: 140, vol: 0.08 });
+}
+
+/* A short rising four-note fanfare of our own, after the box settles. */
+function sndWin() {
+  var notes = [523, 659, 784, 1047];
+  game.after(0.3, function () {
+    for (var i = 0; i < notes.length; i++) {
+      (function (f, delay) {
+        game.after(delay, function () {
+          game.sfx({ wave: "square", from: f, to: f, ms: 120, vol: 0.05 });
+        });
+      })(notes[i], i * 0.11);
+    }
+  });
+}
+
+/* ---------------- moving ---------------- */
+
+function doMove(dir) {
+  if (ui !== "play" || solvedFlag) return;
+  var delta = DIRS[dir], to = state.player + delta, bi = -1;
+  if (level.floor[to]) {
+    for (var i = 0; i < state.boxes.length; i++) {
+      if (state.boxes[i] === to) { bi = i; break; }
+    }
+  }
+  var res = Board.step(state, dir);
+  facing = dir;
+  var kind = res.kind === "walk" ? "walk" : res.kind === "push" ? "push" : "bump";
+  var a = BoxInput.begin(inp, kind, game.time * 1000);
+  a.dir = dir;
+  a.fromBox = to;
+  a.box = res.kind === "bumpBox";
+  a.result = res;
+  a.bi = bi;
+  if (kind === "bump") inp.blocked = true;   /* the proto stops repeats when the bump starts */
+  if (kind === "walk") sndStep();
+  else if (kind === "push") sndPush();
+  else sndBump();
+  if (!replay) saveNow();
+}
+
+function finishAnim(a) {
+  var now = game.time * 1000;
+  if (a.kind === "push") {
+    dust.push({ cell: a.fromBox, t: 0 });
+    var res = a.result || {};
+    BoxInput.finish(inp, now, "push", !!(res.onGoal || res.dead));
+    if (res.onGoal) sndGoal();
+    else if (res.dead) sndDead();
+    if (Board.solved(state)) onSolved();
+  } else if (a.kind === "walk") {
+    BoxInput.finish(inp, now, "walk", false);
+  } else {
+    /* A bump set blocked when it began; ending it only sets readyAt, exactly as the proto does. */
+    BoxInput.finish(inp, now, "bump", false);
+  }
+}
+
+function onSolved() {
+  if (solvedFlag) return;
+  solvedFlag = true;
+  inp.won = true;
+  clearInput();
+  /* The result comes before the removal: a full box-now must never cost the day's result. */
+  solvedRecord = saved.days[dayK] || recordDay(state.pushes, state.moves, playMs, peeked);
+  game.remove("box-now");
+  cardPending = true;
+  cardAt = game.time + 0.35;
+  sndWin();
+}
+
+function doUndo() {
+  if (inp.anim || solvedFlag || replay) return;
+  if (!Board.undo(state)) { game.sfx("miss"); return; }
+  sndStep();
+  saveNow();
+}
+
+function doRestart() {
+  resetBoard(true);
+  ui = "play";
+  game.sfx("tap");
+}
+
+function startReplay() {
+  var already = !!saved.days[dayK];
+  peeked = true;
+  /* If the day was already solved, the first result's numbers stay, but it is now a peeked day. */
+  if (already) {
+    saved.days[dayK].peeked = true;
+    if (boxWritable) game.save("box", saved);
+  }
+  resetBoard(true);
+  clearInput();
+  ui = "play";
+  replay = { i: 0 };
+  /* Keep the peek even if the app is left before the replay is stopped or finished. */
+  if (!already) saveNow();
+}
+
+function stopReplay() {
+  replay = null;
+  clearInput();
+  saveNow();
+  game.sfx("miss");
+}
+
+function updateReplay() {
+  if (inp.anim || !replay) return;
+  if (replay.i < level.solution.length) {
+    doMove(DIR_CODE[level.solution[replay.i++]]);
+  } else {
+    replay = null;
+    if (!solvedFlag && Board.solved(state)) onSolved();
+  }
+}
+
+/* ---------------- the overlays ---------------- */
+
+function menuItems() {
+  return [
+    T({ zh: "继续", en: "Resume" }),
+    T({ zh: "重来", en: "Restart" }),
+    T({ zh: "看答案", en: "Show answer" }),
+    T({ zh: "玩法", en: "How to play" })
+  ];
+}
+
+function openMenu() {
+  if (ui !== "play" && ui !== "done") return;
+  menuBack = ui;
+  menuSel = 0;
+  clearInput();
+  ui = "menu";
+  game.sfx("tap");
+}
+
+function openConfirm(back) {
+  confirmBack = back;
+  clearInput();
+  ui = "confirm";
+  game.sfx("tap");
+}
+
+function chooseMenu(i) {
+  game.sfx("tap");
+  if (i === 0) ui = menuBack;
+  else if (i === 1) { confirmBack = "menu"; clearInput(); ui = "confirm"; }
+  else if (i === 2) startReplay();
+  else if (i === 3) { helpBack = "menu"; clearInput(); ui = "help"; }
+}
+
+function menuHit() {
+  var p = game.pointer;
+  if (p.x < 24 || p.x > 136 || p.y < 32 || p.y >= 32 + 4 * 16) return -1;
+  return Math.min(3, Math.floor((p.y - 32) / 16));
+}
+
+/* Only the A label confirms a tap; the rest of the dialog is inert. */
+function confirmARect() {
+  var full = T({ zh: "A 重来   B 取消", en: "A restart   B cancel" });
+  var label = T({ zh: "A 重来", en: "A restart" });
+  var left = 80 - game.g.measure(full) / 2;
+  return { x: Math.round(left - 2), y: 64, w: Math.round(game.g.measure(label) + 4), h: 20 };
+}
+
+function confirmAHit(x, y) {
+  var r = confirmARect();
+  return x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
+}
+
+function updateMenu() {
+  var items = menuItems();
+  if (game.repeat("up", 0.32, 0.09)) {
+    menuSel = (menuSel + items.length - 1) % items.length;
+    game.sfx("move");
+  } else if (game.repeat("down", 0.32, 0.09)) {
+    menuSel = (menuSel + 1) % items.length;
+    game.sfx("move");
+  }
+  var pick = -1;
+  if (game.pressed("a") || game.pressed("start")) pick = menuSel;
+  else if (game.pointer.pressed) pick = menuHit();
+  if (pick >= 0) chooseMenu(pick);
+  else if (game.pressed("b")) {
+    ui = menuBack;
+    game.sfx("miss");
+  }
+}
+
+function updateConfirm() {
+  if (game.pressed("a")) doRestart();
+  else if (game.pointer.pressed && confirmAHit(game.pointer.x, game.pointer.y)) doRestart();
+  else if (game.pressed("b")) {
+    ui = confirmBack;
+    game.sfx("miss");
+  }
+}
+
+function updateHelp() {
+  if (game.pressed("a") || game.pressed("b") || game.pointer.pressed) {
+    if (!seenHelp) {
+      seenHelp = true;
+      game.save("box-help", 1);
+    }
+    ui = helpBack || "play";
+    game.sfx("tap");
+  }
+}
+
+function updateCard() {
+  if (game.pressed("a") || game.pointer.pressed) {
+    clearInput();
+    ui = "done";
+    game.sfx("tap");
+  }
+}
+
+function updateDone() {
+  if (game.pressed("start")) openMenu();
+  else if (game.pressed("select")) openConfirm("done");
+}
+
+/* ---------------- play input ---------------- */
+
+function pressDir(dir, now) {
+  var move = BoxInput.press(inp, dir, now);
+  if (move) doMove(move);
+}
+
+function swipeDirection(x0, y0, x1, y1) {
+  var dx = x1 - x0, dy = y1 - y0;
+  if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return null;
+  return Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "right" : "left") : (dy > 0 ? "down" : "up");
+}
+
+/* A cancelled gesture never becomes a move, however far the finger travelled. */
+function gestureDirection(start, last, cancelled) {
+  if (cancelled || !start || !last) return null;
+  return swipeDirection(start.x, start.y, last.x, last.y);
+}
+
+function pointerSwipe(now) {
+  var p = game.pointer;
+  if (p.pressed) {
+    if (touchIgnored) {
+      swipe = null;
+      return;
+    }
+    var start = touchStart || p;
+    swipe = start.y < TB ? { x: start.x, y: start.y, dir: null } : null;
+  }
+  if (!swipe) return;
+  /* Resolve on the release position too: a down + move + up inside one tick is still one swipe. */
+  if (!swipe.dir) {
+    var end = touchLast || p;
+    swipe.dir = gestureDirection(swipe, end, touchCancelled);
+    if (swipe.dir) pressDir(swipe.dir, now);
+  }
+  if (p.released) {
+    if (swipe.dir) BoxInput.release(inp, swipe.dir);
+    swipe = null;
+    touchStart = touchLast = null;
+    touchCancelled = false;
+  }
+}
+
+function handlePlayInput(now) {
+  if (game.pressed("start")) { releaseDirections(); openMenu(); return; }
+  if (game.pressed("select")) { releaseDirections(); openConfirm("play"); return; }
+  if (game.pressed("b")) { releaseDirections(); doUndo(); return; }
+
+  pointerSwipe(now);
+
+  for (var i = 0; i < BUTTON_DIRS.length; i++) {
+    var dir = BUTTON_DIRS[i];
+    if (game.pressed(dir)) pressDir(dir, now);
+  }
+  releaseDirections();          /* after the presses: press + release in one frame = one move */
+
+  if (inp.anim) return;
+  var move = BoxInput.next(inp, now);
+  if (move) doMove(move.dir);
+}
+
+/* ---------------- the scene ---------------- */
+
+game.scene("play", {
+  enter: function () {
+    loadAll();
+  },
+  update: function (dt) {
+    var now = game.time * 1000;
+    if (ui === "loading") return;
+    if (ui === "play" && !solvedFlag && anyInput() && maybeNewDay()) return;
+    if (ui === "done" && anyInput() && maybeNewDay()) return;
+    pumpReleases();
+    if (ui === "help") { updateHelp(); return; }
+    if (ui === "menu") { updateMenu(); return; }
+    if (ui === "confirm") { updateConfirm(); return; }
+    if (ui === "card") { updateCard(); return; }
+    if (ui === "done") { updateDone(); return; }
+
+    if (!solvedFlag) playMs += dt * 1000;
+
+    var ended = BoxInput.advance(inp, dt * 1000);
+    if (ended) finishAnim(ended);
+
+    for (var i = 0; i < dust.length; i++) dust[i].t += dt * 1000;
+    dust = dust.filter(function (p) { return p.t < MS.dust; });
+
+    if (cardPending && !inp.anim && game.time >= cardAt) {
+      cardPending = false;
+      clearInput();
+      ui = "card";
+      return;
+    }
+    if (solvedFlag) {
+      if (game.pressed("start")) openMenu();
+      else if (game.pressed("select")) openConfirm("play");
+      return;
+    }
+    if (replay) {
+      if (game.pressed("start")) { openMenu(); return; }
+      if (game.pressed("select")) { openConfirm("play"); return; }
+      if (game.pressed("b")) { stopReplay(); return; }
+      updateReplay();
+      return;
+    }
+    handlePlayInput(now);
+  },
+  draw: draw
+});
+
+/* ---------------- drawing ---------------- */
+
+function cellXY(i) { return [(i % W) * TILE, ((i / W) | 0) * TILE]; }
+function ease(p) { return p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2; }
+
+/* Only the wall cells that touch a floor cell are drawn; the rest of the outside is paper. */
+function wallVisible(i) {
+  var x = i % W, y = (i / W) | 0;
+  for (var dy = -1; dy <= 1; dy++) {
+    for (var dx = -1; dx <= 1; dx++) {
+      if (!dx && !dy) continue;
+      var nx = x + dx, ny = y + dy;
+      if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+      if (level.floor[ny * W + nx]) return true;
+    }
+  }
+  return false;
+}
+
+function animOffsets() {
+  var out = { pdx: 0, pdy: 0, bdx: 0, bdy: 0 };
+  var a = inp.anim;
+  if (!a) return out;
+  var v = VEC[a.dir];
+  if (a.kind === "walk") {
+    var p = a.t / a.dur;
+    out.pdx = -v[0] * TILE * (1 - p);
+    out.pdy = -v[1] * TILE * (1 - p);
+  } else if (a.kind === "bump") {
+    var nudge = Math.sin(Math.PI * a.t / a.dur) * (a.box ? 1 : 2);
+    out.pdx = v[0] * nudge;
+    out.pdy = v[1] * nudge;
+  } else if (a.kind === "push") {
+    if (a.t < MS.brace) {
+      var lean = 2 * (a.t / Math.max(1, MS.brace));
+      out.pdx = -v[0] * (TILE - lean);
+      out.pdy = -v[1] * (TILE - lean);
+      out.bdx = -v[0] * TILE;
+      out.bdy = -v[1] * TILE;
+    } else {
+      var q = ease(Math.min(1, (a.t - MS.brace) / MS.move));
+      out.bdx = -v[0] * TILE * (1 - q);
+      out.bdy = -v[1] * TILE * (1 - q);
+      out.pdx = -v[0] * 14 * (1 - q);
+      out.pdy = -v[1] * 14 * (1 - q);
+    }
+  }
+  return out;
+}
+
+function drawBoard(g) {
+  var i, c;
+  for (i = 0; i < CELLS; i++) {
+    c = cellXY(i);
+    if (level.floor[i]) {
+      g.sprite(ART.floor, c[0], c[1]);
+      if (goalMap[i]) g.sprite(ART.goal, c[0], c[1]);
+    } else if (wallVisible(i)) {
+      g.sprite(ART.wall, c[0], c[1]);
+    }
+  }
+
+  var off = animOffsets();
+  var a = inp.anim;
+  var pushing = a && a.kind === "push";
+  for (var bi = 0; bi < state.boxes.length; bi++) {
+    var b = state.boxes[bi];
+    c = cellXY(b);
+    var moving = pushing && a.bi === bi;
+    var ox = moving ? off.bdx : 0, oy = moving ? off.bdy : 0;
+    var on = goalMap[b] && !moving;
+    var dead = !on && state.dead[b] && !moving;
+    g.sprite(on ? ART.done : dead ? ART.dead : ART.box,
+      c[0] + Math.round(ox), c[1] + Math.round(oy));
+  }
+
+  drawDust(g);
+  drawPlayer(g, off);
+}
+
+function drawDust(g) {
+  var v = VEC[facing];
+  for (var i = 0; i < dust.length; i++) {
+    var p = dust[i], c = cellXY(p.cell), k = p.t / MS.dust;
+    var cx = c[0] + 8, cy = c[1] + 8;
+    for (var s = -1; s <= 1; s += 2) {
+      var x = cx + (v[1] ? s * (4 + 3 * k) : 0) - v[0] * (2 + 5 * k);
+      var y = cy + (v[0] ? s * (4 + 3 * k) : 0) - v[1] * (2 + 5 * k);
+      g.pixel(Math.floor(x), Math.floor(y), g.MID);
+    }
+  }
+}
+
+function drawPlayer(g, off) {
+  var a = inp.anim;
+  var base = facing === "left" ? "right" : facing;
+  var flip = facing === "left";
+  var fr, bob = 0;
+  if (a && a.kind === "push") fr = "push" + base + (a.t > a.dur * 0.55 ? "1" : "0");
+  else if (a && a.kind === "walk") {
+    fr = base + (a.t > a.dur / 2 ? "1" : "0");
+    bob = a.t > a.dur * 0.25 && a.t < a.dur * 0.75 ? -1 : 0;
+  } else if (a && a.kind === "bump" && a.box) fr = "push" + base + "0";
+  else fr = base + "0";
+  var c = cellXY(state.player);
+  g.sprite(ART[fr], c[0] + Math.round(off.pdx), c[1] + Math.round(off.pdy) + bob, { flip: flip });
+}
+
+/* A solved day shows the result that was kept, not the cell values of a reconstruction. */
+function statusPushes() {
+  if (solvedFlag && solvedRecord) return solvedRecord.pushes;
+  return state ? state.pushes : 0;
+}
+
+function drawStatus(g) {
+  if (!state || !level || !today) return;
+  g.rect(0, TB, 160, 16, g.INK);
+  g.text(dateLabel(today), 4, 131, { color: g.PAPER });
+  var right = T({ zh: "推 {n}  最少 {p}", en: "{n} / par {p}" }, { n: statusPushes(), p: level.par });
+  g.text(right, 156, 131, { color: g.PAPER, align: "right" });
+}
+
+function helpLines() {
+  return [
+    T({ zh: "把箱子推到记号上。", en: "Push crates to marks." }),
+    T({ zh: "只能推，不能拉。", en: "Push, never pull." }),
+    T({ zh: "方向键或滑动，B 撤销。", en: "Keys/swipe. B undo." }),
+    T({ zh: "SELECT 重来", en: "SELECT restart" }),
+    T({ zh: "START 菜单", en: "START menu" }),
+    T({ zh: "一天一关，明天再来。", en: "One puzzle a day." })
+  ];
+}
+
+function drawHelp(g) {
+  var x = 2, y = 1, w = 156, h = 142;
+  g.window(x, y, w, h);
+  var ty = y + 6;
+  g.text(T({ zh: "玩法", en: "How to play" }), x + w / 2, ty, { align: "center" });
+  ty += 18;
+  g.rect(x + 10, ty - 4, w - 20, 1, g.MID);
+  ty += 2;
+  var lines = helpLines();
+  for (var i = 0; i < lines.length; i++) {
+    ty += g.text(lines[i], x + 9, ty, { width: w - 18 });
+    ty += 1;
+  }
+  g.text(T({ zh: "A 好", en: "A OK" }), x + w / 2, y + h - 16, { align: "center" });
+}
+
+function drawMenu(g) {
+  var items = menuItems();
+  var x = 24, y = 8, w = 112, h = 112;
+  g.window(x, y, w, h);
+  g.text(T({ zh: "暂停", en: "Paused" }), x + w / 2, y + 5, { align: "center" });
+  g.rect(x + 8, y + 20, w - 16, 1, g.MID);
+  for (var i = 0; i < items.length; i++) {
+    var ry = y + 24 + i * 16;
+    if (i === menuSel) {
+      g.rect(x + 6, ry - 1, w - 12, 15, g.INK);
+      g.text(items[i], x + 14, ry, { color: g.PAPER });
+    } else {
+      g.text(items[i], x + 14, ry);
+    }
+  }
+  g.text(T({ zh: "A 好  B 返回", en: "A select  B back" }), x + w / 2, y + h - 14, { align: "center", color: g.DARK });
+}
+
+function drawConfirm(g) {
+  var w = 136, x = 12, y = 38, h = 56;
+  g.window(x, y, w, h);
+  g.text(T({ zh: "重来这一局？", en: "Restart this puzzle?" }), 80, y + 8, { align: "center" });
+  g.text(T({ zh: "A 重来   B 取消", en: "A restart   B cancel" }), 80, y + 30, { align: "center", color: g.DARK });
+}
+
+/* A peeked day never gets the perfect badge, even when the answer replay used par pushes. */
+function cardBadge(rec) {
+  if (rec.peeked) return "answer";
+  return rec.pushes === level.par ? "perfect" : null;
+}
+
+function drawCard(g) {
+  var rec = solvedRecord || saved.days[dayK] || { pushes: state.pushes, moves: state.moves, ms: playMs, peeked: peeked };
+  var badge = cardBadge(rec);
+  var w = 124, h = 106, x = 18, y = Math.round((TB - h) / 2);
+  g.window(x, y, w, h);
+  var ty = y + 6;
+  g.text(T({ zh: "今日完成", en: "All done" }), x + w / 2, ty, { align: "center" });
+  ty += 16;
+  if (badge === "answer") {
+    g.text(T({ zh: "看过答案", en: "Answer shown" }), x + w / 2, ty, { align: "center", color: g.DARK });
+    ty += 14;
+  } else if (badge === "perfect") {
+    g.text(T({ zh: "完美", en: "Perfect" }), x + w / 2, ty, { align: "center", color: g.DARK });
+    ty += 14;
+  }
+  g.rect(x + 8, ty - 1, w - 16, 1, g.MID);
+  ty += 5;
+  g.text(T({ zh: "推 {n}  最少 {p}", en: "{n} / par {p}" }, { n: rec.pushes, p: level.par }),
+    x + w / 2, ty, { align: "center" });
+  ty += 14;
+  g.text(T({ zh: "用时 {t}", en: "Time {t}" }, { t: fmtTime(rec.ms) }), x + w / 2, ty, { align: "center" });
+  ty += 14;
+  g.text(T({ zh: "连续 {k} 天", en: "Streak {k}" }, { k: streakCount() }), x + w / 2, ty, { align: "center" });
+  g.text(T({ zh: "A 好", en: "A OK" }), x + w / 2, y + h - 18, { align: "center" });
+}
+
+function drawTomorrow(g) {
+  var text = T({ zh: "明天再来", en: "Come back tomorrow" });
+  var w = g.measure(text) + 16;
+  g.window(Math.round((160 - w) / 2), 100, w, 20);
+  g.text(text, 80, 103, { align: "center" });
+}
+
+function draw(g) {
+  g.clear(g.PAPER);
+  if (ui === "loading" || !level || !state) return;
+  drawBoard(g);
+  if (ui === "help") {
+    drawHelp(g);            /* the help is the whole screen, so no status bar behind it */
+    return;
+  }
+  if (ui === "card") {
+    g.dither(0, 0, 160, TB, g.MID, 2);
+    drawCard(g);
+  } else if (ui === "done") {
+    drawTomorrow(g);
+  } else if (ui === "menu") {
+    drawMenu(g);
+  } else if (ui === "confirm") {
+    drawConfirm(g);
+  }
+  drawStatus(g);
+}
+
+/* ---------------- the tests' window into the game ---------------- */
+
+function levelFromRows(rows) {
+  var floor = new Uint8Array(CELLS), boxes = [], goals = [], player = -1;
+  for (var y = 0; y < H; y++) {
+    if (!rows[y] || rows[y].length !== W) throw new Error("a test level row must be 10 cells");
+    for (var x = 0; x < W; x++) {
+      var ch = rows[y].charAt(x), i = y * W + x;
+      if (ch !== "#") floor[i] = 1;
+      if (ch === "$" || ch === "*") boxes.push(i);
+      if (ch === "." || ch === "*" || ch === "+") goals.push(i);
+      if (ch === "@" || ch === "+") player = i;
+    }
+  }
+  return { w: W, h: H, floor: floor, boxes: boxes, goals: goals, player: player, par: 1, solution: [] };
+}
+
+var BOX = {
+  state: function () {
+    return {
+      date: dayK,
+      player: state ? state.player : -1,
+      boxes: state ? state.boxes.slice() : [],
+      moves: state ? state.moves : 0,
+      pushes: state ? state.pushes : 0,
+      history: state ? state.history.length : 0,
+      ms: Math.round(playMs),
+      solved: !!solvedFlag,
+      peeked: !!peeked,
+      statusPushes: statusPushes(),
+      ui: ui,
+      par: level ? level.par : 0
+    };
+  },
+  days: function () { return JSON.parse(JSON.stringify(saved)); },
+  help: function () { return helpLines(); },
+  streak: function () { return streakCount(); },
+  badge: function () {
+    var rec = solvedRecord || saved.days[dayK];
+    return rec ? cardBadge(rec) : null;
+  },
+  confirmA: function () { return confirmARect(); },
+  confirmHit: function (x, y) { return confirmAHit(x, y); },
+  swipe: function (x0, y0, x1, y1) { return swipeDirection(x0, y0, x1, y1); },
+  gesture: function (x0, y0, x1, y1, cancelled) {
+    return gestureDirection({ x: x0, y: y0 }, { x: x1, y: y1 }, !!cancelled);
+  },
+  load: function (rows) {
+    if (!today) today = new Date();
+    dayK = dayKey(today);
+    setLevel(levelFromRows(rows));
+    peeked = false;
+    seenHelp = true;
+    resetBoard(true);
+    ui = "play";
+  }
+};
+window.BOX = BOX;
+
+game.start("play");
+</script>
+</body>
+</html>
