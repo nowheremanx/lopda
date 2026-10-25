@@ -449,7 +449,7 @@ function noteAt(song,p,track,t){
   var pat=song && song.patterns && song.patterns[p];
   var list=pat && pat.notes && pat.notes[track];
   if(!Array.isArray(list)) return null;
-  for(var i=0;i<list.length;i++) if(list[i] && list[i].t===t) return list[i];
+  for(var i=0;i<list.length;i++) if(list[i] && list[i].t===t) return clone(list[i]);
   return null;
 }
 
@@ -458,7 +458,10 @@ function setNote(song,p,track,t,deg,vel){
   if(!editable(out,track)) return out;
   if(!int(p) || p<0 || p>=PATTERNS_MAX || !int(t) || t<0) return out;
   var src=song.patterns && song.patterns[p];
-  var len=src && int(src.len) && src.len>=1 ? src.len : STEPS;
+  /* an existing pattern with a broken len cannot be tied: refuse it instead of writing NaN lengths. A missing pattern is
+     different, it is created with the default length below. */
+  if(src && (!plain(src) || !int(src.len) || src.len<1)) return out;
+  var len=src ? src.len : STEPS;
   if(t>=len*STEP || !int(deg) || deg<-32 || deg>32) return out;
   var v=vel==null ? NOTE_VEL : vel;
   if(!num(v) || v<0 || v>1) return out;
@@ -558,25 +561,60 @@ function chainAt(song,chain,tick){
   return {slot:segs.length-1, p:segs[segs.length-1].p, t:m};
 }
 
+/* The segments are sorted by start; binary searches keep a 64-slot chain cheap to narrow to the few bars a window covers. */
+function firstEndAfter(segs,tick){
+  var lo=0, hi=segs.length, mid;
+  while(lo<hi){
+    mid=(lo+hi)>>1;
+    if(segs[mid].start+segs[mid].ticks>tick) hi=mid;
+    else lo=mid+1;
+  }
+  return lo;
+}
+
+function firstStartAtOrAfter(segs,tick){
+  var lo=0, hi=segs.length, mid;
+  while(lo<hi){
+    mid=(lo+hi)>>1;
+    if(segs[mid].start>=tick) hi=mid;
+    else lo=mid+1;
+  }
+  return lo;
+}
+
 function chainEvents(song,chain,fromTick,toTick){
   var out=[];
+  /* the scheduler window must be finite and positive; a window that starts before zero simply starts at zero */
+  if(!isFinite(fromTick) || !isFinite(toTick)) return out;
+  if(fromTick<0) fromTick=0;
   if(!(toTick>fromTick)) return out;
   var segs=chainSegments(song,chain);
   if(!segs.length) return out;
-  var total=chainTicks(song,chain), i, n;
+  var total=0, i, n;
+  for(i=0;i<segs.length;i++) total+=segs[i].ticks;
   if(total<=0) return out;
 
   var pats=song && song.patterns;
   var tracks=(song && song.tracks) || [], place={};
   for(i=0;i<tracks.length;i++) place["$"+tracks[i].id]=i;
   var off=swingTicks(song && song.swing);
+  if(!num(off)) off=0;
+  /* only a forward swing makes a note leave its own bar; a negative one is outside the format's range */
+  var spill=off>0?off:0;
 
-  var first=Math.floor(fromTick/total), last=Math.floor(toTick/total);
-  /* one pass back as well: a swung note at a segment's last step can land in the next segment, which may be the one the
-     range starts in. Notes below fromTick are dropped by the test. */
-  for(var pass=first-1;pass<=last;pass++){
+  var first=Math.floor((fromTick-spill)/total), last=Math.floor(toTick/total);
+  /* A segment can spill into the next one, so each pass starts one segment early; the pass itself starts early when the
+     window is within a swing's reach of the pass boundary. Everything outside the window is dropped below. */
+  for(var pass=first;pass<=last;pass++){
     var base=pass*total;
-    for(i=0;i<segs.length;i++){
+    if(base>=toTick || base+total+spill<=fromTick) continue;
+    var lo=fromTick-base, hi=toTick-base;
+    if(lo<0) lo=0;
+    if(hi>total) hi=total;
+    var a=firstEndAfter(segs,lo);
+    if(a>0) a--;
+    var b=firstStartAtOrAfter(segs,hi)-1;
+    for(i=a;i<=b;i++){
       var seg=segs[i];
       var pat=int(seg.p) ? pats && pats[seg.p] : null;
       if(!pat || !plain(pat.notes)) continue;

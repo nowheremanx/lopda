@@ -108,6 +108,33 @@ async function studioPage(t, withChip) {
       for (let i = Math.max(0, Math.floor(from * SR)); i < Math.min(d.length, Math.ceil(to * SR)); i++) m = Math.max(m, Math.abs(d[i]));
       return m;
     };
+    /* the fundamental in `d` over [from, to]: normalised autocorrelation, searched around the expected period and
+       interpolated between lags. One lag is far too coarse (about 16 cents at 440 Hz / 48 kHz) for a 3-cent check. */
+    window.pitchAt = (d, sr, expected, from, to) => {
+      const a = Math.max(0, Math.floor(from * sr)), b = Math.min(d.length, Math.floor(to * sr));
+      const x = new Float64Array(b - a);
+      let mean = 0;
+      for (let i = 0; i < x.length; i++) mean += d[a + i];
+      mean /= x.length;
+      for (let i = 0; i < x.length; i++) x[i] = d[a + i] - mean;
+      const period = sr / expected;
+      const lo = Math.max(2, Math.floor(period * 0.8)), hi = Math.ceil(period * 1.2);
+      const corr = [];
+      for (let lag = lo - 1; lag <= hi + 1; lag++) {
+        let sum = 0, e0 = 0, e1 = 0;
+        for (let i = 0; i + lag < x.length; i++) {
+          sum += x[i] * x[i + lag]; e0 += x[i] * x[i]; e1 += x[i + lag] * x[i + lag];
+        }
+        corr.push(sum / Math.sqrt(e0 * e1 || 1));
+      }
+      let best = 1;
+      for (let i = 1; i < corr.length - 1; i++) if (corr[i] > corr[best]) best = i;
+      const y0 = corr[best - 1], y1 = corr[best], y2 = corr[best + 1];
+      const denom = y0 - 2 * y1 + y2;
+      const delta = Math.abs(denom) > 1e-12 ? 0.5 * (y0 - y2) / denom : 0;
+      const freq = sr / (lo - 1 + best + delta);
+      return { freq, cents: 1200 * Math.log2(freq / expected) };
+    };
     /* `seconds` of the DEMO beat from the song data, swing included */
     window.renderBeat = async (kit, seconds) => {
       const song = LopdaSong.newSong();
@@ -266,8 +293,33 @@ test("studio synth: every melodic voice sounds low and high, under its target, a
   for (const n of r.notes) {
     t.diagnostic(`${n.voice} ${n.midi}: peak ${n.peak.toFixed(4)}, ends ${n.last.toFixed(3)} s`);
     assert.ok(n.peak > 0.02, `${n.voice} ${n.midi} is audible (peak ${n.peak})`);
-    assert.ok(n.peak <= targets[n.voice] * 1.2, `${n.voice} ${n.midi} peak ${n.peak} is under ${(targets[n.voice] * 1.2).toFixed(3)}`);
+    assert.ok(n.peak <= targets[n.voice] * 1.1, `${n.voice} ${n.midi} peak ${n.peak} is under ${(targets[n.voice] * 1.1).toFixed(3)}`);
     assert.ok(n.diff < 1e-4, `${n.voice} ${n.midi} renders the same twice (max difference ${n.diff})`);
+  }
+  assert.deepEqual(errors, []);
+});
+
+test("studio synth: pluck stays in tune at 44.1 and 48 kHz", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await studioPage(t, false);
+  const r = await p.evaluate(async () => {
+    const out = [];
+    for (const sr of [44100, 48000]) {
+      for (const midi of [57, 69, 86]) {
+        const oc = new OfflineAudioContext(1, Math.ceil(sr * 0.5), sr);
+        const gain = oc.createGain(); gain.gain.value = 1; gain.connect(oc.destination);
+        const synth = LopdaStudioSynth.create(oc, gain);
+        synth.note("pluck", midi, 0.02, 0.5, 1);
+        const d = (await oc.startRendering()).getChannelData(0);
+        const expected = 440 * Math.pow(2, (midi - 69) / 12);
+        const m = pitchAt(d, sr, expected, 0.1, 0.4);
+        out.push({ sr, midi, expected, freq: m.freq, cents: m.cents });
+      }
+    }
+    return out;
+  });
+  for (const n of r) {
+    t.diagnostic(`${n.sr} Hz, midi ${n.midi}: ${n.freq.toFixed(3)} Hz (wanted ${n.expected.toFixed(3)}), ${n.cents.toFixed(2)} cents`);
+    assert.ok(Math.abs(n.cents) <= 3, `${n.sr} Hz midi ${n.midi} is within 3 cents (${n.cents.toFixed(2)})`);
   }
   assert.deepEqual(errors, []);
 });
@@ -310,6 +362,34 @@ test("studio synth: a dense hit stays under the soft clip, and the melodic parts
   assert.deepEqual(errors, []);
 });
 
+test("studio synth: the four-bar demo pattern with the soft kit peaks under 0.9", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await studioPage(t, false);
+  const r = await p.evaluate(async () => {
+    const SR = 22050;
+    const song = LopdaSong.newSong();
+    const ticks = 4 * LopdaSong.STEPS * LopdaSong.STEP;
+    const ev = LopdaSong.chainEvents(song, song.song, 0, ticks);
+    const seconds = LopdaSong.ticksToSec(ticks, song.bpm);
+    const oc = new OfflineAudioContext(1, Math.ceil(SR * seconds), SR);
+    const out = oc.createGain(); out.gain.value = 1; out.connect(oc.destination);
+    const synth = LopdaStudioSynth.create(oc, out);
+    for (const e of ev) {
+      const at = LopdaSong.ticksToSec(e.tick, song.bpm);
+      const dur = LopdaSong.ticksToSec(e.len, song.bpm);
+      if (e.track === "drums") synth.hit(song.kit, e.key, at, e.vel);
+      else if (e.track === "bass") synth.note(LopdaSong.SOUND.bass, LopdaSong.noteMidi(song, "bass", e.deg), at, dur, e.vel);
+      else if (e.track === "chords") {
+        for (const midi of LopdaSong.chordNotes(song, e.deg)) synth.note(LopdaSong.SOUND.chords, midi, at, dur, e.vel);
+      } else if (e.track === "melody") synth.note(LopdaSong.SOUND.melody, LopdaSong.noteMidi(song, "melody", e.deg), at, dur, e.vel);
+    }
+    return { kit: song.kit, seconds, events: ev.length, peak: stats((await oc.startRendering()).getChannelData(0)).peak };
+  });
+  t.diagnostic(`${r.events} events over 4 bars (${r.seconds.toFixed(3)} s) with the ${r.kit} kit: peak ${r.peak.toFixed(3)}`);
+  assert.ok(r.peak <= 0.9, `the four-bar demo peaks <= 0.9 (${r.peak})`);
+  assert.ok(r.peak > 0.2, `the four-bar demo sounds (${r.peak})`);
+  assert.deepEqual(errors, []);
+});
+
 test("studio synth: the soft clip leaves a single soft kick alone", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await studioPage(t, false);
   const r = await p.evaluate(async () => {
@@ -342,6 +422,12 @@ test("studio synth: dispose stops later notes; an unknown voice or bad note args
       synth.note("bass", 45, 0.02, -0.1, 1);
       synth.note("bass", 45, 0.02, 0.2, 0);
       synth.note("keys", 60, 0.02, 0.2, -1);
+      synth.note("bass", 45, 0.02, Infinity, 1);
+      synth.note("keys", 60, 0.02, Infinity, 1);
+      synth.note("bass", 1e6, 0.02, 0.2, 1);
+      synth.note("bass", -1e6, 0.02, 0.2, 1);
+      synth.note("keys", 1e6, 0.02, 0.2, 1);
+      synth.note("keys", -1e6, 0.02, 0.2, 1);
     } catch (e) { out.threw = true; }
     out.badPeak = stats((await oc.startRendering()).getChannelData(0)).peak;
 

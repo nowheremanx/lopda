@@ -594,19 +594,20 @@ test("patterns: emptyPattern is fresh, ensurePattern fills up to the index and l
   assert.deepEqual(plain(b.notes.bass), []);
 
   const song = fresh();
+  const snapshot = plain(song);
   const same = S.ensurePattern(song, 0);
-  assert.deepEqual(plain(same), plain(song));
+  assert.deepEqual(plain(same), snapshot);
   assert.notEqual(same.patterns[0], song.patterns[0]);
 
   const three = S.ensurePattern(song, 2);
   assert.equal(three.patterns.length, 3);
   assert.deepEqual(plain(three.patterns[1]), plain(S.emptyPattern()));
   assert.deepEqual(plain(three.patterns[2]), plain(S.emptyPattern()));
-  assert.equal(song.patterns.length, 1, "the input is untouched");
+  assert.deepEqual(plain(song), snapshot, "the input is untouched");
   assert.equal(S.validate(three).error, undefined);
 
   for (const bad of [-1, 8, 2.5, "2", undefined]) {
-    assert.deepEqual(plain(S.ensurePattern(song, bad)), plain(song), String(bad));
+    assert.deepEqual(plain(S.ensurePattern(song, bad)), snapshot, String(bad));
   }
 });
 
@@ -630,19 +631,23 @@ test("hasNotes and patternEmpty: missing patterns and tracks read as empty", () 
 
 test("copyPattern: copies len and a deep clone of the notes, or leaves the song unchanged", () => {
   const song = fresh();
-  song.patterns[0].notes.bass = [{ t: 0, len: P, deg: 1, vel: 0.5 }];
+  song.patterns[0].len = 8;
+  song.patterns[0].notes.bass = [{ t: 0, len: 8 * S.STEP, deg: 1, vel: 0.5 }];
+  const snapshot = plain(song);
   const out = S.copyPattern(song, 0, 2);
   assert.equal(out.patterns.length, 3);
+  assert.equal(out.patterns[2].len, 8, "the source's len, not the default 16");
   assert.deepEqual(plain(out.patterns[2]), plain(song.patterns[0]));
   assert.notEqual(out.patterns[2].notes, out.patterns[0].notes);
   assert.notEqual(out.patterns[2].notes.bass, out.patterns[0].notes.bass);
-  assert.equal(song.patterns.length, 1);
+  assert.deepEqual(plain(song), snapshot, "the input is untouched");
 
   // from === to, a missing from, or an index outside A-H: unchanged
-  assert.deepEqual(plain(S.copyPattern(song, 0, 0)), plain(song));
-  assert.deepEqual(plain(S.copyPattern(song, 4, 2)), plain(song));
-  assert.deepEqual(plain(S.copyPattern(song, -1, 2)), plain(song));
-  assert.deepEqual(plain(S.copyPattern(song, 0, 8)), plain(song));
+  assert.deepEqual(plain(S.copyPattern(song, 0, 0)), snapshot);
+  assert.deepEqual(plain(S.copyPattern(song, 4, 2)), snapshot);
+  assert.deepEqual(plain(S.copyPattern(song, -1, 2)), snapshot);
+  assert.deepEqual(plain(S.copyPattern(song, 0, 8)), snapshot);
+  assert.deepEqual(plain(song), snapshot);
 });
 
 test("setNote: adds a note, defaults the velocity, and re-ties the whole track", () => {
@@ -703,6 +708,25 @@ test("setNote: ensures the pattern, but drums, unknown tracks and bad input leav
   }
 });
 
+test("setNote: an existing pattern with a broken len is refused instead of tying NaN lengths", () => {
+  // 0, a fraction, a string and a missing len are all invalid on a pattern that already exists
+  for (const len of [0, -1, 1.5, "16", null, undefined]) {
+    const song = fresh();
+    if (len === undefined) delete song.patterns[0].len;
+    else song.patterns[0].len = len;
+    const snapshot = plain(song);
+    const out = S.setNote(song, 0, "bass", 0, 1);
+    assert.deepEqual(plain(out), snapshot, String(len));
+    assert.deepEqual(plain(song), snapshot, "the input is untouched");
+  }
+  // a missing pattern is not a broken one: it is created with the default length
+  const song = fresh();
+  const out = S.setNote(song, 1, "bass", 0, 1);
+  assert.equal(out.patterns.length, 2);
+  assert.deepEqual(plain(out.patterns[1].notes.bass), [{ t: 0, len: P, deg: 1, vel: S.NOTE_VEL }]);
+  assert.equal(S.validate(out).error, undefined);
+});
+
 test("removeNote: removes and re-ties; noteAt finds by exact tick", () => {
   const song = fresh();
   const before = plain(song);
@@ -710,6 +734,15 @@ test("removeNote: removes and re-ties; noteAt finds by exact tick", () => {
   assert.equal(S.noteAt(song, 0, "bass", 192 - 1), null);
   assert.equal(S.noteAt(song, 0, "melody", 0), null);
   assert.equal(S.noteAt(song, 1, "bass", 0), null);
+
+  // noteAt hands back a copy: editing it never edits the song
+  const found = S.noteAt(song, 0, "bass", 192);
+  assert.deepEqual(plain(found), { t: 192, len: 48, deg: 2, vel: S.NOTE_VEL });
+  found.deg = 9;
+  found.extra = true;
+  assert.equal(S.noteAt(song, 0, "bass", 192).deg, 2);
+  assert.equal(S.noteAt(song, 0, "bass", 192).extra, undefined);
+  assert.deepEqual(plain(song), before);
 
   const out = S.removeNote(song, 0, "bass", 192);
   assert.deepEqual(plain(song), before);
@@ -855,6 +888,139 @@ test("chainEvents: several passes, 7-tick slices make the same list", () => {
   const four = plain(S.chainEvents(song, [0, 1], 4 * total, 5 * total));
   assert.equal(four.length, one.length);
   four.forEach((e, i) => close(e.tick - 4 * total, one[i].tick, "pass " + i));
+});
+
+test("chainEvents: patterns of different len in one chain keep their own bars", () => {
+  const song = fresh(); // A, 16 steps
+  song.patterns.push(S.emptyPattern()); // B, 8 steps
+  song.patterns[1].len = 8;
+  song.patterns[1].notes.bass = [{ t: 0, len: 8 * S.STEP, deg: 4, vel: 0.8 }];
+
+  const chain = [0, 1, 0];
+  const total = S.chainTicks(song, chain);
+  assert.equal(total, P + 8 * S.STEP + P, "A + short B + A");
+  assert.equal(total, 960);
+
+  const all = plain(S.chainEvents(song, chain, 0, total));
+  const find = (track, tick) => all.find((e) => e.track === track && e.tick === tick);
+
+  // B starts at P and lasts 192 ticks, so the third slot starts at P + 192
+  assert.deepEqual(find("bass", P), { tick: P, track: "bass", deg: 4, vel: 0.8, len: 8 * S.STEP, p: 1, slot: 1 });
+  assert.equal(find("bass", P + 8 * S.STEP).p, 0);
+  assert.equal(find("bass", P + 8 * S.STEP).slot, 2);
+  assert.equal(find("bass", P + 8 * S.STEP + 192).deg, 2, "A's step 9 is back, 8 steps into the last bar");
+  assert.equal(all.some((e) => e.slot === 2 && e.tick < P + 8 * S.STEP), false);
+
+  assert.deepEqual(plain(S.chainAt(song, chain, P + 8 * S.STEP)), { slot: 2, p: 0, t: 0 });
+  assert.deepEqual(plain(S.chainAt(song, chain, total)), { slot: 0, p: 0, t: 0 });
+});
+
+test("chainEvents: non-finite bounds are empty; a negative fromTick starts at zero", () => {
+  const song = fresh();
+  for (const [a, b] of [
+    [0, Infinity],
+    [-Infinity, 100],
+    [-Infinity, Infinity],
+    [Infinity, Infinity],
+    [0, NaN],
+    [NaN, 100],
+  ]) {
+    assert.deepEqual(plain(S.chainEvents(song, [0], a, b)), [], `${a}..${b}`);
+  }
+
+  const fromZero = plain(S.chainEvents(song, [0], 0, 300));
+  assert.deepEqual(plain(S.chainEvents(song, [0], -50, 300)), fromZero, "a negative fromTick is 0");
+  assert.deepEqual(plain(S.chainEvents(song, [0], -1e15, 300)), fromZero, "a huge negative fromTick is 0");
+  assert.deepEqual(plain(S.chainEvents(song, [0], -1e15, -1e14)), [], "after the clamp the range is empty");
+});
+
+test("chainEvents: a dense 64-slot song gives the same events as a straightforward scan", () => {
+  // a fixed LCG so a failing window can be reproduced
+  let seed = 0x5eed;
+  const rand = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+  const pick = (n) => Math.floor(rand() * n);
+
+  // the scheduler's worst accepted song: 8 patterns, 4 tracks of 1024 notes, all 64 slots
+  const song = fresh();
+  song.swing = 0.75;
+  song.patterns = [];
+  for (let pi = 0; pi < S.PATTERNS_MAX; pi++) {
+    const notes = { drums: [], bass: [], chords: [], melody: [] };
+    for (const track of ["drums", "bass", "chords", "melody"]) {
+      for (let j = 0; j < 1024; j++) {
+        const note = { t: pick(P), len: 1 + pick(P), vel: rand() };
+        if (track === "drums") note.key = S.DRUMS[pick(S.DRUMS.length)];
+        else note.deg = pick(33) - 16;
+        notes[track].push(note);
+      }
+    }
+    song.patterns.push({ len: 16, notes });
+  }
+  song.song = Array.from({ length: S.SONG_MAX }, (_, i) => i % S.PATTERNS_MAX);
+  assert.equal(S.validate(song).error, undefined);
+
+  // the old shape: every slot, every note, every pass around the window, then the same sort and filter
+  const reference = (fromTick, toTick) => {
+    const out = [];
+    if (!isFinite(fromTick) || !isFinite(toTick)) return out;
+    if (fromTick < 0) fromTick = 0;
+    if (!(toTick > fromTick)) return out;
+    const segs = [];
+    let total = 0;
+    for (let i = 0; i < song.song.length; i++) {
+      const p = song.song[i];
+      const pat = song.patterns[p];
+      const len = pat && Number.isInteger(pat.len) && pat.len >= 1 ? pat.len : S.STEPS;
+      segs.push({ slot: i, p, start: total, ticks: len * S.STEP });
+      total += len * S.STEP;
+    }
+    const off = S.swingTicks(song.swing);
+    const place = {};
+    song.tracks.forEach((tr, i) => { place["$" + tr.id] = i; });
+    for (let pass = Math.floor(fromTick / total) - 1; pass <= Math.floor(toTick / total) + 1; pass++) {
+      const base = pass * total;
+      for (const seg of segs) {
+        const pat = song.patterns[seg.p];
+        if (!pat) continue;
+        for (const tr of song.tracks) {
+          if (tr.kind === "voice" || tr.mute) continue;
+          for (const note of pat.notes[tr.id] || []) {
+            const tick = base + seg.start + note.t + (Math.floor(note.t / S.STEP) % 2 ? off : 0);
+            if (tick < fromTick || tick >= toTick) continue;
+            const e = { tick, track: tr.id };
+            if (tr.kind === "drum") e.key = note.key;
+            else e.deg = note.deg;
+            e.vel = note.vel;
+            e.len = note.len;
+            e.p = seg.p;
+            e.slot = seg.slot;
+            out.push(e);
+          }
+        }
+      }
+    }
+    out.sort((a, b) => {
+      if (a.tick !== b.tick) return a.tick - b.tick;
+      const d = place["$" + a.track] - place["$" + b.track];
+      if (d) return d;
+      const da = S.DRUMS.indexOf(a.key), db = S.DRUMS.indexOf(b.key);
+      if (da >= 0 || db >= 0) return da - db;
+      return (a.deg || 0) - (b.deg || 0);
+    });
+    return out;
+  };
+
+  const total = S.chainTicks(song, song.song);
+  const windows = [];
+  for (let w = 0; w < 12; w++) {
+    const from = pick(total * 2);
+    windows.push([from, from + 1 + pick(500)]);
+  }
+  // start of the song, a pass boundary, and one tick of a new pass
+  windows.push([0, 400], [total - 20, total + 20], [total, total + 1]);
+  for (const [from, to] of windows) {
+    assert.deepEqual(plain(S.chainEvents(song, song.song, from, to)), plain(reference(from, to)), `window ${from}..${to}`);
+  }
 });
 
 test("chainEvents: missing patterns count as empty 16-step bars; empty chains and ranges", () => {

@@ -21,8 +21,9 @@
  * Levels (measured by tests/studio-e2e.test.mjs at 22.05 kHz): all four drums on one step peak 0.79 for both kits,
  * well under 0.85; each drum alone stays between 0.13 and 0.49 at velocity 1. The demo beat's rms is 0.53x the
  * paper tower's title tune with the chip kit and 0.62x with the soft kit, so it sits near PAD.music's songs. The
- * melodic voices at velocity 1 peak 0.30 for bass, 0.072 per keys note and 0.263 for pluck; bass 45, a four-note
- * keys chord and pluck 69 together peak 0.59, so the notes alone stay under 0.6 and the dense drum hit stops at
+ * melodic voices at velocity 1 peak 0.30 for bass, 0.072 per keys note and 0.26 for pluck; bass 45, a four-note
+ * keys chord and pluck 69 together peak 0.58, so the notes alone stay under 0.6. The four-bar demo pattern (drums,
+ * bass and chords) with the soft kit peaks 0.77, under the section 12.6 target of 0.9; the dense drum hit stops at
  * the 0.908 ceiling.
  */
 (function(){
@@ -242,8 +243,11 @@ VOICES.keys=function(ctx,out){
 
 /* one Karplus-Strong buffer per context and MIDI note. The delay line's first N samples are seeded noise; after
    that y[n] = 0.996 * 0.5 * (y[n-N] + y[n-N-1]), the averaging lowpass that makes a plucked string lose its highs
-   as it rings. The same WeakMap fallback as noiseFor keeps only the live context on browsers without WeakMap. */
-var PLUCK_SECONDS=1.2;
+   as it rings. 2.5 s gives even a slow melody note a long tail before the buffer's own decay takes over; that is
+   441 KB per pitch at 44.1 kHz and 480 KB at 48 kHz (one mono float buffer per pitch, only for pitches a song
+   actually plays), so a 16-note melody costs about 7.7 MB at 48 kHz. The same WeakMap fallback as noiseFor keeps
+   only the live context on browsers without WeakMap. */
+var PLUCK_SECONDS=2.5;
 var pluckMap=typeof WeakMap==="function" ? new WeakMap() : null, lastPluck=null;
 
 function pluckFor(ctx,midi){
@@ -273,19 +277,24 @@ function pluckFor(ctx,midi){
 }
 
 /* pluck: the cached buffer at a gain that starts at the peak (a pluck has no attack) and releases for 60 ms at
-   at+dur. The correction N*f/sr is near 1: the delay line is an integer length, so playing the buffer a hair off
-   speed puts the fundamental exactly on the note. The buffer also stops the note at its own 1.2 s end. */
+   at+dur. The two-tap averaging filter has a delay of N + 0.5 samples (it is linear phase: the extra half sample is
+   the 0.5 * (x + x delayed by one) at its heart), so the buffer's fundamental is sr / (N + 0.5), not sr / N.
+   Playing it at (N + 0.5) * f / sr puts the note exactly on pitch. The fade stays at at+dur; if the 2.5 s buffer
+   runs out first the string simply ends with its own decay, which is quieter than the old 1.2 s fade. */
 VOICES.pluck=function(ctx,out){
   return {
     note:function(midi,at,dur,vel){
       var v=velOf(vel), t=when(ctx,at), b=pluckFor(ctx,midi);
       var sr=ctx.sampleRate, f=midiFreq(midi), n=Math.max(2,Math.floor(sr/f));
-      var rate=n*f/sr, playDur=b.duration/rate, end=Math.min(t+dur+0.06,t+playDur);
-      var releaseStart=Math.max(t,end-0.06), g=ctx.createGain(), s=ctx.createBufferSource();
+      var rate=(n+0.5)*f/sr, playDur=b.duration/rate, noteEnd=t+dur, playEnd=t+playDur;
+      var end=Math.min(noteEnd+0.06,playEnd), g=ctx.createGain(), s=ctx.createBufferSource();
       s.buffer=b; s.playbackRate.value=rate;
       g.gain.setValueAtTime(0.265*v,t);
-      g.gain.setValueAtTime(0.265*v,releaseStart);
-      g.gain.linearRampToValueAtTime(0,end);
+      /* only at+dur gets a fade; a buffer that ends first is the string's own decay, not a cut */
+      if(playEnd>noteEnd){
+        g.gain.setValueAtTime(0.265*v,noteEnd);
+        g.gain.linearRampToValueAtTime(0,end);
+      }
       s.connect(g); g.connect(out);
       s.start(t); s.stop(end);
       cleanup(s,[s,g]);
@@ -336,14 +345,17 @@ function create(ctx,out){
     k.hit(drum,t,v);
   }
 
-  /* unknown voice, a bad pitch or a length or velocity that cannot sound: nothing, not an error */
+  /* unknown voice, a pitch outside MIDI, a length that is not finite and positive or a velocity that cannot sound:
+     nothing, not an error. A finite but absurd length would schedule ramps for years (and break the editor's math),
+     so a note is capped at a minute; midi 1e6 must not reach an oscillator frequency or an FM depth ramp. */
   function note(voice,midi,at,dur,vel){
     if(disposed) return;
     if(!Object.prototype.hasOwnProperty.call(VOICES,voice)) return;
-    if(typeof midi!=="number" || !isFinite(midi)) return;
-    if(!(dur>0)) return;
+    if(typeof midi!=="number" || !isFinite(midi) || midi<0 || midi>127) return;
+    if(typeof dur!=="number" || !isFinite(dur) || dur<=0) return;
     var v=velOf(vel);
     if(v<=0) return;
+    if(dur>60) dur=60;
     var t=(typeof at==="number" && isFinite(at)) ? at : ctx.currentTime;
     if(t<ctx.currentTime) t=ctx.currentTime;
     var n=voices[voice];
