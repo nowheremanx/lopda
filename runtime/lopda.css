@@ -206,6 +206,33 @@ textarea::placeholder{color:var(--ink-2)}
 .settings{padding:14px;display:flex;flex-direction:column;gap:14px;max-width:420px}
 .set-row{display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px dashed var(--ink-2);padding-bottom:12px;font-size:16px}
 .set-row .btn{padding:6px 14px;min-width:56px}
+/* the short settings menu: one 44 px row per setting, the long parts behind a row */
+.set-menu{padding:0 10px 6px;gap:0}
+.set-bar{padding:1px 8px}
+.set-bar h2{line-height:1.1}
+.set-menu .set-row{min-height:44px;padding:6px 0 8px;justify-content:flex-start;gap:10px}
+/* a little air between the buttons and the lines above and below them (the 3 px shadow sits in the bottom gap) */
+.set-menu .set-row .btn{min-height:34px;padding:3px 12px}
+.set-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.set-ico{flex:none;width:24px;height:24px;display:flex;align-items:center;justify-content:center}
+.set-ico canvas{display:block;width:24px;height:24px;image-rendering:pixelated;image-rendering:crisp-edges}
+.set-state{flex:none;color:var(--ink-2);font-size:15px;white-space:nowrap}
+.set-rule{border-top:2px solid var(--ink);margin:0}
+/* the solid rule ends the group above it: the row before it drops its own dashed line */
+.set-menu .set-row:has(+ .set-rule),.set-menu .set-row:last-child{border-bottom:0}
+.set-menu .set-subnote{margin:0;padding:0 0 0 34px;font-size:12px;line-height:1.2}
+.set-open{display:flex;align-items:center;gap:10px;width:100%;min-height:44px;padding:0;background:none;border:0;border-bottom:1px dashed var(--ink-2);color:inherit;font:inherit;text-align:left;cursor:pointer}
+.set-open:active{background:var(--lcd-2)}
+.set-share-page{align-items:center;text-align:center;gap:10px}
+.set-share-qr{display:block;background:var(--lcd);border:2px solid var(--ink);padding:4px;image-rendering:pixelated;image-rendering:crisp-edges}
+.set-share-url{margin:0;font-family:var(--f-pix);font-size:17px;word-break:break-all;-webkit-user-select:text;user-select:text}
+.set-share-hint{max-width:280px;text-align:center}
+.set-share-btns{justify-content:center}
+.set-about-page{gap:8px;font-size:15px;line-height:1.5}
+.set-about-page h3{margin:4px 0 0;font-size:16px;font-weight:400}
+.set-about-page p{margin:0}
+.set-about-line{font-family:var(--f-pix);font-size:15px}
+.set-about-small{border-top:1px dashed var(--ink-2);padding-top:8px;font-size:12px;line-height:1.4}
 .set-sense{display:flex;flex-direction:column;gap:8px;border-bottom:1px dashed var(--ink-2);padding-bottom:12px;font-size:16px}
 .set-sense-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
 .set-sense-list li{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:15px}
@@ -216,7 +243,7 @@ textarea::placeholder{color:var(--ink-2)}
 .set-ai .set-row{border-bottom:0;padding-bottom:0}
 .set-ai .hint,.set-ai-page .hint{margin:0}
 .set-ai-field{display:flex;flex-direction:column;gap:4px;font-size:16px}
-.set-ai-field input{min-height:44px;font-family:var(--f-lcd);font-size:16px;color:var(--ink);background:var(--lcd);border:3px solid var(--ink);border-radius:0;padding:4px 8px;width:100%;min-width:0}
+.set-ai-field input{min-height:44px;font-family:var(--f-lcd);font-size:16px;color:var(--ink);background:var(--lcd);border:3px solid var(--ink);border-radius:0;padding:4px 8px;width:100%;min-width:0;-webkit-appearance:none;appearance:none}
 .set-ai-page .row{flex-wrap:wrap;gap:8px}
 .set-ai-page .btn{min-height:44px;padding:6px 14px}
 .set-backup{display:flex;flex-direction:column;gap:8px;border-bottom:1px dashed var(--ink-2);padding-bottom:12px}
@@ -226,8 +253,6 @@ textarea::placeholder{color:var(--ink-2)}
 .set-backup-box .row{flex-wrap:wrap;gap:8px}
 .set-backup-box .btn{min-height:44px;padding:6px 14px}
 .vol{font-family:var(--f-pix);font-size:26px;letter-spacing:.08em;min-width:4.2ch;text-align:center}
-.about{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--ink-2);border:2px solid var(--ink);padding:10px;background:var(--lcd-2)}
-.about b{font-weight:400;color:var(--ink);font-size:15px}
 /* film tints on the load panel */
 .tints{gap:2px;flex-wrap:nowrap;justify-content:space-between}
 .tint{display:flex;flex-direction:column;align-items:center;gap:3px;padding:4px 3px;min-width:0;background:transparent;border:2px solid transparent;cursor:pointer;font-family:var(--f-lcd);font-size:12px;color:var(--ink)}

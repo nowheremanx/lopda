@@ -884,7 +884,7 @@ CPU 降速 4 倍（DevTools 的 CPU throttling，粗略代表旧手机）时，�
 - **出片**（菜单是一张单子，有软键栏，B 取消）：单张 1600×1400；印样用 `LP.film.buildCard` 的 1080×1440 排法，画的是彩色照片；
   胶片条是整卷的彩色胶片，片孔、片边字。彩色的片边：底色深（黑白片是透明的浅灰），片边印片名，用片种的片边颜色；每格的格号旁印焦距（`26mm`、`FRONT`）。
   `buildStrip` 多了三个可选项（`colour` 每格的彩色像素、`edgeInk` 片边字颜色、`marks` 每格的焦距），不给的时候和原来一模一样，底片的样子不变（runtime-shots 查过）。
-  文件名 `lopda-print-<装卷日期>-<片名>-<卷号>-<格号>.png`、`lopda-contact-…png`、`lopda-strip-…png`。出片菜单一打开就先做好三张（单张先），
+  文件名 `lopda-print-<装卷日期>-<片名>-<卷号>-<格号>.jpg`（0.39.0 起；以前是 .png）、`lopda-contact-…png`、`lopda-strip-…png`。出片菜单一打开就先做好三张（单张先），
   A 松开时做好了就直接打开分享菜单；没做好时做完再存（Safari 那时会多一个"保存"按钮，platform.js 已有）。
 - **调试**（`?debug`）：胶卷的菜单多一项「七种片对比」：这卷前 4 张非空白的照片用同样的种子按七种片种各冲一遍，存成一张对比图
   （一行一种片，一列一格，左边写片名），`lopda-compare-…png`。不改动这卷。
@@ -1340,7 +1340,7 @@ CPU 降速 4 倍（DevTools 的 CPU throttling，粗略代表旧手机）时，�
   没有授权时 `inBook` 回 `null`，不弹框。三个调用是 `PAD.dict.addWord(word)` / `removeWord(word)` ->
   `"saved" | "denied" | "full" | null`、`PAD.dict.inBook(words)` -> `boolean[] | null`；和词典程序、阅读器同一个
   2000 词上限、同一条存储路径，只存 ECDICT 的词条头词（`lookup` 后的 `word`，不在 ECDICT 里就 `null`），没有 toast、没有声音。
-  设置 → 传感器与相机 列出被授权的 app（生词本），撤销只收回权限，不动已经加进去的词。所有 `PAD.dict` 调用共用每秒 10 次的限制。
+  设置 → 传感器与权限 列出被授权的 app（生词本），撤销只收回权限，不动已经加进去的词。所有 `PAD.dict` 调用共用每秒 10 次的限制。
 - **实现**：`runtime/wordlist.js`（`window.LopdaWordList`，纯函数加一个 source，`tests/wordlist.test.mjs`）；
   `runtime/apps/dict.js` 建一个 `LopdaWordList.source` 交给 `LP.dict.apps`，`book(BUILTIN)` 和 `D.lemma` 用的就是词典程序那份，
   lookup 第一次才解包整本书，不会加载两次。`runtime/apps/store.js` 的 `dictRequest` 负责转发：每个 app 一个
@@ -1364,3 +1364,33 @@ app 不知道手机什么时候才是平的。
   并可以用 `flat` 引导玩家。
 - **代码**：`runtime/sensors.js` 的 `tilt()` 和 `feedTilt()`、`sdk/pad-shim.js` 的 `tilt` 消息、`sdk/dev.html` 的方块
   （方块的原始位置就是绝对倾斜）、`tests/sensors.test.mjs` 和 `tests/pad-shim.test.mjs`。
+
+## 38. 单张照片带拍摄时间（EXIF，0.39.0）
+
+2026-10-25，runtime 0.39.0。冲洗店的单张印相原来是 PNG，相册只能按存下的日子排；现在改成 JPEG，EXIF 里带拍摄时间，
+相册按拍摄那天排。位置留到步骤 B（1.0 以后）。
+
+- **为什么 JPEG**：EXIF 在 JPEG 里每个相册都读；PNG 的 eXIf 不可靠。像素不变，只换容器（同一张画布按 92% 编成 JPEG）。
+- **时间总是带上，没有开关**：日期本来就是胶卷的一部分（文件名的日期、日期背、底片 JSON 里的 `taken`），单独一个日期
+  泄露的风险很低；位置才是敏感的那一项，以后单独做，默认关闭，加密放进底片。
+- **写什么**：IFD0 的 Make / Model 都是 `Lo-PDA`，Software `Lo-PDA 0.39.0`，DateTime；Exif IFD 的 ExifVersion `0232`、
+  DateTimeOriginal / DateTimeDigitized、OffsetTime / OffsetTimeOriginal / OffsetTimeDigitized。时间是拍摄那一刻的当地钟面
+  （`taken + tz`），偏移写成 `+08:00` 这样。不写 GPS。
+- **时区跟着底片走**：相机每格多记 `tz`（分钟，东为正），导出的底片带着它；老底片没有就按导出这台手机的时区算。
+  带 `tz` 的底片记成格式版本 3（布局和版本 2 一样），0.39.0 以前的 runtime 照例报「升级以后才能看」，
+  不会当成坏底片（一次性：数据没丢，用 0.39.0 再导入即可）。`tz` 超出 ±840 分钟算坏底片。
+- **不做的**：接触印相、胶片条、对比图和底片还是 PNG、没有 EXIF。
+- **代码**：`runtime/exif.js`（`window.LopdaExif`，纯函数，`tests/exif.test.mjs`）；`apps/darkroom.js` 的
+  `buildPrint("p-single")` 返回 `{blob, name}`；`LP.saveBlob`；`negative.js` 的 `FRAME_KEYS`。
+
+## 39. 设置整理：菜单、分享、关于（0.40.0）
+
+2026-10-24，runtime 0.40.0。设置页一直是一长列：音量、语言、授权、AI、备份、更新和关于叠在一起，在 331×359 上要滚很久才能找到「恢复」。owner 还想把掌机当面递给朋友：让对方扫一下就能打开，也想知道「PDA」到底是什么。
+
+- **一页菜单，五个子页**：主页面保留音量、语言和系统（版本 + 检查更新），下面一条 2 px 墨线；传感器与权限、AI 线路、备份与恢复、分享、关于各占一整行 44 px，带像素图标与状态（「{n} 个程序 ›」「今天 ›」「未接上 ›」），整行可点。子页沿用 AI 线路已有的 ◂ 返回栏，返回主页面。每行还是至少 44 px，331 宽不横滚。
+- **没有搬动数据**：设置文档、授权文档、`backup-meta`、备份 zip 和恢复的每一步检查都不变；只是控件换了一个页面。备份页打开时照旧统计本机存档与胶卷盒，对话框忙的时候不被收起。
+- **二维码在机身里画**：分享页用 vendor 的 qrcode-generator（MIT，原样拷入）在 canvas 上用 `putImageData` 画 `https://nowheremanx.github.io/lopda/`，纠错 M、4 格静区，scale 4，四色里的墨与纸；不联网。`runtime/qr.js` 是 runtime 自己的小接口（`LopdaQR.matrix/draw`），以后的 PAD API 可以共用。分享的地址是公开站点，不用 `location`：PR 预览和 localhost 也要分享真实地址。
+- **发给朋友**：有 `navigator.share` 时显示「发送链接…」，只在 click 里调用；「复制」走剪贴板，失败就选中网址并提示长按复制。
+- **关于页**：解释 PDA 与这台虚构的 1986 年掌机，列出本机版本、仓库、MIT 和随 runtime 发布的第三方许可（字体、ECDICT/WordNet、holiday-cn、binjgb、qrcode-generator、样书）。原来主页的 `.about` 小框不再存在。
+- **不做的**：不做可编辑的分享文案，不生成短链（要联网），不把二维码存成图片文件（扫码就够了）。
+- **代码**：`runtime/apps/settings.js`（菜单、子页、`SHARE_URL`、`ROW_ICONS`）、`runtime/index.html` 的五个 `v-set-*`、`runtime/lopda.css`、`runtime/qr.js` + `runtime/vendor/qrcode-generator/`、`tests/qr.test.mjs`；e2e 从主页点进子页再断言。

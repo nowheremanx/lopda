@@ -29,7 +29,7 @@
 // program does not shift the others. Paint was a built-in up to runtime 0.4.1 and is a preinstalled app
 // since 0.5.0: each tree gets the shots for the paint it has (05-paint* or 05-paint-app*). Likewise the cutter
 // (up to 0.13.x: 10-cam-develop-menu, strip/card/cut downloads, 11-13 cutter) and the darkroom that replaced it
-// (0.14.0+: 10-cam-done-menu, 11-13b darkroom, negative.png), and its developing (0.20.0+: 13c-13f, print.png,
+// (0.14.0+: 10-cam-done-menu, 11-13b darkroom, negative.png), and its developing (0.20.0+: 13c-13f, print.jpg,
 // contact.png, filmstrip.png). The roll's seed comes from crypto.getRandomValues, which is seeded as well.
 import { createServer } from "node:http";
 import { readFile, writeFile, mkdir, readdir, rm } from "node:fs/promises";
@@ -242,7 +242,7 @@ async function capture(rootArg, outArg) {
       await p.keyboard.press("ArrowLeft");
       await p.keyboard.press("Enter"); await p.waitForSelector("#dk-sheet:not([hidden])");
       await shot("13e-darkroom-print-menu");
-      await download(() => p.keyboard.press("x"), "print.png"); await settle(400);
+      await download(() => p.keyboard.press("x"), "print.jpg"); await settle(400);
       await p.keyboard.press("Enter"); await p.keyboard.press("ArrowDown");
       await download(() => p.keyboard.press("x"), "contact.png"); await settle(400);
       await p.keyboard.press("Enter"); await p.keyboard.press("ArrowDown"); await p.keyboard.press("ArrowDown");
@@ -323,7 +323,7 @@ async function capture(rootArg, outArg) {
   /* settings, English and back */
   const settings = async (name) => {
     /* the version changes with every runtime release; mask it so a version bump is not a diff.
-       Only the number goes: the label next to it ("系统版本") is still compared. */
+       Only the number goes: the label next to it ("系统") is still compared. */
     await p.evaluate(() => {
       document.getElementById("set-version").textContent = "Lo-PDA (version masked)";
       const upd = document.getElementById("upd-label");
@@ -333,6 +333,12 @@ async function capture(rootArg, outArg) {
   };
   await home(); await tile("settings"); await p.waitForTimeout(700);
   await settings("15-settings");
+  await p.click("#set-share-open"); await p.waitForSelector("#v-set-share:not([hidden])");
+  await shot("15a-settings-share");
+  await p.click("#set-share-back"); await p.waitForSelector("#v-settings:not([hidden])");
+  await p.click("#set-about-open"); await p.waitForSelector("#v-set-about:not([hidden])");
+  await settings("15b-settings-about");
+  await p.click("#set-about-back"); await p.waitForSelector("#v-settings:not([hidden])");
   await p.click("[data-lang=en]"); await p.waitForTimeout(400);
   await settings("16-settings-en");
   await home(); await p.waitForTimeout(300);
