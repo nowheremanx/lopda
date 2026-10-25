@@ -1576,10 +1576,9 @@ function weatherNow(){
   if(!P.save) return "sun";
   return Pet.weatherOf(P.save.born,dayKey(now()),seasonOf(now()));
 }
-/* Only rain has a voice. The chip's "wind" preset is filtered noise, and at this low level the owner heard it
-   as rain while the window only showed a few faint lines; so wind is silent and the window's bent strokes carry
-   it. Rain's sound is asked for with the weather of the exact frame that was drawn (P.lastScene), never a second
-   reading of the clock, and only while the room (and so the window) is on screen: a sub-screen covers it. The
+/* Rain and wind have a voice, each its own chip preset. The sound is asked for with the weather of the exact frame
+   that was drawn (P.lastScene), never a second reading of the clock, so what you hear is what the window shows,
+   and only while the room (and so the window) is on screen: a sub-screen covers it. The
    sound stops on the same frame the weather changes, when it leaves, and while the page is hidden. */
 function silenceWeather(){
   if(!P.ambName) return;
@@ -1588,7 +1587,8 @@ function silenceWeather(){
 }
 function syncWeatherSound(weather){
   if(!isOpen() || document.hidden){ silenceWeather(); return; }
-  var name=weather==="rain" ? "rain" : null;
+  /* the drawn weather and its own preset: rain plays rain, wind plays wind, the rest are quiet */
+  var name=weather==="rain" ? "rain" : weather==="wind" ? "wind" : null;
   if(name===P.ambName) return;
   P.ambName=name;
   if(LP.chip && typeof LP.chip.ambience==="function")
