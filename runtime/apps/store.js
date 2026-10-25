@@ -168,8 +168,8 @@ function storeItem(r){
   var tile=document.createElement("span"); tile.className="tile"; fillTile(tile,r);
   var body=document.createElement("div"); body.className="store-body";
   var t=document.createElement("b"); t.textContent=appName(r)+" v"+r.version;
-  var badge=isNew(r) ? "store.new" : (isUpdated(r) ? "store.updatebadge" : "");
-  if(badge){ var nb=document.createElement("span"); nb.className="store-badge"; nb.textContent=tr(badge); t.appendChild(document.createTextNode(" ")); t.appendChild(nb); }
+  var badge=isUpdated(r) ? "store.updatebadge" : (isNew(r) ? "store.new" : "");
+  if(badge){ var nb=document.createElement("span"); nb.className="store-badge"; nb.textContent=tr(badge); nb.title=tr(badge+".title"); t.appendChild(document.createTextNode(" ")); t.appendChild(nb); }
   var d=document.createElement("span"); d.textContent=appDesc(r);
   var m=document.createElement("small"); m.textContent=(r.author||tr("store.anon"))+" · "+(r.license||"")+" · "+Math.max(1,Math.round((r.bytes||0)/1024))+" KB";
   body.appendChild(t); body.appendChild(d); body.appendChild(m);
@@ -283,7 +283,9 @@ function doInstall(r,btn,added){
   fetchApp(r).then(function(prev){
     added.filter(function(p){ return GRANTABLE.indexOf(p)>=0; }).forEach(function(p){ grant(r.id,p); });
     toast(tr(prev?"store.updated":"store.installed",{name:appName(r)})); sfx("ok");
+    S.revealApp=r.id;   /* the home screen scrolls this tile into view when it comes back */
     renderStore(true);
+    if(!$("v-home").hidden) renderHome();
   }).catch(function(e){
     toast(tr("store.failed",{msg:e.message})); sfx("err"); btn.disabled=false; btn.textContent=tr("store.retry");
   });
