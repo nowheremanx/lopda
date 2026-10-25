@@ -15,6 +15,7 @@
       "app.notes": "记事本", "app.camera": "点阵相机", "app.darkroom": "冲洗店",
       "app.cart": "卡带机", "app.store": "应用商店", "app.settings": "设置", "app.unnamed": "无名",
       "app.scripts": "脚本",
+      "app.studio": "四轨机",
 
       "scripts.title": "脚本",
       "scripts.new": "新建", "scripts.import": "导入",
@@ -361,6 +362,23 @@
       "cart.saved": "存好了（覆盖上一份）。", "cart.loadgo": "确认读档", "cart.restored": "回到 {when} 的存档。",
       "cart.loadfail": "存档读不进去。",
 
+      "studio.bpm": "{n} BPM",
+      "studio.play": "播放", "studio.stop": "停止",
+      "studio.slower": "慢一点", "studio.faster": "快一点",
+      "studio.tour": "教程", "studio.menu": "菜单", "studio.title": "四轨机",
+      "studio.drum.kick": "底鼓", "studio.drum.snare": "军鼓", "studio.drum.hat": "镲", "studio.drum.perc": "打击",
+      "studio.cell": "{drum} 第 {n} 步",
+      "studio.new": "新磁带", "studio.back": "返回", "studio.new.ask": "换一盘新磁带？这一盘的节奏会清掉。", "studio.confirm": "确认",
+      "studio.kit": "换鼓组：{kit}", "studio.kit.soft": "软鼓", "studio.kit.chip": "芯片",
+      "studio.hush": "静音键开着就听不到外放",
+      "studio.bad": "这盘磁带读不出来，换了一盘新的",
+      "studio.tour.skip": "跳过", "studio.tour.next": "下一步", "studio.tour.done": "好了",
+      "studio.tour.play": "按 ▸ 听听这盘磁带。",
+      "studio.tour.grid": "这 16 格是一小节：一行一拍，从左上走到右下。亮着的格子会响。",
+      "studio.tour.cell": "点一个空格，加一下底鼓；再点一次就去掉。",
+      "studio.tour.drums": "四只鼓各有自己的 16 格，叠在一起就是节奏。换一只看看。",
+      "studio.tour.tempo": "− + 调快慢；≡ 里换鼓组、新磁带。HOME 随时离开，会自动保存。",
+
       "boot.nostore": "这台浏览器不让存档，关掉页面后内容会丢。"
     },
 
@@ -368,6 +386,7 @@
       "app.notes": "Notes", "app.camera": "Camera", "app.darkroom": "Darkroom",
       "app.cart": "Cartridge", "app.store": "Store", "app.settings": "Settings", "app.unnamed": "Untitled",
       "app.scripts": "Scripts",
+      "app.studio": "Tape4",
 
       "scripts.title": "Scripts",
       "scripts.new": "New", "scripts.import": "Import",
@@ -714,6 +733,23 @@
       "cart.nopower": "Won't start: {msg}", "cart.badrom": "can't read this cart",
       "cart.saved": "Saved (over the last one).", "cart.loadgo": "Load?", "cart.restored": "Back to the save from {when}.",
       "cart.loadfail": "Couldn't load the save.",
+
+      "studio.bpm": "{n} BPM",
+      "studio.play": "Play", "studio.stop": "Stop",
+      "studio.slower": "Slower", "studio.faster": "Faster",
+      "studio.tour": "Tour", "studio.menu": "Menu", "studio.title": "Tape4",
+      "studio.drum.kick": "Kick", "studio.drum.snare": "Snare", "studio.drum.hat": "Hat", "studio.drum.perc": "Perc",
+      "studio.cell": "{drum} step {n}",
+      "studio.new": "New tape", "studio.back": "Back", "studio.new.ask": "Start a new tape? This one's beat is cleared.", "studio.confirm": "Confirm",
+      "studio.kit": "Kit: {kit}", "studio.kit.soft": "Soft", "studio.kit.chip": "Chip",
+      "studio.hush": "With the silent switch on, the speaker stays quiet",
+      "studio.bad": "That tape couldn't be read; here is a fresh one",
+      "studio.tour.skip": "Skip", "studio.tour.next": "Next", "studio.tour.done": "Done",
+      "studio.tour.play": "Press ▸ to hear this tape.",
+      "studio.tour.grid": "These 16 squares are one bar: a row is a beat, left to right, top to bottom. Lit squares play.",
+      "studio.tour.cell": "Tap an empty square to add a kick. Tap it again to remove it.",
+      "studio.tour.drums": "Four drums, 16 squares each; together they make the beat. Try another one.",
+      "studio.tour.tempo": "− and + set the speed; ≡ has the kit and a new tape. HOME leaves any time; it saves itself.",
 
       "boot.nostore": "This browser won't keep data. It's lost when the page closes."
     }
