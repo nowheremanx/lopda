@@ -3404,6 +3404,215 @@ test("camera: the Place switch follows the position only while the viewfinder ru
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
+/* ---------- darkroom step B part 4: the place in the single print, the sealed negative, erasing it ---------- */
+test("darkroom: the single print alone carries the place; a negative keeps it sealed; another key cannot open it; 抹掉地点 erases it", { skip, timeout: 300000 }, async (t) => {
+  const PLACE = { latitude: 12.5, longitude: 45.25, accuracy: 10 };
+  const near = (a, b) => Math.abs(a - b) < 1e-5;
+  const geoCounters = () => {
+    const g = navigator.geolocation, watch = g.watchPosition.bind(g);
+    window.__geo = { watch: 0, fixes: 0 };
+    g.watchPosition = function (ok, err, o) {
+      window.__geo.watch++;
+      return watch(ok ? function (pos) { window.__geo.fixes++; return ok(pos); } : ok, err, o);
+    };
+  };
+  const fs = await import("node:fs/promises");
+  const press = async (p, key) => { await p.keyboard.down(key); await p.waitForTimeout(30); await p.keyboard.up(key); await p.waitForTimeout(60); };
+  const save = async (p, action) => { const [d] = await Promise.all([p.waitForEvent("download", { timeout: 60000 }), action()]); return { name: d.suggestedFilename(), buf: await fs.readFile(await d.path()) }; };
+  const items = (p) => p.$$eval("#dk-sheet li", (ls) => ls.map((l) => l.querySelector("span").textContent));
+  const toast = (p, re) => p.waitForFunction((s) => { const el = document.getElementById("toast"); return !el.hidden && new RegExp(s).test(el.textContent); }, re.source, { timeout: 20000 });
+  const waitLive = (p) => p.waitForFunction(() => {
+    const v = document.getElementById("cam-video");
+    return !document.getElementById("cam-live-tag").hidden && v.readyState >= 2 && v.videoWidth > 0;
+  }, null, { timeout: 10000 });
+
+  /* a) a small roll with Place on: every shot sealed; unload and develop it */
+  const first = await camPage(t, geoCounters, null, "", {
+    permissions: ["camera", "geolocation"], geolocation: PLACE
+  });
+  const p = first.p, errors = first.errors;
+  const readDoc = (path) => idb.doc(p, path);
+  const waitDoc = async (path, ok = (d) => !!d) => {
+    for (let i = 0; i < 100; i++) { const d = await readDoc(path); if (ok(d)) return d; await p.waitForTimeout(100); }
+    assert.fail("no document at " + path);
+  };
+  await first.open();
+  await p.waitForSelector("#cam-load:not([hidden])");
+  await press(p, "ArrowDown");                                       /* 12 -> 8 */
+  await p.waitForFunction(() => /8 张/.test(document.getElementById("roll-count").textContent));
+  await p.click("#roll-go");
+  await waitLive(p);
+  const id = (await waitDoc("data/users/local/film")).roll;
+
+  await press(p, "Enter");
+  await p.waitForSelector("#cam-menu:not([hidden])");
+  await p.locator("#menu-list li", { hasText: "地点" }).click();
+  await waitDoc("data/users/local/darkroom-key");
+  await p.waitForFunction(() => {
+    const li = [...document.querySelectorAll("#menu-list li")].find((x) => x.textContent.startsWith("地点"));
+    return !!li && li.textContent.endsWith("开");
+  });
+  await p.locator("#menu-list li", { hasText: "回到取景" }).click();
+  await p.waitForFunction(() => window.__geo.watch >= 1 && window.__geo.fixes >= 1, null, { timeout: 10000 });
+  await waitLive(p);
+  for (let i = 0; i < 8; i++) {
+    await p.click("#cam-shutter");
+    await p.waitForFunction(() => document.getElementById("cam-shut").hidden, null, { timeout: 3000 });
+    await p.waitForTimeout(120);
+  }
+  await p.waitForSelector("#cam-menu:not([hidden])");
+  await p.locator("#menu-list li", { hasText: "取出胶卷" }).click();
+  await toast(p, /胶卷放进冲洗店的胶卷盒了/);
+  const sealed = await waitDoc(`data/users/local/rolls/items/${id}`, (r) => r && r.frames && r.frames.length === 8);
+  assert.ok(sealed.frames.every((f) => f.geo), "every shot carries a sealed place");
+
+  await p.click("#home-key");
+  await p.locator("#home .app", { has: p.locator(".label", { hasText: /^冲洗店$/ }) }).click();
+  await p.waitForFunction(() => /人像 400/.test(document.getElementById("dk-list").textContent));
+  await press(p, "x");
+  assert.deepEqual(await items(p), ["冲洗", "起名", "导出底片", "抹掉地点", "扔掉"]);
+  await press(p, "x");
+  await p.waitForSelector("#dk-dev:not([hidden])");
+  await p.waitForSelector("#dk-view:not([hidden])", { timeout: 60000 });
+  await p.waitForFunction(() => document.getElementById("dk-vwait").hidden, null, { timeout: 20000 });
+
+  /* b) single print of frame 1: the place is in its GPS IFD, and the sheet says so */
+  await press(p, "Enter");
+  await p.waitForFunction(() => {
+    const n = document.querySelector("#dk-sheet .dk-note");
+    return !!n && /单张印相含拍摄地点/.test(n.textContent);
+  }, null, { timeout: 30000 });
+  const single = await save(p, () => press(p, "x"));
+  assert.match(single.name, /^lopda-print-\d{8}-portrait-400-001-01\.jpg$/);
+  const exif = EXIF.read(single.buf);
+  assert.ok(exif && exif.dateTimeOriginal, "the shooting time is still there");
+  assert.ok(exif.gps, "the single print carries the place");
+  assert.ok(near(exif.gps.lat, PLACE.latitude) && near(exif.gps.lon, PLACE.longitude), JSON.stringify(exif.gps));
+  assert.ok(Math.abs(exif.gps.acc - PLACE.accuracy) < 0.01);
+
+  /* c) the contact sheet and the strip stay PNGs without EXIF or a GPS tag */
+  await press(p, "Enter"); await press(p, "ArrowDown");
+  const card = await save(p, () => press(p, "x"));
+  assert.match(card.name, /^lopda-contact-.*\.png$/);
+  assert.deepEqual(pngSize(card.buf), [1080, 1440]);
+  assert.equal(EXIF.read(card.buf), null);
+  assert.ok(!card.buf.toString("latin1").includes("GPS"), "the contact sheet has no GPS tag");
+  await press(p, "Enter"); await press(p, "ArrowDown"); await press(p, "ArrowDown");
+  const strip = await save(p, () => press(p, "x"));
+  assert.match(strip.name, /^lopda-strip-.*\.png$/);
+  assert.equal(EXIF.read(strip.buf), null);
+  assert.ok(!strip.buf.toString("latin1").includes("GPS"), "the strip has no GPS tag");
+
+  /* d) the negative carries the sealed place only: no test coordinate in the clear */
+  await press(p, "z");
+  await p.waitForFunction(() => document.getElementById("dk-view").hidden);
+  await press(p, "x");
+  await p.waitForFunction(() => !document.getElementById("dk-sheet").hidden);
+  assert.deepEqual(await items(p), ["看照片", "起名", "导出底片", "抹掉地点", "扔掉"]);
+  await press(p, "ArrowDown"); await press(p, "ArrowDown"); await press(p, "x");
+  await p.waitForFunction(() => /彩色原片/.test(document.getElementById("dk-sheet").textContent));
+  await press(p, "ArrowUp");
+  const neg = await save(p, () => press(p, "x"));
+  await toast(p, /底片导出了/);
+  const latin = neg.buf.toString("latin1");
+  assert.ok(latin.includes('"geo"'), "the sealed place travels in the negative");
+  for (const s of ["12.5", "45.25", "12.50000", "45.250000", "1250000", "4525000"])
+    assert.ok(!latin.includes(s), "no plaintext " + s);
+  const keyText = await p.evaluate(() => LP.darkroomKey.info().then((i) => i && i.text));
+  assert.match(keyText, /^[0-9A-F]{4}(?:-[0-9A-F]{4}){8}$/);
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+
+  /* e) a fresh profile with a different key: the negative imports, the time prints, the place does not;
+        the first handheld's key, pasted in Settings, opens it again */
+  const { p: q, errors: qErrors } = await page(t, { locale: "zh-CN", serviceWorkers: "block" });
+  await q.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await q.waitForFunction(() => window.LP && window.LP.S.db);
+  const other = await q.evaluate(() => LP.darkroomKey.ensure().then((b) => LopdaGeotag.keyText(b)));
+  assert.notEqual(other, keyText);
+  assert.equal(await q.evaluate(() => LP.darkroomKey.ring().then((r) => r.length)), 1);
+  await q.locator("#home .app", { has: q.locator(".label", { hasText: /^冲洗店$/ }) }).click();
+  await q.waitForFunction(() => document.getElementById("dk-file") && document.getElementById("dk-list"));
+  await q.setInputFiles("#dk-file", { name: neg.name, mimeType: "image/png", buffer: neg.buf });
+  await toast(q, /底片放进胶卷盒了/);
+  await q.waitForFunction(() => /已冲洗/.test(document.getElementById("dk-list").textContent));
+  await press(q, "x");
+  assert.deepEqual(await items(q), ["看照片", "起名", "导出底片", "抹掉地点", "扔掉"]);
+  await press(q, "x");
+  await q.waitForSelector("#dk-view:not([hidden])");
+  await q.waitForFunction(() => document.getElementById("dk-vwait").hidden, null, { timeout: 20000 });
+  await press(q, "Enter");
+  await q.waitForFunction(() => !document.getElementById("dk-sheet").hidden);
+  await q.waitForTimeout(1200);
+  assert.equal(await q.locator("#dk-sheet .dk-note").count(), 0, "no place note without the key");
+  const stranger = await save(q, () => press(q, "x"));
+  const strangerExif = EXIF.read(stranger.buf);
+  assert.ok(strangerExif && strangerExif.dateTimeOriginal, "the time still prints");
+  assert.equal(strangerExif.gps, undefined, "a foreign key opens nothing");
+
+  await q.click("#home-key");
+  await q.locator("#home .app", { has: q.locator(".label", { hasText: /^设置$/ }) }).click();
+  await q.waitForSelector("#v-settings:not([hidden])");
+  await q.click("#set-key-open");
+  await q.waitForSelector("#v-set-key:not([hidden])");
+  await q.fill("#set-key-input", keyText);
+  await q.click("#set-key-use");
+  await q.waitForFunction(() => /已换用这把钥匙|已经在用/.test(document.getElementById("set-key-result").textContent), null, { timeout: 10000 });
+  assert.equal(await q.evaluate(() => LP.darkroomKey.ring().then((r) => r.length)), 2, "the fresh key is kept too");
+
+  await q.click("#home-key");
+  await q.locator("#home .app", { has: q.locator(".label", { hasText: /^冲洗店$/ }) }).click();
+  await q.waitForFunction(() => /已冲洗/.test(document.getElementById("dk-list").textContent));
+  await press(q, "x"); await press(q, "x");
+  await q.waitForSelector("#dk-view:not([hidden])");
+  await q.waitForFunction(() => document.getElementById("dk-vwait").hidden, null, { timeout: 20000 });
+  await press(q, "Enter");
+  await q.waitForFunction(() => {
+    const n = document.querySelector("#dk-sheet .dk-note");
+    return !!n && /单张印相含拍摄地点/.test(n.textContent);
+  }, null, { timeout: 30000 });
+  const opened = await save(q, () => press(q, "x"));
+  const openedExif = EXIF.read(opened.buf);
+  assert.ok(openedExif.gps, "the first handheld's key opens the place");
+  assert.ok(near(openedExif.gps.lat, PLACE.latitude) && near(openedExif.gps.lon, PLACE.longitude));
+
+  /* f) 抹掉地点: the confirmation keeps 保留 selected until the user moves to 抹掉 */
+  await press(q, "z");
+  await q.waitForFunction(() => document.getElementById("dk-view").hidden);
+  await press(q, "x");
+  await q.waitForFunction(() => !document.getElementById("dk-sheet").hidden);
+  assert.deepEqual(await items(q), ["看照片", "起名", "导出底片", "抹掉地点", "扔掉"]);
+  await press(q, "ArrowDown"); await press(q, "ArrowDown"); await press(q, "ArrowDown");
+  await press(q, "x");
+  await q.waitForFunction(() => /抹掉这卷的拍摄地点/.test(document.getElementById("dk-sheet").textContent));
+  assert.deepEqual(await items(q), ["抹掉", "保留"]);
+  assert.equal(await q.textContent("#dk-sheet li.on span"), "保留", "the safe choice is selected");
+  assert.match(await q.textContent("#dk-sheet"), /每张底片里的地点都会删掉/);
+  await press(q, "ArrowUp");
+  await press(q, "x");
+  await toast(q, /地点已抹掉/);
+  assert.deepEqual(await items(q), ["看照片", "起名", "导出底片", "扔掉"], "the erase row is gone");
+  let erased = null;
+  for (let i = 0; i < 50; i++) {
+    const d = await idb.doc(q, `data/users/local/rolls/items/${id}`);
+    if (d && d.frames.every((f) => !("geo" in f))) { erased = d; break; }
+    await q.waitForTimeout(100);
+  }
+  assert.ok(erased, "the roll document keeps no place");
+
+  await press(q, "ArrowUp"); await press(q, "ArrowUp"); await press(q, "ArrowUp");
+  await press(q, "x");
+  await q.waitForSelector("#dk-view:not([hidden])");
+  await q.waitForFunction(() => document.getElementById("dk-vwait").hidden, null, { timeout: 20000 });
+  await press(q, "Enter");
+  await q.waitForTimeout(1200);
+  assert.equal(await q.locator("#dk-sheet .dk-note").count(), 0, "no place note after erasing");
+  const gone = await save(q, () => press(q, "x"));
+  const goneExif = EXIF.read(gone.buf);
+  assert.ok(goneExif && goneExif.dateTimeOriginal);
+  assert.equal(goneExif.gps, undefined, "the erased place is not printed");
+  assert.deepEqual(qErrors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
 /* ---------- darkroom step 2 (docs/design/darkroom.md section 9): developing, the viewer, the three prints ---------- */
 /* width and height from a PNG's IHDR */
 const pngSize = (buf) => [buf.readUInt32BE(16), buf.readUInt32BE(20)];
