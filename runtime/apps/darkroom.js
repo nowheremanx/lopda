@@ -288,11 +288,18 @@ function exportNegative(){
 /* the sealed places go, the times and pictures stay; prints made from the old place are dropped */
 function erasePlaces(){
   var r=current(); if(!r) return;
+  /* the places leave memory only once the roll without them is stored: a failed write keeps them (put shows the error) */
+  var kept=r.frames.map(function(f){ return f.geo; });
   r.frames.forEach(function(f){ delete f.geo; });
-  if(S.db) put(S.refs.rolls.doc(r.id),r);
-  D.prints=null; D.neg=null;
-  sfx("ok"); toast(tr("dk.erased"));
-  toMenu("discard"); renderSheet(); render();
+  (S.db ? put(S.refs.rolls.doc(r.id),r) : Promise.resolve(true)).then(function(ok){
+    if(!ok){
+      r.frames.forEach(function(f,k){ if(kept[k]) f.geo=kept[k]; });
+      sfx("err"); toMenu("erase"); renderSheet(); render(); return;   /* put has said why */
+    }
+    D.prints=null; D.neg=null;
+    sfx("ok"); toast(tr("dk.erased"));
+    toMenu("discard"); renderSheet(); render();
+  });
 }
 function discard(){
   var r=current(); if(!r) return;

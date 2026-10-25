@@ -1,19 +1,13 @@
 // runtime/exif.js: the EXIF APP1 segment of a single print (decisions.md sections 38 and 40, docs/design/darkroom.md section 6).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import vm from "node:vm";
-import { execFileSync } from "node:child_process";
-import { runScript, ROOT } from "./helpers.mjs";
+import { createHash } from "node:crypto";
+import { runScript } from "./helpers.mjs";
 
 const X = runScript("runtime/exif.js").LopdaExif;
-/* the code as it stood before the GPS IFD, to prove a print without a place keeps its exact bytes */
-function oldExif() {
-  const ctx = vm.createContext({ console });
-  ctx.window = ctx;
-  vm.runInContext(execFileSync("git", ["show", "HEAD:runtime/exif.js"], { cwd: ROOT, encoding: "utf8" }), ctx);
-  return ctx.LopdaExif;
-}
-const OLD = oldExif();
+/* sha256 of insert(jpeg(), {taken: TAKEN, tz: 480, software: "Lo-PDA 0.39.0"}) from exif.js as it stood before the GPS
+   IFD (main at 81f3b63, runtime 0.41.0): a print without a place keeps its exact bytes */
+const NO_GPS_SHA = "b8354f663a879ae7a6d7176d500aba7d652ee729e9298a8d218ad159cc5953dc";
 
 /* A JPEG as far as insert/read care: SOI, APP0 JFIF, an old APP1 Exif, COM, SOS with a few scan bytes, EOI.
    insert and read stop at SOS, so no entropy-coded image is needed. */
@@ -230,7 +224,8 @@ test("a negative place writes S and W and reads back signed", () => {
 
 test("without a place, the bytes are exactly the old ones: gps absent, null and invalid all match", () => {
   const info = { taken: TAKEN, tz: 480, software: "Lo-PDA 0.39.0" };
-  const want = Buffer.from(OLD.insert(jpeg(), info));
+  const want = Buffer.from(X.insert(jpeg(), info));
+  assert.equal(createHash("sha256").update(want).digest("hex"), NO_GPS_SHA, "the same bytes as before the GPS IFD");
   for (const gps of [undefined, null, {}, "nope", { lat: NaN, lon: 0 }, { lat: 91, lon: 0 }, { lat: 0, lon: -181 }]) {
     const out = X.insert(jpeg(), gps === undefined ? info : { ...info, gps });
     assert.ok(Buffer.from(out).equals(want), "gps " + JSON.stringify(gps));
