@@ -658,6 +658,12 @@ textarea::placeholder{color:var(--ink-2)}
 /* the eight pitch keys, two rows of four, the higher octave underlined */
 .st-keys-wrap{flex:none;padding:0 8px 6px}
 .st-keys{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));grid-auto-rows:44px;gap:4px}
+/* 331x359: take the padding out of the bars and the keys, and 2 px from the grid gaps, so four cells still
+   measure at least 40 px after the remaining scale. The buttons themselves stay 44 px. */
+.studio.st-short .st-bar,.studio.st-short .st-nav,.studio.st-short .st-tabs{padding-top:0;padding-bottom:0}
+.studio.st-short .st-board{padding:2px 4px;overflow:hidden}
+.studio.st-short .st-keys-wrap{padding-bottom:0}
+.studio.st-short .st-keys{gap:2px}
 .st-key{position:relative;min-height:44px;min-width:0;display:flex;align-items:center;justify-content:center;padding:0;background:var(--lcd);color:var(--ink);border:2px solid var(--ink);font-family:var(--f-pix);font-size:18px;line-height:1;cursor:pointer}
 .st-key.on{background:var(--ink);color:var(--lcd)}
 .st-key-line{position:absolute;left:32%;right:32%;bottom:5px;height:2px;background:currentColor;display:none}

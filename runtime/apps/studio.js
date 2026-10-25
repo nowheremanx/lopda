@@ -223,6 +223,20 @@ function setSong(song){
   if(T.playing && T.ctx) reanchor(song.bpm);
   T.song=song;
   if(!T.song.patterns || !T.song.patterns[T.pat]) T.pat=0;
+  /* a different tape may be shorter: keep every in-memory cursor inside it */
+  var n=T.song.song && T.song.song.length ? T.song.song.length : 1;
+  if(!(T.slot>=0)) T.slot=0;
+  if(T.slot>n-1) T.slot=n-1;
+  var pat=T.song.patterns && T.song.patterns[T.pat];
+  var last=pat && pat.len>0 ? pat.len-1 : SONGS.STEPS-1;
+  if(T.noteSel){
+    if(T.noteSel.bass>last) T.noteSel.bass=last;
+    if(T.noteSel.melody>last) T.noteSel.melody=last;
+  }
+  if(T.chordSel>1) T.chordSel=1;
+  if(T.screen==="song"){ if(T.focus>n-1) T.focus=n-1; }
+  else if(T.focus>last) T.focus=last;
+  if(T.focus<0) T.focus=0;
 }
 /* one note or hit: the drum kit, the voice of each track, the chord expanded (12.6, 12.7) */
 function playEvent(e,at,bpm){
@@ -252,6 +266,15 @@ function scheduleRange(from,to){
    letter keeps blinking and data-play-pat keeps the old pattern meanwhile. */
 function scheduleTo(to){
   var guard=0, b, p;
+  /* a stalled main thread can leave the frontier behind the ears; scheduling those ticks now would play the
+     whole missed stretch at once (synth hit() and note() clamp past times to now) */
+  if(T.lastTick<T.heard) T.lastTick=T.heard;
+  /* the same stall can leave a queued boundary behind the ears: move it to the next bar worth waiting for */
+  if(T.mode==="pattern" && T.pendingPat>=0 && T.chainPat!==T.pendingPat){
+    b=Math.max(T.lastTick,T.heard+1);
+    p=patternTicks(T.chainPat);
+    if(T.boundaryGlobal<b) T.boundaryGlobal=Math.ceil(b/p)*p;
+  }
   while(T.lastTick<to && guard++<512){
     if(T.mode==="pattern" && T.pendingPat>=0 && T.chainPat!==T.pendingPat){
       b=T.boundaryGlobal;
@@ -538,9 +561,16 @@ function layout(){
   if(!visible()) return;
   var board=$("studio-board"), grid=$("studio-grid"), view=$("v-studio");
   if(!board || !grid || board.hidden) return;
-  var w=board.clientWidth-16, h=board.clientHeight-12;
+  /* below the normal 523 px there is not room for the bars, the pitch keys and four 56 px cells: tighten the
+     chrome and the grid gaps, then scale the grid only as much as it still needs (never below 40 px cells on
+     drums/notes). The 44 px rule stays for every button that is not a grid cell. */
+  var short=view.clientHeight<523;
+  view.classList.toggle("st-short",short);
+  var cs=getComputedStyle(board);
+  var w=board.clientWidth-parseFloat(cs.paddingLeft)-parseFloat(cs.paddingRight);
+  var h=board.clientHeight-parseFloat(cs.paddingTop)-parseFloat(cs.paddingBottom);
   if(w<=0 || h<=0) return;
-  var gap=4, cell=Math.floor((Math.min(w,h)-gap*3)/4);
+  var gap=short?2:4, cell=Math.floor((Math.min(w,h)-gap*3)/4);
   if(cell<56) cell=56;
   var total=cell*4+gap*3;
   /* a grid step's bubble sits above the grid: shrink the grid just enough to keep the bubble
@@ -562,6 +592,7 @@ function layout(){
   }
   grid.style.width=total+"px";
   grid.style.height=total+"px";
+  grid.style.gap=gap+"px";
   grid.style.gridTemplateColumns="repeat(4,"+cell+"px)";
   grid.style.gridTemplateRows="repeat(4,"+cell+"px)";
   /* the smallest phone (331x359) cannot hold four 56 px cells plus the bars and the keys; shrink the drawing
@@ -952,7 +983,8 @@ function renderSheet(){
   if(T.sheet==="pattern"){
     sheetHead(tr("studio.pat.label",{p:letter(T.pat)}));
     sh.appendChild(patternButtons(function(p){
-      T.sheet=""; setPat(p);
+      T.sheet="";
+      if(!setPat(p)) renderSheet();       /* before the read lands this is not an edit: just close the sheet */
     }));
     var copy=el("button","st-sheet-btn","");
     copy.type="button";
@@ -1004,7 +1036,7 @@ function renderSheet(){
 }
 /* copies all four tracks and switches the edit view to the target; while a pattern plays this queues the switch */
 function copyTo(target){
-  if(!T.song || target<0 || target>=SONGS.PATTERNS_MAX || target===T.pat) return;
+  if(!T.loaded || !T.song || target<0 || target>=SONGS.PATTERNS_MAX || target===T.pat) return;
   T.song=SONGS.copyPattern(T.song,T.pat,target);
   T.sheet="";
   touch();                 /* the target may be a pattern this song did not have yet */
@@ -1034,7 +1066,7 @@ function setScreen(s){
   renderAll();
 }
 function setPat(i){
-  if(!T.song || i<0 || i>=SONGS.PATTERNS_MAX) return;
+  if(!T.loaded || !T.song || i<0 || i>=SONGS.PATTERNS_MAX) return false;
   if(!T.song.patterns[i]){ T.song=SONGS.ensurePattern(T.song,i); touch(); }
   if(T.pat!==i){
     T.pat=i;
@@ -1045,17 +1077,30 @@ function setPat(i){
   if(T.playing && T.mode==="pattern") queuePat(i);
   T.painted=null;
   renderAll();
+  return true;
 }
-/* a pattern picked while a pattern plays waits for the next bar of what was already scheduled (12.3) */
+/* A pattern picked while a pattern plays waits for the next bar of what was already scheduled (12.3).
+   The latch rule: if the scheduler has already put the last look-ahead (~0.1 s) into the next bar, lastTick is
+   past that boundary, so ceil() sends the pick one bar later, like a real sequencer. */
 function queuePat(i){
   if(!T.playing || T.mode!=="pattern") return;
+  /* Picking the pattern the ears are hearing cancels a queue the scheduler has not crossed yet (no blink).
+     Once the scheduler has crossed the boundary the switch is latched: B's bar is already being scheduled, so
+     picking A now queues it for the next boundary instead (it blinks until then). */
   if(i===T.playPat && T.chainPat===T.playPat){
     T.pendingPat=-1; T.queued=-1; T.boundaryGlobal=0;
     renderNav();
     return;
   }
+  if(T.pendingPat===i) return;                 /* the same pattern is already the queued one */
   var p=patternTicks(T.chainPat);
-  var b=Math.ceil(T.lastTick/p)*p;
+  var heard=T.heard>0 ? T.heard : 0;
+  var min=Math.max(T.lastTick,heard+1);
+  var b=Math.ceil(min/p)*p;
+  if(T.pendingPat>=0 && T.chainPat===T.pendingPat){
+    /* latched: the scheduler is already inside the queued pattern's bar, so this pick gets the following bar */
+    b=Math.max(T.boundaryGlobal+p,b);
+  }
   T.pendingPat=i;
   T.queued=i;
   T.boundaryGlobal=b;
@@ -1152,6 +1197,14 @@ function selectSlot(i){
   T.focus=T.slot;
   renderSong(); renderNav();
 }
+/* "+" selects the new last slot; the chain is the only scroller, so nudge just its scrollTop */
+function scrollSlotIntoView(){
+  var chain=$("studio-chain"), cell=chain && chain.children[T.slot];
+  if(!chain || !cell) return;
+  var cr=chain.getBoundingClientRect(), r=cell.getBoundingClientRect();
+  if(r.top<cr.top) chain.scrollTop-=cr.top-r.top;
+  else if(r.bottom>cr.bottom) chain.scrollTop+=r.bottom-cr.bottom;
+}
 function songLetter(p){
   if(!T.song || !T.loaded) return;
   T.song=SONGS.setSlot(T.song,T.slot,p);
@@ -1159,7 +1212,7 @@ function songLetter(p){
   renderSong(); renderNav(); renderTabs();
 }
 function addSongSlot(){
-  if(!T.song) return;
+  if(!T.loaded || !T.song) return;
   var s=T.song.song||[0];
   if(s.length>=SONGS.SONG_MAX){ toast(tr("studio.song.full")); return; }
   T.song=SONGS.addSlot(T.song,T.pat);
@@ -1167,9 +1220,10 @@ function addSongSlot(){
   T.focus=T.slot;
   touch();
   renderSong(); renderNav(); renderTabs();
+  scrollSlotIntoView();
 }
 function dropSongSlot(){
-  if(!T.song) return;
+  if(!T.loaded || !T.song) return;
   var s=T.song.song||[0];
   if(s.length<=1) return;
   T.song=SONGS.dropSlot(T.song);
