@@ -417,7 +417,7 @@ test("studio synth: the four-bar demo pattern with the soft kit peaks under 0.9"
   assert.deepEqual(errors, []);
 });
 
-test("studio synth: the whole example song, 16 bars of every track through SOUND, peaks under 0.9", { skip, timeout: 120000 }, async (t) => {
+test("studio synth: the whole example song, 24 bars of every track through SOUND, peaks under 0.9", { skip, timeout: 120000 }, async (t) => {
   const { p, errors } = await studioPage(t, false);
   const r = await p.evaluate(async () => {
     const SR = 22050;
@@ -444,7 +444,7 @@ test("studio synth: the whole example song, 16 bars of every track through SOUND
       rests: ev.filter((e) => e.vel === 0).length, used: Object.keys(used).sort(), peak: s.peak, rms: s.rms };
   });
   t.diagnostic(`${r.events} events (${r.rests} rests skipped) over ${r.bars} bars (${r.seconds.toFixed(3)} s) with the ${r.kit} kit: peak ${r.peak.toFixed(3)}, rms ${r.rms.toFixed(4)}`);
-  assert.equal(r.bars, 16);
+  assert.equal(r.bars, 24);
   assert.equal(r.kit, "soft");
   assert.deepEqual(r.used, ["bass", "chords", "drums", "melody"]);
   assert.ok(r.rests > 0, "the song has rests (they are skipped, not played)");
@@ -2116,7 +2116,7 @@ test("studio: a chain edit while the song plays freezes the heard bar and acts f
   assert.deepEqual(errors, []);
 });
 
-test("studio: the demo tape loads 16 slots and survives a reload", { skip, timeout: 60000 }, async (t) => {
+test("studio: the demo tape loads 24 slots and survives a reload", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await rtPage(t);
   await studioOpen(p);
   await skipTour(p);
@@ -2135,10 +2135,10 @@ test("studio: the demo tape loads 16 slots and survives a reload", { skip, timeo
   assert.equal(await p.getAttribute("#v-studio", "data-pat"), "0", "pattern A");
   await p.click('#studio-screens .st-scr[data-screen="song"]');
   await skipScreenTour(p);
-  assert.equal(await p.locator(".st-chain-cell").count(), 16, "the demo tape is 16 slots");
+  assert.equal(await p.locator(".st-chain-cell").count(), 24, "the demo tape is 24 slots");
   const chain = await p.$$eval(".st-chain-cell", (els) => els.map((e) => e.textContent));
-  assert.deepEqual(chain, ["A", "A", "B", "B", "C", "C", "B", "B", "D", "D", "C", "C", "B", "B", "A", "A"]);
-  await waitStored(p, { song: [0, 0, 1, 1, 2, 2, 1, 1, 3, 3, 2, 2, 1, 1, 0, 0] });
+  assert.deepEqual(chain.join(""), "ABCDABCDEFGHEFGHABCDEFGH");
+  await waitStored(p, { song: [0, 1, 2, 3, 0, 1, 2, 3, 4, 5, 6, 7, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7] });
 
   await p.click("#home-key");
   await p.waitForTimeout(250);
@@ -2146,7 +2146,7 @@ test("studio: the demo tape loads 16 slots and survives a reload", { skip, timeo
   await openTile(p);
   await p.click('#studio-screens .st-scr[data-screen="song"]');
   await skipScreenTour(p);
-  assert.equal(await p.locator(".st-chain-cell").count(), 16, "still 16 slots after the reload");
+  assert.equal(await p.locator(".st-chain-cell").count(), 24, "still 24 slots after the reload");
   assert.deepEqual(errors, []);
 });
 
@@ -2166,7 +2166,7 @@ test("studio: the demo tape clears the old one's other patterns too", { skip, ti
   await p.click("#studio-pat");
   await p.locator('#studio-sheet .st-pat-btn[data-pat="2"]').click();
   const kicks = await p.$$eval("#studio-grid .st-cell.on", (els) => els.map((e) => Number(e.dataset.step)));
-  assert.deepEqual(kicks, [0, 7, 10, 14], "C is the demo's third bar, not the old edit");
+  assert.deepEqual(kicks, [0, 7, 10], "C is the demo's third bar, not the old edit");
   assert.deepEqual(errors, []);
 });
 

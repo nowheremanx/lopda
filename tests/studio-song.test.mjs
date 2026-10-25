@@ -1184,72 +1184,63 @@ test("chainTicks and chainAt: wrap after one pass, and before the start", () => 
   assert.deepEqual(plain(S.chainAt(song, chain, -5)), { slot: 0, p: 0, t: 0 });
 });
 
-test("demoSong: 4 patterns, 16 slots, A is newSong's bar, and its rests come out as vel 0 events", () => {
+test("demoSong: eight patterns in two four-bar phrases, A dorian, ghost notes and rests from DEMO_SONG", () => {
   const song = S.demoSong(2000);
   assert.equal(S.validate(song).error, undefined);
   assert.equal(song.updated, 2000);
   assert.equal(S.demoSong().updated, 0);
   assert.equal(song.v, 1);
-  assert.equal(song.bpm, 82);
-  assert.equal(song.key, 9);
-  assert.equal(song.scale, "minor-penta");
-  assert.equal(song.swing, 0.55);
-  assert.equal(song.kit, "soft");
-  assert.equal(song.patterns.length, 4);
-  assert.equal(song.song.length, 16);
-  assert.deepEqual(plain(song.song), [0, 0, 1, 1, 2, 2, 1, 1, 3, 3, 2, 2, 1, 1, 0, 0]);
+  assert.deepEqual([song.bpm, song.key, song.scale, song.swing, song.kit], [78, 9, "dorian", 0.62, "soft"]);
+  assert.equal(song.patterns.length, 8);
+  assert.deepEqual(plain(song.song), [0, 1, 2, 3, 0, 1, 2, 3, 4, 5, 6, 7, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7]);
   assert.deepEqual(plain(S.DEMO_SONG.song), plain(song.song));
-
-  // A is exactly newSong()'s bar; the example is its own song, not the single demo bar
-  assert.deepEqual(plain(song.patterns[0]), plain(S.newSong().patterns[0]));
+  // the example is its own song: a new tape stays the single demo bar
   assert.deepEqual(plain(S.newSong().song), [0]);
+  assert.equal(S.newSong().scale, "minor-penta");
+
+  // the progression, by chord name and step
+  const chords = plain(song.patterns).map((p) => p.notes.chords.map((n) => S.chordName(song, n.deg).name + "@" + (n.t / S.STEP + 1)).join(" "));
+  assert.deepEqual(chords, ["Am9@1", "D9@1", "Cmaj9@1 Bm7@9", "Em9@1 D9@9", "Cmaj9@1", "Bm7@1 Em9@9", "Am9@1 F#m7b5@9", "D9@1"]);
 
   // rows as [step, value]; a rest is step + null, and lens come from the tie
-  const rows = (p, track, key) => plain(song.patterns[p].notes[track]).map((n) => [n.t / S.STEP + 1, key(n)]);
-  const deg = (n) => (S.isRest(n) ? null : n.deg);
-  const steps = (p, drum) => plain(song.patterns[p].notes.drums).filter((n) => n.key === drum).map((n) => n.t / S.STEP + 1);
+  const rows = (p, track) => plain(song.patterns[p].notes[track]).map((n) => [n.t / S.STEP + 1, S.isRest(n) ? null : n.deg]);
+  assert.deepEqual(rows(0, "bass"), [[1, 0], [3, null], [4, 0], [7, 4], [8, null], [11, 6], [13, 7], [15, 6]]);
+  assert.deepEqual(rows(7, "melody"), [[1, 5], [3, 4], [5, 3], [7, null]]);
+  // the bass reaches the next chord's root a 16th early: C's B on step 8 under Bm7 from step 9
+  assert.deepEqual(rows(2, "bass")[4], [8, 1]);
+  // a third number is a velocity; without one a note plays at NOTE_VEL
+  const a = song.patterns[0].notes;
+  assert.equal(a.bass.find((n) => n.t === 3 * S.STEP).vel, 0.6);
+  assert.equal(a.bass[0].vel, S.NOTE_VEL);
+  for (const n of song.patterns[0].notes.melody) if (n.t === S.STEP * 14) assert.equal(n.vel, 0);
 
-  // B: A's drums, bass and chords plus the melody with a rest on steps 7 and 15
-  assert.deepEqual(rows(1, "melody", deg), [[1, 4], [3, 5], [5, 4], [7, null], [9, 3], [11, 2], [13, 3], [15, null]]);
-  assert.deepEqual(plain(song.patterns[1].notes.bass), plain(song.patterns[0].notes.bass));
-  assert.deepEqual(plain(song.patterns[1].notes.chords), plain(song.patterns[0].notes.chords));
-  assert.deepEqual(plain(song.patterns[1].notes.drums), plain(song.patterns[0].notes.drums));
+  // drums: a bare step plays at the row's velocity, [step, vel] is a ghost or an accent
+  const hits = (p, drum) => plain(song.patterns[p].notes.drums).filter((n) => n.key === drum).map((n) => [n.t / S.STEP + 1, n.vel]);
+  assert.deepEqual(hits(0, "snare"), [[5, 0.9], [10, 0.22], [13, 0.9], [16, 0.28]]);
+  assert.deepEqual(hits(0, "kick"), [[1, 0.85], [8, 0.75], [11, 0.9]]);
+  assert.deepEqual(hits(7, "snare").map((h) => h[0]), [5, 9, 11, 13, 14, 15, 16], "H rolls back to the top");
+  for (const p of song.patterns) for (const n of p.notes.drums) assert.ok(n.vel > 0 && n.vel <= 1);
 
-  // C: the kick pushes 15, the bass walks 1 3 4 and the melody sits higher
-  assert.deepEqual(steps(2, "kick"), [1, 8, 11, 15]);
-  assert.deepEqual(steps(2, "snare"), [5, 13]);
-  assert.deepEqual(steps(2, "perc"), [16]);
-  assert.deepEqual(rows(2, "bass", deg), [[1, 1], [9, 3], [13, 4]]);
-  assert.deepEqual(rows(2, "chords", deg), [[1, 5], [9, 4]]);
-  assert.deepEqual(rows(2, "melody", deg), [[1, 6], [4, 5], [7, 3], [8, null], [9, 4], [12, 3], [15, null]]);
+  // every degree stays on the grid the screens can show (keys 0-7, chords 0-5)
+  for (const p of song.patterns) {
+    for (const t of ["bass", "melody"]) for (const n of p.notes[t]) assert.ok(n.deg >= 0 && n.deg <= 7, `${t} ${n.deg}`);
+    for (const n of p.notes.chords) assert.ok(n.deg >= 0 && n.deg <= 5);
+    // and the chords sit on the two cells of the chord screen
+    for (const n of p.notes.chords) assert.ok(n.t === 0 || n.t === 8 * S.STEP);
+  }
 
-  // D: kick 1, snare 13, hats 1 5 9 13, no perc
-  assert.deepEqual(steps(3, "kick"), [1]);
-  assert.deepEqual(steps(3, "snare"), [13]);
-  assert.deepEqual(steps(3, "hat"), [1, 5, 9, 13]);
-  assert.deepEqual(steps(3, "perc"), []);
-  assert.deepEqual(rows(3, "bass", deg), [[1, 2], [9, null]]);
-  assert.deepEqual(rows(3, "chords", deg), [[1, 3]]);
-  assert.deepEqual(rows(3, "melody", deg), [[1, 5], [9, null]]);
-
-  // the drum velocities are DEMO's
-  for (const n of song.patterns[3].notes.drums) assert.equal(n.vel, S.DEMO.vel[n.key]);
-
-  // over the whole chain every rest is an event with vel 0 and no pitch; the M9/M11 ties give it a real len
+  // over the whole chain every rest is an event with vel 0 and no pitch, with a real len from the tie
   const total = S.chainTicks(song, song.song);
-  assert.equal(total, 16 * P);
+  assert.equal(total, 24 * P);
   const ev = plain(S.chainEvents(song, song.song, 0, total));
   const rests = ev.filter((e) => e.vel === 0);
-  assert.equal(rests.length, 24);
+  assert.ok(rests.length > 0);
   for (const r of rests) {
     assert.equal(r.deg, 0);
     assert.ok(r.track === "melody" || r.track === "bass", r.track);
     assert.ok(r.len >= S.STEP, `rest len ${r.len}`);
   }
-  assert.ok(ev.some((e) => e.track === "melody" && e.vel > 0));
-  assert.ok(ev.some((e) => e.track === "bass" && e.vel > 0));
-  assert.ok(ev.some((e) => e.track === "chords" && e.vel > 0));
-  assert.ok(ev.some((e) => e.track === "drums" && e.vel > 0));
+  for (const tr of ["melody", "bass", "chords", "drums"]) assert.ok(ev.some((e) => e.track === tr && e.vel > 0), tr);
 });
 
 test("newSong: the demo bass and chords validate, keep their velocities, and do not alias the constants", () => {
