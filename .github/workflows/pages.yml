@@ -29,7 +29,6 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       PR: ${{ github.event.pull_request.number }}
       ACTION: ${{ github.event.action }}
-      BASE_SHA: ${{ github.event.pull_request.base.sha }}
       SITE: https://nowheremanx.github.io/lopda
     steps:
       - uses: actions/checkout@v4
@@ -45,7 +44,11 @@ jobs:
           if [ "${{ github.event_name }}" = "push" ] || [ "$ACTION" = "closed" ]; then
             echo "deploy=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
-          CHANGED=$(git diff --name-only "$BASE_SHA" "${{ github.sha }}")
+          # github.sha is GitHub's test merge of the PR into the base branch as it is now; its first parent is that
+          # base. Diffing against it gives exactly what the PR changes. pull_request.base.sha can be older than the
+          # base the merge was made on (main moved on, or the branch merged main in), and a diff against it would
+          # count main's newer commits as the PR's.
+          CHANGED=$(git diff --name-only "${{ github.sha }}^1" "${{ github.sha }}")
           # Registry apps the PR touches (and that still exist). The shell runs with pipefail,
           # so a grep that matches nothing must not end the step.
           APPS=$(printf '%s\n' "$CHANGED" | { grep '^registry/apps/' || true; } | cut -d/ -f3 | sort -u | while read -r id; do
