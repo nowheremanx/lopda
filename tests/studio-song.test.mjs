@@ -479,22 +479,23 @@ test("constants: parent scales, voices, note velocity, chord cells, note names, 
     major: "major",
     dorian: "dorian",
   });
-  assert.deepEqual(plain(S.SOUND), { bass: "bass", chords: "keys", melody: "pluck" });
+  assert.deepEqual(plain(S.SOUND), { bass: "bass", chords: "keys", melody: "flute" });
   assert.equal(S.NOTE_VEL, 0.8);
+  assert.equal(S.REST_VEL, 0);
   assert.deepEqual(plain(S.CHORD_STEPS), [0, 8]);
   assert.deepEqual(plain(S.NAMES), ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"]);
   assert.deepEqual(plain(S.DEMO_BASS), [[1, 0], [9, 2], [11, 3]]);
   assert.deepEqual(plain(S.DEMO_CHORDS), [[1, 0], [9, 3]]);
 });
 
-test("tonic: the bass window E2-D#3, the melody two octaves up, other tracks null", () => {
-  // A minor (key 9) puts the bass tonic on A2 45, E on 40, D# on 51
+test("tonic: the bass window E2-D#3, the melody one octave up, other tracks null", () => {
+  // A minor (key 9) puts the bass tonic on A2 45, E on 40, D# on 51; 12.12 puts the melody on A3 57
   assert.equal(S.tonic("bass", 9), 45);
   assert.equal(S.tonic("bass", 4), 40);
   assert.equal(S.tonic("bass", 3), 51);
-  assert.equal(S.tonic("melody", 9), 69);
-  assert.equal(S.tonic("melody", 4), 64);
-  assert.equal(S.tonic("melody", 3), 75);
+  assert.equal(S.tonic("melody", 9), 57);
+  assert.equal(S.tonic("melody", 4), 52);
+  assert.equal(S.tonic("melody", 3), 63);
   for (const track of ["drums", "chords", "voice", "lead", undefined]) assert.equal(S.tonic(track, 9), null);
   assert.equal(S.tonic("bass", "9"), null);
   assert.equal(S.tonic("bass", 1.5), null);
@@ -507,8 +508,8 @@ test("noteMidi: scale degrees from the tonic, wrapping both ways; non-note track
   assert.equal(S.noteMidi(A, "bass", 4), 55);
   assert.equal(S.noteMidi(A, "bass", 5), 57, "one octave above the tonic");
   assert.equal(S.noteMidi(A, "bass", -1), 43, "the G below A2");
-  assert.equal(S.noteMidi(A, "melody", 0), 69);
-  assert.equal(S.noteMidi(A, "melody", -5), 57);
+  assert.equal(S.noteMidi(A, "melody", 0), 57);
+  assert.equal(S.noteMidi(A, "melody", -5), 45);
   assert.equal(S.noteMidi({ key: 9, scale: "minor" }, "bass", 6), 55);
   assert.equal(S.noteMidi(A, "chords", 0), null);
   assert.equal(S.noteMidi(A, "drums", 0), null);
@@ -760,6 +761,69 @@ test("removeNote: removes and re-ties; noteAt finds by exact tick", () => {
   assert.deepEqual(plain(S.removeNote(song, 1, "bass", 0)), before);
 });
 
+test("setRest and isRest: a vel-0 note is a rest, it ends the note before it, and setNote revives it", () => {
+  const song = fresh();
+  const before = plain(song);
+  assert.equal(S.isRest({ t: 0, len: 24, deg: 0, vel: 0 }), true);
+  assert.equal(S.isRest({ t: 0, len: 24, deg: 0, vel: S.NOTE_VEL }), false);
+  assert.equal(S.isRest(null), false);
+
+  // the rest replaces the bass note on step 9; the first note now ends there, and the rest ties to step 11
+  const out = S.setRest(song, 0, "bass", 8 * S.STEP);
+  assert.deepEqual(plain(song), before, "the input is untouched");
+  assert.deepEqual(plain(out.patterns[0].notes.bass), [
+    { t: 0, len: 192, deg: 0, vel: S.NOTE_VEL },
+    { t: 192, len: 48, deg: 0, vel: 0 },
+    { t: 240, len: 144, deg: 3, vel: S.NOTE_VEL },
+  ]);
+  assert.equal(S.validate(out).error, undefined);
+  assert.equal(S.isRest(S.noteAt(out, 0, "bass", 192)), true);
+
+  // a rest on an empty tick is added and tied like a note; it has no pitch
+  const added = S.setRest(song, 0, "melody", S.STEP);
+  assert.deepEqual(plain(added.patterns[0].notes.melody), [{ t: S.STEP, len: P - S.STEP, deg: 0, vel: 0 }]);
+  assert.equal(S.noteAt(added, 0, "melody", S.STEP).deg, 0);
+
+  // setNote over a rest writes the pitch at NOTE_VEL, even if a velocity is passed: the key sets a pitch
+  const revived = S.setNote(out, 0, "bass", 8 * S.STEP, 4, 0.2);
+  assert.deepEqual(plain(revived.patterns[0].notes.bass), [
+    { t: 0, len: 192, deg: 0, vel: S.NOTE_VEL },
+    { t: 192, len: 48, deg: 4, vel: S.NOTE_VEL },
+    { t: 240, len: 144, deg: 3, vel: S.NOTE_VEL },
+  ]);
+  // a real note still keeps its own velocity
+  const own = fresh();
+  own.patterns[0].notes.bass[2].vel = 0.5;
+  assert.equal(S.noteAt(S.setNote(own, 0, "bass", 240, 5, 0.2), 0, "bass", 240).vel, 0.5);
+
+  // chord tracks are editable too; a fresh pattern is created with the rest at the default length
+  assert.equal(S.isRest(S.noteAt(S.setRest(song, 0, "chords", 0), 0, "chords", 0)), true);
+  const fresh2 = S.setRest(song, 2, "melody", 0);
+  assert.equal(fresh2.patterns.length, 3);
+  assert.deepEqual(plain(fresh2.patterns[2].notes.melody), [{ t: 0, len: P, deg: 0, vel: 0 }]);
+  assert.equal(S.validate(fresh2).error, undefined);
+
+  // drums, unknown tracks, bad ticks, patterns and a broken len leave an unchanged copy
+  for (const [p, track, t] of [
+    [0, "drums", 0],
+    [0, "voice", 0],
+    [0, "lead", 0],
+    [0, "bass", -1],
+    [0, "bass", P],
+    [0, "bass", 0.5],
+    [8, "bass", 0],
+    [-1, "bass", 0],
+  ]) {
+    assert.deepEqual(plain(S.setRest(song, p, track, t)), before, `${p} ${track} ${t}`);
+  }
+  for (const len of [0, 1.5, "16", null]) {
+    const bad = fresh();
+    bad.patterns[0].len = len;
+    const snapshot = plain(bad);
+    assert.deepEqual(plain(S.setRest(bad, 0, "bass", 0)), snapshot, String(len));
+  }
+});
+
 test("song chain: setSlot, addSlot and dropSlot copy, ensure the pattern, and keep the limits", () => {
   const song = fresh();
   const before = plain(song);
@@ -789,6 +853,55 @@ test("song chain: setSlot, addSlot and dropSlot copy, ensure the pattern, and ke
     assert.deepEqual(plain(S.setSlot(song, i, p)), before, `${i} ${p}`);
   }
   for (const p of [-1, 8, 1.5, "1"]) assert.deepEqual(plain(S.addSlot(song, p)), before, String(p));
+});
+
+test("insertSlot and removeSlot: index 0, the end, the 64 cap, one slot left, bad input", () => {
+  const song = fresh(); // [0]
+  const before = plain(song);
+
+  // insert at the front adds a pattern and moves the old slot right
+  const front = S.insertSlot(song, 0, 2);
+  assert.deepEqual(plain(front.song), [2, 0]);
+  assert.equal(front.patterns.length, 3);
+  assert.equal(S.validate(front).error, undefined);
+  assert.deepEqual(plain(song), before, "the input is untouched");
+
+  // i === length appends
+  const end = S.insertSlot(song, 1, 1);
+  assert.deepEqual(plain(end.song), [0, 1]);
+  assert.equal(end.patterns.length, 2);
+  assert.equal(S.validate(end).error, undefined);
+
+  // 64 is the cap: a refused insert changes neither slots nor patterns
+  const full = fresh();
+  full.song = Array(S.SONG_MAX).fill(0);
+  assert.deepEqual(plain(S.insertSlot(full, 0, 1)), plain(full));
+  assert.deepEqual(plain(S.insertSlot(full, S.SONG_MAX, 1)), plain(full));
+  assert.equal(S.insertSlot(full, S.SONG_MAX, 1).patterns.length, 1);
+
+  // bad indexes, patterns and songs are unchanged copies
+  for (const [i, p] of [[-1, 1], [2, 1], [1.5, 1], ["1", 1], [0, 8], [0, -1], [0, 1.5], [0, "1"]]) {
+    assert.deepEqual(plain(S.insertSlot(song, i, p)), before, `${i} ${p}`);
+  }
+  const noSong = fresh();
+  delete noSong.song;
+  assert.deepEqual(plain(S.insertSlot(noSong, 0, 1)), plain(noSong));
+
+  // remove from the middle, the front or the end
+  const three = S.insertSlot(S.insertSlot(song, 1, 1), 2, 2); // [0, 1, 2]
+  assert.deepEqual(plain(S.removeSlot(three, 1).song), [0, 2]);
+  assert.deepEqual(plain(S.removeSlot(three, 0).song), [1, 2]);
+  assert.deepEqual(plain(S.removeSlot(three, 2).song), [0, 1]);
+  assert.equal(S.validate(S.removeSlot(three, 1)).error, undefined);
+  assert.deepEqual(plain(three.song), [0, 1, 2], "removeSlot copies");
+
+  // never below one slot, and a bad index or song is an unchanged copy
+  assert.deepEqual(plain(S.removeSlot(song, 0)), before);
+  for (const i of [-1, 1, 0.5, "0"]) assert.deepEqual(plain(S.removeSlot(song, i)), before, String(i));
+  assert.deepEqual(plain(S.removeSlot(three, 3)), plain(three));
+  const noSlots = fresh();
+  noSlots.song = null;
+  assert.deepEqual(plain(S.removeSlot(noSlots, 0)), plain(noSlots));
 });
 
 test("chainEvents: one slot is events() plus p and slot, over several ranges and loops", () => {
@@ -1069,6 +1182,74 @@ test("chainTicks and chainAt: wrap after one pass, and before the start", () => 
   assert.deepEqual(plain(S.chainAt(song, chain, P + 192)), { slot: 0, p: 0, t: 0 }, "one pass wraps");
   assert.deepEqual(plain(S.chainAt(song, chain, 1000)), { slot: 1, p: 1, t: 40 });
   assert.deepEqual(plain(S.chainAt(song, chain, -5)), { slot: 0, p: 0, t: 0 });
+});
+
+test("demoSong: 4 patterns, 16 slots, A is newSong's bar, and its rests come out as vel 0 events", () => {
+  const song = S.demoSong(2000);
+  assert.equal(S.validate(song).error, undefined);
+  assert.equal(song.updated, 2000);
+  assert.equal(S.demoSong().updated, 0);
+  assert.equal(song.v, 1);
+  assert.equal(song.bpm, 82);
+  assert.equal(song.key, 9);
+  assert.equal(song.scale, "minor-penta");
+  assert.equal(song.swing, 0.55);
+  assert.equal(song.kit, "soft");
+  assert.equal(song.patterns.length, 4);
+  assert.equal(song.song.length, 16);
+  assert.deepEqual(plain(song.song), [0, 0, 1, 1, 2, 2, 1, 1, 3, 3, 2, 2, 1, 1, 0, 0]);
+  assert.deepEqual(plain(S.DEMO_SONG.song), plain(song.song));
+
+  // A is exactly newSong()'s bar; the example is its own song, not the single demo bar
+  assert.deepEqual(plain(song.patterns[0]), plain(S.newSong().patterns[0]));
+  assert.deepEqual(plain(S.newSong().song), [0]);
+
+  // rows as [step, value]; a rest is step + null, and lens come from the tie
+  const rows = (p, track, key) => plain(song.patterns[p].notes[track]).map((n) => [n.t / S.STEP + 1, key(n)]);
+  const deg = (n) => (S.isRest(n) ? null : n.deg);
+  const steps = (p, drum) => plain(song.patterns[p].notes.drums).filter((n) => n.key === drum).map((n) => n.t / S.STEP + 1);
+
+  // B: A's drums, bass and chords plus the melody with a rest on steps 7 and 15
+  assert.deepEqual(rows(1, "melody", deg), [[1, 4], [3, 5], [5, 4], [7, null], [9, 3], [11, 2], [13, 3], [15, null]]);
+  assert.deepEqual(plain(song.patterns[1].notes.bass), plain(song.patterns[0].notes.bass));
+  assert.deepEqual(plain(song.patterns[1].notes.chords), plain(song.patterns[0].notes.chords));
+  assert.deepEqual(plain(song.patterns[1].notes.drums), plain(song.patterns[0].notes.drums));
+
+  // C: the kick pushes 15, the bass walks 1 3 4 and the melody sits higher
+  assert.deepEqual(steps(2, "kick"), [1, 8, 11, 15]);
+  assert.deepEqual(steps(2, "snare"), [5, 13]);
+  assert.deepEqual(steps(2, "perc"), [16]);
+  assert.deepEqual(rows(2, "bass", deg), [[1, 1], [9, 3], [13, 4]]);
+  assert.deepEqual(rows(2, "chords", deg), [[1, 5], [9, 4]]);
+  assert.deepEqual(rows(2, "melody", deg), [[1, 6], [4, 5], [7, 3], [8, null], [9, 4], [12, 3], [15, null]]);
+
+  // D: kick 1, snare 13, hats 1 5 9 13, no perc
+  assert.deepEqual(steps(3, "kick"), [1]);
+  assert.deepEqual(steps(3, "snare"), [13]);
+  assert.deepEqual(steps(3, "hat"), [1, 5, 9, 13]);
+  assert.deepEqual(steps(3, "perc"), []);
+  assert.deepEqual(rows(3, "bass", deg), [[1, 2], [9, null]]);
+  assert.deepEqual(rows(3, "chords", deg), [[1, 3]]);
+  assert.deepEqual(rows(3, "melody", deg), [[1, 5], [9, null]]);
+
+  // the drum velocities are DEMO's
+  for (const n of song.patterns[3].notes.drums) assert.equal(n.vel, S.DEMO.vel[n.key]);
+
+  // over the whole chain every rest is an event with vel 0 and no pitch; the M9/M11 ties give it a real len
+  const total = S.chainTicks(song, song.song);
+  assert.equal(total, 16 * P);
+  const ev = plain(S.chainEvents(song, song.song, 0, total));
+  const rests = ev.filter((e) => e.vel === 0);
+  assert.equal(rests.length, 24);
+  for (const r of rests) {
+    assert.equal(r.deg, 0);
+    assert.ok(r.track === "melody" || r.track === "bass", r.track);
+    assert.ok(r.len >= S.STEP, `rest len ${r.len}`);
+  }
+  assert.ok(ev.some((e) => e.track === "melody" && e.vel > 0));
+  assert.ok(ev.some((e) => e.track === "bass" && e.vel > 0));
+  assert.ok(ev.some((e) => e.track === "chords" && e.vel > 0));
+  assert.ok(ev.some((e) => e.track === "drums" && e.vel > 0));
 });
 
 test("newSong: the demo bass and chords validate, keep their velocities, and do not alias the constants", () => {

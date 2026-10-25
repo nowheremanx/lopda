@@ -1,8 +1,9 @@
 /*
- * Lo-PDA runtime: the drum voices and the three melodic voices of the four-track tape machine
+ * Lo-PDA runtime: the drum voices and the four melodic voices of the four-track tape machine
  * (docs/design/studio.md sections 1, 3, 11 and 12.6).
  * Two kits, every sound synthesised: the 8-bit `chip` kit and the lofi `soft` kit (muffled kick, brush snare).
- * Three melodic voices: `bass` (triangle and sub sine), `keys` (FM electric piano) and `pluck` (Karplus-Strong).
+ * Four melodic voices: `bass` (triangle and sub sine), `keys` (FM electric piano), `flute` (sine, a little triangle,
+ * breath and a late vibrato) and `pluck` (Karplus-Strong, kept in the registry though the melody now uses the flute).
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  *
  *   LopdaStudioSynth.KITS             the registry: kit id -> function(ctx, out) -> {hit(drum, at, vel)}
@@ -21,10 +22,10 @@
  * Levels (measured by tests/studio-e2e.test.mjs at 22.05 kHz): all four drums on one step peak 0.79 for both kits,
  * well under 0.85; each drum alone stays between 0.13 and 0.49 at velocity 1. The demo beat's rms is 0.53x the
  * paper tower's title tune with the chip kit and 0.62x with the soft kit, so it sits near PAD.music's songs. The
- * melodic voices at velocity 1 peak 0.30 for bass, 0.072 per keys note and 0.26 for pluck; bass 45, a four-note
- * keys chord and pluck 69 together peak 0.58, so the notes alone stay under 0.6. The four-bar demo pattern (drums,
- * bass and chords) with the soft kit peaks 0.77, under the section 12.6 target of 0.9; the dense drum hit stops at
- * the 0.908 ceiling.
+ * melodic voices at velocity 1 peak 0.30 for bass, 0.072 per keys note, 0.22 for flute and 0.26 for pluck; bass 45,
+ * a four-note keys chord and pluck 69 together peak 0.58, so the notes alone stay under 0.6. The four-bar demo pattern
+ * (drums, bass and chords) with the soft kit peaks 0.77, and the sixteen-bar example tape with all four tracks peaks
+ * under the section 12.6 target of 0.9; the dense drum hit stops at the 0.908 ceiling.
  */
 (function(){
 "use strict";
@@ -237,6 +238,49 @@ VOICES.keys=function(ctx,out){
       carrier.start(t); carrier.stop(releaseStart+0.26);
       mod.start(t); mod.stop(releaseStart+0.26);
       cleanup(carrier,[carrier,mod,modGain,g]);
+    }
+  };
+};
+
+/* flute (12.12): the chill lead. Mostly sine with a little triangle (0.15 of the sine) for a hint of a hollow body,
+   through a gentle 2 kHz lowpass that takes the triangle's upper harmonics off so it stays soft, not bright. Attack
+   40 ms, hold, 120 ms release at at+dur. The vibrato is 5 Hz and 8 cents deep and only starts fading in from 150 ms,
+   the way a player adds it: a short note is straight. A very quiet band-passed breath at 2 kHz (the drums' seeded
+   noise) sits under the attack. The envelope peaks at 0.18; sine and triangle reach 0.207 together and the breath
+   adds at most 0.018, so a note measures near 0.22 at velocity 1, well under the bass. */
+VOICES.flute=function(ctx,out){
+  var noise=noiseFor(ctx);
+  return {
+    note:function(midi,at,dur,vel){
+      var f=midiFreq(midi), v=velOf(vel), peak=0.18*v;
+      var t=when(ctx,at), a=Math.min(0.04,dur), attackEnd=t+a, releaseStart=t+dur, releaseEnd=releaseStart+0.12;
+      var sine=ctx.createOscillator(), sineGain=ctx.createGain(), tri=ctx.createOscillator(), triGain=ctx.createGain();
+      var vib=ctx.createOscillator(), vibGain=ctx.createGain();
+      var filter=ctx.createBiquadFilter(), g=ctx.createGain();
+      sine.type="sine"; sine.frequency.value=f; sineGain.gain.value=1;
+      tri.type="triangle"; tri.frequency.value=f; triGain.gain.value=0.15;
+      /* 8 cents is f * (2^(8/1200) - 1) Hz either side; flat under 150 ms, then in over half a second */
+      vib.type="sine"; vib.frequency.value=5;
+      vibGain.gain.setValueAtTime(0,t);
+      if(releaseStart>t+0.15){
+        vibGain.gain.setValueAtTime(0,t+0.15);
+        vibGain.gain.linearRampToValueAtTime(f*(Math.pow(2,8/1200)-1),t+0.65);
+      }
+      vib.connect(vibGain); vibGain.connect(sine.frequency); vibGain.connect(tri.frequency);
+      filter.type="lowpass"; filter.frequency.value=2000; filter.Q.value=0.5;
+      g.gain.setValueAtTime(SILENCE,t);
+      g.gain.linearRampToValueAtTime(peak,attackEnd);
+      g.gain.setValueAtTime(peak,releaseStart);
+      g.gain.exponentialRampToValueAtTime(SILENCE,releaseEnd);
+      sine.connect(sineGain); tri.connect(triGain);
+      sineGain.connect(filter); triGain.connect(filter); filter.connect(g); g.connect(out);
+      sine.start(t); sine.stop(releaseEnd+0.01);
+      tri.start(t); tri.stop(releaseEnd+0.01);
+      vib.start(t); vib.stop(releaseEnd+0.01);
+      /* the breath: gone by 150 ms, or with a note shorter than that, and silent before its source stops */
+      var breathEnd=Math.min(t+0.15,releaseStart+0.02);
+      noiseVoice(ctx,out,noise,"bandpass",2000,0.7,0.018*v,0.004,breathEnd-t-0.004,breathEnd-t+0.01,t);
+      cleanup(sine,[sine,sineGain,tri,triGain,vib,vibGain,filter,g]);
     }
   };
 };

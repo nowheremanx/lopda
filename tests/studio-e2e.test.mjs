@@ -299,6 +299,33 @@ test("studio synth: every melodic voice sounds low and high, under its target, a
   assert.deepEqual(errors, []);
 });
 
+test("studio synth: the flute sounds at 57 and 79, peaks at 0.22, renders the same twice and stops after its release", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await studioPage(t, false);
+  const r = await p.evaluate(async () => {
+    const out = { notes: [] };
+    for (const midi of [57, 79]) {
+      const a = await renderNote("flute", midi, 0.4);
+      const b = await renderNote("flute", midi, 0.4);
+      out.notes.push({ midi, peak: a.peak, last: a.last, diff: maxDiff(a.data, b.data) });
+    }
+    /* 40 ms attack, a 120 ms release at at+dur: nothing may be left 50 ms after the release */
+    const at = 0.05, dur = 0.3, release = 0.12;
+    const s = await renderEvents([{ voice: "flute", midi: 57, at, dur }], 1.5);
+    out.after = peakBetween(s.data, at + dur + release + 0.05, 1.4);
+    out.cut = at + dur + release + 0.05;
+    return out;
+  });
+  for (const n of r.notes) {
+    t.diagnostic(`flute ${n.midi}: peak ${n.peak.toFixed(4)}, ends ${n.last.toFixed(3)} s, repeat diff ${n.diff.toExponential(2)}`);
+    assert.ok(n.peak > 0.02, `flute ${n.midi} is audible (peak ${n.peak})`);
+    assert.ok(n.peak <= 0.22 * 1.1, `flute ${n.midi} peak ${n.peak} is under 0.242`);
+    assert.ok(n.diff < 1e-4, `flute ${n.midi} renders the same twice (max difference ${n.diff})`);
+  }
+  t.diagnostic(`flute after its release at ${r.cut.toFixed(3)} s: peak ${r.after.toExponential(2)}`);
+  assert.ok(r.after < 1e-3, `the flute is silent after at + dur + release + 50 ms (${r.after})`);
+  assert.deepEqual(errors, []);
+});
+
 test("studio synth: pluck stays in tune at 44.1 and 48 kHz", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await studioPage(t, false);
   const r = await p.evaluate(async () => {
@@ -387,6 +414,42 @@ test("studio synth: the four-bar demo pattern with the soft kit peaks under 0.9"
   t.diagnostic(`${r.events} events over 4 bars (${r.seconds.toFixed(3)} s) with the ${r.kit} kit: peak ${r.peak.toFixed(3)}`);
   assert.ok(r.peak <= 0.9, `the four-bar demo peaks <= 0.9 (${r.peak})`);
   assert.ok(r.peak > 0.2, `the four-bar demo sounds (${r.peak})`);
+  assert.deepEqual(errors, []);
+});
+
+test("studio synth: the whole example song, 16 bars of every track through SOUND, peaks under 0.9", { skip, timeout: 120000 }, async (t) => {
+  const { p, errors } = await studioPage(t, false);
+  const r = await p.evaluate(async () => {
+    const SR = 22050;
+    const song = LopdaSong.demoSong();
+    const ticks = LopdaSong.chainTicks(song, song.song);
+    const ev = LopdaSong.chainEvents(song, song.song, 0, ticks);
+    const seconds = LopdaSong.ticksToSec(ticks, song.bpm);
+    const oc = new OfflineAudioContext(1, Math.ceil(SR * seconds), SR);
+    const out = oc.createGain(); out.gain.value = 1; out.connect(oc.destination);
+    const synth = LopdaStudioSynth.create(oc, out);
+    const used = {};
+    for (const e of ev) {
+      if (e.vel <= 0) continue; // rests: the synth would ignore vel 0 anyway
+      used[e.track] = true;
+      const at = LopdaSong.ticksToSec(e.tick, song.bpm);
+      const dur = LopdaSong.ticksToSec(e.len, song.bpm);
+      if (e.track === "drums") synth.hit(song.kit, e.key, at, e.vel);
+      else if (e.track === "chords") {
+        for (const midi of LopdaSong.chordNotes(song, e.deg)) synth.note(LopdaSong.SOUND.chords, midi, at, dur, e.vel);
+      } else synth.note(LopdaSong.SOUND[e.track], LopdaSong.noteMidi(song, e.track, e.deg), at, dur, e.vel);
+    }
+    const s = stats((await oc.startRendering()).getChannelData(0));
+    return { kit: song.kit, seconds, bars: song.song.length, events: ev.length,
+      rests: ev.filter((e) => e.vel === 0).length, used: Object.keys(used).sort(), peak: s.peak, rms: s.rms };
+  });
+  t.diagnostic(`${r.events} events (${r.rests} rests skipped) over ${r.bars} bars (${r.seconds.toFixed(3)} s) with the ${r.kit} kit: peak ${r.peak.toFixed(3)}, rms ${r.rms.toFixed(4)}`);
+  assert.equal(r.bars, 16);
+  assert.equal(r.kit, "soft");
+  assert.deepEqual(r.used, ["bass", "chords", "drums", "melody"]);
+  assert.ok(r.rests > 0, "the song has rests (they are skipped, not played)");
+  assert.ok(r.peak <= 0.9, `the whole example song peaks <= 0.9 (${r.peak})`);
+  assert.ok(r.peak > 0.2, `the whole example song sounds (${r.peak})`);
   assert.deepEqual(errors, []);
 });
 
