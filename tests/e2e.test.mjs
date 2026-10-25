@@ -3453,6 +3453,37 @@ test("darkroom: develop a roll with blank frames, walk it in colour, print singl
 /* ---------- the pet (runtime/apps/pet.js; briefs/pet/design.md) ---------- */
 const PET_TONES = [[31, 42, 20], [74, 90, 50], [125, 138, 88], [163, 173, 126]].map((t) => t.concat(255).join(","));
 
+/* The owner saw the pet blink out of the room for a second now and then: the look-left/right and head-shake frames were
+   empty (shiftX dropped every pixel). Watch the pet's part of the room for 40 s of idle variety, baby and child. */
+test("pet: the pet never disappears from the room while it idles", { skip, timeout: 120000 }, async (t) => {
+  const { p, errors } = await page(t, { ...pw.devices["iPhone 13"], locale: "zh-CN", serviceWorkers: "block" });
+  await p.clock.install({ time: new Date(2026, 9, 11, 10, 0) });
+  await p.goto(base + "/runtime/?debug", { waitUntil: "networkidle" });
+  await p.waitForFunction(() => document.getElementById("savestate").textContent !== "启动中…");
+  await p.evaluate(() => LP.builtins.find((x) => x.id === "pet").open());
+  await p.evaluate(() => LOPDA_DEBUG.pet.hatch());
+  await p.clock.runFor(4000);
+  for (const stage of ["baby", "child"]) {
+    if (stage === "child") await p.evaluate(() => LOPDA_DEBUG.pet.setDay(5));
+    await p.evaluate(() => {
+      const x = document.getElementById("pet-cv").getContext("2d"), o = x.putImageData.bind(x);
+      window.__petInk = [];
+      x.putImageData = function (im, a, b) {
+        const d = im.data; let n = 0;
+        for (let y = 55; y < 105; y++) for (let c = 0; c < 162; c++) if (d[(y * 162 + c) * 4] < 40) n++;
+        window.__petInk.push(n);
+        return o(im, a, b);
+      };
+    });
+    await p.clock.runFor(40000);
+    const ink = await p.evaluate(() => window.__petInk);
+    const med = ink.slice().sort((a, b) => a - b)[ink.length >> 1];
+    assert.ok(ink.length >= 60, stage + ": frames drawn " + ink.length);
+    assert.deepEqual(ink.filter((n) => n < med - 100), [], stage + ": a frame without the pet");
+  }
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
 test("pet: the first phone feedback - an inert egg, a full screen, a vertical food list, a tap that feeds and A's own label", { skip, timeout: 90000 }, async (t) => {
   const { p, errors } = await page(t, { ...pw.devices["iPhone 13"], locale: "zh-CN", serviceWorkers: "block" });
   await p.clock.install({ time: new Date(2026, 9, 11, 9, 0) });
