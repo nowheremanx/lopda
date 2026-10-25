@@ -569,7 +569,7 @@ CPU 降速 4 倍（DevTools 的 CPU throttling，粗略代表旧手机）时，�
   其余都是社区 app。按这个标准，画板和计算器是社区 app。
 - **文件接口**：manifest 声明 `"permissions": ["files"]`（目前唯一允许的权限，其他值检查器报错），PAD 新增
   `exportFile({name, type, data})` → `"saved" | "cancelled"`、`importFile({accept})` → `{name, type, data} | null`。单个文件上限 2 MB。
-  - **每次都由 runtime 在机身上弹确认框**（`导出「x.png」？ 好 / 取消`、`从文件导入？ 选文件 / 取消`），安装时不额外弹窗。
+  - **每次都由 runtime 在机身上弹确认框**（`导出「x.png」？ 好 / 取消`、`从文件导入？ 选文件 / 取消`）。`files` 不参与安装时的权限确认（第 42 节），每次导出或导入仍然单独问，所以安装时不额外弹窗。
     理由：沙盒 app 不能悄悄导出或读取文件；iPhone 的分享面板和文件选择器要求真实的点击，而沙盒 iframe 里的手势能不能传到外层页面没有把握，
     让用户点 runtime 自己的按钮就保证了手势来自外层页面；设定上像老机器的系统对话框。
   - "好"在 `pointerup`（或键盘触发的 click）时执行。下巴按键也能用：对话框打开后**重新按下**的 A 松开时确定，B 取消；
@@ -1020,8 +1020,8 @@ CPU 降速 4 倍（DevTools 的 CPU throttling，粗略代表旧手机）时，�
   或者没有明显的峰（比如吹气、噪声）就是 `null`。
 - **没有传感器**：桌面浏览器也有 `DeviceOrientationEvent`，只是不发事件；`start()` 等第一个读数，1 秒内没有就回 `"none"`。
   麦克风：`NotAllowedError` 回 `"denied"`，其他失败（没有麦克风等）回 `"none"`。
-- **询问**：第一次 `start()` 弹机身确认框（和文件确认框同一个，`openAsk` 改成了通用的：文字、附注、两个按钮的名字、
-  `ok()` 和 `cancel()`）。A 在松开时、或"允许"在 `pointerup` 时同意，系统授权在**这一下点击里**发起；倾斜的两个
+- **询问**：没有在安装时获准的 app，第一次 `start()` 弹机身确认框（和文件确认框同一个，`openAsk` 改成了通用的：文字、附注、
+  两个按钮的名字、`ok()` 和 `cancel()`；0.44.0 起，商店安装时已确认的权限不再问，见第 42 节）。A 在松开时、或"允许"在 `pointerup` 时同意，系统授权在**这一下点击里**发起；倾斜的两个
   `requestPermission()` 一起调，只弹一个系统框。B / "不允许"这一次回 `"denied"`，不记住，下次再问。
   同意过的记在 `data/users/local/sensors`（`{apps: {id: {motion, mic}}}`），设置里"传感器"一栏逐个列出，可以撤销；
   卸载 app 时一并删掉。
@@ -1479,3 +1479,39 @@ EXIF，相册就能把照片放到地图上。
 - **代码**：`runtime/core.js` 的 `SND.uiOn`、`applyLevel`、`playNamed`；`runtime/boot.js` 读 `ui`；
   `runtime/apps/settings.js` 的 `set-ui` 和 `saveSettings`；`runtime/index.html`、`runtime/strings.js`；
   `tests/e2e.test.mjs` 的「system sounds switch off on their own」。
+
+
+## 42. 商店搜索与安装前的权限确认（0.44.0）
+
+2026-10-25，runtime 0.44.0。owner 的两条反馈：目录里的 app 多起来以后，找自己的 app 变难了；app 的系统能力
+应该像 Android 一样在**安装之前**让用户确认，条目下面那行权限说明改成一眼就懂的图标。
+
+- **搜索**：商店标题下面一个输入框（44 px，`#store-q`），输入即筛。两边都做 NFKC 和小写（和记事本的搜索一样），
+  按空格切成词，每个词都要命中；可以用中文名、英文名、描述、id、作者或分类名找，所以「纸」和「paper」都能
+  找到纸塔。命名完全一致、开头一致、包含、描述里包含、其他字段命中，依次排在前面；同分按当前语言的名字排。
+  搜索时分类条隐藏，结果是一个平铺的列表，条上写「{n} 个结果」；没有结果说「没有找到「…」」。清空搜索回到
+  原来的分类和位置。「全部更新」那一栏在搜索时照常显示。
+- **权限图标**：manifest 的六种能力各有 16 x 16 的四色图标（`PERM_ICONS`，和 `ICONS` 同一种写法）：
+  文件夹（files）、带抖动线的手机（motion）、话筒（mic）、铅笔（notes）、相机（camera）、打开的书（wordbook）。
+  商店条目里只画一行图标，最多六个，一行放得下；长说明留在 `store.perm.*` 里，作为图标的 title 和整行的
+  `aria-label`，不再占条目的一行字。图标 16 px，条目 331 px 宽时一行六个仍然放得下。
+- **安装前确认**：点「安装」时，如果这个 app 声明了权限，先弹 runtime 自己的确认框：「安装「X」？它要用：」，
+  下面每个权限一个 24 px 图标加一个短词（文件 / 倾斜 / 话筒 / 记事 / 相机 / 生词本），A 或「安装」在松开时继续，
+  B 或「取消」什么都不做，不下载、按钮回到「安装」。没有声明权限的 app 直接安装，不多一次点击。
+- **确认即授权**：确认以后下载、校验、存好，再把这份 manifest 里可以记住的四种能力（`motion`、`mic`、`camera`、
+  `wordbook`）写进 `data/users/local/sensors`，和第一次使用时的授权是同一份记录，设置 → 传感器与权限 照常
+  列出、撤销。所以装好第一次 `start()` / `snap()` / 加生词时不再问；手机自己的系统授权框仍然可能在需要时出现
+  （iOS 要求真实的点击，仍然走原来那条「点一下开启…」）。
+- **每次都要问的两种**：`files` 和 `notes` 不记住，也不在安装时假装记住：导入导出、写记事本仍然每一次都弹
+  runtime 的确认框。安装前的确认只是告诉玩家这个 app 会用到它们。
+- **旧安装、更新和「全部更新」**：旧版本装的 app 没有这份授权，第一次用时照旧问。更新如果**新增**了权限，
+  点「更新」时也会先确认，只把新增的能力写进记录；权限没变的更新不弹。「全部更新」一件一件地装，不中途弹框，
+  新权限留给第一次使用时问。卸载照旧删掉这个 app 的所有授权。
+- **不做的**：不做详情页、不做按作者或标签的高级筛选、不做搜索历史；不把权限说明重新放回条目下面；不在安装时
+  请求手机的系统权限（那一步仍然必须发生在用户的一次点击里）。
+- **代码**：`runtime/index.html` 的 `#store-q`、`#store-q-clear`；`runtime/apps/store.js` 的 `PERM_ICONS`、
+  `permIcon`、`permRow`、`searchScore`、`searchApps`、`setQuery`、`install` / `doInstall` 和 `openAsk` 的
+  `req.perms`；`runtime/lopda.css` 的 `.store-search`、`.store-perms`、`.ask-perms`；`runtime/strings.js`；
+  `tests/e2e.test.mjs` 的「store: search…」和「store: an app that asks…」。
+- **图标重画**：owner 指出吹蜡烛、纸塔、拍照拼图、声音样本、矢量梦和罗盘的主屏图标不好认。草稿先放在本机不被
+  git 跟踪的目录里逐个 review，定稿后再改 manifest 和 registry。

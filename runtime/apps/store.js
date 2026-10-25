@@ -4,7 +4,8 @@
  * the microphone through runtime/sensors.js, asked for on the same dialog, writing into notes on that dialog too, speech, one
  * photo at a time through the runtime's own viewfinder, apps/snap.js, read-only dictionary queries through
  * runtime/wordlist.js and the dictionary program's copy of the built-in ECDICT, and the player's own word book behind one
- * consent per app).
+ * consent per app). The store searches names and descriptions in both languages, shows what an app may use as icons,
+ * and confirms an app that asks for capabilities before downloading it (decisions.md section 42).
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  */
 (function(){
@@ -18,6 +19,29 @@ var own=LP.own, toast=LP.toast, put=LP.put, sfx=LP.sfx, show=LP.show, showPad=LP
 var PREINSTALL=["calculator","paint"];
 /* capabilities a manifest may ask for (SPEC.md section 2) */
 var PERMISSIONS=["files","motion","mic","notes","camera","wordbook"];
+/* a permission as one glance: 16 x 16 pixel icons, the same format as ICONS in core.js. The store's entry shows
+   them instead of a line of text; the install dialog shows them with a one-word label (decisions.md section 42). */
+var PERM_ICONS={
+  files:["................","..000...........",".03330..........","0333330000000000","0333333333333330","0333333333333330","0300000000000030","0333333333333330","0333333333333330","0333333333333330","0333333333333330","0333333333333330","0333333333333330","0000000000000000","................","................"],
+  motion:["................","................",".....00000......",".....03330......","0....03130....0.","00...03130...00.","0....03130....0.",".....03330......",".....03130......","0....03130....0.","00...03130...00.","0....03130....0.",".....03330......",".....00000......","................","................"],
+  mic:["................","......0000......",".....033330.....",".....033330.....",".....033330.....",".....033330.....",".....033330.....","..0..033330..0..","..0..033330..0..","...0.033330.0...","....03333330....",".....000000.....",".......00.......",".......00.......","......0000......","................"],
+  notes:["................","................","...........00...","..........0330..",".........0330...","........0330....",".......0330.....","......0330......",".....0330.......","....0330........","....000.........","...00...........","..00............","................","................","................"],
+  camera:["................","................","....0000........","..000000000000..",".03333333333330.",".03300000333330.",".03011111033000.",".00112222103330.",".00122332103330.",".00122332103330.",".00112222103330.",".03011111033330.",".03300000333330.",".00000000000000.","................","................"],
+  wordbook:["................","................","..000000000000..","..033330033330..","..031130031130..","..033330033330..","..031130031130..","..033330033330..","..031130031130..","..033330033330..","..033330033330..","..000000000000..",".......0220.....",".......0220.....","........00......","................"]
+};
+function permIcon(p,cls){
+  var s=document.createElement("span"); s.className=cls||"perm"; s.title=tr("store.perm."+p); s.setAttribute("aria-label",tr("store.perm."+p));
+  s.appendChild(LP.iconCanvas(PERM_ICONS[p]));
+  return s;
+}
+/* one line of icons, at most; the row's accessible name carries the long text */
+function permRow(perms){
+  var row=document.createElement("span"); row.className="store-perms";
+  row.setAttribute("role","img");
+  row.setAttribute("aria-label",perms.map(function(p){ return tr("store.perm."+p); }).join(tr("set.sense.and")));
+  perms.forEach(function(p){ row.appendChild(permIcon(p)); });
+  return row;
+}
 /* store sections, in the order the catalogue shows them; an app without a known category goes last */
 var CATEGORIES=["game","productivity","education","create","story","life"];
 function validPerms(x){ return Array.isArray(x) ? PERMISSIONS.filter(function(p){ return x.indexOf(p)>=0; }) : []; }
@@ -64,7 +88,35 @@ function outdatedApps(){
 }
 function updatesAvailable(){ return outdatedApps().length>0; }
 /* the selected category stays while the store is open; "all" groups the list into sections */
-var storeCat="all", updating=null;
+var storeCat="all", updating=null, storeQuery="";
+/* search: NFKC and lower case on both sides, a plain substring, every word must match; names beat descriptions.
+   Written out in the manifest's languages, so "paper" and "纸塔" both find the same app. */
+function normText(s){ return String(s==null?"":s).normalize("NFKC").toLowerCase().replace(/\s+/g," ").trim(); }
+function i18nField(r,field){
+  var out=[r[field]];
+  I18N.LANGS.forEach(function(l){ var e=r.i18n && r.i18n[l]; if(e && e[field]) out.push(e[field]); });
+  return normText(out.join(" "));
+}
+function searchScore(r,tokens){
+  var name=i18nField(r,"name"), desc=i18nField(r,"description");
+  var rest=normText([r.id,r.author,catLabel(categoryOf(r))].join(" "));
+  var hay=name+" "+desc+" "+rest;
+  for(var i=0;i<tokens.length;i++) if(hay.indexOf(tokens[i])<0) return -1;
+  var q=tokens.join(" ");
+  if(name===q) return 0;
+  if(name.indexOf(q)===0) return 1;
+  if(name.indexOf(q)>=0) return 2;
+  if(desc.indexOf(q)>=0) return 3;
+  return 4;
+}
+function searchApps(){
+  var q=normText(storeQuery), tokens=q.split(" ").filter(function(x){ return x; });
+  if(!tokens.length) return null;
+  return registryApps().map(function(r){ return {r:r, s:searchScore(r,tokens)}; })
+    .filter(function(x){ return x.s>=0; })
+    .sort(function(a,b){ return (a.s-b.s) || appName(a.r).localeCompare(appName(b.r)); })
+    .map(function(x){ return x.r; });
+}
 function renderFilters(){
   var box=$("store-filters"), counts={all:registryApps().length};
   registryApps().forEach(function(r){ var c=categoryOf(r); counts[c]=(counts[c]||0)+1; });
@@ -107,7 +159,8 @@ function storeItem(r){
   var d=document.createElement("span"); d.textContent=appDesc(r);
   var m=document.createElement("small"); m.textContent=(r.author||tr("store.anon"))+" · "+(r.license||"")+" · "+Math.max(1,Math.round((r.bytes||0)/1024))+" KB";
   body.appendChild(t); body.appendChild(d); body.appendChild(m);
-  validPerms(r.permissions).forEach(function(p){ var x=document.createElement("small"); x.textContent=tr("store.perm."+p); body.appendChild(x); });
+  var perms=validPerms(r.permissions);
+  if(perms.length) body.appendChild(permRow(perms));
   var a=installedOf(r.id), btn=document.createElement("button"); btn.type="button";
   if(!a){ btn.className="btn"; btn.textContent=tr("store.install"); }
   else if(a.sha256!==r.sha256){ btn.className="btn"; btn.textContent=tr("store.update"); }
@@ -133,21 +186,40 @@ function renderStore(keepScroll){
     $("store-updates").textContent=""; $("store-updates").hidden=true;
     var e=document.createElement("li"); e.className="empty"; e.textContent=tr("store.waiting"); ul.appendChild(e);
   } else {
-    filters.hidden=false;
-    renderFilters(); renderUpdates();
-    if(storeCat==="all"){
-      CATEGORIES.concat(["other"]).forEach(function(c){
-        var group=registryApps().filter(function(r){ return categoryOf(r)===c; });
-        if(!group.length) return;
-        ul.appendChild(categoryHead(c,group.length));
-        group.forEach(function(r){ ul.appendChild(storeItem(r)); });
-      });
+    var hits=searchApps();
+    if(hits){
+      filters.textContent=""; filters.hidden=true;
+      renderUpdates();
+      $("store-state").textContent=tr("store.results",{n:hits.length});
+      if(!hits.length){
+        var n=document.createElement("li"); n.className="empty"; n.textContent=tr("store.noresults",{q:storeQuery.trim()}); ul.appendChild(n);
+      } else hits.forEach(function(r){ ul.appendChild(storeItem(r)); });
     } else {
-      registryApps().filter(function(r){ return categoryOf(r)===storeCat; }).forEach(function(r){ ul.appendChild(storeItem(r)); });
+      filters.hidden=false;
+      $("store-state").textContent=tr("store.count",{n:registryApps().length});
+      renderFilters(); renderUpdates();
+      if(storeCat==="all"){
+        CATEGORIES.concat(["other"]).forEach(function(c){
+          var group=registryApps().filter(function(r){ return categoryOf(r)===c; });
+          if(!group.length) return;
+          ul.appendChild(categoryHead(c,group.length));
+          group.forEach(function(r){ ul.appendChild(storeItem(r)); });
+        });
+      } else {
+        registryApps().filter(function(r){ return categoryOf(r)===storeCat; }).forEach(function(r){ ul.appendChild(storeItem(r)); });
+      }
     }
   }
   /* emptying the list clamps the view to the top: put it back after the rebuild */
   view.scrollTop=scroll;
+}
+/* the search field: typing starts at the top of the results, clearing restores the categories */
+function setQuery(q,keepScroll){
+  storeQuery=q;
+  if($("store-q").value!==q) $("store-q").value=q;
+  $("store-q-clear").hidden=!q;
+  renderStore(!!keepScroll);
+  if(!keepScroll) $("v-store").scrollTop=0;
 }
 /* one button for every update: one at a time, the catalogue order, a failed one does not stop the rest */
 function updateAll(){
@@ -175,10 +247,27 @@ function updateAll(){
   };
   next();
 }
-/* install exactly the file the registry describes: the hash must match */
+/* install exactly the file the registry describes: the hash must match. Like Android, an app that asks for
+   capabilities is confirmed before it is downloaded, and the capabilities it can be granted are remembered then;
+   files and notes still ask on every use (decisions.md section 42). An older install, an update that adds a
+   permission, or "update all" has no such grant, so the first use asks as before. */
+var GRANTABLE=["motion","mic","camera","wordbook"];
 function install(r,btn){
+  if(updating) return;
+  var a=installedOf(r.id), perms=validPerms(r.permissions);
+  var added=a ? perms.filter(function(p){ return (a.permissions||[]).indexOf(p)<0; }) : perms;
+  if(!added.length){ doInstall(r,btn,[]); return; }
+  var req={text:tr(a?"store.updateask":"store.installask",{name:appName(r)}), perms:added, install:true,
+    okLabel:tr(a?"store.update":"store.install"), noLabel:tr("common.cancel")};
+  req.ok=function(){ closeAsk(false); doInstall(r,btn,added); };
+  if(ask) closeAsk(true);
+  openAsk(req);
+  sfx("tap");
+}
+function doInstall(r,btn,added){
   btn.disabled=true; btn.textContent=tr("store.downloading");
   fetchApp(r).then(function(prev){
+    added.filter(function(p){ return GRANTABLE.indexOf(p)>=0; }).forEach(function(p){ grant(r.id,p); });
     toast(tr(prev?"store.updated":"store.installed",{name:appName(r)})); sfx("ok");
     renderStore(true);
   }).catch(function(e){
@@ -430,8 +519,8 @@ function fileRequest(app,win,d){
 function openAsk(req){
   ask=req;
   askA=false;   /* an A held from an earlier dialog must not confirm this one */
-  /* the app lets go of every button: the dialog has the pad now */
-  req.win.postMessage({pad:1,op:"release-all"},"*");
+  /* the app lets go of every button: the dialog has the pad now (a store dialog has no app behind it) */
+  if(req.win) req.win.postMessage({pad:1,op:"release-all"},"*");
   var scrim=document.createElement("div"); scrim.className="file-ask"+(req.bar?" bar":""); scrim.id="file-ask";
   req.el=scrim;
   if(req.bar){
@@ -448,6 +537,17 @@ function openAsk(req){
   /* the words an app wants to write, as they will read (PAD.notes.append) */
   if(req.quote){ var q=document.createElement("p"); q.className="quote"; q.id="file-quote"; q.textContent=req.quote; box.appendChild(q); }
   if(req.note){ var n=document.createElement("p"); n.className="note"; n.textContent=req.note; box.appendChild(n); }
+  /* what an app asks for, as icons with one-word labels (the store's install dialog) */
+  if(req.perms && req.perms.length){
+    var pr=document.createElement("div"); pr.className="ask-perms"; pr.id="ask-perms";
+    req.perms.forEach(function(p){
+      var it=document.createElement("span"); it.className="ask-perm";
+      it.appendChild(permIcon(p,"ask-perm-ico"));
+      var l=document.createElement("small"); l.textContent=tr("store.perm.short."+p); it.appendChild(l);
+      pr.appendChild(it);
+    });
+    box.appendChild(pr);
+  }
   var row=document.createElement("div"); row.className="row";
   var ok=document.createElement("button"); ok.className="btn"; ok.type="button"; ok.id="file-ok"; ok.textContent=req.okLabel;
   var no=document.createElement("button"); no.className="btn ghost"; no.type="button"; no.id="file-no"; no.textContent=req.noLabel||tr("common.cancel");
@@ -793,10 +893,12 @@ function dictRequest(app,win,d){
 LP.builtin({id:"sensors", audio:function(){ sensors.rewire(); },
   ready:function(){
     grantsRef=S.db.doc("data/users/local/sensors");
-    grantsRef.get().then(function(sn){ var d=sn.exists && own(sn.data()); if(d && d.apps && typeof d.apps==="object") grants=d.apps; }).catch(function(){});
+    grantsRef.get().then(function(sn){ var d=sn.exists && own(sn.data()); if(d && d.apps && typeof d.apps==="object"){ Object.keys(grants).forEach(function(id){ d.apps[id]=grants[id]; }); grants=d.apps; } }).catch(function(){});
   }});
 
 $("store-refresh").onclick=function(){ loadRegistry(true); };
+$("store-q").addEventListener("input",function(){ setQuery(this.value,false); });
+$("store-q-clear").onclick=function(){ setQuery("",false); $("store-q").focus(); };
 
 LP.runApp=runApp;
 LP.onData("apps",function(){ if(!$("v-store").hidden) renderStore(true); });
@@ -818,7 +920,8 @@ LP.padRoute("run",function(b,down){
 LP.builtin({id:"store", label:"app.store", icon:"store", view:"store",
   open:function(){ show("store"); },
   tag:function(){ return updatesAvailable()?tr("home.updates"):""; },
-  enter:function(){ storeCat="all"; renderStore(); loadRegistry(); },
+  enter:function(){ storeCat="all"; setQuery("",false); loadRegistry(); },
+  leave:function(){ if(ask && ask.install) closeAsk(false); },
   ready:function(){ loadRegistry(); }});
 /* the runner owns the run view but has no icon of its own: apps appear on the home screen */
 LP.builtin({id:"run", view:"run", keepPad:true,
