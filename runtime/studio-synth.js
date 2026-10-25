@@ -1,18 +1,29 @@
 /*
- * Lo-PDA runtime: the drum voices of the four-track tape machine (docs/design/studio.md sections 1, 3 and 11).
+ * Lo-PDA runtime: the drum voices and the three melodic voices of the four-track tape machine
+ * (docs/design/studio.md sections 1, 3, 11 and 12.6).
  * Two kits, every sound synthesised: the 8-bit `chip` kit and the lofi `soft` kit (muffled kick, brush snare).
+ * Three melodic voices: `bass` (triangle and sub sine), `keys` (FM electric piano) and `pluck` (Karplus-Strong).
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  *
  *   LopdaStudioSynth.KITS             the registry: kit id -> function(ctx, out) -> {hit(drum, at, vel)}
- *   LopdaStudioSynth.create(ctx,out)  -> {hit(kit, drum, at, vel), dispose()}
+ *   LopdaStudioSynth.VOICES           the registry: voice id -> function(ctx, out) -> {note(midi, at, dur, vel)}
+ *   LopdaStudioSynth.create(ctx,out)  -> {hit(kit, drum, at, vel), note(voice, midi, at, dur, vel), dispose()}
  *
- * Sounds are a registry and not a switch: adding an instrument is adding one entry to KITS (design rule, section 3.4).
- * A kit is built on its first hit, so a song that never uses the soft kit pays nothing for it. All the random noise
- * comes from one seeded xorshift generator per context, never Math.random, so an offline render is the same every run.
+ * Sounds are a registry and not a switch: adding an instrument is adding one entry to KITS or VOICES (design rule,
+ * section 3.4). A kit or voice is built on its first use, so a song that never uses the soft kit or the pluck pays
+ * nothing for it. All the random noise comes from one seeded xorshift generator per context, never Math.random, so
+ * an offline render is the same every run.
+ *
+ * The whole mix goes through a soft ceiling (section 12.6): no compressor, so there is no look-ahead latency, the
+ * render is sample-exact every time, and loud hits bend like tape instead of clipping. Below 0.7 it is a plain wire,
+ * so a single drum keeps the level it had before the ceiling.
  *
  * Levels (measured by tests/studio-e2e.test.mjs at 22.05 kHz): all four drums on one step peak 0.79 for both kits,
  * well under 0.85; each drum alone stays between 0.13 and 0.49 at velocity 1. The demo beat's rms is 0.53x the
- * paper tower's title tune with the chip kit and 0.62x with the soft kit, so it sits near PAD.music's songs.
+ * paper tower's title tune with the chip kit and 0.62x with the soft kit, so it sits near PAD.music's songs. The
+ * melodic voices at velocity 1 peak 0.30 for bass, 0.072 per keys note and 0.263 for pluck; bass 45, a four-note
+ * keys chord and pluck 69 together peak 0.59, so the notes alone stay under 0.6 and the dense drum hit stops at
+ * the 0.908 ceiling.
  */
 (function(){
 "use strict";
@@ -60,6 +71,12 @@ function cleanup(src,nodes){
 }
 
 function velOf(v){ return typeof v==="number" && isFinite(v) ? (v<0?0:v>1?1:v) : 1; }
+
+/* equal temperament, A4 (69) = 440 Hz; the project stores plain MIDI numbers */
+function midiFreq(midi){ return 440*Math.pow(2,(midi-69)/12); }
+
+/* a note may be handed a time the 25 ms scheduler has already passed (the main thread stalled): start now, as hit does */
+function when(ctx,at){ return (typeof at==="number" && isFinite(at) && at>ctx.currentTime) ? at : ctx.currentTime; }
 
 /* a filtered noise voice; `end` is when it stops, release the envelope after the attack */
 function noiseVoice(ctx,out,buf,type,freq,q,peak,attack,release,end,at){
@@ -160,13 +177,151 @@ KITS.soft=function(ctx,out){
   };
 };
 
+/* ---------- the melodic voices ----------
+   id -> constructor(ctx, out); each returns {note(midi, at, dur, vel)}. Add an entry to add an instrument. */
+
+var VOICES={};
+
+/* bass: a triangle for the body and a quiet sine an octave down, both through a 700 Hz lowpass. The lowpass takes
+   the edge off the triangle's upper harmonics; the sine fills the bottom without adding a second pitch. Attack 8 ms,
+   hold, 80 ms release at at+dur. The envelope peaks at 0.255 and the sub adds up to a quarter of that, giving a
+   measured peak near 0.30 at velocity 1. */
+VOICES.bass=function(ctx,out){
+  return {
+    note:function(midi,at,dur,vel){
+      var f=midiFreq(midi), v=velOf(vel), peak=0.255*v;
+      var t=when(ctx,at), a=Math.min(0.008,dur), attackEnd=t+a, holdEnd=Math.max(t+dur,attackEnd);
+      var tri=ctx.createOscillator(), triGain=ctx.createGain(), sine=ctx.createOscillator(), sineGain=ctx.createGain();
+      var filter=ctx.createBiquadFilter(), g=ctx.createGain();
+      tri.type="triangle"; tri.frequency.value=f;
+      triGain.gain.value=1;
+      sine.type="sine"; sine.frequency.value=f/2;
+      sineGain.gain.value=0.25;
+      filter.type="lowpass"; filter.frequency.value=700; filter.Q.value=0.7;
+      g.gain.setValueAtTime(SILENCE,t);
+      g.gain.linearRampToValueAtTime(peak,attackEnd);
+      g.gain.setValueAtTime(peak,holdEnd);
+      g.gain.exponentialRampToValueAtTime(SILENCE,holdEnd+0.08);
+      tri.connect(triGain); sine.connect(sineGain);
+      triGain.connect(filter); sineGain.connect(filter); filter.connect(g); g.connect(out);
+      tri.start(t); tri.stop(holdEnd+0.09);
+      sine.start(t); sine.stop(holdEnd+0.09);
+      cleanup(tri,[tri,triGain,sine,sineGain,filter,g]);
+    }
+  };
+};
+
+/* keys: two-operator FM, ratio 1. The modulator's depth starts at 2.5 f and falls to 0.15 f in 300 ms, which is the
+   tine: bright at the strike and mellow while the note rings. The carrier envelope opens in 5 ms, falls to half over
+   one second and holds there, then releases for 250 ms at at+dur. The carrier amplitude is the peak (0.072 a note,
+   so four notes of a chord reach about 0.28 before the mix), not a modulation-dependent level. */
+VOICES.keys=function(ctx,out){
+  return {
+    note:function(midi,at,dur,vel){
+      var f=midiFreq(midi), v=velOf(vel), peak=0.072*v;
+      var t=when(ctx,at), a=Math.min(0.005,dur), attackEnd=t+a, releaseStart=t+dur;
+      var carrier=ctx.createOscillator(), mod=ctx.createOscillator(), modGain=ctx.createGain(), g=ctx.createGain();
+      var decayEnd=Math.min(t+1,releaseStart), holdVal=peak;
+      carrier.type="sine"; carrier.frequency.value=f;
+      mod.type="sine"; mod.frequency.value=f;
+      modGain.gain.setValueAtTime(2.5*f,t);
+      modGain.gain.exponentialRampToValueAtTime(0.15*f,t+0.3);
+      mod.connect(modGain); modGain.connect(carrier.frequency);
+      g.gain.setValueAtTime(SILENCE,t);
+      g.gain.linearRampToValueAtTime(peak,attackEnd);
+      if(decayEnd>attackEnd){ g.gain.linearRampToValueAtTime(peak*0.5,decayEnd); holdVal=peak*0.5; }
+      g.gain.setValueAtTime(holdVal,releaseStart);
+      g.gain.exponentialRampToValueAtTime(SILENCE,releaseStart+0.25);
+      carrier.connect(g); g.connect(out);
+      carrier.start(t); carrier.stop(releaseStart+0.26);
+      mod.start(t); mod.stop(releaseStart+0.26);
+      cleanup(carrier,[carrier,mod,modGain,g]);
+    }
+  };
+};
+
+/* one Karplus-Strong buffer per context and MIDI note. The delay line's first N samples are seeded noise; after
+   that y[n] = 0.996 * 0.5 * (y[n-N] + y[n-N-1]), the averaging lowpass that makes a plucked string lose its highs
+   as it rings. The same WeakMap fallback as noiseFor keeps only the live context on browsers without WeakMap. */
+var PLUCK_SECONDS=1.2;
+var pluckMap=typeof WeakMap==="function" ? new WeakMap() : null, lastPluck=null;
+
+function pluckFor(ctx,midi){
+  var map=null, buf;
+  if(pluckMap){
+    map=pluckMap.get(ctx);
+    if(!map){ map={}; pluckMap.set(ctx,map); }
+  } else {
+    if(!lastPluck || lastPluck.ctx!==ctx) lastPluck={ctx:ctx, map:{}};
+    map=lastPluck.map;
+  }
+  buf=map[midi];
+  if(buf) return buf;
+  var sr=ctx.sampleRate, f=midiFreq(midi);
+  var n=Math.max(2,Math.floor(sr/f)), len=Math.ceil(sr*PLUCK_SECONDS);
+  var b=ctx.createBuffer(1,len,sr), d=b.getChannelData(0), r=rng(0x51ed270b^(midi*2654435761)), i, max=0;
+  for(i=0;i<len;i++){
+    if(i<n) d[i]=r()*2-1;
+    else d[i]=0.996*0.5*(d[i-n]+(i-n-1>=0?d[i-n-1]:0));
+    if(Math.abs(d[i])>max) max=Math.abs(d[i]);
+  }
+  /* the noise seed of each pitch has its own peak; normalising every buffer to 1 makes the 0.265 trim mean the same
+     thing across the keyboard */
+  if(max>0) for(i=0;i<len;i++) d[i]/=max;
+  map[midi]=b;
+  return b;
+}
+
+/* pluck: the cached buffer at a gain that starts at the peak (a pluck has no attack) and releases for 60 ms at
+   at+dur. The correction N*f/sr is near 1: the delay line is an integer length, so playing the buffer a hair off
+   speed puts the fundamental exactly on the note. The buffer also stops the note at its own 1.2 s end. */
+VOICES.pluck=function(ctx,out){
+  return {
+    note:function(midi,at,dur,vel){
+      var v=velOf(vel), t=when(ctx,at), b=pluckFor(ctx,midi);
+      var sr=ctx.sampleRate, f=midiFreq(midi), n=Math.max(2,Math.floor(sr/f));
+      var rate=n*f/sr, playDur=b.duration/rate, end=Math.min(t+dur+0.06,t+playDur);
+      var releaseStart=Math.max(t,end-0.06), g=ctx.createGain(), s=ctx.createBufferSource();
+      s.buffer=b; s.playbackRate.value=rate;
+      g.gain.setValueAtTime(0.265*v,t);
+      g.gain.setValueAtTime(0.265*v,releaseStart);
+      g.gain.linearRampToValueAtTime(0,end);
+      s.connect(g); g.connect(out);
+      s.start(t); s.stop(end);
+      cleanup(s,[s,g]);
+    }
+  };
+};
+
+/* ---------- the soft clip ----------
+   A WaveShaper, not a compressor: no look-ahead means no latency and an offline render is bit-for-bit repeatable.
+   Below the 0.7 knee the curve is y = x, so one drum (0.55 at most) is untouched; above it tanh bends the peaks
+   toward 0.908, a tape-ish ceiling that keeps four busy tracks from ever reaching 1. The curve is built once. */
+var CLIP_KNEE=0.7, CLIP_SOFT=0.25, clipCurve=null;
+
+function softClipCurve(){
+  if(clipCurve) return clipCurve;
+  var n=4097, c=new Float32Array(n), i, x, a, s;
+  for(i=0;i<n;i++){
+    x=-1+2*i/(n-1);
+    a=Math.abs(x);
+    if(a<=CLIP_KNEE) c[i]=x;
+    else { s=x<0?-1:1; c[i]=s*(CLIP_KNEE+CLIP_SOFT*Math.tanh((a-CLIP_KNEE)/CLIP_SOFT)); }
+  }
+  clipCurve=c;
+  return c;
+}
+
 /* ---------- the mix ---------- */
 
 function create(ctx,out){
-  var master=ctx.createGain();
+  var master=ctx.createGain(), clip=ctx.createWaveShaper();
   master.gain.value=1;
-  if(out) master.connect(out); else master.connect(ctx.destination);
-  var built={}, disposed=false;
+  clip.curve=softClipCurve();
+  clip.oversample="none";
+  master.connect(clip);
+  if(out) clip.connect(out); else clip.connect(ctx.destination);
+  var built={}, voices={}, disposed=false;
 
   function hit(kit,drum,at,vel){
     if(disposed) return;
@@ -181,14 +336,31 @@ function create(ctx,out){
     k.hit(drum,t,v);
   }
 
+  /* unknown voice, a bad pitch or a length or velocity that cannot sound: nothing, not an error */
+  function note(voice,midi,at,dur,vel){
+    if(disposed) return;
+    if(!Object.prototype.hasOwnProperty.call(VOICES,voice)) return;
+    if(typeof midi!=="number" || !isFinite(midi)) return;
+    if(!(dur>0)) return;
+    var v=velOf(vel);
+    if(v<=0) return;
+    var t=(typeof at==="number" && isFinite(at)) ? at : ctx.currentTime;
+    if(t<ctx.currentTime) t=ctx.currentTime;
+    var n=voices[voice];
+    if(!n) n=voices[voice]=VOICES[voice](ctx,master);
+    n.note(midi,t,dur,v);
+  }
+
   function dispose(){
     if(disposed) return;
     disposed=true;
+    /* the shaper too: the player makes a new synth on every play, and a left-over node stays wired to the output */
     try{ master.disconnect(); }catch(e){}
+    try{ clip.disconnect(); }catch(e){}
   }
 
-  return {hit:hit, dispose:dispose};
+  return {hit:hit, note:note, dispose:dispose};
 }
 
-window.LopdaStudioSynth={KITS:KITS, create:create};
+window.LopdaStudioSynth={KITS:KITS, VOICES:VOICES, create:create};
 })();

@@ -1,4 +1,4 @@
-// The four-track tape machine's drum synth (runtime/studio-synth.js), rendered offline in headless Chromium.
+// The four-track tape machine's drum and melodic synth (runtime/studio-synth.js), rendered offline in headless Chromium.
 // Needs Playwright, which the repo does not depend on, so these tests skip without it:
 //   npm i --no-save playwright && npx playwright install chromium && node --test tests/studio-e2e.test.mjs
 // Kept out of tests/e2e.test.mjs so the big suite is not touched by the studio work.
@@ -82,6 +82,31 @@ async function studioPage(t, withChip) {
       const synth = LopdaStudioSynth.create(oc, out);
       for (const drum of ["kick", "snare", "hat", "perc"]) synth.hit(kit, drum, 0.02, vel);
       return stats((await oc.startRendering()).getChannelData(0));
+    };
+    /* one note of one voice, at 0.02 s, into a gain of 1 */
+    window.renderNote = async (voice, midi, dur, vel = 1, seconds = 1) => {
+      const oc = new OfflineAudioContext(1, Math.ceil(SR * seconds), SR);
+      const out = oc.createGain(); out.gain.value = 1; out.connect(oc.destination);
+      const synth = LopdaStudioSynth.create(oc, out);
+      synth.note(voice, midi, 0.02, dur, vel);
+      return stats((await oc.startRendering()).getChannelData(0));
+    };
+    /* drums and notes together; an event is {kit, drum} or {voice, midi, at, dur}, both with at and vel */
+    window.renderEvents = async (events, seconds = 1) => {
+      const oc = new OfflineAudioContext(1, Math.ceil(SR * seconds), SR);
+      const out = oc.createGain(); out.gain.value = 1; out.connect(oc.destination);
+      const synth = LopdaStudioSynth.create(oc, out);
+      for (const e of events) {
+        if (e.voice) synth.note(e.voice, e.midi, e.at || 0, e.dur, e.vel == null ? 1 : e.vel);
+        else synth.hit(e.kit, e.drum, e.at || 0, e.vel == null ? 1 : e.vel);
+      }
+      return stats((await oc.startRendering()).getChannelData(0));
+    };
+    /* the largest absolute sample between two times, in seconds */
+    window.peakBetween = (d, from, to) => {
+      let m = 0;
+      for (let i = Math.max(0, Math.floor(from * SR)); i < Math.min(d.length, Math.ceil(to * SR)); i++) m = Math.max(m, Math.abs(d[i]));
+      return m;
     };
     /* `seconds` of the DEMO beat from the song data, swing included */
     window.renderBeat = async (kit, seconds) => {
@@ -219,6 +244,125 @@ test("studio synth: dispose stops later hits; unknown kit or drum is ignored", {
   assert.equal(r.silentPeak, 0, "a disposed synth renders silence");
   assert.equal(r.zeroPeak, 0, "velocity 0 schedules no sound");
   assert.equal(r.whole, 0, "the hit scheduled before dispose is silenced too (the master is disconnected)");
+  assert.equal(r.after, 0, "nothing sounds after dispose");
+  assert.deepEqual(errors, []);
+});
+
+test("studio synth: every melodic voice sounds low and high, under its target, and renders the same twice", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await studioPage(t, false);
+  const targets = { bass: 0.30, keys: 0.075, pluck: 0.28 };
+  const pitches = { bass: [33, 57], keys: [48, 72], pluck: [57, 84] };
+  const r = await p.evaluate(async (pitches) => {
+    const out = { notes: [] };
+    for (const voice of Object.keys(pitches)) {
+      for (const midi of pitches[voice]) {
+        const a = await renderNote(voice, midi, 0.4);
+        const b = await renderNote(voice, midi, 0.4);
+        out.notes.push({ voice, midi, peak: a.peak, last: a.last, diff: maxDiff(a.data, b.data) });
+      }
+    }
+    return out;
+  }, pitches);
+  for (const n of r.notes) {
+    t.diagnostic(`${n.voice} ${n.midi}: peak ${n.peak.toFixed(4)}, ends ${n.last.toFixed(3)} s`);
+    assert.ok(n.peak > 0.02, `${n.voice} ${n.midi} is audible (peak ${n.peak})`);
+    assert.ok(n.peak <= targets[n.voice] * 1.2, `${n.voice} ${n.midi} peak ${n.peak} is under ${(targets[n.voice] * 1.2).toFixed(3)}`);
+    assert.ok(n.diff < 1e-4, `${n.voice} ${n.midi} renders the same twice (max difference ${n.diff})`);
+  }
+  assert.deepEqual(errors, []);
+});
+
+test("studio synth: bass, keys and pluck stop after their release", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await studioPage(t, false);
+  const r = await p.evaluate(async () => {
+    const out = {};
+    /* after at + dur + release + 50 ms nothing of the note may be left; the source stops at the release end */
+    for (const [voice, dur, release] of [["bass", 0.2, 0.08], ["keys", 0.2, 0.25], ["pluck", 0.2, 0.06]]) {
+      const at = 0.05;
+      const s = await renderEvents([{ voice, midi: 57, at, dur }], 1.5);
+      out[voice] = { peak: s.peak, after: peakBetween(s.data, at + dur + release + 0.05, 1.4), cut: at + dur + release + 0.05 };
+    }
+    return out;
+  });
+  for (const voice of ["bass", "keys", "pluck"]) {
+    t.diagnostic(`${voice}: peak ${r[voice].peak.toFixed(4)}, after ${r[voice].cut.toFixed(3)} s peak ${r[voice].after.toExponential(2)}`);
+    assert.ok(r[voice].peak > 0.02, `${voice} note sounds before its release (${r[voice].peak})`);
+    assert.ok(r[voice].after < 1e-3, `${voice} is silent after at + dur + release + 50 ms (${r[voice].after})`);
+  }
+  assert.deepEqual(errors, []);
+});
+
+test("studio synth: a dense hit stays under the soft clip, and the melodic parts alone under 0.6", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await studioPage(t, false);
+  const r = await p.evaluate(async () => {
+    const drums = ["kick", "snare", "hat", "perc"].map((drum) => ({ kit: "soft", drum, at: 0 }));
+    const bass = { voice: "bass", midi: 45, at: 0, dur: 1 };
+    const keys = [57, 60, 67, 71].map((midi) => ({ voice: "keys", midi, at: 0, dur: 1 }));
+    const pluck = { voice: "pluck", midi: 69, at: 0, dur: 1 };
+    const dense = await renderEvents([...drums, bass, ...keys, pluck], 1.5);
+    const melodic = await renderEvents([bass, ...keys, pluck], 1.5);
+    return { dense: dense.peak, melodic: melodic.peak };
+  });
+  t.diagnostic(`soft kit + bass 45 + keys 57 60 67 71 + pluck 69: peak ${r.dense.toFixed(3)}`);
+  t.diagnostic(`bass 45 + keys 57 60 67 71 + pluck 69: peak ${r.melodic.toFixed(3)}`);
+  assert.ok(r.dense <= 0.95, `the dense hit peaks <= 0.95 (${r.dense})`);
+  assert.ok(r.melodic <= 0.6, `the melodic parts alone peak <= 0.6 (${r.melodic})`);
+  assert.deepEqual(errors, []);
+});
+
+test("studio synth: the soft clip leaves a single soft kick alone", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await studioPage(t, false);
+  const r = await p.evaluate(async () => {
+    const full = await renderDrum("soft", "kick");
+    const half = await renderEvents([{ kit: "soft", drum: "kick", at: 0.02, vel: 0.5 }]);
+    return { full: full.peak, half: half.peak };
+  });
+  t.diagnostic(`soft kick at velocity 1: peak ${r.full.toFixed(4)}; at 0.5: ${r.half.toFixed(4)}`);
+  assert.ok(r.full < 0.7, `the kick stays below the clip knee (${r.full})`);
+  const off = Math.abs(r.half - r.full * 0.5) / (r.full * 0.5);
+  t.diagnostic(`half velocity differs from half the peak by ${(off * 100).toFixed(2)}%`);
+  assert.ok(off < 0.01, `velocity 0.5 scales the peak by half within 1% (${off * 100}%)`);
+  assert.deepEqual(errors, []);
+});
+
+test("studio synth: dispose stops later notes; an unknown voice or bad note args is ignored", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await studioPage(t, false);
+  const r = await p.evaluate(async () => {
+    const SR = 22050;
+    const out = { threw: false };
+    /* unknown voice, a non-finite pitch, zero length and zero velocity schedule nothing and never throw */
+    let oc = new OfflineAudioContext(1, SR, SR);
+    let gain = oc.createGain(); gain.gain.value = 1; gain.connect(oc.destination);
+    let synth = LopdaStudioSynth.create(oc, gain);
+    try {
+      synth.note("nope", 60, 0.02, 0.2, 1);
+      synth.note("bass", NaN, 0.02, 0.2, 1);
+      synth.note("bass", Infinity, 0.02, 0.2, 1);
+      synth.note("bass", 45, 0.02, 0, 1);
+      synth.note("bass", 45, 0.02, -0.1, 1);
+      synth.note("bass", 45, 0.02, 0.2, 0);
+      synth.note("keys", 60, 0.02, 0.2, -1);
+    } catch (e) { out.threw = true; }
+    out.badPeak = stats((await oc.startRendering()).getChannelData(0)).peak;
+
+    /* a note already scheduled is silenced by dispose (the master is cut), and later notes do nothing */
+    oc = new OfflineAudioContext(1, SR, SR);
+    gain = oc.createGain(); gain.gain.value = 1; gain.connect(oc.destination);
+    synth = LopdaStudioSynth.create(oc, gain);
+    synth.note("bass", 45, 0.05, 0.3, 1);
+    synth.dispose();
+    try {
+      synth.note("bass", 52, 0.3, 0.3, 1);
+      synth.note("keys", 60, 0.3, 0.3, 1);
+    } catch (e) { out.threw = true; }
+    const d = (await oc.startRendering()).getChannelData(0);
+    out.whole = stats(d).peak;
+    out.after = peakBetween(d, 0.3, 1);
+    return out;
+  });
+  assert.equal(r.threw, false, "bad voices and bad note arguments never throw");
+  assert.equal(r.badPeak, 0, "an unknown voice or bad arguments schedule no sound");
+  assert.equal(r.whole, 0, "the note scheduled before dispose is silenced too");
   assert.equal(r.after, 0, "nothing sounds after dispose");
   assert.deepEqual(errors, []);
 });
