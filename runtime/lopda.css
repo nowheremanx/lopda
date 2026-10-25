@@ -639,3 +639,69 @@ textarea::placeholder{color:var(--ink-2)}
 /* a sheet owns the screen while it is open: the bubble and the target's frame step aside, then come back */
 .studio.st-sheet-open .st-tour-box{display:none}
 .studio.st-sheet-open .st-tour-hi{position:static;z-index:auto;outline:none}
+
+/* the screens (docs/design/studio.md 12.2): the pattern letter, then five tabs; a tab's dot says that track has notes */
+.st-nav{flex:none;display:flex;align-items:stretch;gap:4px;padding:4px 6px;border-bottom:2px solid var(--ink)}
+.st-pat{flex:none;width:44px;height:44px;display:flex;align-items:center;justify-content:center;padding:0;background:var(--lcd);color:var(--ink);border:4px solid var(--ink);font-family:var(--f-pix);font-size:24px;line-height:1;cursor:pointer}
+/* a queued pattern blinks for two beats at the current tempo; the duration comes from the player, inline */
+.st-pat.queued{animation-name:st-queue;animation-timing-function:linear;animation-iteration-count:infinite}
+@keyframes st-queue{0%,49%{background:var(--ink);color:var(--lcd)}50%,100%{background:var(--lcd);color:var(--ink)}}
+.st-screens{flex:1;min-width:0;display:flex;gap:3px}
+.st-scr{flex:1;min-width:0;min-height:44px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;padding:1px;background:transparent;color:var(--ink);border:2px solid var(--ink);font-family:var(--f-lcd);font-size:13px;line-height:1.1;cursor:pointer;white-space:nowrap;overflow:hidden}
+.st-scr.on{background:var(--ink);color:var(--lcd)}
+.st-scr-name{max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.st-scr .st-dot{width:4px;height:4px}
+.st-scr.on .st-dot.on{background:var(--lcd)}
+/* a note cell writes its pitch in paper on ink; the selected cell has a thick inner frame */
+.st-cell.has-note{display:flex;align-items:center;justify-content:center;color:var(--lcd);font-family:var(--f-pix);font-size:18px;line-height:1}
+.st-cell.sel{box-shadow:inset 0 0 0 5px var(--lcd)}
+/* the eight pitch keys, two rows of four, the higher octave underlined */
+.st-keys-wrap{flex:none;padding:0 8px 6px}
+.st-keys{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));grid-auto-rows:44px;gap:4px}
+.st-key{position:relative;min-height:44px;min-width:0;display:flex;align-items:center;justify-content:center;padding:0;background:var(--lcd);color:var(--ink);border:2px solid var(--ink);font-family:var(--f-pix);font-size:18px;line-height:1;cursor:pointer}
+.st-key.on{background:var(--ink);color:var(--lcd)}
+.st-key-line{position:absolute;left:32%;right:32%;bottom:5px;height:2px;background:currentColor;display:none}
+.st-key.oct .st-key-line{display:block}
+/* the chord screen: two big cells, then six keys */
+.st-chord-board{flex:1;min-height:0;display:flex;flex-direction:column;gap:4px;padding:6px 8px}
+.st-chord-cells{flex:1;min-height:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+.st-chord-cell{min-width:0;min-height:56px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:2px;background:var(--lcd);color:var(--ink);border:3px solid var(--ink);font-family:var(--f-lcd);cursor:pointer;overflow:hidden}
+.st-chord-cell .st-roman{font-family:var(--f-pix);font-size:26px;line-height:1}
+.st-chord-cell .st-name{font-size:13px;line-height:1.2;color:var(--ink-2)}
+.st-chord-cell.has-chord .st-name{color:var(--ink)}
+.st-chord-cell.sel{box-shadow:inset 0 0 0 5px var(--ink)}
+.st-chord-cell.focus,.st-chain-cell.focus{outline:2px dashed var(--ink);outline-offset:1px}
+.st-chord-cell.playing{background:var(--lcd-3)}
+.st-chord-cell.has-chord.playing{background:var(--ink-2);color:var(--lcd)}
+.st-chord-cell.has-chord.playing .st-name{color:var(--lcd)}
+.st-chord-cell.has-chord.playing.sel{box-shadow:inset 0 0 0 5px var(--lcd)}
+.st-chord-keys{flex:none;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));grid-auto-rows:44px;gap:4px}
+.st-chord-key{min-height:44px;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;padding:0 2px;background:var(--lcd);color:var(--ink);border:2px solid var(--ink);font-family:var(--f-lcd);line-height:1.1;cursor:pointer;overflow:hidden}
+.st-chord-key b{font-family:var(--f-pix);font-weight:400;font-size:18px;line-height:1}
+.st-chord-key small{font-size:11px;color:var(--ink-2);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.st-chord-key.on{background:var(--ink);color:var(--lcd)}
+.st-chord-key.on small{color:var(--lcd)}
+/* the song screen: only the chain scrolls, and only when it is longer than its box */
+.st-song{flex:1;min-height:0;display:flex;flex-direction:column;gap:4px;padding:4px 6px 6px}
+.st-chain{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;touch-action:pan-y;display:grid;grid-template-columns:repeat(6,minmax(0,1fr));grid-auto-rows:44px;gap:4px;align-content:start}
+.st-chain-cell{min-width:0;min-height:44px;display:flex;align-items:center;justify-content:center;padding:0;background:var(--lcd);color:var(--ink);border:2px solid var(--ink);font-family:var(--f-pix);font-size:20px;line-height:1;cursor:pointer}
+.st-chain-cell.sel{box-shadow:inset 0 0 0 4px var(--ink)}
+.st-chain-cell.playing{background:var(--ink);color:var(--lcd)}
+.st-chain-cell.playing.sel{box-shadow:inset 0 0 0 4px var(--lcd)}
+.st-letters{flex:none;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));grid-auto-rows:44px;gap:4px}
+.st-letter{position:relative;min-height:44px;min-width:0;display:flex;align-items:center;justify-content:center;padding:0 0 6px;background:var(--lcd);color:var(--ink);border:2px solid var(--ink);font-family:var(--f-pix);font-size:20px;line-height:1;cursor:pointer}
+.st-letter .st-dot{position:absolute;left:50%;bottom:4px;margin-left:-2.5px}
+.st-song-btns{flex:none;display:flex;gap:4px}
+.st-song-btn{flex:1;min-width:0;min-height:44px;padding:2px 4px;background:var(--ink);color:var(--lcd);border:2px solid var(--ink);font-family:var(--f-lcd);font-size:13px;line-height:1.15;cursor:pointer}
+.st-song-btn:disabled{background:var(--lcd-3);color:var(--ink-2);border-color:var(--lcd-3);cursor:default}
+/* the pattern sheet: A-H in two rows of four, the current one inverted, a dot when that pattern has notes */
+.st-pat-grid{flex:none;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));grid-auto-rows:44px;gap:4px}
+.st-pat-btn{position:relative;min-height:44px;min-width:0;display:flex;align-items:center;justify-content:center;padding:0 0 6px;background:transparent;color:var(--ink);border:2px solid var(--ink);font-family:var(--f-pix);font-size:20px;line-height:1;cursor:pointer}
+.st-pat-btn.on{background:var(--ink);color:var(--lcd)}
+.st-pat-btn .st-dot{position:absolute;left:50%;bottom:4px;margin-left:-2.5px}
+.st-pat-btn.on .st-dot.on{background:var(--lcd)}
+.st-sheet-btn{min-height:44px;padding:4px 8px;background:transparent;color:var(--ink);border:2px solid var(--ink);font-family:var(--f-lcd);font-size:15px;line-height:1.1;cursor:pointer}
+.st-sheet-row{flex:none;display:flex;gap:4px}
+.st-sheet-row .st-sheet-btn{flex:1;min-width:0}
+.st-copy-ask{display:flex;flex-direction:column;gap:8px;font-size:15px;line-height:1.4}
+.st-copy-ask p{margin:0}

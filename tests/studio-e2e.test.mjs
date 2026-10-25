@@ -407,11 +407,31 @@ async function waitTour(p, re) {
     return t && new RegExp(src).test(t.textContent);
   }, re.source);
 }
-/* counts every drum hit the studio schedules; installed before boot because that is when the synth is defined */
+/* Counts every drum hit and melodic note the studio schedules, and every chainEvents call; installed before boot
+   because that is when the synth and the song helper are defined. */
 async function hitCountingPage(t) {
   const { p, errors } = await rtPage(t);
   await p.addInitScript(() => {
-    let synth;
+    let synth, song;
+    Object.defineProperty(window, "LopdaSong", {
+      configurable: true,
+      get() { return song; },
+      set(v) {
+        if (v && typeof v.chainEvents === "function" && !v.__chainWrapped) {
+          const chainEvents = v.chainEvents;
+          v.chainEvents = function (sg, chain, from, to) {
+            const ev = chainEvents.call(v, sg, chain, from, to);
+            window.__studioChain.push({
+              chain: chain.slice(), from, to,
+              events: ev.map((e) => ({ p: e.p, tick: e.tick, track: e.track, key: e.key })),
+            });
+            return ev;
+          };
+          v.__chainWrapped = true;
+        }
+        song = v;
+      }
+    });
     Object.defineProperty(window, "LopdaStudioSynth", {
       configurable: true,
       get() { return synth; },
@@ -425,6 +445,11 @@ async function hitCountingPage(t) {
               window.__studioHits.push({ kit, drum, at, wall: performance.now() });
               return hit.apply(s, arguments);
             };
+            const note = s.note;
+            s.note = function (voice, midi, at, dur, vel) {
+              window.__studioNotes.push({ voice, midi, at, dur, vel, wall: performance.now() });
+              return note.apply(s, arguments);
+            };
             return s;
           };
           v.__hitsWrapped = true;
@@ -433,6 +458,8 @@ async function hitCountingPage(t) {
       }
     });
     window.__studioHits = [];
+    window.__studioNotes = [];
+    window.__studioChain = [];
   });
   return { p, errors };
 }
@@ -441,6 +468,51 @@ const storedKick = (p, step) => p.evaluate(async (n) => {
   const item = await LopdaPlatform.db.doc("data/users/local/studio/items/" + meta.current).get();
   return !!item.data().patterns[0].notes.drums.some((x) => x.key === "kick" && Math.round(x.t / 24) === n);
 }, step);
+const storedSong = (p) => p.evaluate(async () => {
+  const meta = (await LopdaPlatform.db.doc("data/users/local/studio").get()).data();
+  const item = await LopdaPlatform.db.doc("data/users/local/studio/items/" + meta.current).get();
+  return item.data();
+});
+/* wait for the debounced save to land in IndexedDB: want.song, or want.pat's track as [t, len, deg] rows.
+   Polled from Node: page.waitForFunction does not unwrap an async predicate's promise (it reads the promise as
+   truthy), so an async predicate there would pass at once. */
+function storedMatches(data, want) {
+  if (want.song && JSON.stringify(data.song) !== JSON.stringify(want.song)) return false;
+  if (want.pat != null) {
+    const pat = data.patterns && data.patterns[want.pat];
+    if (!pat) return false;
+    if (want.notes) {
+      const list = (pat.notes && pat.notes[want.track]) || [];
+      if (JSON.stringify(list.map((n) => [n.t, n.len, n.deg])) !== JSON.stringify(want.notes)) return false;
+    }
+  }
+  return true;
+}
+async function waitStored(p, want, timeout = 6000) {
+  const end = Date.now() + timeout;
+  for (;;) {
+    let data = null;
+    try { data = await storedSong(p); } catch { /* not written yet */ }
+    if (data && storedMatches(data, want)) return;
+    if (Date.now() > end) throw new Error("the stored tape never matched " + JSON.stringify(want));
+    await p.waitForTimeout(50);
+  }
+}
+/* the kick steps of one stored pattern, as 0-based step numbers */
+async function waitKicks(p, pat, steps, timeout = 6000) {
+  const end = Date.now() + timeout;
+  for (;;) {
+    let data = null;
+    try { data = await storedSong(p); } catch { /* not written yet */ }
+    const list = data && data.patterns[pat] ? data.patterns[pat].notes.drums : null;
+    if (list) {
+      const got = list.filter((n) => n.key === "kick").map((n) => Math.round(n.t / 24));
+      if (JSON.stringify(got) === JSON.stringify(steps)) return;
+    }
+    if (Date.now() > end) throw new Error(`stored pattern ${pat} kicks never became ${JSON.stringify(steps)}`);
+    await p.waitForTimeout(50);
+  }
+}
 const cellOn = (p, step) => p.locator(`#v-studio .st-cell[data-step="${step}"]`).evaluate((c) => c.classList.contains("on"));
 async function cellWidths(p) {
   return p.$$eval("#v-studio .st-cell", (cells) => cells.map((c) => {
@@ -878,5 +950,327 @@ test("studio tour: HOME ends it unseen, so the next open shows it again", { skip
   assert.match(await tourText(p), /按 ▸ 听听这盘磁带。/);
   await p.keyboard.press("z");
   await p.waitForSelector("#v-studio .st-tour-box", { state: "detached" });
+  assert.deepEqual(errors, []);
+});
+
+/* ---------------- the eight patterns, the note / chord / song screens and the player (docs/design/studio.md 12) ---------------- */
+test("studio: the navigation row carries the pattern letter and five screens, and the demo's bass and chords show", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  assert.equal(await p.getAttribute("#v-studio", "data-screen"), "drums", "opening lands on drums");
+  assert.equal(await p.getAttribute("#v-studio", "data-pat"), "0", "opening lands on pattern A");
+  assert.equal(await p.textContent("#studio-pat"), "A");
+  assert.equal(await p.getAttribute("#studio-pat", "aria-label"), "第 A 段");
+  const patBox = await p.locator("#studio-pat").boundingBox();
+  assert.ok(patBox.width >= 44 && patBox.height >= 44, "the letter button is 44x44");
+
+  const tabs = await p.$$eval("#studio-screens .st-scr", (els) => els.map((e) => [e.dataset.screen, e.textContent.trim()]));
+  assert.deepEqual(tabs.map((x) => x[0]), ["drums", "bass", "chords", "melody", "song"]);
+  assert.deepEqual(tabs.map((x) => x[1]), ["鼓", "贝斯", "和弦", "旋律", "歌曲"]);
+
+  await p.click('#studio-screens .st-scr[data-screen="bass"]');
+  assert.equal(await p.getAttribute("#v-studio", "data-screen"), "bass");
+  assert.equal(await p.locator("#v-studio .st-cell").count(), 16);
+  assert.equal(await p.locator("#studio-keys .st-key").count(), 8);
+  const bass = await p.$$eval("#v-studio .st-cell", (els) => els.map((e) => e.textContent));
+  assert.equal(bass[0], "A", "bass step 1 is A");
+  assert.equal(bass[8], "D", "bass step 9 is D");
+  assert.equal(bass[10], "E", "bass step 11 is E");
+  assert.equal(await p.locator('#studio-screens .st-scr[data-screen="bass"] .st-dot.on').count(), 1, "the bass tab has a dot");
+
+  await p.click('#studio-screens .st-scr[data-screen="chords"]');
+  const chords = await p.$$eval("#studio-chord-cells .st-chord-cell", (els) => els.map((e) => e.textContent));
+  assert.match(chords[0], /i/, "first half is i");
+  assert.match(chords[0], /Am9/, "first half is Am9");
+  assert.match(chords[1], /iv/, "second half is iv");
+  assert.match(chords[1], /Dm9/, "second half is Dm9");
+  assert.deepEqual(errors, []);
+});
+
+test("studio: a note is added, its pitch changed, removed, and the lengths re-tied; it survives a reload", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await p.click('#studio-screens .st-scr[data-screen="bass"]');
+
+  assert.equal(await p.textContent('#studio-grid .st-cell[data-step="1"]'), "");
+  await p.locator('#studio-grid .st-cell[data-step="1"]').click();
+  assert.equal(await p.textContent('#studio-grid .st-cell[data-step="1"]'), "A", "an empty cell takes the last degree (A)");
+  await p.locator('#studio-keys .st-key[data-deg="2"]').click();
+  assert.equal(await p.textContent('#studio-grid .st-cell[data-step="1"]'), "D", "the pitch key changes the selected cell");
+  await waitStored(p, { pat: 0, track: "bass", notes: [[0, 24, 0], [24, 168, 2], [192, 48, 2], [240, 144, 3]] });
+
+  await p.locator('#studio-grid .st-cell[data-step="1"]').click();
+  assert.equal(await p.textContent('#studio-grid .st-cell[data-step="1"]'), "", "tapping the selected cell removes it");
+  await waitStored(p, { pat: 0, track: "bass", notes: [[0, 192, 0], [192, 48, 2], [240, 144, 3]] });
+
+  /* put one back so the reload has something of this edit to show */
+  await p.locator('#studio-grid .st-cell[data-step="1"]').click();
+  await p.locator('#studio-keys .st-key[data-deg="2"]').click();
+  await p.click("#home-key");
+  await p.waitForTimeout(250);
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await openTile(p);
+  await p.click('#studio-screens .st-scr[data-screen="bass"]');
+  assert.equal(await p.textContent('#studio-grid .st-cell[data-step="1"]'), "D", "the note is still there after the reload");
+  assert.deepEqual(errors, []);
+});
+
+test("studio: the second chord becomes VI/Fmaj9 and removing it re-ties the first to the whole bar", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await p.click('#studio-screens .st-scr[data-screen="chords"]');
+
+  await p.locator('.st-chord-cell[data-half="1"]').click();
+  await p.locator('.st-chord-key[data-deg="5"]').click();
+  const second = await p.textContent('.st-chord-cell[data-half="1"]');
+  assert.match(second, /VI/, "the second half reads VI");
+  assert.match(second, /Fmaj9/, "the second half reads Fmaj9");
+  await waitStored(p, { pat: 0, track: "chords", notes: [[0, 192, 0], [192, 192, 5]] });
+
+  await p.locator('.st-chord-cell[data-half="1"]').click();
+  assert.equal(await p.textContent('.st-chord-cell[data-half="1"]'), "", "tapping the selected chord removes it");
+  await waitStored(p, { pat: 0, track: "chords", notes: [[0, 384, 0]] });
+  assert.deepEqual(errors, []);
+});
+
+test("studio: the pattern sheet switches to C, and copying A over a full C asks before it overwrites", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+
+  await p.click("#studio-pat");
+  assert.equal(await p.textContent("#studio-sheet .sheet-title"), "第 A 段");
+  assert.equal(await p.locator("#studio-sheet .st-pat-btn").count(), 8, "A-H in the sheet");
+  await p.locator('#studio-sheet .st-pat-btn[data-pat="2"]').click();
+  assert.equal(await p.getAttribute("#v-studio", "data-pat"), "2", "picked C");
+  assert.equal(await p.isHidden("#studio-sheet"), true, "the sheet closes after a pick");
+  assert.equal(await p.locator("#studio-grid .st-cell.on").count(), 0, "C starts empty");
+
+  /* give C one kick so copying over it has to ask */
+  await p.locator('#studio-grid .st-cell[data-step="2"]').click();
+  await waitKicks(p, 2, [2]);
+
+  /* edit A again, then copy A to C */
+  await p.click("#studio-pat");
+  await p.locator('#studio-sheet .st-pat-btn[data-pat="0"]').click();
+  await p.click("#studio-pat");
+  await p.locator("#studio-sheet .st-sheet-btn", { hasText: "复制 A 到…" }).click();
+  assert.equal(await p.textContent("#studio-sheet .sheet-title"), "把 A 复制到哪一段？");
+  await p.locator('#studio-sheet .st-pat-btn[data-pat="2"]').click();
+  assert.ok(await p.locator("#studio-sheet .st-copy-ask").count(), "a full target asks first");
+  assert.match(await p.textContent("#studio-sheet .st-copy-ask p"), /C 段会被盖掉/);
+
+  await p.locator("#studio-sheet .st-copy-ask .btn.ghost").click();   /* cancel */
+  assert.match(await p.textContent("#studio-sheet .sheet-title"), /把 A 复制到哪一段/, "B/cancel goes back to the copy sheet");
+  const kept = await storedSong(p);
+  assert.equal(kept.patterns[2].notes.drums.length, 1, "cancel leaves C alone");
+  assert.equal(kept.patterns[2].notes.drums[0].t, 48, "C's own kick is still at step 3");
+
+  await p.locator('#studio-sheet .st-pat-btn[data-pat="2"]').click();
+  await p.locator("#studio-sheet .st-copy-ask .btn").first().click(); /* confirm */
+  assert.equal(await p.getAttribute("#v-studio", "data-pat"), "2", "confirm switches to C");
+  assert.match(await p.textContent("#toast"), /已复制到 C/);
+  const on = await p.$$eval("#studio-grid .st-cell.on", (els) => els.map((e) => Number(e.dataset.step)));
+  assert.deepEqual(on, [0, 7, 10], "C now has A's kicks");
+  await waitKicks(p, 2, [0, 7, 10]);
+  assert.deepEqual(errors, []);
+});
+
+test("studio: + adds the edit letter, a letter key changes the selected slot, - drops, and one slot disables it", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await p.click('#studio-screens .st-scr[data-screen="song"]');
+  assert.equal(await p.locator(".st-chain-cell").count(), 1);
+  assert.equal(await p.isDisabled("#studio-drop"), true, "- is disabled with one slot");
+
+  await p.click("#studio-add");
+  let chain = await p.$$eval(".st-chain-cell", (els) => els.map((e) => e.textContent));
+  assert.deepEqual(chain, ["A", "A"], "+ appends the edit pattern (A)");
+
+  await p.locator('.st-letter[data-pat="1"]').click();
+  chain = await p.$$eval(".st-chain-cell", (els) => els.map((e) => e.textContent));
+  assert.deepEqual(chain, ["A", "B"], "a letter key changes the selected slot");
+  await waitStored(p, { song: [0, 1] });
+
+  await p.click("#home-key");
+  await p.waitForTimeout(250);
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await openTile(p);
+  await p.click('#studio-screens .st-scr[data-screen="song"]');
+  chain = await p.$$eval(".st-chain-cell", (els) => els.map((e) => e.textContent));
+  assert.deepEqual(chain, ["A", "B"], "the chain survives a reload");
+
+  await p.click("#studio-drop");
+  chain = await p.$$eval(".st-chain-cell", (els) => els.map((e) => e.textContent));
+  assert.deepEqual(chain, ["A"]);
+  assert.equal(await p.isDisabled("#studio-drop"), true, "- is disabled again at one slot");
+  assert.deepEqual(errors, []);
+});
+
+test("studio: playing the song [A, B] at 140 BPM walks slot 0 -> 1 -> 0 and schedules both patterns", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await hitCountingPage(t);
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await openTile(p);
+  await skipTour(p);
+  /* B is a pattern of its own: one kick, no demo notes */
+  await p.click("#studio-pat");
+  await p.locator('#studio-sheet .st-pat-btn[data-pat="1"]').click();
+  assert.equal(await p.locator("#studio-grid .st-cell.on").count(), 0, "B starts empty");
+  await p.locator('#studio-grid .st-cell[data-step="2"]').click();
+  for (let i = 0; i < 29; i++) await p.click("#studio-plus");          /* 82 -> 140 */
+  assert.match(await p.textContent("#studio-bpm"), /140 BPM/);
+
+  await p.click('#studio-screens .st-scr[data-screen="song"]');
+  assert.deepEqual(await p.$$eval(".st-chain-cell", (els) => els.map((e) => e.textContent)), ["A"]);
+  await p.click("#studio-add");
+  assert.deepEqual(await p.$$eval(".st-chain-cell", (els) => els.map((e) => e.textContent)), ["A", "B"]);
+  await p.evaluate(() => { window.__studioChain.length = 0; window.__studioHits.length = 0; window.__studioNotes.length = 0; });
+
+  await p.click("#studio-play");
+  assert.equal(await p.getAttribute("#v-studio", "data-mode"), "song");
+  assert.equal(await p.getAttribute("#v-studio", "data-play-slot"), "0");
+  assert.equal(await p.getAttribute("#v-studio", "data-play-pat"), "0");
+  await p.waitForFunction(() => document.querySelector("#v-studio").dataset.playSlot === "1", null, { timeout: 15000 });
+  assert.equal(await p.getAttribute("#v-studio", "data-play-pat"), "1");
+  assert.deepEqual(await p.$$eval(".st-chain-cell", (els) => els.map((e) => e.classList.contains("playing"))), [false, true]);
+  await p.waitForFunction(() => document.querySelector("#v-studio").dataset.playSlot === "0", null, { timeout: 15000 });
+  assert.equal(await p.getAttribute("#v-studio", "data-play-pat"), "0");
+
+  const pats = await p.evaluate(() => {
+    const seen = new Set();
+    for (const call of window.__studioChain) for (const e of call.events) seen.add(e.p);
+    return [...seen];
+  });
+  assert.deepEqual(pats.sort(), [0, 1], "chainEvents scheduled both patterns");
+  assert.ok(await p.evaluate(() => window.__studioHits.length > 0), "drum hits were scheduled");
+  assert.ok(await p.evaluate(() => window.__studioNotes.length > 0), "melodic notes were scheduled");
+  assert.deepEqual(errors, []);
+});
+
+test("studio: a pattern picked while A plays waits for the bar boundary and never schedules B early", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await hitCountingPage(t);
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await openTile(p);
+  await skipTour(p);
+  /* make B distinct: one kick on step 3 */
+  await p.click("#studio-pat");
+  await p.locator('#studio-sheet .st-pat-btn[data-pat="1"]').click();
+  await p.locator('#studio-grid .st-cell[data-step="2"]').click();
+  await p.click("#studio-pat");
+  await p.locator('#studio-sheet .st-pat-btn[data-pat="0"]').click();
+  await p.evaluate(() => { window.__studioChain.length = 0; });
+
+  await p.click("#studio-play");
+  assert.equal(await p.getAttribute("#v-studio", "data-mode"), "pattern");
+  assert.equal(await p.getAttribute("#v-studio", "data-play-pat"), "0");
+  await p.waitForTimeout(300);
+
+  await p.click("#studio-pat");
+  await p.locator('#studio-sheet .st-pat-btn[data-pat="1"]').click();
+  assert.equal(await p.getAttribute("#v-studio", "data-pat"), "1", "the edit view is B at once");
+  assert.equal(await p.getAttribute("#v-studio", "data-play-pat"), "0", "the ears are still on A");
+  assert.equal(await p.locator("#studio-pat.queued").count(), 1, "the letter blinks while it waits");
+  const period = await p.locator("#studio-pat").evaluate((e) => parseFloat(getComputedStyle(e).animationDuration));
+  assert.ok(Math.abs(period - 120 / 82) < 0.02, `two beats at 82 BPM, got ${period}s`);
+  await p.waitForTimeout(100);
+  assert.equal(await p.locator("#v-studio .st-cell.playing").count(), 0, "no playhead until the ears reach B");
+
+  await p.waitForFunction(() => document.querySelector("#v-studio").dataset.playPat === "1", null, { timeout: 15000 });
+  await p.waitForFunction(() => document.querySelector("#v-studio").dataset.playSlot === "", null, { timeout: 1000 });
+  assert.equal(await p.locator("#studio-pat.queued").count(), 0, "the blink stops at the boundary");
+  /* the scheduler runs 0.1 s ahead; wait until B's first event has been scheduled, then look at where it landed */
+  await p.waitForFunction(() => window.__studioChain.some((c) => c.chain.length === 1 && c.chain[0] === 1 && c.events.some((e) => e.p === 1)), null, { timeout: 5000 });
+
+  const early = await p.evaluate(() => {
+    const out = [];
+    for (const call of window.__studioChain) {
+      if (call.chain.length !== 1 || call.chain[0] !== 1) continue;
+      for (const e of call.events) out.push({ from: call.from, p: e.p, tick: e.tick });
+    }
+    return out;
+  });
+  assert.ok(early.length > 0, "B was scheduled after the boundary");
+  assert.ok(early.every((e) => e.from >= 384 && e.tick >= 384), `no B event before bar tick 384: ${JSON.stringify(early.slice(0, 5))}`);
+  assert.equal(await p.evaluate(() => window.__studioChain.filter((c) => c.chain.length === 1 && c.chain[0] === 1).every((c) => c.from >= 384)), true,
+    "the B chain is never asked for ticks before the boundary");
+  assert.deepEqual(errors, []);
+});
+
+test("studio: every screen fits at 375x667 with 44 px buttons and 56 px grid cells, and stays in the view at 331x359", { skip, timeout: 120000 }, async (t) => {
+  const screens = ["drums", "bass", "chords", "melody", "song"];
+  const { p, errors } = await rtPage(t, { width: 375, height: 667 });
+  await studioOpen(p);
+  await skipTour(p);
+  for (const screen of screens) {
+    await p.click(`#studio-screens .st-scr[data-screen="${screen}"]`);
+    const m = await p.evaluate(() => {
+      const v = document.querySelector("#v-studio");
+      return { scroll: v.scrollHeight, client: v.clientHeight };
+    });
+    assert.ok(m.scroll <= m.client, `${screen}: no page scroll (${m.scroll} <= ${m.client})`);
+    const small = await p.$$eval("#v-studio button", (els) => els.filter((e) => {
+      const r = e.getBoundingClientRect();
+      return r.width > 0 && r.height > 0 && (r.width < 44 - 0.5 || r.height < 44 - 0.5);
+    }).map((e) => ({ id: e.id || e.className, text: e.textContent.trim(), w: e.getBoundingClientRect().width, h: e.getBoundingClientRect().height })));
+    assert.deepEqual(small, [], `${screen}: every button is at least 44 px`);
+    if (screen === "drums" || screen === "bass" || screen === "melody") {
+      const cells = await cellWidths(p);
+      assert.equal(cells.length, 16);
+      assert.deepEqual(cells.filter((c) => c.w < 56 || c.h < 56), [], `${screen}: every cell is at least 56 px`);
+    }
+  }
+
+  /* the same view made 331x359 tall (a 375-wide phone with more browser chrome) must not spill */
+  const { p: q, errors: errors2 } = await rtPage(t, { width: 375, height: 503 });
+  await studioOpen(q);
+  await skipTour(q);
+  const view = await q.evaluate(() => {
+    const r = document.querySelector("#v-studio").getBoundingClientRect();
+    return { w: r.width, h: r.height };
+  });
+  assert.ok(view.w >= 330 && view.w <= 332 && view.h >= 358 && view.h <= 360, `the view is 331x359 (${view.w}x${view.h})`);
+  for (const screen of screens) {
+    await q.click(`#studio-screens .st-scr[data-screen="${screen}"]`);
+    const bad = await q.evaluate(() => {
+      const v = document.querySelector("#v-studio");
+      const vr = v.getBoundingClientRect();
+      const out = [];
+      for (const e of v.querySelectorAll("*")) {
+        const r = e.getBoundingClientRect();
+        if (r.width <= 0 || r.height <= 0) continue;
+        if (r.left < vr.left - 1 || r.right > vr.right + 1 || r.top < vr.top - 1 || r.bottom > vr.bottom + 1) {
+          out.push({ tag: e.tagName, cls: String(e.className).slice(0, 40), id: e.id,
+            l: Math.round(r.left - vr.left), t: Math.round(r.top - vr.top),
+            r: Math.round(r.right - vr.left), b: Math.round(r.bottom - vr.top) });
+        }
+      }
+      return { out: out.slice(0, 8), scroll: v.scrollHeight, client: v.clientHeight, sw: v.scrollWidth, cw: v.clientWidth };
+    });
+    assert.deepEqual(bad.out, [], `${screen}: nothing overflows the 331x359 view: ${JSON.stringify(bad)}`);
+    assert.ok(bad.scroll <= bad.client && bad.sw <= bad.cw, `${screen}: the view does not scroll at 331x359`);
+  }
+  assert.deepEqual(errors, []);
+  assert.deepEqual(errors2, []);
+});
+
+test("studio: HOME stops the song player too", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await p.click('#studio-screens .st-scr[data-screen="song"]');
+  await p.click("#studio-play");
+  await p.waitForFunction(() => document.querySelector("#v-studio").dataset.mode === "song");
+  await p.waitForTimeout(300);
+  assert.equal(await p.getAttribute("#v-studio", "data-play-slot"), "0");
+  assert.ok(await p.locator("#v-studio .st-chain-cell.playing").count() >= 1, "the playing slot is inverted");
+  await p.click("#home-key");
+  await p.waitForFunction(() => document.querySelector("#v-studio").dataset.mode === "");
+  assert.equal(await p.getAttribute("#v-studio", "data-play-slot"), "");
+  assert.equal(await p.getAttribute("#v-studio", "data-play-pat"), "");
+  assert.equal(await p.locator("#v-studio .st-chain-cell.playing").count(), 0);
   assert.deepEqual(errors, []);
 });
