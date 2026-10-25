@@ -89,7 +89,7 @@
 
       "store.title": "应用商店", "store.refresh": "刷新",
       "store.search": "搜索程序", "store.clear": "清除搜索", "store.results": "{n} 个结果", "store.noresults": "没有找到「{q}」。",
-      "store.installask": "安装「{name}」？它要用：", "store.updateask": "更新「{name}」？新版本要用：", "store.new": "新", "store.updatebadge": "更新",
+      "store.installask": "安装「{name}」？它要用：", "store.updateask": "更新「{name}」？新版本要用：", "store.new": "新", "store.new.title": "新上架", "store.updatebadge": "更新", "store.updatebadge.title": "新版本",
       "store.all": "全部",
       "store.cat.game": "游戏", "store.cat.productivity": "效率", "store.cat.education": "教育",
       "store.cat.create": "创作", "store.cat.story": "故事", "store.cat.life": "生活", "store.cat.other": "其它",
@@ -567,7 +567,7 @@
 
       "store.title": "Store", "store.refresh": "Reload",
       "store.search": "Search apps", "store.clear": "Clear search", "store.results": "{n} results", "store.noresults": "Nothing matches \u201c{q}\u201d.",
-      "store.installask": "Install \u201c{name}\u201d? It asks for:", "store.updateask": "Update \u201c{name}\u201d? The new version asks for:", "store.new": "NEW", "store.updatebadge": "UPDATED",
+      "store.installask": "Install \u201c{name}\u201d? It asks for:", "store.updateask": "Update \u201c{name}\u201d? The new version asks for:", "store.new": "NEW", "store.new.title": "New in the store", "store.updatebadge": "UPDATED", "store.updatebadge.title": "New version",
       "store.all": "All",
       "store.cat.game": "Games", "store.cat.productivity": "Productivity", "store.cat.education": "Education",
       "store.cat.create": "Create", "store.cat.story": "Stories", "store.cat.life": "Life", "store.cat.other": "Other",
