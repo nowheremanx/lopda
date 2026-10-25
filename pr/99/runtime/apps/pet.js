@@ -114,7 +114,8 @@ function shiftX(grid,dx){
   if(!grid || !dx) return grid;
   var w=String(grid[0]).length, blank="", out=[], r;
   for(var c=0;c<w;c++) blank+=".";
-  for(r=0;r<grid.length;r++) out.push(dx>0 ? (blank+grid[r]).slice(0,w) : (grid[r]+blank).slice(-w));
+  /* move by dx columns, keeping the width: pad on the side it moves away from and cut the other side */
+  for(r=0;r<grid.length;r++) out.push(dx>0 ? (blank.slice(0,dx)+grid[r]).slice(0,w) : (String(grid[r]).slice(-dx)+blank).slice(0,w));
   return out;
 }
 /* ---------- tones and canvases ---------- */
