@@ -302,9 +302,11 @@
     <section class="view studio" id="v-studio" hidden data-playing="false">
       <div class="st-bar">
         <button class="st-play" id="studio-play" type="button" data-playing="false" aria-label="播放"><span id="studio-play-glyph"></span></button>
-        <span class="st-bpm" id="studio-bpm">82 BPM</span>
-        <button class="st-step" id="studio-minus" type="button" data-i18n-label="studio.slower" aria-label="慢一点">−</button>
-        <button class="st-step" id="studio-plus" type="button" data-i18n-label="studio.faster" aria-label="快一点">+</button>
+        <span class="st-tempo" id="studio-tempo">
+          <span class="st-bpm" id="studio-bpm">82 BPM</span>
+          <button class="st-step" id="studio-minus" type="button" data-i18n-label="studio.slower" aria-label="慢一点">−</button>
+          <button class="st-step" id="studio-plus" type="button" data-i18n-label="studio.faster" aria-label="快一点">+</button>
+        </span>
         <span class="st-gap"></span>
         <button class="st-mini" id="studio-tour" type="button" data-i18n-label="studio.tour" aria-label="教程">?</button>
         <button class="st-mini" id="studio-menu" type="button" data-i18n-label="studio.menu" aria-label="菜单">≡</button>

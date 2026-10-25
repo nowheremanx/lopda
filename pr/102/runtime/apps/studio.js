@@ -313,7 +313,7 @@ function build(){
   $("studio-tour").onclick=function(){ startTour(); };
   $("studio-menu").onclick=function(){ openSheet("menu"); };
   if(window.ResizeObserver) new ResizeObserver(function(){ layout(); }).observe($("studio-board"));
-  else window.addEventListener("resize",layout);
+  window.addEventListener("resize",layout);
 }
 function layout(){
   if(!visible()) return;
@@ -372,19 +372,21 @@ function renderAll(){
   build();
   var v=$("v-studio"); if(v) v.setAttribute("data-loaded",T.loaded?"true":"false");
   renderBar(); renderTabs(); renderGrid(); renderSheet();
+  if(T.tour) tourPlace();
 }
 /* ---------- the tour ----------
    Not an LP interface: only this program uses tour(); docs/design/studio.md 11.6. One step is
    {el:function(){ return element }, text:"studio.tour.x", done:"play"|"toggle"|"drum"|null}. The screen reports
    the named event with tourEvent(); a null done shows a Next button (Done on the last step). Every step skips.
-   The cover is four dither panels around the highlighted element, so only that element and the box take taps. */
+   Nothing is covered: the target gets an ink outline and a speech bubble beside it, and the rest of the screen
+   keeps working (the beat can be stopped, the menu opened). A tap elsewhere never ends the tour. */
 function rhythmTour(){
   return [
     {el:function(){ return $("studio-play"); }, text:"studio.tour.play", done:"play"},
-    {el:function(){ return $("studio-grid"); }, text:"studio.tour.grid", done:"toggle"},
+    {el:function(){ return $("studio-grid"); }, text:"studio.tour.grid", done:null},
+    {el:function(){ return $("studio-grid"); }, text:"studio.tour.cell", done:"toggle"},
     {el:function(){ return $("studio-tabs"); }, text:"studio.tour.drums", done:"drum"},
-    /* the readout between − and + stands for the BPM controls */
-    {el:function(){ return $("studio-bpm"); }, text:"studio.tour.bpm", done:null}
+    {el:function(){ return $("studio-tempo"); }, text:"studio.tour.tempo", done:null}
   ];
 }
 function startTour(){ if(T.built) tour("rhythm",rhythmTour()); }
@@ -396,19 +398,18 @@ function maybeTour(){
 function tour(screen,steps){
   tourEnd(false);
   if(!steps || !steps.length) return;
-  var view=$("v-studio"), i;
-  var root=el("div","st-tour"), box=el("div","st-tour-box"), covers=[];
-  for(i=0;i<4;i++){ var c=el("i","st-tour-cover"); root.appendChild(c); covers.push(c); }
+  var view=$("v-studio");
+  var root=el("div","st-tour"), box=el("div","st-tour-box");
   var text=el("p","st-tour-text");
   var row=el("div","st-tour-btns");
   var skip=el("button","st-tour-skip"), next=el("button","st-tour-next");
   skip.type="button"; next.type="button";
   row.appendChild(skip); row.appendChild(next);
   box.appendChild(text); box.appendChild(row);
-  view.appendChild(root); view.appendChild(box);
-  view.classList.add("st-touring");
+  root.appendChild(box);
+  view.appendChild(root);
   document.body.classList.add("st-tour-on");
-  T.tour={screen:screen, steps:steps, i:0, root:root, box:box, text:text, skip:skip, next:next, covers:covers, hi:null};
+  T.tour={screen:screen, steps:steps, i:0, root:root, box:box, text:text, skip:skip, next:next, hi:null};
   skip.onclick=function(){ tourEnd(true); };
   next.onclick=function(){ tourNext(); };
   tourShow(0);
@@ -418,34 +419,53 @@ function tourShow(i){
   if(!t || !t.steps[i]) return;
   t.i=i;
   if(t.hi) t.hi.classList.remove("st-tour-hi");
-  var node=t.steps[i].el ? t.steps[i].el() : null;
+  /* the kick grid is what steps 2 and 3 are about, so the kick tab is the one picked */
+  if(i===2 && T.drum!=="kick") pickDrum("kick",false,false);
+  var step=t.steps[i];
+  var node=step.el ? step.el() : null;
   t.hi=node || null;
   if(node) node.classList.add("st-tour-hi");
-  /* step 2 is the kick grid, so the kick tab has to be the one picked when it starts */
-  if(i===1 && T.drum!=="kick") pickDrum("kick",false,false);
-  t.text.textContent=tr(t.steps[i].text);
+  t.text.textContent=tr(step.text);
   t.skip.textContent=tr("studio.tour.skip");
   t.next.textContent=tr(i===t.steps.length-1 ? "studio.tour.done" : "studio.tour.next");
-  t.next.hidden=!!t.steps[i].done;
+  /* an action already done when the step starts (playing when step 1 shows) offers Next instead */
+  var met=step.done==="play" && T.playing;
+  t.next.hidden=!!step.done && !met;
   tourPlace();
 }
-/* four cover panels leave the hole; the box sits in the other half of the screen */
+/* bubble above or below the target, against the side with more room inside the view; the triangle points
+   at the target's centre and the bubble never sits over the target */
 function tourPlace(){
   var t=T.tour;
   if(!t || !t.hi) return;
   var view=$("v-studio"), v=view.getBoundingClientRect(), r=t.hi.getBoundingClientRect();
-  if(!v.width || !v.height) return;
-  var pad=4;
-  var x0=Math.max(0,r.left-v.left-pad), y0=Math.max(0,r.top-v.top-pad);
-  var x1=Math.min(v.width,r.right-v.left+pad), y1=Math.min(v.height,r.bottom-v.top+pad);
-  var ch=Math.max(0,y1-y0), c=t.covers;
-  c[0].style.cssText="left:0;top:0;right:0;height:"+y0+"px";
-  c[1].style.cssText="left:0;top:"+y1+"px;right:0;bottom:0";
-  c[2].style.cssText="left:0;top:"+y0+"px;width:"+x0+"px;height:"+ch+"px";
-  c[3].style.cssText="left:"+x1+"px;right:0;top:"+y0+"px;height:"+ch+"px";
-  var upper=(r.top-v.top)+r.height/2 < v.height/2;
-  t.box.style.top=upper ? "auto" : "4px";
-  t.box.style.bottom=upper ? "4px" : "auto";
+  if(!v.width || !v.height || !r.width) return;
+  var box=t.box, w=box.offsetWidth, h=box.offsetHeight, margin=4;
+  if(!w || !h) return;
+  var cx=r.left-v.left+r.width/2;
+  var left=Math.round(cx-w/2);
+  if(left<margin) left=margin;
+  if(left>v.width-margin-w) left=Math.round(v.width-margin-w);
+  var top=r.top-v.top, bottom=r.bottom-v.top;
+  var above=top > v.height-bottom;
+  var y=above ? top-10-h : bottom+10;
+  if(y<margin) y=margin;
+  if(y+h>v.height-margin) y=v.height-margin-h;
+  /* if the clamp pushed it over the target, take the other side */
+  if(y<bottom && y+h>top){
+    var alt=above ? bottom+10 : top-10-h;
+    if(alt>=margin && alt+h<=v.height-margin) y=alt;
+  }
+  y=Math.round(y);
+  box.classList.toggle("st-tour-above",y+h<=top);
+  box.classList.toggle("st-tour-below",y>=bottom);
+  box.style.left=left+"px";
+  box.style.top=y+"px";
+  /* the triangle sits on the padding box, hence the 3 px border; 14 px keeps it off the rounded corners */
+  var tri=Math.round(cx-left-3), max=w-6-14;
+  if(tri<14) tri=14;
+  if(tri>max) tri=max;
+  box.style.setProperty("--st-tour-tip",tri+"px");
 }
 function tourNext(){
   var t=T.tour;
@@ -464,10 +484,8 @@ function tourEnd(seen){
   if(!t) return;
   T.tour=null;
   if(t.hi) t.hi.classList.remove("st-tour-hi");
-  $("v-studio").classList.remove("st-touring");
   document.body.classList.remove("st-tour-on");
   if(t.root.parentNode) t.root.parentNode.removeChild(t.root);
-  if(t.box.parentNode) t.box.parentNode.removeChild(t.box);
   if(seen && T.meta && t.screen){
     T.meta.toured=T.meta.toured || {};
     T.meta.toured[t.screen]=true;

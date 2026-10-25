@@ -373,8 +373,11 @@
       "studio.hush": "静音键开着就听不到外放",
       "studio.bad": "这盘磁带读不出来，换了一盘新的",
       "studio.tour.skip": "跳过", "studio.tour.next": "下一步", "studio.tour.done": "好了",
-      "studio.tour.play": "按 ▸ 听听", "studio.tour.grid": "点亮一格，加一下底鼓",
-      "studio.tour.drums": "换一只鼓试试", "studio.tour.bpm": "−、+ 改快慢；HOME 随时离开，会自动保存",
+      "studio.tour.play": "按 ▸ 听听这盘磁带。",
+      "studio.tour.grid": "这 16 格是一小节：一行一拍，从左上走到右下。亮着的格子会响。",
+      "studio.tour.cell": "点一个空格，加一下底鼓；再点一次就去掉。",
+      "studio.tour.drums": "四只鼓各有自己的 16 格，叠在一起就是节奏。换一只看看。",
+      "studio.tour.tempo": "− + 调快慢；≡ 里换鼓组、新磁带。HOME 随时离开，会自动保存。",
 
       "boot.nostore": "这台浏览器不让存档，关掉页面后内容会丢。"
     },
@@ -742,8 +745,11 @@
       "studio.hush": "With the silent switch on, the speaker stays quiet",
       "studio.bad": "That tape couldn't be read; here is a fresh one",
       "studio.tour.skip": "Skip", "studio.tour.next": "Next", "studio.tour.done": "Done",
-      "studio.tour.play": "Press ▸ to listen", "studio.tour.grid": "Light a square to add a kick",
-      "studio.tour.drums": "Try another drum", "studio.tour.bpm": "− and + set the speed. HOME leaves any time; it saves itself",
+      "studio.tour.play": "Press ▸ to hear this tape.",
+      "studio.tour.grid": "These 16 squares are one bar: a row is a beat, left to right, top to bottom. Lit squares play.",
+      "studio.tour.cell": "Tap an empty square to add a kick. Tap it again to remove it.",
+      "studio.tour.drums": "Each drum has its own 16 squares; together they make the beat. Try another one.",
+      "studio.tour.tempo": "− and + set the speed; ≡ has the kit and a new tape. HOME leaves any time; it saves itself.",
 
       "boot.nostore": "This browser won't keep data. It's lost when the page closes."
     }
