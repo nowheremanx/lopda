@@ -19,12 +19,13 @@ var ROW_ICONS={
   permissions:["............","....0000....","...0....0...","...0....0...","..00000000..","..0......0..","..0..00..0..","..0..00..0..","..0......0..","..00000000..","............","............"],
   ai:["............","000000000000","0..........0","0..00..000.0","0.0..0..0..0","0.0000..0..0","0.0..0..0..0","0.0..0.000.0","0..........0","000000000000",".00.........",".0.........."],
   backup:["............","......0.....",".....000....","....00000...","......0.....","......0.....",".0000000000.",".0........0.",".0........0.",".0........0.",".0000000000.","............"],
+  key:["............","..000.......",".0...0......",".0...0......","..000.......","....0000000.",".........0..",".........0..",".........00.","............","............","............"],
   share:["............","........000.","........000.",".......0....","......0.....",".000.0......",".0000.......",".000.0......","......0.....",".......0....","........000.","........000."],
   about:["....0000....","..00....00..",".0...00...0.",".0...00...0.","0..........0","0...000....0","0....00....0","0....00....0",".0...00...0.",".0..0000..0.","..00....00..","....0000...."]
 };
 function drawRowIcons(){
   [["set-vol-ico","volume"],["set-lang-ico","language"],["set-sys-ico","system"],["set-sense-ico","permissions"],
-   ["set-ai-ico","ai"],["set-backup-ico","backup"],["set-share-ico","share"],["set-about-ico","about"]].forEach(function(p){
+   ["set-ai-ico","ai"],["set-backup-ico","backup"],["set-key-ico","key"],["set-share-ico","share"],["set-about-ico","about"]].forEach(function(p){
     var host=$(p[0]), rows=ROW_ICONS[p[1]];
     if(host && rows){ host.textContent=""; host.appendChild(LP.iconCanvas(rows)); }
   });
@@ -114,6 +115,131 @@ LP.ai={
   watch:function(f){ AI.seen.push(f); },
   saved:function(){ return AI.key ? {v:1, key:AI.key, model:AI.model} : null; }
 };
+
+/* ---------- the darkroom key (runtime/geotag.js, decisions.md section 40) ----------
+   The random 128-bit key that seals each negative's place. Only this handheld's darkroom prints can open what it
+   sealed, and whoever holds the key reads every negative's place: so the key stays inside the runtime, never through
+   PAD, pad-shim, the sandboxed app iframe or any postMessage. The ring is one document of the user's own; the camera's
+   place switch makes the first key (ensure), and a restore only ever adds keys to it. */
+var DKP="data/users/local/darkroom-key", DK={text:"", count:0, shown:false};
+var DKPENDING=null, G=window.LopdaGeotag;
+/* read the document fresh every time: a restore may have replaced it since the page opened */
+function keyDoc(){
+  if(!S.db) return Promise.reject({code:"unavailable"});
+  return S.db.doc(DKP).get().then(function(sn){
+    return sn.exists ? G.cleanRing(LP.own(sn.data())) : null;
+  });
+}
+function docKey(doc){
+  if(!doc) return null;
+  for(var i=0;i<doc.keys.length;i++) if(doc.keys[i].id===doc.current) return G.fromHex(doc.keys[i].key);
+  return null;
+}
+/* current first, then the rest in the order stored (the one old negatives still need may be any of them) */
+function ringList(doc){
+  var out=[], i, k, e;
+  if(!doc) return out;
+  for(i=0;i<doc.keys.length;i++){
+    k=doc.keys[i];
+    e={id:k.id, bytes:G.fromHex(k.key)};
+    if(k.id===doc.current) out.unshift(e); else out.push(e);
+  }
+  return out;
+}
+function ensureKey(){
+  if(DKPENDING) return DKPENDING;
+  DKPENDING=keyDoc().then(function(doc){
+    var have=docKey(doc);
+    if(have) return have;
+    var bytes=new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    return G.keyId(crypto.subtle,bytes).then(function(id){
+      var d={keys:[{id:id, key:G.toHex(bytes), added:Date.now()}], current:id};
+      return S.db.doc(DKP).set(d).then(function(){ return bytes; });
+    });
+  });
+  DKPENDING.then(function(){ DKPENDING=null; },function(){ DKPENDING=null; });
+  return DKPENDING;
+}
+LP.darkroomKey={
+  current:function(){ return keyDoc().then(docKey); },
+  ensure:ensureKey,
+  ring:function(){ return keyDoc().then(ringList); },
+  add:function(text){
+    var bytes=G.parseKey(text);
+    if(!bytes) return Promise.resolve("bad");
+    return G.keyId(crypto.subtle,bytes).then(function(id){
+      var hex=G.toHex(bytes);
+      return keyDoc().then(function(doc){
+        var keys=doc ? doc.keys.slice() : [], i, found=false;
+        for(i=0;i<keys.length;i++){
+          if(keys[i].id!==id) continue;
+          found=true; keys[i]={id:id, key:hex, added:keys[i].added || Date.now()};
+        }
+        if(!found) keys.push({id:id, key:hex, added:Date.now()});
+        return S.db.doc(DKP).set({keys:keys, current:id}).then(function(){ return found ? "same" : "added"; });
+      });
+    });
+  },
+  info:function(){
+    return keyDoc().then(function(doc){
+      var bytes=docKey(doc);
+      return bytes ? {text:G.keyText(bytes), count:doc.keys.length} : null;
+    });
+  }
+};
+function keyMask(text){ return "••••-••••-…-"+text.slice(-4); }
+function paintKey(){
+  var on=!!DK.text;
+  $("set-key-state").textContent=on ? (DK.shown ? DK.text : keyMask(DK.text)) : tr("key.none");
+  $("set-key-show").textContent=tr(DK.shown ? "key.hide" : "key.show");
+  $("set-key-show-row").hidden=!on;
+  $("set-key-old").hidden=!(on && DK.count>1);
+  if(on && DK.count>1) $("set-key-old").textContent=tr("key.old",{n:DK.count-1});
+}
+function loadKey(){
+  return LP.darkroomKey.info().then(function(i){
+    DK.text=i ? i.text : ""; DK.count=i ? i.count : 0; DK.shown=false; paintKey();
+  },function(){ DK.text=""; DK.count=0; DK.shown=false; paintKey(); });
+}
+function selectKeyText(){
+  var el=$("set-key-state"), sel=window.getSelection && window.getSelection();
+  if(!el || !sel) return;
+  var r=document.createRange(); r.selectNodeContents(el); sel.removeAllRanges(); sel.addRange(r);
+}
+$("set-key-open").onclick=function(){ sfx("tap"); show("set-key"); };
+$("set-key-back").onclick=function(){ sfx("tap"); openSettings(); };
+$("set-key-show").onclick=function(){ DK.shown=!DK.shown; paintKey(); sfx("tap"); };
+/* the clipboard needs a real click, never pointerdown (CLAUDE.md); the fallback shows the key so it can be selected */
+$("set-key-copy").onclick=function(){
+  if(!DK.text) return;
+  var p=null;
+  try{ if(navigator.clipboard && navigator.clipboard.writeText) p=navigator.clipboard.writeText(DK.text); }catch(e){ p=null; }
+  if(!p){ DK.shown=true; paintKey(); selectKeyText(); toast(tr("key.copy.manual")); sfx("err"); return; }
+  p.then(function(){ toast(tr("set.share.copied")); sfx("ok"); },function(){
+    DK.shown=true; paintKey(); selectKeyText(); toast(tr("key.copy.manual")); sfx("err");
+  });
+};
+function useKey(){
+  var b=$("set-key-use"), input=$("set-key-input");
+  if(b.disabled) return;
+  b.disabled=true;
+  LP.darkroomKey.add(input.value).then(function(r){
+    if(r!=="added" && r!=="same"){ $("set-key-result").textContent=tr("key.bad"); sfx("err"); return; }
+    input.value="";
+    $("set-key-result").textContent=tr(r==="added" ? "key.added" : "key.same");
+    sfx("ok");
+    return loadKey();
+  },function(){ $("set-key-result").textContent=tr("key.bad"); sfx("err"); }).then(function(){ b.disabled=false; });
+}
+$("set-key-use").onclick=useKey;
+$("set-key-input").addEventListener("keydown",function(e){ if(e.key==="Enter"){ e.preventDefault(); useKey(); } });
+LP.builtin({id:"set-key", view:"set-key",
+  enter:function(){ loadKey(); },
+  lang:function(){ loadKey(); },
+  /* the key text is shown only while the page is open */
+  leave:function(){ DK.shown=false; if(DK.text) paintKey(); $("set-key-input").value=""; $("set-key-result").textContent=""; }
+});
 
 /* `sound` is still written for runtimes before 0.12.0, which had a separate switch */
 function saveSettings(){
@@ -225,22 +351,29 @@ function detach(dump){
 }
 function doRestore(bk){
   box(tr("rs.working"));
-  /* programs stop their own writes before anything is replaced; the page reloads straight after a successful restore */
-  LP.each("restore");
-  /* the AI key is never in a backup: the one on this phone stays, whatever the file holds */
-  var mine=LP.ai.saved(), docs=bk.docs.filter(function(x){ return x.path!==AIP; });
-  if(mine) docs.push({path:AIP, data:mine});
-  P.dumpAll().then(detach).then(function(old){
-    return P.replaceAll({docs:docs, files:bk.files}).then(function(){
-      box(tr("rs.done")); sfx("ok");
-      location.reload();
-    },function(e){
-      if(window.console) console.error("Lo-PDA restore failed, writing the old data back", e);
-      return P.replaceAll(old).then(function(){ sfx("err"); okBox(tr("rs.failed")); },function(e2){
-        if(window.console) console.error("Lo-PDA rollback failed", e2);
-        sfx("err"); BS.busy=false; renderLostRetry(old);
+  /* the AI key is never in a backup: the one on this phone stays, whatever the file holds. The darkroom key does go
+     in (without it a restored phone could not read its own photos' places), and a restore only ever adds keys. */
+  S.db.doc(DKP).get().then(function(sn){
+    var mineDark=sn.exists ? LP.own(sn.data()) : null, theirsDark=null, i;
+    for(i=0;i<bk.docs.length;i++) if(bk.docs[i].path===DKP) theirsDark=bk.docs[i].data;
+    var dark=G.mergeRing(mineDark,theirsDark);
+    var mine=LP.ai.saved(), docs=bk.docs.filter(function(x){ return x.path!==AIP && x.path!==DKP; });
+    if(mine) docs.push({path:AIP, data:mine});
+    if(dark) docs.push({path:DKP, data:dark});
+    /* programs stop their own writes before anything is replaced; the page reloads straight after a successful restore */
+    LP.each("restore");
+    P.dumpAll().then(detach).then(function(old){
+      return P.replaceAll({docs:docs, files:bk.files}).then(function(){
+        box(tr("rs.done")); sfx("ok");
+        location.reload();
+      },function(e){
+        if(window.console) console.error("Lo-PDA restore failed, writing the old data back", e);
+        return P.replaceAll(old).then(function(){ sfx("err"); okBox(tr("rs.failed")); },function(e2){
+          if(window.console) console.error("Lo-PDA rollback failed", e2);
+          sfx("err"); BS.busy=false; renderLostRetry(old);
+        });
       });
-    });
+    },function(){ sfx("err"); okBox(tr("rs.failed")); });
   },function(){ sfx("err"); okBox(tr("rs.failed")); });
 }
 /* after the old data was saved (or not), keep offering to save it again until the user leaves */

@@ -6,8 +6,8 @@
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  *
  * The roll in the camera: data/users/local/film {roll, no, stock, seed, size, res, loaded, exposure, contrast, date, lens};
- * its frames: data/users/local/frames/items/<roll>-<nn> {roll, n, px, taken, tz, dated, lens, exposure, contrast, blank};
- * how many rolls this handheld has loaded: data/users/local/camera {rolls};
+ * its frames: data/users/local/frames/items/<roll>-<nn> {roll, n, px, taken, tz, dated, lens, exposure, contrast, blank, geo?};
+ * how many rolls this handheld has loaded: data/users/local/camera {rolls, place?};
  * latent images: LopdaPlatform.files "roll/<roll>/<nn>.jpg" (800x700 JPEG). Unloading moves the roll to
  * data/users/local/rolls/items/<roll> (apps/darkroom.js); the latent images keep their keys.
  */
@@ -15,13 +15,13 @@
 "use strict";
 var LP=window.LP, $=LP.$, S=LP.S, I18N=LP.I18N, tr=LP.tr;
 var TONES=LP.TONES, own=LP.own, toast=LP.toast, put=LP.put, pad2=LP.pad2, sfx=LP.sfx, show=LP.show, showPad=LP.showPad;
-var FILES=window.LopdaPlatform.files;
+var FILES=window.LopdaPlatform.files, GEOTAG=window.LopdaGeotag;
 /* the look of the finder and of every frame: runtime/finder.js, shared with the viewfinder apps open (apps/snap.js) */
 var FINDER=window.LopdaFinder, ditherLuma=FINDER.ditherLuma;
 
 /* ---------- pixel camera: a roll of film. Frames are fixed once taken; a finished roll goes to the darkroom. ---------- */
 var CW=128, CH=112;
-var F={roll:null, no:0, count:0, size:12, res:1, stock:"portrait", seed:0, loaded:0, exposure:0, contrast:0, date:true, frames:[], ready:false, stale:null, jobs:[]};
+var F={roll:null, no:0, count:0, size:12, res:1, stock:"portrait", seed:0, loaded:0, exposure:0, contrast:0, date:true, place:false, frames:[], ready:false, stale:null, jobs:[]};
 var ccv=$("cam-cv"), cctx=ccv.getContext("2d"), cimg=cctx.createImageData(CW,CH);
 /* film format: 1 = 128x112 standard, 2 = 256x224 fine grain. Fixed for the life of a roll. */
 /* film stocks (docs/design/darkroom.md section 4): a describing word and a speed, never a real film's name. The
@@ -49,6 +49,11 @@ function latentKey(roll,n){ return "roll/"+roll+"/"+pad2(n)+".jpg"; }
 function setRes(r){ r=r===2?2:1; F.res=r; CW=128*r; CH=112*r; ccv.width=CW; ccv.height=CH; cimg=cctx.createImageData(CW,CH); }
 function stockName(r){ return tr(r===2?"cam.stock2":"cam.stock1"); }
 function filmDoc(){ return {roll:F.roll,no:F.no,stock:F.stock,seed:F.seed,size:F.size,res:F.res,loaded:F.loaded,exposure:F.exposure,contrast:F.contrast,date:F.date,lens:LIVE.lens}; }
+/* the camera's own document outlives every roll: the roll count and the Place switch (the film doc is deleted on unload) */
+function cameraDoc(){ var d={rolls:F.count}; if(F.place) d.place=true; return d; }
+/* the last two minutes of readings, in memory only, never stored in plain text */
+var GEO={fixes:[]};
+var PLACE={try:0};
 var nextStock=1, nextSize=12;
 function drawPx(ctx,img,px){
   var d=img.data;
@@ -117,6 +122,7 @@ function toggleDate(){
   F.date=!F.date; renderCam(); saveFilmSoon();
 }
 function saveFilmSoon(){ if(S.db && F.roll){ clearTimeout(expTimer); expTimer=setTimeout(function(){ put(S.refs.film,filmDoc()); },800); } }
+function saveCamera(){ if(S.db) put(S.refs.camera,cameraDoc()); }
 
 /* exposure is a setting for the next frame, never an edit of a taken one */
 var expTimer=null;
@@ -141,7 +147,7 @@ function loadRoll(){
   /* the roll's number on this handheld, 1, 2, 3...: it names the negative's file, so a day's rolls never come out as
      "(1)" "(2)" copies. Never reused, even when a roll is thrown away. */
   F.count++; F.no=F.count;
-  if(S.db){ put(S.refs.film,filmDoc()); put(S.refs.camera,{rolls:F.count}); }
+  if(S.db){ put(S.refs.film,filmDoc()); put(S.refs.camera,cameraDoc()); }
   /* the door closes, the film is wound on to frame 1 */
   sfx("tap"); setTimeout(function(){ sfx("tick"); },120); setTimeout(function(){ sfx("tick"); },240); setTimeout(function(){ sfx("ok"); },420);
   camSheet(null); camIdle(); renderCam(); startLive();
@@ -153,7 +159,7 @@ function loadRoll(){
    lens is the id the user last chose ("uw" "w" "t" "f"), kept in the film doc; lenses stays null until found. */
 var LENS=window.LopdaLenses;
 var LIVE={stream:null, on:false, opening:false, gen:0, raf:0, last:0, lens:"w", lenses:null, hold:0, failed:false, swapping:0,
-  why:"", since:0, seen:false, replayed:false, muted:0, restarts:0, watch:null, picker:false};
+  why:"", since:0, seen:false, replayed:false, muted:0, restarts:0, watch:null, picker:false, geo:null};
 var lumaFrom=FINDER.grabber();
 function liveSupported(){ return !!(window.isSecureContext && navigator.mediaDevices && navigator.mediaDevices.getUserMedia); }
 /* The finder's state, decided here and nowhere else (decisions.md section 4): "live" pictures are coming; "starting" the
@@ -258,6 +264,7 @@ function startLive(){
       k.addEventListener("unmute",function(){ if(gen===LIVE.gen){ camLog("track unmuted"); LIVE.muted=0; } });
     });
     $("cam-video").srcObject=stream; playLive("start");
+    if(F.place) geoWatch(gen);
     camModeLabel(); LIVE.raf=requestAnimationFrame(liveTick); watchLive(gen);
   }).catch(function(e){
     if(gen!==LIVE.gen) return;
@@ -269,10 +276,36 @@ function startLive(){
   }).then(function(){ if(gen===LIVE.gen) LIVE.opening=false; });
 }
 function stopLive(){
+  stopGeo();
   cancelAnimationFrame(LIVE.raf); clearInterval(LIVE.watch); LIVE.on=false; LIVE.opening=false; LIVE.gen++; LIVE.muted=0;
   if(LIVE.stream){ stopStream(LIVE.stream); LIVE.stream=null; }
   var v=$("cam-video"); if(v) v.srcObject=null;
   if(!$("v-cam").hidden) camModeLabel();
+}
+/* Place (地点): the watch runs only while the finder's stream is on. A fix stays two minutes in memory; a new
+   watch starts with every new stream (a lens swap, a resume). The fix itself is never stored here. */
+function geoWatch(gen){
+  if(!F.place || !navigator.geolocation || !navigator.geolocation.watchPosition) return;
+  try{
+    LIVE.geo=navigator.geolocation.watchPosition(function(pos){
+      if(gen!==LIVE.gen || !LIVE.on || !F.place) return;   /* an answer for a stream that is gone */
+      var c=pos.coords, at=typeof pos.timestamp==="number" ? pos.timestamp : Date.now();
+      GEO.fixes.push({lat:c.latitude,lon:c.longitude,acc:c.accuracy,at:at});
+      var cut=Date.now()-120000;
+      GEO.fixes=GEO.fixes.filter(function(f){ return f.at>=cut; });
+      if(GEO.fixes.length>30) GEO.fixes=GEO.fixes.slice(GEO.fixes.length-30);
+    }, function(e){
+      if(gen!==LIVE.gen || !F.place) return;
+      if(e && e.code===1){ stopGeo(); F.place=false; saveCamera(); toast(tr("cam.place.denied")); }
+    }, {enableHighAccuracy:true,maximumAge:0,timeout:30000});
+  }catch(e){ LIVE.geo=null; }
+}
+function stopGeo(){
+  if(LIVE.geo!==null){
+    if(navigator.geolocation && navigator.geolocation.clearWatch){ try{ navigator.geolocation.clearWatch(LIVE.geo); }catch(e){} }
+    LIVE.geo=null;
+  }
+  GEO.fixes=[];
 }
 function liveTick(t){
   if(!LIVE.on) return;
@@ -317,6 +350,23 @@ function keepLatent(roll,n,c){
   }).catch(function(){ if(F.roll===roll) toast(tr("cam.lost")); });
   F.jobs.push(job);
 }
+/* The shutter's place: one fix from the last two minutes, sealed with the darkroom key before the frame is written
+   again. The job catches its own errors (unloadRoll waits for every job, and a rejected one would fail the unload). */
+function sealPlace(fr,now){
+  var at=GEOTAG.pick(GEO.fixes,now);
+  if(!at) return;
+  var job=Promise.resolve().then(function(){
+    return LP.darkroomKey.current();
+  }).then(function(key){
+    if(!key) throw new Error("nokey");
+    return GEOTAG.seal(crypto.subtle,key,crypto.getRandomValues(new Uint8Array(12)),{lat:at.lat,lon:at.lon,acc:at.acc});
+  }).then(function(sealed){
+    fr.geo=sealed;
+    camLog("geo sealed, acc "+Math.round(at.acc)+" m");
+    if(S.db) return put(S.refs.frames.doc(fr.roll+"-"+pad2(fr.n)),fr);
+  }).catch(function(){ camLog("geo failed"); });
+  F.jobs.push(job);
+}
 function takeFrame(px,latent){
   var n=F.frames.length+1, now=Date.now(), roll=F.roll;
   if(F.date) burnDate(px,CW,CH,now,F.res);
@@ -329,6 +379,8 @@ function takeFrame(px,latent){
   setTimeout(function(){ sfx("tick"); },260); setTimeout(function(){ sfx("tick"); },360);
   /* the latent first: on the last frame renderCam opens the unload menu, which stops the stream */
   if(latent && S.db) keepLatent(roll,n,latent());
+  /* the place job before renderCam: the unload menu must already see it (the stream, and its fix, stop there) */
+  if(latent && LIVE.on && S.db) sealPlace(fr,now);
   renderCam();
   if(S.db) put(S.refs.frames.doc(roll+"-"+pad2(n)),fr).then(function(ok){ if(!ok) toast(tr("cam.lost")); });
   if(rollFull()){ toast(tr("cam.last")); stopLive(); }
@@ -500,7 +552,7 @@ function rollDoc(frames,bytes){
       var f={n:fr.n, px:fr.px, taken:fr.taken};
       if(typeof fr.tz==="number") f.tz=fr.tz;   /* the shooting time zone travels with the negative */
       if(fr.blank) f.blank=fr.blank;
-      else { f.dated=!!fr.dated; f.exposure=fr.exposure|0; f.contrast=fr.contrast|0; if(fr.lens) f.lens=fr.lens; }
+      else { f.dated=!!fr.dated; f.exposure=fr.exposure|0; f.contrast=fr.contrast|0; if(fr.lens) f.lens=fr.lens; if(fr.geo) f.geo=fr.geo; }
       return f;
     })};
 }
@@ -548,7 +600,7 @@ function rewindEarly(){
 
 function loadFilm(){
   if(!S.db){ F.ready=true; renderCam(); return Promise.resolve(); }
-  return S.refs.camera.get().then(function(sn){ var c=sn.exists?own(sn.data()):null; F.count=Math.max(F.count,(c&&c.rolls)|0); },function(){})
+  return S.refs.camera.get().then(function(sn){ var c=sn.exists?own(sn.data()):null; F.count=Math.max(F.count,(c&&c.rolls)|0); F.place=!!(c&&c.place===true); },function(){})
   .then(function(){ return S.refs.film.get(); }).then(function(sn){
     var d=sn.exists?own(sn.data()):null;
     if(!d || !d.roll){ F.roll=null; F.frames=[]; F.ready=true; return; }
@@ -627,11 +679,33 @@ function camSheet(name){
   if(name) stopLive();
   if(name==="load") buildRolls();
 }
+/* Place (地点): the one prompt must run inside the tap, so getCurrentPosition is called before the key is waited for;
+   the key is chained alongside. The menu note lives on M.note, which drawMenu already reads (and CAM.busy still wins). */
+function pickPlace(M){
+  M.note=""; PLACE.try++;
+  if(F.place){
+    F.place=false; stopGeo(); saveCamera(); drawMenu(); return;
+  }
+  if(!navigator.geolocation || !navigator.geolocation.getCurrentPosition){ M.note="cam.place.none"; drawMenu(); return; }
+  var tok=PLACE.try, g=navigator.geolocation;
+  F.place=true; saveCamera(); drawMenu();
+  try{
+    g.getCurrentPosition(function(){},function(e){
+      if(tok!==PLACE.try || !F.place) return;
+      if(e && e.code===1){ F.place=false; stopGeo(); saveCamera(); M.note="cam.place.denied"; sfx("err"); drawMenu(); }
+    },{enableHighAccuracy:true,maximumAge:0,timeout:30000});
+  }catch(e){ /* other errors leave Place on, with no note */ }
+  LP.darkroomKey.ensure().then(function(){},function(){
+    if(tok!==PLACE.try || !F.place) return;
+    F.place=false; stopGeo(); saveCamera(); M.note="cam.place.nokey"; sfx("err"); drawMenu();
+  });
+}
 function camMenu(kind){
   var left=F.size-F.frames.length, M;
   /* titles, labels and notes are keys, so an open menu redraws in the new language */
   if(kind==="body") M={title:"cam.menu.body", note:"", back:function(){ camSheet(null); renderCam(); startLive(); }, items:[
     {label:"cam.menu.date", value:function(){ return tr(F.date?"set.on":"set.off"); }, pick:function(){ toggleDate(); }},
+    {label:"cam.menu.place", value:function(){ return tr(F.place?"set.on":"set.off"); }, pick:function(){ pickPlace(M); }},
     {label:"cam.menu.lens", value:function(){ return lensName(lensNow()); }, pick:function(){ LIVE.lens=LENS.next(LIVE.lenses,LIVE.lens).id; saveFilmSoon(); }},
     {label:"cam.menu.rewind", value:function(){ return tr("cam.menu.left",{n:left}); }, pick:function(){ camMenu("rewind"); }},
     {label:"cam.menu.finder", pick:function(){ M.back(); }}
