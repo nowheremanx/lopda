@@ -6,8 +6,8 @@
  *
  * The screen: a top bar (play/stop, BPM, − and +, ?, ≡), four drum tabs with a dot under each drum that has a hit,
  * and the selected drum's 16 steps as a 4x4 grid, one row per beat, the first cell of a row heavier. On = ink.
- * The step being heard turns mid (empty) or dark (lit) while it sounds. The menu holds "new tape" (A / 确认 confirms, B / 取消 cancels)
- * and the kit (soft / chip). The "?" replays the tour; the first open runs it by itself (docs/design/studio.md 11.6).
+ * The step being heard turns mid (empty) or dark (lit) while it sounds. The menu holds "new tape" (A / 确认 confirms,
+ * B / 取消 cancels), the kit (soft / chip) and 返回. No UI clicks anywhere here: the only sounds are the drums. The "?" replays the tour; the first open runs it by itself (docs/design/studio.md 11.6).
  *
  * Keys (the chin pad is hidden): arrows move a dashed focus box, X = A toggles that cell, Enter = START plays and
  * stops, Shift = SELECT picks the next drum, Z = B closes the menu or its confirmation. HOME is the runtime's.
@@ -22,7 +22,7 @@
 (function(){
 "use strict";
 var LP=window.LP, $=LP.$, S=LP.S, tr=LP.tr, SONGS=window.LopdaSong, SYNTH=window.LopdaStudioSynth;
-var own=LP.own, toast=LP.toast, sfx=LP.sfx, show=LP.show, showPad=LP.showPad;
+var own=LP.own, toast=LP.toast, show=LP.show, showPad=LP.showPad;
 
 var BASE="data/users/local/studio", LOOKAHEAD=0.1, LOOP_MS=25, SAVE_MS=1000;
 
@@ -409,8 +409,8 @@ function tour(screen,steps){
   view.classList.add("st-touring");
   document.body.classList.add("st-tour-on");
   T.tour={screen:screen, steps:steps, i:0, root:root, box:box, text:text, skip:skip, next:next, covers:covers, hi:null};
-  skip.onclick=function(){ sfx("miss"); tourEnd(true); };
-  next.onclick=function(){ sfx("tap"); tourNext(); };
+  skip.onclick=function(){ tourEnd(true); };
+  next.onclick=function(){ tourNext(); };
   tourShow(0);
 }
 function tourShow(i){
@@ -499,11 +499,13 @@ function renderSheet(){
   sh.appendChild(head);
   if(T.sheet==="menu"){
     var ul=el("ul","lcd-menu");
-    if(T.loaded) sheetRow(ul,tr("studio.new"),"",function(){ sfx("tap"); openSheet("new"); });
+    if(T.loaded) sheetRow(ul,tr("studio.new"),"",function(){ openSheet("new"); });
     if(T.song && T.loaded) sheetRow(ul,tr("studio.kit",{kit:tr("studio.kit."+T.song.kit)}),"",function(){
       T.song.kit=T.song.kit==="soft" ? "chip" : "soft";
-      touch(); sfx("tap"); renderSheet();
+      touch(); renderSheet();
     });
+    /* no chin pad here, so the way out of the menu has to be on screen */
+    sheetRow(ul,tr("studio.back"),"",function(){ closeSheet(); });
     sh.appendChild(ul);
     return;
   }
@@ -517,7 +519,7 @@ function renderSheet(){
   var no=el("button","btn ghost","");
   no.type="button";
   no.textContent=tr("common.cancel");
-  no.onclick=function(){ sfx("miss"); closeSheet(); };
+  no.onclick=function(){ closeSheet(); };
   row.appendChild(yes); row.appendChild(no);
   ask.appendChild(row);
   sh.appendChild(ask);
@@ -529,7 +531,6 @@ function newTape(){
   T.dirty=true;
   T.sheet="";
   flush();
-  sfx("ok");
   renderAll();
 }
 /* ---------- taps and keys ---------- */

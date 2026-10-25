@@ -205,7 +205,7 @@ document.addEventListener("visibilitychange",function(){
 });
 
 /* ---------- sound: tiny square-wave chips through Web Audio (the named sounds themselves are in chip.js) ---------- */
-var RUNTIME_VERSION="0.37.0+d3c7723";   /* keep in step with VERSION in sw.js */
+var RUNTIME_VERSION="0.37.0+f95321b";   /* keep in step with VERSION in sw.js */
 /* One volume, five steps, 0 is off (decisions.md section 10). It sets the master gain and nothing else does.
    Under the master: `ui` for the runtime's own clicks, held at a fraction so they stay as quiet as they always were
    (step 2 gives them 0.11, their level before 0.12.0), and `app` for apps, music and the cartridge at the full step. */
@@ -323,10 +323,11 @@ document.addEventListener("visibilitychange",function(){
    (the dictionary stops its own) ---------- */
 var speech=window.LopdaSpeech.host({window:window, volume:function(){ return Math.min(1,(VOL_GAIN[SND.vol]||0)/VOL_GAIN[VOL_MAX]); }});
 document.addEventListener("visibilitychange",function(){ if(document.hidden) speech.stop(); });
-/* every button gets a key click, except the ones that make their own sound */
+/* every button gets a key click, except the ones that make their own sound, and the tape machine's: a click over the
+   music it plays (or a drum it auditions) is noise in a music program (owner 2026-10-25) */
 document.addEventListener("pointerdown",function(e){
   var b=e.target.closest && e.target.closest("button,label.btn,.app");
-  if(!b || b.disabled || b.id==="home-key" || b.closest(".gamepad") || b.closest(".cam-view")) return;
+  if(!b || b.disabled || b.id==="home-key" || b.closest(".gamepad") || b.closest(".cam-view") || b.closest("#v-studio")) return;
   sfx("tap");
 },true);
 
