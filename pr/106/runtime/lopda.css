@@ -210,12 +210,16 @@ textarea::placeholder{color:var(--ink-2)}
 .set-menu{padding:0 10px 6px;gap:0}
 .set-bar{padding:1px 8px}
 .set-bar h2{line-height:1.1}
-.set-menu .set-row{min-height:44px;padding:0;justify-content:flex-start;gap:10px}
+.set-menu .set-row{min-height:44px;padding:6px 0 8px;justify-content:flex-start;gap:10px}
+/* a little air between the buttons and the lines above and below them (the 3 px shadow sits in the bottom gap) */
+.set-menu .set-row .btn{min-height:34px;padding:3px 12px}
 .set-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .set-ico{flex:none;width:24px;height:24px;display:flex;align-items:center;justify-content:center}
 .set-ico canvas{display:block;width:24px;height:24px;image-rendering:pixelated;image-rendering:crisp-edges}
 .set-state{flex:none;color:var(--ink-2);font-size:15px;white-space:nowrap}
 .set-rule{border-top:2px solid var(--ink);margin:0}
+/* the solid rule ends the group above it: the row before it drops its own dashed line */
+.set-menu .set-row:has(+ .set-rule),.set-menu .set-row:last-child{border-bottom:0}
 .set-menu .set-subnote{margin:0;padding:0 0 0 34px;font-size:12px;line-height:1.2}
 .set-open{display:flex;align-items:center;gap:10px;width:100%;min-height:44px;padding:0;background:none;border:0;border-bottom:1px dashed var(--ink-2);color:inherit;font:inherit;text-align:left;cursor:pointer}
 .set-open:active{background:var(--lcd-2)}
@@ -239,7 +243,7 @@ textarea::placeholder{color:var(--ink-2)}
 .set-ai .set-row{border-bottom:0;padding-bottom:0}
 .set-ai .hint,.set-ai-page .hint{margin:0}
 .set-ai-field{display:flex;flex-direction:column;gap:4px;font-size:16px}
-.set-ai-field input{min-height:44px;font-family:var(--f-lcd);font-size:16px;color:var(--ink);background:var(--lcd);border:3px solid var(--ink);border-radius:0;padding:4px 8px;width:100%;min-width:0}
+.set-ai-field input{min-height:44px;font-family:var(--f-lcd);font-size:16px;color:var(--ink);background:var(--lcd);border:3px solid var(--ink);border-radius:0;padding:4px 8px;width:100%;min-width:0;-webkit-appearance:none;appearance:none}
 .set-ai-page .row{flex-wrap:wrap;gap:8px}
 .set-ai-page .btn{min-height:44px;padding:6px 14px}
 .set-backup{display:flex;flex-direction:column;gap:8px;border-bottom:1px dashed var(--ink-2);padding-bottom:12px}

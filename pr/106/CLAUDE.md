@@ -16,7 +16,7 @@ runtime/        the PWA: index.html, core.js (shared LP object: utils, views, so
                 ai.js (the AI line: OpenRouter chat completions streamed with the user's own key, for the scripts' 生成; decisions.md section 34),
                 sensors.js (tilt, shake, heading and the microphone's level and pitch for apps, the audio session; shared with sdk/dev.html),
                 lenses.js (which physical camera lenses a phone has, pure functions), finder.js (the viewfinder's look: luma, the Bayer dither,
-                exposure and contrast; shared by the camera, the snap viewfinder, the reader and sdk/dev.html), textsel.js (the text selection shared by the reader and the dictionary entry page), negative.js (the negative PNG and its lpDa chunk, pure functions),
+                exposure and contrast; shared by the camera, the snap viewfinder, the reader and sdk/dev.html), textsel.js (the text selection shared by the reader and the dictionary entry page), negative.js (the negative PNG and its lpDa chunk, pure functions), exif.js (a single print's APP1 Exif segment, pure functions),
                 develop.js (developing a frame: the stocks' looks, grain, halation, leaks, date stamp; pure functions on RGBA),
                 notetext.js (notes: tags, search and snippets, the diary title, the diaries by day, front matter, export names, the rules for app notes; pure functions),
                 zip.js (stored zips written, stored and deflated zips read; pure functions, CRC from negative.js), qr.js (the runtime's QR helper: text to a module matrix, drawn with putImageData on the share page), lunar.js (lunar calendar + solar term tables, 1900-2100), stardict.js (StarDict reader), wordlist.js (the word list and the entries behind PAD.dict: check/query/entry and one source, shared by apps/dict.js, sdk/dev.html and the tests, SPEC.md 6.7), bookparse.js (TXT/EPUB parser),
@@ -63,7 +63,7 @@ README.md (English, the homepage) README.zh.md (Chinese) LICENSE NOTICE LICENSIN
   never stored, every look and print develops them again), the colour viewer, single / contact sheet / film strip prints; decisions.md section 19), cart (GB), store (app store: categories from the manifest's `category` (missing goes to Other), category filters, single and "update all" installs, preinstalled apps, sandboxed runner, file dialog), scripts (local HTML/JS programs: copy an AI prompt, paste, run in the sandbox; every script has its own storage document), settings (also 备份 / 恢复: the whole
   device as one `lopda-backup-YYYYMMDD.zip` through backup.js, every check before a restore replaces everything, the old data
   written back if a write fails; `data/users/local/backup-meta` {last}; decisions.md section 24; the main page is a short menu,
-  the permissions list, backup, the share page (a QR code drawn on the device) and About have pages of their own; decisions.md section 37).
+  the permissions list, backup, the share page (a QR code drawn on the device) and About have pages of their own; decisions.md section 39).
   Paint and the calculator are community apps (`registry/apps/paint`, `calculator`), installed on first start
   (`PREINSTALL` in store.js; their files are in sw.js SHELL). The LCD fonts ship in runtime/fonts/ (OFL). Each registers with
   `LP.builtin({id, label, icon, view, open, ...hooks})`; the home screen draws them in registration order
