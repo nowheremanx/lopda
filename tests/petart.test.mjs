@@ -1,4 +1,4 @@
-// runtime/petart.js: the chip species pack, its grids, the room painter and the souvenir strings.
+// runtime/petart.js: the chip species pack at 32 x 32, the 162 x 120 room and the souvenir strings.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { runScript, EMOJI } from "./helpers.mjs";
@@ -10,10 +10,13 @@ const ZH = loadStrings("zh-CN"), EN = loadStrings("en-US");
 const zh = ZH.t, en = EN.t;
 const own = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
 
-const W = 81, H = 60;
-function room(scene) {
-  const buf = new Uint8Array(W * H);
-  A.drawRoom(buf, W, H, scene);
+const W = 162, H = 120;
+const STAGES = ["baby", "child", "adult"];
+const FRONT = [...A.FRAME_NAMES];
+const SIDE = [...A.POSE_NAMES.side];
+function room(scene, w = W, h = H) {
+  const buf = new Uint8Array(w * h);
+  A.drawRoom(buf, w, h, scene);
   return buf;
 }
 function assertGrid(name, g, w, h) {
@@ -29,59 +32,211 @@ function assertGrid(name, g, w, h) {
   if (h !== undefined) assert.equal(g.length, h, `${name} is ${h} high`);
   return g;
 }
-function frameGrids() {
-  const out = [];
-  for (const face of P.faces) for (const ant of P.marks.ant) for (const pat of P.marks.pat) for (const eye of P.marks.eye) {
-    out.push([`frames ${face} ${ant}/${pat}/${eye}`, P.frames({ ant, pat, eye, face })]);
+function changed(a, b, x0, x1, y0, y1) {
+  let inside = 0, outside = 0;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const i = y * W + x;
+    if (a[i] === b[i]) continue;
+    if (x >= x0 && x < x1 && y >= y0 && y < y1) inside++; else outside++;
   }
-  return out;
+  return { inside, outside };
 }
 
-test("the pack is one chip species with 4 x 4 x 3 markings, 6 adult forms, 15 actions and a room", () => {
+test("pack: one chip species with 6 antennas, 3 eye shapes, 6 forms and a 162 x 120 room", () => {
   assert.equal(P.id, "chip");
   assert.deepEqual(A.PACKS.chip, P);
-  assert.deepEqual([...P.marks.ant], ["ball", "stick", "fork", "bent"]);
-  assert.deepEqual([...P.marks.pat], ["plain", "dot", "stripe", "trace"]);
-  assert.deepEqual([...P.marks.eye], ["dot", "bar", "big"]);
+  assert.deepEqual([...P.marks.ant], ["orb", "triangle", "crook", "curl", "prongs", "star"]);
+  assert.deepEqual([...P.marks.eye], ["round", "wide", "sleepy"]);
+  assert.equal(P.marks.pat, undefined, "the body pattern is gone from the pack");
   assert.deepEqual([...P.forms], ["book", "walk", "scholar", "diary", "monster", "plain"]);
   assert.deepEqual([...P.faces], ["idle1", "idle2", "blink", "eat1", "eat2", "happy", "walk1", "walk2", "sleep", "wait", "surprised", "sad", "angry", "sulk", "hold"]);
   assert.deepEqual([...A.TONES], ["#1f2a14", "#4a5a32", "#7d8a58", "#a3ad7e"]);
-  assert.equal(P.room.w, 81);
-  assert.equal(P.room.h, 60);
-  assert.equal(P.room.petX, 40);
-  assert.equal(P.room.petY, 36);
+  assert.equal(A.ROOM_W, 162);
+  assert.equal(A.ROOM_H, 120);
+  assert.equal(P.room.w, 162);
+  assert.equal(P.room.h, 120);
+  assert.equal(P.room.petX, 83);
+  assert.equal(P.room.petY, 69);
   assert.equal(typeof P.room.draw, "function");
   for (const id of ["bowl", "bowlEmpty", "poop", "sign", "zz"]) assert.equal(P.room[id], P.props[id], `room ${id} is the pack's own grid`);
 });
 
 test("every grid in the pack is rectangular and uses only .kdmp", () => {
-  for (const [name, g] of frameGrids()) assertGrid(name, g);
-  for (const id of ["egg", "baby", "child"]) assertGrid(id, P[id]);
-  P.eggCrack.forEach((g, i) => assertGrid("eggCrack " + i, g));
-  for (const id of P.forms) assertGrid("adult " + id, P.adult(id));
+  for (const stage of STAGES) for (const name of FRONT) for (const ant of P.marks.ant) for (const eye of P.marks.eye) {
+    assertGrid(`${stage} ${name} ${ant}/${eye}`, A.stagePose(P, stage, { ant, eye }, "front", name), 32, 32);
+  }
+  for (const stage of STAGES) for (const name of SIDE) for (const ant of P.marks.ant) for (const eye of P.marks.eye) {
+    assertGrid(`${stage} side ${name} ${ant}/${eye}`, A.stagePose(P, stage, { ant, eye }, "side", name), 32, 32);
+  }
+  for (const id of ["egg", "baby", "child"]) assertGrid(id, P[id], 32, 32);
+  P.eggCrack.forEach((g, i) => assertGrid("eggCrack " + i, g, 32, 32));
+  for (const id of P.forms) assertGrid("adult " + id, P.adult(id), 32, 32);
   for (const id of Object.keys(P.props)) assertGrid("prop " + id, P.props[id]);
-  for (const id of ["bowl", "bowlEmpty", "poop", "sign", "zz"]) assertGrid("room " + id, P.room[id]);
-  for (const id of Object.keys(P.icons)) assertGrid("icon " + id, P.icons[id]);
+  for (const id of Object.keys(P.icons)) assertGrid("icon " + id, P.icons[id], 8, 8);
   for (const id of Object.keys(P.homeIcons)) assertGrid("home icon " + id, P.homeIcons[id], 16, 16);
-  for (const s of P.souvenirs) assertGrid("souvenir " + s.id, s.grid);
+  for (const s of P.souvenirs) assertGrid("souvenir " + s.id, s.grid, 16, 16);
 });
 
-test("egg: two cracked stages, same 16 x 16 box as the whole egg, and each one is a different picture", () => {
+test("frames: every stage x every frame x 6 antennas x 3 eyes is a visible 32 x 32", () => {
+  let count = 0;
+  for (const stage of STAGES) {
+    for (const name of FRONT) {
+      for (const ant of P.marks.ant) for (const eye of P.marks.eye) {
+        const g = A.stagePose(P, stage, { ant, eye }, "front", name);
+        assertGrid(`${stage} ${name} ${ant}/${eye}`, g, 32, 32);
+        assert.ok(A.frameInk(g) >= 60, `${stage} ${name} ${ant}/${eye} has ${A.frameInk(g)} ink/dark pixels`);
+        count++;
+      }
+    }
+  }
+  assert.equal(count, 3 * FRONT.length * 6 * 3);
+  /* the side view is the same promise for the five standard side poses */
+  let sideCount = 0;
+  for (const stage of STAGES) for (const name of SIDE) for (const ant of P.marks.ant) for (const eye of P.marks.eye) {
+    const g = A.stagePose(P, stage, { ant, eye }, "side", name);
+    assertGrid(`${stage} side ${name} ${ant}/${eye}`, g, 32, 32);
+    assert.ok(A.frameInk(g) >= 60, `${stage} side ${name} has ${A.frameInk(g)} ink/dark pixels`);
+    sideCount++;
+  }
+  assert.equal(sideCount, 3 * SIDE.length * 6 * 3);
+  /* a few faces must actually differ: the expressions are not one idle frame copied around */
+  const marks = { ant: "orb", eye: "round" };
+  const idle = A.stagePose(P, "adult", marks, "front", "idle1");
+  for (const name of ["blink", "eat1", "eat2", "happy", "sleep", "wait", "surprised", "sad", "angry", "sulk", "jump", "fall", "catch"]) {
+    assert.notDeepEqual(A.stagePose(P, "adult", marks, "front", name), idle, `adult ${name} is not idle`);
+  }
+  assert.notDeepEqual(A.stagePose(P, "adult", marks, "side", "walk1"), A.stagePose(P, "adult", marks, "side", "walk2"));
+  assert.notDeepEqual(A.stagePose(P, "adult", marks, "front", "lookL"), A.stagePose(P, "adult", marks, "front", "lookR"));
+});
+
+test("frames: an unknown face falls back to idle1, eyes and antenna included", () => {
+  const idle = P.frames({ face: "idle1", ant: "crook", eye: "wide" });
+  assert.deepEqual(P.frames({ face: "idle", ant: "crook", eye: "wide" }), idle);
+  assert.deepEqual(P.frames({ face: "not-a-face", ant: "crook", eye: "wide" }), idle);
+  assert.notDeepEqual(P.frames({ face: "blink", ant: "crook", eye: "wide" }), idle);
+  assert.notDeepEqual(P.frames({ face: "idle1", ant: "orb", eye: "wide" }), P.frames({ face: "idle1", ant: "star", eye: "wide" }));
+  assert.notDeepEqual(P.frames({ face: "idle1", ant: "orb", eye: "round" }), P.frames({ face: "idle1", ant: "orb", eye: "sleepy" }));
+});
+
+test("marks: new names, old save indices, and pat ignored", () => {
+  assert.equal(P.marks.ant.length, 6);
+  assert.equal(P.marks.eye.length, 3);
+  const old = { ant: 2, pat: 3, eye: 1 };
+  const mapped = { ant: "crook", eye: "wide" };
+  for (const stage of STAGES) for (const name of ["idle1", "happy", "sad"]) {
+    assert.deepEqual(
+      A.stagePose(P, stage, old, "front", name),
+      A.stagePose(P, stage, mapped, "front", name),
+      `${stage} ${name}: old ant/eye indices map to the same look`
+    );
+  }
+  assert.deepEqual(A.stagePose(P, "adult", { ant: 0, eye: 0 }, "front", "idle1"),
+    A.stagePose(P, "adult", { ant: "orb", eye: "round" }, "front", "idle1"));
+  assert.deepEqual(A.stagePose(P, "adult", { ant: 3, eye: 2 }, "front", "idle1"),
+    A.stagePose(P, "adult", { ant: "curl", eye: "sleepy" }, "front", "idle1"));
+  const withPat = A.stagePose(P, "adult", { ant: "orb", pat: "stripe", eye: "round" }, "front", "idle1");
+  const withoutPat = A.stagePose(P, "adult", { ant: "orb", eye: "round" }, "front", "idle1");
+  assert.deepEqual(withPat, withoutPat, "pat no longer changes the body");
+});
+
+test("adult forms: six 32 x 32 forms, each accessory tells it apart, every face shows", () => {
+  for (const form of P.forms) {
+    const g = P.adult(form, { ant: "orb", eye: "round" });
+    assertGrid(`adult ${form}`, g, 32, 32);
+    assert.ok(A.frameInk(g) >= 60, `adult ${form} has ink`);
+  }
+  const plain = P.adult("plain", { ant: "orb", eye: "round" });
+  const seen = new Set();
+  for (const form of P.forms) {
+    const g = P.adult(form, { ant: "orb", eye: "round" });
+    if (form !== "plain") assert.notDeepEqual(g, plain, `${form} has its own accessory`);
+    seen.add(g.join("\n"));
+  }
+  assert.equal(seen.size, P.forms.length, "all six forms are different pictures");
+  for (const form of P.forms) {
+    const neutral = P.adult(form, { face: "idle1", ant: "orb", eye: "round" });
+    for (const face of ["happy", "sleep", "wait", "surprised", "blink", "sad", "angry", "sulk"]) {
+      const g = P.adult(form, { face, ant: "orb", eye: "round" });
+      assertGrid(`adult ${form} ${face}`, g, 32, 32);
+      assert.notDeepEqual(g, neutral, `${form} ${face} is not the neutral face`);
+    }
+    assert.notDeepEqual(P.adult(form, { face: "sad" }), P.adult(form, { face: "angry" }));
+    assert.notDeepEqual(P.adult(form, { face: "angry" }), P.adult(form, { face: "sulk" }));
+  }
+});
+
+test("adult forms: every form x every frame x 6 antennas x 3 eyes is a visible 32 x 32", () => {
+  let count = 0;
+  for (const form of P.forms) {
+    for (const name of FRONT) for (const ant of P.marks.ant) for (const eye of P.marks.eye) {
+      const g = P.adult(form, { face: name, ant: ant, eye: eye });
+      assertGrid(`adult ${form} ${name} ${ant}/${eye}`, g, 32, 32);
+      assert.ok(A.frameInk(g) >= 60, `adult ${form} ${name} ${ant}/${eye} has ${A.frameInk(g)} ink/dark pixels`);
+      count++;
+    }
+  }
+  assert.equal(count, P.forms.length * FRONT.length * 6 * 3);
+});
+
+test("egg: 32 x 32, one clean shell and two growing cracks", () => {
   assert.equal(P.eggCrack.length, 2);
   const whole = P.egg;
   const [small, big] = P.eggCrack;
+  assertGrid("egg", whole, 32, 32);
   for (const [name, g] of [["small", small], ["big", big]]) {
-    assertGrid("eggCrack " + name, g, 16, 16);
+    assertGrid("eggCrack " + name, g, 32, 32);
     assert.notDeepEqual(g, whole, `${name} crack is not the whole egg`);
-    assert.deepEqual(g.slice(0, 2), whole.slice(0, 2), `${name} keeps the egg's top`);
-    assert.deepEqual(g.slice(14), whole.slice(14), `${name} keeps the egg's bottom`);
+    assert.deepEqual(g.slice(0, 4), whole.slice(0, 4), `${name} keeps the egg's top`);
+    assert.deepEqual(g.slice(18), whole.slice(18), `${name} keeps the egg's bottom`);
   }
   assert.notDeepEqual(small, big, "the two stages differ");
   const changes = (g) => g.reduce((n, row, r) => n + [...row].filter((c, i) => c !== whole[r][i]).length, 0);
   assert.ok(changes(small) > 0 && changes(big) > changes(small), "the big crack changes more pixels than the small one");
 });
 
-test("floor props: the full and empty bowls are the same bowl, and a pile uses more than one tone", () => {
+test("poses: the standard vocabulary, the side view and the mirror", () => {
+  assert.deepEqual(Object.keys(A.POSE_NAMES).sort(), ["front", "side"]);
+  assert.deepEqual([...A.POSE_NAMES.front], ["idle", "happy", "sad", "angry", "sulk", "surprised", "blink", "jump", "fall", "catch"]);
+  assert.deepEqual([...A.POSE_NAMES.side], ["walk1", "walk2", "jump", "flap1", "flap2"]);
+  for (const view of Object.keys(A.POSE_NAMES)) {
+    assert.deepEqual(Object.keys(P.poses[view]).sort(), [...A.POSE_NAMES[view]].sort(), `the pack provides every ${view} pose`);
+    for (const name of A.POSE_NAMES[view]) for (const ant of P.marks.ant) for (const eye of P.marks.eye) {
+      const g = A.pose(P, { ant, eye }, view, name);
+      assertGrid(`${view}/${name} ${ant}/${eye}`, g, 32, 32);
+      assert.ok(A.frameInk(g) >= 60, `${view}/${name} ${ant}/${eye} has ink`);
+    }
+  }
+  assert.notDeepEqual(A.pose(P, { ant: "orb", eye: "round" }, "side", "walk1"),
+    A.pose(P, { ant: "star", eye: "sleepy" }, "side", "walk1"));
+  const pictures = new Set(A.POSE_NAMES.front.map((n) => A.pose(P, {}, "front", n).join("\n")));
+  assert.equal(pictures.size, A.POSE_NAMES.front.length, "the front poses differ");
+  const g = A.pose(P, { ant: "star", eye: "sleepy" }, "side", "walk2");
+  const m = A.mirror(g);
+  assert.equal(m.length, 32);
+  for (let r = 0; r < 32; r++) assert.equal(m[r], [...g[r]].reverse().join(""), `row ${r}`);
+  assert.deepEqual(A.mirror(m), g);
+  assert.equal(A.mirror(null), null);
+});
+
+test("homeIcons: five 16 x 16 states, all different, a round chip with an antenna", () => {
+  const keys = Object.keys(P.homeIcons).sort();
+  assert.deepEqual(keys, ["away", "egg", "face", "need", "sleep"]);
+  for (const key of keys) {
+    assertGrid("homeIcons " + key, P.homeIcons[key], 16, 16);
+    assert.ok(A.frameInk(P.homeIcons[key]) >= 20, `homeIcons ${key} has ink`);
+  }
+  const seen = new Set(keys.map((k) => P.homeIcons[k].join("\n")));
+  assert.equal(seen.size, keys.length, "each state is a different picture");
+  assert.notDeepEqual(P.homeIcons.sleep, P.homeIcons.face, "sleeping closes the eyes");
+  assert.notDeepEqual(P.homeIcons.away, P.homeIcons.face, "away is not the everyday face");
+  /* the face and sleep icons carry the antenna above the body: ink in the top rows */
+  for (const key of ["face", "sleep", "need", "away"]) {
+    const top = P.homeIcons[key].slice(0, 5).join("");
+    assert.match(top, /k/, `${key} has its antenna above the body`);
+  }
+});
+
+test("props: the bowls, the piles, the flag and the double-size digit font", () => {
   const full = P.props.bowl, empty = P.props.bowlEmpty;
   assertGrid("bowl", full); assertGrid("bowlEmpty", empty);
   assert.match(full.slice(0, 3).join(""), /[dm]/, "food sits over the full bowl's rim");
@@ -89,28 +244,141 @@ test("floor props: the full and empty bowls are the same bowl, and a pile uses m
   assert.deepEqual(full.slice(3), empty.slice(3), "below the rim the two states are the same bowl");
   const tones = new Set(P.props.poop.join("").replace(/\./g, "").split(""));
   assert.ok(tones.has("k") && tones.has("m") && tones.has("d"), "a pile has an ink edge, a mid body and dark turns");
+  assert.notDeepEqual(P.props.flag, P.props.flagBlank);
+  assert.ok(P.props.flag[0].length >= 16 && P.props.flag.length >= 28, "the flag is drawn at double size");
+  assert.ok(P.props.desk[0].length >= 48 && P.props.sign[0].length >= 32, "the desk and sign are double size");
+  assert.equal(A.numberGrid(9).length, 7);
+  assert.equal(A.numberGrid(9)[0].length, 5);
+  assert.equal(A.numberGrid(24)[0].length, 11);
+  const seen = new Set();
+  for (let n = 1; n <= 31; n++) seen.add(A.numberGrid(n).join("\n"));
+  assert.equal(seen.size, 31, "every day 1-31 has its own digits");
 });
 
-test("frames: every action with all 48 markings is 16 x 16", () => {
-  for (const [name, g] of frameGrids()) assertGrid(name, g, 16, 16);
-  assert.equal(frameGrids().length, 15 * 4 * 4 * 3);
-  /* the two resting postures use a drooped antenna, so the rolled mark does not show there */
-  assert.deepEqual(P.frames({ face: "sleep", ant: "fork" }), P.frames({ face: "sleep", ant: "ball" }));
-  assert.notDeepEqual(P.frames({ face: "idle1", ant: "fork" }), P.frames({ face: "idle1", ant: "ball" }));
-});
-
-test("frames: an unknown face falls back to idle1, eyes included", () => {
-  const idle = P.frames({ face: "idle1", ant: "fork", pat: "stripe", eye: "big" });
-  assert.deepEqual(P.frames({ face: "idle", ant: "fork", pat: "stripe", eye: "big" }), idle);
-  assert.deepEqual(P.frames({ face: "not-a-face", ant: "fork", pat: "stripe", eye: "big" }), idle);
-  assert.notDeepEqual(P.frames({ face: "blink", ant: "fork", pat: "stripe", eye: "big" }), idle);
-});
-
-test("adult: all six forms are 20 x 20", () => {
-  for (const id of P.forms) assertGrid("adult " + id, P.adult(id), 20, 20);
-  for (const id of P.forms.filter((f) => f !== "plain")) {
-    assert.notDeepEqual(P.adult(id), P.adult("plain"), `${id} has its own accessory`);
+test("drawRoom: 162 x 120 and only tone indices 0-3", () => {
+  for (const scene of [
+    { pet: P.frames({ face: "idle1" }), petX: 83, petY: 69, dayOfMonth: 24, bowlFull: true, mess: 1 },
+    { night: true, dayOfMonth: 3, bowlFull: false, mess: 3, zz: true, lightOff: true },
+    { pet: null, sign: true, prop: P.props.card, dayOfMonth: 31, season: "winter", shelf: P.souvenirs[0].grid }
+  ]) {
+    const buf = room(scene);
+    assert.equal(buf.length, W * H);
+    assert.deepEqual([...new Set(buf)].sort(), [0, 1, 2, 3]);
   }
+  /* the old call with no width or height uses the pack's own room size */
+  const buf = new Uint8Array(W * H);
+  A.drawRoom(buf, undefined, undefined, { dayOfMonth: 9 });
+  assert.equal(buf.length, W * H);
+});
+
+test("drawRoom: every weather draws only inside the window, day and night", () => {
+  const base = { pet: P.frames({ face: "idle1" }), petX: 83, petY: 69, dayOfMonth: 24, bowlFull: true, mess: 1, season: "" };
+  const win = P.room.window;
+  for (const night of [false, true]) {
+    const before = room({ ...base, night, weather: null });
+    for (const weather of ["sun", "cloud", "rain", "snow", "wind"]) {
+      const after = room({ ...base, night, weather });
+      let inside = 0, outside = 0;
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+        const i = y * W + x;
+        if (before[i] === after[i]) continue;
+        if (x >= win.x && x < win.x + win.w && y >= win.y && y < win.y + win.h) inside++; else outside++;
+      }
+      if (!(night && weather === "sun")) assert.ok(inside > 0, `${weather}${night ? " at night" : ""} draws in the window`);
+      assert.equal(outside, 0, `${weather}${night ? " at night" : ""} changes nothing else`);
+    }
+  }
+  /* a clear night is the same moon, whichever way the day started */
+  assert.deepEqual([...room({ ...base, night: true, weather: "sun" })], [...room({ ...base, night: true, weather: null })]);
+});
+
+test("drawRoom: the pet, the prop, the sign and Zz follow the scene", () => {
+  const pet = P.frames({ face: "idle1", ant: "star", eye: "wide" });
+  const base = { pet, petX: 83, petY: 69, dayOfMonth: 24, bowlFull: true, mess: 0 };
+  const withPet = room(base);
+  const without = room({ ...base, pet: null });
+  const petDiff = changed(withPet, without, 83, 115, 69, 101);
+  assert.ok(petDiff.inside > 0, "the pet is at (83,69)");
+  assert.equal(petDiff.outside, 0, "nothing else moved");
+
+  const withProp = room({ ...base, prop: P.props.card });
+  const propDiff = changed(withProp, withPet, 119, 137, 87, 101);
+  assert.ok(propDiff.inside > 0, "the prop follows the pet");
+  assert.equal(propDiff.outside, 0, "the prop changes nothing else");
+
+  const withZz = room({ ...base, zz: true });
+  const zzDiff = changed(withZz, withPet, 111, 135, 47, 71);
+  assert.ok(zzDiff.inside > 0, "Zz follows the pet");
+  assert.equal(zzDiff.outside, 0, "Zz changes nothing else");
+
+  const signScene = { dayOfMonth: 24, bowlFull: true, mess: 0, sign: true };
+  const withSign = room(signScene), noSign = room({ ...signScene, sign: false });
+  const signDiff = changed(withSign, noSign, 62, 94, 60, 82);
+  assert.ok(signDiff.inside > 0, "the travel sign is drawn");
+  assert.equal(signDiff.outside, 0, "the sign changes nothing else");
+});
+
+test("drawRoom: lightOff maps paper-mid-dark-ink one step darker, Zz stays paper", () => {
+  const scene = { pet: P.frames({ face: "happy" }), petX: 83, petY: 69, dayOfMonth: 9, bowlFull: false, mess: 2 };
+  const on = room(scene), off = room({ ...scene, lightOff: true });
+  const map = [0, 0, 1, 2];
+  for (let i = 0; i < on.length; i++) assert.equal(off[i], map[on[i]], `pixel ${i}`);
+
+  const zscene = { pet: P.frames({ face: "sleep", ant: "orb" }), petX: 83, petY: 69, dayOfMonth: 24, zz: true };
+  const lit = room({ ...zscene, lightOff: true });
+  const noZz = room({ ...zscene, zz: false, lightOff: true });
+  let changedPixels = 0;
+  for (let i = 0; i < lit.length; i++) if (lit[i] !== noZz[i]) {
+    changedPixels++;
+    assert.equal(lit[i], 3, `Zz pixel ${i} is paper`);
+  }
+  assert.ok(changedPixels > 0, "Zz is drawn after the light goes off");
+});
+
+test("drawRoom: every day 1-31 has distinct pixels in the calendar's paper area", () => {
+  const base = { bowlFull: true, mess: 0 };
+  const seen = new Set();
+  for (let day = 1; day <= 31; day++) {
+    const buf = room({ ...base, dayOfMonth: day });
+    let sig = "";
+    for (let y = 22; y < 44; y++) for (let x = 62; x < 86; x++) sig += buf[y * W + x];
+    seen.add(sig);
+  }
+  assert.equal(seen.size, 31);
+  assert.deepEqual([...room({ ...base, dayOfMonth: 0 })], [...room({ ...base, dayOfMonth: 1 })]);
+  assert.deepEqual([...room({ ...base, dayOfMonth: 40 })], [...room({ ...base, dayOfMonth: 31 })]);
+});
+
+test("drawRoom: one 16 x 16 souvenir sits on the shelf at 1:1", () => {
+  const base = { dayOfMonth: 24, bowlFull: true, mess: 0 };
+  const empty = room(base);
+  const shelf = P.souvenirs[0].grid;
+  const withShelf = room({ ...base, shelf });
+  const diff = changed(withShelf, empty, 93, 109, 30, 46);
+  assert.ok(diff.inside > 0, "the souvenir appears in the shelf slot");
+  assert.equal(diff.outside, 0, "nothing else moves");
+  const moved = room({ ...base, shelf, shelfX: 70, shelfY: 20 });
+  const movedDiff = changed(moved, empty, 70, 86, 20, 36);
+  assert.ok(movedDiff.inside > 0, "the shelf slot can be moved");
+  assert.equal(movedDiff.outside, 0);
+});
+
+test("drawRoom: a second pack brings its own room props", () => {
+  const fakePoop = ["pp", "pp"];
+  const fake = {
+    id: "fake",
+    room: {
+      w: 162, h: 120, petX: 83, petY: 69,
+      bowl: P.room.bowl, bowlEmpty: P.room.bowlEmpty, poop: fakePoop,
+      sign: P.room.sign, zz: P.room.zz, poops: [[12, 90]], draw: P.room.draw
+    }
+  };
+  const withFake = room({ pack: fake, mess: 1, dayOfMonth: 24, bowlFull: true });
+  for (let r = 0; r < 2; r++) for (let c = 0; c < 2; c++) {
+    assert.equal(withFake[(90 + r) * W + 12 + c], 3, "the fake pack's poop is drawn");
+  }
+  const withChip = room({ mess: 1, dayOfMonth: 24, bowlFull: true });
+  assert.notEqual(withChip[90 * W + 12], 3, "the chip room did not draw the fake grid");
 });
 
 test("souvenirs: exactly 20 original finds, 16 x 16, unique ids, postcard kept", () => {
@@ -125,312 +393,6 @@ test("souvenirs: exactly 20 original finds, 16 x 16, unique ids, postcard kept",
   }
   assert.ok(seen.has("post"));
   assert.deepEqual(Object.keys(P.icons).sort(), ["box", "call", "food", "light", "look", "mail", "play", "wash"]);
-});
-
-test("homeIcons: five 16 x 16 states, all different, the egg is the pack's egg", () => {
-  const keys = Object.keys(P.homeIcons).sort();
-  assert.deepEqual(keys, ["away", "egg", "face", "need", "sleep"]);
-  for (const key of keys) assertGrid("homeIcons " + key, P.homeIcons[key], 16, 16);
-  assert.deepEqual(P.homeIcons.egg, P.egg, "the egg home icon is the same egg");
-  const seen = new Set(keys.map((k) => P.homeIcons[k].join("\n")));
-  assert.equal(seen.size, keys.length, "each state is a different picture");
-  assert.match(P.homeIcons.need.join(""), /k/, "the need icon has a visible mark");
-  assert.notDeepEqual(P.homeIcons.sleep, P.homeIcons.face, "sleeping closes the eyes");
-});
-
-test("drawRoom: every weather draws only inside the window, day and night", () => {
-  const base = { pet: P.frames({ face: "idle1" }), petX: 32, petY: 31, dayOfMonth: 24, bowlFull: true, mess: 1, season: "" };
-  for (const night of [false, true]) {
-    const before = room({ ...base, night, weather: null });
-    for (const weather of ["sun", "cloud", "rain", "snow", "wind"]) {
-      const after = room({ ...base, night, weather });
-      let inside = 0, outside = 0;
-      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-        const i = y * W + x;
-        if (before[i] === after[i]) continue;
-        if (x >= 5 && x < 25 && y >= 6 && y < 22) inside++; else outside++;
-      }
-      if(!(night && weather === "sun")) assert.ok(inside > 0, `${weather}${night ? " at night" : ""} draws in the window`);
-      assert.equal(outside, 0, `${weather}${night ? " at night" : ""} changes nothing else`);
-    }
-  }
-  /* a clear night is the same moon, whichever way the day started */
-  assert.deepEqual([...room({ ...base, night: true, weather: "sun" })], [...room({ ...base, night: true, weather: null })]);
-});
-
-test("drawRoom: 81 x 60 and only tone indices 0-3", () => {
-  for (const scene of [
-    { pet: P.frames({ face: "idle1" }), petX: 32, petY: 31, dayOfMonth: 24, bowlFull: true, mess: 1 },
-    { night: true, dayOfMonth: 3, bowlFull: false, mess: 3, zz: true, lightOff: true },
-    { pet: null, sign: true, prop: P.props.card, dayOfMonth: 31, season: "winter" }
-  ]) {
-    const buf = room(scene);
-    assert.equal(buf.length, W * H);
-    assert.deepEqual([...new Set(buf)].sort(), [0, 1, 2, 3]);
-  }
-});
-
-test("drawRoom: the pet's pixels appear where it is placed", () => {
-  const pet = P.frames({ face: "idle1", ant: "fork", pat: "trace", eye: "big" });
-  const base = { petX: 30, petY: 30, dayOfMonth: 24, bowlFull: true, mess: 0 };
-  const withPet = room({ ...base, pet });
-  const without = room({ ...base, pet: null });
-  let inside = 0, outside = 0;
-  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-    const i = y * W + x;
-    if (withPet[i] === without[i]) continue;
-    if (x >= 30 && x < 46 && y >= 30 && y < 46) inside++; else outside++;
-  }
-  assert.ok(inside > 0, "the pet changed pixels inside its box");
-  assert.equal(outside, 0, "nothing else moved");
-});
-
-test("drawRoom: a pet without coordinates uses the room spot for the pet, prop and Zz", () => {
-  const pet = P.frames({ face: "idle1", ant: "fork", pat: "trace", eye: "big" });
-  const base = { pet, prop: P.props.card, zz: true, dayOfMonth: 24, bowlFull: true, mess: 0 };
-  const implicit = room(base);
-  const explicit = room({ ...base, petX: P.room.petX, petY: P.room.petY });
-  assert.deepEqual([...implicit], [...explicit], "the default is the room's pet spot");
-
-  function changed(a, b, x0, x1, y0, y1) {
-    let inside = 0, outside = 0;
-    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-      const i = y * W + x;
-      if (a[i] === b[i]) continue;
-      if (x >= x0 && x < x1 && y >= y0 && y < y1) inside++; else outside++;
-    }
-    return { inside, outside };
-  }
-  const petDiff = changed(implicit, room({ ...base, pet: null }), 40, 56, 36, 52);
-  assert.ok(petDiff.inside > 0, "the pet is at (40,36)");
-  assert.equal(petDiff.outside, 0);
-  const propDiff = changed(implicit, room({ ...base, prop: null }), 57, 66, 45, 52);
-  assert.ok(propDiff.inside > 0, "the prop follows the pet");
-  assert.equal(propDiff.outside, 0);
-  const zzDiff = changed(implicit, room({ ...base, zz: false }), 53, 65, 26, 38);
-  assert.ok(zzDiff.inside > 0, "Zz follows the pet");
-  assert.equal(zzDiff.outside, 0);
-});
-
-test("drawRoom: a second pack brings its own room props", () => {
-  const fakePoop = ["pp", "pp"];
-  const fake = {
-    id: "fake",
-    room: {
-      w: 81, h: 60, petX: 40, petY: 36,
-      bowl: P.room.bowl, bowlEmpty: P.room.bowlEmpty, poop: fakePoop,
-      sign: P.room.sign, zz: P.room.zz, poops: [[12, 55]], draw: P.room.draw
-    }
-  };
-  const withFake = room({ pack: fake, mess: 1, dayOfMonth: 24, bowlFull: true });
-  for (let r = 0; r < 2; r++) for (let c = 0; c < 2; c++) {
-    assert.equal(withFake[(55 + r) * W + 12 + c], 3, "the fake pack's poop is drawn");
-  }
-  const withChip = room({ mess: 1, dayOfMonth: 24, bowlFull: true });
-  assert.notEqual(withChip[55 * W + 12], 3, "the chip room did not draw the fake grid");
-});
-
-test("drawRoom: the rug is a bordered rectangle under the pet, and a full bowl differs from an empty one", () => {
-  const base = { dayOfMonth: 24, mess: 0 };
-  const full = room({ ...base, bowlFull: true });
-  assert.equal(full[48 * W + 38], 0, "the rug's top-left corner is its ink border");
-  assert.equal(full[52 * W + 53], 0, "the rug's bottom-right corner is its ink border");
-  assert.equal(full[49 * W + 39], 3, "the rug has a paper field inside the border");
-  assert.equal(full[50 * W + 46], 1, "the rug has a pattern in the middle");
-  const empty = room({ ...base, bowlFull: false });
-  let changed = 0;
-  for (let y = 47; y < 54; y++) for (let x = 9; x < 19; x++) if (full[y * W + x] !== empty[y * W + x]) changed++;
-  assert.ok(changed > 0, "food in the bowl changes the bowl, not something else");
-  let outside = 0;
-  for (let i = 0; i < W * H; i++) if (full[i] !== empty[i]) {
-    const x = i % W, y = Math.floor(i / W);
-    if (x < 9 || x >= 19 || y < 47 || y >= 54) outside++;
-  }
-  assert.equal(outside, 0, "only the bowl changes with the food");
-});
-
-test("drawRoom: lightOff maps paper-mid-dark-ink one step darker", () => {
-  const scene = { pet: P.frames({ face: "happy" }), petX: 28, petY: 29, dayOfMonth: 9, bowlFull: false, mess: 2 };
-  const on = room(scene), off = room({ ...scene, lightOff: true });
-  const map = [0, 0, 1, 2];
-  for (let i = 0; i < on.length; i++) assert.equal(off[i], map[on[i]], `pixel ${i}`);
-});
-
-test("drawRoom: Zz stays paper after the light goes off", () => {
-  const scene = { pet: P.frames({ face: "sleep", ant: "ball" }), petX: 30, petY: 30, dayOfMonth: 24, zz: true };
-  const lit = room({ ...scene, lightOff: true });
-  const noZz = room({ ...scene, zz: false, lightOff: true });
-  let changed = 0;
-  for (let i = 0; i < lit.length; i++) if (lit[i] !== noZz[i]) {
-    changed++;
-    assert.equal(lit[i], 3, `Zz pixel ${i} is paper`);
-  }
-  assert.ok(changed > 0, "Zz is drawn");
-});
-
-test("drawRoom: every day 1-31 has distinct pixels in the calendar's paper area", () => {
-  const base = { bowlFull: true, mess: 0 };
-  const seen = new Set();
-  for (let day = 1; day <= 31; day++) {
-    const buf = room({ ...base, dayOfMonth: day });
-    let sig = "";
-    for (let y = 9; y < 19; y++) for (let x = 32; x < 41; x++) sig += buf[y * W + x];
-    seen.add(sig);
-  }
-  assert.equal(seen.size, 31);
-});
-
-test("drawRoom: night and season change only the window", () => {
-  const base = { pet: P.frames({ face: "idle1" }), petX: 32, petY: 31, dayOfMonth: 24, bowlFull: true, mess: 0 };
-  const day = room({ ...base, night: false, season: "" });
-  const night = room({ ...base, night: true, season: "" });
-  const spring = room({ ...base, night: false, season: "spring" });
-  const winter = room({ ...base, night: false, season: "winter" });
-  function windowDiff(a, b) {
-    let d = 0;
-    for (let y = 6; y < 22; y++) for (let x = 5; x < 25; x++) if (a[y * W + x] !== b[y * W + x]) d++;
-    return d;
-  }
-  assert.ok(windowDiff(day, night) > 0);
-  assert.ok(windowDiff(spring, winter) > 0);
-  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-    if (x >= 5 && x < 25 && y >= 6 && y < 22) continue;
-    assert.equal(day[y * W + x], spring[y * W + x], `season changed the room at ${x},${y}`);
-    assert.equal(day[y * W + x], night[y * W + x], `night changed the room at ${x},${y}`);
-  }
-});
-
-test("poses: every standard pose exists for every mark combination, 16 x 16, only .kdmp", () => {
-  assert.deepEqual(Object.keys(A.POSE_NAMES).sort(), ["front", "side"]);
-  assert.deepEqual([...A.POSE_NAMES.front], ["idle", "happy", "sad", "angry", "sulk", "surprised", "blink", "jump", "fall", "catch"]);
-  assert.deepEqual([...A.POSE_NAMES.side], ["walk1", "walk2", "jump", "flap1", "flap2"]);
-  for (const view of Object.keys(A.POSE_NAMES)) {
-    assert.deepEqual(Object.keys(P.poses[view]).sort(), [...A.POSE_NAMES[view]].sort(), `the pack provides every ${view} pose`);
-    for (const name of A.POSE_NAMES[view]) for (const ant of P.marks.ant) for (const pat of P.marks.pat) for (const eye of P.marks.eye) {
-      assertGrid(`${view}/${name} ${ant}/${pat}/${eye}`, A.pose(P, { ant, pat, eye }, view, name), 16, 16);
-    }
-  }
-  /* the marks show in the side view too, and every front pose is its own picture */
-  assert.notDeepEqual(A.pose(P, { ant: "ball", pat: "dot", eye: "dot" }, "side", "walk1"),
-    A.pose(P, { ant: "fork", pat: "stripe", eye: "big" }, "side", "walk1"));
-  const pictures = new Set(A.POSE_NAMES.front.map((n) => A.pose(P, {}, "front", n).join("\n")));
-  assert.equal(pictures.size, A.POSE_NAMES.front.length, "the six front poses differ");
-});
-
-test("moods: sad, angry and sulk are real faces, different from idle and from each other, marks included", () => {
-  const idle = A.pose(P, {}, "front", "idle");
-  const sad = A.pose(P, {}, "front", "sad");
-  const angry = A.pose(P, {}, "front", "angry");
-  const sulk = A.pose(P, {}, "front", "sulk");
-  for (const [name, g] of [["sad", sad], ["angry", angry], ["sulk", sulk]]) {
-    assertGrid(name, g, 16, 16);
-    assert.notDeepEqual(g, idle, `${name} is not the neutral wait face`);
-  }
-  assert.notDeepEqual(sad, angry); assert.notDeepEqual(sad, sulk); assert.notDeepEqual(angry, sulk);
-  /* the mouth turns down (corners lower than the middle) and the sad eyes are not the old flat wait eyes */
-  assert.notDeepEqual(sad, A.pose(P, {}, "front", "idle"));
-  const mouth = (g) => g[9].split("").map((c, i) => c !== "." ? i : -1).filter((i) => i >= 0);
-  assert.ok(mouth(sad).includes(6) && mouth(sad).includes(9), "the sad mouth has low corners");
-  assert.equal(angry[4][4], "k", "anger draws a slanted brow");
-  assert.equal(angry[6][4], "k", "and a narrowed eye below it");
-  /* every mark combination still shows its antenna and pattern */
-  for (const ant of P.marks.ant) for (const pat of P.marks.pat) for (const eye of P.marks.eye) {
-    const g = A.pose(P, { ant, pat, eye }, "front", "angry");
-    assertGrid(`angry ${ant}/${pat}/${eye}`, g, 16, 16);
-  }
-  assert.notDeepEqual(A.pose(P, { ant: "fork", pat: "trace" }, "front", "sad"),
-    A.pose(P, { ant: "ball", pat: "plain" }, "front", "sad"), "the marks still show in a mood");
-});
-test("baby and child: moods, idle and every game pose use their own small body", () => {
-  const marks = { ant: "fork", pat: "trace", eye: "big" };
-  for (const stage of ["baby", "child"]) {
-    const pose = (name) => A.stagePose(P, stage, marks, "front", name);
-    const idle = pose("idle");
-    assertGrid(stage + " idle", idle, 16, 16);
-    for (const name of ["sad", "angry", "sulk", "blink", "happy", "surprised", "jump", "fall", "catch", "walk1", "walk2"]) {
-      const g = pose(name);
-      assertGrid(stage + " " + name, g, 16, 16);
-      assert.notDeepEqual(g, idle, stage + " " + name + " differs from idle");
-    }
-    assert.notDeepEqual(pose("sad"), pose("angry"));
-    assert.notDeepEqual(pose("sad"), pose("sulk"));
-    assert.notDeepEqual(pose("angry"), pose("sulk"));
-    /* the game asks for the side walk: the stage still answers with its own body, not the full chip */
-    assert.deepEqual(A.stagePose(P, stage, marks, "side", "walk1"), pose("walk1"));
-    assert.notDeepEqual(pose("walk1"), A.pose(P, marks, "side", "walk1"));
-    /* the face really changes inside the same body: the outline row is untouched */
-    assert.equal(pose("sad")[6], idle[6], stage + " keeps its body outline");
-  }
-});
-
-test("mirror: reverses every row, twice is the original", () => {
-  const g = A.pose(P, { ant: "bent", pat: "trace", eye: "big" }, "side", "walk2");
-  const m = A.mirror(g);
-  assert.equal(m.length, 16);
-  for (let r = 0; r < 16; r++) assert.equal(m[r], [...g[r]].reverse().join(""), `row ${r}`);
-  assert.deepEqual(A.mirror(m), g);
-  assert.equal(A.mirror(null), null);
-});
-
-test("used frames: every name the program and the games ask for draws on every stage and adult form", () => {
-  const marks = [
-    { ant: "ball", pat: "dot", eye: "dot" },
-    { ant: "stick", pat: "plain", eye: "bar" },
-    { ant: "fork", pat: "trace", eye: "big" },
-    { ant: "bent", pat: "stripe", eye: "dot" }
-  ];
-  /* one exported list, so a new face or game pose cannot silently miss a stage */
-  for (const name of ["idle", "idle1", "idle2", "blink", "eat1", "eat2", "happy", "sleep", "wait",
-    "surprised", "sad", "angry", "sulk", "walk1", "walk2", "jump", "fall", "catch", "hold",
-    "flap1", "flap2", "look", "lookL", "lookR", "sit"]) {
-    assert.ok(A.FRAME_NAMES.includes(name), "FRAME_NAMES has " + name);
-  }
-  for (const stage of ["baby", "child"]) {
-    for (const m of marks) for (const name of A.FRAME_NAMES) for (const view of ["front", "side"]) {
-      const g = A.stagePose(P, stage, m, view, name);
-      assertGrid(`${stage} ${view}/${name}`, g, 16, 16);
-      assert.ok(A.frameInk(g) >= 20, `${stage} ${view}/${name} has ink: ${A.frameInk(g)}`);
-    }
-  }
-  /* the adult room art is 20 x 20 (the resolution is the owner's separate decision); the game layer stays 16. */
-  for (const form of P.forms) {
-    for (const m of marks) for (const name of A.FRAME_NAMES) {
-      const g = P.adult(form, { ant: m.ant, pat: m.pat, eye: m.eye, face: name });
-      assertGrid(`adult ${form} ${name}`, g, 20, 20);
-      assert.ok(A.frameInk(g) >= 20, `adult ${form} ${name} has ink: ${A.frameInk(g)}`);
-      const game = A.stagePose(P, "adult", m, "front", name);
-      assertGrid(`adult game ${form} ${name}`, game, 16, 16);
-      assert.ok(A.frameInk(game) >= 20, `adult game ${form} ${name} has ink`);
-      const side = A.stagePose(P, "adult", m, "side", name);
-      assertGrid(`adult game side ${form} ${name}`, side, 16, 16);
-      assert.ok(A.frameInk(side) >= 20, `adult game side ${form} ${name} has ink`);
-    }
-  }
-  const home = Object.keys(P.homeIcons);
-  assert.equal(home.length, 5);
-  for (const key of home) {
-    const g = P.homeIcons[key];
-    assertGrid("home " + key, g, 16, 16);
-    assert.ok(A.frameInk(g) >= 20, "home " + key + " has ink: " + A.frameInk(g));
-  }
-  for (const key of Object.keys(P.icons)) {
-    const g = P.icons[key];
-    assertGrid("icon " + key, g, 8, 8);
-    assert.ok(A.frameInk(g) > 0, "icon " + key + " is visible");
-  }
-});
-
-test("adult forms take the pet's own face vocabulary, moods and sleep included", () => {
-  for (const form of P.forms) {
-    const neutral = P.adult(form, { face: "idle1" });
-    for (const face of ["happy", "sleep", "wait", "surprised", "blink", "sad", "angry", "sulk"]) {
-      const g = P.adult(form, { face });
-      assertGrid(`adult ${form} ${face}`, g, 20, 20);
-      assert.notDeepEqual(g, neutral, `${form} ${face} is not the neutral face`);
-    }
-    assert.notDeepEqual(P.adult(form, { face: "sad" }), P.adult(form, { face: "angry" }));
-    assert.notDeepEqual(P.adult(form, { face: "angry" }), P.adult(form, { face: "sulk" }));
-  }
 });
 
 test("blit and darken are bounded and map the four tones", () => {

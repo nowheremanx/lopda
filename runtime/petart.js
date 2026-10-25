@@ -1,8 +1,18 @@
 /*
- * Lo-PDA runtime: the built-in pet's art. A species pack is art and numbers only: one base grid and a frame builder,
- * the markings rolled at hatch, the growth stages, the adult forms, props, icons, souvenirs, and the room painter.
- * Pure functions, no DOM, no canvas, no storage: drawRoom writes tone indices into a plain buffer and the program
- * turns that into ImageData. The grids stay as arrays of text rows so they are editable by hand.
+ * Lo-PDA runtime: the built-in pet's art. A species pack is art and numbers only: the 32 x 32 pet frames,
+ * the growth stages and the adult forms, props, icons, souvenirs, and the 162 x 120 room painter.
+ * Pure functions, no DOM, no canvas, no storage: drawRoom writes tone indices into a plain buffer and the
+ * program turns that into ImageData. The grids stay as arrays of text rows so they are editable by hand.
+ *
+ * The 32 px style (owner-approved sample, tmp-playtest/art32): four tones only, a 2 px ink wall, a mid body
+ * with a dark edge down the right and along the bottom, no body pattern and no paper noise. A pet's own
+ * look is its antenna (six silhouettes, PACKS.chip.marks.ant) and its eye shape (round, wide, sleepy);
+ * every expression is built from those parts. The room is the old room at double resolution: wall, window,
+ * calendar, bookshelf, bed, rug, bowl, piles, the pet, a prop, the sign, Zz and a small souvenir shelf.
+ *
+ * Old saves carry marks {ant: 0-3, pat: 0-3, eye: 0-2}. The antenna index still means the same slot in the
+ * six-entry list, the eye index the same slot in the three-entry list, and `pat` is ignored: the body has
+ * no pattern any more (see markAnt/markEye below, which also keep accepting the new names).
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  */
 (function(){
@@ -12,7 +22,7 @@
 var TONES=["#1f2a14","#4a5a32","#7d8a58","#a3ad7e"];
 var TONE_OF={k:0,d:1,m:2,p:3};
 var DARK=[0,0,1,2];
-var BLANK16="................";
+var N=32;
 
 function rows(g){ return g.map(function(r){ return String(r).split(""); }); }
 function join(a){ return a.map(function(r){ return r.join(""); }); }
@@ -34,267 +44,636 @@ function blankGrid(w,h,ch){
   for(var r=0;r<h;r++) out.push(row);
   return out;
 }
-/* three-by-five digits for the wall calendar and the little flag; paper is left transparent */
+/* The calendar and flag font at double size: five by seven block digits, one column of air between two.
+   The old font was three by five; the room draws this one at 2x, the flag at 1:1. */
 var DIGITS={
-  "0":["kkk","k.k","k.k","k.k","kkk"],
-  "1":[".k.","kk.",".k.",".k.","kkk"],
-  "2":["kkk","..k","kkk","k..","kkk"],
-  "3":["kkk","..k","kkk","..k","kkk"],
-  "4":["k.k","k.k","kkk","..k","..k"],
-  "5":["kkk","k..","kkk","..k","kkk"],
-  "6":["kkk","k..","kkk","k.k","kkk"],
-  "7":["kkk","..k","..k","..k","..k"],
-  "8":["kkk","k.k","kkk","k.k","kkk"],
-  "9":["kkk","k.k","kkk","..k","kkk"]
+  "0":["kkkkk","k...k","k...k","k...k","k...k","k...k","kkkkk"],
+  "1":["..k..",".kk..","..k..","..k..","..k..","..k..","kkkkk"],
+  "2":["kkkkk","....k","....k","kkkkk","k....","k....","kkkkk"],
+  "3":["kkkkk","....k","....k","kkkkk","....k","....k","kkkkk"],
+  "4":["k...k","k...k","k...k","kkkkk","....k","....k","....k"],
+  "5":["kkkkk","k....","k....","kkkkk","....k","....k","kkkkk"],
+  "6":["kkkkk","k....","k....","kkkkk","k...k","k...k","kkkkk"],
+  "7":["kkkkk","....k","....k","...k.","..k..","..k..","..k.."],
+  "8":["kkkkk","k...k","k...k","kkkkk","k...k","k...k","kkkkk"],
+  "9":["kkkkk","k...k","k...k","kkkkk","....k","....k","kkkkk"]
 };
 function digitGrid(n){
   var d=String(n).charAt(0);
   return (DIGITS[d]||DIGITS["0"]).slice();
 }
-/* a number as a grid: one digit 3 wide, two digits 7 wide with a one-column gap */
+/* numberGrid(24) -> five wide, seven high; numberGrid(124) -> eleven wide with our one-column gap. */
 function numberGrid(n){
   var s=String(Math.max(0,Math.min(99,Number(n)||0)));
   if(s.length<2) return digitGrid(s);
   var a=rows(digitGrid(s.charAt(0))), b=rows(digitGrid(s.charAt(1))), out=[];
-  for(var r=0;r<5;r++) out.push(a[r].join("")+"."+b[r].join(""));
+  for(var r=0;r<7;r++) out.push(a[r].join("")+"."+b[r].join(""));
   return out;
 }
 
-/* ---------- 芯仔: the base is 16 x 16; eyes at rows 5-6, mouth row 8 ---------- */
-var CHIP=[
-"......kkk.......",
-".......k........",
-"..kkkkkkkkkkkk..",
-"..kddddddddddk..",
-"kkkdmmmmmmmmdkkk",
-"..kdmmmmmmmmdk..",
-"kkkdmmmmmmmmdkkk",
-"..kdmmmmmmmmdk..",
-"kkkdmmmmmmmmdkkk",
-"..kdmmmmmmmmdk..",
-"kkkddddddddddkkk",
-"..kddddddddddk..",
-"..kkkkkkkkkkkk..",
-"...k.k....k.k...",
-"...k.k....k.k...",
-"................"];
-var ANT={
-  ball:["......kkk.......",".......k........"],
-  stick:[".......k........",".......k........"],
-  fork:["......k.k.......",".......k........"],
-  bent:["........kk......",".......k........"],
-  droop:["................","......kk........"]
-};
-var PAT={
-  plain:function(a){},
-  dot:function(a){ setc(a,11,4,"p"); },
-  stripe:function(a){ for(var c=4;c<12;c++) setc(a,3,c,"p"); },
-  trace:function(a){ [4,7,9,12].forEach(function(c){ setc(a,10,c,"p"); }); setc(a,11,4,"p"); setc(a,11,12,"p"); }
-};
-var EYE={
-  dot:function(a){ [5,10].forEach(function(c){ setc(a,5,c,"k"); setc(a,6,c,"k"); }); },
-  bar:function(a){ [[4,5],[10,11]].forEach(function(p){ setc(a,6,p[0],"k"); setc(a,6,p[1],"k"); }); },
-  big:function(a){ [[5,6],[9,10]].forEach(function(p){ setc(a,5,p[0],"p"); setc(a,5,p[1],"k"); setc(a,6,p[0],"k"); setc(a,6,p[1],"k"); }); }
-};
-/* The action names are the program's vocabulary (design.md 3); each one sets only the cells that differ from idle. */
-var FACE={
-  idle1:{},
-  idle2:{squat:true},
-  blink:{face:"closed"},
-  eat1:{mouth:"open"},
-  eat2:{mouth:"chew"},
-  happy:{face:"happy",mouth:"open",legs:"dangle"},
-  walk1:{legs:"walk1"},
-  walk2:{legs:"walk2",squat:true},
-  sleep:{face:"sleep",mouth:"none",ant:"droop"},
-  wait:{face:"down",mouth:"flat",ant:"droop"},
-  surprised:{face:"wow",mouth:"o"},
-  /* the moods: a real sad face, a short anger, and the turned-away sulk (never for long; no grudges) */
-  sad:{face:"sad",mouth:"frown"},
-  angry:{face:"angry",mouth:"tight"},
-  sulk:{face:"sulk",mouth:"frown"},
-  hold:{}
-};
-/* the raw frame builder, kept close to art/chipart.js so the grids above stay the single source */
-function build(o){
-  o=o||{};
-  var a=rows(CHIP), ant=ANT[o.ant||"ball"]||ANT.ball;
-  a[0]=ant[0].split(""); a[1]=ant[1].split("");
-  (PAT[o.pat||"dot"]||PAT.dot)(a);
-  var face=o.face||"open";
-  if(face==="open") (EYE[o.eye||"dot"]||EYE.dot)(a);
-  if(face==="closed"||face==="sleep"){ [[4,5],[10,11]].forEach(function(p){ setc(a,6,p[0],"k"); setc(a,6,p[1],"k"); }); }
-  if(face==="happy"){ [5,10].forEach(function(c){ setc(a,5,c,"k"); setc(a,6,c-1,"k"); setc(a,6,c+1,"k"); }); }
-  if(face==="down"){ [5,10].forEach(function(c){ setc(a,6,c,"k"); setc(a,7,c,"k"); }); }
-  if(face==="wow"){ [[5,6],[9,10]].forEach(function(p){ setc(a,5,p[0],"k"); setc(a,5,p[1],"k"); setc(a,6,p[0],"k"); setc(a,6,p[1],"k"); }); }
-  /* sad: the outer corners of the eyes droop, with a small lifted brow; the mouth turns down */
-  if(face==="sad"){
-    setc(a,4,4,"k"); setc(a,5,5,"k"); setc(a,6,6,"k");
-    setc(a,4,11,"k"); setc(a,5,10,"k"); setc(a,6,9,"k");
+/* ---------- the 32 x 32 grid toolkit ------------------------------------------------------------ */
+function blank32(){
+  var g=[], r, c, row;
+  for(r=0;r<N;r++){
+    row=[];
+    for(c=0;c<N;c++) row.push(".");
+    g.push(row);
   }
-  /* angry: slanted brows over narrowed eyes, and a puff of steam beside the cheek */
-  if(face==="angry"){
-    setc(a,4,4,"k"); setc(a,4,5,"k"); setc(a,5,6,"k");
-    setc(a,4,11,"k"); setc(a,4,10,"k"); setc(a,5,9,"k");
-    setc(a,6,4,"k"); setc(a,6,5,"k"); setc(a,6,10,"k"); setc(a,6,11,"k");
-    setc(a,7,13,"m"); setc(a,8,13,"m");
-  }
-  /* sulk: turned a little away, both eyes shifted to one side and looking down */
-  if(face==="sulk"){
-    setc(a,5,7,"k"); setc(a,6,7,"k"); setc(a,7,6,"k");
-    setc(a,5,12,"k"); setc(a,6,12,"k"); setc(a,7,11,"k");
-    setc(a,4,8,"m");
-  }
-  var m=o.mouth||"smile";
-  if(m==="smile"){ setc(a,8,7,"k"); setc(a,8,8,"k"); }
-  if(m==="open"){ setc(a,8,7,"k"); setc(a,8,8,"k"); setc(a,9,7,"k"); setc(a,9,8,"k"); setc(a,8,6,"k"); setc(a,8,9,"k"); }
-  if(m==="chew"){ for(var c=6;c<10;c++) setc(a,8,c,"k"); }
-  if(m==="flat"){ setc(a,9,7,"k"); setc(a,9,8,"k"); }
-  if(m==="o"){ setc(a,8,7,"k"); setc(a,8,8,"k"); setc(a,9,7,"k"); setc(a,9,8,"k"); }
-  if(m==="frown"){ setc(a,8,7,"k"); setc(a,8,8,"k"); setc(a,9,6,"k"); setc(a,9,9,"k"); }
-  if(m==="tight"){ setc(a,9,7,"k"); setc(a,9,8,"k"); setc(a,8,6,"k"); setc(a,8,9,"k"); }
-  if(m==="fang"){ setc(a,8,6,"k"); setc(a,8,7,"k"); setc(a,8,8,"k"); setc(a,8,9,"k"); setc(a,9,6,"p"); setc(a,9,9,"p"); }
-  if(o.legs==="walk1"){ a[13]="...k.k....k.k...".split(""); a[14]="..k...k..k...k..".split(""); }
-  if(o.legs==="walk2"){ a[13]="...k.k....k.k...".split(""); a[14]="....kk....kk....".split(""); }
-  if(o.legs==="dangle"){ a[13]="...k.k....k.k...".split(""); a[14]="..k...k..k...k..".split(""); }
-  var g=join(a);
-  if(o.squat){ g=[BLANK16].concat(g.slice(0,13)).concat([g[13],BLANK16]); }
-  if(o.jump){ var up=[], pad=[]; for(var j=0;j<o.jump;j++) pad.push(BLANK16); up=g.slice(o.jump).concat(pad); g=up; }
   return g;
 }
-/* frames({ant, pat, eye, face}): the markings are stored, the face is the two-frame action of the moment */
-var RAW_FACE={open:1,closed:1,sleep:1,happy:1,down:1,wow:1,none:1};
+function px(g,x,y,ch){
+  if(y>=0 && y<g.length && x>=0 && x<g[y].length) g[y][x]=ch;
+}
+function fill(g,x,y,w,h,ch){
+  for(var r=0;r<h;r++) for(var c=0;c<w;c++) px(g,x+c,y+r,ch);
+}
+function hline(g,x,y,w,ch){ fill(g,x,y,w,1,ch); }
+/* a rounded-rectangle mask; the corner radius is measured from the cell centres. */
+function roundMask(w,h,r){
+  var m=[], y, x;
+  for(y=0;y<h;y++){
+    m.push([]);
+    for(x=0;x<w;x++){
+      var ax=x+0.5, ay=y+0.5, dx=0, dy=0;
+      if(ax<r) dx=r-ax; else if(ax>w-r) dx=ax-(w-r);
+      if(ay<r) dy=r-ay; else if(ay>h-r) dy=ay-(h-r);
+      m[y].push(dx*dx+dy*dy<=r*r+0.001);
+    }
+  }
+  return m;
+}
+/* the chip body: 2 px ink wall, mid fill, dark on the right and the bottom. */
+function drawBody(g,box){
+  var bx=box[0], by=box[1], bw=box[2], bh=box[3], r=box[4];
+  var m=roundMask(bw,bh,r), inside=[], x, y, dx, dy;
+  function inMask(xx,yy){ return xx>=0 && yy>=0 && xx<bw && yy<bh && m[yy][xx]; }
+  for(y=0;y<bh;y++){
+    for(x=0;x<bw;x++){
+      if(!m[y][x]) continue;
+      var edge=false;
+      for(dy=-2;dy<=2 && !edge;dy++){
+        for(dx=-2;dx<=2;dx++) if(!inMask(x+dx,y+dy)){ edge=true; break; }
+      }
+      if(edge) px(g,bx+x,by+y,"k"); else inside.push([x,y]);
+    }
+  }
+  var maxX=-1, maxY=-1;
+  for(var i=0;i<inside.length;i++){
+    if(inside[i][0]>maxX) maxX=inside[i][0];
+    if(inside[i][1]>maxY) maxY=inside[i][1];
+  }
+  for(i=0;i<inside.length;i++){
+    var q=inside[i], ch="m";
+    if(q[0]>=maxX-1 || q[1]>=maxY-1) ch="d";
+    px(g,bx+q[0],by+q[1],ch);
+  }
+}
+
+/* Three stage bodies. Every shape starts at row 10 and leaves rows 29-30 for the legs and row 31
+   empty, so a one-pixel step or squash never cuts a foot or the antenna. */
+var STAGES={
+  baby:{
+    body:[6,10,20,19,7], eyeY:15, eyeH:4, browY:13, mouthY:22,
+    arms:{rows:[19],len:2,thick:2},
+    legs:{cols:[[10,11],[20,21]],top:29,len:2,feet:true}
+  },
+  child:{
+    body:[5,10,22,19,5], eyeY:15, eyeH:3, browY:13, mouthY:22,
+    arms:{rows:[17,21],len:3,thick:2},
+    legs:{cols:[[9,10],[15,16],[21,22]],top:29,len:2}
+  },
+  adult:{
+    body:[4,10,24,19,3], eyeY:15, eyeH:3, browY:13, mouthY:22,
+    arms:{rows:[15,19,23],len:3,thick:2},
+    legs:{cols:[[9,10],[15,16],[21,22]],top:29,len:2}
+  }
+};
+/* little pins: arms out of the sides, legs under the body, all ink; walk and dangle move the feet. */
+function drawPins(g,stage,mode,box){
+  var c=STAGES[stage], body=box||c.body, bx=body[0], bw=body[2], i, k, x;
+  for(i=0;i<c.arms.rows.length;i++){
+    var ar=c.arms.rows[i];
+    for(k=0;k<c.arms.thick;k++){
+      for(var a=1;a<=c.arms.len;a++){
+        px(g,bx-a,ar+k,"k");
+        px(g,bx+bw-1+a,ar+k,"k");
+      }
+    }
+  }
+  var legs=c.legs, last=legs.cols.length-1;
+  for(i=0;i<legs.cols.length;i++){
+    var c0=legs.cols[i][0], c1=legs.cols[i][1];
+    for(var r=0;r<legs.len;r++){
+      var x0=c0, x1=c1;
+      if(r===legs.len-1){
+        if(mode==="walk1" && (i===0 || i===last)){
+          if(i===0){ x0-=1; x1-=1; } else { x0+=1; x1+=1; }
+        } else if(mode==="walk2" && (i===0 || i===last)){
+          if(i===0){ x0+=1; x1+=1; } else { x0-=1; x1-=1; }
+        } else if(mode==="dangle"){
+          x0-=1; x1+=1;
+        }
+      }
+      if(legs.feet && r===legs.len-1){ x0-=1; x1+=1; }
+      for(x=x0;x<=x1;x++) px(g,x,legs.top+r,"k");
+    }
+  }
+}
+
+/* ---------- antennas: six silhouettes on a 12-wide grid ----------------------------------------
+   The stalk is columns 5-6, so the renderer puts the grid at x = 10 (front) or 11 (side) and at
+   y = headTop - height + 1: the last row is the root that meets the head's ink rim. */
+var ANTENNAS=[
+  {id:"orb", grid:[
+    ".....kk.....",
+    "...kkmmkk...",
+    "..kmmmmmmk..",
+    "..kmmmmmmk..",
+    "..kmmmmmdk..",
+    "...kmmmdk...",
+    "....kkkk....",
+    ".....kk.....",
+    ".....kk....."
+  ]},
+  {id:"triangle", grid:[
+    ".....kk.....",
+    "....kmmk....",
+    "...kmmmmk...",
+    "..kmmmmmdk..",
+    ".kmmmmmmmdk.",
+    ".kkkkkkkkkk.",
+    ".....kk.....",
+    ".....kk....."
+  ]},
+  {id:"crook", grid:[
+    "........kk..",
+    ".......kk...",
+    "......kk....",
+    ".....kk.....",
+    ".....kk.....",
+    ".....kk.....",
+    ".....kk.....",
+    ".....kk.....",
+    ".....kk.....",
+    ".....kk....."
+  ]},
+  {id:"curl", grid:[
+    "....kkkk....",
+    "...k....k...",
+    "..k......k..",
+    "..k..kk..k..",
+    "..k.k..k.k..",
+    "...k.kk.k...",
+    "....k..k....",
+    ".....kk.....",
+    ".....kk.....",
+    ".....kk....."
+  ]},
+  {id:"prongs", grid:[
+    "...kk..kk...",
+    "...kk..kk...",
+    "...kk..kk...",
+    "....kkkk....",
+    ".....kk.....",
+    ".....kk.....",
+    ".....kk.....",
+    ".....kk....."
+  ]},
+  {id:"star", grid:[
+    ".....kk.....",
+    "....kkkk....",
+    "..kkkmmkkk..",
+    "....kkkk....",
+    ".....kk.....",
+    ".....kk.....",
+    ".....kk.....",
+    ".....kk....."
+  ]}
+];
+function drawAntenna(g,id,headTop,left){
+  var ant=null, i;
+  for(i=0;i<ANTENNAS.length;i++) if(ANTENNAS[i].id===id) ant=ANTENNAS[i];
+  if(!ant) ant=ANTENNAS[0];
+  var grid=ant.grid, y=headTop-grid.length+1, r, c, ch;
+  for(r=0;r<grid.length;r++){
+    var row=String(grid[r]);
+    for(c=0;c<row.length;c++){
+      ch=row.charAt(c);
+      if(ch!==".") px(g,left+c,y+r,ch);
+    }
+  }
+}
+
+/* ---------- the face: the rolled eye shape x the expression ------------------------------------- */
+var EYE_W={round:3,wide:4,sleepy:3};
+var EYE_IDS=["round","wide","sleepy"];
+function eyeOpen(g,shape,x,y,h){
+  var w=EYE_W[shape]||3;
+  if(shape==="sleepy"){
+    fill(g,x,y,w,1,"d");
+    fill(g,x,y+1,w,h-1,"k");
+    px(g,x,y+1,"p");
+  } else {
+    fill(g,x,y,w,h,"k");
+    px(g,x,y,"p");
+  }
+}
+function eyeClosed(g,x,y,w){
+  hline(g,x-1,y+2,w+2,"k");
+  px(g,x-1,y+3,"k");
+}
+function mouthSmile(g,mx,my,w){
+  px(g,mx,my,"k"); px(g,mx+w-1,my,"k");
+  for(var x=mx+1;x<mx+w-1;x++) px(g,x,my+1,"k");
+}
+function mouthFrown(g,mx,my,w){
+  for(var x=mx+1;x<mx+w-1;x++) px(g,x,my,"k");
+  px(g,mx,my+1,"k"); px(g,mx+w-1,my+1,"k");
+}
+function mouthFlat(g,mx,my,w){
+  for(var x=mx+1;x<mx+w-1;x++) px(g,x,my,"k");
+}
+function mouthOpenSmile(g,mx,my,w){
+  px(g,mx,my,"k"); px(g,mx+w-1,my,"k");
+  for(var x=mx+1;x<mx+w-1;x++) px(g,x,my+1,"k");
+  px(g,mx+1,my+2,"k"); px(g,mx+w-2,my+2,"k");
+  for(var x2=mx+2;x2<mx+w-2;x2++) px(g,x2,my+2,"d");
+  for(var x3=mx+2;x3<mx+w-2;x3++) px(g,x3,my+3,"k");
+}
+function mouthOval(g,mx,my,w){
+  px(g,mx,my,"k"); px(g,mx+w-1,my,"k");
+  for(var x=mx+1;x<mx+w-1;x++){ px(g,x,my,"k"); px(g,x,my+3,"k"); }
+  for(var y=my+1;y<my+3;y++){
+    px(g,mx,y,"k"); px(g,mx+w-1,y,"k");
+    for(var x2=mx+1;x2<mx+w-1;x2++) px(g,x2,y,"d");
+  }
+}
+/* name -> the eye expression and the mouth; the pack's own words are only aliases of these. */
+var FACE_EXPR={
+  idle1:{eye:"open",mouth:"smile"},
+  idle2:{eye:"open",mouth:"smile"},
+  idle:{eye:"open",mouth:"smile"},
+  look:{eye:"open",mouth:"smile"},
+  hold:{eye:"open",mouth:"smile"},
+  walk1:{eye:"open",mouth:"smile"},
+  walk2:{eye:"open",mouth:"smile"},
+  sit:{eye:"open",mouth:"smile"},
+  blink:{eye:"closed",mouth:"smile"},
+  eat1:{eye:"open",mouth:"oval"},
+  eat2:{eye:"open",mouth:"chew"},
+  happy:{eye:"happy",mouth:"open",brow:"happy"},
+  sleep:{eye:"sleep",mouth:"none"},
+  wait:{eye:"wait",mouth:"flat"},
+  surprised:{eye:"wow",mouth:"o",brow:"happy"},
+  sad:{eye:"open",mouth:"frown",brow:"sad"},
+  angry:{eye:"angry",mouth:"tight",brow:"angry"},
+  sulk:{eye:"sulk",mouth:"frown"},
+  jump:{eye:"happy",mouth:"open",brow:"happy"},
+  fall:{eye:"wow",mouth:"o"},
+  catch:{eye:"happy",mouth:"open",brow:"happy"},
+  lookL:{eye:"open",mouth:"smile",dx:-1},
+  lookR:{eye:"open",mouth:"smile",dx:1},
+  "look-left":{eye:"open",mouth:"smile",dx:-1},
+  "look-right":{eye:"open",mouth:"smile",dx:1},
+  /* raw face words a renderer may pass; the program's own names win */
+  open:{eye:"open",mouth:"smile"},
+  closed:{eye:"closed",mouth:"smile"},
+  none:{eye:"open",mouth:"smile"},
+  down:{eye:"wait",mouth:"flat"},
+  wow:{eye:"wow",mouth:"o"}
+};
+function exprFor(name){ return FACE_EXPR[name]||FACE_EXPR.idle1; }
+function drawEyeSet(g,stage,shape,e){
+  var c=STAGES[stage], h=c.eyeH, y=c.eyeY, w=EYE_W[shape]||3;
+  var L=14-w, R=18, dx=e.dx||0, i, x;
+  if(e.eye==="closed" || e.eye==="sleep"){
+    eyeClosed(g,L+dx,y,w);
+    eyeClosed(g,R+dx,y,w);
+    return;
+  }
+  var hh=h, ey=y;
+  if(e.eye==="happy") hh=Math.min(h,3);
+  if(e.eye==="wow") hh=h+1;
+  if(e.eye==="wait") ey=y+1;
+  if(e.eye==="sulk"){ eyeOpen(g,shape,L+1,y,h); eyeOpen(g,shape,R+1,y,h); }
+  else { eyeOpen(g,shape,L+dx,ey,hh); eyeOpen(g,shape,R+dx,ey,hh); }
+  if(e.eye==="angry" || e.eye==="sulk"){
+    for(i=0;i<w;i++){ if(e.eye==="sulk"){ px(g,L+1+i,y,"d"); px(g,R+1+i,y,"d"); } else { px(g,L+i,y,"d"); px(g,R+i,y,"d"); } }
+  }
+}
+function drawBrow(g,stage,e){
+  var c=STAGES[stage], w=EYE_W[e.eyeShape]||3, L=14-w, R=18, by=c.browY, x;
+  if(e.brow==="happy"){
+    for(x=L;x<L+w;x++) px(g,x,by,"k");
+    px(g,L-1,by+1,"k"); px(g,L+w,by+1,"k");
+    for(x=R;x<R+w;x++) px(g,x,by,"k");
+    px(g,R-1,by+1,"k"); px(g,R+w,by+1,"k");
+  } else if(e.brow==="sad"){
+    for(x=L;x<L+w;x++) px(g,x,by,"k");
+    px(g,L,by+1,"k");
+    for(x=R;x<R+w;x++) px(g,x,by,"k");
+    px(g,R+w-1,by+1,"k");
+  } else if(e.brow==="angry"){
+    for(x=L;x<L+w;x++) px(g,x,by,"k");
+    px(g,L+w-1,by+1,"k");
+    for(x=R;x<R+w;x++) px(g,x,by,"k");
+    px(g,R,by+1,"k");
+  }
+}
+function drawMouth(g,stage,kind){
+  var c=STAGES[stage], my=c.mouthY;
+  if(kind==="none") return;
+  if(kind==="smile"){ mouthSmile(g,13,my,6); return; }
+  if(kind==="frown"){ mouthFrown(g,13,my,6); return; }
+  if(kind==="flat"){ mouthFlat(g,13,my,6); return; }
+  if(kind==="tight"){ mouthFlat(g,14,my,4); px(g,13,my+1,"k"); px(g,18,my+1,"k"); return; }
+  if(kind==="open"){ mouthOpenSmile(g,12,my-1,8); return; }
+  if(kind==="oval"){ mouthOval(g,13,my-1,6); return; }
+  if(kind==="o"){ mouthOval(g,14,my-1,4); return; }
+  if(kind==="chew"){ fill(g,14,my,4,1,"k"); px(g,15,my+1,"d"); px(g,16,my+1,"d"); return; }
+}
+function drawFace(g,stage,shape,name){
+  var src=exprFor(name);
+  var e={eye:src.eye,mouth:src.mouth,brow:src.brow,dx:src.dx,eyeShape:shape};
+  drawEyeSet(g,stage,shape,e);
+  drawBrow(g,stage,e);
+  drawMouth(g,stage,e.mouth);
+}
+
+/* ---------- front frames ------------------------------------------------------------------------ */
+function legsMode(name){
+  if(name==="walk1") return "walk1";
+  if(name==="walk2") return "walk2";
+  if(name==="happy" || name==="jump" || name==="fall" || name==="catch") return "dangle";
+  return "stand";
+}
+function moveY(g,dy){
+  if(!dy) return g;
+  var w=String(g[0]).length, blank="", out=[], r;
+  for(r=0;r<w;r++) blank+=".";
+  if(dy>0){
+    for(r=0;r<dy;r++) out.push(blank);
+    for(r=0;r<g.length-dy;r++) out.push(g[r]);
+  } else {
+    for(r=-dy;r<g.length;r++) out.push(g[r]);
+    for(r=0;r<-dy;r++) out.push(blank);
+  }
+  return out;
+}
+function armsUp(g,stage){
+  var b=STAGES[stage].body, bx=b[0], bw=b[2];
+  px(g,bx-2,12,"k"); px(g,bx-1,12,"k"); px(g,bx-2,13,"k");
+  px(g,bx+bw,12,"k"); px(g,bx+bw+1,12,"k"); px(g,bx+bw,13,"k");
+}
+function frontFrame(stage,name,marks){
+  var c=STAGES[stage]||STAGES.adult, g=blank32();
+  var ant=markAnt(marks), eye=markEye(marks);
+  var nm=name||"idle1";
+  var mode=legsMode(nm);
+  drawPins(g,stage,mode,c.body);
+  drawBody(g,c.body);
+  drawFace(g,stage,eye,nm);
+  if(nm==="jump" || nm==="catch") armsUp(g,stage);
+  drawAntenna(g,ant,c.body[1],10);
+  var out=join(g);
+  if(nm==="idle2" || nm==="sit" || nm==="walk2" || nm==="fall") out=moveY(out,1);
+  else if(nm==="walk1" || nm==="jump") out=moveY(out,-1);
+  return out;
+}
+
+/* ---------- the side view: one body per stage, one eye, the same antenna ------------------------ */
+var SIDE_BOX={
+  baby:[7,11,19,18,7],
+  child:[6,11,21,18,5],
+  adult:[5,11,22,18,3]
+};
+function sideSnout(g,box){
+  var x=box[0]+box[2], y=box[1]+Math.floor(box[3]*0.58);
+  px(g,x,y,"k"); px(g,x,y+1,"k"); px(g,x,y+2,"k");
+  px(g,x+1,y,"k"); px(g,x+1,y+1,"m"); px(g,x+1,y+2,"k");
+}
+function sideFace(g,stage,shape,name){
+  var c=STAGES[stage], e=exprFor(name), y=c.eyeY, h=c.eyeH, w=EYE_W[shape]||3, x=18;
+  var hh=h;
+  if(e.eye==="closed" || e.eye==="sleep"){ eyeClosed(g,x,y,w); }
+  else {
+    if(e.eye==="happy") hh=Math.min(h,3);
+    if(e.eye==="wow") hh=h+1;
+    if(e.eye==="wait") eyeOpen(g,shape,x,y+1,hh);
+    else if(e.eye==="sulk") eyeOpen(g,shape,x+1,y,h);
+    else eyeOpen(g,shape,x+(e.dx||0),y,hh);
+    if(e.eye==="angry" || e.eye==="sulk"){
+      for(var i=0;i<w;i++) px(g,(e.eye==="sulk"?x+1:x)+i,y,"d");
+    }
+  }
+  if(e.brow){
+    var by=c.browY;
+    for(var b=x;b<x+w;b++) px(g,b,by,"k");
+    if(e.brow==="happy"){ px(g,x-1,by+1,"k"); px(g,x+w,by+1,"k"); }
+    if(e.brow==="sad") px(g,x+w-1,by+1,"k");
+    if(e.brow==="angry") px(g,x,by+1,"k");
+  }
+  /* the mouth sits on the snout side, low under the eye */
+  var my=c.mouthY;
+  if(e.mouth==="none") return;
+  if(e.mouth==="smile") mouthSmile(g,21,my,4);
+  else if(e.mouth==="frown") mouthFrown(g,21,my,4);
+  else if(e.mouth==="flat") mouthFlat(g,21,my,4);
+  else if(e.mouth==="tight"){ mouthFlat(g,22,my,2); px(g,21,my+1,"k"); px(g,24,my+1,"k"); }
+  else if(e.mouth==="open") mouthOpenSmile(g,21,my-1,4);
+  else if(e.mouth==="oval") mouthOval(g,21,my-1,4);
+  else if(e.mouth==="o") mouthOval(g,22,my-1,2);
+  else if(e.mouth==="chew"){ fill(g,21,my,3,1,"k"); px(g,22,my+1,"d"); }
+}
+function sideFrame(stage,name,marks){
+  var c=STAGES[stage]||STAGES.adult, box=SIDE_BOX[stage]||SIDE_BOX.adult;
+  var g=blank32(), ant=markAnt(marks), eye=markEye(marks);
+  drawPins(g,stage,legsMode(name),box);
+  drawBody(g,box);
+  sideSnout(g,box);
+  sideFace(g,stage,eye,name);
+  drawAntenna(g,ant,box[1],11);
+  if(name==="flap1" || name==="flap2"){
+    /* a paper wing opens out of the back; flap2 is the downstroke, so the two frames never match */
+    var wy=name==="flap1" ? 16 : 20;
+    fill(g,1,wy,4,2,"p");
+    hline(g,0,wy-1,5,"k");
+    hline(g,0,wy+2,5,"k");
+    px(g,0,wy,"k"); px(g,0,wy+1,"k");
+  }
+  var out=join(g);
+  if(name==="walk1" || name==="jump" || name==="flap1" || name==="flap2") out=moveY(out,-1);
+  else if(name==="walk2" || name==="fall") out=moveY(out,1);
+  return out;
+}
+
+/* ---------- marks: new names, or an old save's index; the pattern is always ignored -------------- */
+var ANT_IDS=["orb","triangle","crook","curl","prongs","star"];
+function markAnt(marks){
+  var v=marks && marks.ant;
+  if(typeof v==="number") return ANT_IDS[v|0]||ANT_IDS[0];
+  if(typeof v==="string"){
+    for(var i=0;i<ANT_IDS.length;i++) if(ANT_IDS[i]===v) return v;
+  }
+  return ANT_IDS[0];
+}
+function markEye(marks){
+  var v=marks && marks.eye;
+  if(typeof v==="number") return EYE_IDS[v|0]||EYE_IDS[0];
+  if(typeof v==="string"){
+    for(var i=0;i<EYE_IDS.length;i++) if(EYE_IDS[i]===v) return v;
+  }
+  return EYE_IDS[0];
+}
+/* frames({ant, eye, face}): the program's call. Unknown faces keep the neutral face, never a blank grid. */
 function frames(o){
   o=o||{};
-  var name=o.face||"idle1", f=FACE[name];
-  if(!f){
-    /* a few raw faces are useful to a renderer; anything else is a typo and keeps the pet's eyes */
-    if(RAW_FACE[name]) f={face:name,mouth:o.mouth,legs:o.legs,squat:o.squat,ant:o.ant};
-    else f=FACE.idle1;
-  }
-  return build({
-    ant:f.ant||o.ant||"ball",
-    pat:o.pat||"dot",
-    eye:o.eye||"dot",
-    face:f.face,
-    mouth:f.mouth,
-    legs:f.legs,
-    squat:f.squat
-  });
+  var name=o.face && FACE_EXPR[o.face] ? o.face : "idle1";
+  return frontFrame("adult",name,{ant:o.ant,eye:o.eye});
 }
 
-/* ---------- the standard poses every species pack must provide ----------
- * A play pack (runtime/petplay.js) may only ask for these names, never for a species' own action names, so every
- * future species can play every game:
- *   front: idle, happy, sad, angry, sulk, blink, jump (arms up), fall, catch (holding up)
- *   side:  walk1, walk2, jump, flap1, flap2      (all facing right; the left view is mirror(grid))
- * Every pose is a 16 x 16 grid of .kdmp. A pack's poses are functions of the rolled marks, so the antenna, pattern
- * and eyes show in every pose. The side view is ready for later side games; no side game ships yet. */
-var POSE_NAMES={front:["idle","happy","sad","angry","sulk","surprised","blink","jump","fall","catch"],side:["walk1","walk2","jump","flap1","flap2"]};
-/* the chip's side, facing right: one eye near the snout, the body's pins as legs, the same antenna and marks */
-var SIDE_BASE=[
-"................",
-"........kkk.....",
-".........k......",
-"..kkkkkkkkkkkk..",
-"..kddddddddddk..",
-"..kdmmmmmmmmdk..",
-"..kdmmmmmmmmdk..",
-"..kdmmmmmmmmdk..",
-"..kdmmmmmmmmdk..",
-"..kdmmmmmmmmdk..",
-"..kddddddddddk..",
-"..kddddddddddk..",
-"..kkkkkkkkkkkk..",
-"...k.k....k.k...",
-"...k.k....k.k...",
-"................"];
-var SIDE_ANT={
-  ball:["........kkk.....",".........k......"],
-  stick:[".........k......",".........k......"],
-  fork:["........k.k.....",".........k......"],
-  bent:["..........kk....",".........k......"],
-  droop:["................","..........k....."]
-};
-var SIDE_PAT={
-  plain:function(a){},
-  dot:function(a){ setc(a,9,5,"p"); },
-  stripe:function(a){ for(var c=4;c<12;c++) setc(a,4,c,"p"); },
-  trace:function(a){ [[10,4],[10,7],[10,10],[11,5],[11,11]].forEach(function(p){ setc(a,p[0],p[1],"p"); }); }
-};
-var SIDE_EYE={
-  dot:function(a){ [[5,10],[5,11],[6,10],[6,11]].forEach(function(p){ setc(a,p[0],p[1],"k"); }); },
-  bar:function(a){ for(var c=9;c<12;c++) setc(a,6,c,"k"); },
-  big:function(a){ for(var r=5;r<7;r++) for(var c=9;c<12;c++) setc(a,r,c,(c===9&&r===5)?"p":"k"); }
-};
-function shiftUp(g,n){
-  var w=String(g[0]).length, blank="", out=[], r;
-  for(r=0;r<w;r++) blank+=".";
-  for(r=0;r<g.length;r++) out.push(r+n<g.length ? g[r+n] : blank);
-  return out;
-}
-function shiftDown(g,n){
-  var w=String(g[0]).length, blank="", out=[], r;
-  for(r=0;r<w;r++) blank+=".";
-  for(r=0;r<g.length;r++) out.push(r-n>=0 ? g[r-n] : blank);
-  return out;
-}
-function sidePose(marks,name){
-  var m=marks||{}, a=rows(SIDE_BASE);
-  var ant=SIDE_ANT[m.ant||"ball"]||SIDE_ANT.ball;
-  a[0]=ant[0].split(""); a[1]=ant[1].split("");
-  (SIDE_PAT[m.pat||"dot"]||SIDE_PAT.dot)(a);
-  (SIDE_EYE[m.eye||"dot"]||SIDE_EYE.dot)(a);
-  /* the mouth and a small snout make the facing direction read at 16 px */
-  setc(a,8,10,"k"); setc(a,8,11,"k");
-  setc(a,7,14,"k"); setc(a,8,14,"k");
-  if(name==="walk1"){ a[13]="...k.k....k.k...".split(""); a[14]="..k...k..k...k..".split(""); }
-  if(name==="walk2"){ a[13]="...k.k....k.k...".split(""); a[14]="....kk....kk....".split(""); }
-  var g=join(a);
-  if(name==="walk2") g=shiftDown(g,1);               /* the second step sits a pixel lower */
-  if(name==="jump") g=shiftUp(g,1);
-  if(name==="flap1" || name==="flap2"){
-    g=shiftUp(g,1);
-    var f=rows(g), r=name==="flap1"?10:12;
-    [[r,0],[r,1],[r+1,0],[r,14],[r,15],[r+1,15]].forEach(function(p){ setc(f,p[0],p[1],"k"); });
-    g=join(f);
+/* ---------- the egg: one clean round shell, two crack stages ------------------------------------ */
+function eggMask(){
+  var m=[], y, x;
+  for(y=0;y<N;y++){
+    m.push([]);
+    for(x=0;x<N;x++){
+      var t=(y+0.5-16)/12.8;
+      if(Math.abs(t)>1){ m[y].push(false); continue; }
+      var rx=11.4*Math.sqrt(1-t*t);
+      rx*=1-0.05*Math.max(0,-t);
+      m[y].push(Math.abs(x+0.5-16)<=rx);
+    }
   }
-  return g;
+  return m;
 }
-function frontPose(marks,name){
-  var m=marks||{}, o={ant:m.ant||"ball",pat:m.pat||"dot",eye:m.eye||"dot"}, g, a;
-  if(name==="happy") g=frames({ant:o.ant,pat:o.pat,eye:o.eye,face:"happy"});
-  else if(name==="sad") g=frames({ant:o.ant,pat:o.pat,eye:o.eye,face:"sad"});
-  else if(name==="angry") g=frames({ant:o.ant,pat:o.pat,eye:o.eye,face:"angry"});
-  else if(name==="sulk") g=frames({ant:o.ant,pat:o.pat,eye:o.eye,face:"sulk"});
-  else if(name==="surprised") g=frames({ant:o.ant,pat:o.pat,eye:o.eye,face:"surprised"});
-  else if(name==="blink") g=frames({ant:o.ant,pat:o.pat,eye:o.eye,face:"blink"});
-  else if(name==="jump"){
-    g=build({ant:o.ant,pat:o.pat,eye:o.eye,face:"happy",mouth:"open"});
-    a=rows(g);
-    [[2,1],[3,1],[2,14],[3,14]].forEach(function(p){ setc(a,p[0],p[1],"k"); });
-    setc(a,1,1,"p"); setc(a,1,14,"p");
-    g=join(a);
-  } else if(name==="fall"){
-    g=build({ant:"droop",pat:o.pat,eye:o.eye,face:"wow",mouth:"o",legs:"dangle"});
-  } else if(name==="catch"){
-    g=frames({ant:o.ant,pat:o.pat,eye:o.eye,face:"happy",mouth:"open"});
-    a=rows(g);
-    [[1,1],[2,1],[3,1],[1,14],[2,14],[3,14]].forEach(function(p){ setc(a,p[0],p[1],"k"); });
-    setc(a,0,1,"p"); setc(a,0,14,"p");
-    g=join(a);
-  } else g=frames({ant:o.ant,pat:o.pat,eye:o.eye,face:"idle1"});
-  return g;
+function drawEgg(crack){
+  var g=blank32(), m=eggMask(), inner=[], x, y, dy, dx;
+  for(y=0;y<N;y++) for(x=0;x<N;x++){
+    if(!m[y][x]) continue;
+    var edge=false;
+    for(dy=-2;dy<=2 && !edge;dy++) for(dx=-2;dx<=2;dx++){
+      var xx=x+dx, yy=y+dy;
+      if(xx<0 || yy<0 || xx>=N || yy>=N || !m[yy][xx]){ edge=true; break; }
+    }
+    if(edge) px(g,x,y,"k"); else inner.push([x,y]);
+  }
+  var maxX=-1, maxY=-1;
+  for(var i=0;i<inner.length;i++){
+    if(inner[i][0]>maxX) maxX=inner[i][0];
+    if(inner[i][1]>maxY) maxY=inner[i][1];
+  }
+  for(i=0;i<inner.length;i++){
+    var q=inner[i], ch="m";
+    if(q[0]>=maxX-1 || (q[1]===maxY && q[0]>=14)) ch="d";
+    px(g,q[0],q[1],ch);
+  }
+  [[9,10,2,1],[19,13,2,1],[11,21,2,1],[18,22,1,1]].forEach(function(s){
+    for(var rr=0;rr<s[3];rr++) for(var cc=0;cc<s[2];cc++){
+      if(g[s[1]+rr] && g[s[1]+rr][s[0]+cc]==="m") px(g,s[0]+cc,s[1]+rr,"d");
+    }
+  });
+  if(crack>0){
+    var line=crack===1
+      ? [[16,4],[17,5],[16,6],[17,7],[16,8],[15,9],[16,10],[15,11]]
+      : [[16,4],[17,5],[16,6],[17,7],[16,8],[15,9],[16,10],[15,11],
+         [14,12],[15,13],[14,14],[14,15],[13,16],[14,17]];
+    for(i=0;i<line.length;i++){ px(g,line[i][0],line[i][1],"k"); px(g,line[i][0]+1,line[i][1],"k"); }
+  }
+  return join(g);
 }
+var CHIP_EGG=drawEgg(0);
+var CHIP_EGG_CRACK=[drawEgg(1),drawEgg(2)];
+
+/* ---------- adult forms: the adult body plus one accessory that tells the form ------------------ */
+function accessoryBook(g,o){
+  var shape=markEye(o), w=EYE_W[shape], L=14-w, R=18, ey=STAGES.adult.eyeY;
+  /* reading glasses: a thin frame around each eye and a bridge */
+  var i, x;
+  for(i=0;i<2;i++){
+    x=i?R:L;
+    hline(g,x-1,ey-1,w+2,"k");
+    hline(g,x-1,ey+STAGES.adult.eyeH,w+2,"k");
+    px(g,x-1,ey,"k"); px(g,x+w,ey,"k");
+    px(g,x-1,ey+1,"k"); px(g,x+w,ey+1,"k");
+  }
+  hline(g,L+w,ey-1,R-(L+w)+1,"k");
+  /* a tiny book held at the right hip: ink cover, paper pages, a dark spine */
+  fill(g,23,17,6,8,"k");
+  fill(g,24,18,4,6,"p");
+  hline(g,24,21,4,"d");
+  px(g,23,17,"p"); px(g,23,24,"p");
+}
+function accessoryWalk(g){
+  var bx=5, bw=22, x;
+  /* a scarf across the chest, with one end hanging down */
+  fill(g,bx+2,18,bw-4,1,"k");
+  fill(g,bx+2,19,bw-4,2,"m");
+  fill(g,bx+2,21,bw-4,1,"k");
+  fill(g,bx+8,22,5,2,"d");
+  px(g,bx+8,24,"m"); px(g,bx+12,24,"m");
+  hline(g,bx+10,20,bw-14,"p");
+  /* the walking stick: a hooked ink line at the right side */
+  for(x=7;x<27;x++) px(g,29,x,"k");
+  px(g,28,7,"k"); px(g,27,8,"k"); px(g,27,9,"k");
+  px(g,30,26,"k"); px(g,29,27,"k");
+}
+function accessoryScholar(g){
+  /* a mortarboard: a wide ink board, a dark cap below it, a tassel on the right */
+  hline(g,8,8,16,"k");
+  hline(g,10,9,12,"d");
+  hline(g,12,10,8,"k");
+  for(var y=9;y<14;y++) px(g,23,y,"k");
+  px(g,24,14,"k"); px(g,23,15,"p");
+}
+function accessoryDiary(g){
+  /* a pen tucked behind the antenna on the left: ink barrel, paper nib, dark clip */
+  for(var y=1;y<10;y++){ px(g,8,y,"k"); px(g,9,y,"d"); }
+  px(g,8,0,"p"); px(g,9,0,"p");
+  hline(g,7,3,1,"k"); hline(g,10,3,1,"k");
+}
+function accessoryMonster(g){
+  /* two little horns on the head's top corners; the teeth are paper in the smile */
+  px(g,8,8,"k"); hline(g,7,9,3,"k"); hline(g,6,10,5,"k");
+  px(g,22,8,"k"); hline(g,21,9,3,"k"); hline(g,20,10,5,"k");
+  px(g,14,23,"p"); px(g,17,23,"p");
+  px(g,14,24,"p"); px(g,17,24,"p");
+}
+var FORM_IDS=["book","walk","scholar","diary","monster","plain"];
+function adult(id,o){
+  o=o||{};
+  var name=o.face && FACE_EXPR[o.face] ? o.face : "idle1";
+  var g=rows(frontFrame("adult",name,{ant:o.ant,eye:o.eye}));
+  if(id==="book") accessoryBook(g,o);
+  else if(id==="walk") accessoryWalk(g);
+  else if(id==="scholar") accessoryScholar(g);
+  else if(id==="diary") accessoryDiary(g);
+  else if(id==="monster") accessoryMonster(g);
+  return join(g);
+}
+
+/* ---------- poses: the standard vocabulary every play pack may ask for -------------------------- */
+var POSE_NAMES={front:["idle","happy","sad","angry","sulk","surprised","blink","jump","fall","catch"],side:["walk1","walk2","jump","flap1","flap2"]};
 var CHIP_POSES={front:{},side:{}};
-POSE_NAMES.front.forEach(function(n){ CHIP_POSES.front[n]=function(m){ return frontPose(m,n); }; });
-POSE_NAMES.side.forEach(function(n){ CHIP_POSES.side[n]=function(m){ return sidePose(m,n); }; });
-/* one pose for a view; a pack that is missing one falls back to the chip's, never to a blank screen */
+POSE_NAMES.front.forEach(function(n){
+  CHIP_POSES.front[n]=function(m){ return frontFrame("adult",n,m); };
+});
+POSE_NAMES.side.forEach(function(n){
+  CHIP_POSES.side[n]=function(m){ return sideFrame("adult",n,m); };
+});
 function pose(pack,marks,view,name){
   var set=(pack && pack.poses && pack.poses[view]) || CHIP_POSES[view];
   var fn=set && set[name];
   if(!fn){ set=CHIP_POSES[view]; fn=set[name] || set[view==="side"?"walk1":"idle"]; }
   return typeof fn==="function" ? fn(marks||{}) : fn;
+}
+/* every stage, every front and side name: a missing name falls back to the stage's idle, never to blank */
+function stagePose(pack,stage,marks,view,name){
+  if(pack===PACKS.chip || (pack && pack.id==="chip")){
+    return view==="side" ? sideFrame(stage||"adult",name||"walk1",marks)
+      : frontFrame(stage||"adult",name||"idle1",marks);
+  }
+  return pose(pack,marks,view,name);
 }
 /* the left-facing view is the right-facing grid with every row reversed */
 function mirror(grid){
@@ -304,294 +683,76 @@ function mirror(grid){
   return out;
 }
 
-var CHIP_EGG=[
-"................",
-"......kkkk......",
-".....kppppk.....",
-"....kppmmppk....",
-"...kpppmmpppk...",
-"...kppppppppk...",
-"..kppkkkkkkppk..",
-"..kpkkddddkkpk..",
-"..kppkdmmdkppk..",
-"..kpkkdmmdkkpk..",
-"..kppkddddkppk..",
-"..kppkkkkkkppk..",
-"...kppppppppk...",
-"....kpppppmk....",
-".....kkkkkk.....",
-"................"];
-/* the egg's two cracked stages, same shell and the same 16 x 16 box: a short crack at 20 s, a long one at 40 s */
-var CHIP_EGG_CRACK=[
-[
-"................",
-"......kkkk......",
-".....kppppk.....",
-"....kppmmdpk....",
-"...kpppmdpppk...",
-"...kpppdppppk...",
-"..kppkkkkkkppk..",
-"..kpkkddddkkpk..",
-"..kppkdmmdkppk..",
-"..kpkkdmmdkkpk..",
-"..kppkddddkppk..",
-"..kppkkkkkkppk..",
-"...kppppppppk...",
-"....kpppppmk....",
-".....kkkkkk.....",
-"................"],
-[
-"................",
-"......kkkk......",
-".....kppdpk.....",
-"....kppmmdpk....",
-"...kpppddpppk...",
-"...kppddppppk...",
-"..kppkkpkkkppk..",
-"..kpkkdpddkkpk..",
-"..kppkdmpdkppk..",
-"..kpkkdpmdkkpk..",
-"..kppkddpdkppk..",
-"..kppkkkpkkppk..",
-"...kppppdpppk...",
-"....kppppdmk....",
-".....kkkkkk.....",
-"................"]
-];
-var CHIP_BABY=[
-"................",
-"................",
-"................",
-"................",
-"................",
-".......kk.......",
-"....kkkkkkkk....",
-"....kmmmmmmk....",
-"...kkmkmmkmkk...",
-"....kmkmmkmk....",
-"...kkmmmmmmkk...",
-"....kmmkkmmk....",
-"....kkkkkkkk....",
-".....k....k.....",
-"................",
-"................"];
-var CHIP_CHILD=[
-"................",
-"................",
-".......kk.......",
-"........k.......",
-"...kkkkkkkkkk...",
-"...kddddddddk...",
-"..kkdmmmmmmdkk..",
-"...kdmkmmkmdk...",
-"..kkdmkmmkmdkk..",
-"...kdmmkkmmdk...",
-"..kkdmmmmmmdkk..",
-"...kddpdddddk...",
-"...kkkkkkkkkk...",
-"....k.k..k.k....",
-"....k.k..k.k....",
-"................"];
-
-/* ---------- the baby and the child: the same face vocabulary on their smaller bodies ----------
- * The owner sees these for the first ten days, so every mood, idle and game pose must show here too. The body
- * grids keep their shape; the baked eyes and mouth are cleared and redrawn at the stage's own coordinates, which
- * keeps every expression (and a one-pixel nod, jump or dangle) readable without a second art set. */
-var MINI={
-  /* the baby's face is 6 x 5 pixels: its eyes go one row up (7-8) so a row stays free between them and the mouth
-     (10-11), or every mood melts into one blob; `bake` lists the drawing's own eye pixels to clear */
-  baby:{base:CHIP_BABY, top:7, bottom:8, left:6, right:9, mouth:11, bake:[[8,6],[9,6],[8,9],[9,9]]},
-  child:{base:CHIP_CHILD, top:7, bottom:8, left:6, right:9, mouth:9}
-};
-function miniBase(stage){
-  var c=MINI[stage], a=rows(c.base);
-  setc(a,c.top,c.left,"m"); setc(a,c.top,c.right,"m");
-  setc(a,c.bottom,c.left,"m"); setc(a,c.bottom,c.right,"m");
-  setc(a,c.mouth,7,"m"); setc(a,c.mouth,8,"m");
-  (c.bake||[]).forEach(function(q){ setc(a,q[0],q[1],"m"); });
-  return a;
-}
-function miniEyes(a,c,face){
-  var T=c.top, B=c.bottom, L=c.left, R=c.right;
-  if(face==="closed" || face==="sleep" || face==="blink"){
-    setc(a,B,L,"k"); setc(a,B,L+1,"k"); setc(a,B,R-1,"k"); setc(a,B,R,"k");
-  } else if(face==="happy"){
-    setc(a,T,L,"k"); setc(a,B,L+1,"k"); setc(a,T,R,"k"); setc(a,B,R-1,"k");
-  } else if(face==="sad"){
-    setc(a,T,L+1,"k"); setc(a,B,L,"k"); setc(a,T,R-1,"k"); setc(a,B,R,"k");
-  } else if(face==="wow"){
-    setc(a,T,L,"k"); setc(a,T,L+1,"k"); setc(a,B,L,"k"); setc(a,B,L+1,"k");
-    setc(a,T,R-1,"k"); setc(a,T,R,"k"); setc(a,B,R-1,"k"); setc(a,B,R,"k");
-  } else if(face==="down"){
-    setc(a,B,L,"k"); setc(a,B+1,L,"k"); setc(a,B,R,"k"); setc(a,B+1,R,"k");
-  } else if(face==="angry"){
-    /* eyes slanting down toward the middle; on these small faces there is no row above them for brows */
-    setc(a,T,L,"k"); setc(a,B,L+1,"k"); setc(a,T,R,"k"); setc(a,B,R-1,"k");
-  } else if(face==="sulk"){
-    /* half-lidded, both eyes shifted to one side: looking down and a little away */
-    setc(a,B,L+1,"k"); setc(a,B,R+1,"k");
-  } else {
-    setc(a,T,L,"k"); setc(a,B,L,"k"); setc(a,T,R,"k"); setc(a,B,R,"k");
-  }
-}
-function miniMouth(a,c,stage,mouth){
-  var M=c.mouth;
-  var smileC=stage==="baby" ? M-1 : M, smileM=stage==="baby" ? M : M+1;
-  if(mouth==="smile"){
-    setc(a,smileC,6,"k"); setc(a,smileC,9,"k"); setc(a,smileM,7,"k"); setc(a,smileM,8,"k");
-  } else if(mouth==="frown"){
-    setc(a,smileM,6,"k"); setc(a,smileM,9,"k"); setc(a,smileC,7,"k"); setc(a,smileC,8,"k");
-  } else if(mouth==="open" || mouth==="chew"){
-    for(var x=6;x<10;x++) setc(a,M,x,"k");
-  } else if(mouth==="o"){
-    setc(a,M,7,"k"); setc(a,M,8,"k"); setc(a,M+1,7,"k"); setc(a,M+1,8,"k");
-  } else if(mouth==="flat" || mouth==="tight"){
-    setc(a,M,7,"k"); setc(a,M,8,"k");
-  }
-}
-/* name -> the face and the one-pixel movement that makes the pose read at 16 px (the standard pose vocabulary) */
-var MINI_POSE={
-  idle:{}, idle1:{}, idle2:{mouth:"smile",down:1},
-  /* the room's idle varieties: they still need a frame, even if they only differ by a shift later */
-  look:{}, lookL:{}, lookR:{}, sit:{mouth:"smile",down:1},
-  blink:{face:"closed"}, eat1:{mouth:"open"}, eat2:{mouth:"chew"},
-  happy:{face:"happy",mouth:"open"}, sleep:{face:"closed",mouth:"none"},
-  wait:{face:"down",mouth:"flat"}, surprised:{face:"wow",mouth:"o"},
-  sad:{face:"sad",mouth:"frown"}, angry:{face:"angry",mouth:"tight"}, sulk:{face:"sulk",mouth:"flat"},
-  jump:{face:"happy",mouth:"open",up:1}, fall:{face:"wow",mouth:"o",down:1},
-  catch:{face:"happy",mouth:"open",up:2},
-  walk1:{up:1}, walk2:{down:1}, flap1:{up:1}, flap2:{up:2}
-};
-function miniFrame(stage,name){
-  var c=MINI[stage], p=MINI_POSE[name] || MINI_POSE.idle, a=miniBase(stage), g;
-  miniEyes(a,c,p.face||"open");
-  miniMouth(a,c,stage,p.mouth||"smile");
-  g=join(a);
-  if(p.up) g=shiftUp(g,p.up);
-  if(p.down) g=shiftDown(g,p.down);
+/* ---------- home screen icons: a 16 x 16 chip with an antenna, from the new style ------------- */
+function blank16(){
+  var g=[],r,c,row;
+  for(r=0;r<16;r++){ row=[]; for(c=0;c<16;c++) row.push("."); g.push(row); }
   return g;
 }
-function stagePose(pack,stage,marks,view,name){
-  if(stage==="baby" || stage==="child") return miniFrame(stage,name);
-  return pose(pack,marks,view,name);
+function homeBody(g,hollow){
+  var box=[2,5,12,10,4], m=roundMask(12,10,4), x, y, dx, dy;
+  function inside(xx,yy){ return xx>=0 && yy>=0 && xx<12 && yy<10 && m[yy][xx]; }
+  for(y=0;y<10;y++) for(x=0;x<12;x++){
+    if(!m[y][x]) continue;
+    var edge=false;
+    for(dy=-1;dy<=1 && !edge;dy++) for(dx=-1;dx<=1;dx++) if(!inside(x+dx,y+dy)){ edge=true; break; }
+    if(edge) px(g,box[0]+x,box[1]+y,"k");
+    else px(g,box[0]+x,box[1]+y,hollow?"p":(x>=9 || y>=8 ? "d" : "m"));
+  }
 }
-
-/* ---------- the home screen's 16 x 16 icon states: egg, asleep, needing something, away, and the everyday face ---------- */
+function homeAntenna(g){
+  px(g,7,3,"k"); px(g,8,3,"k");
+  px(g,7,4,"k"); px(g,8,4,"k");
+  px(g,6,1,"k"); px(g,7,1,"k"); px(g,8,1,"k"); px(g,9,1,"k");
+  px(g,6,0,"k"); px(g,7,0,"k"); px(g,8,0,"k"); px(g,9,0,"k");
+  px(g,6,2,"k"); px(g,7,2,"k"); px(g,8,2,"k"); px(g,9,2,"k");
+}
+function homeEyes(g,closed){
+  if(closed){ hline(g,3,9,4,"k"); hline(g,9,9,4,"k"); return; }
+  fill(g,4,8,2,2,"k"); px(g,4,8,"p");
+  fill(g,9,8,2,2,"k"); px(g,9,8,"p");
+}
+function homeChip(state){
+  var g=blank16();
+  homeBody(g,state==="away");
+  homeAntenna(g);
+  if(state==="away") return join(g);
+  homeEyes(g,state==="sleep");
+  if(state==="sleep") return join(g);
+  if(state==="need"){
+    fill(g,3,8,3,2,"k"); px(g,3,8,"p");
+    fill(g,9,8,3,2,"k"); px(g,9,8,"p");
+    mouthOval(g,7,11,2);
+    hline(g,13,1,1,"k"); hline(g,13,2,1,"k"); px(g,13,3,"k"); px(g,13,5,"k");
+    return join(g);
+  }
+  hline(g,7,12,2,"k");
+  return join(g);
+}
+function homeEgg(){
+  /* a clean 16 px egg: one ink ring, mid shell, dark on the right and the bottom */
+  var g=blank16(), x, y;
+  for(y=1;y<15;y++){
+    var t=(y+0.5-8)/7.2;
+    if(Math.abs(t)>1) continue;
+    var rx=6.2*Math.sqrt(1-t*t);
+    for(x=0;x<16;x++){
+      if(Math.abs(x+0.5-8)>rx) continue;
+      var edge=Math.abs(x+0.5-8)>rx-1.1 || Math.abs(y+0.5-8)>7.2-1.1;
+      px(g,x,y,edge?"k":(x>=9 || y>=13 ? "d" : "m"));
+    }
+  }
+  return join(g);
+}
 var HOME_ICONS={
-  egg:CHIP_EGG,
-  sleep:frames({face:"sleep",ant:"ball"}),
-  face:frames({face:"idle1",ant:"ball",pat:"dot",eye:"dot"}),
-  need:[
-  "................",
-  "................",
-  ".......kk.......",
-  ".......kk.......",
-  ".......kk.......",
-  ".......kk.......",
-  ".......kk.......",
-  "................",
-  ".......kk.......",
-  ".......kk.......",
-  "................",
-  "...kkkkkkkkkk...",
-  "...k........k...",
-  "....kkkkkkkk....",
-  "................",
-  "................"],
-  away:[
-  "................",
-  "..kkkkkkkkkkkk..",
-  "..k..........k..",
-  "..k..........k..",
-  "..k..........k..",
-  "..k...kkkk...k..",
-  "..k...kppk...k..",
-  "..k...kkkk...k..",
-  "..k....kk....k..",
-  "..k....kk....k..",
-  "..k..........k..",
-  "..k..........k..",
-  "..k..........k..",
-  "..kkkkkkkkkkkk..",
-  "................",
-  "................"]
+  egg:homeEgg(),
+  sleep:homeChip("sleep"),
+  face:homeChip("face"),
+  need:homeChip("need"),
+  away:homeChip("away")
 };
 
-/* ---------- adult forms: accessories in base coordinates, then the base lifted onto a 20 x 20 canvas at (2,4) ---------- */
-var ADULT={
-  plain:{name:"普通",acc:[]},
-  book:{name:"书虫",eye:"dot",face:"none",acc:[{r:5,c:4,g:["kkk..kkk"]},{r:6,c:4,g:["k.k..k.k"]},{r:5,c:7,g:["kk"]}]},
-  walk:{name:"走路家",clearAnt:true,acc:[{r:-2,c:2,g:["...kkkkkk...","..kmmmmmmk..","..kmmmmmmk..","kkkkkkkkkkkk"]},{r:8,c:9,g:["kkkkk","kpkdk","kkkkk"]}]},
-  scholar:{name:"学者",clearAnt:true,acc:[{r:-2,c:1,g:["......kk......","kkkkkkkkkkkkkk","..kkkkkkkkkk..","...kddddddk..."]},{r:0,c:15,g:["k","k","d"]}]},
-  diary:{name:"日记家",acc:[{r:3,c:13,g:[".....k","....kd","...kdk","..kdk.",".kdk..","kpk...","kk...."]}]},
-  monster:{name:"小怪兽",clearAnt:true,mouth:"fang",acc:[{r:0,c:2,g:["k..","kk.","kkk"]},{r:0,c:11,g:["..k",".kk","kkk"]}]}
-};
-function adult(id,o){
-  var A=ADULT[id]||ADULT.plain, x={};
-  if(o) for(var k in o) if(Object.prototype.hasOwnProperty.call(o,k)) x[k]=o[k];
-  /* An action name from the pet's vocabulary carries its own eyes, mouth, legs and posture. Translating it here
-     keeps every adult form's moods and sleep/meal faces visible, instead of silently drawing the neutral face. */
-  var named=x.face, af=named && FACE[named];
-  if(af){
-    x.face=af.face || "open";
-    if(af.mouth) x.mouth=af.mouth;
-    if(af.legs) x.legs=af.legs;
-    if(af.squat) x.squat=af.squat;
-    if(af.ant) x.ant=af.ant;
-  }
-  if(A.mouth) x.mouth=A.mouth;
-  var moodFace=x.face==="sad"||x.face==="angry"||x.face==="sulk";
-  /* The book form's "none" only means "no plain open eyes under the glasses": a blink, sleep, or any expression
-     still draws its own eyes (the earlier code replaced them with the neutral two dots, so those faces vanished). */
-  var plainFace=!x.face || x.face==="open";
-  if(A.face==="none" && !moodFace && plainFace) x.face="none";
-  var g=rows(build(x));
-  if(A.face==="none" && x.face==="none"){ setc(g,6,5,"k"); setc(g,6,10,"k"); }
-  if(A.face==="none" && (x.face==="closed" || x.face==="sleep")){
-    /* the glasses cover the built-in closed-eye line; one row lower it still reads as shut eyes */
-    setc(g,7,5,"k"); setc(g,7,10,"k");
-  }
-  if(A.clearAnt){ g[0]=BLANK16.split(""); g[1]=BLANK16.split(""); }
-  var out=[], r, c;
-  for(r=0;r<20;r++) out.push(blankGrid(20,1,".")[0].split(""));
-  for(r=0;r<16;r++) for(c=0;c<16;c++) if(g[r][c]!==".") out[r+4][c+2]=g[r][c];
-  A.acc.forEach(function(a){
-    a.g.forEach(function(line,i){
-      line.split("").forEach(function(v,j){
-        if(v===".") return;
-        var rr=a.r+i+4, cc=a.c+j+2;
-        if(out[rr] && out[rr][cc]!==undefined) out[rr][cc]=v;
-      });
-    });
-  });
-  return join(out);
-}
-
-/* ---------- props: the things it puts in the room to show something ---------- */
-var PROPS={
-  card:["kkkkkkkkk","kpppppppk","kpkkkkppk","kpppppppk","kpkkkkkpk","kpppppppk","kkkkkkkkk"],
-  flag:["kkkkkkkk","kppppppk","kpkkkppk","kpppkppk","kppkkppk","kpppkppk","kpkkkppk","kppppppk","kkkkkkkk","k.......","k.......","k.......","k.......","k......."],
-  /* the flag with its number slot empty, for a day count drawn with numberGrid */
-  flagBlank:["kkkkkkkk","kppppppk","kppppppk","kppppppk","kppppppk","kppppppk","kppppppk","kppppppk","kkkkkkkk","k.......","k.......","k.......","k.......","k......."],
-  books:["...kkkkkkkk.","...kmmmmmmk.","..kkkkkkkkkk","..kpppppppdk",".kkkkkkkkkk.",".kdddddddmk.","kkkkkkkkkkkk","kmmmmmmmmmpk","kkkkkkkkkkkk"],
-  film:[".kkkkk..","kdpddk..","kdddkkkk","kdddkmmk","kdddkkkk","kdddk...",".kkkk..."],
-  /* the same bowl in both states, so the owner can tell which is which: a heap of dark food over the rim, or an empty
-     dark inside; the body is paper, outlined in ink */
-  bowl:["..........","...d.d....","..ddddd...","kkkkkkkkkk","kddddddddk",".kppppppk.","..kkkkkk.."],
-  bowlEmpty:["..........","..........","..........","kkkkkkkkkk","kddddddddk",".kppppppk.","..kkkkkk.."],
-  /* a small coiled pile in three tones, not a smear: ink edge, mid body, dark turns */
-  poop:["..kkk..",".kmmmk.","kmdmmmk","kmmdmmk",".kmmmk.","..kkk.."],
-  heart:[".kk.kk.","kddkddk","kdddddk",".kdddk.","..kdk..","...k..."],
-  heartE:[".kk.kk.","k..k..k","k.....k",".k...k.","..k.k..","...k..."],
-  sign:["kkkkkkkkkkkkkkkk","kppppppppppppppk","kppppppppppppppk","kppppppppppppppk","kppppppppppppppk","kppppppppppppppk","kkkkkkkkkkkkkkkk",".......kk.......",".......kk.......",".......kk.......",".....kkkkkk....."],
-  zz:["....kkkkkk..",".........k..","........k...",".......k....","......k.....",".....k......","....kkkkkk..","............","..kkk.......","....k.......","...k........","..kkk......."],
-  pen:["......kkk","..kkkkkpk","..k...kkk"],
-  desk:["kkkkkkkkkkkkkkkkkkkkkkkkk","kpppppppppppppppppppppppk","kpkkkkkkkkkkkkkkkkkkkkkpk","kpppppppppppppppppppppppk","kkkkkkkkkkkkkkkkkkkkkkkkk","..k...................k..",".k.....................k.","kk....................kk."],
-  scarf:["...kkkkkk...","..kmmmmmmk..","..kmppppmk..","..kmmmmmmk..",".kkkkkkkkkk.","k...k..k...k","....k..k....","....k..k...."],
-  mooncake:["....kkkk....","...kmmmmk...","..kmppppmk..",".kmmkkkkmmk.",".kmkmmmmkmk.",".kmkmmmmkmk.",".kmmkkkkmmk.","..kmppppmk..","...kmmmmk...","....kkkk...."]
-};
-
-/* ---------- the eight icon-row icons, 8 x 8 ---------- */
+/* ---------- row icons: 8 x 8 DOM glyphs, unchanged (the five the pet's row shows plus old names) -- */
 var ICONS={
   food:["........","..k.k.k.",".k.k.k..","kkkkkkkk","k......k",".k....k.","..kkkk..","........"],
   play:["..kkkk..",".k..k.k.","k..k...k","kkk...kk","k...kk.k","k..k...k",".k.k..k.","..kkkk.."],
@@ -947,33 +1108,213 @@ var SOUV=[
   "................"]}
 ];
 
-/* ---------- the room: 81 x 60 room pixels, style B ---------- */
-var ROOM_W=81, ROOM_H=60;
-function put(buf,w,h,x,y,t){
+/* ---------- props at double size ----------------------------------------------------------------- */
+function propCanvas(w,h){ return rows(blankGrid(w,h,".")); }
+function propOutline(g,x,y,w,h,t){
+  fill(g,x,y,w,t,"k");
+  fill(g,x,y+h-t,w,t,"k");
+  fill(g,x,y,t,h,"k");
+  fill(g,x+w-t,y,t,h,"k");
+}
+function propCard(){
+  var g=propCanvas(18,14);
+  propOutline(g,0,0,18,14,1);
+  fill(g,1,1,16,12,"p");
+  fill(g,2,2,7,7,"d");
+  fill(g,3,3,5,5,"m");
+  px(g,5,3,"p"); px(g,4,5,"p"); px(g,3,6,"p");
+  hline(g,11,4,4,"k"); hline(g,11,6,4,"k"); hline(g,11,8,4,"d"); hline(g,11,10,3,"d");
+  return join(g);
+}
+function propFlag(blank){
+  var g=propCanvas(16,28);
+  fill(g,2,0,2,28,"k");
+  fill(g,0,1,12,12,"k");
+  fill(g,1,2,10,10,blank?"p":"m");
+  if(!blank){
+    hline(g,2,4,8,"d");
+    px(g,5,7,"p"); px(g,6,6,"p"); px(g,7,7,"p"); px(g,6,8,"p");
+    hline(g,3,10,7,"d");
+  }
+  return join(g);
+}
+function propBooks(){
+  var g=propCanvas(24,18);
+  fill(g,1,13,22,5,"k"); fill(g,2,14,20,3,"m"); hline(g,3,15,18,"p");
+  fill(g,0,8,22,5,"k"); fill(g,1,9,20,3,"d"); hline(g,2,10,18,"p");
+  fill(g,2,3,21,5,"k"); fill(g,3,4,19,3,"m"); hline(g,4,5,17,"p");
+  return join(g);
+}
+function propFilm(){
+  var g=propCanvas(16,14);
+  fill(g,0,0,16,14,"k");
+  fill(g,2,2,12,10,"d");
+  for(var y=2;y<12;y+=3){ px(g,1,y,"p"); px(g,14,y,"p"); }
+  fill(g,4,4,4,6,"m"); fill(g,8,4,4,6,"m");
+  px(g,5,5,"p"); px(g,9,5,"p");
+  return join(g);
+}
+function propDesk(){
+  var g=propCanvas(50,16);
+  fill(g,0,0,50,3,"k");
+  fill(g,1,3,48,8,"p");
+  hline(g,1,11,48,"d");
+  fill(g,0,12,50,2,"k");
+  fill(g,4,14,3,2,"k"); fill(g,43,14,3,2,"k");
+  hline(g,6,5,12,"d"); hline(g,6,7,9,"d");
+  return join(g);
+}
+function propPen(){
+  var g=propCanvas(18,6);
+  fill(g,4,2,10,2,"k");
+  fill(g,5,2,6,1,"d");
+  px(g,14,2,"p"); px(g,15,2,"p"); px(g,15,3,"p");
+  fill(g,6,1,2,1,"m");
+  return join(g);
+}
+function propScarf(){
+  var g=propCanvas(24,12), r, x;
+  /* a looped scarf: a folded band, a knot and two striped tails that swing out at the bottom */
+  fill(g,2,1,20,1,"k"); fill(g,3,2,18,2,"m"); fill(g,3,3,18,1,"p"); fill(g,2,4,20,1,"k");
+  fill(g,10,4,4,3,"k"); fill(g,11,5,2,1,"p");
+  for(r=0;r<6;r++){
+    x=6-(r>2?1:0);
+    hline(g,x,5+r,6,"k");
+    if(r>0 && r<5) fill(g,x+1,5+r,4,1,r===2?"p":(r%2?"m":"d"));
+    x=15+(r>2?1:0);
+    hline(g,x,5+r,6,"k");
+    if(r>0 && r<5) fill(g,x+1,5+r,4,1,r===3?"p":(r%2?"m":"d"));
+  }
+  px(g,5,11,"k"); px(g,7,11,"k"); px(g,9,11,"k");
+  px(g,15,11,"k"); px(g,17,11,"k"); px(g,19,11,"k");
+  return join(g);
+}
+function propMooncake(){
+  var g=propCanvas(20,20);
+  fill(g,4,1,12,1,"k"); fill(g,2,2,16,1,"k"); fill(g,1,3,18,1,"k");
+  fill(g,1,4,18,12,"m"); fill(g,0,5,1,10,"k"); fill(g,19,5,1,10,"k");
+  fill(g,1,16,18,1,"k"); fill(g,2,17,16,1,"k"); fill(g,4,18,12,1,"k");
+  fill(g,4,6,12,1,"d"); fill(g,4,13,12,1,"d");
+  fill(g,8,8,4,4,"d"); px(g,7,9,"d"); px(g,12,9,"d"); px(g,7,11,"d"); px(g,12,11,"d");
+  px(g,9,8,"p"); px(g,10,8,"p");
+  return join(g);
+}
+function propHeart(full){
+  var g=propCanvas(14,12);
+  fill(g,1,2,4,1,"k"); fill(g,9,2,4,1,"k");
+  fill(g,0,3,6,2,"k"); fill(g,8,3,6,2,"k");
+  fill(g,1,5,12,1,"k"); fill(g,2,6,10,1,"k");
+  fill(g,3,7,8,1,"k"); fill(g,4,8,6,1,"k"); fill(g,5,9,4,1,"k");
+  if(full){
+    fill(g,2,3,4,2,"d"); fill(g,8,3,4,2,"d");
+    fill(g,3,5,8,1,"d"); fill(g,4,6,6,1,"d"); fill(g,5,7,4,1,"d");
+  }
+  return join(g);
+}
+function propSign(){
+  var g=propCanvas(32,22);
+  propOutline(g,0,0,32,16,2);
+  fill(g,2,2,28,12,"p");
+  hline(g,6,6,20,"k"); hline(g,6,9,14,"d"); hline(g,6,11,17,"d");
+  fill(g,7,16,3,6,"k"); fill(g,22,16,3,6,"k");
+  return join(g);
+}
+function propZz(){
+  var g=propCanvas(24,24);
+  hline(g,3,3,9,"k"); for(var i=0;i<6;i++) px(g,11-i,4+i,"k"); hline(g,3,10,9,"k");
+  hline(g,12,13,7,"k"); for(i=0;i<4;i++) px(g,18-i,14+i,"k"); hline(g,12,18,7,"k");
+  return join(g);
+}
+function propBowl(full){
+  var g=propCanvas(20,14);
+  if(full){
+    hline(g,6,0,8,"d"); hline(g,4,1,12,"d"); hline(g,2,2,16,"d");
+    fill(g,4,3,12,1,"m");
+  }
+  fill(g,0,3,20,2,"k");
+  for(var i=0;i<6;i++){
+    var w=18-i*2, x=1+i;
+    hline(g,x,5+i,w,"p");
+    px(g,x-1,5+i,"k"); px(g,x+w,5+i,"k");
+    px(g,x,5+i,"d"); px(g,x+w-1,5+i,"d");
+  }
+  hline(g,5,11,10,"k"); hline(g,7,12,6,"k");
+  px(g,6,11,"p"); px(g,13,11,"p");
+  hline(g,3,13,14,"d");
+  return join(g);
+}
+function propPoop(){
+  var g=propCanvas(14,12);
+  hline(g,5,1,4,"k");
+  hline(g,4,2,6,"m"); hline(g,3,3,8,"m"); px(g,3,3,"k"); px(g,10,3,"k");
+  hline(g,2,4,10,"m"); px(g,2,4,"k"); px(g,11,4,"k");
+  hline(g,2,5,10,"d"); px(g,2,5,"k"); px(g,11,5,"k");
+  hline(g,1,6,12,"m"); px(g,1,6,"k"); px(g,12,6,"k");
+  hline(g,1,7,12,"d"); px(g,1,7,"k"); px(g,12,7,"k");
+  hline(g,2,8,10,"k"); hline(g,3,9,8,"k");
+  hline(g,4,10,6,"d");
+  return join(g);
+}
+var PROPS={
+  card:propCard(),
+  flag:propFlag(false),
+  flagBlank:propFlag(true),
+  books:propBooks(),
+  film:propFilm(),
+  desk:propDesk(),
+  pen:propPen(),
+  scarf:propScarf(),
+  mooncake:propMooncake(),
+  heart:propHeart(true),
+  heartE:propHeart(false),
+  sign:propSign(),
+  zz:propZz(),
+  bowl:propBowl(true),
+  bowlEmpty:propBowl(false),
+  poop:propPoop()
+};
+
+/* ---------- the room: 162 x 120 room pixels ---------------------------------------------------- */
+var ROOM_W=162, ROOM_H=120;
+function bput(buf,w,h,x,y,t){
   x=Math.floor(x); y=Math.floor(y);
   if(x<0||y<0||x>=w||y>=h) return;
   buf[y*w+x]=t;
 }
-function rect(buf,w,h,x,y,rw,rh,t){
-  for(var r=0;r<rh;r++) for(var c=0;c<rw;c++) put(buf,w,h,x+c,y+r,t);
+function brect(buf,w,h,x,y,rw,rh,t){
+  for(var r=0;r<rh;r++) for(var c=0;c<rw;c++) bput(buf,w,h,x+c,y+r,t);
 }
+function bhline(buf,w,h,x,y,rw,t){ brect(buf,w,h,x,y,rw,1,t); }
 function blit(buf,w,h,grid,x,y){
   if(!grid) return buf;
   for(var r=0;r<grid.length;r++){
-    var row=grid[r], line=String(row);
+    var line=String(grid[r]);
     for(var c=0;c<line.length;c++){
       var t=TONE_OF[line.charAt(c)];
-      if(t!==undefined) put(buf,w,h,x+c,y+r,t);
+      if(t!==undefined) bput(buf,w,h,x+c,y+r,t);
     }
   }
   return buf;
 }
-/* any non-transparent cell in one tone: the night Zz is drawn after darkening so it stays paper */
-function blitTone(buf,w,h,grid,x,y,t){
-  if(!grid) return buf;
+function blitScaled(buf,w,h,grid,x,y,scale,tone){
+  if(!grid) return;
   for(var r=0;r<grid.length;r++){
     var line=String(grid[r]);
-    for(var c=0;c<line.length;c++) if(line.charAt(c)!==".") put(buf,w,h,x+c,y+r,t);
+    for(var c=0;c<line.length;c++){
+      var ch=line.charAt(c);
+      if(ch===".") continue;
+      var t=tone!==undefined?tone:TONE_OF[ch];
+      if(t===undefined) continue;
+      brect(buf,w,h,x+c*scale,y+r*scale,scale,scale,t);
+    }
+  }
+}
+/* any non-transparent cell in one tone: the night Zz is drawn after darkening so it stays paper */
+function blitTone(buf,w,h,grid,x,y,t){
+  if(!grid) return;
+  for(var r=0;r<grid.length;r++){
+    var line=String(grid[r]);
+    for(var c=0;c<line.length;c++) if(line.charAt(c)!==".") bput(buf,w,h,x+c,y+r,t);
   }
   return buf;
 }
@@ -981,127 +1322,199 @@ function darken(buf){
   for(var i=0;i<buf.length;i++) buf[i]=DARK[buf[i]]||0;
   return buf;
 }
-var CLOUD=["..pppp....",".pppppp.pp","pppppppppp"];
-var CLOUD2=["..pppp..",".pppppp.","pppppppp"];
-var Moon=["..pp.","...pp","...pp","..pp."];
-var STARS=[[8,9],[11,15],[20,17],[9,18]];
-var SUN=["..p..",".ppp.","ppppp",".ppp.","..p.."];
-var BOOKS=[[58,15,"d",3],[61,13,"m",2],[63,16,"k",3],[66,14,"d",2],[68,12,"m",3],[71,15,"d",2],[73,16,"m",3],
-           [58,30,"m",2],[60,28,"k",3],[63,31,"d",2],[65,29,"m",3],[68,30,"d",2],[70,28,"m",3],[73,31,"k",3]];
-var POOPS=[[22,51],[27,52],[32,51]];
+var WIN={x:10,y:10,w:40,h:36};
+var MOON=["..pp.","...pp","...pp","..pp."];
+var STARS=[[18,15],[44,15],[18,40],[44,40],[33,12]];
+var CLOUD=[
+  "....pppppp......",
+  "..pppppppppp....",
+  ".pppppppppppppp.",
+  "pppppppppppppppp",
+  ".pppppppppppppp.",
+  "....pppppppp...."
+];
+var SUN=[
+  "..p..",
+  ".ppp.",
+  "ppppp",
+  ".ppp.",
+  "..p.."
+];
+var POOPS=[[50,107],[57,108],[64,107]];
+var BOOKS=[
+  [118,21,5,28,"d"],[124,25,4,24,"m"],[129,20,6,29,"k",true],
+  [136,27,5,22,"m"],[142,23,4,26,"d"],[147,19,3,30,"m"],[151,26,4,23,"d",true],
+  [118,56,4,17,"m"],[123,58,6,15,"d"],[130,54,4,19,"k"],
+  [135,57,5,16,"m",true],[141,55,3,18,"d"],[145,59,6,14,"m"],[152,54,3,19,"d"],
+  [118,78,5,17,"m"],[124,80,4,15,"d"],[129,77,6,18,"m",true],
+  [136,81,3,14,"k"],[140,79,5,16,"d"],[146,77,4,18,"m"],[151,80,4,15,"d"]
+];
 
-/* The day's weather, inside the window's inner pane only (x 6-23, y 7-20). "sun" clears the default cloud;
-   rain and snow fall at night too; wind is a few bent lines. */
+/* Weather marks at double size, painted only inside the window's inner pane. The day's rain, wind and
+   cloud are ink on mid; at night the same marks are paper on the dark sky. */
 function weatherMark(buf,w,h,weather,night){
-  var s=String(weather||""), r, c, x, y, t=night?3:0;
+  var s=String(weather||""), r, c, x, y, t=night?3:0, ink=night?3:0;
   if(!s) return;
   if(s==="sun" && !night){
-    blit(buf,w,h,SUN,16,8);
-    for(r=0;r<3;r++){ put(buf,w,h,15+r*3,7,3); put(buf,w,h,15+r*3,14,3); }
-    put(buf,w,h,14,9,3); put(buf,w,h,14,12,3); put(buf,w,h,21,9,3); put(buf,w,h,21,12,3);
+    blit(buf,w,h,SUN,33,16);
+    for(r=0;r<5;r++){
+      bput(buf,w,h,32,15+r,3); bput(buf,w,h,38,15+r,3);
+      bput(buf,w,h,32+r,14,3); bput(buf,w,h,32+r,21,3);
+    }
   } else if(s==="cloud"){
-    blit(buf,w,h,night?CLOUD2:CLOUD,night?7:8,night?8:9);
-    blit(buf,w,h,CLOUD2,14,16);
+    blit(buf,w,h,CLOUD,17,14);
+    if(night) blitTone(buf,w,h,CLOUD,17,14,3);
   } else if(s==="rain"){
-    if(night) blit(buf,w,h,CLOUD2,7,8);
-    else blit(buf,w,h,CLOUD,7,8);
-    for(y=11;y<20;y++){
-      x=7+((y*5)%11);
-      put(buf,w,h,x,y,t);
-      if(y+1<20) put(buf,w,h,x,(y+1),t);
+    blit(buf,w,h,CLOUD,17,14);
+    if(night) blitTone(buf,w,h,CLOUD,17,14,3);
+    for(y=22;y<42;y+=5){
+      x=14+((y*5)%30);
+      for(r=0;r<2;r++) bput(buf,w,h,x+r,y,ink);
+      bput(buf,w,h,x,y+1,ink);
     }
   } else if(s==="snow"){
-    var flakes=[[8,9],[12,11],[19,9],[10,14],[15,13],[21,15],[9,18],[17,18],[13,19]];
+    var flakes=[[15,24],[22,31],[31,24],[39,32],[17,38],[28,39],[43,23],[42,38],[35,40]];
     for(var i=0;i<flakes.length;i++){
-      put(buf,w,h,flakes[i][0],flakes[i][1],3);
-      put(buf,w,h,flakes[i][0]+1,flakes[i][1],3);
-      put(buf,w,h,flakes[i][0],flakes[i][1]+1,3);
+      for(r=0;r<3;r++) for(c=0;c<3;c++){
+        if((r===1 || c===1)) bput(buf,w,h,flakes[i][0]-1+c,flakes[i][1]-1+r,3);
+      }
     }
   } else if(s==="wind"){
-    for(y=9;y<20;y+=3){
-      x=7+((y*3)%5);
-      for(c=0;c<9;c++) put(buf,w,h,x+c,y+(c%3===0?-1:0),night?3:1);
+    for(y=17;y<42;y+=6){
+      x=14+((y*3)%5);
+      for(c=0;c<26;c++) bput(buf,w,h,x+c,y+(c%4===0?-1:0),ink);
+      bput(buf,w,h,x+26,y+1,ink); bput(buf,w,h,x+27,y,ink);
     }
   }
 }
-
 /* A small seasonal mark in the window, so the room notices the year without a new layout. */
 function seasonMark(buf,w,h,season){
   var s=String(season||"").toLowerCase();
   if(/spring|春/.test(s)){
-    put(buf,w,h,8,9,3); put(buf,w,h,9,9,3); put(buf,w,h,8,10,3); put(buf,w,h,10,10,3);
+    bput(buf,w,h,15,38,3); bput(buf,w,h,16,38,3); bput(buf,w,h,15,39,3); bput(buf,w,h,17,39,3);
+    bput(buf,w,h,16,40,3);
   } else if(/summer|夏/.test(s)){
-    put(buf,w,h,20,8,3); put(buf,w,h,21,8,3); put(buf,w,h,20,9,3); put(buf,w,h,21,9,3);
+    bput(buf,w,h,43,37,3); bput(buf,w,h,44,37,3); bput(buf,w,h,43,38,3); bput(buf,w,h,44,38,3);
   } else if(/autumn|fall|秋/.test(s)){
-    put(buf,w,h,19,17,1); put(buf,w,h,20,18,1); put(buf,w,h,19,18,1); put(buf,w,h,18,18,1);
+    bput(buf,w,h,14,16,1); bput(buf,w,h,15,17,1); bput(buf,w,h,14,17,1); bput(buf,w,h,13,17,1);
   } else if(/winter|冬/.test(s)){
-    put(buf,w,h,8,9,3); put(buf,w,h,11,18,3); put(buf,w,h,20,18,3); put(buf,w,h,17,8,3);
+    bput(buf,w,h,15,15,3); bput(buf,w,h,44,15,3); bput(buf,w,h,15,41,3); bput(buf,w,h,44,41,3);
   }
 }
+function drawWindow(buf,w,h,scene){
+  var night=!!scene.night, weather=String(scene.weather||"");
+  brect(buf,w,h,WIN.x,WIN.y,WIN.w,WIN.h,0);
+  brect(buf,w,h,WIN.x+2,WIN.y+2,WIN.w-4,WIN.h-4,night?0:2);
+  if(night){
+    blit(buf,w,h,MOON,33,14);
+    for(var i=0;i<STARS.length;i++) bput(buf,w,h,STARS[i][0],STARS[i][1],3);
+  }
+  weatherMark(buf,w,h,weather,night);
+  seasonMark(buf,w,h,scene.season);
+  /* the four panes, on top so no weather spills over a bar */
+  brect(buf,w,h,29,12,2,32,0);
+  brect(buf,w,h,12,27,36,2,0);
+  /* sill */
+  brect(buf,w,h,8,46,44,2,1);
+  bhline(buf,w,h,9,48,42,0);
+}
+function drawCalendar(buf,w,h,scene){
+  brect(buf,w,h,60,14,28,34,0);
+  brect(buf,w,h,62,16,24,28,3);
+  brect(buf,w,h,62,16,24,6,1);
+  brect(buf,w,h,65,13,2,3,0);
+  brect(buf,w,h,81,13,2,3,0);
+  var day=Math.max(1,Math.min(31,Number(scene.dayOfMonth)||1));
+  var num=numberGrid(day), nw=String(num[0]).length*2;
+  blitScaled(buf,w,h,num,62+Math.floor((24-nw)/2),25,2,0);
+}
+function drawShelf(buf,w,h,scene,room){
+  /* the little wall shelf leaves a 16 x 16 slot for one souvenir: board at y 46, the find sits on it */
+  var at=room.shelfAt||[93,30];
+  brect(buf,w,h,90,46,23,2,1);
+  bhline(buf,w,h,90,48,23,0);
+  brect(buf,w,h,91,49,2,3,0);
+  brect(buf,w,h,110,49,2,3,0);
+  bhline(buf,w,h,91,45,21,3);
+  if(scene.shelf){
+    var sx=(scene.shelfX!==undefined)?scene.shelfX:at[0];
+    var sy=(scene.shelfY!==undefined)?scene.shelfY:at[1];
+    blit(buf,w,h,scene.shelf,sx,sy);
+  }
+}
+function drawFurniture(buf,w,h,scene,room){
+  var x, y, i;
+  /* wall: paper with a grid of soft 12 px spaced 2 x 2 dots */
+  brect(buf,w,h,0,0,w,83,3);
+  for(y=6;y<84;y+=12){
+    var off=(Math.floor(y/12)%2)?6:0;
+    for(x=6+off;x<w;x+=12) brect(buf,w,h,x,y,2,2,2);
+  }
+  bhline(buf,w,h,0,83,w,1);
+  bhline(buf,w,h,0,84,w,0);
+  bhline(buf,w,h,0,85,w,0);
+  /* the plank floor */
+  brect(buf,w,h,0,86,w,h-86,2);
+  for(y=94;y<h;y+=8) bhline(buf,w,h,0,y,w,1);
+  for(i=0;i<4;i++){
+    var top=86+i*8;
+    for(x=(i%2?21:0);x<w;x+=42) brect(buf,w,h,x,top+1,1,6,1);
+  }
+  [[30,90],[74,98],[128,110],[52,114]].forEach(function(q){
+    bput(buf,w,h,q[0],q[1],1); bput(buf,w,h,q[0]+1,q[1],1); bput(buf,w,h,q[0],q[1]+1,1);
+  });
+  drawWindow(buf,w,h,scene);
+  drawCalendar(buf,w,h,scene);
+  drawShelf(buf,w,h,scene,room);
 
+  /* bookshelf: dark case, paper back, two shelves of books */
+  brect(buf,w,h,114,16,44,80,0);
+  brect(buf,w,h,116,18,40,76,3);
+  bhline(buf,w,h,116,50,40,0);
+  bhline(buf,w,h,116,51,40,0);
+  bhline(buf,w,h,116,74,40,0);
+  bhline(buf,w,h,116,75,40,0);
+  for(i=0;i<BOOKS.length;i++){
+    var b=BOOKS[i], bh=(b[1]<50?50:b[1]<74?74:95)-b[1];
+    brect(buf,w,h,b[0],b[1],b[2],bh,TONE_OF[b[4]]);
+    if(b[5]){ bhline(buf,w,h,b[0],b[1]+6,b[2],3); bhline(buf,w,h,b[0],b[1]+7,b[2],3); }
+  }
+
+  /* bed in the left corner */
+  brect(buf,w,h,4,58,7,30,0); fill(buf,w,h,5,59,5,28,1);
+  brect(buf,w,h,6,56,3,2,0);
+  brect(buf,w,h,9,68,43,16,0); brect(buf,w,h,10,69,41,14,3);
+  brect(buf,w,h,10,83,41,2,1); brect(buf,w,h,10,85,41,2,0);
+  brect(buf,w,h,11,69,16,10,0); brect(buf,w,h,12,70,14,8,3);
+  bhline(buf,w,h,12,76,14,1);
+  brect(buf,w,h,27,69,24,17,0); brect(buf,w,h,28,70,22,15,2);
+  brect(buf,w,h,28,70,22,2,3);
+  bhline(buf,w,h,28,79,22,1); bhline(buf,w,h,28,82,22,1);
+  brect(buf,w,h,12,87,3,5,0); brect(buf,w,h,48,87,3,5,0);
+  bhline(buf,w,h,9,92,43,1);
+
+  /* the rug the pet stands on */
+  brect(buf,w,h,70,98,56,19,0);
+  brect(buf,w,h,72,100,52,15,3);
+  for(x=74;x<122;x+=8){ brect(buf,w,h,x,102,2,2,2); brect(buf,w,h,x+4,111,2,2,2); }
+  bhline(buf,w,h,97,102,3,1);
+  bput(buf,w,h,96,103,1); bhline(buf,w,h,97,103,3,2); bput(buf,w,h,100,103,1);
+  bput(buf,w,h,95,104,1); bhline(buf,w,h,96,104,5,2); bput(buf,w,h,101,104,1);
+  bput(buf,w,h,96,105,1); bhline(buf,w,h,97,105,3,2); bput(buf,w,h,100,105,1);
+  bhline(buf,w,h,97,106,3,1);
+
+  /* bowl and the little piles, from this room's own props */
+  var bowlAt=room.bowlAt||[25,97];
+  blit(buf,w,h,scene.bowlFull?room.bowl:room.bowlEmpty,bowlAt[0],bowlAt[1]);
+  var mess=Math.max(0,Math.min(3,Number(scene.mess)||0)), poops=room.poops||POOPS;
+  for(i=0;i<mess;i++) if(poops[i]) blit(buf,w,h,room.poop,poops[i][0],poops[i][1]);
+}
 /* The furniture and the room's own props. A pack may keep this painter and only swap its grids;
    a second room can replace draw entirely and still get the pet, prop, sign and Zz from drawRoom. */
 function paintRoom(buf,w,h,scene,pack){
-  var room=(pack&&pack.room)||CHIP_ROOM, x, y, row;
-  /* the wall, its dot pattern, and the plank floor */
-  rect(buf,w,h,0,0,w,h,3);
-  for(y=2;y<42;y+=6) for(x=(y%12===2?1:4);x<w;x+=6) put(buf,w,h,x,y,2);
-  rect(buf,w,h,0,43,w,1,0);
-  rect(buf,w,h,0,44,w,h-44,2);
-  for(y=47;y<h;y+=4) rect(buf,w,h,0,y,w,1,1);
-  for(row=0;row<4;row++) for(x=(row%2?4:12);x<w;x+=18) rect(buf,w,h,x,44+row*4+1,1,3,1);
-
-  /* window: day sky with the day's weather, or night with the moon and a few stars */
-  rect(buf,w,h,5,6,20,16,0);
-  var weather=String(scene.weather||"");
-  if(scene.night){
-    rect(buf,w,h,6,7,18,14,0);
-    blit(buf,w,h,Moon,17,9);
-    STARS.forEach(function(p){ put(buf,w,h,p[0],p[1],3); });
-  } else {
-    rect(buf,w,h,6,7,18,14,2);
-    if(weather!=="sun") blit(buf,w,h,CLOUD,9,10);
-  }
-  seasonMark(buf,w,h,scene.season);
-  weatherMark(buf,w,h,weather,!!scene.night);
-  rect(buf,w,h,14,7,1,14,1);
-  rect(buf,w,h,6,13,18,1,1);
-
-  /* the wall calendar: a dark header and today's number in three-by-five digits */
-  rect(buf,w,h,31,7,11,13,0);
-  rect(buf,w,h,32,8,9,1,1);
-  rect(buf,w,h,32,9,9,10,3);
-  var day=Math.max(1,Math.min(31,Number(scene.dayOfMonth)||1)), ds=String(day);
-  if(ds.length<2) blit(buf,w,h,digitGrid(day),35,11);
-  else blit(buf,w,h,numberGrid(day),33,11);
-
-  /* bookshelf, with books at two heights */
-  rect(buf,w,h,56,10,22,33,0);
-  rect(buf,w,h,57,11,20,31,3);
-  rect(buf,w,h,57,25,20,1,0);
-  BOOKS.forEach(function(b){
-    var top=b[1], bh=(b[1]<25?25:42)-top;
-    rect(buf,w,h,b[0],top,b[3],bh,TONE_OF[b[2]]);
-  });
-
-  /* bed in the left corner */
-  rect(buf,w,h,3,38,18,6,0);
-  rect(buf,w,h,4,39,16,4,3);
-  rect(buf,w,h,4,39,5,2,2);
-
-  /* the rug: a small rectangle with an ink border and a simple mid pattern, under the pet's feet */
-  rect(buf,w,h,38,48,16,5,0);
-  rect(buf,w,h,39,49,14,3,3);
-  for(x=40;x<52;x+=4){ put(buf,w,h,x,49,2); put(buf,w,h,x+1,51,2); }
-  put(buf,w,h,46,50,1); put(buf,w,h,47,50,1);
-
-  /* bowl and the little piles, from this room's own props */
-  var bowlAt=room.bowlAt||[9,47];
-  blit(buf,w,h,scene.bowlFull?room.bowl:room.bowlEmpty,bowlAt[0],bowlAt[1]);
-  var mess=Math.max(0,Math.min(3,Number(scene.mess)||0)), poops=room.poops||POOPS;
-  for(var m=0;m<mess;m++) if(poops[m]) blit(buf,w,h,room.poop,poops[m][0],poops[m][1]);
+  var room=(pack&&pack.room)||CHIP_ROOM;
+  drawFurniture(buf,w,h,scene,room);
 }
-
 function drawRoom(buf,w,h,scene){
   scene=scene||{};
   var pack=scene.pack;
@@ -1113,33 +1526,33 @@ function drawRoom(buf,w,h,scene){
   drawFn(buf,w,h,scene,pack);
 
   /* one pet spot for the pet, the prop and Zz; a caller may move any of them */
-  var petX=(scene.petX!==undefined)?scene.petX:(room.petX!==undefined?room.petX:40);
-  var petY=(scene.petY!==undefined)?scene.petY:(room.petY!==undefined?room.petY:36);
+  var petX=(scene.petX!==undefined)?scene.petX:(room.petX!==undefined?room.petX:83);
+  var petY=(scene.petY!==undefined)?scene.petY:(room.petY!==undefined?room.petY:69);
   if(scene.pet) blit(buf,w,h,scene.pet,petX,petY);
 
   if(scene.prop){
     var pw=gridWidth(scene.prop), ph=gridHeight(scene.prop);
-    var px=(scene.propX!==undefined)?scene.propX:petX+(room.propDx!==undefined?room.propDx:17);
-    var py=(scene.propY!==undefined)?scene.propY:petY+16-ph;
-    if(px>w-pw) px=w-pw;
-    if(py>h-ph) py=h-ph;
-    if(px<0) px=0; if(py<0) py=0;
-    blit(buf,w,h,scene.prop,px,py);
+    var px0=(scene.propX!==undefined)?scene.propX:petX+(room.propDx!==undefined?room.propDx:36);
+    var py0=(scene.propY!==undefined)?scene.propY:petY+32-ph;
+    if(px0>w-pw) px0=w-pw;
+    if(py0>h-ph) py0=h-ph;
+    if(px0<0) px0=0; if(py0<0) py0=0;
+    blit(buf,w,h,scene.prop,px0,py0);
   }
 
   /* the away sign: the board can be passed in, otherwise the room's own sign */
   if(scene.sign){
-    var sg=(scene.sign.length && typeof scene.sign!=="string")?scene.sign:room.sign;
-    var at=room.signAt||[32,37];
+    var sg=(scene.sign.length && typeof scene.sign!=="string" && typeof scene.sign!=="boolean")?scene.sign:room.sign;
+    var at=room.signAt||[62,60];
     var sx=(scene.signX!==undefined)?scene.signX:at[0], sy=(scene.signY!==undefined)?scene.signY:at[1];
     blit(buf,w,h,sg,sx,sy);
   }
 
   var zx=0, zy=0;
   if(scene.zz){
-    zx=petX+(room.zzDx!==undefined?room.zzDx:13);
-    zy=petY+(room.zzDy!==undefined?room.zzDy:-10);
-    if(zx>w-12) zx=w-12; if(zx<0) zx=0;
+    zx=petX+(room.zzDx!==undefined?room.zzDx:28);
+    zy=petY+(room.zzDy!==undefined?room.zzDy:-22);
+    if(zx>w-24) zx=w-24; if(zx<0) zx=0;
     if(zy<0) zy=0;
     blit(buf,w,h,room.zz,zx,zy);
   }
@@ -1152,17 +1565,21 @@ function drawRoom(buf,w,h,scene){
 }
 
 var CHIP_ROOM={
+  id:"chip",
   w:ROOM_W, h:ROOM_H,
-  petX:40, petY:36,
+  petX:83, petY:69,
+  window:WIN,
   bowl:PROPS.bowl, bowlEmpty:PROPS.bowlEmpty, poop:PROPS.poop, sign:PROPS.sign, zz:PROPS.zz,
-  bowlAt:[9,47],
+  bowlAt:[25,97],
   poops:POOPS,
-  signAt:[32,37],
-  propDx:17,
-  zzDx:13, zzDy:-10,
+  signAt:[62,60],
+  shelfAt:[93,30],
+  propDx:36,
+  zzDx:28, zzDy:-22,
   draw:paintRoom
 };
 
+/* ---------- the pack --------------------------------------------------------------------------- */
 var CHIP_PACK={
   id:"chip",
   name:{zh:"芯仔",en:"Chip"},
@@ -1172,10 +1589,11 @@ var CHIP_PACK={
   adult:adult,
   egg:CHIP_EGG,
   eggCrack:CHIP_EGG_CRACK,
-  baby:CHIP_BABY,
-  child:CHIP_CHILD,
-  marks:{ant:["ball","stick","fork","bent"],pat:["plain","dot","stripe","trace"],eye:["dot","bar","big"]},
-  forms:["book","walk","scholar","diary","monster","plain"],
+  baby:frontFrame("baby","idle1",{}),
+  child:frontFrame("child","idle1",{}),
+  /* six antennas and three eye shapes: 18 looks. Old saves use the same index slots; `pat` is gone. */
+  marks:{ant:ANT_IDS, eye:EYE_IDS},
+  forms:FORM_IDS,
   props:PROPS,
   room:CHIP_ROOM,
   icons:ICONS,
@@ -1184,11 +1602,12 @@ var CHIP_PACK={
 };
 var PACKS={chip:CHIP_PACK};
 
-/* Every frame name the program and the play packs ask for, in one list the tests can enumerate. The room uses the
-   faces, the games use the standard front and side poses, and the idle varieties name a mood that is then shifted. */
-var FRAME_NAMES=["idle","idle1","idle2","blink","eat1","eat2","happy","sleep","wait","surprised","sad","angry",
-  "sulk","walk1","walk2","jump","fall","catch","hold","flap1","flap2","look","lookL","lookR","sit"];
-/* Ink plus dark pixels: the minimum that makes a 16 x 16 frame a visible pet rather than an empty box. */
+/* Every frame name the program and the play packs ask for, in one list the tests can enumerate. The room
+   uses the faces, the games use the standard front and side poses, and the idle varieties name a mood
+   that is then shifted. look-left / look-right are the long spellings of the program's lookL / lookR. */
+var FRAME_NAMES=["idle","idle1","idle2","blink","eat1","eat2","happy","walk1","walk2","sleep","wait","surprised",
+  "sad","angry","sulk","hold","jump","fall","catch","flap1","flap2","look","lookL","lookR","look-left","look-right","sit"];
+/* Ink plus dark pixels: the minimum that makes a 32 x 32 frame a visible pet rather than an empty box. */
 function frameInk(g){
   var n=0, r, c, line;
   if(!g) return 0;
