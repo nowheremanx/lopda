@@ -607,13 +607,18 @@ function colourStrip(r,small){
   return {pal:[e.base,e.holes,e.text,e.text], res:r.res, size:r.size, loaded:r.loaded, out:r.out, lead:stock,
     edges:[stock, "LO-PDA "+stock], edgeInk:css(e.edge), marks:r.frames.map(lensMark), colour:small};
 }
+/* the shooting offset in the negative is trusted only when it is a plausible minute count */
+function frameTz(f){
+  var tz=f.tz;
+  return typeof tz==="number" && isFinite(tz) && tz===Math.floor(tz) && tz>=-840 && tz<=840 ? tz : -new Date(f.taken).getTimezoneOffset();
+}
 /* the single print leaves as a JPEG with the shooting time in EXIF (decisions.md section 38); no taken, no EXIF */
 function jpegPrint(cv,f,name){
   return new Promise(function(resolve,reject){
     cv.toBlob(function(blob){
       if(!blob){ reject({code:"bad_request"}); return; }
       if(!f || typeof f.taken!=="number"){ resolve({blob:blob, name:name}); return; }
-      var tz=typeof f.tz==="number" ? f.tz : -new Date(f.taken).getTimezoneOffset();
+      var tz=frameTz(f);
       bytesOf(blob).then(function(bytes){
         var out=EXIF.insert(bytes,{taken:f.taken, tz:tz, software:"Lo-PDA "+LP.RUNTIME_VERSION});
         resolve({blob:new Blob([out],{type:"image/jpeg"}), name:name});

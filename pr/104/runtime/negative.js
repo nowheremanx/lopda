@@ -6,17 +6,19 @@
  * docs/design/darkroom.md section 5.
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  *
- * Chunk data, format version 2:
+ * Chunk data, format version 2 or 3:
  *   "LOPDA-NEG" (9 bytes) | version (1 byte) | JSON length (uint32 BE) | JSON (UTF-8) | 2-bit pixels | JPEGs | CRC32 (uint32 BE)
  * The CRC covers everything before it. JSON: {roll, latent}, with px omitted from each frame; pixels are packed
  * four per byte, most significant bits first. latent[k] is [offset, length] into the JPEG area for frame k, or null.
  * Format version 1 stored each frame's px string in the JSON and put JPEGs immediately after it.
+ * Format version 3 is version 2 byte for byte: it only says the frames carry tz (minutes east of UTC), so a runtime
+ * before 0.39.0 refuses it with "version" ("升级以后才能看") instead of calling the file damaged.
  * A developed roll has roll.dev {v, seed, at} (runtime 0.20.0); it needs no new format version, older runtimes ignore it.
  */
 (function(){
 "use strict";
 
-var MAGIC="LOPDA-NEG", VERSION=2, CHUNK="lpDa";
+var MAGIC="LOPDA-NEG", VERSION=3, CHUNK="lpDa";
 var SIG=[137,80,78,71,13,10,26,10];
 
 /* every failure is one of three: not a Lo-PDA negative at all, a damaged one, or one from a newer handheld */
@@ -77,8 +79,8 @@ function chunkBytes(type,data){
 }
 
 /* the roll as the darkroom keeps it, checked field by field: an import takes all of it or nothing */
-/* tz (minutes east of UTC, runtime 0.39.0) is in the whitelist: runtimes before 0.39.0 refuse a negative whole
-   when its frames carry it (one-off; nothing is lost, the file stays as exported and imports on this version). */
+/* tz (minutes east of UTC, runtime 0.39.0) is in the whitelist. A roll whose frames carry it packs as format 3,
+   which older runtimes refuse with "version" (one-off; nothing is lost, import it again on 0.39.0). */
 var FRAME_KEYS={n:1, px:1, taken:1, tz:1, dated:1, lens:1, exposure:1, contrast:1, blank:1};
 function int(v,a,b){ return typeof v==="number" && v===Math.floor(v) && v>=a && v<=b; }
 /* a developed roll carries how it was developed (darkroom step 2): the algorithm's version, the develop seed and when.
@@ -138,10 +140,12 @@ function pack(png,roll,jpegs){
     else latent.push(null);
   });
   var pixelsPerFrame=128*roll.res*112*roll.res, pixelBytes=roll.frames.length*pixelsPerFrame/4;
+  var version=2;
+  for(var fk=0;fk<roll.frames.length;fk++) if(typeof roll.frames[fk].tz==="number"){ version=3; break; }
   var json=utf8(JSON.stringify({roll:rollWithoutPixels(roll), latent:latent}));
   var data=new Uint8Array(MAGIC.length+1+4+json.length+pixelBytes+bin+4), o=0;
   data.set(ascii(MAGIC),0); o=MAGIC.length;
-  data[o++]=VERSION;
+  data[o++]=version;
   setU32(data,o,json.length); o+=4;
   data.set(json,o); o+=json.length;
   for(var k=0;k<roll.frames.length;k++){
@@ -182,14 +186,14 @@ function unpack(u8){
   var d=u8.subarray(c.data,c.data+c.len), head=MAGIC.length+1+4;
   if(d.length<head+4 || asciiAt(d,0,MAGIC.length)!==MAGIC) throw fail("notneg","magic");
   var version=d[MAGIC.length];
-  if(version!==1 && version!==2) throw fail("version","format "+version);
+  if(version!==1 && version!==2 && version!==3) throw fail("version","format "+version);
   if(crc32(d,0,d.length-4)!==u32(d,d.length-4)) throw fail("damaged","content CRC");
   var jlen=u32(d,MAGIC.length+1);
   if(head+jlen>d.length-4) throw fail("damaged","JSON length");
   var meta;
   try{ meta=JSON.parse(fromUtf8(d.subarray(head,head+jlen))); }catch(e){ throw fail("damaged","JSON"); }
   var binStart=head+jlen, pixelBytes=0;
-  if(version===2){
+  if(version===2 || version===3){   /* the layout is the same; 3 only marks that the frames carry tz */
     if(!meta || !meta.roll || !Array.isArray(meta.roll.frames) || !int(meta.roll.size,1,36) ||
       meta.roll.frames.length!==meta.roll.size || (meta.roll.res!==1 && meta.roll.res!==2)) throw fail("damaged","roll");
     var pixelsPerFrame=128*meta.roll.res*112*meta.roll.res;
