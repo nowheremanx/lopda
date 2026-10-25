@@ -40,39 +40,84 @@
       <p class="hint store-note" data-i18n="store.note">每个程序都经过社区审核，在隔离的沙盒里运行，不能联网，也碰不到你的其他数据。装好的版本不会自己变，有新版本时这里会提示，也可以一键全部更新。</p>
     </section>
 
-    <!-- SETTINGS -->
+    <!-- SETTINGS: a short menu; the long parts have pages of their own -->
     <section class="view" id="v-settings" hidden>
-      <div class="bar"><h2 data-i18n="set.title">设置</h2></div>
-      <div class="settings">
+      <div class="bar set-bar"><h2 data-i18n="set.title">设置</h2></div>
+      <div class="settings set-menu">
         <div class="set-row">
-          <span data-i18n="set.volume">音量</span>
+          <span class="set-ico" id="set-vol-ico" aria-hidden="true"></span>
+          <span class="set-label" data-i18n="set.volume">音量</span>
           <div class="row">
             <button class="btn ghost" id="set-vol-down" type="button" data-i18n-label="set.voldown" aria-label="调小音量">−</button>
             <span class="vol" id="set-vol" aria-live="polite">▮▮▯▯</span>
             <button class="btn ghost" id="set-vol-up" type="button" data-i18n-label="set.volup" aria-label="调大音量">+</button>
           </div>
         </div>
-        <p class="hint" data-i18n="set.soundnote">外放跟随手机静音键，耳机只看这里的音量；不会打断正在播放的音乐。</p>
+        <p class="hint set-subnote" data-i18n="set.soundnote">外放跟随静音键；耳机只看这里，不打断音乐。</p>
         <div class="set-row">
-          <span data-i18n="set.lang">语言</span>
+          <span class="set-ico" id="set-lang-ico" aria-hidden="true"></span>
+          <span class="set-label" data-i18n="set.lang">语言</span>
           <div class="row" role="radiogroup" aria-label="语言 / Language">
             <button class="btn ghost" type="button" role="radio" data-lang="zh" lang="zh-CN">中文</button>
             <button class="btn ghost" type="button" role="radio" data-lang="en" lang="en">English</button>
           </div>
         </div>
+        <div class="set-row">
+          <span class="set-ico" id="set-sys-ico" aria-hidden="true"></span>
+          <span class="set-label" id="upd-label">系统</span>
+          <button class="btn ghost" id="set-update" type="button" data-i18n="upd.check">检查更新</button>
+        </div>
+        <div class="set-rule" aria-hidden="true"></div>
+        <button class="set-open" id="set-sense-open" type="button">
+          <span class="set-ico" id="set-sense-ico" aria-hidden="true"></span>
+          <span class="set-label" data-i18n="set.sense">传感器与权限</span>
+          <span class="set-state" id="set-sense-state"></span>
+        </button>
+        <button class="set-open" id="set-ai-row" type="button">
+          <span class="set-ico" id="set-ai-ico" aria-hidden="true"></span>
+          <span class="set-label" data-i18n="ai.label">AI 线路</span>
+          <span class="set-state" id="set-ai-open">未接上 ›</span>
+        </button>
+        <button class="set-open" id="set-backup-open" type="button">
+          <span class="set-ico" id="set-backup-ico" aria-hidden="true"></span>
+          <span class="set-label" data-i18n="set.backup">备份与恢复</span>
+          <span class="set-state" id="set-backup-state"></span>
+        </button>
+        <button class="set-open" id="set-share-open" type="button">
+          <span class="set-ico" id="set-share-ico" aria-hidden="true"></span>
+          <span class="set-label" data-i18n="set.share">分享</span>
+          <span class="set-state">›</span>
+        </button>
+        <button class="set-open" id="set-about-open" type="button">
+          <span class="set-ico" id="set-about-ico" aria-hidden="true"></span>
+          <span class="set-label" data-i18n="set.about">关于</span>
+          <span class="set-state">›</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- SENSORS AND PERMISSIONS: the apps allowed tilt, the microphone, the camera or the word book -->
+    <section class="view" id="v-set-sense" hidden>
+      <div class="bar">
+        <button class="btn ghost" id="set-sense-back" type="button" aria-label="返回">◂</button>
+        <h2 data-i18n="set.sense">传感器与权限</h2>
+      </div>
+      <div class="settings">
         <div class="set-sense" id="set-sense">
-          <span data-i18n="set.sense">传感器与相机</span>
+          <span data-i18n="set.sense">传感器与权限</span>
           <ul class="set-sense-list" id="set-sense-list"></ul>
           <p class="hint" id="set-sense-note" data-i18n="set.sense.note">撤销以后，这个程序下次要用时会再问一次。</p>
         </div>
-        <div class="set-ai" id="set-ai">
-          <div class="set-row">
-            <span data-i18n="ai.label">AI 线路</span>
-            <button class="btn ghost" id="set-ai-open" type="button">未接上 ›</button>
-          </div>
-          <p class="hint" data-i18n="ai.note">接上以后，脚本里的「生成」直接请 AI 写程序。key 只存在这台手机上，不进备份；请用设了额度上限的 key。</p>
-          <p class="hint" data-i18n="ai.pet"></p>
-        </div>
+      </div>
+    </section>
+
+    <!-- BACKUP: the whole device as one file (decisions.md section 24) -->
+    <section class="view" id="v-set-backup" hidden>
+      <div class="bar">
+        <button class="btn ghost" id="set-backup-back" type="button" aria-label="返回">◂</button>
+        <h2 data-i18n="set.backup">备份与恢复</h2>
+      </div>
+      <div class="settings">
         <div class="set-backup" id="set-backup">
           <div class="set-row">
             <span data-i18n="bk.label">全部数据</span>
@@ -89,18 +134,43 @@
           </div>
           <input type="file" id="set-restore-file" accept=".zip,application/zip" hidden>
         </div>
-        <div class="set-row">
-          <span id="upd-label">系统版本</span>
-          <button class="btn ghost" id="set-update" type="button" data-i18n="upd.check">检查更新</button>
+        <p class="hint" id="set-storage" data-i18n="set.counting">本机存档：计算中…</p>
+      </div>
+    </section>
+
+    <!-- SHARE: the public site as a QR code, drawn on the device -->
+    <section class="view" id="v-set-share" hidden>
+      <div class="bar">
+        <button class="btn ghost" id="set-share-back" type="button" aria-label="返回">◂</button>
+        <h2 data-i18n="set.share">分享</h2>
+      </div>
+      <div class="settings set-share-page">
+        <canvas id="set-share-qr" class="set-share-qr" aria-label="Lo-PDA"></canvas>
+        <p class="set-share-url" id="set-share-url"></p>
+        <p class="hint set-share-hint" data-i18n="set.share.hint">让朋友用手机相机扫一下，打开后「添加到主屏幕」。</p>
+        <div class="row set-share-btns">
+          <button class="btn" id="set-share-send" type="button" data-i18n="set.share.send" hidden>发送链接…</button>
+          <button class="btn ghost" id="set-share-copy" type="button" data-i18n="set.share.copy">复制</button>
         </div>
-        <p class="hint" id="upd-note" data-i18n="upd.note">新版本下载好以后按「重启升级」。存档、胶卷和卡带都不受影响。</p>
-        <div class="about">
-          <b data-i18n="set.about">关于</b>
-          <span id="set-version">Lo-PDA</span>
-          <span id="set-storage" data-i18n="set.counting">本机存档：计算中…</span>
-          <span>MIT License · Copyright (c) 2026 Haowei Wu</span>
-          <span>github.com/nowheremanx/lopda</span>
-        </div>
+      </div>
+    </section>
+
+    <!-- ABOUT: what a PDA is, this device, and the licences -->
+    <section class="view" id="v-set-about" hidden>
+      <div class="bar">
+        <button class="btn ghost" id="set-about-back" type="button" aria-label="返回">◂</button>
+        <h2 data-i18n="set.about">关于</h2>
+      </div>
+      <div class="settings set-about-page">
+        <h3 data-i18n="set.about.what">什么是 PDA</h3>
+        <p data-i18n="set.about.what.p">PDA 是「个人数字助理」（Personal Digital Assistant）：八九十年代放进口袋的小电脑，记事、日历、词典、计算器，一块单色液晶屏，几颗按键。</p>
+        <h3 data-i18n="set.about.this">这台 Lo-PDA</h3>
+        <p data-i18n="set.about.this.p">一台假想的 1986 年掌机，四种绿色，不联网。自带记事本、万年历、词典、阅读器、相机和冲洗店；程序商店里的小程序是社区写的，谁都能做一个，也可以请 AI 帮忙。</p>
+        <h3 data-i18n="set.about.machine">本机</h3>
+        <p class="set-about-line"><span id="set-version">Lo-PDA</span></p>
+        <p class="set-about-line">MIT License · Copyright (c) 2026 Haowei Wu</p>
+        <p class="set-about-line">github.com/nowheremanx/lopda</p>
+        <p class="hint set-about-small" data-i18n="set.about.small">字体 DotGothic16、VT323（OFL）；词典 ECDICT（MIT，英文释义部分来自 WordNet 3.0）；节假日 holiday-cn（MIT）；卡带核心 binjgb（MIT）；二维码 qrcode-generator（MIT）；样书《爱丽丝漫游奇境》《论语》（公有领域）。</p>
       </div>
     </section>
 
@@ -111,6 +181,8 @@
         <h2 data-i18n="ai.label">AI 线路</h2>
       </div>
       <div class="settings set-ai-page">
+        <p class="hint" data-i18n="ai.note">接上以后，脚本里的「生成」直接请 AI 写程序。key 只存在这台手机上，不进备份；请用设了额度上限的 key。</p>
+        <p class="hint" data-i18n="ai.pet"></p>
         <p class="hint" id="set-ai-state" aria-live="polite"></p>
         <label class="set-ai-field">
           <span data-i18n="ai.key">OpenRouter 的 key</span>
@@ -347,7 +419,7 @@
     <section class="view pet-view" id="v-pet" hidden>
       <div class="pet-stage" id="pet-stage">
         <div class="pet-room">
-          <canvas class="pet-cv" id="pet-cv" width="81" height="60" data-i18n-label="pet.room" aria-label="宠物的房间"></canvas>
+          <canvas class="pet-cv" id="pet-cv" width="162" height="120" data-i18n-label="pet.room" aria-label="宠物的房间"></canvas>
           <div class="pet-panel" id="pet-panel" hidden></div>
           <div class="pet-away" id="pet-away" hidden></div>
         </div>
@@ -526,6 +598,7 @@
 <script src="lenses.js"></script>
 <script src="finder.js"></script>
 <script src="negative.js"></script>
+<script src="exif.js"></script>
 <script src="develop.js"></script>
 <script src="notetext.js"></script>
 <script src="petsim.js"></script>
@@ -536,6 +609,8 @@
 <script src="ai.js"></script>
 <script src="studio-song.js"></script>
 <script src="studio-synth.js"></script>
+<script src="vendor/qrcode-generator/qrcode.js"></script>
+<script src="qr.js"></script>
 <script src="core.js"></script>
 <script src="apps/notes.js"></script>
 <script src="apps/calendar.js"></script>

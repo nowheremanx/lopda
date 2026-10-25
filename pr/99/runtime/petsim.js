@@ -14,6 +14,9 @@
  *               under today resets on a new day; shownYesterday carries the kind across the reset so it is not repeated.
  *   seenUse     {reader, dict, notes, darkroom}: the usage counts at the last first-open of a day, for the day's joy.
  *   aiUse       the usage counts at the last AI call, so categories are only what happened since (null before one).
+ *   name        the name chosen at the hatch (null in an egg, or in a pet hatched before naming); never changed later.
+ *   shelf       the id of the one souvenir on the room's shelf, or null.
+ *   today.shelf whether changing the shelf already gave the day's +1 joy (reset with the other today counters).
  *
  * API (the save-taking functions return new saves; the input save is never changed):
  *   rng(seed)                    deterministic floats in [0,1), mulberry32
@@ -22,7 +25,7 @@
  *   hourOf(now, tzOffsetMin)     local hour 0-23
  *   weatherOf(born, dayKey, season)  "sun", "cloud", "rain", "snow" or "wind", by season and the day's seed
  *   fresh(now, rnd, species)     a new egg; marks and trait rolled from rnd
- *   hatch(save)                  egg -> baby (the program calls it after the 60 s hatch)
+ *   hatch(save)                  egg -> baby (the program calls it after the ~8 s hatch)
  *   asleep(save, hour, minute)   the sleep window by trait, or the light off after 20:00
  *   catchUp(save, now, ctx)      {save, events}, 1-hour steps from save.last; ctx = {tz}
  *   openDay(save, dayKey, counts) counts a day opened and grows baby -> child -> adult; counts feeds adultForm
@@ -51,7 +54,7 @@ var HOUR=3600000, MINUTE=60000, DAY=86400000;
 var SPECIES={
   chip:{
     id:"chip", room:"chip",
-    marks:{ant:4, pat:4, eye:3},
+    marks:{ant:6, eye:3},
     traits:{lively:{outing:0.70, idle:2}, sleepy:{outing:0.30, idle:3}, curious:{outing:0.55, idle:2}},
     sleep:{normal:[1320, 420], sleepy:[1290, 450]},
     lightOff:1200,
@@ -136,7 +139,7 @@ function traitsOf(sp){ return Object.keys(sp.traits || {normal:{outing:0.5, idle
 function traitOf(sp,trait){ return (sp.traits && sp.traits[trait]) || sp.traits[traitsOf(sp)[0]]; }
 function blankToday(day,shownYesterday){
   return {day:day, shown:null, shownYesterday:shownYesterday||null, picked:false, pick:null, used:false,
-    rewarded:false, ai:false, out:null, back:false, snacks:0, pats:0, played:0, burp:false};
+    rewarded:false, ai:false, out:null, back:false, snacks:0, pats:0, played:0, burp:false, shelf:false};
 }
 function clone(s){ return s==null ? s : JSON.parse(JSON.stringify(s)); }
 function ensureToday(s,key){
@@ -158,9 +161,9 @@ function fresh(now,rnd,species){
     v:1, species:sp.id, room:sp.room, born:num(now), last:num(now),
     hunger:sp.hungerMax, joy:sp.joyMax, mess:0, close:0, opened:0, lastDay:null,
     awakeHunger:0, awakeJoy:0,
-    stage:"egg", form:null,
-    marks:{ant:roll(r,sp.marks.ant), pat:roll(r,sp.marks.pat), eye:roll(r,sp.marks.eye)},
-    trait:trait, light:true, today:blankToday(null), lastMeal:null, travel:false,
+    stage:"egg", form:null, name:null,
+    marks:{ant:roll(r,sp.marks.ant), eye:roll(r,sp.marks.eye)},
+    trait:trait, light:true, today:blankToday(null), lastMeal:null, travel:false, shelf:null,
     seenUse:null, aiUse:null
   };
 }

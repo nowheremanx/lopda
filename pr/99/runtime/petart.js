@@ -1350,10 +1350,10 @@ var BOOKS=[
   [136,81,3,14,"k"],[140,79,5,16,"d"],[146,77,4,18,"m"],[151,80,4,15,"d"]
 ];
 
-/* Weather marks at double size, painted only inside the window's inner pane. The day's rain, wind and
-   cloud are ink on mid; at night the same marks are paper on the dark sky. */
+/* Weather marks at double size, painted only inside the window's inner pane. Day: ink on mid. Night: a dark
+   sky with a paper moon and stars; rain is short diagonal streaks, snow is dots and wind is a few curved strokes. */
 function weatherMark(buf,w,h,weather,night){
-  var s=String(weather||""), r, c, x, y, t=night?3:0, ink=night?3:0;
+  var s=String(weather||""), r, c, x, y, yy, ink=night?3:0;
   if(!s) return;
   if(s==="sun" && !night){
     blit(buf,w,h,SUN,33,16);
@@ -1362,28 +1362,31 @@ function weatherMark(buf,w,h,weather,night){
       bput(buf,w,h,32+r,14,3); bput(buf,w,h,32+r,21,3);
     }
   } else if(s==="cloud"){
-    blit(buf,w,h,CLOUD,17,14);
-    if(night) blitTone(buf,w,h,CLOUD,17,14,3);
+    if(night){
+      /* a quiet mid cloud under the moon, never a bright paper board */
+      for(r=0;r<CLOUD.length;r++) for(c=0;c<CLOUD[r].length;c++)
+        if(CLOUD[r].charAt(c)!==".") bput(buf,w,h,17+c,14+r,2);
+    } else blit(buf,w,h,CLOUD,17,14);
   } else if(s==="rain"){
-    blit(buf,w,h,CLOUD,17,14);
-    if(night) blitTone(buf,w,h,CLOUD,17,14,3);
-    for(y=22;y<42;y+=5){
-      x=14+((y*5)%30);
-      for(r=0;r<2;r++) bput(buf,w,h,x+r,y,ink);
-      bput(buf,w,h,x,y+1,ink);
+    if(!night) blit(buf,w,h,CLOUD,17,14);
+    for(y=21;y<44;y+=5){
+      x=14+((y*5)%28);
+      bput(buf,w,h,x,y,ink); bput(buf,w,h,x+1,y,ink);
+      bput(buf,w,h,x+1,y+1,ink); bput(buf,w,h,x+2,y+1,ink);
     }
   } else if(s==="snow"){
-    var flakes=[[15,24],[22,31],[31,24],[39,32],[17,38],[28,39],[43,23],[42,38],[35,40]];
+    var flakes=[[16,22],[23,30],[32,23],[40,31],[18,37],[29,39],[43,22],[42,37],[35,41]];
     for(var i=0;i<flakes.length;i++){
-      for(r=0;r<3;r++) for(c=0;c<3;c++){
-        if((r===1 || c===1)) bput(buf,w,h,flakes[i][0]-1+c,flakes[i][1]-1+r,3);
-      }
+      for(r=0;r<2;r++) for(c=0;c<2;c++) bput(buf,w,h,flakes[i][0]+c,flakes[i][1]+r,ink);
     }
   } else if(s==="wind"){
-    for(y=17;y<42;y+=6){
-      x=14+((y*3)%5);
-      for(c=0;c<26;c++) bput(buf,w,h,x+c,y+(c%4===0?-1:0),ink);
-      bput(buf,w,h,x+26,y+1,ink); bput(buf,w,h,x+27,y,ink);
+    for(y=18;y<42;y+=8){
+      for(c=0;c<24;c++){
+        x=12+c;
+        yy=y+Math.round(Math.sin(c/3));
+        bput(buf,w,h,x,yy,ink);
+      }
+      bput(buf,w,h,x+1,y-1,ink); bput(buf,w,h,x+2,y,ink); bput(buf,w,h,x+2,y+1,ink);
     }
   }
 }
@@ -1404,7 +1407,7 @@ function seasonMark(buf,w,h,season){
 function drawWindow(buf,w,h,scene){
   var night=!!scene.night, weather=String(scene.weather||"");
   brect(buf,w,h,WIN.x,WIN.y,WIN.w,WIN.h,0);
-  brect(buf,w,h,WIN.x+2,WIN.y+2,WIN.w-4,WIN.h-4,night?0:2);
+  brect(buf,w,h,WIN.x+2,WIN.y+2,WIN.w-4,WIN.h-4,night?1:2);
   if(night){
     blit(buf,w,h,MOON,33,14);
     for(var i=0;i<STARS.length;i++) bput(buf,w,h,STARS[i][0],STARS[i][1],3);
@@ -1550,10 +1553,10 @@ function drawRoom(buf,w,h,scene){
 
   var zx=0, zy=0;
   if(scene.zz){
-    zx=petX+(room.zzDx!==undefined?room.zzDx:28);
-    zy=petY+(room.zzDy!==undefined?room.zzDy:-22);
+    zx=(scene.zzX!==undefined)?scene.zzX:petX+(room.zzDx!==undefined?room.zzDx:28);
+    zy=(scene.zzY!==undefined)?scene.zzY:petY+(room.zzDy!==undefined?room.zzDy:-22);
     if(zx>w-24) zx=w-24; if(zx<0) zx=0;
-    if(zy<0) zy=0;
+    if(zy>h-24) zy=h-24; if(zy<0) zy=0;
     blit(buf,w,h,room.zz,zx,zy);
   }
 
