@@ -1,0 +1,1070 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#a3ad7e">
+<!-- No manifest on purpose: "Add to Home Screen" from Safari on this page gives a standalone web app that starts here,
+     so the test sees the same home-screen conditions as the runtime without a link from it. -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="GPS test">
+<title>GPS 测试 (GPS test)</title>
+<!-- Throwaway iPhone test page: four colours, inline everything, no runtime link. -->
+<style>
+  /* Only these four tones are used: ink, dark, mid, paper. */
+  html { background: #a3ad7e; }
+  body {
+    margin: 0; padding: 6px; box-sizing: border-box; width: auto;
+    background: #a3ad7e; color: #1f2a14;
+    font: 13px/1.35 -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  }
+  h1 { margin: 0; font-size: 15px; line-height: 1.2; color: #a3ad7e; }
+  header {
+    background: #1f2a14; color: #a3ad7e;
+    padding: 7px 8px; border: 1px solid #1f2a14; margin-bottom: 6px;
+  }
+  .meta { font-size: 10px; line-height: 1.35; margin-top: 4px; color: #a3ad7e; word-break: break-word; }
+  section {
+    background: #a3ad7e; border: 1px solid #4a5a32;
+    margin: 0 0 6px 0; padding: 0 0 5px 0;
+  }
+  .sec-head {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 5px; background: #4a5a32; color: #a3ad7e;
+    padding: 3px 4px 3px 7px; min-height: 44px; box-sizing: border-box;
+  }
+  h2 { margin: 0; font-size: 12px; line-height: 1.2; font-weight: 600; }
+  .row { display: flex; flex-wrap: wrap; gap: 5px; padding: 5px 5px 0 5px; }
+  button {
+    min-height: 44px; padding: 5px 7px; box-sizing: border-box;
+    border: 1px solid #1f2a14; border-radius: 0;
+    background: #1f2a14; color: #a3ad7e;
+    font: inherit; font-size: 12px; line-height: 1.15;
+    cursor: pointer; -webkit-appearance: none; appearance: none;
+  }
+  button:active { background: #4a5a32; }
+  button.alt { background: #4a5a32; }
+  button.alt:active { background: #1f2a14; }
+  button.copy {
+    background: #a3ad7e; color: #1f2a14; border-color: #1f2a14;
+    min-height: 44px; font-size: 11px; flex: 0 0 auto;
+  }
+  button.copy:active { background: #7d8a58; }
+  .row button { flex: 1 1 0; min-width: 88px; }
+  .live {
+    margin: 5px 5px 0 5px; padding: 3px 4px; border-left: 3px solid #4a5a32;
+    font-size: 10px; line-height: 1.35; color: #1f2a14; word-break: break-word;
+  }
+  pre {
+    margin: 5px; padding: 4px; box-sizing: border-box;
+    max-height: 118px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere;
+    background: #1f2a14; color: #a3ad7e;
+    border: 1px solid #1f2a14;
+    font: 10px/1.35 ui-monospace, Menlo, Consolas, monospace;
+  }
+  video {
+    display: block; width: calc(100% - 10px); height: 104px; margin: 5px 5px 0 5px;
+    box-sizing: border-box; background: #1f2a14; object-fit: contain;
+    border: 1px solid #4a5a32;
+  }
+  .note { margin: 4px 5px 0 5px; font-size: 10px; line-height: 1.3; color: #4a5a32; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>GPS 测试 (GPS test)</h1>
+  <div class="meta" id="loads">页面加载计数 (load counts) 读取中...</div>
+  <div class="meta" id="page-state"></div>
+</header>
+
+<section>
+  <div class="sec-head">
+    <h2>页面错误 (Page errors)</h2>
+    <button class="copy" type="button" data-copy="error">复制结果 (Copy)</button>
+  </div>
+  <pre id="log-error"></pre>
+</section>
+
+<section>
+  <div class="sec-head">
+    <h2>1. 权限 (Permission)</h2>
+    <button class="copy" type="button" data-copy="perm">复制结果 (Copy)</button>
+  </div>
+  <div class="live" id="perm-live">未检查 (not checked)</div>
+  <div class="row">
+    <button id="btn-perm" type="button">查询权限 + 定位 (Check)</button>
+  </div>
+  <pre id="log-perm"></pre>
+</section>
+
+<section>
+  <div class="sec-head">
+    <h2>2. 精确跟踪 (Precise watch)</h2>
+    <button class="copy" type="button" data-copy="precise">复制结果 (Copy)</button>
+  </div>
+  <div class="live" id="precise-live">未开始 (idle)</div>
+  <div class="row">
+    <button id="btn-precise-start" type="button">开始 (Start)</button>
+    <button id="btn-precise-stop" class="alt" type="button">停止 (Stop)</button>
+  </div>
+  <pre id="log-precise"></pre>
+</section>
+
+<section>
+  <div class="sec-head">
+    <h2>3. 低精度跟踪 (Coarse watch)</h2>
+    <button class="copy" type="button" data-copy="coarse">复制结果 (Copy)</button>
+  </div>
+  <div class="live" id="coarse-live">未开始 (idle)</div>
+  <div class="row">
+    <button id="btn-coarse-start" type="button">开始 (Start)</button>
+    <button id="btn-coarse-stop" class="alt" type="button">停止 (Stop)</button>
+  </div>
+  <pre id="log-coarse"></pre>
+</section>
+
+<section>
+  <div class="sec-head">
+    <h2>4. 取景 + 定位 (Camera + GPS)</h2>
+    <button class="copy" type="button" data-copy="cam">复制结果 (Copy)</button>
+  </div>
+  <div class="live" id="cam-live">相机 关 | 定位 停 (camera off, watch idle)</div>
+  <div class="row">
+    <button id="btn-cam-start" type="button">打开相机 + 定位 (Start)</button>
+    <button id="btn-shutter" class="alt" type="button">快门 (Shutter)</button>
+    <button id="btn-cam-stop" class="alt" type="button">停止 (Stop)</button>
+  </div>
+  <div class="live" id="shutter-live">快门结果 (shutter) 尚未记录</div>
+  <video id="cam-video" playsinline muted autoplay></video>
+  <div class="note">页面隐藏时会自动停止相机与定位，日志会写明。</div>
+  <pre id="log-cam"></pre>
+</section>
+
+<section>
+  <div class="sec-head">
+    <h2>5. 存一张带位置的 JPEG (Save JPEG with GPS)</h2>
+    <button class="copy" type="button" data-copy="jpeg">复制结果 (Copy)</button>
+  </div>
+  <div class="live" id="jpeg-live">尚未制作 (no file built)</div>
+  <div class="row">
+    <button id="btn-build" type="button">制作 JPEG (Build)</button>
+    <button id="btn-save" class="alt" type="button">存储 / 分享 (Save)</button>
+  </div>
+  <div class="note">先制作，再存储。分享必须在点击里同步调用，所以分成两步。</div>
+  <pre id="log-jpeg"></pre>
+</section>
+
+<script>
+(function () {
+  "use strict";
+
+  var INK = "#1f2a14", DARK = "#4a5a32", MID = "#7d8a58", PAPER = "#a3ad7e";
+  var pageStart = (window.performance && typeof performance.now === "function")
+    ? Date.now() - performance.now() : Date.now();
+
+  var logs = {
+    error: document.getElementById("log-error"),
+    perm: document.getElementById("log-perm"),
+    precise: document.getElementById("log-precise"),
+    coarse: document.getElementById("log-coarse"),
+    cam: document.getElementById("log-cam"),
+    jpeg: document.getElementById("log-jpeg")
+  };
+  var LABEL = {
+    error: "页面错误 (Page errors)",
+    perm: "1 权限 (Permission)",
+    precise: "2 精确跟踪 (Precise watch)",
+    coarse: "3 低精度跟踪 (Coarse watch)",
+    cam: "4 取景 + 定位 (Camera + GPS)",
+    jpeg: "5 存一张带位置的 JPEG (Save JPEG with GPS)"
+  };
+
+  var videoEl = document.getElementById("cam-video");
+  var globalFixes = [];          /* every watch fix on the page, oldest first */
+  var camRec = null;             /* section 4's own precise watch */
+  var camStream = null;
+  var camOpening = false;
+  var camGen = 0;                /* a stop/background invalidates a permission prompt still in flight */
+  var built = null;              /* the File section 5's Save button may share */
+  var MAX_FIXES = 400;
+
+  /* ---------------- tiny helpers ---------------- */
+  function pad2(n) { return (n < 10 ? "0" : "") + n; }
+  function pad3(n) { return n < 10 ? "00" + n : n < 100 ? "0" + n : "" + n; }
+  function stamp() {
+    var now = Date.now(), d = new Date(now);
+    return "[+" + Math.round(now - pageStart) + "ms " + pad2(d.getHours()) + ":" + pad2(d.getMinutes()) + ":" +
+      pad2(d.getSeconds()) + "." + pad3(d.getMilliseconds()) + "]";
+  }
+  function addLog(key, msg) {
+    var el = logs[key];
+    if (!el) return;
+    el.textContent += (el.textContent ? "\n" : "") + stamp() + " " + msg;
+    /* a long watch should not grow the page without bound */
+    var lines = el.textContent.split("\n");
+    if (lines.length > 300) el.textContent = lines.slice(lines.length - 300).join("\n");
+    el.scrollTop = el.scrollHeight;
+  }
+  function errText(e) {
+    if (!e) return "unknown error";
+    if (e.name && e.message) return e.name + ": " + e.message;
+    if (e.message) return e.message;
+    return String(e);
+  }
+  function fmt(v, n) {
+    return typeof v === "number" && isFinite(v) ? v.toFixed(n) : "?";
+  }
+  function isStandalone() {
+    try { if (navigator.standalone === true) return true; } catch (e) {}
+    try { if (window.matchMedia && matchMedia("(display-mode: standalone)").matches) return true; } catch (e) {}
+    return false;
+  }
+  function bumpCount(storage, key) {
+    try {
+      var n = parseInt(storage.getItem(key), 10);
+      if (!isFinite(n) || n < 0) n = 0;
+      n += 1;
+      storage.setItem(key, String(n));
+      return n;
+    } catch (e) { return null; }
+  }
+  var sessionLoads = bumpCount(window.sessionStorage, "gpsTest.sessionLoads");
+  var installLoads = bumpCount(window.localStorage, "gpsTest.installLoads");
+  function standaloneText() { return isStandalone() ? "yes" : "no"; }
+
+  function copyHeader(key) {
+    return "Lo-PDA gps-test / " + LABEL[key] + "\n" +
+      "URL: " + location.href + "\n" +
+      "UA: " + navigator.userAgent + "\n" +
+      "Standalone: " + standaloneText() + "\n" +
+      "Loads: session=" + (sessionLoads == null ? "?" : sessionLoads) +
+      ", install=" + (installLoads == null ? "?" : installLoads) + "\n" +
+      "---- log ----\n";
+  }
+
+  /* Copy is an action too: writeText first, else a selected textarea + execCommand. */
+  function copyLog(key) {
+    var el = logs[key];
+    if (!el) return;
+    var text = copyHeader(key) + el.textContent;
+    function fallback(why) {
+      var ta = document.createElement("textarea");
+      ta.value = text; ta.setAttribute("readonly", "");
+      ta.style.position = "fixed"; ta.style.left = "-9999px"; ta.style.top = "0";
+      document.body.appendChild(ta);
+      var ok = false, err = null;
+      try {
+        ta.focus(); ta.select();
+        if (ta.setSelectionRange) ta.setSelectionRange(0, ta.value.length);
+        ok = document.execCommand ? document.execCommand("copy") : false;
+        if (!document.execCommand) err = "execCommand missing";
+      } catch (e) { err = errText(e); }
+      document.body.removeChild(ta);
+      addLog(key, "复制 (copy) " + (ok ? "成功 via textarea+execCommand" : "失败 via textarea+execCommand") +
+        (why ? "; writeText 原因: " + why : "") + (err ? "; " + err : ""));
+    }
+    var clip = navigator.clipboard;
+    if (clip && typeof clip.writeText === "function") {
+      var p;
+      try { p = clip.writeText(text); }
+      catch (e) { fallback(errText(e)); return; }
+      Promise.resolve(p).then(function () {
+        addLog(key, "复制 (copy) 成功 via navigator.clipboard.writeText");
+      }, function (e) {
+        fallback(errText(e));
+      });
+    } else {
+      fallback("navigator.clipboard 不可用");
+    }
+  }
+
+  /* ---------------- page errors ---------------- */
+  window.onerror = function (msg, src, line, col, err) {
+    addLog("error", "window.onerror: " + msg + " @ " + (src || "?") + ":" + line + ":" + col +
+      (err ? " (" + errText(err) + ")" : ""));
+    return false;
+  };
+  window.addEventListener("unhandledrejection", function (ev) {
+    addLog("error", "unhandledrejection: " + errText(ev && ev.reason));
+  });
+
+  /* ---------------- permission (section 1) ---------------- */
+  function geoCodeName(code) {
+    return code === 1 ? "PERMISSION_DENIED" : code === 2 ? "POSITION_UNAVAILABLE" :
+      code === 3 ? "TIMEOUT" : "UNKNOWN";
+  }
+  function queryPermState(tag, cb) {
+    if (!navigator.permissions || !navigator.permissions.query) {
+      addLog("perm", tag + ": permissions API 不支持 (unsupported)");
+      cb(null); return;
+    }
+    var p;
+    try { p = navigator.permissions.query({ name: "geolocation" }); }
+    catch (e) { addLog("perm", tag + ": permissions.query 抛错: " + errText(e)); cb(null); return; }
+    Promise.resolve(p).then(function (s) {
+      addLog("perm", tag + ": permissions state=" + s.state);
+      if (s && s.addEventListener) {
+        s.addEventListener("change", function () {
+          addLog("perm", "permissions 状态变化 (change): " + s.state);
+        });
+      }
+      cb(s.state);
+    }, function (e) {
+      addLog("perm", tag + ": permissions.query 失败: " + errText(e));
+      cb(null);
+    });
+  }
+  function onPermission() {
+    addLog("perm", "点击 查询权限 + 定位 (click)");
+    /* start the query first, but call getCurrentPosition in this same click: older iOS is happiest with user activation */
+    queryPermState("查询前 (before)", function () {});
+    if (!navigator.geolocation) {
+      addLog("perm", "geolocation 不支持 (unsupported)");
+      return;
+    }
+    var callAt = Date.now();
+    addLog("perm", "调用 getCurrentPosition (enableHighAccuracy=true, maximumAge=0, timeout=30000)");
+    var opts = { enableHighAccuracy: true, maximumAge: 0, timeout: 30000 };
+    try {
+      navigator.geolocation.getCurrentPosition(function (pos) {
+        var dt = Date.now() - callAt, c = pos.coords;
+        var age = typeof pos.timestamp === "number" ? Date.now() - pos.timestamp : null;
+        addLog("perm", "getCurrentPosition 成功: 调用到返回 " + dt + " ms; lat " + fmt(c.latitude, 6) +
+          ", lon " + fmt(c.longitude, 6) + ", 精度 " + fmt(c.accuracy, 1) + " m, fix.timestamp 年龄 " +
+          (age == null ? "?" : age + " ms"));
+        addLog("perm", "提示/定位返回用时 (call to answer): " + dt + " ms");
+        document.getElementById("perm-live").textContent =
+          "成功 (ok) | " + dt + " ms | 精度 " + fmt(c.accuracy, 1) + " m";
+        queryPermState("返回后 (after)", function () {});
+      }, function (err) {
+        var dt = Date.now() - callAt;
+        addLog("perm", "getCurrentPosition 失败: 调用到返回 " + dt + " ms, code=" + err.code +
+          " (" + geoCodeName(err.code) + "), message=" + (err.message || "(none)"));
+        document.getElementById("perm-live").textContent =
+          "失败 (error) | code " + err.code + " " + geoCodeName(err.code);
+        queryPermState("返回后 (after)", function () {});
+      }, opts);
+    } catch (e) {
+      addLog("perm", "getCurrentPosition 同步抛错: " + errText(e));
+    }
+  }
+
+  /* ---------------- shared watch recorder (sections 2-4) ---------------- */
+  function newRec(name, label, logKey, liveEl, prefix) {
+    return {
+      name: name, label: label, logKey: logKey, liveEl: liveEl, prefix: prefix,
+      id: null, startedAt: 0, firstFixAt: null, acc100At: null, acc30At: null,
+      best: null, count: 0, onUpdate: null
+    };
+  }
+  function fixAgeMs(fix, now) {
+    var t = (typeof fix.ts === "number" && isFinite(fix.ts) && fix.ts > 0) ? fix.ts : fix.at;
+    return Math.max(0, now - t);
+  }
+  function updateWatchLive(rec) {
+    if (!rec.liveEl) return;
+    if (!rec.startedAt) { rec.liveEl.textContent = "未开始 (idle)"; return; }
+    function since(t) { return t == null ? "-" : ((t - rec.startedAt) / 1000).toFixed(1) + " s"; }
+    rec.liveEl.textContent = "首次定位 " + since(rec.firstFixAt) +
+      " | ≤100 m " + since(rec.acc100At) +
+      " | ≤30 m " + since(rec.acc30At) +
+      " | 最佳 " + (rec.best == null ? "-" : fmt(rec.best, 1) + " m") +
+      " | 次数 " + rec.count + " | " + (rec.id === null ? "已停止 (stopped)" : "跟踪中 (watching)");
+    if (rec.onUpdate) rec.onUpdate();
+  }
+  function addFix(rec, pos) {
+    var now = Date.now(), c = pos.coords;
+    var acc = (typeof c.accuracy === "number" && isFinite(c.accuracy)) ? c.accuracy : NaN;
+    var fix = {
+      at: now,
+      lat: c.latitude, lon: c.longitude, acc: acc,
+      ts: typeof pos.timestamp === "number" ? pos.timestamp : null,
+      source: rec.name, label: rec.label
+    };
+    rec.count += 1;
+    var age = fixAgeMs(fix, now);
+    addLog(rec.logKey, rec.prefix + " 第 " + rec.count + " 次定位: 距开始 " +
+      ((now - rec.startedAt) / 1000).toFixed(2) + " s, 精度 " + fmt(acc, 1) +
+      " m, lat " + fmt(fix.lat, 6) + ", lon " + fmt(fix.lon, 6) +
+      ", fix.timestamp 年龄 " + age + " ms (" + (age / 1000).toFixed(2) + " s)");
+    if (rec.firstFixAt == null) {
+      rec.firstFixAt = now;
+      addLog(rec.logKey, rec.prefix + " 首次定位 (first fix): 距开始 " +
+        ((now - rec.startedAt) / 1000).toFixed(2) + " s");
+    }
+    if (isFinite(acc) && acc <= 100 && rec.acc100At == null) {
+      rec.acc100At = now;
+      addLog(rec.logKey, rec.prefix + " 精度达到 ≤100 m: 距开始 " +
+        ((now - rec.startedAt) / 1000).toFixed(2) + " s");
+    }
+    if (isFinite(acc) && acc <= 30 && rec.acc30At == null) {
+      rec.acc30At = now;
+      addLog(rec.logKey, rec.prefix + " 精度达到 ≤30 m: 距开始 " +
+        ((now - rec.startedAt) / 1000).toFixed(2) + " s");
+    }
+    if (isFinite(acc) && (rec.best == null || acc < rec.best)) {
+      rec.best = acc;
+      addLog(rec.logKey, rec.prefix + " 最佳精度 (best so far): " + fmt(acc, 1) + " m");
+    }
+    globalFixes.push(fix);
+    if (globalFixes.length > MAX_FIXES) globalFixes.shift();
+    updateWatchLive(rec);
+  }
+  function watchError(rec, err) {
+    addLog(rec.logKey, rec.prefix + " 定位错误: code=" + err.code + " (" + geoCodeName(err.code) +
+      "), message=" + (err.message || "(none)"));
+  }
+  function startWatch(rec, high) {
+    if (!navigator.geolocation) {
+      addLog(rec.logKey, rec.prefix + " geolocation 不支持 (unsupported)");
+      return;
+    }
+    if (rec.id !== null) {
+      addLog(rec.logKey, rec.prefix + " 已在跟踪 (already watching), id=" + rec.id);
+      return;
+    }
+    rec.startedAt = Date.now();
+    rec.firstFixAt = null; rec.acc100At = null; rec.acc30At = null;
+    rec.best = null; rec.count = 0;
+    var opts = { enableHighAccuracy: !!high, maximumAge: 0, timeout: 30000 };
+    addLog(rec.logKey, rec.prefix + " watchPosition 开始: enableHighAccuracy=" + !!high +
+      ", maximumAge=0, timeout=30000");
+    try {
+      rec.id = navigator.geolocation.watchPosition(function (pos) {
+        try { addFix(rec, pos); }
+        catch (e) { addLog(rec.logKey, rec.prefix + " 记录定位时出错: " + errText(e)); }
+      }, function (err) {
+        try { watchError(rec, err); }
+        catch (e) { addLog(rec.logKey, rec.prefix + " 记录定位错误时出错: " + errText(e)); }
+      }, opts);
+      addLog(rec.logKey, rec.prefix + " watch id=" + rec.id);
+    } catch (e) {
+      rec.id = null;
+      addLog(rec.logKey, rec.prefix + " watchPosition 同步抛错: " + errText(e));
+    }
+    updateWatchLive(rec);
+  }
+  function stopWatch(rec, why) {
+    if (rec.id === null) {
+      addLog(rec.logKey, rec.prefix + " 未在跟踪 (not watching)" + (why ? " [" + why + "]" : ""));
+      updateWatchLive(rec);
+      return;
+    }
+    var id = rec.id;
+    try {
+      navigator.geolocation.clearWatch(id);
+      rec.id = null;
+      addLog(rec.logKey, rec.prefix + " clearWatch(" + id + ") 已运行" +
+        (why ? " [" + why + "]" : "") + ", 距开始 " + ((Date.now() - rec.startedAt) / 1000).toFixed(2) + " s");
+    } catch (e) {
+      addLog(rec.logKey, rec.prefix + " clearWatch 抛错: " + errText(e));
+      rec.id = null;
+    }
+    updateWatchLive(rec);
+  }
+
+  /* ---------------- section 4: camera + GPS ---------------- */
+  function updateCamLive() {
+    var el = document.getElementById("cam-live");
+    var newest = globalFixes.length ? globalFixes[globalFixes.length - 1] : null;
+    var newestText = newest
+      ? "最新 " + newest.label + " " + fmt(newest.acc, 1) + " m, " + fmt(fixAgeMs(newest, Date.now()) / 1000, 1) + " s 前"
+      : "最新 -";
+    el.textContent = "相机 " + (camStream ? "开 (on)" : "关 (off)") +
+      " | 定位 " + (camRec && camRec.id !== null ? "跟踪中 (watching)" : "停 (idle)") +
+      " | 本次定位 " + (camRec ? camRec.count : 0) + " 次 | " + newestText;
+  }
+  function startCamera() {
+    if (camStream || camOpening) {
+      addLog("cam", "相机已在打开或运行 (camera busy)");
+      return;
+    }
+    if (!window.isSecureContext) {
+      addLog("cam", "警告: 不是安全上下文 (isSecureContext=false), getUserMedia 可能失败");
+    }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      addLog("cam", "getUserMedia 不支持 (unsupported)");
+      return;
+    }
+    camOpening = true;
+    var gen = ++camGen;
+    addLog("cam", "请求后置相机: facingMode ideal=environment, 1280x960 ideal, audio=false");
+    var p;
+    try {
+      p = navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 960 } }
+      });
+    } catch (e) {
+      p = Promise.reject(e);
+    }
+    Promise.resolve(p).then(function (stream) {
+      if (gen !== camGen || document.hidden) {
+        addLog("cam", "相机流在停止或页面隐藏之后才到达 (stale stream): 立即停止");
+        var late = stream.getTracks();
+        for (var j = 0; j < late.length; j++) {
+          try { late[j].stop(); } catch (e) {}
+        }
+        if (gen === camGen) camOpening = false;
+        updateCamLive();
+        return;
+      }
+      camOpening = false;
+      camStream = stream;
+      addLog("cam", "相机已打开 (stream on)");
+      var tracks = stream.getVideoTracks();
+      for (var i = 0; i < tracks.length; i++) {
+        (function (t) {
+          var s = {};
+          try { s = t.getSettings ? t.getSettings() : {}; } catch (e) { s = {}; }
+          addLog("cam", "视频轨道 " + i + ": label=" + (t.label || "(none)") +
+            ", settings " + (s.width || "?") + "x" + (s.height || "?") +
+            ", facingMode=" + (s.facingMode || "?") + ", readyState=" + t.readyState);
+          t.addEventListener("ended", function () {
+            addLog("cam", "视频轨道 ended (系统结束), readyState=" + t.readyState);
+            updateCamLive();
+          });
+        })(tracks[i]);
+      }
+      if (videoEl.srcObject !== stream) {
+        try { videoEl.srcObject = stream; } catch (e) { videoEl.src = URL.createObjectURL(stream); }
+      }
+      try {
+        var playRet = videoEl.play();
+        Promise.resolve(playRet).then(function () {
+          addLog("cam", "video.play() 成功");
+        }, function (e) {
+          addLog("cam", "video.play() 被拒: " + errText(e));
+        });
+      } catch (e) {
+        addLog("cam", "video.play() 同步抛错: " + errText(e));
+      }
+      updateCamLive();
+    }, function (e) {
+      if (gen !== camGen) {
+        addLog("cam", "过期的相机请求失败 (ignored): " + errText(e));
+        return;
+      }
+      camOpening = false;
+      addLog("cam", "相机打开失败 (getUserMedia): " + errText(e) +
+        (e && e.name === "NotAllowedError" ? " (权限被拒或没有用户手势)" : ""));
+      updateCamLive();
+    });
+    videoEl.onloadedmetadata = function () {
+      addLog("cam", "视频尺寸 (videoWidth x videoHeight): " + videoEl.videoWidth + "x" + videoEl.videoHeight +
+        ", readyState=" + videoEl.readyState);
+    };
+  }
+  function stopCameraAndWatch(why) {
+    addLog("cam", "停止 (stop): " + why);
+    camGen += 1;
+    if (camOpening) {
+      addLog("cam", "相机正在打开 (opening): 作废请求, 若流稍后到达会立即停止");
+      camOpening = false;
+    }
+    if (camStream) {
+      var tracks = camStream.getTracks();
+      for (var i = 0; i < tracks.length; i++) {
+        var t = tracks[i];
+        addLog("cam", "轨道 " + i + " " + t.kind + " 停止前 readyState=" + t.readyState + "; 调用 stop()");
+        try { t.stop(); } catch (e) { addLog("cam", "轨道 " + i + " stop() 抛错: " + errText(e)); }
+        addLog("cam", "轨道 " + i + " 停止后 readyState=" + t.readyState + " (ended)");
+      }
+      try { videoEl.pause(); } catch (e) {}
+      try { videoEl.srcObject = null; } catch (e) {}
+      camStream = null;
+    } else {
+      addLog("cam", "相机未打开 (camera idle)");
+    }
+    stopWatch(camRec, why);
+    updateCamLive();
+  }
+  function shutter() {
+    var now = Date.now();
+    var newest = globalFixes.length ? globalFixes[globalFixes.length - 1] : null;
+    if (newest) {
+      addLog("cam", "快门: 最新定位 source=" + newest.label + ", age=" + fixAgeMs(newest, now) +
+        " ms (" + (fixAgeMs(newest, now) / 1000).toFixed(2) + " s), acc=" + fmt(newest.acc, 1) +
+        " m, lat " + fmt(newest.lat, 6) + ", lon " + fmt(newest.lon, 6));
+    } else {
+      addLog("cam", "快门: 页面上还没有任何定位 (no fix yet)");
+    }
+    var picked = null, rule = "C";
+    if (newest) {
+      var nAge = fixAgeMs(newest, now);
+      if (nAge <= 30000 && isFinite(newest.acc) && newest.acc <= 100) {
+        picked = newest; rule = "A";
+      }
+    }
+    if (!picked) {
+      var best = null, bestAge = 0;
+      for (var i = 0; i < globalFixes.length; i++) {
+        var f = globalFixes[i], age = fixAgeMs(f, now);
+        if (age <= 120000 && isFinite(f.acc) && (best == null || f.acc < best.acc)) {
+          best = f; bestAge = age;
+        }
+      }
+      if (best) { picked = best; rule = "B"; }
+    }
+    if (picked) {
+      var age = fixAgeMs(picked, now);
+      if (rule === "A") {
+        addLog("cam", "快门规则 case A: 使用最新定位 age=" + age + " ms (" + (age / 1000).toFixed(2) +
+          " s) ≤30 s 且 acc=" + fmt(picked.acc, 1) + " m ≤100 m; lat " + fmt(picked.lat, 6) +
+          ", lon " + fmt(picked.lon, 6));
+      } else {
+        addLog("cam", "快门规则 case A 不满足; case B: 使用 2 分钟内最佳精度 age=" + age + " ms (" +
+          (age / 1000).toFixed(2) + " s), acc=" + fmt(picked.acc, 1) + " m, source=" + picked.label +
+          "; lat " + fmt(picked.lat, 6) + ", lon " + fmt(picked.lon, 6));
+      }
+      document.getElementById("shutter-live").textContent =
+        "case " + rule + " | age " + (age / 1000).toFixed(2) + " s | 精度 " + fmt(picked.acc, 1) +
+        " m | " + fmt(picked.lat, 6) + ", " + fmt(picked.lon, 6);
+    } else {
+      addLog("cam", "快门规则 case C: 无可用定位 (最新 age=" +
+        (newest ? (fixAgeMs(newest, now) / 1000).toFixed(2) + " s, acc=" + fmt(newest.acc, 1) + " m" : "无") +
+        "; 2 分钟内没有有效定位), 本次不加位置");
+      document.getElementById("shutter-live").textContent = "case C | 无可用定位 (no usable fix)";
+    }
+  }
+
+  /* ---------------- EXIF writer, copied from runtime/exif.js and extended with GPS ---------------- */
+  var TYPE_ASCII = 2, TYPE_BYTE = 1, TYPE_LONG = 4, TYPE_UNDEFINED = 7, TYPE_RATIONAL = 5;
+  var TAG_MAKE = 0x010F, TAG_SOFTWARE = 0x0131, TAG_EXIF_IFD = 0x8769, TAG_GPS_IFD = 0x8825;
+  var TAG_EXIF_VERSION = 0x9000, TAG_DATETIME_ORIGINAL = 0x9003, TAG_OFFSET_TIME_ORIGINAL = 0x9011;
+  var TAG_GPS_VERSION = 0x0000, TAG_GPS_LAT_REF = 0x0001, TAG_GPS_LAT = 0x0002;
+  var TAG_GPS_LON_REF = 0x0003, TAG_GPS_LON = 0x0004, TAG_GPS_HPOS = 0x001F;
+
+  function fail(msg) { var e = new Error(msg); e.code = "badjpeg"; return e; }
+  function be16(u8, o) { return (u8[o] << 8) | u8[o + 1]; }
+  function be32(u8, o) { return ((u8[o] << 24) >>> 0) + (u8[o + 1] << 16) + (u8[o + 2] << 8) + u8[o + 3]; }
+  function put16(u8, o, v) { u8[o] = (v >>> 8) & 255; u8[o + 1] = v & 255; }
+  function put32(u8, o, v) { u8[o] = (v >>> 24) & 255; u8[o + 1] = (v >>> 16) & 255; u8[o + 2] = (v >>> 8) & 255; u8[o + 3] = v & 255; }
+  function ascii(s) {
+    var out = new Uint8Array(s.length + 1);
+    for (var i = 0; i < s.length; i++) out[i] = s.charCodeAt(i) & 255;
+    return out;
+  }
+  function wall(taken, tz) {
+    var d = new Date(taken + tz * 60000);
+    return d.getUTCFullYear() + ":" + pad2(d.getUTCMonth() + 1) + ":" + pad2(d.getUTCDate()) + " " +
+      pad2(d.getUTCHours()) + ":" + pad2(d.getUTCMinutes()) + ":" + pad2(d.getUTCSeconds());
+  }
+  function offsetText(tz) {
+    var sign = tz < 0 ? "-" : "+", m = Math.abs(tz);
+    return sign + pad2(Math.floor(m / 60)) + ":" + pad2(m % 60);
+  }
+  function entry(tag, type, count, value) { return { tag: tag, type: type, count: count, value: value }; }
+  function padded(n) { return (n + 1) & ~1; }
+  function buildIfd(entries, at, next) {
+    var head = 2 + entries.length * 12 + 4, tail = 0, i, v;
+    for (i = 0; i < entries.length; i++) {
+      v = entries[i].value;
+      if (typeof v !== "number" && v.length > 4) tail += padded(v.length);
+    }
+    var out = new Uint8Array(head + tail), dataAt = at + head;
+    put16(out, 0, entries.length);
+    for (i = 0; i < entries.length; i++) {
+      var e = entries[i], o = 2 + i * 12;
+      put16(out, o, e.tag); put16(out, o + 2, e.type); put32(out, o + 4, e.count);
+      if (typeof e.value === "number") put32(out, o + 8, e.value);
+      else if (e.value.length <= 4) out.set(e.value, o + 8);
+      else { put32(out, o + 8, dataAt); out.set(e.value, dataAt - at); dataAt += padded(e.value.length); }
+    }
+    put32(out, 2 + entries.length * 12, next);
+    return out;
+  }
+  function rational(num, den) {
+    var b = new Uint8Array(8);
+    put32(b, 0, num); put32(b, 4, den);
+    return b;
+  }
+  function threeRationals(list) {
+    var out = new Uint8Array(24);
+    for (var i = 0; i < 3; i++) out.set(list[i], i * 8);
+    return out;
+  }
+  /* deg/1, min/1, sec*10000/10000: seconds keep four decimals and the sign lives in the Ref tag. */
+  function degMinSec(v) {
+    v = Math.abs(v);
+    var deg = Math.floor(v);
+    var minF = (v - deg) * 60;
+    var min = Math.floor(minF);
+    var secNum = Math.round((minF - min) * 60 * 10000);
+    if (secNum >= 600000) { secNum -= 600000; min += 1; }
+    if (min >= 60) { min -= 60; deg += 1; }
+    return threeRationals([rational(deg, 1), rational(min, 1), rational(secNum, 10000)]);
+  }
+  function gpsEntries(lat, lon, acc) {
+    var accNum = (typeof acc === "number" && isFinite(acc) && acc >= 0) ? Math.round(acc * 100) : 0;
+    return [
+      entry(TAG_GPS_VERSION, TYPE_BYTE, 4, new Uint8Array([2, 3, 0, 0])),
+      entry(TAG_GPS_LAT_REF, TYPE_ASCII, 2, ascii(lat < 0 ? "S" : "N")),
+      entry(TAG_GPS_LAT, TYPE_RATIONAL, 3, degMinSec(lat)),
+      entry(TAG_GPS_LON_REF, TYPE_ASCII, 2, ascii(lon < 0 ? "W" : "E")),
+      entry(TAG_GPS_LON, TYPE_RATIONAL, 3, degMinSec(lon)),
+      entry(TAG_GPS_HPOS, TYPE_RATIONAL, 1, rational(accNum, 100))
+    ];
+  }
+  /* APP1 "Exif" after SOI: IFD0 (Make, Software, Exif pointer, optional GPS pointer), Exif IFD, GPS IFD. */
+  function exifSegment(taken, tz, gps) {
+    var time = wall(taken, tz), offset = offsetText(tz);
+    var make = ascii("Lo-PDA"), soft = ascii("gps-test"), dt = ascii(time), off = ascii(offset);
+    var exifEntries = [
+      entry(TAG_EXIF_VERSION, TYPE_UNDEFINED, 4, new Uint8Array([0x30, 0x32, 0x33, 0x32])),
+      entry(TAG_DATETIME_ORIGINAL, TYPE_ASCII, dt.length, dt),
+      entry(TAG_OFFSET_TIME_ORIGINAL, TYPE_ASCII, off.length, off)
+    ];
+    var gEntries = gps ? gpsEntries(gps.lat, gps.lon, gps.acc) : null;
+    var exifLen = buildIfd(exifEntries, 0, 0).length;
+    var gpsLen = gEntries ? buildIfd(gEntries, 0, 0).length : 0;
+    function ifd0(exifAt, gpsAt) {
+      var es = [
+        entry(TAG_MAKE, TYPE_ASCII, make.length, make),
+        entry(TAG_SOFTWARE, TYPE_ASCII, soft.length, soft),
+        entry(TAG_EXIF_IFD, TYPE_LONG, 1, exifAt)
+      ];
+      if (gpsAt !== null) es.push(entry(TAG_GPS_IFD, TYPE_LONG, 1, gpsAt));
+      return buildIfd(es, 8, 0);
+    }
+    /* lengths do not depend on pointer values, so measure once with both pointers, then write the real ones */
+    var probe = ifd0(0, gEntries ? 0 : null);
+    var exifAt = 8 + probe.length;
+    var gpsAt = gEntries ? exifAt + exifLen : null;
+    var ifd0Out = ifd0(exifAt, gpsAt);
+    var exif = buildIfd(exifEntries, exifAt, 0);
+    var gpsIfd = gEntries ? buildIfd(gEntries, gpsAt, 0) : null;
+    var total = 8 + ifd0Out.length + exif.length + (gpsIfd ? gpsIfd.length : 0);
+    var tiff = new Uint8Array(total);
+    tiff[0] = 0x4D; tiff[1] = 0x4D; put16(tiff, 2, 42); put32(tiff, 4, 8);
+    tiff.set(ifd0Out, 8);
+    tiff.set(exif, exifAt);
+    if (gpsIfd) tiff.set(gpsIfd, gpsAt);
+    var seg = new Uint8Array(10 + tiff.length);
+    seg[0] = 0xFF; seg[1] = 0xE1; put16(seg, 2, 8 + tiff.length);
+    seg[4] = 0x45; seg[5] = 0x78; seg[6] = 0x69; seg[7] = 0x66; seg[8] = 0; seg[9] = 0;
+    seg.set(tiff, 10);
+    return seg;
+  }
+  function isExif(u8, o) {
+    return o + 10 <= u8.length && u8[o + 4] === 0x45 && u8[o + 5] === 0x78 && u8[o + 6] === 0x69 &&
+      u8[o + 7] === 0x66 && u8[o + 8] === 0 && u8[o + 9] === 0;
+  }
+  /* drop a canvas encoder's own Exif APP1, keep everything from SOI to EOI otherwise */
+  function insertExif(jpeg, seg) {
+    var src = jpeg, len = src.length;
+    if (len < 4 || src[0] !== 0xFF || src[1] !== 0xD8) throw fail("not a JPEG");
+    var chunks = [src.subarray(0, 2), seg], total = 2 + seg.length, o = 2;
+    while (o + 1 < len) {
+      if (src[o] !== 0xFF) { chunks.push(src.subarray(o)); total += len - o; o = len; break; }
+      var m = src[o + 1];
+      if (m === 0xDA || m === 0xD9) { chunks.push(src.subarray(o)); total += len - o; o = len; break; }
+      if (m === 0x01 || (m >= 0xD0 && m <= 0xD7)) { chunks.push(src.subarray(o, o + 2)); total += 2; o += 2; continue; }
+      if (o + 4 > len) { chunks.push(src.subarray(o)); total += len - o; o = len; break; }
+      var sl = be16(src, o + 2);
+      if (sl < 2 || o + 2 + sl > len) { chunks.push(src.subarray(o)); total += len - o; o = len; break; }
+      var end = o + 2 + sl;
+      if (!(m === 0xE1 && isExif(src, o))) { chunks.push(src.subarray(o, end)); total += end - o; }
+      o = end;
+    }
+    if (o < len) { chunks.push(src.subarray(o)); total += len - o; }
+    var out = new Uint8Array(total), at = 0;
+    for (var i = 0; i < chunks.length; i++) { out.set(chunks[i], at); at += chunks[i].length; }
+    return out;
+  }
+
+  /* ---------------- JPEG building (section 5 + window.gpsTest) ---------------- */
+  function videoHasFrame() {
+    try { return !!(videoEl && videoEl.readyState >= 2 && videoEl.videoWidth > 0 && videoEl.videoHeight > 0); }
+    catch (e) { return false; }
+  }
+  function drawTestPattern(ctx, w, h) {
+    ctx.fillStyle = PAPER; ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = DARK; ctx.fillRect(0, 0, w, Math.round(h * 0.16));
+    ctx.fillStyle = MID; ctx.fillRect(0, Math.round(h * 0.16), w, Math.round(h * 0.08));
+    ctx.fillStyle = INK; ctx.fillRect(0, Math.round(h * 0.24), w, Math.round(h * 0.04));
+    /* a grid and rings make it obvious this is not a real photo */
+    ctx.strokeStyle = MID; ctx.lineWidth = Math.max(1, Math.round(w / 400));
+    var step = Math.round(w / 12);
+    for (var x = step; x < w; x += step) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
+    for (var y = step; y < h; y += step) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
+    ctx.strokeStyle = INK; ctx.lineWidth = Math.max(2, Math.round(w / 200));
+    ctx.beginPath(); ctx.arc(w / 2, h / 2, Math.round(Math.min(w, h) * 0.22), 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(w / 2, h * 0.3); ctx.lineTo(w / 2, h * 0.7); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(w * 0.28, h / 2); ctx.lineTo(w * 0.72, h / 2); ctx.stroke();
+    ctx.fillStyle = INK;
+    ctx.font = "bold " + Math.max(14, Math.round(w / 24)) + "px monospace";
+    ctx.fillText("Lo-PDA GPS test", Math.round(w * 0.05), Math.round(h * 0.13));
+    ctx.font = Math.max(11, Math.round(w / 42)) + "px monospace";
+    ctx.fillStyle = DARK;
+    ctx.fillText("test pattern (no camera frame)", Math.round(w * 0.05), Math.round(h * 0.33));
+    ctx.fillText("exif: DateTimeOriginal + GPS", Math.round(w * 0.05), Math.round(h * 0.39));
+  }
+  function drawFrame(canvas) {
+    var ctx = canvas.getContext("2d");
+    var hasVideo = videoHasFrame();
+    var w = hasVideo ? videoEl.videoWidth : 640;
+    var h = hasVideo ? videoEl.videoHeight : 480;
+    canvas.width = w; canvas.height = h;
+    if (hasVideo) {
+      try {
+        ctx.drawImage(videoEl, 0, 0, w, h);
+        return { fromVideo: true, width: w, height: h };
+      } catch (e) {
+        /* a stopped or protected frame may refuse: the test pattern is still a valid build */
+      }
+    }
+    drawTestPattern(ctx, w, h);
+    return { fromVideo: false, width: w, height: h };
+  }
+  function blobBytes(blob) {
+    if (blob && typeof blob.arrayBuffer === "function") {
+      return blob.arrayBuffer().then(function (ab) { return new Uint8Array(ab); });
+    }
+    return new Promise(function (resolve, reject) {
+      var fr = new FileReader();
+      fr.onload = function () { resolve(new Uint8Array(fr.result)); };
+      fr.onerror = function () { reject(fr.error || new Error("FileReader failed")); };
+      fr.readAsArrayBuffer(blob);
+    });
+  }
+  function canvasJpeg(canvas) {
+    return new Promise(function (resolve, reject) {
+      if (typeof canvas.toBlob !== "function") {
+        try {
+          var url = canvas.toDataURL("image/jpeg", 0.85), comma = url.indexOf(",");
+          if (comma < 0) throw new Error("toDataURL did not return base64");
+          var bin = atob(url.slice(comma + 1)), out = new Uint8Array(bin.length);
+          for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+          resolve(out);
+        } catch (e) { reject(e); }
+        return;
+      }
+      try {
+        canvas.toBlob(function (blob) {
+          if (!blob) { reject(new Error("canvas.toBlob returned null")); return; }
+          blobBytes(blob).then(resolve, reject);
+        }, "image/jpeg", 0.85);
+      } catch (e) { reject(e); }
+    });
+  }
+  function jpegName(taken) {
+    var d = new Date(taken);
+    return "lopda-gps-" + d.getFullYear() + pad2(d.getMonth() + 1) + pad2(d.getDate()) + "-" +
+      pad2(d.getHours()) + pad2(d.getMinutes()) + pad2(d.getSeconds()) + ".jpg";
+  }
+  function latestFix() {
+    return globalFixes.length ? globalFixes[globalFixes.length - 1] : null;
+  }
+  /* lat/lon optional: no valid pair means "write the Exif but no GPS IFD". */
+  function buildJpegBytes(lat, lon, acc) {
+    return new Promise(function (resolve, reject) {
+      try {
+        var canvas = document.createElement("canvas");
+        var src = drawFrame(canvas);
+        canvasJpeg(canvas).then(function (plain) {
+          var taken = Date.now(), tz = -new Date(taken).getTimezoneOffset();
+          var hasGps = typeof lat === "number" && isFinite(lat) &&
+            typeof lon === "number" && isFinite(lon);
+          var gps = hasGps ? { lat: lat, lon: lon, acc: acc } : null;
+          var seg = exifSegment(taken, tz, gps);
+          var out = insertExif(plain, seg);
+          resolve({
+            bytes: out, width: src.width, height: src.height, fromVideo: src.fromVideo,
+            taken: taken, tz: tz, gps: gps, exifBytes: seg.length, plainBytes: plain.length
+          });
+        }).then(null, reject);
+      } catch (e) { reject(e); }
+    });
+  }
+  function fileFromBytes(bytes, name) {
+    var type = "image/jpeg";
+    try { return new File([bytes], name, { type: type }); }
+    catch (e) {
+      var blob = new Blob([bytes], { type: type });
+      try { blob.name = name; } catch (e2) {}
+      return blob;
+    }
+  }
+  function downloadFile(file) {
+    var url = URL.createObjectURL(file);
+    var a = document.createElement("a");
+    a.href = url; a.download = file.name || "lopda-gps.jpg";
+    document.body.appendChild(a);
+    try { a.click(); } catch (e) { addLog("jpeg", "下载链接 click 抛错: " + errText(e)); }
+    a.remove();
+    setTimeout(function () {
+      try { URL.revokeObjectURL(url); } catch (e) {}
+    }, 4000);
+  }
+  function onBuild() {
+    var fix = latestFix();
+    var hasGps = !!(fix && typeof fix.lat === "number" && isFinite(fix.lat) &&
+      typeof fix.lon === "number" && isFinite(fix.lon));
+    addLog("jpeg", "点击 制作 JPEG (Build); 图像源=" + (videoHasFrame() ? "相机最后一帧 (video)" : "测试图案 (test pattern)"));
+    if (hasGps) {
+      addLog("jpeg", "使用最新定位 (newest fix): source=" + fix.label + ", lat " + fmt(fix.lat, 6) +
+        ", lon " + fmt(fix.lon, 6) + ", acc " + fmt(fix.acc, 1) + " m, age " +
+        (fixAgeMs(fix, Date.now()) / 1000).toFixed(2) + " s");
+    } else {
+      addLog("jpeg", "还没有定位 (no fix yet): 仍写 Exif, 但不写 GPS IFD");
+    }
+    buildJpegBytes(hasGps ? fix.lat : null, hasGps ? fix.lon : null, hasGps ? fix.acc : null).then(function (r) {
+      var name = jpegName(r.taken);
+      var file = fileFromBytes(r.bytes, name);
+      built = {
+        file: file, bytes: r.bytes.length, name: name,
+        lat: hasGps ? fix.lat : null, lon: hasGps ? fix.lon : null, acc: hasGps ? fix.acc : null,
+        fromVideo: r.fromVideo, taken: r.taken
+      };
+      addLog("jpeg", "制作完成 (built): " + name + ", " + r.bytes.length + " 字节 (base " +
+        r.plainBytes + " + Exif APP1 " + r.exifBytes + "), 图像 " + r.width + "x" + r.height +
+        " (" + (r.fromVideo ? "video" : "test pattern") + ")");
+      if (hasGps) {
+        addLog("jpeg", "写入坐标 (written GPS): lat " + fmt(fix.lat, 6) + " (" + (fix.lat < 0 ? "S" : "N") +
+          "), lon " + fmt(fix.lon, 6) + " (" + (fix.lon < 0 ? "W" : "E") + "), HPositioningError " +
+          fmt(fix.acc, 2) + " m, DateTimeOriginal " + wall(r.taken, r.tz) + " " + offsetText(r.tz));
+      } else {
+        addLog("jpeg", "未写 GPS IFD (no GPS IFD); DateTimeOriginal " + wall(r.taken, r.tz) + " " + offsetText(r.tz));
+      }
+      document.getElementById("jpeg-live").textContent = "已制作 (ready): " + name + " | " + r.bytes.length +
+        " bytes | " + (hasGps ? "GPS " + fmt(fix.lat, 6) + ", " + fmt(fix.lon, 6) : "no GPS");
+    }, function (e) {
+      addLog("jpeg", "制作失败 (build failed): " + errText(e));
+    });
+  }
+  function onSave() {
+    if (!built || !built.file) {
+      addLog("jpeg", "没有文件 (nothing built): 先点 制作 JPEG (Build)");
+      return;
+    }
+    var file = built.file;
+    var canShare = !!(navigator.share && navigator.canShare);
+    if (!canShare) {
+      addLog("jpeg", "navigator.canShare 或 navigator.share 缺失: 回退到 <a download> 链接");
+      downloadFile(file);
+      addLog("jpeg", "已触发下载链接 (a download): " + built.name + " (" + built.bytes + " 字节)");
+      return;
+    }
+    var canFiles = false, why = "";
+    try { canFiles = navigator.canShare({ files: [file] }); }
+    catch (e) { why = "; canShare 抛错: " + errText(e); }
+    if (!canFiles) {
+      addLog("jpeg", "navigator.canShare({files}) = false" + why + ": 回退到 <a download> 链接");
+      downloadFile(file);
+      addLog("jpeg", "已触发下载链接 (a download): " + built.name + " (" + built.bytes + " 字节)");
+      return;
+    }
+    /* files only, no title/text (platform.js does the same): iOS would save the title as a second file */
+    addLog("jpeg", "点击 存储 / 分享 (Save): 同步调用 navigator.share({files:[...]}), 文件 " +
+      built.name + ", " + built.bytes + " 字节");
+    var sp;
+    try {
+      sp = navigator.share({ files: [file] });
+    } catch (e) {
+      addLog("jpeg", "navigator.share 同步抛错: " + errText(e));
+      return;
+    }
+    Promise.resolve(sp).then(function () {
+      addLog("jpeg", "分享完成 (share resolved)");
+    }, function (e) {
+      addLog("jpeg", e && e.name === "AbortError" ? "分享取消 (AbortError)" : "分享失败 (share failed): " + errText(e));
+    });
+  }
+
+  /* ---------------- boot: counts + buttons ---------------- */
+  var loadsEl = document.getElementById("loads");
+  loadsEl.textContent = "本次启动加载 (session): " + (sessionLoads == null ? "?" : sessionLoads) +
+    " | 自安装以来 (local): " + (installLoads == null ? "?" : installLoads) +
+    " | 重载: session +1; 从主屏重新启动: session 一般归 1 (local 继续累加)";
+  document.getElementById("page-state").textContent =
+    "URL: " + location.href + " | standalone=" + standaloneText();
+
+  addLog("perm", "页面加载 (load): session=" + (sessionLoads == null ? "?" : sessionLoads) +
+    ", install=" + (installLoads == null ? "?" : installLoads) + ", standalone=" + standaloneText());
+  addLog("error", "页面已加载 (page loaded). window.onerror / unhandledrejection 会写在这里。");
+  addLog("cam", "页面已加载 (page loaded), 相机与定位均未开始");
+
+  var preciseRec = newRec("precise", "精确跟踪 (Precise)", "precise", document.getElementById("precise-live"), "[精确]");
+  var coarseRec = newRec("coarse", "低精度跟踪 (Coarse)", "coarse", document.getElementById("coarse-live"), "[低精度]");
+  camRec = newRec("camera", "取景定位 (Camera GPS)", "cam", document.getElementById("cam-live"), "[相机 GPS]");
+  camRec.onUpdate = updateCamLive;
+  updateWatchLive(preciseRec);
+  updateWatchLive(coarseRec);
+  updateCamLive();
+
+  document.getElementById("btn-perm").onclick = function () {
+    try { onPermission(); } catch (e) { addLog("perm", "点击处理出错: " + errText(e)); }
+  };
+  document.getElementById("btn-precise-start").onclick = function () {
+    try { addLog("precise", "[精确] 点击 开始 (Start)"); startWatch(preciseRec, true); }
+    catch (e) { addLog("precise", "[精确] 开始出错: " + errText(e)); }
+  };
+  document.getElementById("btn-precise-stop").onclick = function () {
+    try { addLog("precise", "[精确] 点击 停止 (Stop)"); stopWatch(preciseRec, "button"); }
+    catch (e) { addLog("precise", "[精确] 停止出错: " + errText(e)); }
+  };
+  document.getElementById("btn-coarse-start").onclick = function () {
+    try { addLog("coarse", "[低精度] 点击 开始 (Start)"); startWatch(coarseRec, false); }
+    catch (e) { addLog("coarse", "[低精度] 开始出错: " + errText(e)); }
+  };
+  document.getElementById("btn-coarse-stop").onclick = function () {
+    try { addLog("coarse", "[低精度] 点击 停止 (Stop)"); stopWatch(coarseRec, "button"); }
+    catch (e) { addLog("coarse", "[低精度] 停止出错: " + errText(e)); }
+  };
+  document.getElementById("btn-cam-start").onclick = function () {
+    try {
+      addLog("cam", "点击 打开相机 + 定位 (Start)");
+      startWatch(camRec, true);
+      startCamera();
+      updateCamLive();
+    } catch (e) { addLog("cam", "打开相机处理出错: " + errText(e)); }
+  };
+  document.getElementById("btn-shutter").onclick = function () {
+    try { shutter(); } catch (e) { addLog("cam", "快门处理出错: " + errText(e)); }
+  };
+  document.getElementById("btn-cam-stop").onclick = function () {
+    try { stopCameraAndWatch("button"); } catch (e) { addLog("cam", "停止处理出错: " + errText(e)); }
+  };
+  document.getElementById("btn-build").onclick = function () {
+    try { onBuild(); } catch (e) { addLog("jpeg", "制作处理出错: " + errText(e)); }
+  };
+  document.getElementById("btn-save").onclick = function () {
+    try { onSave(); } catch (e) { addLog("jpeg", "存储处理出错: " + errText(e)); }
+  };
+
+  var copyButtons = document.querySelectorAll("button[data-copy]");
+  for (var i = 0; i < copyButtons.length; i++) {
+    (function (btn) {
+      btn.onclick = function () {
+        try { copyLog(btn.getAttribute("data-copy")); }
+        catch (e) {
+          var key = btn.getAttribute("data-copy");
+          try { addLog(key, "复制处理出错: " + errText(e)); } catch (e2) {}
+        }
+      };
+    })(copyButtons[i]);
+  }
+
+  document.addEventListener("visibilitychange", function () {
+    try {
+      if (document.hidden) {
+        addLog("cam", "visibilitychange hidden: 停止相机与定位 (检查状态栏定位箭头是否消失)");
+        stopCameraAndWatch("visibility hidden");
+      } else {
+        addLog("cam", "visibilitychange visible");
+        updateCamLive();
+      }
+    } catch (e) { addLog("cam", "visibilitychange 处理出错: " + errText(e)); }
+  });
+
+  window.gpsTest = {
+    buildJpeg: function (lat, lon, acc) {
+      return buildJpegBytes(lat, lon, acc).then(function (r) { return r.bytes; });
+    }
+  };
+})();
+</script>
+</body>
+</html>
