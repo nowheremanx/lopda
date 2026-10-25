@@ -24,7 +24,7 @@
  */
 (function(){
 "use strict";
-var LP=window.LP, $=LP.$, S=LP.S, tr=LP.tr, P=window.LopdaPlatform, NEG=window.LopdaNegative, DEV=window.LopdaDevelop, EXIF=window.LopdaExif, FILM=LP.film;
+var LP=window.LP, $=LP.$, S=LP.S, tr=LP.tr, P=window.LopdaPlatform, NEG=window.LopdaNegative, DEV=window.LopdaDevelop, EXIF=window.LopdaExif, GEOTAG=window.LopdaGeotag, FILM=LP.film;
 var own=LP.own, toast=LP.toast, put=LP.put, pad2=LP.pad2, sfx=LP.sfx, show=LP.show, showPad=LP.showPad, TONES=LP.TONES;
 
 /* the runtime's own import, not PAD's 2 MB: a fine-grain roll of 16 is about 3 MB */
@@ -104,10 +104,17 @@ function render(){
 }
 
 /* ---------- over the box: the roll's menu, naming, and the two confirmations ---------- */
+function placeInRoll(r){
+  if(!r || !r.frames) return false;
+  for(var i=0;i<r.frames.length;i++) if(r.frames[i] && r.frames[i].geo) return true;
+  return false;
+}
 function sheetItems(){
   if(D.sheet==="menu"){
     var r=current(), items=[r && r.dev ? {k:"view", label:"dk.view"} : {k:"develop", label:"dk.develop"},
       {k:"rename", label:"dk.rename"},{k:"export", label:"dk.export"},{k:"discard", label:"dk.discard"}];
+    /* a roll with a sealed place can lose all of them at once, just before throwing it away */
+    if(placeInRoll(r)) items.splice(items.length-1,0,{k:"erase", label:"dk.erase"});
     /* debug only (?debug): the owner tunes the stocks on his own photos */
     if(window.LOPDA_DEBUG) items.push({k:"compare", label:"dk.compare"});
     return items;
@@ -115,6 +122,7 @@ function sheetItems(){
   if(D.sheet==="print") return [{k:"p-single", label:"dk.p.single"},{k:"p-card", label:"dk.p.card"},{k:"p-strip", label:"dk.p.strip"}];
   if(D.sheet==="export") return [{k:"export-go", label:"dk.export.go"},{k:"back", label:"common.cancel"}];
   if(D.sheet==="discard") return [{k:"discard-go", label:"dk.discard.go"},{k:"back", label:"dk.discard.keep"}];
+  if(D.sheet==="erase") return [{k:"erase-go", label:"dk.erase.go"},{k:"back", label:"dk.erase.keep"}];
   return [];
 }
 function openMenu(){ if(!current()) return; D.sheet="menu"; D.sel=0; renderSheet(); }
@@ -131,12 +139,14 @@ function renderSheet(){
   D.armA=false;
   sh.hidden=!D.sheet || !r; sh.textContent="";
   if(sh.hidden) return;
-  var head=el("p","sheet-title"), top=D.sheet==="export"?tr("dk.export.title"):D.sheet==="discard"?tr("dk.discard.title"):D.sheet==="print"?tr("dk.print.title",{n:pad2(D.idx+1)}):title(r);
+  var head=el("p","sheet-title"), top=D.sheet==="export"?tr("dk.export.title"):D.sheet==="discard"?tr("dk.discard.title"):D.sheet==="erase"?tr("dk.erase.title"):D.sheet==="print"?tr("dk.print.title",{n:pad2(D.idx+1)}):title(r);
   head.appendChild(el("span","",top));
   if(top!==FILM.stockLabel(r.stock)) head.appendChild(el("small","",FILM.stockLabel(r.stock)));
   sh.appendChild(head);
   if(D.sheet==="name"){ nameSheet(sh,r); renderKeys(); return; }
-  if(D.sheet==="export" || D.sheet==="discard") sh.appendChild(el("p","hint dk-note",tr(D.sheet==="export"?"dk.export.note":"dk.discard.note")));
+  if(D.sheet==="export" || D.sheet==="discard" || D.sheet==="erase") sh.appendChild(el("p","hint dk-note",tr(D.sheet==="export"?"dk.export.note":D.sheet==="discard"?"dk.discard.note":"dk.erase.note")));
+  else if(D.sheet==="print" && D.prints && D.prints.key===r.id+"-"+D.idx && D.prints.jobs["p-single"] && D.prints.jobs["p-single"].out && D.prints.jobs["p-single"].out.placed)
+    sh.appendChild(el("p","hint dk-note",tr("dk.print.place")));
   var ul=el("ul","lcd-menu");
   sheetItems().forEach(function(it,i){
     var li=el("li",i===D.sel?"on":""); li.appendChild(el("span","",tr(it.label)));
@@ -177,8 +187,10 @@ function pick(){
   else if(it.k==="p-single" || it.k==="p-card" || it.k==="p-strip") printOut(it.k);
   else if(it.k==="rename"){ sfx("tap"); D.sheet="name"; renderSheet(); }
   else if(it.k==="export"){ sfx("tap"); openConfirm("export"); }
+  else if(it.k==="erase"){ sfx("tap"); openConfirm("erase"); }
   else if(it.k==="discard"){ sfx("tap"); openConfirm("discard"); }
   else if(it.k==="export-go") exportNegative();
+  else if(it.k==="erase-go") erasePlaces();
   else if(it.k==="discard-go") discard();
   else if(it.k==="back") back();
 }
@@ -208,6 +220,28 @@ function packable(r){
   if(r.dev) o.dev={v:r.dev.v, seed:r.dev.seed, at:r.dev.at};
   return o;
 }
+/* negative.js checks every frame key against its own list, so the sealed place cannot ride inside a frame in the
+   file; it travels beside them, one slot per frame, and comes back onto the frames when the negative is imported.
+   A roll without a place packs exactly as it did before: no extra key. */
+function negativeRoll(r){
+  var places=r.frames.map(function(f){ return f.geo || null; }), any=false, i;
+  for(i=0;i<places.length;i++) if(places[i]) any=true;
+  if(!any) return packable(r);
+  var o=packable(r);
+  o.frames=r.frames.map(function(f){
+    var c={}, key;
+    for(key in f) if(key!=="geo") c[key]=f[key];
+    return c;
+  });
+  o.geo=places;
+  return o;
+}
+function unpackPlaces(roll){
+  var places=roll && roll.geo;
+  if(!Array.isArray(places)) return;
+  roll.frames.forEach(function(f,k){ if(places[k] && typeof places[k]==="object") f.geo=places[k]; });
+  delete roll.geo;
+}
 function bytesOf(blob){ return blob.arrayBuffer ? blob.arrayBuffer().then(function(b){ return new Uint8Array(b); }) : new Promise(function(res,rej){ var fr=new FileReader(); fr.onload=function(){ res(new Uint8Array(fr.result)); }; fr.onerror=rej; fr.readAsArrayBuffer(blob); }); }
 /* lopda-negative-20261011-sunny-200-007.png: the day it was loaded, the stock and the roll's number on the handheld that
    shot it, in plain letters (a roll's own name may be Chinese, which some browsers and chat apps turn into "download");
@@ -227,7 +261,7 @@ function buildNegative(r){
       head:"LO-PDA NEGATIVE", sub:stock+" · "+r.size+" EXP"+(r.name?" · "+r.name:""), foot:"· ROLL "+rollNo(r)+" ·"});
     snap(cv);
     return new Promise(function(resolve,reject){ cv.toBlob(function(b){ if(b) resolve(b); else reject(new Error("png")); },"image/png"); })
-      .then(bytesOf).then(function(png){ return new Blob([NEG.pack(png,packable(r),jpegs)],{type:"image/png"}); });
+      .then(bytesOf).then(function(png){ return new Blob([NEG.pack(png,negativeRoll(r),jpegs)],{type:"image/png"}); });
   });
 }
 /* made as soon as the confirmation opens, so the tap on Export can open the share sheet itself */
@@ -250,6 +284,22 @@ function exportNegative(){
   if(job.blob){ done(); save(job.blob); return; }
   busy(tr("dk.exporting"));
   job.promise.then(save,function(e){ toast(tr("save.failed",{code:(e&&e.message)||"?"})); sfx("err"); }).then(done);
+}
+/* the sealed places go, the times and pictures stay; prints made from the old place are dropped */
+function erasePlaces(){
+  var r=current(); if(!r) return;
+  /* the places leave memory only once the roll without them is stored: a failed write keeps them (put shows the error) */
+  var kept=r.frames.map(function(f){ return f.geo; });
+  r.frames.forEach(function(f){ delete f.geo; });
+  (S.db ? put(S.refs.rolls.doc(r.id),r) : Promise.resolve(true)).then(function(ok){
+    if(!ok){
+      r.frames.forEach(function(f,k){ if(kept[k]) f.geo=kept[k]; });
+      sfx("err"); toMenu("erase"); renderSheet(); render(); return;   /* put has said why */
+    }
+    D.prints=null; D.neg=null;
+    sfx("ok"); toast(tr("dk.erased"));
+    toMenu("discard"); renderSheet(); render();
+  });
 }
 function discard(){
   var r=current(); if(!r) return;
@@ -288,6 +338,7 @@ $("dk-file").addEventListener("change",function(){
 });
 /* the latent images first, then the roll; if any write fails, what was written goes again */
 function keep(roll,jpegs){
+  unpackPlaces(roll);
   var r=packable(roll), bytes=0, written=[];
   r.frames.forEach(function(f){ bytes+=f.px.length; });
   jpegs.forEach(function(j){ if(j) bytes+=j.length; });
@@ -612,16 +663,28 @@ function frameTz(f){
   var tz=f.tz;
   return typeof tz==="number" && isFinite(tz) && tz===Math.floor(tz) && tz>=-840 && tz<=840 ? tz : -new Date(f.taken).getTimezoneOffset();
 }
+/* the single print is the one print that can show where it was taken: the sealed place is opened here, in local
+   variables only. No place, no key, a foreign key or damage is just a time-only print, with no error and no toast. */
+function placeOf(f){
+  if(!f || !f.geo || !GEOTAG) return Promise.resolve(null);
+  return LP.darkroomKey.ring().then(function(ring){
+    return GEOTAG.open(crypto.subtle,ring,f.geo);
+  }).then(function(place){ return place || null; },function(){ return null; });
+}
 /* the single print leaves as a JPEG with the shooting time in EXIF (decisions.md section 38); no taken, no EXIF */
 function jpegPrint(cv,f,name){
   return new Promise(function(resolve,reject){
     cv.toBlob(function(blob){
       if(!blob){ reject({code:"bad_request"}); return; }
-      if(!f || typeof f.taken!=="number"){ resolve({blob:blob, name:name}); return; }
+      if(!f || typeof f.taken!=="number"){ resolve({blob:blob, name:name, placed:false}); return; }
       var tz=frameTz(f);
-      bytesOf(blob).then(function(bytes){
-        var out=EXIF.insert(bytes,{taken:f.taken, tz:tz, software:"Lo-PDA "+LP.RUNTIME_VERSION});
-        resolve({blob:new Blob([out],{type:"image/jpeg"}), name:name});
+      placeOf(f).then(function(place){
+        return bytesOf(blob).then(function(bytes){
+          var info={taken:f.taken, tz:tz, software:"Lo-PDA "+LP.RUNTIME_VERSION};
+          if(place) info.gps={lat:place.lat, lon:place.lon, acc:place.acc};
+          var out=EXIF.insert(bytes,info);
+          resolve({blob:new Blob([out],{type:"image/jpeg"}), name:name, placed:!!place});
+        });
       }).then(null,reject);
     },"image/jpeg",0.92);
   });
@@ -648,7 +711,12 @@ function preparePrints(r){
     return pr.then(function(){
       if(gen!==D.gen || !D.prints || D.prints.jobs!==jobs) return;
       var job=jobs[kind]={out:null};
-      job.promise=buildPrint(kind,r,k).then(function(o){ job.out=o; return o; });
+      job.promise=buildPrint(kind,r,k).then(function(o){
+        job.out=o;
+        /* the note is information only: redraw the same sheet once the single print says it carries a place */
+        if(kind==="p-single" && o && o.placed && D.prints && D.prints.jobs===jobs && D.prints.key===key && D.sheet==="print") renderSheet();
+        return o;
+      });
       return job.promise.then(null,function(){});
     });
   },Promise.resolve());
