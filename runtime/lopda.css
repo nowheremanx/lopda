@@ -210,7 +210,9 @@ textarea::placeholder{color:var(--ink-2)}
 .set-menu{padding:0 10px 6px;gap:0}
 .set-bar{padding:1px 8px}
 .set-bar h2{line-height:1.1}
-.set-menu .set-row{min-height:44px;padding:0;justify-content:flex-start;gap:10px}
+.set-menu .set-row{min-height:44px;padding:6px 0 8px;justify-content:flex-start;gap:10px}
+/* a little air between the buttons and the lines above and below them (the 3 px shadow sits in the bottom gap) */
+.set-menu .set-row .btn{min-height:34px;padding:3px 12px}
 .set-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .set-ico{flex:none;width:24px;height:24px;display:flex;align-items:center;justify-content:center}
 .set-ico canvas{display:block;width:24px;height:24px;image-rendering:pixelated;image-rendering:crisp-edges}
