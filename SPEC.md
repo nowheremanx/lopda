@@ -37,7 +37,6 @@ No other files are loaded. Images, sounds and fonts must be embedded in
   "category": "game",
   "icon": ["................", "...16 rows of 16 characters..."],
   "version": "1.0.0",
-  "released": "2026-10-07",
   "description": "点黑格子里的地鼠，20 秒。",
   "i18n": { "en": { "name": "Mole Bop", "description": "Bop the moles in the dark holes. 20 seconds." } },
   "author": "Haowei Wu",
@@ -56,13 +55,17 @@ No other files are loaded. Images, sounds and fonts must be embedded in
 | `category` | Optional. One of `game`, `productivity`, `education`, `create`, `story`, `life`. The store files the app under it and offers that category as a filter; without it the app shows under Other. |
 | `icon` | Optional. A 16×16 pixel icon: an array of 16 strings, each 16 characters long. `0` ink, `1` dark, `2` mid, `3` paper, `.` transparent (the tile shows through). |
 | `version` | Semantic version `MAJOR.MINOR.PATCH`. Bump it on every change. |
-| `released` | Optional. The day the app was first published, `YYYY-MM-DD`. The store wears a 新 / NEW badge for seven days after it (runtime 0.44.0+). Set it once; a version update does not change it. |
 | `description` | One sentence, 80 characters at most. |
 | `i18n` | Optional. Store text in other languages: `{"en": {"name", "description"}, "zh": {...}}`. Only `zh` and `en`, only those two fields, same rules as above. The store and home screen show the entry for the player's language and fall back to `name` / `description`. |
 | `author` | Name or handle. |
 | `license` | One of: `MIT`, `0BSD`, `BSD-2-Clause`, `BSD-3-Clause`, `ISC`, `Apache-2.0`, `CC0-1.0`, `Unlicense`. |
 | `permissions` | Array. Usually empty. Six capabilities (`lopda/1`): `"files"`, the app may export and import files, each time confirmed by the player (section 6.2); `"motion"`, tilt, shake and heading; `"mic"`, the microphone's loudness and pitch (both section 6.4); `"notes"`, the app may add text to a note of its own in the player's notes, each time confirmed by the player (section 6.5); `"camera"`, the app may ask for a photo, which the player takes in the runtime's viewfinder and the app gets as a small four-tone picture (section 6.6); `"wordbook"`, the app may read and change the player's word book (section 6.7). The store shows them as icons on the app's entry and asks the player before installing (runtime 0.44.0+); an app allowed then does not ask on first use, while files and notes still confirm every call. Anything else fails the checker. |
 | `buttons` | Optional, `lopda/1` only. `true` shows the chin buttons while the app runs (section 4). Leave it out for touch-only apps. |
+
+`registry/index.json` adds two dates to every entry, `released` and `updated` (`YYYY-MM-DD`): the first and the
+most recent commit that changed the app's `index.html`, stamped by `tools/build-index.mjs` from git. The store
+wears 新 / NEW for seven days after `released`, and 更新 / UPDATED for seven days after `updated` when the app is
+not new (runtime 0.44.0+). App authors do not write these fields; the manifest checker rejects them.
 
 ## 3. The screen
 

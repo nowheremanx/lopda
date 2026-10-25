@@ -1507,18 +1507,24 @@ EXIF，相册就能把照片放到地图上。
 - **旧安装、更新和「全部更新」**：旧版本装的 app 没有这份授权，第一次用时照旧问。更新如果**新增**了权限，
   点「更新」时也会先确认，只把新增的能力写进记录；权限没变的更新不弹。「全部更新」一件一件地装，不中途弹框，
   新权限留给第一次使用时问。卸载照旧删掉这个 app 的所有授权。
-- **新上架的标记（owner，2026-10-25）**：manifest 多一个可选的 `released`（`YYYY-MM-DD`，首次上架的日期，
-  版本更新不改它），`tools/build-index.mjs` 把它带进目录；商店用设备时间算，发布日期在七天以内（含今天、
-  不包含未来日期）的条目在名字和版本后面挂一个「新 / NEW」小牌。到期自动消失，不需要人工撤。旧 app 没有这个
-  字段就不挂；新提交的 app 由作者写。检查器验日期格式和真实性，不拦未来日期（未来的日期只是不显示）。
+- **新上架 / 更新的标记（owner，2026-10-25）**：两个日期都**不是 manifest 字段**，由 `tools/build-index.mjs`
+  从 git 算出来写进 `registry/index.json`：
+  - `released`：这个 app 的 `index.html` 第一次被提交的日期（`git log --follow --diff-filter=A`）。
+  - `updated`：最近一次改 `index.html` 的日期（`git log --follow -1`）。改图标、改文案、改 manifest 不算更新，
+    因为 `index.html` 没变；版本更新才会变。
+  没有 git 时（测试临时副本、只发布已提交文件的环境）沿用现有 `index.json` 里的日期；新 app 没有历史就先没有日期。
+  app 作者完全不碰这两个字段，检查器见到 manifest 里有 `released` / `updated` 直接报错。商店用设备时间算：
+  `released` 七天以内挂「新 / NEW」；否则 `updated` 七天以内挂「更新 / UPDATED」。两个都符合只挂「新」。
+  到期自动消失。这样作者不用记，也不能自己写日期来常驻 NEW。
 - **权限图标的第二轮（owner，2026-10-25）**：`files` 改成最经典的文件夹；`motion` 换成一点加三道超声波的
   图案（owner 说原来那个倾斜手机的图案看不出来）；`mic` 去掉两边的支架，改成上面几个点、中间一道圈的
   菠萝纹话筒；`notes` 用铅笔；`camera` 和 `wordbook` 不改。
 - **不做的**：不做详情页、不做按作者或标签的高级筛选、不做搜索历史；不把权限说明重新放回条目下面；不在安装时
   请求手机的系统权限（那一步仍然必须发生在用户的一次点击里）；不做按发布日排序或「只看新上架」的筛选。
 - **代码**：`runtime/index.html` 的 `#store-q`、`#store-q-clear`；`runtime/apps/store.js` 的 `PERM_ICONS`、
-  `permIcon`、`permRow`、`searchScore`、`searchApps`、`setQuery`、`install` / `doInstall` 和 `openAsk` 的
-  `req.perms`；`runtime/lopda.css` 的 `.store-search`、`.store-perms`、`.ask-perms`；`runtime/strings.js`；
+  `permIcon`、`permRow`、`searchScore`、`searchApps`、`setQuery`、`withinWeek` / `isNew` / `isUpdated`、
+  `install` / `doInstall` 和 `openAsk` 的 `req.perms`；`runtime/lopda.css` 的 `.store-search`、`.store-perms`、
+  `.ask-perms`、`.store-badge`；`runtime/strings.js`；`tools/build-index.mjs` 的 `datesFor`；
   `tests/e2e.test.mjs` 的「store: search…」和「store: an app that asks…」。
 - **图标重画**：owner 指出吹蜡烛、纸塔、拍照拼图、声音样本、矢量梦和罗盘的主屏图标不好认。草稿先放在本机不被
   git 跟踪的目录里逐个 review，owner 2026-10-25 拍板用推荐的那一版，已经写进 manifest 和 registry：

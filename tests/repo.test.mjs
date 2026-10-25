@@ -23,6 +23,19 @@ test("registry/index.json is what build-index.mjs would write", (t) => {
   assert.deepEqual(cur, fresh, "run node tools/build-index.mjs");
 });
 
+test("registry entries carry released and updated dates, in order", () => {
+  const index = readJSON("registry/index.json");
+  for (const a of index.apps) {
+    for (const k of ["released", "updated"]) {
+      assert.match(a[k] || "", /^\d{4}-\d{2}-\d{2}$/, `${a.id}: ${k}`);
+      const [y, mo, d] = a[k].split("-").map(Number);
+      const dt = new Date(Date.UTC(y, mo - 1, d));
+      assert.equal(dt.toISOString().slice(0, 10), a[k], `${a.id}: ${k} is a real date`);
+    }
+    assert.ok(a.released <= a.updated, `${a.id}: released ${a.released} after updated ${a.updated}`);
+  }
+});
+
 test("every index entry points at the exact file it describes", () => {
   const index = readJSON("registry/index.json");
   assert.equal(index.spec, "lopda/1");

@@ -5,7 +5,6 @@
   "glyph": "梦",
   "category": "create",
   "version": "0.2.0",
-  "released": "2026-10-08",
   "description": "手写的软件三维渲染：环结、飞越山地、晶体。方向键转视角，A 换场景，B 线框。",
   "i18n": {
     "en": {

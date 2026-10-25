@@ -5,7 +5,6 @@
   "glyph": "签",
   "category": "life",
   "version": "1.1.1",
-  "released": "2026-10-19",
   "description": "抽一支签，读一段今天的顺便话。写进记事本接口的示范。",
   "i18n": {
     "zh": {

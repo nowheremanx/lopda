@@ -87,15 +87,18 @@ function outdatedApps(){
   return registryApps().filter(function(r){ var a=installedOf(r.id); return a && a.sha256!==r.sha256; });
 }
 function updatesAvailable(){ return outdatedApps().length>0; }
-/* an app first published in the last seven days wears the NEW badge; the date comes from the manifest's
-   "released" and is copied into registry/index.json (SPEC.md section 2, decisions.md section 42) */
-function isNew(r){
-  if(!r || typeof r.released!=="string") return false;
-  var t=Date.parse(r.released+"T00:00:00");
+/* the two dates in registry/index.json, both stamped by tools/build-index.mjs from git: released is the
+   first commit of the app's index.html, updated the last. A first week wears NEW; a later version's first
+   week wears UPDATED, but a new app shows only NEW (decisions.md section 42). */
+function withinWeek(date){
+  if(typeof date!=="string") return false;
+  var t=Date.parse(date+"T00:00:00");
   if(isNaN(t)) return false;
   var age=Date.now()-t;
   return age>=0 && age<7*24*60*60*1000;
 }
+function isNew(r){ return withinWeek(r && r.released); }
+function isUpdated(r){ return withinWeek(r && r.updated); }
 /* the selected category stays while the store is open; "all" groups the list into sections */
 var storeCat="all", updating=null, storeQuery="";
 /* search: NFKC and lower case on both sides, a plain substring, every word must match; names beat descriptions.
@@ -165,7 +168,8 @@ function storeItem(r){
   var tile=document.createElement("span"); tile.className="tile"; fillTile(tile,r);
   var body=document.createElement("div"); body.className="store-body";
   var t=document.createElement("b"); t.textContent=appName(r)+" v"+r.version;
-  if(isNew(r)){ var nb=document.createElement("span"); nb.className="store-new"; nb.textContent=tr("store.new"); t.appendChild(document.createTextNode(" ")); t.appendChild(nb); }
+  var badge=isNew(r) ? "store.new" : (isUpdated(r) ? "store.updatebadge" : "");
+  if(badge){ var nb=document.createElement("span"); nb.className="store-badge"; nb.textContent=tr(badge); t.appendChild(document.createTextNode(" ")); t.appendChild(nb); }
   var d=document.createElement("span"); d.textContent=appDesc(r);
   var m=document.createElement("small"); m.textContent=(r.author||tr("store.anon"))+" · "+(r.license||"")+" · "+Math.max(1,Math.round((r.bytes||0)/1024))+" KB";
   body.appendChild(t); body.appendChild(d); body.appendChild(m);

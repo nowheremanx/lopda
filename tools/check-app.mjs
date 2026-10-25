@@ -130,15 +130,6 @@ export function checkApp(dir) {
     }
   } else info.push("no i18n in the manifest: zh + en names are recommended (SPEC.md)");
   if (typeof m.version !== "string" || !/^\d+\.\d+\.\d+$/.test(m.version)) errors.push("version must be MAJOR.MINOR.PATCH");
-  if (m.released !== undefined) {
-    const okDate = typeof m.released === "string" && /^\d{4}-\d{2}-\d{2}$/.test(m.released);
-    if (!okDate) errors.push('released must be a date, "YYYY-MM-DD"');
-    else {
-      const [y, mo, d] = m.released.split("-").map(Number);
-      const dt = new Date(Date.UTC(y, mo - 1, d));
-      if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) errors.push(`released ${m.released} is not a real date`);
-    }
-  } else info.push("no released date: the store shows no NEW badge");
   if (!m.description || chars(m.description).length > 80) errors.push("description must be 1-80 characters");
   if (!m.author) errors.push("author is required");
   if (!LICENSES.includes(m.license)) errors.push(`license must be one of ${LICENSES.join(", ")}`);
@@ -148,6 +139,7 @@ export function checkApp(dir) {
     if (new Set(m.permissions).size !== m.permissions.length) errors.push("permissions lists the same one twice");
     if (m.permissions.length && m.spec !== "lopda/1") errors.push('permissions need spec "lopda/1"');
   }
+  if (m.released !== undefined || m.updated !== undefined) errors.push("released and updated are computed by tools/build-index.mjs from git; do not put them in the manifest");
   if (m.buttons !== undefined) {
     if (m.spec !== "lopda/1") errors.push('buttons needs spec "lopda/1"');
     else if (typeof m.buttons !== "boolean") errors.push("buttons must be true or false");

@@ -329,13 +329,15 @@ test("store: search finds an app by either language, ignores case, and clearing 
   assert.equal(await p.locator("#store-filters").isHidden(), true, "categories step aside while searching");
   assert.match(await p.textContent("#store-list"), /纸塔/);
   assert.match(await p.textContent("#store-state"), /1 个结果/);
-  assert.equal((await p.textContent("#store-list .store-new")).trim(), "新", "a four-day-old app wears NEW");
+  assert.equal((await p.textContent("#store-list .store-badge")).trim(), "新", "a four-day-old app wears NEW");
 
   await p.fill("#store-q", "PAPER");
   assert.match(await p.textContent("#store-list"), /纸塔/, "the English name finds it too");
+  await p.fill("#store-q", "拍照");
+  assert.equal((await p.textContent("#store-list .store-badge")).trim(), "更新", "a five-day-old version wears UPDATED");
   await p.fill("#store-q", "五子棋");
   assert.equal(await p.locator("#store-list .store-item").count(), 1);
-  assert.equal(await p.locator("#store-list .store-new").count(), 0, "an older app has no badge");
+  assert.equal(await p.locator("#store-list .store-badge").count(), 0, "an older app has no badge");
   await p.fill("#store-q", "zzzz");
   assert.match(await p.textContent("#store-list"), /没有找到/, "an empty result says so");
 
