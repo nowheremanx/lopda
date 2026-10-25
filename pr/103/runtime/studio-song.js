@@ -63,22 +63,74 @@ var DEMO={
 /* The demo's bass and chords, same 1-based grid as DEMO (12.9); the drum beat is untouched, so 1a songs play the same. */
 var DEMO_BASS=[[1,0],[9,2],[11,3]], DEMO_CHORDS=[[1,0],[9,3]];
 
-/* The example tape (12.12): four one-bar patterns and a 16-slot chain, all the numbers in one place next to DEMO. A is
-   exactly newSong()'s bar; the others keep A's drums, bass or chords unless a row says otherwise. Drum rows are 1-based
-   steps. Note pairs are [step, degree]: melody and bass degrees are of the pentatonic grid, chord degrees of the
-   seven-note parent, and a null degree is a rest (a note with vel 0). */
+/* The example tape (12.12, rewritten after the owner's second try): a neo-soul tune in A dorian, original. Eight one-bar
+   patterns make two four-bar phrases, so the song moves by phrase instead of repeating each bar: a verse (A-D: Am9 |
+   D9 | Cmaj9 Bm7 | Em9 D9) and a chorus (E-H: Cmaj9 | Bm7 Em9 | Am9 F#m7b5 | D9 with a fill), played verse, verse,
+   chorus, chorus, verse, chorus. Dorian's major sixth (F#) gives the i9 - IV9 sound the style leans on.
+   What makes it lean rather than square: the bass lands on the next chord's root a 16th early (step 8 or 16) and
+   leaves holes with rests; the melody starts off the beat and breathes; ghost snares and soft 16th hats sit under a
+   heavier swing (0.62). Every number is here so the tape can be read and changed. Drum rows are 1-based steps, or
+   [step, velocity] for a ghost or an accent; note rows are [step, degree] or [step, degree, velocity], with degrees of
+   the grid's own scale (dorian: 0 A, 1 B, 2 C, 3 D, 4 E, 5 F#, 6 G, 7 A) for bass and melody, of the scale for chords
+   (0 Am9, 1 Bm7, 2 Cmaj9, 3 D9, 4 Em9, 5 F#m7b5), and a null degree is a rest. The chords play at 0.65: a soft
+   pad under the flute, and the whole tape stays below the soft clip's knee most of the time. */
+var R=null;
+var GROOVE={                                   /* the verse: kick 1, the "and" before 3, a push on 11; ghosts on 10 and 16 */
+  kick:[1,[8,0.75],[11,0.9]], snare:[5,[10,0.22],13,[16,0.28]],
+  hat:[1,[3,0.35],5,[7,0.35],[8,0.2],9,[11,0.35],13,[15,0.4]], perc:[],
+  vel:{kick:0.85, snare:0.9, hat:0.5, perc:0.35}
+};
+var GROOVE_D={                                 /* the verse's last bar: the ghosts walk up into the next phrase */
+  kick:[1,[8,0.75],[11,0.9]], snare:[5,13,[14,0.3],[15,0.4],[16,0.55]],
+  hat:[1,[3,0.35],5,[7,0.35],9,[11,0.35]], perc:[], vel:GROOVE.vel
+};
+var GROOVE_C={                                 /* the chorus: more 16ths, a wood block answering the snare */
+  kick:[1,[7,0.8],[11,0.9],[12,0.5]], snare:[[3,0.2],5,[10,0.22],13,[15,0.25]],
+  hat:[1,[2,0.25],3,5,[6,0.25],7,9,[10,0.25],11,13,[14,0.25],15], perc:[[4,0.35],[12,0.35]],
+  vel:{kick:0.85, snare:0.9, hat:0.45, perc:0.35}
+};
+var GROOVE_H={                                 /* the turnaround: a snare roll that climbs back to the top */
+  kick:[1,[8,0.75]], snare:[5,[9,0.3],[11,0.35],[13,0.45],[14,0.55],[15,0.7],[16,0.85]],
+  hat:[1,[3,0.35],5,[7,0.35]], perc:[], vel:GROOVE.vel
+};
 var DEMO_SONG={
+  bpm:78, scale:"dorian", swing:0.62,
   patterns:[
-    {drums:DEMO, bass:DEMO_BASS, chords:DEMO_CHORDS, melody:[]},
-    {drums:DEMO, bass:DEMO_BASS, chords:DEMO_CHORDS,
-     melody:[[1,4],[3,5],[5,4],[7,null],[9,3],[11,2],[13,3],[15,null]]},
-    {drums:{kick:[1,8,11,15], snare:[5,13], hat:[1,3,5,7,9,11,13], perc:[16], vel:DEMO.vel},
-     bass:[[1,1],[9,3],[13,4]], chords:[[1,5],[9,4]],
-     melody:[[1,6],[4,5],[7,3],[8,null],[9,4],[12,3],[15,null]]},
-    {drums:{kick:[1], snare:[13], hat:[1,5,9,13], perc:[], vel:DEMO.vel},
-     bass:[[1,2],[9,null]], chords:[[1,3]], melody:[[1,5],[9,null]]}
+    /* A  Am9 */
+    {drums:GROOVE, chords:[[1,0,0.65]],
+     bass:[[1,0],[3,R],[4,0,0.6],[7,4],[8,R],[11,6],[13,7],[15,6]],
+     melody:[[3,4],[4,6,0.6],[6,7],[9,6],[10,R],[11,4],[13,6],[15,R]]},
+    /* B  D9 */
+    {drums:GROOVE, chords:[[1,3,0.65]],
+     bass:[[1,3],[3,R],[4,3,0.6],[7,5],[8,R],[11,7],[13,6],[16,2]],
+     melody:[[2,5],[4,4],[5,3],[7,R],[9,5],[10,6,0.6],[11,5],[12,3],[14,4],[16,R]]},
+    /* C  Cmaj9 Bm7 */
+    {drums:GROOVE, chords:[[1,2,0.65],[9,1,0.65]],
+     bass:[[1,2],[4,R],[5,2,0.6],[7,4],[8,1],[11,R],[12,3],[14,5],[16,4]],
+     melody:[[3,1],[4,2,0.6],[5,4],[7,6],[8,5],[11,3],[12,R],[13,1],[15,R]]},
+    /* D  Em9 D9 */
+    {drums:GROOVE_D, chords:[[1,4,0.65],[9,3,0.65]],
+     bass:[[1,4],[3,R],[4,4,0.6],[6,6],[8,3],[11,R],[12,5],[14,3],[16,0]],
+     melody:[[1,6],[3,5],[4,4,0.6],[6,R],[9,5],[11,4],[12,3,0.6],[13,0],[15,R]]},
+    /* E  Cmaj9 */
+    {drums:GROOVE_C, chords:[[1,2,0.65]],
+     bass:[[1,2],[2,R],[3,2,0.5],[5,4],[7,6],[8,R],[9,2],[11,R],[12,4],[14,6],[16,1]],
+     melody:[[1,6],[2,7,0.6],[4,6],[5,4],[7,R],[9,1],[11,2],[12,4,0.6],[13,6],[15,R]]},
+    /* F  Bm7 Em9 */
+    {drums:GROOVE_C, chords:[[1,1,0.65],[9,4,0.65]],
+     bass:[[1,1],[3,R],[4,1,0.6],[7,3],[8,4],[11,R],[12,4,0.6],[14,6],[16,0]],
+     melody:[[1,5],[3,3],[4,1,0.6],[6,R],[8,6],[10,5],[11,4],[13,R],[14,3,0.6],[15,4],[16,R]]},
+    /* G  Am9 F#m7b5 */
+    {drums:GROOVE_C, chords:[[1,0,0.65],[9,5,0.65]],
+     bass:[[1,0],[3,R],[4,0,0.6],[7,2],[8,5],[11,R],[12,5,0.6],[14,2],[16,3]],
+     melody:[[1,7],[3,6],[5,4],[6,6,0.6],[8,R],[9,5],[11,2],[12,0,0.6],[13,2],[15,R]]},
+    /* H  D9, the fill */
+    {drums:GROOVE_H, chords:[[1,3,0.65]],
+     bass:[[1,3],[3,R],[5,3,0.7],[7,5],[9,7],[11,6],[13,5],[14,4],[15,3],[16,2]],
+     melody:[[1,5],[3,4],[5,3],[7,R]]}
   ],
-  song:[0,0,1,1,2,2,1,1,3,3,2,2,1,1,0,0]
+  /* verse, verse, chorus, chorus, verse, chorus: 24 bars, about 74 seconds */
+  song:[0,1,2,3, 0,1,2,3, 4,5,6,7, 4,5,6,7, 0,1,2,3, 4,5,6,7]
 };
 
 var SWING_MIN=0.5, SWING_MAX=0.75, SWING_DEFAULT=0.55, TAPE_MAX=4, PATTERNS_MAX=8, SONG_MAX=64, NAME_MAX=40;
@@ -128,7 +180,11 @@ function drumNotes(spec){
   var out=[];
   for(var i=0;i<DRUMS.length;i++){
     var drum=DRUMS[i], steps=spec[drum], vel=(spec.vel&&spec.vel[drum]!=null)?spec.vel[drum]:DEMO.vel[drum];
-    for(var j=0;j<steps.length;j++) out.push({t:(steps[j]-1)*STEP, len:STEP, key:drum, vel:vel});
+    for(var j=0;j<steps.length;j++){
+      /* a bare step plays at the row's velocity; [step, vel] is a ghost note or an accent */
+      var hit=steps[j], step=Array.isArray(hit)?hit[0]:hit, v=Array.isArray(hit)?hit[1]:vel;
+      out.push({t:(step-1)*STEP, len:STEP, key:drum, vel:v});
+    }
   }
   out.sort(order);
   return out;
@@ -144,7 +200,8 @@ function demoTrack(pairs){
   var out=[];
   for(var i=0;i<pairs.length;i++){
     var rest=pairs[i][1]==null;
-    out.push({t:(pairs[i][0]-1)*STEP, len:STEP, deg:rest?0:pairs[i][1], vel:rest?REST_VEL:NOTE_VEL});
+    out.push({t:(pairs[i][0]-1)*STEP, len:STEP, deg:rest?0:pairs[i][1],
+      vel:rest?REST_VEL:(pairs[i][2]!=null?pairs[i][2]:NOTE_VEL)});
   }
   return tie(out, STEPS*STEP);
 }
@@ -168,10 +225,11 @@ function newSong(now){
   };
 }
 
-/* The example tape in the menu (12.12): newSong's tempo, key, scale, swing and soft kit, four patterns and the 16-slot
-   chain from DEMO_SONG. A fresh song and the example are separate: "new tape" stays the single demo bar. */
+/* The example tape in the menu (12.12): newSong's key and soft kit with DEMO_SONG's tempo, scale and swing, its eight
+   patterns and its chain. A fresh song and the example are separate: "new tape" stays the single demo bar. */
 function demoSong(now){
   var song=newSong(now), i, d;
+  song.bpm=DEMO_SONG.bpm; song.scale=DEMO_SONG.scale; song.swing=DEMO_SONG.swing;
   song.patterns=[];
   for(i=0;i<DEMO_SONG.patterns.length;i++){
     d=DEMO_SONG.patterns[i];

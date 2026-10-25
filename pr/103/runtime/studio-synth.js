@@ -24,7 +24,7 @@
  * paper tower's title tune with the chip kit and 0.62x with the soft kit, so it sits near PAD.music's songs. The
  * melodic voices at velocity 1 peak 0.30 for bass, 0.072 per keys note, 0.22 for flute and 0.26 for pluck; bass 45,
  * a four-note keys chord and pluck 69 together peak 0.58, so the notes alone stay under 0.6. The four-bar demo pattern
- * (drums, bass and chords) with the soft kit peaks 0.77, and the sixteen-bar example tape with all four tracks peaks
+ * (drums, bass and chords) with the soft kit peaks 0.77, and the 24-bar example tape with all four tracks peaks
  * under the section 12.6 target of 0.9; the dense drum hit stops at the 0.908 ceiling.
  */
 (function(){
