@@ -77,7 +77,9 @@ function chunkBytes(type,data){
 }
 
 /* the roll as the darkroom keeps it, checked field by field: an import takes all of it or nothing */
-var FRAME_KEYS={n:1, px:1, taken:1, dated:1, lens:1, exposure:1, contrast:1, blank:1};
+/* tz (minutes east of UTC, runtime 0.39.0) is in the whitelist: runtimes before 0.39.0 refuse a negative whole
+   when its frames carry it (one-off; nothing is lost, the file stays as exported and imports on this version). */
+var FRAME_KEYS={n:1, px:1, taken:1, tz:1, dated:1, lens:1, exposure:1, contrast:1, blank:1};
 function int(v,a,b){ return typeof v==="number" && v===Math.floor(v) && v>=a && v<=b; }
 /* a developed roll carries how it was developed (darkroom step 2): the algorithm's version, the develop seed and when.
    A friend who imports the negative prints the same pictures. Older runtimes ignore the key. */
@@ -100,6 +102,7 @@ function checkRoll(roll){
     var f=roll.frames[k];
     if(!f || typeof f!=="object" || f.n!==k+1 || typeof f.px!=="string" || f.px.length!==want || !/^[0-3]*$/.test(f.px) || !int(f.taken,0,1e14)) return false;
     for(var key in f) if(!FRAME_KEYS[key]) return false;
+    if(f.tz!=null && !int(f.tz,-840,840)) return false;
     if(f.dated!=null && typeof f.dated!=="boolean") return false;
     if(f.lens!=null && !/^(uw|w|t|f)$/.test(f.lens)) return false;
     if(f.exposure!=null && !int(f.exposure,-3,3)) return false;

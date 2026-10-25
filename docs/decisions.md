@@ -1364,3 +1364,20 @@ app 不知道手机什么时候才是平的。
   并可以用 `flat` 引导玩家。
 - **代码**：`runtime/sensors.js` 的 `tilt()` 和 `feedTilt()`、`sdk/pad-shim.js` 的 `tilt` 消息、`sdk/dev.html` 的方块
   （方块的原始位置就是绝对倾斜）、`tests/sensors.test.mjs` 和 `tests/pad-shim.test.mjs`。
+
+## 38. 单张照片带拍摄时间（EXIF，0.39.0）
+
+2026-10-25，runtime 0.39.0。冲洗店的单张印相原来是 PNG，相册只能按存下的日子排；现在改成 JPEG，EXIF 里带拍摄时间，
+相册按拍摄那天排。位置留到步骤 B（1.0 以后）。
+
+- **为什么 JPEG**：EXIF 在 JPEG 里每个相册都读；PNG 的 eXIf 不可靠。像素不变，只换容器（同一张画布按 92% 编成 JPEG）。
+- **时间总是带上，没有开关**：日期本来就是胶卷的一部分（文件名的日期、日期背、底片 JSON 里的 `taken`），单独一个日期
+  泄露的风险很低；位置才是敏感的那一项，以后单独做，默认关闭，加密放进底片。
+- **写什么**：IFD0 的 Make / Model 都是 `Lo-PDA`，Software `Lo-PDA 0.39.0`，DateTime；Exif IFD 的 ExifVersion `0232`、
+  DateTimeOriginal / DateTimeDigitized、OffsetTime / OffsetTimeOriginal / OffsetTimeDigitized。时间是拍摄那一刻的当地钟面
+  （`taken + tz`），偏移写成 `+08:00` 这样。不写 GPS。
+- **时区跟着底片走**：相机每格多记 `tz`（分钟，东为正），导出的底片带着它；老底片没有就按导出这台手机的时区算。
+  0.39.0 以前的 runtime 不认帧里的 `tz`，会整卷拒绝导入（一次性：数据没丢，用 0.39.0 再导入即可）。`tz` 超出 ±840 分钟算坏底片。
+- **不做的**：接触印相、胶片条、对比图和底片还是 PNG、没有 EXIF。
+- **代码**：`runtime/exif.js`（`window.LopdaExif`，纯函数，`tests/exif.test.mjs`）；`apps/darkroom.js` 的
+  `buildPrint("p-single")` 返回 `{blob, name}`；`LP.saveBlob`；`negative.js` 的 `FRAME_KEYS`。

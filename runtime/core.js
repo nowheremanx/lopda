@@ -70,12 +70,18 @@ function pad2(n){ return String(n).padStart(2,"0"); }
 /* the four LCD tones, and the 4x4 Bayer matrix every import and photo is dithered with (runtime/finder.js) */
 var TONES=[[31,42,20],[74,90,50],[125,138,88],[163,173,126]];
 var BAYER=window.LopdaFinder.BAYER;
+function saveBlob(blob,name){
+  return new Promise(function(resolve,reject){
+    if(!S.downloads){ reject({code:"unavailable"}); return; }
+    S.downloads.save({filename:name,data:blob}).then(resolve,reject);
+  });
+}
 function saveCanvas(cv,name){
   return new Promise(function(resolve,reject){
     if(!S.downloads){ reject({code:"unavailable"}); return; }
     cv.toBlob(function(blob){
       if(!blob){ reject({code:"bad_request"}); return; }
-      S.downloads.save({filename:name,data:blob}).then(resolve,reject);
+      saveBlob(blob,name).then(resolve,reject);
     },"image/png");
   });
 }
@@ -205,7 +211,7 @@ document.addEventListener("visibilitychange",function(){
 });
 
 /* ---------- sound: tiny square-wave chips through Web Audio (the named sounds themselves are in chip.js) ---------- */
-var RUNTIME_VERSION="0.37.0";   /* keep in step with VERSION in sw.js */
+var RUNTIME_VERSION="0.39.0";   /* keep in step with VERSION in sw.js */
 /* One volume, five steps, 0 is off (decisions.md section 10). It sets the master gain and nothing else does.
    Under the master: `ui` for the runtime's own clicks, held at a fraction so they stay as quiet as they always were
    (step 2 gives them 0.11, their level before 0.12.0), and `app` for apps, music and the cartridge at the full step. */
@@ -544,7 +550,7 @@ if(/[?&]debug\b/.test(location.search)) window.LOPDA_DEBUG={setButton:setButton,
 /* what the built-ins and boot.js use */
 var share={
   noEmoji:noEmoji, glyphOf:glyphOf, own:own, uid:uid, toast:toast, put:put, fmt:fmt, pad2:pad2,
-  TONES:TONES, BAYER:BAYER, saveCanvas:saveCanvas, saveErr:saveErr, sha256hex:sha256hex,
+  TONES:TONES, BAYER:BAYER, saveCanvas:saveCanvas, saveBlob:saveBlob, saveErr:saveErr, sha256hex:sha256hex,
   upsert:upsert, dropLocal:dropLocal, pending:pending, refresh:refresh, onData:onData,
   setStatus:setStatus, tickClock:tickClock, show:show, keepAwake:keepAwake,
   RUNTIME_VERSION:RUNTIME_VERSION, SND:SND, VOL_MAX:VOL_MAX, VOL_GAIN:VOL_GAIN, audio:audio, wake:wake, setSession:setSession, micRoute:micRoute, sfx:sfx, appSfx:appSfx, APP_SFX:APP_SFX, chip:chip, sfxCustom:sfxCustom, applyLevel:applyLevel, speech:speech,

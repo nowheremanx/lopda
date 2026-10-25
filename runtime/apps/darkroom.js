@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  *
  * A roll: data/users/local/rolls/items/<id> {id, stock, seed, size, res, loaded, out, name, bytes, dev, frames:[{n, px,
- * taken, dated, lens, exposure, contrast, blank}]}, written by the camera when it unloads (apps/camera.js); its latent
+ * taken, tz, dated, lens, exposure, contrast, blank}]}, written by the camera when it unloads (apps/camera.js); its latent
  * images are LopdaPlatform.files "roll/<id>/<nn>.jpg". A negative is a four-tone PNG of the roll laid out like a contact
  * sheet with the whole roll in its lpDa chunk (runtime/negative.js). Developing (runtime/develop.js) writes
  * dev {v, seed, at} once; the pictures are never stored, every look and every print develops them again from the latent
@@ -24,7 +24,7 @@
  */
 (function(){
 "use strict";
-var LP=window.LP, $=LP.$, S=LP.S, tr=LP.tr, P=window.LopdaPlatform, NEG=window.LopdaNegative, DEV=window.LopdaDevelop, FILM=LP.film;
+var LP=window.LP, $=LP.$, S=LP.S, tr=LP.tr, P=window.LopdaPlatform, NEG=window.LopdaNegative, DEV=window.LopdaDevelop, EXIF=window.LopdaExif, FILM=LP.film;
 var own=LP.own, toast=LP.toast, put=LP.put, pad2=LP.pad2, sfx=LP.sfx, show=LP.show, showPad=LP.showPad, TONES=LP.TONES;
 
 /* the runtime's own import, not PAD's 2 MB: a fine-grain roll of 16 is about 3 MB */
@@ -607,8 +607,24 @@ function colourStrip(r,small){
   return {pal:[e.base,e.holes,e.text,e.text], res:r.res, size:r.size, loaded:r.loaded, out:r.out, lead:stock,
     edges:[stock, "LO-PDA "+stock], edgeInk:css(e.edge), marks:r.frames.map(lensMark), colour:small};
 }
+/* the single print leaves as a JPEG with the shooting time in EXIF (decisions.md section 38); no taken, no EXIF */
+function jpegPrint(cv,f,name){
+  return new Promise(function(resolve,reject){
+    cv.toBlob(function(blob){
+      if(!blob){ reject({code:"bad_request"}); return; }
+      if(!f || typeof f.taken!=="number"){ resolve({blob:blob, name:name}); return; }
+      var tz=typeof f.tz==="number" ? f.tz : -new Date(f.taken).getTimezoneOffset();
+      bytesOf(blob).then(function(bytes){
+        var out=EXIF.insert(bytes,{taken:f.taken, tz:tz, software:"Lo-PDA "+LP.RUNTIME_VERSION});
+        resolve({blob:new Blob([out],{type:"image/jpeg"}), name:name});
+      }).then(null,reject);
+    },"image/jpeg",0.92);
+  });
+}
 function buildPrint(kind,r,k){
-  if(kind==="p-single") return developFrame(r,r.dev,k,2).then(function(im){ return {cv:canvasOf(im), name:fileBase("print",r)+"-"+pad2(k+1)+".png"}; });
+  if(kind==="p-single") return developFrame(r,r.dev,k,2).then(function(im){
+    return jpegPrint(canvasOf(im),r.frames[k],fileBase("print",r)+"-"+pad2(k+1)+".jpg");
+  });
   return Promise.all([smalls(r),FILM.fontsReady()]).then(function(got){
     var o=colourStrip(r,got[0]), stock=FILM.stockPrint(r.stock);
     if(kind==="p-strip") return {cv:FILM.buildStrip(r.frames,o), name:fileBase("strip",r)+".png"};
@@ -637,7 +653,7 @@ function printOut(kind){
   var gen=D.gen, job=D.prints && D.prints.key===r.id+"-"+D.idx && D.prints.jobs[kind];
   var save=function(o){
     if(gen!==D.gen) return;
-    return LP.saveCanvas(o.cv,o.name).then(function(res){
+    return (o.blob ? LP.saveBlob(o.blob,o.name) : LP.saveCanvas(o.cv,o.name)).then(function(res){
       if(res && res.status==="saved"){ sfx("ok"); toast(tr("dk.printed")); }
     },function(e){ if(!(e && e.code==="declined")){ toast(LP.saveErr(e)); sfx("err"); } });
   };

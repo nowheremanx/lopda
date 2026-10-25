@@ -191,6 +191,21 @@ test("bad metadata is refused when writing and when reading", () => {
   assert.equal(code(() => N.pack(png(), r, jpegsFor(r).slice(1))), "badroll");
 });
 
+/* runtime 0.39.0: the shooting time zone (minutes east of UTC) travels in each frame; -840..840 only */
+test("frames keep their shooting time zone through the negative; an impossible offset is refused", () => {
+  const tz = [480, 0, -300, 330];
+  const r = { ...roll(), frames: roll().frames.map((f, k) => ({ ...f, tz: tz[k % tz.length] })) };
+  for (const M of [N, N5]) {
+    const back = M.unpack(M.pack(png(), r, jpegsFor(r)));
+    assert.deepEqual(plain(back.roll.frames.map((f) => f.tz)), r.frames.map((f) => f.tz));
+    assert.deepEqual(plain(back.roll), r);
+  }
+  for (const bad of [900, -841, 1.5, "480", true]) {
+    const broken = { ...r, frames: r.frames.map((f, k) => k === 1 ? { ...f, tz: bad } : f) };
+    assert.equal(code(() => N.pack(png(), broken, jpegsFor(broken))), "badroll", JSON.stringify(bad));
+  }
+});
+
 test("a whole fine-grain roll: 16 frames with 120 KB JPEGs writes and reads", () => {
   const r = roll({ size: 16, res: 2 }), j = r.frames.map((f, k) => jpeg(120 * 1024, 100 + k));
   const out = N.pack(png(64, 64), r, j);
