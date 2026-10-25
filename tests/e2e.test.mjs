@@ -5212,7 +5212,7 @@ test("pet: the AI souvenir is made and saved with the pet screen never opened; o
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
-test("pet: rain draws visible streaks and is the only weather with a sound; wind is wind or silent; sun is silent", { skip, timeout: 60000 }, async (t) => {
+test("pet: rain draws visible streaks and plays rain; wind plays wind; sun is silent", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await page(t, { locale: "zh-CN", serviceWorkers: "block", viewport: { width: 390, height: 844 } });
   await p.clock.install({ time: new Date(2026, 9, 11, 9, 0) });
   await p.goto(base + "/runtime/?debug", { waitUntil: "networkidle" });
@@ -5254,7 +5254,7 @@ test("pet: rain draws visible streaks and is the only weather with a sound; wind
   assert.ok(inkInWindow(rain) > inkInWindow(sun) + 40,
     `rain's streaks are clearly visible: ${inkInWindow(rain)} ink vs sun's ${inkInWindow(sun)}`);
 
-  /* the sound is taken from the weather of the frame just drawn: rain only when rain, wind wind or nothing, sun quiet */
+  /* the sound is taken from the weather of the frame just drawn: rain plays rain, wind plays wind, sun is quiet */
   await p.evaluate(() => {
     window.__amb = [];
     const orig = LP.chip.ambience.bind(LP.chip);
@@ -5271,8 +5271,7 @@ test("pet: rain draws visible streaks and is the only weather with a sound; wind
   await p.evaluate(() => LOPDA_DEBUG.pet.setWeather("wind"));
   await p.waitForTimeout(120);
   amb = await p.evaluate(() => window.__amb);
-  assert.ok(amb[amb.length - 1].name === null || amb[amb.length - 1].name === "wind", "wind is wind or nothing, never rain");
-  assert.notEqual(amb[amb.length - 1].name, "rain", "wind never sounds like rain");
+  assert.equal(amb[amb.length - 1].name, "wind", "wind plays the wind preset, never rain");
   await p.evaluate(() => LOPDA_DEBUG.pet.setWeather("rain"));
   await p.waitForTimeout(120);
   amb = await p.evaluate(() => window.__amb);
