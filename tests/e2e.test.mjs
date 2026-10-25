@@ -2815,10 +2815,10 @@ test("ambience in the dev harness: the rain station's rain waits for a key; the 
 
 /* camera lenses (docs/decisions.md section 4): Chromium's fake camera is one unnamed device, so the camera keeps
    the plain back/front pair; a faked device list stands in for an iPhone's four cameras */
-async function camPage(t, init, arg, query = "") {
+async function camPage(t, init, arg, query = "", contextOptions = {}) {
   const cam = await pw.chromium.launch({ args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"] });
   t.after(() => cam.close());
-  const ctx = await cam.newContext({ viewport: { width: 390, height: 844 }, locale: "zh-CN", reducedMotion: "reduce", serviceWorkers: "block", permissions: ["camera"] });
+  const ctx = await cam.newContext({ viewport: { width: 390, height: 844 }, locale: "zh-CN", reducedMotion: "reduce", serviceWorkers: "block", permissions: ["camera"], ...contextOptions });
   if (init) await ctx.addInitScript(init, arg);
   const p = await ctx.newPage();
   const errors = [];
@@ -3293,6 +3293,114 @@ test("darkroom: a roll left in the camera by an older version is void when the c
   await open();
   await p.waitForSelector("#cam-load:not([hidden])"); await p.waitForTimeout(600);
   assert.notEqual(await p.evaluate(() => document.getElementById("toast").hidden ? "" : document.getElementById("toast").textContent), "旧胶卷已作废");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("camera: the Place switch follows the position only while the viewfinder runs, seals each shot, and does nothing when off", { skip, timeout: 120000 }, async (t) => {
+  /* the three calls the camera may make, counted; every one delegates to the real geolocation */
+  const geoCounters = () => {
+    const g = navigator.geolocation;
+    const get = g.getCurrentPosition.bind(g), watch = g.watchPosition.bind(g), clear = g.clearWatch.bind(g);
+    window.__geo = { get: 0, watch: 0, clear: 0, fixes: 0 };
+    g.getCurrentPosition = function (ok, err, o) { window.__geo.get++; return get(ok, err, o); };
+    g.watchPosition = function (ok, err, o) {
+      window.__geo.watch++;
+      return watch(ok ? function (pos) { window.__geo.fixes++; return ok(pos); } : ok, err, o);
+    };
+    g.clearWatch = function (id) { window.__geo.clear++; return clear(id); };
+  };
+  const { p, errors, open } = await camPage(t, geoCounters, null, "", {
+    permissions: ["camera", "geolocation"], geolocation: { latitude: 12.5, longitude: 45.25, accuracy: 10 }
+  });
+  const geo = () => p.evaluate(() => window.__geo);
+  const readDoc = (path) => idb.doc(p, path);
+  const waitDoc = async (path, ok = (d) => !!d) => {
+    for (let i = 0; i < 100; i++) { const d = await readDoc(path); if (ok(d)) return d; await p.waitForTimeout(100); }
+    assert.fail("no document at " + path);
+  };
+  const placeRow = () => p.locator("#menu-list li", { hasText: "地点" });
+  const placeValue = (v) => p.waitForFunction((v) => {
+    const li = [...document.querySelectorAll("#menu-list li")].find((x) => x.textContent.startsWith("地点"));
+    return !!li && li.textContent.endsWith(v);
+  }, v);
+  const shoot = async () => {
+    await p.click("#cam-shutter");
+    await p.waitForFunction(() => document.getElementById("cam-shut").hidden, null, { timeout: 3000 });
+    await p.waitForTimeout(120);
+  };
+  /* a picture is coming, not just the stream: the same test liveState() makes */
+  const waitLive = () => p.waitForFunction(() => {
+    const v = document.getElementById("cam-video");
+    return !document.getElementById("cam-live-tag").hidden && v.readyState >= 2 && v.videoWidth > 0;
+  }, null, { timeout: 10000 });
+
+  await open();
+  await p.waitForSelector("#cam-load:not([hidden])");
+  await p.click("#roll-go");
+  await waitLive();
+  const id = (await waitDoc("data/users/local/film")).roll;
+
+  /* a) off by default: no geolocation call, no key, no place in the camera doc, no geo on the frames */
+  await shoot(); await shoot();
+  const f1 = await waitDoc(`data/users/local/frames/items/${id}-01`);
+  const f2 = await waitDoc(`data/users/local/frames/items/${id}-02`);
+  assert.deepEqual(await geo(), { get: 0, watch: 0, clear: 0, fixes: 0 });
+  assert.deepEqual(await waitDoc("data/users/local/camera"), { rolls: 1 });
+  assert.ok(!("geo" in f1) && !("geo" in f2));
+  assert.equal(await readDoc("data/users/local/darkroom-key"), null);
+
+  /* b) on: one prompt inside the tap, the key made, the row says 开 */
+  await p.keyboard.press("Enter");
+  await p.waitForSelector("#cam-menu:not([hidden])");
+  await placeRow().click();
+  await p.waitForFunction(() => window.__geo.get === 1);
+  const key = await waitDoc("data/users/local/darkroom-key");
+  assert.ok(Array.isArray(key.keys) && key.keys.length >= 1 && typeof key.current === "string");
+  await placeValue("开");
+  assert.deepEqual(await waitDoc("data/users/local/camera", (d) => d && d.place === true), { rolls: 1, place: true });
+
+  /* back to the finder: the watch starts, and the next frame is sealed */
+  await p.locator("#menu-list li", { hasText: "回到取景" }).click();
+  await p.waitForFunction(() => window.__geo.watch === 1, null, { timeout: 10000 });
+  await p.waitForFunction(() => window.__geo.fixes >= 1, null, { timeout: 10000 });
+  await waitLive();
+  await shoot();
+  const f3 = await waitDoc(`data/users/local/frames/items/${id}-03`, (d) => d && d.geo);
+  assert.deepEqual(Object.keys(f3.geo).sort(), ["ct", "iv", "k"]);
+  for (const k of ["k", "iv", "ct"]) assert.equal(typeof f3.geo[k], "string");
+  /* the place travels only sealed: no test coordinate is stored in the clear anywhere under the user's data */
+  const all = await p.evaluate(() => new Promise((resolve, reject) => {
+    const r = indexedDB.open("lopda");
+    r.onerror = () => reject(r.error);
+    r.onsuccess = () => {
+      const g = r.result.transaction("docs").objectStore("docs").getAll();
+      g.onsuccess = () => { r.result.close(); resolve(g.result.filter((x) => x.path.startsWith("data/users/local/")).map((x) => x.data)); };
+      g.onerror = () => reject(g.error);
+    };
+  }));
+  const stored = JSON.stringify(all);
+  assert.ok(!stored.includes("12.5"), "no plaintext latitude");
+  assert.ok(!stored.includes("45.25"), "no plaintext longitude");
+
+  /* c) the menu stops the finder, and the watch with it */
+  await p.keyboard.press("Enter");
+  await p.waitForSelector("#cam-menu:not([hidden])");
+  await p.waitForFunction(() => window.__geo.clear === window.__geo.watch);
+  assert.equal((await geo()).watch, 1);
+
+  /* d) off: the row changes, the camera doc loses place, and nothing new is called */
+  await placeRow().click();
+  await placeValue("关");
+  assert.deepEqual(await waitDoc("data/users/local/camera", (d) => d && !("place" in d)), { rolls: 1 });
+  const quiet = await geo();
+  await p.locator("#menu-list li", { hasText: "回到取景" }).click();
+  await waitLive();
+  await p.waitForTimeout(600);
+  assert.deepEqual(await geo(), quiet, "no watch on the finder with Place off");
+  await shoot();
+  const f4 = await waitDoc(`data/users/local/frames/items/${id}-04`);
+  assert.ok(!("geo" in f4));
+  assert.deepEqual(await geo(), quiet);
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 

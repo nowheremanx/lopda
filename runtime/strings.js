@@ -335,12 +335,15 @@
       "stock.tungsten.note": "灯下自然，亮处一圈红晕。", "stock.noir.note": "黑白，反差高，颗粒粗。",
       "stock.expired.note": "褪色、偏色，每卷都不一样。",
 
-      "cam.menu.body": "机身菜单", "cam.menu.date": "日期", "cam.menu.lens": "换镜头",
+      "cam.menu.body": "机身菜单", "cam.menu.date": "日期", "cam.menu.place": "地点", "cam.menu.lens": "换镜头",
       "cam.lens.mm": "{mm}mm", "cam.lens.front": "前置", "cam.lens.back": "后置", "cam.menu.rewind": "提前倒片", "cam.menu.left": "{n} 张未拍", "cam.menu.finder": "回到取景",
       "cam.menu.rewindnote": "还有 {n} 张没拍。倒片时剩下的胶片会见光，冲出来是一片白。倒片后这卷就拍完了。",
       "cam.menu.rewindgo": "确认倒片", "cam.menu.done": "这卷拍完了",
       "cam.menu.donenote": "取出来放进冲洗店的胶卷盒，在那里冲洗。", "cam.menu.unload": "取出胶卷",
       "cam.menu.keys": "▲▼ 选择 · A 确定", "cam.menu.keysback": " · B 返回",
+      "cam.place.nokey": "钥匙没能保存，地点没有打开。",
+      "cam.place.denied": "系统没有允许定位：到 设置 → 隐私与安全性 → 定位服务 里允许。",
+      "cam.place.none": "这台机器不能定位。",
 
       "dk.title": "胶卷盒", "dk.loading": "读取中…",
       "dk.empty": "胶卷盒是空的。在相机里拍完一卷，取出胶卷，它就会放到这里。别人发来的底片，按 SELECT 导入。",
@@ -744,12 +747,15 @@
       "stock.tungsten.note": "Natural under lamps, red glow round lights.", "stock.noir.note": "Black and white, hard and grainy.",
       "stock.expired.note": "Faded and off, never the same twice.",
 
-      "cam.menu.body": "BODY MENU", "cam.menu.date": "Date", "cam.menu.lens": "Lens",
+      "cam.menu.body": "BODY MENU", "cam.menu.date": "Date", "cam.menu.place": "Place", "cam.menu.lens": "Lens",
       "cam.lens.mm": "{mm}mm", "cam.lens.front": "FRONT", "cam.lens.back": "BACK", "cam.menu.rewind": "Rewind now", "cam.menu.left": "{n} left", "cam.menu.finder": "Back to finder",
       "cam.menu.rewindnote": "{n} frames unshot. Rewinding lets light onto them: they develop white. The roll is then done.",
       "cam.menu.rewindgo": "Rewind", "cam.menu.done": "ROLL DONE",
       "cam.menu.donenote": "Unload it into the darkroom's film box; it is developed there.", "cam.menu.unload": "Unload",
       "cam.menu.keys": "▲▼ Pick · A OK", "cam.menu.keysback": " · B Back",
+      "cam.place.nokey": "The key could not be saved; Place stays off.",
+      "cam.place.denied": "Location is not allowed: allow it in Settings → Privacy & Security → Location Services.",
+      "cam.place.none": "This device cannot tell its location.",
 
       "dk.title": "FILM BOX", "dk.loading": "Reading…",
       "dk.empty": "The film box is empty. Finish a roll in the camera and unload it: it comes here. Press SELECT to import a negative someone sent you.",
