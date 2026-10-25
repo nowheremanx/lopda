@@ -19,6 +19,9 @@ runtime/        the PWA: index.html, core.js (shared LP object: utils, views, so
                 exposure and contrast; shared by the camera, the snap viewfinder, the reader and sdk/dev.html), textsel.js (the text selection shared by the reader and the dictionary entry page), negative.js (the negative PNG and its lpDa chunk, pure functions), exif.js (a single print's APP1 Exif segment, pure functions),
                 develop.js (developing a frame: the stocks' looks, grain, halation, leaks, date stamp; pure functions on RGBA),
                 notetext.js (notes: tags, search and snippets, the diary title, the diaries by day, front matter, export names, the rules for app notes; pure functions),
+                petsim.js (the built-in pet's rules: catch-up, sleep, hunger and joy, growth, the day's outing, souvenir checks; pure functions),
+                petart.js (the pet's species pack "chip": 32 x 32 sprite grids and frame builder, the standard front and side poses, props, icons, souvenirs and the 162 x 120 room painter into a tone buffer; pure functions),
+                petplay.js (the pet's play packs: catch, bounce and climb, deterministic 50 ms ticks over the standard 32 x 32 poses and the 162 x 120 tone buffer; pure functions),
                 zip.js (stored zips written, stored and deflated zips read; pure functions, CRC from negative.js), qr.js (the runtime's QR helper: text to a module matrix, drawn with putImageData on the share page), lunar.js (lunar calendar + solar term tables, 1900-2100), stardict.js (StarDict reader), wordlist.js (the word list and the entries behind PAD.dict: check/query/entry and one source, shared by apps/dict.js, sdk/dev.html and the tests, SPEC.md 6.7), bookparse.js (TXT/EPUB parser),
                 books/ (the reader's two public-domain sample books), sw.js (offline cache),
                 fonts/ (DotGothic16, VT323, OFL), vendor/binjgb/ (Game Boy core, MIT), vendor/holiday-cn/ (China days off, MIT),
@@ -31,7 +34,7 @@ tools/          check-app.mjs, build-index.mjs, bundle-app.mjs (+ lo-game.mjs al
                 readme-shots.mjs (the README pictures: docs/images/ in English, --lang=zh into docs/images/zh/ for README.zh.md; needs Playwright) with readme-scene.mjs (the lake the fake camera sees);
                 gen-lunar.py (one-off generator of the lunar table, needs PyEphem); gen-ecdict.mjs (one-off, ECDICT csv ->
                 vendor/ecdict/) with stardict-write.mjs (StarDict + dictzip writer, also used by tests)
-tests/          node:test suite (no deps): tools, strings, PAD shim, sensors, speech, platform store, backup, lo-game, negative, develop, notetext, zip, repo rules;
+tests/          node:test suite (no deps): tools, strings, PAD shim, sensors, speech, platform store, backup, lo-game, negative, develop, notetext, zip, repo rules, petplay;
                 runtime-shots.mjs (before/after screenshots of the runtime), hko-compare.mjs (lunar table vs the HKO tables, manual)
 SPEC.md         app spec lopda/1 (MIT)
 README.md (English, the homepage) README.zh.md (Chinese) LICENSE NOTICE LICENSING.md CONTRIBUTING.md
@@ -53,14 +56,16 @@ README.md (English, the homepage) README.zh.md (Chinese) LICENSE NOTICE LICENSIN
   never stored); docs `notes/<id>` {body, updated, created?, pinned?, day?, src?, deleted?}; decisions.md section 20),
   calendar (万年历; lunar.js, holiday-cn, the one built-in that may reach another site, decisions.md section 14; a folded corner
   on days with a diary and a read-only 日记 block on the day sheet, START opens or backfills that day's diary in notes, only through
-  those three functions, section 21), dict (词典; stardict.js, built-in ECDICT, imported StarDict books in
+  those three functions, section 21; `LP.calendar.upcoming(days)` -> bare `{in}` and `LP.calendar.open(day)` for the pet, no name
+  or note, section 37), dict (词典; stardict.js, built-in ECDICT, imported StarDict books in
   `LopdaPlatform.files`, `LP.dict.lookup(word)` for other programs, decisions.md section 15; its entry page selects text through textsel.js and looks words up level by level, section 18; A on an entry says the headword with the phone's English voice), reader (阅读器; bookparse.js, books, their dithered pictures and imported fonts in
   `LopdaPlatform.files`, layouts and an e-ink full refresh, long-press or SELECT selection that looks up through `LP.dict` and quotes (underline + `LP.notes.append`),
-  decisions.md sections 16-17), camera (viewfinder, film stocks, a colour latent image per frame in `LopdaPlatform.files`, SELECT cycles the
+  decisions.md sections 16-17; `LP.reader.current()` -> `{id, pct, opened}` and `open(id)` for the pet, never a title or text,
+  section 37), camera (viewfinder, film stocks, a colour latent image per frame in `LopdaPlatform.files`, SELECT cycles the
   physical lenses found by lenses.js; shares its film helpers as `LP.film`, its dither in finder.js), snap (apps/snap.js: the viewfinder an app opens with
   `PAD.camera.snap` over the running app, `LP.snap`; keeps nothing; decisions.md section 28), darkroom (冲洗店: the film box of unloaded rolls,
   negative export and import through negative.js, developing through develop.js (once per roll, `dev` {v, seed, at} in the roll; pictures are
-  never stored, every look and print develops them again), the colour viewer, single / contact sheet / film strip prints; decisions.md section 19), cart (GB), store (app store: categories from the manifest's `category` (missing goes to Other), category filters, single and "update all" installs, preinstalled apps, sandboxed runner, file dialog), scripts (local HTML/JS programs: copy an AI prompt, paste, run in the sandbox; every script has its own storage document), settings (also 备份 / 恢复: the whole
+  never stored, every look and print develops them again), the colour viewer, single / contact sheet / film strip prints; decisions.md section 19), cart (GB), pet (宠物 / Pet: the built-in pet, petsim.js rules and petart.js art on one hardware screen (a 162 x 120 room at 2 css px, 32 x 32 sprites, five icons and a START menu, two-frame actions); it hatches in ~8 s, is named once at birth (fixed for life), sleeps lying in its bed at night and walks back to the rug in the morning, never dies and lives from boot, silent outside its screen (background catch-up, the day's pick from the read-only summaries, props and 信, the outing and one AI souvenir a day with a silent built-in fallback); souvenirs go on the room's one shelf, not into notes; docs `pet` and `pet/souvenirs/<id>`, decisions.md section 37), store (app store: categories from the manifest's `category` (missing goes to Other), category filters, single and "update all" installs, preinstalled apps, sandboxed runner, file dialog), scripts (local HTML/JS programs: copy an AI prompt, paste, run in the sandbox; every script has its own storage document), settings (also 备份 / 恢复: the whole
   device as one `lopda-backup-YYYYMMDD.zip` through backup.js, every check before a restore replaces everything, the old data
   written back if a write fails; `data/users/local/backup-meta` {last}; decisions.md section 24; the main page is a short menu,
   the permissions list, backup, the share page (a QR code drawn on the device) and About have pages of their own; decisions.md section 39).

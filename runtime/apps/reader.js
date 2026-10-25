@@ -1064,6 +1064,29 @@ function openReader(){
   if(R.loaded) seed();
 }
 
+/* ---------- the pet (docs/decisions.md section 37): a read-only summary of the reading position, never title or text ---------- */
+/* the pet (docs/decisions.md section 37) uses this: the most recently opened unfinished book as {id, pct, opened}, with no
+   title, author or text, or null; R.meta is kept in memory, so it is synchronous */
+function petCurrent(){
+  var best=null;
+  Object.keys(R.meta).forEach(function(id){
+    var m=R.meta[id]; if(!m || !(m.opened>0)) return;
+    if((m.pct||0)>=100) return;   // finished, whatever rounding would show
+    var pct=Math.max(0,Math.min(100,Math.round(m.pct||0)));
+    if(!best || m.opened>best.opened) best={id:id, pct:pct, opened:m.opened};
+  });
+  return best;
+}
+/* the pet (docs/decisions.md section 37) uses this: opens that book as a tap on the shelf does; no title or text, and false
+   for an id that is not on the shelf */
+function petOpenBook(id){
+  if(!id || !R.meta[id]) return false;
+  openReader();
+  openBook(id);
+  return true;
+}
+LP.reader={current:petCurrent, open:petOpenBook};
+
 LP.builtin({id:"reader", label:"app.reader", icon:function(){ return ICON; }, view:"reader", keepPad:true,
   open:function(){ openReader(); },
   leave:function(){
