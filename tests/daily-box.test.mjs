@@ -329,11 +329,12 @@ test("daily-box board: deadSquares is the exact static dead set on a hand-writte
   assert.ok(!Board.deadSquares(level).includes(26), "a goal is always live");
 });
 
-test("daily-box board: dayIndex counts local y/m/d, clamps before the epoch and wraps after 1099", () => {
+test("daily-box board: dayIndex counts local y/m/d and wraps in both directions", () => {
   assert.equal(Board.dayIndex(new Date(2026, 9, 26)), 0, "EPOCH is day 0");
   assert.equal(Board.dayIndex(new Date(2026, 9, 27)), 1);
-  assert.equal(Board.dayIndex(new Date(2026, 9, 25)), 0, "the day before launch shows day 0");
-  assert.equal(Board.dayIndex(new Date(1999, 0, 1)), 0, "a far past date also clamps");
+  assert.equal(Board.dayIndex(new Date(2026, 9, 25)), 1098, "the day before the epoch is the last table day");
+  assert.equal(Board.dayIndex(new Date(2026, 9, 24)), 1097, "two days before the epoch is the day before that");
+  assert.equal(Board.dayIndex(new Date(1999, 0, 1)), 830, "a far past date wraps instead of clamping");
   assert.equal(Board.dayIndex(new Date(2029, 9, 28)), 1098, "the last table day");
   assert.equal(Board.dayIndex(new Date(2029, 9, 29)), 0, "day 1099 wraps to 0");
   assert.equal(new Date(2029, 9, 29).getDay(), new Date(2026, 9, 26).getDay(), "the wrap lands on the same weekday");
@@ -347,6 +348,8 @@ test("daily-box board: dayIndex counts local y/m/d, clamps before the epoch and 
   }
 
   assert.equal(Board.levelFor(new Date(2026, 9, 26)).par, decoded[0].par);
+  assert.equal(Board.levelFor(new Date(2026, 9, 25)).par, decoded[1098].par);
+  assert.equal(Board.levelFor(new Date(2026, 9, 24)).par, decoded[1097].par);
   assert.equal(Board.levelFor(new Date(2029, 9, 29)).par, decoded[0].par);
   assert.equal(Board.levelFor(new Date(2029, 9, 28)).par, decoded[1098].par);
 });
