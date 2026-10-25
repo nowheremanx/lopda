@@ -1,6 +1,6 @@
 {
   "spec": "lopda/1",
-  "generated": "2026-10-24",
+  "generated": "2026-10-25",
   "apps": [
     {
       "spec": "lopda/1",
@@ -111,7 +111,7 @@
         "....11111111....",
         "......1111......"
       ],
-      "version": "1.6.0",
+      "version": "1.6.1",
       "description": "在字母盘上拼出单词，填满小小字谜格。拼对后中文显示在格下，再读出英文。",
       "i18n": {
         "zh": {
@@ -129,8 +129,8 @@
         "wordbook"
       ],
       "path": "apps/crossing/index.html",
-      "sha256": "98411be80eb978385ae45e07d645ea353b111d895ef189efe5adf9aaba74c3bb",
-      "bytes": 91231
+      "sha256": "ae8c1740b21cd24593fff84a64e91b862fddf42ad9035f2eb0641d9f917bda4f",
+      "bytes": 98649
     },
     {
       "spec": "lopda/1",
