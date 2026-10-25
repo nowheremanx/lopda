@@ -896,8 +896,7 @@
   }
   function openPicked() {
     var n = pickPage * 25 + pickAt + 1;
-    /* TEMP (PR 105 testing only, revert before merge): a locked round opens as a replay, which saves no progress */
-    if (n > state.cleared + 1) { clearPickMsg(); PAD.sfx("ok"); startRound(n, state.hints, [], { replay: true }); return; }
+    if (n > state.cleared + 1) { PAD.sfx("err"); showLockedMsg(); return; }   /* a locked round says why */
     clearPickMsg();
     PAD.sfx("ok");
     openRound(n);
