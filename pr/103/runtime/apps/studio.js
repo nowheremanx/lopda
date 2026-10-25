@@ -1,15 +1,17 @@
 /*
- * Lo-PDA built-in: the four-track tape machine (四轨机 / Tape4), step 1b-1: eight patterns, the drums, bass, chords,
- * melody and song screens, and one player for a looped pattern or a whole song. docs/design/studio.md sections 11
- * and 12. One project at a time: its song is a LopdaSong document in data/users/local/studio/items/<id>, the current
- * id and the little state around it in data/users/local/studio {current, toured, hushTip}. The format stays v 1:
- * the editing pattern, screen and selections live in memory only. A bad or too-new tape is never written over.
+ * Lo-PDA built-in: the four-track tape machine (四轨机 / Tape4), step 1b-1: sixteen patterns, the drums, bass,
+ * chords, melody and song screens, and one player for a looped pattern or a whole song. docs/design/studio.md
+ * sections 11 and 12. One project at a time: its song is a LopdaSong document in data/users/local/studio/items/<id>,
+ * the current id and the little state around it in data/users/local/studio {current, toured, hushTip}. The format
+ * stays v 1: the editing pattern, screen and selections live in memory only. A bad or too-new tape is never written
+ * over.
  *
  * The screen: a top bar (play/stop, BPM, − and +, ?, ≡), the navigation row (the pattern letter and five screen tabs),
  * then that screen. Drums keeps 1a's four drum tabs and 4x4 grid. Bass and melody share the same 16 cells with the
  * pitch name in the cell and eight pitch keys below. Chords are two cells (the two halves of the bar) and six keys.
- * Song is the chain in sixes with A-H letter keys and add / remove. A dot on a tab or a letter means that track or
- * pattern has notes. On = ink; the step being heard is mid (empty) or dark (lit).
+ * Song is the chain in fours (one row is a four-bar phrase) and add; a slot's letter is picked in the sheet that
+ * opens on its second tap. A dot on a tab or a pattern letter means that track or pattern has notes. On = ink; the
+ * step being heard is mid (empty) or dark (lit).
  *
  * The player: one scheduler over LopdaSong.chainEvents(), 0.1 s ahead every 25 ms into LP.SND.app through
  * LopdaStudioSynth. On a drum/note/chord screen it loops the edit pattern; on the song screen it plays the chain one
@@ -32,7 +34,7 @@ var LP=window.LP, $=LP.$, S=LP.S, tr=LP.tr, SONGS=window.LopdaSong, SYNTH=window
 var own=LP.own, toast=LP.toast, show=LP.show, showPad=LP.showPad;
 
 var BASE="data/users/local/studio", LOOKAHEAD=0.1, LOOP_MS=25, SAVE_MS=1000;
-var LETTERS="ABCDEFGH";
+var LETTERS="ABCDEFGHIJKLMNOP";
 
 var T={
   song:null, id:"", meta:null,
@@ -656,18 +658,6 @@ function build(){
   chordRest.id="studio-chord-rest";
   chordRest.onclick=function(){ restTap(); };
   ck.appendChild(chordRest);
-  var letters=$("studio-letters");
-  for(i=0;i<SONGS.PATTERNS_MAX;i++){
-    (function(p){
-      var b=el("button","st-letter");
-      b.type="button";
-      b.setAttribute("data-pat",String(p));
-      b.appendChild(el("span","st-letter-name"));
-      b.appendChild(el("i","st-dot"));
-      b.onclick=function(){ songLetter(p); };
-      letters.appendChild(b);
-    })(i);
-  }
   $("studio-pat").onclick=function(){ openSheet("pattern"); };
   $("studio-add").onclick=function(){ addSongSlot(); };
   bindRepeat($("studio-minus"),-SONGS.BPM_STEP);
@@ -871,7 +861,7 @@ function renderChords(){
   if(rk){ rk.textContent=tr("studio.rest"); rk.setAttribute("aria-label",tr("studio.rest")); }
 }
 function renderSong(){
-  var chain=$("studio-chain"), s=T.song&&T.song.song?T.song.song:[0], i, b;
+  var chain=$("studio-chain"), s=T.song&&T.song.song?T.song.song:[0], i;
   chain.textContent="";
   for(i=0;i<s.length;i++){
     (function(idx){
@@ -883,17 +873,6 @@ function renderSong(){
       cell.onclick=function(){ selectSlot(idx); };
       chain.appendChild(cell);
     })(i);
-  }
-  var letters=$("studio-letters").children, p, dot;
-  for(i=0;i<letters.length;i++){
-    b=letters[i]; p=i;
-    b.querySelector(".st-letter-name").textContent=letter(p);
-    b.setAttribute("aria-label",tr("studio.pat.label",{p:letter(p)}));
-    b.setAttribute("aria-pressed",String(s[T.slot]===p));
-    dot=b.querySelector(".st-dot");
-    var has=false, j;
-    if(T.song) for(j=0;j<4;j++) if(SONGS.hasNotes(T.song,p,["drums","bass","chords","melody"][j])){ has=true; break; }
-    dot.classList.toggle("on",has);
   }
   $("studio-add").textContent=tr("studio.song.add");
   /* the chain cells are new nodes: put the playing slot back on them when the chain changes mid-song */
@@ -1002,9 +981,8 @@ function tourShow(i){
   layout();                     /* grid steps make room for the bubble; others take the normal size back */
   tourPlace();                  /* chord and song screens have no grid, so layout() returns before placing */
 }
-/* the song tour's chain step needs air above a tall scroll box: keep the chain's one visible row at the
-   bottom of its old space and let the bubble sit between the bar and the frame. Any other step, or no
-   tour, gives the chain its normal size back. */
+/* the song tour's chain step needs air above a tall scroll box: keep the chain's rows whole and let the bubble
+   sit between the bar and the frame. Any other step, or no tour, gives the chain its normal size back. */
 function tourFitChain(){
   var chain=$("studio-chain");
   if(!chain) return;
@@ -1013,16 +991,16 @@ function tourFitChain(){
   chain.style.flex="";
   var t=T.tour;
   if(!t || !t.steps[t.i] || !t.steps[t.i].chain) return;
-  var view=$("v-studio"), bar=view.querySelector(".st-bar"), song=$("studio-song"), letters=$("studio-letters");
-  if(!bar || !song || !letters || !t.box) return;
-  var cr=chain.getBoundingClientRect(), lr=letters.getBoundingClientRect(), br=bar.getBoundingClientRect();
-  var allocated=lr.top-cr.top-4;         /* the song column's 4 px gap */
-  if(allocated<=0) return;
+  var view=$("v-studio"), bar=view.querySelector(".st-bar"), song=$("studio-song");
+  if(!bar || !song || !t.box) return;
+  var cr=chain.getBoundingClientRect(), br=bar.getBoundingClientRect();
+  /* the bubble goes above the chain's top edge; the navigation row between the bar and the chain may be covered */
   var need=t.box.offsetHeight+10-(cr.top-br.bottom);
   if(need<=2) return;
-  if(need>allocated-1) need=allocated-1;
+  if(need>cr.height-44) need=cr.height-44;      /* keep at least one row of slots */
+  if(need<=0) return;
   chain.style.flex="none";
-  chain.style.height=(allocated-need)+"px";
+  chain.style.height=(cr.height-need)+"px";
   chain.style.marginTop=need+"px";
 }
 /* the chord tour frames the two cells from below. Both demo halves are full and the cells fill the board, so
@@ -1173,15 +1151,20 @@ function sheetHead(text){
   $("studio-sheet").appendChild(head);
   return head;
 }
-function patternButtons(click){
-  var grid=el("div","st-pat-grid"), i, b;
+function patternHasNotes(p){
+  return !!(T.song && !SONGS.patternEmpty(T.song,p));
+}
+/* the sixteen letters in four rows of four: the one being shown (or the slot's own) inverted, a dot when the
+   pattern has notes. Shared by the pattern sheet, its copy question and the slot sheet. */
+function patternButtons(click,current){
+  var grid=el("div","st-pat-grid"), i, b, at=current==null ? T.pat : current;
   for(i=0;i<SONGS.PATTERNS_MAX;i++){
     (function(p){
-      b=el("button","st-pat-btn"+(p===T.pat?" on":""));
+      b=el("button","st-pat-btn"+(p===at?" on":""));
       b.type="button";
       b.setAttribute("data-pat",String(p));
       b.appendChild(el("span","",letter(p)));
-      if(T.song && !SONGS.patternEmpty(T.song,p)) b.appendChild(el("i","st-dot on"));
+      if(patternHasNotes(p)) b.appendChild(el("i","st-dot on"));
       b.onclick=function(){ click(p); };
       grid.appendChild(b);
     })(i);
@@ -1287,9 +1270,11 @@ function renderSheet(){
     return;
   }
   if(T.sheet==="slot"){
-    var chain=(T.song&&T.song.song)||[0], at=T.slot;
-    sheetHead(tr("studio.song.slot",{n:at+1,p:letter(chain[at]==null?0:chain[at])}));
-    var sul=el("ul","lcd-menu");
+    var chain=(T.song&&T.song.song)||[0], at=T.slot, own=chain[at]==null?0:chain[at];
+    sheetHead(tr("studio.song.slot",{n:at+1,p:letter(own)}));
+    /* first the letters: one tap sets the slot and closes; then the edits that keep the slot where it is */
+    sh.appendChild(patternButtons(function(p){ slotLetter(p); },own));
+    var sul=el("ul","lcd-menu st-slot-actions");
     sheetRow(sul,tr("studio.song.insert"),"",function(){ insertSlotBefore(); });
     sheetRow(sul,tr("studio.song.copy"),"",function(){ copySlotAfter(); });
     var delRow=sheetRow(sul,tr("studio.song.del"),"",function(){ deleteSlotAt(); });
@@ -1533,12 +1518,16 @@ function scrollSlotIntoView(){
   if(r.top<cr.top) chain.scrollTop-=cr.top-r.top;
   else if(r.bottom>cr.bottom) chain.scrollTop+=r.bottom-cr.bottom;
 }
-function songLetter(p){
+/* the slot sheet's letters (12.13): one tap sets the slot, closes the sheet and counts as the tour's letter change.
+   The player reads the live chain, so a letter picked while the song plays is heard from the next bar. */
+function slotLetter(p){
   if(!T.song || !T.loaded) return;
   T.song=SONGS.setSlot(T.song,T.slot,p);
   touch();
-  renderSong(); renderNav(); renderTabs();
-  tourEvent("slot");             /* a tap on the selected slot's letter counts even when it does not change it */
+  T.sheet="";
+  renderSong(); renderNav(); renderTabs(); renderSheet();
+  scrollSlotIntoView();
+  tourEvent("slot");
 }
 function addSongSlot(){
   if(!T.loaded || !T.song) return;
@@ -1625,8 +1614,8 @@ function moveFocus(key){
     s=(T.song&&T.song.song)||[0];
     if(key==="ArrowLeft") i=Math.max(0,i-1);
     else if(key==="ArrowRight") i=Math.min(s.length-1,i+1);
-    else if(key==="ArrowUp") i=Math.max(0,i-6);
-    else i=Math.min(s.length-1,i+6);
+    else if(key==="ArrowUp") i=Math.max(0,i-4);
+    else i=Math.min(s.length-1,i+4);
     if(i>=s.length) i=s.length-1;
   } else {
     if(key==="ArrowLeft") i=i%4===0 ? i+3 : i-1;
