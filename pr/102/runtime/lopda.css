@@ -636,3 +636,6 @@ textarea::placeholder{color:var(--ink-2)}
 .st-tour-next{background:var(--ink);color:var(--lcd)}
 /* the bubble sits above the screen, so the hush toast has to rise above it */
 .st-tour-on #toast{z-index:60}
+/* a sheet owns the screen while it is open: the bubble and the target's frame step aside, then come back */
+.studio.st-sheet-open .st-tour-box{display:none}
+.studio.st-sheet-open .st-tour-hi{position:static;z-index:auto;outline:none}
