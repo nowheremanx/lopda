@@ -216,6 +216,8 @@ textarea::placeholder{color:var(--ink-2)}
 .set-ico canvas{display:block;width:24px;height:24px;image-rendering:pixelated;image-rendering:crisp-edges}
 .set-state{flex:none;color:var(--ink-2);font-size:15px;white-space:nowrap}
 .set-rule{border-top:2px solid var(--ink);margin:0}
+/* the solid rule ends the group above it: the row before it drops its own dashed line */
+.set-menu .set-row:has(+ .set-rule),.set-menu .set-row:last-child{border-bottom:0}
 .set-menu .set-subnote{margin:0;padding:0 0 0 34px;font-size:12px;line-height:1.2}
 .set-open{display:flex;align-items:center;gap:10px;width:100%;min-height:44px;padding:0;background:none;border:0;border-bottom:1px dashed var(--ink-2);color:inherit;font:inherit;text-align:left;cursor:pointer}
 .set-open:active{background:var(--lcd-2)}
