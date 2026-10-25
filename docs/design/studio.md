@@ -68,7 +68,7 @@
 4. 音色和效果做成登记表（`id → 构造函数`），加一种乐器就是加一项。
 5. 工程带格式版本号 `v`；新版读得了旧工程，太新的拒收（同备份的规则）。
 
-存储：工程文档 `studio/<id>`（{v, name, bpm, key, swing, tape, tracks, song, updated}）；人声片段在 `LopdaPlatform.files`
+存储：工程文档 `studio/items/<id>`（{v, name, bpm, key, swing, tape, tracks, song, updated}）；人声片段在 `LopdaPlatform.files`
 （单声道 16 kHz μ-law，3 分钟约 3 MB）。都自动进整机备份。录音**边录边分块写入**，被来电、锁屏打断时保留已录部分。
 
 ## 4. 录音
@@ -115,9 +115,9 @@
 |---|---|---|---|
 | 0 | iPhone 实测页（第 8 节），不合并 | 1–2 天 | 决定第 4 节的做法 |
 | 1a | 合成器 + 音序器 + 节奏器屏 + 教程框架 + 存工程（细节见第 11 节） | 约 1 周 | 能玩节奏 |
-| 1b | 贝斯 / 和弦 / 旋律屏、调音台、磁带味 + swing、导出 WAV | 约 1 周 | **能做独奏曲（可发布）** |
+| 1b | 贝斯 / 和弦 / 旋律屏、调音台、磁带味 + swing、导出 WAV；**pattern A–H 切换、复制、简单排一串**（owner 2026-10-25 从第 3 步提前：不然 1b 还只是一个 loop，鼓没法中途变化） | 约 1.5 周 | **能做独奏曲（可发布）** |
 | 2 | 录音、校准、重录一段、人声混入 WAV | 1–1.5 周 | 能伴奏 + 唱 |
-| 3 | 歌曲屏、弹奏（loop 叠加）、工程 / MIDI 导入导出、MML | 约 1 周 | 格式齐全 |
+| 3 | 歌曲屏的完整编辑（插入、删除、拖动）、弹奏（loop 叠加）、工程 / MIDI 导入导出、MML | 约 1 周 | 格式齐全 |
 | 4 | AI 辅助 + 模板 | 2–3 天 | |
 
 估计是猜的，含 iPhone 返工。编码按现在的流程交给 DeepSeek；录音、校准、audio session 这几处由 Claude 判断和审。
@@ -197,13 +197,13 @@ iPhone，iOS 18.7，2026-10-24，测试页 PR #101。两轮：外放（Safari）
 ### 11.3 数据（第 3 节的五条落到 1a）
 
 ```js
-// data/users/local/studio/<id>
+// data/users/local/studio/items/<id>   (文档路径要偶数段，所以工程在 studio 文档的 items 集合里)
 { v: 1, name: "", bpm: 82, key: 9, scale: "minor-penta", swing: 0.55, tape: 2, kit: "soft",
   tracks: [ {id:"drums", kind:"drum"}, {id:"bass", kind:"note"}, {id:"chords", kind:"chord"},
             {id:"melody", kind:"note"}, {id:"voice", kind:"voice"} ],
   patterns: [ { len: 16, notes: { drums: [ {t:0, len:24, key:"kick", vel:1}, ... ], bass: [], chords: [], melody: [] } } ],
   song: [0], clips: [], updated: 0 }
-// data/users/local/studio-meta  { current: "<id>", toured: {rhythm: true}, hushTip: true }
+// data/users/local/studio  { current: "<id>", toured: {rhythm: true}, hushTip: true }
 ```
 
 - 时间单位 tick，每拍 96（`TPB`），一步 24（`STEP`），一个 pattern 16 步。鼓的 `key` 是 `"kick" | "snare" | "hat" | "perc"`。
@@ -241,8 +241,13 @@ iPhone，iOS 18.7，2026-10-24，测试页 PR #101。两轮：外放（Safari）
 
 - `studio.js` 里一个小函数 `tour(steps)`：每步 = 高亮一个元素 + 一句话 + 「做完什么才进下一步」的检查（或「下一步」按钮）。
   可以「跳过」；看完记进 `studio-meta.toured[屏名]`；顶栏的「?」重看。不做成通用的 `LP` 接口（只有这一个程序用，等第二个再说）。
-- 节奏器的四步：①「按 ▶ 听听」（等播放）②「点亮一格，加一下底鼓」（等一次切换）③「换一只鼓试试」（等换鼓）④「−、+ 改快慢；HOME 随时离开，会自动保存」（按钮结束）。
-- 画法：其余部分盖一层底色网点（四色，`putImageData` 或 CSS 的四色图案），被高亮的元素露出来；文字框墨色字、底色底，放在不挡住高亮的那一半。
+- 节奏器的五步（owner 2026-10-25 改：第一版整屏盖网点、不讲概念、放着停不下来，「非常差」）：
+  ①「按 ▶ 听听」（等播放）②「这 16 格是一小节：一行一拍，从左上走到右下；亮着的格子会响」（下一步）
+  ③「点一个空格，加一下底鼓；再点一次就去掉」（等一次切换）④「四只鼓各有自己的 16 格，叠在一起就是节奏。换一只看看」（等换鼓）
+  ⑤「− + 调快慢；≡ 里换鼓组、新磁带；HOME 随时离开，会自动保存」（好了）。
+- 画法：**不盖屏**，界面照常能点（随时能停播放）。目标外面一圈墨色框（和目标隔一圈底色，墨色按钮上也看得见），
+  旁边一个对话气泡（墨色字、底色底、墨色边，一个小三角指向目标），放在目标上方或下方空间大的一边，不挡住目标。
+  点别处不结束教程；只有「跳过」、B 键、最后一步「好了」结束它，HOME 结束但不算看过。
 
 ### 11.7 演示节奏
 
@@ -255,7 +260,7 @@ iPhone，iOS 18.7，2026-10-24，测试页 PR #101。两轮：外放（Safari）
   OfflineAudioContext 渲染每只鼓一次，检查不是静音、不削波。
 - `tests/runtime-shots.mjs`：加四轨机的两张截图（打开时、教程第 2 步）；main 对比：其他画面不变。
 - 全套 `node --test` 只在最后跑一次。
-- owner 的 iPhone 清单（PR 里写中文）：第一次打开能听到节奏；点方块马上有声；教程四步走得通；锁屏回来不乱响；音量键和静音键管用；拖到后台再回来，节奏还在。
+- owner 的 iPhone 清单（PR 里写中文）：第一次打开能听到节奏；点方块马上有声；教程五步走得通；锁屏回来不乱响；音量键和静音键管用；拖到后台再回来，节奏还在。
 
 ### 11.9 怎么分给 DeepSeek
 
@@ -264,7 +269,7 @@ iPhone，iOS 18.7，2026-10-24，测试页 PR #101。两轮：外放（Safari）
 | A | `studio-song.js` + 单元测试 | `tests/studio-song.test.mjs` |
 | B | `studio-synth.js` 两套鼓 + e2e 渲染检查 | e2e 里新加的那几条 |
 | C | `apps/studio.js` 节奏器屏、存取、播放循环、图标、strings、版本号、SHELL | `tests/repo.test.mjs`、`tests/strings.test.mjs`、新 e2e |
-| D | 教程 `tour()` 和节奏器的四步、runtime-shots | 新 e2e + runtime-shots 对比 |
+| D | 教程 `tour()` 和节奏器的五步、runtime-shots | 新 e2e + runtime-shots 对比 |
 
 每部分推一次；A 推完开草稿 PR。Claude 审每一部分（尤其 B 的音量和 C 的生命周期：HOME、锁屏、context 重建），最后的全套测试由审查方决定。
 

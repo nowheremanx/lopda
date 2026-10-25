@@ -584,3 +584,58 @@ textarea::placeholder{color:var(--ink-2)}
 #data-ask p{margin:0 0 2px;font-size:15px;line-height:1.35}
 #data-clear-all:disabled{color:var(--mid);border-color:var(--mid);background:transparent;box-shadow:none;cursor:default}
 #run-err-msg{white-space:pre-wrap}
+
+/* ---------- studio: the four-track tape machine's rhythm screen (apps/studio.js) ---------- */
+.studio{display:flex;flex-direction:column;overflow:hidden;background:var(--lcd)}
+.st-bar{flex:none;display:flex;align-items:center;gap:4px;padding:4px 6px;border-bottom:2px solid var(--ink)}
+.st-tempo{flex:none;display:flex;align-items:center;gap:4px}
+.st-play{flex:none;width:44px;height:44px;display:flex;align-items:center;justify-content:center;padding:0;background:var(--ink);color:var(--lcd);border:2px solid var(--ink);font-family:var(--f-pix);font-size:22px;line-height:1;cursor:pointer}
+#studio-play-glyph{display:block;width:0;height:0;margin-left:3px;border-left:14px solid currentColor;border-top:9px solid transparent;border-bottom:9px solid transparent}
+.st-play[data-playing="true"] #studio-play-glyph{width:13px;height:13px;margin-left:0;border:0;background:currentColor}
+.st-play[data-playing="true"]{background:var(--lcd);color:var(--ink)}
+.st-bpm{flex:none;min-width:52px;text-align:center;font-family:var(--f-pix);font-size:18px;line-height:1;white-space:nowrap;font-variant-numeric:tabular-nums}
+.st-step,.st-mini{flex:none;width:44px;height:44px;display:flex;align-items:center;justify-content:center;padding:0;background:transparent;color:var(--ink);border:2px solid var(--ink);font-family:var(--f-pix);font-size:24px;line-height:1;cursor:pointer}
+.st-mini{font-size:20px}
+.st-step:active,.st-mini:active{background:var(--ink);color:var(--lcd)}
+.st-gap{flex:1;min-width:0}
+.st-tabs{flex:none;display:flex;gap:4px;padding:4px 6px;border-bottom:2px solid var(--ink)}
+.st-tab{flex:1;min-width:0;min-height:44px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;padding:2px;background:transparent;color:var(--ink);border:2px solid var(--ink);font-family:var(--f-lcd);font-size:14px;line-height:1.1;cursor:pointer;white-space:nowrap;overflow:hidden}
+.st-tab.on{background:var(--ink);color:var(--lcd)}
+.st-tab-name{max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.st-dot{display:block;width:5px;height:5px;border-radius:50%;background:transparent}
+.st-dot.on{background:var(--ink)}
+.st-tab.on .st-dot.on{background:var(--lcd)}
+.st-board{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:6px 8px}
+.st-grid{display:grid;gap:4px;touch-action:manipulation}
+.st-cell{display:block;min-width:0;min-height:0;margin:0;padding:0;background:var(--lcd);border:2px solid var(--ink);border-radius:0;cursor:pointer;-webkit-appearance:none;appearance:none}
+.st-cell.beat{border-width:3px}
+.st-cell.on{background:var(--ink)}
+/* the step being heard: mid tone on an empty step, dark on a lit one, so the moving light never reads as a note */
+.st-cell.playing{background:var(--lcd-3)}
+.st-cell.on.playing{background:var(--ink-2)}
+.st-cell.focus,.st-cell:focus-visible{outline:2px dashed var(--ink);outline-offset:1px}
+.st-sheet{z-index:3}
+.st-sheet .lcd-menu{flex:none}
+.st-sheet .lcd-menu li{min-height:44px;box-sizing:border-box}
+.st-ask{display:flex;flex-direction:column;gap:10px;font-size:15px;line-height:1.4}
+.st-ask p{margin:0}
+.st-ask .row{gap:10px}
+.st-ask .btn{flex:1;min-height:44px}
+/* the tour: an ink frame on the target and a speech bubble above or below it; nothing is covered, so
+   the whole screen keeps working (docs/design/studio.md 11.6) */
+.st-tour-hi{position:relative;z-index:44;outline:3px solid var(--ink);outline-offset:3px}
+.st-tour{position:absolute;inset:0;z-index:40;pointer-events:none}
+.st-tour-box{position:absolute;z-index:48;width:max-content;max-width:calc(100% - 8px);background:var(--lcd);color:var(--ink);border:3px solid var(--ink);padding:6px 8px;display:flex;flex-direction:column;gap:6px;pointer-events:auto;font-size:15px;line-height:1.3}
+.st-tour-box::before{content:"";position:absolute;width:0;height:0;border:8px solid transparent}
+.st-tour-above::before{bottom:-19px;left:calc(var(--st-tour-tip,50%) - 8px);border-top-color:var(--ink)}
+.st-tour-below::before{top:-19px;left:calc(var(--st-tour-tip,50%) - 8px);border-bottom-color:var(--ink)}
+.st-tour-text{margin:0}
+.st-tour-btns{display:flex;gap:6px}
+.st-tour-btns button{flex:1;min-height:44px;padding:4px 8px;border:2px solid var(--ink);font-family:var(--f-lcd);font-size:15px;line-height:1.1;cursor:pointer}
+.st-tour-skip{background:transparent;color:var(--ink)}
+.st-tour-next{background:var(--ink);color:var(--lcd)}
+/* the bubble sits above the screen, so the hush toast has to rise above it */
+.st-tour-on #toast{z-index:60}
+/* a sheet owns the screen while it is open: the bubble and the target's frame step aside, then come back */
+.studio.st-sheet-open .st-tour-box{display:none}
+.studio.st-sheet-open .st-tour-hi{position:static;z-index:auto;outline:none}
