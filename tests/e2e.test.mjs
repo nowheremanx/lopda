@@ -3532,12 +3532,12 @@ test("darkroom: the single print alone carries the place; a negative keeps it se
   assert.match(card.name, /^lopda-contact-.*\.png$/);
   assert.deepEqual(pngSize(card.buf), [1080, 1440]);
   assert.equal(EXIF.read(card.buf), null);
-  assert.ok(!card.buf.toString("latin1").includes("GPS"), "the contact sheet has no GPS tag");
+  assert.ok(pngPixelsOnly(card.buf), "the contact sheet has no Exif or text chunk: " + pngChunks(card.buf).join(","));
   await press(p, "Enter"); await press(p, "ArrowDown"); await press(p, "ArrowDown");
   const strip = await save(p, () => press(p, "x"));
   assert.match(strip.name, /^lopda-strip-.*\.png$/);
   assert.equal(EXIF.read(strip.buf), null);
-  assert.ok(!strip.buf.toString("latin1").includes("GPS"), "the strip has no GPS tag");
+  assert.ok(pngPixelsOnly(strip.buf), "the strip has no Exif or text chunk: " + pngChunks(strip.buf).join(","));
 
   /* d) the negative carries the sealed place only: no test coordinate in the clear */
   await press(p, "z");
@@ -3652,6 +3652,14 @@ test("darkroom: the single print alone carries the place; a negative keeps it se
 /* ---------- darkroom step 2 (docs/design/darkroom.md section 9): developing, the viewer, the three prints ---------- */
 /* width and height from a PNG's IHDR */
 const pngSize = (buf) => [buf.readUInt32BE(16), buf.readUInt32BE(20)];
+/* the chunk types of a PNG in order. A print carries pixels only: no eXIf and no text chunk. Do not look for the
+   letters "GPS" in the raw bytes (the old check did): IDAT is deflated, so any three bytes can turn up by chance. */
+const pngChunks = (buf) => {
+  const out = [];
+  for (let o = 8; o + 8 <= buf.length;) { const len = buf.readUInt32BE(o); out.push(buf.toString("latin1", o + 4, o + 8)); o += 12 + len; }
+  return out;
+};
+const pngPixelsOnly = (buf) => !pngChunks(buf).some((c) => /^(eXIf|tEXt|zTXt|iTXt)$/.test(c));
 /* width and height from a JPEG's SOF0/SOF2 (after APP0 and the Exif APP1, which this walks past) */
 const jpegSize = (buf) => {
   let o = 2;
