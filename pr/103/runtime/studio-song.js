@@ -1,0 +1,636 @@
+/*
+ * Lo-PDA runtime: the song data of the four-track tape machine (docs/design/studio.md sections 3 and 11). Pure functions,
+ * no DOM, so Node tests run them: the format constants and the demo beat, a fresh song, validate (what a song from storage
+ * or a file must look like), drum steps on and off, the events the player schedules (with swing), and scale degrees.
+ * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
+ */
+(function(){
+"use strict";
+
+/* ---------- the format ----------
+   Ticks, not seconds or step numbers: 96 per beat and 24 per 16th step, so a piano roll, a free note length or a slower
+   tempo later needs no migration. A pattern is measured in 16th steps for the grid. */
+var V=1, TPB=96, STEP=24, STEPS=16;
+
+var BPM_MIN=60, BPM_MAX=140, BPM_DEFAULT=82, BPM_STEP=2;
+
+var DRUMS=["kick","snare","hat","perc"], KITS=["chip","soft"], KINDS=["drum","note","chord","voice"];
+
+/* Track ids are the keys of a pattern's notes and of the editor's state, so they are a plain slug: lower-case letters,
+   digits and "-", starting with a letter. That keeps "__proto__" and friends out of plain objects used as maps. */
+var TRACK_ID=/^[a-z][a-z0-9-]{0,15}$/;
+
+/* a pattern is 16 steps in 1a; four bars of off-grid notes are far below this, and a broken file cannot make validate
+   walk millions of notes */
+var NOTES_MAX=1024;
+
+/* "4 instruments + 1 voice" is this constant, not a rule of the format: the stored song keeps its own track list, so a
+   file from another writer (or a later version) may carry other tracks. */
+var TRACKS=[
+  {id:"drums", kind:"drum"},
+  {id:"bass", kind:"note"},
+  {id:"chords", kind:"chord"},
+  {id:"melody", kind:"note"},
+  {id:"voice", kind:"voice"}
+];
+
+var SCALES={
+  "minor-penta":[0,3,5,7,10],
+  "major-penta":[0,2,4,7,9],
+  "minor":[0,2,3,5,7,8,10],
+  "major":[0,2,4,5,7,9,11],
+  "dorian":[0,2,3,5,7,9,10]
+};
+
+/* The seven-note scale behind each grid scale (12.5): chords are stacked in thirds of the seven-note scale, so a
+   five-note pad borrows its parent. */
+var PARENT={"minor-penta":"minor","major-penta":"major","minor":"minor","major":"major","dorian":"dorian"};
+
+/* Pitch classes the way the note and chord labels write them: the sharps and flats this machine shows, not a key
+   signature. */
+var NAMES=["C","C#","D","Eb","E","F","F#","G","Ab","A","Bb","B"];
+
+/* The demo beat as it reads on the 16-step grid (1-based), with the velocity of each drum row. Original, so no licence. */
+var DEMO={
+  kick:[1,8,11],
+  snare:[5,13],
+  hat:[1,3,5,7,9,11,13],
+  perc:[16],
+  vel:{kick:1, snare:0.9, hat:0.55, perc:0.7}
+};
+
+/* The demo's bass and chords, same 1-based grid as DEMO (12.9); the drum beat is untouched, so 1a songs play the same. */
+var DEMO_BASS=[[1,0],[9,2],[11,3]], DEMO_CHORDS=[[1,0],[9,3]];
+
+var SWING_MIN=0.5, SWING_MAX=0.75, SWING_DEFAULT=0.55, TAPE_MAX=4, PATTERNS_MAX=8, SONG_MAX=64, NAME_MAX=40;
+
+/* Which synth voice a track plays (12.6): a constant, not a song field, so a later version can revoice a track without
+   migrating files. */
+var SOUND={bass:"bass", chords:"keys", melody:"pluck"};
+var NOTE_VEL=0.8;
+/* The two chord cells of a bar start on step 1 and step 9 (12.5). */
+var CHORD_STEPS=[0,8];
+
+/* ---------- small checks and a copy ---------- */
+/* a plain object, not an array, a Date or a boxed primitive: the song is JSON-shaped data */
+function plain(x){ return !!x && typeof x==="object" && Object.prototype.toString.call(x)==="[object Object]"; }
+function int(n){ return typeof n==="number" && isFinite(n) && Math.floor(n)===n; }
+function num(n){ return typeof n==="number" && isFinite(n); }
+
+/* validate hands back a copy, and toggle copies the song before touching it: the editor must never edit the document
+   it loaded by accident, and unknown fields from a newer minor writer have to survive a load and a save. */
+function clone(x){
+  var i, k, out;
+  if(Array.isArray(x)){
+    out=[];
+    for(i=0;i<x.length;i++) out.push(clone(x[i]));
+    return out;
+  }
+  if(x && typeof x==="object"){
+    out={};
+    for(k in x) if(Object.prototype.hasOwnProperty.call(x,k)) out[k]=clone(x[k]);
+    return out;
+  }
+  return x;
+}
+
+/* the drum list is stable: by time, then by the row of the drum, so the grid reads straight down and a removed and
+   re-added hit comes back where it was */
+function order(a,b){
+  var d=a.t-b.t;
+  return d || DRUMS.indexOf(a.key)-DRUMS.indexOf(b.key);
+}
+
+/* the DEMO steps as notes, sorted once at load */
+function demoNames(){
+  var out=[];
+  for(var i=0;i<DRUMS.length;i++){
+    var drum=DRUMS[i], steps=DEMO[drum];
+    for(var j=0;j<steps.length;j++) out.push({t:(steps[j]-1)*STEP, len:STEP, key:drum, vel:DEMO.vel[drum]});
+  }
+  out.sort(order);
+  return out;
+}
+
+/* ---------- a fresh song ---------- */
+/* The demo's note tracks: [step, degree] pairs run through the same tie the editor uses, so a fresh song already holds
+   the lengths the editor would compute. */
+function demoTrack(pairs){
+  var out=[];
+  for(var i=0;i<pairs.length;i++) out.push({t:(pairs[i][0]-1)*STEP, len:STEP, deg:pairs[i][1], vel:NOTE_VEL});
+  return tie(out, STEPS*STEP);
+}
+
+/* "A note sounds until the next note" (12.4): sort first, then every len is the distance to the next start, the last
+   one reaching the end of the pattern. Every add, remove or pitch change on a note or chord track ends here. */
+function tie(list,end){
+  list.sort(function(a,b){ return a.t-b.t; });
+  for(var i=0;i<list.length;i++) list[i].len=(i+1<list.length?list[i+1].t:end)-list[i].t;
+  return list;
+}
+
+function newSong(now){
+  var tracks=[];
+  for(var i=0;i<TRACKS.length;i++) tracks.push({id:TRACKS[i].id, kind:TRACKS[i].kind});
+  return {
+    v:V, name:"", bpm:BPM_DEFAULT, key:9, scale:"minor-penta", swing:SWING_DEFAULT, tape:2, kit:"soft",
+    tracks:tracks,
+    patterns:[{len:STEPS, notes:{drums:demoNames(), bass:demoTrack(DEMO_BASS), chords:demoTrack(DEMO_CHORDS), melody:[]}}],
+    song:[0], clips:[], updated:now||0
+  };
+}
+
+/* ---------- validate: the one gate between storage / a file and the editor ----------
+   A too-new file is refused as too new before its fields are judged: the fields we do not know may be the ones that
+   changed, and reporting "broken" would invite a silent overwrite. Same rule as the backup.
+   A document that blows the stack (a 20 000-deep unknown field) or throws from a getter is refused rather than allowed
+   to take the editor down: to us it is a document we cannot read, which is "type". */
+function validate(x){
+  try { return check(x); }
+  catch(e){ return {error:"type"}; }
+}
+
+function check(x){
+  if(!plain(x)) return {error:"type"};
+  if(int(x.v) && x.v>V) return {error:"newer"};
+  if(!int(x.v) || x.v<1) return {error:"version"};
+
+  if(!num(x.bpm) || x.bpm<BPM_MIN || x.bpm>BPM_MAX) return {error:"bpm"};
+  if(!int(x.key) || x.key<0 || x.key>11) return {error:"key"};
+  if(!Object.prototype.hasOwnProperty.call(SCALES,x.scale)) return {error:"scale"};
+  if(!num(x.swing) || x.swing<SWING_MIN || x.swing>SWING_MAX) return {error:"swing"};
+  if(!int(x.tape) || x.tape<0 || x.tape>TAPE_MAX) return {error:"tape"};
+  if(KITS.indexOf(x.kit)<0) return {error:"kit"};
+
+  var i, j, tr, note, list, keys, owner, max, k;
+  if(!Array.isArray(x.tracks) || x.tracks.length<1 || x.tracks.length>8) return {error:"tracks"};
+  /* ids are the keys of a pattern's notes; "$" keeps even an allowed "constructor" a harmless map key */
+  var byId={};
+  for(i=0;i<x.tracks.length;i++){
+    tr=x.tracks[i];
+    if(!plain(tr) || typeof tr.id!=="string" || !TRACK_ID.test(tr.id)) return {error:"tracks"};
+    if(KINDS.indexOf(tr.kind)<0) return {error:"tracks"};
+    if(Object.prototype.hasOwnProperty.call(byId,"$"+tr.id)) return {error:"tracks"};
+    byId["$"+tr.id]=tr;
+  }
+
+  if(!Array.isArray(x.patterns) || x.patterns.length<1 || x.patterns.length>PATTERNS_MAX) return {error:"patterns"};
+  for(i=0;i<x.patterns.length;i++){
+    var p=x.patterns[i];
+    if(!plain(p) || !int(p.len) || p.len<1 || p.len>64 || !plain(p.notes)) return {error:"patterns"};
+    max=p.len*STEP;
+    keys=Object.keys(p.notes);
+    for(j=0;j<keys.length;j++){
+      k=keys[j];
+      owner=byId["$"+k];
+      /* a voice track holds clips, not notes; a notes key with no track is a song this build cannot play */
+      if(!owner || owner.kind==="voice") return {error:"notes"};
+      list=p.notes[k];
+      if(!Array.isArray(list) || list.length>NOTES_MAX) return {error:"notes"};
+      for(var n=0;n<list.length;n++){
+        note=list[n];
+        if(!plain(note) || !int(note.t) || note.t<0 || note.t>=max ||
+           !int(note.len) || note.len<1 || note.len>max ||
+           !num(note.vel) || note.vel<0 || note.vel>1) return {error:"notes"};
+        if(owner.kind==="drum"){
+          if(DRUMS.indexOf(note.key)<0) return {error:"notes"};
+        } else if(!int(note.deg) || note.deg<-32 || note.deg>32) return {error:"notes"};
+      }
+    }
+  }
+
+  if(!Array.isArray(x.song) || x.song.length<1 || x.song.length>SONG_MAX) return {error:"song"};
+  for(i=0;i<x.song.length;i++) if(!int(x.song[i]) || x.song[i]<0 || x.song[i]>=x.patterns.length) return {error:"song"};
+  if(!Array.isArray(x.clips)) return {error:"clips"};
+  /* code points, not UTF-16 units; the length check first keeps a huge string from being copied into an array */
+  if(typeof x.name!=="string" || x.name.length>NAME_MAX*2 || Array.from(x.name).length>NAME_MAX) return {error:"name"};
+  if(!num(x.updated) || x.updated<0) return {error:"updated"};
+
+  return {song:clone(x)};
+}
+
+/* ---------- the drum grid ---------- */
+function has(song,p,track,key,step){
+  var pat=song && song.patterns && song.patterns[p];
+  var list=pat && pat.notes && pat.notes[track];
+  if(!Array.isArray(list)) return false;
+  var at=step*STEP;
+  for(var i=0;i<list.length;i++) if(list[i] && list[i].key===key && list[i].t===at) return true;
+  return false;
+}
+
+function toggle(song,p,track,key,step,vel){
+  var out=clone(song);
+  var pat=out && out.patterns && out.patterns[p];
+  if(!pat) return out;
+  if(!plain(pat.notes)) pat.notes={};
+  var list=pat.notes[track];
+  if(!Array.isArray(list)) list=pat.notes[track]=[];
+  var at=step*STEP, i;
+  for(i=0;i<list.length;i++) if(list[i] && list[i].key===key && list[i].t===at) break;
+  if(i<list.length) list.splice(i,1);
+  else {
+    list.push({t:at, len:STEP, key:key, vel:vel==null?1:vel});
+    list.sort(order);
+  }
+  return out;
+}
+
+/* ---------- scheduling ---------- */
+/* Swing: the second 16th of each pair (step index odd) is pushed later by (swing - 0.5) * 2 * STEP ticks; the first keeps
+   its place. That is the whole formula; the default 0.55 delays an odd step by 2.4 of its 24 ticks. */
+function swingTicks(swing){
+  return (swing-0.5)*2*STEP;
+}
+
+/* Events are in loop time, not pattern time: loop n places a pattern tick t at n * patternTicks + t + swing, with
+   patternTicks = len * STEP. The player keeps one clock across loops, so a range can start mid-loop, span any number of
+   loops, or be empty. Voice tracks (and tracks a later version muted) make no notes. */
+function events(song,p,fromTick,toTick){
+  var out=[];
+  if(!(toTick>fromTick)) return out;
+  var pat=song && song.patterns && song.patterns[p];
+  if(!pat || !int(pat.len) || pat.len<1 || !plain(pat.notes)) return out;
+  var P=pat.len*STEP, off=swingTicks(song.swing);
+  var tracks=song.tracks || [], place={}, i;
+  for(i=0;i<tracks.length;i++) place["$"+tracks[i].id]=i;
+
+  var first=Math.floor(fromTick/P), last=Math.floor(toTick/P);
+  /* one loop back too: an off-grid odd step (t up to P-1) swung by 0.75 can land in the next loop, so a range that
+     starts there must still see it. Its earlier events are below fromTick and are dropped by the test below. */
+  for(var loop=first-1;loop<=last;loop++){
+    var base=loop*P;
+    for(i=0;i<tracks.length;i++){
+      var tr=tracks[i];
+      if(tr.kind==="voice" || tr.mute) continue;
+      var list=pat.notes[tr.id];
+      if(!Array.isArray(list)) continue;
+      for(var n=0;n<list.length;n++){
+        var note=list[n];
+        var tick=base+note.t+(Math.floor(note.t/STEP)%2 ? off : 0);
+        if(tick<fromTick || tick>=toTick) continue;
+        var e={tick:tick, track:tr.id};
+        if(tr.kind==="drum") e.key=note.key;
+        else e.deg=note.deg;
+        e.vel=note.vel;
+        e.len=note.len;
+        out.push(e);
+      }
+    }
+  }
+
+  /* tick, then the song's track order, then the drum row; within one chord track the degrees rise, so a chord reads up */
+  out.sort(function(a,b){
+    if(a.tick!==b.tick) return a.tick-b.tick;
+    var d=place["$"+a.track]-place["$"+b.track];
+    if(d) return d;
+    var da=DRUMS.indexOf(a.key), db=DRUMS.indexOf(b.key);
+    if(da>=0 || db>=0) return da-db;
+    return (a.deg||0)-(b.deg||0);
+  });
+  return out;
+}
+
+function ticksToSec(ticks,bpm){
+  return ticks*60/(bpm*TPB);
+}
+
+/* ---------- pitch ---------- */
+/* MIDI 60 is C4, so octave oct starts at 12*(oct+1). A degree outside the scale's length wraps a whole octave at a time,
+   both ways: degree -1 of A minor penta is the G below A4 (67), not the G of two octaves down. */
+function degreeToMidi(key,scale,deg,oct){
+  var steps=SCALES[scale];
+  if(!steps || !int(deg) || !int(key) || !int(oct)) return null;
+  var n=steps.length, q=Math.floor(deg/n), r=deg-q*n;
+  return 12*(oct+1)+key+12*q+steps[r];
+}
+
+/* ---------- the grid's pitch ----------
+   The bass sits in E2..D#3 (MIDI 40..51) and the melody two octaves above it (12.4), so the tonic places the key's
+   pitch class in that window and noteMidi walks the scale from there. */
+function tonic(track,key){
+  if(!int(key)) return null;
+  var base=40+((key-4+12)%12);
+  if(track==="bass") return base;
+  if(track==="melody") return base+24;
+  return null;
+}
+
+function noteMidi(song,track,deg){
+  var steps=song && Object.prototype.hasOwnProperty.call(SCALES,song.scale) ? SCALES[song.scale] : null;
+  var base=tonic(track, song && song.key);
+  if(!steps || base==null || !int(deg)) return null;
+  var n=steps.length, q=Math.floor(deg/n), r=deg-q*n;
+  return base+12*q+steps[r];
+}
+
+function noteName(midi){
+  if(!int(midi)) return null;
+  return NAMES[((midi%12)+12)%12];
+}
+
+/* ---------- chords ----------
+   A chord root is a degree of the seven-note parent scale. Stacking thirds there (not on the five notes of the pad)
+   gives the seventh and ninth; when the ninth is a major second above the root, the fifth is dropped (12.5). */
+function scaleAt(steps,d){
+  var n=steps.length, q=Math.floor(d/n), r=d-q*n;
+  return steps[r]+12*q;
+}
+
+function chordOf(song,deg){
+  var parent=song && Object.prototype.hasOwnProperty.call(PARENT,song.scale) ? PARENT[song.scale] : null;
+  var steps=parent && SCALES[parent];
+  if(!steps || !int(song.key) || !int(deg)) return null;
+  var d=((deg%7)+7)%7;
+  var root=48+(((song.key+steps[d])%12)+12)%12;
+  var third=scaleAt(steps,deg+2)-scaleAt(steps,deg);
+  var fifth=scaleAt(steps,deg+4)-scaleAt(steps,deg);
+  var seventh=scaleAt(steps,deg+6)-scaleAt(steps,deg);
+  var ninth=scaleAt(steps,deg+8)-scaleAt(steps,deg);
+  /* a major second above the root: the ninth replaces the fifth, which would only crowd the voicing */
+  var addNine=ninth-12===2;
+  var notes=addNine
+    ? [root, root+third, root+seventh, root+ninth]
+    : [root, root+third, root+fifth, root+seventh];
+  return {d:d, root:root, third:third, fifth:fifth, seventh:seventh, ninth:ninth, addNine:addNine, notes:notes};
+}
+
+function chordNotes(song,deg){
+  var c=chordOf(song,deg);
+  return c ? c.notes : null;
+}
+
+function chordName(song,deg){
+  var c=chordOf(song,deg);
+  if(!c) return null;
+  var roman=["I","II","III","IV","V","VI","VII"][c.d];
+  if(c.third===3) roman=roman.toLowerCase();
+  if(c.fifth===6) roman+="ø";
+  var suffix;
+  if(c.third===4 && c.seventh===11) suffix=c.addNine?"maj9":"maj7";
+  else if(c.third===3 && c.seventh===10 && c.fifth===7) suffix=c.addNine?"m9":"m7";
+  else if(c.third===4 && c.seventh===10) suffix=c.addNine?"9":"7";
+  else if(c.fifth===6) suffix="m7b5";
+  else suffix="";
+  return {roman:roman, name:NAMES[((c.root%12)+12)%12]+suffix};
+}
+
+function clampBpm(bpm){
+  var n=Math.round(bpm);
+  if(!isFinite(n)) return BPM_DEFAULT;
+  return Math.max(BPM_MIN, Math.min(BPM_MAX, n));
+}
+
+/* ---------- patterns A-H (12.3) ---------- */
+/* A pattern is created on demand up to 8, the number of letter buttons; an empty one is the shape every screen expects. */
+function emptyPattern(){
+  return {len:STEPS, notes:{drums:[], bass:[], chords:[], melody:[]}};
+}
+
+/* Fills on the copied song, so callers that already hold a clone do not clone twice. */
+function ensureInto(out,i){
+  if(!plain(out)) return out;
+  if(!Array.isArray(out.patterns)) out.patterns=[];
+  while(out.patterns.length<=i) out.patterns.push(emptyPattern());
+  return out;
+}
+
+function ensurePattern(song,i){
+  var out=clone(song);
+  if(!int(i) || i<0 || i>=PATTERNS_MAX) return out;
+  return ensureInto(out,i);
+}
+
+function hasNotes(song,p,track){
+  var pat=song && song.patterns && song.patterns[p];
+  var list=pat && pat.notes && pat.notes[track];
+  return Array.isArray(list) && list.length>0;
+}
+
+function patternEmpty(song,p){
+  var pat=song && song.patterns && song.patterns[p];
+  if(!pat || !plain(pat.notes)) return true;
+  var keys=Object.keys(pat.notes);
+  for(var i=0;i<keys.length;i++) if(Array.isArray(pat.notes[keys[i]]) && pat.notes[keys[i]].length) return false;
+  return true;
+}
+
+function copyPattern(song,from,to){
+  var out=clone(song);
+  if(!plain(out)) return out;
+  if(!int(from) || !int(to) || from===to) return out;
+  if(from<0 || from>=PATTERNS_MAX || to<0 || to>=PATTERNS_MAX) return out;
+  var src=out.patterns && out.patterns[from];
+  if(!plain(src) || !int(src.len) || src.len<1 || !plain(src.notes)) return out;
+  out=ensureInto(out,to);
+  var dst=out.patterns[to];
+  if(!plain(dst)) dst=out.patterns[to]={len:STEPS, notes:{drums:[], bass:[], chords:[], melody:[]}};
+  dst.len=src.len;
+  dst.notes=clone(src.notes);
+  return out;
+}
+
+/* ---------- notes on the grid (12.4, 12.5) ----------
+   A note's tick is its position; its len is only a consequence ("sounds until the next note"), so every edit re-ties the
+   track. Drum hits stay on the step grid and keep their own length rule, so setNote/removeNote ignore that track. */
+function trackKind(song,id){
+  var tracks=song && song.tracks;
+  if(!Array.isArray(tracks)) return null;
+  for(var i=0;i<tracks.length;i++) if(tracks[i] && tracks[i].id===id) return tracks[i].kind;
+  return null;
+}
+
+function editable(song,track){
+  var kind=trackKind(song,track);
+  return kind==="note" || kind==="chord";
+}
+
+function noteAt(song,p,track,t){
+  var pat=song && song.patterns && song.patterns[p];
+  var list=pat && pat.notes && pat.notes[track];
+  if(!Array.isArray(list)) return null;
+  for(var i=0;i<list.length;i++) if(list[i] && list[i].t===t) return list[i];
+  return null;
+}
+
+function setNote(song,p,track,t,deg,vel){
+  var out=clone(song);
+  if(!editable(out,track)) return out;
+  if(!int(p) || p<0 || p>=PATTERNS_MAX || !int(t) || t<0) return out;
+  var src=song.patterns && song.patterns[p];
+  var len=src && int(src.len) && src.len>=1 ? src.len : STEPS;
+  if(t>=len*STEP || !int(deg) || deg<-32 || deg>32) return out;
+  var v=vel==null ? NOTE_VEL : vel;
+  if(!num(v) || v<0 || v>1) return out;
+
+  out=ensureInto(out,p);
+  var pat=out.patterns[p];
+  if(!plain(pat.notes)) pat.notes={};
+  var list=pat.notes[track];
+  if(!Array.isArray(list)) list=pat.notes[track]=[];
+  var found=null;
+  for(var i=0;i<list.length;i++) if(list[i] && list[i].t===t){ found=list[i]; break; }
+  /* an existing note keeps its velocity: the pitch keys change the degree, not how hard it is played */
+  if(found) found.deg=deg;
+  else list.push({t:t, len:1, deg:deg, vel:v});
+  tie(list, pat.len*STEP);
+  return out;
+}
+
+function removeNote(song,p,track,t){
+  var out=clone(song);
+  if(!editable(out,track)) return out;
+  if(!int(p) || p<0 || p>=PATTERNS_MAX || !int(t) || t<0) return out;
+  var pat=out.patterns && out.patterns[p];
+  if(!plain(pat) || !int(pat.len) || pat.len<1 || t>=pat.len*STEP) return out;
+  var list=pat.notes && pat.notes[track];
+  if(!Array.isArray(list)) return out;
+  for(var i=0;i<list.length;i++) if(list[i] && list[i].t===t){ list.splice(i,1); break; }
+  tie(list, pat.len*STEP);
+  return out;
+}
+
+/* ---------- the song chain (12.8) ---------- */
+function setSlot(song,i,p){
+  var out=clone(song);
+  if(!plain(out)) return out;
+  if(!Array.isArray(out.song) || !int(i) || i<0 || i>=out.song.length) return out;
+  if(!int(p) || p<0 || p>=PATTERNS_MAX) return out;
+  out=ensureInto(out,p);
+  out.song[i]=p;
+  return out;
+}
+
+function addSlot(song,p){
+  var out=clone(song);
+  if(!plain(out)) return out;
+  if(!int(p) || p<0 || p>=PATTERNS_MAX) return out;
+  if(!Array.isArray(out.song)) out.song=[];
+  if(out.song.length>=SONG_MAX) return out;
+  out=ensureInto(out,p);
+  out.song.push(p);
+  return out;
+}
+
+function dropSlot(song){
+  var out=clone(song);
+  if(!plain(out)) return out;
+  if(!Array.isArray(out.song) || out.song.length<=1) return out;
+  out.song.pop();
+  return out;
+}
+
+/* ---------- scheduling the chain (12.7) ----------
+   A chain entry that names a missing pattern is an empty 16-step bar here too, so a song with a stale slot keeps time
+   instead of stopping. The swing offset is decided inside each pattern (odd 16th), and the last odd step of a segment
+   may land in the next segment's ticks; the pass loop starts one pass back for that. */
+function chainSegments(song,chain){
+  var out=[], start=0;
+  if(!Array.isArray(chain)) return out;
+  for(var i=0;i<chain.length;i++){
+    var p=chain[i], pat=song && song.patterns && int(p) ? song.patterns[p] : null;
+    var len=pat && int(pat.len) && pat.len>=1 ? pat.len : STEPS;
+    out.push({slot:i, p:p, len:len, ticks:len*STEP, start:start});
+    start+=len*STEP;
+  }
+  return out;
+}
+
+function chainTicks(song,chain){
+  var segs=chainSegments(song,chain), total=0;
+  for(var i=0;i<segs.length;i++) total+=segs[i].ticks;
+  return total;
+}
+
+/* Where a tick falls: the slot, its pattern and the tick inside that pattern. Ticks beyond a pass wrap; a negative tick
+   means the start, so a player that asks before the clock starts still has an answer. */
+function chainAt(song,chain,tick){
+  var segs=chainSegments(song,chain);
+  if(!segs.length) return null;
+  if(!num(tick) || tick<0) return {slot:0, p:segs[0].p, t:0};
+  var total=0, i;
+  for(i=0;i<segs.length;i++) total+=segs[i].ticks;
+  var m=tick%total;
+  for(i=0;i<segs.length;i++){
+    if(m<segs[i].ticks) return {slot:i, p:segs[i].p, t:m};
+    m-=segs[i].ticks;
+  }
+  return {slot:segs.length-1, p:segs[segs.length-1].p, t:m};
+}
+
+function chainEvents(song,chain,fromTick,toTick){
+  var out=[];
+  if(!(toTick>fromTick)) return out;
+  var segs=chainSegments(song,chain);
+  if(!segs.length) return out;
+  var total=chainTicks(song,chain), i, n;
+  if(total<=0) return out;
+
+  var pats=song && song.patterns;
+  var tracks=(song && song.tracks) || [], place={};
+  for(i=0;i<tracks.length;i++) place["$"+tracks[i].id]=i;
+  var off=swingTicks(song && song.swing);
+
+  var first=Math.floor(fromTick/total), last=Math.floor(toTick/total);
+  /* one pass back as well: a swung note at a segment's last step can land in the next segment, which may be the one the
+     range starts in. Notes below fromTick are dropped by the test. */
+  for(var pass=first-1;pass<=last;pass++){
+    var base=pass*total;
+    for(i=0;i<segs.length;i++){
+      var seg=segs[i];
+      var pat=int(seg.p) ? pats && pats[seg.p] : null;
+      if(!pat || !plain(pat.notes)) continue;
+      var segBase=base+seg.start;
+      for(var k=0;k<tracks.length;k++){
+        var tr=tracks[k];
+        if(tr.kind==="voice" || tr.mute) continue;
+        var list=pat.notes[tr.id];
+        if(!Array.isArray(list)) continue;
+        for(n=0;n<list.length;n++){
+          var note=list[n];
+          var tick=segBase+note.t+(Math.floor(note.t/STEP)%2 ? off : 0);
+          if(tick<fromTick || tick>=toTick) continue;
+          var e={tick:tick, track:tr.id};
+          if(tr.kind==="drum") e.key=note.key;
+          else e.deg=note.deg;
+          e.vel=note.vel;
+          e.len=note.len;
+          e.p=seg.p;
+          e.slot=seg.slot;
+          out.push(e);
+        }
+      }
+    }
+  }
+
+  /* the same order as events(): tick, the song's track order, the drum row, then the degrees of a chord */
+  out.sort(function(a,b){
+    if(a.tick!==b.tick) return a.tick-b.tick;
+    var d=place["$"+a.track]-place["$"+b.track];
+    if(d) return d;
+    var da=DRUMS.indexOf(a.key), db=DRUMS.indexOf(b.key);
+    if(da>=0 || db>=0) return da-db;
+    return (a.deg||0)-(b.deg||0);
+  });
+  return out;
+}
+
+window.LopdaSong={
+  V:V, TPB:TPB, STEP:STEP, STEPS:STEPS,
+  BPM_MIN:BPM_MIN, BPM_MAX:BPM_MAX, BPM_DEFAULT:BPM_DEFAULT, BPM_STEP:BPM_STEP,
+  DRUMS:DRUMS, KITS:KITS, KINDS:KINDS, TRACKS:TRACKS, SCALES:SCALES, PARENT:PARENT, DEMO:DEMO,
+  DEMO_BASS:DEMO_BASS, DEMO_CHORDS:DEMO_CHORDS,
+  SOUND:SOUND, NOTE_VEL:NOTE_VEL, CHORD_STEPS:CHORD_STEPS, NAMES:NAMES,
+  SWING_MIN:SWING_MIN, SWING_MAX:SWING_MAX, SWING_DEFAULT:SWING_DEFAULT,
+  TAPE_MAX:TAPE_MAX, PATTERNS_MAX:PATTERNS_MAX, SONG_MAX:SONG_MAX, NAME_MAX:NAME_MAX,
+  newSong:newSong, validate:validate, has:has, toggle:toggle,
+  swingTicks:swingTicks, events:events, ticksToSec:ticksToSec,
+  degreeToMidi:degreeToMidi, clampBpm:clampBpm,
+  tonic:tonic, noteMidi:noteMidi, noteName:noteName,
+  chordNotes:chordNotes, chordName:chordName,
+  emptyPattern:emptyPattern, ensurePattern:ensurePattern, hasNotes:hasNotes, patternEmpty:patternEmpty,
+  copyPattern:copyPattern, noteAt:noteAt, setNote:setNote, removeNote:removeNote,
+  setSlot:setSlot, addSlot:addSlot, dropSlot:dropSlot,
+  chainEvents:chainEvents, chainTicks:chainTicks, chainAt:chainAt
+};
+})();
