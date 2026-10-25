@@ -566,6 +566,28 @@ function openCal(){
   loadHolidays().then(function(){ if(!$("v-cal").hidden) render(); updateHolidays(); });
 }
 
+/* ---------- the pet (docs/decisions.md section 37): read-only summaries, no name and no note ---------- */
+/* the pet (docs/decisions.md section 37) uses this: the user's own dates as bare {in} days from today (0..days), sorted,
+   with no name, id or note. C.dates is kept in memory, so it is synchronous; before it has loaded it returns what is
+   known (nothing) and never throws. */
+function petUpcoming(days){
+  var n=todayN(), max=typeof days==="number" && isFinite(days) ? Math.max(0,Math.floor(days)) : 0, out=[];
+  C.dates.forEach(function(a){
+    var on=nextOf(a,n); if(on===null) return;
+    var k=on-n; if(k>=0 && k<=max) out.push({in:k});
+  });
+  out.sort(function(a,b){ return a.in-b.in; });
+  return out;
+}
+/* the pet (docs/decisions.md section 37) uses this: shows the calendar on that day as the user going there would; it
+   reads no date name or note */
+function petOpenDay(n){
+  openCal();
+  if(typeof n==="number" && isFinite(n)){ select(n); C.sheet=""; C.form=null; renderSheet(); render(); }
+  return true;
+}
+LP.calendar={upcoming:petUpcoming, open:petOpenDay};
+
 LP.builtin({id:"calendar", label:"app.calendar", icon:dateIcon, view:"cal", keepPad:true,
   open:function(){ openCal(); },
   tag:tag,

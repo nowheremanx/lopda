@@ -182,6 +182,7 @@
       </div>
       <div class="settings set-ai-page">
         <p class="hint" data-i18n="ai.note">接上以后，脚本里的「生成」直接请 AI 写程序。key 只存在这台手机上，不进备份；请用设了额度上限的 key。</p>
+        <p class="hint" data-i18n="ai.pet"></p>
         <p class="hint" id="set-ai-state" aria-live="polite"></p>
         <label class="set-ai-field">
           <span data-i18n="ai.key">OpenRouter 的 key</span>
@@ -429,6 +430,20 @@
       </div>
     </section>
 
+    <!-- PET: one hardware screen, the room (81 x 60 at 4 px), eight icons and the soft keys; sub-screens open over the room -->
+    <section class="view pet-view" id="v-pet" hidden>
+      <div class="pet-stage" id="pet-stage">
+        <div class="pet-room">
+          <canvas class="pet-cv" id="pet-cv" width="162" height="120" data-i18n-label="pet.room" aria-label="宠物的房间"></canvas>
+          <div class="pet-panel" id="pet-panel" hidden></div>
+          <div class="pet-away" id="pet-away" hidden></div>
+        </div>
+      </div>
+      <p class="pet-eggline" id="pet-eggline" hidden></p>
+      <div class="pet-icons" id="pet-icons"></div>
+      <div class="pet-keys" id="pet-keys"></div>
+    </section>
+
     <!-- SCRIPTS: local HTML/JS programs, edited on the device or pasted from a phone/AI -->
     <section class="view scripts-view" id="v-scripts" hidden>
       <div class="bar">
@@ -601,6 +616,9 @@
 <script src="exif.js"></script>
 <script src="develop.js"></script>
 <script src="notetext.js"></script>
+<script src="petsim.js"></script>
+<script src="petart.js"></script>
+<script src="petplay.js"></script>
 <script src="zip.js"></script>
 <script src="backup.js"></script>
 <script src="ai.js"></script>
@@ -617,6 +635,7 @@
 <script src="apps/darkroom.js"></script>
 <script src="apps/studio.js"></script>
 <script src="apps/cart.js"></script>
+<script src="apps/pet.js"></script>
 <script src="apps/snap.js"></script>
 <script src="apps/store.js"></script>
 <script src="apps/scripts-templates.js"></script>
