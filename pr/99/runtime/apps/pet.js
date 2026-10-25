@@ -1001,6 +1001,10 @@ function taskBusy(){
     var k=task.dur ? Math.min(1,(t-task.t)/task.dur) : 1;
     task.pos=Pet.pathPoint(task.from,task.to,k);
     if(k>=1){
+      /* the walk is over, so the pet now stands at its destination. The sleep transition later in the same
+         tick reads P.at: leaving it at the last point sampled one frame ago made a completed bed walk start a
+         second one from a few pixels short of the bed (and so miss the night's Zz for another second). */
+      P.at={x:task.to.x,y:task.to.y};
       if(task.phase==="walkBowl") taskEnter("atBowl");
       else if(task.phase==="walkRug") taskEnter("awake");
       else taskEnter("settle");
