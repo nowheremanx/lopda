@@ -1,12 +1,36 @@
 /*
- * Lo-PDA built-in: settings. Volume, language, the apps allowed tilt, the microphone, the camera or the word book, the AI line, the whole-device backup and restore,
- * updates, about.
+ * Lo-PDA built-in: settings. A short menu of volume, language, system, permissions, the AI line, backup and restore,
+ * sharing and about; the long parts have pages of their own.
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  */
 (function(){
 "use strict";
 var LP=window.LP, $=LP.$, S=LP.S, I18N=LP.I18N, tr=LP.tr;
 var SND=LP.SND, RUNTIME_VERSION=LP.RUNTIME_VERSION, put=LP.put, sfx=LP.sfx, toast=LP.toast, show=LP.show, setLang=LP.setLang, renderUpdate=LP.renderUpdate;
+/* the public site, not location.host: a PR preview or localhost must still share the real address */
+var SHARE_URL="https://nowheremanx.github.io/lopda/";
+var SHARE_TEXT=SHARE_URL.replace(/^https:\/\//,"").replace(/\/$/,"");
+
+/* 12x12 pixel icons for the menu rows, the same string format as ICONS in core.js: 0-3 are the four tones, "." is clear */
+var ROW_ICONS={
+  volume:["............",".....0......","....00..0...","...000...0..","000000..0.0.","000000..0.0.","000000..0.0.","...000...0..","....00..0...",".....0......","............","............"],
+  language:["............","...00000....","..0.....0...",".0.00000.0..",".0.0...0.0..",".0.00000.0..",".0.......0..","..0.....0...","...00000....",".....0......","....0.......","............"],
+  system:["..0..0..0...",".000000000..",".0.......0..","00000000000.","0.0000000.0.","0.0.....0.0.","0.0.....0.0.","0.0000000.0.","00000000000.",".0.......0..",".000000000..","..0..0..0..."],
+  permissions:["............","....0000....","...0....0...","...0....0...","..00000000..","..0......0..","..0..00..0..","..0..00..0..","..0......0..","..00000000..","............","............"],
+  ai:["............","000000000000","0..........0","0..00..000.0","0.0..0..0..0","0.0000..0..0","0.0..0..0..0","0.0..0.000.0","0..........0","000000000000",".00.........",".0.........."],
+  backup:["............","......0.....",".....000....","....00000...","......0.....","......0.....",".0000000000.",".0........0.",".0........0.",".0........0.",".0000000000.","............"],
+  share:["............","........000.","........000.",".......0....","......0.....",".000.0......",".0000.......",".000.0......","......0.....",".......0....","........000.","........000."],
+  about:["....0000....","..00....00..",".0...00...0.",".0...00...0.","0..........0","0...000....0","0....00....0","0....00....0",".0...00...0.",".0..0000..0.","..00....00..","....0000...."]
+};
+function drawRowIcons(){
+  [["set-vol-ico","volume"],["set-lang-ico","language"],["set-sys-ico","system"],["set-sense-ico","permissions"],
+   ["set-ai-ico","ai"],["set-backup-ico","backup"],["set-share-ico","share"],["set-about-ico","about"]].forEach(function(p){
+    var host=$(p[0]), rows=ROW_ICONS[p[1]];
+    if(host && rows){ host.textContent=""; host.appendChild(LP.iconCanvas(rows)); }
+  });
+}
+drawRowIcons();
+$("set-share-url").textContent=SHARE_TEXT;
 
 function renderSettings(){
   /* one control: five steps, the lowest is off */
@@ -22,6 +46,7 @@ function renderSettings(){
 function renderSense(){
   var ul=$("set-sense-list"); ul.textContent="";
   var list=LP.sensorGrants ? LP.sensorGrants.list() : [];
+  $("set-sense-state").textContent=list.length ? tr("set.sense.some",{n:list.length}) : tr("set.sense.zero");
   $("set-sense-note").hidden=!list.length;
   if(!list.length){ var e=document.createElement("li"); e.className="none"; e.textContent=tr("set.sense.none"); ul.appendChild(e); return; }
   list.forEach(function(g){
@@ -53,7 +78,7 @@ function renderAi(msg){
   $("set-ai-test").hidden=!on; $("set-ai-del").hidden=!on;
   if(document.activeElement!==$("set-ai-model")) $("set-ai-model").value=AI.model;
 }
-$("set-ai-open").onclick=function(){ sfx("tap"); show("set-ai"); };
+$("set-ai-row").onclick=function(){ sfx("tap"); show("set-ai"); };
 $("set-ai-back").onclick=function(){ sfx("tap"); openSettings(); };
 function saveAi(){
   var v=$("set-ai-key").value.trim(), key=v===KEPT ? "" : v, model=$("set-ai-model").value.trim();
@@ -120,6 +145,7 @@ function sizeText(bytes){
 function renderLast(){
   var t=BS.last, n=Math.floor((Date.now()-t)/DAY);
   $("set-backup-last").textContent=!t ? tr("bk.never") : n<1 ? tr("bk.today") : tr("bk.days",{n:n});
+  $("set-backup-state").textContent=!t ? tr("bk.row.never") : n<1 ? tr("bk.row.today") : tr("bk.row.days",{n:n});
 }
 /* the dialog under the 全部数据 row: a message, a warning line, buttons [{label, go, main}] (a click: the release of a tap) */
 function box(msg,buttons,warn){
@@ -223,27 +249,79 @@ function renderLostRetry(old){
 /* the notes reminder counts a full backup as an export (apps/notes.js) */
 LP.backup={last:function(){ return BS.last; }};
 
-function openSettings(){
-  show("settings"); renderSettings(); renderSense(); renderAi(); renderUpdate(); renderLast();
-  if(!BS.busy) $("set-backup-box").hidden=true;
+/* the storage line, on the backup page: the phone's usage plus the darkroom's film box (apps/darkroom.js) */
+function renderStorage(){
   var el=$("set-storage"); el.textContent=tr("set.counting");
-  /* the darkroom's film box, in rolls and the space they take (apps/darkroom.js) */
-  var box=LP.darkroom ? LP.darkroom.summary().then(function(b){ return tr("set.box",{n:b.n, size:LP.darkroom.size(b.bytes)}); },function(){ return ""; }) : Promise.resolve("");
+  var film=LP.darkroom ? LP.darkroom.summary().then(function(b){ return tr("set.box",{n:b.n, size:LP.darkroom.size(b.bytes)}); },function(){ return ""; }) : Promise.resolve("");
   if(navigator.storage && navigator.storage.estimate){
-    Promise.all([navigator.storage.estimate(), navigator.storage.persisted ? navigator.storage.persisted() : Promise.resolve(false), box]).then(function(r){
+    Promise.all([navigator.storage.estimate(), navigator.storage.persisted ? navigator.storage.persisted() : Promise.resolve(false), film]).then(function(r){
       var kb=Math.max(1,Math.round((r[0].usage||0)/1024));
       el.textContent=tr("set.storage",{size:kb>1024?(kb/1024).toFixed(1)+" MB":kb+" KB"})+r[2]+tr(r[1]?"set.locked":"set.unlocked");
     }).catch(function(){ el.textContent=tr("set.nousage"); });
-  } else box.then(function(t){ el.textContent=tr("set.nousage")+t; });
+  } else film.then(function(t){ el.textContent=tr("set.nousage")+t; });
 }
+function openSettings(){
+  show("settings"); renderSettings(); renderSense(); renderAi(); renderUpdate(); renderLast();
+}
+function selectShareText(){
+  var el=$("set-share-url"), sel=window.getSelection && window.getSelection();
+  if(!el || !sel) return;
+  var r=document.createRange(); r.selectNodeContents(el); sel.removeAllRanges(); sel.addRange(r);
+}
+var SHARE={drawn:false};
+function openShare(){
+  $("set-share-send").hidden=!navigator.share;
+  /* the address never changes: draw once, the first time the page opens */
+  if(SHARE.drawn) return;
+  try{ window.LopdaQR.draw($("set-share-qr"),SHARE_URL,4); SHARE.drawn=true; }
+  catch(e){ if(window.console) console.error("Lo-PDA QR failed",e); }
+}
+$("set-sense-open").onclick=function(){ sfx("tap"); show("set-sense"); };
+$("set-sense-back").onclick=function(){ sfx("tap"); openSettings(); };
+$("set-backup-open").onclick=function(){ sfx("tap"); show("set-backup"); };
+$("set-backup-back").onclick=function(){ sfx("tap"); openSettings(); };
+$("set-share-open").onclick=function(){ sfx("tap"); show("set-share"); };
+$("set-share-back").onclick=function(){ sfx("tap"); openSettings(); };
+$("set-about-open").onclick=function(){ sfx("tap"); show("set-about"); };
+$("set-about-back").onclick=function(){ sfx("tap"); openSettings(); };
+/* the share sheet and the clipboard need a real click, never pointerdown (CLAUDE.md) */
+$("set-share-send").onclick=function(){
+  sfx("tap");
+  if(!navigator.share) return;
+  try{
+    var p=navigator.share({title:"Lo-PDA",url:SHARE_URL});
+    if(p && p.catch) p.catch(function(e){ if(!(e && e.name==="AbortError") && window.console) console.error("Lo-PDA share failed",e); });
+  }catch(e){}
+};
+$("set-share-copy").onclick=function(){
+  var p=null;
+  try{ if(navigator.clipboard && navigator.clipboard.writeText) p=navigator.clipboard.writeText(SHARE_URL); }catch(e){ p=null; }
+  if(!p){ selectShareText(); toast(tr("set.share.manual")); sfx("err"); return; }
+  p.then(function(){ toast(tr("set.share.copied")); sfx("ok"); },function(){ selectShareText(); toast(tr("set.share.manual")); sfx("err"); });
+};
 
 LP.builtin({id:"set-ai", view:"set-ai",
   enter:function(){ renderAi(); },
   lang:function(){ renderAi(); }
 });
+LP.builtin({id:"set-sense", view:"set-sense",
+  enter:function(){ renderSense(); },
+  lang:function(){ renderSense(); }
+});
+LP.builtin({id:"set-backup", view:"set-backup",
+  enter:function(){ renderLast(); renderStorage(); if(!BS.busy) $("set-backup-box").hidden=true; },
+  lang:function(){ renderLast(); renderStorage(); }
+});
+LP.builtin({id:"set-share", view:"set-share",
+  enter:function(){ openShare(); }
+});
+LP.builtin({id:"set-about", view:"set-about",
+  enter:function(){ $("set-version").textContent=tr("set.version",{v:RUNTIME_VERSION}); },
+  lang:function(){ $("set-version").textContent=tr("set.version",{v:RUNTIME_VERSION}); }
+});
 LP.builtin({id:"settings", label:"app.settings", icon:"settings", view:"settings",
   open:function(){ openSettings(); },
-  lang:function(){ renderSettings(); renderLast(); if(!$("v-settings").hidden) openSettings(); },
+  lang:function(){ renderSettings(); renderSense(); renderAi(); renderLast(); },
   ready:function(){
     S.db.doc(AIP).get().then(function(sn){
       var d=sn.exists ? LP.own(sn.data()) : null;
