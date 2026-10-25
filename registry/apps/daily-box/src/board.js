@@ -206,8 +206,10 @@ var Board = (function () {
     var length = (typeof LEVELS !== "undefined" && LEVELS.levels) ? LEVELS.levels.length : 0;
     if (!length) throw new Error("levels.js is not loaded");
     var days = Math.round((Date.UTC(y, m, d) - Date.UTC(epoch[0], epoch[1] - 1, epoch[2])) / 86400000);
-    if (days < 0) days = 0;      // before launch, show day 0 rather than a negative index
-    return days % length;
+    /* The table holds whole weeks, so it wraps backwards as cleanly as forwards. Clamping days before
+       the epoch to 0 made every such day the same puzzle: the app went out before its Monday epoch,
+       and a player who came back the next day still found day 0 waiting. Take the real day, wrapped. */
+    return ((days % length) + length) % length;
   }
 
   function levelFor(date) {
