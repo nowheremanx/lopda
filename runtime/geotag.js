@@ -180,6 +180,43 @@ function placeFromBytes(u8){
   return {lat:p.lat, lon:p.lon, acc:p.acc};
 }
 
+/* a keyring document from storage or a backup, or anything else, reduced to the keys this runtime can use: 8 hex ids,
+   32 hex keys, no duplicate id, and a current id that names a key. null when nothing usable is left. */
+function cleanRing(doc){
+  if(!doc || typeof doc!=="object" || !Array.isArray(doc.keys)) return null;
+  var keys=[], seen={}, i, k, id, key;
+  for(i=0;i<doc.keys.length;i++){
+    k=doc.keys[i];
+    if(!k || typeof k!=="object") continue;
+    id=typeof k.id==="string" ? k.id.toLowerCase() : "";
+    key=typeof k.key==="string" ? k.key.toLowerCase() : "";
+    if(!/^[0-9a-f]{8}$/.test(id) || !/^[0-9a-f]{32}$/.test(key) || seen[id]) continue;
+    seen[id]=true;
+    keys.push({id:id, key:key, added:isNum(k.added) ? k.added : 0});
+  }
+  if(!keys.length) return null;
+  var current=typeof doc.current==="string" ? doc.current.toLowerCase() : "";
+  if(!seen[current]) current=keys[0].id;
+  return {keys:keys, current:current};
+}
+
+/* a restore adds a backup's keys to this phone's own, never the other way: union by id, mine's order first, then
+   theirs' new ones; the backup's current key wins when it is in the union. null when neither side holds a valid key. */
+function mergeRing(mine, theirs){
+  var a=cleanRing(mine), b=cleanRing(theirs), keys=[], seen={}, i, k;
+  if(!a && !b) return null;
+  /* the raw current ids, before cleanRing falls back to a ring's first key, so "theirs' current if it is in the
+     union, else mine's" still holds when a current id names a key cleanRing dropped */
+  var acur=mine && typeof mine.current==="string" ? mine.current.toLowerCase() : "";
+  var bcur=theirs && typeof theirs.current==="string" ? theirs.current.toLowerCase() : "";
+  if(a) for(i=0;i<a.keys.length;i++){ k=a.keys[i]; keys.push(k); seen[k.id]=true; }
+  if(b) for(i=0;i<b.keys.length;i++){ k=b.keys[i]; if(seen[k.id]) continue; keys.push(k); seen[k.id]=true; }
+  var current=keys[0].id;
+  if(b && seen[bcur]) current=bcur;
+  else if(a && seen[acur]) current=acur;
+  return {keys:keys, current:current};
+}
+
 /* try the named key first, then the rest in order; any failure (including a bad key) is just "not this one" */
 function open(subtle,keyring,sealed){
   return Promise.resolve().then(function(){
@@ -213,5 +250,5 @@ function open(subtle,keyring,sealed){
 }
 
 window.LopdaGeotag={pick:pick, keyText:keyText, parseKey:parseKey, keyId:keyId, toHex:toHex, fromHex:fromHex,
-  seal:seal, open:open};
+  cleanRing:cleanRing, mergeRing:mergeRing, seal:seal, open:open};
 })();

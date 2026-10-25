@@ -2434,7 +2434,7 @@ test("sound: one volume with five steps; an old 'sound off' setting becomes volu
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
-test("settings: eight 44 px rows fit 331x359 down to 备份与恢复; the share QR and about page open and go back", { skip, timeout: 60000 }, async (t) => {
+test("settings: nine 44 px rows fit 331x359 down to 备份与恢复; the share QR and about page open and go back", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await page(t, { locale: "zh-CN", viewport: { width: 331, height: 359 } });
   await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
   await p.waitForFunction(() => window.LP && window.LP.S.db);
@@ -2449,11 +2449,11 @@ test("settings: eight 44 px rows fit 331x359 down to 备份与恢复; the share 
     return { rows: rows.map((r) => { const b = r.getBoundingClientRect(); return { top: b.top - box.top, bottom: b.bottom - box.top, h: b.height }; }),
       scroll: v.scrollWidth, client: v.clientWidth };
   });
-  assert.equal(menu.rows.length, 8);
+  assert.equal(menu.rows.length, 9);
   assert.ok(menu.rows.every((r) => r.h >= 44), JSON.stringify(menu.rows));
   assert.ok(menu.scroll <= menu.client + 1, "no sideways scroll at 331");
-  /* the rows leave room around their buttons (owner, 2026-10-25), so 分享 and 关于 are a short scroll away on the smallest screen */
-  assert.ok(menu.rows[5].bottom <= 359 + 1, "the menu fits down to 备份与恢复; only 分享 and 关于 scroll: " + JSON.stringify(menu.rows));
+  /* the rows leave room around their buttons (owner, 2026-10-25), so 暗房钥匙, 分享 and 关于 are a short scroll away on the smallest screen */
+  assert.ok(menu.rows[5].bottom <= 359 + 1, "the menu fits down to 备份与恢复; only the rows after it scroll: " + JSON.stringify(menu.rows));
   await p.evaluate(() => { document.getElementById("v-settings").scrollTop = 9999; });
   assert.ok(await p.evaluate(() => {
     const v = document.getElementById("v-settings"), last = document.querySelector("#set-about-open").getBoundingClientRect(), b = v.getBoundingClientRect();
@@ -2484,6 +2484,59 @@ test("settings: eight 44 px rows fit 331x359 down to 备份与恢复; the share 
   assert.match(await p.textContent("#v-set-about"), /什么是 PDA[\s\S]*这台 Lo-PDA/);
   await p.click("#set-about-back");
   await p.waitForFunction(() => !document.getElementById("v-settings").hidden);
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("settings: the darkroom key page shows no key until one exists, masks, shows and accepts another handheld's key without losing the old one", { skip, timeout: 90000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN" });
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await p.waitForFunction(() => window.LP && window.LP.S.db);
+  await p.evaluate(() => LP.builtins.find((b) => b.id === "settings").open());
+  await p.waitForSelector("#v-settings:not([hidden])");
+  await p.click("#set-key-open");
+  await p.waitForSelector("#v-set-key:not([hidden])");
+  /* a fresh profile: no key is made just by opening the page */
+  assert.equal(await p.locator("#set-key-state").innerText(), "还没有钥匙：在相机菜单里打开「地点」时自动生成。");
+  const hasDoc = () => p.evaluate(() => LP.S.db.doc("data/users/local/darkroom-key").get().then((sn) => sn.exists));
+  assert.equal(await hasDoc(), false, "visiting the page makes no key");
+
+  const mine = await p.evaluate(() => LP.darkroomKey.ensure().then((b) => LopdaGeotag.keyText(b)));
+  assert.match(mine, /^[0-9A-F]{4}(?:-[0-9A-F]{4}){8}$/);
+  assert.equal(await hasDoc(), true);
+  /* the page reads the ring when it opens: go back and in again */
+  await p.click("#set-key-back");
+  await p.waitForFunction(() => !document.getElementById("v-settings").hidden);
+  await p.click("#set-key-open");
+  const mask = "••••-••••-…-" + mine.slice(-4);
+  await p.waitForFunction(() => /^••••-••••-…-/.test(document.getElementById("set-key-state").textContent));
+  assert.equal(await p.locator("#set-key-state").innerText(), mask);
+  assert.equal(await p.textContent("#set-key-show"), "显示");
+  await p.click("#set-key-show");
+  assert.equal(await p.textContent("#set-key-state"), mine, "Show reveals the whole key");
+  assert.equal(await p.textContent("#set-key-show"), "隐藏");
+  await p.click("#set-key-back");
+  await p.waitForFunction(() => !document.getElementById("v-settings").hidden);
+  await p.click("#set-key-open");
+  await p.waitForFunction(() => /^••••-••••-…-/.test(document.getElementById("set-key-state").textContent));
+  assert.equal(await p.textContent("#set-key-state"), mask, "leaving the page hides the key again");
+
+  /* another handheld's key, made with the same rule */
+  const other = runScript("runtime/geotag.js").LopdaGeotag.keyText(new Uint8Array(16).fill(7));
+  await p.fill("#set-key-input", other);
+  await p.click("#set-key-use");
+  await p.waitForFunction(() => /已换用这把钥匙/.test(document.getElementById("set-key-result").textContent));
+  assert.equal(await p.evaluate(() => LP.darkroomKey.ring().then((r) => r.length)), 2, "the old key is kept");
+  const current = () => p.evaluate(() => LP.darkroomKey.current().then((b) => LopdaGeotag.toHex(b)));
+  assert.equal(await current(), other.replace(/-/g, "").toLowerCase().slice(0, 32));
+  assert.equal(await p.textContent("#set-key-state"), "••••-••••-…-" + other.slice(-4));
+
+  /* one digit changed: refused, nothing saved */
+  const bad = other.slice(0, -1) + (other.slice(-1) === "0" ? "1" : "0");
+  await p.fill("#set-key-input", bad);
+  await p.click("#set-key-use");
+  await p.waitForFunction(() => /钥匙不对/.test(document.getElementById("set-key-result").textContent));
+  assert.equal(await p.evaluate(() => LP.darkroomKey.ring().then((r) => r.length)), 2);
+  assert.equal(await current(), other.replace(/-/g, "").toLowerCase().slice(0, 32));
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 

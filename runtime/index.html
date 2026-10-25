@@ -83,6 +83,11 @@
           <span class="set-label" data-i18n="set.backup">备份与恢复</span>
           <span class="set-state" id="set-backup-state"></span>
         </button>
+        <button class="set-open" id="set-key-open" type="button">
+          <span class="set-ico" id="set-key-ico" aria-hidden="true"></span>
+          <span class="set-label" data-i18n="key.label">暗房钥匙</span>
+          <span class="set-state">›</span>
+        </button>
         <button class="set-open" id="set-share-open" type="button">
           <span class="set-ico" id="set-share-ico" aria-hidden="true"></span>
           <span class="set-label" data-i18n="set.share">分享</span>
@@ -197,6 +202,31 @@
           <button class="btn ghost" id="set-ai-test" type="button" data-i18n="ai.test" hidden>试一下</button>
           <button class="btn ghost" id="set-ai-del" type="button" data-i18n="ai.del" hidden>删除 key</button>
         </div>
+      </div>
+    </section>
+
+    <!-- DARKROOM KEY: the key that opens the places in your negatives, kept inside the runtime -->
+    <section class="view" id="v-set-key" hidden>
+      <div class="bar">
+        <button class="btn ghost" id="set-key-back" type="button" aria-label="返回">◂</button>
+        <h2 data-i18n="key.label">暗房钥匙</h2>
+      </div>
+      <div class="settings set-ai-page">
+        <p class="hint" data-i18n="key.note">它能解开你底片里的拍摄地点。别给别人；只在你自己的另一台机器上输入。</p>
+        <p class="hint" id="set-key-state" aria-live="polite"></p>
+        <div class="row" id="set-key-show-row" hidden>
+          <button class="btn ghost" id="set-key-show" type="button" data-i18n="key.show">显示</button>
+          <button class="btn ghost" id="set-key-copy" type="button" data-i18n="key.copy">复制</button>
+        </div>
+        <p class="hint" id="set-key-old" hidden></p>
+        <label class="set-ai-field">
+          <span data-i18n="key.other">输入另一台机器的钥匙</span>
+          <input id="set-key-input" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="64" data-i18n-ph="key.ph" placeholder="XXXX-XXXX-…-CCCC">
+        </label>
+        <div class="row">
+          <button class="btn" id="set-key-use" type="button" data-i18n="key.use">使用</button>
+        </div>
+        <p class="hint" id="set-key-result" aria-live="polite"></p>
       </div>
     </section>
 

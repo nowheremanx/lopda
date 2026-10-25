@@ -142,3 +142,53 @@ test("open returns null when the plaintext is JSON but not a place", async () =>
     assert.equal(await G.open(subtle, [{ id: "whatever", bytes: KEY }], await make(text)), null, text);
   }
 });
+
+/* ---------- the keyring: a restore merges this phone's keys with the backup's ---------- */
+
+const H1 = "00112233445566778899aabbccddeeff", H2 = "ffeeddccbbaa99887766554433221100", H3 = "0123456789abcdef0123456789abcdef";
+const e = (id, key, added = 1000) => ({ id, key, added });
+const doc = (keys, current) => ({ keys, current });
+const plain = (v) => JSON.parse(JSON.stringify(v));
+
+test("mergeRing: a phone with no keys takes the backup's ring as it was", () => {
+  const theirs = doc([e("aaaa0001", H1, 7)], "aaaa0001");
+  assert.deepEqual(plain(G.mergeRing(null, theirs)), theirs);
+});
+
+test("mergeRing: disjoint rings become a union in mine's order, with the backup's current key", () => {
+  const mine = doc([e("11111111", H1)], "11111111");
+  const theirs = doc([e("22222222", H2)], "22222222");
+  const got = plain(G.mergeRing(mine, theirs));
+  assert.deepEqual(got.keys.map((k) => k.id), ["11111111", "22222222"]);
+  assert.equal(got.current, "22222222");
+});
+
+test("mergeRing: a key both sides hold appears once, and mine's copy is kept", () => {
+  const mine = doc([e("11111111", H1, 1), e("22222222", H2, 2)], "11111111");
+  const theirs = doc([e("11111111", H1, 99), e("33333333", H3, 3)], "33333333");
+  const got = plain(G.mergeRing(mine, theirs));
+  assert.deepEqual(got.keys.map((k) => k.id), ["11111111", "22222222", "33333333"]);
+  assert.equal(got.keys[0].added, 1, "mine's entry wins on an overlap");
+  assert.equal(got.current, "33333333", "the backup's current key is in the union");
+});
+
+test("mergeRing: a garbage backup leaves this phone's ring untouched", () => {
+  const mine = doc([e("11111111", H1), e("22222222", H2)], "22222222");
+  for (const junk of [null, "x", {}, { keys: "nope" }, { keys: [{ id: "short", key: H1 }, { id: "11111111" }] }]) {
+    assert.deepEqual(plain(G.mergeRing(mine, junk)), plain(G.cleanRing(mine)), JSON.stringify(junk));
+  }
+});
+
+test("mergeRing: no valid keys on either side is null", () => {
+  assert.equal(G.mergeRing(null, null), null);
+  assert.equal(G.mergeRing({}, { keys: [] }), null);
+  assert.equal(G.mergeRing({ keys: [{ id: "00000000", key: "nothex" }] }, { keys: [] }), null);
+});
+
+test("mergeRing: a key only on this phone is never lost, and its current key stays when the backup has none", () => {
+  const mine = doc([e("11111111", H1), e("22222222", H2)], "22222222");
+  const theirs = doc([e("11111111", H1)], "deadbeef");
+  const got = plain(G.mergeRing(mine, theirs));
+  assert.deepEqual(got.keys.map((k) => k.id), ["11111111", "22222222"]);
+  assert.equal(got.current, "22222222");
+});
