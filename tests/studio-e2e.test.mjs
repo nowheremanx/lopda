@@ -465,42 +465,162 @@ async function firstOpenTour(p) {
   await openTile(p);
   await p.waitForSelector("#v-studio .st-tour-box");
 }
+const tourHi = (p) => p.locator("#v-studio .st-tour-hi").getAttribute("id");
+/* the five steps, visited with the same taps a player uses; visits get the step number */
+async function walkTour(p, visit) {
+  await visit(0);
+  await p.click("#studio-play");
+  await waitTour(p, /这 16 格是一小节/);
+  await visit(1);
+  await p.locator("#v-studio .st-tour-next").click();
+  await waitTour(p, /点一个空格/);
+  await visit(2);
+  await p.locator('#v-studio .st-cell[data-step="1"]').click();
+  await waitTour(p, /四只鼓各有自己的 16 格/);
+  await visit(3);
+  await p.locator('#studio-tabs .st-tab[data-drum="snare"]').click();
+  await waitTour(p, /调快慢/);
+  await visit(4);
+}
 
-test("studio tour: the first open walks play, a cell, a drum and Done", { skip, timeout: 60000 }, async (t) => {
+test("studio tour: the first open walks five steps from play to Done", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await rtPage(t);
   await firstOpenTour(p);
-  assert.match(await tourText(p), /按 ▸ 听听/);
-  assert.equal(await p.locator("#v-studio .st-tour-hi").getAttribute("id"), "studio-play");
+  assert.match(await tourText(p), /按 ▸ 听听这盘磁带。/);
+  assert.equal(await tourHi(p), "studio-play");
   assert.equal(await p.locator("#v-studio .st-tour-next").isVisible(), false, "an action step has no Next");
   assert.equal(await p.locator("#v-studio .st-tour-skip").isVisible(), true, "every step can skip");
 
   await p.click("#studio-play");
-  await waitTour(p, /点亮一格/);
-  assert.equal(await p.locator("#v-studio .st-tour-hi").getAttribute("id"), "studio-grid");
-  assert.equal(await p.locator("#studio-tabs .st-tab.on").getAttribute("data-drum"), "kick", "step 2 always starts on the kick");
-  assert.equal(await p.locator("#toast").evaluate((e) => getComputedStyle(e).zIndex), "60", "the hush toast rises above the tour");
-  await p.evaluate(() => document.activeElement && document.activeElement.blur());
-  await p.keyboard.press("Enter");
-  await p.waitForFunction(() => document.querySelector("#v-studio").getAttribute("data-playing") === "false");
+  await waitTour(p, /这 16 格是一小节/);
+  assert.equal(await tourHi(p), "studio-grid");
+  assert.equal(await p.locator("#studio-tabs .st-tab.on").getAttribute("data-drum"), "kick", "the kick grid is the one shown");
+  assert.equal(await p.locator("#v-studio .st-tour-next").isVisible(), true, "a Next step has Next");
+  assert.equal(await p.locator("#toast").evaluate((e) => getComputedStyle(e).zIndex), "60", "the hush toast rises above the bubble");
+  await p.locator("#v-studio .st-tour-next").click();
+  await waitTour(p, /点一个空格/);
+  assert.equal(await tourHi(p), "studio-grid", "step 3 still frames the grid");
+  assert.equal(await p.locator("#v-studio .st-tour-next").isVisible(), false, "step 3 waits for a toggle");
 
   assert.equal(await cellOn(p, 1), false);
   await p.locator('#v-studio .st-cell[data-step="1"]').click();
-  await waitTour(p, /换一只鼓/);
+  await waitTour(p, /四只鼓各有自己的 16 格/);
   assert.equal(await cellOn(p, 1), true, "the tap that moved the tour on also toggled the cell");
-  assert.equal(await p.locator("#v-studio .st-tour-hi").getAttribute("id"), "studio-tabs");
+  assert.equal(await tourHi(p), "studio-tabs");
 
   await p.locator('#studio-tabs .st-tab[data-drum="snare"]').click();
-  await waitTour(p, /改快慢/);
-  assert.equal(await p.locator("#v-studio .st-tour-hi").getAttribute("id"), "studio-bpm");
+  await waitTour(p, /调快慢/);
+  assert.equal(await tourHi(p), "studio-tempo", "step 5 frames −, the BPM and + together");
   assert.equal(await p.textContent("#v-studio .st-tour-next"), "好了", "the last step says Done");
 
   await p.locator("#v-studio .st-tour-next").click();
   await p.waitForSelector("#v-studio .st-tour-box", { state: "detached" });
   assert.equal(await p.locator("#toast").evaluate((e) => getComputedStyle(e).zIndex), "5", "the toast goes back to its own layer");
-  await p.waitForFunction(async () => {
-    const doc = await LopdaPlatform.db.doc("data/users/local/studio").get();
-    return !!(doc.exists && doc.data().toured && doc.data().toured.rhythm === true);
+  assert.equal(await touredRhythm(p), true, "Done records the tour");
+  assert.deepEqual(errors, []);
+});
+
+test("studio tour: at step 3 the play button still stops the beat and the tour stays", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await firstOpenTour(p);
+  await p.click("#studio-play");
+  await waitTour(p, /这 16 格是一小节/);
+  await p.locator("#v-studio .st-tour-next").click();
+  await waitTour(p, /点一个空格/);
+  assert.equal(await p.getAttribute("#v-studio", "data-playing"), "true", "the beat is playing at step 3");
+
+  await p.click("#studio-play");
+  await p.waitForFunction(() => document.querySelector("#v-studio").getAttribute("data-playing") === "false");
+  assert.match(await tourText(p), /点一个空格/, "stopping the beat does not move the tour");
+  assert.equal(await tourHi(p), "studio-grid");
+  assert.equal(await tourBox(p).count(), 1, "the bubble is still there");
+  assert.deepEqual(errors, []);
+});
+
+test("studio tour: an untargeted + works at step 2 and does not end the tour", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await firstOpenTour(p);
+  await p.click("#studio-play");
+  await waitTour(p, /这 16 格是一小节/);
+  assert.match(await p.textContent("#studio-bpm"), /82 BPM/);
+  await p.click("#studio-plus");
+  assert.match(await p.textContent("#studio-bpm"), /84 BPM/, "the + outside the target still works");
+  assert.match(await tourText(p), /这 16 格是一小节/, "the tour stays on step 2");
+  assert.equal(await tourHi(p), "studio-grid");
+  await p.keyboard.press("z");
+  await p.waitForSelector("#v-studio .st-tour-box", { state: "detached" });
+  assert.deepEqual(errors, []);
+});
+
+test("studio tour: the bubble stays outside the target at 375x667 and 390x844, every step", { skip, timeout: 120000 }, async (t) => {
+  for (const viewport of [{ width: 375, height: 667 }, { width: 390, height: 844 }]) {
+    const { p, errors } = await rtPage(t, viewport);
+    await firstOpenTour(p);
+    await walkTour(p, async (i) => {
+      const m = await p.evaluate(() => {
+        const b = document.querySelector("#v-studio .st-tour-box").getBoundingClientRect();
+        const t = document.querySelector("#v-studio .st-tour-hi").getBoundingClientRect();
+        const v = document.querySelector("#v-studio").getBoundingClientRect();
+        return { b: { l: b.left, r: b.right, t: b.top, b: b.bottom }, t: { l: t.left, r: t.right, t: t.top, b: t.bottom }, v: { l: v.left, r: v.right, t: v.top, b: v.bottom } };
+      });
+      const where = `step ${i + 1} at ${viewport.width}x${viewport.height}`;
+      assert.ok(m.b.b <= m.t.t || m.b.t >= m.t.b, `${where}: the bubble is above or below the target (${JSON.stringify(m)})`);
+      assert.ok(m.b.l >= m.v.l + 4 - 0.5 && m.b.r <= m.v.r - 4 + 0.5, `${where}: the bubble is inside the view with 4 px margins (${JSON.stringify(m)})`);
+    });
+    assert.equal(await touredRhythm(p), false, "the walk itself did not end the tour");
+    await p.keyboard.press("z");
+    await p.waitForSelector("#v-studio .st-tour-box", { state: "detached" });
+    assert.deepEqual(errors, []);
+  }
+});
+
+test("studio tour: every colour it draws is one of the four tones", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  const tones = ["rgb(31, 42, 20)", "rgb(74, 90, 50)", "rgb(125, 138, 88)", "rgb(163, 173, 126)", "rgba(0, 0, 0, 0)", "transparent"];
+  await firstOpenTour(p);
+  const bad = [];
+  await walkTour(p, async (i) => {
+    bad.push(...(await p.evaluate((allowed) => {
+      const props = ["color", "backgroundColor", "borderTopColor", "borderRightColor", "borderBottomColor", "borderLeftColor", "outlineColor"];
+      const out = [];
+      for (const el of document.querySelectorAll('#v-studio [class*="st-tour"]')) {
+        const check = (s, pseudo) => {
+          for (const prop of props) {
+            const v = s[prop];
+            if (!allowed.includes(v)) out.push({ cls: String(el.className), tag: el.id || el.tagName, pseudo, prop, v });
+          }
+        };
+        check(getComputedStyle(el), "");
+        for (const pseudo of ["::before", "::after"]) {
+          const s = getComputedStyle(el, pseudo);
+          if (s.content === "none" || s.content === "normal") continue;
+          check(s, pseudo);
+        }
+      }
+      return out;
+    }, tones)).map((b) => ({ step: i + 1, ...b })));
   });
+  assert.deepEqual(bad, [], "the tour paints only ink, dark, mid and paper");
+  await p.keyboard.press("z");
+  await p.waitForSelector("#v-studio .st-tour-box", { state: "detached" });
+  assert.deepEqual(errors, []);
+});
+
+test("studio tour: played before the tour, step 1 offers Next instead of waiting", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await p.click("#studio-play");
+  await p.waitForFunction(() => document.querySelector("#v-studio").getAttribute("data-playing") === "true");
+  await p.click("#studio-tour");
+  await p.waitForSelector("#v-studio .st-tour-box");
+  assert.match(await tourText(p), /按 ▸ 听听这盘磁带。/);
+  assert.equal(await p.locator("#v-studio .st-tour-next").isVisible(), true, "an already-done play step shows Next");
+  assert.equal(await p.textContent("#v-studio .st-tour-next"), "下一步");
+  await p.locator("#v-studio .st-tour-next").click();
+  await waitTour(p, /这 16 格是一小节/);
+  await p.keyboard.press("z");
+  await p.waitForSelector("#v-studio .st-tour-box", { state: "detached" });
   assert.deepEqual(errors, []);
 });
 
@@ -521,7 +641,7 @@ test("studio tour: after Done a reopen has no tour; ? replays it", { skip, timeo
 
   await p.click("#studio-tour");
   await p.waitForSelector("#v-studio .st-tour-box");
-  assert.match(await tourText(p), /按 ▸ 听听/, "? starts again from step 1");
+  assert.match(await tourText(p), /按 ▸ 听听这盘磁带。/, "? starts again from step 1");
   await p.keyboard.press("z");
   await p.waitForSelector("#v-studio .st-tour-box", { state: "detached" });
   assert.deepEqual(errors, []);
@@ -550,10 +670,7 @@ test("studio tour: z ends it", { skip, timeout: 60000 }, async (t) => {
   await p.keyboard.press("z");
   await p.waitForSelector("#v-studio .st-tour-box", { state: "detached" });
   assert.equal(await p.locator("#studio-sheet").isHidden(), true, "B closed the tour, not a sheet");
-  await p.waitForFunction(async () => {
-    const doc = await LopdaPlatform.db.doc("data/users/local/studio").get();
-    return !!(doc.exists && doc.data().toured && doc.data().toured.rhythm === true);
-  });
+  assert.equal(await touredRhythm(p), true, "B records the tour");
   assert.deepEqual(errors, []);
 });
 
@@ -565,29 +682,7 @@ test("studio tour: HOME ends it unseen, so the next open shows it again", { skip
   assert.equal(await touredRhythm(p), false, "HOME does not record the tour as seen");
   await openTile(p);
   await p.waitForSelector("#v-studio .st-tour-box");
-  assert.match(await tourText(p), /按 ▸ 听听/);
-  await p.keyboard.press("z");
-  await p.waitForSelector("#v-studio .st-tour-box", { state: "detached" });
-  assert.deepEqual(errors, []);
-});
-
-test("studio tour: taps outside the highlighted element do nothing", { skip, timeout: 60000 }, async (t) => {
-  const { p, errors } = await rtPage(t);
-  await firstOpenTour(p);
-  assert.match(await tourText(p), /按 ▸ 听听/);
-
-  const menu = await p.locator("#studio-menu").boundingBox();
-  await p.mouse.click(menu.x + menu.width / 2, menu.y + menu.height / 2);
-  await p.waitForTimeout(150);
-  assert.equal(await p.locator("#studio-sheet").isHidden(), true, "the covered menu never opened");
-  assert.equal(await p.getAttribute("#v-studio", "data-playing"), "false", "playback did not start");
-  assert.match(await tourText(p), /按 ▸ 听听/, "the tour is still on step 1");
-
-  const cell = await p.locator('#v-studio .st-cell[data-step="5"]').boundingBox();
-  await p.mouse.click(cell.x + cell.width / 2, cell.y + cell.height / 2);
-  await p.waitForTimeout(150);
-  assert.equal(await cellOn(p, 5), false, "the covered cell did not toggle");
-  assert.match(await tourText(p), /按 ▸ 听听/, "still step 1");
+  assert.match(await tourText(p), /按 ▸ 听听这盘磁带。/);
   await p.keyboard.press("z");
   await p.waitForSelector("#v-studio .st-tour-box", { state: "detached" });
   assert.deepEqual(errors, []);

@@ -273,8 +273,8 @@ async function capture(rootArg, outArg) {
   await settle(400);
   }
 
-  /* TAPE4 (0.37.0+): the first open shows tour step 1; PLAY then START-to-stop leaves step 2. The playing
-     look is timed, so playback is stopped before the shot. */
+  /* TAPE4 (0.37.0+): the first open shows tour step 1; PLAY then advances to step 2. The playing look is
+     timed, so playback is stopped with the same PLAY button before the shot: the tour covers nothing. */
   if (await p.locator("#v-studio").count() > 0) {
     await home(); await tile("studio");
     await p.waitForSelector("#v-studio:not([hidden])");
@@ -284,9 +284,7 @@ async function capture(rootArg, outArg) {
     await p.click("#studio-play");
     await p.waitForFunction(() => document.getElementById("v-studio").getAttribute("data-playing") === "true");
     await p.waitForFunction(() => document.getElementById("studio-grid").classList.contains("st-tour-hi"));
-    /* the play button is covered by step 2's tour, so START (Enter) stops it */
-    await p.evaluate(() => document.activeElement && document.activeElement.blur());
-    await p.keyboard.press("Enter");
+    await p.click("#studio-play");
     await p.waitForFunction(() => document.getElementById("v-studio").getAttribute("data-playing") === "false");
     await p.waitForFunction(() => !document.querySelector("#v-studio .st-cell.playing"));
     await shot("13h-studio-tour-2");

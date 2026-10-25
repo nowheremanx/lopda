@@ -588,6 +588,7 @@ textarea::placeholder{color:var(--ink-2)}
 /* ---------- studio: the four-track tape machine's rhythm screen (apps/studio.js) ---------- */
 .studio{display:flex;flex-direction:column;overflow:hidden;background:var(--lcd)}
 .st-bar{flex:none;display:flex;align-items:center;gap:4px;padding:4px 6px;border-bottom:2px solid var(--ink)}
+.st-tempo{flex:none;display:flex;align-items:center;gap:4px}
 .st-play{flex:none;width:44px;height:44px;display:flex;align-items:center;justify-content:center;padding:0;background:var(--ink);color:var(--lcd);border:2px solid var(--ink);font-family:var(--f-pix);font-size:22px;line-height:1;cursor:pointer}
 #studio-play-glyph{display:block;width:0;height:0;margin-left:3px;border-left:14px solid currentColor;border-top:9px solid transparent;border-bottom:9px solid transparent}
 .st-play[data-playing="true"] #studio-play-glyph{width:13px;height:13px;margin-left:0;border:0;background:currentColor}
@@ -620,16 +621,18 @@ textarea::placeholder{color:var(--ink-2)}
 .st-ask p{margin:0}
 .st-ask .row{gap:10px}
 .st-ask .btn{flex:1;min-height:44px}
-/* the tour: four dither panels leave a hole around the highlighted element, the box sits in the other half */
-.studio.st-touring .st-bar{position:static}
-.st-tour-hi{position:relative;z-index:44;outline:3px solid var(--ink);outline-offset:0}
+/* the tour: an ink frame on the target and a speech bubble above or below it; nothing is covered, so
+   the whole screen keeps working (docs/design/studio.md 11.6) */
+.st-tour-hi{position:relative;z-index:44;outline:3px solid var(--ink);outline-offset:3px}
 .st-tour{position:absolute;inset:0;z-index:40;pointer-events:none}
-.st-tour-cover{position:absolute;display:block;pointer-events:auto;background-color:var(--lcd);background-image:repeating-conic-gradient(var(--lcd) 0deg 90deg,var(--lcd-2) 90deg 180deg,var(--lcd-3) 180deg 270deg,var(--ink-2) 270deg 360deg);background-size:4px 4px}
-.st-tour-box{position:absolute;left:4px;right:4px;z-index:48;background:var(--lcd);color:var(--ink);border:3px solid var(--ink);padding:4px 6px;display:flex;flex-direction:column;gap:4px;pointer-events:auto}
-.st-tour-text{margin:0;font-size:14px;line-height:1.25}
+.st-tour-box{position:absolute;z-index:48;width:max-content;max-width:calc(100% - 8px);background:var(--lcd);color:var(--ink);border:3px solid var(--ink);padding:6px 8px;display:flex;flex-direction:column;gap:6px;pointer-events:auto;font-size:15px;line-height:1.3}
+.st-tour-box::before{content:"";position:absolute;width:0;height:0;border:8px solid transparent}
+.st-tour-above::before{bottom:-19px;left:calc(var(--st-tour-tip,50%) - 8px);border-top-color:var(--ink)}
+.st-tour-below::before{top:-19px;left:calc(var(--st-tour-tip,50%) - 8px);border-bottom-color:var(--ink)}
+.st-tour-text{margin:0}
 .st-tour-btns{display:flex;gap:6px}
-.st-tour-btns button{flex:1;min-height:44px;padding:4px 8px;border:2px solid var(--ink);font-family:var(--f-lcd);font-size:16px;line-height:1.1;cursor:pointer}
+.st-tour-btns button{flex:1;min-height:44px;padding:4px 8px;border:2px solid var(--ink);font-family:var(--f-lcd);font-size:15px;line-height:1.1;cursor:pointer}
 .st-tour-skip{background:transparent;color:var(--ink)}
 .st-tour-next{background:var(--ink);color:var(--lcd)}
-/* the tour's cover sits above the screen, so the hush toast has to rise above it */
+/* the bubble sits above the screen, so the hush toast has to rise above it */
 .st-tour-on #toast{z-index:60}
