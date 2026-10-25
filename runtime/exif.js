@@ -42,11 +42,13 @@ function offsetText(tz){
 /* One IFD at byte `at` of the TIFF block, its values over 4 bytes after it; `next` is the next IFD offset (0 = end).
    entry.value is a byte array or a number (LONG/SHORT written inline). */
 function entry(tag,type,count,value){ return {tag:tag, type:type, count:count, value:value}; }
+/* TIFF 6.0 wants every out-of-line value on an even offset: pad each one to an even length */
+function padded(n){ return (n+1)&~1; }
 function buildIfd(entries,at,next){
   var head=2+entries.length*12+4, tail=0, i, v;
   for(i=0;i<entries.length;i++){
     v=entries[i].value;
-    if(typeof v!=="number" && v.length>4) tail+=v.length;
+    if(typeof v!=="number" && v.length>4) tail+=padded(v.length);
   }
   var out=new Uint8Array(head+tail), dataAt=at+head;
   put16(out,0,entries.length);
@@ -55,7 +57,7 @@ function buildIfd(entries,at,next){
     put16(out,o,e.tag); put16(out,o+2,e.type); put32(out,o+4,e.count);
     if(typeof e.value==="number") put32(out,o+8,e.value);
     else if(e.value.length<=4) out.set(e.value,o+8);
-    else { put32(out,o+8,dataAt); out.set(e.value,dataAt-at); dataAt+=e.value.length; }
+    else { put32(out,o+8,dataAt); out.set(e.value,dataAt-at); dataAt+=padded(e.value.length); }
   }
   put32(out,2+entries.length*12,next);
   return out;
@@ -65,9 +67,17 @@ function buildIfd(entries,at,next){
 function exifSegment(taken,tz,software){
   var time=wall(taken,tz), offset=offsetText(tz);
   var make=ascii("Lo-PDA"), model=ascii("Lo-PDA"), soft=ascii(software), dt=ascii(time), off=ascii(offset);
-  var ifd0Head=2+5*12+4;
-  var exifAt=8+ifd0Head+make.length+model.length+soft.length+dt.length;
+  /* build IFD0 once with a placeholder to learn its padded length, then with the real Exif IFD offset:
+     a tag added later cannot move the pointer by hand */
   var ifd0=buildIfd([
+    entry(TAG_MAKE,TYPE_ASCII,make.length,make),
+    entry(TAG_MODEL,TYPE_ASCII,model.length,model),
+    entry(TAG_SOFTWARE,TYPE_ASCII,soft.length,soft),
+    entry(TAG_DATETIME,TYPE_ASCII,dt.length,dt),
+    entry(TAG_EXIF_IFD,TYPE_LONG,1,0)
+  ],8,0);
+  var exifAt=8+ifd0.length;
+  ifd0=buildIfd([
     entry(TAG_MAKE,TYPE_ASCII,make.length,make),
     entry(TAG_MODEL,TYPE_ASCII,model.length,model),
     entry(TAG_SOFTWARE,TYPE_ASCII,soft.length,soft),
@@ -92,6 +102,13 @@ function exifSegment(taken,tz,software){
   return seg;
 }
 
+/* minutes east of UTC, an integer in -840..840; anything else is the device's offset at that instant */
+function frameTz(info){
+  var tz=info.tz;
+  return typeof tz==="number" && isFinite(tz) && tz===Math.floor(tz) && tz>=-840 && tz<=840
+    ? tz : -new Date(info.taken).getTimezoneOffset();
+}
+
 function isExif(u8,o){
   return o+10<=u8.length && u8[o+4]===0x45 && u8[o+5]===0x78 && u8[o+6]===0x69 && u8[o+7]===0x66 && u8[o+8]===0 && u8[o+9]===0;
 }
@@ -102,7 +119,7 @@ function insert(jpeg,info){
   if(!info || typeof info.taken!=="number" || !isFinite(info.taken)) throw new Error("exif: no shooting time");
   var src=jpeg, len=src.length;
   if(len<4 || src[0]!==0xFF || src[1]!==0xD8) throw fail("not a JPEG");
-  var tz=typeof info.tz==="number" && isFinite(info.tz) ? Math.round(info.tz) : -new Date(info.taken).getTimezoneOffset();
+  var tz=frameTz(info);
   var software=typeof info.software==="string" && info.software ? info.software : "Lo-PDA";
   var seg=exifSegment(info.taken,tz,software);
   var chunks=[src.subarray(0,2),seg], total=2+seg.length, o=2;

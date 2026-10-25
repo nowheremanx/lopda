@@ -13,8 +13,9 @@ import { ROOT, tempDir, runScript } from "./helpers.mjs";
 let pw = null;
 try { pw = await import("playwright"); } catch {}
 const skip = pw ? false : "playwright is not installed";
-/* the runtime's own EXIF reader, so the darkroom test checks what a photo library reads */
+/* runtime/exif.js itself, so the darkroom test reads back what it wrote */
 const EXIF = runScript("runtime/exif.js").LopdaExif;
+const RUNTIME_VERSION = readFileSync(join(ROOT, "runtime/core.js"), "utf8").match(/var RUNTIME_VERSION="([^"]+)"/)[1];
 
 const TYPES = { ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css", ".json": "application/json",
   ".png": "image/png", ".wasm": "application/wasm", ".webmanifest": "application/manifest+json" };
@@ -3336,7 +3337,7 @@ test("darkroom: develop a roll with blank frames, walk it in colour, print singl
   const exif = EXIF.read(single.buf);
   assert.equal(exif.make, "Lo-PDA");
   assert.equal(exif.model, "Lo-PDA");
-  assert.match(exif.software, /^Lo-PDA 0\.39\.0/);
+  assert.equal(exif.software, "Lo-PDA " + RUNTIME_VERSION);
   assert.equal(exif.dateTimeOriginal, exifTime(frame1.taken, frame1.tz), "the shooting day at the shooting tz");
   assert.equal(exif.offsetTimeOriginal, exifOffset(frame1.tz));
   await toast(/照片存好了/);

@@ -884,7 +884,7 @@ CPU 降速 4 倍（DevTools 的 CPU throttling，粗略代表旧手机）时，�
 - **出片**（菜单是一张单子，有软键栏，B 取消）：单张 1600×1400；印样用 `LP.film.buildCard` 的 1080×1440 排法，画的是彩色照片；
   胶片条是整卷的彩色胶片，片孔、片边字。彩色的片边：底色深（黑白片是透明的浅灰），片边印片名，用片种的片边颜色；每格的格号旁印焦距（`26mm`、`FRONT`）。
   `buildStrip` 多了三个可选项（`colour` 每格的彩色像素、`edgeInk` 片边字颜色、`marks` 每格的焦距），不给的时候和原来一模一样，底片的样子不变（runtime-shots 查过）。
-  文件名 `lopda-print-<装卷日期>-<片名>-<卷号>-<格号>.png`、`lopda-contact-…png`、`lopda-strip-…png`。出片菜单一打开就先做好三张（单张先），
+  文件名 `lopda-print-<装卷日期>-<片名>-<卷号>-<格号>.jpg`（0.39.0 起；以前是 .png）、`lopda-contact-…png`、`lopda-strip-…png`。出片菜单一打开就先做好三张（单张先），
   A 松开时做好了就直接打开分享菜单；没做好时做完再存（Safari 那时会多一个"保存"按钮，platform.js 已有）。
 - **调试**（`?debug`）：胶卷的菜单多一项「七种片对比」：这卷前 4 张非空白的照片用同样的种子按七种片种各冲一遍，存成一张对比图
   （一行一种片，一列一格，左边写片名），`lopda-compare-…png`。不改动这卷。
@@ -1377,7 +1377,8 @@ app 不知道手机什么时候才是平的。
   DateTimeOriginal / DateTimeDigitized、OffsetTime / OffsetTimeOriginal / OffsetTimeDigitized。时间是拍摄那一刻的当地钟面
   （`taken + tz`），偏移写成 `+08:00` 这样。不写 GPS。
 - **时区跟着底片走**：相机每格多记 `tz`（分钟，东为正），导出的底片带着它；老底片没有就按导出这台手机的时区算。
-  0.39.0 以前的 runtime 不认帧里的 `tz`，会整卷拒绝导入（一次性：数据没丢，用 0.39.0 再导入即可）。`tz` 超出 ±840 分钟算坏底片。
+  带 `tz` 的底片记成格式版本 3（布局和版本 2 一样），0.39.0 以前的 runtime 照例报「升级以后才能看」，
+  不会当成坏底片（一次性：数据没丢，用 0.39.0 再导入即可）。`tz` 超出 ±840 分钟算坏底片。
 - **不做的**：接触印相、胶片条、对比图和底片还是 PNG、没有 EXIF。
 - **代码**：`runtime/exif.js`（`window.LopdaExif`，纯函数，`tests/exif.test.mjs`）；`apps/darkroom.js` 的
   `buildPrint("p-single")` 返回 `{blob, name}`；`LP.saveBlob`；`negative.js` 的 `FRAME_KEYS`。

@@ -35,10 +35,6 @@ function segments(buf) {
   }
   return out;
 }
-const time = (taken, tz) => {
-  const d = new Date(taken + tz * 60000), p = (n) => String(n).padStart(2, "0");
-  return `${d.getUTCFullYear()}:${p(d.getUTCMonth() + 1)}:${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
-};
 const offset = (tz) => `${tz < 0 ? "-" : "+"}${String(Math.floor(Math.abs(tz) / 60)).padStart(2, "0")}:${String(Math.abs(tz) % 60).padStart(2, "0")}`;
 
 /* 2026-10-24 20:30 UTC: +08:00 is already the next day, 04:30 local */
@@ -70,6 +66,47 @@ test("Make, Model and Software are Lo-PDA; ExifVersion 0232 is written", () => {
   assert.equal(got.model, "Lo-PDA");
   assert.equal(got.software, "Lo-PDA 0.39.0");
   assert.ok(Buffer.from(out).includes(Buffer.from("0232", "latin1")), "ExifVersion");
+});
+
+test("every out-of-line value starts on an even offset; the Exif pointer is the Exif IFD start", () => {
+  const out = X.insert(jpeg(), { taken: TAKEN, tz: 480, software: "Lo-PDA 0.39.0" });
+  const seg = segments(out).find((s) => s.marker === 0xe1);
+  const tiff = Buffer.from(out.subarray(seg.start + 10, seg.start + 2 + seg.length));
+  const u16 = (o) => tiff.readUInt16BE(o), u32 = (o) => tiff.readUInt32BE(o);
+  const typeBytes = { 1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 7: 1, 9: 4, 10: 8 };
+  const walk = (at) => {
+    assert.equal(at % 2, 0, "an IFD starts even");
+    const n = u16(at), entries = {};
+    /* where this IFD and its out-of-line values end, so the next IFD can be checked against it */
+    let end = at + 2 + n * 12 + 4;
+    for (let i = 0; i < n; i++) {
+      const o = at + 2 + i * 12, tag = u16(o), type = u16(o + 2), count = u32(o + 4);
+      const bytes = (typeBytes[type] || 1) * count;
+      entries[tag] = { type, count, pos: o, value: u32(o + 8) };
+      if (bytes > 4) {
+        const v = u32(o + 8);
+        assert.equal(v % 2, 0, "tag 0x" + tag.toString(16) + " at an even offset");
+        assert.ok(v + bytes <= tiff.length, "value inside the TIFF block");
+        end = Math.max(end, v + ((bytes + 1) & ~1));
+      }
+    }
+    return { entries, end };
+  };
+  const ifd0 = walk(u32(4));
+  const pointer = ifd0.entries[0x8769].value;
+  assert.equal(pointer, ifd0.end, "0x8769 points exactly at the Exif IFD");
+  const exif = walk(pointer).entries;
+  assert.equal(exif[0x9000].type, 7, "ExifVersion is UNDEFINED");
+  assert.equal(exif[0x9000].count, 4);
+  assert.equal(tiff.toString("latin1", exif[0x9000].pos + 8, exif[0x9000].pos + 12), "0232");
+});
+
+test("an impossible tz falls back to the device's offset at that instant", () => {
+  const fallback = -new Date(TAKEN).getTimezoneOffset();
+  for (const tz of [900, 1e12, -841, 1.5, NaN]) {
+    const got = X.read(X.insert(jpeg(), { taken: TAKEN, tz, software: "Lo-PDA 0.39.0" }));
+    assert.equal(got.offsetTimeOriginal, offset(fallback), "tz " + tz);
+  }
 });
 
 test("the result is still a JPEG: SOI first, one Exif APP1 after it, segments parse, EOI last", () => {

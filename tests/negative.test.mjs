@@ -161,7 +161,7 @@ test("not a negative: a PNG without the chunk, a JPEG, nothing", () => {
 test("a negative from a newer format version is refused, not half read", () => {
   const out = N.pack(png(), roll(), jpegsFor(roll())), c = Buffer.from(out.buffer);
   const at = c.indexOf("LOPDA-NEG", 0, "latin1"), start = c.indexOf("lpDa", 0, "latin1"), len = c.readUInt32BE(start - 4);
-  out[at + 9] = 3;
+  out[at + 9] = 4;
   c.writeUInt32BE(N.crc32(out.subarray(at, at + len - 4)), at + len - 4);
   c.writeUInt32BE(N.crc32(out.subarray(start, start + 4 + len)), start + 4 + len);
   assert.equal(code(() => N.unpack(out)), "version");
@@ -193,10 +193,17 @@ test("bad metadata is refused when writing and when reading", () => {
 
 /* runtime 0.39.0: the shooting time zone (minutes east of UTC) travels in each frame; -840..840 only */
 test("frames keep their shooting time zone through the negative; an impossible offset is refused", () => {
+  /* a roll without tz is still format 2, byte for byte as before */
+  for (const M of [N, N5]) {
+    const r2 = roll(), out2 = M.pack(png(), r2, jpegsFor(r2));
+    assert.equal(out2[pngChunk(out2, "lpDa").data + 9], 2, "no tz, format 2");
+  }
   const tz = [480, 0, -300, 330];
   const r = { ...roll(), frames: roll().frames.map((f, k) => ({ ...f, tz: tz[k % tz.length] })) };
   for (const M of [N, N5]) {
-    const back = M.unpack(M.pack(png(), r, jpegsFor(r)));
+    const out = M.pack(png(), r, jpegsFor(r));
+    assert.equal(out[pngChunk(out, "lpDa").data + 9], 3, "tz makes it format 3");
+    const back = M.unpack(out);
     assert.deepEqual(plain(back.roll.frames.map((f) => f.tz)), r.frames.map((f) => f.tz));
     assert.deepEqual(plain(back.roll), r);
   }
