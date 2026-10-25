@@ -8948,7 +8948,7 @@ test("AI line: a key in Settings turns 复制 into 生成, the code streams into
   await p.waitForFunction(() => !document.getElementById("v-set-ai").hidden);
   assert.match(await p.locator("#set-ai-state").innerText(), /还没接上/);
   /* each field has its label */
-  assert.deepEqual(await p.locator(".set-ai-field > span").allInnerTexts(), ["OpenRouter 的 key", "模型"]);
+  assert.deepEqual(await p.locator("#v-set-ai .set-ai-field > span").allInnerTexts(), ["OpenRouter 的 key", "模型"]);
   await p.fill("#set-ai-key", "sk-or-secret-1234");
   await p.click("#set-ai-save");
   assert.match(await p.locator("#set-ai-state").innerText(), /key …1234 · 模型 openrouter\/auto/);
