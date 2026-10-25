@@ -642,6 +642,7 @@ textarea::placeholder{color:var(--ink-2)}
 .st-sheet{z-index:3}
 .st-sheet .lcd-menu{flex:none}
 .st-sheet .lcd-menu li{min-height:44px;box-sizing:border-box}
+.st-sheet .lcd-menu li.disabled{color:var(--ink-2);cursor:default}
 .st-ask{display:flex;flex-direction:column;gap:10px;font-size:15px;line-height:1.4}
 .st-ask p{margin:0}
 .st-ask .row{gap:10px}
@@ -684,9 +685,15 @@ textarea::placeholder{color:var(--ink-2)}
 /* a note cell writes its pitch in paper on ink; the selected cell has a thick inner frame */
 .st-cell.has-note{display:flex;align-items:center;justify-content:center;color:var(--lcd);font-family:var(--f-pix);font-size:18px;line-height:1}
 .st-cell.sel{box-shadow:inset 0 0 0 5px var(--lcd)}
-/* the eight pitch keys, two rows of four, the higher octave underlined */
+/* a rest: paper with a heavy frame and an en dash, not a filled note (12.12); the selection's inner frame is ink */
+.st-cell.rest{display:flex;align-items:center;justify-content:center;background:var(--lcd);color:var(--ink);border-width:4px;font-family:var(--f-pix);font-size:20px;line-height:1}
+.st-cell.rest.sel{box-shadow:inset 0 0 0 5px var(--ink)}
+.st-cell.rest.playing{background:var(--lcd-3)}
+/* the eight pitch keys, two rows of four, the higher octave underlined; the rest key fills the fifth column */
 .st-keys-wrap{flex:none;padding:0 8px 6px}
-.st-keys{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));grid-auto-rows:44px;gap:4px}
+.st-keys{display:grid;grid-template-columns:repeat(4,minmax(0,1fr)) 44px;grid-auto-rows:44px;gap:4px}
+.st-rest-key{grid-column:5;grid-row:1/span 2;min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:center;padding:0;background:var(--lcd);color:var(--ink);border:2px solid var(--ink);font-family:var(--f-lcd);font-size:14px;line-height:1.1;cursor:pointer;overflow:hidden}
+.st-rest-key:active{background:var(--ink);color:var(--lcd)}
 /* 331x359: take the padding out of the bars and the keys, and 2 px from the grid gaps, so four cells still
    measure at least 40 px after the remaining scale. The buttons themselves stay 44 px. */
 .studio.st-short .st-bar,.studio.st-short .st-nav,.studio.st-short .st-tabs{padding-top:0;padding-bottom:0}
@@ -710,7 +717,13 @@ textarea::placeholder{color:var(--ink-2)}
 .st-chord-cell.has-chord.playing{background:var(--ink-2);color:var(--lcd)}
 .st-chord-cell.has-chord.playing .st-name{color:var(--lcd)}
 .st-chord-cell.has-chord.playing.sel{box-shadow:inset 0 0 0 5px var(--lcd)}
-.st-chord-keys{flex:none;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));grid-auto-rows:44px;gap:4px}
+/* a rest on the chord screen: the same paper-and-heavy-frame dash (12.12) */
+.st-chord-cell.rest{background:var(--lcd);color:var(--ink);border-width:4px}
+.st-chord-cell.rest .st-roman{font-size:26px}
+.st-chord-cell.rest.sel{box-shadow:inset 0 0 0 5px var(--ink)}
+.st-chord-cell.rest.playing{background:var(--lcd-3)}
+.st-chord-keys{flex:none;display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) 44px;grid-auto-rows:44px;gap:4px}
+.st-chord-keys .st-rest-key{grid-column:4;grid-row:1/span 2}
 .st-chord-key{min-height:44px;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;padding:0 2px;background:var(--lcd);color:var(--ink);border:2px solid var(--ink);font-family:var(--f-lcd);line-height:1.1;cursor:pointer;overflow:hidden}
 .st-chord-key b{font-family:var(--f-pix);font-weight:400;font-size:18px;line-height:1}
 .st-chord-key small{font-size:11px;color:var(--ink-2);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

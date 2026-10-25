@@ -242,6 +242,8 @@ function setSong(song){
 function playEvent(e,at,bpm){
   var i, notes, midi;
   if(!T.synth || !T.song) return;
+  /* a rest (12.12) is a note that does not sound: it holds the tie and paints the playhead, nothing more */
+  if(!e.vel) return;
   if(e.track==="drums"){
     if(e.key) T.synth.hit(T.song.kit,e.key,at,e.vel);
   } else if(e.track==="chords"){
@@ -510,6 +512,12 @@ function build(){
       keys.appendChild(b);
     })(i);
   }
+  /* the rest key (12.12) sits in the fifth column beside both rows of pitch keys */
+  var restKey=el("button","st-rest-key");
+  restKey.type="button";
+  restKey.id="studio-note-rest";
+  restKey.onclick=function(){ restTap(); };
+  keys.appendChild(restKey);
   var cells=$("studio-chord-cells");
   for(i=0;i<2;i++){
     (function(half){
@@ -534,6 +542,11 @@ function build(){
       ck.appendChild(b);
     })(i);
   }
+  var chordRest=el("button","st-rest-key");
+  chordRest.type="button";
+  chordRest.id="studio-chord-rest";
+  chordRest.onclick=function(){ restTap(); };
+  ck.appendChild(chordRest);
   var letters=$("studio-letters");
   for(i=0;i<SONGS.PATTERNS_MAX;i++){
     (function(p){
@@ -548,7 +561,6 @@ function build(){
   }
   $("studio-pat").onclick=function(){ openSheet("pattern"); };
   $("studio-add").onclick=function(){ addSongSlot(); };
-  $("studio-drop").onclick=function(){ dropSongSlot(); };
   bindRepeat($("studio-minus"),-SONGS.BPM_STEP);
   bindRepeat($("studio-plus"),SONGS.BPM_STEP);
   $("studio-play").onclick=function(){ togglePlay(); };
@@ -668,35 +680,40 @@ function renderTabs(){
   }
 }
 function renderGrid(){
-  var cells=$("studio-grid").children, i, b, on, note, nm, track=noteTrack();
+  var cells=$("studio-grid").children, i, b, on, note, nm, rest, track=noteTrack();
   for(i=0;i<cells.length;i++){
     b=cells[i];
     b.classList.toggle("focus",T.kb && i===T.focus);
     if(track){
       note=T.song && SONGS.noteAt(T.song,T.pat,track,i*SONGS.STEP);
-      nm=note ? SONGS.noteName(SONGS.noteMidi(T.song,track,note.deg)) : "";
-      b.textContent=nm||"";
-      b.classList.toggle("on",!!note);
-      b.classList.toggle("has-note",!!note);
+      rest=!!(note && SONGS.isRest(note));
+      nm=note && !rest ? SONGS.noteName(SONGS.noteMidi(T.song,track,note.deg)) : "";
+      b.textContent=rest?"–":(nm||"");
+      b.classList.toggle("on",!!note && !rest);
+      b.classList.toggle("has-note",!!note && !rest);
+      b.classList.toggle("rest",rest);
       b.classList.toggle("sel",T.noteSel[track]===i);
       b.setAttribute("aria-pressed",note?"true":"false");
-      b.setAttribute("aria-label",tr(note?"studio.note.cell":"studio.note.empty",
+      b.setAttribute("aria-label",rest?tr("studio.rest.cell",{n:i+1}):tr(note?"studio.note.cell":"studio.note.empty",
         {track:screenName(track),n:i+1,note:nm||""}));
     } else {
       b.textContent="";
-      b.classList.remove("has-note","sel");
+      b.classList.remove("has-note","sel","rest");
       on=!!(T.song && SONGS.has(T.song,T.pat,"drums",T.drum,i));
       b.classList.toggle("on",on);
       b.setAttribute("aria-pressed",on?"true":"false");
       b.setAttribute("aria-label",tr("studio.cell",{drum:tr("studio.drum."+T.drum),n:i+1}));
     }
   }
+  var rk=$("studio-note-rest");
+  if(rk){ rk.textContent=tr("studio.rest"); rk.setAttribute("aria-label",tr("studio.rest")); }
 }
 function renderKeys(){
   var track=noteTrack();
   if(!track || !T.song) return;
-  var keys=$("studio-keys").children, i, b, midi, name, note, sel=T.noteSel[track];
+  var keys=$("studio-keys").querySelectorAll(".st-key"), i, b, midi, name, note, sel=T.noteSel[track];
   note=sel>=0 ? SONGS.noteAt(T.song,T.pat,track,sel*SONGS.STEP) : null;
+  if(note && SONGS.isRest(note)) note=null;
   var base=SONGS.tonic(track,T.song.key);
   for(i=0;i<keys.length;i++){
     b=keys[i];
@@ -710,24 +727,28 @@ function renderKeys(){
   }
 }
 function renderChords(){
-  var cells=$("studio-chord-cells").children, i, b, tick, note, ch, roman, name;
+  var cells=$("studio-chord-cells").children, i, b, tick, note, rest, ch, roman, name;
   for(i=0;i<2;i++){
     b=cells[i];
     tick=SONGS.CHORD_STEPS[i]*SONGS.STEP;
     note=T.song && SONGS.noteAt(T.song,T.pat,"chords",tick);
-    ch=note ? SONGS.chordName(T.song,note.deg) : null;
+    rest=!!(note && SONGS.isRest(note));
+    ch=note && !rest ? SONGS.chordName(T.song,note.deg) : null;
     roman=b.querySelector(".st-roman");
     name=b.querySelector(".st-name");
-    roman.textContent=ch?ch.roman:"";
-    name.textContent=ch?ch.name:"";
+    roman.textContent=rest?"–":(ch?ch.roman:"");
+    name.textContent=rest?"":(ch?ch.name:"");
     b.classList.toggle("has-chord",!!ch);
+    b.classList.toggle("rest",rest);
     b.classList.toggle("sel",T.chordSel===i);
     b.classList.toggle("focus",T.kb && T.focus===i);
     b.setAttribute("aria-pressed",note?"true":"false");
-    b.setAttribute("aria-label",tr(i===0?"studio.chord.half1":"studio.chord.half2")+(ch?" · "+ch.name:""));
+    b.setAttribute("aria-label",rest?tr("studio.rest.cell",{n:SONGS.CHORD_STEPS[i]+1}):
+      tr(i===0?"studio.chord.half1":"studio.chord.half2")+(ch?" · "+ch.name:""));
   }
-  var keys=$("studio-chord-keys").children, k, kb, degNote;
+  var keys=$("studio-chord-keys").querySelectorAll(".st-chord-key"), k, kb, degNote;
   degNote=T.chordSel>=0 && T.song ? SONGS.noteAt(T.song,T.pat,"chords",SONGS.CHORD_STEPS[T.chordSel]*SONGS.STEP) : null;
+  if(degNote && SONGS.isRest(degNote)) degNote=null;
   for(i=0;i<keys.length;i++){
     k=keys[i];
     ch=T.song ? SONGS.chordName(T.song,i) : null;
@@ -737,6 +758,8 @@ function renderChords(){
     k.setAttribute("aria-pressed",degNote && degNote.deg===i?"true":"false");
     k.setAttribute("aria-label",tr("studio.chord.key",{name:ch?ch.name:""}));
   }
+  var rk=$("studio-chord-rest");
+  if(rk){ rk.textContent=tr("studio.rest"); rk.setAttribute("aria-label",tr("studio.rest")); }
 }
 function renderSong(){
   var chain=$("studio-chain"), s=T.song&&T.song.song?T.song.song:[0], i, b;
@@ -764,8 +787,6 @@ function renderSong(){
     dot.classList.toggle("on",has);
   }
   $("studio-add").textContent=tr("studio.song.add");
-  $("studio-drop").textContent=tr("studio.song.drop");
-  $("studio-drop").disabled=!T.song || s.length<=1;
   /* the chain cells are new nodes: put the playing slot back on them when the chain changes mid-song */
   if(T.playing) paintPlaying(true);
 }
@@ -1025,6 +1046,7 @@ function tourEnd(seen){
 function openSheet(name){ T.sheet=name; renderSheet(); }
 function closeSheet(){
   if(T.sheet==="new"){ T.sheet="menu"; renderSheet(); return; }
+  if(T.sheet==="demo"){ T.sheet="menu"; renderSheet(); return; }
   if(T.sheet==="copyask"){ T.sheet="copy"; renderSheet(); return; }
   if(T.sheet){ T.sheet=""; renderSheet(); }
 }
@@ -1071,6 +1093,7 @@ function renderSheet(){
     sheetHead(tr("studio.title"));
     var ul=el("ul","lcd-menu");
     if(T.loaded) sheetRow(ul,tr("studio.new"),"",function(){ openSheet("new"); });
+    if(T.loaded) sheetRow(ul,tr("studio.demo"),"",function(){ openSheet("demo"); });
     if(T.song && T.loaded) sheetRow(ul,tr("studio.kit",{kit:tr("studio.kit."+T.song.kit)}),"",function(){
       T.song.kit=T.song.kit==="soft" ? "chip" : "soft";
       touch(); renderSheet();
@@ -1096,6 +1119,24 @@ function renderSheet(){
     row.appendChild(yes); row.appendChild(no);
     ask.appendChild(row);
     sh.appendChild(ask);
+    return;
+  }
+  if(T.sheet==="demo"){
+    sheetHead(tr("studio.title"));
+    var askDemo=el("div","st-ask");
+    askDemo.appendChild(el("p","",tr("studio.demo.ask")));
+    var drow=el("div","row");
+    var dyes=el("button","btn","");
+    dyes.type="button";
+    dyes.textContent=tr("studio.confirm");
+    dyes.onclick=function(){ demoTape(); };
+    var dno=el("button","btn ghost","");
+    dno.type="button";
+    dno.textContent=tr("common.cancel");
+    dno.onclick=function(){ closeSheet(); };
+    drow.appendChild(dyes); drow.appendChild(dno);
+    askDemo.appendChild(drow);
+    sh.appendChild(askDemo);
     return;
   }
   if(T.sheet==="pattern"){
@@ -1136,6 +1177,18 @@ function renderSheet(){
     sh.appendChild(crow);
     return;
   }
+  if(T.sheet==="slot"){
+    var chain=(T.song&&T.song.song)||[0], at=T.slot;
+    sheetHead(tr("studio.song.slot",{n:at+1,p:letter(chain[at]==null?0:chain[at])}));
+    var sul=el("ul","lcd-menu");
+    sheetRow(sul,tr("studio.song.insert"),"",function(){ insertSlotBefore(); });
+    sheetRow(sul,tr("studio.song.copy"),"",function(){ copySlotAfter(); });
+    var delRow=sheetRow(sul,tr("studio.song.del"),"",function(){ deleteSlotAt(); });
+    if(chain.length<=1){ delRow.className="disabled"; delRow.setAttribute("aria-disabled","true"); delRow.onclick=null; }
+    sheetRow(sul,tr("studio.back"),"",function(){ closeSheet(); });
+    sh.appendChild(sul);
+    return;
+  }
   /* copyask: the target already has notes, so the overwrite needs an answer (A / 确认, B / 取消) */
   var ask2=el("div","st-copy-ask");
   ask2.appendChild(el("p","",tr("studio.pat.over",{p:letter(T.copyTo)})));
@@ -1161,20 +1214,28 @@ function copyTo(target){
   setPat(target);
   toast(tr("studio.pat.copied",{p:letter(target)}));
 }
-function newTape(){
-  if(!T.loaded) return;
+/* a new or demo tape: same path as a tab tap, drums screen, pattern A, keeps the beat if one is playing (12.9) */
+function swapTape(song){
   stopRepeatAll();
   screenTo("drums");            /* the same path as a tab tap: an unfinished tour ends unseen */
   T.pat=0; T.focus=0; T.slot=0; T.kb=false;
   T.noteSel={bass:-1,melody:-1}; T.noteDeg={bass:0,melody:0}; T.chordSel=-1; T.chordDeg=0;
   T.queued=-1; T.pendingPat=-1; T.boundaryGlobal=0; T.chainPat=0; T.playPat=0;
-  setSong(SONGS.newSong(Date.now()));
+  setSong(song);
   if(T.playing){ T.lastTick=Math.max(T.lastTick,T.heard+1); T.painted=null; }
   T.dirty=true;
   T.sheet="";
   flush();
   renderAll();
   maybeTour();
+}
+function newTape(){
+  if(!T.loaded) return;
+  swapTape(SONGS.newSong(Date.now()));
+}
+function demoTape(){
+  if(!T.loaded) return;
+  swapTape(SONGS.demoSong(Date.now()));
 }
 /* ---------- taps and keys ---------- */
 /* the one screen switch: leaving a screen mid-tour ends that tour unseen (it shows again next time) */
@@ -1247,9 +1308,10 @@ function cellTap(step){
 }
 function noteTap(track,step){
   if(!T.loaded || !T.song) return;
-  var tick=step*SONGS.STEP, note=SONGS.noteAt(T.song,T.pat,track,tick), deg;
+  var tick=step*SONGS.STEP, note=SONGS.noteAt(T.song,T.pat,track,tick), deg, rest;
   T.focus=step;
   if(note){
+    rest=SONGS.isRest(note);
     if(T.noteSel[track]===step){
       T.song=SONGS.removeNote(T.song,T.pat,track,tick);
       T.noteSel[track]=-1;
@@ -1259,7 +1321,7 @@ function noteTap(track,step){
     }
     T.noteSel[track]=step;
     renderGrid(); renderKeys();
-    auditionNote(track,note.deg);
+    if(!rest) auditionNote(track,note.deg);
     return;
   }
   deg=T.noteDeg[track]||0;
@@ -1269,6 +1331,26 @@ function noteTap(track,step){
   renderGrid(); renderKeys(); renderNav();
   auditionNote(track,deg);
   tourEvent("note");
+}
+/* the rest key (12.12): the selected cell becomes a rest; it never changes the track's last-used degree and never
+   auditions. With no selection it does nothing. */
+function restTap(){
+  var track=noteTrack();
+  if(track){ restNote(track); return; }
+  if(T.screen==="chords") restChord();
+}
+function restNote(track){
+  var sel=T.noteSel[track];
+  if(!T.loaded || !T.song || sel<0) return;
+  T.song=SONGS.setRest(T.song,T.pat,track,sel*SONGS.STEP);
+  touch();
+  renderGrid(); renderKeys(); renderNav();
+}
+function restChord(){
+  if(!T.loaded || !T.song || T.chordSel<0) return;
+  T.song=SONGS.setRest(T.song,T.pat,"chords",SONGS.CHORD_STEPS[T.chordSel]*SONGS.STEP);
+  touch();
+  renderChords(); renderNav();
 }
 function keyTap(deg){
   var track=noteTrack(), sel, note;
@@ -1289,9 +1371,10 @@ function keyTap(deg){
 }
 function chordTap(half){
   if(!T.loaded || !T.song) return;
-  var tick=SONGS.CHORD_STEPS[half]*SONGS.STEP, note=SONGS.noteAt(T.song,T.pat,"chords",tick), deg;
+  var tick=SONGS.CHORD_STEPS[half]*SONGS.STEP, note=SONGS.noteAt(T.song,T.pat,"chords",tick), deg, rest;
   T.focus=half;
   if(note){
+    rest=SONGS.isRest(note);
     if(T.chordSel===half){
       T.song=SONGS.removeNote(T.song,T.pat,"chords",tick);
       T.chordSel=-1;
@@ -1301,8 +1384,10 @@ function chordTap(half){
     }
     T.chordSel=half;
     renderChords();
-    auditionChord(note.deg);
-    tourEvent("chord");            /* selecting an occupied cell follows step 1 too */
+    if(!rest){
+      auditionChord(note.deg);
+      tourEvent("chord");          /* selecting an occupied cell follows step 1 too */
+    }
     return;
   }
   deg=T.chordDeg||0;
@@ -1325,7 +1410,11 @@ function chordKeyTap(deg){
 }
 function selectSlot(i){
   if(!T.song) return;
-  T.slot=Math.max(0,Math.min((T.song.song||[0]).length-1,i));
+  var s=T.song.song||[0];
+  i=Math.max(0,Math.min(s.length-1,i));
+  /* tapping the slot already selected opens its sheet (12.12); another slot just selects it */
+  if(i===T.slot){ T.focus=i; openSheet("slot"); return; }
+  T.slot=i;
   T.focus=T.slot;
   renderSong(); renderNav();
 }
@@ -1355,15 +1444,40 @@ function addSongSlot(){
   renderSong(); renderNav(); renderTabs();
   scrollSlotIntoView();
 }
-function dropSongSlot(){
+/* the slot sheet's three edits (12.12): insert the slot's letter before it, copy it after it, or delete it. All three
+   close the sheet and save like any other slot edit; the player reads the live chain, so they work while it plays. */
+function insertSlotAt(i,p,sel){
   if(!T.loaded || !T.song) return;
   var s=T.song.song||[0];
-  if(s.length<=1) return;
-  T.song=SONGS.dropSlot(T.song);
-  if(T.slot>T.song.song.length-1) T.slot=T.song.song.length-1;
-  if(T.focus>T.song.song.length-1) T.focus=T.song.song.length-1;
+  if(s.length>=SONGS.SONG_MAX){ toast(tr("studio.song.full")); return; }
+  T.song=SONGS.insertSlot(T.song,i,p);
+  T.slot=Math.max(0,Math.min(T.song.song.length-1,sel));
+  T.focus=T.slot;
   touch();
-  renderSong(); renderNav(); renderTabs();
+  T.sheet="";
+  renderSong(); renderNav(); renderTabs(); renderSheet();
+  scrollSlotIntoView();
+}
+function insertSlotBefore(){
+  var s=(T.song&&T.song.song)||[0], i=T.slot;
+  if(i<0 || i>=s.length) return;
+  insertSlotAt(i,s[i],i);
+}
+function copySlotAfter(){
+  var s=(T.song&&T.song.song)||[0], i=T.slot;
+  if(i<0 || i>=s.length) return;
+  insertSlotAt(i+1,s[i],i+1);
+}
+function deleteSlotAt(){
+  var s=(T.song&&T.song.song)||[0], i=T.slot;
+  if(!T.loaded || !T.song || s.length<=1 || i<0 || i>=s.length) return;
+  T.song=SONGS.removeSlot(T.song,i);
+  T.slot=Math.min(i,T.song.song.length-1);
+  T.focus=T.slot;
+  touch();
+  T.sheet="";
+  renderSong(); renderNav(); renderTabs(); renderSheet();
+  scrollSlotIntoView();
 }
 function pickDrum(drum,play,byUser){
   if(SONGS.DRUMS.indexOf(drum)<0) return;
@@ -1434,7 +1548,9 @@ document.addEventListener("keydown",function(e){
   else if(key==="x"||key==="X"){
     if(e.repeat) return;
     if(T.sheet==="new") newTape();
+    else if(T.sheet==="demo") demoTape();
     else if(T.sheet==="copyask") confirmCopy();
+    else if(T.sheet==="slot") insertSlotBefore();   /* A is the sheet's first row, like the other questions' 确认 */
     else if(!T.sheet) tapFocus();
   }
   else if(key==="Enter"){ if(e.repeat) return; togglePlay(); }
