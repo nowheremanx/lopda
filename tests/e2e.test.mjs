@@ -7620,34 +7620,62 @@ test("crossing: a drag along a chord skips the middle letter, and a fast step ov
   const at = (i, dx = 0, dy = 0) => ({ x: box.x + wheel.keys[i].x + dx, y: box.y + wheel.keys[i].y + dy });
   const entry = () => f.textContent("#entry");
   const letters = (ids) => ids.map((i) => wheel.letters[i].toUpperCase()).join("");
+  /* the app's own distance from a point to the step's segment, for the premise checks below */
+  const segDist = (q, a, b) => {
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const t = Math.max(0, Math.min(1, ((q.x - a.x) * dx + (q.y - a.y) * dy) / (dx * dx + dy * dy)));
+    return Math.hypot(a.x + t * dx - q.x, a.y + t * dy - q.y);
+  };
 
-  /* (a) the straight chord from a letter to the one two steps on passes 20 px from the letter between them;
-     the seven-letter catch radius is 12 px, so the middle letter does not come in */
+  /* (a) the straight chord from key 2 to key 4 passes between the new 12 px radius and the old 24 px one
+     from key 3's middle; the segment check must leave key 3's element out */
+  const chord = segDist(wheel.keys[3], wheel.keys[2], wheel.keys[4]);
+  assert.ok(chord > 12 && chord < 24,
+    "the chord passes " + chord.toFixed(1) + " px from key 3's middle: outside 12 px, inside the old 24 px");
   await p.mouse.move(at(2).x, at(2).y);
   await p.mouse.down();
   await p.mouse.move(at(4).x, at(4).y, { steps: 12 });
   assert.equal(await entry(), letters([2, 4]), "the chord takes its two ends");
-  assert.equal((await entry()).indexOf(wheel.letters[3].toUpperCase()), -1, "the letter between them stays out");
+  const on = await f.evaluate(() => [...document.querySelectorAll(".key")].map((el) => el.classList.contains("on")));
+  assert.equal(on[3], false, "key 3's element is not marked on");
+  assert.deepEqual([on[2], on[4]], [true, true], "the chord's two ends are the picked letters");
   await p.mouse.up();
   await until(p, async () => (await entry()) === "", "the two-letter word to be refused");
 
-  /* (b) through the middles of three neighbouring keys: all three, in the order the finger reaches them */
+  /* (b) through the middles of three neighbouring keys: all three, in the order the finger reaches them.
+     These three letters spell ERA, a bonus word in round 41: releasing adds it and one hint, so the "land"
+     message is honest. It only changes the done list and hints; the wheel and its key positions stay put,
+     which is all (c) reads. */
+  const hintsBefore = await f.evaluate(() => game.hints);
   await p.mouse.move(at(2).x, at(2).y);
   await p.mouse.down();
   await p.mouse.move(at(3).x, at(3).y, { steps: 6 });
   await p.mouse.move(at(4).x, at(4).y, { steps: 6 });
   assert.equal(await entry(), letters([2, 3, 4]), "three neighbouring letters, in order");
   await p.mouse.up();
-  await until(p, async () => (await entry()) === "", "the three-letter word to be refused or land");
+  await until(p, async () => (await entry()) === "", "the ERA bonus word to be submitted");
+  assert.equal(await f.evaluate(() => game.hints), hintsBefore + 1, "ERA is a bonus word in round 41: it adds one hint");
 
-  /* (c) one big jump with no pointermove over the middle key: the step's segment still passes within
-     catchR() of its middle, so the segment check takes it as well */
-  const start = at(0, 19, -19);        /* still on key 0's 44 px target, towards key 1 */
-  await p.mouse.move(start.x, start.y);
+  /* (c) one big jump with no pointermove over the middle key: the step runs from key 0's middle through
+     key 1 to a landing point past it, so the segment check is the only way key 1 can come in. The landing
+     point is more than 12 px from every key's middle, so it cannot pick one by itself. The wheel is
+     unchanged by (b), so its measured keys still apply. */
+  const land = {
+    x: wheel.keys[1].x + 0.8 * (wheel.keys[1].x - wheel.keys[0].x),
+    y: wheel.keys[1].y + 0.8 * (wheel.keys[1].y - wheel.keys[0].y),
+  };
+  const gaps = wheel.keys.map((k) => Math.hypot(k.x - land.x, k.y - land.y));
+  assert.ok(gaps.every((d) => d > 12),
+    "the landing point stays " + Math.min(...gaps).toFixed(1) + " px from every key's middle");
+  const view = await f.evaluate(() => [document.documentElement.clientWidth, document.documentElement.clientHeight]);
+  assert.ok(land.x > 0 && land.y > 0 && land.x < view[0] && land.y < view[1], "the jump ends inside the app");
+  await p.mouse.move(at(0).x, at(0).y);
   await p.mouse.down();
-  await p.mouse.move(at(2).x, at(2).y, { steps: 1 });
-  assert.equal(await entry(), letters([0, 1, 2]), "the jump over the middle key still takes it");
+  await p.mouse.move(box.x + land.x, box.y + land.y, { steps: 1 });
+  assert.equal(await entry(), letters([0, 1]), "the jump over the middle key still takes it");
+  assert.deepEqual(await f.evaluate(() => game.entry.slice()), [0, 1], "key 0 then key 1, though no pointermove ended near key 1");
   await p.mouse.up();
+  await until(p, async () => (await entry()) === "", "the two-letter word to be refused");
 
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
