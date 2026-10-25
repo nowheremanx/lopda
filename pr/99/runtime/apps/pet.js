@@ -60,8 +60,12 @@ var ICON_ROWS=[
 /* a short, original four-bar hatch tune: p1 the tune, p2 a third below, tri the floor */
 var JINGLE={bpm:180, p1:"o6 l8 e g c8 > c < b g e c4", p2:"o5 l8 c e g8 e d c4", tri:"o4 l4 c g c g c"};
 var SWEEP_MS=1000, EGG_MS=8000, EGG_CRACK1=3000, EGG_CRACK2=6000, HATCH_ANIM_MS=1500, OUT_MS=20000, HOLD_MS=600;
-/* where it lies at night and where it stands by day; the wake walk goes from the first to the second */
-var BED_X=10, BED_Y=52, RUG_X=83, RUG_Y=69;
+/* where it lies at night, where it stands by day, and the floor spot in front of the bowl; every bed <-> floor move
+   walks the same L (petsim.pathPoint), at two room frames a second, a few seconds across the room. */
+var BED_X=10, BED_Y=52, RUG_X=83, RUG_Y=69, BOWL_X=32, BOWL_Y=69;
+var WALK_MS_PER_PX=30, AWAKE_TICKS=240;                 /* 2 minutes of the 500 ms room tick */
+/* the small puff of an angry wake: drawn beside the head for the 1.5 s of the grumble */
+var PUFF=[".mm..","mppm.",".mm.."];
 var NAME_EMOJI=/[\p{Extended_Pictographic}\u{1F1E6}-\u{1F1FF}\u{1F3FB}-\u{1F3FF}\u{FE0F}\u{200D}\u{20E3}]/gu;
 
 var P={
@@ -71,7 +75,8 @@ var P={
   anim:0, hold:0, roomHold:0, holdFired:false,
   eggMs:0, hatching:null, action:null, actionUntil:0, heartUntil:0,
   washUntil:0, washStart:0, flash:null, outing:null, foodSel:0, boxPage:0, boxAsk:null,
-  naming:null, wake:null, wasAsleep:null, lastScene:null,
+  naming:null, task:null, at:null, feeds:[], awakeLeft:0, puffUntil:0, pendingNeed:null, lightReturn:false,
+  wasAsleep:null, lastScene:null, flashSeq:0,
   game:null, gameSel:0, gameTimer:0, gameLabel:"", gameHeld:{left:false,right:false,a:false}, gamePress:{left:false,right:false,a:false}, gameTouch:null,
   gameSeed:null,
   angryUntil:0, moodClearUntil:0, callTaps:[],
@@ -90,7 +95,7 @@ function tz(){ return -new Date().getTimezoneOffset(); }
 function isOpen(){ var v=$("v-pet"); return !!v && !v.hidden; }
 function isEgg(){ return !!(P.save && P.save.stage==="egg"); }
 function el(tag,cls,text){ var e=document.createElement(tag); if(cls) e.className=cls; if(text!=null) e.textContent=text; return e; }
-function beep(name){ if(!document.hidden && isOpen()) LP.sfx(name); }
+function beep(name){ if(!document.hidden && isOpen() && !inBedSleep()) LP.sfx(name); }
 function localDate(t){ return new Date(t+tz()*60000); }
 function dayKey(t){ return Pet.dayKey(t,tz()); }
 function hourNow(){ return Pet.hourOf(now(),tz()); }
@@ -279,19 +284,27 @@ function loadStorage(){
 }
 
 /* ---------- catching up and the day ---------- */
-function flash(i){ P.flash={i:i,left:6}; }
+function flash(i){ if(!inBedSleep()){ P.flashSeq++; P.flash={i:i,left:6}; } }
 function wantsOf(){ return P.save ? Pet.wants(P.save) : null; }
+/* catch-up events never flash or sound over a sleeping pet: a need that arose during a night is kept and shown
+   once when it gets up. A threshold crossed while it was awake is one real change, so one flash. */
 function handleEvents(events){
-  var t=now();
+  var sleeping=inBedSleep();
   (events||[]).forEach(function(e){
     if(e==="travel") beep("err");
-    else if(e==="hungry"){ flash(0); beep("coin"); }
-    else if(e==="poop"){ flash(2); beep("coin"); }
-    else if(e==="woke"){ P.action="woke"; P.actionUntil=t+2500; beep("ok"); }
+    else if(e==="hungry"){
+      if(sleeping) P.pendingNeed=P.pendingNeed||"food";
+      else beep("coin");
+    } else if(e==="poop"){
+      if(sleeping) P.pendingNeed=P.pendingNeed||"wash";
+      else beep("coin");
+    } else if(e==="woke" && !sleeping && !P.task && !P.outing){
+      P.at={x:BED_X,y:BED_Y};
+      startChore("wake","walkRug");
+    }
   });
-  var w=wantsOf();
-  if(w && w!==P.lastWants) flash(w==="food"?0:2);
-  P.lastWants=w;
+  if(sleeping) noteWants();
+  else announceNeed(wantsOf());
 }
 function refreshTime(){
   if(!P.save) return;
@@ -318,10 +331,6 @@ function refreshTime(){
 /* On storage ready, whenever the home screen asks for the icon and on resume, the pet catches up, rolls the day,
    decides its pick and its outing, and makes the day's one AI call at the outing hour. No sound, no toast, no
    animation: only a few promises and a save. Growth days stay with the screen (openDay is not called here). */
-function noteWants(){
-  var w=wantsOf();
-  P.lastWants=w;
-}
 function dayWork(){
   if(P.restoring || P.nostore || P.readFailed) return Promise.resolve();
   if(!P.save) return Promise.resolve();
@@ -906,13 +915,170 @@ function checkOuting(){
   if(mins===o.hour*60) startOuting(o.hour);
 }
 
+/* ---------- the walk, the waking and the short chores ---------- */
+/* The room's one clock is 500 ms; the path is sampled on that clock, so the legs alternate at 2 fps. Any care
+   action that would move the pet while it is on its way is queued and happens at the bowl, never at once. */
+var SPOT={bed:{x:BED_X,y:BED_Y}, rug:{x:RUG_X,y:RUG_Y}, bowl:{x:BOWL_X,y:BOWL_Y}};
+function naturalAsleep(){
+  if(!P.save || P.save.stage==="egg") return false;
+  return Pet.asleep(P.save,hourNow(),localDate(now()).getUTCMinutes());
+}
+/* the pet is in bed and nothing (a wake walk, the forced two minutes) is holding it up */
+function inBedSleep(){ return naturalAsleep() && !P.task && !(P.awakeLeft>0); }
+function atBed(){ return !!P.at && Math.abs(P.at.x-BED_X)<=2 && Math.abs(P.at.y-BED_Y)<=2; }
+function spotNow(){
+  if(P.task && P.task.pos) return {x:P.task.pos.x,y:P.task.pos.y};
+  if(P.at) return {x:P.at.x,y:P.at.y};
+  return naturalAsleep() ? {x:BED_X,y:BED_Y} : {x:RUG_X,y:RUG_Y};
+}
+function walkMs(from,to){
+  var d=Math.abs(from.x-to.x)+Math.abs(from.y-to.y);
+  return Math.max(700,Math.round(d*WALK_MS_PER_PX));
+}
+function walkFrame(pack,save){
+  return petFrame(pack,save.stage,markNames(save,pack),"side",P.frame?"walk2":"walk1");
+}
+function taskAwake(){
+  var kind=P.task ? P.task.kind : "";
+  P.task=null; P.action=""; P.actionUntil=0; P.puffUntil=0;
+  P.at={x:RUG_X,y:RUG_Y};
+  if(P.feeds.length){ P.awakeLeft=0; startChore("feed","walkBowl"); return; }
+  if(kind==="grumpy"){
+    if(P.lightReturn){ P.lightReturn=false; P.awakeLeft=0; startChore("bed","walkBed"); return; }
+    P.awakeLeft=AWAKE_TICKS;                 /* two minutes on the screen, then back to bed */
+  } else {
+    P.awakeLeft=0;
+    P.lightReturn=false;
+  }
+  flushPendingNeed();
+}
+function feedAtBowl(){
+  if(P.feeds.length){
+    var kind=P.feeds.shift(), sp=Pet.SPECIES[P.save.species]||Pet.SPECIES.chip;
+    if(kind==="meal" && (+P.save.hunger||0)>=sp.hungerMax){
+      /* full: it still got up, shakes its head at the bowl and goes back */
+      beep("err"); taskEnter("shake"); return;
+    }
+    var burp=false;
+    P.save=Pet.feed(P.save,kind,now(),dayKey(now()));
+    if(kind==="snack" && P.save.today && P.save.today.burp){ burp=true; P.save.today.burp=false; }
+    P.moodClearUntil=now()+8000; P.angryUntil=0; P.idle=null;
+    beep(burp?"err":"ok");
+    taskEnter(burp?"burp":"eat");
+    saveSoon(); renderKeys();
+    return;
+  }
+  taskEnter(naturalAsleep()?"walkBed":"walkRug");
+}
+function taskEnter(phase){
+  var task=P.task;
+  if(!task) return;
+  task.phase=phase; task.t=now();
+  if(phase==="walkBowl" || phase==="walkRug" || phase==="walkBed"){
+    var to=phase==="walkBowl"?SPOT.bowl:phase==="walkRug"?SPOT.rug:SPOT.bed;
+    task.from=spotNow(); task.to={x:to.x,y:to.y};
+    task.pos=task.from; task.dur=walkMs(task.from,to);
+    P.action=""; P.actionUntil=0;
+  } else if(phase==="blink"){ P.action="blink"; P.actionUntil=now()+600; }
+  else if(phase==="stretch"){ P.action="happy"; P.actionUntil=now()+700; }
+  else if(phase==="angry"){ P.action="angry"; P.actionUntil=now()+1500; P.puffUntil=now()+1500; beep("err"); }
+  else if(phase==="eat"){ P.action="eat"; P.actionUntil=now()+1800; }
+  else if(phase==="burp"){ P.action="burp"; P.actionUntil=now()+1200; }
+  else if(phase==="shake"){ P.action="shake"; P.actionUntil=now()+1200; }
+  else if(phase==="awake"){ taskAwake(); }
+  else if(phase==="settle"){
+    P.task=null; P.action=""; P.actionUntil=0; P.puffUntil=0; P.lightReturn=false;
+    if(P.feeds.length) startChore("feed","walkBowl");
+    else flushPendingNeed();
+  }
+}
+function taskBusy(){
+  var task=P.task;
+  if(!task) return false;
+  var t=now();
+  if(task.phase==="walkBowl" || task.phase==="walkRug" || task.phase==="walkBed"){
+    var k=task.dur ? Math.min(1,(t-task.t)/task.dur) : 1;
+    task.pos=Pet.pathPoint(task.from,task.to,k);
+    if(k>=1){
+      if(task.phase==="walkBowl") taskEnter("atBowl");
+      else if(task.phase==="walkRug") taskEnter("awake");
+      else taskEnter("settle");
+    }
+    return true;
+  }
+  if(task.phase==="atBowl"){ feedAtBowl(); return true; }
+  if(task.phase==="blink"){ if(t-task.t>=600) taskEnter("stretch"); return true; }
+  if(task.phase==="stretch"){ if(t-task.t>=700) taskEnter("walkBowl"); return true; }
+  if(task.phase==="angry"){ if(t-task.t>=1500) taskEnter("walkRug"); return true; }
+  if(task.phase==="eat"){ if(t-task.t>=1800) taskEnter("atBowl"); return true; }
+  if(task.phase==="burp" || task.phase==="shake"){ if(t-task.t>=1200) taskEnter("atBowl"); return true; }
+  return true;
+}
+function startChore(kind,phase){
+  var from=spotNow();
+  P.task={kind:kind, phase:"", t:now(), pos:from, from:null, to:null, dur:0};
+  P.action=""; P.actionUntil=0; P.idle=null;
+  taskEnter(phase);
+}
+/* Leaving the screen in the middle of a chore: no animation runs off screen, so the queued food is taken and the
+   pet is put at the place the chore was heading for. The two minutes only count while the screen is showing it. */
+function finishTaskOnLeave(){
+  var task=P.task;
+  if(!task) return;
+  if(task.kind==="feed"){
+    while(P.feeds.length){
+      var kind=P.feeds.shift(), sp=Pet.SPECIES[P.save.species]||Pet.SPECIES.chip;
+      if(!(kind==="meal" && (+P.save.hunger||0)>=sp.hungerMax)) P.save=Pet.feed(P.save,kind,now(),dayKey(now()));
+      if(kind==="snack" && P.save.today && P.save.today.burp) P.save.today.burp=false;
+    }
+    P.awakeLeft=0; P.at=naturalAsleep()?{x:BED_X,y:BED_Y}:{x:RUG_X,y:RUG_Y};
+  } else if(task.kind==="grumpy" || task.kind==="wake"){
+    if(P.save.light===false && naturalAsleep()){ P.awakeLeft=0; P.at={x:BED_X,y:BED_Y}; }
+    else { P.awakeLeft=Math.max(P.awakeLeft,AWAKE_TICKS); P.at={x:RUG_X,y:RUG_Y}; }
+  } else {
+    P.awakeLeft=0; P.at={x:BED_X,y:BED_Y};
+  }
+  P.task=null; P.action=""; P.actionUntil=0; P.puffUntil=0; P.lightReturn=false;
+}
+/* One flash per real change of need. While the pet is asleep nothing flashes or sounds; the need is kept and
+   announced once when it gets up, not lost when the home screen's background day looks at it. */
+function announceNeed(w){
+  if(!w){ P.lastWants=null; P.pendingNeed=null; return; }
+  if(w===P.lastWants){ P.pendingNeed=null; return; }
+  if(inBedSleep()){ P.pendingNeed=w; return; }
+  P.pendingNeed=null;
+  P.lastWants=w;
+  flash(w==="food"?0:2);
+}
+function flushPendingNeed(){
+  var w=wantsOf();
+  if(!w){ P.pendingNeed=null; P.lastWants=null; return; }
+  if(P.pendingNeed && w===P.pendingNeed && w!==P.lastWants){
+    P.lastWants=w;
+    flash(w==="food"?0:2);
+  }
+  P.pendingNeed=null;
+}
+function noteWants(){
+  var w=wantsOf();
+  if(w && w!==P.lastWants) P.pendingNeed=w;
+  else if(!w) P.pendingNeed=null;
+}
+
 /* ---------- actions ---------- */
 function patPet(){
   if(document.hidden || !P.save || P.save.travel || P.outing || P.save.stage==="egg") return;
+  /* A sleeping pet is woken by the touch: no joy for that pat, a short grumble, then it walks to the rug. */
+  if(inBedSleep()){
+    P.at={x:BED_X,y:BED_Y};
+    startChore("grumpy","angry");
+    return;
+  }
   var before=P.save.today ? P.save.today.pats : 0;
   P.save=Pet.pat(P.save,dayKey(now()));
   if((P.save.today ? P.save.today.pats : 0)!==before){
-    P.action="happy"; P.actionUntil=now()+2000; P.heartUntil=now()+2000;
+    if(!P.task){ P.action="happy"; P.actionUntil=now()+2000; }
+    P.heartUntil=now()+2000;
     P.moodClearUntil=now()+8000; P.angryUntil=0; P.idle=null;   /* a pat lifts the low mood at once */
     beep("ok"); saveSoon(); render();
   }
@@ -920,6 +1086,15 @@ function patPet(){
 function feed(kind){
   if(!P.save || isEgg()) return;
   var t=now(), burp=false, sp=Pet.SPECIES[P.save.species]||Pet.SPECIES.chip;
+  /* It gets up for the meal: the food is taken at the bowl, never in bed. A second press while it is walking is
+     accepted and waits its turn; nothing jumps to the bowl. */
+  if(P.task || inBedSleep()){
+    P.feeds.push(kind==="snack"?"snack":"meal");
+    P.sub=null;
+    if(!P.task) startChore("feed","blink");
+    renderKeys(); render();
+    return;
+  }
   /* a full pet does not eat a meal: it shakes its head once and the panel closes. A snack still counts at joy 5. */
   if(kind==="meal" && (+P.save.hunger||0)>=sp.hungerMax){
     P.sub=null;
@@ -942,11 +1117,32 @@ function washPet(){
 }
 function toggleLight(){
   if(!P.save) return;
-  var t=now(), h=hourNow(), night=h<6 || h>=19, mins=localDate(t).getUTCMinutes();
-  var waking=!!(P.save.light===false && night && Pet.asleep(P.save,h,mins));   /* the light woke it */
+  var t=now(), h=hourNow(), mins=localDate(t).getUTCMinutes();
+  var wasAsleep=inBedSleep();
   P.save=Pet.setLight(P.save,!P.save.light);
-  P.action=null; P.actionUntil=0; P.idle=null;
-  if(waking) P.angryUntil=t+1500;                             /* brief, and never carried to tomorrow */
+  P.action=null; P.actionUntil=0; P.idle=null; P.angryUntil=0;
+  if(P.task){
+    /* a light-off during the grumble: it never got up, so it just keeps sleeping; during the walk it turns back */
+    if(P.save.light===false && (P.task.kind==="grumpy" || P.task.kind==="wake")){
+      if(P.task.phase==="angry"){
+        P.task=null; P.awakeLeft=0; P.puffUntil=0; P.action=""; P.actionUntil=0;
+      } else if(P.task.phase==="walkRug"){
+        startChore("bed","walkBed");
+      }
+    } else if(P.save.light===false){
+      P.lightReturn=true;
+    }
+  } else if(wasAsleep && P.save.light===true){
+    /* light on at night: wakes it, angry, and it walks to the rug (the same walk as every bed <-> floor move) */
+    P.at={x:BED_X,y:BED_Y};
+    startChore("grumpy","angry");
+  } else if(P.save.light===false && Pet.asleep(P.save,h,mins) && !wasAsleep){
+    /* light off: back to bed at once, walking */
+    P.awakeLeft=0;
+    startChore("bed","walkBed");
+  } else {
+    P.lightReturn=false;
+  }
   beep("tick"); saveSoon(); renderKeys(); render();
 }
 function callPet(){
@@ -1061,7 +1257,8 @@ function restartPet(){
   P.save.shelf=shelf;                        /* the souvenirs and the one on the shelf are kept */
   P.save.boxSeen=P.souv.length;              /* the box is kept and already seen */
   P.eggMs=0; P.sub=null; P.confirmStage=0; P.action=null; P.outing=null; P.game=null;
-  P.hatching=null; P.naming=null; P.boxAsk=null; P.wake=null; P.wasAsleep=null;
+  P.hatching=null; P.naming=null; P.boxAsk=null; P.wasAsleep=null;
+  P.task=null; P.feeds=[]; P.awakeLeft=0; P.puffUntil=0; P.pendingNeed=null; P.lightReturn=false; P.at=null;
   stopGameTimer();
   P.lastWants=null; P.boxPage=0; P.bringing=false;
   stopAiJob();
@@ -1130,7 +1327,8 @@ function gameTick(){
 function gameSounds(events){
   (events||[]).forEach(function(e){
     if(e==="catch" || e==="serve") beep("coin");
-    else if(e==="return") beep("hit");
+    else if(e==="return" || e==="bat") beep("hit");
+    else if(e==="petmiss") beep("miss");
     else if(e==="land") beep("tick");
   });
 }
@@ -1431,7 +1629,7 @@ function hatchGrid(pack,elapsed){
    a meal lifts the low mood at once, and anger is only ever a second and a half. */
 function moodFace(t){
   if(!P.save || P.save.stage==="egg") return null;
-  if(Pet.asleep(P.save,Pet.hourOf(t,tz()),localDate(t).getUTCMinutes())) return null;
+  if(!P.task && !(P.awakeLeft>0) && Pet.asleep(P.save,Pet.hourOf(t,tz()),localDate(t).getUTCMinutes())) return null;
   if(P.angryUntil>t) return "angry";
   if(P.moodClearUntil>t) return null;
   if((+P.save.hunger||0)<=1) return "sad";
@@ -1456,6 +1654,8 @@ function petGrid(save,pack,t,asleepNow){
   else if(a==="happy" || a==="burp") face="happy";
   else if(a==="sleep" || asleepNow) face="sleep";
   else if(a==="wait") face="wait";
+  else if(a==="blink") face="blink";
+  else if(a==="angry" || a==="sulk") face=a;
   else if(a==="wash" || a==="woke") face=P.frame?"surprised":"happy";
   else {
     mood=(a==="idle") ? moodFace(t) : null;
@@ -1569,7 +1769,8 @@ function pickProp(pick){
 function roomScene(){
   var save=P.save, t=now(), pack=packOf(save), h=hourNow(), min=localDate(t).getUTCMinutes();
   var night=h<6 || h>=19;
-  var asleepNow=save ? Pet.asleep(save,h,min) : false;
+  var asleepNow=!!(save && save.stage!=="egg" && Pet.asleep(save,h,min));
+  if(P.task || P.awakeLeft>0) asleepNow=false;      /* woken for food, by a pat or by the light: it is up */
   var scene={
     pack:pack, night:night, season:seasonOf(t), weather:weatherNow(),
     dayOfMonth:localDate(t).getUTCDate(),
@@ -1610,39 +1811,34 @@ function roomScene(){
     if(pick) scene.prop=pickProp(pick);
     /* The desk and pen stand on the floor under the bookshelf, to the right of the pet: clear of the bed, the
        bookshelf itself, the bowl and the rug's pet spot. */
-    if(pick && pick.kind==="diary" && scene.prop){ px=70; scene.propX=108; scene.propY=96; }
-    if(w==="food" || P.lookAt==="food"){
-      px=32; py=69;
-    } else if(w==="wash" || P.lookAt==="wash"){
-      px=40; py=69;
+    if(pick && pick.kind==="diary" && scene.prop && !P.task && !(P.awakeLeft>0)){ px=70; scene.propX=108; scene.propY=96; }
+    if(!P.task && !(P.awakeLeft>0)){
+      if(w==="food" || P.lookAt==="food"){
+        px=32; py=69;
+      } else if(w==="wash" || P.lookAt==="wash"){
+        px=40; py=69;
+      }
     }
   }
-  /* Night: it lies across its bed, head to the left, with Zz above the bed. On waking it walks back to the rug. */
-  if(save.stage!=="egg"){
-    if(P.wasAsleep===null) P.wasAsleep=!!asleepNow;
-    else {
-      if(P.wasAsleep && !asleepNow && !P.wake) P.wake={start:now(),dur:1200};
-      P.wasAsleep=!!asleepNow;
-    }
+  /* The bed <-> floor move: one reusable path, sampled on the room tick; the walking legs use the side frames.
+     An upright phase (the grumble, the blink and stretch, eating) keeps its own face at the current spot. */
+  if(P.task){
+    px=Math.round(P.task.pos ? P.task.pos.x : px);
+    py=Math.round(P.task.pos ? P.task.pos.y : py);
+    if(P.task.phase==="walkBowl" || P.task.phase==="walkRug" || P.task.phase==="walkBed") scene.pet=walkFrame(pack,save);
+    else scene.pet=petGrid(save,pack,t,false);
   }
-  if(asleepNow && P.wake) P.wake=null;
-  if(P.wake){
-    var k=(now()-P.wake.start)/P.wake.dur;
-    if(k>=1){ P.wake=null; }
-    else {
-      px=Math.round(BED_X+(RUG_X-BED_X)*k);
-      py=Math.round(BED_Y+(RUG_Y-BED_Y)*k);
-      scene.pet=petFrame(pack,save.stage,markNames(save,pack),"side",P.frame?"walk2":"walk1");
-    }
-  }
-  if(asleepNow && save.stage!=="egg" && !P.wake){
+  /* Night: it lies across its bed, head to the left, with Zz above the bed. */
+  if(asleepNow && save.stage!=="egg" && !P.task){
     scene.pet=rotateCCW(scene.pet);
     px=BED_X; py=BED_Y;
     scene.zz=true; scene.zzX=32; scene.zzY=48;
   }
   scene.petX=px; scene.petY=py;
+  if(save.stage!=="egg") P.at={x:px,y:py};
   if(save.stage!=="egg" && isLidong(t)) scene.pet=wearScarf(scene.pet);
   if(P.heartUntil>t) scene.prop=(pack.props||{}).heart;
+  else if(P.puffUntil>t){ scene.prop=PUFF; scene.propX=px+24; scene.propY=py+4; }
   else if(!scene.prop && isMidAutumn(t)) scene.prop=(pack.props||{}).mooncake;
   if(asleepNow && save.stage!=="egg") scene.zz=true;
   return scene;
@@ -1716,6 +1912,7 @@ function buildIcons(){
 }
 function renderIcons(){
   var wrap=$("pet-icons"); if(!wrap) return;
+  if(inBedSleep()) P.flash=null;                /* a leftover flash never survives a nap */
   /* An egg has no icon row at all: not faint icons, no buttons. The naming panel owns the screen too. */
   if(isEgg() || P.sub==="name"){ wrap.hidden=true; wrap.textContent=""; iconBuilt=false; iconCvs={}; return; }
   wrap.hidden=false;
@@ -2001,7 +2198,8 @@ function clearHold(){ if(P.hold){ clearTimeout(P.hold); P.hold=0; } }
 /* Idle variety: a blink, a look to one side, or a short sit, seeded from the pet so a session has its own rhythm.
    The room tick is 500 ms (2 fps), and every action is one or two frames, so nothing ever flickers. */
 function idleAllowed(){
-  return !!(P.save && P.save.stage!=="egg" && !P.sub && !P.action && !P.idle && !P.save.travel && !P.outing);
+  return !!(P.save && P.save.stage!=="egg" && !P.sub && !P.action && !P.idle && !P.save.travel && !P.outing &&
+    !P.task && !inBedSleep());
 }
 function idleRoll(t){
   if(!idleAllowed()) return;
@@ -2020,6 +2218,7 @@ function tick(){
   if(!isOpen() || document.hidden) return;
   if(P.sub==="game"){ render(); return; }      /* the play pack's own 20 fps tick is the only clock it needs */
   P.frame=1-P.frame;
+  if(inBedSleep()) P.flash=null;               /* nothing flashes while it is asleep */
   if(P.flash){ P.flash.left--; if(P.flash.left<=0) P.flash=null; }
   var t=now();
   if(P.save && P.save.today && P.save.today.day!==dayKey(t)){
@@ -2042,6 +2241,26 @@ function tick(){
   if(P.washUntil && t>=P.washUntil) P.washUntil=0;
   if(P.outing){ stepOuting(); }
   else checkOuting();
+  if(P.task) taskBusy();
+  if(!P.task && P.awakeLeft>0){
+    if(!naturalAsleep()) P.awakeLeft=0;        /* morning came: it stays up */
+    else if(--P.awakeLeft<=0) startChore("bed","walkBed");
+  }
+  /* Falling asleep walks to the bed; waking in bed walks back to the rug (never a teleport). */
+  var sleepNow=inBedSleep();
+  if(P.save && P.save.stage!=="egg"){
+    if(P.wasAsleep===null) P.wasAsleep=sleepNow;
+    else if(P.wasAsleep && !sleepNow && !P.task && !P.outing){
+      P.at={x:BED_X,y:BED_Y};
+      startChore("wake","walkRug");
+      P.wasAsleep=false;
+    } else if(!P.wasAsleep && sleepNow && !P.task && !P.outing && !atBed()){
+      startChore("bed","walkBed");
+      P.wasAsleep=false;
+    } else {
+      P.wasAsleep=sleepNow;
+    }
+  }
   render();
 }
 
@@ -2053,6 +2272,7 @@ function enter(){
   /* the save decides the A label and the egg state, so it is read before the keys are built */
   ensurePet();
   refreshTime();
+  P.wasAsleep=inBedSleep();
   maybeNamePrompt();
   renderKeys();
   buildIcons();
@@ -2069,7 +2289,8 @@ function leave(){
   if(P.roomHold){ clearTimeout(P.roomHold); P.roomHold=0; }
   P.holdFired=false;
   P.sub=null; P.confirmStage=0; P.game=null; P.outing=null;
-  P.naming=null; P.boxAsk=null; P.wake=null; P.wasAsleep=null;
+  P.naming=null; P.boxAsk=null; P.wasAsleep=null;
+  finishTaskOnLeave();
   P.gameHeld={left:false,right:false,a:false};
   P.gamePress={left:false,right:false,a:false};
   P.gameTouch=null;
@@ -2098,7 +2319,7 @@ function pause(){
 function resume(){
   P.resumeOuting=true;
   if(isOpen()){
-    refreshTime(); maybeNamePrompt(); render(); startTimer(); refreshUsage();
+    refreshTime(); P.wasAsleep=inBedSleep(); maybeNamePrompt(); render(); startTimer(); refreshUsage();
     if(P.sub==="game" && P.game && !gameDone()) startGameTimer();
   } else {
     backgroundDay();
@@ -2120,7 +2341,7 @@ function iconState(){
   var s=P.save;
   if(!s || s.stage==="egg") return "egg";
   if(s.travel) return "away";
-  if(Pet.asleep(s,hourNow(),localDate(now()).getUTCMinutes())) return "sleep";
+  if(inBedSleep()) return "sleep";
   if(Pet.wants(s)) return "need";
   return "face";
 }
@@ -2320,10 +2541,12 @@ if(/[?&]debug\b/.test(location.search)){
     gameSeed:function(n){ P.gameSeed=(n==null?null:(+n>>>0)); return P.gameSeed; },
     gameState:function(){ var st=gameState(); return st?JSON.parse(JSON.stringify(st)):null; },
     mood:function(){ return moodFace(now()); },
-    setStats:function(h,j){
+    setStats:function(h,j,awakeH,awakeJ){
       if(!P.save) return null;
       if(h!=null) P.save.hunger=Math.max(0,Math.min(5,Math.floor(+h||0)));
       if(j!=null) P.save.joy=Math.max(0,Math.min(5,Math.floor(+j||0)));
+      if(awakeH!=null) P.save.awakeHunger=Math.max(0,+awakeH||0);
+      if(awakeJ!=null) P.save.awakeJoy=Math.max(0,+awakeJ||0);
       P.moodClearUntil=0; P.angryUntil=0; saveSoon(); render();
       return P.save;
     },
@@ -2378,7 +2601,7 @@ if(/[?&]debug\b/.test(location.search)){
     spot:function(){
       var s=P.lastScene;
       if(!s) return null;
-      var out={x:s.petX,y:s.petY,zz:!!s.zz,stage:P.save?P.save.stage:null};
+      var out={x:s.petX,y:s.petY,zz:!!s.zz,stage:P.save?P.save.stage:null,act:P.action||"",phase:P.task?P.task.phase:"",awake:P.awakeLeft,flashes:P.flashSeq,outing:!!P.outing};
       if(s.prop){ out.prop={x:s.propX,y:s.propY,w:Art.gridWidth(s.prop),h:Art.gridHeight(s.prop)}; }
       return out;
     },
