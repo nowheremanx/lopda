@@ -19,10 +19,11 @@ runtime/        the PWA: index.html, core.js (shared LP object: utils, views, so
                 exposure and contrast; shared by the camera, the snap viewfinder, the reader and sdk/dev.html), textsel.js (the text selection shared by the reader and the dictionary entry page), negative.js (the negative PNG and its lpDa chunk, pure functions), exif.js (a single print's APP1 Exif segment, pure functions),
                 develop.js (developing a frame: the stocks' looks, grain, halation, leaks, date stamp; pure functions on RGBA),
                 notetext.js (notes: tags, search and snippets, the diary title, the diaries by day, front matter, export names, the rules for app notes; pure functions),
-                zip.js (stored zips written, stored and deflated zips read; pure functions, CRC from negative.js), lunar.js (lunar calendar + solar term tables, 1900-2100), stardict.js (StarDict reader), wordlist.js (the word list and the entries behind PAD.dict: check/query/entry and one source, shared by apps/dict.js, sdk/dev.html and the tests, SPEC.md 6.7), bookparse.js (TXT/EPUB parser),
+                zip.js (stored zips written, stored and deflated zips read; pure functions, CRC from negative.js), qr.js (the runtime's QR helper: text to a module matrix, drawn with putImageData on the share page), lunar.js (lunar calendar + solar term tables, 1900-2100), stardict.js (StarDict reader), wordlist.js (the word list and the entries behind PAD.dict: check/query/entry and one source, shared by apps/dict.js, sdk/dev.html and the tests, SPEC.md 6.7), bookparse.js (TXT/EPUB parser),
                 books/ (the reader's two public-domain sample books), sw.js (offline cache),
                 fonts/ (DotGothic16, VT323, OFL), vendor/binjgb/ (Game Boy core, MIT), vendor/holiday-cn/ (China days off, MIT),
-                vendor/ecdict/ (abridged ECDICT in StarDict format, MIT + WordNet licence)
+                vendor/ecdict/ (abridged ECDICT in StarDict format, MIT + WordNet licence),
+                vendor/qrcode-generator/ (the share page's QR encoder, MIT)
 sdk/            MIT. pad-shim.js (PAD bridge), lo-game.js (game framework), LO-GAME.md, lo-3d.js (3D), LO-3D.md, PROMPT.md, UI.md (app layout rules),
                 dev.html (app harness), template/, template-game/, template-vn/ (visual novel), fonts/ (lopix12, OFL)
 registry/       index.json (generated) + apps/<id>/{manifest.json,index.html,src/ (optional sources)}
@@ -61,7 +62,8 @@ README.md (English, the homepage) README.zh.md (Chinese) LICENSE NOTICE LICENSIN
   negative export and import through negative.js, developing through develop.js (once per roll, `dev` {v, seed, at} in the roll; pictures are
   never stored, every look and print develops them again), the colour viewer, single / contact sheet / film strip prints; decisions.md section 19), cart (GB), store (app store: categories from the manifest's `category` (missing goes to Other), category filters, single and "update all" installs, preinstalled apps, sandboxed runner, file dialog), scripts (local HTML/JS programs: copy an AI prompt, paste, run in the sandbox; every script has its own storage document), settings (also 备份 / 恢复: the whole
   device as one `lopda-backup-YYYYMMDD.zip` through backup.js, every check before a restore replaces everything, the old data
-  written back if a write fails; `data/users/local/backup-meta` {last}; decisions.md section 24).
+  written back if a write fails; `data/users/local/backup-meta` {last}; decisions.md section 24; the main page is a short menu,
+  the permissions list, backup, the share page (a QR code drawn on the device) and About have pages of their own; decisions.md section 39).
   Paint and the calculator are community apps (`registry/apps/paint`, `calculator`), installed on first start
   (`PREINSTALL` in store.js; their files are in sw.js SHELL). The LCD fonts ship in runtime/fonts/ (OFL). Each registers with
   `LP.builtin({id, label, icon, view, open, ...hooks})`; the home screen draws them in registration order
@@ -123,7 +125,7 @@ node --test                                  # the test suite; must pass
   `"notes"` (runtime 0.26.0+, SPEC.md 6.5: `PAD.notes.append(title, text)` -> "saved" | "denied", the runtime's dialog on every
   call, only into a note the app made itself, src `app:<id>`, title ≤ 64 characters, text ≤ 4 KB; decisions.md section 25),
   `"camera"` (runtime 0.28.0+, SPEC.md 6.6: `PAD.camera.snap({size})` -> {w, h, px} | null, px a Uint8Array of tone indices 0-3,
-  "small" 128×112 or "large" 256×224; the runtime's dialog on an app's first snap (granted with the sensors, Settings → 传感器与相机),
+  "small" 128×112 or "large" 256×224; the runtime's dialog on an app's first snap (granted with the sensors, Settings → 传感器与权限),
   then its own viewfinder for every shot, the player presses the shutter; the runtime keeps nothing; decisions.md section 28),
   `"wordbook"` (runtime 0.36.0+, SPEC.md 6.7: `PAD.dict.inBook(words)` -> boolean[] | null and `PAD.dict.addWord` /
   `removeWord(word)` -> "saved" | "denied" | "full" | null, over the player's own word book, the same one the dictionary and

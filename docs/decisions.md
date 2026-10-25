@@ -1340,7 +1340,7 @@ CPU 降速 4 倍（DevTools 的 CPU throttling，粗略代表旧手机）时，�
   没有授权时 `inBook` 回 `null`，不弹框。三个调用是 `PAD.dict.addWord(word)` / `removeWord(word)` ->
   `"saved" | "denied" | "full" | null`、`PAD.dict.inBook(words)` -> `boolean[] | null`；和词典程序、阅读器同一个
   2000 词上限、同一条存储路径，只存 ECDICT 的词条头词（`lookup` 后的 `word`，不在 ECDICT 里就 `null`），没有 toast、没有声音。
-  设置 → 传感器与相机 列出被授权的 app（生词本），撤销只收回权限，不动已经加进去的词。所有 `PAD.dict` 调用共用每秒 10 次的限制。
+  设置 → 传感器与权限 列出被授权的 app（生词本），撤销只收回权限，不动已经加进去的词。所有 `PAD.dict` 调用共用每秒 10 次的限制。
 - **实现**：`runtime/wordlist.js`（`window.LopdaWordList`，纯函数加一个 source，`tests/wordlist.test.mjs`）；
   `runtime/apps/dict.js` 建一个 `LopdaWordList.source` 交给 `LP.dict.apps`，`book(BUILTIN)` 和 `D.lemma` 用的就是词典程序那份，
   lookup 第一次才解包整本书，不会加载两次。`runtime/apps/store.js` 的 `dictRequest` 负责转发：每个 app 一个
@@ -1382,3 +1382,15 @@ app 不知道手机什么时候才是平的。
 - **不做的**：接触印相、胶片条、对比图和底片还是 PNG、没有 EXIF。
 - **代码**：`runtime/exif.js`（`window.LopdaExif`，纯函数，`tests/exif.test.mjs`）；`apps/darkroom.js` 的
   `buildPrint("p-single")` 返回 `{blob, name}`；`LP.saveBlob`；`negative.js` 的 `FRAME_KEYS`。
+
+## 39. 设置整理：菜单、分享、关于（0.40.0）
+
+2026-10-24，runtime 0.40.0。设置页一直是一长列：音量、语言、授权、AI、备份、更新和关于叠在一起，在 331×359 上要滚很久才能找到「恢复」。owner 还想把掌机当面递给朋友：让对方扫一下就能打开，也想知道「PDA」到底是什么。
+
+- **一页菜单，五个子页**：主页面保留音量、语言和系统（版本 + 检查更新），下面一条 2 px 墨线；传感器与权限、AI 线路、备份与恢复、分享、关于各占一整行 44 px，带像素图标与状态（「{n} 个程序 ›」「今天 ›」「未接上 ›」），整行可点。子页沿用 AI 线路已有的 ◂ 返回栏，返回主页面。每行还是至少 44 px，331 宽不横滚。
+- **没有搬动数据**：设置文档、授权文档、`backup-meta`、备份 zip 和恢复的每一步检查都不变；只是控件换了一个页面。备份页打开时照旧统计本机存档与胶卷盒，对话框忙的时候不被收起。
+- **二维码在机身里画**：分享页用 vendor 的 qrcode-generator（MIT，原样拷入）在 canvas 上用 `putImageData` 画 `https://nowheremanx.github.io/lopda/`，纠错 M、4 格静区，scale 4，四色里的墨与纸；不联网。`runtime/qr.js` 是 runtime 自己的小接口（`LopdaQR.matrix/draw`），以后的 PAD API 可以共用。分享的地址是公开站点，不用 `location`：PR 预览和 localhost 也要分享真实地址。
+- **发给朋友**：有 `navigator.share` 时显示「发送链接…」，只在 click 里调用；「复制」走剪贴板，失败就选中网址并提示长按复制。
+- **关于页**：解释 PDA 与这台虚构的 1986 年掌机，列出本机版本、仓库、MIT 和随 runtime 发布的第三方许可（字体、ECDICT/WordNet、holiday-cn、binjgb、qrcode-generator、样书）。原来主页的 `.about` 小框不再存在。
+- **不做的**：不做可编辑的分享文案，不生成短链（要联网），不把二维码存成图片文件（扫码就够了）。
+- **代码**：`runtime/apps/settings.js`（菜单、子页、`SHARE_URL`、`ROW_ICONS`）、`runtime/index.html` 的五个 `v-set-*`、`runtime/lopda.css`、`runtime/qr.js` + `runtime/vendor/qrcode-generator/`、`tests/qr.test.mjs`；e2e 从主页点进子页再断言。

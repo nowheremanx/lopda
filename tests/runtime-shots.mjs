@@ -297,7 +297,7 @@ async function capture(rootArg, outArg) {
   /* settings, English and back */
   const settings = async (name) => {
     /* the version changes with every runtime release; mask it so a version bump is not a diff.
-       Only the number goes: the label next to it ("系统版本") is still compared. */
+       Only the number goes: the label next to it ("系统") is still compared. */
     await p.evaluate(() => {
       document.getElementById("set-version").textContent = "Lo-PDA (version masked)";
       const upd = document.getElementById("upd-label");
@@ -307,6 +307,12 @@ async function capture(rootArg, outArg) {
   };
   await home(); await tile("settings"); await p.waitForTimeout(700);
   await settings("15-settings");
+  await p.click("#set-share-open"); await p.waitForSelector("#v-set-share:not([hidden])");
+  await shot("15a-settings-share");
+  await p.click("#set-share-back"); await p.waitForSelector("#v-settings:not([hidden])");
+  await p.click("#set-about-open"); await p.waitForSelector("#v-set-about:not([hidden])");
+  await settings("15b-settings-about");
+  await p.click("#set-about-back"); await p.waitForSelector("#v-settings:not([hidden])");
   await p.click("[data-lang=en]"); await p.waitForTimeout(400);
   await settings("16-settings-en");
   await home(); await p.waitForTimeout(300);
