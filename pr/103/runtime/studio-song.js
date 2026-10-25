@@ -1,7 +1,8 @@
 /*
- * Lo-PDA runtime: the song data of the four-track tape machine (docs/design/studio.md sections 3 and 11). Pure functions,
+ * Lo-PDA runtime: the song data of the four-track tape machine (docs/design/studio.md sections 3, 11 and 12). Pure functions,
  * no DOM, so Node tests run them: the format constants and the demo beat, a fresh song, validate (what a song from storage
- * or a file must look like), drum steps on and off, the events the player schedules (with swing), and scale degrees.
+ * or a file must look like), drum steps on and off, notes and rests, the pattern chain, the events the player schedules
+ * (with swing), scale degrees and the example tape.
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  */
 (function(){
@@ -62,12 +63,33 @@ var DEMO={
 /* The demo's bass and chords, same 1-based grid as DEMO (12.9); the drum beat is untouched, so 1a songs play the same. */
 var DEMO_BASS=[[1,0],[9,2],[11,3]], DEMO_CHORDS=[[1,0],[9,3]];
 
+/* The example tape (12.12): four one-bar patterns and a 16-slot chain, all the numbers in one place next to DEMO. A is
+   exactly newSong()'s bar; the others keep A's drums, bass or chords unless a row says otherwise. Drum rows are 1-based
+   steps. Note pairs are [step, degree]: melody and bass degrees are of the pentatonic grid, chord degrees of the
+   seven-note parent, and a null degree is a rest (a note with vel 0). */
+var DEMO_SONG={
+  patterns:[
+    {drums:DEMO, bass:DEMO_BASS, chords:DEMO_CHORDS, melody:[]},
+    {drums:DEMO, bass:DEMO_BASS, chords:DEMO_CHORDS,
+     melody:[[1,4],[3,5],[5,4],[7,null],[9,3],[11,2],[13,3],[15,null]]},
+    {drums:{kick:[1,8,11,15], snare:[5,13], hat:[1,3,5,7,9,11,13], perc:[16], vel:DEMO.vel},
+     bass:[[1,1],[9,3],[13,4]], chords:[[1,5],[9,4]],
+     melody:[[1,6],[4,5],[7,3],[8,null],[9,4],[12,3],[15,null]]},
+    {drums:{kick:[1], snare:[13], hat:[1,5,9,13], perc:[], vel:DEMO.vel},
+     bass:[[1,2],[9,null]], chords:[[1,3]], melody:[[1,5],[9,null]]}
+  ],
+  song:[0,0,1,1,2,2,1,1,3,3,2,2,1,1,0,0]
+};
+
 var SWING_MIN=0.5, SWING_MAX=0.75, SWING_DEFAULT=0.55, TAPE_MAX=4, PATTERNS_MAX=8, SONG_MAX=64, NAME_MAX=40;
 
 /* Which synth voice a track plays (12.6): a constant, not a song field, so a later version can revoice a track without
-   migrating files. */
-var SOUND={bass:"bass", chords:"keys", melody:"pluck"};
+   migrating files. 12.12 moved the melody from the bright pluck to the flute. */
+var SOUND={bass:"bass", chords:"keys", melody:"flute"};
 var NOTE_VEL=0.8;
+/* A "stop" on the note/chord screens is a rest: the format has no rest field, only a note that does not sound, so a rest
+   is {t, len, deg:0, vel:0} and every player simply skips it (12.12). */
+var REST_VEL=0;
 /* The two chord cells of a bar start on step 1 and step 9 (12.5). */
 var CHORD_STEPS=[0,8];
 
@@ -101,23 +123,29 @@ function order(a,b){
   return d || DRUMS.indexOf(a.key)-DRUMS.indexOf(b.key);
 }
 
-/* the DEMO steps as notes, sorted once at load */
-function demoNames(){
+/* a drum row set (a kit's DEMO shape) as notes, sorted by the grid */
+function drumNotes(spec){
   var out=[];
   for(var i=0;i<DRUMS.length;i++){
-    var drum=DRUMS[i], steps=DEMO[drum];
-    for(var j=0;j<steps.length;j++) out.push({t:(steps[j]-1)*STEP, len:STEP, key:drum, vel:DEMO.vel[drum]});
+    var drum=DRUMS[i], steps=spec[drum], vel=(spec.vel&&spec.vel[drum]!=null)?spec.vel[drum]:DEMO.vel[drum];
+    for(var j=0;j<steps.length;j++) out.push({t:(steps[j]-1)*STEP, len:STEP, key:drum, vel:vel});
   }
   out.sort(order);
   return out;
 }
+
+/* the DEMO steps as notes, sorted once at load */
+function demoNames(){ return drumNotes(DEMO); }
 
 /* ---------- a fresh song ---------- */
 /* The demo's note tracks: [step, degree] pairs run through the same tie the editor uses, so a fresh song already holds
    the lengths the editor would compute. */
 function demoTrack(pairs){
   var out=[];
-  for(var i=0;i<pairs.length;i++) out.push({t:(pairs[i][0]-1)*STEP, len:STEP, deg:pairs[i][1], vel:NOTE_VEL});
+  for(var i=0;i<pairs.length;i++){
+    var rest=pairs[i][1]==null;
+    out.push({t:(pairs[i][0]-1)*STEP, len:STEP, deg:rest?0:pairs[i][1], vel:rest?REST_VEL:NOTE_VEL});
+  }
   return tie(out, STEPS*STEP);
 }
 
@@ -138,6 +166,20 @@ function newSong(now){
     patterns:[{len:STEPS, notes:{drums:demoNames(), bass:demoTrack(DEMO_BASS), chords:demoTrack(DEMO_CHORDS), melody:[]}}],
     song:[0], clips:[], updated:now||0
   };
+}
+
+/* The example tape in the menu (12.12): newSong's tempo, key, scale, swing and soft kit, four patterns and the 16-slot
+   chain from DEMO_SONG. A fresh song and the example are separate: "new tape" stays the single demo bar. */
+function demoSong(now){
+  var song=newSong(now), i, d;
+  song.patterns=[];
+  for(i=0;i<DEMO_SONG.patterns.length;i++){
+    d=DEMO_SONG.patterns[i];
+    song.patterns.push({len:STEPS, notes:{drums:drumNotes(d.drums), bass:demoTrack(d.bass),
+      chords:demoTrack(d.chords), melody:demoTrack(d.melody)}});
+  }
+  song.song=DEMO_SONG.song.slice();
+  return song;
 }
 
 /* ---------- validate: the one gate between storage / a file and the editor ----------
@@ -306,13 +348,14 @@ function degreeToMidi(key,scale,deg,oct){
 }
 
 /* ---------- the grid's pitch ----------
-   The bass sits in E2..D#3 (MIDI 40..51) and the melody two octaves above it (12.4), so the tonic places the key's
-   pitch class in that window and noteMidi walks the scale from there. */
+   The bass sits in E2..D#3 (MIDI 40..51) and the melody one octave above it (12.12; it was two octaves in 1b-1's first
+   draft), so the tonic places the key's pitch class in that window and noteMidi walks the scale from there. A minor
+   puts the bass on A2 45 and the melody on A3 57. */
 function tonic(track,key){
   if(!int(key)) return null;
   var base=40+((key-4+12)%12);
   if(track==="bass") return base;
-  if(track==="melody") return base+24;
+  if(track==="melody") return base+12;
   return null;
 }
 
@@ -453,6 +496,9 @@ function noteAt(song,p,track,t){
   return null;
 }
 
+/* A rest is stored as a note that does not sound (12.12): vel 0 is what every player and the synth skip. */
+function isRest(note){ return !!note && note.vel===REST_VEL; }
+
 function setNote(song,p,track,t,deg,vel){
   var out=clone(song);
   if(!editable(out,track)) return out;
@@ -473,9 +519,38 @@ function setNote(song,p,track,t,deg,vel){
   if(!Array.isArray(list)) list=pat.notes[track]=[];
   var found=null;
   for(var i=0;i<list.length;i++) if(list[i] && list[i].t===t){ found=list[i]; break; }
-  /* an existing note keeps its velocity: the pitch keys change the degree, not how hard it is played */
-  if(found) found.deg=deg;
+  /* an existing note keeps its velocity: the pitch keys change the degree, not how hard it is played. A rest at the tick
+     becomes a real note at NOTE_VEL instead: a key sets a pitch, it does not keep the rest's silence. */
+  if(found){
+    found.deg=deg;
+    if(isRest(found)) found.vel=NOTE_VEL;
+  }
   else list.push({t:t, len:1, deg:deg, vel:v});
+  tie(list, pat.len*STEP);
+  return out;
+}
+
+/* The "stop" key: a rest at t, replacing a note there. The tie then lets the previous note sound up to the rest and
+   gives the rest itself the length the editor would give any note; deg is 0 because a rest has no pitch. */
+function setRest(song,p,track,t){
+  var out=clone(song);
+  if(!editable(out,track)) return out;
+  if(!int(p) || p<0 || p>=PATTERNS_MAX || !int(t) || t<0) return out;
+  var src=song.patterns && song.patterns[p];
+  if(src && (!plain(src) || !int(src.len) || src.len<1)) return out;
+  var len=src ? src.len : STEPS;
+  if(t>=len*STEP) return out;
+
+  out=ensureInto(out,p);
+  var pat=out.patterns[p];
+  if(!plain(pat.notes)) pat.notes={};
+  var list=pat.notes[track];
+  if(!Array.isArray(list)) list=pat.notes[track]=[];
+  var i;
+  for(i=0;i<list.length;i++){
+    if(list[i] && list[i].t===t){ list[i]={t:t, len:1, deg:0, vel:REST_VEL}; break; }
+  }
+  if(i>=list.length) list.push({t:t, len:1, deg:0, vel:REST_VEL});
   tie(list, pat.len*STEP);
   return out;
 }
@@ -520,6 +595,28 @@ function dropSlot(song){
   if(!plain(out)) return out;
   if(!Array.isArray(out.song) || out.song.length<=1) return out;
   out.song.pop();
+  return out;
+}
+
+/* Insert at i (0..length, so the end is allowed) and remove slot i (never the last remaining one). Both copy, keep
+   unknown fields and ensure the inserted pattern; a refused call is an unchanged copy, like addSlot and dropSlot. */
+function insertSlot(song,i,p){
+  var out=clone(song);
+  if(!plain(out)) return out;
+  if(!Array.isArray(out.song) || !int(i) || i<0 || i>out.song.length) return out;
+  if(!int(p) || p<0 || p>=PATTERNS_MAX) return out;
+  if(out.song.length>=SONG_MAX) return out;
+  out=ensureInto(out,p);
+  out.song.splice(i,0,p);
+  return out;
+}
+
+function removeSlot(song,i){
+  var out=clone(song);
+  if(!plain(out)) return out;
+  if(!Array.isArray(out.song) || out.song.length<=1) return out;
+  if(!int(i) || i<0 || i>=out.song.length) return out;
+  out.song.splice(i,1);
   return out;
 }
 
@@ -657,18 +754,18 @@ window.LopdaSong={
   V:V, TPB:TPB, STEP:STEP, STEPS:STEPS,
   BPM_MIN:BPM_MIN, BPM_MAX:BPM_MAX, BPM_DEFAULT:BPM_DEFAULT, BPM_STEP:BPM_STEP,
   DRUMS:DRUMS, KITS:KITS, KINDS:KINDS, TRACKS:TRACKS, SCALES:SCALES, PARENT:PARENT, DEMO:DEMO,
-  DEMO_BASS:DEMO_BASS, DEMO_CHORDS:DEMO_CHORDS,
-  SOUND:SOUND, NOTE_VEL:NOTE_VEL, CHORD_STEPS:CHORD_STEPS, NAMES:NAMES,
+  DEMO_BASS:DEMO_BASS, DEMO_CHORDS:DEMO_CHORDS, DEMO_SONG:DEMO_SONG,
+  SOUND:SOUND, NOTE_VEL:NOTE_VEL, REST_VEL:REST_VEL, CHORD_STEPS:CHORD_STEPS, NAMES:NAMES,
   SWING_MIN:SWING_MIN, SWING_MAX:SWING_MAX, SWING_DEFAULT:SWING_DEFAULT,
   TAPE_MAX:TAPE_MAX, PATTERNS_MAX:PATTERNS_MAX, SONG_MAX:SONG_MAX, NAME_MAX:NAME_MAX,
-  newSong:newSong, validate:validate, has:has, toggle:toggle,
+  newSong:newSong, demoSong:demoSong, validate:validate, has:has, toggle:toggle,
   swingTicks:swingTicks, events:events, ticksToSec:ticksToSec,
   degreeToMidi:degreeToMidi, clampBpm:clampBpm,
   tonic:tonic, noteMidi:noteMidi, noteName:noteName,
   chordNotes:chordNotes, chordName:chordName,
   emptyPattern:emptyPattern, ensurePattern:ensurePattern, hasNotes:hasNotes, patternEmpty:patternEmpty,
-  copyPattern:copyPattern, noteAt:noteAt, setNote:setNote, removeNote:removeNote,
-  setSlot:setSlot, addSlot:addSlot, dropSlot:dropSlot,
+  copyPattern:copyPattern, noteAt:noteAt, isRest:isRest, setNote:setNote, setRest:setRest, removeNote:removeNote,
+  setSlot:setSlot, addSlot:addSlot, dropSlot:dropSlot, insertSlot:insertSlot, removeSlot:removeSlot,
   chainEvents:chainEvents, chainTicks:chainTicks, chainAt:chainAt
 };
 })();

@@ -12,10 +12,12 @@
  * pattern has notes. On = ink; the step being heard is mid (empty) or dark (lit).
  *
  * The player: one scheduler over LopdaSong.chainEvents(), 0.1 s ahead every 25 ms into LP.SND.app through
- * LopdaStudioSynth. On a drum/note/chord screen it loops the edit pattern; on the song screen it plays the live chain.
- * A pattern picked while a pattern is playing waits for the next bar boundary (the letter blinks for two beats); the
- * grid shows no playhead until the ears get there. A BPM change is re-anchored at the tick being heard, a rebuilt
- * AudioContext carries on, HOME or a hidden page stops. Changes save a second later, and at once on leave or pause.
+ * LopdaStudioSynth. On a drum/note/chord screen it loops the edit pattern; on the song screen it plays the chain one
+ * bar at a time. A pattern picked while a pattern is playing waits for the next bar boundary (the letter blinks for two
+ * beats); the grid shows no playhead until the ears get there. A chain edit during song playback never touches the bar
+ * being heard: its next-slot index is mapped like an array index, and the bar after it starts from that slot in the
+ * edited chain at the boundary. A BPM change is re-anchored at the tick being heard, a rebuilt AudioContext carries on,
+ * HOME or a hidden page stops. Changes save a second later, and at once on leave or pause.
  *
  * No UI click sounds anywhere here: the only sounds are the instruments. The play glyph is drawn in CSS. Keys (the
  * chin pad is hidden): arrows move the focus box, X = A taps that cell, Enter = START plays and stops, Shift = SELECT
@@ -44,7 +46,10 @@ var T={
   playing:false, mode:"", playPat:0, chainPat:0, pendingPat:-1, queued:-1, boundaryGlobal:0,
   loop:0, ctx:null, synth:null,
   startAt:0, lastTick:0, heard:0, painted:null, navKey:"",
-  repeats:[], tour:null
+  repeats:[], tour:null,
+  /* song mode's bar state (12.12): the bar being heard is frozen; a chain edit only moves where it sits in the
+     edited chain, and the next bar is re-anchored from nextSlot at the boundary (h* = heard, ahead = scheduled) */
+  hSlot:-1, hPat:-1, hStart:0, hTicks:0, nSlot:0, ahead:null
 };
 
 function visible(){ return !$("v-studio").hidden; }
@@ -182,14 +187,18 @@ function patternTicks(p){
   var pat=T.song && T.song.patterns && T.song.patterns[p];
   return (pat && pat.len>0 ? pat.len : SONGS.STEPS)*SONGS.STEP;
 }
-/* the chain the ears hear: a loop of the heard pattern, or the live song (12.7) */
-function heardChain(){
-  if(T.mode==="song" && T.song) return T.song.song || [0];
-  return [T.playPat];
-}
+/* What the ears are on. A pattern loop asks the chain for the tick; song mode answers from the bar it froze when
+   that bar began, so a chain edit cannot change the heard pattern or its slot's pattern mid-bar (12.12). */
 function heardAt(){
   if(!T.playing || !T.song) return null;
-  return SONGS.chainAt(T.song,heardChain(),T.heard);
+  if(T.mode==="song"){
+    if(T.hSlot<0) return null;
+    var t=T.heard-T.hStart;
+    if(t<0) t=0;
+    if(T.hTicks>0 && t>=T.hTicks) t=T.hTicks-1;
+    return {p:T.hPat, slot:T.hSlot, t:t};
+  }
+  return SONGS.chainAt(T.song,[T.playPat],T.heard);
 }
 function playedPat(){
   var c=heardAt();
@@ -197,8 +206,7 @@ function playedPat(){
 }
 function playedSlot(){
   if(T.mode!=="song") return -1;
-  var c=heardAt();
-  return c ? c.slot : -1;
+  return T.hSlot>=0 ? T.hSlot : -1;
 }
 /* the tick the ears are at, on the one timeline that starts at T.startAt (global chain ticks) */
 function heardTick(){
@@ -237,11 +245,15 @@ function setSong(song){
   if(T.screen==="song"){ if(T.focus>n-1) T.focus=n-1; }
   else if(T.focus>last) T.focus=last;
   if(T.focus<0) T.focus=0;
+  /* a whole different tape mid-song starts its own chain from where the ears are */
+  if(T.playing && T.mode==="song") startSongPos(T.heard);
 }
 /* one note or hit: the drum kit, the voice of each track, the chord expanded (12.6, 12.7) */
 function playEvent(e,at,bpm){
   var i, notes, midi;
   if(!T.synth || !T.song) return;
+  /* a rest (12.12) is a note that does not sound: it holds the tie and paints the playhead, nothing more */
+  if(!e.vel) return;
   if(e.track==="drums"){
     if(e.key) T.synth.hit(T.song.kit,e.key,at,e.vel);
   } else if(e.track==="chords"){
@@ -254,11 +266,48 @@ function playEvent(e,at,bpm){
     T.synth.note(SONGS.SOUND[e.track],midi,at,Math.max(0.05,SONGS.ticksToSec(e.len,bpm)),e.vel);
   }
 }
+/* ---------- the song player's bars (12.7, 12.12) ----------
+   A song bar is scheduled from the pattern it started with, so the bar being heard can never change under a chain
+   edit. The bar after it is started from nextSlot (the slot after the heard one) and is only re-read at its own
+   boundary: every slot edit maps nextSlot like an array index instead of rewriting the bar being heard. */
+function scheduleBarPart(pat,start,from,to){
+  if(!(to>from)) return;
+  var ev=SONGS.chainEvents(T.song,[pat],from-start,to-start), i, bpm=T.song.bpm;
+  for(i=0;i<ev.length;i++) playEvent(ev[i],T.startAt+SONGS.ticksToSec(start+ev[i].tick,bpm),bpm);
+}
+function startAhead(){
+  var chain=(T.song&&T.song.song)||[0], n=chain.length, slot=T.nSlot;
+  if(!(slot>=0) || slot>=n) slot=0;
+  T.ahead={slot:slot, pat:chain[slot], start:T.hStart+T.hTicks, ticks:patternTicks(chain[slot])};
+}
+function advanceAhead(){
+  var chain=(T.song&&T.song.song)||[0], n=chain.length, slot=(T.ahead.slot+1)%n;
+  T.ahead={slot:slot, pat:chain[slot], start:T.ahead.start+T.ahead.ticks, ticks:patternTicks(chain[slot])};
+}
+function scheduleSongRange(from,to){
+  var guard=0, heardEnd=T.hStart+T.hTicks, stop;
+  while(from<to && guard++<256){
+    if(!(T.hTicks>0)) return;
+    if(from<heardEnd){
+      stop=Math.min(to,heardEnd);
+      scheduleBarPart(T.hPat,T.hStart,from,stop);
+      from=stop;
+      continue;
+    }
+    if(!T.ahead || from>=T.ahead.start+T.ahead.ticks){
+      if(!T.ahead) startAhead(); else advanceAhead();
+      continue;
+    }
+    stop=Math.min(to,T.ahead.start+T.ahead.ticks);
+    scheduleBarPart(T.ahead.pat,T.ahead.start,from,stop);
+    from=stop;
+  }
+}
 function scheduleRange(from,to){
   if(!T.song || to<=from) return;
+  if(T.mode==="song"){ scheduleSongRange(from,to); return; }
   var bpm=T.song.bpm;
-  var chain=T.mode==="song" ? (T.song.song||[0]) : [T.chainPat];
-  var ev=SONGS.chainEvents(T.song,chain,from,to), i;
+  var ev=SONGS.chainEvents(T.song,[T.chainPat],from,to), i;
   for(i=0;i<ev.length;i++) playEvent(ev[i],T.startAt+SONGS.ticksToSec(ev[i].tick,bpm),bpm);
 }
 /* Schedules forward across a queued pattern's bar boundary without cutting the bar: the old chain is scheduled
@@ -290,6 +339,61 @@ function scheduleTo(to){
     T.lastTick=p;
   }
 }
+/* the song chain position at play start (song mode): bar 0 is heard, slot 1 is next */
+function startSongPos(tick){
+  var chain=(T.song&&T.song.song)||[0], n=chain.length;
+  T.hSlot=0;
+  T.hPat=chain[0];
+  T.hStart=tick||0;
+  T.hTicks=patternTicks(chain[0]);
+  T.nSlot=n>1?1:0;
+  T.ahead=null;
+}
+/* the ears crossed a bar boundary: the bar the scheduler started ahead becomes the heard one, and the slot after
+   it is next in the chain as it is now (an edit while the bar played mapped that index already) */
+function advanceHeard(){
+  var chain=(T.song&&T.song.song)||[0], n=chain.length, guard=0, start, bar, slot;
+  while(T.hTicks>0 && T.heard>=T.hStart+T.hTicks && guard++<16){
+    start=T.hStart+T.hTicks;
+    bar=T.ahead && T.ahead.start===start ? T.ahead : null;
+    if(bar){
+      T.hSlot=bar.slot; T.hPat=bar.pat; T.hTicks=bar.ticks;
+      /* the next bar was already scheduled when its slot was deleted: the following slot slid into its index, so
+         the same index is next, not the one after it (nothing is skipped) */
+      T.nSlot=bar.slide ? T.hSlot : (T.hSlot+1)%n;
+      T.ahead=null;
+    } else {
+      slot=T.nSlot>=0 && T.nSlot<n ? T.nSlot : 0;
+      T.hSlot=slot; T.hPat=chain[slot]; T.hTicks=patternTicks(chain[slot]);
+      T.nSlot=(T.hSlot+1)%n;
+    }
+    T.hStart=start;
+    T.painted=null;
+  }
+}
+/* a slot edit maps an index like an array index; delete at the index itself leaves it pointing at the slot that
+   slides in (12.12's next-slot rule) */
+function mapIndex(idx,kind,i,n){
+  if(idx<0) return idx;
+  if(kind==="insert"){ if(i<=idx) idx++; }
+  else if(i<idx) idx--;
+  if(idx>n-1) idx=n-1;
+  if(idx<0) idx=0;
+  return idx;
+}
+function mapSongEdit(kind,i){
+  if(!T.playing || T.mode!=="song" || !T.song) return;
+  var chain=T.song.song||[0], n=chain.length;
+  if(n<1) return;
+  T.hSlot=mapIndex(T.hSlot,kind,i,n);
+  T.nSlot=mapIndex(T.nSlot,kind,i,n);
+  if(T.ahead){
+    var a=T.ahead.slot;
+    T.ahead.slot=mapIndex(a,kind,i,n);
+    /* the scheduled next bar lost its own slot: its index now holds the following slot */
+    if(kind==="delete" && i===a) T.ahead.slide=true;
+  }
+}
 function loop(){
   if(!T.playing) return;
   var ac=LP.SND.ctx;
@@ -299,6 +403,8 @@ function loop(){
   var heard=Math.floor(Math.max(0,now-T.startAt)*bpm*SONGS.TPB/60);
   var to=Math.floor(Math.max(0,now+LOOKAHEAD-T.startAt)*bpm*SONGS.TPB/60)+1;
   T.heard=heard;
+  /* the ears may have reached a new song bar before the scheduler: take the bar it started, then keep filling */
+  if(T.mode==="song") advanceHeard();
   /* schedule first: if a timer stall made the ears jump past the boundary, scheduleTo still has to place the
      queued pattern at that boundary before the ears are said to be on it */
   scheduleTo(to);
@@ -328,6 +434,8 @@ function startPlay(){
   T.playing=true;
   T.startAt=ac.currentTime+0.02;
   T.lastTick=0; T.heard=0; T.painted=null; T.navKey="";
+  if(T.mode==="song") startSongPos(0);
+  else { T.ahead=null; T.hSlot=-1; T.hPat=-1; T.hTicks=0; T.nSlot=0; }
   T.loop=setInterval(loop,LOOP_MS);
   LP.keepAwake(true);
   renderPlay(); renderNav();
@@ -343,6 +451,8 @@ function stopPlay(){
   T.pendingPat=-1;
   T.queued=-1;
   T.boundaryGlobal=0;
+  T.ahead=null;
+  T.hSlot=-1; T.hPat=-1; T.hTicks=0; T.nSlot=0;
   if(T.loop){ clearInterval(T.loop); T.loop=0; }
   dropSynth();                       /* silence the hits already scheduled in the look-ahead */
   T.painted=null;
@@ -409,6 +519,7 @@ function onAudio(){
   T.startAt=T.ctx.currentTime-SONGS.ticksToSec(tick,T.song.bpm);
   T.lastTick=tick+1;
   T.heard=tick;
+  if(T.mode==="song") advanceHeard();
   T.painted=null;
   paintPlaying(true);
   renderNav();
@@ -510,6 +621,12 @@ function build(){
       keys.appendChild(b);
     })(i);
   }
+  /* the rest key (12.12) sits in the fifth column beside both rows of pitch keys */
+  var restKey=el("button","st-rest-key");
+  restKey.type="button";
+  restKey.id="studio-note-rest";
+  restKey.onclick=function(){ restTap(); };
+  keys.appendChild(restKey);
   var cells=$("studio-chord-cells");
   for(i=0;i<2;i++){
     (function(half){
@@ -534,6 +651,11 @@ function build(){
       ck.appendChild(b);
     })(i);
   }
+  var chordRest=el("button","st-rest-key");
+  chordRest.type="button";
+  chordRest.id="studio-chord-rest";
+  chordRest.onclick=function(){ restTap(); };
+  ck.appendChild(chordRest);
   var letters=$("studio-letters");
   for(i=0;i<SONGS.PATTERNS_MAX;i++){
     (function(p){
@@ -548,7 +670,6 @@ function build(){
   }
   $("studio-pat").onclick=function(){ openSheet("pattern"); };
   $("studio-add").onclick=function(){ addSongSlot(); };
-  $("studio-drop").onclick=function(){ dropSongSlot(); };
   bindRepeat($("studio-minus"),-SONGS.BPM_STEP);
   bindRepeat($("studio-plus"),SONGS.BPM_STEP);
   $("studio-play").onclick=function(){ togglePlay(); };
@@ -668,35 +789,40 @@ function renderTabs(){
   }
 }
 function renderGrid(){
-  var cells=$("studio-grid").children, i, b, on, note, nm, track=noteTrack();
+  var cells=$("studio-grid").children, i, b, on, note, nm, rest, track=noteTrack();
   for(i=0;i<cells.length;i++){
     b=cells[i];
     b.classList.toggle("focus",T.kb && i===T.focus);
     if(track){
       note=T.song && SONGS.noteAt(T.song,T.pat,track,i*SONGS.STEP);
-      nm=note ? SONGS.noteName(SONGS.noteMidi(T.song,track,note.deg)) : "";
-      b.textContent=nm||"";
-      b.classList.toggle("on",!!note);
-      b.classList.toggle("has-note",!!note);
+      rest=!!(note && SONGS.isRest(note));
+      nm=note && !rest ? SONGS.noteName(SONGS.noteMidi(T.song,track,note.deg)) : "";
+      b.textContent=rest?"–":(nm||"");
+      b.classList.toggle("on",!!note && !rest);
+      b.classList.toggle("has-note",!!note && !rest);
+      b.classList.toggle("rest",rest);
       b.classList.toggle("sel",T.noteSel[track]===i);
       b.setAttribute("aria-pressed",note?"true":"false");
-      b.setAttribute("aria-label",tr(note?"studio.note.cell":"studio.note.empty",
+      b.setAttribute("aria-label",rest?tr("studio.rest.cell",{n:i+1}):tr(note?"studio.note.cell":"studio.note.empty",
         {track:screenName(track),n:i+1,note:nm||""}));
     } else {
       b.textContent="";
-      b.classList.remove("has-note","sel");
+      b.classList.remove("has-note","sel","rest");
       on=!!(T.song && SONGS.has(T.song,T.pat,"drums",T.drum,i));
       b.classList.toggle("on",on);
       b.setAttribute("aria-pressed",on?"true":"false");
       b.setAttribute("aria-label",tr("studio.cell",{drum:tr("studio.drum."+T.drum),n:i+1}));
     }
   }
+  var rk=$("studio-note-rest");
+  if(rk){ rk.textContent=tr("studio.rest"); rk.setAttribute("aria-label",tr("studio.rest")); }
 }
 function renderKeys(){
   var track=noteTrack();
   if(!track || !T.song) return;
-  var keys=$("studio-keys").children, i, b, midi, name, note, sel=T.noteSel[track];
+  var keys=$("studio-keys").querySelectorAll(".st-key"), i, b, midi, name, note, sel=T.noteSel[track];
   note=sel>=0 ? SONGS.noteAt(T.song,T.pat,track,sel*SONGS.STEP) : null;
+  if(note && SONGS.isRest(note)) note=null;
   var base=SONGS.tonic(track,T.song.key);
   for(i=0;i<keys.length;i++){
     b=keys[i];
@@ -710,24 +836,28 @@ function renderKeys(){
   }
 }
 function renderChords(){
-  var cells=$("studio-chord-cells").children, i, b, tick, note, ch, roman, name;
+  var cells=$("studio-chord-cells").children, i, b, tick, note, rest, ch, roman, name;
   for(i=0;i<2;i++){
     b=cells[i];
     tick=SONGS.CHORD_STEPS[i]*SONGS.STEP;
     note=T.song && SONGS.noteAt(T.song,T.pat,"chords",tick);
-    ch=note ? SONGS.chordName(T.song,note.deg) : null;
+    rest=!!(note && SONGS.isRest(note));
+    ch=note && !rest ? SONGS.chordName(T.song,note.deg) : null;
     roman=b.querySelector(".st-roman");
     name=b.querySelector(".st-name");
-    roman.textContent=ch?ch.roman:"";
-    name.textContent=ch?ch.name:"";
+    roman.textContent=rest?"–":(ch?ch.roman:"");
+    name.textContent=rest?"":(ch?ch.name:"");
     b.classList.toggle("has-chord",!!ch);
+    b.classList.toggle("rest",rest);
     b.classList.toggle("sel",T.chordSel===i);
     b.classList.toggle("focus",T.kb && T.focus===i);
     b.setAttribute("aria-pressed",note?"true":"false");
-    b.setAttribute("aria-label",tr(i===0?"studio.chord.half1":"studio.chord.half2")+(ch?" · "+ch.name:""));
+    b.setAttribute("aria-label",rest?tr("studio.rest.cell",{n:SONGS.CHORD_STEPS[i]+1}):
+      tr(i===0?"studio.chord.half1":"studio.chord.half2")+(ch?" · "+ch.name:""));
   }
-  var keys=$("studio-chord-keys").children, k, kb, degNote;
+  var keys=$("studio-chord-keys").querySelectorAll(".st-chord-key"), k, kb, degNote;
   degNote=T.chordSel>=0 && T.song ? SONGS.noteAt(T.song,T.pat,"chords",SONGS.CHORD_STEPS[T.chordSel]*SONGS.STEP) : null;
+  if(degNote && SONGS.isRest(degNote)) degNote=null;
   for(i=0;i<keys.length;i++){
     k=keys[i];
     ch=T.song ? SONGS.chordName(T.song,i) : null;
@@ -737,6 +867,8 @@ function renderChords(){
     k.setAttribute("aria-pressed",degNote && degNote.deg===i?"true":"false");
     k.setAttribute("aria-label",tr("studio.chord.key",{name:ch?ch.name:""}));
   }
+  var rk=$("studio-chord-rest");
+  if(rk){ rk.textContent=tr("studio.rest"); rk.setAttribute("aria-label",tr("studio.rest")); }
 }
 function renderSong(){
   var chain=$("studio-chain"), s=T.song&&T.song.song?T.song.song:[0], i, b;
@@ -764,8 +896,6 @@ function renderSong(){
     dot.classList.toggle("on",has);
   }
   $("studio-add").textContent=tr("studio.song.add");
-  $("studio-drop").textContent=tr("studio.song.drop");
-  $("studio-drop").disabled=!T.song || s.length<=1;
   /* the chain cells are new nodes: put the playing slot back on them when the chain changes mid-song */
   if(T.playing) paintPlaying(true);
 }
@@ -1025,6 +1155,7 @@ function tourEnd(seen){
 function openSheet(name){ T.sheet=name; renderSheet(); }
 function closeSheet(){
   if(T.sheet==="new"){ T.sheet="menu"; renderSheet(); return; }
+  if(T.sheet==="demo"){ T.sheet="menu"; renderSheet(); return; }
   if(T.sheet==="copyask"){ T.sheet="copy"; renderSheet(); return; }
   if(T.sheet){ T.sheet=""; renderSheet(); }
 }
@@ -1071,6 +1202,7 @@ function renderSheet(){
     sheetHead(tr("studio.title"));
     var ul=el("ul","lcd-menu");
     if(T.loaded) sheetRow(ul,tr("studio.new"),"",function(){ openSheet("new"); });
+    if(T.loaded) sheetRow(ul,tr("studio.demo"),"",function(){ openSheet("demo"); });
     if(T.song && T.loaded) sheetRow(ul,tr("studio.kit",{kit:tr("studio.kit."+T.song.kit)}),"",function(){
       T.song.kit=T.song.kit==="soft" ? "chip" : "soft";
       touch(); renderSheet();
@@ -1096,6 +1228,24 @@ function renderSheet(){
     row.appendChild(yes); row.appendChild(no);
     ask.appendChild(row);
     sh.appendChild(ask);
+    return;
+  }
+  if(T.sheet==="demo"){
+    sheetHead(tr("studio.title"));
+    var askDemo=el("div","st-ask");
+    askDemo.appendChild(el("p","",tr("studio.demo.ask")));
+    var drow=el("div","row");
+    var dyes=el("button","btn","");
+    dyes.type="button";
+    dyes.textContent=tr("studio.confirm");
+    dyes.onclick=function(){ demoTape(); };
+    var dno=el("button","btn ghost","");
+    dno.type="button";
+    dno.textContent=tr("common.cancel");
+    dno.onclick=function(){ closeSheet(); };
+    drow.appendChild(dyes); drow.appendChild(dno);
+    askDemo.appendChild(drow);
+    sh.appendChild(askDemo);
     return;
   }
   if(T.sheet==="pattern"){
@@ -1136,6 +1286,18 @@ function renderSheet(){
     sh.appendChild(crow);
     return;
   }
+  if(T.sheet==="slot"){
+    var chain=(T.song&&T.song.song)||[0], at=T.slot;
+    sheetHead(tr("studio.song.slot",{n:at+1,p:letter(chain[at]==null?0:chain[at])}));
+    var sul=el("ul","lcd-menu");
+    sheetRow(sul,tr("studio.song.insert"),"",function(){ insertSlotBefore(); });
+    sheetRow(sul,tr("studio.song.copy"),"",function(){ copySlotAfter(); });
+    var delRow=sheetRow(sul,tr("studio.song.del"),"",function(){ deleteSlotAt(); });
+    if(chain.length<=1){ delRow.className="disabled"; delRow.setAttribute("aria-disabled","true"); delRow.onclick=null; }
+    sheetRow(sul,tr("studio.back"),"",function(){ closeSheet(); });
+    sh.appendChild(sul);
+    return;
+  }
   /* copyask: the target already has notes, so the overwrite needs an answer (A / 确认, B / 取消) */
   var ask2=el("div","st-copy-ask");
   ask2.appendChild(el("p","",tr("studio.pat.over",{p:letter(T.copyTo)})));
@@ -1161,20 +1323,28 @@ function copyTo(target){
   setPat(target);
   toast(tr("studio.pat.copied",{p:letter(target)}));
 }
-function newTape(){
-  if(!T.loaded) return;
+/* a new or demo tape: same path as a tab tap, drums screen, pattern A, keeps the beat if one is playing (12.9) */
+function swapTape(song){
   stopRepeatAll();
   screenTo("drums");            /* the same path as a tab tap: an unfinished tour ends unseen */
   T.pat=0; T.focus=0; T.slot=0; T.kb=false;
   T.noteSel={bass:-1,melody:-1}; T.noteDeg={bass:0,melody:0}; T.chordSel=-1; T.chordDeg=0;
   T.queued=-1; T.pendingPat=-1; T.boundaryGlobal=0; T.chainPat=0; T.playPat=0;
-  setSong(SONGS.newSong(Date.now()));
+  setSong(song);
   if(T.playing){ T.lastTick=Math.max(T.lastTick,T.heard+1); T.painted=null; }
   T.dirty=true;
   T.sheet="";
   flush();
   renderAll();
   maybeTour();
+}
+function newTape(){
+  if(!T.loaded) return;
+  swapTape(SONGS.newSong(Date.now()));
+}
+function demoTape(){
+  if(!T.loaded) return;
+  swapTape(SONGS.demoSong(Date.now()));
 }
 /* ---------- taps and keys ---------- */
 /* the one screen switch: leaving a screen mid-tour ends that tour unseen (it shows again next time) */
@@ -1247,9 +1417,10 @@ function cellTap(step){
 }
 function noteTap(track,step){
   if(!T.loaded || !T.song) return;
-  var tick=step*SONGS.STEP, note=SONGS.noteAt(T.song,T.pat,track,tick), deg;
+  var tick=step*SONGS.STEP, note=SONGS.noteAt(T.song,T.pat,track,tick), deg, rest;
   T.focus=step;
   if(note){
+    rest=SONGS.isRest(note);
     if(T.noteSel[track]===step){
       T.song=SONGS.removeNote(T.song,T.pat,track,tick);
       T.noteSel[track]=-1;
@@ -1259,7 +1430,7 @@ function noteTap(track,step){
     }
     T.noteSel[track]=step;
     renderGrid(); renderKeys();
-    auditionNote(track,note.deg);
+    if(!rest) auditionNote(track,note.deg);
     return;
   }
   deg=T.noteDeg[track]||0;
@@ -1269,6 +1440,26 @@ function noteTap(track,step){
   renderGrid(); renderKeys(); renderNav();
   auditionNote(track,deg);
   tourEvent("note");
+}
+/* the rest key (12.12): the selected cell becomes a rest; it never changes the track's last-used degree and never
+   auditions. With no selection it does nothing. */
+function restTap(){
+  var track=noteTrack();
+  if(track){ restNote(track); return; }
+  if(T.screen==="chords") restChord();
+}
+function restNote(track){
+  var sel=T.noteSel[track];
+  if(!T.loaded || !T.song || sel<0) return;
+  T.song=SONGS.setRest(T.song,T.pat,track,sel*SONGS.STEP);
+  touch();
+  renderGrid(); renderKeys(); renderNav();
+}
+function restChord(){
+  if(!T.loaded || !T.song || T.chordSel<0) return;
+  T.song=SONGS.setRest(T.song,T.pat,"chords",SONGS.CHORD_STEPS[T.chordSel]*SONGS.STEP);
+  touch();
+  renderChords(); renderNav();
 }
 function keyTap(deg){
   var track=noteTrack(), sel, note;
@@ -1289,9 +1480,10 @@ function keyTap(deg){
 }
 function chordTap(half){
   if(!T.loaded || !T.song) return;
-  var tick=SONGS.CHORD_STEPS[half]*SONGS.STEP, note=SONGS.noteAt(T.song,T.pat,"chords",tick), deg;
+  var tick=SONGS.CHORD_STEPS[half]*SONGS.STEP, note=SONGS.noteAt(T.song,T.pat,"chords",tick), deg, rest;
   T.focus=half;
   if(note){
+    rest=SONGS.isRest(note);
     if(T.chordSel===half){
       T.song=SONGS.removeNote(T.song,T.pat,"chords",tick);
       T.chordSel=-1;
@@ -1301,8 +1493,8 @@ function chordTap(half){
     }
     T.chordSel=half;
     renderChords();
-    auditionChord(note.deg);
-    tourEvent("chord");            /* selecting an occupied cell follows step 1 too */
+    if(!rest) auditionChord(note.deg);
+    tourEvent("chord");            /* selecting any occupied cell, a rest too, follows step 1 (12.10) */
     return;
   }
   deg=T.chordDeg||0;
@@ -1324,8 +1516,12 @@ function chordKeyTap(deg){
   auditionChord(deg);
 }
 function selectSlot(i){
-  if(!T.song) return;
-  T.slot=Math.max(0,Math.min((T.song.song||[0]).length-1,i));
+  if(!T.loaded || !T.song) return;
+  var s=T.song.song||[0];
+  i=Math.max(0,Math.min(s.length-1,i));
+  /* tapping the slot already selected opens its sheet (12.12); another slot just selects it */
+  if(i===T.slot){ T.focus=i; openSheet("slot"); return; }
+  T.slot=i;
   T.focus=T.slot;
   renderSong(); renderNav();
 }
@@ -1355,15 +1551,42 @@ function addSongSlot(){
   renderSong(); renderNav(); renderTabs();
   scrollSlotIntoView();
 }
-function dropSongSlot(){
+/* the slot sheet's three edits (12.12): insert the slot's letter before it, copy it after it, or delete it. All three
+   close the sheet and save like any other slot edit; the player reads the live chain, so they work while it plays. */
+function insertSlotAt(i,p,sel){
   if(!T.loaded || !T.song) return;
   var s=T.song.song||[0];
-  if(s.length<=1) return;
-  T.song=SONGS.dropSlot(T.song);
-  if(T.slot>T.song.song.length-1) T.slot=T.song.song.length-1;
-  if(T.focus>T.song.song.length-1) T.focus=T.song.song.length-1;
+  if(s.length>=SONGS.SONG_MAX){ toast(tr("studio.song.full")); return; }
+  T.song=SONGS.insertSlot(T.song,i,p);
+  mapSongEdit("insert",i);
+  T.slot=Math.max(0,Math.min(T.song.song.length-1,sel));
+  T.focus=T.slot;
   touch();
-  renderSong(); renderNav(); renderTabs();
+  T.sheet="";
+  renderSong(); renderNav(); renderTabs(); renderSheet();
+  scrollSlotIntoView();
+}
+function insertSlotBefore(){
+  var s=(T.song&&T.song.song)||[0], i=T.slot;
+  if(i<0 || i>=s.length) return;
+  insertSlotAt(i,s[i],i);
+}
+function copySlotAfter(){
+  var s=(T.song&&T.song.song)||[0], i=T.slot;
+  if(i<0 || i>=s.length) return;
+  insertSlotAt(i+1,s[i],i+1);
+}
+function deleteSlotAt(){
+  var s=(T.song&&T.song.song)||[0], i=T.slot;
+  if(!T.loaded || !T.song || s.length<=1 || i<0 || i>=s.length) return;
+  T.song=SONGS.removeSlot(T.song,i);
+  mapSongEdit("delete",i);
+  T.slot=Math.min(i,T.song.song.length-1);
+  T.focus=T.slot;
+  touch();
+  T.sheet="";
+  renderSong(); renderNav(); renderTabs(); renderSheet();
+  scrollSlotIntoView();
 }
 function pickDrum(drum,play,byUser){
   if(SONGS.DRUMS.indexOf(drum)<0) return;
@@ -1434,12 +1657,14 @@ document.addEventListener("keydown",function(e){
   else if(key==="x"||key==="X"){
     if(e.repeat) return;
     if(T.sheet==="new") newTape();
+    else if(T.sheet==="demo") demoTape();
     else if(T.sheet==="copyask") confirmCopy();
+    else if(T.sheet==="slot") insertSlotBefore();   /* A is the sheet's first row, like the other questions' 确认 */
     else if(!T.sheet) tapFocus();
   }
   else if(key==="Enter"){ if(e.repeat) return; togglePlay(); }
   else if(key==="Shift"){ if(e.repeat) return; if(!T.sheet && T.screen==="drums") nextDrum(); }
-  else if(key==="z"||key==="Z"){ if(e.repeat) return; if(T.tour) tourEnd(true); else closeSheet(); }
+  else if(key==="z"||key==="Z"){ if(e.repeat) return; if(T.sheet) closeSheet(); else if(T.tour) tourEnd(true); }
   else done=false;
   if(done) e.preventDefault();
 });
