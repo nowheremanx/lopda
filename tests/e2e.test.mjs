@@ -13,6 +13,9 @@ import { ROOT, tempDir, runScript } from "./helpers.mjs";
 let pw = null;
 try { pw = await import("playwright"); } catch {}
 const skip = pw ? false : "playwright is not installed";
+/* runtime/exif.js itself, so the darkroom test reads back what it wrote */
+const EXIF = runScript("runtime/exif.js").LopdaExif;
+const RUNTIME_VERSION = readFileSync(join(ROOT, "runtime/core.js"), "utf8").match(/var RUNTIME_VERSION="([^"]+)"/)[1];
 
 const TYPES = { ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css", ".json": "application/json",
   ".png": "image/png", ".wasm": "application/wasm", ".webmanifest": "application/manifest+json" };
@@ -3226,6 +3229,25 @@ test("darkroom: a roll left in the camera by an older version is void when the c
 /* ---------- darkroom step 2 (docs/design/darkroom.md section 9): developing, the viewer, the three prints ---------- */
 /* width and height from a PNG's IHDR */
 const pngSize = (buf) => [buf.readUInt32BE(16), buf.readUInt32BE(20)];
+/* width and height from a JPEG's SOF0/SOF2 (after APP0 and the Exif APP1, which this walks past) */
+const jpegSize = (buf) => {
+  let o = 2;
+  while (o + 9 < buf.length) {
+    if (buf[o] !== 0xff) throw new Error("not a JPEG segment at " + o);
+    const m = buf[o + 1];
+    if (m === 0xda || m === 0xd9) break;
+    const len = buf.readUInt16BE(o + 2);
+    if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) return [buf.readUInt16BE(o + 7), buf.readUInt16BE(o + 5)];
+    o += 2 + len;
+  }
+  throw new Error("no SOF in the JPEG");
+};
+/* the EXIF wall clock is the shooting instant at the frame's tz: the same arithmetic runtime/exif.js does */
+const exifTime = (taken, tz) => {
+  const d = new Date(taken + tz * 60000), p = (n) => String(n).padStart(2, "0");
+  return `${d.getUTCFullYear()}:${p(d.getUTCMonth() + 1)}:${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
+};
+const exifOffset = (tz) => `${tz < 0 ? "-" : "+"}${String(Math.floor(Math.abs(tz) / 60)).padStart(2, "0")}:${String(Math.abs(tz) % 60).padStart(2, "0")}`;
 
 test("darkroom: develop a roll with blank frames, walk it in colour, print single, contact sheet and strip; a re-imported negative reprints byte for byte", { skip, timeout: 240000 }, async (t) => {
   const { p, errors, open } = await camPage(t);
@@ -3362,8 +3384,16 @@ test("darkroom: develop a roll with blank frames, walk it in colour, print singl
   assert.equal(await p.textContent("#dk-keys .sk-start span"), "出片");
   await press("Enter");
   const single = await save(() => press("x"));
-  assert.match(single.name, /^lopda-print-\d{8}-portrait-400-001-01\.png$/);
-  assert.deepEqual(pngSize(single.buf), [1600, 1400]);
+  assert.match(single.name, /^lopda-print-\d{8}-portrait-400-001-01\.jpg$/);
+  assert.deepEqual([...single.buf.subarray(0, 3)], [0xff, 0xd8, 0xff], "a JPEG from the first byte");
+  assert.deepEqual(jpegSize(single.buf), [1600, 1400]);
+  const frame1 = roll.frames[0];
+  const exif = EXIF.read(single.buf);
+  assert.equal(exif.make, "Lo-PDA");
+  assert.equal(exif.model, "Lo-PDA");
+  assert.equal(exif.software, "Lo-PDA " + RUNTIME_VERSION);
+  assert.equal(exif.dateTimeOriginal, exifTime(frame1.taken, frame1.tz), "the shooting day at the shooting tz");
+  assert.equal(exif.offsetTimeOriginal, exifOffset(frame1.tz));
   await toast(/照片存好了/);
   await press("Enter"); await press("ArrowDown");
   const card = await save(() => press("x"));

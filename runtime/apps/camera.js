@@ -6,7 +6,7 @@
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  *
  * The roll in the camera: data/users/local/film {roll, no, stock, seed, size, res, loaded, exposure, contrast, date, lens};
- * its frames: data/users/local/frames/items/<roll>-<nn> {roll, n, px, taken, dated, lens, exposure, contrast, blank};
+ * its frames: data/users/local/frames/items/<roll>-<nn> {roll, n, px, taken, tz, dated, lens, exposure, contrast, blank};
  * how many rolls this handheld has loaded: data/users/local/camera {rolls};
  * latent images: LopdaPlatform.files "roll/<roll>/<nn>.jpg" (800x700 JPEG). Unloading moves the roll to
  * data/users/local/rolls/items/<roll> (apps/darkroom.js); the latent images keep their keys.
@@ -320,7 +320,7 @@ function keepLatent(roll,n,c){
 function takeFrame(px,latent){
   var n=F.frames.length+1, now=Date.now(), roll=F.roll;
   if(F.date) burnDate(px,CW,CH,now,F.res);
-  var fr={roll:roll, n:n, px:Array.prototype.join.call(px,""), taken:now, dated:F.date, exposure:F.exposure, contrast:F.contrast};
+  var fr={roll:roll, n:n, px:Array.prototype.join.call(px,""), taken:now, tz:-new Date(now).getTimezoneOffset(), dated:F.date, exposure:F.exposure, contrast:F.contrast};
   if(LIVE.on) fr.lens=lensNow().id;   /* for the lab to print later; the system camera's lens is unknown */
   F.frames.push(fr);
   /* film: you never see the frame. The shutter blinks, the film winds on. */
@@ -498,6 +498,7 @@ function rollDoc(frames,bytes){
   return {id:F.roll, no:F.no, stock:F.stock, seed:F.seed, size:F.size, res:F.res, loaded:F.loaded, out:Date.now(), name:"", bytes:bytes,
     frames:frames.map(function(fr){
       var f={n:fr.n, px:fr.px, taken:fr.taken};
+      if(typeof fr.tz==="number") f.tz=fr.tz;   /* the shooting time zone travels with the negative */
       if(fr.blank) f.blank=fr.blank;
       else { f.dated=!!fr.dated; f.exposure=fr.exposure|0; f.contrast=fr.contrast|0; if(fr.lens) f.lens=fr.lens; }
       return f;
@@ -535,7 +536,7 @@ function rewindEarly(){
   if(!F.roll || rollFull()) return;
   var fill=new Array(CW*CH+1).join("3"), now=Date.now(), writes=[];
   for(var n=F.frames.length+1;n<=F.size;n++){
-    var fr={roll:F.roll, n:n, px:fill, taken:now, blank:"light"};
+    var fr={roll:F.roll, n:n, px:fill, taken:now, tz:-new Date(now).getTimezoneOffset(), blank:"light"};
     F.frames.push(fr);
     if(S.db) writes.push([S.refs.frames.doc(F.roll+"-"+pad2(n)),fr]);
   }
