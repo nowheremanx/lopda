@@ -3,18 +3,20 @@
  * The rules live in petsim.js (window.LopdaPet) and the art in petart.js (window.LopdaPetArt); this file owns the
  * screen, the keys, the timers and the storage. One IIFE, ES5 style, talks to the rest only through window.LP.
  *
- * Screen: the room is an 81 x 60 canvas at 4 CSS pixels a pixel (324 x 240), then five 44 px icon targets and the
+ * Screen: the room is a 162 x 120 canvas at 2 CSS pixels a pixel (324 x 240), then five 44 px icon targets and the
  * soft keys; 328 px of content, so it fits the 331 x 359 LCD with nothing to scroll. Everything on the canvas is
  * putImageData from a Uint8Array of tone indices: never drawImage after putImageData (Safari swaps red and blue).
- * Sub-screens (food, the play pack list, the START menu, look, box, word) open over the room at the same 324 x 240,
- * on paper with ink text. A play pack runs in the room canvas at 20 fps only while its screen is visible (50 ms
- * fixed ticks in petplay.js), from the same putImageData buffer as the room; leaving, pausing or HOME stops it.
+ * Sub-screens (food, the play pack list, the START menu, look, box, word, the naming panel) open over the room at the
+ * same 324 x 240, on paper with ink text. A play pack runs in the room canvas at 20 fps only while its screen is
+ * visible (50 ms fixed ticks in petplay.js), from the same putImageData buffer as the room; leaving, pausing or HOME
+ * stops it.
  *
  * Storage: data/users/local/pet (design.md 8 plus petsim's lastMeal, awakeHunger, awakeJoy, today, seenUse and aiUse;
- * boxSeen and today's pick/outing phase/remaining/hour/ai flag, and outSouv — the souvenir a background trip is
- * bringing in — and data/users/local/pet/souvenirs/<id> {name:{zh,en}, line:{zh,en}, px, at, ai, day}. A failed read is not
- * "no pet": the program then keeps an in-memory pet and never writes an egg over a save it could not read (the status
- * bar says 未存档).
+ * boxSeen and today's pick/outing phase/remaining/hour/ai/shelf flag, and outSouv — the souvenir a background trip is
+ * bringing in — and data/users/local/pet/souvenirs/<id> {name:{zh,en}, line:{zh,en}, px, at, ai, day}. The pet's
+ * `name` is fixed at the hatch and `shelf` is the one souvenir shown on the room's shelf (or null). A failed read is
+ * not "no pet": the program then keeps an in-memory pet and never writes an egg over a save it could not read (the
+ * status bar says 未存档).
  *
  * The day: on the first open of a day (and after hatching) the program asks the read-only summaries for the day's one
  * pick: an upcoming calendar date (a count of days, never a name), a diary after 20:00, the word book, a book not opened
@@ -26,7 +28,7 @@
  * From boot: the pet lives without its screen. On storage ready, whenever the home screen draws its icon and on resume,
  * it catches up, rolls the day, decides the pick and the outing and, once the outing hour has come, makes the day's one
  * AI call and saves the souvenir. No sound, toast, popup or animation happens outside the pet's screen; growth days
- * (openDay) and the 60 s hatch still count only time on the screen.
+ * (openDay) and the ~8 s hatch still count only time on the screen.
  */
 (function(){
 "use strict";
@@ -34,8 +36,8 @@
 var LP=window.LP, $=LP.$, S=LP.S, tr=LP.tr, I18N=LP.I18N;
 var Pet=window.LopdaPet, Art=window.LopdaPetArt, Play=window.LopdaPetPlay, L=window.LopdaLunar;
 
-var HOUR=3600000, DAY=86400000, SCALE=4;
-var ROOM_W=81, ROOM_H=60;
+var HOUR=3600000, DAY=86400000, SCALE=2;
+var ROOM_W=162, ROOM_H=120;
 var ICON_NAMES=["food", "play", "wash", "light", "call"];
 var TONE_OF={k:0,d:1,m:2,p:3, "0":0, "1":1, "2":2, "3":3};
 var ICON_ROWS=[
@@ -57,15 +59,19 @@ var ICON_ROWS=[
   "................"];
 /* a short, original four-bar hatch tune: p1 the tune, p2 a third below, tri the floor */
 var JINGLE={bpm:180, p1:"o6 l8 e g c8 > c < b g e c4", p2:"o5 l8 c e g8 e d c4", tri:"o4 l4 c g c g c"};
-var SWEEP_MS=1000, EGG_MS=60000, OUT_MS=20000, HOLD_MS=600;
+var SWEEP_MS=1000, EGG_MS=8000, EGG_CRACK1=3000, EGG_CRACK2=6000, HATCH_ANIM_MS=1500, OUT_MS=20000, HOLD_MS=600;
+/* where it lies at night and where it stands by day; the wake walk goes from the first to the second */
+var BED_X=10, BED_Y=52, RUG_X=83, RUG_Y=69;
+var NAME_EMOJI=/[\p{Extended_Pictographic}\u{1F1E6}-\u{1F1FF}\u{1F3FB}-\u{1F3FF}\u{FE0F}\u{200D}\u{20E3}]/gu;
 
 var P={
   save:null, loaded:false, nostore:false, readTried:false, readFailed:false, inView:false,
   refs:null, souv:[], usage:null, resumeOuting:false,
   sub:null, sel:0, menuSel:0, frame:0,
   anim:0, hold:0, roomHold:0, holdFired:false,
-  eggMs:0, action:null, actionUntil:0, heartUntil:0,
-  washUntil:0, washStart:0, flash:null, outing:null, foodSel:0, boxPage:0,
+  eggMs:0, hatching:null, action:null, actionUntil:0, heartUntil:0,
+  washUntil:0, washStart:0, flash:null, outing:null, foodSel:0, boxPage:0, boxAsk:null,
+  naming:null, wake:null, wasAsleep:null, lastScene:null,
   game:null, gameSel:0, gameTimer:0, gameLabel:"", gameHeld:{left:false,right:false,a:false}, gamePress:{left:false,right:false,a:false}, gameTouch:null,
   gameSeed:null,
   angryUntil:0, moodClearUntil:0, callTaps:[],
@@ -182,10 +188,12 @@ function normalize(save){
     var sp=Art.PACKS[save.species];
     save.room=(sp && sp.room && sp.room.id) || save.species;
   }
-  if(!save.marks || typeof save.marks!=="object") save.marks={ant:0,pat:1,eye:0};
+  if(!save.marks || typeof save.marks!=="object") save.marks={ant:0,eye:0};
+  if(save.name===undefined) save.name=null;
+  if(save.shelf===undefined) save.shelf=null;
   if(save.light===undefined) save.light=true;
   if(save.boxSeen==null) save.boxSeen=0;
-  if(!save.today || typeof save.today!=="object") save.today={day:null,shown:null,picked:false,pick:null,used:false,rewarded:false,ai:false,out:null,back:false,snacks:0,pats:0,played:0,burp:false};
+  if(!save.today || typeof save.today!=="object") save.today={day:null,shown:null,picked:false,pick:null,used:false,rewarded:false,ai:false,out:null,back:false,snacks:0,pats:0,played:0,burp:false,shelf:false};
   var td=save.today;
   if(td.picked===undefined) td.picked=!!td.pick;
   if(td.pick===undefined) td.pick=null;
@@ -195,6 +203,7 @@ function normalize(save){
   if(td.shownYesterday===undefined) td.shownYesterday=null;
   if(td.outSouv===undefined) td.outSouv=null;
   if(td.outHour===undefined) td.outHour=null;
+  if(td.shelf===undefined) td.shelf=false;
   return save;
 }
 function packOf(save){
@@ -262,7 +271,7 @@ function loadStorage(){
     }
     readUsage().then(function(){
       backfillForm();
-      if(isOpen()){ ensurePet(); refreshTime(); renderKeys(); render(); }
+      if(isOpen()){ ensurePet(); refreshTime(); maybeNamePrompt(); renderKeys(); render(); }
       else { backgroundDay(); }
       homeMaybeRender();
     });
@@ -971,22 +980,88 @@ function bringBack(){
     beep("ok"); saveNow(); render();
   });
 }
+/* the pack's default name in the language the pet is hatched in: 芯仔 / Chip for chip */
+function defaultPetName(){
+  var pack=packOf(P.save), n=pack && pack.name;
+  if(!n) return "";
+  if(typeof n==="string") return n;
+  return String(n[I18N.lang] || n.zh || n.en || "");
+}
+/* 6 CJK characters or 12 Latin letters: a CJK character costs 2, everything else 1. Emoji are stripped, never
+   counted; the field is trimmed only when the name is confirmed, so a space can be typed between words. */
+function nameCost(cp){
+  return /[\u3400-\u9fff]/.test(cp) ? 2 : 1;
+}
+function limitName(v){
+  var s=String(v==null?"":v).replace(NAME_EMOJI,""), cp=Array.from(s), out="", cost=0, i, w;
+  for(i=0;i<cp.length;i++){
+    w=nameCost(cp[i]);
+    if(cost+w>12) break;
+    out+=cp[i];
+    cost+=w;
+  }
+  return out;
+}
+function nameFinal(){
+  var v=limitName(P.naming ? P.naming.value : "").replace(/\s+/g," ").trim();
+  return v || defaultPetName();
+}
+function openNaming(){
+  if(!P.save || P.save.stage==="egg") return;
+  P.sub="name";
+  P.boxAsk=null;
+  P.naming={value:P.save.name || defaultPetName(), confirm:false};
+  P.panelKey="";
+  renderKeys(); render();
+}
+/* A/OK from the field: ask once more, then keep the name forever. B from the question goes back to the field. */
+function nameNext(){
+  if(!P.naming) return;
+  if(P.naming.confirm){ finishNaming(); return; }
+  P.naming.value=limitName(P.naming.value);
+  P.naming.confirm=true;
+  P.panelKey="";
+  beep("tap"); renderKeys(); render();
+}
+function nameEdit(){
+  if(!P.naming) return;
+  P.naming.confirm=false;
+  P.panelKey="";
+  beep("tap"); renderKeys(); render();
+}
+function finishNaming(){
+  if(!P.save) return;
+  P.save.name=nameFinal();
+  P.naming=null;
+  P.sub=null;
+  P.action="happy"; P.actionUntil=now()+2000;
+  beep("ok"); saveNow(); renderKeys(); render(); homeMaybeRender();
+}
+function maybeNamePrompt(){
+  if(P.save && P.save.stage!=="egg" && !P.save.name && !P.naming && !P.sub) openNaming();
+}
 function hatchNow(silent){
   if(!P.save || P.save.stage!=="egg") return;
   P.save=Pet.hatch(P.save);
-  P.eggMs=0; P.action="happy"; P.actionUntil=now()+3000;
+  P.eggMs=0; P.hatching=null; P.action="happy"; P.actionUntil=now()+3000;
+  if(silent && !P.save.name) P.save.name=defaultPetName();
   if(!silent){
     beep("ok");
     if(isOpen() && LP.chip && LP.chip.music){ LP.chip.music({action:"play",song:JINGLE,loop:false}); P.jingle=true; }
   }
-  saveNow(); renderKeys(); render();
+  saveNow();
+  if(!silent && !P.save.name) openNaming();
+  else { renderKeys(); render(); }
   buildPick();
   homeMaybeRender();
 }
 function restartPet(){
+  var old=P.save, shelf=(old && old.shelf && findSouv(old.shelf)) ? old.shelf : null;
   P.save=freshSave();
+  P.save.shelf=shelf;                        /* the souvenirs and the one on the shelf are kept */
   P.save.boxSeen=P.souv.length;              /* the box is kept and already seen */
   P.eggMs=0; P.sub=null; P.confirmStage=0; P.action=null; P.outing=null; P.game=null;
+  P.hatching=null; P.naming=null; P.boxAsk=null; P.wake=null; P.wasAsleep=null;
   stopGameTimer();
   P.lastWants=null; P.boxPage=0; P.bringing=false;
   stopAiJob();
@@ -996,7 +1071,7 @@ function restartPet(){
 /* ---------- the four sub-screens ---------- */
 function openLook(){ P.sub="look"; P.confirmStage=0; renderKeys(); beep("tap"); render(); }
 function openBox(){
-  P.sub="box"; P.boxPage=0;
+  P.sub="box"; P.boxPage=0; P.boxAsk=null;
   if(P.save){ P.save.boxSeen=P.souv.length; saveNow(); }
   homeMaybeRender();
   renderKeys(); beep("tap"); render();
@@ -1091,12 +1166,38 @@ function confirmNext(){
     /* the look screen's A is the long press; a tap alone does nothing */
   }
 }
-function pasteSouvenir(){
+/* A souvenir on the room's shelf: one at a time, replaced from the box; the first change of a day is +1 joy.
+   The pet turns happy for a moment when something new is put up. No note is written anywhere. */
+function shelfGainJoy(){
+  var s=P.save;
+  if(!s) return;
+  if(!s.today) s.today={shelf:false};
+  if(s.today.shelf) return;
+  var sp=Pet.SPECIES[s.species]||Pet.SPECIES.chip;
+  s.today.shelf=true;
+  s.joy=Math.min(sp.joyMax,(+s.joy||0)+1);
+}
+function setShelf(id){
+  var s=P.save;
+  if(!s) return;
+  var put=!!id;
+  s.shelf=id||null;
+  shelfGainJoy();
+  if(put){ P.action="happy"; P.actionUntil=now()+2500; P.idle=null; }
+  P.boxAsk=null; P.panelKey="";
+  beep("ok"); saveSoon(); renderKeys(); render();
+}
+function askShelfAction(){
   var s=P.souv[P.boxPage];
-  if(!s || !LP.notes) return;
-  LP.notes.append(tr("pet.noteTitle"), souvText(s,"name")+"\n"+souvText(s,"line")).then(function(){
-    beep("ok"); LP.toast(tr("pet.box.pasted"));
-  },function(){ beep("err"); LP.toast(tr("pet.box.pastefail")); });
+  if(!s || !P.save) return;
+  P.boxAsk={id:s.id, take:P.save.shelf===s.id};
+  P.panelKey=""; beep("tap"); renderKeys(); render();
+}
+function answerShelf(yes){
+  var ask=P.boxAsk;
+  if(!ask) return;
+  if(!yes){ P.boxAsk=null; P.panelKey=""; beep("tap"); renderKeys(); render(); return; }
+  setShelf(ask.take?null:ask.id);
 }
 function pickFood(kind){ feed(kind==="snack"?"snack":"meal"); }
 /* dir -1 is up / left and +1 is down / right: the food list is vertical, so both pairs move it, the icon row is
@@ -1112,6 +1213,7 @@ function nav(dir){
   if(P.sub==="game") return;
   if(P.sub==="box"){
     if(!P.souv.length) return;
+    P.boxAsk=null;
     P.boxPage=Math.max(0,Math.min(P.souv.length-1,P.boxPage+dir));
     beep("move"); render(); return;
   }
@@ -1154,7 +1256,8 @@ function pressA(){
   }
   if(P.sub==="menu"){ chooseMenuItem(P.menuSel); return; }
   if(P.sub==="look"){ confirmNext(); return; }
-  if(P.sub==="box"){ pasteSouvenir(); return; }
+  if(P.sub==="box"){ if(P.boxAsk) answerShelf(true); else askShelfAction(); return; }
+  if(P.sub==="name"){ nameNext(); return; }
   if(P.sub==="word"){ lookupWord(); return; }
   if(P.sub) return;
   if(P.save.travel){ bringBack(); return; }
@@ -1162,8 +1265,13 @@ function pressA(){
 }
 function back(){
   if(P.sub==="game"){ exitGame(); return; }
+  if(P.sub==="name"){
+    if(P.naming && P.naming.confirm) nameEdit();
+    return;
+  }
+  if(P.sub==="box" && P.boxAsk){ answerShelf(false); return; }
   if(P.sub){
-    P.sub=null; P.confirmStage=0;
+    P.sub=null; P.confirmStage=0; P.boxAsk=null;
     P.wordWord=""; P.wordMeaning=null; P.wordBusy=false;
     beep("tap"); renderKeys(); render();
   }
@@ -1274,9 +1382,8 @@ function syncWeatherSound(){
 }
 function markNames(save,pack){
   var m=save.marks||{}, out={};
-  out.ant=(pack.marks.ant||["ball"])[m.ant|0] || "ball";
-  out.pat=(pack.marks.pat||["plain"])[m.pat|0] || "plain";
-  out.eye=(pack.marks.eye||["dot"])[m.eye|0] || "dot";
+  out.ant=(pack.marks.ant||["orb"])[m.ant|0] || "orb";
+  out.eye=(pack.marks.eye||["round"])[m.eye|0] || "round";
   return out;
 }
 /* A missing frame must never empty the screen: the stage's idle frame stands in, and ?debug names it once. */
@@ -1294,12 +1401,31 @@ function petFrame(pack,stage,marks,view,name){
   if(g && g.length && (!Art.frameInk || Art.frameInk(g)>0)) return g;
   return Art.stagePose(pack,stage,marks,"front","idle");
 }
-/* the egg over its 60 visible seconds: whole, a small crack, a big crack; then the program hatches it */
+/* the egg over its ~8 visible seconds: whole, a small crack at 3 s, a big crack at 6 s, then the split */
 function eggGrid(pack){
   var cracks=(pack && pack.eggCrack)||[], g=(pack && pack.egg) || null;
-  if(P.eggMs>=EGG_MS*2/3 && cracks[1]) g=cracks[1];
-  else if(P.eggMs>=EGG_MS/3 && cracks[0]) g=cracks[0];
+  if(P.eggMs>=EGG_CRACK2 && cracks[1]) g=cracks[1];
+  else if(P.eggMs>=EGG_CRACK1 && cracks[0]) g=cracks[0];
   return g;
+}
+/* The short hatch: the top of the shell lifts away, then the baby stands in the bottom half. A pure picture made of
+   the pack's own egg and baby grids, so a second species hatches without a single new frame name. */
+function splitEgg(egg,frame){
+  if(!egg || !egg.length) return egg;
+  var n=egg.length, w=String(egg[0]).length, out=[], r, lift=frame?4:2, mid=Math.floor(n/2);
+  for(r=0;r<n;r++) out.push(new Array(w+1).join("."));
+  for(r=0;r<mid;r++){ var to=r-lift; if(to>=0 && to<n) out[to]=String(egg[r]); }
+  for(r=mid;r<n;r++) out[r]=String(egg[r]);
+  return out;
+}
+function hatchGrid(pack,elapsed){
+  var phone=(pack && pack.eggCrack && pack.eggCrack[1]) || (pack && pack.egg);
+  if(elapsed<250) return splitEgg(phone,0);
+  if(elapsed>=750){
+    var g=Art.stagePose(pack,"baby",markNames(P.save,pack),"front","happy");
+    return g || phone;
+  }
+  return splitEgg(phone,1);
 }
 /* Moods are read from the two numbers the pet already has, plus the short anger timers. They never last: a pat or
    a meal lifts the low mood at once, and anger is only ever a second and a half. */
@@ -1319,7 +1445,10 @@ function idleFace(){
   return "idle1";
 }
 function petGrid(save,pack,t,asleepNow){
-  if(save.stage==="egg") return shift(eggGrid(pack), P.frame?1:0);
+  if(save.stage==="egg"){
+    if(P.hatching) return hatchGrid(pack, t-P.hatching.start);
+    return shift(eggGrid(pack), P.frame?1:0);
+  }
   var marks=markNames(save,pack), a=P.action || "idle";
   var idle=idleFace(), mood=null;
   var face="idle1";
@@ -1341,7 +1470,7 @@ function petGrid(save,pack,t,asleepNow){
     return look ? shiftX(smallStage,look) : smallStage;
   }
   if(save.stage==="adult"){
-    var opts={ant:marks.ant, pat:marks.pat, eye:marks.eye, face:face};
+    var opts={ant:marks.ant, eye:marks.eye, face:face};
     if(mood) opts.face=mood;
     if(face==="blink" && !mood) opts.face="blink";
     var g=pack.adult(save.form||"plain",opts);
@@ -1355,7 +1484,7 @@ function petGrid(save,pack,t,asleepNow){
     return look?shiftX(g,look):shift(g,P.frame?1:0);
   }
   var small=pack.frames({
-    ant:marks.ant, pat:marks.pat, eye:marks.eye, face:face
+    ant:marks.ant, eye:marks.eye, face:face
   });
   if(a==="shake") return shiftX(small,P.frame?1:-1);
   return look ? shiftX(small,look) : shift(small,0);
@@ -1374,6 +1503,17 @@ function overlayGrid(base,top,x,y){
   }
   return out.map(function(a){ return a.join(""); });
 }
+/* turn a frame a quarter turn: the sleeping pet lies across the bed, the antenna/head to the left */
+function rotateCCW(g){
+  if(!g || !g.length) return g;
+  var h=g.length, w=String(g[0]).length, out=[], r, c, row;
+  for(r=0;r<w;r++){
+    row="";
+    for(c=0;c<h;c++) row+=String(g[c]).charAt(w-1-r);
+    out.push(row);
+  }
+  return out;
+}
 /* 立冬's scarf is worn, not held: it is laid over the pet grid, so a pick's prop can sit beside it. */
 function wearScarf(pet){
   var scarf=((packOf(P.save).props)||Art.PROPS||{}).scarf;
@@ -1389,7 +1529,9 @@ function flagWithNumber(n){
   if(!base) return null;
   var num=Art.numberGrid ? Art.numberGrid(Math.max(0,Math.min(99,+n||0))) : null;
   if(!num) return base;
-  var w=String(num[0]).length, x=Math.max(1,Math.floor((8-w)/2));
+  var w=String(num[0]).length, x=1+Math.floor((10-w)/2);
+  if(x<1) x=1;
+  if(x+w>16) x=16-w;
   return overlayGrid(base,num,x,2);
 }
 function deskWithPen(){
@@ -1402,10 +1544,13 @@ function deskWithPen(){
   return top.concat(props.desk);
 }
 function gridFromPx(px){
-  var rows=[], r, c, line, out;
+  var rows=[], r, c, line, out, map="kdmp";
   for(r=0;r<16;r++){
     line=String(px||""); out="";
-    for(c=0;c<16;c++){ var ch=line.charAt(r*16+c); out+=/[0-3]/.test(ch)?ch:"3"; }
+    for(c=0;c<16;c++){
+      var ch=line.charAt(r*16+c);
+      out+=/[0-3]/.test(ch)?map.charAt(+ch):"p";
+    }
     rows.push(out);
   }
   return rows;
@@ -1432,25 +1577,29 @@ function roomScene(){
     bowlFull:save ? save.hunger>=2 : true,
     mess:save ? save.mess : 0
   };
+  if(save && save.shelf){
+    var onShelf=findSouv(save.shelf);
+    if(onShelf) scene.shelf=gridFromPx(onShelf.px);
+  }
   if(!save) return scene;
   if(save.travel){ scene.sign=true; return scene; }
   if(P.outing && P.outing.phase==="out") return scene;
 
-  var px=40, py=36, w=Pet.wants(save);
+  var px=83, py=69, w=Pet.wants(save);
   scene.pet=petGrid(save,pack,t,asleepNow);
-  if(save.stage==="baby"){ px=42; py=40; }
-  else if(save.stage==="child"){ px=41; py=38; }
-  else if(save.stage==="egg"){ px=40; py=38; }
+  if(save.stage==="baby"){ px=85; }
+  else if(save.stage==="child"){ px=84; }
+  else if(save.stage==="egg"){ px=83; py=71; }
 
   if(P.outing && P.outing.phase==="back"){
-    px=8+(4-P.outing.left)*9;
+    px=16+(4-P.outing.left)*18;
     if(save.stage==="egg"){
-      scene.pet=shift(eggGrid(pack), P.frame?1:0);
+      scene.pet=P.hatching ? hatchGrid(pack,t-P.hatching.start) : shift(eggGrid(pack), P.frame?1:0);
     } else if(save.stage==="baby" || save.stage==="child"){
       scene.pet=petFrame(pack,save.stage,markNames(save,pack),"front",P.frame?"walk1":"walk2");
     } else {
       scene.pet=shift(pack.frames({
-        ant:markNames(save,pack).ant, pat:markNames(save,pack).pat, eye:markNames(save,pack).eye,
+        ant:markNames(save,pack).ant, eye:markNames(save,pack).eye,
         face:P.frame?"walk2":"walk1"
       }),0);
     }
@@ -1459,14 +1608,37 @@ function roomScene(){
   } else {
     var pick=activePick();
     if(pick) scene.prop=pickProp(pick);
-    /* the desk is wider than the room right of the pet: the pet sits a little right and the desk stands at its left,
-       clear of the bowl */
-    if(pick && pick.kind==="diary" && scene.prop){ px=54; scene.propX=px-String(scene.prop[0]).length-1; }
+    /* The desk and pen stand on the floor under the bookshelf, to the right of the pet: clear of the bed, the
+       bookshelf itself, the bowl and the rug's pet spot. */
+    if(pick && pick.kind==="diary" && scene.prop){ px=70; scene.propX=108; scene.propY=96; }
     if(w==="food" || P.lookAt==="food"){
-      px=16; py=40;
+      px=32; py=69;
     } else if(w==="wash" || P.lookAt==="wash"){
-      px=20; py=40;
+      px=40; py=69;
     }
+  }
+  /* Night: it lies across its bed, head to the left, with Zz above the bed. On waking it walks back to the rug. */
+  if(save.stage!=="egg"){
+    if(P.wasAsleep===null) P.wasAsleep=!!asleepNow;
+    else {
+      if(P.wasAsleep && !asleepNow && !P.wake) P.wake={start:now(),dur:1200};
+      P.wasAsleep=!!asleepNow;
+    }
+  }
+  if(asleepNow && P.wake) P.wake=null;
+  if(P.wake){
+    var k=(now()-P.wake.start)/P.wake.dur;
+    if(k>=1){ P.wake=null; }
+    else {
+      px=Math.round(BED_X+(RUG_X-BED_X)*k);
+      py=Math.round(BED_Y+(RUG_Y-BED_Y)*k);
+      scene.pet=petFrame(pack,save.stage,markNames(save,pack),"side",P.frame?"walk2":"walk1");
+    }
+  }
+  if(asleepNow && save.stage!=="egg" && !P.wake){
+    scene.pet=rotateCCW(scene.pet);
+    px=BED_X; py=BED_Y;
+    scene.zz=true; scene.zzX=32; scene.zzY=48;
   }
   scene.petX=px; scene.petY=py;
   if(save.stage!=="egg" && isLidong(t)) scene.pet=wearScarf(scene.pet);
@@ -1477,24 +1649,25 @@ function roomScene(){
 }
 /* the water sweeps across the floor where the piles are, from the first to the last, never over the bowl */
 function drawSweep(){
-  var room=(packOf(P.save)||{}).room||{}, spots=room.poops||[[22,51],[27,52],[32,51]];
-  var x0=spots[0][0]-2, x1=spots[spots.length-1][0]+8;
+  var room=(packOf(P.save)||{}).room||{}, spots=room.poops||[[50,107],[57,108],[64,107]];
+  var x0=spots[0][0]-4, x1=spots[spots.length-1][0]+16;
   var done=Math.max(0,Math.min(SWEEP_MS,now()-(P.washStart||P.washUntil-SWEEP_MS)));
   var x=Math.round(x0+(x1-x0)*(done/SWEEP_MS)), y;
-  for(y=45;y<59;y++){
+  for(y=90;y<118;y++){
     if(x>=0 && x<ROOM_W) buf[y*ROOM_W+x]=3;
-    if(x+2>=0 && x+2<ROOM_W) buf[y*ROOM_W+x+2]=0;
+    if(x+4>=0 && x+4<ROOM_W) buf[y*ROOM_W+x+4]=0;
   }
 }
 function renderRoom(){
   initCanvas();
   if(!ctx) return;
   var scene=roomScene();
+  P.lastScene=scene;
   Art.drawRoom(buf,ROOM_W,ROOM_H,scene);
   if(P.washUntil>now()) drawSweep();
   paintRoomBuffer();
 }
-/* a play pack paints the same 81 x 60 buffer as the room; the pack's own poses come through Art.pose */
+/* a play pack paints the same 162 x 120 buffer as the room; the pack's own poses come through Art.pose */
 function renderGame(){
   initCanvas();
   if(!ctx || !P.game) return;
@@ -1543,8 +1716,8 @@ function buildIcons(){
 }
 function renderIcons(){
   var wrap=$("pet-icons"); if(!wrap) return;
-  /* An egg has no icon row at all: not faint icons, no buttons. The line below the room says what is happening. */
-  if(isEgg()){ wrap.hidden=true; wrap.textContent=""; iconBuilt=false; iconCvs={}; return; }
+  /* An egg has no icon row at all: not faint icons, no buttons. The naming panel owns the screen too. */
+  if(isEgg() || P.sub==="name"){ wrap.hidden=true; wrap.textContent=""; iconBuilt=false; iconCvs={}; return; }
   wrap.hidden=false;
   if(!iconBuilt) buildIcons();
   var pack=packOf(P.save), icons=(pack&&pack.icons)||{};
@@ -1568,10 +1741,11 @@ function boxes(n){
 }
 function panelKey(){
   var s=P.save||{}, st=gameState();
-  return [P.sub,P.foodSel,P.boxPage,P.menuSel,P.confirmStage,I18N.lang,P.souv.length,activePick()?1:0,
+  return [P.sub,P.foodSel,P.boxPage,P.boxAsk?P.boxAsk.id+P.boxAsk.take:"" ,P.menuSel,P.confirmStage,I18N.lang,P.souv.length,activePick()?1:0,
+    P.naming?(P.naming.confirm?1:0):-1,
     P.gameSel,P.game?P.game.id:"",st?st.score:-1,st&&st.done?1:0,P.game&&P.game.applied?1:0,
     P.wordWord,P.wordMeaning,P.wordBusy,
-    s.stage,s.hunger,s.joy,s.opened,s.born,s.close,s.travel,s.light].join("|");
+    s.stage,s.name,s.hunger,s.joy,s.opened,s.born,s.close,s.travel,s.light].join("|");
 }
 function buildMenu(panel){
   panel.appendChild(el("p","pet-ptitle",tr("pet.menu.title")));
@@ -1623,6 +1797,8 @@ function buildLook(panel){
   /* design.md 8 keeps no meal counter, so this display-only weight counts care actions as meals:
      a base plus 10 g for each, less 5 g for every day it has lived (never below 100 g). */
   var weight=Math.max(100,900+(+s.close||0)*10-age*5);
+  var name=el("p","pet-pname",s.name || defaultPetName());
+  panel.appendChild(name);
   panel.appendChild(el("p","pet-ptitle",tr("pet.look.title")));
   var a=el("p","pet-prow"); a.appendChild(el("span","",tr("pet.look.age"))); a.appendChild(el("b","",tr("pet.look.agedays",{n:age}))); panel.appendChild(a);
   var w=el("p","pet-prow"); w.appendChild(el("span","",tr("pet.look.weight"))); w.appendChild(el("b","",tr("pet.look.gram",{n:weight}))); panel.appendChild(w);
@@ -1651,12 +1827,61 @@ function buildBox(panel){
   body.appendChild(el("b","pet-souvname",souvText(s,"name")));
   body.appendChild(el("p","pet-souvline",souvText(s,"line")));
   body.appendChild(el("p","pet-souvdate",LP.fmt(s.at)));
+  if(P.save && P.save.shelf===s.id) body.appendChild(el("p","pet-souvtag",tr("pet.shelf.on")));
   card.appendChild(body);
   panel.appendChild(card);
   var foot=el("p","pet-souvfoot");
   foot.appendChild(el("span","",tr("pet.box.page",{i:P.boxPage+1,n:P.souv.length})));
-  foot.appendChild(el("span","",tr("pet.box.note")));
   panel.appendChild(foot);
+  if(P.boxAsk && P.boxAsk.id===s.id){
+    var ask=el("div","pet-ask");
+    ask.appendChild(el("p","pet-askq",tr(P.boxAsk.take?"pet.shelf.take":"pet.shelf.put")));
+    var row=el("div","pet-askrow");
+    var yes=el("button","btn",tr("pet.shelf.yes")); yes.type="button"; yes.onclick=function(){ answerShelf(true); };
+    var no=el("button","btn ghost",tr("pet.shelf.no")); no.type="button"; no.onclick=function(){ answerShelf(false); };
+    row.appendChild(yes); row.appendChild(no); ask.appendChild(row);
+    panel.appendChild(ask);
+  }
+}
+function buildName(panel){
+  var confirming=!!(P.naming && P.naming.confirm);
+  panel.appendChild(el("p","pet-ptitle",tr("pet.name.title")));
+  if(!confirming){
+    var inp=el("input","pet-nameinput");
+    inp.id="pet-name"; inp.type="text"; inp.maxLength=24;
+    inp.setAttribute("autocomplete","off"); inp.setAttribute("autocorrect","off");
+    inp.setAttribute("autocapitalize","off"); inp.setAttribute("spellcheck","false");
+    inp.setAttribute("enterkeyhint","done");
+    inp.setAttribute("aria-label",tr("pet.name.title"));
+    inp.value=P.naming ? P.naming.value : defaultPetName();
+    inp.addEventListener("input",function(){
+      var v=limitName(inp.value);
+      if(v!==inp.value) inp.value=v;
+      if(P.naming) P.naming.value=v;
+    });
+    inp.addEventListener("keydown",function(e){
+      if(e.key!=="Enter") return;
+      e.preventDefault(); e.stopPropagation();
+      nameNext();
+    });
+    panel.appendChild(inp);
+    panel.appendChild(el("p","pet-phint",tr("pet.name.hint")));
+    var row=el("div","pet-name-actions");
+    var ok=el("button","btn",tr("pet.name.ok"));
+    ok.type="button"; ok.id="pet-name-ok"; ok.onclick=function(){ nameNext(); };
+    row.appendChild(ok);
+    panel.appendChild(row);
+  } else {
+    panel.appendChild(el("p","pet-pinfo",tr("pet.name.confirm",{name:nameFinal()})));
+    panel.appendChild(el("p","pet-phint",tr("pet.name.hint")));
+    var crow=el("div","pet-name-actions");
+    var yes=el("button","btn",tr("pet.name.yes"));
+    yes.type="button"; yes.id="pet-name-yes"; yes.onclick=function(){ finishNaming(); };
+    var edit=el("button","btn ghost",tr("pet.name.edit"));
+    edit.type="button"; edit.id="pet-name-edit"; edit.onclick=function(){ nameEdit(); };
+    crow.appendChild(yes); crow.appendChild(edit);
+    panel.appendChild(crow);
+  }
 }
 function renderPanel(){
   var panel=$("pet-panel");
@@ -1674,6 +1899,7 @@ function renderPanel(){
   else if(P.sub==="menu") buildMenu(panel);
   else if(P.sub==="look") buildLook(panel);
   else if(P.sub==="box") buildBox(panel);
+  else if(P.sub==="name") buildName(panel);
   else if(P.sub==="word") buildWord(panel);
   if(P.sub==="look" && P.confirmStage){
     LP.resetConfirm("pet-confirm","pet-confirm-btn",tr("pet.look.restart"),restartPet);
@@ -1709,7 +1935,8 @@ function aKeyLabel(){
   }
   if(P.sub==="menu") return "pet.sk.open";
   if(P.sub==="look") return "pet.sk.hold";
-  if(P.sub==="box") return "pet.sk.paste";
+  if(P.sub==="box") return P.boxAsk ? "pet.shelf.yes" : (P.souv[P.boxPage] && P.save && P.save.shelf===P.souv[P.boxPage].id ? "pet.sk.take" : "pet.sk.put");
+  if(P.sub==="name") return P.naming && P.naming.confirm ? "pet.name.yes" : "pet.name.ok";
   if(P.sub==="word") return "pet.sk.lookup";
   if(!P.save || isEgg()) return "";
   if(P.save.travel) return "pet.act.call";
@@ -1733,14 +1960,19 @@ function renderKeys(){
   var wrap=$("pet-keys");
   if(!wrap) return;
   var label=aKeyLabel(), egg=isEgg();
-  /* While it is an egg the soft keys are hidden, not greyed: a calm screen with HOME as the only way out. */
-  if(egg){ wrap.hidden=true; wrap.textContent=""; return; }
+  /* While it is an egg the soft keys are hidden, not greyed: a calm screen with HOME as the only way out. The
+     naming field needs the room for the phone's keyboard, so the keys only come back on the confirm question. */
+  var hide=egg || (P.sub==="name" && !(P.naming && P.naming.confirm));
+  if(hide){ wrap.hidden=true; wrap.textContent=""; return; }
   wrap.hidden=false;
   var inGame=P.sub==="game" && !gameDone();
+  var blabel=tr(inGame?"pet.game.exit":"sk.back");
+  if(P.sub==="box" && P.boxAsk) blabel=tr("pet.shelf.no");
+  else if(P.sub==="name") blabel=tr("pet.name.edit");
   LP.softkeys(wrap,{
     select:null,                           /* reserved for switching rooms when more species come (visits) */
     start:{label:egg ? "" : tr("pet.sk.menu"),disabled:!!P.sub || egg,fn:openMenu},
-    b:{label:tr(inGame?"pet.game.exit":"sk.back"),fn:back},
+    b:{label:blabel,fn:back},
     a:{label:label?tr(label):"",disabled:egg,fn:function(){
       if(P.holdFired){ P.holdFired=false; clearHold(); return; }
       clearHold(); pressA();
@@ -1795,8 +2027,12 @@ function tick(){
     refreshTime();
   }
   if(P.save && P.save.stage==="egg" && !P.sub && !P.save.travel){
-    P.eggMs+=500;
-    if(P.eggMs>=EGG_MS) hatchNow(false);
+    if(!P.hatching){
+      P.eggMs+=500;
+      if(P.eggMs>=EGG_MS) P.hatching={start:t};
+    } else if(t-P.hatching.start>=HATCH_ANIM_MS){
+      hatchNow(false);
+    }
   }
   if(P.actionUntil && t>=P.actionUntil){ P.action=""; P.actionUntil=0; P.lookAt=""; }
   if(P.action) P.idle=null;
@@ -1817,6 +2053,7 @@ function enter(){
   /* the save decides the A label and the egg state, so it is read before the keys are built */
   ensurePet();
   refreshTime();
+  maybeNamePrompt();
   renderKeys();
   buildIcons();
   render();
@@ -1832,6 +2069,7 @@ function leave(){
   if(P.roomHold){ clearTimeout(P.roomHold); P.roomHold=0; }
   P.holdFired=false;
   P.sub=null; P.confirmStage=0; P.game=null; P.outing=null;
+  P.naming=null; P.boxAsk=null; P.wake=null; P.wasAsleep=null;
   P.gameHeld={left:false,right:false,a:false};
   P.gamePress={left:false,right:false,a:false};
   P.gameTouch=null;
@@ -1860,7 +2098,7 @@ function pause(){
 function resume(){
   P.resumeOuting=true;
   if(isOpen()){
-    refreshTime(); render(); startTimer(); refreshUsage();
+    refreshTime(); maybeNamePrompt(); render(); startTimer(); refreshUsage();
     if(P.sub==="game" && P.game && !gameDone()) startGameTimer();
   } else {
     backgroundDay();
@@ -2136,7 +2374,15 @@ if(/[?&]debug\b/.test(location.search)){
       renderKeys(); render();
       return st;
     },
-    save:function(){ return P.save ? JSON.parse(JSON.stringify(P.save)) : null; }
+    save:function(){ return P.save ? JSON.parse(JSON.stringify(P.save)) : null; },
+    spot:function(){
+      var s=P.lastScene;
+      if(!s) return null;
+      var out={x:s.petX,y:s.petY,zz:!!s.zz,stage:P.save?P.save.stage:null};
+      if(s.prop){ out.prop={x:s.propX,y:s.propY,w:Art.gridWidth(s.prop),h:Art.gridHeight(s.prop)}; }
+      return out;
+    },
+    flag:function(n){ return flagWithNumber(n); }
   };
 }
 })();

@@ -37,21 +37,21 @@ test("dayKey and hourOf: local time from the passed offset, not the machine's zo
 test("fresh: the save of design.md 8, plus lastMeal, today's counters and the carried awake minutes", () => {
   const now = at(2026, 10, 20, 8, 0), s = P.fresh(now, P.rng(7));
   assert.deepEqual(Object.keys(s).sort(), ["aiUse", "awakeHunger", "awakeJoy", "born", "close", "form", "hunger", "joy", "last", "lastDay", "lastMeal",
-    "light", "marks", "mess", "opened", "room", "seenUse", "species", "stage", "today", "trait", "travel", "v"].sort());
-  assert.deepEqual(Object.keys(s.today).sort(), ["ai", "back", "burp", "day", "out", "pats", "pick", "picked", "played", "rewarded", "shown", "shownYesterday", "snacks", "used"]);
+    "light", "marks", "mess", "name", "opened", "room", "seenUse", "shelf", "species", "stage", "today", "trait", "travel", "v"].sort());
+  assert.deepEqual(Object.keys(s.today).sort(), ["ai", "back", "burp", "day", "out", "pats", "pick", "picked", "played", "rewarded", "shelf", "shown", "shownYesterday", "snacks", "used"]);
   assert.deepEqual([s.v, s.species, s.room, s.born, s.last, s.hunger, s.joy, s.mess, s.close, s.opened, s.lastDay, s.awakeHunger, s.awakeJoy],
     [1, "chip", "chip", now, now, 5, 5, 0, 0, 0, null, 0, 0]);
-  assert.deepEqual([s.stage, s.form, s.light, s.travel, s.lastMeal], ["egg", null, true, false, null]);
-  assert.ok(s.marks.ant >= 0 && s.marks.ant <= 3);
-  assert.ok(s.marks.pat >= 0 && s.marks.pat <= 3);
+  assert.deepEqual([s.stage, s.form, s.light, s.travel, s.lastMeal, s.name, s.shelf], ["egg", null, true, false, null, null, null]);
+  assert.ok(s.marks.ant >= 0 && s.marks.ant <= 5);
   assert.ok(s.marks.eye >= 0 && s.marks.eye <= 2);
+  assert.ok(s.marks.pat === undefined, "the body pattern is gone from fresh saves");
   assert.ok(["lively", "sleepy", "curious"].includes(s.trait));
   /* marks and traits do vary with the seed, and always stay in their ranges */
   const traits = new Set(), ant = new Set();
   for (let i = 0; i < 60; i++) {
     const f = P.fresh(now, P.rng(i));
     traits.add(f.trait); ant.add(f.marks.ant);
-    assert.ok(f.marks.ant < 4 && f.marks.pat < 4 && f.marks.eye < 3);
+    assert.ok(f.marks.ant < 6 && f.marks.eye < 3 && f.marks.pat === undefined);
   }
   assert.equal(traits.size, 3);
   assert.ok(ant.size >= 3);
