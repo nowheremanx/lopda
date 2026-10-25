@@ -1,9 +1,19 @@
-// runtime/exif.js: the EXIF APP1 segment of a single print (decisions.md section 38, docs/design/darkroom.md section 6).
+// runtime/exif.js: the EXIF APP1 segment of a single print (decisions.md sections 38 and 40, docs/design/darkroom.md section 6).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { runScript } from "./helpers.mjs";
+import vm from "node:vm";
+import { execFileSync } from "node:child_process";
+import { runScript, ROOT } from "./helpers.mjs";
 
 const X = runScript("runtime/exif.js").LopdaExif;
+/* the code as it stood before the GPS IFD, to prove a print without a place keeps its exact bytes */
+function oldExif() {
+  const ctx = vm.createContext({ console });
+  ctx.window = ctx;
+  vm.runInContext(execFileSync("git", ["show", "HEAD:runtime/exif.js"], { cwd: ROOT, encoding: "utf8" }), ctx);
+  return ctx.LopdaExif;
+}
+const OLD = oldExif();
 
 /* A JPEG as far as insert/read care: SOI, APP0 JFIF, an old APP1 Exif, COM, SOS with a few scan bytes, EOI.
    insert and read stop at SOS, so no entropy-coded image is needed. */
@@ -140,4 +150,102 @@ test("insert does not change its input", () => {
   const before = Buffer.from(src);
   X.insert(src, { taken: TAKEN, tz: 480, software: "Lo-PDA 0.39.0" });
   assert.ok(Buffer.from(src).equals(before));
+});
+
+/* the TIFF block of the first Exif APP1 and one IFD in it, for checking the raw GPS bytes */
+function tiffOf(out) {
+  const seg = segments(out).find((s) => s.marker === 0xe1);
+  return Buffer.from(out.subarray(seg.start + 10, seg.start + 2 + seg.length));
+}
+function ifdAt(tiff, at) {
+  assert.equal(at % 2, 0, "an IFD starts even");
+  const n = tiff.readUInt16BE(at), entries = [];
+  for (let i = 0; i < n; i++) {
+    const pos = at + 2 + i * 12;
+    entries.push({ tag: tiff.readUInt16BE(pos), type: tiff.readUInt16BE(pos + 2), count: tiff.readUInt32BE(pos + 4),
+      off: tiff.readUInt32BE(pos + 8), pos });
+  }
+  return { entries, next: tiff.readUInt32BE(at + 2 + n * 12) };
+}
+function rationals(tiff, entry) {
+  const out = [];
+  for (let i = 0; i < entry.count; i++) {
+    const at = entry.off + i * 8;
+    out.push([tiff.readUInt32BE(at), tiff.readUInt32BE(at + 4)]);
+  }
+  return out;
+}
+
+const GPS_INFO = { taken: TAKEN, tz: 480, software: "Lo-PDA 0.39.0" };
+const place = (lat, lon, acc) => ({ ...GPS_INFO, gps: acc === undefined ? { lat, lon } : { lat, lon, acc } });
+
+test("read returns the place of N/E, S/W and a hair off zero", () => {
+  for (const [lat, lon] of [[12.5, 45.25], [-12.5, -45.25], [0.000001, -0.000001]]) {
+    const got = X.read(X.insert(jpeg(), place(lat, lon)));
+    assert.ok(got.gps, "gps " + lat + "," + lon);
+    assert.ok(Math.abs(got.gps.lat - lat) <= 1e-6, "lat " + got.gps.lat);
+    assert.ok(Math.abs(got.gps.lon - lon) <= 1e-6, "lon " + got.gps.lon);
+    assert.equal(got.gps.acc, undefined, "no error given, none written");
+  }
+});
+
+test("the GPS IFD is sorted, version 0230, and the DMS is degrees/1, minutes/1, seconds/10000", () => {
+  const out = X.insert(jpeg(), place(12.5, 45.25, 8.6));
+  const tiff = tiffOf(out);
+  const ifd0 = ifdAt(tiff, tiff.readUInt32BE(4));
+  const tags = ifd0.entries.map((e) => e.tag);
+  assert.deepEqual(tags, [...tags].sort((a, b) => a - b), "IFD0 tags sorted");
+  const pointer = ifd0.entries.find((e) => e.tag === 0x8825);
+  assert.ok(pointer, "0x8825 is in IFD0, after 0x8769");
+  assert.equal(pointer.type, 4, "the GPS pointer is a LONG");
+  assert.equal(ifd0.entries.indexOf(pointer), ifd0.entries.findIndex((e) => e.tag === 0x8769) + 1);
+  const gps = ifdAt(tiff, pointer.off);
+  assert.deepEqual(gps.entries.map((e) => e.tag), [0x0000, 0x0001, 0x0002, 0x0003, 0x0004, 0x001F]);
+  const version = gps.entries[0];
+  assert.equal(version.type, 1, "BYTE");
+  assert.equal(version.count, 4);
+  assert.deepEqual([...tiff.subarray(version.pos + 8, version.pos + 12)], [2, 3, 0, 0], "GPSVersionID 2.3.0.0");
+  assert.equal(gps.entries[1].type, 2);
+  assert.equal(tiff.toString("latin1", gps.entries[1].pos + 8, gps.entries[1].pos + 10), "N\0");
+  assert.equal(gps.entries[2].type, 5, "RATIONAL");
+  assert.equal(gps.entries[2].count, 3);
+  assert.deepEqual(rationals(tiff, gps.entries[2]), [[12, 1], [30, 1], [0, 10000]]);
+  assert.equal(gps.entries[3].type, 2);
+  assert.equal(tiff.toString("latin1", gps.entries[3].pos + 8, gps.entries[3].pos + 10), "E\0");
+  assert.deepEqual(rationals(tiff, gps.entries[4]), [[45, 1], [15, 1], [0, 10000]]);
+  assert.equal(gps.entries[5].type, 5);
+  assert.equal(gps.entries[5].count, 1);
+  assert.deepEqual(rationals(tiff, gps.entries[5]), [[9, 1]], "8.6 m rounds to whole metres");
+});
+
+test("a negative place writes S and W and reads back signed", () => {
+  const out = X.insert(jpeg(), place(-12.5, -45.25, 5));
+  const tiff = tiffOf(out);
+  const ifd0 = ifdAt(tiff, tiff.readUInt32BE(4));
+  const gps = ifdAt(tiff, ifd0.entries.find((e) => e.tag === 0x8825).off);
+  assert.equal(tiff.toString("latin1", gps.entries[1].pos + 8, gps.entries[1].pos + 10), "S\0");
+  assert.equal(tiff.toString("latin1", gps.entries[3].pos + 8, gps.entries[3].pos + 10), "W\0");
+  assert.equal(X.read(out).gps.acc, 5);
+});
+
+test("without a place, the bytes are exactly the old ones: gps absent, null and invalid all match", () => {
+  const info = { taken: TAKEN, tz: 480, software: "Lo-PDA 0.39.0" };
+  const want = Buffer.from(OLD.insert(jpeg(), info));
+  for (const gps of [undefined, null, {}, "nope", { lat: NaN, lon: 0 }, { lat: 91, lon: 0 }, { lat: 0, lon: -181 }]) {
+    const out = X.insert(jpeg(), gps === undefined ? info : { ...info, gps });
+    assert.ok(Buffer.from(out).equals(want), "gps " + JSON.stringify(gps));
+  }
+  assert.equal(X.read(X.insert(jpeg(), info)).gps, undefined);
+  assert.equal(X.read(X.insert(jpeg(), { ...info, gps: null })).gps, undefined);
+});
+
+test("a place adds a second pointer and a GPS IFD without moving the Exif tags", () => {
+  const info = { taken: TAKEN, tz: 480, software: "Lo-PDA 0.39.0" };
+  const got = X.read(X.insert(jpeg(), { ...info, gps: { lat: 12.5, lon: 45.25, acc: 10 } }));
+  const plain = X.read(X.insert(jpeg(), info));
+  assert.equal(got.make, plain.make);
+  assert.equal(got.model, plain.model);
+  assert.equal(got.software, plain.software);
+  assert.equal(got.dateTimeOriginal, plain.dateTimeOriginal);
+  assert.equal(got.offsetTimeOriginal, plain.offsetTimeOriginal);
 });
