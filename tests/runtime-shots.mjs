@@ -297,7 +297,7 @@ async function capture(rootArg, outArg) {
   /* settings, English and back */
   const settings = async (name) => {
     /* the version changes with every runtime release; mask it so a version bump is not a diff.
-       Only the number goes: the label next to it ("系统版本") is still compared. */
+       Only the number goes: the label next to it ("系统") is still compared. */
     await p.evaluate(() => {
       document.getElementById("set-version").textContent = "Lo-PDA (version masked)";
       const upd = document.getElementById("upd-label");

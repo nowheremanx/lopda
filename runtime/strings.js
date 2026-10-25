@@ -511,7 +511,7 @@
 
       "set.title": "Settings", "set.on": "On", "set.off": "Off", "set.volume": "Volume",
       "set.voldown": "Volume down", "set.volup": "Volume up",
-      "set.soundnote": "The speaker follows the phone's silent switch; headphones follow this volume only. Never stops your music.",
+      "set.soundnote": "Speaker follows the silent switch; headphones, this only. Music keeps playing.",
       "set.lang": "Language", "set.about": "About", "set.version": "Lo-PDA {v} · spec lopda/1",
       "set.backup": "Backup and restore", "set.share": "Share",
       "set.about.what": "What is a PDA?",
