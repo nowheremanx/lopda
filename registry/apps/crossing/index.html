@@ -1507,15 +1507,28 @@
     return el && wheelEl.contains(el) ? +el.getAttribute("data-i") : -1;
   }
   /* On a move, take a letter only near the middle of its 44px key, not in a corner: a line drawn between two
-     letters should not pick up a third one it merely grazes. */
-  function keyNear(x, y) {
-    var keys = wheelEl.querySelectorAll(".key"), best = -1, bestD = 24 * 24, i, b, dx, dy, d;
+     letters should not pick up a third one it merely grazes. The ring crowds as it fills, though: a straight
+     line between a letter's two neighbours passes 36 / 26 / 20 px from it with 5 / 6 / 7 letters, so a fixed
+     24 px would always take the one in between. */
+  function catchR() {
+    var n = state.wheel.length;
+    return n <= 5 ? 24 : n === 6 ? 16 : 12;
+  }
+  /* Every letter whose middle the step from (x0, y0) to (x1, y1) passes within catchR() of, in the order the
+     step reaches them. A fast swipe may cross several letters between two pointermove events; testing only the
+     newest point would drop them. The middle is the 44px key's box centre, as before. */
+  function keysAlong(x0, y0, x1, y1) {
+    var keys = wheelEl.querySelectorAll(".key"), r = catchR(), dx = x1 - x0, dy = y1 - y0, out = [], i, b, cx, cy, t, qx, qy;
     for (i = 0; i < keys.length; i++) {
       b = keys[i].getBoundingClientRect();
-      dx = x - (b.left + b.width / 2); dy = y - (b.top + b.height / 2); d = dx * dx + dy * dy;
-      if (d < bestD) { bestD = d; best = +keys[i].getAttribute("data-i"); }
+      cx = b.left + b.width / 2; cy = b.top + b.height / 2;
+      t = dx || dy ? ((cx - x0) * dx + (cy - y0) * dy) / (dx * dx + dy * dy) : 0;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      qx = x0 + t * dx - cx; qy = y0 + t * dy - cy;
+      if (qx * qx + qy * qy <= r * r) out.push({ t: t, i: +keys[i].getAttribute("data-i") });
     }
-    return best;
+    out.sort(function (a, b) { return a.t - b.t; });
+    return out.map(function (o) { return o.i; });
   }
   function addIndex(i) {
     if (i < 0 || state.entry.indexOf(i) >= 0) return;
@@ -1533,7 +1546,7 @@
     e.preventDefault();
     keyMode = false;
     var xy = wheelXY(e);
-    dragging = { id: e.pointerId, x: xy.x, y: xy.y };
+    dragging = { id: e.pointerId, x: xy.x, y: xy.y, px: e.clientX, py: e.clientY };
     state.entry = [];
     addIndex(i);
   });
@@ -1541,8 +1554,13 @@
     if (!dragging || e.pointerId !== dragging.id) return;
     e.preventDefault();
     var xy = wheelXY(e); dragging.x = xy.x; dragging.y = xy.y;
-    var i = keyNear(e.clientX, e.clientY);
-    if (i >= 0 && state.entry.indexOf(i) < 0) addIndex(i); else drawLines();
+    /* the whole step since the last event, so a quick swipe keeps every letter it crossed */
+    var found = keysAlong(dragging.px, dragging.py, e.clientX, e.clientY), i, added = false;
+    for (i = 0; i < found.length; i++) {
+      if (state.entry.indexOf(found[i]) < 0) { addIndex(found[i]); added = true; }
+    }
+    if (!added) drawLines();
+    dragging.px = e.clientX; dragging.py = e.clientY;
   }, { passive: false });
   function endDrag(e) {
     if (!dragging || e.pointerId !== dragging.id) return;

@@ -7587,3 +7587,67 @@ test("crossing: HOW TO PLAY runs the fixed practice round and leaves the save al
 
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
+
+/* ---------- 拼字格 / Crossing: a drag takes the letters its path passes, and the crowded ring's middle letter stays out ---------- */
+test("crossing: a drag along a chord skips the middle letter, and a fast step over a key still takes it", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t);
+  const ready = () => p.waitForFunction(() => /loaded |load failed/.test(document.getElementById("log").textContent), null, { timeout: 5000 });
+  await p.goto(`${base}/sdk/dev.html?app=registry/apps/crossing&lang=zh`, { waitUntil: "load" });
+  await ready();
+  /* round 41 uses a seven-letter seed: the ring where a chord skips a letter only 20 px from its middle */
+  await p.evaluate(() => localStorage.setItem("lopda-dev:crossing", JSON.stringify({ game: { round: 41, cleared: 40, taught: true } })));
+  await p.reload({ waitUntil: "load" });
+  await ready();
+  let f;
+  await until(p, async () => {
+    f = p.frames().find((x) => x !== p.mainFrame());
+    return f && await f.evaluate(() => !!(window.game && game.phase === "title")).catch(() => false);
+  }, "the title screen");
+  await p.locator("#app").evaluate((el) => { el.style.width = "331px"; el.style.height = "359px"; el.style.flex = "none"; });
+  await p.waitForTimeout(150);
+  await p.locator('#pad [data-b="a"]').click();
+  await until(p, () => f.evaluate(() => game.phase === "play" && game.round === 41), "round 41");
+  const wheel = await f.evaluate(() => ({
+    letters: game.wheel.slice(),
+    keys: [...document.querySelectorAll(".key")].map((el) => {
+      const b = el.getBoundingClientRect();
+      return { i: +el.getAttribute("data-i"), x: b.left + b.width / 2, y: b.top + b.height / 2 };
+    }).sort((a, b) => a.i - b.i),
+  }));
+  assert.equal(wheel.letters.length, 7, "round 41's seed has seven letters, the crowded ring this test needs");
+  assert.equal(wheel.keys.length, 7, "one key per letter");
+  const box = await p.locator("#app").boundingBox();
+  const at = (i, dx = 0, dy = 0) => ({ x: box.x + wheel.keys[i].x + dx, y: box.y + wheel.keys[i].y + dy });
+  const entry = () => f.textContent("#entry");
+  const letters = (ids) => ids.map((i) => wheel.letters[i].toUpperCase()).join("");
+
+  /* (a) the straight chord from a letter to the one two steps on passes 20 px from the letter between them;
+     the seven-letter catch radius is 12 px, so the middle letter does not come in */
+  await p.mouse.move(at(2).x, at(2).y);
+  await p.mouse.down();
+  await p.mouse.move(at(4).x, at(4).y, { steps: 12 });
+  assert.equal(await entry(), letters([2, 4]), "the chord takes its two ends");
+  assert.equal((await entry()).indexOf(wheel.letters[3].toUpperCase()), -1, "the letter between them stays out");
+  await p.mouse.up();
+  await until(p, async () => (await entry()) === "", "the two-letter word to be refused");
+
+  /* (b) through the middles of three neighbouring keys: all three, in the order the finger reaches them */
+  await p.mouse.move(at(2).x, at(2).y);
+  await p.mouse.down();
+  await p.mouse.move(at(3).x, at(3).y, { steps: 6 });
+  await p.mouse.move(at(4).x, at(4).y, { steps: 6 });
+  assert.equal(await entry(), letters([2, 3, 4]), "three neighbouring letters, in order");
+  await p.mouse.up();
+  await until(p, async () => (await entry()) === "", "the three-letter word to be refused or land");
+
+  /* (c) one big jump with no pointermove over the middle key: the step's segment still passes within
+     catchR() of its middle, so the segment check takes it as well */
+  const start = at(0, 19, -19);        /* still on key 0's 44 px target, towards key 1 */
+  await p.mouse.move(start.x, start.y);
+  await p.mouse.down();
+  await p.mouse.move(at(2).x, at(2).y, { steps: 1 });
+  assert.equal(await entry(), letters([0, 1, 2]), "the jump over the middle key still takes it");
+  await p.mouse.up();
+
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
