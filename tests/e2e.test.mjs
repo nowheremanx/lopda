@@ -2,13 +2,29 @@
 // Needs Playwright, which the repo does not depend on, so these tests skip without it:
 //   npm i --no-save playwright && npx playwright install chromium && node --test tests/e2e.test.mjs
 // Serves the repo root on a random port, as `python3 -m http.server` would.
-import { test, before, after } from "node:test";
+import { test as nodeTest, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { readFile, writeFile } from "node:fs/promises";
 import { readdirSync } from "node:fs";
 import { join, extname, normalize } from "node:path";
 import { ROOT, tempDir, runScript } from "./helpers.mjs";
+
+/* CI runs this file as four shards in parallel, see .github/workflows/test.yml; each
+   runner takes every fourth test in file order, so a new test is spread automatically.
+   E2E_SHARD is "k/n"; unset means "1/1", the whole file, as a local run expects. */
+const SHARD_SPEC = /^(\d+)\/(\d+)$/.exec(process.env.E2E_SHARD || "1/1");
+const SHARD = SHARD_SPEC && Number(SHARD_SPEC[1]), SHARDS = SHARD_SPEC && Number(SHARD_SPEC[2]);
+let testIndex = 0;
+function test(name, opts, fn) {
+  if (typeof opts === "function") { fn = opts; opts = {}; }
+  if (!SHARD_SPEC || !(SHARDS >= 1) || !(SHARD >= 1) || SHARD > SHARDS)
+    throw new Error(`bad E2E_SHARD "${process.env.E2E_SHARD}", want "k/n" with n >= 1 and 1 <= k <= n`);
+  const options = { ...opts };
+  /* a skip already set means Playwright is missing; leave that reason in place */
+  if (testIndex++ % SHARDS !== SHARD - 1 && !options.skip) options.skip = `e2e shard ${SHARD}/${SHARDS}: not this shard`;
+  return nodeTest(name, options, fn);
+}
 
 let pw = null;
 try { pw = await import("playwright"); } catch {}

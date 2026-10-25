@@ -23,8 +23,15 @@ jobs:
           node-version: 22
       - run: node tools/check-app.mjs registry/apps/*
       - run: node --test
-  e2e:
+  e2e-shard:
+    # The e2e tests run one after another in one file (about 10 minutes), so four
+    # runners each take every fourth test (E2E_SHARD, see tests/e2e.test.mjs).
+    name: e2e (${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -32,6 +39,16 @@ jobs:
           node-version: 22
       - run: npm i --no-save playwright && npx playwright install --with-deps chromium
       - run: node --test tests/e2e.test.mjs
+        env:
+          E2E_SHARD: ${{ matrix.shard }}/4
+  # main's ruleset requires a check named "e2e"; the shards report as "e2e (k/4)", so this one
+  # job passes only when every shard passed (a failed or cancelled shard fails it).
+  e2e:
+    needs: e2e-shard
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "${{ needs.e2e-shard.result }}" = success
   registry:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
