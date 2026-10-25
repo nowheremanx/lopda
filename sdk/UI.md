@@ -69,6 +69,7 @@ Contrast of the four tones against each other (WCAG contrast ratio):
 - Sizes: body text **15 px** or more (Chinese needs it more than Latin), secondary text 13 px or more, nothing
   under 12 px.
 - Text inputs: **font-size 16 px or more**. Smaller makes iPhone Safari zoom the page when the field gets focus.
+  Style the placeholder too (`::placeholder { color: #4a5a32 }`); the browser's default light gray reads as white on paper.
 - Short labels, like an old device: "存档", "SAVE", not sentences.
 
 ## 5. The cursor (apps with `"buttons": true`)
