@@ -139,6 +139,7 @@ export function checkApp(dir) {
     if (new Set(m.permissions).size !== m.permissions.length) errors.push("permissions lists the same one twice");
     if (m.permissions.length && m.spec !== "lopda/1") errors.push('permissions need spec "lopda/1"');
   }
+  if (m.released !== undefined || m.updated !== undefined) errors.push("released and updated are computed by tools/build-index.mjs from git; do not put them in the manifest");
   if (m.buttons !== undefined) {
     if (m.spec !== "lopda/1") errors.push('buttons needs spec "lopda/1"');
     else if (typeof m.buttons !== "boolean") errors.push("buttons must be true or false");
