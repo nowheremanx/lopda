@@ -70,6 +70,40 @@ test("the runtime boots without errors and shows the home screen", { skip }, asy
   assert.deepEqual(errors, []);
 });
 
+test("system sounds switch off on their own: clicks go, apps and the volume step stay", { skip, timeout: 30000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN" });
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await p.waitForFunction(() => window.LP && document.querySelectorAll("#home .app.builtin").length > 0);
+  await p.locator("#home .app", { hasText: "设置" }).click();
+  await p.waitForSelector("#v-settings:not([hidden])");
+  assert.equal((await p.textContent("#set-ui")).trim(), "开");
+  await p.click("#set-ui");
+  assert.equal((await p.textContent("#set-ui")).trim(), "关");
+  /* the ui bus is at zero, the app bus and the master step are untouched */
+  assert.ok(await p.evaluate(() => !!LP.audio()));
+  const gains = await p.evaluate(() => ({ ui: LP.SND.ui.gain.value, app: LP.SND.app.gain.value, master: LP.SND.gain.gain.value, on: LP.SND.uiOn }));
+  assert.equal(gains.on, false);
+  assert.equal(gains.ui, 0);
+  assert.equal(gains.app, 1);
+  assert.equal(gains.master, await p.evaluate(() => LP.VOL_GAIN[LP.SND.vol]));
+  /* saved in the settings document, and read back on the next boot */
+  await p.waitForFunction(() => new Promise((resolve, reject) => {
+    const req = indexedDB.open("lopda");
+    req.onerror = () => reject(req.error);
+    req.onsuccess = () => {
+      const db = req.result, get = db.transaction("docs").objectStore("docs").get("data/users/local/settings");
+      get.onsuccess = () => { const data = get.result && get.result.data; db.close(); resolve(!!(data && data.ui === false)); };
+      get.onerror = () => { db.close(); reject(get.error); };
+    };
+  }));
+  await p.reload({ waitUntil: "networkidle" });
+  await p.waitForFunction(() => window.LP && LP.SND.uiOn === false);
+  await p.locator("#home .app", { hasText: "设置" }).click();
+  await p.waitForSelector("#v-settings:not([hidden])");
+  assert.equal((await p.textContent("#set-ui")).trim(), "关");
+  assert.deepEqual(errors, []);
+});
+
 test("the add-to-home card is iOS Safari only, remembers dismissal, and boot asks for no permissions", { skip, timeout: 30000 }, async (t) => {
   const ios = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1";
   const { p, errors } = await page(t, { locale: "en-US", userAgent: ios });
@@ -2434,7 +2468,7 @@ test("sound: one volume with five steps; an old 'sound off' setting becomes volu
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
-test("settings: nine 44 px rows fit 331x359 down to 备份与恢复; the share QR and about page open and go back", { skip, timeout: 60000 }, async (t) => {
+test("settings: ten 44 px rows fit 331x359 down to AI 线路; the share QR and about page open and go back", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await page(t, { locale: "zh-CN", viewport: { width: 331, height: 359 } });
   await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
   await p.waitForFunction(() => window.LP && window.LP.S.db);
@@ -2449,11 +2483,13 @@ test("settings: nine 44 px rows fit 331x359 down to 备份与恢复; the share Q
     return { rows: rows.map((r) => { const b = r.getBoundingClientRect(); return { top: b.top - box.top, bottom: b.bottom - box.top, h: b.height }; }),
       scroll: v.scrollWidth, client: v.clientWidth };
   });
-  assert.equal(menu.rows.length, 9);
+  assert.equal(menu.rows.length, 10);
   assert.ok(menu.rows.every((r) => r.h >= 44), JSON.stringify(menu.rows));
   assert.ok(menu.scroll <= menu.client + 1, "no sideways scroll at 331");
-  /* the rows leave room around their buttons (owner, 2026-10-25), so 暗房钥匙, 分享 and 关于 are a short scroll away on the smallest screen */
-  assert.ok(menu.rows[5].bottom <= 359 + 1, "the menu fits down to 备份与恢复; only the rows after it scroll: " + JSON.stringify(menu.rows));
+  /* 系统声音 is the tenth (decisions.md section 41): the first screen still fits down to AI 线路, and 备份与恢复
+     shows its top edge, one short scroll away on the smallest screen */
+  assert.ok(menu.rows[5].bottom <= 359 + 1, "the menu fits down to AI 线路; only the rows after it scroll: " + JSON.stringify(menu.rows));
+  assert.ok(menu.rows[6].top < 359, "备份与恢复 starts on the first screen: " + JSON.stringify(menu.rows));
   await p.evaluate(() => { document.getElementById("v-settings").scrollTop = 9999; });
   assert.ok(await p.evaluate(() => {
     const v = document.getElementById("v-settings"), last = document.querySelector("#set-about-open").getBoundingClientRect(), b = v.getBoundingClientRect();
@@ -3496,12 +3532,12 @@ test("darkroom: the single print alone carries the place; a negative keeps it se
   assert.match(card.name, /^lopda-contact-.*\.png$/);
   assert.deepEqual(pngSize(card.buf), [1080, 1440]);
   assert.equal(EXIF.read(card.buf), null);
-  assert.ok(!card.buf.toString("latin1").includes("GPS"), "the contact sheet has no GPS tag");
+  assert.ok(pngPixelsOnly(card.buf), "the contact sheet has no Exif or text chunk: " + pngChunks(card.buf).join(","));
   await press(p, "Enter"); await press(p, "ArrowDown"); await press(p, "ArrowDown");
   const strip = await save(p, () => press(p, "x"));
   assert.match(strip.name, /^lopda-strip-.*\.png$/);
   assert.equal(EXIF.read(strip.buf), null);
-  assert.ok(!strip.buf.toString("latin1").includes("GPS"), "the strip has no GPS tag");
+  assert.ok(pngPixelsOnly(strip.buf), "the strip has no Exif or text chunk: " + pngChunks(strip.buf).join(","));
 
   /* d) the negative carries the sealed place only: no test coordinate in the clear */
   await press(p, "z");
@@ -3616,6 +3652,14 @@ test("darkroom: the single print alone carries the place; a negative keeps it se
 /* ---------- darkroom step 2 (docs/design/darkroom.md section 9): developing, the viewer, the three prints ---------- */
 /* width and height from a PNG's IHDR */
 const pngSize = (buf) => [buf.readUInt32BE(16), buf.readUInt32BE(20)];
+/* the chunk types of a PNG in order. A print carries pixels only: no eXIf and no text chunk. Do not look for the
+   letters "GPS" in the raw bytes (the old check did): IDAT is deflated, so any three bytes can turn up by chance. */
+const pngChunks = (buf) => {
+  const out = [];
+  for (let o = 8; o + 8 <= buf.length;) { const len = buf.readUInt32BE(o); out.push(buf.toString("latin1", o + 4, o + 8)); o += 12 + len; }
+  return out;
+};
+const pngPixelsOnly = (buf) => !pngChunks(buf).some((c) => /^(eXIf|tEXt|zTXt|iTXt)$/.test(c));
 /* width and height from a JPEG's SOF0/SOF2 (after APP0 and the Exif APP1, which this walks past) */
 const jpegSize = (buf) => {
   let o = 2;

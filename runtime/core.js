@@ -237,13 +237,18 @@ document.addEventListener("visibilitychange",function(){
 });
 
 /* ---------- sound: tiny square-wave chips through Web Audio (the named sounds themselves are in chip.js) ---------- */
-var RUNTIME_VERSION="0.42.1";   /* keep in step with VERSION in sw.js */
+var RUNTIME_VERSION="0.43.0";   /* keep in step with VERSION in sw.js */
 /* One volume, five steps, 0 is off (decisions.md section 10). It sets the master gain and nothing else does.
-   Under the master: `ui` for the runtime's own clicks, held at a fraction so they stay as quiet as they always were
-   (step 2 gives them 0.11, their level before 0.12.0), and `app` for apps, music and the cartridge at the full step. */
-var SND={ctx:null, vol:2, gain:null, ui:null, app:null, stale:false, session:"ambient"};
+   Under the master: `ui` for the runtime's own clicks and the built-ins' prompts, held at a fraction so they stay as
+   quiet as they always were (step 2 gives them 0.11, their level before 0.12.0), and `app` for apps, music and the
+   cartridge at the full step. `uiOn` switches the `ui` bus off on its own (Settings → 系统声音), so the clicks can go
+   while games and apps keep their sound; it changes nothing else (decisions.md section 41). */
+var SND={ctx:null, vol:2, uiOn:true, gain:null, ui:null, app:null, stale:false, session:"ambient"};
 var VOL_GAIN=[0,0.12,0.25,0.42,0.6], VOL_MAX=4, UI_LEVEL=0.44;
-function applyLevel(){ if(SND.gain) SND.gain.gain.value=VOL_GAIN[SND.vol]||0; }
+function applyLevel(){
+  if(SND.ui) SND.ui.gain.value=SND.uiOn?UI_LEVEL:0;
+  if(SND.gain) SND.gain.gain.value=VOL_GAIN[SND.vol]||0;
+}
 function audio(){
   if(SND.ctx) return SND.ctx;
   var AC=window.AudioContext||window.webkitAudioContext; if(!AC) return null;
@@ -269,7 +274,7 @@ function wake(){ var ac=SND.ctx; if(ac && ac.state!=="running" && ac.state!=="cl
 var APP_SFX=["tap","tick","move","ok","err","hit","miss","coin","win","lose"];
 function playNamed(name,bus){
   if(window.LOPDA_DEBUG) window.LOPDA_DEBUG.sfxLog.push(name);
-  if(!SND.vol) return;
+  if(!SND.vol || (bus==="ui" && !SND.uiOn)) return;
   if(!window.LopdaChip.hasNamed(name)) return;
   var ac=audio(); if(!ac) return;
   wake();
