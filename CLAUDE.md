@@ -4,6 +4,7 @@ Lo-PDA: a fictional 1986 four-tone handheld, built as a PWA that runs on a phone
 Built-in programs plus a community app store of small sandboxed HTML apps.
 Owner: Haowei Wu. Repo: https://github.com/nowheremanx/lopda.
 Design history and open questions: `docs/decisions.md`. Read it before changing behaviour.
+Design drafts for work not yet merged: `docs/design/` (current: `home-api.md`, the home tile API).
 
 ## Layout
 
