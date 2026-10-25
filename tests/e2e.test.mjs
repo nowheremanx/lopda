@@ -6797,9 +6797,10 @@ test("crossing: round 1 shows a grid, a demo spells one word, words typed with t
       const r = document.querySelector(s).getBoundingClientRect();
       return r.top >= 0 && r.bottom <= root.clientHeight && r.left >= 0 && r.right <= root.clientWidth;
     });
-    const keys44 = [...document.querySelectorAll(".key")].every((k) => {
+    const keysSized = [...document.querySelectorAll(".key")].every((k) => {
       const r = k.getBoundingClientRect();
-      return r.width >= 44 && r.height >= 44;
+      return r.width >= 36 && r.width <= 44 && r.width === r.height &&
+        getComputedStyle(k).borderRadius === "50%";
     });
     const rs = [], cs = [];
     game.placed.forEach((w) => {
@@ -6807,11 +6808,12 @@ test("crossing: round 1 shows a grid, a demo spells one word, words typed with t
         rs.push(w.r + (w.dir === "v" ? i : 0)); cs.push(w.c + (w.dir === "h" ? i : 0));
       }
     });
-    return { size: [root.clientWidth, root.clientHeight], fits, keys44, rows: Math.max(...rs) - Math.min(...rs) + 1, cols: Math.max(...cs) - Math.min(...cs) + 1 };
+    return { size: [root.clientWidth, root.clientHeight], fits, keysSized, rows: Math.max(...rs) - Math.min(...rs) + 1, cols: Math.max(...cs) - Math.min(...cs) + 1 };
   });
   assert.deepEqual(layout.size, [331, 359]);
   assert.equal(layout.fits, true, "everything stays inside the smallest screen");
-  assert.equal(layout.keys44, true, "every wheel letter is a 44px target");
+  /* the visible circle is 36-44 px; the 44 px touch target comes from the press proximity in the app */
+  assert.equal(layout.keysSized, true, "every wheel letter is a round 36-44 px key");
   assert.ok(layout.rows <= 7 && layout.cols <= 7, "a small grid: " + layout.rows + "x" + layout.cols);
 
   /* the demo: a finger spells the shortest grid word that is not the seed, the line follows, the word fills in */
@@ -7594,7 +7596,7 @@ test("crossing: a drag along a chord skips the middle letter, and a fast step ov
   const ready = () => p.waitForFunction(() => /loaded |load failed/.test(document.getElementById("log").textContent), null, { timeout: 5000 });
   await p.goto(`${base}/sdk/dev.html?app=registry/apps/crossing&lang=zh`, { waitUntil: "load" });
   await ready();
-  /* round 41 uses a seven-letter seed: the ring where a chord skips a letter only 20 px from its middle */
+  /* round 41 uses a seven-letter seed: the crowded ring where a chord skips a letter about one key away */
   await p.evaluate(() => localStorage.setItem("lopda-dev:crossing", JSON.stringify({ game: { round: 41, cleared: 40, taught: true } })));
   await p.reload({ waitUntil: "load" });
   await ready();
@@ -7607,15 +7609,41 @@ test("crossing: a drag along a chord skips the middle letter, and a fast step ov
   await p.waitForTimeout(150);
   await p.locator('#pad [data-b="a"]').click();
   await until(p, () => f.evaluate(() => game.phase === "play" && game.round === 41), "round 41");
-  const wheel = await f.evaluate(() => ({
-    letters: game.wheel.slice(),
-    keys: [...document.querySelectorAll(".key")].map((el) => {
+  const wheel = await f.evaluate(() => {
+    const keys = [...document.querySelectorAll(".key")].map((el) => {
       const b = el.getBoundingClientRect();
-      return { i: +el.getAttribute("data-i"), x: b.left + b.width / 2, y: b.top + b.height / 2 };
-    }).sort((a, b) => a.i - b.i),
-  }));
+      return { i: +el.getAttribute("data-i"), x: b.left + b.width / 2, y: b.top + b.height / 2, w: b.width };
+    }).sort((a, b) => a.i - b.i);
+    const wr = document.getElementById("wheel").getBoundingClientRect();
+    const br = document.getElementById("board").getBoundingClientRect();
+    const sr = document.getElementById("stage").getBoundingClientRect();
+    return {
+      letters: game.wheel.slice(),
+      ringR: game.wheelR,
+      wheelW: wr.width,
+      keyRadius: getComputedStyle(document.querySelector(".key")).borderRadius,
+      keys,
+      board: { l: br.left, r: br.right, t: br.top, b: br.bottom },
+      stage: { l: sr.left, r: sr.right, t: sr.top, b: sr.bottom },
+      size: [document.documentElement.clientWidth, document.documentElement.clientHeight],
+    };
+  });
   assert.equal(wheel.letters.length, 7, "round 41's seed has seven letters, the crowded ring this test needs");
   assert.equal(wheel.keys.length, 7, "one key per letter");
+  /* the approved smallest-screen shape: a wheel that grew into the board's width, round keys with room to spare */
+  assert.ok(wheel.wheelW >= 176, "the wheel is at least 176 px wide at 331x359: " + wheel.wheelW.toFixed(1));
+  assert.equal(wheel.keyRadius, "50%", "every key is a circle");
+  const ringGaps = wheel.keys.map((k, i) => {
+    const q = wheel.keys[(i + 1) % wheel.keys.length];
+    return Math.hypot(q.x - k.x, q.y - k.y) - k.w;
+  });
+  assert.ok(ringGaps.every((g) => g >= 10),
+    "neighbouring circles keep at least 10 px apart at 331x359: " + ringGaps.map((g) => g.toFixed(1)).join(" / "));
+  assert.ok(wheel.board.l >= 0 && wheel.board.r <= wheel.size[0],
+    "the board stays inside the app's width: " + wheel.board.l.toFixed(1) + ".." + wheel.board.r.toFixed(1) + " of " + wheel.size[0]);
+  assert.ok(wheel.board.l >= wheel.stage.l - 0.5 && wheel.board.r <= wheel.stage.r + 0.5 &&
+    wheel.board.t >= wheel.stage.t - 0.5 && wheel.board.b <= wheel.stage.b + 0.5,
+    "the board stays inside the stage: board " + JSON.stringify(wheel.board) + " in stage " + JSON.stringify(wheel.stage));
   const box = await p.locator("#app").boundingBox();
   const at = (i, dx = 0, dy = 0) => ({ x: box.x + wheel.keys[i].x + dx, y: box.y + wheel.keys[i].y + dy });
   const entry = () => f.textContent("#entry");
@@ -7626,12 +7654,19 @@ test("crossing: a drag along a chord skips the middle letter, and a fast step ov
     const t = Math.max(0, Math.min(1, ((q.x - a.x) * dx + (q.y - a.y) * dy) / (dx * dx + dy * dy)));
     return Math.hypot(a.x + t * dx - q.x, a.y + t * dy - q.y);
   };
+  /* the catch radius the app computes from the real ring (the chord premise below must sit outside it) */
+  const catchRadius = Math.max(12, Math.min(24,
+    Math.round(0.62 * wheel.ringR * (1 - Math.cos(2 * Math.PI / wheel.letters.length)))));
+  const firstChord = Math.hypot(wheel.keys[1].x - wheel.keys[0].x, wheel.keys[1].y - wheel.keys[0].y);
+  const measuredR = firstChord / (2 * Math.sin(Math.PI / wheel.letters.length));
+  assert.ok(Math.abs(wheel.ringR - measuredR) <= 1,
+    "game.wheelR is the ring the keys sit on: " + wheel.ringR + " vs " + measuredR.toFixed(1) + " measured");
 
-  /* (a) the straight chord from key 2 to key 4 passes between the new 12 px radius and the old 24 px one
-     from key 3's middle; the segment check must leave key 3's element out */
+  /* (a) the straight chord from key 2 to key 4 passes farther from key 3's middle than the catch radius,
+     so the segment check must leave key 3's element out */
   const chord = segDist(wheel.keys[3], wheel.keys[2], wheel.keys[4]);
-  assert.ok(chord > 12 && chord < 24,
-    "the chord passes " + chord.toFixed(1) + " px from key 3's middle: outside 12 px, inside the old 24 px");
+  assert.ok(chord > catchRadius,
+    "the chord passes " + chord.toFixed(1) + " px from key 3's middle, outside the " + catchRadius + " px catch radius");
   await p.mouse.move(at(2).x, at(2).y);
   await p.mouse.down();
   await p.mouse.move(at(4).x, at(4).y, { steps: 12 });
@@ -7658,15 +7693,15 @@ test("crossing: a drag along a chord skips the middle letter, and a fast step ov
 
   /* (c) one big jump with no pointermove over the middle key: the step runs from key 0's middle through
      key 1 to a landing point past it, so the segment check is the only way key 1 can come in. The landing
-     point is more than 12 px from every key's middle, so it cannot pick one by itself. The wheel is
-     unchanged by (b), so its measured keys still apply. */
+     point is farther from every key's middle than the catch radius, so it cannot pick one by itself. The
+     wheel is unchanged by (b), so its measured keys still apply. */
   const land = {
     x: wheel.keys[1].x + 0.8 * (wheel.keys[1].x - wheel.keys[0].x),
     y: wheel.keys[1].y + 0.8 * (wheel.keys[1].y - wheel.keys[0].y),
   };
   const gaps = wheel.keys.map((k) => Math.hypot(k.x - land.x, k.y - land.y));
-  assert.ok(gaps.every((d) => d > 12),
-    "the landing point stays " + Math.min(...gaps).toFixed(1) + " px from every key's middle");
+  assert.ok(gaps.every((d) => d > catchRadius),
+    "the landing point stays " + Math.min(...gaps).toFixed(1) + " px from every key's middle, outside the catch radius");
   const view = await f.evaluate(() => [document.documentElement.clientWidth, document.documentElement.clientHeight]);
   assert.ok(land.x > 0 && land.y > 0 && land.x < view[0] && land.y < view[1], "the jump ends inside the app");
   await p.mouse.move(at(0).x, at(0).y);
