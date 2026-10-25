@@ -4709,8 +4709,9 @@ test("pet: at night it lies in the bed in every stage, wakes back to the rug, an
     assert.equal(a.zz, true, `${stage} has Zz`);
   }
 
-  /* morning: a short walk from the bed back to the rug (down first, then across) */
-  await p.clock.setSystemTime(new Date(2026, 9, 12, 7, 5));
+  /* morning: a short walk from the bed back to the rug (down first, then across).
+     08:00 is after every trait's sleep window (the sleepy one wakes at 07:30), so the pet is up. */
+  await p.clock.setSystemTime(new Date(2026, 9, 12, 8, 0));
   let mid = null;
   for (let i = 0; i < 14 && !mid; i++) {
     await p.clock.runFor(500);
