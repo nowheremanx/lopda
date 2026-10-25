@@ -124,7 +124,7 @@ test("no game ROMs in the repo", () => {
 test("third-party code keeps its licence file and is listed in NOTICE and LICENSING.md", () => {
   for (const [dir, licence] of [["runtime/vendor/binjgb", "LICENSE"], ["sdk/fonts", "LICENSE-lopix12.txt"],
     ["runtime/fonts", "OFL-DotGothic16.txt"], ["runtime/fonts", "OFL-VT323.txt"],
-    ["runtime/vendor/holiday-cn", "LICENSE"]]) {
+    ["runtime/vendor/holiday-cn", "LICENSE"], ["runtime/vendor/qrcode-generator", "LICENSE"]]) {
     assert.ok(existsSync(join(ROOT, dir, licence)), `${dir}/${licence}`);
     assert.ok(read("NOTICE").includes(dir), "NOTICE lists " + dir);
     assert.ok(read("LICENSING.md").includes(dir), "LICENSING.md lists " + dir);
@@ -161,7 +161,8 @@ test("the only other sites a runtime script names are the calendar's holiday add
     const code = read(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
     for (const m of code.matchAll(/"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/g)) if (/https?:\/\//.test(m[0])) found.push(f + " " + m[0]);
   }
-  assert.deepEqual(found.sort(), ['runtime/ai.js "https://openrouter.ai/api/v1/chat/completions"', 'runtime/apps/calendar.js "https://cdn.jsdelivr.net/gh/NateScarlet/holiday-cn@master/"']);
+  assert.deepEqual(found.sort(), ['runtime/ai.js "https://openrouter.ai/api/v1/chat/completions"', 'runtime/apps/calendar.js "https://cdn.jsdelivr.net/gh/NateScarlet/holiday-cn@master/"',
+    'runtime/apps/settings.js "https://nowheremanx.github.io/lopda/"']);
 });
 
 test("build-index refuses an app that fails the checker", (t) => {

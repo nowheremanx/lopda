@@ -307,6 +307,12 @@ async function capture(rootArg, outArg) {
   };
   await home(); await tile("settings"); await p.waitForTimeout(700);
   await settings("15-settings");
+  await p.click("#set-share-open"); await p.waitForSelector("#v-set-share:not([hidden])");
+  await shot("15a-settings-share");
+  await p.click("#set-share-back"); await p.waitForSelector("#v-settings:not([hidden])");
+  await p.click("#set-about-open"); await p.waitForSelector("#v-set-about:not([hidden])");
+  await settings("15b-settings-about");
+  await p.click("#set-about-back"); await p.waitForSelector("#v-settings:not([hidden])");
   await p.click("[data-lang=en]"); await p.waitForTimeout(400);
   await settings("16-settings-en");
   await home(); await p.waitForTimeout(300);

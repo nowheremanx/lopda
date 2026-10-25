@@ -205,7 +205,7 @@ document.addEventListener("visibilitychange",function(){
 });
 
 /* ---------- sound: tiny square-wave chips through Web Audio (the named sounds themselves are in chip.js) ---------- */
-var RUNTIME_VERSION="0.37.0";   /* keep in step with VERSION in sw.js */
+var RUNTIME_VERSION="0.38.0";   /* keep in step with VERSION in sw.js */
 /* One volume, five steps, 0 is off (decisions.md section 10). It sets the master gain and nothing else does.
    Under the master: `ui` for the runtime's own clicks, held at a fraction so they stay as quiet as they always were
    (step 2 gives them 0.11, their level before 0.12.0), and `app` for apps, music and the cartridge at the full step. */
@@ -388,9 +388,9 @@ function validIcon(rows){
   return Array.isArray(rows) && rows.length===16 && rows.every(function(r){ return typeof r==="string" && /^[.0-3]{16}$/.test(r); });
 }
 function iconCanvas(rows){
-  var c=document.createElement("canvas"); c.width=16; c.height=16; c.className="icon";
-  var x=c.getContext("2d"), im=x.createImageData(16,16), d=im.data;
-  rows.forEach(function(r,y){ for(var i=0;i<16;i++){ var ch=r.charAt(i), o=(y*16+i)*4; if(ch==="."){ d[o+3]=0; continue; } var t=TONES[+ch]; d[o]=t[0]; d[o+1]=t[1]; d[o+2]=t[2]; d[o+3]=255; } });
+  var n=rows.length, c=document.createElement("canvas"); c.width=n; c.height=n; c.className="icon";
+  var x=c.getContext("2d"), im=x.createImageData(n,n), d=im.data;
+  rows.forEach(function(r,y){ for(var i=0;i<n;i++){ var ch=r.charAt(i), o=(y*n+i)*4; if(ch==="."){ d[o+3]=0; continue; } var t=TONES[+ch]; d[o]=t[0]; d[o+1]=t[1]; d[o+2]=t[2]; d[o+3]=255; } });
   x.putImageData(im,0,0);
   return c;
 }
@@ -549,7 +549,7 @@ var share={
   setStatus:setStatus, tickClock:tickClock, show:show, keepAwake:keepAwake,
   RUNTIME_VERSION:RUNTIME_VERSION, SND:SND, VOL_MAX:VOL_MAX, VOL_GAIN:VOL_GAIN, audio:audio, wake:wake, setSession:setSession, micRoute:micRoute, sfx:sfx, appSfx:appSfx, APP_SFX:APP_SFX, chip:chip, sfxCustom:sfxCustom, applyLevel:applyLevel, speech:speech,
   setLang:setLang, UPD:UPD, renderUpdate:renderUpdate,
-  validIcon:validIcon, fillTile:fillTile, appName:appName, appDesc:appDesc, renderHome:renderHome,
+  validIcon:validIcon, iconCanvas:iconCanvas, fillTile:fillTile, appName:appName, appDesc:appDesc, renderHome:renderHome,
   resetConfirm:resetConfirm, padRoute:padRoute, setButton:setButton, releaseButtons:releaseButtons, showPad:showPad
 };
 for(var k in share) LP[k]=share[k];
