@@ -1295,17 +1295,27 @@ function startGame(id){
   if(!g) return;
   stopGameTimer();
   P.sub="game";
-  P.game={id:g.id, state:g.init(P.gameSeed!=null ? (P.gameSeed>>>0) : (now()>>>0)), applied:false};
+  /* The round waits on its start card: no timer runs until the first key. The card names the game and one line
+     of how to play, so a player never has to remember the pack list's labels. */
+  P.game={id:g.id, state:g.init(P.gameSeed!=null ? (P.gameSeed>>>0) : (now()>>>0)), applied:false, started:false};
   P.gameHeld={left:false,right:false,a:false};
   P.gamePress={left:false,right:false,a:false};
   P.gameLabel="";
   silenceWeather();
   beep("tap"); renderKeys(); render();
+}
+function startRound(){
+  if(!P.game || P.game.started) return;
+  P.game.started=true;
+  P.gameHeld={left:false,right:false,a:false};
+  P.gamePress={left:false,right:false,a:false};
+  P.panelKey="";
+  beep("tap"); renderKeys(); render();
   startGameTimer();
 }
 function gameTick(){
   if(!isOpen() || document.hidden){ stopGameTimer(); return; }
-  if(P.sub!=="game" || !P.game) return;
+  if(P.sub!=="game" || !P.game || !P.game.started) return;
   var g=gameById(P.game.id), st=gameState();
   if(!g || !st || st.done) return;
   var input={left:P.gameHeld.left, right:P.gameHeld.right, a:P.gameHeld.a,
@@ -1448,7 +1458,8 @@ function pressA(){
   }
   if(P.sub==="game"){
     if(!P.game) return;
-    if(gameDone()){ startGame(P.game.id); return; }     /* 再来: the same pack, a fresh round */
+    if(gameDone()){ exitGame(); return; }              /* any key returns to the room, never a new round */
+    if(!P.game.started){ startRound(); return; }
     P.gamePress.a=true;
     if(P.game.id==="bounce") beep("tick");
     return;
@@ -1558,22 +1569,26 @@ function seasonOf(t){
   if(m>=9 && m<=11) return "autumn";
   return "winter";
 }
-/* The day's weather by season, seeded by the pet and the day; the debug hook may pin it for a picture. */
+/* The day's weather by season, seeded by the pet and the day; the debug hook may pin it for a picture.
+   A real weather source can replace the seed here later (a system GPS/weather API), once there is one. */
 function weatherNow(){
   if(P.weatherOverride) return P.weatherOverride;
   if(!P.save) return "sun";
   return Pet.weatherOf(P.save.born,dayKey(now()),seasonOf(now()));
 }
-/* Rain and wind are the only weathers with a voice; it belongs to the pet's screen and stops when it leaves. */
+/* Only rain has a voice. The chip's "wind" preset is filtered noise, and at this low level the owner heard it
+   as rain while the window only showed a few faint lines; so wind is silent and the window's bent strokes carry
+   it. Rain's sound is asked for with the weather of the exact frame that was drawn (P.lastScene), never a second
+   reading of the clock, and only while the room (and so the window) is on screen: a sub-screen covers it. The
+   sound stops on the same frame the weather changes, when it leaves, and while the page is hidden. */
 function silenceWeather(){
   if(!P.ambName) return;
   P.ambName=null;
   if(LP.chip && typeof LP.chip.ambience==="function") LP.chip.ambience({name:null,level:0});
 }
-function syncWeatherSound(){
+function syncWeatherSound(weather){
   if(!isOpen() || document.hidden){ silenceWeather(); return; }
-  var w=weatherNow();
-  var name=w==="rain" ? "rain" : w==="wind" ? "wind" : null;
+  var name=weather==="rain" ? "rain" : null;
   if(name===P.ambName) return;
   P.ambName=name;
   if(LP.chip && typeof LP.chip.ambience==="function")
@@ -1773,7 +1788,7 @@ function roomScene(){
   var asleepNow=!!(save && save.stage!=="egg" && Pet.asleep(save,h,min));
   if(P.task || P.awakeLeft>0) asleepNow=false;      /* woken for food, by a pat or by the light: it is up */
   var scene={
-    pack:pack, night:night, season:seasonOf(t), weather:weatherNow(),
+    pack:pack, night:night, season:seasonOf(t), weather:weatherNow(), phase:Math.floor(t/500),
     dayOfMonth:localDate(t).getUTCDate(),
     lightOff:!!(save && save.light===false && asleepNow),
     bowlFull:save ? save.hunger>=2 : true,
@@ -1941,7 +1956,7 @@ function panelKey(){
   var s=P.save||{}, st=gameState();
   return [P.sub,P.foodSel,P.boxPage,P.boxAsk?P.boxAsk.id+P.boxAsk.take:"" ,P.menuSel,P.confirmStage,I18N.lang,P.souv.length,activePick()?1:0,
     P.naming?(P.naming.confirm?1:0):-1,
-    P.gameSel,P.game?P.game.id:"",st?st.score:-1,st&&st.done?1:0,P.game&&P.game.applied?1:0,
+    P.gameSel,P.game?P.game.id:"",st?st.score:-1,st&&st.done?1:0,P.game&&P.game.applied?1:0,P.game&&P.game.started?1:0,
     P.wordWord,P.wordMeaning,P.wordBusy,
     s.stage,s.name,s.hunger,s.joy,s.opened,s.born,s.close,s.travel,s.light].join("|");
 }
@@ -1981,14 +1996,48 @@ function buildGames(panel){
   });
   panel.appendChild(el("p","pet-phint",tr("pet.game.hint")));
 }
+/* The start card and the result are HTML cards over the canvas, so their words are the strings' own pixel
+   font; the pet's face and the score are painted into small canvases with the same four tones as the room. */
+function gameFace(){
+  var pack=packOf(P.save), st=gameState();
+  var marks=P.save ? markNames(P.save,pack) : {};
+  return petFrame(pack,P.save ? P.save.stage : "adult",marks,"front",st&&st.joy>=2?"happy":"idle1");
+}
+function paintScore(cv,n){
+  var num=Art.numberGrid ? Art.numberGrid(n) : null;
+  if(!num || !num.length) return;
+  paintGrid(cv,num,undefined,3);
+  var gw=String(num[0]).length;
+  cv.style.width=(gw*6)+"px";
+  cv.style.height=(num.length*6)+"px";
+}
+function buildGameStart(panel){
+  panel.className="pet-panel pet-gcard";
+  panel.onclick=function(){ startRound(); };
+  var g=P.game ? gameById(P.game.id) : null, box=el("div","pet-gbox");
+  box.appendChild(el("p","pet-gname",g?tr(g.labelKey):tr("pet.game.title")));
+  box.appendChild(el("p","pet-ghow",tr("pet.game.how."+(P.game?P.game.id:"catch"))));
+  panel.appendChild(box);
+}
 function buildGameOver(panel){
   var st=gameState(), g=P.game ? gameById(P.game.id) : null;
   if(!st) return;
-  panel.appendChild(el("p","pet-ptitle",g?tr(g.labelKey):tr("pet.game.title")));
-  panel.appendChild(el("p","pet-pinfo",tr("pet.game.over")));
-  panel.appendChild(el("p","pet-presult",tr("pet.game.score",{n:st.score})));
-  panel.appendChild(el("p","pet-presult",tr(st.joy>=2?"pet.game.joy2":"pet.game.joy1")));
-  panel.appendChild(el("p","pet-phint",tr("pet.game.again")));
+  panel.className="pet-panel pet-gcard";
+  panel.onclick=function(){ exitGame(); };            /* any tap, any key: back to the room */
+  var box=el("div","pet-gbox");
+  box.appendChild(el("p","pet-gname",g?tr(g.labelKey):tr("pet.game.title")));
+  var face=el("canvas","pet-gface");
+  face.setAttribute("aria-hidden","true");
+  paintGrid(face,gameFace(),undefined,3);
+  box.appendChild(face);
+  box.appendChild(el("p","pet-gscorelabel",tr("pet.game.scorelabel")));
+  var score=el("canvas","pet-gscore");
+  score.setAttribute("aria-label",tr("pet.game.score",{n:st.score}));
+  paintScore(score,st.score);
+  box.appendChild(score);
+  box.appendChild(el("p","pet-gcomment",tr(st.joy>=2?"pet.game.result.fun":"pet.game.result.ok")));
+  box.appendChild(el("p","pet-ganykey",tr("pet.game.anykey")));
+  panel.appendChild(box);
 }
 function buildLook(panel){
   var s=P.save||{}, age=Math.max(0,Math.floor((now()-(+s.born||now()))/DAY));
@@ -2085,14 +2134,18 @@ function renderPanel(){
   var panel=$("pet-panel");
   if(!panel) return;
   if(!P.sub){ panel.hidden=true; P.panelKey=""; return; }
-  if(P.sub==="game" && !gameDone()){ panel.hidden=true; P.panelKey=""; return; }
+  var startCard=P.sub==="game" && P.game && !P.game.started;
+  if(P.sub==="game" && !startCard && !gameDone()){ panel.hidden=true; P.panelKey=""; return; }
   panel.hidden=false;
   var key=panelKey();
   if(key===P.panelKey) return;
   P.panelKey=key;
+  panel.className="pet-panel";
+  panel.onclick=null;
   panel.textContent="";
   if(P.sub==="food") buildFood(panel);
   else if(P.sub==="games") buildGames(panel);
+  else if(P.sub==="game" && startCard) buildGameStart(panel);
   else if(P.sub==="game") buildGameOver(panel);
   else if(P.sub==="menu") buildMenu(panel);
   else if(P.sub==="look") buildLook(panel);
@@ -2120,14 +2173,17 @@ function render(){
     away.hidden=!trv || P.sub==="game";
     if(trv) away.textContent=tr("pet.away")+" · "+tr("pet.away.hint");
   }
-  if(P.sub==="game") silenceWeather(); else syncWeatherSound();
+  if(P.sub==="game") silenceWeather();
+  else if(!P.sub && P.lastScene) syncWeatherSound(P.lastScene.weather);
+  else silenceWeather();
 }
 /* The main screen's A names what the selected icon will do; a sub-screen keeps its own A. */
 function aKeyLabel(){
   if(P.sub==="food") return "pet.sk.pick";
   if(P.sub==="games") return "pet.sk.start";
   if(P.sub==="game"){
-    if(gameDone()) return "pet.game.again";
+    if(gameDone()) return "pet.game.room";
+    if(P.game && !P.game.started) return "pet.sk.start";
     var st=gameState();
     return P.game && P.game.id==="bounce" && st && !st.ball ? "pet.game.serve" : "";
   }
@@ -2321,7 +2377,7 @@ function resume(){
   P.resumeOuting=true;
   if(isOpen()){
     refreshTime(); P.wasAsleep=inBedSleep(); maybeNamePrompt(); render(); startTimer(); refreshUsage();
-    if(P.sub==="game" && P.game && !gameDone()) startGameTimer();
+    if(P.sub==="game" && P.game && P.game.started && !gameDone()) startGameTimer();
   } else {
     backgroundDay();
   }
@@ -2411,7 +2467,9 @@ function bindRoom(){
     P.gameHeld.left=left; P.gameHeld.right=!left;
   }
   function gameTouch(e){
-    if(document.hidden || !isOpen() || P.sub!=="game" || !P.game || gameDone()) return;
+    if(document.hidden || !isOpen() || P.sub!=="game" || !P.game) return;
+    if(gameDone()){ exitGame(); return; }
+    if(!P.game.started){ startRound(); return; }
     P.gameTouch=e.pointerId;
     gameSide(e);
     try{ if(cv.setPointerCapture) cv.setPointerCapture(e.pointerId); }catch(err){}
@@ -2435,12 +2493,18 @@ bindRoom();
 /* normal boots also get pause/resume from core; this keeps a game's 20 fps loop stopped in nostore mode too */
 document.addEventListener("visibilitychange",function(){
   if(document.hidden){ stopGameTimer(); return; }
-  if(P.inView && isOpen() && P.sub==="game" && P.game && !gameDone()) startGameTimer();
+  if(P.inView && isOpen() && P.sub==="game" && P.game && P.game.started && !gameDone()) startGameTimer();
 });
 
 LP.padRoute("pet",function(b,down){
   if(!isOpen()) return false;
   if(P.sub==="game"){
+    if(gameDone()){ if(down) exitGame(); return true; }        /* any key: back to the room */
+    if(!P.game || !P.game.started){
+      if(b==="b"){ if(down) exitGame(); return true; }         /* B is still back, not a start */
+      if(down) startRound();                                   /* any other first key starts the round */
+      return true;
+    }
     if(b==="a"){ if(down) pressA(); return true; }
     if(b==="b"){ if(down) exitGame(); return true; }
     if(b==="left" || b==="right"){ P.gameHeld[b]=!!down; return true; }

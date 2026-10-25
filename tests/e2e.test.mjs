@@ -4305,8 +4305,13 @@ test("pet: games - the play list opens each pack, the canvas moves at 20 fps, B 
   assert.deepEqual(items, ["接东西", "弹球", "往上跳"]);
   assert.equal(await p.locator("#pet-keys .sk-a span").innerText(), "开始");
 
-  /* catch: the 20 fps loop runs while visible, stops while hidden and resumes; the pet's x follows the keys */
+  /* catch: its start card, then the 20 fps loop runs while visible, stops while hidden and resumes; the pet's x follows the keys */
   await key("a");
+  const startCard = await p.locator("#pet-panel").innerText();
+  assert.match(startCard, /接东西/, "the start card names the game");
+  assert.match(startCard, /接住掉下来的零件/, "and gives one line of how to play");
+  assert.equal(await p.locator("#pet-keys .sk-a span").innerText(), "开始");
+  await key("a");                                          /* the first key removes the start card */
   assert.ok(await p.isHidden("#pet-panel"), "a running play pack shows the room canvas");
   await p.evaluate(() => { window.__steps = 0; });
   await p.waitForTimeout(1000);
@@ -4356,12 +4361,15 @@ test("pet: games - the play list opens each pack, the canvas moves at 20 fps, B 
   await p.waitForTimeout(300);
   assert.equal(await steps(), 0, "B stopped the 20 fps loop");
 
-  /* bounce: A serves, the ball moves, B leaves */
+  /* bounce: the start card goes on the first key, A serves, the ball moves, B leaves */
   await key("a");
   await p.waitForSelector("#pet-panel:not([hidden])");
   await p.keyboard.press("ArrowDown");
   await p.waitForTimeout(80);
   await key("a");
+  await p.waitForSelector("#pet-panel:not([hidden])");
+  assert.match(await p.locator("#pet-panel").innerText(), /弹球/);
+  await key("a");                                          /* start */
   await p.waitForTimeout(200);
   const b0 = await sig();
   await key("a");                                          /* serve */
@@ -4379,6 +4387,9 @@ test("pet: games - the play list opens each pack, the canvas moves at 20 fps, B 
   await p.keyboard.press("ArrowDown");
   await p.waitForTimeout(80);
   await key("a");
+  await p.waitForSelector("#pet-panel:not([hidden])");
+  assert.match(await p.locator("#pet-panel").innerText(), /往上跳/);
+  await key("a");                                          /* start */
   await p.waitForTimeout(250);
   const m0 = await sig();
   const mx0 = await p.evaluate(() => window.__gameState && window.__gameState.pet.x);
@@ -4391,25 +4402,49 @@ test("pet: games - the play list opens each pack, the canvas moves at 20 fps, B 
   await assertFourTones("climb");
   await key("b");
 
-  /* a real no-input catch round ends by itself, then the score and joy are on screen and in the save */
+  /* a round's result card, then any key returns to the room (never 再来 / a new round) */
   await key("a");                                          /* 玩 */
   await p.waitForSelector("#pet-panel:not([hidden])");
-  await key("a");                                          /* catch */
+  await key("a");                                          /* catch: the start card */
   const before = await save();
-  await p.evaluate(() => { window.__gameState = null; });
-  await p.waitForFunction(() => window.__gameState && window.__gameState.done, null, { timeout: 12000 });
+  await key("a");                                          /* first key starts the round */
+  await p.evaluate(() => LOPDA_DEBUG.pet.finishGame(12));
   await p.waitForTimeout(150);
-  const st = await p.evaluate(() => ({ score: window.__gameState.score, joy: window.__gameState.joy }));
+  const st = await p.evaluate(() => LOPDA_DEBUG.pet.gameState());
+  assert.equal(st.score, 12);
+  assert.equal(st.joy, 2, "12 catches is over the +2 threshold");
   const panel = await p.locator("#pet-panel").innerText();
-  assert.match(panel, new RegExp("得分 " + st.score));
-  assert.match(panel, /再来/);
-  assert.match(panel, st.joy === 2 ? /\+2/ : /\+1/);
+  assert.doesNotMatch(panel, /再来/, "no repeat button on the result");
+  assert.match(panel, /它玩得很开心/, "a quiet comment");
+  assert.match(panel, /按任意键回房间/, "the way back is named");
+  assert.equal(await p.locator(".pet-gscore").getAttribute("aria-label"), "得分 12");
+  const scoreInk = await p.evaluate(() => {
+    const c = document.querySelector(".pet-gscore"), d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data;
+    let n = 0;
+    for (let i = 0; i < d.length; i += 4) if (d[i] < 100) n++;
+    return n;
+  });
+  assert.ok(scoreInk > 20, "the score is drawn in big pixel digits: " + scoreInk);
+  assert.ok(await p.locator(".pet-gface").isVisible(), "the pet's face is on the result card");
   const after = await save();
-  assert.equal(after.today.played, before.today.played + 1, "the real round counted once");
-  assert.equal(after.joy, Math.min(5, before.joy + st.joy), "the real round's joy was applied, once");
-  await key("a");                                          /* 再来: a fresh round */
-  assert.ok(await p.isHidden("#pet-panel"), "A starts the same pack again");
-  await key("b");
+  assert.equal(after.today.played, before.today.played + 1, "the round counted once");
+  assert.equal(after.joy, Math.min(5, before.joy + st.joy), "the round's joy was applied, once");
+  await key("down");                                       /* any key, here a direction */
+  assert.ok(await p.isHidden("#pet-panel"), "a direction returns to the room");
+  assert.equal(await p.locator("#pet-keys .sk-b span").innerText(), "返回");
+  assert.equal(await p.evaluate(() => LOPDA_DEBUG.pet.gameState()), null, "the round is gone, not restarted");
+  const roomed = await save();
+  assert.equal(roomed.joy, after.joy, "the key back applies no second joy");
+
+  /* a tap on the result card is the same way out */
+  await key("a");
+  await p.waitForSelector("#pet-panel:not([hidden])");
+  await key("a");
+  await key("a");                                          /* start */
+  await p.evaluate(() => LOPDA_DEBUG.pet.finishGame(3));
+  await p.waitForTimeout(100);
+  await p.locator("#pet-panel").click();
+  assert.ok(await p.isHidden("#pet-panel"), "a tap returns to the room too");
 
   /* during the day's outing, A on 玩 opens nothing and does not freeze the outing */
   await p.evaluate(() => LOPDA_DEBUG.pet.forceOuting());
@@ -4458,6 +4493,9 @@ test("pet: third phone feedback - holding right climbs to a higher platform, and
   await p.keyboard.press("ArrowDown");
   await p.waitForTimeout(80);
   await key("a");
+  await p.waitForSelector("#pet-panel:not([hidden])");
+  assert.match(await p.locator("#pet-panel").innerText(), /往上跳/);
+  await key("a");                                          /* the start card goes, the round begins */
   await p.waitForTimeout(120);
   await p.keyboard.down("ArrowRight");
   await p.waitForTimeout(4200);
@@ -5174,7 +5212,7 @@ test("pet: the AI souvenir is made and saved with the pet screen never opened; o
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
-test("pet: rain and sun change only the window; rain has its ambience on the screen and silence after HOME", { skip, timeout: 60000 }, async (t) => {
+test("pet: rain draws visible streaks and is the only weather with a sound; wind is wind or silent; sun is silent", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await page(t, { locale: "zh-CN", serviceWorkers: "block", viewport: { width: 390, height: 844 } });
   await p.clock.install({ time: new Date(2026, 9, 11, 9, 0) });
   await p.goto(base + "/runtime/?debug", { waitUntil: "networkidle" });
@@ -5183,35 +5221,75 @@ test("pet: rain and sun change only the window; rain has its ambience on the scr
   await p.locator("#v-pet:not([hidden])").waitFor();
   await p.evaluate(() => LOPDA_DEBUG.pet.hatch());
   await p.waitForTimeout(150);
-  const frames = await p.evaluate(() => {
-    const snap = (w) => {
-      LOPDA_DEBUG.pet.setWeather(w);
-      const c = document.getElementById("pet-cv"), d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data;
-      return Array.from(d);
-    };
-    return { rain: snap("rain"), sun: snap("sun") };
+  const frame = () => p.evaluate(() => {
+    const c = document.getElementById("pet-cv"), d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data;
+    return Array.from(d);
   });
-  const rain = frames.rain, sun = frames.sun;
-  let inside = 0, outside = 0;
-  for (let y = 0; y < 120; y++) for (let x = 0; x < 162; x++) {
-    const i = (y * 162 + x) * 4;
-    if (rain[i] === sun[i] && rain[i + 1] === sun[i + 1] && rain[i + 2] === sun[i + 2]) continue;
-    if (x >= 10 && x < 50 && y >= 12 && y < 44) inside++; else outside++;
-  }
-  assert.ok(inside > 0, "rain and sun draw different windows");
-  assert.equal(outside, 0, "weather changes nothing outside the window");
+  const inkInWindow = (d) => {
+    let n = 0;
+    for (let y = 12; y < 44; y++) for (let x = 12; x < 48; x++) {
+      const i = (y * 162 + x) * 4;
+      if (d[i] === 31 && d[i + 1] === 42 && d[i + 2] === 20) n++;
+    }
+    return n;
+  };
+  const changed = (a, b) => {
+    let inside = 0, outside = 0;
+    for (let y = 0; y < 120; y++) for (let x = 0; x < 162; x++) {
+      const i = (y * 162 + x) * 4;
+      if (a[i] === b[i] && a[i + 1] === b[i + 1] && a[i + 2] === b[i + 2]) continue;
+      if (x >= 10 && x < 50 && y >= 10 && y < 46) inside++; else outside++;
+    }
+    return { inside, outside };
+  };
 
-  /* rain starts the low ambience; leaving the pet stops it */
+  await p.evaluate(() => LOPDA_DEBUG.pet.setWeather("rain"));
+  const rain = await frame();
+  await p.clock.runFor(700);                              /* one room tick: the weather moves on */
+  const rainLater = await frame();
+  const rainMove = changed(rain, rainLater);
+  assert.ok(rainMove.inside > 0, "rain animates in the window");
+  await p.evaluate(() => LOPDA_DEBUG.pet.setWeather("sun"));
+  const sun = await frame();
+  assert.ok(inkInWindow(rain) > inkInWindow(sun) + 40,
+    `rain's streaks are clearly visible: ${inkInWindow(rain)} ink vs sun's ${inkInWindow(sun)}`);
+
+  /* the sound is taken from the weather of the frame just drawn: rain only when rain, wind wind or nothing, sun quiet */
   await p.evaluate(() => {
-    LOPDA_DEBUG.pet.setWeather("sun");
     window.__amb = [];
     const orig = LP.chip.ambience.bind(LP.chip);
     LP.chip.ambience = function (d) { window.__amb.push({ name: d && d.name, level: d && d.level }); return orig(d); };
     LOPDA_DEBUG.pet.setWeather("rain");
   });
-  await p.waitForTimeout(150);
+  await p.waitForTimeout(120);
   let amb = await p.evaluate(() => window.__amb);
   assert.ok(amb.some((a) => a.name === "rain" && a.level > 0 && a.level < 0.3), "rain plays at a low level");
+  await p.evaluate(() => LOPDA_DEBUG.pet.setWeather("sun"));
+  await p.waitForTimeout(120);
+  amb = await p.evaluate(() => window.__amb);
+  assert.equal(amb[amb.length - 1].name, null, "sun is silent");
+  await p.evaluate(() => LOPDA_DEBUG.pet.setWeather("wind"));
+  await p.waitForTimeout(120);
+  amb = await p.evaluate(() => window.__amb);
+  assert.ok(amb[amb.length - 1].name === null || amb[amb.length - 1].name === "wind", "wind is wind or nothing, never rain");
+  assert.notEqual(amb[amb.length - 1].name, "rain", "wind never sounds like rain");
+  await p.evaluate(() => LOPDA_DEBUG.pet.setWeather("rain"));
+  await p.waitForTimeout(120);
+  amb = await p.evaluate(() => window.__amb);
+  assert.equal(amb[amb.length - 1].name, "rain", "rain is back with its own frame");
+
+  /* a sub-screen covers the window: the rain stops, and it comes back with the room */
+  await p.evaluate(() => LOPDA_DEBUG.setButton("start", true));
+  await p.evaluate(() => LOPDA_DEBUG.setButton("start", false));
+  await p.waitForTimeout(120);
+  amb = await p.evaluate(() => window.__amb);
+  assert.equal(amb[amb.length - 1].name, null, "a panel over the window silences the rain");
+  await p.evaluate(() => { LOPDA_DEBUG.setButton("b", true); LOPDA_DEBUG.setButton("b", false); });
+  await p.waitForTimeout(120);
+  amb = await p.evaluate(() => window.__amb);
+  assert.equal(amb[amb.length - 1].name, "rain", "the room brings its rain back");
+
+  /* HOME stops it */
   await p.click("#home-key");
   await p.waitForTimeout(250);
   amb = await p.evaluate(() => window.__amb);

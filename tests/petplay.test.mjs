@@ -97,6 +97,56 @@ test("draw writes only tone indices 0-3 into the 162 x 120 buffer", () => {
   }
 });
 
+test("draw: a thin ink frame, the score in petart's pixel digits, and each game's own field", () => {
+  const corner = (buf, s) => {
+    const A = Art.numberGrid(s.score), gw = String(A[0]).length;
+    return { x0: W - 4 - gw, x1: W - 3, y0: 4, y1: 11 };
+  };
+  for (const g of Play.GAMES) {
+    const s = g.init(21);
+    for (let i = 0; i < 8; i++) g.step(s, inputAt(i, false), 50);
+    s.score = 7;
+    const a = drawTones(g, s);
+    s.score = 12;
+    const b = drawTones(g, s);
+    let inScore = 0, outside = 0;
+    const c = corner(a, s);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const i = y * W + x;
+      if (a[i] === b[i]) continue;
+      if (x >= c.x0 && x <= c.x1 && y >= c.y0 && y <= c.y1) inScore++; else outside++;
+    }
+    assert.ok(inScore > 0, `${g.id} shows the score in the corner`);
+    assert.equal(outside, 0, `${g.id}'s score changes only its corner`);
+    for (let x = 0; x < W; x++) for (const y of [0, 1, H - 2, H - 1]) assert.equal(a[y * W + x], 0, `${g.id} frame row ${y}`);
+    for (let y = 0; y < H; y++) for (const x of [0, 1, W - 2, W - 1]) assert.equal(a[y * W + x], 0, `${g.id} frame column ${x}`);
+  }
+
+  /* catch: a floor line under a floor band, and specks in the sky */
+  const catchGame = game("catch"), catchState = catchGame.init(4);
+  const onFloor = drawTones(catchGame, catchState);
+  assert.equal(onFloor[(H - 6) * W + 10], 1, "catch has a floor line");
+  assert.equal(onFloor[(H - 4) * W + 10], 2, "and a floor band");
+  assert.equal(onFloor[20 * W + 20], 2, "with background dots");
+
+  /* bounce: the dashed centre line and the two side walls */
+  const bounceGame = game("bounce"), bounceState = bounceGame.init(4);
+  const court = drawTones(bounceGame, bounceState);
+  assert.equal(court[10 * W + Math.floor(W / 2)], 2, "the centre line is dashed");
+  assert.equal(court[20 * W + 5], 2, "the left wall");
+  assert.equal(court[20 * W + W - 6], 2, "the right wall");
+
+  /* climb: the faint wall pattern scrolls with the camera and nothing else changes */
+  const climbGame = game("climb"), climbState = climbGame.init(4);
+  climbState.plats = []; climbState.pet = null; climbState.score = 3;
+  climbState.height = 0; const wall0 = drawTones(climbGame, climbState);
+  climbState.height = 3; const wall3 = drawTones(climbGame, climbState);
+  let moved = 0;
+  for (let i = 0; i < wall0.length; i++) if (wall0[i] !== wall3[i]) moved++;
+  assert.ok(moved > 50, `the wall scrolls: ${moved} pixels`);
+  assert.ok([...wall0].includes(2), "climb's wall is drawn in the faint tone");
+});
+
 test("catch: standing under a falling thing catches it", () => {
   const g = game("catch"), s = g.init(5);
   s.next = 999;                       /* no new thing while this one falls */

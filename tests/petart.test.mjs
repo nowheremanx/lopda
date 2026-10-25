@@ -292,6 +292,32 @@ test("drawRoom: every weather draws only inside the window, day and night", () =
   assert.deepEqual([...room({ ...base, night: true, weather: "sun" })], [...room({ ...base, night: true, weather: null })]);
 });
 
+test("drawRoom: each weather animates only inside the window, on the room's own 2 fps phase", () => {
+  const base = { pet: P.frames({ face: "idle1" }), petX: 83, petY: 69, dayOfMonth: 24, bowlFull: true, mess: 0, season: "" };
+  const win = P.room.window;
+  const innerInk = (buf) => {
+    let n = 0;
+    for (let y = win.y + 2; y < win.y + win.h - 2; y++) for (let x = win.x + 2; x < win.x + win.w - 2; x++) if (buf[y * W + x] === 0) n++;
+    return n;
+  };
+  for (const night of [false, true]) {
+    for (const weather of ["sun", "cloud", "rain", "snow", "wind"]) {
+      const a = room({ ...base, night, weather, phase: 0 });
+      const b = room({ ...base, night, weather, phase: 11 });
+      const d = changed(a, b, win.x, win.x + win.w, win.y, win.y + win.h);
+      if (!(night && weather === "sun")) assert.ok(d.inside > 0, `${weather}${night ? " at night" : ""} moves between two phases`);
+      assert.equal(d.outside, 0, `${weather}${night ? " at night" : ""} moves nothing outside the window`);
+      assert.deepEqual([...new Set(a)].sort(), [0, 1, 2, 3], `${weather}${night ? " night" : " day"} keeps the four tones`);
+    }
+  }
+  /* day rain is unmistakable: ink streaks over the window, where a sunny sky has only the panes' ink */
+  const sun = room({ ...base, weather: "sun", phase: 0 });
+  const rain = room({ ...base, weather: "rain", phase: 0 });
+  assert.ok(innerInk(rain) > innerInk(sun) + 60, `rain's streaks are visible: ${innerInk(rain)} ink vs ${innerInk(sun)}`);
+  /* the phase is optional: no phase is the animation's first frame, never a random one */
+  assert.deepEqual([...room({ ...base, weather: "rain" })], [...rain]);
+});
+
 test("drawRoom: the pet, the prop, the sign and Zz follow the scene", () => {
   const pet = P.frames({ face: "idle1", ant: "star", eye: "wide" });
   const base = { pet, petX: 83, petY: 69, dayOfMonth: 24, bowlFull: true, mess: 0 };

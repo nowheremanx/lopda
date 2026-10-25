@@ -1350,43 +1350,86 @@ var BOOKS=[
   [136,81,3,14,"k"],[140,79,5,16,"d"],[146,77,4,18,"m"],[151,80,4,15,"d"]
 ];
 
-/* Weather marks at double size, painted only inside the window's inner pane. Day: ink on mid. Night: a dark
-   sky with a paper moon and stars; rain is short diagonal streaks, snow is dots and wind is a few curved strokes. */
-function weatherMark(buf,w,h,weather,night){
-  var s=String(weather||""), r, c, x, y, yy, ink=night?3:0;
+/* ---------- the window's weather, a slow animation ------------------------------------------------
+   Everything here is painted inside the window's inner pane and only there: the panes and the sill are laid over
+   it afterwards, so a weather change can never touch a pixel of the room. The phase is the room's own 2 fps tick
+   (the program passes floor(now / 500) in the scene); nothing in this file keeps time or a timer. One pixel every
+   three ticks is the clouds' 1 px a second and a half, rain falls three pixels a tick, and snow drifts one.
+   Day: ink and dark on mid. Night: paper and mid on dark, with the moon and stars left visible above the clouds. */
+var WX0=WIN.x+2, WX1=WIN.x+WIN.w-2, WY0=WIN.y+2, WY1=WIN.y+WIN.h-2;
+function wput(buf,w,h,x,y,t){
+  x=Math.floor(x); y=Math.floor(y);
+  if(x<WX0 || x>=WX1 || y<WY0 || y>=WY1) return;
+  bput(buf,w,h,x,y,t);
+}
+function wcloud(buf,w,h,x,y,tone){
+  var r,c;
+  for(r=0;r<CLOUD.length;r++) for(c=0;c<CLOUD[r].length;c++)
+    if(CLOUD[r].charAt(c)!==".") wput(buf,w,h,x+c,y+r,tone);
+}
+function weatherMark(buf,w,h,weather,night,phase){
+  var s=String(weather||""), p=Math.max(0,Math.floor(Number(phase)||0)), i, x, y, k, ink=night?3:0;
   if(!s) return;
   if(s==="sun" && !night){
     blit(buf,w,h,SUN,33,16);
-    for(r=0;r<5;r++){
-      bput(buf,w,h,32,15+r,3); bput(buf,w,h,38,15+r,3);
-      bput(buf,w,h,32+r,14,3); bput(buf,w,h,32+r,21,3);
+    for(i=0;i<5;i++){
+      wput(buf,w,h,32,15+i,3); wput(buf,w,h,38,15+i,3);
+      wput(buf,w,h,32+i,14,3); wput(buf,w,h,32+i,21,3);
+    }
+    /* a small cloud crosses now and then: half a minute of sky, then half a minute of sun */
+    var sunCycle=p%240;
+    if(sunCycle<130){
+      x=WX0+Math.floor(sunCycle/3)%36;
+      wcloud(buf,w,h,x,13,3);
     }
   } else if(s==="cloud"){
-    if(night){
-      /* a quiet mid cloud under the moon, never a bright paper board */
-      for(r=0;r<CLOUD.length;r++) for(c=0;c<CLOUD[r].length;c++)
-        if(CLOUD[r].charAt(c)!==".") bput(buf,w,h,17+c,14+r,2);
-    } else blit(buf,w,h,CLOUD,17,14);
+    /* two clouds at different speeds; at night they sit low so the moon and the high stars stay clear */
+    var y0=night?22:13, y1=night?31:22, tone=night?2:3, tone2=night?0:1;
+    x=WX0+Math.floor(p/3)%36;
+    wcloud(buf,w,h,x,y0,tone);
+    x=WX0+(Math.floor(p/5)+18)%36;
+    wcloud(buf,w,h,x,y1,tone2);
   } else if(s==="rain"){
-    if(!night) blit(buf,w,h,CLOUD,17,14);
-    for(y=21;y<44;y+=5){
-      x=14+((y*5)%28);
-      bput(buf,w,h,x,y,ink); bput(buf,w,h,x+1,y,ink);
-      bput(buf,w,h,x+1,y+1,ink); bput(buf,w,h,x+2,y+1,ink);
+    /* a dark cloud and a dozen two-pixel streaks: rain reads as rain even on a phone at arm's length */
+    if(night){
+      wcloud(buf,w,h,WX0+2,19,2);
+      wcloud(buf,w,h,WX0+20,22,2);
+    } else {
+      wcloud(buf,w,h,WX0+2,13,1);
+      wcloud(buf,w,h,WX0+20,16,0);
+    }
+    for(i=0;i<10;i++){
+      x=WX0+1+(i*4)%35;
+      y=WY0+9+((i*7+p*3)%25);
+      k=3+(i%3);
+      for(var j=0;j<k;j++){
+        wput(buf,w,h,x+j,y+j,ink);
+        wput(buf,w,h,x+j+1,y+j,ink);
+      }
     }
   } else if(s==="snow"){
-    var flakes=[[16,22],[23,30],[32,23],[40,31],[18,37],[29,39],[43,22],[42,37],[35,41]];
-    for(var i=0;i<flakes.length;i++){
-      for(r=0;r<2;r++) for(c=0;c<2;c++) bput(buf,w,h,flakes[i][0]+c,flakes[i][1]+r,ink);
+    for(i=0;i<11;i++){
+      x=WX0+1+(i*7)%34;
+      y=WY0+(i*9+p)%31;
+      x+=Math.round(Math.sin((p+i*5)/7)*2);
+      wput(buf,w,h,x,y,ink); wput(buf,w,h,x+1,y,ink);
+      wput(buf,w,h,x,y+1,ink); wput(buf,w,h,x+1,y+1,ink);
     }
   } else if(s==="wind"){
-    for(y=18;y<42;y+=8){
-      for(c=0;c<24;c++){
-        x=12+c;
-        yy=y+Math.round(Math.sin(c/3));
-        bput(buf,w,h,x,yy,ink);
+    /* three strokes that bend with the gust, and a leaf that crosses on one in every few seconds */
+    for(i=0;i<3;i++){
+      y=WY0+5+i*12;
+      for(x=WX0;x<WX1;x++){
+        var yy=y+Math.round(Math.sin((x+p)/4+i)*2);
+        wput(buf,w,h,x,yy,ink);
       }
-      bput(buf,w,h,x+1,y-1,ink); bput(buf,w,h,x+2,y,ink); bput(buf,w,h,x+2,y+1,ink);
+    }
+    var leaf=p%240;
+    if(leaf<70){
+      x=WX0+Math.floor(leaf/2);
+      y=WY0+13+Math.round(Math.sin(leaf/6)*3);
+      wput(buf,w,h,x,y,ink); wput(buf,w,h,x+1,y,ink);
+      wput(buf,w,h,x+1,y+1,ink); wput(buf,w,h,x+2,y+1,ink);
     }
   }
 }
@@ -1412,7 +1455,7 @@ function drawWindow(buf,w,h,scene){
     blit(buf,w,h,MOON,33,14);
     for(var i=0;i<STARS.length;i++) bput(buf,w,h,STARS[i][0],STARS[i][1],3);
   }
-  weatherMark(buf,w,h,weather,night);
+  weatherMark(buf,w,h,weather,night,scene.phase);
   seasonMark(buf,w,h,scene.season);
   /* the four panes, on top so no weather spills over a bar */
   brect(buf,w,h,29,12,2,32,0);

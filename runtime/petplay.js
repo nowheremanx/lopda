@@ -20,7 +20,7 @@
  * and the pose lasts a few ticks before the movement pose takes over again.
  *
  * A finished state is {done:true, score, joy}; joy is +1, or +2 at the game's threshold, and never negative.
- * There is no losing state and no losing message: the program shows the score and 再来 / Again.
+ * There is no losing state and no losing message: the program shows a result card and any key goes back to the room.
  */
 (function(){
 "use strict";
@@ -67,6 +67,35 @@ function blit(buf,w,h,grid,x,y){
       var t=TONE[line.charAt(c)];
       if(t!==undefined) put(buf,w,h,x+c,y+r,t);
     }
+  }
+}
+/* the field's thin ink frame, the score's own digits at the top right and small sky marks: the 1986 handheld look
+   without a new font or a new canvas. The score uses petart's five by seven digits, so it matches the calendar. */
+function frame(buf,w,h){
+  rect(buf,w,h,0,0,w,2,0);
+  rect(buf,w,h,0,h-2,w,2,0);
+  rect(buf,w,h,0,0,2,h,0);
+  rect(buf,w,h,w-2,0,2,h,0);
+}
+function scoreDigits(buf,w,h,score){
+  var A=window.LopdaPetArt;
+  if(!A || typeof A.numberGrid!=="function") return;
+  var grid=A.numberGrid(score);
+  if(!grid || !grid.length) return;
+  var gw=String(grid[0]).length;
+  blit(buf,w,h,grid,w-4-gw,4);
+}
+function dots(buf,w,h,list){
+  for(var i=0;i<list.length;i++) rect(buf,w,h,list[i][0],list[i][1],2,2,2);
+}
+/* catch's floor and a few specks in the air; a wide, calm sky so the falling parts are the only movement */
+var CATCH_DOTS=[[20,20],[44,14],[70,22],[96,15],[122,23],[142,14],[58,34],[110,31],[31,44],[84,40],[135,42]];
+/* climb's wall: a faint brick grid that moves with the camera, so height reads even before a platform passes */
+function climbWall(buf,w,h,height){
+  var off=((height||0)%12+12)%12, y, x;
+  for(y=-12+off;y<h;y+=12){
+    rect(buf,w,h,0,y,w,1,2);
+    for(x=(Math.floor(y/12)%2?8:20);x<w;x+=24) rect(buf,w,h,x,y,1,11,2);
   }
 }
 /* the old 16 px game props at the room's new scale: every cell becomes a 2 x 2 block */
@@ -192,8 +221,9 @@ function catchTick(s,inp){
 }
 function catchDraw(s,buf,w,h,pack,poseFor){
   clear(buf);
-  rect(buf,w,h,0,h-4,w,4,2);
-  rect(buf,w,h,0,h-6,w,2,1);
+  dots(buf,w,h,CATCH_DOTS);
+  rect(buf,w,h,0,h-6,w,1,1);
+  rect(buf,w,h,0,h-5,w,5,2);
   var near=false;
   for(var i=0;i<s.things.length;i++){
     var o=s.things[i];
@@ -205,8 +235,9 @@ function catchDraw(s,buf,w,h,pack,poseFor){
     var t=THINGS[s.things[i].k]||THINGS[0];
     blit(buf,w,h,t.grid,s.things[i].x,s.things[i].y);
   }
-  for(i=0;i<s.misses;i++) rect(buf,w,h,w-8-i*6,2,4,2,0);
-  for(i=0;i<Math.min(3,s.misses);i++) rect(buf,w,h,w-8-i*6,4,4,2,0);
+  for(i=0;i<Math.min(3,s.misses);i++) rect(buf,w,h,6+i*6,5,4,2,0);
+  frame(buf,w,h);
+  scoreDigits(buf,w,h,s.score);
 }
 
 /* ---------- bounce: the pet at the top is the other player, your paddle is at the bottom ---------- */
@@ -298,7 +329,10 @@ function stillSideWalk(a,b){
 }
 function bounceDraw(s,buf,w,h,pack,poseFor){
   clear(buf);
-  rect(buf,w,h,0,0,2,h,2); rect(buf,w,h,w-2,0,2,h,2);
+  /* the court: a dashed centre line and a thin wall down each side, inside the field's frame */
+  for(var y=10;y<h-10;y+=8) rect(buf,w,h,Math.floor(w/2),y,1,3,2);
+  rect(buf,w,h,5,8,1,h-16,2);
+  rect(buf,w,h,w-6,8,1,h-16,2);
   var grid;
   if(reacting(s)){
     grid=poseOf(poseFor,"front",s.react);
@@ -318,7 +352,9 @@ function bounceDraw(s,buf,w,h,pack,poseFor){
     rect(buf,w,h,s.ball.x,s.ball.y,6,6,0);
     rect(buf,w,h,s.ball.x+2,s.ball.y+2,2,2,3);
   }
-  for(var i=0;i<s.misses;i++) rect(buf,w,h,2+i*6,2,4,2,0);
+  for(var i=0;i<Math.min(3,s.misses);i++) rect(buf,w,h,6+i*6,5,4,2,0);
+  frame(buf,w,h);
+  scoreDigits(buf,w,h,s.score);
 }
 
 /* ---------- climb: the pet jumps on its own, the screen scrolls, the score is the height ----------
@@ -534,17 +570,21 @@ function climbTick(s,inp){
 }
 function climbDraw(s,buf,w,h,pack,poseFor){
   clear(buf);
+  climbWall(buf,w,h,s.height);
   for(var i=0;i<s.plats.length;i++){
     var p=s.plats[i];
     rect(buf,w,h,p.x,p.y,p.w,6,0);
     rect(buf,w,h,p.x+2,p.y+2,p.w-4,2,2);
   }
-  if(!s.pet) return;
-  var pose;
-  if(reacting(s)) pose=s.react;
-  else if(s.pet.onPlat) pose="idle";
-  else pose=s.pet.vy<0?"jump":"fall";
-  blit(buf,w,h,poseOf(poseFor,"front",pose),s.pet.x,s.pet.y);
+  if(s.pet){
+    var pose;
+    if(reacting(s)) pose=s.react;
+    else if(s.pet.onPlat) pose="idle";
+    else pose=s.pet.vy<0?"jump":"fall";
+    blit(buf,w,h,poseOf(poseFor,"front",pose),s.pet.x,s.pet.y);
+  }
+  frame(buf,w,h);
+  scoreDigits(buf,w,h,s.score);
 }
 
 /* ---------- the three packs ---------- */
