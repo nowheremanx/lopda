@@ -2418,7 +2418,7 @@ test("sound: one volume with five steps; an old 'sound off' setting becomes volu
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
-test("settings: eight 44 px rows fit 331x359 apart from the last one; the share QR and about page open and go back", { skip, timeout: 60000 }, async (t) => {
+test("settings: eight 44 px rows fit 331x359 down to 备份与恢复; the share QR and about page open and go back", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await page(t, { locale: "zh-CN", viewport: { width: 331, height: 359 } });
   await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
   await p.waitForFunction(() => window.LP && window.LP.S.db);
@@ -2436,7 +2436,8 @@ test("settings: eight 44 px rows fit 331x359 apart from the last one; the share 
   assert.equal(menu.rows.length, 8);
   assert.ok(menu.rows.every((r) => r.h >= 44), JSON.stringify(menu.rows));
   assert.ok(menu.scroll <= menu.client + 1, "no sideways scroll at 331");
-  assert.ok(menu.rows[6].bottom <= 359 + 1, "the menu fits down to 分享; only 关于 scrolls: " + JSON.stringify(menu.rows));
+  /* the rows leave room around their buttons (owner, 2026-10-25), so 分享 and 关于 are a short scroll away on the smallest screen */
+  assert.ok(menu.rows[5].bottom <= 359 + 1, "the menu fits down to 备份与恢复; only 分享 and 关于 scroll: " + JSON.stringify(menu.rows));
   await p.evaluate(() => { document.getElementById("v-settings").scrollTop = 9999; });
   assert.ok(await p.evaluate(() => {
     const v = document.getElementById("v-settings"), last = document.querySelector("#set-about-open").getBoundingClientRect(), b = v.getBoundingClientRect();
