@@ -76,6 +76,29 @@ test("asleep: 22:00-7:00, sleepy 21:30-7:30, and a light left off after 20:00", 
   assert.equal(P.asleep({ ...dark, trait: "sleepy" }, 20, 30), true);
 });
 
+/* ---------- the bed <-> floor walk ---------- */
+test("pathPoint: the bed walk goes down first, then across; the way back comes along the floor and up last", () => {
+  const bed = { x: 10, y: 52 }, rug = { x: 83, y: 69 };
+  assert.deepEqual(plain(P.pathPoint(bed, rug, 0)), bed, "starts at the bed");
+  assert.deepEqual(plain(P.pathPoint(bed, rug, 1)), rug, "ends on the rug");
+  const quarter = P.pathPoint(bed, rug, 0.1);
+  assert.equal(quarter.x, 10, "leaves the bed straight down, not through its head");
+  assert.ok(quarter.y > 52 && quarter.y < 69, "and is on its way down: " + quarter.y);
+  const half = P.pathPoint(bed, rug, 0.5);
+  assert.equal(half.y, 69, "then walks along the floor");
+  assert.ok(half.x > 10 && half.x < 83, "across the room: " + half.x);
+  /* coming back: the floor first, the climb at the bed's own column */
+  const back = P.pathPoint(rug, bed, 0.1);
+  assert.equal(back.y, 69, "stays on the floor at first");
+  assert.ok(back.x < 83, "walking left");
+  const last = P.pathPoint(rug, bed, 0.9);
+  assert.equal(last.x, 10, "then climbs up at the bed");
+  assert.ok(last.y > 52, "still below the pillow: " + last.y);
+  /* a floor-to-floor move is a plain horizontal walk */
+  assert.deepEqual(plain(P.pathPoint({ x: 32, y: 69 }, { x: 83, y: 69 }, 0.5)), { x: 58, y: 69 });
+  assert.deepEqual(plain(P.pathPoint(rug, rug, 0.4)), rug, "no distance, no movement");
+});
+
 /* ---------- catch-up ---------- */
 test("catch-up after 1 and 5 hours: hunger every 4 awake hours, joy every 6", () => {
   const s = base();
@@ -137,6 +160,17 @@ test("no hunger loss across a night, and the wake is reported", () => {
   assert.equal(asleepAll.save.hunger, 5);
   const morning = P.catchUp(base(at(2026, 10, 21, 6, 0)), at(2026, 10, 21, 9, 0), { tz: TZ });
   assert.ok(morning.events.includes("woke"));
+});
+
+test("hungry is reported once when hunger first reaches 1, not again while it sits at 0", () => {
+  const s = base(at(2026, 10, 20, 8, 0));
+  s.hunger = 2; s.awakeHunger = 239;                 /* one awake minute away from the next step */
+  const first = P.catchUp(s, at(2026, 10, 20, 9, 0), { tz: TZ });
+  assert.equal(first.save.hunger, 1);
+  assert.ok(first.events.includes("hungry"), "the first arrival at 1 is the real change");
+  const more = P.catchUp(first.save, at(2026, 10, 20, 13, 0), { tz: TZ });
+  assert.equal(more.save.hunger, 0);
+  assert.ok(!more.events.includes("hungry"), "1 -> 0 is the same need, no second call");
 });
 
 test("a meal leaves a pile 2-3 hours later, once; mess stops at 3", () => {

@@ -3705,15 +3705,23 @@ test("pet: hatch, meal, wash, look, the light at night, travel and the postcard;
   await p.locator(".pet-ikey").nth(0).click();
   await p.waitForSelector("#pet-panel:not([hidden])");
   await key("a");
-  assert.ok((await save()).lastMeal > 0, "a meal was eaten when hungry");
+  assert.ok((await save()).lastMeal > 0 || (await p.evaluate(() => LOPDA_DEBUG.pet.spot().phase)) !== "", "the meal is taken (or queued behind the wake walk)");
   assert.ok(await p.isHidden("#pet-panel"));
+  /* the morning wake and the queued meal finish first: it eats on its way back from the bed */
+  await p.clock.runFor(12000);
+  await p.waitForTimeout(100);
+  assert.equal(await p.evaluate(() => LOPDA_DEBUG.pet.spot().phase), "", "the queued meal has finished");
 
-  /* 21:00 with the light off is a darker room */
+  /* 21:00 with the light off is a darker room; it walks back to the bed first, never teleports */
   await p.clock.setSystemTime(new Date(2026, 9, 11, 21, 0));
   await p.evaluate(() => LP.builtins.find((b) => b.id === "pet").lang());
   const bright = await avgRooms();
   await p.locator(".pet-ikey").nth(3).click();
   assert.equal((await save()).light, false);
+  assert.equal(await p.evaluate(() => LOPDA_DEBUG.pet.spot().zz), false, "awake while it walks to bed");
+  await p.clock.runFor(4000);
+  await p.waitForTimeout(100);
+  assert.equal(await p.evaluate(() => LOPDA_DEBUG.pet.spot().zz), true, "back in bed");
   const dark = await avgRooms();
   assert.ok(dark < bright - 10, `the room got darker (${bright} -> ${dark})`);
 
@@ -3727,13 +3735,15 @@ test("pet: hatch, meal, wash, look, the light at night, travel and the postcard;
   await p.waitForFunction(() => LOPDA_DEBUG.pet.save().travel === false);
   assert.equal(await p.evaluate(() => LP.builtins.find((b) => b.id === "pet").tag()), "带回了");
 
-  /* the box: one postcard, one page, a real 16 x 16 picture, and the souvenir document */
+  /* the box: the postcard is the newest page (the day may also have brought its outing souvenir), a real
+     16 x 16 picture, and the souvenir document; paging right reaches the postcard */
   await p.locator("#pet-keys .sk-start").click();
   await p.waitForSelector("#pet-panel:not([hidden])");
   await p.locator("#pet-panel .pet-menu").nth(2).click();
+  await key("right", "right", "right");
   const box = await p.locator("#pet-panel").innerText();
   assert.match(box, /明信片/);
-  assert.match(box, /1\/1/);
+  assert.match(box, /\d+\/\d+/);
   const picture = await p.evaluate(() => {
     const c = document.querySelector(".pet-souvcv"), d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data;
     const set = new Set();
@@ -3742,11 +3752,11 @@ test("pet: hatch, meal, wash, look, the light at night, travel and the postcard;
   });
   assert.ok(picture.length >= 2, "the souvenir is a picture, not a blank square: " + picture);
   const souv = await idb.under(p, "data/users/local/pet/souvenirs");
-  assert.equal(souv.length, 1);
-  assert.equal(souv[0].name.zh, "明信片");
-  assert.equal(souv[0].name.en, "Postcard");
-  assert.equal(souv[0].ai, false);
-  assert.equal(souv[0].px.length, 256);
+  const post = souv.find((s) => s.name && s.name.zh === "明信片");
+  assert.ok(post, "the postcard is stored");
+  assert.equal(post.name.en, "Postcard");
+  assert.equal(post.ai, false);
+  assert.equal(post.px.length, 256);
   assert.equal(await p.evaluate(() => LP.builtins.find((b) => b.id === "pet").tag()), "");
 
   /* every canvas on the screen is four-tone only */
@@ -3787,24 +3797,27 @@ test("pet: hatch, meal, wash, look, the light at night, travel and the postcard;
     assert.ok(left >= 0 && top >= 0 && bottom <= 587, "icon visible");
   }
 
-  /* the box's seen marker is saved: after a reload the tag stays away and the souvenir is still there */
+  /* the box's seen marker is saved: after a reload the tag stays away and the postcard is still there */
+  const seen = await p.evaluate(() => LOPDA_DEBUG.pet.save().boxSeen);
+  assert.ok(seen >= 1, "boxSeen counts every souvenir, including the day's outing: " + seen);
   let petDoc = null;
   for (let i = 0; i < 100; i++) {
     petDoc = await idb.doc(p, "data/users/local/pet");
-    if (petDoc && petDoc.boxSeen === 1) break;
+    if (petDoc && petDoc.boxSeen === seen) break;
     await p.waitForTimeout(50);
   }
-  assert.equal(petDoc.boxSeen, 1, "boxSeen is stored");
+  assert.equal(petDoc.boxSeen, seen, "boxSeen is stored");
   await p.click("#home-key");
   await p.reload({ waitUntil: "networkidle" });
   await p.waitForFunction(() => document.getElementById("savestate").textContent !== "启动中…");
-  await p.waitForFunction(() => window.LOPDA_DEBUG && LOPDA_DEBUG.pet && LOPDA_DEBUG.pet.save() && LOPDA_DEBUG.pet.save().boxSeen === 1);
+  await p.waitForFunction((n) => window.LOPDA_DEBUG && LOPDA_DEBUG.pet && LOPDA_DEBUG.pet.save() && LOPDA_DEBUG.pet.save().boxSeen === n, seen);
   assert.equal(await p.evaluate(() => LP.builtins.find((b) => b.id === "pet").tag()), "", "the tag stays cleared after a reload");
-  assert.equal((await idb.under(p, "data/users/local/pet/souvenirs")).length, 1);
+  assert.equal((await idb.under(p, "data/users/local/pet/souvenirs")).length, seen);
   await openPet();
   await p.locator("#pet-keys .sk-start").click();
   await p.waitForSelector("#pet-panel:not([hidden])");
   await p.locator("#pet-panel .pet-menu").nth(2).click();
+  await key("right", "right", "right");
   assert.match(await p.locator("#pet-panel").innerText(), /明信片/);
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
@@ -4613,7 +4626,8 @@ test("pet: at night it lies in the bed in every stage, wakes back to the rug, an
   await p.locator("#home .app", { hasText: "宠物" }).click();
   await p.locator("#v-pet:not([hidden])").waitFor();
   await p.evaluate(() => LOPDA_DEBUG.pet.hatch());
-  await p.waitForTimeout(200);
+  await p.clock.runFor(3000);
+  await p.waitForTimeout(100);
   const spot = () => p.evaluate(() => LOPDA_DEBUG.pet.spot());
 
   /* every stage sleeps in the bed, with Zz above it */
@@ -4626,13 +4640,17 @@ test("pet: at night it lies in the bed in every stage, wakes back to the rug, an
     assert.equal(a.zz, true, `${stage} has Zz`);
   }
 
-  /* morning: a short walk from the bed back to the rug */
+  /* morning: a short walk from the bed back to the rug (down first, then across) */
   await p.clock.setSystemTime(new Date(2026, 9, 12, 7, 5));
-  await p.clock.runFor(1200);
-  let mid = await spot();
-  assert.ok(mid.x > 10 && mid.x < 83, `walking back, not teleporting (${mid.x})`);
-  assert.equal(mid.zz, false, "Zz is gone once awake");
-  await p.clock.runFor(1500);
+  let mid = null;
+  for (let i = 0; i < 14 && !mid; i++) {
+    await p.clock.runFor(500);
+    const q = await spot();
+    if (q.zz === false && q.x > 10 && q.x < 83) mid = q;
+  }
+  assert.ok(mid, "walking back, not teleporting");
+  assert.equal((await spot()).zz, false, "Zz is gone once awake");
+  await p.clock.runFor(3000);
   const home = await spot();
   assert.deepEqual([home.x, home.y], [83, 69], "back on the rug");
 
@@ -4654,6 +4672,227 @@ test("pet: at night it lies in the bed in every stage, wakes back to the rug, an
   ]) assert.ok(!hit(d.prop, box), `the desk does not overlap the ${name}`);
   assert.ok(!hit(pet, { x: 4, y: 58, w: 48, h: 34 }), "the pet is clear of the bed");
   assert.ok(!hit(pet, { x: 114, y: 16, w: 44, h: 80 }), "the pet is clear of the bookshelf");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("pet: a sleeping pet gets up for a meal, walks to the bowl and back to bed; a second meal queues", { skip, timeout: 120000 }, async (t) => {
+  const { p, errors } = await page(t, { ...pw.devices["iPhone 13"], locale: "zh-CN", serviceWorkers: "block" });
+  await p.clock.install({ time: new Date(2026, 9, 11, 22, 0) });
+  await p.goto(base + "/runtime/?debug", { waitUntil: "networkidle" });
+  await p.waitForFunction(() => document.getElementById("savestate").textContent !== "启动中…");
+  const save = () => p.evaluate(() => LOPDA_DEBUG.pet.save());
+  const spot = () => p.evaluate(() => LOPDA_DEBUG.pet.spot());
+  const until = async (fn, ticks = 40) => {
+    for (let i = 0; i < ticks; i++) {
+      await p.clock.runFor(500);
+      if (await fn()) return true;
+    }
+    return false;
+  };
+  const feed = async (which) => {
+    await p.locator(".pet-ikey").nth(0).tap();
+    await p.waitForSelector("#pet-panel:not([hidden])");
+    if (which === "snack") await p.keyboard.press("ArrowDown");
+    await p.keyboard.press("x");
+  };
+
+  await p.locator("#home .app", { hasText: "宠物" }).click();
+  await p.locator("#v-pet:not([hidden])").waitFor();
+  await p.evaluate(() => { LOPDA_DEBUG.pet.hatch(); LOPDA_DEBUG.pet.setStats(1, 3); });
+  await p.clock.runFor(3000);
+  await p.waitForTimeout(100);
+  for (let i = 0; i < 20 && (await spot()).outing; i++) await p.clock.runFor(500);
+  assert.equal((await spot()).zz, true, "asleep in bed");
+  const lastMeal = (await save()).lastMeal;
+
+  /* feeding it in bed: it wakes, gets up and eats at the bowl, never in bed */
+  await feed("meal");
+  let s = await save(), a = await spot();
+  assert.equal(s.hunger, 1, "no meal was eaten in bed");
+  assert.equal(s.lastMeal, lastMeal);
+  assert.equal(a.zz, false, "it woke up");
+  await p.clock.runFor(2500);
+  a = await spot();
+  assert.equal((await save()).hunger, 1, "still walking, still not eating");
+  assert.equal(a.y, 69, "on the floor on the way");
+  /* a second press while it walks is accepted and waits its turn (no teleporting to the bowl) */
+  await feed("meal");
+  assert.equal((await save()).hunger, 1, "the queued meal is not eaten at once");
+  assert.ok(await until(async () => (await save()).hunger >= 3, 40), "the first meal lands at the bowl");
+  a = await spot();
+  assert.deepEqual([a.x, a.y], [32, 69], "at the bowl");
+  assert.ok((await save()).lastMeal > lastMeal);
+  assert.ok(await until(async () => (await save()).hunger >= 5, 30), "the queued meal follows");
+  assert.ok(await until(async () => (await spot()).zz === true, 30), "then it walks back and sleeps");
+  a = await spot();
+  assert.deepEqual([a.x, a.y], [10, 52], "back in bed");
+  assert.equal(a.zz, true, "Zz is back");
+  assert.equal((await save()).hunger, 5);
+
+  /* a full pet still gets up, shakes its head at the bowl and comes back without eating */
+  await p.evaluate(() => LOPDA_DEBUG.pet.setStats(5, 3));
+  const fullMeal = (await save()).lastMeal;
+  await feed("meal");
+  assert.ok(await until(async () => (await spot()).act === "shake", 25), "it shakes its head at the bowl");
+  assert.equal((await spot()).x, 32, "at the bowl, not in bed");
+  assert.equal((await save()).lastMeal, fullMeal, "nothing was eaten");
+  assert.ok(await until(async () => (await spot()).zz === true, 30), "and goes back to bed");
+  assert.deepEqual([(await spot()).x, (await spot()).y], [10, 52]);
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("pet: a pat wakes a sleeping pet angry; it walks to the rug, returns after two minutes, and the light sends it back at once", { skip, timeout: 150000 }, async (t) => {
+  const { p, errors } = await page(t, { ...pw.devices["iPhone 13"], locale: "zh-CN", serviceWorkers: "block" });
+  await p.clock.install({ time: new Date(2026, 9, 11, 22, 0) });
+  await p.goto(base + "/runtime/?debug", { waitUntil: "networkidle" });
+  await p.waitForFunction(() => document.getElementById("savestate").textContent !== "启动中…");
+  const save = () => p.evaluate(() => LOPDA_DEBUG.pet.save());
+  const spot = () => p.evaluate(() => LOPDA_DEBUG.pet.spot());
+  const until = async (fn, ticks = 40) => {
+    for (let i = 0; i < ticks; i++) {
+      await p.clock.runFor(500);
+      if (await fn()) return true;
+    }
+    return false;
+  };
+  await p.locator("#home .app", { hasText: "宠物" }).click();
+  await p.locator("#v-pet:not([hidden])").waitFor();
+  await p.evaluate(() => LOPDA_DEBUG.pet.hatch());
+  await p.clock.runFor(3000);
+  await p.waitForTimeout(100);
+  for (let i = 0; i < 20 && (await spot()).outing; i++) await p.clock.runFor(500);
+  assert.equal((await spot()).zz, true);
+  const joy = (await save()).joy, pats = (await save()).today.pats;
+
+  /* long-press the room: it sits up angry, with a puff, then gets off the bed */
+  const box = await p.locator("#pet-cv").boundingBox();
+  await p.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await p.mouse.down();
+  await p.waitForTimeout(700);
+  await p.mouse.up();
+  await p.clock.runFor(500);
+  let a = await spot();
+  assert.equal(a.zz, false, "awake");
+  assert.equal(a.act, "angry", "angry for the first moment");
+  assert.deepEqual([a.x, a.y], [10, 52], "sitting up in bed");
+  assert.ok(a.prop && a.prop.w <= 8, "a small puff beside it");
+  assert.equal((await save()).joy, joy, "no joy for the pat that woke it");
+  assert.equal((await save()).today.pats, pats, "the waking pat is not a counted pat");
+  assert.ok(await until(async () => { const q = await spot(); return q.y === 69 && q.x > 10 && !q.phase; }, 20), "walks to the rug");
+  a = await spot();
+  assert.equal(a.zz, false, "stays awake on the rug");
+  assert.equal(a.awake > 0, true, "the two-minute count started");
+
+  /* about two minutes on the screen, then it walks back itself */
+  await p.clock.runFor(125000);
+  a = await spot();
+  assert.deepEqual([a.x, a.y], [10, 52], "back in bed by itself");
+  assert.equal(a.zz, true);
+
+  /* light on at night wakes it the same way; light off sends it back at once, walking */
+  await p.locator(".pet-ikey").nth(3).click();        /* light off: it is already asleep */
+  await p.clock.runFor(1000);
+  assert.equal((await spot()).zz, true);
+  await p.locator(".pet-ikey").nth(3).click();        /* light on: the light woke it */
+  await p.clock.runFor(500);
+  a = await spot();
+  assert.equal(a.zz, false);
+  assert.equal(a.act, "angry");
+  assert.ok(await until(async () => { const q = await spot(); return q.y === 69 && q.x > 10 && !q.phase; }, 20), "walks to the rug");
+  const rugX = (await spot()).x;
+  await p.locator(".pet-ikey").nth(3).click();        /* light off: straight back, no two-minute wait */
+  await p.clock.runFor(500);
+  a = await spot();
+  assert.equal(a.zz, false, "walking, not teleporting");
+  assert.ok(a.x < rugX || a.y > 52, "on the way back");
+  assert.ok(await until(async () => (await spot()).zz === true, 12), "back in bed at once");
+  assert.deepEqual([(await spot()).x, (await spot()).y], [10, 52]);
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("pet: nothing flashes or beeps while it sleeps, the home tile stays, and a need that arose at night flashes once on waking", { skip, timeout: 120000 }, async (t) => {
+  const { p, errors } = await page(t, { ...pw.devices["iPhone 13"], locale: "zh-CN", serviceWorkers: "block" });
+  await p.clock.install({ time: new Date(2026, 9, 11, 21, 0) });
+  await p.goto(base + "/runtime/?debug", { waitUntil: "networkidle" });
+  await p.waitForFunction(() => document.getElementById("savestate").textContent !== "启动中…");
+  const save = () => p.evaluate(() => LOPDA_DEBUG.pet.save());
+  const spot = () => p.evaluate(() => LOPDA_DEBUG.pet.spot());
+  const iconInk = () => p.evaluate(() => [...document.querySelectorAll(".pet-ikey canvas")].slice(0, 4).map((c) => {
+    const d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data;
+    let n = 0;
+    for (let j = 0; j < d.length; j += 4) if (d[j] === 31 && d[j + 1] === 42 && d[j + 2] === 20) n++;
+    return n;
+  }));
+  const tile = () => p.evaluate(() => {
+    const b = [...document.querySelectorAll("#home .app.builtin")].find((x) => {
+      const l = x.querySelector(".label"); return l && l.textContent === "宠物";
+    });
+    const c = b && b.querySelector(".tile canvas");
+    return c ? c.toDataURL() : null;
+  });
+  const until = async (fn, ticks = 40) => {
+    for (let i = 0; i < ticks; i++) {
+      await p.clock.runFor(500);
+      if (await fn()) return true;
+    }
+    return false;
+  };
+
+  await p.locator("#home .app", { hasText: "宠物" }).click();
+  await p.locator("#v-pet:not([hidden])").waitFor();
+  await p.evaluate(() => { LOPDA_DEBUG.pet.hatch(); LOPDA_DEBUG.pet.setStats(2, 3, 239); });
+  await p.waitForTimeout(200);
+  await p.evaluate(() => {
+    window.__beeps = [];
+    const old = window.LP.sfx;
+    window.LP.sfx = function (n) { window.__beeps.push(n); return old.apply(this, arguments); };
+  });
+  /* 21:00 -> 23:30: one awake hour drops hunger 2 -> 1 at 21:40, then it sleeps; the night adds a need but
+     must not flash or beep. The home screen's background day runs too. */
+  await p.clock.setSystemTime(new Date(2026, 9, 11, 23, 30));
+  await p.evaluate(() => LOPDA_DEBUG.pet.advance(2.5));
+  let a = await spot();
+  assert.equal(a.zz, true, "asleep");
+  assert.equal((await save()).hunger, 1, "hunger crossed the line during the awake hour");
+  const flashes0 = a.flashes;
+  let anyInk = false;
+  for (let i = 0; i < 120; i++) {
+    await p.clock.runFor(500);
+    if ((await iconInk()).some((n) => n > 0)) anyInk = true;
+  }
+  a = await spot();
+  assert.equal(a.flashes, flashes0, "no flash sequence while asleep");
+  assert.equal(anyInk, false, "no icon lit up while asleep");
+  assert.deepEqual(await p.evaluate(() => window.__beeps), [], "no beep while asleep");
+
+  /* the home icon keeps the sleeping face while the home screen sits on the fake clock */
+  await p.click("#home-key");
+  await p.waitForTimeout(250);
+  const before = await tile();
+  const rowsBefore = await p.evaluate(() => LP.builtins.find((b) => b.id === "pet").icon());
+  await p.clock.runFor(60000);
+  await p.waitForTimeout(250);
+  const after = await tile();
+  const rowsAfter = await p.evaluate(() => LP.builtins.find((b) => b.id === "pet").icon());
+  assert.equal(after, before, "the home tile did not change or flash while asleep");
+  assert.deepEqual(rowsAfter, rowsBefore, "the sleeping icon is the same picture");
+
+  /* waking it with a pat: the food need that arose at night flashes once, then stops */
+  await p.locator("#home .app", { hasText: "宠物" }).click();
+  await p.locator("#v-pet:not([hidden])").waitFor();
+  await p.waitForTimeout(200);
+  for (let i = 0; i < 20 && (await spot()).outing; i++) await p.clock.runFor(500);
+  const box = await p.locator("#pet-cv").boundingBox();
+  await p.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await p.mouse.down();
+  await p.waitForTimeout(700);
+  await p.mouse.up();
+  const startFlashes = (await spot()).flashes;
+  assert.ok(await until(async () => (await spot()).flashes > startFlashes, 20), "the night's need flashes once when it wakes");
+  const once = (await spot()).flashes;
+  assert.equal(once - startFlashes, 1, "exactly one flash sequence");
+  for (let i = 0; i < 30; i++) await p.clock.runFor(500);
+  assert.equal((await spot()).flashes, once, "and never again for the same need");
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 

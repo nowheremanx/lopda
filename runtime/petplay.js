@@ -104,9 +104,10 @@ var REACT={
     return null;
   },
   bounce:function(event,state){
-    if(event==="return") return (state.rally||0)>=5 ? "happy" : null;
-    if(event==="miss") return "surprised";
-    return null;
+    if(event==="bat") return "jump";                  /* the pet pushed the ball down: a short hop pose */
+    if(event==="petmiss") return "surprised";          /* it whiffed: your point */
+    if(event==="miss") return "surprised";             /* the ball passed your paddle */
+    return null;                                       /* your return: the pet does not react */
   },
   climb:function(event,state){
     if(event==="record") return "happy";
@@ -208,12 +209,19 @@ function catchDraw(s,buf,w,h,pack,poseFor){
   for(i=0;i<Math.min(3,s.misses);i++) rect(buf,w,h,w-8-i*6,4,4,2,0);
 }
 
-/* ---------- bounce: the pet sits at the top, the player's paddle at the bottom, one ball ---------- */
+/* ---------- bounce: the pet at the top is the other player, your paddle is at the bottom ---------- */
+/* It is a fair rally: the pet almost always returns, but a seeded whiff grows with the rally and scores for you.
+   Your paddle never makes the pet hop; only its own bat does. */
+var B_MISS_BASE=0.03, B_MISS_STEP=0.02, B_MISS_MAX=0.24;
+function bounceMissChance(rally){
+  var r=Math.max(0,num(rally));
+  return Math.min(B_MISS_MAX,B_MISS_BASE+r*B_MISS_STEP);
+}
 function bounceInit(seed){
   var s=base("bounce",seed);
   s.petX=64; s.petBaseY=4; s.petY=4;
   s.paddleX=66; s.paddleY=110; s.paddleW=30;
-  s.ball=null; s.reload=0; s.misses=0; s.rally=0; s.petFace=1; s.hop=0;
+  s.ball=null; s.reload=0; s.misses=0; s.petMisses=0; s.rally=0; s.petFace=1; s.hop=0;
   return s;
 }
 function bounceHop(s){
@@ -250,16 +258,20 @@ function bounceTick(s,inp){
     b.x+=b.vx; b.y+=b.vy;
     if(b.x<2){ b.x=2; b.vx=2; }
     if(b.x>W-8){ b.x=W-8; b.vx=-2; }
-    /* the pet is the top wall: a return is a point, a miss is only one of three */
-    if(b.vy<0 && b.y<=s.petY+32 && b.y+6>=s.petY && b.x+6>=s.petX && b.x<=s.petX+30){
-      b.y=s.petY+32; b.vy=2; s.score++; s.rally++; note(s,"return");
+    /* one seeded decision as the ball reaches the pet's row: a rare whiff, more likely late in a rally */
+    if(b.vy<0 && !b.decided && b.y<=s.petY+36){
+      b.decided=true;
+      b.miss=rand(s)<bounceMissChance(s.rally);
+    }
+    /* the pet is the top player: when it reaches the ball it bats it down; no point for the pet's return */
+    if(!b.miss && b.vy<0 && b.y<=s.petY+32 && b.y+6>=s.petY && b.x+6>=s.petX && b.x<=s.petX+30){
+      b.y=s.petY+32; b.vy=2; s.rally++; note(s,"bat"); bounceHop(s);
     } else if(b.y<-8){
-      s.ball=null; s.reload=20; s.misses++; s.rally=0; note(s,"miss");
+      s.ball=null; s.reload=20; s.petMisses++; s.score++; s.rally=0; note(s,"petmiss");
     }
     if(b && b.vy>0 && b.y+6>=s.paddleY && b.y<=s.paddleY+4 && b.x+6>=s.paddleX && b.x<=s.paddleX+s.paddleW){
       b.y=s.paddleY-6; b.vy=-2; b.vx=b.x+2<s.paddleX+s.paddleW/2?-2:2;
       s.score++; s.rally++; note(s,"return");
-      bounceHop(s);                                     /* the ball is on its way back to it */
     } else if(b && b.y>H){
       s.ball=null; s.reload=20; s.misses++; s.rally=0; note(s,"miss");
     }
@@ -550,6 +562,7 @@ window.LopdaPetPlay={
   finish:finish,
   reaction:reaction,
   climbReachable:climbReachable,
+  BOUNCE:{MISS_BASE:B_MISS_BASE, MISS_STEP:B_MISS_STEP, MISS_MAX:B_MISS_MAX, missChance:bounceMissChance},
   CLIMB:{RISE:C_RISE, RUN:C_RUN, GAP_MIN:C_GAP_MIN, GAP_MAX:C_GAP_MAX, GAP_HARD:C_RISE-4,
     WIDTH_EASY_MIN:20, WIDTH_EASY_MAX:36, WIDTH_HARD:C_WIDTH_HARD, EASY_PLATS:C_EASY_PLATS,
     RAMP_PLATS:C_RAMP_PLATS, FEET_L:FEET_L, FEET_R:FEET_R, FEET_BOTTOM:FEET_BOTTOM}

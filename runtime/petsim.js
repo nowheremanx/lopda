@@ -27,6 +27,7 @@
  *   fresh(now, rnd, species)     a new egg; marks and trait rolled from rnd
  *   hatch(save)                  egg -> baby (the program calls it after the ~8 s hatch)
  *   asleep(save, hour, minute)   the sleep window by trait, or the light off after 20:00
+ *   pathPoint(from, to, t)      a point on the bed <-> floor L-walk, t 0..1
  *   catchUp(save, now, ctx)      {save, events}, 1-hour steps from save.last; ctx = {tz}
  *   openDay(save, dayKey, counts) counts a day opened and grows baby -> child -> adult; counts feeds adultForm
  *   adultForm(counts, species)   book / walk / scholar / diary / monster / plain
@@ -194,6 +195,23 @@ function asleep(save,hour,minute){
   return mins>=w[0] || mins<w[1];
 }
 
+/* ---------- the bed <-> floor walk ---------- */
+/* One L-shaped route between the bed and a floor spot: leave the bed downwards first and climb back up at the
+   bed's own column, so the pet never slides through the bed's head or the wall. t is 0..1 along the whole route;
+   the caller animates it at the room's own frame rate, and the program uses the same helper for every such walk. */
+function pathPoint(from,to,t){
+  var a=from||{}, b=to||{}, ax=num(a.x), ay=num(a.y), bx=num(b.x), by=num(b.y);
+  var dx=bx-ax, dy=by-ay, vx=Math.abs(dx), vy=Math.abs(dy), total=vx+vy, d;
+  if(!total) return {x:bx,y:by};
+  d=Math.max(0,Math.min(1,num(t)))*total;
+  if(dy>=0){
+    if(d<=vy) return {x:ax, y:Math.round(ay+(vy?dy/vy:0)*d)};
+    return {x:Math.round(ax+(vx?dx/vx:0)*(d-vy)), y:by};
+  }
+  if(d<=vx) return {x:Math.round(ax+(vx?dx/vx:0)*d), y:ay};
+  return {x:bx, y:Math.round(ay+(vy?dy/vy:0)*(d-vx))};
+}
+
 /* ---------- catching up ---------- */
 /* 2 or 3 hours, decided by the meal's own time: a replayed open after the same meal always poops at the same hour */
 function poopDelay(s,meal){
@@ -249,7 +267,8 @@ function catchUp(save,now,ctx){
       hungerMin-=hungerEvery;
       if(s.hunger>0){
         s.hunger--;
-        if(s.hunger<=1 && !hungry){ hungry=true; events.push("hungry"); }
+        /* the call lights once, when hunger first reaches 1; another 4 awake hours at 0/1 is not a new need */
+        if(s.hunger===1 && !hungry){ hungry=true; events.push("hungry"); }
       }
     }
     while(joyMin>=joyEvery){
@@ -592,6 +611,7 @@ window.LopdaPet={
   SPECIES:SPECIES,
   rng:rng, daySeed:daySeed, dayKey:dayKey, hourOf:hourOf, weatherOf:weatherOf,
   fresh:fresh, hatch:hatch, asleep:asleep, catchUp:catchUp,
+  pathPoint:pathPoint,
   openDay:openDay, adultForm:adultForm,
   feed:feed, play:play, wash:wash, pat:pat, setLight:setLight, wants:wants,
   outingToday:outingToday, pickOfDay:pickOfDay,

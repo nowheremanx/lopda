@@ -108,39 +108,59 @@ test("catch: standing under a falling thing catches it", () => {
   assert.equal(s.done, false);
 });
 
-test("bounce: a paddle under the ball returns it", () => {
+test("bounce: a paddle under the ball returns it up, and the pet does not hop or react", () => {
   const g = game("bounce"), s = g.init(5);
   s.ball = { x: s.paddleX + 12, y: s.paddleY - 8, vx: 0, vy: 2 };
   g.step(s, inputAt(0), 50);
-  assert.equal(s.score, 1, "the return scored");
+  assert.equal(s.score, 1, "your return scored");
   assert.equal(s.ball.vy, -2, "the ball is going back up");
   assert.ok(s.events.includes("return"));
   assert.equal(s.done, false);
+  assert.equal(s.hop, 0, "the pet does not hop when your paddle returns the ball");
+  assert.equal(s.petY, s.petBaseY, "the pet stays on its base row");
+  assert.equal(s.react, null, "no pose: the ball did not touch the pet");
 });
 
-test("bounce: the pet on top never bobs; it hops once when the ball comes back from the paddle", () => {
+test("bounce: the pet at the top bats the ball back down with a short hop; no walk bob while sliding", () => {
   const g = game("bounce"), s = g.init(7), base = s.petBaseY, W = Play.W;
-  s.ball = { x: s.paddleX + 12, y: s.paddleY - 8, vx: 0, vy: 2 };
+  /* the pet slides under the ball, on its base row, with no walk bob */
   const ys = [];
-  let hops = 0;
-  for (let i = 0; i < 400 && !s.done; i++) {
+  for (let i = 0; i < 80 && !s.done; i++) {
     if (s.ball && s.ball.vy > 0) s.paddleX = Math.max(2, Math.min(W - 4 - s.paddleW, s.ball.x - 15));
-    const before = s.hop;
+    if (s.ball && s.ball.vy < 0) s.ball.y = Math.min(s.ball.y, s.petY + 60);
     g.step(s, { left: false, right: false, a: false, press: { left: false, right: false, a: false } }, 50);
-    if (s.hop > before) hops++;
-    if (!s.hop) assert.equal(s.petY, base, "the pet is on its base row outside the hop");
-    else assert.ok(s.petY >= base - 4 && s.petY <= base, "the hop is four pixels at most");
+    if (!s.hop) assert.equal(s.petY, base, "the pet is on its base row outside its own hop");
     ys.push(s.petY);
   }
-  assert.ok(hops > 0, "the ball came back from the paddle and the pet hopped");
-  assert.ok(ys.includes(base) && ys.includes(base - 4), "the hop rises and comes back down");
-  /* the resting row is much more common than the hop: no walk bob */
-  assert.ok(ys.filter((y) => y === base).length > ys.length / 2);
-  /* a top return (the pet sends the ball down) does not trigger another hop */
-  const h = game("bounce"), t = h.init(8);
-  t.ball = { x: t.petX + 12, y: t.petY + 31, vx: 0, vy: -2 };
-  h.step(t, { left: false, right: false, a: false, press: {} }, 50);
-  assert.equal(t.hop, 0, "only the paddle's return makes it hop");
+  assert.ok(ys.includes(base));
+  assert.ok(ys.filter((y) => y === base).length > ys.length / 2, "the resting row is the normal one");
+  /* a ball that reaches the pet is batted back down: a hop, the jump pose, and no point for you */
+  const t = game("bounce"), b = t.init(8);
+  b.ball = { x: b.petX + 12, y: b.petY + 31, vx: 0, vy: -2, decided: true, miss: false };
+  t.step(b, { left: false, right: false, a: false, press: {} }, 50);
+  assert.ok(b.events.includes("bat"), "the pet's bat is its own moment");
+  assert.equal(b.ball.vy, 2, "the ball goes back down");
+  assert.equal(b.score, 0, "the pet's own return is not your point");
+  assert.ok(b.hop > 0, "a short hop");
+  assert.equal(b.react, "jump", "the push pose");
+  t.step(b, { left: false, right: false, a: false, press: {} }, 50);
+  assert.equal(b.petY, b.petBaseY - 2, "the hop lifts it a little");
+  for (let i = 0; i < 6; i++) t.step(b, { left: false, right: false, a: false, press: {} }, 50);
+  assert.equal(b.petY, b.petBaseY, "and it comes back down to the base row");
+});
+
+test("bounce: a seeded whiff grows with the rally, scores for you and never counts as your miss", () => {
+  const g = game("bounce"), s = g.init(10);
+  s.ball = { x: s.petX + 12, y: s.petY + 31, vx: 0, vy: -2, decided: true, miss: true };
+  for (let i = 0; i < 40 && s.petMisses === 0; i++) g.step(s, { left: false, right: false, a: false, press: {} }, 50);
+  assert.equal(s.petMisses, 1, "the pet whiffed");
+  assert.equal(s.score, 1, "the whiff scores for you");
+  assert.equal(s.misses, 0, "it is not one of your three misses");
+  assert.ok(s.tick < 900, "the round goes on");
+  const c = Play.BOUNCE.missChance;
+  assert.ok(c(0) >= 0.02 && c(0) <= 0.05, "rare at the start: " + c(0));
+  assert.ok(c(10) > c(0), "more likely as the rally grows");
+  assert.ok(c(100) <= Play.BOUNCE.MISS_MAX, "and capped");
 });
 
 test("catch: the pet walks 6 px a tick and things come every 0.7 to 1.0 seconds", () => {
@@ -318,9 +338,11 @@ test("reactions: a small pure table per game names the pose of the moment", () =
   assert.equal(R("catch", "catch", { catches: 5 }), "jump", "every 5th catch is a short cheer");
   assert.equal(R("catch", "miss", { misses: 1 }), "fall");
   assert.equal(R("catch", "miss", { misses: 2 }), "sad");
-  assert.equal(R("bounce", "return", { rally: 4 }), null, "a short rally keeps the walk");
-  assert.equal(R("bounce", "return", { rally: 5 }), "happy", "a long rally gets a smile");
-  assert.equal(R("bounce", "miss", { misses: 1 }), "surprised", "the ball passed: a surprised face");
+  assert.equal(R("bounce", "bat", {}), "jump", "the pet's push is its own moment");
+  assert.equal(R("bounce", "return", { rally: 4 }), null, "your return makes the pet do nothing");
+  assert.equal(R("bounce", "return", { rally: 9 }), null, "and a long rally changes nothing");
+  assert.equal(R("bounce", "petmiss", {}), "surprised", "the pet whiffed: a surprised face");
+  assert.equal(R("bounce", "miss", { misses: 1 }), "surprised", "the ball passed your paddle");
   assert.equal(R("climb", "record", { height: 30 }), "happy");
   assert.equal(R("climb", "blink", {}), "blink");
   assert.equal(R("climb", "land", {}), null);
