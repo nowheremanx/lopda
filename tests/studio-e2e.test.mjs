@@ -684,6 +684,82 @@ async function cellWidths(p) {
     return { w: b.width, h: b.height };
   }));
 }
+/* a stored demo tape with a chosen chain and tempo, tours already seen: the four demo bars are distinct, which is
+   what the song player's bar tests need */
+async function preparedTape(p, chain, bpm) {
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await p.evaluate(async ({ chain, bpm }) => {
+    const song = LopdaSong.demoSong(Date.now());
+    song.bpm = bpm;
+    song.song = chain.slice();
+    await LopdaPlatform.db.doc("data/users/local/studio").set({
+      current: "studio-chain", hushTip: true,
+      toured: { rhythm: true, notes: true, chords: true, song: true },
+    });
+    await LopdaPlatform.db.doc("data/users/local/studio/items/studio-chain").set(song);
+  }, { chain, bpm });
+  await openTile(p);
+  await p.click('#studio-screens .st-scr[data-screen="song"]');
+}
+const chainLetters = (p) => p.$$eval(".st-chain-cell", (els) => els.map((e) => e.textContent));
+/* open the sheet of slot idx: the first tap selects it, the second opens it (if it was already selected, one tap) */
+async function openSlotSheet(p, idx) {
+  const cell = p.locator("#studio-chain .st-chain-cell").nth(idx);
+  await cell.click();
+  if (await p.locator("#studio-sheet").isHidden()) await cell.click();
+  await p.waitForSelector("#studio-sheet:not([hidden])");
+}
+/* Read the synth calls back as one pattern per absolute bar. Every demo bar starts with a kick on tick 0, so the
+   earliest kick is bar 0; each event's absolute tick comes from its audio time and the tempo. Drums plus bass and
+   melody identify a demo pattern (chords are left out: one chord event expands to several synth notes). */
+async function scheduledBarPatterns(p, bpm) {
+  return p.evaluate((bpm) => {
+    const BAR = LopdaSong.STEPS * LopdaSong.STEP, TPS = bpm * LopdaSong.TPB / 60;
+    const hits = window.__studioHits, notes = window.__studioNotes;
+    let at0 = Infinity;
+    for (const h of hits) if (h.drum === "kick" && h.at < at0) at0 = h.at;
+    if (!isFinite(at0)) return { bars: [], at0: null };
+    const buckets = new Map();
+    const put = (tok, at) => {
+      const tick = (at - at0) * TPS;
+      const bar = Math.max(0, Math.floor((tick + 0.5) / BAR));
+      const step = Math.round((tick - bar * BAR) / LopdaSong.STEP) % LopdaSong.STEPS;
+      if (!buckets.has(bar)) buckets.set(bar, new Set());
+      buckets.get(bar).add(tok + ":" + ((step + LopdaSong.STEPS) % LopdaSong.STEPS));
+    };
+    for (const h of hits) put("d:" + h.drum, h.at);
+    for (const n of notes) {
+      if (n.voice === "keys") continue;
+      put((n.voice === "flute" ? "m:" : "b:") + n.midi, n.at);
+    }
+    const demo = LopdaSong.demoSong(), sigs = [];
+    for (let pat = 0; pat < 4; pat++) {
+      const set = new Set();
+      for (const e of LopdaSong.events(demo, pat, 0, BAR)) {
+        if (!e.vel) continue;
+        if (e.track === "drums") set.add("d:" + e.key + ":" + Math.round(e.tick / LopdaSong.STEP));
+        else if (e.track === "bass" || e.track === "melody") {
+          const midi = LopdaSong.noteMidi(demo, e.track, e.deg);
+          if (midi != null) set.add((e.track === "bass" ? "b:" : "m:") + midi + ":" + Math.round(e.tick / LopdaSong.STEP));
+        }
+      }
+      sigs.push([...set].sort().join("|"));
+    }
+    const last = Math.max(...buckets.keys());
+    const bars = [];
+    for (let bar = 0; bar <= last; bar++) {
+      const sig = [...(buckets.get(bar) || [])].sort().join("|");
+      bars.push({ bar, sig, pats: sigs.map((s, i) => s === sig ? i : -1).filter((x) => x >= 0) });
+    }
+    return { bars, at0 };
+  }, bpm);
+}
+function assertBars(bars, expected) {
+  assert.ok(bars.length >= expected.length, `saw ${bars.length} bars, wanted ${expected.length}: ${JSON.stringify(bars)}`);
+  const seen = bars.slice(0, expected.length);
+  for (const b of seen) assert.equal(b.pats.length, 1, `bar ${b.bar} has events of exactly one demo pattern: ${JSON.stringify(b)}`);
+  assert.deepEqual(seen.map((b) => b.pats[0]), expected, `bar patterns: ${JSON.stringify(seen)}`);
+}
 
 test("studio: the tape opens from home with the demo beat's kick on the grid", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await rtPage(t);
@@ -1213,6 +1289,7 @@ test("studio tour: the note, chord and song tours walk their steps to Done; a re
   await walkSongTour(p, async (i) => {
     if (i === 1) {
       assert.deepEqual((await tourTarget(p)).id, "studio-chain", "step 2 frames the chain");
+      assert.match(await tourText(p), /点下面的字母，换掉选中的那一格|Tap a letter below to change the selected slot/, "step 2 tells the player to use a letter");
       assert.equal(await p.locator("#v-studio .st-tour-next").isVisible(), false, "step 2 waits for a letter tap");
     } else if (i === 2) {
       const target = await tourTarget(p);
@@ -1488,6 +1565,49 @@ test("studio tour: every colour on the new screens and their tours is one of the
 });
 
 /* ---------------- the eight patterns, the note / chord / song screens and the player (docs/design/studio.md 12) ---------------- */
+test("studio tour: selecting a rest cell advances the chord tour's first step and auditions nothing", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await hitCountingPage(t);
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await openTile(p);
+  await skipTour(p);
+  await p.click('#studio-screens .st-scr[data-screen="chords"]');
+  await skipScreenTour(p);
+
+  /* a rest on the second half, then select the first half again, so the rest is not the selected cell */
+  await p.locator('.st-chord-cell[data-half="1"]').click();
+  await p.locator("#studio-chord-rest").click();
+  await p.locator('.st-chord-cell[data-half="0"]').click();
+  await p.click("#studio-tour");
+  await p.waitForSelector("#v-studio .st-tour-box");
+  await waitTour(p, /一小节两格|Two squares per bar/);
+  assert.equal(await p.locator("#v-studio .st-tour-hi").getAttribute("id"), "studio-chord-cells");
+
+  const before = await p.evaluate(() => window.__studioNotes.length);
+  await p.locator('.st-chord-cell[data-half="1"]').click();
+  await waitTour(p, /点一个和弦|Tap a chord/);
+  assert.equal(await p.evaluate(() => window.__studioNotes.length), before, "selecting a rest auditions nothing");
+  assert.equal(await p.locator("#v-studio .st-tour-hi").getAttribute("id"), "studio-chord-keys", "the tour moved to step 2");
+  await p.keyboard.press("z");
+  await p.waitForSelector("#v-studio .st-tour-box", { state: "detached" });
+  assert.deepEqual(errors, []);
+});
+
+test("studio tour: B closes a visible sheet first, then the tour", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await firstOpenTour(p);
+  assert.equal(await tourHi(p), "studio-play");
+  await p.click("#studio-menu");
+  await p.waitForSelector("#studio-sheet:not([hidden])");
+  await p.keyboard.press("z");
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  assert.equal(await p.locator("#v-studio .st-tour-box").count(), 1, "the sheet closed, the tour stays");
+  assert.equal(await tourHi(p), "studio-play", "still on the same step");
+  await p.keyboard.press("z");
+  await p.waitForSelector("#v-studio .st-tour-box", { state: "detached" });
+  assert.equal(await touredRhythm(p), true, "the second B ends the tour");
+  assert.deepEqual(errors, []);
+});
+
 test("studio: the navigation row carries the pattern letter and five screens, and the demo's bass and chords show", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await rtPage(t);
   await studioOpen(p);
@@ -1912,6 +2032,87 @@ test("studio: the slot sheet's edits work while the whole song plays", { skip, t
   await waitStored(p, { song: [0, 0, 0] });
   await p.click("#studio-play");
   await p.waitForFunction(() => document.querySelector("#v-studio").dataset.mode === "");
+  assert.deepEqual(errors, []);
+});
+
+test("studio: a chain edit while the song plays freezes the heard bar and acts from the next one", { skip, timeout: 180000 }, async (t) => {
+  const { p, errors } = await hitCountingPage(t);
+  const BPM = 140, EDITED = [0, 1, 2];
+  const play = async () => {
+    await p.evaluate(() => { window.__studioHits.length = 0; window.__studioNotes.length = 0; window.__studioChain.length = 0; });
+    await p.click("#studio-play");
+    await p.waitForFunction(() => document.querySelector("#v-studio").dataset.mode === "song");
+  };
+  const heard = (slot, pat) => p.waitForFunction(({ slot, pat }) => {
+    const d = document.querySelector("#v-studio").dataset;
+    return d.playSlot === slot && d.playPat === pat;
+  }, { slot, pat }, { timeout: 15000 });
+  const stop = async () => {
+    await p.click("#studio-play");
+    await p.waitForFunction(() => document.querySelector("#v-studio").dataset.mode === "");
+  };
+  const attr = (name) => p.getAttribute("#v-studio", name);
+
+  /* (a) insert before the heard slot: the heard B keeps sounding and moves to index 2; the next bar is C */
+  await preparedTape(p, EDITED, BPM);
+  await play();
+  await heard("1", "1");
+  await openSlotSheet(p, 0);
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "前面插一段" }).click();
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  assert.equal(await attr("data-play-slot"), "2", "insert before the heard slot moves the playhead to index 2");
+  assert.equal(await attr("data-play-pat"), "1", "the heard bar keeps its pattern");
+  assert.deepEqual(await chainLetters(p), ["A", "A", "B", "C"]);
+  await heard("0", "0");                       /* bar 3, after the next one has played */
+  await stop();
+  assertBars((await scheduledBarPatterns(p, BPM)).bars, [0, 1, 2]);
+
+  /* (b) delete before the heard slot: the heard B stays at index 0; the chain's C follows it */
+  await preparedTape(p, EDITED, BPM);
+  await play();
+  await heard("1", "1");
+  await openSlotSheet(p, 0);
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "删掉这一格" }).click();
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  assert.equal(await attr("data-play-slot"), "0", "delete before the heard slot moves the playhead to index 0");
+  assert.equal(await attr("data-play-pat"), "1", "the heard bar keeps its pattern");
+  assert.deepEqual(await chainLetters(p), ["B", "C"]);
+  await heard("1", "2");                       /* the next bar is C */
+  await heard("0", "1");                       /* and then B again */
+  await stop();
+  assertBars((await scheduledBarPatterns(p, BPM)).bars, [0, 1, 2]);
+
+  /* (c) delete the heard slot: B finishes at index 1, whose letter is now C; the next bar is that C */
+  await preparedTape(p, EDITED, BPM);
+  await play();
+  await heard("1", "1");
+  await openSlotSheet(p, 1);
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "删掉这一格" }).click();
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  assert.equal(await attr("data-play-slot"), "1", "the following slot slides into the heard index");
+  assert.equal(await attr("data-play-pat"), "1", "the deleted slot's bar still finishes with its own pattern");
+  assert.deepEqual(await chainLetters(p), ["A", "C"]);
+  await heard("1", "2");                       /* the following C, at the same index */
+  await heard("0", "0");
+  await stop();
+  assertBars((await scheduledBarPatterns(p, BPM)).bars, [0, 1, 2]);
+
+  /* (d) change the heard slot's letter: B's bar finishes, C follows, and the new letter plays on the next pass */
+  await preparedTape(p, EDITED, BPM);
+  await play();
+  await heard("1", "1");
+  await p.locator("#studio-chain .st-chain-cell").nth(1).click();   /* select slot 1 (does not open a sheet) */
+  await p.locator('#studio-letters .st-letter[data-pat="2"]').click();
+  assert.equal(await attr("data-play-slot"), "1");
+  assert.equal(await attr("data-play-pat"), "1", "the heard B is not replaced mid-bar");
+  assert.deepEqual(await chainLetters(p), ["A", "C", "C"]);
+  await heard("2", "2");                       /* C, the following slot */
+  await heard("0", "0");                       /* A, the next pass's first slot */
+  await heard("1", "2");                       /* the changed letter, now on its next pass */
+  await heard("0", "0");
+  await stop();
+  assertBars((await scheduledBarPatterns(p, BPM)).bars, [0, 1, 2, 0, 2]);
+
   assert.deepEqual(errors, []);
 });
 
@@ -2343,6 +2544,11 @@ test("studio: edits made before the tape read lands are refused, and the late so
   assert.equal(await p.locator(".st-chain-cell").count(), 1);
   await p.click("#studio-add");
   assert.equal(await p.locator(".st-chain-cell").count(), 1, "+ was refused before the read");
+
+  /* tapping the selected slot / its sheet is refused before the read too */
+  await p.locator(".st-chain-cell").first().click();
+  assert.equal(await p.isHidden("#studio-sheet"), true, "the slot sheet does not open before the read");
+  assert.equal(await p.getAttribute("#v-studio .st-chain-cell", "data-slot"), "0", "the selection did not move");
 
   await p.waitForFunction(() => document.querySelector("#v-studio").dataset.loaded === "true", null, { timeout: 10000 });
   await p.waitForTimeout(100);                  /* the tour may open once the tape is in */

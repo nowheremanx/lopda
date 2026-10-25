@@ -406,7 +406,7 @@
       "studio.tour.c1": "一小节两格。点一格选中它。",
       "studio.tour.c2": "点一个和弦换掉它；再点一次选中的格就删掉。后一格空着，前一个和弦就响满一小节。",
       "studio.tour.s1": "A 到 H 是八段，每段一小节。点这里换一段，或者把这一段复制过去改。",
-      "studio.tour.s2": "这一串就是整首歌，从左往右放。点一格，再点下面的字母换掉它。",
+      "studio.tour.s2": "这一串就是整首歌，从左往右放。点下面的字母，换掉选中的那一格。",
       "studio.tour.s3": "+ 在最后加一段。点选中的格，可以在前面插一段、复制或者删掉它。在这一屏按 ▸ 放整首歌。",
 
       "boot.nostore": "这台浏览器不让存档，关掉页面后内容会丢。"
@@ -808,7 +808,7 @@
       "studio.tour.c1": "Two squares per bar. Tap one to select it.",
       "studio.tour.c2": "Tap a chord to change it; tap the selected square again to remove it. Leave the second square empty and the first chord fills the bar.",
       "studio.tour.s1": "A to H are eight patterns, one bar each. Tap here to switch, or copy this one and change the copy.",
-      "studio.tour.s2": "This row is the whole song, played left to right. Tap a slot, then a letter below to change it.",
+      "studio.tour.s2": "This row is the whole song, played left to right. Tap a letter below to change the selected slot.",
       "studio.tour.s3": "+ adds a slot at the end. Tap the selected slot to insert before it, copy it or delete it. Press ▸ on this screen to play the whole song.",
 
       "boot.nostore": "This browser won't keep data. It's lost when the page closes."

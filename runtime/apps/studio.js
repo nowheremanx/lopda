@@ -12,10 +12,12 @@
  * pattern has notes. On = ink; the step being heard is mid (empty) or dark (lit).
  *
  * The player: one scheduler over LopdaSong.chainEvents(), 0.1 s ahead every 25 ms into LP.SND.app through
- * LopdaStudioSynth. On a drum/note/chord screen it loops the edit pattern; on the song screen it plays the live chain.
- * A pattern picked while a pattern is playing waits for the next bar boundary (the letter blinks for two beats); the
- * grid shows no playhead until the ears get there. A BPM change is re-anchored at the tick being heard, a rebuilt
- * AudioContext carries on, HOME or a hidden page stops. Changes save a second later, and at once on leave or pause.
+ * LopdaStudioSynth. On a drum/note/chord screen it loops the edit pattern; on the song screen it plays the chain one
+ * bar at a time. A pattern picked while a pattern is playing waits for the next bar boundary (the letter blinks for two
+ * beats); the grid shows no playhead until the ears get there. A chain edit during song playback never touches the bar
+ * being heard: its next-slot index is mapped like an array index, and the bar after it starts from that slot in the
+ * edited chain at the boundary. A BPM change is re-anchored at the tick being heard, a rebuilt AudioContext carries on,
+ * HOME or a hidden page stops. Changes save a second later, and at once on leave or pause.
  *
  * No UI click sounds anywhere here: the only sounds are the instruments. The play glyph is drawn in CSS. Keys (the
  * chin pad is hidden): arrows move the focus box, X = A taps that cell, Enter = START plays and stops, Shift = SELECT
@@ -44,7 +46,10 @@ var T={
   playing:false, mode:"", playPat:0, chainPat:0, pendingPat:-1, queued:-1, boundaryGlobal:0,
   loop:0, ctx:null, synth:null,
   startAt:0, lastTick:0, heard:0, painted:null, navKey:"",
-  repeats:[], tour:null
+  repeats:[], tour:null,
+  /* song mode's bar state (12.12): the bar being heard is frozen; a chain edit only moves where it sits in the
+     edited chain, and the next bar is re-anchored from nextSlot at the boundary (h* = heard, ahead = scheduled) */
+  hSlot:-1, hPat:-1, hStart:0, hTicks:0, nSlot:0, ahead:null
 };
 
 function visible(){ return !$("v-studio").hidden; }
@@ -182,14 +187,18 @@ function patternTicks(p){
   var pat=T.song && T.song.patterns && T.song.patterns[p];
   return (pat && pat.len>0 ? pat.len : SONGS.STEPS)*SONGS.STEP;
 }
-/* the chain the ears hear: a loop of the heard pattern, or the live song (12.7) */
-function heardChain(){
-  if(T.mode==="song" && T.song) return T.song.song || [0];
-  return [T.playPat];
-}
+/* What the ears are on. A pattern loop asks the chain for the tick; song mode answers from the bar it froze when
+   that bar began, so a chain edit cannot change the heard pattern or its slot's pattern mid-bar (12.12). */
 function heardAt(){
   if(!T.playing || !T.song) return null;
-  return SONGS.chainAt(T.song,heardChain(),T.heard);
+  if(T.mode==="song"){
+    if(T.hSlot<0) return null;
+    var t=T.heard-T.hStart;
+    if(t<0) t=0;
+    if(T.hTicks>0 && t>=T.hTicks) t=T.hTicks-1;
+    return {p:T.hPat, slot:T.hSlot, t:t};
+  }
+  return SONGS.chainAt(T.song,[T.playPat],T.heard);
 }
 function playedPat(){
   var c=heardAt();
@@ -197,8 +206,7 @@ function playedPat(){
 }
 function playedSlot(){
   if(T.mode!=="song") return -1;
-  var c=heardAt();
-  return c ? c.slot : -1;
+  return T.hSlot>=0 ? T.hSlot : -1;
 }
 /* the tick the ears are at, on the one timeline that starts at T.startAt (global chain ticks) */
 function heardTick(){
@@ -237,6 +245,8 @@ function setSong(song){
   if(T.screen==="song"){ if(T.focus>n-1) T.focus=n-1; }
   else if(T.focus>last) T.focus=last;
   if(T.focus<0) T.focus=0;
+  /* a whole different tape mid-song starts its own chain from where the ears are */
+  if(T.playing && T.mode==="song") startSongPos(T.heard);
 }
 /* one note or hit: the drum kit, the voice of each track, the chord expanded (12.6, 12.7) */
 function playEvent(e,at,bpm){
@@ -256,11 +266,48 @@ function playEvent(e,at,bpm){
     T.synth.note(SONGS.SOUND[e.track],midi,at,Math.max(0.05,SONGS.ticksToSec(e.len,bpm)),e.vel);
   }
 }
+/* ---------- the song player's bars (12.7, 12.12) ----------
+   A song bar is scheduled from the pattern it started with, so the bar being heard can never change under a chain
+   edit. The bar after it is started from nextSlot (the slot after the heard one) and is only re-read at its own
+   boundary: every slot edit maps nextSlot like an array index instead of rewriting the bar being heard. */
+function scheduleBarPart(pat,start,from,to){
+  if(!(to>from)) return;
+  var ev=SONGS.chainEvents(T.song,[pat],from-start,to-start), i, bpm=T.song.bpm;
+  for(i=0;i<ev.length;i++) playEvent(ev[i],T.startAt+SONGS.ticksToSec(start+ev[i].tick,bpm),bpm);
+}
+function startAhead(){
+  var chain=(T.song&&T.song.song)||[0], n=chain.length, slot=T.nSlot;
+  if(!(slot>=0) || slot>=n) slot=0;
+  T.ahead={slot:slot, pat:chain[slot], start:T.hStart+T.hTicks, ticks:patternTicks(chain[slot])};
+}
+function advanceAhead(){
+  var chain=(T.song&&T.song.song)||[0], n=chain.length, slot=(T.ahead.slot+1)%n;
+  T.ahead={slot:slot, pat:chain[slot], start:T.ahead.start+T.ahead.ticks, ticks:patternTicks(chain[slot])};
+}
+function scheduleSongRange(from,to){
+  var guard=0, heardEnd=T.hStart+T.hTicks, stop;
+  while(from<to && guard++<256){
+    if(!(T.hTicks>0)) return;
+    if(from<heardEnd){
+      stop=Math.min(to,heardEnd);
+      scheduleBarPart(T.hPat,T.hStart,from,stop);
+      from=stop;
+      continue;
+    }
+    if(!T.ahead || from>=T.ahead.start+T.ahead.ticks){
+      if(!T.ahead) startAhead(); else advanceAhead();
+      continue;
+    }
+    stop=Math.min(to,T.ahead.start+T.ahead.ticks);
+    scheduleBarPart(T.ahead.pat,T.ahead.start,from,stop);
+    from=stop;
+  }
+}
 function scheduleRange(from,to){
   if(!T.song || to<=from) return;
+  if(T.mode==="song"){ scheduleSongRange(from,to); return; }
   var bpm=T.song.bpm;
-  var chain=T.mode==="song" ? (T.song.song||[0]) : [T.chainPat];
-  var ev=SONGS.chainEvents(T.song,chain,from,to), i;
+  var ev=SONGS.chainEvents(T.song,[T.chainPat],from,to), i;
   for(i=0;i<ev.length;i++) playEvent(ev[i],T.startAt+SONGS.ticksToSec(ev[i].tick,bpm),bpm);
 }
 /* Schedules forward across a queued pattern's bar boundary without cutting the bar: the old chain is scheduled
@@ -292,6 +339,61 @@ function scheduleTo(to){
     T.lastTick=p;
   }
 }
+/* the song chain position at play start (song mode): bar 0 is heard, slot 1 is next */
+function startSongPos(tick){
+  var chain=(T.song&&T.song.song)||[0], n=chain.length;
+  T.hSlot=0;
+  T.hPat=chain[0];
+  T.hStart=tick||0;
+  T.hTicks=patternTicks(chain[0]);
+  T.nSlot=n>1?1:0;
+  T.ahead=null;
+}
+/* the ears crossed a bar boundary: the bar the scheduler started ahead becomes the heard one, and the slot after
+   it is next in the chain as it is now (an edit while the bar played mapped that index already) */
+function advanceHeard(){
+  var chain=(T.song&&T.song.song)||[0], n=chain.length, guard=0, start, bar, slot;
+  while(T.hTicks>0 && T.heard>=T.hStart+T.hTicks && guard++<16){
+    start=T.hStart+T.hTicks;
+    bar=T.ahead && T.ahead.start===start ? T.ahead : null;
+    if(bar){
+      T.hSlot=bar.slot; T.hPat=bar.pat; T.hTicks=bar.ticks;
+      /* the next bar was already scheduled when its slot was deleted: the following slot slid into its index, so
+         the same index is next, not the one after it (nothing is skipped) */
+      T.nSlot=bar.slide ? T.hSlot : (T.hSlot+1)%n;
+      T.ahead=null;
+    } else {
+      slot=T.nSlot>=0 && T.nSlot<n ? T.nSlot : 0;
+      T.hSlot=slot; T.hPat=chain[slot]; T.hTicks=patternTicks(chain[slot]);
+      T.nSlot=(T.hSlot+1)%n;
+    }
+    T.hStart=start;
+    T.painted=null;
+  }
+}
+/* a slot edit maps an index like an array index; delete at the index itself leaves it pointing at the slot that
+   slides in (12.12's next-slot rule) */
+function mapIndex(idx,kind,i,n){
+  if(idx<0) return idx;
+  if(kind==="insert"){ if(i<=idx) idx++; }
+  else if(i<idx) idx--;
+  if(idx>n-1) idx=n-1;
+  if(idx<0) idx=0;
+  return idx;
+}
+function mapSongEdit(kind,i){
+  if(!T.playing || T.mode!=="song" || !T.song) return;
+  var chain=T.song.song||[0], n=chain.length;
+  if(n<1) return;
+  T.hSlot=mapIndex(T.hSlot,kind,i,n);
+  T.nSlot=mapIndex(T.nSlot,kind,i,n);
+  if(T.ahead){
+    var a=T.ahead.slot;
+    T.ahead.slot=mapIndex(a,kind,i,n);
+    /* the scheduled next bar lost its own slot: its index now holds the following slot */
+    if(kind==="delete" && i===a) T.ahead.slide=true;
+  }
+}
 function loop(){
   if(!T.playing) return;
   var ac=LP.SND.ctx;
@@ -301,6 +403,8 @@ function loop(){
   var heard=Math.floor(Math.max(0,now-T.startAt)*bpm*SONGS.TPB/60);
   var to=Math.floor(Math.max(0,now+LOOKAHEAD-T.startAt)*bpm*SONGS.TPB/60)+1;
   T.heard=heard;
+  /* the ears may have reached a new song bar before the scheduler: take the bar it started, then keep filling */
+  if(T.mode==="song") advanceHeard();
   /* schedule first: if a timer stall made the ears jump past the boundary, scheduleTo still has to place the
      queued pattern at that boundary before the ears are said to be on it */
   scheduleTo(to);
@@ -330,6 +434,8 @@ function startPlay(){
   T.playing=true;
   T.startAt=ac.currentTime+0.02;
   T.lastTick=0; T.heard=0; T.painted=null; T.navKey="";
+  if(T.mode==="song") startSongPos(0);
+  else { T.ahead=null; T.hSlot=-1; T.hPat=-1; T.hTicks=0; T.nSlot=0; }
   T.loop=setInterval(loop,LOOP_MS);
   LP.keepAwake(true);
   renderPlay(); renderNav();
@@ -345,6 +451,8 @@ function stopPlay(){
   T.pendingPat=-1;
   T.queued=-1;
   T.boundaryGlobal=0;
+  T.ahead=null;
+  T.hSlot=-1; T.hPat=-1; T.hTicks=0; T.nSlot=0;
   if(T.loop){ clearInterval(T.loop); T.loop=0; }
   dropSynth();                       /* silence the hits already scheduled in the look-ahead */
   T.painted=null;
@@ -411,6 +519,7 @@ function onAudio(){
   T.startAt=T.ctx.currentTime-SONGS.ticksToSec(tick,T.song.bpm);
   T.lastTick=tick+1;
   T.heard=tick;
+  if(T.mode==="song") advanceHeard();
   T.painted=null;
   paintPlaying(true);
   renderNav();
@@ -1384,10 +1493,8 @@ function chordTap(half){
     }
     T.chordSel=half;
     renderChords();
-    if(!rest){
-      auditionChord(note.deg);
-      tourEvent("chord");          /* selecting an occupied cell follows step 1 too */
-    }
+    if(!rest) auditionChord(note.deg);
+    tourEvent("chord");            /* selecting any occupied cell, a rest too, follows step 1 (12.10) */
     return;
   }
   deg=T.chordDeg||0;
@@ -1409,7 +1516,7 @@ function chordKeyTap(deg){
   auditionChord(deg);
 }
 function selectSlot(i){
-  if(!T.song) return;
+  if(!T.loaded || !T.song) return;
   var s=T.song.song||[0];
   i=Math.max(0,Math.min(s.length-1,i));
   /* tapping the slot already selected opens its sheet (12.12); another slot just selects it */
@@ -1451,6 +1558,7 @@ function insertSlotAt(i,p,sel){
   var s=T.song.song||[0];
   if(s.length>=SONGS.SONG_MAX){ toast(tr("studio.song.full")); return; }
   T.song=SONGS.insertSlot(T.song,i,p);
+  mapSongEdit("insert",i);
   T.slot=Math.max(0,Math.min(T.song.song.length-1,sel));
   T.focus=T.slot;
   touch();
@@ -1472,6 +1580,7 @@ function deleteSlotAt(){
   var s=(T.song&&T.song.song)||[0], i=T.slot;
   if(!T.loaded || !T.song || s.length<=1 || i<0 || i>=s.length) return;
   T.song=SONGS.removeSlot(T.song,i);
+  mapSongEdit("delete",i);
   T.slot=Math.min(i,T.song.song.length-1);
   T.focus=T.slot;
   touch();
@@ -1555,7 +1664,7 @@ document.addEventListener("keydown",function(e){
   }
   else if(key==="Enter"){ if(e.repeat) return; togglePlay(); }
   else if(key==="Shift"){ if(e.repeat) return; if(!T.sheet && T.screen==="drums") nextDrum(); }
-  else if(key==="z"||key==="Z"){ if(e.repeat) return; if(T.tour) tourEnd(true); else closeSheet(); }
+  else if(key==="z"||key==="Z"){ if(e.repeat) return; if(T.sheet) closeSheet(); else if(T.tour) tourEnd(true); }
   else done=false;
   if(done) e.preventDefault();
 });
