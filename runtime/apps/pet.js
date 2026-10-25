@@ -12,14 +12,14 @@
  *
  * Storage: data/users/local/pet (design.md 8 plus petsim's lastMeal, awakeHunger, awakeJoy, today, seenUse and aiUse;
  * boxSeen and today's pick/outing phase/remaining/hour/ai flag, and outSouv — the souvenir a background trip is
- * bringing in — and data/users/local/pet/souvenirs/<id> {name, line, px, at, ai, day}. A failed read is not
+ * bringing in — and data/users/local/pet/souvenirs/<id> {name:{zh,en}, line:{zh,en}, px, at, ai, day}. A failed read is not
  * "no pet": the program then keeps an in-memory pet and never writes an egg over a save it could not read (the status
  * bar says 未存档).
  *
  * The day: on the first open of a day (and after hatching) the program asks the read-only summaries for the day's one
  * pick: an upcoming calendar date (a count of days, never a name), a diary after 20:00, the word book, a book not opened
  * for a week, or waiting film. LopdaPet.pickOfDay chooses (about half the days nothing); the pet holds the matching prop
- * and 信 lights. START opens the small menu (信 / 看看 / 纪念品箱); A on 信 opens the summary's own program, then the pick
+ * and 信 lights. START opens the small menu (信 / 状态 / 纪念品箱); A on 信 opens the summary's own program, then the pick
  * is used for the day. The AI souvenir, when the line is on, is one call at the day's outing (30 s cap) and silently
  * falls back to the built-in table.
  *
@@ -75,7 +75,7 @@ var P={
   pickSeq:0, wordWord:"", wordMeaning:null, wordBusy:false, aiJob:null,
   weatherOverride:null, ambName:null,
   bgTimer:0, bgRun:false, outResolving:null, homeSig:"",
-  restoring:false, restoreTimer:0
+  restoring:false, restoreTimer:0, missing:{}
 };
 var ctx=null, buf=null, im=null, iconCvs={}, iconBuilt=false;
 
@@ -245,8 +245,9 @@ function loadStorage(){
     var list=[];
     q.docs.forEach(function(doc){
       var o=LP.own(doc.data())||{};
-      if(!o.name || !o.line || typeof o.px!=="string" || o.px.length!==256) return;
-      list.push({id:doc.id, name:String(o.name), line:String(o.line), px:o.px, at:+o.at||0, ai:!!o.ai, day:o.day?String(o.day):""});
+      var name=storedText(o.name), line=storedText(o.line);
+      if(!name || !line || typeof o.px!=="string" || o.px.length!==256) return;
+      list.push({id:doc.id, name:name, line:line, px:o.px, at:+o.at||0, ai:!!o.ai, day:o.day?String(o.day):""});
     });
     list.sort(function(a,b){ return (a.at||0)-(b.at||0); });
     P.souv=list;
@@ -477,11 +478,35 @@ function finishPick(){
 }
 
 /* ---------- the day's outing ---------- */
+/* Souvenirs are stored in both languages. A document written before the pair (or a built-in entry) may still be one
+   string; it is shown as it is, in either language, rather than turned into "[object Object]". */
+function textPair(v){
+  if(!v || typeof v!=="string" && (typeof v!=="object" || Array.isArray(v))) return null;
+  if(typeof v==="string") return null;
+  var zh=typeof v.zh==="string" ? v.zh : "", en=typeof v.en==="string" ? v.en : "";
+  if(!zh && !en) return null;
+  return {zh:zh||en, en:en||zh};
+}
+function storedText(v){
+  var p=textPair(v);
+  if(p) return p;
+  return typeof v==="string" && v ? v : null;
+}
+function souvText(s,field){
+  var v=s && s[field], p=textPair(v);
+  if(p) return String(p[I18N.lang] || p.zh || p.en || "");
+  return String(v==null ? "" : v);
+}
+function langText(lang,key,fallback){
+  var table=I18N.STR && I18N.STR[lang];
+  var s=table ? table[key] : null;
+  return s==null ? fallback : s;
+}
 function recentNames(){
-  return P.souv.slice(Math.max(0,P.souv.length-5)).map(function(s){ return s.name; });
+  return P.souv.slice(Math.max(0,P.souv.length-5)).map(function(s){ return souvText(s,"name"); });
 }
 /* petsim.builtinSouvenir avoids table entries whose `name` is recent; pack entries carry only an id, so give
-   each candidate its localized name before choosing (the id stays for the strings and the picture). */
+   each candidate its localized names before choosing (the id stays for the strings and the picture). */
 function souvenirTable(pack){
   return ((pack && pack.souvenirs)||[]).map(function(e){
     var t=dirText(e,e.id);
@@ -489,23 +514,30 @@ function souvenirTable(pack){
   });
 }
 function dirText(entry,id){
-  var key="pet.souv."+id, line=tr(key+".line");
-  var name=entry && entry.name ? entry.name : tr(key);
-  if(name===key) name=entry && entry.id ? entry.id : id;
-  if(line==="pet.souv."+id+".line") line=entry && entry.line ? entry.line : "";
+  var key="pet.souv."+id, lineKey=key+".line";
+  var fall = entry && entry.id ? entry.id : id;
+  var name={
+    zh:langText("zh",key,entry && typeof entry.name==="string" ? entry.name : fall),
+    en:langText("en",key,entry && typeof entry.name==="string" ? entry.name : fall)
+  };
+  var line={
+    zh:langText("zh",lineKey,entry && typeof entry.line==="string" ? entry.line : ""),
+    en:langText("en",lineKey,entry && typeof entry.line==="string" ? entry.line : "")
+  };
   return {name:name, line:line};
 }
 function pxFromGrid(grid){
   var out="", r, c;
   for(r=0;r<16;r++){
-    var line=String((grid||[])[r]||"");
+    var line=String((grid||{})[r]||"");
     for(c=0;c<16;c++){ var t=TONE_OF[line.charAt(c)]; out+=t===undefined?"3":String(t); }
   }
   return out;
 }
 function makeSouvenir(entry){
   var id=(entry && entry.id) || "souv";
-  var txt=dirText(entry,id);
+  var pairName=textPair(entry && entry.name), pairLine=textPair(entry && entry.line);
+  var txt=pairName && pairLine ? {name:pairName, line:pairLine} : dirText(entry,id);
   return {
     id:LP.uid(), name:txt.name, line:txt.line,
     px:entry && entry.px ? String(entry.px) : pxFromGrid(entry && entry.grid),
@@ -1062,7 +1094,7 @@ function confirmNext(){
 function pasteSouvenir(){
   var s=P.souv[P.boxPage];
   if(!s || !LP.notes) return;
-  LP.notes.append(tr("pet.noteTitle"), s.name+"\n"+s.line).then(function(){
+  LP.notes.append(tr("pet.noteTitle"), souvText(s,"name")+"\n"+souvText(s,"line")).then(function(){
     beep("ok"); LP.toast(tr("pet.box.pasted"));
   },function(){ beep("err"); LP.toast(tr("pet.box.pastefail")); });
 }
@@ -1247,6 +1279,21 @@ function markNames(save,pack){
   out.eye=(pack.marks.eye||["dot"])[m.eye|0] || "dot";
   return out;
 }
+/* A missing frame must never empty the screen: the stage's idle frame stands in, and ?debug names it once. */
+function missingFrame(stage,view,name){
+  var key=String(stage)+"|"+String(view)+"|"+String(name);
+  if(P.missing[key]) return;
+  P.missing[key]=1;
+  if(window.LOPDA_DEBUG && window.console) window.console.warn("pet: missing frame "+key);
+}
+function petFrame(pack,stage,marks,view,name){
+  var g=Art.stagePose(pack,stage,marks,view,name);
+  if(g && g.length && (!Art.frameInk || Art.frameInk(g)>0)) return g;
+  missingFrame(stage,view,name);
+  g=Art.stagePose(pack,stage,marks,view,view==="side"?"walk1":"idle");
+  if(g && g.length && (!Art.frameInk || Art.frameInk(g)>0)) return g;
+  return Art.stagePose(pack,stage,marks,"front","idle");
+}
 /* the egg over its 60 visible seconds: whole, a small crack, a big crack; then the program hatches it */
 function eggGrid(pack){
   var cracks=(pack && pack.eggCrack)||[], g=(pack && pack.egg) || null;
@@ -1289,16 +1336,19 @@ function petGrid(save,pack,t,asleepNow){
   /* Baby and child have their own small bodies, but the same face vocabulary: moods, blinks and game poses all
      read there too (the owner sees these stages for the first ten days). */
   if(save.stage==="baby" || save.stage==="child"){
-    var smallStage=Art.stagePose(pack,save.stage,marks,"front",face);
+    var smallStage=petFrame(pack,save.stage,marks,"front",face);
     if(a==="shake") return shiftX(smallStage,P.frame?1:-1);
     return look ? shiftX(smallStage,look) : smallStage;
   }
   if(save.stage==="adult"){
-    var opts={ant:marks.ant, pat:marks.pat, eye:marks.eye};
+    var opts={ant:marks.ant, pat:marks.pat, eye:marks.eye, face:face};
     if(mood) opts.face=mood;
-    if(face==="idle2" && !mood) opts.squat=true;
-    if(face==="blink" && !mood) opts.face="closed";
+    if(face==="blink" && !mood) opts.face="blink";
     var g=pack.adult(save.form||"plain",opts);
+    if(!g || !g.length || (Art.frameInk && !Art.frameInk(g))){
+      missingFrame("adult",save.form||"plain",face);
+      g=Art.stagePose(pack,"adult",marks,"front","idle");
+    }
     if(a==="shake") return shiftX(g,P.frame?1:-1);
     if(face==="happy") return shift(g,-1);
     if(face==="sleep" || face==="wait" || mood) return look?shiftX(g,look):g;
@@ -1397,7 +1447,7 @@ function roomScene(){
     if(save.stage==="egg"){
       scene.pet=shift(eggGrid(pack), P.frame?1:0);
     } else if(save.stage==="baby" || save.stage==="child"){
-      scene.pet=Art.stagePose(pack,save.stage,markNames(save,pack),"front",P.frame?"walk1":"walk2");
+      scene.pet=petFrame(pack,save.stage,markNames(save,pack),"front",P.frame?"walk1":"walk2");
     } else {
       scene.pet=shift(pack.frames({
         ant:markNames(save,pack).ant, pat:markNames(save,pack).pat, eye:markNames(save,pack).eye,
@@ -1452,7 +1502,7 @@ function renderGame(){
   if(!g || !st) return;
   var pack=packOf(P.save), marks=P.save ? markNames(P.save,pack) : {};
   g.draw(st,buf,ROOM_W,ROOM_H,pack,function(view,name){
-    return Art.stagePose(pack,P.save ? P.save.stage : "adult",marks,view,name);
+    return petFrame(pack,P.save ? P.save.stage : "adult",marks,view,name);
   });
   paintRoomBuffer();
 }
@@ -1598,8 +1648,8 @@ function buildBox(panel){
   paintSouvenir(cv,s.px);
   card.appendChild(cv);
   var body=el("div","pet-souvtext");
-  body.appendChild(el("b","pet-souvname",s.name));
-  body.appendChild(el("p","pet-souvline",s.line));
+  body.appendChild(el("b","pet-souvname",souvText(s,"name")));
+  body.appendChild(el("p","pet-souvline",souvText(s,"line")));
   body.appendChild(el("p","pet-souvdate",LP.fmt(s.at)));
   card.appendChild(body);
   panel.appendChild(card);

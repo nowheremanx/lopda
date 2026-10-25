@@ -33,7 +33,7 @@
  *   wants(save)                  "food", "wash" or null, for the call icon
  *   outingToday(save, dayKey)    {hour} or null; the caller stores the hour in today.out
  *   pickOfDay(candidates, yesterdayKind, seed) one candidate or null, about half the days nothing
- *   validateSouvenir(input)      a clean {name, line, px: 256 chars} or null
+ *   validateSouvenir(input)      a clean {name:{zh,en}, line:{zh,en}, px: 256 chars} or null
  *   builtinSouvenir(rnd, recentNames, table) one entry of table, avoiding recent names when possible
  *   aiPrompt(ctx)                {messages, max} for one LP.ai.ask call, with only design.md 7's allowed facts
  *   moodWord(hunger, joy, zh)    the one mood word the prompt may carry
@@ -437,15 +437,27 @@ function emojiCp(c){
     (c>=0x200B && c<=0x200F) || (c>=0x202A && c<=0x202E) || (c>=0x2060 && c<=0x2064) || (c>=0x2066 && c<=0x2069) ||
     c===0xFE0F || c===0xFE0E || c===0xFEFF || c===0x20E3 || (c>=0xD800 && c<=0xDFFF);
 }
-/* name 1-8 code points, line 1-40, 16 rows of exactly 16 of "0"-"3". The rows are joined into the 256-character
-   string design.md 8 stores, so the caller never has to decide what a "row" is again. */
+/* A souvenir's name and line exist in both languages: zh in Chinese characters, en in Latin letters (spaces and
+   basic punctuation only). A one-language answer is rejected, so a German or English-only name cannot slip in. */
+var EN_TEXT=/^[A-Za-z][A-Za-z .,!?'"()\-:;]*$/;
+var CJK_TEXT=/[\u3400-\u9fff]/;
+function bilingualText(v,maxZh,maxEn){
+  if(!v || typeof v!=="object" || Array.isArray(v)) return null;
+  var zh=plainText(v.zh,maxZh), en=plainText(v.en,maxEn);
+  if(zh===null || en===null) return null;
+  if(!CJK_TEXT.test(zh) || /[A-Za-z]/.test(zh)) return null;
+  if(!EN_TEXT.test(en)) return null;
+  return {zh:zh, en:en};
+}
+/* name {zh,en}, line {zh,en}, 16 rows of exactly 16 of "0"-"3". The rows are joined into the 256-character string
+   design.md 8 stores, so the caller never has to decide what a "row" is again. */
 function validateSouvenir(input){
   var o=input;
   if(typeof input==="string"){
     try{ o=JSON.parse(input); }catch(e){ return null; }
   }
   if(!o || typeof o!=="object" || Array.isArray(o)) return null;
-  var name=plainText(o.name,8), line=plainText(o.line,40);
+  var name=bilingualText(o.name,8,16), line=bilingualText(o.line,40,80);
   if(name===null || line===null) return null;
   if(!Array.isArray(o.px) || o.px.length!==16) return null;
   var rows=[];
@@ -466,7 +478,12 @@ function builtinSouvenir(rnd,recentNames,table){
   var pool=[];
   for(var i=0;i<table.length;i++){
     var e=table[i], nm=e && typeof e==="object" ? e.name : null;
-    if(!nm || !seen[String(nm)]) pool.push(e);
+    var names=[];
+    if(nm && typeof nm==="object"){ if(nm.zh) names.push(nm.zh); if(nm.en) names.push(nm.en); }
+    else if(nm) names.push(nm);
+    var repeated=false;
+    names.forEach(function(n){ if(seen[String(n)]) repeated=true; });
+    if(!names.length || !repeated) pool.push(e);
   }
   if(!pool.length) pool=table.slice();
   return pool[Math.min(pool.length-1,Math.floor(num(r())*pool.length))];
@@ -521,11 +538,11 @@ function aiPrompt(ctx){
     if(cats.length) lines.push("这周做过："+cats.join("、"));
     if(recent.length) lines.push("最近带回的纪念品："+recent.join("、"));
     if(word) lines.push("一个词："+word);
-    lines.push("请只输出 JSON：{\"name\":\"不超过 8 个字\",\"line\":\"不超过 40 个字\",\"px\":[\"16 行，每行 16 个 0-3 的字符\"]}");
+    lines.push("请只输出 JSON：{\"name\":{\"zh\":\"不超过 8 个汉字\",\"en\":\"16 characters at most\"},\"line\":{\"zh\":\"不超过 40 个汉字\",\"en\":\"80 characters at most\"},\"px\":[\"16 行，每行 16 个 0-3 的字符\"]}");
     return {messages:[
-      {role:"system", content:"你是一台掌上电脑里的小生物。你只会画一张 16×16 的四色像素小画，并给它起个名字、写一句话。只输出 JSON，不要解释，不要表情符号。"},
+      {role:"system", content:"你是一台掌上电脑里的小生物。你只会画一张 16×16 的四色像素小画，并给它起个名字、写一句话。名字和这句话都要中文、英文两版：中文只用汉字，英文只用英文字母（可以空格和基本标点）；不要其他语言，不要表情符号。只输出 JSON，不要解释。"},
       {role:"user", content:lines.join("\n")}
-    ], max:512};
+    ], max:768};
   }
   if(form) lines.push("Form: "+form);
   if(age!==null) lines.push("Age: "+age+" days");
@@ -536,11 +553,11 @@ function aiPrompt(ctx){
   if(cats.length) lines.push("Done this week: "+cats.join(", "));
   if(recent.length) lines.push("Recent souvenirs: "+recent.join(", "));
   if(word) lines.push("One word: "+word);
-  lines.push("Reply with JSON only: {\"name\":\"8 characters at most\",\"line\":\"40 characters at most\",\"px\":[\"16 rows of 16 characters from 0-3\"]}");
+  lines.push("Reply with JSON only: {\"name\":{\"zh\":\"8 Chinese characters at most\",\"en\":\"16 characters at most\"},\"line\":{\"zh\":\"40 Chinese characters at most\",\"en\":\"80 characters at most\"},\"px\":[\"16 rows of 16 characters from 0-3\"]}");
   return {messages:[
-    {role:"system", content:"You are a small creature living inside a handheld computer. You draw one 16x16 four-tone pixel picture and give it a name and one line. Reply with JSON only, no explanation, no emoji."},
+    {role:"system", content:"You are a small creature living inside a handheld computer. You draw one 16x16 four-tone pixel picture and give it a name and one line. Both the name and the line must be given in Chinese and in English: Chinese in Chinese characters only, English in Latin letters only (spaces and basic punctuation are fine). Never another language, no emoji. Reply with JSON only, no explanation."},
     {role:"user", content:lines.join("\n")}
-  ], max:512};
+  ], max:768};
 }
 
 /* ---------- the AI's small vocabulary ---------- */

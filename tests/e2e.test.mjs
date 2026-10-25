@@ -3658,7 +3658,8 @@ test("pet: hatch, meal, wash, look, the light at night, travel and the postcard;
   assert.ok(picture.length >= 2, "the souvenir is a picture, not a blank square: " + picture);
   const souv = await idb.under(p, "data/users/local/pet/souvenirs");
   assert.equal(souv.length, 1);
-  assert.equal(souv[0].name, "明信片");
+  assert.equal(souv[0].name.zh, "明信片");
+  assert.equal(souv[0].name.en, "Postcard");
   assert.equal(souv[0].ai, false);
   assert.equal(souv[0].px.length, 256);
   assert.equal(await p.evaluate(() => LP.builtins.find((b) => b.id === "pet").tag()), "");
@@ -3932,7 +3933,7 @@ test("pet: one AI souvenir a day, valid or silently built-in, never a note, date
   await p.waitForFunction(() => LP.calendar && LP.calendar.upcoming(7).some((d) => d.in === 1));
 
   /* one valid, fenced answer */
-  const answer = "```json\n" + JSON.stringify({ name: "夜灯", line: "一小块夜里的光。", px: Array(16).fill("0123012301230123") }) + "\n```";
+  const answer = "```json\n" + JSON.stringify({ name: { zh: "夜灯", en: "Night lamp" }, line: { zh: "一小块夜里的光。", en: "A little light from the night." }, px: Array(16).fill("0123012301230123") }) + "\n```";
   await installAi(answer);
   await openPet();
   await p.evaluate(() => LOPDA_DEBUG.pet.hatch());
@@ -3943,7 +3944,10 @@ test("pet: one AI souvenir a day, valid or silently built-in, never a note, date
   let docs = await beside();
   const aiSouv = docs.find((d) => d.ai === true);
   assert.ok(aiSouv, "the AI souvenir is in the box with ai:true");
-  assert.equal(aiSouv.name, "夜灯");
+  assert.equal(aiSouv.name.zh, "夜灯");
+  assert.equal(aiSouv.name.en, "Night lamp");
+  assert.equal(aiSouv.line.zh, "一小块夜里的光。");
+  assert.equal(aiSouv.line.en, "A little light from the night.");
   assert.equal(aiSouv.px.length, 256);
   const calls = await p.evaluate(() => window.__aiCalls.map((c) => JSON.stringify(c.messages)));
   assert.equal(calls.length, 1, "one call for the day");
@@ -4067,7 +4071,7 @@ test("pet: the home icon is an egg, a sleeping pet and a pet that wants somethin
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
-test("pet: START opens the menu, B closes it, and 看看 / 纪念品箱 open from it", { skip, timeout: 60000 }, async (t) => {
+test("pet: START opens the menu, B closes it, and 状态 / 纪念品箱 open from it", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await page(t, { locale: "zh-CN", serviceWorkers: "block", viewport: { width: 390, height: 844 } });
   await p.clock.install({ time: new Date(2026, 9, 11, 9, 0) });
   await p.goto(base + "/runtime/?debug", { waitUntil: "networkidle" });
@@ -4084,11 +4088,11 @@ test("pet: START opens the menu, B closes it, and 看看 / 纪念品箱 open fro
   await key("start");
   await p.waitForSelector("#pet-panel:not([hidden])");
   const items = await p.$$eval("#pet-panel .pet-menu", (l) => l.map((x) => x.innerText.trim()));
-  assert.deepEqual(items, ["信", "看看", "纪念品箱"]);
+  assert.deepEqual(items, ["信", "状态", "纪念品箱"]);
   await key("b");
   assert.ok(await p.isHidden("#pet-panel"), "B closes the menu");
 
-  /* A opens 看看 */
+  /* A opens 状态 */
   await p.locator("#pet-keys .sk-start").click();
   await p.waitForSelector("#pet-panel:not([hidden])");
   await key("a");
@@ -4365,7 +4369,7 @@ test("pet: the AI souvenir is made and saved with the pet screen never opened; o
   await idb.setDoc(p, "data/users/local/pet", plan.save);
 
   /* boot at the outing hour with a fake AI line already in place; the pet is never opened */
-  const answer = JSON.stringify({ name: "夜灯", line: "一小块夜里的光。", px: Array(16).fill("0123012301230123") });
+  const answer = JSON.stringify({ name: { zh: "夜灯", en: "Night lamp" }, line: { zh: "一小块夜里的光。", en: "A little light from the night." }, px: Array(16).fill("0123012301230123") });
   await p.addInitScript((answer) => {
     window.__aiCalls = [];
     let lp;
@@ -4391,7 +4395,8 @@ test("pet: the AI souvenir is made and saved with the pet screen never opened; o
   }
   assert.equal(docs.length, 1, "the souvenir was saved with the pet screen closed");
   assert.equal(docs[0].ai, true, "the AI answer is the souvenir");
-  assert.equal(docs[0].name, "夜灯");
+  assert.equal(docs[0].name.zh, "夜灯");
+  assert.equal(docs[0].name.en, "Night lamp");
   assert.equal(await p.evaluate(() => window.__aiCalls.length), 1, "one AI call for the day");
   assert.equal(await p.evaluate(() => LP.builtins.find((b) => b.id === "pet").tag()), "带回了", "the home tag already knows");
   const before = await p.evaluate(() => LOPDA_DEBUG.pet.save());

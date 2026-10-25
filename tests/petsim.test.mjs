@@ -444,30 +444,58 @@ test("wants: food at hunger 1 or less, otherwise wash at mess 2 or more", () => 
 });
 
 /* ---------- souvenirs ---------- */
-test("validateSouvenir: a good object or JSON string, trimmed, px joined to 256 characters", () => {
-  const good = { name: " 红叶 ", line: " 在山顶捡到的一片叶子 ", px: rows() };
+test("validateSouvenir: a good bilingual object or JSON string, trimmed, px joined to 256 characters", () => {
+  const good = {
+    name: { zh: " 红叶 ", en: " Red leaf " },
+    line: { zh: " 在山顶捡到的一片叶子 ", en: " A leaf from the ridge. " },
+    px: rows()
+  };
   const v = P.validateSouvenir(good);
-  assert.deepEqual([v.name, v.line, v.px.length], ["红叶", "在山顶捡到的一片叶子", 256]);
+  assert.deepEqual(JSON.parse(JSON.stringify(v.name)), { zh: "红叶", en: "Red leaf" });
+  assert.deepEqual(JSON.parse(JSON.stringify(v.line)), { zh: "在山顶捡到的一片叶子", en: "A leaf from the ridge." });
+  assert.equal(v.px.length, 256);
   assert.match(v.px, /^[0-3]{256}$/);
   assert.deepEqual(P.validateSouvenir(JSON.stringify(good)), v);
-  assert.equal(P.validateSouvenir({ name: "一二三四五六七八", line: "字".repeat(40), px: rows() }).name.length, 8);
+  const longest = P.validateSouvenir({
+    name: { zh: "一二三四五六七八", en: "Sixteen letters!" },
+    line: { zh: "字".repeat(40), en: "word ".repeat(16).trim() },
+    px: rows()
+  });
+  assert.equal([...longest.name.zh].length, 8);
+  assert.equal([...longest.name.en].length, 16);
+  assert.equal([...longest.line.zh].length, 40);
+  assert.ok([...longest.line.en].length <= 80);
 });
 
-test("validateSouvenir: each bad kind is refused", () => {
-  const good = { name: "红叶", line: "一片叶子", px: rows() };
+test("validateSouvenir: one language, the wrong script, or a bad length is refused", () => {
+  const good = {
+    name: { zh: "红叶", en: "Red leaf" },
+    line: { zh: "一片叶子", en: "One leaf" },
+    px: rows()
+  };
   const bad = [
     "{",                                                                // bad JSON
-    { ...good, name: "一二三四五六七八九" },                             // 9 code points
-    { ...good, line: "字".repeat(41) },                                  // 41 code points
-    { ...good, name: "叶😀" },                                           // emoji
-    { ...good, line: "叶子❤️" },                                        // U+FE0F
-    { ...good, line: "<b>叶子</b>" },                                    // markup
-    { ...good, name: "a\u0001b" },                                       // control
+    { ...good, name: "红叶" },                                          // one-language name (old shape)
+    { ...good, line: "一片叶子" },                                       // one-language line
+    { ...good, name: { zh: "红叶" } },                                  // no English name
+    { ...good, name: { en: "Red leaf" } },                              // no Chinese name
+    { ...good, name: { zh: "一二三四五六七八九", en: "Red leaf" } },     // 9 Chinese code points
+    { ...good, name: { zh: "红叶", en: "Seventeen letters" } },          // 17 English characters
+    { ...good, line: { zh: "字".repeat(41), en: "One leaf" } },           // 41 Chinese code points
+    { ...good, line: { zh: "叶子", en: "x".repeat(81) } },               // 81 English characters
+    { ...good, name: { zh: "red 红叶", en: "Red leaf" } },               // Latin in the Chinese name
+    { ...good, name: { zh: "红叶", en: "红叶" } },                       // no Latin in the English name
+    { ...good, name: { zh: "红叶", en: "Über leaf" } },                  // not a Latin letter
+    { ...good, name: { zh: "红叶", en: "Red leaf 2" } },                 // digits are not basic punctuation
+    { ...good, name: { zh: "叶😀", en: "Red leaf" } },                   // emoji
+    { ...good, line: { zh: "叶子❤️", en: "One leaf" } },                // U+FE0F
+    { ...good, line: { zh: "<b>叶子</b>", en: "One leaf" } },             // markup
+    { ...good, name: { zh: "a\u0001b", en: "Red leaf" } },               // control
     { ...good, px: rows().slice(0, 15) },                                // 15 rows
     { ...good, px: [...rows().slice(0, 15), "01230123012301230"] },      // 17 columns
     { ...good, px: [...rows().slice(0, 15), "0123012301230124"] },       // a 4
-    { name: "红叶", line: "一片叶子" },                                   // no px
-    { name: "红叶", px: rows() },                                        // no line
+    { name: good.name, line: good.line },                                // no px
+    { name: good.name, px: rows() },                                     // no line
     { ...good, name: 7 },
     { ...good, px: "0123" },
     { ...good, px: [...rows().slice(0, 15), 123] },
@@ -478,7 +506,11 @@ test("validateSouvenir: each bad kind is refused", () => {
 });
 
 test("validateSouvenir: pictographs, symbols, invisibles and lone surrogates are refused", () => {
-  const good = { name: "红叶", line: "一片叶子", px: rows() };
+  const good = {
+    name: { zh: "红叶", en: "Red leaf" },
+    line: { zh: "一片叶子", en: "One leaf" },
+    px: rows()
+  };
   const bad = [
     ["watch", "\u231A"], ["alarm", "\u23F0"], ["hourglass", "\u231B"], ["wavy dash", "\u3030"],
     ["left-right arrow", "\u2194"], ["return arrow", "\u21A9"], ["small square", "\u25AA"],
@@ -490,8 +522,9 @@ test("validateSouvenir: pictographs, symbols, invisibles and lone surrogates are
     ["lone high surrogate", "\uD800"], ["lone low surrogate", "\uDC00"]
   ];
   for (const [kind, ch] of bad) {
-    assert.equal(P.validateSouvenir({ ...good, name: "叶" + ch }), null, kind + " in the name");
-    assert.equal(P.validateSouvenir({ ...good, line: "叶" + ch + "子" }), null, kind + " in the line");
+    assert.equal(P.validateSouvenir({ ...good, name: { ...good.name, zh: "叶" + ch } }), null, kind + " in the Chinese name");
+    assert.equal(P.validateSouvenir({ ...good, line: { ...good.line, zh: "叶" + ch + "子" } }), null, kind + " in the Chinese line");
+    assert.equal(P.validateSouvenir({ ...good, name: { ...good.name, en: "Leaf" + ch } }), null, kind + " in the English name");
   }
 });
 
@@ -504,6 +537,14 @@ test("builtinSouvenir: deterministic, avoids recent names, repeats only when it 
   assert.equal(P.builtinSouvenir(P.rng(5), [], null), null);
   /* a numeric seed is accepted too */
   assert.deepEqual(P.builtinSouvenir(5, [], table), P.builtinSouvenir(P.rng(5), [], table));
+  /* a bilingual table is avoided by either language the box showed */
+  const pair = [
+    { name: { zh: "红叶", en: "Red leaf" } },
+    { name: { zh: "贝壳", en: "Shell" } },
+    { name: { zh: "纽扣", en: "Button" } }
+  ];
+  const picked = P.builtinSouvenir(P.rng(5), ["红叶", "Button"], pair);
+  assert.equal(picked.name.en, "Shell", "both languages count as recent");
 });
 
 /* ---------- the AI prompt ---------- */
@@ -525,6 +566,10 @@ test("aiPrompt: uses only the allowed facts; no notes, diary, calendar names, bo
   assert.ok(s.includes("read") && s.includes("wrote a diary"));
   assert.ok(s.includes("JSON"));
   assert.ok(s.includes("寒露"));
+  const raw = r.messages.map((m) => m.content).join("\n");
+  assert.ok(raw.includes('"name":{"zh"') && raw.includes('"line":{"zh"'), "the schema asks for both languages");
+  assert.ok(raw.includes("16 characters at most") && raw.includes("80 characters at most"));
+  assert.ok(raw.includes("中文只用汉字") && raw.includes("不要其他语言"));
   /* the English prompt is English and still carries the same facts */
   const en = P.aiPrompt({ ...ctx, lang: "en" });
   const es = JSON.stringify(en.messages);
@@ -532,6 +577,9 @@ test("aiPrompt: uses only the allowed facts; no notes, diary, calendar names, bo
   assert.equal(es.split("serendipity").length - 1, 1);
   assert.ok(es.includes("Reply with JSON only"));
   assert.ok(!es.includes("请只输出"));
+  const eraw = en.messages.map((m) => m.content).join("\n");
+  assert.ok(eraw.includes('"name":{"zh"') && eraw.includes('"line":{"zh"'));
+  assert.ok(eraw.includes("both") || eraw.includes("Both"));
 });
 
 test("aiPrompt: a word with whitespace or a newline is dropped; other fields collapse whitespace", () => {

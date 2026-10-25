@@ -302,7 +302,7 @@ test("drawRoom: night and season change only the window", () => {
 
 test("poses: every standard pose exists for every mark combination, 16 x 16, only .kdmp", () => {
   assert.deepEqual(Object.keys(A.POSE_NAMES).sort(), ["front", "side"]);
-  assert.deepEqual([...A.POSE_NAMES.front], ["idle", "happy", "sad", "angry", "sulk", "blink", "jump", "fall", "catch"]);
+  assert.deepEqual([...A.POSE_NAMES.front], ["idle", "happy", "sad", "angry", "sulk", "surprised", "blink", "jump", "fall", "catch"]);
   assert.deepEqual([...A.POSE_NAMES.side], ["walk1", "walk2", "jump", "flap1", "flap2"]);
   for (const view of Object.keys(A.POSE_NAMES)) {
     assert.deepEqual(Object.keys(P.poses[view]).sort(), [...A.POSE_NAMES[view]].sort(), `the pack provides every ${view} pose`);
@@ -347,7 +347,7 @@ test("baby and child: moods, idle and every game pose use their own small body",
     const pose = (name) => A.stagePose(P, stage, marks, "front", name);
     const idle = pose("idle");
     assertGrid(stage + " idle", idle, 16, 16);
-    for (const name of ["sad", "angry", "sulk", "blink", "happy", "jump", "fall", "catch", "walk1", "walk2"]) {
+    for (const name of ["sad", "angry", "sulk", "blink", "happy", "surprised", "jump", "fall", "catch", "walk1", "walk2"]) {
       const g = pose(name);
       assertGrid(stage + " " + name, g, 16, 16);
       assert.notDeepEqual(g, idle, stage + " " + name + " differs from idle");
@@ -370,6 +370,67 @@ test("mirror: reverses every row, twice is the original", () => {
   for (let r = 0; r < 16; r++) assert.equal(m[r], [...g[r]].reverse().join(""), `row ${r}`);
   assert.deepEqual(A.mirror(m), g);
   assert.equal(A.mirror(null), null);
+});
+
+test("used frames: every name the program and the games ask for draws on every stage and adult form", () => {
+  const marks = [
+    { ant: "ball", pat: "dot", eye: "dot" },
+    { ant: "stick", pat: "plain", eye: "bar" },
+    { ant: "fork", pat: "trace", eye: "big" },
+    { ant: "bent", pat: "stripe", eye: "dot" }
+  ];
+  /* one exported list, so a new face or game pose cannot silently miss a stage */
+  for (const name of ["idle", "idle1", "idle2", "blink", "eat1", "eat2", "happy", "sleep", "wait",
+    "surprised", "sad", "angry", "sulk", "walk1", "walk2", "jump", "fall", "catch", "hold",
+    "flap1", "flap2", "look", "lookL", "lookR", "sit"]) {
+    assert.ok(A.FRAME_NAMES.includes(name), "FRAME_NAMES has " + name);
+  }
+  for (const stage of ["baby", "child"]) {
+    for (const m of marks) for (const name of A.FRAME_NAMES) for (const view of ["front", "side"]) {
+      const g = A.stagePose(P, stage, m, view, name);
+      assertGrid(`${stage} ${view}/${name}`, g, 16, 16);
+      assert.ok(A.frameInk(g) >= 20, `${stage} ${view}/${name} has ink: ${A.frameInk(g)}`);
+    }
+  }
+  /* the adult room art is 20 x 20 (the resolution is the owner's separate decision); the game layer stays 16. */
+  for (const form of P.forms) {
+    for (const m of marks) for (const name of A.FRAME_NAMES) {
+      const g = P.adult(form, { ant: m.ant, pat: m.pat, eye: m.eye, face: name });
+      assertGrid(`adult ${form} ${name}`, g, 20, 20);
+      assert.ok(A.frameInk(g) >= 20, `adult ${form} ${name} has ink: ${A.frameInk(g)}`);
+      const game = A.stagePose(P, "adult", m, "front", name);
+      assertGrid(`adult game ${form} ${name}`, game, 16, 16);
+      assert.ok(A.frameInk(game) >= 20, `adult game ${form} ${name} has ink`);
+      const side = A.stagePose(P, "adult", m, "side", name);
+      assertGrid(`adult game side ${form} ${name}`, side, 16, 16);
+      assert.ok(A.frameInk(side) >= 20, `adult game side ${form} ${name} has ink`);
+    }
+  }
+  const home = Object.keys(P.homeIcons);
+  assert.equal(home.length, 5);
+  for (const key of home) {
+    const g = P.homeIcons[key];
+    assertGrid("home " + key, g, 16, 16);
+    assert.ok(A.frameInk(g) >= 20, "home " + key + " has ink: " + A.frameInk(g));
+  }
+  for (const key of Object.keys(P.icons)) {
+    const g = P.icons[key];
+    assertGrid("icon " + key, g, 8, 8);
+    assert.ok(A.frameInk(g) > 0, "icon " + key + " is visible");
+  }
+});
+
+test("adult forms take the pet's own face vocabulary, moods and sleep included", () => {
+  for (const form of P.forms) {
+    const neutral = P.adult(form, { face: "idle1" });
+    for (const face of ["happy", "sleep", "wait", "surprised", "blink", "sad", "angry", "sulk"]) {
+      const g = P.adult(form, { face });
+      assertGrid(`adult ${form} ${face}`, g, 20, 20);
+      assert.notDeepEqual(g, neutral, `${form} ${face} is not the neutral face`);
+    }
+    assert.notDeepEqual(P.adult(form, { face: "sad" }), P.adult(form, { face: "angry" }));
+    assert.notDeepEqual(P.adult(form, { face: "angry" }), P.adult(form, { face: "sulk" }));
+  }
 });
 
 test("blit and darken are bounded and map the four tones", () => {

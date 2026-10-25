@@ -190,7 +190,7 @@ function frames(o){
  *   side:  walk1, walk2, jump, flap1, flap2      (all facing right; the left view is mirror(grid))
  * Every pose is a 16 x 16 grid of .kdmp. A pack's poses are functions of the rolled marks, so the antenna, pattern
  * and eyes show in every pose. The side view is ready for later side games; no side game ships yet. */
-var POSE_NAMES={front:["idle","happy","sad","angry","sulk","blink","jump","fall","catch"],side:["walk1","walk2","jump","flap1","flap2"]};
+var POSE_NAMES={front:["idle","happy","sad","angry","sulk","surprised","blink","jump","fall","catch"],side:["walk1","walk2","jump","flap1","flap2"]};
 /* the chip's side, facing right: one eye near the snout, the body's pins as legs, the same antenna and marks */
 var SIDE_BASE=[
 "................",
@@ -267,6 +267,7 @@ function frontPose(marks,name){
   else if(name==="sad") g=frames({ant:o.ant,pat:o.pat,eye:o.eye,face:"sad"});
   else if(name==="angry") g=frames({ant:o.ant,pat:o.pat,eye:o.eye,face:"angry"});
   else if(name==="sulk") g=frames({ant:o.ant,pat:o.pat,eye:o.eye,face:"sulk"});
+  else if(name==="surprised") g=frames({ant:o.ant,pat:o.pat,eye:o.eye,face:"surprised"});
   else if(name==="blink") g=frames({ant:o.ant,pat:o.pat,eye:o.eye,face:"blink"});
   else if(name==="jump"){
     g=build({ant:o.ant,pat:o.pat,eye:o.eye,face:"happy",mouth:"open"});
@@ -451,6 +452,8 @@ function miniMouth(a,c,stage,mouth){
 /* name -> the face and the one-pixel movement that makes the pose read at 16 px (the standard pose vocabulary) */
 var MINI_POSE={
   idle:{}, idle1:{}, idle2:{mouth:"smile",down:1},
+  /* the room's idle varieties: they still need a frame, even if they only differ by a shift later */
+  look:{}, lookL:{}, lookR:{}, sit:{mouth:"smile",down:1},
   blink:{face:"closed"}, eat1:{mouth:"open"}, eat2:{mouth:"chew"},
   happy:{face:"happy",mouth:"open"}, sleep:{face:"closed",mouth:"none"},
   wait:{face:"down",mouth:"flat"}, surprised:{face:"wow",mouth:"o"},
@@ -526,11 +529,28 @@ var ADULT={
 function adult(id,o){
   var A=ADULT[id]||ADULT.plain, x={};
   if(o) for(var k in o) if(Object.prototype.hasOwnProperty.call(o,k)) x[k]=o[k];
+  /* An action name from the pet's vocabulary carries its own eyes, mouth, legs and posture. Translating it here
+     keeps every adult form's moods and sleep/meal faces visible, instead of silently drawing the neutral face. */
+  var named=x.face, af=named && FACE[named];
+  if(af){
+    x.face=af.face || "open";
+    if(af.mouth) x.mouth=af.mouth;
+    if(af.legs) x.legs=af.legs;
+    if(af.squat) x.squat=af.squat;
+    if(af.ant) x.ant=af.ant;
+  }
   if(A.mouth) x.mouth=A.mouth;
   var moodFace=x.face==="sad"||x.face==="angry"||x.face==="sulk";
-  if(A.face==="none" && !moodFace) x.face="none";
+  /* The book form's "none" only means "no plain open eyes under the glasses": a blink, sleep, or any expression
+     still draws its own eyes (the earlier code replaced them with the neutral two dots, so those faces vanished). */
+  var plainFace=!x.face || x.face==="open";
+  if(A.face==="none" && !moodFace && plainFace) x.face="none";
   var g=rows(build(x));
-  if(A.face==="none" && !moodFace){ setc(g,6,5,"k"); setc(g,6,10,"k"); }
+  if(A.face==="none" && x.face==="none"){ setc(g,6,5,"k"); setc(g,6,10,"k"); }
+  if(A.face==="none" && (x.face==="closed" || x.face==="sleep")){
+    /* the glasses cover the built-in closed-eye line; one row lower it still reads as shut eyes */
+    setc(g,7,5,"k"); setc(g,7,10,"k");
+  }
   if(A.clearAnt){ g[0]=BLANK16.split(""); g[1]=BLANK16.split(""); }
   var out=[], r, c;
   for(r=0;r<20;r++) out.push(blankGrid(20,1,".")[0].split(""));
@@ -1164,6 +1184,21 @@ var CHIP_PACK={
 };
 var PACKS={chip:CHIP_PACK};
 
+/* Every frame name the program and the play packs ask for, in one list the tests can enumerate. The room uses the
+   faces, the games use the standard front and side poses, and the idle varieties name a mood that is then shifted. */
+var FRAME_NAMES=["idle","idle1","idle2","blink","eat1","eat2","happy","sleep","wait","surprised","sad","angry",
+  "sulk","walk1","walk2","jump","fall","catch","hold","flap1","flap2","look","lookL","lookR","sit"];
+/* Ink plus dark pixels: the minimum that makes a 16 x 16 frame a visible pet rather than an empty box. */
+function frameInk(g){
+  var n=0, r, c, line;
+  if(!g) return 0;
+  for(r=0;r<g.length;r++){
+    line=String(g[r]||"");
+    for(c=0;c<line.length;c++) if(line.charAt(c)==="k" || line.charAt(c)==="d") n++;
+  }
+  return n;
+}
+
 window.LopdaPetArt={
   PACKS:PACKS,
   TONES:TONES,
@@ -1181,6 +1216,8 @@ window.LopdaPetArt={
   rows:rows,
   join:join,
   POSE_NAMES:POSE_NAMES,
+  FRAME_NAMES:FRAME_NAMES,
+  frameInk:frameInk,
   pose:pose,
   stagePose:stagePose,
   mirror:mirror

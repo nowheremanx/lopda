@@ -118,6 +118,31 @@ test("bounce: a paddle under the ball returns it", () => {
   assert.equal(s.done, false);
 });
 
+test("bounce: the pet on top never bobs; it hops once when the ball comes back from the paddle", () => {
+  const g = game("bounce"), s = g.init(7), base = s.petBaseY, W = Play.W;
+  s.ball = { x: s.paddleX + 6, y: s.paddleY - 4, vx: 0, vy: 1 };
+  const ys = [];
+  let hops = 0;
+  for (let i = 0; i < 400 && !s.done; i++) {
+    if (s.ball && s.ball.vy > 0) s.paddleX = Math.max(1, Math.min(W - 2 - s.paddleW, s.ball.x - 7));
+    const before = s.hop;
+    g.step(s, { left: false, right: false, a: false, press: { left: false, right: false, a: false } }, 50);
+    if (s.hop > before) hops++;
+    if (!s.hop) assert.equal(s.petY, base, "the pet is on its base row outside the hop");
+    else assert.ok(s.petY >= base - 2 && s.petY <= base, "the hop is two pixels at most");
+    ys.push(s.petY);
+  }
+  assert.ok(hops > 0, "the ball came back from the paddle and the pet hopped");
+  assert.ok(ys.includes(base) && ys.includes(base - 2), "the hop rises and comes back down");
+  /* the resting row is much more common than the hop: no walk bob */
+  assert.ok(ys.filter((y) => y === base).length > ys.length / 2);
+  /* a top return (the pet sends the ball down) does not trigger another hop */
+  const h = game("bounce"), t = h.init(8);
+  t.ball = { x: t.petX + 6, y: t.petY + 15, vx: 0, vy: -1 };
+  h.step(t, { left: false, right: false, a: false, press: {} }, 50);
+  assert.equal(t.hop, 0, "only the paddle's return makes it hop");
+});
+
 test("catch: the pet walks 3 px a tick and things come every 0.7 to 1.0 seconds", () => {
   const g = game("catch"), s = g.init(3);
   s.next = 999;
@@ -129,35 +154,118 @@ test("catch: the pet walks 3 px a tick and things come every 0.7 to 1.0 seconds"
   assert.ok(s.next >= 14 && s.next <= 20, "spawn gap is 14-20 ticks: " + s.next);
 });
 
-/* A simple steering bot: rising, aim at the nearest platform above; falling, at the nearest one below the feet. */
-function climbBot(seed) {
-  const g = game("climb"), s = g.init(seed);
+/* The bots the owner's numbers are measured with. The target is the platform directly above the one just left,
+   so a jump keeps its aim after it rises past the bar; the steering is the plain "move toward its centre" rule.
+   A delayed bot sees the platforms and the pet's phase 6 ticks (300 ms) late. */
+function climbSnap(s) {
+  return JSON.parse(JSON.stringify({ pet: s.pet, plats: s.plats }));
+}
+function climbTarget(s) {
+  const C = Play.CLIMB, feet = s.pet.y + C.FEET_BOTTOM;
+  let base = null;
+  for (const p of s.plats) if (p.y >= feet && (!base || p.y < base.y)) base = p;
+  const ref = base ? base.y : feet;
+  let target = null;
+  for (const p of s.plats) if (p.y < ref && (!target || p.y > target.y)) target = p;
+  if (!target) for (const p of s.plats) if (p.y >= feet && (!target || p.y < target.y)) target = p;
+  return target;
+}
+function movingX(p, ticks) {
+  if (!p.mv) return p.x;
+  let x = p.mv.x, dir = p.mv.dir, t = p.mv.t;
+  for (let k = 0; k < ticks; k++) {
+    t++;
+    if (t % 3) continue;
+    x += dir;
+    if (x >= p.mv.base + p.mv.amp) { x = p.mv.base + p.mv.amp; dir = -1; }
+    else if (x <= p.mv.base - p.mv.amp) { x = p.mv.base - p.mv.amp; dir = 1; }
+  }
+  return x;
+}
+function climbAim(snap, currentX) {
+  if (!snap || !snap.pet) return 0;
+  const target = climbTarget(snap);
+  if (!target) return 0;
+  /* ticks until the feet come down on the target's row */
+  let y = snap.pet.y, vy = snap.pet.onPlat ? -6 : snap.pet.vy, t = 0;
+  for (; t < 50; t++) { vy = Math.min(5, vy + 1); y += vy; if (vy > 0 && y >= target.y) break; }
+  const px = movingX(target, t + 1);
+  const want = Math.max(1, Math.min(64, px + target.w / 2 - 1));
+  const cx = currentX + 8, tx = want + 8;
+  return tx > cx ? 1 : tx < cx ? -1 : 0;
+}
+function climbRun(g, seed, delay) {
+  const s = g.init(seed), history = [];
   for (let i = 0; i < 4000 && !s.done; i++) {
-    const bottom = s.pet.y + Play.CLIMB.FEET_BOTTOM;
-    let target = null;
-    for (const p of s.plats) {
-      if (s.pet.vy < 0) { if (p.y < bottom - 1 && (!target || p.y > target.y)) target = p; }
-      else if (p.y >= bottom && (!target || p.y < target.y)) target = p;
-    }
-    let dir = 0;
-    if (target) {
-      const tx = target.x + target.w / 2, cx = s.pet.x + 8;
-      if (tx > cx + 1) dir = 1; else if (tx < cx - 1) dir = -1;
-    }
+    const snap = delay ? history[Math.max(0, history.length - delay)] : climbSnap(s);
+    const dir = climbAim(snap, s.pet.x);
+    history.push(climbSnap(s));
+    g.step(s, { left: dir < 0, right: dir > 0, a: false, press: { left: false, right: false, a: false } }, 50);
+  }
+  return s;
+}
+function randomClimb(g, seed) {
+  const s = g.init(seed);
+  let st = (seed * 9973 + 1) >>> 0, dir = 0, hold = 0;
+  for (let i = 0; i < 4000 && !s.done; i++) {
+    st = (Math.imul(st, 1664525) + 1013904223) >>> 0;
+    if (hold <= 0) { dir = ((st >>> 16) & 1) ? 1 : -1; hold = 3 + ((st >>> 8) % 18); }
+    hold--;
     g.step(s, { left: dir < 0, right: dir > 0, a: false, press: { left: false, right: false, a: false } }, 50);
   }
   return s;
 }
 
-test("climb: a steering bot reaches height 30 in at least 80% of 200 seeds", () => {
-  let reached = 0;
-  const heights = [];
-  for (let seed = 1; seed <= 200; seed++) {
-    const s = climbBot(seed);
-    heights.push(s.height);
-    if (s.height >= 30) reached++;
+test("climb: the difficulty curve is easy for six platforms, then narrower, higher and sometimes moving", () => {
+  const g = game("climb"), inp = { left: false, right: false, a: false, press: {} };
+  function chain(gen, seed) {
+    const s = g.init(seed);
+    s.moved = true; s.gen = gen;              /* jump straight to that point of the curve */
+    g.step(s, inp, 50);
+    return s.plats.slice(1);
   }
-  assert.ok(reached >= 160, `only ${reached}/200 seeds reached 30; heights ${heights.slice(0, 12).join(",")}`);
+  const easy = chain(0, 7);
+  assert.ok(easy.length >= 2);
+  for (const p of easy) {
+    assert.ok(p.w >= 10 && p.w <= 18, "easy width " + p.w);
+    assert.ok(p.y < 46);
+  }
+  for (let i = 1; i < easy.length; i++) {
+    const gap = easy[i - 1].y - easy[i].y;
+    assert.ok(gap >= Play.CLIMB.GAP_MIN && gap <= Play.CLIMB.GAP_MAX, "easy gap " + gap);
+  }
+  const late = chain(40, 7);
+  assert.ok(late.length >= 2);
+  for (const p of late) assert.equal(p.w, Play.CLIMB.WIDTH_HARD, "the top is 6 px wide");
+  assert.ok(46 - late[0].y >= 11, "the first vertical gap is near the jump's limit");
+  let sawMover = false;
+  for (let seed = 1; seed <= 20 && !sawMover; seed++) sawMover = chain(40, seed).some((p) => !!p.mv);
+  assert.ok(sawMover, "some high platforms move left/right");
+  const all = late.slice();
+  for (let seed = 1; seed <= 10; seed++) all.push(...chain(40, seed));
+  for (const p of all) {
+    assert.ok(p.w >= Play.CLIMB.WIDTH_HARD && p.w <= 12, "width is in the hard range: " + p.w);
+    if (p.mv) assert.ok(p.mv.amp >= 2 && p.mv.amp <= 4, "a mover slides a few pixels: " + p.mv.amp);
+  }
+});
+
+test("climb: 200 seeds — a perfect steering bot caps, a 300 ms bot falls in 40-70%, random input in >90%", () => {
+  const g = game("climb");
+  let perfectCap = 0, delayedFalls = 0, randomFalls = 0;
+  const randomScores = [];
+  for (let seed = 1; seed <= 200; seed++) {
+    if (climbRun(g, seed, 0).tick >= 900) perfectCap++;
+    const delayed = climbRun(g, seed, 6);       /* 300 ms at a 50 ms tick */
+    if (!(delayed.tick >= 900)) delayedFalls++;
+    const random = randomClimb(g, seed);
+    randomScores.push(random.score);
+    if (!(random.tick >= 900)) randomFalls++;
+  }
+  assert.ok(perfectCap >= 190, `perfect bot capped ${perfectCap}/200, wanted at least 190`);
+  assert.ok(delayedFalls >= 80 && delayedFalls <= 140, `delayed bot fell ${delayedFalls}/200, wanted 80-140`);
+  assert.ok(randomFalls >= 181, `random bot fell ${randomFalls}/200, wanted more than 180`);
+  randomScores.sort((a, b) => a - b);
+  assert.ok(randomScores[100] < 30, "random median score " + randomScores[100]);
 });
 
 test("climb: every generated platform pair is reachable (<= jump height - 2 and <= the air-time run)", () => {
@@ -213,7 +321,7 @@ test("reactions: a small pure table per game names the pose of the moment", () =
   assert.equal(R("catch", "miss", { misses: 2 }), "sad");
   assert.equal(R("bounce", "return", { rally: 4 }), null, "a short rally keeps the walk");
   assert.equal(R("bounce", "return", { rally: 5 }), "happy", "a long rally gets a smile");
-  assert.equal(R("bounce", "miss", { misses: 1 }), "fall");
+  assert.equal(R("bounce", "miss", { misses: 1 }), "surprised", "the ball passed: a surprised face");
   assert.equal(R("climb", "record", { height: 30 }), "happy");
   assert.equal(R("climb", "blink", {}), "blink");
   assert.equal(R("climb", "land", {}), null);
