@@ -748,7 +748,7 @@
       "studio.tour.play": "Press ▸ to hear this tape.",
       "studio.tour.grid": "These 16 squares are one bar: a row is a beat, left to right, top to bottom. Lit squares play.",
       "studio.tour.cell": "Tap an empty square to add a kick. Tap it again to remove it.",
-      "studio.tour.drums": "Each drum has its own 16 squares; together they make the beat. Try another one.",
+      "studio.tour.drums": "Four drums, 16 squares each; together they make the beat. Try another one.",
       "studio.tour.tempo": "− and + set the speed; ≡ has the kit and a new tape. HOME leaves any time; it saves itself.",
 
       "boot.nostore": "This browser won't keep data. It's lost when the page closes."

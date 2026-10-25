@@ -317,13 +317,30 @@ function build(){
 }
 function layout(){
   if(!visible()) return;
-  var board=$("studio-board"), grid=$("studio-grid");
+  var board=$("studio-board"), grid=$("studio-grid"), view=$("v-studio");
   if(!board || !grid) return;
   var w=board.clientWidth-16, h=board.clientHeight-12;
   if(w<=0 || h<=0) return;
   var gap=4, cell=Math.floor((Math.min(w,h)-gap*3)/4);
   if(cell<56) cell=56;
   var total=cell*4+gap*3;
+  /* a grid step's bubble sits above the grid: shrink the grid just enough to keep the bubble
+     clear of the bar, never below the 56 px cell floor (docs/design/studio.md 11.6) */
+  var step=T.tour && T.tour.steps[T.tour.i], box=T.tour && T.tour.box;
+  if(step && step.room && box && box.offsetHeight>0){
+    var bar=view.querySelector(".st-bar");
+    if(bar){
+      var vr=view.getBoundingClientRect(), br=bar.getBoundingClientRect(), bd=board.getBoundingClientRect();
+      var need=box.offsetHeight+14;      /* the 10 px gap above the grid and 4 px below the bar */
+      var maxTotal=Math.floor(board.clientHeight-2*(br.bottom+need-bd.top));
+      var floor=56*4+gap*3;
+      if(maxTotal<total){
+        cell=Math.floor((Math.max(floor,maxTotal)-gap*3)/4);
+        if(cell<56) cell=56;
+        total=cell*4+gap*3;
+      }
+    }
+  }
   grid.style.width=total+"px";
   grid.style.height=total+"px";
   grid.style.gridTemplateColumns="repeat(4,"+cell+"px)";
@@ -372,19 +389,18 @@ function renderAll(){
   build();
   var v=$("v-studio"); if(v) v.setAttribute("data-loaded",T.loaded?"true":"false");
   renderBar(); renderTabs(); renderGrid(); renderSheet();
-  if(T.tour) tourPlace();
 }
 /* ---------- the tour ----------
    Not an LP interface: only this program uses tour(); docs/design/studio.md 11.6. One step is
-   {el:function(){ return element }, text:"studio.tour.x", done:"play"|"toggle"|"drum"|null}. The screen reports
-   the named event with tourEvent(); a null done shows a Next button (Done on the last step). Every step skips.
-   Nothing is covered: the target gets an ink outline and a speech bubble beside it, and the rest of the screen
-   keeps working (the beat can be stopped, the menu opened). A tap elsewhere never ends the tour. */
+   {el:function(){ return element }, text:"studio.tour.x", done:"play"|"toggle"|"drum"|null, room?:true}. The screen
+   reports the named event with tourEvent(); a null done shows a Next button (Done on the last step). Every step skips.
+   room marks a step whose bubble needs space above the grid. Nothing is covered: the target gets an ink outline and
+   a speech bubble beside it, and the rest of the screen keeps working. A tap elsewhere never ends the tour. */
 function rhythmTour(){
   return [
     {el:function(){ return $("studio-play"); }, text:"studio.tour.play", done:"play"},
-    {el:function(){ return $("studio-grid"); }, text:"studio.tour.grid", done:null},
-    {el:function(){ return $("studio-grid"); }, text:"studio.tour.cell", done:"toggle"},
+    {el:function(){ return $("studio-grid"); }, text:"studio.tour.grid", done:null, room:true},
+    {el:function(){ return $("studio-grid"); }, text:"studio.tour.cell", done:"toggle", room:true},
     {el:function(){ return $("studio-tabs"); }, text:"studio.tour.drums", done:"drum"},
     {el:function(){ return $("studio-tempo"); }, text:"studio.tour.tempo", done:null}
   ];
@@ -431,7 +447,7 @@ function tourShow(i){
   /* an action already done when the step starts (playing when step 1 shows) offers Next instead */
   var met=step.done==="play" && T.playing;
   t.next.hidden=!!step.done && !met;
-  tourPlace();
+  layout();                     /* grid steps make room for the bubble; others take the normal size back */
 }
 /* bubble above or below the target, against the side with more room inside the view; the triangle points
    at the target's centre and the bubble never sits over the target */
@@ -491,6 +507,7 @@ function tourEnd(seen){
     T.meta.toured[t.screen]=true;
     saveMeta();
   }
+  if(visible()) layout();        /* the grid takes its normal size back */
 }
 /* ---------- sheets: the menu and the new-tape question ---------- */
 function openSheet(name){ T.sheet=name; renderSheet(); }
@@ -510,6 +527,10 @@ function renderSheet(){
   if(!T.built) return;
   var sh=$("studio-sheet");
   sh.hidden=!T.sheet;
+  /* a sheet owns the screen while it is open: the bubble and the frame step aside, then come back */
+  var view=$("v-studio");
+  if(view) view.classList.toggle("st-sheet-open",!!T.sheet);
+  if(T.tour) layout();
   sh.textContent="";
   if(!T.sheet) return;
   var head=el("p","sheet-title");

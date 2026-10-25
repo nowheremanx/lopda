@@ -225,8 +225,8 @@ test("studio synth: dispose stops later hits; unknown kit or drum is ignored", {
 
 /* ---------------- the rhythm screen (runtime/apps/studio.js) ---------------- */
 /* the runtime at a chosen viewport; each page is its own browser context, so its store starts empty */
-async function rtPage(t, viewport) {
-  const p = await browser.newPage({ viewport: viewport || { width: 390, height: 844 }, locale: "zh-CN", hasTouch: true });
+async function rtPage(t, viewport, locale) {
+  const p = await browser.newPage({ viewport: viewport || { width: 390, height: 844 }, locale: locale || "zh-CN", hasTouch: true });
   const errors = [];
   p.on("pageerror", (e) => errors.push(e.message));
   p.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
@@ -460,26 +460,26 @@ const touredRhythm = (p) => p.evaluate(async () => {
   const doc = await LopdaPlatform.db.doc("data/users/local/studio").get();
   return !!(doc.exists && doc.data().toured && doc.data().toured.rhythm === true);
 });
-async function firstOpenTour(p) {
+async function firstOpenTour(p, locale = "zh-CN") {
   await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
-  await openTile(p);
+  await openTile(p, locale);
   await p.waitForSelector("#v-studio .st-tour-box");
 }
 const tourHi = (p) => p.locator("#v-studio .st-tour-hi").getAttribute("id");
 /* the five steps, visited with the same taps a player uses; visits get the step number */
-async function walkTour(p, visit) {
+async function walkTour(p, visit, en) {
   await visit(0);
   await p.click("#studio-play");
-  await waitTour(p, /这 16 格是一小节/);
+  await waitTour(p, en ? /These 16 squares/ : /这 16 格是一小节/);
   await visit(1);
   await p.locator("#v-studio .st-tour-next").click();
-  await waitTour(p, /点一个空格/);
+  await waitTour(p, en ? /Tap an empty square/ : /点一个空格/);
   await visit(2);
   await p.locator('#v-studio .st-cell[data-step="1"]').click();
-  await waitTour(p, /四只鼓各有自己的 16 格/);
+  await waitTour(p, en ? /Four drums/ : /四只鼓各有自己的 16 格/);
   await visit(3);
   await p.locator('#studio-tabs .st-tab[data-drum="snare"]').click();
-  await waitTour(p, /调快慢/);
+  await waitTour(p, en ? /set the speed/ : /调快慢/);
   await visit(4);
 }
 
@@ -552,26 +552,75 @@ test("studio tour: an untargeted + works at step 2 and does not end the tour", {
   assert.deepEqual(errors, []);
 });
 
-test("studio tour: the bubble stays outside the target at 375x667 and 390x844, every step", { skip, timeout: 120000 }, async (t) => {
-  for (const viewport of [{ width: 375, height: 667 }, { width: 390, height: 844 }]) {
-    const { p, errors } = await rtPage(t, viewport);
-    await firstOpenTour(p);
-    await walkTour(p, async (i) => {
-      const m = await p.evaluate(() => {
-        const b = document.querySelector("#v-studio .st-tour-box").getBoundingClientRect();
-        const t = document.querySelector("#v-studio .st-tour-hi").getBoundingClientRect();
-        const v = document.querySelector("#v-studio").getBoundingClientRect();
-        return { b: { l: b.left, r: b.right, t: b.top, b: b.bottom }, t: { l: t.left, r: t.right, t: t.top, b: t.bottom }, v: { l: v.left, r: v.right, t: v.top, b: v.bottom } };
-      });
-      const where = `step ${i + 1} at ${viewport.width}x${viewport.height}`;
-      assert.ok(m.b.b <= m.t.t || m.b.t >= m.t.b, `${where}: the bubble is above or below the target (${JSON.stringify(m)})`);
-      assert.ok(m.b.l >= m.v.l + 4 - 0.5 && m.b.r <= m.v.r - 4 + 0.5, `${where}: the bubble is inside the view with 4 px margins (${JSON.stringify(m)})`);
-    });
-    assert.equal(await touredRhythm(p), false, "the walk itself did not end the tour");
-    await p.keyboard.press("z");
-    await p.waitForSelector("#v-studio .st-tour-box", { state: "detached" });
-    assert.deepEqual(errors, []);
+const intersects = (a, b) => a.l < b.r && a.r > b.l && a.t < b.b && a.b > b.t;
+
+test("studio tour: the bubble clears the bar and the target, and the play button stays reachable, both languages", { skip, timeout: 180000 }, async (t) => {
+  for (const viewport of [{ width: 375, height: 667 }, { width: 430, height: 932 }]) {
+    for (const locale of ["zh-CN", "en-US"]) {
+      const { p, errors } = await rtPage(t, viewport, locale);
+      await firstOpenTour(p, locale);
+      await walkTour(p, async (i) => {
+        const m = await p.evaluate(() => {
+          const rect = (e) => { const r = e.getBoundingClientRect(); return { l: r.left, r: r.right, t: r.top, b: r.bottom }; };
+          const view = document.querySelector("#v-studio");
+          const bar = view.querySelector(".st-bar");
+          const box = document.querySelector("#v-studio .st-tour-box");
+          const hi = document.querySelector("#v-studio .st-tour-hi");
+          const play = document.querySelector("#studio-play").getBoundingClientRect();
+          const hit = document.elementFromPoint(play.left + play.width / 2, play.top + play.height / 2);
+          return {
+            b: rect(box), t: rect(hi), bar: rect(bar), v: rect(view), inBar: bar.contains(hi),
+            play: !!(hit && hit.closest && hit.closest("#studio-play")), hit: hit && (hit.id || hit.tagName),
+          };
+        });
+        const where = `step ${i + 1} at ${viewport.width}x${viewport.height} ${locale}`;
+        assert.ok(m.b.b <= m.t.t || m.b.t >= m.t.b, `${where}: the bubble is above or below the target (${JSON.stringify(m)})`);
+        assert.equal(intersects(m.b, m.t), false, `${where}: the bubble never covers the target (${JSON.stringify(m)})`);
+        if (!m.inBar) assert.equal(intersects(m.b, m.bar), false, `${where}: the bubble never covers the bar (${JSON.stringify(m)})`);
+        assert.ok(m.play, `${where}: the play button's centre reaches #studio-play, not ${m.hit} (${JSON.stringify(m)})`);
+        assert.ok(m.b.l >= m.v.l + 4 - 0.5 && m.b.r <= m.v.r - 4 + 0.5, `${where}: the bubble is inside the view with 4 px margins`);
+      }, locale === "en-US");
+      assert.equal(await touredRhythm(p), false, "the walk itself did not end the tour");
+      await p.keyboard.press("z");
+      await p.waitForSelector("#v-studio .st-tour-box", { state: "detached" });
+      assert.deepEqual(errors, []);
+    }
   }
+});
+
+test("studio tour: a sheet hides the tour, is fully tappable, and the bubble comes back on step 5", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await firstOpenTour(p);
+  await walkTour(p, async () => {});
+  assert.match(await tourText(p), /调快慢/, "step 5 is showing");
+  await p.click("#studio-menu");
+  await p.waitForSelector("#studio-sheet:not([hidden])");
+
+  const open = await p.evaluate(() => {
+    const box = document.querySelector("#v-studio .st-tour-box");
+    const hi = document.querySelector("#v-studio .st-tour-hi");
+    const rows = [...document.querySelectorAll("#studio-sheet .lcd-menu li")].map((li) => {
+      const r = li.getBoundingClientRect();
+      const e = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return { text: li.textContent.trim(), hit: !!(e && (e === li || li.contains(e))) };
+    });
+    return { box: getComputedStyle(box).display, outline: getComputedStyle(hi).outlineStyle, z: getComputedStyle(hi).zIndex, rows };
+  });
+  assert.equal(open.box, "none", "the bubble is hidden while the sheet is open");
+  assert.equal(open.outline, "none", "the target's frame is hidden while the sheet is open");
+  assert.equal(open.z, "auto", "the framed target cannot sit over the sheet");
+  assert.ok(open.rows.length >= 3, `the menu has its rows (${JSON.stringify(open.rows)})`);
+  for (const row of open.rows) assert.ok(row.hit, `the row's centre reaches it: ${row.text}`);
+
+  /* 返回 is the last row: its centre closes the sheet */
+  const back = await p.locator("#studio-sheet .lcd-menu li").last().boundingBox();
+  await p.mouse.click(back.x + back.width / 2, back.y + back.height / 2);
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  assert.equal(await tourBox(p).isVisible(), true, "the bubble is back after the sheet closes");
+  assert.match(await tourText(p), /调快慢/, "still on step 5");
+  assert.equal(await tourHi(p), "studio-tempo");
+  assert.equal(await p.locator("#v-studio .st-tour-hi").evaluate((e) => getComputedStyle(e).outlineStyle), "solid", "the frame is back");
+  assert.deepEqual(errors, []);
 });
 
 test("studio tour: every colour it draws is one of the four tones", { skip, timeout: 60000 }, async (t) => {
