@@ -323,10 +323,11 @@ document.addEventListener("visibilitychange",function(){
    (the dictionary stops its own) ---------- */
 var speech=window.LopdaSpeech.host({window:window, volume:function(){ return Math.min(1,(VOL_GAIN[SND.vol]||0)/VOL_GAIN[VOL_MAX]); }});
 document.addEventListener("visibilitychange",function(){ if(document.hidden) speech.stop(); });
-/* every button gets a key click, except the ones that make their own sound */
+/* every button gets a key click, except the ones that make their own sound, and the tape machine's: a click over the
+   music it plays (or a drum it auditions) is noise in a music program (owner 2026-10-25) */
 document.addEventListener("pointerdown",function(e){
   var b=e.target.closest && e.target.closest("button,label.btn,.app");
-  if(!b || b.disabled || b.id==="home-key" || b.closest(".gamepad") || b.closest(".cam-view")) return;
+  if(!b || b.disabled || b.id==="home-key" || b.closest(".gamepad") || b.closest(".cam-view") || b.closest("#v-studio")) return;
   sfx("tap");
 },true);
 
