@@ -1077,11 +1077,9 @@ async function walkNotesTour(p, visit) {
 }
 async function walkChordsTour(p, visit) {
   await visit(0);
-  /* both demo halves hold a chord: select and remove the second, then place it again */
+  /* both demo halves already hold a chord: the first tap selects one and is enough for step 1 */
   await p.locator('.st-chord-cell[data-half="1"]').click();
-  await p.locator('.st-chord-cell[data-half="1"]').click();
-  await p.locator('.st-chord-cell[data-half="1"]').click();
-  await waitTour(p, /六个|These six/);
+  await waitTour(p, /点一个和弦|Tap a chord/);
   await visit(1);
 }
 async function walkSongTour(p, visit) {
@@ -1090,13 +1088,13 @@ async function walkSongTour(p, visit) {
   await waitTour(p, /这一串|This row/);
   await visit(1);
   await p.locator("#studio-chain .st-chain-cell").first().click();
-  await p.locator('#studio-letters .st-letter[data-pat="1"]').click();
+  await p.locator('#studio-letters .st-letter[data-pat="0"]').click();   /* the same letter still counts */
   await waitTour(p, /加一段|adds a slot/);
   await visit(2);
 }
 const NEW_TOURS = [
   { screen: "bass", key: "notes", first: /16 格还是一小节|16 squares are still one bar/, done: /点一个空格|Tap an empty one/ },
-  { screen: "chords", key: "chords", first: /一小节两格|Two squares per bar/, done: /六个|These six/ },
+  { screen: "chords", key: "chords", first: /一小节两格|Two squares per bar/, done: /点一个和弦|Tap a chord/ },
   { screen: "song", key: "song", first: /八段|eight patterns/, done: /加一段|adds a slot/ },
 ];
 
@@ -1130,10 +1128,12 @@ test("studio tour: the note, chord and song tours walk their steps to Done; a re
   await p.waitForSelector("#v-studio .st-tour-box");
   await waitTour(p, NEW_TOURS[1].first);
   assert.deepEqual((await tourTarget(p)).id, "studio-chord-cells", "step 1 frames the two chord cells");
-  assert.equal(await p.locator("#v-studio .st-tour-next").isVisible(), false, "step 1 waits for a chord");
+  assert.match(await tourText(p), /点一格选中它|Tap one to select it/);
+  assert.equal(await p.locator("#v-studio .st-tour-next").isVisible(), false, "step 1 waits for a chord cell to be selected");
   await walkChordsTour(p, async (i) => {
     if (i === 1) {
       assert.deepEqual((await tourTarget(p)).id, "studio-chord-keys", "step 2 frames the chord keys");
+      assert.match(await tourText(p), /点一个和弦换掉它|Tap a chord to change it/);
       assert.equal(await p.textContent("#v-studio .st-tour-next"), "好了", "the last chord step says Done");
     }
   });
@@ -1150,7 +1150,7 @@ test("studio tour: the note, chord and song tours walk their steps to Done; a re
   await walkSongTour(p, async (i) => {
     if (i === 1) {
       assert.deepEqual((await tourTarget(p)).id, "studio-chain", "step 2 frames the chain");
-      assert.equal(await p.locator("#v-studio .st-tour-next").isVisible(), false, "step 2 waits for a letter change");
+      assert.equal(await p.locator("#v-studio .st-tour-next").isVisible(), false, "step 2 waits for a letter tap");
     } else if (i === 2) {
       const target = await tourTarget(p);
       assert.match(target.cls, /st-song-btns/, "step 3 frames the + / − row");
@@ -1161,10 +1161,16 @@ test("studio tour: the note, chord and song tours walk their steps to Done; a re
   await p.waitForSelector("#v-studio .st-tour-box", { state: "detached" });
   assert.equal((await touredAny(p)).song, true, "Done records the song tour");
 
-  /* every screen is quiet now */
+  /* every screen is quiet now, and still quiet after a real page reload */
   for (const tour of NEW_TOURS) {
     await p.click(`#studio-screens .st-scr[data-screen="${tour.screen}"]`);
     assert.equal(await p.locator("#v-studio .st-tour-box").count(), 0, `${tour.screen} does not bring its tour back`);
+  }
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await openTile(p);
+  for (const tour of NEW_TOURS) {
+    await p.click(`#studio-screens .st-scr[data-screen="${tour.screen}"]`);
+    assert.equal(await p.locator("#v-studio .st-tour-box").count(), 0, `${tour.screen} stays quiet after a reload`);
   }
 
   /* ? replays the tour of the screen being shown */
@@ -1234,6 +1240,53 @@ test("studio tour: switching screen mid-tour ends it unseen, starts the new scre
   assert.deepEqual(errors, []);
 });
 
+test("studio tour: the pitch step waits for a key that sets a selected note", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await p.click('#studio-screens .st-scr[data-screen="bass"]');
+  await p.waitForSelector("#v-studio .st-tour-box");
+  await waitTour(p, NEW_TOURS[0].first);
+
+  await p.locator('#studio-grid .st-cell[data-step="5"]').click();
+  await waitTour(p, /8 个键|8 keys/);
+  /* tapping the selected cell again removes it and clears the selection */
+  await p.locator('#studio-grid .st-cell[data-step="5"]').click();
+  assert.equal(await p.locator("#v-studio .st-tour-hi").getAttribute("id"), "studio-keys-wrap", "still on step 2");
+  await p.locator('#studio-keys .st-key[data-deg="3"]').click();
+  assert.match(await tourText(p), /8 个键|8 keys/, "a key tap with no selected note does not advance");
+
+  /* with a note selected again, a key tap sets its pitch and moves on */
+  await p.locator('#studio-grid .st-cell[data-step="5"]').click();
+  await p.locator('#studio-keys .st-key[data-deg="3"]').click();
+  await waitTour(p, /再点一次|selected square/);
+  assert.equal(await p.locator("#v-studio .st-tour-hi").getAttribute("id"), "studio-grid");
+  await p.locator("#v-studio .st-tour-next").click();
+  await p.waitForSelector("#v-studio .st-tour-box", { state: "detached" });
+  assert.deepEqual(errors, []);
+});
+
+test("studio tour: a new tape from a note tour leaves the drums screen untoured and the note tour unseen", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await p.click('#studio-screens .st-scr[data-screen="bass"]');
+  await p.waitForSelector("#v-studio .st-tour-box");
+  await waitTour(p, NEW_TOURS[0].first);
+
+  await p.click("#studio-menu");
+  await p.waitForSelector("#studio-sheet:not([hidden])");
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "新磁带" }).click();
+  await p.waitForSelector("#studio-sheet .st-ask");
+  await p.locator("#studio-sheet .st-ask .btn", { hasText: "确认" }).click();
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+
+  assert.equal(await p.getAttribute("#v-studio", "data-screen"), "drums", "a new tape opens on the drums screen");
+  assert.equal(await p.locator("#v-studio .st-tour-box").count(), 0, "the note tour does not stand on the drums screen");
+  assert.deepEqual((await touredAny(p)).notes, undefined, "the unfinished note tour stays unseen");
+  assert.deepEqual(errors, []);
+});
+
 /* the bubble on every new step: inside the view with its 4 px margin, off its target, and the play button still
    reaches #studio-play (the bar itself may be given up on the 331x359 screen, where there is no room) */
 test("studio tour: every new step's bubble sits inside the view, off its target, and leaves play reachable, two sizes and both languages", { skip, timeout: 240000 }, async (t) => {
@@ -1265,8 +1318,27 @@ test("studio tour: every new step's bubble sits inside the view, off its target,
         assert.ok(m.b.l >= m.v.l + 4 - 0.5 && m.b.r <= m.v.r - 4 + 0.5, `${where(screen, step)}: the bubble is inside the view horizontally`);
         assert.ok(m.b.t >= m.v.t + 4 - 0.5 && m.b.b <= m.v.b - 4 + 0.5, `${where(screen, step)}: the bubble is inside the view vertically`);
         assert.equal(intersects(m.b, m.t), false, `${where(screen, step)}: the bubble never covers the target`);
+        if (screen === "bass") {
+          if (step === 1) assert.ok(m.b.b <= m.t.t + 0.5, `${where(screen, step)}: the key bubble sits above the keys`);
+          else assert.ok(m.b.t >= m.t.b - 0.5, `${where(screen, step)}: the bubble sits below the grid`);
+        }
         assert.ok(m.play, `${where(screen, step)}: the play button's centre reaches #studio-play, not ${m.hit}`);
         assert.equal(m.outline, "solid", `${where(screen, step)}: the target is framed`);
+        if (viewport.width === 375 && viewport.height === 667 && !(screen === "song" && step === 1)) {
+          const nav = await p.evaluate(() => {
+            const reaches = (el) => {
+              const r = el.getBoundingClientRect();
+              const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+              return !!(hit && (hit === el || el.contains(hit)));
+            };
+            return {
+              pat: reaches(document.querySelector("#studio-pat")),
+              tabs: [...document.querySelectorAll("#studio-screens .st-scr")].map(reaches),
+            };
+          });
+          assert.equal(nav.pat, true, `${where(screen, step)}: the pattern letter stays tappable`);
+          assert.deepEqual(nav.tabs, [true, true, true, true, true], `${where(screen, step)}: every screen tab stays tappable`);
+        }
       };
 
       await p.click('#studio-screens .st-scr[data-screen="bass"]');
