@@ -1,5 +1,5 @@
 /*
- * Lo-PDA built-in: settings. A short menu of volume, language, system, permissions, the AI line, backup and restore,
+ * Lo-PDA built-in: settings. A short menu of volume, system sounds, language, system, permissions, the AI line, backup and restore,
  * sharing and about; the long parts have pages of their own.
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  */
@@ -20,11 +20,12 @@ var ROW_ICONS={
   ai:["............","000000000000","0..........0","0..00..000.0","0.0..0..0..0","0.0000..0..0","0.0..0..0..0","0.0..0.000.0","0..........0","000000000000",".00.........",".0.........."],
   backup:["............","......0.....",".....000....","....00000...","......0.....","......0.....",".0000000000.",".0........0.",".0........0.",".0........0.",".0000000000.","............"],
   key:["............","..000.......",".0...0......",".0...0......","..000.......","....0000000.",".........0..",".........0..",".........00.","............","............","............"],
+  sounds:["............","....0000....","...0....0...","...0....0...","..0......0..","..0......0..","..0......0..",".0........0.",".0........0.","000000000000","....0000....",".....00....."],
   share:["............","........000.","........000.",".......0....","......0.....",".000.0......",".0000.......",".000.0......","......0.....",".......0....","........000.","........000."],
   about:["....0000....","..00....00..",".0...00...0.",".0...00...0.","0..........0","0...000....0","0....00....0","0....00....0",".0...00...0.",".0..0000..0.","..00....00..","....0000...."]
 };
 function drawRowIcons(){
-  [["set-vol-ico","volume"],["set-lang-ico","language"],["set-sys-ico","system"],["set-sense-ico","permissions"],
+  [["set-vol-ico","volume"],["set-ui-ico","sounds"],["set-lang-ico","language"],["set-sys-ico","system"],["set-sense-ico","permissions"],
    ["set-ai-ico","ai"],["set-backup-ico","backup"],["set-key-ico","key"],["set-share-ico","share"],["set-about-ico","about"]].forEach(function(p){
     var host=$(p[0]), rows=ROW_ICONS[p[1]];
     if(host && rows){ host.textContent=""; host.appendChild(LP.iconCanvas(rows)); }
@@ -38,6 +39,9 @@ function renderSettings(){
   var max=LP.VOL_MAX;
   $("set-vol").textContent=SND.vol ? "▮".repeat(SND.vol)+"▯".repeat(max-SND.vol) : tr("set.off");
   $("set-vol-down").disabled=SND.vol<=0; $("set-vol-up").disabled=SND.vol>=max;
+  /* the runtime's and the built-ins' clicks and prompts: off on its own, apps and games unchanged */
+  $("set-ui").textContent=tr(SND.uiOn?"set.on":"set.off");
+  $("set-ui").setAttribute("aria-pressed",SND.uiOn?"true":"false");
   $("set-version").textContent=tr("set.version",{v:RUNTIME_VERSION});
   Array.prototype.forEach.call(document.querySelectorAll("[data-lang]"),function(b){
     var on=b.getAttribute("data-lang")===I18N.lang; b.className=on?"btn":"btn ghost"; b.setAttribute("aria-checked",on?"true":"false");
@@ -245,7 +249,7 @@ LP.builtin({id:"set-key", view:"set-key",
 function saveSettings(){
   renderSettings();
   if(S.db){
-    var data={sound:SND.vol>0, volume:SND.vol, lang:I18N.lang};
+    var data={sound:SND.vol>0, volume:SND.vol, ui:SND.uiOn, lang:I18N.lang};
     if(S.homeTipDismissed) data.homeTipDismissed=true;
     put(S.refs.settings,data);
   }
@@ -256,6 +260,8 @@ Array.prototype.forEach.call(document.querySelectorAll("[data-lang]"),function(b
 function setVol(v){ SND.vol=v; LP.applyLevel(); saveSettings(); sfx("tap"); }
 $("set-vol-down").onclick=function(){ if(SND.vol>0) setVol(SND.vol-1); };
 $("set-vol-up").onclick=function(){ if(SND.vol<LP.VOL_MAX) setVol(SND.vol+1); };
+/* turning the clicks off is itself silent, like a real volume control; turning them back on gives the click */
+$("set-ui").onclick=function(){ SND.uiOn=!SND.uiOn; LP.applyLevel(); saveSettings(); sfx("tap"); };
 
 /* ---------- the whole-device backup and restore (decisions.md section 24) ----------
    Backup: dump both databases, pack them (backup.js), show the size, save the zip from the tap on 保存.

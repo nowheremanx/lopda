@@ -1457,3 +1457,25 @@ EXIF，相册就能把照片放到地图上。
   `tests/geotag.test.mjs`）；`runtime/exif.js` 的 GPS IFD（`tests/exif.test.mjs`）；`apps/settings.js` 的 `LP.darkroomKey`、
   `v-set-key` 和恢复时的合并；`apps/camera.js` 的 `F.place`（存在 `data/users/local/camera`）、`geoWatch`、`sealPlace`；
   `apps/darkroom.js` 的单张印相和「抹掉地点」；e2e 各一个测试。
+
+## 41. 系统声音可以单独关掉（0.43.0）
+
+2026-10-25，runtime 0.43.0。owner 有时候想关掉 PDA 的按键咔哒声，但游戏和 app 的声音要留着：按第 10 节的
+「一个音量」，`ui` 和 `app` 两条总线的比例虽然已经分开，用户却没有办法只关其中一条。
+
+- **设置里多一行「系统声音」**（音量下面，铃铛图标，开/关）。关掉以后 `ui` 总线的增益置 0，`playNamed` 对
+  `ui` 直接返回：runtime 的按键声、内置程序的 ok / err / 快门 / 翻页等提示音全都不响，AudioContext 也不会
+  为它们多建一个。`app` 总线、总增益和 5 档音量都不动，app 和游戏的具名音效、自定义音效、音乐、环境声、
+  卡带机照常。总音量 0 档仍然是全部静音。
+- **词典发音和 `PAD.say` 不在这个开关里**：那是手机语音合成，跟总音量（第 15、23 节），不是 `ui` 总线。
+- **存进设置文档的 `ui` 字段**（缺省 `true`）。旧设置没有这个字段，照常开着；0.43.0 以前写入的备份恢复以后
+  也是开着。字段不认识的旧 runtime 会忽略它，其余设置不变。
+- **关掉这一下的确认声**：点「关」只静音，不响（像把真机音量拧到最小）；点「开」放一声 `tap`，能听见就说明
+  打开了。
+- **一屏的代价**：设置主页多了一行和一句小字。331×359 上第一屏从第 39 节的「一屏到备份与恢复」变成
+  「一屏到 AI 线路」，备份与恢复露出上沿，往下滚约 20 px（e2e 按这个新的高度锁住）。
+- **不做的**：不把按键声和提示音再分成两级，不给 app 单独的音量或静音（第 10 节「单独的音乐音量」仍然不做），
+  也不做 0–N 档。
+- **代码**：`runtime/core.js` 的 `SND.uiOn`、`applyLevel`、`playNamed`；`runtime/boot.js` 读 `ui`；
+  `runtime/apps/settings.js` 的 `set-ui` 和 `saveSettings`；`runtime/index.html`、`runtime/strings.js`；
+  `tests/e2e.test.mjs` 的「system sounds switch off on their own」。

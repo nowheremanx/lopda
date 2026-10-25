@@ -33,7 +33,7 @@ LP.renderHome();
     S.refs.settings.get().then(function(sn){
       var d=sn.exists?own(sn.data()):null;
       S.homeTipDismissed=!!(d && d.homeTipDismissed);
-      if(d){ SND.vol=d.sound===false ? 0 : Math.max(0,Math.min(LP.VOL_MAX,d.volume==null?2:d.volume|0)); LP.applyLevel(); if(I18N.STR[d.lang]) LP.setLang(d.lang); }
+      if(d){ SND.vol=d.sound===false ? 0 : Math.max(0,Math.min(LP.VOL_MAX,d.volume==null?2:d.volume|0)); SND.uiOn=d.ui!==false; LP.applyLevel(); if(I18N.STR[d.lang]) LP.setLang(d.lang); }
       if(!$("v-home").hidden) LP.renderHome();
     }).catch(function(e){ console.error("Lo-PDA settings read failed",e); });
     setStatus("status.saved");
