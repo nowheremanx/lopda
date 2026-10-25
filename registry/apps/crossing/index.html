@@ -14,7 +14,8 @@
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #a3ad7e; color: #1f2a14; font-family: monospace; }
   body { display: flex; flex-direction: column; -webkit-user-select: none; user-select: none; }
-  header { flex: none; height: 44px; display: flex; align-items: center; justify-content: space-between; padding: 0 4px; box-sizing: border-box; font-size: 16px; }
+  /* the round and the two 44 px buttons keep 4 px of air above and below: a 44 px header pinched them against the edge */
+  header { flex: none; height: 52px; display: flex; align-items: center; justify-content: space-between; padding: 0 4px; box-sizing: border-box; font-size: 16px; }
   #round { font-weight: bold; }
   /* a random round has no number: an inverted little badge stands where the round number would be */
   #round.badge { background: #1f2a14; color: #a3ad7e; padding: 2px; }
@@ -95,6 +96,9 @@
   #cover.pick #cover-list { display: grid; grid-template-columns: repeat(5, 44px); gap: 8px; width: auto; max-width: none; }
   #cover.pick #cover-list li { width: 44px; height: 44px; line-height: 40px; padding: 0; text-align: center; font-size: 17px;
     font-weight: bold; letter-spacing: 0; text-transform: none; border: 2px solid transparent; }
+  /* iOS Safari cancels a horizontal pointer move unless the list forbids panning; the cells need it too,
+     because a gesture that starts on one reads that element's touch-action first */
+  #cover.pick #cover-list, #cover.pick #cover-list li { touch-action: none; }
   #cover.pick #cover-list li.cleared { background: #7d8a58; color: #1f2a14; }
   #cover.pick #cover-list li.next { background: #a3ad7e; color: #1f2a14; border: 2px dashed #1f2a14; }
   #cover.pick #cover-list li.locked { background: #a3ad7e; color: #4a5a32; }
@@ -105,11 +109,12 @@
   /* the way out of a round: a small panel on top of the round, not a whole screen */
   #cover.confirm { inset: auto; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 268px; max-width: calc(100% - 24px);
     padding: 16px; gap: 10px; border: 2px solid #1f2a14; box-shadow: 6px 6px 0 #4a5a32; overflow: visible; }
-  /* two choices side by side, each a full finger target; the buttons carry the keys, so there is no footer */
+  /* two choices side by side, each a full finger target. The cursor's button is filled, the other outlined;
+     B always stays, so the panel needs no footer to explain the keys. */
   #cover-actions { display: flex; gap: 8px; justify-content: center; }
   #cover-actions[hidden] { display: none; }
   #cover.confirm #cover-actions button { box-sizing: border-box; min-width: 96px; min-height: 44px; padding: 0 12px; }
-  #cover.confirm #cover-btn2 { background: #a3ad7e; color: #1f2a14; border: 2px solid #1f2a14; box-shadow: none; }
+  #cover.confirm #cover-actions button.outline { background: #a3ad7e; color: #1f2a14; border: 2px solid #1f2a14; box-shadow: none; }
   /* The results card is its own calm column: the list, the chosen word's whole line below it, then NEXT ROUND.
      The detail box keeps its three lines whichever item is chosen, so nothing jumps as the cursor moves. */
   #cover.done { gap: 8px; padding: 8px 12px; }
@@ -301,6 +306,7 @@
   var noteKind = "", noteWord = "";   /* what the newest note action was: "tap" remembers its word */
   var tapCell = "", tapTurn = 0, tapDown = null, tapPending = {};   /* a filled word tapped: the cell, which word, a guard for one lookup */
   var rowDown = null;           /* a pointerdown on a results row: only a tap on it selects the word */
+  var pickSwipe = null;         /* a pointerdown on the picker: a mostly horizontal move turns the page */
   var keyMode = false;          /* the cursor square shows only once the player uses the keys: on touch it looked like a pick */
   var pos = [];                 /* the centre of each wheel letter, in the wheel's own pixels, for the line */
   var demoTimers = [], demoWord = null, helpBack = null;
@@ -316,6 +322,7 @@
      as a round number, so both leave these alone */
   var replay = false, mainRound = 1, mainDone = [];
   var titleRows = [], titlePick = 0, pickPage = 0, pickAt = 0, pickMsgTimer = null;
+  var leaveAt = 0;        /* the leave panel's cursor: 0 is STAY, 1 is LEAVE */
   var titleGuardAt = 0;   /* a cover just closed onto the title: its rows are under the same finger for a moment */
 
   goalEl.textContent = TXT.goal;
@@ -894,6 +901,14 @@
     renderPicker();
     PAD.sfx("tick");
   }
+  /* A swipe turns the pages like a book, in either direction and round the four; unlike the arrows at a
+     column's edge it keeps the cursor's row and column, so the same spot of the new page stays under the thumb. */
+  function turnPickPage(dir) {
+    clearPickMsg();
+    pickPage = (pickPage + dir + 4) % 4;
+    fillPicker();
+    PAD.sfx("tick");
+  }
   function openPicked() {
     var n = pickPage * 25 + pickAt + 1;
     if (n > state.cleared + 1) { PAD.sfx("err"); showLockedMsg(); return; }   /* a locked round says why */
@@ -915,7 +930,8 @@
     startRound(101, state.hints, [], { random: true, seed: Date.now() });
   }
 
-  /* B in an empty entry asks once: the words found are saved after every one, but a thumb can find B by accident */
+  /* B in an empty entry asks once: the words found are saved after every one, but a thumb can find B by accident.
+     The safe answer (STAY) comes first and holds the cursor; B itself always stays. */
   function showLeave() {
     phase = "leave";
     coverEl.classList.remove("title", "pick", "done", "help");
@@ -924,16 +940,29 @@
     coverText.textContent = TXT.leave;
     coverList.innerHTML = "";
     coverList.hidden = true;
-    /* the two buttons carry their keys, so the panel needs no footer to explain them */
-    coverBtn.textContent = "A " + TXT.leaveYes;
+    leaveAt = 0;
+    coverBtn.textContent = TXT.leaveNo;
     coverBtn.hidden = false;
-    coverBtn.classList.remove("outline");
-    coverBtn2.textContent = "B " + TXT.leaveNo;
+    coverBtn2.textContent = TXT.leaveYes;
     coverBtn2.hidden = false;
     coverActions.hidden = false;
     footEl.hidden = true;
     footEl.classList.remove("ink");
     coverEl.hidden = false;
+    renderLeave();
+  }
+  /* The two buttons are one row: the filled one is what A or START does, the outlined one is the other choice. */
+  function renderLeave() {
+    coverBtn.classList.toggle("outline", leaveAt !== 0);
+    coverBtn2.classList.toggle("outline", leaveAt !== 1);
+  }
+  function moveLeaveCursor(b) {
+    leaveAt = (leaveAt + (b === "right" || b === "down" ? 1 : -1) + 2) % 2;
+    renderLeave();
+    PAD.sfx("tick");
+  }
+  function activateLeave() {
+    if (leaveAt === 0) cancelLeave(); else leaveToTitle();
   }
   function leaveToTitle() {
     coverEl.classList.remove("confirm");
@@ -1311,7 +1340,8 @@
       }
     }
     save();
-    var token = gen, wait = quiet ? 0 : (after || 0) + 1100, t0 = Date.now();
+    /* the fanfare's last note rings until about 1.2 s; the card waits for its tail to die away, not just the flash */
+    var token = gen, wait = quiet ? 0 : (after || 0) + 1800, t0 = Date.now();
     if (!quiet) fxTimers.push(setTimeout(function () {
       boardEl.classList.remove("flash"); void boardEl.offsetWidth; boardEl.classList.add("flash");
       clearTune();
@@ -1494,24 +1524,36 @@
     else if (phase === "help") closeHelp();
     else if (phase === "error") {
       startRound(pending.round, pending.hints, pending.done, pending.opts);
-    } else if (phase === "leave") leaveToTitle();
+    } else if (phase === "leave") cancelLeave();   /* STAY is the leave panel's first button */
     else if (phase === "done") nextRound();
   });
   coverBtn2.addEventListener("click", function () {
-    if (phase === "leave") cancelLeave();
+    if (phase === "leave") leaveToTitle();          /* LEAVE is the leave panel's second button */
   });
   /* The word rows are 24 px tall, below the 44 px touch rule, so the whole row width is the target. A tap on
      the right 44 px is the word book toggle (and selects the word); a tap elsewhere selects and reads it.
      Like the grid, the tap counts only on pointerup and only when it did not travel: a scroll must not pick.
      The title's and the picker's rows take a tap the same way, as A would. */
   coverList.addEventListener("pointerdown", function (e) {
+    /* the picker's swipe is remembered even in the gaps between cells: the list's background is a target too */
+    if (phase === "pick") pickSwipe = { x: e.clientX, y: e.clientY, id: e.pointerId };
     var here = phase === "done" || phase === "title" || phase === "pick";
     var li = here && e.target && e.target.closest ? e.target.closest("li") : null;
     rowDown = li && coverList.contains(li) ? { li: li, x: e.clientX, y: e.clientY, id: e.pointerId } : null;
   });
   coverList.addEventListener("pointerup", function (e) {
+    var swipe = pickSwipe;
+    pickSwipe = null;
     var down = rowDown;
     rowDown = null;
+    if (phase === "pick" && swipe && e.pointerId === swipe.id) {
+      var dx = e.clientX - swipe.x, dy = e.clientY - swipe.y;
+      /* a swipe is a page turn, never also a tap on the cell it started from */
+      if (Math.abs(dx) >= 40 && Math.abs(dx) > 1.5 * Math.abs(dy)) {
+        turnPickPage(dx < 0 ? 1 : -1);
+        return;
+      }
+    }
     if (!down || e.pointerId !== down.id) return;
     if (phase !== "done" && phase !== "title" && phase !== "pick") return;
     /* the cover that just closed may still be under the finger: this tap is that one, not a new choice */
@@ -1535,7 +1577,7 @@
       toggleBook();
     } else pickWord(n);
   });
-  coverList.addEventListener("pointercancel", function () { rowDown = null; });
+  coverList.addEventListener("pointercancel", function () { rowDown = null; pickSwipe = null; });
   hintEl.addEventListener("click", hint);
   helpEl.addEventListener("click", openHelp);
 
@@ -1626,7 +1668,9 @@
 
   /* The arrows move the cursor the way they point, as on a map of the wheel: Up goes to the letter above, Left to
      the one on the left. The best letter is the one most nearly in that direction (within about 60 degrees), then
-     the nearest; if none is, any letter on that side; at the edge of the wheel the cursor stays. */
+     the nearest; if none is, any letter on that side; at the edge of the wheel the cursor stays. With seven letters
+     the middle rows' partner sits straight across, and a weaker sideways penalty (2) sent the cursor diagonally
+     to the wrong row, so across counts 3. */
   var DIRS = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
   function aim(at, b) {
     var d = DIRS[b], from = pos[at], best = -1, bestS = Infinity, wide = -1, wideS = Infinity, j;
@@ -1634,7 +1678,7 @@
     for (j = 0; j < pos.length; j++) {
       if (j === at) continue;
       var dx = pos[j].x - from.x, dy = pos[j].y - from.y;
-      var along = dx * d[0] + dy * d[1], across = Math.abs(dx * d[1] - dy * d[0]), sc = along + 2 * across;
+      var along = dx * d[0] + dy * d[1], across = Math.abs(dx * d[1] - dy * d[0]), sc = along + 3 * across;
       if (along < 2) continue;
       if (across <= along * 1.8 && sc < bestS) { bestS = sc; best = j; }
       if (sc < wideS) { wideS = sc; wide = j; }
@@ -1668,7 +1712,8 @@
       return;
     }
     if (phase === "leave") {
-      if (b === "a" || b === "start") leaveToTitle();
+      if (b === "left" || b === "right" || b === "up" || b === "down") moveLeaveCursor(b);
+      else if (b === "a" || b === "start") activateLeave();
       else if (b === "b") cancelLeave();
       return;
     }
