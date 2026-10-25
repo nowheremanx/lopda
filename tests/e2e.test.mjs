@@ -13,6 +13,9 @@ import { ROOT, tempDir, runScript } from "./helpers.mjs";
 let pw = null;
 try { pw = await import("playwright"); } catch {}
 const skip = pw ? false : "playwright is not installed";
+/* runtime/exif.js itself, so the darkroom test reads back what it wrote */
+const EXIF = runScript("runtime/exif.js").LopdaExif;
+const RUNTIME_VERSION = readFileSync(join(ROOT, "runtime/core.js"), "utf8").match(/var RUNTIME_VERSION="([^"]+)"/)[1];
 
 const TYPES = { ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css", ".json": "application/json",
   ".png": "image/png", ".wasm": "application/wasm", ".webmanifest": "application/manifest+json" };
@@ -2415,6 +2418,59 @@ test("sound: one volume with five steps; an old 'sound off' setting becomes volu
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
+test("settings: eight 44 px rows fit 331x359 down to 备份与恢复; the share QR and about page open and go back", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN", viewport: { width: 331, height: 359 } });
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await p.waitForFunction(() => window.LP && window.LP.S.db);
+  await p.evaluate(() => LP.builtins.find((b) => b.id === "settings").open());
+  await p.waitForSelector("#v-settings:not([hidden])");
+  const menu = await p.evaluate(() => {
+    /* the smallest LCD is 331x359; measure the view at that size, not the phone case around it */
+    const v = document.getElementById("v-settings");
+    v.style.width = "331px"; v.style.height = "359px"; v.style.flex = "none";
+    const box = v.getBoundingClientRect();
+    const rows = [...v.querySelectorAll(".set-menu > .set-row, .set-menu > .set-open")];
+    return { rows: rows.map((r) => { const b = r.getBoundingClientRect(); return { top: b.top - box.top, bottom: b.bottom - box.top, h: b.height }; }),
+      scroll: v.scrollWidth, client: v.clientWidth };
+  });
+  assert.equal(menu.rows.length, 8);
+  assert.ok(menu.rows.every((r) => r.h >= 44), JSON.stringify(menu.rows));
+  assert.ok(menu.scroll <= menu.client + 1, "no sideways scroll at 331");
+  /* the rows leave room around their buttons (owner, 2026-10-25), so 分享 and 关于 are a short scroll away on the smallest screen */
+  assert.ok(menu.rows[5].bottom <= 359 + 1, "the menu fits down to 备份与恢复; only 分享 and 关于 scroll: " + JSON.stringify(menu.rows));
+  await p.evaluate(() => { document.getElementById("v-settings").scrollTop = 9999; });
+  assert.ok(await p.evaluate(() => {
+    const v = document.getElementById("v-settings"), last = document.querySelector("#set-about-open").getBoundingClientRect(), b = v.getBoundingClientRect();
+    return last.top >= b.top - 1 && last.bottom <= b.bottom + 1;
+  }), "关于 scrolls into view");
+  /* share: the QR is (n + 8) * 4 pixels square, and the address is shown without https:// or a trailing slash */
+  await p.click("#set-share-open");
+  await p.waitForSelector("#v-set-share:not([hidden])");
+  const qr = await p.evaluate(() => {
+    const c = document.getElementById("set-share-qr");
+    return { w: c.width, h: c.height, n: window.LopdaQR.matrix("https://nowheremanx.github.io/lopda/").n };
+  });
+  assert.equal(qr.n, 29);
+  assert.deepEqual([qr.w, qr.h], [(qr.n + 8) * 4, (qr.n + 8) * 4]);
+  assert.ok(await p.evaluate(() => {
+    const c = document.getElementById("set-share-qr"), d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data;
+    let ink = 0, paper = 0;
+    for (let i = 0; i < d.length; i += 4) { if (d[i] === 31 && d[i + 1] === 42 && d[i + 2] === 20) ink++; else if (d[i] === 163 && d[i + 1] === 173 && d[i + 2] === 126) paper++; }
+    return ink > 0 && paper > 0;
+  }), "the QR is drawn in ink on paper");
+  assert.equal(await p.textContent("#set-share-url"), "nowheremanx.github.io/lopda");
+  await p.click("#set-share-back");
+  await p.waitForFunction(() => !document.getElementById("v-settings").hidden);
+  /* about, then back to the menu */
+  await p.click("#set-about-open");
+  await p.waitForSelector("#v-set-about:not([hidden])");
+  assert.equal(await p.textContent("#set-version"), "Lo-PDA " + (await p.evaluate(() => LP.RUNTIME_VERSION)) + " · 规范 lopda/1");
+  assert.match(await p.textContent("#v-set-about"), /什么是 PDA[\s\S]*这台 Lo-PDA/);
+  await p.click("#set-about-back");
+  await p.waitForFunction(() => !document.getElementById("v-settings").hidden);
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
 test("music: a score with a mistake is shown in the error box, with its column; custom sounds and the rate limit", { skip, timeout: 30000 }, async (t) => {
   const { p, errors } = await page(t, { locale: "zh-CN" });
   await p.goto(base + "/runtime/", { waitUntil: "load" });
@@ -3136,9 +3192,11 @@ test("darkroom: load a stock, shoot a roll with latent images, unload it to the 
     await p.setInputFiles("#dk-file", { name, mimeType, buffer });
     await toast(/这张底片冲不出来/);
   }
-  /* Settings counts the box */
+  /* Settings counts the box, on the backup page */
   await p.click("#home-key");
   await p.locator("#home .app", { has: p.locator(".label", { hasText: /^设置$/ }) }).click();
+  await p.click("#set-backup-open");
+  await p.waitForSelector("#v-set-backup:not([hidden])");
   await p.waitForFunction(() => /胶卷盒 1 卷，\d/.test(document.getElementById("set-storage").textContent));
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
@@ -3172,6 +3230,25 @@ test("darkroom: a roll left in the camera by an older version is void when the c
 /* ---------- darkroom step 2 (docs/design/darkroom.md section 9): developing, the viewer, the three prints ---------- */
 /* width and height from a PNG's IHDR */
 const pngSize = (buf) => [buf.readUInt32BE(16), buf.readUInt32BE(20)];
+/* width and height from a JPEG's SOF0/SOF2 (after APP0 and the Exif APP1, which this walks past) */
+const jpegSize = (buf) => {
+  let o = 2;
+  while (o + 9 < buf.length) {
+    if (buf[o] !== 0xff) throw new Error("not a JPEG segment at " + o);
+    const m = buf[o + 1];
+    if (m === 0xda || m === 0xd9) break;
+    const len = buf.readUInt16BE(o + 2);
+    if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) return [buf.readUInt16BE(o + 7), buf.readUInt16BE(o + 5)];
+    o += 2 + len;
+  }
+  throw new Error("no SOF in the JPEG");
+};
+/* the EXIF wall clock is the shooting instant at the frame's tz: the same arithmetic runtime/exif.js does */
+const exifTime = (taken, tz) => {
+  const d = new Date(taken + tz * 60000), p = (n) => String(n).padStart(2, "0");
+  return `${d.getUTCFullYear()}:${p(d.getUTCMonth() + 1)}:${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
+};
+const exifOffset = (tz) => `${tz < 0 ? "-" : "+"}${String(Math.floor(Math.abs(tz) / 60)).padStart(2, "0")}:${String(Math.abs(tz) % 60).padStart(2, "0")}`;
 
 test("darkroom: develop a roll with blank frames, walk it in colour, print single, contact sheet and strip; a re-imported negative reprints byte for byte", { skip, timeout: 240000 }, async (t) => {
   const { p, errors, open } = await camPage(t);
@@ -3308,8 +3385,16 @@ test("darkroom: develop a roll with blank frames, walk it in colour, print singl
   assert.equal(await p.textContent("#dk-keys .sk-start span"), "出片");
   await press("Enter");
   const single = await save(() => press("x"));
-  assert.match(single.name, /^lopda-print-\d{8}-portrait-400-001-01\.png$/);
-  assert.deepEqual(pngSize(single.buf), [1600, 1400]);
+  assert.match(single.name, /^lopda-print-\d{8}-portrait-400-001-01\.jpg$/);
+  assert.deepEqual([...single.buf.subarray(0, 3)], [0xff, 0xd8, 0xff], "a JPEG from the first byte");
+  assert.deepEqual(jpegSize(single.buf), [1600, 1400]);
+  const frame1 = roll.frames[0];
+  const exif = EXIF.read(single.buf);
+  assert.equal(exif.make, "Lo-PDA");
+  assert.equal(exif.model, "Lo-PDA");
+  assert.equal(exif.software, "Lo-PDA " + RUNTIME_VERSION);
+  assert.equal(exif.dateTimeOriginal, exifTime(frame1.taken, frame1.tz), "the shooting day at the shooting tz");
+  assert.equal(exif.offsetTimeOriginal, exifOffset(frame1.tz));
   await toast(/照片存好了/);
   await press("Enter"); await press("ArrowDown");
   const card = await save(() => press("x"));
@@ -3999,7 +4084,7 @@ test("pet: one AI souvenir a day, valid or silently built-in, never a note, date
   await p.click("#home-key");
   await p.locator("#home .app", { hasText: "设置" }).click();
   await p.locator("#v-settings:not([hidden])").waitFor();
-  assert.match(await p.locator('#v-settings p[data-i18n="ai.pet"]').innerText(), /宠物每天出门时会发出/);
+  assert.match(await p.locator('#v-set-ai p[data-i18n="ai.pet"]').textContent(), /宠物每天出门时会发出/);
 
   /* leaving during a hung ask stops it at once; the day is already marked, so the resumed walk-back uses the built-in */
   await p.clock.setSystemTime(new Date(2026, 9, 13, 9, 0));
@@ -5994,6 +6079,8 @@ test("sensor: after a relaunch an allowed app gets the tap bar; settings revoke 
   /* settings lists it; revoke, and the next start asks on the dialog again */
   await p.click("#home-key");
   await p.locator("#home .app", { has: p.locator(".label", { hasText: /^设置$/ }) }).click();
+  await p.click("#set-sense-open");
+  await p.waitForSelector("#v-set-sense:not([hidden])");
   /* the test app is never stored, so the list names it by id once the home screen has re-read the installed apps */
   assert.match(await p.textContent("#set-sense-list"), /(传感测试|sense-test) · 倾斜/);
   await p.click('#set-sense-list [data-app="sense-test"]');
@@ -6171,7 +6258,9 @@ test("camera snap: without the permission null and no dialog; Settings lists the
   await until(p, async () => (await R(f)).results.length === 1, "null");
   await p.click("#home-key");
   await p.locator("#home .app", { has: p.locator(".label", { hasText: /^设置$/ }) }).click();
-  assert.equal(await p.textContent("#set-sense > span"), "传感器与相机");
+  await p.click("#set-sense-open");
+  await p.waitForSelector("#v-set-sense:not([hidden])");
+  assert.equal(await p.textContent("#set-sense > span"), "传感器与权限");
   assert.match(await p.textContent("#set-sense-list"), /(拍照测试|snap-test) · 相机/);
   await p.click('#set-sense-list [data-app="snap-test"]');
   assert.match(await p.textContent("#set-sense-list"), /还没有程序用过倾斜感应、麦克风、相机或生词本/);
@@ -7257,7 +7346,7 @@ async function backupPage(t) {
     await p.waitForFunction(() => window.LP && window.LP.S.db && document.querySelectorAll("#home .app:not(.builtin)").length >= 2, null, { timeout: 15000 });
     await p.waitForTimeout(600);   /* let the programs' first reads and writes settle */
   };
-  const settings = async () => { await p.click("#home-key"); await tile(p, "设置"); await p.waitForSelector("#v-settings:not([hidden])"); };
+  const settings = async () => { await p.click("#home-key"); await tile(p, "设置"); await p.waitForSelector("#v-settings:not([hidden])"); await p.click("#set-backup-open"); await p.waitForSelector("#v-set-backup:not([hidden])"); };
   const msg = () => p.textContent("#set-backup-msg");
   const backup = async () => {
     await p.click("#set-backup-go");

@@ -468,7 +468,7 @@ if (PAD.camera) {                        // undefined before runtime 0.28.0
 - **Consent.** The first `snap()` of an app shows the handheld's own dialog (the same one as files, sensors and notes):
   `「<app>」想用相机拍一张照片。照片只以四色小图交给它。` A (on release) or 允许 allows it, and the phone's own camera prompt,
   if any, comes in that tap; B or 不允许 resolves `null` and is not remembered. An allowed app is remembered; Settings →
-  传感器与相机 lists it and can revoke it. After a relaunch the phone may need to ask again: the runtime then shows a one-line
+  传感器与权限 lists it and can revoke it. After a relaunch the phone may need to ask again: the runtime then shows a one-line
   bar, 点一下开启相机, first.
 - **Every shot is the player's.** Every `snap()`, allowed or not, opens the viewfinder over the app with the app's name on
   top. It looks like the camera program: the live picture dithered at the size asked for, A shutter, SELECT the next lens
@@ -575,7 +575,7 @@ if (PAD.dict && PAD.dict.inBook) {               // the word book calls arrive w
 - **One grant per app.** The first `addWord` or `removeWord` shows the handheld's own dialog once:
   `「<app>」想把单词加入你的生词本` (`<app> wants to add words to your word book`). A (on release) or 允许 allows it and
   the call goes ahead; B or 不允许 resolves `"denied"` for that call and is not remembered, so the next call asks again.
-  Settings → 传感器与相机 lists the app with 生词本 and can revoke it. The dialog is asked once, not per word: a dialog
+  Settings → 传感器与权限 lists the app with 生词本 and can revoke it. The dialog is asked once, not per word: a dialog
   for every word would stop the game.
 - **Reading needs the grant too.** `inBook()` resolves `null` until the player has allowed the app, and when the manifest
   lacks `"wordbook"`. An app cannot read the book before the player knows. It never opens a dialog of its own.
