@@ -59,8 +59,13 @@ No other files are loaded. Images, sounds and fonts must be embedded in
 | `i18n` | Optional. Store text in other languages: `{"en": {"name", "description"}, "zh": {...}}`. Only `zh` and `en`, only those two fields, same rules as above. The store and home screen show the entry for the player's language and fall back to `name` / `description`. |
 | `author` | Name or handle. |
 | `license` | One of: `MIT`, `0BSD`, `BSD-2-Clause`, `BSD-3-Clause`, `ISC`, `Apache-2.0`, `CC0-1.0`, `Unlicense`. |
-| `permissions` | Array. Usually empty. Six capabilities (`lopda/1`): `"files"`, the app may export and import files, each time confirmed by the player (section 6.2); `"motion"`, tilt, shake and heading; `"mic"`, the microphone's loudness and pitch (both section 6.4, confirmed by the player the first time); `"notes"`, the app may add text to a note of its own in the player's notes, each time confirmed by the player (section 6.5); `"camera"`, the app may ask for a photo, which the player takes in the runtime's viewfinder and the app gets as a small four-tone picture (section 6.6, allowed by the player the first time); `"wordbook"`, the app may read and change the player's word book, allowed by the player the first time it adds or removes a word (section 6.7). The store shows them on the app's entry. Anything else fails the checker. |
+| `permissions` | Array. Usually empty. Six capabilities (`lopda/1`): `"files"`, the app may export and import files, each time confirmed by the player (section 6.2); `"motion"`, tilt, shake and heading; `"mic"`, the microphone's loudness and pitch (both section 6.4); `"notes"`, the app may add text to a note of its own in the player's notes, each time confirmed by the player (section 6.5); `"camera"`, the app may ask for a photo, which the player takes in the runtime's viewfinder and the app gets as a small four-tone picture (section 6.6); `"wordbook"`, the app may read and change the player's word book (section 6.7). The store shows them as icons on the app's entry and asks the player before installing (runtime 0.44.0+); an app allowed then does not ask on first use, while files and notes still confirm every call. Anything else fails the checker. |
 | `buttons` | Optional, `lopda/1` only. `true` shows the chin buttons while the app runs (section 4). Leave it out for touch-only apps. |
+
+`registry/index.json` adds two dates to every entry, `released` and `updated` (`YYYY-MM-DD`): the first and the
+most recent commit that changed the app's `index.html`, stamped by `tools/build-index.mjs` from git. The store
+wears 新 / NEW for seven days after `released`, and 更新 / UPDATED for seven days after `updated` when the app is
+not new (runtime 0.44.0+). App authors do not write these fields; the manifest checker rejects them.
 
 ## 3. The screen
 
@@ -385,11 +390,11 @@ if (PAD.mic) {
 `x`, `y`, `flat` and `level` come in steps of 1/32. `tilt` comes at most 30 times a second and `sound` at most 20 times, each
 only when a value changed: hold the last one between events.
 
-**Asking.** `start()` can be called at any time; the app does not need a tap of its own. The first time an app asks,
-the handheld shows its own dialog over it (`「迷宫」要用倾斜感应。 允许 / 不允许`; the microphone's adds that the phone's
-silent switch does nothing while it is on). A, or a tap on 允许, allows it and the phone's own prompt may follow; B or
-不允许 resolves `"denied"`, and the next `start()` asks again. An allowed app is remembered (the player can revoke it
-in Settings). The phone may still ask again after the handheld is reopened: then a one-line bar
+**Asking.** `start()` can be called at any time; the app does not need a tap of its own. An app installed with the
+permission through the store (runtime 0.44.0+) is already allowed. Otherwise the first time an app asks, the handheld
+shows its own dialog over it (`「迷宫」要用倾斜感应。 允许 / 不允许`; the microphone's adds that the phone's silent switch
+does nothing while it is on). A, or a tap on 允许, allows it and the phone's own prompt may follow; B or 不允许 resolves
+`"denied"`, and the next `start()` asks again. An allowed app is remembered (the player can revoke it in Settings). The phone may still ask again after the handheld is reopened: then a one-line bar
 (`点一下开启倾斜感应`) waits for the player's tap, because the phone takes the answer only from a tap on the handheld
 itself. `start()` resolves `"on"`, `"denied"` (the player or the phone said no, or the manifest lacks the permission)
 or `"none"` (no such sensor: a desktop, an old phone). Without the permission there is no dialog: `"denied"` at once,
@@ -465,7 +470,8 @@ if (PAD.camera) {                        // undefined before runtime 0.28.0
 }
 ```
 
-- **Consent.** The first `snap()` of an app shows the handheld's own dialog (the same one as files, sensors and notes):
+- **Consent.** An app installed with the permission through the store (runtime 0.44.0+) is already allowed. Otherwise the
+  first `snap()` shows the handheld's own dialog (the same one as files, sensors and notes):
   `「<app>」想用相机拍一张照片。照片只以四色小图交给它。` A (on release) or 允许 allows it, and the phone's own camera prompt,
   if any, comes in that tap; B or 不允许 resolves `null` and is not remembered. An allowed app is remembered; Settings →
   传感器与权限 lists it and can revoke it. After a relaunch the phone may need to ask again: the runtime then shows a one-line
@@ -572,7 +578,8 @@ if (PAD.dict && PAD.dict.inBook) {               // the word book calls arrive w
 }
 ```
 
-- **One grant per app.** The first `addWord` or `removeWord` shows the handheld's own dialog once:
+- **One grant per app.** An app installed with the permission through the store (runtime 0.44.0+) is already allowed;
+  otherwise the first `addWord` or `removeWord` shows the handheld's own dialog once:
   `「<app>」想把单词加入你的生词本` (`<app> wants to add words to your word book`). A (on release) or 允许 allows it and
   the call goes ahead; B or 不允许 resolves `"denied"` for that call and is not remembered, so the next call asks again.
   Settings → 传感器与权限 lists the app with 生词本 and can revoke it. The dialog is asked once, not per word: a dialog

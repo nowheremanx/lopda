@@ -313,6 +313,81 @@ test("store: category filters split the catalogue, and one button updates every 
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
+test("store: search finds an app by either language, ignores case, and clearing brings the catalogue back", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN" });
+  /* a fixed day, so the seven-day NEW badge is stable: paper-tower is four days old, gomoku eighteen */
+  await p.clock.install({ time: new Date(2026, 9, 25, 12, 0) });
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await p.waitForFunction(() => document.querySelectorAll("#home .app:not(.builtin)").length === 2);
+  await p.locator("#home .app.builtin", { hasText: "应用商店" }).click();
+  await p.waitForSelector("#store-list .store-item");
+  const total = await p.locator("#store-list .store-item").count();
+
+  await p.fill("#store-q", "纸");
+  assert.equal(await p.locator("#store-list .store-item").count(), 1, "one app has 纸 in its name");
+  assert.equal(await p.locator("#store-list .store-cat").count(), 0, "results are one flat list");
+  assert.equal(await p.locator("#store-filters").isHidden(), true, "categories step aside while searching");
+  assert.match(await p.textContent("#store-list"), /纸塔/);
+  assert.match(await p.textContent("#store-state"), /1 个结果/);
+  assert.equal((await p.textContent("#store-list .store-badge")).trim(), "新", "a four-day-old app wears NEW");
+
+  await p.fill("#store-q", "PAPER");
+  assert.match(await p.textContent("#store-list"), /纸塔/, "the English name finds it too");
+  await p.fill("#store-q", "拍照");
+  assert.equal((await p.textContent("#store-list .store-badge")).trim(), "更新", "a five-day-old version wears UPDATED");
+  await p.fill("#store-q", "五子棋");
+  assert.equal(await p.locator("#store-list .store-item").count(), 1);
+  assert.equal(await p.locator("#store-list .store-badge").count(), 0, "an older app has no badge");
+  await p.fill("#store-q", "zzzz");
+  assert.match(await p.textContent("#store-list"), /没有找到/, "an empty result says so");
+
+  await p.click("#store-q-clear");
+  assert.equal(await p.locator("#store-list .store-item").count(), total, "clearing shows the whole catalogue");
+  assert.equal(await p.locator(".store-filter").count(), 7);
+  assert.equal(await p.locator("#store-filters").isHidden(), false);
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("store: an app that asks for a capability shows its icons before install, and the grant is remembered", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN" });
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await p.waitForFunction(() => document.querySelectorAll("#home .app:not(.builtin)").length === 2);
+  await p.locator("#home .app.builtin", { hasText: "应用商店" }).click();
+  await p.waitForSelector("#store-list .store-item");
+
+  await p.fill("#store-q", "吹蜡烛");
+  const item = p.locator("#store-list .store-item");
+  await item.waitFor();
+  assert.equal(await item.locator(".store-perms .perm").count(), 1, "the entry shows the microphone as one icon");
+  assert.equal(await item.locator("small").filter({ hasText: "会用麦克风" }).count(), 0, "no line of permission text");
+
+  await item.locator("button").click();
+  await p.waitForSelector("#file-ask .ask-perms");
+  assert.equal(await p.locator("#file-ask .ask-perm").count(), 1);
+  assert.match(await p.textContent("#file-ask .ask-perm"), /话筒/);
+  await p.click("#file-no");
+  await p.waitForSelector("#file-ask", { state: "detached" });
+  assert.equal((await item.locator("button").innerText()).trim(), "安装", "cancelling changes nothing");
+
+  await item.locator("button").click();
+  await p.waitForSelector("#file-ask .ask-perms");
+  await p.click("#file-ok");
+  await p.waitForFunction(() => [...document.querySelectorAll("#store-list .store-item")]
+    .some((x) => x.textContent.includes("吹蜡烛") && x.querySelector("button").textContent === "打开"), null, { timeout: 15000 });
+
+  const granted = await p.evaluate(() => new Promise((resolve, reject) => {
+    const req = indexedDB.open("lopda");
+    req.onerror = () => reject(req.error);
+    req.onsuccess = () => {
+      const get = req.result.transaction("docs").objectStore("docs").get("data/users/local/sensors");
+      get.onsuccess = () => { req.result.close(); resolve(get.result ? get.result.data : null); };
+      get.onerror = () => reject(get.error);
+    };
+  }));
+  assert.equal(granted?.apps?.["blow-candles"]?.mic, true, "the install dialog granted the microphone");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
 test("files: the runtime's dialog guards PAD.exportFile and PAD.importFile (paint)", { skip, timeout: 30000 }, async (t) => {
   /* a mouse, not touch: on a coarse pointer the runtime saves through the share sheet, which headless Chromium lacks */
   const p = await browser.newPage({ viewport: { width: 390, height: 844 }, acceptDownloads: true, locale: "zh-CN" });
@@ -6862,7 +6937,7 @@ test("sensor: after a relaunch an allowed app gets the tap bar; settings revoke 
   /* the test app is never stored, so the list names it by id once the home screen has re-read the installed apps */
   assert.match(await p.textContent("#set-sense-list"), /(传感测试|sense-test) · 倾斜/);
   await p.click('#set-sense-list [data-app="sense-test"]');
-  assert.match(await p.textContent("#set-sense-list"), /还没有程序用过/);
+  assert.match(await p.textContent("#set-sense-list"), /还没有程序获准使用/);
   f = await runSenseApp(p);
   f.evaluate(() => { go("motion"); });
   await p.waitForSelector("#file-ask .box");
@@ -7041,7 +7116,7 @@ test("camera snap: without the permission null and no dialog; Settings lists the
   assert.equal(await p.textContent("#set-sense > span"), "传感器与权限");
   assert.match(await p.textContent("#set-sense-list"), /(拍照测试|snap-test) · 相机/);
   await p.click('#set-sense-list [data-app="snap-test"]');
-  assert.match(await p.textContent("#set-sense-list"), /还没有程序用过倾斜感应、麦克风、相机或生词本/);
+  assert.match(await p.textContent("#set-sense-list"), /还没有程序获准使用倾斜感应、麦克风、相机或生词本/);
   f = await runSnapApp(p);
   f.evaluate(() => { snap(); });
   await p.waitForSelector("#file-ask .box");

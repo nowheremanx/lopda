@@ -40,6 +40,15 @@ test("every sdk template passes once named after its id and built", (t) => {
   }
 });
 
+test("a manifest cannot set released or updated: the index stamps them from git", (t) => {
+  for (const key of ["released", "updated"]) {
+    const app = counter(t, { manifest: (m) => { m[key] = "2026-10-25"; } });
+    const r = tool("check-app.mjs", app);
+    assert.notEqual(r.code, 0, key);
+    assert.match(r.out, /released and updated are computed by tools\/build-index\.mjs from git/, key);
+  }
+});
+
 test("the counter template passes without warnings; the game template needs lo-game", (t) => {
   const app = counter(t);
   const r1 = tool("check-app.mjs", app);

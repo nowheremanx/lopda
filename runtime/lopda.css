@@ -160,6 +160,15 @@ textarea::placeholder{color:var(--ink-2)}
 .store-updates{display:flex;align-items:center;gap:10px;margin:8px 12px 0;padding:8px 10px;border:2px solid var(--ink);background:var(--lcd-2)}
 .store-updates span{flex:1;min-width:0;font-size:14px;line-height:1.35}
 .store-updates .btn{flex:none;min-height:44px;padding:8px 12px;font-size:14px}
+/* store: the search box, the category chips, the permission icons */
+.store-search{display:flex;gap:8px;padding:8px 12px 0}
+.store-search input{flex:1;min-width:0;min-height:44px;font-family:var(--f-lcd);font-size:17px;color:var(--ink);background:var(--lcd);border:3px solid var(--ink);border-radius:0;padding:6px 8px;-webkit-appearance:none;appearance:none}
+.store-search input::placeholder{color:var(--ink-2)}
+.store-search input::-webkit-search-cancel-button{display:none}
+.store-q-clear{flex:none;width:44px;height:44px;padding:0;font-size:22px;line-height:1}
+.store-perms{display:flex;align-items:center;gap:6px;margin-top:1px}
+.store-perms .perm{display:inline-flex;width:16px;height:16px}
+.store-perms canvas{width:16px;height:16px;display:block;image-rendering:pixelated;image-rendering:crisp-edges}
 .store-filters{display:flex;flex-wrap:nowrap;gap:6px;padding:8px 12px 0;overflow-x:auto;scrollbar-width:none}
 .store-filters::-webkit-scrollbar{display:none}
 .store-filter{flex:none;display:inline-flex;align-items:baseline;gap:5px;font-family:var(--f-lcd);font-size:14px;background:transparent;color:var(--ink);border:2px solid var(--ink);padding:6px 9px;min-height:40px;cursor:pointer}
@@ -177,6 +186,7 @@ textarea::placeholder{color:var(--ink-2)}
 .store-body b{font-weight:400;font-size:16px}
 .store-body span{font-size:13px;line-height:1.5}
 .store-body small{font-family:var(--f-pix);font-size:15px;color:var(--ink-2)}
+.store-badge{display:inline-block;margin-left:4px;padding:0 3px;background:var(--ink);color:var(--lcd);font-family:var(--f-lcd);font-size:10px;line-height:14px;vertical-align:1px}
 .store-item .btn{flex:none;padding:8px 12px;font-size:14px}
 .store-note{padding:4px 14px 14px;margin:0}
 /* one-tap save sheet (iOS needs a fresh tap for the share sheet) */
@@ -189,6 +199,12 @@ textarea::placeholder{color:var(--ink-2)}
 .file-ask .row{display:flex;gap:10px}
 .file-ask .btn{flex:1}
 .file-ask small{font-family:var(--f-pix);font-size:14px;color:var(--ink-2)}
+/* the permissions an app asks for: one icon and one word each */
+.file-ask .ask-perms{display:flex;flex-wrap:wrap;justify-content:center;gap:10px}
+.file-ask .ask-perm{display:flex;flex-direction:column;align-items:center;gap:3px;width:58px;text-align:center}
+.file-ask .ask-perm-ico{display:inline-flex;width:24px;height:24px}
+.file-ask .ask-perm-ico canvas{width:24px;height:24px;display:block;image-rendering:pixelated;image-rendering:crisp-edges}
+.file-ask .ask-perm small{font-family:var(--f-lcd);font-size:12px;line-height:1.1;color:var(--ink)}
 .file-ask p.note{font-size:14px;color:var(--ink-2)}
 .file-ask p.names{word-break:keep-all;overflow-wrap:anywhere}
 .file-ask p.quote{font-size:14px;line-height:1.35;white-space:pre-wrap;max-height:8.1em;overflow:hidden;border-left:3px solid var(--ink-2);padding-left:8px}
