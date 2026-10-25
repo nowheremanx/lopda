@@ -20,7 +20,7 @@
  * No UI click sounds anywhere here: the only sounds are the instruments. The play glyph is drawn in CSS. Keys (the
  * chin pad is hidden): arrows move the focus box, X = A taps that cell, Enter = START plays and stops, Shift = SELECT
  * picks the next drum (drums only), Z = B closes the tour, a sheet or a question. Every screen and sheet has an
- * on-screen way back. The tour framework is 1a's and stays that way (12.10's per-screen tours are a later step).
+ * on-screen way back. The tour framework is 1a's; 12.10 gives the note, chord and song screens their own step lists.
  *
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  */
@@ -560,7 +560,7 @@ function build(){
 function layout(){
   if(!visible()) return;
   var board=$("studio-board"), grid=$("studio-grid"), view=$("v-studio");
-  if(!board || !grid || board.hidden) return;
+  if(!board || !grid || board.hidden){ if(T.tour) tourPlace(); return; }
   /* below the normal 523 px there is not room for the bars, the pitch keys and four 56 px cells: tighten the
      chrome and the grid gaps, then scale the grid only as much as it still needs (never below 40 px cells on
      drums/notes). The 44 px rule stays for every button that is not a grid cell. */
@@ -576,6 +576,9 @@ function layout(){
   /* a grid step's bubble sits above the grid: shrink the grid just enough to keep the bubble
      clear of the bar, never below the 56 px cell floor (docs/design/studio.md 11.6) */
   var step=T.tour && T.tour.steps[T.tour.i], box=T.tour && T.tour.box;
+  /* the note tour frames the grid from above; bottom-align it while that step shows so the bubble has
+     room under the bar at 375x667 (rhythm steps keep their centred grid) */
+  grid.style.alignSelf=(step && step.bottom && !short) ? "flex-end" : "";
   if(step && step.room && box && box.offsetHeight>0){
     var bar=view.querySelector(".st-bar");
     if(bar){
@@ -792,18 +795,45 @@ function rhythmTour(){
     {el:function(){ return $("studio-tempo"); }, text:"studio.tour.tempo", done:null}
   ];
 }
+/* 12.10: the note screens (bass and melody share one tour), the chord screen and the song screen */
+function notesTour(){
+  return [
+    {el:function(){ return $("studio-grid"); }, text:"studio.tour.n1", done:"note", room:true, bottom:true},
+    {el:function(){ return $("studio-keys-wrap"); }, text:"studio.tour.n2", done:"pitch"},
+    {el:function(){ return $("studio-grid"); }, text:"studio.tour.n3", done:null, room:true, bottom:true}
+  ];
+}
+function chordsTour(){
+  return [
+    {el:function(){ return $("studio-chord-cells"); }, text:"studio.tour.c1", done:"chord"},
+    {el:function(){ return $("studio-chord-keys"); }, text:"studio.tour.c2", done:null}
+  ];
+}
+function songTour(){
+  return [
+    {el:function(){ return $("studio-pat"); }, text:"studio.tour.s1", done:null},
+    {el:function(){ return $("studio-chain"); }, text:"studio.tour.s2", done:"slot", chain:true, above:true},
+    {el:function(){ return $("studio-add").parentNode; }, text:"studio.tour.s3", done:null}
+  ];
+}
+/* which tour a screen shows, and the key it is remembered under (bass and melody share "notes") */
+function screenTour(s){
+  if(s==="drums") return {key:"rhythm", steps:rhythmTour()};
+  if(s==="bass"||s==="melody") return {key:"notes", steps:notesTour()};
+  if(s==="chords") return {key:"chords", steps:chordsTour()};
+  if(s==="song") return {key:"song", steps:songTour()};
+  return null;
+}
 function startTour(){
-  /* 12.10's per-screen tours are a later step: ? still replays the rhythm tour, so bring its screen back first */
-  if(T.built && T.screen!=="drums"){
-    T.screen="drums"; T.focus=0; T.painted=null;
-    renderAll();
-  }
-  if(T.built) tour("rhythm",rhythmTour());
+  var tourDef=T.built ? screenTour(T.screen) : null;
+  if(tourDef) tour(tourDef.key,tourDef.steps);
 }
 function maybeTour(){
   if(!visible() || T.tour || !T.built || !T.loaded || !T.meta) return;
-  if(T.meta.toured && T.meta.toured.rhythm) return;
-  startTour();
+  var tourDef=screenTour(T.screen);
+  if(!tourDef) return;
+  if(T.meta.toured && T.meta.toured[tourDef.key]) return;
+  tour(tourDef.key,tourDef.steps);
 }
 function tour(screen,steps){
   tourEnd(false);
@@ -841,32 +871,99 @@ function tourShow(i){
   /* an action already done when the step starts (playing when step 1 shows) offers Next instead */
   var met=step.done==="play" && T.playing;
   t.next.hidden=!!step.done && !met;
+  t.box.style.maxWidth="";      /* the previous step may have narrowed it to clear the play button */
   layout();                     /* grid steps make room for the bubble; others take the normal size back */
+  tourPlace();                  /* chord and song screens have no grid, so layout() returns before placing */
+}
+/* the song tour's chain step needs air above a tall scroll box: keep the chain's one visible row at the
+   bottom of its old space and let the bubble sit between the bar and the frame. Any other step, or no
+   tour, gives the chain its normal size back. */
+function tourFitChain(){
+  var chain=$("studio-chain");
+  if(!chain) return;
+  chain.style.height="";
+  chain.style.marginTop="";
+  chain.style.flex="";
+  var t=T.tour;
+  if(!t || !t.steps[t.i] || !t.steps[t.i].chain) return;
+  var view=$("v-studio"), bar=view.querySelector(".st-bar"), song=$("studio-song"), letters=$("studio-letters");
+  if(!bar || !song || !letters || !t.box) return;
+  var cr=chain.getBoundingClientRect(), lr=letters.getBoundingClientRect(), br=bar.getBoundingClientRect();
+  var allocated=lr.top-cr.top-4;         /* the song column's 4 px gap */
+  if(allocated<=0) return;
+  var need=t.box.offsetHeight+10-(cr.top-br.bottom);
+  if(need<=2) return;
+  if(need>allocated-1) need=allocated-1;
+  chain.style.flex="none";
+  chain.style.height=(allocated-need)+"px";
+  chain.style.marginTop=need+"px";
 }
 /* bubble above or below the target, against the side with more room inside the view; the triangle points
-   at the target's centre and the bubble never sits over the target */
+   at the target's centre and the bubble never sits over the target. A side that would jam the bubble against
+   the top bar (or out of the view) gives way to the other side, so the play button stays reachable on the
+   short 331x359 screen too. */
 function tourPlace(){
   var t=T.tour;
   if(!t || !t.hi) return;
+  tourFitChain();
   var view=$("v-studio"), v=view.getBoundingClientRect(), r=t.hi.getBoundingClientRect();
   if(!v.width || !v.height || !r.width) return;
-  var box=t.box, w=box.offsetWidth, h=box.offsetHeight, margin=4;
+  var box=t.box, w=box.offsetWidth, h=box.offsetHeight, margin=4, gap=10;
   if(!w || !h) return;
+  var bar=view.querySelector(".st-bar"), play=$("studio-play");
+  var barBottom=bar ? bar.getBoundingClientRect().bottom-v.top : 0;
   var cx=r.left-v.left+r.width/2;
   var left=Math.round(cx-w/2);
   if(left<margin) left=margin;
   if(left>v.width-margin-w) left=Math.round(v.width-margin-w);
   var top=r.top-v.top, bottom=r.bottom-v.top;
-  var above=top > v.height-bottom;
-  var y=above ? top-10-h : bottom+10;
+  var yAbove=top-gap-h, yBelow=bottom+gap;
+  function fits(y){ return y>=margin && y+h<=v.height-margin; }
+  var step=t.steps[t.i];
+  var above=step && step.above ? true : top > v.height-bottom;
+  var y=above ? yAbove : yBelow;
+  /* a target below the bar never gets a bubble on top of the bar if the other side has room */
+  if(!(step && step.above) && top>=barBottom && y<barBottom+margin && fits(above ? yBelow : yAbove)){
+    above=!above;
+    y=above ? yAbove : yBelow;
+  } else if(!fits(y) && fits(above ? yBelow : yAbove)){
+    above=!above;
+    y=above ? yAbove : yBelow;
+  }
   if(y<margin) y=margin;
   if(y+h>v.height-margin) y=v.height-margin-h;
   /* if the clamp pushed it over the target, take the other side */
   if(y<bottom && y+h>top){
-    var alt=above ? bottom+10 : top-10-h;
-    if(alt>=margin && alt+h<=v.height-margin) y=alt;
+    var alt=above ? yBelow : yAbove;
+    if(alt>=margin && alt+h<=v.height-margin && (alt+h<=top || alt>=bottom)){
+      y=alt;
+      above=!above;
+    }
   }
   y=Math.round(y);
+  /* last resort on the tiny screen: slide off the play button rather than sit over it */
+  if(play && top>=barBottom){
+    var pr=play.getBoundingClientRect();
+    var bl=v.left+left, bt=v.top+y;
+    if(bl<pr.right && bl+w>pr.left && bt<pr.bottom && bt+h>pr.top){
+      var nl=Math.round(pr.right-v.left+6);
+      var room=v.width-margin-nl;
+      if(nl+w<=v.width-margin){
+        left=nl;
+      } else if(room>=80){
+        /* a narrower bubble rewraps and grows; put it back on the side it came from */
+        box.style.maxWidth=room+"px";
+        left=nl;
+        w=box.offsetWidth;
+        h=box.offsetHeight;
+        if(y+h>top && y<bottom){
+          y=above ? top-gap-h : bottom+gap;
+          if(y<margin) y=margin;
+          if(y+h>v.height-margin) y=v.height-margin-h;
+        }
+      }
+    }
+  }
   box.classList.toggle("st-tour-above",y+h<=top);
   box.classList.toggle("st-tour-below",y>=bottom);
   box.style.left=left+"px";
@@ -896,6 +993,7 @@ function tourEnd(seen){
   if(t.hi) t.hi.classList.remove("st-tour-hi");
   document.body.classList.remove("st-tour-on");
   if(t.root.parentNode) t.root.parentNode.removeChild(t.root);
+  tourFitChain();                 /* the song chain takes its normal height back */
   if(seen && T.meta && t.screen){
     T.meta.toured=T.meta.toured || {};
     T.meta.toured[t.screen]=true;
@@ -1059,11 +1157,15 @@ function newTape(){
 /* ---------- taps and keys ---------- */
 function setScreen(s){
   if(["drums","bass","chords","melody","song"].indexOf(s)<0) return;
+  var changed=s!==T.screen;
+  /* leaving a screen mid-tour ends that tour unseen: it shows again next time */
+  if(changed && T.tour) tourEnd(false);
   T.screen=s;
   T.focus=0;
   T.kb=false;
   T.painted=null;
   renderAll();
+  if(changed) maybeTour();
 }
 function setPat(i){
   if(!T.loaded || !T.song || i<0 || i>=SONGS.PATTERNS_MAX) return false;
@@ -1140,6 +1242,7 @@ function noteTap(track,step){
   touch();
   renderGrid(); renderKeys(); renderNav();
   auditionNote(track,deg);
+  tourEvent("note");
 }
 function keyTap(deg){
   var track=noteTrack(), sel, note;
@@ -1156,6 +1259,7 @@ function keyTap(deg){
   }
   renderKeys();
   auditionNote(track,deg);
+  tourEvent("pitch");
 }
 function chordTap(half){
   if(!T.loaded || !T.song) return;
@@ -1180,6 +1284,7 @@ function chordTap(half){
   touch();
   renderChords(); renderNav();
   auditionChord(deg);
+  tourEvent("chord");
 }
 function chordKeyTap(deg){
   if(!T.song) return;
@@ -1207,9 +1312,11 @@ function scrollSlotIntoView(){
 }
 function songLetter(p){
   if(!T.song || !T.loaded) return;
+  var s=T.song.song||[0], changed=s[T.slot]!==p;
   T.song=SONGS.setSlot(T.song,T.slot,p);
   touch();
   renderSong(); renderNav(); renderTabs();
+  if(changed) tourEvent("slot");
 }
 function addSongSlot(){
   if(!T.loaded || !T.song) return;

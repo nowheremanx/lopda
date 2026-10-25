@@ -288,6 +288,32 @@ async function capture(rootArg, outArg) {
     await p.waitForFunction(() => document.getElementById("v-studio").getAttribute("data-playing") === "false");
     await p.waitForFunction(() => !document.querySelector("#v-studio .st-cell.playing"));
     await shot("13h-studio-tour-2");
+
+    /* 1b-1 (12.2, 12.10): B ends the rhythm tour as seen; the bass screen then shows its own first step,
+       the chord and song tours are skipped, and the pattern sheet is open. Playback stays stopped in all four. */
+    await p.keyboard.press("z");
+    await p.waitForSelector("#v-studio .st-tour-box", { state: "detached" });
+    await p.click('#studio-screens .st-scr[data-screen="bass"]');
+    await p.waitForFunction(() => {
+      const t = document.querySelector("#v-studio .st-tour-box p");
+      return t && /这 16 格还是一小节/.test(t.textContent);
+    });
+    await shot("13i-studio-bass");
+    await p.keyboard.press("z");
+    await p.waitForSelector("#v-studio .st-tour-box", { state: "detached" });
+    await p.click('#studio-screens .st-scr[data-screen="chords"]');
+    await p.waitForSelector("#v-studio .st-tour-box");
+    await p.keyboard.press("z");
+    await p.waitForSelector("#v-studio .st-tour-box", { state: "detached" });
+    await shot("13j-studio-chords");
+    await p.click('#studio-screens .st-scr[data-screen="song"]');
+    await p.waitForSelector("#v-studio .st-tour-box");
+    await p.keyboard.press("z");
+    await p.waitForSelector("#v-studio .st-tour-box", { state: "detached" });
+    await shot("13k-studio-song");
+    await p.click("#studio-pat");
+    await p.waitForSelector("#studio-sheet:not([hidden])");
+    await shot("13l-studio-patterns");
   }
 
   /* cartridge player, empty library */

@@ -634,6 +634,10 @@ textarea::placeholder{color:var(--ink-2)}
 .st-tour-btns button{flex:1;min-height:44px;padding:4px 8px;border:2px solid var(--ink);font-family:var(--f-lcd);font-size:15px;line-height:1.1;cursor:pointer}
 .st-tour-skip{background:transparent;color:var(--ink)}
 .st-tour-next{background:var(--ink);color:var(--lcd)}
+/* 331x359: a 15 px bubble is taller than the gap above a target; the smaller voice keeps the same
+   words and 44 px buttons inside the view */
+.studio.st-short .st-tour-box{font-size:12px;line-height:1.25;padding:2px 4px;gap:2px}
+.studio.st-short .st-tour-btns button{font-size:12px;padding:2px 4px}
 /* the bubble sits above the screen, so the hush toast has to rise above it */
 .st-tour-on #toast{z-index:60}
 /* a sheet owns the screen while it is open: the bubble and the target's frame step aside, then come back */

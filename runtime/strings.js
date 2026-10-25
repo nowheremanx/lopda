@@ -387,6 +387,14 @@
       "studio.tour.cell": "点一个空格，加一下底鼓；再点一次就去掉。",
       "studio.tour.drums": "四只鼓各有自己的 16 格，叠在一起就是节奏。换一只看看。",
       "studio.tour.tempo": "− + 调快慢；≡ 里换鼓组、新磁带。HOME 随时离开，会自动保存。",
+      "studio.tour.n1": "这 16 格还是一小节。点一个空格，放一个音。",
+      "studio.tour.n2": "下面 8 个键从低到高。点一个，换这一格的音高。",
+      "studio.tour.n3": "再点一次选中的格就删掉。一个音会一直响到下一个音。",
+      "studio.tour.c1": "一小节两格。点一格，放一个和弦。",
+      "studio.tour.c2": "这六个是这个调里的和弦，点一个换掉选中的格。后一格空着，前一个和弦就响满一小节。",
+      "studio.tour.s1": "A 到 H 是八段，每段一小节。点这里换一段，或者把这一段复制过去改。",
+      "studio.tour.s2": "这一串就是整首歌，从左往右放。点一格，再点下面的字母换掉它。",
+      "studio.tour.s3": "+ 加一段，− 去掉最后一段。在这一屏按 ▸ 放整首歌。",
 
       "boot.nostore": "这台浏览器不让存档，关掉页面后内容会丢。"
     },
@@ -768,6 +776,14 @@
       "studio.tour.cell": "Tap an empty square to add a kick. Tap it again to remove it.",
       "studio.tour.drums": "Four drums, 16 squares each; together they make the beat. Try another one.",
       "studio.tour.tempo": "− and + set the speed; ≡ has the kit and a new tape. HOME leaves any time; it saves itself.",
+      "studio.tour.n1": "These 16 squares are still one bar. Tap an empty one to place a note.",
+      "studio.tour.n2": "The 8 keys below go from low to high. Tap one to change this square's pitch.",
+      "studio.tour.n3": "Tap the selected square again to remove it. A note rings until the next one.",
+      "studio.tour.c1": "Two squares per bar. Tap one to place a chord.",
+      "studio.tour.c2": "These six are the chords of this key; tap one to change the selected square. Leave the second square empty and the first chord fills the bar.",
+      "studio.tour.s1": "A to H are eight patterns, one bar each. Tap here to switch, or copy this one and change the copy.",
+      "studio.tour.s2": "This row is the whole song, played left to right. Tap a slot, then a letter below to change it.",
+      "studio.tour.s3": "+ adds a slot, − removes the last. Press ▸ on this screen to play the whole song.",
 
       "boot.nostore": "This browser won't keep data. It's lost when the page closes."
     }
