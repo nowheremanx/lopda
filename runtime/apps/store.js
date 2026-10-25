@@ -22,9 +22,9 @@ var PERMISSIONS=["files","motion","mic","notes","camera","wordbook"];
 /* a permission as one glance: 16 x 16 pixel icons, the same format as ICONS in core.js. The store's entry shows
    them instead of a line of text; the install dialog shows them with a one-word label (decisions.md section 42). */
 var PERM_ICONS={
-  files:["................","..000...........",".03330..........","0333330000000000","0333333333333330","0333333333333330","0300000000000030","0333333333333330","0333333333333330","0333333333333330","0333333333333330","0333333333333330","0333333333333330","0000000000000000","................","................"],
-  motion:["................","................",".....00000......",".....03330......","0....03130....0.","00...03130...00.","0....03130....0.",".....03330......",".....03130......","0....03130....0.","00...03130...00.","0....03130....0.",".....03330......",".....00000......","................","................"],
-  mic:["................","......0000......",".....033330.....",".....033330.....",".....033330.....",".....033330.....",".....033330.....","..0..033330..0..","..0..033330..0..","...0.033330.0...","....03333330....",".....000000.....",".......00.......",".......00.......","......0000......","................"],
+  files:["................","................","................","..000...........",".03330..........",".033330000000...",".0333333333330..",".00000000000000.","..0333333333330.","..0333333333330.","..0333333333330.","..0333333333330.","..0333333333330.","..0000000000000.","................","................"],
+  motion:["................","................","................","................","..0000..........",".....000........",".......00.......","..000....0......",".....00...0.....","......00..00....","..000..00..0....","....00..0..00...","..11.00..0..0...","..11..0..0..0...","......0..0..0...","................"],
+  mic:["................",".....0000.......","....033330......","...03333330.....","...03030330.....","...03333330.....","...03030330.....","...03333330.....","...00000000.....","....033330......","....033330......","....033330......","....033330......","...00000000.....","..0000000000....","................"],
   notes:["................","................","...........00...","..........0330..",".........0330...","........0330....",".......0330.....","......0330......",".....0330.......","....0330........","....000.........","...00...........","..00............","................","................","................"],
   camera:["................","................","....0000........","..000000000000..",".03333333333330.",".03300000333330.",".03011111033000.",".00112222103330.",".00122332103330.",".00122332103330.",".00112222103330.",".03011111033330.",".03300000333330.",".00000000000000.","................","................"],
   wordbook:["................","................","..000000000000..","..033330033330..","..031130031130..","..033330033330..","..031130031130..","..033330033330..","..031130031130..","..033330033330..","..033330033330..","..000000000000..",".......0220.....",".......0220.....","........00......","................"]
@@ -87,6 +87,15 @@ function outdatedApps(){
   return registryApps().filter(function(r){ var a=installedOf(r.id); return a && a.sha256!==r.sha256; });
 }
 function updatesAvailable(){ return outdatedApps().length>0; }
+/* an app first published in the last seven days wears the NEW badge; the date comes from the manifest's
+   "released" and is copied into registry/index.json (SPEC.md section 2, decisions.md section 42) */
+function isNew(r){
+  if(!r || typeof r.released!=="string") return false;
+  var t=Date.parse(r.released+"T00:00:00");
+  if(isNaN(t)) return false;
+  var age=Date.now()-t;
+  return age>=0 && age<7*24*60*60*1000;
+}
 /* the selected category stays while the store is open; "all" groups the list into sections */
 var storeCat="all", updating=null, storeQuery="";
 /* search: NFKC and lower case on both sides, a plain substring, every word must match; names beat descriptions.
@@ -155,7 +164,8 @@ function storeItem(r){
   var li=document.createElement("li"); li.className="store-item";
   var tile=document.createElement("span"); tile.className="tile"; fillTile(tile,r);
   var body=document.createElement("div"); body.className="store-body";
-  var t=document.createElement("b"); t.textContent=appName(r)+"  v"+r.version;
+  var t=document.createElement("b"); t.textContent=appName(r)+" v"+r.version;
+  if(isNew(r)){ var nb=document.createElement("span"); nb.className="store-new"; nb.textContent=tr("store.new"); t.appendChild(document.createTextNode(" ")); t.appendChild(nb); }
   var d=document.createElement("span"); d.textContent=appDesc(r);
   var m=document.createElement("small"); m.textContent=(r.author||tr("store.anon"))+" · "+(r.license||"")+" · "+Math.max(1,Math.round((r.bytes||0)/1024))+" KB";
   body.appendChild(t); body.appendChild(d); body.appendChild(m);

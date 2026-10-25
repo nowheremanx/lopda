@@ -37,6 +37,7 @@ No other files are loaded. Images, sounds and fonts must be embedded in
   "category": "game",
   "icon": ["................", "...16 rows of 16 characters..."],
   "version": "1.0.0",
+  "released": "2026-10-07",
   "description": "点黑格子里的地鼠，20 秒。",
   "i18n": { "en": { "name": "Mole Bop", "description": "Bop the moles in the dark holes. 20 seconds." } },
   "author": "Haowei Wu",
@@ -55,6 +56,7 @@ No other files are loaded. Images, sounds and fonts must be embedded in
 | `category` | Optional. One of `game`, `productivity`, `education`, `create`, `story`, `life`. The store files the app under it and offers that category as a filter; without it the app shows under Other. |
 | `icon` | Optional. A 16×16 pixel icon: an array of 16 strings, each 16 characters long. `0` ink, `1` dark, `2` mid, `3` paper, `.` transparent (the tile shows through). |
 | `version` | Semantic version `MAJOR.MINOR.PATCH`. Bump it on every change. |
+| `released` | Optional. The day the app was first published, `YYYY-MM-DD`. The store wears a 新 / NEW badge for seven days after it (runtime 0.44.0+). Set it once; a version update does not change it. |
 | `description` | One sentence, 80 characters at most. |
 | `i18n` | Optional. Store text in other languages: `{"en": {"name", "description"}, "zh": {...}}`. Only `zh` and `en`, only those two fields, same rules as above. The store and home screen show the entry for the player's language and fall back to `name` / `description`. |
 | `author` | Name or handle. |

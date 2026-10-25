@@ -5,6 +5,7 @@
   "glyph": "箱",
   "category": "game",
   "version": "1.0.0",
+  "released": "2026-10-24",
   "description": "每天一关推箱子：把箱子推到记号上，只能推不能拉。有最少步数、撤销和答案。",
   "i18n": {
     "zh": {

@@ -23,7 +23,7 @@ for (const id of ids) {
   const m = JSON.parse(readFileSync(join(dir, "manifest.json"), "utf8"));
   const html = readFileSync(join(dir, "index.html"));
   apps.push({
-    spec: m.spec, id: m.id, name: m.name, glyph: m.glyph, ...(m.category ? { category: m.category } : {}), ...(m.buttons ? { buttons: true } : {}), ...(m.icon ? { icon: m.icon } : {}), version: m.version,
+    spec: m.spec, id: m.id, name: m.name, glyph: m.glyph, ...(m.category ? { category: m.category } : {}), ...(m.buttons ? { buttons: true } : {}), ...(m.icon ? { icon: m.icon } : {}), version: m.version, ...(m.released ? { released: m.released } : {}),
     description: m.description, ...(m.i18n ? { i18n: m.i18n } : {}), author: m.author, license: m.license,
     ...(m.permissions && m.permissions.length ? { permissions: m.permissions } : {}),
     path: `apps/${id}/index.html`,
