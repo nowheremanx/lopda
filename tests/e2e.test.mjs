@@ -6886,9 +6886,10 @@ test("crossing: round 1 shows a grid, a demo spells one word, words typed with t
       const r = document.querySelector(s).getBoundingClientRect();
       return r.top >= 0 && r.bottom <= root.clientHeight && r.left >= 0 && r.right <= root.clientWidth;
     });
-    const keys44 = [...document.querySelectorAll(".key")].every((k) => {
+    const keysSized = [...document.querySelectorAll(".key")].every((k) => {
       const r = k.getBoundingClientRect();
-      return r.width >= 44 && r.height >= 44;
+      return r.width >= 36 && r.width <= 44 && r.width === r.height &&
+        getComputedStyle(k).borderRadius === "50%";
     });
     const rs = [], cs = [];
     game.placed.forEach((w) => {
@@ -6896,11 +6897,12 @@ test("crossing: round 1 shows a grid, a demo spells one word, words typed with t
         rs.push(w.r + (w.dir === "v" ? i : 0)); cs.push(w.c + (w.dir === "h" ? i : 0));
       }
     });
-    return { size: [root.clientWidth, root.clientHeight], fits, keys44, rows: Math.max(...rs) - Math.min(...rs) + 1, cols: Math.max(...cs) - Math.min(...cs) + 1 };
+    return { size: [root.clientWidth, root.clientHeight], fits, keysSized, rows: Math.max(...rs) - Math.min(...rs) + 1, cols: Math.max(...cs) - Math.min(...cs) + 1 };
   });
   assert.deepEqual(layout.size, [331, 359]);
   assert.equal(layout.fits, true, "everything stays inside the smallest screen");
-  assert.equal(layout.keys44, true, "every wheel letter is a 44px target");
+  /* the visible circle is 36-44 px; the 44 px touch target comes from the press proximity in the app */
+  assert.equal(layout.keysSized, true, "every wheel letter is a round 36-44 px key");
   assert.ok(layout.rows <= 7 && layout.cols <= 7, "a small grid: " + layout.rows + "x" + layout.cols);
 
   /* the demo: a finger spells the shortest grid word that is not the seed, the line follows, the word fills in */
@@ -7107,12 +7109,14 @@ test("crossing: round 1 shows a grid, a demo spells one word, words typed with t
   await press("a");
   await until(p, () => f.evaluate(() => game.phase === "play" && game.round === 2), "round 2");
 
-  /* the way out: B with an empty entry asks first; two buttons carry the keys, and a tap on either acts as its key */
+  /* the way out: B with an empty entry asks first; STAY comes first and holds the cursor, and a tap on either
+     button acts as that button without moving the cursor first */
   await press("b");
   await f.waitForFunction(() => game.phase === "leave");
   const leave = await f.evaluate(() => {
     const root = document.documentElement, box = document.getElementById("cover").getBoundingClientRect();
-    const btns = [...document.querySelectorAll("#cover-actions button")].map((b) => {
+    const acts = [...document.querySelectorAll("#cover-actions button")];
+    const btns = acts.map((b) => {
       const r = b.getBoundingClientRect();
       return { text: b.textContent, w: r.width, h: r.height, left: r.left, right: r.right, top: r.top, bottom: r.bottom };
     });
@@ -7120,26 +7124,38 @@ test("crossing: round 1 shows a grid, a demo spells one word, words typed with t
       text: document.getElementById("cover-text").textContent,
       footHidden: document.getElementById("cover-foot").hidden,
       buttons: btns,
+      outline: acts.map((b) => b.classList.contains("outline")),
       gap: btns.length > 1 ? btns[1].left - btns[0].right : -1,
       box: [box.left, box.top, box.right, box.bottom],
       size: [root.clientWidth, root.clientHeight],
     };
   });
   assert.match(leave.text, /回到主界面/, "the confirm asks before leaving");
-  assert.equal(leave.footHidden, true, "the buttons carry the keys, so the old footer line is gone");
-  assert.deepEqual(leave.buttons.map((b) => b.text), ["A 回去", "B 留下"], "two buttons, each naming its key");
+  assert.equal(leave.footHidden, true, "the confirm's own buttons need no footer line");
+  assert.deepEqual(leave.buttons.map((b) => b.text), ["留下", "回去"], "STAY first, then LEAVE; the cursor says what A does");
+  assert.deepEqual(leave.outline, [false, true], "the safe answer STAY opens selected (filled); LEAVE is outlined");
   assert.ok(leave.buttons.length === 2 && leave.buttons.every((b) => b.w >= 96 && b.h >= 44), "each button is a finger target");
   assert.ok(leave.gap >= 8, "the buttons keep 8 px apart: " + leave.gap);
   assert.deepEqual(leave.size, [331, 359]);
   assert.ok(leave.buttons.every((b) => b.left >= leave.box[0] && b.right <= leave.box[2] && b.top >= leave.box[1] && b.bottom <= leave.box[3]),
     "both buttons sit inside the confirm panel");
   assert.ok(leave.box[0] >= 0 && leave.box[1] >= 0 && leave.box[2] <= 331 && leave.box[3] <= 359, "the confirm fits 331x359: " + leave.box);
-  /* B STAY, tapped, goes back to the round; the next B asks again and A LEAVE, tapped, goes to the title */
-  await f.locator("#cover-btn2").tap();
+  /* Right/Left move the cursor between the two; B always goes back to the round */
+  const leaveOutline = () => f.evaluate(() => [...document.querySelectorAll("#cover-actions button")].map((b) => b.classList.contains("outline")));
+  await press("right");
+  assert.deepEqual(await leaveOutline(), [true, false], "Right moves the cursor to LEAVE");
+  await press("left");
+  assert.deepEqual(await leaveOutline(), [false, true], "Left moves it back to STAY");
+  await press("b");
   await f.waitForFunction(() => game.phase === "play");
+  /* a tap on STAY goes back to the round; the next B asks again and a tap on LEAVE goes to the title */
   await press("b");
   await f.waitForFunction(() => game.phase === "leave");
   await f.locator("#cover-btn").tap();
+  await f.waitForFunction(() => game.phase === "play");
+  await press("b");
+  await f.waitForFunction(() => game.phase === "leave");
+  await f.locator("#cover-btn2").tap();
   await f.waitForFunction(() => game.phase === "title");
   const continued = await f.evaluate(() => [...document.querySelectorAll("#cover-list li")].map((li) => li.textContent));
   assert.equal(continued[0], "继续 · 第 2 关", "the title continues at round 2");
@@ -7207,6 +7223,33 @@ test("crossing: round 1 shows a grid, a demo spells one word, words typed with t
   });
   assert.equal(pagedBack.text, "◄ ► 翻页", "the page hint comes back after 1.5 s");
   assert.equal(pagedBack.ink, false, "the reason's ink goes with it");
+  /* A horizontal swipe turns the pages as the arrow keys do, wrapping round the four and keeping the cursor's
+     row and column. A swipe that starts on an open round must not open it, and one from a gap must still turn. */
+  const swipeAt = await f.evaluate(() => {
+    const cells = [...document.querySelectorAll("#cover-list li")];
+    const c1 = cells[1].getBoundingClientRect(), c2 = cells[2].getBoundingClientRect(), c3 = cells[3].getBoundingClientRect();
+    return {
+      cell1: { x: (c1.left + c1.right) / 2, y: (c1.top + c1.bottom) / 2 },
+      gap: { x: (c2.right + c3.left) / 2, y: (c2.top + c2.bottom) / 2 },
+    };
+  });
+  await p.locator("#app").scrollIntoViewIfNeeded();
+  const appBox = await p.locator("#app").boundingBox();
+  await p.mouse.move(appBox.x + swipeAt.cell1.x, appBox.y + swipeAt.cell1.y);
+  await p.mouse.down();
+  await p.mouse.move(appBox.x + swipeAt.cell1.x - 60, appBox.y + swipeAt.cell1.y, { steps: 6 });
+  await p.mouse.up();
+  const nextPage = await picker();
+  assert.equal(await f.evaluate(() => game.phase), "pick", "a left swipe must not open the round it starts on");
+  assert.equal(nextPage.head, "第 26-50 关", "a left swipe turns to the next page");
+  assert.equal(nextPage.sel, 2, "the swipe keeps the cursor's row and column");
+  await p.mouse.move(appBox.x + swipeAt.gap.x, appBox.y + swipeAt.gap.y);
+  await p.mouse.down();
+  await p.mouse.move(appBox.x + swipeAt.gap.x + 60, appBox.y + swipeAt.gap.y, { steps: 6 });
+  await p.mouse.up();
+  const backPage = await picker();
+  assert.equal(backPage.head, "第 1-25 关", "a right swipe goes back a page, even from a gap between cells");
+  assert.equal(backPage.sel, 2, "and the cursor keeps its place again");
   await press("b");
   await f.waitForFunction(() => game.phase === "title");
 
@@ -7417,6 +7460,7 @@ test("crossing: an old save, a replay and a quick re-entry", { skip, timeout: 60
   assert.equal(await f.textContent("#round"), "第 1 关 · 重玩", "the header marks the replay");
   await press("b");
   await f.waitForFunction(() => game.phase === "leave");
+  await press("right");                /* the cursor opens on STAY: step to LEAVE */
   await press("a");
   await f.waitForFunction(() => game.phase === "title");
   const kept = await p.evaluate(() => JSON.parse(localStorage.getItem("lopda-dev:crossing") || "{}").game);
@@ -7429,6 +7473,7 @@ test("crossing: an old save, a replay and a quick re-entry", { skip, timeout: 60
   await until(p, () => f.evaluate(() => game.phase === "play" && game.round === 2), "round 2");
   await press("b");
   await f.waitForFunction(() => game.phase === "leave");
+  await press("right");
   await press("a");
   await f.waitForFunction(() => game.phase === "title");
   await p.waitForTimeout(350);        /* the title's tap guard after the leave */
@@ -7562,10 +7607,11 @@ test("crossing: HOW TO PLAY runs the fixed practice round and leaves the save al
   await press("start");
   await f.waitForFunction(() => game.phase === "play");
 
-  /* (a) mid-play, B asks and LEAVE returns to the title without saving anything */
+  /* (a) mid-play, B asks; the cursor opens on STAY, so step to LEAVE and A returns to the title without saving */
   await press("b");
   await f.waitForFunction(() => game.phase === "leave");
   assert.match(await f.textContent("#cover-text"), /回到主界面/);
+  await press("right");
   await press("a");
   await f.waitForFunction(() => game.phase === "title");
   assert.equal(await f.evaluate(() => game.mode), "fixed", "the leave also clears the practice mode");
@@ -7673,6 +7719,190 @@ test("crossing: HOW TO PLAY runs the fixed practice round and leaves the save al
   assert.deepEqual(kept.done, []);
   assert.equal(kept.random, 0);
   assert.equal(kept.bookTip, true);
+
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+/* ---------- 拼字格 / Crossing: a drag takes the letters its path passes, and the crowded ring's middle letter stays out ---------- */
+test("crossing: a drag along a chord skips the middle letter, and a fast step over a key still takes it", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t);
+  const ready = () => p.waitForFunction(() => /loaded |load failed/.test(document.getElementById("log").textContent), null, { timeout: 5000 });
+  await p.goto(`${base}/sdk/dev.html?app=registry/apps/crossing&lang=zh`, { waitUntil: "load" });
+  await ready();
+  /* round 41 uses a seven-letter seed: the crowded ring where a chord skips a letter about one key away */
+  await p.evaluate(() => localStorage.setItem("lopda-dev:crossing", JSON.stringify({ game: { round: 41, cleared: 40, taught: true } })));
+  await p.reload({ waitUntil: "load" });
+  await ready();
+  let f;
+  await until(p, async () => {
+    f = p.frames().find((x) => x !== p.mainFrame());
+    return f && await f.evaluate(() => !!(window.game && game.phase === "title")).catch(() => false);
+  }, "the title screen");
+  await p.locator("#app").evaluate((el) => { el.style.width = "331px"; el.style.height = "359px"; el.style.flex = "none"; });
+  await p.waitForTimeout(150);
+  await p.locator('#pad [data-b="a"]').click();
+  await until(p, () => f.evaluate(() => game.phase === "play" && game.round === 41), "round 41");
+  const wheel = await f.evaluate(() => {
+    const keys = [...document.querySelectorAll(".key")].map((el) => {
+      const b = el.getBoundingClientRect();
+      return { i: +el.getAttribute("data-i"), x: b.left + b.width / 2, y: b.top + b.height / 2, w: b.width };
+    }).sort((a, b) => a.i - b.i);
+    const wr = document.getElementById("wheel").getBoundingClientRect();
+    const br = document.getElementById("board").getBoundingClientRect();
+    const sr = document.getElementById("stage").getBoundingClientRect();
+    return {
+      letters: game.wheel.slice(),
+      ringR: game.wheelR,
+      wheelW: wr.width,
+      center: { x: wr.left + wr.width / 2, y: wr.top + wr.height / 2 },
+      keyRadius: getComputedStyle(document.querySelector(".key")).borderRadius,
+      keys,
+      board: { l: br.left, r: br.right, t: br.top, b: br.bottom },
+      stage: { l: sr.left, r: sr.right, t: sr.top, b: sr.bottom },
+      size: [document.documentElement.clientWidth, document.documentElement.clientHeight],
+    };
+  });
+  assert.equal(wheel.letters.length, 7, "round 41's seed has seven letters, the crowded ring this test needs");
+  assert.equal(wheel.keys.length, 7, "one key per letter");
+  /* the approved smallest-screen shape: a wheel that grew into the board's width, round keys with room to spare */
+  assert.ok(wheel.wheelW >= 176, "the wheel is at least 176 px wide at 331x359: " + wheel.wheelW.toFixed(1));
+  assert.equal(wheel.keyRadius, "50%", "every key is a circle");
+  const ringGaps = wheel.keys.map((k, i) => {
+    const q = wheel.keys[(i + 1) % wheel.keys.length];
+    return Math.hypot(q.x - k.x, q.y - k.y) - k.w;
+  });
+  assert.ok(ringGaps.every((g) => g >= 10),
+    "neighbouring circles keep at least 10 px apart at 331x359: " + ringGaps.map((g) => g.toFixed(1)).join(" / "));
+  assert.ok(wheel.board.l >= 0 && wheel.board.r <= wheel.size[0],
+    "the board stays inside the app's width: " + wheel.board.l.toFixed(1) + ".." + wheel.board.r.toFixed(1) + " of " + wheel.size[0]);
+  assert.ok(wheel.board.l >= wheel.stage.l - 0.5 && wheel.board.r <= wheel.stage.r + 0.5 &&
+    wheel.board.t >= wheel.stage.t - 0.5 && wheel.board.b <= wheel.stage.b + 0.5,
+    "the board stays inside the stage: board " + JSON.stringify(wheel.board) + " in stage " + JSON.stringify(wheel.stage));
+  const box = await p.locator("#app").boundingBox();
+  const at = (i, dx = 0, dy = 0) => ({ x: box.x + wheel.keys[i].x + dx, y: box.y + wheel.keys[i].y + dy });
+  const entry = () => f.textContent("#entry");
+  const letters = (ids) => ids.map((i) => wheel.letters[i].toUpperCase()).join("");
+  /* the app's own distance from a point to the step's segment, for the premise checks below */
+  const segDist = (q, a, b) => {
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const t = Math.max(0, Math.min(1, ((q.x - a.x) * dx + (q.y - a.y) * dy) / (dx * dx + dy * dy)));
+    return Math.hypot(a.x + t * dx - q.x, a.y + t * dy - q.y);
+  };
+  /* the catch radius the app computes from the real ring (the bowed legs' premise below must sit outside it) */
+  const catchRadius = Math.max(12, Math.min(24,
+    Math.round(0.62 * wheel.ringR * (1 - Math.cos(2 * Math.PI / wheel.letters.length)))));
+  const firstChord = Math.hypot(wheel.keys[1].x - wheel.keys[0].x, wheel.keys[1].y - wheel.keys[0].y);
+  const measuredR = firstChord / (2 * Math.sin(Math.PI / wheel.letters.length));
+  assert.ok(Math.abs(wheel.ringR - measuredR) <= 1,
+    "game.wheelR is the ring the keys sit on: " + wheel.ringR + " vs " + measuredR.toFixed(1) + " measured");
+  /* Seven letters crowd the ring: the two middle rows' partner sits straight across. Left from the upper
+     middle letter takes the lower right one, and Right from the lower middle takes the upper left one; the
+     old weaker sideways penalty sent those four presses diagonally to the wrong row. */
+  const aimed = await f.evaluate(() => ({
+    "1 left": game.aim(1, "left"), "2 left": game.aim(2, "left"),
+    "5 right": game.aim(5, "right"), "6 right": game.aim(6, "right"),
+  }));
+  assert.deepEqual(aimed, { "1 left": 6, "2 left": 5, "5 right": 2, "6 right": 1 },
+    "with seven letters the middle rows' partner is straight across");
+
+  /* (a) A straight chord passes 25.9 px from key 3's middle, outside the catch radius, so it proves nothing.
+     Bow the path outward toward key 3, through a midpoint on the wheel-centre-to-key-3 line at catchRadius + 4 px
+     from key 3 (on the centre side): both legs must still leave key 3's element out. */
+  const towardCentre = (d) => {
+    const dx = wheel.center.x - wheel.keys[3].x, dy = wheel.center.y - wheel.keys[3].y;
+    const len = Math.hypot(dx, dy);
+    return { x: wheel.keys[3].x + (dx / len) * d, y: wheel.keys[3].y + (dy / len) * d };
+  };
+  const outMid = towardCentre(catchRadius + 4);
+  assert.ok(Math.abs(Math.hypot(outMid.x - wheel.center.x, outMid.y - wheel.center.y) - (wheel.ringR - catchRadius - 4)) <= 1.5,
+    "the bowed midpoint sits between the wheel's centre and key 3");
+  const leg2 = segDist(wheel.keys[3], wheel.keys[2], outMid);
+  const leg4 = segDist(wheel.keys[3], outMid, wheel.keys[4]);
+  assert.ok(leg2 > catchRadius && leg4 > catchRadius,
+    "the bowed legs pass " + leg2.toFixed(1) + " and " + leg4.toFixed(1) + " px from key 3's middle, outside the " + catchRadius + " px catch radius");
+  await p.mouse.move(at(2).x, at(2).y);
+  await p.mouse.down();
+  await p.mouse.move(box.x + outMid.x, box.y + outMid.y, { steps: 8 });
+  await p.mouse.move(at(4).x, at(4).y, { steps: 8 });
+  assert.equal(await entry(), letters([2, 4]), "the bowed path takes only its two ends");
+  let on = await f.evaluate(() => [...document.querySelectorAll(".key")].map((el) => el.classList.contains("on")));
+  assert.equal(on[3], false, "key 3's element is not marked on");
+  assert.deepEqual([on[2], on[4]], [true, true], "the bowed path's two ends are the picked letters");
+  await p.mouse.up();
+  await until(p, async () => (await entry()) === "", "the two-letter word to be refused");
+
+  /* The same bow with its midpoint at catchRadius - 4 px from key 3, from key 4 to key 2 (reversed, so the
+     word is ARE and not the ERA that step (b) needs): now the legs pass inside the catch radius and key 3
+     must come in, between its two neighbours. This proves the radius on both sides. */
+  const inMid = towardCentre(catchRadius - 4);
+  await p.mouse.move(at(4).x, at(4).y);
+  await p.mouse.down();
+  await p.mouse.move(box.x + inMid.x, box.y + inMid.y, { steps: 8 });
+  await p.mouse.move(at(2).x, at(2).y, { steps: 8 });
+  assert.equal(await entry(), letters([4, 3, 2]), "a midpoint inside the catch radius takes key 3");
+  await p.mouse.up();
+  await until(p, async () => (await entry()) === "", "the three-letter word to be submitted");
+
+  /* (b) through the middles of three neighbouring keys: all three, in the order the finger reaches them.
+     These three letters spell ERA, a bonus word in round 41: releasing adds it and one hint, so the "land"
+     message is honest. It only changes the done list and hints; the wheel and its key positions stay put,
+     which is all (c) reads. */
+  const hintsBefore = await f.evaluate(() => game.hints);
+  await p.mouse.move(at(2).x, at(2).y);
+  await p.mouse.down();
+  await p.mouse.move(at(3).x, at(3).y, { steps: 6 });
+  await p.mouse.move(at(4).x, at(4).y, { steps: 6 });
+  assert.equal(await entry(), letters([2, 3, 4]), "three neighbouring letters, in order");
+  await p.mouse.up();
+  await until(p, async () => (await entry()) === "", "the ERA bonus word to be submitted");
+  assert.equal(await f.evaluate(() => game.hints), hintsBefore + 1, "ERA is a bonus word in round 41: it adds one hint");
+
+  /* (c) one big jump with no pointermove over the middle key: the step runs from key 0's middle through
+     key 1 to a landing point past it, so the segment check is the only way key 1 can come in. The landing
+     point is farther from every key's middle than the catch radius, so it cannot pick one by itself. The
+     wheel is unchanged by (b), so its measured keys still apply. */
+  const land = {
+    x: wheel.keys[1].x + 0.8 * (wheel.keys[1].x - wheel.keys[0].x),
+    y: wheel.keys[1].y + 0.8 * (wheel.keys[1].y - wheel.keys[0].y),
+  };
+  const gaps = wheel.keys.map((k) => Math.hypot(k.x - land.x, k.y - land.y));
+  assert.ok(gaps.every((d) => d > catchRadius),
+    "the landing point stays " + Math.min(...gaps).toFixed(1) + " px from every key's middle, outside the catch radius");
+  const view = await f.evaluate(() => [document.documentElement.clientWidth, document.documentElement.clientHeight]);
+  assert.ok(land.x > 0 && land.y > 0 && land.x < view[0] && land.y < view[1], "the jump ends inside the app");
+  await p.mouse.move(at(0).x, at(0).y);
+  await p.mouse.down();
+  await p.mouse.move(box.x + land.x, box.y + land.y, { steps: 1 });
+  assert.equal(await entry(), letters([0, 1]), "the jump over the middle key still takes it");
+  assert.deepEqual(await f.evaluate(() => game.entry.slice()), [0, 1], "key 0 then key 1, though no pointermove ended near key 1");
+  await p.mouse.up();
+  await until(p, async () => (await entry()) === "", "the two-letter word to be refused");
+
+  /* (d) the first press of a drag is forgiving: 20 px from a key's middle, outside its visible circle and
+     outward away from the wheel's centre and neighbours, must still take that key. (The step above may have
+     started a shake; wait for it, because its few pixels at the edge of keyNear's 22 px would matter here.) */
+  await p.waitForTimeout(300);
+  const pressKey = 1;
+  const outward = {
+    x: wheel.keys[pressKey].x - wheel.center.x,
+    y: wheel.keys[pressKey].y - wheel.center.y,
+  };
+  const outLen = Math.hypot(outward.x, outward.y);
+  const firstPress = {
+    x: wheel.keys[pressKey].x + (outward.x / outLen) * 20,
+    y: wheel.keys[pressKey].y + (outward.y / outLen) * 20,
+  };
+  assert.ok(20 > wheel.keys[pressKey].w / 2,
+    "the press sits outside the key's visible " + wheel.keys[pressKey].w + " px circle");
+  assert.ok(Math.hypot(firstPress.x - wheel.center.x, firstPress.y - wheel.center.y) < wheel.wheelW / 2,
+    "the press stays on the wheel");
+  const nearestOther = Math.min(...wheel.keys.filter((k) => k.i !== pressKey).map((k) => Math.hypot(k.x - firstPress.x, k.y - firstPress.y)));
+  assert.ok(nearestOther > 22, "no neighbour is within keyNear's 22 px of the press: " + nearestOther.toFixed(1));
+  await p.mouse.move(box.x + firstPress.x, box.y + firstPress.y);
+  await p.mouse.down();
+  assert.equal(await entry(), letters([pressKey]), "a first press 20 px from a key's middle takes that key");
+  await p.mouse.up();
+  await until(p, async () => (await entry()) === "", "the one-letter press to clear");
 
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
