@@ -5,7 +5,7 @@
  * so a first start without network can still install them.
  * The cache is named after this worker's scope as well as its version: GitHub Pages PR previews (pr/<n>/runtime/)
  * share Cache Storage with the real site, and each worker only ever deletes its own scope's old caches. */
-var VERSION = "lopda-v0.41.0+8126a2f";
+var VERSION = "lopda-v0.41.0+4ba28b9";
 var CACHE = VERSION + " " + self.registration.scope;
 var SHELL = ["./", "index.html", "lopda.css", "strings.js", "platform.js", "lunar.js", "stardict.js", "wordlist.js", "bookparse.js", "textsel.js", "chip.js", "sensors.js", "speech.js", "lenses.js", "finder.js", "negative.js", "exif.js", "develop.js", "notetext.js", "zip.js", "backup.js", "ai.js", "studio-song.js", "studio-synth.js", "vendor/qrcode-generator/qrcode.js", "qr.js", "core.js",
   "apps/notes.js", "apps/calendar.js", "apps/dict.js", "apps/reader.js", "apps/camera.js", "apps/darkroom.js", "apps/studio.js", "apps/cart.js", "apps/snap.js", "apps/store.js", "apps/scripts-templates.js", "apps/scripts.js", "apps/settings.js", "boot.js", "../sdk/pad-shim.js",
