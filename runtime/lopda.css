@@ -610,6 +610,76 @@ textarea::placeholder{color:var(--ink-2)}
 #data-clear-all:disabled{color:var(--mid);border-color:var(--mid);background:transparent;box-shadow:none;cursor:default}
 #run-err-msg{white-space:pre-wrap}
 
+/* pet (runtime/apps/pet.js): one hardware screen, the room at 4 px a room pixel, eight 44 px icons, soft keys */
+.pet-view{display:flex;flex-direction:column;overflow:hidden;padding:0}
+/* the room keeps 4 CSS px a room pixel and is centred in whatever height is left above the icons: the spare height is paper,
+   and the soft keys sit on the very bottom of the LCD like the calendar's and the dictionary's */
+.pet-stage{flex:1;min-height:240px;display:flex;align-items:center;justify-content:center;overflow:hidden;background:var(--lcd)}
+.pet-room{position:relative;flex:none;width:324px;height:240px;overflow:hidden}
+.pet-cv{display:block;width:324px;height:240px;image-rendering:pixelated;image-rendering:crisp-edges}
+.pet-panel{position:absolute;inset:0;background:var(--lcd);color:var(--ink);padding:8px 10px;display:flex;flex-direction:column;gap:4px;overflow:hidden;font-size:14px;line-height:1.35}
+.pet-panel p{margin:0}
+.pet-ptitle{font-size:15px;font-weight:600;border-bottom:2px solid var(--ink);padding-bottom:3px}
+.pet-pinfo{font-size:14px;color:var(--ink-2)}
+.pet-phint{font-size:13px;color:var(--ink-2);margin-top:auto}
+.pet-pempty{padding:20px 0;text-align:center;color:var(--ink-2)}
+.pet-choice{width:100%;min-height:44px;margin:2px 0;padding:6px 10px;text-align:left;font-size:15px;color:var(--ink);background:transparent;border:2px solid var(--ink);cursor:pointer}
+.pet-choice.on{background:var(--ink);color:var(--lcd)}
+.pet-leftright{display:flex;gap:8px}
+.pet-leftright .pet-choice{flex:1;text-align:center;margin:0}
+.pet-presult{margin:2px 0;font-size:15px}
+.pet-prow{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:22px;border-bottom:1px dashed var(--ink-2)}
+.pet-prow b{font-weight:400;font-family:var(--f-pix);font-size:16px}
+.pet-boxes{display:inline-flex;align-items:center;gap:2px}
+.pet-box{display:inline-block;width:14px;height:14px;border:2px solid var(--ink);background:transparent}
+.pet-box.on{background:var(--ink)}
+.pet-confirm{display:flex;gap:6px;margin-top:2px;min-height:0}
+.pet-confirm:empty{display:none}
+.pet-confirm .btn{min-height:44px;padding:6px 10px;font-size:14px}
+.pet-souv{display:flex;align-items:flex-start;gap:10px;padding:4px 0;border-bottom:1px dashed var(--ink-2)}
+.pet-souvcv{flex:none;width:48px;height:48px;image-rendering:pixelated;image-rendering:crisp-edges;border:2px solid var(--ink)}
+.pet-souvtext{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.pet-souvname{font-weight:600;font-size:15px}
+.pet-souvline{font-size:14px;line-height:1.35;overflow-wrap:anywhere;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.pet-souvdate{font-family:var(--f-pix);font-size:14px;color:var(--ink-2)}
+.pet-souvtag{margin:2px 0 0;font-size:13px;color:var(--ink);border:1px solid var(--ink);padding:0 4px;align-self:flex-start}
+.pet-souvfoot{display:flex;justify-content:space-between;gap:8px;font-size:14px;color:var(--ink-2)}
+.pet-ask{margin-top:4px}
+.pet-askq{margin:0 0 2px;font-size:14px}
+.pet-askrow{display:flex;gap:6px}
+.pet-askrow .btn{min-height:44px;flex:1;padding:6px 8px;font-size:14px}
+.pet-nameinput{width:100%;min-width:0;min-height:44px;box-sizing:border-box;font-family:var(--f-lcd);font-size:17px;color:var(--ink);background:var(--lcd);border:3px solid var(--ink);border-radius:0;padding:6px 8px;-webkit-appearance:none;appearance:none}
+.pet-nameinput::placeholder{color:var(--ink-2)}
+.pet-name-actions{display:flex;gap:6px;margin-top:2px}
+.pet-name-actions .btn{min-height:44px;flex:1;padding:6px 8px;font-size:14px}
+.pet-pname{margin:0;font-family:var(--f-lcd);font-size:17px;font-weight:600;border-bottom:2px solid var(--ink);padding-bottom:3px}
+.pet-wordbig{margin:8px 0 0;font-family:var(--f-pix);font-size:40px;line-height:1.1;overflow-wrap:anywhere}
+.pet-meaning{margin:2px 0 0;font-size:14px;line-height:1.4;overflow-wrap:anywhere;overflow:hidden;display:-webkit-box;-webkit-line-clamp:7;-webkit-box-orient:vertical}
+.pet-eggline{flex:none;display:flex;align-items:center;justify-content:center;height:44px;margin:0;padding:0 10px;text-align:center;font-size:14px;line-height:1.3;color:var(--ink-2)}
+.pet-eggline[hidden]{display:none}
+.pet-icons{flex:none;display:flex;justify-content:space-around;align-items:center;height:44px;overflow:hidden}
+.pet-icons[hidden]{display:none}
+.pet-keys[hidden]{display:none}
+.pet-ikey{flex:none;width:44px;height:44px;padding:0;display:flex;align-items:center;justify-content:center;background:transparent;border:0;cursor:pointer;position:relative}
+.pet-ikey.on{box-shadow:inset 0 0 0 2px var(--ink)}
+.pet-icv{display:block;width:24px;height:24px;image-rendering:pixelated;image-rendering:crisp-edges}
+.pet-keys{flex:none;padding:0;height:44px}
+.pet-menu{width:100%;min-height:44px;margin:0;padding:6px 10px;display:flex;align-items:center;gap:8px;text-align:left;font-family:var(--f-lcd);font-size:16px;color:var(--ink);background:transparent;border:0;border-bottom:1px dashed var(--ink-2);cursor:pointer}
+.pet-menu.on{background:var(--ink);color:var(--lcd)}
+.pet-menu.dim,.pet-menu:disabled{color:var(--ink-2);cursor:default}
+.pet-menu.on .pet-dot{background:var(--lcd)}
+.pet-dot{flex:none;width:6px;height:6px;border-radius:50%;background:var(--ink)}
+.pet-away{position:absolute;left:0;right:0;bottom:4px;padding:2px 4px;text-align:center;font-size:14px;line-height:1.25;color:var(--ink);background:var(--lcd);border-top:1px solid var(--ink-2)}
+/* a play pack's start card and its result: one centred four-tone card, a double ink frame, no scrolling */
+.pet-panel.pet-gcard{align-items:center;justify-content:center;text-align:center;padding:10px;gap:0}
+.pet-gbox{display:flex;flex-direction:column;align-items:center;gap:5px;border:2px solid var(--ink);padding:10px 16px;min-width:200px;max-width:290px;box-sizing:border-box;background:var(--lcd);box-shadow:0 0 0 2px var(--lcd),0 0 0 4px var(--ink)}
+.pet-gname{margin:0;font-family:var(--f-lcd);font-size:19px;font-weight:600;line-height:1.1}
+.pet-ghow{margin:0;font-size:13px;line-height:1.3;color:var(--ink-2)}
+.pet-gface{display:block;width:56px;height:56px;image-rendering:pixelated;image-rendering:crisp-edges}
+.pet-gscorelabel{margin:0;font-size:11px;letter-spacing:2px;color:var(--ink-2)}
+.pet-gscore{display:block;image-rendering:pixelated;image-rendering:crisp-edges}
+.pet-gcomment{margin:0;font-family:var(--f-lcd);font-size:15px;line-height:1.2}
+.pet-ganykey{margin:2px 0 0;font-size:11px;line-height:1.2;color:var(--ink-2)}
 /* ---------- studio: the four-track tape machine's rhythm screen (apps/studio.js) ---------- */
 .studio{display:flex;flex-direction:column;overflow:hidden;background:var(--lcd)}
 .st-bar{flex:none;display:flex;align-items:center;gap:4px;padding:4px 6px;border-bottom:2px solid var(--ink)}

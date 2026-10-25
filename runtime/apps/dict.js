@@ -770,8 +770,27 @@ var APPS=window.LopdaWordList.source({
   book:function(){ return book(BUILTIN).then(function(b){ return {book:b, lemma:D.lemma}; }); }
 });
 
+/* ---------- the pet (docs/decisions.md section 37): read-only summaries of the word book, never an entry's text ---------- */
+/* the pet (docs/decisions.md section 37) uses this: the number of words and the newest t (ms), never a word or its text;
+   D.set.words is kept in memory, so it is synchronous */
+function bookSummary(){
+  var newest=0;
+  D.set.words.forEach(function(x){ var t=x && typeof x.t==="number" ? x.t : 0; if(t>newest) newest=t; });
+  return {n:D.set.words.length, newest:newest};
+}
+/* the pet (docs/decisions.md section 37) uses this: one word for an integer seed, the same word every time, or null on an
+   empty book; the word only, never its definition */
+function pickWord(seed){
+  var n=D.set.words.length; if(!n) return null;
+  var s=typeof seed==="number" && isFinite(seed) ? Math.floor(seed) : 0;
+  var i=((s%n)+n)%n;
+  return D.set.words[i].w;
+}
+
 /* the reader shares the word book: START on an entry there adds or removes it, as here */
 LP.dict={lookup:lookup, suggest:suggest, inBook:inBook, inBookMany:inBookMany, toggleWord:toggleWord, setWord:setWord, apps:APPS};
+LP.dict.bookSummary=bookSummary;
+LP.dict.pickWord=pickWord;
 LP.builtin({id:"dict", label:"app.dict", icon:function(){ return ICON; }, view:"dict", keepPad:true,
   open:function(){ openDict(); },
   leave:function(){ hush(); D.sheet=""; D.entry=null; D.review=null; D.stack=[]; D.armed=null; D.q=""; var i=$("dict-q"); if(i){ i.value=""; i.blur(); } renderSheet(); },

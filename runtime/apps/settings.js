@@ -360,10 +360,12 @@ function doRestore(bk){
     var mine=LP.ai.saved(), docs=bk.docs.filter(function(x){ return x.path!==AIP && x.path!==DKP; });
     if(mine) docs.push({path:AIP, data:mine});
     if(dark) docs.push({path:DKP, data:dark});
+    /* programs stop their own writes before anything is replaced; the page reloads straight after a successful restore */
+    LP.each("restore");
     P.dumpAll().then(detach).then(function(old){
       return P.replaceAll({docs:docs, files:bk.files}).then(function(){
         box(tr("rs.done")); sfx("ok");
-        setTimeout(function(){ location.reload(); },800);
+        location.reload();
       },function(e){
         if(window.console) console.error("Lo-PDA restore failed, writing the old data back", e);
         return P.replaceAll(old).then(function(){ sfx("err"); okBox(tr("rs.failed")); },function(e2){
