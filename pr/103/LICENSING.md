@@ -59,6 +59,10 @@ See `CONTRIBUTING.md`.
   `runtime/vendor/holiday-cn/` with its license file. The calendar may download a
   missing year's file from jsDelivr, at most once every 7 days and with nothing about
   the user in the request (see docs/decisions.md section 14).
+- QR codes: QR Code Generator for JavaScript by Kazuhiko Arase (npm
+  qrcode-generator 1.4.4), MIT License, the browser file copied unchanged into
+  `runtime/vendor/qrcode-generator/` with its license file. `runtime/qr.js` draws
+  the code on the LCD; nothing leaves the device (see docs/decisions.md section 37).
 - English-Chinese dictionary: `runtime/vendor/ecdict/` is an abridged ECDICT by
   skywind3000 (Linwei), MIT License, converted to StarDict by `tools/gen-ecdict.mjs`;
   licence files `runtime/vendor/ecdict/LICENSE` and `LICENSE-WordNet`. Review of the fields
