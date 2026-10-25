@@ -62,10 +62,13 @@ No other files are loaded. Images, sounds and fonts must be embedded in
 | `permissions` | Array. Usually empty. Six capabilities (`lopda/1`): `"files"`, the app may export and import files, each time confirmed by the player (section 6.2); `"motion"`, tilt, shake and heading; `"mic"`, the microphone's loudness and pitch (both section 6.4); `"notes"`, the app may add text to a note of its own in the player's notes, each time confirmed by the player (section 6.5); `"camera"`, the app may ask for a photo, which the player takes in the runtime's viewfinder and the app gets as a small four-tone picture (section 6.6); `"wordbook"`, the app may read and change the player's word book (section 6.7). The store shows them as icons on the app's entry and asks the player before installing (runtime 0.44.0+); an app allowed then does not ask on first use, while files and notes still confirm every call. Anything else fails the checker. |
 | `buttons` | Optional, `lopda/1` only. `true` shows the chin buttons while the app runs (section 4). Leave it out for touch-only apps. |
 
-`registry/index.json` adds two dates to every entry, `released` and `updated` (`YYYY-MM-DD`): the first and the
-most recent commit that changed the app's `index.html`, stamped by `tools/build-index.mjs` from git. The store
-wears 新 / NEW for seven days after `released`, and 更新 / UPDATED for seven days after `updated` when the app is
-not new (runtime 0.44.0+). App authors do not write these fields; the manifest checker rejects them.
+`registry/index.json` adds `released` (`YYYY-MM-DD`) to every entry: the commit that first added the app's
+`manifest.json`, stamped by `tools/build-index.mjs` from git. When the current version differs from the version
+at that first appearance, it also adds `updated`, the last commit that changed the version. The store wears
+新 / NEW for seven days after `released` when there is no `updated`, and 更新 / UPDATED for seven days after
+`updated`. An app first published as 2.0.0 is NEW, not UPDATED; a 1.0.0 → 2.0.0 change is UPDATED, even on the
+same day (runtime 0.44.0+, dates corrected in 0.44.1). App authors do not write these fields; the manifest
+checker rejects them.
 
 ## 3. The screen
 

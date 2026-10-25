@@ -13,6 +13,7 @@ var I18N = window.LopdaStrings, tr = I18N.t;
 var S = {
   db:null, refs:{}, downloads:null,
   apps:[], notes:[],
+  revealApp:null,         // the app an install/update should scroll into view on the next home render
   homeTipDismissed:null,
   kv:{},                  // appId -> {key:value}
   running:null, editing:null,
@@ -237,7 +238,7 @@ document.addEventListener("visibilitychange",function(){
 });
 
 /* ---------- sound: tiny square-wave chips through Web Audio (the named sounds themselves are in chip.js) ---------- */
-var RUNTIME_VERSION="0.44.0";   /* keep in step with VERSION in sw.js */
+var RUNTIME_VERSION="0.44.1";   /* keep in step with VERSION in sw.js */
 /* One volume, five steps, 0 is off (decisions.md section 10). It sets the master gain and nothing else does.
    Under the master: `ui` for the runtime's own clicks and the built-ins' prompts, held at a fraction so they stay as
    quiet as they always were (step 2 gives them 0.11, their level before 0.12.0), and `app` for apps, music and the
@@ -487,14 +488,23 @@ function renderHome(){
     b.appendChild(tile); b.appendChild(l);
     if(tag){ var t=document.createElement("span"); t.className="tag"; t.textContent=tag; b.appendChild(t); }
     b.onclick=onclick; h.appendChild(b);
+    return b;
   }
   LP.builtins.forEach(function(bi){
     if(bi.icon) add("builtin",{},tr(bi.label),bi.tag?bi.tag():"",function(){ bi.open(); },bi.icon);
   });
   var pre=function(a){ return a.preinstalled>0 ? a.preinstalled : Infinity; };
+  var reveal=null;
   S.apps.slice().sort(function(a,b){ return (pre(a)-pre(b)) || ((a.installed||0)-(b.installed||0)); }).forEach(function(a){
-    add("",a,appName(a),"v"+(a.version||"?"),function(){ LP.runApp(a); });
+    var b=add("",a,appName(a),"v"+(a.version||"?"),function(){ LP.runApp(a); });
+    if(a.id===S.revealApp) reveal=b;
   });
+  /* a freshly installed or updated app sits at the end of the grid, often below the fold: bring its tile into
+     view when the home screen comes back. One reveal only; a missing app (removed before HOME) just clears it. */
+  if(S.revealApp){
+    if(reveal){ try{ reveal.scrollIntoView({block:"nearest"}); }catch(e){} }
+    S.revealApp=null;
+  }
 }
 
 /* two-tap confirm: the page builds its own confirmation instead of confirm() */

@@ -335,6 +335,10 @@ test("store: search finds an app by either language, ignores case, and clearing 
   assert.match(await p.textContent("#store-list"), /纸塔/, "the English name finds it too");
   await p.fill("#store-q", "拍照");
   assert.equal((await p.textContent("#store-list .store-badge")).trim(), "更新", "a five-day-old version wears UPDATED");
+  await p.fill("#store-q", "罗盘");
+  assert.equal((await p.textContent("#store-list .store-badge")).trim(), "新", "first published as 1.0.0: NEW, not UPDATED");
+  await p.fill("#store-q", "滥竽");
+  assert.equal((await p.textContent("#store-list .store-badge")).trim(), "更新", "1.0.0 -> 2.0.0: UPDATED");
   await p.fill("#store-q", "五子棋");
   assert.equal(await p.locator("#store-list .store-item").count(), 1);
   assert.equal(await p.locator("#store-list .store-badge").count(), 0, "an older app has no badge");
@@ -385,6 +389,15 @@ test("store: an app that asks for a capability shows its icons before install, a
     };
   }));
   assert.equal(granted?.apps?.["blow-candles"]?.mic, true, "the install dialog granted the microphone");
+
+  /* HOME scrolls the new tile into view: the grid is taller than the screen and the app sits at the end */
+  await p.click("#home-key");
+  await p.waitForTimeout(200);
+  const tileBox = await p.locator("#home .app", { hasText: "吹蜡烛" }).boundingBox();
+  const viewBox = await p.locator("#v-home").boundingBox();
+  assert.ok(tileBox && viewBox, "the installed app has a home tile");
+  assert.ok(tileBox.y >= viewBox.y - 1 && tileBox.y + tileBox.height <= viewBox.y + viewBox.height + 1,
+    "the installed app is scrolled into view");
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 

@@ -11,27 +11,43 @@ const root = join(import.meta.dirname, "..");
 const appsDir = join(root, "registry", "apps");
 const ids = readdirSync(appsDir).filter((d) => statSync(join(appsDir, d)).isDirectory()).sort();
 
-/* the first and the last commit that touched an app's index.html: released / updated. With no git (a test copy,
-   a source tarball, a publish that only serves the committed files) fall back to the dates already in index.json. */
+/* The index's two dates are derived, not authored:
+   - released: the commit that first added the app's manifest.json, i.e. the app's first appearance in the store.
+   - updated: the last commit that changed the manifest's version, and only when the current version differs from
+     the version at that first appearance. An app first published as 2.0.0 has no earlier store version, so it
+     is NEW, not UPDATED. A version bump on the same day still counts.
+   Without git (a test copy, a source tarball, a publish that only serves the committed files) reuse the dates
+   already in index.json. */
 let previous = {};
 try {
   const prev = JSON.parse(readFileSync(join(root, "registry", "index.json"), "utf8"));
   for (const a of prev.apps || []) previous[a.id] = a;
 } catch {}
-function gitDate(args) {
+function git(args) {
   try {
-    const out = execFileSync("git", ["-C", root, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-    return out.split("\n").filter(Boolean).pop() || "";
+    return execFileSync("git", ["-C", root, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
   } catch { return ""; }
 }
-function datesFor(id) {
-  const path = `registry/apps/${id}/index.html`;
-  const released = gitDate(["log", "--follow", "--diff-filter=A", "--format=%cs", "--", path]);
-  const updated = gitDate(["log", "--follow", "-1", "--format=%cs", "--", path]);
+function firstManifest(id) {
+  const path = `registry/apps/${id}/manifest.json`;
+  const lines = git(["log", "--diff-filter=A", "--format=%H %cs", "--", path]).split("\n").filter(Boolean);
+  const [hash, date] = (lines[lines.length - 1] || "").split(" ");
+  let version = "";
+  if (hash) {
+    try { version = JSON.parse(git(["show", `${hash}:${path}`])).version || ""; } catch {}
+  }
+  return { date: date || "", version };
+}
+function datesFor(id, version) {
+  const path = `registry/apps/${id}/manifest.json`;
+  const first = firstManifest(id);
   const old = previous[id] || {};
-  const r = released || old.released || "";
-  const u = updated || old.updated || r;
-  return { released: r, updated: u };
+  if (!first.date) return { released: old.released || "", updated: old.updated || "" };
+  let updated = "";
+  if (first.version && version && first.version !== version) {
+    updated = git(["log", "-1", "--format=%cs", "-G", '"version":', "--", path]);
+  }
+  return { released: first.date, updated };
 }
 
 const apps = [];
@@ -44,7 +60,7 @@ for (const id of ids) {
     continue;
   }
   const m = JSON.parse(readFileSync(join(dir, "manifest.json"), "utf8"));
-  const dates = datesFor(id);
+  const dates = datesFor(id, m.version);
   const html = readFileSync(join(dir, "index.html"));
   apps.push({
     spec: m.spec, id: m.id, name: m.name, glyph: m.glyph, ...(m.category ? { category: m.category } : {}), ...(m.buttons ? { buttons: true } : {}), ...(m.icon ? { icon: m.icon } : {}), version: m.version, ...(dates.released ? { released: dates.released } : {}), ...(dates.updated ? { updated: dates.updated } : {}),

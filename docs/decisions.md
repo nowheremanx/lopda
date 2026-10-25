@@ -1507,15 +1507,22 @@ EXIF，相册就能把照片放到地图上。
 - **旧安装、更新和「全部更新」**：旧版本装的 app 没有这份授权，第一次用时照旧问。更新如果**新增**了权限，
   点「更新」时也会先确认，只把新增的能力写进记录；权限没变的更新不弹。「全部更新」一件一件地装，不中途弹框，
   新权限留给第一次使用时问。卸载照旧删掉这个 app 的所有授权。
-- **新上架 / 更新的标记（owner，2026-10-25）**：两个日期都**不是 manifest 字段**，由 `tools/build-index.mjs`
-  从 git 算出来写进 `registry/index.json`：
-  - `released`：这个 app 的 `index.html` 第一次被提交的日期（`git log --follow --diff-filter=A`）。
-  - `updated`：最近一次改 `index.html` 的日期（`git log --follow -1`）。改图标、改文案、改 manifest 不算更新，
-    因为 `index.html` 没变；版本更新才会变。
-  没有 git 时（测试临时副本、只发布已提交文件的环境）沿用现有 `index.json` 里的日期；新 app 没有历史就先没有日期。
-  app 作者完全不碰这两个字段，检查器见到 manifest 里有 `released` / `updated` 直接报错。商店用设备时间算：
-  `released` 七天以内挂「新 / NEW」；否则 `updated` 七天以内挂「更新 / UPDATED」。两个都符合只挂「新」。
-  到期自动消失。这样作者不用记，也不能自己写日期来常驻 NEW。
+- **新上架 / 更新的标记（owner，2026-10-25；0.44.1 修正）**：两个日期都不是 manifest 字段，由
+  `tools/build-index.mjs` 从 git 算出来写进 `registry/index.json`：
+  - `released`：这个 app 的 `manifest.json` 第一次被提交的日期（`git log --diff-filter=A`，**不带**
+    `--follow`）。不带 `--follow` 很重要：app 从模板复制过来的，`--follow` 会追到模板第一次加进来的日期，
+    把新 app 算成旧的（0.44.0 的罗盘就是这样被算成「更新」）。
+  - `updated`：最近一次改 manifest 里 `version` 的日期（`git log -1 -G '"version":'`），并且只在当前版本和
+    首次上架的版本不同时才写。首次就发布 2.0.0 的 app 没有「之前的商店版本」，所以是「新」不是「更新」；
+    1.0.0 → 2.0.0 的 app 是「更新」，即使两次在同一天。改图标、文案、manifest 其他字段不算。
+  没有 git 时（测试临时副本、只发布已提交文件的环境）沿用现有 `index.json` 里的日期。作者不碰这两个字段，
+  检查器见到 manifest 里有 `released` / `updated` 直接报错。商店：`updated` 七天以内挂「更新 / UPDATED」；
+  否则 `released` 七天以内挂「新 / NEW」；都没有就不挂。「新」的 title 是「新上架」，「更新」的 title 是
+  「新版本」，这样 2.0.0 的新上架 app 不再让人误会。
+- **装好以后滚到新 tile（0.44.1）**：主屏的 app tile 排在最后，网格比屏幕高，装好回到主屏时原来的滚动位置
+  会让新 tile 落在下面看不见。`doInstall` 成功后记下 `S.revealApp`，主屏下一次渲染时用
+  `scrollIntoView({block:"nearest"})` 把它滚进视野（更新也这样），只做一次；app 在 HOME 之前被删掉就清掉。
+  331 x 359 的 e2e 检查新 tile 的 bounding box 在主屏视野内。
 - **权限图标的第二轮（owner，2026-10-25）**：`files` 改成最经典的文件夹；`motion` 换成一点加三道超声波的
   图案（owner 说原来那个倾斜手机的图案看不出来）；`mic` 去掉两边的支架，改成上面几个点、中间一道圈的
   菠萝纹话筒；`notes` 用铅笔；`camera` 和 `wordbook` 不改。
