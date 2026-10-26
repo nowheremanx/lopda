@@ -1002,8 +1002,12 @@ var ART = (function () {
         for (var y = top; y < H; y++) {
           var d = (y - top) / Math.max(1, H - top);
           var v = night ? 0.72 - d * 0.68 : 1.38 - d * 1.30;
-          v += Math.sin(wx * 0.031 + y * 0.14) * 0.13;
-          if ((y + Math.floor(Math.sin(wx * 0.041) * 4)) % 19 === 0) v -= 0.55;
+          v += Math.sin(wx * 0.031 + y * 0.14) * 0.055;
+          /* large diagonal facets, then the horizontal strata, then the deep cracks */
+          var facet = (wx * 0.55 + (y - top) * 1.35) / 46;
+          v += ((Math.floor(facet) % 3) - 1) * 0.11;
+          if ((facet - Math.floor(facet)) * 46 < 1.4) v -= 0.30;
+          if ((y + Math.floor(Math.sin(wx * 0.041) * 4)) % 22 === 0) v -= 0.42;
           if (crack(wx, y)) v = 0.02;
           px(g, x, y, v);
         }
