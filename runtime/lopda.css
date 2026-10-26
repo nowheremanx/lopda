@@ -661,6 +661,11 @@ textarea::placeholder{color:var(--ink-2)}
 .pet-souvdate{font-family:var(--f-pix);font-size:14px;color:var(--ink-2)}
 .pet-souvtag{margin:2px 0 0;font-size:13px;color:var(--ink);border:1px solid var(--ink);padding:0 4px;align-self:flex-start}
 .pet-souvfoot{display:flex;justify-content:space-between;gap:8px;font-size:14px;color:var(--ink-2)}
+/* the box index: 5 x 5 pictures a page, newest first; the selected tile gets an outer frame */
+.pet-souv-grid{display:grid;grid-template-columns:repeat(5,32px);grid-auto-rows:32px;gap:4px;justify-content:center;align-content:center;padding:2px 0}
+.pet-tile{width:32px;height:32px;padding:0;background:transparent;border:0;position:relative;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.pet-tile canvas{width:32px;height:32px;image-rendering:pixelated;image-rendering:crisp-edges;border:2px solid var(--ink);box-sizing:border-box;display:block}
+.pet-tile.on{box-shadow:0 0 0 2px var(--ink)}
 .pet-ask{margin-top:4px}
 .pet-askq{margin:0 0 2px;font-size:14px}
 .pet-askrow{display:flex;gap:6px}

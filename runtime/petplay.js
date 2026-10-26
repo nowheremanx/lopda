@@ -92,10 +92,13 @@ function dots(buf,w,h,list){
 var CATCH_DOTS=[[20,20],[44,14],[70,22],[96,15],[122,23],[142,14],[58,34],[110,31],[31,44],[84,40],[135,42]];
 /* climb's wall: a faint brick grid that moves with the camera, so height reads even before a platform passes */
 function climbWall(buf,w,h,height){
-  var off=((height||0)%12+12)%12, y, x;
+  var off=((height||0)%12+12)%12, y, x, row;
   for(y=-12+off;y<h;y+=12){
+    /* the brick columns belong to the world row, not to the screen row: using the screen would make them
+       jump 12 px sideways every time the camera crosses a 12 px line */
+    row=Math.floor((y-height)/12);
     rect(buf,w,h,0,y,w,1,2);
-    for(x=(Math.floor(y/12)%2?8:20);x<w;x+=24) rect(buf,w,h,x,y,1,11,2);
+    for(x=(((row%2)+2)%2?8:20);x<w;x+=24) rect(buf,w,h,x,y,1,11,2);
   }
 }
 /* the old 16 px game props at the room's new scale: every cell becomes a 2 x 2 block */
