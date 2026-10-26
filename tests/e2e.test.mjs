@@ -4987,8 +4987,8 @@ test("pet: games - the play list opens each pack, the canvas moves at 20 fps, B 
   const after = await save();
   assert.equal(after.today.played, before.today.played + 1, "the round counted once");
   assert.equal(after.joy, Math.min(5, before.joy + st.joy), "the round's joy was applied, once");
-  await key("down");                                       /* any key, here a direction */
-  assert.ok(await p.isHidden("#pet-panel"), "a direction returns to the room");
+  await key("a");                                          /* A is one key; its release must not open 玩 */
+  assert.ok(await p.isHidden("#pet-panel"), "A returns to the room, not to the play list");
   assert.equal(await p.locator("#pet-keys .sk-b span").innerText(), "返回");
   assert.equal(await p.evaluate(() => LOPDA_DEBUG.pet.gameState()), null, "the round is gone, not restarted");
   const roomed = await save();

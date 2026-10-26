@@ -90,7 +90,7 @@ var P={
   eggMs:0, hatching:null, action:null, actionUntil:0, heartUntil:0,
   washUntil:0, washStart:0, flash:null, outing:null, foodSel:0, boxPage:0, boxAsk:null,
   naming:null, task:null, at:null, feeds:[], awakeLeft:0, puffUntil:0, pendingNeed:null, lightReturn:false,
-  useRun:null, useSpot:null,
+  useRun:null, useSpot:null, ignoreAUp:false,
   wasAsleep:null, lastScene:null, flashSeq:0,
   game:null, gameSel:0, gameTimer:0, gameLabel:"", gameHeld:{left:false,right:false,a:false}, gamePress:{left:false,right:false,a:false}, gameTouch:null,
   gameSeed:null,
@@ -1397,13 +1397,17 @@ function applyGameJoy(st){
   beep(st.joy>1?"win":"ok"); saveSoon();
 }
 function stopGameTimer(){ if(P.gameTimer){ clearInterval(P.gameTimer); P.gameTimer=0; } }
-function exitGame(){
+function exitGame(swallowAUp){
   stopGameTimer();
   P.game=null;
   P.gameHeld={left:false,right:false,a:false};
   P.gamePress={left:false,right:false,a:false};
   P.gameTouch=null;
-  P.sub=null; beep("tap"); renderKeys(); render();
+  P.sub=null;
+  /* A leaves the game on keydown; the keyup must not fall through to the selected 玩 icon and open the
+     play list with a second sound. A tap on the result card passes no flag. */
+  if(swallowAUp) P.ignoreAUp=true;
+  beep("tap"); renderKeys(); render();
 }
 function openRestart(){
   if(P.sub!=="look") return;
@@ -2571,7 +2575,7 @@ document.addEventListener("visibilitychange",function(){
 LP.padRoute("pet",function(b,down){
   if(!isOpen()) return false;
   if(P.sub==="game"){
-    if(gameDone()){ if(down) exitGame(); return true; }        /* any key: back to the room */
+    if(gameDone()){ if(down) exitGame(b==="a"); return true; } /* any key: back to the room */
     if(!P.game || !P.game.started){
       if(b==="b"){ if(down) exitGame(); return true; }         /* B is still back, not a start */
       if(down) startRound();                                   /* any other first key starts the round */
@@ -2583,8 +2587,9 @@ LP.padRoute("pet",function(b,down){
     return true;                                  /* up/down/start/select do nothing in a play pack */
   }
   if(b==="a"){
-    if(down){ clearHold(); startHold(); }
+    if(down){ P.ignoreAUp=false; clearHold(); startHold(); }
     else {
+      if(P.ignoreAUp){ P.ignoreAUp=false; return true; }
       clearHold();
       if(P.holdFired){ P.holdFired=false; return true; }
       pressA();
