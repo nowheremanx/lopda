@@ -76,6 +76,20 @@ test("asleep: 22:00-7:00, sleepy 21:30-7:30, and a light left off after 20:00", 
   assert.equal(P.asleep({ ...dark, trait: "sleepy" }, 20, 30), true);
 });
 
+test("actionReady: in bed only food and the light; travel only the call; an outing and an egg none", () => {
+  const adult = { stage: "adult" };
+  const ACTIONS = [...P.ACTIONS];
+  const ready = (s, ctx) => ACTIONS.filter((a) => P.actionReady(s, a, ctx));
+  assert.deepEqual(ready(adult, {}), ["food", "play", "wash", "light", "call"], "awake: all five");
+  assert.deepEqual(ready(adult, { asleep: true }), ["food", "light"], "in bed: a meal or the light");
+  assert.deepEqual(ready(adult, { outing: true }), [], "on an outing it answers nothing");
+  assert.deepEqual(ready({ ...adult, travel: true }, {}), ["call"], "away: the call brings it home");
+  assert.deepEqual(ready({ ...adult, travel: true }, { asleep: true }), ["call"], "travel wins over sleep");
+  assert.deepEqual(ready({ stage: "egg" }, {}), [], "an egg has no icons");
+  assert.equal(P.actionReady(null, "food", {}), false);
+  assert.equal(P.actionReady({ stage: "baby" }, "play", {}), true, "a baby can play too");
+});
+
 /* ---------- the bed <-> floor walk ---------- */
 test("pathPoint: the bed walk goes down first, then across; the way back comes along the floor and up last", () => {
   const bed = { x: 10, y: 52 }, rug = { x: 83, y: 69 };

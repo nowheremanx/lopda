@@ -318,6 +318,74 @@ test("drawRoom: each weather animates only inside the window, on the room's own 
   assert.deepEqual([...room({ ...base, weather: "rain" })], [...rain]);
 });
 
+test("room: spots and slots name the placement, and a slotted prop stays put", () => {
+  const R = P.room;
+  const plain = (v) => JSON.parse(JSON.stringify(v));
+  assert.deepEqual(plain(R.spots.stand), { x: 83, y: 69 });
+  assert.deepEqual(plain(R.spots.sleep), { x: 10, y: 52 });
+  assert.deepEqual(plain(R.spots.eat), { x: 32, y: 69 });
+  assert.deepEqual(plain(R.spots.desk), { x: 70, y: 69 });
+  assert.deepEqual(plain(A.spotPoint(R, "sleep")), { x: 10, y: 52 });
+  const dot = ["kk", "kk"];
+  assert.deepEqual(plain(A.slotPoint(R, "pick", dot)), { x: 119, y: 99 });
+  assert.deepEqual(plain(A.slotPoint(R, "desk", dot)), { x: 108, y: 116 });
+  assert.deepEqual(plain(A.slotPoint(R, "shelf", dot)), { x: 93, y: 30 });
+  const petAtDesk = A.resolve({ spot: "desk" }, R).pet;
+  assert.deepEqual([petAtDesk.x, petAtDesk.y], [70, 69], "the desk has its own stand spot");
+  const at = (petX) => plain(A.resolve({ prop: dot, propSlot: "desk", petX, petY: 69 }, R).prop);
+  assert.deepEqual(at(10), { x: 108, y: 116, w: 2, h: 2 }, "the desk does not follow a walking pet");
+  assert.deepEqual(at(83), at(10), "the slot is the same from every pet spot");
+  assert.equal(A.resolve({ prop: dot, petX: 83, petY: 69 }, R).prop, null, "an unplaced prop is not drawn");
+  assert.deepEqual(plain(A.resolve({ prop: dot, propFollow: true, petX: 10, petY: 52 }, R).prop),
+    { x: 46, y: 82, w: 2, h: 2 }, "propFollow is the explicit follow relation");
+  /* the desk and pen are clear of every furniture box the room declares */
+  const big = Array(21).fill("k".repeat(50)).concat(["k".repeat(50)]);
+  const desk = plain(A.resolve({ prop: big, propSlot: "desk" }, R).prop);
+  assert.deepEqual([desk.x, desk.y, desk.w, desk.h], [108, 96, 50, 22]);
+  const hit = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+  for (const o of R.solids) {
+    const box = { x: o.box[0], y: o.box[1], w: o.box[2], h: o.box[3] };
+    assert.ok(!hit(desk, box), `the desk is clear of the ${o.id}`);
+  }
+});
+
+test("room: z order, data checks and a second room need no engine change", () => {
+  const R = P.room, plain = (v) => JSON.parse(JSON.stringify(v));
+  const dot = ["kk", "kk"];
+  let L = A.resolve({ pet: dot, prop: dot, propSlot: "pick", sign: true, zz: true }, R);
+  assert.deepEqual([...L.order].map((e) => e.k), ["pet", "prop", "sign", "zz"], "the default layers keep the old order");
+  L = A.resolve({ pet: dot, prop: dot, propSlot: "pick", propZ: 1 }, R);
+  assert.deepEqual([...L.order].map((e) => e.k), ["prop", "pet"], "an explicit z puts a prop behind the pet");
+  L = A.resolve({ pet: dot, prop: dot, propX: 10, propY: 10, propZ: 10, petX: 83, petY: 69 }, R);
+  assert.deepEqual([...L.order].map((e) => e.k), ["prop", "pet"], "a layer tie goes to the lower feet");
+  assert.deepEqual(plain(A.useSpot(R, "feed", "eat")), { x: 32, y: 69 }, "a verb can name its spot");
+  assert.deepEqual([...A.roomOk(R)], [], "the chip room is sound data");
+  assert.deepEqual([...A.packOk(P)], [], "the chip pack is sound data");
+
+  /* a second room: different spots, slots and furniture, the same painter and the same resolver */
+  const room2 = {
+    id: "loft", w: 162, h: 120, petX: 60, petY: 80,
+    spots: { stand: { x: 60, y: 80 }, sleep: { x: 120, y: 60 }, eat: { x: 40, y: 80 }, wash: { x: 30, y: 80 }, desk: { x: 80, y: 80 } },
+    slots: { pick: { x: 100, bottom: 110, z: 12 }, desk: { x: 110, bottom: 118, z: 12 }, shelf: { x: 20, y: 30, z: 6 }, sign: { x: 60, y: 40, z: 20 }, zz: { x: 130, y: 50, z: 30 } },
+    solids: [{ id: "bed", box: [110, 50, 40, 30] }],
+    uses: { feed: { spot: "eat" }, sleep: { spot: "sleep" }, wash: { spot: "wash" }, rest: { spot: "stand" }, diary: { spot: "desk", slot: "desk" } },
+    bowl: P.room.bowl, bowlEmpty: P.room.bowlEmpty, poop: P.room.poop, sign: P.room.sign, zz: P.room.zz,
+    poops: P.room.poops, draw: P.room.draw
+  };
+  assert.deepEqual([...A.roomOk(room2)], [], "a second room is sound data");
+  assert.deepEqual(plain(A.useSpot(room2, "feed", "eat")), { x: 40, y: 80 });
+  const l2 = plain(A.resolve({ prop: ["kk"], propSlot: "desk", petX: 10, petY: 10 }, room2).prop);
+  assert.deepEqual([l2.x, l2.y], [110, 117], "the desk follows the second room's slot");
+  const base = { dayOfMonth: 24, bowlFull: true, mess: 1, pet: P.frames({ face: "idle1" }) };
+  const first = room(base), second = room({ ...base, pack: { id: "loft", room: room2 } });
+  assert.notDeepEqual([...first], [...second], "the second room draws where its own data says");
+
+  /* broken data is reported, not silently clamped */
+  const bad = { ...room2, spots: { ...room2.spots, sleep: { x: -4, y: 0 } }, slots: { ...room2.slots, pick: null } };
+  assert.ok(A.roomOk(bad).length >= 2);
+  assert.ok(A.packOk({}).length > 0);
+});
+
 test("drawRoom: the pet, the prop, the sign and Zz follow the scene", () => {
   const pet = P.frames({ face: "idle1", ant: "star", eye: "wide" });
   const base = { pet, petX: 83, petY: 69, dayOfMonth: 24, bowlFull: true, mess: 0 };
@@ -327,10 +395,15 @@ test("drawRoom: the pet, the prop, the sign and Zz follow the scene", () => {
   assert.ok(petDiff.inside > 0, "the pet is at (83,69)");
   assert.equal(petDiff.outside, 0, "nothing else moved");
 
-  const withProp = room({ ...base, prop: P.props.card });
+  const withProp = room({ ...base, prop: P.props.card, propFollow: true });
   const propDiff = changed(withProp, withPet, 119, 137, 87, 101);
-  assert.ok(propDiff.inside > 0, "the prop follows the pet");
+  assert.ok(propDiff.inside > 0, "a prop that asks to follow the pet does");
   assert.equal(propDiff.outside, 0, "the prop changes nothing else");
+
+  const parked = room({ ...base, prop: P.props.card, propSlot: "pick" });
+  const parkedDiff = changed(parked, withPet, 119, 137, 87, 101);
+  assert.ok(parkedDiff.inside > 0, "a slotted prop sits in its slot");
+  assert.equal(parkedDiff.outside, 0, "the slot changes nothing else");
 
   const withZz = room({ ...base, zz: true });
   const zzDiff = changed(withZz, withPet, 111, 135, 47, 71);

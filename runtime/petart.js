@@ -1476,15 +1476,16 @@ function drawCalendar(buf,w,h,scene){
 }
 function drawShelf(buf,w,h,scene,room){
   /* the little wall shelf leaves a 16 x 16 slot for one souvenir: board at y 46, the find sits on it */
-  var at=room.shelfAt||[93,30];
+  var sp=slotPoint(room,"shelf",scene.shelf), fallback=room.shelfAt||[93,30];
+  var ax=sp?sp.x:fallback[0], ay=sp?sp.y:fallback[1];
   brect(buf,w,h,90,46,23,2,1);
   bhline(buf,w,h,90,48,23,0);
   brect(buf,w,h,91,49,2,3,0);
   brect(buf,w,h,110,49,2,3,0);
   bhline(buf,w,h,91,45,21,3);
   if(scene.shelf){
-    var sx=(scene.shelfX!==undefined)?scene.shelfX:at[0];
-    var sy=(scene.shelfY!==undefined)?scene.shelfY:at[1];
+    var sx=(scene.shelfX!==undefined)?scene.shelfX:ax;
+    var sy=(scene.shelfY!==undefined)?scene.shelfY:ay;
     blit(buf,w,h,scene.shelf,sx,sy);
   }
 }
@@ -1561,6 +1562,146 @@ function paintRoom(buf,w,h,scene,pack){
   var room=(pack&&pack.room)||CHIP_ROOM;
   drawFurniture(buf,w,h,scene,room);
 }
+/* ---------- spots, slots and the one placement resolver --------------------------------------- */
+/* A room names where the pet stands to do something (spots) and where a thing goes (slots). A slot may
+   anchor on its bottom or right edge, so a taller or wider DLC prop still sits on the floor or against the
+   wall. The program never writes a room coordinate for a prop again. */
+function spotPoint(room,name){
+  var s=room && room.spots && room.spots[name];
+  return s ? {x:s.x,y:s.y} : null;
+}
+function slotPoint(room,name,grid){
+  var s=room && room.slots && room.slots[name];
+  if(!s) return null;
+  var w=grid?gridWidth(grid):0, h=grid?gridHeight(grid):0;
+  var x=(s.right!==undefined)?s.right-w:s.x;
+  var y=(s.bottom!==undefined)?s.bottom-h:s.y;
+  return {x:Math.round(x),y:Math.round(y)};
+}
+/* the spot an action uses: the room may name it ("feed" may use "bowlSide" instead of "eat") */
+function useSpot(room,kind,fallback){
+  var u=room && room.uses && room.uses[kind];
+  var name=(u && u.spot) || fallback;
+  return name ? spotPoint(room,name) : null;
+}
+/* A room is data: every spot, slot, solid and use must stay inside it. Returns a list of problems, [] when
+   sound. The painter and the pet frames are still code; packOk checks every grid a pack declares. */
+var ROOM_FALLBACK={feed:"eat",sleep:"sleep",rest:"stand",wash:"wash",diary:"desk"};
+function roomOk(room){
+  var errs=[], w, h, k, s, i, b, sx, sy;
+  if(!room || typeof room!=="object") return ["room"];
+  w=+room.w||0; h=+room.h||0;
+  if(w<32 || h<32 || w>512 || h>512) errs.push("room size");
+  function inside(x,y){ return isFinite(x) && isFinite(y) && x>=0 && y>=0 && x<=w && y<=h; }
+  var spots=room.spots||{}, slots=room.slots||{}, uses=room.uses||{};
+  for(k in spots) if(Object.prototype.hasOwnProperty.call(spots,k)){
+    s=spots[k];
+    if(!s || !inside(+s.x,+s.y)) errs.push("spot "+k);
+  }
+  /* a verb may name its own spot; the fallback names must exist when the verb does not */
+  for(k in ROOM_FALLBACK) if(Object.prototype.hasOwnProperty.call(ROOM_FALLBACK,k)){
+    if(!(uses[k] && uses[k].spot) && !spots[ROOM_FALLBACK[k]]) errs.push("missing spot "+ROOM_FALLBACK[k]);
+  }
+  for(k in slots) if(Object.prototype.hasOwnProperty.call(slots,k)){
+    s=slots[k];
+    sx=s && (s.right!==undefined?s.right:s.x);
+    sy=s && (s.bottom!==undefined?s.bottom:s.y);
+    if(!s || !inside(+sx,+sy)) errs.push("slot "+k);
+  }
+  if(!slots.pick) errs.push("missing slot pick");
+  if(!(uses.diary && uses.diary.slot) && !slots.desk) errs.push("missing slot desk");
+  var solids=room.solids||[];
+  for(i=0;i<solids.length;i++){
+    b=solids[i] && solids[i].box;
+    if(!b || b.length!==4 || !inside(+b[0],+b[1]) || !(+b[2]>0) || !(+b[3]>0) || +b[0]+ +b[2]>w || +b[1]+ +b[3]>h)
+      errs.push("solid "+((solids[i] && solids[i].id) || i));
+  }
+  for(k in uses) if(Object.prototype.hasOwnProperty.call(uses,k)){
+    s=uses[k];
+    if(!s || (s.spot && !spots[s.spot])) errs.push("use "+k+" spot");
+    if(s && s.slot && !slots[s.slot]) errs.push("use "+k+" slot");
+  }
+  return errs;
+}
+function packOk(pack){
+  var errs=[], i, k;
+  if(!pack || typeof pack!=="object") return ["pack"];
+  if(!pack.id || typeof pack.id!=="string") errs.push("id");
+  errs=errs.concat(roomOk(pack.room));
+  if(typeof pack.frames!=="function") errs.push("frames");
+  if(typeof pack.adult!=="function") errs.push("adult");
+  if(!pack.marks || !pack.marks.ant || !pack.marks.eye) errs.push("marks");
+  if(!pack.poses || typeof pack.poses!=="object") errs.push("poses");
+  var props=pack.props||{};
+  for(k in props) if(Object.prototype.hasOwnProperty.call(props,k) && !isGrid(props[k])) errs.push("prop "+k);
+  var souv=pack.souvenirs||[];
+  for(i=0;i<souv.length;i++){
+    if(!souv[i] || !souv[i].id || !isGrid(souv[i].grid)) errs.push("souvenir "+((souv[i] && souv[i].id) || i));
+  }
+  var fixed=[["egg",pack.egg],["baby",pack.baby],["child",pack.child]];
+  for(i=0;i<fixed.length;i++) if(fixed[i][1] && !isGrid(fixed[i][1])) errs.push(fixed[i][0]);
+  var cracks=pack.eggCrack||[];
+  for(i=0;i<cracks.length;i++) if(!isGrid(cracks[i])) errs.push("eggCrack "+i);
+  return errs;
+}
+/* scene -> {pet, prop, sign, zz}; the prop and Zz are clamped inside the room. Absolute first, then a named
+   spot or slot, then (only when the caller says so) a follow relation. No silent default for a prop: an
+   unplaced prop is not drawn, which is better than a desk that walks by itself. */
+function resolve(scene,room){
+  scene=scene||{}; room=room||CHIP_ROOM;
+  var rw=room.w||ROOM_W, rh=room.h||ROOM_H;
+  var sp=(scene.spot && spotPoint(room,scene.spot))||null;
+  var petX=(scene.petX!==undefined)?scene.petX:(sp?sp.x:(room.petX!==undefined?room.petX:83));
+  var petY=(scene.petY!==undefined)?scene.petY:(sp?sp.y:(room.petY!==undefined?room.petY:69));
+  var out={pet:{x:petX,y:petY,w:N,h:N},prop:null,sign:null,zz:null,order:[]};
+  var order=out.order;
+  if(scene.pet) order.push({k:"pet",z:(scene.petZ!==undefined?+scene.petZ:10),y:petY+N,i:0});
+  if(scene.prop){
+    var pw=gridWidth(scene.prop), ph=gridHeight(scene.prop), at=null;
+    if(scene.propSlot) at=slotPoint(room,scene.propSlot,scene.prop);
+    if(!at && (scene.propX!==undefined || scene.propY!==undefined)){
+      at={x:(scene.propX!==undefined?scene.propX:petX+(room.propDx!==undefined?room.propDx:36)),
+          y:(scene.propY!==undefined?scene.propY:petY+32-ph)};
+    }
+    if(!at && scene.propFollow){
+      at={x:petX+(room.propDx!==undefined?room.propDx:36), y:petY+32-ph};
+    }
+    if(at){
+      var px0=Math.max(0,Math.min(Math.max(0,rw-pw),at.x));
+      var py0=Math.max(0,Math.min(Math.max(0,rh-ph),at.y));
+      var pz=(scene.propZ!==undefined)?+scene.propZ:12;
+      var pslot=scene.propSlot && room.slots && room.slots[scene.propSlot];
+      if(scene.propZ===undefined && pslot && pslot.z!==undefined) pz=+pslot.z;
+      out.prop={x:px0,y:py0,w:pw,h:ph};
+      order.push({k:"prop",z:pz,y:py0+ph,i:1});
+    }
+  }
+  if(scene.sign){
+    var sg=(scene.sign.length && typeof scene.sign!=="string" && typeof scene.sign!=="boolean")?scene.sign:room.sign;
+    var spt=slotPoint(room,"sign",sg), sat=spt?[spt.x,spt.y]:(room.signAt||[62,60]);
+    var sx=(scene.signX!==undefined)?scene.signX:sat[0];
+    var sy=(scene.signY!==undefined)?scene.signY:sat[1];
+    var sslot=room.slots && room.slots.sign;
+    var sz=(scene.signZ!==undefined)?+scene.signZ:(sslot && sslot.z!==undefined?+sslot.z:20);
+    out.sign={x:sx,y:sy,w:gridWidth(sg),h:gridHeight(sg)};
+    order.push({k:"sign",z:sz,y:sy+out.sign.h,i:2});
+  }
+  if(scene.zz){
+    var zat=scene.zzSlot?slotPoint(room,scene.zzSlot,room.zz):null;
+    var zx=(scene.zzX!==undefined)?scene.zzX:(zat?zat.x:petX+(room.zzDx!==undefined?room.zzDx:28));
+    var zy=(scene.zzY!==undefined)?scene.zzY:(zat?zat.y:petY+(room.zzDy!==undefined?room.zzDy:-22));
+    var zw=gridWidth(room.zz), zh=gridHeight(room.zz);
+    zx=Math.max(0,Math.min(rw-zw,zx)); zy=Math.max(0,Math.min(rh-zh,zy));
+    out.zz={x:zx,y:zy,w:zw,h:zh};
+    var zslot=scene.zzSlot && room.slots && room.slots[scene.zzSlot];
+    var zz=(scene.zzZ!==undefined)?+scene.zzZ:(zslot && zslot.z!==undefined?+zslot.z:30);
+    order.push({k:"zz",z:zz,y:zy+zh,i:3});
+  }
+  /* same layer: the lower feet are drawn last, and the insertion order breaks a tie deterministically */
+  order.sort(function(a,b){ return (a.z-b.z)||(a.y-b.y)||(a.i-b.i); });
+  return out;
+}
+
 function drawRoom(buf,w,h,scene){
   scene=scene||{};
   var pack=scene.pack;
@@ -1571,41 +1712,19 @@ function drawRoom(buf,w,h,scene){
   var drawFn=(typeof room.draw==="function")?room.draw:paintRoom;
   drawFn(buf,w,h,scene,pack);
 
-  /* one pet spot for the pet, the prop and Zz; a caller may move any of them */
-  var petX=(scene.petX!==undefined)?scene.petX:(room.petX!==undefined?room.petX:83);
-  var petY=(scene.petY!==undefined)?scene.petY:(room.petY!==undefined?room.petY:69);
-  if(scene.pet) blit(buf,w,h,scene.pet,petX,petY);
-
-  if(scene.prop){
-    var pw=gridWidth(scene.prop), ph=gridHeight(scene.prop);
-    var px0=(scene.propX!==undefined)?scene.propX:petX+(room.propDx!==undefined?room.propDx:36);
-    var py0=(scene.propY!==undefined)?scene.propY:petY+32-ph;
-    if(px0>w-pw) px0=w-pw;
-    if(py0>h-ph) py0=h-ph;
-    if(px0<0) px0=0; if(py0<0) py0=0;
-    blit(buf,w,h,scene.prop,px0,py0);
-  }
-
-  /* the away sign: the board can be passed in, otherwise the room's own sign */
-  if(scene.sign){
-    var sg=(scene.sign.length && typeof scene.sign!=="string" && typeof scene.sign!=="boolean")?scene.sign:room.sign;
-    var at=room.signAt||[62,60];
-    var sx=(scene.signX!==undefined)?scene.signX:at[0], sy=(scene.signY!==undefined)?scene.signY:at[1];
-    blit(buf,w,h,sg,sx,sy);
-  }
-
-  var zx=0, zy=0;
-  if(scene.zz){
-    zx=(scene.zzX!==undefined)?scene.zzX:petX+(room.zzDx!==undefined?room.zzDx:28);
-    zy=(scene.zzY!==undefined)?scene.zzY:petY+(room.zzDy!==undefined?room.zzDy:-22);
-    if(zx>w-24) zx=w-24; if(zx<0) zx=0;
-    if(zy>h-24) zy=h-24; if(zy<0) zy=0;
-    blit(buf,w,h,room.zz,zx,zy);
-  }
+  /* one placement for the pet, the prop, the sign and Zz, drawn in z order */
+  var at=resolve(scene,room);
+  var sg=(scene.sign && (scene.sign.length && typeof scene.sign!=="string" && typeof scene.sign!=="boolean"))?scene.sign:room.sign;
+  at.order.forEach(function(e){
+    if(e.k==="pet" && scene.pet) blit(buf,w,h,scene.pet,at.pet.x,at.pet.y);
+    else if(e.k==="prop" && at.prop) blit(buf,w,h,scene.prop,at.prop.x,at.prop.y);
+    else if(e.k==="sign" && at.sign) blit(buf,w,h,sg,at.sign.x,at.sign.y);
+    else if(e.k==="zz" && at.zz) blit(buf,w,h,room.zz,at.zz.x,at.zz.y);
+  });
 
   if(scene.lightOff){
     darken(buf);
-    if(scene.zz) blitTone(buf,w,h,room.zz,zx,zy,3);
+    if(at.zz) blitTone(buf,w,h,room.zz,at.zz.x,at.zz.y,3);
   }
   return buf;
 }
@@ -1614,6 +1733,36 @@ var CHIP_ROOM={
   id:"chip",
   w:ROOM_W, h:ROOM_H,
   petX:83, petY:69,
+  /* where the pet stands to do something */
+  spots:{
+    stand:{x:83,y:69},
+    sleep:{x:10,y:52},
+    eat:{x:32,y:69},
+    wash:{x:40,y:69},
+    desk:{x:70,y:69}
+  },
+  /* where a thing goes; bottom/right are edges, not top-left corners; z is the draw layer */
+  slots:{
+    pick:{x:119,bottom:101,z:12},
+    desk:{x:108,bottom:118,z:12},
+    shelf:{x:93,y:30,z:6},
+    sign:{x:62,y:60,z:20},
+    zz:{x:32,y:48,z:30}
+  },
+  /* what the pet does at a spot, and which prop slot a pick kind uses */
+  uses:{
+    feed:{spot:"eat"},
+    sleep:{spot:"sleep"},
+    rest:{spot:"stand"},
+    wash:{spot:"wash"},
+    diary:{spot:"desk",slot:"desk"}
+  },
+  /* furniture boxes, for clearances and tests */
+  solids:[
+    {id:"bed",box:[4,58,48,34]},
+    {id:"bookshelf",box:[114,16,44,80]},
+    {id:"bowl",box:[25,97,20,14]}
+  ],
   window:WIN,
   bowl:PROPS.bowl, bowlEmpty:PROPS.bowlEmpty, poop:PROPS.poop, sign:PROPS.sign, zz:PROPS.zz,
   bowlAt:[25,97],
@@ -1670,6 +1819,12 @@ window.LopdaPetArt={
   ROOM_W:ROOM_W,
   ROOM_H:ROOM_H,
   drawRoom:drawRoom,
+  resolve:resolve,
+  spotPoint:spotPoint,
+  slotPoint:slotPoint,
+  useSpot:useSpot,
+  roomOk:roomOk,
+  packOk:packOk,
   blit:blit,
   darken:darken,
   isGrid:isGrid,

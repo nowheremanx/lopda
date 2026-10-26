@@ -4505,6 +4505,46 @@ test("pet: mail and props - each kind lights 信, puts its prop in the room and 
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
+/* ---------- pet, walk to use: the diary waits for the desk ---------- */
+test("pet: a diary pick walks the pet to the desk first, and the notes cover the walk back", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN", serviceWorkers: "block", viewport: { width: 375, height: 667 } });
+  await p.clock.install({ time: new Date(2026, 9, 11, 9, 0) });
+  await p.goto(base + "/runtime/?debug", { waitUntil: "networkidle" });
+  await p.waitForFunction(() => document.getElementById("savestate").textContent !== "启动中…");
+  const key = async (b) => { await p.evaluate((b) => { LOPDA_DEBUG.setButton(b, true); LOPDA_DEBUG.setButton(b, false); }, b); await p.waitForTimeout(100); };
+  const spot = () => p.evaluate(() => LOPDA_DEBUG.pet.spot());
+  const save = () => p.evaluate(() => LOPDA_DEBUG.pet.save());
+  await p.locator("#home .app", { hasText: "宠物" }).click();
+  await p.locator("#v-pet:not([hidden])").waitFor();
+  await p.evaluate(() => { LOPDA_DEBUG.pet.hatch(); LOPDA_DEBUG.pet.forcePick("diary"); LOPDA_DEBUG.pet.setStats(1, 5); });
+  await p.waitForTimeout(200);
+
+  /* hungry, it stands at the bowl; the diary desk is already on the floor */
+  let a = await spot();
+  assert.deepEqual([a.x, a.y], [32, 69], "it waits at the bowl, not at the desk");
+  assert.deepEqual(a.prop, { x: 108, y: 96, w: 50, h: 22 }, "the diary desk is under the bookshelf");
+
+  await p.locator("#pet-keys .sk-start").click();
+  await p.waitForSelector("#pet-panel:not([hidden])");
+  await p.locator("#pet-panel .pet-menu").nth(0).click();
+  await p.clock.runFor(500);
+  a = await spot();
+  assert.equal(a.phase, "walkUse", "using 信 starts a walk, not the notes view");
+  assert.ok(a.x > 32 && a.x < 70, "on the way to the desk: " + a.x);
+  assert.equal(a.dir, "right", "walking right, toward the desk");
+  assert.deepEqual([a.prop.x, a.prop.y], [108, 96], "the desk does not move with it");
+  assert.ok(await p.isHidden("#v-note"), "the notes waits until it reaches the desk");
+
+  await p.clock.runFor(1500);
+  await p.locator("#v-note:not([hidden])").waitFor();
+  assert.equal((await save()).today.used, true, "the diary is used after the walk");
+  await key("b");
+  await p.locator("#v-pet:not([hidden])").waitFor();
+  a = await spot();
+  assert.deepEqual([a.x, a.y], [32, 69], "after the notes it is back at the bowl it wanted");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
 /* ---------- pet, reward: usage in other programs is read again when the screen opens ---------- */
 test("pet: using the dictionary after a visit earns one joy when it next opens, and only once", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await page(t, { locale: "zh-CN", serviceWorkers: "block", viewport: { width: 375, height: 667 } });
@@ -5214,8 +5254,10 @@ test("pet: at night it lies in the bed in every stage, wakes back to the rug, an
   await p.locator("#v-pet:not([hidden])").waitFor();
   await p.evaluate(() => LOPDA_DEBUG.pet.hatch());
   await p.clock.runFor(3000);
-  await p.waitForTimeout(100);
+  await p.waitForTimeout(400);                     /* a missed outing decided in the background may land here */
   const spot = () => p.evaluate(() => LOPDA_DEBUG.pet.spot());
+  for (let i = 0; i < 20 && (await spot()).outing; i++) await p.clock.runFor(500);
+  assert.equal((await spot()).zz, true, "settled in bed before the night checks");
 
   /* every stage sleeps in the bed, with Zz above it */
   for (const [day, stage] of [[0, "baby"], [3, "child"], [10, "adult"]]) {
@@ -5227,6 +5269,15 @@ test("pet: at night it lies in the bed in every stage, wakes back to the rug, an
     assert.equal(a.zz, true, `${stage} has Zz`);
   }
 
+  /* in bed the icon row follows the state: food and the light answer, play and wash do not */
+  assert.equal(await p.locator(".pet-ikey").nth(1).getAttribute("aria-disabled"), "true", "play is not an option in bed");
+  assert.equal(await p.locator(".pet-ikey").nth(2).getAttribute("aria-disabled"), "true", "wash is not an option in bed");
+  assert.equal(await p.locator(".pet-ikey").nth(0).getAttribute("aria-disabled"), "false", "food gets it up");
+  assert.equal(await p.locator(".pet-ikey").nth(3).getAttribute("aria-disabled"), "false", "the light still answers");
+  await p.evaluate(() => document.querySelectorAll(".pet-ikey")[1].click());
+  await p.waitForTimeout(100);
+  assert.ok(await p.isHidden("#pet-panel"), "play does not open while it sleeps");
+
   /* morning: a short walk from the bed back to the rug (down first, then across).
      08:00 is after every trait's sleep window (the sleepy one wakes at 07:30), so the pet is up. */
   await p.clock.setSystemTime(new Date(2026, 9, 12, 8, 0));
@@ -5237,6 +5288,8 @@ test("pet: at night it lies in the bed in every stage, wakes back to the rug, an
     if (q.zz === false && q.x > 10 && q.x < 83) mid = q;
   }
   assert.ok(mid, "walking back, not teleporting");
+  assert.equal(mid.dir, "right", "the side frames face the way it walks");
+  assert.equal(await p.locator(".pet-ikey").nth(1).getAttribute("aria-disabled"), "false", "play comes back once it is up");
   assert.equal((await spot()).zz, false, "Zz is gone once awake");
   await p.clock.runFor(3000);
   const home = await spot();
@@ -5252,14 +5305,14 @@ test("pet: at night it lies in the bed in every stage, wakes back to the rug, an
   assert.deepEqual(d.prop, { x: 108, y: 96, w: 50, h: 22 }, "the desk and pen are on the floor under the bookshelf");
   const hit = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
   const pet = { x: d.x, y: d.y, w: 32, h: 32 };
-  for (const [name, box] of [
-    ["bed", { x: 4, y: 58, w: 48, h: 34 }],
-    ["bookshelf", { x: 114, y: 16, w: 44, h: 80 }],
-    ["bowl", { x: 25, y: 97, w: 20, h: 14 }],
-    ["pet", pet]
-  ]) assert.ok(!hit(d.prop, box), `the desk does not overlap the ${name}`);
-  assert.ok(!hit(pet, { x: 4, y: 58, w: 48, h: 34 }), "the pet is clear of the bed");
-  assert.ok(!hit(pet, { x: 114, y: 16, w: 44, h: 80 }), "the pet is clear of the bookshelf");
+  const solids = await p.evaluate(() => LOPDA_DEBUG.pet.room().solids);
+  const boxOf = (o) => ({ x: o.box[0], y: o.box[1], w: o.box[2], h: o.box[3] });
+  assert.deepEqual(solids.map((o) => o.id), ["bed", "bookshelf", "bowl"], "the room declares its furniture");
+  for (const [name, box] of [...solids.map((o) => [o.id, boxOf(o)]), ["pet", pet]]) {
+    assert.ok(!hit(d.prop, box), `the desk does not overlap the ${name}`);
+  }
+  assert.ok(!hit(pet, boxOf(solids.find((o) => o.id === "bed"))), "the pet is clear of the bed");
+  assert.ok(!hit(pet, boxOf(solids.find((o) => o.id === "bookshelf"))), "the pet is clear of the bookshelf");
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
@@ -5392,6 +5445,7 @@ test("pet: a pat wakes a sleeping pet angry; it walks to the rug, returns after 
   await p.clock.runFor(500);
   a = await spot();
   assert.equal(a.zz, false, "walking, not teleporting");
+  assert.equal(a.dir, "left", "heading back to bed it faces left, not right");
   assert.ok(a.x < rugX || a.y > 52, "on the way back");
   assert.ok(await until(async () => (await spot()).zz === true, 12), "back in bed at once");
   assert.deepEqual([(await spot()).x, (await spot()).y], [10, 52]);
