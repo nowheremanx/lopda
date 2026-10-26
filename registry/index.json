@@ -613,8 +613,8 @@
         "notes"
       ],
       "path": "apps/sisyphus/index.html",
-      "sha256": "7a0d9ea82de0ad054138be4ff10d59cbe6212c5feb5126c041744e41362b5f11",
-      "bytes": 91253
+      "sha256": "c3db3b1a1e77c0f778148b31926263aca547c3c2066fdede0e2d76206558c971",
+      "bytes": 91519
     },
     {
       "spec": "lopda/1",
