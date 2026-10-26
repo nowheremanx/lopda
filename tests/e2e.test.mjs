@@ -4420,7 +4420,7 @@ test("pet: mail and props - each kind lights 信, puts its prop in the room and 
   assert.deepEqual(flags.one, [3, 7], "one digit is centred in the flag field");
   assert.deepEqual(flags.two, [1, 10], "two digits start at the left; the last column is already the ink border");
 
-  for (const kind of ["date", "diary", "word", "book", "film"]) {
+  for (const kind of ["date", "word", "book", "film"]) {
     const diff = await propDiff(kind);
     assert.ok(diff > 0, `${kind} puts prop pixels into the room (${diff})`);
     await openMenu();
@@ -4465,15 +4465,6 @@ test("pet: mail and props - each kind lights 信, puts its prop in the room and 
   await key("b");
   assert.ok(await p.isHidden("#pet-panel"));
 
-  /* diary: A on 信 opens today's diary in notes; B comes back to the pet */
-  await p.evaluate(() => LOPDA_DEBUG.pet.forcePick("diary"));
-  await openMail();
-  await p.locator("#v-note:not([hidden])").waitFor();
-  assert.equal((await save()).today.used, true, "the diary pick is used");
-  await key("b");
-  await p.locator("#v-pet:not([hidden])").waitFor();
-  assert.ok(await p.isHidden("#pet-panel"));
-
   /* film: A opens the darkroom */
   await p.evaluate(() => LOPDA_DEBUG.pet.forcePick("film"));
   await openMail();
@@ -4504,47 +4495,6 @@ test("pet: mail and props - each kind lights 信, puts its prop in the room and 
   assert.equal(await p.locator("#pet-keys .sk-start").isDisabled(), false, "START still opens the menu");
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
-
-/* ---------- pet, walk to use: the diary waits for the desk ---------- */
-test("pet: a diary pick walks the pet to the desk first, and the notes cover the walk back", { skip, timeout: 60000 }, async (t) => {
-  const { p, errors } = await page(t, { locale: "zh-CN", serviceWorkers: "block", viewport: { width: 375, height: 667 } });
-  await p.clock.install({ time: new Date(2026, 9, 11, 9, 0) });
-  await p.goto(base + "/runtime/?debug", { waitUntil: "networkidle" });
-  await p.waitForFunction(() => document.getElementById("savestate").textContent !== "启动中…");
-  const key = async (b) => { await p.evaluate((b) => { LOPDA_DEBUG.setButton(b, true); LOPDA_DEBUG.setButton(b, false); }, b); await p.waitForTimeout(100); };
-  const spot = () => p.evaluate(() => LOPDA_DEBUG.pet.spot());
-  const save = () => p.evaluate(() => LOPDA_DEBUG.pet.save());
-  await p.locator("#home .app", { hasText: "宠物" }).click();
-  await p.locator("#v-pet:not([hidden])").waitFor();
-  await p.evaluate(() => { LOPDA_DEBUG.pet.hatch(); LOPDA_DEBUG.pet.forcePick("diary"); LOPDA_DEBUG.pet.setStats(1, 5); });
-  await p.waitForTimeout(200);
-
-  /* hungry, it stands at the bowl; the diary desk is already on the floor */
-  let a = await spot();
-  assert.deepEqual([a.x, a.y], [32, 69], "it waits at the bowl, not at the desk");
-  assert.deepEqual(a.prop, { x: 108, y: 96, w: 50, h: 22 }, "the diary desk is under the bookshelf");
-
-  await p.locator("#pet-keys .sk-start").click();
-  await p.waitForSelector("#pet-panel:not([hidden])");
-  await p.locator("#pet-panel .pet-menu").nth(0).click();
-  await p.clock.runFor(500);
-  a = await spot();
-  assert.equal(a.phase, "walkUse", "using 信 starts a walk, not the notes view");
-  assert.ok(a.x > 32 && a.x < 70, "on the way to the desk: " + a.x);
-  assert.equal(a.dir, "right", "walking right, toward the desk");
-  assert.deepEqual([a.prop.x, a.prop.y], [108, 96], "the desk does not move with it");
-  assert.ok(await p.isHidden("#v-note"), "the notes waits until it reaches the desk");
-
-  await p.clock.runFor(1500);
-  await p.locator("#v-note:not([hidden])").waitFor();
-  assert.equal((await save()).today.used, true, "the diary is used after the walk");
-  await key("b");
-  await p.locator("#v-pet:not([hidden])").waitFor();
-  a = await spot();
-  assert.deepEqual([a.x, a.y], [32, 69], "after the notes it is back at the bowl it wanted");
-  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
-});
-
 /* ---------- pet, reward: usage in other programs is read again when the screen opens ---------- */
 test("pet: using the dictionary after a visit earns one joy when it next opens, and only once", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await page(t, { locale: "zh-CN", serviceWorkers: "block", viewport: { width: 375, height: 667 } });
@@ -5245,7 +5195,7 @@ test("pet: an old nameless pet opened before the first storage read is asked for
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
-test("pet: at night it lies in the bed in every stage, wakes back to the rug, and the diary desk stands clear", { skip, timeout: 90000 }, async (t) => {
+test("pet: at night it lies in the bed in every stage, wakes back to the rug, and faces the way it walks", { skip, timeout: 90000 }, async (t) => {
   const { p, errors } = await page(t, { ...pw.devices["iPhone 13"], locale: "zh-CN", serviceWorkers: "block" });
   await p.clock.install({ time: new Date(2026, 9, 11, 22, 0) });
   await p.goto(base + "/runtime/?debug", { waitUntil: "networkidle" });
@@ -5295,24 +5245,6 @@ test("pet: at night it lies in the bed in every stage, wakes back to the rug, an
   const home = await spot();
   assert.deepEqual([home.x, home.y], [83, 69], "back on the rug");
 
-  /* the diary desk is on the floor, clear of the bed, the bookshelf, the bowl and the pet */
-  await p.clock.setSystemTime(new Date(2026, 9, 12, 9, 0));
-  await p.clock.runFor(600);
-  await p.evaluate(() => LOPDA_DEBUG.pet.forcePick("diary"));
-  await p.clock.runFor(600);
-  const d = await spot();
-  assert.deepEqual([d.x, d.y], [70, 69], "the pet stands beside the desk");
-  assert.deepEqual(d.prop, { x: 108, y: 96, w: 50, h: 22 }, "the desk and pen are on the floor under the bookshelf");
-  const hit = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
-  const pet = { x: d.x, y: d.y, w: 32, h: 32 };
-  const solids = await p.evaluate(() => LOPDA_DEBUG.pet.room().solids);
-  const boxOf = (o) => ({ x: o.box[0], y: o.box[1], w: o.box[2], h: o.box[3] });
-  assert.deepEqual(solids.map((o) => o.id), ["bed", "bookshelf", "bowl"], "the room declares its furniture");
-  for (const [name, box] of [...solids.map((o) => [o.id, boxOf(o)]), ["pet", pet]]) {
-    assert.ok(!hit(d.prop, box), `the desk does not overlap the ${name}`);
-  }
-  assert.ok(!hit(pet, boxOf(solids.find((o) => o.id === "bed"))), "the pet is clear of the bed");
-  assert.ok(!hit(pet, boxOf(solids.find((o) => o.id === "bookshelf"))), "the pet is clear of the bookshelf");
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 

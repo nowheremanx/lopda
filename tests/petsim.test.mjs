@@ -417,14 +417,14 @@ test("pickOfDay: yesterday's kind is dropped, only the first two kinds can win",
   assert.equal(P.pickOfDay([{ kind: "word" }], "word", 1), null, "nothing else to show");
 });
 
-test("pickOfDay: all five kinds, no yesterday drop, only the first two in design order", () => {
-  const cands = [{ kind: "film" }, { kind: "book" }, { kind: "word" }, { kind: "diary" }, { kind: "date" }];
+test("pickOfDay: all four kinds, no yesterday drop, only the first two in design order", () => {
+  const cands = [{ kind: "film" }, { kind: "book" }, { kind: "word" }, { kind: "date" }];
   let shown = 0;
   for (let seed = 0; seed < 400; seed++) {
     const pick = P.pickOfDay(cands, null, seed);
     if (!pick) continue;
     shown++;
-    assert.ok(pick.kind === "date" || pick.kind === "diary", "only date and diary can win: " + pick.kind);
+    assert.ok(pick.kind === "date" || pick.kind === "word", "only date and word can win: " + pick.kind);
   }
   assert.ok(shown > 0);
 });

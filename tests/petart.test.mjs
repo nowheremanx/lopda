@@ -246,7 +246,7 @@ test("props: the bowls, the piles, the flag and the double-size digit font", () 
   assert.ok(tones.has("k") && tones.has("m") && tones.has("d"), "a pile has an ink edge, a mid body and dark turns");
   assert.notDeepEqual(P.props.flag, P.props.flagBlank);
   assert.ok(P.props.flag[0].length >= 16 && P.props.flag.length >= 28, "the flag is drawn at double size");
-  assert.ok(P.props.desk[0].length >= 48 && P.props.sign[0].length >= 32, "the desk and sign are double size");
+  assert.ok(P.props.sign[0].length >= 32, "the sign is double size");
   assert.equal(A.numberGrid(9).length, 7);
   assert.equal(A.numberGrid(9)[0].length, 5);
   assert.equal(A.numberGrid(24)[0].length, 11);
@@ -324,29 +324,17 @@ test("room: spots and slots name the placement, and a slotted prop stays put", (
   assert.deepEqual(plain(R.spots.stand), { x: 83, y: 69 });
   assert.deepEqual(plain(R.spots.sleep), { x: 10, y: 52 });
   assert.deepEqual(plain(R.spots.eat), { x: 32, y: 69 });
-  assert.deepEqual(plain(R.spots.desk), { x: 70, y: 69 });
+  assert.equal(R.spots.desk, undefined, "there is no desk spot: the pet does not write your diary");
   assert.deepEqual(plain(A.spotPoint(R, "sleep")), { x: 10, y: 52 });
   const dot = ["kk", "kk"];
   assert.deepEqual(plain(A.slotPoint(R, "pick", dot)), { x: 119, y: 99 });
-  assert.deepEqual(plain(A.slotPoint(R, "desk", dot)), { x: 108, y: 116 });
   assert.deepEqual(plain(A.slotPoint(R, "shelf", dot)), { x: 93, y: 30 });
-  const petAtDesk = A.resolve({ spot: "desk" }, R).pet;
-  assert.deepEqual([petAtDesk.x, petAtDesk.y], [70, 69], "the desk has its own stand spot");
-  const at = (petX) => plain(A.resolve({ prop: dot, propSlot: "desk", petX, petY: 69 }, R).prop);
-  assert.deepEqual(at(10), { x: 108, y: 116, w: 2, h: 2 }, "the desk does not follow a walking pet");
+  const at = (petX) => plain(A.resolve({ prop: dot, propSlot: "pick", petX, petY: 69 }, R).prop);
+  assert.deepEqual(at(10), { x: 119, y: 99, w: 2, h: 2 }, "the pick does not follow a walking pet");
   assert.deepEqual(at(83), at(10), "the slot is the same from every pet spot");
   assert.equal(A.resolve({ prop: dot, petX: 83, petY: 69 }, R).prop, null, "an unplaced prop is not drawn");
   assert.deepEqual(plain(A.resolve({ prop: dot, propFollow: true, petX: 10, petY: 52 }, R).prop),
     { x: 46, y: 82, w: 2, h: 2 }, "propFollow is the explicit follow relation");
-  /* the desk and pen are clear of every furniture box the room declares */
-  const big = Array(21).fill("k".repeat(50)).concat(["k".repeat(50)]);
-  const desk = plain(A.resolve({ prop: big, propSlot: "desk" }, R).prop);
-  assert.deepEqual([desk.x, desk.y, desk.w, desk.h], [108, 96, 50, 22]);
-  const hit = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
-  for (const o of R.solids) {
-    const box = { x: o.box[0], y: o.box[1], w: o.box[2], h: o.box[3] };
-    assert.ok(!hit(desk, box), `the desk is clear of the ${o.id}`);
-  }
 });
 
 test("room: z order, data checks and a second room need no engine change", () => {
@@ -365,17 +353,17 @@ test("room: z order, data checks and a second room need no engine change", () =>
   /* a second room: different spots, slots and furniture, the same painter and the same resolver */
   const room2 = {
     id: "loft", w: 162, h: 120, petX: 60, petY: 80,
-    spots: { stand: { x: 60, y: 80 }, sleep: { x: 120, y: 60 }, eat: { x: 40, y: 80 }, wash: { x: 30, y: 80 }, desk: { x: 80, y: 80 } },
-    slots: { pick: { x: 100, bottom: 110, z: 12 }, desk: { x: 110, bottom: 118, z: 12 }, shelf: { x: 20, y: 30, z: 6 }, sign: { x: 60, y: 40, z: 20 }, zz: { x: 130, y: 50, z: 30 } },
+    spots: { stand: { x: 60, y: 80 }, sleep: { x: 120, y: 60 }, eat: { x: 40, y: 80 }, wash: { x: 30, y: 80 } },
+    slots: { pick: { x: 100, bottom: 110, z: 12 }, shelf: { x: 20, y: 30, z: 6 }, sign: { x: 60, y: 40, z: 20 }, zz: { x: 130, y: 50, z: 30 } },
     solids: [{ id: "bed", box: [110, 50, 40, 30] }],
-    uses: { feed: { spot: "eat" }, sleep: { spot: "sleep" }, wash: { spot: "wash" }, rest: { spot: "stand" }, diary: { spot: "desk", slot: "desk" } },
+    uses: { feed: { spot: "eat" }, sleep: { spot: "sleep" }, wash: { spot: "wash" }, rest: { spot: "stand" } },
     bowl: P.room.bowl, bowlEmpty: P.room.bowlEmpty, poop: P.room.poop, sign: P.room.sign, zz: P.room.zz,
     poops: P.room.poops, draw: P.room.draw
   };
   assert.deepEqual([...A.roomOk(room2)], [], "a second room is sound data");
   assert.deepEqual(plain(A.useSpot(room2, "feed", "eat")), { x: 40, y: 80 });
-  const l2 = plain(A.resolve({ prop: ["kk"], propSlot: "desk", petX: 10, petY: 10 }, room2).prop);
-  assert.deepEqual([l2.x, l2.y], [110, 117], "the desk follows the second room's slot");
+  const l2 = plain(A.resolve({ prop: ["kk"], propSlot: "pick", petX: 10, petY: 10 }, room2).prop);
+  assert.deepEqual([l2.x, l2.y], [100, 109], "the prop follows the second room's slot");
   const base = { dayOfMonth: 24, bowlFull: true, mess: 1, pet: P.frames({ face: "idle1" }) };
   const first = room(base), second = room({ ...base, pack: { id: "loft", room: room2 } });
   assert.notDeepEqual([...first], [...second], "the second room draws where its own data says");
