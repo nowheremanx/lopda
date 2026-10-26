@@ -140,6 +140,16 @@ test("draw: a thin ink frame, the score in petart's pixel digits, and each game'
   const climbGame = game("climb"), climbState = climbGame.init(4);
   climbState.plats = []; climbState.pet = null; climbState.score = 3;
   climbState.height = 0; const wall0 = drawTones(climbGame, climbState);
+  const brickXs = (buf, y) => {
+    const xs = [];
+    for (let x = 0; x < W; x++) if (buf[y * W + x] === 2) xs.push(x);
+    return xs.join(",");
+  };
+  const bricks = brickXs(wall0, 10);
+  for (let h = 0; h < 24; h++) {
+    climbState.height = h;
+    assert.equal(brickXs(drawTones(climbGame, climbState), h + 10), bricks, `the same world row keeps its bricks at height ${h}`);
+  }
   climbState.height = 3; const wall3 = drawTones(climbGame, climbState);
   let moved = 0;
   for (let i = 0; i < wall0.length; i++) if (wall0[i] !== wall3[i]) moved++;

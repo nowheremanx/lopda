@@ -27,6 +27,7 @@
  *   fresh(now, rnd, species)     a new egg; marks and trait rolled from rnd
  *   hatch(save)                  egg -> baby (the program calls it after the ~8 s hatch)
  *   asleep(save, hour, minute)   the sleep window by trait, or the light off after 20:00
+ *   actionReady(save, action, ctx) whether food / play / wash / light / call answers now; ctx = {asleep, outing}
  *   pathPoint(from, to, t)      a point on the bed <-> floor L-walk, t 0..1
  *   catchUp(save, now, ctx)      {save, events}, 1-hour steps from save.last; ctx = {tz}
  *   openDay(save, dayKey, counts) counts a day opened and grows baby -> child -> adult; counts feeds adultForm
@@ -193,6 +194,19 @@ function asleep(save,hour,minute){
   if(save.light===false && mins>=sp.lightOff) return true;
   var w=(sp.sleep && (sp.sleep[save.trait] || sp.sleep.normal)) || [1320,420];
   return mins>=w[0] || mins<w[1];
+}
+
+/* ---------- the five icons and the pet's state ---------- */
+var ACTIONS=["food","play","wash","light","call"];
+/* Whether the pet will answer an action right now. A sleeping pet answers only the light (which wakes it);
+   a meal, play and wash need it up. Travel keeps only the call (it brings the pet home); an outing keeps none. */
+function actionReady(save,action,ctx){
+  var c=ctx||{};
+  if(!save || save.stage==="egg") return false;
+  if(save.travel) return action==="call";
+  if(c.outing) return false;
+  if(c.asleep) return action==="light";
+  return ACTIONS.indexOf(action)>=0;
 }
 
 /* ---------- the bed <-> floor walk ---------- */
@@ -400,7 +414,7 @@ function outingToday(save,key){
 }
 
 /* ---------- the pick of the day ---------- */
-var KIND_ORDER={date:0, diary:1, word:2, book:3, film:4};
+var KIND_ORDER={date:0, word:1, book:2, film:3};
 function kindRank(c){
   var k=typeof c==="string" ? c : c && c.kind;
   return KIND_ORDER.hasOwnProperty(k) ? KIND_ORDER[k] : 99;
@@ -610,7 +624,7 @@ function aiCategories(before,after){
 window.LopdaPet={
   SPECIES:SPECIES,
   rng:rng, daySeed:daySeed, dayKey:dayKey, hourOf:hourOf, weatherOf:weatherOf,
-  fresh:fresh, hatch:hatch, asleep:asleep, catchUp:catchUp,
+  fresh:fresh, hatch:hatch, asleep:asleep, actionReady:actionReady, ACTIONS:ACTIONS, catchUp:catchUp,
   pathPoint:pathPoint,
   openDay:openDay, adultForm:adultForm,
   feed:feed, play:play, wash:wash, pat:pat, setLight:setLight, wants:wants,
