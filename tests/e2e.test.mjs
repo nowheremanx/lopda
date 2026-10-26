@@ -4294,10 +4294,13 @@ test("pet: hatch, meal, wash, look, the light at night, travel and the postcard;
   await p.locator("#pet-keys .sk-start").click();
   await p.waitForSelector("#pet-panel:not([hidden])");
   await p.locator("#pet-panel .pet-menu").nth(2).click();
-  await key("right", "right", "right");
+  assert.equal(await p.locator(".pet-tile").count() >= 1, true, "the box opens on a picture grid");
+  const grid = await p.locator("#pet-panel").innerText();
+  assert.match(grid, /\d{4}年\d+月/, "the grid names the month");
+  assert.match(grid, /\d+\/\d+/, "and the page");
+  await key("a");                                            /* the newest souvenir is the first tile */
   const box = await p.locator("#pet-panel").innerText();
   assert.match(box, /明信片/);
-  assert.match(box, /\d+\/\d+/);
   const picture = await p.evaluate(() => {
     const c = document.querySelector(".pet-souvcv"), d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data;
     const set = new Set();
@@ -4371,7 +4374,8 @@ test("pet: hatch, meal, wash, look, the light at night, travel and the postcard;
   await p.locator("#pet-keys .sk-start").click();
   await p.waitForSelector("#pet-panel:not([hidden])");
   await p.locator("#pet-panel .pet-menu").nth(2).click();
-  await key("right", "right", "right");
+  assert.match(await p.locator("#pet-panel").innerText(), /\d{4}年\d+月/);
+  await key("a");                                            /* the newest picture is first */
   assert.match(await p.locator("#pet-panel").innerText(), /明信片/);
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
@@ -5561,8 +5565,12 @@ test("pet: an old save's marks load, A then A puts a souvenir on the shelf, and 
   await p.locator("#pet-keys .sk-start").click();
   await p.waitForSelector("#pet-panel:not([hidden])");
   await p.locator("#pet-panel .pet-menu").nth(2).click();
+  assert.equal(await p.locator(".pet-tile").count(), 2, "two pictures in the grid");
+  assert.match(await p.locator("#pet-panel").innerText(), /2026年10月/);
+  assert.match(await p.locator("#pet-panel").innerText(), /1\/1/);
+  await key("right");                                 /* the newest is first; pick the older shell */
+  await key("a");
   assert.match(await p.locator("#pet-panel").innerText(), /贝壳/);
-  assert.match(await p.locator("#pet-panel").innerText(), /1\/2/);
   await key("a");
   assert.match(await p.locator("#pet-panel").innerText(), /摆到房间里？/);
   assert.equal(await p.locator("#pet-keys .sk-a span").innerText(), "是");
@@ -5593,8 +5601,10 @@ test("pet: an old save's marks load, A then A puts a souvenir on the shelf, and 
   assert.equal(await p.locator("#pet-keys .sk-a span").innerText(), "收");
   await fourTones();
 
-  /* one at a time: browsing to the other page and choosing it replaces the first, with no second joy */
-  await key("right");
+  /* one at a time: back to the grid, choose the other picture, it replaces the first with no second joy */
+  await key("b");
+  await key("left");
+  await key("a");
   assert.match(await p.locator("#pet-panel").innerText(), /红叶/);
   assert.ok(!/摆着/.test(await p.locator("#pet-panel").innerText()), "the other souvenir is not on display");
   await key("a");
@@ -5605,7 +5615,9 @@ test("pet: an old save's marks load, A then A puts a souvenir on the shelf, and 
   assert.equal((await save()).joy, 3, "one joy a day for changing the shelf");
   const onS2 = await shelfSig();
   assert.notEqual(onS2, onS1, "the other souvenir has its own shelf picture");
-  await key("left");
+  await key("b");
+  await key("right");
+  await key("a");
   assert.ok(!/摆着/.test(await p.locator("#pet-panel").innerText()), "the replaced souvenir lost its 摆着 mark");
   await fourTones();
 
@@ -5635,7 +5647,7 @@ test("pet: an old save's marks load, A then A puts a souvenir on the shelf, and 
   await p.locator("#pet-keys .sk-start").click();
   await p.waitForSelector("#pet-panel:not([hidden])");
   await p.locator("#pet-panel .pet-menu").nth(2).click();
-  await key("right");
+  await key("a");
   assert.match(await p.locator("#pet-panel").innerText(), /摆着/);
   await key("a");
   assert.match(await p.locator("#pet-panel").innerText(), /收起来？/);
@@ -5647,11 +5659,14 @@ test("pet: an old save's marks load, A then A puts a souvenir on the shelf, and 
   await fourTones();
 
   /* 重新开始 keeps the souvenirs and the one on the shelf */
-  await key("left");
+  await key("b");
+  await key("right");
+  await key("a");
   await key("a");
   await key("a");
   await p.waitForTimeout(150);
   assert.equal((await save()).shelf, "s1", "the shelf is put back up for the restart check");
+  await key("b");
   await key("b");
   await p.locator("#pet-keys .sk-start").click();
   await p.waitForSelector("#pet-panel:not([hidden])");
@@ -5668,6 +5683,79 @@ test("pet: an old save's marks load, A then A puts a souvenir on the shelf, and 
   assert.equal(restarted.shelf, "s1", "重新开始 keeps the shelf");
   assert.equal((await idb.under(p, "data/users/local/pet/souvenirs")).length, 2, "the souvenirs themselves are kept");
   assert.equal(await shelfSig(), onS1, "the kept souvenir is still drawn on the shelf");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("pet: the keepsake box is a newest-first month grid with page turns, and fits 331 x 359", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t, { ...pw.devices["iPhone 13"], locale: "zh-CN", serviceWorkers: "block" });
+  await p.clock.install({ time: new Date(2026, 9, 11, 9, 0) });
+  await p.goto(base + "/runtime/?debug", { waitUntil: "networkidle" });
+  await p.waitForFunction(() => document.getElementById("savestate").textContent !== "启动中…");
+  const key = async (b) => { await p.evaluate((b) => { LOPDA_DEBUG.setButton(b, true); LOPDA_DEBUG.setButton(b, false); }, b); await p.waitForTimeout(90); };
+  const plan = await p.evaluate(() => {
+    const P = window.LopdaPet, now = Date.now();
+    const s = P.fresh(now, P.rng(9));
+    s.stage = "baby"; s.name = "芯仔"; s.boxSeen = 0; s.lastDay = null;
+    return s;
+  });
+  await idb.setDoc(p, "data/users/local/pet", plan);
+  const px = (n) => String(n % 4).repeat(256);
+  for (let n = 1; n <= 5; n++) {
+    await idb.setDoc(p, "data/users/local/pet/souvenirs/sep" + n, {
+      name: { zh: "九月" + n, en: "Sep " + n }, line: { zh: "九月的第 " + n + " 天。", en: "Day " + n + " of September." },
+      px: px(n), at: Date.UTC(2026, 8, n), ai: false, day: "2026-09-" + String(n).padStart(2, "0")
+    });
+  }
+  for (let n = 1; n <= 22; n++) {
+    await idb.setDoc(p, "data/users/local/pet/souvenirs/oct" + n, {
+      name: { zh: "十月" + n, en: "Oct " + n }, line: { zh: "十月的第 " + n + " 天。", en: "Day " + n + " of October." },
+      px: px(n), at: Date.UTC(2026, 9, n), ai: false, day: "2026-10-" + String(n).padStart(2, "0")
+    });
+  }
+  await p.reload({ waitUntil: "networkidle" });
+  await p.waitForFunction(() => document.getElementById("savestate").textContent !== "启动中…");
+  await p.locator("#home .app", { hasText: "宠物" }).click();
+  await p.locator("#v-pet:not([hidden])").waitFor();
+  await p.waitForTimeout(200);
+  await p.locator("#pet-keys .sk-start").click();
+  await p.waitForSelector("#pet-panel:not([hidden])");
+  await p.locator("#pet-panel .pet-menu").nth(2).click();
+
+  /* the newest month first: October has 22 pictures, one page; the first picture is the newest */
+  let text = await p.locator("#pet-panel").innerText();
+  assert.match(text, /2026年10月/);
+  assert.match(text, /1\/2/);
+  assert.equal(await p.locator(".pet-tile").count(), 22);
+  await p.setViewportSize({ width: 375, height: 587 });   /* the 331 x 359 LCD */
+  await p.waitForTimeout(150);
+  const fit = await p.evaluate(() => {
+    const panel = document.getElementById("pet-panel").getBoundingClientRect();
+    const grid = document.querySelector(".pet-souv-grid").getBoundingClientRect();
+    const foot = document.querySelector(".pet-souvfoot").getBoundingClientRect();
+    const v = document.getElementById("v-pet");
+    return { panelBottom: panel.bottom, gridBottom: grid.bottom, footBottom: foot.bottom, scrollH: v.scrollHeight, clientH: v.clientHeight };
+  });
+  assert.ok(fit.gridBottom <= fit.panelBottom + 0.5 && fit.footBottom <= fit.panelBottom + 0.5, "the grid and its footer fit the panel");
+  assert.ok(fit.scrollH <= fit.clientH, "the box does not scroll on 331 x 359");
+  await p.setViewportSize({ width: 390, height: 844 });
+  await p.waitForTimeout(150);
+
+  /* right walks the pictures; one more at the end turns to September */
+  for (let i = 0; i < 21; i++) await key("right");
+  text = await p.locator("#pet-panel").innerText();
+  assert.match(text, /2026年10月/);
+  assert.match(text, /1\/2/);
+  await key("right");
+  text = await p.locator("#pet-panel").innerText();
+  assert.match(text, /2026年9月/);
+  assert.match(text, /2\/2/);
+  assert.equal(await p.locator(".pet-tile").count(), 5);
+  await key("a");
+  assert.match(await p.locator("#pet-panel").innerText(), /九月5/);
+  await key("b");
+  assert.equal(await p.locator(".pet-tile").count(), 5, "B goes back to the September page");
+  await key("b");
+  assert.ok(await p.isHidden("#pet-panel"), "B from the grid closes the box");
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
@@ -5743,6 +5831,8 @@ test("pet: the AI souvenir is made and saved with the pet screen never opened; o
   await p.locator("#pet-keys .sk-start").click();
   await p.waitForSelector("#pet-panel:not([hidden])");
   await p.locator("#pet-panel .pet-menu").nth(2).click();
+  assert.match(await p.locator("#pet-panel").innerText(), /2026年10月/);
+  await p.locator(".pet-tile").first().click();
   assert.match(await p.locator("#pet-panel").innerText(), /夜灯/);
   assert.equal(await p.evaluate(() => window.__aiCalls.length), 1, "still one call");
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);

@@ -83,7 +83,7 @@ var P={
   sub:null, sel:0, menuSel:0, frame:0,
   anim:0, hold:0, roomHold:0, holdFired:false,
   eggMs:0, hatching:null, action:null, actionUntil:0, heartUntil:0,
-  washUntil:0, washStart:0, flash:null, outing:null, foodSel:0, boxPage:0, boxAsk:null,
+  washUntil:0, washStart:0, flash:null, outing:null, foodSel:0, boxPage:0, boxSel:0, boxItem:null, boxAsk:null,
   naming:null, task:null, at:null, feeds:[], awakeLeft:0, puffUntil:0, pendingNeed:null, lightReturn:false,
   ignoreAUp:false,
   wasAsleep:null, lastScene:null, flashSeq:0,
@@ -1242,15 +1242,42 @@ function restartPet(){
   P.hatching=null; P.naming=null; P.boxAsk=null; P.wasAsleep=null;
   P.task=null; P.feeds=[]; P.awakeLeft=0; P.puffUntil=0; P.pendingNeed=null; P.lightReturn=false; P.at=null;
   stopGameTimer();
-  P.lastWants=null; P.boxPage=0; P.bringing=false;
+  P.lastWants=null; P.boxPage=0; P.boxSel=0; P.boxItem=null; P.bringing=false;
   stopAiJob();
   saveNow(); beep("ok"); LP.toast(tr("pet.restart.done")); renderKeys(); render();
 }
 
 /* ---------- the four sub-screens ---------- */
 function openLook(){ P.sub="look"; P.confirmStage=0; renderKeys(); beep("tap"); render(); }
+/* The box is a month index: newest month first, 5 x 5 pictures a page, A opens one. The newest souvenir
+   is the first picture, so opening the box after an outing shows what was brought back. */
+var SOUV_PER_PAGE=25, SOUV_COLS=5;
+function souvDay(s){
+  if(s && s.day && /^\d{4}-\d{2}-\d{2}$/.test(s.day)) return s.day;
+  return dayKey((s && s.at) || now());
+}
+function boxPages(){
+  var list=P.souv.slice().sort(function(a,b){ return (b.at||0)-(a.at||0); });
+  var groups=[], g=null, pages=[], i, n;
+  list.forEach(function(s){
+    var m=souvDay(s).slice(0,7);
+    if(!g || g.key!==m){ g={key:m,items:[]}; groups.push(g); }
+    g.items.push(s);
+  });
+  groups.forEach(function(grp){
+    n=Math.ceil(grp.items.length/SOUV_PER_PAGE);
+    for(i=0;i<n;i++) pages.push({key:grp.key,items:grp.items.slice(i*SOUV_PER_PAGE,i*SOUV_PER_PAGE+SOUV_PER_PAGE)});
+  });
+  return pages;
+}
+function openBoxItem(){
+  var pages=boxPages(), pg=pages[P.boxPage], s=pg && pg.items[P.boxSel];
+  if(!s) return;
+  P.boxItem=s.id; P.boxAsk=null; P.panelKey="";
+  beep("tap"); renderKeys(); render();
+}
 function openBox(){
-  P.sub="box"; P.boxPage=0; P.boxAsk=null;
+  P.sub="box"; P.boxPage=0; P.boxSel=0; P.boxItem=null; P.boxAsk=null;
   if(P.save){ P.save.boxSeen=P.souv.length; saveNow(); }
   homeMaybeRender();
   renderKeys(); beep("tap"); render();
@@ -1382,7 +1409,7 @@ function setShelf(id){
   beep("ok"); saveSoon(); renderKeys(); render();
 }
 function askShelfAction(){
-  var s=P.souv[P.boxPage];
+  var s=findSouv(P.boxItem);
   if(!s || !P.save) return;
   P.boxAsk={id:s.id, take:P.save.shelf===s.id};
   P.panelKey=""; beep("tap"); renderKeys(); render();
@@ -1396,7 +1423,7 @@ function answerShelf(yes){
 function pickFood(kind){ feed(kind==="snack"?"snack":"meal"); }
 /* dir -1 is up / left and +1 is down / right: the food list is vertical, so both pairs move it, the icon row is
    horizontal but a thumb on the cross may use either pair */
-function nav(dir){
+function nav(dir,btn){
   if(P.sub==="food"){ P.foodSel=Math.max(0,Math.min(1,P.foodSel+dir)); beep("move"); render(); return; }
   if(P.sub==="games"){
     var list=(Play && Play.GAMES)||[];
@@ -1406,10 +1433,26 @@ function nav(dir){
   }
   if(P.sub==="game") return;
   if(P.sub==="box"){
-    if(!P.souv.length) return;
-    P.boxAsk=null;
-    P.boxPage=Math.max(0,Math.min(P.souv.length-1,P.boxPage+dir));
-    beep("move"); render(); return;
+    if(P.boxItem) return;                    /* one card: B goes back to the grid */
+    var pages=boxPages();
+    if(!pages.length) return;
+    P.boxPage=Math.max(0,Math.min(pages.length-1,P.boxPage));
+    var pg=pages[P.boxPage], n=pg.items.length, idx, row, col;
+    P.boxSel=Math.max(0,Math.min(n-1,P.boxSel));
+    row=Math.floor(P.boxSel/SOUV_COLS); col=P.boxSel%SOUV_COLS;
+    if(btn==="up" || btn==="down"){
+      row+=btn==="down"?1:-1;
+      idx=row*SOUV_COLS+col;
+      if(row>=0 && row<SOUV_COLS && idx<n) P.boxSel=idx;
+    } else {
+      idx=P.boxSel+(btn==="left"?-1:(btn==="right"?1:dir));
+      if(idx<0){
+        if(P.boxPage>0){ P.boxPage--; P.boxSel=Math.min(SOUV_PER_PAGE-1,boxPages()[P.boxPage].items.length-1); }
+      } else if(idx>=n){
+        if(P.boxPage<pages.length-1){ P.boxPage++; P.boxSel=0; }
+      } else P.boxSel=idx;
+    }
+    P.boxAsk=null; beep("move"); render(); return;
   }
   if(P.sub==="menu"){
     var items=menuItems(), i=P.menuSel, n=items.length;
@@ -1453,7 +1496,12 @@ function pressA(){
   }
   if(P.sub==="menu"){ chooseMenuItem(P.menuSel); return; }
   if(P.sub==="look"){ confirmNext(); return; }
-  if(P.sub==="box"){ if(P.boxAsk) answerShelf(true); else askShelfAction(); return; }
+  if(P.sub==="box"){
+    if(P.boxAsk) answerShelf(true);
+    else if(!P.boxItem) openBoxItem();
+    else askShelfAction();
+    return;
+  }
   if(P.sub==="name"){ nameNext(); return; }
   if(P.sub==="word"){ lookupWord(); return; }
   if(P.sub) return;
@@ -1467,6 +1515,7 @@ function back(){
     return;
   }
   if(P.sub==="box" && P.boxAsk){ answerShelf(false); return; }
+  if(P.sub==="box" && P.boxItem){ P.boxItem=null; P.boxAsk=null; P.panelKey=""; beep("tap"); renderKeys(); render(); return; }
   if(P.sub){
     P.sub=null; P.confirmStage=0; P.boxAsk=null;
     P.wordWord=""; P.wordMeaning=null; P.wordBusy=false;
@@ -1935,7 +1984,7 @@ function boxes(n){
 }
 function panelKey(){
   var s=P.save||{}, st=gameState();
-  return [P.sub,P.foodSel,P.boxPage,P.boxAsk?P.boxAsk.id+P.boxAsk.take:"" ,P.menuSel,P.confirmStage,I18N.lang,P.souv.length,activePick()?activePick().kind:"",
+  return [P.sub,P.foodSel,P.boxPage,P.boxAsk?P.boxAsk.id+P.boxAsk.take:"" ,P.menuSel,P.confirmStage,I18N.lang,P.souv.length,P.boxSel,P.boxItem||"",activePick()?activePick().kind:"",
     P.naming?(P.naming.confirm?1:0):-1,
     P.gameSel,P.game?P.game.id:"",st?st.score:-1,st&&st.done?1:0,P.game&&P.game.applied?1:0,P.game&&P.game.started?1:0,
     P.wordWord,P.wordMeaning,P.wordBusy,
@@ -2045,31 +2094,54 @@ function buildWord(panel){
 function buildBox(panel){
   panel.appendChild(el("p","pet-ptitle",tr("pet.box.title")));
   if(!P.souv.length){ panel.appendChild(el("p","pet-pempty",tr("pet.box.empty"))); return; }
-  P.boxPage=Math.max(0,Math.min(P.souv.length-1,P.boxPage));
-  var s=P.souv[P.boxPage];
-  var card=el("div","pet-souv");
-  var cv=el("canvas","pet-souvcv"); cv.width=16; cv.height=16; cv.setAttribute("aria-hidden","true");
-  paintSouvenir(cv,s.px);
-  card.appendChild(cv);
-  var body=el("div","pet-souvtext");
-  body.appendChild(el("b","pet-souvname",souvText(s,"name")));
-  body.appendChild(el("p","pet-souvline",souvText(s,"line")));
-  body.appendChild(el("p","pet-souvdate",LP.fmt(s.at)));
-  if(P.save && P.save.shelf===s.id) body.appendChild(el("p","pet-souvtag",tr("pet.shelf.on")));
-  card.appendChild(body);
-  panel.appendChild(card);
-  var foot=el("p","pet-souvfoot");
-  foot.appendChild(el("span","",tr("pet.box.page",{i:P.boxPage+1,n:P.souv.length})));
-  panel.appendChild(foot);
-  if(P.boxAsk && P.boxAsk.id===s.id){
-    var ask=el("div","pet-ask");
-    ask.appendChild(el("p","pet-askq",tr(P.boxAsk.take?"pet.shelf.take":"pet.shelf.put")));
-    var row=el("div","pet-askrow");
-    var yes=el("button","btn",tr("pet.shelf.yes")); yes.type="button"; yes.onclick=function(){ answerShelf(true); };
-    var no=el("button","btn ghost",tr("pet.shelf.no")); no.type="button"; no.onclick=function(){ answerShelf(false); };
-    row.appendChild(yes); row.appendChild(no); ask.appendChild(row);
-    panel.appendChild(ask);
+  if(P.boxItem){
+    var one=findSouv(P.boxItem);
+    if(!one){ P.boxItem=null; }
+    else {
+      var card=el("div","pet-souv");
+      var cv=el("canvas","pet-souvcv"); cv.width=16; cv.height=16; cv.setAttribute("aria-hidden","true");
+      paintSouvenir(cv,one.px);
+      card.appendChild(cv);
+      var body=el("div","pet-souvtext");
+      body.appendChild(el("b","pet-souvname",souvText(one,"name")));
+      body.appendChild(el("p","pet-souvline",souvText(one,"line")));
+      body.appendChild(el("p","pet-souvdate",LP.fmt(one.at)));
+      if(P.save && P.save.shelf===one.id) body.appendChild(el("p","pet-souvtag",tr("pet.shelf.on")));
+      card.appendChild(body);
+      panel.appendChild(card);
+      if(P.boxAsk && P.boxAsk.id===one.id){
+        var ask=el("div","pet-ask");
+        ask.appendChild(el("p","pet-askq",tr(P.boxAsk.take?"pet.shelf.take":"pet.shelf.put")));
+        var row=el("div","pet-askrow");
+        var yes=el("button","btn",tr("pet.shelf.yes")); yes.type="button"; yes.onclick=function(){ answerShelf(true); };
+        var no=el("button","btn ghost",tr("pet.shelf.no")); no.type="button"; no.onclick=function(){ answerShelf(false); };
+        row.appendChild(yes); row.appendChild(no); ask.appendChild(row);
+        panel.appendChild(ask);
+      }
+      return;
+    }
   }
+  var pages=boxPages();
+  if(!pages.length){ panel.appendChild(el("p","pet-pempty",tr("pet.box.empty"))); return; }
+  P.boxPage=Math.max(0,Math.min(pages.length-1,P.boxPage));
+  var pg=pages[P.boxPage];
+  P.boxSel=Math.max(0,Math.min(pg.items.length-1,P.boxSel));
+  var grid=el("div","pet-souv-grid");
+  pg.items.forEach(function(s,i){
+    var b=el("button","pet-tile"+(i===P.boxSel?" on":""));
+    b.type="button";
+    b.setAttribute("aria-label",souvText(s,"name")+" · "+LP.fmt(s.at));
+    var cv=el("canvas",""); cv.width=16; cv.height=16; cv.setAttribute("aria-hidden","true");
+    paintSouvenir(cv,s.px);
+    b.appendChild(cv);
+    b.onclick=function(){ P.boxSel=i; openBoxItem(); };
+    grid.appendChild(b);
+  });
+  panel.appendChild(grid);
+  var foot=el("p","pet-souvfoot");
+  foot.appendChild(el("span","",tr("pet.box.month",{y:pg.key.slice(0,4),m:+pg.key.slice(5,7)})));
+  foot.appendChild(el("span","",tr("pet.box.page",{i:P.boxPage+1,n:pages.length})));
+  panel.appendChild(foot);
 }
 function buildName(panel){
   var confirming=!!(P.naming && P.naming.confirm);
@@ -2170,7 +2242,11 @@ function aKeyLabel(){
   }
   if(P.sub==="menu") return "pet.sk.open";
   if(P.sub==="look") return "pet.sk.hold";
-  if(P.sub==="box") return P.boxAsk ? "pet.shelf.yes" : (P.souv[P.boxPage] && P.save && P.save.shelf===P.souv[P.boxPage].id ? "pet.sk.take" : "pet.sk.put");
+  if(P.sub==="box"){
+    if(P.boxAsk) return "pet.shelf.yes";
+    if(!P.boxItem) return "pet.sk.open";
+    return P.save && P.save.shelf===P.boxItem ? "pet.sk.take" : "pet.sk.put";
+  }
   if(P.sub==="name") return P.naming && P.naming.confirm ? "pet.name.yes" : "pet.name.ok";
   if(P.sub==="word") return "pet.sk.lookup";
   if(!P.save || isEgg()) return "";
@@ -2502,7 +2578,7 @@ LP.padRoute("pet",function(b,down){
     return true;
   }
   if(!down) return true;
-  if(b==="up" || b==="left" || b==="down" || b==="right"){ nav(b==="up" || b==="left"?-1:1); return true; }
+  if(b==="up" || b==="left" || b==="down" || b==="right"){ nav(b==="up" || b==="left"?-1:1,b); return true; }
   if(b==="b"){ back(); return true; }
   if(b==="start"){ openMenu(); return true; }
   /* SELECT stays empty: reserved for switching rooms when more species come (visits) */
