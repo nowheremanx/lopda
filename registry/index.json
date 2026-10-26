@@ -1,6 +1,6 @@
 {
   "spec": "lopda/1",
-  "generated": "2026-10-25",
+  "generated": "2026-10-26",
   "apps": [
     {
       "spec": "lopda/1",
@@ -572,6 +572,49 @@
       "path": "apps/rain-station/index.html",
       "sha256": "ffae5645ed2913d841b2793d49f6a13ee3ed81cc75113e5d4a66f3cbf935ba8b",
       "bytes": 173113
+    },
+    {
+      "spec": "lopda/1",
+      "id": "sisyphus",
+      "name": "西西弗斯",
+      "glyph": "石",
+      "category": "game",
+      "buttons": true,
+      "icon": [
+        "................",
+        "................",
+        "..........000...",
+        ".........03330..",
+        "........0333330.",
+        "........0333330.",
+        ".........03330..",
+        "..........000...",
+        "................",
+        "........00......",
+        "......000.......",
+        "....000.........",
+        "..000...........",
+        "000.............",
+        "................",
+        "................"
+      ],
+      "version": "0.1.0",
+      "released": "2026-10-25",
+      "description": "推石上山。它滚下去。再推。加缪的十六句话在山顶等你。",
+      "i18n": {
+        "en": {
+          "name": "Sisyphus",
+          "description": "Push. It falls. Push again. Sixteen lines from Camus at the summit."
+        }
+      },
+      "author": "Haowei Wu",
+      "license": "MIT",
+      "permissions": [
+        "notes"
+      ],
+      "path": "apps/sisyphus/index.html",
+      "sha256": "7a0d9ea82de0ad054138be4ff10d59cbe6212c5feb5126c041744e41362b5f11",
+      "bytes": 91253
     },
     {
       "spec": "lopda/1",
