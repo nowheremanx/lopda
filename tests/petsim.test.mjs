@@ -76,12 +76,12 @@ test("asleep: 22:00-7:00, sleepy 21:30-7:30, and a light left off after 20:00", 
   assert.equal(P.asleep({ ...dark, trait: "sleepy" }, 20, 30), true);
 });
 
-test("actionReady: in bed only food and the light; travel only the call; an outing and an egg none", () => {
+test("actionReady: in bed only the light; travel only the call; an outing and an egg none", () => {
   const adult = { stage: "adult" };
   const ACTIONS = [...P.ACTIONS];
   const ready = (s, ctx) => ACTIONS.filter((a) => P.actionReady(s, a, ctx));
   assert.deepEqual(ready(adult, {}), ["food", "play", "wash", "light", "call"], "awake: all five");
-  assert.deepEqual(ready(adult, { asleep: true }), ["food", "light"], "in bed: a meal or the light");
+  assert.deepEqual(ready(adult, { asleep: true }), ["light"], "in bed: only the light; a meal needs it up");
   assert.deepEqual(ready(adult, { outing: true }), [], "on an outing it answers nothing");
   assert.deepEqual(ready({ ...adult, travel: true }, {}), ["call"], "away: the call brings it home");
   assert.deepEqual(ready({ ...adult, travel: true }, { asleep: true }), ["call"], "travel wins over sleep");

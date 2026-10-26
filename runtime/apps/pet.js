@@ -21,8 +21,8 @@
  * The day: on the first open of a day (and after hatching) the program asks the read-only summaries for the day's one
  * pick: an upcoming calendar date (a count of days, never a name), the word book, a book not opened for a week,
  * or waiting film. LopdaPet.pickOfDay chooses (about half the days nothing); the pet holds the matching prop
- * and 信 lights. START opens the small menu (信 / 状态 / 纪念品箱); A on 信 opens the summary's own program, then the pick
- * is used for the day. The AI souvenir, when the line is on, is one call at the day's outing (30 s cap) and silently
+ * and its row lights. START opens the small menu (the pick's own name / 状态 / 纪念品箱; "今天没有" when empty);
+ * A on that row opens the summary's own program, then the pick is used for the day. The AI souvenir, when the line is on, is one call at the day's outing (30 s cap) and silently
  * falls back to the built-in table.
  *
  * From boot: the pet lives without its screen. On storage ready, whenever the home screen draws its icon and on resume,
@@ -89,7 +89,7 @@ var P={
   wasAsleep:null, lastScene:null, flashSeq:0,
   game:null, gameSel:0, gameTimer:0, gameLabel:"", gameHeld:{left:false,right:false,a:false}, gamePress:{left:false,right:false,a:false}, gameTouch:null,
   gameSeed:null,
-  angryUntil:0, moodClearUntil:0, callTaps:[],
+  moodClearUntil:0,
   idle:null, idleRng:null,
   confirmStage:0, panelKey:"",
   saveTimer:0, lastWants:null, bringing:false,
@@ -149,10 +149,8 @@ function paintRoomBuffer(){
   }
   ctx.putImageData(im,0,0);
 }
-/* an icon or a souvenir picture: every pixel is paper or one of the four tones, so a canvas holds no stray colours.
-   A faint (disabled) glyph is the same drawing in mid with half its pixels dropped in a checker: clearly lighter than
-   the normal mid glyph, and still a shape rather than a blank. */
-function paintGrid(cv,grid,tone,bg,faint){
+/* an icon or a souvenir picture: every pixel is paper or one of the four tones, so a canvas holds no stray colours. */
+function paintGrid(cv,grid,tone,bg){
   var g=grid||[], w=16, h=16, r, c, line, ch, imd, d, rgb=[], i, t;
   if(g.length && String(g[0]).length===8){ w=8; h=8; }
   if(g.length) h=g.length;
@@ -168,7 +166,6 @@ function paintGrid(cv,grid,tone,bg,faint){
       t=TONE_OF[ch];
       if(ch==="k" && tone!==undefined) t=tone;      /* the icon grids are all glyph: tone is the icon's state */
       if(t===undefined) t=(bg===undefined?3:bg);
-      if(faint && ch!==".") t=((r+c)%2===0 ? 2 : 3);
       i=(r*w+c)*4;
       d[i]=rgb[t][0]; d[i+1]=rgb[t][1]; d[i+2]=rgb[t][2]; d[i+3]=255;
     }
@@ -950,7 +947,7 @@ function feedAtBowl(){
     var burp=false;
     P.save=Pet.feed(P.save,kind,now(),dayKey(now()));
     if(kind==="snack" && P.save.today && P.save.today.burp){ burp=true; P.save.today.burp=false; }
-    P.moodClearUntil=now()+8000; P.angryUntil=0; P.idle=null;
+    P.moodClearUntil=now()+8000; P.idle=null;
     beep(burp?"err":"ok");
     taskEnter(burp?"burp":"eat");
     saveSoon(); renderKeys();
@@ -967,9 +964,7 @@ function taskEnter(phase){
     task.from=spotNow(); task.to={x:to.x,y:to.y};
     task.pos=task.from; task.dur=walkMs(task.from,to);
     P.action=""; P.actionUntil=0;
-  } else if(phase==="blink"){ P.action="blink"; P.actionUntil=now()+600; }
-  else if(phase==="stretch"){ P.action="happy"; P.actionUntil=now()+700; }
-  else if(phase==="angry"){ P.action="angry"; P.actionUntil=now()+1500; P.puffUntil=now()+1500; beep("err"); }
+  } else if(phase==="angry"){ P.action="angry"; P.actionUntil=now()+1500; P.puffUntil=now()+1500; beep("err"); }
   else if(phase==="eat"){ P.action="eat"; P.actionUntil=now()+1800; }
   else if(phase==="burp"){ P.action="burp"; P.actionUntil=now()+1200; }
   else if(phase==="shake"){ P.action="shake"; P.actionUntil=now()+1200; }
@@ -999,8 +994,6 @@ function taskBusy(){
     return true;
   }
   if(task.phase==="atBowl"){ feedAtBowl(); return true; }
-  if(task.phase==="blink"){ if(t-task.t>=600) taskEnter("stretch"); return true; }
-  if(task.phase==="stretch"){ if(t-task.t>=700) taskEnter("walkBowl"); return true; }
   if(task.phase==="angry"){ if(t-task.t>=1500) taskEnter("walkRug"); return true; }
   if(task.phase==="eat"){ if(t-task.t>=1800) taskEnter("atBowl"); return true; }
   if(task.phase==="burp" || task.phase==="shake"){ if(t-task.t>=1200) taskEnter("atBowl"); return true; }
@@ -1071,19 +1064,20 @@ function patPet(){
   if((P.save.today ? P.save.today.pats : 0)!==before){
     if(!P.task){ P.action="happy"; P.actionUntil=now()+2000; }
     P.heartUntil=now()+2000;
-    P.moodClearUntil=now()+8000; P.angryUntil=0; P.idle=null;   /* a pat lifts the low mood at once */
+    P.moodClearUntil=now()+8000; P.idle=null;   /* a pat lifts the low mood at once */
     beep("ok"); saveSoon(); render();
   }
 }
 function feed(kind){
   if(!P.save || isEgg()) return;
   var t=now(), burp=false, sp=Pet.SPECIES[P.save.species]||Pet.SPECIES.chip;
-  /* It gets up for the meal: the food is taken at the bowl, never in bed. A second press while it is walking is
-     accepted and waits its turn; nothing jumps to the bowl. */
-  if(P.task || inBedSleep()){
+  /* A sleeping pet is not fed: the light is the way up, and its food icon is disabled in bed. If the food
+     panel was already open when it fell asleep, close it instead of queuing a meal. */
+  if(inBedSleep()){ P.sub=null; renderKeys(); render(); return; }
+  /* A second press while it is walking is accepted and waits for the bowl; nothing jumps there. */
+  if(P.task){
     P.feeds.push(kind==="snack"?"snack":"meal");
     P.sub=null;
-    if(!P.task) startChore("feed","blink");
     renderKeys(); render();
     return;
   }
@@ -1097,7 +1091,7 @@ function feed(kind){
   P.save=Pet.feed(P.save,kind,t,dayKey(t));
   if(kind==="snack" && P.save.today && P.save.today.burp){ burp=true; P.save.today.burp=false; }
   P.sub=null; P.action=burp?"burp":"eat"; P.actionUntil=t+(burp?1200:2000);
-  P.moodClearUntil=t+8000; P.angryUntil=0; P.idle=null;       /* a meal lifts the low mood at once */
+  P.moodClearUntil=t+8000; P.idle=null;       /* a meal lifts the low mood at once */
   beep(burp?"err":"ok");
   saveSoon(); renderKeys(); render();
 }
@@ -1112,7 +1106,7 @@ function toggleLight(){
   var t=now(), h=hourNow(), mins=localDate(t).getUTCMinutes();
   var wasAsleep=inBedSleep();
   P.save=Pet.setLight(P.save,!P.save.light);
-  P.action=null; P.actionUntil=0; P.idle=null; P.angryUntil=0;
+  P.action=null; P.actionUntil=0; P.idle=null;
   if(P.task){
     /* a light-off during the grumble: it never got up, so it just keeps sleeping; during the walk it turns back */
     if(P.save.light===false && (P.task.kind==="grumpy" || P.task.kind==="wake")){
@@ -1140,18 +1134,14 @@ function toggleLight(){
 function callPet(){
   var t=now(), w=wantsOf();
   if(!w){
-    /* Tapping 呼唤 when it wants nothing: the first two are a small noise, the third in a minute is a short anger. */
-    P.callTaps=(P.callTaps||[]).filter(function(x){ return t-x<60000; });
-    P.callTaps.push(t);
-    if(P.callTaps.length>=3){ P.callTaps=[]; P.angryUntil=t+1500; beep("err"); }
-    else beep("tick");
-    P.idle=null; render();
+    /* 叫它 when it wants nothing: it looks up for a moment. No hidden anger for tapping again. */
+    P.idle=null; P.action="surprised"; P.actionUntil=t+1500;
+    beep("tick"); render();
     return;
   }
-  P.callTaps=[];
   if(w==="food"){ P.lookAt="food"; P.action="wait"; }
   else { P.lookAt="wash"; P.action="wait"; }
-  P.actionUntil=now()+3000;
+  P.actionUntil=t+3000;
   beep("tick"); render();
 }
 function bringBack(){
@@ -1483,10 +1473,13 @@ function back(){
     beep("tap"); renderKeys(); render();
   }
 }
-/* START opens the small menu over the room; A on 信 uses the day's pick. */
+/* START opens the small menu over the room; A on the day's row uses the pick. */
+var PICK_NAME={date:"pet.pick.date",word:"pet.pick.word",book:"pet.pick.book",film:"pet.pick.film"};
 function menuItems(){
+  var pick=activePick();
+  if(pick && !PICK_NAME[pick.kind]) pick=null;      /* an old kind with no program is not offered */
   return [
-    {id:"mail", enabled:!!activePick()},
+    {id:"mail", enabled:!!pick, label:tr(pick?PICK_NAME[pick.kind]:"pet.menu.none")},
     {id:"look", enabled:true},
     {id:"box", enabled:true}
   ];
@@ -1504,7 +1497,7 @@ function chooseMenuItem(i){
   else openBox();
 }
 
-/* ---------- 信: the pick's own program, or the word card ---------- */
+/* ---------- the day's pick: its own program, or the word card ---------- */
 function usePick(){
   var pick=activePick();
   if(P.sub || !pick || !P.save || P.save.travel || P.outing || P.save.stage==="egg") return;
@@ -1635,7 +1628,6 @@ function hatchGrid(pack,elapsed){
 function moodFace(t){
   if(!P.save || P.save.stage==="egg") return null;
   if(!P.task && !(P.awakeLeft>0) && Pet.asleep(P.save,Pet.hourOf(t,tz()),localDate(t).getUTCMinutes())) return null;
-  if(P.angryUntil>t) return "angry";
   if(P.moodClearUntil>t) return null;
   if((+P.save.hunger||0)<=1) return "sad";
   if((+P.save.joy||0)<=1) return "sulk";
@@ -1819,7 +1811,7 @@ function roomScene(){
     }
   }
   /* The bed <-> floor move: one reusable path, sampled on the room tick; the walking legs use the side frames.
-     An upright phase (the grumble, the blink and stretch, eating) keeps its own face at the current spot.
+     An upright phase (the grumble, eating) keeps its own face at the current spot.
      The side frames face right; walking left mirrors them (heading to bed used to moonwalk). */
   if(P.task){
     px=Math.round(P.task.pos ? P.task.pos.x : px);
@@ -1879,20 +1871,18 @@ function renderGame(){
 }
 
 /* ---------- icons ---------- */
-/* every icon is mid when nothing is special, ink when it is lit (信 with a pick, 呼唤 when it wants something) and
-   faint while it cannot be used (信 with no pick, everything on an egg, play and wash while it is in bed).
-   Selected is the frame, not a tone. `petsim.actionReady` owns which action a state answers. */
-function iconTone(i){
+/* A normal icon is dark, an unavailable one mid (lighter but still a whole, readable glyph), a lit one
+   (a need flashing, or 呼唤 when it wants something) ink. Selected is the frame, not a tone.
+   `petsim.actionReady` owns which action a state answers. */
+function iconTone(i,usable){
   var name=ICON_NAMES[i];
-  if(name==="call") return wantsOf()?0:2;                /* 呼唤: ink only when it wants something */
-  if(P.flash && P.flash.i===i && P.flash.left%2===0) return 0;
-  return 2;
+  if(!usable) return 2;
+  if(P.flash && P.flash.i===i) return P.flash.left%2===0 ? 0 : 2;
+  if(name==="call") return wantsOf()?0:1;
+  return 1;
 }
 function iconUsable(name){
   return Pet.actionReady(P.save,name,{asleep:inBedSleep(),outing:!!P.outing});
-}
-function iconFaint(name){
-  return !iconUsable(name);
 }
 function buildIcons(){
   var wrap=$("pet-icons");
@@ -1908,7 +1898,7 @@ function buildIcons(){
       if(P.sub) return;                     /* a sub-screen owns A/B; an icon must not act behind it */
       if(isEgg()){ beep("err"); return; }   /* an egg has nothing to choose yet */
       P.sel=i; beep("move"); renderKeys();
-      if(!iconUsable(name)){ beep("err"); return; }   /* asleep: only food and the light answer */
+      if(!iconUsable(name)){ beep("err"); return; }   /* asleep: only the light answers */
       if(P.save && P.save.travel){ bringBack(); return; }
       if(P.outing) return;
       useSelected();
@@ -1920,7 +1910,7 @@ function buildIcons(){
 function renderIcons(){
   var wrap=$("pet-icons"); if(!wrap) return;
   if(inBedSleep()) P.flash=null;                /* a leftover flash never survives a nap */
-  /* An egg has no icon row at all: not faint icons, no buttons. The naming panel owns the screen too. */
+  /* An egg has no icon row at all: no buttons. The naming panel owns the screen too. */
   if(isEgg() || P.sub==="name"){ wrap.hidden=true; wrap.textContent=""; iconBuilt=false; iconCvs={}; return; }
   wrap.hidden=false;
   if(!iconBuilt) buildIcons();
@@ -1928,10 +1918,10 @@ function renderIcons(){
   var kids=wrap.children;
   ICON_NAMES.forEach(function(name,i){
     var cv=iconCvs[name]; if(!cv) return;
-    var faint=iconFaint(name);
-    paintGrid(cv,icons[name]||[],iconTone(i),3,faint);
+    var usable=iconUsable(name);
+    paintGrid(cv,icons[name]||[],iconTone(i,usable),3);
     var b=kids[i]; if(!b) return;
-    b.setAttribute("aria-disabled",iconUsable(name)?"false":"true");
+    b.setAttribute("aria-disabled",usable?"false":"true");
     if(i===P.sel) b.classList.add("on"); else b.classList.remove("on");
     b.setAttribute("aria-pressed",i===P.sel?"true":"false");
   });
@@ -1945,7 +1935,7 @@ function boxes(n){
 }
 function panelKey(){
   var s=P.save||{}, st=gameState();
-  return [P.sub,P.foodSel,P.boxPage,P.boxAsk?P.boxAsk.id+P.boxAsk.take:"" ,P.menuSel,P.confirmStage,I18N.lang,P.souv.length,activePick()?1:0,
+  return [P.sub,P.foodSel,P.boxPage,P.boxAsk?P.boxAsk.id+P.boxAsk.take:"" ,P.menuSel,P.confirmStage,I18N.lang,P.souv.length,activePick()?activePick().kind:"",
     P.naming?(P.naming.confirm?1:0):-1,
     P.gameSel,P.game?P.game.id:"",st?st.score:-1,st&&st.done?1:0,P.game&&P.game.applied?1:0,P.game&&P.game.started?1:0,
     P.wordWord,P.wordMeaning,P.wordBusy,
@@ -1958,7 +1948,7 @@ function buildMenu(panel){
     var b=el("button","pet-menu"+(i===P.menuSel?" on":"")+(it.enabled?"":" dim"));
     b.type="button";
     if(it.id==="mail" && it.enabled) b.appendChild(el("i","pet-dot"));
-    b.appendChild(el("span","",tr("pet.menu."+it.id)));
+    b.appendChild(el("span","",it.label || tr("pet.menu."+it.id)));
     b.disabled=!it.enabled;
     b.setAttribute("aria-disabled",it.enabled?"false":"true");
     b.onclick=function(){ if(!it.enabled) return; P.menuSel=i; chooseMenuItem(i); };
@@ -2604,7 +2594,7 @@ if(/[?&]debug\b/.test(location.search)){
       if(j!=null) P.save.joy=Math.max(0,Math.min(5,Math.floor(+j||0)));
       if(awakeH!=null) P.save.awakeHunger=Math.max(0,+awakeH||0);
       if(awakeJ!=null) P.save.awakeJoy=Math.max(0,+awakeJ||0);
-      P.moodClearUntil=0; P.angryUntil=0; saveSoon(); render();
+      P.moodClearUntil=0; saveSoon(); render();
       return P.save;
     },
     forceOuting:function(){
