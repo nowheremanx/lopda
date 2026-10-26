@@ -198,14 +198,14 @@ function asleep(save,hour,minute){
 
 /* ---------- the five icons and the pet's state ---------- */
 var ACTIONS=["food","play","wash","light","call"];
-/* Whether the pet will answer an action right now. A sleeping pet only gets up for a meal or the light; play and
-   wash need it on the floor. Travel keeps only the call (it brings the pet home); an outing keeps none. */
+/* Whether the pet will answer an action right now. A sleeping pet answers only the light (which wakes it);
+   a meal, play and wash need it up. Travel keeps only the call (it brings the pet home); an outing keeps none. */
 function actionReady(save,action,ctx){
   var c=ctx||{};
   if(!save || save.stage==="egg") return false;
   if(save.travel) return action==="call";
   if(c.outing) return false;
-  if(c.asleep) return action==="food" || action==="light";
+  if(c.asleep) return action==="light";
   return ACTIONS.indexOf(action)>=0;
 }
 
