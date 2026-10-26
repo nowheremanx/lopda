@@ -1154,24 +1154,6 @@ function propFilm(){
   px(g,5,5,"p"); px(g,9,5,"p");
   return join(g);
 }
-function propDesk(){
-  var g=propCanvas(50,16);
-  fill(g,0,0,50,3,"k");
-  fill(g,1,3,48,8,"p");
-  hline(g,1,11,48,"d");
-  fill(g,0,12,50,2,"k");
-  fill(g,4,14,3,2,"k"); fill(g,43,14,3,2,"k");
-  hline(g,6,5,12,"d"); hline(g,6,7,9,"d");
-  return join(g);
-}
-function propPen(){
-  var g=propCanvas(18,6);
-  fill(g,4,2,10,2,"k");
-  fill(g,5,2,6,1,"d");
-  px(g,14,2,"p"); px(g,15,2,"p"); px(g,15,3,"p");
-  fill(g,6,1,2,1,"m");
-  return join(g);
-}
 function propScarf(){
   var g=propCanvas(24,12), r, x;
   /* a looped scarf: a folded band, a knot and two striped tails that swing out at the bottom */
@@ -1261,8 +1243,6 @@ var PROPS={
   flagBlank:propFlag(true),
   books:propBooks(),
   film:propFilm(),
-  desk:propDesk(),
-  pen:propPen(),
   scarf:propScarf(),
   mooncake:propMooncake(),
   heart:propHeart(true),
@@ -1586,7 +1566,7 @@ function useSpot(room,kind,fallback){
 }
 /* A room is data: every spot, slot, solid and use must stay inside it. Returns a list of problems, [] when
    sound. The painter and the pet frames are still code; packOk checks every grid a pack declares. */
-var ROOM_FALLBACK={feed:"eat",sleep:"sleep",rest:"stand",wash:"wash",diary:"desk"};
+var ROOM_FALLBACK={feed:"eat",sleep:"sleep",rest:"stand",wash:"wash"};
 function roomOk(room){
   var errs=[], w, h, k, s, i, b, sx, sy;
   if(!room || typeof room!=="object") return ["room"];
@@ -1609,7 +1589,6 @@ function roomOk(room){
     if(!s || !inside(+sx,+sy)) errs.push("slot "+k);
   }
   if(!slots.pick) errs.push("missing slot pick");
-  if(!(uses.diary && uses.diary.slot) && !slots.desk) errs.push("missing slot desk");
   var solids=room.solids||[];
   for(i=0;i<solids.length;i++){
     b=solids[i] && solids[i].box;
@@ -1738,13 +1717,11 @@ var CHIP_ROOM={
     stand:{x:83,y:69},
     sleep:{x:10,y:52},
     eat:{x:32,y:69},
-    wash:{x:40,y:69},
-    desk:{x:70,y:69}
+    wash:{x:40,y:69}
   },
   /* where a thing goes; bottom/right are edges, not top-left corners; z is the draw layer */
   slots:{
     pick:{x:119,bottom:101,z:12},
-    desk:{x:108,bottom:118,z:12},
     shelf:{x:93,y:30,z:6},
     sign:{x:62,y:60,z:20},
     zz:{x:32,y:48,z:30}
@@ -1754,8 +1731,7 @@ var CHIP_ROOM={
     feed:{spot:"eat"},
     sleep:{spot:"sleep"},
     rest:{spot:"stand"},
-    wash:{spot:"wash"},
-    diary:{spot:"desk",slot:"desk"}
+    wash:{spot:"wash"}
   },
   /* furniture boxes, for clearances and tests */
   solids:[

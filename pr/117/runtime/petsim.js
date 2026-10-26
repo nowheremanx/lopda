@@ -414,7 +414,7 @@ function outingToday(save,key){
 }
 
 /* ---------- the pick of the day ---------- */
-var KIND_ORDER={date:0, diary:1, word:2, book:3, film:4};
+var KIND_ORDER={date:0, word:1, book:2, film:3};
 function kindRank(c){
   var k=typeof c==="string" ? c : c && c.kind;
   return KIND_ORDER.hasOwnProperty(k) ? KIND_ORDER[k] : 99;
