@@ -36,7 +36,7 @@ var S = {
   rollT: 0, rollFrom: 0,
   lock: 0, phase: 1,
   heaveT: 0, breathT: 0, stepT: 0, slipT: 0, wasPush: false,
-  descentT: 0, epi: 0, endT: 0,
+  descentT: 0, epi: 0, endT: 0, descendPhase: "far", farX: WORLD.SUMMIT_X, wipe: 0, baseT: 0,
   menuIndex: 0, menuOpen: false,
   galleryList: [], galleryIndex: 0, galleryStatus: null, gallerySaving: false, galleryDone: 0,
   loadingNote: null
@@ -66,7 +66,7 @@ game.load("sisyphus").then(function (v) {
 function updatePositions() {
   S.playerX = WORLD.pathX(S.p);
   S.playerY = WORLD.pathY(S.playerX);
-  var bp = Math.min(1, S.p + 0.018);
+  var bp = Math.min(1, S.p + 0.022);
   S.boulderX = WORLD.pathX(bp);
   S.boulderY = WORLD.pathY(S.boulderX) - S.boulderR + 1;
 }
@@ -83,10 +83,11 @@ function resetRun(newLoop) {
   S.quote = null; S.quoteStatus = null; S.quoteReveal = 0; S.quoteT = 0;
   S.quoteOpened = false; S.quoteSaving = false; S.doneT = 0;
   S.summitT = 0; S.gong = false; S.fallT = 0;
-  S.descentT = 0; S.epi = 0; S.endT = 0;
+  S.descentT = 0; S.epi = 0; S.endT = 0; S.descendPhase = "far"; S.farX = WORLD.SUMMIT_X; S.wipe = 0; S.baseT = 0;
   S.heaveT = 0; S.breathT = 0; S.stepT = 0; S.slipT = 0;
   S.wasPush = false; S.lock = 0.28; S.phase = 1;
   S.dust = [];
+  S.walkPhase = 0;
   S.boulderAngle = 0;
   if (newLoop || !S.weather) S.weather = WORLD.pickWeather();
   updatePositions();
@@ -171,6 +172,7 @@ game.scene("climb", {
       var speed = 0.0175 * (1 - 0.30 * S.p);
       S.p += speed * dt;
       S.boulderAngle += speed * dt * 31;
+      S.walkPhase += dt * 6.2;
       S.pose = Math.sin(S.time * 3.2) > 0.72 ? "strain" : "push";
 
       S.heaveT -= dt;
@@ -400,43 +402,84 @@ game.scene("fall", {
 game.scene("descent", {
   enter: function () {
     S.mode = "descent";
+    S.descendPhase = "far";
+    S.farX = WORLD.SUMMIT_X;
+    S.wipe = 0; S.baseT = 0;
     S.p = 1;
     S.descentT = 0; S.epi = 0; S.endT = 0;
     S.pose = "walk"; S.walkPhase = 0; S.wasPush = false;
     S.dust = [];
-    updateDescentPositions();
+    S.playerX = S.farX;
+    S.playerY = WORLD.farPathY(S.farX);
+    S.boulderX = 1040;
+    S.boulderY = WORLD.farPathY(S.boulderX) - S.boulderR + 1;
     S.cam = WORLD.makeCamera();
-    WORLD.follow(S.cam, S.playerX, S.playerY, 1, true);
+    WORLD.follow(S.cam, S.playerX, S.playerY + 56, 1, true);
     game.music(MUSIC.descent);
     setAmbience(0.35);
   },
   update: function (dt) {
     S.time = game.time;
     S.descentT += dt;
-    S.p = Math.max(0, S.p - dt / 26);
-    updateDescentPositions();
-    S.walkPhase += dt * 6;
-    S.pose = "walk";
-    WORLD.follow(S.cam, S.playerX, S.playerY, dt);
-    ART.updateDust(S, dt);
 
-    if (S.descentT > 4.5 && S.descentT < 13) S.epi = Math.min(1, S.epi + dt / 1.2);
-    else S.epi = Math.max(0, S.epi - dt / 1.2);
-
-    if (S.p <= 0) {
-      S.endT += dt;
-      if (S.endT > 1.6) game.go("climb", { reset: true, newLoop: true }, { time: 0.6, to: 3 });
+    if (S.descendPhase === "far") {
+      /* he follows the stone over the ridge and down the far side */
+      S.farX = Math.min(1000, S.farX + dt * 40);
+      S.playerX = S.farX;
+      S.playerY = WORLD.farPathY(S.farX);
+      S.walkPhase += dt * 7;
+      S.pose = "walk";
+      S.boulderX = 1040;
+      S.boulderY = WORLD.farPathY(S.boulderX) - S.boulderR + 1;
+      WORLD.follow(S.cam, S.playerX, S.playerY + 56, dt);
+      ART.updateDust(S, dt);
+      if (S.descentT > 1.3) S.epi = Math.min(1, S.epi + dt / 1.1);
+      if (S.farX >= 999.5) {
+        S.descendPhase = "cover";
+        S.wipe = 0;
+        S.epi = 0;
+      }
+    } else if (S.descendPhase === "cover") {
+      /* the camera goes around the mountain: a dither curtain from the far side to ours */
+      S.wipe = Math.min(1, S.wipe + dt / 0.55);
+      if (S.wipe >= 1) {
+        snapToBase();
+        S.descendPhase = "reveal";
+        S.wipe = 1;
+      }
+    } else if (S.descendPhase === "reveal") {
+      S.wipe = Math.max(0, S.wipe - dt / 0.55);
+      if (S.wipe <= 0) { S.descendPhase = "base"; S.baseT = 0; }
+    } else {
+      S.baseT += dt;
+      S.pose = S.baseT > 0.6 ? "look" : "stand";
+      if (S.baseT > 2.2) game.go("climb", { reset: true, newLoop: true }, { time: 0.5, to: 3 });
     }
   },
   draw: function (g) {
     S.time = game.time;
     ART.drawWorld(g, S);
-    if (S.epi > 0.15) {
-      g.text("Le rocher roule encore.", 8, 146, { color: 3, shadow: 0 });
-      g.text("巨石仍在滚动。", 8, 160, { color: 3, shadow: 0 });
+    if (S.wipe > 0) ART.wipe(g, S.wipe, 0);
+    if (S.descendPhase === "base" && S.baseT > 0.45) {
+      g.text("Le rocher l'attend.", 80, 146, { align: "center", color: 3, shadow: 0 });
+      g.text("石头在山脚等他。", 80, 160, { align: "center", color: 3, shadow: 0 });
     }
   }
 });
+
+function snapToBase() {
+  S.p = 0;
+  S.playerX = WORLD.pathX(0);
+  S.playerY = WORLD.pathY(S.playerX);
+  S.boulderX = WORLD.pathX(0.02);
+  S.boulderY = WORLD.pathY(S.boulderX) - S.boulderR + 1;
+  S.cam = WORLD.makeCamera();
+  WORLD.follow(S.cam, S.playerX, S.playerY, 1, true);
+  S.pose = "stand";
+  S.walkPhase = 0;
+  S.epi = 0;
+  S.dust = [];
+}
 
 /* ---------------- menu and gallery ---------------- */
 function openMenu() {

@@ -239,12 +239,24 @@ var ART = (function () {
   function boulder(g, cx, cy, r, angle, night) {
     /* contact shadow on the ledge */
     line2(g, cx - r + 2, cy + r - 1, cx + r - 2, cy + r - 1, 0.1);
-    for (var y = -r; y <= r; y++) for (var x = -r; x <= r; x++) {
+    var reach = r + 3;
+    for (var y = -reach; y <= reach; y++) for (var x = -reach; x <= reach; x++) {
       var d = Math.sqrt(x * x + y * y);
-      if (d > r) continue;
+      var theta = Math.atan2(y, x) - angle;
+      /* a lumpy outline: an off-centre body, three harmonics and two chipped corners */
+      var rr = r * (0.91 + 0.115 * Math.sin(theta * 3 + 0.8)
+        + 0.070 * Math.sin(theta * 5 - 1.2)
+        + 0.045 * Math.sin(theta * 7 + 2.1)
+        + 0.050 * Math.sin(theta * 2 - 0.4));
+      var chip = Math.atan2(Math.sin(theta - 2.25), Math.cos(theta - 2.25));
+      if (Math.abs(chip) < 0.40) rr -= r * 0.20 * (1 - Math.abs(chip) / 0.40);
+      var chip2 = Math.atan2(Math.sin(theta + 2.55), Math.cos(theta + 2.55));
+      if (Math.abs(chip2) < 0.28) rr -= r * 0.12 * (1 - Math.abs(chip2) / 0.28);
+      if (d > rr) continue;
       var sh = (x * 0.62 - y * 0.78) / r;
       var v = 1.08 + sh * 0.95;
-      if (d > r - 1.2) v = 0.06;
+      if (d > rr - 1.25) v = 0.06;
+      if (d > rr - 1.3 && sh > 0.30) v = 2.9;
       if (sh > 0.48 && bayer(cx + x, cy + y) < 0.52) v = 3;
       px(g, cx + x, cy + y, night ? v - 0.35 : v);
     }
@@ -266,73 +278,99 @@ var ART = (function () {
         }
       }
     }
-    /* rim light from the upper right */
-    for (var a = -1.35; a < 0.35; a += 0.10) {
-      px(g, cx + Math.cos(a) * (r - 1), cy + Math.sin(a) * (r - 1), 2.9);
-    }
   }
 
   /* ---------------- Sisyphus ---------------- */
   function sisyphus(g, sx, sy, pose, phase, bx, by, br, night) {
-    var lean = pose === "push" || pose === "strain" ? 2 : 0;
-    var crouch = pose === "strain" ? 2 : 0;
+    var pushing = pose === "push" || pose === "strain";
+    var lean = pushing ? 2 : (pose === "slip" ? -1 : 0);
+    var crouch = pose === "strain" ? 1 : 0;
     var look = pose === "look" ? 1 : 0;
     var hx = sx + lean;
-    var hy = sy - 15 + crouch - look;
+    var hy = sy - 16 + crouch - look;
+    var shoulderY = sy - 12 + crouch;
+    var hipY = sy - 4;
     var ink = 0, rim = night ? 2.7 : 2.2, hi = 3;
+    var step = Math.sin(phase);
 
     line2(g, sx - 3, sy - 1, sx + 3, sy - 1, 0.1);
+
+    /* the far arm goes behind the torso, so the pushing pose has depth instead of a belly */
+    if (pushing) {
+      line2(g, hx - 1, shoulderY + 1, sx - 2, shoulderY + 4, ink);
+      line2(g, sx - 2, shoulderY + 4, bx - br + 2, by + 1, ink);
+    }
+
+    /* legs: while pushing they shuffle, one foot forward and one back */
+    if (pose === "slip") {
+      line2(g, sx - 1, hipY, sx - 5, sy, ink); line2(g, sx + 1, hipY, sx + 5, sy, ink);
+      line2(g, sx - 6, sy, sx - 4, sy, ink); line2(g, sx + 4, sy, sx + 6, sy, ink);
+    } else if (pose === "walk") {
+      var sw = Math.sin(phase) * 3;
+      line2(g, sx - 1, hipY, sx - sw, sy - (sw > 0 ? 1 : 0), ink);
+      line2(g, sx + 1, hipY, sx + sw, sy - (sw < 0 ? 1 : 0), ink);
+      line2(g, sx - sw - 1, sy - (sw > 0 ? 1 : 0), sx - sw + 1, sy - (sw > 0 ? 1 : 0), ink);
+      line2(g, sx + sw - 1, sy - (sw < 0 ? 1 : 0), sx + sw + 1, sy - (sw < 0 ? 1 : 0), ink);
+    } else if (pushing) {
+      var stride = step * 2.2;
+      var lfx = sx - 2 - stride, rfx = sx + 2 + stride;
+      var lfy = sy - (step > 0.30 ? 1 : 0);
+      var rfy = sy - (step < -0.30 ? 1 : 0);
+      line2(g, sx - 1, hipY, lfx, lfy, ink);
+      line2(g, sx + 1, hipY, rfx, rfy, ink);
+      line2(g, lfx - 1, lfy, lfx + 1, lfy, ink);
+      line2(g, rfx - 1, rfy, rfx + 1, rfy, ink);
+      px(g, (sx - 1 + lfx) / 2, (hipY + lfy) / 2, rim);
+    } else {
+      var stance = pose === "stand" ? 2 : 1;
+      line2(g, sx - 1, hipY, sx - stance, sy, ink); line2(g, sx + 1, hipY, sx + stance, sy, ink);
+      line2(g, sx - stance - 1, sy, sx - stance + 1, sy, ink);
+      line2(g, sx + stance - 1, sy, sx + stance + 1, sy, ink);
+    }
+
+    /* torso: wide shoulders, a narrow waist; not a barrel */
+    for (var i = 0; i < 8; i++) {
+      var t = i / 7;
+      var cx = sx + lean * (1 - t);
+      var w = i < 2 ? 2 : 1;
+      var yy = sy - 12 + crouch + i;
+      g.rect(cx - w, yy, w * 2 + 1, 1, ink);
+      px(g, cx - w - 1, yy, rim);
+      if (i === 0) px(g, cx - w, yy, hi);
+    }
+    g.rect(sx - 1, hipY, 3, 1, ink);
+
     /* head and neck */
     g.circle(hx, hy, 2, ink, true);
     px(g, hx - 2, hy - 1, rim); px(g, hx - 1, hy - 2, hi);
     if (night) { px(g, hx + 2, hy - 1, rim); px(g, hx + 1, hy + 1, rim); }
     g.rect(hx - 1, hy + 2, 2, 2, ink);
-    /* torso: a tapered block leaning into the work */
-    for (var i = 0; i < 8; i++) {
-      var yy = sy - 12 + i;
-      var w = i < 4 ? 2 : 1;
-      var off = lean * (i / 8);
-      g.rect(sx + off - w, yy, w * 2 + 1, 1, ink);
-      px(g, sx + off - w - 1, yy, rim);
-      if (i < 2) px(g, sx + off + w, yy, rim);
-      if (night) px(g, sx + off + w + 1, yy, 2.35);
-    }
-    /* hips */
-    g.rect(sx - 1, sy - 4, 3, 1, ink);
-    /* legs */
-    if (pose === "slip") {
-      line2(g, sx - 1, sy - 4, sx - 5, sy, ink); line2(g, sx + 1, sy - 4, sx + 5, sy, ink);
-      line2(g, sx - 6, sy, sx - 4, sy, ink); line2(g, sx + 4, sy, sx + 6, sy, ink);
-    } else if (pose === "walk") {
-      var sw = Math.sin(phase) * 3;
-      line2(g, sx - 1, sy - 4, sx - sw, sy, ink); line2(g, sx + 1, sy - 4, sx + sw, sy, ink);
-      line2(g, sx - sw - 1, sy, sx - sw + 1, sy, ink); line2(g, sx + sw - 1, sy, sx + sw + 1, sy, ink);
-    } else {
-      var front = pose === "push" || pose === "strain" ? 4 : 2;
-      line2(g, sx + 1, sy - 4, sx + front, sy, ink); line2(g, sx - 1, sy - 4, sx - front, sy, ink);
-      line2(g, sx + front - 1, sy, sx + front + 1, sy, ink); line2(g, sx - front - 1, sy, sx - front + 1, sy, ink);
-    }
-    /* arms */
-    var shoulderY = sy - 10;
-    if (pose === "push" || pose === "strain") {
+
+    /* near arm, in front: one clear arm from shoulder to the stone */
+    var shoulderY2 = shoulderY + 1;
+    if (pushing) {
       var handX = bx - br + 1, handY = by - 2;
-      var elbowX = (sx + lean + 1 + handX) / 2, elbowY = shoulderY + 3;
-      line2(g, sx + lean + 1, shoulderY, elbowX, elbowY, ink);
-      line2(g, elbowX, elbowY, handX, handY, ink);
-      line2(g, sx + lean - 1, shoulderY + 1, elbowX - 1, elbowY + 2, ink);
-      line2(g, elbowX - 1, elbowY + 2, handX - 1, handY + 1, ink);
-      px(g, handX, handY, ink);
+      var ex = hx + 3, ey = shoulderY + 3;
+      /* two pixels thick, with a lit top edge, so it reads against the dark stone */
+      line2(g, hx + 1, shoulderY2, ex, ey, ink);
+      line2(g, hx + 1, shoulderY2 + 1, ex, ey + 1, ink);
+      line2(g, ex, ey, handX, handY, ink);
+      line2(g, ex, ey + 1, handX, handY + 1, ink);
+      line2(g, hx + 1, shoulderY2 - 1, ex, ey - 1, rim);
+      line2(g, ex, ey - 1, handX, handY - 1, rim);
+      px(g, ex, ey - 1, hi); px(g, handX, handY, hi); px(g, handX, handY - 1, hi);
     } else if (pose === "slip") {
-      line2(g, sx + 1, shoulderY, sx - 5, sy - 17, ink);
-      line2(g, sx - 1, shoulderY, sx + 5, sy - 16, ink);
+      line2(g, hx + 1, shoulderY2, sx + 5, sy - 17, ink);
+      line2(g, hx - 1, shoulderY2, sx - 5, sy - 16, ink);
     } else if (pose === "walk") {
       var sw2 = Math.sin(phase) * 3;
-      line2(g, sx + 1, shoulderY, sx + 2 + sw2, sy - 5, ink);
-      line2(g, sx - 1, shoulderY, sx - 2 - sw2, sy - 5, ink);
+      line2(g, hx + 1, shoulderY2, sx + 2 + sw2, sy - 5, ink);
+      line2(g, hx - 1, shoulderY2, sx - 2 - sw2, sy - 5, ink);
     } else {
-      line2(g, sx + 1, shoulderY, sx + 3, sy - 4, ink);
-      line2(g, sx - 1, shoulderY, sx - 3, sy - 4, ink);
+      line2(g, hx + 1, shoulderY2, sx + 3, sy - 4, ink);
+      line2(g, hx - 1, shoulderY2, sx - 3, sy - 4, ink);
     }
+
     /* a little more rim on the back */
     px(g, sx - 2, sy - 9, rim); px(g, sx - 2, sy - 7, rim);
   }
@@ -402,6 +440,13 @@ var ART = (function () {
     g.text(hint, 13, 157, { color: 0 });
   }
 
+  function wipe(g, amount, tone) {
+    if (amount >= 1) { g.clear(tone); return; }
+    for (var y = 0; y < H; y++) for (var x = 0; x < W; x++) {
+      if (x / W > 1 - amount + (bayer(x, y) - 0.5) * 0.055) g.pixel(x, y, tone);
+    }
+  }
+
   function drawWorld(g, s) {
     sky(g, s);
     ridges(g, s);
@@ -412,7 +457,7 @@ var ART = (function () {
     var psx = s.playerX - s.cam.x, psy = s.playerY - s.cam.y;
     var night = s.mode === "descent";
 
-    if (s.mode !== "descent" || s.p < 0.08) boulder(g, bsx, bsy, s.boulderR, s.boulderAngle, night);
+    boulder(g, bsx, bsy, s.boulderR, s.boulderAngle, night);
     sisyphus(g, psx, psy, s.pose, s.walkPhase, bsx, bsy, s.boulderR, night);
     drawDust(g, s);
   }
@@ -421,6 +466,6 @@ var ART = (function () {
     W: W, H: H, tone: tone, px: px, disc: disc, line2: line2,
     sky: sky, ridges: ridges, cloudSea: cloudSea, terrain: terrain,
     boulder: boulder, sisyphus: sisyphus, spawnDust: spawnDust, updateDust: updateDust, drawDust: drawDust,
-    reveal: reveal, card: card, drawWorld: drawWorld
+    reveal: reveal, card: card, wipe: wipe, drawWorld: drawWorld
   };
 })();
