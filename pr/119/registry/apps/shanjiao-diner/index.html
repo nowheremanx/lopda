@@ -1,0 +1,4158 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>山脚小馆</title>
+<!-- A 216x240 four-tone restaurant game for Lo-PDA. MIT License. -->
+</head>
+<body>
+<script data-lo-game="1.4.0">
+/*
+ * lo-game.js 1.4.0, a tiny game framework for Lo-PDA apps.
+ * MIT License. Copyright (c) 2026 Haowei Wu. See sdk/LICENSE.
+ *
+ * Paste-in library: an app carries its own copy inside a script tag marked
+ * data-lo-game="1.4.0", and `node tools/lo-game.mjs registry/apps/<id>` fills it in.
+ * The same tool adds a pixel-font block holding just the characters the app uses.
+ * Do not edit the copy inside an app; the checker verifies it.
+ *
+ * Everything is drawn into a four-tone indexed framebuffer (values 0-3), so
+ * nothing can ever show a colour outside the palette or a blurred edge.
+ * Reference: sdk/LO-GAME.md
+ */
+var LoGame = (function () {
+  "use strict";
+
+  var VERSION = "1.4.0";
+  var TONES = ["#1f2a14", "#4a5a32", "#7d8a58", "#a3ad7e"];
+  var INK = 0, DARK = 1, MID = 2, PAPER = 3;
+  var CLEAR = 255;
+  var BUTTONS = ["up", "down", "left", "right", "a", "b", "start", "select"];
+  var KEYS = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right",
+    x: "a", X: "a", z: "b", Z: "b", Enter: "start", Shift: "select" };
+  var HAS_PAD = typeof PAD !== "undefined";
+  var BITMAP_FONT = null;   /* set by LoGame.font(data), from the data-lo-font block */
+  function font(data) { BITMAP_FONT = data; }
+  function b64bits(str, n) {
+    var bin = atob(str), out = new Uint8Array(n);
+    for (var i = 0; i < n; i++) out[i] = (bin.charCodeAt(i >> 3) >> (7 - (i & 7))) & 1;
+    return out;
+  }
+
+  /* bilingual text (1.2.0): t({zh: "...", en: "..."}, vars) picks PAD.lang, else the fallback
+     language, else whichever the app wrote. Plain strings pass through. "{name}" is filled from vars. */
+  function padLang() { var l = HAS_PAD && PAD.lang; return l === "zh" || l === "en" ? l : null; }
+  function pick(text, lang, vars) {
+    var s = text;
+    if (s && typeof s === "object") { s = s[lang]; if (s == null) s = text.zh != null ? text.zh : text.en; }
+    s = s == null ? "" : String(s);
+    return vars ? s.replace(/\{(\w+)\}/g, function (m, k) { return vars[k] == null ? "" : String(vars[k]); }) : s;
+  }
+  function t(text, vars) { return pick(text, padLang() || "zh", vars); }
+
+  function rgbOf(hex) { return [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)]; }
+  var RGB = TONES.map(rgbOf);
+
+  /* ---------------- small helpers ---------------- */
+  function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+  function lerp(a, b, t) { return a + (b - a) * t; }
+  function approach(v, target, step) { return v < target ? Math.min(v + step, target) : Math.max(v - step, target); }
+  function rng(seed) {
+    var s = (seed >>> 0) || 0x9e3779b9;
+    var next = function () { s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; };
+    return {
+      next: next,
+      int: function (a, b) { return a + Math.floor(next() * (b - a + 1)); },
+      pick: function (arr) { return arr[Math.floor(next() * arr.length)]; },
+      chance: function (p) { return next() < p; }
+    };
+  }
+  var EASE = {
+    linear: function (t) { return t; },
+    out: function (t) { return 1 - (1 - t) * (1 - t); },
+    "in": function (t) { return t * t; },
+    inOut: function (t) { return t < 0.5 ? 2 * t * t : 1 - 2 * (1 - t) * (1 - t); }
+  };
+
+  /* ---------------- sprites: rows of "0123." ---------------- */
+  function sprite(rows) {
+    if (!Array.isArray(rows) || !rows.length) throw new Error("sprite: give an array of strings");
+    var h = rows.length, w = rows[0].length, px = new Uint8Array(w * h);
+    for (var y = 0; y < h; y++) {
+      if (rows[y].length !== w) throw new Error("sprite: row " + y + " is " + rows[y].length + " wide, expected " + w);
+      for (var x = 0; x < w; x++) {
+        var c = rows[y].charCodeAt(x) - 48;
+        px[y * w + x] = c >= 0 && c <= 3 ? c : CLEAR;
+      }
+    }
+    return { w: w, h: h, px: px };
+  }
+  function sprites(table) { var out = {}; Object.keys(table).forEach(function (k) { out[k] = sprite(table[k]); }); return out; }
+
+  /* ---------------- tile maps ---------------- */
+  function tilemap(opt) {
+    var rows = opt.map.slice(), size = opt.size || 8, tiles = opt.tiles || {}, solid = opt.solid || "";
+    var cols = rows[0].length;
+    rows.forEach(function (r, i) { if (r.length !== cols) throw new Error("tilemap: row " + i + " is " + r.length + " wide, expected " + cols); });
+    var map = {
+      size: size, cols: cols, rows: rows.length, width: cols * size, height: rows.length * size,
+      get: function (tx, ty) { return ty < 0 || ty >= rows.length || tx < 0 || tx >= cols ? null : rows[ty][tx]; },
+      set: function (tx, ty, ch) { if (map.get(tx, ty) === null) return; rows[ty] = rows[ty].slice(0, tx) + ch + rows[ty].slice(tx + 1); },
+      solid: function (tx, ty) { var c = map.get(tx, ty); return c === null || solid.indexOf(c) >= 0; },
+      find: function (ch) { var out = []; rows.forEach(function (r, y) { for (var x = 0; x < r.length; x++) if (r[x] === ch) out.push({ x: x, y: y }); }); return out; },
+      at: function (px, py) { return { x: Math.floor(px / size), y: Math.floor(py / size) }; },
+      draw: function (g, camX, camY) {
+        camX = Math.round(camX || 0); camY = Math.round(camY || 0);
+        var x0 = Math.max(0, Math.floor(camX / size)), y0 = Math.max(0, Math.floor(camY / size));
+        var x1 = Math.min(cols - 1, Math.floor((camX + g.width - 1) / size)), y1 = Math.min(rows.length - 1, Math.floor((camY + g.height - 1) / size));
+        for (var ty = y0; ty <= y1; ty++) for (var tx = x0; tx <= x1; tx++) {
+          var t = tiles[rows[ty][tx]];
+          if (t) g.sprite(t, tx * size - camX, ty * size - camY);
+        }
+      }
+    };
+    return map;
+  }
+  /* top-left of a camera that keeps (x, y) centred inside a world */
+  function camera(x, y, viewW, viewH, worldW, worldH) {
+    return {
+      x: worldW <= viewW ? Math.round((worldW - viewW) / 2) : clamp(Math.round(x - viewW / 2), 0, worldW - viewW),
+      y: worldH <= viewH ? Math.round((worldH - viewH) / 2) : clamp(Math.round(y - viewH / 2), 0, worldH - viewH)
+    };
+  }
+
+  /* ---------------- the game ---------------- */
+  function create(opt) {
+    opt = opt || {};
+    var W = opt.width || 160, H = opt.height || 144;
+    var LANG = padLang() || (opt.lang === "en" ? "en" : "zh");   /* opt.lang: the app's own default */
+    var STEP = 1 / 60;
+    var fontOpt = opt.font || {};
+    /* text: the pixel font when the app carries one, the phone's own font otherwise */
+    var BF = fontOpt.system ? null : BITMAP_FONT;
+    var FONT = { size: fontOpt.size || 12, family: fontOpt.family || "sans-serif", weight: fontOpt.weight || "400",
+      threshold: fontOpt.threshold || 0.45 };
+    FONT.line = BF ? BF.line : FONT.size + 2;
+    FONT.cell = BF ? BF.cell : FONT.line;
+
+    /* --- page and canvas --- */
+    var parent = opt.parent || document.body;
+    var border = opt.border == null ? PAPER : opt.border;
+    if (!opt.parent) {
+      var st = document.createElement("style");
+      st.textContent = "html,body{margin:0;height:100%;overflow:hidden;background:" + TONES[border] + "}" +
+        "body{display:flex;align-items:center;justify-content:center;touch-action:none;-webkit-user-select:none;user-select:none}";
+      document.head.appendChild(st);
+    }
+    var canvas = document.createElement("canvas");
+    canvas.width = W; canvas.height = H;
+    canvas.style.cssText = "display:block;image-rendering:pixelated;image-rendering:crisp-edges;touch-action:none";
+    parent.appendChild(canvas);
+    var ctx = canvas.getContext("2d");
+    var image = ctx.createImageData(W, H);
+    function fit() {
+      var aw = parent.clientWidth || innerWidth, ah = parent.clientHeight || innerHeight;
+      var dpr = window.devicePixelRatio || 1, best = Math.min(aw / W, ah / H), k = Math.floor(best * dpr) / dpr;
+      if (k < best * 0.9) k = best;   /* small screens: size beats perfectly even pixels */
+      k = Math.max(0.5, k);
+      canvas.style.width = Math.round(W * k) + "px"; canvas.style.height = Math.round(H * k) + "px";
+      game.scale = k;
+    }
+
+    /* --- framebuffer and drawing --- */
+    var buf = new Uint8Array(W * H);
+    var ox = 0, oy = 0, cx0 = 0, cy0 = 0, cx1 = W, cy1 = H;
+    function put(x, y, c) { if (x >= cx0 && y >= cy0 && x < cx1 && y < cy1) buf[y * W + x] = c; }
+
+    var fc = document.createElement("canvas"), fx = null, glyphs = {}, baseline = 0;
+    function fontCtx() {
+      if (fx) return fx;
+      fc.width = FONT.size * 3; fc.height = FONT.line + 4;
+      fx = fc.getContext("2d", { willReadFrequently: true });
+      fx.font = FONT.weight + " " + FONT.size + "px " + FONT.family;
+      fx.textBaseline = "alphabetic"; fx.fillStyle = TONES[INK];
+      var m = fx.measureText("国");
+      baseline = BF ? BF.cell - 2 : Math.round(m.actualBoundingBoxAscent || FONT.size * 0.88);
+      return fx;
+    }
+    /* a glyph is the system font at its native pixel size, thresholded to one bit */
+    function glyph(ch) {
+      var g = glyphs[ch]; if (g) return g;
+      var bf = BF && BF.glyphs[ch];
+      if (bf) {
+        var cut = bf.indexOf(":"), adv0 = +bf.slice(0, cut);
+        return (glyphs[ch] = { w: adv0, adv: adv0, h: BF.cell, bits: b64bits(bf.slice(cut + 1), adv0 * BF.cell) });
+      }
+      var x = fontCtx(), adv = Math.max(1, Math.round(x.measureText(ch).width));
+      x.clearRect(0, 0, fc.width, fc.height);
+      x.fillText(ch, 0, baseline);
+      var h = FONT.cell, w = Math.min(adv, fc.width), d = x.getImageData(0, 0, w, h).data, bits = new Uint8Array(w * h), lim = FONT.threshold * 255;
+      for (var i = 0; i < w * h; i++) bits[i] = d[i * 4 + 3] >= lim ? 1 : 0;
+      g = glyphs[ch] = { w: w, adv: adv, h: h, bits: bits };
+      return g;
+    }
+    function measure(str) { var w = 0; Array.from(String(str)).forEach(function (ch) { if (ch !== "\n") w += glyph(ch).adv; }); return w; }
+    var NO_START = "，。！？、；：）」』》,.!?;:)]%";
+    function wrap(str, width) {
+      var lines = [];
+      String(str).split("\n").forEach(function (para) {
+        var tokens = para.match(/[A-Za-z0-9'_\-]+|\s|./gu) || [""], line = "", lw = 0;
+        tokens.forEach(function (t) {
+          var tw = measure(t);
+          if (lw + tw > width && line && NO_START.indexOf(t) < 0) {
+            lines.push(line.replace(/\s+$/, "")); line = ""; lw = 0;
+            if (/^\s$/.test(t)) return;
+          }
+          line += t; lw += tw;
+        });
+        lines.push(line);
+      });
+      return lines;
+    }
+
+    var g = {
+      width: W, height: H, INK: INK, DARK: DARK, MID: MID, PAPER: PAPER,
+      clear: function (c) { buf.fill(c == null ? PAPER : c); },
+      origin: function (x, y) { ox = Math.round(x || 0); oy = Math.round(y || 0); },
+      clip: function (x, y, w, h) {
+        if (x == null) { cx0 = 0; cy0 = 0; cx1 = W; cy1 = H; return; }
+        cx0 = clamp(Math.round(x + ox), 0, W); cy0 = clamp(Math.round(y + oy), 0, H);
+        cx1 = clamp(Math.round(x + ox + w), 0, W); cy1 = clamp(Math.round(y + oy + h), 0, H);
+      },
+      pixel: function (x, y, c) { put(Math.round(x) + ox, Math.round(y) + oy, c); },
+      get: function (x, y) { x = Math.round(x) + ox; y = Math.round(y) + oy; return x < 0 || y < 0 || x >= W || y >= H ? null : buf[y * W + x]; },
+      rect: function (x, y, w, h, c) {
+        x = Math.round(x) + ox; y = Math.round(y) + oy;
+        var xa = Math.max(x, cx0), ya = Math.max(y, cy0), xb = Math.min(x + Math.round(w), cx1), yb = Math.min(y + Math.round(h), cy1);
+        for (var yy = ya; yy < yb; yy++) buf.fill(c, yy * W + xa, yy * W + Math.max(xa, xb));
+      },
+      frame: function (x, y, w, h, c) {
+        g.rect(x, y, w, 1, c); g.rect(x, y + h - 1, w, 1, c); g.rect(x, y, 1, h, c); g.rect(x + w - 1, y, 1, h, c);
+      },
+      line: function (x0, y0, x1, y1, c) {
+        x0 = Math.round(x0); y0 = Math.round(y0); x1 = Math.round(x1); y1 = Math.round(y1);
+        var dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1, e = dx + dy;
+        for (;;) { put(x0 + ox, y0 + oy, c); if (x0 === x1 && y0 === y1) break; var e2 = 2 * e; if (e2 >= dy) { e += dy; x0 += sx; } if (e2 <= dx) { e += dx; y0 += sy; } }
+      },
+      circle: function (cx, cy, r, c, fill) {
+        cx = Math.round(cx); cy = Math.round(cy);
+        for (var y = -r; y <= r; y++) {
+          var span = Math.round(Math.sqrt(r * r + r - y * y));
+          if (fill) g.rect(cx - span, cy + y, span * 2 + 1, 1, c);
+          else { g.pixel(cx - span, cy + y, c); g.pixel(cx + span, cy + y, c); }
+        }
+        if (!fill) for (var x = -r; x <= r; x++) { var s2 = Math.round(Math.sqrt(r * r + r - x * x)); g.pixel(cx + x, cy - s2, c); g.pixel(cx + x, cy + s2, c); }
+      },
+      /* level 0-4: 0 nothing, 2 checkerboard, 4 solid */
+      dither: function (x, y, w, h, c, level) {
+        level = clamp(level == null ? 2 : level, 0, 4);
+        x = Math.round(x); y = Math.round(y);
+        for (var yy = 0; yy < h; yy++) for (var xx = 0; xx < w; xx++) {
+          var px = (x + xx) & 1, py = (y + yy) & 1;
+          var on = level === 4 || (level === 3 && !(px && py)) || (level === 2 && px === py) || (level === 1 && !px && !py);
+          if (on) put(x + xx + ox, y + yy + oy, c);
+        }
+      },
+      /* opts: {flip, flipY, color (paint every opaque pixel one tone), map: [t0,t1,t2,t3]} */
+      sprite: function (s, x, y, o) {
+        o = o || {};
+        x = Math.round(x) + ox; y = Math.round(y) + oy;
+        var w = s.w, h = s.h, px = s.px, one = o.color, map = o.map;
+        for (var yy = 0; yy < h; yy++) {
+          var dy = y + yy; if (dy < cy0 || dy >= cy1) continue;
+          var sy = o.flipY ? h - 1 - yy : yy;
+          for (var xx = 0; xx < w; xx++) {
+            var dx = x + xx; if (dx < cx0 || dx >= cx1) continue;
+            var v = px[sy * w + (o.flip ? w - 1 - xx : xx)];
+            if (v === CLEAR) continue;
+            buf[dy * W + dx] = one != null ? one : map ? map[v] : v;
+          }
+        }
+      },
+      /* opts: {color, align: "left"|"center"|"right", width (wrap), shadow: tone} -> height drawn */
+      text: function (str, x, y, o) {
+        o = o || {};
+        var color = o.color == null ? INK : o.color;
+        var lines = o.width ? wrap(str, o.width) : String(str).split("\n"), yy = Math.round(y);
+        lines.forEach(function (ln) {
+          /* with a width, align inside x..x+width; without one, x is the centre or the right edge */
+          var lw = measure(ln), box = o.width || 0, xx = Math.round(x);
+          if (o.align === "center") xx = Math.round(box ? x + (box - lw) / 2 : x - lw / 2);
+          else if (o.align === "right") xx = Math.round(box ? x + box - lw : x - lw);
+          Array.from(ln).forEach(function (ch) {
+            var gl = glyph(ch);
+            for (var j = 0; j < gl.h; j++) for (var i = 0; i < gl.w; i++) if (gl.bits[j * gl.w + i]) {
+              if (o.shadow != null) put(xx + i + 1 + ox, yy + j + 1 + oy, o.shadow);
+              put(xx + i + ox, yy + j + oy, color);
+            }
+            xx += gl.adv;
+          });
+          yy += FONT.line;
+        });
+        return lines.length * FONT.line;
+      },
+      measure: measure,
+      wrap: wrap,
+      lineHeight: FONT.line,
+      /* the standard window: paper inside, ink border with cut corners */
+      window: function (x, y, w, h, o) {
+        o = o || {};
+        g.rect(x + 1, y + 1, w - 2, h - 2, o.fill == null ? PAPER : o.fill);
+        var c = o.border == null ? INK : o.border;
+        g.rect(x + 1, y, w - 2, 1, c); g.rect(x + 1, y + h - 1, w - 2, 1, c);
+        g.rect(x, y + 1, 1, h - 2, c); g.rect(x + w - 1, y + 1, 1, h - 2, c);
+        if (!o.thin) { g.rect(x + 2, y + 2, w - 4, 1, MID); }
+      },
+      /* a small arrow used by menus and "more" markers */
+      arrow: function (x, y, dir, c) {
+        c = c == null ? INK : c;
+        for (var i = 0; i < 4; i++) {
+          if (dir === "down") g.rect(x + i, y + i, 7 - 2 * i, 1, c);
+          else g.rect(x + i, y + i, 1, 7 - 2 * i, c);
+        }
+      }
+    };
+
+    /* --- palette effects: every frame the indexed buffer goes through this map --- */
+    var pal = [0, 1, 2, 3], fadeLevel = 0, fadeTo = PAPER, flashT = 0, shakeT = 0, shakeA = 0, sx = 0, sy = 0;
+    function present() {
+      var map = pal.slice();
+      if (fadeLevel) for (var i = 0; i < 4; i++) map[i] = fadeTo === PAPER ? Math.min(3, i + fadeLevel) : Math.max(0, i - fadeLevel);
+      if (flashT > 0) map = map.map(function (v) { return 3 - v; });
+      var d = image.data, n = W * H;
+      if (shakeT > 0) { sx = Math.round((Math.random() * 2 - 1) * shakeA); sy = Math.round((Math.random() * 2 - 1) * shakeA); } else { sx = sy = 0; }
+      for (var y = 0; y < H; y++) for (var x = 0; x < W; x++) {
+        var srcX = x - sx, srcY = y - sy, v = srcX < 0 || srcY < 0 || srcX >= W || srcY >= H ? PAPER : buf[srcY * W + srcX];
+        var c = RGB[map[v]], o = (y * W + x) * 4;
+        d[o] = c[0]; d[o + 1] = c[1]; d[o + 2] = c[2]; d[o + 3] = 255;
+      }
+      ctx.putImageData(image, 0, 0);
+      return n;
+    }
+
+    /* --- input: chin buttons through PAD, keyboard as a fallback, and the pointer --- */
+    var held = {}, heldFor = {}, queued = {}, pressedNow = {}, releasedNow = {}, queuedUp = {};
+    function down(b) { if (held[b]) return; held[b] = true; heldFor[b] = 0; queued[b] = true; }
+    function up(b) { if (!held[b]) return; held[b] = false; queuedUp[b] = true; }
+    if (HAS_PAD && PAD.on) { PAD.on("press", down); PAD.on("release", up); }
+    else {
+      addEventListener("keydown", function (e) { var b = KEYS[e.key]; if (b) { e.preventDefault(); if (!e.repeat) down(b); } });
+      addEventListener("keyup", function (e) { var b = KEYS[e.key]; if (b) up(b); });
+    }
+    addEventListener("blur", function () { BUTTONS.forEach(up); });
+    var pointer = { x: 0, y: 0, down: false, pressed: false, released: false }, pQueued = false, pQueuedUp = false;
+    function toScreen(e) {
+      var r = canvas.getBoundingClientRect();
+      pointer.x = Math.floor((e.clientX - r.left) * W / r.width); pointer.y = Math.floor((e.clientY - r.top) * H / r.height);
+    }
+    canvas.addEventListener("pointerdown", function (e) { e.preventDefault(); try { canvas.setPointerCapture(e.pointerId); } catch (x) {} toScreen(e); pointer.down = true; pQueued = true; });
+    canvas.addEventListener("pointermove", function (e) { toScreen(e); });
+    ["pointerup", "pointercancel"].forEach(function (t) { canvas.addEventListener(t, function (e) { toScreen(e); if (pointer.down) { pointer.down = false; pQueuedUp = true; } }); });
+    function inputBegin() {
+      pressedNow = queued; queued = {}; releasedNow = queuedUp; queuedUp = {};
+      pointer.pressed = pQueued; pQueued = false; pointer.released = pQueuedUp; pQueuedUp = false;
+    }
+    function inputEnd() { BUTTONS.forEach(function (b) { if (held[b]) heldFor[b] += STEP; }); }
+
+    /* --- timers and tweens (owned by the scene stack; cleared by game.go) --- */
+    var timers = [], tweens = [];
+    function runTimers() {
+      for (var i = 0; i < timers.length; i++) {
+        var t = timers[i]; t.left -= STEP;
+        if (t.left <= 0 && !t.dead) { t.fn(); if (t.every) t.left += t.every; else t.dead = true; }
+      }
+      timers = timers.filter(function (t) { return !t.dead; });
+      for (i = 0; i < tweens.length; i++) {
+        var w = tweens[i]; w.t = Math.min(1, w.t + STEP / w.dur);
+        var k = w.ease(w.t);
+        for (var p in w.to) w.obj[p] = lerp(w.from[p], w.to[p], k);
+        if (w.t >= 1) { w.dead = true; w.done(); }
+      }
+      tweens = tweens.filter(function (w) { return !w.dead; });
+    }
+
+    /* --- scenes: a stack; only the top one updates, all of them draw --- */
+    var scenes = {}, stack = [], busy = false;
+    function sceneOf(s) { if (typeof s === "string") { if (!scenes[s]) throw new Error("no scene named " + s); return scenes[s]; } return s; }
+    function enter(s, args) { var e = { scene: s, args: args, resolve: null }; stack.push(e); if (s.enter) s.enter(args); return e; }
+
+    var game = {
+      VERSION: VERSION, width: W, height: H, g: g, time: 0, frame: 0, scale: 1, pointer: pointer, lang: LANG,
+      t: function (text, vars) { return pick(text, LANG, vars); },
+      INK: INK, DARK: DARK, MID: MID, PAPER: PAPER,
+
+      scene: function (name, def) { scenes[name] = def; return def; },
+      start: function (name, args) { stack = []; enter(sceneOf(name), args); loop(); },
+      go: function (name, args, o) {
+        o = o || {};
+        var next = sceneOf(name);
+        var swap = function () {
+          while (stack.length) { var e = stack.pop(); if (e.scene.exit) e.scene.exit(); if (e.resolve) e.resolve(null); }
+          timers = []; tweens = [];
+          enter(next, args);
+        };
+        if (o.fade === false) { swap(); return Promise.resolve(); }
+        busy = true;
+        return game.fade("out", o.time || 0.25, o.to).then(function () { swap(); return game.fade("in", o.time || 0.25, o.to); }).then(function () { busy = false; });
+      },
+      /* overlays: game.push(scene) resolves with the value given to game.pop(value) */
+      push: function (s, args) { return new Promise(function (res) { enter(sceneOf(s), args).resolve = res; }); },
+      pop: function (value) {
+        var e = stack.pop(); if (!e) return;
+        if (e.scene.exit) e.scene.exit();
+        if (e.resolve) e.resolve(value);
+      },
+      top: function () { var e = stack[stack.length - 1]; return e && e.scene; },
+
+      btn: function (b) { return !!held[b]; },
+      pressed: function (b) { return !!pressedNow[b]; },
+      released: function (b) { return !!releasedNow[b]; },
+      /* true when first pressed, then again every `rate` seconds after `delay` (menus, cursors) */
+      repeat: function (b, delay, rate) {
+        if (pressedNow[b]) return true;
+        if (!held[b]) return false;
+        delay = delay == null ? 0.32 : delay; rate = rate == null ? 0.09 : rate;
+        var t = heldFor[b] - delay; return t >= 0 && Math.floor(t / rate) !== Math.floor((t - STEP) / rate);
+      },
+      /* A, START or a tap: "carry on" */
+      ok: function () { return !!(pressedNow.a || pressedNow.start || pointer.pressed); },
+      /* the D-pad as a direction: {x, y}, one step per press with repeat */
+      dir: function (delay, rate) {
+        return { x: (game.repeat("right", delay, rate) ? 1 : 0) - (game.repeat("left", delay, rate) ? 1 : 0),
+                 y: (game.repeat("down", delay, rate) ? 1 : 0) - (game.repeat("up", delay, rate) ? 1 : 0) };
+      },
+
+      after: function (sec, fn) { var t = { left: sec, fn: fn }; timers.push(t); return function () { t.dead = true; }; },
+      every: function (sec, fn) { var t = { left: sec, every: sec, fn: fn }; timers.push(t); return function () { t.dead = true; }; },
+      wait: function (sec) { return new Promise(function (res) { game.after(sec, res); }); },
+      tween: function (obj, to, sec, ease) {
+        return new Promise(function (res) {
+          var from = {}; for (var p in to) from[p] = obj[p];
+          tweens.push({ obj: obj, from: from, to: to, dur: Math.max(STEP, sec), t: 0, ease: EASE[ease || "out"] || EASE.out, done: res });
+        });
+      },
+
+      /* screen effects */
+      fade: function (dir, sec, to) {
+        fadeTo = to == null ? PAPER : to;
+        var steps = 3, each = (sec == null ? 0.25 : sec) / steps, i = 0;
+        return new Promise(function (res) {
+          var tick = function () {
+            i++; fadeLevel = dir === "out" ? i : steps - i;
+            if (i >= steps) { if (dir !== "out") fadeLevel = 0; res(); } else game.after(each, tick);
+          };
+          if (dir !== "out") fadeLevel = steps;
+          game.after(each, tick);
+        });
+      },
+      flash: function (sec) { flashT = sec == null ? 0.08 : sec; },
+      shake: function (amount, sec) { shakeA = amount == null ? 2 : amount; shakeT = sec == null ? 0.25 : sec; },
+
+      /* sound. sfx("coin") or sfx({wave, from, to, ms, ...}); music(song, {loop}) and musicStop() (1.3.0).
+         Runtimes without PAD.music (before 0.11.0) have no music and no custom sounds: those calls do nothing. */
+      sfx: function (s) { if (HAS_PAD && PAD.sfx && (typeof s === "string" || PAD.music)) PAD.sfx(s); },
+      music: function (song, o) { if (HAS_PAD && PAD.music) PAD.music.play(song, o); },
+      musicStop: function () { if (HAS_PAD && PAD.music) PAD.music.stop(); },
+      /* ambience("rain", 0.6), ambience(null) to fade it out (1.4.0); nothing on runtimes before 0.13.0 */
+      ambience: function (name, level) { if (HAS_PAD && PAD.ambience) PAD.ambience(name, level); },
+      save: function (key, value) { if (HAS_PAD) PAD.save(key, value); else memory[key] = JSON.parse(JSON.stringify(value)); },
+      load: function (key) { return HAS_PAD ? PAD.load(key) : Promise.resolve(key in memory ? memory[key] : null); },
+      remove: function (key) { if (HAS_PAD) PAD.remove(key); else delete memory[key]; },
+
+      /* dialogue: resolves when the player has read every page */
+      say: function (text, o) { return game.push(dialogScene(text, o || {})); },
+      /* menu: resolves with the chosen index, or -1 when cancelled with B */
+      choose: function (items, o) { return game.push(menuScene(items, o || {})); }
+    };
+    var memory = {};
+
+    /* --- built-in overlay: dialogue box with a typewriter --- */
+    function dialogScene(text, o) {
+      var pages = [], boxH = o.lines ? o.lines * FONT.line + 10 : 3 * FONT.line + 10, innerW = W - 16;
+      (Array.isArray(text) ? text : [text]).forEach(function (t) {
+        var ls = wrap(t, innerW), per = Math.floor((boxH - 10) / FONT.line);
+        for (var i = 0; i < ls.length; i += per) pages.push(ls.slice(i, i + per));
+      });
+      var page = 0, shown = 0, speed = o.speed || 40, blip = o.blip !== false, y = o.top ? 0 : H - boxH, sinceBlip = 0;
+      function total() { return Array.from(pages[page].join("")).length; }
+      return {
+        update: function () {
+          if (shown < total()) {
+            var before = Math.floor(shown);
+            shown = Math.min(total(), shown + speed * STEP);
+            if (blip && Math.floor(shown) !== before && (sinceBlip++ % 3 === 0)) game.sfx("tick");
+            if (game.ok() || game.pressed("b")) shown = total();
+          } else if (game.ok() || game.pressed("b")) {
+            if (page < pages.length - 1) { page++; shown = 0; game.sfx("move"); }
+            else { game.sfx("move"); game.pop(true); }
+          }
+        },
+        draw: function (gg) {
+          gg.origin(0, 0); gg.clip();
+          var top = y;
+          if (o.name) {
+            var nw = measure(o.name) + 10, ny = o.top ? boxH - 1 : top - FONT.line - 3;
+            gg.window(4, ny, nw, FONT.line + 4, { thin: true });
+            gg.text(o.name, 9, ny + 2);
+          }
+          gg.window(0, top, W, boxH);
+          var left = Math.floor(shown), ty = top + 5;
+          pages[page].forEach(function (ln) {
+            var part = Array.from(ln).slice(0, Math.max(0, left)).join("");
+            left -= Array.from(ln).length;
+            gg.text(part, 8, ty); ty += FONT.line;
+          });
+          if (shown >= total() && Math.floor(game.time * 3) % 2 === 0) gg.arrow(W - 13, top + boxH - 7, "down");
+        }
+      };
+    }
+
+    /* --- built-in overlay: a vertical menu --- */
+    function menuScene(items, o) {
+      var sel = clamp(o.index || 0, 0, items.length - 1), pad = 6, rowH = FONT.line + 2;
+      var w = o.width || Math.max.apply(null, items.map(measure).concat([o.title ? measure(o.title) : 0])) + pad * 2 + 10;
+      var h = items.length * rowH + pad * 2 - 2 + (o.title ? rowH : 0);
+      var x = o.x == null ? Math.round((W - w) / 2) : o.x, y = o.y == null ? Math.round((H - h) / 2) : o.y;
+      var cancel = o.cancel !== false;
+      return {
+        update: function () {
+          var d = game.dir();
+          if (d.y) { sel = (sel + d.y + items.length) % items.length; game.sfx("move"); }
+          if (game.pressed("a") || game.pressed("start")) { game.sfx("tap"); game.pop(sel); return; }
+          if (cancel && game.pressed("b")) { game.sfx("miss"); game.pop(-1); return; }
+          if (pointer.pressed) {
+            var r = Math.floor((pointer.y - y - pad - (o.title ? rowH : 0)) / rowH);
+            if (pointer.x >= x && pointer.x < x + w && r >= 0 && r < items.length) { sel = r; game.sfx("tap"); game.pop(sel); }
+            else if (cancel) { game.sfx("miss"); game.pop(-1); }
+          }
+        },
+        draw: function (gg) {
+          gg.origin(0, 0); gg.clip();
+          gg.window(x, y, w, h);
+          var ty = y + pad;
+          if (o.title) { gg.text(o.title, x + pad, ty, { color: DARK }); ty += rowH; }
+          items.forEach(function (it, i) {
+            if (i === sel) gg.arrow(x + pad - 1, ty + 3, "right");
+            gg.text(it, x + pad + 8, ty);
+            ty += rowH;
+          });
+        }
+      };
+    }
+
+    /* --- the loop: fixed 60 steps a second, one draw per screen refresh --- */
+    var last = 0, acc = 0, running = false;
+    function tick() {
+      inputBegin();
+      runTimers();
+      var top = stack[stack.length - 1];
+      if (top && top.scene.update && !busy) top.scene.update(STEP);
+      if (flashT > 0) flashT -= STEP;
+      if (shakeT > 0) shakeT -= STEP;
+      game.time += STEP; game.frame++;
+      inputEnd();
+    }
+    function render() {
+      g.origin(0, 0); g.clip();
+      for (var i = 0; i < stack.length; i++) { var s = stack[i].scene; g.origin(0, 0); g.clip(); if (s.draw) s.draw(g); }
+      present();
+    }
+    function frame(ts) {
+      requestAnimationFrame(frame);
+      if (!last) last = ts;
+      acc += Math.min(0.1, (ts - last) / 1000); last = ts;
+      var n = 0;
+      while (acc >= STEP && n < 6) { tick(); acc -= STEP; n++; }
+      if (n) render();
+    }
+    function loop() {
+      if (running) return; running = true;
+      fit(); addEventListener("resize", fit);
+      document.addEventListener("visibilitychange", function () { last = 0; });
+      requestAnimationFrame(frame);
+    }
+    g.clear();
+    return game;
+  }
+
+  return {
+    VERSION: VERSION, TONES: TONES.slice(), font: font, INK: INK, DARK: DARK, MID: MID, PAPER: PAPER, BUTTONS: BUTTONS.slice(),
+    create: create, sprite: sprite, sprites: sprites, tilemap: tilemap, camera: camera, rng: rng,
+    clamp: clamp, lerp: lerp, approach: approach, t: t
+  };
+})();
+</script>
+<script data-lo-font="lopix12">
+/*
+lopix12: a 12-pixel bitmap font for Lo-PDA apps.
+
+lopix12 is a Modified Version of Fusion Pixel Font (12px, proportional,
+Simplified Chinese; upstream release 2026.08.11): its glyphs were rasterized at
+their native size into one-bit bitmaps, and apps carry only the characters they
+use. It is distributed under the SIL Open Font License 1.1, below, and only
+under that license. It is not named Fusion Pixel, which is a Reserved Font Name.
+
+Fusion Pixel Font: https://github.com/TakWolf/fusion-pixel-font
+Copyright (c) 2022, TakWolf (https://takwolf.com), with Reserved Font Name 'Fusion Pixel'.
+It combines glyphs from these OFL-licensed fonts:
+- Ark Pixel Font, Copyright (c) 2021, TakWolf (https://takwolf.com).
+- Cubic 11, including JF Dot M+H 12, Copyright(c) 2005 M+ FONTS PROJECT,
+  and M+ BITMAP FONTS, Copyright (C) 2002-2004 COZ.
+- Galmuri, Copyright (c) 2019-2025 Lee Minseo (quiple@quiple.dev).
+
+-----------------------------------------------------------
+SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
+-----------------------------------------------------------
+
+PREAMBLE
+The goals of the Open Font License (OFL) are to stimulate worldwide
+development of collaborative font projects, to support the font creation
+efforts of academic and linguistic communities, and to provide a free and
+open framework in which fonts may be shared and improved in partnership
+with others.
+
+The OFL allows the licensed fonts to be used, studied, modified and
+redistributed freely as long as they are not sold by themselves. The
+fonts, including any derivative works, can be bundled, embedded,
+redistributed and/or sold with any software provided that any reserved
+names are not used by derivative works. The fonts and derivatives,
+however, cannot be released under any other type of license. The
+requirement for fonts to remain under this license does not apply
+to any document created using the fonts or their derivatives.
+
+DEFINITIONS
+"Font Software" refers to the set of files released by the Copyright
+Holder(s) under this license and clearly marked as such. This may
+include source files, build scripts and documentation.
+
+"Reserved Font Name" refers to any names specified as such after the
+copyright statement(s).
+
+"Original Version" refers to the collection of Font Software components as
+distributed by the Copyright Holder(s).
+
+"Modified Version" refers to any derivative made by adding to, deleting,
+or substituting -- in part or in whole -- any of the components of the
+Original Version, by changing formats or by porting the Font Software to a
+new environment.
+
+"Author" refers to any designer, engineer, programmer, technical
+writer or other person who contributed to the Font Software.
+
+PERMISSION & CONDITIONS
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of the Font Software, to use, study, copy, merge, embed, modify,
+redistribute, and sell modified and unmodified copies of the Font
+Software, subject to the following conditions:
+
+1) Neither the Font Software nor any of its individual components,
+in Original or Modified Versions, may be sold by itself.
+
+2) Original or Modified Versions of the Font Software may be bundled,
+redistributed and/or sold with any software, provided that each copy
+contains the above copyright notice and this license. These can be
+included either as stand-alone text files, human-readable headers or
+in the appropriate machine-readable metadata fields within text or
+binary files as long as those fields can be easily viewed by the user.
+
+3) No Modified Version of the Font Software may use the Reserved Font
+Name(s) unless explicit written permission is granted by the corresponding
+Copyright Holder. This restriction only applies to the primary font name as
+presented to the users.
+
+4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font
+Software shall not be used to promote, endorse or advertise any
+Modified Version, except to acknowledge the contribution(s) of the
+Copyright Holder(s) and the Author(s) or with their explicit written
+permission.
+
+5) The Font Software, modified or unmodified, in part or in whole,
+must be distributed entirely under this license, and must not be
+distributed under any other license. The requirement for fonts to
+remain under this license does not apply to any document created
+using the Font Software.
+
+TERMINATION
+This license becomes null and void if any of the above conditions are
+not met.
+
+DISCLAIMER
+THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT
+OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
+DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
+OTHER DEALINGS IN THE FONT SOFTWARE.
+*/
+LoGame.font({"name":"lopix12","cell":13,"line":14,"glyphs":{"0":"6:AAciimqyiicAAA==","1":"6:AAIYIIIIIIcAAA==","2":"6:AAciCCEIQg+AAA==","3":"6:AAciCCMCCicAAA==","4":"6:AAEMMUUk+EEAAA==","5":"6:AA+ggg8CCicAAA==","6":"6:AAcigg8iiicAAA==","7":"6:AA+CCEEIIIIAAA==","8":"6:AAciiiciiicAAA==","9":"6:AAciiieCCicAAA=="," ":"6:AAAAAAAAAAAAAA==","!":"4:AEREREBAAA==","\"":"6:AAUUUAAAAAAAAA==","#":"7:AAEiT8kSJPyRIAAA","$":"6:AIcqoocKKqcIAA==","%":"8:AABEpEgIECAkSkQAAA==","&":"7:AADCRIYZSokR0AAA","'":"4:AERAAAAAAA==","(":"6:AEIIQQQQQIIEAA==",")":"6:AQIIEEEEEIIQAA==","*":"6:AAAAAIqcqIAAAA==","+":"6:AAAAAII+IIAAAA==",",":"4:AAAAAABEgA==","-":"6:AAAAAAA+AAAAAA==",".":"4:AAAAAABAAA==","/":"6:ACCEEIIIQQggAA==",":":"4:AAAEAABAAA==",";":"4:AAAEAABEgA==","<":"5:AAABERBBBAAA","=":"6:AAAAAA+A+AAAAA==",">":"5:AAAIIIIiIAAA","?":"6:AAciCCEIIAIAAA==","@":"8:AAA4RJqqqqqqtkA8AA==","A":"8:AAAQECgoRHxEgoIAAA==","B":"7:AAPkKFC+QoUL4AAA","C":"7:AADiKBAgQICI4AAA","D":"7:AAPESFChQoUTwAAA","E":"7:AAP0CBA+QIED8AAA","F":"7:AAP0CBA+QIECAAAA","G":"7:AADiKBAgRoSI8AAA","H":"7:AAIUKFC/QoUKEAAA","I":"4:AORERETgAA==","J":"6:AACCCCCCiicAAA==","K":"7:AAIUSRQwUJESEAAA","L":"6:AAgggggggg+AAA==","M":"8:AACCgsbGqqqSkpIAAA==","N":"7:AAIWKlSlSo0aEAAA","O":"8:AAA4RIKCgoKCRDgAAA==","P":"7:AAPkKFC+QIECAAAA","Q":"8:AAA4RIKCgoKKRDoAAA==","R":"7:AAPkKFC+SIkSEAAA","S":"7:AAHkKAgMBAUJ4AAA","T":"8:AAD+EBAQEBAQEBAAAA==","U":"7:AAIUKFChQoUJ4AAA","V":"8:AACCgkRERCgoEBAAAA==","W":"10:AAAIiiKIlUVRVCIIgiAAAAA=","X":"8:AACCREQoEChERIIAAA==","Y":"8:AACCREQoKBAQEBAAAA==","Z":"7:AAPwIIIIEEED8AAA","[":"6:AcQQQQQQQQQcAA==","\\":"6:AggQQIIIEECCAA==","]":"6:AcEEEEEEEEEcAA==","^":"6:AAIUiAAAAAAAAA==","_":"6:AAAAAAAAAAAA+A==","`":"5:ABBAAAAAAAAA","a":"6:AAAAAcCeiieAAA==","b":"6:AAggg8iiii8AAA==","c":"6:AAAAAciggicAAA==","d":"6:AACCCeiiiieAAA==","e":"6:AAAAAci+gicAAA==","f":"5:AAyEeQhCEAAA","g":"6:AAAAAeiiiieCcA==","h":"6:AAgggsyiiiiAAA==","i":"4:AEAMRETgAA==","j":"4:ACAOIiIiwA==","k":"6:AAgggiswokiAAA==","l":"4:AMRERERgAA==","m":"8:AAAAAADskpKSkpIAAA==","n":"6:AAAAAsyiiiiAAA==","o":"6:AAAAAciiiicAAA==","p":"6:AAAAA8iiii8ggA==","q":"6:AAAAAeiiiieCCA==","r":"5:AAAAWxCEIAAA","s":"6:AAAAAciYEicAAA==","t":"5:ABCEeQhCDAAA","u":"6:AAAAAiiiimaAAA==","v":"6:AAAAAiiUUIIAAA==","w":"8:AAAAAACSkqqqREQAAA==","x":"6:AAAAAiUIIUiAAA==","y":"6:AAAAAiiiUUIIwA==","z":"6:AAAAA+EIQg+AAA==","{":"7:ADCBAgQQECBAgMAA","|":"4:BEREREREAA==","}":"7:AMBAgQICCBAgQwAA","~":"6:AAAAAQqEAAAAAA==","·":"12:AAAAAAAAAAAABgBgAAAAAAAAAAA=","×":"6:AAAAAiUIUiAAAA==","—":"12:AAAAAAAAAAAA/+AAAAAAAAAAAAA=","“":"12:AAAkBIBsBsAAAAAAAAAAAAAAAAA=","”":"12:AAbAbAJASAAAAAAAAAAAAAAAAAA=","…":"12:AAAAAAAAAAAAZmZmAAAAAAAAAAA=","←":"12:AAAAAAAAIAQA/+QAIAAAAAAAAAA=","↑":"12:AABADgFQBABABABABABABABAAAA=","→":"12:AAAAAAAAAIAE/+AEAIAAAAAAAAA=","↓":"12:AABABABABABABABABAFQDgBAAAA=","▲":"12:AAAABADgDgHwHwP4P4f8f8AAAAA=","▼":"12:AAAAf8f8P4P4HwHwDgDgBAAAAAA=","　":"12:AAAAAAAAAAAAAAAAAAAAAAAAAAA=","、":"12:AAAAAAAAAAAAAAAAAAQAMAEAAAA=","。":"12:AAAAAAAAAAAAAAAAMASASAMAAAA=","「":"12:AAA8AgAgAgAgAgAgAgAAAAAAAAA=","」":"12:AAAAAAAACACACACACACACAeAAAA=","一":"12:AAAAAAAAAAAA/+AAAAAAAAAAAAA=","七":"12:AACACACACODw+ACACACCCCB+AAA=","三":"12:AAf8AAAAAAAAP4AAAAAAAA/+AAA=","上":"12:AABABABABAB8BABABABABA/+AAA=","下":"12:AA/+BABABABQBIBEBABABABAAAA=","不":"12:AA/+AgBADAFQJIxEBCBABABAAAA=","东":"12:AACA/+EAJARAf8BAJIREhCHAAAA=","两":"12:AA/+EQEQ/+kSkSqqxGgCgCgOAAA=","个":"12:AABACgEQIIxGBABABABABABAAAA=","中":"12:AABABA/+hChChC/+BABABABAAAA=","为":"12:AARAJABA/+BCBSCKCKECICwMAAA=","么":"12:AACACAEQEQIgQghACEEEIafiAAA=","之":"12:AACABA/8AIAQAgBACAMATAg+AAA=","也":"12:AABAJAJMJ0PE5EJMJAICICH+AAA=","买":"12:AA/+ACIkEgQgIg/+BACQMIwGAAA=","了":"12:AAf8AEAIAQAgAgAgAgAgAgDgAAA=","二":"12:AAAAf8AAAAAAAAAAAAAA/+AAAAA=","交":"12:AABA/+AAEQII0WCgBACgMYwGAAA=","亮":"12:AABA/+IIP4AA/+gCHwEQISweAAA=","人":"12:AABABABABACgCgEQEQIIQEgCAAA=","今":"12:AABACgMYwGBAAgf8AIAQAgBAAAA=","从":"12:AAEQEQEQEQEQKoKoKoREREiCAAA=","他":"12:AAIQKQSWS63SSSSWSQSCSCR+AAA=","以":"12:AAAISIRIRIQIQISQUQYoREGCAAA=","份":"12:AAJIJISESE0CT8RERESESEUYAAA=","休":"12:AAIgIgX+QgxwRwSoSoUkYiQgAAA=","伙":"12:AAIQIQSSSS0UQQQQQoQoREWCAAA=","会":"12:AABACgMYwGP4AAAA/+EAIIf0AAA=","伞":"12:AABACgMYxGBAJIFQ/+BABABAAAA=","传":"12:AAIQL8QgQg3+RAT8QERIQwQIAAA=","伤":"12:AAJAJ+SAUgwgT+QiQiRCRCSMAAA=","但":"12:AAL8KESESEz8SESESET8QAX+AAA=","位":"12:AAIgIQX+QAyESERERIRIQQX+AAA=","住":"12:AAIgIQX+QQwQQQT8QQQQQQX+AAA=","体":"12:AAIgIgX+QgxwSoSoUkb6QgQgAAA=","余":"12:AADgEQII32BABAf8BAJIxGDAAAA=","你":"12:AAKAL+SCUSwQRURUSSUSQQQwAAA=","保":"12:AAL8KESET8wQQQX+Q4RUWSQQAAA=","倒":"12:AAPyJKSKUq3aRKRKXyRCRyWOAAA=","候":"12:AAJ8IEX+VA1+WQUQX+UoRESCAAA=","做":"12:AAKQKQXeSkyUSUXUVUVIVUXiAAA=","停":"12:AAIgP+SET8wAX+UCT8QQQQRwAAA=","傍":"12:AAIQL+RET+yCQQT+QgQ+RCWMAAA=","像":"12:AAJ4KIX+SSz+RwWaRsWaRqWYAAA=","儿":"12:AAEQEQEQEQEQEQEQIQISQSgeAAA=","先":"12:AAJAJAP8RABA/+EQEQESISweAAA=","光":"12:AABAREJIFQBA/+EQEQESISweAAA=","入":"12:AAEACABABACgCgEQEQIIQEgCAAA=","八":"12:AAEQEQEQEQEQIIIIIIQEQEgCAAA=","共":"12:AAEQEQf8EQEQEQ/+AAEQIIwGAAA=","兽":"12:AAIIEQf8REf8RE/+AAf8QEf8AAA=","再":"12:AA/+BAf8REf8RERE/+QEQEQcAAA=","冒":"12:AA/+gCv6gCv6IIP4IIP4IIP4AAA=","冲":"12:AAgQQQX+ESESESX+QQQQgQgQAAA=","决":"12:AAggQgT8AkAkAkX+QgRQiIsGAAA=","准":"12:AAhQRIT+GID+CISIT+SIiIj+AAA=","几":"12:AAPwIQIQIQIQIQIQIQQSQSgeAAA=","凳":"12:AAeUCIv6YMv6EQ/+AAHwES4eAAA=","出":"12:AABAREREREf8BABAhChChC/+AAA=","击":"12:AABABAf8BABA/+BAREREREf8AAA=","刀":"12:AAf+CCCCCCCCCCCCECECICwcAAA=","刁":"12:AAf+ACACASAiBCGCYCACACAMAAA=","分":"12:AAEQEQIIIIQEv6CICIEIIIwwAAA=","切":"12:AAT+QiQiciwiQiQiUiZCRCCMAAA=","划":"12:AAKCJKIKPq4KJKKKEKEiKixuAAA=","初":"12:AAT+Ii8iEiIiKiciqiJCJCKMAAA=","利":"12:AADCcCESES/SESMSOSVCkCEOAAA=","别":"12:AA/ChShS/SIS/SJSJSRCRCmOAAA=","到":"12:AA/iEKIKRK+qEKEK/qECHi4OAAA=","前":"12:AAIIEQ/+AAfURUfURUfURETMAAA=","剩":"12:AADCcKEK/qVK1qVK1qOCVCkuAAA=","力":"12:AABABAf+BCBCBCCCCCECICwcAAA=","加":"12:AAIAIe/SJSJSJSJSJSRSRSmeAAA=","动":"12:AAAQeQB+AS+SISQSSSmi6iBMAAA=","包":"12:AAIAP8QEvkIkIkPkIcIAICH+AAA=","十":"12:AABABABABA/+BABABABABABAAAA=","半":"12:AABAREJIBAf8BABA/+BABABAAAA=","单":"12:AAIIEQf8REf8REf8BA/+BABAAAA=","卖":"12:AABAf8BA/+EiSkIg/+BQGI4GAAA=","厚":"12:AAf+UEX8UEX8QAX8QIf+QQhwAAA=","厨":"12:AAf+QAfkQEXeVEXUQMVEVkuMAAA=","去":"12:AABABAf8BABA/+CAEIEII0fEAAA=","又":"12:AAf8QEQEIIIIEQCgBACgMYwGAAA=","取":"12:AA/AS+eiSiSieiSUSUXI6UCiAAA=","口":"12:AAAAf8QEQEQEQEQEQEQEf8AAAAA=","可":"12:AA/+AEAEPkIkIkIkPkAEAEAcAAA=","台":"12:AACAEAIIQE/6ACf8QEQEQEf8AAA=","叶":"12:AAAQ8QkQkQn+kQkQkQ8QAQAQAAA=","吃":"12:AABA5+qAsAr8oIoQog5ACCB+AAA=","合":"12:AABACgMYwGP4AAf8QEQEQEf8AAA=","名":"12:AACAD8EEaIBQAgH+8CECECH+AAA=","后":"12:AAA8fAQAQAf+QAX8UEUEUEn8AAA=","向":"12:AACAEA/+gCnykSkSkSnygCgOAAA=","吗":"12:AAD84EpEpEpEp+oCoC76ACAcAAA=","吧":"12:AAD+6SqSqSqSr+qAqA6CCCB+AAA=","听":"12:AAAM7wqAqAr+qIqIqI6ICIEIAAA=","吸":"12:AAD85EpEpIpOpCpipU6ICUFiAAA=","周":"12:AAP+IiL6IiL6ICL6KKT6QCgOAAA=","味":"12:AAAQ4Qr8oQoQv+oQo45UGSAQAAA=","呼":"12:AAAO7woQqSpUoQr+oQ4QAQBwAAA=","和":"12:AADAceESES/SESMSWSlSEeEAAAA=","响":"12:AAAQ4gr+qCq6qqqqqq66CCCGAAA=","哼":"12:AAAQ7+pEpEp8oAp8oI4QAQAwAAA=","喝":"12:AAD86Er8qEr8pAr+sS6qD6AGAAA=","嘴":"12:AAAk62qkv+pIr+uSr+6SD+ESAAA=","四":"12:AA/+kSkSkSkSkSoewCgCgC/+AAA=","回":"12:AA/+gCgCnykSkSkSnygCgC/+AAA=","在":"12:AACACA/+EAEQIQb+oQIQIQL+AAA=","地":"12:AAQQSQSW66XSSSSWaQyCCCB+AAA=","坐":"12:AABAJIJIJIVUjiBAf8BABA/+AAA=","块":"12:AAQgQgT84kQkQkX+YgxQCIMGAAA=","坛":"12:AAJ8IAIA8AL+IgIgNExECaDiAAA=","塞":"12:AABA/+kSf8EQ/+IIREv6BA/+AAA=","声":"12:AABA/+BAf8AAf8REf8QAQAgAAAA=","处":"12:AAIIIIPIRIRMpKKIKIEILAw+AAA=","备":"12:AAEAP40QDgMYwGf8REf8REf8AAA=","多":"12:AABAD4cICQBoGe4iHCAkAYPgAAA=","夜":"12:AABA/+IgI8RESU1IQoQQRoWGAAA=","够":"12:AAIQPeRihUdIVwVeVidUBIGwAAA=","大":"12:AABABABA/+BACgCgEQEQIIwGAAA=","天":"12:AAf8BABABA/+BACgCgEQIIwGAAA=","太":"12:AABABABA/+BACgCgEQEQKIxGAAA=","夫":"12:AABABAf8BABA/+BACgEQIIwGAAA=","头":"12:AAIgEgQgIgAg/+BABQCIMEwCAAA=","她":"12:AAIQJQ9WV6XSVSlWVQJCVCg+AAA=","好":"12:AAJ8IE8IUQUQX+kQUQIQUQhwAAA=","始":"12:AAIQIQ8kVEX6UAl+VCJCVCh+AAA=","姑":"12:AAIQIQ9+UQUQUQl8VEJEVEh8AAA=","姜":"12:AAEQ/+BAf8BA/+CA/+EIHw4OAAA=","娘":"12:AAIQJ+9CV+VCV+lIVKJEVUhiAAA=","婆":"12:AAQQL+iST8CkKYVk/+EIHw4OAAA=","嫌":"12:AAJEL+8oX+UqX+kqX+IoVsiqAAA=","子":"12:AAf4AIAQAgBA/+BABABABAHAAAA=","字":"12:AABA/+gCv6AQAgBA/+BABAHAAAA=","存":"12:AACA/+EAJ8IIYQoQL+IQIQIwAAA=","学":"12:AASEJI/+gCv6AQBg/+BABAHAAAA=","它":"12:AABA/+gCoCIIIwPAIAICICH+AAA=","守":"12:AABA/+gCgSAQ/+AQIQEQAQBwAAA=","完":"12:AABA/+gCv6AAAA/+EQEQISweAAA=","定":"12:AABA/+gCAAf8BAJAJ8JAXAg+AAA=","客":"12:AABA/+iCnycQDgMY/+IIIIP4AAA=","宴":"12:AABA/+oKv6IIP4CA/+EIHw4OAAA=","家":"12:AABA/+gCv6DAMkzoMwzoMmzAAAA=","宽":"12:AABA/+kSf8EQP4IIJIJICi8+AAA=","对":"12:AAAE8EF+kEUEVEIkIkUEUEgcAAA=","小":"12:AABABABAJIJERERChCBABAHAAAA=","少":"12:AABABAJIJERChCBIAQBgGA4AAAA=","就":"12:AAIU+SAQ/+iQio+oIoqqqqZOAAA=","尽":"12:AAP8IEIEP8IIIITEgyAAGABwAAA=","局":"12:AAf8QEf8QAf+QCXyUSUSXygMAAA=","山":"12:AABABABAhChChChChChChC/+AAA=","岩":"12:AAREREf8AA/+CAEAP8YEoEP8AAA=","工":"12:AAf8BABABABABABABABABA/+AAA=","差":"12:AAEQ/+BAf8CA/+EAP8QgggP+AAA=","己":"12:AAf8AEAEAEAEf8QAQAQCQCP+AAA=","已":"12:AAf8AEAEQEQEf8QAQAQCQCP+AAA=","带":"12:AAJI/+JIAA/+hCf8RERERMBAAAA=","帮":"12:AAEe/SEU/SEeIQxAf8RERMBAAAA=","常":"12:AAJI/+gCv6IIP4BAf8RERMBAAAA=","年":"12:AAIAP+QgggP8IgIg/+AgAgAgAAA=","库":"12:AAAgf+RAf+SAUgX8Qgf+QgggAAA=","底":"12:AAAgf+QEX4UQUQX+UQUIVKmmAAA=","店":"12:AAAgf+QAQgQ+QgQgX8UEUEn8AAA=","座":"12:AAAgf+QAQgUkUkaqQgX8Qgv+AAA=","开":"12:AA/+IIIIIIII/+IIIIQIQIgIAAA=","弃":"12:AABA/+EAIIf0AAEQ/+EQIQwQAAA=","张":"12:AA5EJEJI5QhAn+5QJIJIJUxiAAA=","影":"12:AAfCREfIRAfCEE/oRAfCVEsoAAA=","待":"12:AAIQR8gQIQT+wET+REQkQEQcAAA=","很":"12:AAL8SEj8KESEz8SSSUSISkTCAAA=","得":"12:AAL8SEj8KET8wAX+QIX+SIRYAAA=","心":"12:AACABAAgEgEAUEUCUCkKEID4AAA=","忙":"12:AAIgIQr+tApApAJAJAJAJAJ+AAA=","快":"12:AAIgIgr8skokokP+IgJQKIMGAAA=","怎":"12:AAIAP+SAj8CAD8CAVEUikKD4AAA=","总":"12:AAIIEQf8QEQEf8AAVEUikKD4AAA=","息":"12:AACAP4IIP4IIP4IIP4VEUqj6AAA=","您":"12:AAKAL+SC0QRUSSQwBAUkUKj6AAA=","想":"12:AAI++iI+ciq+IiI+FAUkUKj6AAA=","意":"12:AABAf8EQ/+IIP4IIP4FEUqj6AAA=","感":"12:AAAUf+XQQUXIVKnWBAUkUKj6AAA=","愿":"12:AAf+RAX8UEX8UEX8SoVkaSr6AAA=","慢":"12:AAJ8JEp8tEr+qqL+JEIoIQLuAAA=","我":"12:AAGU4SIQ/+IQIUOU4IIKIWYiAAA=","截":"12:AAEUfSEQ/+IQSS/USIfKSWfiAAA=","户":"12:AAAgP+ICICP+IAIAIAQAQAgAAAA=","房":"12:AAAgf+QCf+Qgf+SAT8SEUEoYAAA=","手":"12:AAA8fABABAf8BABA/+BABAHAAAA=","才":"12:AAAQAQ/+AQAwBQCQMQwQAQBwAAA=","扎":"12:AAIgIg+gIgIgOg4gIgIiIi4eAAA=","扑":"12:AAIQIQ8QIQIYMU4SIQIQIQ4QAAA=","打":"12:AAJ+II8IIIIIMI4IIIIIII44AAA=","找":"12:AAQoQk4gQ+XgYkwoQQQSRq2GAAA=","把":"12:AAT+SS6SSSSSb+yASASCSCx+AAA=","抵":"12:AAQMTw6QSQSQb+yQSISKSmzSAAA=","招":"12:AAT+Qi4iRCSOYAz+SCSCSCz+AAA=","拱":"12:AARIRI7+RIRIZI3+QARISE0CAAA=","拿":"12:AADgMY32AAP4IIf8BA/+BAHAAAA=","指":"12:AASCSM7wSCR+YAz+SCT+SCz+AAA=","按":"12:AAQQT+6CQQQQb+wkREQoQYzmAAA=","挡":"12:AAQQSS5UQQT+YCwCT+QCQCz+AAA=","挥":"12:AAT+SC4gT+RAaQz+QQT+QQwQAAA=","换":"12:AAQgQ45IT8SUaUyUX+QoRE2CAAA=","捶":"12:AAQMRw4QT+RUb+xURUT+QQx8AAA=","掉":"12:AAQQQe4QT8SEb8yET8QQX+wQAAA=","排":"12:AAQoQo7uQoQobuwoQoTuQowoAAA=","推":"12:AARQRI7+WIT+aIyIT+SISIz+AAA=","搭":"12:AAREX+5EQ4REW64AT+SCSCz+AAA=","摆":"12:AAT+Sq6qT+QQZ8wQT+QgREz6AAA=","摸":"12:AARIX+5IT8SEb8yEX+QwRI2GAAA=","撑":"12:AARUT+6CR8REZ8wQR8QQT+wQAAA=","撒":"12:AASoX46uXyQKfq0qXqUkXq0yAAA=","收":"12:AAEgkgk+lEmkkkkoso0QEoFGAAA=","攻":"12:AAAg8gI+JEKkIkIoMowQAoDGAAA=","放":"12:AAQgIg++REQkekSoSoSQSonGAAA=","教":"12:AAIQ9QKe/kIkfUiUHU8IEUNiAAA=","散":"12:AAUQ+QUe+kBU+UiU+UiI+UiiAAA=","数":"12:AAlQWQ/eMkWUlUIU/UJIOUxiAAA=","整":"12:AAEQ/+VUfUOIVU/+BAJ8JA/+AAA=","文":"12:AACABA/+IIIIEQEQCgBAGw4OAAA=","斜":"12:AAMESkgU8EJEIk8GIcrkoEIEAAA=","新":"12:AAEG/YRQKQ/eEU/UEUVUkkMkAAA=","方":"12:AACABA/+CACAD8CEEEEEIEwYAAA=","日":"12:AAf8QEQEQEQEf8QEQEQEQEf8AAA=","旧":"12:AAT+SCSCSCSCT+SCSCSCSCT+AAA=","早":"12:AAf8QEf8QEf8BABA/+BABABAAAA=","时":"12:AAAE8El+kEkE9EkkkkkE8EAcAAA=","明":"12:AA9+lClCl+9ClCl+lC9CCCEOAAA=","春":"12:AABAf8CAf8EA/+IIYMv6IIP4AAA=","是":"12:AAf8QEf8QEf8AA/+JAJ8XAg+AAA=","晚":"12:AABA54qIv+qS6Sr+oooq5KGOAAA=","晴":"12:AAAQ78oQr8oQ/+qEr8qE78CEAAA=","暂":"12:AAIG+4Qgo++kJEf8QEf8QEf8AAA=","最":"12:AAf8QEf8QE/+SAe+SiXU6IC2AAA=","月":"12:AAP8IEIEP8IEIEP8IEQEQEgcAAA=","有":"12:AACA/+EAIAP8YEv8IEP8IEIcAAA=","末":"12:AABABA/+BABAf8FQFQJIxGBAAAA=","机":"12:AAJ4JI9IJIJIZIdIpIJKJKKOAAA=","材":"12:AAIEIE9+IEIMYMcUokLEIEIcAAA=","条":"12:AAEAH4II0QDg8eBAf8BAJIzGAAA=","来":"12:AABAf8BAJIFQ/+DgFQJIxGBAAAA=","松":"12:AAIoIo9EJEKCYgcgpEJEKaLiAAA=","板":"12:AAIGJ49AJAJ+ZCdipUJIJUKiAAA=","林":"12:AAIQIQ/+IQIQY4dUqSIQIQIQAAA=","标":"12:AAJ8IA8AL+IQYQdUpSJSKSIwAAA=","树":"12:AAIELk8+KkKkZUdMqkKkMEIMAAA=","样":"12:AAJEIo/+IQIQZ8cQoQL+IQIQAAA=","桌":"12:AABAB+BAf8QEf8QE/+FQJIxGAAA=","档":"12:AAIQKS9UIQL+YCcCr+ICICL+AAA=","欠":"12:AAIAIAP+QChEBABACgCgEQ4OAAA=","次":"12:AAhARAR+CCEUAQQQQoQohEmCAAA=","正":"12:AA/+BABABAJAJ8JAJAJAJA/+AAA=","每":"12:AAIAP+QAv8JEIk/+REQkf+AEAAA=","气":"12:AAQAf8gAf4AA/4AIAIAKAKAEAAA=","水":"12:AABABABC9kFoFQJQJIREhCHAAAA=","汤":"12:AAT8IIAQggT+AqBKSSQSgihMAAA=","没":"12:AAR4JIBIhIWOAAD8SERIgwnOAAA=","河":"12:AAn+QEAEj0SUCUCUT0QEgEgcAAA=","泉":"12:AACAf8QEf8QEf8BC9sFQJIzGAAA=","法":"12:AAQQIQD8gQQQH+AgREREianiAAA=","浆":"12:AAEgk+UiFSMM1wBC9sFQJIzGAAA=","浪":"12:AAQgL8CEj8SED8CSSUSIikjCAAA=","深":"12:AAn+UCAohEWCAQH+QQQ4hUmSAAA=","清":"12:AAQQL8AQj8QQH+CET8SEj8iEAAA=","渔":"12:AARAJ8CEn+SSD+CSSST+gAn+AAA=","渡":"12:AAgQX+FEn+VEF8EAV8VEk4rGAAA=","溪":"12:AAH6kiSUBIiSX+AQX+QohEmCAAA=","满":"12:AAhIX+BIn+RIH+FKVKW2kCkGAAA=","漏":"12:AAn+UCH+kAV+EIF+VuValupaAAA=","火":"12:AABABAJEJERIBACgCgEQIIwGAAA=","灭":"12:AA/+BABAJEJERICgCgEQIIwGAAA=","灯":"12:AAJ+IIoIsIoIIIIIIIUIUIg4AAA=","灶":"12:AAIQIQoQsQp8IQIQIQUQUQj+AAA=","炒":"12:AAIQIQpUtSpSKQISIEUIUwjAAAA=","炭":"12:AAREREf8IA/+IgKkUoQgjYMGAAA=","点":"12:AABAB+BABAf8QEQEf8AAUkiSAAA=","烊":"12:AAJEIor+sQoQJ8IQIQX+UQgQAAA=","烙":"12:AAIgI8tEqooQIoLGJ8VEVEh8AAA=","烤":"12:AAIQJ6sUr+oQI+LgI8UEUEgYAAA=","热":"12:AAIQ98IUIUNk4kJSZKAAUkiSAAA=","焖":"12:AAKeJCsSqKqCKqLmKiWqSaiGAAA=","煮":"12:AACCf0CI/+IEf8oEP8AAUkiSAAA=","煲":"12:AAL8KET8wQX+RUWSJERICg8eAAA=","片":"12:AAIQIQIQP+IAIAP4IIQIQIgIAAA=","牌":"12:AAUgV+VSf+RSR+coVIX+UIkIAAA=","牙":"12:AAf8IQIQQQf+AwBQCQMQwQBwAAA=","猎":"12:AApIT8RIpIP+IAb8qEL8KEz8AAA=","猪":"12:AAogT6QkooP+IgZ8rEN8JEx8AAA=","猴":"12:AApcRES+qQOeKoaIq+KIKUyiAAA=","玩":"12:AAD84AQAQAX+5IRIRIaKyKEOAAA=","珍":"12:AAAQ4oREWKQw7EQIQybEwYDgAAA=","甜":"12:AAGk4kJ+Ik+kIkI8+kikik+8AAA=","生":"12:AARARAf8RAhABAf8BABABA/+AAA=","用":"12:AAf8REREf8REREf8REREREhMAAA=","田":"12:AA/+hChChChC/+hChChChC/+AAA=","留":"12:AAG+4SgSii9GAAf8REf8REf8AAA=","瘦":"12:AAAgf+Sg0sUkWs0kX8SIRwuOAAA=","百":"12:AA/+BACAf8QEQEf8QEQEQEf8AAA=","的":"12:AAIgQg++jCiCiS+KiKiCiC+MAAA=","皮":"12:AAAgf+QiQgf8UESERIQwTIsGAAA=","盐":"12:AAEQfQEYEUHS4QAAf8SkSk/+AAA=","看":"12:AAf8BAf8CA/+IEf8oEP8IEP8AAA=","眼":"12:AA78qEr86EqEr86SqUqI6kDCAAA=","着":"12:AAEQ/+CAf8EA/+IEYEv8IEP8AAA=","睡":"12:AA4MpwoQ7+pUr+5UpUr+4QB8AAA=","石":"12:AA/+CACAEAEAP8YEoEIEIEP8AAA=","砍":"12:AA9AJAJ+RCeU0QUQUoUodECCAAA=","砸":"12:AA7+SISIi+6qqqqqquqI6ID+AAA=","碎":"12:AA8QL+IAREdE2qUQX+UQcQAQAAA=","碗":"12:AA4QT+SChA5uqqqqtuoo5KCOAAA=","磨":"12:AAAgf+SIf+Xcaqf+RAT+WCr+AAA=","神":"12:AAgQQQ7+KSSSb+2SSST+QQQQAAA=","禾":"12:AAA8fABABA/+DgFQJIREhCBAAAA=","种":"12:AAEQ4QL+KS+SKSb+cQoQIQIQAAA=","租":"12:AAF85EJEJ89EJEZ8dEpEJEL+AAA=","稳":"12:AAE85EL+IC/+ICb+cgpULKN6AAA=","稻":"12:AAEG74IiKU8gLOaCbuuCKCL+AAA=","空":"12:AABA/+gCEQIIwGf8BABABA/+AAA=","站":"12:AAQQIQ+eAQkQUQV+JCPCxCB+AAA=","竹":"12:AAIQIQPeUklEEEEEEEEEEEEcAAA=","笋":"12:AAQge+lIf8BE/+BEf8CAMAwAAAA=","笑":"12:AAQge+lIAAA8fABA/+CgMYwGAAA=","第":"12:AAQge+lIf8BEf8RAf+FCJCxMAAA=","等":"12:AAQge+lIf8BA/+AI/+EICIA4AAA=","筒":"12:AAQge+lIf8QEX0QEX0UUX0QMAAA=","算":"12:AAQge+lIf8QEf8QEf8EQ/+IQAAA=","管":"12:AAQge+lI/+oKP4IAP8IEIEP8AAA=","篮":"12:AAQge+pIEgk+lIkEf8SkSk/+AAA=","米":"12:AAREJIFQBA/+BADgFQJIxGBAAAA=","粉":"12:AAIosoZEJE+CJ8YkckpEJEKYAAA=","粒":"12:AAIgsQb+IA9EJEYkckooIIL+AAA=","粮":"12:AAIQt+ZCJ+9CJ+ZIdKpEJUJiAAA=","精":"12:AAIQt8YQJ88QL+ZEd8pEJ8JEAAA=","练":"12:AAQgX+hAnw6QT+gQ5UBSKSwwAAA=","细":"12:AAT+SSiSqSyST+iS6SCSKSz+AAA=","经":"12:AAT8QEgIoQxoWGh84QAQIQz+AAA=","结":"12:AAIQIQT+kQ4QJ8QA98BENEx8AAA=","给":"12:AAQQQohEqCx8QAj+6CCCKCz+AAA=","继":"12:AASISqicqIy+SIic6qCIKAz+AAA=","续":"12:AAQQR8gQr+xCSohI7+AQIkzCAAA=","缝":"12:AAUQSegioc2iSIi+6IC+NI0+AAA=","美":"12:AAEQ/+BAf8BA/+BA/+CgMYwGAAA=","羹":"12:AAEQf8BA/+UkiS/+BA/+EQ4OAAA=","老":"12:AACEfoCQCg/+CAME0YHgECD+AAA=","肉":"12:AABABA/+hCiisahCiisagCgOAAA=","肥":"12:AA7+qSqS6SqSr+6AqAqCqCp+AAA=","能":"12:AAQmk46gAi+eiA+mi4+giimeAAA=","脆":"12:AA5Ap4qI7+uAq86kqsqgqiseAAA=","脚":"12:AA5OpKv65KpKv65KqKqusovYAAA=","腌":"12:AA4gr8pI6kv+qk78qkr8oioeAAA=","自":"12:AABACAf8QEf8QEQEf8QEQEf8AAA=","船":"12:AAI8ekSkakXG+AS+aiWiSim+AAA=","苦":"12:AAEQ/+EQBA/+BABAf8QEQEf8AAA=","药":"12:AAEQ/+JQRA9+JCQC+iASGC4MAAA=","菇":"12:AAEQ/+EQAAIQ9+UQl8VEJE18AAA=","菌":"12:AAEQ/+EQf8QUXkREX0TkVUf8AAA=","菜":"12:AAEQ/+EQAcfgSEJI/+FQJIxGAAA=","行":"12:AAJ8QAgAL+QIwIQIQIQIQIQ4AAA=","被":"12:AAgQT+6SKQT+XC6iWUSISUViAAA=","装":"12:AAkQX+EQMQ18BA/+Eg4ULIMGAAA=","西":"12:AA/+EQEQ/+kSkSkSoewCgC/+AAA=","要":"12:AA/+Cgf8Skf8CA/+EIMQDg8eAAA=","解":"12:AAI+OSSS/mVAfUVefkVeVElEAAA=","计":"12:AAQQIQAQAQz+QQQQQQUQYQQQAAA=","记":"12:AAj8QEAEAEwET8SASAWCaCR+AAA=","话":"12:AAgMTwAQAQz+QQQQR8VEZER8AAA=","说":"12:AAiERID8CEyESET8RIVKaKUOAAA=","请":"12:AAgQT8AQD8wQX+SET8WEb8SEAAA=","谁":"12:AAhQRID+GIz+SISIT+WIaIT+AAA=","账":"12:AA+kikqoqwqgr+qoqoIkUkiyAAA=","贴":"12:AA+IiIqOqIqIqIq+qiIiUii+AAA=","费":"12:AAEg/8Ek/+ki/+QEREREGw4OAAA=","赢":"12:AABA/+QAf8II/+qq6qqu5KqqAAA=","走":"12:AABAf8BABA/+BAJAJ8JAXAg+AAA=","起":"12:AAE8eEEEEE+8EgUiWiUesAj+AAA=","跑":"12:AA9Al+mC96JKJKt6pGpAtCw+AAA=","跟":"12:AA9+lCl+9CJCJ+tIpKpEtUxiAAA=","路":"12:AA8gk8lE+oIQIovGp8pEtEx8AAA=","跳":"12:AA8okomq9sIoIotsqqootKyOAAA=","踩":"12:AA8Gn4ki+SJEIQr+s4pUuSwQAAA=","身":"12:AACAP4IIP4IIP6IM/4BIGI44AAA=","转":"12:AAIQ98QQoQr+8gJ8ME4oIQIIAAA=","轻":"12:AAJ88EQIoQpo+GJ8MQ4QIQL+AAA=","辰":"12:AAf+QAX8QAf+UQUSUUUIVkmCAAA=","边":"12:AAggQgD+AiwiQiRCRCSMoAn+AAA=","过":"12:AAgIQIH+AIyIRIRIQIQ4oAn+AAA=","近":"12:AAgMTwCACAz+SISISIUIoAn+AAA=","返":"12:AAgOTwCACAz+TCSkSYVmoAn+AAA=","还":"12:AAn+QQAgAgxoSkUiQgQgoAn+AAA=","这":"12:AAggQQH+AExEQoQQQoTGoAn+AAA=","进":"12:AAhIRIH+BIxIX+RIRISIoAn+AAA=","迷":"12:AAgQSSBUAQ3+Q4RUWSQQoAn+AAA=","退":"12:AAj8SED8CEz8SiSUSoTGoAn+AAA=","送":"12:AAhEQoD+AQwQT+QQQoTGoAn+AAA=","选":"12:AAiQT8EQAQ3+RIRISKUOoAn+AAA=","遍":"12:AAgQX+ECH+0AX+Wqb+SqoAn+AAA=","道":"12:AAhIX+AgD8yET8SESET8oAn+AAA=","那":"12:AA/eJSJS/UJUJS/SJSJcRQmQAAA=","邻":"12:AAEeKSRSg0IUES/yBSScMQDQAAA=","都":"12:AAIe9SKSMU/UISfSxSfcRQfQAAA=","酒":"12:AAn+RIBIn+VKFKGOUCX+kCn+AAA=","醒":"12:AA++UiU++iq+qo2+jI++iI++AAA=","采":"12:AAAcfgCERIIQBA/+FQJIxGBAAAA=","里":"12:AAf8REREf8REREf8BAf8BA/+AAA=","重":"12:AAf8BA/+REf8REf8BAf8BA/+AAA=","野":"12:AA++qC+UqIr++KIM+IIIOIw4AAA=","量":"12:AAf8QEf8QE/+REf8REf8BA/+AAA=","针":"12:AAQQcQgQ8QT+QQ8QQQUQYQQQAAA=","钱":"12:AAQUcSge9wQQQe9wQSUMYaTmAAA=","铜":"12:AAT+aCi66CS6Sq6qSqS6aCSGAAA=","银":"12:AAT8aEj86ESET86SSUSIakTCAAA=","铺":"12:AAQUb+gQ7+SST+6ST+SSaSSWAAA=","锁":"12:AASSZUgQ7+SCSS6SSSQoZESCAAA=","锅":"12:AAR8ZEhE58QQT+6SSqTGaCSGAAA=","错":"12:AARIb8hI5IX+QA78SET8aET8AAA=","键":"12:AAQIe+iK7+UKW+6IS+WIbIU+AAA=","镇":"12:AAQQb+gQ58RER85ERET+ZESCAAA=","长":"12:AAIIIQIgLAIA/+JAIgIQKIMGAAA=","门":"12:AAn+QCACgCgCgCgCgCgCgCgOAAA=","间":"12:AAn+QCACnykSkSnykSkSnygGAAA=","阱":"12:AA4kokr+okwkokr+ok4khEiEAAA=","阳":"12:AA9+lClCpCpCl+lClC5ChCh+AAA=","阶":"12:AA4QoopEuCxEpEpEpE5EhEiEAAA=","阿":"12:AA7+oEoEr0yUqUqUr04EgEgcAAA=","陆":"12:AA4QoQr+oQwQr+oQqS6SiSj+AAA=","限":"12:AA78qEr8qEyEr8qSqU6IikjCAAA=","陷":"12:AA4go8pEuIwgrOqCru6CiCj+AAA=","随":"12:AA4Qt+qQo8xku8qkq86klAk+AAA=","难":"12:AAAo8oF+nIV+VIJIJ+VIVIh+AAA=","雨":"12:AA/+BABA/+hCpSlKhCpSlKhCAAA=","雷":"12:AAf8BA/+hCtaAAf8REf8REf8AAA=","雾":"12:AAf8BA/+pSH8YIP4xGP8EEYYAAA=","需":"12:AAf8BA/+hCtaAA/+CA/+kSkWAAA=","青":"12:AABAf8BAf8BA/+IIP4IIP4IIAAA=","面":"12:AA/+BACA/+kSnykSkSnykS/+AAA=","预":"12:AA++CIU+Ii+qKqMqIqIIIUYiAAA=","题":"12:AA++iI++ii+qAq+IIUui4An+AAA=","食":"12:AADgMYxGP4IIP4IIP6IkKYMGAAA=","饭":"12:AAQObwqACAT+TCSiSUSIaUViAAA=","饼":"12:AARCYkr+AkQkQkT+QkQkZESEAAA=","馆":"12:AAQQb+qCB8RER8RAR+VCZCR+AAA=","香":"12:AAA8fABA/+FQJI/+IIP4IIP4AAA=","魈":"12:AARK+sqI++qi++KiV+XiUAn+AAA=","鱼":"12:AAIAPwQQ/8REf8REREf8AA/+AAA=","鲜":"12:AAQicUk++IqI++qI+IA+GI4IAAA=","鳞":"12:AARKcsl++srK+kq+/UA0Gu5EAAA=","黑":"12:AAf8REVUREf8BAf8BA/+UkiSAAA=","龇":"12:AAIouooooq+6Asqoqo2qi6/OAAA=","！":"12:AAAAIAcAcAcAIAIAIAAAIAAAAAA=","（":"12:AAAEAIAIAQAQAQAQAQAIAIAEAAA=","）":"12:AAQAIAIAEAEAEAEAEAIAIAQAAAA=","，":"12:AAAAAAAAAAAAAAAAMAMAEAIAAAA=","：":"12:AAAAAAMAMAAAAAAAAAMAMAAAAAA=","；":"12:AAAAAAMAMAAAAAAAMAMAEAIAAAA=","？":"12:AAAAcAiAiACAEAIAIAAAIAAAAAA="}});
+</script>
+<script data-src="src/00-main.js">
+/* 山脚小馆 — the game object and a few globals. */
+var game = LoGame.create({ width: 216, height: 240, lang: "zh" });
+var T = game.t;
+var W = 216, H = 240;
+var SAVE_KEY = "diner";
+var SAVE_VERSION = 1;
+var busy = false;
+var toast = { text: "", until: 0 };
+function sayToast(text) { toast.text = text; toast.until = game.time + 2.6; }
+document.documentElement.lang = game.lang === "zh" ? "zh-CN" : "en";
+</script>
+<script data-src="src/10-data.js">
+/* All content lives here: ingredients, dishes, enemies, upgrades, people, weather. */
+var DATA = (function () {
+  var ING = {
+    mushroom: { name: "山菇", one: "菇", desc: "雨后松针底下冒出来的小伞。" },
+    fish:     { name: "河鱼", one: "鱼", desc: "溪水里的银鳞，烤着最香。" },
+    rice:     { name: "稻米", one: "米", desc: "山脚田里收的，粒粒都小。" },
+    bamboo:   { name: "竹笋", one: "笋", desc: "春雷之后，一夜长一截。" },
+    greens:   { name: "野菜", one: "菜", desc: "苦里带一点甜。" },
+    meat:     { name: "山猪肉", one: "肉", desc: "猎户分给你的，肥瘦正好。" },
+    rare:     { name: "山珍", one: "珍", desc: "雾里才找得到，山神的口粮。" }
+  };
+  var ING_ORDER = ["mushroom", "fish", "rice", "bamboo", "greens", "meat", "rare"];
+
+  var DISHES = {
+    mushroom_soup: { name: "山菇汤", price: 8, need: { mushroom: 2 }, appeal: 1, unlock: "base", kind: "soup",
+      desc: "清水煮山菇，起锅前撒一点盐。" },
+    greens_cake:   { name: "野菜饼", price: 6, need: { greens: 1, rice: 1 }, appeal: 1, unlock: "base", kind: "cake",
+      desc: "菜叶切碎和米浆，贴在锅边烙。" },
+    bamboo_rice:   { name: "竹筒饭", price: 9, need: { rice: 1, bamboo: 1 }, appeal: 2, unlock: "base", kind: "rice",
+      desc: "米装进青竹筒，火上慢慢焖。" },
+    grilled_fish:  { name: "烤河鱼", price: 13, need: { fish: 1 }, appeal: 2, unlock: "stove", kind: "grill",
+      desc: "鱼身划三刀，炭火烤到皮脆。" },
+    pork:          { name: "山猪肉", price: 16, need: { meat: 1, mushroom: 1 }, appeal: 3, unlock: "stove", kind: "grill",
+      desc: "厚切猪肉，和山菇一起焖。" },
+    bamboo_pork:   { name: "笋炒肉", price: 19, need: { bamboo: 1, meat: 1 }, appeal: 3, unlock: "yan", kind: "stir",
+      desc: "阿岩教的：笋斜切，肉大火。" },
+    mushroom_pot:  { name: "菌菇煲", price: 24, need: { mushroom: 3 }, appeal: 4, unlock: "critic", kind: "pot",
+      desc: "三种菇，一锅汤，火候要稳。" },
+    god_soup:      { name: "山神羹", price: 45, need: { rare: 1, mushroom: 2 }, appeal: 5, unlock: "boss", kind: "pot",
+      desc: "山神宴的羹，雾里的山珍。" }
+  };
+  var DISH_ORDER = ["mushroom_soup", "greens_cake", "bamboo_rice", "grilled_fish", "pork", "bamboo_pork", "mushroom_pot", "god_soup"];
+
+  var ENEMIES = {
+    boar:   { name: "山猪", hp: 22, atk: 5, def: 0, money: 6, drops: [["meat", 1, 2]],
+      intro: "山猪哼了一声，挡在路中间。", art: "boar" },
+    monkey: { name: "野猴", hp: 16, atk: 4, def: 0, money: 4, drops: [["greens", 1, 2], ["mushroom", 0, 1]],
+      intro: "野猴从树上跳下来，冲你龇牙。", art: "monkey" },
+    bamboo: { name: "竹精", hp: 28, atk: 5, def: 1, money: 8, drops: [["bamboo", 2, 2]],
+      intro: "竹影里站起一个细长的东西。", art: "bamboo" },
+    boss:   { name: "山魈", hp: 72, atk: 6, def: 1, money: 45, drops: [["rare", 1, 1]], boss: true,
+      intro: "雾散开。山魈坐在石阶上，像一座会呼吸的山。", art: "boss" }
+  };
+
+  var UPGRADES = {
+    stove:     { name: "新灶台", cost: 80, rep: 1, desc: "解锁「烤河鱼」「山猪肉」。", short: "灶" },
+    sign:      { name: "新招牌", cost: 60, rep: 1, desc: "每晚多来一位客人。", short: "牌" },
+    table:     { name: "加一条长凳", cost: 120, rep: 2, desc: "客人愿意多等一会儿，门口多站一位。", short: "凳" },
+    whetstone: { name: "磨刀石", cost: 70, rep: 1, desc: "下厨的刀快一点，攻击 +2。", short: "刀" },
+    cellar:    { name: "腌菜坛", cost: 50, rep: 1, desc: "打烊后每道菜留一份，不浪费。", short: "坛" }
+  };
+  var UPGRADE_ORDER = ["stove", "sign", "table", "whetstone", "cellar"];
+
+  var NPCS = {
+    ahe:  { name: "阿禾", title: "邻家的姑娘", fav: "mushroom_soup", art: "ahe",
+      hint: "她总在打烊前过来，坐在最里面那张桌。" },
+    zhou: { name: "老周", title: "渡口的渔夫", fav: "grilled_fish", art: "zhou",
+      hint: "他带来的鱼，鳞片还亮着。" },
+    yan:  { name: "阿岩", title: "后山的猎户", fav: "bamboo_pork", art: "yan",
+      hint: "他不太说话，但会教你切肉。" },
+    po:   { name: "婆婆", title: "房东", fav: "bamboo_rice", art: "po",
+      hint: "每月初四收租，一分不能少。" },
+    critic: { name: "陆先生", title: "过路的美食客", fav: "mushroom_pot", art: "critic",
+      hint: "他吃过很多地方，嘴很刁。" }
+  };
+  var NPC_ORDER = ["ahe", "zhou", "yan", "po"];
+
+  var WEATHER = {
+    sunny: { name: "晴", customers: 1, forest: "阳光从叶缝里漏下来。", ambience: null },
+    rain:  { name: "雨", customers: -1, forest: "雨点打在山菇上，长得正肥。", ambience: "rain" },
+    fog:   { name: "雾", customers: -2, forest: "雾很重，深处的东西会出来。", ambience: "wind" }
+  };
+  var WEATHER_BY_DAY = ["sunny", "rain", "sunny", "rain", "sunny", "fog", "sunny"];
+
+  var RENT = { 4: 100, 7: 150 };
+  var MAX_DAY = 7;
+
+  return {
+    ING: ING, ING_ORDER: ING_ORDER,
+    DISHES: DISHES, DISH_ORDER: DISH_ORDER,
+    ENEMIES: ENEMIES,
+    UPGRADES: UPGRADES, UPGRADE_ORDER: UPGRADE_ORDER,
+    NPCS: NPCS, NPC_ORDER: NPC_ORDER,
+    WEATHER: WEATHER, WEATHER_BY_DAY: WEATHER_BY_DAY,
+    RENT: RENT, MAX_DAY: MAX_DAY
+  };
+})();
+</script>
+<script data-src="src/20-art.js">
+/* Pixel art and scene backdrops. Everything is drawn with the four tones. */
+var ART = {};
+
+function spr(rows) { return LoGame.sprite(rows); }
+
+/* ---------------- people ---------------- */
+ART.heroDown = spr([
+  "...000000...",
+  "..01111110..",
+  "..01333310..",
+  "..01303010..",
+  "..01333310..",
+  "...000000...",
+  "..01111110..",
+  ".0111111110.",
+  ".0111333110.",
+  ".0111333110.",
+  ".0111333110.",
+  ".0111111110.",
+  "..01111110..",
+  "..0......0..",
+  "..0......0..",
+  "..0......0..",
+  ".00......00.",
+  "............"
+]);
+ART.heroUp = spr([
+  "...000000...",
+  "..01111110..",
+  "..01111110..",
+  "..01111110..",
+  "..01111110..",
+  "...000000...",
+  "..01111110..",
+  ".0111111110.",
+  ".0111111110.",
+  ".0111111110.",
+  ".0111111110.",
+  ".0111111110.",
+  "..01111110..",
+  "..0......0..",
+  "..0......0..",
+  "..0......0..",
+  ".00......00.",
+  "............"
+]);
+ART.heroSide = spr([
+  "...000000...",
+  "..01111110..",
+  "..01333310..",
+  "..01303010..",
+  "..01333310..",
+  "...000000...",
+  "..01111110..",
+  "..01111110..",
+  "..01113310..",
+  "..01113310..",
+  "..01113310..",
+  "..01111110..",
+  "..01111110..",
+  "..0......0..",
+  "..0......0..",
+  "..0......0..",
+  ".00......00.",
+  "............"
+]);
+
+ART.ahe = spr([
+  "....0000....",
+  "...011110...",
+  "..01111110..",
+  "..01333310..",
+  "..01303010..",
+  "..01333310..",
+  "...000000...",
+  "..01111110..",
+  ".0111111110.",
+  ".0113333110.",
+  ".0113333110.",
+  ".0113333110.",
+  "..01111110..",
+  "..0......0..",
+  "..0......0..",
+  "..0......0..",
+  ".00......00.",
+  "............"
+]);
+ART.zhou = spr([
+  ".0000000000.",
+  "011111111110",
+  ".0011111100.",
+  "..01333310..",
+  "..01303010..",
+  "..01333310..",
+  "...000000...",
+  "..01111110..",
+  ".0111111110.",
+  ".0111111110.",
+  ".0111333110.",
+  ".0111111110.",
+  "..01111110..",
+  "..0......0..",
+  "..0......0..",
+  "..0......0..",
+  ".00......00.",
+  "............"
+]);
+ART.yan = spr([
+  "...000000...",
+  "..01111110..",
+  "..03333330..",
+  "..01333310..",
+  "..01003010..",
+  "..01333310..",
+  "...000000...",
+  "..01111110..",
+  ".0111111110.",
+  ".0122222210.",
+  ".0112222110.",
+  ".0111111110.",
+  "..01111110..",
+  "..0......0..",
+  "..0......0..",
+  "..0......0..",
+  ".00......00.",
+  "............"
+]);
+ART.po = spr([
+  "...000000...",
+  "..03333330..",
+  "..03333330..",
+  "..01333310..",
+  "..01003010..",
+  "..01333310..",
+  "...000000...",
+  "..02222220..",
+  ".0222222220.",
+  ".0222222220.",
+  ".0222222220.",
+  ".0222222220.",
+  "..02222220..",
+  "..0......0..",
+  "..0......0..",
+  "..0......0..",
+  ".00......00.",
+  "............"
+]);
+
+ART.guestA = spr([
+  "...000000...",
+  "..01111110..",
+  "..01333310..",
+  "..01303010..",
+  "..01333310..",
+  "...000000...",
+  "..01111110..",
+  ".0111111110.",
+  ".0111111110.",
+  ".0111221110.",
+  ".0111111110.",
+  ".0111111110.",
+  "..01111110..",
+  "..0......0..",
+  "..0......0..",
+  "..0......0..",
+  ".00......00.",
+  "............"
+]);
+ART.guestB = spr([
+  "...000000...",
+  "..01111110..",
+  "..01333310..",
+  "..01303010..",
+  "..01333310..",
+  "...000000...",
+  "..01111110..",
+  ".0111111110.",
+  ".0111111110.",
+  ".0111333110.",
+  ".0111111110.",
+  ".0111111110.",
+  "..01111110..",
+  "..0......0..",
+  "..0......0..",
+  "..0......0..",
+  ".00......00.",
+  "............"
+]);
+ART.guestC = spr([
+  ".0000000000.",
+  "011111111110",
+  ".0011111100.",
+  "..01333310..",
+  "..01303010..",
+  "..01333310..",
+  "...000000...",
+  "..01111110..",
+  ".0111111110.",
+  ".0111111110.",
+  ".0111221110.",
+  ".0111111110.",
+  "..01111110..",
+  "..0......0..",
+  "..0......0..",
+  "..0......0..",
+  ".00......00.",
+  "............"
+]);
+
+ART.cat = spr([
+  "..0.....0...",
+  ".000...000..",
+  ".000000000..",
+  ".003030000..",
+  "..0000000...",
+  "..0000000...",
+  ".0.0...0.0..",
+  "............"
+]);
+
+/* ---------------- creatures ---------------- */
+ART.boar = spr([
+  "............................",
+  "..........00000000..........",
+  "........001111111100........",
+  ".......01111111111110.......",
+  "......0111111111111100......",
+  ".....011111111111111110.....",
+  "....00111111111111111110....",
+  "...0011111111111111111110...",
+  "...0331111111111111111110...",
+  "...0331111111111111111110...",
+  "....001111111111111111110...",
+  ".....0011111111111111110....",
+  "......0000000000000000......",
+  ".......0..0......0..0.......",
+  "......00..00....00..00......",
+  "............................",
+  "............................",
+  "............................"
+]);
+ART.monkey = spr([
+  "....................",
+  "......000000........",
+  ".....01111100.......",
+  "....0111111110......",
+  "....0130301110......",
+  "....0133331110......",
+  ".....01111110.......",
+  "....0011111100......",
+  "...011111111110.....",
+  "..01111111111110....",
+  "..01113333111110....",
+  "..01111111111110....",
+  "...011111111110.....",
+  "....0..0..0..0......",
+  "...00..00.00..00....",
+  "....................",
+  "....................",
+  "...................."
+]);
+ART.bamboo = spr([
+  "..........00........",
+  ".........0110.......",
+  "........011110......",
+  "........011110......",
+  ".........0110.......",
+  "..........00........",
+  "..........00........",
+  ".........0110.......",
+  "........011110......",
+  "........011110......",
+  ".........0110.......",
+  "..........00........",
+  "..........00........",
+  ".........0110.......",
+  "........011110......",
+  "........013310......",
+  ".........0110.......",
+  "..........00........",
+  "..........00........",
+  ".........0110.......",
+  "........011110......",
+  "........013310......",
+  ".........0110.......",
+  "..........00........",
+  "..........00........",
+  "...................."
+]);
+
+/* ---------------- the little diner ---------------- */
+ART.TABLES = [[72, 116], [136, 116], [72, 162], [136, 162]];
+
+ART.table = function (g, x, y, selected) {
+  if (selected) {
+    g.rect(x - 2, y - 2, 48, 16, g.INK);
+    g.rect(x, y, 44, 12, g.PAPER);
+  } else {
+    g.rect(x - 1, y, 44, 12, g.INK);
+    g.rect(x + 1, y + 2, 40, 8, g.PAPER);
+  }
+  g.rect(x + 4, y + 12, 3, 8, g.DARK);
+  g.rect(x + 35, y + 12, 3, 8, g.DARK);
+  g.rect(x + 6, y + 22, 9, 4, g.DARK);
+  g.rect(x + 29, y + 22, 9, 4, g.DARK);
+  // a bowl, a cup and chopsticks
+  g.rect(x + 10, y + 3, 9, 4, g.INK);
+  g.rect(x + 11, y + 2, 7, 1, g.MID);
+  g.rect(x + 26, y + 3, 9, 1, g.DARK);
+  g.rect(x + 24, y + 5, 5, 3, g.INK);
+};
+
+ART.room = function (g, s, mode, t, sel) {
+  g.clear(g.PAPER);
+  // wall and floor
+  g.dither(0, 28, 216, 24, g.MID, 1);
+  g.rect(0, 52, 216, 44, g.MID);
+  g.rect(0, 96, 216, 144, g.MID);
+  g.dither(0, 96, 216, 6, g.DARK, 1);
+  g.rect(0, 95, 216, 1, g.INK);
+  for (var fy = 108; fy < 240; fy += 12) g.rect(0, fy, 216, 1, g.DARK);
+  // kitchen pass
+  g.rect(6, 40, 62, 44, g.INK);
+  g.rect(9, 43, 56, 38, g.DARK);
+  g.rect(11, 45, 52, 34, g.MID);
+  g.text("灶", 37, 50, { align: "center" });
+  for (var i = 0; i < 3; i++) {
+    var sx = 18 + i * 14, sy = 34 - (i % 2) * 4;
+    g.rect(sx, sy, 3, 5, g.PAPER);
+    g.rect(sx + 1, sy - 6, 3, 4, g.PAPER);
+  }
+  // shelves
+  g.rect(168, 40, 42, 30, g.INK);
+  g.rect(170, 42, 38, 26, g.PAPER);
+  for (var sh = 0; sh < 2; sh++) {
+    g.rect(171, 48 + sh * 10, 36, 1, g.DARK);
+    for (var j = 0; j < 6; j++) g.rect(172 + j * 6, 43 + sh * 10, 4, 4, sh % 2 ? g.MID : g.DARK);
+  }
+  // hanging scroll
+  g.rect(84, 34, 18, 34, g.INK);
+  g.rect(85, 35, 16, 32, g.PAPER);
+  g.text("酒", 93, 37, { align: "center" });
+  // today's board
+  g.rect(110, 38, 54, 30, g.INK);
+  g.rect(112, 40, 50, 26, g.PAPER);
+  g.text("今日", 115, 41, { color: g.DARK });
+  var first = s && s.menu && s.menu.length ? DATA.DISHES[s.menu[0]].name : "休息";
+  g.text(first, 115, 55);
+  // counter
+  g.rect(6, 100, 60, 48, g.DARK);
+  g.rect(8, 102, 56, 44, g.MID);
+  g.rect(8, 98, 56, 3, g.PAPER);
+  // pot, bowls and a steamer
+  g.rect(14, 104, 18, 10, g.INK);
+  g.rect(16, 106, 14, 6, g.PAPER);
+  g.rect(15, 101, 16, 3, g.PAPER);
+  g.rect(20, 98, 2, 3, g.PAPER); g.rect(22, 95, 2, 3, g.PAPER);
+  for (var b = 0; b < 3; b++) g.rect(38, 106 + b * 3, 10, 2, b % 2 ? g.MID : g.DARK);
+  g.rect(38, 118, 18, 8, g.INK); g.rect(40, 120, 14, 4, g.PAPER);
+  // cat on the counter
+  g.sprite(ART.cat, 48, 90 + (Math.sin(t * 2) > 0 ? 1 : 0));
+  // tables
+  for (var ti = 0; ti < 4; ti++) ART.table(g, ART.TABLES[ti][0], ART.TABLES[ti][1], sel === ti);
+  // the long bench (upgrade)
+  if (s && s.upgrades && s.upgrades.table) {
+    g.rect(18, 156, 44, 3, g.INK);
+    g.rect(20, 159, 3, 8, g.DARK); g.rect(57, 159, 3, 8, g.DARK);
+    g.rect(22, 154, 36, 2, g.MID);
+    g.rect(24, 150, 4, 4, g.PAPER); g.rect(44, 150, 4, 4, g.PAPER);
+  }
+  // sliding door
+  g.rect(194, 110, 16, 56, g.INK);
+  g.rect(196, 112, 12, 52, g.PAPER);
+  g.rect(196, 112, 5, 52, g.MID);
+  g.rect(203, 112, 5, 52, g.MID);
+  g.rect(196, 112, 12, 1, g.INK);
+  // noren
+  g.rect(194, 104, 16, 8, g.INK);
+  g.rect(196, 105, 12, 6, g.PAPER);
+  g.text("馆", 202, 104, { align: "center" });
+  // lanterns
+  ART.lantern(g, 74, 30, t);
+  ART.lantern(g, 198, 100, t);
+  // weather at the door
+  if (s && s.weather === "rain") {
+    for (var r = 0; r < 7; r++) {
+      var rx = 197 + ((r * 7 + Math.floor(t * 18)) % 12);
+      var ry = 114 + ((r * 11) % 48);
+      g.line(rx, ry, rx - 2, ry + 5, g.DARK);
+    }
+  } else if (mode === "night") {
+    g.rect(199, 118, 6, 6, g.PAPER);
+    g.pixel(201, 120, g.PAPER);
+  }
+  // morning light / night shade
+  if (mode === "morning") {
+    g.dither(0, 28, 100, 120, g.PAPER, 1);
+    g.dither(100, 28, 60, 60, g.PAPER, 1);
+  } else if (mode === "night") {
+    g.dither(0, 28, 216, 212, g.INK, 2);
+    ART.glow(g, 74, 30, 34, 28, t);
+    ART.glow(g, 198, 100, 22, 20, t);
+  } else if (mode === "service") {
+    ART.glow(g, 74, 30, 30, 24, t);
+    ART.glow(g, 198, 100, 20, 18, t);
+  }
+};
+
+ART.lantern = function (g, x, y, t) {
+  var sway = Math.sin(t * 1.7 + x) > 0 ? 0 : 1;
+  g.rect(x + 4, y, 1, 6, g.INK);
+  g.rect(x, y + 6, 9, 10, g.INK);
+  g.rect(x + 1, y + 7, 7, 8, g.MID);
+  g.dither(x + 1, y + 7, 7, 8, g.PAPER, 1 + sway);
+};
+
+ART.glow = function (g, x, y, w, h, t) {
+  var pulse = 0.5 + 0.5 * Math.sin(t * 3 + x);
+  g.dither(x - w / 2, y - h / 2, w, h, g.PAPER, pulse > 0.5 ? 1 : 2);
+};
+
+/* ---------------- the shop facade ---------------- */
+ART.facade = function (g, x, y, s, t) {
+  // wall
+  g.rect(x + 6, y + 24, 108, 58, g.PAPER);
+  g.frame(x + 6, y + 24, 108, 58, g.INK);
+  g.dither(x + 8, y + 26, 104, 8, g.MID, 1);
+  // timber frame
+  g.rect(x + 16, y + 24, 2, 58, g.DARK);
+  g.rect(x + 88, y + 24, 2, 58, g.DARK);
+  g.rect(x + 6, y + 44, 108, 2, g.DARK);
+  // roof
+  g.rect(x, y + 22, 120, 3, g.INK);
+  for (var i = 0; i < 8; i++) {
+    var half = 28 + i * 4;
+    g.rect(x + 60 - half, y + 20 - i * 2, half * 2, 2, i % 2 ? g.INK : g.DARK);
+    if (i % 2 === 0) for (var k = -half + 6; k < half; k += 12) g.rect(x + 60 + k, y + 20 - i * 2, 1, 2, g.DARK);
+  }
+  g.rect(x + 28, y + 3, 64, 3, g.INK);
+  g.line(x + 24, y + 6, x + 18, y + 2, g.INK);
+  g.line(x + 96, y + 6, x + 102, y + 2, g.INK);
+  g.line(x, y + 22, x - 4, y + 17, g.INK);
+  g.line(x + 120, y + 22, x + 124, y + 17, g.INK);
+  // chimney
+  g.rect(x + 72, y - 8, 6, 12, g.DARK);
+  g.rect(x + 69, y - 10, 12, 2, g.INK);
+  for (var p = 0; p < 3; p++) {
+    g.rect(x + 80 + p * 2, y - 16 - p * 5, 3, 4, g.PAPER);
+    g.rect(x + 81 + p * 2, y - 21 - p * 5, 3, 3, g.PAPER);
+  }
+  // sign
+  g.rect(x + 14, y + 26, 56, 15, g.INK);
+  g.rect(x + 15, y + 27, 54, 13, g.PAPER);
+  g.text("山脚小馆", x + 42, y + 27, { align: "center" });
+  if (s && s.upgrades && s.upgrades.sign) {
+    g.rect(x + 100, y + 28, 10, 18, g.INK);
+    g.rect(x + 101, y + 29, 8, 16, g.PAPER);
+    g.text("新", x + 105, y + 31, { align: "center", color: g.DARK });
+  }
+  // door
+  g.rect(x + 34, y + 46, 34, 32, g.INK);
+  g.rect(x + 37, y + 49, 28, 29, g.DARK);
+  g.rect(x + 38, y + 50, 12, 28, g.MID);
+  g.rect(x + 52, y + 50, 12, 28, g.MID);
+  g.rect(x + 38, y + 50, 12, 1, g.PAPER);
+  g.rect(x + 52, y + 50, 12, 1, g.PAPER);
+  g.rect(x + 50, y + 62, 2, 4, g.PAPER);
+  // noren
+  g.rect(x + 32, y + 42, 38, 7, g.INK);
+  g.rect(x + 34, y + 43, 34, 5, g.PAPER);
+  g.text("小馆", x + 51, y + 42, { align: "center" });
+  // window
+  g.rect(x + 72, y + 48, 16, 14, g.INK);
+  g.rect(x + 74, y + 50, 12, 10, g.PAPER);
+  g.rect(x + 80, y + 50, 1, 10, g.INK);
+  g.rect(x + 74, y + 54, 12, 1, g.INK);
+  g.dither(x + 74, y + 50, 6, 4, g.MID, 1);
+  // lanterns with a warm halo
+  ART.glow(g, x + 10, y + 33, 20, 18, t);
+  ART.glow(g, x + 106, y + 33, 20, 18, t);
+  ART.lantern(g, x + 6, y + 26, t);
+  ART.lantern(g, x + 102, y + 26, t);
+  // steps
+  g.rect(x + 24, y + 80, 72, 2, g.DARK);
+  g.rect(x + 30, y + 83, 60, 2, g.MID);
+  // little plant by the door
+  g.rect(x + 24, y + 70, 3, 10, g.DARK);
+  g.rect(x + 21, y + 66, 9, 5, g.MID);
+  g.rect(x + 23, y + 64, 5, 3, g.MID);
+};
+
+ART.title = function (g, t) {
+  g.clear(g.PAPER);
+  // sky
+  g.dither(0, 0, 216, 38, g.MID, 1);
+  g.dither(0, 38, 216, 16, g.MID, 1);
+  g.rect(0, 54, 216, 18, g.PAPER);
+  // sun and rays
+  g.dither(160, 8, 32, 32, g.MID, 1);
+  g.circle(176, 24, 13, g.INK, true);
+  g.circle(176, 24, 11, g.PAPER, true);
+  for (var sr = 0; sr < 8; sr++) {
+    var a = sr * Math.PI / 4;
+    g.line(176 + Math.cos(a) * 17, 24 + Math.sin(a) * 17, 176 + Math.cos(a) * 22, 24 + Math.sin(a) * 22, g.DARK);
+  }
+  // clouds
+  for (var c = 0; c < 3; c++) {
+    g.dither(12 + c * 54, 8 + (c % 2) * 8, 34, 6, g.PAPER, 2);
+    g.dither(18 + c * 54, 10 + (c % 2) * 8, 22, 4, g.PAPER, 3);
+  }
+  // mountains: three layers
+  g.line(0, 58, 30, 42, g.MID); g.line(30, 42, 60, 58, g.MID);
+  g.line(40, 58, 84, 32, g.DARK); g.line(84, 32, 128, 58, g.DARK);
+  g.line(112, 58, 152, 40, g.DARK); g.line(152, 40, 192, 58, g.DARK);
+  g.line(170, 58, 202, 48, g.MID); g.line(202, 48, 216, 56, g.MID);
+  g.dither(64, 42, 40, 16, g.DARK, 1);
+  g.dither(140, 46, 30, 12, g.DARK, 1);
+  g.rect(0, 58, 216, 2, g.DARK);
+  // pines framing the postcard
+  ART.pine(g, -8, 36, 1.35);
+  ART.pine(g, 188, 40, 1.45);
+  ART.pine(g, 20, 70, 0.75);
+  ART.pine(g, 174, 78, 0.6);
+  // ground
+  g.rect(0, 60, 216, 180, g.PAPER);
+  g.dither(0, 60, 216, 12, g.MID, 1);
+  // path
+  for (var py = 148; py < 240; py += 7) {
+    g.rect(80 + (py % 14 ? 2 : -2), py, 56, 5, g.MID);
+    g.rect(82 + (py % 14 ? 2 : -2), py, 52, 1, g.PAPER);
+  }
+  // fence
+  for (var f = 0; f < 7; f++) g.rect(10 + f * 14, 168, 2, 22, g.DARK);
+  g.rect(8, 174, 104, 2, g.DARK);
+  g.rect(8, 186, 104, 2, g.DARK);
+  // stone lantern
+  g.rect(162, 160, 3, 20, g.DARK);
+  g.rect(156, 156, 15, 4, g.INK);
+  g.rect(158, 150, 11, 6, g.PAPER);
+  g.rect(158, 150, 11, 1, g.MID);
+  g.dither(159, 152, 9, 3, g.PAPER, 1);
+  // shop
+  ART.facade(g, 48, 88, null, t);
+  // cat and a little bush
+  g.sprite(ART.scale(ART.cat, 1.5), 24, 176);
+  ART.bush(g, 40, 178, t);
+  // the wooden title board
+  g.rect(18, 18, 136, 52, g.INK);
+  g.rect(20, 20, 132, 48, g.PAPER);
+  g.rect(22, 22, 128, 1, g.MID);
+  g.rect(18, 18, 136, 2, g.DARK);
+  g.rect(18, 68, 136, 2, g.DARK);
+  g.line(24, 18, 28, 8, g.DARK);
+  g.line(148, 18, 144, 8, g.DARK);
+  // leaves
+  for (var i = 0; i < 14; i++) {
+    var lx = (i * 47 + t * 8) % 216;
+    var ly = 90 + ((i * 31 + t * 5) % 120);
+    g.pixel(lx, ly, i % 3 ? g.DARK : g.MID);
+  }
+};
+ART.pine = function (g, x, y, k) {
+  var h = Math.round(38 * k);
+  for (var j = 0; j < h; j++) {
+    var half = Math.round(j * 0.34 * k);
+    g.rect(x + Math.round(8 * k) - half, y + j, half * 2 + 1, 1, g.INK);
+  }
+  g.rect(x + Math.round(7 * k), y + h, Math.max(2, Math.round(3 * k)), Math.round(8 * k), g.DARK);
+};
+
+ART.scale = function (s, k) {
+  var w = Math.max(1, Math.round(s.w * k)), h = Math.max(1, Math.round(s.h * k));
+  var px = new Uint8Array(w * h);
+  for (var y = 0; y < h; y++) for (var x = 0; x < w; x++) {
+    px[y * w + x] = s.px[Math.floor(y / k) * s.w + Math.floor(x / k)];
+  }
+  return { w: w, h: h, px: px };
+};
+ART.big = {
+  heroSide: ART.scale(ART.heroSide, 2),
+  heroDown: ART.scale(ART.heroDown, 1.34),
+  heroUp: ART.scale(ART.heroUp, 1.34),
+  ahe: ART.scale(ART.ahe, 1.34),
+  zhou: ART.scale(ART.zhou, 1.34),
+  yan: ART.scale(ART.yan, 1.34),
+  po: ART.scale(ART.po, 1.34),
+  guestA: ART.scale(ART.guestA, 1.34),
+  guestB: ART.scale(ART.guestB, 1.34),
+  guestC: ART.scale(ART.guestC, 1.34),
+  boar: ART.scale(ART.boar, 2),
+  monkey: ART.scale(ART.monkey, 2),
+  bamboo: ART.scale(ART.bamboo, 1.8)
+};
+
+/* ---------------- the mountain ---------------- */
+ART.forest = function (g, map, t, s) {
+  g.clear(g.MID);
+  for (var r = 0; r < map.length; r++) {
+    for (var c = 0; c < map[r].length; c++) {
+      var ch = map[r][c], x = c * 12, y = 24 + r * 12;
+      if (ch === "~") {
+        g.rect(x, y, 12, 12, g.MID);
+        g.rect(x, y + 2, 12, 1, g.DARK);
+        g.rect(x + 2 + ((Math.floor(t * 2) + r) % 6), y + 6, 5, 1, g.PAPER);
+        g.rect(x + 7, y + 9, 3, 1, g.DARK);
+        if ((r + c) % 3 === 0) g.rect(x + 2, y + 10, 1, 2, g.DARK);
+      } else if (ch === "#") {
+        g.rect(x, y, 12, 12, g.PAPER);
+        g.rect(x + 1, y + 5, 10, 7, g.DARK);
+        g.rect(x + 3, y + 3, 6, 4, g.DARK);
+        g.dither(x + 2, y + 6, 8, 4, g.INK, 1);
+        g.rect(x + 3, y + 6, 2, 1, g.MID);
+      } else if (ch === ",") {
+        g.rect(x, y, 12, 12, g.MID);
+        g.rect(x + 2, y + 3, 2, 1, g.DARK);
+        g.rect(x + 7, y + 8, 3, 1, g.DARK);
+        if ((r + c) % 3 === 0) g.rect(x + 4, y + 6, 4, 1, g.PAPER);
+        if ((r * 5 + c) % 7 === 0) g.rect(x + 9, y + 2, 2, 2, g.DARK);
+      } else {
+        g.rect(x, y, 12, 12, g.PAPER);
+        if ((r * 7 + c * 3) % 5 === 0) g.rect(x + 2, y + 4, 2, 1, g.MID);
+        if ((r * 3 + c * 5) % 7 === 0) g.rect(x + 7, y + 8, 2, 2, g.MID);
+        if ((r * 11 + c * 7) % 13 === 0) {
+          g.rect(x + 4, y + 2, 1, 3, g.DARK);
+          g.rect(x + 6, y + 3, 1, 2, g.DARK);
+          g.rect(x + 5, y + 1, 2, 1, g.MID);
+        }
+        if (ch === "*") {
+          g.rect(x + 5, y + 4, 2, 4, g.DARK);
+          g.rect(x + 3, y + 3, 6, 2, g.INK);
+          g.pixel(x + 5, y + 2, g.PAPER);
+          g.pixel(x + 4, y + 3, g.PAPER);
+        }
+        if ((r + c) % 9 === 0) {
+          g.rect(x + 8, y + 5, 1, 3, g.DARK);
+          g.rect(x + 9, y + 7, 1, 2, g.DARK);
+        }
+      }
+    }
+  }
+  if (s && s.weather === "rain") {
+    for (var i = 0; i < 11; i++) {
+      var rx = (i * 47 + Math.floor(t * 22)) % 216;
+      var ry = 24 + ((i * 59 + Math.floor(t * 27)) % 192);
+      g.line(rx, ry, rx - 1, ry + 3, g.DARK);
+    }
+    g.dither(0, 24, 216, 30, g.INK, 1);
+  } else if (s && s.weather === "fog") {
+    g.dither(0, 24, 216, 40, g.PAPER, 1);
+    g.dither(0, 64, 216, 24, g.PAPER, 1);
+  } else {
+    g.dither(0, 24, 216, 46, g.PAPER, 1);
+  }
+};
+
+ART.tree = function (g, x, y, t) {
+  var sway = Math.sin(t * 1.2 + x) > 0 ? 1 : 0;
+  // trunk and roots
+  g.rect(x + 5, y + 14, 4, 18, g.DARK);
+  g.rect(x + 4, y + 14, 2, 18, g.INK);
+  g.rect(x + 3, y + 28, 7, 3, g.INK);
+  g.rect(x + 2, y + 30, 4, 1, g.DARK);
+  g.rect(x + 8, y + 30, 4, 1, g.DARK);
+  // layered canopy
+  g.rect(x - 4, y + 6 + sway, 20, 8, g.INK);
+  g.rect(x - 2, y + 2 + sway, 16, 8, g.INK);
+  g.rect(x + 1, y - 2 + sway, 10, 6, g.INK);
+  g.rect(x - 6, y + 11 + sway, 24, 5, g.DARK);
+  g.dither(x - 2, y + 4 + sway, 16, 8, g.DARK, 1);
+  g.dither(x + 2, y + 1 + sway, 8, 5, g.MID, 1);
+  // leaf clusters
+  g.rect(x - 3, y + 7 + sway, 3, 2, g.MID);
+  g.rect(x + 11, y + 9 + sway, 4, 2, g.MID);
+  g.rect(x + 4, y + 13 + sway, 3, 1, g.MID);
+  g.rect(x + 14, y + 4 + sway, 2, 2, g.DARK);
+  g.rect(x - 5, y + 9 + sway, 2, 2, g.DARK);
+};
+
+ART.bush = function (g, x, y, t) {
+  var sway = Math.sin(t * 2 + x) > 0 ? 1 : 0;
+  g.rect(x + 1, y + 8 + sway, 10, 5, g.INK);
+  g.rect(x + 3, y + 5 + sway, 6, 5, g.INK);
+  g.dither(x + 3, y + 6 + sway, 7, 4, g.DARK, 1);
+  g.rect(x + 5, y + 7 + sway, 3, 2, g.MID);
+  g.rect(x + 9, y + 10, 2, 3, g.DARK);
+};
+
+ART.bambooPlant = function (g, x, y, t) {
+  var sway = Math.sin(t * 1.5 + x) > 0 ? 1 : 0;
+  g.rect(x + 5, y - 6, 3, 30, g.DARK);
+  g.rect(x + 4, y - 6, 1, 30, g.INK);
+  for (var i = 0; i < 4; i++) {
+    var ly = y - 2 + i * 6;
+    g.rect(x + 8 + sway, ly, 6, 1, g.INK);
+    g.rect(x - 1 + sway, ly + 2, 5, 1, g.INK);
+    g.rect(x + 10 + sway, ly - 2, 4, 1, g.DARK);
+  }
+};
+
+ART.shrine = function (g, x, y, t) {
+  g.rect(x + 2, y + 4, 3, 24, g.DARK);
+  g.rect(x + 19, y + 4, 3, 24, g.DARK);
+  g.rect(x, y, 24, 3, g.INK);
+  g.rect(x + 3, y + 4, 18, 2, g.INK);
+  g.rect(x - 2, y + 6, 28, 2, g.DARK);
+  g.rect(x + 4, y + 10, 16, 1, g.DARK);
+  g.rect(x + 9, y + 12, 6, 14, g.PAPER);
+  g.text("山", x + 12, y + 13, { align: "center", color: g.DARK });
+  if (Math.floor(t * 2) % 2 === 0) g.pixel(x + 12, y + 28, g.PAPER);
+};
+
+ART.node = function (g, kind, x, y, t) {
+  var blink = Math.floor(t * 3 + x) % 4 === 0;
+  if (kind === "mushroom") {
+    g.rect(x + 2, y + 6, 8, 5, g.INK);
+    g.rect(x + 3, y + 7, 6, 3, g.PAPER);
+    g.rect(x + 1, y + 4, 5, 4, g.DARK);
+    g.rect(x + 6, y + 2, 5, 4, g.DARK);
+    g.pixel(x + 3, y + 5, g.PAPER); g.pixel(x + 8, y + 3, g.PAPER);
+  } else if (kind === "greens") {
+    g.rect(x + 3, y + 8, 6, 2, g.INK);
+    g.rect(x + 2, y + 3, 4, 6, g.DARK);
+    g.rect(x + 6, y + 1, 4, 8, g.DARK);
+    g.rect(x + 8, y + 5, 3, 5, g.MID);
+  } else if (kind === "rice") {
+    g.rect(x + 3, y + 2, 1, 9, g.DARK);
+    g.rect(x + 7, y + 1, 1, 10, g.DARK);
+    for (var i = 0; i < 3; i++) {
+      g.rect(x + 1, y + 3 + i * 3, 3, 2, g.PAPER);
+      g.rect(x + 8, y + 2 + i * 3, 3, 2, g.PAPER);
+    }
+  } else if (kind === "fish") {
+    g.rect(x + 2, y + 5, 8, 4, g.INK);
+    g.rect(x + 3, y + 6, 6, 2, g.MID);
+    g.rect(x + 9, y + 4, 2, 2, g.INK);
+    g.pixel(x + 4, y + 6, g.PAPER);
+    g.rect(x + 1, y + 9, 3, 1, g.PAPER);
+  } else if (kind === "bamboo") {
+    g.rect(x + 4, y + 2, 4, 10, g.DARK);
+    g.rect(x + 5, y + 2, 2, 10, g.PAPER);
+    g.rect(x + 3, y + 6, 6, 1, g.INK);
+    g.rect(x + 8, y + 1, 3, 3, g.INK);
+  } else if (kind === "rare") {
+    g.rect(x + 4, y + 6, 1, 6, g.PAPER);
+    g.rect(x + 7, y + 4, 1, 8, g.PAPER);
+    g.rect(x + 3, y + 3, 5, 4, g.INK);
+    g.rect(x + 6, y + 1, 5, 4, g.INK);
+    if (blink) g.dither(x + 1, y + 1, 10, 10, g.PAPER, 2);
+  }
+  if (blink) {
+    g.pixel(x + 1, y + 1, g.PAPER);
+    g.pixel(x + 10, y + 2, g.PAPER);
+  }
+};
+
+ART.monster = function (g, id, x, y, t) {
+  if (id === "boar") {
+    g.dither(x - 4, y + 9, 20, 3, g.DARK, 1);
+    g.sprite(ART.boar, x - 8, y - 4 + (Math.sin(t * 3) > 0 ? 1 : 0));
+    g.pixel(x + 2, y, g.PAPER);
+  } else if (id === "monkey") {
+    g.dither(x - 2, y + 10, 16, 2, g.DARK, 1);
+    g.sprite(ART.monkey, x - 4, y - 3 + (Math.sin(t * 4) > 0 ? 1 : 0));
+  } else if (id === "bamboo") {
+    g.dither(x - 3, y + 10, 18, 2, g.DARK, 1);
+    g.sprite(ART.bamboo, x - 4, y - 12 + (Math.sin(t * 2) > 0 ? 1 : 0));
+  } else if (id === "boss") {
+    g.dither(x - 12, y + 10, 36, 3, g.INK, 2);
+    ART.boss(g, x - 20, y - 34, t, false);
+  }
+};
+
+ART.enemyBig = function (g, id, x, y, t, hurt) {
+  var bob = Math.sin(t * 3) > 0 ? 1 : 0;
+  if (id === "boss") { ART.boss(g, x, y, t, hurt); return; }
+  var s = id === "boar" ? ART.big.boar : id === "monkey" ? ART.big.monkey : ART.big.bamboo;
+  g.dither(x + 2, y + s.h - 2, s.w - 4, 3, g.DARK, 1);
+  if (hurt) g.sprite(s, x, y + bob, { map: [g.PAPER, g.PAPER, g.PAPER, g.PAPER] });
+  else g.sprite(s, x, y + bob);
+  if (id === "boar") {
+    g.pixel(x + 20, y + 14 + bob, g.PAPER);
+    g.rect(x + 5, y + 20 + bob, 7, 1, g.PAPER);
+  } else if (id === "monkey") {
+    g.pixel(x + 18, y + 14 + bob, g.PAPER);
+  } else {
+    g.pixel(x + 18, y + 14 + bob, g.PAPER);
+  }
+};
+
+/* ---------------- battle ---------------- */
+ART.battleBg = function (g, kind, t) {
+  g.clear(g.PAPER);
+  var deep = kind === "deep";
+  // sky
+  g.dither(0, 0, 216, deep ? 44 : 50, g.MID, deep ? 2 : 1);
+  if (deep) {
+    g.rect(0, 0, 216, 30, g.DARK);
+    g.dither(0, 0, 216, 30, g.INK, 1);
+  } else {
+    g.rect(0, 0, 216, 24, g.PAPER);
+  }
+  // far hills
+  g.line(0, 62, 28, 40, deep ? g.DARK : g.DARK);
+  g.line(28, 40, 56, 62, g.DARK);
+  g.line(44, 62, 80, 34, g.DARK);
+  g.line(80, 34, 116, 62, g.DARK);
+  g.line(104, 62, 144, 42, g.DARK);
+  g.line(144, 42, 184, 62, g.DARK);
+  g.line(170, 62, 206, 48, g.DARK);
+  g.line(206, 48, 216, 56, g.DARK);
+  g.dither(46, 44, 30, 16, g.DARK, 1);
+  g.dither(128, 46, 34, 14, g.DARK, 1);
+  // distant pines
+  ART.pine(g, 6, 24, 0.7);
+  ART.pine(g, 38, 30, 0.55);
+  ART.pine(g, 168, 28, 0.65);
+  ART.pine(g, 198, 22, 0.8);
+  // mist
+  g.dither(0, 62, 216, 10, g.PAPER, 2);
+  g.dither(0, 78, 216, 6, g.PAPER, 1);
+  // trees at the sides
+  ART.pine(g, -10, 28, 1.3);
+  ART.pine(g, 190, 30, 1.4);
+  if (!deep) {
+    ART.tree(g, -8, 62, t);
+    ART.tree(g, 202, 58, t);
+  }
+  // ground
+  g.rect(0, 104, 216, 46, g.PAPER);
+  g.dither(0, 104, 216, 7, g.MID, 1);
+  g.rect(0, 104, 216, 1, g.DARK);
+  for (var i = 0; i < 18; i++) {
+    var gx = (i * 37) % 216, gy = 112 + (i * 17) % 30;
+    g.rect(gx, gy, 5, 1, g.MID);
+    if (i % 3 === 0) g.rect(gx + 2, gy - 2, 1, 2, g.DARK);
+  }
+  // a little path
+  g.rect(72, 104, 72, 2, g.MID);
+  g.dither(72, 106, 72, 3, g.DARK, 1);
+  // light shafts
+  if (!deep) {
+    for (var b = 0; b < 4; b++) {
+      var bx = 18 + b * 18;
+      for (var j = 0; j < 6; j++) g.rect(bx + j * 2, 8 + j * 9, 4, 8, g.PAPER);
+    }
+  }
+  if (deep) {
+    ART.shrine(g, 92, 56, t);
+    g.dither(0, 72, 216, 30, g.PAPER, 2);
+    g.rect(0, 104, 216, 46, g.DARK);
+    g.dither(0, 104, 216, 8, g.INK, 1);
+    for (var r = 0; r < 10; r++) g.rect((r * 29) % 216, 112 + (r * 7) % 30, 6, 1, g.MID);
+  } else {
+    // flowers
+    for (var f = 0; f < 6; f++) {
+      g.rect(10 + f * 34, 128 + (f % 3) * 5, 2, 2, g.MID);
+      g.pixel(11 + f * 34, 127 + (f % 3) * 5, g.PAPER);
+    }
+  }
+  // fireflies
+  for (var j2 = 0; j2 < 8; j2++) {
+    var fx = (j2 * 43 + Math.sin(t * 0.8 + j2) * 9) % 216;
+    var fy = 52 + (j2 * 19) % 48;
+    if (Math.floor(t * 2 + j2) % 3) g.pixel(fx, fy, g.PAPER);
+  }
+};
+
+ART.enemyBig = function (g, id, x, y, t, hurt) {
+  var bob = Math.sin(t * 3) > 0 ? 1 : 0;
+  if (id === "boss") { ART.boss(g, x, y, t, hurt); return; }
+  var s = id === "boar" ? ART.big.boar : id === "monkey" ? ART.big.monkey : ART.big.bamboo;
+  g.dither(x + 2, y + s.h - 2, s.w - 4, 3, g.DARK, 1);
+  if (hurt) g.sprite(s, x, y + bob, { map: [g.PAPER, g.PAPER, g.PAPER, g.PAPER] });
+  else g.sprite(s, x, y + bob);
+  if (id === "boar") {
+    g.pixel(x + 20, y + 14 + bob, g.PAPER);
+    g.rect(x + 5, y + 20 + bob, 7, 1, g.PAPER);
+  } else if (id === "monkey") {
+    g.pixel(x + 18, y + 14 + bob, g.PAPER);
+  } else {
+    g.pixel(x + 18, y + 14 + bob, g.PAPER);
+  }
+};
+
+/* ---------------- battle ---------------- */
+ART.battleBg = function (g, kind, t) {
+  g.clear(g.MID);
+  if (kind === "deep") {
+    g.dither(0, 0, 216, 60, g.INK, 2);
+    g.rect(0, 0, 216, 46, g.DARK);
+    g.dither(0, 0, 216, 46, g.INK, 1);
+  } else {
+    g.dither(0, 0, 216, 52, g.DARK, 1);
+    g.rect(0, 0, 216, 30, g.DARK);
+  }
+  ART.pine(g, -4, 26, 1.2);
+  ART.pine(g, 24, 34, 0.8);
+  ART.pine(g, 176, 30, 1.3);
+  ART.pine(g, 196, 38, 0.9);
+  // ground
+  g.rect(0, 108, 216, 48, g.PAPER);
+  g.dither(0, 108, 216, 6, g.MID, 1);
+  for (var i = 0; i < 12; i++) {
+    g.rect((i * 37) % 216, 118 + (i % 4) * 7, 8, 1, g.MID);
+  }
+  // shrine stones for the boss
+  if (kind === "deep") {
+    ART.shrine(g, 92, 58, t);
+    g.dither(0, 76, 216, 32, g.PAPER, 1);
+    for (var f = 0; f < 12; f++) {
+      g.pixel((f * 31 + Math.floor(t * 8)) % 216, 60 + (f * 13) % 40, g.PAPER);
+    }
+  }
+  // fireflies
+  for (var j = 0; j < 6; j++) {
+    var fx = (j * 43 + Math.sin(t * 0.8 + j) * 8) % 216;
+    var fy = 60 + (j * 19) % 40;
+    if (Math.floor(t * 2 + j) % 3) g.pixel(fx, fy, g.PAPER);
+  }
+};
+
+ART.enemy = function (g, id, x, y, t, hurt) {
+  var bob = Math.sin(t * 3) > 0 ? 1 : 0;
+  if (id === "boss") {
+    ART.boss(g, x, y, t, hurt);
+    return;
+  }
+  var s = id === "boar" ? ART.boar : id === "monkey" ? ART.monkey : ART.bamboo;
+  g.dither(x + 2, y + s.h - 2, s.w - 4, 3, g.DARK, 1);
+  if (hurt) g.sprite(s, x, y + bob, { map: [g.PAPER, g.PAPER, g.PAPER, g.PAPER] });
+  else g.sprite(s, x, y + bob);
+  if (id === "boar") {
+    g.pixel(x + 12, y + 8 + bob, g.PAPER);
+    g.rect(x + 3, y + 11 + bob, 4, 1, g.PAPER);
+  } else if (id === "monkey") {
+    g.pixel(x + 10, y + 8 + bob, g.PAPER);
+  } else {
+    g.pixel(x + 10, y + 8 + bob, g.PAPER);
+  }
+};
+
+ART.boss = function (g, x, y, t, hurt) {
+  var bob = Math.sin(t * 1.6) > 0 ? 1 : 0;
+  var c = hurt ? g.PAPER : g.DARK;
+  g.dither(x + 4, y + 40, 34, 4, g.INK, 2);
+  // body
+  g.circle(x + 20, y + 26, 18, c, true);
+  g.circle(x + 20, y + 18, 13, c, true);
+  g.rect(x + 3, y + 28, 34, 14, c);
+  // arms
+  g.rect(x - 2, y + 24 + bob, 7, 16, c);
+  g.rect(x + 35, y + 24 + bob, 7, 16, c);
+  // legs
+  g.rect(x + 8, y + 38, 8, 8, c);
+  g.rect(x + 24, y + 38, 8, 8, c);
+  // fur dither
+  g.dither(x + 4, y + 10, 32, 28, hurt ? g.DARK : g.INK, 1);
+  // horns
+  g.rect(x + 8, y + 2, 4, 10, g.INK);
+  g.rect(x + 28, y + 2, 4, 10, g.INK);
+  g.rect(x + 6, y - 2, 4, 5, g.PAPER);
+  g.rect(x + 30, y - 2, 4, 5, g.PAPER);
+  // face
+  g.rect(x + 11, y + 12, 6, 4, g.INK);
+  g.rect(x + 23, y + 12, 6, 4, g.INK);
+  if (!hurt) {
+    g.pixel(x + 13, y + 13, g.PAPER); g.pixel(x + 25, y + 13, g.PAPER);
+  }
+  g.rect(x + 14, y + 20, 12, 3, g.INK);
+  g.rect(x + 12, y + 24, 4, 2, g.PAPER);
+  g.rect(x + 24, y + 24, 4, 2, g.PAPER);
+  // moss
+  g.dither(x + 8, y + 32, 24, 6, g.MID, 2);
+};
+
+/* ---------------- portraits ---------------- */
+function portraitBase(g, x, y, opts) {
+  opts = opts || {};
+  var hair = opts.hair == null ? g.INK : opts.hair;
+  // hair behind the head
+  g.rect(x + 2, y + 12, 76, 64, hair);
+  // neck and robe
+  g.rect(x + 32, y + 64, 16, 12, g.PAPER);
+  g.rect(x + 8, y + 76, 64, 24, g.DARK);
+  g.rect(x + 14, y + 76, 52, 4, g.MID);
+  // face
+  g.rect(x + 18, y + 22, 44, 32, g.PAPER);
+  g.rect(x + 16, y + 30, 48, 22, g.PAPER);
+  g.rect(x + 22, y + 52, 36, 8, g.PAPER);
+  g.rect(x + 26, y + 58, 28, 4, g.PAPER);
+  // fringe and side locks
+  g.rect(x + 12, y + 10, 56, 16, hair);
+  g.rect(x + 10, y + 24, 8, 40, hair);
+  g.rect(x + 62, y + 24, 8, 40, hair);
+  // eyes
+  g.rect(x + 26, y + 38, 5, 3, g.INK);
+  g.rect(x + 47, y + 38, 5, 3, g.INK);
+  g.rect(x + 27, y + 38, 2, 1, g.PAPER);
+  g.rect(x + 48, y + 38, 2, 1, g.PAPER);
+  g.rect(x + 25, y + 34, 8, 2, opts.stern ? g.INK : g.DARK);
+  g.rect(x + 45, y + 34, 8, 2, opts.stern ? g.INK : g.DARK);
+  // nose, mouth, blush
+  g.rect(x + 39, y + 44, 3, 6, g.DARK);
+  g.rect(x + 35, y + 54, 10, 2, g.INK);
+  if (opts.smile) {
+    g.pixel(x + 33, y + 53, g.INK);
+    g.pixel(x + 46, y + 53, g.INK);
+  }
+  g.dither(x + 21, y + 47, 7, 5, g.MID, 2);
+  g.dither(x + 52, y + 47, 7, 5, g.MID, 2);
+  return { hair: hair };
+}
+
+ART.portrait = function (g, who, x, y) {
+  if (who === "ahe") {
+    portraitBase(g, x, y, { smile: true });
+    // bun and pin
+    g.rect(x + 30, y + 2, 20, 10, g.INK);
+    g.rect(x + 33, y + 0, 14, 4, g.DARK);
+    g.rect(x + 45, y - 4, 2, 8, g.PAPER);
+    // fringe parting
+    g.rect(x + 36, y + 10, 2, 12, g.INK);
+    g.rect(x + 44, y + 10, 2, 12, g.INK);
+    // flower
+    g.rect(x + 62, y + 18, 2, 2, g.PAPER);
+    g.rect(x + 60, y + 20, 2, 2, g.PAPER);
+    g.rect(x + 64, y + 20, 2, 2, g.PAPER);
+    g.rect(x + 62, y + 22, 2, 2, g.PAPER);
+    g.pixel(x + 63, y + 21, g.INK);
+    // apron collar
+    g.line(x + 36, y + 76, x + 40, y + 88, g.PAPER);
+    g.line(x + 50, y + 76, x + 46, y + 88, g.PAPER);
+    g.rect(x + 40, y + 88, 8, 12, g.PAPER);
+  } else if (who === "zhou") {
+    portraitBase(g, x, y, { stern: true });
+    // straw hat
+    g.rect(x + 2, y + 10, 76, 6, g.INK);
+    g.rect(x + 20, y - 2, 40, 14, g.DARK);
+    g.rect(x + 8, y + 8, 64, 2, g.MID);
+    g.rect(x + 22, y + 2, 36, 2, g.PAPER);
+    // beard and moustache
+    g.rect(x + 28, y + 52, 24, 14, g.PAPER);
+    g.rect(x + 30, y + 50, 8, 3, g.PAPER);
+    g.rect(x + 42, y + 50, 8, 3, g.PAPER);
+    g.dither(x + 30, y + 56, 20, 8, g.DARK, 1);
+    // pipe
+    g.line(x + 62, y + 68, x + 76, y + 58, g.INK);
+    g.rect(x + 74, y + 54, 4, 4, g.INK);
+    g.rect(x + 77, y + 52, 2, 2, g.MID);
+  } else if (who === "yan") {
+    portraitBase(g, x, y, { stern: true, smile: false });
+    // headband
+    g.rect(x + 10, y + 14, 60, 5, g.PAPER);
+    g.rect(x + 10, y + 18, 60, 1, g.DARK);
+    // spiky hair
+    g.rect(x + 16, y + 6, 8, 8, g.INK);
+    g.rect(x + 30, y + 4, 8, 10, g.INK);
+    g.rect(x + 46, y + 5, 8, 9, g.INK);
+    g.rect(x + 58, y + 8, 6, 7, g.INK);
+    // scar
+    g.line(x + 52, y + 34, x + 57, y + 48, g.DARK);
+    // fur collar
+    g.dither(x + 16, y + 74, 48, 10, g.MID, 2);
+    g.rect(x + 18, y + 76, 44, 3, g.PAPER);
+  } else if (who === "po") {
+    portraitBase(g, x, y, { hair: g.PAPER, stern: true });
+    // grey hair texture
+    g.dither(x + 4, y + 12, 72, 62, g.DARK, 1);
+    // bun
+    g.rect(x + 30, y + 4, 20, 10, g.PAPER);
+    g.dither(x + 30, y + 4, 20, 10, g.DARK, 2);
+    // glasses
+    g.frame(x + 22, y + 36, 14, 10, g.INK);
+    g.frame(x + 44, y + 36, 14, 10, g.INK);
+    g.rect(x + 36, y + 40, 8, 1, g.INK);
+    g.rect(x + 25, y + 39, 8, 1, g.MID);
+    g.rect(x + 47, y + 39, 8, 1, g.MID);
+    // shawl
+    g.dither(x + 10, y + 76, 60, 22, g.MID, 2);
+    g.rect(x + 10, y + 76, 60, 2, g.PAPER);
+    // cane
+    g.line(x + 6, y + 72, x + 2, y + 100, g.DARK);
+  } else if (who === "critic") {
+    portraitBase(g, x, y, { stern: true });
+    // a travelling scholar's hat and fan
+    g.rect(x + 12, y + 4, 56, 8, g.INK);
+    g.rect(x + 20, y - 4, 40, 10, g.DARK);
+    g.rect(x + 8, y + 10, 64, 2, g.PAPER);
+    g.rect(x + 28, y + 50, 24, 2, g.PAPER);
+    g.rect(x + 30, y + 54, 20, 1, g.DARK);
+    g.rect(x + 62, y + 66, 12, 2, g.INK);
+    g.line(x + 64, y + 66, x + 52, y + 54, g.INK);
+    g.dither(x + 52, y + 52, 14, 8, g.PAPER, 2);
+    g.rect(x + 72, y + 76, 4, 20, g.DARK);
+  } else {
+    portraitBase(g, x, y, { smile: true });
+  }
+};
+
+/* ---------------- food and things ---------------- */
+ART.steam = function (g, x, y, t) {
+  var a = Math.floor(t * 3) % 3;
+  g.rect(x, y - a, 2, 3, g.PAPER);
+  g.rect(x + 3, y - 2 - a, 2, 3, g.PAPER);
+  g.rect(x + 6, y - 1 - a, 2, 2, g.PAPER);
+};
+
+ART.dish = function (g, id, x, y, t) {
+  var d = DATA.DISHES[id];
+  var kind = d ? d.kind : "soup";
+  g.rect(x + 1, y + 10, 18, 2, g.INK);
+  g.rect(x + 3, y + 12, 14, 1, g.MID);
+  if (kind === "soup" || kind === "pot") {
+    g.rect(x + 3, y + 6, 14, 5, g.INK);
+    g.rect(x + 4, y + 7, 12, 3, g.PAPER);
+    g.rect(x + 6, y + 7, 8, 1, g.MID);
+    if (kind === "pot") {
+      g.rect(x + 2, y + 4, 16, 3, g.INK);
+      g.rect(x + 4, y + 5, 12, 2, g.DARK);
+      g.rect(x - 1, y + 6, 4, 2, g.INK);
+      g.rect(x + 17, y + 6, 4, 2, g.INK);
+    }
+    ART.steam(g, x + 7, y + 4, t);
+  } else if (kind === "cake") {
+    g.circle(x + 10, y + 7, 6, g.INK, true);
+    g.circle(x + 10, y + 7, 5, g.PAPER, true);
+    g.dither(x + 6, y + 4, 8, 6, g.MID, 1);
+    ART.steam(g, x + 8, y + 0, t);
+  } else if (kind === "rice") {
+    g.rect(x + 4, y + 2, 12, 8, g.DARK);
+    g.rect(x + 5, y + 3, 10, 6, g.PAPER);
+    g.rect(x + 5, y + 2, 10, 1, g.INK);
+    g.rect(x + 7, y + 4, 2, 1, g.MID);
+    g.rect(x + 11, y + 6, 2, 1, g.MID);
+  } else if (kind === "grill") {
+    g.rect(x + 3, y + 4, 14, 7, g.MID);
+    g.rect(x + 4, y + 5, 12, 2, g.PAPER);
+    for (var i = 0; i < 3; i++) g.rect(x + 5 + i * 4, y + 4, 1, 7, g.INK);
+    g.rect(x + 5, y + 9, 10, 1, g.INK);
+    ART.steam(g, x + 7, y + 2, t);
+  } else if (kind === "stir") {
+    g.rect(x + 2, y + 8, 16, 3, g.INK);
+    g.rect(x + 4, y + 6, 12, 4, g.DARK);
+    g.rect(x + 6, y + 5, 3, 3, g.PAPER);
+    g.rect(x + 11, y + 6, 3, 2, g.MID);
+    ART.steam(g, x + 8, y + 2, t);
+  } else {
+    g.rect(x + 3, y + 6, 14, 5, g.INK);
+    g.rect(x + 5, y + 7, 10, 3, g.PAPER);
+    g.circle(x + 10, y + 6, 4, g.PAPER, true);
+    g.dither(x + 6, y + 3, 8, 4, g.PAPER, 2);
+    ART.steam(g, x + 7, y + 0, t);
+  }
+};
+
+ART.ing = function (g, id, x, y) {
+  if (id === "mushroom") {
+    g.rect(x + 4, y + 4, 4, 6, g.INK);
+    g.rect(x + 5, y + 5, 2, 5, g.PAPER);
+    g.rect(x + 2, y + 1, 8, 3, g.DARK);
+    g.rect(x + 3, y + 2, 6, 1, g.PAPER);
+    g.pixel(x + 3, y + 2, g.PAPER); g.pixel(x + 7, y + 2, g.PAPER);
+  } else if (id === "fish") {
+    g.rect(x + 2, y + 4, 7, 4, g.INK);
+    g.rect(x + 3, y + 5, 5, 2, g.MID);
+    g.rect(x + 9, y + 3, 2, 2, g.INK);
+    g.rect(x + 9, y + 7, 2, 2, g.INK);
+    g.pixel(x + 4, y + 5, g.PAPER);
+  } else if (id === "rice") {
+    for (var i = 0; i < 5; i++) g.rect(x + 2 + (i * 3) % 7, y + 3 + (i * 5) % 7, 2, 3, g.PAPER);
+    g.rect(x + 2, y + 9, 8, 1, g.DARK);
+  } else if (id === "bamboo") {
+    g.rect(x + 4, y + 2, 4, 9, g.DARK);
+    g.rect(x + 5, y + 2, 2, 9, g.PAPER);
+    g.rect(x + 3, y + 6, 6, 1, g.INK);
+    g.rect(x + 8, y + 1, 3, 3, g.INK);
+  } else if (id === "greens") {
+    g.rect(x + 3, y + 7, 6, 2, g.INK);
+    g.rect(x + 2, y + 2, 4, 6, g.DARK);
+    g.rect(x + 6, y + 1, 4, 7, g.DARK);
+    g.rect(x + 7, y + 4, 3, 4, g.MID);
+  } else if (id === "meat") {
+    g.rect(x + 2, y + 3, 8, 6, g.MID);
+    g.rect(x + 3, y + 4, 6, 2, g.PAPER);
+    g.rect(x + 3, y + 7, 6, 1, g.DARK);
+    g.rect(x + 1, y + 4, 2, 1, g.PAPER);
+  } else {
+    g.rect(x + 5, y + 3, 2, 7, g.PAPER);
+    g.rect(x + 3, y + 2, 4, 3, g.INK);
+    g.rect(x + 7, y + 5, 3, 3, g.MID);
+    g.dither(x + 2, y + 2, 8, 8, g.PAPER, 1);
+  }
+};
+
+ART.weatherIcon = function (g, id, x, y, t) {
+  if (id === "sunny") {
+    g.circle(x + 6, y + 6, 4, g.PAPER, true);
+    g.circle(x + 6, y + 6, 3, g.INK, true);
+    for (var i = 0; i < 4; i++) {
+      g.pixel(x + 6 + (i < 2 ? -6 + i * 12 : 0), y + 6 + (i < 2 ? 0 : -5 + (i - 2) * 10), g.PAPER);
+    }
+  } else if (id === "rain") {
+    g.rect(x + 1, y + 3, 10, 4, g.DARK);
+    g.rect(x + 3, y + 1, 4, 3, g.DARK);
+    for (var j = 0; j < 3; j++) {
+      var dy = (Math.floor(t * 6) + j * 3) % 6;
+      g.line(x + 2 + j * 4, y + 8 + dy, x + 1 + j * 4, y + 10 + dy, g.PAPER);
+    }
+  } else {
+    for (var k = 0; k < 3; k++) g.rect(x + 1 + (k % 2) * 2, y + 2 + k * 3, 9, 1, g.PAPER);
+    g.rect(x + 4, y + 4, 4, 1, g.MID);
+  }
+};
+
+ART.coin = function (g, x, y) {
+  g.circle(x + 3, y + 3, 3, g.INK, true);
+  g.rect(x + 2, y + 3, 3, 2, g.PAPER);
+  g.pixel(x + 3, y + 2, g.PAPER);
+};
+
+ART.heart = function (g, x, y, filled) {
+  var c = filled ? g.INK : g.MID;
+  g.rect(x + 1, y + 1, 2, 2, c); g.rect(x + 4, y + 1, 2, 2, c);
+  g.rect(x + 1, y + 2, 5, 2, c);
+  g.rect(x + 2, y + 4, 3, 1, c);
+  g.pixel(x + 3, y + 5, c);
+  if (!filled) { g.pixel(x + 3, y + 1, g.PAPER); g.pixel(x + 4, y + 2, g.PAPER); }
+};
+
+ART.star = function (g, x, y, c) {
+  c = c == null ? g.PAPER : c;
+  g.pixel(x + 3, y, c); g.rect(x + 2, y + 1, 3, 1, c); g.rect(x + 1, y + 2, 5, 1, c);
+  g.rect(x + 2, y + 3, 3, 1, c); g.pixel(x + 1, y + 4, c); g.pixel(x + 5, y + 4, c);
+};
+
+/* ---------------- ending ---------------- */
+ART.ending = function (g, t, kind) {
+  g.clear(g.PAPER);
+  g.dither(0, 0, 216, 54, g.MID, 1);
+  g.dither(154, 10, 40, 38, g.MID, 1);
+  g.circle(174, 28, 16, g.INK, true);
+  g.circle(174, 28, 14, g.PAPER, true);
+  for (var er = 0; er < 8; er++) {
+    var ea = er * Math.PI / 4;
+    g.line(174 + Math.cos(ea) * 20, 28 + Math.sin(ea) * 20, 174 + Math.cos(ea) * 24, 28 + Math.sin(ea) * 24, g.DARK);
+  }
+  g.line(0, 78, 38, 48, g.DARK); g.line(38, 48, 76, 78, g.DARK);
+  g.line(52, 78, 96, 42, g.DARK); g.line(96, 42, 140, 78, g.DARK);
+  g.line(124, 78, 164, 52, g.DARK); g.line(164, 52, 204, 78, g.DARK);
+  g.rect(0, 78, 216, 162, g.PAPER);
+  g.dither(0, 78, 216, 10, g.MID, 1);
+  ART.pine(g, -2, 42, 1.1);
+  ART.pine(g, 190, 46, 1.2);
+  ART.facade(g, 48, 62, null, t);
+  // birds
+  for (var b = 0; b < 3; b++) {
+    var bx = 40 + b * 34 + Math.sin(t + b) * 3, by = 34 + b * 6;
+    g.line(bx, by, bx + 3, by - 2, g.DARK);
+    g.line(bx + 3, by - 2, bx + 6, by, g.DARK);
+  }
+  // the people who stayed
+  g.sprite(ART.big.heroDown, 72, 140);
+  if (kind !== "bad") {
+    g.sprite(ART.big.ahe, 90, 142);
+    g.sprite(ART.big.zhou, 108, 142);
+    g.sprite(ART.big.yan, 126, 142);
+    g.sprite(ART.big.po, 144, 142);
+  }
+  g.sprite(ART.cat, 160, 146);
+  for (var i = 0; i < 20; i++) {
+    var px = (i * 41 + t * 6) % 216;
+    var py = 80 + ((i * 27 + t * 4) % 84);
+    if (Math.floor(t * 2 + i) % 3) {
+      g.rect(px, py, 2, 1, i % 2 ? g.PAPER : g.MID);
+      if (i % 4 === 0) g.pixel(px + 1, py + 1, g.DARK);
+    }
+  }
+};
+</script>
+<script data-src="src/30-ui.js">
+/* Small widgets shared by the scenes. */
+var UI = {};
+
+UI.header = function (g, s, label) {
+  g.window(6, 4, 204, 24, { thin: true });
+  g.text(label || ("第 " + s.day + " 天"), 10, 6);
+  ART.weatherIcon(g, s.weather, 74, 8, game.time);
+  g.text(DATA.WEATHER[s.weather].name, 89, 6, { color: g.DARK });
+  g.text("名声 " + s.rep, 112, 6, { color: g.DARK });
+  ART.coin(g, 166, 8);
+  g.text(String(s.money), 176, 6);
+  g.text("文", 202, 6, { color: g.DARK });
+};
+
+UI.footer = function (g, text, color) {
+  g.text(text, 108, 224, { align: "center", color: color == null ? g.DARK : color });
+};
+
+UI.window = function (g, x, y, w, h, opts) {
+  g.window(x, y, w, h, opts || {});
+};
+
+UI.panel = function (g, x, y, w, h, title) {
+  g.window(x, y, w, h);
+  if (title) {
+    g.rect(x + 5, y + 2, g.measure(title) + 2, 12, g.PAPER);
+    g.text(title, x + 6, y + 2, { color: g.DARK });
+  }
+};
+
+UI.hearts = function (g, x, y, n, max) {
+  for (var i = 0; i < (max || 5); i++) ART.heart(g, x + i * 9, y, i < n);
+};
+
+UI.stars = function (g, x, y, n) {
+  for (var i = 0; i < 5; i++) ART.star(g, x + i * 8, y, i < n ? g.INK : g.MID);
+};
+
+UI.bar = function (g, x, y, w, h, v, max, color) {
+  g.rect(x, y, w, h, g.MID);
+  g.rect(x, y, Math.round(w * Math.max(0, Math.min(1, v / max))), h, color == null ? g.INK : color);
+};
+
+UI.money = function (g, x, y, n, right) {
+  ART.coin(g, x, y);
+  g.text((right ? "" : "") + n, x + 10, y - 2);
+};
+
+UI.actionBar = function (g, items, sel, y) {
+  y = y == null ? 194 : y;
+  g.window(6, y, 204, 22, { thin: true });
+  var xs = [12, 52, 92, 132, 172];
+  for (var i = 0; i < items.length; i++) {
+    var it = items[i], x = xs[i];
+    if (i === sel) {
+      g.rect(x - 5, y + 2, 36, 18, g.INK);
+      g.text(it.label, x, y + 4, { color: g.PAPER });
+    } else {
+      g.text(it.label, x, y + 4, { color: it.disabled ? g.DARK : g.INK });
+    }
+  }
+};
+
+UI.arrow = function (g, x, y, color) {
+  g.arrow(x, y, "right", color == null ? g.INK : color);
+};
+
+UI.toast = function (g) {
+  if (game.time < toast.until && toast.text) {
+    g.window(16, 116, 184, 20, { thin: true });
+    g.text(toast.text, 108, 118, { align: "center" });
+  }
+};
+
+UI.help = function (g, page) {
+  g.clear(g.PAPER);
+  UI.header(g, S || { day: 1, weather: "sunny", rep: 1, money: 0 }, "说明");
+  g.window(6, 32, 204, 184);
+  g.text("怎么玩", 14, 36, { color: g.DARK });
+  var lines = [
+    "早上有 2 个行动：出门、备菜。",
+    "先出门采买，回来再备菜；",
+    "出门去后山采食材、打山兽。",
+    "傍晚开门，客人点单，按 A 上菜。",
+    "打烊后看账，第四天和第七天交租。",
+    "第七天山神宴：备好三道菜。",
+    "",
+    "方向键 选    A 好    B 返回",
+    "START 暂停 / 存档",
+    "",
+    "钱、好感和名声都会留到第二天。",
+    "常客好感 3 心，会来帮你。"
+  ];
+  for (var i = 0; i < lines.length; i++) g.text(lines[i], 14, 52 + i * 15, { color: i === 7 ? g.DARK : g.INK });
+  UI.footer(g, "A / B 返回");
+};
+</script>
+<script data-src="src/40-state.js">
+/* Save state and the rules that are not drawing. */
+var S = null;
+
+function fresh() {
+  var ing = {};
+  for (var i = 0; i < DATA.ING_ORDER.length; i++) ing[DATA.ING_ORDER[i]] = 0;
+  ing.mushroom = 4; ing.rice = 2; ing.greens = 2;
+  var unlocked = {};
+  for (var d = 0; d < DATA.DISH_ORDER.length; d++) {
+    if (DATA.DISHES[DATA.DISH_ORDER[d]].unlock === "base") unlocked[DATA.DISH_ORDER[d]] = true;
+  }
+  var npc = {};
+  for (var n = 0; n < DATA.NPC_ORDER.length; n++) npc[DATA.NPC_ORDER[n]] = 0;
+  return {
+    v: SAVE_VERSION, phase: "morning", day: 1, money: 80, rep: 1, ap: 2,
+    weather: DATA.WEATHER_BY_DAY[0],
+    ingredients: ing, menu: [], stock: {}, unlocked: unlocked,
+    upgrades: {}, npc: npc, staff: null, seen: {}, flags: {},
+    stats: { served: 0, lost: 0, earned: 0, tips: 0, days: 0 },
+    rentPaid: 0, debt: 0, lastLedger: null
+  };
+}
+
+function save() { if (S) game.save(SAVE_KEY, S); }
+function seen(id) { return !!(S && S.seen[id]); }
+function mark(id) { if (S) { S.seen[id] = 1; save(); } }
+function flag(id) { return !!(S && S.flags[id]); }
+function setFlag(id, v) { if (S) { S.flags[id] = v == null ? 1 : v; save(); } }
+
+function ing(id) { return S.ingredients[id] || 0; }
+function addIng(id, n) {
+  S.ingredients[id] = Math.max(0, (S.ingredients[id] || 0) + n);
+}
+function takeIng(id, n) {
+  if ((S.ingredients[id] || 0) < n) return false;
+  S.ingredients[id] -= n;
+  return true;
+}
+function mainIng(id) {
+  var need = DATA.DISHES[id].need;
+  for (var k in need) if (Object.prototype.hasOwnProperty.call(need, k)) return k;
+  return null;
+}
+function maxPortions(id) {
+  var need = DATA.DISHES[id].need, n = 5;
+  for (var k in need) if (Object.prototype.hasOwnProperty.call(need, k)) {
+    n = Math.min(n, Math.floor((S.ingredients[k] || 0) / need[k]));
+  }
+  return Math.max(0, n);
+}
+function canCookPlan(plan) {
+  var used = {};
+  for (var id in plan) if (Object.prototype.hasOwnProperty.call(plan, id) && plan[id] > 0) {
+    var need = DATA.DISHES[id].need;
+    for (var k in need) if (Object.prototype.hasOwnProperty.call(need, k)) {
+      used[k] = (used[k] || 0) + need[k] * plan[id];
+    }
+  }
+  for (var u in used) if (Object.prototype.hasOwnProperty.call(used, u) && used[u] > (S.ingredients[u] || 0)) return false;
+  return true;
+}
+function cookPlan(plan) {
+  var kinds = 0;
+  for (var kk in plan) if (Object.prototype.hasOwnProperty.call(plan, kk) && plan[kk] > 0) kinds++;
+  if (kinds > 4) return false;
+  if (!canCookPlan(plan)) return false;
+  for (var id in plan) if (Object.prototype.hasOwnProperty.call(plan, id) && plan[id] > 0) {
+    var need = DATA.DISHES[id].need;
+    for (var k in need) if (Object.prototype.hasOwnProperty.call(need, k)) takeIng(k, need[k] * plan[id]);
+  }
+  S.menu = [];
+  S.stock = {};
+  for (var id2 in plan) if (Object.prototype.hasOwnProperty.call(plan, id2) && plan[id2] > 0) {
+    S.menu.push(id2);
+    S.stock[id2] = plan[id2];
+  }
+  S.menu.sort(function (a, b) { return DATA.DISH_ORDER.indexOf(a) - DATA.DISH_ORDER.indexOf(b); });
+  save();
+  return true;
+}
+function stockOf(id) { return (S.stock && S.stock[id]) || 0; }
+function stockTotal() {
+  var n = 0;
+  for (var id in S.stock) if (Object.prototype.hasOwnProperty.call(S.stock, id)) n += S.stock[id];
+  return n;
+}
+function useStock(id) {
+  if (!S.stock[id] || S.stock[id] <= 0) return false;
+  S.stock[id]--;
+  if (S.stock[id] <= 0) delete S.stock[id];
+  return true;
+}
+function menuDishes() { return S.menu.slice(); }
+function addRep(n) { S.rep = Math.max(0, S.rep + n); save(); }
+function addMoney(n) { S.money = Math.max(0, S.money + n); save(); }
+function addNpc(id, n) { S.npc[id] = Math.max(0, Math.min(5, (S.npc[id] || 0) + n)); save(); }
+function hasUpgrade(id) { return !!(S.upgrades && S.upgrades[id]); }
+function canBuy(id) {
+  var u = DATA.UPGRADES[id];
+  return !hasUpgrade(id) && S.money >= u.cost && S.rep >= u.rep;
+}
+function buyUpgrade(id) {
+  if (!canBuy(id)) return false;
+  S.money -= DATA.UPGRADES[id].cost;
+  S.upgrades[id] = true;
+  if (id === "stove") { unlockDish("grilled_fish"); unlockDish("pork"); }
+  save();
+  return true;
+}
+function unlockDish(id) { if (S && DATA.DISHES[id]) { S.unlocked[id] = true; save(); } }
+function unlockedDishes() { return DATA.DISH_ORDER.filter(function (id) { return S.unlocked[id]; }); }
+function hasHelper() { return availableHelpers().length > 0; }
+function availableHelpers() {
+  return DATA.NPC_ORDER.filter(function (id) { return id !== "po" && (S.npc[id] || 0) >= 3; });
+}
+function helperName() {
+  return S.staff ? DATA.NPCS[S.staff].name : "";
+}
+function dayWeather(day) { return DATA.WEATHER_BY_DAY[Math.min(DATA.WEATHER_BY_DAY.length, Math.max(1, day)) - 1]; }
+function rentFor(day) { return DATA.RENT[day] || 0; }
+function startDay(day) {
+  S.day = day;
+  S.phase = "morning";
+  S.weather = dayWeather(day);
+  S.ap = 2;
+  S.menu = [];
+  S.stock = {};
+  S.staff = null;
+  S.flags.prepared = false;
+  S.flags.opened = false;
+  S.flags.forest = false;
+  S.stats.days++;
+  save();
+}
+function endDay() {
+  // carry nothing except money, people and upgrades
+  S.menu = [];
+  S.stock = {};
+  save();
+}
+function serveCount() {
+  var base = 4 + DATA.WEATHER[S.weather].customers + (hasUpgrade("sign") ? 1 : 0) + Math.floor(S.rep / 3);
+  return Math.max(3, Math.min(9, base));
+}
+function tableCount() { return 4; }
+function totalDishes() { return unlockedDishes().length; }
+function storySeen(id) { return !!S.seen[id]; }
+</script>
+<script data-src="src/45-music.js">
+/* Original MML loops, written for this game. D minor / A minor / F major. */
+var MUSIC = {
+  shop: {
+    bpm: 76,
+    p1: "@1 v9 o4 l8 | d4 f4 a4 g4 | f4 e4 d4 r | d4 f4 g4 a4 | c4 a4 g4 f4" +
+        " | d4 f4 a4 >d4 | <c4 a4 f4 r | g4 f4 e4 d4 | d2. r4",
+    p2: "@0 v5 o3 l8 | r d f a r f a f | r d f a r f a f | r d g b- r g b- g | r e g >c< r g >c< g" +
+        " | r d f a r f a f | r d f a r f a f | r c e g r e g e | r d f a r d f d",
+    tri: "v10 o2 l4 | d a d a | d a d a | b- >f b- f | c g >c< g | d a d a | d a d a | c g >c< g | d a d a",
+    noise: "l8 [v3 x r r v2 x r]7 | v3 X4 r2"
+  },
+  forest: {
+    bpm: 70,
+    p1: "@1 v8 o4 l8 | g4 b-4 d4 c4 | b-4 a4 g4 r | g4 b-4 c4 d4 | f4 d4 c4 b-4" +
+        " | g4 b-4 d4 c4 | b-4 a4 g4 r | d4 f4 g4 a4 | g2. r4",
+    p2: "@0 v4 o3 l8 | r g b- >d< r b- >d< b- | r g b- >d< r b- >d< b- | r a >c< e r a >c< a | r f a >c< r a >c< a" +
+        " | r g b- >d< r b- >d< b- | r g b- >d< r b- >d< b- | r d f a r f a f | r g b- >d< r g b- g",
+    tri: "v9 o2 l4 | g >d g d< | g >d g d< | a >e a e< | f >c f c< | g >d g d< | g >d g d< | d a >d< a | g >d g d<",
+    noise: "l8 [v2 x r r v2 x r]7 | v2 X4 r2"
+  },
+  service: {
+    bpm: 96,
+    p1: "@1 v10 o4 l8 | a4 >c4< a4 g4 | e4 g4 a4 r | a4 >c4 d4 c4 | <a4 g4 e4 r" +
+        " | a4 >c4< a4 g4 | e4 g4 a4 r | d4 e4 g4 e4 | a2. r4",
+    p2: "@0 v5 o3 l8 | r a >c< r a >c< a | r e g r e g e | r a >c< r a >c< a | r e g r e g e" +
+        " | r a >c< r a >c< a | r e g r e g e | r d f a r d f d | r a >c< r a >c< a",
+    tri: "v10 o2 l4 | a >c a c< | e g e g | a >c a c< | e g e g | a >c a c< | e g e g | d f d f | a >c a c<",
+    noise: "l8 [v2 x r r v2 x r]7 | v2 X4 r2"
+  },
+  battle: {
+    bpm: 144,
+    p1: "@1 v10 o4 l8 | a4 >c4 d4 c4 | <a4 e4 a4 r | g4 a4 >c4 d4 | e4 d4 c4 r" +
+        " | a4 >c4 d4 c4 | <a4 e4 a4 r | d4 e4 g4 e4 | a4 r r4",
+    p2: "@0 v6 o3 l8 | r a >c< r a >c< a | r e g r e g e | r g >c< r g >c< g | r e g r e g e" +
+        " | r a >c< r a >c< a | r e g r e g e | r d f r d f d | r a >c< r a >c< a",
+    tri: "v11 o2 l4 | a >c a c< | e g e g | g >c g c< | e g e g | a >c a c< | e g e g | d f d f | a >c a c<",
+    noise: "l8 [v4 x r v3 x x]7 | v5 X4 r2"
+  },
+  night: {
+    bpm: 66,
+    p1: "@1 v7 o4 l8 | f4 a4 c4 r | d4 c4 a4 r | b-4 a4 g4 f4 | g2. r4" +
+        " | f4 a4 c4 r | d4 c4 a4 r | g4 f4 e4 d4 | f2. r4",
+    p2: "@0 v4 o3 l8 | r f a >c< r a >c< a | r d f a r f a f | r b- >d< f r d f d | r c e g r e g e" +
+        " | r f a >c< r a >c< a | r d f a r f a f | r g b- >d< r b- >d< b- | r f a >c< r f a f",
+    tri: "v9 o2 l4 | f >c f c< | d a >d< a | b- >f b- f | c g >c< g | f >c f c< | d a >d< a | g >d g d< | f >c f c<",
+    noise: "l8 [v2 x r r v2 x r]7 | v2 X4 r2"
+  },
+  ending: {
+    bpm: 60,
+    p1: "@1 v8 o4 l8 | f4 a4 c4 r | d4 c4 a4 r | b-4 a4 g4 f4 | g2. r4" +
+        " | f4 a4 c4 r | d4 c4 a4 r | g4 f4 e4 d4 | f2. r4",
+    p2: "@0 v4 o3 l8 | r f a >c< r a >c< a | r d f a r f a f | r b- >d< f r d f d | r c e g r e g e" +
+        " | r f a >c< r a >c< a | r d f a r f a f | r g b- >d< r b- >d< b- | r f a >c< r f a f",
+    tri: "v9 o2 l4 | f >c f c< | d a >d< a | b- >f b- f | c g >c< g | f >c f c< | d a >d< a | g >d g d< | f >c f c<",
+    noise: "l8 [v2 x r r v2 x r]7 | v2 X4 r2"
+  }
+};
+
+var MUSIC_NOW = null;
+function playMusic(id) {
+  if (MUSIC_NOW === id) return;
+  MUSIC_NOW = id;
+  if (typeof MUSIC !== "undefined" && MUSIC[id]) game.music(MUSIC[id]);
+}
+function stopMusic() {
+  MUSIC_NOW = null;
+  game.musicStop();
+}
+</script>
+<script data-src="src/50-title.js">
+/* Title and the help screen. */
+var TITLE_SEL = 0;
+
+function titleOptions() {
+  var opts = [];
+  if (bootSave) opts.push({ id: "continue", label: "继续" });
+  opts.push({ id: "new", label: bootSave ? "新局" : "开始" });
+  opts.push({ id: "help", label: "说明" });
+  return opts;
+}
+
+game.scene("title", {
+  enter: function () {
+    TITLE_SEL = 0;
+    game.ambience(null);
+    if (typeof stopMusic === "function") stopMusic(); else game.musicStop();
+  },
+  update: function () {
+    if (!booted) return;
+    var opts = titleOptions();
+    if (game.repeat("left")) { TITLE_SEL = (TITLE_SEL + opts.length - 1) % opts.length; game.sfx("move"); }
+    if (game.repeat("right")) { TITLE_SEL = (TITLE_SEL + 1) % opts.length; game.sfx("move"); }
+    if (game.pressed("a") || game.pressed("start")) {
+      var id = opts[TITLE_SEL].id;
+      game.sfx("tap");
+      if (id === "continue") {
+        S = bootSave;
+        if (S.phase === "night") game.go("night");
+        else if (S.phase === "ending") game.go("ending");
+        else game.go("morning");
+      } else if (id === "new") {
+        S = fresh();
+        startDay(1);
+        game.go("morning");
+      } else {
+        game.go("help", { from: "title" });
+      }
+    }
+  },
+  draw: function (g) {
+    ART.title(g, game.time);
+    // title board
+    g.text("山脚小馆", 86, 23, { align: "center" });
+    g.text("七天，守住这间小店", 86, 40, { align: "center", color: g.DARK });
+    g.text("采买 · 备菜 · 开门", 86, 54, { align: "center", color: g.DARK });
+    // menu
+    var opts = titleOptions();
+    g.window(28, 190, 160, 32, { thin: true });
+    var xs = opts.length === 3 ? [38, 78, 118] : [62, 118];
+    for (var i = 0; i < opts.length; i++) {
+      if (i === TITLE_SEL) {
+        g.rect(xs[i] - 5, 196, 36, 18, g.INK);
+        g.text(opts[i].label, xs[i], 198, { color: g.PAPER });
+      } else {
+        g.text(opts[i].label, xs[i], 198);
+      }
+    }
+    g.text("←→ 选   A 决定", 108, 226, { align: "center", color: g.DARK });
+    if (!booted) g.text("…", 108, 170, { align: "center", color: g.DARK });
+  }
+});
+
+game.scene("help", {
+  enter: function (args) { this.from = (args && args.from) || "title"; },
+  update: function () {
+    if (game.pressed("a") || game.pressed("b") || game.pressed("start")) {
+      game.sfx("tap");
+      game.go(this.from);
+    }
+  },
+  draw: function (g) { UI.help(g, S || { day: 1, weather: "sunny", rep: 1, money: 0 }); }
+});
+</script>
+<script data-src="src/51-morning.js">
+/* Morning: two actions before opening. */
+var MORNING_SEL = 0;
+
+function morningActions() {
+  return [
+    { label: "出门", id: "forest", disabled: S.ap <= 0 },
+    { label: "菜单", id: "prep", disabled: S.ap <= 0 || !!S.flags.prepared },
+    { label: "店铺", id: "shop", disabled: false },
+    { label: "帮手", id: "helper", disabled: !hasHelper() || !!S.staff },
+    { label: "开门", id: "open", disabled: false }
+  ];
+}
+
+function helperEffect(id) {
+  return id === "ahe" ? "帮上菜" : id === "zhou" ? "送两条鱼" : id === "yan" ? "送一块肉" : "";
+}
+
+function chooseHelper() {
+  var ids = availableHelpers();
+  if (!ids.length) { game.sfx("err"); return; }
+  busy = true;
+  var labels = ids.map(function (id) { return DATA.NPCS[id].name + "（" + helperEffect(id) + "）"; });
+  game.choose(labels, { title: "今天请谁帮忙？", cancel: true }).then(function (i) {
+    if (i >= 0) {
+      S.staff = ids[i];
+      if (S.staff === "zhou") addIng("fish", 2);
+      if (S.staff === "yan") addIng("meat", 1);
+      save();
+      game.sfx("ok");
+      sayToast(DATA.NPCS[S.staff].name + "来帮忙了");
+    }
+    busy = false;
+  });
+}
+
+function morningAct(i) {
+  if (busy) return;
+  var acts = morningActions();
+  if (!acts[i] || acts[i].disabled) { game.sfx("err"); return; }
+  if (acts[i].id === "prep") { game.sfx("tap"); game.go("prep"); return; }
+  if (acts[i].id === "forest") {
+    if (S.ap === 1 && !S.flags.prepared) {
+      busy = true;
+      game.choose(["先备菜", "还是出门"], { title: "还没备菜，要空着灶开门吗？", cancel: true }).then(function (c) {
+        busy = false;
+        if (c === 0) game.go("prep");
+        else if (c === 1) { S.ap--; save(); game.sfx("move"); game.go("forest"); }
+      });
+      return;
+    }
+    S.ap--;
+    save();
+    game.sfx("move");
+    game.go("forest");
+    return;
+  }
+  if (acts[i].id === "shop") { game.sfx("tap"); game.go("shop"); return; }
+  if (acts[i].id === "helper") { chooseHelper(); return; }
+  if (acts[i].id === "open") {
+    if (stockTotal() <= 0) {
+      busy = true;
+      game.say("灶上还是空的。先去备菜吧。").then(function () { busy = false; });
+      return;
+    }
+    S.flags.opened = 1;
+    save();
+    game.sfx("ok");
+    game.go("service");
+  }
+}
+
+game.scene("morning", {
+  enter: function () {
+    MORNING_SEL = 0;
+    game.ambience(S.weather === "rain" ? "rain" : null, 0.35);
+    if (typeof playMusic === "function") playMusic("shop");
+    if (typeof MorningStory === "function") {
+      busy = true;
+      MorningStory().then(function () { busy = false; });
+    }
+  },
+  update: function () {
+    if (busy) return;
+    var acts = morningActions();
+    if (game.repeat("left")) { MORNING_SEL = (MORNING_SEL + acts.length - 1) % acts.length; game.sfx("move"); }
+    if (game.repeat("right")) { MORNING_SEL = (MORNING_SEL + 1) % acts.length; game.sfx("move"); }
+    // up/down still move the same row on a one-row bar
+    if (game.pressed("a")) morningAct(MORNING_SEL);
+    if (game.pressed("b")) game.go("help", { from: "morning" });
+    if (game.pressed("start")) {
+      game.sfx("tap");
+      game.say("小馆的一天。菜要备，人要待，租要交。").then(function () {});
+    }
+  },
+  draw: function (g) {
+    ART.room(g, S, "morning", game.time, -1);
+    // Xiao Man behind the counter
+    g.sprite(ART.heroDown, 30, 82 + (Math.sin(game.time * 2) > 0 ? 0 : 1));
+    UI.header(g, S);
+    // summary
+    g.window(6, 146, 204, 44);
+    var names = S.menu.map(function (id) { return DATA.DISHES[id].name; });
+    var menuText = names.length ? names.slice(0, 2).join("、") + (names.length > 2 ? "等" + names.length + "道" : "") : "还没定";
+    g.text("菜单：" + menuText, 10, 149);
+    g.text("库存 " + stockTotal() + " 份　　行动 " + S.ap + "/2" + (S.staff ? "　　帮手 " + helperName() : ""), 10, 163, { color: g.DARK });
+    var regCount = DATA.NPC_ORDER.filter(function (id) { return (S.npc[id] || 0) >= 3; }).length;
+    g.text("预计客 " + serveCount() + " 位　常客 " + regCount + " 人", 10, 177, { color: g.DARK });
+    UI.actionBar(g, morningActions(), MORNING_SEL, 194);
+    UI.footer(g, "←→ 选　A 好　B 说明");
+    UI.toast(g);
+  }
+});
+</script>
+<script data-src="src/52-prep.js">
+/* Prep: choose today's dishes and how many portions to cook. */
+var PREP_PLAN = {}, PREP_SEL = 0, PREP_SCROLL = 0;
+
+function prepList() { return unlockedDishes(); }
+function prepNeedUsed() {
+  var used = {};
+  for (var id in PREP_PLAN) if (Object.prototype.hasOwnProperty.call(PREP_PLAN, id)) {
+    var need = DATA.DISHES[id].need;
+    for (var k in need) if (Object.prototype.hasOwnProperty.call(need, k)) used[k] = (used[k] || 0) + need[k] * PREP_PLAN[id];
+  }
+  return used;
+}
+function prepRoom(id) {
+  var need = DATA.DISHES[id].need, used = prepNeedUsed(), n = 5;
+  for (var k in need) if (Object.prototype.hasOwnProperty.call(need, k)) {
+    var mine = (PREP_PLAN[id] || 0) * need[k];
+    var avail = (S.ingredients[k] || 0) - ((used[k] || 0) - mine);
+    n = Math.min(n, Math.floor(avail / need[k]));
+  }
+  return Math.max(0, n);
+}
+function prepTotal() {
+  var n = 0;
+  for (var id in PREP_PLAN) if (Object.prototype.hasOwnProperty.call(PREP_PLAN, id)) n += PREP_PLAN[id];
+  return n;
+}
+function prepConfirm() {
+  var kinds = 0;
+  for (var id in PREP_PLAN) if (Object.prototype.hasOwnProperty.call(PREP_PLAN, id) && PREP_PLAN[id] > 0) kinds++;
+  if (kinds > 4) { game.sfx("err"); sayToast("菜单最多四道菜"); return; }
+  if (prepTotal() <= 0) { game.sfx("err"); return; }
+  if (!canCookPlan(PREP_PLAN)) { game.sfx("err"); return; }
+  if (!cookPlan(PREP_PLAN)) { game.sfx("err"); return; }
+  S.ap--;
+  S.flags.prepared = 1;
+  save();
+  game.sfx("ok");
+  sayToast("备好了 " + stockTotal() + " 份");
+  game.go("morning");
+}
+
+game.scene("prep", {
+  enter: function () {
+    if (S.flags.prepared) { game.go("morning"); return; }
+    PREP_PLAN = {};
+    PREP_SEL = 0;
+    PREP_SCROLL = 0;
+  },
+  update: function () {
+    if (busy) return;
+    var list = prepList();
+    if (!list.length) return;
+    if (game.repeat("up")) { PREP_SEL = (PREP_SEL + list.length - 1) % list.length; game.sfx("move"); }
+    if (game.repeat("down")) { PREP_SEL = (PREP_SEL + 1) % list.length; game.sfx("move"); }
+    if (PREP_SEL < PREP_SCROLL) PREP_SCROLL = PREP_SEL;
+    if (PREP_SEL > PREP_SCROLL + 5) PREP_SCROLL = PREP_SEL - 5;
+    var id = list[PREP_SEL];
+    if (game.repeat("left")) {
+      PREP_PLAN[id] = Math.max(0, (PREP_PLAN[id] || 0) - 1);
+      game.sfx("tick");
+    }
+    if (game.repeat("right")) {
+      var room = prepRoom(id);
+      if ((PREP_PLAN[id] || 0) < room) { PREP_PLAN[id] = (PREP_PLAN[id] || 0) + 1; game.sfx("tick"); }
+      else game.sfx("err");
+    }
+    if (game.pressed("a")) prepConfirm();
+    if (game.pressed("b")) { game.sfx("tap"); game.go("morning"); }
+    if (game.pressed("start")) { game.sfx("tap"); game.go("morning"); }
+  },
+  draw: function (g) {
+    g.clear(g.PAPER);
+    UI.header(g, S, "备菜");
+    // pantry
+    g.window(6, 32, 204, 22, { thin: true });
+    for (var i = 0; i < DATA.ING_ORDER.length; i++) {
+      var k = DATA.ING_ORDER[i];
+      ART.ing(g, k, 11 + i * 27, 35);
+      g.text(String(ing(k)), 25 + i * 27, 37, { color: ing(k) > 0 ? g.INK : g.DARK });
+    }
+    // dish list
+    var list = prepList();
+    g.window(6, 58, 204, 108);
+    g.text("今日菜单", 12, 60, { color: g.DARK });
+    var kinds = 0;
+    for (var kk in PREP_PLAN) if (Object.prototype.hasOwnProperty.call(PREP_PLAN, kk) && PREP_PLAN[kk] > 0) kinds++;
+    g.text("菜" + kinds + "/4", 126, 60, { color: g.DARK });
+    g.text("共" + prepTotal() + "份", 204, 60, { align: "right", color: g.DARK });
+    for (var row = 0; row < 6 && PREP_SCROLL + row < list.length; row++) {
+      var idx = PREP_SCROLL + row, id = list[idx], y = 76 + row * 15;
+      var selected = idx === PREP_SEL;
+      if (selected) g.rect(8, y - 1, 200, 15, g.INK);
+      var col = selected ? g.PAPER : g.INK;
+      ART.dish(g, id, 12, y, game.time);
+      g.text(DATA.DISHES[id].name, 36, y, { color: col });
+      g.text(DATA.DISHES[id].price + "文", 100, y, { color: selected ? g.PAPER : g.DARK });
+      g.text("定 " + (PREP_PLAN[id] || 0), 136, y, { color: col });
+      g.text("可 " + prepRoom(id), 174, y, { color: selected ? g.PAPER : g.DARK });
+    }
+    if (PREP_SCROLL > 0) g.text("▲", 198, 66, { color: g.DARK });
+    if (PREP_SCROLL + 6 < list.length) g.text("▼", 198, 154, { color: g.DARK });
+    // detail
+    var id2 = list[PREP_SEL];
+    if (id2) {
+      g.window(6, 170, 204, 46);
+      g.text(DATA.DISHES[id2].name, 10, 172);
+      g.text(DATA.DISHES[id2].desc, 10, 186, { width: 196 });
+      var need = DATA.DISHES[id2].need, parts = [];
+      for (var nk in need) if (Object.prototype.hasOwnProperty.call(need, nk)) parts.push(DATA.ING[nk].name + "×" + need[nk]);
+      g.text("需 " + parts.join("　") + "　已定 " + (PREP_PLAN[id2] || 0) + "　可 " + prepRoom(id2), 10, 200, { color: g.DARK });
+    }
+    UI.footer(g, "↑↓ 选　←→ 份数　A 备好　B 返回");
+    UI.toast(g);
+  }
+});
+</script>
+<script data-src="src/53-forest.js">
+/* The mountain: one screen, three actions, a basket and a knife. */
+var FOREST_MAP = [
+  "TTTTTTTTDTTTTTTTTT",
+  "T.......,........T",
+  "T..TT...,...TT...T",
+  "T..TT...,...TT...T",
+  "T.......,........T",
+  "T..~~~..,........T",
+  "T..~~~..,........T",
+  "T.......,........T",
+  "T...TT..,..TT....T",
+  "T...TT..,..TT....T",
+  "T.......,........T",
+  "T..S....,........T",
+  "T.......,........T",
+  "T.......,........T",
+  "T.......,........T",
+  "TTTTTTTTETTTTTTTTT"
+];
+var DEEP_MAP = [
+  "TTTTTTTTTTTTTTTTTT",
+  "T................T",
+  "T.......~~.......T",
+  "T.......~~.......T",
+  "T..TT........TT..T",
+  "T..TT...S....TT..T",
+  "T................T",
+  "T......#..#......T",
+  "T................T",
+  "T................T",
+  "T...TT......TT...T",
+  "T...TT......TT...T",
+  "T................T",
+  "T................T",
+  "T................T",
+  "TTTTTTTTTTTTTTTTTT"
+];
+var FOREST_DECOR = [[2, 3, "bamboo"], [15, 4, "bamboo"], [6, 9, "bamboo"], [12, 12, "bamboo"]];
+var NODE_SPOTS = {
+  mushroom: [[3, 1], [14, 1], [5, 4], [15, 7], [4, 13], [12, 11]],
+  greens: [[2, 7], [13, 4], [6, 12], [15, 13]],
+  rice: [[12, 5], [3, 8], [10, 13]],
+  fish: [[3, 7], [4, 7], [14, 5], [15, 8]],
+  bamboo: [[2, 9], [15, 10], [6, 3]]
+};
+var DEEP_SPOTS = {
+  rare: [[3, 2], [14, 2], [4, 9], [14, 9]],
+  mushroom: [[2, 6], [15, 6], [6, 12], [11, 13]]
+};
+var FOREST_MONSTERS = [
+  { id: "boar", x: 4, y: 7 },
+  { id: "monkey", x: 13, y: 6 },
+  { id: "bamboo", x: 11, y: 10 }
+];
+
+var trip = null;
+
+function shuffle(arr) {
+  var a = arr.slice();
+  for (var i = a.length - 1; i > 0; i--) {
+    var j = Math.floor(Math.random() * (i + 1));
+    var t = a[i]; a[i] = a[j]; a[j] = t;
+  }
+  return a;
+}
+function someOf(arr, n) { return shuffle(arr).slice(0, n); }
+
+function newTrip() {
+  var t = {
+    area: "forest", stamina: 3, staminaMax: 4, basket: 0, basketMax: 8,
+    nodes: [], monsters: [], shrine: false, deep: false,
+    player: { x: 8, y: 13, fx: 8, fy: 13, t: 1, dir: "up", cool: 0 },
+    fx: []
+  };
+  var n = { mushroom: 3, greens: 2, rice: 2, fish: 1, bamboo: 1 };
+  if (S.weather === "rain") n.mushroom++;
+  for (var k in n) if (Object.prototype.hasOwnProperty.call(n, k)) {
+    var spots = someOf(NODE_SPOTS[k] || [], n[k]);
+    for (var i = 0; i < spots.length; i++) t.nodes.push({ kind: k, x: spots[i][0], y: spots[i][1] });
+  }
+  t.monsters = someOf(FOREST_MONSTERS, 2).map(function (m) { return { id: m.id, x: m.x, y: m.y }; });
+  return t;
+}
+
+function deepTrip(t) {
+  t.area = "deep";
+  t.deep = true;
+  t.player = { x: 8, y: 14, fx: 8, fy: 14, t: 1, dir: "up", cool: 0 };
+  t.nodes = [];
+  for (var k in DEEP_SPOTS) if (Object.prototype.hasOwnProperty.call(DEEP_SPOTS, k)) {
+    var spots = someOf(DEEP_SPOTS[k], k === "rare" ? 2 : 2);
+    for (var i = 0; i < spots.length; i++) t.nodes.push({ kind: k, x: spots[i][0], y: spots[i][1] });
+  }
+  t.monsters = [{ id: "boss", x: 8, y: 4 }];
+  if (S.flags.boss) t.monsters = [];
+  t.shrine = false;
+}
+
+function forestMap() { return trip.area === "deep" ? DEEP_MAP : FOREST_MAP; }
+function mapChar(x, y) {
+  var m = forestMap();
+  if (y < 0 || y >= m.length || x < 0 || x >= m[0].length) return "T";
+  return m[y][x];
+}
+function solidAt(x, y) {
+  var c = mapChar(x, y);
+  return c === "T" || c === "~" || c === "#";
+}
+function nodeAt(x, y) {
+  for (var i = 0; i < trip.nodes.length; i++) if (trip.nodes[i].x === x && trip.nodes[i].y === y) return trip.nodes[i];
+  return null;
+}
+function monsterAt(x, y) {
+  for (var i = 0; i < trip.monsters.length; i++) if (trip.monsters[i].x === x && trip.monsters[i].y === y) return trip.monsters[i];
+  return null;
+}
+function yieldOf(kind) {
+  if (kind === "mushroom") return 2 + (S.weather === "rain" ? 1 : 0) + (Math.random() < 0.3 ? 1 : 0);
+  if (kind === "fish") return 1 + (Math.random() < 0.5 ? 1 : 0);
+  if (kind === "rare") return 1;
+  return 2;
+}
+function addBasket(n) { trip.basket = Math.min(trip.basketMax, trip.basket + n); }
+
+async function endTrip(msg) {
+  if (!trip) return;
+  busy = true;
+  if (msg) sayToast(msg);
+  await game.wait(0.7);
+  game.go("morning");
+}
+
+async function gatherNode(node) {
+  if (busy) return;
+  busy = true;
+  var n = yieldOf(node.kind);
+  addIng(node.kind, n);
+  addBasket(n);
+  trip.stamina--;
+  trip.nodes.splice(trip.nodes.indexOf(node), 1);
+  trip.fx.push({ text: "+" + n + " " + DATA.ING[node.kind].one, x: node.x * 12, y: 24 + node.y * 12 - 4, until: game.time + 1.2 });
+  game.sfx("coin");
+  save();
+  if (trip.stamina <= 0) { await endTrip("没力气了，回店吧"); return; }
+  if (trip.basket >= trip.basketMax) { await endTrip("篮子满了，回店吧"); return; }
+  busy = false;
+}
+
+async function startBattle(m) {
+  trip.stamina--;
+  busy = true;
+  var res = await game.push("battle", { enemy: m.id, from: trip.area, boss: m.id === "boss" });
+  if (!res) res = { result: "flee" };
+  if (res.result === "win") {
+    trip.monsters.splice(trip.monsters.indexOf(m), 1);
+    if (res.drops) for (var i = 0; i < res.drops.length; i++) addBasket(res.drops[i][1]);
+    sayToast(m.id === "boss" ? "山魈倒下了。山珍到手。" : "打赢了，食材到手");
+    if (m.id === "boss") {
+      S.flags.boss = 1;
+      unlockDish("god_soup");
+      save();
+    }
+  } else if (res.result === "lose") {
+    S.money = Math.max(0, S.money - 5);
+    var ids = DATA.ING_ORDER.filter(function (id) { return ing(id) > 0; });
+    if (ids.length) addIng(ids[Math.floor(Math.random() * ids.length)], -1);
+    save();
+    busy = true;
+    await game.say(["眼前一黑……", "醒来时，你已经在店里。篮子轻了，钱也少了。"]);
+    game.go("morning");
+    return;
+  } else {
+    // ran away: step back
+    trip.player.x = trip.player.fx;
+    trip.player.y = trip.player.fy;
+    trip.player.t = 1;
+  }
+  busy = false;
+  if (trip.stamina <= 0) await endTrip("没力气了，回店吧");
+  else if (trip.basket >= trip.basketMax) await endTrip("篮子满了，回店吧");
+}
+
+function arrive(x, y) {
+  var m = monsterAt(x, y);
+  if (m) { startBattle(m); return; }
+  var n = nodeAt(x, y);
+  if (n) { gatherNode(n); return; }
+  if (mapChar(x, y) === "S") {
+    if (!trip.shrine) {
+      trip.shrine = true;
+      if (trip.stamina < trip.staminaMax) trip.stamina = Math.min(trip.staminaMax, trip.stamina + 2);
+      game.sfx("ok");
+      sayToast("山神泉：力气回来了");
+    }
+    return;
+  }
+  if (mapChar(x, y) === "D") {
+    if (trip.area === "forest") {
+      if (S.flags.deep) {
+        game.sfx("move");
+        deepTrip(trip);
+      } else {
+        game.sfx("err");
+        sayToast("雾太深，还进不去");
+        trip.player.x = 8; trip.player.y = 1; trip.player.fx = 8; trip.player.fy = 1;
+      }
+    }
+  }
+}
+
+game.scene("forest", {
+  enter: function () {
+    trip = newTrip();
+    busy = false;
+    game.ambience(S.weather === "rain" ? "rain" : "stream", 0.35);
+    if (typeof playMusic === "function") playMusic("forest");
+  },
+  update: function (dt) {
+    if (!trip || busy) return;
+    if (game.pressed("b")) {
+      if (trip.area === "deep") {
+        game.sfx("move");
+        trip.area = "forest";
+        trip.player = { x: 8, y: 1, fx: 8, fy: 1, t: 1, dir: "down", cool: 0.2 };
+        return;
+      }
+      endTrip("回店");
+      return;
+    }
+    var p = trip.player;
+    if (p.t < 1) {
+      p.t = Math.min(1, p.t + dt / 0.13);
+      if (p.t >= 1) { p.fx = p.x; p.fy = p.y; arrive(p.x, p.y); }
+      return;
+    }
+    p.cool -= dt;
+    if (p.cool > 0) return;
+    var dx = 0, dy = 0;
+    if (game.btn("up")) dy = -1;
+    else if (game.btn("down")) dy = 1;
+    else if (game.btn("left")) dx = -1;
+    else if (game.btn("right")) dx = 1;
+    if (!dx && !dy) return;
+    p.dir = dy < 0 ? "up" : dy > 0 ? "down" : dx < 0 ? "left" : "right";
+    var nx = p.x + dx, ny = p.y + dy;
+    if (solidAt(nx, ny)) { p.cool = 0.12; game.sfx("err"); return; }
+    p.fx = p.x; p.fy = p.y;
+    p.x = nx; p.y = ny; p.t = 0; p.cool = 0.13;
+    game.sfx("tick");
+  },
+  draw: function (g) {
+    if (!trip) return;
+    var map = forestMap();
+    ART.forest(g, map, game.time, trip.area === "deep" ? { weather: "fog" } : S);
+    g.clip(0, 24, 216, 192);
+    if (trip.area === "deep") {
+      g.dither(0, 24, 216, 26, g.INK, 1);
+      g.dither(0, 190, 216, 26, g.INK, 1);
+      g.dither(0, 24, 18, 192, g.INK, 1);
+      g.dither(198, 24, 18, 192, g.INK, 1);
+    }
+    var items = [];
+    for (var r = 0; r < map.length; r++) for (var c = 0; c < map[r].length; c++) {
+      var ch = map[r][c], x = c * 12, y = 24 + r * 12;
+      if (ch === "T") items.push({ y: y + 12, fn: (function (xx, yy) { return function () { ART.tree(g, xx, yy - 8, game.time); }; })(x, y) });
+      if (ch === "S") items.push({ y: y + 12, fn: (function (xx, yy) { return function () { ART.shrine(g, xx - 6, yy - 14, game.time); }; })(x, y) });
+      if (ch === "D") items.push({ y: y + 12, fn: (function (xx, yy) { return function () { ART.shrine(g, xx - 6, yy + 2, game.time); }; })(x, y) });
+      if (ch === "E") items.push({ y: y + 12, fn: (function (xx, yy) { return function () {
+        g.rect(xx - 6, yy + 2, 24, 2, g.DARK); g.rect(xx - 3, yy + 4, 18, 1, g.MID);
+        g.rect(xx - 2, yy - 2, 2, 5, g.DARK); g.rect(xx + 12, yy - 2, 2, 5, g.DARK);
+      }; })(x, y) });
+      if (ch === "T" && (r * 3 + c) % 11 === 0) items.push({ y: y + 14, fn: (function (xx, yy) { return function () { ART.bush(g, xx, yy, game.time); }; })(x, y) });
+    }
+    for (var d = 0; d < FOREST_DECOR.length; d++) {
+      var dec = FOREST_DECOR[d];
+      if (trip.area === "forest") {
+        items.push({ y: 24 + dec[1] * 12 + 12, fn: (function (xx, yy) { return function () { ART.bambooPlant(g, xx, yy - 8, game.time); }; })(dec[0] * 12, 24 + dec[1] * 12) });
+      }
+    }
+    for (var n = 0; n < trip.nodes.length; n++) {
+      var nd = trip.nodes[n];
+      items.push({ y: 24 + nd.y * 12 + 12, fn: (function (node) { return function () { ART.node(g, node.kind, node.x * 12, 24 + node.y * 12, game.time); }; })(nd) });
+    }
+    for (var m = 0; m < trip.monsters.length; m++) {
+      var mo = trip.monsters[m];
+      items.push({ y: 24 + mo.y * 12 + 12, fn: (function (mon) { return function () { ART.monster(g, mon.id, mon.x * 12, 24 + mon.y * 12, game.time); }; })(mo) });
+    }
+    var p = trip.player;
+    items.push({ y: 24 + p.y * 12 + 12, fn: function () {
+      var px = LoGame.lerp(p.fx, p.x, p.t) * 12;
+      var py = LoGame.lerp(p.fy, p.y, p.t) * 12 + 18;
+      g.dither(px, py + 16, 12, 2, g.DARK, 1);
+      var s = p.dir === "up" ? ART.heroUp : p.dir === "down" ? ART.heroDown : ART.heroSide;
+      g.sprite(s, px, py + (p.t < 1 ? Math.sin(p.t * Math.PI) * -2 : 0), { flip: p.dir === "left" });
+    } });
+    items.sort(function (a, b) { return a.y - b.y; });
+    for (var i = 0; i < items.length; i++) items[i].fn();
+    // pickups float up
+    for (var f = 0; f < trip.fx.length; f++) {
+      var fx = trip.fx[f];
+      if (game.time < fx.until) g.text(fx.text, fx.x, fx.y - (fx.until - game.time) * 8, { color: g.PAPER });
+    }
+    trip.fx = trip.fx.filter(function (v) { return game.time < v.until; });
+    g.clip();
+    // HUD
+    g.window(6, 4, 204, 22, { thin: true });
+    g.text(trip.area === "deep" ? "后山深处" : "后山", 10, 6);
+    ART.weatherIcon(g, trip.area === "deep" ? "fog" : S.weather, 66, 8, game.time);
+    g.text("体力", 92, 6, { color: g.DARK });
+    for (var st = 0; st < trip.staminaMax; st++) {
+      g.rect(122 + st * 8, 8, 5, 5, st < trip.stamina ? g.INK : g.MID);
+    }
+    g.text("篮 " + trip.basket + "/8", 202, 6, { align: "right", color: g.DARK });
+    UI.footer(g, trip.area === "deep" ? "方向键 走　B 回后山" : "方向键 走　B 回店");
+    UI.toast(g);
+  }
+});
+</script>
+<script data-src="src/54-battle.js">
+/* A short, turn-based fight. The restaurant is the main course; this is how you get meat. */
+var B = null;
+
+function battleAtk() { return 6 + (hasUpgrade("whetstone") ? 2 : 0); }
+function rnd(a, b) { return a + Math.floor(Math.random() * (b - a + 1)); }
+
+function battleFx(text, x, y, color) {
+  B.fx.push({ text: text, x: x, y: y, color: color == null ? 3 : color, until: game.time + 0.9 });
+}
+
+function battleMsg(text) { B.msg = text; }
+
+async function enemyTurn() {
+  if (B.stun > 0) {
+    B.stun--;
+    battleMsg("它被粉末迷了眼，扑了个空。");
+    game.sfx("miss");
+    await game.wait(0.5);
+    B.mode = "menu";
+    return;
+  }
+  var dmg;
+  if (B.boss && B.turn % 3 === 0) {
+    battleMsg("山魈捶地，整座山都在响！");
+    dmg = rnd(9, 13);
+  } else {
+    battleMsg(B.def.name + "扑了上来。");
+    dmg = rnd(Math.max(2, B.def.atk - 1), B.def.atk + 2);
+  }
+  B.enemyOff = -6;
+  await game.wait(0.12);
+  B.enemyOff = 0;
+  game.sfx("hit");
+  game.shake(2, 0.18);
+  B.heroHp = Math.max(0, B.heroHp - dmg);
+  battleFx("-" + dmg, 36, 100, 0);
+  await game.wait(0.45);
+  B.turn++;
+  if (B.heroHp <= 0) {
+    B.result = "lose";
+    B.mode = "end";
+    battleMsg("眼前一黑……");
+    game.sfx("lose");
+    return;
+  }
+  B.mode = "menu";
+}
+
+async function playerAction(i) {
+  if (B.mode !== "menu") return;
+  if (i === 4) { // flee
+    if (B.boss) { game.sfx("err"); battleMsg("山魈挡在路前，跑不掉。"); return; }
+    B.mode = "busy";
+    battleMsg("你转身就跑……");
+    await game.wait(0.4);
+    if (Math.random() < 0.55) {
+      B.result = "flee";
+      B.mode = "end";
+      battleMsg("你退回了林子。");
+    } else {
+      battleMsg("没跑掉！");
+      await game.wait(0.2);
+      await enemyTurn();
+    }
+    return;
+  }
+  var cost = i === 1 ? 2 : (i === 2 || i === 3) ? 1 : 0;
+  if (B.qi < cost) { game.sfx("err"); battleMsg("气不够了。"); return; }
+  B.mode = "busy";
+  B.qi -= cost;
+  if (i === 0) {
+    battleMsg("你挥刀砍去。");
+    await game.wait(0.15);
+    var dmg0 = Math.max(1, battleAtk() + rnd(0, 3) - B.def.def);
+    B.hp = Math.max(0, B.hp - dmg0);
+    B.hurtUntil = game.time + 0.12;
+    game.sfx("hit"); game.flash(0.04); game.shake(1, 0.12);
+    battleFx("-" + dmg0, 142, 64, 0);
+  } else if (i === 1) {
+    battleMsg("快刀！");
+    await game.wait(0.12);
+    var dmg1 = Math.max(1, battleAtk() * 2 + rnd(0, 4) - B.def.def);
+    B.hp = Math.max(0, B.hp - dmg1);
+    B.hurtUntil = game.time + 0.16;
+    game.sfx("hit"); game.flash(0.07); game.shake(3, 0.18);
+    battleFx("-" + dmg1, 138, 54, 0);
+  } else if (i === 2) {
+    battleMsg("你撒出一把药粉。");
+    B.stun = 1;
+    game.sfx("miss");
+    await game.wait(0.35);
+  } else {
+    if (B.heroHp >= B.heroMax) { game.sfx("err"); battleMsg("伤已经好了。"); B.mode = "menu"; B.qi += cost; return; }
+    var heal = Math.min(10, B.heroMax - B.heroHp);
+    B.heroHp += heal;
+    battleMsg("你给自己包扎了一下。");
+    battleFx("+" + heal, 36, 96, 3);
+    game.sfx("ok");
+    await game.wait(0.45);
+  }
+  await game.wait(0.25);
+  if (B.hp <= 0) {
+    victory();
+    return;
+  }
+  await enemyTurn();
+}
+
+function victory() {
+  B.result = "win";
+  B.mode = "end";
+  var lines = [];
+  var drops = [];
+  for (var i = 0; i < B.def.drops.length; i++) {
+    var d = B.def.drops[i], n = rnd(d[1], d[2]);
+    if (n > 0) { addIng(d[0], n); drops.push([d[0], n]); lines.push(DATA.ING[d[0]].name + "×" + n); }
+  }
+  var money = rnd(B.def.money - 2, B.def.money + 2);
+  addMoney(money);
+  B.drops = drops;
+  B.money = money;
+  if (B.boss) {
+    S.flags.boss = 1;
+    unlockDish("god_soup");
+    addRep(2);
+  }
+  save();
+  battleMsg("赢了！" + (lines.length ? lines.join("　") + "　" : "") + money + " 文");
+  game.sfx("win");
+}
+
+game.scene("battle", {
+  enter: function (args) {
+    var def = DATA.ENEMIES[args.enemy];
+    B = {
+      id: args.enemy, def: def, boss: !!args.boss, from: args.from || "forest",
+      hp: def.hp, maxHp: def.hp, heroHp: 30, heroMax: 30, qi: 3, qiMax: 3,
+      turn: 1, stun: 0, mode: "menu", sel: 0, msg: def.intro,
+      fx: [], hurtUntil: 0, enemyOff: 0, result: null, drops: [], money: 0
+    };
+    busy = false;
+    game.ambience(args.from === "deep" ? "wind" : "stream", 0.3);
+    if (typeof playMusic === "function") playMusic("battle");
+  },
+  exit: function () {
+    if (typeof playMusic === "function") playMusic("forest");
+  },
+  update: function (dt) {
+    if (!B) return;
+    if (B.mode === "menu") {
+      if (game.repeat("left")) { B.sel = (B.sel + 3) % 4; game.sfx("move"); }
+      if (game.repeat("right")) { B.sel = (B.sel + 1) % 4; game.sfx("move"); }
+      if (game.repeat("up")) { B.sel = (B.sel + 2) % 4; game.sfx("move"); }
+      if (game.repeat("down")) { B.sel = (B.sel + 2) % 4; game.sfx("move"); }
+      if (game.pressed("a")) playerAction(B.sel);
+      if (game.pressed("b")) playerAction(4);
+    } else if (B.mode === "end") {
+      if (game.pressed("a") || game.pressed("b")) {
+        game.sfx("tap");
+        game.pop({ result: B.result, drops: B.drops, money: B.money });
+      }
+    }
+  },
+  draw: function (g) {
+    if (!B) return;
+    ART.battleBg(g, B.from === "deep" ? "deep" : "forest", game.time);
+    // enemy
+    var ex = B.from === "deep" ? 122 : B.id === "boar" ? 116 : 122;
+    var ey = B.id === "boss" ? 54 : B.id === "bamboo" ? 54 : 72;
+    ART.enemyBig(g, B.id, ex + B.enemyOff, ey, game.time, game.time < B.hurtUntil);
+    // hero
+    g.dither(34, 106, 24, 3, g.DARK, 1);
+    var hx = 32 + (B.heroHp > 0 ? Math.sin(game.time * 2) * 0.5 : 0);
+    g.sprite(ART.big.heroSide, hx, 72, { flip: false });
+    // top bars
+    g.window(6, 6, 96, 26, { thin: true });
+    g.text("小满", 10, 8);
+    g.text(B.heroHp + "/" + B.heroMax, 96, 8, { align: "right", color: g.DARK });
+    g.rect(10, 20, 84, 3, g.MID); g.rect(10, 20, Math.round(84 * B.heroHp / B.heroMax), 3, g.INK);
+    g.text("气", 10, 26, { color: g.DARK });
+    for (var q = 0; q < B.qiMax; q++) g.rect(24 + q * 8, 27, 5, 4, q < B.qi ? g.INK : g.MID);
+    g.window(114, 6, 96, 26, { thin: true });
+    g.text(B.def.name, 118, 8);
+    g.text(B.hp + "/" + B.maxHp, 204, 8, { align: "right", color: g.DARK });
+    g.rect(118, 20, 84, 3, g.MID); g.rect(118, 20, Math.round(84 * B.hp / B.maxHp), 3, g.INK);
+    // message
+    g.window(4, 144, 208, 30);
+    g.text(B.msg, 10, 148, { width: 196 });
+    // commands
+    g.window(4, 176, 208, 46);
+    var cmds = [
+      ["攻击", ""], ["快刀", "2气"], ["撒粉", "1气"], ["包扎", "1气"]
+    ];
+    for (var i = 0; i < 4; i++) {
+      var cx = i % 2 === 0 ? 10 : 110, cy = i < 2 ? 179 : 192;
+      if (i === B.sel) {
+        g.rect(cx - 4, cy - 1, 94, 14, g.INK);
+        g.text(cmds[i][0], cx, cy, { color: g.PAPER });
+        g.text(cmds[i][1], cx + 86, cy, { align: "right", color: g.PAPER });
+      } else {
+        var need = i === 1 ? 2 : (i === 2 || i === 3) ? 1 : 0;
+        g.text(cmds[i][0], cx, cy, { color: B.qi < need ? g.DARK : g.INK });
+        g.text(cmds[i][1], cx + 86, cy, { align: "right", color: g.DARK });
+      }
+    }
+    // fx
+    for (var f = 0; f < B.fx.length; f++) {
+      var fx = B.fx[f];
+      if (game.time < fx.until) {
+        var dy = (fx.until - game.time) * 12;
+        g.text(fx.text, fx.x, fx.y - dy, { color: fx.color });
+      }
+    }
+    B.fx = B.fx.filter(function (v) { return game.time < v.until; });
+    g.text("A 选　B 收手", 108, 226, { align: "center", color: g.DARK });
+    if (B.mode === "end") {
+      g.window(44, 100, 128, 22, { thin: true });
+      g.text("A 继续", 108, 105, { align: "center" });
+    }
+  }
+});
+</script>
+<script data-src="src/55-service.js">
+/* Evening service: four tables, a clock, and a finite number of portions. */
+var SERV = null;
+
+function clk(min) {
+  var h = Math.floor(min / 60) % 24, m = Math.floor(min % 60);
+  return (h < 10 ? "0" : "") + h + ":" + (m < 10 ? "0" : "") + m;
+}
+function tablePos(i) {
+  return ART.TABLES[i];
+}
+function seatPos(i) {
+  var p = tablePos(i);
+  return { x: p[0] + 16, y: p[1] - 20 };
+}
+function randomDish() {
+  if (!S.menu.length) return null;
+  var total = 0, i;
+  for (i = 0; i < S.menu.length; i++) total += DATA.DISHES[S.menu[i]].appeal;
+  var r = Math.random() * total;
+  for (i = 0; i < S.menu.length; i++) {
+    r -= DATA.DISHES[S.menu[i]].appeal;
+    if (r <= 0) return S.menu[i];
+  }
+  return S.menu[S.menu.length - 1];
+}
+function bestDish() {
+  var best = null;
+  for (var i = 0; i < S.menu.length; i++) {
+    if (!best || DATA.DISHES[S.menu[i]].price > DATA.DISHES[best].price) best = S.menu[i];
+  }
+  return best;
+}
+function hasDish(id) { return S.menu.indexOf(id) >= 0; }
+
+function makeCustomer(dish, who) {
+  var pat = (who ? 22 : 17) + (hasUpgrade("table") ? 4 : 0);
+  return {
+    dish: dish, who: who || null, state: "queue", seat: -1,
+    patience: pat, maxPatience: pat,
+    x: 202, y: 132, fx: 202, fy: 132, tx: 202, ty: 132, t: 1,
+    eatT: 0, variant: Math.floor(Math.random() * 3)
+  };
+}
+
+function buildSchedule() {
+  var list = [];
+  var n = serveCount();
+  var first = 18 * 60 + 10, span = 200;
+  for (var i = 0; i < n; i++) {
+    var dish = randomDish();
+    if (!dish) break;
+    list.push({ time: first + Math.round(i * span / n) + rnd(-3, 3), dish: dish, who: null });
+  }
+  function add(who, dish, time) {
+    if (!dish) return;
+    list.push({ time: time, dish: dish, who: who });
+  }
+  if (S.day === 1 && !seen("svc_ahe")) add("ahe", hasDish("mushroom_soup") ? "mushroom_soup" : bestDish(), 19 * 60);
+  if (S.day === 2 && !seen("svc_zhou")) add("zhou", hasDish("grilled_fish") ? "grilled_fish" : bestDish(), 19 * 60 + 20);
+  if (S.day === 3 && !seen("svc_yan")) add("yan", hasDish("pork") ? "pork" : hasDish("bamboo_pork") ? "bamboo_pork" : bestDish(), 20 * 60);
+  if (S.day === 5 && !seen("svc_critic")) add("critic", hasDish("mushroom_pot") ? "mushroom_pot" : bestDish(), 20 * 60);
+  if (S.day === 7) {
+    add("po", hasDish("god_soup") ? "god_soup" : bestDish(), 18 * 60 + 30);
+    add("zhou", hasDish("grilled_fish") ? "grilled_fish" : bestDish(), 19 * 60 + 30);
+    add("ahe", hasDish("mushroom_soup") ? "mushroom_soup" : bestDish(), 20 * 60 + 30);
+  }
+  list.sort(function (a, b) { return a.time - b.time; });
+  return list;
+}
+
+function freeSeat() {
+  for (var i = 0; i < SERV.seats; i++) if (!SERV.tables[i]) return i;
+  return -1;
+}
+function seatCustomer(c, seat) {
+  var p = seatPos(seat);
+  c.seat = seat;
+  c.state = "sit";
+  c.fx = c.x; c.fy = c.y;
+  c.tx = p.x; c.ty = p.y;
+  c.t = 0;
+  SERV.tables[seat] = c;
+}
+function queueCustomer(c) {
+  if (SERV.queue.length >= (2 + (hasUpgrade("table") ? 1 : 0))) { lostCustomer(c, "门口排不下了"); return; }
+  c.state = "queue";
+  c.x = 202; c.y = 132 + SERV.queue.length * 18;
+  c.fx = c.x; c.fy = c.y;
+  c.t = 1;
+  SERV.queue.push(c);
+  SERV.customers.push(c);
+}
+function lostCustomer(c, msg) {
+  SERV.lost++;
+  SERV.repDelta--;
+  if (c.who) {
+    if (S.day === 7) S.flags.vipFail = (S.flags.vipFail || 0) + 1;
+    SERV.storyQueue.push({ who: c.who, dish: c.dish, lost: true });
+  }
+  if (msg) sayToast(msg);
+}
+function payCustomer(c) {
+  var d = DATA.DISHES[c.dish];
+  if (!d) return;
+  var tip = 1 + (c.patience > c.maxPatience * 0.5 ? 1 : 0) + (c.who ? 1 : 0);
+  S.money += d.price + tip;
+  SERV.earned += d.price;
+  SERV.tips += tip;
+  SERV.served++;
+  SERV.repDelta++;
+  sayToast("+" + (d.price + tip) + " 文");
+  var fp = c.seat >= 0 ? seatPos(c.seat) : { x: c.x, y: c.y };
+  SERV.fx.push({ text: "+" + (d.price + tip) + "文", x: fp.x, y: fp.y - 18, until: game.time + 1.2 });
+  if (tip > 1) SERV.fx.push({ text: "好", x: fp.x + 28, y: fp.y - 20, until: game.time + 1.2 });
+  if (S.day === 7 && c.who) {
+    if (!S.flags["vip_" + c.who]) {
+      var ok = (c.who === "po" && c.dish === "god_soup") || (c.who === "zhou" && c.dish === "grilled_fish") || (c.who === "ahe" && c.dish === "mushroom_soup");
+      if (ok) S.flags.vip = (S.flags.vip || 0) + 1;
+      else S.flags.vipFail = (S.flags.vipFail || 0) + 1;
+      S.flags["vip_" + c.who] = 1;
+    }
+    if (!seen("svc7_" + c.who)) SERV.storyQueue.push({ who: c.who, dish: c.dish, lost: false });
+  } else if (c.who && !seen("svc_" + c.who)) {
+    SERV.storyQueue.push({ who: c.who, dish: c.dish, lost: false });
+  }
+}
+function startLeaving(c) {
+  if (c.seat >= 0 && SERV.tables[c.seat] === c) SERV.tables[c.seat] = null;
+  c.queue = false;
+  var qi = SERV.queue.indexOf(c);
+  if (qi >= 0) SERV.queue.splice(qi, 1);
+  c.state = "leave";
+  c.fx = c.x; c.fy = c.y;
+  c.tx = 202; c.ty = 132;
+  c.t = 0;
+}
+function removeCustomer(c) {
+  var i = SERV.customers.indexOf(c);
+  if (i >= 0) SERV.customers.splice(i, 1);
+}
+function seatFromQueue() {
+  if (!SERV.queue.length) return;
+  var seat = freeSeat();
+  if (seat < 0) return;
+  var c = SERV.queue.shift();
+  c.state = "sit";
+  c.seat = seat;
+  var p = seatPos(seat);
+  c.fx = c.x; c.fy = c.y;
+  c.tx = p.x; c.ty = p.y;
+  c.t = 0;
+  SERV.tables[seat] = c;
+}
+
+async function serveSeat(i) {
+  if (SERV.busy || SERV.menuOpen || SERV.paused) return;
+  var c = SERV.tables[i];
+  if (!c || c.state !== "wait") { game.sfx("err"); return; }
+  if (stockOf(c.dish) <= 0) {
+    game.sfx("err");
+    sayToast("「" + DATA.DISHES[c.dish].name + "」卖完了");
+    c.patience -= 4;
+    if (c.patience <= 0) { lostCustomer(c, "客人等走了"); startLeaving(c); seatFromQueue(); }
+    return;
+  }
+  SERV.busy = true;
+  SERV.waiter.action = "serve";
+  var p = seatPos(i);
+  SERV.waiter.fx = SERV.waiter.x; SERV.waiter.fy = SERV.waiter.y;
+  SERV.waiter.tx = p.x; SERV.waiter.ty = p.y + 2; SERV.waiter.t = 0;
+  await game.wait(0.24);
+  if (useStock(c.dish)) {
+    c.state = "eat";
+    c.eatT = 2.3;
+    game.sfx("ok");
+    SERV.fx.push({ text: "上菜", x: p.x, y: p.y - 8, until: game.time + 0.8 });
+  }
+  await game.wait(0.24);
+  SERV.waiter.fx = SERV.waiter.x; SERV.waiter.fy = SERV.waiter.y;
+  SERV.waiter.tx = 120; SERV.waiter.ty = 170; SERV.waiter.t = 0;
+  SERV.waiter.action = "";
+  await game.wait(0.24);
+  SERV.busy = false;
+}
+
+async function autoServe() {
+  if (SERV.busy || SERV.menuOpen || SERV.paused) return false;
+  for (var i = 0; i < SERV.seats; i++) {
+    var c = SERV.tables[i];
+    if (c && c.state === "wait" && stockOf(c.dish) > 0) {
+      if (!useStock(c.dish)) continue;
+      c.state = "eat";
+      c.eatT = 2.1;
+      SERV.fx.push({ text: "阿禾", x: seatPos(i).x, y: seatPos(i).y - 10, until: game.time + 1 });
+      game.sfx("tick");
+      if (c.who && (S.day === 7 ? !S.flags["vip_" + c.who] : !seen("svc_" + c.who))) {
+        SERV.storyQueue.push({ who: c.who, dish: c.dish, lost: false });
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
+function finishService(early) {
+  if (SERV.done) return;
+  SERV.done = true;
+  // pay the people already eating, lose the rest
+  for (var i = 0; i < SERV.customers.length; i++) {
+    var c = SERV.customers[i];
+    if (c.state === "eat") payCustomer(c);
+    else if (c.state !== "leave") lostCustomer(c, null);
+  }
+  var rep = Math.round(SERV.served / 3) - SERV.lost;
+  addRep(rep);
+  SERV.repDelta = rep;
+  S.phase = "night";
+  S.lastLedger = {
+    served: SERV.served, lost: SERV.lost, earned: SERV.earned, tips: SERV.tips,
+    repDelta: rep, leftover: stockTotal(), early: !!early
+  };
+  S.stats.served += SERV.served;
+  S.stats.lost += SERV.lost;
+  S.stats.earned += SERV.earned;
+  S.stats.tips += SERV.tips;
+  save();
+  game.go("night");
+}
+
+game.scene("service", {
+  enter: function () {
+    var seats = tableCount();
+    SERV = {
+      clock: 1080, end: 1320, seats: seats, sel: 0,
+      tables: new Array(seats).fill(null), queue: [], customers: [],
+      schedule: buildSchedule(), spawnAt: 0,
+      served: 0, lost: 0, earned: 0, tips: 0, repDelta: 0,
+      busy: false, menuOpen: false, paused: false, pauseSel: 0,
+      done: false, storyQueue: [], fx: [], staffTimer: 5,
+      waiter: { x: 120, y: 170, fx: 120, fy: 170, tx: 120, ty: 170, t: 1, action: "" }
+    };
+    game.ambience(S.weather === "rain" ? "rain" : null, 0.3);
+    if (typeof playMusic === "function") playMusic("service");
+    save();
+  },
+  update: function (dt) {
+    if (!SERV || SERV.done) return;
+    if (SERV.paused) {
+      if (game.repeat("left") || game.repeat("up")) { SERV.pauseSel = (SERV.pauseSel + 1) % 2; game.sfx("move"); }
+      if (game.repeat("right") || game.repeat("down")) { SERV.pauseSel = (SERV.pauseSel + 1) % 2; game.sfx("move"); }
+      if (game.pressed("a")) {
+        if (SERV.pauseSel === 0) { SERV.paused = false; game.sfx("tap"); }
+        else { game.sfx("tap"); finishService(true); }
+      }
+      if (game.pressed("start")) { SERV.paused = false; game.sfx("tap"); }
+      return;
+    }
+    if (SERV.menuOpen) {
+      if (game.pressed("b") || game.pressed("a") || game.pressed("start")) { SERV.menuOpen = false; game.sfx("tap"); }
+      return;
+    }
+    if (game.pressed("start")) { SERV.paused = true; SERV.pauseSel = 0; game.sfx("tap"); return; }
+    if (game.pressed("b")) { SERV.menuOpen = true; game.sfx("tap"); return; }
+    if (SERV.busy) return;
+    if (game.repeat("left")) { SERV.sel = (SERV.sel + SERV.seats - 1) % SERV.seats; game.sfx("move"); }
+    if (game.repeat("right")) { SERV.sel = (SERV.sel + 1) % SERV.seats; game.sfx("move"); }
+    if (game.pressed("a")) serveSeat(SERV.sel);
+    // story
+    if (SERV.storyQueue.length) {
+      var st = SERV.storyQueue.shift();
+      if (st.lost) { SERV.busy = false; return; }
+      SERV.busy = true;
+      var p = S.day === 7 ? FestivalStory(st.who, st.dish, false) : ServiceStory(st.who, st.dish, false);
+      if (p && p.then) p.then(function () { SERV.busy = false; });
+      else SERV.busy = false;
+      return;
+    }
+    // clock
+    SERV.clock += dt / 0.45;
+    if (SERV.clock >= SERV.end) { finishService(false); return; }
+    // arrivals
+    while (SERV.spawnAt < SERV.schedule.length && SERV.clock >= SERV.schedule[SERV.spawnAt].time) {
+      var sc = SERV.schedule[SERV.spawnAt++];
+      if (!sc.dish) continue;
+      var c = makeCustomer(sc.dish, sc.who);
+      var seat = freeSeat();
+      if (seat >= 0) { SERV.customers.push(c); seatCustomer(c, seat); }
+      else queueCustomer(c);
+    }
+    // people
+    for (var i = SERV.customers.length - 1; i >= 0; i--) {
+      var c = SERV.customers[i];
+      if (c.t < 1) {
+        c.t = Math.min(1, c.t + dt / 0.38);
+        c.x = LoGame.lerp(c.fx, c.tx, c.t);
+        c.y = LoGame.lerp(c.fy, c.ty, c.t);
+        if (c.t >= 1 && c.state === "sit") { c.state = "wait"; c.patience = c.maxPatience; }
+        if (c.t >= 1 && c.state === "leave") { removeCustomer(c); seatFromQueue(); }
+        continue;
+      }
+      if (c.state === "wait" || c.state === "queue") {
+        c.patience -= dt;
+        if (c.patience <= 0) {
+          lostCustomer(c, c.state === "queue" ? "等位的客人走了" : "客人等走了");
+          startLeaving(c);
+          seatFromQueue();
+        }
+      } else if (c.state === "eat") {
+        c.eatT -= dt;
+        if (c.eatT <= 0) { payCustomer(c); startLeaving(c); seatFromQueue(); }
+      }
+    }
+    // waiter
+    var w = SERV.waiter;
+    if (w.t < 1) {
+      w.t = Math.min(1, w.t + dt / 0.3);
+      w.x = LoGame.lerp(w.fx, w.tx, w.t);
+      w.y = LoGame.lerp(w.fy, w.ty, w.t);
+    }
+    // staff
+    if (S.staff === "ahe") {
+      SERV.staffTimer -= dt;
+      if (SERV.staffTimer <= 0) {
+        autoServe();
+        SERV.staffTimer = 6;
+      }
+    }
+    // floating text
+    SERV.fx = SERV.fx.filter(function (v) { return game.time < v.until; });
+  },
+  draw: function (g) {
+    if (!SERV) return;
+    ART.room(g, S, "service", game.time, SERV.sel);
+    // selected table marker
+    var sp = tablePos(SERV.sel);
+    g.arrow(sp[0] + 18, sp[1] - 12, "down", g.INK);
+    // customers
+    for (var i = 0; i < SERV.customers.length; i++) {
+      var c = SERV.customers[i];
+      if (c.state === "leave" || c.state === "sit" || c.state === "wait" || c.state === "queue") drawCustomer(g, c);
+      if (c.state === "eat") {
+        drawCustomer(g, c);
+        var tp = tablePos(c.seat);
+        g.rect(tp[0] + 18, tp[1] - 2, 8, 4, g.INK);
+        g.rect(tp[0] + 19, tp[1] - 3, 6, 2, g.PAPER);
+        ART.steam(g, tp[0] + 20, tp[1] - 6, game.time);
+      }
+      if (c.state === "wait") drawOrder(g, c);
+      if (c.state === "queue") drawQueueOrder(g, c);
+    }
+    // waiter
+    var w = SERV.waiter;
+    g.dither(w.x, w.y + 17, 12, 2, g.DARK, 1);
+    g.sprite(w.action === "serve" ? ART.big.heroSide : ART.big.heroDown, w.x - 2, w.y - 6, { flip: w.tx < 100 });
+    if (w.action === "serve") {
+      g.rect(w.x + 10, w.y + 4, 12, 3, g.INK);
+      g.rect(w.x + 13, w.y + 2, 6, 2, g.PAPER);
+    }
+    // staff
+    if (S.staff === "ahe") {
+      g.sprite(ART.big.ahe, 120, 90);
+    }
+    // header
+    UI.header(g, S, clk(SERV.clock));
+    // footer / action bar
+    g.window(6, 194, 204, 20, { thin: true });
+    g.text("A 上菜　B 菜单", 12, 197);
+    g.text("客 " + SERV.served + " / 走 " + SERV.lost, 204, 197, { align: "right", color: g.DARK });
+    UI.footer(g, "←→ 选桌　START 暂停");
+    // floating text
+    for (var f = 0; f < SERV.fx.length; f++) {
+      var fx = SERV.fx[f];
+      if (game.time < fx.until) g.text(fx.text, fx.x, fx.y - (fx.until - game.time) * 8, { color: g.INK });
+    }
+    UI.toast(g);
+    if (SERV.menuOpen) drawMenu(g);
+    if (SERV.paused) drawPause(g);
+  }
+});
+
+function customerSprite(c) {
+  if (c.who === "ahe") return ART.big.ahe;
+  if (c.who === "zhou") return ART.big.zhou;
+  if (c.who === "yan") return ART.big.yan;
+  if (c.who === "po") return ART.big.po;
+  if (c.who === "critic") return ART.big.guestC;
+  return c.variant === 0 ? ART.big.guestA : c.variant === 1 ? ART.big.guestB : ART.big.guestC;
+}
+function drawCustomer(g, c) {
+  g.dither(c.x - 2, c.y + 17, 16, 2, g.DARK, 1);
+  g.sprite(customerSprite(c), c.x - 2, c.y - 6);
+  if (c.state === "wait" && c.patience < c.maxPatience * 0.35 && Math.floor(game.time * 6) % 2 === 0) {
+    g.text("!", c.x + 2, c.y - 14, { color: g.INK });
+  }
+}
+function drawOrder(g, c) {
+  var tp = tablePos(c.seat);
+  var x = tp[0] + 2, y = tp[1] - 44;
+  g.window(x, y, 58, 18, { thin: true });
+  g.text(DATA.DISHES[c.dish].name, x + 4, y + 2);
+  if (c.who) ART.heart(g, x + 44, y + 5, true);
+  var frac = Math.max(0, c.patience / c.maxPatience);
+  g.rect(x + 2, y + 18, 54, 2, g.MID);
+  g.rect(x + 2, y + 18, Math.round(54 * frac), 2, frac < 0.35 ? g.INK : g.DARK);
+  g.rect(x + 14, y - 2, 2, 3, g.INK);
+}
+function drawQueueOrder(g, c) {
+  g.rect(c.x - 6, c.y - 6, 24, 2, g.MID);
+  g.rect(c.x - 6, c.y - 6, Math.round(24 * Math.max(0, c.patience / c.maxPatience)), 2, g.DARK);
+}
+function drawMenu(g) {
+  g.window(20, 52, 176, 128);
+  g.text("今日余量", 28, 56, { color: g.DARK });
+  for (var i = 0; i < S.menu.length; i++) {
+    var id = S.menu[i], y = 76 + i * 17;
+    ART.dish(g, id, 26, y - 1, game.time);
+    g.text(DATA.DISHES[id].name, 50, y);
+    g.text("× " + stockOf(id), 186, y, { align: "right", color: stockOf(id) ? g.INK : g.DARK });
+  }
+  g.text("A / B 返回", 108, 168, { align: "center", color: g.DARK });
+}
+function drawPause(g) {
+  g.window(48, 76, 120, 74);
+  g.text("暂停", 108, 80, { align: "center", color: g.DARK });
+  var opts = ["继续", "打烊"];
+  for (var i = 0; i < 2; i++) {
+    if (i === SERV.pauseSel) { g.rect(60, 98 + i * 20, 96, 16, g.INK); g.text(opts[i], 68, 100 + i * 20, { color: g.PAPER }); }
+    else g.text(opts[i], 68, 100 + i * 20);
+  }
+  g.text("START 继续", 108, 140, { align: "center", color: g.DARK });
+}
+
+function FestivalStory(who, dish, lost) {
+  return (async function () {
+    if (lost) return;
+    var ok = (who === "po" && dish === "god_soup") || (who === "zhou" && dish === "grilled_fish") || (who === "ahe" && dish === "mushroom_soup");
+    var pages = who === "po"
+      ? (ok ? ["这碗羹……山神会记得。", "小馆保住了。"] : ["心意到了。", "明年再说明年的话。"])
+      : who === "zhou"
+        ? (ok ? ["这条鱼，烤得正好。", "山神宴上，得有这一口。"] : ["鱼不错。", "下次再早一点。"])
+        : (ok ? ["这碗汤，还是我娘的味道。", "我明年还来。"] : ["人多，难为你了。", "汤还是热的。"]);
+    await game.push("event", { who: who, bg: "shop", pages: pages, cancel: false });
+    mark("svc7_" + who);
+  })();
+}
+</script>
+<script data-src="src/56-night.js">
+/* Night: the ledger, the rent, and the people who stayed. */
+var NIGHT_STORY = null, NIGHT_STORY_DONE = false;
+
+function nightRent() {
+  var rent = rentFor(S.day);
+  if (!rent) return null;
+  var old = S.debt;
+  var due = rent + old;
+  var paid = Math.min(S.money, due);
+  S.money -= paid;
+  S.rentPaid += paid;
+  var missed = due - paid;
+  S.debt = missed;
+  var out = { rent: due, paid: paid, missed: missed, old: old };
+  if (missed > 0) { addRep(-1); out.rep = -1; }
+  else { addRep(1); out.rep = 1; }
+  S.flags["rent" + S.day] = 1;
+  save();
+  return out;
+}
+
+function nightRefund() {
+  var refunded = 0;
+  if (hasUpgrade("cellar")) {
+    for (var id in S.stock) if (Object.prototype.hasOwnProperty.call(S.stock, id) && S.stock[id] > 0) {
+      var mi = mainIng(id);
+      if (mi) { addIng(mi, 1); refunded++; }
+    }
+  }
+  return refunded;
+}
+
+game.scene("night", {
+  enter: function () {
+    if (!S.lastLedger) S.lastLedger = { served: 0, lost: 0, earned: 0, tips: 0, repDelta: 0, leftover: 0, early: false };
+    if (!S.lastLedger.rentDone) {
+      S.lastLedger.refund = nightRefund();
+      S.lastLedger.rentInfo = nightRent();
+      S.lastLedger.rentDone = 1;
+      save();
+    }
+    S.phase = "night";
+    save();
+    NIGHT_STORY = null;
+    NIGHT_STORY_DONE = false;
+    if (S.day === 5 && S.flags.criticGood) {
+      NIGHT_STORY = { who: null, bg: "dawn", pages: ["第二天，镇上都在传陆先生的话。", "「山脚那家小馆，汤里有山气。」"] };
+    } else if (S.day === 6 && S.flags.boss && !seen("ahe_stay")) {
+      NIGHT_STORY = { who: "ahe", bg: "shop", pages: ["我明天来帮你。", "不要工钱，管饭就行。"], choices: ["留下", "再想想"], cancel: false, stay: true };
+    } else if (S.day === 6 && !S.flags.boss) {
+      NIGHT_STORY = { who: null, bg: "dawn", pages: ["雾里的山道还开着。", "山神宴前，还有一天。"] };
+    } else if (S.day === 4 && S.lastLedger.rentInfo && S.lastLedger.rentInfo.missed > 0) {
+      NIGHT_STORY = { who: "po", bg: "shop", pages: ["钱不够？", "初七一起算。利息，就算你多给我留一碗汤。"] };
+    }
+    game.ambience("fire", 0.18);
+    if (typeof playMusic === "function") playMusic("night");
+  },
+  update: function () {
+    if (busy) return;
+    if (game.pressed("a") || game.pressed("start")) {
+      game.sfx("tap");
+      if (S.day === 7) { game.go("ending"); return; }
+      if (NIGHT_STORY && !NIGHT_STORY_DONE) {
+        NIGHT_STORY_DONE = true;
+        busy = true;
+        var args = { who: NIGHT_STORY.who, bg: NIGHT_STORY.bg, pages: NIGHT_STORY.pages, choices: NIGHT_STORY.choices, cancel: false };
+        game.push("event", args).then(function (i) {
+          if (NIGHT_STORY && NIGHT_STORY.stay) {
+            if (i === 0) { S.npc.ahe = Math.max(4, S.npc.ahe); S.staff = null; save(); sayToast("阿禾会来帮忙了"); }
+            else { S.npc.ahe = Math.max(3, S.npc.ahe); save(); }
+            mark("ahe_stay");
+          }
+          busy = false;
+        });
+        return;
+      }
+      endDay();
+      startDay(S.day + 1);
+      S.phase = "morning";
+      save();
+      game.go("morning");
+    }
+  },
+  draw: function (g) {
+    ART.room(g, S, "night", game.time, -1);
+    UI.header(g, S, "打烊");
+    var L = S.lastLedger || {};
+    // left: the money
+    g.window(6, 32, 110, 180);
+    g.text("今日", 12, 36, { color: g.DARK });
+    var lines = [
+      ["客人", (L.served || 0) + " 位"],
+      ["走了", (L.lost || 0) + " 位"],
+      ["菜钱", (L.earned || 0) + " 文"],
+      ["小费", (L.tips || 0) + " 文"],
+      ["名声", (L.repDelta >= 0 ? "+" : "") + (L.repDelta || 0)],
+      ["剩菜", (L.leftover || 0) + " 份"]
+    ];
+    var y = 52;
+    for (var i = 0; i < lines.length; i++) {
+      g.text(lines[i][0], 12, y, { color: g.DARK });
+      g.text(lines[i][1], 108, y, { align: "right" });
+      y += 15;
+    }
+    g.rect(12, y - 2, 96, 1, g.MID);
+    y += 6;
+    if (L.refund) { g.text("腌菜坛退回 " + L.refund + " 份", 12, y, { color: g.DARK }); y += 15; }
+    var r = L.rentInfo;
+    if (r) {
+      g.text(r.old > 0 ? "房租+旧账" : "房租", 12, y, { color: g.DARK });
+      g.text(r.paid + "/" + r.rent, 108, y, { align: "right" });
+      y += 15;
+      if (r.missed > 0) { g.text("还欠 " + S.debt + " 文", 12, y, { color: g.INK }); y += 15; }
+    }
+    if (S.debt > 0) g.text("共欠 " + S.debt + " 文", 12, y, { color: g.INK });
+    else g.text("账清了", 12, y, { color: g.DARK });
+    // right: the people
+    g.window(120, 32, 90, 180);
+    g.text("常客", 126, 36, { color: g.DARK });
+    var names = DATA.NPC_ORDER;
+    for (var n = 0; n < names.length; n++) {
+      var id = names[n], ny = 54 + n * 20;
+      g.text(DATA.NPCS[id].name, 126, ny);
+      UI.hearts(g, 158, ny + 1, S.npc[id] || 0, 5);
+    }
+    var next = S.day < 7 ? dayWeather(S.day + 1) : "sunny";
+    g.text("明日", 126, 140, { color: g.DARK });
+    ART.weatherIcon(g, next, 156, 138, game.time);
+    g.text(DATA.WEATHER[next].name, 174, 140, { color: g.DARK });
+    g.text("总客 " + S.stats.served, 126, 160, { color: g.DARK });
+    g.text("总入 " + S.stats.earned, 126, 174, { color: g.DARK });
+    g.text("第七天，山神宴。", 126, 192, { color: g.DARK });
+    UI.footer(g, S.day === 7 ? "A 结局" : (NIGHT_STORY && !NIGHT_STORY_DONE ? "A 听她说" : "A 睡吧"));
+    UI.toast(g);
+  }
+});
+</script>
+<script data-src="src/57-shop.js">
+/* Shop: spend money on the things that make the days easier. */
+var SHOP_SEL = 0, SHOP_MSG = "", SHOP_MSG_UNTIL = 0;
+
+function shopStatus(id) {
+  var u = DATA.UPGRADES[id];
+  if (hasUpgrade(id)) return "已有";
+  if (S.rep < u.rep) return "名声 " + u.rep;
+  if (S.money < u.cost) return "钱不够";
+  return "可买";
+}
+
+game.scene("shop", {
+  enter: function () {
+    SHOP_SEL = 0;
+    SHOP_MSG = "";
+    SHOP_MSG_UNTIL = 0;
+    game.ambience(null);
+  },
+  update: function () {
+    if (busy) return;
+    if (game.repeat("up")) { SHOP_SEL = (SHOP_SEL + DATA.UPGRADE_ORDER.length - 1) % DATA.UPGRADE_ORDER.length; game.sfx("move"); }
+    if (game.repeat("down")) { SHOP_SEL = (SHOP_SEL + 1) % DATA.UPGRADE_ORDER.length; game.sfx("move"); }
+    if (game.pressed("a")) {
+      var id = DATA.UPGRADE_ORDER[SHOP_SEL], u = DATA.UPGRADES[id];
+      if (hasUpgrade(id)) { game.sfx("err"); SHOP_MSG = "这个已经有了。"; SHOP_MSG_UNTIL = game.time + 2; return; }
+      if (S.rep < u.rep) { game.sfx("err"); SHOP_MSG = "名声还不够，需要 " + u.rep + "。"; SHOP_MSG_UNTIL = game.time + 2.4; return; }
+      if (S.money < u.cost) { game.sfx("err"); SHOP_MSG = "钱不够，还差 " + (u.cost - S.money) + " 文。"; SHOP_MSG_UNTIL = game.time + 2.4; return; }
+      if (buyUpgrade(id)) {
+        game.sfx("ok");
+        sayToast("买下了「" + u.name + "」");
+      }
+    }
+    if (game.pressed("b") || game.pressed("start")) { game.sfx("tap"); game.go("morning"); }
+  },
+  draw: function (g) {
+    g.clear(g.PAPER);
+    UI.header(g, S, "店铺");
+    ART.facade(g, 48, 28, S, game.time);
+    g.window(6, 108, 204, 86);
+    for (var i = 0; i < DATA.UPGRADE_ORDER.length; i++) {
+      var id = DATA.UPGRADE_ORDER[i], u = DATA.UPGRADES[id], y = 112 + i * 16;
+      if (i === SHOP_SEL) g.rect(8, y - 2, 200, 16, g.INK);
+      var col = i === SHOP_SEL ? g.PAPER : g.INK;
+      g.rect(11, y, 14, 12, i === SHOP_SEL ? g.PAPER : g.INK);
+      g.text(u.short, 18, y, { align: "center", color: i === SHOP_SEL ? g.INK : g.PAPER });
+      g.text(u.name, 30, y, { color: col });
+      g.text(u.cost + "文", 100, y, { color: i === SHOP_SEL ? g.PAPER : g.DARK });
+      g.text(shopStatus(id), 204, y, { align: "right", color: i === SHOP_SEL ? g.PAPER : (hasUpgrade(id) ? g.DARK : g.INK) });
+    }
+    g.text(DATA.UPGRADES[DATA.UPGRADE_ORDER[SHOP_SEL]].desc, 10, 198, { width: 196, color: g.DARK });
+    if (game.time < SHOP_MSG_UNTIL) g.text(SHOP_MSG, 10, 210, { color: g.DARK });
+    UI.footer(g, "↑↓ 选　A 买　B 返回");
+    UI.toast(g);
+  }
+});
+</script>
+<script data-src="src/58-event.js">
+/* Events: a portrait, a few lines, sometimes a choice. */
+var EVENT_ARGS = null;
+
+ART.eventBg = function (g, bg, t) {
+  if (bg === "forest") {
+    ART.battleBg(g, "forest", t);
+    g.dither(0, 0, 216, 40, g.PAPER, 1);
+    for (var i = 0; i < 8; i++) g.pixel((i * 41 + t * 7) % 216, 40 + (i * 23) % 120, g.PAPER);
+    return;
+  }
+  if (bg === "deep") {
+    ART.battleBg(g, "deep", t);
+    g.dither(0, 0, 216, 90, g.PAPER, 1);
+    return;
+  }
+  // shop at night
+  g.clear(g.INK);
+  g.dither(0, 0, 216, 40, g.DARK, 1);
+  g.rect(140, 8, 66, 44, g.DARK);
+  g.rect(142, 10, 62, 40, g.MID);
+  g.rect(172, 10, 1, 40, g.INK); g.rect(142, 28, 62, 1, g.INK);
+  g.pixel(188, 20, g.PAPER); g.pixel(189, 19, g.PAPER); g.pixel(187, 19, g.PAPER); g.pixel(189, 21, g.PAPER);
+  g.rect(122, 18, 14, 38, g.INK);
+  g.rect(123, 19, 12, 36, g.PAPER);
+  g.text("汤", 129, 22, { align: "center" });
+  g.rect(112, 34, 10, 12, g.INK);
+  g.rect(113, 35, 8, 10, g.MID);
+  g.dither(113, 35, 8, 10, g.PAPER, 1);
+  g.rect(8, 36, 108, 112, g.MID);
+  g.dither(8, 36, 108, 4, g.DARK, 1);
+  g.dither(8, 144, 108, 4, g.DARK, 1);
+  g.dither(8, 40, 4, 104, g.DARK, 1);
+  g.dither(112, 40, 4, 104, g.DARK, 1);
+  g.rect(14, 148, 96, 3, g.INK);
+  g.dither(0, 152, 216, 30, g.INK, 1);
+  if (bg === "dawn") {
+    g.dither(0, 0, 216, 60, g.PAPER, 1);
+    g.dither(8, 36, 108, 112, g.PAPER, 1);
+  }
+  for (var d = 0; d < 8; d++) {
+    if (Math.floor(t * 2 + d) % 3) g.pixel((d * 29 + t * 5) % 216, 42 + (d * 37) % 100, g.PAPER);
+  }
+};
+
+game.scene("event", {
+  enter: function (args) {
+    EVENT_ARGS = args;
+    var run = async function () {
+      await game.wait(0.18);
+      var name = args.name || (args.who && DATA.NPCS[args.who] ? DATA.NPCS[args.who].name : "");
+      if (args.pages) await game.say(args.pages, { name: name, speed: 34 });
+      var result = 0;
+      if (args.choices && args.choices.length) {
+        result = await game.choose(args.choices, {
+          title: args.title,
+          x: 124, y: 52, width: 86,
+          cancel: args.cancel === true
+        });
+      }
+      game.pop(result);
+    };
+    run();
+  },
+  draw: function (g) {
+    if (!EVENT_ARGS) return;
+    ART.eventBg(g, EVENT_ARGS.bg || "shop", game.time);
+    if (EVENT_ARGS.who) ART.portrait(g, EVENT_ARGS.who, 14, 34);
+  }
+});
+
+/* ---- morning scenes ---- */
+function MorningStory() {
+  return (async function () {
+    if (!S) return;
+    if (S.day === 1 && !seen("intro")) {
+      await game.say(["山脚的小馆，今天重新开门。", "先出门采买，回来再备菜。", "七天后的山神宴，是它最后的机会。"]);
+      mark("intro");
+      return;
+    }
+    if (S.day === 2 && !seen("zhou1")) {
+      var z = await game.push("event", {
+        who: "zhou", bg: "dawn",
+        pages: ["下雨也得出船。这两条鱼，给你。", "你要是不嫌弃，就算我搭个伙。"],
+        choices: ["收下，记你账上", "给你十文"],
+        cancel: false
+      });
+      addIng("fish", 2);
+      if (z === 1) {
+        if (S.money >= 10) { addMoney(-10); addNpc("zhou", 2); await game.say("老周把钱推回来一半，又塞给你一条鱼。"); addIng("fish", 1); }
+        else { addNpc("zhou", 1); await game.say("你摸出几个铜板，老周摆摆手：“先记账。”"); }
+      } else addNpc("zhou", 1);
+      mark("zhou1");
+      sayToast("老周留下两条鱼");
+      return;
+    }
+    if (S.day === 3 && !seen("yan1")) {
+      var y = await game.push("event", {
+        who: "yan", bg: "forest",
+        pages: ["后山那头山猪，最近总来拱我的陷阱。", "你那个小馆，会做肉吗？"],
+        choices: ["教我两手", "帮我打一头"],
+        cancel: false
+      });
+      unlockDish("bamboo_pork");
+      addIng("meat", y === 1 ? 2 : 1);
+      addNpc("yan", y === 1 ? 2 : 1);
+      await game.say("阿岩把切肉的法子说了一遍。笋炒肉，上了菜单。");
+      mark("yan1");
+      sayToast("学会了「笋炒肉」");
+      return;
+    }
+    if (S.day === 4 && !seen("po4")) {
+      await game.push("event", {
+        who: "po", bg: "dawn",
+        pages: ["初四了。", "一百文，晚上我来取。", "交不上，就拿你那张灶台抵。"],
+        choices: ["准备好了", "再宽限两天"],
+        cancel: false
+      });
+      addNpc("po", S.money >= 100 ? 1 : 0);
+      mark("po4");
+      return;
+    }
+    if (S.day === 5 && !seen("critic5")) {
+      await game.push("event", {
+        who: "critic", bg: "dawn",
+        pages: ["听说山脚有间小馆，汤里有山气。", "今晚我来。菌菇煲，少一味都不行。"],
+        choices: ["一定备好", "我尽量"],
+        cancel: false
+      });
+      unlockDish("mushroom_pot");
+      mark("critic5");
+      sayToast("学会了「菌菇煲」");
+      return;
+    }
+    if (S.day === 6 && !seen("yan6")) {
+      await game.push("event", {
+        who: "yan", bg: "deep",
+        pages: ["雾一起，山魈就出来。", "你要的那味山珍，在它守着的地方。", "路我给你踩出来了。去不去，你自己定。"],
+        choices: ["去", "再等等"],
+        cancel: false
+      });
+      S.flags.deep = 1;
+      addNpc("yan", 1);
+      addIng("meat", 1);
+      mark("yan6");
+      sayToast("后山深处可以去了");
+      return;
+    }
+    if (S.day === 7 && !seen("day7")) {
+      S.ap = 3;
+      await game.say(["今晚山神宴。", "镇上的人都会来。三道菜，别砸了招牌。", "今天多给你一个时辰。"]);
+      mark("day7");
+      return;
+    }
+  })();
+}
+
+/* ---- things said over a served table ---- */
+function ServiceStory(who, dish) {
+  return (async function () {
+    var key = "svc_" + who;
+    if (seen(key)) return;
+    if (who === "ahe") {
+      var a = await game.push("event", {
+        who: "ahe", bg: "shop",
+        pages: ["这碗汤……和我娘做的一样。", "我明天还能来吗？"],
+        choices: ["随时来", "要收钱的"],
+        cancel: false
+      });
+      addNpc("ahe", a === 0 ? 1 : 0);
+      if (a === 0) await game.say("阿禾笑起来，把碗底最后一口汤喝完了。");
+      mark(key);
+    } else if (who === "zhou") {
+      var b = await game.push("event", {
+        who: "zhou", bg: "shop",
+        pages: ["鱼还合口吗？", "我这条河，别的不多，鱼管够。"],
+        choices: ["鲜", "下次多放姜"],
+        cancel: false
+      });
+      addNpc("zhou", 1);
+      if (b === 1) addIng("fish", 1);
+      mark(key);
+    } else if (who === "yan") {
+      var c = await game.push("event", {
+        who: "yan", bg: "shop",
+        pages: ["肉切得厚。", "下回我打一头小的，给你练手。"],
+        choices: ["跟你学的", "下回你切"],
+        cancel: false
+      });
+      addNpc("yan", 1);
+      mark(key);
+    } else if (who === "critic") {
+      var good = dish === "mushroom_pot";
+      await game.push("event", {
+        who: "critic", bg: "shop",
+        pages: good
+          ? ["这锅菌菇煲，火候到了。", "我走过不少地方，这碗汤有山气。"]
+          : ["这不是我要的那道菜。", "火候还差一点。"],
+        choices: good ? ["先生慢用", "还请指教"] : ["对不住", "再给您做一碗"],
+        cancel: false
+      });
+      if (good) {
+        addMoney(30);
+        addRep(2);
+        S.flags.criticGood = 1;
+        sayToast("陆先生留下三十文");
+      } else {
+        addRep(-1);
+      }
+      mark(key);
+    } else if (who === "po") {
+      var vip = dish === "god_soup";
+      await game.push("event", {
+        who: "po", bg: "shop",
+        pages: vip
+          ? ["这碗羹……山神会记得。", "小馆保住了。"]
+          : ["心意到了。", "明年再说明年的话。"],
+        cancel: false
+      });
+      if (vip) S.flags.vip = (S.flags.vip || 0) + 1;
+      else S.flags.vipFail = (S.flags.vipFail || 0) + 1;
+      mark(key);
+    }
+  })();
+}
+</script>
+<script data-src="src/59-ending.js">
+/* One of four mornings after the seventh night. */
+game.scene("ending", {
+  enter: function () {
+    var paid = S.debt <= 0;
+    var vip = S.flags.vip || 0;
+    if (!paid) this.kind = "bad";
+    else if (vip >= 3 && S.rep >= 8 && (S.npc.ahe || 0) >= 4) this.kind = "best";
+    else if (S.rep >= 5 || vip >= 1) this.kind = "good";
+    else this.kind = "normal";
+    S.phase = "ending";
+    save();
+    game.ambience("stream", 0.25);
+    if (typeof playMusic === "function") playMusic("ending");
+  },
+  update: function () {
+    if (game.pressed("a") || game.pressed("start")) {
+      game.sfx("tap");
+      bootSave = null;
+      S = null;
+      game.go("title");
+    }
+  },
+  draw: function (g) {
+    ART.ending(g, game.time, this.kind);
+    var K = {
+      best: ["山脚小馆", "山神宴散了，小馆的灯还亮着。", "阿禾留了下来。招牌换了新的。", "山脚的汤，有了名字。"],
+      good: ["山脚小馆", "山神宴过了，小馆还在。", "钱不多，客人不少。", "明天还得早起。"],
+      normal: ["山脚小馆", "七天，撑过来了。", "账上没剩几个钱，灶还是热的。", "明天还得早起。"],
+      bad: ["山脚小馆", "灯灭了。", "山脚的小馆，没能等到第八天。", "但灶台还在，火种也还在。"]
+    }[this.kind];
+    g.window(10, 8, 150, 44);
+    g.text(K[0], 85, 12, { align: "center" });
+    g.text(K[1], 10, 28, { align: "center", width: 150, color: g.DARK });
+    g.window(6, 168, 204, 68);
+    g.text(K[2], 6, 172, { align: "center", width: 204 });
+    g.text(K[3], 6, 188, { align: "center", width: 204, color: g.DARK });
+    g.text("客 " + S.stats.served + " · 入 " + S.stats.earned + " 文 · 名 " + S.rep + (S.debt ? " · 欠 " + S.debt : ""), 6, 204, { align: "center", width: 204, color: g.DARK });
+    g.text("A 回到标题", 108, 220, { align: "center" });
+    UI.toast(g);
+  }
+});
+</script>
+<script data-src="src/60-boot.js">
+/* Load the save, then open the shop. */
+var booted = false, bootSave = null;
+game.load(SAVE_KEY).then(function (v) {
+  if (v && v.v === SAVE_VERSION) bootSave = v;
+  booted = true;
+});
+game.start("title");
+</script>
+</body>
+</html>
