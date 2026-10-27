@@ -1,6 +1,6 @@
 {
   "spec": "lopda/1",
-  "generated": "2026-10-26",
+  "generated": "2026-10-27",
   "apps": [
     {
       "spec": "lopda/1",
@@ -613,8 +613,8 @@
         "notes"
       ],
       "path": "apps/sisyphus/index.html",
-      "sha256": "c3db3b1a1e77c0f778148b31926263aca547c3c2066fdede0e2d76206558c971",
-      "bytes": 91519
+      "sha256": "454bbb1a6980ef4ffe7c7c8abe6ad7f669407ffa6249a4bfb1221e0b9c708eae",
+      "bytes": 95113
     },
     {
       "spec": "lopda/1",
