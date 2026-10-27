@@ -1,6 +1,6 @@
 # 设计研究：西西弗斯 / Sisyphus
 
-状态：v0.1.0 已实现（占位美术，合成音效）。实现见 `registry/apps/sisyphus/`；美术需求见 `docs/design/sisyphus-art-prompt.md`；采样替换见 `docs/design/sisyphus-todo.md`。目标平台是 Lo-PDA 社区 app（`lopda/1`，`"buttons": true`，`"permissions": ["notes"]`）。
+状态：v0.1.1 已实现（占位美术，合成音效）。实现见 `registry/apps/sisyphus/`；美术需求见 `docs/design/sisyphus-art-prompt.md`；采样替换见 `docs/design/sisyphus-todo.md`。目标平台是 Lo-PDA 社区 app（`lopda/1`，`"buttons": true`，`"permissions": ["notes"]`）。
 
 一句话：把巨石推上去，它从另一边滚下去；西西弗斯走下山，再推。没有胜利，没有失败，只有一次次山顶的停顿和加缪的一句话。
 
@@ -318,7 +318,7 @@ registry/apps/sisyphus/
   "name": "西西弗斯",
   "glyph": "石",
   "category": "game",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "推石上山。它滚下去。再推。加缪的十六句话在山顶等你。",
   "i18n": { "en": { "name": "Sisyphus", "description": "Push the stone. It falls. Push again. Sixteen lines from Camus wait at the summit." } },
   "author": "…",
