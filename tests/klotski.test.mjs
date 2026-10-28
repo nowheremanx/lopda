@@ -140,6 +140,16 @@ test("klotski: a piece cannot slide onto or through another piece", () => {
   assert.equal(KRules.maxSteps(blocked, blockedPieces, 0, 0, 1), 0, "a 2x1 bar slid down onto a soldier");
 });
 
+test("klotski: canMoveAny finds the pieces a player can actually move", () => {
+  const d = DATA.levels.find((x) => x.id === "k27");
+  const level = KRules.parse(d.rows);
+  const pieces = KRules.reset(level);
+  assert.equal(KRules.canMoveAny(level, pieces, level.cao), false, "Cao should be walled in at the start");
+  let moving = 0;
+  for (let i = 0; i < pieces.length; i++) if (KRules.canMoveAny(level, pieces, i)) moving++;
+  assert.ok(moving >= 2, "the opening has only " + moving + " movable pieces");
+});
+
 test("klotski: validPieces rejects overlaps, walls and pieces outside the board", () => {
   const level = KRules.parse(["B..C", "B..C", "....", "....", "...."]);
   const pieces = KRules.reset(level);
@@ -291,6 +301,27 @@ test("klotski app: a lesson's intro can be read, then the target completes the l
   const saved = app.ctx.get("saved");
   assert.equal(saved.lessons.m01.done, 1);
   assert.equal(saved.lessons.m01.best, 2);
+});
+
+test("klotski app: SELECT starts on a movable piece and skips the blocked ones", async () => {
+  const { app, pad } = await bootApp();
+  const K = app.ctx.get("window").KLOTSKI;
+  const d = DATA.levels.find((x) => x.id === "k27");
+  const level = KRules.parse(d.rows);
+  assert.ok(K.open("k27"));
+  run(app, 5);
+  const piecesOf = (state) => state.pieces.map((p) => ({ x: p[0], y: p[1] }));
+  let state = K.state();
+  assert.ok(KRules.canMoveAny(level, piecesOf(state), state.selected), "the first selection is blocked");
+  const seen = new Set([state.selected]);
+  for (let i = 0; i < 6; i++) {
+    tapButton(app, pad, "select");
+    run(app, 2);
+    state = K.state();
+    assert.ok(KRules.canMoveAny(level, piecesOf(state), state.selected), "SELECT landed on a blocked piece");
+    seen.add(state.selected);
+  }
+  assert.ok(seen.size >= 2, "SELECT never changed the piece");
 });
 
 test("klotski app: the level list is open, and a key moves the selected piece", async () => {

@@ -155,11 +155,23 @@ function drawCheck(g, x, y, tone) {
   g.line(x + 3, y + 7, x + 8, y, tone);
   g.line(x + 4, y + 7, x + 9, y, tone);
 }
-function dottedRect(g, x, y, w, h, tone) {
-  var i;
-  for (i = 0; i < w; i += 4) { g.rect(x + i, y, 2, 1, tone); g.rect(x + i, y + h - 1, 2, 1, tone); }
-  for (i = 0; i < h; i += 4) { g.rect(x, y + i, 1, 2, tone); g.rect(x + w - 1, y + i, 1, 2, tone); }
+/* The selected piece gets a thick inset ring and corner ticks. It is drawn inside the piece so it
+   is never clipped by the board edge and never covers a neighbour; the tone flips on dark Cao. */
+function selectionMark(g, x, y, w, h, onInk) {
+  var tone = onInk ? g.PAPER : g.INK, s = 6;
+  g.frame(x + 3, y + 3, w - 6, h - 6, tone);
+  g.frame(x + 4, y + 4, w - 8, h - 8, tone);
+  g.rect(x + 3, y + 3, s, 2, tone);
+  g.rect(x + 3, y + 3, 2, s, tone);
+  g.rect(x + w - 3 - s, y + 3, s, 2, tone);
+  g.rect(x + w - 5, y + 3, 2, s, tone);
+  g.rect(x + 3, y + h - 5, s, 2, tone);
+  g.rect(x + 3, y + h - 3 - s, 2, s, tone);
+  g.rect(x + w - 3 - s, y + h - 5, s, 2, tone);
+  g.rect(x + w - 5, y + h - 3 - s, 2, s, tone);
 }
+
+
 /* The lesson's target must stay visible when another piece sits on it. A 2 px dashed border
    alternates ink and paper, so at least half of it reads on either tone; the corners and the centre
    have a paper underlay so they do not vanish on a dark piece. */
@@ -211,6 +223,18 @@ function geomOf(level) {
     h: level.h * cell
   };
 }
+/* start on a piece the player can actually move: Cao if possible, else the lesson target, else any */
+function initialSelection(level, pieces) {
+  var preferred = level.cao >= 0 ? level.cao : 0, i;
+  if (level.goal && level.goal.piece) {
+    var gi = KRules.pieceIndex(level, level.goal.piece);
+    if (gi >= 0) preferred = gi;
+  }
+  if (KRules.canMoveAny(level, pieces, preferred)) return preferred;
+  for (i = 0; i < pieces.length; i++) if (KRules.canMoveAny(level, pieces, i)) return i;
+  return preferred;
+}
+
 function pieceLabel(p) {
   if (p.kind === "cao") return T({ zh: "曹操", en: "CAO" });
   if (p.kind === "h") return T({ zh: "横将", en: "GEN" });
@@ -218,7 +242,7 @@ function pieceLabel(p) {
   if (p.kind === "s") return T({ zh: "兵", en: "SOL" });
   return T({ zh: "块", en: "BLK" });
 }
-function drawPiece(g, level, geom, i, at, ox, oy, selected) {
+function drawPiece(g, level, geom, i, at, ox, oy) {
   var p = level.pieces[i], cell = geom.cell;
   var x = geom.x + at.x * cell + (ox || 0), y = geom.y + at.y * cell + (oy || 0);
   var w = p.w * cell, h = p.h * cell;
@@ -241,12 +265,6 @@ function drawPiece(g, level, geom, i, at, ox, oy, selected) {
   var isGoal = !!(level.goal && level.goal.piece && level.goal.piece === p.ch);
   var label = isGoal && p.kind !== "cao" ? p.ch : pieceLabel(p);
   g.text(label, x + w / 2, y + h / 2 - 7, { align: "center", color: p.kind === "cao" ? g.PAPER : g.INK });
-  if (isGoal) {
-    /* the lesson's marked piece: a solid ring, with a paper gap so it reads on ink too */
-    g.frame(x - 4, y - 4, w + 8, h + 8, g.PAPER);
-    g.frame(x - 5, y - 5, w + 10, h + 10, g.INK);
-  }
-  if (selected) dottedRect(g, x - 2, y - 2, w + 4, h + 4, g.INK);
 }
 
 function drawBoard(g, level, pieces, anim, bump, selected, hint, hideCao, caoExtraY) {
@@ -297,10 +315,10 @@ function drawBoard(g, level, pieces, anim, bump, selected, hint, hideCao, caoExt
       var nudge = Math.sin(Math.PI * Math.min(1, bt)) * 4;
       ox += bump.dx * nudge; oy += bump.dy * nudge;
     }
-    drawPiece(g, level, geom, i, pieces[i], ox, oy, selected === i);
+    drawPiece(g, level, geom, i, pieces[i], ox, oy);
   }
   if (hideCao >= 0) {
-    drawPiece(g, level, geom, hideCao, pieces[hideCao], 0, caoExtraY || 0, false);
+    drawPiece(g, level, geom, hideCao, pieces[hideCao], 0, caoExtraY || 0);
   }
   if (level.goal && level.goal.piece) {
     var ti = KRules.pieceIndex(level, level.goal.piece);
@@ -309,6 +327,27 @@ function drawBoard(g, level, pieces, anim, bump, selected, hint, hideCao, caoExt
       var tx = geom.x + level.goal.x * cell, ty = geom.y + level.goal.y * cell;
       targetMark(g, tx, ty, p.w * cell, p.h * cell);
     }
+  }
+  /* the selection ring is drawn last so a neighbouring piece can never cover it */
+  if (selected >= 0 && selected < pieces.length) {
+    var sox = 0, soy = 0;
+    if (anim && anim.i === selected) {
+      var st = Math.min(1, anim.t / anim.dur);
+      var se = st < 0.5 ? 2 * st * st : 1 - Math.pow(-2 * st + 2, 2) / 2;
+      sox = (anim.fx - pieces[selected].x) * cell * (1 - se);
+      soy = (anim.fy - pieces[selected].y) * cell * (1 - se);
+    }
+    if (bump && bump.i === selected) {
+      var sbt = Math.min(1, bump.t / 0.18);
+      var sn = Math.sin(Math.PI * sbt) * 4;
+      sox += bump.dx * sn; soy += bump.dy * sn;
+    }
+    selectionMark(g,
+      geom.x + pieces[selected].x * cell + sox,
+      geom.y + pieces[selected].y * cell + soy,
+      level.pieces[selected].w * cell,
+      level.pieces[selected].h * cell,
+      level.pieces[selected].kind === "cao");
   }
   if (hint) {
     p = pieces[hint.i];
@@ -331,7 +370,7 @@ var table = {
 function tableReset(fresh) {
   var level = table.level;
   table.pieces = KRules.reset(level);
-  table.moves = 0; table.history = []; table.selected = level.cao >= 0 ? level.cao : 0;
+  table.moves = 0; table.history = []; table.selected = initialSelection(level, table.pieces);
   table.hints = 0; table.undos = 0; table.assisted = false;
   table.ui = "play"; table.queue = []; table.anim = null; table.bump = null;
   table.hint = null; table.hintLeft = 0; table.solving = false; table.demo = null;
@@ -388,7 +427,7 @@ function tableEnter(args) {
     cur = loadCurrent(level);
     if (cur) {
       table.pieces = cur.pieces; table.moves = cur.moves; table.history = [];
-      table.selected = level.cao >= 0 ? level.cao : 0;
+      table.selected = initialSelection(level, table.pieces);
       table.hints = cur.hints; table.undos = cur.undos; table.assisted = cur.assisted;
       table.resumed = true;
       setToast(T({ zh: "继续上次", en: "Resumed" }));
@@ -507,11 +546,23 @@ function selectPiece(i) {
   table.selected = i;
   game.sfx("ok");
 }
+/* the next piece that can actually move, going round from `start` (never `start` itself unless it is
+   the only movable one and we go all the way round) */
+function nextMovable(start) {
+  var n = table.pieces.length, i, idx;
+  for (i = 1; i <= n; i++) {
+    idx = (start + i) % n;
+    if (KRules.canMoveAny(table.level, table.pieces, idx)) return idx;
+  }
+  return -1;
+}
 function cyclePiece() {
-  var n = table.pieces.length;
+  var n = table.pieces.length, idx;
   if (!n) return;
-  table.selected = (table.selected + 1) % n;
-  game.sfx("tick");
+  idx = nextMovable(table.selected);
+  if (idx < 0) { table.selected = (table.selected + 1) % n; game.sfx("err"); return; }
+  table.selected = idx;
+  game.sfx("ok");
 }
 function enqueue(i, dx, dy, n) {
   var k;
@@ -624,6 +675,10 @@ function updateAnim(dt) {
       table.anim = null;
       if (KRules.goalMet(table.level, table.pieces, table.level.goal)) { startWin(); return; }
     }
+  }
+  if (!table.anim && !table.queue.length && !table.win && !KRules.canMoveAny(table.level, table.pieces, table.selected)) {
+    var nm = nextMovable(table.selected);
+    if (nm >= 0) table.selected = nm;
   }
   if (!table.anim && table.queue.length) pump();
   else if (!table.anim && !table.queue.length && !table.win && KRules.goalMet(table.level, table.pieces, table.level.goal)) startWin();
@@ -853,7 +908,7 @@ function drawHUD(g) {
     l2 = "";
   } else {
     l1 = T({ zh: "拖/方向　A 提示　B 撤销", en: "Drag/keys  A hint  B undo" });
-    l2 = T({ zh: "SELECT 换块　START 菜单", en: "SEL piece  START menu" });
+    l2 = T({ zh: "SELECT 可动　START 菜单", en: "SEL movable  START menu" });
   }
   if (l1) g.text(l1, 5, FOOT + 1, { color: g.INK });
   if (l2) g.text(l2, 5, FOOT + 13, { color: g.INK });
