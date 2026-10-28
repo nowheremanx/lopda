@@ -36,6 +36,7 @@ function prepConfirm() {
   save();
   game.sfx("ok");
   sayToast("备好了 " + stockTotal() + " 份");
+  MORNING_SEL = 5; // 开门
   game.go("morning");
 }
 

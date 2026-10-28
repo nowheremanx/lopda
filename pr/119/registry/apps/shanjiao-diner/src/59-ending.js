@@ -5,7 +5,7 @@ game.scene("ending", {
     var vip = S.flags.vip || 0;
     if (!paid) this.kind = "bad";
     else if (vip >= 3 && S.rep >= 8 && (S.npc.ahe || 0) >= 4) this.kind = "best";
-    else if (S.rep >= 5 || vip >= 1) this.kind = "good";
+    else if (S.rep >= 9 || vip >= 2) this.kind = "good";
     else this.kind = "normal";
     S.phase = "ending";
     save();

@@ -217,6 +217,11 @@ game.scene("forest", {
   },
   update: function (dt) {
     if (!trip || busy) return;
+    if (game.pressed("start")) {
+      game.sfx("tap");
+      game.push("codex", { from: "forest" });
+      return;
+    }
     if (game.pressed("b")) {
       if (trip.area === "deep") {
         game.sfx("move");
@@ -301,6 +306,28 @@ game.scene("forest", {
       if (game.time < fx.until) g.text(fx.text, fx.x, fx.y - (fx.until - game.time) * 8, { color: g.PAPER });
     }
     trip.fx = trip.fx.filter(function (v) { return game.time < v.until; });
+    // the icon is 12 px; a name tag appears when the player is next to it
+    var near = null;
+    for (var nn = 0; nn < trip.nodes.length; nn++) {
+      var nd = trip.nodes[nn];
+      if (Math.abs(nd.x - p.x) <= 1 && Math.abs(nd.y - p.y) <= 1) { near = nd; break; }
+    }
+    var nearFoe = null;
+    if (!near) {
+      for (var nf = 0; nf < trip.monsters.length; nf++) {
+        var mo = trip.monsters[nf];
+        if (Math.abs(mo.x - p.x) <= 1 && Math.abs(mo.y - p.y) <= 1) { nearFoe = mo; break; }
+      }
+    }
+    var tag = near ? DATA.ING[near.kind].name : nearFoe ? DATA.ENEMIES[nearFoe.id].name : "";
+    if (tag) {
+      var lw = g.measure(tag) + 8;
+      var src = near || nearFoe;
+      var lx = Math.max(2, Math.min(216 - lw - 2, src.x * 12 + 6 - lw / 2));
+      var ly = Math.max(28, Math.min(200, 24 + src.y * 12 - 14));
+      g.window(lx, ly, lw, 14, { thin: true });
+      g.text(tag, lx + 4, ly + 2);
+    }
     g.clip();
     // HUD
     g.window(6, 4, 204, 22, { thin: true });
@@ -311,7 +338,7 @@ game.scene("forest", {
       g.rect(122 + st * 8, 8, 5, 5, st < trip.stamina ? g.INK : g.MID);
     }
     g.text("篮 " + trip.basket + "/" + trip.basketMax, 202, 6, { align: "right", color: g.DARK });
-    UI.footer(g, trip.area === "deep" ? "方向键 走　B 回后山" : "方向键 走　B 回店");
+    UI.footer(g, trip.area === "deep" ? "方向键 走　START 图鉴　B 回后山" : "方向键 走　START 图鉴　B 回店");
     UI.toast(g);
   }
 });

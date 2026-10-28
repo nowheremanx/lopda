@@ -8,8 +8,9 @@ Open the Store, or `sdk/dev.html?app=registry/apps/shanjiao-diner`.
 
 - Arrow keys: choose / walk
 - A: confirm / gather / serve
-- B: back / open the stock list during service
-- START: pause during service
+- B: back / open the stock list during service; the cursor stays on the action you left
+- START: pause during service; in the mountain, open the codex
+- SELECT: the layout grid (development)
 
 ## The week
 
@@ -20,6 +21,7 @@ Day 7 is the mountain god's feast. Three guests matter; the best ending wants th
 ## What is in it
 
 - 8 dishes, 7 ingredients, 4 enemies (one boss)
+- an ingredient / dish / beast codex (早市「图鉴」, or START in the mountain)
 - 5 shop upgrades, 4 regulars with affinity, 3 helpers
 - 2 mountain maps, 7 days, 4 endings
 - Original pixel art, original MML music and ambience

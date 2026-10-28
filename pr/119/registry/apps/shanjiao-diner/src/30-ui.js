@@ -135,8 +135,14 @@ var UI = (function () {
       o.draw(g, idx, y, idx === o.sel);
     }
     g.clip();
-    if (scroll > 0) g.text("▲", o.x + o.w - 10, o.y + 1, { color: g.DARK });
-    if (scroll + visible < o.count) g.text("▼", o.x + o.w - 10, o.y + o.h - 12, { color: g.DARK });
+    // a 2 px scrollbar instead of arrows: it never sits on the last column
+    if (o.count > visible) {
+      var trackY = o.y, trackH = o.h;
+      var thumbH = Math.max(8, Math.round(trackH * visible / o.count));
+      var thumbY = trackY + Math.round((trackH - thumbH) * scroll / Math.max(1, o.count - visible));
+      g.rect(o.x + o.w - 2, trackY, 1, trackH, g.MID);
+      g.rect(o.x + o.w - 3, thumbY, 2, thumbH, g.DARK);
+    }
     return scroll;
   }
 
@@ -186,17 +192,17 @@ var UI = (function () {
       "先出门采买，回来再备菜；",
       "出门去后山采食材、打山兽。",
       "傍晚开门，客人点单，按 A 上菜。",
-      "打烊后看账，第四天和第七天交租。",
+      "打烊看账，初四、初七交租。",
       "第七天山神宴：备好三道菜。",
-      "",
+      "图鉴：早市或后山 START。",
       "方向键 选    A 好    B 返回",
       "START 暂停 / 存档",
       "",
-      "钱、好感和名声都会留到第二天。",
+      "钱、好感、名声都留到明天。",
       "常客好感 3 心，会来帮你。"
     ];
     for (var i = 0; i < lines.length; i++) {
-      text(g, lines[i], 14, 52 + i * 15, { color: i === 7 ? g.DARK : g.INK, fit: 188 });
+      text(g, lines[i], 14, 52 + i * 14, { color: i === 7 ? g.DARK : g.INK, fit: 188 });
     }
     footer(g, "A / B 返回");
   }

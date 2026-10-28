@@ -73,7 +73,7 @@ function MorningStory() {
   return (async function () {
     if (!S) return;
     if (S.day === 1 && !seen("intro")) {
-      await game.say(["山脚的小馆，今天重新开门。", "先出门采买，回来再备菜。", "七天后的山神宴，是它最后的机会。"]);
+      await game.say(["山脚的小馆，今天重新开门。", "先出门采买，回来再备菜。", "不认识的食材，早市「图鉴」里查。", "七天后的山神宴，是它最后的机会。"]);
       mark("intro");
       return;
     }
