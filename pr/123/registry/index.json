@@ -1,6 +1,6 @@
 {
   "spec": "lopda/1",
-  "generated": "2026-10-27",
+  "generated": "2026-10-28",
   "apps": [
     {
       "spec": "lopda/1",
@@ -254,9 +254,9 @@
         "................",
         "................"
       ],
-      "version": "2.0.0",
+      "version": "2.1.0",
       "released": "2026-10-21",
-      "updated": "2026-10-21",
+      "updated": "2026-10-27",
       "description": "节奏故事：十首古典曲、三幕剧情、四种结局。A 吹竽、B 敲磬；国王睁眼时停手，闭上再起手。",
       "i18n": {
         "en": {
@@ -267,8 +267,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/fake-yu/index.html",
-      "sha256": "aa3c3c03d8297f8679b854270dc51b1366c0419932875779e859d3e84fe2d573",
-      "bytes": 181647
+      "sha256": "48c2be3bfcafc87878807166c3c64bbb326423e7ea1d9aff88b859d0ddecc5d8",
+      "bytes": 202573
     },
     {
       "spec": "lopda/1",
@@ -599,8 +599,7 @@
         "................"
       ],
       "version": "0.1.1",
-      "released": "2026-10-25",
-      "updated": "2026-10-27",
+      "released": "2026-10-27",
       "description": "推石上山。它滚下去。再推。加缪的十六句话在山顶等你。",
       "i18n": {
         "en": {
