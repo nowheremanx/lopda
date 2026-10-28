@@ -73,7 +73,7 @@ function makeRules(tuned, before) {
     for (const [id, p] of Object.entries(TUNED.enemies || {})) Object.assign(enemies[id], p);
     Object.assign(rent, TUNED.rent || {});
   }
-  return { dishes, enemies, rent, weather: DATA.WEATHER, weatherByDay: DATA.WEATHER_BY_DAY };
+  return { dishes, enemies, rent, weather: DATA.WEATHER, weatherByDay: DATA.WEATHER_BY_DAY, before: !!before };
 }
 
 /* ---- state ---- */
@@ -101,7 +101,7 @@ function takeIng(s, id, n) { if ((s.ing[id] || 0) < n) return false; s.ing[id] -
 function unlocked(s, rules) { return DATA.DISH_ORDER.filter((id) => s.unlocked[id]); }
 function hasUp(s, id) { return !!s.upgrades[id]; }
 function serveCount(s, rules) {
-  const base = 4 + rules.weather[s.weather].customers + (hasUp(s, "sign") ? 1 : 0) + Math.floor(s.rep / 3);
+  const base = 4 + rules.weather[s.weather].customers + (rules.before && hasUp(s, "sign") ? 1 : 0) + Math.floor(s.rep / 3);
   return clamp(base, 3, 9);
 }
 function maxPortionsFor(s, id, rules) {
@@ -404,7 +404,11 @@ function randomDish(s, rules, r) {
   // the feast dish is not what a passing customer orders; it is cooked for the
   // mountain god's table.  Without this the highest-appeal dish is eaten by the
   // first walk-in and the feast can never happen.
-  const pool = s.menu.filter((id) => !rules.dishes[id].vipOnly);
+  const feast = { god_soup: 1, grilled_fish: 1, mushroom_soup: 1 };
+  const pool = s.menu.filter((id) => {
+    if (rules.dishes[id].vipOnly) return false;
+    return !(s.day === 7 && !rules.before && feast[id]);
+  });
   if (!pool.length) return null;
   let total = 0;
   for (const id of pool) total += rules.dishes[id].appeal;
@@ -424,7 +428,7 @@ function service(s, rules, r, policy) {
     if (dish && (s.stock[dish] || 0) > 0) {
       s.stock[dish]--;
       if (s.stock[dish] <= 0) delete s.stock[dish];
-      const tip = 2 + (r() < 0.5 ? 1 : 0); // patience and a regular
+      const tip = 2 + (r() < 0.5 ? 1 : 0) + (!rules.before && hasUp(s, "sign") ? 1 : 0);
       served++; earned += rules.dishes[dish].price; tips += tip;
       s.money += rules.dishes[dish].price + tip;
     } else {
@@ -541,7 +545,7 @@ function runOne(seed, policy, tuned, before) {
     }
 
     // the house's reputation is settled after the feast guests are counted
-    s.rep = Math.max(0, s.rep + Math.round(svc.served / 3) - svc.lost);
+    s.rep = Math.max(0, s.rep + Math.round(svc.served / (rules.before ? 3 : 2)) - svc.lost);
 
     // night: rent, refund, affinity
     let rentInfo = null;
@@ -583,7 +587,7 @@ function runOne(seed, policy, tuned, before) {
   let ending = "normal";
   if (!paid) ending = "bad";
   else if (vip >= 3 && s.rep >= 8 && s.npc.ahe >= 4) ending = "best";
-  else if (s.rep >= 5 || vip >= 1) ending = "good";
+  else if (rules.before ? (s.rep >= 5 || vip >= 1) : (s.rep >= 9 || vip >= 2)) ending = "good";
   return { ending, money: s.money, debt: s.debt, rep: s.rep, npc: s.npc, stats: s.stats, flags: s.flags, days };
 }
 

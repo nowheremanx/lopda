@@ -44,7 +44,7 @@ var DATA = (function () {
 
   var UPGRADES = {
     stove:     { name: "新灶台", cost: 80, rep: 1, desc: "解锁「烤河鱼」「山猪肉」。", short: "灶" },
-    sign:      { name: "新招牌", cost: 60, rep: 1, desc: "每晚多来一位客人。", short: "牌" },
+    sign:      { name: "新招牌", cost: 60, rep: 1, desc: "招牌一亮，客人多给一文小费。", short: "牌" },
     table:     { name: "加一条长凳", cost: 120, rep: 2, desc: "客人愿意多等一会儿，门口多站一位。", short: "凳" },
     whetstone: { name: "磨刀石", cost: 70, rep: 1, desc: "下厨的刀快一点，攻击 +2。", short: "刀" },
     cellar:    { name: "腌菜坛", cost: 50, rep: 1, desc: "打烊后每道菜留一份，不浪费。", short: "坛" }

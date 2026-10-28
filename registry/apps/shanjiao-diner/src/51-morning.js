@@ -7,6 +7,7 @@ function morningActions() {
     { label: "菜单", id: "prep", disabled: S.ap <= 0 || !!S.flags.prepared },
     { label: "店铺", id: "shop", disabled: false },
     { label: "帮手", id: "helper", disabled: !hasHelper() || !!S.staff },
+    { label: "图鉴", id: "codex", disabled: false },
     { label: "开门", id: "open", disabled: false }
   ];
 }
@@ -56,6 +57,7 @@ function morningAct(i) {
   }
   if (acts[i].id === "shop") { game.sfx("tap"); game.go("shop"); return; }
   if (acts[i].id === "helper") { chooseHelper(); return; }
+  if (acts[i].id === "codex") { game.sfx("tap"); game.push("codex", { from: "morning" }); return; }
   if (acts[i].id === "open") {
     if (stockTotal() <= 0) {
       busy = true;
@@ -71,7 +73,8 @@ function morningAct(i) {
 
 game.scene("morning", {
   enter: function () {
-    MORNING_SEL = 0;
+    /* keep the cursor where it was: B from prep/shop/codex returns to the
+     * action that opened it, not to 出门.  startDay resets it each morning. */
     game.ambience(S.weather === "rain" ? "rain" : null, 0.35);
     if (typeof playMusic === "function") playMusic("shop");
     if (typeof MorningStory === "function") {

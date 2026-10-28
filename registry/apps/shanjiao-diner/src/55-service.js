@@ -16,7 +16,11 @@ function randomDish() {
   // A passing customer does not order the feast dish; it is cooked for the
   // mountain god's table.  Without this, the highest-appeal dish is eaten by
   // the first walk-in and the seventh night's three guests never get theirs.
-  var pool = S.menu.filter(function (id) { return !DATA.DISHES[id].vipOnly; });
+  var feast = { god_soup: 1, grilled_fish: 1, mushroom_soup: 1 };
+  var pool = S.menu.filter(function (id) {
+    if (DATA.DISHES[id].vipOnly) return false;
+    return !(S.day === 7 && feast[id]);
+  });
   if (!pool.length) return null;
   var total = 0, i;
   for (i = 0; i < pool.length; i++) total += DATA.DISHES[pool[i]].appeal;
@@ -106,7 +110,7 @@ function lostCustomer(c, msg) {
 function payCustomer(c) {
   var d = DATA.DISHES[c.dish];
   if (!d) return;
-  var tip = 1 + (c.patience > c.maxPatience * 0.5 ? 1 : 0) + (c.who ? 1 : 0);
+  var tip = 1 + (c.patience > c.maxPatience * 0.5 ? 1 : 0) + (c.who ? 1 : 0) + (hasUpgrade("sign") ? 1 : 0);
   S.money += d.price + tip;
   SERV.earned += d.price;
   SERV.tips += tip;
@@ -215,7 +219,7 @@ function finishService(early) {
     if (c.state === "eat") payCustomer(c);
     else if (c.state !== "leave") lostCustomer(c, null);
   }
-  var rep = Math.round(SERV.served / 3) - SERV.lost;
+  var rep = Math.round(SERV.served / 2) - SERV.lost;
   addRep(rep);
   SERV.repDelta = rep;
   S.phase = "night";

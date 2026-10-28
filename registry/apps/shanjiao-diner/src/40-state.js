@@ -119,6 +119,7 @@ function helperName() {
 function dayWeather(day) { return DATA.WEATHER_BY_DAY[Math.min(DATA.WEATHER_BY_DAY.length, Math.max(1, day)) - 1]; }
 function rentFor(day) { return DATA.RENT[day] || 0; }
 function startDay(day) {
+  MORNING_SEL = 0;
   S.day = day;
   S.phase = "morning";
   S.weather = dayWeather(day);
@@ -139,7 +140,7 @@ function endDay() {
   save();
 }
 function serveCount() {
-  var base = 4 + DATA.WEATHER[S.weather].customers + (hasUpgrade("sign") ? 1 : 0) + Math.floor(S.rep / 3);
+  var base = 4 + DATA.WEATHER[S.weather].customers + Math.floor(S.rep / 3);
   return Math.max(3, Math.min(9, base));
 }
 function tableCount() { return 4; }
