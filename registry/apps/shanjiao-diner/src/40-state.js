@@ -14,7 +14,7 @@ function fresh() {
   return {
     v: SAVE_VERSION, phase: "morning", day: 1, money: 80, rep: 1, ap: 2,
     weather: DATA.WEATHER_BY_DAY[0],
-    ingredients: ing, menu: [], stock: {}, unlocked: unlocked,
+    ingredients: ing, menu: [], stock: {}, demand: [], unlocked: unlocked,
     upgrades: {}, npc: npc, staff: null, seen: {}, flags: {},
     stats: { served: 0, lost: 0, earned: 0, tips: 0, days: 0 },
     rentPaid: 0, debt: 0, lastLedger: null
@@ -124,6 +124,7 @@ function startDay(day) {
   S.phase = "morning";
   S.weather = dayWeather(day);
   S.ap = 2;
+  S.demand = makeDemand(serveCount(), S.weather);
   S.menu = [];
   S.stock = {};
   S.staff = null;
@@ -142,6 +143,40 @@ function endDay() {
 function serveCount() {
   var base = 4 + DATA.WEATHER[S.weather].customers + Math.floor(S.rep / 3);
   return Math.max(3, Math.min(9, base));
+}
+
+/* A day's cravings are fixed in the morning, so the player can plan the menu
+ * around the forecast instead of guessing after the door opens. */
+function makeDemand(n, weather) {
+  var C = DATA.CRAVING, w = {}, total = 0, i, k;
+  for (i = 0; i < C.kinds.length; i++) {
+    k = C.kinds[i];
+    w[k] = (C.base[k] || 0) + ((C.weather[weather] && C.weather[weather][k]) || 0);
+    total += w[k];
+  }
+  var out = [];
+  for (i = 0; i < n; i++) {
+    var r = Math.random() * total, pick = C.kinds[0];
+    for (var j = 0; j < C.kinds.length; j++) {
+      r -= w[C.kinds[j]];
+      if (r <= 0) { pick = C.kinds[j]; break; }
+    }
+    out.push(pick);
+  }
+  return out;
+}
+function demandCounts() {
+  var c = {}, list = S && S.demand ? S.demand : [];
+  for (var i = 0; i < list.length; i++) c[list[i]] = (c[list[i]] || 0) + 1;
+  return c;
+}
+function demandText(max) {
+  var c = demandCounts(), arr = [];
+  for (var k in c) if (Object.prototype.hasOwnProperty.call(c, k)) arr.push([k, c[k]]);
+  arr.sort(function (a, b) { return b[1] - a[1]; });
+  return arr.slice(0, max || 3).map(function (e) {
+    return (DATA.KIND_NAME[e[0]] || e[0]) + e[1];
+  }).join(" ");
 }
 function tableCount() { return 4; }
 function totalDishes() { return unlockedDishes().length; }

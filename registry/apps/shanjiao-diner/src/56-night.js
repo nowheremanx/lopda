@@ -43,7 +43,13 @@ game.scene("night", {
     save();
     NIGHT_STORY = null;
     NIGHT_STORY_DONE = false;
-    if (S.day === 5 && S.flags.criticGood) {
+    if (S.day === 1) {
+      NIGHT_STORY = { who: null, bg: "dawn", pages: ["把灯芯拨亮。", "娘以前说，灯亮着，山脚就还有人。"] };
+    } else if (S.day === 2) {
+      NIGHT_STORY = { who: null, bg: "dawn", pages: ["雨停了。", "门口的泥地上，有一串很深的脚印。", "不是人的。"] };
+    } else if (S.day === 3) {
+      NIGHT_STORY = { who: null, bg: "dawn", pages: ["阿岩的刀，磨得很亮。", "他说山要封了。"] };
+    } else if (S.day === 5 && S.flags.criticGood) {
       NIGHT_STORY = { who: null, bg: "dawn", pages: ["第二天，镇上都在传陆先生的话。", "「山脚那家小馆，汤里有山气。」"] };
     } else if (S.day === 6 && S.flags.boss && !seen("ahe_stay")) {
       NIGHT_STORY = { who: "ahe", bg: "shop", pages: ["我明天来帮你。", "不要工钱，管饭就行。"], choices: ["留下", "再想想"], cancel: false, stay: true };
@@ -51,6 +57,8 @@ game.scene("night", {
       NIGHT_STORY = { who: null, bg: "dawn", pages: ["雾里的山道还开着。", "山神宴前，还有一天。"] };
     } else if (S.day === 4 && S.lastLedger.rentInfo && S.lastLedger.rentInfo.missed > 0) {
       NIGHT_STORY = { who: "po", bg: "shop", pages: ["钱不够？", "初七一起算。利息，就算你多给我留一碗汤。"] };
+    } else if (S.day === 4) {
+      NIGHT_STORY = { who: null, bg: "dawn", pages: ["初四的租，交上了。", "婆婆数钱的时候，没说话。"] };
     }
     game.ambience("fire", 0.18);
     if (typeof playMusic === "function") playMusic("night");
@@ -59,7 +67,25 @@ game.scene("night", {
     if (busy) return;
     if (game.pressed("a") || game.pressed("start")) {
       game.sfx("tap");
-      if (S.day === 7) { game.go("ending"); return; }
+      if (S.day === 7) {
+        if (!S.flags.finalChoice && (S.flags.vip || 0) >= 2 && (S.npc.ahe || 0) >= 4) {
+          busy = true;
+          game.push("event", {
+            bg: "dawn",
+            pages: ["灶上还剩最后一碗山神羹。", "娘以前说，山神是第一位客人。", "这碗，供在山神庙，还是端给还坐在店里的人？"],
+            choices: ["供在山神庙", "端给阿禾"],
+            cancel: false
+          }).then(function (i) {
+            S.flags.finalChoice = i === 0 ? "shrine" : "ahe";
+            save();
+            busy = false;
+            game.go("ending");
+          });
+          return;
+        }
+        game.go("ending");
+        return;
+      }
       if (NIGHT_STORY && !NIGHT_STORY_DONE) {
         NIGHT_STORY_DONE = true;
         busy = true;
@@ -94,6 +120,7 @@ game.scene("night", {
       ["菜钱", (L.earned || 0) + " 文"],
       ["小费", (L.tips || 0) + " 文"],
       ["名声", (L.repDelta >= 0 ? "+" : "") + (L.repDelta || 0)],
+      ["对味", (L.satisfied || 0) + " 位"],
       ["剩菜", (L.leftover || 0) + " 份"]
     ];
     var y = 52;
@@ -102,19 +129,19 @@ game.scene("night", {
         { x: 12, w: 56, text: lines[i][0], color: g.DARK },
         { x: 68, w: 40, text: lines[i][1], align: "right" }
       ]);
-      y += 15;
+      y += 14;
     }
     g.rect(12, y - 2, 96, 1, g.MID);
     y += 6;
-    if (L.refund) { UI.text(g, "腌菜坛退回 " + L.refund + " 份", 12, y, { color: g.DARK, fit: 96 }); y += 15; }
+    if (L.refund) { UI.text(g, "腌菜坛退回 " + L.refund + " 份", 12, y, { color: g.DARK, fit: 96 }); y += 14; }
     var r = L.rentInfo;
     if (r) {
       UI.columns(g, y, [
-        { x: 12, w: 60, text: r.old > 0 ? "房租+旧账" : "房租", color: g.DARK },
-        { x: 76, w: 32, text: r.paid + "/" + r.rent, align: "right" }
+        { x: 12, w: 52, text: r.old > 0 ? "房租+旧" : "房租", color: g.DARK },
+        { x: 64, w: 44, text: r.paid + "/" + r.rent, align: "right" }
       ]);
-      y += 15;
-      if (r.missed > 0) { UI.text(g, "还欠 " + S.debt + " 文", 12, y, { color: g.INK, fit: 96 }); y += 15; }
+      y += 14;
+      if (r.missed > 0) { UI.text(g, "还欠 " + S.debt + " 文", 12, y, { color: g.INK, fit: 96 }); y += 14; }
     }
     if (S.debt > 0) UI.text(g, "共欠 " + S.debt + " 文", 12, y, { color: g.INK, fit: 96 });
     else UI.text(g, "账清了", 12, y, { color: g.DARK, fit: 96 });

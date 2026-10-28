@@ -73,7 +73,7 @@ function makeRules(tuned, before) {
     for (const [id, p] of Object.entries(TUNED.enemies || {})) Object.assign(enemies[id], p);
     Object.assign(rent, TUNED.rent || {});
   }
-  return { dishes, enemies, rent, weather: DATA.WEATHER, weatherByDay: DATA.WEATHER_BY_DAY, before: !!before };
+  return { dishes, enemies, rent, weather: DATA.WEATHER, weatherByDay: DATA.WEATHER_BY_DAY, before: !!before, _weather: DATA.WEATHER_BY_DAY[0] };
 }
 
 /* ---- state ---- */
@@ -178,6 +178,69 @@ function bestPlan(s, rules, want, focus) {
   }
   rec(0, want);
   return best;
+}
+
+/* A day's cravings: weather shifts the mix.  The player sees the counts in the
+ * morning and can cook a menu that covers them. */
+function makeDemand(n, rules, r) {
+  const C = DATA.CRAVING;
+  const w = {}, kinds = C.kinds;
+  let total = 0;
+  for (const k of kinds) {
+    w[k] = (C.base[k] || 0) + ((C.weather[s_weather(rules)] && C.weather[s_weather(rules)][k]) || 0);
+    total += w[k];
+  }
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    let x = r() * total, pick = kinds[0];
+    for (const k of kinds) { x -= w[k]; if (x <= 0) { pick = k; break; } }
+    out.push(pick);
+  }
+  return out;
+}
+function s_weather(rules) { return rules._weather || "sunny"; }
+
+/* A greedy menu that covers the top craving kinds, then fills the house. */
+function demandPlan(s, rules, demand) {
+  const counts = {};
+  for (const k of demand) counts[k] = (counts[k] || 0) + 1;
+  const kinds = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
+  const plan = {}, used = {};
+  function room(id) {
+    const need = rules.dishes[id].need;
+    let n = 5;
+    for (const k in need) n = Math.min(n, Math.floor(((s.ing[k] || 0) - (used[k] || 0)) / need[k]));
+    return Math.max(0, n);
+  }
+  function add(id, n) {
+    if (n <= 0) return;
+    plan[id] = (plan[id] || 0) + n;
+    const need = rules.dishes[id].need;
+    for (const k in need) used[k] = (used[k] || 0) + need[k] * n;
+  }
+  for (const kind of kinds) {
+    if (Object.keys(plan).length >= 4) break;
+    const candidates = unlocked(s, rules).filter((id) => rules.dishes[id].kind === kind && !plan[id]);
+    candidates.sort((a, b) => rules.dishes[b].price - rules.dishes[a].price);
+    for (const id of candidates) {
+      const n = Math.min(5, counts[kind], room(id));
+      if (n > 0) { add(id, n); break; }
+    }
+  }
+  let total = Object.values(plan).reduce((a, b) => a + b, 0);
+  while (total < demand.length) {
+    const candidates = unlocked(s, rules).filter((id) => {
+      const have = plan[id] || 0;
+      return have < 5 && room(id) > 0 && (have || Object.keys(plan).length < 4);
+    });
+    candidates.sort((a, b) => rules.dishes[b].price - rules.dishes[a].price);
+    if (!candidates.length) break;
+    const id = candidates[0];
+    const n = Math.min(5 - (plan[id] || 0), demand.length - total, room(id));
+    if (n <= 0) break;
+    add(id, n); total += n;
+  }
+  return plan;
 }
 
 /* The last night is not a normal service: three regulars each want one named
@@ -420,15 +483,41 @@ function randomDish(s, rules, r) {
   return pool[pool.length - 1];
 }
 
-function service(s, rules, r, policy) {
-  const n = serveCount(s, rules);
-  let served = 0, lost = 0, earned = 0, tips = 0, stockout = 0;
+function regularPool(s, rules) {
+  const feast = { god_soup: 1, grilled_fish: 1, mushroom_soup: 1 };
+  return s.menu.filter((id) => {
+    if (rules.dishes[id].vipOnly) return false;
+    return !(s.day === 7 && !rules.before && feast[id]);
+  });
+}
+function pickWeighted(s, rules, pool, r) {
+  let total = 0;
+  for (const id of pool) total += rules.dishes[id].appeal;
+  let x = r() * total;
+  for (const id of pool) { x -= rules.dishes[id].appeal; if (x <= 0) return id; }
+  return pool[pool.length - 1];
+}
+function service(s, rules, r, policy, demand) {
+  const n = rules.before ? serveCount(s, rules) : (demand && demand.length ? demand.length : serveCount(s, rules));
+  let served = 0, lost = 0, earned = 0, tips = 0, stockout = 0, missed = 0;
   for (let i = 0; i < n; i++) {
-    const dish = randomDish(s, rules, r);
+    let dish = null, matched = true;
+    if (rules.before) {
+      dish = randomDish(s, rules, r);
+      if (dish && (s.stock[dish] || 0) > 0) matched = true;
+    } else {
+      const want = demand && demand[i];
+      const pool = regularPool(s, rules).filter((id) => (s.stock[id] || 0) > 0 && rules.dishes[id].kind === want);
+      matched = pool.length > 0;
+      const fallback = regularPool(s, rules).filter((id) => (s.stock[id] || 0) > 0);
+      if (pool.length) dish = pickWeighted(s, rules, pool, r);
+      else if (fallback.length) dish = pickWeighted(s, rules, fallback, r);
+    }
     if (dish && (s.stock[dish] || 0) > 0) {
       s.stock[dish]--;
       if (s.stock[dish] <= 0) delete s.stock[dish];
-      const tip = 2 + (r() < 0.5 ? 1 : 0) + (!rules.before && hasUp(s, "sign") ? 1 : 0);
+      const tip = 2 + (r() < 0.5 ? 1 : 0) + (!rules.before && hasUp(s, "sign") ? 1 : 0) + (!rules.before && matched ? 1 : 0);
+      if (!matched) missed++;
       served++; earned += rules.dishes[dish].price; tips += tip;
       s.money += rules.dishes[dish].price + tip;
     } else {
@@ -437,9 +526,10 @@ function service(s, rules, r, policy) {
     }
   }
   s.stats.served += served; s.stats.lost += lost; s.stats.stockout += stockout;
+  s.stats.missed = (s.stats.missed || 0) + missed;
   s.stats.earned += earned; s.stats.tips += tips;
   const repDelta = Math.round(served / 3) - lost;
-  return { n, served, lost, earned, tips, repDelta, stockout };
+  return { n, served, lost, earned, tips, repDelta, stockout, missed };
 }
 
 /* ---- upgrades ---- */
@@ -503,7 +593,9 @@ function runOne(seed, policy, tuned, before) {
 
     // cook for tonight
     const want = serveCount(s, rules);
-    let plan = bestPlan(s, rules, want).plan;
+    rules._weather = s.weather;
+    const demand = rules.before ? [] : makeDemand(want, rules, r);
+    let plan = rules.before ? bestPlan(s, rules, want).plan : demandPlan(s, rules, demand);
     if (day === 7 && policy.feast) {
       const fp = feastPlan(s, rules, want);
       if (Object.keys(fp).length) plan = fp;
@@ -512,7 +604,7 @@ function runOne(seed, policy, tuned, before) {
     const stock = Object.values(s.stock).reduce((a, b) => a + b, 0);
 
     // service
-    const svc = service(s, rules, r, policy);
+    const svc = service(s, rules, r, policy, demand);
 
     // the critic
     if (day === 5 && s.menu.includes("mushroom_pot") && (svc.served > 0) && !s.flags.criticGood) {
@@ -586,8 +678,8 @@ function runOne(seed, policy, tuned, before) {
   const vip = s.flags.vip || 0;
   let ending = "normal";
   if (!paid) ending = "bad";
-  else if (vip >= 3 && s.rep >= 8 && s.npc.ahe >= 4) ending = "best";
-  else if (rules.before ? (s.rep >= 5 || vip >= 1) : (s.rep >= 9 || vip >= 2)) ending = "good";
+  else if (vip >= 3 && s.rep >= 10 && s.npc.ahe >= 4) ending = "best";
+  else if (rules.before ? (s.rep >= 5 || vip >= 1) : (vip >= 2)) ending = "good";
   return { ending, money: s.money, debt: s.debt, rep: s.rep, npc: s.npc, stats: s.stats, flags: s.flags, days };
 }
 
@@ -614,6 +706,7 @@ function summarize(runs, policy) {
   const served = runs.map((x, i) => x.stats.served / days[i]);
   const lost = runs.map((x, i) => x.stats.lost / days[i]);
   const stockout = runs.map((x, i) => x.stats.stockout / days[i]);
+  const missed = runs.map((x, i) => (x.stats.missed || 0) / days[i]);
   const rep = runs.map((x) => x.rep);
   const boss = runs.filter((x) => x.flags.boss).length;
   const missed4 = runs.filter((x) => { const d = x.days.find((y) => y.day === 4); return d && d.rent && d.rent.missed > 0; }).length;
@@ -623,7 +716,7 @@ function summarize(runs, policy) {
     best: pct(endings.best, runs.length), good: pct(endings.good, runs.length),
     normal: pct(endings.normal, runs.length), bad: pct(endings.bad, runs.length),
     d4money: f1(avg(d4)), d7money: f1(avg(d7)),
-    served: f1(avg(served)), lost: f1(avg(lost)), stockout: f1(avg(stockout)),
+    served: f1(avg(served)), lost: f1(avg(lost)), stockout: f1(avg(stockout)), missed: f1(avg(missed)),
     rep: f1(avg(rep)), boss: pct(boss, runs.length),
     missed4: pct(missed4, runs.length), missed7: pct(missed7, runs.length)
   };
@@ -692,8 +785,8 @@ function main() {
     results.push(summarize(all, pp));
   }
 
-  const head = ["policy", "best", "good", "normal", "bad", "day4钱", "day7钱", "客/天", "走/天", "缺菜/天", "名声", "山魈胜", "4日欠", "7日欠"];
-  const rows = results.map((r) => [r.policy, r.best, r.good, r.normal, r.bad, r.d4money, r.d7money, r.served, r.lost, r.stockout, r.rep, r.boss, r.missed4, r.missed7]);
+  const head = ["policy", "best", "good", "normal", "bad", "day4钱", "day7钱", "客/天", "走/天", "缺菜/天", "将就/天", "名声", "山魈胜", "4日欠", "7日欠"];
+  const rows = results.map((r) => [r.policy, r.best, r.good, r.normal, r.bad, r.d4money, r.d7money, r.served, r.lost, r.stockout, r.missed, r.rep, r.boss, r.missed4, r.missed7]);
   const widths = head.map((h, i) => Math.max(h.length, ...rows.map((row) => String(row[i]).length)));
   const line = (row) => row.map((c, i) => String(c).padEnd(widths[i])).join("  ");
   console.log(`\n${runs} runs per policy${before ? " · pre-patch numbers (boss 72, 3 stamina, basket 8, feast dish orderable)" : ""}`);

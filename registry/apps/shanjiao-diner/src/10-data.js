@@ -53,7 +53,7 @@ var DATA = (function () {
 
   var NPCS = {
     ahe:  { name: "阿禾", title: "邻家的姑娘", fav: "mushroom_soup", art: "ahe",
-      hint: "她总在打烊前过来，坐在最里面那张桌。" },
+      hint: "打烊前过来，坐最里面那张桌。" },
     zhou: { name: "老周", title: "渡口的渔夫", fav: "grilled_fish", art: "zhou",
       hint: "他带来的鱼，鳞片还亮着。" },
     yan:  { name: "阿岩", title: "后山的猎户", fav: "bamboo_pork", art: "yan",
@@ -72,6 +72,18 @@ var DATA = (function () {
   };
   var WEATHER_BY_DAY = ["sunny", "rain", "sunny", "rain", "sunny", "fog", "sunny"];
 
+  var KIND_NAME = { soup: "汤", cake: "饼", rice: "饭", grill: "烤", stir: "炒", pot: "煲" };
+  /* what the room feels like eating today; weather shifts the mix */
+  var CRAVING = {
+    kinds: ["soup", "cake", "rice", "grill", "stir", "pot"],
+    base: { soup: 2, cake: 1, rice: 1, grill: 2, stir: 1, pot: 1 },
+    weather: {
+      sunny: { grill: 2, rice: 1 },
+      rain: { soup: 2, pot: 1 },
+      fog: { pot: 2, stir: 1 }
+    }
+  };
+
   var RENT = { 4: 100, 7: 150 };
   var MAX_DAY = 7;
 
@@ -81,6 +93,7 @@ var DATA = (function () {
     ENEMIES: ENEMIES,
     UPGRADES: UPGRADES, UPGRADE_ORDER: UPGRADE_ORDER,
     NPCS: NPCS, NPC_ORDER: NPC_ORDER,
+    KIND_NAME: KIND_NAME, CRAVING: CRAVING,
     WEATHER: WEATHER, WEATHER_BY_DAY: WEATHER_BY_DAY,
     RENT: RENT, MAX_DAY: MAX_DAY
   };
