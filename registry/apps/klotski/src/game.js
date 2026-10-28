@@ -510,7 +510,7 @@ function startDemo() {
   table.assisted = true;
   table.demo = {
     moves: null, idx: 0, pieces: KRules.clonePieces(table.pieces), anim: null,
-    ready: false, endT: 0, speed: 0.1
+    ready: false, endT: 0, speed: 0.26, timer: 0
   };
   table.ui = "demo";
   game.sfx("tap");
@@ -528,7 +528,7 @@ function startDemo() {
     }
     table.demo.moves = r.moves;
     table.demo.ready = true;
-    table.demo.speed = Math.max(0.045, Math.min(0.12, 8 / Math.max(1, r.moves.length)));
+    table.demo.speed = 0.26;
     if (table.kind === "level") saveCurrent();
   }, 40);
 }
@@ -778,20 +778,22 @@ function updateDemo(dt, ev) {
   if (!d) { table.ui = "play"; return; }
   if (game.pressed("b") || (ev && ev.dist < 8 && ev.y0 > 174)) { stopDemo(); return; }
   if (!d.ready) return;
+  d.timer += dt;
   if (d.anim) {
     d.anim.t += dt;
     if (d.anim.t >= d.anim.dur) d.anim = null;
+    return;
   }
-  if (!d.anim) {
-    if (d.idx < d.moves.length) {
-      var m = d.moves[d.idx++];
-      var old = KRules.step(table.level, d.pieces, m.i, m.dx, m.dy);
-      if (old) d.anim = { i: m.i, fx: old.x, fy: old.y, t: 0, dur: 0.06 };
-      game.sfx("move");
-    } else {
-      d.endT += dt;
-      if (d.endT > 0.7) stopDemo();
-    }
+  if (d.timer < d.speed) return;
+  d.timer = 0;
+  if (d.idx < d.moves.length) {
+    var m = d.moves[d.idx++];
+    var old = KRules.step(table.level, d.pieces, m.i, m.dx, m.dy);
+    if (old) d.anim = { i: m.i, fx: old.x, fy: old.y, t: 0, dur: 0.11 };
+    game.sfx("move");
+  } else {
+    d.endT += d.speed;
+    if (d.endT > 0.7) stopDemo();
   }
 }
 
@@ -913,8 +915,71 @@ function drawExitCinematic(g, t) {
 
 function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
 
+function horseLeg(g, x1, y1, x2, y2, x3, y3, tone) {
+  g.line(x1, y1, x2, y2, tone);
+  g.line(x1 + 1, y1, x2 + 1, y2, tone);
+  g.line(x2, y2, x3, y3, tone);
+  g.line(x2 + 1, y2, x3 + 1, y3, tone);
+  g.rect(x3 - 1, y3 - 1, 3, 2, tone);
+}
+
+/* Cao Cao on a white horse, a side-view paper silhouette for the night pass */
+function drawHorse(g, x, y, phase) {
+  var s = Math.sin(phase), i;
+  /* tail */
+  g.line(x + 14, y + 14, x + 5, y + 10, g.PAPER);
+  g.line(x + 14, y + 16, x + 3, y + 14, g.MID);
+  g.line(x + 14, y + 18, x + 6, y + 20, g.PAPER);
+  /* far legs */
+  horseLeg(g, x + 20, y + 22, x + 20 - Math.round(2 * s), y + 27, x + 22 - Math.round(3 * s), y + 31, g.MID);
+  horseLeg(g, x + 38, y + 21, x + 42 + Math.round(2 * s), y + 26, x + 45 + Math.round(3 * s), y + 31, g.MID);
+  /* body */
+  g.rect(x + 14, y + 14, 24, 8, g.PAPER);
+  g.circle(x + 16, y + 18, 4, g.PAPER, true);
+  g.circle(x + 36, y + 18, 4, g.PAPER, true);
+  g.rect(x + 17, y + 21, 19, 1, g.MID);
+  /* neck and head */
+  for (i = 0; i < 8; i++) g.rect(x + 35 + i, y + 16 - i, 4, 3, g.PAPER);
+  g.rect(x + 41, y + 5, 6, 7, g.PAPER);
+  g.rect(x + 46, y + 8, 3, 4, g.PAPER);
+  g.line(x + 42, y + 5, x + 41, y + 3, g.PAPER);
+  g.line(x + 45, y + 5, x + 45, y + 3, g.PAPER);
+  g.rect(x + 45, y + 7, 1, 1, g.INK);
+  g.rect(x + 38, y + 7, 2, 7, g.MID);
+  g.rect(x + 36, y + 10, 2, 5, g.MID);
+  /* saddle and girth */
+  g.rect(x + 22, y + 12, 8, 3, g.INK);
+  g.rect(x + 22, y + 12, 8, 1, g.MID);
+  /* cloak streaming behind the rider */
+  g.rect(x + 14, y + 7, 10, 2, g.MID);
+  g.rect(x + 10, y + 9, 11, 2, g.PAPER);
+  g.rect(x + 6, y + 11, 11, 2, g.MID);
+  g.rect(x + 9, y + 13, 7, 2, g.PAPER);
+  g.rect(x + 3, y + 15, 7, 2, g.MID);
+  /* rider */
+  g.rect(x + 23, y + 6, 6, 7, g.PAPER);
+  g.rect(x + 24, y + 10, 4, 1, g.INK);
+  g.rect(x + 24, y + 1, 5, 5, g.PAPER);
+  g.rect(x + 23, y + 0, 7, 2, g.PAPER);
+  g.rect(x + 26, y - 2, 2, 2, g.PAPER);
+  g.rect(x + 24, y + 2, 1, 2, g.MID);
+  g.line(x + 29, y + 8, x + 35, y + 9, g.PAPER);
+  g.line(x + 35, y + 9, x + 45, y + 9, g.PAPER);
+  g.rect(x + 25, y + 13, 4, 3, g.PAPER);
+  /* the flag at his back */
+  g.rect(x + 23, y - 8, 1, 9, g.PAPER);
+  g.rect(x + 24, y - 8, 9, 5, g.PAPER);
+  g.rect(x + 24, y - 8, 9, 1, g.MID);
+  g.rect(x + 24, y - 4, 9, 1, g.MID);
+  /* near legs */
+  horseLeg(g, x + 16, y + 22, x + 12 + Math.round(2 * s), y + 27, x + 9 + Math.round(3 * s), y + 31, g.PAPER);
+  horseLeg(g, x + 36, y + 21, x + 39 - Math.round(2 * s), y + 26, x + 42 - Math.round(3 * s), y + 31, g.PAPER);
+  /* dust behind the hooves */
+  for (i = 0; i < 4; i++) g.rect(x - 6 - i * 4, y + 23 + (i % 2) * 3, 2, 2, g.MID);
+}
+
 function drawNight(g, nt) {
-  var i, x, y, top, d, w, p, e, rx, ry, bt, by, tilt, hx, hy;
+  var i, x, top, p, e, hx, hy, tilt, bx, bt, by;
   g.rect(0, 0, 160, 200, g.INK);
 
   g.text(T({ zh: "华容道", en: "HUARONG" }), 80, 6, { align: "center", color: g.PAPER });
@@ -923,69 +988,69 @@ function drawNight(g, nt) {
 
   for (i = 0; i < 15; i++) {
     x = (i * 37 + 13) % 150 + 5;
-    y = (i * 31 + 11) % 62 + 14;
-    if (Math.sin(nt * 2.2 + i * 1.7) > -0.55) g.rect(x, y, 1, 1, g.PAPER);
+    top = (i * 31 + 11) % 62 + 14;
+    if (Math.sin(nt * 2.2 + i * 1.7) > -0.55) g.rect(x, top, 1, 1, g.PAPER);
   }
 
   g.circle(124, 40, 16, g.PAPER, true);
   g.dither(118, 34, 7, 7, g.MID, 2);
   g.circle(124, 40, 19, g.DARK, false);
 
-  /* far ridge */
+  /* far and near ridges */
   for (x = 0; x < 160; x += 2) {
-    top = 92 - Math.round(12 * Math.sin(x * 0.07 + 1) + 6 * Math.sin(x * 0.19));
-    top = clamp(top, 58, 130);
+    top = 92 - Math.round(10 * Math.sin(x * 0.07 + 1) + 6 * Math.sin(x * 0.19));
+    top = clamp(top, 58, 128);
     g.rect(x, top, 2, 200 - top, g.MID);
   }
-  /* near walls with a V pass in the middle */
   for (x = 0; x < 160; x += 2) {
-    d = Math.abs(x - 80);
-    top = 128 - Math.round(d * 0.62) + Math.round(4 * Math.sin(x * 0.11));
-    top = clamp(top, 60, 150);
+    top = 118 - Math.round(8 * Math.sin(x * 0.09 + 2) + 5 * Math.sin(x * 0.23));
+    top = clamp(top, 76, 138);
     g.rect(x, top, 2, 200 - top, g.DARK);
   }
-  /* the pass road */
-  for (y = 128; y < 200; y++) {
-    w = 4 + Math.round((y - 128) * 0.55);
-    g.rect(80 - (w >> 1), y, w, 1, g.MID);
+
+  /* the road, side view */
+  for (x = 0; x < 160; x++) {
+    top = 139 - Math.round(2 * Math.sin(x * 0.05));
+    g.rect(x, top, 1, 160 - top, g.MID);
+    if (x % 7 === 0) g.rect(x, top, 4, 1, g.PAPER);
   }
-  for (y = 136; y < 196; y += 10) g.rect(79, y, 2, 4, g.PAPER);
+  for (x = 10; x < 150; x += 24) g.rect(x, 146, 2, 1, g.PAPER);
 
-  /* the gate */
-  g.rect(35, 140, 7, 60, g.DARK); g.rect(35, 140, 1, 60, g.PAPER); g.rect(41, 140, 1, 60, g.PAPER);
-  g.rect(118, 140, 7, 60, g.DARK); g.rect(118, 140, 1, 60, g.PAPER); g.rect(124, 140, 1, 60, g.PAPER);
-  g.rect(31, 134, 98, 7, g.DARK); g.rect(31, 134, 98, 1, g.PAPER);
+  /* the gate on the left */
+  g.rect(0, 102, 6, 58, g.DARK); g.rect(0, 102, 1, 58, g.PAPER); g.rect(5, 102, 1, 58, g.PAPER);
+  g.rect(19, 102, 6, 58, g.DARK); g.rect(19, 102, 1, 58, g.PAPER); g.rect(24, 102, 1, 58, g.PAPER);
+  g.rect(0, 97, 25, 6, g.DARK); g.rect(0, 97, 25, 1, g.PAPER);
 
-  /* Guan Yu, lowering the halberd */
-  g.rect(43, 106, 17, 36, g.DARK);
-  g.frame(43, 106, 17, 36, g.PAPER);
-  g.text(T({ zh: "关", en: "G" }), 51, 111, { align: "center", color: g.PAPER });
+  /* Guan Yu in the gate, lowering the halberd */
+  g.rect(4, 106, 14, 34, g.DARK);
+  g.frame(4, 106, 14, 34, g.PAPER);
+  g.text(T({ zh: "关", en: "G" }), 11, 110, { align: "center", color: g.PAPER });
   tilt = nt < 0.9 ? 0 : Math.min(1, (nt - 0.9) / 0.6);
-  hx = 61 + Math.round(9 * tilt); hy = 104 - Math.round(2 * tilt);
-  g.line(61, 150, hx, hy, g.PAPER);
+  hy = 104 - Math.round(2 * tilt);
+  hx = 18 + Math.round(8 * tilt);
+  g.line(18, 154, hx, hy, g.PAPER);
   g.line(hx, hy, hx + 4, hy - 4, g.PAPER);
 
-  /* Cao Cao rides up the pass */
-  p = clamp(nt / 1.7, 0, 1); e = 1 - (1 - p) * (1 - p);
-  rx = 80 + Math.round(4 * Math.sin(p * Math.PI));
-  ry = 176 - Math.round(46 * e);
-  for (i = 0; i < 4; i++) g.rect(rx - 12 - i * 3, ry + 9 + (i % 2) * 3, 2, 2, g.MID);
-  g.rect(rx + 9, ry - 18, 1, 10, g.PAPER);
-  g.rect(rx + 9, ry - 18, 9, 6, g.PAPER);
-  g.rect(rx + 9, ry - 18, 9, 1, g.INK);
-  g.rect(rx - 10, ry - 10, 20, 20, g.INK);
-  g.frame(rx - 10, ry - 10, 20, 20, g.PAPER);
-  g.text(T({ zh: "曹", en: "CAO" }), rx, ry - 6, { align: "center", color: g.PAPER });
+  /* foreground grass, and the shadow that grounds the horse */
+  for (i = 0; i < 9; i++) {
+    g.rect(12 + i * 18, 160, 2, 3, g.MID);
+    g.rect(16 + i * 18, 162, 1, 2, g.DARK);
+  }
+  /* Cao rides out and away */
+  p = clamp(nt / 1.75, 0, 1); e = 1 - (1 - p) * (1 - p);
+  bx = 18 + Math.round(94 * e);
+  g.rect(bx + 7, 151, 32, 2, g.DARK);
+  drawHorse(g, bx, 119, nt * 12);
 
   /* the scroll: the story beat */
   bt = clamp((nt - 1.15) / 0.35, 0, 1);
-  by = 204 - Math.round(bt * 56);
-  g.window(10, by, 140, 50, { thin: true });
+  by = 204 - Math.round(bt * 52);
+  g.window(10, by, 140, 44, { thin: true });
   g.rect(8, by - 2, 144, 3, g.DARK);
-  g.rect(8, by + 49, 144, 3, g.DARK);
-  g.text(T({ zh: "关羽义释曹操", en: "Guan Yu lets Cao go" }), 80, by + 7, { align: "center", color: g.INK });
-  g.text(T({ zh: "曹操已过华容道", en: "Cao passes Huarong" }), 80, by + 21, { align: "center", color: g.INK });
-  g.text(T({ zh: "建安十三年", en: "A.D. 208" }), 80, by + 35, { align: "center", color: g.INK });
+  g.rect(8, by + 43, 144, 3, g.DARK);
+  g.text(T({ zh: "关羽义释曹操", en: "Guan Yu lets Cao go" }), 80, by + 4, { align: "center", color: g.INK });
+  g.text(T({ zh: "曹操已过华容道", en: "Cao passes Huarong" }), 80, by + 17, { align: "center", color: g.INK });
+  g.text(T({ zh: "建安十三年", en: "A.D. 208" }), 80, by + 30, { align: "center", color: g.INK });
 }
 
 function drawHUD(g) {
