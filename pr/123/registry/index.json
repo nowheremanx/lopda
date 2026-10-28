@@ -267,8 +267,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/fake-yu/index.html",
-      "sha256": "48c2be3bfcafc87878807166c3c64bbb326423e7ea1d9aff88b859d0ddecc5d8",
-      "bytes": 202573
+      "sha256": "720c3babd8f1989f0047fbeb6cd1c783a5091044a688af93a6ef13b3d69149dc",
+      "bytes": 203474
     },
     {
       "spec": "lopda/1",
@@ -770,21 +770,21 @@
         "................",
         "................"
       ],
-      "version": "2.3.0",
+      "version": "4.0.0",
       "released": "2026-10-07",
-      "updated": "2026-10-13",
-      "description": "30 秒砸地鼠，戴头盔的要砸两下。",
+      "updated": "2026-10-27",
+      "description": "60 秒冲分，或无尽生存。戴头盔的砸两下，冒火花的雷别碰。",
       "i18n": {
         "en": {
           "name": "Mole Bop",
-          "description": "30 seconds of bopping moles. The ones in helmets take two hits."
+          "description": "60s score attack or endless survival. Helmets take two hits; mines are a no-go."
         }
       },
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/whack-a-mole/index.html",
-      "sha256": "a1f16555ee761c6d05c338cd02ec720be696652c6e850088a994fc03ada37c6f",
-      "bytes": 12816
+      "sha256": "037e5efd0ae2809e5713e69a1696f89e54c75958bd553a32f2d4ec7cd4e4ffc9",
+      "bytes": 22989
     },
     {
       "spec": "lopda/1",
