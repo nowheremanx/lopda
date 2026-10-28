@@ -7,6 +7,7 @@ document.documentElement.lang = game.lang === "zh" ? "zh-CN" : "en";
 
 var SAVE_KEY = "klotski";
 var HEAD = 20, BOARD_TOP = 22, BOARD_ROOM = 150, FOOT = 174;
+var EXIT_SLIDE = 0.55, EXIT_WIPE = 0.35, EXIT_END = 3.1;
 var ROW_H = 27, LIST_ROWS = 5;
 
 /* ---------------- pointer: lo-game keeps only the latest point in a tick, so a quick down+up can
@@ -607,10 +608,11 @@ function pump() {
 
 function startWin() {
   if (table.win || table.card) return;
+  var isExit = !(table.level.goal && table.level.goal.piece);
   table.ui = "win";
-  table.win = { t: 0 };
+  table.win = { t: 0, mode: isExit ? "exit" : "target", sounded: false };
   table.hint = null;
-  game.sfx("win");
+  game.sfx(isExit ? "move" : "win");
   markWin();
 }
 function markWin() {
@@ -837,7 +839,15 @@ var tableScene = {
     if (table.ui === "card") { updateCard(ev); return; }
     if (table.ui === "win") {
       table.win.t += dt;
-      if (table.win.t > 0.62) { table.ui = "card"; table.win = null; }
+      if (table.win.mode === "exit") {
+        if (table.win.t > 0.6 && (game.pressed("a") || game.pressed("b") || game.pressed("start") || (ev && ev.dist < 8))) {
+          table.ui = "card"; table.win = null; return;
+        }
+        if (table.win.t > 1.7 && !table.win.sounded) { game.sfx("win"); table.win.sounded = true; }
+        if (table.win.t > EXIT_END) { table.ui = "card"; table.win = null; }
+      } else if (table.win.t > 0.62) {
+        table.ui = "card"; table.win = null;
+      }
       return;
     }
     if (table.busy || table.solving) return;
@@ -863,6 +873,10 @@ var tableScene = {
       hideCao = level.cao;
       caoY = table.win.t * 90;
     }
+    if (table.ui === "win" && table.win && table.win.mode === "exit") {
+      drawExitCinematic(g, table.win.t);
+      return;
+    }
     drawBoard(g, level, pieces, anim, table.ui === "play" ? table.bump : null,
       table.ui === "play" ? table.selected : -1,
       table.hint, hideCao, caoY);
@@ -873,6 +887,106 @@ var tableScene = {
     if (table.ui === "card") drawCard(g);
   }
 };
+
+/* ---------------- the exit: a short 演义 interlude from the board to the pass ---------------- */
+function drawExitCinematic(g, t) {
+  var level = table.level, i, nt, h, p, e;
+  if (t < EXIT_SLIDE) {
+    p = t / EXIT_SLIDE; e = p * p;
+    drawBoard(g, level, table.pieces, null, null, -1, null, level.cao, Math.round(100 * e));
+    for (i = 0; i < 5; i++) {
+      g.rect(56 + i * 12, Math.min(198, 176 + Math.round((t * 60 + i * 5) % 18)), 2, 2, g.MID);
+    }
+    return;
+  }
+  nt = t - EXIT_SLIDE;
+  if (t < EXIT_SLIDE + EXIT_WIPE) {
+    drawBoard(g, level, table.pieces, null, null, -1, null, level.cao, 200);
+    h = Math.round(Math.min(1, (t - EXIT_SLIDE) / EXIT_WIPE) * 200);
+    g.clip(0, 200 - h, 160, h);
+    drawNight(g, nt);
+    g.clip();
+    return;
+  }
+  drawNight(g, nt);
+}
+
+function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+
+function drawNight(g, nt) {
+  var i, x, y, top, d, w, p, e, rx, ry, bt, by, tilt, hx, hy;
+  g.rect(0, 0, 160, 200, g.INK);
+
+  g.text(T({ zh: "华容道", en: "HUARONG" }), 80, 6, { align: "center", color: g.PAPER });
+  g.rect(18, 20, 124, 1, g.DARK);
+  g.text(T({ zh: "A 跳过", en: "A skip" }), 155, 6, { align: "right", color: g.PAPER });
+
+  for (i = 0; i < 15; i++) {
+    x = (i * 37 + 13) % 150 + 5;
+    y = (i * 31 + 11) % 62 + 14;
+    if (Math.sin(nt * 2.2 + i * 1.7) > -0.55) g.rect(x, y, 1, 1, g.PAPER);
+  }
+
+  g.circle(124, 40, 16, g.PAPER, true);
+  g.dither(118, 34, 7, 7, g.MID, 2);
+  g.circle(124, 40, 19, g.DARK, false);
+
+  /* far ridge */
+  for (x = 0; x < 160; x += 2) {
+    top = 92 - Math.round(12 * Math.sin(x * 0.07 + 1) + 6 * Math.sin(x * 0.19));
+    top = clamp(top, 58, 130);
+    g.rect(x, top, 2, 200 - top, g.MID);
+  }
+  /* near walls with a V pass in the middle */
+  for (x = 0; x < 160; x += 2) {
+    d = Math.abs(x - 80);
+    top = 128 - Math.round(d * 0.62) + Math.round(4 * Math.sin(x * 0.11));
+    top = clamp(top, 60, 150);
+    g.rect(x, top, 2, 200 - top, g.DARK);
+  }
+  /* the pass road */
+  for (y = 128; y < 200; y++) {
+    w = 4 + Math.round((y - 128) * 0.55);
+    g.rect(80 - (w >> 1), y, w, 1, g.MID);
+  }
+  for (y = 136; y < 196; y += 10) g.rect(79, y, 2, 4, g.PAPER);
+
+  /* the gate */
+  g.rect(35, 140, 7, 60, g.DARK); g.rect(35, 140, 1, 60, g.PAPER); g.rect(41, 140, 1, 60, g.PAPER);
+  g.rect(118, 140, 7, 60, g.DARK); g.rect(118, 140, 1, 60, g.PAPER); g.rect(124, 140, 1, 60, g.PAPER);
+  g.rect(31, 134, 98, 7, g.DARK); g.rect(31, 134, 98, 1, g.PAPER);
+
+  /* Guan Yu, lowering the halberd */
+  g.rect(43, 106, 17, 36, g.DARK);
+  g.frame(43, 106, 17, 36, g.PAPER);
+  g.text(T({ zh: "关", en: "G" }), 51, 111, { align: "center", color: g.PAPER });
+  tilt = nt < 0.9 ? 0 : Math.min(1, (nt - 0.9) / 0.6);
+  hx = 61 + Math.round(9 * tilt); hy = 104 - Math.round(2 * tilt);
+  g.line(61, 150, hx, hy, g.PAPER);
+  g.line(hx, hy, hx + 4, hy - 4, g.PAPER);
+
+  /* Cao Cao rides up the pass */
+  p = clamp(nt / 1.7, 0, 1); e = 1 - (1 - p) * (1 - p);
+  rx = 80 + Math.round(4 * Math.sin(p * Math.PI));
+  ry = 176 - Math.round(46 * e);
+  for (i = 0; i < 4; i++) g.rect(rx - 12 - i * 3, ry + 9 + (i % 2) * 3, 2, 2, g.MID);
+  g.rect(rx + 9, ry - 18, 1, 10, g.PAPER);
+  g.rect(rx + 9, ry - 18, 9, 6, g.PAPER);
+  g.rect(rx + 9, ry - 18, 9, 1, g.INK);
+  g.rect(rx - 10, ry - 10, 20, 20, g.INK);
+  g.frame(rx - 10, ry - 10, 20, 20, g.PAPER);
+  g.text(T({ zh: "曹", en: "CAO" }), rx, ry - 6, { align: "center", color: g.PAPER });
+
+  /* the scroll: the story beat */
+  bt = clamp((nt - 1.15) / 0.35, 0, 1);
+  by = 204 - Math.round(bt * 56);
+  g.window(10, by, 140, 50, { thin: true });
+  g.rect(8, by - 2, 144, 3, g.DARK);
+  g.rect(8, by + 49, 144, 3, g.DARK);
+  g.text(T({ zh: "关羽义释曹操", en: "Guan Yu lets Cao go" }), 80, by + 7, { align: "center", color: g.INK });
+  g.text(T({ zh: "曹操已过华容道", en: "Cao passes Huarong" }), 80, by + 21, { align: "center", color: g.INK });
+  g.text(T({ zh: "建安十三年", en: "A.D. 208" }), 80, by + 35, { align: "center", color: g.INK });
+}
 
 function drawHUD(g) {
   var level = table.level;
