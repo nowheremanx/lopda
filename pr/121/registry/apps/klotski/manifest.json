@@ -4,7 +4,7 @@
   "name": "华容道",
   "glyph": "华",
   "category": "game",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "曹操从华容道脱身：全关开放，记录步数，附八课大师教程与逐步提示。",
   "i18n": {
     "zh": {

@@ -7,7 +7,7 @@ document.documentElement.lang = game.lang === "zh" ? "zh-CN" : "en";
 
 var SAVE_KEY = "klotski";
 var HEAD = 20, BOARD_TOP = 22, BOARD_ROOM = 150, FOOT = 174;
-var EXIT_SLIDE = 0.55, EXIT_WIPE = 0.35, EXIT_END = 3.1;
+var EXIT_SLIDE = 0.55, EXIT_WIPE = 0.35;
 var ROW_H = 27, LIST_ROWS = 5;
 
 /* ---------------- pointer: lo-game keeps only the latest point in a tick, so a quick down+up can
@@ -846,7 +846,7 @@ var tableScene = {
           table.ui = "card"; table.win = null; return;
         }
         if (table.win.t > 1.7 && !table.win.sounded) { game.sfx("win"); table.win.sounded = true; }
-        if (table.win.t > EXIT_END) { table.ui = "card"; table.win = null; }
+        /* no timer: the night ride loops until the player presses A or taps */
       } else if (table.win.t > 0.62) {
         table.ui = "card"; table.win = null;
       }
@@ -984,7 +984,8 @@ function drawNight(g, nt) {
 
   g.text(T({ zh: "华容道", en: "HUARONG" }), 80, 6, { align: "center", color: g.PAPER });
   g.rect(18, 20, 124, 1, g.DARK);
-  g.text(T({ zh: "A 跳过", en: "A skip" }), 155, 6, { align: "right", color: g.PAPER });
+  g.window(116, 2, 40, 18, { thin: true });
+  g.text(T({ zh: "A 继续", en: "A next" }), 136, 5, { align: "center", color: g.INK });
 
   for (i = 0; i < 15; i++) {
     x = (i * 37 + 13) % 150 + 5;
@@ -1037,8 +1038,8 @@ function drawNight(g, nt) {
     g.rect(16 + i * 18, 162, 1, 2, g.DARK);
   }
   /* Cao rides out and away */
-  p = clamp(nt / 1.75, 0, 1); e = 1 - (1 - p) * (1 - p);
-  bx = 18 + Math.round(94 * e);
+  p = clamp((nt % 2.0) / 1.8, 0, 1); e = 1 - (1 - p) * (1 - p);
+  bx = 18 + Math.round(130 * e);
   g.rect(bx + 7, 151, 32, 2, g.DARK);
   drawHorse(g, bx, 119, nt * 12);
 
@@ -1491,6 +1492,10 @@ window.KLOTSKI = {
     if (!lv) return false;
     game.go("table", { kind: lv.kind, id: id }, { fade: false });
     return true;
+  },
+  skip: function () {
+    if (table.ui === "win") { table.ui = "card"; table.win = null; return true; }
+    return false;
   },
   step: function (i, dx, dy) {
     if (!table.level || table.ui !== "play" || table.anim || table.queue.length) return false;
