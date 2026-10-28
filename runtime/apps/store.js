@@ -11,6 +11,7 @@
 (function(){
 "use strict";
 var LP=window.LP, $=LP.$, S=LP.S, I18N=LP.I18N, tr=LP.tr;
+var AS=window.LopdaAppSaves;
 var REGISTRY = new URL("../registry/", location.href).href;
 var own=LP.own, toast=LP.toast, put=LP.put, sfx=LP.sfx, show=LP.show, showPad=LP.showPad, sha256hex=LP.sha256hex,
   validIcon=LP.validIcon, fillTile=LP.fillTile, appName=LP.appName, appDesc=LP.appDesc, renderHome=LP.renderHome,
@@ -360,11 +361,21 @@ function loadHtml(a){
     return h;
   });
 }
+/* removing a program is not removing its save (decisions.md section 43). The code, the manifest and
+   the sensor grants go; data/users/local/appdata/items/<id> stays, so installing the same id again
+   carries on. The save is cleared separately, in Settings -> App saves. */
 function deleteApp(id){
+  /* snapshot the name/version before the app leaves S.apps: leave() flushes the last saves after this */
+  if(S.kv[id]!==undefined) kvMeta[id]=AS.record(id, S.kv[id], kvMeta[id], installedOf(id), Date.now());
   dropLocal("apps",id);
   revokeSense(id);
-  if(S.db){ S.refs.apps.doc(id).delete().catch(function(){ toast(tr("store.removefail")); }); S.refs.kv.doc(id).delete().catch(function(){}); S.refs.code.doc(id).delete().catch(function(){}); }
-  delete S.kv[id];
+  delete kvWarned[id];   /* a reinstall should warn about a damaged save again */
+  if(S.db){
+    S.refs.apps.doc(id).delete().catch(function(){ toast(tr("store.removefail")); });
+    S.refs.code.doc(id).delete().catch(function(){});
+  }
+  /* keep S.kv[id] as well: a reinstall in this session starts from the same data, and leave() may
+     still flush the last 500 ms of saves after this call */
 }
 
 /* ---------- runner: sandboxed iframe + PAD bridge (sdk/pad-shim.js) ---------- */
@@ -387,7 +398,7 @@ function runApp(a){
   dictLimit=window.LopdaWordList ? window.LopdaWordList.limiter() : null;
   $("run-title").textContent=a.local ? appName(a) : appName(a)+" · v"+(a.version||"?");
   $("run-del-wrap").hidden=!!a.local;   /* local scripts are removed in the scripts app, not here */
-  if(!a.local) LP.resetConfirm("run-del-wrap","run-del",tr("run.remove"),function(){ if(S.running){ var n=appName(S.running); deleteApp(S.running.id); show("home"); toast(tr("run.removed",{name:n})); } });
+  if(!a.local) LP.resetConfirm("run-del-wrap","run-del",tr("run.remove"),function(){ if(S.running){ var n=appName(S.running); deleteApp(S.running.id); show("home"); toast(tr("run.removed",{name:n})); } },tr("run.remove.confirm",{name:appName(a)}));
   $("run-err").hidden=true;
   show("run");
   showPad(!!a.buttons);
@@ -409,22 +420,32 @@ $("run-err-close").onclick=function(){ $("run-err").hidden=true; };
 function localScriptId(appId){
   return S.running && S.running.local && S.running.id===appId ? S.running.scriptId : null;
 }
+var kvTimers={}, kvMeta={}, kvWarned={}, kvLoaded={}, kvSaved={};
+/* read the save once per run. A document that cannot be read is not turned into {} any more: the
+   app gets a rejected PAD.load and the player gets a notice; the bytes stay until Settings clears
+   them (decisions.md section 43). */
 function getKv(appId){
-  if(S.kv[appId]) return Promise.resolve(S.kv[appId]);
+  if(S.kv[appId]!==undefined) return Promise.resolve(S.kv[appId]);
   var sid=localScriptId(appId);
   if(sid && LP.scripts){
-    return LP.scripts.loadData(sid).then(function(kv){ S.kv[appId]=kv||{}; return S.kv[appId]; },function(){ S.kv[appId]={}; return S.kv[appId]; });
+    return LP.scripts.loadData(sid).then(function(kv){ S.kv[appId]=kv||{}; kvLoaded[appId]=true; delete kvWarned[appId]; return S.kv[appId]; });
   }
-  if(!S.db){ S.kv[appId]=S.kv[appId]||{}; return Promise.resolve(S.kv[appId]); }
-  return S.refs.kv.doc(appId).get().then(function(s){ S.kv[appId]=(s.exists && own(s.data()).kv)||{}; return S.kv[appId]; }).catch(function(){ S.kv[appId]={}; return S.kv[appId]; });
+  if(!S.db){ S.kv[appId]={}; kvLoaded[appId]=true; kvSaved[appId]=false; return Promise.resolve(S.kv[appId]); }
+  return S.refs.kv.doc(appId).get().then(function(s){
+    if(!s.exists){ S.kv[appId]={}; kvMeta[appId]={loaded:true, existed:false, schema:null, updated:0, bytes:0, app:null}; kvLoaded[appId]=true; kvSaved[appId]=false; delete kvWarned[appId]; return S.kv[appId]; }
+    var rec=AS.read(own(s.data()), appId);
+    if(rec.code) throw AS.error(rec.code);
+    rec.existed=true; S.kv[appId]=rec.kv; kvMeta[appId]=rec; kvLoaded[appId]=true; kvSaved[appId]=true; delete kvWarned[appId]; return S.kv[appId];
+  },function(){ throw AS.error("readfail"); });
 }
-var kvTimers={};
 function saveKvSoon(appId){
   if(!S.db) return;
+  kvLoaded[appId]=true; kvSaved[appId]=true;
   clearTimeout(kvTimers[appId]);
   var sid=localScriptId(appId);
   if(sid && LP.scripts){ kvTimers[appId]=setTimeout(function(){ LP.scripts.saveData(sid, S.kv[appId]); },500); return; }
-  kvTimers[appId]=setTimeout(function(){ put(S.refs.kv.doc(appId),{kv:S.kv[appId]}); },500);
+  kvMeta[appId]=AS.record(appId, S.kv[appId], kvMeta[appId], installedOf(appId), Date.now());
+  kvTimers[appId]=setTimeout(function(){ put(S.refs.kv.doc(appId), kvMeta[appId]); },500);
 }
 /* leaving a run must not lose the last 500 ms of saves */
 function flushKv(appId){
@@ -432,22 +453,117 @@ function flushKv(appId){
   if(!S.db || !Object.prototype.hasOwnProperty.call(S.kv,appId)) return Promise.resolve(true);
   var sid=localScriptId(appId);
   if(sid && LP.scripts) return LP.scripts.saveData(sid, S.kv[appId]);
-  return put(S.refs.kv.doc(appId),{kv:S.kv[appId]});
+  kvMeta[appId]=AS.record(appId, S.kv[appId], kvMeta[appId], installedOf(appId), Date.now());
+  kvSaved[appId]=true;
+  return put(S.refs.kv.doc(appId), kvMeta[appId]);
 }
+/* one notice per run, not one per PAD.load call */
+function warnSave(appId,e){
+  var code=(e && e.code) || "readfail";
+  if(kvWarned[appId]===code) return;
+  kvWarned[appId]=code;
+  var a=S.running && S.running.id===appId ? S.running : installedOf(appId);
+  var name=a ? appName(a) : appId;
+  if(code==="corrupt") toast(tr("run.savecorrupt",{name:name}));
+  else if(code==="newer") toast(tr("run.savenewer",{name:name}));
+  else toast(tr("run.savereadfail",{name:name,code:code}));
+}
+/* the document's metadata without loading its keys into a running app */
+function saveInfo(appId){
+  var sid=localScriptId(appId);
+  if(sid && LP.scripts && LP.scripts.info) return LP.scripts.info(sid);
+  if(kvLoaded[appId] && kvMeta[appId]){
+    if(!kvSaved[appId] && !Object.keys(S.kv[appId]||{}).length) return Promise.resolve(null);
+    var m=kvMeta[appId];
+    return Promise.resolve(AS.info({schema:m.schema, app:m.app, updated:m.updated, bytes:AS.size(S.kv[appId])}));
+  }
+  if(!S.db) return Promise.resolve(null);
+  return S.refs.kv.doc(appId).get().then(function(s){
+    if(!s.exists) return null;
+    var rec=AS.read(own(s.data()), appId);
+    if(rec.code) throw AS.error(rec.code);
+    kvMeta[appId]=rec;
+    return AS.info(rec);
+  },function(){ throw AS.error("readfail"); });
+}
+
+/* Settings -> App saves: every save on the device, installed or not. A removed app's save is the
+   point of this list; an installed app's save is here so it can be cleared without removing the app. */
+function appSaveRows(){
+  if(!S.db) return Promise.resolve([]);
+  return S.refs.kv.get().then(function(q){
+    var out=q.docs.map(function(d){
+      var raw=own(d.data())||{};
+      var rec=AS.read(raw,d.id);
+      var a=installedOf(d.id);
+      var app=a || rec.app || {id:d.id};
+      var name=(a || (rec.app && rec.app.name)) ? appName(app) : d.id;
+      var bytes=rec.bytes;
+      if(rec.code){ try{ bytes=JSON.stringify(raw).length; }catch(e){ bytes=0; } }
+      return {id:d.id, name:name, installed:!!a, size:bytes, updated:rec.updated, schema:rec.schema, bad:rec.code, version:(app && app.version)||null};
+    });
+    out.sort(function(a,b){ return (b.updated||0)-(a.updated||0) || (a.name<b.name?-1:a.name>b.name?1:0); });
+    return out;
+  });
+}
+function clearAppSave(id){
+  if(S.running && S.running.id===id) return Promise.reject({code:"running"});
+  clearTimeout(kvTimers[id]);
+  delete S.kv[id]; delete kvMeta[id]; delete kvWarned[id]; delete kvLoaded[id]; delete kvSaved[id];
+  if(!S.db) return Promise.resolve(true);
+  return S.refs.kv.doc(id).delete().then(function(){ return true; },function(){ return false; });
+}
+function clearAllAppSaves(){
+  if(S.running) return Promise.reject({code:"running"});
+  if(!S.db) return Promise.resolve(true);
+  return S.refs.kv.get().then(function(q){
+    return Promise.all(q.docs.map(function(d){
+      return clearAppSave(d.id);
+    })).then(function(ok){ return ok.every(function(x){ return x!==false; }); });
+  });
+}
+LP.appSaves={
+  list:appSaveRows,
+  clear:clearAppSave,
+  clearAll:clearAllAppSaves,
+  info:saveInfo
+};
 window.addEventListener("message",function(e){
   var f=$("run-frame");
   if(!S.running || e.source!==f.contentWindow) return;
   var d=e.data; if(!d || !d.pad) return;
   var appId=S.running.id;
   if(d.op==="load"){
-    getKv(appId).then(function(kv){ var v=Object.prototype.hasOwnProperty.call(kv,d.k)?kv[d.k]:null; f.contentWindow.postMessage({pad:1,op:"loaded",i:d.i,v:v},"*"); });
+    getKv(appId).then(function(kv){
+      var v=Object.prototype.hasOwnProperty.call(kv,d.k)?kv[d.k]:null;
+      f.contentWindow.postMessage({pad:1,op:"loaded",i:d.i,v:v},"*");
+    },function(e){
+      warnSave(appId,e);
+      f.contentWindow.postMessage({pad:1,op:"loaded",i:d.i,error:(e && e.code) || "readfail"},"*");
+    });
   } else if(d.op==="save" || d.op==="remove"){
     getKv(appId).then(function(kv){
       var next=Object.assign({},kv);
       if(d.op==="remove") delete next[d.k];
       else { try{ next[d.k]=JSON.parse(JSON.stringify(d.v)); }catch(err){ return; } }
       if(JSON.stringify(next).length>KV_BUDGET){ $("run-err-msg").textContent=tr("run.toobig"); $("run-err").hidden=false; return; }
-      S.kv[appId]=next; saveKvSoon(appId);
+      S.kv[appId]=next; delete kvWarned[appId]; saveKvSoon(appId);
+    },function(e){ warnSave(appId,e); });
+  } else if(d.op==="schema"){
+    /* the app says which data schema it writes; PAD.saveInfo tells the next run what is on disk */
+    if(typeof d.n!=="number" || !isFinite(d.n) || d.n<0 || d.n>AS.MAX_SCHEMA) return;
+    var schema=Math.floor(d.n), sid=localScriptId(appId);
+    if(sid && LP.scripts && LP.scripts.setSchema){ LP.scripts.setSchema(sid,schema).catch(function(){}); return; }
+    getKv(appId).then(function(kv){
+      kvMeta[appId]=kvMeta[appId]||{loaded:true, existed:false};
+      kvMeta[appId].schema=schema;
+      /* no data yet: keep the schema in memory, it rides with the first save. Do not create an empty save. */
+      if(kvMeta[appId].existed || Object.keys(kv).length) saveKvSoon(appId);
+    },function(e){ warnSave(appId,e); });
+  } else if(d.op==="info"){
+    saveInfo(appId).then(function(v){ f.contentWindow.postMessage({pad:1,op:"infoed",i:d.i,v:v},"*"); },function(e){
+      warnSave(appId,e);
+      f.contentWindow.postMessage({pad:1,op:"infoed",i:d.i,error:(e && e.code) || "readfail"},"*");
     });
   } else if(d.op==="error"){
     var msg=String(d.msg||tr("common.unknown")).slice(0,300);

@@ -9,7 +9,7 @@
  * Older runtimes pass none, so PAD.lang is undefined there and apps fall back to their own default; PAD.music is likewise undefined
  * unless the runtime can play it (runtime 0.11.0 and later, and sdk/dev.html), PAD.ambience (0.13.0 and later),
  * PAD.motion and PAD.mic (0.24.0 and later), PAD.notes and PAD.say (0.26.0 and later; Japanese say in 0.29.0),
- * PAD.camera (0.28.0 and later) and PAD.dict (0.36.0 and later).
+ * PAD.camera (0.28.0 and later), PAD.dict (0.36.0 and later) and PAD.saveInfo / PAD.setSchema (0.46.0 and later).
  *
  * Messages app -> runtime:  {pad:1, op:"save"|"load"|"remove"|"error"|"exit", ...}
  *                           {pad:1, op:"sfx", name}  or  {pad:1, op:"sfx", params:{wave, duty, from, to, ms, attack, decay, vol, vibrato:{depth, rate}}}
@@ -25,7 +25,10 @@
  *                           {pad:1, op:"dict", i, kind:"words", q}  or  {pad:1, op:"dict", i, kind:"lookup", word}
  *                           {pad:1, op:"dict", i, kind:"inBook", words}  (needs "wordbook")
  *                           {pad:1, op:"dict", i, kind:"add"|"remove", word}   (needs "wordbook")
- * Messages runtime -> app:  {pad:1, op:"loaded", i, v}
+ *                           {pad:1, op:"schema", n}   (the data schema this build writes)
+ *                           {pad:1, op:"info", i}     (the save's metadata)
+ * Messages runtime -> app:  {pad:1, op:"loaded", i, v}  or  {pad:1, op:"loaded", i, error}
+ *                           {pad:1, op:"infoed", i, v}  or  {pad:1, op:"infoed", i, error}
  *                           {pad:1, op:"filed", i, v}  or  {pad:1, op:"filed", i, error}
  *                           {pad:1, op:"sensed", i, v}   v: "on" | "denied" | "none"
  *                           {pad:1, op:"noted", i, v}   v: "saved" | "denied"
@@ -39,7 +42,7 @@
  *                           {pad:1, op:"release-all"}
  */
 function lopdaPadShim(opts) {
-  var seq = 0, waiting = {}, filing = {}, sensing = {}, noting = {}, saying = {}, snapping = {}, dicting = {};
+  var seq = 0, waiting = {}, infoing = {}, filing = {}, sensing = {}, noting = {}, saying = {}, snapping = {}, dicting = {};
   var post = function (msg) { msg.pad = 1; parent.postMessage(msg, "*"); };
   var TONES = ["#1f2a14", "#4a5a32", "#7d8a58", "#a3ad7e"];
   var LANG = opts && (opts.lang === "zh" || opts.lang === "en") ? opts.lang : undefined;
@@ -253,11 +256,24 @@ function lopdaPadShim(opts) {
     SOUNDS: Object.freeze(SOUNDS.slice()),
     save: function (k, v) { post({ op: "save", k: String(k), v: v }); },
     remove: function (k) { post({ op: "remove", k: String(k) }); },
+    /* -> Promise<value|null>. Rejects with err.code "corrupt", "readfail" or "newer" when the
+       runtime cannot read the save; the app must catch it and tell the player. */
     load: function (k) {
-      return new Promise(function (resolve) {
-        var i = ++seq; waiting[i] = resolve;
+      return new Promise(function (resolve, reject) {
+        var i = ++seq; waiting[i] = { resolve: resolve, reject: reject };
         post({ op: "load", k: String(k), i: i });
       });
+    },
+    /* -> Promise<{schema, version, updated, bytes}|null>, the metadata of what is on disk now */
+    saveInfo: function () {
+      return new Promise(function (resolve, reject) {
+        var i = ++seq; infoing[i] = { resolve: resolve, reject: reject };
+        post({ op: "info", i: i });
+      });
+    },
+    /* the app's own data schema: record it in the save after a migration or a new format */
+    setSchema: function (n) {
+      if (typeof n === "number" && isFinite(n) && n >= 0) post({ op: "schema", n: Math.floor(n) });
     },
     exit: function () { post({ op: "exit" }); },
     /* sfx("coin"), one of SOUNDS, or sfx({wave, from, to, ms, ...}), a sound of the app's own */
@@ -292,7 +308,16 @@ function lopdaPadShim(opts) {
 
   addEventListener("message", function (e) {
     var d = e.data; if (!d || !d.pad || e.source !== parent) return;
-    if (d.op === "loaded" && waiting[d.i]) { waiting[d.i](d.v); delete waiting[d.i]; }
+    if (d.op === "loaded" && waiting[d.i]) {
+      var lw = waiting[d.i]; delete waiting[d.i];
+      if (d.error) { var le = new Error("PAD.load: " + String(d.error)); le.code = String(d.error); lw.reject(le); }
+      else lw.resolve(d.v);
+    }
+    else if (d.op === "infoed" && infoing[d.i]) {
+      var iw = infoing[d.i]; delete infoing[d.i];
+      if (d.error) { var ie = new Error("PAD.saveInfo: " + String(d.error)); ie.code = String(d.error); iw.reject(ie); }
+      else iw.resolve(d.v);
+    }
     else if (d.op === "filed" && filing[d.i]) {
       var f = filing[d.i]; delete filing[d.i];
       if (d.error) f.reject(new Error(String(d.error))); else f.resolve(d.v);

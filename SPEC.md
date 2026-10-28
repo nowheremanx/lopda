@@ -138,9 +138,11 @@ So an app cannot:
 The runtime injects a global `PAD` object before the app's own scripts run.
 
 ```js
-await PAD.load(key)          // -> the saved value, or null
+await PAD.load(key)          // -> the saved value, or null; rejects if the save cannot be read
 PAD.save(key, value)         // value: anything JSON-serializable
 PAD.remove(key)
+await PAD.saveInfo()         // 0.46.0+; -> {schema, version, updated, bytes}, or null when nothing is saved
+PAD.setSchema(n)             // 0.46.0+; record the data schema this build writes (an integer >= 0)
 PAD.TONES                    // ["#1f2a14", "#4a5a32", "#7d8a58", "#a3ad7e"]
 PAD.spec                     // "lopda/1", the newest spec this runtime implements
 PAD.exit()                   // ask the runtime to close the app
@@ -201,9 +203,20 @@ Sounds, roughly: `tap` key click, `tick` short tick (timers), `move` cursor step
 `lose` falling tune. Unknown names are ignored. The runtime plays at most 20 sounds a
 second per app, named and custom together.
 
-- Storage is per app, private, and survives app updates.
+- Storage is per app, private, and survives app updates **and removing the app**. Installing the
+  same id again carries on from the old save; Settings → App saves is where the player clears it.
+  This is a promise to the player: your save format must keep reading what earlier versions wrote
+  (section 8).
 - Budget: 256 KB of JSON per app. Writes past the budget are dropped.
 - Saves are batched by the runtime; do not save on every frame.
+- `PAD.load` can reject. The code is `"corrupt"` (the bytes are not a save), `"readfail"` (storage
+  could not be read) or `"newer"` (a document format this runtime does not know). Catch it, tell the
+  player what happened, and do not silently reset or overwrite: the runtime shows its own notice and
+  the old bytes stay until the player clears them in Settings → App saves. The app is still the
+  owner of its data and of the way back.
+- `PAD.saveInfo` is the metadata of the save on disk (`schema`, the app version that wrote it,
+  `updated` in milliseconds since the epoch, and `bytes`), not the values themselves. `PAD.setSchema(n)` records the schema this build
+  writes; call it after a migration and it rides with the next save.
 - Uncaught errors and rejected promises are reported to the runtime, which shows
   them to the user.
 
@@ -617,8 +630,31 @@ if (PAD.dict && PAD.dict.inBook) {               // the word book calls arrive w
 - The registry index lists each app's version and the SHA-256 of `index.html`.
 - The runtime installs that exact file and checks the hash. An installed app
   never changes until the user taps update.
-- Data saved with `PAD.save` stays with the app id across versions. If you
-  change your data format, migrate old values yourself.
+- An app id is permanent and belongs to one app. Never reuse an id for a different app: the save
+  travels with the id.
+- Data saved with `PAD.save` stays with the app id across versions **and across removing and
+  reinstalling the app**. Your format must therefore stay backward compatible for as long as the
+  app exists. Additive changes are the default: new keys with defaults, keep the old ones.
+
+### Breaking changes: load, transform, then write
+
+When a format change cannot be additive, migrate on the device, inside the app:
+
+1. Keep a schema number inside the saved value (or use `PAD.setSchema`, or both). A top-level
+   `v` in the value is the usual place: `{v: 2, ...}`.
+2. On start, read the old value, transform it in memory, and validate the result. Do not write
+   over the only copy before the transform has succeeded.
+3. Save the transformed value, then record the new schema (`PAD.setSchema(2)`).
+4. If the value's schema is **newer** than the app understands, do not overwrite it. Say so and let
+   the player update the app; `PAD.saveInfo().schema` gives the number on disk.
+5. If loading fails, catch the rejection and tell the player the save cannot be read. Do not
+   silently start a new game over the old data. Settings → App saves is where the player can clear
+   the damaged save after deciding.
+6. Test the migration with a fixture of the old value. A release that breaks an old save is a
+   broken release, not a fresh start.
+
+The runtime keeps the bytes of a save it cannot read until the player clears them, and it refuses
+new writes for that app until then. That is deliberate: the player's data outranks a clean start.
 
 ## 9. Checking an app
 
