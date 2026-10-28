@@ -96,14 +96,14 @@ var STORY = (function () {
     {
       song: "canon",
       interlude: [
-        { who: "yuezheng", text: { zh: "南郭，你知道我为什么让你当副手吗？", en: "Nan Guo, do you know why I made you deputy?" } },
+        { who: "yuezheng", text: { zh: "王上要立你当副手。你知道我为什么推荐你吗？", en: "The king will make you deputy. Do you know why I recommended you?" } },
         { who: "nanguo", text: { zh: "因为我吹得好？", en: "Because I play well?" } },
         { who: "yuezheng", text: { zh: "因为你欠我一个人情。一个不会吹的副手，比一个会吹的副手好用。", en: "Because you owe me. A deputy who cannot play is more useful than one who can." } },
         { who: "nanguo", mood: "worried", text: { zh: "……乐正，您到底知道多少？", en: "...Music Master, how much do you know?" } },
         { who: "yuezheng", text: { zh: "我知道的，刚好够让你睡不着。", en: "Enough to keep you awake." } }
       ],
       before: [
-        { who: "yuezheng", text: { zh: "王上要立你当乐正副手。以后你带新人。", en: "The king will make you deputy Music Master. You will train the new players." } },
+        { who: "yuezheng", text: { zh: "明天起，你带新人。王上已经点头了。", en: "From tomorrow you train the new players. The king has already nodded." } },
         { who: "nanguo", mood: "worried", text: { zh: "带新人？我连自己都带不明白。", en: "Train them? I cannot even train myself." } },
         { who: "aqin", text: { zh: "我可以帮你。但你得答应我一件事：学一支真曲。", en: "I can help. Promise me one thing: learn one real tune." } },
         { who: "nanguo", text: { zh: "等忙完这阵子。", en: "After this busy spell." } }
@@ -121,15 +121,13 @@ var STORY = (function () {
     },
     {
       song: "mountain",
-      interlude: [
+      before: [
+        { who: "narr", text: { zh: "宣王去世。齐湣王即位。他第一句话是：寡人只听独奏。", en: "King Xuan died. King Min took the throne. His first words: I listen to solos." } },
         { who: "narr", text: { zh: "宣王的葬礼上，三百名乐师站成一片。新王一句话，乐队就散了。", en: "At King Xuan's funeral, three hundred players stood together. One word from the new king, and the orchestra scattered." } },
         { who: "nanguo", mood: "worried", text: { zh: "昨天还在一起吹，今天连个影子都没有。", en: "Yesterday we played together. Today there is not even a shadow." } },
         { who: "aqin", text: { zh: "合奏就是这样。人一散，谁也不会记得谁吹过什么。", en: "That is an ensemble. Once it scatters, no one remembers who played what." } },
         { who: "nanguo", text: { zh: "那我呢？", en: "And me?" } },
-        { who: "aqin", mood: "sad", text: { zh: "你还在。所以你得吹。", en: "You are still here. So you have to play." } }
-      ],
-      before: [
-        { who: "narr", text: { zh: "宣王去世。齐湣王即位。他第一句话是：寡人只听独奏。", en: "King Xuan died. King Min took the throne. His first words: I listen to solos." } },
+        { who: "aqin", mood: "sad", text: { zh: "你还在。所以你得吹。", en: "You are still here. So you have to play." } },
         { who: "min", mood: "angry", text: { zh: "三百人一起吹，吹错了也没人知道。寡人不想被当傻子。", en: "In a crowd of three hundred, a wrong note hides. I will not be made a fool." } },
         { who: "yuezheng", text: { zh: "从南郭开始。", en: "Begin with Nan Guo." } },
         { who: "nanguo", mood: "worried", text: { zh: "我？王上，我最近嗓子……", en: "Me? Sire, my throat has been..." } },
