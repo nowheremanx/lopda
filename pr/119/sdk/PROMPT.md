@@ -47,11 +47,17 @@ Hard rules for index.html:
   translation.
 - To remember things (high scores, settings), use the global PAD object that the
   runtime provides. Do not use localStorage, cookies or IndexedDB.
-    await PAD.load(key)   -> saved value or null
+    await PAD.load(key)   -> saved value or null; catch a rejection (corrupt/readfail/newer)
     PAD.save(key, value)  -> any JSON-serializable value
     PAD.remove(key)
+    await PAD.saveInfo()  -> {schema, version, updated, bytes} or null   (0.46.0+; check it first)
+    PAD.setSchema(n)      -> record the data schema this build writes    (0.46.0+)
     PAD.exit()            -> close the app
   Save on meaningful events (game over, setting changed), not every frame.
+  A save survives updates and uninstall/reinstall, so old values must keep loading. Keep a schema
+  (v) in the value; if the format breaks, read the old value, transform it, validate, then save it
+  back. If the saved schema is newer than the app, do not overwrite it. If PAD.load rejects, tell
+  the player instead of silently starting over. See SPEC.md section 8.
 - Sound: call PAD.sfx(name) with one of "tap", "tick", "move", "ok", "err",
   "hit", "miss", "coin", "win", "lose". Do not create your own AudioContext.
   Newer runtimes also play the app's own sounds and music; PAD.music is undefined

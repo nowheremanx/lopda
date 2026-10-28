@@ -238,7 +238,7 @@ document.addEventListener("visibilitychange",function(){
 });
 
 /* ---------- sound: tiny square-wave chips through Web Audio (the named sounds themselves are in chip.js) ---------- */
-var RUNTIME_VERSION="0.45.0+6cfa378";   /* keep in step with VERSION in sw.js */
+var RUNTIME_VERSION="0.46.0+61ed8a9";   /* keep in step with VERSION in sw.js */
 /* One volume, five steps, 0 is off (decisions.md section 10). It sets the master gain and nothing else does.
    Under the master: `ui` for the runtime's own clicks and the built-ins' prompts, held at a fraction so they stay as
    quiet as they always were (step 2 gives them 0.11, their level before 0.12.0), and `app` for apps, music and the
@@ -507,18 +507,20 @@ function renderHome(){
   }
 }
 
-/* two-tap confirm: the page builds its own confirmation instead of confirm() */
-function resetConfirm(wrapId,btnId,label,onYes){
+/* two-tap confirm: the page builds its own confirmation instead of confirm().
+   `confirm` is the second button's words when the first label alone would not say what will happen
+   (removing an app keeps its saves, so the question says so). */
+function resetConfirm(wrapId,btnId,label,onYes,confirm){
   var w=$(wrapId); w.textContent="";
   var b=document.createElement("button"); b.className="btn ghost"; b.type="button"; b.id=btnId; b.textContent=label||tr("common.delete");
-  w.appendChild(b); b.onclick=function(){ armConfirm(wrapId,btnId,label,onYes); };
+  w.appendChild(b); b.onclick=function(){ armConfirm(wrapId,btnId,label,onYes,confirm); };
 }
-function armConfirm(wrapId,btnId,label,onYes){
+function armConfirm(wrapId,btnId,label,onYes,confirm){
   var w=$(wrapId); w.textContent="";
-  var yes=document.createElement("button"); yes.className="btn"; yes.type="button"; yes.textContent=tr("common.confirm",{what:label||tr("common.delete")});
+  var yes=document.createElement("button"); yes.className="btn"; yes.type="button"; yes.textContent=confirm||tr("common.confirm",{what:label||tr("common.delete")});
   var no=document.createElement("button"); no.className="btn ghost"; no.type="button"; no.textContent=tr("common.cancel");
   w.appendChild(yes); w.appendChild(no);
-  no.onclick=function(){ resetConfirm(wrapId,btnId,label,onYes); };
+  no.onclick=function(){ resetConfirm(wrapId,btnId,label,onYes,confirm); };
   yes.onclick=onYes;
 }
 

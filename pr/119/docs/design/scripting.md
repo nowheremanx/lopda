@@ -118,7 +118,7 @@ requestAnimationFrame(frame);
 data/users/local/scripts                   设置：{v, lastId, sort}
 data/users/local/script-idea                AI 需求草稿：{v, text, updated}
 data/users/local/scripts/items/<scriptId>  脚本源文件：{v, id, name, kind, body, created, updated}
-data/users/local/scripts/data/<scriptId>   脚本存档：{v, kv, updated, bytes}
+data/users/local/scripts/data/<scriptId>   脚本存档：{v, kv, schema?, updated, bytes}
 ```
 
 - `scriptId` 在新建/导入时生成（`LP.uid()` 一类），不是文件名；文件名/标题可以随便改。
@@ -138,12 +138,13 @@ data/users/local/scripts/data/<scriptId>   脚本存档：{v, kv, updated, bytes
 
 ```js
 // data/<scriptId>
-{ v: 1, kv: { settings: {...}, sessions: [...] }, updated: 1690000000000, bytes: 1234 }
+{ v: 1, kv: { settings: {...}, sessions: [...] }, schema: 2, updated: 1690000000000, bytes: 1234 }
 ```
 
 - 每个脚本上限 **256 KB**（和商店 app 的 `PAD.save` 预算一致）；超出时拒绝本次写入，保留上一版，toast 提示。
 - 所有脚本合计上限建议 **2 MB**，在“脚本 → 存档”页显示用量；到上限时提示用户清理。这个上限集中在一个常量里，以后可调。
-- `v` 用于以后迁移；读到比当前新的版本，拒绝运行并提示“存档来自更新的版本”，不要静默降级。
+- `v` 是平台文档格式；读到比当前新的版本，拒绝运行并提示“存档来自更新的版本”，不要静默降级。
+- `schema` 是脚本自己的数据版本，由 `PAD.setSchema(n)` 记下；`PAD.saveInfo()` 读到的就是它。
 - `bytes` 只是显示/统计用，真正判断以 `JSON.stringify(kv).length` 为准。
 
 #### 编辑、重命名、替换、复制

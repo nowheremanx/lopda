@@ -287,6 +287,12 @@ other games, however short.
 
 Save at meaningful moments (a save point, a level cleared), not every frame.
 
+A save survives app updates and uninstall/reinstall, so keep it backward compatible: put a schema
+number in the value and migrate old values on load (read, transform, validate, then save back).
+`PAD.saveInfo()` tells you the schema on disk; `PAD.setSchema(n)` records the one this build writes.
+If the save is newer than the game, do not overwrite it. Catch a rejected `game.load` and tell the
+player; do not start a new game over a damaged save. SPEC.md section 8 has the full rule.
+
 ## 10. Helpers
 
 ```js

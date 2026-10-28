@@ -98,38 +98,42 @@ game.scene("night", {
     ];
     var y = 52;
     for (var i = 0; i < lines.length; i++) {
-      g.text(lines[i][0], 12, y, { color: g.DARK });
-      g.text(lines[i][1], 108, y, { align: "right" });
+      UI.columns(g, y, [
+        { x: 12, w: 56, text: lines[i][0], color: g.DARK },
+        { x: 68, w: 40, text: lines[i][1], align: "right" }
+      ]);
       y += 15;
     }
     g.rect(12, y - 2, 96, 1, g.MID);
     y += 6;
-    if (L.refund) { g.text("腌菜坛退回 " + L.refund + " 份", 12, y, { color: g.DARK }); y += 15; }
+    if (L.refund) { UI.text(g, "腌菜坛退回 " + L.refund + " 份", 12, y, { color: g.DARK, fit: 96 }); y += 15; }
     var r = L.rentInfo;
     if (r) {
-      g.text(r.old > 0 ? "房租+旧账" : "房租", 12, y, { color: g.DARK });
-      g.text(r.paid + "/" + r.rent, 108, y, { align: "right" });
+      UI.columns(g, y, [
+        { x: 12, w: 60, text: r.old > 0 ? "房租+旧账" : "房租", color: g.DARK },
+        { x: 76, w: 32, text: r.paid + "/" + r.rent, align: "right" }
+      ]);
       y += 15;
-      if (r.missed > 0) { g.text("还欠 " + S.debt + " 文", 12, y, { color: g.INK }); y += 15; }
+      if (r.missed > 0) { UI.text(g, "还欠 " + S.debt + " 文", 12, y, { color: g.INK, fit: 96 }); y += 15; }
     }
-    if (S.debt > 0) g.text("共欠 " + S.debt + " 文", 12, y, { color: g.INK });
-    else g.text("账清了", 12, y, { color: g.DARK });
+    if (S.debt > 0) UI.text(g, "共欠 " + S.debt + " 文", 12, y, { color: g.INK, fit: 96 });
+    else UI.text(g, "账清了", 12, y, { color: g.DARK, fit: 96 });
     // right: the people
     g.window(120, 32, 90, 180);
-    g.text("常客", 126, 36, { color: g.DARK });
+    UI.text(g, "常客", 126, 36, { color: g.DARK, fit: 78 });
     var names = DATA.NPC_ORDER;
     for (var n = 0; n < names.length; n++) {
       var id = names[n], ny = 54 + n * 20;
-      g.text(DATA.NPCS[id].name, 126, ny);
+      UI.text(g, DATA.NPCS[id].name, 126, ny, { fit: 30 });
       UI.hearts(g, 158, ny + 1, S.npc[id] || 0, 5);
     }
     var next = S.day < 7 ? dayWeather(S.day + 1) : "sunny";
     g.text("明日", 126, 140, { color: g.DARK });
     ART.weatherIcon(g, next, 156, 138, game.time);
     g.text(DATA.WEATHER[next].name, 174, 140, { color: g.DARK });
-    g.text("总客 " + S.stats.served, 126, 160, { color: g.DARK });
-    g.text("总入 " + S.stats.earned, 126, 174, { color: g.DARK });
-    g.text("第七天，山神宴。", 126, 192, { color: g.DARK });
+    UI.text(g, "总客 " + S.stats.served, 126, 160, { color: g.DARK, fit: 78 });
+    UI.text(g, "总入 " + S.stats.earned, 126, 174, { color: g.DARK, fit: 78 });
+    UI.text(g, "第七天 山神宴", 126, 192, { color: g.DARK, fit: 78 });
     UI.footer(g, S.day === 7 ? "A 结局" : (NIGHT_STORY && !NIGHT_STORY_DONE ? "A 听她说" : "A 睡吧"));
     UI.toast(g);
   }

@@ -101,10 +101,10 @@ game.scene("morning", {
     g.window(6, 146, 204, 44);
     var names = S.menu.map(function (id) { return DATA.DISHES[id].name; });
     var menuText = names.length ? names.slice(0, 2).join("、") + (names.length > 2 ? "等" + names.length + "道" : "") : "还没定";
-    g.text("菜单：" + menuText, 10, 149);
-    g.text("库存 " + stockTotal() + " 份　　行动 " + S.ap + "/2" + (S.staff ? "　　帮手 " + helperName() : ""), 10, 163, { color: g.DARK });
+    UI.text(g, "菜单：" + menuText, 10, 149, { fit: 196 });
+    UI.text(g, "库存 " + stockTotal() + " 份　　行动 " + S.ap + "/2" + (S.staff ? "　　帮手 " + helperName() : ""), 10, 163, { color: g.DARK, fit: 196 });
     var regCount = DATA.NPC_ORDER.filter(function (id) { return (S.npc[id] || 0) >= 3; }).length;
-    g.text("预计客 " + serveCount() + " 位　常客 " + regCount + " 人", 10, 177, { color: g.DARK });
+    UI.text(g, "预计客 " + serveCount() + " 位　常客 " + regCount + " 人", 10, 177, { color: g.DARK, fit: 196 });
     UI.actionBar(g, morningActions(), MORNING_SEL, 194);
     UI.footer(g, "←→ 选　A 好　B 说明");
     UI.toast(g);

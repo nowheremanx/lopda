@@ -67,7 +67,7 @@ function someOf(arr, n) { return shuffle(arr).slice(0, n); }
 
 function newTrip() {
   var t = {
-    area: "forest", stamina: 3, staminaMax: 4, basket: 0, basketMax: 8,
+    area: "forest", stamina: 4, staminaMax: 4, basket: 0, basketMax: 10,
     nodes: [], monsters: [], shrine: false, deep: false,
     player: { x: 8, y: 13, fx: 8, fy: 13, t: 1, dir: "up", cool: 0 },
     fx: []
@@ -310,7 +310,7 @@ game.scene("forest", {
     for (var st = 0; st < trip.staminaMax; st++) {
       g.rect(122 + st * 8, 8, 5, 5, st < trip.stamina ? g.INK : g.MID);
     }
-    g.text("篮 " + trip.basket + "/8", 202, 6, { align: "right", color: g.DARK });
+    g.text("篮 " + trip.basket + "/" + trip.basketMax, 202, 6, { align: "right", color: g.DARK });
     UI.footer(g, trip.area === "deep" ? "方向键 走　B 回后山" : "方向键 走　B 回店");
     UI.toast(g);
   }

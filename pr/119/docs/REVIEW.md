@@ -1,4 +1,4 @@
-English summary: Review apps for original, shareable content; four-tone, usable screens; working keys; justified permissions; sandbox compliance; size; and readable code.
+English summary: Review apps for original, shareable content; four-tone, usable screens; working keys; justified permissions; sandbox compliance; size; save compatibility across updates and reinstall; and readable code.
 
 # App review checklist
 
@@ -12,4 +12,5 @@ English summary: Review apps for original, shareable content; four-tone, usable 
 - **权限**：每项权限都必须必要且实际使用。尤其麦克风只在 app 正在听时开启，听完立即关闭。
 - **沙盒**：按 `SPEC.md` 第 5 节检查，不联网、不加载外部资源、不绕过存储隔离、不导航到 app 外。
 - **大小**：`index.html` 不超过 512 KB，且通过 `node tools/check-app.mjs`。
+- **存档兼容**：存档跨版本、跨卸载重装保留。更新必须能读旧档；breaking change 要有 schema，先读、迁移、校验再覆盖，不能静默丢旧档；读到更新的 schema 不覆盖；`PAD.load` 失败要 catch 并告诉玩家（`SPEC.md` 第 8 节）。
 - **代码**：逻辑清楚、容易阅读；仅在非显然处补充注释。

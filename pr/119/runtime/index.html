@@ -93,6 +93,11 @@
           <span class="set-label" data-i18n="set.backup">备份与恢复</span>
           <span class="set-state" id="set-backup-state"></span>
         </button>
+        <button class="set-open" id="set-saves-open" type="button">
+          <span class="set-ico" id="set-saves-ico" aria-hidden="true"></span>
+          <span class="set-label" data-i18n="set.saves">程序存档</span>
+          <span class="set-state" id="set-saves-state"></span>
+        </button>
         <button class="set-open" id="set-key-open" type="button">
           <span class="set-ico" id="set-key-ico" aria-hidden="true"></span>
           <span class="set-label" data-i18n="key.label">暗房钥匙</span>
@@ -126,6 +131,22 @@
       </div>
     </section>
 
+    <!-- APP SAVES: kept when an app is removed (decisions.md section 43) -->
+    <section class="view" id="v-set-saves" hidden>
+      <div class="bar">
+        <button class="btn ghost" id="set-saves-back" type="button" aria-label="返回">◂</button>
+        <h2 data-i18n="saves.title">程序存档</h2>
+      </div>
+      <div class="settings">
+        <div class="set-saves" id="set-saves">
+          <p class="hint" data-i18n="saves.note">卸载程序不会删掉它的存档；重新安装同一个程序会接着用。这里可以清除。脚本的存档在「脚本」程序里管理。</p>
+          <p class="hint" id="set-saves-summary" aria-live="polite"></p>
+          <ul class="set-saves-list" id="set-saves-list"></ul>
+          <div class="row" id="set-saves-all-wrap"></div>
+        </div>
+      </div>
+    </section>
+
     <!-- BACKUP: the whole device as one file (decisions.md section 24) -->
     <section class="view" id="v-set-backup" hidden>
       <div class="bar">
@@ -150,6 +171,7 @@
           <input type="file" id="set-restore-file" accept=".zip,application/zip" hidden>
         </div>
         <p class="hint" id="set-storage" data-i18n="set.counting">本机存档：计算中…</p>
+        <p class="hint" data-i18n="bk.saves">程序存档也在备份里；卸载程序不会删掉存档。</p>
       </div>
     </section>
 
@@ -667,6 +689,7 @@
 <script src="studio-synth.js"></script>
 <script src="vendor/qrcode-generator/qrcode.js"></script>
 <script src="qr.js"></script>
+<script src="appsaves.js"></script>
 <script src="core.js"></script>
 <script src="apps/notes.js"></script>
 <script src="apps/calendar.js"></script>

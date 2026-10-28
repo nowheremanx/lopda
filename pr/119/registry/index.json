@@ -1,6 +1,6 @@
 {
   "spec": "lopda/1",
-  "generated": "2026-10-27",
+  "generated": "2026-10-28",
   "apps": [
     {
       "spec": "lopda/1",
@@ -610,8 +610,51 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/shanjiao-diner/index.html",
-      "sha256": "719a09673c6e56875269f6b4c93b1296b2d734f4574e9fc02f9dfc928352c0ce",
-      "bytes": 180950
+      "sha256": "4ed1bd53a9448a914ebfcf26674ab0125196af66213dd715eb5f1aefe10f82b1",
+      "bytes": 220996
+    },
+    {
+      "spec": "lopda/1",
+      "id": "sisyphus",
+      "name": "西西弗斯",
+      "glyph": "石",
+      "category": "game",
+      "buttons": true,
+      "icon": [
+        "................",
+        "................",
+        "..........000...",
+        ".........03330..",
+        "........0333330.",
+        "........0333330.",
+        ".........03330..",
+        "..........000...",
+        "................",
+        "........00......",
+        "......000.......",
+        "....000.........",
+        "..000...........",
+        "000.............",
+        "................",
+        "................"
+      ],
+      "version": "0.1.1",
+      "released": "2026-10-27",
+      "description": "推石上山。它滚下去。再推。加缪的十六句话在山顶等你。",
+      "i18n": {
+        "en": {
+          "name": "Sisyphus",
+          "description": "Push. It falls. Push again. Sixteen lines from Camus at the summit."
+        }
+      },
+      "author": "Haowei Wu",
+      "license": "MIT",
+      "permissions": [
+        "notes"
+      ],
+      "path": "apps/sisyphus/index.html",
+      "sha256": "f2d37ddf6800a9fbb1a6f60136775be8a26a8ba140e5c9d9f7f2782a37dab02e",
+      "bytes": 96050
     },
     {
       "spec": "lopda/1",
