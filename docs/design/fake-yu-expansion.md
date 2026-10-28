@@ -1,6 +1,6 @@
 # 计划：滥竽充数 · 加长版（fake-yu 2.1）
 
-状态：进行中。分支 `fake-yu-long`，PR 待开。
+状态：音乐、剧情和加演已实现，待试听和 PR。分支 `fake-yu-long`。
 主人决定：A（音乐）、B（剧情）、C（加演）全做；先做音乐，做完还有空再加剧情。
 小夜曲要“原汁原味”；主线保持游戏化简化，完整的原曲难度版放进加演。
 
@@ -15,6 +15,15 @@
 - 版本：`manifest.json` 从 2.0.0 升到 2.1.0（音乐）/ 2.2.0（剧情，如果同 PR 就只写 2.1.0 也可，以最终为准）。
 - 不要 push 到 `main`；推到 `fake-yu-long`，开 PR。
 - 提交信息用英文短句，结尾按会话要求加 Co-Authored-By（如果会话没有要求就不加）。
+
+## 0.1 当前状态（交接时先读这段）
+
+- 十首曲子已加长：总时长 706 秒（11 分 46 秒），最短 48 秒，最长 87 秒。
+- 卡农改为 `D A Bm F#m G D G A`、每小节两个和弦；土耳其按 A-B-A-C-A-coda 重写；小夜曲改为 3/4 的《Ständchen》简化版。
+- 六段间奏、第八章后“白纸”过场、四种结局各一页后日谈已加；没有加“小选择”，以保持 2×2 结局和旧存档。
+- 加演模式已实现：通关后标题页出现第四行“加演”，选曲页标题变成“加演曲目”；加演用更密的 `encoreChart`、更窄的判定窗口、更少的怀疑回落。
+- `tests/fake-yu.test.mjs` 已通过；`bundle-app` 和 `check-app` 已通过。
+- 还没做：真机/浏览器试听、PR 描述和 push。
 
 ## 1. 问题与决定
 
@@ -246,20 +255,20 @@ if (def.bars.length !== beat / 4) throw ...
 
 ## 6. 执行顺序与检查点
 
-- [ ] 1. 写本计划并提交（handoff）。
-- [ ] 2. 改 `music.js`：`meter`、`chordsPerBar`、`backing`、`resumeAt`、MML 校验。
-- [ ] 3. 重写卡农；本地跑数据校验；听感自查（用 dev.html 播）。
-- [ ] 4. 重写土耳其；校验。
-- [ ] 5. 重写小夜曲（3/4）；校验。
-- [ ] 6. 补欢乐颂、绿袖子、山魔王、天鹅湖、匈牙利、致爱丽丝、小星星。
-- [ ] 7. 重标 difficulty；确认每首至少 2 个注视（小星星除外）。
-- [ ] 8. 加 `tests/fake-yu.test.mjs`，跑 `node --test tests/fake-yu.test.mjs`。
-- [ ] 9. 跑 `bundle-app.mjs` + `check-app.mjs`；开 dev.html 手动过一遍十首。
-- [ ] 10. 提交音乐部分（commit）。
-- [ ] 11. 剧情间奏/扩写/结局页；再跑测试和 checker。
-- [ ] 12. 加演模式（如果时间够）。
-- [ ] 13. 更新 `docs/design/fake-yu.md`（曲目表、时长、难度、剧情、加演）。
-- [ ] 14. 升 manifest 版本；重跑 bundle/check。
+- [x] 1. 写本计划并提交（handoff）。
+- [x] 2. 改 `music.js`：`meter`、`chordsPerBar`、`backing`、`resumeAt`、MML 校验。
+- [x] 3. 重写卡农；本地跑数据校验；听感自查（用 dev.html 播）。
+- [x] 4. 重写土耳其；校验。
+- [x] 5. 重写小夜曲（3/4）；校验。
+- [x] 6. 补欢乐颂、绿袖子、山魔王、天鹅湖、匈牙利、致爱丽丝、小星星。
+- [x] 7. 重标 difficulty；确认每首至少 2 个注视（小星星除外）。
+- [x] 8. 加 `tests/fake-yu.test.mjs`，跑 `node --test tests/fake-yu.test.mjs`。
+- [x] 9. 跑 `bundle-app.mjs` + `check-app.mjs`；开 dev.html 手动过一遍十首。
+- [x] 10. 提交音乐部分（commit）。
+- [x] 11. 剧情间奏/扩写/结局页；再跑测试和 checker。
+- [x] 12. 加演模式（如果时间够）。
+- [x] 13. 更新 `docs/design/fake-yu.md`（曲目表、时长、难度、剧情、加演）。
+- [x] 14. 升 manifest 版本；重跑 bundle/check。
 - [ ] 15. push `fake-yu-long`，开 PR；PR 描述列改动、试听注意点、未做项。
 
 ## 7. 验收
