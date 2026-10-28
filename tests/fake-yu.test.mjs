@@ -51,6 +51,27 @@ test("every gaze has a release hold before it and a re-entry note after it", () 
   }
 });
 
+test("every gaze ends on a bar line", () => {
+  for (const song of FAKE_SONGS) {
+    const meter = song.meter || 4;
+    for (const [, end] of song.watch) {
+      const endBeat = end * song.bpm / 60;
+      assert.ok(Math.abs(endBeat / meter - Math.round(endBeat / meter)) < 1e-6,
+        `${song.id}: gaze ends at beat ${endBeat.toFixed(2)}, not a bar line`);
+    }
+  }
+});
+
+test("the Turkish A theme keeps its octave from start to finish", () => {
+  const turkish = FAKE_SONGS.find((s) => s.id === "turkish");
+  const beatSec = 60 / turkish.bpm;
+  const at = (beat) => turkish.chart.find((n) => Math.abs(n.t / beatSec - beat) < 0.01);
+  assert.equal(at(13).note, "b4", "the B A G# A figure should not drop an octave");
+  assert.equal(at(14).note, "c5");
+  assert.equal(at(108).note, "b5", "the octave-up statement should stay up");
+  assert.equal(at(110).note, "c6");
+});
+
 test("the three rewritten pieces have the shape the plan promised", () => {
   const canon = FAKE_SONGS.find((s) => s.id === "canon");
   assert.equal(canon.chordsPerBar, 2);
