@@ -2957,7 +2957,7 @@ game.scene("select", {
       g.text(b ? b.rank : T(TX.fresh), 154, y + 1, { align: "right", color: on ? PAPER : DARK });
       for (var k = 0; k < 5; k++) g.rect(20 + k * 6, y + 15, 4, 2, k < s.difficulty ? (on ? PAPER : INK) : MID);
       if (b) g.text(String(b.score), 154, y + 12, { align: "right", color: on ? PAPER : DARK });
-      if (i === profile.story) {
+      if (!selectEncore && i === profile.story) {
         var mk = on ? PAPER : INK;
         g.rect(4, y + 15, 5, 1, mk);
         g.rect(5, y + 14, 3, 1, mk);
