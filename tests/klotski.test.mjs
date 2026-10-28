@@ -249,10 +249,13 @@ test("klotski app: a level played through the solver reaches the card and writes
     assert.ok(K.step(m.i, m.dx, m.dy), `the app refused ${JSON.stringify(m)}`);
     run(app, 6);
   }
-  run(app, 220);   /* the exit interlude is 3.1 s */
+  run(app, 220);   /* the exit ride loops; it must not end by itself */
   const state = K.state();
-  assert.equal(state.ui, "card");
+  assert.equal(state.ui, "win");
   assert.equal(state.moves, d.par);
+  assert.ok(K.skip());
+  run(app, 2);
+  assert.equal(K.state().ui, "card");
   const saved = app.ctx.get("saved");
   assert.equal(saved.levels.k01.best, d.par);
   assert.equal(saved.levels.k01.clean, d.par);
