@@ -91,6 +91,16 @@ var KRules = (function () {
     return !!p && fits(level, pieces, i, p.x + dx, p.y + dy, level.pieces[i].w, level.pieces[i].h);
   }
 
+  /* can piece i move at least one cell in any direction? (SELECT walks only these) */
+  function canMoveAny(level, pieces, i) {
+    var d;
+    if (!pieces[i]) return false;
+    for (d = 0; d < 4; d++) {
+      if (maxSteps(level, pieces, i, DIRS[d][0], DIRS[d][1]) > 0) return true;
+    }
+    return false;
+  }
+
   /* how many cells can piece i slide in (dx,dy) before something blocks it? */
   function maxSteps(level, pieces, i, dx, dy) {
     var p = pieces[i], n = 0, pw = level.pieces[i].w, ph = level.pieces[i].h;
@@ -180,6 +190,7 @@ var KRules = (function () {
     clonePieces: clonePieces,
     fits: fits,
     canStep: canStep,
+    canMoveAny: canMoveAny,
     maxSteps: maxSteps,
     step: step,
     pieceAt: pieceAt,

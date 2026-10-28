@@ -281,7 +281,7 @@ var KLOTSKI_DATA = {
       title: { zh: "操作", en: "Controls" },
       lines: [
         { zh: "点一块选中，拖动它。点相邻的空格，也能把选中的块推过去。", en: "Tap a piece to select, then drag it. Tap an adjacent empty cell to push the selected piece there." },
-        { zh: "方向键移动选中的块；SELECT 换一块；A 提示；B 撤销；START 菜单。", en: "Arrows move the selected piece; SELECT picks another; A hints; B undoes; START opens the menu." },
+        { zh: "方向键移动选中的块；SELECT 只在能移动的方块之间切换；A 提示；B 撤销；START 菜单。", en: "Arrows move the selected piece; SELECT cycles only the pieces that can move; A hints; B undoes; START opens the menu." },
         { zh: "在选关列表里，上下选择，A 打开，SELECT 筛选难度。", en: "In the level list, up/down selects, A opens, SELECT filters by difficulty." }
       ]
     },
