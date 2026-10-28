@@ -94,7 +94,8 @@ node tools/build-index.mjs
 
 Everything stays in the phone's browser storage. Settings → Backup writes the whole device (notes, rolls and their
 colour originals, books, dictionaries, cartridge saves, app data) into one `lopda-backup-YYYYMMDD.zip`, and Restore
-puts it back after checking it first. The only built-in that goes online is the calendar, which fetches next year's
+puts it back after checking it first. Removing an app keeps its saves; Settings → App saves lists them and clears
+them, and a reinstall of the same app carries on. The only built-in that goes online is the calendar, which fetches next year's
 table of China's holidays from jsDelivr when it is missing (the tables up to now ship with the app). Apps cannot reach the network at all.
 
 ## Run it locally

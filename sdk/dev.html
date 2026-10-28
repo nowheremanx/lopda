@@ -122,6 +122,7 @@
   var key = function () { return "lopda-dev:" + appId; };
   var readStore = function () { try { return JSON.parse(localStorage.getItem(key()) || "{}"); } catch (e) { return {}; } };
   var writeStore = function (s) { localStorage.setItem(key(), JSON.stringify(s)); showStore(); };
+  var readSchema = function () { var n = parseInt(localStorage.getItem(key() + ":schema"), 10); return isFinite(n) && n >= 0 ? n : null; };
   var showStore = function () { document.getElementById("store").textContent = JSON.stringify(readStore(), null, 2); };
   /* PAD.dict (SPEC.md 6.7): the same wordlist.js source the handheld builds in runtime/apps/dict.js, over the same ECDICT
      files. words() reads only the 87 KB word list; the book loads on the first lookup and only once. No permission. */
@@ -229,6 +230,11 @@
     if (d.op === "load") frame.contentWindow.postMessage({ pad: 1, op: "loaded", i: d.i, v: d.k in s ? s[d.k] : null }, "*");
     else if (d.op === "save") { s[d.k] = d.v; writeStore(s); }
     else if (d.op === "remove") { delete s[d.k]; writeStore(s); }
+    else if (d.op === "info") {
+      var schema = readSchema();
+      frame.contentWindow.postMessage({ pad: 1, op: "infoed", i: d.i, v: (Object.keys(s).length || schema != null) ? { schema: schema, version: null, updated: 0, bytes: JSON.stringify(s).length } : null }, "*");
+    }
+    else if (d.op === "schema" && typeof d.n === "number" && isFinite(d.n) && d.n >= 0) localStorage.setItem(key() + ":schema", String(Math.floor(d.n)));
     else if (d.op === "error") log("ERROR " + d.msg);
     else if (d.op === "exit") { runToken++; wbAsk = null; document.getElementById("wordbookbox").hidden = true; log("app asked to exit"); if (chip) chip.stop(); senseStop("motion"); senseStop("mic"); speech.stop(); snapEnd(null); frame.srcdoc = ""; }
     else if (d.op === "notes") notesOp(d);

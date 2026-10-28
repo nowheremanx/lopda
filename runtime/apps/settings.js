@@ -19,6 +19,7 @@ var ROW_ICONS={
   permissions:["............","....0000....","...0....0...","...0....0...","..00000000..","..0......0..","..0..00..0..","..0..00..0..","..0......0..","..00000000..","............","............"],
   ai:["............","000000000000","0..........0","0..00..000.0","0.0..0..0..0","0.0000..0..0","0.0..0..0..0","0.0..0.000.0","0..........0","000000000000",".00.........",".0.........."],
   backup:["............","......0.....",".....000....","....00000...","......0.....","......0.....",".0000000000.",".0........0.",".0........0.",".0........0.",".0000000000.","............"],
+  saves:["............","..00000000..","..0......0..","..0.0..0.0..","..0......0..","..0.0000.0..","..0......0..","..0......0..","..00000000..","...0....0...","..00000000..","............"],
   key:["............","..000.......",".0...0......",".0...0......","..000.......","....0000000.",".........0..",".........0..",".........00.","............","............","............"],
   sounds:["............","....0000....","...0....0...","...0....0...","..0......0..","..0......0..","..0......0..",".0........0.",".0........0.","000000000000","....0000....",".....00....."],
   share:["............","........000.","........000.",".......0....","......0.....",".000.0......",".0000.......",".000.0......","......0.....",".......0....","........000.","........000."],
@@ -26,7 +27,7 @@ var ROW_ICONS={
 };
 function drawRowIcons(){
   [["set-vol-ico","volume"],["set-ui-ico","sounds"],["set-lang-ico","language"],["set-sys-ico","system"],["set-sense-ico","permissions"],
-   ["set-ai-ico","ai"],["set-backup-ico","backup"],["set-key-ico","key"],["set-share-ico","share"],["set-about-ico","about"]].forEach(function(p){
+   ["set-ai-ico","ai"],["set-backup-ico","backup"],["set-saves-ico","saves"],["set-key-ico","key"],["set-share-ico","share"],["set-about-ico","about"]].forEach(function(p){
     var host=$(p[0]), rows=ROW_ICONS[p[1]];
     if(host && rows){ host.textContent=""; host.appendChild(LP.iconCanvas(rows)); }
   });
@@ -62,6 +63,63 @@ function renderSense(){
     li.appendChild(t); li.appendChild(b); ul.appendChild(li);
   });
 }
+/* ---------- app saves (runtime/appsaves.js, apps/store.js; decisions.md section 43) ----------
+   Removing an app keeps its save. This page is the one place that clears saves, installed or not;
+   the script saves have their own page in the Scripts app. */
+function sizeBytes(n){
+  n=+n||0;
+  if(n<1024) return n+" B";
+  return (Math.round(n/102.4)/10)+" KB";
+}
+var savesSeq=0;
+function renderSavesRow(){
+  var el=$("set-saves-state"); if(!el) return;
+  if(!LP.appSaves){ el.textContent=""; return; }
+  el.textContent="…";
+  LP.appSaves.list().then(function(list){
+    var total=0;
+    list.forEach(function(x){ total+=x.size||0; });
+    el.textContent=list.length?tr("set.saves.state",{n:list.length,size:sizeBytes(total)}):tr("set.saves.none");
+  },function(){ el.textContent=""; });
+}
+function renderSaves(){
+  var seq=++savesSeq, ul=$("set-saves-list"), sum=$("set-saves-summary"), wrap=$("set-saves-all-wrap");
+  if(!ul) return;
+  ul.textContent=""; wrap.textContent=""; sum.textContent=tr("run.loading");
+  if(!LP.appSaves){ sum.textContent=tr("saves.readfail"); return; }
+  LP.appSaves.list().then(function(list){
+    if(seq!==savesSeq) return;
+    var total=0, orphans=0;
+    list.forEach(function(x){ total+=x.size||0; if(!x.installed) orphans++; });
+    sum.textContent=list.length?tr(orphans?"saves.summary":"saves.summaryall",{n:list.length,size:sizeBytes(total),m:orphans}):tr("saves.summarynone");
+    if(!list.length){ var none=document.createElement("li"); none.className="none"; none.textContent=tr("saves.summarynone"); ul.appendChild(none); return; }
+    list.forEach(function(x,i){
+      var li=document.createElement("li"), t=document.createElement("span"), name=document.createElement("b"), tag=document.createElement("span"), meta=document.createElement("small");
+      t.className="t"; name.textContent=x.name;
+      tag.className="tag";
+      tag.textContent=tr(x.bad==="corrupt"||x.bad==="readfail"?"saves.bad":x.bad==="newer"?"saves.newer":x.installed?"saves.installed":"saves.orphan");
+      meta.textContent=tr("saves.size",{size:sizeBytes(x.size),when:x.updated?LP.fmt(x.updated):tr("saves.unknown")});
+      t.appendChild(name); t.appendChild(tag); t.appendChild(meta); li.appendChild(t);
+      var w=document.createElement("span"); w.id="set-saves-del-"+i; li.appendChild(w);
+      ul.appendChild(li);
+      LP.resetConfirm(w.id,"set-saves-del-btn-"+i,tr("saves.clear"),function(){
+        LP.appSaves.clear(x.id).then(function(ok){
+          if(ok){ toast(tr("saves.cleared")); sfx("ok"); renderSaves(); renderSavesRow(); }
+          else { toast(tr("saves.clearfail")); sfx("err"); }
+        },function(e){ toast(tr(e && e.code==="running"?"saves.running":"saves.clearfail")); sfx("err"); });
+      });
+    });
+    LP.resetConfirm("set-saves-all-wrap","set-saves-all",tr("saves.clearall"),function(){
+      LP.appSaves.clearAll().then(function(ok){
+        toast(tr(ok?"saves.clearedall":"saves.clearallfail")); sfx(ok?"ok":"err"); renderSaves(); renderSavesRow();
+      },function(e){ toast(tr(e && e.code==="running"?"saves.running":"saves.clearallfail")); sfx("err"); });
+    });
+  },function(){
+    if(seq!==savesSeq) return;
+    sum.textContent=tr("saves.readfail"); ul.textContent=""; wrap.textContent="";
+  });
+}
+
 /* ---------- the AI line (runtime/ai.js, decisions.md section 34) ----------
    The user's OpenRouter key and model in one document of their own. The key never leaves this phone except in the
    request itself: it is kept out of the backup, and a restore leaves the one already here. Settings shows its last
@@ -402,7 +460,7 @@ function renderStorage(){
   } else film.then(function(t){ el.textContent=tr("set.nousage")+t; });
 }
 function openSettings(){
-  show("settings"); renderSettings(); renderSense(); renderAi(); renderUpdate(); renderLast();
+  show("settings"); renderSettings(); renderSense(); renderAi(); renderUpdate(); renderLast(); renderSavesRow();
 }
 function selectShareText(){
   var el=$("set-share-url"), sel=window.getSelection && window.getSelection();
@@ -421,6 +479,8 @@ $("set-sense-open").onclick=function(){ sfx("tap"); show("set-sense"); };
 $("set-sense-back").onclick=function(){ sfx("tap"); openSettings(); };
 $("set-backup-open").onclick=function(){ sfx("tap"); show("set-backup"); };
 $("set-backup-back").onclick=function(){ sfx("tap"); openSettings(); };
+$("set-saves-open").onclick=function(){ sfx("tap"); show("set-saves"); };
+$("set-saves-back").onclick=function(){ sfx("tap"); openSettings(); };
 $("set-share-open").onclick=function(){ sfx("tap"); show("set-share"); };
 $("set-share-back").onclick=function(){ sfx("tap"); openSettings(); };
 $("set-about-open").onclick=function(){ sfx("tap"); show("set-about"); };
@@ -453,6 +513,10 @@ LP.builtin({id:"set-backup", view:"set-backup",
   enter:function(){ renderLast(); renderStorage(); if(!BS.busy) $("set-backup-box").hidden=true; },
   lang:function(){ renderLast(); renderStorage(); }
 });
+LP.builtin({id:"set-saves", view:"set-saves",
+  enter:function(){ renderSaves(); },
+  lang:function(){ renderSaves(); }
+});
 LP.builtin({id:"set-share", view:"set-share",
   enter:function(){ openShare(); }
 });
@@ -462,7 +526,7 @@ LP.builtin({id:"set-about", view:"set-about",
 });
 LP.builtin({id:"settings", label:"app.settings", icon:"settings", view:"settings",
   open:function(){ openSettings(); },
-  lang:function(){ renderSettings(); renderSense(); renderAi(); renderLast(); },
+  lang:function(){ renderSettings(); renderSense(); renderAi(); renderLast(); renderSavesRow(); },
   ready:function(){
     S.db.doc(AIP).get().then(function(sn){
       var d=sn.exists ? LP.own(sn.data()) : null;

@@ -14,7 +14,7 @@ var DATA_MAX=256*1024;
 
 var M={
   base:null, items:null, data:null, ideaDoc:null,
-  list:[], sizes:{}, cache:{},
+  list:[], sizes:{}, cache:{}, schema:{},
   current:null, seq:0, saveTimer:0, dirty:false, askYes:null, dataAskYes:null, seedPromise:null,
   idea:"", ideaLoaded:false, ideaTouched:false, ideaTimer:0
 };
@@ -145,7 +145,7 @@ function deleteScript(id){
     return M.items.doc(id).delete();
   }).then(function(){
     M.list=M.list.filter(function(x){ return x.id!==id; });
-    delete M.sizes[id]; delete M.cache[id];
+    delete M.sizes[id]; delete M.cache[id]; delete M.schema[id];
     delete S.kv[PREFIX+id];
   });
 }
@@ -180,11 +180,16 @@ function loadData(id){
     var d=sn.exists ? own(sn.data()) : null;
     if(d && d.v>1) throw {code:"newer"};
     M.cache[id]=(d && d.kv)||{};
+    /* a setSchema before the first load is kept until the document has one of its own */
+    if(d && typeof d.schema==="number") M.schema[id]=d.schema;
+    else if(M.schema[id]==null) M.schema[id]=null;
     if(d && d.bytes!=null) M.sizes[id]=d.bytes;
     return M.cache[id];
   });
 }
-function saveData(id,kv){
+/* The third argument is the app's data schema (PAD.setSchema). Omitted, the schema already known for
+   this script is kept, so the store's debounced saves do not erase it. */
+function saveData(id,kv,schema){
   if(!id) return Promise.resolve(false);
   var clean;
   try { clean=own(kv||{}); } catch(e){ return Promise.resolve(false); }
@@ -193,13 +198,38 @@ function saveData(id,kv){
   if(json.length>DATA_MAX){ toast(tr("run.toobig")); return Promise.resolve(false); }
   M.cache[id]=clean;
   M.sizes[id]=json.length;
+  if(schema!==undefined && typeof schema==="number" && isFinite(schema) && schema>=0) M.schema[id]=Math.floor(schema);
   if(!refs()) return Promise.resolve(false);
-  return put(M.data.doc(id),{v:1, kv:clean, updated:Date.now(), bytes:json.length});
+  var rec={v:1, kv:clean, updated:Date.now(), bytes:json.length};
+  if(M.schema[id]!=null) rec.schema=M.schema[id];
+  return put(M.data.doc(id),rec);
 }
 function deleteData(id){
-  delete M.cache[id]; delete M.sizes[id]; delete S.kv[PREFIX+id];
+  delete M.cache[id]; delete M.sizes[id]; delete M.schema[id]; delete S.kv[PREFIX+id];
   if(!refs()) return Promise.resolve();
   return M.data.doc(id).delete();
+}
+function dataInfo(id){
+  if(!id || !refs()) return Promise.resolve(null);
+  return M.data.doc(id).get().then(function(sn){
+    if(!sn.exists) return M.schema[id]!=null ? {schema:M.schema[id], version:null, updated:0, bytes:0} : null;
+    var d=own(sn.data())||{};
+    if(d.v>1) throw {code:"newer"};
+    return {schema:typeof d.schema==="number"?d.schema:null, version:null, updated:d.updated||0, bytes:d.bytes!=null?d.bytes:0};
+  });
+}
+function setDataSchema(id,n){
+  if(!id || typeof n!=="number" || !isFinite(n) || n<0) return Promise.resolve(false);
+  M.schema[id]=Math.floor(n);
+  if(M.cache[id]) return saveData(id,M.cache[id],M.schema[id]);
+  if(!refs()) return Promise.resolve(false);
+  return M.data.doc(id).get().then(function(sn){
+    if(!sn.exists) return true;
+    var d=own(sn.data())||{};
+    if(d.v>1) throw {code:"newer"};
+    d.schema=M.schema[id]; d.updated=Date.now();
+    return put(M.data.doc(id),d);
+  });
 }
 
 LP.scripts={
@@ -207,6 +237,8 @@ LP.scripts={
   saveData:saveData,
   flush:saveData,
   deleteData:deleteData,
+  info:dataInfo,
+  setSchema:setDataSchema,
   size:function(id){ return M.sizes[id]||0; }
 };
 
