@@ -22,12 +22,12 @@
     "................",
     "................"
   ],
-  "version": "3.0.0",
-  "description": "30 秒砸地鼠。戴头盔的砸两下，冒火花的雷别碰。",
+  "version": "4.0.0",
+  "description": "60 秒冲分，或无尽生存。戴头盔的砸两下，冒火花的雷别碰。",
   "i18n": {
     "en": {
       "name": "Mole Bop",
-      "description": "30 seconds of bopping moles. Helmets take two hits; mines are a no-go."
+      "description": "60s score attack or endless survival. Helmets take two hits; mines are a no-go."
     }
   },
   "author": "Haowei Wu",

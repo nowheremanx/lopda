@@ -771,21 +771,21 @@
         "................",
         "................"
       ],
-      "version": "3.0.0",
+      "version": "4.0.0",
       "released": "2026-10-07",
       "updated": "2026-10-27",
-      "description": "30 秒砸地鼠。戴头盔的砸两下，冒火花的雷别碰。",
+      "description": "60 秒冲分，或无尽生存。戴头盔的砸两下，冒火花的雷别碰。",
       "i18n": {
         "en": {
           "name": "Mole Bop",
-          "description": "30 seconds of bopping moles. Helmets take two hits; mines are a no-go."
+          "description": "60s score attack or endless survival. Helmets take two hits; mines are a no-go."
         }
       },
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/whack-a-mole/index.html",
-      "sha256": "db32b52ae5753857d5c60e4bca8f5e3ab818cae625d5cf1faf8133884f3dec4c",
-      "bytes": 18414
+      "sha256": "037e5efd0ae2809e5713e69a1696f89e54c75958bd553a32f2d4ec7cd4e4ffc9",
+      "bytes": 22989
     },
     {
       "spec": "lopda/1",
