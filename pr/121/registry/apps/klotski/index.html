@@ -773,7 +773,7 @@ var KRules = (function () {
         for (i = 0; i < pieces.length; i++) {
           if (i === skip) continue;
           p = pieces[i];
-          if (xx >= p.x && xx < p.x + p.w && yy >= p.y && yy < p.y + p.h) return false;
+          if (xx >= p.x && xx < p.x + level.pieces[i].w && yy >= p.y && yy < p.y + level.pieces[i].h) return false;
         }
       }
     }
@@ -1149,9 +1149,9 @@ var KLOTSKI_DATA = {
       intro: [
         { zh: "这是一块 4×5 的华容道。木牌只能横着或竖着滑进空格，不能拿起来。", en: "This is a 4x5 Klotski board. Pieces only slide into empty cells; nothing can be lifted." },
         { zh: "点一块选中，再拖动它。方向键也能移动选中的块。每移动一格算一步。", en: "Tap a piece to select it, then drag. The arrow keys move the selected piece too. One cell is one step." },
-        { zh: "先把小兵移到虚线圈里。不要想太远，看清眼前这一步。", en: "Move the soldier into the dashed target. Do not plan too far ahead yet; see this one step clearly." }
+        { zh: "先把小兵 A 移到虚线圈里。不要想太远，看清眼前这一步。", en: "Move soldier A into the dashed target. Do not plan too far ahead yet; see this one step clearly." }
       ],
-      tip: { zh: "把小兵拖到虚线格。", en: "Drag the soldier to the dashed cell." }
+      tip: { zh: "把小兵 A 拖到虚线格。", en: "Drag soldier A to the dashed cell." }
     },
     {
       id: "m02", diff: 1, par: 3,
@@ -1190,7 +1190,7 @@ var KLOTSKI_DATA = {
         { zh: "四个兵把门口占满了。把他们分别送到左右两边，不要把中间堵住。", en: "Four soldiers fill the doorway. Send them to the left and right edges; keep the middle clear." },
         { zh: "门铺好了，曹操才能下楼。", en: "Prepare the door, and Cao can step down." }
       ],
-      tip: { zh: "把曹操 C 往下移一格。", en: "Move Cao C down one row." }
+      tip: { zh: "把曹操往下移一格。", en: "Move Cao down one row." }
     },
     {
       id: "m05", diff: 2, par: 5,
@@ -1229,7 +1229,7 @@ var KLOTSKI_DATA = {
         { zh: "先只做一件事：让曹操向下走一格。看清楚是哪两个兵要先让开。", en: "Do one thing only: move Cao down one row. Find the two soldiers that must step aside first." },
         { zh: "完整的一局在关卡列表里，最少 116 格。这一课只拆开第一步。", en: "The full puzzle is in the level list, 116 cells at best. This lesson only opens the first step." }
       ],
-      tip: { zh: "只把曹操 A 向下挪一格。", en: "Move Cao A down exactly one row." }
+      tip: { zh: "只把曹操向下挪一格。", en: "Move Cao down exactly one row." }
     },
     {
       id: "m08", diff: 3, par: 17,
@@ -1528,17 +1528,34 @@ function dottedRect(g, x, y, w, h, tone) {
   for (i = 0; i < w; i += 4) { g.rect(x + i, y, 2, 1, tone); g.rect(x + i, y + h - 1, 2, 1, tone); }
   for (i = 0; i < h; i += 4) { g.rect(x, y + i, 1, 2, tone); g.rect(x + w - 1, y + i, 1, 2, tone); }
 }
-/* a target that stays visible over paper and over ink: a paper under-corner then an ink corner */
-function cornerMark(g, x, y, w, h, size) {
-  var corners = [[x, y, 1, 1], [x + w, y, -1, 1], [x, y + h, 1, -1], [x + w, y + h, -1, -1]];
-  var i, c, sx, sy, dx, dy;
-  for (i = 0; i < corners.length; i++) {
-    c = corners[i]; sx = c[0]; sy = c[1]; dx = c[2]; dy = c[3];
-    g.rect(Math.min(sx, sx + dx * size), sy - 1, size + 1, 3, g.PAPER);
-    g.rect(sx - 1, Math.min(sy, sy + dy * size), 3, size + 1, g.PAPER);
-    g.rect(Math.min(sx, sx + dx * size), sy, size + 1, 1, g.INK);
-    g.rect(sx, Math.min(sy, sy + dy * size), 1, size + 1, g.INK);
+/* The lesson's target must stay visible when another piece sits on it. A 2 px dashed border
+   alternates ink and paper, so at least half of it reads on either tone; the corners and the centre
+   have a paper underlay so they do not vanish on a dark piece. */
+function targetMark(g, x, y, w, h) {
+  var i, len, tone, c, sx, sy, dx, dy;
+  x += 2; y += 2; w -= 4; h -= 4;
+  for (i = 0; i < w; i += 4) {
+    len = Math.min(4, w - i);
+    tone = (Math.floor(i / 4) & 1) ? g.PAPER : g.INK;
+    g.rect(x + i, y, len, 2, tone);
+    g.rect(x + i, y + h - 2, len, 2, tone);
   }
+  for (i = 0; i < h; i += 4) {
+    len = Math.min(4, h - i);
+    tone = (Math.floor(i / 4) & 1) ? g.PAPER : g.INK;
+    g.rect(x, y + i, 2, len, tone);
+    g.rect(x + w - 2, y + i, 2, len, tone);
+  }
+  var corners = [[x - 1, y - 1, 1, 1], [x + w + 1, y - 1, -1, 1], [x - 1, y + h + 1, 1, -1], [x + w + 1, y + h + 1, -1, -1]];
+  for (i = 0; i < 4; i++) {
+    c = corners[i]; sx = c[0]; sy = c[1]; dx = c[2]; dy = c[3];
+    g.rect(Math.min(sx, sx + dx * 7), sy - 1, 8, 3, g.PAPER);
+    g.rect(sx - 1, Math.min(sy, sy + dy * 7), 3, 8, g.PAPER);
+    g.rect(Math.min(sx, sx + dx * 7), sy, 8, 1, g.INK);
+    g.rect(sx, Math.min(sy, sy + dy * 7), 1, 8, g.INK);
+  }
+  g.circle(x + w / 2, y + h / 2, 3, g.PAPER, true);
+  g.circle(x + w / 2, y + h / 2, 2, g.INK, true);
 }
 function arrow(g, x0, y0, x1, y1, tone) {
   g.line(x0, y0, x1, y1, tone);
@@ -1589,8 +1606,14 @@ function drawPiece(g, level, geom, i, at, ox, oy, selected) {
     g.rect(x + 4, y + 4, 2, 2, g.MID);
     g.rect(x + w - 6, y + h - 6, 2, 2, g.MID);
   }
-  var label = pieceLabel(p);
+  var isGoal = !!(level.goal && level.goal.piece && level.goal.piece === p.ch);
+  var label = isGoal && p.kind !== "cao" ? p.ch : pieceLabel(p);
   g.text(label, x + w / 2, y + h / 2 - 7, { align: "center", color: p.kind === "cao" ? g.PAPER : g.INK });
+  if (isGoal) {
+    /* the lesson's marked piece: a solid ring, with a paper gap so it reads on ink too */
+    g.frame(x - 4, y - 4, w + 8, h + 8, g.PAPER);
+    g.frame(x - 5, y - 5, w + 10, h + 10, g.INK);
+  }
   if (selected) dottedRect(g, x - 2, y - 2, w + 4, h + 4, g.INK);
 }
 
@@ -1652,8 +1675,7 @@ function drawBoard(g, level, pieces, anim, bump, selected, hint, hideCao, caoExt
     if (ti >= 0) {
       p = level.pieces[ti];
       var tx = geom.x + level.goal.x * cell, ty = geom.y + level.goal.y * cell;
-      cornerMark(g, tx + 2, ty + 2, p.w * cell - 4, p.h * cell - 4, 8);
-      g.circle(tx + p.w * cell / 2, ty + p.h * cell / 2, 2, g.INK, true);
+      targetMark(g, tx, ty, p.w * cell, p.h * cell);
     }
   }
   if (hint) {

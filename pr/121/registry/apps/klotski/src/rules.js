@@ -79,7 +79,7 @@ var KRules = (function () {
         for (i = 0; i < pieces.length; i++) {
           if (i === skip) continue;
           p = pieces[i];
-          if (xx >= p.x && xx < p.x + p.w && yy >= p.y && yy < p.y + p.h) return false;
+          if (xx >= p.x && xx < p.x + level.pieces[i].w && yy >= p.y && yy < p.y + level.pieces[i].h) return false;
         }
       }
     }
