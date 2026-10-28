@@ -249,7 +249,7 @@ test("klotski app: a level played through the solver reaches the card and writes
     assert.ok(K.step(m.i, m.dx, m.dy), `the app refused ${JSON.stringify(m)}`);
     run(app, 6);
   }
-  run(app, 50);
+  run(app, 220);   /* the exit interlude is 3.1 s */
   const state = K.state();
   assert.equal(state.ui, "card");
   assert.equal(state.moves, d.par);
