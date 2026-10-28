@@ -1,0 +1,1881 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>矿工老张</title>
+<!-- Lo-PDA game (lopda/1): 矿工老张 / Lao Zhang, a four-tone hook-and-haul mine.
+     Original art, music and code. MIT License. -->
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #a3ad7e; color: #1f2a14; font-family: monospace; -webkit-user-select: none; user-select: none; }
+  body { font-size: 15px; }
+  #app { height: 100%; display: flex; flex-direction: column; }
+  #hud { flex: none; height: 30px; display: flex; align-items: center; justify-content: space-between; padding: 0 8px; box-sizing: border-box; font-size: 14px; font-weight: bold; white-space: nowrap; }
+  #hud span { padding: 1px 4px; }
+  #cash.met, #tm.low { background: #1f2a14; color: #a3ad7e; }
+  #bar { flex: none; height: 3px; background: #7d8a58; margin: 0 8px; }
+  #barfill { display: block; height: 100%; width: 0; background: #1f2a14; }
+  #stage { flex: 1; min-height: 0; position: relative; display: flex; align-items: center; justify-content: center; padding: 4px; box-sizing: border-box; overflow: hidden; }
+  #c { display: block; image-rendering: pixelated; image-rendering: crisp-edges; border: 2px solid #1f2a14; touch-action: none; background: #a3ad7e; }
+  #foot { flex: none; height: 18px; line-height: 18px; font-size: 13px; text-align: center; color: #4a5a32; white-space: nowrap; overflow: hidden; }
+  #intro { position: absolute; top: 6px; left: 6px; right: 56px; box-sizing: border-box; background: #1f2a14; color: #a3ad7e; padding: 3px 7px; text-align: center; font-size: 13px; line-height: 1.35; pointer-events: none; z-index: 3; }
+  #intro b { display: block; font-size: 14px; }
+  #intro span { display: block; }
+  #intro[hidden] { display: none !important; }
+  #dyn { position: absolute; top: 6px; right: 6px; z-index: 2; width: 44px; height: 44px; box-sizing: border-box; padding: 0; font: inherit; font-size: 13px; font-weight: bold; line-height: 1.1; background: #a3ad7e; color: #1f2a14; border: 2px solid #1f2a14; box-shadow: 2px 2px 0 #4a5a32; touch-action: manipulation; }
+  #dyn.on { background: #1f2a14; color: #a3ad7e; }
+  #dyn.off { border-style: dashed; color: #4a5a32; box-shadow: none; }
+  #dyn[hidden] { display: none !important; }
+  #ov { position: fixed; inset: 0; z-index: 20; background: #a3ad7e; color: #1f2a14; display: flex; flex-direction: column; padding: 10px 12px; box-sizing: border-box; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  #ov[hidden] { display: none !important; }
+  .sbody { flex: 1 0 auto; min-height: 0; display: flex; flex-direction: column; }
+  .sbody.center { justify-content: center; align-items: center; text-align: center; gap: 9px; }
+  .sbody.shop { justify-content: flex-start; gap: 5px; }
+  #ov h1 { margin: 0; font-size: 26px; letter-spacing: 2px; line-height: 1.1; }
+  #ov p { margin: 0; font-size: 15px; line-height: 1.35; }
+  #ov .sub { font-size: 15px; }
+  #ov .tip { font-size: 14px; color: #4a5a32; }
+  #ov .big { font-size: 20px; font-weight: bold; }
+  #ov .big.cashline { font-size: 18px; }
+  #ov .small { font-size: 13px; color: #4a5a32; }
+  #ov .best { font-size: 13px; color: #4a5a32; }
+  #ov .warn { font-size: 13px; color: #4a5a32; max-width: 290px; }
+  #logo { display: block; image-rendering: pixelated; image-rendering: crisp-edges; }
+  #ov button { font: inherit; touch-action: manipulation; border: 0; }
+  #ov .primary { min-height: 44px; padding: 8px 22px; background: #1f2a14; color: #a3ad7e; font-size: 17px; font-weight: bold; box-shadow: 3px 3px 0 #4a5a32; }
+  #ov .primary:active { transform: translate(1px, 1px); box-shadow: 2px 2px 0 #4a5a32; }
+  #ov .ghost { min-height: 44px; padding: 8px 22px; background: #a3ad7e; color: #1f2a14; border: 2px solid #1f2a14; font-size: 15px; font-weight: bold; box-shadow: none; }
+  #ov .ofoot { flex: none; height: 18px; line-height: 18px; font-size: 13px; text-align: center; color: #4a5a32; white-space: nowrap; overflow: hidden; }
+  .shophead { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 15px; }
+  .shophead b { font-size: 16px; }
+  .shophead span { font-size: 14px; }
+  .nextline { margin-bottom: 2px; }
+  #ov .row { min-height: 44px; width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 8px; box-sizing: border-box; background: #a3ad7e; color: #1f2a14; border: 2px solid #4a5a32; text-align: left; }
+  #ov .row.sel { background: #1f2a14; color: #a3ad7e; border-color: #1f2a14; }
+  #ov .row.off { border-style: dashed; color: #4a5a32; }
+  #ov .row.sel.off { color: #a3ad7e; border-color: #a3ad7e; }
+  #ov .row .nm { display: block; font-size: 15px; font-weight: bold; line-height: 1.15; }
+  #ov .row .nm i { font-style: normal; font-size: 13px; color: #4a5a32; }
+  #ov .row .nm small { display: block; font-size: 13px; font-weight: normal; color: #4a5a32; line-height: 1.15; }
+  #ov .row.sel small, #ov .row.sel i { color: #a3ad7e; }
+  #ov .row .pr { flex: none; font-size: 14px; font-weight: bold; }
+  #ov .row.sel .pr { color: #a3ad7e; }
+  #ov .next { min-height: 44px; width: 100%; background: #a3ad7e; color: #1f2a14; border: 2px solid #1f2a14; font-size: 16px; font-weight: bold; }
+  #ov .next.sel { background: #1f2a14; color: #a3ad7e; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header id="hud"><span id="lv"></span><span id="cash"></span><span id="tm"></span></header>
+  <div id="bar"><i id="barfill"></i></div>
+  <main id="stage">
+    <canvas id="c" width="160" height="144"></canvas>
+    <div id="intro" hidden></div>
+    <button id="dyn" type="button" hidden></button>
+  </main>
+  <footer id="foot"></footer>
+</div>
+<div id="ov" hidden></div>
+<script data-src="src/00-data.js">
+/* 矿工老张 / Lao Zhang: data, levels, shop and both languages.
+   The game is a four-tone hook-and-haul mine; the picture is 160x144 logical pixels. */
+var GM = (typeof GM !== "undefined" && GM) || {};
+
+GM.W = 160;
+GM.H = 144;
+GM.GROUND = 23;                 /* the miner stands on this line; the mine is below it */
+GM.ANCHOR = { x: 80, y: 18 };   /* the rope leaves old Zhang's hands here */
+GM.IDLE_ROPE = 27;              /* the hook swings at this length */
+GM.MAX_ROPE = 172;
+GM.SWING = 1.32;                /* radians either side of straight down */
+GM.PERIOD = 2.8;                /* seconds for a full left-right-left swing */
+GM.LEVEL_TIME = 60;
+GM.OUT_SPEED = 175;
+GM.EMPTY_SPEED = 300;
+GM.BASE_SPEED = 150;
+GM.PLAY_LEVELS = 10;
+GM.STRENGTH_STEP = 0.15;
+GM.DYNAMITE_MAX = 5;
+GM.ENDLESS_FIRST_STEP = 2600;
+GM.ENDLESS_GROW = 200;
+
+/* cumulative cash targets for the ten written levels */
+GM.TARGETS = [600, 1400, 2400, 3600, 5000, 6600, 8400, 10400, 12600, 15000];
+
+/* value is the base price; bag uses min/max and a roll; rocks are worth triple with the book */
+GM.ITEMS = {
+  goldS:   { kind: "gold",  value: 50,  weight: 1.0,  r: 7,  sprite: "goldS",   pref: [40, 122] },
+  goldM:   { kind: "gold",  value: 150, weight: 1.55, r: 10, sprite: "goldM",   pref: [55, 130] },
+  goldL:   { kind: "gold",  value: 350, weight: 2.5,  r: 13, sprite: "goldL",   pref: [70, 129] },
+  diamond: { kind: "gem",   value: 700, weight: 0.65, r: 6,  sprite: "diamond", pref: [92, 134] },
+  bag:     { kind: "bag",   value: 0,   weight: 1.1,  r: 8,  sprite: "bag",     pref: [50, 126], min: 100, max: 400 },
+  rockS:   { kind: "rock",  value: 15,  weight: 2.4,  r: 8,  sprite: "rockS",   pref: [45, 134] },
+  rockL:   { kind: "rock",  value: 40,  weight: 4.2,  r: 13, sprite: "rockL",   pref: [60, 129] },
+  bone:    { kind: "junk",  value: 2,   weight: 0.9,  r: 7,  sprite: "bone",    pref: [50, 128] },
+  skull:   { kind: "junk",  value: 8,   weight: 1.6,  r: 8,  sprite: "skull",   pref: [55, 132] },
+  tnt:     { kind: "tnt",   value: 0,   weight: 1.4,  r: 8,  sprite: "tnt",     pref: [65, 126] },
+  mole:    { kind: "mole",  value: 0,   weight: 0.8,  r: 8,  sprite: "mole",    pref: [82, 120] }
+};
+
+GM.LEVELS = [
+  { goldS: 8, goldM: 3, goldL: 1, bag: 1, rockS: 2, bone: 1 },
+  { goldS: 7, goldM: 4, goldL: 2, bag: 2, rockS: 2, bone: 1, diamond: 1 },
+  { goldS: 7, goldM: 4, goldL: 2, bag: 2, rockS: 3, rockL: 1, bone: 1, skull: 1, diamond: 1 },
+  { goldS: 6, goldM: 5, goldL: 3, bag: 2, rockS: 3, rockL: 1, bone: 1, skull: 1, diamond: 1, tnt: 1, mole: 1 },
+  { goldS: 6, goldM: 5, goldL: 3, bag: 2, rockS: 3, rockL: 2, bone: 2, skull: 1, diamond: 2, tnt: 1, mole: 1 },
+  { goldS: 5, goldM: 5, goldL: 3, bag: 3, rockS: 4, rockL: 2, bone: 2, skull: 1, diamond: 2, tnt: 1, mole: 1 },
+  { goldS: 4, goldM: 5, goldL: 4, bag: 3, rockS: 4, rockL: 2, bone: 2, skull: 1, diamond: 2, tnt: 1, mole: 1 },
+  { goldS: 3, goldM: 5, goldL: 4, bag: 3, rockS: 3, rockL: 2, bone: 2, skull: 2, diamond: 2, tnt: 2, mole: 2 },
+  { goldS: 2, goldM: 5, goldL: 4, bag: 3, rockS: 3, rockL: 2, bone: 1, skull: 2, diamond: 3, tnt: 2, mole: 2 },
+  { goldS: 2, goldM: 6, goldL: 5, bag: 3, rockS: 4, rockL: 2, bone: 1, skull: 2, diamond: 3, tnt: 2, mole: 2 }
+];
+
+GM.SHOP = [
+  { id: "dynamite", key: "dynamite", price: 120, max: 5 },
+  { id: "strength", key: "strength", price: 200, max: 3 },
+  { id: "clover",   key: "clover",   price: 180, max: 2 },
+  { id: "book",     key: "book",     price: 250, max: 1 }
+];
+
+/* An original eight-bar loop written for this app; nothing borrowed. */
+GM.MUSIC = {
+  bpm: 108,
+  p1: "[o4 l8 e g a g e d c d | e g a b a g e d | c e g a g e d c | d e g e d c b a]2",
+  p2: "[o3 l8 c e g e c e g e | c e g e c e g e | a c e c a c e c | g b d b g b d b]2",
+  tri: "[o2 l4 c g a e | f c g g | a e f c | g d g c]2",
+  noise: "[l8 v4 x r v2 x r v5 x r v2 x r]2"
+};
+
+GM.SFX = {
+  boom:  { wave: "noise", from: 900, to: 55, ms: 380, vol: 0.9 },
+  chime: { wave: "triangle", from: 880, to: 1560, ms: 160, vol: 0.55, decay: 150 }
+};
+
+GM.TEXT = {
+  zh: {
+    title: "矿工老张",
+    sub: "六十秒一关。钩金子，躲石头。",
+    tip: "钩子摆动时按 A 下钩。",
+    start: "开始",
+    best: "最高 第 {l} 关 · ${b}",
+    noBest: "还没有纪录",
+    footTitle: "A / START 开始",
+    level: "第 {n} 关",
+    time: "{n}秒",
+    dyn: "药 {n}",
+    intro: "第 {n} 关　目标 ${t}",
+    tip1: "石头又重又不值钱。",
+    tip4: "炸药桶会炸掉附近的东西。",
+    tip7: "地鼠带着好东西，会跑。",
+    tipDefault: "A 下钩　START 暂停",
+    footPlay: "A/点 下钩　START 暂停",
+    footPlayDyn: "A/点 下钩　B 炸药　START 暂停",
+    pause: "暂停",
+    resume: "继续",
+    footPause: "START 继续",
+    clear: "过关",
+    clearLine: "现金 ${b} / 目标 ${t}",
+    extra: "多挖 ${d}",
+    record: "新纪录",
+    shopBtn: "去商店",
+    footClear: "A 去商店",
+    shopTitle: "第 {n} 关 · 商店",
+    shopCash: "现金 ${b}",
+    nextTarget: "下关目标 ${t}",
+    next: "下一关",
+    max: "已满",
+    shortPrice: "差 ${d}",
+    owned: "{n}/{m}",
+    footShop: "↑↓ 选　A 买　B 下一关",
+    shopNames: ["炸药", "力量药水", "幸运草", "岩石图鉴"],
+    shopDescs: ["炸掉钩住的东西", "收绳更快", "钱袋更鼓，多一颗钻石", "石头值三倍"],
+    over: "时间到",
+    overShort: "差 ${d}",
+    retry: "再来一次",
+    toTitle: "回标题",
+    footOver: "A 再来　B 标题",
+    victory: "矿场传说",
+    victoryLine: "第 10 关通过",
+    keep: "继续挖",
+    footVictory: "A 继续挖　B 标题",
+    saveFail: "最高纪录读不出，本次不写入。",
+    saveNewer: "存档来自新版本，本次不写入。",
+    saveWrite: "最高纪录暂时写不进去。"
+  },
+  en: {
+    title: "LAO ZHANG",
+    sub: "Sixty seconds a level. Hook gold, dodge rocks.",
+    tip: "Press A as the hook swings.",
+    start: "START",
+    best: "BEST LV {l} · ${b}",
+    noBest: "NO RECORD YET",
+    footTitle: "A / START TO PLAY",
+    level: "LV {n}",
+    time: "{n}s",
+    dyn: "B {n}",
+    intro: "LV {n}　TARGET ${t}",
+    tip1: "Rocks are heavy and cheap.",
+    tip4: "TNT blows up everything nearby.",
+    tip7: "The mole carries treasure and runs.",
+    tipDefault: "A HOOK　START PAUSE",
+    footPlay: "A/TAP HOOK　START PAUSE",
+    footPlayDyn: "A/TAP HOOK　B BOOM　START PAUSE",
+    pause: "PAUSED",
+    resume: "RESUME",
+    footPause: "START RESUME",
+    clear: "LEVEL CLEAR",
+    clearLine: "TAKE ${b} / GOAL ${t}",
+    extra: "${d} EXTRA",
+    record: "NEW BEST",
+    shopBtn: "SHOP",
+    footClear: "A SHOP",
+    shopTitle: "LV {n} · SHOP",
+    shopCash: "CASH ${b}",
+    nextTarget: "NEXT TARGET ${t}",
+    next: "NEXT",
+    max: "MAX",
+    shortPrice: "${d} SHORT",
+    owned: "{n}/{m}",
+    footShop: "UP/DOWN PICK　A BUY　B NEXT",
+    shopNames: ["DYNAMITE", "STRENGTH", "CLOVER", "ROCK BOOK"],
+    shopDescs: ["Blow up what you hooked", "Reel in faster", "Fatter bags, more diamonds", "Rocks worth triple"],
+    over: "TIME UP",
+    overShort: "${d} SHORT",
+    retry: "TRY AGAIN",
+    toTitle: "TITLE",
+    footOver: "A AGAIN　B TITLE",
+    victory: "MINE LEGEND",
+    victoryLine: "LEVEL 10 CLEARED",
+    keep: "KEEP DIGGING",
+    footVictory: "A KEEP DIGGING　B TITLE",
+    saveFail: "Best save unreadable; not writing this time.",
+    saveNewer: "Save is from a newer version; not writing.",
+    saveWrite: "Best save cannot be written now."
+  }
+};
+
+GM.fmt = function (s, vars) {
+  return String(s).replace(/\{(\w+)\}/g, function (_, k) {
+    return vars && vars[k] != null ? vars[k] : "";
+  });
+};
+
+GM.money = function (n) {
+  n = Math.max(0, Math.round(Number(n) || 0));
+  return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+};
+
+GM.text = function (lang) {
+  return GM.TEXT[lang === "en" ? "en" : "zh"];
+};
+</script>
+<script data-src="src/10-game.js">
+/* 矿工老张: the game itself. Everything here is plain state plus functions, so the
+   tests can run it without a browser. The art, DOM and PAD calls live in the next files. */
+var GM = (typeof GM !== "undefined" && GM) || {};
+
+GM.rng = function (seed) {
+  var s = (seed >>> 0) || 1;
+  return function () {
+    s = (s + 0x6D2B79F5) >>> 0;
+    var t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+};
+
+GM.targetFor = function (n) {
+  if (n <= GM.PLAY_LEVELS) return GM.TARGETS[n - 1] || GM.TARGETS[0];
+  var t = GM.TARGETS[GM.PLAY_LEVELS - 1];
+  for (var i = GM.PLAY_LEVELS + 1; i <= n; i++) {
+    t += GM.ENDLESS_FIRST_STEP + (i - GM.PLAY_LEVELS - 1) * GM.ENDLESS_GROW;
+  }
+  return t;
+};
+
+GM.moleCarry = function (n) {
+  return n >= 6 ? "diamond" : "goldM";
+};
+
+GM.moleValue = function (n) {
+  return GM.ITEMS[GM.moleCarry(n)].value;
+};
+
+GM.recipeFor = function (n) {
+  var r, i;
+  if (n <= GM.PLAY_LEVELS) {
+    r = {};
+    for (i in GM.LEVELS[n - 1]) if (Object.prototype.hasOwnProperty.call(GM.LEVELS[n - 1], i)) r[i] = GM.LEVELS[n - 1][i];
+    return r;
+  }
+  r = {};
+  for (i in GM.LEVELS[GM.PLAY_LEVELS - 1]) {
+    if (Object.prototype.hasOwnProperty.call(GM.LEVELS[GM.PLAY_LEVELS - 1], i)) r[i] = GM.LEVELS[GM.PLAY_LEVELS - 1][i];
+  }
+  var extra = n - GM.PLAY_LEVELS;
+  r.goldM += Math.min(6, Math.ceil(extra / 2));
+  r.goldL += Math.min(4, Math.floor(extra / 2));
+  r.diamond += Math.min(5, Math.floor(extra / 2));
+  r.bag += Math.min(3, Math.floor(extra / 3));
+  r.tnt = Math.min(4, r.tnt + Math.floor(extra / 3));
+  r.mole = Math.min(4, r.mole + Math.floor(extra / 2));
+  /* never turn the mine into a solid wall: shed the cheapest things first */
+  var drop = ["bone", "skull", "rockS", "goldS", "bag", "rockL", "goldM", "goldL", "diamond", "mole", "tnt"];
+  var total = GM.recipeCount(r);
+  while (total > 36) {
+    for (i = 0; i < drop.length; i++) {
+      if (r[drop[i]] > 0) { r[drop[i]]--; total--; break; }
+    }
+  }
+  return r;
+};
+
+GM.recipeCount = function (recipe) {
+  var n = 0;
+  for (var k in recipe) if (Object.prototype.hasOwnProperty.call(recipe, k)) n += recipe[k] || 0;
+  return n;
+};
+
+GM.rockValue = function (type, book) {
+  return GM.ITEMS[type].value * (book ? 3 : 1);
+};
+
+GM.bagValue = function (rng, clover) {
+  var mult = 1 + 0.5 * (clover || 0);
+  var v = (GM.ITEMS.bag.min + rng() * (GM.ITEMS.bag.max - GM.ITEMS.bag.min)) * mult;
+  return Math.max(10, Math.round(v / 10) * 10);
+};
+
+GM.recipeValue = function (n, clover, book) {
+  var r = GM.recipeFor(n), min = 0, max = 0, k, c;
+  r.diamond = (r.diamond || 0) + (clover || 0);
+  for (k in r) {
+    if (!Object.prototype.hasOwnProperty.call(r, k) || !r[k]) continue;
+    c = r[k];
+    if (k === "bag") {
+      min += c * GM.ITEMS.bag.min * (1 + 0.5 * (clover || 0));
+      max += c * GM.ITEMS.bag.max * (1 + 0.5 * (clover || 0));
+    } else if (k === "mole") {
+      min += c * GM.moleValue(n);
+      max += c * GM.moleValue(n);
+    } else if (k === "rockS" || k === "rockL") {
+      min += c * GM.rockValue(k, book);
+      max += c * GM.rockValue(k, book);
+    } else {
+      min += c * GM.ITEMS[k].value;
+      max += c * GM.ITEMS[k].value;
+    }
+  }
+  return { min: min, max: max };
+};
+
+GM.newState = function () {
+  return {
+    screen: "title",
+    level: 1,
+    bank: 0,
+    target: GM.TARGETS[0],
+    time: GM.LEVEL_TIME,
+    items: [],
+    hook: { state: "swing", len: GM.IDLE_ROPE, angle: 0, item: null },
+    dynamite: 0,
+    strength: 0,
+    clover: 0,
+    book: 0,
+    shopCursor: 4,
+    runSeed: 1,
+    levelSeed: 1,
+    rng: GM.rng(1),
+    swingT: 0,
+    introT: 0,
+    resumeTo: "play",
+    lastSec: GM.LEVEL_TIME,
+    events: [],
+    floats: [],
+    particles: [],
+    blasts: [],
+    shake: 0,
+    anim: 0,
+    best: { level: 0, bank: 0 },
+    bestBlocked: false,
+    bestDirty: false,
+    newBest: false,
+    saveMsg: "",
+    wonOnce: false,
+    bg: null,
+    bgKey: ""
+  };
+};
+
+GM.startRun = function (state, seed) {
+  state.level = 1;
+  state.bank = 0;
+  state.dynamite = 0;
+  state.strength = 0;
+  state.clover = 0;
+  state.book = 0;
+  state.wonOnce = false;
+  state.bestDirty = false;
+  state.newBest = false;
+  state.runSeed = (seed || Math.floor(Math.random() * 2147483000) + 1) >>> 0;
+  GM.startLevel(state, 1);
+};
+
+GM.startLevel = function (state, n) {
+  state.level = n;
+  state.target = GM.targetFor(n);
+  state.time = GM.LEVEL_TIME;
+  state.lastSec = GM.LEVEL_TIME;
+  state.levelSeed = (state.runSeed + n * 7919) >>> 0;
+  state.rng = GM.rng(state.levelSeed);
+  state.items = GM.generate(state, n);
+  state.hook = { state: "swing", len: GM.IDLE_ROPE, angle: 0, item: null };
+  state.swingT = 0;
+  state.introT = 1.25;
+  state.shopCursor = 4;
+  state.events = [];
+  state.floats = [];
+  state.particles = [];
+  state.blasts = [];
+  state.shake = 0;
+  state.anim = 0;
+  state.bestDirty = false;
+  state.newBest = false;
+  state.bg = null;
+  state.bgKey = "";
+  state.screen = "intro";
+};
+
+GM.makeItem = function (state, type, x, y, rng) {
+  var spec = GM.ITEMS[type];
+  var it = {
+    type: type,
+    kind: spec.kind,
+    sprite: spec.sprite,
+    x: x,
+    y: y,
+    r: spec.r,
+    weight: spec.weight,
+    value: spec.value,
+    fuse: 0
+  };
+  if (type === "bag") it.value = GM.bagValue(rng, state.clover);
+  if (type === "rockS" || type === "rockL") it.value = GM.rockValue(type, state.book);
+  if (type === "mole") {
+    it.carry = GM.moleCarry(state.level);
+    it.value = GM.ITEMS[it.carry].value;
+    it.dir = rng() < 0.5 ? -1 : 1;
+    it.speed = 13 + Math.min(12, state.level * 1.1);
+    it.minX = 18;
+    it.maxX = 142;
+  }
+  return it;
+};
+
+GM.overlaps = function (x, y, r, items, gap) {
+  for (var i = 0; i < items.length; i++) {
+    var it = items[i];
+    if (it.type === "mole") continue;
+    var dx = it.x - x, dy = it.y - y, rr = it.r + r + (gap == null ? 2 : gap);
+    if (dx * dx + dy * dy < rr * rr) return true;
+  }
+  return false;
+};
+
+GM.generate = function (state, n) {
+  var recipe = GM.recipeFor(n);
+  recipe.diamond = (recipe.diamond || 0) + (state.clover || 0);
+  var rng = state.rng || GM.rng(state.levelSeed || 1);
+  var items = [];
+  var order = ["diamond", "goldL", "goldM", "bag", "goldS", "rockL", "rockS", "skull", "bone", "tnt"];
+  var i, j, type, count, spec, pref, x, y, r, tries, placed, gap;
+
+  for (i = 0; i < order.length; i++) {
+    type = order[i];
+    count = recipe[type] || 0;
+    spec = GM.ITEMS[type];
+    pref = spec.pref;
+    r = spec.r;
+    for (j = 0; j < count; j++) {
+      placed = false;
+      for (gap = 2; gap >= 0 && !placed; gap -= 2) {
+        for (tries = 0; tries < 170 && !placed; tries++) {
+          x = r + 4 + rng() * (GM.W - 2 * r - 8);
+          var yMin = Math.max(GM.GROUND + 15, pref[0]);
+          var yMax = Math.min(GM.H - r - 4, pref[1]);
+          if (yMax < yMin) yMin = yMax;
+          y = yMin + rng() * Math.max(1, yMax - yMin);
+          if (!GM.overlaps(x, y, r, items, gap)) {
+            items.push(GM.makeItem(state, type, x, y, rng));
+            placed = true;
+          }
+        }
+      }
+    }
+  }
+
+  /* the mole runs along a lane of its own; it may pass in front of the static loot */
+  var moles = recipe.mole || 0;
+  for (i = 0; i < moles; i++) {
+    items.push(GM.makeItem(state, "mole", 24 + rng() * 112, 84 + rng() * 28, rng));
+  }
+  return items;
+};
+
+GM.countItems = function (items, type) {
+  var n = 0;
+  for (var i = 0; i < items.length; i++) if (items[i].type === type) n++;
+  return n;
+};
+
+GM.tip = function (hook) {
+  return {
+    x: GM.ANCHOR.x + Math.sin(hook.angle) * hook.len,
+    y: GM.ANCHOR.y + Math.cos(hook.angle) * hook.len
+  };
+};
+
+GM.retractSpeed = function (item, strength) {
+  return Math.min(300, GM.BASE_SPEED / Math.max(0.4, item.weight) * (1 + GM.STRENGTH_STEP * (strength || 0)));
+};
+
+GM.fire = function (state) {
+  if (state.screen !== "play" || state.hook.state !== "swing") return false;
+  state.hook.state = "out";
+  state.hook.len = GM.IDLE_ROPE;
+  state.events.push("fire");
+  return true;
+};
+
+GM.useDynamite = function (state) {
+  if (state.screen !== "play" || state.hook.state !== "back" || !state.hook.item || state.dynamite <= 0) return false;
+  state.dynamite--;
+  var it = state.hook.item;
+  var p = GM.tip(state.hook);
+  if (it.kind === "tnt") {
+    GM.explode(state, p.x, p.y);
+  } else {
+    GM.addParticles(state, p.x, p.y, 10, ["mid", "dark"]);
+    state.events.push("boom");
+    state.shake = 0.22;
+    state.hook.item = null;
+  }
+  return true;
+};
+
+GM.attach = function (state, index) {
+  var it = state.items[index];
+  state.items.splice(index, 1);
+  state.hook.item = it;
+  state.hook.state = "back";
+  if (it.kind === "tnt") it.fuse = 1.0;
+  var p = GM.tip(state.hook);
+  GM.addParticles(state, p.x, p.y, 5, ["mid", "dark"]);
+  state.events.push("grab");
+  return it;
+};
+
+GM.collect = function (state) {
+  var it = state.hook.item;
+  if (!it) return;
+  var p = GM.tip(state.hook);
+  state.hook.item = null;
+  state.hook.state = "swing";
+  state.hook.len = GM.IDLE_ROPE;
+  if (it.kind === "tnt") {
+    GM.explode(state, p.x, p.y);
+    return;
+  }
+  state.bank += it.value;
+  var ev = it.kind === "gem" ? "gem" : (it.kind === "junk" || it.kind === "rock") ? "junk" : "coin";
+  state.events.push(ev);
+  if (it.value > 0) GM.addFloat(state, GM.ANCHOR.x, 6, "+" + it.value);
+  if (it.kind === "gem") GM.addParticles(state, p.x, p.y, 10, ["paper"]);
+};
+
+GM.explode = function (state, x, y) {
+  var keep = [], i, it;
+  for (i = 0; i < state.items.length; i++) {
+    it = state.items[i];
+    var dx = it.x - x, dy = it.y - y;
+    if (dx * dx + dy * dy <= 30 * 30) {
+      GM.addParticles(state, it.x, it.y, 6, ["mid", "dark", "paper"]);
+    } else {
+      keep.push(it);
+    }
+  }
+  state.items = keep;
+  state.hook.item = null;
+  state.hook.state = "back";
+  state.blasts.push({ x: x, y: y, t: 0, life: 0.55 });
+  state.shake = 0.4;
+  state.events.push("boom");
+};
+
+GM.addFloat = function (state, x, y, text) {
+  state.floats.push({ x: x, y: y, text: text, t: 0, life: 0.85 });
+};
+
+GM.addParticles = function (state, x, y, n, colors) {
+  for (var i = 0; i < n; i++) {
+    var a = Math.random() * Math.PI * 2;
+    var s = 8 + Math.random() * 28;
+    state.particles.push({
+      x: x,
+      y: y,
+      vx: Math.cos(a) * s,
+      vy: Math.sin(a) * s - 8,
+      t: 0,
+      life: 0.35 + Math.random() * 0.35,
+      color: colors[i % colors.length]
+    });
+  }
+};
+
+GM.updateEffects = function (state, dt) {
+  var out = [], i, e;
+  for (i = 0; i < state.floats.length; i++) {
+    e = state.floats[i];
+    e.t += dt;
+    if (e.t < e.life) out.push(e);
+  }
+  state.floats = out;
+  out = [];
+  for (i = 0; i < state.particles.length; i++) {
+    e = state.particles[i];
+    e.t += dt;
+    e.x += e.vx * dt;
+    e.y += e.vy * dt;
+    e.vy += 90 * dt;
+    if (e.t < e.life) out.push(e);
+  }
+  state.particles = out;
+  out = [];
+  for (i = 0; i < state.blasts.length; i++) {
+    e = state.blasts[i];
+    e.t += dt;
+    if (e.t < e.life) out.push(e);
+  }
+  state.blasts = out;
+};
+
+GM.finishLevel = function (state) {
+  if (state.bank >= state.target) {
+    GM.recordBest(state, state.level, state.bank);
+    state.events.push("clear");
+    if (state.level === GM.PLAY_LEVELS && !state.wonOnce) {
+      state.wonOnce = true;
+      state.screen = "victory";
+    } else {
+      state.screen = "clear";
+    }
+  } else {
+    GM.recordBest(state, Math.max(0, state.level - 1), state.bank);
+    state.events.push("fail");
+    state.screen = "over";
+  }
+};
+
+GM.better = function (a, b) {
+  if (!a) return false;
+  if (!b) return true;
+  if (a.level !== b.level) return a.level > b.level;
+  return a.bank > b.bank;
+};
+
+GM.recordBest = function (state, level, bank) {
+  var next = { level: level, bank: bank };
+  if (!GM.better(next, state.best)) return false;
+  state.best = next;
+  state.bestDirty = true;
+  state.newBest = true;
+  return true;
+};
+
+GM.bestPayload = function (state) {
+  return { v: 1, level: state.best.level, bank: state.best.bank };
+};
+
+GM.readBest = function (raw) {
+  var empty = { level: 0, bank: 0 };
+  if (raw == null) return { ok: true, best: empty };
+  if (typeof raw !== "object" || raw.length != null) return { ok: false, corrupt: true, best: empty };
+  var v = raw.v;
+  if (typeof v !== "number" || Math.floor(v) !== v) return { ok: false, corrupt: true, best: empty };
+  if (v > 1) return { ok: false, newer: true, best: empty };
+  if (v !== 1) return { ok: false, corrupt: true, best: empty };
+  var level = raw.level, bank = raw.bank;
+  if (typeof level !== "number" || Math.floor(level) !== level || level < 0 || level > 9999) {
+    return { ok: false, corrupt: true, best: empty };
+  }
+  if (typeof bank !== "number" || Math.floor(bank) !== bank || bank < 0 || bank > 999999999) {
+    return { ok: false, corrupt: true, best: empty };
+  }
+  return { ok: true, best: { level: level, bank: bank } };
+};
+
+GM.openShop = function (state) {
+  state.shopCursor = 4;
+  state.screen = "shop";
+  state.events = [];
+};
+
+GM.shopNext = function (state) {
+  GM.startLevel(state, state.level + 1);
+};
+
+GM.moveShop = function (state, dir) {
+  state.shopCursor = (state.shopCursor + dir + 5) % 5;
+  state.events.push("move");
+};
+
+GM.buy = function (state, idx) {
+  var item = GM.SHOP[idx];
+  if (!item) { state.events.push("err"); return false; }
+  var have = state[item.key] || 0;
+  if (have >= item.max || state.bank < item.price) {
+    state.events.push("err");
+    return false;
+  }
+  state.bank -= item.price;
+  state[item.key] = have + 1;
+  state.events.push("buy");
+  return true;
+};
+
+GM.pause = function (state) {
+  if (state.screen !== "play" && state.screen !== "intro") return false;
+  state.resumeTo = state.screen;
+  state.screen = "paused";
+  return true;
+};
+
+GM.resume = function (state) {
+  if (state.screen !== "paused") return false;
+  state.screen = state.resumeTo || "play";
+  return true;
+};
+
+GM.toTitle = function (state) {
+  state.screen = "title";
+  state.events = [];
+};
+
+GM.moveMoles = function (state, dt) {
+  for (var i = 0; i < state.items.length; i++) {
+    var it = state.items[i];
+    if (it.type !== "mole") continue;
+    it.x += it.dir * it.speed * dt;
+    if (it.x < it.minX) { it.x = it.minX; it.dir = 1; }
+    if (it.x > it.maxX) { it.x = it.maxX; it.dir = -1; }
+  }
+};
+
+GM.stepHook = function (state, dt) {
+  var hook = state.hook;
+  if (hook.state === "out") {
+    hook.len += GM.OUT_SPEED * dt;
+    var p = GM.tip(hook);
+    for (var i = 0; i < state.items.length; i++) {
+      var it = state.items[i];
+      var dx = it.x - p.x, dy = it.y - p.y;
+      if (dx * dx + dy * dy <= (it.r + 4) * (it.r + 4)) {
+        GM.attach(state, i);
+        return;
+      }
+    }
+    if (hook.len >= GM.MAX_ROPE || p.x < 3 || p.x > GM.W - 3 || p.y > GM.H - 2) {
+      hook.state = "back";
+    }
+    return;
+  }
+  if (hook.state !== "back") return;
+
+  if (hook.item && hook.item.kind === "tnt") {
+    hook.item.fuse -= dt;
+    if (hook.item.fuse <= 0) {
+      var q = GM.tip(hook);
+      GM.explode(state, q.x, q.y);
+      return;
+    }
+  }
+  var speed = hook.item ? GM.retractSpeed(hook.item, state.strength) : GM.EMPTY_SPEED;
+  hook.len -= speed * dt;
+  if (hook.item && hook.len <= 10) {
+    GM.collect(state);
+    return;
+  }
+  if (!hook.item && hook.len <= GM.IDLE_ROPE) {
+    hook.len = GM.IDLE_ROPE;
+    hook.state = "swing";
+  }
+};
+
+GM.update = function (state, dt) {
+  dt = Math.min(0.1, Math.max(0, dt));
+  if (dt <= 0) return;
+
+  if (state.screen === "intro") {
+    state.anim += dt;
+    state.introT -= dt;
+    if (state.hook.state === "swing") {
+      state.swingT += dt;
+      state.hook.angle = Math.sin(state.swingT * Math.PI * 2 / GM.PERIOD) * GM.SWING;
+    }
+    if (state.introT <= 0) {
+      state.screen = "play";
+      state.time = GM.LEVEL_TIME;
+      state.lastSec = GM.LEVEL_TIME;
+    }
+    return;
+  }
+  if (state.screen !== "play") return;
+
+  state.anim += dt;
+  state.time -= dt;
+  if (state.time <= 0) {
+    state.time = 0;
+    GM.finishLevel(state);
+    return;
+  }
+  var sec = Math.ceil(state.time);
+  if (sec !== state.lastSec) {
+    state.lastSec = sec;
+    if (sec <= 10) state.events.push("tick");
+  }
+
+  if (state.hook.state === "swing") {
+    state.swingT += dt;
+    state.hook.angle = Math.sin(state.swingT * Math.PI * 2 / GM.PERIOD) * GM.SWING;
+  }
+  GM.moveMoles(state, dt);
+  var left = dt;
+  while (left > 0 && state.screen === "play") {
+    var h = Math.min(0.016, left);
+    GM.stepHook(state, h);
+    left -= h;
+  }
+  GM.updateEffects(state, dt);
+  state.shake = Math.max(0, state.shake - dt);
+};
+</script>
+<script data-src="src/20-art.js">
+/* 矿工老张: the four-tone picture. Everything is painted into an indexed 160x144 buffer,
+   so every visible pixel is one of the four palette colours; no antialiasing, no blending. */
+var GM = (typeof GM !== "undefined" && GM) || {};
+
+GM.INK = 0;
+GM.DARK = 1;
+GM.MID = 2;
+GM.PAPER = 3;
+GM.CLEAR = 255;
+GM.RGB = [[31, 42, 20], [74, 90, 50], [125, 138, 88], [163, 173, 126]];
+
+GM.put = function (buf, x, y, c) {
+  x = x | 0; y = y | 0;
+  if (x >= 0 && x < GM.W && y >= 0 && y < GM.H) buf[y * GM.W + x] = c;
+};
+
+GM.rect = function (buf, x, y, w, h, c) {
+  x = x | 0; y = y | 0; w = w | 0; h = h | 0;
+  var x0 = Math.max(0, x), x1 = Math.min(GM.W, x + w);
+  var y0 = Math.max(0, y), y1 = Math.min(GM.H, y + h);
+  for (var yy = y0; yy < y1; yy++) {
+    var row = yy * GM.W;
+    for (var xx = x0; xx < x1; xx++) buf[row + xx] = c;
+  }
+};
+
+GM.line = function (buf, x0, y0, x1, y1, c) {
+  x0 = Math.round(x0); y0 = Math.round(y0);
+  x1 = Math.round(x1); y1 = Math.round(y1);
+  var dx = Math.abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
+  var dy = -Math.abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
+  var err = dx + dy;
+  for (;;) {
+    GM.put(buf, x0, y0, c);
+    if (x0 === x1 && y0 === y1) break;
+    var e2 = 2 * err;
+    if (e2 >= dy) { err += dy; x0 += sx; }
+    if (e2 <= dx) { err += dx; y0 += sy; }
+  }
+};
+
+GM.ellipse = function (buf, cx, cy, rx, ry, c) {
+  cx = Math.round(cx); cy = Math.round(cy);
+  for (var dy = -ry; dy <= ry; dy++) {
+    var w = Math.floor(rx * Math.sqrt(Math.max(0, 1 - (dy * dy) / ((ry + 0.5) * (ry + 0.5)))));
+    GM.rect(buf, cx - w, cy + dy, w * 2 + 1, 1, c);
+  }
+};
+
+GM.sprite = function (w, h) {
+  var b = new Uint8Array(w * h);
+  b.fill(GM.CLEAR);
+  return { w: w, h: h, b: b };
+};
+
+GM.sput = function (s, x, y, c) {
+  x = x | 0; y = y | 0;
+  if (x >= 0 && x < s.w && y >= 0 && y < s.h) s.b[y * s.w + x] = c;
+};
+
+GM.srect = function (s, x, y, w, h, c) {
+  for (var yy = y; yy < y + h; yy++) for (var xx = x; xx < x + w; xx++) GM.sput(s, xx, yy, c);
+};
+
+GM.sline = function (s, x0, y0, x1, y1, c) {
+  x0 = Math.round(x0); y0 = Math.round(y0); x1 = Math.round(x1); y1 = Math.round(y1);
+  var dx = Math.abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
+  var dy = -Math.abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
+  var err = dx + dy;
+  for (;;) {
+    GM.sput(s, x0, y0, c);
+    if (x0 === x1 && y0 === y1) break;
+    var e2 = 2 * err;
+    if (e2 >= dy) { err += dy; x0 += sx; }
+    if (e2 <= dx) { err += dx; y0 += sy; }
+  }
+};
+
+GM.sellipse = function (s, cx, cy, rx, ry, c) {
+  cx = Math.round(cx); cy = Math.round(cy);
+  for (var dy = -ry; dy <= ry; dy++) {
+    var w = Math.floor(rx * Math.sqrt(Math.max(0, 1 - (dy * dy) / ((ry + 0.5) * (ry + 0.5)))));
+    GM.srect(s, cx - w, cy + dy, w * 2 + 1, 1, c);
+  }
+};
+
+/* a one-pixel ink edge around everything already drawn in a sprite */
+GM.soutline = function (s, ink) {
+  var copy = s.b.slice();
+  for (var y = 0; y < s.h; y++) {
+    for (var x = 0; x < s.w; x++) {
+      if (copy[y * s.w + x] === GM.CLEAR) continue;
+      if (x === 0 || y === 0 || x === s.w - 1 || y === s.h - 1 ||
+          copy[y * s.w + x - 1] === GM.CLEAR || copy[y * s.w + x + 1] === GM.CLEAR ||
+          copy[(y - 1) * s.w + x] === GM.CLEAR || copy[(y + 1) * s.w + x] === GM.CLEAR) {
+        s.b[y * s.w + x] = ink;
+      }
+    }
+  }
+};
+
+GM.pointIn = function (poly, x, y) {
+  var inside = false;
+  for (var i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    var xi = poly[i][0], yi = poly[i][1], xj = poly[j][0], yj = poly[j][1];
+    if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) inside = !inside;
+  }
+  return inside;
+};
+
+GM.blob = function (w, h, seed, base, shadow, highlight, speck) {
+  var s = GM.sprite(w, h);
+  var rng = GM.rng(seed);
+  var cx = w / 2, cy = h / 2, rx = w / 2 - 1, ry = h / 2 - 1;
+  var n = 10, poly = [], i;
+  for (i = 0; i < n; i++) {
+    var a = i / n * Math.PI * 2;
+    var k = 0.78 + rng() * 0.2;
+    poly.push([cx + Math.cos(a) * rx * k, cy + Math.sin(a) * ry * k]);
+  }
+  for (var y = 0; y < h; y++) {
+    for (var x = 0; x < w; x++) {
+      if (!GM.pointIn(poly, x + 0.5, y + 0.5)) continue;
+      s.b[y * w + x] = base;
+      if (x * 0.5 + y * 0.9 > (w * 0.5 + h * 0.9) * 0.68) s.b[y * w + x] = shadow;
+    }
+  }
+  GM.soutline(s, GM.INK);
+  if (highlight) {
+    for (i = 0; i < 2; i++) {
+      var hx = Math.round(cx - rx * 0.45 + rng() * rx * 0.35);
+      var hy = Math.round(cy - ry * 0.45 + rng() * ry * 0.2);
+      if (s.b[hy * w + hx] !== GM.CLEAR) s.b[hy * w + hx] = GM.PAPER;
+    }
+  }
+  if (speck) {
+    /* rocks get a crack, not a row of dots */
+    GM.sline(s, Math.round(cx - rx * 0.2), Math.round(cy), Math.round(cx + rx * 0.15), Math.round(cy + ry * 0.35), GM.INK);
+    GM.sline(s, Math.round(cx - rx * 0.2), Math.round(cy), Math.round(cx - rx * 0.45), Math.round(cy - ry * 0.1), GM.INK);
+  }
+  return s;
+};
+
+GM.diamondSprite = function () {
+  var s = GM.sprite(14, 14);
+  var poly = [[7, 1], [13, 6], [7, 13], [1, 6]];
+  for (var y = 0; y < 14; y++) for (var x = 0; x < 14; x++) if (GM.pointIn(poly, x + 0.5, y + 0.5)) GM.sput(s, x, y, GM.PAPER);
+  GM.soutline(s, GM.INK);
+  GM.sline(s, 2, 6, 12, 6, GM.MID);
+  GM.sline(s, 7, 2, 3, 6, GM.MID);
+  GM.sline(s, 7, 2, 11, 6, GM.MID);
+  GM.sline(s, 3, 6, 7, 12, GM.MID);
+  GM.sline(s, 11, 6, 7, 12, GM.MID);
+  return s;
+};
+
+GM.bagSprite = function () {
+  var s = GM.sprite(16, 16);
+  GM.sellipse(s, 8, 10, 6, 5, GM.PAPER);
+  GM.srect(s, 6, 3, 4, 6, GM.PAPER);
+  GM.soutline(s, GM.INK);
+  GM.srect(s, 5, 6, 6, 2, GM.DARK);
+  GM.sput(s, 5, 6, GM.INK); GM.sput(s, 10, 6, GM.INK);
+  /* a readable five-by-seven dollar mark */
+  var d = ["00100", "01110", "10100", "01110", "00101", "01110", "00100"];
+  for (var y = 0; y < d.length; y++) {
+    for (var x = 0; x < 5; x++) if (d[y].charAt(x) === "1") GM.sput(s, 6 + x, 8 + y, GM.INK);
+  }
+  return s;
+};
+
+GM.boneSprite = function () {
+  var s = GM.sprite(16, 10);
+  GM.srect(s, 4, 4, 8, 2, GM.PAPER);
+  GM.sellipse(s, 3, 3, 2, 2, GM.PAPER);
+  GM.sellipse(s, 3, 6, 2, 2, GM.PAPER);
+  GM.sellipse(s, 13, 3, 2, 2, GM.PAPER);
+  GM.sellipse(s, 13, 6, 2, 2, GM.PAPER);
+  GM.soutline(s, GM.INK);
+  GM.sput(s, 3, 4, GM.MID); GM.sput(s, 13, 4, GM.MID);
+  return s;
+};
+
+GM.skullSprite = function () {
+  var s = GM.sprite(14, 14);
+  GM.sellipse(s, 7, 6, 5, 5, GM.PAPER);
+  GM.srect(s, 4, 9, 6, 3, GM.PAPER);
+  GM.soutline(s, GM.INK);
+  GM.srect(s, 4, 5, 2, 2, GM.INK);
+  GM.srect(s, 8, 5, 2, 2, GM.INK);
+  GM.srect(s, 6, 8, 2, 1, GM.INK);
+  GM.srect(s, 4, 11, 1, 2, GM.INK);
+  GM.srect(s, 6, 11, 1, 2, GM.INK);
+  GM.srect(s, 8, 11, 1, 2, GM.INK);
+  GM.srect(s, 10, 11, 1, 2, GM.INK);
+  return s;
+};
+
+GM.tntSprite = function () {
+  var s = GM.sprite(16, 16);
+  var xs = [3, 7, 11], i;
+  for (i = 0; i < xs.length; i++) GM.srect(s, xs[i], 5, 2, 9, GM.DARK);
+  GM.soutline(s, GM.INK);
+  GM.srect(s, 2, 9, 12, 1, GM.INK);
+  GM.srect(s, 2, 10, 12, 1, GM.PAPER);
+  GM.srect(s, 2, 11, 12, 1, GM.INK);
+  GM.sline(s, 8, 5, 11, 2, GM.MID);
+  GM.sput(s, 12, 1, GM.PAPER);
+  GM.sput(s, 11, 2, GM.PAPER);
+  return s;
+};
+
+GM.ICON = [
+  "................",
+  ".....000000.....",
+  "...0033333300...",
+  "..033333333330..",
+  "..033333333330..",
+  "..033332333330..",
+  "..033333333330..",
+  "..000000000000..",
+  "...0333333330...",
+  "...0303333030...",
+  "...0333333330...",
+  "...0331111330...",
+  "....03333330....",
+  ".....000000.....",
+  "................",
+  "................"
+];
+
+GM.text3 = function (s, text, x, y, color) {
+  var F = GM.FONT3, i, j, r, c;
+  for (i = 0; i < text.length; i++) {
+    var glyph = F[text.charAt(i)] || F["?"];
+    for (j = 0; j < glyph.length; j++) {
+      r = glyph[j];
+      for (c = 0; c < 3; c++) if (r.charAt(c) === "1") GM.sput(s, x + i * 4 + c, y + j, color);
+    }
+  }
+};
+
+GM.FONT3 = {
+  "0": ["111", "101", "101", "101", "111"],
+  "1": ["010", "110", "010", "010", "111"],
+  "2": ["111", "001", "111", "100", "111"],
+  "3": ["111", "001", "111", "001", "111"],
+  "4": ["101", "101", "111", "001", "001"],
+  "5": ["111", "100", "111", "001", "111"],
+  "6": ["111", "100", "111", "101", "111"],
+  "7": ["111", "001", "010", "010", "010"],
+  "8": ["111", "101", "111", "101", "111"],
+  "9": ["111", "101", "111", "001", "111"],
+  "$": ["011", "110", "010", "011", "110"],
+  "+": ["000", "010", "111", "010", "000"],
+  "-": ["000", "000", "111", "000", "000"],
+  " ": ["000", "000", "000", "000", "000"],
+  "?": ["111", "001", "011", "000", "010"]
+};
+
+GM.initArt = function () {
+  GM.SPR = {
+    goldS: GM.blob(14, 12, 11, GM.PAPER, GM.MID, false, false),
+    goldM: GM.blob(20, 16, 17, GM.PAPER, GM.MID, false, false),
+    goldL: GM.blob(26, 20, 23, GM.PAPER, GM.MID, false, false),
+    rockS: GM.blob(16, 14, 31, GM.MID, GM.DARK, true, true),
+    rockL: GM.blob(26, 20, 37, GM.MID, GM.DARK, true, true),
+    diamond: GM.diamondSprite(),
+    bag: GM.bagSprite(),
+    bone: GM.boneSprite(),
+    skull: GM.skullSprite(),
+    tnt: GM.tntSprite()
+  };
+};
+
+GM.spriteDraw = function (buf, s, x, y, flip) {
+  x = Math.round(x); y = Math.round(y);
+  for (var sy = 0; sy < s.h; sy++) {
+    for (var sx = 0; sx < s.w; sx++) {
+      var c = s.b[sy * s.w + sx];
+      if (c === GM.CLEAR) continue;
+      GM.put(buf, x + (flip ? s.w - 1 - sx : sx), y + sy, c);
+    }
+  }
+};
+
+GM.makeBackground = function (state) {
+  var b = new Uint8Array(GM.W * GM.H);
+  var x, y, i, rng, len;
+  GM.rect(b, 0, 0, GM.W, GM.H, GM.DARK);
+  GM.rect(b, 0, 0, GM.W, GM.GROUND, GM.PAPER);
+
+  /* low hills at the edges, so the sky is not an empty band */
+  for (x = 0; x < GM.W; x++) {
+    var lh = x < 56 ? 3 + Math.round(2 * Math.sin(x / 7)) : 0;
+    var rh = x > 104 ? 3 + Math.round(2 * Math.sin((160 - x) / 6)) : 0;
+    var hh = Math.max(lh, rh);
+    if (hh > 0) GM.rect(b, x, GM.GROUND - hh, 1, hh, GM.MID);
+  }
+  GM.rect(b, 0, GM.GROUND - 1, GM.W, 2, GM.INK);
+
+  /* a small lantern on the left, the only light down here */
+  GM.rect(b, 8, 12, 2, 10, GM.DARK);
+  GM.rect(b, 5, 4, 8, 1, GM.INK);
+  GM.rect(b, 4, 5, 10, 8, GM.INK);
+  GM.rect(b, 5, 6, 8, 6, GM.PAPER);
+  GM.rect(b, 7, 7, 4, 4, GM.MID);
+  GM.rect(b, 8, 8, 2, 2, GM.PAPER);
+  GM.rect(b, 5, 12, 8, 1, GM.INK);
+  GM.rect(b, 6, 3, 6, 1, GM.DARK);
+
+  /* mine texture: sparse, small, never mistaken for loot */
+  rng = GM.rng((state.levelSeed || 1) ^ 0x9e3779b9);
+  for (i = 0; i < 95; i++) {
+    x = 2 + Math.floor(rng() * (GM.W - 4));
+    y = GM.GROUND + 2 + Math.floor(Math.pow(rng(), 1.6) * (GM.H - GM.GROUND - 4));
+    GM.put(b, x, y, rng() < 0.7 ? GM.MID : GM.DARK);
+    if (rng() < 0.28) GM.put(b, x + 1, y, GM.DARK);
+  }
+  for (i = 0; i < 18; i++) {
+    x = 2 + Math.floor(rng() * (GM.W - 22));
+    y = GM.GROUND + 5 + Math.floor(rng() * (GM.H - GM.GROUND - 10));
+    len = 3 + Math.floor(rng() * 13);
+    if (rng() < 0.5) GM.line(b, x, y, x + len, y + (rng() < 0.5 ? 0 : 1), GM.DARK);
+    else GM.line(b, x, y, x + len, y - 1, GM.MID);
+  }
+  for (i = 0; i < 7; i++) {
+    x = 5 + Math.floor(rng() * (GM.W - 16));
+    y = GM.GROUND + 8 + Math.floor(rng() * (GM.H - GM.GROUND - 16));
+    GM.line(b, x, y, x + 2, y + 2, GM.INK);
+    GM.line(b, x + 2, y + 2, x + 1, y + 5, GM.INK);
+    if (rng() < 0.6) GM.line(b, x + 2, y + 2, x + 5, y + 3, GM.INK);
+  }
+  for (i = 0; i < 9; i++) {
+    x = 3 + Math.floor(rng() * (GM.W - 8));
+    y = GM.GROUND + 4 + Math.floor(rng() * (GM.H - GM.GROUND - 8));
+    GM.rect(b, x, y, 2, 2, GM.MID);
+    GM.put(b, x, y, GM.DARK);
+  }
+  return b;
+};
+
+GM.drawItem = function (buf, it, anim) {
+  var spr = GM.SPR[it.sprite];
+  if (!spr) return;
+  var x = Math.round(it.x - spr.w / 2);
+  var y = Math.round(it.y - spr.h / 2);
+  GM.spriteDraw(buf, spr, x, y);
+  if (it.kind === "gem" && Math.sin(anim * 4 + it.x) > 0.86) {
+    GM.put(buf, x + spr.w - 2, y + 2, GM.PAPER);
+  }
+  if (it.kind === "tnt" && it.fuse > 0 && Math.sin(anim * 30) > 0) {
+    GM.put(buf, x + 12, y, GM.PAPER);
+    GM.put(buf, x + 11, y + 1, GM.MID);
+  }
+};
+
+GM.miniGold = function (buf, x, y) {
+  GM.rect(buf, x, y, 5, 4, GM.INK);
+  GM.rect(buf, x + 1, y + 1, 3, 2, GM.PAPER);
+};
+
+GM.miniGem = function (buf, x, y) {
+  GM.rect(buf, x, y + 1, 5, 3, GM.INK);
+  GM.rect(buf, x + 1, y + 2, 3, 1, GM.PAPER);
+  GM.put(buf, x + 2, y, GM.INK);
+  GM.put(buf, x + 2, y + 4, GM.INK);
+  GM.put(buf, x + 2, y + 1, GM.PAPER);
+};
+
+GM.drawMole = function (buf, it, anim) {
+  var d = it.dir;
+  var x = Math.round(it.x), y = Math.round(it.y);
+  var step = Math.sin(anim * 14 + it.x) > 0 ? 1 : 0;
+  GM.ellipse(buf, x, y, 8, 5, GM.INK);
+  GM.ellipse(buf, x, y, 7, 4, GM.MID);
+  GM.ellipse(buf, x, y + 2, 5, 2, GM.DARK);
+  GM.ellipse(buf, x + d * 5, y - 2, 4, 4, GM.INK);
+  GM.ellipse(buf, x + d * 5, y - 2, 3, 3, GM.MID);
+  GM.ellipse(buf, x + d * 2, y - 6, 2, 2, GM.INK);
+  GM.ellipse(buf, x + d * 2, y - 6, 1, 1, GM.DARK);
+  GM.rect(buf, x + d * 8, y - 2, 2, 2, GM.PAPER);
+  GM.put(buf, x + d * 9, y - 1, GM.INK);
+  GM.put(buf, x + d * 6, y - 3, GM.INK);
+  GM.line(buf, x - 3, y + 4, x - 4, y + 6 + step, GM.INK);
+  GM.line(buf, x + 3, y + 4, x + 4, y + 6 + (1 - step), GM.INK);
+  GM.line(buf, x - d * 7, y, x - d * 10, y - 2, GM.INK);
+  if (it.carry === "diamond") GM.miniGem(buf, x + d * 6 - (d < 0 ? 5 : 0), y - 8);
+  else GM.miniGold(buf, x + d * 6 - (d < 0 ? 5 : 0), y - 8);
+};
+
+GM.drawRope = function (buf, hook) {
+  var tip = GM.tip(hook);
+  var a = hook.angle, dx = Math.sin(a), dy = Math.cos(a);
+  GM.line(buf, GM.ANCHOR.x, GM.ANCHOR.y, tip.x - dx, tip.y - dy, GM.INK);
+  for (var d = 7; d < hook.len - 3; d += 9) {
+    GM.put(buf, GM.ANCHOR.x + dx * d, GM.ANCHOR.y + dy * d, GM.PAPER);
+  }
+};
+
+GM.drawHook = function (buf, hook) {
+  var tip = GM.tip(hook);
+  var a = hook.angle, dx = Math.sin(a), dy = Math.cos(a);
+  var px = Math.cos(a), py = -Math.sin(a);
+  GM.line(buf, tip.x - dx * 3, tip.y - dy * 3, tip.x, tip.y, GM.INK);
+  var closed = !!hook.item;
+  for (var side = -1; side <= 1; side += 2) {
+    var x1 = tip.x + dx * 1.5 + px * side * 1.8;
+    var y1 = tip.y + dy * 1.5 + py * side * 1.8;
+    var x2 = tip.x + dx * 4 + px * side * (closed ? 1.1 : 3.7);
+    var y2 = tip.y + dy * 4 + py * side * (closed ? 1.1 : 3.7);
+    GM.line(buf, tip.x, tip.y, x1, y1, GM.INK);
+    GM.line(buf, x1, y1, x2, y2, GM.INK);
+    GM.put(buf, x2, y2, GM.PAPER);
+  }
+  GM.rect(buf, tip.x - 1, tip.y - 1, 2, 2, GM.INK);
+};
+
+GM.drawMiner = function (buf, state) {
+  var hook = state.hook;
+  var bob = hook.state === "swing" && Math.sin(state.anim * 4) > 0.35 ? -1 : 0;
+  var lean = hook.state === "out" ? 1 : hook.state === "back" ? -1 : 0;
+  var bx = 80 + lean;
+  var by = bob;
+  var ground = 22;
+
+  /* boots and legs stay on the ground; the body bobs above them */
+  GM.rect(buf, bx - 8, ground - 1, 5, 2, GM.INK);
+  GM.rect(buf, bx + 3, ground - 1, 5, 2, GM.INK);
+  GM.rect(buf, bx - 6, ground - 4, 3, 3, GM.DARK);
+  GM.rect(buf, bx + 3, ground - 4, 3, 3, GM.DARK);
+
+  /* body, shirt and overalls */
+  GM.rect(buf, bx - 7, 12 + by, 14, 7, GM.INK);
+  GM.rect(buf, bx - 6, 13 + by, 12, 5, GM.MID);
+  GM.rect(buf, bx - 5, 14 + by, 10, 4, GM.DARK);
+  GM.rect(buf, bx - 4, 13 + by, 1, 5, GM.PAPER);
+  GM.rect(buf, bx + 3, 13 + by, 1, 5, GM.PAPER);
+
+  /* head, eyes and a big moustache */
+  GM.rect(buf, bx - 5, 6 + by, 10, 7, GM.INK);
+  GM.rect(buf, bx - 4, 7 + by, 8, 5, GM.PAPER);
+  GM.put(buf, bx - 2, 9 + by, GM.INK);
+  GM.put(buf, bx + 2, 9 + by, GM.INK);
+  GM.rect(buf, bx - 3, 11 + by, 6, 1, GM.DARK);
+  GM.put(buf, bx - 4, 11 + by, GM.DARK);
+  GM.put(buf, bx + 4, 11 + by, GM.DARK);
+
+  /* a low cap with a broad brim and a lamp */
+  GM.ellipse(buf, bx, 4 + by, 8, 3, GM.INK);
+  GM.ellipse(buf, bx, 4 + by, 7, 2, GM.PAPER);
+  GM.rect(buf, bx - 9, 6 + by, 18, 2, GM.INK);
+  GM.rect(buf, bx - 8, 6 + by, 16, 1, GM.PAPER);
+  GM.rect(buf, bx - 1, 2 + by, 3, 2, GM.MID);
+  GM.put(buf, bx, 2 + by, GM.PAPER);
+
+  /* two hands on the rope, with a small coil at the winch */
+  GM.line(buf, bx - 7, 13 + by, 79, 17, GM.INK);
+  GM.line(buf, bx + 7, 13 + by, 81, 17, GM.INK);
+  GM.rect(buf, 78, 16, 2, 2, GM.PAPER);
+  GM.rect(buf, 81, 16, 2, 2, GM.PAPER);
+  GM.rect(buf, 79, 17, 2, 2, GM.DARK);
+  GM.put(buf, 80, 18, GM.PAPER);
+};
+
+GM.draw = function (ctx, state) {
+  if (!GM.SPR) GM.initArt();
+  var key = state.levelSeed;
+  if (!state.bg || state.bgKey !== key) {
+    state.bg = GM.makeBackground(state);
+    state.bgKey = key;
+  }
+  var buf = GM._buf || (GM._buf = new Uint8Array(GM.W * GM.H));
+  buf.set(state.bg);
+  var i, it, tip;
+  for (i = 0; i < state.items.length; i++) {
+    it = state.items[i];
+    if (it.type !== "mole") GM.drawItem(buf, it, state.anim);
+  }
+  for (i = 0; i < state.items.length; i++) {
+    it = state.items[i];
+    if (it.type === "mole") GM.drawMole(buf, it, state.anim);
+  }
+  GM.drawRope(buf, state.hook);
+  if (state.hook.item) {
+    tip = GM.tip(state.hook);
+    GM.drawItem(buf, state.hook.item, state.anim);
+    GM.put(buf, Math.round(tip.x), Math.round(tip.y) - 2, GM.PAPER);
+  }
+  GM.drawHook(buf, state.hook);
+  GM.drawMiner(buf, state);
+
+  for (i = 0; i < state.blasts.length; i++) {
+    var bl = state.blasts[i], k = bl.t / bl.life;
+    var rr = 4 + k * 27;
+    for (var a = 0; a < Math.PI * 2; a += 0.22) {
+      GM.put(buf, bl.x + Math.cos(a) * rr, bl.y + Math.sin(a) * rr, (i + Math.floor(a * 5)) % 2 ? GM.PAPER : GM.MID);
+    }
+    GM.put(buf, bl.x, bl.y, GM.PAPER);
+  }
+  for (i = 0; i < state.particles.length; i++) {
+    var p = state.particles[i];
+    GM.put(buf, p.x, p.y, p.color === "paper" ? GM.PAPER : p.color === "dark" ? GM.DARK : GM.MID);
+  }
+  for (i = 0; i < state.floats.length; i++) {
+    var f = state.floats[i];
+    var tx = f.x - (f.text.length * 4 - 1) / 2;
+    var ty = f.y - (f.t / f.life) * 9;
+    GM.text3(buf, f.text, Math.round(tx), Math.round(ty), GM.INK);
+  }
+
+  var sx = 0, sy = 0;
+  if (state.shake > 0) {
+    sx = Math.round((Math.random() * 2 - 1) * 3);
+    sy = Math.round((Math.random() * 2 - 1) * 2);
+  }
+  GM.present(ctx, buf, sx, sy);
+};
+
+GM.present = function (ctx, buf, sx, sy) {
+  if (!GM._img) GM._img = ctx.createImageData(GM.W, GM.H);
+  var data = GM._img.data;
+  for (var y = 0; y < GM.H; y++) {
+    for (var x = 0; x < GM.W; x++) {
+      var xx = x - (sx || 0), yy = y - (sy || 0), c;
+      if (xx < 0 || xx >= GM.W || yy < 0 || yy >= GM.H) c = GM.RGB[GM.PAPER];
+      else {
+        var t = buf[yy * GM.W + xx];
+        c = GM.RGB[t === GM.CLEAR ? GM.PAPER : t] || GM.RGB[GM.PAPER];
+      }
+      var o = (y * GM.W + x) * 4;
+      data[o] = c[0]; data[o + 1] = c[1]; data[o + 2] = c[2]; data[o + 3] = 255;
+    }
+  }
+  ctx.putImageData(GM._img, 0, 0);
+};
+
+GM.iconCanvas = function () {
+  if (GM._iconCv) return GM._iconCv;
+  var b = new Uint8Array(16 * 16);
+  b.fill(GM.PAPER);
+  for (var y = 0; y < 16; y++) {
+    for (var x = 0; x < 16; x++) {
+      var ch = GM.ICON[y].charAt(x);
+      if (ch !== ".") b[y * 16 + x] = +ch;
+    }
+  }
+  var c = document.createElement("canvas");
+  c.width = 16; c.height = 16;
+  var ctx = c.getContext("2d");
+  var img = ctx.createImageData(16, 16);
+  for (var i = 0; i < 256; i++) {
+    var t = b[i], rgb = GM.RGB[t] || GM.RGB[GM.PAPER], o = i * 4;
+    img.data[o] = rgb[0]; img.data[o + 1] = rgb[1]; img.data[o + 2] = rgb[2]; img.data[o + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  GM._iconCv = c;
+  return c;
+};
+
+GM.initArt();
+</script>
+<script data-src="src/30-ui.js">
+/* 矿工老张: DOM screens, the chin buttons, touch, sound and the page loop. */
+var GM = (typeof GM !== "undefined" && GM) || {};
+
+GM.ui = (function () {
+  var LANG = (typeof PAD !== "undefined" && PAD.lang === "en") ? "en" : "zh";
+  var T = GM.text(LANG);
+  var state, ctx, cv, ov, introEl, dynBtn, foot, lv, cash, tm, bar;
+  var last = 0, lastScreen = "", lastHud = "", lastDyn = "", lastFoot = "", lastIntro = "";
+  var musicPlaying = false;
+
+  function $(id) { return document.getElementById(id); }
+  function money(n) { return "$" + GM.money(n); }
+  function esc(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  function init(st) {
+    state = st;
+    cv = $("c");
+    ctx = cv.getContext("2d");
+    ctx.imageSmoothingEnabled = false;
+    ov = $("ov");
+    introEl = $("intro");
+    dynBtn = $("dyn");
+    foot = $("foot");
+    lv = $("lv");
+    cash = $("cash");
+    tm = $("tm");
+    bar = $("barfill");
+    document.documentElement.lang = LANG === "zh" ? "zh-CN" : "en";
+    document.title = T.title;
+    cv.addEventListener("pointerdown", onCanvas);
+    dynBtn.addEventListener("click", onDyn);
+    ov.addEventListener("click", onOverlay);
+    addEventListener("resize", fit);
+    document.addEventListener("visibilitychange", onVis);
+    if (typeof PAD !== "undefined" && PAD.on) PAD.on("press", onPad);
+    fit();
+    updateHud(true);
+    updateDyn(true);
+    updateFoot(true);
+  }
+
+  function setBest(info) {
+    var incoming = (info && info.best) || { level: 0, bank: 0 };
+    if (!GM.better(state.best, incoming)) state.best = incoming;
+    state.bestBlocked = !(info && info.ok);
+    state.saveMsg = info && info.corrupt ? T.saveFail : info && info.newer ? T.saveNewer : "";
+  }
+
+  function shell(cls, body, footer) {
+    return '<div class="sbody ' + cls + '">' + body + '</div><div class="ofoot">' + esc(footer) + "</div>";
+  }
+
+  function render(screen) {
+    var i, item, have, can, sel, price, rows, best, warn, extra, rec, next, target, short;
+    if (screen === "title") {
+      best = state.best.level > 0
+        ? GM.fmt(T.best, { l: state.best.level, b: GM.money(state.best.bank) })
+        : T.noBest;
+      warn = state.saveMsg ? '<p class="warn">' + esc(state.saveMsg) + "</p>" : "";
+      return shell("center",
+        '<canvas id="logo" width="16" height="16" aria-hidden="true"></canvas>' +
+        "<h1>" + esc(T.title) + "</h1>" +
+        '<p class="sub">' + esc(T.sub) + "</p>" +
+        '<p class="tip">' + esc(T.tip) + "</p>" +
+        '<button type="button" class="primary" data-act="start">' + esc(T.start) + "</button>" +
+        '<p class="best">' + esc(best) + "</p>" + warn,
+        T.footTitle);
+    }
+    if (screen === "paused") {
+      return shell("center",
+        "<h1>" + esc(T.pause) + "</h1>" +
+        "<p>" + esc(GM.fmt(T.level, { n: state.level })) + " · " + esc(GM.fmt(T.shopCash, { b: GM.money(state.bank) })) + "</p>" +
+        '<button type="button" class="primary" data-act="resume">' + esc(T.resume) + "</button>",
+        T.footPause);
+    }
+    if (screen === "clear") {
+      extra = Math.max(0, state.bank - state.target);
+      rec = state.newBest ? '<p class="best">' + esc(T.record) + "</p>" : "";
+      return shell("center",
+        "<h1>" + esc(T.clear) + "</h1>" +
+        '<p class="big cashline">' + esc(GM.fmt(T.clearLine, { b: GM.money(state.bank), t: GM.money(state.target) })) + "</p>" +
+        '<p class="small">' + esc(GM.fmt(T.extra, { d: GM.money(extra) })) + "</p>" + rec +
+        '<button type="button" class="primary" data-act="shop">' + esc(T.shopBtn) + "</button>",
+        T.footClear);
+    }
+    if (screen === "shop") {
+      next = state.level + 1;
+      target = GM.targetFor(next);
+      rows = "";
+      for (i = 0; i < GM.SHOP.length; i++) {
+        item = GM.SHOP[i];
+        have = state[item.key] || 0;
+        can = have < item.max && state.bank >= item.price;
+        sel = state.shopCursor === i;
+        if (have >= item.max) price = T.max;
+        else if (state.bank < item.price) price = GM.fmt(T.shortPrice, { d: GM.money(item.price - state.bank) });
+        else price = money(item.price);
+        rows += '<button type="button" class="row' + (sel ? " sel" : "") + (can ? "" : " off") + '" data-act="buy" data-i="' + i + '">' +
+          '<span class="nm">' + esc(T.shopNames[i]) + " <i>" + esc(GM.fmt(T.owned, { n: have, m: item.max })) + "</i>" +
+          "<small>" + esc(T.shopDescs[i]) + "</small></span>" +
+          '<span class="pr">' + esc(price) + "</span></button>";
+      }
+      return shell("shop",
+        '<div class="shophead"><b>' + esc(GM.fmt(T.shopTitle, { n: next })) + "</b><span>" +
+        esc(GM.fmt(T.shopCash, { b: GM.money(state.bank) })) + "</span></div>" +
+        '<p class="small nextline">' + esc(GM.fmt(T.nextTarget, { t: GM.money(target) })) + "</p>" +
+        rows +
+        '<button type="button" class="next' + (state.shopCursor === 4 ? " sel" : "") + '" data-act="next">' + esc(T.next) + "</button>",
+        T.footShop);
+    }
+    if (screen === "over") {
+      short = Math.max(0, state.target - state.bank);
+      return shell("center",
+        "<h1>" + esc(T.over) + "</h1>" +
+        '<p class="big">' + esc(GM.fmt(T.overShort, { d: GM.money(short) })) + "</p>" +
+        '<p class="small">' + esc(GM.fmt(T.clearLine, { b: GM.money(state.bank), t: GM.money(state.target) })) + "</p>" +
+        '<button type="button" class="primary" data-act="retry">' + esc(T.retry) + "</button>" +
+        '<button type="button" class="ghost" data-act="title">' + esc(T.toTitle) + "</button>",
+        T.footOver);
+    }
+    if (screen === "victory") {
+      rec = state.newBest ? '<p class="best">' + esc(T.record) + "</p>" : "";
+      return shell("center",
+        "<h1>" + esc(T.victory) + "</h1>" +
+        "<p>" + esc(T.victoryLine) + "</p>" +
+        '<p class="big">' + esc(GM.fmt(T.shopCash, { b: GM.money(state.bank) })) + "</p>" + rec +
+        '<button type="button" class="primary" data-act="endless">' + esc(T.keep) + "</button>" +
+        '<button type="button" class="ghost" data-act="title">' + esc(T.toTitle) + "</button>",
+        T.footVictory);
+    }
+    return "";
+  }
+
+  function post(screen) {
+    if (screen !== "title") return;
+    var logo = $("logo");
+    if (!logo) return;
+    logo.style.width = "64px";
+    logo.style.height = "64px";
+    var lctx = logo.getContext("2d");
+    lctx.imageSmoothingEnabled = false;
+    lctx.drawImage(GM.iconCanvas(), 0, 0);
+  }
+
+  function enter(screen) {
+    if (!state) return;
+    lastScreen = screen;
+    var full = screen !== "play" && screen !== "intro";
+    ov.hidden = !full;
+    if (full) {
+      ov.innerHTML = render(screen);
+      ov.scrollTop = 0;
+      post(screen);
+    } else {
+      ov.innerHTML = "";
+    }
+    updateFoot(true);
+    updateHud(true);
+    updateDyn(true);
+    updateIntro();
+    musicFor(screen);
+  }
+
+  function updateHud(force) {
+    var sec = Math.ceil(state.time);
+    var key = state.screen + "|" + state.level + "|" + state.bank + "|" + state.target + "|" + sec + "|" + (state.bank >= state.target);
+    if (!force && key === lastHud) return;
+    lastHud = key;
+    lv.textContent = GM.fmt(T.level, { n: state.level });
+    cash.textContent = money(state.bank) + " / " + GM.money(state.target);
+    cash.className = state.bank >= state.target ? "met" : "";
+    tm.textContent = GM.fmt(T.time, { n: sec });
+    tm.className = sec <= 10 && state.screen === "play" ? "low" : "";
+    bar.style.width = Math.max(0, Math.min(100, Math.round(state.bank / (state.target || 1) * 100))) + "%";
+  }
+
+  function updateDyn(force) {
+    var show = (state.screen === "play" || state.screen === "intro") && state.dynamite > 0;
+    if (!show) {
+      if (!dynBtn.hidden) dynBtn.hidden = true;
+      lastDyn = "";
+      return;
+    }
+    var key = state.dynamite + "|" + (state.hook.item ? 1 : 0) + "|" + state.screen;
+    if (!force && key === lastDyn) return;
+    lastDyn = key;
+    dynBtn.hidden = false;
+    dynBtn.textContent = GM.fmt(T.dyn, { n: state.dynamite });
+    dynBtn.className = state.hook.item ? "on" : "off";
+  }
+
+  function updateFoot(force) {
+    var text;
+    if (state.screen === "play" || state.screen === "intro") text = state.dynamite > 0 ? T.footPlayDyn : T.footPlay;
+    else if (state.screen === "paused") text = T.footPause;
+    else if (state.screen === "clear") text = T.footClear;
+    else if (state.screen === "shop") text = T.footShop;
+    else if (state.screen === "over") text = T.footOver;
+    else if (state.screen === "victory") text = T.footVictory;
+    else text = T.footTitle;
+    if (!force && text === lastFoot) return;
+    lastFoot = text;
+    foot.textContent = text;
+  }
+
+  function updateIntro() {
+    if (state.screen !== "intro") {
+      if (!introEl.hidden) introEl.hidden = true;
+      lastIntro = "";
+      return;
+    }
+    var tip = state.level === 1 ? T.tip1 : state.level === 4 ? T.tip4 : state.level === 7 ? T.tip7 : T.tipDefault;
+    var html = "<b>" + esc(GM.fmt(T.intro, { n: state.level, t: GM.money(state.target) })) + "</b><span>" + esc(tip) + "</span>";
+    if (html === lastIntro) return;
+    lastIntro = html;
+    introEl.innerHTML = html;
+    introEl.hidden = false;
+  }
+
+  function sfx(sound) {
+    if (typeof PAD === "undefined" || !PAD.sfx) return;
+    try { PAD.sfx(sound); }
+    catch (e) { try { if (typeof sound !== "string") PAD.sfx("hit"); } catch (e2) {} }
+  }
+
+  function pump() {
+    var n = 0;
+    while (state.events.length && n++ < 60) {
+      var ev = state.events.shift();
+      if (ev === "fire") sfx("tap");
+      else if (ev === "grab") sfx("hit");
+      else if (ev === "coin") sfx("coin");
+      else if (ev === "gem") sfx(GM.SFX.chime);
+      else if (ev === "junk") sfx("miss");
+      else if (ev === "boom") sfx(GM.SFX.boom);
+      else if (ev === "tick") sfx("tick");
+      else if (ev === "clear") sfx("win");
+      else if (ev === "fail") sfx("lose");
+      else if (ev === "buy") sfx("ok");
+      else if (ev === "err") sfx("err");
+      else if (ev === "move") sfx("move");
+      if (ev === "clear" || ev === "fail") saveBest();
+    }
+  }
+
+  function saveBest() {
+    if (!state.bestDirty || state.bestBlocked) return;
+    if (typeof PAD === "undefined" || !PAD.save) return;
+    try {
+      var r = PAD.save("best", GM.bestPayload(state));
+      if (r && typeof r.catch === "function") {
+        r.catch(function () { state.bestBlocked = true; state.saveMsg = T.saveWrite; });
+      }
+      try { if (PAD.setSchema) PAD.setSchema(1); } catch (e) {}
+      state.bestDirty = false;
+    } catch (e) {
+      state.bestBlocked = true;
+      state.saveMsg = T.saveWrite;
+    }
+  }
+
+  function musicFor(screen) {
+    var want = screen === "play" || screen === "intro";
+    if (want && !musicPlaying) {
+      if (typeof PAD !== "undefined" && PAD.music) {
+        try { PAD.music.play(GM.MUSIC); musicPlaying = true; } catch (e) {}
+      }
+    } else if (!want && musicPlaying) {
+      if (typeof PAD !== "undefined" && PAD.music) {
+        try { PAD.music.stop(); } catch (e) {}
+      }
+      musicPlaying = false;
+    }
+  }
+
+  function startRun() {
+    GM.startRun(state);
+    enter(state.screen);
+  }
+
+  function openShop() {
+    GM.openShop(state);
+    enter("shop");
+  }
+
+  function shopNext() {
+    GM.shopNext(state);
+    pump();
+    enter(state.screen);
+  }
+
+  function onCanvas(e) {
+    if (state.screen === "play") {
+      GM.fire(state);
+      pump();
+    } else if (state.screen === "intro") {
+      state.introT = 0;
+    }
+    e.preventDefault();
+  }
+
+  function onDyn(e) {
+    if (state.screen !== "play") return;
+    if (!GM.useDynamite(state)) sfx("err");
+    pump();
+    e.preventDefault();
+  }
+
+  function onOverlay(e) {
+    var el = e.target;
+    while (el && el !== ov && !(el.getAttribute && el.getAttribute("data-act"))) el = el.parentNode;
+    if (!el || el === ov) return;
+    var act = el.getAttribute("data-act");
+    var i = +(el.getAttribute("data-i") || 0);
+    if (act === "start" || act === "retry") startRun();
+    else if (act === "resume") { GM.resume(state); enter(state.screen); }
+    else if (act === "shop" || act === "endless") openShop();
+    else if (act === "buy") { GM.buy(state, i); pump(); enter("shop"); }
+    else if (act === "next") shopNext();
+    else if (act === "title") { GM.toTitle(state); enter("title"); }
+    e.preventDefault();
+  }
+
+  function onPad(btn) {
+    var s = state.screen;
+    if (s === "title") {
+      if (btn === "a" || btn === "start") startRun();
+      return;
+    }
+    if (s === "intro") {
+      if (btn === "a") { state.introT = 0; return; }
+      if (btn === "start" && GM.pause(state)) enter("paused");
+      return;
+    }
+    if (s === "play") {
+      if (btn === "a") { GM.fire(state); pump(); }
+      else if (btn === "b" && state.dynamite > 0) {
+        if (!GM.useDynamite(state)) sfx("err");
+        pump();
+      } else if (btn === "start" && GM.pause(state)) enter("paused");
+      return;
+    }
+    if (s === "paused") {
+      if (btn === "a" || btn === "start") { GM.resume(state); enter(state.screen); }
+      return;
+    }
+    if (s === "clear") {
+      if (btn === "a" || btn === "start") openShop();
+      return;
+    }
+    if (s === "shop") {
+      if (btn === "up") { GM.moveShop(state, -1); pump(); enter("shop"); }
+      else if (btn === "down") { GM.moveShop(state, 1); pump(); enter("shop"); }
+      else if (btn === "a" || btn === "start") {
+        if (state.shopCursor === 4) shopNext();
+        else { GM.buy(state, state.shopCursor); pump(); enter("shop"); }
+      } else if (btn === "b") shopNext();
+      return;
+    }
+    if (s === "over") {
+      if (btn === "a" || btn === "start") startRun();
+      else if (btn === "b") { GM.toTitle(state); enter("title"); }
+      return;
+    }
+    if (s === "victory") {
+      if (btn === "a" || btn === "start") openShop();
+      else if (btn === "b") { GM.toTitle(state); enter("title"); }
+    }
+  }
+
+  function onVis() {
+    if (document.hidden && (state.screen === "play" || state.screen === "intro") && GM.pause(state)) enter("paused");
+  }
+
+  function fit() {
+    if (!cv) return;
+    var stage = $("stage");
+    var aw = stage.clientWidth - 12, ah = stage.clientHeight - 12;
+    if (aw < 40 || ah < 40) return;
+    var k = Math.min(aw / GM.W, ah / GM.H);
+    var dpr = window.devicePixelRatio || 1;
+    var kk = Math.floor(k * dpr) / dpr;
+    if (kk < k * 0.9) kk = k;
+    kk = Math.max(0.75, kk);
+    cv.style.width = Math.round(GM.W * kk) + "px";
+    cv.style.height = Math.round(GM.H * kk) + "px";
+  }
+
+  function loop(now) {
+    var dt = last ? Math.min(0.1, (now - last) / 1000) : 0;
+    last = now;
+    if (state.screen === "play" || state.screen === "intro") {
+      GM.update(state, dt);
+      pump();
+      if (state.screen !== lastScreen) enter(state.screen);
+      if (state.screen === "play" || state.screen === "intro") {
+        updateHud();
+        updateDyn();
+        updateFoot();
+        updateIntro();
+        GM.draw(ctx, state);
+      }
+    } else if (state.screen !== lastScreen) {
+      enter(state.screen);
+    }
+    requestAnimationFrame(loop);
+  }
+
+  return {
+    init: init,
+    setBest: setBest,
+    enter: enter,
+    loop: loop,
+    fit: fit,
+    pump: pump,
+    lang: LANG,
+    text: T
+  };
+})();
+</script>
+<script data-src="src/40-boot.js">
+/* 矿工老张: boot, load the best run, and hand the page to the UI loop. */
+(function () {
+  var state = GM.newState();
+  GM.ui.init(state);
+  GM.ui.setBest({ ok: true, best: { level: 0, bank: 0 } });
+  GM.ui.enter("title");
+  requestAnimationFrame(GM.ui.loop);
+
+  function ready(info) {
+    GM.ui.setBest(info);
+    if (state.screen === "title") GM.ui.enter("title");
+  }
+
+  if (typeof PAD !== "undefined" && PAD.load) {
+    try {
+      var p = PAD.load("best");
+      if (p && typeof p.then === "function") {
+        p.then(function (v) { ready(GM.readBest(v)); },
+               function () { ready({ ok: false, corrupt: true, best: { level: 0, bank: 0 } }); });
+      } else {
+        ready(GM.readBest(p));
+      }
+    } catch (e) {
+      ready({ ok: false, corrupt: true, best: { level: 0, bank: 0 } });
+    }
+  } else {
+    ready(GM.readBest(null));
+  }
+})();
+</script>
+</body>
+</html>

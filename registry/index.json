@@ -401,6 +401,46 @@
     },
     {
       "spec": "lopda/1",
+      "id": "lao-zhang",
+      "name": "矿工老张",
+      "glyph": "张",
+      "category": "game",
+      "buttons": true,
+      "icon": [
+        "................",
+        ".....000000.....",
+        "...0033333300...",
+        "..033333333330..",
+        "..033333333330..",
+        "..033332333330..",
+        "..033333333330..",
+        "..000000000000..",
+        "...0333333330...",
+        "...0303333030...",
+        "...0333333330...",
+        "...0331111330...",
+        "....03333330....",
+        ".....000000.....",
+        "................",
+        "................"
+      ],
+      "version": "1.0.0",
+      "released": "2026-10-28",
+      "description": "六十秒一关：摆动钩子，钩金块、躲石头，用炸药和商店挖得更深。",
+      "i18n": {
+        "en": {
+          "name": "LAOZHANG",
+          "description": "Swing the hook, haul gold, dodge rocks. Sixty seconds a level; shop between."
+        }
+      },
+      "author": "Haowei Wu",
+      "license": "MIT",
+      "path": "apps/lao-zhang/index.html",
+      "sha256": "f643e76784b266e87f1dd736310bdd2af477bc53d8321b894ddcb41f7c26139d",
+      "bytes": 65655
+    },
+    {
+      "spec": "lopda/1",
       "id": "luck-compass",
       "name": "神位罗盘",
       "glyph": "吉",
