@@ -379,13 +379,13 @@ GM.ui = (function () {
     var stage = $("stage");
     var aw = stage.clientWidth - 12, ah = stage.clientHeight - 12;
     if (aw < 40 || ah < 40) return;
-    var k = Math.min(aw / GM.W, ah / GM.H);
+    var k = Math.min(aw / GM.BW, ah / GM.BH);
     var dpr = window.devicePixelRatio || 1;
     var kk = Math.floor(k * dpr) / dpr;
     if (kk < k * 0.9) kk = k;
     kk = Math.max(0.75, kk);
-    cv.style.width = Math.round(GM.W * kk) + "px";
-    cv.style.height = Math.round(GM.H * kk) + "px";
+    cv.style.width = Math.round(GM.BW * kk) + "px";
+    cv.style.height = Math.round(GM.BH * kk) + "px";
   }
 
   function loop(now) {
