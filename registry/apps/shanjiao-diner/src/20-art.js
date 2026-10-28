@@ -289,7 +289,10 @@ ART.bamboo = spr([
 ]);
 
 /* ---------------- the little diner ---------------- */
-ART.TABLES = [[72, 116], [136, 116], [72, 162], [136, 162]];
+ART.TABLES = [[72, 94], [136, 94], [72, 168], [136, 168]];
+/* morning and night panels cover the lower row; keep the two visible tables
+ * lower than the service row so they sit on the floor, not against the wall */
+ART.TABLES_LOUNGE = [[72, 116], [136, 116]];
 
 ART.table = function (g, x, y, selected) {
   if (selected) {
@@ -311,56 +314,49 @@ ART.table = function (g, x, y, selected) {
 };
 
 ART.room = function (g, s, mode, t, sel) {
-  g.clear(g.PAPER);
-  // wall and floor
-  g.dither(0, 28, 216, 24, g.MID, 1);
-  g.rect(0, 52, 216, 44, g.MID);
-  g.rect(0, 96, 216, 144, g.MID);
-  g.dither(0, 96, 216, 6, g.DARK, 1);
-  g.rect(0, 95, 216, 1, g.INK);
-  for (var fy = 108; fy < 240; fy += 12) g.rect(0, fy, 216, 1, g.DARK);
-  // kitchen pass
-  g.rect(6, 40, 62, 44, g.INK);
-  g.rect(9, 43, 56, 38, g.DARK);
-  g.rect(11, 45, 52, 34, g.MID);
-  g.text("灶", 37, 50, { align: "center" });
-  for (var i = 0; i < 3; i++) {
-    var sx = 18 + i * 14, sy = 34 - (i % 2) * 4;
-    g.rect(sx, sy, 3, 5, g.PAPER);
-    g.rect(sx + 1, sy - 6, 3, 4, g.PAPER);
+  ART.plate(g, mode === "night" ? PLATES.roomNight : PLATES.roomDay, 0, 0);
+
+  // The plate leaves the middle of the wall empty: the scroll and the today
+  // board are live text, and during service that band belongs to the orders.
+  if (mode !== "service") {
+    g.rect(84, 34, 18, 34, g.INK);
+    g.rect(85, 35, 16, 32, g.PAPER);
+    g.text("酒", 93, 37, { align: "center" });
+    g.rect(110, 38, 54, 30, g.INK);
+    g.rect(112, 40, 50, 26, g.PAPER);
+    g.text("今日", 115, 41, { color: g.DARK });
+    var first = s && s.menu && s.menu.length ? DATA.DISHES[s.menu[0]].name : "休息";
+    g.text(first, 115, 55);
+    // a shelf of jars on the right wall, below the high window
+    g.rect(168, 54, 42, 30, g.INK);
+    g.rect(170, 56, 38, 26, g.PAPER);
+    for (var sh = 0; sh < 2; sh++) {
+      g.rect(171, 62 + sh * 10, 36, 1, g.DARK);
+      for (var j = 0; j < 6; j++) g.rect(172 + j * 6, 57 + sh * 10, 4, 4, sh % 2 ? g.MID : g.DARK);
+    }
+    // a string of dried chillies by the pass
+    g.line(74, 30, 74, 46, g.INK);
+    for (var h = 0; h < 4; h++) {
+      g.rect(72 + (h % 2), 32 + h * 3, 3, 2, h % 2 ? g.DARK : g.MID);
+      g.pixel(75, 33 + h * 3, g.PAPER);
+    }
   }
-  // shelves
-  g.rect(168, 40, 42, 30, g.INK);
-  g.rect(170, 42, 38, 26, g.PAPER);
-  for (var sh = 0; sh < 2; sh++) {
-    g.rect(171, 48 + sh * 10, 36, 1, g.DARK);
-    for (var j = 0; j < 6; j++) g.rect(172 + j * 6, 43 + sh * 10, 4, 4, sh % 2 ? g.MID : g.DARK);
+
+  // steam from the pass, even before the first customer
+  for (var st = 0; st < 3; st++) {
+    var sy = 60 - ((t * 5 + st * 7) % 16);
+    g.pixel(38 + st * 5, sy, g.PAPER);
+    g.pixel(39 + st * 5, sy - 2, g.MID);
   }
-  // hanging scroll
-  g.rect(84, 34, 18, 34, g.INK);
-  g.rect(85, 35, 16, 32, g.PAPER);
-  g.text("酒", 93, 37, { align: "center" });
-  // today's board
-  g.rect(110, 38, 54, 30, g.INK);
-  g.rect(112, 40, 50, 26, g.PAPER);
-  g.text("今日", 115, 41, { color: g.DARK });
-  var first = s && s.menu && s.menu.length ? DATA.DISHES[s.menu[0]].name : "休息";
-  g.text(first, 115, 55);
-  // counter
-  g.rect(6, 100, 60, 48, g.DARK);
-  g.rect(8, 102, 56, 44, g.MID);
-  g.rect(8, 98, 56, 3, g.PAPER);
-  // pot, bowls and a steamer
-  g.rect(14, 104, 18, 10, g.INK);
-  g.rect(16, 106, 14, 6, g.PAPER);
-  g.rect(15, 101, 16, 3, g.PAPER);
-  g.rect(20, 98, 2, 3, g.PAPER); g.rect(22, 95, 2, 3, g.PAPER);
-  for (var b = 0; b < 3; b++) g.rect(38, 106 + b * 3, 10, 2, b % 2 ? g.MID : g.DARK);
-  g.rect(38, 118, 18, 8, g.INK); g.rect(40, 120, 14, 4, g.PAPER);
-  // cat on the counter
+
+  // the cat on the counter
   g.sprite(ART.cat, 48, 90 + (Math.sin(t * 2) > 0 ? 1 : 0));
-  // tables
-  for (var ti = 0; ti < 4; ti++) ART.table(g, ART.TABLES[ti][0], ART.TABLES[ti][1], sel === ti);
+
+  // tables (the lower row is hidden by the morning/night panels anyway)
+  var tables = mode === "service" ? ART.TABLES : ART.TABLES_LOUNGE;
+  for (var ti = 0; ti < tables.length; ti++) {
+    ART.table(g, tables[ti][0], tables[ti][1], sel === ti);
+  }
   // the long bench (upgrade)
   if (s && s.upgrades && s.upgrades.table) {
     g.rect(18, 156, 44, 3, g.INK);
@@ -368,19 +364,10 @@ ART.room = function (g, s, mode, t, sel) {
     g.rect(22, 154, 36, 2, g.MID);
     g.rect(24, 150, 4, 4, g.PAPER); g.rect(44, 150, 4, 4, g.PAPER);
   }
-  // sliding door
-  g.rect(194, 110, 16, 56, g.INK);
-  g.rect(196, 112, 12, 52, g.PAPER);
-  g.rect(196, 112, 5, 52, g.MID);
-  g.rect(203, 112, 5, 52, g.MID);
-  g.rect(196, 112, 12, 1, g.INK);
-  // noren
-  g.rect(194, 104, 16, 8, g.INK);
-  g.rect(196, 105, 12, 6, g.PAPER);
+
+  // noren: the plate has the cloth and its crest, the character is live
   g.text("馆", 202, 104, { align: "center" });
-  // lanterns
-  ART.lantern(g, 74, 30, t);
-  ART.lantern(g, 198, 100, t);
+
   // weather at the door
   if (s && s.weather === "rain") {
     for (var r = 0; r < 7; r++) {
@@ -388,21 +375,15 @@ ART.room = function (g, s, mode, t, sel) {
       var ry = 114 + ((r * 11) % 48);
       g.line(rx, ry, rx - 2, ry + 5, g.DARK);
     }
-  } else if (mode === "night") {
-    g.rect(199, 118, 6, 6, g.PAPER);
-    g.pixel(201, 120, g.PAPER);
   }
-  // morning light / night shade
-  if (mode === "morning") {
-    g.dither(0, 28, 100, 120, g.PAPER, 1);
-    g.dither(100, 28, 60, 60, g.PAPER, 1);
-  } else if (mode === "night") {
-    g.dither(0, 28, 216, 212, g.INK, 2);
-    ART.glow(g, 74, 30, 34, 28, t);
-    ART.glow(g, 198, 100, 22, 20, t);
+
+  // lantern light: the bodies are on the plate, the halo moves
+  if (mode === "night") {
+    ART.glow(g, 78, 38, 40, 34, t);
+    ART.glow(g, 202, 104, 30, 26, t);
   } else if (mode === "service") {
-    ART.glow(g, 74, 30, 30, 24, t);
-    ART.glow(g, 198, 100, 20, 18, t);
+    ART.glow(g, 78, 38, 34, 28, t);
+    ART.glow(g, 202, 104, 26, 24, t);
   }
 };
 
@@ -490,55 +471,7 @@ ART.facade = function (g, x, y, s, t) {
 };
 
 ART.title = function (g, t) {
-  g.clear(g.PAPER);
-  // sky
-  g.dither(0, 0, 216, 38, g.MID, 1);
-  g.dither(0, 38, 216, 16, g.MID, 1);
-  g.rect(0, 54, 216, 18, g.PAPER);
-  // sun and rays
-  g.dither(160, 8, 32, 32, g.MID, 1);
-  g.circle(176, 24, 13, g.INK, true);
-  g.circle(176, 24, 11, g.PAPER, true);
-  for (var sr = 0; sr < 8; sr++) {
-    var a = sr * Math.PI / 4;
-    g.line(176 + Math.cos(a) * 17, 24 + Math.sin(a) * 17, 176 + Math.cos(a) * 22, 24 + Math.sin(a) * 22, g.DARK);
-  }
-  // clouds
-  for (var c = 0; c < 3; c++) {
-    g.dither(12 + c * 54, 8 + (c % 2) * 8, 34, 6, g.PAPER, 2);
-    g.dither(18 + c * 54, 10 + (c % 2) * 8, 22, 4, g.PAPER, 3);
-  }
-  // mountains: three layers
-  g.line(0, 58, 30, 42, g.MID); g.line(30, 42, 60, 58, g.MID);
-  g.line(40, 58, 84, 32, g.DARK); g.line(84, 32, 128, 58, g.DARK);
-  g.line(112, 58, 152, 40, g.DARK); g.line(152, 40, 192, 58, g.DARK);
-  g.line(170, 58, 202, 48, g.MID); g.line(202, 48, 216, 56, g.MID);
-  g.dither(64, 42, 40, 16, g.DARK, 1);
-  g.dither(140, 46, 30, 12, g.DARK, 1);
-  g.rect(0, 58, 216, 2, g.DARK);
-  // pines framing the postcard
-  ART.pine(g, -8, 36, 1.35);
-  ART.pine(g, 188, 40, 1.45);
-  ART.pine(g, 20, 70, 0.75);
-  ART.pine(g, 174, 78, 0.6);
-  // ground
-  g.rect(0, 60, 216, 180, g.PAPER);
-  g.dither(0, 60, 216, 12, g.MID, 1);
-  // path
-  for (var py = 148; py < 240; py += 7) {
-    g.rect(80 + (py % 14 ? 2 : -2), py, 56, 5, g.MID);
-    g.rect(82 + (py % 14 ? 2 : -2), py, 52, 1, g.PAPER);
-  }
-  // fence
-  for (var f = 0; f < 7; f++) g.rect(10 + f * 14, 168, 2, 22, g.DARK);
-  g.rect(8, 174, 104, 2, g.DARK);
-  g.rect(8, 186, 104, 2, g.DARK);
-  // stone lantern
-  g.rect(162, 160, 3, 20, g.DARK);
-  g.rect(156, 156, 15, 4, g.INK);
-  g.rect(158, 150, 11, 6, g.PAPER);
-  g.rect(158, 150, 11, 1, g.MID);
-  g.dither(159, 152, 9, 3, g.PAPER, 1);
+  ART.plate(g, PLATES.mountain, 0, 0);
   // shop
   ART.facade(g, 48, 88, null, t);
   // cat and a little bush
@@ -884,38 +817,38 @@ ART.enemyBig = function (g, id, x, y, t, hurt) {
 
 /* ---------------- battle ---------------- */
 ART.battleBg = function (g, kind, t) {
-  g.clear(g.MID);
-  if (kind === "deep") {
-    g.dither(0, 0, 216, 60, g.INK, 2);
-    g.rect(0, 0, 216, 46, g.DARK);
-    g.dither(0, 0, 216, 46, g.INK, 1);
-  } else {
-    g.dither(0, 0, 216, 52, g.DARK, 1);
-    g.rect(0, 0, 216, 30, g.DARK);
-  }
-  ART.pine(g, -4, 26, 1.2);
-  ART.pine(g, 24, 34, 0.8);
-  ART.pine(g, 176, 30, 1.3);
-  ART.pine(g, 196, 38, 0.9);
-  // ground
-  g.rect(0, 108, 216, 48, g.PAPER);
+  ART.plate(g, PLATES.mountain, 0, 0);
+  var deep = kind === "deep";
+  // the fight stands on a stage cut into the mountain plate
+  g.rect(0, 108, 216, 132, deep ? g.DARK : g.PAPER);
   g.dither(0, 108, 216, 6, g.MID, 1);
-  for (var i = 0; i < 12; i++) {
-    g.rect((i * 37) % 216, 118 + (i % 4) * 7, 8, 1, g.MID);
+  g.rect(0, 108, 216, 1, g.DARK);
+  for (var i = 0; i < 18; i++) {
+    var gx = (i * 37) % 216, gy = 114 + (i * 17) % 30;
+    g.rect(gx, gy, 5, 1, g.MID);
+    if (i % 3 === 0) g.rect(gx + 2, gy - 2, 1, 2, deep ? g.DARK : g.INK);
   }
-  // shrine stones for the boss
-  if (kind === "deep") {
-    ART.shrine(g, 92, 58, t);
-    g.dither(0, 76, 216, 32, g.PAPER, 1);
-    for (var f = 0; f < 12; f++) {
-      g.pixel((f * 31 + Math.floor(t * 8)) % 216, 60 + (f * 13) % 40, g.PAPER);
+  // a little path
+  g.rect(72, 108, 72, 2, g.MID);
+  g.dither(72, 110, 72, 3, g.DARK, 1);
+  if (deep) {
+    g.dither(0, 0, 216, 108, g.INK, 2);
+    g.dither(0, 0, 216, 44, g.INK, 1);
+    ART.shrine(g, 92, 56, t);
+    g.dither(0, 72, 216, 36, g.PAPER, 1);
+    for (var r = 0; r < 10; r++) g.rect((r * 29) % 216, 114 + (r * 7) % 30, 6, 1, g.MID);
+  } else {
+    // light shafts
+    for (var b = 0; b < 4; b++) {
+      var bx = 18 + b * 18;
+      for (var j = 0; j < 6; j++) g.rect(bx + j * 2, 8 + j * 9, 4, 8, g.PAPER);
     }
   }
   // fireflies
-  for (var j = 0; j < 6; j++) {
-    var fx = (j * 43 + Math.sin(t * 0.8 + j) * 8) % 216;
-    var fy = 60 + (j * 19) % 40;
-    if (Math.floor(t * 2 + j) % 3) g.pixel(fx, fy, g.PAPER);
+  for (var j2 = 0; j2 < 8; j2++) {
+    var fx = (j2 * 43 + Math.sin(t * 0.8 + j2) * 9) % 216;
+    var fy = 52 + (j2 * 19) % 48;
+    if (Math.floor(t * 2 + j2) % 3) g.pixel(fx, fy, g.PAPER);
   }
 };
 

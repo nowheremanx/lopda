@@ -53,7 +53,7 @@ game.scene("prep", {
     if (game.repeat("up")) { PREP_SEL = (PREP_SEL + list.length - 1) % list.length; game.sfx("move"); }
     if (game.repeat("down")) { PREP_SEL = (PREP_SEL + 1) % list.length; game.sfx("move"); }
     if (PREP_SEL < PREP_SCROLL) PREP_SCROLL = PREP_SEL;
-    if (PREP_SEL > PREP_SCROLL + 5) PREP_SCROLL = PREP_SEL - 5;
+    if (PREP_SEL > PREP_SCROLL + 4) PREP_SCROLL = PREP_SEL - 4;
     var id = list[PREP_SEL];
     if (game.repeat("left")) {
       PREP_PLAN[id] = Math.max(0, (PREP_PLAN[id] || 0) - 1);
@@ -71,43 +71,47 @@ game.scene("prep", {
   draw: function (g) {
     g.clear(g.PAPER);
     UI.header(g, S, "备菜");
-    // pantry
-    g.window(6, 32, 204, 22, { thin: true });
+    // pantry: seven tiny icons were unreadable at 1x, so the counts are text
+    g.window(6, 32, 204, 30, { thin: true });
     for (var i = 0; i < DATA.ING_ORDER.length; i++) {
       var k = DATA.ING_ORDER[i];
-      ART.ing(g, k, 11 + i * 27, 35);
-      g.text(String(ing(k)), 25 + i * 27, 37, { color: ing(k) > 0 ? g.INK : g.DARK });
+      var row = i < 4 ? 0 : 1;
+      var px0 = 12 + (i < 4 ? i : i - 4) * 48, py0 = 35 + row * 14;
+      var nm = DATA.ING[k].name;
+      UI.text(g, nm, px0, py0, { color: g.DARK });
+      UI.text(g, String(ing(k)), px0 + g.measure(nm) + 5, py0, { color: ing(k) > 0 ? g.INK : g.DARK });
     }
-    // dish list
+    // dish list: the kit owns the window, cursor, scroll and arrows
     var list = prepList();
-    g.window(6, 58, 204, 108);
-    g.text("今日菜单", 12, 60, { color: g.DARK });
+    g.window(6, 66, 204, 100);
+    UI.text(g, "今日菜单", 12, 68, { color: g.DARK });
     var kinds = 0;
     for (var kk in PREP_PLAN) if (Object.prototype.hasOwnProperty.call(PREP_PLAN, kk) && PREP_PLAN[kk] > 0) kinds++;
-    g.text("菜" + kinds + "/4", 126, 60, { color: g.DARK });
-    g.text("共" + prepTotal() + "份", 204, 60, { align: "right", color: g.DARK });
-    for (var row = 0; row < 6 && PREP_SCROLL + row < list.length; row++) {
-      var idx = PREP_SCROLL + row, id = list[idx], y = 76 + row * 15;
-      var selected = idx === PREP_SEL;
-      if (selected) g.rect(8, y - 1, 200, 15, g.INK);
-      var col = selected ? g.PAPER : g.INK;
-      ART.dish(g, id, 12, y, game.time);
-      g.text(DATA.DISHES[id].name, 36, y, { color: col });
-      g.text(DATA.DISHES[id].price + "文", 100, y, { color: selected ? g.PAPER : g.DARK });
-      g.text("定 " + (PREP_PLAN[id] || 0), 136, y, { color: col });
-      g.text("可 " + prepRoom(id), 174, y, { color: selected ? g.PAPER : g.DARK });
-    }
-    if (PREP_SCROLL > 0) g.text("▲", 198, 66, { color: g.DARK });
-    if (PREP_SCROLL + 6 < list.length) g.text("▼", 198, 154, { color: g.DARK });
+    UI.text(g, "菜" + kinds + "/4", 126, 68, { color: g.DARK });
+    UI.right(g, "共" + prepTotal() + "份", 204, 68, { color: g.DARK });
+    PREP_SCROLL = UI.list(g, {
+      x: 8, y: 82, w: 200, h: 75, rowH: 15, count: list.length, sel: PREP_SEL, scroll: PREP_SCROLL,
+      onScroll: function (v) { PREP_SCROLL = v; },
+      draw: function (gg, idx, y, selected) {
+        var id = list[idx], col = selected ? gg.PAPER : gg.INK;
+        ART.dish(gg, id, 12, y, game.time);
+        UI.columns(gg, y, [
+          { x: 36, w: 60, text: DATA.DISHES[id].name, color: col },
+          { x: 100, w: 32, text: DATA.DISHES[id].price + "文", color: selected ? gg.PAPER : gg.DARK },
+          { x: 136, w: 30, text: "定 " + (PREP_PLAN[id] || 0), color: col },
+          { x: 174, w: 28, text: "可 " + prepRoom(id), color: selected ? gg.PAPER : gg.DARK }
+        ]);
+      }
+    });
     // detail
     var id2 = list[PREP_SEL];
     if (id2) {
       g.window(6, 170, 204, 46);
       g.text(DATA.DISHES[id2].name, 10, 172);
-      g.text(DATA.DISHES[id2].desc, 10, 186, { width: 196 });
+      UI.text(g, DATA.DISHES[id2].desc, 10, 186, { fit: 196 });
       var need = DATA.DISHES[id2].need, parts = [];
       for (var nk in need) if (Object.prototype.hasOwnProperty.call(need, nk)) parts.push(DATA.ING[nk].name + "×" + need[nk]);
-      g.text("需 " + parts.join("　") + "　已定 " + (PREP_PLAN[id2] || 0) + "　可 " + prepRoom(id2), 10, 200, { color: g.DARK });
+      UI.text(g, parts.join(" ") + "　定" + (PREP_PLAN[id2] || 0) + "　可" + prepRoom(id2), 10, 202, { color: g.DARK, fit: 196 });
     }
     UI.footer(g, "↑↓ 选　←→ 份数　A 备好　B 返回");
     UI.toast(g);

@@ -33,4 +33,31 @@ node tools/bundle-app.mjs registry/apps/shanjiao-diner
 node tools/check-app.mjs registry/apps/shanjiao-diner
 ```
 
+The screen layout lives in `src/30-ui.js` (header / body / action / footer bands,
+text fitting, lists, order tags). The art is in `src/20-art.js`; the three
+background plates are generated into `src/25-plates.js` by:
+
+```sh
+node tools/art-shanjiao.mjs      # needs Playwright; writes drafts/plates/*.png
+```
+
+The plates are 216 x 240, four tones, 2-bit RLE (5.0 / 9.7 / 9.8 KB). Tables,
+people, steam, rain and the lantern glow stay live on top. In `sdk/dev.html`,
+SELECT toggles the layout grid.
+
+## Balance
+
+The whole seven-day loop can be simulated without a browser:
+
+```sh
+node tools/sim-shanjiao.mjs --runs=300       # every policy
+node tools/sim-shanjiao.mjs --policy=tuned --trace
+node tools/sim-shanjiao.mjs --before --runs=300   # the numbers before the 2026-10 patch
+node tools/sim-shanjiao.mjs --boss           # the mountain spirit alone
+```
+
+It reads `src/10-data.js`, so a dish, enemy or rent change shows up in the next
+run. It assumes perfect service, so treat it as an upper bound, not a playtest.
+The design notes and the target numbers are in `docs/design/shanjiao-production.md`.
+
 MIT License, like the rest of Lo-PDA.

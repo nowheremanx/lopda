@@ -38,7 +38,7 @@ var DATA = (function () {
       intro: "野猴从树上跳下来，冲你龇牙。", art: "monkey" },
     bamboo: { name: "竹精", hp: 28, atk: 5, def: 1, money: 8, drops: [["bamboo", 2, 2]],
       intro: "竹影里站起一个细长的东西。", art: "bamboo" },
-    boss:   { name: "山魈", hp: 72, atk: 6, def: 1, money: 45, drops: [["rare", 1, 1]], boss: true,
+    boss:   { name: "山魈", hp: 44, atk: 6, def: 1, money: 45, drops: [["rare", 1, 1]], boss: true,
       intro: "雾散开。山魈坐在石阶上，像一座会呼吸的山。", art: "boss" }
   };
 

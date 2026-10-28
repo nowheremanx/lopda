@@ -13,15 +13,19 @@ function seatPos(i) {
   return { x: p[0] + 16, y: p[1] - 20 };
 }
 function randomDish() {
-  if (!S.menu.length) return null;
+  // A passing customer does not order the feast dish; it is cooked for the
+  // mountain god's table.  Without this, the highest-appeal dish is eaten by
+  // the first walk-in and the seventh night's three guests never get theirs.
+  var pool = S.menu.filter(function (id) { return !DATA.DISHES[id].vipOnly; });
+  if (!pool.length) return null;
   var total = 0, i;
-  for (i = 0; i < S.menu.length; i++) total += DATA.DISHES[S.menu[i]].appeal;
+  for (i = 0; i < pool.length; i++) total += DATA.DISHES[pool[i]].appeal;
   var r = Math.random() * total;
-  for (i = 0; i < S.menu.length; i++) {
-    r -= DATA.DISHES[S.menu[i]].appeal;
-    if (r <= 0) return S.menu[i];
+  for (i = 0; i < pool.length; i++) {
+    r -= DATA.DISHES[pool[i]].appeal;
+    if (r <= 0) return pool[i];
   }
-  return S.menu[S.menu.length - 1];
+  return pool[pool.length - 1];
 }
 function bestDish() {
   var best = null;
@@ -177,7 +181,7 @@ async function serveSeat(i) {
   }
   await game.wait(0.24);
   SERV.waiter.fx = SERV.waiter.x; SERV.waiter.fy = SERV.waiter.y;
-  SERV.waiter.tx = 120; SERV.waiter.ty = 170; SERV.waiter.t = 0;
+  SERV.waiter.tx = 120; SERV.waiter.ty = 144; SERV.waiter.t = 0;
   SERV.waiter.action = "";
   await game.wait(0.24);
   SERV.busy = false;
@@ -237,7 +241,7 @@ game.scene("service", {
       served: 0, lost: 0, earned: 0, tips: 0, repDelta: 0,
       busy: false, menuOpen: false, paused: false, pauseSel: 0,
       done: false, storyQueue: [], fx: [], staffTimer: 5,
-      waiter: { x: 120, y: 170, fx: 120, fy: 170, tx: 120, ty: 170, t: 1, action: "" }
+      waiter: { x: 120, y: 144, fx: 120, fy: 144, tx: 120, ty: 144, t: 1, action: "" }
     };
     game.ambience(S.weather === "rain" ? "rain" : null, 0.3);
     if (typeof playMusic === "function") playMusic("service");
@@ -331,9 +335,6 @@ game.scene("service", {
   draw: function (g) {
     if (!SERV) return;
     ART.room(g, S, "service", game.time, SERV.sel);
-    // selected table marker
-    var sp = tablePos(SERV.sel);
-    g.arrow(sp[0] + 18, sp[1] - 12, "down", g.INK);
     // customers
     for (var i = 0; i < SERV.customers.length; i++) {
       var c = SERV.customers[i];
@@ -358,7 +359,7 @@ game.scene("service", {
     }
     // staff
     if (S.staff === "ahe") {
-      g.sprite(ART.big.ahe, 120, 90);
+      g.sprite(ART.big.ahe, 24, 152);
     }
     // header
     UI.header(g, S, clk(SERV.clock));
@@ -372,7 +373,7 @@ game.scene("service", {
       var fx = SERV.fx[f];
       if (game.time < fx.until) g.text(fx.text, fx.x, fx.y - (fx.until - game.time) * 8, { color: g.INK });
     }
-    UI.toast(g);
+    UI.toast(g, 30);
     if (SERV.menuOpen) drawMenu(g);
     if (SERV.paused) drawPause(g);
   }
@@ -396,17 +397,12 @@ function drawCustomer(g, c) {
 function drawOrder(g, c) {
   var tp = tablePos(c.seat);
   var x = tp[0] + 2, y = tp[1] - 44;
-  g.window(x, y, 58, 18, { thin: true });
-  g.text(DATA.DISHES[c.dish].name, x + 4, y + 2);
-  if (c.who) ART.heart(g, x + 44, y + 5, true);
+  var label = DATA.DISHES[c.dish].name;
   var frac = Math.max(0, c.patience / c.maxPatience);
-  g.rect(x + 2, y + 18, 54, 2, g.MID);
-  g.rect(x + 2, y + 18, Math.round(54 * frac), 2, frac < 0.35 ? g.INK : g.DARK);
-  g.rect(x + 14, y - 2, 2, 3, g.INK);
+  UI.orderTag(g, x, y, label, frac, SERV.sel === c.seat, c.seat + 1);
 }
 function drawQueueOrder(g, c) {
-  g.rect(c.x - 6, c.y - 6, 24, 2, g.MID);
-  g.rect(c.x - 6, c.y - 6, Math.round(24 * Math.max(0, c.patience / c.maxPatience)), 2, g.DARK);
+  // people outside the door are a count in the bar, not a tag on a table
 }
 function drawMenu(g) {
   g.window(20, 52, 176, 128);

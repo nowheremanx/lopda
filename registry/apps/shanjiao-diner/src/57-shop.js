@@ -37,17 +37,21 @@ game.scene("shop", {
     UI.header(g, S, "店铺");
     ART.facade(g, 48, 28, S, game.time);
     g.window(6, 108, 204, 86);
-    for (var i = 0; i < DATA.UPGRADE_ORDER.length; i++) {
-      var id = DATA.UPGRADE_ORDER[i], u = DATA.UPGRADES[id], y = 112 + i * 16;
-      if (i === SHOP_SEL) g.rect(8, y - 2, 200, 16, g.INK);
-      var col = i === SHOP_SEL ? g.PAPER : g.INK;
-      g.rect(11, y, 14, 12, i === SHOP_SEL ? g.PAPER : g.INK);
-      g.text(u.short, 18, y, { align: "center", color: i === SHOP_SEL ? g.INK : g.PAPER });
-      g.text(u.name, 30, y, { color: col });
-      g.text(u.cost + "文", 100, y, { color: i === SHOP_SEL ? g.PAPER : g.DARK });
-      g.text(shopStatus(id), 204, y, { align: "right", color: i === SHOP_SEL ? g.PAPER : (hasUpgrade(id) ? g.DARK : g.INK) });
-    }
-    g.text(DATA.UPGRADES[DATA.UPGRADE_ORDER[SHOP_SEL]].desc, 10, 198, { width: 196, color: g.DARK });
+    UI.list(g, {
+      x: 8, y: 112, w: 200, h: 80, rowH: 16, count: DATA.UPGRADE_ORDER.length, sel: SHOP_SEL, scroll: 0,
+      draw: function (gg, i, y, selected) {
+        var id = DATA.UPGRADE_ORDER[i], u = DATA.UPGRADES[id];
+        var col = selected ? gg.PAPER : gg.INK;
+        gg.rect(11, y, 14, 12, selected ? gg.PAPER : gg.INK);
+        gg.text(u.short, 18, y, { align: "center", color: selected ? gg.INK : gg.PAPER });
+        UI.columns(gg, y, [
+          { x: 30, w: 64, text: u.name, color: col },
+          { x: 96, w: 34, text: u.cost + "文", color: selected ? gg.PAPER : gg.DARK },
+          { x: 134, w: 70, text: shopStatus(id), align: "right", color: selected ? gg.PAPER : (hasUpgrade(id) ? gg.DARK : gg.INK) }
+        ]);
+      }
+    });
+    UI.text(g, DATA.UPGRADES[DATA.UPGRADE_ORDER[SHOP_SEL]].desc, 10, 198, { fit: 196, color: g.DARK });
     if (game.time < SHOP_MSG_UNTIL) g.text(SHOP_MSG, 10, 210, { color: g.DARK });
     UI.footer(g, "↑↓ 选　A 买　B 返回");
     UI.toast(g);
