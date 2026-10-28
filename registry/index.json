@@ -1,6 +1,6 @@
 {
   "spec": "lopda/1",
-  "generated": "2026-10-27",
+  "generated": "2026-10-28",
   "apps": [
     {
       "spec": "lopda/1",
@@ -353,6 +353,50 @@
       "path": "apps/kana-cards/index.html",
       "sha256": "8a7ae828c7a0b5e1885c8732530dd237abd1302e1dc290e9603d5b5d5a3421ca",
       "bytes": 21949
+    },
+    {
+      "spec": "lopda/1",
+      "id": "klotski",
+      "name": "华容道",
+      "glyph": "华",
+      "category": "game",
+      "buttons": true,
+      "icon": [
+        "................",
+        ".00000000000000.",
+        ".01111111111110.",
+        ".01111111111110.",
+        ".01113333111110.",
+        ".01113333111110.",
+        ".01111111111110.",
+        ".01122222222110.",
+        ".01122112222110.",
+        ".01122112222110.",
+        ".01122222222110.",
+        ".01111111111110.",
+        ".01111111111110.",
+        ".00000000000000.",
+        "................",
+        "................"
+      ],
+      "version": "1.0.0",
+      "released": "2026-10-27",
+      "description": "曹操从华容道脱身：全关开放，记录步数，附八课大师教程与逐步提示。",
+      "i18n": {
+        "zh": {
+          "name": "华容道",
+          "description": "曹操从华容道脱身：全关开放，记录步数，附八课大师教程与逐步提示。"
+        },
+        "en": {
+          "name": "Klotski",
+          "description": "Slide Cao Cao out of Huarong Pass. All levels open, step records, master class."
+        }
+      },
+      "author": "Haowei Wu",
+      "license": "MIT",
+      "path": "apps/klotski/index.html",
+      "sha256": "11622bdca28300393ea99a7e27cca1b2dfe0c7dc649a317a18bef4e97b32169d",
+      "bytes": 141603
     },
     {
       "spec": "lopda/1",
