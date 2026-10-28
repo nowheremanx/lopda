@@ -254,6 +254,14 @@ textarea::placeholder{color:var(--ink-2)}
 .set-sense-list li{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:15px}
 .set-sense-list li.none{color:var(--ink-2);font-size:14px}
 .set-sense-list .btn{padding:6px 14px;min-height:44px}
+.set-saves{display:flex;flex-direction:column;gap:10px}
+.set-saves-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.set-saves-list li{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:44px;padding-bottom:8px;border-bottom:1px dashed var(--ink-2)}
+.set-saves-list li.none{display:block;color:var(--ink-2);font-size:14px;border-bottom:0}
+.set-saves-list .t{min-width:0;font-size:15px;overflow-wrap:anywhere}
+.set-saves-list .t small{display:block;margin-top:2px;font-size:13px;color:var(--ink-2)}
+.set-saves-list .tag{margin-left:6px;font-size:12px;border:1px solid var(--ink-2);padding:0 4px;white-space:nowrap}
+.set-saves-list .btn{flex:none;padding:6px 14px;min-height:44px}
 .set-sense .hint{margin:0}
 .set-ai{display:flex;flex-direction:column;gap:8px;border-bottom:1px dashed var(--ink-2);padding-bottom:12px}
 .set-ai .set-row{border-bottom:0;padding-bottom:0}

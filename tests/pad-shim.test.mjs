@@ -68,6 +68,35 @@ test("load resolves from the matching reply, only from the parent", async () => 
   assert.deepEqual(await Promise.all([p1, p2]), [1, 2]);
 });
 
+test("a save the runtime cannot read rejects PAD.load with its code", async () => {
+  const a = app();
+  const p = a.PAD.load("x");
+  const req = a.posted()[0];
+  assert.equal(req.op, "load");
+  a.fromRuntime({ pad: 1, op: "loaded", i: req.i, error: "corrupt" });
+  await assert.rejects(p, (e) => e.code === "corrupt" && /PAD\.load/.test(e.message));
+});
+
+test("saveInfo asks for the save's metadata; setSchema records an integer only", async () => {
+  const a = app();
+  const p = a.PAD.saveInfo();
+  const req = a.posted()[0];
+  assert.deepEqual(req, { op: "info", i: req.i, pad: 1 });
+  a.fromRuntime({ pad: 1, op: "infoed", i: req.i, v: { schema: 2, version: "1.2.0", updated: 9, bytes: 12 } });
+  assert.deepEqual(await p, { schema: 2, version: "1.2.0", updated: 9, bytes: 12 });
+
+  const bad = a.PAD.saveInfo();
+  const badReq = a.posted()[1];
+  a.fromRuntime({ pad: 1, op: "infoed", i: badReq.i, error: "newer" });
+  await assert.rejects(bad, (e) => e.code === "newer");
+
+  a.PAD.setSchema(3.9);
+  assert.deepEqual(a.posted()[2], { op: "schema", n: 3, pad: 1 });
+  a.PAD.setSchema(-1);
+  a.PAD.setSchema("2");
+  assert.equal(a.posted().length, 3, "invalid schemas post nothing");
+});
+
 test("chin buttons: press, release, isDown, off", () => {
   const a = app(), log = [];
   const onPress = (b) => log.push("+" + b);

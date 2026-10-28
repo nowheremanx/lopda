@@ -1540,3 +1540,52 @@ EXIF，相册就能把照片放到地图上。
   2 x 2 的照片、右上角一块带榫头抬起；声音样本是四根均衡器条；矢量梦是带三角网格的等轴测立方体；神位罗盘
   是圆形表盘加八向罗盘玫瑰。图标只是 manifest 的元数据，index.html 的 sha256 没变，装过的 app 下次收到目录时
   自动换图标，不用更新版本。
+
+## 43. 卸载 app 保留存档（0.46.0）
+
+2026-10-27，runtime 0.46.0。owner 的问题：卸载 app 连存档一起删，是不是设计缺陷。结论：**程序可以删，
+存档留下；清存档是另一个动作。** 卡带机早就这么做（第 10 节：扔掉卡带，`cartsave/<id>` 留着，重新插入
+接着玩），商店 app 反而把 `PAD.save` 一起删掉，是三套规则里最不保护用户数据的一套。
+
+- **卸载**：运行页的「卸载」只删 app 文档、代码和传感器授权；`data/users/local/appdata/items/<id>` 不动。
+  确认框写「卸载「X」？存档会留着。」，卸载后 toast 写「已卸载 X，存档留着（设置 → 程序存档）」。
+  同一个 id 从商店装回来，`PAD.load` 直接读到旧数据；不需要恢复流程，也不需要新的安装逻辑。
+  本地脚本仍是例外：脚本的存档属于脚本，删除脚本时一起删；脚本程序里有自己的「清除存档」和确认框。
+- **清存档**：设置里新的一页「程序存档」（`v-set-saves`），列出所有 app 的存档，已安装和已卸载都在，
+  每行是名字、大小、时间、`已安装 / 已卸载 / 读不出来 / 来自更新的版本`，以及两次确认的「清除」；
+  底部「全部清除」。脚本的存档不在这一页，仍在「脚本 → 存档」里。清除正在运行的 app 的存档会被拒绝
+  （先 HOME 退出；`S.running` 已经由 `show()` 的 leave 清掉，正常路径不会撞上）。
+- **不做自动淘汰**：不做「保留 30 天」「超过 20 个 / 2 MB 就删最旧的」。存档是用户数据，满了让用户自己清；
+  每个 app 的上限仍是 256 KB，一个孤儿存档不会自己长大。整机备份本来就会带上它们（第 24 节）。
+- **保存文档**：新写的文档是 `{v:1, kv, schema?, updated, bytes, app:{id, name, i18n?, version?, author?}}`。
+  `v` 是平台文档格式；`schema` 是 app 自己的数据版本；`app` 是卸载后还能在列表里写出名字的快照。
+  旧文档 `{kv}` 照旧能读，缺 `kv` 当空存档，不报损坏。`v > 1` 是更新的平台格式，报 `newer`，不碰。
+  纯函数在 `runtime/appsaves.js`（`read / record / info / size`），`tests/appsaves.test.mjs` 直接测。
+- **系统 hook**：`PAD.saveInfo()` 返回磁盘上的 `{schema, version, updated, bytes}` 或 null；
+  `PAD.setSchema(n)` 记下这一版写的 schema，跟存档一起落盘（有数据时立刻写；还没有数据的空档等第一次保存，不凭空建一个空存档）。本地脚本也支持：脚本数据文档加
+  `schema` 字段，`LP.scripts.info / setSchema` 走同一套。
+- **读档失败要说话**：`getKv` 不再把读不出来的文档悄悄变成 `{}`。`PAD.load` 会 reject，`err.code` 是
+  `corrupt`（字节不是存档）、`readfail`（存储读不了）或 `newer`（平台格式更新）。运行页按 code toast
+  「存档已损毁 / 来自更新的版本 / 读不出来」，每次运行只说一次；app 没 catch 时，`unhandledrejection`
+  照旧把它显示在错误框里。**损坏的字节不删、也不允许覆盖**：这个 app 的 `PAD.save` 在清除前一律失败，
+  设置里那一行标「读不出来」，由用户决定何时清。app 作者的责任是 catch，并给玩家一个说得清楚的画面；
+  平台保证不静默重置、不偷偷用新档盖旧档。
+- **对 app 的要求（写进 SPEC 第 8 节）**：存档跨版本、跨卸载重装都在，所以 app 的格式必须向后兼容。
+  默认做加法：新字段带默认值，旧字段保留。真要 breaking change：把 schema 写进值里（通常顶层 `v`），
+  启动时读到旧值 → 在内存里 transform → 校验 → 保存新值 → `PAD.setSchema(new)`；transform 成功前不能
+  覆盖唯一一份旧档。读到比 app 新的 schema 不要覆盖，让玩家更新 app。读档失败要 catch 并告诉玩家，
+  不能静默开新档。每个 migration 要有旧档 fixture 的测试。`sdk/PROMPT.md`、`sdk/LO-GAME.md` 同步写明。
+- **id 不能复用**：存档按 app id 存，id 是扁平命名空间（`registry/apps/<id>`）。把旧 id 给另一个 app，
+  新 app 会读到旧 app 的存档。这不是本节的实现能防的，写进 SPEC 第 8 节作为商店/投稿规则：一个 id
+  永远属于一个 app。存档文档里的 `app.name / author / version` 至少让用户在列表里看出这是谁的数据。
+- **不做的**：不做单 app 存档的导出/导入（先用整机备份）；不做“恢复刚卸载的 app”入口（重装就是入口）；
+  不做存档的自动清理；不改脚本删除脚本时一并删存档的规则；不拦截手机系统层面删除 PWA（iOS 删主屏
+  web app 会带走它独立的站点数据，app 没有钩子；只能靠备份和提醒）。
+- **代码**：`runtime/appsaves.js`；`runtime/apps/store.js` 的 `getKv / saveKvSoon / flushKv / warnSave /
+  saveInfo / appSaveRows / clearAppSave / clearAllAppSaves / deleteApp`、消息 `load / save / schema / info`、
+  `runApp` 的卸载确认；`runtime/apps/scripts.js` 的 `schema / info / setSchema`；`sdk/pad-shim.js` 的
+  `saveInfo / setSchema` 和 `loaded / infoed` 的 error；`runtime/apps/settings.js` 的 `renderSaves`；
+  `runtime/index.html` 的 `#v-set-saves`；`runtime/strings.js`；`runtime/lopda.css`。
+- **测试**：`tests/appsaves.test.mjs`（旧档、损坏、newer、schema、app 快照）；`tests/pad-shim.test.mjs`
+  （load reject、saveInfo、setSchema）；`tests/e2e.test.mjs` 的「removing an app keeps its save...」
+  （卸载后文档还在、重装读回、设置里清除、损坏提示）。

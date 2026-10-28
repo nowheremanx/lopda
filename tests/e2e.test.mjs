@@ -261,6 +261,117 @@ test("preinstalled apps: installed on first start after the built-ins, and a rem
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
+test("removing an app keeps its save; Settings clears it; a damaged save is reported and kept", { skip, timeout: 90000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN" });
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await p.waitForFunction(() => window.LP && LP.S.db);
+  const until = async (fn, what) => { for (let i = 0; i < 100; i++) { if (await fn()) return; await p.waitForTimeout(100); } assert.fail("timed out waiting for " + what); };
+  const getDoc = (path) => p.evaluate((path) => new Promise((resolve, reject) => {
+    const req = indexedDB.open("lopda");
+    req.onerror = () => reject(req.error);
+    req.onsuccess = () => {
+      const get = req.result.transaction("docs").objectStore("docs").get(path);
+      get.onsuccess = () => { req.result.close(); resolve(get.result ? get.result.data : null); };
+      get.onerror = () => reject(get.error);
+    };
+  }), path);
+  const putDoc = (path, data) => p.evaluate(({ path, data }) => new Promise((resolve, reject) => {
+    const req = indexedDB.open("lopda");
+    req.onerror = () => reject(req.error);
+    req.onsuccess = () => {
+      const tx = req.result.transaction("docs", "readwrite");
+      tx.objectStore("docs").put({ path, parent: path.slice(0, path.lastIndexOf("/")), data });
+      tx.oncomplete = () => { req.result.close(); resolve(); };
+      tx.onerror = () => reject(tx.error);
+    };
+  }), { path, data });
+  const frame = async (flag) => {
+    for (let i = 0; i < 100; i++) {
+      const f = p.frames().find((x) => x !== p.mainFrame());
+      if (f && await f.evaluate((flag) => !!window[flag], flag).catch(() => false)) return f;
+      await p.waitForTimeout(100);
+    }
+    assert.fail("timed out waiting for the app frame");
+  };
+  const html = "<!doctype html><html><body><script>window.ready=true;<" + "/script></body></html>";
+  const SAVE = "data/users/local/appdata/items/probe";
+
+  /* a save, then remove the app: the document stays */
+  await runInRuntime(p, "probe", html);
+  let f = await frame("ready");
+  assert.equal(await f.evaluate(() => PAD.saveInfo()), null, "nothing saved yet");
+  await f.evaluate(() => PAD.save("k", { hello: "world" }));
+  await p.waitForTimeout(800);
+  let saved = await getDoc(SAVE);
+  assert.deepEqual(saved.kv, { k: { hello: "world" } });
+  assert.equal(saved.v, 1);
+  assert.equal(saved.app.id, "probe");
+  await p.click("#run-del");
+  assert.match(await p.textContent("#run-del-wrap .btn:not(.ghost)"), /存档会留着/);
+  await p.click("#run-del-wrap .btn:not(.ghost)");
+  await p.waitForSelector("#v-home:not([hidden])");
+  saved = await getDoc(SAVE);
+  assert.ok(saved, "the save survived removing the app");
+
+  /* the list names the removed app, and a reinstall reads the old save */
+  await p.locator("#home .app", { hasText: "设置" }).click();
+  await p.click("#set-saves-open");
+  await p.waitForSelector("#v-set-saves:not([hidden])");
+  await p.waitForSelector("#set-saves-list li");
+  assert.match(await p.textContent("#set-saves-list"), /probe/);
+  assert.match(await p.textContent("#set-saves-list"), /已卸载/);
+  assert.ok(await p.evaluate(() => {
+    const v = document.getElementById("v-set-saves");
+    v.style.width = "331px"; v.style.height = "359px"; v.style.flex = "none";
+    const ok = v.scrollWidth <= v.clientWidth + 1;
+    v.style.width = ""; v.style.height = ""; v.style.flex = "";
+    return ok;
+  }), "the save list has no sideways scroll at 331");
+  await p.click("#set-saves-back");
+  await runInRuntime(p, "probe", html);
+  f = await frame("ready");
+  assert.deepEqual(await f.evaluate(() => PAD.load("k")), { hello: "world" });
+
+  /* schema and saveInfo travel with the document */
+  await f.evaluate(() => { PAD.setSchema(2); PAD.save("k", { hello: "again" }); });
+  await p.waitForTimeout(800);
+  saved = await getDoc(SAVE);
+  assert.equal(saved.schema, 2);
+  assert.deepEqual(saved.kv, { k: { hello: "again" } });
+  assert.equal((await f.evaluate(() => PAD.saveInfo())).schema, 2);
+
+  /* clear it from Settings, two taps */
+  await p.click("#home-key");
+  await p.locator("#home .app", { hasText: "设置" }).click();
+  await p.click("#set-saves-open");
+  await p.waitForSelector("#set-saves-list li");
+  await p.click("#set-saves-del-btn-0");
+  await p.click("#set-saves-del-0 .btn:not(.ghost)");
+  await until(async () => (await getDoc(SAVE)) === null, "the save to be cleared");
+  assert.match(await p.textContent("#toast"), /存档已清除/);
+
+  /* a damaged save: the app gets a rejection, the player a notice, and the bytes stay */
+  await putDoc(SAVE, { v: 1, kv: "not a save" });
+  await p.click("#set-saves-back");
+  await runInRuntime(p, "probe", "<!doctype html><html><body><script>window.__code=null;PAD.load('k').then(function(){window.__code='loaded';},function(e){window.__code=e.code;});window.ready=true;<" + "/script></body></html>");
+  f = await frame("ready");
+  await until(async () => (await f.evaluate(() => window.__code)) === "corrupt", "the corrupt rejection");
+  assert.match(await p.textContent("#toast"), /存档已损毁/);
+  await f.evaluate(() => PAD.save("k", { hello: "new" }));
+  await p.waitForTimeout(800);
+  assert.deepEqual((await getDoc(SAVE)).kv, "not a save", "a write does not replace the damaged bytes");
+  await p.click("#home-key");
+  await p.locator("#home .app", { hasText: "设置" }).click();
+  await p.click("#set-saves-open");
+  await p.waitForSelector("#set-saves-list li");
+  assert.match(await p.textContent("#set-saves-list"), /读不出来/);
+  await p.click("#set-saves-all");
+  await p.click("#set-saves-all-wrap .btn:not(.ghost)");
+  await until(async () => (await getDoc(SAVE)) === null, "the damaged save to be cleared");
+  assert.match(await p.textContent("#toast"), /全部程序存档已清除/);
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
 test("store: category filters split the catalogue, and one button updates every app", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await page(t, { locale: "zh-CN" });
   await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
@@ -2556,7 +2667,7 @@ test("sound: one volume with five steps; an old 'sound off' setting becomes volu
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
-test("settings: ten 44 px rows fit 331x359 down to AI 线路; the share QR and about page open and go back", { skip, timeout: 60000 }, async (t) => {
+test("settings: eleven 44 px rows fit 331x359 down to AI 线路; the share QR and about page open and go back", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await page(t, { locale: "zh-CN", viewport: { width: 331, height: 359 } });
   await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
   await p.waitForFunction(() => window.LP && window.LP.S.db);
@@ -2571,7 +2682,7 @@ test("settings: ten 44 px rows fit 331x359 down to AI 线路; the share QR and a
     return { rows: rows.map((r) => { const b = r.getBoundingClientRect(); return { top: b.top - box.top, bottom: b.bottom - box.top, h: b.height }; }),
       scroll: v.scrollWidth, client: v.clientWidth };
   });
-  assert.equal(menu.rows.length, 10);
+  assert.equal(menu.rows.length, 11);
   assert.ok(menu.rows.every((r) => r.h >= 44), JSON.stringify(menu.rows));
   assert.ok(menu.scroll <= menu.client + 1, "no sideways scroll at 331");
   /* 系统声音 is the tenth (decisions.md section 41): the first screen still fits down to AI 线路, and 备份与恢复
