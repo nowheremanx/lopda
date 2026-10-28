@@ -30,6 +30,8 @@ var TX = {
   storyStart: { zh: "开始故事", en: "Begin story" },
   storyContinue: { zh: "继续故事", en: "Continue" },
   songs: { zh: "选曲", en: "Songs" },
+  encore: { zh: "加演", en: "Encore" },
+  encoreTitle: { zh: "加演曲目", en: "Encore" },
   howto: { zh: "怎么玩", en: "How to play" },
   titleKeys: { zh: "↑↓选 A好", en: "UP/DOWN A" },
   songKeys: { zh: "↑↓选　A演奏　B返回", en: "UP/DOWN  A play  B back" },
@@ -185,6 +187,11 @@ game.scene("boot", {
 
 /* ---------- title ---------- */
 var titleSel = 0, titleLock = 0;
+function titleItems() {
+  var items = [profile.story > 0 ? T(TX.storyContinue) : T(TX.storyStart), T(TX.songs), T(TX.howto)];
+  if (profile.finaled) items.push(T(TX.encore));
+  return items;
+}
 game.scene("title", {
   enter: function () {
     titleSel = 0;
@@ -193,19 +200,22 @@ game.scene("title", {
     game.ambience(null);
   },
   update: function () {
+    var items = titleItems(), n = items.length;
     var d = game.dir().y;
-    if (d) { titleSel = (titleSel + d + 3) % 3; game.sfx("move"); }
+    if (d) { titleSel = (titleSel + d + n) % n; game.sfx("move"); }
     var canGo = game.time >= titleLock;
     var go = canGo && (game.pressed("a") || game.pressed("start"));
-    if (canGo && game.pointer.pressed && game.pointer.y >= 86 && game.pointer.y < 144) {
-      var i = Math.floor((game.pointer.y - 86) / 16);
-      if (i >= 0) { titleSel = Math.min(2, i); go = true; }
+    var rowH = n === 4 ? 14 : 16, startY = n === 4 ? 89 : 92, boxY = n === 4 ? 84 : 86, boxH = n === 4 ? 59 : 57;
+    if (canGo && game.pointer.pressed && game.pointer.y >= boxY && game.pointer.y < boxY + boxH) {
+      var i = Math.floor((game.pointer.y - startY) / rowH);
+      if (i >= 0) { titleSel = Math.min(n - 1, i); go = true; }
     }
     if (go) {
       game.sfx("tap");
       if (titleSel === 0) startStory();
       else if (titleSel === 1) game.go("select");
-      else game.go("howto");
+      else if (titleSel === 2) game.go("howto");
+      else game.go("select", { encore: true });
     }
   },
   draw: function (g) {
@@ -232,14 +242,15 @@ game.scene("title", {
     ART.musician(g, 66, 60, "qin", beat + 0.1, "");
     ART.musician(g, 84, 60, "drum", beat + 0.2, "");
     ART.musician(g, 104, 60, "flute", beat + 0.3, "");
-    /* menu: 16 px rows with room above and below; the stage stops clear of it */
-    g.rect(6, 86, 148, 57, PAPER);
-    g.frame(6, 86, 148, 57, INK);
-    var items = [profile.story > 0 ? T(TX.storyContinue) : T(TX.storyStart), T(TX.songs), T(TX.howto)];
-    for (var i = 0; i < 3; i++) {
-      var y = 92 + i * 16;
+    /* menu: 16 px rows, or 14 px when Encore adds a fourth row */
+    var items = titleItems(), n = items.length;
+    var rowH = n === 4 ? 14 : 16, startY = n === 4 ? 89 : 92, boxY = n === 4 ? 84 : 86, boxH = n === 4 ? 59 : 57;
+    g.rect(6, boxY, 148, boxH, PAPER);
+    g.frame(6, boxY, 148, boxH, INK);
+    for (var i = 0; i < n; i++) {
+      var y = startY + i * rowH;
       if (i === titleSel) {
-        g.rect(9, y - 1, 142, 15, INK);
+        g.rect(9, y - 1, 142, rowH - 1, INK);
         g.text(items[i], 80, y, { align: "center", color: PAPER });
       } else g.text(items[i], 80, y, { align: "center" });
     }
@@ -288,12 +299,14 @@ async function runStory(a) {
   var i = a.i;
   if (a.kind === "pre") {
     if (isActStart(i)) await actCard(actOf(i));
+    if (STORY.CHAPTERS[i].interlude) await tell(STORY.CHAPTERS[i].interlude);
     await tell(chapterPre(i));
     game.go("play", { i: i, story: true }, { fade: false });
     return;
   }
   await tell(STORY.CHAPTERS[i].after || []);
   var ch = STORY.CHAPTERS[i];
+  if (ch.postlude) await tell(ch.postlude);
   if (ch.choice) {
     await tell([{ who: "narr", text: { zh: "（说实话，还是继续装？最后一曲演成什么样，会把你带向不同的结局。）", en: "(Truth or lie? How the last tune goes will decide which ending you reach.)" } }]);
     var pick = await game.choose([T(TX.choice0), T(TX.choice1)], { title: T(TX.choiceTitle), cancel: false });
@@ -367,10 +380,11 @@ function drawActCard(g, n) {
 }
 
 /* ---------- song select: a scrolling list of ten ---------- */
-var selectSel = 0, selectTop = 0, selectLock = 0;
+var selectSel = 0, selectTop = 0, selectLock = 0, selectEncore = false;
 var ROW_H = 23, VIEW_ROWS = 4, LIST_Y = 20;
 game.scene("select", {
   enter: function (a) {
+    selectEncore = !!(a && a.encore);
     selectSel = Math.max(0, Math.min(SONGS.length - 1, a && a.i != null ? a.i : profile.story));
     if (selectSel >= SONGS.length) selectSel = 0;
     selectTop = Math.max(0, Math.min(SONGS.length - VIEW_ROWS, selectSel - 1));
@@ -398,13 +412,13 @@ game.scene("select", {
     if (game.pressed("b")) { game.sfx("miss"); game.go("title"); return; }
     if (go) {
       game.sfx("tap");
-      game.go("play", { i: selectSel, story: false }, { fade: true, to: PAPER });
+      game.go("play", { i: selectSel, story: false, encore: selectEncore }, { fade: true, to: PAPER });
     }
   },
   draw: function (g) {
     g.clear(PAPER);
     g.rect(0, 0, 160, 18, INK);
-    g.text(tt("曲目", "Songs"), 6, 2, { color: PAPER });
+    g.text(T(selectEncore ? TX.encoreTitle : TX.songs), 6, 2, { color: PAPER });
     g.text((selectSel + 1) + "/" + SONGS.length, 154, 2, { align: "right", color: PAPER });
     for (var row = 0; row < VIEW_ROWS; row++) {
       var i = selectTop + row;
@@ -416,11 +430,11 @@ game.scene("select", {
       var act = "I".repeat(Math.max(1, s.act));
       g.text(act, 6, y + 1, { color: on ? PAPER : DARK });
       g.text((i + 1) + "." + T(s.name), 20, y + 1, { color: on ? PAPER : INK });
-      var b = profile.best[s.id];
+      var b = profile.best[selectEncore ? s.id + ":encore" : s.id];
       g.text(b ? b.rank : T(TX.fresh), 154, y + 1, { align: "right", color: on ? PAPER : DARK });
       for (var k = 0; k < 5; k++) g.rect(20 + k * 6, y + 15, 4, 2, k < s.difficulty ? (on ? PAPER : INK) : MID);
       if (b) g.text(String(b.score), 154, y + 12, { align: "right", color: on ? PAPER : DARK });
-      if (i === profile.story) {
+      if (!selectEncore && i === profile.story) {
         var mk = on ? PAPER : INK;
         g.rect(4, y + 15, 5, 1, mk);
         g.rect(5, y + 14, 3, 1, mk);
@@ -512,21 +526,22 @@ game.scene("howto", {
 /* ---------- performance ---------- */
 var P = null;
 
-function buildPlay(i, storyMode) {
+function buildPlay(i, storyMode, encore) {
   var s = SONGS[i];
+  var chart = encore && s.encoreChart && s.encoreChart.length ? s.encoreChart : s.chart;
   var lo = 127, hi = 0;
-  s.chart.forEach(function (n) {
+  chart.forEach(function (n) {
     var m = midiOfNote(n.note);
     if (m < lo) lo = m; if (m > hi) hi = m;
   });
   if (hi - lo < 8) { var c = (hi + lo) / 2; lo = c - 4; hi = c + 4; }
   lo -= 1; hi += 1;
   var firstB = null;
-  s.chart.forEach(function (n) { if (n.lane === "b" && firstB === null) firstB = n.t; });
+  chart.forEach(function (n) { if (n.lane === "b" && firstB === null) firstB = n.t; });
   return {
-    i: i, song: s, story: !!storyMode, start: game.time, t: 0, lo: lo, hi: hi,
+    i: i, song: s, chart: chart, encore: !!encore, story: !!storyMode, start: game.time, t: 0, lo: lo, hi: hi,
     combo: 0, maxCombo: 0, score: 0, perfect: 0, good: 0, miss: 0, noise: 0, caught: 0,
-    suspicion: 0, total: s.chart.length, judged: {}, hold: null,
+    suspicion: 0, total: chart.length, judged: {}, hold: null,
     puffs: [], bits: [], judge: null, judgeUntil: 0,
     warned: {}, inEye: {}, eye: false, banner: "", bannerUntil: 0,
     ended: false, failed: false, endAt: 0,
@@ -536,6 +551,8 @@ function buildPlay(i, storyMode) {
     touchA: false, caughtCool: 0, pause: null
   };
 }
+function goodWin(P) { return P.encore ? 0.14 : GOOD; }
+function perfectWin(P) { return P.encore ? 0.07 : PERFECT; }
 function midiOfNote(n) {
   var m = /^([a-g])([+-]?)(\d)$/.exec(n);
   return (parseInt(m[3], 10) + 1) * 12 + { c: 0, d: 2, e: 4, f: 5, g: 7, a: 9, b: 11 }[m[1]] + (m[2] === "+" ? 1 : m[2] === "-" ? -1 : 0);
@@ -599,7 +616,7 @@ function missNote(P, note, why) {
   P.judged[note.t] = "miss";
   P.miss++;
   P.combo = 0;
-  addSuspicion(P, why === "break" ? 10 : 9);
+  addSuspicion(P, why === "break" ? (P.encore ? 12 : 10) : (P.encore ? 11 : 9));
   setJudge(P, why === "break" ? T(TX.broken) : T(TX.miss), INK, 0.6);
   hitSound(true);
   game.shake(1, 0.1);
@@ -609,7 +626,7 @@ function missNote(P, note, why) {
 function wrongPress(P) {
   P.noise++;
   P.combo = 0;
-  addSuspicion(P, 7);
+  addSuspicion(P, P.encore ? 9 : 7);
   setJudge(P, T(TX.noise), INK, 0.5);
   hitSound(true);
   game.shake(1, 0.08);
@@ -620,7 +637,7 @@ function caught(P) {
   P.caught++;
   P.combo = 0;
   P.eyeCaught = true;
-  addSuspicion(P, 16);
+  addSuspicion(P, P.encore ? 20 : 16);
   setJudge(P, T(TX.caught), INK, 0.8);
   game.sfx("err"); game.flash(0.09); game.shake(3, 0.25);
   P.sweat = 1.5;
@@ -657,13 +674,13 @@ function resultStats(P) {
   };
 }
 function nearestNote(P, t, lane) {
-  var best = null, bd = 1e9;
-  for (var i = 0; i < P.song.chart.length; i++) {
-    var n = P.song.chart[i];
+  var best = null, bd = 1e9, good = goodWin(P), early = P.encore ? 0.28 : EARLY;
+  for (var i = 0; i < P.chart.length; i++) {
+    var n = P.chart[i];
     if (P.judged[n.t] || n.lane !== lane) continue;
     var d = n.t - t;
-    if (d < -GOOD) continue;
-    if (d > EARLY) break;
+    if (d < -good) continue;
+    if (d > early) break;
     var ad = Math.abs(d);
     if (ad < bd) { bd = ad; best = n; }
   }
@@ -672,12 +689,12 @@ function nearestNote(P, t, lane) {
 function pressLane(P, t, lane) {
   var note = nearestNote(P, t, lane);
   if (note) {
-    if (t < note.t - GOOD) {
+    if (t < note.t - goodWin(P)) {
       setJudge(P, T(TX.early), DARK, 0.35);
       game.sfx("tick");
       return;
     }
-    var perfect = Math.abs(t - note.t) <= PERFECT;
+    var perfect = Math.abs(t - note.t) <= perfectWin(P);
     if (note.hold) {
       P.hold = { note: note, perfect: perfect, start: t };
       P.judged[note.t] = "hold";
@@ -690,7 +707,7 @@ function pressLane(P, t, lane) {
     }
     return;
   }
-  if (t > P.song.chart[0].t - 0.35 && t < P.song.chart[P.song.chart.length - 1].end + GOOD) wrongPress(P);
+  if (t > P.chart[0].t - 0.35 && t < P.chart[P.chart.length - 1].end + goodWin(P)) wrongPress(P);
 }
 
 var PAUSE_LINES = {
@@ -713,17 +730,18 @@ function pauseLines(kind) {
 }
 function nextResumeBeat(P) {
   var beatSec = 60 / P.song.bpm;
+  var meter = P.song.meter || 4;
   var cur = P.t / beatSec;
-  var next = Math.ceil(cur / 4) * 4;
+  var next = Math.ceil(cur / meter) * meter;
   for (var guard = 0; guard < 8; guard++) {
     var nextSec = next * beatSec;
     var inside = P.song.watch.some(function (w) { return nextSec >= w[0] && nextSec < w[1]; });
     if (!inside) break;
-    next += 4;
+    next += meter;
   }
-  var max = P.song.totalBeats - 4;
+  var max = P.song.totalBeats - meter;
   if (next > max) next = max;
-  if (next < 4) next = 4;
+  if (next < meter) next = meter;
   return next;
 }
 function openPause(P) {
@@ -749,12 +767,12 @@ function finishCountdown(P) {
   if (!q) return;
   if (q.action === "retry") {
     P.pause = null;
-    game.go("play", { i: P.i, story: P.story }, { fade: false });
+    game.go("play", { i: P.i, story: P.story, encore: P.encore }, { fade: false });
     return;
   }
   var beatSec = 60 / P.song.bpm, resumeT = q.resumeBeat * beatSec;
-  for (var i = 0; i < P.song.chart.length; i++) {
-    var n = P.song.chart[i];
+  for (var i = 0; i < P.chart.length; i++) {
+    var n = P.chart[i];
     if (n.t < resumeT - 0.001 && !P.judged[n.t]) { P.judged[n.t] = "skip"; P.total--; }
   }
   if (P.hold) {
@@ -828,7 +846,7 @@ function drawPause(g, P) {
 
 game.scene("play", {
   enter: function (a) {
-    P = buildPlay(a.i, a.story);
+    P = buildPlay(a.i, a.story, a.encore);
     P.caughtCool = 0;
     game.ambience(P.song.venue === "throne" ? "wind" : P.song.venue === "night" || P.song.venue === "moon" ? "wind" : null, 0.14);
     if (a.retry) {
@@ -917,9 +935,9 @@ game.scene("play", {
       if (P.hold) {
         var hn = P.hold.note;
         if (up) {
-          if (t >= hn.end - GOOD) {
+          if (t >= hn.end - goodWin(P)) {
             P.judged[hn.t] = "hit";
-            scoreHit(P, hn, P.hold.perfect && Math.abs(t - hn.end) <= 0.12);
+            scoreHit(P, hn, P.hold.perfect && Math.abs(t - hn.end) <= (P.encore ? 0.08 : 0.12));
             P.hold = null;
           } else {
             P.judged[hn.t] = "miss";
@@ -941,29 +959,32 @@ game.scene("play", {
       }
 
       /* unplayed taps that have gone past the window */
-      for (i = 0; i < P.song.chart.length; i++) {
-        var n = P.song.chart[i];
+      for (i = 0; i < P.chart.length; i++) {
+        var n = P.chart[i];
         if (P.judged[n.t]) continue;
-        if (n.t + GOOD < t) {
+        if (n.t + goodWin(P) < t) {
           missNote(P, n, "miss");
           if (P.ended) return;
         }
       }
 
-      if (!eye) P.suspicion = Math.max(0, P.suspicion - dt * 0.55);
+      if (!eye) P.suspicion = Math.max(0, P.suspicion - dt * (P.encore ? 0.28 : 0.55));
       if (t > P.song.seconds + 0.25) finish(P);
     } else if (game.time - P.endAt > (P.failed ? 1.05 : 1.5)) {
       var stats = resultStats(P);
       if (!P.failed) {
-        var b = profile.best[P.song.id];
+        var bestKey = P.encore ? P.song.id + ":encore" : P.song.id;
+        var b = profile.best[bestKey];
         stats.newBest = !b || stats.score > b.score;
-        if (stats.newBest) profile.best[P.song.id] = { score: stats.score, rank: stats.rank, acc: stats.acc, combo: stats.maxCombo };
-        profile.cleared[P.song.id] = true;
-        if (P.story) profile.story = Math.max(profile.story, P.i + 1);
-        if (clearedCount() === SONGS.length) profile.finaled = true;
+        if (stats.newBest) profile.best[bestKey] = { score: stats.score, rank: stats.rank, acc: stats.acc, combo: stats.maxCombo };
+        if (!P.encore) {
+          profile.cleared[P.song.id] = true;
+          if (P.story) profile.story = Math.max(profile.story, P.i + 1);
+          if (clearedCount() === SONGS.length) profile.finaled = true;
+        }
       }
       saveProfile();
-      game.go("result", { i: P.i, stats: stats, story: P.story }, { fade: true, to: PAPER });
+      game.go("result", { i: P.i, stats: stats, story: P.story, encore: P.encore }, { fade: true, to: PAPER });
     }
     var bi = Math.floor(beat);
     if (bi !== P.lastBeat) { P.lastBeat = bi; P.startPuff = 0.08; }
@@ -1009,8 +1030,8 @@ game.scene("play", {
       }
     }
     var lead = 2.2;
-    for (var i = 0; i < P.song.chart.length; i++) {
-      var n = P.song.chart[i];
+    for (var i = 0; i < P.chart.length; i++) {
+      var n = P.chart[i];
       if (P.judged[n.t] && P.judged[n.t] !== "hold") continue;
       if (P.eye) continue;
       var x = 40 + (n.t - t) * (118 / lead);
@@ -1081,7 +1102,7 @@ game.scene("play", {
       g.text(P.judge.text, 80, jy + 2, { align: "center", color: P.judge.tone });
     }
     /* intro */
-    var first = P.song.chart[0].t;
+    var first = P.chart[0].t;
     if (t < first && !P.ended) {
       var beatsLeft = (first - t) / (60 / P.song.bpm);
       g.window(6, 16, 148, 32);
@@ -1193,7 +1214,7 @@ game.scene("result", {
     if (game.pressed("b")) {
       game.sfx("miss");
       if (resultArgs.stats.failed) game.go("title");
-      else game.go("select", { i: resultArgs.i });
+      else game.go("select", { i: resultArgs.i, encore: resultArgs.encore });
       return;
     }
     if (act) {
@@ -1203,12 +1224,12 @@ game.scene("result", {
         if (resultArgs.story) game.go("story", { i: resultArgs.i, kind: "post", stats: resultArgs.stats }, { fade: true, to: PAPER });
         else {
           var nxt = (resultArgs.i + 1) % SONGS.length;
-          game.go("play", { i: nxt, story: false }, { fade: false });
+          game.go("play", { i: nxt, story: false, encore: resultArgs.encore }, { fade: false });
         }
-      } else if (what === "retry") game.go("play", { i: resultArgs.i, story: resultArgs.story, retry: true }, { fade: false });
+      } else if (what === "retry") game.go("play", { i: resultArgs.i, story: resultArgs.story, retry: true, encore: resultArgs.encore }, { fade: false });
       else if (what === "curtain") game.go("ending", { stats: resultArgs.stats });
       else if (what === "title") game.go("title");
-      else game.go("select", { i: resultArgs.i });
+      else game.go("select", { i: resultArgs.i, encore: resultArgs.encore });
     }
   },
   draw: function (g) {
