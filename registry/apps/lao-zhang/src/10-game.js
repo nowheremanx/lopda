@@ -194,7 +194,7 @@ GM.makeItem = function (state, type, x, y, rng) {
     it.carry = GM.moleCarry(state.level);
     it.value = GM.ITEMS[it.carry].value;
     it.dir = rng() < 0.5 ? -1 : 1;
-    it.speed = 13 + Math.min(12, state.level * 1.1);
+    it.speed = 11 + Math.min(10, state.level * 0.9);
     it.minX = 18;
     it.maxX = 142;
   }

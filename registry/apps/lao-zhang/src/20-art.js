@@ -1,5 +1,6 @@
-/* 矿工老张: the four-tone picture. Everything is painted into an indexed 160x144 buffer,
-   so every visible pixel is one of the four palette colours; no antialiasing, no blending. */
+/* 矿工老张: the four-tone picture. The game world is 160x144, but the picture is
+   painted into a 320x288 indexed buffer: items and effects get twice the detail,
+   and every visible pixel is still one of the four palette colours. */
 var GM = (typeof GM !== "undefined" && GM) || {};
 
 GM.INK = 0;
@@ -8,30 +9,33 @@ GM.MID = 2;
 GM.PAPER = 3;
 GM.CLEAR = 255;
 GM.RGB = [[31, 42, 20], [74, 90, 50], [125, 138, 88], [163, 173, 126]];
+GM.RGB32 = GM.RGB.map(function (c) { return ((255 << 24) | (c[2] << 16) | (c[1] << 8) | c[0]) >>> 0; });
 
-GM.put = function (buf, x, y, c) {
+/* ---- the 320x288 framebuffer ---- */
+
+GM.bput = function (buf, x, y, c) {
   x = x | 0; y = y | 0;
-  if (x >= 0 && x < GM.W && y >= 0 && y < GM.H) buf[y * GM.W + x] = c;
+  if (x >= 0 && x < GM.BW && y >= 0 && y < GM.BH) buf[y * GM.BW + x] = c;
 };
 
-GM.rect = function (buf, x, y, w, h, c) {
+GM.brect = function (buf, x, y, w, h, c) {
   x = x | 0; y = y | 0; w = w | 0; h = h | 0;
-  var x0 = Math.max(0, x), x1 = Math.min(GM.W, x + w);
-  var y0 = Math.max(0, y), y1 = Math.min(GM.H, y + h);
+  var x0 = Math.max(0, x), x1 = Math.min(GM.BW, x + w);
+  var y0 = Math.max(0, y), y1 = Math.min(GM.BH, y + h);
   for (var yy = y0; yy < y1; yy++) {
-    var row = yy * GM.W;
+    var row = yy * GM.BW;
     for (var xx = x0; xx < x1; xx++) buf[row + xx] = c;
   }
 };
 
-GM.line = function (buf, x0, y0, x1, y1, c) {
+GM.bline = function (buf, x0, y0, x1, y1, c) {
   x0 = Math.round(x0); y0 = Math.round(y0);
   x1 = Math.round(x1); y1 = Math.round(y1);
   var dx = Math.abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
   var dy = -Math.abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
   var err = dx + dy;
   for (;;) {
-    GM.put(buf, x0, y0, c);
+    GM.bput(buf, x0, y0, c);
     if (x0 === x1 && y0 === y1) break;
     var e2 = 2 * err;
     if (e2 >= dy) { err += dy; x0 += sx; }
@@ -39,13 +43,46 @@ GM.line = function (buf, x0, y0, x1, y1, c) {
   }
 };
 
-GM.ellipse = function (buf, cx, cy, rx, ry, c) {
+GM.blineWide = function (buf, x0, y0, x1, y1, c, thick) {
+  x0 = Math.round(x0); y0 = Math.round(y0);
+  x1 = Math.round(x1); y1 = Math.round(y1);
+  thick = thick || 1;
+  var off = thick >> 1;
+  var dx = Math.abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
+  var dy = -Math.abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
+  var err = dx + dy;
+  for (;;) {
+    GM.brect(buf, x0 - off, y0 - off, thick, thick, c);
+    if (x0 === x1 && y0 === y1) break;
+    var e2 = 2 * err;
+    if (e2 >= dy) { err += dy; x0 += sx; }
+    if (e2 <= dx) { err += dx; y0 += sy; }
+  }
+};
+
+GM.bellipse = function (buf, cx, cy, rx, ry, c) {
   cx = Math.round(cx); cy = Math.round(cy);
   for (var dy = -ry; dy <= ry; dy++) {
     var w = Math.floor(rx * Math.sqrt(Math.max(0, 1 - (dy * dy) / ((ry + 0.5) * (ry + 0.5)))));
-    GM.rect(buf, cx - w, cy + dy, w * 2 + 1, 1, c);
+    GM.brect(buf, cx - w, cy + dy, w * 2 + 1, 1, c);
   }
 };
+
+/* world-space helpers: the game still thinks in 160x144 */
+GM.put = function (buf, x, y, c) {
+  GM.brect(buf, Math.round(x) * GM.SCALE, Math.round(y) * GM.SCALE, GM.SCALE, GM.SCALE, c);
+};
+GM.rect = function (buf, x, y, w, h, c) {
+  GM.brect(buf, Math.round(x) * GM.SCALE, Math.round(y) * GM.SCALE, Math.round(w) * GM.SCALE, Math.round(h) * GM.SCALE, c);
+};
+GM.line = function (buf, x0, y0, x1, y1, c) {
+  GM.blineWide(buf, x0 * GM.SCALE, y0 * GM.SCALE, x1 * GM.SCALE, y1 * GM.SCALE, c, GM.SCALE);
+};
+GM.ellipse = function (buf, cx, cy, rx, ry, c) {
+  GM.bellipse(buf, cx * GM.SCALE, cy * GM.SCALE, rx * GM.SCALE, ry * GM.SCALE, c);
+};
+
+/* ---- sprites: these live in their own little buffers at 2x ---- */
 
 GM.sprite = function (w, h) {
   var b = new Uint8Array(w * h);
@@ -111,11 +148,11 @@ GM.pointIn = function (poly, x, y) {
 GM.blob = function (w, h, seed, base, shadow, highlight, speck) {
   var s = GM.sprite(w, h);
   var rng = GM.rng(seed);
-  var cx = w / 2, cy = h / 2, rx = w / 2 - 1, ry = h / 2 - 1;
-  var n = 10, poly = [], i;
+  var cx = w / 2, cy = h / 2, rx = w / 2 - 1.5, ry = h / 2 - 1.5;
+  var n = 12 + Math.floor(rng() * 4), poly = [], i;
   for (i = 0; i < n; i++) {
     var a = i / n * Math.PI * 2;
-    var k = 0.78 + rng() * 0.2;
+    var k = 0.82 + rng() * 0.16;
     poly.push([cx + Math.cos(a) * rx * k, cy + Math.sin(a) * ry * k]);
   }
   for (var y = 0; y < h; y++) {
@@ -127,86 +164,91 @@ GM.blob = function (w, h, seed, base, shadow, highlight, speck) {
   }
   GM.soutline(s, GM.INK);
   if (highlight) {
-    for (i = 0; i < 2; i++) {
+    for (i = 0; i < 4; i++) {
       var hx = Math.round(cx - rx * 0.45 + rng() * rx * 0.35);
       var hy = Math.round(cy - ry * 0.45 + rng() * ry * 0.2);
       if (s.b[hy * w + hx] !== GM.CLEAR) s.b[hy * w + hx] = GM.PAPER;
     }
   }
   if (speck) {
-    /* rocks get a crack, not a row of dots */
-    GM.sline(s, Math.round(cx - rx * 0.2), Math.round(cy), Math.round(cx + rx * 0.15), Math.round(cy + ry * 0.35), GM.INK);
-    GM.sline(s, Math.round(cx - rx * 0.2), Math.round(cy), Math.round(cx - rx * 0.45), Math.round(cy - ry * 0.1), GM.INK);
+    /* a rock gets a crack, not a row of dots */
+    GM.sline(s, Math.round(cx - rx * 0.35), Math.round(cy - ry * 0.1), Math.round(cx + rx * 0.2), Math.round(cy + ry * 0.45), GM.INK);
+    GM.sline(s, Math.round(cx - rx * 0.35), Math.round(cy - ry * 0.1), Math.round(cx - rx * 0.65), Math.round(cy - ry * 0.35), GM.INK);
   }
   return s;
 };
 
 GM.diamondSprite = function () {
-  var s = GM.sprite(14, 14);
-  var poly = [[7, 1], [13, 6], [7, 13], [1, 6]];
-  for (var y = 0; y < 14; y++) for (var x = 0; x < 14; x++) if (GM.pointIn(poly, x + 0.5, y + 0.5)) GM.sput(s, x, y, GM.PAPER);
+  var s = GM.sprite(28, 28);
+  var poly = [[14, 2], [26, 12], [14, 26], [2, 12]];
+  for (var y = 0; y < 28; y++) for (var x = 0; x < 28; x++) if (GM.pointIn(poly, x + 0.5, y + 0.5)) GM.sput(s, x, y, GM.PAPER);
   GM.soutline(s, GM.INK);
-  GM.sline(s, 2, 6, 12, 6, GM.MID);
-  GM.sline(s, 7, 2, 3, 6, GM.MID);
-  GM.sline(s, 7, 2, 11, 6, GM.MID);
-  GM.sline(s, 3, 6, 7, 12, GM.MID);
-  GM.sline(s, 11, 6, 7, 12, GM.MID);
+  GM.sline(s, 4, 12, 24, 12, GM.MID);
+  GM.sline(s, 14, 3, 6, 12, GM.MID);
+  GM.sline(s, 14, 3, 22, 12, GM.MID);
+  GM.sline(s, 6, 12, 14, 25, GM.MID);
+  GM.sline(s, 22, 12, 14, 25, GM.MID);
   return s;
 };
 
 GM.bagSprite = function () {
-  var s = GM.sprite(16, 16);
-  GM.sellipse(s, 8, 10, 6, 5, GM.PAPER);
-  GM.srect(s, 6, 3, 4, 6, GM.PAPER);
+  var s = GM.sprite(32, 32);
+  GM.sellipse(s, 16, 20, 12, 10, GM.PAPER);
+  GM.srect(s, 12, 6, 8, 14, GM.PAPER);
   GM.soutline(s, GM.INK);
-  GM.srect(s, 5, 6, 6, 2, GM.DARK);
-  GM.sput(s, 5, 6, GM.INK); GM.sput(s, 10, 6, GM.INK);
-  /* a readable five-by-seven dollar mark */
-  var d = ["00100", "01110", "10100", "01110", "00101", "01110", "00100"];
-  for (var y = 0; y < d.length; y++) {
-    for (var x = 0; x < 5; x++) if (d[y].charAt(x) === "1") GM.sput(s, 6 + x, 8 + y, GM.INK);
-  }
+  GM.srect(s, 10, 13, 12, 4, GM.DARK);
+  GM.sput(s, 10, 13, GM.INK); GM.sput(s, 21, 13, GM.INK);
+  GM.stext(s, "$", 11, 17, GM.INK, 2);
+  GM.srect(s, 20, 26, 4, 2, GM.MID);
   return s;
 };
 
 GM.boneSprite = function () {
-  var s = GM.sprite(16, 10);
-  GM.srect(s, 4, 4, 8, 2, GM.PAPER);
-  GM.sellipse(s, 3, 3, 2, 2, GM.PAPER);
-  GM.sellipse(s, 3, 6, 2, 2, GM.PAPER);
-  GM.sellipse(s, 13, 3, 2, 2, GM.PAPER);
-  GM.sellipse(s, 13, 6, 2, 2, GM.PAPER);
+  var s = GM.sprite(32, 20);
+  GM.srect(s, 8, 8, 16, 4, GM.PAPER);
+  GM.sellipse(s, 6, 6, 4, 4, GM.PAPER);
+  GM.sellipse(s, 6, 14, 4, 4, GM.PAPER);
+  GM.sellipse(s, 26, 6, 4, 4, GM.PAPER);
+  GM.sellipse(s, 26, 14, 4, 4, GM.PAPER);
   GM.soutline(s, GM.INK);
-  GM.sput(s, 3, 4, GM.MID); GM.sput(s, 13, 4, GM.MID);
+  GM.sput(s, 6, 8, GM.MID); GM.sput(s, 26, 8, GM.MID);
   return s;
 };
 
 GM.skullSprite = function () {
-  var s = GM.sprite(14, 14);
-  GM.sellipse(s, 7, 6, 5, 5, GM.PAPER);
-  GM.srect(s, 4, 9, 6, 3, GM.PAPER);
+  var s = GM.sprite(28, 28);
+  GM.sellipse(s, 14, 12, 10, 10, GM.PAPER);
+  GM.srect(s, 8, 19, 12, 6, GM.PAPER);
   GM.soutline(s, GM.INK);
-  GM.srect(s, 4, 5, 2, 2, GM.INK);
-  GM.srect(s, 8, 5, 2, 2, GM.INK);
-  GM.srect(s, 6, 8, 2, 1, GM.INK);
-  GM.srect(s, 4, 11, 1, 2, GM.INK);
-  GM.srect(s, 6, 11, 1, 2, GM.INK);
-  GM.srect(s, 8, 11, 1, 2, GM.INK);
-  GM.srect(s, 10, 11, 1, 2, GM.INK);
+  GM.srect(s, 7, 9, 4, 4, GM.INK);
+  GM.srect(s, 17, 9, 4, 4, GM.INK);
+  GM.srect(s, 12, 15, 4, 2, GM.INK);
+  GM.srect(s, 9, 22, 2, 3, GM.INK);
+  GM.srect(s, 13, 22, 2, 3, GM.INK);
+  GM.srect(s, 17, 22, 2, 3, GM.INK);
   return s;
 };
 
 GM.tntSprite = function () {
-  var s = GM.sprite(16, 16);
-  var xs = [3, 7, 11], i;
-  for (i = 0; i < xs.length; i++) GM.srect(s, xs[i], 5, 2, 9, GM.DARK);
+  var s = GM.sprite(32, 32);
+  var xs = [6, 14, 22], i;
+  for (i = 0; i < xs.length; i++) GM.srect(s, xs[i], 10, 4, 18, GM.DARK);
   GM.soutline(s, GM.INK);
-  GM.srect(s, 2, 9, 12, 1, GM.INK);
-  GM.srect(s, 2, 10, 12, 1, GM.PAPER);
-  GM.srect(s, 2, 11, 12, 1, GM.INK);
-  GM.sline(s, 8, 5, 11, 2, GM.MID);
-  GM.sput(s, 12, 1, GM.PAPER);
-  GM.sput(s, 11, 2, GM.PAPER);
+  GM.srect(s, 4, 18, 24, 2, GM.INK);
+  GM.srect(s, 4, 20, 24, 4, GM.PAPER);
+  GM.srect(s, 4, 24, 24, 2, GM.INK);
+  GM.sline(s, 16, 10, 24, 4, GM.MID);
+  GM.srect(s, 24, 2, 2, 2, GM.PAPER);
+  return s;
+};
+
+GM.miniGemSprite = function () {
+  var s = GM.sprite(10, 10);
+  var poly = [[5, 1], [9, 5], [5, 9], [1, 5]];
+  for (var y = 0; y < 10; y++) for (var x = 0; x < 10; x++) if (GM.pointIn(poly, x + 0.5, y + 0.5)) GM.sput(s, x, y, GM.PAPER);
+  GM.soutline(s, GM.INK);
+  GM.sline(s, 2, 5, 8, 5, GM.MID);
+  GM.sline(s, 5, 2, 5, 8, GM.MID);
   return s;
 };
 
@@ -215,30 +257,19 @@ GM.ICON = [
   ".....000000.....",
   "...0033333300...",
   "..033333333330..",
+  "..033332233330..",
+  "..033332233330..",
   "..033333333330..",
-  "..033332333330..",
-  "..033333333330..",
-  "..000000000000..",
+  ".00000000000000.",
+  "0000000000000000",
   "...0333333330...",
   "...0303333030...",
   "...0333333330...",
   "...0331111330...",
   "....03333330....",
   ".....000000.....",
-  "................",
   "................"
 ];
-
-GM.text3 = function (s, text, x, y, color) {
-  var F = GM.FONT3, i, j, r, c;
-  for (i = 0; i < text.length; i++) {
-    var glyph = F[text.charAt(i)] || F["?"];
-    for (j = 0; j < glyph.length; j++) {
-      r = glyph[j];
-      for (c = 0; c < 3; c++) if (r.charAt(c) === "1") GM.sput(s, x + i * 4 + c, y + j, color);
-    }
-  }
-};
 
 GM.FONT3 = {
   "0": ["111", "101", "101", "101", "111"],
@@ -258,34 +289,68 @@ GM.FONT3 = {
   "?": ["111", "001", "011", "000", "010"]
 };
 
+GM.stext = function (s, text, x, y, color, k) {
+  k = k || 1;
+  var F = GM.FONT3, i, j, c;
+  for (i = 0; i < text.length; i++) {
+    var glyph = F[text.charAt(i)] || F["?"];
+    for (j = 0; j < glyph.length; j++) {
+      var r = glyph[j];
+      for (c = 0; c < 3; c++) {
+        if (r.charAt(c) === "1") GM.srect(s, x + i * 4 * k + c * k, y + j * k, k, k, color);
+      }
+    }
+  }
+};
+
+GM.textMain = function (buf, text, x, y, color, k) {
+  k = k || 1;
+  var F = GM.FONT3, i, j, c;
+  for (i = 0; i < text.length; i++) {
+    var glyph = F[text.charAt(i)] || F["?"];
+    for (j = 0; j < glyph.length; j++) {
+      var r = glyph[j];
+      for (c = 0; c < 3; c++) {
+        if (r.charAt(c) === "1") GM.brect(buf, x + i * 4 * k + c * k, y + j * k, k, k, color);
+      }
+    }
+  }
+};
+
+GM.textWidth = function (text, k) {
+  return text.length * 4 * k - k;
+};
+
 GM.initArt = function () {
   GM.SPR = {
-    goldS: GM.blob(14, 12, 11, GM.PAPER, GM.MID, false, false),
-    goldM: GM.blob(20, 16, 17, GM.PAPER, GM.MID, false, false),
-    goldL: GM.blob(26, 20, 23, GM.PAPER, GM.MID, false, false),
-    rockS: GM.blob(16, 14, 31, GM.MID, GM.DARK, true, true),
-    rockL: GM.blob(26, 20, 37, GM.MID, GM.DARK, true, true),
+    goldS: GM.blob(28, 24, 11, GM.PAPER, GM.MID, false, false),
+    goldM: GM.blob(40, 32, 17, GM.PAPER, GM.MID, false, false),
+    goldL: GM.blob(52, 40, 23, GM.PAPER, GM.MID, false, false),
+    rockS: GM.blob(32, 28, 31, GM.MID, GM.DARK, true, true),
+    rockL: GM.blob(52, 40, 37, GM.MID, GM.DARK, true, true),
     diamond: GM.diamondSprite(),
     bag: GM.bagSprite(),
     bone: GM.boneSprite(),
     skull: GM.skullSprite(),
-    tnt: GM.tntSprite()
+    tnt: GM.tntSprite(),
+    miniGold: GM.blob(10, 8, 41, GM.PAPER, GM.MID, false, false),
+    miniGem: GM.miniGemSprite()
   };
 };
 
-GM.spriteDraw = function (buf, s, x, y, flip) {
+GM.spriteDraw = function (buf, s, x, y) {
   x = Math.round(x); y = Math.round(y);
   for (var sy = 0; sy < s.h; sy++) {
     for (var sx = 0; sx < s.w; sx++) {
       var c = s.b[sy * s.w + sx];
       if (c === GM.CLEAR) continue;
-      GM.put(buf, x + (flip ? s.w - 1 - sx : sx), y + sy, c);
+      GM.bput(buf, x + sx, y + sy, c);
     }
   }
 };
 
 GM.makeBackground = function (state) {
-  var b = new Uint8Array(GM.W * GM.H);
+  var b = new Uint8Array(GM.BW * GM.BH);
   var x, y, i, rng, len;
   GM.rect(b, 0, 0, GM.W, GM.H, GM.DARK);
   GM.rect(b, 0, 0, GM.W, GM.GROUND, GM.PAPER);
@@ -309,84 +374,75 @@ GM.makeBackground = function (state) {
   GM.rect(b, 5, 12, 8, 1, GM.INK);
   GM.rect(b, 6, 3, 6, 1, GM.DARK);
 
-  /* mine texture: sparse, small, never mistaken for loot */
+  /* the mine is textured at the buffer's own resolution, not stretched from 160x144 */
   rng = GM.rng((state.levelSeed || 1) ^ 0x9e3779b9);
-  for (i = 0; i < 95; i++) {
-    x = 2 + Math.floor(rng() * (GM.W - 4));
-    y = GM.GROUND + 2 + Math.floor(Math.pow(rng(), 1.6) * (GM.H - GM.GROUND - 4));
-    GM.put(b, x, y, rng() < 0.7 ? GM.MID : GM.DARK);
-    if (rng() < 0.28) GM.put(b, x + 1, y, GM.DARK);
+  var top = (GM.GROUND + 2) * GM.SCALE;
+  var bottom = GM.BH - 3;
+  for (i = 0; i < 260; i++) {
+    x = 4 + Math.floor(rng() * (GM.BW - 8));
+    y = top + Math.floor(Math.pow(rng(), 1.6) * (bottom - top));
+    GM.bput(b, x, y, rng() < 0.7 ? GM.MID : GM.DARK);
+    if (rng() < 0.22) GM.brect(b, x, y, 2, 2, rng() < 0.5 ? GM.MID : GM.DARK);
   }
-  for (i = 0; i < 18; i++) {
-    x = 2 + Math.floor(rng() * (GM.W - 22));
-    y = GM.GROUND + 5 + Math.floor(rng() * (GM.H - GM.GROUND - 10));
-    len = 3 + Math.floor(rng() * 13);
-    if (rng() < 0.5) GM.line(b, x, y, x + len, y + (rng() < 0.5 ? 0 : 1), GM.DARK);
-    else GM.line(b, x, y, x + len, y - 1, GM.MID);
+  for (i = 0; i < 30; i++) {
+    x = 4 + Math.floor(rng() * (GM.BW - 44));
+    y = top + 6 + Math.floor(rng() * (bottom - top - 12));
+    len = 6 + Math.floor(rng() * 28);
+    GM.bline(b, x, y, x + len, y + (rng() < 0.5 ? 0 : 2), rng() < 0.55 ? GM.DARK : GM.MID);
   }
-  for (i = 0; i < 7; i++) {
-    x = 5 + Math.floor(rng() * (GM.W - 16));
-    y = GM.GROUND + 8 + Math.floor(rng() * (GM.H - GM.GROUND - 16));
-    GM.line(b, x, y, x + 2, y + 2, GM.INK);
-    GM.line(b, x + 2, y + 2, x + 1, y + 5, GM.INK);
-    if (rng() < 0.6) GM.line(b, x + 2, y + 2, x + 5, y + 3, GM.INK);
+  for (i = 0; i < 12; i++) {
+    x = 8 + Math.floor(rng() * (GM.BW - 32));
+    y = top + 10 + Math.floor(rng() * (bottom - top - 24));
+    GM.blineWide(b, x, y, x + 4, y + 5, GM.INK, 2);
+    GM.blineWide(b, x + 4, y + 5, x + 2, y + 11, GM.INK, 2);
+    if (rng() < 0.6) GM.blineWide(b, x + 4, y + 5, x + 10, y + 7, GM.INK, 2);
   }
-  for (i = 0; i < 9; i++) {
-    x = 3 + Math.floor(rng() * (GM.W - 8));
-    y = GM.GROUND + 4 + Math.floor(rng() * (GM.H - GM.GROUND - 8));
-    GM.rect(b, x, y, 2, 2, GM.MID);
-    GM.put(b, x, y, GM.DARK);
+  for (i = 0; i < 16; i++) {
+    x = 6 + Math.floor(rng() * (GM.BW - 12));
+    y = top + 8 + Math.floor(rng() * (bottom - top - 16));
+    GM.brect(b, x, y, 3, 2, GM.MID);
+    GM.bput(b, x, y, GM.DARK);
   }
   return b;
 };
 
-GM.drawItem = function (buf, it, anim) {
+GM.drawItemAt = function (buf, it, bx, by, anim) {
   var spr = GM.SPR[it.sprite];
   if (!spr) return;
-  var x = Math.round(it.x - spr.w / 2);
-  var y = Math.round(it.y - spr.h / 2);
+  var x = Math.round(bx - spr.w / 2);
+  var y = Math.round(by - spr.h / 2);
   GM.spriteDraw(buf, spr, x, y);
   if (it.kind === "gem" && Math.sin(anim * 4 + it.x) > 0.86) {
-    GM.put(buf, x + spr.w - 2, y + 2, GM.PAPER);
+    GM.brect(buf, x + spr.w - 5, y + 4, 2, 2, GM.PAPER);
+    GM.bput(buf, x + spr.w - 6, y + 6, GM.MID);
   }
   if (it.kind === "tnt" && it.fuse > 0 && Math.sin(anim * 30) > 0) {
-    GM.put(buf, x + 12, y, GM.PAPER);
-    GM.put(buf, x + 11, y + 1, GM.MID);
+    GM.brect(buf, x + 23, y + 1, 3, 3, GM.PAPER);
+    GM.bput(buf, x + 22, y + 3, GM.MID);
   }
-};
-
-GM.miniGold = function (buf, x, y) {
-  GM.rect(buf, x, y, 5, 4, GM.INK);
-  GM.rect(buf, x + 1, y + 1, 3, 2, GM.PAPER);
-};
-
-GM.miniGem = function (buf, x, y) {
-  GM.rect(buf, x, y + 1, 5, 3, GM.INK);
-  GM.rect(buf, x + 1, y + 2, 3, 1, GM.PAPER);
-  GM.put(buf, x + 2, y, GM.INK);
-  GM.put(buf, x + 2, y + 4, GM.INK);
-  GM.put(buf, x + 2, y + 1, GM.PAPER);
 };
 
 GM.drawMole = function (buf, it, anim) {
-  var d = it.dir;
-  var x = Math.round(it.x), y = Math.round(it.y);
-  var step = Math.sin(anim * 14 + it.x) > 0 ? 1 : 0;
-  GM.ellipse(buf, x, y, 8, 5, GM.INK);
-  GM.ellipse(buf, x, y, 7, 4, GM.MID);
-  GM.ellipse(buf, x, y + 2, 5, 2, GM.DARK);
-  GM.ellipse(buf, x + d * 5, y - 2, 4, 4, GM.INK);
-  GM.ellipse(buf, x + d * 5, y - 2, 3, 3, GM.MID);
-  GM.ellipse(buf, x + d * 2, y - 6, 2, 2, GM.INK);
-  GM.ellipse(buf, x + d * 2, y - 6, 1, 1, GM.DARK);
-  GM.rect(buf, x + d * 8, y - 2, 2, 2, GM.PAPER);
-  GM.put(buf, x + d * 9, y - 1, GM.INK);
-  GM.put(buf, x + d * 6, y - 3, GM.INK);
-  GM.line(buf, x - 3, y + 4, x - 4, y + 6 + step, GM.INK);
-  GM.line(buf, x + 3, y + 4, x + 4, y + 6 + (1 - step), GM.INK);
-  GM.line(buf, x - d * 7, y, x - d * 10, y - 2, GM.INK);
-  if (it.carry === "diamond") GM.miniGem(buf, x + d * 6 - (d < 0 ? 5 : 0), y - 8);
-  else GM.miniGold(buf, x + d * 6 - (d < 0 ? 5 : 0), y - 8);
+  var d = it.dir, S = GM.SCALE;
+  var x = Math.round(it.x * S), y = Math.round(it.y * S);
+  var step = Math.sin(anim * 14 + it.x) > 0 ? 2 : 0;
+  GM.bellipse(buf, x, y, 16, 10, GM.INK);
+  GM.bellipse(buf, x, y, 14, 8, GM.MID);
+  GM.bellipse(buf, x, y + 5, 10, 4, GM.DARK);
+  GM.bellipse(buf, x + d * 10, y - 4, 8, 8, GM.INK);
+  GM.bellipse(buf, x + d * 10, y - 4, 6, 6, GM.MID);
+  GM.bellipse(buf, x + d * 4, y - 12, 4, 4, GM.INK);
+  GM.bellipse(buf, x + d * 4, y - 12, 2, 2, GM.DARK);
+  GM.brect(buf, x + d * 16, y - 4, 4, 4, GM.PAPER);
+  GM.bput(buf, x + d * 18, y - 2, GM.INK);
+  GM.brect(buf, x + d * 12, y - 6, 2, 2, GM.INK);
+  GM.blineWide(buf, x - 6, y + 8, x - 8, y + 12 + step, GM.INK, 2);
+  GM.blineWide(buf, x + 6, y + 8, x + 8, y + 12 + (2 - step), GM.INK, 2);
+  GM.blineWide(buf, x - d * 14, y, x - d * 20, y - 4, GM.INK, 2);
+  var mini = it.carry === "diamond" ? GM.SPR.miniGem : GM.SPR.miniGold;
+  var mx = x + d * 12 - (d < 0 ? mini.w : 0);
+  var my = y - 20;
+  GM.spriteDraw(buf, mini, mx, my);
 };
 
 GM.drawRope = function (buf, hook) {
@@ -446,11 +502,13 @@ GM.drawMiner = function (buf, state) {
   GM.put(buf, bx - 4, 11 + by, GM.DARK);
   GM.put(buf, bx + 4, 11 + by, GM.DARK);
 
-  /* a low cap with a broad brim and a lamp */
+  /* a low safety cap: crown, broad brim and a front peak */
   GM.ellipse(buf, bx, 4 + by, 8, 3, GM.INK);
   GM.ellipse(buf, bx, 4 + by, 7, 2, GM.PAPER);
   GM.rect(buf, bx - 9, 6 + by, 18, 2, GM.INK);
   GM.rect(buf, bx - 8, 6 + by, 16, 1, GM.PAPER);
+  GM.rect(buf, bx + 9, 7 + by, 3, 1, GM.INK);
+  GM.rect(buf, bx + 9, 7 + by, 2, 1, GM.PAPER);
   GM.rect(buf, bx - 1, 2 + by, 3, 2, GM.MID);
   GM.put(buf, bx, 2 + by, GM.PAPER);
 
@@ -470,12 +528,12 @@ GM.draw = function (ctx, state) {
     state.bg = GM.makeBackground(state);
     state.bgKey = key;
   }
-  var buf = GM._buf || (GM._buf = new Uint8Array(GM.W * GM.H));
+  var buf = GM._buf || (GM._buf = new Uint8Array(GM.BW * GM.BH));
   buf.set(state.bg);
-  var i, it, tip;
+  var i, it, tip, p;
   for (i = 0; i < state.items.length; i++) {
     it = state.items[i];
-    if (it.type !== "mole") GM.drawItem(buf, it, state.anim);
+    if (it.type !== "mole") GM.drawItemAt(buf, it, it.x * GM.SCALE, it.y * GM.SCALE, state.anim);
   }
   for (i = 0; i < state.items.length; i++) {
     it = state.items[i];
@@ -484,52 +542,58 @@ GM.draw = function (ctx, state) {
   GM.drawRope(buf, state.hook);
   if (state.hook.item) {
     tip = GM.tip(state.hook);
-    GM.drawItem(buf, state.hook.item, state.anim);
-    GM.put(buf, Math.round(tip.x), Math.round(tip.y) - 2, GM.PAPER);
+    GM.drawItemAt(buf, state.hook.item, tip.x * GM.SCALE, tip.y * GM.SCALE, state.anim);
+    GM.brect(buf, Math.round(tip.x * GM.SCALE) - 2, Math.round(tip.y * GM.SCALE) - 5, 4, 2, GM.PAPER);
   }
   GM.drawHook(buf, state.hook);
   GM.drawMiner(buf, state);
 
   for (i = 0; i < state.blasts.length; i++) {
     var bl = state.blasts[i], k = bl.t / bl.life;
-    var rr = 4 + k * 27;
-    for (var a = 0; a < Math.PI * 2; a += 0.22) {
-      GM.put(buf, bl.x + Math.cos(a) * rr, bl.y + Math.sin(a) * rr, (i + Math.floor(a * 5)) % 2 ? GM.PAPER : GM.MID);
+    var rr = (4 + k * 27) * GM.SCALE;
+    var bx = bl.x * GM.SCALE, by = bl.y * GM.SCALE;
+    for (var a = 0; a < Math.PI * 2; a += 0.18) {
+      GM.brect(buf, bx + Math.cos(a) * rr, by + Math.sin(a) * rr, 2, 2,
+        (i + Math.floor(a * 5)) % 2 ? GM.PAPER : GM.MID);
     }
-    GM.put(buf, bl.x, bl.y, GM.PAPER);
+    GM.brect(buf, bx - 2, by - 2, 4, 4, GM.PAPER);
   }
   for (i = 0; i < state.particles.length; i++) {
-    var p = state.particles[i];
-    GM.put(buf, p.x, p.y, p.color === "paper" ? GM.PAPER : p.color === "dark" ? GM.DARK : GM.MID);
+    p = state.particles[i];
+    GM.brect(buf, p.x * GM.SCALE, p.y * GM.SCALE, 2, 2,
+      p.color === "paper" ? GM.PAPER : p.color === "dark" ? GM.DARK : GM.MID);
   }
   for (i = 0; i < state.floats.length; i++) {
     var f = state.floats[i];
-    var tx = f.x - (f.text.length * 4 - 1) / 2;
-    var ty = f.y - (f.t / f.life) * 9;
-    GM.text3(buf, f.text, Math.round(tx), Math.round(ty), GM.INK);
+    var tw = GM.textWidth(f.text, GM.SCALE);
+    var tx = f.x * GM.SCALE - tw / 2;
+    var ty = f.y * GM.SCALE - (f.t / f.life) * 9 * GM.SCALE;
+    GM.textMain(buf, f.text, Math.round(tx), Math.round(ty), GM.INK, GM.SCALE);
   }
 
   var sx = 0, sy = 0;
   if (state.shake > 0) {
-    sx = Math.round((Math.random() * 2 - 1) * 3);
-    sy = Math.round((Math.random() * 2 - 1) * 2);
+    sx = Math.round((Math.random() * 2 - 1) * 6);
+    sy = Math.round((Math.random() * 2 - 1) * 4);
   }
   GM.present(ctx, buf, sx, sy);
 };
 
 GM.present = function (ctx, buf, sx, sy) {
-  if (!GM._img) GM._img = ctx.createImageData(GM.W, GM.H);
-  var data = GM._img.data;
-  for (var y = 0; y < GM.H; y++) {
-    for (var x = 0; x < GM.W; x++) {
-      var xx = x - (sx || 0), yy = y - (sy || 0), c;
-      if (xx < 0 || xx >= GM.W || yy < 0 || yy >= GM.H) c = GM.RGB[GM.PAPER];
+  if (!GM._img) {
+    GM._img = ctx.createImageData(GM.BW, GM.BH);
+    GM._u32 = new Uint32Array(GM._img.data.buffer);
+  }
+  var u32 = GM._u32;
+  for (var y = 0; y < GM.BH; y++) {
+    for (var x = 0; x < GM.BW; x++) {
+      var xx = x - (sx || 0), yy = y - (sy || 0), t;
+      if (xx < 0 || xx >= GM.BW || yy < 0 || yy >= GM.BH) t = GM.PAPER;
       else {
-        var t = buf[yy * GM.W + xx];
-        c = GM.RGB[t === GM.CLEAR ? GM.PAPER : t] || GM.RGB[GM.PAPER];
+        t = buf[yy * GM.BW + xx];
+        if (t === GM.CLEAR) t = GM.PAPER;
       }
-      var o = (y * GM.W + x) * 4;
-      data[o] = c[0]; data[o + 1] = c[1]; data[o + 2] = c[2]; data[o + 3] = 255;
+      u32[y * GM.BW + x] = GM.RGB32[t];
     }
   }
   ctx.putImageData(GM._img, 0, 0);

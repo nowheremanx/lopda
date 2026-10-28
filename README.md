@@ -54,7 +54,7 @@ Seventeen apps today, all open source and all made for Lo-PDA:
 
 | Kind | Apps |
 |---|---|
-| Games | Paper Tower (a ten-minute tower climb), Fake Yu (a one-key rhythm story), SnapTile (a sliding puzzle from your own photo), Marble (tilt the phone), Candles (blow into the mic), Gomoku, Mole Bop, Lao Zhang (a sixty-second hook-and-haul mine), Pagoda (a 3D prologue), Sisyphus (a meditative climb with sixteen lines from Camus) |
+| Games | Paper Tower (a ten-minute tower climb), Fake Yu (a one-key rhythm story), SnapTile (a sliding puzzle from your own photo), Marble (tilt the phone), Candles (blow into the mic), Gomoku, Mole Bop, Gold Dig (a sixty-second hook-and-haul mine), Pagoda (a 3D prologue), Sisyphus (a meditative climb with sixteen lines from Camus) |
 | Story | Rain Station, a visual novel with seven chapters and five endings |
 | Tools and toys | Calc and Paint (both preinstalled), Fortune, Kana, Sounds, VecDream |
 

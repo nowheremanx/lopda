@@ -188,5 +188,5 @@ test("the manifest and both languages are store-ready", () => {
   for (const name of Object.keys(GM.ITEMS)) {
     if (name !== "mole") assert.ok(GM.SPR[name], `missing sprite ${name}`);
   }
-  assert.equal(GM.SPR.diamond.w, 14);
+  assert.equal(GM.SPR.diamond.w, 28);
 });

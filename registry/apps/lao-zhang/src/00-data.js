@@ -2,18 +2,21 @@
    The game is a four-tone hook-and-haul mine; the picture is 160x144 logical pixels. */
 var GM = (typeof GM !== "undefined" && GM) || {};
 
-GM.W = 160;
+GM.W = 160;                     /* the mine's world, in game units */
 GM.H = 144;
+GM.SCALE = 2;                   /* draw at 2x: the world stays readable, the items get real detail */
+GM.BW = GM.W * GM.SCALE;        /* the indexed framebuffer */
+GM.BH = GM.H * GM.SCALE;
 GM.GROUND = 23;                 /* the miner stands on this line; the mine is below it */
 GM.ANCHOR = { x: 80, y: 18 };   /* the rope leaves old Zhang's hands here */
 GM.IDLE_ROPE = 27;              /* the hook swings at this length */
 GM.MAX_ROPE = 172;
 GM.SWING = 1.32;                /* radians either side of straight down */
-GM.PERIOD = 2.8;                /* seconds for a full left-right-left swing */
+GM.PERIOD = 3.6;                /* seconds for a full left-right-left swing */
 GM.LEVEL_TIME = 60;
-GM.OUT_SPEED = 175;
-GM.EMPTY_SPEED = 300;
-GM.BASE_SPEED = 150;
+GM.OUT_SPEED = 135;
+GM.EMPTY_SPEED = 240;
+GM.BASE_SPEED = 120;
 GM.PLAY_LEVELS = 10;
 GM.STRENGTH_STEP = 0.15;
 GM.DYNAMITE_MAX = 5;
@@ -124,7 +127,7 @@ GM.TEXT = {
     saveWrite: "最高纪录暂时写不进去。"
   },
   en: {
-    title: "LAO ZHANG",
+    title: "GOLD DIG",
     sub: "Sixty seconds a level. Hook gold, dodge rocks.",
     tip: "Press A as the hook swings.",
     start: "START",
