@@ -21,7 +21,9 @@ Day 7 is the mountain god's feast. Three guests matter; the best ending wants th
 ## What is in it
 
 - 8 dishes, 7 ingredients, 4 enemies (one boss)
-- an ingredient / dish / beast codex (早市「图鉴」, or START in the mountain)
+- an ingredient / dish / beast / regulars codex (早市「图鉴」, or START in the mountain)
+- a morning craving forecast (汤 / 饼 / 饭 / 烤 / 炒 / 煲): cook the kind the room wants for an extra tip
+- a final choice on the seventh night: the last bowl at the shrine, or for the person still at the table
 - 5 shop upgrades, 4 regulars with affinity, 3 helpers
 - 2 mountain maps, 7 days, 4 endings
 - Original pixel art, original MML music and ambience

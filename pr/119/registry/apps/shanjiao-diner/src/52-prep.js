@@ -98,7 +98,7 @@ game.scene("prep", {
         ART.dish(gg, id, 12, y, game.time);
         UI.columns(gg, y, [
           { x: 36, w: 60, text: DATA.DISHES[id].name, color: col },
-          { x: 100, w: 32, text: DATA.DISHES[id].price + "文", color: selected ? gg.PAPER : gg.DARK },
+          { x: 96, w: 38, text: (DATA.KIND_NAME[DATA.DISHES[id].kind] || "") + DATA.DISHES[id].price + "文", color: selected ? gg.PAPER : gg.DARK },
           { x: 136, w: 30, text: "定 " + (PREP_PLAN[id] || 0), color: col },
           { x: 174, w: 28, text: "可 " + prepRoom(id), color: selected ? gg.PAPER : gg.DARK }
         ]);

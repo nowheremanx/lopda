@@ -12,16 +12,17 @@ function seatPos(i) {
   var p = tablePos(i);
   return { x: p[0] + 16, y: p[1] - 20 };
 }
-function randomDish() {
+function dishPool() {
   // A passing customer does not order the feast dish; it is cooked for the
-  // mountain god's table.  Without this, the highest-appeal dish is eaten by
-  // the first walk-in and the seventh night's three guests never get theirs.
+  // mountain god's table.  On the seventh night the three named dishes are
+  // kept for the three guests, so a walk-in never eats them.
   var feast = { god_soup: 1, grilled_fish: 1, mushroom_soup: 1 };
-  var pool = S.menu.filter(function (id) {
+  return S.menu.filter(function (id) {
     if (DATA.DISHES[id].vipOnly) return false;
     return !(S.day === 7 && feast[id]);
   });
-  if (!pool.length) return null;
+}
+function pickWeighted(pool) {
   var total = 0, i;
   for (i = 0; i < pool.length; i++) total += DATA.DISHES[pool[i]].appeal;
   var r = Math.random() * total;
@@ -30,6 +31,18 @@ function randomDish() {
     if (r <= 0) return pool[i];
   }
   return pool[pool.length - 1];
+}
+/* -> { dish, want, matched }; matched is false when the menu has nothing of
+ * the kind the room wants and the customer settles for another dish. */
+function randomDish(want) {
+  var pool = dishPool();
+  if (!pool.length) return null;
+  var matches = want ? pool.filter(function (id) { return DATA.DISHES[id].kind === want; }) : [];
+  return {
+    dish: pickWeighted(matches.length ? matches : pool),
+    want: want || null,
+    matched: matches.length > 0
+  };
 }
 function bestDish() {
   var best = null;
@@ -40,10 +53,11 @@ function bestDish() {
 }
 function hasDish(id) { return S.menu.indexOf(id) >= 0; }
 
-function makeCustomer(dish, who) {
+function makeCustomer(dish, who, want, matched) {
   var pat = (who ? 22 : 17) + (hasUpgrade("table") ? 4 : 0);
   return {
-    dish: dish, who: who || null, state: "queue", seat: -1,
+    dish: dish, who: who || null, want: want || null, matched: !!matched,
+    state: "queue", seat: -1,
     patience: pat, maxPatience: pat,
     x: 202, y: 132, fx: 202, fy: 132, tx: 202, ty: 132, t: 1,
     eatT: 0, variant: Math.floor(Math.random() * 3)
@@ -54,14 +68,23 @@ function buildSchedule() {
   var list = [];
   var n = serveCount();
   var first = 18 * 60 + 10, span = 200;
+  var wants = S.demand && S.demand.length ? S.demand.slice() : makeDemand(n, S.weather);
+  while (wants.length < n) wants.push(DATA.CRAVING.kinds[Math.floor(Math.random() * DATA.CRAVING.kinds.length)]);
   for (var i = 0; i < n; i++) {
-    var dish = randomDish();
-    if (!dish) break;
-    list.push({ time: first + Math.round(i * span / n) + rnd(-3, 3), dish: dish, who: null });
+    var order = randomDish(wants[i]);
+    if (!order) break;
+    list.push({ time: first + Math.round(i * span / n) + rnd(-3, 3), dish: order.dish, want: order.want, matched: order.matched, who: null });
   }
   function add(who, dish, time) {
     if (!dish) return;
-    list.push({ time: time, dish: dish, who: who });
+    var want = DATA.DISHES[dish] ? DATA.DISHES[dish].kind : null;
+    var onMenu = hasDish(dish);
+    if (!onMenu) dish = bestDish();
+    if (!dish) return;
+    list.push({
+      time: time, dish: dish, who: who, want: want,
+      matched: onMenu && DATA.DISHES[dish] && DATA.DISHES[dish].kind === want
+    });
   }
   if (S.day === 1 && !seen("svc_ahe")) add("ahe", hasDish("mushroom_soup") ? "mushroom_soup" : bestDish(), 19 * 60);
   if (S.day === 2 && !seen("svc_zhou")) add("zhou", hasDish("grilled_fish") ? "grilled_fish" : bestDish(), 19 * 60 + 20);
@@ -110,16 +133,18 @@ function lostCustomer(c, msg) {
 function payCustomer(c) {
   var d = DATA.DISHES[c.dish];
   if (!d) return;
-  var tip = 1 + (c.patience > c.maxPatience * 0.5 ? 1 : 0) + (c.who ? 1 : 0) + (hasUpgrade("sign") ? 1 : 0);
+  var tip = 1 + (c.patience > c.maxPatience * 0.5 ? 1 : 0) + (c.who ? 1 : 0) + (hasUpgrade("sign") ? 1 : 0) + (c.matched ? 1 : 0);
+  if (c.matched) SERV.satisfied++; else SERV.missed++;
   S.money += d.price + tip;
   SERV.earned += d.price;
   SERV.tips += tip;
   SERV.served++;
   SERV.repDelta++;
+  if (c.who && DATA.NPCS[c.who] && c.dish === DATA.NPCS[c.who].fav) addNpc(c.who, 1);
   sayToast("+" + (d.price + tip) + " 文");
   var fp = c.seat >= 0 ? seatPos(c.seat) : { x: c.x, y: c.y };
   SERV.fx.push({ text: "+" + (d.price + tip) + "文", x: fp.x, y: fp.y - 18, until: game.time + 1.2 });
-  if (tip > 1) SERV.fx.push({ text: "好", x: fp.x + 28, y: fp.y - 20, until: game.time + 1.2 });
+  if (tip > 1) SERV.fx.push({ text: c.matched ? "对味" : "好", x: fp.x + 20, y: fp.y - 28, until: game.time + 1.2 });
   if (S.day === 7 && c.who) {
     if (!S.flags["vip_" + c.who]) {
       var ok = (c.who === "po" && c.dish === "god_soup") || (c.who === "zhou" && c.dish === "grilled_fish") || (c.who === "ahe" && c.dish === "mushroom_soup");
@@ -242,7 +267,7 @@ game.scene("service", {
       clock: 1080, end: 1320, seats: seats, sel: 0,
       tables: new Array(seats).fill(null), queue: [], customers: [],
       schedule: buildSchedule(), spawnAt: 0,
-      served: 0, lost: 0, earned: 0, tips: 0, repDelta: 0,
+      served: 0, lost: 0, earned: 0, tips: 0, repDelta: 0, satisfied: 0, missed: 0,
       busy: false, menuOpen: false, paused: false, pauseSel: 0,
       done: false, storyQueue: [], fx: [], staffTimer: 5,
       waiter: { x: 120, y: 144, fx: 120, fy: 144, tx: 120, ty: 144, t: 1, action: "" }
@@ -290,7 +315,7 @@ game.scene("service", {
     while (SERV.spawnAt < SERV.schedule.length && SERV.clock >= SERV.schedule[SERV.spawnAt].time) {
       var sc = SERV.schedule[SERV.spawnAt++];
       if (!sc.dish) continue;
-      var c = makeCustomer(sc.dish, sc.who);
+      var c = makeCustomer(sc.dish, sc.who, sc.want, sc.matched);
       var seat = freeSeat();
       if (seat >= 0) { SERV.customers.push(c); seatCustomer(c, seat); }
       else queueCustomer(c);

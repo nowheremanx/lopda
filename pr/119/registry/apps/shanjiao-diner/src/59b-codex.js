@@ -6,7 +6,8 @@ var CODEX_TAB = 0, CODEX_SEL = 0, CODEX_SCROLL = 0, CODEX_FROM = null;
 var CODEX_TABS = [
   { id: "ing", label: "食材" },
   { id: "dish", label: "菜谱" },
-  { id: "foe", label: "山兽" }
+  { id: "foe", label: "山兽" },
+  { id: "npc", label: "常客" }
 ];
 
 var CODEX_WHERE = {
@@ -24,6 +25,7 @@ var CODEX_SHORT = {
 };
 var CODEX_FOES = ["boar", "monkey", "bamboo", "boss"];
 var CODEX_FOE_GLYPH = { boar: "猪", monkey: "猴", bamboo: "竹", boss: "魈" };
+var CODEX_NPC_GLYPH = { ahe: "禾", zhou: "周", yan: "岩", po: "婆" };
 var CODEX_DISH_GLYPH = {
   mushroom_soup: "汤", greens_cake: "饼", bamboo_rice: "饭", grilled_fish: "鱼",
   pork: "肉", bamboo_pork: "肉", mushroom_pot: "煲", god_soup: "羹"
@@ -32,7 +34,8 @@ var CODEX_DISH_GLYPH = {
 function codexIds() {
   if (CODEX_TAB === 0) return DATA.ING_ORDER.slice();
   if (CODEX_TAB === 1) return DATA.DISH_ORDER.slice();
-  return CODEX_FOES.slice();
+  if (CODEX_TAB === 2) return CODEX_FOES.slice();
+  return DATA.NPC_ORDER.slice();
 }
 function codexUsedBy(id) {
   var out = [];
@@ -91,12 +94,12 @@ game.scene("codex", {
     // tabs
     g.window(6, 32, 204, 20, { thin: true });
     for (var t = 0; t < CODEX_TABS.length; t++) {
-      var tx = 10 + t * 67;
+      var tx = 10 + t * 50;
       if (t === CODEX_TAB) {
-        g.rect(tx, 34, 64, 16, g.INK);
-        g.text(CODEX_TABS[t].label, tx + 32, 36, { align: "center", color: g.PAPER });
+        g.rect(tx, 34, 48, 16, g.INK);
+        g.text(CODEX_TABS[t].label, tx + 24, 36, { align: "center", color: g.PAPER });
       } else {
-        g.text(CODEX_TABS[t].label, tx + 32, 36, { align: "center" });
+        g.text(CODEX_TABS[t].label, tx + 24, 36, { align: "center" });
       }
     }
 
@@ -109,7 +112,8 @@ game.scene("codex", {
         var id = list[idx], col = selected ? gg.PAPER : gg.INK;
         var glyph = CODEX_TAB === 0 ? DATA.ING[id].one
           : CODEX_TAB === 1 ? CODEX_DISH_GLYPH[id]
-          : CODEX_FOE_GLYPH[id];
+          : CODEX_TAB === 2 ? CODEX_FOE_GLYPH[id]
+          : CODEX_NPC_GLYPH[id];
         // a character tile reads at 1x; the 12 px ingredient sprites do not
         gg.rect(10, y, 14, 12, selected ? gg.PAPER : gg.INK);
         gg.text(glyph, 17, y, { align: "center", color: selected ? gg.INK : gg.PAPER });
@@ -123,11 +127,17 @@ game.scene("codex", {
             { x: 32, w: 100, text: DATA.DISHES[id].name, color: col },
             { x: 140, w: 64, text: DATA.DISHES[id].price + "文", align: "right", color: selected ? gg.PAPER : gg.DARK }
           ]);
-        } else {
+        } else if (CODEX_TAB === 2) {
           var foe = DATA.ENEMIES[id];
           UI.columns(gg, y, [
             { x: 32, w: 96, text: foe.name, color: col },
             { x: 140, w: 64, text: "HP " + foe.hp, align: "right", color: selected ? gg.PAPER : gg.DARK }
+          ]);
+        } else {
+          var npc = DATA.NPCS[id];
+          UI.columns(gg, y, [
+            { x: 32, w: 96, text: npc.name, color: col },
+            { x: 140, w: 64, text: "心 " + ((S && S.npc[id]) || 0), align: "right", color: selected ? gg.PAPER : gg.DARK }
           ]);
         }
       }
@@ -151,15 +161,22 @@ game.scene("codex", {
         var need = [];
         for (var k in dish.need) if (Object.prototype.hasOwnProperty.call(dish.need, k)) need.push(DATA.ING[k].name + "×" + dish.need[k]);
         UI.text(g, "材料：" + need.join("　"), 12, 170, { color: g.DARK, fit: 196 });
-        UI.text(g, "解锁：" + codexUnlock(sel), 12, 184, { color: g.DARK, fit: 196 });
+        UI.text(g, "类型：" + (DATA.KIND_NAME[dish.kind] || dish.kind) + "　解锁：" + codexUnlock(sel), 12, 184, { color: g.DARK, fit: 196 });
         UI.text(g, dish.desc, 12, 198, { fit: 196 });
-      } else {
+      } else if (CODEX_TAB === 2) {
         var f = DATA.ENEMIES[sel];
         UI.text(g, f.name, 12, 156);
         UI.right(g, "HP " + f.hp + "　攻 " + f.atk, 204, 156);
         UI.text(g, "掉落：" + codexDrops(f), 12, 170, { color: g.DARK, fit: 196 });
         UI.text(g, f.intro, 12, 184, { fit: 196 });
         if (f.boss) UI.text(g, "第七天山神宴前的最后一关。", 12, 198, { color: g.DARK, fit: 196 });
+      } else {
+        var npc = DATA.NPCS[sel];
+        UI.text(g, npc.name, 12, 156);
+        UI.text(g, npc.title, 204, 156, { align: "right", color: g.DARK, fit: 90 });
+        UI.text(g, "喜欢：" + DATA.DISHES[npc.fav].name, 12, 170, { color: g.DARK, fit: 196 });
+        UI.text(g, npc.hint, 12, 184, { fit: 196 });
+        UI.text(g, "好感 " + ((S && S.npc[sel]) || 0) + "/5　3 心会来帮忙", 12, 198, { color: g.DARK, fit: 196 });
       }
     }
     UI.footer(g, "←→ 分类　↑↓ 选　B 返回");
