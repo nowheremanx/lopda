@@ -126,6 +126,20 @@ test("klotski: pieceAt covers both cells of a bar (the bug that made taps miss)"
   assert.equal(KRules.pieceAt(level, pieces, 1, 0), KRules.pieceAt(level, pieces, 0, 0));
 });
 
+test("klotski: a piece cannot slide onto or through another piece", () => {
+  const level = KRules.parse(["AB..", "....", "....", "....", "...."]);
+  const pieces = KRules.reset(level);
+  assert.equal(KRules.maxSteps(level, pieces, 0, 1, 0), 0, "the soldier slid through the next soldier");
+  assert.equal(KRules.step(level, pieces, 0, 1, 0), null, "the soldier stepped onto the next soldier");
+  const bar = KRules.parse(["AAB.", "....", "....", "....", "...."]);
+  const barPieces = KRules.reset(bar);
+  assert.equal(KRules.maxSteps(bar, barPieces, 0, 1, 0), 0, "a 2x1 bar slid into a 1x1");
+  assert.equal(KRules.maxSteps(bar, barPieces, 0, 0, 1), 4, "the free column below the bar was lost");
+  const blocked = KRules.parse(["AA..", "B...", "....", "....", "...."]);
+  const blockedPieces = KRules.reset(blocked);
+  assert.equal(KRules.maxSteps(blocked, blockedPieces, 0, 0, 1), 0, "a 2x1 bar slid down onto a soldier");
+});
+
 test("klotski: validPieces rejects overlaps, walls and pieces outside the board", () => {
   const level = KRules.parse(["B..C", "B..C", "....", "....", "...."]);
   const pieces = KRules.reset(level);

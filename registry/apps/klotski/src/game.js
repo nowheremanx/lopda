@@ -160,17 +160,34 @@ function dottedRect(g, x, y, w, h, tone) {
   for (i = 0; i < w; i += 4) { g.rect(x + i, y, 2, 1, tone); g.rect(x + i, y + h - 1, 2, 1, tone); }
   for (i = 0; i < h; i += 4) { g.rect(x, y + i, 1, 2, tone); g.rect(x + w - 1, y + i, 1, 2, tone); }
 }
-/* a target that stays visible over paper and over ink: a paper under-corner then an ink corner */
-function cornerMark(g, x, y, w, h, size) {
-  var corners = [[x, y, 1, 1], [x + w, y, -1, 1], [x, y + h, 1, -1], [x + w, y + h, -1, -1]];
-  var i, c, sx, sy, dx, dy;
-  for (i = 0; i < corners.length; i++) {
-    c = corners[i]; sx = c[0]; sy = c[1]; dx = c[2]; dy = c[3];
-    g.rect(Math.min(sx, sx + dx * size), sy - 1, size + 1, 3, g.PAPER);
-    g.rect(sx - 1, Math.min(sy, sy + dy * size), 3, size + 1, g.PAPER);
-    g.rect(Math.min(sx, sx + dx * size), sy, size + 1, 1, g.INK);
-    g.rect(sx, Math.min(sy, sy + dy * size), 1, size + 1, g.INK);
+/* The lesson's target must stay visible when another piece sits on it. A 2 px dashed border
+   alternates ink and paper, so at least half of it reads on either tone; the corners and the centre
+   have a paper underlay so they do not vanish on a dark piece. */
+function targetMark(g, x, y, w, h) {
+  var i, len, tone, c, sx, sy, dx, dy;
+  x += 2; y += 2; w -= 4; h -= 4;
+  for (i = 0; i < w; i += 4) {
+    len = Math.min(4, w - i);
+    tone = (Math.floor(i / 4) & 1) ? g.PAPER : g.INK;
+    g.rect(x + i, y, len, 2, tone);
+    g.rect(x + i, y + h - 2, len, 2, tone);
   }
+  for (i = 0; i < h; i += 4) {
+    len = Math.min(4, h - i);
+    tone = (Math.floor(i / 4) & 1) ? g.PAPER : g.INK;
+    g.rect(x, y + i, 2, len, tone);
+    g.rect(x + w - 2, y + i, 2, len, tone);
+  }
+  var corners = [[x - 1, y - 1, 1, 1], [x + w + 1, y - 1, -1, 1], [x - 1, y + h + 1, 1, -1], [x + w + 1, y + h + 1, -1, -1]];
+  for (i = 0; i < 4; i++) {
+    c = corners[i]; sx = c[0]; sy = c[1]; dx = c[2]; dy = c[3];
+    g.rect(Math.min(sx, sx + dx * 7), sy - 1, 8, 3, g.PAPER);
+    g.rect(sx - 1, Math.min(sy, sy + dy * 7), 3, 8, g.PAPER);
+    g.rect(Math.min(sx, sx + dx * 7), sy, 8, 1, g.INK);
+    g.rect(sx, Math.min(sy, sy + dy * 7), 1, 8, g.INK);
+  }
+  g.circle(x + w / 2, y + h / 2, 3, g.PAPER, true);
+  g.circle(x + w / 2, y + h / 2, 2, g.INK, true);
 }
 function arrow(g, x0, y0, x1, y1, tone) {
   g.line(x0, y0, x1, y1, tone);
@@ -221,8 +238,14 @@ function drawPiece(g, level, geom, i, at, ox, oy, selected) {
     g.rect(x + 4, y + 4, 2, 2, g.MID);
     g.rect(x + w - 6, y + h - 6, 2, 2, g.MID);
   }
-  var label = pieceLabel(p);
+  var isGoal = !!(level.goal && level.goal.piece && level.goal.piece === p.ch);
+  var label = isGoal && p.kind !== "cao" ? p.ch : pieceLabel(p);
   g.text(label, x + w / 2, y + h / 2 - 7, { align: "center", color: p.kind === "cao" ? g.PAPER : g.INK });
+  if (isGoal) {
+    /* the lesson's marked piece: a solid ring, with a paper gap so it reads on ink too */
+    g.frame(x - 4, y - 4, w + 8, h + 8, g.PAPER);
+    g.frame(x - 5, y - 5, w + 10, h + 10, g.INK);
+  }
   if (selected) dottedRect(g, x - 2, y - 2, w + 4, h + 4, g.INK);
 }
 
@@ -284,8 +307,7 @@ function drawBoard(g, level, pieces, anim, bump, selected, hint, hideCao, caoExt
     if (ti >= 0) {
       p = level.pieces[ti];
       var tx = geom.x + level.goal.x * cell, ty = geom.y + level.goal.y * cell;
-      cornerMark(g, tx + 2, ty + 2, p.w * cell - 4, p.h * cell - 4, 8);
-      g.circle(tx + p.w * cell / 2, ty + p.h * cell / 2, 2, g.INK, true);
+      targetMark(g, tx, ty, p.w * cell, p.h * cell);
     }
   }
   if (hint) {

@@ -88,9 +88,9 @@ var KLOTSKI_DATA = {
       intro: [
         { zh: "这是一块 4×5 的华容道。木牌只能横着或竖着滑进空格，不能拿起来。", en: "This is a 4x5 Klotski board. Pieces only slide into empty cells; nothing can be lifted." },
         { zh: "点一块选中，再拖动它。方向键也能移动选中的块。每移动一格算一步。", en: "Tap a piece to select it, then drag. The arrow keys move the selected piece too. One cell is one step." },
-        { zh: "先把小兵移到虚线圈里。不要想太远，看清眼前这一步。", en: "Move the soldier into the dashed target. Do not plan too far ahead yet; see this one step clearly." }
+        { zh: "先把小兵 A 移到虚线圈里。不要想太远，看清眼前这一步。", en: "Move soldier A into the dashed target. Do not plan too far ahead yet; see this one step clearly." }
       ],
-      tip: { zh: "把小兵拖到虚线格。", en: "Drag the soldier to the dashed cell." }
+      tip: { zh: "把小兵 A 拖到虚线格。", en: "Drag soldier A to the dashed cell." }
     },
     {
       id: "m02", diff: 1, par: 3,
@@ -129,7 +129,7 @@ var KLOTSKI_DATA = {
         { zh: "四个兵把门口占满了。把他们分别送到左右两边，不要把中间堵住。", en: "Four soldiers fill the doorway. Send them to the left and right edges; keep the middle clear." },
         { zh: "门铺好了，曹操才能下楼。", en: "Prepare the door, and Cao can step down." }
       ],
-      tip: { zh: "把曹操 C 往下移一格。", en: "Move Cao C down one row." }
+      tip: { zh: "把曹操往下移一格。", en: "Move Cao down one row." }
     },
     {
       id: "m05", diff: 2, par: 5,
@@ -168,7 +168,7 @@ var KLOTSKI_DATA = {
         { zh: "先只做一件事：让曹操向下走一格。看清楚是哪两个兵要先让开。", en: "Do one thing only: move Cao down one row. Find the two soldiers that must step aside first." },
         { zh: "完整的一局在关卡列表里，最少 116 格。这一课只拆开第一步。", en: "The full puzzle is in the level list, 116 cells at best. This lesson only opens the first step." }
       ],
-      tip: { zh: "只把曹操 A 向下挪一格。", en: "Move Cao A down exactly one row." }
+      tip: { zh: "只把曹操向下挪一格。", en: "Move Cao down exactly one row." }
     },
     {
       id: "m08", diff: 3, par: 17,
