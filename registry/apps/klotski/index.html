@@ -2358,7 +2358,8 @@ function drawHorse(g, x, y, phase) {
 }
 
 function drawNight(g, nt) {
-  var i, x, top, p, e, hx, hy, tilt, bx, bt, by;
+  var i, x, wx, top, p, e, hx, hy, bx, gx, scroll, off, tilt, bt, by;
+  var RIDE = 1.1, SPEED = 26, TAU = Math.PI * 2;
   g.rect(0, 0, 160, 200, g.INK);
 
   g.text(T({ zh: "华容道", en: "HUARONG" }), 80, 6, { align: "center", color: g.PAPER });
@@ -2376,49 +2377,59 @@ function drawNight(g, nt) {
   g.dither(118, 34, 7, 7, g.MID, 2);
   g.circle(124, 40, 19, g.DARK, false);
 
-  /* far and near ridges */
+  /* Once the rider is in the middle the camera moves instead: the ridges, road and grass are
+     periodic over 160 px, so off = scroll % 160 wraps without a visible seam. */
+  scroll = Math.max(0, nt - RIDE) * SPEED;
+  off = scroll % 160;
   for (x = 0; x < 160; x += 2) {
-    top = 92 - Math.round(10 * Math.sin(x * 0.07 + 1) + 6 * Math.sin(x * 0.19));
+    wx = x + off;
+    top = 92 - Math.round(10 * Math.sin(TAU * 2 * wx / 160 + 1) + 6 * Math.sin(TAU * 5 * wx / 160));
     top = clamp(top, 58, 128);
     g.rect(x, top, 2, 200 - top, g.MID);
   }
   for (x = 0; x < 160; x += 2) {
-    top = 118 - Math.round(8 * Math.sin(x * 0.09 + 2) + 5 * Math.sin(x * 0.23));
+    wx = x + off;
+    top = 118 - Math.round(8 * Math.sin(TAU * 3 * wx / 160 + 2) + 5 * Math.sin(TAU * 7 * wx / 160));
     top = clamp(top, 76, 138);
     g.rect(x, top, 2, 200 - top, g.DARK);
   }
 
-  /* the road, side view */
+  /* the road, side view; its edge and stones repeat every 20 px */
   for (x = 0; x < 160; x++) {
-    top = 139 - Math.round(2 * Math.sin(x * 0.05));
+    wx = x + off;
+    top = 139 - Math.round(2 * Math.sin(TAU * 3 * wx / 160 + 0.5));
     g.rect(x, top, 1, 160 - top, g.MID);
-    if (x % 7 === 0) g.rect(x, top, 4, 1, g.PAPER);
+    if (((wx % 20) + 20) % 20 < 4) g.rect(x, top, 1, 1, g.PAPER);
   }
-  for (x = 10; x < 150; x += 24) g.rect(x, 146, 2, 1, g.PAPER);
 
-  /* the gate on the left */
-  g.rect(0, 102, 6, 58, g.DARK); g.rect(0, 102, 1, 58, g.PAPER); g.rect(5, 102, 1, 58, g.PAPER);
-  g.rect(19, 102, 6, 58, g.DARK); g.rect(19, 102, 1, 58, g.PAPER); g.rect(24, 102, 1, 58, g.PAPER);
-  g.rect(0, 97, 25, 6, g.DARK); g.rect(0, 97, 25, 1, g.PAPER);
-
-  /* Guan Yu in the gate, lowering the halberd */
-  g.rect(4, 106, 14, 34, g.DARK);
-  g.frame(4, 106, 14, 34, g.PAPER);
-  g.text(T({ zh: "关", en: "G" }), 11, 110, { align: "center", color: g.PAPER });
-  tilt = nt < 0.9 ? 0 : Math.min(1, (nt - 0.9) / 0.6);
-  hy = 104 - Math.round(2 * tilt);
-  hx = 18 + Math.round(8 * tilt);
-  g.line(18, 154, hx, hy, g.PAPER);
-  g.line(hx, hy, hx + 4, hy - 4, g.PAPER);
-
-  /* foreground grass, and the shadow that grounds the horse */
-  for (i = 0; i < 9; i++) {
-    g.rect(12 + i * 18, 160, 2, 3, g.MID);
-    g.rect(16 + i * 18, 162, 1, 2, g.DARK);
+  /* grass tufts, also periodic */
+  for (x = 0; x < 160; x++) {
+    wx = x + off;
+    if (((wx % 40) + 40) % 40 < 2) {
+      g.rect(x, 160, 2, 3, g.MID);
+      g.rect(x + 2, 162, 1, 2, g.DARK);
+    }
   }
-  /* Cao rides out and away */
-  p = clamp((nt % 2.0) / 1.8, 0, 1); e = 1 - (1 - p) * (1 - p);
-  bx = 18 + Math.round(130 * e);
+
+  /* the gate is a one-off: it slides off to the left and does not come round again */
+  gx = -scroll;
+  if (gx > -30) {
+    g.rect(gx, 102, 6, 58, g.DARK); g.rect(gx, 102, 1, 58, g.PAPER); g.rect(gx + 5, 102, 1, 58, g.PAPER);
+    g.rect(gx + 19, 102, 6, 58, g.DARK); g.rect(gx + 19, 102, 1, 58, g.PAPER); g.rect(gx + 24, 102, 1, 58, g.PAPER);
+    g.rect(gx, 97, 25, 6, g.DARK); g.rect(gx, 97, 25, 1, g.PAPER);
+    g.rect(gx + 4, 106, 14, 34, g.DARK);
+    g.frame(gx + 4, 106, 14, 34, g.PAPER);
+    g.text(T({ zh: "关", en: "G" }), gx + 11, 110, { align: "center", color: g.PAPER });
+    tilt = nt < 0.9 ? 0 : Math.min(1, (nt - 0.9) / 0.6);
+    hy = 104 - Math.round(2 * tilt);
+    hx = gx + 18 + Math.round(8 * tilt);
+    g.line(gx + 18, 154, hx, hy, g.PAPER);
+    g.line(hx, hy, hx + 4, hy - 4, g.PAPER);
+  }
+
+  /* the rider moves to the centre once, then the world moves under him */
+  p = clamp(nt / RIDE, 0, 1); e = 1 - (1 - p) * (1 - p);
+  bx = 18 + Math.round(38 * e);
   g.rect(bx + 7, 151, 32, 2, g.DARK);
   drawHorse(g, bx, 119, nt * 12);
 
