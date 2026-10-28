@@ -542,7 +542,15 @@ GM.draw = function (ctx, state) {
   GM.drawRope(buf, state.hook);
   if (state.hook.item) {
     tip = GM.tip(state.hook);
-    GM.drawItemAt(buf, state.hook.item, tip.x * GM.SCALE, tip.y * GM.SCALE, state.anim);
+    it = state.hook.item;
+    if (it.type === "mole") {
+      var ox = it.x, oy = it.y;
+      it.x = tip.x; it.y = tip.y;
+      GM.drawMole(buf, it, state.anim);
+      it.x = ox; it.y = oy;
+    } else {
+      GM.drawItemAt(buf, it, tip.x * GM.SCALE, tip.y * GM.SCALE, state.anim);
+    }
     GM.brect(buf, Math.round(tip.x * GM.SCALE) - 2, Math.round(tip.y * GM.SCALE) - 5, 4, 2, GM.PAPER);
   }
   GM.drawHook(buf, state.hook);
