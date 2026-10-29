@@ -10,8 +10,9 @@
  * then that screen. Drums keeps 1a's four drum tabs and 4x4 grid. Bass and melody share the same 16 cells with the
  * pitch name in the cell and eight pitch keys below. Chords are two cells (the two halves of the bar) and six keys.
  * Song is the chain in fours (one row is a four-bar phrase) and add; a slot's letter is picked in the sheet that
- * opens on its second tap. A dot on a tab or a pattern letter means that track or pattern has notes. On = ink; the
- * step being heard is mid (empty) or dark (lit).
+ * opens on its second tap. On the song screen ▸ starts at the selected slot (the slot sheet's first row does the
+ * same), so one bar can be heard without playing the whole tape from the top. A dot on a tab or a pattern letter means
+ * that track or pattern has notes. On = ink; the step being heard is mid (empty) or dark (lit).
  *
  * The player: one scheduler over LopdaSong.chainEvents(), 0.1 s ahead every 25 ms into LP.SND.app through
  * LopdaStudioSynth. On a drum/note/chord screen it loops the edit pattern; on the song screen it plays the chain one
@@ -248,7 +249,7 @@ function setSong(song){
   else if(T.focus>last) T.focus=last;
   if(T.focus<0) T.focus=0;
   /* a whole different tape mid-song starts its own chain from where the ears are */
-  if(T.playing && T.mode==="song") startSongPos(T.heard);
+  if(T.playing && T.mode==="song") startSongPos(0,T.heard);
 }
 /* one note or hit: the drum kit, the voice of each track, the chord expanded (12.6, 12.7) */
 function playEvent(e,at,bpm){
@@ -341,14 +342,17 @@ function scheduleTo(to){
     T.lastTick=p;
   }
 }
-/* the song chain position at play start (song mode): bar 0 is heard, slot 1 is next */
-function startSongPos(tick){
+/* the song chain position at play start (song mode): the selected slot is heard first (12.8), the slot after it is
+   next, and the chain wraps back to slot 0 after the last one. atTick keeps the old timeline when a whole tape is
+   swapped mid-song; a normal start begins at tick 0. */
+function startSongPos(slot,atTick){
   var chain=(T.song&&T.song.song)||[0], n=chain.length;
-  T.hSlot=0;
-  T.hPat=chain[0];
-  T.hStart=tick||0;
-  T.hTicks=patternTicks(chain[0]);
-  T.nSlot=n>1?1:0;
+  if(!(slot>=0) || slot>=n) slot=0;
+  T.hSlot=slot;
+  T.hPat=chain[slot];
+  T.hStart=atTick||0;
+  T.hTicks=patternTicks(chain[slot]);
+  T.nSlot=n>1?(slot+1)%n:0;
   T.ahead=null;
 }
 /* the ears crossed a bar boundary: the bar the scheduler started ahead becomes the heard one, and the slot after
@@ -436,7 +440,7 @@ function startPlay(){
   T.playing=true;
   T.startAt=ac.currentTime+0.02;
   T.lastTick=0; T.heard=0; T.painted=null; T.navKey="";
-  if(T.mode==="song") startSongPos(0);
+  if(T.mode==="song") startSongPos(T.slot,0);
   else { T.ahead=null; T.hSlot=-1; T.hPat=-1; T.hTicks=0; T.nSlot=0; }
   T.loop=setInterval(loop,LOOP_MS);
   LP.keepAwake(true);
@@ -722,7 +726,8 @@ function renderPlay(){
   if(v) v.setAttribute("data-playing",T.playing?"true":"false");
   if(!b) return;
   b.setAttribute("data-playing",T.playing?"true":"false");
-  b.setAttribute("aria-label",tr(T.playing?"studio.stop":"studio.play"));
+  var n=(T.slot>=0?T.slot:0)+1;
+  b.setAttribute("aria-label",tr(T.playing?"studio.stop":(T.screen==="song"?"studio.song.playfrom":"studio.play"),{n:n}));
 }
 function stateKey(){
   return T.screen+"|"+T.pat+"|"+(T.playing?T.mode:"")+"|"+(T.playing?playedPat():"")+
@@ -875,6 +880,8 @@ function renderSong(){
     })(i);
   }
   $("studio-add").textContent=tr("studio.song.add");
+  /* the play button names the slot it will start from (12.8) */
+  renderPlay();
   /* the chain cells are new nodes: put the playing slot back on them when the chain changes mid-song */
   if(T.playing) paintPlaying(true);
 }
@@ -1271,7 +1278,14 @@ function renderSheet(){
   }
   if(T.sheet==="slot"){
     var chain=(T.song&&T.song.song)||[0], at=T.slot, own=chain[at]==null?0:chain[at];
-    sheetHead(tr("studio.song.slot",{n:at+1,p:letter(own)}));
+    var head=sheetHead(tr("studio.song.slot",{n:at+1,p:letter(own)}));
+    /* 12.8: the title row's play button starts the chain at this slot */
+    head.className+=" st-slot-title";
+    var playBtn=el("button","st-slot-play");
+    playBtn.type="button";
+    playBtn.setAttribute("aria-label",tr("studio.song.play"));
+    playBtn.onclick=function(){ playFromSlot(at); };
+    head.appendChild(playBtn);
     /* first the letters: one tap sets the slot and closes; then the edits that keep the slot where it is */
     sh.appendChild(patternButtons(function(p){ slotLetter(p); },own));
     var sul=el("ul","lcd-menu st-slot-actions");
@@ -1509,6 +1523,20 @@ function selectSlot(i){
   T.slot=i;
   T.focus=T.slot;
   renderSong(); renderNav();
+}
+/* the song screen's ▸ and the slot sheet's first row (12.8): play the chain from this slot to its end, then wrap
+   back to the top. A song already playing restarts here, so this is also the way to jump to another bar. */
+function playFromSlot(i){
+  if(!T.loaded || !T.song) return;
+  var s=T.song.song||[0];
+  if(!(i>=0) || i>=s.length) i=0;
+  T.slot=i;
+  T.focus=i;
+  T.sheet="";
+  renderSong(); renderNav(); renderSheet();
+  scrollSlotIntoView();
+  if(T.playing) stopPlay();
+  startPlay();
 }
 /* "+" selects the new last slot; the chain is the only scroller, so nudge just its scrollTop */
 function scrollSlotIntoView(){

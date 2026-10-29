@@ -502,6 +502,7 @@
       "studio.chord.half1": "前半小节", "studio.chord.half2": "后半小节", "studio.chord.key": "和弦 {name}",
       "studio.rest": "停", "studio.rest.cell": "第 {n} 步：停",
       "studio.song.slot": "第 {n} 格：{p}", "studio.song.add": "+ 加一段",
+      "studio.song.play": "从这里播放", "studio.song.playfrom": "从第 {n} 格播放",
       "studio.song.insert": "前面插一段", "studio.song.copy": "后面复制一段", "studio.song.del": "删掉这一格",
       "studio.song.full": "最多 64 段",
       "studio.kit": "换鼓组：{kit}", "studio.kit.soft": "软鼓", "studio.kit.chip": "芯片",
@@ -520,7 +521,7 @@
       "studio.tour.c2": "点一个和弦换掉它；再点一次选中的格就删掉。后一格空着，前一个和弦就响满一小节。",
       "studio.tour.s1": "A 到 P 是十六段，每段一小节。点这里换一段，或者把这一段复制过去改。",
       "studio.tour.s2": "这一串就是整首歌，从左往右放，一行四小节。点一格选中，再点一次换字母。",
-      "studio.tour.s3": "+ 在最后加一段。点选中的格，可以在前面插一段、复制或者删掉它。在这一屏按 ▸ 放整首歌。",
+      "studio.tour.s3": "+ 在最后加一段。点选中的格，可以在前面插一段、复制或者删掉它。按 ▸ 从选中的那一格开始放整首歌。",
 
       "boot.nostore": "这台浏览器不让存档，关掉页面后内容会丢。"
     },
@@ -1017,6 +1018,7 @@
       "studio.chord.half1": "First half", "studio.chord.half2": "Second half", "studio.chord.key": "Chord {name}",
       "studio.rest": "Rest", "studio.rest.cell": "step {n}: rest",
       "studio.song.slot": "Slot {n}: {p}", "studio.song.add": "+ Add",
+      "studio.song.play": "Play from here", "studio.song.playfrom": "Play from slot {n}",
       "studio.song.insert": "Insert before", "studio.song.copy": "Copy after", "studio.song.del": "Delete",
       "studio.song.full": "64 at most",
       "studio.kit": "Kit: {kit}", "studio.kit.soft": "Soft", "studio.kit.chip": "Chip",
@@ -1035,7 +1037,7 @@
       "studio.tour.c2": "Tap a chord to change it; tap the selected square again to remove it. Leave the second square empty and the first chord fills the bar.",
       "studio.tour.s1": "A to P are sixteen patterns, one bar each. Tap here to switch, or copy this one and change the copy.",
       "studio.tour.s2": "This row is the whole song, played left to right, four bars a row. Tap a slot to select it, tap it again to change its letter.",
-      "studio.tour.s3": "+ adds a slot at the end. Tap the selected slot to insert before it, copy it or delete it. Press ▸ on this screen to play the whole song.",
+      "studio.tour.s3": "+ adds a slot at the end. Tap the selected slot to insert before it, copy it or delete it. Press ▸ to play the whole song from the selected slot.",
 
       "boot.nostore": "This browser won't keep data. It's lost when the page closes."
     }

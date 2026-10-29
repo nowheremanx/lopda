@@ -2266,6 +2266,8 @@ test("studio: playing the song [A, B] at 140 BPM walks slot 0 -> 1 -> 0 and sche
   assert.deepEqual(await p.$$eval(".st-chain-cell", (els) => els.map((e) => e.textContent)), ["A"]);
   await p.click("#studio-add");
   assert.deepEqual(await p.$$eval(".st-chain-cell", (els) => els.map((e) => e.textContent)), ["A", "B"]);
+  /* ▸ on the song screen starts at the selected slot: pick the first one to hear the whole chain from the top */
+  await p.locator(".st-chain-cell").first().click();
   await p.evaluate(() => { window.__studioChain.length = 0; window.__studioHits.length = 0; window.__studioNotes.length = 0; });
 
   await p.click("#studio-play");
@@ -2286,6 +2288,46 @@ test("studio: playing the song [A, B] at 140 BPM walks slot 0 -> 1 -> 0 and sche
   assert.deepEqual(pats.sort(), [0, 1], "chainEvents scheduled both patterns");
   assert.ok(await p.evaluate(() => window.__studioHits.length > 0), "drum hits were scheduled");
   assert.ok(await p.evaluate(() => window.__studioNotes.length > 0), "melodic notes were scheduled");
+  assert.deepEqual(errors, []);
+});
+
+test("studio: ▸ on the song screen starts at the selected slot and wraps after the last one", { skip, timeout: 90000 }, async (t) => {
+  const { p, errors } = await hitCountingPage(t);
+  const BPM = 140;
+  await preparedTape(p, [0, 1, 2, 3], BPM);
+  await p.locator("#studio-chain .st-chain-cell").nth(2).click();
+  assert.equal(await p.getAttribute("#v-studio .st-chain-cell.sel", "data-slot"), "2", "slot 3 is selected");
+  assert.equal(await p.getAttribute("#studio-play", "aria-label"), "从第 3 格播放", "the play button says where it starts");
+  await p.evaluate(() => { window.__studioChain.length = 0; window.__studioHits.length = 0; window.__studioNotes.length = 0; });
+
+  await p.click("#studio-play");
+  assert.equal(await p.getAttribute("#v-studio", "data-mode"), "song");
+  assert.equal(await p.getAttribute("#v-studio", "data-play-slot"), "2", "the selected slot is heard first");
+  assert.equal(await p.getAttribute("#v-studio", "data-play-pat"), "2");
+  assert.deepEqual(await p.$$eval(".st-chain-cell", (els) => els.map((e) => e.classList.contains("playing"))), [false, false, true, false]);
+  await p.waitForFunction(() => document.querySelector("#v-studio").dataset.playSlot === "3", null, { timeout: 15000 });
+  assert.equal(await p.getAttribute("#v-studio", "data-play-pat"), "3");
+  await p.waitForFunction(() => document.querySelector("#v-studio").dataset.playSlot === "0", null, { timeout: 15000 });
+  assert.equal(await p.getAttribute("#v-studio", "data-play-pat"), "0", "after the last slot the chain wraps to the top");
+  await p.click("#studio-play");
+  await p.waitForFunction(() => document.querySelector("#v-studio").dataset.mode === "");
+  assertBars((await scheduledBarPatterns(p, BPM)).bars, [2, 3]);
+  assert.deepEqual(errors, []);
+});
+
+test("studio: the slot sheet's play button starts the chain at that slot", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await hitCountingPage(t);
+  await preparedTape(p, [0, 1, 2, 3], 140);
+  await openSlotSheet(p, 1);
+  assert.equal(await p.getAttribute("#studio-sheet .st-slot-play", "aria-label"), "从这里播放");
+  const box = await p.locator("#studio-sheet .st-slot-play").boundingBox();
+  assert.ok(box.width >= 44 && box.height >= 44, `the slot play button is a 44 px target (${box.width}x${box.height})`);
+  await p.click("#studio-sheet .st-slot-play");
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  await p.waitForFunction(() => document.querySelector("#v-studio").dataset.mode === "song");
+  assert.equal(await p.getAttribute("#v-studio", "data-play-slot"), "1", "the sheet's slot is heard first");
+  assert.equal(await p.getAttribute("#v-studio", "data-play-pat"), "1");
+  assert.equal(await p.getAttribute("#studio-play", "aria-label"), "停止", "the play button is now Stop");
   assert.deepEqual(errors, []);
 });
 
@@ -2606,6 +2648,7 @@ test("studio: every screen fits at 375x667 with 44 px buttons and 56 px grid cel
     };
     return {
       letters: letters.length,
+      play: !!document.querySelector("#studio-sheet .st-slot-play"),
       letterRows: rows(letters).map((r) => r.items.length),
       inverted: letters.filter((e) => e.classList.contains("on")).map((e) => e.dataset.pat),
       actions: actions.map((e) => e.textContent.trim()),
@@ -2614,6 +2657,7 @@ test("studio: every screen fits at 375x667 with 44 px buttons and 56 px grid cel
     };
   });
   assert.equal(shot.letters, 16, "the slot sheet shows the 16 letters");
+  assert.equal(shot.play, true, "the slot sheet's title has the play-from-here button");
   assert.deepEqual(shot.letterRows, [4, 4, 4, 4], "four rows of four letters");
   assert.deepEqual(shot.inverted, ["0"], "the slot's own letter is inverted");
   assert.deepEqual(shot.actions, ["前面插一段", "后面复制一段", "删掉这一格", "返回"]);

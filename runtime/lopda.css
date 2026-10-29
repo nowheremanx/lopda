@@ -852,6 +852,10 @@ textarea::placeholder{color:var(--ink-2)}
 .st-slot-actions{flex:none;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px}
 .st-slot-actions li{min-height:44px;box-sizing:border-box;justify-content:center;padding:4px 6px;border:2px solid var(--ink);font-size:14px;line-height:1.15}
 .st-slot-actions li span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center}
+/* the slot sheet's title keeps a 44 px play button (12.8), so the sheet still fits the 331x359 screen */
+.dict-sheet .st-slot-title{align-items:center;padding-bottom:0;gap:6px}
+.st-slot-play{flex:none;width:44px;height:44px;display:flex;align-items:center;justify-content:center;padding:0;background:var(--ink);color:var(--lcd);border:2px solid var(--ink);cursor:pointer}
+.st-slot-play::before{content:"";display:block;width:0;height:0;margin-left:3px;border-left:12px solid currentColor;border-top:8px solid transparent;border-bottom:8px solid transparent}
 .st-copy-ask{display:flex;flex-direction:column;gap:8px;font-size:15px;line-height:1.4}
 .st-copy-ask p{margin:0}
 .st-copy-ask .row{gap:10px}
