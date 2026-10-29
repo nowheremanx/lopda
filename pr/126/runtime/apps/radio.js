@@ -9,7 +9,7 @@
 var LP=window.LP, $=LP.$, tr=LP.tr, AC=window.LopdaAcoustic;
 var TONES=LP.TONES, micMark=$("mic-mark");
 
-var R={tab:"send", rate:40, pattern:"a5", tx:null, rx:null, pending:false, token:0,
+var R={tab:"send", rate:40, pattern:"a5", live:false, tx:null, rx:null, pending:false, token:0,
   sendText:"", recvText:"", recvStats:"", recvHex:"", last:null, log:[], sendTimer:0, recvTimer:0};
 
 function esc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
@@ -306,9 +306,11 @@ function icon(){
 }
 
 LP.builtin({id:"radio", label:"app.radio", icon:icon, view:"radio",
-  open:function(){ R.tab="send"; render(); renderLog(); LP.show("radio"); },
-  leave:function(){ stopAll(); },
-  pause:function(){ stopAll(); R.recvText=tr("radio.recv.stopped"); render(); },
-  lang:function(){ render(); renderLog(); },
-  audio:function(){ stopAll(); R.sendText=""; R.recvText=tr("radio.audio"); render(); }});
+  open:function(){ R.live=true; R.tab="send"; render(); renderLog(); LP.show("radio"); },
+  /* The runtime calls leave/pause/audio on every built-in, not only the one in front. Only the live Radio may
+     let go of the wake lock or the microphone, or it would clobber the reader's lock when the page hides. */
+  leave:function(){ if(R.live){ R.live=false; stopAll(); } },
+  pause:function(){ if(R.live){ stopAll(); R.recvText=tr("radio.recv.stopped"); render(); } },
+  lang:function(){ if(R.live){ render(); renderLog(); } },
+  audio:function(){ if(R.live){ stopAll(); R.sendText=""; R.recvText=tr("radio.audio"); render(); } }});
 })();
