@@ -426,8 +426,9 @@ test("store: category filters split the catalogue, and one button updates every 
 
 test("store: search finds an app by either language, ignores case, and clearing brings the catalogue back", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await page(t, { locale: "zh-CN" });
-  /* a fixed day, so the seven-day NEW badge is stable: paper-tower is six days old, gomoku twenty */
-  await p.clock.install({ time: new Date(2026, 9, 27, 12, 0) });
+  /* a fixed day, so the seven-day NEW badge is stable: paper-tower is a week old,
+     luck-compass is four days old, and Fake Yu's 2.1.1 update is today */
+  await p.clock.install({ time: new Date(2026, 9, 28, 12, 0) });
   await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
   await p.waitForFunction(() => document.querySelectorAll("#home .app:not(.builtin)").length === 2);
   await p.locator("#home .app.builtin", { hasText: "应用商店" }).click();
@@ -440,7 +441,7 @@ test("store: search finds an app by either language, ignores case, and clearing 
   assert.equal(await p.locator("#store-filters").isHidden(), true, "categories step aside while searching");
   assert.match(await p.textContent("#store-list"), /纸塔/);
   assert.match(await p.textContent("#store-state"), /1 个结果/);
-  assert.equal((await p.textContent("#store-list .store-badge")).trim(), "新", "a six-day-old app wears NEW");
+  assert.equal(await p.locator("#store-list .store-badge").count(), 0, "a week-old app has no badge");
 
   await p.fill("#store-q", "PAPER");
   assert.match(await p.textContent("#store-list"), /纸塔/, "the English name finds it too");
