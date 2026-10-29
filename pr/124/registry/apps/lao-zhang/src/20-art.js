@@ -254,6 +254,53 @@ GM.dynIconSprite = function () {
   return s;
 };
 
+GM.bombSprite = function () {
+  var s = GM.sprite(16, 16);
+  GM.sellipse(s, 8, 9, 6, 6, GM.INK);
+  GM.sellipse(s, 8, 9, 5, 5, GM.DARK);
+  GM.srect(s, 5, 5, 2, 2, GM.PAPER);
+  GM.sline(s, 8, 3, 11, 0, GM.MID);
+  GM.sput(s, 11, 0, GM.PAPER);
+  return s;
+};
+
+GM.shopStrengthSprite = function () {
+  var s = GM.sprite(16, 16);
+  GM.srect(s, 4, 6, 8, 8, GM.PAPER);
+  GM.srect(s, 6, 2, 4, 5, GM.PAPER);
+  GM.soutline(s, GM.INK);
+  GM.srect(s, 6, 1, 4, 2, GM.DARK);
+  GM.srect(s, 4, 12, 8, 2, GM.MID);
+  GM.sline(s, 8, 6, 6, 9, GM.INK);
+  GM.sline(s, 6, 9, 9, 9, GM.INK);
+  GM.sline(s, 9, 9, 7, 12, GM.INK);
+  return s;
+};
+
+GM.shopCloverSprite = function () {
+  var s = GM.sprite(16, 16);
+  GM.sellipse(s, 5, 6, 3, 3, GM.PAPER);
+  GM.sellipse(s, 11, 6, 3, 3, GM.PAPER);
+  GM.sellipse(s, 5, 11, 3, 3, GM.PAPER);
+  GM.sellipse(s, 11, 11, 3, 3, GM.PAPER);
+  GM.soutline(s, GM.INK);
+  GM.sput(s, 8, 8, GM.INK);
+  GM.srect(s, 7, 12, 2, 3, GM.DARK);
+  return s;
+};
+
+GM.shopBookSprite = function () {
+  var s = GM.sprite(16, 16);
+  GM.srect(s, 3, 3, 10, 11, GM.PAPER);
+  GM.soutline(s, GM.INK);
+  GM.srect(s, 3, 3, 2, 11, GM.DARK);
+  GM.srect(s, 6, 6, 6, 6, GM.MID);
+  GM.sput(s, 7, 7, GM.INK);
+  GM.sput(s, 10, 9, GM.INK);
+  GM.sline(s, 7, 6, 10, 10, GM.INK);
+  return s;
+};
+
 GM.miniGemSprite = function () {
   var s = GM.sprite(10, 10);
   var poly = [[5, 1], [9, 5], [5, 9], [1, 5]];
@@ -295,6 +342,7 @@ GM.FONT3 = {
   "8": ["111", "101", "111", "101", "111"],
   "9": ["111", "101", "111", "001", "111"],
   "$": ["011", "110", "010", "011", "110"],
+  "×": ["000", "101", "010", "101", "000"],
   "+": ["000", "010", "111", "010", "000"],
   "-": ["000", "000", "111", "000", "000"],
   " ": ["000", "000", "000", "000", "000"],
@@ -346,6 +394,10 @@ GM.initArt = function () {
     skull: GM.skullSprite(),
     tnt: GM.tntSprite(),
     dynIcon: GM.dynIconSprite(),
+    bomb: GM.bombSprite(),
+    shopStrength: GM.shopStrengthSprite(),
+    shopClover: GM.shopCloverSprite(),
+    shopBook: GM.shopBookSprite(),
     miniGold: GM.blob(10, 8, 41, GM.PAPER, GM.MID, false, false),
     miniGem: GM.miniGemSprite()
   };
@@ -539,20 +591,42 @@ GM.drawMiner = function (buf, state) {
   GM.rect(buf, 79, 17, 2, 2, GM.DARK);
   GM.put(buf, 80, 18, GM.PAPER);
 
-  /* sweat: more drops when the rope is heavy with something */
+  /* sweat: drops run downward, faster as they fall */
   if (hook.item) {
-    var t = state.anim, side, sx, sy;
+    var t = state.anim, side, sx, sy, p;
     for (var i = 0; i < 4; i++) {
       side = i < 2 ? -1 : 1;
-      sx = bx + side * (9 + (i % 2) * 2) + Math.sin(t * 5 + i) * 0.8;
-      sy = 6 + by + (i % 2) * 3 - ((t * 4 + i) % 2);
+      p = (t * 0.8 + i * 0.23) % 1;
+      sx = bx + side * (9 + (i % 2) * 2) + Math.sin(t * 5 + i) * 0.7;
+      sy = 5 + by + p * p * 12;
       GM.sweatDrop(buf, Math.round(sx * GM.SCALE), Math.round(sy * GM.SCALE));
     }
-    GM.sweatDrop(buf, Math.round((bx - 3) * GM.SCALE), Math.round((10 + by) * GM.SCALE));
-    GM.sweatDrop(buf, Math.round((bx + 4) * GM.SCALE), Math.round((10 + by) * GM.SCALE));
-    GM.sweatDrop(buf, Math.round((bx - 8) * GM.SCALE), Math.round((14 + by) * GM.SCALE));
-    GM.sweatDrop(buf, Math.round((bx + 9) * GM.SCALE), Math.round((15 + by) * GM.SCALE));
+    for (i = 0; i < 2; i++) {
+      p = (t * 0.9 + i * 0.4) % 1;
+      sx = bx - 3 + i * 7;
+      sy = 9 + by + p * p * 8;
+      GM.sweatDrop(buf, Math.round(sx * GM.SCALE), Math.round(sy * GM.SCALE));
+    }
+    for (i = 0; i < 2; i++) {
+      p = (t * 0.7 + i * 0.35) % 1;
+      side = i ? 1 : -1;
+      sx = bx + side * 8;
+      sy = 13 + by + p * p * 5;
+      GM.sweatDrop(buf, Math.round(sx * GM.SCALE), Math.round(sy * GM.SCALE));
+    }
   }
+
+  if (state.bomb && state.bomb.t < 0.18) {
+    var bp = GM.bombPos(state.bomb);
+    GM.line(buf, bx + 7, 13 + by, bp.x, bp.y, GM.INK);
+  }
+};
+
+GM.drawDynamite = function (buf, state) {
+  if (state.dynamite <= 0) return;
+  var bx = 94 * GM.SCALE, by = 3 * GM.SCALE;
+  GM.spriteDraw(buf, GM.SPR.dynIcon, bx, by);
+  GM.textMain(buf, "×" + state.dynamite, bx + 18, by + 4, GM.INK, GM.SCALE);
 };
 
 GM.draw = function (ctx, state) {
@@ -590,6 +664,12 @@ GM.draw = function (ctx, state) {
   }
   GM.drawHook(buf, state.hook);
   GM.drawMiner(buf, state);
+  GM.drawDynamite(buf, state);
+  if (state.bomb) {
+    var bp = GM.bombPos(state.bomb);
+    GM.spriteDraw(buf, GM.SPR.bomb, Math.round(bp.x * GM.SCALE) - 8, Math.round(bp.y * GM.SCALE) - 8);
+    GM.bput(buf, Math.round(bp.x * GM.SCALE) + 4, Math.round(bp.y * GM.SCALE) - 8, GM.PAPER);
+  }
 
   for (i = 0; i < state.blasts.length; i++) {
     var bl = state.blasts[i], k = bl.t / bl.life;

@@ -4,8 +4,8 @@ var GM = (typeof GM !== "undefined" && GM) || {};
 GM.ui = (function () {
   var LANG = (typeof PAD !== "undefined" && PAD.lang === "en") ? "en" : "zh";
   var T = GM.text(LANG);
-  var state, ctx, cv, ov, introEl, dynBtn, dynIcon, dynCount, foot, lv, cash, tm, bar;
-  var last = 0, lastScreen = "", lastHud = "", lastDyn = "", lastFoot = "", lastIntro = "";
+  var state, ctx, cv, ov, introEl, foot, lv, cash, tm, bar;
+  var last = 0, lastScreen = "", lastHud = "", lastFoot = "", lastIntro = "";
   var lastJingleId = 0;
 
   function $(id) { return document.getElementById(id); }
@@ -21,9 +21,6 @@ GM.ui = (function () {
     ctx.imageSmoothingEnabled = false;
     ov = $("ov");
     introEl = $("intro");
-    dynBtn = $("dyn");
-    dynIcon = $("dynicon");
-    dynCount = $("dyncount");
     foot = $("foot");
     lv = $("lv");
     cash = $("cash");
@@ -31,20 +28,13 @@ GM.ui = (function () {
     bar = $("barfill");
     document.documentElement.lang = LANG === "zh" ? "zh-CN" : "en";
     document.title = T.title;
-    if (dynIcon && GM.SPR) {
-      var dctx = dynIcon.getContext("2d");
-      dctx.imageSmoothingEnabled = false;
-      dctx.drawImage(GM.spriteCanvas(GM.SPR.dynIcon), 0, 0);
-    }
     cv.addEventListener("pointerdown", onCanvas);
-    dynBtn.addEventListener("click", onDyn);
     ov.addEventListener("click", onOverlay);
     addEventListener("resize", fit);
     document.addEventListener("visibilitychange", onVis);
     if (typeof PAD !== "undefined" && PAD.on) PAD.on("press", onPad);
     fit();
     updateHud(true);
-    updateDyn(true);
     updateFoot(true);
   }
 
@@ -105,6 +95,7 @@ GM.ui = (function () {
         else if (state.bank < item.price) price = GM.fmt(T.shortPrice, { d: GM.money(item.price - state.bank) });
         else price = money(item.price);
         rows += '<button type="button" class="row' + (sel ? " sel" : "") + (can ? "" : " off") + '" data-act="buy" data-i="' + i + '">' +
+          '<canvas class="sic" width="16" height="16" data-icon="' + ["dynIcon", "shopStrength", "shopClover", "shopBook"][i] + '" aria-hidden="true"></canvas>' +
           '<span class="nm">' + esc(T.shopNames[i]) + " <i>" + esc(GM.fmt(T.owned, { n: have, m: item.max })) + "</i>" +
           "<small>" + esc(T.shopDescs[i]) + "</small></span>" +
           '<span class="pr">' + esc(price) + "</span></button>";
@@ -141,14 +132,28 @@ GM.ui = (function () {
   }
 
   function post(screen) {
-    if (screen !== "title") return;
-    var logo = $("logo");
-    if (!logo) return;
-    logo.style.width = "64px";
-    logo.style.height = "64px";
-    var lctx = logo.getContext("2d");
-    lctx.imageSmoothingEnabled = false;
-    lctx.drawImage(GM.iconCanvas(), 0, 0);
+    var i, c, ctx2, spr;
+    if (screen === "title") {
+      var logo = $("logo");
+      if (!logo) return;
+      logo.style.width = "64px";
+      logo.style.height = "64px";
+      var lctx = logo.getContext("2d");
+      lctx.imageSmoothingEnabled = false;
+      lctx.drawImage(GM.iconCanvas(), 0, 0);
+      return;
+    }
+    if (screen === "shop") {
+      var icons = ov.querySelectorAll("canvas[data-icon]");
+      for (i = 0; i < icons.length; i++) {
+        c = icons[i];
+        spr = GM.SPR[c.getAttribute("data-icon")];
+        if (!spr) continue;
+        ctx2 = c.getContext("2d");
+        ctx2.imageSmoothingEnabled = false;
+        ctx2.drawImage(GM.spriteCanvas(spr), 0, 0);
+      }
+    }
   }
 
   function enter(screen) {
@@ -165,7 +170,6 @@ GM.ui = (function () {
     }
     updateFoot(true);
     updateHud(true);
-    updateDyn(true);
     updateIntro();
     musicFor(screen);
   }
@@ -181,21 +185,6 @@ GM.ui = (function () {
     tm.textContent = GM.fmt(T.time, { n: sec });
     tm.className = sec <= 10 && state.screen === "play" ? "low" : "";
     bar.style.width = Math.max(0, Math.min(100, Math.round(state.bank / (state.target || 1) * 100))) + "%";
-  }
-
-  function updateDyn(force) {
-    var show = (state.screen === "play" || state.screen === "intro") && state.dynamite > 0;
-    if (!show) {
-      if (!dynBtn.hidden) dynBtn.hidden = true;
-      lastDyn = "";
-      return;
-    }
-    var key = state.dynamite + "|" + (state.hook.item ? 1 : 0) + "|" + state.screen;
-    if (!force && key === lastDyn) return;
-    lastDyn = key;
-    dynBtn.hidden = false;
-    dynCount.textContent = "×" + state.dynamite;
-    dynBtn.className = state.hook.item ? "on" : "off";
   }
 
   function updateFoot(force) {
@@ -237,6 +226,7 @@ GM.ui = (function () {
     while (state.events.length && n++ < 60) {
       var ev = state.events.shift();
       if (ev === "fire") sfx("tap");
+      else if (ev === "throw") sfx(GM.SFX.throw);
       else if (ev === "grab") sfx("hit");
       else if (ev === "coin") sfx("coin");
       else if (ev === "gem") sfx(GM.SFX.chime);
@@ -303,13 +293,6 @@ GM.ui = (function () {
     } else if (state.screen === "intro") {
       state.introT = 0;
     }
-    e.preventDefault();
-  }
-
-  function onDyn(e) {
-    if (state.screen !== "play") return;
-    if (!GM.useDynamite(state)) sfx("err");
-    pump();
     e.preventDefault();
   }
 
@@ -402,7 +385,6 @@ GM.ui = (function () {
       if (state.screen !== lastScreen) enter(state.screen);
       if (state.screen === "play" || state.screen === "intro") {
         updateHud();
-        updateDyn();
         updateFoot();
         updateIntro();
         GM.draw(ctx, state);

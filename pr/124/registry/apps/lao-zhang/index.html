@@ -18,16 +18,10 @@
   #stage { flex: 1; min-height: 0; position: relative; display: flex; align-items: center; justify-content: center; padding: 4px; box-sizing: border-box; overflow: hidden; }
   #c { display: block; image-rendering: pixelated; image-rendering: crisp-edges; border: 2px solid #1f2a14; touch-action: none; background: #a3ad7e; }
   #foot { flex: none; height: 18px; line-height: 18px; font-size: 13px; text-align: center; color: #4a5a32; white-space: nowrap; overflow: hidden; }
-  #intro { position: absolute; top: 6px; left: 6px; right: 56px; box-sizing: border-box; background: #1f2a14; color: #a3ad7e; padding: 3px 7px; text-align: center; font-size: 13px; line-height: 1.35; pointer-events: none; z-index: 3; }
+  #intro { position: absolute; top: 50px; left: 8px; right: 8px; box-sizing: border-box; background: #1f2a14; color: #a3ad7e; padding: 3px 7px; text-align: center; font-size: 13px; line-height: 1.35; pointer-events: none; z-index: 3; }
   #intro b { display: block; font-size: 14px; }
   #intro span { display: block; }
   #intro[hidden] { display: none !important; }
-  #dyn { position: absolute; top: 6px; right: 6px; z-index: 2; width: 44px; height: 44px; box-sizing: border-box; padding: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; font: inherit; font-weight: bold; background: #a3ad7e; color: #1f2a14; border: 2px solid #1f2a14; box-shadow: 2px 2px 0 #4a5a32; touch-action: manipulation; }
-  #dyn canvas { display: block; width: 24px; height: 24px; image-rendering: pixelated; image-rendering: crisp-edges; }
-  #dyn span { display: block; font-size: 14px; line-height: 1; }
-  #dyn.on { background: #7d8a58; color: #1f2a14; border: 2px solid #1f2a14; }
-  #dyn.off { background: #a3ad7e; border-style: dashed; color: #4a5a32; box-shadow: none; }
-  #dyn[hidden] { display: none !important; }
   #ov { position: fixed; inset: 0; z-index: 20; background: #a3ad7e; color: #1f2a14; display: flex; flex-direction: column; padding: 10px 12px; box-sizing: border-box; overflow-y: auto; -webkit-overflow-scrolling: touch; }
   #ov[hidden] { display: none !important; }
   .sbody { flex: 1 0 auto; min-height: 0; display: flex; flex-direction: column; }
@@ -56,7 +50,8 @@
   #ov .row.sel { background: #1f2a14; color: #a3ad7e; border-color: #1f2a14; }
   #ov .row.off { border-style: dashed; color: #4a5a32; }
   #ov .row.sel.off { color: #a3ad7e; border-color: #a3ad7e; }
-  #ov .row .nm { display: block; font-size: 15px; font-weight: bold; line-height: 1.15; }
+  #ov .row .sic { flex: none; width: 24px; height: 24px; image-rendering: pixelated; image-rendering: crisp-edges; }
+  #ov .row .nm { display: block; flex: 1; min-width: 0; font-size: 15px; font-weight: bold; line-height: 1.15; }
   #ov .row .nm i { font-style: normal; font-size: 13px; color: #4a5a32; }
   #ov .row .nm small { display: block; font-size: 13px; font-weight: normal; color: #4a5a32; line-height: 1.15; }
   #ov .row.sel small, #ov .row.sel i { color: #a3ad7e; }
@@ -73,7 +68,6 @@
   <main id="stage">
     <canvas id="c" width="320" height="288"></canvas>
     <div id="intro" hidden></div>
-    <button id="dyn" type="button" hidden><canvas id="dynicon" width="16" height="16"></canvas><span id="dyncount"></span></button>
   </main>
   <footer id="foot"></footer>
 </div>
@@ -114,8 +108,8 @@ GM.ITEMS = {
   goldL:   { kind: "gold",  value: 700, weight: 1.4,  r: 13, sprite: "goldL",   pref: [70, 129] },
   diamond: { kind: "gem",   value: 1500, weight: 0.6, r: 6,  sprite: "diamond", pref: [92, 134] },
   bag:     { kind: "bag",   value: 0,   weight: 0.9,  r: 8,  sprite: "bag",     pref: [50, 126], min: 150, max: 600 },
-  rockS:   { kind: "rock",  value: 3,   weight: 2.4,  r: 8,  sprite: "rockS",   pref: [45, 134] },
-  rockL:   { kind: "rock",  value: 8,   weight: 4.0,  r: 13, sprite: "rockL",   pref: [60, 129] },
+  rockS:   { kind: "rock",  value: 2,   weight: 1.8,  r: 8,  sprite: "rockS",   pref: [45, 134] },
+  rockL:   { kind: "rock",  value: 10,  weight: 4.2,  r: 13, sprite: "rockL",   pref: [60, 129] },
   bone:    { kind: "junk",  value: 2,   weight: 1.2,  r: 7,  sprite: "bone",    pref: [50, 128] },
   skull:   { kind: "junk",  value: 10,  weight: 1.6,  r: 8,  sprite: "skull",   pref: [55, 132] },
   tnt:     { kind: "tnt",   value: 0,   weight: 1.4,  r: 8,  sprite: "tnt",     pref: [65, 126] },
@@ -153,7 +147,8 @@ GM.JINGLE = {
 
 GM.SFX = {
   boom:  { wave: "noise", from: 900, to: 55, ms: 380, vol: 0.9 },
-  chime: { wave: "triangle", from: 880, to: 1560, ms: 160, vol: 0.55, decay: 150 }
+  chime: { wave: "triangle", from: 880, to: 1560, ms: 160, vol: 0.55, decay: 150 },
+  throw: { wave: "noise", from: 300, to: 900, ms: 110, vol: 0.32 }
 };
 
 GM.TEXT = {
@@ -384,6 +379,7 @@ GM.newState = function () {
     time: GM.LEVEL_TIME,
     items: [],
     hook: { state: "swing", len: GM.IDLE_ROPE, angle: 0, item: null },
+    bomb: null,
     dynamite: 0,
     strength: 0,
     clover: 0,
@@ -438,6 +434,7 @@ GM.startLevel = function (state, n) {
   state.rng = GM.rng(state.levelSeed);
   state.items = GM.generate(state, n);
   state.hook = { state: "swing", len: GM.IDLE_ROPE, angle: 0, item: null };
+  state.bomb = null;
   state.swingT = 0;
   state.introT = 1.25;
   state.shopCursor = 4;
@@ -543,13 +540,11 @@ GM.tip = function (hook) {
   };
 };
 
-/* the caught item hangs from the near edge, not from its centre; near the top it
-   slides into the claw so the hand-off still happens at the miner */
+/* the caught item hangs from the near edge, not from its centre */
 GM.heldPos = function (hook) {
   var tip = GM.tip(hook);
   if (!hook.item) return tip;
-  var shrink = Math.min(1, Math.max(0, (hook.len - 6) / 34));
-  var off = (hook.item.r + 2) * shrink;
+  var off = hook.item.r + 2;
   return {
     x: tip.x + Math.sin(hook.angle) * off,
     y: tip.y + Math.cos(hook.angle) * off
@@ -569,19 +564,54 @@ GM.fire = function (state) {
 };
 
 GM.useDynamite = function (state) {
-  if (state.screen !== "play" || state.hook.state !== "back" || !state.hook.item || state.dynamite <= 0) return false;
+  if (state.screen !== "play" || state.hook.state !== "back" || !state.hook.item ||
+      state.dynamite <= 0 || state.bomb) return false;
   state.dynamite--;
-  var it = state.hook.item;
   var p = GM.heldPos(state.hook);
-  if (it.kind === "tnt") {
-    GM.explode(state, p.x, p.y);
-  } else {
-    GM.addParticles(state, p.x, p.y, 10, ["mid", "dark"]);
-    state.events.push("boom");
-    state.shake = 0.22;
-    state.hook.item = null;
-  }
+  state.bomb = {
+    t: 0,
+    dur: 0.38,
+    sx: GM.ANCHOR.x,
+    sy: GM.ANCHOR.y - 5,
+    tx: p.x,
+    ty: p.y,
+    item: state.hook.item
+  };
+  state.events.push("throw");
   return true;
+};
+
+GM.bombPos = function (b) {
+  var p = Math.min(1, b.t / b.dur);
+  return {
+    x: b.sx + (b.tx - b.sx) * p,
+    y: b.sy + (b.ty - b.sy) * p - Math.sin(p * Math.PI) * 7
+  };
+};
+
+GM.resolveBomb = function (state) {
+  var b = state.bomb;
+  if (!b) return;
+  state.bomb = null;
+  var it = b.item;
+  if (state.hook.item === it) {
+    state.hook.item = null;
+    state.hook.state = "back";
+  }
+  if (it.kind === "tnt") {
+    GM.explode(state, b.tx, b.ty);
+  } else {
+    GM.addParticles(state, b.tx, b.ty, 12, ["mid", "dark", "paper"]);
+    state.blasts.push({ x: b.tx, y: b.ty, t: 0, life: 0.5 });
+    state.shake = 0.32;
+    state.events.push("boom");
+  }
+};
+
+GM.updateBomb = function (state, dt) {
+  if (!state.bomb) return;
+  state.bomb.t += dt;
+  if (state.bomb.t >= state.bomb.dur) GM.resolveBomb(state);
 };
 
 GM.attach = function (state, index) {
@@ -822,7 +852,7 @@ GM.stepHook = function (state, dt) {
   }
   var speed = hook.item ? GM.retractSpeed(hook.item, state.strength) : GM.EMPTY_SPEED;
   hook.len -= speed * dt;
-  if (hook.item && hook.len <= 10) {
+  if (hook.item && hook.len <= 2) {
     GM.collect(state);
     return;
   }
@@ -870,11 +900,15 @@ GM.update = function (state, dt) {
     state.hook.angle = Math.sin(state.swingT * Math.PI * 2 / GM.PERIOD) * GM.SWING;
   }
   GM.moveMoles(state, dt);
-  var left = dt;
-  while (left > 0 && state.screen === "play") {
-    var h = Math.min(0.016, left);
-    GM.stepHook(state, h);
-    left -= h;
+  if (state.bomb) {
+    GM.updateBomb(state, dt);
+  } else {
+    var left = dt;
+    while (left > 0 && state.screen === "play") {
+      var h = Math.min(0.016, left);
+      GM.stepHook(state, h);
+      left -= h;
+    }
   }
   /* nothing left to catch: do not make the player sit out the rest of the clock */
   if (state.screen === "play" && state.items.length === 0 && !state.hook.item) {
@@ -1142,6 +1176,53 @@ GM.dynIconSprite = function () {
   return s;
 };
 
+GM.bombSprite = function () {
+  var s = GM.sprite(16, 16);
+  GM.sellipse(s, 8, 9, 6, 6, GM.INK);
+  GM.sellipse(s, 8, 9, 5, 5, GM.DARK);
+  GM.srect(s, 5, 5, 2, 2, GM.PAPER);
+  GM.sline(s, 8, 3, 11, 0, GM.MID);
+  GM.sput(s, 11, 0, GM.PAPER);
+  return s;
+};
+
+GM.shopStrengthSprite = function () {
+  var s = GM.sprite(16, 16);
+  GM.srect(s, 4, 6, 8, 8, GM.PAPER);
+  GM.srect(s, 6, 2, 4, 5, GM.PAPER);
+  GM.soutline(s, GM.INK);
+  GM.srect(s, 6, 1, 4, 2, GM.DARK);
+  GM.srect(s, 4, 12, 8, 2, GM.MID);
+  GM.sline(s, 8, 6, 6, 9, GM.INK);
+  GM.sline(s, 6, 9, 9, 9, GM.INK);
+  GM.sline(s, 9, 9, 7, 12, GM.INK);
+  return s;
+};
+
+GM.shopCloverSprite = function () {
+  var s = GM.sprite(16, 16);
+  GM.sellipse(s, 5, 6, 3, 3, GM.PAPER);
+  GM.sellipse(s, 11, 6, 3, 3, GM.PAPER);
+  GM.sellipse(s, 5, 11, 3, 3, GM.PAPER);
+  GM.sellipse(s, 11, 11, 3, 3, GM.PAPER);
+  GM.soutline(s, GM.INK);
+  GM.sput(s, 8, 8, GM.INK);
+  GM.srect(s, 7, 12, 2, 3, GM.DARK);
+  return s;
+};
+
+GM.shopBookSprite = function () {
+  var s = GM.sprite(16, 16);
+  GM.srect(s, 3, 3, 10, 11, GM.PAPER);
+  GM.soutline(s, GM.INK);
+  GM.srect(s, 3, 3, 2, 11, GM.DARK);
+  GM.srect(s, 6, 6, 6, 6, GM.MID);
+  GM.sput(s, 7, 7, GM.INK);
+  GM.sput(s, 10, 9, GM.INK);
+  GM.sline(s, 7, 6, 10, 10, GM.INK);
+  return s;
+};
+
 GM.miniGemSprite = function () {
   var s = GM.sprite(10, 10);
   var poly = [[5, 1], [9, 5], [5, 9], [1, 5]];
@@ -1183,6 +1264,7 @@ GM.FONT3 = {
   "8": ["111", "101", "111", "101", "111"],
   "9": ["111", "101", "111", "001", "111"],
   "$": ["011", "110", "010", "011", "110"],
+  "×": ["000", "101", "010", "101", "000"],
   "+": ["000", "010", "111", "010", "000"],
   "-": ["000", "000", "111", "000", "000"],
   " ": ["000", "000", "000", "000", "000"],
@@ -1234,6 +1316,10 @@ GM.initArt = function () {
     skull: GM.skullSprite(),
     tnt: GM.tntSprite(),
     dynIcon: GM.dynIconSprite(),
+    bomb: GM.bombSprite(),
+    shopStrength: GM.shopStrengthSprite(),
+    shopClover: GM.shopCloverSprite(),
+    shopBook: GM.shopBookSprite(),
     miniGold: GM.blob(10, 8, 41, GM.PAPER, GM.MID, false, false),
     miniGem: GM.miniGemSprite()
   };
@@ -1427,20 +1513,42 @@ GM.drawMiner = function (buf, state) {
   GM.rect(buf, 79, 17, 2, 2, GM.DARK);
   GM.put(buf, 80, 18, GM.PAPER);
 
-  /* sweat: more drops when the rope is heavy with something */
+  /* sweat: drops run downward, faster as they fall */
   if (hook.item) {
-    var t = state.anim, side, sx, sy;
+    var t = state.anim, side, sx, sy, p;
     for (var i = 0; i < 4; i++) {
       side = i < 2 ? -1 : 1;
-      sx = bx + side * (9 + (i % 2) * 2) + Math.sin(t * 5 + i) * 0.8;
-      sy = 6 + by + (i % 2) * 3 - ((t * 4 + i) % 2);
+      p = (t * 0.8 + i * 0.23) % 1;
+      sx = bx + side * (9 + (i % 2) * 2) + Math.sin(t * 5 + i) * 0.7;
+      sy = 5 + by + p * p * 12;
       GM.sweatDrop(buf, Math.round(sx * GM.SCALE), Math.round(sy * GM.SCALE));
     }
-    GM.sweatDrop(buf, Math.round((bx - 3) * GM.SCALE), Math.round((10 + by) * GM.SCALE));
-    GM.sweatDrop(buf, Math.round((bx + 4) * GM.SCALE), Math.round((10 + by) * GM.SCALE));
-    GM.sweatDrop(buf, Math.round((bx - 8) * GM.SCALE), Math.round((14 + by) * GM.SCALE));
-    GM.sweatDrop(buf, Math.round((bx + 9) * GM.SCALE), Math.round((15 + by) * GM.SCALE));
+    for (i = 0; i < 2; i++) {
+      p = (t * 0.9 + i * 0.4) % 1;
+      sx = bx - 3 + i * 7;
+      sy = 9 + by + p * p * 8;
+      GM.sweatDrop(buf, Math.round(sx * GM.SCALE), Math.round(sy * GM.SCALE));
+    }
+    for (i = 0; i < 2; i++) {
+      p = (t * 0.7 + i * 0.35) % 1;
+      side = i ? 1 : -1;
+      sx = bx + side * 8;
+      sy = 13 + by + p * p * 5;
+      GM.sweatDrop(buf, Math.round(sx * GM.SCALE), Math.round(sy * GM.SCALE));
+    }
   }
+
+  if (state.bomb && state.bomb.t < 0.18) {
+    var bp = GM.bombPos(state.bomb);
+    GM.line(buf, bx + 7, 13 + by, bp.x, bp.y, GM.INK);
+  }
+};
+
+GM.drawDynamite = function (buf, state) {
+  if (state.dynamite <= 0) return;
+  var bx = 94 * GM.SCALE, by = 3 * GM.SCALE;
+  GM.spriteDraw(buf, GM.SPR.dynIcon, bx, by);
+  GM.textMain(buf, "×" + state.dynamite, bx + 18, by + 4, GM.INK, GM.SCALE);
 };
 
 GM.draw = function (ctx, state) {
@@ -1478,6 +1586,12 @@ GM.draw = function (ctx, state) {
   }
   GM.drawHook(buf, state.hook);
   GM.drawMiner(buf, state);
+  GM.drawDynamite(buf, state);
+  if (state.bomb) {
+    var bp = GM.bombPos(state.bomb);
+    GM.spriteDraw(buf, GM.SPR.bomb, Math.round(bp.x * GM.SCALE) - 8, Math.round(bp.y * GM.SCALE) - 8);
+    GM.bput(buf, Math.round(bp.x * GM.SCALE) + 4, Math.round(bp.y * GM.SCALE) - 8, GM.PAPER);
+  }
 
   for (i = 0; i < state.blasts.length; i++) {
     var bl = state.blasts[i], k = bl.t / bl.life;
@@ -1577,8 +1691,8 @@ var GM = (typeof GM !== "undefined" && GM) || {};
 GM.ui = (function () {
   var LANG = (typeof PAD !== "undefined" && PAD.lang === "en") ? "en" : "zh";
   var T = GM.text(LANG);
-  var state, ctx, cv, ov, introEl, dynBtn, dynIcon, dynCount, foot, lv, cash, tm, bar;
-  var last = 0, lastScreen = "", lastHud = "", lastDyn = "", lastFoot = "", lastIntro = "";
+  var state, ctx, cv, ov, introEl, foot, lv, cash, tm, bar;
+  var last = 0, lastScreen = "", lastHud = "", lastFoot = "", lastIntro = "";
   var lastJingleId = 0;
 
   function $(id) { return document.getElementById(id); }
@@ -1594,9 +1708,6 @@ GM.ui = (function () {
     ctx.imageSmoothingEnabled = false;
     ov = $("ov");
     introEl = $("intro");
-    dynBtn = $("dyn");
-    dynIcon = $("dynicon");
-    dynCount = $("dyncount");
     foot = $("foot");
     lv = $("lv");
     cash = $("cash");
@@ -1604,20 +1715,13 @@ GM.ui = (function () {
     bar = $("barfill");
     document.documentElement.lang = LANG === "zh" ? "zh-CN" : "en";
     document.title = T.title;
-    if (dynIcon && GM.SPR) {
-      var dctx = dynIcon.getContext("2d");
-      dctx.imageSmoothingEnabled = false;
-      dctx.drawImage(GM.spriteCanvas(GM.SPR.dynIcon), 0, 0);
-    }
     cv.addEventListener("pointerdown", onCanvas);
-    dynBtn.addEventListener("click", onDyn);
     ov.addEventListener("click", onOverlay);
     addEventListener("resize", fit);
     document.addEventListener("visibilitychange", onVis);
     if (typeof PAD !== "undefined" && PAD.on) PAD.on("press", onPad);
     fit();
     updateHud(true);
-    updateDyn(true);
     updateFoot(true);
   }
 
@@ -1678,6 +1782,7 @@ GM.ui = (function () {
         else if (state.bank < item.price) price = GM.fmt(T.shortPrice, { d: GM.money(item.price - state.bank) });
         else price = money(item.price);
         rows += '<button type="button" class="row' + (sel ? " sel" : "") + (can ? "" : " off") + '" data-act="buy" data-i="' + i + '">' +
+          '<canvas class="sic" width="16" height="16" data-icon="' + ["dynIcon", "shopStrength", "shopClover", "shopBook"][i] + '" aria-hidden="true"></canvas>' +
           '<span class="nm">' + esc(T.shopNames[i]) + " <i>" + esc(GM.fmt(T.owned, { n: have, m: item.max })) + "</i>" +
           "<small>" + esc(T.shopDescs[i]) + "</small></span>" +
           '<span class="pr">' + esc(price) + "</span></button>";
@@ -1714,14 +1819,28 @@ GM.ui = (function () {
   }
 
   function post(screen) {
-    if (screen !== "title") return;
-    var logo = $("logo");
-    if (!logo) return;
-    logo.style.width = "64px";
-    logo.style.height = "64px";
-    var lctx = logo.getContext("2d");
-    lctx.imageSmoothingEnabled = false;
-    lctx.drawImage(GM.iconCanvas(), 0, 0);
+    var i, c, ctx2, spr;
+    if (screen === "title") {
+      var logo = $("logo");
+      if (!logo) return;
+      logo.style.width = "64px";
+      logo.style.height = "64px";
+      var lctx = logo.getContext("2d");
+      lctx.imageSmoothingEnabled = false;
+      lctx.drawImage(GM.iconCanvas(), 0, 0);
+      return;
+    }
+    if (screen === "shop") {
+      var icons = ov.querySelectorAll("canvas[data-icon]");
+      for (i = 0; i < icons.length; i++) {
+        c = icons[i];
+        spr = GM.SPR[c.getAttribute("data-icon")];
+        if (!spr) continue;
+        ctx2 = c.getContext("2d");
+        ctx2.imageSmoothingEnabled = false;
+        ctx2.drawImage(GM.spriteCanvas(spr), 0, 0);
+      }
+    }
   }
 
   function enter(screen) {
@@ -1738,7 +1857,6 @@ GM.ui = (function () {
     }
     updateFoot(true);
     updateHud(true);
-    updateDyn(true);
     updateIntro();
     musicFor(screen);
   }
@@ -1754,21 +1872,6 @@ GM.ui = (function () {
     tm.textContent = GM.fmt(T.time, { n: sec });
     tm.className = sec <= 10 && state.screen === "play" ? "low" : "";
     bar.style.width = Math.max(0, Math.min(100, Math.round(state.bank / (state.target || 1) * 100))) + "%";
-  }
-
-  function updateDyn(force) {
-    var show = (state.screen === "play" || state.screen === "intro") && state.dynamite > 0;
-    if (!show) {
-      if (!dynBtn.hidden) dynBtn.hidden = true;
-      lastDyn = "";
-      return;
-    }
-    var key = state.dynamite + "|" + (state.hook.item ? 1 : 0) + "|" + state.screen;
-    if (!force && key === lastDyn) return;
-    lastDyn = key;
-    dynBtn.hidden = false;
-    dynCount.textContent = "×" + state.dynamite;
-    dynBtn.className = state.hook.item ? "on" : "off";
   }
 
   function updateFoot(force) {
@@ -1810,6 +1913,7 @@ GM.ui = (function () {
     while (state.events.length && n++ < 60) {
       var ev = state.events.shift();
       if (ev === "fire") sfx("tap");
+      else if (ev === "throw") sfx(GM.SFX.throw);
       else if (ev === "grab") sfx("hit");
       else if (ev === "coin") sfx("coin");
       else if (ev === "gem") sfx(GM.SFX.chime);
@@ -1876,13 +1980,6 @@ GM.ui = (function () {
     } else if (state.screen === "intro") {
       state.introT = 0;
     }
-    e.preventDefault();
-  }
-
-  function onDyn(e) {
-    if (state.screen !== "play") return;
-    if (!GM.useDynamite(state)) sfx("err");
-    pump();
     e.preventDefault();
   }
 
@@ -1975,7 +2072,6 @@ GM.ui = (function () {
       if (state.screen !== lastScreen) enter(state.screen);
       if (state.screen === "play" || state.screen === "intro") {
         updateHud();
-        updateDyn();
         updateFoot();
         updateIntro();
         GM.draw(ctx, state);
