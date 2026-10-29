@@ -770,14 +770,14 @@ textarea::placeholder{color:var(--ink-2)}
 .studio.st-sheet-open .st-tour-box{display:none}
 .studio.st-sheet-open .st-tour-hi{position:static;z-index:auto;outline:none}
 
-/* the screens (docs/design/studio.md 12.2): the pattern letter, then five tabs; a tab's dot says that track has notes */
-.st-nav{flex:none;display:flex;align-items:stretch;gap:4px;padding:4px 6px;border-bottom:2px solid var(--ink)}
+/* the screens (docs/design/studio.md 12.2): the pattern letter, then six tabs; a tab's dot says that track has notes */
+.st-nav{flex:none;display:flex;align-items:stretch;gap:4px;padding:4px;border-bottom:2px solid var(--ink)}
 .st-pat{flex:none;width:44px;height:44px;display:flex;align-items:center;justify-content:center;padding:0;background:var(--lcd);color:var(--ink);border:4px solid var(--ink);font-family:var(--f-pix);font-size:24px;line-height:1;cursor:pointer}
 /* a queued pattern blinks for two beats at the current tempo; the duration comes from the player, inline */
 .st-pat.queued{animation-name:st-queue;animation-timing-function:linear;animation-iteration-count:infinite}
 @keyframes st-queue{0%,49%{background:var(--ink);color:var(--lcd)}50%,100%{background:var(--lcd);color:var(--ink)}}
-.st-screens{flex:1;min-width:0;display:flex;gap:3px}
-.st-scr{flex:1;min-width:0;min-height:44px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;padding:1px;background:transparent;color:var(--ink);border:2px solid var(--ink);font-family:var(--f-lcd);font-size:13px;line-height:1.1;cursor:pointer;white-space:nowrap;overflow:hidden}
+.st-screens{flex:1;min-width:0;display:flex;gap:2px}
+.st-scr{flex:1;min-width:0;min-height:44px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;padding:1px 0;background:transparent;color:var(--ink);border:2px solid var(--ink);font-family:var(--f-lcd);font-size:13px;line-height:1.1;cursor:pointer;white-space:nowrap;overflow:hidden}
 .st-scr.on{background:var(--ink);color:var(--lcd)}
 .st-scr-name{max-width:100%;overflow:hidden;text-overflow:ellipsis}
 .st-scr .st-dot{width:4px;height:4px}
@@ -839,6 +839,34 @@ textarea::placeholder{color:var(--ink-2)}
 .st-song-btns{flex:none;display:flex;gap:4px}
 .st-song-btn{flex:1;min-width:0;min-height:44px;padding:2px 4px;background:var(--ink);color:var(--lcd);border:2px solid var(--ink);font-family:var(--f-lcd);font-size:13px;line-height:1.15;cursor:pointer}
 .st-song-btn:disabled{background:var(--lcd-3);color:var(--ink-2);border-color:var(--lcd-3);cursor:default}
+/* the mixer screen (12.14): key and tape/sound row, then one row per instrument; 4 rows + the top row fit 331x359 */
+.st-mixer{flex:1;min-height:0;display:flex;flex-direction:column;gap:4px;padding:4px 6px 6px}
+.st-mix-top{flex:none;display:flex;gap:4px}
+.st-mix-open{flex:1;min-width:0;min-height:44px;padding:2px 4px;background:transparent;color:var(--ink);border:2px solid var(--ink);font-family:var(--f-lcd);font-size:13px;line-height:1.15;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.st-mix-rows{flex:1;min-height:0;display:flex;flex-direction:column;gap:4px}
+.st-mix-row{flex:none;display:flex;align-items:center;gap:4px;min-height:44px;border-bottom:1px solid var(--ink);box-sizing:border-box}
+.st-mix-row.muted .st-mix-name{color:var(--ink-2)}
+.st-mix-row.focus{outline:2px dashed var(--ink);outline-offset:-2px}
+.st-mix-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--f-lcd);font-size:14px}
+.st-mix-btn{flex:none;width:44px;height:44px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;padding:0;background:transparent;color:var(--ink);border:2px solid var(--ink);font-family:var(--f-pix);font-size:20px;line-height:1;cursor:pointer}
+.st-mix-btn:disabled{color:var(--ink-2);border-color:var(--ink-2);cursor:default}
+.st-mix-vol{flex:none;min-width:28px;text-align:center;font-family:var(--f-pix);font-size:16px;line-height:1;font-variant-numeric:tabular-nums}
+.st-mix-mute{font-family:var(--f-lcd);font-size:13px}
+.st-mix-mute.on{background:var(--ink);color:var(--lcd)}
+/* the key, sound and slot sheets' title buttons (12.8, 12.14) keep the title row at 44 px */
+.dict-sheet .st-sheet-head{align-items:center;padding-bottom:0;gap:6px}
+.st-sheet-close{flex:none;min-width:44px;height:44px;box-sizing:border-box;padding:0 6px;background:transparent;color:var(--ink);border:2px solid var(--ink);font-family:var(--f-lcd);font-size:14px;line-height:1;cursor:pointer}
+.st-key-grid{flex:none;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));grid-auto-rows:44px;gap:4px}
+.st-scale-grid{flex:none;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));grid-auto-rows:44px;gap:4px}
+.st-key-btn,.st-scale-btn{min-width:0;min-height:44px;padding:2px 4px;background:transparent;color:var(--ink);border:2px solid var(--ink);font-family:var(--f-lcd);font-size:14px;line-height:1.1;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.st-key-btn.on,.st-scale-btn.on{background:var(--ink);color:var(--lcd)}
+.st-sheet-label{margin:0;font-size:14px;line-height:1.2;color:var(--ink)}
+.st-tape-levels{flex:none;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:4px}
+.st-tape-btn{min-width:0;min-height:44px;padding:0;background:transparent;color:var(--ink);border:2px solid var(--ink);font-family:var(--f-pix);font-size:20px;line-height:1;cursor:pointer}
+.st-tape-btn.on{background:var(--ink);color:var(--lcd)}
+.st-swing-row{flex:none;display:flex;align-items:center;gap:4px;min-height:44px}
+.st-swing-name{flex:1;min-width:0;font-family:var(--f-lcd);font-size:14px}
+.st-swing-val{flex:none;min-width:52px;text-align:center;font-family:var(--f-pix);font-size:18px;line-height:1;font-variant-numeric:tabular-nums}
 /* the pattern sheet: A-P in four rows of four, the current one inverted, a dot when that pattern has notes */
 .st-pat-grid{flex:none;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));grid-auto-rows:44px;gap:4px}
 .st-pat-btn{position:relative;min-height:44px;min-width:0;display:flex;align-items:center;justify-content:center;padding:0 0 6px;background:transparent;color:var(--ink);border:2px solid var(--ink);font-family:var(--f-pix);font-size:20px;line-height:1;cursor:pointer}

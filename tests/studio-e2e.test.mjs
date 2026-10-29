@@ -46,6 +46,7 @@ async function studioPage(t, withChip) {
   await p.setContent("<!doctype html><html><body></body></html>");
   await p.addScriptTag({ content: await readFile(join(ROOT, "runtime/studio-song.js"), "utf8") });
   await p.addScriptTag({ content: await readFile(join(ROOT, "runtime/studio-synth.js"), "utf8") });
+  await p.addScriptTag({ content: await readFile(join(ROOT, "runtime/studio-tape.js"), "utf8") });
   if (withChip) {
     await p.addScriptTag({ content: await readFile(join(ROOT, "runtime/chip.js"), "utf8") });
     await p.addScriptTag({ content: await readFile(join(ROOT, "registry/apps/paper-tower/src/music.js"), "utf8") });
@@ -101,6 +102,21 @@ async function studioPage(t, withChip) {
         else synth.hit(e.kit, e.drum, e.at || 0, e.vel == null ? 1 : e.vel);
       }
       return stats((await oc.startRendering()).getChannelData(0));
+    };
+    /* one snare through the tape chain at a chosen level, and how much the wave moves sample to sample (a cheap
+       high-frequency meter: the lowpass and the crush both bring it down) */
+    window.renderTape = async (level) => {
+      const oc = new OfflineAudioContext(1, Math.ceil(SR * 2), SR);
+      const tape = LopdaStudioTape.create(oc, oc.destination);
+      tape.set(level);
+      tape.start(0, 2);
+      const synth = LopdaStudioSynth.create(oc, tape.input);
+      synth.hit("soft", "snare", 0.05, 1);
+      const d = (await oc.startRendering()).getChannelData(0), s = stats(d);
+      let diff = 0, n = 0;
+      for (let i = Math.floor(0.05 * SR); i < Math.floor(1.5 * SR); i++) { diff += (d[i] - d[i - 1]) ** 2; n++; }
+      tape.dispose(); synth.dispose();
+      return { peak: s.peak, rms: s.rms, diff: Math.sqrt(diff / n) };
     };
     /* the largest absolute sample between two times, in seconds */
     window.peakBetween = (d, from, to) => {
@@ -516,6 +532,17 @@ test("studio synth: dispose stops later notes; an unknown voice or bad note args
   assert.deepEqual(errors, []);
 });
 
+test("studio tape: position 0 is a clean wire, 4 muffles the same hit, and both still sound", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await studioPage(t);
+  const r = await p.evaluate(async () => ({ clean: await renderTape(0), worn: await renderTape(4), again: await renderTape(4) }));
+  assert.ok(r.clean.peak > 0.05, `the clean chain still sounds (${r.clean.peak})`);
+  assert.ok(r.worn.peak > 0.03, `the worn chain still sounds (${r.worn.peak})`);
+  assert.ok(r.worn.diff < r.clean.diff * 0.75, `position 4 takes the top off (${r.worn.diff} vs ${r.clean.diff})`);
+  assert.equal(r.worn.peak, r.again.peak, "the same level renders the same twice");
+  assert.equal(r.worn.diff, r.again.diff);
+  assert.deepEqual(errors, []);
+});
+
 /* ---------------- the rhythm screen (runtime/apps/studio.js) ---------------- */
 /* the runtime at a chosen viewport; each page is its own browser context, so its store starts empty */
 async function rtPage(t, viewport, locale) {
@@ -604,7 +631,7 @@ async function hitCountingPage(t) {
             const s = create.call(v, ctx, out);
             const hit = s.hit;
             s.hit = function (kit, drum, at, vel) {
-              window.__studioHits.push({ kit, drum, at, wall: performance.now() });
+              window.__studioHits.push({ kit, drum, at, vel, wall: performance.now() });
               return hit.apply(s, arguments);
             };
             const note = s.note;
@@ -642,6 +669,17 @@ const storedSong = (p) => p.evaluate(async () => {
    truthy), so an async predicate there would pass at once. */
 function storedMatches(data, want) {
   if (want.song && JSON.stringify(data.song) !== JSON.stringify(want.song)) return false;
+  if (want.key != null && data.key !== want.key) return false;
+  if (want.scale != null && data.scale !== want.scale) return false;
+  if (want.swing != null && data.swing !== want.swing) return false;
+  if (want.tape != null && data.tape !== want.tape) return false;
+  if (want.tracks) {
+    for (const [id, fields] of Object.entries(want.tracks)) {
+      const tr = (data.tracks || []).find((x) => x.id === id);
+      if (!tr) return false;
+      for (const [k, v] of Object.entries(fields)) if (tr[k] !== v) return false;
+    }
+  }
   if (want.pat != null) {
     const pat = data.patterns && data.patterns[want.pat];
     if (!pat) return false;
@@ -1481,7 +1519,7 @@ test("studio tour: every new step's bubble sits inside the view, off its target,
             };
           });
           assert.equal(nav.pat, true, `${where(screen, step)}: the pattern letter stays tappable`);
-          assert.deepEqual(nav.tabs, [true, true, true, true, true], `${where(screen, step)}: every screen tab stays tappable`);
+          assert.deepEqual(nav.tabs, [true, true, true, true, true, true], `${where(screen, step)}: every screen tab stays tappable`);
         }
       };
 
@@ -1503,6 +1541,15 @@ test("studio tour: every new step's bubble sits inside the view, off its target,
       await p.waitForSelector("#v-studio .st-tour-box");
       await waitTour(p, NEW_TOURS[2].first);
       await walkSongTour(p, (i) => check("song", i));
+      await p.locator("#v-studio .st-tour-next").click();
+      await p.waitForSelector("#v-studio .st-tour-box", { state: "detached" });
+
+      await p.click('#studio-screens .st-scr[data-screen="mixer"]');
+      await p.waitForSelector("#v-studio .st-tour-box");
+      await waitTour(p, /一行一条轨|One row per track/);
+      await check("mixer", 0);
+      await p.locator("#v-studio .st-tour-next").click();
+      await check("mixer", 1);
       await p.locator("#v-studio .st-tour-next").click();
       await p.waitForSelector("#v-studio .st-tour-box", { state: "detached" });
       assert.deepEqual(errors, []);
@@ -1562,6 +1609,26 @@ test("studio tour: every colour on the new screens and their tours is one of the
   await p.waitForSelector("#v-studio .st-tour-box", { state: "detached" });
   await scan("song screen");
 
+  await p.click('#studio-screens .st-scr[data-screen="mixer"]');
+  await p.waitForSelector("#v-studio .st-tour-box");
+  await waitTour(p, /一行一条轨|One row per track/);
+  await scan("mixer step 1");
+  await p.locator("#v-studio .st-tour-next").click();
+  await scan("mixer step 2");
+  await p.locator("#v-studio .st-tour-next").click();
+  await p.waitForSelector("#v-studio .st-tour-box", { state: "detached" });
+  await scan("mixer screen");
+  await p.click("#studio-mix-key");
+  await p.waitForSelector("#studio-sheet:not([hidden])");
+  await scan("key sheet");
+  await p.click("#studio-sheet .st-sheet-close");
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  await p.click("#studio-mix-sound");
+  await p.waitForSelector("#studio-sheet:not([hidden])");
+  await scan("sound sheet");
+  await p.click("#studio-sheet .st-sheet-close");
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+
   assert.deepEqual(bad, [], "the new screens and tours paint only ink, dark, mid and paper");
   assert.deepEqual(errors, []);
 });
@@ -1610,7 +1677,7 @@ test("studio tour: B closes a visible sheet first, then the tour", { skip, timeo
   assert.deepEqual(errors, []);
 });
 
-test("studio: the navigation row carries the pattern letter and five screens, and the demo's bass and chords show", { skip, timeout: 60000 }, async (t) => {
+test("studio: the navigation row carries the pattern letter and six screens, and the demo's bass and chords show", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await rtPage(t);
   await studioOpen(p);
   await skipTour(p);
@@ -1622,8 +1689,8 @@ test("studio: the navigation row carries the pattern letter and five screens, an
   assert.ok(patBox.width >= 44 && patBox.height >= 44, "the letter button is 44x44");
 
   const tabs = await p.$$eval("#studio-screens .st-scr", (els) => els.map((e) => [e.dataset.screen, e.textContent.trim()]));
-  assert.deepEqual(tabs.map((x) => x[0]), ["drums", "bass", "chords", "melody", "song"]);
-  assert.deepEqual(tabs.map((x) => x[1]), ["鼓", "贝斯", "和弦", "旋律", "歌曲"]);
+  assert.deepEqual(tabs.map((x) => x[0]), ["drums", "bass", "chords", "melody", "song", "mixer"]);
+  assert.deepEqual(tabs.map((x) => x[1]), ["鼓", "贝斯", "和弦", "旋律", "歌曲", "调音台"]);
 
   await p.click('#studio-screens .st-scr[data-screen="bass"]');
   await skipScreenTour(p);
@@ -1643,6 +1710,196 @@ test("studio: the navigation row carries the pattern letter and five screens, an
   assert.match(chords[0], /Am9/, "first half is Am9");
   assert.match(chords[1], /iv/, "second half is iv");
   assert.match(chords[1], /Dm9/, "second half is Dm9");
+  assert.deepEqual(errors, []);
+});
+
+test("studio: the mixer sets a track's level and mute, and they survive a reload", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await p.click('#studio-screens .st-scr[data-screen="mixer"]');
+  await skipScreenTour(p);
+  assert.equal(await p.locator("#studio-mix-rows .st-mix-row").count(), 4, "four instrument rows");
+  assert.deepEqual(await p.$$eval("#studio-mix-rows .st-mix-name", (els) => els.map((e) => e.textContent)), ["鼓", "贝斯", "和弦", "旋律"]);
+  assert.match(await p.textContent("#studio-mix-key"), /调式 A · 小调五声/);
+  assert.match(await p.textContent("#studio-mix-sound"), /磁带 2 · 摇摆 55%/);
+
+  const drums = p.locator('#studio-mix-rows .st-mix-row[data-track="drums"]');
+  assert.equal(await drums.locator(".st-mix-vol").textContent(), "10", "a fresh tape is at full level");
+  await drums.locator(".st-mix-minus").click();
+  await drums.locator(".st-mix-minus").click();
+  assert.equal(await drums.locator(".st-mix-vol").textContent(), "8");
+  await drums.locator(".st-mix-mute").click();
+  assert.equal(await drums.locator(".st-mix-mute").getAttribute("aria-pressed"), "true");
+  assert.equal(await drums.evaluate((e) => e.classList.contains("muted")), true);
+  await waitStored(p, { tracks: { drums: { vol: 0.8, mute: true } } });
+
+  await p.click("#home-key");
+  await p.waitForTimeout(250);
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await openTile(p);
+  await p.click('#studio-screens .st-scr[data-screen="mixer"]');
+  await skipScreenTour(p);
+  const back = p.locator('#studio-mix-rows .st-mix-row[data-track="drums"]');
+  assert.equal(await back.locator(".st-mix-vol").textContent(), "8", "the level survives the reload");
+  assert.equal(await back.locator(".st-mix-mute").getAttribute("aria-pressed"), "true", "the mute survives too");
+  assert.deepEqual(errors, []);
+});
+
+test("studio: the mixer's level scales the scheduled hits and a muted track schedules nothing", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await hitCountingPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await p.click('#studio-screens .st-scr[data-screen="mixer"]');
+  await skipScreenTour(p);
+  const drums = p.locator('#studio-mix-rows .st-mix-row[data-track="drums"]');
+  for (let i = 0; i < 5; i++) await drums.locator(".st-mix-minus").click();       /* 10 -> 5 */
+  await p.locator('#studio-mix-rows .st-mix-row[data-track="bass"] .st-mix-mute').click();
+  assert.equal(await drums.locator(".st-mix-vol").textContent(), "5");
+  await p.evaluate(() => { window.__studioHits.length = 0; window.__studioNotes.length = 0; });
+  await p.click("#studio-play");
+  await p.waitForFunction(() => document.querySelector("#v-studio").dataset.mode === "pattern");
+  await p.waitForTimeout(700);
+  const r = await p.evaluate(() => ({
+    hits: window.__studioHits.map((h) => ({ drum: h.drum, vel: h.vel })),
+    voices: [...new Set(window.__studioNotes.map((n) => n.voice))],
+  }));
+  assert.ok(r.hits.length > 0, "the drum track still plays");
+  assert.ok(r.hits.every((h) => h.vel <= 0.5001), `every hit is at half velocity: ${JSON.stringify(r.hits.slice(0, 6))}`);
+  assert.ok(r.hits.some((h) => h.drum === "kick" && h.vel > 0.49), "the kick is at 0.5");
+  assert.equal(r.voices.includes("bass"), false, "the muted bass scheduled no notes");
+  assert.equal(r.voices.includes("keys"), true, "the unmuted chords still sound");
+  await p.click("#studio-play");
+  await p.waitForFunction(() => document.querySelector("#v-studio").dataset.mode === "");
+  assert.deepEqual(errors, []);
+});
+
+test("studio: the key sheet sets the key and scale, and the mixer shows both", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await p.click('#studio-screens .st-scr[data-screen="mixer"]');
+  await skipScreenTour(p);
+  await p.click("#studio-mix-key");
+  await p.waitForSelector("#studio-sheet:not([hidden])");
+  assert.equal(await p.textContent("#studio-sheet .sheet-title span"), "调式");
+  assert.equal(await p.locator("#studio-sheet .st-key-btn").count(), 12, "twelve keys");
+  assert.equal(await p.locator("#studio-sheet .st-scale-btn").count(), 5, "five scales");
+  const close = await p.locator("#studio-sheet .st-sheet-close").boundingBox();
+  assert.ok(close.width >= 44 && close.height >= 44, "the sheet's back button is a 44 px target");
+  await p.locator('#studio-sheet .st-key-btn[data-key="0"]').click();
+  await p.locator('#studio-sheet .st-scale-btn[data-scale="major"]').click();
+  assert.match(await p.textContent("#studio-mix-key"), /调式 C · 大调/);
+  assert.equal(await p.isHidden("#studio-sheet"), false, "picking a key leaves the sheet open");
+  await waitStored(p, { key: 0, scale: "major" });
+  await p.click("#studio-sheet .st-sheet-close");
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  assert.deepEqual(errors, []);
+});
+
+test("studio: the sound sheet sets the tape colour and the swing, and the mixer shows both", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await p.click('#studio-screens .st-scr[data-screen="mixer"]');
+  await skipScreenTour(p);
+  await p.click("#studio-mix-sound");
+  await p.waitForSelector("#studio-sheet:not([hidden])");
+  assert.equal(await p.textContent("#studio-sheet .sheet-title span"), "声音");
+  assert.equal(await p.locator("#studio-sheet .st-tape-btn").count(), 5, "positions 0 to 4");
+  assert.equal(await p.textContent("#studio-swing-val"), "55%");
+  await p.locator('#studio-sheet .st-tape-btn[data-level="4"]').click();
+  await p.locator("#studio-sheet .st-swing-row .st-swing-plus").click();
+  assert.equal(await p.textContent("#studio-swing-val"), "56%");
+  assert.match(await p.textContent("#studio-mix-sound"), /磁带 4 · 摇摆 56%/);
+  assert.equal(await p.locator('#studio-sheet .st-tape-btn[data-level="4"]').evaluate((e) => e.classList.contains("on")), true);
+  await waitStored(p, { tape: 4, swing: 0.56 });
+  await p.click("#studio-sheet .st-sheet-close");
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  assert.deepEqual(errors, []);
+});
+
+test("studio: the key and sound sheets fit the 331x359 screen with 44 px controls", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t, { width: 375, height: 503 });
+  await studioOpen(p);
+  await skipTour(p);
+  await p.click('#studio-screens .st-scr[data-screen="mixer"]');
+  await skipScreenTour(p);
+  for (const which of ["studio-mix-key", "studio-mix-sound"]) {
+    await p.click("#" + which);
+    await p.waitForSelector("#studio-sheet:not([hidden])");
+    const sheet = await p.evaluate(() => {
+      const sh = document.querySelector("#studio-sheet");
+      return { scroll: sh.scrollHeight, client: sh.clientHeight, small: [...sh.querySelectorAll("button")].filter((e) => {
+        const r = e.getBoundingClientRect();
+        return r.width > 0 && r.height > 0 && (r.width < 44 - 0.5 || r.height < 44 - 0.5);
+      }).map((e) => ({ text: e.textContent.trim(), w: e.getBoundingClientRect().width, h: e.getBoundingClientRect().height })) };
+    });
+    assert.ok(sheet.scroll <= sheet.client, `${which}: the sheet does not scroll (${sheet.scroll} <= ${sheet.client})`);
+    assert.deepEqual(sheet.small, [], `${which}: every button is at least 44 px`);
+    await p.click("#studio-sheet .st-sheet-close");
+    await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  }
+  assert.deepEqual(errors, []);
+});
+
+test("studio: 导出 WAV writes a mono 16-bit 22.05 kHz WAV with sound in it", { skip, timeout: 90000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await p.evaluate(() => {
+    window.__wav = null;
+    LopdaPlatform.downloads.save = async ({ filename, data }) => {
+      const b = new Uint8Array(await data.arrayBuffer()), v = new DataView(b.buffer);
+      let sum = 0;
+      for (let i = 44; i + 1 < b.length; i += 2) { const s = v.getInt16(i, true) / 32768; sum += s * s; }
+      window.__wav = {
+        filename, type: data.type, size: b.length,
+        riff: String.fromCharCode(...b.slice(0, 4)), wave: String.fromCharCode(...b.slice(8, 12)),
+        format: v.getUint16(20, true), channels: v.getUint16(22, true), rate: v.getUint32(24, true),
+        bits: v.getUint16(34, true), data: v.getUint32(40, true),
+        rms: Math.sqrt(sum / ((b.length - 44) / 2)),
+      };
+      return { status: "saved" };
+    };
+  });
+  await p.click("#studio-menu");
+  await p.waitForSelector("#studio-sheet:not([hidden])");
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "导出 WAV" }).click();
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  await p.waitForFunction(() => window.__wav, null, { timeout: 60000 });
+  const w = await p.evaluate(() => window.__wav);
+  assert.match(w.filename, /^tape4-\d{8}-\d{4}\.wav$/, "a dated tape4 name");
+  assert.equal(w.type, "audio/wav");
+  assert.equal(w.riff, "RIFF");
+  assert.equal(w.wave, "WAVE");
+  assert.equal(w.format, 1, "PCM");
+  assert.equal(w.channels, 1, "mono");
+  assert.equal(w.rate, 22050);
+  assert.equal(w.bits, 16);
+  assert.equal(w.data, w.size - 44, "the data chunk is the whole rest of the file");
+  assert.ok(w.size > 44 + 22050, `at least a second of audio (${w.size} bytes)`);
+  assert.ok(w.rms > 0.01, `the render is not silence (${w.rms})`);
+  assert.deepEqual(errors, []);
+});
+
+test("studio tour: the mixer tour walks two steps to Done and a reopen is quiet", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await p.click('#studio-screens .st-scr[data-screen="mixer"]');
+  await p.waitForSelector("#v-studio .st-tour-box");
+  assert.match(await tourText(p), /一行一条轨|One row per track/);
+  assert.deepEqual(await tourTarget(p), { id: "", cls: "st-mix-row st-tour-hi" }, "step 1 frames the first track row");
+  await p.locator("#v-studio .st-tour-next").click();
+  assert.match(await tourText(p), /磁带味和摇摆|tape colour and the swing/);
+  assert.deepEqual(await tourTarget(p), { id: "studio-mix-top", cls: "st-mix-top st-tour-hi" }, "step 2 frames the top row");
+  await p.locator("#v-studio .st-tour-next").click();
+  await p.waitForSelector("#v-studio .st-tour-box", { state: "detached" });
+  assert.equal((await touredAny(p)).mixer, true, "Done records the mixer tour");
+  await p.click('#studio-screens .st-scr[data-screen="drums"]');
+  await p.click('#studio-screens .st-scr[data-screen="mixer"]');
+  assert.equal(await p.locator("#v-studio .st-tour-box").count(), 0, "the mixer tour does not come back");
   assert.deepEqual(errors, []);
 });
 
@@ -2475,7 +2732,7 @@ test("studio: picking the pattern the ears hear cancels a queue the scheduler ha
 });
 
 test("studio: every screen fits at 375x667 with 44 px buttons and 56 px grid cells, and stays in the view at 331x359", { skip, timeout: 120000 }, async (t) => {
-  const screens = ["drums", "bass", "chords", "melody", "song"];
+  const screens = ["drums", "bass", "chords", "melody", "song", "mixer"];
   const { p, errors } = await rtPage(t, { width: 375, height: 667 });
   await studioOpen(p);
   await skipTour(p);
@@ -2547,6 +2804,10 @@ test("studio: every screen fits at 375x667 with 44 px buttons and 56 px grid cel
   }
   t.diagnostic(`331x359 grid cells: ${JSON.stringify(cellsAt331)}`);
   t.diagnostic(`331x359 view: ${view.w}x${view.h}`);
+  const clippedTabs = await q.$$eval("#studio-screens .st-scr-name", (els) => els
+    .filter((e) => e.scrollWidth > e.clientWidth + 1)
+    .map((e) => ({ text: e.textContent, scroll: e.scrollWidth, client: e.clientWidth })));
+  assert.deepEqual(clippedTabs, [], `331x359: every screen label fits (${JSON.stringify(clippedTabs)})`);
 
   /* "+" brings the new last slot into the chain's own viewport; the view itself never scrolls */
   await q.click('#studio-screens .st-scr[data-screen="song"]');
