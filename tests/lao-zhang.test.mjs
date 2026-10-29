@@ -147,6 +147,62 @@ test("the shop enforces prices and caps", () => {
   assert.equal(state.dynamite, 5);
 });
 
+test("a run in progress is saved at the level start, updated in the shop, and cleared on failure", () => {
+  const state = GM.newState();
+  state.runSeed = 12345;
+  state.bank = 900;
+  state.dynamite = 2;
+  state.strength = 1;
+  GM.startLevel(state, 3);
+  assert.equal(state.run.level, 3);
+  assert.equal(state.run.bank, 900);
+  assert.equal(state.run.dynamite, 2);
+  assert.equal(state.run.strength, 1);
+  assert.equal(state.run.runSeed, 12345);
+  assert.equal(state.runDirty, true);
+
+  const payload = GM.runPayload(state);
+  const saved = GM.readRun(payload);
+  assert.equal(saved.ok, true);
+  assert.equal(saved.run.level, 3);
+  assert.equal(saved.run.bank, 900);
+  assert.equal(GM.readRun({ v: 2, level: 3 }).newer, true);
+  assert.equal(GM.readRun({ v: 1, level: 0, bank: 0 }).corrupt, true);
+  assert.equal(GM.readRun({ v: 1, level: 3, bank: 0, dynamite: 9, strength: 0, clover: 0, book: 0, runSeed: 1 }).corrupt, true);
+
+  state.screen = "shop";
+  state.bank = 1000;
+  GM.buy(state, 1);
+  assert.equal(state.run.level, 4);
+  assert.equal(state.run.bank, 800);
+  assert.equal(state.run.strength, 2);
+
+  state.level = 4;
+  state.target = 4000;
+  state.bank = 4500;
+  GM.finishLevel(state);
+  assert.equal(state.screen, "clear");
+  assert.equal(state.run.level, 5);
+  assert.equal(state.run.bank, 4500);
+
+  state.level = 5;
+  state.target = 99999;
+  state.bank = 100;
+  GM.finishLevel(state);
+  assert.equal(state.screen, "over");
+  assert.equal(state.run, null);
+
+  const resume = GM.newState();
+  resume.run = { level: 4, bank: 800, dynamite: 2, strength: 2, clover: 1, book: 0, runSeed: 99 };
+  assert.equal(GM.continueRun(resume), true);
+  assert.equal(resume.level, 4);
+  assert.equal(resume.bank, 800);
+  assert.equal(resume.dynamite, 2);
+  assert.equal(resume.strength, 2);
+  assert.equal(resume.clover, 1);
+  assert.equal(resume.run.level, 4);
+});
+
 test("best-run saves are v1, validated, and never downgrade the record", () => {
   let saved = GM.readBest(null);
   assert.equal(saved.ok, true);
@@ -201,6 +257,7 @@ test("the manifest and both languages are store-ready", () => {
     }
     assert.equal(T.shopNames.length, GM.SHOP.length);
     assert.equal(T.shopDescs.length, GM.SHOP.length);
+    assert.equal(T.codexNames.length, GM.ITEM_ORDER.length);
   }
   for (const name of Object.keys(GM.ITEMS)) {
     if (name !== "mole") assert.ok(GM.SPR[name], `missing sprite ${name}`);
