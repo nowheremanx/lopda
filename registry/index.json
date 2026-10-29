@@ -1,6 +1,6 @@
 {
   "spec": "lopda/1",
-  "generated": "2026-10-28",
+  "generated": "2026-10-29",
   "apps": [
     {
       "spec": "lopda/1",
@@ -436,8 +436,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/lao-zhang/index.html",
-      "sha256": "b9999ecf48a242526c3fa866f9f27c51aac97f8d1c5599b0e55f0b1c168900e6",
-      "bytes": 68616
+      "sha256": "12cd7eb2b84238069dfad4f46c9d538fe93d60f97acaa9b14bebfa63b3215f3d",
+      "bytes": 71591
     },
     {
       "spec": "lopda/1",

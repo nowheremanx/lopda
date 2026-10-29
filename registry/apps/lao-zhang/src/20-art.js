@@ -242,6 +242,18 @@ GM.tntSprite = function () {
   return s;
 };
 
+GM.dynIconSprite = function () {
+  var s = GM.sprite(16, 16);
+  GM.srect(s, 6, 5, 4, 9, GM.DARK);
+  GM.soutline(s, GM.INK);
+  GM.srect(s, 5, 9, 6, 3, GM.PAPER);
+  GM.srect(s, 5, 9, 6, 1, GM.INK);
+  GM.srect(s, 5, 11, 6, 1, GM.INK);
+  GM.sline(s, 8, 5, 12, 1, GM.MID);
+  GM.sput(s, 12, 1, GM.PAPER);
+  return s;
+};
+
 GM.miniGemSprite = function () {
   var s = GM.sprite(10, 10);
   var poly = [[5, 1], [9, 5], [5, 9], [1, 5]];
@@ -333,6 +345,7 @@ GM.initArt = function () {
     bone: GM.boneSprite(),
     skull: GM.skullSprite(),
     tnt: GM.tntSprite(),
+    dynIcon: GM.dynIconSprite(),
     miniGold: GM.blob(10, 8, 41, GM.PAPER, GM.MID, false, false),
     miniGem: GM.miniGemSprite()
   };
@@ -374,32 +387,32 @@ GM.makeBackground = function (state) {
   GM.rect(b, 5, 12, 8, 1, GM.INK);
   GM.rect(b, 6, 3, 6, 1, GM.DARK);
 
-  /* the mine is textured at the buffer's own resolution, not stretched from 160x144 */
+  /* a clean, slightly lighter seam just under the grass, then quiet soil */
+  GM.rect(b, 0, GM.GROUND + 1, GM.W, 5, GM.MID);
+  GM.rect(b, 0, GM.GROUND + 6, GM.W, 1, GM.DARK);
   rng = GM.rng((state.levelSeed || 1) ^ 0x9e3779b9);
   var top = (GM.GROUND + 2) * GM.SCALE;
   var bottom = GM.BH - 3;
-  for (i = 0; i < 260; i++) {
+  for (i = 0; i < 34; i++) {
+    x = 4 + Math.floor(rng() * (GM.BW - 8));
+    y = (GM.GROUND + 2) * GM.SCALE + Math.floor(rng() * 8);
+    GM.bput(b, x, y, GM.DARK);
+  }
+  for (i = 0; i < 150; i++) {
     x = 4 + Math.floor(rng() * (GM.BW - 8));
     y = top + Math.floor(Math.pow(rng(), 1.6) * (bottom - top));
-    GM.bput(b, x, y, rng() < 0.7 ? GM.MID : GM.DARK);
-    if (rng() < 0.22) GM.brect(b, x, y, 2, 2, rng() < 0.5 ? GM.MID : GM.DARK);
+    GM.bput(b, x, y, rng() < 0.78 ? GM.MID : GM.DARK);
+    if (rng() < 0.18) GM.brect(b, x, y, 2, 2, rng() < 0.5 ? GM.MID : GM.DARK);
   }
-  for (i = 0; i < 30; i++) {
+  for (i = 0; i < 18; i++) {
     x = 4 + Math.floor(rng() * (GM.BW - 44));
-    y = top + 6 + Math.floor(rng() * (bottom - top - 12));
-    len = 6 + Math.floor(rng() * 28);
-    GM.bline(b, x, y, x + len, y + (rng() < 0.5 ? 0 : 2), rng() < 0.55 ? GM.DARK : GM.MID);
+    y = top + 8 + Math.floor(rng() * (bottom - top - 14));
+    len = 8 + Math.floor(rng() * 26);
+    GM.bline(b, x, y, x + len, y + (rng() < 0.5 ? 0 : 2), rng() < 0.6 ? GM.DARK : GM.MID);
   }
-  for (i = 0; i < 12; i++) {
-    x = 8 + Math.floor(rng() * (GM.BW - 32));
-    y = top + 10 + Math.floor(rng() * (bottom - top - 24));
-    GM.blineWide(b, x, y, x + 4, y + 5, GM.INK, 2);
-    GM.blineWide(b, x + 4, y + 5, x + 2, y + 11, GM.INK, 2);
-    if (rng() < 0.6) GM.blineWide(b, x + 4, y + 5, x + 10, y + 7, GM.INK, 2);
-  }
-  for (i = 0; i < 16; i++) {
+  for (i = 0; i < 8; i++) {
     x = 6 + Math.floor(rng() * (GM.BW - 12));
-    y = top + 8 + Math.floor(rng() * (bottom - top - 16));
+    y = top + 10 + Math.floor(rng() * (bottom - top - 18));
     GM.brect(b, x, y, 3, 2, GM.MID);
     GM.bput(b, x, y, GM.DARK);
   }
@@ -472,6 +485,12 @@ GM.drawHook = function (buf, hook) {
   GM.rect(buf, tip.x - 1, tip.y - 1, 2, 2, GM.INK);
 };
 
+GM.sweatDrop = function (buf, bx, by) {
+  GM.brect(buf, bx, by, 3, 4, GM.INK);
+  GM.brect(buf, bx + 1, by, 1, 2, GM.PAPER);
+  GM.bput(buf, bx + 1, by + 2, GM.MID);
+};
+
 GM.drawMiner = function (buf, state) {
   var hook = state.hook;
   var bob = hook.state === "swing" && Math.sin(state.anim * 4) > 0.35 ? -1 : 0;
@@ -519,6 +538,21 @@ GM.drawMiner = function (buf, state) {
   GM.rect(buf, 81, 16, 2, 2, GM.PAPER);
   GM.rect(buf, 79, 17, 2, 2, GM.DARK);
   GM.put(buf, 80, 18, GM.PAPER);
+
+  /* sweat: more drops when the rope is heavy with something */
+  if (hook.item) {
+    var t = state.anim, side, sx, sy;
+    for (var i = 0; i < 4; i++) {
+      side = i < 2 ? -1 : 1;
+      sx = bx + side * (9 + (i % 2) * 2) + Math.sin(t * 5 + i) * 0.8;
+      sy = 6 + by + (i % 2) * 3 - ((t * 4 + i) % 2);
+      GM.sweatDrop(buf, Math.round(sx * GM.SCALE), Math.round(sy * GM.SCALE));
+    }
+    GM.sweatDrop(buf, Math.round((bx - 3) * GM.SCALE), Math.round((10 + by) * GM.SCALE));
+    GM.sweatDrop(buf, Math.round((bx + 4) * GM.SCALE), Math.round((10 + by) * GM.SCALE));
+    GM.sweatDrop(buf, Math.round((bx - 8) * GM.SCALE), Math.round((14 + by) * GM.SCALE));
+    GM.sweatDrop(buf, Math.round((bx + 9) * GM.SCALE), Math.round((15 + by) * GM.SCALE));
+  }
 };
 
 GM.draw = function (ctx, state) {
@@ -541,15 +575,16 @@ GM.draw = function (ctx, state) {
   }
   GM.drawRope(buf, state.hook);
   if (state.hook.item) {
+    var held = GM.heldPos(state.hook);
     tip = GM.tip(state.hook);
     it = state.hook.item;
     if (it.type === "mole") {
       var ox = it.x, oy = it.y;
-      it.x = tip.x; it.y = tip.y;
+      it.x = held.x; it.y = held.y;
       GM.drawMole(buf, it, state.anim);
       it.x = ox; it.y = oy;
     } else {
-      GM.drawItemAt(buf, it, tip.x * GM.SCALE, tip.y * GM.SCALE, state.anim);
+      GM.drawItemAt(buf, it, held.x * GM.SCALE, held.y * GM.SCALE, state.anim);
     }
     GM.brect(buf, Math.round(tip.x * GM.SCALE) - 2, Math.round(tip.y * GM.SCALE) - 5, 4, 2, GM.PAPER);
   }
@@ -605,6 +640,21 @@ GM.present = function (ctx, buf, sx, sy) {
     }
   }
   ctx.putImageData(GM._img, 0, 0);
+};
+
+GM.spriteCanvas = function (spr) {
+  var c = document.createElement("canvas");
+  c.width = spr.w; c.height = spr.h;
+  var ctx = c.getContext("2d");
+  var img = ctx.createImageData(spr.w, spr.h);
+  for (var i = 0; i < spr.b.length; i++) {
+    var t = spr.b[i], o = i * 4;
+    if (t === GM.CLEAR) { img.data[o + 3] = 0; continue; }
+    var rgb = GM.RGB[t] || GM.RGB[GM.PAPER];
+    img.data[o] = rgb[0]; img.data[o + 1] = rgb[1]; img.data[o + 2] = rgb[2]; img.data[o + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  return c;
 };
 
 GM.iconCanvas = function () {

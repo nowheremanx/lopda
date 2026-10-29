@@ -131,6 +131,7 @@ GM.newState = function () {
     newBest: false,
     saveMsg: "",
     wonOnce: false,
+    jingleId: 0,
     bg: null,
     bgKey: ""
   };
@@ -154,6 +155,7 @@ GM.startLevel = function (state, n) {
   state.level = n;
   state.target = GM.targetFor(n);
   state.time = GM.LEVEL_TIME;
+  state.jingleId = (state.jingleId || 0) + 1;
   state.lastSec = GM.LEVEL_TIME;
   state.levelSeed = (state.runSeed + n * 7919) >>> 0;
   state.rng = GM.rng(state.levelSeed);
@@ -264,6 +266,19 @@ GM.tip = function (hook) {
   };
 };
 
+/* the caught item hangs from the near edge, not from its centre; near the top it
+   slides into the claw so the hand-off still happens at the miner */
+GM.heldPos = function (hook) {
+  var tip = GM.tip(hook);
+  if (!hook.item) return tip;
+  var shrink = Math.min(1, Math.max(0, (hook.len - 6) / 34));
+  var off = (hook.item.r + 2) * shrink;
+  return {
+    x: tip.x + Math.sin(hook.angle) * off,
+    y: tip.y + Math.cos(hook.angle) * off
+  };
+};
+
 GM.retractSpeed = function (item, strength) {
   return Math.min(300, GM.BASE_SPEED / Math.max(0.4, item.weight) * (1 + GM.STRENGTH_STEP * (strength || 0)));
 };
@@ -280,7 +295,7 @@ GM.useDynamite = function (state) {
   if (state.screen !== "play" || state.hook.state !== "back" || !state.hook.item || state.dynamite <= 0) return false;
   state.dynamite--;
   var it = state.hook.item;
-  var p = GM.tip(state.hook);
+  var p = GM.heldPos(state.hook);
   if (it.kind === "tnt") {
     GM.explode(state, p.x, p.y);
   } else {
@@ -307,7 +322,7 @@ GM.attach = function (state, index) {
 GM.collect = function (state) {
   var it = state.hook.item;
   if (!it) return;
-  var p = GM.tip(state.hook);
+  var p = GM.heldPos(state.hook);
   state.hook.item = null;
   state.hook.state = "swing";
   state.hook.len = GM.IDLE_ROPE;
@@ -523,7 +538,7 @@ GM.stepHook = function (state, dt) {
   if (hook.item && hook.item.kind === "tnt") {
     hook.item.fuse -= dt;
     if (hook.item.fuse <= 0) {
-      var q = GM.tip(hook);
+      var q = GM.heldPos(hook);
       GM.explode(state, q.x, q.y);
       return;
     }
@@ -583,6 +598,11 @@ GM.update = function (state, dt) {
     var h = Math.min(0.016, left);
     GM.stepHook(state, h);
     left -= h;
+  }
+  /* nothing left to catch: do not make the player sit out the rest of the clock */
+  if (state.screen === "play" && state.items.length === 0 && !state.hook.item) {
+    GM.finishLevel(state);
+    return;
   }
   GM.updateEffects(state, dt);
   state.shake = Math.max(0, state.shake - dt);

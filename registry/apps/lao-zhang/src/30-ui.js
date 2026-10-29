@@ -4,9 +4,9 @@ var GM = (typeof GM !== "undefined" && GM) || {};
 GM.ui = (function () {
   var LANG = (typeof PAD !== "undefined" && PAD.lang === "en") ? "en" : "zh";
   var T = GM.text(LANG);
-  var state, ctx, cv, ov, introEl, dynBtn, foot, lv, cash, tm, bar;
+  var state, ctx, cv, ov, introEl, dynBtn, dynIcon, dynCount, foot, lv, cash, tm, bar;
   var last = 0, lastScreen = "", lastHud = "", lastDyn = "", lastFoot = "", lastIntro = "";
-  var musicPlaying = false;
+  var lastJingleId = 0;
 
   function $(id) { return document.getElementById(id); }
   function money(n) { return "$" + GM.money(n); }
@@ -22,6 +22,8 @@ GM.ui = (function () {
     ov = $("ov");
     introEl = $("intro");
     dynBtn = $("dyn");
+    dynIcon = $("dynicon");
+    dynCount = $("dyncount");
     foot = $("foot");
     lv = $("lv");
     cash = $("cash");
@@ -29,6 +31,11 @@ GM.ui = (function () {
     bar = $("barfill");
     document.documentElement.lang = LANG === "zh" ? "zh-CN" : "en";
     document.title = T.title;
+    if (dynIcon && GM.SPR) {
+      var dctx = dynIcon.getContext("2d");
+      dctx.imageSmoothingEnabled = false;
+      dctx.drawImage(GM.spriteCanvas(GM.SPR.dynIcon), 0, 0);
+    }
     cv.addEventListener("pointerdown", onCanvas);
     dynBtn.addEventListener("click", onDyn);
     ov.addEventListener("click", onOverlay);
@@ -187,7 +194,7 @@ GM.ui = (function () {
     if (!force && key === lastDyn) return;
     lastDyn = key;
     dynBtn.hidden = false;
-    dynBtn.textContent = GM.fmt(T.dyn, { n: state.dynamite });
+    dynCount.textContent = "×" + state.dynamite;
     dynBtn.className = state.hook.item ? "on" : "off";
   }
 
@@ -262,16 +269,14 @@ GM.ui = (function () {
   }
 
   function musicFor(screen) {
-    var want = screen === "play" || screen === "intro";
-    if (want && !musicPlaying) {
-      if (typeof PAD !== "undefined" && PAD.music) {
-        try { PAD.music.play(GM.MUSIC); musicPlaying = true; } catch (e) {}
+    if (typeof PAD === "undefined" || !PAD.music) return;
+    if (screen === "intro") {
+      if (state.jingleId !== lastJingleId) {
+        lastJingleId = state.jingleId;
+        try { PAD.music.play(GM.JINGLE, { loop: false }); } catch (e) {}
       }
-    } else if (!want && musicPlaying) {
-      if (typeof PAD !== "undefined" && PAD.music) {
-        try { PAD.music.stop(); } catch (e) {}
-      }
-      musicPlaying = false;
+    } else if (screen !== "play") {
+      try { PAD.music.stop(); } catch (e) {}
     }
   }
 

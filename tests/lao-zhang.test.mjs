@@ -78,11 +78,23 @@ test("a fired hook catches an item, reels it in and banks its value", () => {
   assert.equal(state.hook.item && state.hook.item.type, "goldM");
   assert.equal(state.items.length, 0);
 
-  for (let i = 0; i < 200 && state.bank === 0; i++) GM.update(state, 0.01);
-  assert.equal(state.bank, 150);
+  for (let i = 0; i < 400 && state.bank === 0; i++) GM.update(state, 0.01);
+  assert.equal(state.bank, 300);
   assert.equal(state.hook.item, null);
   assert.equal(state.hook.state, "swing");
   assert.ok(state.events.includes("fire") && state.events.includes("grab") && state.events.includes("coin"));
+});
+
+test("an empty mine ends the level at once instead of waiting for the clock", () => {
+  const state = GM.newState();
+  state.screen = "play";
+  state.level = 4;
+  state.bank = state.target;
+  state.time = 42;
+  state.items = [];
+  state.hook = { state: "swing", len: GM.IDLE_ROPE, angle: 0, item: null };
+  GM.update(state, 0.016);
+  assert.equal(state.screen, "clear");
 });
 
 test("dynamite cuts a heavy item; a lit TNT clears only what is near it", () => {
