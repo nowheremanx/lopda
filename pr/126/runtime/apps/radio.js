@@ -9,7 +9,7 @@
 var LP=window.LP, $=LP.$, tr=LP.tr, AC=window.LopdaAcoustic;
 var TONES=LP.TONES, micMark=$("mic-mark");
 
-var R={tab:"send", rate:40, pattern:"a5", live:false, tx:null, rx:null, pending:false, token:0,
+var R={tab:"send", rate:10, pattern:"a5", live:false, tx:null, rx:null, pending:false, token:0,
   sendText:"", recvText:"", recvStats:"", recvHex:"", last:null, log:[], sendTimer:0, recvTimer:0};
 
 function esc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
@@ -42,6 +42,8 @@ function render(){
   }
   $("radio-rate").disabled=active();
   $("radio-pattern").disabled=active();
+  $("radio-rate").value=String(R.rate);
+  $("radio-pattern").value=R.pattern;
   $("radio-pattern-hex").textContent=tr("radio.hex.tx")+" "+AC.hex(bytes());
   $("radio-send-go").disabled=active();
   $("radio-recv-go").disabled=active();
@@ -63,12 +65,15 @@ function setTab(t){
 /* ---------- transmit ---------- */
 function startSend(){
   if(active()) return;
+  /* no microphone while sending: "playback" puts the sound on the speaker and does not ask for the
+     receiver route that "play-and-record" can choose on some iPhones. */
+  LP.setSession("playback");
   var ctx=LP.audio();
   if(!ctx){ LP.toast(tr("radio.noaudio")); return; }
   LP.wake();
   var data=bytes();
   var samples;
-  try{ samples=AC.synth(data,{sampleRate:ctx.sampleRate,symbolMs:R.rate,amp:0.55,leadMs:150,tailMs:150}); }
+  try{ samples=AC.synth(data,{sampleRate:ctx.sampleRate,symbolMs:R.rate,amp:0.9,leadMs:150,tailMs:150}); }
   catch(e){ LP.toast(tr("radio.send.fail")); return; }
   var buf;
   try{
@@ -109,6 +114,7 @@ function finishSend(why){
   if(why==="error"){ R.sendText=tr("radio.send.fail"); log(tr("radio.send.fail")); LP.sfx("err"); }
   else if(why==="stop"){ R.sendText=tr("radio.send.stopped"); log(tr("radio.send.stopped")); }
   else{ R.sendText=tr("radio.send.done",{n:bytes().length}); log(tr("radio.send.done",{n:bytes().length})); LP.sfx("ok"); }
+  LP.setSession("ambient");
   LP.keepAwake(!!R.rx);
   render();
 }

@@ -169,7 +169,7 @@ PLAYWRIGHT_DIR=/path/to/node_modules/playwright node experiments/acoustic-lab/ve
 2. 另一台点“发报 → 发送测试序列”。
 3. 收报端显示 `Sync 16/16`、`符号错误 0/64`、`字节错误 0/16` 即通过。
 
-M2 只传已知测试序列，没有帧、CRC 或 ACK；文本和任意字节是 M3/M4。速率可选 40 / 20 / 10 / 5 ms。
+M2 只传已知测试序列，没有帧、CRC 或 ACK；文本和任意字节是 M3/M4。速率可选 40 / 20 / 10 / 5 ms，内置 app 默认 10 ms；5 ms 只在扬声器外放、音量足够时试。
 发送时麦克风关闭，接收时发送关闭；打开麦克风期间静音键不起作用。
 
 ```sh

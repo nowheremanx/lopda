@@ -126,7 +126,7 @@ raw microphone audio. On iOS it fails with `NotAllowedError` rather than `Securi
 - The 13 Pro's lower speaker volume did not hurt detection, but M2 should still use relative
   candidate energy rather than an absolute amplitude threshold.
 
-## 7. M2 built-in Radio (电波台) — synthetic PASS, two phones pending
+## 7. M2 built-in Radio (电波台) — synthetic and two-phone pass
 
 The M2 modem moved into the runtime:
 
@@ -151,4 +151,19 @@ Browser end-to-end with a generated WAV on the fake microphone, through the real
 | 10 ms | 16/16 | 0/64 | 0/16 | 160 bit/s |
 | 5 ms | 16/16 | 0/64 | 0/16 | 320 bit/s |
 
-The real two-phone M2 pass is not done yet. M3 (frames, CRC, ACK) and M4 (text) are next.
+### Real two-phone M2 pass (owner, 2026-10-29)
+
+Both phones through the built-in Radio, speaker output:
+
+| direction | 5 ms | 10 ms | note |
+|---|---|---|---|
+| iPhone 16 -> iPhone 13 Pro | **perfect** | perfect | 16 speaker is louder |
+| iPhone 13 Pro -> iPhone 16 | errors | **perfect** | 13 Pro speaker is weaker |
+
+- With the speaker and enough volume, 5 ms was completely usable in the 16 -> 13 Pro direction.
+- Through the **earpiece** (电话听筒), both directions had a much higher error rate; this is a routing/level problem, not a modem bug.
+- The built-in now sets `audioSession.type = "playback"` for sending (the speaker) and `"ambient"` when the burst ends; receiving still uses `"play-and-record"`.
+- TX amplitude was raised (0.55 -> 0.9) and the built-in now defaults to **10 ms**, the rate that worked in both directions with the 13 Pro as sender. 5 ms remains selectable for a strong speaker pair.
+- The engine is the same in both directions, so this is acoustic level/frequency response, not a decoder asymmetry to fix in code. M3's ACK/retry should fall back to a slower rate after repeated failures; M5 should measure each direction separately.
+
+M3 (frames, CRC, ACK) and M4 (text) are next.
