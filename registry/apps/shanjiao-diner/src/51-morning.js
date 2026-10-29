@@ -64,10 +64,21 @@ function morningAct(i) {
       game.say("灶上还是空的。先去备菜吧。").then(function () { busy = false; });
       return;
     }
-    S.flags.opened = 1;
-    save();
-    game.sfx("ok");
-    game.go("service");
+    busy = true;
+    game.choose(["开门营业", "自动结算"], { title: "今晚怎么开？", cancel: true }).then(function (c) {
+      busy = false;
+      if (c === 1) {
+        S.flags.opened = 1;
+        save();
+        game.sfx("ok");
+        autoService();
+      } else if (c === 0) {
+        S.flags.opened = 1;
+        save();
+        game.sfx("ok");
+        game.go("service");
+      }
+    });
   }
 }
 

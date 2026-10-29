@@ -380,8 +380,7 @@
         "................"
       ],
       "version": "1.0.6",
-      "released": "2026-10-27",
-      "updated": "2026-10-27",
+      "released": "2026-10-28",
       "description": "曹操从华容道脱身：全关开放，记录步数，附八课大师教程与逐步提示。",
       "i18n": {
         "zh": {
@@ -684,7 +683,7 @@
         "................"
       ],
       "version": "1.0.0",
-      "released": "2026-10-27",
+      "released": "2026-10-28",
       "description": "七天，守住山脚的小馆：采买、打怪、备菜、待客。",
       "i18n": {
         "en": {
@@ -695,8 +694,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/shanjiao-diner/index.html",
-      "sha256": "b7171f9dd7a43beb24ddfd13caa0ea2dad6770a5ff19f251e1f94762abc3e0e0",
-      "bytes": 237104
+      "sha256": "844a0027d61642df62fe3851a29c9219af273c010a22d833d5b48d8fbb011798",
+      "bytes": 240184
     },
     {
       "spec": "lopda/1",

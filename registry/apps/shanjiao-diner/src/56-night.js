@@ -109,8 +109,8 @@ game.scene("night", {
   },
   draw: function (g) {
     ART.room(g, S, "night", game.time, -1);
-    UI.header(g, S, "打烊");
     var L = S.lastLedger || {};
+    UI.header(g, S, L.auto ? "打烊·自动" : "打烊");
     // left: the money
     g.window(6, 32, 110, 180);
     g.text("今日", 12, 36, { color: g.DARK });
