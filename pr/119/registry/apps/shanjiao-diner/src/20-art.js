@@ -379,11 +379,11 @@ ART.room = function (g, s, mode, t, sel) {
 
   // lantern light: the bodies are on the plate, the halo moves
   if (mode === "night") {
-    ART.glow(g, 78, 38, 40, 34, t);
-    ART.glow(g, 202, 104, 30, 26, t);
+    ART.glow(g, 78, 38, 24, 22, t);
+    ART.glow(g, 202, 104, 18, 16, t);
   } else if (mode === "service") {
-    ART.glow(g, 78, 38, 34, 28, t);
-    ART.glow(g, 202, 104, 26, 24, t);
+    ART.glow(g, 78, 38, 20, 18, t);
+    ART.glow(g, 202, 104, 16, 14, t);
   }
 };
 
@@ -432,7 +432,8 @@ ART.facade = function (g, x, y, s, t) {
   // sign
   g.rect(x + 14, y + 26, 56, 15, g.INK);
   g.rect(x + 15, y + 27, 54, 13, g.PAPER);
-  g.text("山脚小馆", x + 42, y + 27, { align: "center" });
+  if (s) g.text("山脚小馆", x + 42, y + 27, { align: "center" });
+  else { g.rect(x + 39, y + 31, 6, 1, g.DARK); g.rect(x + 37, y + 34, 10, 1, g.DARK); }
   if (s && s.upgrades && s.upgrades.sign) {
     g.rect(x + 100, y + 28, 10, 18, g.INK);
     g.rect(x + 101, y + 29, 8, 16, g.PAPER);
@@ -449,7 +450,8 @@ ART.facade = function (g, x, y, s, t) {
   // noren
   g.rect(x + 32, y + 42, 38, 7, g.INK);
   g.rect(x + 34, y + 43, 34, 5, g.PAPER);
-  g.text("小馆", x + 51, y + 42, { align: "center" });
+  g.circle(x + 51, y + 45, 3, g.DARK, true);
+  g.circle(x + 51, y + 45, 1, g.PAPER, true);
   // window
   g.rect(x + 72, y + 48, 16, 14, g.INK);
   g.rect(x + 74, y + 50, 12, 10, g.PAPER);
@@ -474,6 +476,17 @@ ART.title = function (g, t) {
   ART.plate(g, PLATES.mountain, 0, 0);
   // shop
   ART.facade(g, 48, 88, null, t);
+  // chimney smoke and a few fireflies make the postcard breathe
+  for (var st = 0; st < 4; st++) {
+    var sy = 76 - ((t * 4 + st * 7) % 16);
+    g.pixel(120 + st * 2, sy, g.PAPER);
+    g.pixel(121 + st * 2, sy - 2, g.MID);
+  }
+  for (var ff = 0; ff < 5; ff++) {
+    var fx = 24 + ff * 36 + Math.sin(t * 0.9 + ff) * 6;
+    var fy = 132 + (ff * 23) % 48 + Math.sin(t * 1.3 + ff) * 3;
+    if (Math.floor(t * 2 + ff) % 3) g.pixel(fx, fy, g.PAPER);
+  }
   // cat and a little bush
   g.sprite(ART.scale(ART.cat, 1.5), 24, 176);
   ART.bush(g, 40, 178, t);
@@ -485,6 +498,8 @@ ART.title = function (g, t) {
   g.rect(18, 68, 136, 2, g.DARK);
   g.line(24, 18, 28, 8, g.DARK);
   g.line(148, 18, 144, 8, g.DARK);
+  g.rect(22, 56, 10, 10, g.INK);
+  g.text("馆", 27, 55, { align: "center", color: g.PAPER });
   // leaves
   for (var i = 0; i < 14; i++) {
     var lx = (i * 47 + t * 8) % 216;

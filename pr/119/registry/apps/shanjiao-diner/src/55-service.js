@@ -99,6 +99,56 @@ function buildSchedule() {
   return list;
 }
 
+/* The whole evening without the walk: use the same schedule and the same
+ * stock, serve whoever can be served, and go straight to the ledger. */
+function autoService() {
+  if (!S || !S.menu.length) return false;
+  var list = buildSchedule();
+  var stock = {};
+  for (var id in S.stock) if (Object.prototype.hasOwnProperty.call(S.stock, id)) stock[id] = S.stock[id];
+  var served = 0, lost = 0, earned = 0, tips = 0, satisfied = 0, missed = 0;
+  var vip = 0, vipFail = 0, critic = false;
+  for (var i = 0; i < list.length; i++) {
+    var sc = list[i], d = DATA.DISHES[sc.dish];
+    if (!d) continue;
+    if ((stock[sc.dish] || 0) > 0) {
+      stock[sc.dish]--;
+      var tip = 1 + (sc.who ? 1 : 0) + (hasUpgrade("sign") ? 1 : 0) + (sc.matched ? 1 : 0);
+      served++; earned += d.price; tips += tip;
+      S.money += d.price + tip;
+      if (sc.matched) satisfied++; else missed++;
+      if (sc.who && DATA.NPCS[sc.who] && sc.dish === DATA.NPCS[sc.who].fav) addNpc(sc.who, 1);
+      if (S.day === 7 && sc.who) {
+        var ok = (sc.who === "po" && sc.dish === "god_soup") ||
+                 (sc.who === "zhou" && sc.dish === "grilled_fish") ||
+                 (sc.who === "ahe" && sc.dish === "mushroom_soup");
+        if (ok) vip++; else vipFail++;
+      }
+      if (sc.who === "critic" && sc.dish === "mushroom_pot") critic = true;
+    } else {
+      lost++;
+    }
+  }
+  S.stock = stock;
+  S.flags.vip = (S.flags.vip || 0) + vip;
+  S.flags.vipFail = (S.flags.vipFail || 0) + vipFail;
+  var rep = Math.round(served / 2) - lost;
+  addRep(rep);
+  if (critic && !S.flags.criticGood) { S.money += 30; addRep(2); S.flags.criticGood = 1; }
+  S.flags.opened = 1;
+  S.lastLedger = {
+    served: served, lost: lost, earned: earned, tips: tips,
+    repDelta: rep, leftover: stockTotal(), satisfied: satisfied, missed: missed, auto: true
+  };
+  S.stats.served += served; S.stats.lost += lost;
+  S.stats.earned += earned; S.stats.tips += tips;
+  S.phase = "night";
+  save();
+  sayToast("自动结算：客 " + served + "　走 " + lost);
+  game.go("night");
+  return true;
+}
+
 function freeSeat() {
   for (var i = 0; i < SERV.seats; i++) if (!SERV.tables[i]) return i;
   return -1;
@@ -279,8 +329,8 @@ game.scene("service", {
   update: function (dt) {
     if (!SERV || SERV.done) return;
     if (SERV.paused) {
-      if (game.repeat("left") || game.repeat("up")) { SERV.pauseSel = (SERV.pauseSel + 1) % 2; game.sfx("move"); }
-      if (game.repeat("right") || game.repeat("down")) { SERV.pauseSel = (SERV.pauseSel + 1) % 2; game.sfx("move"); }
+      if (game.repeat("up") || game.repeat("left")) { SERV.pauseSel = (SERV.pauseSel + 1) % 2; game.sfx("move"); }
+      if (game.repeat("down") || game.repeat("right")) { SERV.pauseSel = (SERV.pauseSel + 1) % 2; game.sfx("move"); }
       if (game.pressed("a")) {
         if (SERV.pauseSel === 0) { SERV.paused = false; game.sfx("tap"); }
         else { game.sfx("tap"); finishService(true); }
@@ -448,7 +498,7 @@ function drawPause(g) {
   g.window(48, 76, 120, 74);
   g.text("暂停", 108, 80, { align: "center", color: g.DARK });
   var opts = ["继续", "打烊"];
-  for (var i = 0; i < 2; i++) {
+  for (var i = 0; i < opts.length; i++) {
     if (i === SERV.pauseSel) { g.rect(60, 98 + i * 20, 96, 16, g.INK); g.text(opts[i], 68, 100 + i * 20, { color: g.PAPER }); }
     else g.text(opts[i], 68, 100 + i * 20);
   }

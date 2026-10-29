@@ -9,8 +9,9 @@ Open the Store, or `sdk/dev.html?app=registry/apps/shanjiao-diner`.
 - Arrow keys: choose / walk
 - A: confirm / gather / serve
 - B: back / open the stock list during service; the cursor stays on the action you left
+- 开门 offers 开门营业 or 自动结算 (the whole evening, straight to the ledger)
 - START: pause during service; in the mountain, open the codex
-- SELECT: the layout grid (development)
+- SELECT: open the codex
 
 ## The week
 
