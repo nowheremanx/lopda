@@ -380,8 +380,7 @@
         "................"
       ],
       "version": "1.0.6",
-      "released": "2026-10-27",
-      "updated": "2026-10-27",
+      "released": "2026-10-28",
       "description": "曹操从华容道脱身：全关开放，记录步数，附八课大师教程与逐步提示。",
       "i18n": {
         "zh": {
@@ -657,6 +656,47 @@
       "path": "apps/rain-station/index.html",
       "sha256": "ffae5645ed2913d841b2793d49f6a13ee3ed81cc75113e5d4a66f3cbf935ba8b",
       "bytes": 173113
+    },
+    {
+      "spec": "lopda/1",
+      "id": "shanjiao-diner",
+      "name": "山脚小馆",
+      "glyph": "馆",
+      "category": "game",
+      "buttons": true,
+      "icon": [
+        "................",
+        "......0000......",
+        ".....011110.....",
+        "....01111110....",
+        "...0111111110...",
+        "...0000000000...",
+        "..011111111110..",
+        ".01111111111110.",
+        ".01113333331110.",
+        ".01133333333110.",
+        ".01133333333110.",
+        ".01113333331110.",
+        ".01111111111110.",
+        "..000000000000..",
+        "................",
+        "................"
+      ],
+      "version": "0.1.0",
+      "released": "2026-10-28",
+      "updated": "2026-10-28",
+      "description": "七天，守住山脚的小馆：采买、打怪、备菜、待客。",
+      "i18n": {
+        "en": {
+          "name": "Foothill",
+          "description": "Seven days to keep a little mountain diner open: gather, fight, cook and serve."
+        }
+      },
+      "author": "Haowei Wu",
+      "license": "MIT",
+      "path": "apps/shanjiao-diner/index.html",
+      "sha256": "0c6f5dbc43934d514dd3bec39db7e78d37b0ff4f8657946a93d63503015aafa0",
+      "bytes": 240184
     },
     {
       "spec": "lopda/1",
