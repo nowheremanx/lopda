@@ -492,6 +492,62 @@
       </div>
     </section>
 
+    <!-- RADIO: the acoustic modem, M2 test bench over runtime/acoustic.js (apps/radio.js) -->
+    <section class="view radio-view" id="v-radio" hidden>
+      <div class="bar">
+        <h2 data-i18n="radio.title">电波台</h2>
+        <span class="hint" id="radio-state"></span>
+      </div>
+      <div class="radio-body">
+        <div class="radio-tabs" role="tablist">
+          <button class="btn ghost" id="radio-tab-send" type="button" role="tab" data-i18n="radio.tab.send">发报</button>
+          <button class="btn ghost" id="radio-tab-recv" type="button" role="tab" data-i18n="radio.tab.recv">收报</button>
+          <button class="btn ghost" id="radio-tab-lab" type="button" role="tab" data-i18n="radio.tab.lab">仪表</button>
+        </div>
+        <div class="radio-settings">
+          <label class="radio-field">
+            <span data-i18n="radio.rate">速率</span>
+            <select id="radio-rate">
+              <option value="40">40 ms · 50 bit/s</option>
+              <option value="20">20 ms · 100 bit/s</option>
+              <option value="10" selected>10 ms · 200 bit/s · 推荐</option>
+              <option value="5">5 ms · 400 bit/s</option>
+            </select>
+          </label>
+          <label class="radio-field">
+            <span data-i18n="radio.test">测试序列</span>
+            <select id="radio-pattern">
+              <option value="a5" data-i18n="radio.pattern.a5">A5 5A · 16 字节</option>
+              <option value="count" data-i18n="radio.pattern.count">00–0F · 16 字节</option>
+              <option value="random" data-i18n="radio.pattern.random">随机 · 16 字节</option>
+            </select>
+          </label>
+          <p class="hint radio-hex" id="radio-pattern-hex"></p>
+        </div>
+        <div class="radio-pane" id="radio-pane-send">
+          <button class="btn" id="radio-send-go" type="button" data-i18n="radio.send.go">发送测试序列</button>
+          <div class="radio-meter"><span id="radio-send-bar"></span></div>
+          <p class="hint" id="radio-send-state" aria-live="polite"></p>
+        </div>
+        <div class="radio-pane" id="radio-pane-recv" hidden>
+          <div class="row radio-actions">
+            <button class="btn" id="radio-recv-go" type="button" data-i18n="radio.recv.go">接收并解码</button>
+            <button class="btn ghost" id="radio-recv-stop" type="button" data-i18n="radio.recv.stop" disabled>停止并解码</button>
+          </div>
+          <div class="radio-meter"><span id="radio-recv-bar"></span></div>
+          <p class="hint" id="radio-recv-state" aria-live="polite"></p>
+          <p class="hint" id="radio-recv-stats"></p>
+          <p class="radio-hex" id="radio-recv-hex"></p>
+        </div>
+        <div class="radio-pane" id="radio-pane-lab" hidden>
+          <canvas id="radio-lab-cv" class="radio-scope" width="600" height="120" data-i18n-label="radio.lab.scope" aria-label="符号"></canvas>
+          <p class="hint" id="radio-lab-note"></p>
+          <div class="radio-log" id="radio-log"></div>
+        </div>
+        <p class="hint radio-note" id="radio-note"></p>
+      </div>
+    </section>
+
     <!-- PET: one hardware screen, the room (81 x 60 at 4 px), eight icons and the soft keys; sub-screens open over the room -->
     <section class="view pet-view" id="v-pet" hidden>
       <div class="pet-stage" id="pet-stage">
@@ -690,6 +746,7 @@
 <script src="vendor/qrcode-generator/qrcode.js"></script>
 <script src="qr.js"></script>
 <script src="appsaves.js"></script>
+<script src="acoustic.js"></script>
 <script src="core.js"></script>
 <script src="apps/notes.js"></script>
 <script src="apps/calendar.js"></script>
@@ -699,6 +756,7 @@
 <script src="apps/darkroom.js"></script>
 <script src="apps/studio.js"></script>
 <script src="apps/cart.js"></script>
+<script src="apps/radio.js"></script>
 <script src="apps/pet.js"></script>
 <script src="apps/snap.js"></script>
 <script src="apps/store.js"></script>

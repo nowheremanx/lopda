@@ -125,3 +125,45 @@ raw microphone audio. On iOS it fails with `NotAllowedError` rather than `Securi
 - Both phones report 48 kHz and `play-and-record`; 4500 Hz works well enough at this distance.
 - The 13 Pro's lower speaker volume did not hurt detection, but M2 should still use relative
   candidate energy rather than an absolute amplitude threshold.
+
+## 7. M2 built-in Radio (电波台) — synthetic and two-phone pass
+
+The M2 modem moved into the runtime:
+
+- `runtime/acoustic.js`: pure 4-FSK symbol/synth/decode functions
+- `runtime/apps/radio.js`: built-in 电波台, send/receive/scope
+- `tests/acoustic.test.mjs`: 7 tests, all pass
+
+Engine round-trip (48 kHz and 44.1 kHz, 40/20/10/5 ms), no noise:
+
+| sample rate | rates | result |
+|---|---|---|
+| 48000 | 40 / 20 / 10 / 5 ms | `sync 16/16`, 0 symbol errors, 0 byte errors |
+| 44100 | 40 / 20 / 10 / 5 ms | `sync 16/16`, 0 symbol errors, 0 byte errors |
+
+Noisy (σ ≈ 0.006) 40 ms and 10 ms also pass; silence/short/truncated bursts do not invent a frame.
+
+Browser end-to-end with a generated WAV on the fake microphone, through the real built-in app:
+
+| rate | sync | symbol errors | byte errors | goodput |
+|---|---|---|---|---|
+| 40 ms | 16/16 | 0/64 | 0/16 | 40 bit/s |
+| 10 ms | 16/16 | 0/64 | 0/16 | 160 bit/s |
+| 5 ms | 16/16 | 0/64 | 0/16 | 320 bit/s |
+
+### Real two-phone M2 pass (owner, 2026-10-29)
+
+Both phones through the built-in Radio, speaker output:
+
+| direction | 5 ms | 10 ms | note |
+|---|---|---|---|
+| iPhone 16 -> iPhone 13 Pro | **perfect** | perfect | 16 speaker is louder |
+| iPhone 13 Pro -> iPhone 16 | errors | **perfect** | 13 Pro speaker is weaker |
+
+- With the speaker and enough volume, 5 ms was completely usable in the 16 -> 13 Pro direction.
+- The owner confirmed the sound came from the **bottom speaker**, not the earpiece. An earlier earpiece observation was a routing/level problem; the built-in still sets `audioSession.type = "playback"` for sending, but that change did not materially change the rates.
+- The direction data points at the **receiver**: the 13 Pro's microphone decoded 5 ms from the 16, while the 16 needed 10 ms from the 13 Pro. The 13 Pro speaker is not the limiting factor. Raising TX amplitude (0.55 -> 0.9) also did not change the result much.
+- The built-in now defaults to **10 ms**, the balanced rate in both directions. 5 ms remains selectable for a strong pair.
+- The engine is the same in both directions, so this is an acoustic/microphone difference, not a decoder asymmetry. M3's handshake should pick a rate that works both ways; M5 should measure each direction separately.
+
+M3 (frames, CRC, ACK) and M4 (text) are next.

@@ -3,6 +3,9 @@
 这是声波通信项目的 **M1**：只验证音调发送、麦克风采集、实时频谱和四音调检测。
 **不包含**符号定时、帧同步、CRC、ACK/重传或文本传输；这些从 M2 开始。
 
+> **M2 已开始。** 产品方向已经改为内置的 **电波台**（`runtime/apps/radio.js`），M2 的
+> 4-FSK 符号引擎在 `runtime/acoustic.js`，设计见 `docs/design/radio.md`。本页继续保留为调参/回归台。
+
 ```
 experiments/acoustic-lab/
   index.html    自包含实验页（无依赖、无网络、无存储）
@@ -157,3 +160,20 @@ PLAYWRIGHT_DIR=/path/to/node_modules/playwright node experiments/acoustic-lab/ve
 - 麦克风权限被拒绝、页面不是 HTTPS、AudioContext 被挂起时，页面会明确显示原因；不会静默继续。
 - 桌面 macOS 上直接用真实麦克风做扬声器回声测试时，系统 TCC 可能给浏览器返回静音流；自动验证因此使用假麦克风文件。真机结果以手机页面为准。
 - 不写入 localStorage/IndexedDB，不上传任何音频；报告只在本页文本框里。
+
+## M2：内置电波台
+
+打开 `runtime/`，首页点 **电波台 / Radio**。两台手机选同样的速率和测试序列：
+
+1. 一台点“收报 → 接收并解码”。
+2. 另一台点“发报 → 发送测试序列”。
+3. 收报端显示 `Sync 16/16`、`符号错误 0/64`、`字节错误 0/16` 即通过。
+
+M2 只传已知测试序列，没有帧、CRC 或 ACK；文本和任意字节是 M3/M4。速率可选 40 / 20 / 10 / 5 ms，内置 app 默认 10 ms；5 ms 只在扬声器外放、音量足够时试。
+发送时麦克风关闭，接收时发送关闭；打开麦克风期间静音键不起作用。
+
+```sh
+node --test tests/acoustic.test.mjs
+```
+
+覆盖符号位序、48 kHz / 44.1 kHz × 四个速率、噪声、静音、截断和定时偏移。
