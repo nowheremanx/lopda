@@ -45,6 +45,50 @@ GM.ui = (function () {
     state.saveMsg = info && info.corrupt ? T.saveFail : info && info.newer ? T.saveNewer : "";
   }
 
+  function setRun(info) {
+    state.run = (info && info.run) || null;
+    state.runBlocked = !(info && info.ok);
+    state.runMsg = info && info.corrupt ? T.runFail : info && info.newer ? T.runNewer : "";
+    state.runDirty = false;
+    if (state.run) state.menuCursor = 0;
+    else if (state.menuCursor === 0) state.menuCursor = 1;
+  }
+
+  function saveRun() {
+    if (!state.runDirty || state.runBlocked) return;
+    if (typeof PAD === "undefined") return;
+    try {
+      if (state.run) {
+        if (PAD.save) PAD.save("run", GM.runPayload(state));
+        if (PAD.setSchema) PAD.setSchema(1);
+      } else if (PAD.remove) {
+        PAD.remove("run");
+      }
+      state.runDirty = false;
+    } catch (e) {
+      state.runBlocked = true;
+      state.runMsg = T.runWrite;
+    }
+  }
+
+  function row(sel, act, name, sub, off) {
+    return '<button type="button" class="mrow' + (sel ? " sel" : "") + (off ? " off" : "") + '" data-act="' + act + '">' +
+      "<b>" + esc(name) + "</b>" + (sub ? "<small>" + esc(sub) + "</small>" : "") + "</button>";
+  }
+
+  function codexValue(type) {
+    var it = GM.ITEMS[type];
+    if (type === "bag") return money(it.min) + "-" + money(it.max);
+    if (type === "tnt") return T.codexBoom;
+    if (type === "mole") return money(GM.ITEMS.goldM.value) + " / " + money(GM.ITEMS.diamond.value);
+    return money(it.value);
+  }
+
+  function codexWeight(type) {
+    var w = GM.ITEMS[type].weight;
+    return w <= 1 ? T.codexLight : w <= 2.4 ? T.codexMid : T.codexHeavy;
+  }
+
   function shell(cls, body, footer) {
     return '<div class="sbody ' + cls + '">' + body + '</div><div class="ofoot">' + esc(footer) + "</div>";
   }
@@ -55,22 +99,58 @@ GM.ui = (function () {
       best = state.best.level > 0
         ? GM.fmt(T.best, { l: state.best.level, b: GM.money(state.best.bank) })
         : T.noBest;
-      warn = state.saveMsg ? '<p class="warn">' + esc(state.saveMsg) + "</p>" : "";
-      return shell("center",
+      warn = (state.saveMsg ? '<p class="warn">' + esc(state.saveMsg) + "</p>" : "") +
+             (state.runMsg ? '<p class="warn">' + esc(state.runMsg) + "</p>" : "");
+      var runSub = state.run
+        ? GM.fmt(T.menuContinueAt, { n: state.run.level, b: GM.money(state.run.bank) })
+        : T.menuNoRun;
+      return shell("title center",
         '<canvas id="logo" width="16" height="16" aria-hidden="true"></canvas>' +
         "<h1>" + esc(T.title) + "</h1>" +
         '<p class="sub">' + esc(T.sub) + "</p>" +
-        '<p class="tip">' + esc(T.tip) + "</p>" +
-        '<button type="button" class="primary" data-act="start">' + esc(T.start) + "</button>" +
+        '<div class="menu">' +
+          row(state.menuCursor === 0, "continue", T.menuContinue, runSub, !state.run) +
+          row(state.menuCursor === 1, "new", T.menuNew, T.menuNewSub, false) +
+          row(state.menuCursor === 2, "codex", T.menuCodex, T.menuCodexSub, false) +
+        "</div>" +
         '<p class="best">' + esc(best) + "</p>" + warn,
-        T.footTitle);
+        T.menuFoot);
     }
     if (screen === "paused") {
       return shell("center",
         "<h1>" + esc(T.pause) + "</h1>" +
         "<p>" + esc(GM.fmt(T.level, { n: state.level })) + " · " + esc(GM.fmt(T.shopCash, { b: GM.money(state.bank) })) + "</p>" +
-        '<button type="button" class="primary" data-act="resume">' + esc(T.resume) + "</button>",
-        T.footPause);
+        '<div class="menu">' +
+          row(state.pauseCursor === 0, "resume", T.resume, "", false) +
+          row(state.pauseCursor === 1, "pauseTitle", T.pauseMenu, "", false) +
+        "</div>",
+        T.pauseFoot);
+    }
+    if (screen === "confirm") {
+      var runLevel = state.run ? state.run.level : 1;
+      return shell("center",
+        "<h1>" + esc(T.confirmTitle) + "</h1>" +
+        "<p>" + esc(GM.fmt(T.confirmText, { n: runLevel })) + "</p>" +
+        '<div class="menu">' +
+          row(state.confirmCursor === 0, "menu", T.confirmCancel, "", false) +
+          row(state.confirmCursor === 1, "restartRun", T.confirmRestart, "", false) +
+        "</div>",
+        T.confirmFoot);
+    }
+    if (screen === "codex") {
+      var cells = "";
+      for (i = 0; i < GM.ITEM_ORDER.length; i++) {
+        var ct = GM.ITEM_ORDER[i];
+        cells += '<div class="ccell"><canvas width="32" height="32" data-item="' + ct + '" aria-hidden="true"></canvas>' +
+          "<b>" + esc(T.codexNames[i]) + "</b><span>" + esc(codexValue(ct)) + "</span>" +
+          "<em>" + esc(codexWeight(ct)) + "</em></div>";
+      }
+      return shell("codex",
+        "<h1>" + esc(T.codexTitle) + "</h1>" +
+        '<p class="small">' + esc(T.codexHint) + "</p>" +
+        '<div class="cgrid">' + cells + "</div>" +
+        '<button type="button" class="primary codexback" data-act="menu">' + esc(T.codexBack) + "</button>",
+        T.codexFoot);
     }
     if (screen === "clear") {
       extra = Math.max(0, state.bank - state.target);
@@ -151,7 +231,26 @@ GM.ui = (function () {
         if (!spr) continue;
         ctx2 = c.getContext("2d");
         ctx2.imageSmoothingEnabled = false;
+        ctx2.fillStyle = "#7d8a58";
+        ctx2.fillRect(0, 0, c.width, c.height);
         ctx2.drawImage(GM.spriteCanvas(spr), 0, 0);
+      }
+    }
+    if (screen === "codex") {
+      var items = ov.querySelectorAll("canvas[data-item]");
+      for (i = 0; i < items.length; i++) {
+        c = items[i];
+        var type = c.getAttribute("data-item");
+        spr = GM.SPR[type === "mole" ? "moleIcon" : type];
+        if (!spr) continue;
+        ctx2 = c.getContext("2d");
+        ctx2.imageSmoothingEnabled = false;
+        ctx2.fillStyle = "#4a5a32";
+        ctx2.fillRect(0, 0, c.width, c.height);
+        var src = GM.spriteCanvas(spr);
+        var k = Math.min(32 / spr.w, 32 / spr.h);
+        var iw = spr.w * k, ih = spr.h * k;
+        ctx2.drawImage(src, (32 - iw) / 2, (32 - ih) / 2, iw, ih);
       }
     }
   }
@@ -172,6 +271,7 @@ GM.ui = (function () {
     updateHud(true);
     updateIntro();
     musicFor(screen);
+    saveRun();
   }
 
   function updateHud(force) {
@@ -190,12 +290,14 @@ GM.ui = (function () {
   function updateFoot(force) {
     var text;
     if (state.screen === "play" || state.screen === "intro") text = state.dynamite > 0 ? T.footPlayDyn : T.footPlay;
-    else if (state.screen === "paused") text = T.footPause;
+    else if (state.screen === "paused") text = T.pauseFoot;
+    else if (state.screen === "confirm") text = T.confirmFoot;
+    else if (state.screen === "codex") text = T.codexFoot;
     else if (state.screen === "clear") text = T.footClear;
     else if (state.screen === "shop") text = T.footShop;
     else if (state.screen === "over") text = T.footOver;
     else if (state.screen === "victory") text = T.footVictory;
-    else text = T.footTitle;
+    else text = T.menuFoot;
     if (!force && text === lastFoot) return;
     lastFoot = text;
     foot.textContent = text;
@@ -286,6 +388,36 @@ GM.ui = (function () {
     enter(state.screen);
   }
 
+  function continueGame() {
+    if (!state.run) { sfx("err"); return; }
+    GM.continueRun(state);
+    pump();
+    enter(state.screen);
+  }
+
+  function newGame() {
+    if (state.run) {
+      state.screen = "confirm";
+      state.confirmCursor = 0;
+      enter("confirm");
+    } else {
+      GM.startRun(state);
+      pump();
+      enter(state.screen);
+    }
+  }
+
+  function openCodex() {
+    state.screen = "codex";
+    enter("codex");
+  }
+
+  function chooseMenu() {
+    if (state.menuCursor === 0) continueGame();
+    else if (state.menuCursor === 1) newGame();
+    else openCodex();
+  }
+
   function onCanvas(e) {
     if (state.screen === "play") {
       GM.fire(state);
@@ -302,19 +434,64 @@ GM.ui = (function () {
     if (!el || el === ov) return;
     var act = el.getAttribute("data-act");
     var i = +(el.getAttribute("data-i") || 0);
-    if (act === "start" || act === "retry") startRun();
+    var prev = state.screen;
+    if (act === "continue") continueGame();
+    else if (act === "new") newGame();
+    else if (act === "codex") openCodex();
+    else if (act === "restartRun") { GM.startRun(state); pump(); enter(state.screen); }
+    else if (act === "retry") startRun();
     else if (act === "resume") { GM.resume(state); enter(state.screen); }
+    else if (act === "menu" || act === "pauseTitle" || act === "title") {
+      GM.toTitle(state);
+      if (prev === "codex") state.menuCursor = 2;
+      enter("title");
+    }
     else if (act === "shop" || act === "endless") openShop();
     else if (act === "buy") { GM.buy(state, i); pump(); enter("shop"); }
     else if (act === "next") shopNext();
-    else if (act === "title") { GM.toTitle(state); enter("title"); }
     e.preventDefault();
   }
 
   function onPad(btn) {
     var s = state.screen;
     if (s === "title") {
-      if (btn === "a" || btn === "start") startRun();
+      if (btn === "up" || btn === "down") {
+        state.menuCursor = (state.menuCursor + (btn === "down" ? 1 : 2) + 3) % 3;
+        sfx("move");
+        enter("title");
+        return;
+      }
+      if (btn === "a" || btn === "start") chooseMenu();
+      return;
+    }
+    if (s === "confirm") {
+      if (btn === "up" || btn === "down") {
+        state.confirmCursor = 1 - state.confirmCursor;
+        sfx("move");
+        enter("confirm");
+        return;
+      }
+      if (btn === "a" || btn === "start") {
+        if (state.confirmCursor === 0) {
+          GM.toTitle(state);
+          enter("title");
+        } else {
+          GM.startRun(state);
+          pump();
+          enter(state.screen);
+        }
+      } else if (btn === "b") {
+        GM.toTitle(state);
+        enter("title");
+      }
+      return;
+    }
+    if (s === "codex") {
+      if (btn === "a" || btn === "b" || btn === "start") {
+        GM.toTitle(state);
+        state.menuCursor = 2;
+        enter("title");
+      }
       return;
     }
     if (s === "intro") {
@@ -331,7 +508,19 @@ GM.ui = (function () {
       return;
     }
     if (s === "paused") {
-      if (btn === "a" || btn === "start") { GM.resume(state); enter(state.screen); }
+      if (btn === "up" || btn === "down") {
+        state.pauseCursor = 1 - state.pauseCursor;
+        sfx("move");
+        enter("paused");
+        return;
+      }
+      if (btn === "a" || btn === "start") {
+        if (state.pauseCursor === 0) { GM.resume(state); enter(state.screen); }
+        else { GM.toTitle(state); enter("title"); }
+      } else if (btn === "b") {
+        GM.resume(state);
+        enter(state.screen);
+      }
       return;
     }
     if (s === "clear") {
@@ -398,6 +587,7 @@ GM.ui = (function () {
   return {
     init: init,
     setBest: setBest,
+    setRun: setRun,
     enter: enter,
     loop: loop,
     fit: fit,

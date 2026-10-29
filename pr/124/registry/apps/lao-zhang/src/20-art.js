@@ -301,6 +301,20 @@ GM.shopBookSprite = function () {
   return s;
 };
 
+GM.moleIconSprite = function () {
+  var s = GM.sprite(16, 16);
+  GM.sellipse(s, 8, 9, 6, 4, GM.INK);
+  GM.sellipse(s, 8, 9, 5, 3, GM.MID);
+  GM.sellipse(s, 12, 6, 3, 3, GM.INK);
+  GM.sellipse(s, 12, 6, 2, 2, GM.MID);
+  GM.srect(s, 14, 6, 2, 2, GM.PAPER);
+  GM.sput(s, 15, 7, GM.INK);
+  GM.sput(s, 13, 5, GM.INK);
+  GM.sline(s, 3, 12, 2, 15, GM.INK);
+  GM.sline(s, 8, 12, 8, 15, GM.INK);
+  return s;
+};
+
 GM.miniGemSprite = function () {
   var s = GM.sprite(10, 10);
   var poly = [[5, 1], [9, 5], [5, 9], [1, 5]];
@@ -398,6 +412,7 @@ GM.initArt = function () {
     shopStrength: GM.shopStrengthSprite(),
     shopClover: GM.shopCloverSprite(),
     shopBook: GM.shopBookSprite(),
+    moleIcon: GM.moleIconSprite(),
     miniGold: GM.blob(10, 8, 41, GM.PAPER, GM.MID, false, false),
     miniGem: GM.miniGemSprite()
   };

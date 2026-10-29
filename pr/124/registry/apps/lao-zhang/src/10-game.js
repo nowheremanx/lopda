@@ -131,6 +131,13 @@ GM.newState = function () {
     bestDirty: false,
     newBest: false,
     saveMsg: "",
+    run: null,
+    runBlocked: false,
+    runDirty: false,
+    runMsg: "",
+    menuCursor: 0,
+    pauseCursor: 0,
+    confirmCursor: 0,
     wonOnce: false,
     jingleId: 0,
     bg: null,
@@ -163,6 +170,7 @@ GM.startLevel = function (state, n) {
   state.items = GM.generate(state, n);
   state.hook = { state: "swing", len: GM.IDLE_ROPE, angle: 0, item: null };
   state.bomb = null;
+  GM.setRun(state, n);
   state.swingT = 0;
   state.introT = 1.25;
   state.shopCursor = 4;
@@ -441,6 +449,7 @@ GM.updateEffects = function (state, dt) {
 GM.finishLevel = function (state) {
   if (state.bank >= state.target) {
     GM.recordBest(state, state.level, state.bank);
+    GM.setRun(state, state.level + 1);
     state.events.push("clear");
     if (state.level === GM.PLAY_LEVELS && !state.wonOnce) {
       state.wonOnce = true;
@@ -450,9 +459,81 @@ GM.finishLevel = function (state) {
     }
   } else {
     GM.recordBest(state, Math.max(0, state.level - 1), state.bank);
+    GM.clearRun(state);
     state.events.push("fail");
     state.screen = "over";
   }
+};
+
+GM.setRun = function (state, level) {
+  state.run = {
+    level: level,
+    bank: state.bank,
+    dynamite: state.dynamite,
+    strength: state.strength,
+    clover: state.clover,
+    book: state.book,
+    runSeed: state.runSeed
+  };
+  state.runDirty = true;
+};
+
+GM.clearRun = function (state) {
+  state.run = null;
+  state.runDirty = true;
+};
+
+GM.runPayload = function (state) {
+  var r = state.run;
+  if (!r) return null;
+  return {
+    v: 1,
+    level: r.level,
+    bank: r.bank,
+    dynamite: r.dynamite,
+    strength: r.strength,
+    clover: r.clover,
+    book: r.book,
+    runSeed: r.runSeed
+  };
+};
+
+GM.readRun = function (raw) {
+  if (raw == null) return { ok: true, run: null };
+  if (typeof raw !== "object" || raw.length != null) return { ok: false, corrupt: true, run: null };
+  var v = raw.v;
+  if (typeof v !== "number" || Math.floor(v) !== v) return { ok: false, corrupt: true, run: null };
+  if (v > 1) return { ok: false, newer: true, run: null };
+  if (v !== 1) return { ok: false, corrupt: true, run: null };
+  var nums = ["level", "bank", "dynamite", "strength", "clover", "book", "runSeed"];
+  for (var i = 0; i < nums.length; i++) {
+    var n = raw[nums[i]];
+    if (typeof n !== "number" || Math.floor(n) !== n || n < 0) return { ok: false, corrupt: true, run: null };
+  }
+  if (raw.level < 1 || raw.level > 9999) return { ok: false, corrupt: true, run: null };
+  if (raw.dynamite > 5 || raw.strength > 3 || raw.clover > 2 || raw.book > 1) return { ok: false, corrupt: true, run: null };
+  if (raw.runSeed < 1 || raw.runSeed > 4294967295) return { ok: false, corrupt: true, run: null };
+  return {
+    ok: true,
+    run: {
+      level: raw.level, bank: raw.bank, dynamite: raw.dynamite, strength: raw.strength,
+      clover: raw.clover, book: raw.book, runSeed: raw.runSeed
+    }
+  };
+};
+
+GM.continueRun = function (state) {
+  var r = state.run;
+  if (!r) return false;
+  state.runSeed = r.runSeed >>> 0;
+  state.bank = r.bank;
+  state.dynamite = r.dynamite;
+  state.strength = r.strength;
+  state.clover = r.clover;
+  state.book = r.book;
+  state.wonOnce = r.level > GM.PLAY_LEVELS;
+  GM.startLevel(state, r.level);
+  return true;
 };
 
 GM.better = function (a, b) {
@@ -518,6 +599,7 @@ GM.buy = function (state, idx) {
   }
   state.bank -= item.price;
   state[item.key] = have + 1;
+  GM.setRun(state, state.level + 1);
   state.events.push("buy");
   return true;
 };
@@ -525,6 +607,7 @@ GM.buy = function (state, idx) {
 GM.pause = function (state) {
   if (state.screen !== "play" && state.screen !== "intro") return false;
   state.resumeTo = state.screen;
+  state.pauseCursor = 0;
   state.screen = "paused";
   return true;
 };
@@ -537,6 +620,7 @@ GM.resume = function (state) {
 
 GM.toTitle = function (state) {
   state.screen = "title";
+  state.menuCursor = state.run ? 0 : 1;
   state.events = [];
 };
 

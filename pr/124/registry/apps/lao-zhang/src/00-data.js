@@ -41,6 +41,8 @@ GM.ITEMS = {
   mole:    { kind: "mole",  value: 0,   weight: 0.9,  r: 8,  sprite: "mole",    pref: [82, 120] }
 };
 
+GM.ITEM_ORDER = ["goldS", "goldM", "goldL", "diamond", "bag", "rockS", "rockL", "bone", "skull", "tnt", "mole"];
+
 GM.LEVELS = [
   { goldS: 8, goldM: 3, goldL: 1, bag: 1, rockS: 2, bone: 1 },
   { goldS: 7, goldM: 4, goldL: 2, bag: 2, rockS: 2, bone: 1, diamond: 1 },
@@ -125,7 +127,34 @@ GM.TEXT = {
     footVictory: "A 继续挖　B 标题",
     saveFail: "最高纪录读不出，本次不写入。",
     saveNewer: "存档来自新版本，本次不写入。",
-    saveWrite: "最高纪录暂时写不进去。"
+    saveWrite: "最高纪录暂时写不进去。",
+    runFail: "进行中的进度读不出，本次不续关。",
+    runNewer: "进行中的进度来自新版本，本次不续关。",
+    runWrite: "进度暂时写不进去。",
+    menuContinue: "继续",
+    menuContinueAt: "第 {n} 关 · 现金 ${b}",
+    menuNoRun: "没有进行中的矿",
+    menuNew: "重新开始",
+    menuNewSub: "从第 1 关开始",
+    menuCodex: "物品图鉴",
+    menuCodexSub: "看看每样东西值多少",
+    menuFoot: "↑↓ 选　A 确定",
+    confirmTitle: "重新开始？",
+    confirmText: "会丢掉第 {n} 关的进度。",
+    confirmCancel: "取消",
+    confirmRestart: "重新开始",
+    confirmFoot: "A 确定　B 返回",
+    pauseMenu: "回到主菜单",
+    pauseFoot: "↑↓ 选　A 确定　START 继续",
+    codexTitle: "物品图鉴",
+    codexHint: "越轻越值钱；石头、骨头和头骨又重又便宜。",
+    codexBack: "返回",
+    codexFoot: "B 返回",
+    codexBoom: "爆炸",
+    codexLight: "轻",
+    codexMid: "中",
+    codexHeavy: "重",
+    codexNames: ["小金块", "中金块", "大金块", "钻石", "钱袋", "小石头", "大石头", "骨头", "头骨", "炸药桶", "地鼠"]
   },
   en: {
     title: "GOLD DIG",
@@ -175,7 +204,34 @@ GM.TEXT = {
     footVictory: "A KEEP DIGGING　B TITLE",
     saveFail: "Best save unreadable; not writing this time.",
     saveNewer: "Save is from a newer version; not writing.",
-    saveWrite: "Best save cannot be written now."
+    saveWrite: "Best save cannot be written now.",
+    runFail: "Run save unreadable; Continue is off.",
+    runNewer: "Run save is from a newer version; Continue is off.",
+    runWrite: "Run progress cannot be saved now.",
+    menuContinue: "CONTINUE",
+    menuContinueAt: "LV {n} · ${b}",
+    menuNoRun: "NO RUN IN PROGRESS",
+    menuNew: "NEW GAME",
+    menuNewSub: "Start again at level 1",
+    menuCodex: "ITEM CODEX",
+    menuCodexSub: "What each thing is worth",
+    menuFoot: "UP/DOWN PICK　A CHOOSE",
+    confirmTitle: "START OVER?",
+    confirmText: "The run at LV {n} will be lost.",
+    confirmCancel: "CANCEL",
+    confirmRestart: "START OVER",
+    confirmFoot: "A CHOOSE　B BACK",
+    pauseMenu: "MAIN MENU",
+    pauseFoot: "UP/DOWN PICK　A CHOOSE　START RESUME",
+    codexTitle: "ITEM CODEX",
+    codexHint: "Lighter is better; rocks are heavy.",
+    codexBack: "BACK",
+    codexFoot: "B BACK",
+    codexBoom: "BOOM",
+    codexLight: "LIGHT",
+    codexMid: "MID",
+    codexHeavy: "HEAVY",
+    codexNames: ["GOLD S", "GOLD M", "GOLD L", "DIAMOND", "BAG", "ROCK S", "ROCK L", "BONE", "SKULL", "TNT", "MOLE"]
   }
 };
 
