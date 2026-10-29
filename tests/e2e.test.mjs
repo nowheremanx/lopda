@@ -2730,6 +2730,8 @@ test("settings: the darkroom key page shows no key until one exists, masks, show
   await p.waitForSelector("#v-settings:not([hidden])");
   await p.click("#set-key-open");
   await p.waitForSelector("#v-set-key:not([hidden])");
+  /* the state is painted only after the async key read; wait for that paint, not just the view */
+  await p.waitForFunction(() => document.getElementById("set-key-state").textContent.length > 0);
   /* a fresh profile: no key is made just by opening the page */
   assert.equal(await p.locator("#set-key-state").innerText(), "还没有钥匙：在相机菜单里打开「地点」时自动生成。");
   const hasDoc = () => p.evaluate(() => LP.S.db.doc("data/users/local/darkroom-key").get().then((sn) => sn.exists));
