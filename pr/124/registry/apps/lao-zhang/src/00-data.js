@@ -9,36 +9,36 @@ GM.BW = GM.W * GM.SCALE;        /* the indexed framebuffer */
 GM.BH = GM.H * GM.SCALE;
 GM.GROUND = 23;                 /* the miner stands on this line; the mine is below it */
 GM.ANCHOR = { x: 80, y: 18 };   /* the rope leaves old Zhang's hands here */
-GM.IDLE_ROPE = 27;              /* the hook swings at this length */
+GM.IDLE_ROPE = 18;              /* the hook swings at this length (two-thirds of the old rope) */
 GM.MAX_ROPE = 172;
 GM.SWING = 1.32;                /* radians either side of straight down */
 GM.PERIOD = 3.6;                /* seconds for a full left-right-left swing */
 GM.LEVEL_TIME = 60;
 GM.OUT_SPEED = 135;
 GM.EMPTY_SPEED = 240;
-GM.BASE_SPEED = 120;
+GM.BASE_SPEED = 28.6;           /* the old large-rock reel speed, now the base */
 GM.PLAY_LEVELS = 10;
 GM.STRENGTH_STEP = 0.15;
 GM.DYNAMITE_MAX = 5;
 GM.ENDLESS_FIRST_STEP = 2600;
 GM.ENDLESS_GROW = 200;
 
-/* cumulative cash targets for the ten written levels */
-GM.TARGETS = [600, 1400, 2400, 3600, 5000, 6600, 8400, 10400, 12600, 15000];
+/* cumulative cash targets for the ten written levels, retuned for the slower reel */
+GM.TARGETS = [1000, 2400, 4000, 5800, 7800, 10000, 12500, 15300, 18400, 21800];
 
 /* value is the base price; bag uses min/max and a roll; rocks are worth triple with the book */
 GM.ITEMS = {
-  goldS:   { kind: "gold",  value: 50,  weight: 1.0,  r: 7,  sprite: "goldS",   pref: [40, 122] },
-  goldM:   { kind: "gold",  value: 150, weight: 1.55, r: 10, sprite: "goldM",   pref: [55, 130] },
-  goldL:   { kind: "gold",  value: 350, weight: 2.5,  r: 13, sprite: "goldL",   pref: [70, 129] },
-  diamond: { kind: "gem",   value: 700, weight: 0.65, r: 6,  sprite: "diamond", pref: [92, 134] },
-  bag:     { kind: "bag",   value: 0,   weight: 1.1,  r: 8,  sprite: "bag",     pref: [50, 126], min: 100, max: 400 },
-  rockS:   { kind: "rock",  value: 15,  weight: 2.4,  r: 8,  sprite: "rockS",   pref: [45, 134] },
-  rockL:   { kind: "rock",  value: 40,  weight: 4.2,  r: 13, sprite: "rockL",   pref: [60, 129] },
-  bone:    { kind: "junk",  value: 2,   weight: 0.9,  r: 7,  sprite: "bone",    pref: [50, 128] },
-  skull:   { kind: "junk",  value: 8,   weight: 1.6,  r: 8,  sprite: "skull",   pref: [55, 132] },
+  goldS:   { kind: "gold",  value: 100, weight: 0.9,  r: 7,  sprite: "goldS",   pref: [40, 122] },
+  goldM:   { kind: "gold",  value: 300, weight: 1.1,  r: 10, sprite: "goldM",   pref: [55, 130] },
+  goldL:   { kind: "gold",  value: 700, weight: 1.4,  r: 13, sprite: "goldL",   pref: [70, 129] },
+  diamond: { kind: "gem",   value: 1500, weight: 0.6, r: 6,  sprite: "diamond", pref: [92, 134] },
+  bag:     { kind: "bag",   value: 0,   weight: 0.9,  r: 8,  sprite: "bag",     pref: [50, 126], min: 150, max: 600 },
+  rockS:   { kind: "rock",  value: 3,   weight: 2.4,  r: 8,  sprite: "rockS",   pref: [45, 134] },
+  rockL:   { kind: "rock",  value: 8,   weight: 4.0,  r: 13, sprite: "rockL",   pref: [60, 129] },
+  bone:    { kind: "junk",  value: 2,   weight: 1.2,  r: 7,  sprite: "bone",    pref: [50, 128] },
+  skull:   { kind: "junk",  value: 10,  weight: 1.6,  r: 8,  sprite: "skull",   pref: [55, 132] },
   tnt:     { kind: "tnt",   value: 0,   weight: 1.4,  r: 8,  sprite: "tnt",     pref: [65, 126] },
-  mole:    { kind: "mole",  value: 0,   weight: 0.8,  r: 8,  sprite: "mole",    pref: [82, 120] }
+  mole:    { kind: "mole",  value: 0,   weight: 0.9,  r: 8,  sprite: "mole",    pref: [82, 120] }
 };
 
 GM.LEVELS = [
@@ -61,13 +61,13 @@ GM.SHOP = [
   { id: "book",     key: "book",     price: 250, max: 1 }
 ];
 
-/* An original eight-bar loop written for this app; nothing borrowed. */
-GM.MUSIC = {
-  bpm: 108,
-  p1: "[o4 l8 e g a g e d c d | e g a b a g e d | c e g a g e d c | d e g e d c b a]2",
-  p2: "[o3 l8 c e g e c e g e | c e g e c e g e | a c e c a c e c | g b d b g b d b]2",
-  tri: "[o2 l4 c g a e | f c g g | a e f c | g d g c]2",
-  noise: "[l8 v4 x r v2 x r v5 x r v2 x r]2"
+/* An original four-note level-start jingle; there is no background loop. */
+GM.JINGLE = {
+  bpm: 144,
+  p1: "o5 l8 c e g >c",
+  p2: "o4 l8 c e g c",
+  tri: "o3 l4 c g",
+  noise: "l8 v3 x r x r"
 };
 
 GM.SFX = {

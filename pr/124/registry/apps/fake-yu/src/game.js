@@ -42,7 +42,7 @@ var TX = {
   how1: { zh: "音符到竖线时按 A。长条要按住，到尾再松。START 暂停。", en: "Press A as a note crosses the line. Hold long bars to the end. START pauses." },
   how2: { zh: "国王的眼睛睁开时，A、B 都别按。空心音符是假的，按了就露馅；眼睛闭上再起手。", en: "King's eye? Stop A/B. Hollow notes are fake; don't press. Resume when it closes." },
   how3: { zh: "菱形音符是磬，按 B。A 是竽，B 是磬；手忙脚乱时，先看清形状。", en: "Diamond notes are chimes: press B. A is sheng, B is chime. Read the shape first." },
-  how4: { zh: "长音会在眼睛睁开时结束：松手。眼睛闭上时接下一个音符。后面的曲子会假闭眼，别提前按。", en: "Holds end when the eye opens: release. Resume on the next note. Later songs fake a blink: wait." },
+  how4: { zh: "长音会在眼睛睁开时结束：松手。眼睛闭上时接下一个音符。后面的曲子眼睛会眨一下，但还在看你，别提前按。", en: "Holds end when the eye opens: release. Resume when it closes. Later songs blink once but keep watching: wait." },
   ready: { zh: "准备", en: "READY" },
   go: { zh: "开始！", en: "GO!" },
   watchWarn: { zh: "王上看过来了", en: "King is watching" },
@@ -1012,12 +1012,14 @@ game.scene("play", {
     if (P.hasB) g.text("B", 10, 41, { color: DARK });
     if (P.eye) {
       var ws = watchStart(P), we = watchEnd(P);
-      var u = we > ws ? (t - ws) / (we - ws) : 0;
-      var lid = Math.min(1, 0.3 + Math.min(1, (t - ws) * 5));
-      /* later songs fake a blink: the lid dips but the gaze is still on */
-      if (P.song.act >= 2 && u > 0.42 && u < 0.62) {
-        var k = (u - 0.42) / 0.20;
-        lid *= 1 - Math.sin(k * Math.PI) * 0.82;
+      var lid = Math.min(1, 0.55 + Math.min(1, (t - ws) * 10));
+      /* Act II on: one quick, shallow blink in the middle of the gaze. The lid never
+         shuts, and the gaze never ends early: pressing during the blink still gives
+         the player away. Centred on the middle beat so it reads as a blink, not an end. */
+      if (P.song.act >= 2) {
+        var mid = (ws + we) / 2, blink = 0.11;
+        var k = Math.abs(t - mid) / blink;
+        if (k < 1) lid *= 1 - (1 - k * k) * 0.40;
       }
       drawEye(g, 49, 38, 62, 22, lid);
       g.text(tt("别按", "FREEZE"), 80, 64, { align: "center", color: INK });

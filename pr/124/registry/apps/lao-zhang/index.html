@@ -22,9 +22,11 @@
   #intro b { display: block; font-size: 14px; }
   #intro span { display: block; }
   #intro[hidden] { display: none !important; }
-  #dyn { position: absolute; top: 6px; right: 6px; z-index: 2; width: 44px; height: 44px; box-sizing: border-box; padding: 0; font: inherit; font-size: 13px; font-weight: bold; line-height: 1.1; background: #a3ad7e; color: #1f2a14; border: 2px solid #1f2a14; box-shadow: 2px 2px 0 #4a5a32; touch-action: manipulation; }
-  #dyn.on { background: #1f2a14; color: #a3ad7e; }
-  #dyn.off { border-style: dashed; color: #4a5a32; box-shadow: none; }
+  #dyn { position: absolute; top: 6px; right: 6px; z-index: 2; width: 44px; height: 44px; box-sizing: border-box; padding: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; font: inherit; font-weight: bold; background: #a3ad7e; color: #1f2a14; border: 2px solid #1f2a14; box-shadow: 2px 2px 0 #4a5a32; touch-action: manipulation; }
+  #dyn canvas { display: block; width: 24px; height: 24px; image-rendering: pixelated; image-rendering: crisp-edges; }
+  #dyn span { display: block; font-size: 14px; line-height: 1; }
+  #dyn.on { background: #7d8a58; color: #1f2a14; border: 2px solid #1f2a14; }
+  #dyn.off { background: #a3ad7e; border-style: dashed; color: #4a5a32; box-shadow: none; }
   #dyn[hidden] { display: none !important; }
   #ov { position: fixed; inset: 0; z-index: 20; background: #a3ad7e; color: #1f2a14; display: flex; flex-direction: column; padding: 10px 12px; box-sizing: border-box; overflow-y: auto; -webkit-overflow-scrolling: touch; }
   #ov[hidden] { display: none !important; }
@@ -71,7 +73,7 @@
   <main id="stage">
     <canvas id="c" width="320" height="288"></canvas>
     <div id="intro" hidden></div>
-    <button id="dyn" type="button" hidden></button>
+    <button id="dyn" type="button" hidden><canvas id="dynicon" width="16" height="16"></canvas><span id="dyncount"></span></button>
   </main>
   <footer id="foot"></footer>
 </div>
@@ -88,36 +90,36 @@ GM.BW = GM.W * GM.SCALE;        /* the indexed framebuffer */
 GM.BH = GM.H * GM.SCALE;
 GM.GROUND = 23;                 /* the miner stands on this line; the mine is below it */
 GM.ANCHOR = { x: 80, y: 18 };   /* the rope leaves old Zhang's hands here */
-GM.IDLE_ROPE = 27;              /* the hook swings at this length */
+GM.IDLE_ROPE = 18;              /* the hook swings at this length (two-thirds of the old rope) */
 GM.MAX_ROPE = 172;
 GM.SWING = 1.32;                /* radians either side of straight down */
 GM.PERIOD = 3.6;                /* seconds for a full left-right-left swing */
 GM.LEVEL_TIME = 60;
 GM.OUT_SPEED = 135;
 GM.EMPTY_SPEED = 240;
-GM.BASE_SPEED = 120;
+GM.BASE_SPEED = 28.6;           /* the old large-rock reel speed, now the base */
 GM.PLAY_LEVELS = 10;
 GM.STRENGTH_STEP = 0.15;
 GM.DYNAMITE_MAX = 5;
 GM.ENDLESS_FIRST_STEP = 2600;
 GM.ENDLESS_GROW = 200;
 
-/* cumulative cash targets for the ten written levels */
-GM.TARGETS = [600, 1400, 2400, 3600, 5000, 6600, 8400, 10400, 12600, 15000];
+/* cumulative cash targets for the ten written levels, retuned for the slower reel */
+GM.TARGETS = [1000, 2400, 4000, 5800, 7800, 10000, 12500, 15300, 18400, 21800];
 
 /* value is the base price; bag uses min/max and a roll; rocks are worth triple with the book */
 GM.ITEMS = {
-  goldS:   { kind: "gold",  value: 50,  weight: 1.0,  r: 7,  sprite: "goldS",   pref: [40, 122] },
-  goldM:   { kind: "gold",  value: 150, weight: 1.55, r: 10, sprite: "goldM",   pref: [55, 130] },
-  goldL:   { kind: "gold",  value: 350, weight: 2.5,  r: 13, sprite: "goldL",   pref: [70, 129] },
-  diamond: { kind: "gem",   value: 700, weight: 0.65, r: 6,  sprite: "diamond", pref: [92, 134] },
-  bag:     { kind: "bag",   value: 0,   weight: 1.1,  r: 8,  sprite: "bag",     pref: [50, 126], min: 100, max: 400 },
-  rockS:   { kind: "rock",  value: 15,  weight: 2.4,  r: 8,  sprite: "rockS",   pref: [45, 134] },
-  rockL:   { kind: "rock",  value: 40,  weight: 4.2,  r: 13, sprite: "rockL",   pref: [60, 129] },
-  bone:    { kind: "junk",  value: 2,   weight: 0.9,  r: 7,  sprite: "bone",    pref: [50, 128] },
-  skull:   { kind: "junk",  value: 8,   weight: 1.6,  r: 8,  sprite: "skull",   pref: [55, 132] },
+  goldS:   { kind: "gold",  value: 100, weight: 0.9,  r: 7,  sprite: "goldS",   pref: [40, 122] },
+  goldM:   { kind: "gold",  value: 300, weight: 1.1,  r: 10, sprite: "goldM",   pref: [55, 130] },
+  goldL:   { kind: "gold",  value: 700, weight: 1.4,  r: 13, sprite: "goldL",   pref: [70, 129] },
+  diamond: { kind: "gem",   value: 1500, weight: 0.6, r: 6,  sprite: "diamond", pref: [92, 134] },
+  bag:     { kind: "bag",   value: 0,   weight: 0.9,  r: 8,  sprite: "bag",     pref: [50, 126], min: 150, max: 600 },
+  rockS:   { kind: "rock",  value: 3,   weight: 2.4,  r: 8,  sprite: "rockS",   pref: [45, 134] },
+  rockL:   { kind: "rock",  value: 8,   weight: 4.0,  r: 13, sprite: "rockL",   pref: [60, 129] },
+  bone:    { kind: "junk",  value: 2,   weight: 1.2,  r: 7,  sprite: "bone",    pref: [50, 128] },
+  skull:   { kind: "junk",  value: 10,  weight: 1.6,  r: 8,  sprite: "skull",   pref: [55, 132] },
   tnt:     { kind: "tnt",   value: 0,   weight: 1.4,  r: 8,  sprite: "tnt",     pref: [65, 126] },
-  mole:    { kind: "mole",  value: 0,   weight: 0.8,  r: 8,  sprite: "mole",    pref: [82, 120] }
+  mole:    { kind: "mole",  value: 0,   weight: 0.9,  r: 8,  sprite: "mole",    pref: [82, 120] }
 };
 
 GM.LEVELS = [
@@ -140,13 +142,13 @@ GM.SHOP = [
   { id: "book",     key: "book",     price: 250, max: 1 }
 ];
 
-/* An original eight-bar loop written for this app; nothing borrowed. */
-GM.MUSIC = {
-  bpm: 108,
-  p1: "[o4 l8 e g a g e d c d | e g a b a g e d | c e g a g e d c | d e g e d c b a]2",
-  p2: "[o3 l8 c e g e c e g e | c e g e c e g e | a c e c a c e c | g b d b g b d b]2",
-  tri: "[o2 l4 c g a e | f c g g | a e f c | g d g c]2",
-  noise: "[l8 v4 x r v2 x r v5 x r v2 x r]2"
+/* An original four-note level-start jingle; there is no background loop. */
+GM.JINGLE = {
+  bpm: 144,
+  p1: "o5 l8 c e g >c",
+  p2: "o4 l8 c e g c",
+  tri: "o3 l4 c g",
+  noise: "l8 v3 x r x r"
 };
 
 GM.SFX = {
@@ -406,6 +408,7 @@ GM.newState = function () {
     newBest: false,
     saveMsg: "",
     wonOnce: false,
+    jingleId: 0,
     bg: null,
     bgKey: ""
   };
@@ -429,6 +432,7 @@ GM.startLevel = function (state, n) {
   state.level = n;
   state.target = GM.targetFor(n);
   state.time = GM.LEVEL_TIME;
+  state.jingleId = (state.jingleId || 0) + 1;
   state.lastSec = GM.LEVEL_TIME;
   state.levelSeed = (state.runSeed + n * 7919) >>> 0;
   state.rng = GM.rng(state.levelSeed);
@@ -539,6 +543,19 @@ GM.tip = function (hook) {
   };
 };
 
+/* the caught item hangs from the near edge, not from its centre; near the top it
+   slides into the claw so the hand-off still happens at the miner */
+GM.heldPos = function (hook) {
+  var tip = GM.tip(hook);
+  if (!hook.item) return tip;
+  var shrink = Math.min(1, Math.max(0, (hook.len - 6) / 34));
+  var off = (hook.item.r + 2) * shrink;
+  return {
+    x: tip.x + Math.sin(hook.angle) * off,
+    y: tip.y + Math.cos(hook.angle) * off
+  };
+};
+
 GM.retractSpeed = function (item, strength) {
   return Math.min(300, GM.BASE_SPEED / Math.max(0.4, item.weight) * (1 + GM.STRENGTH_STEP * (strength || 0)));
 };
@@ -555,7 +572,7 @@ GM.useDynamite = function (state) {
   if (state.screen !== "play" || state.hook.state !== "back" || !state.hook.item || state.dynamite <= 0) return false;
   state.dynamite--;
   var it = state.hook.item;
-  var p = GM.tip(state.hook);
+  var p = GM.heldPos(state.hook);
   if (it.kind === "tnt") {
     GM.explode(state, p.x, p.y);
   } else {
@@ -582,7 +599,7 @@ GM.attach = function (state, index) {
 GM.collect = function (state) {
   var it = state.hook.item;
   if (!it) return;
-  var p = GM.tip(state.hook);
+  var p = GM.heldPos(state.hook);
   state.hook.item = null;
   state.hook.state = "swing";
   state.hook.len = GM.IDLE_ROPE;
@@ -798,7 +815,7 @@ GM.stepHook = function (state, dt) {
   if (hook.item && hook.item.kind === "tnt") {
     hook.item.fuse -= dt;
     if (hook.item.fuse <= 0) {
-      var q = GM.tip(hook);
+      var q = GM.heldPos(hook);
       GM.explode(state, q.x, q.y);
       return;
     }
@@ -858,6 +875,11 @@ GM.update = function (state, dt) {
     var h = Math.min(0.016, left);
     GM.stepHook(state, h);
     left -= h;
+  }
+  /* nothing left to catch: do not make the player sit out the rest of the clock */
+  if (state.screen === "play" && state.items.length === 0 && !state.hook.item) {
+    GM.finishLevel(state);
+    return;
   }
   GM.updateEffects(state, dt);
   state.shake = Math.max(0, state.shake - dt);
@@ -1108,6 +1130,18 @@ GM.tntSprite = function () {
   return s;
 };
 
+GM.dynIconSprite = function () {
+  var s = GM.sprite(16, 16);
+  GM.srect(s, 6, 5, 4, 9, GM.DARK);
+  GM.soutline(s, GM.INK);
+  GM.srect(s, 5, 9, 6, 3, GM.PAPER);
+  GM.srect(s, 5, 9, 6, 1, GM.INK);
+  GM.srect(s, 5, 11, 6, 1, GM.INK);
+  GM.sline(s, 8, 5, 12, 1, GM.MID);
+  GM.sput(s, 12, 1, GM.PAPER);
+  return s;
+};
+
 GM.miniGemSprite = function () {
   var s = GM.sprite(10, 10);
   var poly = [[5, 1], [9, 5], [5, 9], [1, 5]];
@@ -1199,6 +1233,7 @@ GM.initArt = function () {
     bone: GM.boneSprite(),
     skull: GM.skullSprite(),
     tnt: GM.tntSprite(),
+    dynIcon: GM.dynIconSprite(),
     miniGold: GM.blob(10, 8, 41, GM.PAPER, GM.MID, false, false),
     miniGem: GM.miniGemSprite()
   };
@@ -1240,32 +1275,32 @@ GM.makeBackground = function (state) {
   GM.rect(b, 5, 12, 8, 1, GM.INK);
   GM.rect(b, 6, 3, 6, 1, GM.DARK);
 
-  /* the mine is textured at the buffer's own resolution, not stretched from 160x144 */
+  /* a clean, slightly lighter seam just under the grass, then quiet soil */
+  GM.rect(b, 0, GM.GROUND + 1, GM.W, 5, GM.MID);
+  GM.rect(b, 0, GM.GROUND + 6, GM.W, 1, GM.DARK);
   rng = GM.rng((state.levelSeed || 1) ^ 0x9e3779b9);
   var top = (GM.GROUND + 2) * GM.SCALE;
   var bottom = GM.BH - 3;
-  for (i = 0; i < 260; i++) {
+  for (i = 0; i < 34; i++) {
+    x = 4 + Math.floor(rng() * (GM.BW - 8));
+    y = (GM.GROUND + 2) * GM.SCALE + Math.floor(rng() * 8);
+    GM.bput(b, x, y, GM.DARK);
+  }
+  for (i = 0; i < 150; i++) {
     x = 4 + Math.floor(rng() * (GM.BW - 8));
     y = top + Math.floor(Math.pow(rng(), 1.6) * (bottom - top));
-    GM.bput(b, x, y, rng() < 0.7 ? GM.MID : GM.DARK);
-    if (rng() < 0.22) GM.brect(b, x, y, 2, 2, rng() < 0.5 ? GM.MID : GM.DARK);
+    GM.bput(b, x, y, rng() < 0.78 ? GM.MID : GM.DARK);
+    if (rng() < 0.18) GM.brect(b, x, y, 2, 2, rng() < 0.5 ? GM.MID : GM.DARK);
   }
-  for (i = 0; i < 30; i++) {
+  for (i = 0; i < 18; i++) {
     x = 4 + Math.floor(rng() * (GM.BW - 44));
-    y = top + 6 + Math.floor(rng() * (bottom - top - 12));
-    len = 6 + Math.floor(rng() * 28);
-    GM.bline(b, x, y, x + len, y + (rng() < 0.5 ? 0 : 2), rng() < 0.55 ? GM.DARK : GM.MID);
+    y = top + 8 + Math.floor(rng() * (bottom - top - 14));
+    len = 8 + Math.floor(rng() * 26);
+    GM.bline(b, x, y, x + len, y + (rng() < 0.5 ? 0 : 2), rng() < 0.6 ? GM.DARK : GM.MID);
   }
-  for (i = 0; i < 12; i++) {
-    x = 8 + Math.floor(rng() * (GM.BW - 32));
-    y = top + 10 + Math.floor(rng() * (bottom - top - 24));
-    GM.blineWide(b, x, y, x + 4, y + 5, GM.INK, 2);
-    GM.blineWide(b, x + 4, y + 5, x + 2, y + 11, GM.INK, 2);
-    if (rng() < 0.6) GM.blineWide(b, x + 4, y + 5, x + 10, y + 7, GM.INK, 2);
-  }
-  for (i = 0; i < 16; i++) {
+  for (i = 0; i < 8; i++) {
     x = 6 + Math.floor(rng() * (GM.BW - 12));
-    y = top + 8 + Math.floor(rng() * (bottom - top - 16));
+    y = top + 10 + Math.floor(rng() * (bottom - top - 18));
     GM.brect(b, x, y, 3, 2, GM.MID);
     GM.bput(b, x, y, GM.DARK);
   }
@@ -1338,6 +1373,12 @@ GM.drawHook = function (buf, hook) {
   GM.rect(buf, tip.x - 1, tip.y - 1, 2, 2, GM.INK);
 };
 
+GM.sweatDrop = function (buf, bx, by) {
+  GM.brect(buf, bx, by, 3, 4, GM.INK);
+  GM.brect(buf, bx + 1, by, 1, 2, GM.PAPER);
+  GM.bput(buf, bx + 1, by + 2, GM.MID);
+};
+
 GM.drawMiner = function (buf, state) {
   var hook = state.hook;
   var bob = hook.state === "swing" && Math.sin(state.anim * 4) > 0.35 ? -1 : 0;
@@ -1385,6 +1426,21 @@ GM.drawMiner = function (buf, state) {
   GM.rect(buf, 81, 16, 2, 2, GM.PAPER);
   GM.rect(buf, 79, 17, 2, 2, GM.DARK);
   GM.put(buf, 80, 18, GM.PAPER);
+
+  /* sweat: more drops when the rope is heavy with something */
+  if (hook.item) {
+    var t = state.anim, side, sx, sy;
+    for (var i = 0; i < 4; i++) {
+      side = i < 2 ? -1 : 1;
+      sx = bx + side * (9 + (i % 2) * 2) + Math.sin(t * 5 + i) * 0.8;
+      sy = 6 + by + (i % 2) * 3 - ((t * 4 + i) % 2);
+      GM.sweatDrop(buf, Math.round(sx * GM.SCALE), Math.round(sy * GM.SCALE));
+    }
+    GM.sweatDrop(buf, Math.round((bx - 3) * GM.SCALE), Math.round((10 + by) * GM.SCALE));
+    GM.sweatDrop(buf, Math.round((bx + 4) * GM.SCALE), Math.round((10 + by) * GM.SCALE));
+    GM.sweatDrop(buf, Math.round((bx - 8) * GM.SCALE), Math.round((14 + by) * GM.SCALE));
+    GM.sweatDrop(buf, Math.round((bx + 9) * GM.SCALE), Math.round((15 + by) * GM.SCALE));
+  }
 };
 
 GM.draw = function (ctx, state) {
@@ -1407,15 +1463,16 @@ GM.draw = function (ctx, state) {
   }
   GM.drawRope(buf, state.hook);
   if (state.hook.item) {
+    var held = GM.heldPos(state.hook);
     tip = GM.tip(state.hook);
     it = state.hook.item;
     if (it.type === "mole") {
       var ox = it.x, oy = it.y;
-      it.x = tip.x; it.y = tip.y;
+      it.x = held.x; it.y = held.y;
       GM.drawMole(buf, it, state.anim);
       it.x = ox; it.y = oy;
     } else {
-      GM.drawItemAt(buf, it, tip.x * GM.SCALE, tip.y * GM.SCALE, state.anim);
+      GM.drawItemAt(buf, it, held.x * GM.SCALE, held.y * GM.SCALE, state.anim);
     }
     GM.brect(buf, Math.round(tip.x * GM.SCALE) - 2, Math.round(tip.y * GM.SCALE) - 5, 4, 2, GM.PAPER);
   }
@@ -1473,6 +1530,21 @@ GM.present = function (ctx, buf, sx, sy) {
   ctx.putImageData(GM._img, 0, 0);
 };
 
+GM.spriteCanvas = function (spr) {
+  var c = document.createElement("canvas");
+  c.width = spr.w; c.height = spr.h;
+  var ctx = c.getContext("2d");
+  var img = ctx.createImageData(spr.w, spr.h);
+  for (var i = 0; i < spr.b.length; i++) {
+    var t = spr.b[i], o = i * 4;
+    if (t === GM.CLEAR) { img.data[o + 3] = 0; continue; }
+    var rgb = GM.RGB[t] || GM.RGB[GM.PAPER];
+    img.data[o] = rgb[0]; img.data[o + 1] = rgb[1]; img.data[o + 2] = rgb[2]; img.data[o + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  return c;
+};
+
 GM.iconCanvas = function () {
   if (GM._iconCv) return GM._iconCv;
   var b = new Uint8Array(16 * 16);
@@ -1505,9 +1577,9 @@ var GM = (typeof GM !== "undefined" && GM) || {};
 GM.ui = (function () {
   var LANG = (typeof PAD !== "undefined" && PAD.lang === "en") ? "en" : "zh";
   var T = GM.text(LANG);
-  var state, ctx, cv, ov, introEl, dynBtn, foot, lv, cash, tm, bar;
+  var state, ctx, cv, ov, introEl, dynBtn, dynIcon, dynCount, foot, lv, cash, tm, bar;
   var last = 0, lastScreen = "", lastHud = "", lastDyn = "", lastFoot = "", lastIntro = "";
-  var musicPlaying = false;
+  var lastJingleId = 0;
 
   function $(id) { return document.getElementById(id); }
   function money(n) { return "$" + GM.money(n); }
@@ -1523,6 +1595,8 @@ GM.ui = (function () {
     ov = $("ov");
     introEl = $("intro");
     dynBtn = $("dyn");
+    dynIcon = $("dynicon");
+    dynCount = $("dyncount");
     foot = $("foot");
     lv = $("lv");
     cash = $("cash");
@@ -1530,6 +1604,11 @@ GM.ui = (function () {
     bar = $("barfill");
     document.documentElement.lang = LANG === "zh" ? "zh-CN" : "en";
     document.title = T.title;
+    if (dynIcon && GM.SPR) {
+      var dctx = dynIcon.getContext("2d");
+      dctx.imageSmoothingEnabled = false;
+      dctx.drawImage(GM.spriteCanvas(GM.SPR.dynIcon), 0, 0);
+    }
     cv.addEventListener("pointerdown", onCanvas);
     dynBtn.addEventListener("click", onDyn);
     ov.addEventListener("click", onOverlay);
@@ -1688,7 +1767,7 @@ GM.ui = (function () {
     if (!force && key === lastDyn) return;
     lastDyn = key;
     dynBtn.hidden = false;
-    dynBtn.textContent = GM.fmt(T.dyn, { n: state.dynamite });
+    dynCount.textContent = "×" + state.dynamite;
     dynBtn.className = state.hook.item ? "on" : "off";
   }
 
@@ -1763,16 +1842,14 @@ GM.ui = (function () {
   }
 
   function musicFor(screen) {
-    var want = screen === "play" || screen === "intro";
-    if (want && !musicPlaying) {
-      if (typeof PAD !== "undefined" && PAD.music) {
-        try { PAD.music.play(GM.MUSIC); musicPlaying = true; } catch (e) {}
+    if (typeof PAD === "undefined" || !PAD.music) return;
+    if (screen === "intro") {
+      if (state.jingleId !== lastJingleId) {
+        lastJingleId = state.jingleId;
+        try { PAD.music.play(GM.JINGLE, { loop: false }); } catch (e) {}
       }
-    } else if (!want && musicPlaying) {
-      if (typeof PAD !== "undefined" && PAD.music) {
-        try { PAD.music.stop(); } catch (e) {}
-      }
-      musicPlaying = false;
+    } else if (screen !== "play") {
+      try { PAD.music.stop(); } catch (e) {}
     }
   }
 
