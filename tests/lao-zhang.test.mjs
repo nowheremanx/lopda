@@ -105,11 +105,16 @@ test("dynamite cuts a heavy item; a lit TNT clears only what is near it", () => 
   state.hook = { state: "back", len: 50, angle: 0, item: { type: "rockL", kind: "rock", value: 40, weight: 4.2, r: 13, fuse: 0 } };
   assert.equal(GM.useDynamite(state), true);
   assert.equal(state.dynamite, 1);
+  assert.ok(state.bomb, "the bomb is in the air");
+  assert.equal(state.hook.item.type, "rockL");
+  for (let i = 0; i < 60 && state.bomb; i++) GM.update(state, 0.01);
+  assert.equal(state.bomb, null);
   assert.equal(state.hook.item, null);
   assert.equal(state.hook.state, "back");
-  assert.ok(state.events.includes("boom"));
+  assert.ok(state.events.includes("throw") && state.events.includes("boom"));
   assert.equal(GM.useDynamite(state), false, "nothing is on the hook now");
 
+  state.blasts = [];
   state.hook = { state: "back", len: 50, angle: 0, item: { type: "tnt", kind: "tnt", value: 0, weight: 1.4, r: 8, fuse: 0.02 } };
   state.items = [
     { type: "goldM", kind: "gold", value: 150, x: 80, y: 68, r: 10, weight: 1.55, sprite: "goldM" },

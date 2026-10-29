@@ -107,6 +107,7 @@ GM.newState = function () {
     time: GM.LEVEL_TIME,
     items: [],
     hook: { state: "swing", len: GM.IDLE_ROPE, angle: 0, item: null },
+    bomb: null,
     dynamite: 0,
     strength: 0,
     clover: 0,
@@ -161,6 +162,7 @@ GM.startLevel = function (state, n) {
   state.rng = GM.rng(state.levelSeed);
   state.items = GM.generate(state, n);
   state.hook = { state: "swing", len: GM.IDLE_ROPE, angle: 0, item: null };
+  state.bomb = null;
   state.swingT = 0;
   state.introT = 1.25;
   state.shopCursor = 4;
@@ -266,13 +268,11 @@ GM.tip = function (hook) {
   };
 };
 
-/* the caught item hangs from the near edge, not from its centre; near the top it
-   slides into the claw so the hand-off still happens at the miner */
+/* the caught item hangs from the near edge, not from its centre */
 GM.heldPos = function (hook) {
   var tip = GM.tip(hook);
   if (!hook.item) return tip;
-  var shrink = Math.min(1, Math.max(0, (hook.len - 6) / 34));
-  var off = (hook.item.r + 2) * shrink;
+  var off = hook.item.r + 2;
   return {
     x: tip.x + Math.sin(hook.angle) * off,
     y: tip.y + Math.cos(hook.angle) * off
@@ -292,19 +292,54 @@ GM.fire = function (state) {
 };
 
 GM.useDynamite = function (state) {
-  if (state.screen !== "play" || state.hook.state !== "back" || !state.hook.item || state.dynamite <= 0) return false;
+  if (state.screen !== "play" || state.hook.state !== "back" || !state.hook.item ||
+      state.dynamite <= 0 || state.bomb) return false;
   state.dynamite--;
-  var it = state.hook.item;
   var p = GM.heldPos(state.hook);
-  if (it.kind === "tnt") {
-    GM.explode(state, p.x, p.y);
-  } else {
-    GM.addParticles(state, p.x, p.y, 10, ["mid", "dark"]);
-    state.events.push("boom");
-    state.shake = 0.22;
-    state.hook.item = null;
-  }
+  state.bomb = {
+    t: 0,
+    dur: 0.38,
+    sx: GM.ANCHOR.x,
+    sy: GM.ANCHOR.y - 5,
+    tx: p.x,
+    ty: p.y,
+    item: state.hook.item
+  };
+  state.events.push("throw");
   return true;
+};
+
+GM.bombPos = function (b) {
+  var p = Math.min(1, b.t / b.dur);
+  return {
+    x: b.sx + (b.tx - b.sx) * p,
+    y: b.sy + (b.ty - b.sy) * p - Math.sin(p * Math.PI) * 7
+  };
+};
+
+GM.resolveBomb = function (state) {
+  var b = state.bomb;
+  if (!b) return;
+  state.bomb = null;
+  var it = b.item;
+  if (state.hook.item === it) {
+    state.hook.item = null;
+    state.hook.state = "back";
+  }
+  if (it.kind === "tnt") {
+    GM.explode(state, b.tx, b.ty);
+  } else {
+    GM.addParticles(state, b.tx, b.ty, 12, ["mid", "dark", "paper"]);
+    state.blasts.push({ x: b.tx, y: b.ty, t: 0, life: 0.5 });
+    state.shake = 0.32;
+    state.events.push("boom");
+  }
+};
+
+GM.updateBomb = function (state, dt) {
+  if (!state.bomb) return;
+  state.bomb.t += dt;
+  if (state.bomb.t >= state.bomb.dur) GM.resolveBomb(state);
 };
 
 GM.attach = function (state, index) {
@@ -545,7 +580,7 @@ GM.stepHook = function (state, dt) {
   }
   var speed = hook.item ? GM.retractSpeed(hook.item, state.strength) : GM.EMPTY_SPEED;
   hook.len -= speed * dt;
-  if (hook.item && hook.len <= 10) {
+  if (hook.item && hook.len <= 2) {
     GM.collect(state);
     return;
   }
@@ -593,11 +628,15 @@ GM.update = function (state, dt) {
     state.hook.angle = Math.sin(state.swingT * Math.PI * 2 / GM.PERIOD) * GM.SWING;
   }
   GM.moveMoles(state, dt);
-  var left = dt;
-  while (left > 0 && state.screen === "play") {
-    var h = Math.min(0.016, left);
-    GM.stepHook(state, h);
-    left -= h;
+  if (state.bomb) {
+    GM.updateBomb(state, dt);
+  } else {
+    var left = dt;
+    while (left > 0 && state.screen === "play") {
+      var h = Math.min(0.016, left);
+      GM.stepHook(state, h);
+      left -= h;
+    }
   }
   /* nothing left to catch: do not make the player sit out the rest of the clock */
   if (state.screen === "play" && state.items.length === 0 && !state.hook.item) {

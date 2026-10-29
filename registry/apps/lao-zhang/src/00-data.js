@@ -33,8 +33,8 @@ GM.ITEMS = {
   goldL:   { kind: "gold",  value: 700, weight: 1.4,  r: 13, sprite: "goldL",   pref: [70, 129] },
   diamond: { kind: "gem",   value: 1500, weight: 0.6, r: 6,  sprite: "diamond", pref: [92, 134] },
   bag:     { kind: "bag",   value: 0,   weight: 0.9,  r: 8,  sprite: "bag",     pref: [50, 126], min: 150, max: 600 },
-  rockS:   { kind: "rock",  value: 3,   weight: 2.4,  r: 8,  sprite: "rockS",   pref: [45, 134] },
-  rockL:   { kind: "rock",  value: 8,   weight: 4.0,  r: 13, sprite: "rockL",   pref: [60, 129] },
+  rockS:   { kind: "rock",  value: 2,   weight: 1.8,  r: 8,  sprite: "rockS",   pref: [45, 134] },
+  rockL:   { kind: "rock",  value: 10,  weight: 4.2,  r: 13, sprite: "rockL",   pref: [60, 129] },
   bone:    { kind: "junk",  value: 2,   weight: 1.2,  r: 7,  sprite: "bone",    pref: [50, 128] },
   skull:   { kind: "junk",  value: 10,  weight: 1.6,  r: 8,  sprite: "skull",   pref: [55, 132] },
   tnt:     { kind: "tnt",   value: 0,   weight: 1.4,  r: 8,  sprite: "tnt",     pref: [65, 126] },
@@ -72,7 +72,8 @@ GM.JINGLE = {
 
 GM.SFX = {
   boom:  { wave: "noise", from: 900, to: 55, ms: 380, vol: 0.9 },
-  chime: { wave: "triangle", from: 880, to: 1560, ms: 160, vol: 0.55, decay: 150 }
+  chime: { wave: "triangle", from: 880, to: 1560, ms: 160, vol: 0.55, decay: 150 },
+  throw: { wave: "noise", from: 300, to: 900, ms: 110, vol: 0.32 }
 };
 
 GM.TEXT = {
