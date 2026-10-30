@@ -193,3 +193,13 @@ The app's automatic mode:
 Known limits: the receiver reopens the microphone for every burst; there is no continuous symbol clock, and an ACK
 lost during handshake is handled by the sender's slower retry only if the receiver is still scanning. M4 text and
 multi-frame sequencing are next.
+
+### Early-poll fix (2026-10-30)
+
+The first automatic link run talked past itself after the handshake: the sender waited out the whole ACK
+capture window before sending DATA, while the receiver had already moved on to its data window and
+timed out. Capture windows now poll every 120 ms and stop as soon as a complete frame is decoded.
+
+A synthetic continuous microphone (a fake getUserMedia stream fed from a timeline, so repeated captures do
+not restart the file) completed a 10 ms receiver run: HELLO/HELLO_ACK, 16-byte DATA, `CRC OK`, FIN/ACK,
+`Received · 16 bytes · 10 ms`. The sender path and two real phones still need a run.

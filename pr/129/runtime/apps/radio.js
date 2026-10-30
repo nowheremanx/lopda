@@ -298,6 +298,7 @@ function cancelLink(){
   l.cancel=true;
   R.link=null;
   if(l.capTimer) clearTimeout(l.capTimer);
+  if(l.pollTimer) clearInterval(l.pollTimer);
   try{ if(l.src){ l.src.onended=null; l.src.stop(); } }catch(e){}
   stopTracks(l.stream);
   micMark.hidden=true;
@@ -337,7 +338,9 @@ function playBurst(frame, rate, token){
   });
 }
 
-function captureWindow(ms, token){
+/* Capture for at most ms. `poll(samples, sampleRate)` may return a decoded frame; when it does,
+   stop at once. That is what keeps the two ends from waiting out each other's windows. */
+function captureWindow(ms, token, poll){
   return new Promise(function(resolve,reject){
     if(!linkAlive(token)) return reject("cancelled");
     var ctx=LP.audio(); if(!ctx) return reject("noaudio");
@@ -347,7 +350,7 @@ function captureWindow(ms, token){
     catch(e){ p=Promise.reject(e); }
     Promise.resolve(p).then(function(stream){
       if(!linkAlive(token)){ stopTracks(stream); return reject("cancelled"); }
-      var src,proc,silent;
+      var src,proc,silent,done=false;
       try{
         src=ctx.createMediaStreamSource(stream);
         proc=ctx.createScriptProcessor(4096,1,1);
@@ -355,15 +358,12 @@ function captureWindow(ms, token){
         src.connect(proc); proc.connect(silent); silent.connect(ctx.destination);
       }catch(e){ stopTracks(stream); return reject(e); }
       var blocks=[];
-      proc.onaudioprocess=function(e){
-        if(R.link && R.link.token===token){ var d=e.inputBuffer.getChannelData(0); var c=new Float32Array(d.length); c.set(d); blocks.push(c); }
-      };
-      R.link.stream=stream;
-      micMark.hidden=false;
-      LP.micRoute(true);
-      R.link.capTimer=setTimeout(function(){
-        if(!R.link || R.link.token!==token) return;
-        R.link.capTimer=0; R.link.stream=null;
+      function finish(early){
+        if(done) return;
+        done=true;
+        if(R.link){ R.link.capTimer=0; R.link.pollTimer=0; R.link.stream=null; }
+        clearTimeout(capTimer);
+        clearInterval(pollTimer);
         proc.onaudioprocess=null;
         try{ proc.disconnect(); }catch(e){}
         try{ src.disconnect(); }catch(e){}
@@ -371,8 +371,30 @@ function captureWindow(ms, token){
         stopTracks(stream);
         micMark.hidden=true;
         LP.setSession("playback");
-        resolve({samples:concat(blocks), sampleRate:ctx.sampleRate});
+        resolve({samples:concat(blocks), sampleRate:ctx.sampleRate, early:early||null});
+      }
+      proc.onaudioprocess=function(e){
+        if(!done && R.link && R.link.token===token){ var d=e.inputBuffer.getChannelData(0); var c=new Float32Array(d.length); c.set(d); blocks.push(c); }
+      };
+      R.link.stream=stream;
+      micMark.hidden=false;
+      LP.micRoute(true);
+      var capTimer=setTimeout(function(){
+        if(!R.link || R.link.token!==token) return;
+        finish(null);
       }, ms);
+      var pollTimer=0;
+      if(poll){
+        pollTimer=setInterval(function(){
+          if(done || !R.link || R.link.token!==token) return;
+          var s=concat(blocks);
+          var hit=null;
+          try{ hit=poll(s,ctx.sampleRate); }catch(e){}
+          if(hit) finish(hit);
+        }, 120);
+      }
+      R.link.capTimer=capTimer;
+      R.link.pollTimer=pollTimer;
     }, function(e){
       if(R.link && R.link.token===token) LP.setSession("ambient");
       reject(e);
@@ -405,9 +427,12 @@ function sendReliable(frame, seq, rate, token, tries){
     if(n>tries) return Promise.reject("no ack");
     if(n>1) log(tr("radio.link.retry",{n:n-1}));
     return playBurst(frame,rate,token).then(function(){
-      return captureWindow(ackMs(rate),token);
+      return captureWindow(ackMs(rate),token,function(samples,sr){
+        var h=decodeFrameAt(samples,sr,rate);
+        return h && h.frame && h.frame.session===R.link.session && h.frame.seq===seq && h.frame.type===LINK.TYPES.ACK ? h : null;
+      });
     }).then(function(cap){
-      var hit=decodeFrameAt(cap.samples,cap.sampleRate,rate);
+      var hit=cap.early || decodeFrameAt(cap.samples,cap.sampleRate,rate);
       if(hit && hit.frame && hit.frame.session===R.link.session && hit.frame.seq===seq && hit.frame.type===LINK.TYPES.ACK) return true;
       throw new Error("no ack");
     }).then(null,function(e){ if(!linkAlive(token)) throw e; return attempt(n+1); });
@@ -418,7 +443,7 @@ function sendReliable(frame, seq, rate, token, tries){
 function linkSend(){
   if(active()) return;
   var token=++R.linkToken;
-  R.link={token:token, role:"send", session:newSession(), rate:10, src:null, stream:null, capTimer:0, cancel:false, payload:null};
+  R.link={token:token, role:"send", session:newSession(), rate:10, src:null, stream:null, capTimer:0, pollTimer:0, cancel:false, payload:null};
   LP.keepAwake(true); render();
   function tryRate(i){
     if(!linkAlive(token)) return Promise.reject("cancelled");
@@ -427,12 +452,16 @@ function linkSend(){
     R.link.rate=rate;
     R.sendText=tr("radio.link.hello",{ms:rate}); render();
     var hello=LINK.encode(LINK.TYPES.HELLO,R.link.session,0,[]);
-    return playBurst(hello,rate,token).then(function(){ return captureWindow(HELLO_WAIT,token); })
-      .then(function(cap){
-        var hit=decodeFrameAt(cap.samples,cap.sampleRate,rate);
-        if(hit && hit.frame && hit.frame.type===LINK.TYPES.HELLO_ACK && hit.frame.session===R.link.session) return rate;
-        throw new Error("no hello ack");
-      }).then(null,function(e){ if(!linkAlive(token)) throw e; log(tr("radio.link.hello.fail",{ms:rate})); return tryRate(i+1); });
+    return playBurst(hello,rate,token).then(function(){
+      return captureWindow(HELLO_WAIT,token,function(samples,sr){
+        var h=decodeFrameAt(samples,sr,rate);
+        return h && h.frame && h.frame.type===LINK.TYPES.HELLO_ACK && h.frame.session===R.link.session ? h : null;
+      });
+    }).then(function(cap){
+      var hit=cap.early || decodeFrameAt(cap.samples,cap.sampleRate,rate);
+      if(hit && hit.frame && hit.frame.type===LINK.TYPES.HELLO_ACK && hit.frame.session===R.link.session) return rate;
+      throw new Error("no hello ack");
+    }).then(null,function(e){ if(!linkAlive(token)) throw e; log(tr("radio.link.hello.fail",{ms:rate})); return tryRate(i+1); });
   }
   tryRate(0).then(function(rate){
     R.link.rate=rate;
@@ -450,8 +479,15 @@ function linkSend(){
 function receiveFin(token, attempt){
   if(!linkAlive(token)) return Promise.reject("cancelled");
   var rate=R.link.rate, session=R.link.session;
-  return captureWindow(ackMs(rate),token).then(function(cap){
-    var hello=scanHello(cap);
+  return captureWindow(ackMs(rate),token,function(samples,sr){
+    var hello=scanHello({samples:samples,sampleRate:sr});
+    if(hello) return {hello:hello};
+    var h=decodeFrameAt(samples,sr,rate);
+    if(h && h.frame && h.frame.session===session && (h.frame.type===LINK.TYPES.FIN || h.frame.type===LINK.TYPES.DATA)) return {frame:h};
+    return null;
+  }).then(function(cap){
+    var early=cap.early;
+    var hello=early&&early.hello?early.hello:scanHello(cap);
     if(hello){
       R.link.rate=hello.rate; R.link.session=hello.frame.session;
       R.recvText=tr("radio.link.found",{ms:hello.rate}); log(tr("radio.link.found",{ms:hello.rate})); render();
@@ -459,7 +495,7 @@ function receiveFin(token, attempt){
         return receiveData(token,1);
       });
     }
-    var hit=decodeFrameAt(cap.samples,cap.sampleRate,rate);
+    var hit=early&&early.frame?early.frame:decodeFrameAt(cap.samples,cap.sampleRate,rate);
     /* A lost our DATA ACK and retried DATA while we waited for FIN: ACK it again, do not append it twice. */
     if(hit && hit.frame && hit.frame.type===LINK.TYPES.DATA && hit.frame.session===session){
       return playBurst(LINK.encode(LINK.TYPES.ACK,session,hit.frame.seq,[]),rate,token).then(function(){
@@ -480,9 +516,16 @@ function receiveData(token, attempt){
   if(!linkAlive(token)) return Promise.reject("cancelled");
   var rate=R.link.rate, session=R.link.session;
   R.recvText=tr("radio.link.data",{ms:rate}); render();
-  return captureWindow(dataMs(rate),token).then(function(cap){
+  return captureWindow(dataMs(rate),token,function(samples,sr){
+    var hello=scanHello({samples:samples,sampleRate:sr});
+    if(hello) return {hello:hello};
+    var h=decodeFrameAt(samples,sr,rate);
+    if(h && h.frame && h.frame.type===LINK.TYPES.DATA && h.frame.session===R.link.session) return {data:h};
+    return null;
+  }).then(function(cap){
     /* The sender lost our HELLO_ACK and is retrying the handshake at another rate: catch it here too. */
-    var hello=scanHello(cap);
+    var early=cap.early;
+    var hello=early&&early.hello?early.hello:scanHello(cap);
     if(hello){
       R.link.rate=hello.rate; R.link.session=hello.frame.session;
       R.recvText=tr("radio.link.found",{ms:hello.rate}); log(tr("radio.link.found",{ms:hello.rate})); render();
@@ -490,7 +533,7 @@ function receiveData(token, attempt){
         return receiveData(token,1);
       });
     }
-    var hit=decodeFrameAt(cap.samples,cap.sampleRate,rate);
+    var hit=early&&early.data?early.data:decodeFrameAt(cap.samples,cap.sampleRate,rate);
     if(hit && hit.frame && hit.frame.type===LINK.TYPES.DATA && hit.frame.session===session){
       R.link.payload=hit.frame.payload;
       R.recvHex=AC.hex(hit.frame.payload);
@@ -510,14 +553,16 @@ function receiveData(token, attempt){
 function linkRecv(){
   if(active()) return;
   var token=++R.linkToken;
-  R.link={token:token, role:"recv", session:0, rate:10, src:null, stream:null, capTimer:0, cancel:false, payload:null};
+  R.link={token:token, role:"recv", session:0, rate:10, src:null, stream:null, capTimer:0, pollTimer:0, cancel:false, payload:null};
   LP.keepAwake(true); R.recvText=tr("radio.link.wait"); render();
   function scan(){
     if(!linkAlive(token)) return;
     R.recvText=tr("radio.link.wait"); render();
-    captureWindow(SCAN_MS,token).then(function(cap){
+    captureWindow(SCAN_MS,token,function(samples,sr){
+      return scanHello({samples:samples,sampleRate:sr});
+    }).then(function(cap){
       if(!linkAlive(token)) return;
-      var hit=scanHello(cap);
+      var hit=cap.early || scanHello(cap);
       if(!hit){ return delay(50).then(scan); }
       R.link.session=hit.frame.session;
       R.link.rate=hit.rate;
