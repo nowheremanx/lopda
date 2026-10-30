@@ -1,79 +1,78 @@
-// runtime/studio-ai.js: the system prompt, the compact project state and the one-JSON answer (docs/design/studio.md 12.16).
+// runtime/studio-ai.js: extracting one JSON object, the compact overview and a pattern's notes (docs/design/studio.md 12.19).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import vm from "node:vm";
 import { runScript, read } from "./helpers.mjs";
 
 const ctx = runScript("runtime/studio-song.js");
-vm.runInContext(read("runtime/studio-ai.js"), ctx, { filename: "runtime/studio-ai.js" });
-const S = ctx.LopdaSong, A = ctx.LopdaStudioAI;
-const song = S.demoSong(1000);
+for (const f of ["studio-styles.js", "studio-tools.js", "studio-edit.js", "studio-ai.js"]) {
+  vm.runInContext(read("runtime/" + f), ctx, { filename: "runtime/" + f });
+}
+const S = ctx.LopdaSong, A = ctx.LopdaStudioAI, ST = ctx.LopdaStudioStyles;
 const plain = (v) => JSON.parse(JSON.stringify(v));
 
-test("summary: the settings, the chain, the used patterns and the focus", () => {
-  const s = A.summary(song, { screen: "bass", pattern: 2, slot: 5 });
-  assert.equal(s.bpm, 78);
-  assert.equal(s.key, "A");
-  assert.equal(s.scale, "dorian");
-  assert.equal(s.swing, 0.62);
-  assert.deepEqual(plain(s.song), plain(song.song));
-  assert.equal(s.focus.screen, "bass");
-  assert.equal(s.focus.pattern, 2);
-  const used = new Set(song.song);
-  for (const p of s.patterns) assert.ok(used.has(p.p) || p.p === 2, `pattern ${p.p} is referenced`);
-  assert.ok(s.patterns.length <= 9, "unused patterns are left out");
-  assert.ok(Array.isArray(s.patterns[0].drums));
-  assert.ok(s.tracks.some((t) => t.id === "drums" && t.vol === 1));
+test("extract: the one object, inside a fence and after a sentence", () => {
+  assert.deepEqual(plain(A.extract('Sure:\n```json\n{"reply":"ok","calls":[]}\n```\nDone.')), { reply: "ok", calls: [] });
+  assert.deepEqual(plain(A.extract('Here it is: {"bars":[[[0,2,0.8]]]} thanks')), { bars: [[[0, 2, 0.8]]] });
+  assert.deepEqual(plain(A.extract('prefix {"name":"a"} suffix {"name":"b"}')), { name: "a" }, "the first balanced object");
 });
 
-test("messages: one system prompt and a user message with the state and the request", () => {
-  const m = A.messages(song, { screen: "drums", pattern: 0 }, "把鼓做得更轻一点");
-  assert.equal(m.length, 2);
-  assert.equal(m[0].role, "system");
-  assert.match(m[0].content, /ONE JSON object/);
-  assert.match(m[0].content, /setTrackVolume/);
-  assert.match(m[0].content, /draft/);
-  assert.equal(m[1].role, "user");
-  assert.match(m[1].content, /CURRENT PROJECT/);
-  assert.match(m[1].content, /把鼓做得更轻一点/);
-  assert.match(m[1].content, /"bpm":78/);
+test("extract: one trailing comma before } or ] is tolerated", () => {
+  assert.deepEqual(plain(A.extract('{"reply":"x","calls":[{"tool":"ghost","pattern":0}] ,}')),
+    { reply: "x", calls: [{ tool: "ghost", pattern: 0 }] });
+  assert.equal(A.extract('{"a":[1,2],}').error, undefined, "the repair is attempted after the first parse fails");
+  assert.ok(A.extract('{"a":[1,2,],}').error, "a second trailing comma is still unreadable");
+  assert.ok(A.extract('{"calls":[{"tool":"ghost","pattern":0,}],}').error, "a nested object is not returned instead");
 });
 
-test("parse: an ops answer, even inside a code fence with a sentence around it", () => {
-  const r = A.parse('Sure:\n```json\n{"reply":"已加快","ops":[{"op":"bpm","delta":4}]}\n```', 2000);
-  assert.equal(r.error, undefined);
-  assert.equal(r.reply, "已加快");
-  assert.deepEqual(plain(r.ops), [{ op: "bpm", delta: 4 }]);
-  assert.equal(r.draft, undefined);
+test("extract: blank and objectless answers carry an English reason", () => {
+  assert.equal(A.extract("").error, "empty answer");
+  assert.equal(A.extract("   \n ").error, "empty answer");
+  assert.match(A.extract("no json here").error, /JSON object/);
+  assert.match(A.extract("[1,2,3]").error, /JSON object/);
 });
 
-test("parse: a draft becomes a validated replaceSong", () => {
-  const draft = {
-    name: "Rainy", bpm: 92, key: 9, scale: "minor", swing: 0.55, tape: 2, kit: "soft",
-    patterns: [
-      { drums: [[0, "kick", 1], [4, "snare", 0.9], [8, "kick", 0.8]], bass: [[0, 0, 0.8], [8, 5, 0.7]], chords: [[0, 0, 0.65]], melody: [[4, 4, 0.6]] },
-      { drums: [[0, "kick", 1], [4, "snare", 0.9]], bass: [[0, 5, 0.8]], chords: [[0, 5, 0.65]], melody: [] },
-    ],
-    song: [0, 1, 0, 1],
-  };
-  const r = A.parse(JSON.stringify({ reply: "写好了", draft }), 2000);
-  assert.equal(r.error, undefined);
-  assert.equal(r.draft, true);
-  assert.equal(r.reply, "写好了");
-  assert.equal(r.ops.length, 1);
-  assert.equal(r.ops[0].op, "replaceSong");
-  assert.equal(r.ops[0].song.name, "Rainy");
-  assert.equal(r.ops[0].song.song.length, 4);
-  assert.equal(S.validate(r.ops[0].song).error, undefined);
-  assert.equal(r.ops[0].song.patterns[0].notes.bass[0].len, 8 * S.STEP, "the draft builder ties notes");
+test("overview: settings, the mix, a compressed chain and one line per pattern", () => {
+  const song = S.demoSong(1000);
+  song.name = "Rainy tram";
+  song.tracks[1].vol = 0.7;
+  song.tracks[3].mute = true;
+  song.song = [0, 0, 1, 1, 2, 3, 2, 3];
+  const text = A.overview(song);
+  assert.match(text, /Rainy tram/);
+  assert.match(text, /78 BPM \| A dorian \| swing 0\.62 \| tape 2 \| kit soft/);
+  assert.match(text, /Mix: bass vol 0\.7, melody muted/);
+  assert.match(text, /Chain \(8\): A x2, B x2, \(C D\) x2/);
+  assert.match(text, /^A: drums \d+ hits \(2 ghost\), bass \d+ notes, chords Am9 \(steps 0\), melody \d+ notes degrees \d+\.\.\d+$/m);
+  assert.match(text, /^C: .*chords Cmaj9 Bm7 \(steps 0, 8\)/m);
 });
 
-test("parse: malformed answers are refused with a word", () => {
-  assert.equal(A.parse("not json").error, "shape");
-  assert.equal(A.parse('{"reply":"x"}').error, "shape");
-  assert.equal(A.parse('{"reply":"x","ops":[],"draft":{}}').error, "shape");
-  assert.equal(A.parse('{"reply":"x","ops":[{"op":"bad"}]}').error, undefined, "shape is for the edit layer; ops are not checked here");
-  assert.equal(A.parse('{"reply":"x","ops":' + JSON.stringify(new Array(65).fill({ op: "bpm", delta: 1 })) + "}").error, "shape");
-  assert.equal(A.parse(JSON.stringify({ reply: "x", draft: { bpm: 999 } })).error, "draft");
-  assert.equal(A.parse(JSON.stringify({ reply: "x", draft: { bpm: 90, patterns: [{ drums: [[99, "kick", 1]] }] } })).error, "draft");
+test("overview: a 16-pattern song stays under about 2.5 KB", () => {
+  let song = S.demoSong(1000);
+  for (let i = 8; i < 16; i++) song = S.ensurePattern(song, i);
+  song.song = Array.from({ length: 16 }, (_, i) => i);
+  const text = A.overview(song);
+  assert.ok(text.length < 2500, text.length + " bytes");
+  assert.equal(text.split("\n").length, 3 + 16, "name, settings and chain, then one line per pattern");
+});
+
+test("patternView: every note, compact, with rests and chord names", () => {
+  const song = S.demoSong(1000);
+  const view = A.patternView(song, 4);
+  assert.match(view, /^E drums: kick /);
+  assert.match(view, /\| snare /);
+  assert.match(view, /; bass: 0:deg\d+@\d/);
+  assert.match(view, /; chords: 0:[IViv]+\(Cmaj9\)/);
+  assert.match(view, /; melody: /);
+
+  const edited = ctx.LopdaStudioEdit.apply(S.newSong(1), [
+    { op: "setRest", pattern: 0, track: "bass", step: 8 },
+    { op: "setRest", pattern: 0, track: "chords", step: 8 },
+    { op: "setRest", pattern: 0, track: "melody", step: 4 },
+  ]);
+  const rests = A.patternView(edited.song, 0);
+  assert.match(rests, /bass: .*8:rest/);
+  assert.match(rests, /chords: .*8:rest/);
+  assert.match(rests, /melody: .*4:rest/);
+  assert.equal(A.patternView(S.newSong(1), 9).split("; ").length, 4, "an empty pattern still has the four tracks");
 });
