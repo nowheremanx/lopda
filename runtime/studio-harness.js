@@ -236,10 +236,12 @@ function planCheck(obj,cards,rolls){
     if(s.drums!=null && s.groove==null){
       var tried=T.run(S.newSong(0),{tool:"groove",pattern:0,steps:s.drums});
       if(tried.error) return {error:"section '"+id+"': "+tried.error};
-    } else if(typeof s.groove!=="string" || !ST.GROOVES[s.groove])
+    } else if(s.groove!=="none" && (typeof s.groove!=="string" || !ST.GROOVES[s.groove]))
       return {error:"section '"+id+"': unknown groove '"+String(s.groove)+"'; use one of "+Object.keys(ST.GROOVES).join(", ")+", or write drums"};
-    if(s.strum!=null && T.CHORD_RHYTHMS.indexOf(s.strum)<0)
-      return {error:"section '"+id+"': strum must be one of "+T.CHORD_RHYTHMS.join(", ")};
+    if(s.strum!=null && s.strum!=="none" && T.CHORD_RHYTHMS.indexOf(s.strum)<0)
+      return {error:"section '"+id+"': strum must be one of "+T.CHORD_RHYTHMS.join(", ")+" or none"};
+    if(s.imitate!=null && typeof s.imitate!=="boolean") return {error:"section '"+id+"': imitate must be true or false"};
+    if(s.imitate && !s.melody) return {error:"section '"+id+"': imitate needs melody true (the bass imitates the melody's motif)"};
     if(Array.isArray(s.bass)){
       var br=T.run(S.newSong(0),{tool:"bass",pattern:0,steps:s.bass});
       if(br.error) return {error:"section '"+id+"': "+br.error};
@@ -279,7 +281,7 @@ function planCheck(obj,cards,rolls){
   for(i=0;i<sections.length;i++){
     s=sections[i];
     kept.push({id:s.id,chords:s.chords.slice(),groove:s.drums!=null && s.groove==null ? null : s.groove,
-      drums:s.drums!=null && s.groove==null ? s.drums : null,strum:s.strum||"hold",
+      drums:s.drums!=null && s.groove==null ? s.drums : null,strum:s.strum||"hold",imitate:s.imitate===true,
       energy:s.energy,bass:s.bass,melody:s.melody,patterns:[]});
   }
   var keptOrder=[];
@@ -339,18 +341,21 @@ function laySong(roll,plan,now){
       /* a bare degree gets the scale's own chord in the plan's chord style (12.20.8) */
       var cj=s.chords[j], dq=int(cj) ? T.diatonicQ(song,cj,plan.chordStyle) : null;
       if(dq) cj={root:cj, q:dq};
-      song=applyTool(song,{tool:"chords",pattern:p,roots:[cj],rhythm:s.strum});
+      song=applyTool(song,{tool:"chords",pattern:p,roots:[cj],rhythm:s.strum==="none" ? "hold" : s.strum});
       song=applyTool(song,s.drums ? {tool:"groove",pattern:p,steps:s.drums,energy:s.energy,fill:fill}
         : {tool:"groove",pattern:p,style:s.groove,energy:s.energy,fill:fill});
       song=applyTool(song,Array.isArray(s.bass) ? {tool:"bass",pattern:p,steps:s.bass} : {tool:"bass",pattern:p,rhythm:s.bass});
+      /* no chord pad: the bass and the melody still follow the chord, which is why it was laid first (12.20.11) */
+      if(s.strum==="none") song=applyTool(song,{tool:"ops",ops:[{op:"clearTrack",pattern:p,track:"chords"}]});
     }
     if(s.alt>=0){
       var lj=s.patterns.length-1, lc=s.chords[lj], lq=int(lc) ? T.diatonicQ(song,lc,plan.chordStyle) : null;
       if(lq) lc={root:lc, q:lq};
-      song=applyTool(song,{tool:"chords",pattern:s.alt,roots:[lc],rhythm:s.strum});
+      song=applyTool(song,{tool:"chords",pattern:s.alt,roots:[lc],rhythm:s.strum==="none" ? "hold" : s.strum});
       song=applyTool(song,s.drums ? {tool:"groove",pattern:s.alt,steps:s.drums,energy:s.energy,fill:true}
         : {tool:"groove",pattern:s.alt,style:s.groove,energy:s.energy,fill:true});
       song=applyTool(song,Array.isArray(s.bass) ? {tool:"bass",pattern:s.alt,steps:s.bass} : {tool:"bass",pattern:s.alt,rhythm:s.bass});
+      if(s.strum==="none") song=applyTool(song,{tool:"ops",ops:[{op:"clearTrack",pattern:s.alt,track:"chords"}]});
     }
   }
   var chain=[], times={};
@@ -387,6 +392,21 @@ function chordSpec(song,plan,c){
   return q ? {root:c, q:q} : {root:c};
 }
 
+function imitationMotif(m){
+  return {rhythm:m.rhythm, answer:m.answer, contour:m.contour, register:"low", ending:m.ending};
+}
+/* a phrase bar for the bass track: replace the bar's bass with these notes (degrees count from the bass's own tonic) */
+function bassOps(p,notes){
+  var ops=[{op:"clearTrack",pattern:p,track:"bass"}], i, n, o;
+  for(i=0;i<notes.length;i++){
+    n=notes[i];
+    o={op:"setNote",pattern:p,track:"bass",step:n[0],deg:Math.max(-3,Math.min(9,n[1])),vel:n[2]};
+    if(n[3] && n[2]>0) o.acc=n[3];
+    ops.push(o);
+  }
+  return ops;
+}
+
 function motifRun(c,song,plan,roll,text,onStage){
   var list=[], i, j, s, bars, sections=[];
   for(i=0;i<plan.sections.length;i++) if(plan.sections[i].melody) list.push(plan.sections[i]);
@@ -409,6 +429,12 @@ function motifRun(c,song,plan,roll,text,onStage){
       var specs=s.chords.map(function(x){ return chordSpec(song,plan,x); });
       out=C.phrase(song,motifs[s.id],specs,{variant:0,start:start});
       for(k=0;k<out.length;k++) song=applyTool(song,{tool:"melody",pattern:s.patterns[k],notes:out[k]});
+      /* imitation: the bass answers with the same motif a bar later and lower, over its own chords, so the two lines
+         are a small canon that stays in the harmony (a fugue's entry, as far as two voices allow) (12.20.11) */
+      if(s.imitate && specs.length>1){
+        var low=C.phrase(song,imitationMotif(motifs[s.id]),specs.slice(1),{variant:0});
+        for(k=0;k<low.length;k++) song=applyTool(song,{tool:"ops",ops:bassOps(s.patterns[k+1],low[k])});
+      }
       if(s.alt>=0){
         alt=C.phrase(song,motifs[s.id],specs,{variant:1,start:start});
         song=applyTool(song,{tool:"melody",pattern:s.alt,notes:alt[alt.length-1]});

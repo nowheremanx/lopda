@@ -394,3 +394,20 @@ test("skeleton: a plan chord off the key is sent back with the chords the key al
   assert.equal(out.draft, true);
   assert.match(ask.seen[1].messages.at(-1).content, /Ab is outside D minor.*use the scale's own chords or one of/);
 });
+
+test("skeleton: a solo piece has no drums and no chord pad; an imitating section gives the bass the motif a bar later", async () => {
+  const plan = planFor();
+  plan.sections = plan.sections.map((s) => ({ ...s, groove: "none", strum: "none", bass: "alberti" }));
+  plan.sections[1].imitate = true;
+  const out = await H.skeleton({ text: "x", ask: makeAsk(fullAnswers(plan)), rand: ST.seeded(6), now: 1000 });
+  const song = out.song;
+  for (let p = 1; p < 10; p++) {               /* pattern 0 has the listen-back's one ghost note */
+    assert.equal(song.patterns[p].notes.drums.length, 0, "no drums in pattern " + p);
+    assert.equal(song.patterns[p].notes.chords.length, 0, "no chord pad in pattern " + p);
+  }
+  /* verse is patterns 1-4: bar 1 keeps the broken chords, bars 2-4 carry the imitation, which starts on the motif's rhythm */
+  assert.equal(song.patterns[1].notes.bass.length, 8, "alberti in the first bar");
+  const onsets = song.patterns[2].notes.bass.filter((n) => n.vel > 0).map((n) => n.t / S.STEP);
+  assert.deepEqual(JSON.parse(JSON.stringify(onsets)).slice(0, 4), [0, 3, 4, 8]);
+  assert.equal(S.validate(song).error, undefined);
+});

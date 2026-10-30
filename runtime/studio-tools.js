@@ -159,12 +159,14 @@ function customGroove(steps){
 function toolGroove(song,call){
   var p=patternArg(call);
   if(p===null) return patternError();
+  /* no drums at all: a solo piece, a chorale, a fugue (12.20.11) */
+  if(call.style==="none") return {ops:[{op:"clearTrack",pattern:p,track:"drums"}]};
   var g=ST.GROOVES[call.style];
   if(call.steps!=null && call.style==null){
     g=customGroove(call.steps);
     if(typeof g==="string") return err(g);
   }
-  if(!g) return failArg("groove","unknown style '"+String(call.style==null?"":call.style)+"'; use one of "+ids(ST.GROOVES)+", or give steps");
+  if(!g) return failArg("groove","unknown style '"+String(call.style==null?"":call.style)+"'; use one of "+ids(ST.GROOVES)+", none, or give steps");
   var energy=typeof call.energy==="undefined" ? 1 : call.energy;
   if(!int(energy) || energy<0 || energy>2) return failArg("energy","use 0, 1 or 2");
   var hits=energyHits(g,energy);

@@ -10,7 +10,7 @@ const S = ctx.LopdaSong, ST = ctx.LopdaStudioStyles;
 const plain = (v) => JSON.parse(JSON.stringify(v));
 const SCALES = ["major", "minor", "dorian"];
 const KITS = ["soft", "chip"];
-const MOVES = ["root", "fifth", "octave", "approach"];
+const MOVES = ["root", "fifth", "octave", "approach", "third"];
 const SECTIONS = ["intro", "verse", "pre", "chorus", "bridge", "outro"];
 
 test("CARDS: about sixteen cards with short original names and every palette id real", () => {
