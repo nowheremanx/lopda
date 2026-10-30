@@ -186,7 +186,7 @@ The app's automatic mode:
 
 1. Sender sends `HELLO` at 10 ms.
 2. Receiver scans the 3.2 s window at 10/20/40 ms and answers `HELLO_ACK` at the rate it decoded.
-3. Sender waits 4.8 s; no answer -> 20 ms, then 40 ms. HELLO and HELLO_ACK test both directions at the same rate.
+3. Sender waits 7 s; no answer -> 20 ms, then 40 ms. HELLO and HELLO_ACK test both directions at the same rate.
 4. One 16-byte DATA frame, CRC-checked; ACK or NACK; up to three DATA retries.
 5. FIN/ACK.
 

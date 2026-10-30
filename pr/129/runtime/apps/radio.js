@@ -261,14 +261,20 @@ function decodeSamples(samples, sr){
    The handshake is one HELLO burst at 10 ms. The receiver scans 10/20/40 and answers at the rate it
    heard. HELLO and HELLO_ACK both have to arrive, so the chosen rate is known to work both ways.
    A fails to a slower rate on a missing HELLO_ACK. 5 ms stays a manual M2 choice. */
-var LINK_RATES=[10,20,40], SCAN_MS=3200, HELLO_WAIT=4800;
+var LINK_RATES=[10,20,40], SCAN_MS=3200, HELLO_WAIT=7000, TURN_MS=1500;
 function delay(ms){ return new Promise(function(r){ setTimeout(r,ms); }); }
 function errText(e){ return e==="cancelled"?"cancelled":((e&&e.message)||String(e)); }
 function stopTracks(s){ if(s) try{ s.getTracks().forEach(function(t){ try{ t.stop(); }catch(e){} }); }catch(e){} }
 function newSession(){ var s=(((Date.now()&0xFFFF)^Math.floor(Math.random()*65536))&0xFFFF); return s||1; }
 function linkAlive(t){ return !!(R.link && R.link.token===t && !R.link.cancel); }
-function ackMs(rate){ return Math.round((16+10*4)*rate+1200); }
-function dataMs(rate){ return Math.round((16+26*4)*rate+900); }
+function frameMs(bytes,rate){ return Math.round((16+bytes*4)*rate+240); }
+/* The receiver opens its microphone after the previous burst and waits TURN_MS before the sender transmits;
+   the capture window must cover that wait as well as the frame. */
+function ackMs(rate){ return Math.round(frameMs(10,rate)+TURN_MS+600); }
+function dataMs(rate){ return Math.round(frameMs(26,rate)+TURN_MS+600); }
+/* The sender's wait covers the receiver's whole capture + turnaround + its ACK. */
+function dataAckMs(rate){ return Math.round(dataMs(rate)+TURN_MS+frameMs(10,rate)+800); }
+function finAckMs(rate){ return Math.round(ackMs(rate)+TURN_MS+frameMs(10,rate)+800); }
 
 function linkDone(token, ok, why, receiver){
   if(!R.link || R.link.token!==token) return;
@@ -371,7 +377,10 @@ function captureWindow(ms, token, poll){
         stopTracks(stream);
         micMark.hidden=true;
         LP.setSession("playback");
-        resolve({samples:concat(blocks), sampleRate:ctx.sampleRate, early:early||null});
+        var all=concat(blocks), peak=0, i;
+        for(i=0;i<all.length;i++) if(Math.abs(all[i])>peak) peak=Math.abs(all[i]);
+        if(R.link){ R.link.lastCapture={ms:ms, samples:all.length, peak:peak}; if(window.LOPDA_DEBUG) R.link.lastSamples=all; }
+        resolve({samples:all, sampleRate:ctx.sampleRate, early:early||null});
       }
       proc.onaudioprocess=function(e){
         if(!done && R.link && R.link.token===token){ var d=e.inputBuffer.getChannelData(0); var c=new Float32Array(d.length); c.set(d); blocks.push(c); }
@@ -426,8 +435,9 @@ function sendReliable(frame, seq, rate, token, tries){
     if(!linkAlive(token)) return Promise.reject("cancelled");
     if(n>tries) return Promise.reject("no ack");
     if(n>1) log(tr("radio.link.retry",{n:n-1}));
+    var wait=seq===1?dataAckMs(rate):finAckMs(rate);
     return playBurst(frame,rate,token).then(function(){
-      return captureWindow(ackMs(rate),token,function(samples,sr){
+      return captureWindow(wait,token,function(samples,sr){
         var h=decodeFrameAt(samples,sr,rate);
         return h && h.frame && h.frame.session===R.link.session && h.frame.seq===seq && h.frame.type===LINK.TYPES.ACK ? h : null;
       });
@@ -459,7 +469,9 @@ function linkSend(){
       });
     }).then(function(cap){
       var hit=cap.early || decodeFrameAt(cap.samples,cap.sampleRate,rate);
-      if(hit && hit.frame && hit.frame.type===LINK.TYPES.HELLO_ACK && hit.frame.session===R.link.session) return rate;
+      if(hit && hit.frame && hit.frame.type===LINK.TYPES.HELLO_ACK && hit.frame.session===R.link.session){
+        return delay(TURN_MS).then(function(){ return rate; });
+      }
       throw new Error("no hello ack");
     }).then(null,function(e){ if(!linkAlive(token)) throw e; log(tr("radio.link.hello.fail",{ms:rate})); return tryRate(i+1); });
   }
@@ -468,8 +480,10 @@ function linkSend(){
     R.sendText=tr("radio.link.ready",{ms:rate}); log(tr("radio.link.ready",{ms:rate})); render();
     var data=LINK.encode(LINK.TYPES.DATA,R.link.session,1,bytes());
     return sendReliable(data,1,rate,token,3).then(function(){
-      var fin=LINK.encode(LINK.TYPES.FIN,R.link.session,2,[]);
-      return sendReliable(fin,2,rate,token,2);
+      return delay(TURN_MS).then(function(){
+        var fin=LINK.encode(LINK.TYPES.FIN,R.link.session,2,[]);
+        return sendReliable(fin,2,rate,token,2);
+      });
     });
   }).then(function(){ linkDone(token,true,null,false); }, function(e){
     if(linkAlive(token)) linkDone(token,false,errText(e),false);
@@ -498,12 +512,16 @@ function receiveFin(token, attempt){
     var hit=early&&early.frame?early.frame:decodeFrameAt(cap.samples,cap.sampleRate,rate);
     /* A lost our DATA ACK and retried DATA while we waited for FIN: ACK it again, do not append it twice. */
     if(hit && hit.frame && hit.frame.type===LINK.TYPES.DATA && hit.frame.session===session){
-      return playBurst(LINK.encode(LINK.TYPES.ACK,session,hit.frame.seq,[]),rate,token).then(function(){
+      return delay(TURN_MS).then(function(){
+        return playBurst(LINK.encode(LINK.TYPES.ACK,session,hit.frame.seq,[]),rate,token);
+      }).then(function(){
         return receiveFin(token,attempt);
       });
     }
     if(hit && hit.frame && hit.frame.type===LINK.TYPES.FIN && hit.frame.session===session){
-      return playBurst(LINK.encode(LINK.TYPES.ACK,session,hit.frame.seq,[]),rate,token).then(function(){
+      return delay(TURN_MS).then(function(){
+        return playBurst(LINK.encode(LINK.TYPES.ACK,session,hit.frame.seq,[]),rate,token);
+      }).then(function(){
         linkDone(token,true,null,true);
       });
     }
@@ -539,7 +557,9 @@ function receiveData(token, attempt){
       R.recvHex=AC.hex(hit.frame.payload);
       R.recvStats=tr("radio.link.crc",{n:hit.frame.payload.length,ms:rate});
       log(tr("radio.link.crc",{n:hit.frame.payload.length,ms:rate})); render();
-      return playBurst(LINK.encode(LINK.TYPES.ACK,session,hit.frame.seq,[]),rate,token).then(function(){
+      return delay(TURN_MS).then(function(){
+        return playBurst(LINK.encode(LINK.TYPES.ACK,session,hit.frame.seq,[]),rate,token);
+      }).then(function(){
         return receiveFin(token,1);
       });
     }
@@ -567,7 +587,9 @@ function linkRecv(){
       R.link.session=hit.frame.session;
       R.link.rate=hit.rate;
       R.recvText=tr("radio.link.found",{ms:hit.rate}); log(tr("radio.link.found",{ms:hit.rate})); render();
-      return playBurst(LINK.encode(LINK.TYPES.HELLO_ACK,hit.frame.session,0,[]),hit.rate,token).then(function(){
+      return delay(TURN_MS).then(function(){
+        return playBurst(LINK.encode(LINK.TYPES.HELLO_ACK,hit.frame.session,0,[]),hit.rate,token);
+      }).then(function(){
         return receiveData(token,1);
       });
     }).then(null,function(e){ if(linkAlive(token)) linkDone(token,false,errText(e),true); });
@@ -643,6 +665,7 @@ function icon(){
   ];
 }
 
+if(window.LOPDA_DEBUG) window.LOPDA_DEBUG.radio=R;
 LP.builtin({id:"radio", label:"app.radio", icon:icon, view:"radio",
   open:function(){ R.live=true; R.tab="send"; render(); renderLog(); LP.show("radio"); },
   /* The runtime calls leave/pause/audio on every built-in, not only the one in front. Only the live Radio may
