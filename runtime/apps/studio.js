@@ -53,7 +53,7 @@ var T={
   /* 12.15: undo/redo (memory), persistent versions and the project library */
   history:[], redo:[], snap:null, historySilent:false,
   versions:[], versionsOk:false, versionPick:0, projects:null, projectsLoading:false,
-  importData:null, guidePage:0,
+  projectFolder:"", templatePick:"", importData:null, guidePage:0,
   /* 12.16: the assistant's one request and the preview waiting for 采用 */
   aiBusy:false, aiJob:null, aiPreview:null, aiNote:"",
   /* the player: one chain clock, chainPat is what is scheduled, playPat is what the ears hear */
@@ -242,6 +242,18 @@ function loadStore(){
     T.metaOk=true;                 /* read OK (or showed none): meta can be written from here */
     if(!T.meta.toured || typeof T.meta.toured!=="object" || Array.isArray(T.meta.toured)) T.meta.toured={};
     T.meta.hushTip=T.meta.hushTip===true;
+    if(!Array.isArray(T.meta.folders)) T.meta.folders=[];
+    else {
+      var rawFolders=T.meta.folders, cleanFolders=[], fi;
+      T.meta.folders=cleanFolders;
+      for(fi=0;fi<rawFolders.length;fi++){
+        var fn=rawFolders[fi];
+        if(typeof fn!=="string") continue;
+        fn=clipName(fn.trim(),SONGS.NAME_MAX);
+        if(!fn || fn==="demo" || cleanFolders.indexOf(fn)>=0) continue;
+        cleanFolders.push(fn);
+      }
+    }
     var cur=typeof T.meta.current==="string" ? T.meta.current : "";
     if(!cur){
       /* a song made before storage was ready is the one to keep */
@@ -311,7 +323,51 @@ function saveVersion(label){
   return writeVersions();
 }
 
-/* ---------- the project library (12.15) ----------
+/* ---------- folders and the built-in demo folder (12.17) ---------- */
+function templates(){
+  return [
+    {id:"night", label:"studio.demo.name", desc:"studio.demo.desc", make:SONGS.demoSong},
+    {id:"pop", label:"studio.pop.name", desc:"studio.pop.desc", make:SONGS.popSong},
+    {id:"saints", label:"studio.saints.name", desc:"studio.saints.desc", make:SONGS.saintsSong},
+    {id:"jasmine", label:"studio.jasmine.name", desc:"studio.jasmine.desc", make:SONGS.jasmineSong}
+  ];
+}
+function templateById(id){
+  var list=templates(), i;
+  for(i=0;i<list.length;i++) if(list[i].id===id) return list[i];
+  return null;
+}
+function folderOf(song){ return song && typeof song.folder==="string" ? song.folder : ""; }
+function folderLabel(folder){
+  if(folder==="demo") return tr("studio.folder.demo");
+  if(!folder) return tr("studio.folder.mine");
+  return folder;
+}
+function customFolders(){
+  var list=T.meta && Array.isArray(T.meta.folders) ? T.meta.folders : [], out=[], i;
+  for(i=0;i<list.length;i++) if(typeof list[i]==="string" && list[i]) out.push(list[i]);
+  return out;
+}
+function folderRows(){
+  var out=[{id:"demo",name:tr("studio.folder.demo"),count:templates().length,demo:true}], seen={}, i, p;
+  out.push({id:"",name:tr("studio.folder.mine"),count:0});
+  for(i=0;i<(T.projects||[]).length;i++){ p=T.projects[i]; if(!folderOf(p.song)) out[1].count++; }
+  for(i=0;i<customFolders().length;i++){
+    if(seen[customFolders()[i]]) continue;
+    seen[customFolders()[i]]=1;
+    out.push({id:customFolders()[i],name:customFolders()[i],count:0});
+  }
+  for(i=0;i<(T.projects||[]).length;i++){
+    p=T.projects[i];
+    var f=folderOf(p.song);
+    if(!f) continue;
+    if(!seen[f]){ seen[f]=1; out.push({id:f,name:f,count:0}); }
+    for(var j=0;j<out.length;j++) if(out[j].id===f) out[j].count++;
+  }
+  return out;
+}
+
+/* ---------- folders and the built-in demo folder (12.17) ----------
    Every tape is an item in the same collection the 1a build already used; the library only adds a list, a current
    pointer and the two edit actions. Opening a tape is the same reset as opening the program: drums, pattern A. */
 function listProjects(){
@@ -332,13 +388,13 @@ function listProjects(){
 function loadProjects(){
   if(!refs()){ T.projects=[]; T.projectsLoading=false; return Promise.resolve(); }
   T.projectsLoading=true;
-  if(T.sheet==="projects") renderSheet();
+  if(T.sheet==="projects"||T.sheet==="folder") renderSheet();
   return listProjects().then(function(list){
     T.projects=list; T.projectsLoading=false;
-    if(T.sheet==="projects") renderSheet();
+    if(T.sheet==="projects"||T.sheet==="folder") renderSheet();
   },function(){
     T.projects=[]; T.projectsLoading=false;
-    if(T.sheet==="projects") renderSheet();
+    if(T.sheet==="projects"||T.sheet==="folder") renderSheet();
   });
 }
 function installSong(song,id,versions){
@@ -350,6 +406,7 @@ function installSong(song,id,versions){
   T.noteSel={bass:-1,melody:-1}; T.noteDeg={bass:0,melody:0}; T.chordSel=-1; T.chordDeg=0;
   setSong(song);
   T.id=id;
+  T.projectFolder=folderOf(song);
   T.meta.current=id;
   T.versions=versions||[];
   T.versionsOk=true;
@@ -363,6 +420,7 @@ function newProject(){
   if(!r || !T.metaOk || !T.loaded) return;
   flush();
   song=SONGS.newSong(Date.now());
+  song.folder=T.projectFolder==="demo" ? "" : T.projectFolder;
   id=LP.uid();
   writeProject(id,song).then(function(ok){
     if(!ok) return;
@@ -393,6 +451,68 @@ function duplicateProject(){
     installSong(song,id,[]);
     toast(tr("studio.proj.copied"));
   });
+}
+function openFolder(folder){
+  T.projectFolder=folder||"";
+  openSheet("folder");
+}
+function useTemplate(){
+  var t=templateById(T.templatePick), song, id;
+  if(!t || !T.loaded || !T.metaOk) return;
+  song=t.make(Date.now());
+  song.name=tr(t.label);
+  song.folder=T.projectFolder==="demo" ? "" : T.projectFolder;
+  id=LP.uid();
+  writeProject(id,song).then(function(ok){
+    if(!ok) return;
+    T.templatePick="";
+    installSong(song,id,[]);
+    toast(tr("studio.template.added",{name:song.name}));
+  });
+}
+function addFolder(name){
+  name=clipName(String(name||"").trim(),SONGS.NAME_MAX);
+  if(!T.metaOk || !T.meta || !name || name==="demo") return false;
+  T.meta.folders=T.meta.folders||[];
+  if(T.meta.folders.indexOf(name)>=0) return false;
+  T.meta.folders.push(name);
+  saveMeta();
+  T.projectFolder=name;
+  return true;
+}
+function renameFolderTo(name){
+  var old=T.projectFolder, next=clipName(String(name||"").trim(),SONGS.NAME_MAX), i, writes=[];
+  if(!T.metaOk || !T.meta || !old || old==="demo" || !next || next==="demo" || next===old) return false;
+  T.meta.folders=T.meta.folders||[];
+  if(T.meta.folders.indexOf(next)>=0) return false;
+  for(i=0;i<T.meta.folders.length;i++) if(T.meta.folders[i]===old) T.meta.folders[i]=next;
+  if(T.meta.folders.indexOf(old)<0) T.meta.folders.push(next);
+  saveMeta();
+  for(i=0;i<(T.projects||[]).length;i++){
+    if(folderOf(T.projects[i].song)===old){
+      T.projects[i].song.folder=next;
+      writes.push(writeProject(T.projects[i].id,T.projects[i].song));
+    }
+  }
+  if(T.song && folderOf(T.song)===old) T.song.folder=next;
+  T.projectFolder=next;
+  Promise.all(writes).then(function(){ loadProjects(); openSheet("folder"); });
+  return true;
+}
+function deleteFolder(){
+  var old=T.projectFolder, i, writes=[];
+  if(!T.metaOk || !T.meta || !old || old==="demo") return;
+  T.meta.folders=(T.meta.folders||[]).filter(function(x){ return x!==old; });
+  saveMeta();
+  for(i=0;i<(T.projects||[]).length;i++){
+    if(folderOf(T.projects[i].song)===old){
+      T.projects[i].song.folder="";
+      writes.push(writeProject(T.projects[i].id,T.projects[i].song));
+    }
+  }
+  if(T.song && folderOf(T.song)===old) T.song.folder="";
+  T.projectFolder="";
+  Promise.all(writes).then(function(){ loadProjects(); openSheet("projects"); });
 }
 function deleteCurrentProject(){
   var r=refs(), id=T.id;
@@ -1245,11 +1365,12 @@ function renderChords(){
   if(rk){ rk.textContent=tr("studio.rest"); rk.setAttribute("aria-label",tr("studio.rest")); }
 }
 function renderSong(){
-  var chain=$("studio-chain"), s=T.song&&T.song.song?T.song.song:[0], i;
+  var chain=$("studio-chain"), s=T.song&&T.song.song?T.song.song:[0], i, same=s[T.slot];
   chain.textContent="";
   for(i=0;i<s.length;i++){
     (function(idx){
-      var cell=el("button","st-chain-cell"+(idx===T.slot?" sel":"")+(T.kb&&idx===T.focus?" focus":""));
+      var cell=el("button","st-chain-cell"+(idx===T.slot?" sel":"")+(T.kb&&idx===T.focus?" focus":"")+
+        (idx!==T.slot && s[idx]===same?" same":""));
       cell.type="button";
       cell.setAttribute("data-slot",String(idx));
       cell.textContent=letter(s[idx]);
@@ -1259,6 +1380,13 @@ function renderSong(){
     })(i);
   }
   $("studio-add").textContent=tr("studio.song.add");
+  var info=$("studio-song-info");
+  if(info){
+    if(T.song){
+      var sec=SONGS.ticksToSec(SONGS.chainTicks(T.song,s),T.song.bpm);
+      info.textContent=tr("studio.song.len",{n:s.length,time:Math.floor(sec/60)+":"+LP.pad2(Math.round(sec%60))});
+    } else info.textContent="";
+  }
   /* the play button names the slot it will start from (12.8) */
   renderPlay();
   /* the chain cells are new nodes: put the playing slot back on them when the chain changes mid-song */
@@ -1572,8 +1700,11 @@ function openSheet(name){
 }
 function closeSheet(){
   if(T.sheet==="new"||T.sheet==="demo"||T.sheet==="pop"){ T.sheet="menu"; renderSheet(); return; }
+  if(T.sheet==="editmenu"||T.sheet==="filemenu"){ T.sheet="menu"; renderSheet(); return; }
   if(T.sheet==="copyask"){ T.sheet="copy"; renderSheet(); return; }
-  if(T.sheet==="rename"||T.sheet==="projdel"){ T.sheet="projects"; renderSheet(); return; }
+  if(T.sheet==="rename"||T.sheet==="projdel"||T.sheet==="templateask"||T.sheet==="renamefolder"||T.sheet==="folderdel"){ T.sheet="folder"; renderSheet(); return; }
+  if(T.sheet==="folder"){ T.sheet="projects"; renderSheet(); return; }
+  if(T.sheet==="newfolder"){ T.sheet="projects"; renderSheet(); return; }
   if(T.sheet==="versionask"){ T.sheet="versions"; renderSheet(); return; }
   if(T.sheet==="importask"){ T.importData=null; T.sheet=""; renderSheet(); return; }
   if(T.sheet){ T.sheet=""; renderSheet(); }
@@ -1597,9 +1728,10 @@ function sheetRow(ul,label,small,onclick){
   return li;
 }
 function sheetHead(text){
-  var head=el("p","sheet-title");
+  var head=el("p","sheet-title st-sheet-head");
   head.appendChild(el("span","",text));
   $("studio-sheet").appendChild(head);
+  sheetClose(head);
   return head;
 }
 function sheetClose(head){
@@ -1643,7 +1775,6 @@ function isAiDraft(pv){
 function renderAiSheet(sh){
   var head=sheetHead(tr("studio.ai.title"));
   head.className+=" st-sheet-head";
-  sheetClose(head);
   if(T.aiPreview){
     var pr=el("div","st-ai-preview");
     pr.appendChild(el("p","st-ai-reply",T.aiPreview.reply||tr("studio.ai.done")));
@@ -1790,24 +1921,36 @@ function renderSheet(){
     var redoRow=sheetRow(ul,tr("studio.redo"),"",function(){ redo(); });
     if(!T.redo.length){ redoRow.className="disabled"; redoRow.setAttribute("aria-disabled","true"); redoRow.onclick=null; }
     if(T.loaded) sheetRow(ul,tr("studio.proj.library"),T.song&&T.song.name?T.song.name:tr("studio.proj.unnamed"),function(){ openSheet("projects"); loadProjects(); });
-    if(T.loaded) sheetRow(ul,tr("studio.versions"),String(T.versions.length),function(){ openSheet("versions"); });
+    if(T.loaded) sheetRow(ul,tr("studio.menu.edit"),"",function(){ openSheet("editmenu"); });
+    if(T.loaded) sheetRow(ul,tr("studio.menu.file"),"",function(){ openSheet("filemenu"); });
     sheetRow(ul,tr("studio.guide"),"",function(){ openSheet("guide"); });
     if(T.loaded) sheetRow(ul,tr("studio.ai.open"),"",function(){ openSheet("ai"); });
+    sh.appendChild(ul);
+    return;
+  }
+  if(T.sheet==="editmenu"){
+    var eh=sheetHead(tr("studio.menu.edit"));
+    eh.className+=" st-sheet-head";
+    var eul=el("ul","lcd-menu");
+    if(T.loaded) sheetRow(eul,tr("studio.versions"),String(T.versions.length),function(){ openSheet("versions"); });
     var clearTrackNow=screenTrack();
-    if(T.song && T.loaded && clearTrackNow) sheetRow(ul,tr("studio.clear.track",{track:screenName(clearTrackNow)}),"",function(){ clearCurrentTrack(); });
-    if(T.song && T.loaded) sheetRow(ul,tr("studio.kit",{kit:tr("studio.kit."+T.song.kit)}),"",function(){
+    if(T.song && T.loaded && clearTrackNow) sheetRow(eul,tr("studio.clear.track",{track:screenName(clearTrackNow)}),"",function(){ clearCurrentTrack(); });
+    if(T.song && T.loaded) sheetRow(eul,tr("studio.kit",{kit:tr("studio.kit."+T.song.kit)}),"",function(){
       T.song.kit=T.song.kit==="soft" ? "chip" : "soft";
       touch(); renderSheet();
     });
-    if(T.song && T.loaded) sheetRow(ul,tr("studio.export"),"WAV",function(){ exportWav(); });
-    if(T.loaded) sheetRow(ul,tr("studio.workspace.export"),"ZIP",function(){ exportWorkspace(); });
-    if(T.loaded) sheetRow(ul,tr("studio.workspace.import"),"ZIP",function(){ $("studio-import-file").click(); });
-    if(T.loaded) sheetRow(ul,tr("studio.clear.tape"),"",function(){ openSheet("new"); });
-    if(T.loaded) sheetRow(ul,tr("studio.demo"),"",function(){ openSheet("demo"); });
-    if(T.loaded) sheetRow(ul,tr("studio.pop"),"",function(){ openSheet("pop"); });
-    /* no chin pad here, so the way out of the menu has to be on screen */
-    sheetRow(ul,tr("studio.back"),"",function(){ closeSheet(); });
-    sh.appendChild(ul);
+    if(T.loaded) sheetRow(eul,tr("studio.clear.tape"),"",function(){ openSheet("new"); });
+    sh.appendChild(eul);
+    return;
+  }
+  if(T.sheet==="filemenu"){
+    var fh2=sheetHead(tr("studio.menu.file"));
+    fh2.className+=" st-sheet-head";
+    var ful=el("ul","lcd-menu");
+    if(T.song && T.loaded) sheetRow(ful,tr("studio.export"),"WAV",function(){ exportWav(); });
+    if(T.loaded) sheetRow(ful,tr("studio.workspace.export"),"ZIP",function(){ exportWorkspace(); });
+    if(T.loaded) sheetRow(ful,tr("studio.workspace.import"),"ZIP",function(){ $("studio-import-file").click(); });
+    sh.appendChild(ful);
     return;
   }
   if(T.sheet==="new"){
@@ -1927,37 +2070,128 @@ function renderSheet(){
   if(T.sheet==="projects"){
     var phead=sheetHead(tr("studio.proj.library"));
     phead.className+=" st-sheet-head";
-    sheetClose(phead);
-    var plist=el("ul","lcd-menu st-proj-list"), p, prow, i2;
+    var plist=el("ul","lcd-menu st-proj-list"), i2, row, rows;
     if(T.projectsLoading){
       plist.appendChild(el("li","disabled",tr("common.reading")));
-    } else if(T.projects && T.projects.length){
-      for(i2=0;i2<T.projects.length;i2++){
-        (function(item){
-          p=el("li",item.id===T.id?"on":"");
-          p.appendChild(el("span","",item.song.name||tr("studio.proj.unnamed")));
-          p.appendChild(el("small","",LP.fmt(item.song.updated)));
-          p.onclick=function(){ openProject(item.id); };
-          plist.appendChild(p);
-        })(T.projects[i2]);
-      }
     } else {
-      plist.appendChild(el("li","disabled",tr("studio.proj.none")));
+      rows=folderRows();
+      for(i2=0;i2<rows.length;i2++){
+        (function(f){
+          row=el("li",f.id===T.projectFolder?"on":"");
+          row.appendChild(el("span","",f.name));
+          row.appendChild(el("small","",String(f.count)));
+          row.onclick=function(){ openFolder(f.id); };
+          plist.appendChild(row);
+        })(rows[i2]);
+      }
     }
     sh.appendChild(plist);
     var pacts=el("ul","lcd-menu st-proj-actions");
-    sheetRow(pacts,tr("studio.proj.new"),"",function(){ newProject(); });
-    sheetRow(pacts,tr("studio.proj.rename"),"",function(){ openSheet("rename"); });
-    sheetRow(pacts,tr("studio.proj.dup"),"",function(){ duplicateProject(); });
-    sheetRow(pacts,tr("studio.proj.del"),"",function(){ openSheet("projdel"); });
-    sheetRow(pacts,tr("studio.back"),"",function(){ closeSheet(); });
+    sheetRow(pacts,tr("studio.folder.new"),"",function(){ openSheet("newfolder"); });
     sh.appendChild(pacts);
+    return;
+  }
+  if(T.sheet==="folder"){
+    var fhead=sheetHead(folderLabel(T.projectFolder));
+    fhead.className+=" st-sheet-head";
+    var flist=el("ul","lcd-menu st-proj-list"), f, k;
+    if(T.projectFolder==="demo"){
+      var tpls=templates();
+      for(k=0;k<tpls.length;k++){
+        (function(t){
+          f=el("li");
+          f.appendChild(el("span","",tr(t.label)));
+          f.appendChild(el("small","",tr(t.desc)));
+          f.onclick=function(){ T.templatePick=t.id; openSheet("templateask"); };
+          flist.appendChild(f);
+        })(tpls[k]);
+      }
+    } else {
+      var mine=(T.projects||[]).filter(function(p){ return folderOf(p.song)===T.projectFolder; });
+      if(!mine.length) flist.appendChild(el("li","disabled",tr("studio.proj.none")));
+      for(k=0;k<mine.length;k++){
+        (function(item){
+          f=el("li",item.id===T.id?"on":"");
+          f.appendChild(el("span","",item.song.name||tr("studio.proj.unnamed")));
+          f.appendChild(el("small","",LP.fmt(item.song.updated)));
+          f.onclick=function(){ openProject(item.id); };
+          flist.appendChild(f);
+        })(mine[k]);
+      }
+    }
+    sh.appendChild(flist);
+    var facts=el("ul","lcd-menu st-proj-actions");
+    if(T.projectFolder!=="demo"){
+      sheetRow(facts,tr("studio.proj.new"),"",function(){ newProject(); });
+      sheetRow(facts,tr("studio.proj.rename"),"",function(){ openSheet("rename"); });
+      sheetRow(facts,tr("studio.proj.dup"),"",function(){ duplicateProject(); });
+      sheetRow(facts,tr("studio.proj.del"),"",function(){ openSheet("projdel"); });
+      sheetRow(facts,tr("studio.clear.tape"),"",function(){ openSheet("new"); });
+      if(T.projectFolder){
+        sheetRow(facts,tr("studio.folder.rename"),"",function(){ openSheet("renamefolder"); });
+        sheetRow(facts,tr("studio.folder.del"),"",function(){ openSheet("folderdel"); });
+      }
+    }
+    sh.appendChild(facts);
+    return;
+  }
+  if(T.sheet==="templateask"){
+    var tpl=templateById(T.templatePick);
+    sheetHead(tr("studio.folder.demo"));
+    var task=el("div","st-ask");
+    task.appendChild(el("p","",tr("studio.template.ask",{name:tpl?tr(tpl.label):""})));
+    var trow=el("div","row");
+    var tyes=el("button","btn",""); tyes.type="button"; tyes.textContent=tr("studio.confirm");
+    tyes.onclick=function(){ useTemplate(); };
+    var tno=el("button","btn ghost",""); tno.type="button"; tno.textContent=tr("common.cancel");
+    tno.onclick=function(){ openSheet("folder"); };
+    trow.appendChild(tyes); trow.appendChild(tno);
+    task.appendChild(trow);
+    sh.appendChild(task);
+    return;
+  }
+  if(T.sheet==="newfolder"||T.sheet==="renamefolder"){
+    var isRename=T.sheet==="renamefolder";
+    var fh=sheetHead(tr(isRename?"studio.folder.rename":"studio.folder.new"));
+    fh.className+=" st-sheet-head";
+    var fin=el("input","st-name");
+    fin.type="text";
+    fin.maxLength=SONGS.NAME_MAX;
+    fin.value=isRename?T.projectFolder:"";
+    fin.placeholder=tr("studio.folder.name");
+    sh.appendChild(fin);
+    var frow=el("div","st-sheet-row");
+    var fsave=el("button","st-sheet-btn",""); fsave.type="button"; fsave.textContent=tr("studio.confirm");
+    fsave.onclick=function(){
+      var ok=isRename?renameFolderTo(fin.value):addFolder(fin.value);
+      if(!ok){ toast(tr("studio.folder.bad")); return; }
+      if(isRename){ loadProjects(); openSheet("folder"); }
+      else { T.sheet="folder"; renderSheet(); }
+    };
+    var fback=el("button","st-sheet-btn",""); fback.type="button"; fback.textContent=tr("common.cancel");
+    fback.onclick=function(){ openSheet(isRename?"folder":"projects"); };
+    frow.appendChild(fsave); frow.appendChild(fback);
+    sh.appendChild(frow);
+    setTimeout(function(){ try{ fin.focus(); }catch(e){} },0);
+    return;
+  }
+  if(T.sheet==="folderdel"){
+    sheetHead(tr("studio.folder.del"));
+    var fdask=el("div","st-ask");
+    fdask.appendChild(el("p","",tr("studio.folder.del.ask",{name:T.projectFolder})));
+    var fdrow=el("div","row");
+    var fdyes=el("button","btn",""); fdyes.type="button"; fdyes.textContent=tr("studio.folder.del.yes");
+    fdyes.onclick=function(){ deleteFolder(); };
+    var fdno=el("button","btn ghost",""); fdno.type="button"; fdno.textContent=tr("common.cancel");
+    fdno.onclick=function(){ openSheet("folder"); };
+    fdrow.appendChild(fdyes); fdrow.appendChild(fdno);
+    fdask.appendChild(fdrow);
+    sh.appendChild(fdask);
     return;
   }
   if(T.sheet==="rename"){
     var rhead=sheetHead(tr("studio.proj.rename"));
     rhead.className+=" st-sheet-head";
-    sheetClose(rhead);
     var inp=el("input","st-name");
     inp.type="text";
     inp.maxLength=SONGS.NAME_MAX;
@@ -1971,14 +2205,14 @@ function renderSheet(){
       if(!T.loaded||!T.song) return;
       T.song.name=clipName(String(inp.value||"").trim(),SONGS.NAME_MAX);
       touch();
-      T.sheet="projects";
+      T.sheet="folder";
       renderAll();
       writeProject(T.id,T.song).then(function(ok){
         if(ok){ T.dirty=false; loadProjects(); }
       });
     };
     var cancelName=el("button","st-sheet-btn",""); cancelName.type="button"; cancelName.textContent=tr("common.cancel");
-    cancelName.onclick=function(){ openSheet("projects"); };
+    cancelName.onclick=function(){ openSheet("folder"); };
     rrow.appendChild(saveName); rrow.appendChild(cancelName);
     sh.appendChild(rrow);
     setTimeout(function(){ try{ inp.focus(); }catch(e){} },0);
@@ -2001,7 +2235,6 @@ function renderSheet(){
   if(T.sheet==="versions"){
     var vhead=sheetHead(tr("studio.versions"));
     vhead.className+=" st-sheet-head";
-    sheetClose(vhead);
     var vlist=el("ul","lcd-menu st-proj-list"), v, vr, vi;
     vr=el("li");
     vr.appendChild(el("span","",tr("studio.version.save")));
@@ -2070,7 +2303,6 @@ function renderSheet(){
     if(T.guidePage>=pages.length) T.guidePage=pages.length-1;
     var ghead=sheetHead(tr("studio.guide.page",{n:T.guidePage+1,total:pages.length}));
     ghead.className+=" st-sheet-head";
-    sheetClose(ghead);
     var g=el("div","st-guide");
     g.appendChild(el("h4","",tr(pages[T.guidePage].title)));
     var gp=el("p","st-guide-text",tr(pages[T.guidePage].body));
@@ -2094,7 +2326,6 @@ function renderSheet(){
   if(T.sheet==="key"){
     var kh=sheetHead(tr("studio.key.title"));
     kh.className+=" st-sheet-head";
-    sheetClose(kh);
     /* twelve keys, four to a row; the scale below is the grid's own (12.14) */
     var kg=el("div","st-key-grid"), k;
     for(k=0;k<SONGS.NAMES.length;k++){
@@ -2125,7 +2356,6 @@ function renderSheet(){
   if(T.sheet==="sound"){
     var shd=sheetHead(tr("studio.sound.title"));
     shd.className+=" st-sheet-head";
-    sheetClose(shd);
     sh.appendChild(el("p","st-sheet-label",tr("studio.tape.label")));
     var levels=el("div","st-tape-levels");
     levels.id="studio-tape-levels";
@@ -2188,6 +2418,7 @@ function swapTape(song){
   T.noteSel={bass:-1,melody:-1}; T.noteDeg={bass:0,melody:0}; T.chordSel=-1; T.chordDeg=0;
   T.queued=-1; T.pendingPat=-1; T.boundaryGlobal=0; T.chainPat=0; T.playPat=0;
   setSong(song);
+  T.projectFolder=folderOf(song);
   T.versions=[]; T.versionsOk=true;
   if(T.id && T.metaOk) writeVersions();
   if(T.playing){ T.lastTick=Math.max(T.lastTick,T.heard+1); T.painted=null; }
@@ -2287,7 +2518,7 @@ function workspaceEntries(){
     return r.versions.get().then(function(versions){
       var entries=[], i, id, data, vers, doc;
       entries.push({name:"workspace.json",data:JSON.stringify({v:1,current:T.id,
-        meta:{toured:T.meta.toured||{},hushTip:!!T.meta.hushTip,guideTip:!!T.meta.guideTip}})});
+        meta:{toured:T.meta.toured||{},hushTip:!!T.meta.hushTip,guideTip:!!T.meta.guideTip,folders:T.meta.folders||[]}})});
       for(i=0;i<items.docs.length;i++){
         doc=items.docs[i];
         id=doc.id;
@@ -2418,7 +2649,8 @@ function applyWorkspaceImport(){
     }
     return Promise.all(writes);
   }).then(function(){
-    T.meta={toured:plan.meta.toured||{},hushTip:!!plan.meta.hushTip,guideTip:!!plan.meta.guideTip,current:plan.current};
+    T.meta={toured:plan.meta.toured||{},hushTip:!!plan.meta.hushTip,guideTip:!!plan.meta.guideTip,
+      folders:Array.isArray(plan.meta.folders)?plan.meta.folders.filter(function(x){return typeof x==="string";}):[],current:plan.current};
     saveMeta();
     T.loaded=false; T.loading=null; T.song=null; T.id=""; T.metaOk=false; T.versions=[]; T.versionsOk=false;
     T.history=[]; T.redo=[]; T.snap=null;

@@ -552,7 +552,7 @@ test("studio synth: the straight pop example peaks under 0.9 and sounds", { skip
   });
   assert.ok(r.peak > 0.2, `the pop example sounds (${r.peak})`);
   assert.ok(r.peak <= 0.9, `the pop example peaks under the soft ceiling (${r.peak})`);
-  assert.ok(Math.abs(r.seconds - 65) < 5, `about a minute of music (${r.seconds}s)`);
+  assert.ok(Math.abs(r.seconds - 160) < 10, `about two and a half minutes of music (${r.seconds}s)`);
   assert.deepEqual(errors, []);
 });
 
@@ -607,6 +607,43 @@ async function skipScreenTour(p) {
     await p.keyboard.press("z");
     await p.waitForSelector("#v-studio .st-tour-box", { state: "detached" });
   }
+}
+async function openMenu(p) {
+  await p.click("#studio-menu");
+  await p.waitForSelector("#studio-sheet:not([hidden])");
+}
+async function openEdit(p) {
+  await openMenu(p);
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "编辑" }).click();
+  await p.waitForSelector("#studio-sheet .lcd-menu");
+}
+async function openFileMenu(p) {
+  await openMenu(p);
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "文件" }).click();
+  await p.waitForSelector("#studio-sheet .lcd-menu");
+}
+async function openFolders(p) {
+  await openMenu(p);
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "磁带库" }).click();
+  await p.waitForSelector("#studio-sheet .st-proj-list");
+  await p.waitForFunction(() => !/读取中/.test((document.querySelector("#studio-sheet .st-proj-list") || {}).textContent || ""));
+}
+async function openMyTapes(p) {
+  if (await p.isHidden("#studio-sheet")) await openFolders(p);
+  await p.locator("#studio-sheet .st-proj-list li", { hasText: "我的磁带" }).click();
+  await p.waitForSelector("#studio-sheet .st-proj-list");
+}
+async function openDemo(p) {
+  if (await p.isHidden("#studio-sheet")) await openFolders(p);
+  await p.locator("#studio-sheet .st-proj-list li", { hasText: "示例" }).first().click();
+  await p.waitForSelector("#studio-sheet .st-proj-list");
+}
+async function useTemplate(p, name) {
+  await openDemo(p);
+  await p.locator("#studio-sheet .st-proj-list li", { hasText: name }).click();
+  await p.waitForSelector("#studio-sheet .st-ask");
+  await p.locator("#studio-sheet .st-ask .btn", { hasText: "确认" }).click();
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
 }
 async function waitTour(p, re) {
   await p.waitForFunction((src) => {
@@ -885,8 +922,8 @@ test("studio: a new tape while playing keeps the beat going at the new tempo", {
   const before = await p.evaluate(() => window.__studioHits.length);
   assert.ok(before > 0, "the 120 BPM tape is scheduling hits");
 
-  await p.click("#studio-menu");
-  await p.locator("#studio-sheet .lcd-menu li", { hasText: "清空这一盘" }).first().click();
+  await openEdit(p);
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "清空这一盘" }).click();
   await p.locator("#studio-sheet .st-ask .btn").first().click();       /* 确认 */
   const at = Date.now();
   await p.waitForFunction((n) => window.__studioHits.length > n, before, { timeout: 1500 });
@@ -1136,11 +1173,10 @@ test("studio tour: a sheet hides the tour, is fully tappable, and the bubble com
   assert.ok(open.rows.length >= 3, `the menu has its rows (${JSON.stringify(open.rows)})`);
   for (const row of open.rows) assert.ok(row.hit, `the row's centre reaches it: ${row.text}`);
 
-  /* 返回 is the last row: scroll it into the menu's view, then its centre closes the sheet */
-  const backRow = p.locator("#studio-sheet .lcd-menu li").last();
-  await backRow.scrollIntoViewIfNeeded();
-  const back = await backRow.boundingBox();
-  await p.mouse.click(back.x + back.width / 2, back.y + back.height / 2);
+  /* the menu's way back is the 44 px button in its title row, always visible */
+  const close = await p.locator("#studio-sheet .st-sheet-close").boundingBox();
+  assert.ok(close.width >= 44 && close.height >= 44, "the menu's close button is a 44 px target");
+  await p.mouse.click(close.x + close.width / 2, close.y + close.height / 2);
   await p.waitForSelector("#studio-sheet", { state: "hidden" });
   assert.equal(await tourBox(p).isVisible(), true, "the bubble is back after the sheet closes");
   assert.match(await tourText(p), /调快慢/, "still on step 5");
@@ -1488,8 +1524,7 @@ test("studio tour: a new tape from a note tour leaves the drums screen untoured 
   await p.waitForSelector("#v-studio .st-tour-box");
   await waitTour(p, NEW_TOURS[0].first);
 
-  await p.click("#studio-menu");
-  await p.waitForSelector("#studio-sheet:not([hidden])");
+  await openEdit(p);
   await p.locator("#studio-sheet .lcd-menu li", { hasText: "清空这一盘" }).click();
   await p.waitForSelector("#studio-sheet .st-ask");
   await p.locator("#studio-sheet .st-ask .btn", { hasText: "确认" }).click();
@@ -1895,8 +1930,7 @@ test("studio: 导出 WAV writes a mono 16-bit 22.05 kHz WAV with sound in it", {
       return { status: "saved" };
     };
   });
-  await p.click("#studio-menu");
-  await p.waitForSelector("#studio-sheet:not([hidden])");
+  await openFileMenu(p);
   await p.locator("#studio-sheet .lcd-menu li", { hasText: "导出 WAV" }).click();
   await p.waitForSelector("#studio-sheet", { state: "hidden" });
   await p.waitForFunction(() => window.__wav, null, { timeout: 60000 });
@@ -2133,7 +2167,7 @@ test("studio: the pattern sheet switches to C, and copying A over a full C asks 
   await skipTour(p);
 
   await p.click("#studio-pat");
-  assert.equal(await p.textContent("#studio-sheet .sheet-title"), "第 A 段");
+  assert.equal(await p.textContent("#studio-sheet .sheet-title span"), "第 A 段");
   assert.equal(await p.locator("#studio-sheet .st-pat-btn").count(), 16, "A-P in the sheet");
   await p.locator('#studio-sheet .st-pat-btn[data-pat="2"]').click();
   assert.equal(await p.getAttribute("#v-studio", "data-pat"), "2", "picked C");
@@ -2149,7 +2183,7 @@ test("studio: the pattern sheet switches to C, and copying A over a full C asks 
   await p.locator('#studio-sheet .st-pat-btn[data-pat="0"]').click();
   await p.click("#studio-pat");
   await p.locator("#studio-sheet .st-sheet-btn", { hasText: "复制 A 到…" }).click();
-  assert.equal(await p.textContent("#studio-sheet .sheet-title"), "把 A 复制到哪一段？");
+  assert.equal(await p.textContent("#studio-sheet .sheet-title span"), "把 A 复制到哪一段？");
   await p.locator('#studio-sheet .st-pat-btn[data-pat="2"]').click();
   assert.ok(await p.locator("#studio-sheet .st-copy-ask").count(), "a full target asks first");
   assert.match(await p.textContent("#studio-sheet .st-copy-ask p"), /C 段会被盖掉/);
@@ -2252,7 +2286,7 @@ test("studio: + appends the edit letter, a letter in the slot sheet changes the 
   assert.deepEqual(chain, ["A", "A"], "+ appends the edit pattern (A)");
 
   await openSlotSheet(p, 1);
-  assert.equal(await p.textContent("#studio-sheet .sheet-title"), "第 2 格：A", "the slot's sheet names the slot and its letter");
+  assert.equal(await p.textContent("#studio-sheet .sheet-title span"), "第 2 格：A", "the slot's sheet names the slot and its letter");
   await p.locator('#studio-sheet .st-pat-btn[data-pat="1"]').click();
   await p.waitForSelector("#studio-sheet", { state: "hidden" });
   chain = await p.$$eval(".st-chain-cell", (els) => els.map((e) => e.textContent));
@@ -2273,7 +2307,7 @@ test("studio: + appends the edit letter, a letter in the slot sheet changes the 
   assert.equal(await p.isHidden("#studio-sheet"), true, "a tap on another slot only selects it");
   await p.locator(".st-chain-cell").nth(1).click();
   await p.waitForSelector("#studio-sheet:not([hidden])");
-  assert.equal(await p.textContent("#studio-sheet .sheet-title"), "第 2 格：B");
+  assert.equal(await p.textContent("#studio-sheet .sheet-title span"), "第 2 格：B");
   const rows = await p.$$eval("#studio-sheet .lcd-menu li", (els) => els.map((e) => e.textContent.trim()));
   assert.deepEqual(rows, ["前面插一段", "后面复制一段", "删掉这一格", "返回"]);
   assert.equal(await p.getAttribute("#studio-sheet .lcd-menu li:nth-child(3)", "aria-disabled"), null, "delete is enabled at two slots");
@@ -2487,14 +2521,17 @@ test("studio: the demo tape loads 24 slots and survives a reload", { skip, timeo
   const { p, errors } = await rtPage(t);
   await studioOpen(p);
   await skipTour(p);
-  await p.click("#studio-menu");
-  await p.waitForSelector("#studio-sheet:not([hidden])");
+  await openMenu(p);
   const items = await p.$$eval("#studio-sheet .lcd-menu li", (els) => els.map((e) => e.textContent.trim()));
-  assert.ok(items.includes("清空这一盘"), "the clear-this-tape row is in the menu");
-  assert.ok(items.indexOf("示例磁带") > items.indexOf("清空这一盘"), "the demo tape sits under it");
-  await p.locator("#studio-sheet .lcd-menu li", { hasText: "示例磁带" }).click();
+  assert.ok(items.some((x) => x.startsWith("磁带库")), "the tape library is in the menu");
+  assert.ok(items.includes("编辑"), "the edit submenu is in the menu");
+  assert.ok(items.includes("文件"), "the file submenu is in the menu");
+  await p.click("#studio-sheet .st-sheet-close");
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  await openDemo(p);
+  await p.locator("#studio-sheet .st-proj-list li", { hasText: "夜色" }).click();
   await p.waitForSelector("#studio-sheet .st-ask");
-  assert.match(await p.textContent("#studio-sheet .st-ask p"), /换成示例磁带？这一盘上的东西都会清掉。/);
+  assert.match(await p.textContent("#studio-sheet .st-ask p"), /复制到我的磁带/);
   await p.locator("#studio-sheet .st-ask .btn", { hasText: "确认" }).click();
   await p.waitForSelector("#studio-sheet", { state: "hidden" });
 
@@ -2517,7 +2554,7 @@ test("studio: the demo tape loads 24 slots and survives a reload", { skip, timeo
   assert.deepEqual(errors, []);
 });
 
-test("studio: the demo tape clears the old one's other patterns too", { skip, timeout: 60000 }, async (t) => {
+test("studio: the demo template opens with its own patterns, not the old C", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await rtPage(t);
   await studioOpen(p);
   await skipTour(p);
@@ -2526,10 +2563,7 @@ test("studio: the demo tape clears the old one's other patterns too", { skip, ti
   await p.locator('#studio-sheet .st-pat-btn[data-pat="2"]').click();
   await p.locator('#studio-grid .st-cell[data-step="2"]').click();
   await waitKicks(p, 2, [2]);
-  await p.click("#studio-menu");
-  await p.locator("#studio-sheet .lcd-menu li", { hasText: "示例磁带" }).click();
-  await p.locator("#studio-sheet .st-ask .btn", { hasText: "确认" }).click();
-  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  await useTemplate(p, "夜色");
   await p.click("#studio-pat");
   await p.locator('#studio-sheet .st-pat-btn[data-pat="2"]').click();
   const kicks = await p.$$eval("#studio-grid .st-cell.on", (els) => els.map((e) => Number(e.dataset.step)));
@@ -2916,8 +2950,8 @@ test("studio: every screen fits at 375x667 with 44 px buttons and 56 px grid cel
   assert.deepEqual(sheet.out, [], `the menu fits at 331x359: ${JSON.stringify(sheet)}`);
   assert.ok(sheet.scroll <= sheet.client);
   assert.deepEqual(await sheetSmall(), [], "every menu row is at least 44 px");
-  await q.locator("#studio-sheet .lcd-menu li").last().click();          /* 返回 */
-  assert.equal(await q.isHidden("#studio-sheet"), true, "the menu's back row closes it");
+  await q.locator("#studio-sheet .st-sheet-close").click();
+  assert.equal(await q.isHidden("#studio-sheet"), true, "the menu's title close button closes it");
 
   /* the slot sheet: the 16 letters, then the four edits two by two; every button is 44 px and all fits */
   await q.click('#studio-screens .st-scr[data-screen="song"]');
@@ -3098,13 +3132,7 @@ test("studio: the tape library renames, opens, copies and deletes tapes", { skip
   await studioOpen(p);
   await skipTour(p);
   const openLibrary = async () => {
-    if (await p.isHidden("#studio-sheet")) {
-      await p.click("#studio-menu");
-      await p.waitForSelector("#studio-sheet:not([hidden])");
-    }
-    await p.locator("#studio-sheet .lcd-menu li", { hasText: "磁带库" }).click();
-    await p.waitForSelector("#studio-sheet .st-proj-list");
-    await p.waitForFunction(() => !/读取中/.test((document.querySelector("#studio-sheet .st-proj-list") || {}).textContent || ""));
+    if (await p.isHidden("#studio-sheet")) await openMyTapes(p);
   };
   await openLibrary();
   assert.equal(await p.locator("#studio-sheet .st-proj-list li").count(), 1, "one tape at first");
@@ -3151,10 +3179,7 @@ test("studio: a version saves the tape and restores it after a change, across a 
   await p.click("#studio-plus");
   assert.match(await p.textContent("#studio-bpm"), /86 BPM/);
   const openVersions = async () => {
-    if (await p.isHidden("#studio-sheet")) {
-      await p.click("#studio-menu");
-      await p.waitForSelector("#studio-sheet:not([hidden])");
-    }
+    await openEdit(p);
     await p.locator("#studio-sheet .lcd-menu li", { hasText: "版本" }).first().click();
     await p.waitForSelector("#studio-sheet .st-proj-list");
     await p.waitForFunction(() => !/读取中/.test((document.querySelector("#studio-sheet .st-proj-list") || {}).textContent || ""));
@@ -3183,7 +3208,7 @@ test("studio: a version saves the tape and restores it after a change, across a 
   await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
   await openTile(p);
   assert.match(await p.textContent("#studio-bpm"), /86 BPM/, "the restored tempo survives the reload");
-  await p.click("#studio-menu");
+  await openEdit(p);
   await p.locator("#studio-sheet .lcd-menu li", { hasText: "版本" }).first().click();
   await p.waitForSelector("#studio-sheet .st-proj-list");
   assert.equal(await p.locator("#studio-sheet .st-proj-list li").count(), 4, "the save row and three versions are still there after the reload");
@@ -3201,7 +3226,7 @@ test("studio: the workspace zip comes back with every tape and version", { skip,
       return { status: "saved" };
     };
   });
-  await p.click("#studio-menu");
+  await openFileMenu(p);
   await p.locator("#studio-sheet .lcd-menu li", { hasText: "导出工作区" }).click();
   await p.waitForFunction(() => window.__ws, null, { timeout: 30000 });
   const ws = await p.evaluate(() => window.__ws);
@@ -3229,20 +3254,16 @@ test("studio: the guide, the pop example and clear-track", { skip, timeout: 9000
   await p.locator("#studio-sheet .st-sheet-btn", { hasText: "开始玩" }).click();
   await p.waitForSelector("#studio-sheet", { state: "hidden" });
 
-  await p.click("#studio-menu");
-  await p.locator("#studio-sheet .lcd-menu li", { hasText: "流行示例" }).click();
-  await p.waitForSelector("#studio-sheet .st-ask");
-  await p.locator("#studio-sheet .st-ask .btn", { hasText: "确认" }).click();
-  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  await useTemplate(p, "白日流行");
   assert.match(await p.textContent("#studio-bpm"), /96 BPM/);
   await p.click('#studio-screens .st-scr[data-screen="song"]');
   await skipScreenTour(p);
-  assert.equal(await p.locator(".st-chain-cell").count(), 26, "the pop example is 26 bars");
+  assert.equal(await p.locator(".st-chain-cell").count(), 64, "the pop example is 64 bars");
 
   await p.click('#studio-screens .st-scr[data-screen="drums"]');
   await skipScreenTour(p);
   assert.ok(await p.locator("#studio-grid .st-cell.on").count() > 0);
-  await p.click("#studio-menu");
+  await openEdit(p);
   await p.locator("#studio-sheet .lcd-menu li", { hasText: "清空这条轨" }).click();
   assert.equal(await p.locator("#studio-grid .st-cell.on").count(), 0, "the drum track is empty");
   await p.click("#studio-menu");
@@ -3306,8 +3327,7 @@ test("studio: an AI draft becomes a new tape and leaves the current one alone", 
   await p.locator("#studio-sheet .st-sheet-btn", { hasText: "采用并试听" }).click();
   await p.waitForFunction(() => /88 BPM/.test((document.querySelector("#studio-bpm") || {}).textContent || ""));
   assert.equal(await p.getAttribute("#v-studio", "data-screen"), "drums");
-  await p.click("#studio-menu");
-  await p.locator("#studio-sheet .lcd-menu li", { hasText: "磁带库" }).click();
+  await openMyTapes(p);
   await p.waitForFunction(() => /AI 测试/.test((document.querySelector("#studio-sheet .st-proj-list") || {}).textContent || ""));
   assert.equal(await p.locator("#studio-sheet .st-proj-list li").count(), 2, "the original tape is still there");
   assert.deepEqual(errors, []);
@@ -3349,19 +3369,22 @@ test("studio: the guide, library, versions and AI sheets fit 331x359 with 44 px 
   await p.click("#studio-sheet .st-sheet-close");
   await p.waitForSelector("#studio-sheet", { state: "hidden" });
 
-  await p.click("#studio-menu");
-  await p.locator("#studio-sheet .lcd-menu li", { hasText: "磁带库" }).click();
-  await p.waitForFunction(() => !/读取中/.test((document.querySelector("#studio-sheet .st-proj-list") || {}).textContent || ""));
+  await openFolders(p);
+  await check("folders");
+  await p.locator("#studio-sheet .st-proj-list li", { hasText: "我的磁带" }).click();
+  await p.waitForSelector("#studio-sheet .st-proj-list");
   await check("library");
   await p.locator("#studio-sheet .st-proj-actions li", { hasText: "改名" }).click();
   await p.waitForSelector("#studio-sheet .st-name");
   await check("rename");
   await p.click("#studio-sheet .st-sheet-btn", { hasText: "取消" });
   await p.waitForSelector("#studio-sheet .st-proj-actions");
-
-  await p.locator("#studio-sheet .st-proj-actions li", { hasText: "返回" }).click();
+  await p.click("#studio-sheet .st-sheet-close");
+  await p.waitForSelector("#studio-sheet .st-proj-list");
+  await p.click("#studio-sheet .st-sheet-close");
   await p.waitForSelector("#studio-sheet", { state: "hidden" });
-  await p.click("#studio-menu");
+
+  await openEdit(p);
   await p.locator("#studio-sheet .lcd-menu li", { hasText: "版本" }).first().click();
   await p.waitForSelector("#studio-sheet .st-proj-list");
   await check("versions");
@@ -3372,5 +3395,72 @@ test("studio: the guide, library, versions and AI sheets fit 331x359 with 44 px 
   await p.locator("#studio-sheet .lcd-menu li", { hasText: "让 AI 改" }).click();
   await p.waitForSelector("#studio-ai-input");
   await check("AI");
+  assert.deepEqual(errors, []);
+});
+
+test("studio: the Demo folder holds four templates and copies one without touching the current tape", { skip, timeout: 120000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await openFolders(p);
+  assert.match(await p.textContent("#studio-sheet .st-proj-list"), /示例/);
+  assert.match(await p.textContent("#studio-sheet .st-proj-list"), /我的磁带/);
+  await openDemo(p);
+  const names = await p.$$eval("#studio-sheet .st-proj-list li span", (els) => els.map((e) => e.textContent));
+  assert.deepEqual(names, ["夜色（neo-soul）", "白日流行", "When the Saints", "茉莉花"]);
+  await p.locator("#studio-sheet .st-sheet-close").click();       /* folder -> folders */
+  await p.waitForSelector("#studio-sheet .st-proj-list");
+  await p.locator("#studio-sheet .st-sheet-close").click();
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+
+  await useTemplate(p, "When the Saints");
+  assert.match(await p.textContent("#studio-bpm"), /104 BPM/);
+  await p.click('#studio-screens .st-scr[data-screen="song"]');
+  await skipScreenTour(p);
+  assert.equal(await p.locator(".st-chain-cell").count(), 64, "the Saints arrangement is 64 bars");
+  assert.match(await p.textContent("#studio-song-info"), /64 格 · 2:2\d/);
+  const letters = await p.$$eval(".st-chain-cell", (els) => els.map((e) => e.textContent));
+  assert.equal(letters.slice(0, 8).join(""), "ABCDEFGH", "the first four-bar phrase is its own row");
+  assert.equal(await p.locator(".st-chain-cell.same").count(), 3, "the selected pattern marks its three repeats");
+
+  await useTemplate(p, "茉莉花");
+  assert.match(await p.textContent("#studio-bpm"), /84 BPM/);
+  await p.click('#studio-screens .st-scr[data-screen="song"]');
+  await skipScreenTour(p);
+  assert.equal(await p.locator(".st-chain-cell").count(), 64);
+  assert.match(await p.textContent("#studio-song-info"), /64 格 · 3:0\d/);
+  assert.deepEqual(errors, []);
+});
+
+test("studio: folders can be made, renamed and deleted, and their tapes return to My tapes", { skip, timeout: 120000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await openFolders(p);
+  await p.locator("#studio-sheet .st-proj-actions li", { hasText: "新文件夹" }).click();
+  await p.waitForSelector("#studio-sheet .st-name");
+  await p.fill("#studio-sheet .st-name", "Ideas");
+  await p.locator("#studio-sheet .st-sheet-btn", { hasText: "确认" }).click();
+  await p.waitForSelector("#studio-sheet .st-proj-list");
+  assert.match(await p.textContent("#studio-sheet .sheet-title"), /Ideas/);
+  await p.locator("#studio-sheet .st-proj-actions li", { hasText: "新磁带" }).click();
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  await openFolders(p);
+  assert.match(await p.textContent("#studio-sheet .st-proj-list"), /Ideas\s*1/);
+
+  await p.locator("#studio-sheet .st-proj-list li", { hasText: "Ideas" }).click();
+  await p.waitForSelector("#studio-sheet .st-proj-list");
+  await p.locator("#studio-sheet .st-proj-actions li", { hasText: "改名文件夹" }).click();
+  await p.waitForSelector("#studio-sheet .st-name");
+  await p.fill("#studio-sheet .st-name", "Songs");
+  await p.locator("#studio-sheet .st-sheet-btn", { hasText: "确认" }).click();
+  await p.waitForSelector("#studio-sheet .st-proj-list");
+  assert.match(await p.textContent("#studio-sheet .sheet-title"), /Songs/);
+  await p.locator("#studio-sheet .st-proj-actions li", { hasText: "删掉文件夹" }).click();
+  await p.waitForSelector("#studio-sheet .st-ask");
+  await p.locator("#studio-sheet .st-ask .btn", { hasText: "删掉" }).click();
+  await p.waitForSelector("#studio-sheet .st-proj-list");
+  assert.doesNotMatch(await p.textContent("#studio-sheet .st-proj-list"), /Songs/);
+  assert.match(await p.textContent("#studio-sheet .st-proj-list"), /我的磁带\s*2/, "the tape moved back to My tapes");
   assert.deepEqual(errors, []);
 });

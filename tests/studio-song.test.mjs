@@ -1322,7 +1322,7 @@ test("clearTrack and setTrackMix: the arrangement and mixer helpers", () => {
   assert.equal(S.setTrackMix(fresh(), "nope", { vol: 0.5 }).tracks[0].vol, 1);
 });
 
-test("popSong: C major, 96 BPM, straight, a 26-bar I-V-vi-IV band sketch", () => {
+test("popSong: C major, 96 BPM, straight, a 64-bar I-V-vi-IV band sketch", () => {
   const s = S.popSong(1234);
   assert.equal(S.validate(s).error, undefined);
   assert.equal(s.name, "白日流行");
@@ -1333,8 +1333,8 @@ test("popSong: C major, 96 BPM, straight, a 26-bar I-V-vi-IV band sketch", () =>
   assert.equal(s.tape, 1);
   assert.equal(s.kit, "soft");
   assert.equal(s.patterns.length, 10);
-  assert.equal(s.song.length, 26);
-  assert.deepEqual(plain(s.song.slice(0, 8)), [8, 0, 1, 2, 3, 0, 1, 2]);
+  assert.equal(s.song.length, 64);
+  assert.deepEqual(plain(s.song.slice(0, 8)), [8, 8, 8, 8, 0, 1, 2, 3]);
   // the four chord roots of the verse and chorus, one per bar
   for (const p of [0, 1, 2, 3, 4, 5, 6, 7]) {
     const c = s.patterns[p].notes.chords;
@@ -1403,4 +1403,52 @@ test("fromDraft: a bad shape is refused instead of half-built", () => {
   }
   assert.ok(S.fromDraft(null).error);
   assert.ok(S.fromDraft({ patterns: [{ drums: "x" }] }).error);
+});
+
+/* ---------- 12.17: folders and the two public-domain tunes ---------- */
+
+test("newSong and validate: a tape has an optional folder, old tapes read as the default folder", () => {
+  const song = S.newSong(1);
+  assert.equal(song.folder, "");
+  assert.equal(S.validate(song).error, undefined);
+  const old = fresh();
+  delete old.folder;
+  const read = S.validate(old);
+  assert.equal(read.error, undefined);
+  assert.equal(read.song.folder, "");
+  assert.equal(broken((s) => { s.folder = 7; }).error, "folder");
+  assert.equal(broken((s) => { s.folder = "x".repeat(41); }).error, "folder");
+  assert.equal(broken((s) => { s.folder = "Ideas"; }).error, undefined);
+});
+
+test("saintsSong and jasmineSong: two 64-bar, 16-pattern public-domain arrangements", () => {
+  for (const [make, name, bpm] of [[S.saintsSong, "When the Saints", 104], [S.jasmineSong, "茉莉花", 84]]) {
+    const s = make(1234);
+    assert.equal(S.validate(s).error, undefined);
+    assert.equal(s.name, name);
+    assert.equal(s.bpm, bpm);
+    assert.equal(s.key, 0);
+    assert.equal(s.scale, "major");
+    assert.equal(s.patterns.length, 16);
+    assert.equal(s.song.length, 64, "64 one-bar slots is a normal 2.5-3 minute song");
+    assert.deepEqual(plain(s.song.slice(0, 16)), [0,1,2,3,4,5,6,7,0,1,2,3,4,5,6,7]);
+    assert.deepEqual(plain(s.song.slice(16, 24)), [8,9,10,11,12,13,14,15], "the chorus is the second group of eight");
+    // both halves have a melody, chords and bass; the chorus melody is an octave up
+    assert.ok(s.patterns[0].notes.melody.length > 0);
+    assert.ok(s.patterns[0].notes.chords.length > 0);
+    assert.ok(s.patterns[0].notes.bass.length > 0);
+    assert.ok(s.patterns[8].notes.melody.length > 0);
+    assert.ok(s.patterns[8].notes.melody[0].deg >= s.patterns[0].notes.melody[0].deg, "the chorus is not lower");
+    // every note is tied and inside its bar
+    for (const p of s.patterns) {
+      for (const track of ["bass", "chords", "melody"]) {
+        const list = p.notes[track];
+        for (let i = 0; i < list.length; i++) {
+          assert.ok(list[i].t >= 0 && list[i].t < S.STEPS * S.STEP);
+          if (i + 1 < list.length) assert.equal(list[i].len, list[i + 1].t - list[i].t);
+        }
+      }
+      for (const h of p.notes.drums) assert.equal(h.t % S.STEP, 0);
+    }
+  }
 });

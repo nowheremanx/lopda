@@ -135,7 +135,7 @@ var DEMO_SONG={
 };
 
 /* The straight pop example (12.15): C major, 96 BPM, no swing, I-V-vi-IV. A short intro, two verses, two choruses,
-   a last verse and chorus, then an outro: 26 bars, about 65 seconds. It is the answer to "can this machine make an
+   a last verse and chorus, then an outro: 64 bars, about 2 minutes 40 seconds. It is the answer to "can this machine make an
    ordinary pop backing?" - a four-piece band sketch, not a production. */
 var POP_VERSE={
   kick:[1,[3,0.82]], snare:[2,4], perc:[],
@@ -181,8 +181,9 @@ var POP_SONG={
     /* J: outro, chords and bass only */
     {drums:POP_EMPTY_DRUMS, chords:[[1,0,0.65]], bass:[[1,0],[9,0]], melody:[]}
   ],
-  /* intro, verse, verse, chorus, chorus, verse, chorus, outro: 26 bars */
-  song:[8, 0,1,2,3, 0,1,2,3, 4,5,6,7, 4,5,6,7, 0,1,2,3, 4,5,6,7, 9]
+  /* a four-bar intro, verse x4, chorus x4, verse x4, chorus x2, a four-bar outro: 64 bars, about 2:40 */
+  song:[8,8,8,8, 0,1,2,3, 0,1,2,3, 0,1,2,3, 0,1,2,3, 4,5,6,7, 4,5,6,7, 4,5,6,7, 4,5,6,7,
+        0,1,2,3, 0,1,2,3, 0,1,2,3, 0,1,2,3, 4,5,6,7, 4,5,6,7, 9,9,9,9]
 };
 
 
@@ -271,7 +272,7 @@ function newSong(now){
   var tracks=[];
   for(var i=0;i<TRACKS.length;i++) tracks.push({id:TRACKS[i].id, kind:TRACKS[i].kind, vol:TRACKS[i].vol, mute:TRACKS[i].mute});
   return {
-    v:V, name:"", bpm:BPM_DEFAULT, key:9, scale:"minor-penta", swing:SWING_DEFAULT, tape:2, kit:"soft",
+    v:V, name:"", folder:"", bpm:BPM_DEFAULT, key:9, scale:"minor-penta", swing:SWING_DEFAULT, tape:2, kit:"soft",
     tracks:tracks,
     patterns:[{len:STEPS, notes:{drums:demoNames(), bass:demoTrack(DEMO_BASS), chords:demoTrack(DEMO_CHORDS), melody:[]}}],
     song:[0], clips:[], updated:now||0
@@ -461,6 +462,7 @@ function check(x){
   if(!Array.isArray(x.clips)) return {error:"clips"};
   /* code points, not UTF-16 units; the length check first keeps a huge string from being copied into an array */
   if(typeof x.name!=="string" || x.name.length>NAME_MAX*2 || Array.from(x.name).length>NAME_MAX) return {error:"name"};
+  if(typeof x.folder!=="undefined" && (typeof x.folder!=="string" || x.folder.length>NAME_MAX*2 || Array.from(x.folder).length>NAME_MAX)) return {error:"folder"};
   if(!num(x.updated) || x.updated<0) return {error:"updated"};
 
   return {song:mixDefaults(clone(x))};
@@ -476,6 +478,7 @@ function mixDefaults(song){
     if(typeof tr.vol==="undefined") tr.vol=1;
     if(typeof tr.mute==="undefined") tr.mute=false;
   }
+  if(typeof song.folder==="undefined") song.folder="";
   return song;
 }
 
@@ -1035,16 +1038,90 @@ function chainEvents(song,chain,fromTick,toTick){
   return out;
 }
 
+
+/* ---------- two public-domain tunes, arranged for the four-track (12.17) ----------
+   "When the Saints Go Marching In" (traditional, public domain) and 茉莉花 (Jiangsu folk song, public domain).
+   These are original four-track arrangements, not copied recordings: the melody, chords, bass and drums are written
+   here so the machine can show what a normal-length song looks like in the A-P grid. Each has eight bars of verse and
+   eight bars of a fuller chorus, and the 64-slot chain repeats them four times (about 2.5 and 3 minutes). */
+var TUNE_VERSE={
+  kick:[1,[3,0.8]], snare:[2,4], perc:[],
+  hat:[[1,0.38],[3,0.3],[5,0.38],[7,0.3],[9,0.38],[11,0.3],[13,0.38],[15,0.3]],
+  vel:{kick:0.85,snare:0.85,hat:0.38,perc:0.3}
+};
+var TUNE_CHORUS={
+  kick:[1,[3,0.9],[7,0.55]], snare:[2,4,[10,0.2]],
+  hat:[[1,0.45],[3,0.35],[5,0.45],[7,0.35],[9,0.45],[11,0.35],[13,0.45],[15,0.35]],
+  perc:[[4,0.3],[12,0.3]], vel:{kick:0.88,snare:0.88,hat:0.42,perc:0.32}
+};
+
+var SAINTS_SPEC={
+  name:"When the Saints", bpm:104, key:0, scale:"major", swing:0.5, tape:1, kit:"soft", octave:7,
+  verseDrums:TUNE_VERSE, chorusDrums:TUNE_CHORUS,
+  bars:[
+    {chords:[[0,0,0.65]], bass:[[0,0],[8,0]], melody:[[0,0],[2,2],[4,3],[6,4]]},
+    {chords:[[0,0,0.65]], bass:[[0,0],[8,0]], melody:[[0,4]]},
+    {chords:[[0,0,0.65]], bass:[[0,0],[8,0]], melody:[[0,0],[2,2],[4,3],[6,4]]},
+    {chords:[[0,0,0.65]], bass:[[0,0],[8,0]], melody:[[0,4]]},
+    {chords:[[0,0,0.65]], bass:[[0,0],[8,0]], melody:[[0,0],[2,2],[4,3],[6,4]]},
+    {chords:[[0,0,0.65]], bass:[[0,0],[8,0]], melody:[[0,4]]},
+    {chords:[[0,4,0.65]], bass:[[0,4],[8,4]], melody:[[0,2],[4,0],[8,2],[12,1]]},
+    {chords:[[0,0,0.65]], bass:[[0,0],[8,0]], melody:[[0,0]]}
+  ]
+};
+var JASMINE_SPEC={
+  name:"茉莉花", bpm:84, key:0, scale:"major", swing:0.5, tape:2, kit:"soft", octave:7,
+  verseDrums:TUNE_VERSE, chorusDrums:TUNE_CHORUS,
+  bars:[
+    {chords:[[0,0,0.65]], bass:[[0,0],[8,0]], melody:[[0,2],[2,2],[4,4],[6,5],[8,7],[10,7],[12,5],[14,4]]},
+    {chords:[[0,5,0.65]], bass:[[0,5],[8,5]], melody:[[0,2],[2,2],[4,4],[6,5],[8,7],[10,7],[12,5],[14,4]]},
+    {chords:[[0,3,0.65]], bass:[[0,3],[8,3]], melody:[[0,4],[2,5],[4,7],[6,5],[8,4],[10,2]]},
+    {chords:[[0,4,0.65]], bass:[[0,4],[8,4]], melody:[[0,1],[2,2],[4,4],[6,2],[8,1],[10,0]]},
+    {chords:[[0,0,0.65]], bass:[[0,0],[8,0]], melody:[[0,2],[2,4],[4,5],[6,7],[8,5],[10,4]]},
+    {chords:[[0,5,0.65]], bass:[[0,5],[8,5]], melody:[[0,2],[2,4],[4,5],[6,7],[8,5],[10,4]]},
+    {chords:[[0,3,0.65]], bass:[[0,3],[8,3]], melody:[[0,1],[2,2],[4,4],[6,2],[8,1],[10,0]]},
+    {chords:[[0,0,0.65]], bass:[[0,0],[8,0]], melody:[[0,0],[8,4]]}
+  ]
+};
+
+/* one builder for the two tunes: eight bars of verse, eight of chorus (the same bars, melody up an octave and a
+   fuller drum pattern), then the 64-slot chain verse verse chorus chorus verse verse chorus chorus. */
+function tuneOne(pairs){
+  var out=[], i;
+  for(i=0;i<pairs.length;i++) out.push([pairs[i][0]+1,pairs[i][1],pairs[i][2]]);
+  return out;
+}
+function tuneSong(now,spec){
+  var song=newSong(now), i, j, bar, chorus, mel, d;
+  song.name=spec.name; song.bpm=spec.bpm; song.key=spec.key; song.scale=spec.scale;
+  song.swing=spec.swing; song.tape=spec.tape; song.kit=spec.kit;
+  song.patterns=[];
+  for(i=0;i<16;i++){
+    bar=spec.bars[i%8]; chorus=i>=8; mel=[];
+    for(j=0;j<bar.melody.length;j++){
+      mel.push([bar.melody[j][0],bar.melody[j][1]+(chorus?spec.octave:0),bar.melody[j][2]==null?NOTE_VEL:bar.melody[j][2]]);
+    }
+    d={drums:chorus?spec.chorusDrums:spec.verseDrums, chords:bar.chords, bass:bar.bass, melody:mel};
+    song.patterns.push({len:STEPS,notes:{drums:drumNotes(d.drums),bass:demoTrack(tuneOne(d.bass)),chords:demoTrack(tuneOne(d.chords)),melody:demoTrack(tuneOne(d.melody))}});
+  }
+  song.song=[];
+  var order=[0,0,1,1,0,0,1,1];                                     /* verse, verse, chorus, chorus, ... */
+  for(i=0;i<order.length;i++) for(j=0;j<8;j++) song.song.push(order[i]*8+j);
+  return song;
+}
+function saintsSong(now){ return tuneSong(now,SAINTS_SPEC); }
+function jasmineSong(now){ return tuneSong(now,JASMINE_SPEC); }
+
 window.LopdaSong={
   V:V, TPB:TPB, STEP:STEP, STEPS:STEPS,
   BPM_MIN:BPM_MIN, BPM_MAX:BPM_MAX, BPM_DEFAULT:BPM_DEFAULT, BPM_STEP:BPM_STEP,
   DRUMS:DRUMS, KITS:KITS, KINDS:KINDS, TRACKS:TRACKS, SCALES:SCALES, PARENT:PARENT, DEMO:DEMO,
   DEMO_BASS:DEMO_BASS, DEMO_CHORDS:DEMO_CHORDS, DEMO_SONG:DEMO_SONG,
-  POP_SONG:POP_SONG,
+  POP_SONG:POP_SONG, SAINTS_SPEC:SAINTS_SPEC, JASMINE_SPEC:JASMINE_SPEC,
   SOUND:SOUND, NOTE_VEL:NOTE_VEL, REST_VEL:REST_VEL, CHORD_STEPS:CHORD_STEPS, NAMES:NAMES,
   SWING_MIN:SWING_MIN, SWING_MAX:SWING_MAX, SWING_DEFAULT:SWING_DEFAULT,
   TAPE_MAX:TAPE_MAX, PATTERNS_MAX:PATTERNS_MAX, SONG_MAX:SONG_MAX, NAME_MAX:NAME_MAX,
-  newSong:newSong, demoSong:demoSong, popSong:popSong, fromDraft:fromDraft, validate:validate, has:has, toggle:toggle,
+  newSong:newSong, demoSong:demoSong, popSong:popSong, saintsSong:saintsSong, jasmineSong:jasmineSong, fromDraft:fromDraft, validate:validate, has:has, toggle:toggle,
   setDrum:setDrum, clearTrack:clearTrack, setTrackMix:setTrackMix,
   swingTicks:swingTicks, events:events, ticksToSec:ticksToSec,
   degreeToMidi:degreeToMidi, clampBpm:clampBpm,
