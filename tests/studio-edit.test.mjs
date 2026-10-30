@@ -118,6 +118,31 @@ test("apply: a replaceSong is validated and becomes the new song", () => {
   assert.equal(S.validate(r.song).error, undefined);
 });
 
+test("apply: setChain replaces the whole chain and creates the patterns it names", () => {
+  let r = apply(fresh(), [{ op: "setChain", song: [0, 2, 2, 5] }]);
+  assert.equal(r.error, undefined);
+  assert.deepEqual(plain(r.song.song), [0, 2, 2, 5]);
+  assert.ok(r.song.patterns[2], "pattern C exists");
+  assert.ok(r.song.patterns[5], "pattern F exists");
+  assert.equal(r.song.patterns[0].notes.bass.length, S.newSong(1).patterns[0].notes.bass.length, "an existing pattern is kept");
+  assert.deepEqual(plain(r.song.patterns[5].notes), { drums: [], bass: [], chords: [], melody: [] });
+  assert.equal(S.validate(r.song).error, undefined);
+  const empty = Array(96).fill(0);
+  r = apply(fresh(), [{ op: "setChain", song: empty }]);
+  assert.equal(r.error, undefined, "96 slots are allowed");
+  assert.equal(r.song.song.length, 96);
+});
+
+test("apply: setChain refuses an empty, long, out-of-range or non-integer chain", () => {
+  assert.equal(apply(fresh(), [{ op: "setChain", song: [] }]).error, "value");
+  assert.equal(apply(fresh(), [{ op: "setChain", song: Array(97).fill(0) }]).error, "value");
+  assert.equal(apply(fresh(), [{ op: "setChain", song: [0, 16] }]).error, "value");
+  assert.equal(apply(fresh(), [{ op: "setChain", song: [0, -1] }]).error, "value");
+  assert.equal(apply(fresh(), [{ op: "setChain", song: [0, 1.5] }]).error, "value");
+  assert.equal(apply(fresh(), [{ op: "setChain", song: "0" }]).error, "value");
+  assert.equal(apply(fresh(), [{ op: "setBpm", value: 90 }, { op: "setChain", song: [0, 16] }]).at, 1);
+});
+
 test("apply: unknown ops, a non-array and malformed values are refused", () => {
   assert.equal(apply(fresh(), "nope").error, "ops");
   assert.equal(apply(fresh(), [{ op: "nope" }]).error, "unknown");
