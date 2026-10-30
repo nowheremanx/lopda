@@ -20,7 +20,7 @@
  */
 (function(){
 "use strict";
-var AI=window.LopdaStudioAI, P=window.LopdaStudioPrompts, ST=window.LopdaStudioStyles,
+var TH=window.LopdaStudioTheory, AI=window.LopdaStudioAI, P=window.LopdaStudioPrompts, ST=window.LopdaStudioStyles,
     T=window.LopdaStudioTools, E=window.LopdaStudioEdit, S=window.LopdaSong;
 
 var MAX_RETRY=2, MAX_TURNS=5, CHORD_STYLES=["triad","seventh","rich"];
@@ -173,8 +173,23 @@ function applyWhy(a,ops){
   return what+(op ? " in operation "+(a.at+1)+" "+JSON.stringify(op).slice(0,120) : "")+(a.detail ? " ("+a.detail+")" : "");
 }
 
+/* The harmony check over the patterns some operations touched: "" when they stay in the key (12.20.9). A key or
+   scale change re-reads every pattern, since it moves every chord. */
+function keyIssues(song,ops){
+  if(!TH) return "";
+  var ps=[], seen={}, i, o, all=false, why;
+  for(i=0;i<ops.length;i++){
+    o=ops[i];
+    if(o.op==="setKey" || o.op==="setScale") all=true;
+    if(int(o.pattern) && !seen["$"+o.pattern]){ seen["$"+o.pattern]=true; ps.push(o.pattern); }
+    if(o.op==="copyPattern" && int(o.to) && !seen["$"+o.to]){ seen["$"+o.to]=true; ps.push(o.to); }
+  }
+  why=TH.songIssues(song,all ? null : ps);
+  return why.length ? why.slice(0,3).join("; ") : "";
+}
+
 /* ---------- the plan ---------- */
-function planCheck(obj,cards){
+function planCheck(obj,cards,rolls){
   var bpm, sections, order, seen={}, lens={}, total=0, chain=0, seconds;
   var i, j, s, id, e, used={};
   if(!plain(obj)) return {error:"reply with one JSON object"};
@@ -211,6 +226,12 @@ function planCheck(obj,cards){
     for(j=0;j<s.chords.length;j++){
       var cr=T.run(S.newSong(0),{tool:"chords",pattern:0,roots:[s.chords[j]]});
       if(cr.error) return {error:"section '"+id+"' bar "+(j+1)+": "+cr.error};
+      /* a chord off the key is refused with the chords this key does allow (12.20.9) */
+      if(TH && rolls && plain(s.chords[j]) && int(obj.card) && rolls[obj.card-1]){
+        var ks={key:obj.key!=null ? obj.key : rolls[obj.card-1].key, scale:obj.scale||rolls[obj.card-1].scale};
+        var why=TH.chordIssue(ks,s.chords[j].root,s.chords[j].q,s.chords[j].acc);
+        if(why) return {error:"section '"+id+"' bar "+(j+1)+": "+why};
+      }
     }
     if(s.drums!=null && s.groove==null){
       var tried=T.run(S.newSong(0),{tool:"groove",pattern:0,steps:s.drums});
@@ -398,7 +419,17 @@ function melodyRun(c,song,plan,roll,text,onStage){
       keyName:S.NAMES[roll.key], scale:roll.scale, bpm:song.bpm,
       section:s.id, place:place, bars:bars, before:written.join("; ")
     });
-    return step(c,msgs,function(obj){ return melodyCheck(obj,bars); },"melody").then(function(ans){
+    return step(c,msgs,function(obj){
+      var r=melodyCheck(obj,bars), tried=song, k, why=[];
+      if(r.error || !TH) return r;
+      /* the notes off the scale must belong to the chord or pass between neighbours (12.20.9) */
+      for(k=0;k<r.value.length;k++){
+        var tr=T.run(tried,{tool:"melody",pattern:s.patterns[k],notes:r.value[k]}), ap=tr.error ? null : E.apply(tried,tr.ops);
+        if(ap && ap.song){ tried=ap.song; why=why.concat(TH.patternIssues(tried,s.patterns[k])); }
+      }
+      if(why.length) return {error:why.slice(0,3).join("; ").replace(/pattern [A-P] /g,"bar ")};
+      return r;
+    },"melody").then(function(ans){
       var notes=ans.value, i;
       for(i=0;i<notes.length;i++)
         song=applyTool(song,{tool:"melody",pattern:s.patterns[i],notes:notes[i]});
@@ -429,6 +460,8 @@ function listenCheck(obj,song){
     a=E.apply(work,r.ops);
     if(!a.song)
       return {error:"call "+(i+1)+" ("+call.tool+") did not apply: "+applyWhy(a,r.ops)};
+    var off=keyIssues(a.song,r.ops);
+    if(off) return {error:"call "+(i+1)+" ("+call.tool+"): "+off};
     work=a.song;
   }
   return {value:{reply:obj.reply.trim(),song:work}};
@@ -454,7 +487,7 @@ function skeleton(o){
       }),
       allGrooves:Object.keys(ST.GROOVES), allBass:Object.keys(ST.BASS)
     });
-    return step(c,planMsgs,function(obj){ return planCheck(obj,rolls.length); },"plan").then(function(ans){
+    return step(c,planMsgs,function(obj){ return planCheck(obj,rolls.length,rolls); },"plan").then(function(ans){
       var plan=ans.value, song;
       roll=rolls[plan.card-1];
       if(plan.scale) roll.scale=plan.scale;
@@ -514,6 +547,12 @@ function runCalls(song,calls){
     a=E.apply(work,r.ops);
     if(!a.song){
       lines.push(n+" error: "+call.tool+" did not apply: "+applyWhy(a,r.ops));
+      failed=true;
+      continue;
+    }
+    var off=keyIssues(a.song,r.ops);
+    if(off){
+      lines.push(n+" error: "+off);
       failed=true;
       continue;
     }

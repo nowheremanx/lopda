@@ -223,7 +223,9 @@ function chordTable(song){
     out.push(d+" = "+(n ? n.name : "?"));
   }
   return "Chords of "+S.NAMES[song.key]+" "+song.scale+" (degree = the scale's own chord): "+out.join(", ")+
-    ". Writing q changes the chord: only do it on purpose (a borrowed chord, a seventh), never to guess the scale's chord.";
+    ". Writing q changes the chord: only do it on purpose (a borrowed chord, a seventh), never to guess the scale's chord."+
+    (window.LopdaStudioTheory ? " Borrowed chords that sound right in this key: "+window.LopdaStudioTheory.borrowedText(song)+
+    ". Other chords off the key, and melody notes off the scale that are neither a chord tone nor a step between neighbours, are refused." : "");
 }
 
 function reject(reason){
