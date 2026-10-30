@@ -105,6 +105,9 @@ var BASS={
   octaves:[[0,0.85,"root"],[4,0.7,"octave"],[8,0.8,"root"],[12,0.7,"octave"]],
   walk:[[0,0.85,"root"],[4,0.7,"fifth"],[8,0.75,"octave"],[12,0.65,"approach"]],
   boom:[[0,0.9,"root"],[8,0.8,"fifth"]],
+  /* broken chords for keyboard-like and classical pieces: the left hand of a sonatina, a rising arpeggio */
+  alberti:[[0,0.8,"root"],[2,0.55,"fifth"],[4,0.65,"third"],[6,0.55,"fifth"],[8,0.75,"root"],[10,0.55,"fifth"],[12,0.65,"third"],[14,0.55,"fifth"]],
+  arpeggio:[[0,0.8,"root"],[4,0.65,"third"],[8,0.7,"fifth"],[12,0.65,"octave"]],
   "boom-walk":[[0,0.9,"root"],[4,0.65,"fifth"],[8,0.85,"root"],[12,0.65,"approach"]],
   syncopated:[[0,0.85,"root"],[3,0.6,"root"],[6,0.7,"fifth"],[8,0.8,"root"],[11,0.6,"octave"],[14,0.65,"approach"]]
 };
