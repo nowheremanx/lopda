@@ -197,7 +197,7 @@ function exporter({ coarse = false, share } = {}) {
     matchMedia: () => ({ matches: coarse }),
     setTimeout: (fn) => fn(),
   });
-  return { save: P.downloads.save, clicked, revoked };
+  return { save: P.downloads.save, saveAll: P.downloads.saveAll, clicked, revoked };
 }
 
 test("on desktop, save() downloads the file", async () => {
@@ -228,6 +228,29 @@ test("a dismissed share sheet is 'declined', other failures 'unavailable'", asyn
   const fail = (name) => () => Promise.reject(Object.assign(new Error(name), { name }));
   await assert.rejects(exporter({ coarse: true, share: fail("AbortError") }).save({ filename: "a.txt", data: "x" }), (e) => e.code === "declined");
   await assert.rejects(exporter({ coarse: true, share: fail("DataError") }).save({ filename: "a.txt", data: "x" }), (e) => e.code === "unavailable");
+});
+
+test("on a phone, saveAll() shares every file in one sheet", async () => {
+  const shared = [];
+  const x = exporter({ coarse: true, share: (d) => { shared.push(d); return Promise.resolve(); } });
+  assert.deepEqual(plain(await x.saveAll([{ filename: "01.jpg", data: "a" }, { filename: "02.jpg", data: "b" }])), { status: "saved" });
+  assert.equal(shared.length, 1, "one share sheet, not one per file");
+  assert.deepEqual(Array.from(shared[0].files, (f) => f.name), ["01.jpg", "02.jpg"]);
+  assert.deepEqual(Object.keys(shared[0]), ["files"]);
+  assert.equal(x.clicked.length, 0);
+});
+
+test("on desktop, saveAll() downloads each file", async () => {
+  const x = exporter();
+  assert.deepEqual(plain(await x.saveAll([{ filename: "01.jpg", data: "a" }, { filename: "02.jpg", data: "b" }])), { status: "saved" });
+  assert.deepEqual(x.clicked.map((c) => c.download), ["01.jpg", "02.jpg"]);
+});
+
+test("saveAll() rejects an empty list or a request without a name or data", async () => {
+  const x = exporter();
+  for (const list of [null, [], [{ filename: "a.jpg" }], [{ data: "x" }], [{ filename: "a.jpg", data: "x" }, {}]]) {
+    await assert.rejects(x.saveAll(list), (e) => e.code === "bad_request");
+  }
 });
 
 test("files: binary values round-trip in their own database, apart from the documents", async () => {
