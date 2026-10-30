@@ -77,7 +77,7 @@ function one(song,op,at){
       if(S.KITS.indexOf(op.value)<0) return fail("value",at);
       song.kit=op.value; return {song:song};
     case "setTrackVolume":
-      if(ALL_TRACKS.indexOf(op.track)<0 || !num(op.value)) return fail("track",at);
+      if(ALL_TRACKS.indexOf(op.track)<0 || !num(op.value) || !trackOf(song,op.track)) return fail("track",at);
       return mix(song,op.track,{vol:op.value},at);
     case "trackVol":
       if(ALL_TRACKS.indexOf(op.track)<0 || !num(op.delta)) return fail("track",at);
@@ -85,7 +85,7 @@ function one(song,op,at){
       if(!tr) return fail("track",at);
       return mix(song,op.track,{vol:clamp((typeof tr.vol==="number"?tr.vol:1)+op.delta,0,1)},at);
     case "setTrackMute":
-      if(ALL_TRACKS.indexOf(op.track)<0 || typeof op.mute!=="boolean") return fail("track",at);
+      if(ALL_TRACKS.indexOf(op.track)<0 || typeof op.mute!=="boolean" || !trackOf(song,op.track)) return fail("track",at);
       return mix(song,op.track,{mute:op.mute},at);
     case "setDrum":
       if(!int(op.pattern) || op.pattern<0 || op.pattern>=S.PATTERNS_MAX || S.DRUMS.indexOf(op.drum)<0 ||

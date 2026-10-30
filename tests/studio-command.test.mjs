@@ -54,6 +54,13 @@ test("parse: a sentence with several clear moves becomes several ops", () => {
   assert.deepEqual(r.ops.map((o) => o.op), ["trackVol", "setBpm", "swing", "setKey", "setScale"]);
 });
 
+test("parse: a per-section ask is left for the model, not applied to every bar", () => {
+  assert.equal(ops("副歌鼓轻一点"), null);
+  assert.equal(ops("A段贝斯小一点"), null);
+  assert.deepEqual(ops("AB段更摇摆").ops, [{ op: "swing", delta: 0.02 }]);
+  assert.deepEqual(ops("清空B段旋律").ops, [{ op: "clearTrack", pattern: 1, track: "melody" }]);
+});
+
 test("parse: unrelated text is not a command", () => {
   assert.equal(ops("今天天气不错"), null);
   assert.equal(ops(""), null);
