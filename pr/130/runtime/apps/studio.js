@@ -1802,7 +1802,7 @@ function renderSheet(){
     if(T.song && T.loaded) sheetRow(ul,tr("studio.export"),"WAV",function(){ exportWav(); });
     if(T.loaded) sheetRow(ul,tr("studio.workspace.export"),"ZIP",function(){ exportWorkspace(); });
     if(T.loaded) sheetRow(ul,tr("studio.workspace.import"),"ZIP",function(){ $("studio-import-file").click(); });
-    if(T.loaded) sheetRow(ul,tr("studio.new"),"",function(){ openSheet("new"); });
+    if(T.loaded) sheetRow(ul,tr("studio.clear.tape"),"",function(){ openSheet("new"); });
     if(T.loaded) sheetRow(ul,tr("studio.demo"),"",function(){ openSheet("demo"); });
     if(T.loaded) sheetRow(ul,tr("studio.pop"),"",function(){ openSheet("pop"); });
     /* no chin pad here, so the way out of the menu has to be on screen */
