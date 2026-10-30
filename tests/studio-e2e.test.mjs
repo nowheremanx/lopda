@@ -3282,16 +3282,32 @@ test("studio: quick AI commands work with no key, and an AI reply is previewed a
   await p.locator("#studio-sheet .st-sheet-btn", { hasText: "说" }).click();
   await p.waitForSelector("#studio-sheet", { state: "hidden" });
   assert.match(await p.textContent("#studio-bpm"), /86 BPM/, "the quick command changed the tempo");
+  assert.match(await p.textContent("#toast"), /本地/, "the quick command says it was done locally");
 
+  /* the harness' first ask is held open: the sheet shows the stage and the link line, and a signal flips the mark */
   await p.evaluate(() => {
     LP.ai.on = () => true;
-    LP.ai.ask = () => Promise.resolve('{"reply":"改到 100","ops":[{"op":"setBpm","value":100}]}');
+    window.__aiSignal = null;
+    LP.ai.ask = (o) => {
+      window.__aiSignal = o.onSignal;
+      return new Promise((resolve) => { window.__aiResolve = resolve; });
+    };
   });
   await p.click("#studio-menu");
   await p.locator("#studio-sheet .lcd-menu li", { hasText: "让 AI 改" }).click();
   await p.waitForSelector("#studio-ai-input");
   await p.fill("#studio-ai-input", "改成 100");
   await p.locator("#studio-sheet .st-sheet-btn", { hasText: "说" }).click();
+  await p.waitForFunction(() => /看谱子|轮/.test((document.querySelector("#studio-ai-stage") || {}).textContent || ""));
+  const link1 = await p.textContent("#studio-ai-link");
+  assert.match(link1, /^[▮▯] /, "the link line starts with the mark");
+  assert.equal(await p.isDisabled("#studio-ai-input"), true, "the input is disabled while busy");
+  assert.equal(await p.locator("#studio-sheet .st-ai-chip:disabled").count(), 3, "the chips are disabled while busy");
+  await p.evaluate(() => window.__aiSignal({ phase: "think", think: 12, text: 0 }));
+  const link2 = await p.textContent("#studio-ai-link");
+  assert.notEqual(link2[0], link1[0], "a signal flips the mark");
+  assert.match(link2, /在想/);
+  await p.evaluate(() => window.__aiResolve('{"reply":"改到 100","calls":[{"tool":"set","bpm":100}],"done":true}'));
   await p.waitForSelector("#studio-sheet .st-ai-preview");
   assert.match(await p.textContent("#studio-sheet .st-ai-reply"), /改到 100/);
   await p.locator("#studio-sheet .st-sheet-btn", { hasText: "采用并试听" }).click();
@@ -3307,15 +3323,34 @@ test("studio: an AI draft becomes a new tape and leaves the current one alone", 
   const { p, errors } = await rtPage(t);
   await studioOpen(p);
   await skipTour(p);
-  const draft = {
-    name: "AI 测试", bpm: 88, key: 9, scale: "minor", swing: 0.5, tape: 1, kit: "soft",
-    patterns: [{ drums: [[0, "kick", 1], [4, "snare", 0.9]], bass: [[0, 0, 0.8]], chords: [[0, 0, 0.65]], melody: [] }],
-    song: [0],
-  };
-  await p.evaluate((draft) => {
+  await p.evaluate(() => {
+    const plan = {
+      card: 1, name: "雨夜测试", bpm: 100,
+      sections: [
+        { id: "intro", chords: [0], groove: "lofi-a", energy: 0, bass: "whole", melody: false },
+        { id: "verse", chords: [0, 5, 3, 4], groove: "lofi-a", energy: 1, bass: "whole", melody: true },
+        { id: "chorus", chords: [3, 4, 0, 5], groove: "lofi-a", energy: 2, bass: "whole", melody: true },
+        { id: "outro", chords: [0], groove: "lofi-a", energy: 0, bass: "whole", melody: false },
+      ],
+      order: [["intro", 1], ["verse", 3], ["chorus", 3], ["verse", 2], ["chorus", 3], ["outro", 1]],
+    };
+    const melody = { bars: [
+      [[0, 0, 0.9], [4, 2, 0.7], [8, 4, 0.8], [12, 2, 0.6]],
+      [[0, 2, 0.9], [4, 4, 0.7], [8, 2, 0.8], [12, 0, 0.6]],
+      [[0, 4, 0.9], [4, 2, 0.7], [8, 0, 0.8], [12, 2, 0.6]],
+      [[0, 0, 0.9], [4, 4, 0.7], [8, 2, 0.8], [12, 0, 0.6]],
+    ] };
+    const answers = { plan: JSON.stringify(plan), melody: JSON.stringify(melody),
+      listen: JSON.stringify({ reply: "这盘磁带写好了", calls: [] }) };
     LP.ai.on = () => true;
-    LP.ai.ask = () => Promise.resolve(JSON.stringify({ reply: "给你一盘", draft }));
-  }, draft);
+    window.__aiSteps = [];
+    LP.ai.ask = (o) => {
+      const m = /TAPE4 STEP: (\w+)/.exec(o.messages[0].content);
+      const step = m ? m[1] : "";
+      window.__aiSteps.push(step);
+      return Promise.resolve(answers[step] || "{}");
+    };
+  });
   await p.click("#studio-menu");
   await p.locator("#studio-sheet .lcd-menu li", { hasText: "让 AI 改" }).click();
   await p.waitForSelector("#studio-ai-input");
@@ -3323,11 +3358,14 @@ test("studio: an AI draft becomes a new tape and leaves the current one alone", 
   await p.locator("#studio-sheet .st-sheet-btn", { hasText: "说" }).click();
   await p.waitForSelector("#studio-sheet .st-ai-preview");
   assert.match(await p.textContent("#studio-sheet .st-sheet-label"), /新磁带/);
+  assert.match(await p.textContent("#studio-sheet .st-ai-card"), /抽到风格卡.*BPM/);
+  assert.match(await p.textContent("#studio-sheet .st-ai-reply"), /这盘磁带写好了/);
+  assert.deepEqual(await p.evaluate(() => window.__aiSteps), ["plan", "melody", "melody", "listen"]);
   await p.locator("#studio-sheet .st-sheet-btn", { hasText: "采用并试听" }).click();
-  await p.waitForFunction(() => /88 BPM/.test((document.querySelector("#studio-bpm") || {}).textContent || ""));
+  await p.waitForFunction(() => /100 BPM/.test((document.querySelector("#studio-bpm") || {}).textContent || ""));
   assert.equal(await p.getAttribute("#v-studio", "data-screen"), "drums");
   await openMyTapes(p);
-  await p.waitForFunction(() => /AI 测试/.test((document.querySelector("#studio-sheet .st-proj-list") || {}).textContent || ""));
+  await p.waitForFunction(() => /雨夜测试/.test((document.querySelector("#studio-sheet .st-proj-list") || {}).textContent || ""));
   assert.equal(await p.locator("#studio-sheet .st-proj-list li").count(), 2, "the original tape is still there");
   assert.deepEqual(errors, []);
 });
@@ -3394,6 +3432,26 @@ test("studio: the guide, library, versions and AI sheets fit 331x359 with 44 px 
   await p.locator("#studio-sheet .lcd-menu li", { hasText: "让 AI 改" }).click();
   await p.waitForSelector("#studio-ai-input");
   await check("AI");
+
+  /* a job in progress: the card, the stage and the link line stay inside the screen */
+  await p.evaluate(() => {
+    LP.ai.on = () => true;
+    LP.ai.ask = () => new Promise(() => {});
+  });
+  await p.fill("#studio-ai-input", "改一下");
+  await p.locator("#studio-sheet .st-sheet-btn", { hasText: "说" }).click();
+  await p.waitForFunction(() => /[▮▯]/.test((document.querySelector("#studio-ai-link") || {}).textContent || ""));
+  await p.waitForFunction(() => /看谱子|轮/.test((document.querySelector("#studio-ai-stage") || {}).textContent || ""));
+  const spill = await p.evaluate(() => {
+    const sh = document.querySelector("#studio-sheet"), sr = sh.getBoundingClientRect(), out = [];
+    for (const e of sh.querySelectorAll("*")) {
+      const r = e.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) continue;
+      if (r.left < sr.left - 1 || r.right > sr.right + 1) out.push({ tag: e.tagName, cls: String(e.className).slice(0, 30), id: e.id });
+    }
+    return out;
+  });
+  assert.deepEqual(spill, [], "AI progress: nothing spills sideways");
   assert.deepEqual(errors, []);
 });
 

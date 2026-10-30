@@ -693,6 +693,185 @@ synth -> input -> 低通 -> 干/湿（湿路是 12 ms 延迟，0.45 Hz + 5.3 Hz 
 - 不再提供「删掉这一盘」（针对当前盘的旧操作），避免「删一盘就被推去音乐界面」。单盘删除统一走每行的「删」。
 - 数据格式仍是 v1：`template` 是可选字符串，旧磁带没有；工作区备份自然带上。
 
+## 12.19 AI 的小 harness：小模型也能写出像样的东西（owner 2026-10-30）
+
+问题（owner 在手机上看到的，2026-10-30 调查）：
+
+- 「AI 什么都没说」：一句话要模型一次写出整首歌的 JSON，回复上限只有 2000 / 4000 token；会思考的模型把额度花在思考上，正文为空或
+  被截断，屏幕上只有「AI 没回话」或「看不懂」，也不重试。
+- 等待时只有一行静态的「AI 正在想…」，看不出线路是活的（脚本页有闪烁通讯）。
+- 「来个骨架」每次都差不多：一句四个字的请求没有任何变化来源，模型每次挑最保险的答案（DeepSeek v4.1 flash 两次都是 A 小调五声、82 BPM）。
+- 「更快一点」「更摇摆」两个快捷句其实是本地规则，用户分不清哪些是 AI 做的。
+- AI 输入框的 placeholder 是浏览器默认的浅灰。
+
+做法：**模型每一步只回一小段严格定义的 JSON，本地程序负责掷骰、铺底、组装、校验和回退**。模型想多久都可以（不设小的回复上限），
+错了就把错误原因发回去让它重写。新建和修改都走这个 harness；本地快命令是其中「不用 AI」的那条路。目标：DeepSeek v4.1 flash
+这一级的模型也能给出合理的结果。存档格式不变（v1），AI 线路的设置和行为不变（`ai.js` 不改）。
+
+### 12.19.1 模块
+
+全部是 runtime/ 下的 ES5 文件（一个 IIFE，`window.LopdaXxx`，无 DOM、无 LP，Node 测试直接跑），加进 index.html 和 sw.js SHELL，
+放在 `studio-ai.js` 之后、`core.js` 之前的同一组里，顺序：`studio-styles.js`、`studio-tools.js`、`studio-prompts.js`、`studio-ai.js`、`studio-harness.js`。
+
+| 文件 | 全局名 | 内容 |
+|---|---|---|
+| `studio-styles.js` | `LopdaStudioStyles` | 风格卡、原创鼓型、贝斯节奏型、`roll(rand)` 掷骰 |
+| `studio-tools.js` | `LopdaStudioTools` | 给 AI 用的本地工具：每个工具把一个意图变成 `studio-edit.js` 的 op 列表 |
+| `studio-prompts.js` | `LopdaStudioPrompts` | 每一步的系统提示词（英文）和用户消息的拼法 |
+| `studio-ai.js`（瘦身） | `LopdaStudioAI` | `extract(text)` 取出一个 JSON 对象、`overview(song)` 给模型看的概要、`patternView(song,p)` 一段的音符 |
+| `studio-harness.js` | `LopdaStudioHarness` | 步骤执行器：调用、校验、带错误重写、进度回调、停止；骨架流水线和修改循环 |
+
+`studio-edit.js` 多一个 op：`{"op":"setChain","song":[0,0,1,1,...]}`，整条歌曲链换掉（1–96 格，每格 0–15，用到的 pattern 自动补齐空段）。
+旧的一次性 `SYSTEM` / `messages()` / `parse()` 删掉（只有 studio.js 和测试用它们）。
+
+### 12.19.2 风格卡（`studio-styles.js`，原创）
+
+- `CARDS`：16 张左右，`{id, zh, en, bpm:[lo,hi], scales:[...], swing:[lo,hi], tape:[lo,hi], kit, grooves:[ids], bass:[ids], form}`。
+  例：雨夜 lofi、晴天流行、城市夜行 neo-soul、旧唱片 boom-bap、海边 bossa 味、进行曲、游戏厅 chip、慢摇、清晨民谣……
+  中英文各一个短名（≤ 12 个字），描述情绪，不提任何真实歌曲、歌手或游戏。音阶只用七声的 `major` `minor` `dorian`
+  （和弦级数是七声的，贝斯才能准确跟根音；五声的旋律感由提示词「多用和弦音」得到）。
+- `GROOVES`：12 个左右原创鼓型，`{id, steps:{kick:[[step,vel],...], snare:..., hat:..., perc:...}}`（0 基的 16 步），带 ghost（0.2 左右）和重音。
+  energy 0/1/2 由工具推导：0 = 去掉一半 hat 和所有 perc、kick 只留强拍；1 = 原样；2 = hat 补到 16 分（偶数步 0.55、奇数步 0.3）且 perc 加在 15 步。
+- `BASS`：贝斯节奏型 id → 每小节的 `[step, vel, move]` 列表，`move` 是 `"root"`、`"fifth"`、`"octave"`、`"approach"`（下一个和弦根音下方一个音阶音）。
+  至少 `whole half pulse eighths octaves walk syncopated`。
+- `FORMS`：几种曲式，段落名 `intro verse pre chorus bridge outro`，每个 `{order:["intro","verse","chorus",...]}`。
+- `roll(rand)`：`rand` 是返回 [0,1) 的函数（UI 传 `Math.random`，测试传带种子的）。返回
+  `{card, key (0-11 随机), scale, bpm (范围内取偶数), swing (两位小数), tape, kit, grooves:[2 个], bass:[2 个], form}`。
+  key 在 12 个调里均匀随机，所以两次骨架几乎不会同调。
+
+### 12.19.3 本地工具（`studio-tools.js`）
+
+`run(song, call)` → `{ops}` | `{error:"..."}`；`call` 就是模型写的 `{"tool":"名字", ...参数}`。所有工具只产出 op，最后由
+`LopdaStudioEdit.apply` 原子校验；工具自己也查参数，错误信息是给模型看的一句英文（例如 `"groove: unknown style 'jazzz'; use one of lofi-a, ..."`）。
+
+| tool | 参数 | 做什么 |
+|---|---|---|
+| `ops` | `ops:[...]` | 直接用 12.16.3 的编辑语言（≤ 64 个） |
+| `groove` | `pattern, style, energy (0-2), fill (bool)` | 清空鼓轨再铺 `GROOVES[style]`；fill 把 12–15 步换成军鼓过门（渐强） |
+| `chords` | `pattern, roots:[1-4 个 0-5]` | 清空和弦轨；1 个在 0 步，2 个在 0/8，3 个在 0/8/12，4 个在 0/4/8/12 |
+| `bass` | `pattern, rhythm` | 读这一段的和弦轨，按 `BASS[rhythm]` 写贝斯，根音换成格子音级（见下）；没有和弦就当 I |
+| `ghost` | `pattern, amount (1-4)` | 在没有军鼓的偶数/奇数步上加 amount 个 0.2 的 ghost 军鼓，位置固定（3、11、7、14 的顺序），可复现 |
+| `fill` | `pattern` | 同 groove 的 fill，只改 12–15 步 |
+| `melody` | `pattern, notes:[[step,deg,vel],...]` | 清空旋律轨再写，≤ 16 个，step 0–15 不重复，deg -5..12 |
+| `copy` | `from, to, change` | 复制整段，change：`"same"`、`"sparse"`（去掉一半 hat、旋律只留强拍上的音）、`"no-melody"`、`"lift"`（鼓 energy +1、旋律高八度） |
+| `chain` | `song:[...]` | 即 `setChain` |
+| `set` | `bpm, key, scale, swing, tape, kit, name`（任选） | 对应的 set op |
+| `mix` | `track, vol, mute` | 对应的混音 op |
+
+根音换算 `rootDegree(song, root)`：和弦根 `root`（七声母音阶的级数）的音高类 = `key + SCALES[PARENT[scale]][root]`；
+在当前格子音阶里找同一个音高类的级数（0..n-1）；五声音阶里找不到就取比它低的最近的音阶音。`chordTones(song, root)` 给出
+这个和弦的音（根、三、五、七）在旋律格子里的级数（范围 0..9），提示词里告诉模型「强拍多用这些」。
+
+### 12.19.4 骨架流水线（新磁带）
+
+| # | 屏幕上的阶段（zh / en） | 谁做 | 内容 |
+|---|---|---|---|
+| 1 | （不显示） | 本地 | `roll(Math.random)` 掷三次，得到三张不同的卡（各自的调、音阶、速度范围、鼓型、贝斯型） |
+| 2 | AI 在定曲子的样子 / The AI is shaping the song | AI | 计划 JSON（下）：先选一张卡；之后屏幕上显示「抽到风格卡：雨夜 · D 小调 · 84 BPM」 |
+| 3 | 在铺鼓、和弦和贝斯 / Laying drums, chords and bass | 本地 | 按计划给每段分 pattern，跑 groove/chords/bass 工具，生成链 |
+| 4 | AI 在写{section}的旋律 / The AI is writing the {section} melody | AI | 每个 `melody:true` 的段一次（主歌、副歌……通常 2–3 次） |
+| 5 | AI 在试音 / The AI is listening back | AI | 看整首的概要，最多 8 个润色调用（ghost、fill、copy、ops…）和给用户的一句话 |
+| 6 | 预览 | 本地 | 和现在一样：「采用并试听 / 放弃 / 再说一句」，新磁带，当前不动 |
+
+**计划 JSON**（第 2 步模型只回这个）：
+
+```json
+{"card":1,"name":"Rain on the tram","bpm":84,"scale":"minor",
+ "sections":[
+   {"id":"intro","chords":[0,5],"groove":"lofi-a","energy":0,"bass":"whole","melody":false},
+   {"id":"verse","chords":[0,5,3,4],"groove":"lofi-a","energy":1,"bass":"pulse","melody":true},
+   {"id":"chorus","chords":[3,4,0,5],"groove":"lofi-b","energy":2,"bass":"eighths","melody":true},
+   {"id":"outro","chords":[0],"groove":"lofi-a","energy":0,"bass":"whole","melody":false}],
+ "order":[["intro",1],["verse",2],["chorus",2],["verse",1],["chorus",2],["outro",1]]}
+```
+
+- 每个段：`chords` 是每小节一个和弦根（1–4 小节），这一段占 `chords.length` 个 pattern（每小节一个）。
+- `order`：`[段 id, 重复次数 1-4]`；链 = 依次把这段的 pattern 放 `次数` 遍。
+- 本地检查（不过就把这句英文发回去重写）：段 id 唯一且在 `order` 里都出现；pattern 总数 ≤ 16；链 ≤ 96 格；
+  时长 `格数 × 240 / bpm` 秒在 100–200 秒之间（「the song is 58 s; add repeats so it is 100-200 s」）；groove/bass 在风格卡给的
+  id 或全部 id 里；chords 都是 0–5；bpm 在 60–140（风格卡范围只是建议）。
+- `card`：1–3。请求没说情绪、风格或速度（「来个骨架」）就用第 1 张，也就是骰子的选择；说了（「雨夜」「早晨散步」）就选最合适的一张。
+  这样模糊的请求每次都不一样，具体的请求也不会被骰子带偏（试验：「来个雨夜骨架」第一版只有一张卡，抽到了进行曲 D 大调）。
+- `scale` 可省：major / minor / dorian，情绪需要时可以换（雨夜→小调）。名字、bpm 可以改；调、摇摆、磁带、鼓组由卡定。
+- 时长提示「100–200 秒，最好 150 秒左右」。
+
+**旋律 JSON**（第 4 步，每段一次）：`{"bars":[[[step,deg,vel],...], ...]}`，小节数 = 这一段 `chords.length`。
+用户消息里给：风格卡的情绪、调和音阶名、这一段在曲中的位置、每小节的和弦名和和弦音级数、前面已写好的段的旋律（让副歌和主歌有对比）。
+本地检查：小节数对；每小节 1–12 个音；step 0–15 递增不重复；deg 整数 -3..10；vel 可省（0.8），0.3–1；整段不能每小节都一样。
+
+**试音 JSON**（第 5 步）：`{"reply":"给用户的一句话","calls":[...]}`，`calls` 0–8 个工具调用（同 12.19.3，不含 `chain` 和 `set`）。
+任何一个调用失败就带错误重写；`reply` 必须非空（≤ 120 个字符）。
+
+**风格请求（owner 2026-10-30：「Johnny Cash 风格」做不出来）**：原因一半在模板（没有火车节奏、没有根音-五音贝斯、AI 只能在三张随机卡里选），
+一半在 Tape4 的设定（和弦固定是电钢琴的七/九和弦长音）。这一版只改模板和 harness：
+
+- 计划可以选**全部**风格卡（卡 1 仍是骰子的选择，模糊请求用它）；点名风格、流派或歌手时选节奏最像的卡（歌手名只当作感觉的提示，不用其作品）。
+- 新的原创卡「火车节奏 / Train beat」「尘土路 / Dust road」，鼓型 `train-a`、`train-b`（军鼓轻打八分、2/4 拍重音），贝斯型 `boom`（1 拍根音、3 拍五音）、`boom-walk`。
+- 每段可选 `strum`：`hold`（默认，长音）、`stabs`（2、4 拍短和弦，后面跟休止）、`pulse`（每拍短和弦）。
+- 没有合适的鼓型时，段里可以不写 `groove`，改写一小节 `drums`（每个鼓 `[step, vel]`），本地照样检查。
+- 试验：「我想做一个 Johnny Cash 风格的音乐」两次都选了火车节奏卡、I–IV–V、`boom` 贝斯、`stabs`，0 次重写。
+- 还没做（等 owner 决定）：一盘磁带可选的「木吉他拨弦 + 三和弦」和弦风格。
+
+### 12.19.5 修改循环（改当前磁带）
+
+本地快命令先试（`studio-command.js` 不变），命中就直接改，toast 写明「本地改好」。否则：
+
+| 屏幕上的阶段 | 内容 |
+|---|---|
+| AI 在看谱子 / The AI is reading the song | 发 `overview(song)` + 请求 |
+| AI 在改 / The AI is editing（第 n 轮） | 模型回 `{"calls":[...],"done":false}` 或 `{"reply":"...","calls":[...],"done":true}` |
+| AI 在试音 / The AI is listening back | 本地检查（下）；有问题就作为一轮发回去 |
+
+- 每一轮的 `calls` 可以有 `{"tool":"read","pattern":4}`（回给它 `patternView`），其他工具在一份工作副本上依次执行。
+  回给模型的是每个调用的结果：`ok`、`error: ...` 或读到的内容。最多 5 轮；第 5 轮还没 done 就把已经成功的改动当结果。
+- `overview(song)`：设置（名字、bpm、调名、音阶、摇摆、磁带、鼓组）、混音、链（压成 `A×2 B×2 | E F G H ×2` 这样）、
+  每个用到的 pattern 一行（鼓几下其中 ghost 几下、贝斯几个音、和弦名（用 `chordName`）、旋律几个音和音域）。不发全部音符，要看就 `read`。
+- 结果：所有成功的 op 合在一起是一个预览，「N 处改动」；采用前写「AI 之前」版本，采用后一次撤销（和 12.16.4 一样）。
+- 本地检查（试音）：改完能通过 `validate`；如果请求点名了段（「副歌」），而改动没碰到任何它说的段，提醒一次（「you changed only E-G; the chorus is E-H?」）。
+
+### 12.19.6 执行器（`studio-harness.js`）
+
+```
+LopdaStudioHarness.skeleton({text, ask, rand, now, onStage}) -> job
+LopdaStudioHarness.edit({song, focus, text, ask, onStage})   -> job
+job: Promise of {reply, ops, draft (bool), song} ; job.stop()
+ask(messages) -> Promise of the answer text, with .stop()   (studio.js 传 LP.ai.ask 的包装)
+onStage({id, n, of, vars})                                    (id 是 strings.js 的键尾，如 "plan" "melody" "listen")
+```
+
+- 每一步：`ask` → `extract` 取 JSON → 这一步的检查。不通过：在 messages 后面加上模型原话（assistant）和
+  `"That JSON was rejected: <reason>. Reply with the corrected JSON only."`（user），再问；**每步最多重写 2 次**，还不行就失败
+  `{code:"unreadable", stage}`。空回答也算一次失败（原因 `"empty answer"`）。
+- 停止：`job.stop()` 停当前的 `ask`，job 以 `{code:"stopped"}` 结束，什么都不采用。
+- 不设回复上限：`ask` 不传 `max`（让模型想完写完）；`ai.js` 一分钟没信号才挂断，这一点不变。
+- 纯 JS、无 DOM：Node 测试用脚本化的假 `ask` 跑完整流水线（含重写和停止）。
+
+### 12.19.7 界面
+
+- AI 页：输入框下面一块进度：当前阶段一行（12.19.4 / 12.19.5 的白话），下面一行和脚本页一样的通讯：
+  `▮`/`▯` 每个信号翻一次 + 计时 + 「拨号中 / 已接通 / 在想（N 字）/ 在写（N 字）」 + 安静 N 秒（≥ 10 秒才显示）。
+  第 1 步的风格卡一直显示在进度上方（「雨夜 lofi · D 小调 · 84」）。生成时 `LP.keepAwake(true)`。
+- 快捷句：「更快一点」「更摇摆」旁边标「本地」，「来个骨架」标「AI」；没有 key 时点「来个骨架」仍提示先从示例磁带开始（现有行为）。
+- 生成时输入框、「说」和快捷句变灰（`--ink-2`，iOS 的半透明禁用样式去掉）；离开四轨机、关掉 AI 页、切到后台都会停掉这次生成。
+- `.st-name::placeholder{color:var(--ink-2)}`（AI 输入框和工程名输入框都用 `.st-name`）。
+- 字符串全部进 strings.js（zh/en）。
+
+### 12.19.8 测试和试验
+
+试验结果（2026-10-30，OpenCode 的 DeepSeek v4.1 flash，`tools/studio-ai-trial.mjs`）：两轮共 13 次全部成功。
+骨架 4–6 次调用、36–90 秒，每次的卡和调都不同；第二轮（三张卡 + 大白话回复）0 次重写。修改：副歌 ghost + 贝斯、整首更欢快、
+B 段去旋律都是 1–3 次调用；「改成 3/4 拍」0 处改动并说明做不到。
+
+
+- `tests/studio-styles.test.mjs`：每张卡、鼓型、贝斯型的形状；`roll` 可复现、调分布不偏。
+- `tests/studio-tools.test.mjs`：每个工具的 op、错误信息、`rootDegree`/`chordTones`（七声和五声）、`setChain`。
+- `tests/studio-harness.test.mjs`：假 `ask` 跑骨架（4–5 次调用）、计划被拒后重写、旋律小节数错、空回答、超过 2 次失败、停止；
+  修改循环的 read → ops → done、5 轮上限。
+- `tests/studio-ai.test.mjs` 改成测 `extract` / `overview` / `patternView`。
+- studio e2e：假 AI 按系统提示词里的阶段标记回答，跑完骨架预览和修改预览；331×359 下进度和通讯行不溢出。
+- `tools/studio-ai-trial.mjs`（手动，不进 `node --test`）：在 Node 里跑 harness，`ask` 通过本机的 opencode 调
+  DeepSeek v4.1 flash；每个场景跑 3 次，打印合法率、重写次数、时长、几次骨架的调/速/鼓型是否不同。
+
 ## 10. 还没定的
 
 - 程序名：暂名「四轨机」/ Tape4，owner 定。
