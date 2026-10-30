@@ -850,7 +850,9 @@ textarea::placeholder{color:var(--ink-2)}
 .st-mix-row{flex:none;display:flex;align-items:center;gap:4px;min-height:44px;border-bottom:1px solid var(--ink);box-sizing:border-box}
 .st-mix-row.muted .st-mix-name{color:var(--ink-2)}
 .st-mix-row.focus{outline:2px dashed var(--ink);outline-offset:-2px}
-.st-mix-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--f-lcd);font-size:14px}
+.st-mix-name{flex:1 1 0;min-width:0;height:44px;box-sizing:border-box;display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:1px;padding:2px 3px;background:transparent;color:var(--ink);border:2px solid var(--ink);font-family:var(--f-lcd);font-size:14px;line-height:1.1;cursor:pointer;text-align:left;overflow:hidden}
+.st-mix-track,.st-mix-voice{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.st-mix-voice{font-size:12px;line-height:1.1;color:var(--ink-2)}
 .st-mix-btn{flex:none;width:44px;height:44px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;padding:0;background:transparent;color:var(--ink);border:2px solid var(--ink);font-family:var(--f-pix);font-size:20px;line-height:1;cursor:pointer}
 .st-mix-btn:disabled{color:var(--ink-2);border-color:var(--ink-2);cursor:default}
 .st-mix-vol{flex:none;min-width:28px;text-align:center;font-family:var(--f-pix);font-size:16px;line-height:1;font-variant-numeric:tabular-nums}
