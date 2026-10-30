@@ -22,12 +22,12 @@
     ".....000000.....",
     "................"
   ],
-  "version": "1.0.0",
-  "description": "六十秒一关：摆动钩子，钩金块、躲石头，用炸药和商店挖得更深。",
+  "version": "1.1.0",
+  "description": "六十秒一关：钩金块、躲炸药，钱袋随机，商店看运气。",
   "i18n": {
     "en": {
       "name": "GOLD DIG",
-      "description": "Swing the hook, haul gold, dodge rocks. Sixty seconds a level; shop between."
+      "description": "Swing the hook, haul gold, dodge TNT. Bags roll random loot; shops vary."
     }
   },
   "author": "Haowei Wu",
