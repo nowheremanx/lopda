@@ -2204,7 +2204,7 @@ function askAi(text){
     return;
   }
   if(!LP.ai || !LP.ai.on()){
-    if(/骨架|写一首|来一首|skeleton|song idea|new song/i.test(text)) toast(tr("studio.ai.nokey.template"));
+    if(H.wantsNewSong(text,T.song)) toast(tr("studio.ai.nokey.template"));
     else toast(tr("studio.ai.nokey"));
     renderSheet();
     return;
@@ -2228,7 +2228,7 @@ function askAi(text){
       else toast(tr("studio.ai.trouble.toast"));
     });
   }
-  var job=/骨架|写一首|来一首|skeleton|song idea|new song/i.test(text)
+  var job=H.wantsNewSong(text,T.song)
     ? H.skeleton({text:text,ask:ask,onStage:onStage,onTrouble:onTrouble})
     : H.edit({song:T.song,focus:{screen:T.screen,pattern:T.pat,slot:T.slot},text:text,ask:ask,onStage:onStage,onTrouble:onTrouble});
   T.aiJob=job;

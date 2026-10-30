@@ -364,3 +364,20 @@ test("skeleton: the plan picks the sound, typed and borrowed chords and its own 
   const melodyUser = ask.seen.find((s) => s.step === "melody").messages.find((m) => m.role === "user").content;
   assert.match(melodyUser, /bar 2: chord C, chord tones/);
 });
+
+test("wantsNewSong: words of making a song, or a fresh tape, start a new song; edits stay edits", () => {
+  const fresh = S.newSong(0), demo = S.demoSong(0);
+  for (const t of ["写一个俄罗斯风格的曲子", "来个骨架", "做一首中国风的歌", "write me a sad song", "an upbeat tune for a walk", "compose something"])
+    assert.equal(H.wantsNewSong(t, demo), true, t);
+  for (const t of ["副歌的军鼓加点 ghost note", "把 B 段的旋律去掉", "make it faster", "整首更欢快一点"])
+    assert.equal(H.wantsNewSong(t, demo), false, t);
+  assert.equal(H.wantsNewSong("俄罗斯风格", fresh), true, "a fresh tape with a style word becomes a new song");
+  assert.equal(H.wantsNewSong("更快一点", fresh), false);
+});
+
+test("the edit prompt names the scale's own chords so a model does not guess Cm in A minor", () => {
+  const song = JSON.parse(JSON.stringify(S.newSong(0)));
+  song.key = 9; song.scale = "minor";
+  const text = ctx.LopdaStudioPrompts.chordTable(song);
+  assert.match(text, /0 = Am, 1 = Bdim, 2 = C, 3 = Dm, 4 = Em, 5 = F/);
+});
