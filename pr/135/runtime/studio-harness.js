@@ -20,7 +20,7 @@
  */
 (function(){
 "use strict";
-var TH=window.LopdaStudioTheory, AI=window.LopdaStudioAI, P=window.LopdaStudioPrompts, ST=window.LopdaStudioStyles,
+var C=window.LopdaStudioCompose, TH=window.LopdaStudioTheory, AI=window.LopdaStudioAI, P=window.LopdaStudioPrompts, ST=window.LopdaStudioStyles,
     T=window.LopdaStudioTools, E=window.LopdaStudioEdit, S=window.LopdaSong;
 
 var MAX_RETRY=2, MAX_TURNS=5, CHORD_STYLES=["triad","seventh","rich"];
@@ -261,7 +261,8 @@ function planCheck(obj,cards,rolls){
     id=e[0];
     if(typeof id!=="string" || !seen["$"+id])
       return {error:"order names an unknown section '"+String(id)+"'"};
-    if(!int(e[1]) || e[1]<1 || e[1]>4) return {error:"repeats in order must be 1-4"};
+    /* two in a row at most: a section played four times running is what made the owner's tapes a loop (12.20.10) */
+    if(!int(e[1]) || e[1]<1 || e[1]>2) return {error:"repeats in order must be 1 or 2; list a section again later in order instead"};
     used["$"+id]=true;
     chain+=lens["$"+id]*e[1];
   }
@@ -320,6 +321,15 @@ function laySong(roll,plan,now){
     s.patterns=[];
     for(j=0;j<s.chords.length;j++){ s.patterns.push(k); k++; }
   }
+  /* A section heard more than once gets a second last bar, while the 16 patterns last: the melody ends the other way
+     and the drums fill, so the second hearing answers the first instead of copying it (12.20.10). */
+  var heard={};
+  for(i=0;i<seq.length;i++) heard["$"+seq[i]]=(heard["$"+seq[i]]||0)+1;
+  for(i=0;i<plan.sections.length;i++){
+    s=plan.sections[i];
+    s.alt=-1;
+    if(heard["$"+s.id]>=2 && s.melody && k<S.PATTERNS_MAX){ s.alt=k; k++; }
+  }
   for(i=0;i+1<seq.length;i++) if(seq[i]!==seq[i+1]) follows["$"+seq[i]]=true;
   for(i=0;i<plan.sections.length;i++){
     s=plan.sections[i];
@@ -334,110 +344,80 @@ function laySong(roll,plan,now){
         : {tool:"groove",pattern:p,style:s.groove,energy:s.energy,fill:fill});
       song=applyTool(song,Array.isArray(s.bass) ? {tool:"bass",pattern:p,steps:s.bass} : {tool:"bass",pattern:p,rhythm:s.bass});
     }
+    if(s.alt>=0){
+      var lj=s.patterns.length-1, lc=s.chords[lj], lq=int(lc) ? T.diatonicQ(song,lc,plan.chordStyle) : null;
+      if(lq) lc={root:lc, q:lq};
+      song=applyTool(song,{tool:"chords",pattern:s.alt,roots:[lc],rhythm:s.strum});
+      song=applyTool(song,s.drums ? {tool:"groove",pattern:s.alt,steps:s.drums,energy:s.energy,fill:true}
+        : {tool:"groove",pattern:s.alt,style:s.groove,energy:s.energy,fill:true});
+      song=applyTool(song,Array.isArray(s.bass) ? {tool:"bass",pattern:s.alt,steps:s.bass} : {tool:"bass",pattern:s.alt,rhythm:s.bass});
+    }
   }
-  var chain=[];
+  var chain=[], times={};
   for(i=0;i<plan.order.length;i++){
     s=sectionById(plan,plan.order[i][0]);
-    for(j=0;j<plan.order[i][1];j++) for(k=0;k<s.patterns.length;k++) chain.push(s.patterns[k]);
+    for(j=0;j<plan.order[i][1];j++){
+      times["$"+s.id]=(times["$"+s.id]||0)+1;
+      for(k=0;k<s.patterns.length;k++)
+        chain.push(k===s.patterns.length-1 && s.alt>=0 && times["$"+s.id]%2===0 ? s.alt : s.patterns[k]);
+    }
   }
   return applyTool(song,{tool:"chain",song:chain});
 }
 
 /* ---------- the melody ---------- */
-function melodyCheck(obj,bars){
-  var out=[], allSame=true, first=null, i, j, bar, notes, prev, n, step, deg, vel, key;
-  if(!plain(obj) || !Array.isArray(obj.bars)) return {error:"reply with {\"bars\":[[[step,degree,velocity], ...], ...]}"};
-  if(obj.bars.length!==bars.length)
-    return {error:"write exactly "+bars.length+" bar"+(bars.length===1?"":"s")+", one per chord"};
-  for(i=0;i<obj.bars.length;i++){
-    bar=obj.bars[i];
-    if(!Array.isArray(bar)) return {error:"bar "+(i+1)+" must be a list of notes"};
-    if(bar.length<1 || bar.length>12) return {error:"bar "+(i+1)+" must have 1-12 notes"};
-    notes=[]; prev=-1;
-    for(j=0;j<bar.length;j++){
-      n=bar[j];
-      if(!Array.isArray(n) || n.length<2)
-        return {error:"bar "+(i+1)+" note "+(j+1)+" must be [step, degree, velocity]"};
-      step=n[0]; deg=n[1]; vel=n.length>2?n[2]:S.NOTE_VEL;
-      if(!int(step) || step<0 || step>15) return {error:"bar "+(i+1)+": steps must be 0-15"};
-      if(step<=prev) return {error:"bar "+(i+1)+": steps must rise, with no step twice"};
-      if(!int(deg) || deg<-3 || deg>10) return {error:"bar "+(i+1)+": degrees must be integers -3..10"};
-      if(!num(vel) || (vel!==0 && (vel<0.3 || vel>1)))
-        return {error:"bar "+(i+1)+": velocity must be 0.3-1, or 0 for a rest"};
-      var acc=n.length>3 && n[3]!=null ? n[3] : 0, orn=n.length>4 && n[4]!=null ? n[4] : "";
-      if(acc!==0 && acc!==1 && acc!==-1) return {error:"bar "+(i+1)+": the 4th value (acc) must be -1, 0 or 1"};
-      if(orn!=="" && orn!=="slide" && orn!=="vib") return {error:"bar "+(i+1)+": the 5th value (ornament) must be \"slide\" or \"vib\""};
-      notes.push(orn ? [step,deg,Math.round(vel*100)/100,acc,orn] : acc ? [step,deg,Math.round(vel*100)/100,acc] : [step,deg,Math.round(vel*100)/100]);
-      prev=step;
-    }
-    key=JSON.stringify(notes);
-    if(first===null) first=key;
-    else if(key!==first) allSame=false;
-    out.push(notes);
+/* The motifs: one ask for every section with a melody, then the local writer (studio-compose.js) builds the phrases
+   over the chords. The model decides the rhythm and the shape of each line; the notes come from the chords, so they
+   fit (12.20.10). */
+function motifCheck(obj,list){
+  var i, m, why;
+  if(!plain(obj) || !plain(obj.motifs)) return {error:"reply with {\"motifs\":{\"<section id>\":{rhythm, answer, contour, register, ending}, ...}}"};
+  for(i=0;i<list.length;i++){
+    m=obj.motifs[list[i].id];
+    if(!m) return {error:"write a motif for the "+list[i].id};
+    why=C.checkMotif(m);
+    if(why) return {error:list[i].id+": "+why};
   }
-  if(out.length>1 && allSame) return {error:"every bar is the same; make the phrase move"};
-  return {value:out};
+  return {value:obj.motifs};
 }
 
-function melodyBlurb(id,bars){
-  var count=0, min=null, max=null, i, j, n;
-  for(i=0;i<bars.length;i++) for(j=0;j<bars[i].length;j++){
-    n=bars[i][j];
-    count++;
-    if(min===null || n[1]<min) min=n[1];
-    if(max===null || n[1]>max) max=n[1];
-  }
-  return id+": "+bars.length+" bar"+(bars.length===1?"":"s")+", "+count+" note"+(count===1?"":"s")+
-    ", degrees "+(min===max?String(min):min+".."+max);
+function chordSpec(song,plan,c){
+  if(!int(c)) return c;
+  var q=T.diatonicQ(song,c,plan.chordStyle);
+  return q ? {root:c, q:q} : {root:c};
 }
 
-function ordinal(n){
-  var s=["th","st","nd","rd"], v=n%100;
-  return n+(s[(v-20)%10]||s[v]||s[0]);
-}
-
-function melodyRun(c,song,plan,roll,text,onStage){
-  var list=[], written=[], idx=0;
-  for(idx=0;idx<plan.sections.length;idx++) if(plan.sections[idx].melody) list.push(plan.sections[idx]);
-  idx=0;
-  function next(){
-    if(idx>=list.length) return Promise.resolve(song);
-    var s=list[idx], at=idx, bars=[], i, nextSection=null, placeAt=0;
-    idx++;
-    for(i=0;i<plan.sections.length;i++) if(plan.sections[i].id===s.id){ placeAt=i; break; }
-    for(i=placeAt+1;i<plan.sections.length;i++){ nextSection=plan.sections[i]; break; }
-    stage(onStage,"melody",at+1,list.length,{section:s.id});
-    for(i=0;i<s.patterns.length;i++){
-      var spec=int(s.chords[i]) ? {root:s.chords[i], q:T.diatonicQ(song,s.chords[i],plan.chordStyle)||undefined} : s.chords[i];
-      var cn=S.chordName(song,spec.root,spec.q,spec.acc);
-      bars.push({chord:cn?cn.name:"deg"+spec.root, tones:T.chordToneText(song,spec)});
+function motifRun(c,song,plan,roll,text,onStage){
+  var list=[], i, j, s, bars, sections=[];
+  for(i=0;i<plan.sections.length;i++) if(plan.sections[i].melody) list.push(plan.sections[i]);
+  if(!list.length) return Promise.resolve(song);
+  stage(onStage,"motif",1,1,{});
+  for(i=0;i<list.length;i++){
+    s=list[i]; bars=[];
+    for(j=0;j<s.chords.length;j++){
+      var spec=chordSpec(song,plan,s.chords[j]), cn=S.chordName(song,spec.root,spec.q,spec.acc);
+      bars.push(cn ? cn.name : "?");
     }
-    var place="the "+ordinal(placeAt+1)+" of "+plan.sections.length+" sections, "+
-      (nextSection?"before the "+nextSection.id:"the last section");
-    var msgs=P.melody({
-      text:text, card:P.lang(text)==="Chinese"?roll.card.zh:roll.card.en,
-      keyName:S.NAMES[roll.key], scale:roll.scale, bpm:song.bpm,
-      section:s.id, place:place, bars:bars, before:written.join("; ")
-    });
-    return step(c,msgs,function(obj){
-      var r=melodyCheck(obj,bars), tried=song, k, why=[];
-      if(r.error || !TH) return r;
-      /* the notes off the scale must belong to the chord or pass between neighbours (12.20.9) */
-      for(k=0;k<r.value.length;k++){
-        var tr=T.run(tried,{tool:"melody",pattern:s.patterns[k],notes:r.value[k]}), ap=tr.error ? null : E.apply(tried,tr.ops);
-        if(ap && ap.song){ tried=ap.song; why=why.concat(TH.patternIssues(tried,s.patterns[k])); }
+    sections.push({id:s.id, bars:bars, energy:s.energy});
+  }
+  var msgs=P.motif({text:text, card:P.lang(text)==="Chinese"?roll.card.zh:roll.card.en,
+    keyName:S.NAMES[song.key], scale:song.scale, bpm:song.bpm, sections:sections});
+  return step(c,msgs,function(obj){ return motifCheck(obj,list); },"melody").then(function(ans){
+    var motifs=ans.value, start=null, k, out, alt;
+    for(i=0;i<list.length;i++){
+      s=list[i];
+      var specs=s.chords.map(function(x){ return chordSpec(song,plan,x); });
+      out=C.phrase(song,motifs[s.id],specs,{variant:0,start:start});
+      for(k=0;k<out.length;k++) song=applyTool(song,{tool:"melody",pattern:s.patterns[k],notes:out[k]});
+      if(s.alt>=0){
+        alt=C.phrase(song,motifs[s.id],specs,{variant:1,start:start});
+        song=applyTool(song,{tool:"melody",pattern:s.alt,notes:alt[alt.length-1]});
       }
-      if(why.length) return {error:why.slice(0,3).join("; ").replace(/pattern [A-P] /g,"bar ")};
-      return r;
-    },"melody").then(function(ans){
-      var notes=ans.value, i;
-      for(i=0;i<notes.length;i++)
-        song=applyTool(song,{tool:"melody",pattern:s.patterns[i],notes:notes[i]});
-      written.push(melodyBlurb(s.id,notes));
-      return next();
-    });
-  }
-  return next();
+      var last=out[out.length-1], ln=last && last[last.length-1];
+      if(ln) start=ln[1];
+    }
+    return song;
+  });
 }
 
 /* ---------- the listen-back ---------- */
@@ -496,7 +476,7 @@ function skeleton(o){
       stage(o.onStage,"card",1,1,{card:cardName,key:S.NAMES[roll.key],scale:roll.scale,bpm:plan.bpm});
       stage(o.onStage,"lay",1,1,{});
       song=laySong(roll,plan,now);
-      return melodyRun(c,song,plan,roll,text,o.onStage);
+      return motifRun(c,song,plan,roll,text,o.onStage);
     }).then(function(song){
       stage(o.onStage,"listen",1,1,{});
       var msgs=P.listen({text:text,overview:AI.overview(song)});

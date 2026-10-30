@@ -5,7 +5,7 @@
  * can be tuned (tools/studio-ai-trial.mjs) without touching the logic.
  *
  *   LopdaStudioPrompts.plan(o)    -> messages   o: {text, cards:[{name, keyName, scale, bpm:[lo,hi], grooves, bass, form}], allGrooves, allBass}
- *   LopdaStudioPrompts.melody(o)  -> messages   o: {text, card, keyName, scale, bpm, section, place, bars:[{chord, tones}], before}
+ *   LopdaStudioPrompts.motif(o)   -> messages   o: {text, card, keyName, scale, bpm, sections:[{id, bars:[chord names], energy}]}
  *   LopdaStudioPrompts.listen(o)  -> messages   o: {text, overview}
  *   LopdaStudioPrompts.edit(o)    -> messages   o: {text, overview, focus}
  *   LopdaStudioPrompts.reject(reason) -> the user turn that sends a rejected answer back
@@ -92,7 +92,8 @@ JSON_ONLY,
 "- section id: one of intro, verse, pre, chorus, bridge, outro; each used once in sections and at least once in order.",
 "- chords: 1-4 numbers, one per bar; each is a chord root 0-5 of the key's seven-note scale (0=I, 1=ii, 2=iii, 3=IV, 4=V, 5=vi in major; in minor 0=i, 2=III, 3=iv, 4=v, 5=VI).",
 "- Each section takes as many patterns as it has chords; all sections together use at most 16 patterns.",
-"- order: [section id, repeats 1-4]. The song plays each section's bars that many times, in this order.",
+"- order: [section id, repeats 1 or 2]. The song plays each section's bars that many times, in this order. For length,",
+"  come back to a section later (verse, chorus, verse, chorus, bridge, chorus) instead of repeating it many times.",
 "- The whole song must last 100-200 seconds (aim for about 150): seconds = total bars * 240 / bpm.",
 "- energy: 0 calm, 1 normal, 2 full. melody: false for intro and outro, usually true for verse and chorus.",
 "- Make the chorus different from the verse: other chords or another order, more energy.",
@@ -113,39 +114,42 @@ cards.join("\n"),
   return msgs("plan",system,user);
 }
 
-/* Step 4, once per section with a melody: one bar per chord, the chord tones given as degrees so the model need not do
-   music theory in its head. */
-function melody(o){
+/* Step 4: one motif per section with a melody. The machine writes the notes from the chords (studio-compose.js), so
+   the model decides only what a songwriter decides first: the rhythm of a bar, the shape of the line, where it sits
+   and how it ends. Writing notes one by one, a small model climbed the scale in even eighths (12.20.10). */
+function motif(o){
   var system=[
 MACHINE,
 "",
-"You write the melody of one section. Notes are scale degrees of the key: 0 is the tonic, 1 the next scale note, one",
-"octave up is the scale's length (7, or 5 for a pentatonic scale), -1 the scale note below the tonic. A note rings until",
-"the next note; a velocity 0 note is a rest. A 4th value 1 or -1 raises or lowers the note a semitone (a blue note, a",
-"passing tone, a borrowed chord's tone); a 5th value \"slide\" or \"vib\" adds an ornament (use them like a singer would).",
+"You give each section of a new song its melody idea, a motif. The machine turns it into phrases over the chords:",
+"strong beats land on chord tones, the line moves by your contour between them, the 2nd bar uses the answer rhythm,",
+"the 3rd bar turns the contour upside down, and the last bar ends on a long note.",
 "",
 JSON_ONLY,
-'Shape: {"bars":[[[step,degree,velocity], [step,degree,velocity,acc,ornament], ...], ...]}  one inner list per bar.',
+'Shape: {"motifs":{"verse":{"rhythm":[0,3,6,8,12],"answer":[0,4,6,8],"contour":[1,1,-2,1],"register":"mid","ending":"open"}, ...}}',
 "",
 "Rules:",
-"- Exactly the number of bars asked. 2-8 notes per bar is typical, at most 12. Steps 0-15, rising, no step twice.",
-"- Degrees -3..10. Velocity 0.5-1 (accent the first note of a phrase); a rest is velocity 0.",
-"- On beats (steps 0, 4, 8, 12) prefer the chord tones given for that bar (\"6#\" means degree 6 with acc 1); between",
-"  them, step through the scale.",
-"- Write a singable phrase: a short motif, repeated with a change; leave some space; end the last bar on a chord tone.",
-"- Do not make every bar the same."
+"- rhythm and answer: the steps (0-15) where notes start in one bar, rising, 2-7 of them. Mix long and short notes:",
+"  [0,3,4,8,12] is a dotted figure, [0,6,8,12] a syncopation, [2,4,8] starts after the beat. Never 8 even eighths.",
+"- contour: 2-8 moves in scale steps (-3..3) from note to note, e.g. [1,1,-1,2] climbs and turns. Small steps sing.",
+"- register: low, mid or high. A chorus usually sits higher and moves more than its verse.",
+"- ending: home (ends on the tonic, the end of a thought) or open (on the third or fifth, wants to go on).",
+"- Give each section its own character, fitting the style: a folk tune steps and turns, a march jumps on the beat,",
+"  a ballad holds long notes, a rock riff repeats short figures. Write nothing from a real song."
   ].join("\n");
-  var bars=[], i;
-  for(i=0;i<o.bars.length;i++) bars.push("bar "+(i+1)+": chord "+o.bars[i].chord+", chord tones "+list(o.bars[i].tones));
+  var lines=[], i, s;
+  for(i=0;i<o.sections.length;i++){
+    s=o.sections[i];
+    lines.push(s.id+": "+s.bars.length+" bar"+(s.bars.length>1?"s":"")+", chords "+s.bars.join(" ")+", energy "+s.energy);
+  }
   var user=[
-"STYLE CARD: "+o.card+". Key: "+o.keyName+" "+o.scale+", "+o.bpm+" BPM.",
-"SECTION: "+o.section+" ("+o.place+"), "+o.bars.length+" bar"+(o.bars.length>1?"s":"")+":",
-bars.join("\n"),
-o.before ? "\nMelodies already written (make this one contrast with them, e.g. higher or more rhythmic for a chorus):\n"+o.before : "",
+"STYLE: "+o.card+". Key: "+o.keyName+" "+o.scale+", "+o.bpm+" BPM.",
+"SECTIONS WITH A MELODY:",
+lines.join("\n"),
 "",
 "REQUEST: "+(o.text||"a new song")
   ].join("\n");
-  return msgs("melody",system,user);
+  return msgs("motif",system,user);
 }
 
 /* the tools the model may call, one line each; shared by the listen and edit steps */
@@ -232,5 +236,5 @@ function reject(reason){
   return "That JSON was rejected: "+reason+". Reply with the corrected JSON only.";
 }
 
-window.LopdaStudioPrompts={chordTable:chordTable, plan:plan, melody:melody, listen:listen, edit:edit, reject:reject, lang:lang};
+window.LopdaStudioPrompts={chordTable:chordTable, plan:plan, motif:motif, listen:listen, edit:edit, reject:reject, lang:lang};
 })();
