@@ -38,6 +38,12 @@ function parse(text,focus){
   if(!s) return null;
   var ops=[], note="", m, tr;
 
+  /* per-section asks are for the model: the local parser only knows whole-song moves. A named pattern is still fine for
+     clear/copy and for tempo/swing; it is not fine for a track volume/mute, which the local language would apply to every
+     bar. */
+  if(/副歌|主歌|桥段|前奏|尾奏|verse|chorus|bridge|intro|outro/.test(s)) return null;
+  if(/(?:[a-p]\s*段|pattern\s*[a-p])/.test(s) && !/清空|清掉|去掉|clear|复制|拷贝|copy|摇摆|swing/.test(s)) return null;
+
   /* a pattern copy is unambiguous and should win over the letter handling below */
   m=/([a-p])\s*(?:段)?\s*(?:复制|拷贝|copy)\s*(?:到|to)\s*([a-p])/i.exec(s) ||
     /(?:把|将)\s*([a-p])\s*(?:段)?\s*(?:复制|拷贝|copy)\s*(?:到|to)\s*([a-p])/i.exec(s);

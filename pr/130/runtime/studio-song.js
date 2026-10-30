@@ -330,7 +330,7 @@ function fromDraft(draft,now){
     p={len:STEPS, notes:{drums:[], bass:[], chords:[], melody:[]}};
     list=[];
     if(d.drums!=null){
-      if(!Array.isArray(d.drums)) return {error:"draft"};
+      if(!Array.isArray(d.drums) || d.drums.length>64) return {error:"draft"};
       for(j=0;j<d.drums.length;j++){
         e=d.drums[j];
         if(!Array.isArray(e) || e.length<2 || !int(e[0]) || e[0]<0 || e[0]>=STEPS || DRUMS.indexOf(e[1])<0) return {error:"draft"};
@@ -345,7 +345,7 @@ function fromDraft(draft,now){
       var track=["bass","chords","melody"][m], src=d[track];
       list=[];
       if(src!=null){
-        if(!Array.isArray(src)) return {error:"draft"};
+        if(!Array.isArray(src) || src.length>64) return {error:"draft"};
         for(j=0;j<src.length;j++){
           e=src[j];
           if(!Array.isArray(e) || e.length<2 || !int(e[0]) || e[0]<0 || e[0]>=STEPS || !int(e[1])) return {error:"draft"};
@@ -368,10 +368,18 @@ function fromDraft(draft,now){
     for(i=0;i<song.patterns.length;i++) song.song.push(i);
   }
   if(draft.tracks!=null){
-    if(!plain(draft.tracks)) return {error:"draft"};
+    var mix=null;
+    if(Array.isArray(draft.tracks)){
+      mix={};
+      for(i=0;i<draft.tracks.length;i++){
+        if(!plain(draft.tracks[i]) || typeof draft.tracks[i].id!=="string") return {error:"draft"};
+        mix[draft.tracks[i].id]=draft.tracks[i];
+      }
+    } else if(plain(draft.tracks)) mix=draft.tracks;
+    else return {error:"draft"};
     for(i=0;i<song.tracks.length;i++){
       tr=song.tracks[i];
-      tracks=draft.tracks[tr.id];
+      tracks=mix[tr.id];
       if(tracks==null) continue;
       if(!plain(tracks)) return {error:"draft"};
       if(typeof tracks.vol!=="undefined"){

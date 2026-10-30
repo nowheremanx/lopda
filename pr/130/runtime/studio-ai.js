@@ -101,7 +101,9 @@ function summary(song,focus){
   if(focus && typeof focus.pattern==="number") used[focus.pattern]=true;
   var patterns=[];
   for(i=0;i<S.PATTERNS_MAX;i++){
-    if(!used[i] || !pats[i] || !pats[i].notes) continue;
+    if(!pats[i] || !pats[i].notes) continue;
+    var has=pats[i].notes, nonEmpty=(has.drums&&has.drums.length)||(has.bass&&has.bass.length)||(has.chords&&has.chords.length)||(has.melody&&has.melody.length);
+    if(!used[i] && !nonEmpty) continue;
     p={p:i};
     var d=notes(pats[i].notes.drums,true);
     var b=notes(pats[i].notes.bass,false), c=notes(pats[i].notes.chords,false), m=notes(pats[i].notes.melody,false);
