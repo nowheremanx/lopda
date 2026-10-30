@@ -5,7 +5,7 @@ import vm from "node:vm";
 import { runScript, read } from "./helpers.mjs";
 
 const ctx = runScript("runtime/studio-song.js");
-for (const f of ["studio-styles.js", "studio-tools.js", "studio-edit.js", "studio-prompts.js", "studio-ai.js", "studio-harness.js"]) {
+for (const f of ["studio-styles.js", "studio-tools.js", "studio-theory.js", "studio-edit.js", "studio-prompts.js", "studio-ai.js", "studio-harness.js"]) {
   vm.runInContext(read("runtime/" + f), ctx, { filename: "runtime/" + f });
 }
 const S = ctx.LopdaSong, ST = ctx.LopdaStudioStyles, E = ctx.LopdaStudioEdit, H = ctx.LopdaStudioHarness;
@@ -380,4 +380,16 @@ test("the edit prompt names the scale's own chords so a model does not guess Cm 
   song.key = 9; song.scale = "minor";
   const text = ctx.LopdaStudioPrompts.chordTable(song);
   assert.match(text, /0 = Am, 1 = Bdim, 2 = C, 3 = Dm, 4 = Em, 5 = F/);
+});
+
+test("skeleton: a plan chord off the key is sent back with the chords the key allows", async () => {
+  const bad = { ...planFor(), key: 2, scale: "minor" };
+  bad.sections = bad.sections.map((s) => ({ ...s }));
+  bad.sections[1].chords = [0, { root: 3, acc: 1, q: "maj" }, 3, 4];
+  const good = { ...bad, sections: bad.sections.map((s, i) => (i === 1 ? { ...s, chords: [0, 5, 3, 4] } : s)) };
+  const answers = fullAnswers(good);
+  const ask = makeAsk((step, messages) => (step === "plan" ? (messages.length > 2 ? good : bad) : answers(step, messages)));
+  const out = await H.skeleton({ text: "x", ask, rand: ST.seeded(2), now: 1000 });
+  assert.equal(out.draft, true);
+  assert.match(ask.seen[1].messages.at(-1).content, /Ab is outside D minor.*use the scale's own chords or one of/);
 });
