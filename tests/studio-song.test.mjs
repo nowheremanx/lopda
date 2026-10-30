@@ -20,7 +20,7 @@ test("constants: format, tracks, scales, demo beat", () => {
   assert.equal(S.STEPS, 16);
   assert.deepEqual([S.BPM_MIN, S.BPM_MAX, S.BPM_DEFAULT, S.BPM_STEP], [60, 140, 82, 2]);
   assert.deepEqual(plain(S.DRUMS), ["kick", "snare", "hat", "perc"]);
-  assert.deepEqual(plain(S.KITS), ["chip", "soft"]);
+  assert.deepEqual(plain(S.KITS), ["chip", "soft", "rock", "electro"]);
   assert.deepEqual(plain(S.KINDS), ["drum", "note", "chord", "voice"]);
   assert.deepEqual(plain(S.TRACKS), [
     { id: "drums", kind: "drum", vol: 1, mute: false },
@@ -162,7 +162,9 @@ test("validate: bpm, key, scale, swing, tape, kit, name, updated", () => {
     [(s) => { s.tape = -1; }, "tape"],
     [(s) => { s.tape = 5; }, "tape"],
     [(s) => { s.tape = 2.5; }, "tape"],
-    [(s) => { s.kit = "loud"; }, "kit"],
+    [(s) => { s.kit = "Loud"; }, "kit"],
+    [(s) => { s.kit = "x".repeat(17); }, "kit"],
+    [(s) => { s.kit = 5; }, "kit"],
     [(s) => { delete s.kit; }, "kit"],
     [(s) => { s.name = "x".repeat(41); }, "name"],
     [(s) => { s.name = 5; }, "name"],
@@ -1458,4 +1460,91 @@ test("saintsSong and jasmineSong: two 64-bar, 16-pattern public-domain arrangeme
       for (const h of p.notes.drums) assert.equal(h.t % S.STEP, 0);
     }
   }
+});
+
+/* ---------- 12.20: a track's optional voice, the relaxed kit rule and the fallbacks ---------- */
+
+test("voice choices and kit choices: the four kits cycle soft, chip, rock, electro", () => {
+  assert.deepEqual(plain(S.VOICE_CHOICES), {
+    bass: ["bass", "pick", "sub"],
+    chords: ["keys", "guitar", "piano", "organ", "strings"],
+    melody: ["flute", "square", "pluck", "reed", "bowed"],
+  });
+  assert.deepEqual(plain(S.KIT_CHOICES), ["soft", "chip", "rock", "electro"]);
+  for (const id of S.KIT_CHOICES) assert.ok(S.KITS.includes(id), `${id} is a known kit`);
+});
+
+test("validate: a track's voice is optional but must have the id shape; an unknown voice still validates", () => {
+  const song = fresh();
+  assert.equal(S.validate(song).error, undefined, "a song without voice fields is unchanged");
+  assert.equal(S.validate(Object.assign(song, { tracks: song.tracks.map((t) => Object.assign({}, t)) })).error, undefined);
+
+  const bad = [
+    ["Bass", "uppercase"],
+    ["_bass", "leading underscore"],
+    ["bass_", "underscore"],
+    ["x".repeat(17), "too long"],
+    [5, "not a string"],
+    [null, "null"],
+    [{}, "an object"],
+  ];
+  for (const [voice, why] of bad) {
+    const r = broken((s) => { s.tracks[1].voice = voice; });
+    assert.equal(r.error, "voice", `${why} is refused as voice`);
+  }
+  assert.equal(broken((s) => { s.tracks[1].voice = "x".repeat(16); }).error, undefined, "16 characters are allowed");
+  assert.equal(broken((s) => { s.tracks[1].voice = "made-up-voice"; }).error, undefined, "an unknown but well-shaped id opens");
+  assert.equal(broken((s) => { s.tracks[0].voice = "pick"; }).error, undefined, "the drum track may carry one too (validate only checks shape)");
+});
+
+test("validate: a kit only has to have the id shape; unknown kits open and fall back in kitOf", () => {
+  assert.equal(broken((s) => { s.kit = "made-up-kit"; }).error, undefined);
+  assert.equal(broken((s) => { s.kit = "electro"; }).error, undefined);
+  for (const [kit, why] of [["Soft", "uppercase"], ["soft kit", "a space"], ["x".repeat(17), "too long"], [3, "a number"], [null, "null"]]) {
+    assert.equal(broken((s) => { s.kit = kit; }).error, "kit", `${why} is refused as kit`);
+  }
+  assert.equal(S.kitOf({ kit: "rock" }), "rock");
+  assert.equal(S.kitOf({ kit: "made-up-kit" }), "soft", "an unknown kit plays as soft");
+  assert.equal(S.kitOf({}), "soft", "a missing kit plays as soft");
+  assert.equal(S.kitOf(null), "soft");
+});
+
+test("voiceOf: an old song gives SOUND for every track; unknown voices and voice-less tracks fall back", () => {
+  for (const song of [fresh(), S.demoSong(1), S.popSong(1), S.saintsSong(1), S.jasmineSong(1)]) {
+    for (const id of ["bass", "chords", "melody"]) assert.equal(S.voiceOf(song, id), S.SOUND[id], `${id} is the default`);
+  }
+  assert.equal(S.voiceOf(fresh(), "drums"), undefined);
+  assert.equal(S.voiceOf(fresh(), "voice"), undefined);
+  assert.equal(S.voiceOf(fresh(), "nope"), undefined);
+
+  const song = fresh();
+  song.tracks[1].voice = "pick";
+  song.tracks[2].voice = "made-up-voice";
+  assert.equal(S.voiceOf(song, "bass"), "pick");
+  assert.equal(S.voiceOf(song, "chords"), "keys", "an unknown voice falls back to the track default");
+  assert.equal(S.voiceOf(song, "melody"), "flute", "a missing voice falls back to the track default");
+  song.tracks[3].voice = "piano";
+  assert.equal(S.voiceOf(song, "melody"), "flute", "a voice from another track's list is not used");
+});
+
+test("setTrackVoice: a clone, only a choice of that track, and a refused call is unchanged", () => {
+  const song = fresh();
+  const a = S.setTrackVoice(song, "bass", "pick");
+  assert.equal(S.voiceOf(a, "bass"), "pick");
+  assert.equal(a.tracks[1].voice, "pick");
+  assert.equal(song.tracks[1].voice, undefined, "the input is not edited");
+  assert.equal(a.tracks[1].vol, 1, "the rest of the track is kept");
+  assert.equal(S.validate(a).error, undefined, "the result validates");
+
+  assert.equal(S.setTrackVoice(song, "chords", "guitar").tracks[2].voice, "guitar");
+  assert.equal(S.setTrackVoice(song, "melody", "bowed").tracks[3].voice, "bowed");
+  assert.equal(S.setTrackVoice(song, "bass", "piano").tracks[1].voice, undefined, "another track's voice is refused");
+  assert.equal(S.setTrackVoice(song, "bass", "nope").tracks[1].voice, undefined);
+  assert.equal(S.setTrackVoice(song, "bass", 5).tracks[1].voice, undefined);
+  assert.equal(S.setTrackVoice(song, "drums", "bass").tracks[0].voice, undefined, "the drum track has no voice list");
+  assert.equal(S.setTrackVoice(song, "nope", "bass").tracks[1].voice, undefined);
+  assert.equal(S.validate(S.setTrackVoice(song, "nope", "bass")).error, undefined);
+
+  const twice = S.setTrackVoice(S.setTrackVoice(song, "bass", "sub"), "bass", "bass");
+  assert.equal(S.voiceOf(twice, "bass"), "bass", "switching back to the default keeps an explicit voice");
 });

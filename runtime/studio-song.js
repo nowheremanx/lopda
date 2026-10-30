@@ -15,7 +15,7 @@ var V=1, TPB=96, STEP=24, STEPS=16;
 
 var BPM_MIN=60, BPM_MAX=140, BPM_DEFAULT=82, BPM_STEP=2;
 
-var DRUMS=["kick","snare","hat","perc"], KITS=["chip","soft"], KINDS=["drum","note","chord","voice"];
+var DRUMS=["kick","snare","hat","perc"], KITS=["chip","soft","rock","electro"], KINDS=["drum","note","chord","voice"];
 
 /* Track ids are the keys of a pattern's notes and of the editor's state, so they are a plain slug: lower-case letters,
    digits and "-", starting with a letter. That keeps "__proto__" and friends out of plain objects used as maps. */
@@ -190,8 +190,18 @@ var POP_SONG={
 var SWING_MIN=0.5, SWING_MAX=0.75, SWING_DEFAULT=0.55, TAPE_MAX=4, PATTERNS_MAX=16, SONG_MAX=96, NAME_MAX=40;
 
 /* Which synth voice a track plays (12.6): a constant, not a song field, so a later version can revoice a track without
-   migrating files. 12.12 moved the melody from the bright pluck to the flute. */
+   migrating files. 12.12 moved the melody from the bright pluck to the flute. 12.20 lets a track carry its own optional
+   `voice`; SOUND stays the default for a song that does not. */
 var SOUND={bass:"bass", chords:"keys", melody:"flute"};
+
+/* The voices each melodic track offers (12.20.1), and the kits in the mixer's cycle order (soft, chip, rock, electro).
+   A voice or kit outside these lists is still a valid file shape; voiceOf and kitOf fall back to the default when the
+   player meets an id this version does not know. */
+var VOICE_CHOICES={
+  bass:["bass","pick","sub"],
+  chords:["keys","guitar","piano","organ","strings"],
+  melody:["flute","square","pluck","reed","bowed"]
+}, KIT_CHOICES=["soft","chip","rock","electro"];
 var NOTE_VEL=0.8;
 /* A "stop" on the note/chord screens is a rest: the format has no rest field, only a note that does not sound, so a rest
    is {t, len, deg:0, vel:0} and every player simply skips it (12.12). */
@@ -416,7 +426,8 @@ function check(x){
   if(!Object.prototype.hasOwnProperty.call(SCALES,x.scale)) return {error:"scale"};
   if(!num(x.swing) || x.swing<SWING_MIN || x.swing>SWING_MAX) return {error:"swing"};
   if(!int(x.tape) || x.tape<0 || x.tape>TAPE_MAX) return {error:"tape"};
-  if(KITS.indexOf(x.kit)<0) return {error:"kit"};
+  /* a kit id is only checked for shape (12.20.1): a newer version's kit opens normally and plays as soft */
+  if(typeof x.kit!=="string" || !TRACK_ID.test(x.kit)) return {error:"kit"};
 
   var i, j, tr, note, list, keys, owner, max, k;
   if(!Array.isArray(x.tracks) || x.tracks.length<1 || x.tracks.length>8) return {error:"tracks"};
@@ -426,6 +437,7 @@ function check(x){
     tr=x.tracks[i];
     if(!plain(tr) || typeof tr.id!=="string" || !TRACK_ID.test(tr.id)) return {error:"tracks"};
     if(KINDS.indexOf(tr.kind)<0) return {error:"tracks"};
+    if(typeof tr.voice!=="undefined" && (typeof tr.voice!=="string" || !TRACK_ID.test(tr.voice))) return {error:"voice"};
     if(typeof tr.vol!=="undefined" && (!num(tr.vol) || tr.vol<0 || tr.vol>1)) return {error:"tracks"};
     if(typeof tr.mute!=="undefined" && typeof tr.mute!=="boolean") return {error:"tracks"};
     if(Object.prototype.hasOwnProperty.call(byId,"$"+tr.id)) return {error:"tracks"};
@@ -857,6 +869,40 @@ function setTrackMix(song,id,patch){
   return out;
 }
 
+/* ---------- which voice and kit a song plays (12.20.1) ---------- */
+/* An unknown id is not an error: the file opens and plays with the track's default voice (SOUND) or the soft kit. */
+function voiceOf(song,id){
+  if(Object.prototype.hasOwnProperty.call(VOICE_CHOICES,id)){
+    var choices=VOICE_CHOICES[id], tracks=song && song.tracks;
+    if(Array.isArray(tracks)){
+      for(var i=0;i<tracks.length;i++){
+        var tr=tracks[i];
+        if(tr && tr.id===id && choices.indexOf(tr.voice)>=0) return tr.voice;
+      }
+    }
+  }
+  return SOUND[id];
+}
+
+function kitOf(song){
+  return song && KITS.indexOf(song.kit)>=0 ? song.kit : "soft";
+}
+
+/* The mixer's stored per-track voice (12.20.1), one pure edit for the screens and the edit ops: a clone, and a copy is
+   returned unchanged when the track has no voice list or the id is not one of its choices. */
+function setTrackVoice(song,id,voice){
+  var out=clone(song);
+  if(!plain(out) || !Array.isArray(out.tracks)) return out;
+  if(!Object.prototype.hasOwnProperty.call(VOICE_CHOICES,id)) return out;
+  var choices=VOICE_CHOICES[id];
+  if(typeof voice!=="string" || choices.indexOf(voice)<0) return out;
+  for(var i=0;i<out.tracks.length;i++){
+    var tr=out.tracks[i];
+    if(tr && tr.id===id){ tr.voice=voice; break; }
+  }
+  return out;
+}
+
 /* ---------- the song chain (12.8) ---------- */
 function setSlot(song,i,p){
   var out=clone(song);
@@ -1119,11 +1165,12 @@ window.LopdaSong={
   DRUMS:DRUMS, KITS:KITS, KINDS:KINDS, TRACKS:TRACKS, SCALES:SCALES, PARENT:PARENT, DEMO:DEMO,
   DEMO_BASS:DEMO_BASS, DEMO_CHORDS:DEMO_CHORDS, DEMO_SONG:DEMO_SONG,
   POP_SONG:POP_SONG, SAINTS_SPEC:SAINTS_SPEC, JASMINE_SPEC:JASMINE_SPEC,
-  SOUND:SOUND, NOTE_VEL:NOTE_VEL, REST_VEL:REST_VEL, CHORD_STEPS:CHORD_STEPS, NAMES:NAMES,
+  SOUND:SOUND, VOICE_CHOICES:VOICE_CHOICES, KIT_CHOICES:KIT_CHOICES, voiceOf:voiceOf, kitOf:kitOf,
+  NOTE_VEL:NOTE_VEL, REST_VEL:REST_VEL, CHORD_STEPS:CHORD_STEPS, NAMES:NAMES,
   SWING_MIN:SWING_MIN, SWING_MAX:SWING_MAX, SWING_DEFAULT:SWING_DEFAULT,
   TAPE_MAX:TAPE_MAX, PATTERNS_MAX:PATTERNS_MAX, SONG_MAX:SONG_MAX, NAME_MAX:NAME_MAX,
   newSong:newSong, demoSong:demoSong, popSong:popSong, saintsSong:saintsSong, jasmineSong:jasmineSong, fromDraft:fromDraft, validate:validate, has:has, toggle:toggle,
-  setDrum:setDrum, clearTrack:clearTrack, setTrackMix:setTrackMix,
+  setDrum:setDrum, clearTrack:clearTrack, setTrackMix:setTrackMix, setTrackVoice:setTrackVoice,
   swingTicks:swingTicks, events:events, ticksToSec:ticksToSec,
   degreeToMidi:degreeToMidi, clampBpm:clampBpm,
   tonic:tonic, noteMidi:noteMidi, noteName:noteName,

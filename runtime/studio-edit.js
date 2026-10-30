@@ -75,8 +75,12 @@ function one(song,op,at){
       if(typeof op.value!=="string" || op.value.length>40*2 || Array.from(op.value).length>40) return fail("value",at);
       song.name=op.value; return {song:song};
     case "setKit":
-      if(S.KITS.indexOf(op.value)<0) return fail("value",at);
+      if(S.KIT_CHOICES.indexOf(op.value)<0) return fail("value",at);
       song.kit=op.value; return {song:song};
+    case "setVoice":
+      if(!Object.prototype.hasOwnProperty.call(S.VOICE_CHOICES,op.track)) return fail("track",at);
+      if(typeof op.value!=="string" || S.VOICE_CHOICES[op.track].indexOf(op.value)<0) return fail("value",at);
+      return {song:S.setTrackVoice(song,op.track,op.value)};
     case "setTrackVolume":
       if(ALL_TRACKS.indexOf(op.track)<0 || !num(op.value) || !trackOf(song,op.track)) return fail("track",at);
       return mix(song,op.track,{vol:op.value},at);

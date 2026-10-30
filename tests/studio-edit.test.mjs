@@ -150,3 +150,53 @@ test("apply: unknown ops, a non-array and malformed values are refused", () => {
   assert.equal(apply(fresh(), [{ op: "setNote", pattern: 0, track: "bass", step: 16, deg: 0 }]).error, "value");
   assert.equal(apply(fresh(), [{ op: "setSwing", value: "x" }]).error, "value");
 });
+
+test("apply: setVoice picks a voice of that track and leaves the input alone", () => {
+  const song = fresh();
+  let r = apply(song, [{ op: "setVoice", track: "bass", value: "pick" }]);
+  assert.equal(r.error, undefined);
+  assert.equal(r.ops, 1);
+  assert.equal(r.song.tracks[1].voice, "pick");
+  assert.equal(S.voiceOf(r.song, "bass"), "pick");
+  assert.equal(song.tracks[1].voice, undefined, "the input is never edited");
+  assert.equal(S.validate(r.song).error, undefined);
+
+  r = apply(r.song, [
+    { op: "setVoice", track: "chords", value: "strings" },
+    { op: "setVoice", track: "melody", value: "square" },
+  ]);
+  assert.equal(r.error, undefined);
+  assert.equal(r.ops, 2);
+  assert.equal(S.voiceOf(r.song, "chords"), "strings");
+  assert.equal(S.voiceOf(r.song, "melody"), "square");
+
+  /* a default voice may be set explicitly too; the shape is the same as a fallback but it is stored */
+  r = apply(r.song, [{ op: "setVoice", track: "bass", value: "bass" }]);
+  assert.equal(r.song.tracks[1].voice, "bass");
+});
+
+test("apply: setVoice refuses another track's voice, an unknown voice and a bad track", () => {
+  assert.equal(apply(fresh(), [{ op: "setVoice", track: "bass", value: "piano" }]).error, "value");
+  assert.equal(apply(fresh(), [{ op: "setVoice", track: "bass", value: "made-up-voice" }]).error, "value");
+  assert.equal(apply(fresh(), [{ op: "setVoice", track: "bass", value: 5 }]).error, "value");
+  assert.equal(apply(fresh(), [{ op: "setVoice", track: "bass", value: null }]).error, "value");
+  assert.equal(apply(fresh(), [{ op: "setVoice", track: "drums", value: "bass" }]).error, "track");
+  assert.equal(apply(fresh(), [{ op: "setVoice", track: "nope", value: "bass" }]).error, "track");
+  assert.equal(apply(fresh(), [{ op: "setVoice", value: "bass" }]).error, "track");
+  /* atomic: the earlier op is not kept when a later one fails */
+  const r = apply(fresh(), [{ op: "setVoice", track: "bass", value: "sub" }, { op: "setVoice", track: "bass", value: "piano" }]);
+  assert.equal(r.error, "value");
+  assert.equal(r.at, 1);
+  assert.equal(r.song, undefined);
+});
+
+test("apply: setKit takes every kit in the cycle", () => {
+  for (const kit of S.KIT_CHOICES) {
+    const r = apply(fresh(), [{ op: "setKit", value: kit }]);
+    assert.equal(r.error, undefined, kit);
+    assert.equal(r.song.kit, kit);
+    assert.equal(S.validate(r.song).error, undefined);
+  }
+  assert.equal(apply(fresh(), [{ op: "setKit", value: "made-up-kit" }]).error, "value");
+  assert.equal(apply(fresh(), [{ op: "setKit", value: "Soft" }]).error, "value");
+});

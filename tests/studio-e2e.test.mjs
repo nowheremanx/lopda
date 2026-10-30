@@ -315,6 +315,70 @@ test("studio synth: every melodic voice sounds low and high, under its target, a
   assert.deepEqual(errors, []);
 });
 
+test("studio synth: every 12.20 voice sounds at two pitches, peaks in its track's window and renders the same twice", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await studioPage(t, false);
+  /* bass 0.2-0.36, one chord note 0.04-0.11, melody 0.15-0.28 (section 12.20.2) */
+  const voices = {
+    pick: { pitches: [33, 57], lo: 0.2, hi: 0.36, seconds: 1.3 },
+    sub: { pitches: [33, 57], lo: 0.2, hi: 0.36, seconds: 1.3 },
+    guitar: { pitches: [48, 72], lo: 0.04, hi: 0.11, seconds: 1.3 },
+    piano: { pitches: [48, 72], lo: 0.04, hi: 0.11, seconds: 1.3 },
+    organ: { pitches: [48, 72], lo: 0.04, hi: 0.11, seconds: 1.3 },
+    strings: { pitches: [48, 72], lo: 0.04, hi: 0.11, seconds: 1.3 },
+    square: { pitches: [57, 79], lo: 0.15, hi: 0.28, seconds: 1.3 },
+    reed: { pitches: [57, 79], lo: 0.15, hi: 0.28, seconds: 1.3 },
+    bowed: { pitches: [57, 79], lo: 0.15, hi: 0.28, seconds: 1.3 },
+  };
+  const r = await p.evaluate(async (voices) => {
+    const out = { notes: [], strum: LopdaStudioSynth.STRUM };
+    for (const voice of Object.keys(voices)) {
+      for (const midi of voices[voice].pitches) {
+        const a = await renderNote(voice, midi, 0.4, 1, voices[voice].seconds);
+        const b = await renderNote(voice, midi, 0.4, 1, voices[voice].seconds);
+        out.notes.push({ voice, midi, peak: a.peak, last: a.last, diff: maxDiff(a.data, b.data) });
+      }
+    }
+    return out;
+  }, voices);
+  assert.equal(r.strum.guitar, 0.012, "the guitar's strum step is exported (low to high, 12 ms)");
+  for (const n of r.notes) {
+    const w = voices[n.voice];
+    t.diagnostic(`${n.voice} ${n.midi}: peak ${n.peak.toFixed(4)}, ends ${n.last.toFixed(3)} s, repeat diff ${n.diff.toExponential(2)}`);
+    assert.ok(n.peak > w.lo, `${n.voice} ${n.midi} peak ${n.peak} is above ${w.lo}`);
+    assert.ok(n.peak < w.hi, `${n.voice} ${n.midi} peak ${n.peak} is below ${w.hi}`);
+    assert.ok(n.diff < 1e-4, `${n.voice} ${n.midi} renders the same twice (max difference ${n.diff})`);
+  }
+  assert.deepEqual(errors, []);
+});
+
+test("studio synth: both 12.20 kits sound, each drum alone stays under 0.5, all four under 0.9, and render the same twice", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await studioPage(t, false);
+  const r = await p.evaluate(async () => {
+    const out = { drums: [], steps: {}, repeats: {} };
+    for (const kit of ["rock", "electro"]) {
+      for (const drum of ["kick", "snare", "hat", "perc"]) {
+        const a = await renderDrum(kit, drum);
+        out.drums.push({ kit, drum, peak: a.peak, last: a.last });
+      }
+      out.steps[kit] = (await renderStep(kit, 1)).peak;
+      const a = await renderDrum(kit, "snare"), b = await renderDrum(kit, "snare");
+      out.repeats[kit] = maxDiff(a.data, b.data);
+    }
+    return out;
+  });
+  for (const d of r.drums) {
+    t.diagnostic(`${d.kit} ${d.drum}: peak ${d.peak.toFixed(3)}, ends ${d.last.toFixed(3)} s`);
+    assert.ok(d.peak > 0.03, `${d.kit} ${d.drum} is audible (peak ${d.peak})`);
+    assert.ok(d.peak <= 0.5, `${d.kit} ${d.drum} peak ${d.peak} is at most 0.5`);
+  }
+  for (const kit of ["rock", "electro"]) {
+    t.diagnostic(`${kit} all four on one step: peak ${r.steps[kit].toFixed(3)}`);
+    assert.ok(r.steps[kit] < 0.9, `${kit}: all four drums together peak under 0.9 (${r.steps[kit]})`);
+    assert.ok(r.repeats[kit] < 1e-4, `${kit} renders the same twice (max difference ${r.repeats[kit]})`);
+  }
+  assert.deepEqual(errors, []);
+});
+
 test("studio synth: the flute sounds at 57 and 79, peaks at 0.22, renders the same twice and stops after its release", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await studioPage(t, false);
   const r = await p.evaluate(async () => {
