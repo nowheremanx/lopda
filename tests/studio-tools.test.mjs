@@ -283,3 +283,13 @@ test("chords: bad object roots are named, and the error lists the qualities", ()
   assert.match(error([0.5]), /^roots:/);
   assert.match(error([{ root: 0, q: 7 }]), /^roots:.*q/);
 });
+
+test("diatonicQ: a bare degree is the scale's own triad or seventh; rich leaves it to the machine", () => {
+  const song = plain(S.newSong(0));
+  song.key = 9; song.scale = "harmonic-minor";
+  assert.deepEqual([0, 3, 4, 5].map((d) => T.diatonicQ(song, d, "triad")), ["m", "m", "maj", "maj"]);
+  assert.deepEqual([0, 4].map((d) => T.diatonicQ(song, d, "seventh")), ["m7", "7"]);
+  assert.equal(T.diatonicQ(song, 0, "rich"), null);
+  song.scale = "major";
+  assert.deepEqual([0, 1, 4].map((d) => T.diatonicQ(song, d, "seventh")), ["maj7", "m7", "7"]);
+});

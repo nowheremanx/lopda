@@ -2101,7 +2101,7 @@ test("studio: the key sheet sets the key and scale, and the mixer shows both", {
   await p.waitForSelector("#studio-sheet:not([hidden])");
   assert.equal(await p.textContent("#studio-sheet .sheet-title span"), "调式");
   assert.equal(await p.locator("#studio-sheet .st-key-btn").count(), 12, "twelve keys");
-  assert.equal(await p.locator("#studio-sheet .st-scale-btn").count(), 5, "five scales");
+  assert.equal(await p.locator("#studio-sheet .st-scale-btn").count(), 8, "eight scales");
   const close = await p.locator("#studio-sheet .st-sheet-close").boundingBox();
   assert.ok(close.width >= 44 && close.height >= 44, "the sheet's back button is a 44 px target");
   await p.locator('#studio-sheet .st-key-btn[data-key="0"]').click();
@@ -2196,6 +2196,65 @@ test("studio: 导出 WAV writes a mono 16-bit 22.05 kHz WAV with sound in it", {
   assert.equal(w.data, w.size - 44, "the data chunk is the whole rest of the file");
   assert.ok(w.size > 44 + 22050, `at least a second of audio (${w.size} bytes)`);
   assert.ok(w.rms > 0.01, `the render is not silence (${w.rms})`);
+  assert.deepEqual(errors, []);
+});
+
+test("studio: export this tape as JSON downloads the stored v1 song", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await p.evaluate(() => {
+    window.__json = null;
+    LopdaPlatform.downloads.save = async ({ filename, data }) => {
+      window.__json = { filename, type: data.type, text: await data.text() };
+      return { status: "saved" };
+    };
+  });
+  await openFileMenu(p);
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "导出这盘（JSON）" }).click();
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  await p.waitForFunction(() => window.__json, null, { timeout: 15000 });
+  const got = await p.evaluate(() => window.__json);
+  assert.match(got.filename, /^tape4-\d{8}-\d{4}\.json$/, "a dated tape4 name");
+  assert.equal(got.type, "application/json");
+  const checked = await p.evaluate(() => {
+    const song = JSON.parse(window.__json.text);
+    const out = LopdaSong.validate(song);
+    return { v: song.v, error: out.error || null, name: out.song && out.song.name };
+  });
+  assert.equal(checked.v, 1);
+  assert.equal(checked.error, null, "the JSON parses and validates as a v1 song");
+  assert.deepEqual(errors, []);
+});
+
+test("studio: export this tape as MIDI downloads a format 1 Standard MIDI File", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await p.evaluate(() => {
+    window.__midi = null;
+    LopdaPlatform.downloads.save = async ({ filename, data }) => {
+      const b = new Uint8Array(await data.arrayBuffer());
+      window.__midi = {
+        filename, type: data.type, size: b.length,
+        header: String.fromCharCode(...b.slice(0, 4)),
+        format: (b[8] << 8) | b[9], ntracks: (b[10] << 8) | b[11], division: (b[12] << 8) | b[13],
+      };
+      return { status: "saved" };
+    };
+  });
+  await openFileMenu(p);
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "导出这盘（MIDI）" }).click();
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  await p.waitForFunction(() => window.__midi, null, { timeout: 15000 });
+  const midi = await p.evaluate(() => window.__midi);
+  assert.match(midi.filename, /^tape4-\d{8}-\d{4}\.mid$/, "a dated tape4 name");
+  assert.equal(midi.type, "audio/midi");
+  assert.equal(midi.header, "MThd");
+  assert.equal(midi.format, 1);
+  assert.equal(midi.ntracks, 5, "one conductor and four instrument tracks");
+  assert.equal(midi.division, 96);
+  assert.ok(midi.size > 20, `a real file (${midi.size} bytes)`);
   assert.deepEqual(errors, []);
 });
 

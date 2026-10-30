@@ -36,6 +36,9 @@ test("constants: format, tracks, scales, demo beat", () => {
     minor: [0, 2, 3, 5, 7, 8, 10],
     major: [0, 2, 4, 5, 7, 9, 11],
     dorian: [0, 2, 3, 5, 7, 9, 10],
+    "harmonic-minor": [0, 2, 3, 5, 7, 8, 11],
+    mixolydian: [0, 2, 4, 5, 7, 9, 10],
+    phrygian: [0, 1, 3, 5, 7, 8, 10],
   });
   assert.deepEqual([S.SWING_MIN, S.SWING_MAX, S.SWING_DEFAULT], [0.5, 0.75, 0.55]);
   assert.equal(S.TAPE_MAX, 4);
@@ -516,6 +519,9 @@ test("constants: parent scales, voices, note velocity, chord cells, note names, 
     minor: "minor",
     major: "major",
     dorian: "dorian",
+    "harmonic-minor": "harmonic-minor",
+    mixolydian: "mixolydian",
+    phrygian: "phrygian",
   });
   assert.deepEqual(plain(S.SOUND), { bass: "bass", chords: "keys", melody: "flute" });
   assert.equal(S.NOTE_VEL, 0.8);
@@ -1728,4 +1734,12 @@ test("12.20.5 an old song's events, notes and names are exactly what they were",
   for (const track of ["bass", "chords", "melody"])
     for (const n of song.patterns[0].notes[track])
       for (const k of ["acc", "gate", "orn", "q"]) assert.equal(k in n, false, `${track} ${k}`);
+});
+
+test("harmonic minor: the fifth degree is a major chord (E in A harmonic minor) and the seventh is raised", () => {
+  const song = plain(S.newSong(0));
+  song.key = 9; song.scale = "harmonic-minor";
+  assert.equal(S.chordName(song, 4).name.slice(0, 1), "E");
+  assert.equal(S.chordNotes(song, 4)[1] % 12, 8, "G sharp, the raised seventh, is the third of V");
+  assert.equal(S.noteMidi(song, "melody", 6) % 12, 8);
 });
