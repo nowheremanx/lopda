@@ -76,6 +76,8 @@ JSON_ONLY,
 "- chordStyle: what a bare chord degree becomes: triad (the scale's own major, minor or diminished chord: folk, pop,",
 "  rock, marches, most traditional music), seventh (the scale's own 7th chords: soul, bossa, swing) or rich (the",
 "  machine's lush sevenths and ninths: lofi, neo-soul, jazz ballads). Default triad.",
+"- For the scale's own chord write just the degree: in a minor key 2 is already the MAJOR chord III and 3 the minor iv.",
+"  Write an object only for a chord that is not the scale's own (borrowed, a different type, sus, power).",
 "- chords: one per bar, either a degree 0-5 (voiced by chordStyle) or",
 "  {\"root\":0-5,\"q\":\"<type>\",\"acc\":-1 or 1} for a chosen type or a borrowed chord (in major, bVII is",
 "  {\"root\":5,\"acc\":1,\"q\":\"maj\"}). Plain pop wants maj and m triads, jazz and R&B sevenths and ninths, rock 5 (power).",
@@ -207,12 +209,26 @@ EDIT_ONLY.concat(TOOLS).join("\n")
   ].join("\n");
   var f=o.focus;
   var where=f ? "\nThe user is looking at pattern "+"ABCDEFGHIJKLMNOP".charAt(f.pattern||0)+" ("+(f.pattern||0)+") on the "+(f.screen||"main")+" screen." : "";
-  return msgs("edit",system,"SONG\n"+o.overview+where+"\n\nREQUEST: "+(o.text||""));
+  return msgs("edit",system,"SONG\n"+o.overview+where+"\n"+chordTable(o.song)+"\n\nREQUEST: "+(o.text||""));
+}
+
+/* The scale's own chord on each degree, named, so a model never writes "C minor" in A minor by guessing (owner's
+   tape, 2026-10-30: chords Am, Cm, D7 in A minor). */
+function chordTable(song){
+  var S=window.LopdaSong, T=window.LopdaStudioTools, out=[], d, q, n;
+  if(!S || !T || !song) return "";
+  for(d=0;d<=5;d++){
+    q=T.diatonicQ(song,d,"triad");
+    n=S.chordName(song,d,q);
+    out.push(d+" = "+(n ? n.name : "?"));
+  }
+  return "Chords of "+S.NAMES[song.key]+" "+song.scale+" (degree = the scale's own chord): "+out.join(", ")+
+    ". Writing q changes the chord: only do it on purpose (a borrowed chord, a seventh), never to guess the scale's chord.";
 }
 
 function reject(reason){
   return "That JSON was rejected: "+reason+". Reply with the corrected JSON only.";
 }
 
-window.LopdaStudioPrompts={plan:plan, melody:melody, listen:listen, edit:edit, reject:reject, lang:lang};
+window.LopdaStudioPrompts={chordTable:chordTable, plan:plan, melody:melody, listen:listen, edit:edit, reject:reject, lang:lang};
 })();
