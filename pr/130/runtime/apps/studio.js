@@ -1718,7 +1718,7 @@ function applyAiPreview(play){
     });
     return;
   }
-  saveVersion(tr("studio.version.before"));
+  saveVersion(tr("studio.ai.before"));
   T.aiPreview=null;
   T.aiNote="";
   T.song=out.song;

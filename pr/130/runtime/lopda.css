@@ -920,6 +920,6 @@ textarea::placeholder{color:var(--ink-2)}
 .st-guide-text{margin:0;font-size:15px;line-height:1.45;white-space:pre-line}
 .st-ai-chips{flex:none;display:flex;gap:4px}
 .st-ai-chip{flex:1;min-width:0;min-height:44px;padding:2px 3px;background:transparent;color:var(--ink);border:2px solid var(--ink);font-family:var(--f-lcd);font-size:12px;line-height:1.15;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.st-ai-preview{flex:none;display:flex;flex-direction:column;gap:6px}
+.st-ai-preview{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:6px}
 .st-ai-reply{margin:0;font-size:15px;line-height:1.4;white-space:pre-line}
 .st-ai-state{color:var(--ink)}
