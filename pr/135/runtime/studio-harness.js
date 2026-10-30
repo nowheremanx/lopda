@@ -137,8 +137,20 @@ function planCheck(obj,cards){
   if(!plain(obj)) return {error:"reply with one JSON object"};
   bpm=obj.bpm; sections=obj.sections; order=obj.order;
   if(!int(obj.card) || obj.card<1 || obj.card>cards) return {error:"card must be 1-"+cards};
-  if(obj.scale!=null && ["major","minor","dorian"].indexOf(obj.scale)<0)
-    return {error:"scale must be major, minor or dorian (or left out)"};
+  if(obj.scale!=null && !S.SCALES[obj.scale])
+    return {error:"scale must be one of "+Object.keys(S.SCALES).join(", ")+" (or left out)"};
+  if(obj.key!=null && (!int(obj.key) || obj.key<0 || obj.key>11)) return {error:"key must be 0-11 (C=0) or left out"};
+  if(obj.kit!=null && S.KIT_CHOICES.indexOf(obj.kit)<0) return {error:"kit must be one of "+S.KIT_CHOICES.join(", ")};
+  if(obj.swing!=null && (!num(obj.swing) || obj.swing<S.SWING_MIN || obj.swing>S.SWING_MAX))
+    return {error:"swing must be "+S.SWING_MIN+"-"+S.SWING_MAX+" or left out"};
+  if(obj.voices!=null){
+    if(!plain(obj.voices)) return {error:"voices must be {\"bass\":..., \"chords\":..., \"melody\":...}"};
+    for(var vt in obj.voices){
+      if(!Object.prototype.hasOwnProperty.call(obj.voices,vt)) continue;
+      if(!S.VOICE_CHOICES[vt]) return {error:"voices: unknown track '"+vt+"'; use bass, chords, melody"};
+      if(S.VOICE_CHOICES[vt].indexOf(obj.voices[vt])<0) return {error:"voices."+vt+" must be one of "+S.VOICE_CHOICES[vt].join(", ")};
+    }
+  }
   if(!num(bpm) || bpm<S.BPM_MIN || bpm>S.BPM_MAX)
     return {error:"bpm must be "+S.BPM_MIN+"-"+S.BPM_MAX};
   if(!Array.isArray(sections) || !sections.length) return {error:"sections must be a non-empty list"};
@@ -153,8 +165,8 @@ function planCheck(obj,cards){
     if(!Array.isArray(s.chords) || s.chords.length<1 || s.chords.length>4)
       return {error:"section '"+id+"': chords must be 1-4 roots, one per bar"};
     for(j=0;j<s.chords.length;j++){
-      if(!int(s.chords[j]) || s.chords[j]<0 || s.chords[j]>5)
-        return {error:"section '"+id+"': each chord root must be an integer 0-5"};
+      var cr=T.run(S.newSong(0),{tool:"chords",pattern:0,roots:[s.chords[j]]});
+      if(cr.error) return {error:"section '"+id+"' bar "+(j+1)+": "+cr.error};
     }
     if(s.drums!=null && s.groove==null){
       var tried=T.run(S.newSong(0),{tool:"groove",pattern:0,steps:s.drums});
@@ -163,8 +175,11 @@ function planCheck(obj,cards){
       return {error:"section '"+id+"': unknown groove '"+String(s.groove)+"'; use one of "+Object.keys(ST.GROOVES).join(", ")+", or write drums"};
     if(s.strum!=null && T.CHORD_RHYTHMS.indexOf(s.strum)<0)
       return {error:"section '"+id+"': strum must be one of "+T.CHORD_RHYTHMS.join(", ")};
-    if(typeof s.bass!=="string" || !ST.BASS[s.bass])
-      return {error:"section '"+id+"': unknown bass rhythm '"+String(s.bass)+"'; use one of "+Object.keys(ST.BASS).join(", ")};
+    if(Array.isArray(s.bass)){
+      var br=T.run(S.newSong(0),{tool:"bass",pattern:0,steps:s.bass});
+      if(br.error) return {error:"section '"+id+"': "+br.error};
+    } else if(typeof s.bass!=="string" || !ST.BASS[s.bass])
+      return {error:"section '"+id+"': unknown bass rhythm '"+String(s.bass)+"'; use one of "+Object.keys(ST.BASS).join(", ")+", or write [[step, velocity, move], ...]"};
     if(!int(s.energy) || s.energy<0 || s.energy>2)
       return {error:"section '"+id+"': energy must be 0, 1 or 2"};
     if(typeof s.melody!=="boolean")
@@ -203,7 +218,7 @@ function planCheck(obj,cards){
   }
   var keptOrder=[];
   for(i=0;i<order.length;i++) keptOrder.push([order[i][0],order[i][1]]);
-  return {value:{card:obj.card, scale:obj.scale||"",
+  return {value:{card:obj.card, scale:obj.scale||"", key:obj.key, kit:obj.kit||"", swing:obj.swing, voices:obj.voices||{},
     name:typeof obj.name==="string" && obj.name.trim() ? obj.name.trim() : "Tape4",
     bpm:bpm, sections:kept, order:keptOrder}};
 }
@@ -226,6 +241,10 @@ function laySong(roll,plan,now){
   var song=S.newSong(now), r, i, j, k, s, p, fill, follows={}, seq=chainSections(plan);
   song.key=roll.key; song.scale=roll.scale; song.swing=roll.swing; song.tape=roll.tape; song.kit=roll.kit;
   song.bpm=plan.bpm; song.name=cut(plan.name,S.NAME_MAX);
+  /* the sound the plan chose (12.20): a kit and a voice per track, over the card's defaults */
+  if(plan.kit) song.kit=plan.kit;
+  if(num(plan.swing)) song.swing=Math.round(plan.swing*100)/100;
+  for(var vt in plan.voices) if(Object.prototype.hasOwnProperty.call(plan.voices,vt)) song=S.setTrackVoice(song,vt,plan.voices[vt]);
   /* newSong carries one demo bar so the editor is never blank; a planned song starts empty. */
   r=E.apply(song,[{op:"clearPattern",pattern:0}]);
   if(!r.song) throw toolsError("clearPattern: "+(r.error||"did not apply"));
@@ -245,7 +264,7 @@ function laySong(roll,plan,now){
       song=applyTool(song,{tool:"chords",pattern:p,roots:[s.chords[j]],rhythm:s.strum});
       song=applyTool(song,s.drums ? {tool:"groove",pattern:p,steps:s.drums,energy:s.energy,fill:fill}
         : {tool:"groove",pattern:p,style:s.groove,energy:s.energy,fill:fill});
-      song=applyTool(song,{tool:"bass",pattern:p,rhythm:s.bass});
+      song=applyTool(song,Array.isArray(s.bass) ? {tool:"bass",pattern:p,steps:s.bass} : {tool:"bass",pattern:p,rhythm:s.bass});
     }
   }
   var chain=[];
@@ -277,7 +296,10 @@ function melodyCheck(obj,bars){
       if(!int(deg) || deg<-3 || deg>10) return {error:"bar "+(i+1)+": degrees must be integers -3..10"};
       if(!num(vel) || (vel!==0 && (vel<0.3 || vel>1)))
         return {error:"bar "+(i+1)+": velocity must be 0.3-1, or 0 for a rest"};
-      notes.push([step,deg,Math.round(vel*100)/100]);
+      var acc=n.length>3 && n[3]!=null ? n[3] : 0, orn=n.length>4 && n[4]!=null ? n[4] : "";
+      if(acc!==0 && acc!==1 && acc!==-1) return {error:"bar "+(i+1)+": the 4th value (acc) must be -1, 0 or 1"};
+      if(orn!=="" && orn!=="slide" && orn!=="vib") return {error:"bar "+(i+1)+": the 5th value (ornament) must be \"slide\" or \"vib\""};
+      notes.push(orn ? [step,deg,Math.round(vel*100)/100,acc,orn] : acc ? [step,deg,Math.round(vel*100)/100,acc] : [step,deg,Math.round(vel*100)/100]);
       prev=step;
     }
     key=JSON.stringify(notes);
@@ -318,8 +340,9 @@ function melodyRun(c,song,plan,roll,text,onStage){
     for(i=placeAt+1;i<plan.sections.length;i++){ nextSection=plan.sections[i]; break; }
     stage(onStage,"melody",at+1,list.length,{section:s.id});
     for(i=0;i<s.patterns.length;i++){
-      var cn=S.chordName(song,s.chords[i]);
-      bars.push({chord:cn?cn.name:"deg"+s.chords[i], tones:T.chordTones(song,s.chords[i])});
+      var spec=int(s.chords[i]) ? {root:s.chords[i]} : s.chords[i];
+      var cn=S.chordName(song,spec.root,spec.q,spec.acc);
+      bars.push({chord:cn?cn.name:"deg"+spec.root, tones:T.chordToneText(song,spec)});
     }
     var place="the "+ordinal(placeAt+1)+" of "+plan.sections.length+" sections, "+
       (nextSection?"before the "+nextSection.id:"the last section");
@@ -387,6 +410,7 @@ function skeleton(o){
       var plan=ans.value, song;
       roll=rolls[plan.card-1];
       if(plan.scale) roll.scale=plan.scale;
+      if(plan.key!=null) roll.key=plan.key;
       cardName=zh?roll.card.zh:roll.card.en;
       stage(o.onStage,"card",1,1,{card:cardName,key:S.NAMES[roll.key],scale:roll.scale,bpm:plan.bpm});
       stage(o.onStage,"lay",1,1,{});
