@@ -3929,15 +3929,13 @@ test("studio: an AI draft becomes a new tape and leaves the current one alone", 
         { id: "chorus", chords: [3, 4, 0, 5], groove: "lofi-a", energy: 2, bass: "whole", melody: true },
         { id: "outro", chords: [0], groove: "lofi-a", energy: 0, bass: "whole", melody: false },
       ],
-      order: [["intro", 1], ["verse", 3], ["chorus", 3], ["verse", 2], ["chorus", 3], ["outro", 1]],
+      order: [["intro", 1], ["verse", 2], ["chorus", 2], ["verse", 2], ["chorus", 2], ["verse", 1], ["chorus", 1], ["outro", 1]],
     };
-    const melody = { bars: [
-      [[0, 0, 0.9], [4, 2, 0.7], [8, 4, 0.8], [12, 2, 0.6]],
-      [[0, 2, 0.9], [4, 4, 0.7], [8, 2, 0.8], [12, 0, 0.6]],
-      [[0, 4, 0.9], [4, 2, 0.7], [8, 0, 0.8], [12, 2, 0.6]],
-      [[0, 0, 0.9], [4, 4, 0.7], [8, 2, 0.8], [12, 0, 0.6]],
-    ] };
-    const answers = { plan: JSON.stringify(plan), melody: JSON.stringify(melody),
+    const motif = { motifs: {
+      verse: { rhythm: [0, 3, 4, 8, 12], answer: [0, 6, 8, 12], contour: [1, 1, -2, 1], register: "mid", ending: "open" },
+      chorus: { rhythm: [0, 2, 8, 10], contour: [2, -1, 1], register: "high", ending: "home" },
+    } };
+    const answers = { plan: JSON.stringify(plan), motif: JSON.stringify(motif),
       listen: JSON.stringify({ reply: "这盘磁带写好了", calls: [] }) };
     LP.ai.on = () => true;
     window.__aiSteps = [];
@@ -3957,7 +3955,7 @@ test("studio: an AI draft becomes a new tape and leaves the current one alone", 
   assert.match(await p.textContent("#studio-sheet .st-sheet-label"), /新磁带/);
   assert.match(await p.textContent("#studio-sheet .st-ai-card"), /抽到风格卡.*BPM/);
   assert.match(await p.textContent("#studio-sheet .st-ai-reply"), /这盘磁带写好了/);
-  assert.deepEqual(await p.evaluate(() => window.__aiSteps), ["plan", "melody", "melody", "listen"]);
+  assert.deepEqual(await p.evaluate(() => window.__aiSteps), ["plan", "motif", "listen"]);
   await p.locator("#studio-sheet .st-sheet-btn", { hasText: "采用并试听" }).click();
   await p.waitForFunction(() => /100 BPM/.test((document.querySelector("#studio-bpm") || {}).textContent || ""));
   assert.equal(await p.getAttribute("#v-studio", "data-screen"), "drums");

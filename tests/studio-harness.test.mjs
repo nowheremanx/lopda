@@ -5,7 +5,7 @@ import vm from "node:vm";
 import { runScript, read } from "./helpers.mjs";
 
 const ctx = runScript("runtime/studio-song.js");
-for (const f of ["studio-styles.js", "studio-tools.js", "studio-theory.js", "studio-edit.js", "studio-prompts.js", "studio-ai.js", "studio-harness.js"]) {
+for (const f of ["studio-styles.js", "studio-tools.js", "studio-theory.js", "studio-compose.js", "studio-edit.js", "studio-prompts.js", "studio-ai.js", "studio-harness.js"]) {
   vm.runInContext(read("runtime/" + f), ctx, { filename: "runtime/" + f });
 }
 const S = ctx.LopdaSong, ST = ctx.LopdaStudioStyles, E = ctx.LopdaStudioEdit, H = ctx.LopdaStudioHarness;
@@ -39,7 +39,7 @@ function makeAsk(script) {
   return ask;
 }
 
-function planFor(bpm = 100) {
+function planFor(bpm = 80) {
   return {
     card: 1,
     name: "Rain on the tram",
@@ -50,28 +50,23 @@ function planFor(bpm = 100) {
       { id: "chorus", chords: [3, 4, 0, 5], groove: "lofi-b", energy: 2, bass: "eighths", melody: true },
       { id: "outro", chords: [0], groove: "lofi-a", energy: 0, bass: "whole", melody: false },
     ],
-    /* 42 bars at 100 BPM: 100.8 s, 10 patterns, 42 chain slots */
-    order: [["intro", 1], ["verse", 3], ["chorus", 3], ["verse", 2], ["chorus", 2], ["outro", 1]],
+    /* 34 bars at 80 BPM: 102 s; 10 patterns plus a second last bar for the verse and the chorus */
+    order: [["intro", 1], ["verse", 2], ["chorus", 2], ["verse", 2], ["chorus", 2], ["outro", 1]],
   };
 }
 
-function melodyBars(messages) {
-  const user = messages.find((m) => m.role === "user").content;
-  const count = (user.match(/^bar \d+:/gm) || []).length;
-  const bars = [];
-  for (let i = 0; i < count; i++) {
-    const lift = i % 2;                             /* not every bar is the same */
-    bars.push([[0, 2 + lift, 0.8], [4, 4 + lift, 0.7], [8, 5, 0.6], [12, 3 + lift, 0.8]]);
-  }
-  return { bars };
-}
+const MOTIFS = {
+  verse: { rhythm: [0, 3, 4, 8, 12], answer: [0, 6, 8, 12], contour: [1, 1, -2, 1], register: "mid", ending: "open" },
+  chorus: { rhythm: [0, 2, 8, 10], contour: [2, -1, 1], register: "high", ending: "home" },
+};
+function motifAnswer() { return { motifs: MOTIFS }; }
 
 const listenAnswer = { reply: "A rainy little tune at 100 BPM.", calls: [{ tool: "ghost", pattern: 0, amount: 1 }] };
 
 function fullAnswers(plan) {
   return (step, messages) => {
     if (step === "plan") return plan;
-    if (step === "melody") return melodyBars(messages);
+    if (step === "motif") return motifAnswer(messages);
     if (step === "listen") return listenAnswer;
     throw new Error("unexpected step " + step);
   };
@@ -97,9 +92,9 @@ test("skeleton: card, plan, laid bars, melodies and a listen-back", async () => 
 
   assert.equal(S.validate(out.song).error, undefined);
   assert.equal(S.validate(out.ops[0].song).error, undefined);
-  assert.equal(out.song.song.length, 42);
-  assert.equal(out.song.patterns.length, 10);
-  assert.equal(out.song.bpm, 100);
+  assert.equal(out.song.song.length, 34);
+  assert.equal(out.song.patterns.length, 12, "ten bars and two second endings");
+  assert.equal(out.song.bpm, 80);
   assert.equal(out.song.name, "Rain on the tram");
 
   const roll = ST.roll(ST.seeded(1));
@@ -110,20 +105,22 @@ test("skeleton: card, plan, laid bars, melodies and a listen-back", async () => 
   assert.equal(out.song.kit, roll.kit);
   assert.equal(out.card.id, roll.card.id);
 
-  assert.deepEqual(stages.map((s) => s.id), ["plan", "card", "lay", "melody", "melody", "listen"]);
+  assert.deepEqual(stages.map((s) => s.id), ["plan", "card", "lay", "motif", "listen"]);
   assert.equal(stages[1].vars.card, roll.card.en);
   assert.equal(stages[1].vars.key, S.NAMES[roll.key]);
   assert.equal(stages[1].vars.scale, roll.scale);
-  assert.equal(stages[1].vars.bpm, 100, "the plan's tempo, not the dice's");
-  assert.equal(stages[3].vars.section, "verse");
-  assert.equal(stages[4].vars.section, "chorus");
-  assert.equal(stages[3].n, 1);
-  assert.equal(stages[3].of, 2);
+  assert.equal(stages[1].vars.bpm, 80, "the plan's tempo, not the dice's");
 
-  assert.deepEqual(ask.seen.map((s) => s.step), ["plan", "melody", "melody", "listen"]);
-  const melodyUser = ask.seen[1].messages.find((m) => m.role === "user").content;
-  assert.match(melodyUser, /SECTION: verse \(the 2nd of 4 sections, before the chorus\), 4 bars/);
-  assert.match(melodyUser, /bar 1: chord \S+, chord tones \d/);
+  assert.deepEqual(ask.seen.map((s) => s.step), ["plan", "motif", "listen"]);
+  const motifUser = ask.seen[1].messages.find((m) => m.role === "user").content;
+  assert.match(motifUser, /verse: 4 bars, chords \S+ \S+ \S+ \S+, energy 1/);
+  assert.match(motifUser, /chorus: 4 bars/);
+
+  /* the second hearing of the verse ends on its own last bar (12.20.10) */
+  const chain = out.song.song;
+  assert.notEqual(chain[4], chain[8], "the verse's last bar differs the second time");
+  assert.equal(chain[1], chain[5], "the verse's first bar is the same");
+  for (const p of [1, 2, 3, 4, 5, 6, 7, 8]) assert.ok(out.song.patterns[p].notes.melody.length >= 2, "pattern " + p + " has a melody");
 });
 
 test("skeleton: two different seeds draw different keys", async () => {
@@ -146,7 +143,7 @@ test("skeleton: a too-short plan is sent back with the reason and then fixed", a
   let planCalls = 0;
   const ask = makeAsk((step, messages) => {
     if (step === "plan") return planCalls++ === 0 ? short : planFor();
-    if (step === "melody") return melodyBars(messages);
+    if (step === "motif") return motifAnswer(messages);
     if (step === "listen") return listenAnswer;
     throw new Error("unexpected step " + step);
   });
@@ -158,30 +155,31 @@ test("skeleton: a too-short plan is sent back with the reason and then fixed", a
   assert.match(retry[retry.length - 1].content, /That JSON was rejected: the song is \d+ s; add repeats so it is 100-200 s/);
 });
 
-test("skeleton: a melody with the wrong bar count is rewritten", async () => {
-  let melodyCalls = 0;
+test("skeleton: a motif of even eighths is sent back; a plan repeating a section four times is too", async () => {
+  let motifCalls = 0, planCalls = 0;
+  const loop = { ...planFor(), order: [["intro", 1], ["verse", 4], ["chorus", 4], ["outro", 1]] };
   const ask = makeAsk((step, messages) => {
-    if (step === "plan") return planFor();
-    if (step === "melody") {
-      melodyCalls++;
-      if (melodyCalls === 1) return { bars: [[[0, 2, 0.8]]] };
-      return melodyBars(messages);
+    if (step === "plan") return planCalls++ === 0 ? loop : planFor();
+    if (step === "motif") {
+      motifCalls++;
+      if (motifCalls === 1) return { motifs: { ...MOTIFS, verse: { ...MOTIFS.verse, rhythm: [0, 2, 4, 6, 8, 10, 12] } } };
+      return motifAnswer(messages);
     }
     if (step === "listen") return listenAnswer;
     throw new Error("unexpected step " + step);
   });
   const out = await H.skeleton({ text: "x", ask, rand: ST.seeded(1), now: 1000 });
-  assert.equal(melodyCalls, 3, "one rewrite, then the two sections");
   assert.equal(S.validate(out.song).error, undefined);
-  const retry = ask.seen[2].messages;                     /* the first melody ask, then its rewrite */
-  assert.match(retry[retry.length - 1].content, /write exactly 4 bars/);
+  assert.match(ask.seen[1].messages.at(-1).content, /repeats in order must be 1 or 2/);
+  assert.equal(motifCalls, 2);
+  assert.match(ask.seen.at(-2).messages.at(-1).content, /verse: rhythm has notes of one length only/);
 });
 
 test("skeleton: an empty answer is a rewrite with the reason 'empty answer'", async () => {
   let planCalls = 0;
   const ask = makeAsk((step, messages) => {
     if (step === "plan") return planCalls++ === 0 ? "" : planFor();
-    if (step === "melody") return melodyBars(messages);
+    if (step === "motif") return motifAnswer(messages);
     if (step === "listen") return listenAnswer;
     throw new Error("unexpected step " + step);
   });
@@ -340,13 +338,13 @@ test("skeleton: a section may write its own drums and strum its chords as stabs"
   assert.match(ask.seen[1].messages.at(-1).content, /steps must be 0-15/);
 });
 
-test("skeleton: the plan picks the sound, typed and borrowed chords and its own bass; melodies may leave the scale", async () => {
+test("skeleton: the plan picks the sound, typed and borrowed chords and its own bass; the melody follows a borrowed chord", async () => {
   const plan = { ...planFor(), key: 2, scale: "major", kit: "rock", voices: { chords: "guitar", melody: "bowed" } };
   plan.sections = plan.sections.map((s) => ({ ...s }));
   plan.sections[1].chords = [0, { root: 5, acc: 1, q: "maj" }, { root: 3, q: "m7" }, { root: 4, q: "sus4" }];
   plan.sections[1].bass = [[0, 0.9, "root"], [6, 0.6, "third"], [8, 0.8, "fifth"]];
   const answers = fullAnswers(plan);
-  const ask = makeAsk((step, messages) => (step === "melody" ? { bars: melodyBars(messages).bars.map((b) => [[0, 2, 0.8, 1, "slide"], ...b.slice(1)]) } : answers(step, messages)));
+  const ask = makeAsk((step, messages) => answers(step, messages));
   const out = await H.skeleton({ text: "x", ask, rand: ST.seeded(4), now: 1000 });
   const song = out.song;
   assert.equal(song.key, 2);
@@ -360,9 +358,12 @@ test("skeleton: the plan picks the sound, typed and borrowed chords and its own 
   assert.equal(S.chordName(song, ch.deg, ch.q, ch.acc).name, "C", "bVII of D major is C");
   const bass0 = verse2.bass.find((n) => n.t === 0);
   assert.equal(S.noteMidi(song, "bass", bass0.deg, bass0.acc) % 12, 0, "the bass plays the borrowed chord's root, C");
-  assert.ok(song.patterns[1].notes.melody.some((n) => n.acc === 1 && n.orn === "slide"));
-  const melodyUser = ask.seen.find((s) => s.step === "melody").messages.find((m) => m.role === "user").content;
-  assert.match(melodyUser, /bar 2: chord C, chord tones/);
+  /* the melody over the borrowed C chord takes its tones from it: C natural is degree 6 lowered in D major */
+  const motifUser = ask.seen.find((s) => s.step === "motif").messages.find((m) => m.role === "user").content;
+  assert.match(motifUser, /verse: 4 bars, chords D C Gm7 Asus4/);
+  const mel = verse2.melody.filter((n) => n.vel > 0);
+  const pcs = mel.map((n) => S.noteMidi(song, "melody", n.deg, n.acc) % 12);
+  assert.ok(pcs.includes(0) || pcs.includes(4) || pcs.includes(7), "a chord tone of C on the bar's strong beat");
 });
 
 test("wantsNewSong: words of making a song, or a fresh tape, start a new song; edits stay edits", () => {
