@@ -888,3 +888,25 @@ textarea::placeholder{color:var(--ink-2)}
 .st-copy-ask p{margin:0}
 .st-copy-ask .row{gap:10px}
 .st-copy-ask .btn{flex:1;min-height:44px}
+
+/* RADIO (apps/radio.js): the M2 acoustic modem bench. Four tones only; the body is one scrolling column. */
+.radio-view{display:flex;flex-direction:column;overflow:hidden}
+.radio-body{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:8px;display:flex;flex-direction:column;gap:8px}
+.radio-tabs{display:flex;gap:6px}
+.radio-tabs .btn{flex:1;min-height:44px;padding:6px 4px;font-size:14px}
+.radio-tabs .btn.on{background:var(--ink);color:var(--lcd);border-color:var(--ink)}
+.radio-settings{display:flex;flex-direction:column;gap:6px}
+.radio-field{display:flex;align-items:center;gap:8px;min-height:36px}
+.radio-field>span{flex:0 0 64px;font-size:13px;color:var(--ink-2)}
+.radio-field select{flex:1;min-width:0;min-height:38px;font-family:var(--f-lcd);font-size:15px;color:var(--ink);background:var(--lcd);border:2px solid var(--ink);border-radius:0;padding:4px 6px;-webkit-appearance:none;appearance:none}
+.radio-pane{display:flex;flex-direction:column;gap:8px}
+.radio-pane .btn{min-height:44px}
+.radio-actions{flex-wrap:nowrap}
+.radio-actions .btn{flex:1;min-width:0;padding:8px 6px;font-size:14px}
+.radio-meter{height:12px;border:2px solid var(--ink);background:var(--lcd);overflow:hidden}
+.radio-meter span{display:block;height:100%;width:0;background:var(--ink)}
+.radio-hex{font-size:14px;line-height:1.45;word-break:break-all;border:2px solid var(--ink-2);padding:4px 6px;min-height:20px;white-space:pre-wrap}
+.radio-scope{display:block;width:100%;height:120px;border:2px solid var(--ink);background:var(--lcd)}
+.radio-log{font-size:13px;line-height:1.4;border:2px solid var(--ink-2);padding:4px 6px;min-height:90px;max-height:170px;overflow-y:auto;word-break:break-all}
+.radio-note{margin-top:auto}
+.radio-field select{background-image:linear-gradient(45deg,transparent 50%,var(--ink) 50%),linear-gradient(135deg,var(--ink) 50%,transparent 50%);background-position:calc(100% - 15px) 16px,calc(100% - 10px) 16px;background-size:5px 5px,5px 5px;background-repeat:no-repeat;padding-right:28px}
