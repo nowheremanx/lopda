@@ -831,11 +831,14 @@ textarea::placeholder{color:var(--ink-2)}
 .st-chord-key.on small{color:var(--lcd)}
 /* the song screen: one row is a four-bar phrase; only the chain scrolls, and only when it outgrows its box */
 .st-song{flex:1;min-height:0;display:flex;flex-direction:column;gap:4px;padding:4px 6px 6px}
+.st-song-info{flex:none;font-family:var(--f-lcd);font-size:13px;line-height:1.2;color:var(--ink);padding:0 2px}
 .st-chain{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;touch-action:pan-y;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));grid-auto-rows:44px;gap:4px;align-content:start}
-.st-chain-cell{min-width:0;min-height:44px;display:flex;align-items:center;justify-content:center;padding:0;background:var(--lcd);color:var(--ink);border:2px solid var(--ink);font-family:var(--f-pix);font-size:20px;line-height:1;cursor:pointer}
+.st-chain-cell{position:relative;min-width:0;min-height:44px;display:flex;align-items:center;justify-content:center;padding:0;background:var(--lcd);color:var(--ink);border:2px solid var(--ink);font-family:var(--f-pix);font-size:20px;line-height:1;cursor:pointer}
 .st-chain-cell.sel{box-shadow:inset 0 0 0 4px var(--ink)}
 .st-chain-cell.playing{background:var(--ink);color:var(--lcd)}
 .st-chain-cell.playing.sel{box-shadow:inset 0 0 0 4px var(--lcd)}
+.st-chain-cell.same::after{content:"";position:absolute;right:5px;bottom:5px;width:5px;height:5px;background:var(--ink)}
+.st-chain-cell.same.playing::after{background:var(--lcd)}
 .st-song-btns{flex:none;display:flex;gap:4px}
 .st-song-btn{flex:1;min-width:0;min-height:44px;padding:2px 4px;background:var(--ink);color:var(--lcd);border:2px solid var(--ink);font-family:var(--f-lcd);font-size:13px;line-height:1.15;cursor:pointer}
 .st-song-btn:disabled{background:var(--lcd-3);color:var(--ink-2);border-color:var(--lcd-3);cursor:default}
