@@ -78,9 +78,9 @@ GM.ui = (function () {
 
   function codexValue(type) {
     var it = GM.ITEMS[type];
-    if (type === "bag") return money(it.min) + "-" + money(it.max);
+    if (type === "bag") return T.codexRandom;
     if (type === "tnt") return T.codexBoom;
-    if (type === "mole") return money(GM.ITEMS.goldM.value) + " / " + money(GM.ITEMS.diamond.value);
+    if (type === "mole") return T.codexMole;
     return money(it.value);
   }
 
@@ -166,17 +166,23 @@ GM.ui = (function () {
       next = state.level + 1;
       target = GM.targetFor(next);
       rows = "";
-      for (i = 0; i < GM.SHOP.length; i++) {
-        item = GM.SHOP[i];
+      var offers = state.shopOffers && state.shopOffers.length ? state.shopOffers : GM.shopOffers(state, next);
+      for (i = 0; i < offers.length; i++) {
+        item = offers[i];
         have = state[item.key] || 0;
-        can = have < item.max && state.bank >= item.price;
+        var capped = item.max != null && have >= item.max;
+        can = item.available && !capped && state.bank >= item.price;
         sel = state.shopCursor === i;
-        if (have >= item.max) price = T.max;
+        if (!item.available) price = T.soldOut;
+        else if (capped) price = T.max;
         else if (state.bank < item.price) price = GM.fmt(T.shortPrice, { d: GM.money(item.price - state.bank) });
-        else price = money(item.price);
+        else price = money(item.price) + (item.priceUp ? " " + T.priceUp : "");
+        var ownedText = item.max == null
+          ? GM.fmt(T.ownedMany, { n: have })
+          : GM.fmt(T.owned, { n: have, m: item.max });
         rows += '<button type="button" class="row' + (sel ? " sel" : "") + (can ? "" : " off") + '" data-act="buy" data-i="' + i + '">' +
           '<canvas class="sic" width="16" height="16" data-icon="' + ["dynIcon", "shopStrength", "shopClover", "shopBook"][i] + '" aria-hidden="true"></canvas>' +
-          '<span class="nm">' + esc(T.shopNames[i]) + " <i>" + esc(GM.fmt(T.owned, { n: have, m: item.max })) + "</i>" +
+          '<span class="nm">' + esc(T.shopNames[i]) + " <i>" + esc(ownedText) + "</i>" +
           "<small>" + esc(T.shopDescs[i]) + "</small></span>" +
           '<span class="pr">' + esc(price) + "</span></button>";
       }
@@ -309,8 +315,14 @@ GM.ui = (function () {
       lastIntro = "";
       return;
     }
-    var tip = state.level === 1 ? T.tip1 : state.level === 4 ? T.tip4 : state.level === 7 ? T.tip7 : T.tipDefault;
-    var html = "<b>" + esc(GM.fmt(T.intro, { n: state.level, t: GM.money(state.target) })) + "</b><span>" + esc(tip) + "</span>";
+    var tip = state.level === 1 ? T.tip1 : state.level === 2 ? T.tip2 : (state.level === 3 || state.level === 4) ? T.tip4
+      : state.level === 6 ? T.tip6 : state.level === 7 ? T.tip7 : T.tipDefault;
+    var buff = [];
+    if (state.strength) buff.push(T.buffNames[0]);
+    if (state.clover) buff.push(T.buffNames[1]);
+    if (state.book) buff.push(T.buffNames[2]);
+    var html = "<b>" + esc(GM.fmt(T.intro, { n: state.level, t: GM.money(state.target) })) + "</b><span>" + esc(tip) + "</span>" +
+      (buff.length ? "<span>" + esc(GM.fmt(T.buffIntro, { b: buff.join(" · ") })) + "</span>" : "");
     if (html === lastIntro) return;
     lastIntro = html;
     introEl.innerHTML = html;

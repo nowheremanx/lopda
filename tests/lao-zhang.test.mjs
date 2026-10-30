@@ -20,17 +20,23 @@ test("ten written levels have rising cumulative targets, and endless keeps risin
   for (let n = 11; n <= 20; n++) assert.ok(GM.targetFor(n) > GM.targetFor(n - 1), `endless ${n}`);
 });
 
-test("every level can pay its target increment from the loot it puts in the mine", () => {
-  for (let n = 1; n <= GM.PLAY_LEVELS; n++) {
-    const increment = GM.targetFor(n) - GM.targetFor(n - 1);
+test("the target curve is rich early, tight at the spikes, and the loot can pay it", () => {
+  const early = [1, 2, 3];
+  for (const n of early) {
+    const increment = GM.targetFor(n) - (n === 1 ? 0 : GM.targetFor(n - 1));
     const loot = GM.recipeValue(n, 0, 0);
-    assert.ok(loot.min >= increment * 1.5, `level ${n}: min loot ${loot.min} vs increment ${increment}`);
+    assert.ok(loot.min >= increment * 1.5, `level ${n}: early loot ${loot.min} should dwarf ${increment}`);
+  }
+  for (let n = 1; n <= GM.PLAY_LEVELS; n++) {
+    const increment = GM.targetFor(n) - (n === 1 ? 0 : GM.targetFor(n - 1));
+    const loot = GM.recipeValue(n, 0, 0);
+    assert.ok(loot.min >= increment * 1.15, `level ${n}: min loot ${loot.min} vs increment ${increment}`);
     assert.ok(loot.max >= loot.min, `level ${n}: max < min`);
     assert.ok(GM.recipeCount(GM.recipeFor(n)) >= 14, `level ${n}: too few items`);
   }
 });
 
-test("generated loot stays in the mine, keeps high-value pieces, and does not overlap", () => {
+test("generated loot stays reachable, keeps high-value pieces, and does not overlap", () => {
   for (let n = 1; n <= GM.PLAY_LEVELS; n++) {
     const state = { level: n, clover: 0, book: 0, rng: GM.rng(7000 + n), levelSeed: 7000 + n };
     const recipe = GM.recipeFor(n);
@@ -46,10 +52,12 @@ test("generated loot stays in the mine, keeps high-value pieces, and does not ov
       assert.ok(it.x <= GM.W - it.r, `level ${n}: ${it.type} x ${it.x} too far right`);
       assert.ok(it.y >= 35, `level ${n}: ${it.type} y ${it.y} too high`);
       assert.ok(it.y <= GM.H - it.r, `level ${n}: ${it.type} y ${it.y} too low`);
+      assert.ok(GM.reachable(it.x, it.y, it.r), `level ${n}: ${it.type} outside the hook's arc`);
       if (it.type === "mole") {
         assert.ok(it.y >= 82 && it.y <= 120, `level ${n}: mole lane`);
         assert.ok(it.dir === -1 || it.dir === 1);
-        assert.equal(it.carry, n >= 6 ? "diamond" : "goldM");
+        assert.ok(it.carry === "none" || it.carry === "diamond");
+        assert.ok(it.value === (it.carry === "diamond" ? GM.ITEMS.diamond.value : 0));
       }
     }
     const solid = items.filter((it) => it.type !== "mole");
@@ -58,6 +66,20 @@ test("generated loot stays in the mine, keeps high-value pieces, and does not ov
         const a = solid[i], b = solid[j];
         const d = Math.hypot(a.x - b.x, a.y - b.y);
         assert.ok(d >= a.r + b.r - 0.01, `level ${n}: ${a.type}/${b.type} overlap (${d.toFixed(1)})`);
+      }
+    }
+  }
+});
+
+test("every TNT sits on something worth taking, and stays there across seeds", () => {
+  for (const seed of [1, 2, 3, 9, 77]) {
+    for (let n = 1; n <= GM.PLAY_LEVELS; n++) {
+      const state = { level: n, clover: 0, book: 0, rng: GM.rng(seed * 1000 + n), levelSeed: seed * 1000 + n };
+      const items = GM.generate(state, n);
+      for (const bomb of items.filter((it) => it.type === "tnt")) {
+        const near = items.some((it) => it !== bomb && it.kind !== "rock" && it.kind !== "junk" &&
+          it.type !== "tnt" && Math.hypot(it.x - bomb.x, it.y - bomb.y) <= 30);
+        assert.ok(near, `seed ${seed} level ${n}: TNT has no treasure within its blast`);
       }
     }
   }
@@ -127,24 +149,143 @@ test("dynamite cuts a heavy item; a lit TNT clears only what is near it", () => 
   assert.equal(state.blasts.length, 1);
 });
 
-test("the shop enforces prices and caps", () => {
+test("a hooked TNT rides back and blows up before it reaches the miner", () => {
   const state = GM.newState();
-  state.bank = 2000;
-  for (let i = 0; i < 5; i++) assert.equal(GM.buy(state, 0), true);
-  assert.equal(state.dynamite, 5);
-  assert.equal(state.bank, 1400);
-  assert.equal(GM.buy(state, 0), false, "dynamite is capped");
-  for (let i = 0; i < 3; i++) assert.equal(GM.buy(state, 1), true);
-  assert.equal(state.strength, 3);
-  assert.equal(GM.buy(state, 1), false, "strength is capped");
-  for (let i = 0; i < 2; i++) assert.equal(GM.buy(state, 2), true);
-  assert.equal(GM.buy(state, 2), false, "clover is capped");
-  assert.equal(GM.buy(state, 3), true);
-  assert.equal(GM.buy(state, 3), false, "the rock book is a one-off");
-  assert.equal(state.bank, 190);
-  state.bank = 0;
-  assert.equal(GM.buy(state, 0), false, "cannot buy without cash");
-  assert.equal(state.dynamite, 5);
+  state.screen = "play";
+  state.time = 60;
+  state.items = [
+    GM.makeItem(state, "tnt", 80, 132, GM.rng(3)),
+    GM.makeItem(state, "goldM", 100, 128, GM.rng(4))
+  ];
+  state.hook = { state: "swing", len: GM.IDLE_ROPE, angle: 0, item: null };
+  GM.fire(state);
+  for (let i = 0; i < 200 && state.hook.state !== "back"; i++) GM.update(state, 0.01);
+  assert.equal(state.hook.item && state.hook.item.type, "tnt");
+  assert.ok(state.hook.item.fuse > 0.15 && state.hook.item.fuse <= 1.05, "the fuse is a ride, not a countdown");
+  assert.ok(state.hook.len > 90, "the TNT is still deep when it is grabbed");
+
+  let blast = null;
+  for (let i = 0; i < 500 && !blast; i++) {
+    GM.update(state, 0.01);
+    if (state.blasts.length) blast = state.blasts[0];
+  }
+  assert.ok(blast, "the TNT explodes");
+  assert.ok(blast.y < 132 && blast.y > GM.ANCHOR.y, "it explodes on the way up, not at the spot");
+  assert.equal(state.bank, 0);
+  assert.equal(GM.countItems(state.items, "goldM"), 0, "the nearby gold is destroyed");
+});
+
+test("bags roll cash, dynamite or strength when hauled in", () => {
+  const rewards = [
+    { kind: "cash", value: 240 },
+    { kind: "dynamite", value: 2 },
+    { kind: "strength", value: 1 }
+  ];
+  const bank = [], dyn = [], str = [];
+  for (const reward of rewards) {
+    const state = GM.newState();
+    state.screen = "play";
+    state.hook = {
+      state: "back", len: 30, angle: 0,
+      item: { type: "bag", kind: "bag", value: reward.kind === "cash" ? reward.value : 0, weight: 0.9, r: 8, reward }
+    };
+    GM.collect(state);
+    bank.push(state.bank);
+    dyn.push(state.dynamite);
+    str.push(state.strength);
+  }
+  assert.deepEqual(bank, [240, 0, 0]);
+  assert.deepEqual(dyn, [0, 2, 0]);
+  assert.deepEqual(str, [0, 0, 1]);
+
+  const rng = GM.rng(99);
+  const kinds = { cash: 0, dynamite: 0, strength: 0 };
+  for (let i = 0; i < 1000; i++) kinds[GM.bagReward(rng, 0).kind]++;
+  assert.ok(kinds.cash > 400 && kinds.dynamite > 100 && kinds.strength > 100, JSON.stringify(kinds));
+});
+
+test("plain moles are worthless; the rare diamond mole is not", () => {
+  assert.ok(GM.moleGemChance(1) < 0.25);
+  assert.ok(GM.moleGemChance(10) > GM.moleGemChance(1));
+  const state = GM.newState();
+  state.screen = "play";
+  for (const [carry, expected, event] of [["none", 0, "junk"], ["diamond", 1500, "gem"]]) {
+    state.bank = 0;
+    state.events = [];
+    state.hook = {
+      state: "back", len: 30, angle: 0,
+      item: { type: "mole", kind: "mole", value: expected, weight: 0.9, r: 8, carry }
+    };
+    GM.collect(state);
+    assert.equal(state.bank, expected);
+    assert.ok(state.events.includes(event));
+  }
+});
+
+test("the shop has unlimited dynamite and one-level buffs", () => {
+  const state = GM.newState();
+  state.runSeed = 12345;
+  state.level = 0;
+  state.bank = 100000;
+  let sawMissing = false, sawPriceUp = false;
+  const prices = new Set();
+  for (let n = 1; n <= 10; n++) {
+    const offers = GM.shopOffers(state, n);
+    assert.equal(offers.length, GM.SHOP.length);
+    assert.equal(offers[0].available, true, "dynamite is always in stock");
+    for (const offer of offers) {
+      assert.ok(offer.price >= 30);
+      prices.add(offer.price);
+      if (!offer.available) sawMissing = true;
+      if (offer.priceUp) sawPriceUp = true;
+    }
+  }
+  assert.ok(sawMissing, "some shops have empty shelves");
+  assert.ok(sawPriceUp, "some shops raise a price");
+  assert.ok(prices.size > 4, "prices move with the level");
+
+  const offers = GM.shopOffers(state, 1);
+  state.shopOffers = offers;
+  const dynIndex = offers.findIndex((o) => o.key === "dynamite");
+  for (let i = 0; i < 20; i++) assert.equal(GM.buy(state, dynIndex), true, "dynamite has no cap");
+  assert.equal(state.dynamite, 20);
+
+  state.bank = 100000;
+  const str = offers.findIndex((o) => o.key === "strength" && o.available);
+  if (str >= 0) {
+    assert.equal(GM.buy(state, str), true);
+    assert.equal(state.strength, 1);
+    assert.equal(GM.buy(state, str), false, "a buff is bought once");
+  }
+
+  let missingIndex = -1;
+  for (let n = 1; n <= 10 && missingIndex < 0; n++) {
+    const list = GM.shopOffers(state, n);
+    missingIndex = list.findIndex((o) => !o.available);
+    if (missingIndex >= 0) state.shopOffers = list;
+  }
+  assert.ok(missingIndex >= 0);
+  state.bank = 100000;
+  assert.equal(GM.buy(state, missingIndex), false, "an empty shelf cannot be bought");
+});
+
+test("strength, clover and the rock book expire when the level ends", () => {
+  const state = GM.newState();
+  state.level = 4;
+  state.strength = 1;
+  state.clover = 1;
+  state.book = 1;
+  state.bank = 5000;
+  state.target = 4000;
+  GM.finishLevel(state);
+  assert.equal(state.screen, "clear");
+  assert.equal(state.strength, 0);
+  assert.equal(state.clover, 0);
+  assert.equal(state.book, 0);
+  assert.equal(state.run.level, 5);
+  assert.equal(state.run.strength, 0);
+  assert.equal(state.run.clover, 0);
+  assert.equal(state.run.book, 0);
 });
 
 test("a run in progress is saved at the level start, updated in the shop, and cleared on failure", () => {
@@ -168,14 +309,19 @@ test("a run in progress is saved at the level start, updated in the shop, and cl
   assert.equal(saved.run.bank, 900);
   assert.equal(GM.readRun({ v: 2, level: 3 }).newer, true);
   assert.equal(GM.readRun({ v: 1, level: 0, bank: 0 }).corrupt, true);
-  assert.equal(GM.readRun({ v: 1, level: 3, bank: 0, dynamite: 9, strength: 0, clover: 0, book: 0, runSeed: 1 }).corrupt, true);
+  assert.equal(GM.readRun({ v: 1, level: 3, bank: 0, dynamite: 10000, strength: 0, clover: 0, book: 0, runSeed: 1 }).corrupt, true);
 
   state.screen = "shop";
   state.bank = 1000;
-  GM.buy(state, 1);
-  assert.equal(state.run.level, 4);
-  assert.equal(state.run.bank, 800);
-  assert.equal(state.run.strength, 2);
+  state.shopOffers = GM.shopOffers(state, 4);
+  const clover = state.shopOffers.findIndex((o) => o.key === "clover" && o.available);
+  if (clover >= 0) {
+    assert.equal(GM.buy(state, clover), true);
+    assert.equal(state.run.level, 4);
+    assert.equal(state.run.clover, 1);
+  }
+  state.run.level = 3;
+  assert.ok(state.dynamite >= 2);
 
   state.level = 4;
   state.target = 4000;
@@ -184,6 +330,7 @@ test("a run in progress is saved at the level start, updated in the shop, and cl
   assert.equal(state.screen, "clear");
   assert.equal(state.run.level, 5);
   assert.equal(state.run.bank, 4500);
+  assert.equal(state.run.clover, 0);
 
   state.level = 5;
   state.target = 99999;
@@ -257,10 +404,12 @@ test("the manifest and both languages are store-ready", () => {
     }
     assert.equal(T.shopNames.length, GM.SHOP.length);
     assert.equal(T.shopDescs.length, GM.SHOP.length);
+    assert.equal(T.buffNames.length, 3);
     assert.equal(T.codexNames.length, GM.ITEM_ORDER.length);
   }
   for (const name of Object.keys(GM.ITEMS)) {
     if (name !== "mole") assert.ok(GM.SPR[name], `missing sprite ${name}`);
   }
   assert.equal(GM.SPR.diamond.w, 28);
+  assert.equal(GM.SPR.bag.w, 32);
 });

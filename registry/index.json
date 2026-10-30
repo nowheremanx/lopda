@@ -1,6 +1,6 @@
 {
   "spec": "lopda/1",
-  "generated": "2026-10-29",
+  "generated": "2026-10-30",
   "apps": [
     {
       "spec": "lopda/1",
@@ -423,20 +423,21 @@
         ".....000000.....",
         "................"
       ],
-      "version": "1.0.0",
+      "version": "1.1.0",
       "released": "2026-10-28",
-      "description": "六十秒一关：摆动钩子，钩金块、躲石头，用炸药和商店挖得更深。",
+      "updated": "2026-10-28",
+      "description": "六十秒一关：钩金块、躲炸药，钱袋随机，商店看运气。",
       "i18n": {
         "en": {
           "name": "GOLD DIG",
-          "description": "Swing the hook, haul gold, dodge rocks. Sixty seconds a level; shop between."
+          "description": "Swing the hook, haul gold, dodge TNT. Bags roll random loot; shops vary."
         }
       },
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/lao-zhang/index.html",
-      "sha256": "4303f630310ae05bc7fa9a5a6c9d2e285ed3427125e7f4684d6931f0dd3dfbdc",
-      "bytes": 86915
+      "sha256": "6f3671889cc08f8d5f68632a9431f27258cf2811c2bc77f5624331a1b8fe02c5",
+      "bytes": 103448
     },
     {
       "spec": "lopda/1",
@@ -684,7 +685,6 @@
       ],
       "version": "0.1.0",
       "released": "2026-10-28",
-      "updated": "2026-10-28",
       "description": "七天，守住山脚的小馆：采买、打怪、备菜、待客。",
       "i18n": {
         "en": {
