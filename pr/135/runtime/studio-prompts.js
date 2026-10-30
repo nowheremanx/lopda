@@ -31,7 +31,8 @@ var MACHINE=[
 "these sounds, rhythm and harmony: it will sound like the style, played on this machine.",
 "Chords may be any type: maj m 7 maj7 m7 9 m9 6 m6 add9 sus2 sus4 dim dim7 aug m7b5 5 (power), on a root that is a",
 "scale degree 0-5, optionally shifted a semitone (acc). Melody notes may leave the scale by a semitone (acc) and may",
-"carry an ornament: slide (up into the note) or vib (vibrato)."
+"carry an ornament: slide (up into the note) or vib (vibrato). A request for all twelve notes, the chromatic scale or",
+"\"全音阶\" means exactly this: use acc on melody (or bass) notes. There is no separate chromatic or whole-tone scale."
 ].join("\n");
 
 function lang(text){
@@ -187,6 +188,7 @@ MACHINE,
 "You change the user's song with tools. The summary below lists every pattern in use; read a pattern before you change",
 "its notes. Make the smallest change that answers the request and keep what already works. If the machine cannot do",
 "what is asked (see the limits above), change nothing and say why.",
+"Change only the patterns the request is about; do not add patterns or rebuild the chain unless asked.",
 "",
 JSON_ONLY,
 'Each turn: {"calls":[...],"done":false}  and you get each call\'s result back.',

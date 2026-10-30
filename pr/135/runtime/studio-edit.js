@@ -228,5 +228,19 @@ function mix(song,track,patch,at){
   return {song:next};
 }
 
-window.LopdaStudioEdit={apply:apply, NOTE_TRACKS:NOTE_TRACKS, ALL_TRACKS:ALL_TRACKS};
+/* A preview made of several model turns can hold more than one call's 64 operations (an edit that rewrote nine bars
+   came to 86). Applied in pieces of 64 on one working copy: still all or nothing for the caller. */
+function applyAll(song, ops){
+  var out=song, i, r;
+  if(!Array.isArray(ops)) return fail("ops",0);
+  if(!ops.length) return apply(song,ops);
+  for(i=0;i<ops.length;i+=64){
+    r=apply(out,ops.slice(i,i+64));
+    if(r.error) return {error:r.error, at:i+r.at, detail:r.detail||"", song:song};
+    out=r.song;
+  }
+  return {song:out, ops:ops.length};
+}
+
+window.LopdaStudioEdit={apply:apply, applyAll:applyAll, NOTE_TRACKS:NOTE_TRACKS, ALL_TRACKS:ALL_TRACKS};
 })();
