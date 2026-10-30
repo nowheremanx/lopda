@@ -119,6 +119,29 @@ function scoreAt(samples, start, period, win, sr){
   return {score:score, sep:sepSum};
 }
 
+/* Decode `count` symbols starting at `payloadStart`, with the same gate as decode(). */
+function decodeSymbols(samples, payloadStart, period, win, sr, count){
+  var symbols=[], confidences=[], erasures=0, i, r;
+  for(i=0;i<count;i++){
+    r=toneWindow(samples, Math.round(payloadStart+i*period), win, sr);
+    if(r.valid) symbols.push(r.idx); else { symbols.push(-1); erasures++; }
+    confidences.push(r.sep);
+  }
+  return {symbols:symbols, confidences:confidences, erasures:erasures};
+}
+
+/* Decode the frame's symbols after the preamble, from a sync result. The frame parser knows how many
+   bytes it needs, so a short ACK does not have to pretend to be a long DATA burst. */
+function decodePayload(samples, opts){
+  opts=opts||{};
+  var sr=opts.sampleRate||48000, ms=opts.symbolMs||40;
+  var period=sr*ms/1000, win=Math.max(64,Math.round(period));
+  var start=opts.startSample||0, count=opts.symbolCount||0;
+  var d=decodeSymbols(samples, start+PREAMBLE.length*period, period, win, sr, count);
+  return {symbols:d.symbols, confidences:d.confidences, erasures:d.erasures,
+    bytes:symbolsToBytes(d.symbols), totalSymbols:count, sampleRate:sr, rate:ms};
+}
+
 /* Decode one burst. expectedBytes is optional; without it the byte count comes from opts.symbolCount.
    Returns sync information even when the payload has errors, so the UI can say where it failed. */
 function decode(samples, opts){
@@ -175,12 +198,8 @@ function decode(samples, opts){
     offsetMs:start/sr*1000};
 
   var payloadStart=start+PREAMBLE.length*period;
-  var symbols=[], confidences=[], erasures=0;
-  for(i=0;i<payloadSymbols;i++){
-    r=toneWindow(samples, Math.round(payloadStart+i*period), win, sr);
-    if(r.valid){ symbols.push(r.idx); } else { symbols.push(-1); erasures++; }
-    confidences.push(r.sep);
-  }
+  var decoded=decodeSymbols(samples,payloadStart,period,win,sr,payloadSymbols);
+  var symbols=decoded.symbols, confidences=decoded.confidences, erasures=decoded.erasures;
   var bytes=symbolsToBytes(symbols);
   out.symbols=symbols; out.confidences=confidences; out.bytes=bytes; out.erasures=erasures;
   out.totalSymbols=payloadSymbols; out.totalBytes=bytes.length;
@@ -239,6 +258,7 @@ return {
   symbolsToBytes:symbolsToBytes,
   synth:synth,
   decode:decode,
+  decodePayload:decodePayload,
   toneWindow:toneWindow,
   goertzel:goertzel,
   testBytes:testBytes,

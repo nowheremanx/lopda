@@ -177,3 +177,18 @@ node --test tests/acoustic.test.mjs
 ```
 
 覆盖符号位序、48 kHz / 44.1 kHz × 四个速率、噪声、静音、截断和定时偏移。
+
+## M3：自动握手与可靠链路
+
+电波台现在默认开启 **自动握手**：先试 10 ms，接收端同时在 10/20/40 ms 上找 HELLO，并用同一速率回
+HELLO_ACK；没有 ACK 就退到 20/40。握手成功后发一帧 16 字节 DATA，CRC 校验，ACK/NACK，最多重试 3 次，最后 FIN。
+
+- 自动：一台点“等待连接”，另一台点“连接并发送”。
+- 手动 M2：取消“自动握手”，选速率和测试序列，再点原来的接收/发送。
+
+```sh
+node --test tests/acoustic-link.test.mjs
+node --test tests/acoustic.test.mjs
+```
+
+M3 的帧、CRC 和各速率往返已经自动验证；两台 iPhone 的自动握手还要真机跑一次。文本和任意字节是 M4。
