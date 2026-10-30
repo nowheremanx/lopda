@@ -886,7 +886,7 @@ test("studio: a new tape while playing keeps the beat going at the new tempo", {
   assert.ok(before > 0, "the 120 BPM tape is scheduling hits");
 
   await p.click("#studio-menu");
-  await p.locator("#studio-sheet .lcd-menu li", { hasText: "新磁带" }).first().click();
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "清空这一盘" }).first().click();
   await p.locator("#studio-sheet .st-ask .btn").first().click();       /* 确认 */
   const at = Date.now();
   await p.waitForFunction((n) => window.__studioHits.length > n, before, { timeout: 1500 });
@@ -1490,7 +1490,7 @@ test("studio tour: a new tape from a note tour leaves the drums screen untoured 
 
   await p.click("#studio-menu");
   await p.waitForSelector("#studio-sheet:not([hidden])");
-  await p.locator("#studio-sheet .lcd-menu li", { hasText: "新磁带" }).click();
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "清空这一盘" }).click();
   await p.waitForSelector("#studio-sheet .st-ask");
   await p.locator("#studio-sheet .st-ask .btn", { hasText: "确认" }).click();
   await p.waitForSelector("#studio-sheet", { state: "hidden" });
@@ -2490,8 +2490,8 @@ test("studio: the demo tape loads 24 slots and survives a reload", { skip, timeo
   await p.click("#studio-menu");
   await p.waitForSelector("#studio-sheet:not([hidden])");
   const items = await p.$$eval("#studio-sheet .lcd-menu li", (els) => els.map((e) => e.textContent.trim()));
-  assert.ok(items.includes("新磁带"), "the new tape is in the menu");
-  assert.ok(items.indexOf("示例磁带") > items.indexOf("新磁带"), "the demo tape sits under it");
+  assert.ok(items.includes("清空这一盘"), "the clear-this-tape row is in the menu");
+  assert.ok(items.indexOf("示例磁带") > items.indexOf("清空这一盘"), "the demo tape sits under it");
   await p.locator("#studio-sheet .lcd-menu li", { hasText: "示例磁带" }).click();
   await p.waitForSelector("#studio-sheet .st-ask");
   assert.match(await p.textContent("#studio-sheet .st-ask p"), /换成示例磁带？这一盘上的东西都会清掉。/);
