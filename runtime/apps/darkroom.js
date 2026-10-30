@@ -119,7 +119,7 @@ function sheetItems(){
     if(window.LOPDA_DEBUG) items.push({k:"compare", label:"dk.compare"});
     return items;
   }
-  if(D.sheet==="print") return [{k:"p-single", label:"dk.p.single"},{k:"p-card", label:"dk.p.card"},{k:"p-strip", label:"dk.p.strip"}];
+  if(D.sheet==="print") return [{k:"p-single", label:"dk.p.single"},{k:"p-all", label:"dk.p.all"},{k:"p-card", label:"dk.p.card"},{k:"p-strip", label:"dk.p.strip"}];
   if(D.sheet==="export") return [{k:"export-go", label:"dk.export.go"},{k:"back", label:"common.cancel"}];
   if(D.sheet==="discard") return [{k:"discard-go", label:"dk.discard.go"},{k:"back", label:"dk.discard.keep"}];
   if(D.sheet==="erase") return [{k:"erase-go", label:"dk.erase.go"},{k:"back", label:"dk.erase.keep"}];
@@ -185,6 +185,7 @@ function pick(){
   else if(it.k==="view"){ sfx("tap"); openViewer(current()); }
   else if(it.k==="compare") compareStocks(current());
   else if(it.k==="p-single" || it.k==="p-card" || it.k==="p-strip") printOut(it.k);
+  else if(it.k==="p-all") printAll();
   else if(it.k==="rename"){ sfx("tap"); D.sheet="name"; renderSheet(); }
   else if(it.k==="export"){ sfx("tap"); openConfirm("export"); }
   else if(it.k==="erase"){ sfx("tap"); openConfirm("erase"); }
@@ -734,6 +735,32 @@ function printOut(kind){
   if(job && job.out){ sfx("tap"); renderKeys(); save(job.out); return; }
   sfx("tap"); D.busy=tr("dk.printing"); viewWait(D.busy); renderKeys();
   (job ? job.promise : buildPrint(kind,r,D.idx)).then(save,function(e){ toast(tr("save.failed",{code:(e&&e.message)||"?"})); sfx("err"); }).then(function(){
+    D.busy=null; if(D.mode==="view") viewWait(D.pics && D.pics.img[D.idx] ? null : "…"); renderKeys();
+  });
+}
+/* the whole roll as single prints, one file per frame. A blank frame is not a picture, so the batch leaves it out
+   (the viewer can still print one on its own). Built one at a time, then handed over in one share sheet. */
+function printAll(){
+  var r=current(); if(!r || !r.dev) return;
+  var gen=D.gen, frames=[], files=[];
+  r.frames.forEach(function(f,k){ if(!f.blank) frames.push(k); });
+  D.sheet=""; renderSheet();
+  if(!frames.length){ sfx("err"); toast(tr("dk.printnone")); renderKeys(); return; }
+  sfx("tap"); D.busy=tr("dk.printing.n",{n:0,all:frames.length}); viewWait(D.busy); renderKeys();
+  frames.reduce(function(pr,k,i){
+    return pr.then(function(){
+      if(gen!==D.gen) return;
+      D.busy=tr("dk.printing.n",{n:i+1,all:frames.length}); viewWait(D.busy);
+      return buildPrint("p-single",r,k).then(function(o){
+        if(gen===D.gen && o) files.push({filename:o.name, data:o.blob});
+      });
+    });
+  },Promise.resolve()).then(function(){
+    if(gen!==D.gen || !files.length) return;
+    return P.downloads.saveAll(files,tr("dk.print.ready",{n:files.length})).then(function(res){
+      if(res && res.status==="saved"){ sfx("ok"); toast(tr("dk.printed.n",{n:files.length})); }
+    },function(e){ if(!(e && e.code==="declined")){ toast(LP.saveErr(e)); sfx("err"); } });
+  },function(e){ toast(tr("save.failed",{code:(e&&e.message)||"?"})); sfx("err"); }).then(function(){
     D.busy=null; if(D.mode==="view") viewWait(D.pics && D.pics.img[D.idx] ? null : "…"); renderKeys();
   });
 }

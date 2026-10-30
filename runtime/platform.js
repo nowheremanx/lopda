@@ -8,7 +8,8 @@
  *   LopdaPlatform.db         a tiny document store on IndexedDB
  *                            doc(path) / collection(path), get / set / update / delete / where
  *   LopdaPlatform.files      a key-value store for large binary data (dictionaries): get / put / del
- *   LopdaPlatform.downloads  save({filename, data}) -> share sheet on phones, download elsewhere
+ *   LopdaPlatform.downloads  save({filename, data}) -> share sheet on phones, download elsewhere;
+ *                            saveAll([{filename, data}], label) -> one share sheet with every file
  *   LopdaPlatform.dumpAll()  -> {docs: [{path, data}], files: [{key, value}]}, everything both databases hold
  *   LopdaPlatform.replaceAll({docs, files})  clears both databases and writes these back
  */
@@ -183,25 +184,33 @@
     setTimeout(function () { URL.revokeObjectURL(a.href); }, 4000);
     return Promise.resolve({ status: "saved" });
   }
-  function share(file) {
+  function share(files) {
     /* files only: with a title as well, iOS "Save to Files" saves the title as a text file next to the file */
-    return navigator.share({ files: [file] }).then(function () { return { status: "saved" }; });
+    return navigator.share({ files: files }).then(function () { return { status: "saved" }; });
   }
   /* Safari only allows share() during a tap. When the file took a moment to build, the tap is
      gone, so we show a one-tap "save" button and share from that tap instead. */
-  function askForTap(file) {
+  function askForTap(files, label) {
     return new Promise(function (resolve, reject) {
       var box = document.createElement("div");
       box.className = "save-sheet";
       box.innerHTML = '<p></p><div class="row"><button class="btn" type="button"></button><button class="btn ghost" type="button"></button></div>';
       var t = window.LopdaStrings ? window.LopdaStrings.t : function (k) { return k; };
-      box.querySelector("p").textContent = t("common.ready", { name: file.name });
+      box.querySelector("p").textContent = label || t("common.ready", { name: files[0].name });
       var btns = box.querySelectorAll("button");
       btns[0].textContent = t("common.save"); btns[1].textContent = t("common.cancel");
-      btns[0].onclick = function () { box.remove(); share(file).then(resolve, function (e) { reject(err(e && e.name === "AbortError" ? "declined" : "unavailable", e)); }); };
+      btns[0].onclick = function () { box.remove(); share(files).then(resolve, function (e) { reject(err(e && e.name === "AbortError" ? "declined" : "unavailable", e)); }); };
       btns[1].onclick = function () { box.remove(); reject(err("declined")); };
       (document.getElementById("screen") || document.body).appendChild(box);
     });
+  }
+  /* one click per file; a breath apart, so a browser does not read the whole run as a pop-up */
+  function downloadAll(files) {
+    return files.reduce(function (pr, file, i) {
+      return pr.then(function () {
+        return new Promise(function (resolve) { if (i) setTimeout(resolve, 150); else resolve(); }).then(function () { return download(file); });
+      });
+    }, Promise.resolve()).then(function () { return { status: "saved" }; });
   }
   var downloads = {
     save: function (req) {
@@ -209,9 +218,27 @@
       var file = toFile(req);
       var canShare = coarse && navigator.canShare && navigator.share && navigator.canShare({ files: [file] });
       if (!canShare) return download(file);
-      return share(file).catch(function (e) {
+      return share([file]).catch(function (e) {
         if (e && e.name === "AbortError") throw err("declined", e);
-        if (e && e.name === "NotAllowedError") return askForTap(file);
+        if (e && e.name === "NotAllowedError") return askForTap([file]);
+        throw err("unavailable", e);
+      });
+    },
+    /* a batch (the darkroom's all singles) goes to the share sheet in one go, so iOS can save every
+       picture at once; where that is not there, each file downloads on its own */
+    saveAll: function (reqs, label) {
+      if (!Array.isArray(reqs) || !reqs.length) return Promise.reject(err("bad_request"));
+      var files = [];
+      for (var i = 0; i < reqs.length; i++) {
+        var req = reqs[i];
+        if (!req || typeof req.filename !== "string" || req.data == null) return Promise.reject(err("bad_request"));
+        files.push(toFile(req));
+      }
+      var canShare = coarse && navigator.canShare && navigator.share && navigator.canShare({ files: files });
+      if (!canShare) return downloadAll(files);
+      return share(files).catch(function (e) {
+        if (e && e.name === "AbortError") throw err("declined", e);
+        if (e && e.name === "NotAllowedError") return askForTap(files, label);
         throw err("unavailable", e);
       });
     }

@@ -3729,13 +3729,13 @@ test("darkroom: the single print alone carries the place; a negative keeps it se
   assert.ok(Math.abs(exif.gps.acc - PLACE.accuracy) < 0.01);
 
   /* c) the contact sheet and the strip stay PNGs without EXIF or a GPS tag */
-  await press(p, "Enter"); await press(p, "ArrowDown");
+  await press(p, "Enter"); await press(p, "ArrowDown"); await press(p, "ArrowDown");
   const card = await save(p, () => press(p, "x"));
   assert.match(card.name, /^lopda-contact-.*\.png$/);
   assert.deepEqual(pngSize(card.buf), [1080, 1440]);
   assert.equal(EXIF.read(card.buf), null);
   assert.ok(pngPixelsOnly(card.buf), "the contact sheet has no Exif or text chunk: " + pngChunks(card.buf).join(","));
-  await press(p, "Enter"); await press(p, "ArrowDown"); await press(p, "ArrowDown");
+  await press(p, "Enter"); await press(p, "ArrowDown"); await press(p, "ArrowDown"); await press(p, "ArrowDown");
   const strip = await save(p, () => press(p, "x"));
   assert.match(strip.name, /^lopda-strip-.*\.png$/);
   assert.equal(EXIF.read(strip.buf), null);
@@ -4010,7 +4010,7 @@ test("darkroom: develop a roll with blank frames, walk it in colour, print singl
 
   /* prints: START opens the menu, B cancels it */
   await press("Enter");
-  assert.deepEqual(await items(), ["单张", "印样", "胶片条"]);
+  assert.deepEqual(await items(), ["单张", "全部单张", "印样", "胶片条"]);
   assert.equal(await p.textContent("#dk-keys .sk-b span"), "取消");
   await press("z"); assert.ok(await p.isHidden("#dk-sheet")); assert.ok(await p.isVisible("#dk-view"));
   assert.equal(await p.textContent("#dk-keys .sk-b span"), "返回", "cancelling the print menu puts the viewer's keys back");
@@ -4028,11 +4028,30 @@ test("darkroom: develop a roll with blank frames, walk it in colour, print singl
   assert.equal(exif.dateTimeOriginal, exifTime(frame1.taken, frame1.tz), "the shooting day at the shooting tz");
   assert.equal(exif.offsetTimeOriginal, exifOffset(frame1.tz));
   await toast(/照片存好了/);
-  await press("Enter"); await press("ArrowDown");
+  /* all singles: one JPEG per non-blank frame, frames 7 and 8 left out, handed over together */
+  const batch = [];
+  const batchHandler = (d) => {
+    const item = { name: d.suggestedFilename() };
+    batch.push(item);
+    d.path().then((f) => fs.readFile(f)).then((b) => { item.buf = b; }, () => {});
+  };
+  p.on("download", batchHandler);
+  const batchDone = new Promise((resolve, reject) => {
+    const tick = setInterval(() => { if (batch.length === 6 && batch.every((b) => b.buf)) { clearInterval(tick); resolve(); } }, 50);
+    setTimeout(() => { clearInterval(tick); reject(new Error("only " + batch.length + " batch prints")); }, 120000);
+  });
+  await press("Enter"); await press("ArrowDown"); await press("x");
+  await batchDone;
+  p.off("download", batchHandler);
+  await toast(/6 张照片存好了/);
+  assert.deepEqual(batch.map((b) => b.name), [1, 2, 3, 4, 5, 6].map((n) => "lopda-print-" + batch[0].name.split("-")[2] + "-portrait-400-001-" + String(n).padStart(2, "0") + ".jpg"));
+  batch.forEach((b) => { assert.deepEqual([...b.buf.subarray(0, 3)], [0xff, 0xd8, 0xff]); assert.deepEqual(jpegSize(b.buf), [1600, 1400]); });
+
+  await press("Enter"); await press("ArrowDown"); await press("ArrowDown");
   const card = await save(() => press("x"));
   assert.match(card.name, /^lopda-contact-\d{8}-portrait-400-001\.png$/);
   assert.deepEqual(pngSize(card.buf), [1080, 1440]);
-  await press("Enter"); await press("ArrowDown"); await press("ArrowDown");
+  await press("Enter"); await press("ArrowDown"); await press("ArrowDown"); await press("ArrowDown");
   const strip = await save(() => press("x"));
   assert.match(strip.name, /^lopda-strip-\d{8}-portrait-400-001\.png$/);
   assert.deepEqual(pngSize(strip.buf), [200 + 8 * 272 - 16 + 64, 320]);
