@@ -39,7 +39,7 @@ test("constants: format, tracks, scales, demo beat", () => {
   assert.deepEqual([S.SWING_MIN, S.SWING_MAX, S.SWING_DEFAULT], [0.5, 0.75, 0.55]);
   assert.equal(S.TAPE_MAX, 4);
   assert.equal(S.PATTERNS_MAX, 16);
-  assert.equal(S.SONG_MAX, 64);
+  assert.equal(S.SONG_MAX, 96);
   assert.equal(S.NAME_MAX, 40);
   assert.deepEqual(plain(S.DEMO), {
     kick: [1, 8, 11],
@@ -299,7 +299,7 @@ test("validate: notes", () => {
 test("validate: song, clips", () => {
   assert.equal(broken((s) => { s.song = "0"; }).error, "song");
   assert.equal(broken((s) => { s.song = []; }).error, "song");
-  assert.equal(broken((s) => { s.song = Array(65).fill(0); }).error, "song");
+  assert.equal(broken((s) => { s.song = Array(97).fill(0); }).error, "song");
   assert.equal(broken((s) => { s.song = [1]; }).error, "song");
   assert.equal(broken((s) => { s.song = [-1]; }).error, "song");
   assert.equal(broken((s) => { s.song = [0.5]; }).error, "song");
@@ -307,10 +307,14 @@ test("validate: song, clips", () => {
   assert.equal(broken((s) => { s.clips = {}; }).error, "clips");
   assert.equal(broken((s) => { delete s.clips; }).error, "clips");
 
-  // 64 slots, and a slot may name the last pattern
+  // the 64-slot example and the 96-slot cap; a slot may name the last pattern
   assert.equal(broken((s) => {
     s.patterns.push({ len: 16, notes: {} });
     s.song = Array(64).fill(1);
+  }).error, undefined);
+  assert.equal(broken((s) => {
+    s.patterns.push({ len: 16, notes: {} });
+    s.song = Array(96).fill(1);
   }).error, undefined);
 });
 
@@ -873,7 +877,7 @@ test("song chain: setSlot, addSlot and dropSlot copy, ensure the pattern, and ke
   assert.deepEqual(plain(S.dropSlot(added).song), [0]);
   assert.deepEqual(plain(S.dropSlot(song)), plain(song), "never below one slot");
 
-  // 64 slots is the cap
+  // the 96 slots cap
   const full = fresh();
   full.song = Array(S.SONG_MAX).fill(0);
   assert.deepEqual(plain(S.addSlot(full, 1)), plain(full));
@@ -886,7 +890,7 @@ test("song chain: setSlot, addSlot and dropSlot copy, ensure the pattern, and ke
   for (const p of [-1, 16, 1.5, "1"]) assert.deepEqual(plain(S.addSlot(song, p)), before, String(p));
 });
 
-test("insertSlot and removeSlot: index 0, the end, the 64 cap, one slot left, bad input", () => {
+test("insertSlot and removeSlot: index 0, the end, the 96 cap, one slot left, bad input", () => {
   const song = fresh(); // [0]
   const before = plain(song);
 
@@ -903,7 +907,7 @@ test("insertSlot and removeSlot: index 0, the end, the 64 cap, one slot left, ba
   assert.equal(end.patterns.length, 2);
   assert.equal(S.validate(end).error, undefined);
 
-  // 64 is the cap: a refused insert changes neither slots nor patterns
+  // 96 is the cap: a refused insert changes neither slots nor patterns
   const full = fresh();
   full.song = Array(S.SONG_MAX).fill(0);
   assert.deepEqual(plain(S.insertSlot(full, 0, 1)), plain(full));

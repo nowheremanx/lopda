@@ -187,7 +187,7 @@ var POP_SONG={
 };
 
 
-var SWING_MIN=0.5, SWING_MAX=0.75, SWING_DEFAULT=0.55, TAPE_MAX=4, PATTERNS_MAX=16, SONG_MAX=64, NAME_MAX=40;
+var SWING_MIN=0.5, SWING_MAX=0.75, SWING_DEFAULT=0.55, TAPE_MAX=4, PATTERNS_MAX=16, SONG_MAX=96, NAME_MAX=40;
 
 /* Which synth voice a track plays (12.6): a constant, not a song field, so a later version can revoice a track without
    migrating files. 12.12 moved the melody from the bright pluck to the flute. */
@@ -946,7 +946,7 @@ function chainAt(song,chain,tick){
   return {slot:segs.length-1, p:segs[segs.length-1].p, t:m};
 }
 
-/* The segments are sorted by start; binary searches keep a 64-slot chain cheap to narrow to the few bars a window covers. */
+/* The segments are sorted by start; binary searches keep a long chain cheap to narrow to the few bars a window covers. */
 function firstEndAfter(segs,tick){
   var lo=0, hi=segs.length, mid;
   while(lo<hi){
@@ -1085,7 +1085,7 @@ var JASMINE_SPEC={
 };
 
 /* one builder for the two tunes: eight bars of verse, eight of chorus (the same bars, melody up an octave and a
-   fuller drum pattern), then the 64-slot chain verse verse chorus chorus verse verse chorus chorus. */
+   fuller drum pattern), then the 64-slot chain verse verse chorus chorus verse verse chorus chorus (the cap is 96; these two tunes use 64). */
 function tuneOne(pairs){
   var out=[], i;
   for(i=0;i<pairs.length;i++) out.push([pairs[i][0]+1,pairs[i][1],pairs[i][2]]);

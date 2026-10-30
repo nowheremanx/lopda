@@ -2366,25 +2366,25 @@ test("studio: + appends the edit letter, a letter in the slot sheet changes the 
   assert.deepEqual(errors, []);
 });
 
-test("studio: 64 slots is the limit, and the slot sheet's insert toasts rather than adding a 65th", { skip, timeout: 60000 }, async (t) => {
+test("studio: 96 slots is the limit, and the slot sheet's insert toasts rather than adding a 97th", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await rtPage(t);
   await studioOpen(p);
   await skipTour(p);
   await p.click('#studio-screens .st-scr[data-screen="song"]');
   await skipScreenTour(p);
-  for (let i = 0; i < 63; i++) await p.click("#studio-add");
-  assert.equal(await p.locator(".st-chain-cell").count(), 64);
+  for (let i = 0; i < 95; i++) await p.click("#studio-add");
+  assert.equal(await p.locator(".st-chain-cell").count(), 96);
   const selected = await p.getAttribute("#v-studio .st-chain-cell.sel", "data-slot");
-  assert.equal(selected, "63", "+ selects the new last slot");
-  await p.locator(".st-chain-cell").nth(63).click();
+  assert.equal(selected, "95", "+ selects the new last slot");
+  await p.locator(".st-chain-cell").nth(95).click();
   await p.waitForSelector("#studio-sheet:not([hidden])");
   await p.locator("#studio-sheet .lcd-menu li", { hasText: "前面插一段" }).click();
   await p.waitForSelector("#toast:not([hidden])");
-  assert.match(await p.textContent("#toast"), /最多 64 段/);
-  assert.equal(await p.locator(".st-chain-cell").count(), 64, "still 64 slots");
+  assert.match(await p.textContent("#toast"), /最多 96 段/);
+  assert.equal(await p.locator(".st-chain-cell").count(), 96, "still 96 slots");
   assert.equal(await p.isHidden("#studio-sheet"), false, "the sheet stays open at the limit");
   await p.locator("#studio-sheet .lcd-menu li", { hasText: "后面复制一段" }).click();
-  assert.equal(await p.locator(".st-chain-cell").count(), 64, "copy after is refused too");
+  assert.equal(await p.locator(".st-chain-cell").count(), 96, "copy after is refused too");
   assert.deepEqual(errors, []);
 });
 
