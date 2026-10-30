@@ -156,8 +156,13 @@ function planCheck(obj,cards){
       if(!int(s.chords[j]) || s.chords[j]<0 || s.chords[j]>5)
         return {error:"section '"+id+"': each chord root must be an integer 0-5"};
     }
-    if(typeof s.groove!=="string" || !ST.GROOVES[s.groove])
-      return {error:"section '"+id+"': unknown groove '"+String(s.groove)+"'; use one of "+Object.keys(ST.GROOVES).join(", ")};
+    if(s.drums!=null && s.groove==null){
+      var tried=T.run(S.newSong(0),{tool:"groove",pattern:0,steps:s.drums});
+      if(tried.error) return {error:"section '"+id+"': "+tried.error};
+    } else if(typeof s.groove!=="string" || !ST.GROOVES[s.groove])
+      return {error:"section '"+id+"': unknown groove '"+String(s.groove)+"'; use one of "+Object.keys(ST.GROOVES).join(", ")+", or write drums"};
+    if(s.strum!=null && T.CHORD_RHYTHMS.indexOf(s.strum)<0)
+      return {error:"section '"+id+"': strum must be one of "+T.CHORD_RHYTHMS.join(", ")};
     if(typeof s.bass!=="string" || !ST.BASS[s.bass])
       return {error:"section '"+id+"': unknown bass rhythm '"+String(s.bass)+"'; use one of "+Object.keys(ST.BASS).join(", ")};
     if(!int(s.energy) || s.energy<0 || s.energy>2)
@@ -192,7 +197,9 @@ function planCheck(obj,cards){
   var kept=[];
   for(i=0;i<sections.length;i++){
     s=sections[i];
-    kept.push({id:s.id,chords:s.chords.slice(),groove:s.groove,energy:s.energy,bass:s.bass,melody:s.melody,patterns:[]});
+    kept.push({id:s.id,chords:s.chords.slice(),groove:s.drums!=null && s.groove==null ? null : s.groove,
+      drums:s.drums!=null && s.groove==null ? s.drums : null,strum:s.strum||"hold",
+      energy:s.energy,bass:s.bass,melody:s.melody,patterns:[]});
   }
   var keptOrder=[];
   for(i=0;i<order.length;i++) keptOrder.push([order[i][0],order[i][1]]);
@@ -235,8 +242,9 @@ function laySong(roll,plan,now){
     for(j=0;j<s.patterns.length;j++){
       p=s.patterns[j];
       fill=!!follows["$"+s.id] && j===s.patterns.length-1;
-      song=applyTool(song,{tool:"chords",pattern:p,roots:[s.chords[j]]});
-      song=applyTool(song,{tool:"groove",pattern:p,style:s.groove,energy:s.energy,fill:fill});
+      song=applyTool(song,{tool:"chords",pattern:p,roots:[s.chords[j]],rhythm:s.strum});
+      song=applyTool(song,s.drums ? {tool:"groove",pattern:p,steps:s.drums,energy:s.energy,fill:fill}
+        : {tool:"groove",pattern:p,style:s.groove,energy:s.energy,fill:fill});
       song=applyTool(song,{tool:"bass",pattern:p,rhythm:s.bass});
     }
   }
@@ -363,15 +371,10 @@ function skeleton(o){
   var rand=typeof o.rand==="function"?o.rand:Math.random;
   var now=num(o.now)?o.now:Date.now();
   return job(o.ask,function(c){
-    /* Three different cards: card 1 is the dice's pick for a vague request ("a skeleton"), and a request that names a
-       mood or a style lets the model take the card that fits it instead. */
-    var rolls=[], seen={}, r, tries=0, zh=P.lang(text)==="Chinese", roll, cardName;
-    while(rolls.length<3 && tries<30){
-      r=ST.roll(rand); tries++;
-      if(seen["$"+r.card.id]) continue;
-      seen["$"+r.card.id]=true;
-      rolls.push(r);
-    }
+    /* Card 1 is the dice's pick, for a vague request ("a skeleton"); every other card follows with its own key, so a
+       request that names a mood or a style can take the card that fits it. */
+    var rolls=[ST.roll(rand)], zh=P.lang(text)==="Chinese", roll, cardName, i;
+    for(i=0;i<ST.CARDS.length;i++) if(ST.CARDS[i].id!==rolls[0].card.id) rolls.push(ST.rollCard(rand,ST.CARDS[i]));
     stage(o.onStage,"plan",1,1,{});
     var planMsgs=P.plan({
       text:text, cards:rolls.map(function(x){

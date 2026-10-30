@@ -3,7 +3,7 @@
 // needs a model on this machine. The harness runs in node:vm exactly as on the phone; only ask() differs: every request
 // is flattened into one prompt and piped to a command that prints the model's answer.
 //
-//   node tools/studio-ai-trial.mjs --cmd "<command reading a prompt on stdin>" [--runs 3] [--only skel|edit] [--out dir]
+//   node tools/studio-ai-trial.mjs --cmd "<command reading a prompt on stdin>" [--runs 3] [--only skel|edit] [--out dir] [--text "a request"]
 //
 // With OpenCode's DeepSeek v4.1 flash (the model class the harness is tuned for):
 //   --cmd "~/.claude/skills/deepseek-subagent/scripts/run.sh -q -m opencode-go/deepseek-v4.1-flash -"
@@ -25,6 +25,7 @@ const CMD = arg("cmd", "");
 const RUNS = Number(arg("runs", "3"));
 const ONLY = arg("only", "");
 const OUT = arg("out", "");
+const TEXT = arg("text", "");   // one skeleton request of your own, run --runs times
 if (!CMD) {
   console.error("usage: node tools/studio-ai-trial.mjs --cmd \"<command reading a prompt on stdin>\" [--runs 3] [--only skel|edit] [--out dir]");
   process.exit(2);
@@ -107,6 +108,7 @@ async function scenario(kind, text, i) {
   }
 }
 
+if (TEXT) SKELETONS.splice(0, SKELETONS.length, [TEXT, RUNS]);
 for (const [text, n] of ONLY === "edit" ? [] : SKELETONS) for (let i = 0; i < n; i++) await scenario("skel", text, i);
 for (const [text, n] of ONLY === "skel" ? [] : EDITS) for (let i = 0; i < n; i++) await scenario("edit", text, i);
 
