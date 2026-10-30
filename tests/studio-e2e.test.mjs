@@ -711,6 +711,16 @@ async function openFileMenu(p) {
   await p.locator("#studio-sheet .lcd-menu li", { hasText: "文件" }).click();
   await p.waitForSelector("#studio-sheet .lcd-menu");
 }
+/* the edit menu's deep switch; B twice leaves the menu (the first B goes back to the menu sheet) */
+async function enableDeep(p) {
+  await openEdit(p);
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "深度模式：关" }).click();
+  await p.waitForFunction(() => /深度模式：开/.test(document.querySelector("#studio-sheet").textContent));
+  await p.keyboard.press("z");
+  await p.waitForTimeout(60);
+  await p.keyboard.press("z");
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+}
 async function openFolders(p) {
   await openMenu(p);
   await p.locator("#studio-sheet .lcd-menu li", { hasText: "磁带库" }).click();
@@ -855,6 +865,24 @@ async function waitStored(p, want, timeout = 6000) {
     try { data = await storedSong(p); } catch { /* not written yet */ }
     if (data && storedMatches(data, want)) return;
     if (Date.now() > end) throw new Error("the stored tape never matched " + JSON.stringify(want));
+    await p.waitForTimeout(50);
+  }
+}
+/* one stored note with its 12.20.5 extras; an absent field reads as null */
+const storedNote = (p, track, t) => p.evaluate(async ({ track, t }) => {
+  const meta = (await LopdaPlatform.db.doc("data/users/local/studio").get()).data();
+  const item = await LopdaPlatform.db.doc("data/users/local/studio/items/" + meta.current).get();
+  const list = (item.data().patterns[0].notes && item.data().patterns[0].notes[track]) || [];
+  const n = list.find((x) => x.t === t);
+  return n ? { acc: n.acc ?? null, gate: n.gate ?? null, orn: n.orn ?? null, q: n.q ?? null } : null;
+}, { track, t });
+async function waitStoredNote(p, track, t, want, timeout = 6000) {
+  const end = Date.now() + timeout;
+  for (;;) {
+    let got = null;
+    try { got = await storedNote(p, track, t); } catch { /* not written yet */ }
+    if (got && Object.entries(want).every(([k, v]) => got[k] === v)) return got;
+    if (Date.now() > end) throw new Error(`stored ${track} note at ${t} never matched ${JSON.stringify(want)} (got ${JSON.stringify(got)})`);
     await p.waitForTimeout(50);
   }
 }
@@ -2241,6 +2269,258 @@ test("studio: the second chord becomes VI/Fmaj9 and removing it re-ties the firs
   await waitStored(p, { pat: 0, track: "chords", notes: [[0, 384, 0]] });
   assert.deepEqual(errors, []);
 });
+
+/* ---------------- deep mode, the sixth column and the two deep sheets (docs/design/studio.md 12.20.5) ---------------- */
+test("studio: deep mode is off by default, the edit menu switches it, and only then do the sixth-column keys appear", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+
+  await openEdit(p);
+  assert.match(await p.textContent("#studio-sheet"), /深度模式：关/, "the switch starts off");
+  await p.keyboard.press("z");
+  await p.waitForTimeout(60);
+  await p.keyboard.press("z");
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+
+  await p.click('#studio-screens .st-scr[data-screen="bass"]');
+  await skipScreenTour(p);
+  assert.equal(await p.locator("#studio-note-acc").count(), 0, "deep off has no acc key");
+  assert.equal(await p.locator("#studio-note-play").count(), 0, "deep off has no play key");
+  assert.equal(await p.locator("#studio-keys .st-key").count(), 8, "the eight pitch keys only");
+
+  await p.click('#studio-screens .st-scr[data-screen="chords"]');
+  await skipScreenTour(p);
+  assert.equal(await p.locator("#studio-chord-acc").count(), 0, "deep off has no chord acc key");
+  assert.equal(await p.locator("#studio-chord-type").count(), 0, "deep off has no chord type key");
+  assert.equal(await p.locator("#studio-chord-keys .st-chord-key").count(), 6, "the six chord keys only");
+
+  await enableDeep(p);
+  assert.equal(await p.locator("#studio-chord-acc").isVisible(), true, "deep on grows the chord keys");
+  assert.equal(await p.isDisabled("#studio-chord-acc"), true, "with no chord selected the acc key is disabled");
+  assert.equal(await p.isDisabled("#studio-chord-type"), true, "with no chord selected the type key is disabled");
+  await p.locator('.st-chord-cell[data-half="0"]').click();
+  assert.equal(await p.isDisabled("#studio-chord-acc"), false, "a selected chord enables the acc key");
+  assert.equal(await p.isDisabled("#studio-chord-type"), false, "a selected chord enables the type key");
+
+  await p.click('#studio-screens .st-scr[data-screen="bass"]');
+  assert.equal(await p.locator("#studio-keys .st-key").count(), 10, "eight pitch keys plus acc and play");
+  assert.equal(await p.locator("#studio-note-play").isVisible(), true);
+  assert.equal(await p.isDisabled("#studio-note-acc"), true, "with no note selected the acc key is disabled");
+  assert.equal(await p.isDisabled("#studio-note-play"), true, "with no note selected the play key is disabled");
+  await p.locator('#studio-grid .st-cell[data-step="0"]').click();
+  assert.equal(await p.isDisabled("#studio-note-acc"), false, "a selected note enables the acc key");
+  assert.equal(await p.isDisabled("#studio-note-play"), false, "a selected note enables the play key");
+  assert.deepEqual(errors, []);
+});
+
+test("studio: deep mode's acc key cycles a melody note through sharp, flat and natural, and undo takes one change back", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await enableDeep(p);
+
+  await p.click('#studio-screens .st-scr[data-screen="melody"]');
+  await skipScreenTour(p);
+  await p.locator('#studio-grid .st-cell[data-step="0"]').click();
+  const cell = p.locator('#studio-grid .st-cell[data-step="0"]');
+  const accKey = p.locator("#studio-note-acc");
+  assert.equal(await cell.textContent(), "A", "the new melody note is A");
+  assert.equal(await accKey.textContent(), "♮", "nothing is sharpened or flattened yet");
+
+  await accKey.click();
+  assert.equal(await cell.textContent(), "Bb", "a sharp is written Bb, as the repo's names do");
+  assert.equal(await accKey.textContent(), "♯");
+  assert.equal(await p.textContent('#studio-keys .st-key[data-deg="0"] .st-key-name'), "A", "the pitch keys stay scale notes");
+  await waitStoredNote(p, "melody", 0, { acc: 1 });
+
+  await p.keyboard.press("Control+z");
+  assert.equal(await cell.textContent(), "A", "undo puts the pitch name back");
+  assert.equal(await accKey.textContent(), "♮");
+  await waitStoredNote(p, "melody", 0, { acc: null });
+
+  await accKey.click();
+  assert.equal(await cell.textContent(), "Bb");
+  await waitStoredNote(p, "melody", 0, { acc: 1 });
+  await accKey.click();
+  assert.equal(await cell.textContent(), "Ab", "the second tap is a flat");
+  assert.equal(await accKey.textContent(), "♭");
+  await waitStoredNote(p, "melody", 0, { acc: -1 });
+  await accKey.click();
+  assert.equal(await cell.textContent(), "A", "the third tap is natural again");
+  assert.equal(await accKey.textContent(), "♮");
+  await waitStoredNote(p, "melody", 0, { acc: null });
+  assert.deepEqual(errors, []);
+});
+
+test("studio: the deep play sheet stores gate 0.5 and slide, stays open, and the bass shows no vibrato", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await enableDeep(p);
+
+  await p.click('#studio-screens .st-scr[data-screen="melody"]');
+  await skipScreenTour(p);
+  await p.locator('#studio-grid .st-cell[data-step="0"]').click();
+  await p.click("#studio-note-play");
+  await p.waitForSelector("#studio-sheet:not([hidden])");
+  assert.match(await p.textContent("#studio-sheet .sheet-title"), /演奏/);
+
+  await p.locator('#studio-sheet .st-deep-btn[data-gate="0.5"]').click();
+  assert.equal(await p.isVisible("#studio-sheet"), true, "a gate pick keeps the sheet open");
+  assert.match(await p.getAttribute('#studio-sheet .st-deep-btn[data-gate="0.5"]', "class"), /\bon\b/);
+  await waitStoredNote(p, "melody", 0, { gate: 0.5 });
+
+  await p.locator('#studio-sheet .st-deep-btn[data-orn="slide"]').click();
+  assert.equal(await p.isVisible("#studio-sheet"), true, "an ornament pick keeps the sheet open");
+  assert.match(await p.getAttribute('#studio-sheet .st-deep-btn[data-orn="slide"]', "class"), /\bon\b/);
+  await waitStoredNote(p, "melody", 0, { gate: 0.5, orn: "slide" });
+  await p.keyboard.press("z");
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+
+  await p.click('#studio-screens .st-scr[data-screen="bass"]');
+  await skipScreenTour(p);
+  await p.locator('#studio-grid .st-cell[data-step="0"]').click();
+  await p.click("#studio-note-play");
+  await p.waitForSelector("#studio-sheet:not([hidden])");
+  assert.equal(await p.locator('#studio-sheet .st-deep-btn[data-orn="vib"]').count(), 0, "the bass offers no vibrato");
+  assert.equal(await p.locator('#studio-sheet .st-deep-btn[data-orn]').count(), 2, "the bass offers none and slide");
+  await p.keyboard.press("z");
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  assert.deepEqual(errors, []);
+});
+
+test("studio: the deep chord type sheet sets m7, 自动 clears it, and the root acc writes a flat roman numeral", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  /* a stored chord on the seventh degree: the six chord keys only reach I-VI, but a tape (or the AI) may carry VII */
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await p.evaluate(async () => {
+    const song = LopdaSong.newSong(Date.now());
+    song.patterns[0].notes.chords = [
+      { t: 0, len: 192, deg: 0, vel: LopdaSong.NOTE_VEL },
+      { t: 192, len: 192, deg: 6, vel: LopdaSong.NOTE_VEL },
+    ];
+    await LopdaPlatform.db.doc("data/users/local/studio").set({
+      current: "studio-deep-chord", hushTip: true, toured: { rhythm: true, notes: true, chords: true },
+    });
+    await LopdaPlatform.db.doc("data/users/local/studio/items/studio-deep-chord").set(song);
+  });
+  await openTile(p);
+  await enableDeep(p);
+
+  await p.click('#studio-screens .st-scr[data-screen="chords"]');
+  await p.locator('.st-chord-cell[data-half="0"]').click();
+  await p.click("#studio-chord-type");
+  await p.waitForSelector("#studio-sheet:not([hidden])");
+  assert.equal(await p.locator("#studio-sheet .st-q-btn").count(), 18, "自动 plus the 17 qualities");
+  assert.equal(await p.locator('#studio-sheet .st-q-btn[data-q=""]').evaluate((e) => e.classList.contains("on")), true, "a chord without q marks 自动");
+
+  await p.locator('#studio-sheet .st-q-btn[data-q="m7"]').click();
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  assert.match(await p.textContent('.st-chord-cell[data-half="0"]'), /Am7/, "the cell reads Am7");
+  await waitStoredNote(p, "chords", 0, { q: "m7" });
+
+  await p.click("#studio-chord-type");
+  await p.locator('#studio-sheet .st-q-btn[data-q=""]').click();
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  assert.match(await p.textContent('.st-chord-cell[data-half="0"]'), /Am9/, "自动 goes back to the automatic voicing");
+  assert.doesNotMatch(await p.textContent('.st-chord-cell[data-half="0"]'), /m7/);
+  await waitStoredNote(p, "chords", 0, { q: null });
+
+  await p.click("#studio-chord-type");
+  await p.locator('#studio-sheet .st-q-btn[data-q="sus4"]').click();
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  assert.match(await p.textContent('.st-chord-cell[data-half="0"]'), /Asus4/);
+  await waitStoredNote(p, "chords", 0, { q: "sus4" });
+  await p.keyboard.press("Control+z");
+  assert.match(await p.textContent('.st-chord-cell[data-half="0"]'), /Am9/, "undo removes the one q change");
+  await waitStoredNote(p, "chords", 0, { q: null });
+
+  await p.locator('.st-chord-cell[data-half="1"]').click();
+  assert.match(await p.textContent('.st-chord-cell[data-half="1"]'), /VII/, "the stored chord is on VII");
+  await p.click("#studio-chord-acc");
+  const flat = await p.textContent('.st-chord-cell[data-half="1"]');
+  assert.match(flat, /♭VII/, "the flat seventh is written ♭VII");
+  await waitStoredNote(p, "chords", 192, { acc: -1 });
+  assert.deepEqual(errors, []);
+});
+
+test("studio: the deep mode setting survives a reload", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await enableDeep(p);
+  await p.waitForTimeout(150);
+
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await openTile(p);
+  await openEdit(p);
+  assert.match(await p.textContent("#studio-sheet"), /深度模式：开/, "the switch is still on after the reload");
+  await p.keyboard.press("z");
+  await p.waitForTimeout(60);
+  await p.keyboard.press("z");
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  await p.click('#studio-screens .st-scr[data-screen="bass"]');
+  await skipScreenTour(p);
+  assert.equal(await p.locator("#studio-note-acc").isVisible(), true, "the deep keys are back too");
+  assert.deepEqual(errors, []);
+});
+
+test("studio: deep mode's note keys, chord keys and both sheets fit 331x359 with 44 px targets", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t, { width: 375, height: 503 });
+  await studioOpen(p);
+  await skipTour(p);
+  await enableDeep(p);
+  const measureKeys = (p, which) => p.evaluate((id) => {
+    const view = document.querySelector("#v-studio"), box = document.querySelector(id);
+    const small = [...box.querySelectorAll("button")].filter((e) => {
+      const r = e.getBoundingClientRect();
+      return r.width > 0 && r.height > 0 && (r.width < 44 - 0.5 || r.height < 44 - 0.5);
+    }).map((e) => ({ id: e.id, text: e.textContent.trim(), w: e.getBoundingClientRect().width, h: e.getBoundingClientRect().height }));
+    return { viewOverflow: view.scrollWidth - view.clientWidth, overflow: box.scrollWidth - box.clientWidth, small };
+  }, which);
+  const measureSheet = (p) => p.evaluate(() => {
+    const sh = document.querySelector("#studio-sheet");
+    return { scroll: sh.scrollHeight, client: sh.clientHeight,
+      small: [...sh.querySelectorAll("button")].filter((e) => {
+        const r = e.getBoundingClientRect();
+        return r.width > 0 && r.height > 0 && (r.width < 44 - 0.5 || r.height < 44 - 0.5);
+      }).map((e) => ({ text: e.textContent.trim(), w: e.getBoundingClientRect().width, h: e.getBoundingClientRect().height })) };
+  });
+
+  await p.click('#studio-screens .st-scr[data-screen="bass"]');
+  await skipScreenTour(p);
+  await p.locator('#studio-grid .st-cell[data-step="0"]').click();
+  const noteKeys = await measureKeys(p, "#studio-keys");
+  assert.ok(noteKeys.viewOverflow <= 0, `the note screen does not overflow (${noteKeys.viewOverflow})`);
+  assert.ok(noteKeys.overflow <= 0, `the six-column key grid does not overflow (${noteKeys.overflow})`);
+  assert.deepEqual(noteKeys.small, [], "every note key is at least 44 px");
+
+  await p.click("#studio-note-play");
+  await p.waitForSelector("#studio-sheet:not([hidden])");
+  const playSheet = await measureSheet(p);
+  assert.ok(playSheet.scroll <= playSheet.client, `the play sheet fits (${playSheet.scroll} <= ${playSheet.client})`);
+  assert.deepEqual(playSheet.small, [], "every play-sheet button is at least 44 px");
+  await p.keyboard.press("z");
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+
+  await p.click('#studio-screens .st-scr[data-screen="chords"]');
+  await skipScreenTour(p);
+  await p.locator('.st-chord-cell[data-half="0"]').click();
+  const chordKeys = await measureKeys(p, "#studio-chord-keys");
+  assert.ok(chordKeys.viewOverflow <= 0, `the chord screen does not overflow (${chordKeys.viewOverflow})`);
+  assert.ok(chordKeys.overflow <= 0, `the five-column chord grid does not overflow (${chordKeys.overflow})`);
+  assert.deepEqual(chordKeys.small, [], "every chord key is at least 44 px");
+
+  await p.click("#studio-chord-type");
+  await p.waitForSelector("#studio-sheet:not([hidden])");
+  assert.equal(await p.locator("#studio-sheet .st-q-btn").count(), 18);
+  const typeSheet = await measureSheet(p);
+  assert.ok(typeSheet.scroll <= typeSheet.client, `the type sheet fits (${typeSheet.scroll} <= ${typeSheet.client})`);
+  assert.deepEqual(typeSheet.small, [], "every type-sheet button is at least 44 px");
+  assert.deepEqual(errors, []);
+});
+
 
 test("studio: the rest key makes a bass cell a silent event, ends the note before it, and keeps the last degree", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await hitCountingPage(t);

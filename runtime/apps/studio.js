@@ -246,6 +246,7 @@ function loadStore(){
     T.metaOk=true;                 /* read OK (or showed none): meta can be written from here */
     if(!T.meta.toured || typeof T.meta.toured!=="object" || Array.isArray(T.meta.toured)) T.meta.toured={};
     T.meta.hushTip=T.meta.hushTip===true;
+    T.meta.deep=T.meta.deep===true;   /* 12.20.5: the deep screens, off unless this device turned them on */
     if(!Array.isArray(T.meta.folders)) T.meta.folders=[];
     else {
       var rawFolders=T.meta.folders, cleanFolders=[], fi;
@@ -1032,15 +1033,19 @@ function auditionDrum(){
   if(!synth || !T.song) return;
   synth.hit(SONGS.kitOf(T.song),T.drum,LP.SND.ctx.currentTime+0.001,vol);
 }
-function auditionNote(track,deg){
-  var synth=ensureSynth(), midi, vol=trackVol(track);
+function auditionNote(track,deg,acc,gate,orn){
+  var synth=ensureSynth(), midi, vol=trackVol(track), dur, opts;
   if(!synth || !T.song) return;
-  midi=SONGS.noteMidi(T.song,track,deg);
+  midi=SONGS.noteMidi(T.song,track,deg,acc);
   if(midi==null) return;
-  synth.note(SONGS.voiceOf(T.song,track),midi,LP.SND.ctx.currentTime+0.001,0.4,SONGS.NOTE_VEL*vol);
+  /* 12.20.5: a deep-mode preview keeps the note's length and ornament; a plain audition stays 0.4 s as before */
+  dur=0.4*(typeof gate==="number" ? gate : 1);
+  if(dur<0.05) dur=0.05;
+  opts=orn==="slide" ? {slide:true} : orn==="vib" ? {vib:true} : null;
+  synth.note(SONGS.voiceOf(T.song,track),midi,LP.SND.ctx.currentTime+0.001,dur,SONGS.NOTE_VEL*vol,opts||undefined);
 }
-function auditionChord(deg){
-  var synth=ensureSynth(), notes=SONGS.chordNotes(T.song,deg), i, now, vol=trackVol("chords");
+function auditionChord(deg,acc,q){
+  var synth=ensureSynth(), notes=SONGS.chordNotes(T.song,deg,q,acc), i, now, vol=trackVol("chords");
   var voice, strum;
   if(!synth || !notes) return;
   now=LP.SND.ctx.currentTime+0.001;
@@ -1048,6 +1053,118 @@ function auditionChord(deg){
   strum=(SYNTH.STRUM && SYNTH.STRUM[voice]) || 0;
   notes=notes.slice().sort(function(a,b){ return a-b; });
   for(i=0;i<notes.length;i++) synth.note(voice,notes[i],now+i*strum,0.8,SONGS.NOTE_VEL*vol);
+}
+/* ---------- deep mode (12.20.5): a sixth column and a small sheet on the note and chord screens ----------
+   The switch lives in the studio's own settings document (T.meta.deep), not in the tape and not in undo. With it off
+   the screens are the ones above; only a note's acc and a chord's q/acc still show in the names they already carry. */
+function deepOn(){ return !!(T.meta && T.meta.deep===true); }
+function toggleDeep(){
+  if(!T.meta) return;
+  T.meta.deep=!T.meta.deep;
+  saveMeta();
+  renderAll();
+}
+function accValue(acc){ return acc===1?1:acc===-1?-1:0; }
+/* the glyphs live here, escaped: tests/strings.test.mjs treats the musical signs as emoji in a string value */
+function accLabel(acc){
+  var a=accValue(acc);
+  return a===1?"\u266f":a===-1?"\u266d":"\u266e";
+}
+function selectedNote(track){
+  var sel=T.noteSel[track], note;
+  if(!track || sel<0 || !T.song) return null;
+  note=SONGS.noteAt(T.song,T.pat,track,sel*SONGS.STEP);
+  return note && !SONGS.isRest(note) ? note : null;
+}
+function selectedChord(){
+  var note;
+  if(!T.song || T.chordSel<0 || T.chordSel>1) return null;
+  note=SONGS.noteAt(T.song,T.pat,"chords",SONGS.CHORD_STEPS[T.chordSel]*SONGS.STEP);
+  return note && !SONGS.isRest(note) ? note : null;
+}
+function removeEl(id){ var e=$(id); if(e && e.parentNode) e.parentNode.removeChild(e); }
+function deepButton(cls,text,on,fn){
+  var b=el("button",cls+(on?" on":""),text);
+  b.type="button";
+  b.setAttribute("aria-pressed",on?"true":"false");
+  b.onclick=fn;
+  return b;
+}
+function ensureNoteDeep(){
+  var keys=$("studio-keys");
+  if(!keys || $("studio-note-acc")) return;
+  var acc=el("button","st-key st-deep-key st-key-acc");
+  acc.type="button"; acc.id="studio-note-acc";
+  acc.onclick=function(){ noteAccTap(); };
+  var play=el("button","st-key st-deep-key st-key-play",tr("studio.note.play"));
+  play.type="button"; play.id="studio-note-play";
+  play.onclick=function(){ openSheet("noteplay"); };
+  keys.appendChild(acc); keys.appendChild(play);
+}
+function ensureChordDeep(){
+  var keys=$("studio-chord-keys");
+  if(!keys || $("studio-chord-acc")) return;
+  var acc=el("button","st-chord-key st-deep-key st-chord-acc");
+  acc.type="button"; acc.id="studio-chord-acc";
+  acc.onclick=function(){ chordAccTap(); };
+  var type=el("button","st-chord-key st-deep-key st-chord-type",tr("studio.chord.type"));
+  type.type="button"; type.id="studio-chord-type";
+  type.onclick=function(){ openSheet("chordtype"); };
+  keys.appendChild(acc); keys.appendChild(type);
+}
+function noteAccTap(){
+  var track=noteTrack(), note=track?selectedNote(track):null, cur, next;
+  if(!note || !T.song) return;
+  cur=accValue(note.acc);
+  next=cur===0?1:cur===1?-1:0;
+  T.song=SONGS.setNoteExtra(T.song,T.pat,track,T.noteSel[track]*SONGS.STEP,{acc:next===0?null:next});
+  touch();
+  renderGrid(); renderKeys(); renderNav();
+  auditionNote(track,note.deg,next,note.gate,note.orn);
+}
+function chordAccTap(){
+  var note=selectedChord(), cur, next;
+  if(!note || !T.song) return;
+  cur=accValue(note.acc);
+  next=cur===0?-1:cur===-1?1:0;
+  T.song=SONGS.setNoteExtra(T.song,T.pat,"chords",SONGS.CHORD_STEPS[T.chordSel]*SONGS.STEP,{acc:next===0?null:next});
+  touch();
+  renderChords(); renderNav();
+  auditionChord(note.deg,next,note.q);
+}
+function setNoteGate(gate){
+  var track=noteTrack(), note=track?selectedNote(track):null;
+  if(!note || !T.song) return;
+  T.song=SONGS.setNoteExtra(T.song,T.pat,track,T.noteSel[track]*SONGS.STEP,{gate:gate===1?null:gate});
+  touch();
+  renderGrid(); renderKeys(); renderNav(); renderSheet();
+  auditionNote(track,note.deg,note.acc,gate,note.orn);
+}
+function setNoteOrn(orn){
+  var track=noteTrack(), note=track?selectedNote(track):null;
+  if(!note || !T.song) return;
+  T.song=SONGS.setNoteExtra(T.song,T.pat,track,T.noteSel[track]*SONGS.STEP,{orn:orn||null});
+  touch();
+  renderGrid(); renderKeys(); renderNav(); renderSheet();
+  auditionNote(track,note.deg,note.acc,note.gate,orn||null);
+}
+function setChordQ(q){
+  var note=selectedChord();
+  if(!note || !T.song) return;
+  T.song=SONGS.setNoteExtra(T.song,T.pat,"chords",SONGS.CHORD_STEPS[T.chordSel]*SONGS.STEP,{q:q||null});
+  touch();
+  closeSheet();                    /* a quality pick is one tap: the sheet closes */
+  renderChords(); renderNav();
+  auditionChord(note.deg,note.acc,q||null);
+}
+/* A confirms the focused option in the two deep sheets, like the other sheets' A; with no DOM focus it takes the
+   marked one, so a keyboard player can confirm what they see. */
+function sheetConfirm(){
+  var sh=$("studio-sheet"), a=document.activeElement, pick;
+  if(a && a.tagName==="BUTTON" && sh && sh.contains(a) && !a.disabled){ a.click(); return; }
+  pick=sh && sh.querySelector("button.on:not(:disabled)");
+  if(!pick) pick=sh && sh.querySelector("button:not(:disabled)");
+  if(pick) pick.click();
 }
 /* 12.20.3: the drum row's preview, kick then snare 0.15 s later, so the kit's two most different drums are heard */
 function auditionKit(){
@@ -1377,7 +1494,7 @@ function renderGrid(){
     if(track){
       note=T.song && SONGS.noteAt(T.song,T.pat,track,i*SONGS.STEP);
       rest=!!(note && SONGS.isRest(note));
-      nm=note && !rest ? SONGS.noteName(SONGS.noteMidi(T.song,track,note.deg)) : "";
+      nm=note && !rest ? SONGS.noteName(SONGS.noteMidi(T.song,track,note.deg,note.acc)) : "";
       b.textContent=rest?"–":(nm||"");
       b.classList.toggle("on",!!note && !rest);
       b.classList.toggle("has-note",!!note && !rest);
@@ -1401,7 +1518,11 @@ function renderGrid(){
 function renderKeys(){
   var track=noteTrack();
   if(!track || !T.song) return;
-  var keys=$("studio-keys").querySelectorAll(".st-key"), i, b, midi, name, note, sel=T.noteSel[track];
+  var keysEl=$("studio-keys"), deep=deepOn();
+  if(deep) ensureNoteDeep();
+  else { removeEl("studio-note-acc"); removeEl("studio-note-play"); }
+  if(keysEl) keysEl.classList.toggle("deep",deep);
+  var keys=keysEl.querySelectorAll(".st-key[data-deg]"), i, b, midi, name, note, sel=T.noteSel[track];
   note=sel>=0 ? SONGS.noteAt(T.song,T.pat,track,sel*SONGS.STEP) : null;
   if(note && SONGS.isRest(note)) note=null;
   var base=SONGS.tonic(track,T.song.key);
@@ -1415,15 +1536,33 @@ function renderKeys(){
     b.setAttribute("aria-label",tr("studio.key",{note:name}));
     b.setAttribute("aria-pressed",note && note.deg===i?"true":"false");
   }
+  var accKey=$("studio-note-acc"), playKey=$("studio-note-play"), cur;
+  if(deep && accKey){
+    cur=note?accValue(note.acc):0;
+    accKey.textContent=accLabel(cur);
+    accKey.disabled=!note;
+    accKey.classList.toggle("on",!!note && cur!==0);
+    accKey.setAttribute("aria-pressed",note && cur!==0?"true":"false");
+    accKey.setAttribute("aria-label",tr("studio.note.acc",{acc:accLabel(cur)}));
+  }
+  if(deep && playKey){
+    playKey.textContent=tr("studio.note.play");
+    playKey.disabled=!note;
+    playKey.setAttribute("aria-label",tr("studio.note.play"));
+  }
 }
 function renderChords(){
+  var deep=deepOn(), ckeys=$("studio-chord-keys");
+  if(deep) ensureChordDeep();
+  else { removeEl("studio-chord-acc"); removeEl("studio-chord-type"); }
+  if(ckeys) ckeys.classList.toggle("deep",deep);
   var cells=$("studio-chord-cells").children, i, b, tick, note, rest, ch, roman, name;
   for(i=0;i<2;i++){
     b=cells[i];
     tick=SONGS.CHORD_STEPS[i]*SONGS.STEP;
     note=T.song && SONGS.noteAt(T.song,T.pat,"chords",tick);
     rest=!!(note && SONGS.isRest(note));
-    ch=note && !rest ? SONGS.chordName(T.song,note.deg) : null;
+    ch=note && !rest ? SONGS.chordName(T.song,note.deg,note.q,note.acc) : null;
     roman=b.querySelector(".st-roman");
     name=b.querySelector(".st-name");
     roman.textContent=rest?"–":(ch?ch.roman:"");
@@ -1436,17 +1575,33 @@ function renderChords(){
     b.setAttribute("aria-label",rest?tr("studio.rest.cell",{n:SONGS.CHORD_STEPS[i]+1}):
       tr(i===0?"studio.chord.half1":"studio.chord.half2")+(ch?" · "+ch.name:""));
   }
-  var keys=$("studio-chord-keys").querySelectorAll(".st-chord-key"), k, kb, degNote;
+  var keys=ckeys.querySelectorAll(".st-chord-key[data-deg]"), k, kb, degNote;
   degNote=T.chordSel>=0 && T.song ? SONGS.noteAt(T.song,T.pat,"chords",SONGS.CHORD_STEPS[T.chordSel]*SONGS.STEP) : null;
   if(degNote && SONGS.isRest(degNote)) degNote=null;
+  /* deep mode previews the selected chord's quality and root shift on every degree key; off keeps the automatic names */
+  var keyQ=deep && degNote ? degNote.q : undefined, keyAcc=deep && degNote ? degNote.acc : undefined;
   for(i=0;i<keys.length;i++){
     k=keys[i];
-    ch=T.song ? SONGS.chordName(T.song,i) : null;
+    ch=T.song ? SONGS.chordName(T.song,i,keyQ,keyAcc) : null;
     k.querySelector("b").textContent=ch?ch.roman:"";
     k.querySelector("small").textContent=ch?ch.name:"";
     k.classList.toggle("on",!!(degNote && degNote.deg===i));
     k.setAttribute("aria-pressed",degNote && degNote.deg===i?"true":"false");
     k.setAttribute("aria-label",tr("studio.chord.key",{name:ch?ch.name:""}));
+  }
+  var accKey=$("studio-chord-acc"), typeKey=$("studio-chord-type"), cur;
+  if(deep && accKey){
+    cur=degNote?accValue(degNote.acc):0;
+    accKey.textContent=accLabel(cur);
+    accKey.disabled=!degNote;
+    accKey.classList.toggle("on",!!degNote && cur!==0);
+    accKey.setAttribute("aria-pressed",degNote && cur!==0?"true":"false");
+    accKey.setAttribute("aria-label",tr("studio.chord.acc",{acc:accLabel(cur)}));
+  }
+  if(deep && typeKey){
+    typeKey.textContent=tr("studio.chord.type");
+    typeKey.disabled=!degNote;
+    typeKey.setAttribute("aria-label",tr("studio.chord.type"));
   }
   var rk=$("studio-chord-rest");
   if(rk){ rk.textContent=tr("studio.rest"); rk.setAttribute("aria-label",tr("studio.rest")); }
@@ -2100,6 +2255,7 @@ function renderSheet(){
     var eh=sheetHead(tr("studio.menu.edit"));
     eh.className+=" st-sheet-head";
     var eul=el("ul","lcd-menu");
+    if(T.meta) sheetRow(eul,tr(T.meta.deep?"studio.deep.on":"studio.deep.off"),"",function(){ toggleDeep(); });
     if(T.loaded) sheetRow(eul,tr("studio.versions"),String(T.versions.length),function(){ openSheet("versions"); });
     var clearTrackNow=screenTrack();
     if(T.song && T.loaded && clearTrackNow) sheetRow(eul,tr("studio.clear.track",{track:screenName(clearTrackNow)}),"",function(){ clearCurrentTrack(); });
@@ -2515,6 +2671,58 @@ function renderSheet(){
     renderAiSheet(sh);
     return;
   }
+  if(T.sheet==="noteplay"){
+    var npTrack=noteTrack(), npNote=npTrack?selectedNote(npTrack):null;
+    if(!npNote){ T.sheet=""; sh.hidden=true; return; }
+    sheetHead(tr("studio.note.play"));
+    var npGate=npNote.gate===0.5?0.5:npNote.gate===0.25?0.25:1;
+    var npOrn=npNote.orn==="slide"?"slide":npNote.orn==="vib"?"vib":"";
+    sh.appendChild(el("p","st-sheet-label",tr("studio.gate")));
+    var grow=el("div","st-deep-row"), gi, gv, gb;
+    var gates=[[1,"studio.gate.normal"],[0.5,"studio.gate.short"],[0.25,"studio.gate.tiny"]];
+    for(gi=0;gi<gates.length;gi++){
+      (function(gv,label){
+        gb=deepButton("st-deep-btn",tr(label),npGate===gv,function(){ setNoteGate(gv); });
+        gb.setAttribute("data-gate",String(gv));
+        grow.appendChild(gb);
+      })(gates[gi][0],gates[gi][1]);
+    }
+    sh.appendChild(grow);
+    sh.appendChild(el("p","st-sheet-label",tr("studio.orn")));
+    var orow=el("div","st-deep-row"), oi, olist;
+    /* the bass has no vibrato (12.20.5): its row shows 无 and 滑音 only */
+    olist=npTrack==="bass" ? [[ "", "studio.orn.none"],["slide","studio.orn.slide"]]
+      : [["","studio.orn.none"],["slide","studio.orn.slide"],["vib","studio.orn.vib"]];
+    for(oi=0;oi<olist.length;oi++){
+      (function(orn,label){
+        var ob=deepButton("st-deep-btn",tr(label),npOrn===orn,function(){ setNoteOrn(orn); });
+        ob.setAttribute("data-orn",orn);
+        orow.appendChild(ob);
+      })(olist[oi][0],olist[oi][1]);
+    }
+    sh.appendChild(orow);
+    return;
+  }
+  if(T.sheet==="chordtype"){
+    var ctNote=selectedChord();
+    if(!ctNote){ T.sheet=""; sh.hidden=true; return; }
+    var cth=sheetHead(tr("studio.chord.type"));
+    cth.className+=" st-sheet-head";
+    var qgrid=el("div","st-q-grid"), qi, curQ;
+    curQ=typeof ctNote.q==="string" && Object.prototype.hasOwnProperty.call(SONGS.QUALITIES,ctNote.q) ? ctNote.q : "";
+    var auto=deepButton("st-q-btn",tr("studio.chord.auto"),curQ==="",function(){ setChordQ(""); });
+    auto.setAttribute("data-q","");
+    qgrid.appendChild(auto);
+    for(qi=0;qi<SONGS.QUALITY_ORDER.length;qi++){
+      (function(q){
+        var qb=deepButton("st-q-btn",q,curQ===q,function(){ setChordQ(q); });
+        qb.setAttribute("data-q",q);
+        qgrid.appendChild(qb);
+      })(SONGS.QUALITY_ORDER[qi]);
+    }
+    sh.appendChild(qgrid);
+    return;
+  }
   if(T.sheet==="key"){
     var kh=sheetHead(tr("studio.key.title"));
     kh.className+=" st-sheet-head";
@@ -2710,7 +2918,7 @@ function workspaceEntries(){
     return r.versions.get().then(function(versions){
       var entries=[], i, id, data, vers, doc;
       entries.push({name:"workspace.json",data:JSON.stringify({v:1,current:T.id,
-        meta:{toured:T.meta.toured||{},hushTip:!!T.meta.hushTip,guideTip:!!T.meta.guideTip,folders:T.meta.folders||[]}})});
+        meta:{toured:T.meta.toured||{},hushTip:!!T.meta.hushTip,guideTip:!!T.meta.guideTip,deep:!!T.meta.deep,folders:T.meta.folders||[]}})});
       for(i=0;i<items.docs.length;i++){
         doc=items.docs[i];
         id=doc.id;
@@ -2841,7 +3049,7 @@ function applyWorkspaceImport(){
     }
     return Promise.all(writes);
   }).then(function(){
-    T.meta={toured:plan.meta.toured||{},hushTip:!!plan.meta.hushTip,guideTip:!!plan.meta.guideTip,
+    T.meta={toured:plan.meta.toured||{},hushTip:!!plan.meta.hushTip,guideTip:!!plan.meta.guideTip,deep:plan.meta.deep===true,
       folders:Array.isArray(plan.meta.folders)?plan.meta.folders.filter(function(x){return typeof x==="string";}):[],current:plan.current};
     saveMeta();
     T.loaded=false; T.loading=null; T.song=null; T.id=""; T.metaOk=false; T.versions=[]; T.versionsOk=false;
@@ -3206,6 +3414,7 @@ document.addEventListener("keydown",function(e){
     else if(T.sheet==="demo") demoTape();
     else if(T.sheet==="copyask") confirmCopy();
     else if(T.sheet==="slot") insertSlotBefore();   /* A is the sheet's first row, like the other questions' 确认 */
+    else if(T.sheet==="noteplay"||T.sheet==="chordtype") sheetConfirm();
     else if(!T.sheet) tapFocus();
   }
   else if(key==="Enter"){ if(e.repeat) return; togglePlay(); }
