@@ -161,9 +161,9 @@ Both phones through the built-in Radio, speaker output:
 | iPhone 13 Pro -> iPhone 16 | errors | **perfect** | 13 Pro speaker is weaker |
 
 - With the speaker and enough volume, 5 ms was completely usable in the 16 -> 13 Pro direction.
-- Through the **earpiece** (电话听筒), both directions had a much higher error rate; this is a routing/level problem, not a modem bug.
-- The built-in now sets `audioSession.type = "playback"` for sending (the speaker) and `"ambient"` when the burst ends; receiving still uses `"play-and-record"`.
-- TX amplitude was raised (0.55 -> 0.9) and the built-in now defaults to **10 ms**, the rate that worked in both directions with the 13 Pro as sender. 5 ms remains selectable for a strong speaker pair.
-- The engine is the same in both directions, so this is acoustic level/frequency response, not a decoder asymmetry to fix in code. M3's ACK/retry should fall back to a slower rate after repeated failures; M5 should measure each direction separately.
+- The owner confirmed the sound came from the **bottom speaker**, not the earpiece. An earlier earpiece observation was a routing/level problem; the built-in still sets `audioSession.type = "playback"` for sending, but that change did not materially change the rates.
+- The direction data points at the **receiver**: the 13 Pro's microphone decoded 5 ms from the 16, while the 16 needed 10 ms from the 13 Pro. The 13 Pro speaker is not the limiting factor. Raising TX amplitude (0.55 -> 0.9) also did not change the result much.
+- The built-in now defaults to **10 ms**, the balanced rate in both directions. 5 ms remains selectable for a strong pair.
+- The engine is the same in both directions, so this is an acoustic/microphone difference, not a decoder asymmetry. M3's handshake should pick a rate that works both ways; M5 should measure each direction separately.
 
 M3 (frames, CRC, ACK) and M4 (text) are next.
