@@ -131,11 +131,14 @@ function applyTool(song,call){
 }
 
 /* ---------- the plan ---------- */
-function planCheck(obj){
+function planCheck(obj,cards){
   var bpm, sections, order, seen={}, lens={}, total=0, chain=0, seconds;
   var i, j, s, id, e, used={};
   if(!plain(obj)) return {error:"reply with one JSON object"};
   bpm=obj.bpm; sections=obj.sections; order=obj.order;
+  if(!int(obj.card) || obj.card<1 || obj.card>cards) return {error:"card must be 1-"+cards};
+  if(obj.scale!=null && ["major","minor","dorian"].indexOf(obj.scale)<0)
+    return {error:"scale must be major, minor or dorian (or left out)"};
   if(!num(bpm) || bpm<S.BPM_MIN || bpm>S.BPM_MAX)
     return {error:"bpm must be "+S.BPM_MIN+"-"+S.BPM_MAX};
   if(!Array.isArray(sections) || !sections.length) return {error:"sections must be a non-empty list"};
@@ -193,7 +196,8 @@ function planCheck(obj){
   }
   var keptOrder=[];
   for(i=0;i<order.length;i++) keptOrder.push([order[i][0],order[i][1]]);
-  return {value:{name:typeof obj.name==="string" && obj.name.trim() ? obj.name.trim() : "Tape4",
+  return {value:{card:obj.card, scale:obj.scale||"",
+    name:typeof obj.name==="string" && obj.name.trim() ? obj.name.trim() : "Tape4",
     bpm:bpm, sections:kept, order:keptOrder}};
 }
 
@@ -359,19 +363,29 @@ function skeleton(o){
   var rand=typeof o.rand==="function"?o.rand:Math.random;
   var now=num(o.now)?o.now:Date.now();
   return job(o.ask,function(c){
-    var roll=ST.roll(rand);
-    var cardName=P.lang(text)==="Chinese"?roll.card.zh:roll.card.en;
-    stage(o.onStage,"card",1,1,{card:cardName,key:S.NAMES[roll.key],scale:roll.scale,bpm:roll.bpm});
+    /* Three different cards: card 1 is the dice's pick for a vague request ("a skeleton"), and a request that names a
+       mood or a style lets the model take the card that fits it instead. */
+    var rolls=[], seen={}, r, tries=0, zh=P.lang(text)==="Chinese", roll, cardName;
+    while(rolls.length<3 && tries<30){
+      r=ST.roll(rand); tries++;
+      if(seen["$"+r.card.id]) continue;
+      seen["$"+r.card.id]=true;
+      rolls.push(r);
+    }
     stage(o.onStage,"plan",1,1,{});
     var planMsgs=P.plan({
-      text:text, card:cardName, keyName:S.NAMES[roll.key], scale:roll.scale, bpm:roll.card.bpm,
-      grooves:roll.grooves, bass:roll.bass,
-      allGrooves:Object.keys(ST.GROOVES).filter(function(g){ return roll.grooves.indexOf(g)<0; }),
-      allBass:Object.keys(ST.BASS).filter(function(b){ return roll.bass.indexOf(b)<0; }),
-      form:ST.FORMS[roll.form] ? ST.FORMS[roll.form].order.join(" ") : ""
+      text:text, cards:rolls.map(function(x){
+        return {name:zh?x.card.zh:x.card.en, keyName:S.NAMES[x.key], scale:x.scale, bpm:x.card.bpm,
+          grooves:x.grooves, bass:x.bass, form:ST.FORMS[x.form] ? ST.FORMS[x.form].order.join(" ") : ""};
+      }),
+      allGrooves:Object.keys(ST.GROOVES), allBass:Object.keys(ST.BASS)
     });
-    return step(c,planMsgs,planCheck,"plan").then(function(ans){
+    return step(c,planMsgs,function(obj){ return planCheck(obj,rolls.length); },"plan").then(function(ans){
       var plan=ans.value, song;
+      roll=rolls[plan.card-1];
+      if(plan.scale) roll.scale=plan.scale;
+      cardName=zh?roll.card.zh:roll.card.en;
+      stage(o.onStage,"card",1,1,{card:cardName,key:S.NAMES[roll.key],scale:roll.scale,bpm:plan.bpm});
       stage(o.onStage,"lay",1,1,{});
       song=laySong(roll,plan,now);
       return melodyRun(c,song,plan,roll,text,o.onStage);
