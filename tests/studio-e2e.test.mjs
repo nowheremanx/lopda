@@ -3958,7 +3958,7 @@ test("studio: an AI draft becomes a new tape and leaves the current one alone", 
   assert.deepEqual(await p.evaluate(() => window.__aiSteps), ["plan", "motif", "listen"]);
   await p.locator("#studio-sheet .st-sheet-btn", { hasText: "采用并试听" }).click();
   await p.waitForFunction(() => /100 BPM/.test((document.querySelector("#studio-bpm") || {}).textContent || ""));
-  assert.equal(await p.getAttribute("#v-studio", "data-screen"), "drums");
+  assert.equal(await p.getAttribute("#v-studio", "data-screen"), "song", "use and listen plays the whole song on the song screen");
   await openMyTapes(p);
   await p.waitForFunction(() => /雨夜测试/.test((document.querySelector("#studio-sheet .st-proj-list") || {}).textContent || ""));
   assert.equal(await p.locator("#studio-sheet .st-proj-list li").count(), 2, "the original tape is still there");

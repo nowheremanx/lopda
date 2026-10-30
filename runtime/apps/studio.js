@@ -2173,7 +2173,7 @@ function applyAiPreview(play){
       T.aiNote="";
       installSong(song,id,[]);
       toast(tr("studio.ai.newdone"));
-      if(play) startPlay();
+      if(play) listenFromTop();
     });
     return;
   }
@@ -2185,7 +2185,15 @@ function applyAiPreview(play){
   T.sheet="";
   renderAll();
   toast(tr("studio.ai.applied"));
-  if(play) startPlay();
+  if(play) listenFromTop();
+}
+/* "Use and listen" plays the whole song from its first bar on the song screen, not the one pattern the user happened to
+   be on (owner, 2026-10-30). The screen's tour is skipped: it would cover the song as it starts. */
+function listenFromTop(){
+  T.slot=0;
+  screenTo("song");
+  renderAll();
+  startPlay();
 }
 function askAi(text){
   text=String(text==null?"":text).trim();
