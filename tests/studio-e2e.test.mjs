@@ -532,6 +532,30 @@ test("studio synth: dispose stops later notes; an unknown voice or bad note args
   assert.deepEqual(errors, []);
 });
 
+test("studio synth: the straight pop example peaks under 0.9 and sounds", { skip, timeout: 120000 }, async (t) => {
+  const { p, errors } = await studioPage(t);
+  const r = await p.evaluate(async () => {
+    const song = LopdaSong.popSong(0), ticks = LopdaSong.chainTicks(song, song.song);
+    const seconds = LopdaSong.ticksToSec(ticks, song.bpm);
+    const oc = new OfflineAudioContext(1, Math.ceil(seconds * 22050), 22050);
+    const out = oc.createGain(); out.gain.value = 1; out.connect(oc.destination);
+    const synth = LopdaStudioSynth.create(oc, out);
+    for (const e of LopdaSong.chainEvents(song, song.song, 0, ticks)) {
+      if (!e.vel) continue;
+      const at = LopdaSong.ticksToSec(e.tick, song.bpm), dur = LopdaSong.ticksToSec(e.len, song.bpm);
+      if (e.track === "drums") synth.hit(song.kit, e.key, at, e.vel);
+      else if (e.track === "chords") for (const midi of LopdaSong.chordNotes(song, e.deg)) synth.note(LopdaSong.SOUND.chords, midi, at, dur, e.vel);
+      else synth.note(LopdaSong.SOUND[e.track], LopdaSong.noteMidi(song, e.track, e.deg), at, dur, e.vel);
+    }
+    const d = (await oc.startRendering()).getChannelData(0);
+    return Object.assign(stats(d), { seconds, bars: song.song.length });
+  });
+  assert.ok(r.peak > 0.2, `the pop example sounds (${r.peak})`);
+  assert.ok(r.peak <= 0.9, `the pop example peaks under the soft ceiling (${r.peak})`);
+  assert.ok(Math.abs(r.seconds - 65) < 5, `about a minute of music (${r.seconds}s)`);
+  assert.deepEqual(errors, []);
+});
+
 test("studio tape: position 0 is a clean wire, 4 muffles the same hit, and both still sound", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await studioPage(t);
   const r = await p.evaluate(async () => ({ clean: await renderTape(0), worn: await renderTape(4), again: await renderTape(4) }));
