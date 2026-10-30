@@ -130,6 +130,14 @@ function applyTool(song,call){
   return a.song;
 }
 
+/* The edit layer's refusal in words a model can act on: which operation, and what about it. */
+function applyWhy(a,ops){
+  var op=ops && typeof a.at==="number" ? ops[a.at] : null;
+  var what={value:"a value is out of range or the wrong type", unknown:"unknown op", track:"unknown track", full:"the chain is full",
+    validate:"the result is not a valid song", op:"not an operation", many:"more than 64 operations"}[a.error]||String(a.error||"invalid edit");
+  return what+(op ? " in operation "+(a.at+1)+" "+JSON.stringify(op).slice(0,120) : "")+(a.detail ? " ("+a.detail+")" : "");
+}
+
 /* ---------- the plan ---------- */
 function planCheck(obj,cards){
   var bpm, sections, order, seen={}, lens={}, total=0, chain=0, seconds;
@@ -381,7 +389,7 @@ function listenCheck(obj,song){
     if(r.error) return {error:"call "+(i+1)+" ("+call.tool+") failed: "+r.error};
     a=E.apply(work,r.ops);
     if(!a.song)
-      return {error:"call "+(i+1)+" ("+call.tool+") did not apply: "+(a.error||"invalid edit")};
+      return {error:"call "+(i+1)+" ("+call.tool+") did not apply: "+applyWhy(a,r.ops)};
     work=a.song;
   }
   return {value:{reply:obj.reply.trim(),song:work}};
@@ -465,7 +473,7 @@ function runCalls(song,calls){
     }
     a=E.apply(work,r.ops);
     if(!a.song){
-      lines.push(n+" error: "+call.tool+" did not apply: "+(a.error||"invalid edit"));
+      lines.push(n+" error: "+call.tool+" did not apply: "+applyWhy(a,r.ops));
       failed=true;
       continue;
     }
