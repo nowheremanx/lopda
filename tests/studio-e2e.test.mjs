@@ -798,6 +798,14 @@ function storedMatches(data, want) {
   if (want.scale != null && data.scale !== want.scale) return false;
   if (want.swing != null && data.swing !== want.swing) return false;
   if (want.tape != null && data.tape !== want.tape) return false;
+  if (want.kit != null && data.kit !== want.kit) return false;
+  if (want.voice) {
+    for (const [id, voice] of Object.entries(want.voice)) {
+      const tr = (data.tracks || []).find((x) => x.id === id);
+      if (!tr) return false;
+      if (voice === null ? typeof tr.voice !== "undefined" : tr.voice !== voice) return false;
+    }
+  }
   if (want.tracks) {
     for (const [id, fields] of Object.entries(want.tracks)) {
       const tr = (data.tracks || []).find((x) => x.id === id);
@@ -1851,7 +1859,8 @@ test("studio: the mixer sets a track's level and mute, and they survive a reload
   await p.click('#studio-screens .st-scr[data-screen="mixer"]');
   await skipScreenTour(p);
   assert.equal(await p.locator("#studio-mix-rows .st-mix-row").count(), 4, "four instrument rows");
-  assert.deepEqual(await p.$$eval("#studio-mix-rows .st-mix-name", (els) => els.map((e) => e.textContent)), ["鼓", "贝斯", "和弦", "旋律"]);
+  assert.deepEqual(await p.$$eval("#studio-mix-rows .st-mix-track", (els) => els.map((e) => e.textContent)), ["鼓", "贝斯", "和弦", "旋律"]);
+  assert.deepEqual(await p.$$eval("#studio-mix-rows .st-mix-voice", (els) => els.map((e) => e.textContent)), ["软鼓", "合成", "电钢", "长笛"], "a fresh tape's default voices");
   assert.match(await p.textContent("#studio-mix-key"), /调式 A · 小调五声/);
   assert.match(await p.textContent("#studio-mix-sound"), /磁带 2 · 摇摆 55%/);
 
@@ -1874,6 +1883,130 @@ test("studio: the mixer sets a track's level and mute, and they survive a reload
   const back = p.locator('#studio-mix-rows .st-mix-row[data-track="drums"]');
   assert.equal(await back.locator(".st-mix-vol").textContent(), "8", "the level survives the reload");
   assert.equal(await back.locator(".st-mix-mute").getAttribute("aria-pressed"), "true", "the mute survives too");
+  assert.deepEqual(errors, []);
+});
+
+test("studio: the mixer's name button cycles a track's voice, saves it, and undo takes it back", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await p.click('#studio-screens .st-scr[data-screen="mixer"]');
+  await skipScreenTour(p);
+
+  const bass = p.locator('#studio-mix-rows .st-mix-row[data-track="bass"]');
+  assert.equal(await bass.locator(".st-mix-voice").textContent(), "合成", "a fresh tape plays the default bass");
+  await bass.locator(".st-mix-name").click();
+  assert.equal(await bass.locator(".st-mix-voice").textContent(), "拨弦", "the name button takes the next voice");
+  assert.equal(await bass.locator(".st-mix-name").getAttribute("aria-label"), "换贝斯的音色（现在：拨弦）");
+  await waitStored(p, { voice: { bass: "pick" } });
+
+  /* undo is one editable step back: the default voice comes back */
+  await openMenu(p);
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "撤销" }).click();
+  await p.click("#studio-sheet .st-sheet-close");
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  assert.equal(await bass.locator(".st-mix-voice").textContent(), "合成", "undo brings the default voice back");
+  await waitStored(p, { voice: { bass: null } });
+
+  /* pick it again and carry it through a reload */
+  await bass.locator(".st-mix-name").click();
+  assert.equal(await bass.locator(".st-mix-voice").textContent(), "拨弦");
+  await waitStored(p, { voice: { bass: "pick" } });
+
+  await p.click("#home-key");
+  await p.waitForTimeout(250);
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await openTile(p);
+  await p.click('#studio-screens .st-scr[data-screen="mixer"]');
+  await skipScreenTour(p);
+  const back = p.locator('#studio-mix-rows .st-mix-row[data-track="bass"]');
+  assert.equal(await back.locator(".st-mix-voice").textContent(), "拨弦", "the voice survives the reload");
+  assert.deepEqual(errors, []);
+});
+
+test("studio: the mixer's drum row cycles all four kits and saves each", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await p.click('#studio-screens .st-scr[data-screen="mixer"]');
+  await skipScreenTour(p);
+  const drums = p.locator('#studio-mix-rows .st-mix-row[data-track="drums"]');
+  const kitOrder = [["芯片", "chip"], ["原声", "rock"], ["电子", "electro"], ["软鼓", "soft"]];
+  for (const [label, id] of kitOrder) {
+    await drums.locator(".st-mix-name").click();
+    assert.equal(await drums.locator(".st-mix-voice").textContent(), label, `the drum row shows ${label}`);
+    assert.equal(await drums.locator(".st-mix-name").getAttribute("aria-label"), `换鼓的音色（现在：${label}）`);
+    await waitStored(p, { kit: id });
+  }
+  assert.deepEqual(errors, []);
+});
+
+test("studio: the guitar voice strums a chord 12 ms apart, low to high", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await hitCountingPage(t);
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await openTile(p);
+  await skipTour(p);
+  await p.click('#studio-screens .st-scr[data-screen="mixer"]');
+  await skipScreenTour(p);
+  const chords = p.locator('#studio-mix-rows .st-mix-row[data-track="chords"]');
+  assert.equal(await chords.locator(".st-mix-voice").textContent(), "电钢");
+  await chords.locator(".st-mix-name").click();
+  assert.equal(await chords.locator(".st-mix-voice").textContent(), "吉他");
+  await waitStored(p, { voice: { chords: "guitar" } });
+
+  await p.click('#studio-screens .st-scr[data-screen="chords"]');
+  await skipScreenTour(p);
+  await p.evaluate(() => { window.__studioNotes.length = 0; });
+  await p.click("#studio-play");
+  await p.waitForTimeout(800);
+  await p.click("#studio-play");
+  await p.waitForFunction(() => document.querySelector("#v-studio").getAttribute("data-playing") === "false");
+  const r = await p.evaluate(() => {
+    const g = window.__studioNotes.filter((n) => n.voice === "guitar");
+    if (!g.length) return { count: 0, notes: [] };
+    const base = Math.min(...g.map((n) => n.at));
+    const first = g.filter((n) => n.at - base < 0.2).sort((a, b) => a.midi - b.midi);
+    return { count: g.length, notes: first.map((n) => ({ midi: n.midi, dt: Math.round((n.at - base) * 1e6) / 1e6 })) };
+  });
+  assert.ok(r.count > 0, "the guitar chord sounds");
+  assert.ok(r.notes.length >= 3, `the chord has its notes: ${JSON.stringify(r.notes)}`);
+  for (let i = 1; i < r.notes.length; i++) {
+    assert.ok(r.notes[i].midi > r.notes[i - 1].midi, `low to high: ${JSON.stringify(r.notes)}`);
+    assert.ok(Math.abs(r.notes[i].dt - r.notes[i - 1].dt - 0.012) < 1e-6, `12 ms apart: ${JSON.stringify(r.notes)}`);
+  }
+  assert.deepEqual(errors, []);
+});
+
+test("studio: the mixer rows fit 331x359 with the name, level and mute buttons", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t, { width: 375, height: 503 });
+  await studioOpen(p);
+  await skipTour(p);
+  await p.click('#studio-screens .st-scr[data-screen="mixer"]');
+  await skipScreenTour(p);
+  const m = await p.evaluate(() => {
+    const v = document.querySelector("#v-studio").getBoundingClientRect();
+    const rows = [...document.querySelectorAll("#studio-mix-rows .st-mix-row")].map((r) => {
+      const b = r.getBoundingClientRect();
+      return { l: b.left - v.left, r: b.right - v.left, t: b.top - v.top, b: b.bottom - v.top };
+    });
+    const names = [...document.querySelectorAll("#studio-mix-rows .st-mix-name")].map((e) => {
+      const b = e.getBoundingClientRect();
+      return { w: b.width, h: b.height, scroll: e.scrollWidth, client: e.clientWidth };
+    });
+    const box = document.querySelector("#studio-mix-rows"), view = document.querySelector("#v-studio");
+    return { vw: v.width, vh: v.height, rows, names,
+      boxScroll: box.scrollWidth, boxClient: box.clientWidth,
+      viewScroll: view.scrollHeight, viewClient: view.clientHeight };
+  });
+  assert.ok(m.vw >= 330 && m.vw <= 332 && m.vh >= 358 && m.vh <= 360, `the view is 331x359 (${m.vw}x${m.vh})`);
+  for (const row of m.rows) assert.ok(row.l >= -1 && row.r <= m.vw + 1 && row.t >= -1 && row.b <= m.vh + 1,
+    `the row stays in the view: ${JSON.stringify(row)}`);
+  for (const n of m.names) {
+    assert.ok(n.w >= 44 && n.h >= 44, `the name is a 44 px target: ${JSON.stringify(n)}`);
+    assert.ok(n.scroll <= n.client + 1, `the name's two lines fit: ${JSON.stringify(n)}`);
+  }
+  assert.ok(m.boxScroll <= m.boxClient + 1, `the rows do not scroll sideways (${m.boxScroll} <= ${m.boxClient})`);
+  assert.ok(m.viewScroll <= m.viewClient, `the mixer screen does not scroll (${m.viewScroll} <= ${m.viewClient})`);
   assert.deepEqual(errors, []);
 });
 

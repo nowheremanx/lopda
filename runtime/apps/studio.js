@@ -719,6 +719,29 @@ function toggleMute(id){
   touch();
   renderMixer(); renderNav();
 }
+/* 12.20.3: a tap on a row's name cycles its voice (or the drum row its kit) as one undoable edit, then auditions
+   it: bass and melody the tonic, chords chord 0, drums a kick and a snare. */
+function cycleVoice(id){
+  var choices=SONGS.VOICE_CHOICES[id], cur, i;
+  if(!T.loaded || !T.song || !choices) return;
+  cur=SONGS.voiceOf(T.song,id);
+  i=(choices.indexOf(cur)+1)%choices.length;
+  T.song=SONGS.setTrackVoice(T.song,id,choices[i]);
+  touch();
+  renderMixer();
+  if(id==="chords") auditionChord(0);
+  else auditionNote(id,0);
+}
+function cycleKit(){
+  var cur, i;
+  if(!T.loaded || !T.song) return;
+  cur=SONGS.kitOf(T.song);
+  i=(SONGS.KIT_CHOICES.indexOf(cur)+1)%SONGS.KIT_CHOICES.length;
+  T.song.kit=SONGS.KIT_CHOICES[i];
+  touch();
+  renderMixer(); renderSheet();
+  auditionKit();
+}
 function setKey(k){
   if(!T.loaded || !T.song || SONGS.NAMES[k]==null) return;
   T.song.key=k;
@@ -752,18 +775,22 @@ function setSwing(v){
 /* one note or hit on a synth: the drum kit, the voice of each track, the chord expanded (12.6, 12.7). Shared by the
    live player and the offline WAV render, so both hear the mixer's level. */
 function soundEvent(song,e,at,bpm,synth,vol){
-  var i, notes, midi;
+  var i, notes, midi, voice, strum;
   if(!synth || !song || !e.vel || !(vol>0)) return;
   if(e.track==="drums"){
-    if(e.key) synth.hit(song.kit,e.key,at,e.vel*vol);
+    if(e.key) synth.hit(SONGS.kitOf(song),e.key,at,e.vel*vol);
   } else if(e.track==="chords"){
     notes=SONGS.chordNotes(song,e.deg);
     if(!notes) return;
-    for(i=0;i<notes.length;i++) synth.note(SONGS.SOUND.chords,notes[i],at,SONGS.ticksToSec(e.len,bpm),e.vel*vol);
+    voice=SONGS.voiceOf(song,"chords");
+    /* 12.20.3: a strummed voice sweeps the chord low to high; a song without voices keeps one instant */
+    strum=(SYNTH.STRUM && SYNTH.STRUM[voice]) || 0;
+    notes=notes.slice().sort(function(a,b){ return a-b; });
+    for(i=0;i<notes.length;i++) synth.note(voice,notes[i],at+i*strum,SONGS.ticksToSec(e.len,bpm),e.vel*vol);
   } else if(e.track==="bass" || e.track==="melody"){
     midi=SONGS.noteMidi(song,e.track,e.deg);
     if(midi==null) return;
-    synth.note(SONGS.SOUND[e.track],midi,at,Math.max(0.05,SONGS.ticksToSec(e.len,bpm)),e.vel*vol);
+    synth.note(SONGS.voiceOf(song,e.track),midi,at,Math.max(0.05,SONGS.ticksToSec(e.len,bpm)),e.vel*vol);
   }
 }
 function playEvent(e,at,bpm){
@@ -1000,20 +1027,33 @@ function guideTip(){
 function auditionDrum(){
   var synth=ensureSynth(), vol=trackVol("drums");
   if(!synth || !T.song) return;
-  synth.hit(T.song.kit,T.drum,LP.SND.ctx.currentTime+0.001,vol);
+  synth.hit(SONGS.kitOf(T.song),T.drum,LP.SND.ctx.currentTime+0.001,vol);
 }
 function auditionNote(track,deg){
   var synth=ensureSynth(), midi, vol=trackVol(track);
   if(!synth || !T.song) return;
   midi=SONGS.noteMidi(T.song,track,deg);
   if(midi==null) return;
-  synth.note(SONGS.SOUND[track],midi,LP.SND.ctx.currentTime+0.001,0.4,SONGS.NOTE_VEL*vol);
+  synth.note(SONGS.voiceOf(T.song,track),midi,LP.SND.ctx.currentTime+0.001,0.4,SONGS.NOTE_VEL*vol);
 }
 function auditionChord(deg){
   var synth=ensureSynth(), notes=SONGS.chordNotes(T.song,deg), i, now, vol=trackVol("chords");
+  var voice, strum;
   if(!synth || !notes) return;
   now=LP.SND.ctx.currentTime+0.001;
-  for(i=0;i<notes.length;i++) synth.note(SONGS.SOUND.chords,notes[i],now,0.8,SONGS.NOTE_VEL*vol);
+  voice=SONGS.voiceOf(T.song,"chords");
+  strum=(SYNTH.STRUM && SYNTH.STRUM[voice]) || 0;
+  notes=notes.slice().sort(function(a,b){ return a-b; });
+  for(i=0;i<notes.length;i++) synth.note(voice,notes[i],now+i*strum,0.8,SONGS.NOTE_VEL*vol);
+}
+/* 12.20.3: the drum row's preview, kick then snare 0.15 s later, so the kit's two most different drums are heard */
+function auditionKit(){
+  var synth=ensureSynth(), vol=trackVol("drums"), kit, now;
+  if(!synth || !T.song) return;
+  kit=SONGS.kitOf(T.song);
+  now=LP.SND.ctx.currentTime+0.001;
+  synth.hit(kit,"kick",now,SONGS.NOTE_VEL*vol);
+  synth.hit(kit,"snare",now+0.15,SONGS.NOTE_VEL*vol);
 }
 /* the context was replaced (a call, Siri): the tape carries on from the same tick on the new one */
 function onAudio(){
@@ -1126,13 +1166,16 @@ function build(){
       screens.appendChild(b);
     })(defs[i]);
   }
-  /* the mixer: a key/tape row and four track rows; voice joins in step 2 (12.14) */
+  /* the mixer: a key/tape row and four track rows; the row's name is the voice button (12.20.3) */
   var rows=$("studio-mix-rows"), trk, name, minus, value, plus, mute;
   for(i=0;i<MIX_TRACKS.length;i++){
     (function(id){
       trk=el("div","st-mix-row");
       trk.setAttribute("data-track",id);
-      name=el("span","st-mix-name");
+      name=el("button","st-mix-name"); name.type="button";
+      name.appendChild(el("span","st-mix-track"));
+      name.appendChild(el("span","st-mix-voice"));
+      name.onclick=function(){ if(id==="drums") cycleKit(); else cycleVoice(id); };
       minus=el("button","st-mix-btn st-mix-minus","−"); minus.type="button";
       minus.setAttribute("aria-label",tr("studio.mix.down",{track:tr("studio.screen."+id)}));
       value=el("span","st-mix-vol");
@@ -1440,13 +1483,17 @@ function renderMixer(){
   if(keyBtn && T.song) keyBtn.textContent=tr("studio.mix.key",{key:SONGS.NAMES[T.song.key],scale:tr("studio.scale."+T.song.scale)});
   if(sndBtn && T.song) sndBtn.textContent=tr("studio.mix.sound",{tape:T.song.tape,swing:Math.round(T.song.swing*100)});
   if(!rows) return;
-  var i, row, id, trk, vol, mute, minus, plus;
+  var i, row, id, trk, vol, mute, minus, plus, nm, label;
   for(i=0;i<rows.children.length;i++){
     row=rows.children[i];
     id=row.getAttribute("data-track");
     trk=trackById(id);
     vol=trk && typeof trk.vol==="number" ? trk.vol : 1;
-    row.querySelector(".st-mix-name").textContent=screenName(id);
+    nm=row.querySelector(".st-mix-name");
+    label=id==="drums" ? tr("studio.kit."+SONGS.kitOf(T.song)) : tr("studio.voice."+SONGS.voiceOf(T.song,id));
+    row.querySelector(".st-mix-track").textContent=screenName(id);
+    row.querySelector(".st-mix-voice").textContent=label;
+    nm.setAttribute("aria-label",tr("studio.voice.change",{track:screenName(id),voice:label}));
     row.querySelector(".st-mix-vol").textContent=tr("studio.mix.vol",{n:Math.round(vol*10)});
     row.querySelector(".st-mix-vol").setAttribute("aria-label",tr("studio.mix.volume",{n:Math.round(vol*10)}));
     row.classList.toggle("muted",!!(trk && trk.mute));
@@ -2053,9 +2100,8 @@ function renderSheet(){
     if(T.loaded) sheetRow(eul,tr("studio.versions"),String(T.versions.length),function(){ openSheet("versions"); });
     var clearTrackNow=screenTrack();
     if(T.song && T.loaded && clearTrackNow) sheetRow(eul,tr("studio.clear.track",{track:screenName(clearTrackNow)}),"",function(){ clearCurrentTrack(); });
-    if(T.song && T.loaded) sheetRow(eul,tr("studio.kit",{kit:tr("studio.kit."+T.song.kit)}),"",function(){
-      T.song.kit=T.song.kit==="soft" ? "chip" : "soft";
-      touch(); renderSheet();
+    if(T.song && T.loaded) sheetRow(eul,tr("studio.kit",{kit:tr("studio.kit."+SONGS.kitOf(T.song))}),"",function(){
+      cycleKit();
     });
     if(T.loaded) sheetRow(eul,tr("studio.clear.tape"),"",function(){ openSheet("new"); });
     sh.appendChild(eul);
