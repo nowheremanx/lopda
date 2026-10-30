@@ -1638,7 +1638,7 @@ function aiState(){
   return LP.ai && LP.ai.on() ? tr("studio.ai.on") : tr("studio.ai.off");
 }
 function isAiDraft(pv){
-  return !!(pv && (pv.draft || (pv.ops && pv.ops.length===1 && pv.ops[0] && pv.ops[0].op==="replaceSong")));
+  return !!(pv && (pv.draft || (pv.ops && pv.ops.some(function(o){ return o && o.op==="replaceSong"; }))));
 }
 function renderAiSheet(sh){
   var head=sheetHead(tr("studio.ai.title"));
@@ -2300,8 +2300,14 @@ function workspaceEntries(){
       for(i=0;i<versions.docs.length;i++){
         doc=versions.docs[i];
         id=doc.id;
-        if(id===T.id) data={v:1,versions:T.versions};
-        else data=doc.data();
+        if(id===T.id){
+          /* the in-memory list may be ahead of the stored one (a save is in flight): keep both, newest first */
+          var seen={}, merged=[], stored=doc.data().versions || [], j;
+          for(j=0;j<T.versions.length;j++) if(T.versions[j] && !seen[T.versions[j].at]){ seen[T.versions[j].at]=1; merged.push(T.versions[j]); }
+          for(j=0;j<stored.length;j++) if(stored[j] && !seen[stored[j].at]){ seen[stored[j].at]=1; merged.push(stored[j]); }
+          merged.sort(function(a,b){ return b.at-a.at; });
+          data={v:1,versions:merged.slice(0,10)};
+        } else data=doc.data();
         entries.push({name:"versions/"+id+".json",data:JSON.stringify(data)});
       }
       /* the current tape may not have been read into the collection yet (the first save is in flight) */
