@@ -6,7 +6,7 @@ Owner: Haowei Wu. Repo: https://github.com/nowheremanx/lopda.
 Design history and open questions: `docs/decisions.md`. Read it before changing behaviour.
 Design drafts for work not yet merged: `docs/design/` (current: `home-api.md`, the home tile API;
 `pet-room.md`, the pet's scene objects, spots and slots; `pet-souvenir-state.md`, the souvenir state hook
-and its grow / cycle / match layers).
+and its grow / match layers, with cycle deferred).
 
 ## Layout
 
