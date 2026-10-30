@@ -161,6 +161,7 @@ function clampCursors(){
 }
 function keepSong(song,snap){
   T.song=song;
+  T.projectFolder=folderOf(song);
   T.snap=snap!==undefined?snap:snapSong();
   T.dirty=true;
   clampCursors();
