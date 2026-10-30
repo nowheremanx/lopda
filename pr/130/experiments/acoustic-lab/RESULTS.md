@@ -167,3 +167,39 @@ Both phones through the built-in Radio, speaker output:
 - The engine is the same in both directions, so this is an acoustic/microphone difference, not a decoder asymmetry. M3's handshake should pick a rate that works both ways; M5 should measure each direction separately.
 
 M3 (frames, CRC, ACK) and M4 (text) are next.
+
+## 8. M3 link — synthetic PASS, two-phone pending
+
+M3 adds `runtime/acoustic-link.js` (frames, CRC-16/CCITT-FALSE, HELLO/DATA/ACK/NACK/FIN) and turns the Radio app's
+automatic mode into a stop-and-wait link.
+
+| check | result |
+|---|---|
+| frame round-trip for every type | pass |
+| CRC-16 known vector (`123456789` -> `0x29B1`) | pass |
+| bad CRC / bad length / bad version / bad type | refused |
+| HELLO, DATA, ACK, FIN through the M2 modem at 10/20/40 ms | pass |
+| M2 manual receive still works in the browser | pass (sync 16/16, 0/64, 0/16) |
+| automatic handshake + DATA on two real phones | **not yet run** |
+
+The app's automatic mode:
+
+1. Sender sends `HELLO` at 10 ms.
+2. Receiver scans the 3.2 s window at 10/20/40 ms and answers `HELLO_ACK` at the rate it decoded.
+3. Sender waits 7 s; no answer -> 20 ms, then 40 ms. HELLO and HELLO_ACK test both directions at the same rate.
+4. One 16-byte DATA frame, CRC-checked; ACK or NACK; up to three DATA retries.
+5. FIN/ACK.
+
+Known limits: the receiver reopens the microphone for every burst; there is no continuous symbol clock, and an ACK
+lost during handshake is handled by the sender's slower retry only if the receiver is still scanning. M4 text and
+multi-frame sequencing are next.
+
+### Early-poll fix (2026-10-30)
+
+The first automatic link run talked past itself after the handshake: the sender waited out the whole ACK
+capture window before sending DATA, while the receiver had already moved on to its data window and
+timed out. Capture windows now poll every 120 ms and stop as soon as a complete frame is decoded.
+
+A synthetic continuous microphone (a fake getUserMedia stream fed from a timeline, so repeated captures do
+not restart the file) completed a 10 ms receiver run: HELLO/HELLO_ACK, 16-byte DATA, `CRC OK`, FIN/ACK,
+`Received · 16 bytes · 10 ms`. The sender path and two real phones still need a run.

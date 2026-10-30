@@ -501,7 +501,7 @@
       </div>
     </section>
 
-    <!-- RADIO: the acoustic modem, M2 test bench over runtime/acoustic.js (apps/radio.js) -->
+    <!-- RADIO: the acoustic link, M2 test bench and M3 handshake/frames (apps/radio.js, acoustic.js, acoustic-link.js) -->
     <section class="view radio-view" id="v-radio" hidden>
       <div class="bar">
         <h2 data-i18n="radio.title">电波台</h2>
@@ -532,15 +532,19 @@
             </select>
           </label>
           <p class="hint radio-hex" id="radio-pattern-hex"></p>
+          <label class="radio-check"><input type="checkbox" id="radio-auto" checked> <span data-i18n="radio.auto">自动握手</span></label>
         </div>
         <div class="radio-pane" id="radio-pane-send">
-          <button class="btn" id="radio-send-go" type="button" data-i18n="radio.send.go">发送测试序列</button>
+          <div class="row radio-actions">
+            <button class="btn" id="radio-send-go" type="button" data-i18n="radio.send.link">连接并发送</button>
+            <button class="btn ghost" id="radio-send-stop" type="button" data-i18n="radio.send.cancel" disabled>取消</button>
+          </div>
           <div class="radio-meter"><span id="radio-send-bar"></span></div>
           <p class="hint" id="radio-send-state" aria-live="polite"></p>
         </div>
         <div class="radio-pane" id="radio-pane-recv" hidden>
           <div class="row radio-actions">
-            <button class="btn" id="radio-recv-go" type="button" data-i18n="radio.recv.go">接收并解码</button>
+            <button class="btn" id="radio-recv-go" type="button" data-i18n="radio.recv.link">等待连接</button>
             <button class="btn ghost" id="radio-recv-stop" type="button" data-i18n="radio.recv.stop" disabled>停止并解码</button>
           </div>
           <div class="radio-meter"><span id="radio-recv-bar"></span></div>
@@ -761,6 +765,7 @@
 <script src="qr.js"></script>
 <script src="appsaves.js"></script>
 <script src="acoustic.js"></script>
+<script src="acoustic-link.js"></script>
 <script src="core.js"></script>
 <script src="apps/notes.js"></script>
 <script src="apps/calendar.js"></script>

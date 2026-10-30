@@ -913,6 +913,8 @@ textarea::placeholder{color:var(--ink-2)}
 .radio-log{font-size:13px;line-height:1.4;border:2px solid var(--ink-2);padding:4px 6px;min-height:90px;max-height:170px;overflow-y:auto;word-break:break-all}
 .radio-note{margin-top:auto}
 .radio-field select{background-image:linear-gradient(45deg,transparent 50%,var(--ink) 50%),linear-gradient(135deg,var(--ink) 50%,transparent 50%);background-position:calc(100% - 15px) 16px,calc(100% - 10px) 16px;background-size:5px 5px,5px 5px;background-repeat:no-repeat;padding-right:28px}
+.radio-check{display:flex;align-items:center;gap:8px;min-height:44px;font-size:14px;color:var(--ink)}
+.radio-check input{width:22px;height:22px;accent-color:var(--ink)}
 /* the project library, versions, guide and assistant sheets (12.15, 12.16) */
 .st-name{width:100%;box-sizing:border-box;height:44px;padding:6px 8px;background:var(--lcd);color:var(--ink);border:2px solid var(--ink);font-family:var(--f-lcd);font-size:16px;line-height:1.2}
 .dict-sheet .st-menu{flex:1;min-height:0;overflow:auto}
