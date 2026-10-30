@@ -23,11 +23,11 @@ test("constants: format, tracks, scales, demo beat", () => {
   assert.deepEqual(plain(S.KITS), ["chip", "soft"]);
   assert.deepEqual(plain(S.KINDS), ["drum", "note", "chord", "voice"]);
   assert.deepEqual(plain(S.TRACKS), [
-    { id: "drums", kind: "drum" },
-    { id: "bass", kind: "note" },
-    { id: "chords", kind: "chord" },
-    { id: "melody", kind: "note" },
-    { id: "voice", kind: "voice" },
+    { id: "drums", kind: "drum", vol: 1, mute: false },
+    { id: "bass", kind: "note", vol: 1, mute: false },
+    { id: "chords", kind: "chord", vol: 1, mute: false },
+    { id: "melody", kind: "note", vol: 1, mute: false },
+    { id: "voice", kind: "voice", vol: 1, mute: false },
   ]);
   assert.deepEqual(plain(S.SCALES), {
     "minor-penta": [0, 3, 5, 7, 10],
@@ -69,6 +69,10 @@ test("newSong: validates, carries the demo beat, and copies the default tracks",
   // the stored tracks are a copy: editing a song never edits the constant
   song.tracks[0].id = "changed";
   assert.equal(S.TRACKS[0].id, "drums");
+  // 12.14: the mixer's two fields start at full volume, unmuted
+  assert.deepEqual(plain(S.newSong().tracks.map((t) => [t.id, t.vol, t.mute])), [
+    ["drums", 1, false], ["bass", 1, false], ["chords", 1, false], ["melody", 1, false], ["voice", 1, false],
+  ]);
 
   const p = song.patterns[0];
   assert.equal(p.len, 16);
@@ -199,8 +203,24 @@ test("validate: tracks", () => {
     (s) => { s.tracks[1].id = s.tracks[0].id; },
     (s) => { s.tracks[0] = null; },
     (s) => { s.tracks[0] = []; },
+    (s) => { s.tracks[0].vol = -0.1; },
+    (s) => { s.tracks[0].vol = 1.1; },
+    (s) => { s.tracks[0].vol = "0.5"; },
+    (s) => { s.tracks[0].vol = null; },
+    (s) => { s.tracks[0].mute = "yes"; },
+    (s) => { s.tracks[0].mute = 1; },
+    (s) => { s.tracks[0].mute = null; },
   ];
   for (const mut of cases) assert.equal(broken(mut).error, "tracks");
+
+  // 12.14: a 1b-1 tape without the mixer fields reads at full volume and unmuted, without editing the input
+  const old = fresh();
+  old.tracks.forEach((tr) => { delete tr.vol; delete tr.mute; });
+  const read = S.validate(old);
+  assert.equal(read.error, undefined);
+  assert.deepEqual(plain(read.song.tracks.map((tr) => [tr.vol, tr.mute])), [[1, false], [1, false], [1, false], [1, false], [1, false]]);
+  assert.equal("vol" in old.tracks[0], false, "validate does not write the defaults into the document it was given");
+  assert.equal("mute" in old.tracks[0], false);
 
   // "constructor" is a legal slug and a harmless map key because the lookup adds "$"
   const ctor = fresh();
