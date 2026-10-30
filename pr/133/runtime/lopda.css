@@ -917,6 +917,10 @@ textarea::placeholder{color:var(--ink-2)}
 .radio-check input{width:22px;height:22px;accent-color:var(--ink)}
 /* the project library, versions, guide and assistant sheets (12.15, 12.16) */
 .st-name{width:100%;box-sizing:border-box;height:44px;padding:6px 8px;background:var(--lcd);color:var(--ink);border:2px solid var(--ink);font-family:var(--f-lcd);font-size:16px;line-height:1.2}
+.st-name::placeholder{color:var(--ink-2)}
+/* iOS paints a disabled field and button grey and half transparent: keep them in the four tones while the AI works */
+.st-name:disabled{opacity:1;color:var(--ink-2);-webkit-text-fill-color:var(--ink-2);border-color:var(--ink-2)}
+.st-ai-chip:disabled,.st-sheet .st-sheet-btn:disabled{opacity:1;color:var(--ink-2);-webkit-text-fill-color:var(--ink-2);border-color:var(--ink-2);cursor:default}
 .dict-sheet .st-menu{flex:1;min-height:0;overflow:auto}
 .dict-sheet .st-proj-list{flex:1;min-height:0;overflow:auto}
 .dict-sheet .st-proj-actions{flex:none;min-height:0;overflow:visible}
@@ -928,6 +932,11 @@ textarea::placeholder{color:var(--ink-2)}
 .st-ai-preview{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:6px}
 .st-ai-reply{margin:0;font-size:15px;line-height:1.4;white-space:pre-line}
 .st-ai-state{color:var(--ink)}
+/* the AI job's progress under the input: one clock for the whole job, plain ink on paper */
+.st-ai-progress{flex:none;display:flex;flex-direction:column;gap:2px;min-width:0}
+.st-ai-card,.st-ai-stage,.st-ai-link,.st-ai-stay{margin:0;font-size:13px;line-height:1.3;color:var(--ink);white-space:normal;overflow-wrap:anywhere}
+.st-ai-stage,.st-ai-stay{font-size:14px}
+.st-ai-link{font-family:inherit}
 /* a tape row in the library: the name, its date or demo tag, and a 44 px delete button */
 .st-proj-list .st-proj-row{padding:0 2px 0 8px;gap:4px}
 .st-row-del{flex:none;width:44px;height:44px;box-sizing:border-box;padding:0;background:transparent;color:var(--ink);border:2px solid var(--ink);font-family:var(--f-lcd);font-size:12px;line-height:1;cursor:pointer}
