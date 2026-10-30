@@ -53,7 +53,7 @@ var T={
   /* 12.15: undo/redo (memory), persistent versions and the project library */
   history:[], redo:[], snap:null, historySilent:false,
   versions:[], versionsOk:false, versionPick:0, projects:null, projectsLoading:false,
-  projectFolder:"", templatePick:"", importData:null, guidePage:0,
+  projectFolder:"", templatePick:"", deletePick:"", importData:null, guidePage:0,
   /* 12.16: the assistant's one request and the preview waiting for 采用 */
   aiBusy:false, aiJob:null, aiPreview:null, aiNote:"",
   /* the player: one chain clock, chainPat is what is scheduled, playPat is what the ears hear */
@@ -120,6 +120,8 @@ function flush(){
   writeItem(data);
 }
 function touch(){
+  /* a template copy stops being a demo copy the moment it is edited; the tag keeps it in 示例副本 */
+  if(T.song && T.song.template){ delete T.song.template; }
   if(!T.historySilent) pushHistory();
   T.dirty=true;
   if(T.saveTimer) clearTimeout(T.saveTimer);
@@ -341,6 +343,7 @@ function templateById(id){
 function folderOf(song){ return song && typeof song.folder==="string" ? song.folder : ""; }
 function folderLabel(folder){
   if(folder==="demo") return tr("studio.folder.demo");
+  if(folder==="copies") return tr("studio.folder.copies");
   if(!folder) return tr("studio.folder.mine");
   return folder;
 }
@@ -349,10 +352,14 @@ function customFolders(){
   for(i=0;i<list.length;i++) if(typeof list[i]==="string" && list[i]) out.push(list[i]);
   return out;
 }
+function demoCopies(){
+  return (T.projects||[]).filter(function(p){ return !!(p.song && p.song.template); });
+}
 function folderRows(){
-  var out=[{id:"demo",name:tr("studio.folder.demo"),count:templates().length,demo:true}], seen={}, i, p;
+  var copies=demoCopies(), out=[{id:"demo",name:tr("studio.folder.demo"),count:templates().length,demo:true}], seen={}, i, p;
   out.push({id:"",name:tr("studio.folder.mine"),count:0});
-  for(i=0;i<(T.projects||[]).length;i++){ p=T.projects[i]; if(!folderOf(p.song)) out[1].count++; }
+  for(i=0;i<(T.projects||[]).length;i++){ p=T.projects[i]; if(!folderOf(p.song) && !p.song.template) out[1].count++; }
+  if(copies.length) out.push({id:"copies",name:tr("studio.folder.copies"),count:copies.length});
   for(i=0;i<customFolders().length;i++){
     if(seen[customFolders()[i]]) continue;
     seen[customFolders()[i]]=1;
@@ -360,6 +367,7 @@ function folderRows(){
   }
   for(i=0;i<(T.projects||[]).length;i++){
     p=T.projects[i];
+    if(p.song.template) continue;
     var f=folderOf(p.song);
     if(!f) continue;
     if(!seen[f]){ seen[f]=1; out.push({id:f,name:f,count:0}); }
@@ -462,6 +470,7 @@ function useTemplate(){
   if(!t || !T.loaded || !T.metaOk) return;
   song=t.make(Date.now());
   song.name=tr(t.label);
+  song.template=t.id;
   song.folder=T.projectFolder==="demo" ? "" : T.projectFolder;
   id=LP.uid();
   writeProject(id,song).then(function(ok){
@@ -515,28 +524,58 @@ function deleteFolder(){
   T.projectFolder="";
   Promise.all(writes).then(function(){ loadProjects(); openSheet("projects"); });
 }
-function deleteCurrentProject(){
-  var r=refs(), id=T.id;
-  if(!r || !id || !T.metaOk) return;
-  r.items.doc(id).delete().then(function(){
-    return r.versions.doc(id).delete();
-  }).then(function(){
-    return listProjects();
-  }).then(function(list){
-    var next=list.filter(function(p){ return p.id!==id; })[0];
-    T.sheet="";
-    if(next) installSong(next.song,next.id,null);
-    else {
-      var song=SONGS.newSong(Date.now()), nid=LP.uid();
-      return writeProject(nid,song).then(function(ok){ if(ok) installSong(song,nid,[]); });
+function adoptQuiet(song,id){
+  stopRepeatAll();
+  if(T.playing) stopPlay();
+  setSong(song);
+  T.id=id;
+  T.projectFolder=folderOf(song);
+  T.meta.current=id;
+  T.versions=[]; T.versionsOk=true;
+  T.dirty=false;
+  saveMeta();
+  loadVersions(id);
+}
+/* Delete one or several tapes from the library and stay in the library. If the current tape goes, another one is
+   adopted silently so closing the library lands on a working music screen (12.18). */
+function deleteProjects(ids){
+  var r=refs(), set={}, i, jobs=[], currentDeleted=false, currentId=T.id, viewFolder=T.projectFolder;
+  if(!r || !T.metaOk || !ids || !ids.length) return Promise.resolve(false);
+  for(i=0;i<ids.length;i++) set[ids[i]]=1;
+  currentDeleted=!!set[currentId];
+  for(i=0;i<ids.length;i++){
+    jobs.push(r.items.doc(ids[i]).delete());
+    jobs.push(r.versions.doc(ids[i]).delete());
+  }
+  return Promise.all(jobs).then(function(){ return listProjects(); }).then(function(list){
+    T.projects=list; T.projectsLoading=false; T.deletePick="";
+    if(currentDeleted){
+      if(list.length){
+        var keep=list.filter(function(p){ return !set[p.id]; })[0] || list[0];
+        adoptQuiet(keep.song,keep.id);
+      } else {
+        var song=SONGS.newSong(Date.now()), nid=LP.uid();
+        writeProject(nid,song).then(function(ok){
+          if(!ok) return;
+          T.projects=[{id:nid,song:song}];
+          adoptQuiet(song,nid);
+          T.sheet="folder";
+          renderAll();
+          toast(tr("studio.proj.deleted"));
+        });
+        return;
+      }
     }
-  }).then(function(){
-    T.sheet=""; renderAll();
+    if(viewFolder==="copies" && demoCopies().length) T.projectFolder="copies";
+    else if(T.projectFolder==="copies" && !demoCopies().length) T.projectFolder="";
+    T.sheet="folder";
+    renderAll();
     toast(tr("studio.proj.deleted"));
   },function(e){
     toast(tr("common.savefail",{code:(e&&e.code)||tr("common.unknown")}));
   });
 }
+
 
 /* ---------- sound and the loop ---------- */
 function makeSynth(){
@@ -1703,7 +1742,7 @@ function closeSheet(){
   if(T.sheet==="new"||T.sheet==="demo"||T.sheet==="pop"){ T.sheet="menu"; renderSheet(); return; }
   if(T.sheet==="editmenu"||T.sheet==="filemenu"){ T.sheet="menu"; renderSheet(); return; }
   if(T.sheet==="copyask"){ T.sheet="copy"; renderSheet(); return; }
-  if(T.sheet==="rename"||T.sheet==="projdel"||T.sheet==="templateask"||T.sheet==="renamefolder"||T.sheet==="folderdel"){ T.sheet="folder"; renderSheet(); return; }
+  if(T.sheet==="rename"||T.sheet==="projdel"||T.sheet==="templateask"||T.sheet==="renamefolder"||T.sheet==="folderdel"||T.sheet==="copiesdel"){ T.sheet="folder"; renderSheet(); return; }
   if(T.sheet==="folder"){ T.sheet="projects"; renderSheet(); return; }
   if(T.sheet==="newfolder"){ T.sheet="projects"; renderSheet(); return; }
   if(T.sheet==="versionask"){ T.sheet="versions"; renderSheet(); return; }
@@ -2108,13 +2147,21 @@ function renderSheet(){
         })(tpls[k]);
       }
     } else {
-      var mine=(T.projects||[]).filter(function(p){ return folderOf(p.song)===T.projectFolder; });
+      var mine;
+      if(T.projectFolder==="copies") mine=demoCopies();
+      else mine=(T.projects||[]).filter(function(p){ return folderOf(p.song)===T.projectFolder && !p.song.template; });
       if(!mine.length) flist.appendChild(el("li","disabled",tr("studio.proj.none")));
       for(k=0;k<mine.length;k++){
         (function(item){
-          f=el("li",item.id===T.id?"on":"");
+          f=el("li","st-proj-row"+(item.id===T.id?" on":""));
           f.appendChild(el("span","",item.song.name||tr("studio.proj.unnamed")));
-          f.appendChild(el("small","",LP.fmt(item.song.updated)));
+          f.appendChild(el("small","",item.song.template?tr("studio.proj.demo"):LP.fmt(item.song.updated)));
+          var del=el("button","st-row-del","");
+          del.type="button";
+          del.textContent=tr("studio.proj.del.short");
+          del.setAttribute("aria-label",tr("studio.proj.del.ask",{name:item.song.name||tr("studio.proj.unnamed")}));
+          del.onclick=function(e){ if(e&&e.stopPropagation) e.stopPropagation(); T.deletePick=item.id; openSheet("projdel"); };
+          f.appendChild(del);
           f.onclick=function(){ openProject(item.id); };
           flist.appendChild(f);
         })(mine[k]);
@@ -2122,11 +2169,12 @@ function renderSheet(){
     }
     sh.appendChild(flist);
     var facts=el("ul","lcd-menu st-proj-actions");
-    if(T.projectFolder!=="demo"){
+    if(T.projectFolder==="copies"){
+      if(demoCopies().length) sheetRow(facts,tr("studio.copies.clear"),String(demoCopies().length),function(){ openSheet("copiesdel"); });
+    } else if(T.projectFolder!=="demo"){
       sheetRow(facts,tr("studio.proj.new"),"",function(){ newProject(); });
       sheetRow(facts,tr("studio.proj.rename"),"",function(){ openSheet("rename"); });
       sheetRow(facts,tr("studio.proj.dup"),"",function(){ duplicateProject(); });
-      sheetRow(facts,tr("studio.proj.del"),"",function(){ openSheet("projdel"); });
       sheetRow(facts,tr("studio.clear.tape"),"",function(){ openSheet("new"); });
       if(T.projectFolder){
         sheetRow(facts,tr("studio.folder.rename"),"",function(){ openSheet("renamefolder"); });
@@ -2221,16 +2269,32 @@ function renderSheet(){
   }
   if(T.sheet==="projdel"){
     sheetHead(tr("studio.proj.del"));
+    var did=T.deletePick||T.id, ditem=(T.projects||[]).filter(function(p){ return p.id===did; })[0];
+    var dname=ditem ? (ditem.song.name||tr("studio.proj.unnamed")) : ((T.song&&T.song.name)||tr("studio.proj.unnamed"));
     var dask=el("div","st-ask");
-    dask.appendChild(el("p","",tr("studio.proj.del.ask",{name:(T.song&&T.song.name)||tr("studio.proj.unnamed")})));
+    dask.appendChild(el("p","",tr("studio.proj.del.ask",{name:dname})));
     var drow2=el("div","row");
     var dyes=el("button","btn",""); dyes.type="button"; dyes.textContent=tr("studio.proj.del.yes");
-    dyes.onclick=function(){ deleteCurrentProject(); };
+    dyes.onclick=function(){ deleteProjects([did]); };
     var dno=el("button","btn ghost",""); dno.type="button"; dno.textContent=tr("common.cancel");
-    dno.onclick=function(){ openSheet("projects"); };
+    dno.onclick=function(){ T.deletePick=""; openSheet("folder"); };
     drow2.appendChild(dyes); drow2.appendChild(dno);
     dask.appendChild(drow2);
     sh.appendChild(dask);
+    return;
+  }
+  if(T.sheet==="copiesdel"){
+    sheetHead(tr("studio.copies.clear"));
+    var cask=el("div","st-ask");
+    cask.appendChild(el("p","",tr("studio.copies.clear.ask",{n:demoCopies().length})));
+    var crow=el("div","row");
+    var cyes=el("button","btn",""); cyes.type="button"; cyes.textContent=tr("studio.proj.del.yes");
+    cyes.onclick=function(){ deleteProjects(demoCopies().map(function(p){ return p.id; })); };
+    var cno=el("button","btn ghost",""); cno.type="button"; cno.textContent=tr("common.cancel");
+    cno.onclick=function(){ openSheet("folder"); };
+    crow.appendChild(cyes); crow.appendChild(cno);
+    cask.appendChild(crow);
+    sh.appendChild(cask);
     return;
   }
   if(T.sheet==="versions"){

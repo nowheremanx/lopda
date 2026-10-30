@@ -463,6 +463,7 @@ function check(x){
   /* code points, not UTF-16 units; the length check first keeps a huge string from being copied into an array */
   if(typeof x.name!=="string" || x.name.length>NAME_MAX*2 || Array.from(x.name).length>NAME_MAX) return {error:"name"};
   if(typeof x.folder!=="undefined" && (typeof x.folder!=="string" || x.folder.length>NAME_MAX*2 || Array.from(x.folder).length>NAME_MAX)) return {error:"folder"};
+  if(typeof x.template!=="undefined" && (typeof x.template!=="string" || x.template.length>NAME_MAX*2 || Array.from(x.template).length>NAME_MAX)) return {error:"template"};
   if(!num(x.updated) || x.updated<0) return {error:"updated"};
 
   return {song:mixDefaults(clone(x))};
