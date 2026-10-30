@@ -22,12 +22,27 @@ GM.targetFor = function (n) {
   return t;
 };
 
-GM.moleCarry = function (n) {
-  return n >= 6 ? "diamond" : "goldM";
+/* Most moles are worthless; the rare one carries a diamond. */
+GM.moleGemChance = function (n) {
+  return Math.min(0.48, 0.16 + (n || 1) * 0.028);
+};
+
+GM.moleCarry = function (n, rng) {
+  return rng() < GM.moleGemChance(n) ? "diamond" : "none";
 };
 
 GM.moleValue = function (n) {
-  return GM.ITEMS[GM.moleCarry(n)].value;
+  return GM.moleGemChance(n) * GM.ITEMS.diamond.value;
+};
+
+/* A bag is a little lottery: cash, dynamite or a strength burst. */
+GM.bagReward = function (rng, clover) {
+  var r = rng();
+  if (r < 0.22) return { kind: "dynamite", value: rng() < 0.25 ? 2 : 1 };
+  if (r < 0.42) return { kind: "strength", value: 1 };
+  var mult = 1 + 0.5 * (clover || 0);
+  var v = (GM.ITEMS.bag.min + rng() * (GM.ITEMS.bag.max - GM.ITEMS.bag.min)) * mult;
+  return { kind: "cash", value: Math.max(10, Math.round(v / 10) * 10) };
 };
 
 GM.recipeFor = function (n) {
@@ -69,12 +84,6 @@ GM.rockValue = function (type, book) {
   return GM.ITEMS[type].value * (book ? 3 : 1);
 };
 
-GM.bagValue = function (rng, clover) {
-  var mult = 1 + 0.5 * (clover || 0);
-  var v = (GM.ITEMS.bag.min + rng() * (GM.ITEMS.bag.max - GM.ITEMS.bag.min)) * mult;
-  return Math.max(10, Math.round(v / 10) * 10);
-};
-
 GM.recipeValue = function (n, clover, book) {
   var r = GM.recipeFor(n), min = 0, max = 0, k, c;
   r.diamond = (r.diamond || 0) + (clover || 0);
@@ -82,8 +91,9 @@ GM.recipeValue = function (n, clover, book) {
     if (!Object.prototype.hasOwnProperty.call(r, k) || !r[k]) continue;
     c = r[k];
     if (k === "bag") {
-      min += c * GM.ITEMS.bag.min * (1 + 0.5 * (clover || 0));
-      max += c * GM.ITEMS.bag.max * (1 + 0.5 * (clover || 0));
+      /* only the cash roll counts as guaranteed loot; dynamite and strength are a bonus */
+      min += c * GM.ITEMS.bag.min * 0.58 * (1 + 0.5 * (clover || 0));
+      max += c * GM.ITEMS.bag.max * 0.58 * (1 + 0.5 * (clover || 0));
     } else if (k === "mole") {
       min += c * GM.moleValue(n);
       max += c * GM.moleValue(n);
@@ -113,6 +123,7 @@ GM.newState = function () {
     clover: 0,
     book: 0,
     shopCursor: 4,
+    shopOffers: [],
     runSeed: 1,
     levelSeed: 1,
     rng: GM.rng(1),
@@ -174,6 +185,7 @@ GM.startLevel = function (state, n) {
   state.swingT = 0;
   state.introT = 1.25;
   state.shopCursor = 4;
+  state.shopOffers = [];
   state.events = [];
   state.floats = [];
   state.particles = [];
@@ -200,11 +212,14 @@ GM.makeItem = function (state, type, x, y, rng) {
     value: spec.value,
     fuse: 0
   };
-  if (type === "bag") it.value = GM.bagValue(rng, state.clover);
+  if (type === "bag") {
+    it.reward = GM.bagReward(rng, state.clover);
+    it.value = it.reward.kind === "cash" ? it.reward.value : 0;
+  }
   if (type === "rockS" || type === "rockL") it.value = GM.rockValue(type, state.book);
   if (type === "mole") {
-    it.carry = GM.moleCarry(state.level);
-    it.value = GM.ITEMS[it.carry].value;
+    it.carry = GM.moleCarry(state.level, rng);
+    it.value = it.carry === "diamond" ? GM.ITEMS.diamond.value : 0;
     it.dir = rng() < 0.5 ? -1 : 1;
     it.speed = 11 + Math.min(10, state.level * 0.9);
     it.minX = 18;
@@ -223,33 +238,315 @@ GM.overlaps = function (x, y, r, items, gap) {
   return false;
 };
 
+/* The hook is a pendulum: an item high in a far corner can be outside its arc or
+   beyond the rope. Every generated item must sit inside the reachable wedge. */
+GM.reachable = function (x, y, r) {
+  var dx = x - GM.ANCHOR.x, dy = y - GM.ANCHOR.y;
+  var d = Math.sqrt(dx * dx + dy * dy);
+  if (d + (r || 0) + 3 > GM.MAX_ROPE) return false;
+  return Math.abs(Math.atan2(dx, dy)) <= GM.SWING - 0.05;
+};
+
+GM.spotOK = function (x, y, r, items, gap) {
+  if (x < r + 3 || x > GM.W - r - 3) return false;
+  if (y < GM.GROUND + 14 || y > GM.H - r - 3) return false;
+  if (!GM.reachable(x, y, r)) return false;
+  return !GM.overlaps(x, y, r, items, gap);
+};
+
+/* How each written level arranges its mine. More vaults means more TNT sitting on
+   the good stuff; more walls and shields mean more rocks between the hook and the gold. */
+GM.MAP_THEMES = [
+  { clusters: 2, cluster: [2, 3], vaults: 0, walls: 0, shields: 0, bagsShielded: 0, deep: 0.15 },
+  { clusters: 3, cluster: [2, 3], vaults: 0, walls: 0, shields: 1, bagsShielded: 0, deep: 0.25 },
+  { clusters: 3, cluster: [2, 3], vaults: 1, walls: 0, shields: 1, bagsShielded: 0, deep: 0.35 },
+  { clusters: 2, cluster: [2, 3], vaults: 1, walls: 1, shields: 2, bagsShielded: 0, deep: 0.45 },
+  { clusters: 3, cluster: [2, 4], vaults: 1, walls: 0, shields: 1, bagsShielded: 1, deep: 0.40 },
+  { clusters: 2, cluster: [3, 4], vaults: 2, walls: 1, shields: 2, bagsShielded: 1, deep: 0.50 },
+  { clusters: 3, cluster: [2, 4], vaults: 1, walls: 0, shields: 1, bagsShielded: 2, deep: 0.45 },
+  { clusters: 2, cluster: [3, 4], vaults: 2, walls: 2, shields: 3, bagsShielded: 1, deep: 0.55 },
+  { clusters: 2, cluster: [3, 4], vaults: 3, walls: 1, shields: 2, bagsShielded: 1, deep: 0.65 },
+  { clusters: 2, cluster: [3, 5], vaults: 3, walls: 2, shields: 3, bagsShielded: 1, deep: 0.70 }
+];
+
 GM.generate = function (state, n) {
   var recipe = GM.recipeFor(n);
   recipe.diamond = (recipe.diamond || 0) + (state.clover || 0);
   var rng = state.rng || GM.rng(state.levelSeed || 1);
   var items = [];
-  var order = ["diamond", "goldL", "goldM", "bag", "goldS", "rockL", "rockS", "skull", "bone", "tnt"];
-  var i, j, type, count, spec, pref, x, y, r, tries, placed, gap;
+  var left = {}, k, i, j, tries, a, d, p, q, it, spec, val, dx, dy;
+  for (k in recipe) if (Object.prototype.hasOwnProperty.call(recipe, k)) left[k] = recipe[k] || 0;
+  var theme = GM.MAP_THEMES[Math.min(GM.MAP_THEMES.length - 1, Math.max(0, n - 1))];
 
-  for (i = 0; i < order.length; i++) {
-    type = order[i];
-    count = recipe[type] || 0;
+  function has(type) { return (left[type] || 0) > 0; }
+  function spend(type) { left[type] = (left[type] || 0) - 1; }
+
+  function place(type, x, y, gap) {
     spec = GM.ITEMS[type];
-    pref = spec.pref;
-    r = spec.r;
+    if (!GM.spotOK(x, y, spec.r, items, gap == null ? 2 : gap)) return null;
+    it = GM.makeItem(state, type, x, y, rng);
+    items.push(it);
+    return it;
+  }
+
+  function addAt(type, x, y, gap) {
+    it = place(type, x, y, gap);
+    if (it) spend(type);
+    return it;
+  }
+
+  function find(type, y0, y1, x0, x1, gap) {
+    spec = GM.ITEMS[type];
+    var xMin = Math.max(spec.r + 3, x0 == null ? 0 : x0);
+    var xMax = Math.min(GM.W - spec.r - 3, x1 == null ? GM.W : x1);
+    var yy0 = Math.max(GM.GROUND + 14, y0 == null ? 0 : y0);
+    var yy1 = Math.min(GM.H - spec.r - 3, y1 == null ? GM.H : y1);
+    if (yy1 < yy0) yy1 = yy0;
+    for (var t = 0; t < 260; t++) {
+      var x = xMin + rng() * (xMax - xMin);
+      var y = yy0 + rng() * (yy1 - yy0);
+      if (GM.spotOK(x, y, spec.r, items, gap == null ? 2 : gap)) return { x: x, y: y };
+    }
+    return null;
+  }
+
+  function anySpot(type) {
+    spec = GM.ITEMS[type];
+    var yy, xx;
+    for (yy = GM.GROUND + 14; yy <= GM.H - spec.r - 4; yy += 2) {
+      for (xx = spec.r + 4; xx <= GM.W - spec.r - 4; xx += 2) {
+        if (GM.spotOK(xx, yy, spec.r, items, 0)) return { x: xx, y: yy };
+      }
+    }
+    for (yy = GM.GROUND + 14; yy <= GM.H - spec.r - 4; yy++) {
+      for (xx = spec.r + 4; xx <= GM.W - spec.r - 4; xx++) {
+        if (GM.spotOK(xx, yy, spec.r, items, 0)) return { x: xx, y: yy };
+      }
+    }
+    return null;
+  }
+
+  function scatter(type) {
+    spec = GM.ITEMS[type];
+    var y0 = Math.max(spec.pref[0], GM.GROUND + 14);
+    var y1 = Math.min(spec.pref[1] + (theme.deep > 0.4 ? 6 : 0), GM.H - spec.r - 4);
+    p = find(type, y0, y1, null, null, 2);
+    if (!p) p = find(type, y0, y1, null, null, 0);
+    if (!p) p = anySpot(type);
+    return p ? addAt(type, p.x, p.y, 0) : null;
+  }
+
+  function cluster(type, count) {
+    count = Math.min(count, left[type] || 0);
+    if (count <= 0) return 0;
+    spec = GM.ITEMS[type];
+    p = find(type, spec.pref[0], spec.pref[1], 12, GM.W - 12, 2);
+    if (!p) return 0;
+    var made = addAt(type, p.x, p.y, 2) ? 1 : 0;
+    for (j = 1; j < count; j++) {
+      for (tries = 0; tries < 60; tries++) {
+        a = rng() * Math.PI * 2;
+        d = spec.r * 1.8 + rng() * spec.r * 1.2;
+        if (addAt(type, p.x + Math.cos(a) * d, p.y + Math.sin(a) * d, 1)) {
+          made++;
+          break;
+        }
+      }
+    }
+    return made;
+  }
+
+  function vein(type, count) {
+    count = Math.min(count, left[type] || 0);
+    if (count <= 0) return 0;
+    spec = GM.ITEMS[type];
+    p = find(type, spec.pref[0], spec.pref[1], 16, GM.W - 16, 2);
+    if (!p) return 0;
+    a = (rng() < 0.5 ? 0.42 : -0.42) + (rng() < 0.5 ? 0 : Math.PI);
+    var step = spec.r * 1.9 + 2;
+    var made = 0;
     for (j = 0; j < count; j++) {
-      placed = false;
-      for (gap = 2; gap >= 0 && !placed; gap -= 2) {
-        for (tries = 0; tries < 170 && !placed; tries++) {
-          x = r + 4 + rng() * (GM.W - 2 * r - 8);
-          var yMin = Math.max(GM.GROUND + 15, pref[0]);
-          var yMax = Math.min(GM.H - r - 4, pref[1]);
-          if (yMax < yMin) yMin = yMax;
-          y = yMin + rng() * Math.max(1, yMax - yMin);
-          if (!GM.overlaps(x, y, r, items, gap)) {
-            items.push(GM.makeItem(state, type, x, y, rng));
-            placed = true;
-          }
+      if (addAt(type, p.x + Math.cos(a) * step * j, p.y + Math.sin(a) * step * j, 1)) made++;
+    }
+    return made;
+  }
+
+  function vault() {
+    if (!has("tnt")) return false;
+    var vt = has("diamond") ? "diamond" : has("goldL") ? "goldL" : has("goldM") ? "goldM" : null;
+    if (!vt) return false;
+    var vs = GM.ITEMS[vt];
+    p = find(vt, Math.max(96, vs.pref[0]), GM.H - vs.r - 6, 12, GM.W - 12, 2);
+    if (!p) p = find(vt, vs.pref[0], vs.pref[1], null, null, 2);
+    if (!p) return false;
+    val = addAt(vt, p.x, p.y, 2);
+    if (!val) return false;
+    val.guarded = true;
+
+    var tsp = GM.ITEMS.tnt, bomb = null;
+    var toA = Math.atan2(GM.ANCHOR.y - val.y, GM.ANCHOR.x - val.x);
+    for (tries = 0; tries < 90 && !bomb; tries++) {
+      a = toA + (rng() - 0.5) * 1.1;
+      d = val.r + tsp.r + 2 + rng() * 6;
+      bomb = place("tnt", val.x + Math.cos(a) * d, val.y + Math.sin(a) * d, 1);
+    }
+    if (!bomb) {
+      /* nothing fits: give the valuable back and let the fallback guard pass try */
+      items.pop();
+      left[vt]++;
+      return false;
+    }
+    spend("tnt");
+
+    /* a second piece of loot on the far side of the TNT, so a missed aim is expensive */
+    var vt2 = has("diamond") ? "diamond" : has("goldL") ? "goldL" : has("goldM") ? "goldM" : null;
+    if (vt2) {
+      var v2 = GM.ITEMS[vt2];
+      for (tries = 0; tries < 60; tries++) {
+        a = rng() * Math.PI * 2;
+        d = bomb.r + v2.r + 2 + rng() * 18;
+        if (addAt(vt2, bomb.x + Math.cos(a) * d, bomb.y + Math.sin(a) * d, 1)) break;
+      }
+    }
+    return true;
+  }
+
+  function guardTnt() {
+    if (!has("tnt")) return false;
+    var vals = [];
+    for (i = 0; i < items.length; i++) {
+      it = items[i];
+      if (it.kind === "gem" || it.type === "goldL" || it.type === "goldM" || it.kind === "bag") vals.push(it);
+    }
+    if (!vals.length) return false;
+    val = vals[Math.floor(rng() * vals.length) % vals.length];
+    var tsp = GM.ITEMS.tnt, bomb = null;
+    var toA = Math.atan2(GM.ANCHOR.y - val.y, GM.ANCHOR.x - val.x);
+    for (tries = 0; tries < 120 && !bomb; tries++) {
+      a = toA + (rng() - 0.5) * 1.1;
+      d = val.r + tsp.r + 2 + rng() * 6;
+      bomb = place("tnt", val.x + Math.cos(a) * d, val.y + Math.sin(a) * d, 1);
+    }
+    if (bomb) { spend("tnt"); return true; }
+    return false;
+  }
+
+  function shield(target, rockType) {
+    if (!target || target.shielded || !has(rockType)) return false;
+    spec = GM.ITEMS[rockType];
+    var dx = GM.ANCHOR.x - target.x, dy = GM.ANCHOR.y - target.y;
+    d = Math.sqrt(dx * dx + dy * dy) || 1;
+    var ux = dx / d, uy = dy / d, px = -uy, py = ux;
+    for (tries = 0; tries < 40; tries++) {
+      var off = (rng() - 0.5) * (spec.r > 9 ? 8 : 4);
+      var dist = 32 + rng() * 9;
+      if (addAt(rockType, target.x + ux * dist + px * off, target.y + uy * dist + py * off, 1)) {
+        target.shielded = true;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function wall(rockType, count) {
+    spec = GM.ITEMS[rockType];
+    var y = 76 + rng() * 32;
+    var step = spec.r * 2 + 2;
+    var x0 = 16 + rng() * Math.max(8, GM.W - 32 - count * step);
+    var made = 0;
+    for (j = 0; j < count; j++) {
+      var typeNow = has(rockType) ? rockType : (has("rockS") ? "rockS" : null);
+      if (!typeNow) break;
+      spec = GM.ITEMS[typeNow];
+      if (addAt(typeNow, x0 + j * step, y + (rng() < 0.25 ? 2 : 0), 1)) made++;
+    }
+    return made;
+  }
+
+  /* 1. TNT vaults, then any spare TNT guards the nearest treasure */
+  var vaults = Math.min(theme.vaults, left.tnt || 0);
+  for (i = 0; i < vaults; i++) vault();
+  for (i = 0; i < 8 && has("tnt"); i++) if (!guardTnt()) break;
+
+  /* 2. gold veins: short clusters rather than an even sprinkle */
+  for (i = 0; i < theme.clusters; i++) {
+    var ct = has("goldL") ? "goldL" : has("goldM") ? "goldM" : has("goldS") ? "goldS" : null;
+    if (!ct) break;
+    var size = theme.cluster[0] + Math.floor(rng() * (theme.cluster[1] - theme.cluster[0] + 1));
+    if (n >= 5 && i % 2 === 0) vein(ct, size);
+    else cluster(ct, size);
+  }
+
+  /* 3. diamonds not used in a vault go deep */
+  while (has("diamond")) {
+    var ds = GM.ITEMS.diamond;
+    p = find("diamond", Math.max(100, ds.pref[0]), GM.H - ds.r - 6, 12, GM.W - 12, 1);
+    if (!p) p = find("diamond", ds.pref[0], ds.pref[1], null, null, 0);
+    if (!p || !addAt("diamond", p.x, p.y, 0)) break;
+  }
+
+  /* 4. bags: a few sit in a pocket behind a rock, the rest are scattered */
+  for (i = 0; i < theme.bagsShielded && has("bag"); i++) {
+    var bags = [];
+    for (j = 0; j < items.length; j++) if (items[j].kind === "bag" && !items[j].shielded) bags.push(items[j]);
+    if (!bags.length) break;
+    if (!shield(bags[Math.floor(rng() * bags.length) % bags.length], has("rockL") ? "rockL" : "rockS")) break;
+  }
+  while (has("bag")) if (!scatter("bag")) break;
+
+  /* 5. rock walls and shields in front of the best pieces */
+  for (i = 0; i < theme.walls; i++) wall(has("rockL") ? "rockL" : "rockS", 3 + Math.floor(rng() * 2));
+  for (i = 0; i < theme.shields; i++) {
+    var guarded = [];
+    for (j = 0; j < items.length; j++) {
+      it = items[j];
+      if (!it.shielded && (it.kind === "gem" || it.type === "goldL" || it.type === "goldM")) guarded.push(it);
+    }
+    if (!guarded.length) break;
+    shield(guarded[Math.floor(rng() * guarded.length) % guarded.length], has("rockL") ? "rockL" : "rockS");
+  }
+
+  /* 6. everything else, cheapest last */
+  var order = ["bone", "skull", "rockL", "rockS", "goldS", "goldM", "goldL", "tnt"];
+  for (i = 0; i < order.length; i++) {
+    while (has(order[i])) if (!scatter(order[i])) break;
+  }
+  var progress = true;
+  while (progress) {
+    progress = false;
+    for (k in left) {
+      if (k === "mole" || !has(k)) continue;
+      if (scatter(k)) progress = true;
+    }
+  }
+
+  /* 7. final safety: every TNT must sit within blast range of something worth taking */
+  for (i = 0; i < items.length; i++) {
+    it = items[i];
+    if (it.type !== "tnt") continue;
+    var near = false;
+    for (j = 0; j < items.length; j++) {
+      val = items[j];
+      if (val === it || val.type === "mole" || val.type === "tnt") continue;
+      if (val.kind === "junk" || val.kind === "rock") continue;
+      dx = val.x - it.x; dy = val.y - it.y;
+      if (dx * dx + dy * dy <= 29 * 29) { near = true; break; }
+    }
+    if (near) continue;
+    var others = items.slice(0, i).concat(items.slice(i + 1));
+    for (j = 0; j < items.length && !near; j++) {
+      val = items[j];
+      if (val === it || val.type === "mole" || val.type === "tnt") continue;
+      if (val.kind === "junk" || val.kind === "rock") continue;
+      var toA = Math.atan2(GM.ANCHOR.y - val.y, GM.ANCHOR.x - val.x);
+      for (tries = 0; tries < 50 && !near; tries++) {
+        a = toA + (rng() - 0.5) * 1.1;
+        d = val.r + it.r + 2 + rng() * 6;
+        var nx = val.x + Math.cos(a) * d, ny = val.y + Math.sin(a) * d;
+        if (GM.spotOK(nx, ny, it.r, others, 1)) {
+          it.x = nx;
+          it.y = ny;
+          near = true;
         }
       }
     }
@@ -258,7 +555,7 @@ GM.generate = function (state, n) {
   /* the mole runs along a lane of its own; it may pass in front of the static loot */
   var moles = recipe.mole || 0;
   for (i = 0; i < moles; i++) {
-    items.push(GM.makeItem(state, "mole", 24 + rng() * 112, 84 + rng() * 28, rng));
+    items.push(GM.makeItem(state, "mole", 24 + rng() * 112, 86 + rng() * 22, rng));
   }
   return items;
 };
@@ -355,7 +652,12 @@ GM.attach = function (state, index) {
   state.items.splice(index, 1);
   state.hook.item = it;
   state.hook.state = "back";
-  if (it.kind === "tnt") it.fuse = 1.0;
+  if (it.kind === "tnt") {
+    /* The fuse is part of the ride back, not a countdown at the spot: it blows up
+       somewhere on the way in, after the player has committed to the grab. */
+    var ride = Math.max(0.001, state.hook.len - 2) / GM.retractSpeed(it, state.strength);
+    it.fuse = Math.max(0.16, Math.min(1.05, ride * 0.58));
+  }
   var p = GM.tip(state.hook);
   GM.addParticles(state, p.x, p.y, 5, ["mid", "dark"]);
   state.events.push("grab");
@@ -373,8 +675,29 @@ GM.collect = function (state) {
     GM.explode(state, p.x, p.y);
     return;
   }
+  if (it.kind === "bag") {
+    var rw = it.reward || { kind: "cash", value: it.value || 0 };
+    if (rw.kind === "cash") {
+      state.bank += rw.value;
+      state.events.push("coin");
+      GM.addFloat(state, GM.ANCHOR.x, 6, "+" + rw.value);
+    } else if (rw.kind === "dynamite") {
+      state.dynamite += rw.value;
+      state.events.push("buy");
+      GM.addFloat(state, GM.ANCHOR.x, 6, "×" + rw.value);
+    } else {
+      state.strength = Math.min(3, state.strength + rw.value);
+      state.events.push("gem");
+      GM.addFloat(state, GM.ANCHOR.x, 6, "×" + rw.value);
+    }
+    GM.addParticles(state, p.x, p.y, 8, ["paper", "mid"]);
+    return;
+  }
   state.bank += it.value;
-  var ev = it.kind === "gem" ? "gem" : (it.kind === "junk" || it.kind === "rock") ? "junk" : "coin";
+  var ev = it.kind === "gem" ? "gem"
+    : (it.kind === "junk" || it.kind === "rock") ? "junk"
+    : it.kind === "mole" ? (it.value > 0 ? "gem" : "junk")
+    : "coin";
   state.events.push(ev);
   if (it.value > 0) GM.addFloat(state, GM.ANCHOR.x, 6, "+" + it.value);
   if (it.kind === "gem") GM.addParticles(state, p.x, p.y, 10, ["paper"]);
@@ -447,6 +770,10 @@ GM.updateEffects = function (state, dt) {
 };
 
 GM.finishLevel = function (state) {
+  /* strength, clover and the rock book are one-level purchases; they end with the level */
+  state.strength = 0;
+  state.clover = 0;
+  state.book = 0;
   if (state.bank >= state.target) {
     GM.recordBest(state, state.level, state.bank);
     GM.setRun(state, state.level + 1);
@@ -511,7 +838,9 @@ GM.readRun = function (raw) {
     if (typeof n !== "number" || Math.floor(n) !== n || n < 0) return { ok: false, corrupt: true, run: null };
   }
   if (raw.level < 1 || raw.level > 9999) return { ok: false, corrupt: true, run: null };
-  if (raw.dynamite > 5 || raw.strength > 3 || raw.clover > 2 || raw.book > 1) return { ok: false, corrupt: true, run: null };
+  if (raw.dynamite > GM.DYNAMITE_HARD_CAP || raw.strength > 3 || raw.clover > 2 || raw.book > 1) {
+    return { ok: false, corrupt: true, run: null };
+  }
   if (raw.runSeed < 1 || raw.runSeed > 4294967295) return { ok: false, corrupt: true, run: null };
   return {
     ok: true,
@@ -576,6 +905,7 @@ GM.readBest = function (raw) {
 
 GM.openShop = function (state) {
   state.shopCursor = 4;
+  state.shopOffers = GM.shopOffers(state, state.level + 1);
   state.screen = "shop";
   state.events = [];
 };
@@ -590,15 +920,17 @@ GM.moveShop = function (state, dir) {
 };
 
 GM.buy = function (state, idx) {
-  var item = GM.SHOP[idx];
-  if (!item) { state.events.push("err"); return false; }
+  var offers = state.shopOffers && state.shopOffers.length ? state.shopOffers : GM.shopOffers(state, state.level + 1);
+  var item = offers[idx];
+  if (!item || !item.available) { state.events.push("err"); return false; }
   var have = state[item.key] || 0;
-  if (have >= item.max || state.bank < item.price) {
+  if ((item.max != null && have >= item.max) || state.bank < item.price) {
     state.events.push("err");
     return false;
   }
   state.bank -= item.price;
   state[item.key] = have + 1;
+  state.shopOffers = offers;
   GM.setRun(state, state.level + 1);
   state.events.push("buy");
   return true;

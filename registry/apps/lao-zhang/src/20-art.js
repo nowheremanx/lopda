@@ -198,7 +198,7 @@ GM.bagSprite = function () {
   GM.soutline(s, GM.INK);
   GM.srect(s, 10, 13, 12, 4, GM.DARK);
   GM.sput(s, 10, 13, GM.INK); GM.sput(s, 21, 13, GM.INK);
-  GM.stext(s, "$", 11, 17, GM.INK, 2);
+  GM.stext(s, "?", 13, 17, GM.INK, 2);
   GM.srect(s, 20, 26, 4, 2, GM.MID);
   return s;
 };
@@ -519,10 +519,21 @@ GM.drawMole = function (buf, it, anim) {
   GM.blineWide(buf, x - 6, y + 8, x - 8, y + 12 + step, GM.INK, 2);
   GM.blineWide(buf, x + 6, y + 8, x + 8, y + 12 + (2 - step), GM.INK, 2);
   GM.blineWide(buf, x - d * 14, y, x - d * 20, y - 4, GM.INK, 2);
-  var mini = it.carry === "diamond" ? GM.SPR.miniGem : GM.SPR.miniGold;
-  var mx = x + d * 12 - (d < 0 ? mini.w : 0);
-  var my = y - 20;
-  GM.spriteDraw(buf, mini, mx, my);
+  /* only the rare mole carries a diamond; a plain mole carries nothing */
+  if (it.carry === "diamond") {
+    var mini = GM.SPR.miniGem;
+    var mx = x + d * 12 - (d < 0 ? mini.w : 0);
+    var my = y - 20;
+    GM.spriteDraw(buf, mini, mx, my);
+    if (Math.sin(anim * 5 + it.x) > 0.55) {
+      GM.brect(buf, mx + mini.w + 2, my, 3, 1, GM.PAPER);
+      GM.brect(buf, mx + mini.w + 3, my - 1, 1, 3, GM.PAPER);
+    }
+  } else {
+    /* a little dirt on its back, so the two moles read differently at a glance */
+    GM.bellipse(buf, x - d * 2, y - 12, 5, 3, GM.DARK);
+    GM.brect(buf, x - d * 2 - 2, y - 13, 2, 2, GM.MID);
+  }
 };
 
 GM.drawRope = function (buf, hook) {
@@ -606,27 +617,14 @@ GM.drawMiner = function (buf, state) {
   GM.rect(buf, 79, 17, 2, 2, GM.DARK);
   GM.put(buf, 80, 18, GM.PAPER);
 
-  /* sweat: drops run downward, faster as they fall */
+  /* sweat: three drops at most, one on each side and one over the brow */
   if (hook.item) {
     var t = state.anim, side, sx, sy, p;
-    for (var i = 0; i < 4; i++) {
-      side = i < 2 ? -1 : 1;
-      p = (t * 0.8 + i * 0.23) % 1;
-      sx = bx + side * (9 + (i % 2) * 2) + Math.sin(t * 5 + i) * 0.7;
-      sy = 5 + by + p * p * 12;
-      GM.sweatDrop(buf, Math.round(sx * GM.SCALE), Math.round(sy * GM.SCALE));
-    }
-    for (i = 0; i < 2; i++) {
-      p = (t * 0.9 + i * 0.4) % 1;
-      sx = bx - 3 + i * 7;
-      sy = 9 + by + p * p * 8;
-      GM.sweatDrop(buf, Math.round(sx * GM.SCALE), Math.round(sy * GM.SCALE));
-    }
-    for (i = 0; i < 2; i++) {
-      p = (t * 0.7 + i * 0.35) % 1;
-      side = i ? 1 : -1;
-      sx = bx + side * 8;
-      sy = 13 + by + p * p * 5;
+    for (var i = 0; i < 3; i++) {
+      side = i === 0 ? -1 : 1;
+      p = (t * 0.78 + i * 0.31) % 1;
+      sx = bx + (i === 2 ? -4 : side * 9) + Math.sin(t * 5 + i) * 0.5;
+      sy = (i === 2 ? 8 : 5) + by + p * p * 10;
       GM.sweatDrop(buf, Math.round(sx * GM.SCALE), Math.round(sy * GM.SCALE));
     }
   }
