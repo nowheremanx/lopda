@@ -8,7 +8,8 @@
  *
  * Steps are 0-based 16th steps, patterns 0-15 (A-P), degrees are the grid's scale degrees, velocities and volumes are
  * 0..1. The operations are deliberately the ones the screens already understand; a track's notes are re-tied by the
- * song helpers, so an edit cannot leave a broken length. No DOM, no LP: Node tests run it.
+ * song helpers, so an edit cannot leave a broken length. setChain replaces the whole song chain (1-96 slots naming
+ * patterns 0-15) and fills in any pattern it names that does not exist yet. No DOM, no LP: Node tests run it.
  *
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  */
@@ -146,6 +147,15 @@ function one(song,op,at){
       if(song.song.length<=1) return fail("value",at);
       next=S.removeSlot(song,op.at);
       return {song:next};
+    case "setChain":
+      if(!Array.isArray(op.song) || op.song.length<1 || op.song.length>S.SONG_MAX) return fail("value",at);
+      for(v=0;v<op.song.length;v++) if(!int(op.song[v]) || op.song[v]<0 || op.song[v]>=S.PATTERNS_MAX) return fail("value",at);
+      next=op.song.slice();
+      /* an empty bar is better than a chain slot that points nowhere: the screens and the player both expect every
+         named pattern to exist */
+      for(v=0;v<next.length;v++) if(!Array.isArray(song.patterns) || !song.patterns[next[v]]) song=S.ensurePattern(song,next[v]);
+      song.song=next;
+      return {song:song};
     case "replaceSong":
       if(!plain(op.song)) return fail("value",at);
       next=S.validate(op.song);
