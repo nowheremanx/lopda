@@ -213,12 +213,31 @@ test("skeleton: stop() stops the current ask and asks nothing more", async () =>
   assert.equal(ask.seen.length, 1, "nothing further is asked");
 });
 
-test("skeleton: an ask error passes through unchanged", async () => {
+test("skeleton: a wrong key ends the job at once; a dropped line is retried, then the user decides", async () => {
+  const now = (f) => f();
+  const key = Object.assign(new Error("key"), { code: "key" });
+  let ask = makeAsk(() => ({ error: key }));
+  await assert.rejects(H.skeleton({ text: "x", ask, rand: ST.seeded(1), now: 1000, later: now }), (e) => e === key);
+  assert.equal(ask.seen.length, 1, "no retry for a key the server refused");
+
   const busy = Object.assign(new Error("busy"), { code: "busy" });
-  const ask = makeAsk(() => ({ error: busy }));
-  const job = H.skeleton({ text: "x", ask, rand: ST.seeded(1), now: 1000 });
-  await assert.rejects(job, (e) => e.code === "busy" && e === busy);
-  assert.equal(ask.seen.length, 1);
+  ask = makeAsk(() => ({ error: busy }));
+  const stages = [];
+  await assert.rejects(H.skeleton({ text: "x", ask, rand: ST.seeded(1), now: 1000, later: now, onStage: (s) => stages.push(s.id) }), (e) => e === busy);
+  assert.equal(ask.seen.length, 1 + H.AUTO_RETRY, "asked again AUTO_RETRY times, then gave up with no one to ask");
+  assert.equal(stages.filter((s) => s === "retry").length, H.AUTO_RETRY);
+
+  /* the user says "keep trying": the line comes back and the job finishes from where it was */
+  let fails = 5, troubles = 0;
+  const answers = fullAnswers(planFor());
+  ask = makeAsk((step, messages) => (fails-- > 0 ? { error: Object.assign(new Error("t"), { code: "timeout" }) } : answers(step, messages)));
+  const out = await H.skeleton({ text: "x", ask, rand: ST.seeded(1), now: 1000, later: now, onTrouble: () => { troubles++; return Promise.resolve(true); } });
+  assert.equal(out.draft, true);
+  assert.equal(troubles, 1, "asked the user once, after the automatic retries");
+
+  /* the user says "stop": the job ends with the line's error */
+  ask = makeAsk(() => ({ error: busy }));
+  await assert.rejects(H.skeleton({ text: "x", ask, rand: ST.seeded(1), now: 1000, later: now, onTrouble: () => Promise.resolve(false) }), (e) => e === busy);
 });
 
 /* ---------- the edit loop ---------- */

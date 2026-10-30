@@ -75,7 +75,42 @@ function job(ask,runner){
   return p;
 }
 
+/* A dropped line is not the model's fault and costs the steps already done if it ends the job (owner, 2026-10-30):
+   a timeout, no network, a busy or failing server or an empty answer is asked again after a pause, AUTO_RETRY times
+   in a row; then the screen asks the user (o.onTrouble) whether to keep trying, and only a "no" ends the job. A wrong
+   key or no credit cannot get better by waiting, so it ends at once. */
+var AUTO_RETRY=3, RETRY_WAIT=[2000,5000,10000], RETRYABLE={timeout:1, offline:1, server:1, busy:1, empty:1, http:1};
+
 function askOnce(c,messages){
+  var tries=0;
+  function attempt(){
+    return askRaw(c,messages).then(null,function(err){
+      var code=err && err.code;
+      if(c.stopped || code==="stopped" || !RETRYABLE[code]) throw err;
+      tries++;
+      if(tries<=AUTO_RETRY){
+        stage(c.onStage,"retry",tries,AUTO_RETRY,{why:code});
+        return pause(c,RETRY_WAIT[tries-1]).then(attempt);
+      }
+      if(!c.onTrouble) throw err;
+      stage(c.onStage,"trouble",tries-1,AUTO_RETRY,{why:code});
+      return Promise.resolve(c.onTrouble(err)).then(function(again){
+        if(!again || c.stopped) throw c.stopped ? stoppedError() : err;
+        tries=0;
+        return attempt();
+      });
+    });
+  }
+  return attempt();
+}
+
+function pause(c,ms){
+  return new Promise(function(resolve,reject){
+    (c.later||setTimeout)(function(){ if(c.stopped) reject(stoppedError()); else resolve(); },ms);
+  });
+}
+
+function askRaw(c,messages){
   return new Promise(function(resolve,reject){
     if(c.stopped){ reject(stoppedError()); return; }
     var a;
@@ -402,6 +437,7 @@ function skeleton(o){
   var rand=typeof o.rand==="function"?o.rand:Math.random;
   var now=num(o.now)?o.now:Date.now();
   return job(o.ask,function(c){
+    c.onStage=o.onStage; c.onTrouble=o.onTrouble; c.later=o.later;
     /* Card 1 is the dice's pick, for a vague request ("a skeleton"); every other card follows with its own key, so a
        request that names a mood or a style can take the card that fits it. */
     var rolls=[ST.roll(rand)], zh=P.lang(text)==="Chinese", roll, cardName, i;
@@ -488,6 +524,7 @@ function edit(o){
   o=o||{};
   var text=o.text==null?"":String(o.text), song=o.song, focus=o.focus, onStage=o.onStage;
   return job(o.ask,function(c){
+    c.onStage=o.onStage; c.onTrouble=o.onTrouble; c.later=o.later;
     var work=song, allOps=[], turn=1;
     var msgs=P.edit({text:text,overview:AI.overview(song),focus:focus});
     function again(){
@@ -519,5 +556,5 @@ function edit(o){
   });
 }
 
-window.LopdaStudioHarness={skeleton:skeleton, edit:edit, MAX_RETRY:MAX_RETRY, MAX_TURNS:MAX_TURNS};
+window.LopdaStudioHarness={skeleton:skeleton, edit:edit, MAX_RETRY:MAX_RETRY, MAX_TURNS:MAX_TURNS, AUTO_RETRY:AUTO_RETRY};
 })();

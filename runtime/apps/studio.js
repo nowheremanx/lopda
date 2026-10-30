@@ -55,7 +55,7 @@ var T={
   versions:[], versionsOk:false, versionPick:0, projects:null, projectsLoading:false,
   projectFolder:"", templatePick:"", deletePick:"", importData:null, guidePage:0,
   /* 12.16: the assistant's one request and the preview waiting for 采用 */
-  aiBusy:false, aiJob:null, aiPreview:null, aiNote:"",
+  aiBusy:false, aiJob:null, aiPreview:null, aiNote:"", aiTrouble:null,
   aiCard:"", aiStage:"", aiSig:null, aiMark:false, aiT0:0, aiLast:0, aiTick:0,
   /* the player: one chain clock, chainPat is what is scheduled, playPat is what the ears hear */
   playing:false, mode:"", playPat:0, chainPat:0, pendingPat:-1, queued:-1, boundaryGlobal:0,
@@ -1945,7 +1945,6 @@ function openSheet(name){
   renderSheet();
 }
 function closeSheet(){
-  if(T.sheet==="ai") aiStopJob();
   if(T.sheet==="new"||T.sheet==="demo"||T.sheet==="pop"){ T.sheet="menu"; renderSheet(); return; }
   if(T.sheet==="editmenu"||T.sheet==="filemenu"){ T.sheet="menu"; renderSheet(); return; }
   if(T.sheet==="copyask"){ T.sheet="copy"; renderSheet(); return; }
@@ -2042,6 +2041,8 @@ function aiStageText(st){
   if(st.id==="read") return tr("studio.ai.stage.read");
   if(st.id==="edit") return tr("studio.ai.stage.edit",{turn:v.turn!=null?v.turn:st.n});
   if(st.id==="check") return tr("studio.ai.stage.check");
+  if(st.id==="retry") return tr("studio.ai.stage.retry",{n:st.n,of:st.of});
+  if(st.id==="trouble") return tr("studio.ai.stage.trouble");
   return "";
 }
 function paintAiProgress(){
@@ -2055,7 +2056,16 @@ function aiStage(st){
   T.aiStage=aiStageText(st);
   paintAiProgress();
 }
+function aiTroubleAnswer(yes){
+  var t=T.aiTrouble;
+  if(!t) return;
+  T.aiTrouble=null;
+  if(yes) T.aiLast=Date.now();
+  t.resolve(yes);
+  renderSheet();
+}
 function aiStopJob(){
+  if(T.aiTrouble) aiTroubleAnswer(false);
   if(T.aiJob && T.aiJob.stop) T.aiJob.stop();
 }
 function isAiDraft(pv){
@@ -2106,6 +2116,19 @@ function renderAiSheet(sh){
     prog.appendChild(el("p","st-ai-stay",tr("studio.ai.stay")));
     sh.appendChild(prog);
     paintAiProgress();
+    /* the line stayed down after the automatic retries: the user chooses, and what is done so far waits (12.20.7) */
+    if(T.aiTrouble){
+      var tb=el("div","st-ai-trouble");
+      tb.appendChild(el("p","st-sheet-label",tr("studio.ai.trouble",{why:T.aiTrouble.why})));
+      var trow=el("div","st-sheet-row");
+      var again=el("button","st-sheet-btn",""); again.type="button"; again.id="studio-ai-again"; again.textContent=tr("studio.ai.trouble.again");
+      again.onclick=function(){ aiTroubleAnswer(true); };
+      var quit=el("button","st-sheet-btn",""); quit.type="button"; quit.id="studio-ai-quit"; quit.textContent=tr("studio.ai.trouble.stop");
+      quit.onclick=function(){ aiTroubleAnswer(false); };
+      trow.appendChild(again); trow.appendChild(quit);
+      tb.appendChild(trow);
+      sh.appendChild(tb);
+    }
   }
   var row=el("div","st-sheet-row");
   var send=el("button","st-sheet-btn",""); send.type="button"; send.textContent=tr("studio.ai.send");
@@ -2139,7 +2162,7 @@ function applyAiPreview(play){
   var pv=T.aiPreview;
   if(!pv || !T.loaded || !T.song) return;
   if(!pv.ops.length && !isAiDraft(pv)){ toast(pv.reply||tr("studio.ai.done")); return; }
-  var out=EDIT.apply(T.song,pv.ops);
+  var out=EDIT.applyAll(T.song,pv.ops);
   if(out.error){ toast(tr("studio.ai.bad")); return; }
   if(isAiDraft(pv)){
     var song=out.song, id=LP.uid();
@@ -2197,9 +2220,17 @@ function askAi(text){
   }
   function ask(messages){ return LP.ai.ask({messages:messages,onSignal:onSignal}); }
   function onStage(st){ aiStage(st); }
+  function onTrouble(e){
+    return new Promise(function(resolve){
+      T.aiTrouble={resolve:resolve, why:LP.ai.err?LP.ai.err(e):""};
+      LP.sfx("err");
+      if(T.sheet==="ai") renderSheet();
+      else toast(tr("studio.ai.trouble.toast"));
+    });
+  }
   var job=/骨架|写一首|来一首|skeleton|song idea|new song/i.test(text)
-    ? H.skeleton({text:text,ask:ask,onStage:onStage})
-    : H.edit({song:T.song,focus:{screen:T.screen,pattern:T.pat,slot:T.slot},text:text,ask:ask,onStage:onStage});
+    ? H.skeleton({text:text,ask:ask,onStage:onStage,onTrouble:onTrouble})
+    : H.edit({song:T.song,focus:{screen:T.screen,pattern:T.pat,slot:T.slot},text:text,ask:ask,onStage:onStage,onTrouble:onTrouble});
   T.aiJob=job;
   if(T.aiTick) clearInterval(T.aiTick);
   T.aiTick=setInterval(paintAiProgress,1000);
@@ -2214,6 +2245,8 @@ function askAi(text){
     end();
     T.aiPreview={reply:res.reply||tr("studio.ai.done"),ops:res.ops||[],draft:!!res.draft,card:T.aiCard};
     T.aiNote=text;
+    /* the sheet may have been closed while the AI worked: the preview waits in it */
+    if(T.sheet!=="ai") toast(tr("studio.ai.ready"));
     renderSheet();
   },function(e){
     var code=e && e.code;
@@ -3428,7 +3461,7 @@ document.addEventListener("keydown",function(e){
 /* boot.js only watches visibility once storage opened, so watch it here too: a hidden page never keeps sounding */
 document.addEventListener("visibilitychange",function(){
   if(!document.hidden || !visible()) return;
-  aiStopJob();
+  /* the AI job stays: iOS may drop its line while hidden, and the harness asks again or asks the user (12.20.7) */
   stopRepeatAll();
   stopPlay();
   flush();
@@ -3477,7 +3510,7 @@ LP.builtin({id:"studio", label:"app.studio", icon:function(){ return ICON; }, vi
   open:open,
   leave:leave,
   lang:function(){ if(visible()){ renderAll(); if(T.tour) tourShow(T.tour.i); } },
-  pause:function(){ aiStopJob(); stopRepeatAll(); stopPlay(); flush(); },
+  pause:function(){ stopRepeatAll(); stopPlay(); flush(); },
   resume:function(){},
   audio:function(){ onAudio(); },
   ready:function(){

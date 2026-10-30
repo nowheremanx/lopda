@@ -302,3 +302,17 @@ test("apply: setNoteExtra refuses a missing note, a rest, a bad value or a field
   assert.equal(r.at, 1);
   assert.equal(r.song, undefined);
 });
+
+test("applyAll: more than 64 operations land in pieces, still all or nothing", () => {
+  const song = fresh();
+  const ops = [];
+  for (let i = 0; i < 86; i++) ops.push({ op: "setDrum", pattern: 0, drum: "hat", step: i % 16, on: i % 2 === 0, vel: 0.4 });
+  assert.equal(E.apply(song, ops).error, "many");
+  const r = E.applyAll(song, ops);
+  assert.equal(r.error, undefined);
+  assert.equal(r.ops, 86);
+  const bad = ops.concat([{ op: "setBpm", value: "x" }]);
+  const b = E.applyAll(song, bad);
+  assert.equal(b.error, "value");
+  assert.equal(b.at, 86);
+});

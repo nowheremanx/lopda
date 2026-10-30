@@ -3821,6 +3821,42 @@ test("studio: quick AI commands work with no key, and an AI reply is previewed a
   assert.deepEqual(errors, []);
 });
 
+test("studio: a dropped AI line is dialled again, then the user decides; a long AI edit (over 64 changes) applies", { skip, timeout: 120000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await p.evaluate(() => {
+    LP.ai.on = () => true;
+    window.__aiCalls = 0;
+    /* 86 hat changes in two ops calls, like the owner's nine-bar rewrite (2026-10-30) */
+    const ops = [];
+    for (let i = 0; i < 86; i++) ops.push({ op: "setDrum", pattern: 0, drum: "hat", step: i % 16, on: i % 2 === 0, vel: 0.4 });
+    const answer = JSON.stringify({ reply: "改好了很多处", calls: [{ tool: "ops", ops: ops.slice(0, 43) }, { tool: "ops", ops: ops.slice(43) }], done: true });
+    LP.ai.ask = () => {
+      window.__aiCalls++;
+      /* the first four asks fail like a dead line: three automatic redials, then the user is asked */
+      if (window.__aiCalls <= 4) { const e = new Error("offline"); e.code = "offline"; const r = Promise.reject(e); r.stop = () => {}; return r; }
+      const ok = Promise.resolve(answer); ok.stop = () => {}; return ok;
+    };
+  });
+  await p.click("#studio-menu");
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "让 AI 改" }).click();
+  await p.waitForSelector("#studio-ai-input");
+  await p.fill("#studio-ai-input", "把踩镲改密一点");
+  await p.locator("#studio-sheet .st-sheet-btn", { hasText: "说" }).click();
+  await p.waitForFunction(() => /重拨/.test((document.querySelector("#studio-ai-stage") || {}).textContent || ""));
+  await p.waitForSelector("#studio-ai-again", { timeout: 40000 });
+  assert.equal(await p.evaluate(() => window.__aiCalls), 4, "three automatic redials after the first try");
+  assert.match(await p.textContent("#studio-sheet .st-ai-trouble"), /做好的步骤都还在/);
+  await p.click("#studio-ai-again");
+  await p.waitForSelector("#studio-sheet .st-ai-preview");
+  assert.match(await p.textContent("#studio-sheet"), /86 处改动/);
+  await p.locator("#studio-sheet .st-sheet-btn", { hasText: "采用并试听" }).click();
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  assert.doesNotMatch(await p.textContent("#toast"), /不合法/, "a preview of 86 changes applies");
+  assert.deepEqual(errors, []);
+});
+
 test("studio: an AI draft becomes a new tape and leaves the current one alone", { skip, timeout: 90000 }, async (t) => {
   const { p, errors } = await rtPage(t);
   await studioOpen(p);
