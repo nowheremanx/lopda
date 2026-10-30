@@ -804,6 +804,11 @@ textarea::placeholder{color:var(--ink-2)}
 .st-key.on{background:var(--ink);color:var(--lcd)}
 .st-key-line{position:absolute;left:32%;right:32%;bottom:5px;height:2px;background:currentColor;display:none}
 .st-key.oct .st-key-line{display:block}
+/* deep mode (12.20.5): a sixth column, the acc key above the Play key; the four pitch columns keep their 44 px floor */
+.st-keys.deep{grid-template-columns:repeat(4,minmax(0,1fr)) 44px 44px}
+.st-key-acc{grid-column:6;grid-row:1;font-family:var(--f-pix);font-size:20px}
+.st-key-play{grid-column:6;grid-row:2;padding:0 1px;font-family:var(--f-lcd);font-size:13px}
+.st-key:disabled{color:var(--ink-2);border-color:var(--ink-2);cursor:default}
 /* the chord screen: two big cells, then six keys */
 .st-chord-board{flex:1;min-height:0;display:flex;flex-direction:column;gap:4px;padding:6px 8px}
 .st-chord-cells{flex:1;min-height:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
@@ -824,6 +829,18 @@ textarea::placeholder{color:var(--ink-2)}
 .st-chord-cell.rest.playing{background:var(--lcd-3)}
 .st-chord-keys{flex:none;display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) 44px;grid-auto-rows:44px;gap:4px}
 .st-chord-keys .st-rest-key{grid-column:4;grid-row:1/span 2}
+/* deep mode (12.20.5): the root's acc above the type key in a fifth column */
+.st-chord-keys.deep{grid-template-columns:repeat(3,minmax(0,1fr)) 44px 44px}
+.st-chord-acc{grid-column:5;grid-row:1;font-family:var(--f-pix);font-size:18px}
+.st-chord-type{grid-column:5;grid-row:2;padding:0 1px;font-size:13px}
+.st-chord-key:disabled{color:var(--ink-2);border-color:var(--ink-2);cursor:default}
+/* the deep sheets: three 44 px choices to a row; the quality sheet is 18 buttons, six rows, so it fits 331x359 */
+.st-deep-row{flex:none;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px}
+.st-deep-btn{min-width:0;min-height:44px;padding:2px 4px;background:transparent;color:var(--ink);border:2px solid var(--ink);font-family:var(--f-lcd);font-size:14px;line-height:1.1;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.st-deep-btn.on{background:var(--ink);color:var(--lcd)}
+.st-q-grid{flex:none;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));grid-auto-rows:44px;gap:4px}
+.st-q-btn{min-width:0;min-height:44px;padding:2px 4px;background:transparent;color:var(--ink);border:2px solid var(--ink);font-family:var(--f-lcd);font-size:14px;line-height:1.1;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.st-q-btn.on{background:var(--ink);color:var(--lcd)}
 .st-chord-key{min-height:44px;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;padding:0 2px;background:var(--lcd);color:var(--ink);border:2px solid var(--ink);font-family:var(--f-lcd);line-height:1.1;cursor:pointer;overflow:hidden}
 .st-chord-key b{font-family:var(--f-pix);font-weight:400;font-size:18px;line-height:1}
 .st-chord-key small{font-size:11px;color:var(--ink-2);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
