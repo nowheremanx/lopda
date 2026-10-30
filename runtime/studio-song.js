@@ -26,13 +26,14 @@ var TRACK_ID=/^[a-z][a-z0-9-]{0,15}$/;
 var NOTES_MAX=1024;
 
 /* "4 instruments + 1 voice" is this constant, not a rule of the format: the stored song keeps its own track list, so a
-   file from another writer (or a later version) may carry other tracks. */
+   file from another writer (or a later version) may carry other tracks. vol is the mixer's level (0-1, in tenths on
+   screen) and mute its switch; a 1b-1 file without them reads as vol 1, mute off (12.14). */
 var TRACKS=[
-  {id:"drums", kind:"drum"},
-  {id:"bass", kind:"note"},
-  {id:"chords", kind:"chord"},
-  {id:"melody", kind:"note"},
-  {id:"voice", kind:"voice"}
+  {id:"drums", kind:"drum", vol:1, mute:false},
+  {id:"bass", kind:"note", vol:1, mute:false},
+  {id:"chords", kind:"chord", vol:1, mute:false},
+  {id:"melody", kind:"note", vol:1, mute:false},
+  {id:"voice", kind:"voice", vol:1, mute:false}
 ];
 
 var SCALES={
@@ -216,7 +217,7 @@ function tie(list,end){
 
 function newSong(now){
   var tracks=[];
-  for(var i=0;i<TRACKS.length;i++) tracks.push({id:TRACKS[i].id, kind:TRACKS[i].kind});
+  for(var i=0;i<TRACKS.length;i++) tracks.push({id:TRACKS[i].id, kind:TRACKS[i].kind, vol:TRACKS[i].vol, mute:TRACKS[i].mute});
   return {
     v:V, name:"", bpm:BPM_DEFAULT, key:9, scale:"minor-penta", swing:SWING_DEFAULT, tape:2, kit:"soft",
     tracks:tracks,
@@ -270,6 +271,8 @@ function check(x){
     tr=x.tracks[i];
     if(!plain(tr) || typeof tr.id!=="string" || !TRACK_ID.test(tr.id)) return {error:"tracks"};
     if(KINDS.indexOf(tr.kind)<0) return {error:"tracks"};
+    if(typeof tr.vol!=="undefined" && (!num(tr.vol) || tr.vol<0 || tr.vol>1)) return {error:"tracks"};
+    if(typeof tr.mute!=="undefined" && typeof tr.mute!=="boolean") return {error:"tracks"};
     if(Object.prototype.hasOwnProperty.call(byId,"$"+tr.id)) return {error:"tracks"};
     byId["$"+tr.id]=tr;
   }
@@ -306,7 +309,20 @@ function check(x){
   if(typeof x.name!=="string" || x.name.length>NAME_MAX*2 || Array.from(x.name).length>NAME_MAX) return {error:"name"};
   if(!num(x.updated) || x.updated<0) return {error:"updated"};
 
-  return {song:clone(x)};
+  return {song:mixDefaults(clone(x))};
+}
+
+/* A 1b-1 tape has no mixer fields. They are additive inside v 1, so an old song reads with every track at full volume
+   and unmuted; validate fills them in, and every save from then on carries them (12.14). */
+function mixDefaults(song){
+  var tracks=song && song.tracks, i, tr;
+  if(!Array.isArray(tracks)) return song;
+  for(i=0;i<tracks.length;i++){
+    tr=tracks[i];
+    if(typeof tr.vol==="undefined") tr.vol=1;
+    if(typeof tr.mute==="undefined") tr.mute=false;
+  }
+  return song;
 }
 
 /* ---------- the drum grid ---------- */
