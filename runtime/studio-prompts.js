@@ -24,7 +24,14 @@ var JSON_ONLY="Answer with exactly ONE JSON object and nothing else: no markdown
 var MACHINE=[
 "Tape4 is a fictional 1986 four-track tape machine: drums, bass, chords, melody. One pattern is one 4/4 bar of 16 steps",
 "(step 0 is the downbeat, 4 is beat 2, 8 is beat 3, 12 is beat 4). Patterns are A-P (0-15); the song is a chain of up to",
-"96 patterns. Tempo 60-140 BPM, swing is global, no 3/4, no tempo or key change, no new instruments."
+"96 patterns. Tempo 60-140 BPM, swing is global, no 3/4 or 6/8 yet, no tempo or key change inside a song.",
+"Every sound is synthesised, 1986-style: kits soft, chip, rock, electro; bass voices bass (synth), pick (picked), sub",
+"(808); chord voices keys (electric piano), guitar (strummed), piano, organ, strings; melody voices flute, square (8-bit",
+"lead), pluck (zither or lute-like), reed (harmonica or accordion-like), bowed (erhu or violin-like). A style is made from",
+"these sounds, rhythm and harmony: it will sound like the style, played on this machine.",
+"Chords may be any type: maj m 7 maj7 m7 9 m9 6 m6 add9 sus2 sus4 dim dim7 aug m7b5 5 (power), on a root that is a",
+"scale degree 0-5, optionally shifted a semitone (acc). Melody notes may leave the scale by a semitone (acc) and may",
+"carry an ornament: slide (up into the note) or vib (vibrato)."
 ].join("\n");
 
 function lang(text){
@@ -41,24 +48,33 @@ function plan(o){
   var system=[
 MACHINE,
 "",
-"You plan a new song for it. The machine offers style cards (card 1 is its random pick). You pick one, then choose the",
-"sections, one chord per bar, and the drums, bass rhythm and chord strum of each section. The machine lays the drums,",
-"chords and bass itself; melodies come in a later step. The sounds are fixed: a small drum kit, a bass, an electric",
-"piano that plays rich seventh chords, and a flute-like lead. A style is made from rhythm and harmony, not new sounds.",
+"You plan a new song for it: the sound (kit and a voice per track), the sections, one chord per bar, and the drums,",
+"bass rhythm and chord strum of each section. The machine lays the drums, chords and bass itself; melodies come in a",
+"later step. Style cards are offered as inspiration (card 1 is the machine's random pick, used for a vague request).",
+"You may learn a style's rhythm, harmony and sound; never copy a real song's melody, lyrics or title.",
 "",
 JSON_ONLY,
 "Shape:",
-'{"card":1,"name":"short title","bpm":84,"scale":"minor",',
-' "sections":[{"id":"verse","chords":[0,5,3,4],"groove":"<groove id>","energy":1,"bass":"<bass id>","strum":"hold","melody":true}, ...],',
+'{"card":1,"name":"short title","bpm":84,"key":9,"scale":"minor","swing":0.55,"kit":"soft",',
+' "voices":{"bass":"bass","chords":"keys","melody":"flute"},',
+' "sections":[{"id":"verse","chords":[0,5,{"root":3,"q":"m7"},{"root":4,"q":"sus4"}],"groove":"<groove id>","energy":1,',
+'   "bass":"<bass id>","strum":"hold","melody":true}, ...],',
 ' "order":[["intro",1],["verse",2],["chorus",2], ...]}',
 "",
 "Rules:",
 "- card: a card number. If the request names no mood, style or tempo (just \"a song\", \"a skeleton\", \"来个骨架\"),",
 "  take card 1. If it names a mood, a genre or an artist's style, take the card whose rhythm fits it best (an artist is",
-"  only a hint for the feel: never use their songs, titles or melodies). The card's key is kept.",
+"  only a hint for the feel: never use their songs, titles or melodies).",
+"- key (0-11, C=0), scale (major, minor, dorian, major-penta, minor-penta), swing (0.5-0.75), kit and voices: optional;",
+"  left out, the card's are kept. Choose them when the style needs it (a Chinese-style ballad: pentatonic, pluck or bowed",
+"  lead, piano; a boy-band ballad: minor, strings and square or flute, electro kit; rock: rock kit, guitar, power chords).",
+"- chords: one per bar, either a degree 0-5 (the machine voices it as a rich seventh or ninth) or",
+"  {\"root\":0-5,\"q\":\"<type>\",\"acc\":-1 or 1} for a chosen type or a borrowed chord (in major, bVII is",
+"  {\"root\":5,\"acc\":1,\"q\":\"maj\"}). Plain pop wants maj and m triads, jazz and R&B sevenths and ninths, rock 5 (power).",
 "- groove: a groove id (any, not only the card's). Only if none fits the style, leave groove out and write one bar",
 "  yourself: \"drums\":{\"kick\":[[0,0.9],[8,0.85]],\"snare\":[[4,0.9],[12,0.9]],\"hat\":[[0,0.4],[2,0.3],...],\"perc\":[]}.",
-"- bass: a bass rhythm id. boom = root on beat 1, fifth on beat 3; walk and boom-walk move each beat.",
+"- bass: a bass rhythm id (boom = root on beat 1, fifth on beat 3; walk and boom-walk move each beat), or one bar of",
+"  your own: [[step, velocity, move], ...] with move root, fifth, third, octave or approach (the note below the next chord).",
 "- strum: hold (the chord rings all bar, the default), stabs (short chords on beats 2 and 4, a guitar's chick against",
 "  the bass's boom: country, ska, rock and roll), pulse (a short chord on every beat).",
 "- bpm: inside the card's range unless the request asks for faster or slower. scale: major, minor or dorian; keep the",
@@ -93,16 +109,19 @@ function melody(o){
   var system=[
 MACHINE,
 "",
-"You write the melody of one section. Notes are scale degrees of the key: 0 is the tonic, 1 the next scale note, 7 the",
-"tonic an octave up, -1 the scale note below the tonic. A note rings until the next note; a velocity 0 note is a rest.",
+"You write the melody of one section. Notes are scale degrees of the key: 0 is the tonic, 1 the next scale note, one",
+"octave up is the scale's length (7, or 5 for a pentatonic scale), -1 the scale note below the tonic. A note rings until",
+"the next note; a velocity 0 note is a rest. A 4th value 1 or -1 raises or lowers the note a semitone (a blue note, a",
+"passing tone, a borrowed chord's tone); a 5th value \"slide\" or \"vib\" adds an ornament (use them like a singer would).",
 "",
 JSON_ONLY,
-'Shape: {"bars":[[[step,degree,velocity], ...], ...]}  one inner list per bar, in order.',
+'Shape: {"bars":[[[step,degree,velocity], [step,degree,velocity,acc,ornament], ...], ...]}  one inner list per bar.',
 "",
 "Rules:",
 "- Exactly the number of bars asked. 2-8 notes per bar is typical, at most 12. Steps 0-15, rising, no step twice.",
 "- Degrees -3..10. Velocity 0.5-1 (accent the first note of a phrase); a rest is velocity 0.",
-"- On beats (steps 0, 4, 8, 12) prefer the chord tones given for that bar; between them, step through the scale.",
+"- On beats (steps 0, 4, 8, 12) prefer the chord tones given for that bar (\"6#\" means degree 6 with acc 1); between",
+"  them, step through the scale.",
 "- Write a singable phrase: a short motif, repeated with a change; leave some space; end the last bar on a chord tone.",
 "- Do not make every bar the same."
   ].join("\n");
@@ -124,18 +143,20 @@ var TOOLS=[
 '{"tool":"groove","pattern":0,"style":"<groove id>","energy":1,"fill":false}   lay the drums of a pattern',
 '{"tool":"ghost","pattern":0,"amount":2}                ghost snare notes (1-4)',
 '{"tool":"fill","pattern":3}                            a snare fill on the last beat',
-'{"tool":"chords","pattern":0,"roots":[0,5]}           1-4 chords in the bar (roots 0-5)',
-'{"tool":"bass","pattern":0,"rhythm":"<bass id>"}       write the bass from the chords of that pattern',
-'{"tool":"melody","pattern":0,"notes":[[0,4,0.8],[4,2,0.7]]}   replace the melody of a pattern',
+'{"tool":"chords","pattern":0,"roots":[0,{"root":5,"q":"m7"}],"rhythm":"hold"}   1-4 chords (rhythm: hold, stabs, pulse)',
+'{"tool":"bass","pattern":0,"rhythm":"<bass id>"}       the bass from that pattern\'s chords (or "steps":[[0,0.9,"root"],...])',
+'{"tool":"melody","pattern":0,"notes":[[0,4,0.8],[4,2,0.7,1,"slide"]]}   replace a pattern\'s melody ([step,deg,vel,acc,orn])',
 '{"tool":"copy","from":0,"to":5,"change":"same"}        change: same, sparse, no-melody, lift',
 '{"tool":"mix","track":"bass","vol":0.8,"mute":false}  track: drums, bass, chords, melody',
 '{"tool":"ops","ops":[{"op":"setDrum","pattern":0,"drum":"snare","step":4,"on":true,"vel":0.9}]}   single notes:',
 '   setDrum {pattern,drum (kick snare hat perc),step,on,vel}, setNote {pattern,track (bass chords melody),step,deg,vel},',
-'   removeNote {pattern,track,step}, clearTrack {pattern,track}'
+'   removeNote {pattern,track,step}, clearTrack {pattern,track},',
+'   setNoteExtra {pattern,track,step,acc,gate,orn,q} (null removes one; gate 0.25-1 shortens a note)'
 ];
 var EDIT_ONLY=[
 '{"tool":"read","pattern":4}                            see every note of a pattern (answered next turn)',
-'{"tool":"set","bpm":96,"key":9,"scale":"minor","swing":0.6,"tape":2,"kit":"soft","name":"..."}   any of these',
+'{"tool":"set","bpm":96,"key":9,"scale":"minor","swing":0.6,"tape":2,"kit":"soft","name":"...",',
+'  "voices":{"chords":"guitar"}}                        any of these; voices as listed above',
 '{"tool":"chain","song":[0,0,1,1,2,3]}                  replace the whole song chain'
 ];
 

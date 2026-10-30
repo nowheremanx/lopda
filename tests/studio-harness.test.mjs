@@ -320,3 +320,28 @@ test("skeleton: a section may write its own drums and strum its chords as stabs"
   await H.skeleton({ text: "x", ask, rand: ST.seeded(3), now: 1000 });
   assert.match(ask.seen[1].messages.at(-1).content, /steps must be 0-15/);
 });
+
+test("skeleton: the plan picks the sound, typed and borrowed chords and its own bass; melodies may leave the scale", async () => {
+  const plan = { ...planFor(), key: 2, scale: "major", kit: "rock", voices: { chords: "guitar", melody: "bowed" } };
+  plan.sections = plan.sections.map((s) => ({ ...s }));
+  plan.sections[1].chords = [0, { root: 5, acc: 1, q: "maj" }, { root: 3, q: "m7" }, { root: 4, q: "sus4" }];
+  plan.sections[1].bass = [[0, 0.9, "root"], [6, 0.6, "third"], [8, 0.8, "fifth"]];
+  const answers = fullAnswers(plan);
+  const ask = makeAsk((step, messages) => (step === "melody" ? { bars: melodyBars(messages).bars.map((b) => [[0, 2, 0.8, 1, "slide"], ...b.slice(1)]) } : answers(step, messages)));
+  const out = await H.skeleton({ text: "x", ask, rand: ST.seeded(4), now: 1000 });
+  const song = out.song;
+  assert.equal(song.key, 2);
+  assert.equal(song.kit, "rock");
+  assert.equal(S.voiceOf(song, "chords"), "guitar");
+  assert.equal(S.voiceOf(song, "melody"), "bowed");
+  const verse2 = song.patterns[2].notes;            // intro is 0, the verse's second bar is 2
+  const ch = verse2.chords.find((n) => n.vel > 0);
+  assert.equal(ch.acc, 1);
+  assert.equal(ch.q, "maj");
+  assert.equal(S.chordName(song, ch.deg, ch.q, ch.acc).name, "C", "bVII of D major is C");
+  const bass0 = verse2.bass.find((n) => n.t === 0);
+  assert.equal(S.noteMidi(song, "bass", bass0.deg, bass0.acc) % 12, 0, "the bass plays the borrowed chord's root, C");
+  assert.ok(song.patterns[1].notes.melody.some((n) => n.acc === 1 && n.orn === "slide"));
+  const melodyUser = ask.seen.find((s) => s.step === "melody").messages.find((m) => m.role === "user").content;
+  assert.match(melodyUser, /bar 2: chord C, chord tones/);
+});
