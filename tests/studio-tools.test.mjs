@@ -251,3 +251,35 @@ test("bass under stabbed chords takes the bar's chord from beat 1", () => {
   const b = T.run(c, { tool: "bass", pattern: 0, rhythm: "boom" });
   assert.equal(b.ops.find((o) => o.op === "setNote" && o.step === 0).deg, T.rootDegree(c, 3));
 });
+
+/* ---------- 12.20.5: a chord root may name a quality and a semitone shift ---------- */
+test("chords: object roots carry q and acc; a bare number is still the automatic chord", () => {
+  const r = T.run(fresh(), { tool: "chords", pattern: 0, roots: [{ root: 0, q: "m7", acc: -1 }, { root: 4, q: "sus4" }, 5] });
+  assert.equal(r.error, undefined);
+  const song = apply(fresh(), r.ops).song;
+  const chords = song.patterns[0].notes.chords;
+  assert.deepEqual(plain(chords.map((n) => [n.t / S.STEP, n.deg, n.q, n.acc])), [
+    [0, 0, "m7", -1], [8, 4, "sus4", null], [12, 5, null, null],
+  ]);
+  assert.equal(chords.every((n) => n.vel === 0.65), true);
+  assert.equal(S.validate(song).error, undefined);
+
+  // stabs and pulse take one root object and put its quality on every strike
+  const c = apply(fresh(), T.run(fresh(), { tool: "chords", pattern: 0, roots: [{ root: 3, q: "7", acc: 1 }], rhythm: "stabs" }).ops).song;
+  const struck = c.patterns[0].notes.chords.filter((n) => n.vel > 0);
+  assert.deepEqual(plain(struck.map((n) => [n.t / S.STEP, n.deg, n.q, n.acc])), [[4, 3, "7", 1], [12, 3, "7", 1]]);
+  assert.equal(S.validate(c).error, undefined);
+});
+
+test("chords: bad object roots are named, and the error lists the qualities", () => {
+  const error = (roots) => T.run(fresh(), { tool: "chords", pattern: 0, roots }).error || "";
+  assert.match(error([{ root: 6, q: "m7" }]), /^roots:/);
+  assert.match(error([{ q: "m7" }]), /^roots:/);
+  assert.match(error([{ root: 0, q: "blues" }]), /^roots:.*blues.*maj, m, 7/);
+  assert.match(error([{ root: 0, q: "blues" }]), /m7b5/);
+  assert.match(error([{ root: 0, acc: 0 }]), /^roots:.*acc/);
+  assert.match(error([{ root: 0, acc: 2 }]), /^roots:.*acc/);
+  assert.match(error(["0"]), /^roots:/);
+  assert.match(error([0.5]), /^roots:/);
+  assert.match(error([{ root: 0, q: 7 }]), /^roots:.*q/);
+});

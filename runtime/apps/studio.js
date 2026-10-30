@@ -775,22 +775,25 @@ function setSwing(v){
 /* one note or hit on a synth: the drum kit, the voice of each track, the chord expanded (12.6, 12.7). Shared by the
    live player and the offline WAV render, so both hear the mixer's level. */
 function soundEvent(song,e,at,bpm,synth,vol){
-  var i, notes, midi, voice, strum;
+  var i, notes, midi, voice, strum, dur, opts;
   if(!synth || !song || !e.vel || !(vol>0)) return;
   if(e.track==="drums"){
     if(e.key) synth.hit(SONGS.kitOf(song),e.key,at,e.vel*vol);
   } else if(e.track==="chords"){
-    notes=SONGS.chordNotes(song,e.deg);
+    notes=SONGS.chordNotes(song,e.deg,e.q,e.acc);
     if(!notes) return;
     voice=SONGS.voiceOf(song,"chords");
+    dur=SONGS.ticksToSec(e.len,bpm)*(e.gate||1);
     /* 12.20.3: a strummed voice sweeps the chord low to high; a song without voices keeps one instant */
     strum=(SYNTH.STRUM && SYNTH.STRUM[voice]) || 0;
     notes=notes.slice().sort(function(a,b){ return a-b; });
-    for(i=0;i<notes.length;i++) synth.note(voice,notes[i],at+i*strum,SONGS.ticksToSec(e.len,bpm),e.vel*vol);
+    for(i=0;i<notes.length;i++) synth.note(voice,notes[i],at+i*strum,dur,e.vel*vol);
   } else if(e.track==="bass" || e.track==="melody"){
-    midi=SONGS.noteMidi(song,e.track,e.deg);
+    midi=SONGS.noteMidi(song,e.track,e.deg,e.acc);
     if(midi==null) return;
-    synth.note(SONGS.voiceOf(song,e.track),midi,at,Math.max(0.05,SONGS.ticksToSec(e.len,bpm)),e.vel*vol);
+    dur=SONGS.ticksToSec(e.len,bpm)*(e.gate||1);
+    opts=e.orn==="slide" ? {slide:true} : e.orn==="vib" ? {vib:true} : undefined;
+    synth.note(SONGS.voiceOf(song,e.track),midi,at,Math.max(0.05,dur),e.vel*vol,opts);
   }
 }
 function playEvent(e,at,bpm){

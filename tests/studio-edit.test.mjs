@@ -200,3 +200,105 @@ test("apply: setKit takes every kit in the cycle", () => {
   assert.equal(apply(fresh(), [{ op: "setKit", value: "made-up-kit" }]).error, "value");
   assert.equal(apply(fresh(), [{ op: "setKit", value: "Soft" }]).error, "value");
 });
+
+/* ---------- 12.20.5: the optional note fields and the setNoteExtra op ---------- */
+test("apply: setNote takes acc, gate and orn on notes, and q and acc on chords", () => {
+  let r = apply(fresh(), [{ op: "setNote", pattern: 0, track: "melody", step: 4, deg: 2, vel: 0.7, acc: 1, gate: 0.5, orn: "vib" }]);
+  assert.equal(r.error, undefined);
+  let note = r.song.patterns[0].notes.melody.find((n) => n.t === 4 * S.STEP);
+  assert.deepEqual(plain(note), { t: 4 * S.STEP, len: 288, deg: 2, vel: 0.7, acc: 1, gate: 0.5, orn: "vib" });
+  assert.equal(S.validate(r.song).error, undefined);
+
+  r = apply(r.song, [{ op: "setNote", pattern: 0, track: "bass", step: 4, deg: 0, orn: "slide", gate: 1 }]);
+  assert.equal(r.error, undefined);
+  note = r.song.patterns[0].notes.bass.find((n) => n.t === 4 * S.STEP);
+  assert.equal(note.orn, "slide");
+  assert.equal(note.gate, 1);
+
+  r = apply(fresh(), [{ op: "setNote", pattern: 0, track: "chords", step: 4, deg: 3, vel: 0.6, q: "m7", acc: -1 }]);
+  assert.equal(r.error, undefined);
+  note = r.song.patterns[0].notes.chords.find((n) => n.t === 4 * S.STEP);
+  assert.deepEqual(plain(note), { t: 4 * S.STEP, len: 96, deg: 3, vel: 0.6, q: "m7", acc: -1 });
+  assert.equal(S.validate(r.song).error, undefined);
+
+  // an unknown q is a later writer's: it validates and is kept, but plays as absent
+  r = apply(fresh(), [{ op: "setNote", pattern: 0, track: "chords", step: 4, deg: 0, q: "a-later-quality" }]);
+  assert.equal(r.error, undefined);
+  assert.equal(r.song.patterns[0].notes.chords.find((n) => n.t === 4 * S.STEP).q, "a-later-quality");
+  assert.equal(S.validate(r.song).error, undefined);
+});
+
+test("apply: a bad optional field on setNote is refused like the format", () => {
+  const base = { op: "setNote", pattern: 0, track: "melody", step: 4, deg: 0 };
+  for (const extra of [{ acc: 0 }, { acc: 2 }, { acc: "1" }, { gate: 0.05 }, { gate: 1.1 }, { gate: "0.5" },
+    { orn: "trill" }, { orn: 1 }, { q: "m7" }])
+    assert.equal(apply(fresh(), [{ ...base, ...extra }]).error, "value", JSON.stringify(extra));
+  assert.equal(apply(fresh(), [{ ...base, track: "bass", orn: "vib" }]).error, "value", "the bass only slides");
+  assert.equal(apply(fresh(), [{ ...base, track: "chords", deg: 0, gate: 0.5 }]).error, "value");
+  assert.equal(apply(fresh(), [{ ...base, track: "chords", deg: 0, orn: "slide" }]).error, "value");
+  assert.equal(apply(fresh(), [{ ...base, track: "chords", deg: 0, q: 7 }]).error, "value");
+  assert.equal(apply(fresh(), [{ ...base, vel: 0, acc: 1 }]).error, "value", "a rest keeps no extra fields");
+  // the valid edges
+  assert.equal(apply(fresh(), [{ ...base, acc: -1, gate: 0.1, orn: "slide" }]).error, undefined);
+  assert.equal(apply(fresh(), [{ ...base, track: "chords", deg: 0, q: "maj", acc: 1 }]).error, undefined);
+});
+
+test("apply: setNoteExtra changes only the optional fields, null removes, and deg and vel stay", () => {
+  let r = apply(fresh(), [{ op: "setNote", pattern: 0, track: "melody", step: 4, deg: 2, vel: 0.7, acc: 1, gate: 0.5, orn: "vib" }]);
+  const before = plain(r.song.patterns[0].notes.melody.find((n) => n.t === 4 * S.STEP));
+  r = apply(r.song, [{ op: "setNoteExtra", pattern: 0, track: "melody", step: 4, acc: -1, gate: null }]);
+  assert.equal(r.error, undefined);
+  let note = plain(r.song.patterns[0].notes.melody.find((n) => n.t === 4 * S.STEP));
+  assert.deepEqual(note, { t: 4 * S.STEP, len: 288, deg: 2, vel: 0.7, acc: -1, orn: "vib" });
+  assert.equal(note.deg, before.deg);
+  assert.equal(note.vel, before.vel);
+  assert.equal(S.validate(r.song).error, undefined);
+
+  r = apply(r.song, [{ op: "setNoteExtra", pattern: 0, track: "melody", step: 4, orn: null, acc: null }]);
+  assert.equal(r.error, undefined);
+  assert.deepEqual(plain(r.song.patterns[0].notes.melody.find((n) => n.t === 4 * S.STEP)),
+    { t: 4 * S.STEP, len: 288, deg: 2, vel: 0.7 });
+
+  r = apply(fresh(), [{ op: "setNote", pattern: 0, track: "chords", step: 0, deg: 0, q: "maj" }]);
+  r = apply(r.song, [{ op: "setNoteExtra", pattern: 0, track: "chords", step: 0, q: "m7", acc: -1 }]);
+  assert.equal(r.error, undefined);
+  note = plain(r.song.patterns[0].notes.chords.find((n) => n.t === 0));
+  assert.equal(note.q, "m7");
+  assert.equal(note.acc, -1);
+  assert.equal(note.deg, 0);
+  assert.equal(note.vel, S.NOTE_VEL);
+
+  r = apply(fresh(), [{ op: "setNoteExtra", pattern: 0, track: "bass", step: 0, orn: "slide" }]);
+  assert.equal(r.error, undefined);
+  assert.equal(r.song.patterns[0].notes.bass.find((n) => n.t === 0).orn, "slide");
+});
+
+test("apply: setNoteExtra refuses a missing note, a rest, a bad value or a field on the wrong track", () => {
+  const song = apply(fresh(), [{ op: "setNote", pattern: 0, track: "melody", step: 4, deg: 2, vel: 0.7, acc: 1 }]).song;
+  const at = (extra) => apply(song, [{ op: "setNoteExtra", pattern: 0, track: "melody", step: 4, ...extra }]);
+  assert.equal(at({ acc: 1 }).error, undefined);
+  assert.equal(at({ acc: 0 }).error, "value");
+  assert.equal(at({ acc: "1" }).error, "value");
+  assert.equal(at({ gate: 0.05 }).error, "value");
+  assert.equal(at({ gate: 1.1 }).error, "value");
+  assert.equal(at({ orn: "trill" }).error, "value");
+  assert.equal(at({ q: "m7" }).error, "value", "q is a chord field");
+  assert.equal(at({}).error, "value", "give at least one field");
+  assert.equal(apply(song, [{ op: "setNoteExtra", pattern: 0, track: "melody", step: 8, acc: 1 }]).error, "value", "no note there");
+  assert.equal(apply(song, [{ op: "setNoteExtra", pattern: 0, track: "bass", step: 0, orn: "vib" }]).error, "value", "the bass only slides");
+  assert.equal(apply(song, [{ op: "setNoteExtra", pattern: 0, track: "chords", step: 0, gate: 0.5 }]).error, "value");
+  assert.equal(apply(song, [{ op: "setNoteExtra", pattern: 0, track: "chords", step: 0, orn: "slide" }]).error, "value");
+
+  const rest = apply(fresh(), [{ op: "setRest", pattern: 0, track: "melody", step: 4 }]).song;
+  assert.equal(apply(rest, [{ op: "setNoteExtra", pattern: 0, track: "melody", step: 4, acc: 1 }]).error, "value");
+  assert.equal(apply(rest, [{ op: "setNoteExtra", pattern: 0, track: "melody", step: 4, acc: null }]).error, undefined, "removing nothing is a no-op");
+
+  // atomic: a later bad op drops the earlier good one
+  const r = apply(song, [
+    { op: "setNoteExtra", pattern: 0, track: "melody", step: 4, gate: 0.5 },
+    { op: "setNoteExtra", pattern: 0, track: "melody", step: 8, acc: 1 },
+  ]);
+  assert.equal(r.error, "value");
+  assert.equal(r.at, 1);
+  assert.equal(r.song, undefined);
+});

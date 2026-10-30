@@ -85,11 +85,36 @@ async function studioPage(t, withChip) {
       return stats((await oc.startRendering()).getChannelData(0));
     };
     /* one note of one voice, at 0.02 s, into a gain of 1 */
-    window.renderNote = async (voice, midi, dur, vel = 1, seconds = 1) => {
+    window.renderNote = async (voice, midi, dur, vel = 1, seconds = 1, opts) => {
       const oc = new OfflineAudioContext(1, Math.ceil(SR * seconds), SR);
       const out = oc.createGain(); out.gain.value = 1; out.connect(oc.destination);
       const synth = LopdaStudioSynth.create(oc, out);
-      synth.note(voice, midi, 0.02, dur, vel);
+      synth.note(voice, midi, 0.02, dur, vel, opts);
+      return stats((await oc.startRendering()).getChannelData(0));
+    };
+    /* the song's events through the same choices soundEvent makes (12.20.5): acc, gate, orn and a chord's q */
+    window.renderSongEvents = async (song, events, seconds = 1) => {
+      const oc = new OfflineAudioContext(1, Math.ceil(SR * seconds), SR);
+      const out = oc.createGain(); out.gain.value = 1; out.connect(oc.destination);
+      const synth = LopdaStudioSynth.create(oc, out);
+      for (const e of events) {
+        if (!e.vel) continue;
+        const at = e.at == null ? LopdaSong.ticksToSec(e.tick, song.bpm) : e.at;
+        if (e.track === "drums") synth.hit(LopdaSong.kitOf(song), e.key, at, e.vel);
+        else if (e.track === "chords") {
+          const notes = LopdaSong.chordNotes(song, e.deg, e.q, e.acc) || [];
+          const voice = LopdaSong.voiceOf(song, "chords");
+          const dur = LopdaSong.ticksToSec(e.len, song.bpm) * (e.gate || 1);
+          const strum = (LopdaStudioSynth.STRUM && LopdaStudioSynth.STRUM[voice]) || 0;
+          notes.slice().sort((a, b) => a - b).forEach((midi, i) => synth.note(voice, midi, at + i * strum, dur, e.vel));
+        } else {
+          const midi = LopdaSong.noteMidi(song, e.track, e.deg, e.acc);
+          if (midi == null) continue;
+          const dur = Math.max(0.05, LopdaSong.ticksToSec(e.len, song.bpm) * (e.gate || 1));
+          const opts = e.orn === "slide" ? { slide: true } : e.orn === "vib" ? { vib: true } : undefined;
+          synth.note(LopdaSong.voiceOf(song, e.track), midi, at, dur, e.vel, opts);
+        }
+      }
       return stats((await oc.startRendering()).getChannelData(0));
     };
     /* drums and notes together; an event is {kit, drum} or {voice, midi, at, dur}, both with at and vel */
@@ -3763,5 +3788,77 @@ test("studio: editing a demo copy turns it into a normal tape in My tapes", { sk
   await openFolders(p);
   assert.doesNotMatch(await p.textContent("#studio-sheet .st-proj-list"), /示例副本/, "the copies folder is gone");
   assert.match(await p.textContent("#studio-sheet .st-proj-list"), /我的磁带\s*2/);
+  assert.deepEqual(errors, []);
+});
+
+/* ---------- 12.20.5: the twelve semitones, gate and the ornaments, offline ---------- */
+test("studio synth: a melody note with acc 1 sounds a semitone higher", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await studioPage(t, false);
+  const r = await p.evaluate(async () => {
+    const SR = 22050;
+    const song = LopdaSong.newSong();
+    song.patterns[0].notes.drums = [];
+    song.patterns[0].notes.bass = [];
+    song.patterns[0].notes.chords = [];
+    song.patterns[0].notes.melody = [{ t: 0, len: 96, deg: 0, vel: 0.8 }];
+    const ev = () => LopdaSong.events(song, 0, 0, 16 * LopdaSong.STEP);
+    const low = await renderSongEvents(song, ev(), 1);
+    song.patterns[0].notes.melody[0].acc = 1;
+    const high = await renderSongEvents(song, ev(), 1);
+    const f0 = 440 * Math.pow(2, (LopdaSong.noteMidi(song, "melody", 0, 0) - 69) / 12);
+    const a = pitchAt(low.data, SR, f0, 0.15, 0.5);
+    const b = pitchAt(high.data, SR, f0 * Math.pow(2, 1 / 12), 0.15, 0.5);
+    return { peakLow: low.peak, peakHigh: high.peak, freqLow: a.freq, freqHigh: b.freq, cents: 1200 * Math.log2(b.freq / a.freq) };
+  });
+  t.diagnostic(`acc 0 ${r.freqLow.toFixed(1)} Hz, acc 1 ${r.freqHigh.toFixed(1)} Hz, ${r.cents.toFixed(1)} cents apart`);
+  assert.ok(r.peakLow > 0.05 && r.peakHigh > 0.05, "both notes sound");
+  assert.ok(Math.abs(r.cents - 100) < 15, `acc 1 is a semitone higher (${r.cents.toFixed(1)} cents)`);
+  assert.deepEqual(errors, []);
+});
+
+test("studio synth: gate 0.25 falls silent after a quarter of the length plus the release", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await studioPage(t, false);
+  const r = await p.evaluate(async () => {
+    const song = LopdaSong.newSong();
+    song.patterns[0].notes.drums = [];
+    song.patterns[0].notes.bass = [];
+    song.patterns[0].notes.chords = [];
+    song.patterns[0].notes.melody = [{ t: 0, len: 96, deg: 0, vel: 0.8, gate: 0.25 }];
+    const ev = () => LopdaSong.events(song, 0, 0, 16 * LopdaSong.STEP);
+    const short = await renderSongEvents(song, ev(), 1.2);
+    song.patterns[0].notes.melody[0].gate = 1;
+    const long = await renderSongEvents(song, ev(), 1.2);
+    return {
+      shortLast: short.last, longLast: long.last,
+      shortTail: peakBetween(short.data, 0.36, 1.15), longMid: peakBetween(long.data, 0.4, 0.6),
+    };
+  });
+  t.diagnostic(`gate 0.25 last ${r.shortLast.toFixed(3)} s, gate 1 last ${r.longLast.toFixed(3)} s`);
+  assert.ok(r.shortLast < 0.4, `the short note ends after its quarter plus release (${r.shortLast})`);
+  assert.ok(r.shortTail < 1e-4, `nothing sounds after it (${r.shortTail})`);
+  assert.ok(r.longLast > 0.7, "the full-length note still rings");
+  assert.ok(r.longMid > 0.01, "the full-length note sounds at 0.5 s");
+  assert.deepEqual(errors, []);
+});
+
+test("studio synth: every bass and melody voice honours slide and vib and renders the same twice", { skip, timeout: 120000 }, async (t) => {
+  const { p, errors } = await studioPage(t, false);
+  const r = await p.evaluate(async () => {
+    const voices = { bass: 45, pick: 45, sub: 45, flute: 69, square: 69, pluck: 69, reed: 69, bowed: 69 };
+    const out = [];
+    for (const voice of Object.keys(voices)) {
+      for (const kind of ["slide", "vib"]) {
+        const opts = kind === "slide" ? { slide: true } : { vib: true };
+        const a = await renderNote(voice, voices[voice], 0.4, 1, 1, opts);
+        const b = await renderNote(voice, voices[voice], 0.4, 1, 1, opts);
+        out.push({ voice, kind, peak: a.peak, diff: maxDiff(a.data, b.data) });
+      }
+    }
+    return out;
+  });
+  for (const n of r) {
+    assert.ok(n.peak > 0.01, `${n.voice} ${n.kind} sounds (peak ${n.peak})`);
+    assert.ok(n.diff < 1e-4, `${n.voice} ${n.kind} renders the same twice (max difference ${n.diff})`);
+  }
   assert.deepEqual(errors, []);
 });

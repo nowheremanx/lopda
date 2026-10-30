@@ -87,6 +87,30 @@ function midiFreq(midi){ return 440*Math.pow(2,(midi-69)/12); }
 /* a note may be handed a time the 25 ms scheduler has already passed (the main thread stalled): start now, as hit does */
 function when(ctx,at){ return (typeof at==="number" && isFinite(at) && at>ctx.currentTime) ? at : ctx.currentTime; }
 
+/* 12.20.5: the two ornaments a note may carry. A slide starts two semitones below and reaches the pitch in 80 ms; a
+   vibrato is 6 Hz at 25 cents from the very start. `param` is an oscillator's frequency or a buffer source's
+   playbackRate; `base` is the value 25 cents is measured against. No ornament adds no node, so an old tape's render is
+   unchanged. */
+function slideParam(param,base,t){
+  param.setValueAtTime(base*Math.pow(2,-2/12),t);
+  param.exponentialRampToValueAtTime(base,t+0.08);
+}
+
+/* one 6 Hz LFO with a gain per parameter, so an octave-down partial gets its own 25 cents. Returns the nodes to clean
+   up; the caller adds them to its cleanup list. */
+function vibParams(ctx,t,end,list){
+  var o=ctx.createOscillator(), out=[o], i, g;
+  o.type="sine"; o.frequency.value=6;
+  for(i=0;i<list.length;i++){
+    g=ctx.createGain();
+    g.gain.value=list[i].base*(Math.pow(2,25/1200)-1);
+    o.connect(g); g.connect(list[i].param);
+    out.push(g);
+  }
+  o.start(t); o.stop(end);
+  return out;
+}
+
 /* a filtered noise voice; `end` is when it stops, release the envelope after the attack */
 function noiseVoice(ctx,out,buf,type,freq,q,peak,attack,release,end,at){
   var s=ctx.createBufferSource(), f=ctx.createBiquadFilter(), g=ctx.createGain();
@@ -259,15 +283,16 @@ var VOICES={};
    measured peak near 0.30 at velocity 1. */
 VOICES.bass=function(ctx,out){
   return {
-    note:function(midi,at,dur,vel){
-      var f=midiFreq(midi), v=velOf(vel), peak=0.255*v;
+    note:function(midi,at,dur,vel,opts){
+      var f=midiFreq(midi), v=velOf(vel), peak=0.255*v, slide=opts&&opts.slide, vib=opts&&opts.vib;
       var t=when(ctx,at), a=Math.min(0.008,dur), attackEnd=t+a, holdEnd=Math.max(t+dur,attackEnd);
       var tri=ctx.createOscillator(), triGain=ctx.createGain(), sine=ctx.createOscillator(), sineGain=ctx.createGain();
-      var filter=ctx.createBiquadFilter(), g=ctx.createGain();
+      var filter=ctx.createBiquadFilter(), g=ctx.createGain(), nodes;
       tri.type="triangle"; tri.frequency.value=f;
       triGain.gain.value=1;
       sine.type="sine"; sine.frequency.value=f/2;
       sineGain.gain.value=0.25;
+      if(slide){ slideParam(tri.frequency,f,t); slideParam(sine.frequency,f/2,t); }
       filter.type="lowpass"; filter.frequency.value=700; filter.Q.value=0.7;
       g.gain.setValueAtTime(SILENCE,t);
       g.gain.linearRampToValueAtTime(peak,attackEnd);
@@ -277,7 +302,9 @@ VOICES.bass=function(ctx,out){
       triGain.connect(filter); sineGain.connect(filter); filter.connect(g); g.connect(out);
       tri.start(t); tri.stop(holdEnd+0.09);
       sine.start(t); sine.stop(holdEnd+0.09);
-      cleanup(tri,[tri,triGain,sine,sineGain,filter,g]);
+      nodes=[tri,triGain,sine,sineGain,filter,g];
+      if(vib) nodes=nodes.concat(vibParams(ctx,t,holdEnd+0.09,[{param:tri.frequency,base:f},{param:sine.frequency,base:f/2}]));
+      cleanup(tri,nodes);
     }
   };
 };
@@ -288,11 +315,12 @@ VOICES.bass=function(ctx,out){
    at velocity 1, beside the triangle bass. */
 VOICES.pick=function(ctx,out){
   return {
-    note:function(midi,at,dur,vel){
-      var f=midiFreq(midi), v=velOf(vel), peak=0.30*v;
+    note:function(midi,at,dur,vel,opts){
+      var f=midiFreq(midi), v=velOf(vel), peak=0.30*v, slide=opts&&opts.slide, vib=opts&&opts.vib;
       var t=when(ctx,at), a=Math.min(0.002,dur), attackEnd=t+a, holdEnd=Math.max(t+dur,attackEnd);
-      var o=ctx.createOscillator(), filter=ctx.createBiquadFilter(), g=ctx.createGain();
+      var o=ctx.createOscillator(), filter=ctx.createBiquadFilter(), g=ctx.createGain(), nodes;
       o.type="sawtooth"; o.frequency.value=f;
+      if(slide) slideParam(o.frequency,f,t);
       filter.type="lowpass"; filter.Q.value=0.9;
       filter.frequency.setValueAtTime(900,t);
       filter.frequency.exponentialRampToValueAtTime(300,t+0.08);
@@ -307,7 +335,9 @@ VOICES.pick=function(ctx,out){
       g.gain.exponentialRampToValueAtTime(SILENCE,holdEnd+0.08);
       o.connect(filter); filter.connect(g); g.connect(out);
       o.start(t); o.stop(holdEnd+0.09);
-      cleanup(o,[o,filter,g]);
+      nodes=[o,filter,g];
+      if(vib) nodes=nodes.concat(vibParams(ctx,t,holdEnd+0.09,[{param:o.frequency,base:f}]));
+      cleanup(o,nodes);
     }
   };
 };
@@ -328,13 +358,17 @@ function subCurve(){
    its curve is near a wire at this level, so the measured peak is about 0.30 at velocity 1. */
 VOICES.sub=function(ctx,out){
   return {
-    note:function(midi,at,dur,vel){
-      var f=midiFreq(midi), v=velOf(vel), peak=0.15*v;
+    note:function(midi,at,dur,vel,opts){
+      var f=midiFreq(midi), v=velOf(vel), peak=0.15*v, slide=opts&&opts.slide, vib=opts&&opts.vib;
       var t=when(ctx,at), a=Math.min(0.005,dur), attackEnd=t+a, releaseStart=Math.max(t+dur,attackEnd);
-      var o=ctx.createOscillator(), g=ctx.createGain(), shaper=ctx.createWaveShaper();
+      var o=ctx.createOscillator(), g=ctx.createGain(), shaper=ctx.createWaveShaper(), nodes;
       o.type="sine";
-      o.frequency.setValueAtTime(f*Math.pow(2,7/12),t);
-      o.frequency.exponentialRampToValueAtTime(f,t+0.06);
+      /* the 808's own seven-semitone drop gives way to an explicit slide */
+      if(slide) slideParam(o.frequency,f,t);
+      else {
+        o.frequency.setValueAtTime(f*Math.pow(2,7/12),t);
+        o.frequency.exponentialRampToValueAtTime(f,t+0.06);
+      }
       shaper.curve=subCurve(); shaper.oversample="none";
       g.gain.setValueAtTime(SILENCE,t);
       g.gain.linearRampToValueAtTime(peak,attackEnd);
@@ -342,7 +376,9 @@ VOICES.sub=function(ctx,out){
       g.gain.exponentialRampToValueAtTime(SILENCE,releaseStart+0.3);
       o.connect(g); g.connect(shaper); shaper.connect(out);
       o.start(t); o.stop(releaseStart+0.31);
-      cleanup(o,[o,g,shaper]);
+      nodes=[o,g,shaper];
+      if(vib) nodes=nodes.concat(vibParams(ctx,t,releaseStart+0.31,[{param:o.frequency,base:f}]));
+      cleanup(o,nodes);
     }
   };
 };
@@ -536,14 +572,15 @@ VOICES.strings=function(ctx,out){
 VOICES.flute=function(ctx,out){
   var noise=noiseFor(ctx);
   return {
-    note:function(midi,at,dur,vel){
-      var f=midiFreq(midi), v=velOf(vel), peak=0.18*v;
+    note:function(midi,at,dur,vel,opts){
+      var f=midiFreq(midi), v=velOf(vel), peak=0.18*v, slide=opts&&opts.slide;
       var t=when(ctx,at), a=Math.min(0.04,dur), attackEnd=t+a, releaseStart=t+dur, releaseEnd=releaseStart+0.12;
       var sine=ctx.createOscillator(), sineGain=ctx.createGain(), tri=ctx.createOscillator(), triGain=ctx.createGain();
-      var vib=ctx.createOscillator(), vibGain=ctx.createGain();
+      var vib=ctx.createOscillator(), vibGain=ctx.createGain(), nodes;
       var filter=ctx.createBiquadFilter(), g=ctx.createGain();
       sine.type="sine"; sine.frequency.value=f; sineGain.gain.value=1;
       tri.type="triangle"; tri.frequency.value=f; triGain.gain.value=0.15;
+      if(slide){ slideParam(sine.frequency,f,t); slideParam(tri.frequency,f,t); }
       /* 8 cents is f * (2^(8/1200) - 1) Hz either side; flat under 150 ms, then in over half a second */
       vib.type="sine"; vib.frequency.value=5;
       vibGain.gain.setValueAtTime(0,t);
@@ -565,7 +602,9 @@ VOICES.flute=function(ctx,out){
       /* the breath: gone by 150 ms, or with a note shorter than that, and silent before its source stops */
       var breathEnd=Math.min(t+0.15,releaseStart+0.02);
       noiseVoice(ctx,out,noise,"bandpass",2000,0.7,0.018*v,0.004,breathEnd-t-0.004,breathEnd-t+0.01,t);
-      cleanup(sine,[sine,sineGain,tri,triGain,vib,vibGain,filter,g]);
+      nodes=[sine,sineGain,tri,triGain,vib,vibGain,filter,g];
+      if(opts&&opts.vib) nodes=nodes.concat(vibParams(ctx,t,releaseEnd+0.01,[{param:sine.frequency,base:f},{param:tri.frequency,base:f}]));
+      cleanup(sine,nodes);
     }
   };
 };
@@ -595,12 +634,13 @@ function pulseWaveFor(ctx){
    measures near 0.19 at velocity 1. */
 VOICES.square=function(ctx,out){
   return {
-    note:function(midi,at,dur,vel){
-      var f=midiFreq(midi), v=velOf(vel), peak=0.22*v;
+    note:function(midi,at,dur,vel,opts){
+      var f=midiFreq(midi), v=velOf(vel), peak=0.22*v, slide=opts&&opts.slide, moreVib=opts&&opts.vib;
       var t=when(ctx,at), a=Math.min(0.002,dur), attackEnd=t+a, releaseStart=Math.max(t+dur,attackEnd);
-      var o=ctx.createOscillator(), filter=ctx.createBiquadFilter(), g=ctx.createGain();
+      var o=ctx.createOscillator(), filter=ctx.createBiquadFilter(), g=ctx.createGain(), nodes;
       var vib=ctx.createOscillator(), vibGain=ctx.createGain();
       o.setPeriodicWave(pulseWaveFor(ctx)); o.frequency.value=f;
+      if(slide) slideParam(o.frequency,f,t);
       filter.type="lowpass"; filter.frequency.value=4000; filter.Q.value=0.5;
       vib.type="sine"; vib.frequency.value=5.5;
       vibGain.gain.setValueAtTime(0,t);
@@ -616,7 +656,9 @@ VOICES.square=function(ctx,out){
       o.connect(filter); filter.connect(g); g.connect(out);
       o.start(t); o.stop(releaseStart+0.07);
       vib.start(t); vib.stop(releaseStart+0.07);
-      cleanup(o,[o,filter,vib,vibGain,g]);
+      nodes=[o,filter,vib,vibGain,g];
+      if(moreVib) nodes=nodes.concat(vibParams(ctx,t,releaseStart+0.07,[{param:o.frequency,base:f}]));
+      cleanup(o,nodes);
     }
   };
 };
@@ -663,12 +705,14 @@ function pluckFor(ctx,midi){
    runs out first the string simply ends with its own decay, which is quieter than the old 1.2 s fade. */
 VOICES.pluck=function(ctx,out){
   return {
-    note:function(midi,at,dur,vel){
-      var v=velOf(vel), t=when(ctx,at), b=pluckFor(ctx,midi);
+    note:function(midi,at,dur,vel,opts){
+      var v=velOf(vel), t=when(ctx,at), b=pluckFor(ctx,midi), nodes;
+      var slide=opts&&opts.slide, vib=opts&&opts.vib;
       var sr=ctx.sampleRate, f=midiFreq(midi), n=Math.max(2,Math.floor(sr/f));
       var rate=(n+0.5)*f/sr, playDur=b.duration/rate, noteEnd=t+dur, playEnd=t+playDur;
       var end=Math.min(noteEnd+0.06,playEnd), g=ctx.createGain(), s=ctx.createBufferSource();
       s.buffer=b; s.playbackRate.value=rate;
+      if(slide) slideParam(s.playbackRate,rate,t);
       g.gain.setValueAtTime(0.265*v,t);
       /* only at+dur gets a fade; a buffer that ends first is the string's own decay, not a cut */
       if(playEnd>noteEnd){
@@ -677,7 +721,9 @@ VOICES.pluck=function(ctx,out){
       }
       s.connect(g); g.connect(out);
       s.start(t); s.stop(end);
-      cleanup(s,[s,g]);
+      nodes=[s,g];
+      if(vib) nodes=nodes.concat(vibParams(ctx,t,end,[{param:s.playbackRate,base:rate}]));
+      cleanup(s,nodes);
     }
   };
 };
@@ -688,11 +734,12 @@ VOICES.pluck=function(ctx,out){
 VOICES.reed=function(ctx,out){
   var noise=noiseFor(ctx);
   return {
-    note:function(midi,at,dur,vel){
-      var f=midiFreq(midi), v=velOf(vel), peak=0.42*v;
+    note:function(midi,at,dur,vel,opts){
+      var f=midiFreq(midi), v=velOf(vel), peak=0.42*v, slide=opts&&opts.slide, vib=opts&&opts.vib;
       var t=when(ctx,at), a=Math.min(0.03,dur), attackEnd=t+a, releaseStart=Math.max(t+dur,attackEnd);
-      var o=ctx.createOscillator(), filter=ctx.createBiquadFilter(), g=ctx.createGain();
+      var o=ctx.createOscillator(), filter=ctx.createBiquadFilter(), g=ctx.createGain(), nodes;
       o.type="square"; o.frequency.value=f;
+      if(slide) slideParam(o.frequency,f,t);
       filter.type="bandpass"; filter.frequency.value=1400; filter.Q.value=2;
       g.gain.setValueAtTime(SILENCE,t);
       g.gain.linearRampToValueAtTime(peak,attackEnd);
@@ -703,7 +750,9 @@ VOICES.reed=function(ctx,out){
       /* the breath is gone by 180 ms, or with a shorter note, and silent before its source stops */
       var breathEnd=Math.min(t+0.18,releaseStart+0.02);
       noiseVoice(ctx,out,noise,"bandpass",1400,0.8,0.05*v,0.01,breathEnd-t-0.01,breathEnd-t+0.01,t);
-      cleanup(o,[o,filter,g]);
+      nodes=[o,filter,g];
+      if(vib) nodes=nodes.concat(vibParams(ctx,t,releaseStart+0.09,[{param:o.frequency,base:f}]));
+      cleanup(o,nodes);
     }
   };
 };
@@ -713,14 +762,17 @@ VOICES.reed=function(ctx,out){
    0.22, so a note measures near 0.19-0.24 at velocity 1. */
 VOICES.bowed=function(ctx,out){
   return {
-    note:function(midi,at,dur,vel){
-      var f=midiFreq(midi), v=velOf(vel), peak=0.22*v;
+    note:function(midi,at,dur,vel,opts){
+      var f=midiFreq(midi), v=velOf(vel), peak=0.22*v, slide=opts&&opts.slide, moreVib=opts&&opts.vib;
       var t=when(ctx,at), a=Math.min(0.06,dur), attackEnd=t+a, releaseStart=Math.max(t+dur,attackEnd);
-      var o=ctx.createOscillator(), filter=ctx.createBiquadFilter(), g=ctx.createGain();
+      var o=ctx.createOscillator(), filter=ctx.createBiquadFilter(), g=ctx.createGain(), nodes;
       var vib=ctx.createOscillator(), vibGain=ctx.createGain();
       o.type="sawtooth";
-      o.frequency.setValueAtTime(f*Math.pow(2,-60/1200),t);
-      o.frequency.exponentialRampToValueAtTime(f,t+0.09);
+      if(slide) slideParam(o.frequency,f,t);
+      else {
+        o.frequency.setValueAtTime(f*Math.pow(2,-60/1200),t);
+        o.frequency.exponentialRampToValueAtTime(f,t+0.09);
+      }
       filter.type="lowpass"; filter.frequency.value=2200; filter.Q.value=0.5;
       vib.type="sine"; vib.frequency.value=6;
       vibGain.gain.setValueAtTime(0,t);
@@ -736,7 +788,9 @@ VOICES.bowed=function(ctx,out){
       o.connect(filter); filter.connect(g); g.connect(out);
       o.start(t); o.stop(releaseStart+0.13);
       vib.start(t); vib.stop(releaseStart+0.13);
-      cleanup(o,[o,filter,vib,vibGain,g]);
+      nodes=[o,filter,vib,vibGain,g];
+      if(moreVib) nodes=nodes.concat(vibParams(ctx,t,releaseStart+0.13,[{param:o.frequency,base:f}]));
+      cleanup(o,nodes);
     }
   };
 };
@@ -788,7 +842,7 @@ function create(ctx,out){
   /* unknown voice, a pitch outside MIDI, a length that is not finite and positive or a velocity that cannot sound:
      nothing, not an error. A finite but absurd length would schedule ramps for years (and break the editor's math),
      so a note is capped at a minute; midi 1e6 must not reach an oscillator frequency or an FM depth ramp. */
-  function note(voice,midi,at,dur,vel){
+  function note(voice,midi,at,dur,vel,opts){
     if(disposed) return;
     if(!Object.prototype.hasOwnProperty.call(VOICES,voice)) return;
     if(typeof midi!=="number" || !isFinite(midi) || midi<0 || midi>127) return;
@@ -800,7 +854,7 @@ function create(ctx,out){
     if(t<ctx.currentTime) t=ctx.currentTime;
     var n=voices[voice];
     if(!n) n=voices[voice]=VOICES[voice](ctx,master);
-    n.note(midi,t,dur,v);
+    n.note(midi,t,dur,v,opts);
   }
 
   function dispose(){
