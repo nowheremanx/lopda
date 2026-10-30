@@ -39,7 +39,7 @@ test("constants: format, tracks, scales, demo beat", () => {
   assert.deepEqual([S.SWING_MIN, S.SWING_MAX, S.SWING_DEFAULT], [0.5, 0.75, 0.55]);
   assert.equal(S.TAPE_MAX, 4);
   assert.equal(S.PATTERNS_MAX, 16);
-  assert.equal(S.SONG_MAX, 64);
+  assert.equal(S.SONG_MAX, 96);
   assert.equal(S.NAME_MAX, 40);
   assert.deepEqual(plain(S.DEMO), {
     kick: [1, 8, 11],
@@ -299,7 +299,7 @@ test("validate: notes", () => {
 test("validate: song, clips", () => {
   assert.equal(broken((s) => { s.song = "0"; }).error, "song");
   assert.equal(broken((s) => { s.song = []; }).error, "song");
-  assert.equal(broken((s) => { s.song = Array(65).fill(0); }).error, "song");
+  assert.equal(broken((s) => { s.song = Array(97).fill(0); }).error, "song");
   assert.equal(broken((s) => { s.song = [1]; }).error, "song");
   assert.equal(broken((s) => { s.song = [-1]; }).error, "song");
   assert.equal(broken((s) => { s.song = [0.5]; }).error, "song");
@@ -307,10 +307,14 @@ test("validate: song, clips", () => {
   assert.equal(broken((s) => { s.clips = {}; }).error, "clips");
   assert.equal(broken((s) => { delete s.clips; }).error, "clips");
 
-  // 64 slots, and a slot may name the last pattern
+  // the 64-slot example and the 96-slot cap; a slot may name the last pattern
   assert.equal(broken((s) => {
     s.patterns.push({ len: 16, notes: {} });
     s.song = Array(64).fill(1);
+  }).error, undefined);
+  assert.equal(broken((s) => {
+    s.patterns.push({ len: 16, notes: {} });
+    s.song = Array(96).fill(1);
   }).error, undefined);
 });
 
@@ -873,7 +877,7 @@ test("song chain: setSlot, addSlot and dropSlot copy, ensure the pattern, and ke
   assert.deepEqual(plain(S.dropSlot(added).song), [0]);
   assert.deepEqual(plain(S.dropSlot(song)), plain(song), "never below one slot");
 
-  // 64 slots is the cap
+  // the 96 slots cap
   const full = fresh();
   full.song = Array(S.SONG_MAX).fill(0);
   assert.deepEqual(plain(S.addSlot(full, 1)), plain(full));
@@ -886,7 +890,7 @@ test("song chain: setSlot, addSlot and dropSlot copy, ensure the pattern, and ke
   for (const p of [-1, 16, 1.5, "1"]) assert.deepEqual(plain(S.addSlot(song, p)), before, String(p));
 });
 
-test("insertSlot and removeSlot: index 0, the end, the 64 cap, one slot left, bad input", () => {
+test("insertSlot and removeSlot: index 0, the end, the 96 cap, one slot left, bad input", () => {
   const song = fresh(); // [0]
   const before = plain(song);
 
@@ -903,7 +907,7 @@ test("insertSlot and removeSlot: index 0, the end, the 64 cap, one slot left, ba
   assert.equal(end.patterns.length, 2);
   assert.equal(S.validate(end).error, undefined);
 
-  // 64 is the cap: a refused insert changes neither slots nor patterns
+  // 96 is the cap: a refused insert changes neither slots nor patterns
   const full = fresh();
   full.song = Array(S.SONG_MAX).fill(0);
   assert.deepEqual(plain(S.insertSlot(full, 0, 1)), plain(full));
@@ -1285,4 +1289,173 @@ test("newSong: the demo bass and chords validate, keep their velocities, and do 
   notes.bass[0].t = 99;
   assert.deepEqual(plain(S.DEMO_BASS[0]), [1, 0], "the pair constant is a template, not the stored note");
   assert.deepEqual(plain(S.DEMO_CHORDS[1]), [9, 3]);
+});
+
+/* ---------- 12.15/12.16: the arrangement helpers, the pop example and the AI draft ---------- */
+
+test("setDrum: adds, moves the velocity, removes, and is sorted with the other drums", () => {
+  let s = S.setDrum(fresh(), 0, "snare", 9, true, 0.2);
+  let hit = s.patterns[0].notes.drums.find((n) => n.key === "snare" && n.t === 9 * S.STEP);
+  assert.ok(hit);
+  assert.equal(hit.vel, 0.2);
+  assert.equal(hit.len, S.STEP);
+  s = S.setDrum(s, 0, "snare", 9, true, 0.95);
+  hit = s.patterns[0].notes.drums.find((n) => n.key === "snare" && n.t === 9 * S.STEP);
+  assert.equal(hit.vel, 0.95);
+  s = S.setDrum(s, 0, "snare", 9, false);
+  assert.equal(s.patterns[0].notes.drums.some((n) => n.key === "snare" && n.t === 9 * S.STEP), false);
+  // a missing pattern is created, a bad drum/step/velocity is refused
+  const made = S.setDrum(fresh(), 4, "hat", 0, true, 1);
+  assert.equal(made.patterns[4].notes.drums.length, 1);
+  assert.equal(S.setDrum(fresh(), 0, "cowbell", 0, true).patterns[0].notes.drums.length, 13);
+  assert.equal(S.setDrum(fresh(), 0, "kick", 16, true).patterns[0].notes.drums.length, 13);
+  assert.equal(S.setDrum(fresh(), 0, "kick", 0, true, 2).patterns[0].notes.drums.length, 13);
+});
+
+test("clearTrack and setTrackMix: the arrangement and mixer helpers", () => {
+  let s = S.clearTrack(fresh(), 0, "bass");
+  assert.deepEqual(plain(s.patterns[0].notes.bass), []);
+  assert.equal(s.patterns[0].notes.drums.length, 13, "the other tracks stay");
+  assert.deepEqual(plain(S.clearTrack(fresh(), 7, "melody").patterns[7].notes),
+    { drums: [], bass: [], chords: [], melody: [] });
+  assert.equal(S.clearTrack(fresh(), 0, "voice").patterns[0].notes.voice, undefined, "voice is not editable yet");
+  s = S.setTrackMix(fresh(), "drums", { vol: 0.56, mute: true });
+  assert.equal(s.tracks[0].vol, 0.6);
+  assert.equal(s.tracks[0].mute, true);
+  assert.equal(S.setTrackMix(fresh(), "bass", { vol: 1.1 }).tracks[1].vol, 1);
+  assert.equal(S.setTrackMix(fresh(), "nope", { vol: 0.5 }).tracks[0].vol, 1);
+});
+
+test("popSong: C major, 96 BPM, straight, a 64-bar I-V-vi-IV band sketch", () => {
+  const s = S.popSong(1234);
+  assert.equal(S.validate(s).error, undefined);
+  assert.equal(s.name, "白日流行");
+  assert.equal(s.bpm, 96);
+  assert.equal(s.key, 0);
+  assert.equal(s.scale, "major");
+  assert.equal(s.swing, 0.5);
+  assert.equal(s.tape, 1);
+  assert.equal(s.kit, "soft");
+  assert.equal(s.patterns.length, 10);
+  assert.equal(s.song.length, 64);
+  assert.deepEqual(plain(s.song.slice(0, 8)), [8, 8, 8, 8, 0, 1, 2, 3]);
+  // the four chord roots of the verse and chorus, one per bar
+  for (const p of [0, 1, 2, 3, 4, 5, 6, 7]) {
+    const c = s.patterns[p].notes.chords;
+    assert.equal(c.length, 1, `pattern ${p} has one chord`);
+    assert.equal(c[0].t, 0);
+    assert.equal(c[0].len, S.STEPS * S.STEP, "the chord fills the bar");
+    assert.ok([0, 3, 4, 5].includes(c[0].deg));
+  }
+  // every note track is tied and every drum hit lands on a 16th
+  for (const p of s.patterns) {
+    for (const track of ["bass", "chords", "melody"]) {
+      const list = p.notes[track];
+      for (let i = 0; i < list.length; i++) {
+        assert.equal(list[i].t % S.STEP, 0);
+        if (i + 1 < list.length) assert.equal(list[i].len, list[i + 1].t - list[i].t);
+      }
+    }
+    for (const h of p.notes.drums) assert.equal(h.t % S.STEP, 0);
+  }
+  // the intro has no chords, the outro has no drums
+  assert.deepEqual(plain(s.patterns[8].notes.chords), []);
+  assert.deepEqual(plain(s.patterns[9].notes.drums), []);
+});
+
+test("fromDraft: steps and velocities become a valid tied song, with tracks and a default chain", () => {
+  const draft = {
+    name: "Draft", bpm: 100, key: 0, scale: "major", swing: 0.5, tape: 1, kit: "soft",
+    tracks: { drums: { vol: 0.8, mute: false }, bass: { vol: 0.6, mute: true } },
+    patterns: [
+      { drums: [[0, "kick", 1], [4, "snare", 0.8]], bass: [[0, 0, 0.8], [8, 2, 0.7]], chords: [[0, 0, 0.65]], melody: [[2, 4, 0.6]] },
+      { drums: [], bass: [[0, 5, 0.8]], chords: [[0, 5, 0.65]], melody: [] },
+    ],
+  };
+  const r = S.fromDraft(draft, 2000);
+  assert.equal(r.error, undefined);
+  assert.equal(S.validate(r.song).error, undefined);
+  assert.equal(r.song.name, "Draft");
+  assert.equal(r.song.bpm, 100);
+  assert.deepEqual(plain(r.song.song), [0, 1], "no chain gives one pass in order");
+  assert.equal(r.song.tracks[0].vol, 0.8);
+  assert.equal(r.song.tracks[1].mute, true);
+  assert.equal(r.song.updated, 2000);
+  assert.equal(r.song.patterns[0].notes.bass[0].len, 8 * S.STEP);
+  assert.equal(r.song.patterns[0].notes.melody[0].len, 14 * S.STEP);
+  // the empty drum list is an empty track, not a missing one
+  assert.deepEqual(plain(r.song.patterns[1].notes.drums), []);
+});
+
+test("fromDraft: a bad shape is refused instead of half-built", () => {
+  const base = () => ({ name: "x", bpm: 90, key: 0, scale: "major", swing: 0.5, tape: 1, kit: "soft",
+    patterns: [{ drums: [[0, "kick", 1]], bass: [[0, 0, 0.8]], chords: [[0, 0, 0.65]], melody: [] }] });
+  for (const mut of [
+    (d) => { d.patterns = []; },
+    (d) => { d.patterns = new Array(17).fill({}); },
+    (d) => { d.patterns[0].drums = [[0, "cowbell", 1]]; },
+    (d) => { d.patterns[0].drums = [[16, "kick", 1]]; },
+    (d) => { d.patterns[0].drums = [[0, "kick", 2]]; },
+    (d) => { d.patterns[0].bass = [[0, 0, -0.1]]; },
+    (d) => { d.patterns[0].chords = [[0, 6, 0.6]]; },
+    (d) => { d.song = [0, 1]; },
+    (d) => { d.tracks = { drums: { vol: 2 } }; },
+    (d) => { d.tracks = { drums: { mute: "yes" } }; },
+  ]) {
+    const d = base(); mut(d);
+    assert.ok(S.fromDraft(d).error, JSON.stringify(d));
+  }
+  assert.ok(S.fromDraft(null).error);
+  assert.ok(S.fromDraft({ patterns: [{ drums: "x" }] }).error);
+});
+
+/* ---------- 12.17: folders and the two public-domain tunes ---------- */
+
+test("newSong and validate: a tape has an optional folder, old tapes read as the default folder", () => {
+  const song = S.newSong(1);
+  assert.equal(song.folder, "");
+  assert.equal(S.validate(song).error, undefined);
+  const old = fresh();
+  delete old.folder;
+  const read = S.validate(old);
+  assert.equal(read.error, undefined);
+  assert.equal(read.song.folder, "");
+  assert.equal(broken((s) => { s.folder = 7; }).error, "folder");
+  assert.equal(broken((s) => { s.folder = "x".repeat(41); }).error, "folder");
+  assert.equal(broken((s) => { s.folder = "Ideas"; }).error, undefined);
+  assert.equal(broken((s) => { s.template = 7; }).error, "template");
+  assert.equal(broken((s) => { s.template = 0; }).error, "template");
+  assert.equal(broken((s) => { s.template = "saints"; }).error, undefined);
+});
+
+test("saintsSong and jasmineSong: two 64-bar, 16-pattern public-domain arrangements", () => {
+  for (const [make, name, bpm] of [[S.saintsSong, "When the Saints", 104], [S.jasmineSong, "茉莉花", 84]]) {
+    const s = make(1234);
+    assert.equal(S.validate(s).error, undefined);
+    assert.equal(s.name, name);
+    assert.equal(s.bpm, bpm);
+    assert.equal(s.key, 0);
+    assert.equal(s.scale, "major");
+    assert.equal(s.patterns.length, 16);
+    assert.equal(s.song.length, 64, "64 one-bar slots is a normal 2.5-3 minute song");
+    assert.deepEqual(plain(s.song.slice(0, 16)), [0,1,2,3,4,5,6,7,0,1,2,3,4,5,6,7]);
+    assert.deepEqual(plain(s.song.slice(16, 24)), [8,9,10,11,12,13,14,15], "the chorus is the second group of eight");
+    // both halves have a melody, chords and bass; the chorus melody is an octave up
+    assert.ok(s.patterns[0].notes.melody.length > 0);
+    assert.ok(s.patterns[0].notes.chords.length > 0);
+    assert.ok(s.patterns[0].notes.bass.length > 0);
+    assert.ok(s.patterns[8].notes.melody.length > 0);
+    assert.ok(s.patterns[8].notes.melody[0].deg >= s.patterns[0].notes.melody[0].deg, "the chorus is not lower");
+    // every note is tied and inside its bar
+    for (const p of s.patterns) {
+      for (const track of ["bass", "chords", "melody"]) {
+        const list = p.notes[track];
+        for (let i = 0; i < list.length; i++) {
+          assert.ok(list[i].t >= 0 && list[i].t < S.STEPS * S.STEP);
+          if (i + 1 < list.length) assert.equal(list[i].len, list[i + 1].t - list[i].t);
+        }
+      }
+      for (const h of p.notes.drums) assert.equal(h.t % S.STEP, 0);
+    }
+  }
 });

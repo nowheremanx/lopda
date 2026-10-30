@@ -458,6 +458,7 @@
         <div class="st-chord-keys" id="studio-chord-keys"></div>
       </div>
       <div class="st-song" id="studio-song" hidden>
+        <div class="st-song-info" id="studio-song-info"></div>
         <div class="st-chain" id="studio-chain"></div>
         <div class="st-song-btns">
           <button class="st-song-btn" id="studio-add" type="button" data-i18n="studio.song.add">+ 加一段</button>
@@ -471,6 +472,7 @@
         <div class="st-mix-rows" id="studio-mix-rows"></div>
       </div>
       <div class="dict-sheet st-sheet" id="studio-sheet" hidden></div>
+      <input type="file" id="studio-import-file" accept=".zip,application/zip" hidden>
     </section>
 
     <!-- CARTRIDGE PLAYER -->
@@ -755,6 +757,9 @@
 <script src="studio-song.js"></script>
 <script src="studio-synth.js"></script>
 <script src="studio-tape.js"></script>
+<script src="studio-edit.js"></script>
+<script src="studio-command.js"></script>
+<script src="studio-ai.js"></script>
 <script src="wav.js"></script>
 <script src="vendor/qrcode-generator/qrcode.js"></script>
 <script src="qr.js"></script>

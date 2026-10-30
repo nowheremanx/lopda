@@ -831,11 +831,14 @@ textarea::placeholder{color:var(--ink-2)}
 .st-chord-key.on small{color:var(--lcd)}
 /* the song screen: one row is a four-bar phrase; only the chain scrolls, and only when it outgrows its box */
 .st-song{flex:1;min-height:0;display:flex;flex-direction:column;gap:4px;padding:4px 6px 6px}
+.st-song-info{flex:none;font-family:var(--f-lcd);font-size:13px;line-height:1.2;color:var(--ink);padding:0 2px}
 .st-chain{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;touch-action:pan-y;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));grid-auto-rows:44px;gap:4px;align-content:start}
-.st-chain-cell{min-width:0;min-height:44px;display:flex;align-items:center;justify-content:center;padding:0;background:var(--lcd);color:var(--ink);border:2px solid var(--ink);font-family:var(--f-pix);font-size:20px;line-height:1;cursor:pointer}
+.st-chain-cell{position:relative;min-width:0;min-height:44px;display:flex;align-items:center;justify-content:center;padding:0;background:var(--lcd);color:var(--ink);border:2px solid var(--ink);font-family:var(--f-pix);font-size:20px;line-height:1;cursor:pointer}
 .st-chain-cell.sel{box-shadow:inset 0 0 0 4px var(--ink)}
 .st-chain-cell.playing{background:var(--ink);color:var(--lcd)}
 .st-chain-cell.playing.sel{box-shadow:inset 0 0 0 4px var(--lcd)}
+.st-chain-cell.same::after{content:"";position:absolute;right:5px;bottom:5px;width:5px;height:5px;background:var(--ink)}
+.st-chain-cell.same.playing::after{background:var(--lcd)}
 .st-song-btns{flex:none;display:flex;gap:4px}
 .st-song-btn{flex:1;min-width:0;min-height:44px;padding:2px 4px;background:var(--ink);color:var(--lcd);border:2px solid var(--ink);font-family:var(--f-lcd);font-size:13px;line-height:1.15;cursor:pointer}
 .st-song-btn:disabled{background:var(--lcd-3);color:var(--ink-2);border-color:var(--lcd-3);cursor:default}
@@ -912,3 +915,19 @@ textarea::placeholder{color:var(--ink-2)}
 .radio-field select{background-image:linear-gradient(45deg,transparent 50%,var(--ink) 50%),linear-gradient(135deg,var(--ink) 50%,transparent 50%);background-position:calc(100% - 15px) 16px,calc(100% - 10px) 16px;background-size:5px 5px,5px 5px;background-repeat:no-repeat;padding-right:28px}
 .radio-check{display:flex;align-items:center;gap:8px;min-height:44px;font-size:14px;color:var(--ink)}
 .radio-check input{width:22px;height:22px;accent-color:var(--ink)}
+/* the project library, versions, guide and assistant sheets (12.15, 12.16) */
+.st-name{width:100%;box-sizing:border-box;height:44px;padding:6px 8px;background:var(--lcd);color:var(--ink);border:2px solid var(--ink);font-family:var(--f-lcd);font-size:16px;line-height:1.2}
+.dict-sheet .st-menu{flex:1;min-height:0;overflow:auto}
+.dict-sheet .st-proj-list{flex:1;min-height:0;overflow:auto}
+.dict-sheet .st-proj-actions{flex:none;min-height:0;overflow:visible}
+.st-guide{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:6px}
+.st-guide h4{margin:0;font-family:var(--f-pix);font-weight:400;font-size:18px;line-height:1.2}
+.st-guide-text{margin:0;font-size:15px;line-height:1.45;white-space:pre-line}
+.st-ai-chips{flex:none;display:flex;gap:4px}
+.st-ai-chip{flex:1;min-width:0;min-height:44px;padding:2px 3px;background:transparent;color:var(--ink);border:2px solid var(--ink);font-family:var(--f-lcd);font-size:12px;line-height:1.15;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.st-ai-preview{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:6px}
+.st-ai-reply{margin:0;font-size:15px;line-height:1.4;white-space:pre-line}
+.st-ai-state{color:var(--ink)}
+/* a tape row in the library: the name, its date or demo tag, and a 44 px delete button */
+.st-proj-list .st-proj-row{padding:0 2px 0 8px;gap:4px}
+.st-row-del{flex:none;width:44px;height:44px;box-sizing:border-box;padding:0;background:transparent;color:var(--ink);border:2px solid var(--ink);font-family:var(--f-lcd);font-size:12px;line-height:1;cursor:pointer}
