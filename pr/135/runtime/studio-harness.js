@@ -23,7 +23,7 @@
 var AI=window.LopdaStudioAI, P=window.LopdaStudioPrompts, ST=window.LopdaStudioStyles,
     T=window.LopdaStudioTools, E=window.LopdaStudioEdit, S=window.LopdaSong;
 
-var MAX_RETRY=2, MAX_TURNS=5;
+var MAX_RETRY=2, MAX_TURNS=5, CHORD_STYLES=["triad","seventh","rich"];
 var SECTIONS=["intro","verse","pre","chorus","bridge","outro"];
 
 function plain(x){ return !!x && typeof x==="object" && Object.prototype.toString.call(x)==="[object Object]"; }
@@ -183,6 +183,7 @@ function planCheck(obj,cards){
   if(obj.scale!=null && !S.SCALES[obj.scale])
     return {error:"scale must be one of "+Object.keys(S.SCALES).join(", ")+" (or left out)"};
   if(obj.key!=null && (!int(obj.key) || obj.key<0 || obj.key>11)) return {error:"key must be 0-11 (C=0) or left out"};
+  if(obj.chordStyle!=null && CHORD_STYLES.indexOf(obj.chordStyle)<0) return {error:"chordStyle must be one of "+CHORD_STYLES.join(", ")};
   if(obj.kit!=null && S.KIT_CHOICES.indexOf(obj.kit)<0) return {error:"kit must be one of "+S.KIT_CHOICES.join(", ")};
   if(obj.swing!=null && (!num(obj.swing) || obj.swing<S.SWING_MIN || obj.swing>S.SWING_MAX))
     return {error:"swing must be "+S.SWING_MIN+"-"+S.SWING_MAX+" or left out"};
@@ -261,7 +262,7 @@ function planCheck(obj,cards){
   }
   var keptOrder=[];
   for(i=0;i<order.length;i++) keptOrder.push([order[i][0],order[i][1]]);
-  return {value:{card:obj.card, scale:obj.scale||"", key:obj.key, kit:obj.kit||"", swing:obj.swing, voices:obj.voices||{},
+  return {value:{card:obj.card, scale:obj.scale||"", chordStyle:obj.chordStyle||"triad", key:obj.key, kit:obj.kit||"", swing:obj.swing, voices:obj.voices||{},
     name:typeof obj.name==="string" && obj.name.trim() ? obj.name.trim() : "Tape4",
     bpm:bpm, sections:kept, order:keptOrder}};
 }
@@ -304,7 +305,10 @@ function laySong(roll,plan,now){
     for(j=0;j<s.patterns.length;j++){
       p=s.patterns[j];
       fill=!!follows["$"+s.id] && j===s.patterns.length-1;
-      song=applyTool(song,{tool:"chords",pattern:p,roots:[s.chords[j]],rhythm:s.strum});
+      /* a bare degree gets the scale's own chord in the plan's chord style (12.20.8) */
+      var cj=s.chords[j], dq=int(cj) ? T.diatonicQ(song,cj,plan.chordStyle) : null;
+      if(dq) cj={root:cj, q:dq};
+      song=applyTool(song,{tool:"chords",pattern:p,roots:[cj],rhythm:s.strum});
       song=applyTool(song,s.drums ? {tool:"groove",pattern:p,steps:s.drums,energy:s.energy,fill:fill}
         : {tool:"groove",pattern:p,style:s.groove,energy:s.energy,fill:fill});
       song=applyTool(song,Array.isArray(s.bass) ? {tool:"bass",pattern:p,steps:s.bass} : {tool:"bass",pattern:p,rhythm:s.bass});
@@ -383,7 +387,7 @@ function melodyRun(c,song,plan,roll,text,onStage){
     for(i=placeAt+1;i<plan.sections.length;i++){ nextSection=plan.sections[i]; break; }
     stage(onStage,"melody",at+1,list.length,{section:s.id});
     for(i=0;i<s.patterns.length;i++){
-      var spec=int(s.chords[i]) ? {root:s.chords[i]} : s.chords[i];
+      var spec=int(s.chords[i]) ? {root:s.chords[i], q:T.diatonicQ(song,s.chords[i],plan.chordStyle)||undefined} : s.chords[i];
       var cn=S.chordName(song,spec.root,spec.q,spec.acc);
       bars.push({chord:cn?cn.name:"deg"+spec.root, tones:T.chordToneText(song,spec)});
     }

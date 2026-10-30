@@ -41,12 +41,19 @@ var SCALES={
   "major-penta":[0,2,4,7,9],
   "minor":[0,2,3,5,7,8,10],
   "major":[0,2,4,5,7,9,11],
-  "dorian":[0,2,3,5,7,9,10]
+  "dorian":[0,2,3,5,7,9,10],
+  /* 12.20.8: the colours a folk tune or a film cue needs. Harmonic minor has the raised seventh (a major V, the
+     Russian and East European minor); mixolydian the flat seventh (rock, folk); phrygian the flat second (flamenco,
+     the darker East). Each is its own parent, so chords stack in thirds on it. */
+  "harmonic-minor":[0,2,3,5,7,8,11],
+  "mixolydian":[0,2,4,5,7,9,10],
+  "phrygian":[0,1,3,5,7,8,10]
 };
 
 /* The seven-note scale behind each grid scale (12.5): chords are stacked in thirds of the seven-note scale, so a
    five-note pad borrows its parent. */
-var PARENT={"minor-penta":"minor","major-penta":"major","minor":"minor","major":"major","dorian":"dorian"};
+var PARENT={"minor-penta":"minor","major-penta":"major","minor":"minor","major":"major","dorian":"dorian",
+  "harmonic-minor":"harmonic-minor","mixolydian":"mixolydian","phrygian":"phrygian"};
 
 /* Pitch classes the way the note and chord labels write them: the sharps and flats this machine shows, not a key
    signature. */

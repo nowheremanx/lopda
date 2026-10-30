@@ -39,7 +39,7 @@ var BASE="data/users/local/studio", LOOKAHEAD=0.1, LOOP_MS=25, SAVE_MS=1000;
 var LETTERS="ABCDEFGHIJKLMNOP";
 /* the mixer's four instrument rows (12.14); the voice row joins them in step 2, when it can sound */
 var MIX_TRACKS=["drums","bass","chords","melody"];
-var TAPE=window.LopdaStudioTape, WAV=window.LopdaWav, ZIP=window.LopdaZip;
+var TAPE=window.LopdaStudioTape, WAV=window.LopdaWav, MIDI=window.LopdaMidi, ZIP=window.LopdaZip;
 var EDIT=window.LopdaStudioEdit, CMD=window.LopdaStudioCommand, H=window.LopdaStudioHarness;
 
 var T={
@@ -2303,6 +2303,8 @@ function renderSheet(){
     var fh2=sheetHead(tr("studio.menu.file"));
     fh2.className+=" st-sheet-head";
     var ful=el("ul","lcd-menu");
+    if(T.song && T.loaded) sheetRow(ful,tr("studio.export.json"),"JSON",function(){ exportJson(); });
+    if(T.song && T.loaded) sheetRow(ful,tr("studio.export.midi"),"MIDI",function(){ exportMidi(); });
     if(T.song && T.loaded) sheetRow(ful,tr("studio.export"),"WAV",function(){ exportWav(); });
     if(T.loaded) sheetRow(ful,tr("studio.workspace.export"),"ZIP",function(){ exportWorkspace(); });
     if(T.loaded) sheetRow(ful,tr("studio.workspace.import"),"ZIP",function(){ $("studio-import-file").click(); });
@@ -2880,10 +2882,11 @@ function popTape(){
    One full pass of the chain, rendered offline through the same synth and tape chain as the live player, then written
    as mono 16-bit 22.05 kHz by the pure wav.js writer. A snapshot of the song is rendered, so an edit during the render
    cannot change what is being written. */
-function wavName(){
+function exportName(ext){
   var d=new Date();
-  return "tape4-"+d.getFullYear()+LP.pad2(d.getMonth()+1)+LP.pad2(d.getDate())+"-"+LP.pad2(d.getHours())+LP.pad2(d.getMinutes())+".wav";
+  return "tape4-"+d.getFullYear()+LP.pad2(d.getMonth()+1)+LP.pad2(d.getDate())+"-"+LP.pad2(d.getHours())+LP.pad2(d.getMinutes())+"."+ext;
 }
+function wavName(){ return exportName("wav"); }
 function renderWav(){
   var OC=window.OfflineAudioContext||window.webkitOfflineAudioContext;
   if(!OC || !WAV || !TAPE || !SYNTH || !T.song) return Promise.reject(new Error("unavailable"));
@@ -2933,6 +2936,43 @@ function exportWav(){
   }).then(function(){ T.exporting=false; },function(){
     T.exporting=false;
     toast(tr("studio.export.fail"));
+  });
+}
+/* ---------- a tape as JSON or MIDI ----------
+   Two one-shot exports, no render: the stored v1 song exactly as the library saves it, and the chain through the pure
+   midi.js writer (format 1, one track per instrument). The sheet closes on the tap, like 导出 WAV. */
+function closeForExport(){
+  T.sheet="";
+  if(T.built) renderSheet();
+}
+function exportJson(){
+  if(T.exporting || !T.loaded || !T.song) return;
+  if(!LP.S.downloads){ toast(tr("studio.export.json.fail")); return; }
+  var text;
+  try{ text=JSON.stringify(T.song,null,1); }
+  catch(e){ toast(tr("studio.export.json.fail")); return; }
+  closeForExport();
+  T.exporting=true;
+  LP.S.downloads.save({filename:exportName("json"),data:new Blob([text],{type:"application/json"})}).then(function(res){
+    if(res && res.status==="saved") toast(tr("studio.export.json.done"));
+  }).then(function(){ T.exporting=false; },function(e){
+    T.exporting=false;
+    if(!(e && e.code==="declined")) toast(LP.saveErr ? LP.saveErr(e) : tr("studio.export.json.fail"));
+  });
+}
+function exportMidi(){
+  if(T.exporting || !T.loaded || !T.song) return;
+  if(!MIDI || !LP.S.downloads){ toast(tr("studio.export.midi.fail")); return; }
+  var bytes;
+  try{ bytes=MIDI.write(T.song); }
+  catch(e){ toast(tr("studio.export.midi.fail")); return; }
+  closeForExport();
+  T.exporting=true;
+  LP.S.downloads.save({filename:exportName("mid"),data:new Blob([bytes],{type:"audio/midi"})}).then(function(res){
+    if(res && res.status==="saved") toast(tr("studio.export.midi.done"));
+  }).then(function(){ T.exporting=false; },function(e){
+    T.exporting=false;
+    if(!(e && e.code==="declined")) toast(LP.saveErr ? LP.saveErr(e) : tr("studio.export.midi.fail"));
   });
 }
 /* ---------- the workspace zip (12.15) ----------

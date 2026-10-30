@@ -588,6 +588,25 @@ function chordToneText(song,spec){
   return out;
 }
 
-window.LopdaStudioTools={CHORD_RHYTHMS:CHORD_RHYTHMS, MOVES:MOVES, run:run, rootDegree:rootDegree, chordTones:chordTones,
+/* The chord a bare degree means in a planned song (12.20.8): "triad" and "seventh" are the scale's own chord on that
+   degree (Am, F, E in harmonic minor; Am7, Fmaj7, E7), "rich" leaves it to the machine's automatic seventh-or-ninth
+   voicing. A folk tune voiced as ninths sounds like a lounge, which is why a plan names its chord style. */
+function diatonicQ(song,deg,style){
+  if(style==="rich") return null;
+  var parent=PARENT[song.scale]||song.scale, st=S.SCALES[parent];
+  if(!st) return null;
+  function at(d){ var n=st.length, q=Math.floor(d/n); return st[d-q*n]+12*q; }
+  var third=at(deg+2)-at(deg), fifth=at(deg+4)-at(deg), seventh=at(deg+6)-at(deg);
+  if(style==="seventh"){
+    if(third===4 && fifth===7) return seventh===11 ? "maj7" : "7";
+    if(third===3 && fifth===7) return "m7";
+    if(third===3 && fifth===6) return seventh===9 ? "dim7" : "m7b5";
+    return third===4 ? "aug" : "m7";
+  }
+  if(third===4) return fifth===8 ? "aug" : "maj";
+  return fifth===6 ? "dim" : "m";
+}
+
+window.LopdaStudioTools={diatonicQ:diatonicQ, CHORD_RHYTHMS:CHORD_RHYTHMS, MOVES:MOVES, run:run, rootDegree:rootDegree, chordTones:chordTones,
   chordToneText:chordToneText, pcToGrid:pcToGrid, TOOLS:TOOLS};
 })();
