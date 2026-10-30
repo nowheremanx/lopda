@@ -91,7 +91,8 @@ function bar(song,spec,rhythm,contour,cur,range,o){
   var out=[], targets=chordTargets(song,spec,range[0],range[1]), i, step, deg, acc, strong, a, k=o.k;
   for(i=0;i<rhythm.length;i++){
     step=rhythm[i];
-    strong=step===0 || step===8 || i===0;
+    /* beats 1 and 3, and the bar's last note (it rings over the chord the longest), sit on chord tones */
+    strong=step===0 || step===8 || i===0 || i===rhythm.length-1;
     if(strong){
       a=nearest(targets,i===0 ? cur : cur+contour[k%contour.length]);
       deg=a ? a.deg : cur; acc=a ? a.acc : 0;

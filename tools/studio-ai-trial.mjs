@@ -105,6 +105,8 @@ async function scenario(kind, text, i) {
   if (OUT) {
     fs.mkdirSync(OUT, { recursive: true });
     fs.writeFileSync(path.join(OUT, `${kind}-${rows.length}.json`), JSON.stringify({ row, stages, log }, null, 1));
+    /* the tape itself, to open in Tape4 (file menu) or turn into MIDI with runtime/midi.js */
+    if (res && res.song) fs.writeFileSync(path.join(OUT, `${kind}-${rows.length}.tape.json`), JSON.stringify(res.song, null, 1));
   }
 }
 
