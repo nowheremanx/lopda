@@ -3490,3 +3490,23 @@ test("studio: demo copies stay out of My tapes and clear in one go", { skip, tim
   assert.match(await p.textContent("#studio-sheet .st-proj-list"), /我的磁带\s*1/);
   assert.deepEqual(errors, []);
 });
+
+test("studio: editing a demo copy turns it into a normal tape in My tapes", { skip, timeout: 90000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await useTemplate(p, "When the Saints");
+  await openMyTapes(p);
+  assert.equal(await p.locator("#studio-sheet .st-proj-list li").count(), 1, "the copy is not in My tapes yet");
+  await p.click("#studio-sheet .st-sheet-close");
+  await p.waitForSelector("#studio-sheet .st-proj-list");
+  await p.locator("#studio-sheet .st-proj-list li", { hasText: "示例副本" }).click();
+  await p.waitForSelector("#studio-sheet .st-proj-list");
+  await p.locator("#studio-sheet .st-proj-list li", { hasText: "When the Saints" }).click();
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  await p.click("#studio-plus");                    /* the first real edit clears the template tag */
+  await openFolders(p);
+  assert.doesNotMatch(await p.textContent("#studio-sheet .st-proj-list"), /示例副本/, "the copies folder is gone");
+  assert.match(await p.textContent("#studio-sheet .st-proj-list"), /我的磁带\s*2/);
+  assert.deepEqual(errors, []);
+});
