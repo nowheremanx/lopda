@@ -1,22 +1,22 @@
 /*
- * Lo-PDA built-in: 电波台 / Radio. M2 test bench for the acoustic link.
+ * Lo-PDA built-in: 电波台 / Radio. M2 tone test bench and M3 reliable acoustic link.
  * The modem itself is runtime/acoustic.js (pure functions, tested in tests/acoustic.test.mjs).
  * This file owns the microphone, the speaker and the screen. Frames, CRC, ACK and text are M3/M4.
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  */
 (function(){
 "use strict";
-var LP=window.LP, $=LP.$, tr=LP.tr, AC=window.LopdaAcoustic;
+var LP=window.LP, $=LP.$, tr=LP.tr, AC=window.LopdaAcoustic, LINK=window.LopdaAcousticLink;
 var TONES=LP.TONES, micMark=$("mic-mark");
 
-var R={tab:"send", rate:10, pattern:"a5", live:false, tx:null, rx:null, pending:false, token:0,
-  sendText:"", recvText:"", recvStats:"", recvHex:"", last:null, log:[], sendTimer:0, recvTimer:0};
+var R={tab:"send", rate:10, pattern:"a5", live:false, auto:true, tx:null, rx:null, pending:false, link:null, linkToken:0, token:0,
+  sendText:"", recvText:"", recvStats:"", recvHex:"", last:null, log:[], sendTimer:0, recvTimer:0, suppressAudio:false};
 
 function esc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
 function now(){ return Date.now(); }
 function bytes(){ return AC.testBytes(R.pattern); }
 function totalSymbols(){ return AC.PREAMBLE.length + bytes().length*4; }
-function active(){ return !!(R.tx || R.rx || R.pending); }
+function active(){ return !!(R.tx || R.rx || R.pending || R.link); }
 function secs(ms){ return (ms/1000).toFixed(1); }
 function bar(id, part){ var el=$(id); if(el) el.style.width=Math.round(Math.max(0,Math.min(1,part))*100)+"%"; }
 
@@ -40,20 +40,26 @@ function render(){
     var pane=$("radio-pane-"+tabs[i]);
     if(pane) pane.hidden=tabs[i]!==R.tab;
   }
-  $("radio-rate").disabled=active();
+  $("radio-auto").checked=R.auto;
+  $("radio-auto").disabled=active();
+  $("radio-rate").disabled=active() || R.auto;
   $("radio-pattern").disabled=active();
   $("radio-rate").value=String(R.rate);
   $("radio-pattern").value=R.pattern;
   $("radio-pattern-hex").textContent=tr("radio.hex.tx")+" "+AC.hex(bytes());
   $("radio-send-go").disabled=active();
   $("radio-recv-go").disabled=active();
-  $("radio-recv-stop").disabled=!R.rx;
-  $("radio-send-state").textContent=R.sendText || tr("radio.send.ready");
-  $("radio-recv-state").textContent=R.recvText || tr("radio.recv.wait");
+  $("radio-send-stop").disabled=!R.link;
+  $("radio-send-go").textContent=R.auto?tr("radio.send.link"):tr("radio.send.go");
+  $("radio-recv-go").textContent=R.auto?tr("radio.recv.link"):tr("radio.recv.go");
+  $("radio-recv-stop").disabled=!(R.rx || R.link);
+  $("radio-recv-stop").textContent=R.link?tr("radio.recv.cancel"):tr("radio.recv.stop");
+  $("radio-send-state").textContent=R.sendText || (R.auto?tr("radio.send.linkready"):tr("radio.send.ready"));
+  $("radio-recv-state").textContent=R.recvText || (R.auto?tr("radio.recv.linkwait"):tr("radio.recv.wait"));
   $("radio-recv-stats").textContent=R.recvStats || "";
   $("radio-recv-hex").textContent=R.recvHex || "";
-  $("radio-state").textContent=R.tx ? tr("radio.tx.on") : (R.rx ? tr("radio.rx.on") : (R.last ? tr("radio.last") : ""));
-  $("radio-note").textContent=tr("radio.note");
+  $("radio-state").textContent=R.link ? tr("radio.link.on") : (R.tx ? tr("radio.tx.on") : (R.rx ? tr("radio.rx.on") : (R.last ? tr("radio.last") : tr("radio.ready"))));
+  $("radio-note").textContent=R.auto?tr("radio.note.link"):tr("radio.note");
   $("radio-lab-note").textContent=R.last ? R.recvStats : tr("radio.lab.note");
   drawLab();
 }
@@ -250,7 +256,349 @@ function decodeSamples(samples, sr){
   render();
 }
 
+
+/* ---------- M3: handshake, frames, CRC, ACK/retry ----------
+   The handshake is one HELLO burst at 10 ms. The receiver scans 10/20/40 and answers at the rate it
+   heard. HELLO and HELLO_ACK both have to arrive, so the chosen rate is known to work both ways.
+   A fails to a slower rate on a missing HELLO_ACK. 5 ms stays a manual M2 choice. */
+var LINK_RATES=[10,20,40], SCAN_MS=3200, HELLO_WAIT=7000, TURN_MS=1500;
+function delay(ms){ return new Promise(function(r){ setTimeout(r,ms); }); }
+function errText(e){ return e==="cancelled"?"cancelled":((e&&e.message)||String(e)); }
+function stopTracks(s){ if(s) try{ s.getTracks().forEach(function(t){ try{ t.stop(); }catch(e){} }); }catch(e){} }
+function newSession(){ var s=(((Date.now()&0xFFFF)^Math.floor(Math.random()*65536))&0xFFFF); return s||1; }
+function linkAlive(t){ return !!(R.link && R.link.token===t && !R.link.cancel); }
+function frameMs(bytes,rate){ return Math.round((16+bytes*4)*rate+240); }
+/* The receiver opens its microphone after the previous burst and waits TURN_MS before the sender transmits;
+   the capture window must cover that wait as well as the frame. */
+function ackMs(rate){ return Math.round(frameMs(10,rate)+TURN_MS+600); }
+function dataMs(rate){ return Math.round(frameMs(26,rate)+TURN_MS+600); }
+/* The sender's wait covers the receiver's whole capture + turnaround + its ACK. */
+function dataAckMs(rate){ return Math.round(dataMs(rate)+TURN_MS+frameMs(10,rate)+800); }
+function finAckMs(rate){ return Math.round(ackMs(rate)+TURN_MS+frameMs(10,rate)+800); }
+
+function linkDone(token, ok, why, receiver){
+  if(!R.link || R.link.token!==token) return;
+  var rate=R.link.rate, n=R.link.payload?R.link.payload.length:bytes().length;
+  R.link=null;
+  LP.setSession("ambient");
+  micMark.hidden=true;
+  LP.keepAwake(false);
+  R.suppressAudio=true;
+  try{ LP.micRoute(false); }catch(e){}
+  R.suppressAudio=false;
+  if(receiver){
+    R.recvText=ok?tr("radio.link.received",{n:n,ms:rate}):tr("radio.link.fail",{why:why});
+    if(ok) R.recvStats=tr("radio.link.crc",{n:n,ms:rate});
+  }else{
+    R.sendText=ok?tr("radio.link.sent",{n:n,ms:rate}):tr("radio.link.fail",{why:why});
+  }
+  log((ok?tr("radio.link.ok"):tr("radio.link.fail",{why:why}))+" · "+rate+" ms");
+  LP.sfx(ok?"ok":"err");
+  render();
+}
+
+function cancelLink(){
+  if(!R.link) return;
+  var wasRecv=R.link.role==="recv";
+  var l=R.link;
+  l.cancel=true;
+  R.link=null;
+  if(l.capTimer) clearTimeout(l.capTimer);
+  if(l.pollTimer) clearInterval(l.pollTimer);
+  try{ if(l.src){ l.src.onended=null; l.src.stop(); } }catch(e){}
+  stopTracks(l.stream);
+  micMark.hidden=true;
+  LP.setSession("ambient");
+  LP.keepAwake(false);
+  R.suppressAudio=true;
+  try{ LP.micRoute(false); }catch(e){}
+  R.suppressAudio=false;
+  if(wasRecv) R.recvText=tr("radio.link.cancelled"); else R.sendText=tr("radio.link.cancelled");
+  log(tr("radio.link.cancelled"));
+  render();
+}
+
+function playBurst(frame, rate, token){
+  return new Promise(function(resolve,reject){
+    if(!linkAlive(token)) return reject("cancelled");
+    LP.setSession("playback");
+    var ctx=LP.audio(); if(!ctx) return reject("noaudio");
+    LP.wake();
+    var samples=AC.synth(frame,{sampleRate:ctx.sampleRate,symbolMs:rate,amp:0.9,leadMs:120,tailMs:120});
+    var buf;
+    try{
+      buf=ctx.createBuffer(1,samples.length,ctx.sampleRate);
+      if(buf.copyToChannel) buf.copyToChannel(samples,0);
+      else{ var ch=buf.getChannelData(0); for(var i=0;i<samples.length;i++) ch[i]=samples[i]; }
+    }catch(e){ return reject(e); }
+    var src=ctx.createBufferSource(); src.buffer=buf;
+    var gain=ctx.createGain(); gain.gain.value=1;
+    src.connect(gain); gain.connect(LP.SND.app || ctx.destination);
+    R.link.src=src;
+    src.onended=function(){
+      if(R.link && R.link.token===token) R.link.src=null;
+      try{ src.disconnect(); gain.disconnect(); }catch(e){}
+      resolve();
+    };
+    try{ src.start(); }catch(e){ reject(e); }
+  });
+}
+
+/* Capture for at most ms. `poll(samples, sampleRate)` may return a decoded frame; when it does,
+   stop at once. That is what keeps the two ends from waiting out each other's windows. */
+function captureWindow(ms, token, poll){
+  return new Promise(function(resolve,reject){
+    if(!linkAlive(token)) return reject("cancelled");
+    var ctx=LP.audio(); if(!ctx) return reject("noaudio");
+    LP.wake(); LP.setSession("play-and-record");
+    var p;
+    try{ p=navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false,channelCount:1},video:false}); }
+    catch(e){ p=Promise.reject(e); }
+    Promise.resolve(p).then(function(stream){
+      if(!linkAlive(token)){ stopTracks(stream); return reject("cancelled"); }
+      var src,proc,silent,done=false;
+      try{
+        src=ctx.createMediaStreamSource(stream);
+        proc=ctx.createScriptProcessor(4096,1,1);
+        silent=ctx.createGain(); silent.gain.value=0;
+        src.connect(proc); proc.connect(silent); silent.connect(ctx.destination);
+      }catch(e){ stopTracks(stream); return reject(e); }
+      var blocks=[];
+      function finish(early){
+        if(done) return;
+        done=true;
+        if(R.link){ R.link.capTimer=0; R.link.pollTimer=0; R.link.stream=null; }
+        clearTimeout(capTimer);
+        clearInterval(pollTimer);
+        proc.onaudioprocess=null;
+        try{ proc.disconnect(); }catch(e){}
+        try{ src.disconnect(); }catch(e){}
+        try{ silent.disconnect(); }catch(e){}
+        stopTracks(stream);
+        micMark.hidden=true;
+        LP.setSession("playback");
+        var all=concat(blocks), peak=0, i;
+        for(i=0;i<all.length;i++) if(Math.abs(all[i])>peak) peak=Math.abs(all[i]);
+        if(R.link){ R.link.lastCapture={ms:ms, samples:all.length, peak:peak}; if(window.LOPDA_DEBUG) R.link.lastSamples=all; }
+        resolve({samples:all, sampleRate:ctx.sampleRate, early:early||null});
+      }
+      proc.onaudioprocess=function(e){
+        if(!done && R.link && R.link.token===token){ var d=e.inputBuffer.getChannelData(0); var c=new Float32Array(d.length); c.set(d); blocks.push(c); }
+      };
+      R.link.stream=stream;
+      micMark.hidden=false;
+      LP.micRoute(true);
+      var capTimer=setTimeout(function(){
+        if(!R.link || R.link.token!==token) return;
+        finish(null);
+      }, ms);
+      var pollTimer=0;
+      if(poll){
+        pollTimer=setInterval(function(){
+          if(done || !R.link || R.link.token!==token) return;
+          var s=concat(blocks);
+          var hit=null;
+          try{ hit=poll(s,ctx.sampleRate); }catch(e){}
+          if(hit) finish(hit);
+        }, 120);
+      }
+      R.link.capTimer=capTimer;
+      R.link.pollTimer=pollTimer;
+    }, function(e){
+      if(R.link && R.link.token===token) LP.setSession("ambient");
+      reject(e);
+    });
+  });
+}
+
+function decodeFrameAt(samples, sr, rate){
+  var head=AC.decode(samples,{sampleRate:sr,symbolMs:rate,symbolCount:LINK.HEADER*4});
+  if(!head.sync || !head.sync.ok) return null;
+  var h=LINK.header(head.bytes);
+  if(!h) return null;
+  var body=AC.decodePayload(samples,{sampleRate:sr,symbolMs:rate,startSample:head.sync.startSample,symbolCount:LINK.frameLength(h.length)*4});
+  var p=LINK.parse(body.bytes);
+  if(!p.ok) return {bad:p, header:h, rate:rate};
+  return {frame:p.frame, header:h, rate:rate};
+}
+
+function scanHello(cap){
+  for(var i=0;i<LINK_RATES.length;i++){
+    var hit=decodeFrameAt(cap.samples,cap.sampleRate,LINK_RATES[i]);
+    if(hit && hit.frame && hit.frame.type===LINK.TYPES.HELLO) return hit;
+  }
+  return null;
+}
+
+function sendReliable(frame, seq, rate, token, tries){
+  function attempt(n){
+    if(!linkAlive(token)) return Promise.reject("cancelled");
+    if(n>tries) return Promise.reject("no ack");
+    if(n>1) log(tr("radio.link.retry",{n:n-1}));
+    var wait=seq===1?dataAckMs(rate):finAckMs(rate);
+    return playBurst(frame,rate,token).then(function(){
+      return captureWindow(wait,token,function(samples,sr){
+        var h=decodeFrameAt(samples,sr,rate);
+        return h && h.frame && h.frame.session===R.link.session && h.frame.seq===seq && h.frame.type===LINK.TYPES.ACK ? h : null;
+      });
+    }).then(function(cap){
+      var hit=cap.early || decodeFrameAt(cap.samples,cap.sampleRate,rate);
+      if(hit && hit.frame && hit.frame.session===R.link.session && hit.frame.seq===seq && hit.frame.type===LINK.TYPES.ACK) return true;
+      throw new Error("no ack");
+    }).then(null,function(e){ if(!linkAlive(token)) throw e; return attempt(n+1); });
+  }
+  return attempt(1);
+}
+
+function linkSend(){
+  if(active()) return;
+  var token=++R.linkToken;
+  R.link={token:token, role:"send", session:newSession(), rate:10, src:null, stream:null, capTimer:0, pollTimer:0, cancel:false, payload:null};
+  LP.keepAwake(true); render();
+  function tryRate(i){
+    if(!linkAlive(token)) return Promise.reject("cancelled");
+    if(i>=LINK_RATES.length) return Promise.reject("no hello ack");
+    var rate=LINK_RATES[i];
+    R.link.rate=rate;
+    R.sendText=tr("radio.link.hello",{ms:rate}); render();
+    var hello=LINK.encode(LINK.TYPES.HELLO,R.link.session,0,[]);
+    return playBurst(hello,rate,token).then(function(){
+      return captureWindow(HELLO_WAIT,token,function(samples,sr){
+        var h=decodeFrameAt(samples,sr,rate);
+        return h && h.frame && h.frame.type===LINK.TYPES.HELLO_ACK && h.frame.session===R.link.session ? h : null;
+      });
+    }).then(function(cap){
+      var hit=cap.early || decodeFrameAt(cap.samples,cap.sampleRate,rate);
+      if(hit && hit.frame && hit.frame.type===LINK.TYPES.HELLO_ACK && hit.frame.session===R.link.session){
+        return delay(TURN_MS).then(function(){ return rate; });
+      }
+      throw new Error("no hello ack");
+    }).then(null,function(e){ if(!linkAlive(token)) throw e; log(tr("radio.link.hello.fail",{ms:rate})); return tryRate(i+1); });
+  }
+  tryRate(0).then(function(rate){
+    R.link.rate=rate;
+    R.sendText=tr("radio.link.ready",{ms:rate}); log(tr("radio.link.ready",{ms:rate})); render();
+    var data=LINK.encode(LINK.TYPES.DATA,R.link.session,1,bytes());
+    return sendReliable(data,1,rate,token,3).then(function(){
+      return delay(TURN_MS).then(function(){
+        var fin=LINK.encode(LINK.TYPES.FIN,R.link.session,2,[]);
+        return sendReliable(fin,2,rate,token,2);
+      });
+    });
+  }).then(function(){ linkDone(token,true,null,false); }, function(e){
+    if(linkAlive(token)) linkDone(token,false,errText(e),false);
+  });
+}
+
+function receiveFin(token, attempt){
+  if(!linkAlive(token)) return Promise.reject("cancelled");
+  var rate=R.link.rate, session=R.link.session;
+  return captureWindow(ackMs(rate),token,function(samples,sr){
+    var hello=scanHello({samples:samples,sampleRate:sr});
+    if(hello) return {hello:hello};
+    var h=decodeFrameAt(samples,sr,rate);
+    if(h && h.frame && h.frame.session===session && (h.frame.type===LINK.TYPES.FIN || h.frame.type===LINK.TYPES.DATA)) return {frame:h};
+    return null;
+  }).then(function(cap){
+    var early=cap.early;
+    var hello=early&&early.hello?early.hello:scanHello(cap);
+    if(hello){
+      R.link.rate=hello.rate; R.link.session=hello.frame.session;
+      R.recvText=tr("radio.link.found",{ms:hello.rate}); log(tr("radio.link.found",{ms:hello.rate})); render();
+      return playBurst(LINK.encode(LINK.TYPES.HELLO_ACK,hello.frame.session,0,[]),hello.rate,token).then(function(){
+        return receiveData(token,1);
+      });
+    }
+    var hit=early&&early.frame?early.frame:decodeFrameAt(cap.samples,cap.sampleRate,rate);
+    /* A lost our DATA ACK and retried DATA while we waited for FIN: ACK it again, do not append it twice. */
+    if(hit && hit.frame && hit.frame.type===LINK.TYPES.DATA && hit.frame.session===session){
+      return delay(TURN_MS).then(function(){
+        return playBurst(LINK.encode(LINK.TYPES.ACK,session,hit.frame.seq,[]),rate,token);
+      }).then(function(){
+        return receiveFin(token,attempt);
+      });
+    }
+    if(hit && hit.frame && hit.frame.type===LINK.TYPES.FIN && hit.frame.session===session){
+      return delay(TURN_MS).then(function(){
+        return playBurst(LINK.encode(LINK.TYPES.ACK,session,hit.frame.seq,[]),rate,token);
+      }).then(function(){
+        linkDone(token,true,null,true);
+      });
+    }
+    if(attempt>=2) throw new Error("no fin");
+    return playBurst(LINK.encode(LINK.TYPES.NACK,session,2,[]),rate,token).then(function(){ return receiveFin(token,attempt+1); });
+  });
+}
+
+function receiveData(token, attempt){
+  if(!linkAlive(token)) return Promise.reject("cancelled");
+  var rate=R.link.rate, session=R.link.session;
+  R.recvText=tr("radio.link.data",{ms:rate}); render();
+  return captureWindow(dataMs(rate),token,function(samples,sr){
+    var hello=scanHello({samples:samples,sampleRate:sr});
+    if(hello) return {hello:hello};
+    var h=decodeFrameAt(samples,sr,rate);
+    if(h && h.frame && h.frame.type===LINK.TYPES.DATA && h.frame.session===R.link.session) return {data:h};
+    return null;
+  }).then(function(cap){
+    /* The sender lost our HELLO_ACK and is retrying the handshake at another rate: catch it here too. */
+    var early=cap.early;
+    var hello=early&&early.hello?early.hello:scanHello(cap);
+    if(hello){
+      R.link.rate=hello.rate; R.link.session=hello.frame.session;
+      R.recvText=tr("radio.link.found",{ms:hello.rate}); log(tr("radio.link.found",{ms:hello.rate})); render();
+      return playBurst(LINK.encode(LINK.TYPES.HELLO_ACK,hello.frame.session,0,[]),hello.rate,token).then(function(){
+        return receiveData(token,1);
+      });
+    }
+    var hit=early&&early.data?early.data:decodeFrameAt(cap.samples,cap.sampleRate,rate);
+    if(hit && hit.frame && hit.frame.type===LINK.TYPES.DATA && hit.frame.session===session){
+      R.link.payload=hit.frame.payload;
+      R.recvHex=AC.hex(hit.frame.payload);
+      R.recvStats=tr("radio.link.crc",{n:hit.frame.payload.length,ms:rate});
+      log(tr("radio.link.crc",{n:hit.frame.payload.length,ms:rate})); render();
+      return delay(TURN_MS).then(function(){
+        return playBurst(LINK.encode(LINK.TYPES.ACK,session,hit.frame.seq,[]),rate,token);
+      }).then(function(){
+        return receiveFin(token,1);
+      });
+    }
+    if(attempt>=3) throw new Error("no data");
+    var seq=hit&&hit.frame?hit.frame.seq:1;
+    log(tr("radio.link.nack",{n:attempt}));
+    return playBurst(LINK.encode(LINK.TYPES.NACK,session,seq,[]),rate,token).then(function(){ return receiveData(token,attempt+1); });
+  });
+}
+
+function linkRecv(){
+  if(active()) return;
+  var token=++R.linkToken;
+  R.link={token:token, role:"recv", session:0, rate:10, src:null, stream:null, capTimer:0, pollTimer:0, cancel:false, payload:null};
+  LP.keepAwake(true); R.recvText=tr("radio.link.wait"); render();
+  function scan(){
+    if(!linkAlive(token)) return;
+    R.recvText=tr("radio.link.wait"); render();
+    captureWindow(SCAN_MS,token,function(samples,sr){
+      return scanHello({samples:samples,sampleRate:sr});
+    }).then(function(cap){
+      if(!linkAlive(token)) return;
+      var hit=cap.early || scanHello(cap);
+      if(!hit){ return delay(50).then(scan); }
+      R.link.session=hit.frame.session;
+      R.link.rate=hit.rate;
+      R.recvText=tr("radio.link.found",{ms:hit.rate}); log(tr("radio.link.found",{ms:hit.rate})); render();
+      return delay(TURN_MS).then(function(){
+        return playBurst(LINK.encode(LINK.TYPES.HELLO_ACK,hit.frame.session,0,[]),hit.rate,token);
+      }).then(function(){
+        return receiveData(token,1);
+      });
+    }).then(null,function(e){ if(linkAlive(token)) linkDone(token,false,errText(e),true); });
+  }
+  scan();
+}
+
 function stopAll(){
+  if(R.link) cancelLink();
   stopSend();
   if(R.rx || R.pending) stopRecv(false);
   if(!R.rx){ LP.setSession("ambient"); micMark.hidden=true; LP.keepAwake(false); }
@@ -283,9 +631,15 @@ function drawLab(){
 $("radio-tab-send").onclick=function(){ setTab("send"); };
 $("radio-tab-recv").onclick=function(){ setTab("recv"); };
 $("radio-tab-lab").onclick=function(){ setTab("lab"); };
-$("radio-send-go").onclick=startSend;
-$("radio-recv-go").onclick=startRecv;
-$("radio-recv-stop").onclick=function(){ stopRecv(true); };
+$("radio-send-go").onclick=function(){ if(R.auto) linkSend(); else startSend(); };
+$("radio-recv-go").onclick=function(){ if(R.auto) linkRecv(); else startRecv(); };
+$("radio-send-stop").onclick=cancelLink;
+$("radio-recv-stop").onclick=function(){ if(R.link) cancelLink(); else stopRecv(true); };
+$("radio-auto").onchange=function(){
+  R.auto=this.checked;
+  R.sendText=""; R.recvText=""; R.recvStats=""; R.recvHex="";
+  render();
+};
 $("radio-rate").onchange=function(){ R.rate=parseInt(this.value,10)||40; R.sendText=""; R.recvText=""; R.recvStats=""; R.recvHex=""; render(); };
 $("radio-pattern").onchange=function(){ R.pattern=this.value; R.sendText=""; R.recvText=""; R.recvStats=""; R.recvHex=""; render(); };
 
@@ -311,6 +665,7 @@ function icon(){
   ];
 }
 
+if(window.LOPDA_DEBUG) window.LOPDA_DEBUG.radio=R;
 LP.builtin({id:"radio", label:"app.radio", icon:icon, view:"radio",
   open:function(){ R.live=true; R.tab="send"; render(); renderLog(); LP.show("radio"); },
   /* The runtime calls leave/pause/audio on every built-in, not only the one in front. Only the live Radio may
@@ -318,5 +673,5 @@ LP.builtin({id:"radio", label:"app.radio", icon:icon, view:"radio",
   leave:function(){ if(R.live){ R.live=false; stopAll(); } },
   pause:function(){ if(R.live){ stopAll(); R.recvText=tr("radio.recv.stopped"); render(); } },
   lang:function(){ if(R.live){ render(); renderLog(); } },
-  audio:function(){ if(R.live){ stopAll(); R.sendText=""; R.recvText=tr("radio.audio"); render(); } }});
+  audio:function(){ if(R.live && !R.suppressAudio){ stopAll(); R.sendText=""; R.recvText=tr("radio.audio"); render(); } }});
 })();
