@@ -766,8 +766,8 @@ synth -> input -> 低通 -> 干/湿（湿路是 12 ms 延迟，0.45 Hz + 5.3 Hz 
 
 | # | 屏幕上的阶段（zh / en） | 谁做 | 内容 |
 |---|---|---|---|
-| 1 | 抽风格卡：{card} / Drawing a style card: {card} | 本地 | `roll(Math.random)`；屏幕上显示这张卡和调、速度 |
-| 2 | AI 在定曲子的样子 / The AI is shaping the song | AI | 计划 JSON（下）|
+| 1 | （不显示） | 本地 | `roll(Math.random)` 掷三次，得到三张不同的卡（各自的调、音阶、速度范围、鼓型、贝斯型） |
+| 2 | AI 在定曲子的样子 / The AI is shaping the song | AI | 计划 JSON（下）：先选一张卡；之后屏幕上显示「抽到风格卡：雨夜 · D 小调 · 84 BPM」 |
 | 3 | 在铺鼓、和弦和贝斯 / Laying drums, chords and bass | 本地 | 按计划给每段分 pattern，跑 groove/chords/bass 工具，生成链 |
 | 4 | AI 在写{section}的旋律 / The AI is writing the {section} melody | AI | 每个 `melody:true` 的段一次（主歌、副歌……通常 2–3 次） |
 | 5 | AI 在试音 / The AI is listening back | AI | 看整首的概要，最多 8 个润色调用（ghost、fill、copy、ops…）和给用户的一句话 |
@@ -776,7 +776,7 @@ synth -> input -> 低通 -> 干/湿（湿路是 12 ms 延迟，0.45 Hz + 5.3 Hz 
 **计划 JSON**（第 2 步模型只回这个）：
 
 ```json
-{"name":"Rain on the tram","bpm":84,
+{"card":1,"name":"Rain on the tram","bpm":84,"scale":"minor",
  "sections":[
    {"id":"intro","chords":[0,5],"groove":"lofi-a","energy":0,"bass":"whole","melody":false},
    {"id":"verse","chords":[0,5,3,4],"groove":"lofi-a","energy":1,"bass":"pulse","melody":true},
@@ -790,7 +790,10 @@ synth -> input -> 低通 -> 干/湿（湿路是 12 ms 延迟，0.45 Hz + 5.3 Hz 
 - 本地检查（不过就把这句英文发回去重写）：段 id 唯一且在 `order` 里都出现；pattern 总数 ≤ 16；链 ≤ 96 格；
   时长 `格数 × 240 / bpm` 秒在 100–200 秒之间（「the song is 58 s; add repeats so it is 100-200 s」）；groove/bass 在风格卡给的
   id 或全部 id 里；chords 都是 0–5；bpm 在 60–140（风格卡范围只是建议）。
-- 名字、bpm 可以改；调、音阶、摇摆、磁带、鼓组由风格卡定（模型不改）。
+- `card`：1–3。请求没说情绪、风格或速度（「来个骨架」）就用第 1 张，也就是骰子的选择；说了（「雨夜」「早晨散步」）就选最合适的一张。
+  这样模糊的请求每次都不一样，具体的请求也不会被骰子带偏（试验：「来个雨夜骨架」第一版只有一张卡，抽到了进行曲 D 大调）。
+- `scale` 可省：major / minor / dorian，情绪需要时可以换（雨夜→小调）。名字、bpm 可以改；调、摇摆、磁带、鼓组由卡定。
+- 时长提示「100–200 秒，最好 150 秒左右」。
 
 **旋律 JSON**（第 4 步，每段一次）：`{"bars":[[[step,deg,vel],...], ...]}`，小节数 = 这一段 `chords.length`。
 用户消息里给：风格卡的情绪、调和音阶名、这一段在曲中的位置、每小节的和弦名和和弦音级数、前面已写好的段的旋律（让副歌和主歌有对比）。
@@ -838,11 +841,17 @@ onStage({id, n, of, vars})                                    (id 是 strings.js
 - AI 页：输入框下面一块进度：当前阶段一行（12.19.4 / 12.19.5 的白话），下面一行和脚本页一样的通讯：
   `▮`/`▯` 每个信号翻一次 + 计时 + 「拨号中 / 已接通 / 在想（N 字）/ 在写（N 字）」 + 安静 N 秒（≥ 10 秒才显示）。
   第 1 步的风格卡一直显示在进度上方（「雨夜 lofi · D 小调 · 84」）。生成时 `LP.keepAwake(true)`。
-- 快捷句：「更快一点」「更摇摆」旁边标「本地」，「来个骨架」标「AI」；没有 key 时「来个骨架」不显示（换成「示例磁带」入口，现有行为）。
+- 快捷句：「更快一点」「更摇摆」旁边标「本地」，「来个骨架」标「AI」；没有 key 时点「来个骨架」仍提示先从示例磁带开始（现有行为）。
+- 生成时输入框、「说」和快捷句变灰（`--ink-2`，iOS 的半透明禁用样式去掉）；离开四轨机、关掉 AI 页、切到后台都会停掉这次生成。
 - `.st-name::placeholder{color:var(--ink-2)}`（AI 输入框和工程名输入框都用 `.st-name`）。
 - 字符串全部进 strings.js（zh/en）。
 
 ### 12.19.8 测试和试验
+
+试验结果（2026-10-30，OpenCode 的 DeepSeek v4.1 flash，`tools/studio-ai-trial.mjs`）：两轮共 13 次全部成功。
+骨架 4–6 次调用、36–90 秒，每次的卡和调都不同；第二轮（三张卡 + 大白话回复）0 次重写。修改：副歌 ghost + 贝斯、整首更欢快、
+B 段去旋律都是 1–3 次调用；「改成 3/4 拍」0 处改动并说明做不到。
+
 
 - `tests/studio-styles.test.mjs`：每张卡、鼓型、贝斯型的形状；`roll` 可复现、调分布不偏。
 - `tests/studio-tools.test.mjs`：每个工具的 op、错误信息、`rootDegree`/`chordTones`（七声和五声）、`setChain`。
