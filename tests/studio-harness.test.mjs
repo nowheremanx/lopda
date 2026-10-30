@@ -289,17 +289,34 @@ test("edit: after MAX_TURNS turns the successful ops are returned with no reply"
   assert.equal(out.ops.length, H.MAX_TURNS, "every successful call is kept");
 });
 
-test("skeleton: the plan may take another of the three cards and another scale for a named mood", async () => {
+test("skeleton: the plan may take another card and another scale for a named mood", async () => {
   const plan = { ...planFor(), card: 2, scale: "dorian" };
   const ask = makeAsk(fullAnswers(plan));
   const out = await H.skeleton({ text: "a rainy night song", ask, rand: ST.seeded(5), now: 1000 });
   const planUser = ask.seen[0].messages.find((m) => m.role === "user").content;
   assert.match(planUser, /CARD 1: [\s\S]*CARD 2: [\s\S]*CARD 3: /);
-  const ids = [...planUser.matchAll(/CARD \d: ([^.]+)\./g)].map((m) => m[1]);
-  assert.equal(new Set(ids).size, 3, "three different cards");
+  const ids = [...planUser.matchAll(/CARD \d+: ([^.]+)\./g)].map((m) => m[1]);
+  assert.equal(ids.length, ST.CARDS.length, "every card is offered");
+  assert.equal(new Set(ids).size, ids.length, "each card once");
   assert.equal(out.card.en, ids[1]);
   assert.equal(out.song.scale, "dorian");
-  const bad = makeAsk((step, messages) => (step === "plan" ? (messages.length > 2 ? planFor() : { ...planFor(), card: 4 }) : fullAnswers(planFor())(step, messages)));
+  const bad = makeAsk((step, messages) => (step === "plan" ? (messages.length > 2 ? planFor() : { ...planFor(), card: 99 }) : fullAnswers(planFor())(step, messages)));
   await H.skeleton({ text: "x", ask: bad, rand: ST.seeded(5), now: 1000 });
-  assert.match(bad.seen[1].messages.at(-1).content, /card must be 1-3/);
+  assert.match(bad.seen[1].messages.at(-1).content, new RegExp("card must be 1-" + ST.CARDS.length));
+});
+
+test("skeleton: a section may write its own drums and strum its chords as stabs", async () => {
+  const plan = planFor();
+  plan.sections[1] = { ...plan.sections[1], groove: undefined, drums: { kick: [[0, 0.9], [8, 0.85]], snare: [[4, 0.8], [12, 0.8]] }, strum: "stabs", bass: "boom" };
+  delete plan.sections[1].groove;
+  const out = await H.skeleton({ text: "x", ask: makeAsk(fullAnswers(plan)), rand: ST.seeded(3), now: 1000 });
+  const verse = out.song.patterns[1].notes;   // intro is pattern 0, the verse starts at 1
+  assert.deepEqual(plain(verse.drums.filter((n) => n.key === "kick").map((n) => n.t / S.STEP)), [0, 8]);
+  assert.deepEqual(plain(verse.chords.filter((n) => n.vel > 0).map((n) => n.t / S.STEP)), [4, 12]);
+  const bad = planFor();
+  bad.sections[1] = { ...bad.sections[1], drums: { kick: [[20, 1]] }, strum: "strum" };
+  delete bad.sections[1].groove;
+  const ask = makeAsk((step, messages) => (step === "plan" ? (messages.length > 2 ? planFor() : bad) : fullAnswers(planFor())(step, messages)));
+  await H.skeleton({ text: "x", ask, rand: ST.seeded(3), now: 1000 });
+  assert.match(ask.seen[1].messages.at(-1).content, /steps must be 0-15/);
 });

@@ -232,3 +232,22 @@ test("bass fifth is the chord's fifth by pitch, also on a five-note grid; ghost 
   const g = T.run(r.song, { tool: "ghost", pattern: 0, amount: 1 });
   assert.deepEqual(plain(g.ops.map((o) => o.step)), [11]);
 });
+
+test("groove takes steps the model wrote; chords strum as stabs on 2 and 4 with rests after them", () => {
+  const g = T.run(fresh(), { tool: "groove", pattern: 0, steps: { kick: [[0, 0.9], 8], snare: [[4, 0.8], [12, 0.8]] } });
+  assert.equal(g.error, undefined);
+  const song = apply(fresh(), g.ops).song;
+  assert.deepEqual(plain(song.patterns[0].notes.drums.map((n) => [n.key, n.t / S.STEP]).sort()), [["kick", 0], ["kick", 8], ["snare", 12], ["snare", 4]]);
+  assert.match(T.run(fresh(), { tool: "groove", pattern: 0, steps: { kick: [[16, 1]] } }).error, /0-15/);
+  assert.match(T.run(fresh(), { tool: "groove", pattern: 0, steps: {} }).error, /no hits/);
+  const c = apply(fresh(), T.run(fresh(), { tool: "chords", pattern: 0, roots: [3], rhythm: "stabs" }).ops).song;
+  assert.deepEqual(plain(c.patterns[0].notes.chords.map((n) => [n.t / S.STEP, n.vel > 0])), [[4, true], [6, false], [12, true], [14, false]]);
+  assert.match(T.run(fresh(), { tool: "chords", pattern: 0, roots: [0, 3], rhythm: "stabs" }).error, /one chord root/);
+  assert.match(T.run(fresh(), { tool: "chords", pattern: 0, roots: [0], rhythm: "strum" }).error, /hold, stabs, pulse/);
+});
+
+test("bass under stabbed chords takes the bar's chord from beat 1", () => {
+  const c = apply(fresh(), T.run(fresh(), { tool: "chords", pattern: 0, roots: [3], rhythm: "stabs" }).ops).song;
+  const b = T.run(c, { tool: "bass", pattern: 0, rhythm: "boom" });
+  assert.equal(b.ops.find((o) => o.op === "setNote" && o.step === 0).deg, T.rootDegree(c, 3));
+});

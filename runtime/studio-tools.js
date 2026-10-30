@@ -20,6 +20,7 @@ var S=window.LopdaSong, ST=window.LopdaStudioStyles;
 var PARENT=S.PARENT || {"minor-penta":"minor","major-penta":"major","minor":"minor","major":"major","dorian":"dorian"};
 var ALL_TRACKS=["drums","bass","chords","melody"];
 var CHANGES=["same","sparse","no-melody","lift"];
+var CHORD_RHYTHMS=["hold","stabs","pulse"];
 var TOOLS=["ops","groove","chords","bass","ghost","fill","melody","copy","chain","set","mix"];
 
 function plain(x){ return !!x && typeof x==="object" && Object.prototype.toString.call(x)==="[object Object]"; }
@@ -133,11 +134,37 @@ function toolOps(song,call){
   return {ops:ops.slice()};
 }
 
+/* A groove the model writes itself, for a style no stored groove covers: one bar of [step, velocity] per drum. */
+function customGroove(steps){
+  var keys=["kick","snare","hat","perc"], out={kick:[],snare:[],hat:[],perc:[]}, n=0, i, j, list, h;
+  if(!plain(steps)) return "drums: give {\"kick\":[[step,vel],...],\"snare\":[...],\"hat\":[...],\"perc\":[...]}";
+  for(i=0;i<keys.length;i++){
+    list=steps[keys[i]];
+    if(list==null) continue;
+    if(!Array.isArray(list)) return "drums: "+keys[i]+" must be a list of [step, velocity]";
+    for(j=0;j<list.length;j++){
+      h=list[j];
+      if(int(h)) h=[h,0.8];
+      if(!Array.isArray(h) || !int(h[0]) || h[0]<0 || h[0]>=S.STEPS) return "drums: "+keys[i]+" steps must be 0-15";
+      if(h.length>1 && (!num(h[1]) || h[1]<0 || h[1]>1)) return "drums: "+keys[i]+" velocities must be 0..1";
+      out[keys[i]].push([h[0],h.length>1?h[1]:0.8]);
+      n++;
+    }
+  }
+  if(!n) return "drums: the bar has no hits";
+  if(n>48) return "drums: at most 48 hits in a bar";
+  return {steps:out};
+}
+
 function toolGroove(song,call){
   var p=patternArg(call);
   if(p===null) return patternError();
   var g=ST.GROOVES[call.style];
-  if(!g) return failArg("groove","unknown style '"+String(call.style==null?"":call.style)+"'; use one of "+ids(ST.GROOVES));
+  if(call.steps!=null && call.style==null){
+    g=customGroove(call.steps);
+    if(typeof g==="string") return err(g);
+  }
+  if(!g) return failArg("groove","unknown style '"+String(call.style==null?"":call.style)+"'; use one of "+ids(ST.GROOVES)+", or give steps");
   var energy=typeof call.energy==="undefined" ? 1 : call.energy;
   if(!int(energy) || energy<0 || energy>2) return failArg("energy","use 0, 1 or 2");
   var hits=energyHits(g,energy);
@@ -153,8 +180,21 @@ function toolChords(song,call){
     return failArg("roots","give 1-4 chord roots, each 0-5");
   for(i=0;i<roots.length;i++) if(!int(roots[i]) || roots[i]<0 || roots[i]>5)
     return failArg("roots","each chord root must be 0-5");
-  pos=roots.length===1 ? [0] : roots.length===2 ? [0,8] : roots.length===3 ? [0,8,12] : [0,4,8,12];
+  var rhythm=call.rhythm==null ? "hold" : call.rhythm;
+  if(CHORD_RHYTHMS.indexOf(rhythm)<0) return failArg("rhythm","use one of "+CHORD_RHYTHMS.join(", "));
   var ops=[{op:"clearTrack",pattern:p,track:"chords"}];
+  /* A chord rings until the next one, so a short strum is the chord followed by a rest: "stabs" is the guitar's
+     chick on beats 2 and 4 (the bass's boom fills 1 and 3), "pulse" strikes every beat. One root per bar. */
+  if(rhythm!=="hold"){
+    if(roots.length!==1) return failArg("rhythm",rhythm+" takes one chord root for the bar");
+    pos=rhythm==="stabs" ? [4,12] : [0,4,8,12];
+    for(i=0;i<pos.length;i++){
+      ops.push({op:"setNote",pattern:p,track:"chords",step:pos[i],deg:roots[0],vel:i%2 ? 0.6 : 0.68});
+      ops.push({op:"setRest",pattern:p,track:"chords",step:pos[i]+2});
+    }
+    return {ops:ops};
+  }
+  pos=roots.length===1 ? [0] : roots.length===2 ? [0,8] : roots.length===3 ? [0,8,12] : [0,4,8,12];
   for(i=0;i<roots.length;i++) ops.push({op:"setNote",pattern:p,track:"chords",step:pos[i],deg:roots[i],vel:0.65});
   return {ops:ops};
 }
@@ -168,7 +208,8 @@ function toolBass(song,call){
   var ops=[{op:"clearTrack",pattern:p,track:"bass"}], i, entry, step, at, idx, root, deg, nextRoot;
   for(i=0;i<rhythm.length;i++){
     entry=rhythm[i]; step=entry[0]; at=step*S.STEP; idx=chordAt(chords,step);
-    root=idx>=0 ? chords[idx].deg : 0;
+    /* before the bar's first chord (a strum on beat 2) the bass already plays that chord's root */
+    root=idx>=0 ? chords[idx].deg : chords.length ? chords[0].deg : 0;
     deg=rootDegree(song,root);
     /* the chord's own fifth, found by pitch like the root: "+4 degrees" is a sixth on a five-note grid */
     if(entry[2]==="fifth") deg=fifthDegree(song,root,deg);
@@ -417,5 +458,5 @@ function chordTones(song,root){
   return out;
 }
 
-window.LopdaStudioTools={run:run, rootDegree:rootDegree, chordTones:chordTones, TOOLS:TOOLS};
+window.LopdaStudioTools={CHORD_RHYTHMS:CHORD_RHYTHMS, run:run, rootDegree:rootDegree, chordTones:chordTones, TOOLS:TOOLS};
 })();

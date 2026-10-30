@@ -68,6 +68,18 @@ var GROOVES={
     snare:[[2,0.4],[4,0.9],[6,0.4],[10,0.22],[12,0.9],[14,0.4]],
     hat:[[0,0.4],[4,0.35],[8,0.4],[12,0.35]],
     perc:[[15,0.5]]}},
+  /* the train beat: the snare (played soft, like brushes) runs straight eighths with the backbeat on top, the kick on 1
+     and 3. Room is left for the bass's root-fifth "boom" under it. */
+  "train-a":{steps:{
+    kick:[[0,0.9],[8,0.85]],
+    snare:[[0,0.25],[2,0.35],[4,0.85],[6,0.35],[8,0.25],[10,0.35],[12,0.85],[14,0.35]],
+    hat:[[4,0.25],[12,0.25]],
+    perc:[]}},
+  "train-b":{steps:{
+    kick:[[0,0.9],[6,0.45],[8,0.85]],
+    snare:[[1,0.2],[2,0.4],[3,0.2],[4,0.85],[5,0.2],[6,0.4],[7,0.2],[9,0.2],[10,0.4],[11,0.2],[12,0.85],[13,0.2],[14,0.4],[15,0.2]],
+    hat:[],
+    perc:[[15,0.3]]}},
   "chip-a":{steps:{
     kick:[[0,1],[8,1]],
     snare:[[4,0.95],[12,0.95],[10,0.2]],
@@ -92,6 +104,8 @@ var BASS={
            [8,0.85,"root"],[10,0.6,"root"],[12,0.7,"fifth"],[14,0.6,"root"]],
   octaves:[[0,0.85,"root"],[4,0.7,"octave"],[8,0.8,"root"],[12,0.7,"octave"]],
   walk:[[0,0.85,"root"],[4,0.7,"fifth"],[8,0.75,"octave"],[12,0.65,"approach"]],
+  boom:[[0,0.9,"root"],[8,0.8,"fifth"]],
+  "boom-walk":[[0,0.9,"root"],[4,0.65,"fifth"],[8,0.85,"root"],[12,0.65,"approach"]],
   syncopated:[[0,0.85,"root"],[3,0.6,"root"],[6,0.7,"fifth"],[8,0.8,"root"],[11,0.6,"octave"],[14,0.65,"approach"]]
 };
 
@@ -135,6 +149,10 @@ var CARDS=[
    swing:[0.58,0.68], tape:[1,3], kit:"soft", grooves:["soul-a","boom-a"], bass:["pulse","syncopated"], form:"ballad"},
   {id:"glass-dream", zh:"玻璃梦", en:"Glass dream", bpm:[66,82], scales:["major","dorian"],
    swing:[0.5,0.58], tape:[0,2], kit:"soft", grooves:["bossa-a","lofi-a"], bass:["whole","half"], form:"ballad"},
+  {id:"train-beat", zh:"火车节奏", en:"Train beat", bpm:[100,124], scales:["major"],
+   swing:[0.5,0.54], tape:[1,3], kit:"soft", grooves:["train-a","train-b"], bass:["boom","boom-walk"], form:"pop"},
+  {id:"dust-road", zh:"尘土路", en:"Dust road", bpm:[92,112], scales:["minor","major"],
+   swing:[0.5,0.56], tape:[2,4], kit:"soft", grooves:["train-a","march-a"], bass:["boom","half"], form:"ballad"},
   {id:"toy-box", zh:"玩具盒", en:"Toy box", bpm:[108,132], scales:["major","minor"],
    swing:[0.5,0.54], tape:[0,1], kit:"chip", grooves:["chip-b","chip-a"], bass:["octaves","eighths"], form:"arcade"}
 ];
@@ -167,7 +185,11 @@ function evenBpm(rand,lo,hi){
 }
 
 function roll(rand){
-  var card=pick(rand,CARDS);
+  return rollCard(rand,pick(rand,CARDS));
+}
+
+/* one card's dice: the key and the details inside its ranges */
+function rollCard(rand,card){
   var key=Math.floor(rand()*12);
   if(key<0) key=0;
   if(key>11) key=11;
@@ -200,5 +222,5 @@ function seeded(n){
   };
 }
 
-window.LopdaStudioStyles={CARDS:CARDS, GROOVES:GROOVES, BASS:BASS, FORMS:FORMS, roll:roll, seeded:seeded};
+window.LopdaStudioStyles={CARDS:CARDS, GROOVES:GROOVES, BASS:BASS, FORMS:FORMS, roll:roll, rollCard:rollCard, seeded:seeded};
 })();
