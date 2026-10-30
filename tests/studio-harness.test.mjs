@@ -41,6 +41,7 @@ function makeAsk(script) {
 
 function planFor(bpm = 100) {
   return {
+    card: 1,
     name: "Rain on the tram",
     bpm,
     sections: [
@@ -109,11 +110,11 @@ test("skeleton: card, plan, laid bars, melodies and a listen-back", async () => 
   assert.equal(out.song.kit, roll.kit);
   assert.equal(out.card.id, roll.card.id);
 
-  assert.deepEqual(stages.map((s) => s.id), ["card", "plan", "lay", "melody", "melody", "listen"]);
-  assert.equal(stages[0].vars.card, roll.card.en);
-  assert.equal(stages[0].vars.key, S.NAMES[roll.key]);
-  assert.equal(stages[0].vars.scale, roll.scale);
-  assert.equal(stages[0].vars.bpm, roll.bpm);
+  assert.deepEqual(stages.map((s) => s.id), ["plan", "card", "lay", "melody", "melody", "listen"]);
+  assert.equal(stages[1].vars.card, roll.card.en);
+  assert.equal(stages[1].vars.key, S.NAMES[roll.key]);
+  assert.equal(stages[1].vars.scale, roll.scale);
+  assert.equal(stages[1].vars.bpm, 100, "the plan's tempo, not the dice's");
   assert.equal(stages[3].vars.section, "verse");
   assert.equal(stages[4].vars.section, "chorus");
   assert.equal(stages[3].n, 1);
@@ -135,7 +136,7 @@ test("skeleton: two different seeds draw different keys", async () => {
 
 test("skeleton: a too-short plan is sent back with the reason and then fixed", async () => {
   const short = {
-    name: "too short", bpm: 100,
+    card: 1, name: "too short", bpm: 100,
     sections: [
       { id: "intro", chords: [0], groove: "lofi-a", energy: 0, bass: "whole", melody: false },
       { id: "outro", chords: [0], groove: "lofi-a", energy: 0, bass: "whole", melody: false },
@@ -286,4 +287,19 @@ test("edit: after MAX_TURNS turns the successful ops are returned with no reply"
   assert.equal(out.song.tracks.find((t) => t.id === "bass").vol, 0.8);
   assert.equal(S.validate(out.song).error, undefined);
   assert.equal(out.ops.length, H.MAX_TURNS, "every successful call is kept");
+});
+
+test("skeleton: the plan may take another of the three cards and another scale for a named mood", async () => {
+  const plan = { ...planFor(), card: 2, scale: "dorian" };
+  const ask = makeAsk(fullAnswers(plan));
+  const out = await H.skeleton({ text: "a rainy night song", ask, rand: ST.seeded(5), now: 1000 });
+  const planUser = ask.seen[0].messages.find((m) => m.role === "user").content;
+  assert.match(planUser, /CARD 1: [\s\S]*CARD 2: [\s\S]*CARD 3: /);
+  const ids = [...planUser.matchAll(/CARD \d: ([^.]+)\./g)].map((m) => m[1]);
+  assert.equal(new Set(ids).size, 3, "three different cards");
+  assert.equal(out.card.en, ids[1]);
+  assert.equal(out.song.scale, "dorian");
+  const bad = makeAsk((step, messages) => (step === "plan" ? (messages.length > 2 ? planFor() : { ...planFor(), card: 4 }) : fullAnswers(planFor())(step, messages)));
+  await H.skeleton({ text: "x", ask: bad, rand: ST.seeded(5), now: 1000 });
+  assert.match(bad.seen[1].messages.at(-1).content, /card must be 1-3/);
 });

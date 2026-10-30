@@ -4,7 +4,7 @@
  * harness checks every answer and sends a rejected one back with the reason. Kept apart from the harness so the wording
  * can be tuned (tools/studio-ai-trial.mjs) without touching the logic.
  *
- *   LopdaStudioPrompts.plan(o)    -> messages   o: {text, card, keyName, scale, bpm:[lo,hi], grooves, bass, form, minutes}
+ *   LopdaStudioPrompts.plan(o)    -> messages   o: {text, cards:[{name, keyName, scale, bpm:[lo,hi], grooves, bass, form}], allGrooves, allBass}
  *   LopdaStudioPrompts.melody(o)  -> messages   o: {text, card, keyName, scale, bpm, section, place, bars:[{chord, tones}], before}
  *   LopdaStudioPrompts.listen(o)  -> messages   o: {text, overview}
  *   LopdaStudioPrompts.edit(o)    -> messages   o: {text, overview, focus}
@@ -41,32 +41,39 @@ function plan(o){
   var system=[
 MACHINE,
 "",
-"You plan a new song for it. You choose the sections, one chord per bar, and which local drum groove and bass rhythm",
-"each section uses. The machine lays the drums, chords and bass itself; melodies come in a later step.",
+"You plan a new song for it. The machine has drawn three style cards. You pick one, then choose the sections, one",
+"chord per bar, and which drum groove and bass rhythm each section uses. The machine lays the drums, chords and bass",
+"itself; melodies come in a later step.",
 "",
 JSON_ONLY,
 "Shape:",
-'{"name":"short title","bpm":84,',
+'{"card":1,"name":"short title","bpm":84,"scale":"minor",',
 ' "sections":[{"id":"verse","chords":[0,5,3,4],"groove":"<groove id>","energy":1,"bass":"<bass id>","melody":true}, ...],',
 ' "order":[["intro",1],["verse",2],["chorus",2], ...]}',
 "",
 "Rules:",
+"- card: 1, 2 or 3. If the request names no mood, style or tempo (just \"a song\", \"a skeleton\", \"来个骨架\"), take card 1.",
+"  If it does, take the card that fits it best. The card's key is kept.",
+"- bpm: inside the card's range unless the request asks for faster or slower. scale: major, minor or dorian; keep the",
+"  card's scale unless the request's mood needs another (sad, rainy, night: minor or dorian; bright, sunny: major).",
 "- section id: one of intro, verse, pre, chorus, bridge, outro; each used once in sections and at least once in order.",
 "- chords: 1-4 numbers, one per bar; each is a chord root 0-5 of the key's seven-note scale (0=I, 1=ii, 2=iii, 3=IV, 4=V, 5=vi in major; in minor 0=i, 2=III, 3=iv, 4=v, 5=VI).",
 "- Each section takes as many patterns as it has chords; all sections together use at most 16 patterns.",
 "- order: [section id, repeats 1-4]. The song plays each section's bars that many times, in this order.",
-"- The whole song must last 100-200 seconds: seconds = total bars * 240 / bpm.",
+"- The whole song must last 100-200 seconds (aim for about 150): seconds = total bars * 240 / bpm.",
 "- energy: 0 calm, 1 normal, 2 full. melody: false for intro and outro, usually true for verse and chorus.",
 "- Make the chorus different from the verse: other chords or another order, more energy.",
 "- name: in "+lang(o.text)+", at most 24 characters, original (never a real song's title)."
   ].join("\n");
+  var cards=[], i, c;
+  for(i=0;i<o.cards.length;i++){
+    c=o.cards[i];
+    cards.push("CARD "+(i+1)+": "+c.name+". Key "+c.keyName+" "+c.scale+", "+c.bpm[0]+"-"+c.bpm[1]+" BPM. Grooves "+list(c.grooves)+
+      "; bass "+list(c.bass)+(c.form ? "; form "+c.form : "")+".");
+  }
   var user=[
-"STYLE CARD (already chosen by the machine): "+o.card,
-"Key: "+o.keyName+" "+o.scale+". Tempo range: "+o.bpm[0]+"-"+o.bpm[1]+" BPM.",
-"Grooves for this card: "+list(o.grooves)+". Bass rhythms for this card: "+list(o.bass)+".",
-o.allGrooves ? "Other grooves you may use: "+list(o.allGrooves)+"." : "",
-o.allBass ? "Other bass rhythms: "+list(o.allBass)+"." : "",
-o.form ? "A form that suits it (you may change it): "+o.form+"." : "",
+cards.join("\n"),
+"Every groove: "+list(o.allGrooves)+". Every bass rhythm: "+list(o.allBass)+".",
 "",
 "REQUEST: "+(o.text||"a new song")
   ].join("\n");
@@ -135,7 +142,8 @@ MACHINE,
 "",
 JSON_ONLY,
 'Shape: {"reply":"one or two sentences for the user","calls":[ ...0-8 tool calls... ]}',
-"The reply is in "+lang(o.text)+", at most 120 characters: say what the song is (style, key, tempo, form), plainly.",
+"The reply is in "+lang(o.text)+", at most 120 characters, like a friend telling what the song feels like and how it",
+"moves (calm intro, a fuller chorus...). Never mention pattern letters, step numbers, degrees, swing values or tool names.",
 "",
 "Tools:",
 TOOLS.join("\n")
