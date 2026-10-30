@@ -209,6 +209,22 @@ var REST_VEL=0;
 /* The two chord cells of a bar start on step 1 and step 9 (12.5). */
 var CHORD_STEPS=[0,8];
 
+/* The chord qualities of 12.20.5: intervals in semitones above the root, and the order the keyboard lists them in.
+   A note's optional `q` names one of these; a q this version does not know is kept (a later writer's) but plays as if
+   it were absent, so an old tape still opens. */
+var QUALITIES={
+  maj:[0,4,7], m:[0,3,7], "7":[0,4,7,10], maj7:[0,4,7,11], m7:[0,3,7,10],
+  "9":[0,4,10,14], m9:[0,3,10,14], "6":[0,4,7,9], m6:[0,3,7,9], add9:[0,4,7,14],
+  sus2:[0,2,7], sus4:[0,5,7], dim:[0,3,6], dim7:[0,3,6,9], aug:[0,4,8],
+  m7b5:[0,3,6,10], "5":[0,7,12]
+};
+var QUALITY_ORDER=["maj","m","7","maj7","m7","9","m9","6","m6","add9","sus2","sus4","dim","dim7","aug","m7b5","5"];
+/* the qualities whose roman numeral is written in lower case */
+var LOWER_QUALITIES={m:true, m7:true, m9:true, m6:true, dim:true, dim7:true, m7b5:true};
+
+function knownQ(q){ return typeof q==="string" && Object.prototype.hasOwnProperty.call(QUALITIES,q); }
+function accOf(acc){ return acc===-1 || acc===1 ? acc : 0; }
+
 /* ---------- small checks and a copy ---------- */
 /* a plain object, not an array, a Date or a boxed primitive: the song is JSON-shaped data */
 function plain(x){ return !!x && typeof x==="object" && Object.prototype.toString.call(x)==="[object Object]"; }
@@ -464,7 +480,35 @@ function check(x){
            !num(note.vel) || note.vel<0 || note.vel>1) return {error:"notes"};
         if(owner.kind==="drum"){
           if(DRUMS.indexOf(note.key)<0) return {error:"notes"};
-        } else if(!int(note.deg) || note.deg<-32 || note.deg>32) return {error:"notes"};
+          if(typeof note.acc!=="undefined" || typeof note.gate!=="undefined" ||
+             typeof note.orn!=="undefined" || typeof note.q!=="undefined") return {error:"notes"};
+        } else if(owner.kind==="chord"){
+          if(!int(note.deg) || note.deg<-32 || note.deg>32) return {error:"notes"};
+          if(note.vel===REST_VEL){
+            /* a rest has no pitch or decoration of its own */
+            if(typeof note.acc!=="undefined" || typeof note.gate!=="undefined" ||
+               typeof note.orn!=="undefined" || typeof note.q!=="undefined") return {error:"notes"};
+          } else {
+            if(typeof note.acc!=="undefined" && note.acc!==-1 && note.acc!==1) return {error:"notes"};
+            /* a q this version does not know is a later writer's: valid, and treated as absent */
+            if(typeof note.q!=="undefined" && typeof note.q!=="string") return {error:"notes"};
+            if(typeof note.gate!=="undefined" || typeof note.orn!=="undefined") return {error:"notes"};
+          }
+        } else {
+          if(!int(note.deg) || note.deg<-32 || note.deg>32) return {error:"notes"};
+          if(note.vel===REST_VEL){
+            if(typeof note.acc!=="undefined" || typeof note.gate!=="undefined" ||
+               typeof note.orn!=="undefined" || typeof note.q!=="undefined") return {error:"notes"};
+          } else {
+            if(typeof note.acc!=="undefined" && note.acc!==-1 && note.acc!==1) return {error:"notes"};
+            if(typeof note.gate!=="undefined" && (!num(note.gate) || note.gate<0.1 || note.gate>1)) return {error:"notes"};
+            if(typeof note.orn!=="undefined"){
+              if(note.orn!=="slide" && note.orn!=="vib") return {error:"notes"};
+              if(note.orn==="vib" && owner.id==="bass") return {error:"notes"};
+            }
+            if(typeof note.q!=="undefined") return {error:"notes"};
+          }
+        }
       }
     }
   }
@@ -554,6 +598,16 @@ function swingTicks(swing){
   return (swing-0.5)*2*STEP;
 }
 
+/* The optional note fields of 12.20.5 travel with the event. An unknown q is a later writer's and is left out, so it
+   is absent to the player, chordNotes and chordName exactly as validate makes it absent. */
+function copyNoteExtra(e,note){
+  if(typeof note.acc!=="undefined") e.acc=note.acc;
+  if(typeof note.gate!=="undefined") e.gate=note.gate;
+  if(typeof note.orn!=="undefined") e.orn=note.orn;
+  if(knownQ(note.q)) e.q=note.q;
+  return e;
+}
+
 /* Events are in loop time, not pattern time: loop n places a pattern tick t at n * patternTicks + t + swing, with
    patternTicks = len * STEP. The player keeps one clock across loops, so a range can start mid-loop, span any number of
    loops, or be empty. Voice tracks (and tracks a later version muted) make no notes. */
@@ -585,6 +639,7 @@ function events(song,p,fromTick,toTick){
         else e.deg=note.deg;
         e.vel=note.vel;
         e.len=note.len;
+        copyNoteExtra(e,note);
         out.push(e);
       }
     }
@@ -628,12 +683,12 @@ function tonic(track,key){
   return null;
 }
 
-function noteMidi(song,track,deg){
+function noteMidi(song,track,deg,acc){
   var steps=song && Object.prototype.hasOwnProperty.call(SCALES,song.scale) ? SCALES[song.scale] : null;
   var base=tonic(track, song && song.key);
   if(!steps || base==null || !int(deg)) return null;
   var n=steps.length, q=Math.floor(deg/n), r=deg-q*n;
-  return base+12*q+steps[r];
+  return base+12*q+steps[r]+accOf(acc);
 }
 
 function noteName(midi){
@@ -667,24 +722,42 @@ function chordOf(song,deg){
   return {d:d, root:root, third:third, fifth:fifth, seventh:seventh, ninth:ninth, addNine:addNine, notes:notes};
 }
 
-function chordNotes(song,deg){
-  var c=chordOf(song,deg);
-  return c ? c.notes : null;
-}
-
-function chordName(song,deg){
+function chordNotes(song,deg,q,acc){
   var c=chordOf(song,deg);
   if(!c) return null;
-  var roman=["I","II","III","IV","V","VI","VII"][c.d];
-  if(c.third===3) roman=roman.toLowerCase();
-  if(c.fifth===6) roman+="ø";
-  var suffix;
-  if(c.third===4 && c.seventh===11) suffix=c.addNine?"maj9":"maj7";
-  else if(c.third===3 && c.seventh===10 && c.fifth===7) suffix=c.addNine?"m9":"m7";
-  else if(c.third===4 && c.seventh===10) suffix=c.addNine?"9":"7";
-  else if(c.fifth===6) suffix="m7b5";
-  else suffix="";
-  return {roman:roman, name:NAMES[((c.root%12)+12)%12]+suffix};
+  var shift=accOf(acc), i, out;
+  if(knownQ(q)){
+    var root=c.root+shift;
+    out=[];
+    for(i=0;i<QUALITIES[q].length;i++) out.push(root+QUALITIES[q][i]);
+    return out;
+  }
+  /* no known q: today's automatic voicing, moved by acc when a root is shifted */
+  if(!shift) return c.notes;
+  out=[];
+  for(i=0;i<c.notes.length;i++) out.push(c.notes[i]+shift);
+  return out;
+}
+
+function chordName(song,deg,q,acc){
+  var c=chordOf(song,deg);
+  if(!c) return null;
+  var shift=accOf(acc), roman=["I","II","III","IV","V","VI","VII"][c.d], suffix, root=c.root+shift;
+  if(knownQ(q)){
+    if(Object.prototype.hasOwnProperty.call(LOWER_QUALITIES,q)) roman=roman.toLowerCase();
+    suffix=q==="maj" ? "" : q;
+  } else {
+    if(c.third===3) roman=roman.toLowerCase();
+    if(c.fifth===6) roman+="ø";
+    if(c.third===4 && c.seventh===11) suffix=c.addNine?"maj9":"maj7";
+    else if(c.third===3 && c.seventh===10 && c.fifth===7) suffix=c.addNine?"m9":"m7";
+    else if(c.third===4 && c.seventh===10) suffix=c.addNine?"9":"7";
+    else if(c.fifth===6) suffix="m7b5";
+    else suffix="";
+  }
+  if(shift<0) roman="\u266d"+roman;
+  else if(shift>0) roman="\u266f"+roman;
+  return {roman:roman, name:NAMES[((root%12)+12)%12]+suffix};
 }
 
 function clampBpm(bpm){
@@ -768,7 +841,28 @@ function noteAt(song,p,track,t){
 /* A rest is stored as a note that does not sound (12.12): vel 0 is what every player and the synth skip. */
 function isRest(note){ return !!note && note.vel===REST_VEL; }
 
-function setNote(song,p,track,t,deg,vel){
+/* The optional fields of 12.20.5, checked the way validate checks them. `q` is a chord's quality; a string this
+   version does not know is kept, because it is a later writer's and plays as absent. */
+function validExtra(kind,id,key,value){
+  if(key==="acc") return value===-1 || value===1;
+  if(key==="gate") return kind==="note" && num(value) && value>=0.1 && value<=1;
+  if(key==="orn") return kind==="note" && (value==="slide" || (value==="vib" && id!=="bass"));
+  if(key==="q") return kind==="chord" && typeof value==="string";
+  return false;
+}
+var EXTRA_KEYS=["acc","gate","orn","q"];
+
+function applyExtra(note,kind,id,extra){
+  if(!plain(extra)) return note;
+  for(var i=0;i<EXTRA_KEYS.length;i++){
+    var k=EXTRA_KEYS[i];
+    if(!Object.prototype.hasOwnProperty.call(extra,k)) continue;
+    if(validExtra(kind,id,k,extra[k])) note[k]=extra[k];
+  }
+  return note;
+}
+
+function setNote(song,p,track,t,deg,vel,extra){
   var out=clone(song);
   if(!editable(out,track)) return out;
   if(!int(p) || p<0 || p>=PATTERNS_MAX || !int(t) || t<0) return out;
@@ -780,6 +874,7 @@ function setNote(song,p,track,t,deg,vel){
   if(t>=len*STEP || !int(deg) || deg<-32 || deg>32) return out;
   var v=vel==null ? NOTE_VEL : vel;
   if(!num(v) || v<0 || v>1) return out;
+  var kind=trackKind(out,track);
 
   out=ensureInto(out,p);
   var pat=out.patterns[p];
@@ -793,9 +888,43 @@ function setNote(song,p,track,t,deg,vel){
   if(found){
     found.deg=deg;
     if(isRest(found)) found.vel=NOTE_VEL;
+    if(!isRest(found)) applyExtra(found,kind,track,extra);
   }
-  else list.push({t:t, len:1, deg:deg, vel:v});
+  else {
+    found={t:t, len:1, deg:deg, vel:v};
+    /* a new rest keeps no extra fields (12.20.5) */
+    if(v!==REST_VEL) applyExtra(found,kind,track,extra);
+    list.push(found);
+  }
   tie(list, pat.len*STEP);
+  return out;
+}
+
+/* Change only the optional fields of the note at t (12.20.5). A null removes the field; deg, vel and len stay as they
+   are. The note must exist, and a rest has no optional fields to change. Any bad value or field leaves the whole song
+   unchanged, like the other editors. */
+function setNoteExtra(song,p,track,t,patch){
+  var out=clone(song);
+  if(!editable(out,track) || !plain(patch)) return out;
+  if(!int(p) || p<0 || p>=PATTERNS_MAX || !int(t) || t<0) return out;
+  var src=song.patterns && song.patterns[p];
+  if(src && (!plain(src) || !int(src.len) || src.len<1)) return out;
+  var len=src ? src.len : STEPS;
+  if(t>=len*STEP) return out;
+  var pat=out.patterns[p];
+  var list=pat && plain(pat.notes) && pat.notes[track];
+  if(!Array.isArray(list)) return out;
+  var found=null, i, k;
+  for(i=0;i<list.length;i++) if(list[i] && list[i].t===t){ found=list[i]; break; }
+  if(!found || isRest(found)) return out;
+  var kind=trackKind(out,track);
+  for(i=0;i<EXTRA_KEYS.length;i++){
+    k=EXTRA_KEYS[i];
+    if(!Object.prototype.hasOwnProperty.call(patch,k)) continue;
+    if(patch[k]===null){ delete found[k]; continue; }
+    if(!validExtra(kind,track,k,patch[k])) return out;
+    found[k]=patch[k];
+  }
   return out;
 }
 
@@ -1065,6 +1194,7 @@ function chainEvents(song,chain,fromTick,toTick){
           else e.deg=note.deg;
           e.vel=note.vel;
           e.len=note.len;
+          copyNoteExtra(e,note);
           e.p=seg.p;
           e.slot=seg.slot;
           out.push(e);
@@ -1167,6 +1297,7 @@ window.LopdaSong={
   POP_SONG:POP_SONG, SAINTS_SPEC:SAINTS_SPEC, JASMINE_SPEC:JASMINE_SPEC,
   SOUND:SOUND, VOICE_CHOICES:VOICE_CHOICES, KIT_CHOICES:KIT_CHOICES, voiceOf:voiceOf, kitOf:kitOf,
   NOTE_VEL:NOTE_VEL, REST_VEL:REST_VEL, CHORD_STEPS:CHORD_STEPS, NAMES:NAMES,
+  QUALITIES:QUALITIES, QUALITY_ORDER:QUALITY_ORDER,
   SWING_MIN:SWING_MIN, SWING_MAX:SWING_MAX, SWING_DEFAULT:SWING_DEFAULT,
   TAPE_MAX:TAPE_MAX, PATTERNS_MAX:PATTERNS_MAX, SONG_MAX:SONG_MAX, NAME_MAX:NAME_MAX,
   newSong:newSong, demoSong:demoSong, popSong:popSong, saintsSong:saintsSong, jasmineSong:jasmineSong, fromDraft:fromDraft, validate:validate, has:has, toggle:toggle,
@@ -1176,7 +1307,7 @@ window.LopdaSong={
   tonic:tonic, noteMidi:noteMidi, noteName:noteName,
   chordNotes:chordNotes, chordName:chordName,
   emptyPattern:emptyPattern, ensurePattern:ensurePattern, hasNotes:hasNotes, patternEmpty:patternEmpty,
-  copyPattern:copyPattern, noteAt:noteAt, isRest:isRest, setNote:setNote, setRest:setRest, removeNote:removeNote,
+  copyPattern:copyPattern, noteAt:noteAt, isRest:isRest, setNote:setNote, setNoteExtra:setNoteExtra, setRest:setRest, removeNote:removeNote,
   setSlot:setSlot, addSlot:addSlot, dropSlot:dropSlot, insertSlot:insertSlot, removeSlot:removeSlot,
   chainEvents:chainEvents, chainTicks:chainTicks, chainAt:chainAt
 };

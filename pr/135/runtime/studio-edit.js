@@ -20,6 +20,7 @@ var S=window.LopdaSong;
 function plain(x){ return !!x && typeof x==="object" && Object.prototype.toString.call(x)==="[object Object]"; }
 function int(n){ return typeof n==="number" && isFinite(n) && Math.floor(n)===n; }
 function num(n){ return typeof n==="number" && isFinite(n); }
+function has(x,k){ return Object.prototype.hasOwnProperty.call(x,k); }
 function copy(x){ return JSON.parse(JSON.stringify(x)); }
 function fail(code,at,detail){ return {error:code, at:at, detail:detail||""}; }
 function clamp(n,lo,hi){ return Math.max(lo,Math.min(hi,n)); }
@@ -103,8 +104,51 @@ function one(song,op,at){
          !int(op.step) || op.step<0 || op.step>=S.STEPS || !int(op.deg)) return fail("value",at);
       if(op.track==="chords" && (op.deg<0 || op.deg>5)) return fail("value",at);
       if(typeof op.vel!=="undefined" && (!num(op.vel) || op.vel<0 || op.vel>1)) return fail("value",at);
-      if(op.vel===0){ next=S.setRest(song,op.pattern,op.track,op.step*S.STEP); return {song:next}; }
-      next=S.setNote(song,op.pattern,op.track,op.step*S.STEP,op.deg,op.vel);
+      var extra={}, hasExtra=false;
+      if(op.track==="chords"){
+        if(op.q!=null){ if(typeof op.q!=="string") return fail("value",at); extra.q=op.q; hasExtra=true; }
+        if(op.acc!=null){ if(op.acc!==-1 && op.acc!==1) return fail("value",at); extra.acc=op.acc; hasExtra=true; }
+        if(op.gate!=null || op.orn!=null) return fail("value",at);
+      } else {
+        if(op.acc!=null){ if(op.acc!==-1 && op.acc!==1) return fail("value",at); extra.acc=op.acc; hasExtra=true; }
+        if(op.gate!=null){ if(!num(op.gate) || op.gate<0.1 || op.gate>1) return fail("value",at); extra.gate=op.gate; hasExtra=true; }
+        if(op.orn!=null){
+          if(op.orn!=="slide" && op.orn!=="vib") return fail("value",at);
+          if(op.orn==="vib" && op.track==="bass") return fail("value",at);
+          extra.orn=op.orn; hasExtra=true;
+        }
+        if(op.q!=null) return fail("value",at);
+      }
+      if(op.vel===0){
+        if(hasExtra) return fail("value",at);
+        next=S.setRest(song,op.pattern,op.track,op.step*S.STEP); return {song:next};
+      }
+      next=S.setNote(song,op.pattern,op.track,op.step*S.STEP,op.deg,op.vel,hasExtra?extra:undefined);
+      return {song:next};
+    case "setNoteExtra":
+      if(NOTE_TRACKS.indexOf(op.track)<0 || !int(op.pattern) || op.pattern<0 || op.pattern>=S.PATTERNS_MAX ||
+         !int(op.step) || op.step<0 || op.step>=S.STEPS) return fail("value",at);
+      next=S.noteAt(song,op.pattern,op.track,op.step*S.STEP);
+      if(!next) return fail("value",at);
+      var patch={}, any=false, nonNull=false;
+      if(op.track==="chords"){
+        if(has(op,"q")){ if(op.q!==null && typeof op.q!=="string") return fail("value",at); patch.q=op.q; any=true; if(op.q!==null) nonNull=true; }
+        if(has(op,"acc")){ if(op.acc!==null && op.acc!==-1 && op.acc!==1) return fail("value",at); patch.acc=op.acc; any=true; if(op.acc!==null) nonNull=true; }
+        if(has(op,"gate") || has(op,"orn")) return fail("value",at);
+      } else {
+        if(has(op,"acc")){ if(op.acc!==null && op.acc!==-1 && op.acc!==1) return fail("value",at); patch.acc=op.acc; any=true; if(op.acc!==null) nonNull=true; }
+        if(has(op,"gate")){ if(op.gate!==null && (!num(op.gate) || op.gate<0.1 || op.gate>1)) return fail("value",at); patch.gate=op.gate; any=true; if(op.gate!==null) nonNull=true; }
+        if(has(op,"orn")){
+          if(op.orn!==null && op.orn!=="slide" && op.orn!=="vib") return fail("value",at);
+          if(op.orn==="vib" && op.track==="bass") return fail("value",at);
+          patch.orn=op.orn; any=true; if(op.orn!==null) nonNull=true;
+        }
+        if(has(op,"q")) return fail("value",at);
+      }
+      if(!any) return fail("value",at);
+      /* a rest has no optional fields; removing fields that are not there is a harmless no-op */
+      if(S.isRest(next)) return nonNull ? fail("value",at) : {song:song};
+      next=S.setNoteExtra(song,op.pattern,op.track,op.step*S.STEP,patch);
       return {song:next};
     case "setRest":
       if(NOTE_TRACKS.indexOf(op.track)<0 || !int(op.pattern) || op.pattern<0 || op.pattern>=S.PATTERNS_MAX ||

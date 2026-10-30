@@ -175,28 +175,62 @@ function toolGroove(song,call){
 function toolChords(song,call){
   var p=patternArg(call);
   if(p===null) return patternError();
-  var roots=call.roots, i, pos;
+  var roots=call.roots, i, pos, specs=[], spec;
   if(!Array.isArray(roots) || roots.length<1 || roots.length>4)
-    return failArg("roots","give 1-4 chord roots, each 0-5");
-  for(i=0;i<roots.length;i++) if(!int(roots[i]) || roots[i]<0 || roots[i]>5)
-    return failArg("roots","each chord root must be 0-5");
+    return failArg("roots","give 1-4 chord roots, each 0-5 or {root, q, acc}");
+  for(i=0;i<roots.length;i++){
+    spec=chordRoot(roots[i]);
+    if(spec===null) return failArg("roots","each chord root must be 0-5, or {root:0-5, q:'maj', acc:-1}");
+    if(spec.error==="q") return failArg("roots","q '"+String(roots[i].q)+"' must be one of "+(S.QUALITY_ORDER||[]).join(", "));
+    if(spec.error==="acc") return failArg("roots","acc must be -1 or 1");
+    specs.push(spec);
+  }
   var rhythm=call.rhythm==null ? "hold" : call.rhythm;
   if(CHORD_RHYTHMS.indexOf(rhythm)<0) return failArg("rhythm","use one of "+CHORD_RHYTHMS.join(", "));
   var ops=[{op:"clearTrack",pattern:p,track:"chords"}];
   /* A chord rings until the next one, so a short strum is the chord followed by a rest: "stabs" is the guitar's
      chick on beats 2 and 4 (the bass's boom fills 1 and 3), "pulse" strikes every beat. One root per bar. */
   if(rhythm!=="hold"){
-    if(roots.length!==1) return failArg("rhythm",rhythm+" takes one chord root for the bar");
+    if(specs.length!==1) return failArg("rhythm",rhythm+" takes one chord root for the bar");
     pos=rhythm==="stabs" ? [4,12] : [0,4,8,12];
     for(i=0;i<pos.length;i++){
-      ops.push({op:"setNote",pattern:p,track:"chords",step:pos[i],deg:roots[0],vel:i%2 ? 0.6 : 0.68});
+      ops.push(chordOp(p,pos[i],specs[0],i%2 ? 0.6 : 0.68));
       ops.push({op:"setRest",pattern:p,track:"chords",step:pos[i]+2});
     }
     return {ops:ops};
   }
-  pos=roots.length===1 ? [0] : roots.length===2 ? [0,8] : roots.length===3 ? [0,8,12] : [0,4,8,12];
-  for(i=0;i<roots.length;i++) ops.push({op:"setNote",pattern:p,track:"chords",step:pos[i],deg:roots[i],vel:0.65});
+  pos=specs.length===1 ? [0] : specs.length===2 ? [0,8] : specs.length===3 ? [0,8,12] : [0,4,8,12];
+  for(i=0;i<specs.length;i++) ops.push(chordOp(p,pos[i],specs[i],0.65));
   return {ops:ops};
+}
+
+/* A chord root as the tool writes it: a bare degree 0-5 keeps the old behaviour, or {root, q, acc} adds a quality and
+   a semitone shift (12.20.5). The caller turns the error marker into a sentence that lists the qualities. */
+function chordRoot(entry){
+  var out={root:0};
+  if(int(entry)){
+    if(entry<0 || entry>5) return null;
+    out.root=entry;
+    return out;
+  }
+  if(!plain(entry) || !int(entry.root) || entry.root<0 || entry.root>5) return null;
+  out.root=entry.root;
+  if(entry.q!=null){
+    if(typeof entry.q!=="string" || (S.QUALITY_ORDER||[]).indexOf(entry.q)<0) return {error:"q"};
+    out.q=entry.q;
+  }
+  if(entry.acc!=null){
+    if(entry.acc!==-1 && entry.acc!==1) return {error:"acc"};
+    out.acc=entry.acc;
+  }
+  return out;
+}
+
+function chordOp(p,step,spec,vel){
+  var op={op:"setNote",pattern:p,track:"chords",step:step,deg:spec.root,vel:vel};
+  if(spec.q!=null) op.q=spec.q;
+  if(spec.acc!=null) op.acc=spec.acc;
+  return op;
 }
 
 function toolBass(song,call){
