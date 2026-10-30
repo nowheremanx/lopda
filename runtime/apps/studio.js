@@ -39,7 +39,8 @@ var BASE="data/users/local/studio", LOOKAHEAD=0.1, LOOP_MS=25, SAVE_MS=1000;
 var LETTERS="ABCDEFGHIJKLMNOP";
 /* the mixer's four instrument rows (12.14); the voice row joins them in step 2, when it can sound */
 var MIX_TRACKS=["drums","bass","chords","melody"];
-var TAPE=window.LopdaStudioTape, WAV=window.LopdaWav;
+var TAPE=window.LopdaStudioTape, WAV=window.LopdaWav, ZIP=window.LopdaZip;
+var EDIT=window.LopdaStudioEdit, CMD=window.LopdaStudioCommand, STUDIOAI=window.LopdaStudioAI;
 
 var T={
   song:null, id:"", meta:null,
@@ -49,6 +50,12 @@ var T={
   drum:"kick", focus:0, kb:false, screen:"drums", pat:0, slot:0,
   noteSel:{bass:-1,melody:-1}, noteDeg:{bass:0,melody:0}, chordSel:-1, chordDeg:0,
   sheet:"", copyTo:-1, built:false, exporting:false,
+  /* 12.15: undo/redo (memory), persistent versions and the project library */
+  history:[], redo:[], snap:null, historySilent:false,
+  versions:[], versionsOk:false, versionPick:0, projects:null, projectsLoading:false,
+  importData:null, guidePage:0,
+  /* 12.16: the assistant's one request and the preview waiting for 采用 */
+  aiBusy:false, aiJob:null, aiPreview:null, aiNote:"",
   /* the player: one chain clock, chainPat is what is scheduled, playPat is what the ears hear */
   playing:false, mode:"", playPat:0, chainPat:0, pendingPat:-1, queued:-1, boundaryGlobal:0,
   loop:0, ctx:null, synth:null, tape:null,
@@ -62,6 +69,7 @@ var T={
 function visible(){ return !$("v-studio").hidden; }
 function el(tag,cls,text){ var e=document.createElement(tag); if(cls) e.className=cls; if(text!=null) e.textContent=text; return e; }
 function letter(i){ return LETTERS.charAt(i); }
+function clipName(s,n){ return Array.from(String(s==null?"":s)).slice(0,n).join(""); }
 function noteTrack(){ return T.screen==="bass"||T.screen==="melody" ? T.screen : ""; }
 function screenName(s){ return tr("studio.screen."+s); }
 
@@ -70,7 +78,7 @@ function refs(){
   if(!S.db) return null;
   if(!T.refs){
     var base=S.db.doc(BASE);
-    T.refs={set:base, items:base.collection("items")};
+    T.refs={set:base, items:base.collection("items"), versions:base.collection("versions")};
   }
   return T.refs;
 }
@@ -89,6 +97,17 @@ function writeItem(data){
     toast(tr("common.savefail",{code:(e&&e.code)||tr("common.unknown")}));
   });
 }
+function writeProject(id,song){
+  var r=refs();
+  if(!r || !id || !T.metaOk || !song) return Promise.resolve(false);
+  var data=JSON.parse(JSON.stringify(song));
+  data.updated=Date.now();
+  song.updated=data.updated;
+  return r.items.doc(id).set(data).then(function(){ return true; },function(e){
+    toast(tr("common.savefail",{code:(e&&e.code)||tr("common.unknown")}));
+    return false;
+  });
+}
 function flush(){
   if(T.saveTimer){ clearTimeout(T.saveTimer); T.saveTimer=0; }
   if(!T.dirty || !T.song) return;
@@ -101,14 +120,95 @@ function flush(){
   writeItem(data);
 }
 function touch(){
+  if(!T.historySilent) pushHistory();
   T.dirty=true;
   if(T.saveTimer) clearTimeout(T.saveTimer);
   T.saveTimer=setTimeout(flush,SAVE_MS);
+}
+/* ---------- undo, redo and versions (12.15) ----------
+   Every touch() compares the song with the last snapshot; the first difference puts the snapshot before the edit on
+   the undo stack. The stacks live in memory, are capped, and start again whenever a project is loaded. */
+function snapSong(){ return T.song ? JSON.stringify(T.song) : null; }
+function resetHistory(){
+  T.history=[]; T.redo=[]; T.snap=snapSong(); T.historySilent=false;
+}
+function pushHistory(){
+  if(!T.song) return;
+  var cur=snapSong();
+  if(T.snap===null){ T.snap=cur; return; }
+  if(cur===T.snap) return;
+  T.history.push(T.snap);
+  if(T.history.length>30) T.history.shift();
+  T.redo=[];
+  T.snap=cur;
+}
+/* a restored or undone song may be shorter than the cursors: keep screen state inside it */
+function clampCursors(){
+  if(!T.song) return;
+  if(!T.song.patterns || !T.song.patterns[T.pat]) T.pat=0;
+  var n=T.song.song && T.song.song.length ? T.song.song.length : 1;
+  if(!(T.slot>=0)) T.slot=0;
+  if(T.slot>n-1) T.slot=n-1;
+  var pat=T.song.patterns && T.song.patterns[T.pat];
+  var last=pat && pat.len>0 ? pat.len-1 : SONGS.STEPS-1;
+  if(T.noteSel){
+    if(T.noteSel.bass>last) T.noteSel.bass=last;
+    if(T.noteSel.melody>last) T.noteSel.melody=last;
+  }
+  if(T.chordSel>1) T.chordSel=1;
+  if(T.focus<0) T.focus=0;
+  if(T.focus>(T.screen==="song"?n-1:last)) T.focus=T.screen==="song"?n-1:last;
+}
+function keepSong(song,snap){
+  T.song=song;
+  T.snap=snap!==undefined?snap:snapSong();
+  T.dirty=true;
+  clampCursors();
+  T.painted=null;
+}
+function undo(){
+  if(!T.history.length || !T.song) return;
+  if(T.playing) stopPlay();
+  var cur=snapSong(), prev=T.history.pop();
+  T.redo.push(cur);
+  if(T.redo.length>30) T.redo.shift();
+  T.historySilent=true;
+  keepSong(JSON.parse(prev),prev);
+  touch();
+  T.historySilent=false;
+  renderAll();
+  toast(tr("studio.undo.done"));
+}
+function redo(){
+  if(!T.redo.length || !T.song) return;
+  if(T.playing) stopPlay();
+  var cur=snapSong(), next=T.redo.pop();
+  T.history.push(cur);
+  if(T.history.length>30) T.history.shift();
+  T.historySilent=true;
+  keepSong(JSON.parse(next),next);
+  touch();
+  T.historySilent=false;
+  renderAll();
+  toast(tr("studio.redo.done"));
+}
+/* a version is a whole song, stored outside the undo stack; restoring one keeps the current song undoable */
+function restoreSong(song){
+  if(!T.loaded || !T.song || !song) return;
+  if(T.playing) stopPlay();
+  T.historySilent=true;
+  pushHistory();
+  keepSong(song);
+  touch();
+  T.historySilent=false;
+  renderAll();
+  flush();
 }
 /* a tape for the handheld to play, saved under a new id (and pointed at) unless storage is off */
 function freshSong(tell){
   T.id=LP.uid();
   setSong(SONGS.newSong(Date.now()));
+  T.versions=[]; T.versionsOk=true;
   T.dirty=false;
   if(!T.meta) T.meta={toured:{},hushTip:false};
   T.meta.current=T.id;
@@ -125,6 +225,7 @@ function ensureLocal(){
   if(T.song) return;
   T.id=LP.uid();
   setSong(SONGS.newSong(Date.now()));
+  T.versions=[]; T.versionsOk=true;
   if(!T.meta) T.meta={toured:{},hushTip:false};
   T.meta.current=T.id;
 }
@@ -152,6 +253,8 @@ function loadStore(){
       var got=doc.exists ? SONGS.validate(own(doc.data())) : null;
       if(got && got.song){
         setSong(got.song); T.id=cur; T.dirty=false;
+        T.versions=[]; T.versionsOk=false;
+        loadVersions(cur);
       } else freshSong(true);
     });
   }).then(function(){
@@ -167,6 +270,151 @@ function loadStore(){
     if(visible()) renderAll();
   });
   return T.loading;
+}
+
+/* ---------- versions (12.15) ----------
+   A version is a full song in data/users/local/studio/versions/<project id>, newest first, ten at most. The undo stack
+   in memory is for the last few taps; versions survive a reload and are what an AI edit stores before it lands. */
+function loadVersions(id){
+  T.versions=[]; T.versionsOk=false;
+  var r=refs();
+  if(!r || !id){ T.versionsOk=true; return Promise.resolve(); }
+  return r.versions.doc(id).get().then(function(sn){
+    if(T.id!==id) return;
+    var data=sn.exists ? own(sn.data()) : null, list=data && Array.isArray(data.versions) ? data.versions : [], i, got, v;
+    for(i=0;i<list.length && T.versions.length<10;i++){
+      v=list[i];
+      if(!v || typeof v.at!=="number" || !isFinite(v.at)) continue;
+      got=SONGS.validate(v.song);
+      if(got.song) T.versions.push({at:v.at,name:typeof v.name==="string"?v.name.slice(0,40):"",song:got.song});
+    }
+    T.versionsOk=true;
+    if(T.sheet==="versions") renderSheet();
+  },function(){
+    if(T.id!==id) return;
+    T.versions=[]; T.versionsOk=false;
+    if(T.sheet==="versions") renderSheet();
+  });
+}
+function writeVersions(){
+  var r=refs();
+  if(!r || !T.id || !T.metaOk) return Promise.resolve(false);
+  return r.versions.doc(T.id).set({v:1,versions:T.versions}).then(function(){ return true; },function(e){
+    toast(tr("common.savefail",{code:(e&&e.code)||tr("common.unknown")}));
+    return false;
+  });
+}
+function saveVersion(label){
+  if(!T.loaded || !T.song || !T.id || !T.metaOk) return Promise.resolve(false);
+  T.versions.unshift({at:Date.now(),name:label||"",song:JSON.parse(JSON.stringify(T.song))});
+  if(T.versions.length>10) T.versions.length=10;
+  return writeVersions();
+}
+
+/* ---------- the project library (12.15) ----------
+   Every tape is an item in the same collection the 1a build already used; the library only adds a list, a current
+   pointer and the two edit actions. Opening a tape is the same reset as opening the program: drums, pattern A. */
+function listProjects(){
+  var r=refs();
+  if(!r) return Promise.resolve([]);
+  return r.items.get().then(function(res){
+    var out=[], i, doc, got, id;
+    for(i=0;i<res.docs.length;i++){
+      doc=res.docs[i];
+      id=doc.id;
+      got=SONGS.validate(id===T.id && T.song ? T.song : doc.data());
+      if(got.song) out.push({id:id,song:got.song});
+    }
+    out.sort(function(a,b){ return (b.song.updated||0)-(a.song.updated||0); });
+    return out;
+  });
+}
+function loadProjects(){
+  if(!refs()){ T.projects=[]; T.projectsLoading=false; return Promise.resolve(); }
+  T.projectsLoading=true;
+  if(T.sheet==="projects") renderSheet();
+  return listProjects().then(function(list){
+    T.projects=list; T.projectsLoading=false;
+    if(T.sheet==="projects") renderSheet();
+  },function(){
+    T.projects=[]; T.projectsLoading=false;
+    if(T.sheet==="projects") renderSheet();
+  });
+}
+function installSong(song,id,versions){
+  stopRepeatAll();
+  if(T.playing) stopPlay();
+  T.sheet="";
+  screenTo("drums");
+  T.pat=0; T.focus=0; T.slot=0; T.kb=false;
+  T.noteSel={bass:-1,melody:-1}; T.noteDeg={bass:0,melody:0}; T.chordSel=-1; T.chordDeg=0;
+  setSong(song);
+  T.id=id;
+  T.meta.current=id;
+  T.versions=versions||[];
+  T.versionsOk=true;
+  T.dirty=false;
+  saveMeta();
+  renderAll();
+  loadVersions(id);
+}
+function newProject(){
+  var r=refs(), song, id;
+  if(!r || !T.metaOk || !T.loaded) return;
+  flush();
+  song=SONGS.newSong(Date.now());
+  id=LP.uid();
+  writeProject(id,song).then(function(ok){
+    if(!ok) return;
+    installSong(song,id,[]);
+    toast(tr("studio.proj.new"));
+  });
+}
+function openProject(id){
+  var r=refs();
+  if(!r || !T.loaded || !id) return;
+  if(id===T.id){ T.sheet=""; renderSheet(); return; }
+  flush();
+  r.items.doc(id).get().then(function(doc){
+    var got=doc.exists ? SONGS.validate(own(doc.data())) : null;
+    if(!got || !got.song){ toast(tr("studio.bad")); return; }
+    installSong(got.song,id,null);
+    toast(tr("studio.proj.opened",{name:got.song.name||tr("studio.proj.unnamed")}));
+  },function(e){
+    toast(tr("common.readfail",{msg:String((e&&e.code)||(e&&e.message)||e).slice(0,120)}));
+  });
+}
+function duplicateProject(){
+  if(!T.loaded || !T.song || !T.metaOk) return;
+  var song=JSON.parse(JSON.stringify(T.song)), id=LP.uid(), base=song.name||tr("studio.proj.unnamed");
+  song.name=clipName(base+" "+tr("studio.proj.copy.suffix"),SONGS.NAME_MAX);
+  writeProject(id,song).then(function(ok){
+    if(!ok) return;
+    installSong(song,id,[]);
+    toast(tr("studio.proj.copied"));
+  });
+}
+function deleteCurrentProject(){
+  var r=refs(), id=T.id;
+  if(!r || !id || !T.metaOk) return;
+  r.items.doc(id).delete().then(function(){
+    return r.versions.doc(id).delete();
+  }).then(function(){
+    return listProjects();
+  }).then(function(list){
+    var next=list.filter(function(p){ return p.id!==id; })[0];
+    T.sheet="";
+    if(next) installSong(next.song,next.id,null);
+    else {
+      var song=SONGS.newSong(Date.now()), nid=LP.uid();
+      return writeProject(nid,song).then(function(ok){ if(ok) installSong(song,nid,[]); });
+    }
+  }).then(function(){
+    T.sheet=""; renderAll();
+    toast(tr("studio.proj.deleted"));
+  },function(e){
+    toast(tr("common.savefail",{code:(e&&e.code)||tr("common.unknown")}));
+  });
 }
 
 /* ---------- sound and the loop ---------- */
@@ -264,6 +512,7 @@ function setSong(song){
   if(T.focus<0) T.focus=0;
   /* a whole different tape mid-song starts its own chain from where the ears are */
   if(T.playing && T.mode==="song") startSongPos(0,T.heard);
+  resetHistory();
 }
 /* ---------- tracks and the mixer (12.14) ---------- */
 function trackById(id){
@@ -274,6 +523,23 @@ function trackById(id){
 function trackVol(id){
   var tr=trackById(id);
   return tr && typeof tr.vol==="number" ? tr.vol : 1;
+}
+function screenTrack(){
+  if(T.screen==="drums") return "drums";
+  if(T.screen==="bass"||T.screen==="melody") return T.screen;
+  if(T.screen==="chords") return "chords";
+  return "";
+}
+function clearCurrentTrack(){
+  var track=screenTrack();
+  if(!track || !T.loaded || !T.song) return;
+  T.song=SONGS.clearTrack(T.song,T.pat,track);
+  if(track==="bass"||track==="melody") T.noteSel[track]=-1;
+  if(track==="chords") T.chordSel=-1;
+  touch();
+  T.sheet="";
+  renderAll();
+  toast(tr("studio.clear.done",{track:screenName(track)}));
 }
 function setTrackVol(id,vol){
   var tr=trackById(id);
@@ -563,6 +829,13 @@ function hushTip(){
   saveMeta();
   toast(tr("studio.hush"));
 }
+/* once: point a first-time player at the cross-screen guide, after the first screen's own tour is over */
+function guideTip(){
+  if(!T.meta || T.meta.guideTip || T.tour) return;
+  T.meta.guideTip=true;
+  saveMeta();
+  toast(tr("studio.guide.tip"));
+}
 function auditionDrum(){
   var synth=ensureSynth(), vol=trackVol("drums");
   if(!synth || !T.song) return;
@@ -715,6 +988,11 @@ function build(){
   }
   $("studio-mix-key").onclick=function(){ openSheet("key"); };
   $("studio-mix-sound").onclick=function(){ openSheet("sound"); };
+  $("studio-import-file").addEventListener("change",function(){
+    var f=this.files && this.files[0];
+    this.value="";
+    if(f) readWorkspace(f);
+  });
   var keys=$("studio-keys");
   for(i=0;i<8;i++){
     (function(deg){
@@ -1287,12 +1565,28 @@ function tourEnd(seen){
   if(visible()) layout();        /* the grid takes its normal size back */
 }
 /* ---------- sheets: the menu, the new-tape question and the pattern sheet ---------- */
-function openSheet(name){ T.sheet=name; renderSheet(); }
+function openSheet(name){
+  if(name==="guide") T.guidePage=0;
+  T.sheet=name;
+  renderSheet();
+}
 function closeSheet(){
-  if(T.sheet==="new"){ T.sheet="menu"; renderSheet(); return; }
-  if(T.sheet==="demo"){ T.sheet="menu"; renderSheet(); return; }
+  if(T.sheet==="new"||T.sheet==="demo"||T.sheet==="pop"){ T.sheet="menu"; renderSheet(); return; }
   if(T.sheet==="copyask"){ T.sheet="copy"; renderSheet(); return; }
+  if(T.sheet==="rename"||T.sheet==="projdel"){ T.sheet="projects"; renderSheet(); return; }
+  if(T.sheet==="versionask"){ T.sheet="versions"; renderSheet(); return; }
+  if(T.sheet==="importask"){ T.importData=null; T.sheet=""; renderSheet(); return; }
   if(T.sheet){ T.sheet=""; renderSheet(); }
+}
+/* the five pages of the cross-screen guide (12.15); each page is one idea and one thing to try */
+function guidePages(){
+  return [
+    {title:"studio.guide.1.t",body:"studio.guide.1.b"},
+    {title:"studio.guide.2.t",body:"studio.guide.2.b"},
+    {title:"studio.guide.3.t",body:"studio.guide.3.b"},
+    {title:"studio.guide.4.t",body:"studio.guide.4.b"},
+    {title:"studio.guide.5.t",body:"studio.guide.5.b"}
+  ];
 }
 function sheetRow(ul,label,small,onclick){
   var li=el("li");
@@ -1337,6 +1631,147 @@ function patternButtons(click,current){
   }
   return grid;
 }
+/* 12.16: the assistant sheet. The quick commands work with no key; a longer request goes to the AI line and comes
+   back as a preview, never straight into the song. */
+function aiState(){
+  if(T.aiBusy) return tr("studio.ai.thinking");
+  return LP.ai && LP.ai.on() ? tr("studio.ai.on") : tr("studio.ai.off");
+}
+function isAiDraft(pv){
+  return !!(pv && (pv.draft || (pv.ops && pv.ops.length===1 && pv.ops[0] && pv.ops[0].op==="replaceSong")));
+}
+function renderAiSheet(sh){
+  var head=sheetHead(tr("studio.ai.title"));
+  head.className+=" st-sheet-head";
+  sheetClose(head);
+  if(T.aiPreview){
+    var pr=el("div","st-ai-preview");
+    pr.appendChild(el("p","st-ai-reply",T.aiPreview.reply||tr("studio.ai.done")));
+    pr.appendChild(el("p","st-sheet-label",isAiDraft(T.aiPreview)?tr("studio.ai.newtape"):tr("studio.ai.ops",{n:T.aiPreview.ops.length})));
+    sh.appendChild(pr);
+    var arow=el("div","st-sheet-row");
+    if(T.aiPreview.ops.length || isAiDraft(T.aiPreview)){
+      var apply=el("button","st-sheet-btn",""); apply.type="button"; apply.textContent=tr("studio.ai.apply");
+      apply.onclick=function(){ applyAiPreview(true); };
+      arow.appendChild(apply);
+    }
+    var drop=el("button","st-sheet-btn",""); drop.type="button"; drop.textContent=tr("studio.ai.drop");
+    drop.onclick=function(){ T.aiPreview=null; renderSheet(); };
+    arow.appendChild(drop);
+    sh.appendChild(arow);
+    var brow=el("div","st-sheet-row");
+    var back=el("button","st-sheet-btn",""); back.type="button"; back.textContent=tr("studio.ai.retry");
+    back.onclick=function(){ T.aiPreview=null; renderSheet(); };
+    brow.appendChild(back);
+    sh.appendChild(brow);
+    return;
+  }
+  sh.appendChild(el("p","st-sheet-label",tr("studio.ai.hint")));
+  var input=el("input","st-name st-ai-input");
+  input.type="text";
+  input.maxLength=160;
+  input.id="studio-ai-input";
+  input.placeholder=tr("studio.ai.placeholder");
+  input.value=T.aiNote||"";
+  input.onkeydown=function(e){ if(e.key==="Enter"){ e.preventDefault(); askAi(input.value); } };
+  sh.appendChild(input);
+  var row=el("div","st-sheet-row");
+  var send=el("button","st-sheet-btn",""); send.type="button"; send.textContent=tr("studio.ai.send");
+  send.disabled=T.aiBusy;
+  send.onclick=function(){ askAi(input.value); };
+  row.appendChild(send);
+  sh.appendChild(row);
+  var chips=el("div","st-ai-chips");
+  var chip=function(label,text){
+    var b=el("button","st-ai-chip",label); b.type="button";
+    b.onclick=function(){ askAi(text); };
+    chips.appendChild(b);
+  };
+  chip(tr("studio.ai.chip.faster"),tr("studio.ai.chip.faster"));
+  chip(tr("studio.ai.chip.swing"),tr("studio.ai.chip.swing"));
+  chip(tr("studio.ai.chip.skeleton"),tr("studio.ai.chip.skeleton"));
+  sh.appendChild(chips);
+  var state=el("p","st-sheet-label st-ai-state",aiState());
+  state.id="studio-ai-state";
+  sh.appendChild(state);
+  if(T.aiBusy){
+    var stop=el("button","st-sheet-btn",""); stop.type="button"; stop.textContent=tr("studio.ai.stop");
+    stop.onclick=function(){ if(T.aiJob && T.aiJob.stop) T.aiJob.stop(); };
+    var srow=el("div","st-sheet-row"); srow.appendChild(stop); sh.appendChild(srow);
+  }
+}
+function applyAiPreview(play){
+  var pv=T.aiPreview;
+  if(!pv || !T.loaded || !T.song) return;
+  if(!pv.ops.length && !isAiDraft(pv)){ toast(pv.reply||tr("studio.ai.done")); return; }
+  var out=EDIT.apply(T.song,pv.ops);
+  if(out.error){ toast(tr("studio.ai.bad")); return; }
+  if(isAiDraft(pv)){
+    var song=out.song, id=LP.uid();
+    writeProject(id,song).then(function(ok){
+      if(!ok) return;
+      T.aiPreview=null;
+      T.aiNote="";
+      installSong(song,id,[]);
+      toast(tr("studio.ai.newdone"));
+      if(play) startPlay();
+    });
+    return;
+  }
+  saveVersion(tr("studio.version.before"));
+  T.aiPreview=null;
+  T.aiNote="";
+  T.song=out.song;
+  touch();
+  T.sheet="";
+  renderAll();
+  toast(tr("studio.ai.applied"));
+  if(play) startPlay();
+}
+function askAi(text){
+  text=String(text==null?"":text).trim();
+  if(!text || T.aiBusy) return;
+  T.aiNote=text;
+  var local=CMD ? CMD.parse(text,{pattern:T.pat,screen:T.screen}) : null;
+  if(local && local.ops.length){
+    var out=EDIT.apply(T.song,local.ops);
+    if(out.error){ toast(tr("studio.ai.bad")); return; }
+    T.song=out.song;
+    touch();
+    T.aiNote="";
+    T.sheet="";
+    renderAll();
+    if(local.note==="swing-global") toast(tr("studio.ai.swingglobal"));
+    else toast(tr("studio.ai.local"));
+    return;
+  }
+  if(!LP.ai || !LP.ai.on()){
+    if(/骨架|写一首|来一首|skeleton|song idea|new song/i.test(text)) toast(tr("studio.ai.nokey.template"));
+    else toast(tr("studio.ai.nokey"));
+    renderSheet();
+    return;
+  }
+  T.aiBusy=true;
+  T.aiPreview=null;
+  renderSheet();
+  var messages=STUDIOAI.messages(T.song,{screen:T.screen,pattern:T.pat,slot:T.slot},text);
+  var max=/骨架|写一首|来一首|skeleton|song idea|new song/i.test(text)?4000:2000;
+  var job=LP.ai.ask({messages:messages,max:max});
+  T.aiJob=job;
+  job.then(function(answer){
+    T.aiBusy=false; T.aiJob=null;
+    var got=STUDIOAI.parse(answer,Date.now());
+    if(got.error){ T.aiNote=text; toast(tr("studio.ai.unread")); renderSheet(); return; }
+    T.aiPreview={reply:got.reply,ops:got.ops,draft:!!got.draft};
+    T.aiNote=text;
+    renderSheet();
+  },function(e){
+    T.aiBusy=false; T.aiJob=null;
+    T.aiNote=text;
+    toast(e && e.code==="stopped" ? tr("studio.ai.stopped") : tr("studio.ai.fail",{why:LP.ai.err?LP.ai.err(e):""}));
+    renderSheet();
+  });
+}
 function renderSheet(){
   if(!T.built) return;
   var sh=$("studio-sheet"), i;
@@ -1349,14 +1784,27 @@ function renderSheet(){
   if(!T.sheet) return;
   if(T.sheet==="menu"){
     sheetHead(tr("studio.title"));
-    var ul=el("ul","lcd-menu");
-    if(T.loaded) sheetRow(ul,tr("studio.new"),"",function(){ openSheet("new"); });
-    if(T.loaded) sheetRow(ul,tr("studio.demo"),"",function(){ openSheet("demo"); });
+    var ul=el("ul","lcd-menu st-menu");
+    var undoRow=sheetRow(ul,tr("studio.undo"),"",function(){ undo(); });
+    if(!T.history.length){ undoRow.className="disabled"; undoRow.setAttribute("aria-disabled","true"); undoRow.onclick=null; }
+    var redoRow=sheetRow(ul,tr("studio.redo"),"",function(){ redo(); });
+    if(!T.redo.length){ redoRow.className="disabled"; redoRow.setAttribute("aria-disabled","true"); redoRow.onclick=null; }
+    if(T.loaded) sheetRow(ul,tr("studio.proj.library"),T.song&&T.song.name?T.song.name:tr("studio.proj.unnamed"),function(){ openSheet("projects"); loadProjects(); });
+    if(T.loaded) sheetRow(ul,tr("studio.versions"),String(T.versions.length),function(){ openSheet("versions"); });
+    sheetRow(ul,tr("studio.guide"),"",function(){ openSheet("guide"); });
+    if(T.loaded) sheetRow(ul,tr("studio.ai.open"),"",function(){ openSheet("ai"); });
+    var clearTrackNow=screenTrack();
+    if(T.song && T.loaded && clearTrackNow) sheetRow(ul,tr("studio.clear.track",{track:screenName(clearTrackNow)}),"",function(){ clearCurrentTrack(); });
     if(T.song && T.loaded) sheetRow(ul,tr("studio.kit",{kit:tr("studio.kit."+T.song.kit)}),"",function(){
       T.song.kit=T.song.kit==="soft" ? "chip" : "soft";
       touch(); renderSheet();
     });
     if(T.song && T.loaded) sheetRow(ul,tr("studio.export"),"WAV",function(){ exportWav(); });
+    if(T.loaded) sheetRow(ul,tr("studio.workspace.export"),"ZIP",function(){ exportWorkspace(); });
+    if(T.loaded) sheetRow(ul,tr("studio.workspace.import"),"ZIP",function(){ $("studio-import-file").click(); });
+    if(T.loaded) sheetRow(ul,tr("studio.new"),"",function(){ openSheet("new"); });
+    if(T.loaded) sheetRow(ul,tr("studio.demo"),"",function(){ openSheet("demo"); });
+    if(T.loaded) sheetRow(ul,tr("studio.pop"),"",function(){ openSheet("pop"); });
     /* no chin pad here, so the way out of the menu has to be on screen */
     sheetRow(ul,tr("studio.back"),"",function(){ closeSheet(); });
     sh.appendChild(ul);
@@ -1396,6 +1844,24 @@ function renderSheet(){
     drow.appendChild(dyes); drow.appendChild(dno);
     askDemo.appendChild(drow);
     sh.appendChild(askDemo);
+    return;
+  }
+  if(T.sheet==="pop"){
+    sheetHead(tr("studio.pop"));
+    var askPop=el("div","st-ask");
+    askPop.appendChild(el("p","",tr("studio.pop.ask")));
+    var prow=el("div","row");
+    var pyes=el("button","btn","");
+    pyes.type="button";
+    pyes.textContent=tr("studio.confirm");
+    pyes.onclick=function(){ popTape(); };
+    var pno=el("button","btn ghost","");
+    pno.type="button";
+    pno.textContent=tr("common.cancel");
+    pno.onclick=function(){ closeSheet(); };
+    prow.appendChild(pyes); prow.appendChild(pno);
+    askPop.appendChild(prow);
+    sh.appendChild(askPop);
     return;
   }
   if(T.sheet==="pattern"){
@@ -1456,6 +1922,173 @@ function renderSheet(){
     if(chain.length<=1){ delRow.className="disabled"; delRow.setAttribute("aria-disabled","true"); delRow.onclick=null; }
     sheetRow(sul,tr("studio.back"),"",function(){ closeSheet(); });
     sh.appendChild(sul);
+    return;
+  }
+  if(T.sheet==="projects"){
+    var phead=sheetHead(tr("studio.proj.library"));
+    phead.className+=" st-sheet-head";
+    sheetClose(phead);
+    var plist=el("ul","lcd-menu st-proj-list"), p, prow, i2;
+    if(T.projectsLoading){
+      plist.appendChild(el("li","disabled",tr("common.reading")));
+    } else if(T.projects && T.projects.length){
+      for(i2=0;i2<T.projects.length;i2++){
+        (function(item){
+          p=el("li",item.id===T.id?"on":"");
+          p.appendChild(el("span","",item.song.name||tr("studio.proj.unnamed")));
+          p.appendChild(el("small","",LP.fmt(item.song.updated)));
+          p.onclick=function(){ openProject(item.id); };
+          plist.appendChild(p);
+        })(T.projects[i2]);
+      }
+    } else {
+      plist.appendChild(el("li","disabled",tr("studio.proj.none")));
+    }
+    sh.appendChild(plist);
+    var pacts=el("ul","lcd-menu st-proj-actions");
+    sheetRow(pacts,tr("studio.proj.new"),"",function(){ newProject(); });
+    sheetRow(pacts,tr("studio.proj.rename"),"",function(){ openSheet("rename"); });
+    sheetRow(pacts,tr("studio.proj.dup"),"",function(){ duplicateProject(); });
+    sheetRow(pacts,tr("studio.proj.del"),"",function(){ openSheet("projdel"); });
+    sheetRow(pacts,tr("studio.back"),"",function(){ closeSheet(); });
+    sh.appendChild(pacts);
+    return;
+  }
+  if(T.sheet==="rename"){
+    var rhead=sheetHead(tr("studio.proj.rename"));
+    rhead.className+=" st-sheet-head";
+    sheetClose(rhead);
+    var inp=el("input","st-name");
+    inp.type="text";
+    inp.maxLength=SONGS.NAME_MAX;
+    inp.value=(T.song&&T.song.name)||"";
+    inp.setAttribute("aria-label",tr("studio.proj.name"));
+    inp.placeholder=tr("studio.proj.unnamed");
+    sh.appendChild(inp);
+    var rrow=el("div","st-sheet-row");
+    var saveName=el("button","st-sheet-btn",""); saveName.type="button"; saveName.textContent=tr("studio.confirm");
+    saveName.onclick=function(){
+      if(!T.loaded||!T.song) return;
+      T.song.name=clipName(String(inp.value||"").trim(),SONGS.NAME_MAX);
+      touch();
+      T.sheet="projects";
+      renderAll();
+      writeProject(T.id,T.song).then(function(ok){
+        if(ok){ T.dirty=false; loadProjects(); }
+      });
+    };
+    var cancelName=el("button","st-sheet-btn",""); cancelName.type="button"; cancelName.textContent=tr("common.cancel");
+    cancelName.onclick=function(){ openSheet("projects"); };
+    rrow.appendChild(saveName); rrow.appendChild(cancelName);
+    sh.appendChild(rrow);
+    setTimeout(function(){ try{ inp.focus(); }catch(e){} },0);
+    return;
+  }
+  if(T.sheet==="projdel"){
+    sheetHead(tr("studio.proj.del"));
+    var dask=el("div","st-ask");
+    dask.appendChild(el("p","",tr("studio.proj.del.ask",{name:(T.song&&T.song.name)||tr("studio.proj.unnamed")})));
+    var drow2=el("div","row");
+    var dyes=el("button","btn",""); dyes.type="button"; dyes.textContent=tr("studio.proj.del.yes");
+    dyes.onclick=function(){ deleteCurrentProject(); };
+    var dno=el("button","btn ghost",""); dno.type="button"; dno.textContent=tr("common.cancel");
+    dno.onclick=function(){ openSheet("projects"); };
+    drow2.appendChild(dyes); drow2.appendChild(dno);
+    dask.appendChild(drow2);
+    sh.appendChild(dask);
+    return;
+  }
+  if(T.sheet==="versions"){
+    var vhead=sheetHead(tr("studio.versions"));
+    vhead.className+=" st-sheet-head";
+    sheetClose(vhead);
+    var vlist=el("ul","lcd-menu st-proj-list"), v, vr, vi;
+    vr=el("li");
+    vr.appendChild(el("span","",tr("studio.version.save")));
+    vr.onclick=function(){ saveVersion("").then(function(ok){ if(ok){ toast(tr("studio.version.saved")); renderSheet(); } }); };
+    vlist.appendChild(vr);
+    if(!T.versionsOk){
+      vlist.appendChild(el("li","disabled",tr("common.reading")));
+    } else if(T.versions.length){
+      for(vi=0;vi<T.versions.length;vi++){
+        (function(n){
+          v=el("li");
+          v.appendChild(el("span","",LP.fmt(T.versions[n].at)));
+          v.appendChild(el("small","",T.versions[n].name||tr("studio.version.auto")));
+          v.onclick=function(){ T.versionPick=n; openSheet("versionask"); };
+          vlist.appendChild(v);
+        })(vi);
+      }
+    } else {
+      vlist.appendChild(el("li","disabled",tr("studio.version.none")));
+    }
+    sh.appendChild(vlist);
+    var vacts=el("ul","lcd-menu st-proj-actions");
+    sheetRow(vacts,tr("studio.back"),"",function(){ closeSheet(); });
+    sh.appendChild(vacts);
+    return;
+  }
+  if(T.sheet==="versionask"){
+    var ver=T.versions[T.versionPick||0];
+    sheetHead(tr("studio.version.restore"));
+    var vask=el("div","st-ask");
+    vask.appendChild(el("p","",tr("studio.version.ask",{time:ver?LP.fmt(ver.at):""})));
+    var vrow=el("div","row");
+    var vyes=el("button","btn",""); vyes.type="button"; vyes.textContent=tr("studio.confirm");
+    vyes.onclick=function(){
+      if(!ver) return;
+      saveVersion(tr("studio.version.before"));
+      T.sheet="";
+      restoreSong(JSON.parse(JSON.stringify(ver.song)));
+      renderSheet();
+      toast(tr("studio.version.restored"));
+    };
+    var vno=el("button","btn ghost",""); vno.type="button"; vno.textContent=tr("common.cancel");
+    vno.onclick=function(){ openSheet("versions"); };
+    vrow.appendChild(vyes); vrow.appendChild(vno);
+    vask.appendChild(vrow);
+    sh.appendChild(vask);
+    return;
+  }
+  if(T.sheet==="importask"){
+    sheetHead(tr("studio.workspace.import"));
+    var iask=el("div","st-ask");
+    iask.appendChild(el("p","",tr("studio.workspace.ask")));
+    var irow=el("div","row");
+    var iyes=el("button","btn",""); iyes.type="button"; iyes.textContent=tr("studio.confirm");
+    iyes.onclick=function(){ applyWorkspaceImport(); };
+    var ino=el("button","btn ghost",""); ino.type="button"; ino.textContent=tr("common.cancel");
+    ino.onclick=function(){ T.importData=null; T.sheet=""; renderSheet(); };
+    irow.appendChild(iyes); irow.appendChild(ino);
+    iask.appendChild(irow);
+    sh.appendChild(iask);
+    return;
+  }
+  if(T.sheet==="guide"){
+    var pages=guidePages();
+    if(T.guidePage<0) T.guidePage=0;
+    if(T.guidePage>=pages.length) T.guidePage=pages.length-1;
+    var ghead=sheetHead(tr("studio.guide.page",{n:T.guidePage+1,total:pages.length}));
+    ghead.className+=" st-sheet-head";
+    sheetClose(ghead);
+    var g=el("div","st-guide");
+    g.appendChild(el("h4","",tr(pages[T.guidePage].title)));
+    var gp=el("p","st-guide-text",tr(pages[T.guidePage].body));
+    g.appendChild(gp);
+    sh.appendChild(g);
+    var grow=el("div","st-sheet-row");
+    var prevB=el("button","st-sheet-btn",""); prevB.type="button"; prevB.textContent=tr("studio.guide.prev");
+    prevB.disabled=T.guidePage<=0;
+    prevB.onclick=function(){ if(T.guidePage>0){ T.guidePage--; renderSheet(); } };
+    var nextB=el("button","st-sheet-btn",""); nextB.type="button";
+    nextB.textContent=tr(T.guidePage>=pages.length-1?"studio.guide.done":"studio.guide.next");
+    nextB.onclick=function(){ if(T.guidePage>=pages.length-1) closeSheet(); else { T.guidePage++; renderSheet(); } };
+    grow.appendChild(prevB); grow.appendChild(nextB);
+    sh.appendChild(grow);
+    return;
+  }
+  if(T.sheet==="ai"){
+    renderAiSheet(sh);
     return;
   }
   if(T.sheet==="key"){
@@ -1555,6 +2188,8 @@ function swapTape(song){
   T.noteSel={bass:-1,melody:-1}; T.noteDeg={bass:0,melody:0}; T.chordSel=-1; T.chordDeg=0;
   T.queued=-1; T.pendingPat=-1; T.boundaryGlobal=0; T.chainPat=0; T.playPat=0;
   setSong(song);
+  T.versions=[]; T.versionsOk=true;
+  if(T.id && T.metaOk) writeVersions();
   if(T.playing){ T.lastTick=Math.max(T.lastTick,T.heard+1); T.painted=null; }
   T.dirty=true;
   T.sheet="";
@@ -1569,6 +2204,13 @@ function newTape(){
 function demoTape(){
   if(!T.loaded) return;
   swapTape(SONGS.demoSong(Date.now()));
+}
+function popTape(){
+  var song;
+  if(!T.loaded) return;
+  song=SONGS.popSong(Date.now());
+  song.name=tr("studio.pop.name");
+  swapTape(song);
 }
 /* ---------- WAV export (12.14) ----------
    One full pass of the chain, rendered offline through the same synth and tape chain as the live player, then written
@@ -1629,6 +2271,162 @@ function exportWav(){
     toast(tr("studio.export.fail"));
   });
 }
+/* ---------- the workspace zip (12.15) ----------
+   This is the tape machine's own backup, not the whole-device one in Settings: workspace.json, every project and every
+   project's versions. It is stored (not deflated) by zip.js, so a Node test can read it and a phone can import it
+   without an inflate implementation. */
+function workspaceName(){
+  var d=new Date();
+  return "tape4-workspace-"+d.getFullYear()+LP.pad2(d.getMonth()+1)+LP.pad2(d.getDate())+".zip";
+}
+function utf8Decode(bytes){ return new TextDecoder().decode(bytes); }
+function workspaceEntries(){
+  var r=refs();
+  if(!r || !T.metaOk) return Promise.reject(new Error("unavailable"));
+  return r.items.get().then(function(items){
+    return r.versions.get().then(function(versions){
+      var entries=[], i, id, data, vers, doc;
+      entries.push({name:"workspace.json",data:JSON.stringify({v:1,current:T.id,
+        meta:{toured:T.meta.toured||{},hushTip:!!T.meta.hushTip,guideTip:!!T.meta.guideTip}})});
+      for(i=0;i<items.docs.length;i++){
+        doc=items.docs[i];
+        id=doc.id;
+        data=id===T.id ? JSON.parse(JSON.stringify(T.song)) : doc.data();
+        entries.push({name:"items/"+id+".json",data:JSON.stringify(data)});
+      }
+      if(!items.docs.some(function(d){ return d.id===T.id; })){
+        entries.push({name:"items/"+T.id+".json",data:JSON.stringify(T.song)});
+      }
+      for(i=0;i<versions.docs.length;i++){
+        doc=versions.docs[i];
+        id=doc.id;
+        if(id===T.id) data={v:1,versions:T.versions};
+        else data=doc.data();
+        entries.push({name:"versions/"+id+".json",data:JSON.stringify(data)});
+      }
+      /* the current tape may not have been read into the collection yet (the first save is in flight) */
+      if(!versions.docs.some(function(d){ return d.id===T.id; })) entries.push({name:"versions/"+T.id+".json",data:JSON.stringify({v:1,versions:T.versions})});
+      return entries;
+    });
+  });
+}
+function exportWorkspace(){
+  if(T.exporting || !T.loaded || !T.song) return;
+  if(!ZIP || !LP.S.downloads){ toast(tr("studio.export.fail")); return; }
+  T.sheet="";
+  if(T.built) renderSheet();
+  T.exporting=true;
+  toast(tr("studio.workspace.exporting"));
+  workspaceEntries().then(function(entries){
+    var parts=ZIP.writeParts(entries);
+    return LP.S.downloads.save({filename:workspaceName(),data:new Blob(parts,{type:"application/zip"})});
+  }).then(function(res){
+    T.exporting=false;
+    if(res && res.status==="saved") toast(tr("studio.workspace.exported"));
+  },function(e){
+    T.exporting=false;
+    if(!(e && e.code==="declined")) toast(e && e.message==="unavailable" ? tr("studio.export.fail") : (LP.saveErr ? LP.saveErr(e) : tr("studio.export.fail")));
+  });
+}
+function readWorkspace(file){
+  if(!ZIP || !file) return;
+  if(!file.arrayBuffer){ toast(tr("studio.workspace.bad")); return; }
+  file.arrayBuffer().then(function(buf){
+    var u8=new Uint8Array(buf), list, i, name, plan={meta:null,items:[],versions:[],current:""}, entry;
+    try{ list=ZIP.list(u8); }catch(e){ toast(tr("studio.workspace.bad")); return; }
+    function read(name){
+      var e=list.filter(function(x){ return x.name===name; })[0];
+      if(!e) return null;
+      return ZIP.read(u8,e).then(function(bytes){ return utf8Decode(bytes); });
+    }
+    var wjob=read("workspace.json");
+    if(!wjob){ toast(tr("studio.workspace.bad")); return; }
+    wjob.then(function(text){
+      var w;
+      try{ w=JSON.parse(text); }catch(e){ throw new Error("workspace"); }
+      if(!w || !w.meta) throw new Error("workspace");
+      plan.meta=w.meta; plan.current=typeof w.current==="string" ? w.current : "";
+      var jobs=[];
+      for(i=0;i<list.length;i++){
+        name=list[i].name;
+        if(/^items\/[^/]+\.json$/.test(name)){
+          (function(n){
+            jobs.push(read(n).then(function(t){
+              var doc=JSON.parse(t), got=SONGS.validate(doc);
+              if(!got.song) throw new Error("item");
+              plan.items.push({id:n.slice(6,-5),song:got.song});
+            }));
+          })(name);
+        } else if(/^versions\/[^/]+\.json$/.test(name)){
+          (function(n){
+            jobs.push(read(n).then(function(t){
+              var doc=JSON.parse(t), list2=doc&&Array.isArray(doc.versions)?doc.versions:[], out=[], j, got;
+              for(j=0;j<list2.length && out.length<10;j++){
+                if(!list2[j] || typeof list2[j].at!=="number") continue;
+                got=SONGS.validate(list2[j].song);
+                if(!got.song) throw new Error("version");
+                out.push({at:list2[j].at,name:typeof list2[j].name==="string"?list2[j].name.slice(0,40):"",song:got.song});
+              }
+              plan.versions.push({id:n.slice(9,-5),versions:out});
+            }));
+          })(name);
+        }
+      }
+      return Promise.all(jobs);
+    }).then(function(){
+      if(!plan.items.length) throw new Error("empty");
+      if(!plan.current || !plan.items.some(function(x){ return x.id===plan.current; })) plan.current=plan.items[0].id;
+      T.importData=plan;
+      openSheet("importask");
+    },function(){
+      T.importData=null;
+      toast(tr("studio.workspace.bad"));
+    });
+  },function(e){
+    toast(tr("common.readfail",{msg:String((e&&e.message)||e).slice(0,120)}));
+  });
+}
+function applyWorkspaceImport(){
+  var plan=T.importData, r=refs(), i, jobs=[];
+  if(!plan || !r || !T.metaOk) return;
+  if(T.playing) stopPlay();
+  stopRepeatAll();
+  tourEnd(false);
+  T.importData=null;
+  T.sheet="";
+  renderSheet();
+  T.exporting=true;
+  r.items.get().then(function(items){
+    for(i=0;i<items.docs.length;i++) jobs.push(r.items.doc(items.docs[i].id).delete());
+    return r.versions.get();
+  }).then(function(versions){
+    for(i=0;i<versions.docs.length;i++) jobs.push(r.versions.doc(versions.docs[i].id).delete());
+    return Promise.all(jobs);
+  }).then(function(){
+    var writes=[];
+    for(i=0;i<plan.items.length;i++){
+      (function(item){ writes.push(r.items.doc(item.id).set(item.song)); })(plan.items[i]);
+    }
+    for(i=0;i<plan.versions.length;i++){
+      (function(v){ writes.push(r.versions.doc(v.id).set({v:1,versions:v.versions})); })(plan.versions[i]);
+    }
+    return Promise.all(writes);
+  }).then(function(){
+    T.meta={toured:plan.meta.toured||{},hushTip:!!plan.meta.hushTip,guideTip:!!plan.meta.guideTip,current:plan.current};
+    saveMeta();
+    T.loaded=false; T.loading=null; T.song=null; T.id=""; T.metaOk=false; T.versions=[]; T.versionsOk=false;
+    T.history=[]; T.redo=[]; T.snap=null;
+    return loadStore();
+  }).then(function(){
+    T.exporting=false;
+    renderAll();
+    toast(tr("studio.workspace.imported"));
+  },function(e){
+    T.exporting=false;
+    toast(tr("common.savefail",{code:(e&&e.code)||tr("common.unknown")}));
+  });
+}
+
 /* ---------- taps and keys ---------- */
 /* the one screen switch: leaving a screen mid-tour ends that tour unseen (it shows again next time) */
 function screenTo(s){
@@ -1982,6 +2780,8 @@ document.addEventListener("keydown",function(e){
   }
   else if(key==="Enter"){ if(e.repeat) return; togglePlay(); }
   else if(key==="Shift"){ if(e.repeat) return; if(!T.sheet && T.screen==="drums") nextDrum(); }
+  else if((e.metaKey||e.ctrlKey) && (key==="z"||key==="Z")){ if(e.repeat) return; if(e.shiftKey) redo(); else undo(); }
+  else if((e.metaKey||e.ctrlKey) && (key==="y"||key==="Y")){ if(e.repeat) return; redo(); }
   else if(key==="z"||key==="Z"){ if(e.repeat) return; if(T.sheet) closeSheet(); else if(T.tour) tourEnd(true); }
   else done=false;
   if(done) e.preventDefault();
@@ -2018,8 +2818,8 @@ function open(){
   renderAll();
   layout();
   setTimeout(layout,0);
-  if(T.loaded) maybeTour();
-  else if(S.db) loadStore().then(function(){ if(visible()) maybeTour(); });
+  if(T.loaded){ maybeTour(); guideTip(); }
+  else if(S.db) loadStore().then(function(){ if(visible()){ maybeTour(); guideTip(); } });
 }
 function leave(){
   stopRepeatAll();
@@ -2042,12 +2842,12 @@ LP.builtin({id:"studio", label:"app.studio", icon:function(){ return ICON; }, vi
   ready:function(){
     if(!S.db) return;
     refs();
-    if(visible()) loadStore().then(function(){ if(visible()) maybeTour(); });
+    if(visible()) loadStore().then(function(){ if(visible()){ maybeTour(); guideTip(); } });
   },
   nostore:function(){
     ensureLocal();
     T.loaded=true;
     T.metaOk=false;            /* no store: a local tape, playable but never saved */
-    if(visible()){ renderAll(); maybeTour(); }
+    if(visible()){ renderAll(); maybeTour(); guideTip(); }
   }});
 })();

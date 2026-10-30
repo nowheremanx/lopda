@@ -862,7 +862,7 @@ test("studio: a new tape while playing keeps the beat going at the new tempo", {
   assert.ok(before > 0, "the 120 BPM tape is scheduling hits");
 
   await p.click("#studio-menu");
-  await p.locator("#studio-sheet .lcd-menu li").first().click();       /* 新磁带 */
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "新磁带" }).first().click();
   await p.locator("#studio-sheet .st-ask .btn").first().click();       /* 确认 */
   const at = Date.now();
   await p.waitForFunction((n) => window.__studioHits.length > n, before, { timeout: 1500 });
@@ -1089,11 +1089,17 @@ test("studio tour: a sheet hides the tour, is fully tappable, and the bubble com
   assert.match(await tourText(p), /调快慢/, "step 5 is showing");
   await p.click("#studio-menu");
   await p.waitForSelector("#studio-sheet:not([hidden])");
+  if (await p.isVisible("#toast")) await p.waitForSelector("#toast", { state: "hidden" });
 
   const open = await p.evaluate(() => {
     const box = document.querySelector("#v-studio .st-tour-box");
     const hi = document.querySelector("#v-studio .st-tour-hi");
-    const rows = [...document.querySelectorAll("#studio-sheet .lcd-menu li")].map((li) => {
+    const menu = document.querySelector("#studio-sheet .lcd-menu");
+    const sh = menu.getBoundingClientRect();
+    const rows = [...menu.querySelectorAll("li")].filter((li) => {
+      const r = li.getBoundingClientRect();
+      return r.top >= sh.top - 1 && r.bottom <= sh.bottom + 1;
+    }).map((li) => {
       const r = li.getBoundingClientRect();
       const e = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
       return { text: li.textContent.trim(), hit: !!(e && (e === li || li.contains(e))) };
@@ -1106,8 +1112,10 @@ test("studio tour: a sheet hides the tour, is fully tappable, and the bubble com
   assert.ok(open.rows.length >= 3, `the menu has its rows (${JSON.stringify(open.rows)})`);
   for (const row of open.rows) assert.ok(row.hit, `the row's centre reaches it: ${row.text}`);
 
-  /* 返回 is the last row: its centre closes the sheet */
-  const back = await p.locator("#studio-sheet .lcd-menu li").last().boundingBox();
+  /* 返回 is the last row: scroll it into the menu's view, then its centre closes the sheet */
+  const backRow = p.locator("#studio-sheet .lcd-menu li").last();
+  await backRow.scrollIntoViewIfNeeded();
+  const back = await backRow.boundingBox();
   await p.mouse.click(back.x + back.width / 2, back.y + back.height / 2);
   await p.waitForSelector("#studio-sheet", { state: "hidden" });
   assert.equal(await tourBox(p).isVisible(), true, "the bubble is back after the sheet closes");
@@ -2458,8 +2466,8 @@ test("studio: the demo tape loads 24 slots and survives a reload", { skip, timeo
   await p.click("#studio-menu");
   await p.waitForSelector("#studio-sheet:not([hidden])");
   const items = await p.$$eval("#studio-sheet .lcd-menu li", (els) => els.map((e) => e.textContent.trim()));
-  assert.equal(items[0], "新磁带", "the new tape stays first");
-  assert.equal(items[1], "示例磁带", "the demo tape sits right under it");
+  assert.ok(items.includes("新磁带"), "the new tape is in the menu");
+  assert.ok(items.indexOf("示例磁带") > items.indexOf("新磁带"), "the demo tape sits under it");
   await p.locator("#studio-sheet .lcd-menu li", { hasText: "示例磁带" }).click();
   await p.waitForSelector("#studio-sheet .st-ask");
   assert.match(await p.textContent("#studio-sheet .st-ask p"), /换成示例磁带？这一盘上的东西都会清掉。/);
@@ -2834,6 +2842,10 @@ test("studio: every screen fits at 375x667 with 44 px buttons and 56 px grid cel
     for (const e of sh.querySelectorAll("*")) {
       const r = e.getBoundingClientRect();
       if (r.width <= 0 || r.height <= 0) continue;
+      const box = e.closest(".lcd-menu");
+      const scrolls = box && box !== e && box.scrollHeight > box.clientHeight + 1;
+      /* a tall menu is a scroll box: its off-screen rows are allowed, but a row that spills sideways is not */
+      if (scrolls && !(r.left < vr.left - 1 || r.right > vr.right + 1)) continue;
       if (r.left < vr.left - 1 || r.right > vr.right + 1 || r.top < vr.top - 1 || r.bottom > vr.bottom + 1) {
         out.push({ tag: e.tagName, cls: String(e.className).slice(0, 40) });
       }
@@ -3036,5 +3048,305 @@ test("studio: HOME stops the song player too", { skip, timeout: 60000 }, async (
   assert.equal(await p.getAttribute("#v-studio", "data-play-slot"), "");
   assert.equal(await p.getAttribute("#v-studio", "data-play-pat"), "");
   assert.equal(await p.locator("#v-studio .st-chain-cell.playing").count(), 0);
+  assert.deepEqual(errors, []);
+});
+
+/* ---------------- 12.15/12.16: projects, undo, versions, the workspace, the guide and the AI ---------------- */
+test("studio: undo and redo from the menu put an edit back and take it away again", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  const cell = p.locator('#studio-grid .st-cell[data-step="0"]');
+  assert.equal(await cell.evaluate((e) => e.classList.contains("on")), true, "the demo kick starts on");
+  await cell.click();
+  assert.equal(await cell.evaluate((e) => e.classList.contains("on")), false);
+  await p.click("#studio-menu");
+  await p.waitForSelector("#studio-sheet:not([hidden])");
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "撤销" }).first().click();
+  assert.equal(await cell.evaluate((e) => e.classList.contains("on")), true, "undo brings the kick back");
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "重做" }).first().click();
+  assert.equal(await cell.evaluate((e) => e.classList.contains("on")), false, "redo removes it again");
+  assert.deepEqual(errors, []);
+});
+
+test("studio: the tape library renames, opens, copies and deletes tapes", { skip, timeout: 90000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  const openLibrary = async () => {
+    if (await p.isHidden("#studio-sheet")) {
+      await p.click("#studio-menu");
+      await p.waitForSelector("#studio-sheet:not([hidden])");
+    }
+    await p.locator("#studio-sheet .lcd-menu li", { hasText: "磁带库" }).click();
+    await p.waitForSelector("#studio-sheet .st-proj-list");
+    await p.waitForFunction(() => !/读取中/.test((document.querySelector("#studio-sheet .st-proj-list") || {}).textContent || ""));
+  };
+  await openLibrary();
+  assert.equal(await p.locator("#studio-sheet .st-proj-list li").count(), 1, "one tape at first");
+  await p.locator("#studio-sheet .st-proj-actions li", { hasText: "改名" }).click();
+  await p.waitForSelector("#studio-sheet .st-name");
+  await p.fill("#studio-sheet .st-name", "第一盘");
+  await p.locator("#studio-sheet .st-sheet-btn", { hasText: "确认" }).click();
+  await p.waitForFunction(() => /第一盘/.test((document.querySelector("#studio-sheet .st-proj-list") || {}).textContent || ""));
+
+  await p.locator("#studio-sheet .st-proj-actions li", { hasText: "新磁带" }).click();
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  await p.locator('#studio-grid .st-cell[data-step="3"]').click();      /* step 4, not in the demo */
+  await waitKicks(p, 0, [0, 3, 7, 10]);
+  await openLibrary();
+  assert.equal(await p.locator("#studio-sheet .st-proj-list li").count(), 2, "the library holds both tapes");
+  await p.locator("#studio-sheet .st-proj-list li", { hasText: "第一盘" }).click();
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  assert.equal(await cellOn(p, 3), false, "the first tape did not get the second tape's step 4");
+  await openLibrary();
+  await p.locator("#studio-sheet .st-proj-list li", { hasText: "未命名磁带" }).click();
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  assert.equal(await cellOn(p, 3), true, "the second tape still has its step 4");
+
+  await openLibrary();
+  await p.locator("#studio-sheet .st-proj-actions li", { hasText: "复制这一盘" }).click();
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  await openLibrary();
+  assert.equal(await p.locator("#studio-sheet .st-proj-list li").count(), 3, "the copy is a third tape");
+  assert.match(await p.textContent("#studio-sheet .st-proj-list"), /未命名磁带 副本/);
+  await p.locator("#studio-sheet .st-proj-actions li", { hasText: "删掉这一盘" }).click();
+  await p.waitForSelector("#studio-sheet .st-ask");
+  await p.locator("#studio-sheet .st-ask .btn", { hasText: "删掉" }).click();
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  await openLibrary();
+  assert.equal(await p.locator("#studio-sheet .st-proj-list li").count(), 2, "the copy is gone");
+  assert.deepEqual(errors, []);
+});
+
+test("studio: a version saves the tape and restores it after a change, across a reload", { skip, timeout: 90000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await p.click("#studio-plus");
+  await p.click("#studio-plus");
+  assert.match(await p.textContent("#studio-bpm"), /86 BPM/);
+  const openVersions = async () => {
+    if (await p.isHidden("#studio-sheet")) {
+      await p.click("#studio-menu");
+      await p.waitForSelector("#studio-sheet:not([hidden])");
+    }
+    await p.locator("#studio-sheet .lcd-menu li", { hasText: "版本" }).first().click();
+    await p.waitForSelector("#studio-sheet .st-proj-list");
+    await p.waitForFunction(() => !/读取中/.test((document.querySelector("#studio-sheet .st-proj-list") || {}).textContent || ""));
+  };
+  await openVersions();
+  await p.locator("#studio-sheet .st-proj-list li", { hasText: "存一个版本" }).click();
+  await p.waitForFunction(() => document.querySelectorAll("#studio-sheet .st-proj-list li").length === 2);
+  await p.locator("#studio-sheet .st-proj-list li").last().click();       /* the saved version */
+  await p.waitForSelector("#studio-sheet .st-ask");
+  await p.locator("#studio-sheet .st-ask .btn", { hasText: "确认" }).click();
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+
+  await p.click("#studio-plus");
+  await p.click("#studio-plus");
+  assert.match(await p.textContent("#studio-bpm"), /90 BPM/);
+  await openVersions();
+  assert.equal(await p.locator("#studio-sheet .st-proj-list li").count(), 3, "saving before a restore adds a version");
+  await p.locator("#studio-sheet .st-proj-list li").nth(2).click();      /* the 86 BPM version */
+  await p.waitForSelector("#studio-sheet .st-ask");
+  await p.locator("#studio-sheet .st-ask .btn", { hasText: "确认" }).click();
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  assert.match(await p.textContent("#studio-bpm"), /86 BPM/, "the version's tempo is back");
+
+  await p.click("#home-key");
+  await p.waitForTimeout(250);
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await openTile(p);
+  assert.match(await p.textContent("#studio-bpm"), /86 BPM/, "the restored tempo survives the reload");
+  await p.click("#studio-menu");
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "版本" }).first().click();
+  await p.waitForSelector("#studio-sheet .st-proj-list");
+  assert.equal(await p.locator("#studio-sheet .st-proj-list li").count(), 4, "the save row and three versions are still there after the reload");
+  assert.deepEqual(errors, []);
+});
+
+test("studio: the workspace zip comes back with every tape and version", { skip, timeout: 90000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await p.evaluate(() => {
+    window.__ws = null;
+    LopdaPlatform.downloads.save = async ({ filename, data }) => {
+      window.__ws = { filename, bytes: Array.from(new Uint8Array(await data.arrayBuffer())) };
+      return { status: "saved" };
+    };
+  });
+  await p.click("#studio-menu");
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "导出工作区" }).click();
+  await p.waitForFunction(() => window.__ws, null, { timeout: 30000 });
+  const ws = await p.evaluate(() => window.__ws);
+  assert.match(ws.filename, /^tape4-workspace-\d{8}\.zip$/);
+  await p.locator('#studio-grid .st-cell[data-step="0"]').click();       /* a change the import should undo */
+  assert.equal(await cellOn(p, 0), false);
+  await p.setInputFiles("#studio-import-file", { name: "workspace.zip", mimeType: "application/zip", buffer: Buffer.from(ws.bytes) });
+  await p.waitForSelector("#studio-sheet .st-ask", { timeout: 30000 });
+  await p.locator("#studio-sheet .st-ask .btn", { hasText: "确认" }).click();
+  await p.waitForFunction(() => document.querySelector("#v-studio").getAttribute("data-loaded") === "true", null, { timeout: 30000 });
+  await p.waitForFunction(() => document.querySelector('#studio-grid .st-cell[data-step="0"]').classList.contains("on"));
+  assert.deepEqual(errors, []);
+});
+
+test("studio: the guide, the pop example and clear-track", { skip, timeout: 90000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await p.click("#studio-menu");
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "怎么玩" }).click();
+  await p.waitForSelector("#studio-sheet .st-guide");
+  assert.match(await p.textContent("#studio-sheet .sheet-title"), /怎么玩 1\/5/);
+  for (let i = 0; i < 4; i++) await p.locator("#studio-sheet .st-sheet-btn", { hasText: "下一步" }).click();
+  assert.match(await p.textContent("#studio-sheet .sheet-title"), /怎么玩 5\/5/);
+  await p.locator("#studio-sheet .st-sheet-btn", { hasText: "开始玩" }).click();
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+
+  await p.click("#studio-menu");
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "流行示例" }).click();
+  await p.waitForSelector("#studio-sheet .st-ask");
+  await p.locator("#studio-sheet .st-ask .btn", { hasText: "确认" }).click();
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  assert.match(await p.textContent("#studio-bpm"), /96 BPM/);
+  await p.click('#studio-screens .st-scr[data-screen="song"]');
+  await skipScreenTour(p);
+  assert.equal(await p.locator(".st-chain-cell").count(), 26, "the pop example is 26 bars");
+
+  await p.click('#studio-screens .st-scr[data-screen="drums"]');
+  await skipScreenTour(p);
+  assert.ok(await p.locator("#studio-grid .st-cell.on").count() > 0);
+  await p.click("#studio-menu");
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "清空这条轨" }).click();
+  assert.equal(await p.locator("#studio-grid .st-cell.on").count(), 0, "the drum track is empty");
+  await p.click("#studio-menu");
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "撤销" }).first().click();
+  assert.ok(await p.locator("#studio-grid .st-cell.on").count() > 0, "undo brings the drums back");
+  assert.deepEqual(errors, []);
+});
+
+test("studio: quick AI commands work with no key, and an AI reply is previewed and undoable", { skip, timeout: 90000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await p.click("#studio-menu");
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "让 AI 改" }).click();
+  await p.waitForSelector("#studio-ai-input");
+  await p.fill("#studio-ai-input", "节奏更快点");
+  await p.locator("#studio-sheet .st-sheet-btn", { hasText: "说" }).click();
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  assert.match(await p.textContent("#studio-bpm"), /86 BPM/, "the quick command changed the tempo");
+
+  await p.evaluate(() => {
+    LP.ai.on = () => true;
+    LP.ai.ask = () => Promise.resolve('{"reply":"改到 100","ops":[{"op":"setBpm","value":100}]}');
+  });
+  await p.click("#studio-menu");
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "让 AI 改" }).click();
+  await p.waitForSelector("#studio-ai-input");
+  await p.fill("#studio-ai-input", "改成 100");
+  await p.locator("#studio-sheet .st-sheet-btn", { hasText: "说" }).click();
+  await p.waitForSelector("#studio-sheet .st-ai-preview");
+  assert.match(await p.textContent("#studio-sheet .st-ai-reply"), /改到 100/);
+  await p.locator("#studio-sheet .st-sheet-btn", { hasText: "采用并试听" }).click();
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  assert.match(await p.textContent("#studio-bpm"), /100 BPM/);
+  await p.click("#studio-menu");
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "撤销" }).first().click();
+  assert.match(await p.textContent("#studio-bpm"), /86 BPM/, "the AI edit is one undo step");
+  assert.deepEqual(errors, []);
+});
+
+test("studio: an AI draft becomes a new tape and leaves the current one alone", { skip, timeout: 90000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  const draft = {
+    name: "AI 测试", bpm: 88, key: 9, scale: "minor", swing: 0.5, tape: 1, kit: "soft",
+    patterns: [{ drums: [[0, "kick", 1], [4, "snare", 0.9]], bass: [[0, 0, 0.8]], chords: [[0, 0, 0.65]], melody: [] }],
+    song: [0],
+  };
+  await p.evaluate((draft) => {
+    LP.ai.on = () => true;
+    LP.ai.ask = () => Promise.resolve(JSON.stringify({ reply: "给你一盘", draft }));
+  }, draft);
+  await p.click("#studio-menu");
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "让 AI 改" }).click();
+  await p.waitForSelector("#studio-ai-input");
+  await p.fill("#studio-ai-input", "来个雨夜骨架");
+  await p.locator("#studio-sheet .st-sheet-btn", { hasText: "说" }).click();
+  await p.waitForSelector("#studio-sheet .st-ai-preview");
+  assert.match(await p.textContent("#studio-sheet .st-sheet-label"), /新磁带/);
+  await p.locator("#studio-sheet .st-sheet-btn", { hasText: "采用并试听" }).click();
+  await p.waitForFunction(() => /88 BPM/.test((document.querySelector("#studio-bpm") || {}).textContent || ""));
+  assert.equal(await p.getAttribute("#v-studio", "data-screen"), "drums");
+  await p.click("#studio-menu");
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "磁带库" }).click();
+  await p.waitForFunction(() => /AI 测试/.test((document.querySelector("#studio-sheet .st-proj-list") || {}).textContent || ""));
+  assert.equal(await p.locator("#studio-sheet .st-proj-list li").count(), 2, "the original tape is still there");
+  assert.deepEqual(errors, []);
+});
+
+test("studio: the guide, library, versions and AI sheets fit 331x359 with 44 px controls", { skip, timeout: 90000 }, async (t) => {
+  const { p, errors } = await rtPage(t, { width: 375, height: 503 });
+  await studioOpen(p);
+  await skipTour(p);
+  const check = async (where) => {
+    const m = await p.evaluate(() => {
+      const v = document.querySelector("#v-studio"), vr = v.getBoundingClientRect();
+      const sh = document.querySelector("#studio-sheet"), sr = sh.getBoundingClientRect(), out = [];
+      for (const e of sh.querySelectorAll("*")) {
+        const r = e.getBoundingClientRect();
+        if (r.width <= 0 || r.height <= 0) continue;
+        const box = e.closest(".lcd-menu, .st-guide");
+        const scrolls = box && box !== e && box.scrollHeight > box.clientHeight + 1;
+        if (scrolls && !(r.left < vr.left - 1 || r.right > vr.right + 1)) continue;
+        if (r.left < vr.left - 1 || r.right > vr.right + 1 || r.top < vr.top - 1 || r.bottom > vr.bottom + 1) out.push({ tag: e.tagName, cls: String(e.className).slice(0, 30), id: e.id });
+      }
+      const small = [...sh.querySelectorAll("button")].filter((e) => {
+        const r = e.getBoundingClientRect();
+        return r.width > 0 && r.height > 0 && (r.width < 44 - 0.5 || r.height < 44 - 0.5);
+      }).map((e) => ({ text: e.textContent.trim().slice(0, 20), w: e.getBoundingClientRect().width, h: e.getBoundingClientRect().height }));
+      const input = sh.querySelector("input");
+      return { out: out.slice(0, 8), small, scroll: sh.scrollHeight, client: sh.clientHeight,
+        input: input ? { w: input.getBoundingClientRect().width, h: input.getBoundingClientRect().height } : null };
+    });
+    assert.deepEqual(m.out, [], `${where}: nothing spills sideways or out of the view`);
+    assert.deepEqual(m.small, [], `${where}: every button is at least 44 px`);
+    assert.ok(m.scroll <= m.client + 1, `${where}: the sheet itself does not scroll (${m.scroll} <= ${m.client})`);
+    if (m.input) assert.ok(m.input.h >= 44 - 0.5 && m.input.w >= 44 - 0.5, `${where}: the text field is a 44 px target`);
+  };
+
+  await p.click("#studio-menu");
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "怎么玩" }).click();
+  await check("guide");
+  await p.click("#studio-sheet .st-sheet-close");
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+
+  await p.click("#studio-menu");
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "磁带库" }).click();
+  await p.waitForFunction(() => !/读取中/.test((document.querySelector("#studio-sheet .st-proj-list") || {}).textContent || ""));
+  await check("library");
+  await p.locator("#studio-sheet .st-proj-actions li", { hasText: "改名" }).click();
+  await p.waitForSelector("#studio-sheet .st-name");
+  await check("rename");
+  await p.click("#studio-sheet .st-sheet-btn", { hasText: "取消" });
+  await p.waitForSelector("#studio-sheet .st-proj-actions");
+
+  await p.locator("#studio-sheet .st-proj-actions li", { hasText: "返回" }).click();
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  await p.click("#studio-menu");
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "版本" }).first().click();
+  await p.waitForSelector("#studio-sheet .st-proj-list");
+  await check("versions");
+  await p.click("#studio-sheet .st-sheet-close");
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+
+  await p.click("#studio-menu");
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "让 AI 改" }).click();
+  await p.waitForSelector("#studio-ai-input");
+  await check("AI");
   assert.deepEqual(errors, []);
 });
