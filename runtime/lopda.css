@@ -928,3 +928,6 @@ textarea::placeholder{color:var(--ink-2)}
 .st-ai-preview{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:6px}
 .st-ai-reply{margin:0;font-size:15px;line-height:1.4;white-space:pre-line}
 .st-ai-state{color:var(--ink)}
+/* a tape row in the library: the name, its date or demo tag, and a 44 px delete button */
+.st-proj-list .st-proj-row{padding:0 2px 0 8px;gap:4px}
+.st-row-del{flex:none;width:44px;height:44px;box-sizing:border-box;padding:0;background:transparent;color:var(--ink);border:2px solid var(--ink);font-family:var(--f-lcd);font-size:12px;line-height:1;cursor:pointer}

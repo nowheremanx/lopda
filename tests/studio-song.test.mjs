@@ -1423,6 +1423,9 @@ test("newSong and validate: a tape has an optional folder, old tapes read as the
   assert.equal(broken((s) => { s.folder = 7; }).error, "folder");
   assert.equal(broken((s) => { s.folder = "x".repeat(41); }).error, "folder");
   assert.equal(broken((s) => { s.folder = "Ideas"; }).error, undefined);
+  assert.equal(broken((s) => { s.template = 7; }).error, "template");
+  assert.equal(broken((s) => { s.template = 0; }).error, "template");
+  assert.equal(broken((s) => { s.template = "saints"; }).error, undefined);
 });
 
 test("saintsSong and jasmineSong: two 64-bar, 16-pattern public-domain arrangements", () => {

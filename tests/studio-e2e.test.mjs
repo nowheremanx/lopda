@@ -3162,12 +3162,11 @@ test("studio: the tape library renames, opens, copies and deletes tapes", { skip
   await openLibrary();
   assert.equal(await p.locator("#studio-sheet .st-proj-list li").count(), 3, "the copy is a third tape");
   assert.match(await p.textContent("#studio-sheet .st-proj-list"), /未命名磁带 副本/);
-  await p.locator("#studio-sheet .st-proj-actions li", { hasText: "删掉这一盘" }).click();
+  await p.locator("#studio-sheet .st-proj-list li", { hasText: "未命名磁带 副本" }).locator(".st-row-del").click();
   await p.waitForSelector("#studio-sheet .st-ask");
   await p.locator("#studio-sheet .st-ask .btn", { hasText: "删掉" }).click();
-  await p.waitForSelector("#studio-sheet", { state: "hidden" });
-  await openLibrary();
-  assert.equal(await p.locator("#studio-sheet .st-proj-list li").count(), 2, "the copy is gone");
+  await p.waitForFunction(() => document.querySelectorAll("#studio-sheet .st-proj-list li").length === 2);
+  assert.equal(await p.locator("#studio-sheet .st-proj-list li").count(), 2, "the copy is gone and the folder stays");
   assert.deepEqual(errors, []);
 });
 
@@ -3462,5 +3461,32 @@ test("studio: folders can be made, renamed and deleted, and their tapes return t
   await p.waitForSelector("#studio-sheet .st-proj-list");
   assert.doesNotMatch(await p.textContent("#studio-sheet .st-proj-list"), /Songs/);
   assert.match(await p.textContent("#studio-sheet .st-proj-list"), /我的磁带\s*2/, "the tape moved back to My tapes");
+  assert.deepEqual(errors, []);
+});
+
+test("studio: demo copies stay out of My tapes and clear in one go", { skip, timeout: 120000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await useTemplate(p, "When the Saints");
+  await useTemplate(p, "茉莉花");
+  await openMyTapes(p);
+  assert.equal(await p.locator("#studio-sheet .st-proj-list li").count(), 1, "the two template copies are not in My tapes");
+  assert.doesNotMatch(await p.textContent("#studio-sheet .st-proj-list"), /When the Saints|茉莉花/);
+  await p.click("#studio-sheet .st-sheet-close");       /* folder -> folders */
+  await p.waitForSelector("#studio-sheet .st-proj-list");
+  assert.match(await p.textContent("#studio-sheet .st-proj-list"), /示例副本\s*2/);
+  await p.locator("#studio-sheet .st-proj-list li", { hasText: "示例副本" }).click();
+  await p.waitForSelector("#studio-sheet .st-proj-list");
+  assert.equal(await p.locator("#studio-sheet .st-proj-list li").count(), 2);
+  await p.locator("#studio-sheet .st-proj-actions li", { hasText: "清空示例副本" }).click();
+  await p.waitForSelector("#studio-sheet .st-ask");
+  await p.locator("#studio-sheet .st-ask .btn", { hasText: "删掉" }).click();
+  await p.waitForFunction(() => document.querySelectorAll("#studio-sheet .st-proj-list li").length === 1);
+  assert.match(await p.textContent("#studio-sheet .st-proj-list"), /未命名磁带/, "the empty copies view falls back to My tapes");
+  await p.click("#studio-sheet .st-sheet-close");       /* My tapes -> folders */
+  await p.waitForSelector("#studio-sheet .st-proj-list");
+  assert.doesNotMatch(await p.textContent("#studio-sheet .st-proj-list"), /示例副本/);
+  assert.match(await p.textContent("#studio-sheet .st-proj-list"), /我的磁带\s*1/);
   assert.deepEqual(errors, []);
 });
