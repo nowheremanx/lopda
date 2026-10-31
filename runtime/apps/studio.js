@@ -47,7 +47,7 @@ var T={
   dirty:false, saveTimer:0,
   /* the editor: which screen, which pattern, the focus box and the per-track selections (memory only) */
   drum:"kick", focus:0, kb:false, screen:"drums", pat:0, slot:0,
-  noteSel:{bass:-1,melody:-1}, noteDeg:{bass:0,melody:0}, chordSel:-1, chordDeg:0,
+  noteSel:{bass:-1,melody:-1}, noteDeg:{bass:0,melody:0}, oct:{bass:0,melody:0}, chordSel:-1, chordDeg:0,
   sheet:"", copyTo:-1, built:false, exporting:false,
   /* 12.15: undo/redo (memory), persistent versions and the project library */
   history:[], redo:[], snap:null, historySilent:false,
@@ -413,7 +413,7 @@ function installSong(song,id,versions){
   T.sheet="";
   screenTo("drums");
   T.pat=0; T.focus=0; T.slot=0; T.kb=false;
-  T.noteSel={bass:-1,melody:-1}; T.noteDeg={bass:0,melody:0}; T.chordSel=-1; T.chordDeg=0;
+  T.noteSel={bass:-1,melody:-1}; T.noteDeg={bass:0,melody:0}; T.oct={bass:0,melody:0}; T.chordSel=-1; T.chordDeg=0;
   setSong(song);
   T.id=id;
   T.projectFolder=folderOf(song);
@@ -1333,12 +1333,17 @@ function build(){
       keys.appendChild(b);
     })(i);
   }
-  /* the rest key (12.12) sits in the fifth column beside both rows of pitch keys */
+  /* the rest key (12.12) sits in the fifth column above the octave key (12.23) */
   var restKey=el("button","st-rest-key");
   restKey.type="button";
   restKey.id="studio-note-rest";
   restKey.onclick=function(){ restTap(); };
   keys.appendChild(restKey);
+  var octKey=el("button","st-oct-key");
+  octKey.type="button";
+  octKey.id="studio-note-oct";
+  octKey.onclick=function(){ octTap(); };
+  keys.appendChild(octKey);
   var cells=$("studio-chord-cells");
   for(i=0;i<2;i++){
     (function(half){
@@ -1529,16 +1534,22 @@ function renderKeys(){
   var keys=keysEl.querySelectorAll(".st-key[data-deg]"), i, b, midi, name, note, sel=T.noteSel[track];
   note=sel>=0 ? SONGS.noteAt(T.song,T.pat,track,sel*SONGS.STEP) : null;
   if(note && SONGS.isRest(note)) note=null;
-  var base=SONGS.tonic(track,T.song.key);
+  var base=SONGS.tonic(track,T.song.key), shift=octShift(track), deg;
   for(i=0;i<keys.length;i++){
     b=keys[i];
-    midi=SONGS.noteMidi(T.song,track,i);
+    deg=i+shift;
+    midi=SONGS.noteMidi(T.song,track,deg);
     name=SONGS.noteName(midi)||"";
     b.querySelector(".st-key-name").textContent=name;
-    b.classList.toggle("on",!!(note && note.deg===i));
-    b.classList.toggle("oct",midi!=null && base!=null && midi>=base+12);
+    b.classList.toggle("on",!!(note && note.deg===deg));
+    b.classList.toggle("oct",midi!=null && base!=null && midi>=base+12*(T.oct[track]+1));
     b.setAttribute("aria-label",tr("studio.key",{note:name}));
-    b.setAttribute("aria-pressed",note && note.deg===i?"true":"false");
+    b.setAttribute("aria-pressed",note && note.deg===deg?"true":"false");
+  }
+  var octKey=$("studio-note-oct");
+  if(octKey){
+    octKey.textContent=tr("studio.oct."+T.oct[track]);
+    octKey.setAttribute("aria-label",tr("studio.oct.label",{oct:tr("studio.oct."+T.oct[track])}));
   }
   var accKey=$("studio-note-acc"), playKey=$("studio-note-play"), cur;
   if(deep && accKey){
@@ -2301,9 +2312,6 @@ function renderSheet(){
     if(T.loaded) sheetRow(eul,tr("studio.versions"),String(T.versions.length),function(){ openSheet("versions"); });
     var clearTrackNow=screenTrack();
     if(T.song && T.loaded && clearTrackNow) sheetRow(eul,tr("studio.clear.track",{track:screenName(clearTrackNow)}),"",function(){ clearCurrentTrack(); });
-    if(T.song && T.loaded) sheetRow(eul,tr("studio.kit",{kit:tr("studio.kit."+SONGS.kitOf(T.song))}),"",function(){
-      cycleKit();
-    });
     if(T.loaded) sheetRow(eul,tr("studio.clear.tape"),"",function(){ openSheet("new"); });
     sh.appendChild(eul);
     return;
@@ -2908,7 +2916,7 @@ function swapTape(song){
   stopRepeatAll();
   screenTo("drums");            /* the same path as a tab tap: an unfinished tour ends unseen */
   T.pat=0; T.focus=0; T.slot=0; T.kb=false;
-  T.noteSel={bass:-1,melody:-1}; T.noteDeg={bass:0,melody:0}; T.chordSel=-1; T.chordDeg=0;
+  T.noteSel={bass:-1,melody:-1}; T.noteDeg={bass:0,melody:0}; T.oct={bass:0,melody:0}; T.chordSel=-1; T.chordDeg=0;
   T.queued=-1; T.pendingPat=-1; T.boundaryGlobal=0; T.chainPat=0; T.playPat=0;
   setSong(song);
   T.projectFolder=folderOf(song);
@@ -3312,6 +3320,7 @@ function noteTap(track,step){
       return;
     }
     T.noteSel[track]=step;
+    octFollow(track,note);
     renderGrid(); renderKeys();
     if(!rest) auditionNote(track,note.deg);
     return;
@@ -3344,9 +3353,34 @@ function restChord(){
   touch();
   renderChords(); renderNav();
 }
+/* 12.23: the eight keys show one octave of the scale at a time; the octave key steps the window low, middle, high and
+   round again, and selecting a note moves the window to the note's own octave, so the key it sounds is always lit.
+   The window lives in memory per track, like the selection. */
+var OCTS=[-1,0,1];
+function scaleLen(){
+  var steps=T.song && SONGS.SCALES[T.song.scale];
+  return steps ? steps.length : 7;
+}
+function octShift(track){ return (T.oct[track]||0)*scaleLen(); }
+function octFollow(track,note){
+  if(!note || SONGS.isRest(note)) return;
+  var n=scaleLen(), o=Math.floor(note.deg/n);
+  /* the top key is the next octave's tonic, so a tonic one up stays in this window when it is lit */
+  if(note.deg-octShift(track)>=0 && note.deg-octShift(track)<8) return;
+  T.oct[track]=Math.max(OCTS[0],Math.min(OCTS[OCTS.length-1],o));
+}
+function octTap(){
+  var track=noteTrack();
+  if(!track || !T.song) return;
+  var i=OCTS.indexOf(T.oct[track]||0);
+  T.oct[track]=OCTS[(i+1)%OCTS.length];
+  renderKeys();
+  auditionNote(track,octShift(track));
+}
 function keyTap(deg){
   var track=noteTrack(), sel, note;
   if(!track || !T.song) return;
+  deg+=octShift(track);
   T.noteDeg[track]=deg;
   sel=T.noteSel[track];
   if(sel>=0){
@@ -3616,7 +3650,7 @@ function open(){
   T.pat=0;
   T.focus=0;
   T.slot=0;
-  T.noteSel={bass:-1,melody:-1}; T.noteDeg={bass:0,melody:0};
+  T.noteSel={bass:-1,melody:-1}; T.noteDeg={bass:0,melody:0}; T.oct={bass:0,melody:0};
   T.chordSel=-1; T.chordDeg=0;
   T.painted=null;
   build();

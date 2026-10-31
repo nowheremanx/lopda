@@ -1655,6 +1655,37 @@ test("studio tour: the pitch step waits for a key that sets a selected note", { 
   assert.deepEqual(errors, []);
 });
 
+test("studio: the octave key moves the eight keys low / mid / high and follows a selected note (12.23)", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await p.click('#studio-screens .st-scr[data-screen="melody"]');
+  await skipScreenTour(p);
+  const oct = p.locator("#studio-note-oct");
+  const key0 = p.locator('#studio-keys .st-key[data-deg="0"]');
+  assert.equal(await oct.textContent(), "中");
+  const mid = await key0.textContent();
+  await oct.click();
+  assert.equal(await oct.textContent(), "高");
+  assert.equal(await key0.textContent(), mid, "the same note name, one octave up");
+  await p.locator('#studio-grid .st-cell[data-step="0"]').click();       /* a new note at the high key's pitch */
+  await key0.click();
+  assert.equal(await key0.evaluate((e) => e.classList.contains("on")), true, "the new note is lit");
+  await oct.click();
+  assert.equal(await oct.textContent(), "低");
+  assert.equal(await key0.evaluate((e) => e.classList.contains("on")), false, "the high note is not lit in the low window");
+  /* selecting it again (tap another cell, then this one) brings the window back to its octave */
+  await p.locator('#studio-grid .st-cell[data-step="8"]').click();
+  await p.locator('#studio-grid .st-cell[data-step="0"]').click();
+  assert.equal(await oct.textContent(), "高");
+  assert.equal(await key0.evaluate((e) => e.classList.contains("on")), true);
+  await oct.click();
+  assert.equal(await oct.textContent(), "低");
+  await oct.click();
+  assert.equal(await oct.textContent(), "中", "round again");
+  assert.deepEqual(errors, []);
+});
+
 test("studio tour: a new tape from a note tour leaves the drums screen untoured and the note tour unseen", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await rtPage(t);
   await studioOpen(p);

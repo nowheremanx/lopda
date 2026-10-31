@@ -792,8 +792,11 @@ textarea::placeholder{color:var(--ink-2)}
 /* the eight pitch keys, two rows of four, the higher octave underlined; the rest key fills the fifth column */
 .st-keys-wrap{flex:none;padding:0 8px 6px}
 .st-keys{display:grid;grid-template-columns:repeat(4,minmax(0,1fr)) 44px;grid-auto-rows:44px;gap:4px}
-.st-rest-key{grid-column:5;grid-row:1/span 2;min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:center;padding:0;background:var(--lcd);color:var(--ink);border:2px solid var(--ink);font-family:var(--f-lcd);font-size:14px;line-height:1.1;cursor:pointer;overflow:hidden}
+.st-rest-key{grid-column:5;grid-row:1;min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:center;padding:0;background:var(--lcd);color:var(--ink);border:2px solid var(--ink);font-family:var(--f-lcd);font-size:14px;line-height:1.1;cursor:pointer;overflow:hidden}
 .st-rest-key:active{background:var(--ink);color:var(--lcd)}
+/* 12.23: the octave window under the rest key: 低 / 中 / 高 */
+.st-oct-key{grid-column:5;grid-row:2;min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:center;padding:0;background:var(--lcd);color:var(--ink);border:2px solid var(--ink);font-family:var(--f-lcd);font-size:14px;line-height:1.1;cursor:pointer}
+.st-oct-key:active{background:var(--ink);color:var(--lcd)}
 /* 331x359: take the padding out of the bars and the keys, and 2 px from the grid gaps, so four cells still
    measure at least 40 px after the remaining scale. The buttons themselves stay 44 px. */
 .studio.st-short .st-bar,.studio.st-short .st-nav,.studio.st-short .st-tabs{padding-top:0;padding-bottom:0}
