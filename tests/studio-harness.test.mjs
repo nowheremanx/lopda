@@ -319,7 +319,7 @@ test("skeleton: the plan may take another card and another scale for a named moo
   assert.equal(out.song.scale, "dorian");
   const bad = makeAsk((step, messages) => (step === "plan" ? (messages.length > 2 ? planFor() : { ...planFor(), card: 99 }) : fullAnswers(planFor())(step, messages)));
   await H.skeleton({ text: "x", ask: bad, rand: ST.seeded(5), now: 1000 });
-  assert.match(bad.seen[1].messages.at(-1).content, new RegExp("card must be 1-" + ST.CARDS.length));
+  assert.match(bad.seen[1].messages.at(-1).content, new RegExp("card must be 0 \\(your own style\\) or 1-" + ST.CARDS.length));
 });
 
 test("skeleton: a section may write its own drums and strum its chords as stabs", async () => {
@@ -410,4 +410,17 @@ test("skeleton: a solo piece has no drums and no chord pad; an imitating section
   const onsets = song.patterns[2].notes.bass.filter((n) => n.vel > 0).map((n) => n.t / S.STEP);
   assert.deepEqual(JSON.parse(JSON.stringify(onsets)).slice(0, 4), [0, 3, 4, 8]);
   assert.equal(S.validate(song).error, undefined);
+});
+
+test("skeleton: card 0 is the request's own style: no card is forced, the stage shows the plan's style name", async () => {
+  const plan = { ...planFor(), card: 0, style: "古典", scale: "minor", voices: { melody: "bowed" } };
+  const stages = [];
+  const out = await H.skeleton({ text: "写一首古典乐", ask: makeAsk(fullAnswers(plan)), rand: ST.seeded(7), now: 1000, onStage: (s) => stages.push(s) });
+  assert.equal(out.card.id, "own");
+  assert.equal(stages.find((s) => s.id === "card").vars.card, "古典");
+  assert.equal(out.song.scale, "minor");
+  assert.equal(out.song.swing, 0.5, "no card's swing");
+  const noStyle = makeAsk((step, messages) => (step === "plan" ? (messages.length > 2 ? plan : { ...plan, style: "" }) : fullAnswers(plan)(step, messages)));
+  await H.skeleton({ text: "x", ask: noStyle, rand: ST.seeded(7), now: 1000 });
+  assert.match(noStyle.seen[1].messages.at(-1).content, /with card 0 write style/);
 });

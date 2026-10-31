@@ -194,7 +194,11 @@ function planCheck(obj,cards,rolls){
   var i, j, s, id, e, used={};
   if(!plain(obj)) return {error:"reply with one JSON object"};
   bpm=obj.bpm; sections=obj.sections; order=obj.order;
-  if(!int(obj.card) || obj.card<1 || obj.card>cards) return {error:"card must be 1-"+cards};
+  /* card 0: the request names its own style, so no card is used and the plan chooses everything (owner, 2026-10-31:
+     "classical" drew a blues card) */
+  if(!int(obj.card) || obj.card<0 || obj.card>cards) return {error:"card must be 0 (your own style) or 1-"+cards};
+  if(obj.card===0 && (typeof obj.style!=="string" || !obj.style.trim() || Array.from(obj.style.trim()).length>24))
+    return {error:"with card 0 write style: a short name for the style in the user's language (at most 24 characters)"};
   if(obj.scale!=null && !S.SCALES[obj.scale])
     return {error:"scale must be one of "+Object.keys(S.SCALES).join(", ")+" (or left out)"};
   if(obj.key!=null && (!int(obj.key) || obj.key<0 || obj.key>11)) return {error:"key must be 0-11 (C=0) or left out"};
@@ -227,8 +231,9 @@ function planCheck(obj,cards,rolls){
       var cr=T.run(S.newSong(0),{tool:"chords",pattern:0,roots:[s.chords[j]]});
       if(cr.error) return {error:"section '"+id+"' bar "+(j+1)+": "+cr.error};
       /* a chord off the key is refused with the chords this key does allow (12.20.9) */
-      if(TH && rolls && plain(s.chords[j]) && int(obj.card) && rolls[obj.card-1]){
-        var ks={key:obj.key!=null ? obj.key : rolls[obj.card-1].key, scale:obj.scale||rolls[obj.card-1].scale};
+      if(TH && rolls && plain(s.chords[j]) && int(obj.card)){
+        var base=rolls[Math.max(0,obj.card-1)];
+        var ks={key:obj.key!=null ? obj.key : base.key, scale:obj.scale||(obj.card===0 ? "major" : base.scale)};
         var why=TH.chordIssue(ks,s.chords[j].root,s.chords[j].q,s.chords[j].acc);
         if(why) return {error:"section '"+id+"' bar "+(j+1)+": "+why};
       }
@@ -286,7 +291,7 @@ function planCheck(obj,cards,rolls){
   }
   var keptOrder=[];
   for(i=0;i<order.length;i++) keptOrder.push([order[i][0],order[i][1]]);
-  return {value:{card:obj.card, scale:obj.scale||"", chordStyle:obj.chordStyle||"triad", key:obj.key, kit:obj.kit||"", swing:obj.swing, voices:obj.voices||{},
+  return {value:{card:obj.card, style:typeof obj.style==="string" ? obj.style.trim() : "", scale:obj.scale||"", chordStyle:obj.chordStyle||"triad", key:obj.key, kit:obj.kit||"", swing:obj.swing, voices:obj.voices||{},
     name:typeof obj.name==="string" && obj.name.trim() ? obj.name.trim() : "Tape4",
     bpm:bpm, sections:kept, order:keptOrder}};
 }
@@ -495,11 +500,16 @@ function skeleton(o){
     });
     return step(c,planMsgs,function(obj){ return planCheck(obj,rolls.length,rolls); },"plan").then(function(ans){
       var plan=ans.value, song;
-      roll=rolls[plan.card-1];
+      if(plan.card===0){
+        /* the plan's own style: the dice give only the key (a fresh one each time); the rest is neutral unless the
+           plan set it */
+        roll={card:{id:"own", zh:plan.style, en:plan.style}, key:rolls[0].key, scale:"major", swing:0.5, tape:1, kit:"soft",
+          grooves:[], bass:[], form:""};
+      } else roll=rolls[plan.card-1];
       if(plan.scale) roll.scale=plan.scale;
       if(plan.key!=null) roll.key=plan.key;
       cardName=zh?roll.card.zh:roll.card.en;
-      stage(o.onStage,"card",1,1,{card:cardName,key:S.NAMES[roll.key],scale:roll.scale,bpm:plan.bpm});
+      stage(o.onStage,"card",1,1,{card:cardName,own:plan.card===0,key:S.NAMES[roll.key],scale:roll.scale,bpm:plan.bpm});
       stage(o.onStage,"lay",1,1,{});
       song=laySong(roll,plan,now);
       return motifRun(c,song,plan,roll,text,o.onStage);
