@@ -1,0 +1,1097 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>音调实验室 · Tone Lab</title>
+<!-- Lo-PDA Acoustic Lab, M1: four-tone sender, microphone monitor, live FFT and Goertzel detection.
+     Standalone on purpose: the Lo-PDA app sandbox has no microphone permission policy (SPEC.md 3.2 / 5).
+     Copyright (c) 2026 Haowei Wu. MIT License. No dependencies, no storage, no network. -->
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden;background:#a3ad7e;color:#1f2a14;font-family:monospace;touch-action:manipulation}
+body{display:flex;flex-direction:column;font-size:15px;line-height:1.25}
+header{flex:none;padding:7px 9px 5px;border-bottom:2px solid #1f2a14}
+.bar{display:flex;align-items:center;gap:7px;font-weight:bold;font-size:15px}
+.bar .grow{flex:1}
+.badge{font-size:12px;font-weight:bold;line-height:18px;padding:0 5px;border:1px solid #1f2a14;white-space:nowrap}
+.badge.on{background:#1f2a14;color:#a3ad7e}
+.badge.warn{background:#7d8a58;color:#1f2a14}
+.sub{font-size:12px;color:#4a5a32;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+main{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;padding:7px 9px 9px;display:flex;flex-direction:column;gap:7px}
+.panel{border:2px solid #1f2a14;background:#a3ad7e;box-shadow:2px 2px 0 #4a5a32}
+#spectrumWrap{position:relative;padding:2px}
+#fft{display:block;width:100%;height:82px}
+#specTag{position:absolute;right:5px;top:4px;font-size:12px;line-height:14px;padding:0 3px;background:#a3ad7e;color:#4a5a32;border:1px solid #4a5a32}
+.detect{display:flex;align-items:stretch;gap:6px}
+.toneBig{flex:0 0 92px;background:#1f2a14;color:#a3ad7e;padding:4px 6px;display:flex;flex-direction:column;justify-content:center;border:2px solid #1f2a14;box-shadow:2px 2px 0 #4a5a32}
+.toneBig .n{font-size:28px;font-weight:bold;line-height:1}
+.toneBig .f{font-size:12px;line-height:1.1;margin-top:2px}
+.readout{flex:1;min-width:0;display:grid;grid-template-columns:1fr 1fr;gap:2px 6px;align-content:center;font-size:12px}
+.readout b{font-size:15px}
+.readout .k{color:#4a5a32}
+.bars{display:flex;flex-direction:column;gap:2px;padding:5px 6px}
+.barRow{display:flex;align-items:center;gap:5px;font-size:12px;line-height:14px}
+.barRow .lab{flex:0 0 62px;white-space:nowrap}
+.barRow .track{flex:1;height:9px;border:1px solid #4a5a32;background:#a3ad7e;position:relative;overflow:hidden}
+.barRow .fill{position:absolute;left:0;top:0;bottom:0;width:0;background:#4a5a32}
+.barRow .fill.t1{background:#1f2a14}
+.barRow .fill.t2{background:#4a5a32}
+.barRow .fill.t3{background:#7d8a58}
+.barRow .fill.t4{background:#1f2a14;outline:1px solid #7d8a58;outline-offset:-2px}
+.barRow .val{flex:0 0 48px;text-align:right;color:#4a5a32;white-space:nowrap}
+.barRow.hit .lab{font-weight:bold}
+.barRow.hit .val{color:#1f2a14;font-weight:bold}
+.streamWrap{display:flex;align-items:center;gap:6px;padding:4px 6px;min-height:28px}
+.streamWrap .cap{flex:none;font-size:12px;color:#4a5a32}
+#stream{flex:1;min-width:0;display:flex;gap:2px;overflow:hidden;height:20px}
+.blk{flex:0 0 18px;height:20px;line-height:20px;text-align:center;font-size:12px;font-weight:bold;border:1px solid #1f2a14}
+.blk.t0{background:#1f2a14;color:#a3ad7e}
+.blk.t1{background:#4a5a32;color:#a3ad7e}
+.blk.t2{background:#7d8a58;color:#1f2a14}
+.blk.t3{background:#a3ad7e;color:#1f2a14}
+.blk.gap{background:#a3ad7e;color:#4a5a32;border-style:dashed}
+.controls{display:flex;flex-direction:column;gap:6px}
+.row{display:flex;gap:6px}
+button{font-family:monospace;font-size:15px;font-weight:bold;min-height:44px;padding:4px 8px;color:#a3ad7e;background:#1f2a14;border:2px solid #1f2a14;box-shadow:2px 2px 0 #4a5a32;touch-action:manipulation;cursor:pointer;-webkit-tap-highlight-color:transparent}
+button:active{transform:translate(2px,2px);box-shadow:0 0 0 #4a5a32}
+button.sec{background:#7d8a58;color:#1f2a14}
+button.ghost{background:#a3ad7e;color:#1f2a14;box-shadow:2px 2px 0 #4a5a32}
+button:disabled{color:#4a5a32;background:#a3ad7e;border-style:dashed;box-shadow:none;cursor:default;opacity:1}
+button .small{display:block;font-size:12px;font-weight:normal;line-height:1.1}
+#micBtn{width:100%}
+#micBtn.on{background:#a3ad7e;color:#1f2a14;border-color:#1f2a14;box-shadow:inset 3px 0 0 #1f2a14}
+.toneBtns{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.toneBtns button{min-height:48px;padding:3px 1px;font-size:14px;line-height:1.05}
+.toneBtns .t0{background:#1f2a14;color:#a3ad7e}
+.toneBtns .t1{background:#4a5a32;color:#a3ad7e}
+.toneBtns .t2{background:#7d8a58;color:#1f2a14}
+.toneBtns .t3{background:#a3ad7e;color:#1f2a14}
+.toneBtns button.act{outline:3px solid #1f2a14;outline-offset:1px}
+.vol{display:flex;align-items:center;gap:6px;min-height:44px}
+.vol .k{flex:none;font-size:12px;color:#4a5a32}
+.vol input{flex:1;min-width:0;height:44px;background:transparent;-webkit-appearance:none;appearance:none}
+.vol input::-webkit-slider-runnable-track{height:8px;border:1px solid #1f2a14;background:#7d8a58}
+.vol input::-webkit-slider-thumb{-webkit-appearance:none;width:24px;height:24px;margin-top:-9px;background:#1f2a14;border:2px solid #a3ad7e;box-shadow:0 0 0 1px #1f2a14}
+.vol input::-moz-range-track{height:8px;border:1px solid #1f2a14;background:#7d8a58}
+.vol input::-moz-range-thumb{width:20px;height:20px;background:#1f2a14;border:2px solid #a3ad7e;border-radius:0}
+.vol .v{flex:0 0 38px;text-align:right;font-size:13px;font-weight:bold}
+.log{border:1px solid #4a5a32;padding:3px 5px;font-size:12px;line-height:1.3;color:#1f2a14;background:#a3ad7e;min-height:34px}
+.log div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.log .dim{color:#4a5a32}
+#result{border:2px solid #1f2a14;padding:5px 6px;font-size:12px;line-height:1.45;display:none}
+#result.show{display:block}
+#result .head{font-size:14px;font-weight:bold;margin-bottom:2px}
+#result .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:2px}
+#result .cell{border:1px solid #4a5a32;padding:1px 2px;font-size:12px}
+#result .cell.ok{background:#1f2a14;color:#a3ad7e}
+#result .cell.miss{background:#7d8a58;color:#1f2a14}
+#result .cell.bad{background:#a3ad7e;color:#1f2a14;border-style:dashed}
+footer{flex:none;padding:5px 9px 6px;border-top:2px solid #1f2a14;font-size:12px;color:#4a5a32;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.diag{border-top:1px solid #4a5a32;padding-top:6px;display:flex;flex-direction:column;gap:6px}
+.diag .row{flex-wrap:wrap}
+.diag .row button{flex:1;min-width:120px}
+#diagBody{border:1px solid #4a5a32;padding:4px 6px;font-size:12px;line-height:1.5;word-break:break-word}
+#diagBody .line{display:flex;gap:5px}
+#diagBody .line span:first-child{flex:0 0 96px;color:#4a5a32}
+#diagBody .line span:last-child{flex:1;min-width:0}
+#reportWrap{margin-top:5px}
+#report{width:100%;height:110px;font-family:monospace;font-size:16px;color:#1f2a14;background:#a3ad7e;border:1px solid #4a5a32;resize:vertical}
+.note{font-size:12px;color:#4a5a32;line-height:1.35}
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <span>TONE LAB</span>
+    <span class="grow"></span>
+    <span class="badge" id="envBadge">…</span>
+    <span class="badge" id="micBadge">MIC OFF</span>
+  </div>
+  <div class="sub" id="sub">4-FSK 1.5/2.5/3.5/4.5k · 40ms</div>
+</header>
+<main>
+  <div class="panel" id="spectrumWrap">
+    <canvas id="fft" width="680" height="176" aria-label="实时频谱"></canvas>
+    <span id="specTag">RX FFT</span>
+  </div>
+
+  <div class="detect">
+    <div class="toneBig">
+      <div class="n" id="toneNo">—</div>
+      <div class="f" id="toneFreq">无信号</div>
+    </div>
+    <div class="readout">
+      <div><span class="k">CONF</span><br><b id="conf">— dB</b></div>
+      <div><span class="k">LEVEL</span><br><b id="level">— dBFS</b></div>
+      <div><span class="k">SNR</span><br><b id="snr">— dB</b></div>
+      <div><span class="k">PEAK</span><br><b id="peak">—</b></div>
+    </div>
+  </div>
+
+  <button id="micBtn">开始监听麦克风</button>
+
+  <div class="panel bars" id="bars"></div>
+
+  <div class="panel streamWrap">
+    <span class="cap">RX</span>
+    <div id="stream"></div>
+  </div>
+
+  <div class="controls">
+    <div class="toneBtns" id="toneBtns">
+      <button class="t0" data-tone="0">1<span class="small">1500</span></button>
+      <button class="t1" data-tone="1">2<span class="small">2500</span></button>
+      <button class="t2" data-tone="2">3<span class="small">3500</span></button>
+      <button class="t3" data-tone="3">4<span class="small">4500</span></button>
+    </div>
+    <div class="row">
+      <button class="sec" id="sweepBtn">播放四音</button>
+      <button class="sec" id="testBtn">回声自测</button>
+    </div>
+    <div class="vol">
+      <span class="k">VOL</span>
+      <input id="vol" type="range" min="0" max="100" step="5" value="40" aria-label="输出音量">
+      <span class="v" id="volVal">40%</span>
+    </div>
+  </div>
+
+  <div id="result"></div>
+  <div class="log" id="log"></div>
+
+  <div class="diag">
+    <div class="row">
+      <button class="ghost" id="diagBtn">环境与诊断</button>
+      <button class="ghost" id="probeBtn">沙箱麦克风探测</button>
+    </div>
+    <div id="diagBody" hidden>
+      <div id="diagLines"></div>
+      <div class="row" style="margin-top:5px">
+        <button class="ghost" id="dspBtn">DSP 自检</button>
+        <button class="ghost" id="reportBtn">生成报告</button>
+      </div>
+      <div id="reportWrap" hidden>
+        <textarea id="report" readonly aria-label="测试报告"></textarea>
+        <div class="note">长按全选复制。报告只留在本页，不写入存储。</div>
+      </div>
+      <div class="note" style="margin-top:5px">沙箱探测会创建一个与 Lo-PDA app 相同的 <code>&lt;iframe sandbox="allow-scripts"&gt;</code>，在里面尝试 <code>getUserMedia</code>。如果被拒绝，原始麦克风频谱就不能作为商店 app 运行。</div>
+    </div>
+  </div>
+</main>
+<footer id="foot">点击开始 · 音调按钮与自测在下方 · M1 v0.1</footer>
+
+<script>
+(function(){
+"use strict";
+
+/* ------------------------------------------------------------------ constants */
+
+var TONES = [
+  {hz:1500, cls:"t0"},
+  {hz:2500, cls:"t1"},
+  {hz:3500, cls:"t2"},
+  {hz:4500, cls:"t3"}
+];
+var GUARDS = [600, 900, 2000, 3000, 4000, 5000, 5800];
+var WIN_MS = 30;          /* Goertzel analysis window */
+var TICK_MS = 20;         /* detection cadence, 50 Hz */
+var FFT_SIZE = 2048;
+var DETECT_DB = 6;        /* top tone must beat the runner-up by this much */
+var SNR_DB = 8;           /* and the guard-band noise floor by this much */
+var MIN_LEVEL_DB = -60;   /* ignore near-silence */
+var MAX_STREAM = 18;
+
+/* ------------------------------------------------------------------ state */
+
+var ac = null, master = null, txAn = null, txSilent = null;
+var micStream = null, micSrc = null, micAn = null, micSilent = null;
+var micOn = false, micPending = false, micPromise = null, timer = null;
+var volume = 0.40;
+var fftBuf = null, timeBuf = null;
+var lastFrame = 0, lastDetectUi = 0, lastLoggedIdx = -2, lastLogAt = 0;
+var stream = [], history = [], counts = [0,0,0,0];
+var detected = -1, lastDetection = null;
+var txPeakHz = null, txPlayingUntil = 0;
+var sweepToken = 0, testRunning = false;
+var lastTest = null, sandboxProbeResult = null;
+var logLines = [];
+
+var $ = function(id){ return document.getElementById(id); };
+
+function now(){ return (window.performance && performance.now) ? performance.now() : Date.now(); }
+function clamp(x,a,b){ return x<a?a:(x>b?b:x); }
+function pad2(n){ return (n<10?"0":"")+n; }
+function timeStamp(){
+  var d = new Date();
+  return pad2(d.getHours())+":"+pad2(d.getMinutes())+":"+pad2(d.getSeconds());
+}
+function esc(s){
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+function fmtDb(x){
+  if(x===null || x===undefined || !isFinite(x)) return "—";
+  return (x>0?"+":"") + x.toFixed(1);
+}
+function fmtMargin(x){
+  if(x===null || x===undefined || !isFinite(x)) return "—";
+  return x>60 ? ">60" : (x>0?"+":"") + x.toFixed(1);
+}
+
+/* ------------------------------------------------------------------ logging */
+
+function log(msg){
+  var line = timeStamp()+"  "+msg;
+  logLines.push(line);
+  if(logLines.length>60) logLines.shift();
+  var box = $("log");
+  var html = "";
+  var start = Math.max(0, logLines.length-3);
+  for(var i=start;i<logLines.length;i++){
+    html += '<div class="'+(i===logLines.length-1?"":"dim")+'">'+esc(logLines[i])+'</div>';
+  }
+  box.innerHTML = html;
+  $("foot").textContent = msg;
+}
+
+/* ------------------------------------------------------------------ audio setup */
+
+function AudioCtor(){
+  return window.AudioContext || window.webkitAudioContext;
+}
+
+function ensureAudio(){
+  if(!AudioCtor()) return null;
+  if(!ac){
+    ac = new (AudioCtor())({latencyHint:"interactive"});
+    master = ac.createGain();
+    master.gain.value = volume;
+    master.connect(ac.destination);
+
+    /* a post-gain analyser proves what the graph produces; a zero gain keeps Safari pulling it */
+    txAn = ac.createAnalyser();
+    txAn.fftSize = 4096;
+    txAn.minDecibels = -110;
+    txAn.maxDecibels = -10;
+    txAn.smoothingTimeConstant = 0.3;
+    txSilent = ac.createGain();
+    txSilent.gain.value = 0;
+    master.connect(txAn);
+    txAn.connect(txSilent);
+    txSilent.connect(ac.destination);
+
+    ac.onstatechange = function(){
+      updateHeader();
+      log("AUDIO "+ac.state.toUpperCase());
+    };
+  }
+  if(ac.state !== "running" && ac.resume){
+    try{ ac.resume(); }catch(e){}
+  }
+  return ac;
+}
+
+function setAudioSession(type){
+  try{
+    if(navigator.audioSession && navigator.audioSession.type !== type) navigator.audioSession.type = type;
+  }catch(e){}
+}
+
+function playTone(idx, ms, when){
+  var a = ensureAudio(); if(!a) return null;
+  var t = (when || a.currentTime) + 0.02;
+  var dur = Math.max(0.05, (ms||350)/1000);
+  var osc = a.createOscillator();
+  var env = a.createGain();
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(TONES[idx].hz, t);
+  env.gain.setValueAtTime(0, t);
+  env.gain.linearRampToValueAtTime(1, t+0.008);
+  env.gain.setValueAtTime(1, t+dur-0.012);
+  env.gain.linearRampToValueAtTime(0, t+dur);
+  osc.connect(env); env.connect(master);
+  osc.start(t); osc.stop(t+dur+0.02);
+  txPlayingUntil = now() + (t-a.currentTime+dur)*1000;
+  markToneButton(idx);
+  $("specTag").textContent = "TX FFT";
+  setTimeout(function(){
+    try{ osc.disconnect(); env.disconnect(); }catch(e){}
+  }, (dur+0.2)*1000);
+  return {start:t, dur:dur};
+}
+
+/* One oscillator, scheduled ahead: no per-symbol JavaScript timers in the audio path. */
+function playSequence(seq, durSec, gapSec, done){
+  var a = ensureAudio(); if(!a) return null;
+  var startAt = a.currentTime + 0.10;
+  var osc = a.createOscillator();
+  var env = a.createGain();
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(TONES[seq[0]].hz, startAt);
+  osc.connect(env); env.connect(master);
+  var t = startAt, i;
+  for(i=0;i<seq.length;i++){
+    if(i>0) osc.frequency.setValueAtTime(TONES[seq[i]].hz, t);
+    env.gain.setValueAtTime(0, t);
+    env.gain.linearRampToValueAtTime(1, t+0.006);
+    env.gain.setValueAtTime(1, t+durSec-0.010);
+    env.gain.linearRampToValueAtTime(0, t+durSec);
+    t += durSec + gapSec;
+  }
+  osc.start(startAt);
+  osc.stop(t+0.03);
+  var totalMs = (t+0.03-startAt)*1000;
+  txPlayingUntil = now() + (totalMs + 100);
+  $("specTag").textContent = "TX FFT";
+  setTimeout(function(){ try{ osc.disconnect(); env.disconnect(); }catch(e){} }, totalMs+300);
+  if(done) setTimeout(done, totalMs+60);
+  return {startAt:startAt, totalSec:t-startAt, startPerf: now() + (startAt-a.currentTime)*1000};
+}
+
+function markToneButton(idx){
+  var btns = document.querySelectorAll("#toneBtns button");
+  for(var i=0;i<btns.length;i++) btns[i].className = btns[i].className.replace(/\bact\b/g,"").trim();
+  if(idx>=0 && btns[idx]) btns[idx].className += " act";
+  if(idx>=0){
+    $("specTag").textContent = "TX FFT";
+    setTimeout(function(){ /* leave the tag to the render loop */ }, 0);
+  }
+}
+
+/* ------------------------------------------------------------------ DSP */
+
+/* Goertzel over a Hann-windowed slice, normalised by the window sum so tones can be compared. */
+function goertzel(buf, start, n, freq, sr){
+  var w = 2*Math.PI*freq/sr;
+  var c = 2*Math.cos(w);
+  var s1 = 0, s2 = 0, sum = 0, i, win, x, s0;
+  for(i=0;i<n;i++){
+    win = 0.5 - 0.5*Math.cos(2*Math.PI*i/(n-1));
+    x = buf[start+i]*win;
+    s0 = x + c*s1 - s2;
+    s2 = s1; s1 = s0; sum += win;
+  }
+  var p = s1*s1 + s2*s2 - c*s1*s2;
+  return p/(sum*sum + 1e-18);
+}
+
+function db(p){ return 10*Math.log(p+1e-18)/Math.LN10; }
+
+/* Analyse one buffer. `buf` may be the tail of a longer analyser buffer. */
+function analyse(buf, sr, n){
+  if(!n || n<64) n = Math.min(buf.length, Math.round(sr*WIN_MS/1000));
+  n = Math.min(n, buf.length);
+  var start = buf.length - n;
+  var i, sum = 0, peak = 0, v;
+  for(i=0;i<n;i++){
+    v = buf[start+i];
+    sum += v*v;
+    if(Math.abs(v)>peak) peak = Math.abs(v);
+  }
+  var rms = Math.sqrt(sum/n);
+  var rmsDb = 20*Math.log(rms+1e-9)/Math.LN10;
+  var p = [], pdb = [];
+  for(i=0;i<TONES.length;i++){
+    p[i] = goertzel(buf, start, n, TONES[i].hz, sr);
+    pdb[i] = db(p[i]);
+  }
+  var gdb = [];
+  for(i=0;i<GUARDS.length;i++) gdb.push(db(goertzel(buf, start, n, GUARDS[i], sr)));
+  gdb.sort(function(a,b){ return a-b; });
+  var noise = gdb[Math.floor(gdb.length/2)];
+
+  var top = 0, second = -1;
+  for(i=1;i<TONES.length;i++) if(pdb[i]>pdb[top]) top = i;
+  for(i=0;i<TONES.length;i++) if(i!==top && (second<0 || pdb[i]>pdb[second])) second = i;
+
+  var sep = pdb[top] - pdb[second];
+  var snr = pdb[top] - noise;
+  var ok = rmsDb > MIN_LEVEL_DB && sep >= DETECT_DB && snr >= SNR_DB;
+  return {
+    idx: ok ? top : -1,
+    sep: sep,
+    snr: snr,
+    rmsDb: rmsDb,
+    peak: peak,
+    noiseDb: noise,
+    pdb: pdb,
+    valid: ok
+  };
+}
+
+/* Synthetic check: the detector must classify clean and noisy sines without any hardware. */
+function dspSelfCheck(){
+  var sr = ac ? ac.sampleRate : 48000;
+  var n = Math.round(sr*WIN_MS/1000);
+  var out = [], pass = 0, i, j, buf, an;
+  for(i=0;i<TONES.length;i++){
+    buf = new Float32Array(n);
+    for(j=0;j<n;j++){
+      var noise = (Math.random()-0.5)*0.012;
+      buf[j] = Math.sin(2*Math.PI*TONES[i].hz*j/sr)*0.18 + noise;
+    }
+    an = analyse(buf, sr, n);
+    var ok = an.idx === i;
+    if(ok) pass++;
+    out.push({tone:i+1, expect:TONES[i].hz, got:an.idx>=0?TONES[an.idx].hz:null, sep:+an.sep.toFixed(1), snr:+an.snr.toFixed(1), ok:ok});
+  }
+  log("DSP SELFCHECK "+pass+"/4 "+(pass===4?"PASS":"FAIL"));
+  return {pass:pass, total:4, results:out};
+}
+
+/* ------------------------------------------------------------------ microphone */
+
+function startMic(){
+  if(micOn) return Promise.resolve(true);
+  if(micPending) return micPromise;
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    log("MIC UNAVAILABLE · getUserMedia 不存在");
+    return Promise.resolve(false);
+  }
+  micPending = true;
+  updateHeader();
+  setAudioSession("play-and-record");
+  ensureAudio();
+  log("MIC REQUEST");
+  var streamP;
+  try{
+    streamP = navigator.mediaDevices.getUserMedia({
+      audio:{echoCancellation:false, noiseSuppression:false, autoGainControl:false, channelCount:1},
+      video:false
+    });
+  }catch(e){ streamP = Promise.reject(e); }
+  micPromise = Promise.resolve(streamP).then(function(s){
+    micStream = s;
+    micOn = true;
+    if(!ac){ stopMic(); return false; }
+    if(ac.state !== "running" && ac.resume){
+      var rp = ac.resume();
+      if(rp && rp.catch) rp.catch(function(){});
+    }
+    try{
+      micSrc = ac.createMediaStreamSource(s);
+      micAn = ac.createAnalyser();
+      micAn.fftSize = FFT_SIZE;
+      micAn.smoothingTimeConstant = 0.55;
+      micAn.minDecibels = -100;
+      micAn.maxDecibels = -20;
+      micSilent = ac.createGain();
+      micSilent.gain.value = 0;
+      micSrc.connect(micAn);
+      micAn.connect(micSilent);
+      micSilent.connect(ac.destination);
+    }catch(e){ stopMic(); throw e; }
+    fftBuf = new Uint8Array(micAn.frequencyBinCount);
+    timeBuf = new Float32Array(micAn.fftSize);
+    history = []; counts = [0,0,0,0]; stream = []; lastLoggedIdx = -2; lastDetection = null;
+    lastLogAt = 0; lastDetectUi = 0;
+    $("result").className = ""; $("result").innerHTML = "";
+    renderStream();
+    timer = setInterval(tick, TICK_MS);
+    log("MIC ON · "+Math.round(ac.sampleRate/1000)+" kHz · FFT "+FFT_SIZE);
+    permissionState().then(function(p){ if(p) log("PERMISSION "+p.toUpperCase()); });
+    return true;
+  }).catch(function(err){
+    micOn = false;
+    setAudioSession("ambient");
+    var name = (err && err.name) || "Error";
+    var msg = (err && err.message) || String(err);
+    log("MIC DENIED · "+name+": "+msg);
+    showResult("麦克风没有打开", [
+      "浏览器或系统拒绝了麦克风。",
+      "需要 HTTPS（或 localhost）、用户点击，以及系统里的麦克风权限。",
+      "错误：" + name
+    ]);
+    return false;
+  }).then(function(r){
+    micPending = false;
+    micPromise = null;
+    updateHeader();
+    return r;
+  });
+  return micPromise;
+}
+
+function stopMic(){
+  if(timer){ clearInterval(timer); timer = null; }
+  if(micSrc){ try{ micSrc.disconnect(); }catch(e){} micSrc = null; }
+  if(micAn){ try{ micAn.disconnect(); }catch(e){} micAn = null; }
+  if(micSilent){ try{ micSilent.disconnect(); }catch(e){} micSilent = null; }
+  if(micStream){
+    try{ micStream.getTracks().forEach(function(t){ try{ t.stop(); }catch(e){} }); }catch(e){}
+    micStream = null;
+  }
+  var was = micOn;
+  micOn = false;
+  setAudioSession("ambient");
+  detected = -1; lastDetection = null;
+  updateHeader();
+  renderDetection(null);
+  if(was) log("MIC OFF");
+}
+
+function permissionState(){
+  try{
+    if(navigator.permissions && navigator.permissions.query){
+      return navigator.permissions.query({name:"microphone"}).then(function(s){ return s.state; }, function(){ return "unknown"; });
+    }
+  }catch(e){}
+  return Promise.resolve("unknown");
+}
+
+/* ------------------------------------------------------------------ detection loop */
+
+function tick(){
+  if(!micOn || !micAn) return;
+  micAn.getFloatTimeDomainData(timeBuf);
+  var d = analyse(timeBuf, ac.sampleRate);
+  lastDetection = d;
+  var t = now();
+  d.t = t;
+  history.push(d);
+  if(history.length>600) history.splice(0, history.length-600);
+
+  if(d.valid){
+    detected = d.idx;
+    counts[d.idx]++;
+    if(d.idx !== lastLoggedIdx){
+      stream.push(d.idx);
+      if(stream.length>MAX_STREAM) stream.shift();
+      renderStream();
+      log("TONE "+(d.idx+1)+" / 4 · "+TONES[d.idx].hz+" Hz · CONF "+d.sep.toFixed(1)+" dB");
+      lastLoggedIdx = d.idx;
+      lastLogAt = t;
+    }
+  }else{
+    detected = -1;
+    if(lastLoggedIdx !== -1 && t-lastLogAt > 280){
+      stream.push(-1);
+      if(stream.length>MAX_STREAM) stream.shift();
+      renderStream();
+      lastLoggedIdx = -1;
+      lastLogAt = t;
+    }
+  }
+  if(t-lastDetectUi > 45){ lastDetectUi = t; renderDetection(d); renderTxPeak(); }
+}
+
+/* ------------------------------------------------------------------ rendering */
+
+function renderDetection(d){
+  if(!d){
+    $("toneNo").textContent = "—";
+    $("toneFreq").textContent = micOn ? "无信号" : "麦克风关闭";
+    $("conf").textContent = "— dB";
+    $("level").textContent = "— dBFS";
+    $("snr").textContent = "— dB";
+    $("peak").textContent = "—";
+    var rows = document.querySelectorAll("#bars .barRow");
+    for(var i=0;i<rows.length;i++){
+      rows[i].className = "barRow";
+      rows[i].querySelector(".fill").style.width = "0%";
+      rows[i].querySelector(".val").textContent = "—";
+    }
+    return;
+  }
+  if(d.valid && d.idx>=0){
+    $("toneNo").textContent = String(d.idx+1);
+    $("toneFreq").textContent = TONES[d.idx].hz+" Hz · TONE "+(d.idx+1)+" / 4";
+  }else{
+    $("toneNo").textContent = "—";
+    $("toneFreq").textContent = d.rmsDb>MIN_LEVEL_DB ? "无法判定" : "无信号";
+  }
+  $("conf").textContent = fmtMargin(d.sep)+" dB";
+  $("level").textContent = fmtDb(d.rmsDb)+" dBFS";
+  $("snr").textContent = fmtMargin(d.snr)+" dB";
+  $("peak").textContent = (d.peak*100).toFixed(0)+"%";
+  var maxDb = Math.max.apply(null, d.pdb);
+  var rows = document.querySelectorAll("#bars .barRow");
+  for(var i=0;i<rows.length;i++){
+    var rel = d.pdb[i]-maxDb;
+    var w = maxDb < -90 ? 0 : clamp((rel+30)/30*100, 0, 100);
+    rows[i].querySelector(".fill").style.width = w.toFixed(1)+"%";
+    rows[i].querySelector(".val").textContent = fmtDb(d.pdb[i]);
+    rows[i].className = "barRow"+(d.valid && d.idx===i?" hit":"");
+  }
+}
+
+function renderStream(){
+  var box = $("stream");
+  var html = "";
+  for(var i=0;i<stream.length;i++){
+    var v = stream[i];
+    if(v<0) html += '<span class="blk gap">·</span>';
+    else html += '<span class="blk '+TONES[v].cls+'">'+(v+1)+'</span>';
+  }
+  box.innerHTML = html;
+  box.scrollLeft = box.scrollWidth;
+}
+
+function buildBars(){
+  var html = "";
+  for(var i=0;i<TONES.length;i++){
+    html += '<div class="barRow"><span class="lab">'+(i+1)+' · '+TONES[i].hz+'</span>'+
+      '<span class="track"><span class="fill t'+(i+1)+'"></span></span>'+
+      '<span class="val">—</span></div>';
+  }
+  $("bars").innerHTML = html;
+}
+
+function updateHeader(){
+  var secure = !!window.isSecureContext;
+  var badge = $("envBadge");
+  badge.textContent = secure ? "SECURE" : "NO HTTPS";
+  badge.className = "badge "+(secure?"on":"warn");
+  var mb = $("micBadge");
+  if(micPending){
+    mb.textContent = "MIC …";
+    mb.className = "badge warn";
+  }else if(micOn){
+    mb.textContent = "● MIC ON";
+    mb.className = "badge on";
+  }else{
+    mb.textContent = "MIC OFF";
+    mb.className = "badge";
+  }
+  var btn = $("micBtn");
+  if(micPending){
+    btn.textContent = "请求麦克风…";
+    btn.className = "";
+    btn.disabled = true;
+  }else{
+    btn.disabled = false;
+    if(micOn){
+      btn.textContent = "停止监听";
+      btn.className = "on";
+    }else{
+      btn.textContent = "开始监听麦克风";
+      btn.className = "";
+    }
+  }
+  var s = "4-FSK 1.5/2.5/3.5/4.5k · 40ms";
+  if(ac) s += " · "+ac.state+" "+Math.round(ac.sampleRate/1000)+"k";
+  $("sub").textContent = s;
+}
+
+/* FFT display: one bar per pixel column, candidate markers on top. */
+var fctx = null;
+function drawSpectrum(){
+  var c = $("fft");
+  if(!fctx) fctx = c.getContext("2d");
+  var W = c.width, H = c.height;
+  fctx.fillStyle = "#a3ad7e";
+  fctx.fillRect(0,0,W,H);
+
+  var an = micAn || (now()<txPlayingUntil ? txAn : null);
+  var tag = $("specTag");
+  if(micAn) tag.textContent = "RX FFT"; else if(an) tag.textContent = "TX FFT"; else tag.textContent = "RX OFF";
+
+  /* grid: 0, 1k ... 6k */
+  fctx.strokeStyle = "#7d8a58";
+  fctx.lineWidth = 1;
+  fctx.font = "20px monospace";
+  fctx.fillStyle = "#4a5a32";
+  for(var f=0;f<=6000;f+=1000){
+    var x = Math.round(f/6000*W)+0.5;
+    fctx.beginPath(); fctx.moveTo(x,18); fctx.lineTo(x,H); fctx.stroke();
+    fctx.fillText(f===0?"0":(f/1000)+"k", Math.min(W-28,x+3), 15);
+  }
+
+  /* candidate markers */
+  for(var i=0;i<TONES.length;i++){
+    var mx = Math.round(TONES[i].hz/6000*W)+0.5;
+    fctx.strokeStyle = "#4a5a32";
+    fctx.setLineDash([4,4]);
+    fctx.beginPath(); fctx.moveTo(mx,20); fctx.lineTo(mx,H); fctx.stroke();
+    fctx.setLineDash([]);
+    fctx.fillStyle = (detected===i) ? "#1f2a14" : "#4a5a32";
+    fctx.fillRect(mx-18,0,36,17);
+    fctx.fillStyle = "#a3ad7e";
+    fctx.font = "bold 18px monospace";
+    fctx.fillText(String(i+1), mx-5, 14);
+  }
+
+  if(an){
+    var n = an.frequencyBinCount;
+    var data = fftBuf && fftBuf.length===n ? fftBuf : new Uint8Array(n);
+    an.getByteFrequencyData(data);
+    var nyq = (ac?ac.sampleRate:48000)/2;
+    var base = H-6;
+    for(var px=0;px<W;px++){
+      var lo = Math.floor((px/W*6000)/nyq*n);
+      var hi = Math.floor(((px+1)/W*6000)/nyq*n);
+      if(hi<=lo) hi = lo+1;
+      var m = 0;
+      for(var b=lo;b<hi && b<n;b++) if(data[b]>m) m = data[b];
+      var h = Math.round((m/255)*(base-22));
+      fctx.fillStyle = "#4a5a32";
+      fctx.fillRect(px, base-h, 1, h);
+      if(h>2){ fctx.fillStyle = "#1f2a14"; fctx.fillRect(px, base-h, 1, 2); }
+    }
+  }else{
+    fctx.fillStyle = "#4a5a32";
+    fctx.font = "22px monospace";
+    fctx.fillText(micOn ? "LISTENING…" : "MIC OFF · 点击开始监听", 14, H-14);
+  }
+}
+
+var txFreqBuf = null;
+function renderTxPeak(){
+  if(!txAn || !ac) return;
+  if(now() >= txPlayingUntil) return;
+  var n = txAn.frequencyBinCount;
+  if(!txFreqBuf || txFreqBuf.length!==n) txFreqBuf = new Float32Array(n);
+  var arr = txFreqBuf;
+  txAn.getFloatFrequencyData(arr);
+  var nyq = ac.sampleRate/2, best = -999, bestF = 0;
+  for(var i=0;i<n;i++){
+    var f = i/n*nyq;
+    if(f<800 || f>5500) continue;
+    if(arr[i]>best){ best = arr[i]; bestF = f; }
+  }
+  txPeakHz = best>-90 ? Math.round(bestF) : null;
+}
+
+/* ------------------------------------------------------------------ self test */
+
+function showResult(title, lines){
+  var el = $("result");
+  el.innerHTML = '<div class="head">'+esc(title)+'</div>'+
+    '<div class="note">'+lines.map(esc).join("<br>")+'</div>';
+  el.className = "show";
+}
+
+function loopSelfTest(){
+  if(testRunning) return Promise.resolve(lastTest);
+  if(!micOn){
+    return startMic().then(function(ok){ if(!ok) return null; return loopSelfTest(); });
+  }
+  testRunning = true;
+  $("testBtn").disabled = true;
+  $("testBtn").textContent = "自测中…";
+  var seq = [0,1,2,3,1,0,3,2];
+  var dur = 0.24, gap = 0.16;
+  var sched = playSequence(seq, dur, gap, function(){});
+  if(!sched){
+    testRunning = false; $("testBtn").disabled = false; $("testBtn").textContent = "回声自测";
+    return Promise.resolve(null);
+  }
+  log("SELFTEST 8 tones · 240 ms + 160 ms");
+  var startPerf = sched.startPerf;
+  var total = seq.length*(dur+gap)*1000 + 350;
+  return new Promise(function(resolve){
+    setTimeout(function(){
+      var cells = [], correct = 0, wrong = 0, miss = 0;
+      for(var i=0;i<seq.length;i++){
+        var a = startPerf + i*(dur+gap)*1000 + dur*1000*0.20;
+        var b = startPerf + i*(dur+gap)*1000 + dur*1000*0.85;
+        var tally = [0,0,0,0], best = -1, bestSep = -999;
+        for(var h=0;h<history.length;h++){
+          var d = history[h];
+          if(d.t<a || d.t>b || !d.valid) continue;
+          tally[d.idx]++;
+          if(d.sep>bestSep){ bestSep = d.sep; best = d.idx; }
+        }
+        var idx = -1, top = 0;
+        for(var k=0;k<4;k++) if(tally[k]>top){ top = tally[k]; idx = k; }
+        var ok = idx === seq[i];
+        if(ok) correct++; else if(idx<0) miss++; else wrong++;
+        cells.push({i:i, expect:seq[i], got:idx, sep:bestSep, ok:ok});
+      }
+      var pass = correct >= 7;
+      lastTest = {at:Date.now(), correct:correct, wrong:wrong, miss:miss, cells:cells, pass:pass};
+      var html = '<div class="head">'+(pass?"回声自测 PASS":"回声自测 FAIL")+' · '+correct+'/8</div>'+
+        '<div class="grid">';
+      for(var c=0;c<cells.length;c++){
+        var cc = cells[c];
+        html += '<div class="cell '+(cc.ok?"ok":(cc.got<0?"miss":"bad"))+'">'+
+          (cc.ok?"✓":(cc.got<0?"·":"✗"))+' '+(cc.i+1)+' → '+(cc.got<0?"—":TONES[cc.got].hz)+
+          '</div>';
+      }
+      html += '</div><div class="note">期望：1 2 3 4 2 1 4 3。✓ 正确，✗ 错判，· 未检测。7/8 以上为通过。</div>';
+      $("result").innerHTML = html;
+      $("result").className = "show";
+      log("SELFTEST "+correct+"/8 "+(pass?"PASS":"FAIL")+(wrong?" · WRONG "+wrong:"")+(miss?" · MISS "+miss:""));
+      testRunning = false;
+      $("testBtn").disabled = false;
+      $("testBtn").textContent = "回声自测";
+      resolve(lastTest);
+    }, total);
+  });
+}
+
+function playSweep(){
+  if(testRunning) return;
+  var seq = [0,1,2,3];
+  var token = ++sweepToken;
+  markToneButton(-1);
+  var sched = playSequence(seq, 0.42, 0.12, function(){
+    if(token===sweepToken){ markToneButton(-1); $("specTag").textContent = micOn?"RX FFT":"TX FFT"; }
+  });
+  if(!sched) return;
+  log("PLAY 4 TONES · 420 ms");
+  for(var i=0;i<seq.length;i++){
+    (function(i){
+      setTimeout(function(){
+        if(token!==sweepToken) return;
+        markToneButton(seq[i]);
+        $("foot").textContent = "TX TONE "+(seq[i]+1)+" / 4 · "+TONES[seq[i]].hz+" Hz";
+      }, (sched.startAt-ac.currentTime)*1000 + i*(0.42+0.12)*1000);
+    })(i);
+  }
+}
+
+/* ------------------------------------------------------------------ sandbox probe */
+
+function probeSandbox(){
+  return new Promise(function(resolve){
+    var old = document.getElementById("lab-probe-frame");
+    if(old && old.parentNode) old.parentNode.removeChild(old);
+    var f = document.createElement("iframe");
+    f.id = "lab-probe-frame";
+    f.setAttribute("sandbox","allow-scripts");
+    f.style.cssText = "position:absolute;width:1px;height:1px;left:-10px;top:-10px;border:0";
+    var done = false;
+    function finish(r){
+      if(done) return;
+      done = true;
+      window.removeEventListener("message", onMsg);
+      try{ f.parentNode.removeChild(f); }catch(e){}
+      sandboxProbeResult = r;
+      log("SANDBOX MIC "+(r.ok?"ALLOWED":"BLOCKED")+(r.name?" · "+r.name:""));
+      resolve(r);
+    }
+    function onMsg(ev){
+      if(ev.source !== f.contentWindow) return;
+      var d = ev.data || {};
+      if(d && d.labProbe) finish(d.labProbe);
+    }
+    window.addEventListener("message", onMsg);
+    var code =
+      '<!doctype html><meta charset="utf-8"><script>'+
+      '(function(){'+
+      'var out={audio:!!(window.AudioContext||window.webkitAudioContext),secure:!!window.isSecureContext};'+
+      'function send(){try{parent.postMessage({labProbe:out},"*");}catch(e){}}'+
+      'if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){out.ok=false;out.name="NoGetUserMedia";send();return;}'+
+      'navigator.mediaDevices.getUserMedia({audio:true}).then(function(s){'+
+      'out.ok=true;try{s.getTracks().forEach(function(t){t.stop();});}catch(e){}send();'+
+      '},function(e){out.ok=false;out.name=(e&&e.name)||"Error";out.message=(e&&e.message)||String(e);send();});'+
+      '})();'+
+      '<\/script>';
+    f.srcdoc = code;
+    document.body.appendChild(f);
+    setTimeout(function(){
+      if(!done) finish({ok:false, name:"Timeout", message:"no answer after 5 s (permission prompt or blocked frame)"});
+    }, 5000);
+  });
+}
+
+/* ------------------------------------------------------------------ diagnostics */
+
+function diagLine(k,v){
+  return '<div class="line"><span>'+esc(k)+'</span><span>'+esc(v)+'</span></div>';
+}
+
+function updateDiag(){
+  var a = ac;
+  var settings = null;
+  if(micStream && micStream.getAudioTracks && micStream.getAudioTracks().length){
+    try{ settings = micStream.getAudioTracks()[0].getSettings(); }catch(e){}
+  }
+  var lines = "";
+  lines += diagLine("secure", window.isSecureContext ? "yes" : "NO (需要 HTTPS 或 localhost)");
+  lines += diagLine("top-level", window.self===window.top ? "yes" : "NO (sandboxed iframe)");
+  lines += diagLine("origin", location.origin);
+  lines += diagLine("getUserMedia", navigator.mediaDevices && navigator.mediaDevices.getUserMedia ? "yes" : "NO");
+  lines += diagLine("AudioContext", AudioCtor() ? "yes" : "NO");
+  lines += diagLine("audioContext", a ? a.state : "not created");
+  lines += diagLine("sampleRate", a ? a.sampleRate+" Hz" : "—");
+  lines += diagLine("baseLatency", a && a.baseLatency!=null ? (a.baseLatency*1000).toFixed(1)+" ms" : "—");
+  lines += diagLine("outputLatency", a && a.outputLatency!=null ? (a.outputLatency*1000).toFixed(1)+" ms" : "—");
+  lines += diagLine("audioSession", navigator.audioSession ? String(navigator.audioSession.type) : "not supported");
+  lines += diagLine("trackRate", settings && settings.sampleRate ? settings.sampleRate+" Hz" : "—");
+  lines += diagLine("echoCancel", settings ? String(settings.echoCancellation) : "—");
+  lines += diagLine("noiseSupp", settings ? String(settings.noiseSuppression) : "—");
+  lines += diagLine("autoGain", settings ? String(settings.autoGainControl) : "—");
+  lines += diagLine("FFT", (micAn?micAn.fftSize:FFT_SIZE)+" · "+(a?(a.sampleRate/(micAn?micAn.fftSize:FFT_SIZE)).toFixed(1):"—")+" Hz/bin");
+  lines += diagLine("analysis", WIN_MS+" ms Hann · Goertzel");
+  lines += diagLine("txPeak", txPeakHz?txPeakHz+" Hz":"—");
+  lines += diagLine("detections", counts.join(" / "));
+  lines += diagLine("sandbox mic", sandboxProbeResult ? (sandboxProbeResult.ok?"ALLOWED":("BLOCKED "+(sandboxProbeResult.name||""))) : "not probed");
+  if(lastTest) lines += diagLine("last self-test", lastTest.correct+"/8 "+(lastTest.pass?"PASS":"FAIL"));
+  $("diagLines").innerHTML = lines;
+}
+
+function makeReport(){
+  var d = new Date();
+  var r = "Lo-PDA Acoustic Lab M1 · "+d.toISOString()+"\n";
+  r += "url: "+location.href+"\n";
+  r += "secure: "+window.isSecureContext+" · top: "+(window.self===window.top)+"\n";
+  r += "ua: "+navigator.userAgent+"\n";
+  r += "audio: "+(ac?ac.state+" "+ac.sampleRate+" Hz":"not created")+"\n";
+  r += "audioSession: "+(navigator.audioSession?navigator.audioSession.type:"n/a")+"\n";
+  r += "mic: "+(micOn?"on":"off")+" · counts: "+counts.join("/")+"\n";
+  r += "detected: "+(detected>=0?TONES[detected].hz+" Hz":"none")+"\n";
+  r += "txPeak: "+(txPeakHz||"—")+" Hz\n";
+  r += "sandbox mic: "+(sandboxProbeResult?(sandboxProbeResult.ok?"ALLOWED":("BLOCKED "+(sandboxProbeResult.name||"")+" "+(sandboxProbeResult.message||""))):"not probed")+"\n";
+  if(lastTest){
+    r += "self-test: "+lastTest.correct+"/8 "+(lastTest.pass?"PASS":"FAIL")+" · wrong "+lastTest.wrong+" · miss "+lastTest.miss+"\n";
+    for(var i=0;i<lastTest.cells.length;i++){
+      var c = lastTest.cells[i];
+      r += "  "+(i+1)+" expect "+(c.expect+1)+" got "+(c.got<0?"-":(c.got+1))+" sep "+c.sep.toFixed(1)+" dB "+(c.ok?"ok":"bad")+"\n";
+    }
+  }
+  r += "log:\n"+logLines.slice(-12).join("\n")+"\n";
+  $("report").value = r;
+  $("reportWrap").hidden = false;
+  try{
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      var cp = navigator.clipboard.writeText(r);
+      if(cp && cp.then) cp.then(function(){ log("REPORT COPIED"); }, function(){ log("REPORT READY · 请长按复制"); });
+      else log("REPORT READY · 请长按复制");
+    }else log("REPORT READY · 请长按复制");
+  }catch(e){ log("REPORT READY · 请长按复制"); }
+  return r;
+}
+
+/* ------------------------------------------------------------------ events */
+
+$("micBtn").addEventListener("click", function(){
+  if(micOn) stopMic(); else startMic();
+});
+
+Array.prototype.forEach.call(document.querySelectorAll("#toneBtns button"), function(btn){
+  btn.addEventListener("click", function(){
+    var idx = parseInt(btn.getAttribute("data-tone"),10);
+    playTone(idx, 420);
+    log("PLAY TONE "+(idx+1)+" / 4 · "+TONES[idx].hz+" Hz");
+  });
+});
+
+$("sweepBtn").addEventListener("click", playSweep);
+
+$("testBtn").addEventListener("click", function(){ loopSelfTest(); });
+
+$("vol").addEventListener("input", function(){
+  volume = parseInt(this.value,10)/100;
+  if(master) master.gain.value = volume;
+  $("volVal").textContent = this.value+"%";
+});
+
+$("diagBtn").addEventListener("click", function(){
+  var body = $("diagBody");
+  body.hidden = !body.hidden;
+  if(!body.hidden) updateDiag();
+});
+
+$("probeBtn").addEventListener("click", function(){
+  var btn = this;
+  btn.disabled = true; btn.textContent = "探测中…";
+  log("SANDBOX PROBE START");
+  probeSandbox().then(function(r){
+    btn.disabled = false; btn.textContent = "沙箱麦克风探测";
+    if(!$("diagBody").hidden) updateDiag();
+    showResult(r.ok?"沙箱内麦克风可用":"沙箱内麦克风被拒绝", [
+      r.ok ? "这个 iframe 能打开麦克风；仍需确认 Lo-PDA 的 iframe 策略是否一致。" :
+             "与 Lo-PDA app 相同的 sandbox 中，getUserMedia 失败：",
+      (r.name||"")+(r.message?" · "+r.message:""),
+      "结论：原始 FFT 实验页应继续以顶层页面运行；商店 app 只能用 PAD.mic 的粗读数。"
+    ]);
+  });
+});
+
+$("dspBtn").addEventListener("click", function(){
+  var r = dspSelfCheck();
+  var lines = [];
+  for(var i=0;i<r.results.length;i++){
+    var x = r.results[i];
+    lines.push((x.ok?"✓":"✗")+" "+(i+1)+" → "+(x.got?x.got+" Hz":"—")+" · sep "+x.sep+" dB");
+  }
+  showResult("DSP 自检 "+(r.pass===4?"PASS":"FAIL")+" · "+r.pass+"/4", lines.concat("纯合成正弦 + 噪声，不经过麦克风。"));
+  if(!$("diagBody").hidden) updateDiag();
+});
+
+$("reportBtn").addEventListener("click", makeReport);
+
+document.addEventListener("visibilitychange", function(){
+  if(document.hidden && micOn){
+    stopMic();
+    log("PAGE HIDDEN · MIC STOPPED");
+    $("foot").textContent = "页面切走，麦克风已关闭 · 回来后重新点击开始";
+  }
+});
+window.addEventListener("pagehide", function(){ if(micOn) stopMic(); });
+
+window.addEventListener("resize", function(){ lastFrame = 0; });
+
+/* ------------------------------------------------------------------ frame loop */
+
+function frame(ts){
+  if(!lastFrame || ts-lastFrame>32){
+    lastFrame = ts;
+    drawSpectrum();
+    renderTxPeak();
+    if(!$("diagBody").hidden && !diagThrottle(ts)) updateDiag();
+  }
+  requestAnimationFrame(frame);
+}
+var lastDiag = 0;
+function diagThrottle(ts){ if(ts-lastDiag<700) return true; lastDiag = ts; return false; }
+
+/* ------------------------------------------------------------------ boot */
+
+buildBars();
+renderStream();
+updateHeader();
+requestAnimationFrame(frame);
+log("READY · 独立顶层页 · 点击开始监听");
+
+/* A small hook for the Playwright verification script; not part of the UI. */
+window.__TONE_LAB__ = {
+  version:"m1",
+  snapshot:function(){
+    var txMax = null, txTop = null;
+    if(txAn && ac){
+      var tn = txAn.frequencyBinCount, ta = new Float32Array(tn), ti, tf, tb = -999;
+      txAn.getFloatFrequencyData(ta);
+      for(ti=0;ti<tn;ti++){
+        tf = ti/tn*(ac.sampleRate/2);
+        if(tf<800 || tf>5500) continue;
+        if(ta[ti]>tb){ tb = ta[ti]; txTop = Math.round(tf); }
+      }
+      txMax = tb;
+    }
+    return {
+      version:"m1",
+      txPlaying:now()<txPlayingUntil,
+      txMaxDb:txMax,
+      txTopHz:txTop,
+      masterGain:master?master.gain.value:null,
+      micOn:micOn,
+      ctxState:ac?ac.state:null,
+      sampleRate:ac?ac.sampleRate:null,
+      fftSize:micAn?micAn.fftSize:null,
+      binHz:ac&&micAn?ac.sampleRate/micAn.fftSize:null,
+      secure:!!window.isSecureContext,
+      topLevel:window.self===window.top,
+      detected:detected,
+      lastDetection:lastDetection?{idx:lastDetection.idx,sep:lastDetection.sep,snr:lastDetection.snr,rmsDb:lastDetection.rmsDb,pdb:lastDetection.pdb}:null,
+      counts:counts.slice(),
+      txPeakHz:txPeakHz,
+      sandboxProbe:sandboxProbeResult,
+      lastTest:lastTest,
+      log:logLines.slice(-20)
+    };
+  },
+  startMic:startMic,
+  stopMic:stopMic,
+  playTone:playTone,
+  playSweep:playSweep,
+  loopSelfTest:loopSelfTest,
+  dspSelfCheck:dspSelfCheck,
+  probeSandbox:probeSandbox,
+  makeReport:makeReport
+};
+})();
+</script>
+</body>
+</html>
