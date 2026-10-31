@@ -13,8 +13,8 @@ const plain = (v) => JSON.parse(JSON.stringify(v));
 const fresh = () => plain(S.newSong(1000));
 const apply = (song, ops) => E.apply(song, ops);
 
-test("TOOLS: the eleven tools of the table", () => {
-  assert.deepEqual(plain(T.TOOLS), ["ops", "groove", "chords", "bass", "ghost", "fill", "melody", "copy", "chain", "set", "mix"]);
+test("TOOLS: the twelve tools of the table", () => {
+  assert.deepEqual(plain(T.TOOLS), ["ops", "groove", "chords", "bass", "ghost", "fill", "stop", "melody", "copy", "chain", "set", "mix"]);
 });
 
 test("every tool's valid answer is an ops list that apply() accepts", () => {
@@ -292,4 +292,17 @@ test("diatonicQ: a bare degree is the scale's own triad or seventh; rich leaves 
   assert.equal(T.diatonicQ(song, 0, "rich"), null);
   song.scale = "major";
   assert.deepEqual([0, 1, 4].map((d) => T.diatonicQ(song, d, "seventh")), ["maj7", "m7", "7"]);
+});
+
+test("stop: everything after beat 3 goes, the band hits beat 3 and the tracks rest from step 10", () => {
+  let song = fresh();
+  song = apply(song, T.run(song, { tool: "melody", pattern: 0, notes: [[0, 2, 0.8], [6, 4, 0.7], [12, 3, 0.8]] }).ops).song;
+  const r = apply(song, T.run(song, { tool: "stop", pattern: 0 }).ops).song;
+  const notes = r.patterns[0].notes;
+  assert.ok(notes.drums.every((n) => n.t <= 8 * S.STEP), "no drums after beat 3");
+  assert.ok(notes.drums.some((n) => n.key === "snare" && n.t === 8 * S.STEP));
+  for (const tr of ["bass", "chords", "melody"]) {
+    const after = notes[tr].filter((n) => n.t >= 10 * S.STEP);
+    assert.ok(after.length === 1 && after[0].vel === 0, tr + " rests from step 10");
+  }
 });

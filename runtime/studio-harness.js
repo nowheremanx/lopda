@@ -246,6 +246,7 @@ function planCheck(obj,cards,rolls){
     if(s.strum!=null && s.strum!=="none" && T.CHORD_RHYTHMS.indexOf(s.strum)<0)
       return {error:"section '"+id+"': strum must be one of "+T.CHORD_RHYTHMS.join(", ")+" or none"};
     if(s.imitate!=null && typeof s.imitate!=="boolean") return {error:"section '"+id+"': imitate must be true or false"};
+    if(s.end!=null && s.end!=="stop" && s.end!=="fill" && s.end!=="none") return {error:"section '"+id+"': end must be fill, stop or none"};
     if(s.imitate && !s.melody) return {error:"section '"+id+"': imitate needs melody true (the bass imitates the melody's motif)"};
     if(Array.isArray(s.bass)){
       var br=T.run(S.newSong(0),{tool:"bass",pattern:0,steps:s.bass});
@@ -290,7 +291,7 @@ function planCheck(obj,cards,rolls){
   for(i=0;i<sections.length;i++){
     s=sections[i];
     kept.push({id:s.id,chords:s.chords.slice(),groove:s.drums!=null && s.groove==null ? null : s.groove,
-      drums:s.drums!=null && s.groove==null ? s.drums : null,strum:s.strum||"hold",imitate:s.imitate===true,
+      drums:s.drums!=null && s.groove==null ? s.drums : null,strum:s.strum||"hold",imitate:s.imitate===true,end:s.end||"",
       energy:s.energy,bass:s.bass,melody:s.melody,patterns:[]});
   }
   var keptOrder=[];
@@ -346,7 +347,7 @@ function laySong(roll,plan,now){
     s=plan.sections[i];
     for(j=0;j<s.patterns.length;j++){
       p=s.patterns[j];
-      fill=!!follows["$"+s.id] && j===s.patterns.length-1;
+      fill=!!follows["$"+s.id] && j===s.patterns.length-1 && s.end!=="none" && s.end!=="stop";
       /* a bare degree gets the scale's own chord in the plan's chord style (12.20.8) */
       var cj=s.chords[j], dq=int(cj) ? T.diatonicQ(song,cj,plan.chordStyle) : null;
       if(dq) cj={root:cj, q:dq};
@@ -447,7 +448,11 @@ function motifRun(c,song,plan,roll,text,onStage){
       if(s.alt>=0){
         alt=C.phrase(song,motifs[s.id],specs,{variant:1,start:start});
         song=applyTool(song,{tool:"melody",pattern:s.alt,notes:alt[alt.length-1]});
+        /* the second hearing ends with the band stopping on beat 3: the silence before the next section is the
+           surprise a loop never has (12.20.12) */
+        song=applyTool(song,{tool:"stop",pattern:s.alt});
       }
+      if(s.end==="stop") song=applyTool(song,{tool:"stop",pattern:s.patterns[s.patterns.length-1]});
       var last=out[out.length-1], ln=last && last[last.length-1];
       if(ln) start=ln[1];
     }
