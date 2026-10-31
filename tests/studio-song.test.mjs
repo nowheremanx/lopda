@@ -42,7 +42,7 @@ test("constants: format, tracks, scales, demo beat", () => {
   });
   assert.deepEqual([S.SWING_MIN, S.SWING_MAX, S.SWING_DEFAULT], [0.5, 0.75, 0.55]);
   assert.equal(S.TAPE_MAX, 4);
-  assert.equal(S.PATTERNS_MAX, 16);
+  assert.equal(S.PATTERNS_MAX, 64);
   assert.equal(S.SONG_MAX, 96);
   assert.equal(S.NAME_MAX, 40);
   assert.deepEqual(plain(S.DEMO), {
@@ -240,7 +240,7 @@ test("validate: patterns", () => {
   const cases = [
     (s) => { s.patterns = "nope"; },
     (s) => { s.patterns = []; },
-    (s) => { s.patterns = Array.from({ length: 17 }, () => ({ len: 16, notes: {} })); },
+    (s) => { s.patterns = Array.from({ length: 65 }, () => ({ len: 16, notes: {} })); },
     (s) => { s.patterns[0].len = 0; },
     (s) => { s.patterns[0].len = 65; },
     (s) => { s.patterns[0].len = 1.5; },
@@ -253,15 +253,15 @@ test("validate: patterns", () => {
   for (const mut of cases) assert.equal(broken(mut).error, "patterns");
 });
 
-test("validate: sixteen patterns are a song, seventeen are not", () => {
+test("validate: 64 patterns are a song, 65 are not", () => {
   const song = fresh();
   song.patterns = Array.from({ length: S.PATTERNS_MAX }, () => S.emptyPattern());
   song.song = song.patterns.map((_, i) => i);
-  assert.equal(S.PATTERNS_MAX, 16);
-  assert.equal(S.validate(song).error, undefined, "A-P is the format's limit");
+  assert.equal(S.PATTERNS_MAX, 64);
+  assert.equal(S.validate(song).error, undefined, "64 is the format's limit");
   song.patterns.push(S.emptyPattern());
-  assert.equal(song.patterns.length, 17);
-  assert.equal(S.validate(song).error, "patterns", "a seventeenth pattern is refused");
+  assert.equal(song.patterns.length, 65);
+  assert.equal(S.validate(song).error, "patterns", "a 65th pattern is refused");
 });
 
 test("validate: notes", () => {
@@ -651,7 +651,7 @@ test("patterns: emptyPattern is fresh, ensurePattern fills up to the index and l
   assert.deepEqual(plain(song), snapshot, "the input is untouched");
   assert.equal(S.validate(three).error, undefined);
 
-  for (const bad of [-1, 16, 2.5, "2", undefined]) {
+  for (const bad of [-1, 64, 2.5, "2", undefined]) {
     assert.deepEqual(plain(S.ensurePattern(song, bad)), snapshot, String(bad));
   }
 });
@@ -691,8 +691,114 @@ test("copyPattern: copies len and a deep clone of the notes, or leaves the song 
   assert.deepEqual(plain(S.copyPattern(song, 0, 0)), snapshot);
   assert.deepEqual(plain(S.copyPattern(song, 4, 2)), snapshot);
   assert.deepEqual(plain(S.copyPattern(song, -1, 2)), snapshot);
-  assert.deepEqual(plain(S.copyPattern(song, 0, 16)), snapshot);
+  assert.deepEqual(plain(S.copyPattern(song, 0, S.PATTERNS_MAX)), snapshot);
   assert.deepEqual(plain(song), snapshot);
+});
+
+test("pattern names: default rounds, patName, and validate's rule", () => {
+  assert.deepEqual([0, 15, 16, 31, 32, 47, 48, 63].map(S.defaultPatName),
+    ["A", "P", "A1", "P1", "A2", "P2", "A3", "P3"]);
+
+  const song = fresh();
+  song.patterns[0].name = "C4";
+  assert.equal(S.patName(song, 0), "C4", "its own name wins");
+  assert.equal(S.patName(song, 1), "B", "the pattern the panel offers next gets B");
+  assert.equal(S.patName(song, 2), "C", "a pattern further out still reads its default");
+  song.patterns[0].name = "c4";
+  assert.equal(S.patName(song, 0), "A", "an invalid name falls back to the default");
+
+  for (const bad of ["a", "AA", "A0", "A10", 5]) {
+    const s = fresh();
+    s.patterns[0].name = bad;
+    assert.equal(S.validate(s).error, "patterns", String(bad));
+  }
+  const two = fresh();
+  two.patterns.push(S.emptyPattern());
+  two.patterns[0].name = "B1";
+  two.patterns[1].name = "B1";
+  assert.equal(S.validate(two).error, "patterns", "two patterns cannot share a name");
+  const hidesDefault = fresh();
+  hidesDefault.patterns.push(S.emptyPattern());
+  hidesDefault.patterns[0].name = "B";
+  assert.equal(S.validate(hidesDefault).error, "patterns", "a name cannot hide pattern 1's default B");
+  const ok = fresh();
+  ok.patterns[0].name = "C4";
+  assert.equal(S.validate(ok).error, undefined, "an unused name is fine");
+
+  /* a custom name may use a default that no existing pattern has taken */
+  const c2 = fresh();
+  c2.patterns[0].name = "C2";
+  assert.equal(S.validate(c2).error, undefined, "C2 is free while pattern 34 does not exist");
+});
+
+test("newPatName and ensurePattern: a new pattern takes the first free default name", () => {
+  const song = fresh();
+  song.patterns[0].name = "B";
+  assert.equal(S.newPatName(song, 1), "A", "B is taken, so the next pattern gets A");
+  const grown = S.ensurePattern(song, 1);
+  assert.equal(grown.patterns[1].name, "A");
+  assert.deepEqual(plain(grown.patterns[1].notes), { drums: [], bass: [], chords: [], melody: [] });
+  assert.equal(S.validate(grown).error, undefined);
+  assert.equal(S.patName(grown, 1), "A");
+  assert.equal(S.patName(grown, 2), "C", "the pattern after that keeps its own default");
+  const next = S.ensurePattern(grown, 3);
+  assert.equal(Object.prototype.hasOwnProperty.call(next.patterns[2], "name"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(next.patterns[3], "name"), false);
+  assert.equal(S.patName(next, 3), "D");
+  assert.equal(S.validate(next).error, undefined);
+});
+
+test("renamePattern and nameOk: copy-on-write, bad, taken, and back to the default", () => {
+  const song = fresh();
+  const snapshot = plain(song);
+  assert.equal(S.nameOk(song, 0, "a"), "bad");
+  assert.equal(S.nameOk(song, 0, "AA"), "bad");
+  assert.equal(S.nameOk(song, 0, "A0"), "bad");
+  assert.equal(S.nameOk(song, 0, "B"), true, "pattern 1 does not exist, so B is free");
+  assert.equal(S.nameOk(song, 0, "C2"), true, "C2 is free on a one-pattern song");
+
+  const c2 = S.renamePattern(song, 0, "C2");
+  assert.equal(S.patName(c2, 0), "C2", "C2 names pattern 0");
+  assert.equal(S.validate(c2).error, undefined);
+  assert.deepEqual(plain(song), snapshot, "the input is untouched");
+  assert.equal(S.renamePattern(song, 0, "a"), song, "a bad name returns the song unchanged");
+
+  const two = fresh();
+  two.patterns.push(S.emptyPattern());
+  assert.equal(S.nameOk(two, 0, "B"), "taken", "pattern 1's default B is taken");
+  assert.equal(S.renamePattern(two, 0, "B"), two, "a taken name returns the song unchanged");
+
+  const back = S.renamePattern(c2, 0, "A");
+  assert.equal(Object.prototype.hasOwnProperty.call(back.patterns[0], "name"), false,
+    "naming a pattern its own default removes the field");
+  assert.equal(S.patName(back, 0), "A");
+
+  const grown = S.renamePattern(song, 20, "C2");
+  assert.equal(grown.patterns.length, 21, "a rename can make the pattern first");
+  assert.equal(grown.patterns[20].name, "C2");
+  assert.equal(S.validate(grown).error, undefined, "the filled patterns have free names");
+});
+
+test("copyPattern: the notes move, the target keeps its own name", () => {
+  const song = fresh();
+  song.patterns[0].name = "C4";
+  song.patterns.push(S.emptyPattern());
+  song.patterns[1].name = "D";
+  const out = S.copyPattern(song, 0, 1);
+  assert.equal(out.patterns[1].name, "D", "the target keeps its own name");
+  assert.equal(out.patterns[0].name, "C4");
+  const made = S.copyPattern(song, 0, 2);
+  assert.equal(Object.prototype.hasOwnProperty.call(made.patterns[2], "name"), false,
+    "a made target has no name of its own");
+  assert.equal(S.validate(made).error, undefined);
+});
+
+test("validate: a 64-pattern song with a 96-slot chain", () => {
+  const song = fresh();
+  song.patterns = Array.from({ length: S.PATTERNS_MAX }, () => S.emptyPattern());
+  song.patterns[0].name = "C4";
+  song.song = Array(S.SONG_MAX).fill(S.PATTERNS_MAX - 1);
+  assert.equal(S.validate(song).error, undefined);
 });
 
 test("setNote: adds a note, defaults the velocity, and re-ties the whole track", () => {
@@ -746,7 +852,7 @@ test("setNote: ensures the pattern, but drums, unknown tracks and bad input leav
     [0, "bass", 0, 33, undefined],
     [0, "bass", 0, 0, 2],
     [0, "bass", 0, 0, "0.8"],
-    [16, "bass", 0, 0, undefined],
+    [64, "bass", 0, 0, undefined],
     [-1, "bass", 0, 0, undefined],
   ]) {
     assert.deepEqual(plain(S.setNote(song, p, track, t, deg, vel)), before, `${p} ${track} ${t} ${deg} ${vel}`);
@@ -855,7 +961,7 @@ test("setRest and isRest: a vel-0 note is a rest, it ends the note before it, an
     [0, "bass", -1],
     [0, "bass", P],
     [0, "bass", 0.5],
-    [16, "bass", 0],
+    [64, "bass", 0],
     [-1, "bass", 0],
   ]) {
     assert.deepEqual(plain(S.setRest(song, p, track, t)), before, `${p} ${track} ${t}`);
@@ -893,10 +999,10 @@ test("song chain: setSlot, addSlot and dropSlot copy, ensure the pattern, and ke
   assert.equal(S.addSlot(full, 1).patterns.length, 1, "a refused add does not add a pattern either");
 
   // bad slots, patterns and songs: unchanged copies
-  for (const [i, p] of [[1, 0], [-1, 0], [0, 16], [0, -1], [0, 1.5], ["0", 0], [0, "1"]]) {
+  for (const [i, p] of [[1, 0], [-1, 0], [0, 64], [0, -1], [0, 1.5], ["0", 0], [0, "1"]]) {
     assert.deepEqual(plain(S.setSlot(song, i, p)), before, `${i} ${p}`);
   }
-  for (const p of [-1, 16, 1.5, "1"]) assert.deepEqual(plain(S.addSlot(song, p)), before, String(p));
+  for (const p of [-1, 64, 1.5, "1"]) assert.deepEqual(plain(S.addSlot(song, p)), before, String(p));
 });
 
 test("insertSlot and removeSlot: index 0, the end, the 96 cap, one slot left, bad input", () => {
@@ -924,7 +1030,7 @@ test("insertSlot and removeSlot: index 0, the end, the 96 cap, one slot left, ba
   assert.equal(S.insertSlot(full, S.SONG_MAX, 1).patterns.length, 1);
 
   // bad indexes, patterns and songs are unchanged copies
-  for (const [i, p] of [[-1, 1], [2, 1], [1.5, 1], ["1", 1], [0, 16], [0, -1], [0, 1.5], [0, "1"]]) {
+  for (const [i, p] of [[-1, 1], [2, 1], [1.5, 1], ["1", 1], [0, 64], [0, -1], [0, 1.5], [0, "1"]]) {
     assert.deepEqual(plain(S.insertSlot(song, i, p)), before, `${i} ${p}`);
   }
   const noSong = fresh();
@@ -1401,7 +1507,7 @@ test("fromDraft: a bad shape is refused instead of half-built", () => {
     patterns: [{ drums: [[0, "kick", 1]], bass: [[0, 0, 0.8]], chords: [[0, 0, 0.65]], melody: [] }] });
   for (const mut of [
     (d) => { d.patterns = []; },
-    (d) => { d.patterns = new Array(17).fill({}); },
+    (d) => { d.patterns = new Array(65).fill({}); },
     (d) => { d.patterns[0].drums = [[0, "cowbell", 1]]; },
     (d) => { d.patterns[0].drums = [[16, "kick", 1]]; },
     (d) => { d.patterns[0].drums = [[0, "kick", 2]]; },

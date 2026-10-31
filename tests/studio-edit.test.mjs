@@ -136,11 +136,11 @@ test("apply: setChain replaces the whole chain and creates the patterns it names
 test("apply: setChain refuses an empty, long, out-of-range or non-integer chain", () => {
   assert.equal(apply(fresh(), [{ op: "setChain", song: [] }]).error, "value");
   assert.equal(apply(fresh(), [{ op: "setChain", song: Array(97).fill(0) }]).error, "value");
-  assert.equal(apply(fresh(), [{ op: "setChain", song: [0, 16] }]).error, "value");
+  assert.equal(apply(fresh(), [{ op: "setChain", song: [0, 64] }]).error, "value");
   assert.equal(apply(fresh(), [{ op: "setChain", song: [0, -1] }]).error, "value");
   assert.equal(apply(fresh(), [{ op: "setChain", song: [0, 1.5] }]).error, "value");
   assert.equal(apply(fresh(), [{ op: "setChain", song: "0" }]).error, "value");
-  assert.equal(apply(fresh(), [{ op: "setBpm", value: 90 }, { op: "setChain", song: [0, 16] }]).at, 1);
+  assert.equal(apply(fresh(), [{ op: "setBpm", value: 90 }, { op: "setChain", song: [0, 64] }]).at, 1);
 });
 
 test("apply: unknown ops, a non-array and malformed values are refused", () => {
