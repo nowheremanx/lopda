@@ -21,6 +21,10 @@ var DRUMS=["kick","snare","hat","perc"], KITS=["chip","soft","rock","electro"], 
    digits and "-", starting with a letter. That keeps "__proto__" and friends out of plain objects used as maps. */
 var TRACK_ID=/^[a-z][a-z0-9-]{0,15}$/;
 
+/* A pattern's optional name (12.22): one capital letter, or a capital plus one digit 1-9. The shape is a 1986
+   label, not a free title: it must read at two characters in a 44 px button. */
+var PAT_NAME=/^[A-Z][1-9]?$/;
+
 /* a pattern is 16 steps in 1a; four bars of off-grid notes are far below this, and a broken file cannot make validate
    walk millions of notes */
 var NOTES_MAX=1024;
@@ -194,7 +198,7 @@ var POP_SONG={
 };
 
 
-var SWING_MIN=0.5, SWING_MAX=0.75, SWING_DEFAULT=0.55, TAPE_MAX=4, PATTERNS_MAX=16, SONG_MAX=96, NAME_MAX=40;
+var SWING_MIN=0.5, SWING_MAX=0.75, SWING_DEFAULT=0.55, TAPE_MAX=4, PATTERNS_MAX=64, SONG_MAX=96, NAME_MAX=40;
 
 /* Which synth voice a track plays (12.6): a constant, not a song field, so a later version can revoice a track without
    migrating files. 12.12 moved the melody from the bright pluck to the flute. 12.20 lets a track carry its own optional
@@ -468,9 +472,16 @@ function check(x){
   }
 
   if(!Array.isArray(x.patterns) || x.patterns.length<1 || x.patterns.length>PATTERNS_MAX) return {error:"patterns"};
+  /* the names a listener sees: a pattern's own valid name, else its default letter. They must be unique, so a
+     renamed pattern cannot hide another one (12.22). A tape with no name fields passes exactly as before. */
+  var names={};
   for(i=0;i<x.patterns.length;i++){
     var p=x.patterns[i];
     if(!plain(p) || !int(p.len) || p.len<1 || p.len>64 || !plain(p.notes)) return {error:"patterns"};
+    if(typeof p.name!=="undefined" && (typeof p.name!=="string" || !PAT_NAME.test(p.name))) return {error:"patterns"};
+    var effective=patName(x,i);
+    if(Object.prototype.hasOwnProperty.call(names,"$"+effective)) return {error:"patterns"};
+    names["$"+effective]=true;
     max=p.len*STEP;
     keys=Object.keys(p.notes);
     for(j=0;j<keys.length;j++){
@@ -773,17 +784,80 @@ function clampBpm(bpm){
   return Math.max(BPM_MIN, Math.min(BPM_MAX, n));
 }
 
-/* ---------- patterns A-P (12.3) ---------- */
-/* A pattern is created on demand up to 16, the number of letter buttons; an empty one is the shape every screen expects. */
+/* ---------- patterns A-P, then A1-P3 (12.3, 12.22) ---------- */
+/* A pattern is created on demand up to 64; an empty one is the shape every screen expects. */
 function emptyPattern(){
   return {len:STEPS, notes:{drums:[], bass:[], chords:[], melody:[]}};
 }
 
-/* Fills on the copied song, so callers that already hold a clone do not clone twice. */
+/* The letters the grid has always shown, extended in rounds of 16: 0-15 A-P, 16-31 A1-P1, 32-47 A2-P2,
+   48-63 A3-P3. */
+function defaultPatName(i){
+  var n=int(i) ? i : 0;
+  if(n<0) n=0;
+  if(n>=PATTERNS_MAX) n=PATTERNS_MAX-1;
+  var letter=String.fromCharCode(65+(n%16)), round=Math.floor(n/16);
+  return round ? letter+round : letter;
+}
+
+/* What the user sees: its own valid name, else the name it has (or would get) by default. A pattern just past the
+   end is the one the panel offers next, so it shows the free name newPatName would give it (12.22). */
+function patName(song,i){
+  var pat=song && song.patterns && song.patterns[i];
+  if(pat && typeof pat.name==="string" && PAT_NAME.test(pat.name)) return pat.name;
+  var len=song && Array.isArray(song.patterns) ? song.patterns.length : 0;
+  if(i===len) return newPatName(song,i);
+  return defaultPatName(i);
+}
+
+/* The name a new pattern at index n gets: its own default when free, else the first free default name. Only existing
+   patterns count, so a custom name may use a default that no pattern has taken yet. */
+function newPatName(song,n){
+  var used={}, i, len=song && Array.isArray(song.patterns) ? song.patterns.length : 0, own=defaultPatName(n), cand;
+  for(i=0;i<len;i++) used["$"+patName(song,i)]=true;
+  if(!used["$"+own]) return own;
+  for(i=0;i<PATTERNS_MAX;i++){
+    cand=defaultPatName(i);
+    if(!used["$"+cand]) return cand;
+  }
+  return own;
+}
+
+/* true, "bad" (the shape) or "taken" (another existing pattern already answers to it). */
+function nameOk(song,i,name){
+  if(!int(i) || i<0 || i>=PATTERNS_MAX) return "bad";
+  if(typeof name!=="string" || !PAT_NAME.test(name)) return "bad";
+  var len=song && Array.isArray(song.patterns) ? song.patterns.length : 0;
+  for(var j=0;j<len;j++){
+    if(j===i) continue;
+    if(patName(song,j)===name) return "taken";
+  }
+  return true;
+}
+
+/* A rename is an ordinary edit: copy-on-write, and a name that fails leaves the song as it was. Naming a pattern
+   its own default removes the field instead of storing a redundant one. The check runs after the pattern is made,
+   so a name that clashes with one of the patterns created on the way is refused too. */
+function renamePattern(song,i,name){
+  if(!plain(song) || !int(i) || i<0 || i>=PATTERNS_MAX) return song;
+  if(typeof name!=="string" || !PAT_NAME.test(name)) return song;
+  var out=ensureInto(clone(song),i);
+  if(nameOk(out,i,name)!==true) return song;
+  if(defaultPatName(i)===name) delete out.patterns[i].name;
+  else out.patterns[i].name=name;
+  return out;
+}
+
+/* Fills on the copied song, so callers that already hold a clone do not clone twice. A pattern made next gets its
+   default name unless that is taken, then the first free default (12.22). */
 function ensureInto(out,i){
   if(!plain(out)) return out;
   if(!Array.isArray(out.patterns)) out.patterns=[];
-  while(out.patterns.length<=i) out.patterns.push(emptyPattern());
+  while(out.patterns.length<=i){
+    var n=out.patterns.length, p=emptyPattern(), free=newPatName(out,n);
+    if(free!==defaultPatName(n)) p.name=free;
+    out.patterns.push(p);
+  }
   return out;
 }
 
@@ -818,6 +892,7 @@ function copyPattern(song,from,to){
   var dst=out.patterns[to];
   if(!plain(dst)) dst=out.patterns[to]={len:STEPS, notes:{drums:[], bass:[], chords:[], melody:[]}};
   dst.len=src.len;
+  /* the notes move; the target keeps its own name (12.22) */
   dst.notes=clone(src.notes);
   return out;
 }
@@ -1226,7 +1301,7 @@ function chainEvents(song,chain,fromTick,toTick){
 /* ---------- two public-domain tunes, arranged for the four-track (12.17) ----------
    "When the Saints Go Marching In" (traditional, public domain) and 茉莉花 (Jiangsu folk song, public domain).
    These are original four-track arrangements, not copied recordings: the melody, chords, bass and drums are written
-   here so the machine can show what a normal-length song looks like in the A-P grid. Each has eight bars of verse and
+   here so the machine can show what a normal-length song looks like in the pattern grid. Each has eight bars of verse and
    eight bars of a fuller chorus, and the 64-slot chain repeats them four times (about 2.5 and 3 minutes). */
 var TUNE_VERSE={
   kick:[1,[3,0.8]], snare:[2,4], perc:[],
@@ -1314,6 +1389,7 @@ window.LopdaSong={
   tonic:tonic, noteMidi:noteMidi, noteName:noteName,
   chordNotes:chordNotes, chordName:chordName,
   emptyPattern:emptyPattern, ensurePattern:ensurePattern, hasNotes:hasNotes, patternEmpty:patternEmpty,
+  defaultPatName:defaultPatName, newPatName:newPatName, patName:patName, nameOk:nameOk, renamePattern:renamePattern,
   copyPattern:copyPattern, noteAt:noteAt, isRest:isRest, setNote:setNote, setNoteExtra:setNoteExtra, setRest:setRest, removeNote:removeNote,
   setSlot:setSlot, addSlot:addSlot, dropSlot:dropSlot, insertSlot:insertSlot, removeSlot:removeSlot,
   chainEvents:chainEvents, chainTicks:chainTicks, chainAt:chainAt
