@@ -872,6 +872,17 @@ B 段去旋律都是 1–3 次调用；「改成 3/4 拍」0 处改动并说明�
 - `tools/studio-ai-trial.mjs`（手动，不进 `node --test`）：在 Node 里跑 harness，`ask` 通过本机的 opencode 调
   DeepSeek v4.1 flash；每个场景跑 3 次，打印合法率、重写次数、时长、几次骨架的调/速/鼓型是否不同。
 
+### 12.19.9 提示缓存（prompt cache，2026-10-31）
+
+OpenRouter 后面的 DeepSeek 等会自动缓存：一次请求开头和之前某次请求相同的部分算「cached tokens」，便宜得多、也更快。
+所以每一步的系统提示只取决于步骤本身：开头都是同一段 MACHINE（机器说明），然后是 `TAPE4 STEP: <名字>` 和这一步固定的规则
+（计划步骤还有全部鼓型和贝斯型的列表）；会变的东西（风格卡和骰子、歌的概要、请求、`LANGUAGE: Chinese|English`）都放在用户消息里。
+措辞只挪了位置，没有改要求。`tests/studio-harness.test.mjs` 检查每一步只有一个系统提示、且共用开头。
+
+离线估计（假模型跑 3 次骨架 + 2 次修改，每次请求与之前任一请求的最长相同前缀）：55% → 66%；每首歌第一次的旋律、试音、修改不再从 0 开始，
+换语言后的修改从 38% 到 99%。真实数字：`tools/studio-ai-trial.mjs --openrouter <model>` 打印 API 报告的 prompt / cached tokens。
+OpenRouter 换了提供商（provider）时缓存不跨提供商，这不在我们控制之内。
+
 ## 12.20 Tape4 2.0：音乐词汇，让它能玩大部分风格（owner 2026-10-30）
 
 owner：「不喜欢那么高强度的模板，想让 Tape4 更定制化。现在只能做没有记忆点的循环，听多了无聊。希望技术上支持大部分风格，

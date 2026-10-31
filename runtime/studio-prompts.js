@@ -10,8 +10,14 @@
  *   LopdaStudioPrompts.edit(o)    -> messages   o: {text, overview, focus}
  *   LopdaStudioPrompts.reject(reason) -> the user turn that sends a rejected answer back
  *
- * Every system prompt starts with "TAPE4 STEP: <name>", which the tests' fake model reads to know what to answer.
+ * Every system prompt names its step with "TAPE4 STEP: <name>", which the tests' fake model reads to know what to answer.
  * The prompts are English (models follow it best); the one sentence for the user is asked in the user's language.
+ *
+ * Prompt caching (OpenRouter, DeepSeek): a provider bills the part of a request that repeats the start of an earlier
+ * one as cached tokens, at a fraction of the price and faster. So every system prompt begins with the same MACHINE
+ * block, then the step's name, then the step's fixed rules, and depends on nothing but the step: no language, no dice,
+ * no date. Everything that changes (the cards, the song, the request, the user's language) goes in the user message,
+ * after it. tests/studio-harness.test.mjs keeps it so.
  *
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  */
@@ -39,16 +45,16 @@ function lang(text){
   return /[㐀-鿿]/.test(String(text||"")) ? "Chinese" : "English";
 }
 function msgs(step,system,user){
-  return [{role:"system",content:"TAPE4 STEP: "+step+"\n"+system},{role:"user",content:user}];
+  return [{role:"system",content:MACHINE+"\n\nTAPE4 STEP: "+step+"\n"+system},{role:"user",content:user}];
 }
+/* the user's language, said in the user message so the system prompt stays the same for both */
+function language(text){ return "LANGUAGE: "+lang(text); }
 function list(a){ return (a||[]).join(", "); }
 
 /* Step 2 of a new song: the shape only. Drums, chords and bass are laid by local tools from these choices, so the model
    writes about two hundred tokens instead of a whole song. */
 function plan(o){
   var system=[
-MACHINE,
-"",
 "You plan a new song for it: the sound (kit and a voice per track), the sections, one chord per bar, and the drums,",
 "bass rhythm and chord strum of each section. The machine lays the drums, chords and bass itself; melodies come in a",
 "later step. Style cards are offered as inspiration (card 1 is the machine's random pick, used for a vague request).",
@@ -110,7 +116,9 @@ JSON_ONLY,
 "- Bass: whole and half notes only for an intro, an outro or a ballad; under a melody choose a moving rhythm.",
 "- energy: 0 calm, 1 normal, 2 full. melody: false for intro and outro, usually true for verse and chorus.",
 "- Make the chorus different from the verse: other chords or another order, more energy.",
-"- name: in "+lang(o.text)+", at most 24 characters, original (never a real song's title)."
+"- name: in the LANGUAGE given with the request, at most 24 characters, original (never a real song's title).",
+"",
+"Every groove: "+list(o.allGrooves)+". Every bass rhythm: "+list(o.allBass)+"."
   ].join("\n");
   var cards=[], i, c;
   for(i=0;i<o.cards.length;i++){
@@ -120,8 +128,8 @@ JSON_ONLY,
   }
   var user=[
 cards.join("\n"),
-"Every groove: "+list(o.allGrooves)+". Every bass rhythm: "+list(o.allBass)+".",
 "",
+language(o.text),
 "REQUEST: "+(o.text||"a new song")
   ].join("\n");
   return msgs("plan",system,user);
@@ -132,8 +140,6 @@ cards.join("\n"),
    notes (12.20.13). */
 function melody(o){
   var system=[
-MACHINE,
-"",
 "You write the melody of one section of a new song. Notes are scale degrees of the key: 0 is the tonic, 1 the next",
 "scale note, one octave up is the scale's length (7, or 5 for a pentatonic scale), -1 the scale note below the tonic.",
 "A note rings until the next one; velocity 0 is a rest. A 4th value 1 or -1 raises or lowers a note a semitone, a",
@@ -196,27 +202,23 @@ var EDIT_ONLY=[
 /* Step 5 of a new song: one look at the whole thing, a few touches, and the sentence the user reads. */
 function listen(o){
   var system=[
-MACHINE,
-"",
 "The machine has just written a new song (summary below). Listen back as a producer: add at most 8 small touches",
 "that make it feel played by people, such as a fill before a chorus, ghost notes, a sparser intro. Do not rewrite it.",
 "",
 JSON_ONLY,
 'Shape: {"reply":"one or two sentences for the user","calls":[ ...0-8 tool calls... ]}',
-"The reply is in "+lang(o.text)+", at most 120 characters, like a friend telling what the song feels like and how it",
+"The reply is in the LANGUAGE given below, at most 120 characters, like a friend telling what the song feels like and how it",
 "moves (calm intro, a fuller chorus...). Never mention pattern letters, step numbers, degrees, swing values or tool names.",
 "",
 "Tools:",
 TOOLS.join("\n")
   ].join("\n");
-  return msgs("listen",system,"SONG\n"+o.overview+"\n\nTHE USER ASKED: "+(o.text||"a new song"));
+  return msgs("listen",system,"SONG\n"+o.overview+"\n\n"+language(o.text)+"\nTHE USER ASKED: "+(o.text||"a new song"));
 }
 
 /* the edit loop's first turn; later turns are the tool results the harness appends */
 function edit(o){
   var system=[
-MACHINE,
-"",
 "You change the user's song with tools. The summary below lists every pattern in use; read a pattern before you change",
 "its notes. Make the smallest change that answers the request and keep what already works. If the machine cannot do",
 "what is asked (see the limits above), change nothing and say why.",
@@ -225,14 +227,14 @@ MACHINE,
 JSON_ONLY,
 'Each turn: {"calls":[...],"done":false}  and you get each call\'s result back.',
 'When finished: {"reply":"one sentence for the user","calls":[...last calls, may be empty...],"done":true}',
-"The reply is in "+lang(o.text)+", at most 120 characters. At most 5 turns.",
+"The reply is in the LANGUAGE given below, at most 120 characters. At most 5 turns.",
 "",
 "Tools:",
 EDIT_ONLY.concat(TOOLS).join("\n")
   ].join("\n");
   var f=o.focus;
   var where=f ? "\nThe user is looking at pattern "+"ABCDEFGHIJKLMNOP".charAt(f.pattern||0)+" ("+(f.pattern||0)+") on the "+(f.screen||"main")+" screen." : "";
-  return msgs("edit",system,"SONG\n"+o.overview+where+"\n"+chordTable(o.song)+"\n\nREQUEST: "+(o.text||""));
+  return msgs("edit",system,"SONG\n"+o.overview+where+"\n"+chordTable(o.song)+"\n\n"+language(o.text)+"\nREQUEST: "+(o.text||""));
 }
 
 /* The scale's own chord on each degree, named, so a model never writes "C minor" in A minor by guessing (owner's
