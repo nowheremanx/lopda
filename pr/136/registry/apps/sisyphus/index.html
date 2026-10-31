@@ -1,0 +1,2007 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>西西弗斯 / Sisyphus</title>
+<!-- Sisyphus: a Lo-PDA game after Albert Camus. MIT License. -->
+<style>
+  /* The game is a print on the LCD: the paper around the canvas is its matte. */
+  canvas { outline: 1px solid #1f2a14; outline-offset: 4px; }
+</style>
+</head>
+<body>
+<script data-lo-game="1.4.0">
+/*
+ * lo-game.js 1.4.0, a tiny game framework for Lo-PDA apps.
+ * MIT License. Copyright (c) 2026 Haowei Wu. See sdk/LICENSE.
+ *
+ * Paste-in library: an app carries its own copy inside a script tag marked
+ * data-lo-game="1.4.0", and `node tools/lo-game.mjs registry/apps/<id>` fills it in.
+ * The same tool adds a pixel-font block holding just the characters the app uses.
+ * Do not edit the copy inside an app; the checker verifies it.
+ *
+ * Everything is drawn into a four-tone indexed framebuffer (values 0-3), so
+ * nothing can ever show a colour outside the palette or a blurred edge.
+ * Reference: sdk/LO-GAME.md
+ */
+var LoGame = (function () {
+  "use strict";
+
+  var VERSION = "1.4.0";
+  var TONES = ["#1f2a14", "#4a5a32", "#7d8a58", "#a3ad7e"];
+  var INK = 0, DARK = 1, MID = 2, PAPER = 3;
+  var CLEAR = 255;
+  var BUTTONS = ["up", "down", "left", "right", "a", "b", "start", "select"];
+  var KEYS = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right",
+    x: "a", X: "a", z: "b", Z: "b", Enter: "start", Shift: "select" };
+  var HAS_PAD = typeof PAD !== "undefined";
+  var BITMAP_FONT = null;   /* set by LoGame.font(data), from the data-lo-font block */
+  function font(data) { BITMAP_FONT = data; }
+  function b64bits(str, n) {
+    var bin = atob(str), out = new Uint8Array(n);
+    for (var i = 0; i < n; i++) out[i] = (bin.charCodeAt(i >> 3) >> (7 - (i & 7))) & 1;
+    return out;
+  }
+
+  /* bilingual text (1.2.0): t({zh: "...", en: "..."}, vars) picks PAD.lang, else the fallback
+     language, else whichever the app wrote. Plain strings pass through. "{name}" is filled from vars. */
+  function padLang() { var l = HAS_PAD && PAD.lang; return l === "zh" || l === "en" ? l : null; }
+  function pick(text, lang, vars) {
+    var s = text;
+    if (s && typeof s === "object") { s = s[lang]; if (s == null) s = text.zh != null ? text.zh : text.en; }
+    s = s == null ? "" : String(s);
+    return vars ? s.replace(/\{(\w+)\}/g, function (m, k) { return vars[k] == null ? "" : String(vars[k]); }) : s;
+  }
+  function t(text, vars) { return pick(text, padLang() || "zh", vars); }
+
+  function rgbOf(hex) { return [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)]; }
+  var RGB = TONES.map(rgbOf);
+
+  /* ---------------- small helpers ---------------- */
+  function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+  function lerp(a, b, t) { return a + (b - a) * t; }
+  function approach(v, target, step) { return v < target ? Math.min(v + step, target) : Math.max(v - step, target); }
+  function rng(seed) {
+    var s = (seed >>> 0) || 0x9e3779b9;
+    var next = function () { s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; };
+    return {
+      next: next,
+      int: function (a, b) { return a + Math.floor(next() * (b - a + 1)); },
+      pick: function (arr) { return arr[Math.floor(next() * arr.length)]; },
+      chance: function (p) { return next() < p; }
+    };
+  }
+  var EASE = {
+    linear: function (t) { return t; },
+    out: function (t) { return 1 - (1 - t) * (1 - t); },
+    "in": function (t) { return t * t; },
+    inOut: function (t) { return t < 0.5 ? 2 * t * t : 1 - 2 * (1 - t) * (1 - t); }
+  };
+
+  /* ---------------- sprites: rows of "0123." ---------------- */
+  function sprite(rows) {
+    if (!Array.isArray(rows) || !rows.length) throw new Error("sprite: give an array of strings");
+    var h = rows.length, w = rows[0].length, px = new Uint8Array(w * h);
+    for (var y = 0; y < h; y++) {
+      if (rows[y].length !== w) throw new Error("sprite: row " + y + " is " + rows[y].length + " wide, expected " + w);
+      for (var x = 0; x < w; x++) {
+        var c = rows[y].charCodeAt(x) - 48;
+        px[y * w + x] = c >= 0 && c <= 3 ? c : CLEAR;
+      }
+    }
+    return { w: w, h: h, px: px };
+  }
+  function sprites(table) { var out = {}; Object.keys(table).forEach(function (k) { out[k] = sprite(table[k]); }); return out; }
+
+  /* ---------------- tile maps ---------------- */
+  function tilemap(opt) {
+    var rows = opt.map.slice(), size = opt.size || 8, tiles = opt.tiles || {}, solid = opt.solid || "";
+    var cols = rows[0].length;
+    rows.forEach(function (r, i) { if (r.length !== cols) throw new Error("tilemap: row " + i + " is " + r.length + " wide, expected " + cols); });
+    var map = {
+      size: size, cols: cols, rows: rows.length, width: cols * size, height: rows.length * size,
+      get: function (tx, ty) { return ty < 0 || ty >= rows.length || tx < 0 || tx >= cols ? null : rows[ty][tx]; },
+      set: function (tx, ty, ch) { if (map.get(tx, ty) === null) return; rows[ty] = rows[ty].slice(0, tx) + ch + rows[ty].slice(tx + 1); },
+      solid: function (tx, ty) { var c = map.get(tx, ty); return c === null || solid.indexOf(c) >= 0; },
+      find: function (ch) { var out = []; rows.forEach(function (r, y) { for (var x = 0; x < r.length; x++) if (r[x] === ch) out.push({ x: x, y: y }); }); return out; },
+      at: function (px, py) { return { x: Math.floor(px / size), y: Math.floor(py / size) }; },
+      draw: function (g, camX, camY) {
+        camX = Math.round(camX || 0); camY = Math.round(camY || 0);
+        var x0 = Math.max(0, Math.floor(camX / size)), y0 = Math.max(0, Math.floor(camY / size));
+        var x1 = Math.min(cols - 1, Math.floor((camX + g.width - 1) / size)), y1 = Math.min(rows.length - 1, Math.floor((camY + g.height - 1) / size));
+        for (var ty = y0; ty <= y1; ty++) for (var tx = x0; tx <= x1; tx++) {
+          var t = tiles[rows[ty][tx]];
+          if (t) g.sprite(t, tx * size - camX, ty * size - camY);
+        }
+      }
+    };
+    return map;
+  }
+  /* top-left of a camera that keeps (x, y) centred inside a world */
+  function camera(x, y, viewW, viewH, worldW, worldH) {
+    return {
+      x: worldW <= viewW ? Math.round((worldW - viewW) / 2) : clamp(Math.round(x - viewW / 2), 0, worldW - viewW),
+      y: worldH <= viewH ? Math.round((worldH - viewH) / 2) : clamp(Math.round(y - viewH / 2), 0, worldH - viewH)
+    };
+  }
+
+  /* ---------------- the game ---------------- */
+  function create(opt) {
+    opt = opt || {};
+    var W = opt.width || 160, H = opt.height || 144;
+    var LANG = padLang() || (opt.lang === "en" ? "en" : "zh");   /* opt.lang: the app's own default */
+    var STEP = 1 / 60;
+    var fontOpt = opt.font || {};
+    /* text: the pixel font when the app carries one, the phone's own font otherwise */
+    var BF = fontOpt.system ? null : BITMAP_FONT;
+    var FONT = { size: fontOpt.size || 12, family: fontOpt.family || "sans-serif", weight: fontOpt.weight || "400",
+      threshold: fontOpt.threshold || 0.45 };
+    FONT.line = BF ? BF.line : FONT.size + 2;
+    FONT.cell = BF ? BF.cell : FONT.line;
+
+    /* --- page and canvas --- */
+    var parent = opt.parent || document.body;
+    var border = opt.border == null ? PAPER : opt.border;
+    if (!opt.parent) {
+      var st = document.createElement("style");
+      st.textContent = "html,body{margin:0;height:100%;overflow:hidden;background:" + TONES[border] + "}" +
+        "body{display:flex;align-items:center;justify-content:center;touch-action:none;-webkit-user-select:none;user-select:none}";
+      document.head.appendChild(st);
+    }
+    var canvas = document.createElement("canvas");
+    canvas.width = W; canvas.height = H;
+    canvas.style.cssText = "display:block;image-rendering:pixelated;image-rendering:crisp-edges;touch-action:none";
+    parent.appendChild(canvas);
+    var ctx = canvas.getContext("2d");
+    var image = ctx.createImageData(W, H);
+    function fit() {
+      var aw = parent.clientWidth || innerWidth, ah = parent.clientHeight || innerHeight;
+      var dpr = window.devicePixelRatio || 1, best = Math.min(aw / W, ah / H), k = Math.floor(best * dpr) / dpr;
+      if (k < best * 0.9) k = best;   /* small screens: size beats perfectly even pixels */
+      k = Math.max(0.5, k);
+      canvas.style.width = Math.round(W * k) + "px"; canvas.style.height = Math.round(H * k) + "px";
+      game.scale = k;
+    }
+
+    /* --- framebuffer and drawing --- */
+    var buf = new Uint8Array(W * H);
+    var ox = 0, oy = 0, cx0 = 0, cy0 = 0, cx1 = W, cy1 = H;
+    function put(x, y, c) { if (x >= cx0 && y >= cy0 && x < cx1 && y < cy1) buf[y * W + x] = c; }
+
+    var fc = document.createElement("canvas"), fx = null, glyphs = {}, baseline = 0;
+    function fontCtx() {
+      if (fx) return fx;
+      fc.width = FONT.size * 3; fc.height = FONT.line + 4;
+      fx = fc.getContext("2d", { willReadFrequently: true });
+      fx.font = FONT.weight + " " + FONT.size + "px " + FONT.family;
+      fx.textBaseline = "alphabetic"; fx.fillStyle = TONES[INK];
+      var m = fx.measureText("国");
+      baseline = BF ? BF.cell - 2 : Math.round(m.actualBoundingBoxAscent || FONT.size * 0.88);
+      return fx;
+    }
+    /* a glyph is the system font at its native pixel size, thresholded to one bit */
+    function glyph(ch) {
+      var g = glyphs[ch]; if (g) return g;
+      var bf = BF && BF.glyphs[ch];
+      if (bf) {
+        var cut = bf.indexOf(":"), adv0 = +bf.slice(0, cut);
+        return (glyphs[ch] = { w: adv0, adv: adv0, h: BF.cell, bits: b64bits(bf.slice(cut + 1), adv0 * BF.cell) });
+      }
+      var x = fontCtx(), adv = Math.max(1, Math.round(x.measureText(ch).width));
+      x.clearRect(0, 0, fc.width, fc.height);
+      x.fillText(ch, 0, baseline);
+      var h = FONT.cell, w = Math.min(adv, fc.width), d = x.getImageData(0, 0, w, h).data, bits = new Uint8Array(w * h), lim = FONT.threshold * 255;
+      for (var i = 0; i < w * h; i++) bits[i] = d[i * 4 + 3] >= lim ? 1 : 0;
+      g = glyphs[ch] = { w: w, adv: adv, h: h, bits: bits };
+      return g;
+    }
+    function measure(str) { var w = 0; Array.from(String(str)).forEach(function (ch) { if (ch !== "\n") w += glyph(ch).adv; }); return w; }
+    var NO_START = "，。！？、；：）」』》,.!?;:)]%";
+    function wrap(str, width) {
+      var lines = [];
+      String(str).split("\n").forEach(function (para) {
+        var tokens = para.match(/[A-Za-z0-9'_\-]+|\s|./gu) || [""], line = "", lw = 0;
+        tokens.forEach(function (t) {
+          var tw = measure(t);
+          if (lw + tw > width && line && NO_START.indexOf(t) < 0) {
+            lines.push(line.replace(/\s+$/, "")); line = ""; lw = 0;
+            if (/^\s$/.test(t)) return;
+          }
+          line += t; lw += tw;
+        });
+        lines.push(line);
+      });
+      return lines;
+    }
+
+    var g = {
+      width: W, height: H, INK: INK, DARK: DARK, MID: MID, PAPER: PAPER,
+      clear: function (c) { buf.fill(c == null ? PAPER : c); },
+      origin: function (x, y) { ox = Math.round(x || 0); oy = Math.round(y || 0); },
+      clip: function (x, y, w, h) {
+        if (x == null) { cx0 = 0; cy0 = 0; cx1 = W; cy1 = H; return; }
+        cx0 = clamp(Math.round(x + ox), 0, W); cy0 = clamp(Math.round(y + oy), 0, H);
+        cx1 = clamp(Math.round(x + ox + w), 0, W); cy1 = clamp(Math.round(y + oy + h), 0, H);
+      },
+      pixel: function (x, y, c) { put(Math.round(x) + ox, Math.round(y) + oy, c); },
+      get: function (x, y) { x = Math.round(x) + ox; y = Math.round(y) + oy; return x < 0 || y < 0 || x >= W || y >= H ? null : buf[y * W + x]; },
+      rect: function (x, y, w, h, c) {
+        x = Math.round(x) + ox; y = Math.round(y) + oy;
+        var xa = Math.max(x, cx0), ya = Math.max(y, cy0), xb = Math.min(x + Math.round(w), cx1), yb = Math.min(y + Math.round(h), cy1);
+        for (var yy = ya; yy < yb; yy++) buf.fill(c, yy * W + xa, yy * W + Math.max(xa, xb));
+      },
+      frame: function (x, y, w, h, c) {
+        g.rect(x, y, w, 1, c); g.rect(x, y + h - 1, w, 1, c); g.rect(x, y, 1, h, c); g.rect(x + w - 1, y, 1, h, c);
+      },
+      line: function (x0, y0, x1, y1, c) {
+        x0 = Math.round(x0); y0 = Math.round(y0); x1 = Math.round(x1); y1 = Math.round(y1);
+        var dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1, e = dx + dy;
+        for (;;) { put(x0 + ox, y0 + oy, c); if (x0 === x1 && y0 === y1) break; var e2 = 2 * e; if (e2 >= dy) { e += dy; x0 += sx; } if (e2 <= dx) { e += dx; y0 += sy; } }
+      },
+      circle: function (cx, cy, r, c, fill) {
+        cx = Math.round(cx); cy = Math.round(cy);
+        for (var y = -r; y <= r; y++) {
+          var span = Math.round(Math.sqrt(r * r + r - y * y));
+          if (fill) g.rect(cx - span, cy + y, span * 2 + 1, 1, c);
+          else { g.pixel(cx - span, cy + y, c); g.pixel(cx + span, cy + y, c); }
+        }
+        if (!fill) for (var x = -r; x <= r; x++) { var s2 = Math.round(Math.sqrt(r * r + r - x * x)); g.pixel(cx + x, cy - s2, c); g.pixel(cx + x, cy + s2, c); }
+      },
+      /* level 0-4: 0 nothing, 2 checkerboard, 4 solid */
+      dither: function (x, y, w, h, c, level) {
+        level = clamp(level == null ? 2 : level, 0, 4);
+        x = Math.round(x); y = Math.round(y);
+        for (var yy = 0; yy < h; yy++) for (var xx = 0; xx < w; xx++) {
+          var px = (x + xx) & 1, py = (y + yy) & 1;
+          var on = level === 4 || (level === 3 && !(px && py)) || (level === 2 && px === py) || (level === 1 && !px && !py);
+          if (on) put(x + xx + ox, y + yy + oy, c);
+        }
+      },
+      /* opts: {flip, flipY, color (paint every opaque pixel one tone), map: [t0,t1,t2,t3]} */
+      sprite: function (s, x, y, o) {
+        o = o || {};
+        x = Math.round(x) + ox; y = Math.round(y) + oy;
+        var w = s.w, h = s.h, px = s.px, one = o.color, map = o.map;
+        for (var yy = 0; yy < h; yy++) {
+          var dy = y + yy; if (dy < cy0 || dy >= cy1) continue;
+          var sy = o.flipY ? h - 1 - yy : yy;
+          for (var xx = 0; xx < w; xx++) {
+            var dx = x + xx; if (dx < cx0 || dx >= cx1) continue;
+            var v = px[sy * w + (o.flip ? w - 1 - xx : xx)];
+            if (v === CLEAR) continue;
+            buf[dy * W + dx] = one != null ? one : map ? map[v] : v;
+          }
+        }
+      },
+      /* opts: {color, align: "left"|"center"|"right", width (wrap), shadow: tone} -> height drawn */
+      text: function (str, x, y, o) {
+        o = o || {};
+        var color = o.color == null ? INK : o.color;
+        var lines = o.width ? wrap(str, o.width) : String(str).split("\n"), yy = Math.round(y);
+        lines.forEach(function (ln) {
+          /* with a width, align inside x..x+width; without one, x is the centre or the right edge */
+          var lw = measure(ln), box = o.width || 0, xx = Math.round(x);
+          if (o.align === "center") xx = Math.round(box ? x + (box - lw) / 2 : x - lw / 2);
+          else if (o.align === "right") xx = Math.round(box ? x + box - lw : x - lw);
+          Array.from(ln).forEach(function (ch) {
+            var gl = glyph(ch);
+            for (var j = 0; j < gl.h; j++) for (var i = 0; i < gl.w; i++) if (gl.bits[j * gl.w + i]) {
+              if (o.shadow != null) put(xx + i + 1 + ox, yy + j + 1 + oy, o.shadow);
+              put(xx + i + ox, yy + j + oy, color);
+            }
+            xx += gl.adv;
+          });
+          yy += FONT.line;
+        });
+        return lines.length * FONT.line;
+      },
+      measure: measure,
+      wrap: wrap,
+      lineHeight: FONT.line,
+      /* the standard window: paper inside, ink border with cut corners */
+      window: function (x, y, w, h, o) {
+        o = o || {};
+        g.rect(x + 1, y + 1, w - 2, h - 2, o.fill == null ? PAPER : o.fill);
+        var c = o.border == null ? INK : o.border;
+        g.rect(x + 1, y, w - 2, 1, c); g.rect(x + 1, y + h - 1, w - 2, 1, c);
+        g.rect(x, y + 1, 1, h - 2, c); g.rect(x + w - 1, y + 1, 1, h - 2, c);
+        if (!o.thin) { g.rect(x + 2, y + 2, w - 4, 1, MID); }
+      },
+      /* a small arrow used by menus and "more" markers */
+      arrow: function (x, y, dir, c) {
+        c = c == null ? INK : c;
+        for (var i = 0; i < 4; i++) {
+          if (dir === "down") g.rect(x + i, y + i, 7 - 2 * i, 1, c);
+          else g.rect(x + i, y + i, 1, 7 - 2 * i, c);
+        }
+      }
+    };
+
+    /* --- palette effects: every frame the indexed buffer goes through this map --- */
+    var pal = [0, 1, 2, 3], fadeLevel = 0, fadeTo = PAPER, flashT = 0, shakeT = 0, shakeA = 0, sx = 0, sy = 0;
+    function present() {
+      var map = pal.slice();
+      if (fadeLevel) for (var i = 0; i < 4; i++) map[i] = fadeTo === PAPER ? Math.min(3, i + fadeLevel) : Math.max(0, i - fadeLevel);
+      if (flashT > 0) map = map.map(function (v) { return 3 - v; });
+      var d = image.data, n = W * H;
+      if (shakeT > 0) { sx = Math.round((Math.random() * 2 - 1) * shakeA); sy = Math.round((Math.random() * 2 - 1) * shakeA); } else { sx = sy = 0; }
+      for (var y = 0; y < H; y++) for (var x = 0; x < W; x++) {
+        var srcX = x - sx, srcY = y - sy, v = srcX < 0 || srcY < 0 || srcX >= W || srcY >= H ? PAPER : buf[srcY * W + srcX];
+        var c = RGB[map[v]], o = (y * W + x) * 4;
+        d[o] = c[0]; d[o + 1] = c[1]; d[o + 2] = c[2]; d[o + 3] = 255;
+      }
+      ctx.putImageData(image, 0, 0);
+      return n;
+    }
+
+    /* --- input: chin buttons through PAD, keyboard as a fallback, and the pointer --- */
+    var held = {}, heldFor = {}, queued = {}, pressedNow = {}, releasedNow = {}, queuedUp = {};
+    function down(b) { if (held[b]) return; held[b] = true; heldFor[b] = 0; queued[b] = true; }
+    function up(b) { if (!held[b]) return; held[b] = false; queuedUp[b] = true; }
+    if (HAS_PAD && PAD.on) { PAD.on("press", down); PAD.on("release", up); }
+    else {
+      addEventListener("keydown", function (e) { var b = KEYS[e.key]; if (b) { e.preventDefault(); if (!e.repeat) down(b); } });
+      addEventListener("keyup", function (e) { var b = KEYS[e.key]; if (b) up(b); });
+    }
+    addEventListener("blur", function () { BUTTONS.forEach(up); });
+    var pointer = { x: 0, y: 0, down: false, pressed: false, released: false }, pQueued = false, pQueuedUp = false;
+    function toScreen(e) {
+      var r = canvas.getBoundingClientRect();
+      pointer.x = Math.floor((e.clientX - r.left) * W / r.width); pointer.y = Math.floor((e.clientY - r.top) * H / r.height);
+    }
+    canvas.addEventListener("pointerdown", function (e) { e.preventDefault(); try { canvas.setPointerCapture(e.pointerId); } catch (x) {} toScreen(e); pointer.down = true; pQueued = true; });
+    canvas.addEventListener("pointermove", function (e) { toScreen(e); });
+    ["pointerup", "pointercancel"].forEach(function (t) { canvas.addEventListener(t, function (e) { toScreen(e); if (pointer.down) { pointer.down = false; pQueuedUp = true; } }); });
+    function inputBegin() {
+      pressedNow = queued; queued = {}; releasedNow = queuedUp; queuedUp = {};
+      pointer.pressed = pQueued; pQueued = false; pointer.released = pQueuedUp; pQueuedUp = false;
+    }
+    function inputEnd() { BUTTONS.forEach(function (b) { if (held[b]) heldFor[b] += STEP; }); }
+
+    /* --- timers and tweens (owned by the scene stack; cleared by game.go) --- */
+    var timers = [], tweens = [];
+    function runTimers() {
+      for (var i = 0; i < timers.length; i++) {
+        var t = timers[i]; t.left -= STEP;
+        if (t.left <= 0 && !t.dead) { t.fn(); if (t.every) t.left += t.every; else t.dead = true; }
+      }
+      timers = timers.filter(function (t) { return !t.dead; });
+      for (i = 0; i < tweens.length; i++) {
+        var w = tweens[i]; w.t = Math.min(1, w.t + STEP / w.dur);
+        var k = w.ease(w.t);
+        for (var p in w.to) w.obj[p] = lerp(w.from[p], w.to[p], k);
+        if (w.t >= 1) { w.dead = true; w.done(); }
+      }
+      tweens = tweens.filter(function (w) { return !w.dead; });
+    }
+
+    /* --- scenes: a stack; only the top one updates, all of them draw --- */
+    var scenes = {}, stack = [], busy = false;
+    function sceneOf(s) { if (typeof s === "string") { if (!scenes[s]) throw new Error("no scene named " + s); return scenes[s]; } return s; }
+    function enter(s, args) { var e = { scene: s, args: args, resolve: null }; stack.push(e); if (s.enter) s.enter(args); return e; }
+
+    var game = {
+      VERSION: VERSION, width: W, height: H, g: g, time: 0, frame: 0, scale: 1, pointer: pointer, lang: LANG,
+      t: function (text, vars) { return pick(text, LANG, vars); },
+      INK: INK, DARK: DARK, MID: MID, PAPER: PAPER,
+
+      scene: function (name, def) { scenes[name] = def; return def; },
+      start: function (name, args) { stack = []; enter(sceneOf(name), args); loop(); },
+      go: function (name, args, o) {
+        o = o || {};
+        var next = sceneOf(name);
+        var swap = function () {
+          while (stack.length) { var e = stack.pop(); if (e.scene.exit) e.scene.exit(); if (e.resolve) e.resolve(null); }
+          timers = []; tweens = [];
+          enter(next, args);
+        };
+        if (o.fade === false) { swap(); return Promise.resolve(); }
+        busy = true;
+        return game.fade("out", o.time || 0.25, o.to).then(function () { swap(); return game.fade("in", o.time || 0.25, o.to); }).then(function () { busy = false; });
+      },
+      /* overlays: game.push(scene) resolves with the value given to game.pop(value) */
+      push: function (s, args) { return new Promise(function (res) { enter(sceneOf(s), args).resolve = res; }); },
+      pop: function (value) {
+        var e = stack.pop(); if (!e) return;
+        if (e.scene.exit) e.scene.exit();
+        if (e.resolve) e.resolve(value);
+      },
+      top: function () { var e = stack[stack.length - 1]; return e && e.scene; },
+
+      btn: function (b) { return !!held[b]; },
+      pressed: function (b) { return !!pressedNow[b]; },
+      released: function (b) { return !!releasedNow[b]; },
+      /* true when first pressed, then again every `rate` seconds after `delay` (menus, cursors) */
+      repeat: function (b, delay, rate) {
+        if (pressedNow[b]) return true;
+        if (!held[b]) return false;
+        delay = delay == null ? 0.32 : delay; rate = rate == null ? 0.09 : rate;
+        var t = heldFor[b] - delay; return t >= 0 && Math.floor(t / rate) !== Math.floor((t - STEP) / rate);
+      },
+      /* A, START or a tap: "carry on" */
+      ok: function () { return !!(pressedNow.a || pressedNow.start || pointer.pressed); },
+      /* the D-pad as a direction: {x, y}, one step per press with repeat */
+      dir: function (delay, rate) {
+        return { x: (game.repeat("right", delay, rate) ? 1 : 0) - (game.repeat("left", delay, rate) ? 1 : 0),
+                 y: (game.repeat("down", delay, rate) ? 1 : 0) - (game.repeat("up", delay, rate) ? 1 : 0) };
+      },
+
+      after: function (sec, fn) { var t = { left: sec, fn: fn }; timers.push(t); return function () { t.dead = true; }; },
+      every: function (sec, fn) { var t = { left: sec, every: sec, fn: fn }; timers.push(t); return function () { t.dead = true; }; },
+      wait: function (sec) { return new Promise(function (res) { game.after(sec, res); }); },
+      tween: function (obj, to, sec, ease) {
+        return new Promise(function (res) {
+          var from = {}; for (var p in to) from[p] = obj[p];
+          tweens.push({ obj: obj, from: from, to: to, dur: Math.max(STEP, sec), t: 0, ease: EASE[ease || "out"] || EASE.out, done: res });
+        });
+      },
+
+      /* screen effects */
+      fade: function (dir, sec, to) {
+        fadeTo = to == null ? PAPER : to;
+        var steps = 3, each = (sec == null ? 0.25 : sec) / steps, i = 0;
+        return new Promise(function (res) {
+          var tick = function () {
+            i++; fadeLevel = dir === "out" ? i : steps - i;
+            if (i >= steps) { if (dir !== "out") fadeLevel = 0; res(); } else game.after(each, tick);
+          };
+          if (dir !== "out") fadeLevel = steps;
+          game.after(each, tick);
+        });
+      },
+      flash: function (sec) { flashT = sec == null ? 0.08 : sec; },
+      shake: function (amount, sec) { shakeA = amount == null ? 2 : amount; shakeT = sec == null ? 0.25 : sec; },
+
+      /* sound. sfx("coin") or sfx({wave, from, to, ms, ...}); music(song, {loop}) and musicStop() (1.3.0).
+         Runtimes without PAD.music (before 0.11.0) have no music and no custom sounds: those calls do nothing. */
+      sfx: function (s) { if (HAS_PAD && PAD.sfx && (typeof s === "string" || PAD.music)) PAD.sfx(s); },
+      music: function (song, o) { if (HAS_PAD && PAD.music) PAD.music.play(song, o); },
+      musicStop: function () { if (HAS_PAD && PAD.music) PAD.music.stop(); },
+      /* ambience("rain", 0.6), ambience(null) to fade it out (1.4.0); nothing on runtimes before 0.13.0 */
+      ambience: function (name, level) { if (HAS_PAD && PAD.ambience) PAD.ambience(name, level); },
+      save: function (key, value) { if (HAS_PAD) PAD.save(key, value); else memory[key] = JSON.parse(JSON.stringify(value)); },
+      load: function (key) { return HAS_PAD ? PAD.load(key) : Promise.resolve(key in memory ? memory[key] : null); },
+      remove: function (key) { if (HAS_PAD) PAD.remove(key); else delete memory[key]; },
+
+      /* dialogue: resolves when the player has read every page */
+      say: function (text, o) { return game.push(dialogScene(text, o || {})); },
+      /* menu: resolves with the chosen index, or -1 when cancelled with B */
+      choose: function (items, o) { return game.push(menuScene(items, o || {})); }
+    };
+    var memory = {};
+
+    /* --- built-in overlay: dialogue box with a typewriter --- */
+    function dialogScene(text, o) {
+      var pages = [], boxH = o.lines ? o.lines * FONT.line + 10 : 3 * FONT.line + 10, innerW = W - 16;
+      (Array.isArray(text) ? text : [text]).forEach(function (t) {
+        var ls = wrap(t, innerW), per = Math.floor((boxH - 10) / FONT.line);
+        for (var i = 0; i < ls.length; i += per) pages.push(ls.slice(i, i + per));
+      });
+      var page = 0, shown = 0, speed = o.speed || 40, blip = o.blip !== false, y = o.top ? 0 : H - boxH, sinceBlip = 0;
+      function total() { return Array.from(pages[page].join("")).length; }
+      return {
+        update: function () {
+          if (shown < total()) {
+            var before = Math.floor(shown);
+            shown = Math.min(total(), shown + speed * STEP);
+            if (blip && Math.floor(shown) !== before && (sinceBlip++ % 3 === 0)) game.sfx("tick");
+            if (game.ok() || game.pressed("b")) shown = total();
+          } else if (game.ok() || game.pressed("b")) {
+            if (page < pages.length - 1) { page++; shown = 0; game.sfx("move"); }
+            else { game.sfx("move"); game.pop(true); }
+          }
+        },
+        draw: function (gg) {
+          gg.origin(0, 0); gg.clip();
+          var top = y;
+          if (o.name) {
+            var nw = measure(o.name) + 10, ny = o.top ? boxH - 1 : top - FONT.line - 3;
+            gg.window(4, ny, nw, FONT.line + 4, { thin: true });
+            gg.text(o.name, 9, ny + 2);
+          }
+          gg.window(0, top, W, boxH);
+          var left = Math.floor(shown), ty = top + 5;
+          pages[page].forEach(function (ln) {
+            var part = Array.from(ln).slice(0, Math.max(0, left)).join("");
+            left -= Array.from(ln).length;
+            gg.text(part, 8, ty); ty += FONT.line;
+          });
+          if (shown >= total() && Math.floor(game.time * 3) % 2 === 0) gg.arrow(W - 13, top + boxH - 7, "down");
+        }
+      };
+    }
+
+    /* --- built-in overlay: a vertical menu --- */
+    function menuScene(items, o) {
+      var sel = clamp(o.index || 0, 0, items.length - 1), pad = 6, rowH = FONT.line + 2;
+      var w = o.width || Math.max.apply(null, items.map(measure).concat([o.title ? measure(o.title) : 0])) + pad * 2 + 10;
+      var h = items.length * rowH + pad * 2 - 2 + (o.title ? rowH : 0);
+      var x = o.x == null ? Math.round((W - w) / 2) : o.x, y = o.y == null ? Math.round((H - h) / 2) : o.y;
+      var cancel = o.cancel !== false;
+      return {
+        update: function () {
+          var d = game.dir();
+          if (d.y) { sel = (sel + d.y + items.length) % items.length; game.sfx("move"); }
+          if (game.pressed("a") || game.pressed("start")) { game.sfx("tap"); game.pop(sel); return; }
+          if (cancel && game.pressed("b")) { game.sfx("miss"); game.pop(-1); return; }
+          if (pointer.pressed) {
+            var r = Math.floor((pointer.y - y - pad - (o.title ? rowH : 0)) / rowH);
+            if (pointer.x >= x && pointer.x < x + w && r >= 0 && r < items.length) { sel = r; game.sfx("tap"); game.pop(sel); }
+            else if (cancel) { game.sfx("miss"); game.pop(-1); }
+          }
+        },
+        draw: function (gg) {
+          gg.origin(0, 0); gg.clip();
+          gg.window(x, y, w, h);
+          var ty = y + pad;
+          if (o.title) { gg.text(o.title, x + pad, ty, { color: DARK }); ty += rowH; }
+          items.forEach(function (it, i) {
+            if (i === sel) gg.arrow(x + pad - 1, ty + 3, "right");
+            gg.text(it, x + pad + 8, ty);
+            ty += rowH;
+          });
+        }
+      };
+    }
+
+    /* --- the loop: fixed 60 steps a second, one draw per screen refresh --- */
+    var last = 0, acc = 0, running = false;
+    function tick() {
+      inputBegin();
+      runTimers();
+      var top = stack[stack.length - 1];
+      if (top && top.scene.update && !busy) top.scene.update(STEP);
+      if (flashT > 0) flashT -= STEP;
+      if (shakeT > 0) shakeT -= STEP;
+      game.time += STEP; game.frame++;
+      inputEnd();
+    }
+    function render() {
+      g.origin(0, 0); g.clip();
+      for (var i = 0; i < stack.length; i++) { var s = stack[i].scene; g.origin(0, 0); g.clip(); if (s.draw) s.draw(g); }
+      present();
+    }
+    function frame(ts) {
+      requestAnimationFrame(frame);
+      if (!last) last = ts;
+      acc += Math.min(0.1, (ts - last) / 1000); last = ts;
+      var n = 0;
+      while (acc >= STEP && n < 6) { tick(); acc -= STEP; n++; }
+      if (n) render();
+    }
+    function loop() {
+      if (running) return; running = true;
+      fit(); addEventListener("resize", fit);
+      document.addEventListener("visibilitychange", function () { last = 0; });
+      requestAnimationFrame(frame);
+    }
+    g.clear();
+    return game;
+  }
+
+  return {
+    VERSION: VERSION, TONES: TONES.slice(), font: font, INK: INK, DARK: DARK, MID: MID, PAPER: PAPER, BUTTONS: BUTTONS.slice(),
+    create: create, sprite: sprite, sprites: sprites, tilemap: tilemap, camera: camera, rng: rng,
+    clamp: clamp, lerp: lerp, approach: approach, t: t
+  };
+})();
+</script>
+<script data-lo-font="lopix12">
+/*
+lopix12: a 12-pixel bitmap font for Lo-PDA apps.
+
+lopix12 is a Modified Version of Fusion Pixel Font (12px, proportional,
+Simplified Chinese; upstream release 2026.08.11): its glyphs were rasterized at
+their native size into one-bit bitmaps, and apps carry only the characters they
+use. It is distributed under the SIL Open Font License 1.1, below, and only
+under that license. It is not named Fusion Pixel, which is a Reserved Font Name.
+
+Fusion Pixel Font: https://github.com/TakWolf/fusion-pixel-font
+Copyright (c) 2022, TakWolf (https://takwolf.com), with Reserved Font Name 'Fusion Pixel'.
+It combines glyphs from these OFL-licensed fonts:
+- Ark Pixel Font, Copyright (c) 2021, TakWolf (https://takwolf.com).
+- Cubic 11, including JF Dot M+H 12, Copyright(c) 2005 M+ FONTS PROJECT,
+  and M+ BITMAP FONTS, Copyright (C) 2002-2004 COZ.
+- Galmuri, Copyright (c) 2019-2025 Lee Minseo (quiple@quiple.dev).
+
+-----------------------------------------------------------
+SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
+-----------------------------------------------------------
+
+PREAMBLE
+The goals of the Open Font License (OFL) are to stimulate worldwide
+development of collaborative font projects, to support the font creation
+efforts of academic and linguistic communities, and to provide a free and
+open framework in which fonts may be shared and improved in partnership
+with others.
+
+The OFL allows the licensed fonts to be used, studied, modified and
+redistributed freely as long as they are not sold by themselves. The
+fonts, including any derivative works, can be bundled, embedded,
+redistributed and/or sold with any software provided that any reserved
+names are not used by derivative works. The fonts and derivatives,
+however, cannot be released under any other type of license. The
+requirement for fonts to remain under this license does not apply
+to any document created using the fonts or their derivatives.
+
+DEFINITIONS
+"Font Software" refers to the set of files released by the Copyright
+Holder(s) under this license and clearly marked as such. This may
+include source files, build scripts and documentation.
+
+"Reserved Font Name" refers to any names specified as such after the
+copyright statement(s).
+
+"Original Version" refers to the collection of Font Software components as
+distributed by the Copyright Holder(s).
+
+"Modified Version" refers to any derivative made by adding to, deleting,
+or substituting -- in part or in whole -- any of the components of the
+Original Version, by changing formats or by porting the Font Software to a
+new environment.
+
+"Author" refers to any designer, engineer, programmer, technical
+writer or other person who contributed to the Font Software.
+
+PERMISSION & CONDITIONS
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of the Font Software, to use, study, copy, merge, embed, modify,
+redistribute, and sell modified and unmodified copies of the Font
+Software, subject to the following conditions:
+
+1) Neither the Font Software nor any of its individual components,
+in Original or Modified Versions, may be sold by itself.
+
+2) Original or Modified Versions of the Font Software may be bundled,
+redistributed and/or sold with any software, provided that each copy
+contains the above copyright notice and this license. These can be
+included either as stand-alone text files, human-readable headers or
+in the appropriate machine-readable metadata fields within text or
+binary files as long as those fields can be easily viewed by the user.
+
+3) No Modified Version of the Font Software may use the Reserved Font
+Name(s) unless explicit written permission is granted by the corresponding
+Copyright Holder. This restriction only applies to the primary font name as
+presented to the users.
+
+4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font
+Software shall not be used to promote, endorse or advertise any
+Modified Version, except to acknowledge the contribution(s) of the
+Copyright Holder(s) and the Author(s) or with their explicit written
+permission.
+
+5) The Font Software, modified or unmodified, in part or in whole,
+must be distributed entirely under this license, and must not be
+distributed under any other license. The requirement for fonts to
+remain under this license does not apply to any document created
+using the Font Software.
+
+TERMINATION
+This license becomes null and void if any of the above conditions are
+not met.
+
+DISCLAIMER
+THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT
+OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
+DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
+OTHER DEALINGS IN THE FONT SOFTWARE.
+*/
+LoGame.font({"name":"lopix12","cell":13,"line":14,"glyphs":{"0":"6:AAciimqyiicAAA==","1":"6:AAIYIIIIIIcAAA==","2":"6:AAciCCEIQg+AAA==","3":"6:AAciCCMCCicAAA==","4":"6:AAEMMUUk+EEAAA==","5":"6:AA+ggg8CCicAAA==","6":"6:AAcigg8iiicAAA==","7":"6:AA+CCEEIIIIAAA==","8":"6:AAciiiciiicAAA==","9":"6:AAciiieCCicAAA=="," ":"6:AAAAAAAAAAAAAA==","!":"4:AEREREBAAA==","\"":"6:AAUUUAAAAAAAAA==","#":"7:AAEiT8kSJPyRIAAA","$":"6:AIcqoocKKqcIAA==","%":"8:AABEpEgIECAkSkQAAA==","&":"7:AADCRIYZSokR0AAA","'":"4:AERAAAAAAA==","(":"6:AEIIQQQQQIIEAA==",")":"6:AQIIEEEEEIIQAA==","*":"6:AAAAAIqcqIAAAA==","+":"6:AAAAAII+IIAAAA==",",":"4:AAAAAABEgA==","-":"6:AAAAAAA+AAAAAA==",".":"4:AAAAAABAAA==","/":"6:ACCEEIIIQQggAA==",":":"4:AAAEAABAAA==",";":"4:AAAEAABEgA==","<":"5:AAABERBBBAAA","=":"6:AAAAAA+A+AAAAA==",">":"5:AAAIIIIiIAAA","?":"6:AAciCCEIIAIAAA==","@":"8:AAA4RJqqqqqqtkA8AA==","A":"8:AAAQECgoRHxEgoIAAA==","B":"7:AAPkKFC+QoUL4AAA","C":"7:AADiKBAgQICI4AAA","D":"7:AAPESFChQoUTwAAA","E":"7:AAP0CBA+QIED8AAA","F":"7:AAP0CBA+QIECAAAA","G":"7:AADiKBAgRoSI8AAA","H":"7:AAIUKFC/QoUKEAAA","I":"4:AORERETgAA==","J":"6:AACCCCCCiicAAA==","K":"7:AAIUSRQwUJESEAAA","L":"6:AAgggggggg+AAA==","M":"8:AACCgsbGqqqSkpIAAA==","N":"7:AAIWKlSlSo0aEAAA","O":"8:AAA4RIKCgoKCRDgAAA==","P":"7:AAPkKFC+QIECAAAA","Q":"8:AAA4RIKCgoKKRDoAAA==","R":"7:AAPkKFC+SIkSEAAA","S":"7:AAHkKAgMBAUJ4AAA","T":"8:AAD+EBAQEBAQEBAAAA==","U":"7:AAIUKFChQoUJ4AAA","V":"8:AACCgkRERCgoEBAAAA==","W":"10:AAAIiiKIlUVRVCIIgiAAAAA=","X":"8:AACCREQoEChERIIAAA==","Y":"8:AACCREQoKBAQEBAAAA==","Z":"7:AAPwIIIIEEED8AAA","[":"6:AcQQQQQQQQQcAA==","\\":"6:AggQQIIIEECCAA==","]":"6:AcEEEEEEEEEcAA==","^":"6:AAIUiAAAAAAAAA==","_":"6:AAAAAAAAAAAA+A==","`":"5:ABBAAAAAAAAA","a":"6:AAAAAcCeiieAAA==","b":"6:AAggg8iiii8AAA==","c":"6:AAAAAciggicAAA==","d":"6:AACCCeiiiieAAA==","e":"6:AAAAAci+gicAAA==","f":"5:AAyEeQhCEAAA","g":"6:AAAAAeiiiieCcA==","h":"6:AAgggsyiiiiAAA==","i":"4:AEAMRETgAA==","j":"4:ACAOIiIiwA==","k":"6:AAgggiswokiAAA==","l":"4:AMRERERgAA==","m":"8:AAAAAADskpKSkpIAAA==","n":"6:AAAAAsyiiiiAAA==","o":"6:AAAAAciiiicAAA==","p":"6:AAAAA8iiii8ggA==","q":"6:AAAAAeiiiieCCA==","r":"5:AAAAWxCEIAAA","s":"6:AAAAAciYEicAAA==","t":"5:ABCEeQhCDAAA","u":"6:AAAAAiiiimaAAA==","v":"6:AAAAAiiUUIIAAA==","w":"8:AAAAAACSkqqqREQAAA==","x":"6:AAAAAiUIIUiAAA==","y":"6:AAAAAiiiUUIIwA==","z":"6:AAAAA+EIQg+AAA==","{":"7:ADCBAgQQECBAgMAA","|":"4:BEREREREAA==","}":"7:AMBAgQICCBAgQwAA","~":"6:AAAAAQqEAAAAAA==","·":"12:AAAAAAAAAAAABgBgAAAAAAAAAAA=","—":"12:AAAAAAAAAAAA/+AAAAAAAAAAAAA=","…":"12:AAAAAAAAAAAAZmZmAAAAAAAAAAA=","↑":"12:AABADgFQBABABABABABABABAAAA=","↓":"12:AABABABABABABABABAFQDgBAAAA=","、":"12:AAAAAAAAAAAAAAAAAAQAMAEAAAA=","。":"12:AAAAAAAAAAAAAAAAMASASAMAAAA=","《":"12:AAAkAkBIBICQCQCQBIBIAkAkAAA=","》":"12:AASASAJAJAEgEgEgJAJASASAAAA=","「":"12:AAA8AgAgAgAgAgAgAgAAAAAAAAA=","」":"12:AAAAAAAACACACACACACACAeAAAA=","一":"12:AAAAAAAAAAAA/+AAAAAAAAAAAAA=","上":"12:AABABABABAB8BABABABABA/+AAA=","下":"12:AA/+BABABABQBIBEBABABABAAAA=","不":"12:AA/+AgBADAFQJIxEBCBABABAAAA=","与":"12:AAEAH+EAIAP+ACAC/yACACAcAAA=","世":"12:AAJIJIJI/+JIJIJIJ4IAIAP+AAA=","两":"12:AA/+EQEQ/+kSkSqqxGgCgCgOAAA=","严":"12:AAf+CQSSKUCQf+QAQAQAQAgAAAA=","个":"12:AABACgEQIIxGBABABABABABAAAA=","中":"12:AABABA/+hChChC/+BABABABAAAA=","为":"12:AARAJABA/+BCBSCKCKECICwMAAA=","久":"12:AAEAEAHwIQQQggBACgEQIIwGAAA=","之":"12:AACABA/8AIAQAgBACAMATAg+AAA=","乐":"12:AAAcfgQARAhA/+BAJIREhCHAAAA=","也":"12:AABAJAJMJ0PE5EJMJAICICH+AAA=","事":"12:AABA/+JIJIf8BE/+BEf8BAHAAAA=","于":"12:AAf8BABABABA/+BABABABAHAAAA=","人":"12:AABABABABACgCgEQEQIIQEgCAAA=","从":"12:AAEQEQEQEQEQKoKoKoREREiCAAA=","他":"12:AAIQKQSWS63SSSSWSQSCSCR+AAA=","令":"12:AABACgMYwGBAAgf8AIGQBgAYAAA=","以":"12:AAAISIRIRIQIQISQUQYoREGCAAA=","们":"12:AAKeJCQCSCyCSCSCSCSCSCSOAAA=","会":"12:AABACgMYwGP4AAAA/+EAIIf0AAA=","住":"12:AAIgIQX+QQwQQQT8QQQQQQX+AAA=","作":"12:AAJAJAR+Sg0gQ+QgQgQ+QgQgAAA=","便":"12:AAL+IQT+SSz+SST+RQQgRQWOAAA=","停":"12:AAIgP+SET8wAX+UCT8QQQQRwAAA=","儿":"12:AAEQEQEQEQEQEQEQIQISQSgeAAA=","入":"12:AAEACABABACgCgEQEQIIQEgCAAA=","全":"12:AABACgMYwGP4BABAf8BABA/+AAA=","关":"12:AAIIEQf8BABABA/+CgEQIIwGAAA=","册":"12:AAe8SkSkSkSk/+SkSkSkSknMAAA=","再":"12:AA/+BAf8REf8RERE/+QEQEQcAAA=","写":"12:AA/+gCkCH4IAP8AEAE/0AEA4AAA=","分":"12:AAEQEQIIIIQEv6CICIEIIIwwAAA=","判":"12:AAkiVKEK/qEKEK/qEKECICwOAAA=","力":"12:AABABAf+BCBCBCCCCCECICwcAAA=","加":"12:AAIAIe/SJSJSJSJSJSRSRSmeAAA=","努":"12:AAIA++KiSUMIy2BA/+CCMCwcAAA=","劳":"12:AAEQ/+EQ/+gCCAf8CEEEIEwYAAA=","去":"12:AABABAf8BABA/+CAEIEII0fEAAA=","又":"12:AAf8QEQEIIIIEQCgBACgMYwGAAA=","只":"12:AAf8QEQEQEQEf8AAAAIIQEgCAAA=","可":"12:AA/+AEAEPkIkIkIkPkAEAEAcAAA=","合":"12:AABACgMYwGP4AAf8QEQEQEf8AAA=","同":"12:AA/+gCv6gCnykSkSkSnygCgOAAA=","向":"12:AACAEA/+gCnykSkSkSnygCgOAAA=","员":"12:AAP4IIP4AAf8QERERECgMYwGAAA=","呼":"12:AAAO7woQqSpUoQr+oQ4QAQBwAAA=","命":"12:AABACgMY32AAe8SkSkSkesAgAAA=","哪":"12:AAHu6qqqvqqsqqvqqq6uEoJoAAA=","哲":"12:AAIM9wJA9+JIaIAAf8QEQEf8AAA=","唤":"12:AAAg44pIr8qUqUqUv+4oBEGCAAA=","回":"12:AA/+gCgCnykSkSkSnygCgC/+AAA=","因":"12:AA/+gChChCv6hCiikSoKgC/+AAA=","土":"12:AABABABABAf8BABABABABA/+AAA=","在":"12:AACACA/+EAEQIQb+oQIQIQL+AAA=","地":"12:AAQQSQSW66XSSSSWaQyCCCB+AAA=","填":"12:AAIQL+IQ98JEJ8JENEz+BECCAAA=","壮":"12:AAIQIQoQb+IQIQIQYQoQIQJ8AAA=","声":"12:AABA/+BAf8AAf8REf8QAQAgAAAA=","处":"12:AAIIIIPIRIRMpKKIKIEILAw+AAA=","夜":"12:AABA/+IgI8RESU1IQoQQRoWGAAA=","太":"12:AABABABA/+BACgCgEQEQKIxGAAA=","头":"12:AAIgEgQgIgAg/+BABQCIMEwCAAA=","始":"12:AAIQIQ8kVEX6UAl+VCJCVCh+AAA=","子":"12:AAf4AIAQAgBA/+BABABABAHAAAA=","学":"12:AASEJI/+gCv6AQBg/+BABAHAAAA=","它":"12:AABA/+gCoCIIIwPAIAICICH+AAA=","对":"12:AAAE8EF+kEUEVEIkIkUEUEgcAAA=","就":"12:AAIU+SAQ/+iQio+oIoqqqqZOAAA=","屏":"12:AAf+QCf+SERIX+RIRIX+RImIAAA=","属":"12:AAf+QCf+QgX8UkX8Qgf+oqr2AAA=","山":"12:AABABABAhChChChChChChC/+AAA=","峙":"12:AAIQJ8qQqQr+qEr+qk+UAEAMAAA=","巨":"12:AA/+gAgA/8gEgEgE/8gAgA/+AAA=","己":"12:AAf8AEAEAEAEf8QAQAQCQCP+AAA=","已":"12:AAf8AEAEQEQEf8QAQAQCQCP+AAA=","布":"12:AACA/+EAIgQgv8IkIkIkIsAgAAA=","带":"12:AAJI/+JIAA/+hCf8RERERMBAAAA=","幕":"12:AAEQ/+EQf8QE/+JIf8pKJYBAAAA=","年":"12:AAIAP+QgggP8IgIg/+AgAgAgAAA=","幸":"12:AABAf8BA/+IIEQf8BA/+BABAAAA=","开":"12:AA/+IIIIIIII/+IIIIQIQIgIAAA=","异":"12:AAf8QEf8QAQCP+EI/+EIIIwIAAA=","弗":"12:AAEgEg/8Ek/8kg/+EiEiIswgAAA=","强":"12:AA58JEJ84Qj+iS6SL+IQIUz6AAA=","归":"12:AAF+kCkCkCkCl+kCICICQCh+AAA=","当":"12:AABAREJIBAf8AEAEf8AEAEf8AAA=","录":"12:AAf8AEf8AE/+BAREJoDQNIzGAAA=","影":"12:AAfCREfIRAfCEE/oRAfCVEsoAAA=","心":"12:AACABAAgEgEAUEUCUCkKEID4AAA=","必":"12:AACABIBIEIUQUUUilCGKMIz4AAA=","悲":"12:AACge8Cge8Cg++CgVEUikKD4AAA=","情":"12:AAIQJ8oQt8oQr+JEJ8JEJ8JEAAA=","想":"12:AAI++iI+ciq+IiI+FAUkUKj6AAA=","意":"12:AABAf8EQ/+IIP4IIP4FEUqj6AAA=","感":"12:AAAUf+XQQUXIVKnWBAUkUKj6AAA=","我":"12:AAGU4SIQ/+IQIUOU4IIKIWYiAAA=","或":"12:AAAoAk/+AgekSkSoeQASGq5GAAA=","战":"12:AAIUISOQIeJwIS+UiIiKiW+iAAA=","所":"12:AAGGY4QgegS+SkekQkQkQkhEAAA=","手":"12:AAA8fABABAf8BABA/+BABAHAAAA=","扎":"12:AAIgIg+gIgIgOg4gIgIiIi4eAAA=","把":"12:AAT+SS6SSSSSb+yASASCSCx+AAA=","按":"12:AAQQT+6CQQQQb+wkREQoQYzmAAA=","挣":"12:AARAR46IT8QUb+wUT8QQQQxwAAA=","推":"12:AARQRI7+WIT+aIyIT+SISIz+AAA=","摸":"12:AARIX+5IT8SEb8yEX+QwRI2GAAA=","文":"12:AACABA/+IIIIEQEQCgBAGw4OAAA=","斯":"12:AASG/4SgegS+ekSk/kAkSkhEAAA=","无":"12:AAf8BABABA/+CgCgEgEiIiw+AAA=","既":"12:AA9+lI9IlIn+8IgIoYkqpKyOAAA=","日":"12:AAf8QEQEQEQEf8QEQEQEQEf8AAA=","是":"12:AAf8QEf8QEf8AA/+JAJ8XAg+AAA=","景":"12:AAf8QEf8QEf8BA/+QEf8JIzGAAA=","暂":"12:AAIG+4Qgo++kJEf8QEf8QEf8AAA=","更":"12:AA/+BAf8REf8REf8RAJAGA5+AAA=","月":"12:AAP8IEIEP8IEIEP8IEQEQEgcAAA=","有":"12:AACA/+EAIAP8YEv8IEP8IEIcAAA=","本":"12:AABABA/+FQFQFQJIJIX0hCBAAAA=","杀":"12:AAYEGYBgGQYMBA/+BAJIREjCAAA=","来":"12:AABAf8BAJIFQ/+DgFQJIxGBAAAA=","次":"12:AAhARAR+CCEUAQQQQoQohEmCAAA=","欢":"12:AABA9AF+lCWUUQIQIoUoVEiCAAA=","歇":"12:AAfQRQfeRifKIIfIpIVUdUDiAAA=","正":"12:AA/+BABABAJAJ8JAJAJAJA/+AAA=","此":"12:AAEQEQESUUXYUQUQUQUSXS4OAAA=","每":"12:AAIAP+QAv8JEIk/+REQkf+AEAAA=","比":"12:AAgggggigk+4gggggggimi4eAAA=","沉":"12:AAn+UCECh4RIBIBIRIRKiKkOAAA=","没":"12:AAR4JIBIhIWOAAD8SERIgwnOAAA=","活":"12:AAQMLwAQgQX+AQAQT8SEiEj8AAA=","滚":"12:AAAQn+RICkkqRED8RSWUiIjmAAA=","满":"12:AAhIX+BIn+RIH+FKVKW2kCkGAAA=","演":"12:AAgQX+ECj8QQD8CUT8SUj8mGAAA=","激":"12:AAiIXoEunyUqHqBKX6SkiqlyAAA=","灵":"12:AAf8AEP8AEf8BAJERICgMYwGAAA=","点":"12:AABAB+BABAf8QEQEf8AAUkiSAAA=","片":"12:AAIQIQIQP+IAIAP4IIQIQIgIAAA=","理":"12:AAD+6SSST+SS6ST+QQb+wQH+AAA=","生":"12:AARARAf8RAhABAf8BABABA/+AAA=","界":"12:AAf8REf8REf8EQII0WEQIQwQAAA=","登":"12:AAekCoUQIKf8gCP4IIP4EQ/+AAA=","的":"12:AAIgQg++jCiCiS+KiKiCiC+MAAA=","真":"12:AABAf8BAP4IIP4IIII/+IIwGAAA=","着":"12:AAEQ/+CAf8EA/+IEYEv8IEP8AAA=","石":"12:AA/+CACAEAEAP8YEoEIEIEP8AAA=","确":"12:AA8gI8JET+dS1+VSV+VSdSCWAAA=","磨":"12:AAAgf+SIf+Xcaqf+RAT+WCr+AAA=","神":"12:AAgQQQ7+KSSSb+2SSST+QQQQAAA=","福":"12:AAj+QA58JER8YA3+SST+SST+AAA=","离":"12:AABA/+EQTkUUf8BA/+kSvqgGAAA=","种":"12:AAEQ4QL+KS+SKSb+cQoQIQIQAAA=","第":"12:AAQge+lIf8BEf8RAf+FCJCxMAAA=","等":"12:AAQge+lIf8BA/+AI/+EICIA4AAA=","系":"12:AAAcfgCIMwDAME/6BAJIxGHAAAA=","终":"12:AARAR8iEtIwwRImG5gAYLAw8AAA=","继":"12:AASISqicqIy+SIic6qCIKAz+AAA=","续":"12:AAQQR8gQr+xCSohI7+AQIkzCAAA=","缪":"12:AATuQiiqpmyqQ4hE6aBgIMzwAAA=","罚":"12:AA/+kS/+IAECAS4SISKSMCIOAAA=","肃":"12:AABAf8BE/+BEf8BATkVUREhEAAA=","胜":"12:AA6QqQr86QsQoQ78oQoQoQr+AAA=","能":"12:AAQmk46gAi+eiA+mi4+giimeAAA=","脚":"12:AA5OpKv65KpKv65KqKqusovYAAA=","脸":"12:AA4QoopE+Cp8oA6ipUpUoIr+AAA=","自":"12:AABACAf8QEf8QEQEf8QEQEf8AAA=","英":"12:AAEQ/+EQBAf8RERE/+CgMYwGAAA=","荒":"12:AAEQ/+EQBA/+IAP8AAJIJKxOAAA=","落":"12:AAEQ/+EQQgJ8jEQ4DGJ8REh8AAA=","蔑":"12:AAEQ/+EQf8Skf8Akf+QoYSluAAA=","西":"12:AA/+EQEQ/+kSkSkSoewCgC/+AAA=","视":"12:AAj8SE6UKUSUSU6UUQQqRKWOAAA=","触":"12:AAQIcIk++qqq+qq++IqKqOqyAAA=","认":"12:AAQQIQAQAQ4QIQIoIoJENEKCAAA=","让":"12:AAQQIQAQAQ4eIQIQIQKQMQL+AAA=","记":"12:AAj8QEAEAEwET8SASAWCaCR+AAA=","识":"12:AAj8SECECEyET8QAQARIaEUCAAA=","译":"12:AAT+KCBEA47GIQJ8IQL+MQIQAAA=","话":"12:AAgMTwAQAQz+QQQQR8VEZER8AAA=","诞":"12:AAnCRcCEEE3WRUVUVUSedAU+AAA=","语":"12:AAj+QgD8BExEX+QAT+SCaCT+AAA=","说":"12:AAiERID8CEyESET8RIVKaKUOAAA=","诸":"12:AAggT6AkAo3+QgR8XER8ZER8AAA=","象":"12:AAPwQQ/8REf8HC5kGY50GS5gAAA=","贴":"12:AA+IiIqOqIqIqIq+qiIiUii+AAA=","足":"12:AAf8QEQEQEf8BAJAJ8JAXAg+AAA=","身":"12:AACAP4IIP4IIP6IM/4BIGI44AAA=","过":"12:AAgIQIH+AIyIRIRIQIQ4oAn+AAA=","运":"12:AAj8QAAAH+xARESESaXioAn+AAA=","近":"12:AAgMTwCACAz+SISISIUIoAn+AAA=","返":"12:AAgOTwCACAz+TCSkSYVmoAn+AAA=","还":"12:AAn+QQAgAgxoSkUiQgQgoAn+AAA=","这":"12:AAggQQH+AExEQoQQQoTGoAn+AAA=","迷":"12:AAgQSSBUAQ3+Q4RUWSQQoAn+AAA=","选":"12:AAiQT8EQAQ3+RIRISKUOoAn+AAA=","途":"12:AAg4REGCB8wQT+QQRUSyoAn+AAA=","部":"12:AAEefSASRUKU/yASfSRcRQfQAAA=","重":"12:AAf8BA/+REf8REf8BAf8BA/+AAA=","量":"12:AAf8QEf8QE/+REf8REf8BA/+AAA=","问":"12:AAn+QCACnykSkSkSnygCgCgOAAA=","间":"12:AAn+QCACnykSkSnykSkSnygGAAA=","阳":"12:AA9+lClCpCpCl+lClC5ChCh+AAA=","阴":"12:AA9+lClCp+pClCl+lC5CiCkGAAA=","难":"12:AAAo8oF+nIV+VIJIJ+VIVIh+AAA=","雄":"12:AAQoQo9+TIV+VIVIp+rIrIN+AAA=","靠":"12:AARAf8hA/+QEf8EQ8eEQ8eEQAAA=","顶":"12:AA7+QQT+SCSSSSSSSSQoREyCAAA=","须":"12:AAL+QQj+CCKSSSiSCSIoREiCAAA=","顿":"12:AAI++II+qiqqqq+qIqKIMUIiAAA=","题":"12:AA++iI++ii+qAq+IIUui4An+AAA=","高":"12:AABA/+IIP4AA/+gCnykSnygGAAA=","黑":"12:AAf8REVUREf8BAf8BA/+UkiSAAA=","默":"12:AA/KlK3Il+/IEI/IEU/UAUqiAAA=","，":"12:AAAAAAAAAAAAAAAAMAMAEAIAAAA=","：":"12:AAAAAAMAMAAAAAAAAAMAMAAAAAA="}});
+</script>
+<script data-src="src/quotes.js">
+/* Sisyphus: the sixteen lines. French originals: Albert Camus, Le Mythe de Sisyphe (1942).
+   Chinese and English translations for this work; not a published translation. */
+var QS = (function () {
+  var QUOTES = [
+    { id: "1", zh: "真正严肃的哲学问题只有一个：自杀。",
+      en: "There is only one truly serious philosophical problem: suicide." },
+    { id: "2", zh: "人与自己的生活、演员与布景之间的离异，正是荒诞之感。",
+      en: "The divorce between a man and his life, the actor and his setting: that is the absurd." },
+    { id: "3", zh: "荒诞诞生于人的呼唤与世界不合理的沉默之间的对峙。",
+      en: "The absurd is born between the human call and the world's unreasonable silence." },
+    { id: "4", zh: "荒诞既系于人，也系于世界。",
+      en: "The absurd depends as much on man as on the world." },
+    { id: "5", zh: "诸神判罚西西弗斯把巨石推上山顶，石头又因自身重量滚落。",
+      en: "The gods condemned Sisyphus to roll a rock uphill; it fell by its own weight." },
+    { id: "6", zh: "西西弗斯是荒诞的英雄：既因他的激情，也因他的磨难。",
+      en: "Sisyphus is the absurd hero: as much by his passions as by his torment." },
+    { id: "7", zh: "归途与停顿中，西西弗斯令我着迷。贴近石头劳作的脸，已是石头。",
+      en: "Sisyphus interests me in the return, the pause: a face so close to stone is stone." },
+    { id: "8", zh: "每当他离开山顶，他便高于自己的命运。他比他的巨石更强。",
+      en: "Each time he leaves the summit he is superior to his fate, stronger than his rock." },
+    { id: "9", zh: "这神话之所以悲壮，是因为它的英雄有意识。",
+      en: "If this myth is tragic, it is because its hero is conscious." },
+    { id: "10", zh: "没有哪一种命运不能靠蔑视去战胜。",
+      en: "There is no fate that cannot be surmounted by scorn." },
+    { id: "11", zh: "幸福与荒诞是同一片土地上的两个儿子，不可分离。",
+      en: "Happiness and the absurd are two sons of the same earth. They are inseparable." },
+    { id: "12", zh: "西西弗斯全部无声的欢乐就在于此：命运属于他，巨石也属于他。",
+      en: "All Sisyphus's silent joy is there: his fate belongs to him, his rock is his own." },
+    { id: "13", zh: "没有不带阴影的太阳，人必须认识黑夜。",
+      en: "There is no sun without shadow, and one must know the night." },
+    { id: "14", zh: "荒诞的人说「是」，他的努力从此不会停歇。",
+      en: "The absurd man says yes, and his effort will never cease." },
+    { id: "15", zh: "向着高处挣扎本身，就足以填满一个人的心。",
+      en: "The struggle itself toward the heights is enough to fill a man's heart." },
+    { id: "16", zh: "我们必须想象西西弗斯是幸福的。",
+      en: "One must imagine Sisyphus happy." }
+  ];
+  var byId = {};
+  QUOTES.forEach(function (q) { byId[q.id] = q; });
+
+  function shuffle(a) {
+    for (var i = a.length - 1; i > 0; i--) {
+      var j = Math.floor(Math.random() * (i + 1));
+      var t = a[i]; a[i] = a[j]; a[j] = t;
+    }
+    return a;
+  }
+
+  function allIds() {
+    return QUOTES.map(function (q) { return q.id; });
+  }
+
+  /* The first summit is always the last line; after that a shuffled deck, no immediate repeat. */
+  function next(state) {
+    if (state.summits === 0) {
+      state.lastQuote = "16";
+      return byId["16"];
+    }
+    if (!state.deck || !state.deck.length) state.deck = shuffle(allIds());
+    var id = state.deck.shift();
+    if (id === state.lastQuote && state.deck.length) {
+      var swap = state.deck[0];
+      state.deck[0] = id;
+      id = swap;
+    }
+    state.lastQuote = id;
+    return byId[id];
+  }
+
+  function noteText(q, n) {
+    var d = new Date();
+    var date = d.getFullYear() + "年" + (d.getMonth() + 1) + "月" + d.getDate() + "日";
+    return date + " · 第 " + n + " 次登顶\n\n"
+      + "「" + q.zh + "」\n"
+      + "\"" + q.en + "\"\n\n"
+      + "—— 加缪《西西弗斯神话》";
+  }
+
+  function seenList(state) {
+    var out = [];
+    (state.seen || []).forEach(function (id) { if (byId[id]) out.push(byId[id]); });
+    return out;
+  }
+
+  return { QUOTES: QUOTES, byId: byId, next: next, noteText: noteText, seenList: seenList };
+})();
+</script>
+<script data-src="src/world.js">
+/* Sisyphus: the mountain, the path and the camera. All numbers are internal pixels. */
+var WORLD = (function () {
+  var W = 160, H = 178;
+  var SUMMIT_X = 900, BASE_Y = 330, SUMMIT_Y = 78;
+  var FAR_END = 1080, WORLD_W = 1120;
+  var WEATHERS = ["clear", "wind", "rain"];
+
+  function clamp(v, a, b) { return v < a ? a : (v > b ? b : v); }
+
+  /* The long ledge: a smooth climb, a little uneven, steep at the top. */
+  function pathY(x) {
+    var t = clamp(x / SUMMIT_X, 0, 1);
+    var e = t * t * (3 - 2 * t);
+    return BASE_Y - (BASE_Y - SUMMIT_Y) * e + Math.sin(t * Math.PI) * 3;
+  }
+
+  /* The other side: steep, short, and then the dark. */
+  function farPathY(x) {
+    var t = clamp((x - SUMMIT_X) / (FAR_END - SUMMIT_X), 0, 1);
+    return SUMMIT_Y + 300 * t * t;
+  }
+
+  function pathX(p) { return 40 + clamp(p, 0, 1) * (SUMMIT_X - 40); }
+
+  function makeCamera() { return { x: 0, y: BASE_Y - 110 }; }
+
+  function follow(cam, tx, ty, dt, snap) {
+    var gx = clamp(tx - 54, 0, WORLD_W - W);
+    var gy = clamp(ty - 106, -46, 300);
+    if (snap) { cam.x = gx; cam.y = gy; return; }
+    var k = Math.min(1, dt * 5);
+    cam.x += (gx - cam.x) * k;
+    cam.y += (gy - cam.y) * k;
+  }
+
+  function pickWeather() {
+    return WEATHERS[Math.floor(Math.random() * WEATHERS.length)];
+  }
+
+  return {
+    W: W, H: H, SUMMIT_X: SUMMIT_X, BASE_Y: BASE_Y, SUMMIT_Y: SUMMIT_Y,
+    FAR_END: FAR_END, WORLD_W: WORLD_W, WEATHERS: WEATHERS,
+    clamp: clamp, pathY: pathY, farPathY: farPathY, pathX: pathX,
+    makeCamera: makeCamera, follow: follow, pickWeather: pickWeather
+  };
+})();
+</script>
+<script data-src="src/art.js">
+/* Sisyphus: four-tone art. Everything here is placeholder art with a clear shape:
+   the artist pass can replace the sprites and terrain without touching the game.
+   0 ink, 1 dark, 2 mid, 3 paper; '.' is transparent in sprite text. */
+var ART = (function () {
+  var W = 160, H = 178;
+  var BAYER = [
+    0, 32, 8, 40, 2, 34, 10, 42, 48, 16, 56, 24, 50, 18, 58, 26,
+    12, 44, 4, 36, 14, 46, 6, 38, 60, 28, 52, 20, 62, 30, 54, 22,
+    3, 35, 11, 43, 1, 33, 9, 41, 51, 19, 59, 27, 49, 17, 57, 25,
+    15, 47, 7, 39, 13, 45, 5, 37, 63, 31, 55, 23, 61, 29, 53, 21
+  ];
+
+  function bayer(x, y) { return (BAYER[(y & 7) * 8 + (x & 7)] + 0.5) / 64; }
+  function tone(v, x, y) {
+    var t = Math.floor(v + bayer(x, y));
+    return t < 0 ? 0 : (t > 3 ? 3 : t);
+  }
+  function px(g, x, y, v) {
+    x = Math.round(x); y = Math.round(y);
+    if (x < 0 || y < 0 || x >= W || y >= H) return;
+    g.pixel(x, y, tone(v, x, y));
+  }
+  function disc(g, cx, cy, r, v) {
+    for (var y = -r; y <= r; y++) for (var x = -r; x <= r; x++) {
+      if (x * x + y * y <= r * r) px(g, cx + x, cy + y, v);
+    }
+  }
+  function ring(g, cx, cy, r0, r1, v) {
+    for (var y = -r1; y <= r1; y++) for (var x = -r1; x <= r1; x++) {
+      var d = x * x + y * y;
+      if (d >= r0 * r0 && d <= r1 * r1) px(g, cx + x, cy + y, v);
+    }
+  }
+  function line2(g, x0, y0, x1, y1, v) {
+    x0 = Math.round(x0); y0 = Math.round(y0); x1 = Math.round(x1); y1 = Math.round(y1);
+    var dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1, e = dx + dy;
+    for (;;) {
+      px(g, x0, y0, v);
+      if (x0 === x1 && y0 === y1) break;
+      var e2 = 2 * e;
+      if (e2 >= dy) { e += dy; x0 += sx; }
+      if (e2 <= dx) { e += dx; y0 += sy; }
+    }
+  }
+
+  /* ---------------- sky ---------------- */
+  function sky(g, s) {
+    var night = s.mode === "descent";
+    var day = night ? 1 : s.p;
+    var wet = s.weather === "rain";
+    var topV = night ? 0.12 : 3.08 - 2.25 * day - (wet ? 0.28 : 0);
+    var horV = night ? 0.92 : 1.85 + 1.15 * Math.sin(day * Math.PI) - (wet ? 0.30 : 0);
+    var horizon = 116;
+    for (var y = 0; y < H; y++) {
+      var v = y < horizon ? topV + (horV - topV) * (y / horizon) : horV;
+      for (var x = 0; x < W; x++) px(g, x, y, v);
+    }
+
+    var sx = night ? 119 : 124 - 24 * day;
+    var sy = night ? 42 : 49 + 37 * day;
+    var sr = night ? 8 : 9 - 2 * day;
+    if (!wet || night) {
+      ring(g, sx, sy, sr + 1, sr + 5, night ? 0.9 : 2.25);
+      disc(g, sx, sy, sr, 3);
+    }
+    if (night) {
+      /* a crescent: one dark disc over the paper one */
+      for (var yy = -sr; yy <= sr; yy++) for (var xx = -sr; xx <= sr; xx++) {
+        var dd = xx * xx + yy * yy;
+        if (dd <= (sr - 1) * (sr - 1) && (xx + sr) * (xx + sr) + (yy + 2) * (yy + 2) <= sr * sr) px(g, sx + xx, sy + yy, 0.85);
+      }
+    }
+
+    /* stars only when the sky is dark enough */
+    if (night || day > 0.9) {
+      for (var i = 0; i < 34; i++) {
+        var stx = (i * 37 + 11) % 154 + 3;
+        var sty = (i * 23 + 5) % 76 + 3;
+        var dx0 = stx - sx, dy0 = sty - sy;
+        if (dx0 * dx0 + dy0 * dy0 < (sr + 8) * (sr + 8)) continue;
+        if (Math.sin(s.time * 1.7 + i * 2.3) > -0.72) px(g, stx, sty, i % 5 === 0 ? 3 : 2.4);
+      }
+    }
+
+    /* slow cloud bands; rain and wind change the pace */
+    var wind = s.weather === "wind" ? 2.2 : 1;
+    for (var c = 0; c < 3; c++) {
+      var cy = 58 + c * 15;
+      var off = (s.time * (4 + c) * wind + c * 57) % 240 - 40;
+      for (var x2 = 0; x2 < W; x2++) {
+        var u = (x2 + off) / 240;
+        var band = Math.sin(u * 6.283 * 2 + c) * 0.5 + 0.5;
+        if (band > 0.72) {
+          var vv = night ? 0.55 : 2.45;
+          px(g, x2, cy + Math.sin(x2 * 0.05 + c) * 1.2, vv);
+          px(g, x2, cy + 1 + Math.sin(x2 * 0.05 + c) * 1.2, vv - 0.5);
+        }
+      }
+    }
+
+    if (s.weather === "rain") {
+      for (var r = 0; r < 68; r++) {
+        var rx = (r * 41 + s.time * 31) % 174 - 7;
+        var ry = (r * 59 + s.time * 83) % 178;
+        line2(g, rx, ry, rx - 1, ry + 3, night ? 2.1 : 1.25);
+      }
+    }
+
+    if (!night && s.weather !== "rain" && day < 0.82) {
+      for (var b = 0; b < 3; b++) {
+        var bx = (22 + b * 9 + s.time * 1.6) % (W + 20) - 10;
+        var by = 39 + b * 4;
+        px(g, bx, by, 1.2); px(g, bx + 1, by - 1, 1.2); px(g, bx + 2, by, 1.2);
+      }
+    }
+  }
+
+  /* ---------------- distant ridges ---------------- */
+  function ridges(g, s) {
+    var night = s.mode === "descent";
+    for (var layer = 0; layer < 2; layer++) {
+      var base = 92 + layer * 16 - (s.cam.y - 180) * 0.035;
+      var par = s.cam.x * (0.10 + layer * 0.07);
+      var v = night ? (layer ? 0.18 : 0.42) : (layer ? 0.95 : 1.65);
+      for (var x = 0; x < W; x++) {
+        var wx = x + par;
+        var yy = base + Math.sin(wx * 0.026 + layer * 2.1) * (5 + layer * 2)
+          + Math.sin(wx * 0.071 + layer) * (2.5 + layer);
+        var top = Math.round(yy);
+        for (var y = top; y < H; y++) px(g, x, y, v - (y - top) * 0.002);
+      }
+    }
+  }
+
+  /* ---------------- cloud sea ---------------- */
+  function cloudSea(g, s) {
+    var night = s.mode === "descent";
+    for (var i = 0; i < 4; i++) {
+      var cx = (i * 59 + s.time * 2.5) % 210 - 30;
+      var cy = 124 + (i * 7) % 11;
+      var w = 26 + (i % 2) * 12;
+      for (var x = -w; x <= w; x++) {
+        var edge = Math.sin((x / w) * 1.5708);
+        var h = Math.max(1, Math.round(edge * 3));
+        for (var y = -h; y <= 1; y++) px(g, cx + x, cy + y, night ? 0.75 : 2.35);
+      }
+    }
+  }
+
+  /* ---------------- the mountain and its ledge ---------------- */
+  function terrain(g, s) {
+    var cam = s.cam;
+    var night = s.mode === "descent";
+    var summitScreen = WORLD.SUMMIT_X - cam.x;
+
+    for (var x = 0; x < W; x++) {
+      var wx = cam.x + x;
+      if (wx <= WORLD.SUMMIT_X) {
+        var py = WORLD.pathY(wx) - cam.y;
+
+        /* ledge: a pale top edge, a dark underside */
+        px(g, x, py - 1, night ? 2.0 : 3.0);
+        px(g, x, py, 2.0);
+        px(g, x, py + 1, 2.0);
+        px(g, x, py + 2, 1.1);
+        px(g, x, py + 3, 0.15);
+
+        /* cliff below the ledge */
+        var top = Math.max(py + 4, 0);
+        for (var y = top; y < H; y++) {
+          var d = (y - top) / Math.max(1, H - top);
+          var v = night ? 0.72 - d * 0.68 : 1.38 - d * 1.30;
+          v += Math.sin(wx * 0.031 + y * 0.14) * 0.055;
+          /* large diagonal facets, then the horizontal strata, then the deep cracks */
+          var facet = (wx * 0.55 + (y - top) * 1.35) / 46;
+          v += ((Math.floor(facet) % 3) - 1) * 0.11;
+          if ((facet - Math.floor(facet)) * 46 < 1.4) v -= 0.30;
+          if ((y + Math.floor(Math.sin(wx * 0.041) * 4)) % 22 === 0) v -= 0.42;
+          if (crack(wx, y)) v = 0.02;
+          px(g, x, y, v);
+        }
+      } else {
+        /* the other side: one narrow lit rim, then the far slope in the crest's
+           shadow, then the cloud sea lower down. The first pixels after the
+           summit borrow the near cliff's value, so the two faces meet on the
+           ridge instead of at a vertical seam. */
+        var fy = WORLD.farPathY(wx) - cam.y;
+        var mix = Math.min(1, (wx - WORLD.SUMMIT_X) / 16);
+        var top0 = Math.max(fy + 4, 0);
+        var nearD = 1 / Math.max(1, H - top0);
+        var rim = Math.max(0, Math.min(H, fy + 2));
+        var foot = Math.max(0, Math.min(H, fy + 26));
+        for (var y2 = Math.max(0, fy - 1); y2 < H; y2++) {
+          var v2;
+          if (y2 < rim) {
+            /* the last light on the crest: at most three pixels */
+            v2 = y2 < fy + 1 ? (night ? 2.0 : 2.9) : (night ? 1.3 : 1.9);
+          } else if (y2 < foot) {
+            /* the far slope is in shadow, not a second lit wall */
+            var fd = (y2 - rim) / Math.max(1, foot - rim);
+            v2 = night ? 0.92 - fd * 0.14 : 1.46 - fd * 0.10;
+          } else {
+            /* the cloud sea sits lower and stays close to mid */
+            var d3 = (y2 - foot) / Math.max(1, H - foot);
+            v2 = night ? 0.82 - d3 * 0.22 : 2.02 - d3 * 0.34;
+            v2 += Math.sin(wx * 0.05 + y2 * 0.19) * 0.14;
+          }
+          if (y2 >= rim && mix < 1) {
+            var d0 = Math.max(0, y2 - top0) * nearD;
+            var near = night ? 0.72 - d0 * 0.68 : 1.38 - d0 * 1.30;
+            v2 = near + (v2 - near) * mix;
+          }
+          if (y2 >= rim && (y2 + Math.floor(Math.sin(wx * 0.05) * 3)) % 9 === 0) v2 -= 0.28;
+          px(g, x, y2, v2);
+        }
+      }
+    }
+
+    /* the crest ends in a small lip; a cairn says someone was here before */
+    var su = Math.round(summitScreen);
+    if (su > -6 && su < W + 6) {
+      for (var i2 = 0; i2 < 4; i2++) {
+        px(g, su - 10 + i2, (WORLD.SUMMIT_Y - cam.y) - 2 - i2, 2.2);
+        px(g, su - 11 + i2, (WORLD.SUMMIT_Y - cam.y) - 1 - i2, 0.2);
+      }
+    }
+
+    /* grass tufts, sparse; the mountain is stone, not a meadow */
+    for (var i = 0; i < 18; i++) {
+      var tx = (i * 53 + 17) % (WORLD.SUMMIT_X - 20) + 10;
+      if (tx < cam.x - 6 || tx > cam.x + W + 6) continue;
+      var ty = WORLD.pathY(tx) - cam.y;
+      if (ty < -4 || ty > H) continue;
+      var sx = Math.round(tx - cam.x);
+      px(g, sx, ty - 3, 0.3); px(g, sx - 1, ty - 5, 0.3); px(g, sx + 1, ty - 4, 0.3);
+    }
+
+    /* loose scree at the foot of the cliff */
+    for (var k = 0; k < 46; k++) {
+      var pxW = (k * 67 + 31) % WORLD.SUMMIT_X;
+      if (pxW < cam.x - 2 || pxW > cam.x + W + 2) continue;
+      var pyW = WORLD.pathY(pxW) + 10 + (k * 17) % 40;
+      px(g, pxW - cam.x, pyW - cam.y, k % 3 === 0 ? 2.2 : 0.8);
+    }
+  }
+
+  function crack(wx, y) {
+    var cs = [86, 214, 347, 512, 688, 804];
+    for (var i = 0; i < cs.length; i++) {
+      var c = cs[i] + Math.sin(y * 0.07 + i) * 3;
+      if (Math.abs(wx - c) < 1.1) return true;
+    }
+    return false;
+  }
+
+  /* ---------------- boulder ---------------- */
+  function boulder(g, cx, cy, r, angle, night) {
+    /* contact shadow on the ledge */
+    line2(g, cx - r + 2, cy + r - 1, cx + r - 2, cy + r - 1, 0.1);
+    var reach = r + 3;
+    for (var y = -reach; y <= reach; y++) for (var x = -reach; x <= reach; x++) {
+      var d = Math.sqrt(x * x + y * y);
+      var theta = Math.atan2(y, x) - angle;
+      /* a lumpy outline: an off-centre body, three harmonics and two chipped corners */
+      var rr = r * (0.91 + 0.115 * Math.sin(theta * 3 + 0.8)
+        + 0.070 * Math.sin(theta * 5 - 1.2)
+        + 0.045 * Math.sin(theta * 7 + 2.1)
+        + 0.050 * Math.sin(theta * 2 - 0.4));
+      var chip = Math.atan2(Math.sin(theta - 2.25), Math.cos(theta - 2.25));
+      if (Math.abs(chip) < 0.40) rr -= r * 0.20 * (1 - Math.abs(chip) / 0.40);
+      var chip2 = Math.atan2(Math.sin(theta + 2.55), Math.cos(theta + 2.55));
+      if (Math.abs(chip2) < 0.28) rr -= r * 0.12 * (1 - Math.abs(chip2) / 0.28);
+      if (d > rr) continue;
+      var sh = (x * 0.62 - y * 0.78) / r;
+      var v = 1.08 + sh * 0.95;
+      if (d > rr - 1.25) v = 0.06;
+      if (d > rr - 1.3 && sh > 0.30) v = 2.9;
+      if (sh > 0.48 && bayer(cx + x, cy + y) < 0.52) v = 3;
+      px(g, cx + x, cy + y, night ? v - 0.35 : v);
+    }
+    /* three cracks, turned with the stone */
+    var ca = Math.cos(angle), sa = Math.sin(angle);
+    var cracks = [
+      [[-0.62, -0.18], [-0.18, 0.10], [0.28, 0.02]],
+      [[-0.16, -0.66], [0.10, -0.22], [0.22, 0.36]],
+      [[0.08, 0.52], [-0.24, 0.30], [-0.54, 0.42]]
+    ];
+    for (var c = 0; c < cracks.length; c++) {
+      var pts = cracks[c];
+      for (var p = 1; p < pts.length; p++) {
+        var ax = pts[p - 1][0] * r, ay = pts[p - 1][1] * r;
+        var bx = pts[p][0] * r, by = pts[p][1] * r;
+        for (var t = 0; t <= 1; t += 0.12) {
+          var lx = ax + (bx - ax) * t, ly = ay + (by - ay) * t;
+          px(g, cx + lx * ca - ly * sa, cy + lx * sa + ly * ca, 0.05);
+        }
+      }
+    }
+  }
+
+  /* ---------------- Sisyphus ---------------- */
+  function sisyphus(g, sx, sy, pose, phase, bx, by, br, night) {
+    var pushing = pose === "push" || pose === "strain";
+    var lean = pushing ? 2 : (pose === "slip" ? -1 : 0);
+    var crouch = pose === "strain" ? 1 : 0;
+    var look = pose === "look" ? 1 : 0;
+    var hx = sx + lean;
+    var hy = sy - 16 + crouch - look;
+    var shoulderY = sy - 12 + crouch;
+    var hipY = sy - 4;
+    var ink = 0, rim = night ? 2.7 : 2.2, hi = 3;
+    var step = Math.sin(phase);
+
+    line2(g, sx - 3, sy - 1, sx + 3, sy - 1, 0.1);
+
+    /* the far arm goes behind the torso, so the pushing pose has depth instead of a belly */
+    if (pushing) {
+      line2(g, hx - 1, shoulderY + 1, sx - 2, shoulderY + 4, ink);
+      line2(g, sx - 2, shoulderY + 4, bx - br + 2, by + 1, ink);
+    }
+
+    /* legs: while pushing they shuffle, one foot forward and one back */
+    if (pose === "slip") {
+      line2(g, sx - 1, hipY, sx - 5, sy, ink); line2(g, sx + 1, hipY, sx + 5, sy, ink);
+      line2(g, sx - 6, sy, sx - 4, sy, ink); line2(g, sx + 4, sy, sx + 6, sy, ink);
+    } else if (pose === "walk") {
+      var sw = Math.sin(phase) * 3;
+      line2(g, sx - 1, hipY, sx - sw, sy - (sw > 0 ? 1 : 0), ink);
+      line2(g, sx + 1, hipY, sx + sw, sy - (sw < 0 ? 1 : 0), ink);
+      line2(g, sx - sw - 1, sy - (sw > 0 ? 1 : 0), sx - sw + 1, sy - (sw > 0 ? 1 : 0), ink);
+      line2(g, sx + sw - 1, sy - (sw < 0 ? 1 : 0), sx + sw + 1, sy - (sw < 0 ? 1 : 0), ink);
+    } else if (pushing) {
+      var stride = step * 2.2;
+      var lfx = sx - 2 - stride, rfx = sx + 2 + stride;
+      var lfy = sy - (step > 0.30 ? 1 : 0);
+      var rfy = sy - (step < -0.30 ? 1 : 0);
+      line2(g, sx - 1, hipY, lfx, lfy, ink);
+      line2(g, sx + 1, hipY, rfx, rfy, ink);
+      line2(g, lfx - 1, lfy, lfx + 1, lfy, ink);
+      line2(g, rfx - 1, rfy, rfx + 1, rfy, ink);
+      px(g, (sx - 1 + lfx) / 2, (hipY + lfy) / 2, rim);
+    } else {
+      var stance = pose === "stand" ? 2 : 1;
+      line2(g, sx - 1, hipY, sx - stance, sy, ink); line2(g, sx + 1, hipY, sx + stance, sy, ink);
+      line2(g, sx - stance - 1, sy, sx - stance + 1, sy, ink);
+      line2(g, sx + stance - 1, sy, sx + stance + 1, sy, ink);
+    }
+
+    /* torso: wide shoulders, a narrow waist; not a barrel */
+    for (var i = 0; i < 8; i++) {
+      var t = i / 7;
+      var cx = sx + lean * (1 - t);
+      var w = i < 2 ? 2 : 1;
+      var yy = sy - 12 + crouch + i;
+      g.rect(cx - w, yy, w * 2 + 1, 1, ink);
+      px(g, cx - w - 1, yy, rim);
+      if (i === 0) px(g, cx - w, yy, hi);
+    }
+    g.rect(sx - 1, hipY, 3, 1, ink);
+
+    /* head and neck */
+    g.circle(hx, hy, 2, ink, true);
+    px(g, hx - 2, hy - 1, rim); px(g, hx - 1, hy - 2, hi);
+    if (night) { px(g, hx + 2, hy - 1, rim); px(g, hx + 1, hy + 1, rim); }
+    g.rect(hx - 1, hy + 2, 2, 2, ink);
+
+    /* near arm, in front: one clear arm from shoulder to the stone */
+    var shoulderY2 = shoulderY + 1;
+    if (pushing) {
+      var handX = bx - br + 1, handY = by - 2;
+      var ex = hx + 3, ey = shoulderY + 3;
+      /* two pixels thick, with a lit top edge, so it reads against the dark stone */
+      line2(g, hx + 1, shoulderY2, ex, ey, ink);
+      line2(g, hx + 1, shoulderY2 + 1, ex, ey + 1, ink);
+      line2(g, ex, ey, handX, handY, ink);
+      line2(g, ex, ey + 1, handX, handY + 1, ink);
+      line2(g, hx + 1, shoulderY2 - 1, ex, ey - 1, rim);
+      line2(g, ex, ey - 1, handX, handY - 1, rim);
+      px(g, ex, ey - 1, hi); px(g, handX, handY, hi); px(g, handX, handY - 1, hi);
+    } else if (pose === "slip") {
+      line2(g, hx + 1, shoulderY2, sx + 5, sy - 17, ink);
+      line2(g, hx - 1, shoulderY2, sx - 5, sy - 16, ink);
+    } else if (pose === "walk") {
+      var sw2 = Math.sin(phase) * 3;
+      line2(g, hx + 1, shoulderY2, sx + 2 + sw2, sy - 5, ink);
+      line2(g, hx - 1, shoulderY2, sx - 2 - sw2, sy - 5, ink);
+    } else {
+      line2(g, hx + 1, shoulderY2, sx + 3, sy - 4, ink);
+      line2(g, hx - 1, shoulderY2, sx - 3, sy - 4, ink);
+    }
+
+    /* a little more rim on the back */
+    px(g, sx - 2, sy - 9, rim); px(g, sx - 2, sy - 7, rim);
+  }
+
+  /* ---------------- dust ---------------- */
+  function spawnDust(s, wx, wy, n, power) {
+    for (var i = 0; i < n; i++) {
+      s.dust.push({
+        x: wx + (Math.random() * 2 - 1) * 4,
+        y: wy - Math.random() * 3,
+        vx: (Math.random() * 2 - 1) * power,
+        vy: -Math.random() * power * 0.7,
+        life: 0.45 + Math.random() * 0.7,
+        max: 1.2
+      });
+    }
+  }
+
+  function updateDust(s, dt) {
+    for (var i = s.dust.length - 1; i >= 0; i--) {
+      var p = s.dust[i];
+      p.life -= dt;
+      if (p.life <= 0) { s.dust.splice(i, 1); continue; }
+      p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 18 * dt;
+    }
+  }
+
+  function drawDust(g, s) {
+    for (var i = 0; i < s.dust.length; i++) {
+      var p = s.dust[i];
+      var x = p.x - s.cam.x, y = p.y - s.cam.y;
+      if (x > -2 && x < W + 2 && y > -2 && y < H + 2) {
+        px(g, x, y, p.life > 0.45 ? 3 : 2.2);
+      }
+    }
+  }
+
+  /* ---------------- the quote card ---------------- */
+  function reveal(g, amount) {
+    if (amount >= 1) { g.clear(3); return; }
+    for (var y = 0; y < H; y++) for (var x = 0; x < W; x++) {
+      if (bayer(x, y) < amount) g.pixel(x, y, 3);
+    }
+  }
+
+  function card(g, q, left, right, amount, status, hintText) {
+    reveal(g, amount);
+    if (amount < 0.72) return;
+    g.frame(3, 3, 154, 172, 0);
+    g.text(left, 12, 10, { color: 1 });
+    if (right) g.text(right, 147, 10, { color: 1, align: "right" });
+    g.line(12, 27, 147, 27, 1);
+
+    var y = 34;
+    var zh = g.wrap(q.zh, 132);
+    for (var i = 0; i < zh.length; i++) { g.text(zh[i], 13, y, { color: 0 }); y += g.lineHeight; }
+    y += 4;
+    var en = g.wrap(q.en, 132);
+    for (var j = 0; j < en.length; j++) { g.text(en[j], 13, y, { color: 1 }); y += g.lineHeight; }
+
+    g.line(12, 138, 147, 138, 1);
+    g.text("加缪《西西弗斯神话》", 13, 141, { color: 1 });
+    var hint = hintText || "A 记下    B 让它过去";
+    if (status === "saving") hint = "写入中…";
+    else if (status === "saved") hint = "已写入幸福手册";
+    else if (status === "denied") hint = "没有写入";
+    g.text(hint, 13, 157, { color: 0 });
+  }
+
+  function wipe(g, amount, tone) {
+    if (amount >= 1) { g.clear(tone); return; }
+    for (var y = 0; y < H; y++) for (var x = 0; x < W; x++) {
+      if (x / W > 1 - amount + (bayer(x, y) - 0.5) * 0.055) g.pixel(x, y, tone);
+    }
+  }
+
+  function drawWorld(g, s) {
+    sky(g, s);
+    ridges(g, s);
+    cloudSea(g, s);
+    terrain(g, s);
+
+    var bsx = s.boulderX - s.cam.x, bsy = s.boulderY - s.cam.y;
+    var psx = s.playerX - s.cam.x, psy = s.playerY - s.cam.y;
+    var night = s.mode === "descent";
+
+    boulder(g, bsx, bsy, s.boulderR, s.boulderAngle, night);
+    sisyphus(g, psx, psy, s.pose, s.walkPhase, bsx, bsy, s.boulderR, night);
+    drawDust(g, s);
+  }
+
+  return {
+    W: W, H: H, tone: tone, px: px, disc: disc, line2: line2,
+    sky: sky, ridges: ridges, cloudSea: cloudSea, terrain: terrain,
+    boulder: boulder, sisyphus: sisyphus, spawnDust: spawnDust, updateDust: updateDust, drawDust: drawDust,
+    reveal: reveal, card: card, wipe: wipe, drawWorld: drawWorld
+  };
+})();
+</script>
+<script data-src="src/sfx.js">
+/* Sisyphus: synthesized sounds. No samples: the runtime's chip follows the player's volume,
+   the silent switch and the app's lifecycle. (A recorded sample can replace these later,
+   once PAD.sample exists; see drafts/sisyphus/RESEARCH.md.) */
+var SFX = (function () {
+  function rnd(a, b) { return a + Math.random() * (b - a); }
+
+  function heave(game, hard) {
+    game.sfx({
+      wave: "square", duty: 1, from: hard ? 118 : 148, to: hard ? 76 : 94,
+      ms: hard ? 430 : 320, attack: 30, decay: hard ? 380 : 280,
+      vol: hard ? 0.34 : 0.28,
+      vibrato: { depth: hard ? 1.5 : 1.05, rate: rnd(4.8, 6.2) }
+    });
+    game.sfx({ wave: "noise", from: rnd(700, 900), to: 280, ms: 190, attack: 20, decay: 170, vol: 0.09 });
+  }
+
+  function breath(game) {
+    game.sfx({ wave: "noise", from: rnd(620, 860), to: 260, ms: rnd(160, 230), attack: 18, decay: 180, vol: 0.065 });
+  }
+
+  function step(game) {
+    game.sfx({ wave: "noise", from: rnd(1100, 1500), to: 520, ms: 55, attack: 2, decay: 50, vol: 0.055 });
+  }
+
+  function scrape(game) {
+    game.sfx({ wave: "noise", from: 170, to: 58, ms: 420, attack: 10, decay: 400, vol: 0.12 });
+  }
+
+  function slip(game) {
+    game.sfx({ wave: "noise", from: 1250, to: 320, ms: 120, attack: 2, decay: 110, vol: 0.10 });
+  }
+
+  function rumble(game) {
+    game.sfx({ wave: "noise", from: 92, to: 24, ms: 1400, attack: 20, decay: 1360, vol: 0.34 });
+    game.sfx({ wave: "square", duty: 2, from: 54, to: 30, ms: 1150, attack: 30, decay: 1100, vol: 0.14 });
+  }
+
+  function gong(game) {
+    game.sfx({ wave: "noise", from: 270, to: 38, ms: 1400, attack: 8, decay: 1380, vol: 0.28 });
+    game.sfx({ wave: "triangle", from: 94, to: 58, ms: 1000, attack: 5, decay: 980, vol: 0.20 });
+  }
+
+  function chime(game) {
+    game.sfx({ wave: "triangle", from: 880, to: 660, ms: 520, attack: 4, decay: 500, vol: 0.10 });
+  }
+
+  function click(game) { game.sfx("tap"); }
+  function move(game) { game.sfx("move"); }
+  function denied(game) { game.sfx("err"); }
+
+  return { heave: heave, breath: breath, step: step, scrape: scrape, slip: slip,
+    rumble: rumble, gong: gong, chime: chime, click: click, move: move, denied: denied };
+})();
+</script>
+<script data-src="src/music.js">
+/* Sisyphus: original chip music (MIT). D Dorian on the way up, D Aeolian on the way down;
+   the descent is the same motif heard backwards. MML is described in SPEC.md 6.3. */
+var MUSIC = {
+  /* 60 bpm, about 55 s: a low drone, a slow call, a stone heartbeat. */
+  ascent1: { bpm: 60,
+    p1: "@1 v8 o4 l2 d2 a2 f2 e2 d2 r2 | d2 f2 a2 g2 f2 e2 d2 r2 | f2 e2 d2 c2 d2 e2 f2 r2 | d4 r2 a2 g2 f2 e2",
+    p2: "@2 v4 o3 l8 [d f a >d< a f d f]2 | [g b d >g< d b g b]2 | [c e g >c< g e c e]2 | [d f a >d< a f d f]2",
+    tri: "v10 o2 l2 d2 a2 g2 d2 | c2 g2 d2 a2 | b-2 f2 c2 g2 | d2 a2 d2 r2",
+    noise: "l4 v2 x r v1 x r v2 x r v1 x r | v2 x r v1 x r v3 X4 r r | v2 x r v1 x r v2 x r v1 x r | v3 X4 r v2 x r v1 x r"
+  },
+
+  /* 66 bpm, about 29 s: the same mountain, closer, with a pulse. */
+  ascent2: { bpm: 66,
+    p1: "@1 v10 o5 l4 d4 e4 f4 a4 | g4 f4 e4 d4 | f4 g4 a4 >c4 | <b4 a4 g4 f4 | d4 e4 f4 a4 | >d4 c4 <b4 a4 | g4 f4 e4 d4 | d2 r2",
+    p2: "@0 v5 o3 l8 [d f a >d< a f d f]4 | [g b d >g< d b g b]4 | [c e g >c< g e c e]4 | [d f a >d< a f d f]4",
+    tri: "v11 o2 l4 d2 a2 | b-2 f2 | c2 g2 | d2 a2 | d2 a2 | b-2 f2 | c2 g2 | d2 r2",
+    noise: "l8 v4 x r v2 x x v3 X4 v2 x r | v4 x r v2 x x v3 X4 v2 x r | v4 x r v2 x x v3 X4 v2 x r | v4 X4 r r v2 x r v3 X4 | v4 x r v2 x x v3 X4 v2 x r | v4 x r v2 x x v3 X4 v2 x r | v4 x r v2 x x v3 X4 v2 x r | v5 X2 r2"
+  },
+
+  /* 52 bpm, about 32 s: the ascent motif in reverse, in Aeolian. The night walk. */
+  descent: { bpm: 52,
+    p1: "@2 v7 o4 l2 d2 e2 f2 a2 d2 r2 | c2 b-2 a2 g2 f2 e2 d2 r2",
+    p2: "@0 v4 o3 l4 a2 f2 d2 a2 | g2 e2 c2 e2",
+    tri: "v10 o2 l2 d2 a2 b-2 f2 | g2 d2 a2 d2",
+    noise: "l2 v1 x r | v1 x r"
+  }
+};
+</script>
+<script data-src="src/main.js">
+/* Sisyphus: the game. Lo-PDA / lopda/1, lo-game.js 1.4.0.
+   Sound is synthesized (PAD.sfx / PAD.music / PAD.ambience) so it follows the handheld's
+   volume and silent switch. A recorded sample can replace the heave later, when PAD.sample
+   exists: see drafts/sisyphus/RESEARCH.md and drafts/sisyphus/ART-PROMPT.md. */
+var game = LoGame.create({ width: 160, height: 178, lang: "zh" });
+var T = game.t;
+document.documentElement.lang = game.lang === "zh" ? "zh-CN" : "en";
+
+/* START is the handheld's menu key. The runtime sends it as a press; handling it here
+   keeps it working from every scene that has a menu, and never from the title or a quote. */
+if (PAD && PAD.on) {
+  PAD.on("press", function (b) {
+    if (b !== "start" || !S.loaded || S.menuOpen) return;
+    if (S.mode === "climb" || S.mode === "descent") openMenu();
+  });
+}
+
+var S = {
+  loaded: false,
+  mode: "title",
+  p: 0,
+  idle: 0,
+  summits: 0,
+  seen: [],
+  deck: [],
+  lastQuote: null,
+  weather: "clear",
+  cam: WORLD.makeCamera(),
+  playerX: 0, playerY: WORLD.BASE_Y,
+  boulderX: 18, boulderY: WORLD.BASE_Y - 10, boulderR: 11, boulderAngle: 0,
+  pose: "stand", walkPhase: 0, dust: [], time: 0,
+  quote: null, quoteN: 1, quoteStatus: null, quoteReveal: 0, quoteT: 0,
+  quoteOpened: false, quoteSaving: false, doneT: 0,
+  summitT: 0, gong: false,
+  fallT: 0, fallX: WORLD.SUMMIT_X,
+  rollT: 0, rollFrom: 0,
+  lock: 0, phase: 1,
+  heaveT: 0, breathT: 0, stepT: 0, slipT: 0, wasPush: false,
+  descentT: 0, epi: 0, endT: 0, descendPhase: "far", farX: WORLD.SUMMIT_X, wipe: 0, baseT: 0,
+  menuIndex: 0, menuOpen: false,
+  galleryList: [], galleryIndex: 0, galleryStatus: null, gallerySaving: false, galleryDone: 0,
+  loadingNote: null
+};
+
+/* ---------------- storage ---------------- */
+function saveState() {
+  game.save("sisyphus", {
+    summits: S.summits,
+    seen: S.seen,
+    deck: S.deck,
+    lastQuote: S.lastQuote
+  });
+}
+
+game.load("sisyphus").then(function (v) {
+  if (v && typeof v === "object") {
+    S.summits = Math.max(0, v.summits | 0);
+    S.seen = Array.isArray(v.seen) ? v.seen.filter(function (id) { return !!QS.byId[id]; }) : [];
+    S.deck = Array.isArray(v.deck) ? v.deck.filter(function (id) { return !!QS.byId[id]; }) : [];
+    S.lastQuote = QS.byId[v.lastQuote] ? v.lastQuote : null;
+  }
+  S.loaded = true;
+}).catch(function () { S.loaded = true; });
+
+/* ---------------- positions and camera ---------------- */
+function updatePositions() {
+  S.playerX = WORLD.pathX(S.p);
+  S.playerY = WORLD.pathY(S.playerX);
+  var bp = Math.min(1, S.p + 0.022);
+  S.boulderX = WORLD.pathX(bp);
+  S.boulderY = WORLD.pathY(S.boulderX) - S.boulderR + 1;
+}
+
+function updateDescentPositions() {
+  S.playerX = WORLD.pathX(S.p);
+  S.playerY = WORLD.pathY(S.playerX);
+  S.boulderX = WORLD.pathX(0.02);
+  S.boulderY = WORLD.pathY(S.boulderX) - S.boulderR + 1;
+}
+
+function resetRun(newLoop) {
+  S.p = 0; S.idle = 0; S.rollT = 0; S.rollFrom = 0;
+  S.quote = null; S.quoteStatus = null; S.quoteReveal = 0; S.quoteT = 0;
+  S.quoteOpened = false; S.quoteSaving = false; S.doneT = 0;
+  S.summitT = 0; S.gong = false; S.fallT = 0;
+  S.descentT = 0; S.epi = 0; S.endT = 0; S.descendPhase = "far"; S.farX = WORLD.SUMMIT_X; S.wipe = 0; S.baseT = 0;
+  S.heaveT = 0; S.breathT = 0; S.stepT = 0; S.slipT = 0;
+  S.wasPush = false; S.lock = 0.28; S.phase = 1;
+  S.dust = [];
+  S.walkPhase = 0;
+  S.boulderAngle = 0;
+  if (newLoop || !S.weather) S.weather = WORLD.pickWeather();
+  updatePositions();
+  S.pose = "stand";
+  S.cam = WORLD.makeCamera();
+  WORLD.follow(S.cam, S.playerX, S.playerY, 1, true);
+}
+
+/* ---------------- ambience ---------------- */
+function setAmbience(level) {
+  var name = S.weather === "rain" ? "rain" : "wind";
+  game.ambience(name, level == null ? 0.28 : level);
+}
+
+/* ---------------- notes ---------------- */
+function appendNote(q, n, done) {
+  if (!PAD.notes || !PAD.notes.append) { done("denied"); return; }
+  try {
+    var p = PAD.notes.append("幸福手册", QS.noteText(q, n));
+    if (p && p.then) {
+      p.then(function (r) { done(r === "saved" ? "saved" : "denied"); })
+        .catch(function () { done("denied"); });
+    } else done("denied");
+  } catch (e) { done("denied"); }
+}
+
+/* ---------------- title ---------------- */
+game.scene("title", {
+  enter: function () {
+    S.mode = "title";
+    resetRun(false);
+    S.pose = "look";
+    setAmbience(0.18);
+  },
+  update: function () {
+    S.time = game.time;
+    if (game.pressed("start")) { game.say(aboutPages(), { name: T({ zh: "关于", en: "About" }) }); return; }
+    if (!S.loaded) return;
+    if (game.pressed("a") || game.pointer.pressed) {
+      SFX.click(game);
+      game.go("climb", { reset: true, newLoop: false });
+    }
+  },
+  draw: function (g) {
+    S.time = game.time;
+    ART.drawWorld(g, S);
+    g.text("西西弗斯", 80, 22, { align: "center", color: 0 });
+    g.text("SISYPHUS", 80, 38, { align: "center", color: 1 });
+    g.line(58, 54, 102, 54, 1);
+    g.rect(8, 118, 144, 52, 3);
+    g.frame(8, 118, 144, 52, 0);
+    g.text(T({ zh: "按住 A / B 或屏幕", en: "HOLD A / B OR SCREEN" }), 80, 125, { align: "center", color: 0 });
+    g.text(T({ zh: "把石头推上去", en: "PUSH THE STONE UP" }), 80, 139, { align: "center", color: 1 });
+    g.text(S.loaded ? T({ zh: "A / 触摸 开始", en: "A / TAP TO BEGIN" }) : "…", 80, 157, { align: "center", color: 0 });
+  }
+});
+
+/* ---------------- climb ---------------- */
+game.scene("climb", {
+  enter: function (args) {
+    if (args && args.reset) resetRun(!!args.newLoop);
+    S.mode = "climb";
+    S.phase = 1;
+    S.pose = "stand";
+    S.quoteOpened = false;
+    S.wasPush = false;
+    game.music(MUSIC.ascent1);
+    setAmbience(0.22);
+  },
+  update: function (dt) {
+    S.time = game.time;
+    if (S.lock > 0) S.lock -= dt;
+
+    var pushing = (game.btn("a") || game.btn("b") || game.pointer.down) && S.lock <= 0;
+    if (!S.wasPush && pushing) {
+      S.heaveT = 0.06; S.stepT = 0.25; S.idle = 0;
+    }
+    S.wasPush = pushing;
+
+    if (pushing) {
+      S.idle = 0;
+      var speed = 0.0175 * (1 - 0.30 * S.p);
+      S.p += speed * dt;
+      S.boulderAngle += speed * dt * 31;
+      S.walkPhase += dt * 6.2;
+      S.pose = Math.sin(S.time * 3.2) > 0.72 ? "strain" : "push";
+
+      S.heaveT -= dt;
+      if (S.heaveT <= 0) {
+        SFX.heave(game, S.p < 0.08);
+        ART.spawnDust(S, S.boulderX - S.boulderR + 2, S.boulderY + S.boulderR - 2, 3, 8);
+        game.shake(1, 0.07);
+        S.heaveT = 2.7 + Math.random() * 2.2;
+      }
+      S.breathT -= dt;
+      if (S.breathT <= 0) { SFX.breath(game); S.breathT = 1.5 + Math.random() * 1.1; }
+      S.stepT -= dt;
+      if (S.stepT <= 0) {
+        SFX.step(game);
+        ART.spawnDust(S, S.playerX, S.playerY - 1, 1, 3);
+        S.stepT = 0.62 + Math.random() * 0.18;
+      }
+    } else {
+      S.idle += dt;
+      if (S.idle > 0.95 && S.p > 0) {
+        var slide = 0.0024 + Math.max(0, S.idle - 0.95) * 0.0022;
+        S.p -= slide * dt;
+        S.boulderAngle -= slide * dt * 31;
+        S.pose = S.idle > 1.55 ? "slip" : "strain";
+        if (S.idle > 1.9) {
+          S.slipT -= dt;
+          if (S.slipT <= 0) {
+            SFX.slip(game);
+            ART.spawnDust(S, S.boulderX - S.boulderR + 2, S.boulderY + S.boulderR - 2, 2, 5);
+            S.slipT = 0.54;
+          }
+        }
+      } else {
+        S.pose = "stand";
+      }
+      if (S.p <= 0) { S.p = 0; S.pose = "stand"; }
+      else if (S.idle > 8.5) { startRollback(); return; }
+    }
+
+    if (S.p >= 0.972) { startSummit(); return; }
+    if (S.p < 0) S.p = 0;
+    if (S.p > 0.98) S.p = 0.98;
+    updatePositions();
+    WORLD.follow(S.cam, S.playerX, S.playerY, dt);
+    ART.updateDust(S, dt);
+
+    if (S.phase === 1 && S.p > 0.55) {
+      S.phase = 2;
+      game.music(MUSIC.ascent2);
+      setAmbience(0.40);
+    }
+  },
+  draw: function (g) {
+    S.time = game.time;
+    ART.drawWorld(g, S);
+  }
+});
+
+/* ---------------- rollback ---------------- */
+function startRollback() {
+  if (S.mode !== "climb") return;
+  S.mode = "rollback";
+  S.rollT = 0;
+  S.rollFrom = S.p;
+  S.pose = "slip";
+  S.wasPush = false;
+  SFX.rumble(game);
+  game.musicStop();
+  setAmbience(0.45);
+  game.shake(2, 0.55);
+  game.go("rollback", {}, { fade: false });
+}
+
+game.scene("rollback", {
+  update: function (dt) {
+    S.time = game.time;
+    S.rollT += dt;
+    S.p = Math.max(0, S.rollFrom - S.rollT * 0.55);
+    updatePositions();
+    WORLD.follow(S.cam, S.playerX, S.playerY, dt * 3);
+    if (S.rollT < 0.8) ART.spawnDust(S, S.boulderX - S.boulderR + 2, S.boulderY + S.boulderR - 2, 1, 6);
+    ART.updateDust(S, dt);
+    S.pose = "slip";
+    if (S.p <= 0 && S.rollT > 1.0) {
+      S.mode = "climb";
+      S.p = 0;
+      S.idle = 0;
+      S.phase = 1;
+      S.lock = 0.9;
+      S.pose = "stand";
+      S.wasPush = false;
+      updatePositions();
+      game.music(MUSIC.ascent1);
+      setAmbience(0.22);
+      SFX.scrape(game);
+      game.go("climb", { reset: false }, { fade: false });
+    }
+  },
+  draw: function (g) {
+    S.time = game.time;
+    ART.drawWorld(g, S);
+  }
+});
+
+/* ---------------- summit ---------------- */
+function startSummit() {
+  S.mode = "summit";
+  S.p = 0.98;
+  S.summitT = 0;
+  S.gong = false;
+  S.quoteOpened = false;
+  S.pose = "look";
+  S.wasPush = false;
+  updatePositions();
+  S.boulderX = WORLD.SUMMIT_X;
+  S.boulderY = WORLD.pathY(S.boulderX) - S.boulderR + 1;
+  game.musicStop();
+  setAmbience(0.50);
+  SFX.scrape(game);
+  game.go("summit", {}, { fade: false });
+}
+
+game.scene("summit", {
+  enter: function () { S.mode = "summit"; },
+  update: function (dt) {
+    S.time = game.time;
+    S.summitT += dt;
+    S.boulderAngle = Math.sin(S.summitT * 1.7) * 0.05;
+    S.pose = S.summitT < 0.7 ? "look" : "stand";
+    WORLD.follow(S.cam, S.boulderX - 6, S.boulderY, dt);
+    if (!S.gong && S.summitT > 0.9) { S.gong = true; SFX.gong(game); }
+    if (!S.quoteOpened && S.summitT > 1.65) {
+      S.quoteOpened = true;
+      openQuote();
+    }
+  },
+  draw: function (g) {
+    S.time = game.time;
+    ART.drawWorld(g, S);
+  }
+});
+
+function openQuote() {
+  var n = S.summits + 1;
+  var q = QS.next(S);
+  S.summits = n;
+  if (S.seen.indexOf(q.id) < 0) S.seen.push(q.id);
+  S.quote = q;
+  S.quoteN = n;
+  saveState();
+  game.push("quote", { q: q, n: n }).then(function () { startFall(); });
+}
+
+/* ---------------- quote card ---------------- */
+game.scene("quote", {
+  enter: function (args) {
+    S.quote = args.q;
+    S.quoteN = args.n;
+    S.quoteT = 0;
+    S.quoteReveal = 0;
+    S.quoteStatus = null;
+    S.quoteSaving = false;
+    S.doneT = 0;
+  },
+  update: function (dt) {
+    S.time = game.time;
+    S.quoteT += dt;
+    S.quoteReveal = Math.min(1, S.quoteReveal + dt / 0.5);
+    if (S.quoteSaving) return;
+    if (S.quoteStatus === "saved" || S.quoteStatus === "denied") {
+      S.doneT += dt;
+      if (S.doneT > 0.95 || game.pressed("a") || game.pressed("b")) game.pop(S.quoteStatus);
+      return;
+    }
+    if (S.quoteT < 0.72) return;
+    if (game.pressed("a")) {
+      S.quoteSaving = true;
+      S.quoteStatus = "saving";
+      appendNote(S.quote, S.quoteN, function (r) {
+        S.quoteStatus = r;
+        S.quoteSaving = false;
+        S.doneT = 0;
+        if (r === "saved") SFX.chime(game); else SFX.denied(game);
+      });
+    } else if (game.pressed("b")) {
+      game.pop("skip");
+    }
+  },
+  draw: function (g) {
+    S.time = game.time;
+    ART.card(g, S.quote, "山顶", "第 " + S.quoteN + " 次", S.quoteReveal, S.quoteStatus, "A 记下    B 让它过去");
+  }
+});
+
+/* ---------------- the fall and the walk down ---------------- */
+function startFall() {
+  S.mode = "fall";
+  S.fallT = 0;
+  S.fallX = WORLD.SUMMIT_X;
+  S.pose = "look";
+  S.quoteStatus = null;
+  SFX.rumble(game);
+  game.music(MUSIC.descent);
+  setAmbience(0.40);
+  game.go("fall", {}, { fade: false });
+}
+
+game.scene("fall", {
+  update: function (dt) {
+    S.time = game.time;
+    S.fallT += dt;
+    var t = Math.min(1, S.fallT / 1.9);
+    var e = 1 - (1 - t) * (1 - t);
+    var x = WORLD.SUMMIT_X + 104 * e;
+    S.boulderX = x;
+    S.boulderY = WORLD.farPathY(x) - S.boulderR + 1;
+    S.boulderAngle += dt * 6;
+    WORLD.follow(S.cam, WORLD.SUMMIT_X - 18, WORLD.SUMMIT_Y + 22, dt);
+    if (S.fallT > 2.2) game.go("descent", {}, { time: 0.35, to: 0 });
+  },
+  draw: function (g) {
+    S.time = game.time;
+    ART.drawWorld(g, S);
+  }
+});
+
+game.scene("descent", {
+  enter: function () {
+    S.mode = "descent";
+    S.descendPhase = "far";
+    S.farX = WORLD.SUMMIT_X;
+    S.wipe = 0; S.baseT = 0;
+    S.p = 1;
+    S.descentT = 0; S.epi = 0; S.endT = 0;
+    S.pose = "walk"; S.walkPhase = 0; S.wasPush = false;
+    S.dust = [];
+    S.playerX = S.farX;
+    S.playerY = WORLD.farPathY(S.farX);
+    S.boulderX = 1040;
+    S.boulderY = WORLD.farPathY(S.boulderX) - S.boulderR + 1;
+    S.cam = WORLD.makeCamera();
+    WORLD.follow(S.cam, S.playerX, S.playerY + 56, 1, true);
+    game.music(MUSIC.descent);
+    setAmbience(0.35);
+  },
+  update: function (dt) {
+    S.time = game.time;
+    S.descentT += dt;
+
+    if (S.descendPhase === "far") {
+      /* he follows the stone over the ridge and down the far side */
+      S.farX = Math.min(1000, S.farX + dt * 40);
+      S.playerX = S.farX;
+      S.playerY = WORLD.farPathY(S.farX);
+      S.walkPhase += dt * 7;
+      S.pose = "walk";
+      S.boulderX = 1040;
+      S.boulderY = WORLD.farPathY(S.boulderX) - S.boulderR + 1;
+      WORLD.follow(S.cam, S.playerX, S.playerY + 56, dt);
+      ART.updateDust(S, dt);
+      if (S.descentT > 1.3) S.epi = Math.min(1, S.epi + dt / 1.1);
+      if (S.farX >= 999.5) {
+        S.descendPhase = "cover";
+        S.wipe = 0;
+        S.epi = 0;
+      }
+    } else if (S.descendPhase === "cover") {
+      /* the camera goes around the mountain: a dither curtain from the far side to ours */
+      S.wipe = Math.min(1, S.wipe + dt / 0.55);
+      if (S.wipe >= 1) {
+        snapToBase();
+        S.descendPhase = "reveal";
+        S.wipe = 1;
+      }
+    } else if (S.descendPhase === "reveal") {
+      S.wipe = Math.max(0, S.wipe - dt / 0.55);
+      if (S.wipe <= 0) { S.descendPhase = "base"; S.baseT = 0; }
+    } else {
+      S.baseT += dt;
+      S.pose = S.baseT > 0.6 ? "look" : "stand";
+      if (S.baseT > 2.2) game.go("climb", { reset: true, newLoop: true }, { time: 0.5, to: 3 });
+    }
+  },
+  draw: function (g) {
+    S.time = game.time;
+    ART.drawWorld(g, S);
+    if (S.wipe > 0) ART.wipe(g, S.wipe, 0);
+    if (S.descendPhase === "base" && S.baseT > 0.45) {
+      g.text("Le rocher l'attend.", 80, 146, { align: "center", color: 3, shadow: 0 });
+      g.text("石头在山脚等他。", 80, 160, { align: "center", color: 3, shadow: 0 });
+    }
+  }
+});
+
+function snapToBase() {
+  S.p = 0;
+  S.playerX = WORLD.pathX(0);
+  S.playerY = WORLD.pathY(S.playerX);
+  S.boulderX = WORLD.pathX(0.02);
+  S.boulderY = WORLD.pathY(S.boulderX) - S.boulderR + 1;
+  S.cam = WORLD.makeCamera();
+  WORLD.follow(S.cam, S.playerX, S.playerY, 1, true);
+  S.pose = "stand";
+  S.walkPhase = 0;
+  S.epi = 0;
+  S.dust = [];
+}
+
+/* ---------------- menu and gallery ---------------- */
+function openMenu() {
+  if (S.mode === "fall" || S.mode === "quote") return;
+  SFX.click(game);
+  game.push("menu");
+}
+
+function menuItems() {
+  return [T({ zh: "继续", en: "Resume" }), T({ zh: "语录", en: "Lines" }), T({ zh: "关于", en: "About" })];
+}
+
+game.scene("menu", {
+  enter: function () { S.menuIndex = 0; S.menuOpen = true; },
+  exit: function () { S.menuOpen = false; },
+  update: function () {
+    S.time = game.time;
+    var items = menuItems();
+    if (game.pressed("up")) { S.menuIndex = (S.menuIndex + items.length - 1) % items.length; SFX.move(game); }
+    if (game.pressed("down")) { S.menuIndex = (S.menuIndex + 1) % items.length; SFX.move(game); }
+    if (game.pressed("b")) { SFX.click(game); game.pop(); return; }
+    if (game.pressed("a")) {
+      SFX.click(game);
+      if (S.menuIndex === 0) game.pop();
+      else if (S.menuIndex === 1) game.push("gallery");
+      else game.say(aboutPages(), { name: T({ zh: "关于", en: "About" }) });
+    }
+  },
+  draw: function (g) {
+    S.time = game.time;
+    var items = menuItems();
+    g.window(10, 46, 140, 88);
+    g.text(T({ zh: "暂停", en: "PAUSED" }), 80, 52, { align: "center", color: 1 });
+    for (var i = 0; i < items.length; i++) {
+      var y = 70 + i * 16;
+      if (i === S.menuIndex) {
+        g.rect(18, y - 1, 124, 14, 0);
+        g.text(items[i], 80, y, { align: "center", color: 3 });
+      } else g.text(items[i], 80, y, { align: "center", color: 0 });
+    }
+    g.text(T({ zh: "↑↓选 A确认 B返回", en: "UP/DN A OK B BACK" }), 80, 120, { align: "center", color: 1 });
+  }
+});
+
+game.scene("gallery", {
+  enter: function () {
+    S.galleryList = QS.seenList(S);
+    S.galleryIndex = 0;
+    S.galleryStatus = null;
+    S.gallerySaving = false;
+    S.galleryDone = 0;
+  },
+  update: function (dt) {
+    S.time = game.time;
+    if (S.gallerySaving) return;
+    if (S.galleryStatus === "saved" || S.galleryStatus === "denied") {
+      S.galleryDone += dt;
+      if (S.galleryDone > 0.8 || game.pressed("a") || game.pressed("b")) {
+        S.galleryStatus = null; S.galleryDone = 0;
+      }
+      return;
+    }
+    if (!S.galleryList.length) {
+      if (game.pressed("b") || game.pressed("start")) { SFX.click(game); game.pop(); }
+      return;
+    }
+    if (game.pressed("up")) { S.galleryIndex = (S.galleryIndex + S.galleryList.length - 1) % S.galleryList.length; SFX.move(game); }
+    if (game.pressed("down")) { S.galleryIndex = (S.galleryIndex + 1) % S.galleryList.length; SFX.move(game); }
+    if (game.pressed("b")) { SFX.click(game); game.pop(); return; }
+    if (game.pressed("a")) {
+      SFX.click(game);
+      S.gallerySaving = true;
+      S.galleryStatus = "saving";
+      appendNote(S.galleryList[S.galleryIndex], Math.max(1, S.summits), function (r) {
+        S.galleryStatus = r;
+        S.gallerySaving = false;
+        S.galleryDone = 0;
+        if (r === "saved") SFX.chime(game); else SFX.denied(game);
+      });
+    }
+  },
+  draw: function (g) {
+    S.time = game.time;
+    if (!S.galleryList.length) {
+      g.clear(3);
+      g.frame(3, 3, 154, 172, 0);
+      g.text("幸福手册", 12, 10, { color: 1 });
+      g.line(12, 27, 147, 27, 1);
+      g.text(T({ zh: "还没有语录。", en: "No lines yet." }), 13, 44, { color: 0 });
+      g.text(T({ zh: "去山顶。", en: "Go to the summit." }), 13, 60, { color: 1 });
+      g.text(T({ zh: "B 返回", en: "B BACK" }), 13, 160, { color: 0 });
+      return;
+    }
+    var q = S.galleryList[S.galleryIndex];
+    ART.card(g, q, "幸福手册", (S.galleryIndex + 1) + " / " + S.galleryList.length, 1, S.galleryStatus, "A 写入    B 返回");
+  }
+});
+
+/* ---------------- about ---------------- */
+function aboutPages() {
+  return [
+    T({ zh: "西西弗斯 / Sisyphus", en: "Sisyphus / 西西弗斯" }),
+    T({ zh: "推石上山。它滚下去。再推。", en: "Push the stone. It falls. Push again." }),
+    T({ zh: "灵感来自加缪《西西弗斯神话》。中英译文为本作自译。",
+      en: "After Albert Camus, Le Mythe de Sisyphe. Translations for this work." }),
+    T({ zh: "按住 A / B 或屏幕推石。停太久，石头会滚回去。",
+      en: "Hold A / B or the screen. Rest too long and the stone rolls back." }),
+    T({ zh: "山顶的语录可以写入记事本「幸福手册」。",
+      en: "At the summit, a line can be written into Notes, in 'A Manual of Happiness'." }),
+    T({ zh: "没有终点。", en: "There is no end." })
+  ];
+}
+
+/* The first scene. */
+game.start("title");
+</script>
+</body>
+</html>
