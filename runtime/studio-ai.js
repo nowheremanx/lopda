@@ -150,7 +150,7 @@ function patternLine(song,p){
   }
   for(i=0;i<c.length;i++){
     n=c[i];
-    var cn=S.chordName(song,n.deg);
+    var cn=S.chordName(song,n.deg,n.q,n.acc);
     names.push(cn ? cn.name : "deg"+n.deg);
     st=stepOf(n);
     if(!seen["$"+st]){ seen["$"+st]=true; steps.push(st); }
@@ -176,6 +176,8 @@ function overview(song){
     else if(typeof tr.vol==="number" && tr.vol!==1) mix.push(tr.id+" vol "+tr.vol);
   }
   if(mix.length) lines.push("Mix: "+mix.join(", "));
+  /* the sounds (12.20): every track's voice, so the model can name what it hears */
+  if(S.voiceOf) lines.push("Voices: bass "+S.voiceOf(song,"bass")+", chords "+S.voiceOf(song,"chords")+", melody "+S.voiceOf(song,"melody"));
   lines.push("Chain ("+chain.length+"): "+chainText(chain));
   for(i=0;i<S.PATTERNS_MAX;i++){
     if(!used["$"+i] && !S.hasNotes(song,i,"drums") && !S.hasNotes(song,i,"bass") &&
@@ -189,7 +191,8 @@ function noteText(list){
   var out=[], i, n;
   for(i=0;i<list.length;i++){
     n=list[i];
-    out.push(n.vel===0 ? stepOf(n)+":rest" : stepOf(n)+":deg"+n.deg+"@"+velOf(n.vel));
+    out.push(n.vel===0 ? stepOf(n)+":rest" : stepOf(n)+":deg"+n.deg+(n.acc===1?"#":n.acc===-1?"b":"")+"@"+velOf(n.vel)+
+      (n.orn ? " "+n.orn : "")+(n.gate && n.gate<1 ? " gate"+n.gate : ""));
   }
   return out.length ? out.join(" ") : "-";
 }
@@ -199,7 +202,7 @@ function chordText(song,list){
   for(i=0;i<list.length;i++){
     n=list[i];
     if(n.vel===0){ out.push(stepOf(n)+":rest"); continue; }
-    cn=S.chordName(song,n.deg);
+    cn=S.chordName(song,n.deg,n.q,n.acc);
     out.push(stepOf(n)+":"+(cn ? cn.roman+"("+cn.name+")" : "deg"+n.deg));
   }
   return out.length ? out.join(" ") : "-";

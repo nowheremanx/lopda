@@ -34,7 +34,7 @@ if (!CMD) {
 const ctx = { console, Math, Date, JSON, Promise, setTimeout, clearTimeout };
 ctx.window = ctx;
 vm.createContext(ctx);
-for (const f of ["studio-song.js", "studio-edit.js", "studio-styles.js", "studio-tools.js", "studio-prompts.js", "studio-ai.js", "studio-harness.js"]) {
+for (const f of ["studio-song.js", "studio-edit.js", "studio-styles.js", "studio-tools.js", "studio-theory.js", "studio-critic.js", "studio-prompts.js", "studio-ai.js", "studio-harness.js"]) {
   vm.runInContext(fs.readFileSync(path.join(root, "runtime", f), "utf8"), ctx, { filename: "runtime/" + f });
 }
 const S = ctx.LopdaSong, H = ctx.LopdaStudioHarness;
@@ -105,6 +105,8 @@ async function scenario(kind, text, i) {
   if (OUT) {
     fs.mkdirSync(OUT, { recursive: true });
     fs.writeFileSync(path.join(OUT, `${kind}-${rows.length}.json`), JSON.stringify({ row, stages, log }, null, 1));
+    /* the tape itself, to open in Tape4 (file menu) or turn into MIDI with runtime/midi.js */
+    if (res && res.song) fs.writeFileSync(path.join(OUT, `${kind}-${rows.length}.tape.json`), JSON.stringify(res.song, null, 1));
   }
 }
 

@@ -21,7 +21,7 @@ var PARENT=S.PARENT || {"minor-penta":"minor","major-penta":"major","minor":"min
 var ALL_TRACKS=["drums","bass","chords","melody"];
 var CHANGES=["same","sparse","no-melody","lift"];
 var CHORD_RHYTHMS=["hold","stabs","pulse"];
-var TOOLS=["ops","groove","chords","bass","ghost","fill","melody","copy","chain","set","mix"];
+var TOOLS=["ops","groove","chords","bass","ghost","fill","stop","melody","copy","chain","set","mix"];
 
 function plain(x){ return !!x && typeof x==="object" && Object.prototype.toString.call(x)==="[object Object]"; }
 function int(n){ return typeof n==="number" && isFinite(n) && Math.floor(n)===n; }
@@ -159,12 +159,14 @@ function customGroove(steps){
 function toolGroove(song,call){
   var p=patternArg(call);
   if(p===null) return patternError();
+  /* no drums at all: a solo piece, a chorale, a fugue (12.20.11) */
+  if(call.style==="none") return {ops:[{op:"clearTrack",pattern:p,track:"drums"}]};
   var g=ST.GROOVES[call.style];
   if(call.steps!=null && call.style==null){
     g=customGroove(call.steps);
     if(typeof g==="string") return err(g);
   }
-  if(!g) return failArg("groove","unknown style '"+String(call.style==null?"":call.style)+"'; use one of "+ids(ST.GROOVES)+", or give steps");
+  if(!g) return failArg("groove","unknown style '"+String(call.style==null?"":call.style)+"'; use one of "+ids(ST.GROOVES)+", none, or give steps");
   var energy=typeof call.energy==="undefined" ? 1 : call.energy;
   if(!int(energy) || energy<0 || energy>2) return failArg("energy","use 0, 1 or 2");
   var hits=energyHits(g,energy);
@@ -175,41 +177,95 @@ function toolGroove(song,call){
 function toolChords(song,call){
   var p=patternArg(call);
   if(p===null) return patternError();
-  var roots=call.roots, i, pos;
+  var roots=call.roots, i, pos, specs=[], spec;
   if(!Array.isArray(roots) || roots.length<1 || roots.length>4)
-    return failArg("roots","give 1-4 chord roots, each 0-5");
-  for(i=0;i<roots.length;i++) if(!int(roots[i]) || roots[i]<0 || roots[i]>5)
-    return failArg("roots","each chord root must be 0-5");
+    return failArg("roots","give 1-4 chord roots, each 0-5 or {root, q, acc}");
+  for(i=0;i<roots.length;i++){
+    spec=chordRoot(roots[i]);
+    if(spec===null) return failArg("roots","each chord root must be 0-5, or {root:0-5, q:'maj', acc:-1}");
+    if(spec.error==="q") return failArg("roots","q '"+String(roots[i].q)+"' must be one of "+(S.QUALITY_ORDER||[]).join(", "));
+    if(spec.error==="acc") return failArg("roots","acc must be -1 or 1");
+    specs.push(spec);
+  }
   var rhythm=call.rhythm==null ? "hold" : call.rhythm;
   if(CHORD_RHYTHMS.indexOf(rhythm)<0) return failArg("rhythm","use one of "+CHORD_RHYTHMS.join(", "));
   var ops=[{op:"clearTrack",pattern:p,track:"chords"}];
   /* A chord rings until the next one, so a short strum is the chord followed by a rest: "stabs" is the guitar's
      chick on beats 2 and 4 (the bass's boom fills 1 and 3), "pulse" strikes every beat. One root per bar. */
   if(rhythm!=="hold"){
-    if(roots.length!==1) return failArg("rhythm",rhythm+" takes one chord root for the bar");
+    if(specs.length!==1) return failArg("rhythm",rhythm+" takes one chord root for the bar");
     pos=rhythm==="stabs" ? [4,12] : [0,4,8,12];
     for(i=0;i<pos.length;i++){
-      ops.push({op:"setNote",pattern:p,track:"chords",step:pos[i],deg:roots[0],vel:i%2 ? 0.6 : 0.68});
+      ops.push(chordOp(p,pos[i],specs[0],i%2 ? 0.6 : 0.68));
       ops.push({op:"setRest",pattern:p,track:"chords",step:pos[i]+2});
     }
     return {ops:ops};
   }
-  pos=roots.length===1 ? [0] : roots.length===2 ? [0,8] : roots.length===3 ? [0,8,12] : [0,4,8,12];
-  for(i=0;i<roots.length;i++) ops.push({op:"setNote",pattern:p,track:"chords",step:pos[i],deg:roots[i],vel:0.65});
+  pos=specs.length===1 ? [0] : specs.length===2 ? [0,8] : specs.length===3 ? [0,8,12] : [0,4,8,12];
+  for(i=0;i<specs.length;i++) ops.push(chordOp(p,pos[i],specs[i],0.65));
   return {ops:ops};
+}
+
+/* A chord root as the tool writes it: a bare degree 0-5 keeps the old behaviour, or {root, q, acc} adds a quality and
+   a semitone shift (12.20.5). The caller turns the error marker into a sentence that lists the qualities. */
+function chordRoot(entry){
+  var out={root:0};
+  if(int(entry)){
+    if(entry<0 || entry>5) return null;
+    out.root=entry;
+    return out;
+  }
+  if(!plain(entry) || !int(entry.root) || entry.root<0 || entry.root>5) return null;
+  out.root=entry.root;
+  if(entry.q!=null){
+    if(typeof entry.q!=="string" || (S.QUALITY_ORDER||[]).indexOf(entry.q)<0) return {error:"q"};
+    out.q=entry.q;
+  }
+  if(entry.acc!=null){
+    if(entry.acc!==-1 && entry.acc!==1) return {error:"acc"};
+    out.acc=entry.acc;
+  }
+  return out;
+}
+
+function chordOp(p,step,spec,vel){
+  var op={op:"setNote",pattern:p,track:"chords",step:step,deg:spec.root,vel:vel};
+  if(spec.q!=null) op.q=spec.q;
+  if(spec.acc!=null) op.acc=spec.acc;
+  return op;
 }
 
 function toolBass(song,call){
   var p=patternArg(call);
   if(p===null) return patternError();
   var rhythm=ST.BASS[call.rhythm];
-  if(!rhythm) return failArg("bass","unknown rhythm '"+String(call.rhythm==null?"":call.rhythm)+"'; use one of "+ids(ST.BASS));
+  if(call.steps!=null && call.rhythm==null){
+    rhythm=customBass(call.steps);
+    if(typeof rhythm==="string") return err(rhythm);
+  }
+  if(!rhythm) return failArg("bass","unknown rhythm '"+String(call.rhythm==null?"":call.rhythm)+"'; use one of "+ids(ST.BASS)+", or give steps");
   var chords=chordList(song,p), steps=S.SCALES[song.scale] ? S.SCALES[song.scale].length : 7;
   var ops=[{op:"clearTrack",pattern:p,track:"bass"}], i, entry, step, at, idx, root, deg, nextRoot;
   for(i=0;i<rhythm.length;i++){
     entry=rhythm[i]; step=entry[0]; at=step*S.STEP; idx=chordAt(chords,step);
     /* before the bar's first chord (a strum on beat 2) the bass already plays that chord's root */
     root=idx>=0 ? chords[idx].deg : chords.length ? chords[0].deg : 0;
+    /* a chord with a type or a shifted root (12.20.5) is followed by pitch, so a bVII gets its own root and a m7b5 its
+       flat fifth; a plain chord keeps the scale-degree path it always had */
+    var ch=idx>=0 ? chords[idx] : chords.length ? chords[0] : null;
+    if(ch && (ch.q!=null || ch.acc!=null) || entry[2]==="third"){
+      var spec=chordPitches(song,ch||{deg:0}), pick=entry[2]==="fifth" ? spec.fifth : entry[2]==="third" ? spec.third : spec.root;
+      var g=pcToGrid(song,pick,"bass");
+      if(entry[2]==="octave") g.deg+=steps;
+      if(entry[2]==="approach"){
+        var nx=idx>=0 && idx+1<chords.length ? chords[idx+1] : null;
+        if(nx){ g=pcToGrid(song,chordPitches(song,nx).root,"bass"); g.deg-=1; g.acc=0; }
+      }
+      var bop={op:"setNote",pattern:p,track:"bass",step:step,deg:clamp(g.deg,-3,9),vel:entry[1]};
+      if(g.acc) bop.acc=g.acc;
+      ops.push(bop);
+      continue;
+    }
     deg=rootDegree(song,root);
     /* the chord's own fifth, found by pitch like the root: "+4 degrees" is a sixth on a five-note grid */
     if(entry[2]==="fifth") deg=fifthDegree(song,root,deg);
@@ -224,6 +280,48 @@ function toolBass(song,call){
     ops.push({op:"setNote",pattern:p,track:"bass",step:step,deg:deg,vel:entry[1]});
   }
   return {ops:ops};
+}
+
+/* A bass rhythm the model writes itself: one bar of [step, velocity, move], moves as in studio-styles.js plus "third". */
+var MOVES=["root","fifth","octave","approach","third"];
+function customBass(list){
+  var out=[], i, e, seen={};
+  if(!Array.isArray(list) || !list.length || list.length>16) return "bass: give 1-16 [step, velocity, move] entries";
+  for(i=0;i<list.length;i++){
+    e=list[i];
+    if(!Array.isArray(e) || !int(e[0]) || e[0]<0 || e[0]>=S.STEPS) return "bass: steps must be 0-15";
+    if(seen["$"+e[0]]) return "bass: step "+e[0]+" is used twice";
+    seen["$"+e[0]]=true;
+    if(e.length>1 && (!num(e[1]) || e[1]<0.1 || e[1]>1)) return "bass: velocities must be 0.1..1";
+    if(e.length>2 && MOVES.indexOf(e[2])<0) return "bass: move must be one of "+MOVES.join(", ");
+    out.push([e[0], e.length>1 ? e[1] : 0.8, e.length>2 ? e[2] : "root"]);
+  }
+  out.sort(function(a,b){ return a[0]-b[0]; });
+  return out;
+}
+
+/* The pitch classes of a stored chord's root, third and fifth, whatever its type: the automatic voicing takes them
+   from the parent scale, a typed chord from its intervals. */
+function chordPitches(song,ch){
+  var notes=S.chordNotes(song,ch.deg,ch.q,ch.acc)||[0,4,7], root=notes[0], third=notes[1], fifth=root+7, i, d;
+  for(i=1;i<notes.length;i++){
+    d=notes[i]-root;
+    if(d===6 || d===7 || d===8){ fifth=notes[i]; break; }
+  }
+  if(S.QUALITIES && ch.q && S.QUALITIES[ch.q] && S.QUALITIES[ch.q].length<3) third=root+4;
+  return {root:pc(root), third:pc(third), fifth:pc(fifth)};
+}
+function pc(m){ return ((m%12)+12)%12; }
+
+/* A pitch class as the grid writes it: the scale degree with that pitch, or the one just below it with acc +1.
+   The degree sits in the track's own octave (bass and melody both count from the tonic). */
+function pcToGrid(song,target,track){
+  var steps=S.SCALES[song.scale]||S.SCALES.major, key=song.key||0, i, best=0, rel=pc(target-key);
+  for(i=0;i<steps.length;i++){
+    if(steps[i]===rel) return {deg:i, acc:0};
+    if(steps[i]<rel) best=i;
+  }
+  return {deg:best, acc:rel-steps[best]===1 ? 1 : 0};
 }
 
 function toolGhost(song,call){
@@ -257,6 +355,35 @@ function fillOps(song,p){
   return ops;
 }
 
+/* A stop: the band plays to beat 3, hits it together, and leaves two beats of silence before the next section
+   (owner, 2026-10-31: "no sudden stops at all"). Every track's notes after step 8 go; a rest at step 10 cuts what
+   would ring on. */
+function stopOps(song,p){
+  var ops=[], tracks=["drums","bass","chords","melody"], i, j, list, n, st, rest={}, sounding={};
+  for(i=0;i<tracks.length;i++){
+    list=notesOf(song,p,tracks[i]);
+    for(j=0;j<list.length;j++){
+      n=list[j];
+      if(!n) continue;
+      st=Math.floor(n.t/S.STEP);
+      if(st<=8 && n.vel>0) sounding[tracks[i]]=true;
+      if(st<=8) continue;
+      if(tracks[i]==="drums") ops.push({op:"setDrum",pattern:p,drum:n.key,step:st,on:false});
+      else ops.push({op:"removeNote",pattern:p,track:tracks[i],step:st});
+    }
+  }
+  ops.push({op:"setDrum",pattern:p,drum:"kick",step:8,on:true,vel:0.95});
+  ops.push({op:"setDrum",pattern:p,drum:"snare",step:8,on:true,vel:0.95});
+  for(i=1;i<tracks.length;i++) if(sounding[tracks[i]]) ops.push({op:"setRest",pattern:p,track:tracks[i],step:10});
+  return ops;
+}
+
+function toolStop(song,call){
+  var p=patternArg(call);
+  if(p===null) return patternError();
+  return {ops:stopOps(song,p)};
+}
+
 function toolFill(song,call){
   var p=patternArg(call);
   if(p===null) return patternError();
@@ -268,7 +395,7 @@ function toolMelody(song,call){
   if(p===null) return patternError();
   var notes=call.notes, ops=[{op:"clearTrack",pattern:p,track:"melody"}], used={}, i, n, step, deg, vel;
   if(!Array.isArray(notes) || notes.length>16)
-    return failArg("notes","give up to 16 [step, deg, vel] notes");
+    return failArg("notes","give up to 16 [step, deg, vel, acc, orn] notes");
   for(i=0;i<notes.length;i++){
     n=notes[i];
     if(!Array.isArray(n) || n.length<2) return failArg("notes","note "+i+" must be [step, deg, vel]");
@@ -278,7 +405,17 @@ function toolMelody(song,call){
     if(!int(deg) || deg<-5 || deg>12) return failArg("deg","note "+i+" must be -5..12");
     if(!num(vel) || vel<0 || vel>1) return failArg("vel","note "+i+" must be 0..1");
     used["$"+step]=true;
-    ops.push({op:"setNote",pattern:p,track:"melody",step:step,deg:deg,vel:vel});
+    var mop={op:"setNote",pattern:p,track:"melody",step:step,deg:deg,vel:vel};
+    /* [step, deg, vel, acc, orn]: a semitone off the scale and an ornament, both optional (12.20.5) */
+    if(n.length>3 && n[3]!=null && n[3]!==0){
+      if(n[3]!==1 && n[3]!==-1) return failArg("acc","note "+i+": acc must be -1, 0 or 1");
+      if(vel>0) mop.acc=n[3];
+    }
+    if(n.length>4 && n[4]!=null && n[4]!==""){
+      if(n[4]!=="slide" && n[4]!=="vib") return failArg("orn","note "+i+": orn must be slide or vib");
+      if(vel>0) mop.orn=n[4];
+    }
+    ops.push(mop);
   }
   return {ops:ops};
 }
@@ -365,7 +502,7 @@ function toolSet(song,call){
     ops.push({op:"setTape",value:call.tape}); any=true;
   }
   if(typeof call.kit!=="undefined"){
-    if(S.KITS.indexOf(call.kit)<0) return failArg("kit","use one of "+S.KITS.join(", "));
+    if(S.KIT_CHOICES.indexOf(call.kit)<0) return failArg("kit","use one of "+S.KIT_CHOICES.join(", "));
     ops.push({op:"setKit",value:call.kit}); any=true;
   }
   if(typeof call.name!=="undefined"){
@@ -373,7 +510,16 @@ function toolSet(song,call){
       return failArg("name","use a name of at most "+S.NAME_MAX+" characters");
     ops.push({op:"setName",value:call.name}); any=true;
   }
-  if(!any) return failArg("set","give at least one of bpm, key, scale, swing, tape, kit, name");
+  if(typeof call.voices!=="undefined"){
+    if(!plain(call.voices)) return failArg("voices","give {track: voice}");
+    for(var vt in call.voices){
+      if(!Object.prototype.hasOwnProperty.call(call.voices,vt)) continue;
+      if(!S.VOICE_CHOICES[vt] || S.VOICE_CHOICES[vt].indexOf(call.voices[vt])<0)
+        return failArg("voices",vt+": use one of "+(S.VOICE_CHOICES[vt]||[]).join(", ")+" (tracks bass, chords, melody)");
+      ops.push({op:"setVoice",track:vt,value:call.voices[vt]}); any=true;
+    }
+  }
+  if(!any) return failArg("set","give at least one of bpm, key, scale, swing, tape, kit, name, voices");
   return {ops:ops};
 }
 
@@ -406,6 +552,7 @@ function run(song,call){
     case "bass": return toolBass(song,call);
     case "ghost": return toolGhost(song,call);
     case "fill": return toolFill(song,call);
+    case "stop": return toolStop(song,call);
     case "melody": return toolMelody(song,call);
     case "copy": return toolCopy(song,call);
     case "chain": return toolChain(song,call);
@@ -458,5 +605,40 @@ function chordTones(song,root){
   return out;
 }
 
-window.LopdaStudioTools={CHORD_RHYTHMS:CHORD_RHYTHMS, run:run, rootDegree:rootDegree, chordTones:chordTones, TOOLS:TOOLS};
+/* The tones of any chord (with its type and shifted root) on the melody grid, as text the model reads: "4" is degree
+   4, "6#" is degree 6 raised a semitone. Near the chord's root, inside 0..9. */
+function chordToneText(song,spec){
+  var notes=S.chordNotes(song,spec.root,spec.q,spec.acc)||[], out=[], seen={}, i, g, n=(S.SCALES[song.scale]||[]).length||7, t;
+  for(i=0;i<notes.length;i++){
+    g=pcToGrid(song,notes[i],"melody");
+    if(g.deg<2 && i>0) g.deg+=n;
+    t=g.deg+(g.acc ? "#" : "");
+    if(seen[t]) continue;
+    seen[t]=true;
+    out.push(t);
+  }
+  return out;
+}
+
+/* The chord a bare degree means in a planned song (12.20.8): "triad" and "seventh" are the scale's own chord on that
+   degree (Am, F, E in harmonic minor; Am7, Fmaj7, E7), "rich" leaves it to the machine's automatic seventh-or-ninth
+   voicing. A folk tune voiced as ninths sounds like a lounge, which is why a plan names its chord style. */
+function diatonicQ(song,deg,style){
+  if(style==="rich") return null;
+  var parent=PARENT[song.scale]||song.scale, st=S.SCALES[parent];
+  if(!st) return null;
+  function at(d){ var n=st.length, q=Math.floor(d/n); return st[d-q*n]+12*q; }
+  var third=at(deg+2)-at(deg), fifth=at(deg+4)-at(deg), seventh=at(deg+6)-at(deg);
+  if(style==="seventh"){
+    if(third===4 && fifth===7) return seventh===11 ? "maj7" : "7";
+    if(third===3 && fifth===7) return "m7";
+    if(third===3 && fifth===6) return seventh===9 ? "dim7" : "m7b5";
+    return third===4 ? "aug" : "m7";
+  }
+  if(third===4) return fifth===8 ? "aug" : "maj";
+  return fifth===6 ? "dim" : "m";
+}
+
+window.LopdaStudioTools={diatonicQ:diatonicQ, CHORD_RHYTHMS:CHORD_RHYTHMS, MOVES:MOVES, run:run, rootDegree:rootDegree, chordTones:chordTones,
+  chordToneText:chordToneText, pcToGrid:pcToGrid, TOOLS:TOOLS};
 })();
