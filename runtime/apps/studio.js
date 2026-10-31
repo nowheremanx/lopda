@@ -1317,6 +1317,11 @@ function build(){
     this.value="";
     if(f) readWorkspace(f);
   });
+  $("studio-import-json").addEventListener("change",function(){
+    var f=this.files && this.files[0];
+    this.value="";
+    if(f) importJson(f);
+  });
   var keys=$("studio-keys");
   for(i=0;i<8;i++){
     (function(deg){
@@ -2305,6 +2310,7 @@ function renderSheet(){
     if(T.song && T.loaded) sheetRow(ful,tr("studio.export.json"),"JSON",function(){ exportJson(); });
     if(T.song && T.loaded) sheetRow(ful,tr("studio.export.midi"),"MIDI",function(){ exportMidi(); });
     if(T.song && T.loaded) sheetRow(ful,tr("studio.export"),"WAV",function(){ exportWav(); });
+    if(T.loaded && T.metaOk) sheetRow(ful,tr("studio.import.json"),"JSON",function(){ $("studio-import-json").click(); });
     if(T.loaded) sheetRow(ful,tr("studio.workspace.export"),"ZIP",function(){ exportWorkspace(); });
     if(T.loaded) sheetRow(ful,tr("studio.workspace.import"),"ZIP",function(){ $("studio-import-file").click(); });
     sh.appendChild(ful);
@@ -3035,6 +3041,32 @@ function exportWorkspace(){
   },function(e){
     T.exporting=false;
     if(!(e && e.code==="declined")) toast(e && e.message==="unavailable" ? tr("studio.export.fail") : (LP.saveErr ? LP.saveErr(e) : tr("studio.export.fail")));
+  });
+}
+/* One tape back from its JSON export: the file goes through the same validate as storage, then becomes a new tape in the
+   folder being browsed (its own folder name belongs to the machine it came from), like 复制这一盘. Nothing on this machine
+   is replaced, so there is nothing to confirm. */
+var IMPORT_JSON_MAX=4*1024*1024;
+function importJson(file){
+  if(!file || !T.loaded || !T.metaOk) return;
+  if(!file.text || file.size>IMPORT_JSON_MAX){ toast(tr("studio.import.bad")); return; }
+  file.text().then(function(text){
+    var doc, got, song, id;
+    try{ doc=JSON.parse(text); }catch(e){ toast(tr("studio.import.bad")); return; }
+    got=SONGS.validate(doc);
+    if(!got.song){ toast(tr(got.error==="newer" ? "studio.import.newer" : "studio.import.bad")); return; }
+    song=got.song;
+    song.folder=T.projectFolder==="demo" ? "" : T.projectFolder;
+    delete song.template;          /* a demo copy from elsewhere is the user's own tape here */
+    flush();
+    id=LP.uid();
+    writeProject(id,song).then(function(ok){
+      if(!ok) return;
+      installSong(song,id,[]);
+      toast(tr("studio.import.done",{name:song.name||tr("studio.proj.unnamed")}));
+    });
+  },function(e){
+    toast(tr("common.readfail",{msg:String((e&&e.message)||e).slice(0,120)}));
   });
 }
 function readWorkspace(file){
