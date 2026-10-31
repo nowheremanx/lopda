@@ -152,7 +152,7 @@ test("skeleton: a too-short plan is sent back with the reason and then fixed", a
   assert.equal(S.validate(out.song).error, undefined);
   const retry = ask.seen[1].messages;
   assert.equal(retry[retry.length - 2].role, "assistant");
-  assert.match(retry[retry.length - 1].content, /That JSON was rejected: the song is \d+ s; add repeats so it is 100-200 s/);
+  assert.match(retry[retry.length - 1].content, /That JSON was rejected: the song is \d+ s; add sections so it is 75-150 s/);
 });
 
 test("skeleton: a motif of even eighths is sent back; a plan repeating a section four times is too", async () => {
