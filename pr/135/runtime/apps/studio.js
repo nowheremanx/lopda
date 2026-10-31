@@ -2053,7 +2053,7 @@ function paintAiProgress(){
 }
 function aiStage(st){
   var v=st.vars||{};
-  if(st.id==="card") T.aiCard=tr("studio.ai.card",{card:v.card,key:v.key,scale:tr("studio.scale."+v.scale),bpm:v.bpm});
+  if(st.id==="card") T.aiCard=tr(v.own ? "studio.ai.style" : "studio.ai.card",{card:v.card,key:v.key,scale:tr("studio.scale."+v.scale),bpm:v.bpm});
   T.aiStage=aiStageText(st);
   paintAiProgress();
 }
