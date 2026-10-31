@@ -145,7 +145,7 @@ test("errors: each bad argument is named, and short value lists are printed", ()
   assert.match(error({ tool: "nope" }), /unknown tool 'nope'/);
   assert.match(error({ tool: "ops", ops: "x" }), /^ops:/);
   assert.match(error({ tool: "ops", ops: Array(65).fill({ op: "setBpm", value: 90 }) }), /^ops:/);
-  assert.match(error({ tool: "groove", pattern: 16, style: "lofi-a" }), /^pattern:/);
+  assert.match(error({ tool: "groove", pattern: 64, style: "lofi-a" }), /^pattern:/);
   assert.match(error({ tool: "groove", pattern: 0, style: "jazzz" }), /^groove:.*jazzz.*lofi-a/);
   assert.match(error({ tool: "groove", pattern: 0, style: "lofi-a", energy: 3 }), /^energy:/);
   assert.match(error({ tool: "chords", pattern: 0, roots: [] }), /^roots:/);
@@ -157,10 +157,10 @@ test("errors: each bad argument is named, and short value lists are printed", ()
   assert.match(error({ tool: "melody", pattern: 0, notes: [[0, 13]] }), /^deg:/);
   assert.match(error({ tool: "melody", pattern: 0, notes: Array(17).fill([0, 0]) }), /^notes:/);
   assert.match(error({ tool: "copy", from: 0, to: 1, change: "fast" }), /^change:.*fast.*same/);
-  assert.match(error({ tool: "copy", from: 16, to: 1 }), /^from:/);
+  assert.match(error({ tool: "copy", from: 64, to: 1 }), /^from:/);
   assert.match(error({ tool: "copy", from: 0, to: 0 }), /^to:/);
   assert.match(error({ tool: "chain", song: [] }), /^song:/);
-  assert.match(error({ tool: "chain", song: [16] }), /^song:/);
+  assert.match(error({ tool: "chain", song: [64] }), /^song:/);
   assert.match(error({ tool: "set" }), /^set:/);
   assert.match(error({ tool: "set", scale: "blues" }), /^scale:.*blues.*major/);
   assert.match(error({ tool: "set", bpm: 200 }), /^bpm:/);

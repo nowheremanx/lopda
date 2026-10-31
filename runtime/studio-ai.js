@@ -18,7 +18,12 @@ var S=window.LopdaSong;
 
 function plain(x){ return !!x && typeof x==="object" && Object.prototype.toString.call(x)==="[object Object]"; }
 function int(n){ return typeof n==="number" && isFinite(n) && Math.floor(n)===n; }
-function letter(i){ return "ABCDEFGHIJKLMNOP".charAt(i); }
+/* The model addresses patterns by number (0-15 in the prompts), so a name that is not the old letter carries its
+   number: "C2 (34)". A tape of plain A-P patterns reads exactly as before (12.22). */
+function label(song,i){
+  var name=S.patName(song,i);
+  return i<16 && name===S.defaultPatName(i) ? name : name+" ("+i+")";
+}
 function stepOf(note){ return Math.round(note.t/S.STEP); }
 function velOf(v){ return String(Math.round(v*100)/100); }
 
@@ -77,7 +82,7 @@ function extract(text){
 }
 
 /* Runs of the chain, then repeated blocks of runs: "A A B B C D C D" reads "A x2, B x2, (C D) x2". */
-function chainText(chain){
+function chainText(chain,song){
   var runs=[], tokens=[], i, j, k, reps, same, block, again=true;
   for(i=0;i<chain.length;){
     j=i+1;
@@ -85,7 +90,7 @@ function chainText(chain){
     runs.push({p:chain[i], n:j-i});
     i=j;
   }
-  for(i=0;i<runs.length;i++) tokens.push(letter(runs[i].p)+(runs[i].n>1?" x"+runs[i].n:""));
+  for(i=0;i<runs.length;i++) tokens.push(label(song,runs[i].p)+(runs[i].n>1?" x"+runs[i].n:""));
   while(again){
     again=false;
     for(i=0;i<tokens.length && !again;i++){
@@ -160,7 +165,7 @@ function patternLine(song,p){
   var chords=names.length ? "chords "+names.join(" ")+" (steps "+steps.join(", ")+")" : "chords -";
   var range=degreeRange(m);
   var melody=m.length ? "melody "+m.length+" note"+(m.length===1?"":"s")+(range?" degrees "+range:"") : "melody -";
-  return letter(p)+": "+drums+", "+bass+", "+chords+", "+melody;
+  return label(song,p)+": "+drums+", "+bass+", "+chords+", "+melody;
 }
 
 function overview(song){
@@ -178,7 +183,7 @@ function overview(song){
   if(mix.length) lines.push("Mix: "+mix.join(", "));
   /* the sounds (12.20): every track's voice, so the model can name what it hears */
   if(S.voiceOf) lines.push("Voices: bass "+S.voiceOf(song,"bass")+", chords "+S.voiceOf(song,"chords")+", melody "+S.voiceOf(song,"melody"));
-  lines.push("Chain ("+chain.length+"): "+chainText(chain));
+  lines.push("Chain ("+chain.length+"): "+chainText(chain,song));
   for(i=0;i<S.PATTERNS_MAX;i++){
     if(!used["$"+i] && !S.hasNotes(song,i,"drums") && !S.hasNotes(song,i,"bass") &&
        !S.hasNotes(song,i,"chords") && !S.hasNotes(song,i,"melody")) continue;
@@ -223,7 +228,7 @@ function patternView(song,p){
   parts.push("bass: "+noteText(sorted(notes.bass)));
   parts.push("chords: "+chordText(song,sorted(notes.chords)));
   parts.push("melody: "+noteText(sorted(notes.melody)));
-  return letter(p)+" "+parts.join("; ");
+  return label(song,p)+" "+parts.join("; ");
 }
 
 window.LopdaStudioAI={extract:extract, overview:overview, patternView:patternView};

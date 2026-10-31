@@ -103,7 +103,7 @@ function chordAtTick(song,list,t){
 function patternIssues(song,p){
   var pat=song.patterns && song.patterns[p], out=[], chords, mel, i, n, m, set, tones, prev, next, a, b, letter;
   if(!pat || !pat.notes) return out;
-  letter="ABCDEFGHIJKLMNOP".charAt(p);
+  letter=S.patName(song,p);
   chords=(pat.notes.chords||[]).slice().sort(function(x,y){ return x.t-y.t; });
   for(i=0;i<chords.length;i++){
     n=chords[i];

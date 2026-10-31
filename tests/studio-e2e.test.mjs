@@ -697,6 +697,20 @@ async function skipScreenTour(p) {
     await p.waitForSelector("#v-studio .st-tour-box", { state: "detached" });
   }
 }
+/* The panel shows the existing patterns plus the next empty one. Create patterns one at a time until idx can be
+   picked, then pick it (the sheet closes). Leaves idx as the edit pattern. */
+async function growToPattern(p, idx) {
+  for (let guard = 0; guard < 70; guard++) {
+    if (await p.isHidden("#studio-sheet")) await p.click("#studio-pat");
+    await p.waitForSelector("#studio-sheet:not([hidden])");
+    const target = p.locator(`#studio-sheet .st-pat-btn[data-pat="${idx}"]`);
+    if (await target.count()) { await target.click(); return; }
+    const buttons = p.locator("#studio-sheet .st-pat-btn");
+    assert.ok(await buttons.count() > 0, "the pattern sheet always offers a next pattern");
+    await buttons.last().click();
+  }
+  throw new Error(`could not reach pattern ${idx}`);
+}
 async function openMenu(p) {
   await p.click("#studio-menu");
   await p.waitForSelector("#studio-sheet:not([hidden])");
@@ -1467,7 +1481,7 @@ async function walkSongTour(p, visit) {
 const NEW_TOURS = [
   { screen: "bass", key: "notes", first: /16 格还是一小节|16 squares are still one bar/, done: /点一个空格|Tap an empty one/ },
   { screen: "chords", key: "chords", first: /一小节两格|Two squares per bar/, done: /点一个和弦|Tap a chord/ },
-  { screen: "song", key: "song", first: /十六段|sixteen patterns/, done: /加一段|adds a slot/ },
+  { screen: "song", key: "song", first: /每段一小节|Patterns are one bar each/, done: /加一段|adds a slot/ },
 ];
 
 test("studio tour: the note, chord and song tours walk their steps to Done; a reopen is quiet and ? replays each", { skip, timeout: 120000 }, async (t) => {
@@ -2729,8 +2743,8 @@ test("studio: the pattern sheet switches to C, and copying A over a full C asks 
 
   await p.click("#studio-pat");
   assert.equal(await p.textContent("#studio-sheet .sheet-title span"), "第 A 段");
-  assert.equal(await p.locator("#studio-sheet .st-pat-btn").count(), 16, "A-P in the sheet");
-  await p.locator('#studio-sheet .st-pat-btn[data-pat="2"]').click();
+  assert.equal(await p.locator("#studio-sheet .st-pat-btn").count(), 2, "A and the next pattern");
+  await growToPattern(p, 2);
   assert.equal(await p.getAttribute("#v-studio", "data-pat"), "2", "picked C");
   assert.equal(await p.isHidden("#studio-sheet"), true, "the sheet closes after a pick");
   assert.equal(await p.locator("#studio-grid .st-cell.on").count(), 0, "C starts empty");
@@ -2769,16 +2783,60 @@ test("studio: the pattern sheet switches to C, and copying A over a full C asks 
   assert.deepEqual(errors, []);
 });
 
+test("studio: the pattern panel, renaming a pattern, and undo restoring the old name", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await p.click("#studio-pat");
+  await p.waitForSelector("#studio-sheet:not([hidden])");
+  assert.equal(await p.locator("#studio-sheet .st-pat-btn").count(), 2, "A and the next pattern");
+  assert.equal(await p.textContent("#studio-pat"), "A");
+
+  await p.locator("#studio-sheet .st-sheet-btn", { hasText: "改名" }).click();
+  await p.waitForSelector("#studio-sheet .st-name");
+  assert.equal(await p.inputValue("#studio-sheet .st-name"), "A", "the input starts with the current name");
+  await p.fill("#studio-sheet .st-name", "c2");
+  assert.equal(await p.inputValue("#studio-sheet .st-name"), "C2", "lower case is upper-cased");
+  await p.keyboard.press("Enter");
+  await p.waitForFunction(() => /已改名为 C2/.test(document.querySelector("#toast").textContent));
+  assert.equal(await p.textContent("#studio-pat"), "C2", "the pattern button shows the new name");
+
+  await p.click('#studio-screens .st-scr[data-screen="song"]');
+  await skipScreenTour(p);
+  assert.equal(await p.textContent("#studio-chain .st-chain-cell"), "C2", "the chain cell shows the new name");
+
+  /* undo brings the default name back everywhere, redo returns the rename */
+  await p.keyboard.press("Control+z");
+  assert.equal(await p.textContent("#studio-pat"), "A", "undo puts the default name back");
+  assert.equal(await p.textContent("#studio-chain .st-chain-cell"), "A", "the chain follows the undo");
+  await p.keyboard.press("Control+Shift+z");
+  assert.equal(await p.textContent("#studio-pat"), "C2", "redo returns the name");
+  assert.equal(await p.textContent("#studio-chain .st-chain-cell"), "C2");
+
+  /* pattern B cannot take the same name */
+  await p.click("#studio-pat");
+  await p.locator('#studio-sheet .st-pat-btn[data-pat="1"]').click();
+  await p.click("#studio-pat");
+  await p.locator("#studio-sheet .st-sheet-btn", { hasText: "改名" }).click();
+  await p.waitForSelector("#studio-sheet .st-name");
+  await p.fill("#studio-sheet .st-name", "C2");
+  await p.keyboard.press("Enter");
+  await p.waitForFunction(() => /已经有 C2 段了/.test(document.querySelector("#toast").textContent));
+  assert.equal(await p.locator("#studio-sheet .st-name").count(), 1, "a taken name leaves the sheet open");
+  assert.equal(await p.textContent("#studio-pat"), "B", "the failed rename did not change the pattern");
+  assert.deepEqual(errors, []);
+});
+
 test("studio: picking pattern P in the sheet and editing it survives a reload", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await rtPage(t);
   await studioOpen(p);
   await skipTour(p);
   await p.click("#studio-pat");
   await p.waitForSelector("#studio-sheet:not([hidden])");
-  assert.equal(await p.locator("#studio-sheet .st-pat-btn").count(), 16);
-  assert.equal(await p.textContent('#studio-sheet .st-pat-btn[data-pat="15"]'), "P", "the sixteenth letter is P");
-  await p.locator('#studio-sheet .st-pat-btn[data-pat="15"]').click();
+  assert.equal(await p.locator("#studio-sheet .st-pat-btn").count(), 2);
+  await growToPattern(p, 15);
   assert.equal(await p.getAttribute("#v-studio", "data-pat"), "15", "picked P");
+  assert.equal(await p.textContent("#studio-pat"), "P", "the sixteenth letter is P");
   assert.equal(await p.isHidden("#studio-sheet"), true);
   assert.equal(await p.locator("#studio-grid .st-cell.on").count(), 0, "P starts empty");
   await p.locator('#studio-grid .st-cell[data-step="0"]').click();
@@ -2953,6 +3011,8 @@ test("studio: the slot sheet's edits work while the whole song plays", { skip, t
   const { p, errors } = await rtPage(t);
   await studioOpen(p);
   await skipTour(p);
+  await growToPattern(p, 2);
+  await growToPattern(p, 0);          /* the chain's + appends the edit pattern: keep it on A */
   await p.click('#studio-screens .st-scr[data-screen="song"]');
   await skipScreenTour(p);
   await p.click("#studio-add");
@@ -3120,12 +3180,12 @@ test("studio: the demo template opens with its own patterns, not the old C", { s
   await studioOpen(p);
   await skipTour(p);
   /* give C a kick, then load the demo tape: C is the demo's own third pattern now */
-  await p.click("#studio-pat");
-  await p.locator('#studio-sheet .st-pat-btn[data-pat="2"]').click();
+  await growToPattern(p, 2);
   await p.locator('#studio-grid .st-cell[data-step="2"]').click();
   await waitKicks(p, 2, [2]);
   await useTemplate(p, "夜色");
   await p.click("#studio-pat");
+  assert.equal(await p.locator("#studio-sheet .st-pat-btn").count(), 9, "the demo's eight patterns and the next one");
   await p.locator('#studio-sheet .st-pat-btn[data-pat="2"]').click();
   const kicks = await p.$$eval("#studio-grid .st-cell.on", (els) => els.map((e) => Number(e.dataset.step)));
   assert.deepEqual(kicks, [0, 7, 10], "C is the demo's third bar, not the old edit");
@@ -3461,7 +3521,7 @@ test("studio: every screen fits at 375x667 with 44 px buttons and 56 px grid cel
     for (const e of sh.querySelectorAll("*")) {
       const r = e.getBoundingClientRect();
       if (r.width <= 0 || r.height <= 0) continue;
-      const box = e.closest(".lcd-menu");
+      const box = e.closest(".lcd-menu,.st-pat-grid");
       const scrolls = box && box !== e && box.scrollHeight > box.clientHeight + 1;
       /* a tall menu is a scroll box: its off-screen rows are allowed, but a row that spills sideways is not */
       if (scrolls && !(r.left < vr.left - 1 || r.right > vr.right + 1)) continue;
@@ -3514,7 +3574,7 @@ test("studio: every screen fits at 375x667 with 44 px buttons and 56 px grid cel
   await q.locator("#studio-sheet .st-sheet-close").click();
   assert.equal(await q.isHidden("#studio-sheet"), true, "the menu's title close button closes it");
 
-  /* the slot sheet: the 16 letters, then the four edits two by two; every button is 44 px and all fits */
+  /* the slot sheet: the existing names plus one more, then the four edits two by two; every button is 44 px */
   await q.click('#studio-screens .st-scr[data-screen="song"]');
   await skipScreenTour(q);
   await q.locator(".st-chain-cell").first().click();
@@ -3548,9 +3608,9 @@ test("studio: every screen fits at 375x667 with 44 px buttons and 56 px grid cel
       actionH: Math.min(...actions.map((e) => rect(e).height)),
     };
   });
-  assert.equal(shot.letters, 16, "the slot sheet shows the 16 letters");
+  assert.equal(shot.letters, 3, "the slot sheet shows the two existing patterns and the next one");
   assert.equal(shot.play, true, "the slot sheet's title has the play-from-here button");
-  assert.deepEqual(shot.letterRows, [4, 4, 4, 4], "four rows of four letters");
+  assert.deepEqual(shot.letterRows, [3], "the three names sit in one row");
   assert.deepEqual(shot.inverted, ["0"], "the slot's own letter is inverted");
   assert.deepEqual(shot.actions, ["前面插一段", "后面复制一段", "删掉这一格", "返回"]);
   assert.deepEqual(shot.actionRows, [2, 2], "the four edits sit two by two");
@@ -3602,7 +3662,7 @@ test("studio: edits made before the tape read lands are refused, and the late so
 
   /* the pattern pick does nothing and closes the sheet */
   await p.click("#studio-pat");
-  await p.locator('#studio-sheet .st-pat-btn[data-pat="2"]').click();
+  await p.locator('#studio-sheet .st-pat-btn[data-pat="0"]').click();
   assert.equal(await p.getAttribute("#v-studio", "data-pat"), "0", "the pattern pick was refused");
   assert.equal(await p.isHidden("#studio-sheet"), true);
 
@@ -3822,7 +3882,7 @@ test("studio: a tape's JSON comes back as a new tape and keeps the one it came f
   await p.locator('#studio-grid .st-cell[data-step="0"]').click();       /* this tape changes; the import must not touch it */
   assert.equal(await cellOn(p, 0), false);
   await p.setInputFiles("#studio-import-json", { name: "t.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(doc)) });
-  await p.waitForFunction(() => document.querySelector('#studio-grid .st-cell[data-step="0"]').classList.contains("on"), null, { timeout: 30000 });
+  await p.waitForFunction(() => /imported/.test(document.body.textContent) && document.querySelector('#studio-screens .st-scr[data-screen="song"]').classList.contains("on"), null, { timeout: 30000 });
   const items = await p.evaluate(async () => {
     const got = await LopdaPlatform.db.doc("data/users/local/studio").collection("items").get();
     return got.docs.map((d) => ({ name: d.data().name, template: d.data().template, step0: (d.data().patterns[0].notes.drums || []).some((n) => n.t === 0 && n.key === "kick") }));
@@ -3834,6 +3894,10 @@ test("studio: a tape's JSON comes back as a new tape and keeps the one it came f
 
   await p.setInputFiles("#studio-import-json", { name: "bad.json", mimeType: "application/json", buffer: Buffer.from('{"v":99}') });
   await p.waitForFunction(() => /更新的版本/.test(document.body.textContent), null, { timeout: 10000 });
+  const many = JSON.parse(JSON.stringify(doc));
+  while (many.patterns.length < 65) many.patterns.push(JSON.parse(JSON.stringify(doc.patterns[0])));
+  await p.setInputFiles("#studio-import-json", { name: "many.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(many)) });
+  await p.waitForFunction(() => /这盘有 65 段，四轨机最多 64 段/.test(document.body.textContent), null, { timeout: 10000 });
   await p.setInputFiles("#studio-import-json", { name: "bad.json", mimeType: "application/json", buffer: Buffer.from("not json") });
   await p.waitForFunction(() => /不是能读的磁带/.test(document.body.textContent), null, { timeout: 10000 });
   assert.deepEqual(errors, []);

@@ -76,3 +76,15 @@ test("patternView: every note, compact, with rests and chord names", () => {
   assert.match(rests, /melody: .*4:rest/);
   assert.equal(A.patternView(S.newSong(1), 9).split("; ").length, 4, "an empty pattern still has the four tracks");
 });
+
+test("overview: a renamed or late pattern carries its number; plain A-P reads as before (12.22)", () => {
+  let song = S.demoSong(1);
+  const before = A.overview(song);
+  assert.doesNotMatch(before, /[A-Z]\d? \(\d+\)/, "no numbers on a plain tape");
+  song = S.renamePattern(song, 1, "V2");
+  song = S.copyPattern(song, 0, 20);
+  song.song = [0, 1, 20];
+  const text = A.overview(song);
+  assert.match(text, /Chain \(3\): A, V2 \(1\), E1 \(20\)/);
+  assert.match(A.patternView(song, 1), /^V2 \(1\) /);
+});
