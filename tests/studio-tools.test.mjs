@@ -13,8 +13,8 @@ const plain = (v) => JSON.parse(JSON.stringify(v));
 const fresh = () => plain(S.newSong(1000));
 const apply = (song, ops) => E.apply(song, ops);
 
-test("TOOLS: the eleven tools of the table", () => {
-  assert.deepEqual(plain(T.TOOLS), ["ops", "groove", "chords", "bass", "ghost", "fill", "melody", "copy", "chain", "set", "mix"]);
+test("TOOLS: the twelve tools of the table", () => {
+  assert.deepEqual(plain(T.TOOLS), ["ops", "groove", "chords", "bass", "ghost", "fill", "stop", "melody", "copy", "chain", "set", "mix"]);
 });
 
 test("every tool's valid answer is an ops list that apply() accepts", () => {
@@ -250,4 +250,59 @@ test("bass under stabbed chords takes the bar's chord from beat 1", () => {
   const c = apply(fresh(), T.run(fresh(), { tool: "chords", pattern: 0, roots: [3], rhythm: "stabs" }).ops).song;
   const b = T.run(c, { tool: "bass", pattern: 0, rhythm: "boom" });
   assert.equal(b.ops.find((o) => o.op === "setNote" && o.step === 0).deg, T.rootDegree(c, 3));
+});
+
+/* ---------- 12.20.5: a chord root may name a quality and a semitone shift ---------- */
+test("chords: object roots carry q and acc; a bare number is still the automatic chord", () => {
+  const r = T.run(fresh(), { tool: "chords", pattern: 0, roots: [{ root: 0, q: "m7", acc: -1 }, { root: 4, q: "sus4" }, 5] });
+  assert.equal(r.error, undefined);
+  const song = apply(fresh(), r.ops).song;
+  const chords = song.patterns[0].notes.chords;
+  assert.deepEqual(plain(chords.map((n) => [n.t / S.STEP, n.deg, n.q, n.acc])), [
+    [0, 0, "m7", -1], [8, 4, "sus4", null], [12, 5, null, null],
+  ]);
+  assert.equal(chords.every((n) => n.vel === 0.65), true);
+  assert.equal(S.validate(song).error, undefined);
+
+  // stabs and pulse take one root object and put its quality on every strike
+  const c = apply(fresh(), T.run(fresh(), { tool: "chords", pattern: 0, roots: [{ root: 3, q: "7", acc: 1 }], rhythm: "stabs" }).ops).song;
+  const struck = c.patterns[0].notes.chords.filter((n) => n.vel > 0);
+  assert.deepEqual(plain(struck.map((n) => [n.t / S.STEP, n.deg, n.q, n.acc])), [[4, 3, "7", 1], [12, 3, "7", 1]]);
+  assert.equal(S.validate(c).error, undefined);
+});
+
+test("chords: bad object roots are named, and the error lists the qualities", () => {
+  const error = (roots) => T.run(fresh(), { tool: "chords", pattern: 0, roots }).error || "";
+  assert.match(error([{ root: 6, q: "m7" }]), /^roots:/);
+  assert.match(error([{ q: "m7" }]), /^roots:/);
+  assert.match(error([{ root: 0, q: "blues" }]), /^roots:.*blues.*maj, m, 7/);
+  assert.match(error([{ root: 0, q: "blues" }]), /m7b5/);
+  assert.match(error([{ root: 0, acc: 0 }]), /^roots:.*acc/);
+  assert.match(error([{ root: 0, acc: 2 }]), /^roots:.*acc/);
+  assert.match(error(["0"]), /^roots:/);
+  assert.match(error([0.5]), /^roots:/);
+  assert.match(error([{ root: 0, q: 7 }]), /^roots:.*q/);
+});
+
+test("diatonicQ: a bare degree is the scale's own triad or seventh; rich leaves it to the machine", () => {
+  const song = plain(S.newSong(0));
+  song.key = 9; song.scale = "harmonic-minor";
+  assert.deepEqual([0, 3, 4, 5].map((d) => T.diatonicQ(song, d, "triad")), ["m", "m", "maj", "maj"]);
+  assert.deepEqual([0, 4].map((d) => T.diatonicQ(song, d, "seventh")), ["m7", "7"]);
+  assert.equal(T.diatonicQ(song, 0, "rich"), null);
+  song.scale = "major";
+  assert.deepEqual([0, 1, 4].map((d) => T.diatonicQ(song, d, "seventh")), ["maj7", "m7", "7"]);
+});
+
+test("stop: everything after beat 3 goes, the band hits beat 3 and the tracks rest from step 10", () => {
+  let song = fresh();
+  song = apply(song, T.run(song, { tool: "melody", pattern: 0, notes: [[0, 2, 0.8], [6, 4, 0.7], [12, 3, 0.8]] }).ops).song;
+  const r = apply(song, T.run(song, { tool: "stop", pattern: 0 }).ops).song;
+  const notes = r.patterns[0].notes;
+  assert.ok(notes.drums.every((n) => n.t <= 8 * S.STEP), "no drums after beat 3");
+  assert.ok(notes.drums.some((n) => n.key === "snare" && n.t === 8 * S.STEP));
+  for (const tr of ["bass", "chords", "melody"]) {
+    const after = notes[tr].filter((n) => n.t >= 10 * S.STEP);
+    assert.ok(after.length === 1 && after[0].vel === 0, tr + " rests from step 10");
+  }
 });

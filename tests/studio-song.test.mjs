@@ -2,6 +2,7 @@
 // scale degrees, the grid's pitch and chords, the patterns and the song chain (docs/design/studio.md sections 3, 11 and 12).
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { runScript } from "./helpers.mjs";
 
 const S = runScript("runtime/studio-song.js").LopdaSong;
@@ -20,7 +21,7 @@ test("constants: format, tracks, scales, demo beat", () => {
   assert.equal(S.STEPS, 16);
   assert.deepEqual([S.BPM_MIN, S.BPM_MAX, S.BPM_DEFAULT, S.BPM_STEP], [60, 140, 82, 2]);
   assert.deepEqual(plain(S.DRUMS), ["kick", "snare", "hat", "perc"]);
-  assert.deepEqual(plain(S.KITS), ["chip", "soft"]);
+  assert.deepEqual(plain(S.KITS), ["chip", "soft", "rock", "electro"]);
   assert.deepEqual(plain(S.KINDS), ["drum", "note", "chord", "voice"]);
   assert.deepEqual(plain(S.TRACKS), [
     { id: "drums", kind: "drum", vol: 1, mute: false },
@@ -35,6 +36,9 @@ test("constants: format, tracks, scales, demo beat", () => {
     minor: [0, 2, 3, 5, 7, 8, 10],
     major: [0, 2, 4, 5, 7, 9, 11],
     dorian: [0, 2, 3, 5, 7, 9, 10],
+    "harmonic-minor": [0, 2, 3, 5, 7, 8, 11],
+    mixolydian: [0, 2, 4, 5, 7, 9, 10],
+    phrygian: [0, 1, 3, 5, 7, 8, 10],
   });
   assert.deepEqual([S.SWING_MIN, S.SWING_MAX, S.SWING_DEFAULT], [0.5, 0.75, 0.55]);
   assert.equal(S.TAPE_MAX, 4);
@@ -162,7 +166,9 @@ test("validate: bpm, key, scale, swing, tape, kit, name, updated", () => {
     [(s) => { s.tape = -1; }, "tape"],
     [(s) => { s.tape = 5; }, "tape"],
     [(s) => { s.tape = 2.5; }, "tape"],
-    [(s) => { s.kit = "loud"; }, "kit"],
+    [(s) => { s.kit = "Loud"; }, "kit"],
+    [(s) => { s.kit = "x".repeat(17); }, "kit"],
+    [(s) => { s.kit = 5; }, "kit"],
     [(s) => { delete s.kit; }, "kit"],
     [(s) => { s.name = "x".repeat(41); }, "name"],
     [(s) => { s.name = 5; }, "name"],
@@ -513,6 +519,9 @@ test("constants: parent scales, voices, note velocity, chord cells, note names, 
     minor: "minor",
     major: "major",
     dorian: "dorian",
+    "harmonic-minor": "harmonic-minor",
+    mixolydian: "mixolydian",
+    phrygian: "phrygian",
   });
   assert.deepEqual(plain(S.SOUND), { bass: "bass", chords: "keys", melody: "flute" });
   assert.equal(S.NOTE_VEL, 0.8);
@@ -1458,4 +1467,279 @@ test("saintsSong and jasmineSong: two 64-bar, 16-pattern public-domain arrangeme
       for (const h of p.notes.drums) assert.equal(h.t % S.STEP, 0);
     }
   }
+});
+
+/* ---------- 12.20: a track's optional voice, the relaxed kit rule and the fallbacks ---------- */
+
+test("voice choices and kit choices: the four kits cycle soft, chip, rock, electro", () => {
+  assert.deepEqual(plain(S.VOICE_CHOICES), {
+    bass: ["bass", "pick", "sub"],
+    chords: ["keys", "guitar", "piano", "organ", "strings"],
+    melody: ["flute", "square", "pluck", "reed", "bowed"],
+  });
+  assert.deepEqual(plain(S.KIT_CHOICES), ["soft", "chip", "rock", "electro"]);
+  for (const id of S.KIT_CHOICES) assert.ok(S.KITS.includes(id), `${id} is a known kit`);
+});
+
+test("validate: a track's voice is optional but must have the id shape; an unknown voice still validates", () => {
+  const song = fresh();
+  assert.equal(S.validate(song).error, undefined, "a song without voice fields is unchanged");
+  assert.equal(S.validate(Object.assign(song, { tracks: song.tracks.map((t) => Object.assign({}, t)) })).error, undefined);
+
+  const bad = [
+    ["Bass", "uppercase"],
+    ["_bass", "leading underscore"],
+    ["bass_", "underscore"],
+    ["x".repeat(17), "too long"],
+    [5, "not a string"],
+    [null, "null"],
+    [{}, "an object"],
+  ];
+  for (const [voice, why] of bad) {
+    const r = broken((s) => { s.tracks[1].voice = voice; });
+    assert.equal(r.error, "voice", `${why} is refused as voice`);
+  }
+  assert.equal(broken((s) => { s.tracks[1].voice = "x".repeat(16); }).error, undefined, "16 characters are allowed");
+  assert.equal(broken((s) => { s.tracks[1].voice = "made-up-voice"; }).error, undefined, "an unknown but well-shaped id opens");
+  assert.equal(broken((s) => { s.tracks[0].voice = "pick"; }).error, undefined, "the drum track may carry one too (validate only checks shape)");
+});
+
+test("validate: a kit only has to have the id shape; unknown kits open and fall back in kitOf", () => {
+  assert.equal(broken((s) => { s.kit = "made-up-kit"; }).error, undefined);
+  assert.equal(broken((s) => { s.kit = "electro"; }).error, undefined);
+  for (const [kit, why] of [["Soft", "uppercase"], ["soft kit", "a space"], ["x".repeat(17), "too long"], [3, "a number"], [null, "null"]]) {
+    assert.equal(broken((s) => { s.kit = kit; }).error, "kit", `${why} is refused as kit`);
+  }
+  assert.equal(S.kitOf({ kit: "rock" }), "rock");
+  assert.equal(S.kitOf({ kit: "made-up-kit" }), "soft", "an unknown kit plays as soft");
+  assert.equal(S.kitOf({}), "soft", "a missing kit plays as soft");
+  assert.equal(S.kitOf(null), "soft");
+});
+
+test("voiceOf: an old song gives SOUND for every track; unknown voices and voice-less tracks fall back", () => {
+  for (const song of [fresh(), S.demoSong(1), S.popSong(1), S.saintsSong(1), S.jasmineSong(1)]) {
+    for (const id of ["bass", "chords", "melody"]) assert.equal(S.voiceOf(song, id), S.SOUND[id], `${id} is the default`);
+  }
+  assert.equal(S.voiceOf(fresh(), "drums"), undefined);
+  assert.equal(S.voiceOf(fresh(), "voice"), undefined);
+  assert.equal(S.voiceOf(fresh(), "nope"), undefined);
+
+  const song = fresh();
+  song.tracks[1].voice = "pick";
+  song.tracks[2].voice = "made-up-voice";
+  assert.equal(S.voiceOf(song, "bass"), "pick");
+  assert.equal(S.voiceOf(song, "chords"), "keys", "an unknown voice falls back to the track default");
+  assert.equal(S.voiceOf(song, "melody"), "flute", "a missing voice falls back to the track default");
+  song.tracks[3].voice = "piano";
+  assert.equal(S.voiceOf(song, "melody"), "flute", "a voice from another track's list is not used");
+});
+
+test("setTrackVoice: a clone, only a choice of that track, and a refused call is unchanged", () => {
+  const song = fresh();
+  const a = S.setTrackVoice(song, "bass", "pick");
+  assert.equal(S.voiceOf(a, "bass"), "pick");
+  assert.equal(a.tracks[1].voice, "pick");
+  assert.equal(song.tracks[1].voice, undefined, "the input is not edited");
+  assert.equal(a.tracks[1].vol, 1, "the rest of the track is kept");
+  assert.equal(S.validate(a).error, undefined, "the result validates");
+
+  assert.equal(S.setTrackVoice(song, "chords", "guitar").tracks[2].voice, "guitar");
+  assert.equal(S.setTrackVoice(song, "melody", "bowed").tracks[3].voice, "bowed");
+  assert.equal(S.setTrackVoice(song, "bass", "piano").tracks[1].voice, undefined, "another track's voice is refused");
+  assert.equal(S.setTrackVoice(song, "bass", "nope").tracks[1].voice, undefined);
+  assert.equal(S.setTrackVoice(song, "bass", 5).tracks[1].voice, undefined);
+  assert.equal(S.setTrackVoice(song, "drums", "bass").tracks[0].voice, undefined, "the drum track has no voice list");
+  assert.equal(S.setTrackVoice(song, "nope", "bass").tracks[1].voice, undefined);
+  assert.equal(S.validate(S.setTrackVoice(song, "nope", "bass")).error, undefined);
+
+  const twice = S.setTrackVoice(S.setTrackVoice(song, "bass", "sub"), "bass", "bass");
+  assert.equal(S.voiceOf(twice, "bass"), "bass", "switching back to the default keeps an explicit voice");
+});
+
+/* ---------- 12.20.5: chord qualities, the twelve semitones, gate and ornaments ---------- */
+const sha = (x) => createHash("sha256").update(JSON.stringify(plain(x))).digest("hex");
+
+test("12.20.5 constants: QUALITIES has the seventeen qualities, in the keyboard's order", () => {
+  assert.deepEqual(plain(S.QUALITIES), {
+    maj: [0, 4, 7], m: [0, 3, 7], "7": [0, 4, 7, 10], maj7: [0, 4, 7, 11], m7: [0, 3, 7, 10],
+    "9": [0, 4, 10, 14], m9: [0, 3, 10, 14], "6": [0, 4, 7, 9], m6: [0, 3, 7, 9], add9: [0, 4, 7, 14],
+    sus2: [0, 2, 7], sus4: [0, 5, 7], dim: [0, 3, 6], dim7: [0, 3, 6, 9], aug: [0, 4, 8],
+    m7b5: [0, 3, 6, 10], "5": [0, 7, 12],
+  });
+  assert.deepEqual(plain(S.QUALITY_ORDER), ["maj", "m", "7", "maj7", "m7", "9", "m9", "6", "m6", "add9", "sus2", "sus4", "dim", "dim7", "aug", "m7b5", "5"]);
+});
+
+test("12.20.5 chordNotes: every quality on one root, and acc moves the root", () => {
+  const C = { key: 0, scale: "major" };       // C major: degree 0's root is C4 (48)
+  const root = S.chordNotes(C, 0)[0];
+  assert.equal(root, 48);
+  for (const q of S.QUALITY_ORDER) {
+    assert.deepEqual(plain(S.chordNotes(C, 0, q)), plain(S.QUALITIES[q].map((i) => root + i)), q);
+    assert.deepEqual(plain(S.chordNotes(C, 0, q, 1)), plain(S.QUALITIES[q].map((i) => root + 1 + i)), q + " #");
+    assert.deepEqual(plain(S.chordNotes(C, 0, q, -1)), plain(S.QUALITIES[q].map((i) => root - 1 + i)), q + " b");
+  }
+  // no q: today's voicing; acc shifts every note
+  assert.deepEqual(plain(S.chordNotes(C, 0)), [48, 52, 59, 62]);
+  assert.deepEqual(plain(S.chordNotes(C, 0, undefined, 1)), [49, 53, 60, 63]);
+  assert.deepEqual(plain(S.chordNotes(C, 0, "not-a-quality", -1)), [47, 51, 58, 61], "an unknown q is absent");
+  assert.deepEqual(plain(S.chordNotes(C, 0, "maj", 2)), plain(S.chordNotes(C, 0, "maj")), "a bad acc is no shift");
+  assert.deepEqual(plain(S.chordNotes(C, 0, "maj", "1")), plain(S.chordNotes(C, 0, "maj")));
+});
+
+test("12.20.5 chordName: roman case and suffix follow q; acc prefixes the roman", () => {
+  const C = { key: 0, scale: "major" };
+  assert.deepEqual(plain(S.chordName(C, 6, "maj", -1)), { roman: "♭VII", name: "Bb" });
+  assert.deepEqual(plain(S.chordName(C, 4, "sus4")), { roman: "V", name: "Gsus4" });
+  assert.deepEqual(plain(S.chordName(C, 5, "m7")), { roman: "vi", name: "Am7" });
+  assert.deepEqual(plain(S.chordName(C, 0, "m7b5")), { roman: "i", name: "Cm7b5" });
+  assert.deepEqual(plain(S.chordName(C, 1, "m")), { roman: "ii", name: "Dm" });
+  assert.deepEqual(plain(S.chordName(C, 0, "maj")), { roman: "I", name: "C" });
+  assert.deepEqual(plain(S.chordName(C, 4, "5")), { roman: "V", name: "G5" });
+  assert.deepEqual(plain(S.chordName(C, 4, "7", 1)), { roman: "♯V", name: "Ab7" });
+  assert.deepEqual(plain(S.chordName(C, 2, "dim7")), { roman: "iii", name: "Edim7" });
+  assert.deepEqual(plain(S.chordName(C, 6, "maj7")), { roman: "VII", name: "Bmaj7" });
+  // without q: today's automatic name, still moved by an acc
+  assert.deepEqual(plain(S.chordName(C, 4)), { roman: "V", name: "G9" });
+  assert.deepEqual(plain(S.chordName(C, 6, undefined, -1)), { roman: "♭viiø", name: "Bbm7b5" });
+  assert.deepEqual(plain(S.chordName(C, 0, "newer-q", -1)), { roman: "♭I", name: "Bmaj9" });
+});
+
+test("12.20.5 noteMidi: acc adds a semitone, absent or bad acc adds none", () => {
+  const A = { key: 9, scale: "minor-penta" };
+  assert.equal(S.noteMidi(A, "bass", 0), 45);
+  assert.equal(S.noteMidi(A, "bass", 0, 1), 46);
+  assert.equal(S.noteMidi(A, "bass", 0, -1), 44);
+  assert.equal(S.noteMidi(A, "bass", 0, 0), 45);
+  assert.equal(S.noteMidi(A, "bass", 0, 2), 45);
+  assert.equal(S.noteMidi(A, "melody", 0, 1), 58);
+  assert.equal(S.noteMidi(A, "melody", 0, -1), 56);
+});
+
+test("12.20.5 validate: the optional fields are checked like the others; an unknown q is allowed", () => {
+  const note = (track, extra, vel = 0.8) => {
+    const s = fresh();
+    s.patterns[0].notes[track] = [{ t: 0, len: 24, deg: 0, vel, ...extra }];
+    return S.validate(s).error;
+  };
+  for (const acc of [0, 2, -2, "1", 1.5, null]) assert.equal(note("bass", { acc }), "notes", "acc " + acc);
+  for (const gate of [0, 0.05, 1.1, "0.5", null, NaN]) assert.equal(note("melody", { gate }), "notes", "gate " + gate);
+  for (const orn of ["trill", "", 1, null]) assert.equal(note("melody", { orn }), "notes", "orn " + orn);
+  assert.equal(note("bass", { orn: "vib" }), "notes", "the bass only slides");
+  assert.equal(note("bass", { orn: "slide" }), undefined);
+  assert.equal(note("melody", { orn: "vib" }), undefined);
+  assert.equal(note("bass", { gate: 0.1 }), undefined);
+  assert.equal(note("bass", { gate: 1 }), undefined);
+  assert.equal(note("bass", { acc: -1 }), undefined);
+  assert.equal(note("bass", { q: "m7" }), "notes", "q is a chord field");
+  assert.equal(note("chords", { gate: 0.5 }), "notes");
+  assert.equal(note("chords", { orn: "slide" }), "notes");
+  assert.equal(note("chords", { q: 5 }), "notes");
+  assert.equal(note("chords", { q: "m7", acc: -1 }), undefined);
+  assert.equal(note("chords", { q: "a-later-version", acc: 1 }), undefined, "an unknown q validates");
+  assert.equal(note("drums", { acc: 1 }), "notes", "a drum hit has no pitch");
+  // rests keep no extra fields
+  for (const [track, extra] of [["bass", { acc: 1 }], ["bass", { gate: 0.5 }], ["melody", { orn: "vib" }], ["chords", { q: "m7" }]])
+    assert.equal(note(track, extra, 0), "notes", `${track} rest ${Object.keys(extra)}`);
+});
+
+test("12.20.5 events: the optional fields travel, but an unknown q is absent", () => {
+  const s = fresh();
+  s.patterns[0].notes.drums = [];
+  s.patterns[0].notes.bass = [{ t: 0, len: 96, deg: 0, vel: 0.8, acc: 1, gate: 0.5, orn: "slide" }];
+  s.patterns[0].notes.melody = [{ t: 96, len: 96, deg: 2, vel: 0.8, acc: -1, gate: 0.25, orn: "vib" }];
+  s.patterns[0].notes.chords = [{ t: 0, len: 192, deg: 0, vel: 0.65, q: "m7", acc: -1 }];
+  assert.equal(S.validate(s).error, undefined);
+  const ev = plain(S.events(s, 0, 0, 16 * S.STEP));
+  assert.deepEqual(ev.find((e) => e.track === "bass"), { tick: 0, track: "bass", deg: 0, vel: 0.8, len: 96, acc: 1, gate: 0.5, orn: "slide" });
+  assert.deepEqual(ev.find((e) => e.track === "melody"), { tick: 96, track: "melody", deg: 2, vel: 0.8, len: 96, acc: -1, gate: 0.25, orn: "vib" });
+  assert.deepEqual(ev.find((e) => e.track === "chords"), { tick: 0, track: "chords", deg: 0, vel: 0.65, len: 192, q: "m7", acc: -1 });
+
+  const chain = plain(S.chainEvents(s, [0], 0, 16 * S.STEP));
+  assert.equal(chain.find((e) => e.track === "melody").orn, "vib", "the player's chainEvents carries them too");
+  assert.equal(chain.find((e) => e.track === "chords").q, "m7");
+
+  s.patterns[0].notes.chords[0].q = "a-later-version";
+  assert.equal(S.validate(s).error, undefined);
+  assert.equal("q" in S.events(s, 0, 0, 16 * S.STEP).find((e) => e.track === "chords"), false, "an unknown q is absent");
+});
+
+test("12.20.5 setNote extra: stores only the valid fields and leaves old calls unchanged", () => {
+  const song = fresh();
+  const before = plain(song);
+  const out = S.setNote(song, 0, "melody", 4 * S.STEP, 2, 0.7, { acc: 1, gate: 0.5, orn: "vib" });
+  assert.deepEqual(plain(song), before, "the input is not edited");
+  assert.deepEqual(plain(out.patterns[0].notes.melody.find((n) => n.t === 4 * S.STEP)),
+    { t: 4 * S.STEP, len: 288, deg: 2, vel: 0.7, acc: 1, gate: 0.5, orn: "vib" });
+  assert.equal(S.validate(out).error, undefined);
+
+  const chord = S.setNote(song, 0, "chords", 4 * S.STEP, 3, 0.6, { q: "m7", acc: -1 });
+  assert.deepEqual(plain(chord.patterns[0].notes.chords.find((n) => n.t === 4 * S.STEP)),
+    { t: 4 * S.STEP, len: 96, deg: 3, vel: 0.6, q: "m7", acc: -1 });
+  assert.equal(S.validate(chord).error, undefined);
+
+  // an invalid field is not stored, and the others still are; a q on a note and a gate on a chord are ignored
+  const mixed = S.setNote(song, 0, "bass", 0, 0, 0.8, { acc: 2, gate: 0.5, orn: "vib", q: "m7" });
+  assert.deepEqual(plain(mixed.patterns[0].notes.bass.find((n) => n.t === 0)), { t: 0, len: 192, deg: 0, vel: 0.8, gate: 0.5 });
+  const chordBad = S.setNote(song, 0, "chords", 0, 0, 0.65, { gate: 0.5, orn: "slide", q: "maj", acc: 1 });
+  assert.deepEqual(plain(chordBad.patterns[0].notes.chords.find((n) => n.t === 0)), { t: 0, len: 192, deg: 0, vel: 0.8, q: "maj", acc: 1 });
+
+  // an existing note keeps its fields when the call does not mention them
+  const kept = S.setNote(out, 0, "melody", 4 * S.STEP, 5);
+  assert.deepEqual(plain(kept.patterns[0].notes.melody.find((n) => n.t === 4 * S.STEP)),
+    { t: 4 * S.STEP, len: 288, deg: 5, vel: 0.7, acc: 1, gate: 0.5, orn: "vib" });
+});
+
+test("12.20.5 setNoteExtra: only the optional fields change; null removes; the note must exist", () => {
+  const base = S.setNote(fresh(), 0, "melody", 4 * S.STEP, 2, 0.7, { acc: 1, gate: 0.5, orn: "vib" });
+  const out = S.setNoteExtra(base, 0, "melody", 4 * S.STEP, { acc: -1, gate: null });
+  const note = plain(out.patterns[0].notes.melody.find((n) => n.t === 4 * S.STEP));
+  assert.deepEqual(note, { t: 4 * S.STEP, len: 288, deg: 2, vel: 0.7, acc: -1, orn: "vib" });
+  assert.equal(S.validate(out).error, undefined);
+  assert.deepEqual(plain(base.patterns[0].notes.melody.find((n) => n.t === 4 * S.STEP)).acc, 1, "the input is not edited");
+
+  const removed = S.setNoteExtra(out, 0, "melody", 4 * S.STEP, { orn: null, acc: null });
+  assert.deepEqual(plain(removed.patterns[0].notes.melody.find((n) => n.t === 4 * S.STEP)), { t: 4 * S.STEP, len: 288, deg: 2, vel: 0.7 });
+
+  // a chord's q and acc, and a bass slide
+  let chord = S.setNote(fresh(), 0, "chords", 0, 0, 0.65, { q: "maj" });
+  chord = S.setNoteExtra(chord, 0, "chords", 0, { q: "m7", acc: -1 });
+  assert.deepEqual(plain(chord.patterns[0].notes.chords[0]), { t: 0, len: 192, deg: 0, vel: 0.8, q: "m7", acc: -1 });
+  let bass = S.setNote(fresh(), 0, "bass", 0, 0, 0.8);
+  bass = S.setNoteExtra(bass, 0, "bass", 0, { orn: "slide" });
+  assert.equal(bass.patterns[0].notes.bass[0].orn, "slide");
+
+  // missing note, a rest, a bad value or a field on the wrong track: unchanged
+  const before = plain(base);
+  assert.deepEqual(plain(S.setNoteExtra(base, 0, "melody", 8 * S.STEP, { acc: 1 })), before, "no note at the step");
+  assert.deepEqual(plain(S.setNoteExtra(base, 0, "melody", 4 * S.STEP, { orn: "trill" })), before);
+  assert.deepEqual(plain(S.setNoteExtra(base, 0, "melody", 4 * S.STEP, { q: "m7" })), before);
+  assert.deepEqual(plain(S.setNoteExtra(base, 0, "bass", 0, { orn: "vib" })), before, "a bass cannot vibrate");
+  const rest = S.setRest(fresh(), 0, "melody", 4 * S.STEP);
+  assert.deepEqual(plain(S.setNoteExtra(rest, 0, "melody", 4 * S.STEP, { acc: 1 })), plain(rest), "a rest keeps no fields");
+});
+
+test("12.20.5 an old song's events, notes and names are exactly what they were", () => {
+  const demo = S.demoSong(1);
+  // captured with the code before the 12.20.5 change
+  assert.equal(sha(S.events(demo, 0, 0, P)), "22aa1f242b7b422fa908f60bd086e476f89a3d3f2368d8963395dd3171662b2c");
+  assert.equal(sha(S.chainEvents(demo, demo.song, 0, S.chainTicks(demo, demo.song))), "923ab43ae19b37e795b53d2dcad08e3314a3af98458f8f961429500422e064f7");
+  assert.equal(sha(demo.patterns.map((p) => p.notes)), "24cb10e5c04616e92365268e022cf5197e88620c3eb1e9d3944723185a1fec30");
+  assert.deepEqual([0, 1, 2, 3, 4, 5, 6, 7].map((d) => plain(S.chordName(demo, d))), [
+    { roman: "i", name: "Am9" }, { roman: "ii", name: "Bm7" }, { roman: "III", name: "Cmaj9" }, { roman: "IV", name: "D9" },
+    { roman: "v", name: "Em9" }, { roman: "viø", name: "F#m7b5" }, { roman: "VII", name: "Gmaj9" }, { roman: "i", name: "Am9" },
+  ]);
+  // the fresh song's demo bar too: no new fields anywhere
+  const song = S.newSong(1000);
+  assert.equal(sha(S.events(song, 0, 0, P)), sha(S.events(S.newSong(1000), 0, 0, P)));
+  for (const track of ["bass", "chords", "melody"])
+    for (const n of song.patterns[0].notes[track])
+      for (const k of ["acc", "gate", "orn", "q"]) assert.equal(k in n, false, `${track} ${k}`);
+});
+
+test("harmonic minor: the fifth degree is a major chord (E in A harmonic minor) and the seventh is raised", () => {
+  const song = plain(S.newSong(0));
+  song.key = 9; song.scale = "harmonic-minor";
+  assert.equal(S.chordName(song, 4).name.slice(0, 1), "E");
+  assert.equal(S.chordNotes(song, 4)[1] % 12, 8, "G sharp, the raised seventh, is the third of V");
+  assert.equal(S.noteMidi(song, "melody", 6) % 12, 8);
 });

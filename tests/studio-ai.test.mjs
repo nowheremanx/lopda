@@ -53,7 +53,7 @@ test("overview: a 16-pattern song stays under about 2.5 KB", () => {
   song.song = Array.from({ length: 16 }, (_, i) => i);
   const text = A.overview(song);
   assert.ok(text.length < 2500, text.length + " bytes");
-  assert.equal(text.split("\n").length, 3 + 16, "name, settings and chain, then one line per pattern");
+  assert.equal(text.split("\n").length, 4 + 16, "name, settings, voices and chain, then one line per pattern");
 });
 
 test("patternView: every note, compact, with rests and chord names", () => {

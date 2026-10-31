@@ -85,11 +85,36 @@ async function studioPage(t, withChip) {
       return stats((await oc.startRendering()).getChannelData(0));
     };
     /* one note of one voice, at 0.02 s, into a gain of 1 */
-    window.renderNote = async (voice, midi, dur, vel = 1, seconds = 1) => {
+    window.renderNote = async (voice, midi, dur, vel = 1, seconds = 1, opts) => {
       const oc = new OfflineAudioContext(1, Math.ceil(SR * seconds), SR);
       const out = oc.createGain(); out.gain.value = 1; out.connect(oc.destination);
       const synth = LopdaStudioSynth.create(oc, out);
-      synth.note(voice, midi, 0.02, dur, vel);
+      synth.note(voice, midi, 0.02, dur, vel, opts);
+      return stats((await oc.startRendering()).getChannelData(0));
+    };
+    /* the song's events through the same choices soundEvent makes (12.20.5): acc, gate, orn and a chord's q */
+    window.renderSongEvents = async (song, events, seconds = 1) => {
+      const oc = new OfflineAudioContext(1, Math.ceil(SR * seconds), SR);
+      const out = oc.createGain(); out.gain.value = 1; out.connect(oc.destination);
+      const synth = LopdaStudioSynth.create(oc, out);
+      for (const e of events) {
+        if (!e.vel) continue;
+        const at = e.at == null ? LopdaSong.ticksToSec(e.tick, song.bpm) : e.at;
+        if (e.track === "drums") synth.hit(LopdaSong.kitOf(song), e.key, at, e.vel);
+        else if (e.track === "chords") {
+          const notes = LopdaSong.chordNotes(song, e.deg, e.q, e.acc) || [];
+          const voice = LopdaSong.voiceOf(song, "chords");
+          const dur = LopdaSong.ticksToSec(e.len, song.bpm) * (e.gate || 1);
+          const strum = (LopdaStudioSynth.STRUM && LopdaStudioSynth.STRUM[voice]) || 0;
+          notes.slice().sort((a, b) => a - b).forEach((midi, i) => synth.note(voice, midi, at + i * strum, dur, e.vel));
+        } else {
+          const midi = LopdaSong.noteMidi(song, e.track, e.deg, e.acc);
+          if (midi == null) continue;
+          const dur = Math.max(0.05, LopdaSong.ticksToSec(e.len, song.bpm) * (e.gate || 1));
+          const opts = e.orn === "slide" ? { slide: true } : e.orn === "vib" ? { vib: true } : undefined;
+          synth.note(LopdaSong.voiceOf(song, e.track), midi, at, dur, e.vel, opts);
+        }
+      }
       return stats((await oc.startRendering()).getChannelData(0));
     };
     /* drums and notes together; an event is {kit, drum} or {voice, midi, at, dur}, both with at and vel */
@@ -311,6 +336,70 @@ test("studio synth: every melodic voice sounds low and high, under its target, a
     assert.ok(n.peak > 0.02, `${n.voice} ${n.midi} is audible (peak ${n.peak})`);
     assert.ok(n.peak <= targets[n.voice] * 1.1, `${n.voice} ${n.midi} peak ${n.peak} is under ${(targets[n.voice] * 1.1).toFixed(3)}`);
     assert.ok(n.diff < 1e-4, `${n.voice} ${n.midi} renders the same twice (max difference ${n.diff})`);
+  }
+  assert.deepEqual(errors, []);
+});
+
+test("studio synth: every 12.20 voice sounds at two pitches, peaks in its track's window and renders the same twice", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await studioPage(t, false);
+  /* bass 0.2-0.36, one chord note 0.04-0.11, melody 0.15-0.28 (section 12.20.2) */
+  const voices = {
+    pick: { pitches: [33, 57], lo: 0.2, hi: 0.36, seconds: 1.3 },
+    sub: { pitches: [33, 57], lo: 0.2, hi: 0.36, seconds: 1.3 },
+    guitar: { pitches: [48, 72], lo: 0.04, hi: 0.11, seconds: 1.3 },
+    piano: { pitches: [48, 72], lo: 0.04, hi: 0.11, seconds: 1.3 },
+    organ: { pitches: [48, 72], lo: 0.04, hi: 0.11, seconds: 1.3 },
+    strings: { pitches: [48, 72], lo: 0.04, hi: 0.11, seconds: 1.3 },
+    square: { pitches: [57, 79], lo: 0.15, hi: 0.28, seconds: 1.3 },
+    reed: { pitches: [57, 79], lo: 0.15, hi: 0.28, seconds: 1.3 },
+    bowed: { pitches: [57, 79], lo: 0.15, hi: 0.28, seconds: 1.3 },
+  };
+  const r = await p.evaluate(async (voices) => {
+    const out = { notes: [], strum: LopdaStudioSynth.STRUM };
+    for (const voice of Object.keys(voices)) {
+      for (const midi of voices[voice].pitches) {
+        const a = await renderNote(voice, midi, 0.4, 1, voices[voice].seconds);
+        const b = await renderNote(voice, midi, 0.4, 1, voices[voice].seconds);
+        out.notes.push({ voice, midi, peak: a.peak, last: a.last, diff: maxDiff(a.data, b.data) });
+      }
+    }
+    return out;
+  }, voices);
+  assert.equal(r.strum.guitar, 0.012, "the guitar's strum step is exported (low to high, 12 ms)");
+  for (const n of r.notes) {
+    const w = voices[n.voice];
+    t.diagnostic(`${n.voice} ${n.midi}: peak ${n.peak.toFixed(4)}, ends ${n.last.toFixed(3)} s, repeat diff ${n.diff.toExponential(2)}`);
+    assert.ok(n.peak > w.lo, `${n.voice} ${n.midi} peak ${n.peak} is above ${w.lo}`);
+    assert.ok(n.peak < w.hi, `${n.voice} ${n.midi} peak ${n.peak} is below ${w.hi}`);
+    assert.ok(n.diff < 1e-4, `${n.voice} ${n.midi} renders the same twice (max difference ${n.diff})`);
+  }
+  assert.deepEqual(errors, []);
+});
+
+test("studio synth: both 12.20 kits sound, each drum alone stays under 0.5, all four under 0.9, and render the same twice", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await studioPage(t, false);
+  const r = await p.evaluate(async () => {
+    const out = { drums: [], steps: {}, repeats: {} };
+    for (const kit of ["rock", "electro"]) {
+      for (const drum of ["kick", "snare", "hat", "perc"]) {
+        const a = await renderDrum(kit, drum);
+        out.drums.push({ kit, drum, peak: a.peak, last: a.last });
+      }
+      out.steps[kit] = (await renderStep(kit, 1)).peak;
+      const a = await renderDrum(kit, "snare"), b = await renderDrum(kit, "snare");
+      out.repeats[kit] = maxDiff(a.data, b.data);
+    }
+    return out;
+  });
+  for (const d of r.drums) {
+    t.diagnostic(`${d.kit} ${d.drum}: peak ${d.peak.toFixed(3)}, ends ${d.last.toFixed(3)} s`);
+    assert.ok(d.peak > 0.03, `${d.kit} ${d.drum} is audible (peak ${d.peak})`);
+    assert.ok(d.peak <= 0.5, `${d.kit} ${d.drum} peak ${d.peak} is at most 0.5`);
+  }
+  for (const kit of ["rock", "electro"]) {
+    t.diagnostic(`${kit} all four on one step: peak ${r.steps[kit].toFixed(3)}`);
+    assert.ok(r.steps[kit] < 0.9, `${kit}: all four drums together peak under 0.9 (${r.steps[kit]})`);
+    assert.ok(r.repeats[kit] < 1e-4, `${kit} renders the same twice (max difference ${r.repeats[kit]})`);
   }
   assert.deepEqual(errors, []);
 });
@@ -622,6 +711,16 @@ async function openFileMenu(p) {
   await p.locator("#studio-sheet .lcd-menu li", { hasText: "文件" }).click();
   await p.waitForSelector("#studio-sheet .lcd-menu");
 }
+/* the edit menu's deep switch; B twice leaves the menu (the first B goes back to the menu sheet) */
+async function enableDeep(p) {
+  await openEdit(p);
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "深度模式：关" }).click();
+  await p.waitForFunction(() => /深度模式：开/.test(document.querySelector("#studio-sheet").textContent));
+  await p.keyboard.press("z");
+  await p.waitForTimeout(60);
+  await p.keyboard.press("z");
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+}
 async function openFolders(p) {
   await openMenu(p);
   await p.locator("#studio-sheet .lcd-menu li", { hasText: "磁带库" }).click();
@@ -734,6 +833,14 @@ function storedMatches(data, want) {
   if (want.scale != null && data.scale !== want.scale) return false;
   if (want.swing != null && data.swing !== want.swing) return false;
   if (want.tape != null && data.tape !== want.tape) return false;
+  if (want.kit != null && data.kit !== want.kit) return false;
+  if (want.voice) {
+    for (const [id, voice] of Object.entries(want.voice)) {
+      const tr = (data.tracks || []).find((x) => x.id === id);
+      if (!tr) return false;
+      if (voice === null ? typeof tr.voice !== "undefined" : tr.voice !== voice) return false;
+    }
+  }
   if (want.tracks) {
     for (const [id, fields] of Object.entries(want.tracks)) {
       const tr = (data.tracks || []).find((x) => x.id === id);
@@ -758,6 +865,24 @@ async function waitStored(p, want, timeout = 6000) {
     try { data = await storedSong(p); } catch { /* not written yet */ }
     if (data && storedMatches(data, want)) return;
     if (Date.now() > end) throw new Error("the stored tape never matched " + JSON.stringify(want));
+    await p.waitForTimeout(50);
+  }
+}
+/* one stored note with its 12.20.5 extras; an absent field reads as null */
+const storedNote = (p, track, t) => p.evaluate(async ({ track, t }) => {
+  const meta = (await LopdaPlatform.db.doc("data/users/local/studio").get()).data();
+  const item = await LopdaPlatform.db.doc("data/users/local/studio/items/" + meta.current).get();
+  const list = (item.data().patterns[0].notes && item.data().patterns[0].notes[track]) || [];
+  const n = list.find((x) => x.t === t);
+  return n ? { acc: n.acc ?? null, gate: n.gate ?? null, orn: n.orn ?? null, q: n.q ?? null } : null;
+}, { track, t });
+async function waitStoredNote(p, track, t, want, timeout = 6000) {
+  const end = Date.now() + timeout;
+  for (;;) {
+    let got = null;
+    try { got = await storedNote(p, track, t); } catch { /* not written yet */ }
+    if (got && Object.entries(want).every(([k, v]) => got[k] === v)) return got;
+    if (Date.now() > end) throw new Error(`stored ${track} note at ${t} never matched ${JSON.stringify(want)} (got ${JSON.stringify(got)})`);
     await p.waitForTimeout(50);
   }
 }
@@ -1787,7 +1912,8 @@ test("studio: the mixer sets a track's level and mute, and they survive a reload
   await p.click('#studio-screens .st-scr[data-screen="mixer"]');
   await skipScreenTour(p);
   assert.equal(await p.locator("#studio-mix-rows .st-mix-row").count(), 4, "four instrument rows");
-  assert.deepEqual(await p.$$eval("#studio-mix-rows .st-mix-name", (els) => els.map((e) => e.textContent)), ["鼓", "贝斯", "和弦", "旋律"]);
+  assert.deepEqual(await p.$$eval("#studio-mix-rows .st-mix-track", (els) => els.map((e) => e.textContent)), ["鼓", "贝斯", "和弦", "旋律"]);
+  assert.deepEqual(await p.$$eval("#studio-mix-rows .st-mix-voice", (els) => els.map((e) => e.textContent)), ["软鼓", "合成", "电钢", "长笛"], "a fresh tape's default voices");
   assert.match(await p.textContent("#studio-mix-key"), /调式 A · 小调五声/);
   assert.match(await p.textContent("#studio-mix-sound"), /磁带 2 · 摇摆 55%/);
 
@@ -1810,6 +1936,130 @@ test("studio: the mixer sets a track's level and mute, and they survive a reload
   const back = p.locator('#studio-mix-rows .st-mix-row[data-track="drums"]');
   assert.equal(await back.locator(".st-mix-vol").textContent(), "8", "the level survives the reload");
   assert.equal(await back.locator(".st-mix-mute").getAttribute("aria-pressed"), "true", "the mute survives too");
+  assert.deepEqual(errors, []);
+});
+
+test("studio: the mixer's name button cycles a track's voice, saves it, and undo takes it back", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await p.click('#studio-screens .st-scr[data-screen="mixer"]');
+  await skipScreenTour(p);
+
+  const bass = p.locator('#studio-mix-rows .st-mix-row[data-track="bass"]');
+  assert.equal(await bass.locator(".st-mix-voice").textContent(), "合成", "a fresh tape plays the default bass");
+  await bass.locator(".st-mix-name").click();
+  assert.equal(await bass.locator(".st-mix-voice").textContent(), "拨弦", "the name button takes the next voice");
+  assert.equal(await bass.locator(".st-mix-name").getAttribute("aria-label"), "换贝斯的音色（现在：拨弦）");
+  await waitStored(p, { voice: { bass: "pick" } });
+
+  /* undo is one editable step back: the default voice comes back */
+  await openMenu(p);
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "撤销" }).click();
+  await p.click("#studio-sheet .st-sheet-close");
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  assert.equal(await bass.locator(".st-mix-voice").textContent(), "合成", "undo brings the default voice back");
+  await waitStored(p, { voice: { bass: null } });
+
+  /* pick it again and carry it through a reload */
+  await bass.locator(".st-mix-name").click();
+  assert.equal(await bass.locator(".st-mix-voice").textContent(), "拨弦");
+  await waitStored(p, { voice: { bass: "pick" } });
+
+  await p.click("#home-key");
+  await p.waitForTimeout(250);
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await openTile(p);
+  await p.click('#studio-screens .st-scr[data-screen="mixer"]');
+  await skipScreenTour(p);
+  const back = p.locator('#studio-mix-rows .st-mix-row[data-track="bass"]');
+  assert.equal(await back.locator(".st-mix-voice").textContent(), "拨弦", "the voice survives the reload");
+  assert.deepEqual(errors, []);
+});
+
+test("studio: the mixer's drum row cycles all four kits and saves each", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await p.click('#studio-screens .st-scr[data-screen="mixer"]');
+  await skipScreenTour(p);
+  const drums = p.locator('#studio-mix-rows .st-mix-row[data-track="drums"]');
+  const kitOrder = [["芯片", "chip"], ["原声", "rock"], ["电子", "electro"], ["软鼓", "soft"]];
+  for (const [label, id] of kitOrder) {
+    await drums.locator(".st-mix-name").click();
+    assert.equal(await drums.locator(".st-mix-voice").textContent(), label, `the drum row shows ${label}`);
+    assert.equal(await drums.locator(".st-mix-name").getAttribute("aria-label"), `换鼓的音色（现在：${label}）`);
+    await waitStored(p, { kit: id });
+  }
+  assert.deepEqual(errors, []);
+});
+
+test("studio: the guitar voice strums a chord 12 ms apart, low to high", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await hitCountingPage(t);
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await openTile(p);
+  await skipTour(p);
+  await p.click('#studio-screens .st-scr[data-screen="mixer"]');
+  await skipScreenTour(p);
+  const chords = p.locator('#studio-mix-rows .st-mix-row[data-track="chords"]');
+  assert.equal(await chords.locator(".st-mix-voice").textContent(), "电钢");
+  await chords.locator(".st-mix-name").click();
+  assert.equal(await chords.locator(".st-mix-voice").textContent(), "吉他");
+  await waitStored(p, { voice: { chords: "guitar" } });
+
+  await p.click('#studio-screens .st-scr[data-screen="chords"]');
+  await skipScreenTour(p);
+  await p.evaluate(() => { window.__studioNotes.length = 0; });
+  await p.click("#studio-play");
+  await p.waitForTimeout(800);
+  await p.click("#studio-play");
+  await p.waitForFunction(() => document.querySelector("#v-studio").getAttribute("data-playing") === "false");
+  const r = await p.evaluate(() => {
+    const g = window.__studioNotes.filter((n) => n.voice === "guitar");
+    if (!g.length) return { count: 0, notes: [] };
+    const base = Math.min(...g.map((n) => n.at));
+    const first = g.filter((n) => n.at - base < 0.2).sort((a, b) => a.midi - b.midi);
+    return { count: g.length, notes: first.map((n) => ({ midi: n.midi, dt: Math.round((n.at - base) * 1e6) / 1e6 })) };
+  });
+  assert.ok(r.count > 0, "the guitar chord sounds");
+  assert.ok(r.notes.length >= 3, `the chord has its notes: ${JSON.stringify(r.notes)}`);
+  for (let i = 1; i < r.notes.length; i++) {
+    assert.ok(r.notes[i].midi > r.notes[i - 1].midi, `low to high: ${JSON.stringify(r.notes)}`);
+    assert.ok(Math.abs(r.notes[i].dt - r.notes[i - 1].dt - 0.012) < 1e-6, `12 ms apart: ${JSON.stringify(r.notes)}`);
+  }
+  assert.deepEqual(errors, []);
+});
+
+test("studio: the mixer rows fit 331x359 with the name, level and mute buttons", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t, { width: 375, height: 503 });
+  await studioOpen(p);
+  await skipTour(p);
+  await p.click('#studio-screens .st-scr[data-screen="mixer"]');
+  await skipScreenTour(p);
+  const m = await p.evaluate(() => {
+    const v = document.querySelector("#v-studio").getBoundingClientRect();
+    const rows = [...document.querySelectorAll("#studio-mix-rows .st-mix-row")].map((r) => {
+      const b = r.getBoundingClientRect();
+      return { l: b.left - v.left, r: b.right - v.left, t: b.top - v.top, b: b.bottom - v.top };
+    });
+    const names = [...document.querySelectorAll("#studio-mix-rows .st-mix-name")].map((e) => {
+      const b = e.getBoundingClientRect();
+      return { w: b.width, h: b.height, scroll: e.scrollWidth, client: e.clientWidth };
+    });
+    const box = document.querySelector("#studio-mix-rows"), view = document.querySelector("#v-studio");
+    return { vw: v.width, vh: v.height, rows, names,
+      boxScroll: box.scrollWidth, boxClient: box.clientWidth,
+      viewScroll: view.scrollHeight, viewClient: view.clientHeight };
+  });
+  assert.ok(m.vw >= 330 && m.vw <= 332 && m.vh >= 358 && m.vh <= 360, `the view is 331x359 (${m.vw}x${m.vh})`);
+  for (const row of m.rows) assert.ok(row.l >= -1 && row.r <= m.vw + 1 && row.t >= -1 && row.b <= m.vh + 1,
+    `the row stays in the view: ${JSON.stringify(row)}`);
+  for (const n of m.names) {
+    assert.ok(n.w >= 44 && n.h >= 44, `the name is a 44 px target: ${JSON.stringify(n)}`);
+    assert.ok(n.scroll <= n.client + 1, `the name's two lines fit: ${JSON.stringify(n)}`);
+  }
+  assert.ok(m.boxScroll <= m.boxClient + 1, `the rows do not scroll sideways (${m.boxScroll} <= ${m.boxClient})`);
+  assert.ok(m.viewScroll <= m.viewClient, `the mixer screen does not scroll (${m.viewScroll} <= ${m.viewClient})`);
   assert.deepEqual(errors, []);
 });
 
@@ -1851,7 +2101,7 @@ test("studio: the key sheet sets the key and scale, and the mixer shows both", {
   await p.waitForSelector("#studio-sheet:not([hidden])");
   assert.equal(await p.textContent("#studio-sheet .sheet-title span"), "调式");
   assert.equal(await p.locator("#studio-sheet .st-key-btn").count(), 12, "twelve keys");
-  assert.equal(await p.locator("#studio-sheet .st-scale-btn").count(), 5, "five scales");
+  assert.equal(await p.locator("#studio-sheet .st-scale-btn").count(), 8, "eight scales");
   const close = await p.locator("#studio-sheet .st-sheet-close").boundingBox();
   assert.ok(close.width >= 44 && close.height >= 44, "the sheet's back button is a 44 px target");
   await p.locator('#studio-sheet .st-key-btn[data-key="0"]').click();
@@ -1949,6 +2199,65 @@ test("studio: 导出 WAV writes a mono 16-bit 22.05 kHz WAV with sound in it", {
   assert.deepEqual(errors, []);
 });
 
+test("studio: export this tape as JSON downloads the stored v1 song", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await p.evaluate(() => {
+    window.__json = null;
+    LopdaPlatform.downloads.save = async ({ filename, data }) => {
+      window.__json = { filename, type: data.type, text: await data.text() };
+      return { status: "saved" };
+    };
+  });
+  await openFileMenu(p);
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "导出这盘（JSON）" }).click();
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  await p.waitForFunction(() => window.__json, null, { timeout: 15000 });
+  const got = await p.evaluate(() => window.__json);
+  assert.match(got.filename, /^tape4-\d{8}-\d{4}\.json$/, "a dated tape4 name");
+  assert.equal(got.type, "application/json");
+  const checked = await p.evaluate(() => {
+    const song = JSON.parse(window.__json.text);
+    const out = LopdaSong.validate(song);
+    return { v: song.v, error: out.error || null, name: out.song && out.song.name };
+  });
+  assert.equal(checked.v, 1);
+  assert.equal(checked.error, null, "the JSON parses and validates as a v1 song");
+  assert.deepEqual(errors, []);
+});
+
+test("studio: export this tape as MIDI downloads a format 1 Standard MIDI File", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await p.evaluate(() => {
+    window.__midi = null;
+    LopdaPlatform.downloads.save = async ({ filename, data }) => {
+      const b = new Uint8Array(await data.arrayBuffer());
+      window.__midi = {
+        filename, type: data.type, size: b.length,
+        header: String.fromCharCode(...b.slice(0, 4)),
+        format: (b[8] << 8) | b[9], ntracks: (b[10] << 8) | b[11], division: (b[12] << 8) | b[13],
+      };
+      return { status: "saved" };
+    };
+  });
+  await openFileMenu(p);
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "导出这盘（MIDI）" }).click();
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  await p.waitForFunction(() => window.__midi, null, { timeout: 15000 });
+  const midi = await p.evaluate(() => window.__midi);
+  assert.match(midi.filename, /^tape4-\d{8}-\d{4}\.mid$/, "a dated tape4 name");
+  assert.equal(midi.type, "audio/midi");
+  assert.equal(midi.header, "MThd");
+  assert.equal(midi.format, 1);
+  assert.equal(midi.ntracks, 5, "one conductor and four instrument tracks");
+  assert.equal(midi.division, 96);
+  assert.ok(midi.size > 20, `a real file (${midi.size} bytes)`);
+  assert.deepEqual(errors, []);
+});
+
 test("studio tour: the mixer tour walks two steps to Done and a reopen is quiet", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await rtPage(t);
   await studioOpen(p);
@@ -2019,6 +2328,258 @@ test("studio: the second chord becomes VI/Fmaj9 and removing it re-ties the firs
   await waitStored(p, { pat: 0, track: "chords", notes: [[0, 384, 0]] });
   assert.deepEqual(errors, []);
 });
+
+/* ---------------- deep mode, the sixth column and the two deep sheets (docs/design/studio.md 12.20.5) ---------------- */
+test("studio: deep mode is off by default, the edit menu switches it, and only then do the sixth-column keys appear", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+
+  await openEdit(p);
+  assert.match(await p.textContent("#studio-sheet"), /深度模式：关/, "the switch starts off");
+  await p.keyboard.press("z");
+  await p.waitForTimeout(60);
+  await p.keyboard.press("z");
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+
+  await p.click('#studio-screens .st-scr[data-screen="bass"]');
+  await skipScreenTour(p);
+  assert.equal(await p.locator("#studio-note-acc").count(), 0, "deep off has no acc key");
+  assert.equal(await p.locator("#studio-note-play").count(), 0, "deep off has no play key");
+  assert.equal(await p.locator("#studio-keys .st-key").count(), 8, "the eight pitch keys only");
+
+  await p.click('#studio-screens .st-scr[data-screen="chords"]');
+  await skipScreenTour(p);
+  assert.equal(await p.locator("#studio-chord-acc").count(), 0, "deep off has no chord acc key");
+  assert.equal(await p.locator("#studio-chord-type").count(), 0, "deep off has no chord type key");
+  assert.equal(await p.locator("#studio-chord-keys .st-chord-key").count(), 6, "the six chord keys only");
+
+  await enableDeep(p);
+  assert.equal(await p.locator("#studio-chord-acc").isVisible(), true, "deep on grows the chord keys");
+  assert.equal(await p.isDisabled("#studio-chord-acc"), true, "with no chord selected the acc key is disabled");
+  assert.equal(await p.isDisabled("#studio-chord-type"), true, "with no chord selected the type key is disabled");
+  await p.locator('.st-chord-cell[data-half="0"]').click();
+  assert.equal(await p.isDisabled("#studio-chord-acc"), false, "a selected chord enables the acc key");
+  assert.equal(await p.isDisabled("#studio-chord-type"), false, "a selected chord enables the type key");
+
+  await p.click('#studio-screens .st-scr[data-screen="bass"]');
+  assert.equal(await p.locator("#studio-keys .st-key").count(), 10, "eight pitch keys plus acc and play");
+  assert.equal(await p.locator("#studio-note-play").isVisible(), true);
+  assert.equal(await p.isDisabled("#studio-note-acc"), true, "with no note selected the acc key is disabled");
+  assert.equal(await p.isDisabled("#studio-note-play"), true, "with no note selected the play key is disabled");
+  await p.locator('#studio-grid .st-cell[data-step="0"]').click();
+  assert.equal(await p.isDisabled("#studio-note-acc"), false, "a selected note enables the acc key");
+  assert.equal(await p.isDisabled("#studio-note-play"), false, "a selected note enables the play key");
+  assert.deepEqual(errors, []);
+});
+
+test("studio: deep mode's acc key cycles a melody note through sharp, flat and natural, and undo takes one change back", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await enableDeep(p);
+
+  await p.click('#studio-screens .st-scr[data-screen="melody"]');
+  await skipScreenTour(p);
+  await p.locator('#studio-grid .st-cell[data-step="0"]').click();
+  const cell = p.locator('#studio-grid .st-cell[data-step="0"]');
+  const accKey = p.locator("#studio-note-acc");
+  assert.equal(await cell.textContent(), "A", "the new melody note is A");
+  assert.equal(await accKey.textContent(), "♮", "nothing is sharpened or flattened yet");
+
+  await accKey.click();
+  assert.equal(await cell.textContent(), "Bb", "a sharp is written Bb, as the repo's names do");
+  assert.equal(await accKey.textContent(), "♯");
+  assert.equal(await p.textContent('#studio-keys .st-key[data-deg="0"] .st-key-name'), "A", "the pitch keys stay scale notes");
+  await waitStoredNote(p, "melody", 0, { acc: 1 });
+
+  await p.keyboard.press("Control+z");
+  assert.equal(await cell.textContent(), "A", "undo puts the pitch name back");
+  assert.equal(await accKey.textContent(), "♮");
+  await waitStoredNote(p, "melody", 0, { acc: null });
+
+  await accKey.click();
+  assert.equal(await cell.textContent(), "Bb");
+  await waitStoredNote(p, "melody", 0, { acc: 1 });
+  await accKey.click();
+  assert.equal(await cell.textContent(), "Ab", "the second tap is a flat");
+  assert.equal(await accKey.textContent(), "♭");
+  await waitStoredNote(p, "melody", 0, { acc: -1 });
+  await accKey.click();
+  assert.equal(await cell.textContent(), "A", "the third tap is natural again");
+  assert.equal(await accKey.textContent(), "♮");
+  await waitStoredNote(p, "melody", 0, { acc: null });
+  assert.deepEqual(errors, []);
+});
+
+test("studio: the deep play sheet stores gate 0.5 and slide, stays open, and the bass shows no vibrato", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await enableDeep(p);
+
+  await p.click('#studio-screens .st-scr[data-screen="melody"]');
+  await skipScreenTour(p);
+  await p.locator('#studio-grid .st-cell[data-step="0"]').click();
+  await p.click("#studio-note-play");
+  await p.waitForSelector("#studio-sheet:not([hidden])");
+  assert.match(await p.textContent("#studio-sheet .sheet-title"), /演奏/);
+
+  await p.locator('#studio-sheet .st-deep-btn[data-gate="0.5"]').click();
+  assert.equal(await p.isVisible("#studio-sheet"), true, "a gate pick keeps the sheet open");
+  assert.match(await p.getAttribute('#studio-sheet .st-deep-btn[data-gate="0.5"]', "class"), /\bon\b/);
+  await waitStoredNote(p, "melody", 0, { gate: 0.5 });
+
+  await p.locator('#studio-sheet .st-deep-btn[data-orn="slide"]').click();
+  assert.equal(await p.isVisible("#studio-sheet"), true, "an ornament pick keeps the sheet open");
+  assert.match(await p.getAttribute('#studio-sheet .st-deep-btn[data-orn="slide"]', "class"), /\bon\b/);
+  await waitStoredNote(p, "melody", 0, { gate: 0.5, orn: "slide" });
+  await p.keyboard.press("z");
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+
+  await p.click('#studio-screens .st-scr[data-screen="bass"]');
+  await skipScreenTour(p);
+  await p.locator('#studio-grid .st-cell[data-step="0"]').click();
+  await p.click("#studio-note-play");
+  await p.waitForSelector("#studio-sheet:not([hidden])");
+  assert.equal(await p.locator('#studio-sheet .st-deep-btn[data-orn="vib"]').count(), 0, "the bass offers no vibrato");
+  assert.equal(await p.locator('#studio-sheet .st-deep-btn[data-orn]').count(), 2, "the bass offers none and slide");
+  await p.keyboard.press("z");
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  assert.deepEqual(errors, []);
+});
+
+test("studio: the deep chord type sheet sets m7, 自动 clears it, and the root acc writes a flat roman numeral", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  /* a stored chord on the seventh degree: the six chord keys only reach I-VI, but a tape (or the AI) may carry VII */
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await p.evaluate(async () => {
+    const song = LopdaSong.newSong(Date.now());
+    song.patterns[0].notes.chords = [
+      { t: 0, len: 192, deg: 0, vel: LopdaSong.NOTE_VEL },
+      { t: 192, len: 192, deg: 6, vel: LopdaSong.NOTE_VEL },
+    ];
+    await LopdaPlatform.db.doc("data/users/local/studio").set({
+      current: "studio-deep-chord", hushTip: true, toured: { rhythm: true, notes: true, chords: true },
+    });
+    await LopdaPlatform.db.doc("data/users/local/studio/items/studio-deep-chord").set(song);
+  });
+  await openTile(p);
+  await enableDeep(p);
+
+  await p.click('#studio-screens .st-scr[data-screen="chords"]');
+  await p.locator('.st-chord-cell[data-half="0"]').click();
+  await p.click("#studio-chord-type");
+  await p.waitForSelector("#studio-sheet:not([hidden])");
+  assert.equal(await p.locator("#studio-sheet .st-q-btn").count(), 18, "自动 plus the 17 qualities");
+  assert.equal(await p.locator('#studio-sheet .st-q-btn[data-q=""]').evaluate((e) => e.classList.contains("on")), true, "a chord without q marks 自动");
+
+  await p.locator('#studio-sheet .st-q-btn[data-q="m7"]').click();
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  assert.match(await p.textContent('.st-chord-cell[data-half="0"]'), /Am7/, "the cell reads Am7");
+  await waitStoredNote(p, "chords", 0, { q: "m7" });
+
+  await p.click("#studio-chord-type");
+  await p.locator('#studio-sheet .st-q-btn[data-q=""]').click();
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  assert.match(await p.textContent('.st-chord-cell[data-half="0"]'), /Am9/, "自动 goes back to the automatic voicing");
+  assert.doesNotMatch(await p.textContent('.st-chord-cell[data-half="0"]'), /m7/);
+  await waitStoredNote(p, "chords", 0, { q: null });
+
+  await p.click("#studio-chord-type");
+  await p.locator('#studio-sheet .st-q-btn[data-q="sus4"]').click();
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  assert.match(await p.textContent('.st-chord-cell[data-half="0"]'), /Asus4/);
+  await waitStoredNote(p, "chords", 0, { q: "sus4" });
+  await p.keyboard.press("Control+z");
+  assert.match(await p.textContent('.st-chord-cell[data-half="0"]'), /Am9/, "undo removes the one q change");
+  await waitStoredNote(p, "chords", 0, { q: null });
+
+  await p.locator('.st-chord-cell[data-half="1"]').click();
+  assert.match(await p.textContent('.st-chord-cell[data-half="1"]'), /VII/, "the stored chord is on VII");
+  await p.click("#studio-chord-acc");
+  const flat = await p.textContent('.st-chord-cell[data-half="1"]');
+  assert.match(flat, /♭VII/, "the flat seventh is written ♭VII");
+  await waitStoredNote(p, "chords", 192, { acc: -1 });
+  assert.deepEqual(errors, []);
+});
+
+test("studio: the deep mode setting survives a reload", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await enableDeep(p);
+  await p.waitForTimeout(150);
+
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await openTile(p);
+  await openEdit(p);
+  assert.match(await p.textContent("#studio-sheet"), /深度模式：开/, "the switch is still on after the reload");
+  await p.keyboard.press("z");
+  await p.waitForTimeout(60);
+  await p.keyboard.press("z");
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  await p.click('#studio-screens .st-scr[data-screen="bass"]');
+  await skipScreenTour(p);
+  assert.equal(await p.locator("#studio-note-acc").isVisible(), true, "the deep keys are back too");
+  assert.deepEqual(errors, []);
+});
+
+test("studio: deep mode's note keys, chord keys and both sheets fit 331x359 with 44 px targets", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t, { width: 375, height: 503 });
+  await studioOpen(p);
+  await skipTour(p);
+  await enableDeep(p);
+  const measureKeys = (p, which) => p.evaluate((id) => {
+    const view = document.querySelector("#v-studio"), box = document.querySelector(id);
+    const small = [...box.querySelectorAll("button")].filter((e) => {
+      const r = e.getBoundingClientRect();
+      return r.width > 0 && r.height > 0 && (r.width < 44 - 0.5 || r.height < 44 - 0.5);
+    }).map((e) => ({ id: e.id, text: e.textContent.trim(), w: e.getBoundingClientRect().width, h: e.getBoundingClientRect().height }));
+    return { viewOverflow: view.scrollWidth - view.clientWidth, overflow: box.scrollWidth - box.clientWidth, small };
+  }, which);
+  const measureSheet = (p) => p.evaluate(() => {
+    const sh = document.querySelector("#studio-sheet");
+    return { scroll: sh.scrollHeight, client: sh.clientHeight,
+      small: [...sh.querySelectorAll("button")].filter((e) => {
+        const r = e.getBoundingClientRect();
+        return r.width > 0 && r.height > 0 && (r.width < 44 - 0.5 || r.height < 44 - 0.5);
+      }).map((e) => ({ text: e.textContent.trim(), w: e.getBoundingClientRect().width, h: e.getBoundingClientRect().height })) };
+  });
+
+  await p.click('#studio-screens .st-scr[data-screen="bass"]');
+  await skipScreenTour(p);
+  await p.locator('#studio-grid .st-cell[data-step="0"]').click();
+  const noteKeys = await measureKeys(p, "#studio-keys");
+  assert.ok(noteKeys.viewOverflow <= 0, `the note screen does not overflow (${noteKeys.viewOverflow})`);
+  assert.ok(noteKeys.overflow <= 0, `the six-column key grid does not overflow (${noteKeys.overflow})`);
+  assert.deepEqual(noteKeys.small, [], "every note key is at least 44 px");
+
+  await p.click("#studio-note-play");
+  await p.waitForSelector("#studio-sheet:not([hidden])");
+  const playSheet = await measureSheet(p);
+  assert.ok(playSheet.scroll <= playSheet.client, `the play sheet fits (${playSheet.scroll} <= ${playSheet.client})`);
+  assert.deepEqual(playSheet.small, [], "every play-sheet button is at least 44 px");
+  await p.keyboard.press("z");
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+
+  await p.click('#studio-screens .st-scr[data-screen="chords"]');
+  await skipScreenTour(p);
+  await p.locator('.st-chord-cell[data-half="0"]').click();
+  const chordKeys = await measureKeys(p, "#studio-chord-keys");
+  assert.ok(chordKeys.viewOverflow <= 0, `the chord screen does not overflow (${chordKeys.viewOverflow})`);
+  assert.ok(chordKeys.overflow <= 0, `the five-column chord grid does not overflow (${chordKeys.overflow})`);
+  assert.deepEqual(chordKeys.small, [], "every chord key is at least 44 px");
+
+  await p.click("#studio-chord-type");
+  await p.waitForSelector("#studio-sheet:not([hidden])");
+  assert.equal(await p.locator("#studio-sheet .st-q-btn").count(), 18);
+  const typeSheet = await measureSheet(p);
+  assert.ok(typeSheet.scroll <= typeSheet.client, `the type sheet fits (${typeSheet.scroll} <= ${typeSheet.client})`);
+  assert.deepEqual(typeSheet.small, [], "every type-sheet button is at least 44 px");
+  assert.deepEqual(errors, []);
+});
+
 
 test("studio: the rest key makes a bass cell a silent event, ends the note before it, and keeps the last degree", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await hitCountingPage(t);
@@ -3271,18 +3832,21 @@ test("studio: the guide, the pop example and clear-track", { skip, timeout: 9000
   assert.deepEqual(errors, []);
 });
 
-test("studio: quick AI commands work with no key, and an AI reply is previewed and undoable", { skip, timeout: 90000 }, async (t) => {
+test("studio: with no key nothing changes the tape; an AI reply is previewed and undoable", { skip, timeout: 90000 }, async (t) => {
   const { p, errors } = await rtPage(t);
   await studioOpen(p);
   await skipTour(p);
+  /* the local phrase matcher is gone (owner, 2026-10-31): with no key a request only says so, the tempo stays */
+  const before = await p.textContent("#studio-bpm");
   await p.click("#studio-menu");
   await p.locator("#studio-sheet .lcd-menu li", { hasText: "让 AI 改" }).click();
   await p.waitForSelector("#studio-ai-input");
-  await p.fill("#studio-ai-input", "节奏更快点");
+  await p.fill("#studio-ai-input", "来一首 E 大调 12 bar blues");
   await p.locator("#studio-sheet .st-sheet-btn", { hasText: "说" }).click();
-  await p.waitForSelector("#studio-sheet", { state: "hidden" });
-  assert.match(await p.textContent("#studio-bpm"), /86 BPM/, "the quick command changed the tempo");
-  assert.match(await p.textContent("#toast"), /本地/, "the quick command says it was done locally");
+  assert.match(await p.textContent("#toast"), /没接上 AI/);
+  assert.equal(await p.textContent("#studio-bpm"), before);
+  await p.click("#studio-sheet .st-sheet-head button").catch(() => {});
+  await p.keyboard.press("z");
 
   /* the harness' first ask is held open: the sheet shows the stage and the link line, and a signal flips the mark */
   await p.evaluate(() => {
@@ -3315,7 +3879,43 @@ test("studio: quick AI commands work with no key, and an AI reply is previewed a
   assert.match(await p.textContent("#studio-bpm"), /100 BPM/);
   await p.click("#studio-menu");
   await p.locator("#studio-sheet .lcd-menu li", { hasText: "撤销" }).first().click();
-  assert.match(await p.textContent("#studio-bpm"), /86 BPM/, "the AI edit is one undo step");
+  assert.equal(await p.textContent("#studio-bpm"), before, "the AI edit is one undo step");
+  assert.deepEqual(errors, []);
+});
+
+test("studio: a dropped AI line is dialled again, then the user decides; a long AI edit (over 64 changes) applies", { skip, timeout: 120000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await p.evaluate(() => {
+    LP.ai.on = () => true;
+    window.__aiCalls = 0;
+    /* 86 hat changes in two ops calls, like the owner's nine-bar rewrite (2026-10-30) */
+    const ops = [];
+    for (let i = 0; i < 86; i++) ops.push({ op: "setDrum", pattern: 0, drum: "hat", step: i % 16, on: i % 2 === 0, vel: 0.4 });
+    const answer = JSON.stringify({ reply: "改好了很多处", calls: [{ tool: "ops", ops: ops.slice(0, 43) }, { tool: "ops", ops: ops.slice(43) }], done: true });
+    LP.ai.ask = () => {
+      window.__aiCalls++;
+      /* the first four asks fail like a dead line: three automatic redials, then the user is asked */
+      if (window.__aiCalls <= 4) { const e = new Error("offline"); e.code = "offline"; const r = Promise.reject(e); r.stop = () => {}; return r; }
+      const ok = Promise.resolve(answer); ok.stop = () => {}; return ok;
+    };
+  });
+  await p.click("#studio-menu");
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "让 AI 改" }).click();
+  await p.waitForSelector("#studio-ai-input");
+  await p.fill("#studio-ai-input", "把踩镲改密一点");
+  await p.locator("#studio-sheet .st-sheet-btn", { hasText: "说" }).click();
+  await p.waitForFunction(() => /重拨/.test((document.querySelector("#studio-ai-stage") || {}).textContent || ""));
+  await p.waitForSelector("#studio-ai-again", { timeout: 40000 });
+  assert.equal(await p.evaluate(() => window.__aiCalls), 4, "three automatic redials after the first try");
+  assert.match(await p.textContent("#studio-sheet .st-ai-trouble"), /做好的步骤都还在/);
+  await p.click("#studio-ai-again");
+  await p.waitForSelector("#studio-sheet .st-ai-preview");
+  assert.match(await p.textContent("#studio-sheet"), /86 处改动/);
+  await p.locator("#studio-sheet .st-sheet-btn", { hasText: "采用并试听" }).click();
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  assert.doesNotMatch(await p.textContent("#toast"), /不合法/, "a preview of 86 changes applies");
   assert.deepEqual(errors, []);
 });
 
@@ -3328,17 +3928,17 @@ test("studio: an AI draft becomes a new tape and leaves the current one alone", 
       card: 1, name: "雨夜测试", bpm: 100,
       sections: [
         { id: "intro", chords: [0], groove: "lofi-a", energy: 0, bass: "whole", melody: false },
-        { id: "verse", chords: [0, 5, 3, 4], groove: "lofi-a", energy: 1, bass: "whole", melody: true },
-        { id: "chorus", chords: [3, 4, 0, 5], groove: "lofi-a", energy: 2, bass: "whole", melody: true },
+        { id: "verse", chords: [0, 5, 3, 4], groove: "lofi-a", energy: 1, bass: "pulse", melody: true },
+        { id: "chorus", chords: [3, 4, 0, 5], groove: "lofi-a", energy: 2, bass: "eighths", melody: true },
         { id: "outro", chords: [0], groove: "lofi-a", energy: 0, bass: "whole", melody: false },
       ],
-      order: [["intro", 1], ["verse", 3], ["chorus", 3], ["verse", 2], ["chorus", 3], ["outro", 1]],
+      order: [["intro", 1], ["verse", 2], ["chorus", 2], ["verse", 2], ["chorus", 2], ["verse", 1], ["chorus", 1], ["outro", 1]],
     };
     const melody = { bars: [
-      [[0, 0, 0.9], [4, 2, 0.7], [8, 4, 0.8], [12, 2, 0.6]],
-      [[0, 2, 0.9], [4, 4, 0.7], [8, 2, 0.8], [12, 0, 0.6]],
-      [[0, 4, 0.9], [4, 2, 0.7], [8, 0, 0.8], [12, 2, 0.6]],
-      [[0, 0, 0.9], [4, 4, 0.7], [8, 2, 0.8], [12, 0, 0.6]],
+      [[0, 2, 0.9], [3, 3, 0.7], [4, 4, 0.8], [8, 2, 0.8], [12, 1, 0.7]],
+      { repeat: 1, end: [[8, 4, 0.9]] },
+      { sequence: 1, by: 1 },
+      [[0, 2, 0.9], [6, 1, 0.7], [8, 0, 0.9]],
     ] };
     const answers = { plan: JSON.stringify(plan), melody: JSON.stringify(melody),
       listen: JSON.stringify({ reply: "这盘磁带写好了", calls: [] }) };
@@ -3360,10 +3960,14 @@ test("studio: an AI draft becomes a new tape and leaves the current one alone", 
   assert.match(await p.textContent("#studio-sheet .st-sheet-label"), /新磁带/);
   assert.match(await p.textContent("#studio-sheet .st-ai-card"), /抽到风格卡.*BPM/);
   assert.match(await p.textContent("#studio-sheet .st-ai-reply"), /这盘磁带写好了/);
-  assert.deepEqual(await p.evaluate(() => window.__aiSteps), ["plan", "melody", "melody", "listen"]);
+  /* the fake answers the chorus with the verse's notes, so the critic asks again: plan, melodies, listen */
+  const steps = await p.evaluate(() => window.__aiSteps);
+  assert.equal(steps[0], "plan");
+  assert.equal(steps.at(-1), "listen");
+  assert.ok(steps.filter((x) => x === "melody").length >= 2);
   await p.locator("#studio-sheet .st-sheet-btn", { hasText: "采用并试听" }).click();
   await p.waitForFunction(() => /100 BPM/.test((document.querySelector("#studio-bpm") || {}).textContent || ""));
-  assert.equal(await p.getAttribute("#v-studio", "data-screen"), "drums");
+  assert.equal(await p.getAttribute("#v-studio", "data-screen"), "song", "use and listen plays the whole song on the song screen");
   await openMyTapes(p);
   await p.waitForFunction(() => /雨夜测试/.test((document.querySelector("#studio-sheet .st-proj-list") || {}).textContent || ""));
   assert.equal(await p.locator("#studio-sheet .st-proj-list li").count(), 2, "the original tape is still there");
@@ -3566,5 +4170,77 @@ test("studio: editing a demo copy turns it into a normal tape in My tapes", { sk
   await openFolders(p);
   assert.doesNotMatch(await p.textContent("#studio-sheet .st-proj-list"), /示例副本/, "the copies folder is gone");
   assert.match(await p.textContent("#studio-sheet .st-proj-list"), /我的磁带\s*2/);
+  assert.deepEqual(errors, []);
+});
+
+/* ---------- 12.20.5: the twelve semitones, gate and the ornaments, offline ---------- */
+test("studio synth: a melody note with acc 1 sounds a semitone higher", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await studioPage(t, false);
+  const r = await p.evaluate(async () => {
+    const SR = 22050;
+    const song = LopdaSong.newSong();
+    song.patterns[0].notes.drums = [];
+    song.patterns[0].notes.bass = [];
+    song.patterns[0].notes.chords = [];
+    song.patterns[0].notes.melody = [{ t: 0, len: 96, deg: 0, vel: 0.8 }];
+    const ev = () => LopdaSong.events(song, 0, 0, 16 * LopdaSong.STEP);
+    const low = await renderSongEvents(song, ev(), 1);
+    song.patterns[0].notes.melody[0].acc = 1;
+    const high = await renderSongEvents(song, ev(), 1);
+    const f0 = 440 * Math.pow(2, (LopdaSong.noteMidi(song, "melody", 0, 0) - 69) / 12);
+    const a = pitchAt(low.data, SR, f0, 0.15, 0.5);
+    const b = pitchAt(high.data, SR, f0 * Math.pow(2, 1 / 12), 0.15, 0.5);
+    return { peakLow: low.peak, peakHigh: high.peak, freqLow: a.freq, freqHigh: b.freq, cents: 1200 * Math.log2(b.freq / a.freq) };
+  });
+  t.diagnostic(`acc 0 ${r.freqLow.toFixed(1)} Hz, acc 1 ${r.freqHigh.toFixed(1)} Hz, ${r.cents.toFixed(1)} cents apart`);
+  assert.ok(r.peakLow > 0.05 && r.peakHigh > 0.05, "both notes sound");
+  assert.ok(Math.abs(r.cents - 100) < 15, `acc 1 is a semitone higher (${r.cents.toFixed(1)} cents)`);
+  assert.deepEqual(errors, []);
+});
+
+test("studio synth: gate 0.25 falls silent after a quarter of the length plus the release", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await studioPage(t, false);
+  const r = await p.evaluate(async () => {
+    const song = LopdaSong.newSong();
+    song.patterns[0].notes.drums = [];
+    song.patterns[0].notes.bass = [];
+    song.patterns[0].notes.chords = [];
+    song.patterns[0].notes.melody = [{ t: 0, len: 96, deg: 0, vel: 0.8, gate: 0.25 }];
+    const ev = () => LopdaSong.events(song, 0, 0, 16 * LopdaSong.STEP);
+    const short = await renderSongEvents(song, ev(), 1.2);
+    song.patterns[0].notes.melody[0].gate = 1;
+    const long = await renderSongEvents(song, ev(), 1.2);
+    return {
+      shortLast: short.last, longLast: long.last,
+      shortTail: peakBetween(short.data, 0.36, 1.15), longMid: peakBetween(long.data, 0.4, 0.6),
+    };
+  });
+  t.diagnostic(`gate 0.25 last ${r.shortLast.toFixed(3)} s, gate 1 last ${r.longLast.toFixed(3)} s`);
+  assert.ok(r.shortLast < 0.4, `the short note ends after its quarter plus release (${r.shortLast})`);
+  assert.ok(r.shortTail < 1e-4, `nothing sounds after it (${r.shortTail})`);
+  assert.ok(r.longLast > 0.7, "the full-length note still rings");
+  assert.ok(r.longMid > 0.01, "the full-length note sounds at 0.5 s");
+  assert.deepEqual(errors, []);
+});
+
+test("studio synth: every bass and melody voice honours slide and vib and renders the same twice", { skip, timeout: 120000 }, async (t) => {
+  const { p, errors } = await studioPage(t, false);
+  const r = await p.evaluate(async () => {
+    const voices = { bass: 45, pick: 45, sub: 45, flute: 69, square: 69, pluck: 69, reed: 69, bowed: 69 };
+    const out = [];
+    for (const voice of Object.keys(voices)) {
+      for (const kind of ["slide", "vib"]) {
+        const opts = kind === "slide" ? { slide: true } : { vib: true };
+        const a = await renderNote(voice, voices[voice], 0.4, 1, 1, opts);
+        const b = await renderNote(voice, voices[voice], 0.4, 1, 1, opts);
+        out.push({ voice, kind, peak: a.peak, diff: maxDiff(a.data, b.data) });
+      }
+    }
+    return out;
+  });
+  for (const n of r) {
+    assert.ok(n.peak > 0.01, `${n.voice} ${n.kind} sounds (peak ${n.peak})`);
+    assert.ok(n.diff < 1e-4, `${n.voice} ${n.kind} renders the same twice (max difference ${n.diff})`);
+  }
   assert.deepEqual(errors, []);
 });

@@ -18,13 +18,15 @@
 
 var MAX=4, BASE_DELAY=0.012, NOISE_SECONDS=2;
 
-/* the five positions: filter cutoff, bit depth, wow depth (s), wet delay mix, hiss/crackle level */
+/* the five positions: filter cutoff, bit depth, wow depth (s), wet delay mix, hiss/crackle level.
+   3 and 4 were made gentler (owner, 2026-10-30: "4 is very, very heavy; I already don't like 3"): 4 now sits between
+   the old 2 and 3, so the strongest tape still sounds worn but every note survives it. 0-2 are unchanged. */
 var COLOR=[
   {cut:20000, bits:16, wow:0,     wet:0,    noise:0},
   {cut:7000,  bits:11, wow:0.0015,wet:0.10, noise:0.0012},
   {cut:4000,  bits:9,  wow:0.0025,wet:0.18, noise:0.0025},
-  {cut:2200,  bits:7,  wow:0.0035,wet:0.26, noise:0.0045},
-  {cut:1200,  bits:5,  wow:0.0045,wet:0.34, noise:0.0075}
+  {cut:3400,  bits:9,  wow:0.0028,wet:0.20, noise:0.0030},
+  {cut:2800,  bits:8,  wow:0.0031,wet:0.22, noise:0.0036}
 ];
 
 function clampLevel(n){

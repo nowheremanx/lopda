@@ -39,8 +39,8 @@ var BASE="data/users/local/studio", LOOKAHEAD=0.1, LOOP_MS=25, SAVE_MS=1000;
 var LETTERS="ABCDEFGHIJKLMNOP";
 /* the mixer's four instrument rows (12.14); the voice row joins them in step 2, when it can sound */
 var MIX_TRACKS=["drums","bass","chords","melody"];
-var TAPE=window.LopdaStudioTape, WAV=window.LopdaWav, ZIP=window.LopdaZip;
-var EDIT=window.LopdaStudioEdit, CMD=window.LopdaStudioCommand, H=window.LopdaStudioHarness;
+var TAPE=window.LopdaStudioTape, WAV=window.LopdaWav, MIDI=window.LopdaMidi, ZIP=window.LopdaZip;
+var EDIT=window.LopdaStudioEdit, H=window.LopdaStudioHarness;
 
 var T={
   song:null, id:"", meta:null,
@@ -55,7 +55,7 @@ var T={
   versions:[], versionsOk:false, versionPick:0, projects:null, projectsLoading:false,
   projectFolder:"", templatePick:"", deletePick:"", importData:null, guidePage:0,
   /* 12.16: the assistant's one request and the preview waiting for 采用 */
-  aiBusy:false, aiJob:null, aiPreview:null, aiNote:"",
+  aiBusy:false, aiJob:null, aiPreview:null, aiNote:"", aiTrouble:null,
   aiCard:"", aiStage:"", aiSig:null, aiMark:false, aiT0:0, aiLast:0, aiTick:0,
   /* the player: one chain clock, chainPat is what is scheduled, playPat is what the ears hear */
   playing:false, mode:"", playPat:0, chainPat:0, pendingPat:-1, queued:-1, boundaryGlobal:0,
@@ -246,6 +246,7 @@ function loadStore(){
     T.metaOk=true;                 /* read OK (or showed none): meta can be written from here */
     if(!T.meta.toured || typeof T.meta.toured!=="object" || Array.isArray(T.meta.toured)) T.meta.toured={};
     T.meta.hushTip=T.meta.hushTip===true;
+    T.meta.deep=T.meta.deep===true;   /* 12.20.5: the deep screens, off unless this device turned them on */
     if(!Array.isArray(T.meta.folders)) T.meta.folders=[];
     else {
       var rawFolders=T.meta.folders, cleanFolders=[], fi;
@@ -719,6 +720,29 @@ function toggleMute(id){
   touch();
   renderMixer(); renderNav();
 }
+/* 12.20.3: a tap on a row's name cycles its voice (or the drum row its kit) as one undoable edit, then auditions
+   it: bass and melody the tonic, chords chord 0, drums a kick and a snare. */
+function cycleVoice(id){
+  var choices=SONGS.VOICE_CHOICES[id], cur, i;
+  if(!T.loaded || !T.song || !choices) return;
+  cur=SONGS.voiceOf(T.song,id);
+  i=(choices.indexOf(cur)+1)%choices.length;
+  T.song=SONGS.setTrackVoice(T.song,id,choices[i]);
+  touch();
+  renderMixer();
+  if(id==="chords") auditionChord(0);
+  else auditionNote(id,0);
+}
+function cycleKit(){
+  var cur, i;
+  if(!T.loaded || !T.song) return;
+  cur=SONGS.kitOf(T.song);
+  i=(SONGS.KIT_CHOICES.indexOf(cur)+1)%SONGS.KIT_CHOICES.length;
+  T.song.kit=SONGS.KIT_CHOICES[i];
+  touch();
+  renderMixer(); renderSheet();
+  auditionKit();
+}
 function setKey(k){
   if(!T.loaded || !T.song || SONGS.NAMES[k]==null) return;
   T.song.key=k;
@@ -752,18 +776,25 @@ function setSwing(v){
 /* one note or hit on a synth: the drum kit, the voice of each track, the chord expanded (12.6, 12.7). Shared by the
    live player and the offline WAV render, so both hear the mixer's level. */
 function soundEvent(song,e,at,bpm,synth,vol){
-  var i, notes, midi;
+  var i, notes, midi, voice, strum, dur, opts;
   if(!synth || !song || !e.vel || !(vol>0)) return;
   if(e.track==="drums"){
-    if(e.key) synth.hit(song.kit,e.key,at,e.vel*vol);
+    if(e.key) synth.hit(SONGS.kitOf(song),e.key,at,e.vel*vol);
   } else if(e.track==="chords"){
-    notes=SONGS.chordNotes(song,e.deg);
+    notes=SONGS.chordNotes(song,e.deg,e.q,e.acc);
     if(!notes) return;
-    for(i=0;i<notes.length;i++) synth.note(SONGS.SOUND.chords,notes[i],at,SONGS.ticksToSec(e.len,bpm),e.vel*vol);
+    voice=SONGS.voiceOf(song,"chords");
+    dur=SONGS.ticksToSec(e.len,bpm)*(e.gate||1);
+    /* 12.20.3: a strummed voice sweeps the chord low to high; a song without voices keeps one instant */
+    strum=(SYNTH.STRUM && SYNTH.STRUM[voice]) || 0;
+    notes=notes.slice().sort(function(a,b){ return a-b; });
+    for(i=0;i<notes.length;i++) synth.note(voice,notes[i],at+i*strum,dur,e.vel*vol);
   } else if(e.track==="bass" || e.track==="melody"){
-    midi=SONGS.noteMidi(song,e.track,e.deg);
+    midi=SONGS.noteMidi(song,e.track,e.deg,e.acc);
     if(midi==null) return;
-    synth.note(SONGS.SOUND[e.track],midi,at,Math.max(0.05,SONGS.ticksToSec(e.len,bpm)),e.vel*vol);
+    dur=SONGS.ticksToSec(e.len,bpm)*(e.gate||1);
+    opts=e.orn==="slide" ? {slide:true} : e.orn==="vib" ? {vib:true} : undefined;
+    synth.note(SONGS.voiceOf(song,e.track),midi,at,Math.max(0.05,dur),e.vel*vol,opts);
   }
 }
 function playEvent(e,at,bpm){
@@ -1000,20 +1031,149 @@ function guideTip(){
 function auditionDrum(){
   var synth=ensureSynth(), vol=trackVol("drums");
   if(!synth || !T.song) return;
-  synth.hit(T.song.kit,T.drum,LP.SND.ctx.currentTime+0.001,vol);
+  synth.hit(SONGS.kitOf(T.song),T.drum,LP.SND.ctx.currentTime+0.001,vol);
 }
-function auditionNote(track,deg){
-  var synth=ensureSynth(), midi, vol=trackVol(track);
+function auditionNote(track,deg,acc,gate,orn){
+  var synth=ensureSynth(), midi, vol=trackVol(track), dur, opts;
   if(!synth || !T.song) return;
-  midi=SONGS.noteMidi(T.song,track,deg);
+  midi=SONGS.noteMidi(T.song,track,deg,acc);
   if(midi==null) return;
-  synth.note(SONGS.SOUND[track],midi,LP.SND.ctx.currentTime+0.001,0.4,SONGS.NOTE_VEL*vol);
+  /* 12.20.5: a deep-mode preview keeps the note's length and ornament; a plain audition stays 0.4 s as before */
+  dur=0.4*(typeof gate==="number" ? gate : 1);
+  if(dur<0.05) dur=0.05;
+  opts=orn==="slide" ? {slide:true} : orn==="vib" ? {vib:true} : null;
+  synth.note(SONGS.voiceOf(T.song,track),midi,LP.SND.ctx.currentTime+0.001,dur,SONGS.NOTE_VEL*vol,opts||undefined);
 }
-function auditionChord(deg){
-  var synth=ensureSynth(), notes=SONGS.chordNotes(T.song,deg), i, now, vol=trackVol("chords");
+function auditionChord(deg,acc,q){
+  var synth=ensureSynth(), notes=SONGS.chordNotes(T.song,deg,q,acc), i, now, vol=trackVol("chords");
+  var voice, strum;
   if(!synth || !notes) return;
   now=LP.SND.ctx.currentTime+0.001;
-  for(i=0;i<notes.length;i++) synth.note(SONGS.SOUND.chords,notes[i],now,0.8,SONGS.NOTE_VEL*vol);
+  voice=SONGS.voiceOf(T.song,"chords");
+  strum=(SYNTH.STRUM && SYNTH.STRUM[voice]) || 0;
+  notes=notes.slice().sort(function(a,b){ return a-b; });
+  for(i=0;i<notes.length;i++) synth.note(voice,notes[i],now+i*strum,0.8,SONGS.NOTE_VEL*vol);
+}
+/* ---------- deep mode (12.20.5): a sixth column and a small sheet on the note and chord screens ----------
+   The switch lives in the studio's own settings document (T.meta.deep), not in the tape and not in undo. With it off
+   the screens are the ones above; only a note's acc and a chord's q/acc still show in the names they already carry. */
+function deepOn(){ return !!(T.meta && T.meta.deep===true); }
+function toggleDeep(){
+  if(!T.meta) return;
+  T.meta.deep=!T.meta.deep;
+  saveMeta();
+  renderAll();
+}
+function accValue(acc){ return acc===1?1:acc===-1?-1:0; }
+/* the glyphs live here, escaped: tests/strings.test.mjs treats the musical signs as emoji in a string value */
+function accLabel(acc){
+  var a=accValue(acc);
+  return a===1?"\u266f":a===-1?"\u266d":"\u266e";
+}
+function selectedNote(track){
+  var sel=T.noteSel[track], note;
+  if(!track || sel<0 || !T.song) return null;
+  note=SONGS.noteAt(T.song,T.pat,track,sel*SONGS.STEP);
+  return note && !SONGS.isRest(note) ? note : null;
+}
+function selectedChord(){
+  var note;
+  if(!T.song || T.chordSel<0 || T.chordSel>1) return null;
+  note=SONGS.noteAt(T.song,T.pat,"chords",SONGS.CHORD_STEPS[T.chordSel]*SONGS.STEP);
+  return note && !SONGS.isRest(note) ? note : null;
+}
+function removeEl(id){ var e=$(id); if(e && e.parentNode) e.parentNode.removeChild(e); }
+function deepButton(cls,text,on,fn){
+  var b=el("button",cls+(on?" on":""),text);
+  b.type="button";
+  b.setAttribute("aria-pressed",on?"true":"false");
+  b.onclick=fn;
+  return b;
+}
+function ensureNoteDeep(){
+  var keys=$("studio-keys");
+  if(!keys || $("studio-note-acc")) return;
+  var acc=el("button","st-key st-deep-key st-key-acc");
+  acc.type="button"; acc.id="studio-note-acc";
+  acc.onclick=function(){ noteAccTap(); };
+  var play=el("button","st-key st-deep-key st-key-play",tr("studio.note.play"));
+  play.type="button"; play.id="studio-note-play";
+  play.onclick=function(){ openSheet("noteplay"); };
+  keys.appendChild(acc); keys.appendChild(play);
+}
+function ensureChordDeep(){
+  var keys=$("studio-chord-keys");
+  if(!keys || $("studio-chord-acc")) return;
+  var acc=el("button","st-chord-key st-deep-key st-chord-acc");
+  acc.type="button"; acc.id="studio-chord-acc";
+  acc.onclick=function(){ chordAccTap(); };
+  var type=el("button","st-chord-key st-deep-key st-chord-type",tr("studio.chord.type"));
+  type.type="button"; type.id="studio-chord-type";
+  type.onclick=function(){ openSheet("chordtype"); };
+  keys.appendChild(acc); keys.appendChild(type);
+}
+function noteAccTap(){
+  var track=noteTrack(), note=track?selectedNote(track):null, cur, next;
+  if(!note || !T.song) return;
+  cur=accValue(note.acc);
+  next=cur===0?1:cur===1?-1:0;
+  T.song=SONGS.setNoteExtra(T.song,T.pat,track,T.noteSel[track]*SONGS.STEP,{acc:next===0?null:next});
+  touch();
+  renderGrid(); renderKeys(); renderNav();
+  auditionNote(track,note.deg,next,note.gate,note.orn);
+}
+function chordAccTap(){
+  var note=selectedChord(), cur, next;
+  if(!note || !T.song) return;
+  cur=accValue(note.acc);
+  next=cur===0?-1:cur===-1?1:0;
+  T.song=SONGS.setNoteExtra(T.song,T.pat,"chords",SONGS.CHORD_STEPS[T.chordSel]*SONGS.STEP,{acc:next===0?null:next});
+  touch();
+  renderChords(); renderNav();
+  auditionChord(note.deg,next,note.q);
+}
+function setNoteGate(gate){
+  var track=noteTrack(), note=track?selectedNote(track):null;
+  if(!note || !T.song) return;
+  T.song=SONGS.setNoteExtra(T.song,T.pat,track,T.noteSel[track]*SONGS.STEP,{gate:gate===1?null:gate});
+  touch();
+  renderGrid(); renderKeys(); renderNav(); renderSheet();
+  auditionNote(track,note.deg,note.acc,gate,note.orn);
+}
+function setNoteOrn(orn){
+  var track=noteTrack(), note=track?selectedNote(track):null;
+  if(!note || !T.song) return;
+  T.song=SONGS.setNoteExtra(T.song,T.pat,track,T.noteSel[track]*SONGS.STEP,{orn:orn||null});
+  touch();
+  renderGrid(); renderKeys(); renderNav(); renderSheet();
+  auditionNote(track,note.deg,note.acc,note.gate,orn||null);
+}
+function setChordQ(q){
+  var note=selectedChord();
+  if(!note || !T.song) return;
+  T.song=SONGS.setNoteExtra(T.song,T.pat,"chords",SONGS.CHORD_STEPS[T.chordSel]*SONGS.STEP,{q:q||null});
+  touch();
+  closeSheet();                    /* a quality pick is one tap: the sheet closes */
+  renderChords(); renderNav();
+  auditionChord(note.deg,note.acc,q||null);
+}
+/* A confirms the focused option in the two deep sheets, like the other sheets' A; with no DOM focus it takes the
+   marked one, so a keyboard player can confirm what they see. */
+function sheetConfirm(){
+  var sh=$("studio-sheet"), a=document.activeElement, pick;
+  if(a && a.tagName==="BUTTON" && sh && sh.contains(a) && !a.disabled){ a.click(); return; }
+  pick=sh && sh.querySelector("button.on:not(:disabled)");
+  if(!pick) pick=sh && sh.querySelector("button:not(:disabled)");
+  if(pick) pick.click();
+}
+/* 12.20.3: the drum row's preview, kick then snare 0.15 s later, so the kit's two most different drums are heard */
+function auditionKit(){
+  var synth=ensureSynth(), vol=trackVol("drums"), kit, now;
+  if(!synth || !T.song) return;
+  kit=SONGS.kitOf(T.song);
+  now=LP.SND.ctx.currentTime+0.001;
+  synth.hit(kit,"kick",now,SONGS.NOTE_VEL*vol);
+  synth.hit(kit,"snare",now+0.15,SONGS.NOTE_VEL*vol);
 }
 /* the context was replaced (a call, Siri): the tape carries on from the same tick on the new one */
 function onAudio(){
@@ -1126,13 +1286,16 @@ function build(){
       screens.appendChild(b);
     })(defs[i]);
   }
-  /* the mixer: a key/tape row and four track rows; voice joins in step 2 (12.14) */
+  /* the mixer: a key/tape row and four track rows; the row's name is the voice button (12.20.3) */
   var rows=$("studio-mix-rows"), trk, name, minus, value, plus, mute;
   for(i=0;i<MIX_TRACKS.length;i++){
     (function(id){
       trk=el("div","st-mix-row");
       trk.setAttribute("data-track",id);
-      name=el("span","st-mix-name");
+      name=el("button","st-mix-name"); name.type="button";
+      name.appendChild(el("span","st-mix-track"));
+      name.appendChild(el("span","st-mix-voice"));
+      name.onclick=function(){ if(id==="drums") cycleKit(); else cycleVoice(id); };
       minus=el("button","st-mix-btn st-mix-minus","−"); minus.type="button";
       minus.setAttribute("aria-label",tr("studio.mix.down",{track:tr("studio.screen."+id)}));
       value=el("span","st-mix-vol");
@@ -1331,7 +1494,7 @@ function renderGrid(){
     if(track){
       note=T.song && SONGS.noteAt(T.song,T.pat,track,i*SONGS.STEP);
       rest=!!(note && SONGS.isRest(note));
-      nm=note && !rest ? SONGS.noteName(SONGS.noteMidi(T.song,track,note.deg)) : "";
+      nm=note && !rest ? SONGS.noteName(SONGS.noteMidi(T.song,track,note.deg,note.acc)) : "";
       b.textContent=rest?"–":(nm||"");
       b.classList.toggle("on",!!note && !rest);
       b.classList.toggle("has-note",!!note && !rest);
@@ -1355,7 +1518,11 @@ function renderGrid(){
 function renderKeys(){
   var track=noteTrack();
   if(!track || !T.song) return;
-  var keys=$("studio-keys").querySelectorAll(".st-key"), i, b, midi, name, note, sel=T.noteSel[track];
+  var keysEl=$("studio-keys"), deep=deepOn();
+  if(deep) ensureNoteDeep();
+  else { removeEl("studio-note-acc"); removeEl("studio-note-play"); }
+  if(keysEl) keysEl.classList.toggle("deep",deep);
+  var keys=keysEl.querySelectorAll(".st-key[data-deg]"), i, b, midi, name, note, sel=T.noteSel[track];
   note=sel>=0 ? SONGS.noteAt(T.song,T.pat,track,sel*SONGS.STEP) : null;
   if(note && SONGS.isRest(note)) note=null;
   var base=SONGS.tonic(track,T.song.key);
@@ -1369,15 +1536,33 @@ function renderKeys(){
     b.setAttribute("aria-label",tr("studio.key",{note:name}));
     b.setAttribute("aria-pressed",note && note.deg===i?"true":"false");
   }
+  var accKey=$("studio-note-acc"), playKey=$("studio-note-play"), cur;
+  if(deep && accKey){
+    cur=note?accValue(note.acc):0;
+    accKey.textContent=accLabel(cur);
+    accKey.disabled=!note;
+    accKey.classList.toggle("on",!!note && cur!==0);
+    accKey.setAttribute("aria-pressed",note && cur!==0?"true":"false");
+    accKey.setAttribute("aria-label",tr("studio.note.acc",{acc:accLabel(cur)}));
+  }
+  if(deep && playKey){
+    playKey.textContent=tr("studio.note.play");
+    playKey.disabled=!note;
+    playKey.setAttribute("aria-label",tr("studio.note.play"));
+  }
 }
 function renderChords(){
+  var deep=deepOn(), ckeys=$("studio-chord-keys");
+  if(deep) ensureChordDeep();
+  else { removeEl("studio-chord-acc"); removeEl("studio-chord-type"); }
+  if(ckeys) ckeys.classList.toggle("deep",deep);
   var cells=$("studio-chord-cells").children, i, b, tick, note, rest, ch, roman, name;
   for(i=0;i<2;i++){
     b=cells[i];
     tick=SONGS.CHORD_STEPS[i]*SONGS.STEP;
     note=T.song && SONGS.noteAt(T.song,T.pat,"chords",tick);
     rest=!!(note && SONGS.isRest(note));
-    ch=note && !rest ? SONGS.chordName(T.song,note.deg) : null;
+    ch=note && !rest ? SONGS.chordName(T.song,note.deg,note.q,note.acc) : null;
     roman=b.querySelector(".st-roman");
     name=b.querySelector(".st-name");
     roman.textContent=rest?"–":(ch?ch.roman:"");
@@ -1390,17 +1575,33 @@ function renderChords(){
     b.setAttribute("aria-label",rest?tr("studio.rest.cell",{n:SONGS.CHORD_STEPS[i]+1}):
       tr(i===0?"studio.chord.half1":"studio.chord.half2")+(ch?" · "+ch.name:""));
   }
-  var keys=$("studio-chord-keys").querySelectorAll(".st-chord-key"), k, kb, degNote;
+  var keys=ckeys.querySelectorAll(".st-chord-key[data-deg]"), k, kb, degNote;
   degNote=T.chordSel>=0 && T.song ? SONGS.noteAt(T.song,T.pat,"chords",SONGS.CHORD_STEPS[T.chordSel]*SONGS.STEP) : null;
   if(degNote && SONGS.isRest(degNote)) degNote=null;
+  /* deep mode previews the selected chord's quality and root shift on every degree key; off keeps the automatic names */
+  var keyQ=deep && degNote ? degNote.q : undefined, keyAcc=deep && degNote ? degNote.acc : undefined;
   for(i=0;i<keys.length;i++){
     k=keys[i];
-    ch=T.song ? SONGS.chordName(T.song,i) : null;
+    ch=T.song ? SONGS.chordName(T.song,i,keyQ,keyAcc) : null;
     k.querySelector("b").textContent=ch?ch.roman:"";
     k.querySelector("small").textContent=ch?ch.name:"";
     k.classList.toggle("on",!!(degNote && degNote.deg===i));
     k.setAttribute("aria-pressed",degNote && degNote.deg===i?"true":"false");
     k.setAttribute("aria-label",tr("studio.chord.key",{name:ch?ch.name:""}));
+  }
+  var accKey=$("studio-chord-acc"), typeKey=$("studio-chord-type"), cur;
+  if(deep && accKey){
+    cur=degNote?accValue(degNote.acc):0;
+    accKey.textContent=accLabel(cur);
+    accKey.disabled=!degNote;
+    accKey.classList.toggle("on",!!degNote && cur!==0);
+    accKey.setAttribute("aria-pressed",degNote && cur!==0?"true":"false");
+    accKey.setAttribute("aria-label",tr("studio.chord.acc",{acc:accLabel(cur)}));
+  }
+  if(deep && typeKey){
+    typeKey.textContent=tr("studio.chord.type");
+    typeKey.disabled=!degNote;
+    typeKey.setAttribute("aria-label",tr("studio.chord.type"));
   }
   var rk=$("studio-chord-rest");
   if(rk){ rk.textContent=tr("studio.rest"); rk.setAttribute("aria-label",tr("studio.rest")); }
@@ -1440,13 +1641,17 @@ function renderMixer(){
   if(keyBtn && T.song) keyBtn.textContent=tr("studio.mix.key",{key:SONGS.NAMES[T.song.key],scale:tr("studio.scale."+T.song.scale)});
   if(sndBtn && T.song) sndBtn.textContent=tr("studio.mix.sound",{tape:T.song.tape,swing:Math.round(T.song.swing*100)});
   if(!rows) return;
-  var i, row, id, trk, vol, mute, minus, plus;
+  var i, row, id, trk, vol, mute, minus, plus, nm, label;
   for(i=0;i<rows.children.length;i++){
     row=rows.children[i];
     id=row.getAttribute("data-track");
     trk=trackById(id);
     vol=trk && typeof trk.vol==="number" ? trk.vol : 1;
-    row.querySelector(".st-mix-name").textContent=screenName(id);
+    nm=row.querySelector(".st-mix-name");
+    label=id==="drums" ? tr("studio.kit."+SONGS.kitOf(T.song)) : tr("studio.voice."+SONGS.voiceOf(T.song,id));
+    row.querySelector(".st-mix-track").textContent=screenName(id);
+    row.querySelector(".st-mix-voice").textContent=label;
+    nm.setAttribute("aria-label",tr("studio.voice.change",{track:screenName(id),voice:label}));
     row.querySelector(".st-mix-vol").textContent=tr("studio.mix.vol",{n:Math.round(vol*10)});
     row.querySelector(".st-mix-vol").setAttribute("aria-label",tr("studio.mix.volume",{n:Math.round(vol*10)}));
     row.classList.toggle("muted",!!(trk && trk.mute));
@@ -1740,7 +1945,6 @@ function openSheet(name){
   renderSheet();
 }
 function closeSheet(){
-  if(T.sheet==="ai") aiStopJob();
   if(T.sheet==="new"||T.sheet==="demo"||T.sheet==="pop"){ T.sheet="menu"; renderSheet(); return; }
   if(T.sheet==="editmenu"||T.sheet==="filemenu"){ T.sheet="menu"; renderSheet(); return; }
   if(T.sheet==="copyask"){ T.sheet="copy"; renderSheet(); return; }
@@ -1837,6 +2041,8 @@ function aiStageText(st){
   if(st.id==="read") return tr("studio.ai.stage.read");
   if(st.id==="edit") return tr("studio.ai.stage.edit",{turn:v.turn!=null?v.turn:st.n});
   if(st.id==="check") return tr("studio.ai.stage.check");
+  if(st.id==="retry") return tr("studio.ai.stage.retry",{n:st.n,of:st.of});
+  if(st.id==="trouble") return tr("studio.ai.stage.trouble");
   return "";
 }
 function paintAiProgress(){
@@ -1846,11 +2052,20 @@ function paintAiProgress(){
 }
 function aiStage(st){
   var v=st.vars||{};
-  if(st.id==="card") T.aiCard=tr("studio.ai.card",{card:v.card,key:v.key,scale:tr("studio.scale."+v.scale),bpm:v.bpm});
+  if(st.id==="card") T.aiCard=tr(v.own ? "studio.ai.style" : "studio.ai.card",{card:v.card,key:v.key,scale:tr("studio.scale."+v.scale),bpm:v.bpm});
   T.aiStage=aiStageText(st);
   paintAiProgress();
 }
+function aiTroubleAnswer(yes){
+  var t=T.aiTrouble;
+  if(!t) return;
+  T.aiTrouble=null;
+  if(yes) T.aiLast=Date.now();
+  t.resolve(yes);
+  renderSheet();
+}
 function aiStopJob(){
+  if(T.aiTrouble) aiTroubleAnswer(false);
   if(T.aiJob && T.aiJob.stop) T.aiJob.stop();
 }
 function isAiDraft(pv){
@@ -1883,14 +2098,16 @@ function renderAiSheet(sh){
     return;
   }
   if(!T.aiBusy) sh.appendChild(el("p","st-sheet-label",tr("studio.ai.hint")));
-  var input=el("input","st-name st-ai-input");
-  input.type="text";
-  input.maxLength=160;
+  /* a few lines that scroll inside: a request can be a paragraph (owner, 2026-10-31). Return makes a new line; the
+     send button sends, and Ctrl/Cmd+Return too on a keyboard. */
+  var input=el("textarea","st-name st-ai-input");
+  input.rows=3;
+  input.maxLength=600;
   input.id="studio-ai-input";
   input.placeholder=tr("studio.ai.placeholder");
   input.value=T.aiNote||"";
   input.disabled=T.aiBusy;
-  input.onkeydown=function(e){ if(e.key==="Enter"){ e.preventDefault(); askAi(input.value); } };
+  input.onkeydown=function(e){ if(e.key==="Enter" && (e.ctrlKey || e.metaKey)){ e.preventDefault(); askAi(input.value); } };
   sh.appendChild(input);
   if(T.aiBusy){
     var prog=el("div","st-ai-progress");
@@ -1901,6 +2118,19 @@ function renderAiSheet(sh){
     prog.appendChild(el("p","st-ai-stay",tr("studio.ai.stay")));
     sh.appendChild(prog);
     paintAiProgress();
+    /* the line stayed down after the automatic retries: the user chooses, and what is done so far waits (12.20.7) */
+    if(T.aiTrouble){
+      var tb=el("div","st-ai-trouble");
+      tb.appendChild(el("p","st-sheet-label",tr("studio.ai.trouble",{why:T.aiTrouble.why})));
+      var trow=el("div","st-sheet-row");
+      var again=el("button","st-sheet-btn",""); again.type="button"; again.id="studio-ai-again"; again.textContent=tr("studio.ai.trouble.again");
+      again.onclick=function(){ aiTroubleAnswer(true); };
+      var quit=el("button","st-sheet-btn",""); quit.type="button"; quit.id="studio-ai-quit"; quit.textContent=tr("studio.ai.trouble.stop");
+      quit.onclick=function(){ aiTroubleAnswer(false); };
+      trow.appendChild(again); trow.appendChild(quit);
+      tb.appendChild(trow);
+      sh.appendChild(tb);
+    }
   }
   var row=el("div","st-sheet-row");
   var send=el("button","st-sheet-btn",""); send.type="button"; send.textContent=tr("studio.ai.send");
@@ -1920,9 +2150,9 @@ function renderAiSheet(sh){
     b.onclick=function(){ askAi(text); };
     chips.appendChild(b);
   };
-  chip(tr("studio.ai.chip.faster")+" · "+tr("studio.ai.tag.local"),tr("studio.ai.chip.faster"));
-  chip(tr("studio.ai.chip.swing")+" · "+tr("studio.ai.tag.local"),tr("studio.ai.chip.swing"));
-  chip(tr("studio.ai.chip.skeleton")+" · "+tr("studio.ai.tag.ai"),tr("studio.ai.chip.skeleton"));
+  chip(tr("studio.ai.chip.faster"),tr("studio.ai.chip.faster"));
+  chip(tr("studio.ai.chip.swing"),tr("studio.ai.chip.swing"));
+  chip(tr("studio.ai.chip.skeleton"),tr("studio.ai.chip.skeleton"));
   sh.appendChild(chips);
   if(!T.aiBusy){
     var state=el("p","st-sheet-label st-ai-state",aiState());
@@ -1934,7 +2164,7 @@ function applyAiPreview(play){
   var pv=T.aiPreview;
   if(!pv || !T.loaded || !T.song) return;
   if(!pv.ops.length && !isAiDraft(pv)){ toast(pv.reply||tr("studio.ai.done")); return; }
-  var out=EDIT.apply(T.song,pv.ops);
+  var out=EDIT.applyAll(T.song,pv.ops);
   if(out.error){ toast(tr("studio.ai.bad")); return; }
   if(isAiDraft(pv)){
     var song=out.song, id=LP.uid();
@@ -1944,7 +2174,7 @@ function applyAiPreview(play){
       T.aiNote="";
       installSong(song,id,[]);
       toast(tr("studio.ai.newdone"));
-      if(play) startPlay();
+      if(play) listenFromTop();
     });
     return;
   }
@@ -1956,27 +2186,24 @@ function applyAiPreview(play){
   T.sheet="";
   renderAll();
   toast(tr("studio.ai.applied"));
-  if(play) startPlay();
+  if(play) listenFromTop();
+}
+/* "Use and listen" plays the whole song from its first bar on the song screen, not the one pattern the user happened to
+   be on (owner, 2026-10-30). The screen's tour is skipped: it would cover the song as it starts. */
+function listenFromTop(){
+  T.slot=0;
+  screenTo("song");
+  renderAll();
+  startPlay();
 }
 function askAi(text){
   text=String(text==null?"":text).trim();
   if(!text || T.aiBusy) return;
   T.aiNote=text;
-  var local=CMD ? CMD.parse(text,{pattern:T.pat,screen:T.screen}) : null;
-  if(local && local.ops.length){
-    var out=EDIT.apply(T.song,local.ops);
-    if(out.error){ toast(tr("studio.ai.bad")); return; }
-    T.song=out.song;
-    touch();
-    T.aiNote="";
-    T.sheet="";
-    renderAll();
-    if(local.note==="swing-global") toast(tr("studio.ai.swingglobal"));
-    else toast(tr("studio.ai.local"));
-    return;
-  }
+  /* every request goes to the AI: the local phrase matcher read "a 12-bar blues in E major" as "change the key to E
+     major" and did it (owner, 2026-10-31), so it was removed */
   if(!LP.ai || !LP.ai.on()){
-    if(/骨架|写一首|来一首|skeleton|song idea|new song/i.test(text)) toast(tr("studio.ai.nokey.template"));
+    if(H.wantsNewSong(text,T.song)) toast(tr("studio.ai.nokey.template"));
     else toast(tr("studio.ai.nokey"));
     renderSheet();
     return;
@@ -1992,9 +2219,17 @@ function askAi(text){
   }
   function ask(messages){ return LP.ai.ask({messages:messages,onSignal:onSignal}); }
   function onStage(st){ aiStage(st); }
-  var job=/骨架|写一首|来一首|skeleton|song idea|new song/i.test(text)
-    ? H.skeleton({text:text,ask:ask,onStage:onStage})
-    : H.edit({song:T.song,focus:{screen:T.screen,pattern:T.pat,slot:T.slot},text:text,ask:ask,onStage:onStage});
+  function onTrouble(e){
+    return new Promise(function(resolve){
+      T.aiTrouble={resolve:resolve, why:LP.ai.err?LP.ai.err(e):""};
+      LP.sfx("err");
+      if(T.sheet==="ai") renderSheet();
+      else toast(tr("studio.ai.trouble.toast"));
+    });
+  }
+  var job=H.wantsNewSong(text,T.song)
+    ? H.skeleton({text:text,ask:ask,onStage:onStage,onTrouble:onTrouble})
+    : H.edit({song:T.song,focus:{screen:T.screen,pattern:T.pat,slot:T.slot},text:text,ask:ask,onStage:onStage,onTrouble:onTrouble});
   T.aiJob=job;
   if(T.aiTick) clearInterval(T.aiTick);
   T.aiTick=setInterval(paintAiProgress,1000);
@@ -2009,6 +2244,8 @@ function askAi(text){
     end();
     T.aiPreview={reply:res.reply||tr("studio.ai.done"),ops:res.ops||[],draft:!!res.draft,card:T.aiCard};
     T.aiNote=text;
+    /* the sheet may have been closed while the AI worked: the preview waits in it */
+    if(T.sheet!=="ai") toast(tr("studio.ai.ready"));
     renderSheet();
   },function(e){
     var code=e && e.code;
@@ -2050,12 +2287,12 @@ function renderSheet(){
     var eh=sheetHead(tr("studio.menu.edit"));
     eh.className+=" st-sheet-head";
     var eul=el("ul","lcd-menu");
+    if(T.meta) sheetRow(eul,tr(T.meta.deep?"studio.deep.on":"studio.deep.off"),"",function(){ toggleDeep(); });
     if(T.loaded) sheetRow(eul,tr("studio.versions"),String(T.versions.length),function(){ openSheet("versions"); });
     var clearTrackNow=screenTrack();
     if(T.song && T.loaded && clearTrackNow) sheetRow(eul,tr("studio.clear.track",{track:screenName(clearTrackNow)}),"",function(){ clearCurrentTrack(); });
-    if(T.song && T.loaded) sheetRow(eul,tr("studio.kit",{kit:tr("studio.kit."+T.song.kit)}),"",function(){
-      T.song.kit=T.song.kit==="soft" ? "chip" : "soft";
-      touch(); renderSheet();
+    if(T.song && T.loaded) sheetRow(eul,tr("studio.kit",{kit:tr("studio.kit."+SONGS.kitOf(T.song))}),"",function(){
+      cycleKit();
     });
     if(T.loaded) sheetRow(eul,tr("studio.clear.tape"),"",function(){ openSheet("new"); });
     sh.appendChild(eul);
@@ -2065,6 +2302,8 @@ function renderSheet(){
     var fh2=sheetHead(tr("studio.menu.file"));
     fh2.className+=" st-sheet-head";
     var ful=el("ul","lcd-menu");
+    if(T.song && T.loaded) sheetRow(ful,tr("studio.export.json"),"JSON",function(){ exportJson(); });
+    if(T.song && T.loaded) sheetRow(ful,tr("studio.export.midi"),"MIDI",function(){ exportMidi(); });
     if(T.song && T.loaded) sheetRow(ful,tr("studio.export"),"WAV",function(){ exportWav(); });
     if(T.loaded) sheetRow(ful,tr("studio.workspace.export"),"ZIP",function(){ exportWorkspace(); });
     if(T.loaded) sheetRow(ful,tr("studio.workspace.import"),"ZIP",function(){ $("studio-import-file").click(); });
@@ -2466,6 +2705,58 @@ function renderSheet(){
     renderAiSheet(sh);
     return;
   }
+  if(T.sheet==="noteplay"){
+    var npTrack=noteTrack(), npNote=npTrack?selectedNote(npTrack):null;
+    if(!npNote){ T.sheet=""; sh.hidden=true; return; }
+    sheetHead(tr("studio.note.play"));
+    var npGate=npNote.gate===0.5?0.5:npNote.gate===0.25?0.25:1;
+    var npOrn=npNote.orn==="slide"?"slide":npNote.orn==="vib"?"vib":"";
+    sh.appendChild(el("p","st-sheet-label",tr("studio.gate")));
+    var grow=el("div","st-deep-row"), gi, gv, gb;
+    var gates=[[1,"studio.gate.normal"],[0.5,"studio.gate.short"],[0.25,"studio.gate.tiny"]];
+    for(gi=0;gi<gates.length;gi++){
+      (function(gv,label){
+        gb=deepButton("st-deep-btn",tr(label),npGate===gv,function(){ setNoteGate(gv); });
+        gb.setAttribute("data-gate",String(gv));
+        grow.appendChild(gb);
+      })(gates[gi][0],gates[gi][1]);
+    }
+    sh.appendChild(grow);
+    sh.appendChild(el("p","st-sheet-label",tr("studio.orn")));
+    var orow=el("div","st-deep-row"), oi, olist;
+    /* the bass has no vibrato (12.20.5): its row shows 无 and 滑音 only */
+    olist=npTrack==="bass" ? [[ "", "studio.orn.none"],["slide","studio.orn.slide"]]
+      : [["","studio.orn.none"],["slide","studio.orn.slide"],["vib","studio.orn.vib"]];
+    for(oi=0;oi<olist.length;oi++){
+      (function(orn,label){
+        var ob=deepButton("st-deep-btn",tr(label),npOrn===orn,function(){ setNoteOrn(orn); });
+        ob.setAttribute("data-orn",orn);
+        orow.appendChild(ob);
+      })(olist[oi][0],olist[oi][1]);
+    }
+    sh.appendChild(orow);
+    return;
+  }
+  if(T.sheet==="chordtype"){
+    var ctNote=selectedChord();
+    if(!ctNote){ T.sheet=""; sh.hidden=true; return; }
+    var cth=sheetHead(tr("studio.chord.type"));
+    cth.className+=" st-sheet-head";
+    var qgrid=el("div","st-q-grid"), qi, curQ;
+    curQ=typeof ctNote.q==="string" && Object.prototype.hasOwnProperty.call(SONGS.QUALITIES,ctNote.q) ? ctNote.q : "";
+    var auto=deepButton("st-q-btn",tr("studio.chord.auto"),curQ==="",function(){ setChordQ(""); });
+    auto.setAttribute("data-q","");
+    qgrid.appendChild(auto);
+    for(qi=0;qi<SONGS.QUALITY_ORDER.length;qi++){
+      (function(q){
+        var qb=deepButton("st-q-btn",q,curQ===q,function(){ setChordQ(q); });
+        qb.setAttribute("data-q",q);
+        qgrid.appendChild(qb);
+      })(SONGS.QUALITY_ORDER[qi]);
+    }
+    sh.appendChild(qgrid);
+    return;
+  }
   if(T.sheet==="key"){
     var kh=sheetHead(tr("studio.key.title"));
     kh.className+=" st-sheet-head";
@@ -2590,10 +2881,11 @@ function popTape(){
    One full pass of the chain, rendered offline through the same synth and tape chain as the live player, then written
    as mono 16-bit 22.05 kHz by the pure wav.js writer. A snapshot of the song is rendered, so an edit during the render
    cannot change what is being written. */
-function wavName(){
+function exportName(ext){
   var d=new Date();
-  return "tape4-"+d.getFullYear()+LP.pad2(d.getMonth()+1)+LP.pad2(d.getDate())+"-"+LP.pad2(d.getHours())+LP.pad2(d.getMinutes())+".wav";
+  return "tape4-"+d.getFullYear()+LP.pad2(d.getMonth()+1)+LP.pad2(d.getDate())+"-"+LP.pad2(d.getHours())+LP.pad2(d.getMinutes())+"."+ext;
 }
+function wavName(){ return exportName("wav"); }
 function renderWav(){
   var OC=window.OfflineAudioContext||window.webkitOfflineAudioContext;
   if(!OC || !WAV || !TAPE || !SYNTH || !T.song) return Promise.reject(new Error("unavailable"));
@@ -2645,6 +2937,43 @@ function exportWav(){
     toast(tr("studio.export.fail"));
   });
 }
+/* ---------- a tape as JSON or MIDI ----------
+   Two one-shot exports, no render: the stored v1 song exactly as the library saves it, and the chain through the pure
+   midi.js writer (format 1, one track per instrument). The sheet closes on the tap, like 导出 WAV. */
+function closeForExport(){
+  T.sheet="";
+  if(T.built) renderSheet();
+}
+function exportJson(){
+  if(T.exporting || !T.loaded || !T.song) return;
+  if(!LP.S.downloads){ toast(tr("studio.export.json.fail")); return; }
+  var text;
+  try{ text=JSON.stringify(T.song,null,1); }
+  catch(e){ toast(tr("studio.export.json.fail")); return; }
+  closeForExport();
+  T.exporting=true;
+  LP.S.downloads.save({filename:exportName("json"),data:new Blob([text],{type:"application/json"})}).then(function(res){
+    if(res && res.status==="saved") toast(tr("studio.export.json.done"));
+  }).then(function(){ T.exporting=false; },function(e){
+    T.exporting=false;
+    if(!(e && e.code==="declined")) toast(LP.saveErr ? LP.saveErr(e) : tr("studio.export.json.fail"));
+  });
+}
+function exportMidi(){
+  if(T.exporting || !T.loaded || !T.song) return;
+  if(!MIDI || !LP.S.downloads){ toast(tr("studio.export.midi.fail")); return; }
+  var bytes;
+  try{ bytes=MIDI.write(T.song); }
+  catch(e){ toast(tr("studio.export.midi.fail")); return; }
+  closeForExport();
+  T.exporting=true;
+  LP.S.downloads.save({filename:exportName("mid"),data:new Blob([bytes],{type:"audio/midi"})}).then(function(res){
+    if(res && res.status==="saved") toast(tr("studio.export.midi.done"));
+  }).then(function(){ T.exporting=false; },function(e){
+    T.exporting=false;
+    if(!(e && e.code==="declined")) toast(LP.saveErr ? LP.saveErr(e) : tr("studio.export.midi.fail"));
+  });
+}
 /* ---------- the workspace zip (12.15) ----------
    This is the tape machine's own backup, not the whole-device one in Settings: workspace.json, every project and every
    project's versions. It is stored (not deflated) by zip.js, so a Node test can read it and a phone can import it
@@ -2661,7 +2990,7 @@ function workspaceEntries(){
     return r.versions.get().then(function(versions){
       var entries=[], i, id, data, vers, doc;
       entries.push({name:"workspace.json",data:JSON.stringify({v:1,current:T.id,
-        meta:{toured:T.meta.toured||{},hushTip:!!T.meta.hushTip,guideTip:!!T.meta.guideTip,folders:T.meta.folders||[]}})});
+        meta:{toured:T.meta.toured||{},hushTip:!!T.meta.hushTip,guideTip:!!T.meta.guideTip,deep:!!T.meta.deep,folders:T.meta.folders||[]}})});
       for(i=0;i<items.docs.length;i++){
         doc=items.docs[i];
         id=doc.id;
@@ -2792,7 +3121,7 @@ function applyWorkspaceImport(){
     }
     return Promise.all(writes);
   }).then(function(){
-    T.meta={toured:plan.meta.toured||{},hushTip:!!plan.meta.hushTip,guideTip:!!plan.meta.guideTip,
+    T.meta={toured:plan.meta.toured||{},hushTip:!!plan.meta.hushTip,guideTip:!!plan.meta.guideTip,deep:plan.meta.deep===true,
       folders:Array.isArray(plan.meta.folders)?plan.meta.folders.filter(function(x){return typeof x==="string";}):[],current:plan.current};
     saveMeta();
     T.loaded=false; T.loading=null; T.song=null; T.id=""; T.metaOk=false; T.versions=[]; T.versionsOk=false;
@@ -3157,6 +3486,7 @@ document.addEventListener("keydown",function(e){
     else if(T.sheet==="demo") demoTape();
     else if(T.sheet==="copyask") confirmCopy();
     else if(T.sheet==="slot") insertSlotBefore();   /* A is the sheet's first row, like the other questions' 确认 */
+    else if(T.sheet==="noteplay"||T.sheet==="chordtype") sheetConfirm();
     else if(!T.sheet) tapFocus();
   }
   else if(key==="Enter"){ if(e.repeat) return; togglePlay(); }
@@ -3170,7 +3500,7 @@ document.addEventListener("keydown",function(e){
 /* boot.js only watches visibility once storage opened, so watch it here too: a hidden page never keeps sounding */
 document.addEventListener("visibilitychange",function(){
   if(!document.hidden || !visible()) return;
-  aiStopJob();
+  /* the AI job stays: iOS may drop its line while hidden, and the harness asks again or asks the user (12.20.7) */
   stopRepeatAll();
   stopPlay();
   flush();
@@ -3219,7 +3549,7 @@ LP.builtin({id:"studio", label:"app.studio", icon:function(){ return ICON; }, vi
   open:open,
   leave:leave,
   lang:function(){ if(visible()){ renderAll(); if(T.tour) tourShow(T.tour.i); } },
-  pause:function(){ aiStopJob(); stopRepeatAll(); stopPlay(); flush(); },
+  pause:function(){ stopRepeatAll(); stopPlay(); flush(); },
   resume:function(){},
   audio:function(){ onAudio(); },
   ready:function(){
