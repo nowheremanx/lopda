@@ -5892,7 +5892,9 @@ test("pet: a stateful souvenir grows on the shelf, pauses in the box, and update
   assert.ok(doc.plantedAt > 0, "a new stay has its own plantedAt");
   assert.equal(doc.keep, "yes", "the unknown field survives the put-back update");
 
-  /* a match-only souvenir follows the room's weather without being on the shelf */
+  /* a match-only souvenir follows the room's weather without being on the shelf. The day's own weather is seeded by
+     the pet's birth time, which is Date.now() on a running clock, so it is rain on some runs: pin a dry day first. */
+  await p.evaluate(() => LOPDA_DEBUG.pet.setWeather("sun"));
   assert.equal((await p.evaluate(() => LOPDA_DEBUG.pet.souvState("weather1"))).id, "calm");
   await p.evaluate(() => LOPDA_DEBUG.pet.setWeather("rain"));
   assert.equal((await p.evaluate(() => LOPDA_DEBUG.pet.souvState("weather1"))).id, "wet");
