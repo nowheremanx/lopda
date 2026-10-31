@@ -24,12 +24,19 @@ var K=window.LopdaStudioCritic, TH=window.LopdaStudioTheory, AI=window.LopdaStud
     T=window.LopdaStudioTools, E=window.LopdaStudioEdit, S=window.LopdaSong;
 
 var MAX_RETRY=2, MAX_TURNS=5, CHORD_STYLES=["triad","seventh","rich"];
+/* the AI's own budget stays at 16 patterns, whatever the format now holds (12.22) */
+var AI_PATTERNS=16;
 var SECTIONS=["intro","verse","pre","chorus","bridge","outro"];
 
 function plain(x){ return !!x && typeof x==="object" && Object.prototype.toString.call(x)==="[object Object]"; }
 function int(n){ return typeof n==="number" && isFinite(n) && Math.floor(n)===n; }
 function num(n){ return typeof n==="number" && isFinite(n); }
-function letter(i){ return "ABCDEFGHIJKLMNOP".charAt(i); }
+/* The model addresses patterns by number (0-15 in the prompts), so a name that is not the old letter carries its
+   number: "C2 (34)". A tape of plain A-P patterns reads exactly as before (12.22). */
+function label(song,i){
+  var name=S.patName(song,i);
+  return i<16 && name===S.defaultPatName(i) ? name : name+" ("+i+")";
+}
 function cut(s,n){
   var a=Array.from(String(s==null?"":s));
   return a.length>n ? a.slice(0,n).join("") : a.join("");
@@ -263,8 +270,8 @@ function planCheck(obj,cards,rolls){
     lens["$"+id]=s.chords.length;
     total+=s.chords.length;
   }
-  if(total>S.PATTERNS_MAX)
-    return {error:"the plan uses "+total+" patterns; at most "+S.PATTERNS_MAX};
+  if(total>AI_PATTERNS)
+    return {error:"the plan uses "+total+" patterns; at most "+AI_PATTERNS};
   if(!Array.isArray(order) || !order.length) return {error:"order must list the sections"};
   for(i=0;i<order.length;i++){
     e=order[i];
@@ -340,7 +347,7 @@ function laySong(roll,plan,now){
   for(i=0;i<plan.sections.length;i++){
     s=plan.sections[i];
     s.alt=-1;
-    if(heard["$"+s.id]>=2 && s.melody && k<S.PATTERNS_MAX){ s.alt=k; k++; }
+    if(heard["$"+s.id]>=2 && s.melody && k<AI_PATTERNS){ s.alt=k; k++; }
   }
   for(i=0;i+1<seq.length;i++) if(seq[i]!==seq[i+1]) follows["$"+seq[i]]=true;
   for(i=0;i<plan.sections.length;i++){
@@ -570,7 +577,7 @@ function runCalls(song,calls){
         continue;
       }
       read=true;
-      lines.push(n+" read "+letter(call.pattern)+": "+AI.patternView(work,call.pattern));
+      lines.push(n+" read "+label(work,call.pattern)+": "+AI.patternView(work,call.pattern));
       continue;
     }
     r=T.run(work,call);

@@ -1,5 +1,5 @@
 /*
- * Lo-PDA built-in: the four-track tape machine (四轨机 / Tape4), step 1b-2: sixteen patterns, the drums, bass,
+ * Lo-PDA built-in: the four-track tape machine (四轨机 / Tape4), step 1b-2: 64 patterns, the drums, bass,
  * chords, melody, song and mixer screens, the tape colour, and one player for a looped pattern or a whole song.
  * docs/design/studio.md sections 11, 12 and 12.14. One project at a time: its song is a LopdaSong document in
  * data/users/local/studio/items/<id>,
@@ -36,7 +36,6 @@ var LP=window.LP, $=LP.$, S=LP.S, tr=LP.tr, SONGS=window.LopdaSong, SYNTH=window
 var own=LP.own, toast=LP.toast, show=LP.show, showPad=LP.showPad;
 
 var BASE="data/users/local/studio", LOOKAHEAD=0.1, LOOP_MS=25, SAVE_MS=1000;
-var LETTERS="ABCDEFGHIJKLMNOP";
 /* the mixer's four instrument rows (12.14); the voice row joins them in step 2, when it can sound */
 var MIX_TRACKS=["drums","bass","chords","melody"];
 var TAPE=window.LopdaStudioTape, WAV=window.LopdaWav, MIDI=window.LopdaMidi, ZIP=window.LopdaZip;
@@ -69,7 +68,7 @@ var T={
 
 function visible(){ return !$("v-studio").hidden; }
 function el(tag,cls,text){ var e=document.createElement(tag); if(cls) e.className=cls; if(text!=null) e.textContent=text; return e; }
-function letter(i){ return LETTERS.charAt(i); }
+function patLabel(i){ return SONGS.patName(T.song,i); }
 function clipName(s,n){ return Array.from(String(s==null?"":s)).slice(0,n).join(""); }
 function noteTrack(){ return T.screen==="bass"||T.screen==="melody" ? T.screen : ""; }
 function screenName(s){ return tr("studio.screen."+s); }
@@ -1451,8 +1450,8 @@ function renderNav(){
     v.setAttribute("data-play-slot",T.playing&&T.mode==="song"?String(playedSlot()):"");
   }
   if(patBtn){
-    patBtn.textContent=letter(T.pat);
-    patBtn.setAttribute("aria-label",tr("studio.pat.label",{p:letter(T.pat)}));
+    patBtn.textContent=patLabel(T.pat);
+    patBtn.setAttribute("aria-label",tr("studio.pat.label",{p:patLabel(T.pat)}));
     patBtn.classList.toggle("queued",T.queued>=0);
     patBtn.style.animationDuration=(120/(T.song?T.song.bpm:SONGS.BPM_DEFAULT))+"s";
   }
@@ -1620,8 +1619,10 @@ function renderSong(){
         (idx!==T.slot && s[idx]===same?" same":""));
       cell.type="button";
       cell.setAttribute("data-slot",String(idx));
-      cell.textContent=letter(s[idx]);
-      cell.setAttribute("aria-label",tr("studio.song.slot",{n:idx+1,p:letter(s[idx])}));
+      var nm=patLabel(s[idx]);
+      cell.textContent=nm;
+      if(nm.length>1) cell.classList.add("two");
+      cell.setAttribute("aria-label",tr("studio.song.slot",{n:idx+1,p:nm}));
       cell.onclick=function(){ selectSlot(idx); };
       chain.appendChild(cell);
     })(i);
@@ -1953,6 +1954,7 @@ function closeSheet(){
   if(T.sheet==="new"||T.sheet==="demo"||T.sheet==="pop"){ T.sheet="menu"; renderSheet(); return; }
   if(T.sheet==="editmenu"||T.sheet==="filemenu"){ T.sheet="menu"; renderSheet(); return; }
   if(T.sheet==="copyask"){ T.sheet="copy"; renderSheet(); return; }
+  if(T.sheet==="patname"){ T.sheet="pattern"; renderSheet(); return; }
   if(T.sheet==="rename"||T.sheet==="projdel"||T.sheet==="templateask"||T.sheet==="renamefolder"||T.sheet==="folderdel"||T.sheet==="copiesdel"){ T.sheet="folder"; renderSheet(); return; }
   if(T.sheet==="folder"){ T.sheet="projects"; renderSheet(); return; }
   if(T.sheet==="newfolder"){ T.sheet="projects"; renderSheet(); return; }
@@ -1997,16 +1999,19 @@ function sheetClose(head){
 function patternHasNotes(p){
   return !!(T.song && !SONGS.patternEmpty(T.song,p));
 }
-/* the sixteen letters in four rows of four: the one being shown (or the slot's own) inverted, a dot when the
-   pattern has notes. Shared by the pattern sheet, its copy question and the slot sheet. */
+/* the existing patterns plus the next empty one, the one being shown (or the slot's own) inverted, a dot when the
+   pattern has notes. Six columns; the grid scrolls inside the sheet. Shared by the pattern sheet, its copy question
+   and the slot sheet. */
 function patternButtons(click,current){
   var grid=el("div","st-pat-grid"), i, b, at=current==null ? T.pat : current;
-  for(i=0;i<SONGS.PATTERNS_MAX;i++){
+  var existing=T.song && Array.isArray(T.song.patterns) ? T.song.patterns.length : 0;
+  var count=Math.min(SONGS.PATTERNS_MAX, existing+1);
+  for(i=0;i<count;i++){
     (function(p){
       b=el("button","st-pat-btn"+(p===at?" on":""));
       b.type="button";
       b.setAttribute("data-pat",String(p));
-      b.appendChild(el("span","",letter(p)));
+      b.appendChild(el("span","",patLabel(p)));
       if(patternHasNotes(p)) b.appendChild(el("i","st-dot on"));
       b.onclick=function(){ click(p); };
       grid.appendChild(b);
@@ -2371,17 +2376,22 @@ function renderSheet(){
     return;
   }
   if(T.sheet==="pattern"){
-    sheetHead(tr("studio.pat.label",{p:letter(T.pat)}));
+    sheetHead(tr("studio.pat.label",{p:patLabel(T.pat)}));
     sh.appendChild(patternButtons(function(p){
       T.sheet="";
       if(!setPat(p)) renderSheet();       /* before the read lands this is not an edit: just close the sheet */
     }));
     var copy=el("button","st-sheet-btn","");
     copy.type="button";
-    copy.textContent=tr("studio.pat.copy",{p:letter(T.pat)});
+    copy.textContent=tr("studio.pat.copy",{p:patLabel(T.pat)});
     copy.onclick=function(){ openSheet("copy"); };
+    var rename=el("button","st-sheet-btn","");
+    rename.type="button";
+    rename.textContent=tr("studio.pat.rename");
+    rename.onclick=function(){ openSheet("patname"); };
     var brow=el("div","st-sheet-row");
     brow.appendChild(copy);
+    brow.appendChild(rename);
     sh.appendChild(brow);
     var back=el("button","st-sheet-btn","");
     back.type="button";
@@ -2392,8 +2402,51 @@ function renderSheet(){
     sh.appendChild(brow2);
     return;
   }
+  if(T.sheet==="patname"){
+    sheetHead(tr("studio.pat.name.title"));
+    var pn=el("input","st-name");
+    pn.type="text";
+    pn.maxLength=2;
+    pn.value=patLabel(T.pat);
+    pn.setAttribute("autocapitalize","characters");
+    pn.setAttribute("autocomplete","off");
+    pn.setAttribute("autocorrect","off");
+    pn.setAttribute("spellcheck","false");
+    pn.setAttribute("aria-label",tr("studio.pat.name.title"));
+    pn.placeholder=tr("studio.pat.name.ph");
+    sh.appendChild(pn);
+    sh.appendChild(el("p","st-sheet-label",tr("studio.pat.name.help")));
+    var patNameValue=function(){ return String(pn.value||"").toUpperCase(); };
+    var confirmPatName=function(){
+      var name=patNameValue(), why=T.song ? SONGS.nameOk(T.song,T.pat,name) : "bad";
+      if(why==="bad"){ toast(tr("studio.pat.name.bad")); return; }
+      if(why==="taken"){ toast(tr("studio.pat.name.taken",{p:name})); return; }
+      T.song=SONGS.renamePattern(T.song,T.pat,name);
+      touch();
+      T.sheet="";
+      renderAll();
+      toast(tr("studio.pat.renamed",{p:name}));
+    };
+    pn.oninput=function(){
+      var at=pn.selectionStart;
+      pn.value=patNameValue();
+      try{ pn.setSelectionRange(at,at); }catch(e){}
+    };
+    pn.onkeydown=function(e){
+      if(e.key==="Enter"){ e.preventDefault(); confirmPatName(); }
+    };
+    var prow=el("div","st-sheet-row");
+    var pok=el("button","st-sheet-btn",""); pok.type="button"; pok.textContent=tr("studio.confirm");
+    pok.onclick=confirmPatName;
+    var pback=el("button","st-sheet-btn",""); pback.type="button"; pback.textContent=tr("studio.back");
+    pback.onclick=function(){ openSheet("pattern"); };
+    prow.appendChild(pok); prow.appendChild(pback);
+    sh.appendChild(prow);
+    setTimeout(function(){ try{ pn.focus(); }catch(e){} },0);
+    return;
+  }
   if(T.sheet==="copy"){
-    sheetHead(tr("studio.pat.copyask",{p:letter(T.pat)}));
+    sheetHead(tr("studio.pat.copyask",{p:patLabel(T.pat)}));
     sh.appendChild(patternButtons(function(p){
       if(p===T.pat) return;
       if(T.song && SONGS.patternEmpty(T.song,p)) copyTo(p);
@@ -2410,7 +2463,7 @@ function renderSheet(){
   }
   if(T.sheet==="slot"){
     var chain=(T.song&&T.song.song)||[0], at=T.slot, own=chain[at]==null?0:chain[at];
-    var head=sheetHead(tr("studio.song.slot",{n:at+1,p:letter(own)}));
+    var head=sheetHead(tr("studio.song.slot",{n:at+1,p:patLabel(own)}));
     /* 12.8: the title row's play button starts the chain at this slot */
     head.className+=" st-slot-title";
     var playBtn=el("button","st-slot-play");
@@ -2827,7 +2880,7 @@ function renderSheet(){
   }
   /* copyask: the target already has notes, so the overwrite needs an answer (A / 确认, B / 取消) */
   var ask2=el("div","st-copy-ask");
-  ask2.appendChild(el("p","",tr("studio.pat.over",{p:letter(T.copyTo)})));
+  ask2.appendChild(el("p","",tr("studio.pat.over",{p:patLabel(T.copyTo)})));
   var row2=el("div","row");
   var yes2=el("button","btn","");
   yes2.type="button";
@@ -2848,7 +2901,7 @@ function copyTo(target){
   T.sheet="";
   touch();                 /* the target may be a pattern this song did not have yet */
   setPat(target);
-  toast(tr("studio.pat.copied",{p:letter(target)}));
+  toast(tr("studio.pat.copied",{p:patLabel(target)}));
 }
 /* a new or demo tape: same path as a tab tap, drums screen, pattern A, keeps the beat if one is playing (12.9) */
 function swapTape(song){
@@ -3525,6 +3578,10 @@ document.addEventListener("keydown",function(e){
     else if(T.sheet==="demo") demoTape();
     else if(T.sheet==="copyask") confirmCopy();
     else if(T.sheet==="slot") insertSlotBefore();   /* A is the sheet's first row, like the other questions' 确认 */
+    else if(T.sheet==="patname"){
+      var pnb=$("studio-sheet").querySelector(".st-sheet-btn");
+      if(pnb) pnb.click();
+    }
     else if(T.sheet==="noteplay"||T.sheet==="chordtype") sheetConfirm();
     else if(!T.sheet) tapFocus();
   }
