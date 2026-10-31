@@ -31,7 +31,7 @@ test("review: a scale run, a broken chord, even notes, no breath and a narrow li
   const notes = K.review(s, run, C4, []).join(" | ");
   assert.match(notes, /even notes/);
   assert.match(notes, /by step for six notes/);
-  const arp = [[[0, 0, 0.8], [3, 2, 0.8], [4, 4, 0.8], [8, 7, 0.8], [14, 4, 0.8]], [[0, 0, 0.8], [3, 2, 0.8], [4, 4, 0.8], [8, 7, 0.8], [14, 4, 0.8]]];
+  const arp = [[[0, 0, 0.8], [3, 2, 0.8], [4, 4, 0.8], [8, 7, 0.8], [12, 4, 0.8], [14, 2, 0.8]], [[0, 0, 0.8], [3, 2, 0.8], [4, 4, 0.8], [8, 7, 0.8], [12, 4, 0.8], [14, 2, 0.8]]];
   assert.match(K.review(s, arp, C4, []).join(" "), /arpeggiates/);
   assert.match(K.review(s, arp, C4, []).join(" "), /never breathes/);
   assert.match(K.review(s, good, C4, [{ id: "verse", bars: good }]).join(" "), /repeats the verse exactly/);
