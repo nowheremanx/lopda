@@ -8,6 +8,10 @@
 // With OpenCode's DeepSeek v4.1 flash (the model class the harness is tuned for):
 //   --cmd "~/.claude/skills/deepseek-subagent/scripts/run.sh -q -m opencode-go/deepseek-v4.1-flash -"
 //
+// Or straight against OpenRouter, as the phone talks to it, to see the prompt cache at work (studio-prompts.js): each
+// row then also gives the prompt tokens sent and how many of them the provider reported as cached.
+//   OPENROUTER_API_KEY=sk-or-... node tools/studio-ai-trial.mjs --openrouter deepseek/deepseek-v4.1-flash --runs 2
+//
 // It prints, per scenario and run: success, model calls and rewrites, seconds, and the result (a skeleton's card, key,
 // tempo, length; an edit's reply and number of ops). --out keeps every transcript as JSON for reading prompts back.
 import fs from "node:fs";
@@ -26,8 +30,10 @@ const RUNS = Number(arg("runs", "3"));
 const ONLY = arg("only", "");
 const OUT = arg("out", "");
 const TEXT = arg("text", "");   // one skeleton request of your own, run --runs times
-if (!CMD) {
+const OR_MODEL = arg("openrouter", "");
+if (!CMD && !(OR_MODEL && process.env.OPENROUTER_API_KEY)) {
   console.error("usage: node tools/studio-ai-trial.mjs --cmd \"<command reading a prompt on stdin>\" [--runs 3] [--only skel|edit] [--out dir]");
+  console.error("   or: OPENROUTER_API_KEY=... node tools/studio-ai-trial.mjs --openrouter <model> [...]");
   process.exit(2);
 }
 
@@ -56,13 +62,27 @@ function run(prompt) {
   });
 }
 
+/* The same request the phone sends (runtime/ai.js), not streamed, with the usage OpenRouter reports: cached_tokens is
+   the part of the prompt the provider served from its cache. */
+async function openrouter(messages) {
+  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: "Bearer " + process.env.OPENROUTER_API_KEY },
+    body: JSON.stringify({ model: OR_MODEL, messages, usage: { include: true } }),
+  });
+  const j = await res.json();
+  if (!res.ok || j.error) throw new Error("OpenRouter: " + (j.error ? j.error.message : "HTTP " + res.status));
+  const u = j.usage || {};
+  return { text: j.choices?.[0]?.message?.content || "", usage: { prompt: u.prompt_tokens || 0, cached: u.prompt_tokens_details?.cached_tokens || 0 } };
+}
+
 function makeAsk(log) {
   return (messages) => {
     const t0 = Date.now();
-    const job = run(flatten(messages)).then((text) => {
+    const job = (OR_MODEL ? openrouter(messages) : run(flatten(messages)).then((text) => ({ text }))).then(({ text, usage }) => {
       const last = messages[messages.length - 1].content;
       log.push({ step: /TAPE4 STEP: (\w+)/.exec(messages[0].content)?.[1], turns: messages.length, ms: Date.now() - t0,
-        rejected: /^That JSON was rejected: /.test(last) ? last : undefined, answer: text });
+        rejected: /^That JSON was rejected: /.test(last) ? last : undefined, usage, answer: text });
       return text;
     });
     job.stop = () => {};
@@ -99,6 +119,10 @@ async function scenario(kind, text, i) {
   } else if (res) row.result = `${res.ops.length} ops`;
   if (res) row.reply = res.reply;
   row.rewrites = log.filter((l) => l.rejected).length;
+  if (OR_MODEL) {
+    row.promptTokens = log.reduce((a, l) => a + l.usage.prompt, 0);
+    row.cachedTokens = log.reduce((a, l) => a + l.usage.cached, 0);
+  }
   row.why = log.filter((l) => l.rejected).map((l) => l.step + ": " + l.rejected.slice(25, 140));
   rows.push(row);
   console.log(JSON.stringify(row));
@@ -116,3 +140,7 @@ for (const [text, n] of ONLY === "skel" ? [] : EDITS) for (let i = 0; i < n; i++
 
 const ok = rows.filter((r) => r.ok).length;
 console.log(`\n${ok}/${rows.length} succeeded; ${rows.reduce((a, r) => a + r.calls, 0)} model calls, ${rows.reduce((a, r) => a + r.rewrites, 0)} rewrites`);
+if (OR_MODEL) {
+  const p = rows.reduce((a, r) => a + r.promptTokens, 0), c = rows.reduce((a, r) => a + r.cachedTokens, 0);
+  console.log(`prompt tokens ${p}, cached ${c} (${p ? Math.round(100 * c / p) : 0}%)`);
+}

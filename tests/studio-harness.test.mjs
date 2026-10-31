@@ -90,6 +90,29 @@ async function skeletonOnce({ seed, plan = planFor(), stages = [] }) {
   return { ask, stages, out: await job };
 }
 
+/* A provider's prompt cache (OpenRouter, DeepSeek) bills what repeats the start of an earlier request as cached tokens:
+   each step's system prompt must be the same whatever the request, its language or the dice, and all of them must begin
+   with the same machine description (studio-prompts.js). */
+test("prompts: system prompts depend only on the step and share their opening", async () => {
+  const systems = {};
+  const keep = (ask) => { for (const e of ask.seen) (systems[e.step] ||= new Set()).add(e.messages[0].content); };
+  for (const [seed, text] of [[1, "来个骨架"], [7, "a rainy night song"]]) {
+    const ask = makeAsk(fullAnswers(planFor()));
+    await H.skeleton({ text, ask, rand: ST.seeded(seed), now: 1000 });
+    keep(ask);
+  }
+  for (const [song, text] of [[S.demoSong(0), "副歌更欢快"], [S.demoSong(1000), "more swing"]]) {
+    const ask = makeAsk(() => ({ reply: "ok", calls: [], done: true }));
+    await H.edit({ song, text, ask, focus: { screen: "song", pattern: 0 } });
+    keep(ask);
+  }
+  assert.deepEqual(Object.keys(systems).sort(), ["edit", "listen", "melody", "plan"]);
+  const all = Object.values(systems).map((set) => { assert.equal(set.size, 1, "one system prompt per step"); return [...set][0]; });
+  const opening = all[0].slice(0, all[0].indexOf("TAPE4 STEP:"));
+  assert.ok(opening.length > 1000, "the shared machine description comes first");
+  for (const sys of all) assert.ok(sys.startsWith(opening + "TAPE4 STEP: "), sys.slice(0, 80));
+});
+
 test("skeleton: card, plan, laid bars, melodies and a listen-back", async () => {
   const stages = [];
   const { ask, out } = await skeletonOnce({ seed: 1, stages });
