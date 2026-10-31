@@ -28,7 +28,7 @@ function scaleLen(song){ return (S.SCALES[song.scale]||S.SCALES.major).length; }
 
 /* A motif a line can be built from: enough notes to be a tune, not so many that it is a scale exercise, and with
    long and short notes (an all-eighths bar is what the model wrote before, and what made it sound mechanical). */
-function checkRhythm(r,name){
+function checkRhythm(r,name,even){
   var i, gaps={}, kinds=0;
   if(!Array.isArray(r) || r.length<2 || r.length>7) return name+" must list 2-7 onset steps in one bar (0-15)";
   for(i=0;i<r.length;i++){
@@ -40,7 +40,8 @@ function checkRhythm(r,name){
     var g=r[i+1]-r[i];
     if(!gaps[g]){ gaps[g]=true; kinds++; }
   }
-  if(r.length>=3 && kinds<2) return name+" has notes of one length only; mix long and short notes (e.g. [0,3,4,8] or [0,6,8,12])";
+  /* the answer bar may be even (four quarters answering a dotted figure is a classic); the motif itself may not */
+  if(!even && r.length>=3 && kinds<2) return name+" has notes of one length only; mix long and short notes (e.g. [0,3,4,8] or [0,6,8,12])";
   return "";
 }
 
@@ -49,7 +50,7 @@ function checkMotif(m){
   if(!m || typeof m!=="object") return "a motif is {rhythm, contour, register, ending}";
   why=checkRhythm(m.rhythm,"rhythm");
   if(why) return why;
-  if(m.answer!=null){ why=checkRhythm(m.answer,"answer"); if(why) return why; }
+  if(m.answer!=null){ why=checkRhythm(m.answer,"answer",true); if(why) return why; }
   if(!Array.isArray(m.contour) || m.contour.length<2 || m.contour.length>8) return "contour must list 2-8 moves in scale steps (-3..3)";
   for(i=0;i<m.contour.length;i++) if(!int(m.contour[i]) || m.contour[i]<-3 || m.contour[i]>3) return "contour moves must be integers -3..3";
   var flat=true;
