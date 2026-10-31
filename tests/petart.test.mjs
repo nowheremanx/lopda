@@ -74,7 +74,14 @@ test("every grid in the pack is rectangular and uses only .kdmp", () => {
   for (const id of Object.keys(P.props)) assertGrid("prop " + id, P.props[id]);
   for (const id of Object.keys(P.icons)) assertGrid("icon " + id, P.icons[id], 8, 8);
   for (const id of Object.keys(P.homeIcons)) assertGrid("home icon " + id, P.homeIcons[id], 16, 16);
-  for (const s of P.souvenirs) assertGrid("souvenir " + s.id, s.grid, 16, 16);
+  for (const s of P.souvenirs) {
+    assertGrid("souvenir " + s.id, s.grid, 16, 16);
+    if (!s.state) continue;
+    for (const layer of s.state.layers) {
+      if (layer.kind === "grow") for (const st of layer.stages) assertGrid(`souvenir ${s.id} grow ${st.id}`, st.grid, 16, 16);
+      if (layer.kind === "match") layer.rules.forEach((r, i) => assertGrid(`souvenir ${s.id} match ${r.id || i}`, r.grid, 16, 16));
+    }
+  }
 });
 
 test("frames: every stage x every frame x 6 antennas x 3 eyes is a visible 32 x 32", () => {
@@ -468,8 +475,8 @@ test("drawRoom: a second pack brings its own room props", () => {
   assert.notEqual(withChip[90 * W + 12], 3, "the chip room did not draw the fake grid");
 });
 
-test("souvenirs: exactly 20 original finds, 16 x 16, unique ids, postcard kept", () => {
-  assert.equal(P.souvenirs.length, 20);
+test("souvenirs: exactly 23 original finds, 16 x 16, unique ids, postcard kept", () => {
+  assert.equal(P.souvenirs.length, 23);
   assert.ok(P.souvenirs.length >= 18);
   const seen = new Set();
   for (const s of P.souvenirs) {
@@ -480,6 +487,20 @@ test("souvenirs: exactly 20 original finds, 16 x 16, unique ids, postcard kept",
   }
   assert.ok(seen.has("post"));
   assert.deepEqual(Object.keys(P.icons).sort(), ["box", "call", "food", "light", "look", "mail", "play", "wash"]);
+});
+
+test("packOk: a broken state frame is reported", () => {
+  const bad = {
+    ...P,
+    souvenirs: P.souvenirs.map((s) => s.id === "seed" ? {
+      ...s,
+      state: { v: 1, layers: [{ kind: "grow", stages: [
+        { id: "seed", grid: s.grid },
+        { id: "bad", grid: ["................"] }
+      ] }] }
+    } : s)
+  };
+  assert.ok(A.packOk(bad).some((e) => /state/.test(e)), "a 1-row state frame is not a souvenir frame");
 });
 
 test("blit and darken are bounded and map the four tones", () => {

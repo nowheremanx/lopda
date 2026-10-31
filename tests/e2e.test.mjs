@@ -5819,6 +5819,86 @@ test("pet: an old save's marks load, A then A puts a souvenir on the shelf, and 
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
+test("pet: a stateful souvenir grows on the shelf, pauses in the box, and update keeps unknown fields", { skip, timeout: 90000 }, async (t) => {
+  const { p, errors } = await page(t, { ...pw.devices["iPhone 13"], locale: "zh-CN", serviceWorkers: "block" });
+  await p.clock.install({ time: new Date(2026, 9, 11, 9, 0) });
+  await p.goto(base + "/runtime/?debug", { waitUntil: "networkidle" });
+  await p.waitForFunction(() => document.getElementById("savestate").textContent !== "启动中…");
+  const plan = await p.evaluate(() => {
+    const P = window.LopdaPet, now = Date.now();
+    const s = P.fresh(now, P.rng(5));
+    s.stage = "baby"; s.name = "芯仔";
+    return s;
+  });
+  plan.shelf = "grow1";
+  const px = (ch) => ch.repeat(256);
+  const state = {
+    v: 1,
+    layers: [
+      { kind: "grow", stages: [
+        { id: "seed", px: px("0"), hold: 86400 },
+        { id: "grown", px: px("1"), hold: 0 }
+      ] },
+      { kind: "match", when: { stage: ["grown"] }, rules: [
+        { when: { night: true }, id: "night", px: px("2") },
+        { id: "day", px: px("1") }
+      ] }
+    ]
+  };
+  await idb.setDoc(p, "data/users/local/pet", plan);
+  await idb.setDoc(p, "data/users/local/pet/souvenirs/grow1", {
+    name: { zh: "测试种子", en: "Test seed" }, line: { zh: "放在架子上看看。", en: "Leave it on the shelf." },
+    px: px("0"), at: 1000, ai: false, day: "2026-10-11", state, keep: "yes"
+  });
+  await idb.setDoc(p, "data/users/local/pet/souvenirs/weather1", {
+    name: { zh: "测试风向标", en: "Test vane" }, line: { zh: "看风。", en: "Watch the wind." },
+    px: px("3"), at: 2000, ai: false, day: "2026-10-11",
+    state: { v: 1, layers: [{ kind: "match", rules: [
+      { when: { weather: ["rain"] }, id: "wet", px: px("1") },
+      { id: "calm", px: px("3") }
+    ] }] }
+  });
+  await p.reload({ waitUntil: "networkidle" });
+  await p.waitForFunction(() => document.getElementById("savestate").textContent !== "启动中…");
+  await p.locator("#home .app", { hasText: "宠物" }).click();
+  await p.locator("#v-pet:not([hidden])").waitFor();
+  await p.waitForFunction(() => window.LOPDA_DEBUG.pet && LOPDA_DEBUG.pet.save());
+
+  assert.equal((await p.evaluate(() => LOPDA_DEBUG.pet.souvState("grow1"))).stage, "seed", "planted now, still a seed");
+  await p.evaluate(() => LOPDA_DEBUG.pet.souvAge("grow1", 25));
+  await p.waitForTimeout(150);
+  const grown = await p.evaluate(() => LOPDA_DEBUG.pet.souvState("grow1"));
+  assert.equal(grown.stage, "grown", "25 shelf hours move it on");
+  assert.equal(grown.id, "day", "the day match is the frame");
+  let doc = await idb.doc(p, "data/users/local/pet/souvenirs/grow1");
+  assert.equal(doc.keep, "yes", "the unknown field survives the first update");
+  assert.ok(doc.plantedAt > 0 && doc.grownMs === 0, "on the shelf, time lives in plantedAt");
+
+  /* take it off: the growth is banked in grownMs, the clock stops */
+  await p.evaluate(() => LOPDA_DEBUG.pet.souvShelf(null));
+  await p.waitForFunction(() => LOPDA_DEBUG.pet.save().shelf === null);
+  const paused = await p.evaluate(() => LOPDA_DEBUG.pet.souvState("grow1"));
+  assert.equal(paused.stage, "grown", "the box keeps the stage it reached");
+  doc = await idb.doc(p, "data/users/local/pet/souvenirs/grow1");
+  assert.ok(doc.grownMs >= 25 * 3600000, "the shelf time was banked");
+  assert.equal(doc.plantedAt, null);
+  assert.equal(doc.keep, "yes", "the unknown field survives the take-off update");
+
+  /* put it back: it continues from grownMs, not from zero */
+  await p.evaluate(() => LOPDA_DEBUG.pet.souvShelf("grow1"));
+  await p.waitForFunction(() => LOPDA_DEBUG.pet.save().shelf === "grow1");
+  assert.equal((await p.evaluate(() => LOPDA_DEBUG.pet.souvState("grow1"))).stage, "grown");
+  doc = await idb.doc(p, "data/users/local/pet/souvenirs/grow1");
+  assert.ok(doc.plantedAt > 0, "a new stay has its own plantedAt");
+  assert.equal(doc.keep, "yes", "the unknown field survives the put-back update");
+
+  /* a match-only souvenir follows the room's weather without being on the shelf */
+  assert.equal((await p.evaluate(() => LOPDA_DEBUG.pet.souvState("weather1"))).id, "calm");
+  await p.evaluate(() => LOPDA_DEBUG.pet.setWeather("rain"));
+  assert.equal((await p.evaluate(() => LOPDA_DEBUG.pet.souvState("weather1"))).id, "wet");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
 test("pet: the keepsake box is a newest-first month grid with page turns, and fits 331 x 359", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await page(t, { ...pw.devices["iPhone 13"], locale: "zh-CN", serviceWorkers: "block" });
   await p.clock.install({ time: new Date(2026, 9, 11, 9, 0) });
