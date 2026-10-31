@@ -3832,18 +3832,21 @@ test("studio: the guide, the pop example and clear-track", { skip, timeout: 9000
   assert.deepEqual(errors, []);
 });
 
-test("studio: quick AI commands work with no key, and an AI reply is previewed and undoable", { skip, timeout: 90000 }, async (t) => {
+test("studio: with no key nothing changes the tape; an AI reply is previewed and undoable", { skip, timeout: 90000 }, async (t) => {
   const { p, errors } = await rtPage(t);
   await studioOpen(p);
   await skipTour(p);
+  /* the local phrase matcher is gone (owner, 2026-10-31): with no key a request only says so, the tempo stays */
+  const before = await p.textContent("#studio-bpm");
   await p.click("#studio-menu");
   await p.locator("#studio-sheet .lcd-menu li", { hasText: "让 AI 改" }).click();
   await p.waitForSelector("#studio-ai-input");
-  await p.fill("#studio-ai-input", "节奏更快点");
+  await p.fill("#studio-ai-input", "来一首 E 大调 12 bar blues");
   await p.locator("#studio-sheet .st-sheet-btn", { hasText: "说" }).click();
-  await p.waitForSelector("#studio-sheet", { state: "hidden" });
-  assert.match(await p.textContent("#studio-bpm"), /86 BPM/, "the quick command changed the tempo");
-  assert.match(await p.textContent("#toast"), /本地/, "the quick command says it was done locally");
+  assert.match(await p.textContent("#toast"), /没接上 AI/);
+  assert.equal(await p.textContent("#studio-bpm"), before);
+  await p.click("#studio-sheet .st-sheet-head button").catch(() => {});
+  await p.keyboard.press("z");
 
   /* the harness' first ask is held open: the sheet shows the stage and the link line, and a signal flips the mark */
   await p.evaluate(() => {
@@ -3876,7 +3879,7 @@ test("studio: quick AI commands work with no key, and an AI reply is previewed a
   assert.match(await p.textContent("#studio-bpm"), /100 BPM/);
   await p.click("#studio-menu");
   await p.locator("#studio-sheet .lcd-menu li", { hasText: "撤销" }).first().click();
-  assert.match(await p.textContent("#studio-bpm"), /86 BPM/, "the AI edit is one undo step");
+  assert.equal(await p.textContent("#studio-bpm"), before, "the AI edit is one undo step");
   assert.deepEqual(errors, []);
 });
 

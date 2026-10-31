@@ -40,7 +40,7 @@ var LETTERS="ABCDEFGHIJKLMNOP";
 /* the mixer's four instrument rows (12.14); the voice row joins them in step 2, when it can sound */
 var MIX_TRACKS=["drums","bass","chords","melody"];
 var TAPE=window.LopdaStudioTape, WAV=window.LopdaWav, MIDI=window.LopdaMidi, ZIP=window.LopdaZip;
-var EDIT=window.LopdaStudioEdit, CMD=window.LopdaStudioCommand, H=window.LopdaStudioHarness;
+var EDIT=window.LopdaStudioEdit, H=window.LopdaStudioHarness;
 
 var T={
   song:null, id:"", meta:null,
@@ -2150,9 +2150,9 @@ function renderAiSheet(sh){
     b.onclick=function(){ askAi(text); };
     chips.appendChild(b);
   };
-  chip(tr("studio.ai.chip.faster")+" · "+tr("studio.ai.tag.local"),tr("studio.ai.chip.faster"));
-  chip(tr("studio.ai.chip.swing")+" · "+tr("studio.ai.tag.local"),tr("studio.ai.chip.swing"));
-  chip(tr("studio.ai.chip.skeleton")+" · "+tr("studio.ai.tag.ai"),tr("studio.ai.chip.skeleton"));
+  chip(tr("studio.ai.chip.faster"),tr("studio.ai.chip.faster"));
+  chip(tr("studio.ai.chip.swing"),tr("studio.ai.chip.swing"));
+  chip(tr("studio.ai.chip.skeleton"),tr("studio.ai.chip.skeleton"));
   sh.appendChild(chips);
   if(!T.aiBusy){
     var state=el("p","st-sheet-label st-ai-state",aiState());
@@ -2200,19 +2200,8 @@ function askAi(text){
   text=String(text==null?"":text).trim();
   if(!text || T.aiBusy) return;
   T.aiNote=text;
-  var local=CMD ? CMD.parse(text,{pattern:T.pat,screen:T.screen}) : null;
-  if(local && local.ops.length){
-    var out=EDIT.apply(T.song,local.ops);
-    if(out.error){ toast(tr("studio.ai.bad")); return; }
-    T.song=out.song;
-    touch();
-    T.aiNote="";
-    T.sheet="";
-    renderAll();
-    if(local.note==="swing-global") toast(tr("studio.ai.swingglobal"));
-    else toast(tr("studio.ai.local"));
-    return;
-  }
+  /* every request goes to the AI: the local phrase matcher read "a 12-bar blues in E major" as "change the key to E
+     major" and did it (owner, 2026-10-31), so it was removed */
   if(!LP.ai || !LP.ai.on()){
     if(H.wantsNewSong(text,T.song)) toast(tr("studio.ai.nokey.template"));
     else toast(tr("studio.ai.nokey"));

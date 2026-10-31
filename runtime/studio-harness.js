@@ -20,7 +20,7 @@
  */
 (function(){
 "use strict";
-var K=window.LopdaStudioCritic, C=window.LopdaStudioCompose, TH=window.LopdaStudioTheory, AI=window.LopdaStudioAI, P=window.LopdaStudioPrompts, ST=window.LopdaStudioStyles,
+var K=window.LopdaStudioCritic, TH=window.LopdaStudioTheory, AI=window.LopdaStudioAI, P=window.LopdaStudioPrompts, ST=window.LopdaStudioStyles,
     T=window.LopdaStudioTools, E=window.LopdaStudioEdit, S=window.LopdaSong;
 
 var MAX_RETRY=2, MAX_TURNS=5, CHORD_STYLES=["triad","seventh","rich"];
@@ -381,9 +381,8 @@ function laySong(roll,plan,now){
 }
 
 /* ---------- the melody ---------- */
-/* The motifs: one ask for every section with a melody, then the local writer (studio-compose.js) builds the phrases
-   over the chords. The model decides the rhythm and the shape of each line; the notes come from the chords, so they
-   fit (12.20.10). */
+/* The machine writes no melody notes of its own: 12.20.10's phrase writer was removed with the quick commands
+   (owner, 2026-10-31). */
 function chordSpec(song,plan,c){
   if(!int(c)) return c;
   var q=T.diatonicQ(song,c,plan.chordStyle);
@@ -405,7 +404,7 @@ function bassOps(p,notes){
 /* The melody, one ask per section: the model writes the notes, may develop its own bars with repeat / sequence /
    invert / rest, and the critic (studio-critic.js) sends it back with what to fix. Notes off the key are refused
    every time; taste is advice, asked at most twice, and the third answer stands (12.20.13). If the line fails
-   anyway, the local phrase writer fills the section so the song is never left without a tune. */
+   anyway, the job ends as unreadable: the machine writes no notes of its own (owner, 2026-10-31). */
 function melodyCheck(song,s,specs,others,tries){
   return function(obj){
     var ex, why, k, tried=song, issues=[], advice;
@@ -429,7 +428,6 @@ function melodyCheck(song,s,specs,others,tries){
   };
 }
 
-var FALLBACK_MOTIF={rhythm:[0,3,4,8,12], answer:[0,4,6,8], contour:[1,1,-2,1], register:"mid", ending:"home"};
 
 function melodyRun(c,song,plan,roll,text,onStage){
   var list=[], written=[], i, idx=0;
@@ -466,10 +464,6 @@ function melodyRun(c,song,plan,roll,text,onStage){
       before:written.map(function(w){ return w.id+": "+JSON.stringify(w.bars); }).join("\n")});
     return step(c,msgs,melodyCheck(song,s,specs,written,tries),"melody").then(function(ans){
       finish(s,specs,ans.value);
-      return next();
-    },function(e){
-      if(!e || e.code!=="unreadable") throw e;
-      finish(s,specs,C.phrase(song,FALLBACK_MOTIF,specs,{variant:0}));
       return next();
     });
   }

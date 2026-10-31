@@ -5,7 +5,7 @@ import vm from "node:vm";
 import { runScript, read } from "./helpers.mjs";
 
 const ctx = runScript("runtime/studio-song.js");
-for (const f of ["studio-styles.js", "studio-tools.js", "studio-theory.js", "studio-compose.js", "studio-critic.js", "studio-edit.js", "studio-prompts.js", "studio-ai.js", "studio-harness.js"]) {
+for (const f of ["studio-styles.js", "studio-tools.js", "studio-theory.js", "studio-critic.js", "studio-edit.js", "studio-prompts.js", "studio-ai.js", "studio-harness.js"]) {
   vm.runInContext(read("runtime/" + f), ctx, { filename: "runtime/" + f });
 }
 const S = ctx.LopdaSong, ST = ctx.LopdaStudioStyles, E = ctx.LopdaStudioEdit, H = ctx.LopdaStudioHarness;
