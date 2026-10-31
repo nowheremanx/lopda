@@ -515,6 +515,18 @@ test("validateSouvenir: a good bilingual object or JSON string, trimmed, px join
   assert.ok([...longest.line.en].length <= 80);
 });
 
+test("validateSouvenir: an extra state field is ignored, not a reason to reject the find", () => {
+  const good = {
+    name: { zh: "红叶", en: "Red leaf" },
+    line: { zh: "在山顶捡到的一片叶子", en: "A leaf from the ridge." },
+    px: rows(),
+    state: { v: 1, layers: [{ kind: "grow", stages: [] }] }
+  };
+  const v = P.validateSouvenir(good);
+  assert.ok(v);
+  assert.deepEqual(Object.keys(v).sort(), ["line", "name", "px"], "only the white-listed fields survive");
+});
+
 test("validateSouvenir: one language, the wrong script, or a bad length is refused", () => {
   const good = {
     name: { zh: "红叶", en: "Red leaf" },

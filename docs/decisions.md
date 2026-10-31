@@ -1598,3 +1598,18 @@ EXIF，相册就能把照片放到地图上。
 - **测试**：`tests/appsaves.test.mjs`（旧档、损坏、newer、schema、app 快照）；`tests/pad-shim.test.mjs`
   （load reject、saveInfo、setSchema）；`tests/e2e.test.mjs` 的「removing an app keeps its save...」
   （卸载后文档还在、重装读回、设置里清除、损坏提示）。
+
+## 44. 纪念品的物品状态（0.52.0）
+
+2026-10-30，runtime 0.52.0。纪念品不再只是一张静态的 16 x 16 图：种子会在架子上慢慢长大，风向标会跟着天气换样子，雪花球在冬天/下雪时下雪，月相盘跟着农历走。设计稿是 `docs/design/pet-souvenir-state.md`，这一节只记落地的决定。
+
+- **一个 hook**：`runtime/petstate.js` 的 `window.LopdaPetState.stateOf(item, ctx)` 是唯一入口，返回 `{px, id, layer, stage}`。纯函数，不读 DOM、不写存储、不取 `Date.now()`、不随机；`ctx = {now, hour, minute, night, weather, season, lunar, onShelf}` 由 `pet.js` 从房间里已有的值构造。房间、箱子、出门携带都走同一个入口。
+- **两个 driver**：v1 只有 `grow`（线性生长）和 `match`（按昼夜/小时/天气/季节/农历日/月/闰月/grow stage/是否在架子上选帧）。层按数组顺序求值，后面的层覆盖前面的 `px`/`id`/`stage`；`grow` 放前面，`match` 才能读 `stage`。`cycle` 留到第二批；`event` 不规划，因为天气是 `Pet.weatherOf(born, dayKey, season)`，一天一个值、午夜才变，`restartPet` 换了 `born` 当天天气也会变，现在没有“日内雨停”这种事。
+- **只在架子上长**：`grow` 的年龄 = `grownMs + (onShelf && plantedAt ? now - plantedAt : 0)`。第一次摆上写 `plantedAt`；收起时把这次的时间累进 `grownMs` 并清空 `plantedAt`；收进箱子就暂停，再摆上从 `grownMs` 继续。屏幕关着但仍在架子上，时间照常算；下次打开补上。时钟回拨按 `max(0, ...)`。
+- **只改字段**：`plantedAt` / `grownMs` 是第一次改写已有的纪念品文档，只用 `doc.update({...})`，绝不 `set` 整件重写，未知字段保留。摆上先写 `plantedAt` 再改 `save.shelf`；收起先写 `grownMs` 再清 `save.shelf`；写入失败就停在原状态并显示「未存档」，不假装成功。换架子按“先收旧、再摆新”两步。
+- **数据形状**：纪念品文档在原有 `{name, line, px, at, ai, day}` 上增加可选的 `state`（模板）、`grownMs`、`plantedAt`。没有文档级 `v`；`state.v === 1` 加 `state` 是否存在判断。顶层 `px` 永远等于 `grow` 第 0 阶段，旧 runtime 只读 `px` 也能显示。`state` 不合法就丢掉它、保留 `px`；未知 `when` 字段丢掉整个 layer/rule；绝不因为行为块坏了丢整件纪念品。
+- **第一版物品**：`SOUV` 的 `seed` 改成有状态（种子 -> 发芽 -> 花苞 -> 开花，开花后夜里合上），并新增 `vane`（雨/风/平静三张静态图）、`snowglobe`（冬天或下雪）、`moondial`（农历日 1-6/7-14/15-21/22-30 四张）。第一版没有 `cycle` 动画；风向标要转，等第二批。
+- **AI**：`validateSouvenir` 仍是白名单，只取 `name` / `line` / `px`；模型多给 `state` / `life` / 任何字段都直接忽略，不因此拒绝整件。AI 纪念品第一版仍是静态。
+- **校验与上限**：`LopdaPetState.validate(spec, firstPx)` 清理状态；`layers` <= 4，`grow.stages` <= 6，`match.rules` <= 6，总帧数 <= 8，单段 `hold` <= 30 天、总时长 <= 180 天，帧必须是 16 x 16 的 `0-3`。`grow` 第 0 帧必须等于顶层 `px`。
+- **代码**：`runtime/petstate.js`；`runtime/apps/pet.js` 的 `souvenirCtx / souvenirView / packState / stateHasGrow / updateSouv / shelfTake / shelfPut / setShelf / repairShelf`、箱子和房间的预览；`runtime/petart.js` 的四个物品和 `packOk` 的 state 帧检查；`runtime/strings.js`；`runtime/index.html` 与 `runtime/sw.js` 的 SHELL。`RUNTIME_VERSION` / `VERSION` 0.52.0。
+- **测试**：`tests/petstate.test.mjs`（grow 边界、架子时间、match 每个条件、覆盖顺序、非法降级）；`tests/petsim.test.mjs`（AI 多给的 `state` 被忽略）；`tests/petart.test.mjs`（四个物品每帧 16 x 16、四色）；`tests/e2e.test.mjs`（摆上种子 -> 调时间 -> 发芽/开花、收进箱子暂停、夜里合上、改天气 -> 风向标、重载保留 `grownMs`、未知字段保留）。
