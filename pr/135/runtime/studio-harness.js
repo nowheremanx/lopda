@@ -254,6 +254,9 @@ function planCheck(obj,cards,rolls){
       return {error:"section '"+id+"': unknown bass rhythm '"+String(s.bass)+"'; use one of "+Object.keys(ST.BASS).join(", ")+", or write [[step, velocity, move], ...]"};
     if(!int(s.energy) || s.energy<0 || s.energy>2)
       return {error:"section '"+id+"': energy must be 0, 1 or 2"};
+    /* a whole note a bar under a verse or chorus is what made the songs drag: it is for intros, outros and ballads */
+    if(s.melody && s.energy>=1 && s.bass==="whole")
+      return {error:"section '"+id+"': a whole-note bass drags under a melody; use half, pulse, eighths, walk, boom, syncopated or alberti"};
     if(typeof s.melody!=="boolean")
       return {error:"section '"+id+"': melody must be true or false"};
     lens["$"+id]=s.chords.length;
@@ -279,8 +282,9 @@ function planCheck(obj,cards,rolls){
   }
   if(chain>S.SONG_MAX) return {error:"the chain is "+chain+" slots; at most "+S.SONG_MAX};
   seconds=chain*240/bpm;
-  if(seconds<100) return {error:"the song is "+Math.round(seconds)+" s; add repeats so it is 100-200 s"};
-  if(seconds>200) return {error:"the song is "+Math.round(seconds)+" s; remove repeats so it is 100-200 s"};
+  /* 75-150 s: the owner found two and a half minutes of a handheld's tape drag (2026-10-31) */
+  if(seconds<75) return {error:"the song is "+Math.round(seconds)+" s; add sections so it is 75-150 s"};
+  if(seconds>150) return {error:"the song is "+Math.round(seconds)+" s; cut repeats so it is 75-150 s"};
   /* Keep only the fields the rest of the pipeline uses: a model's extra keys must not leak into the song or a prompt. */
   var kept=[];
   for(i=0;i<sections.length;i++){
