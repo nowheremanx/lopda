@@ -49,3 +49,11 @@ test("fitToChord moves the weighty notes onto the new chord; endOtherWay flips t
   const back = plain(K.endOtherWay(s, open, { root: 0, q: "maj" }));
   assert.equal(S.noteMidi(s, "melody", back[1][1], back[1][3]) % 12, 0, "open becomes home");
 });
+
+test("expand reads an ornament written where acc goes; a half phrase ending on a held beat breathes", () => {
+  const r = plain(K.expand([[[0, 2, 0.8, "vib"], [8, 3, 0.8]]]));
+  assert.deepEqual(r.bars[0][0], [0, 2, 0.8, 0, "vib"]);
+  const s = song(0, "major");
+  const bars = [[[0, 2, 0.8], [3, 3, 0.7], [6, 4, 0.8], [8, 2, 0.8], [10, 1, 0.7]], [[0, 2, 0.8], [3, 3, 0.7], [6, 4, 0.8], [12, 1, 0.8]]];
+  assert.doesNotMatch(K.review(s, bars, C4, []).join(" "), /breathes/);
+});

@@ -29,11 +29,17 @@ function pc(n){ return ((n%12)+12)%12; }
 function copyBar(b){ return b.map(function(n){ return n.slice(); }); }
 
 /* one written bar: rising steps 0-15, degrees -3..12, velocity 0 (a rest) or 0.3-1, then optional acc and ornament */
+/* [step, deg, vel, "vib"]: a small model often puts the ornament where acc goes; that is read as meant, not refused */
+function lenient(n){
+  if(Array.isArray(n) && n.length===4 && (n[3]==="slide" || n[3]==="vib")) return [n[0],n[1],n[2],0,n[3]];
+  return n;
+}
+
 function checkNotes(bar,where){
   var prev=-1, i, n, vel;
   if(!Array.isArray(bar) || bar.length>12) return where+" must be a list of at most 12 notes";
   for(i=0;i<bar.length;i++){
-    n=bar[i];
+    n=lenient(bar[i]);
     if(!Array.isArray(n) || n.length<2) return where+" note "+(i+1)+" must be [step, degree, velocity]";
     if(!int(n[0]) || n[0]<0 || n[0]>15 || n[0]<=prev) return where+": steps must be 0-15, rising, none twice";
     if(!int(n[1]) || n[1]<-3 || n[1]>12) return where+": degrees must be integers -3..12";
@@ -47,6 +53,7 @@ function checkNotes(bar,where){
 }
 
 function norm(n){
+  n=lenient(n);
   var out=[n[0],n[1],n.length>2 && n[2]!=null ? Math.round(n[2]*100)/100 : 0.8];
   if(n.length>3 && n[3]) out.push(n[3]);
   if(n.length>4 && n[4]){ if(out.length<4) out.push(0); out.push(n[4]); }
@@ -135,7 +142,12 @@ function review(song,bars,specs,others){
     else { run=Math.abs(d)===1 ? 2 : 1; dir=Math.abs(d)===1 ? d : 0; }
     if(run>=6){ advice.push("the line climbs or falls by step for six notes or more; turn it around sooner or leap once"); break; }
   }
-  if(bars.length>=2 && !rests && longest<6)
+  var halfEnds=true;
+  for(i=1;i<bars.length;i+=2){
+    var lb=bars[i], ln=lb.length ? 16-lb[lb.length-1][0] : 16;
+    if(ln<4) halfEnds=false;
+  }
+  if(bars.length>=2 && !rests && longest<6 && !halfEnds)
     advice.push("the phrase never breathes; hold one note for at least a beat and a half, or leave a rest, near the middle or the end");
   if(all.length>=6 && hi-lo<4) advice.push("the line stays within "+(hi-lo+1)+" notes; give it a high point (a leap up, then step back down)");
   if(bars.length>=3 && distinct===1) advice.push("every bar has the same rhythm; let at least one bar answer with another rhythm");
