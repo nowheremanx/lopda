@@ -3801,6 +3801,44 @@ test("studio: the workspace zip comes back with every tape and version", { skip,
   assert.deepEqual(errors, []);
 });
 
+test("studio: a tape's JSON comes back as a new tape and keeps the one it came from", { skip, timeout: 90000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await p.evaluate(() => {
+    window.__json = null;
+    LopdaPlatform.downloads.save = async ({ filename, data }) => {
+      window.__json = { filename, text: await data.text() };
+      return { status: "saved" };
+    };
+  });
+  await openFileMenu(p);
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "导出这盘（JSON）" }).click();
+  await p.waitForFunction(() => window.__json, null, { timeout: 30000 });
+  const out = await p.evaluate(() => window.__json);
+  const doc = JSON.parse(out.text);
+  doc.name = "imported";
+  doc.template = "demo";                                                   /* a demo copy from another machine */
+  await p.locator('#studio-grid .st-cell[data-step="0"]').click();       /* this tape changes; the import must not touch it */
+  assert.equal(await cellOn(p, 0), false);
+  await p.setInputFiles("#studio-import-json", { name: "t.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(doc)) });
+  await p.waitForFunction(() => document.querySelector('#studio-grid .st-cell[data-step="0"]').classList.contains("on"), null, { timeout: 30000 });
+  const items = await p.evaluate(async () => {
+    const got = await LopdaPlatform.db.doc("data/users/local/studio").collection("items").get();
+    return got.docs.map((d) => ({ name: d.data().name, template: d.data().template, step0: (d.data().patterns[0].notes.drums || []).some((n) => n.t === 0 && n.key === "kick") }));
+  });
+  assert.equal(items.length, 2, "the import adds a tape");
+  const imp = items.find((x) => x.name === "imported"), old = items.find((x) => x.name !== "imported");
+  assert.ok(imp && imp.step0 && imp.template === undefined, "the imported tape is the exported one, as the user's own");
+  assert.ok(old && !old.step0, "the tape it came from keeps its edit");
+
+  await p.setInputFiles("#studio-import-json", { name: "bad.json", mimeType: "application/json", buffer: Buffer.from('{"v":99}') });
+  await p.waitForFunction(() => /更新的版本/.test(document.body.textContent), null, { timeout: 10000 });
+  await p.setInputFiles("#studio-import-json", { name: "bad.json", mimeType: "application/json", buffer: Buffer.from("not json") });
+  await p.waitForFunction(() => /不是能读的磁带/.test(document.body.textContent), null, { timeout: 10000 });
+  assert.deepEqual(errors, []);
+});
+
 test("studio: the guide, the pop example and clear-track", { skip, timeout: 90000 }, async (t) => {
   const { p, errors } = await rtPage(t);
   await studioOpen(p);
