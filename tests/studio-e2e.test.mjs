@@ -3822,7 +3822,7 @@ test("studio: a tape's JSON comes back as a new tape and keeps the one it came f
   await p.locator('#studio-grid .st-cell[data-step="0"]').click();       /* this tape changes; the import must not touch it */
   assert.equal(await cellOn(p, 0), false);
   await p.setInputFiles("#studio-import-json", { name: "t.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(doc)) });
-  await p.waitForFunction(() => document.querySelector('#studio-grid .st-cell[data-step="0"]').classList.contains("on"), null, { timeout: 30000 });
+  await p.waitForFunction(() => /imported/.test(document.body.textContent) && document.querySelector('#studio-screens .st-scr[data-screen="song"]').classList.contains("on"), null, { timeout: 30000 });
   const items = await p.evaluate(async () => {
     const got = await LopdaPlatform.db.doc("data/users/local/studio").collection("items").get();
     return got.docs.map((d) => ({ name: d.data().name, template: d.data().template, step0: (d.data().patterns[0].notes.drums || []).some((n) => n.t === 0 && n.key === "kick") }));
@@ -3834,6 +3834,10 @@ test("studio: a tape's JSON comes back as a new tape and keeps the one it came f
 
   await p.setInputFiles("#studio-import-json", { name: "bad.json", mimeType: "application/json", buffer: Buffer.from('{"v":99}') });
   await p.waitForFunction(() => /更新的版本/.test(document.body.textContent), null, { timeout: 10000 });
+  const many = JSON.parse(JSON.stringify(doc));
+  while (many.patterns.length < 29) many.patterns.push(JSON.parse(JSON.stringify(doc.patterns[0])));
+  await p.setInputFiles("#studio-import-json", { name: "many.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(many)) });
+  await p.waitForFunction(() => /这盘有 29 段，四轨机最多 16 段/.test(document.body.textContent), null, { timeout: 10000 });
   await p.setInputFiles("#studio-import-json", { name: "bad.json", mimeType: "application/json", buffer: Buffer.from("not json") });
   await p.waitForFunction(() => /不是能读的磁带/.test(document.body.textContent), null, { timeout: 10000 });
   assert.deepEqual(errors, []);

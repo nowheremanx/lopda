@@ -3054,7 +3054,13 @@ function importJson(file){
     var doc, got, song, id;
     try{ doc=JSON.parse(text); }catch(e){ toast(tr("studio.import.bad")); return; }
     got=SONGS.validate(doc);
-    if(!got.song){ toast(tr(got.error==="newer" ? "studio.import.newer" : "studio.import.bad")); return; }
+    if(!got.song){
+      /* a hand-written or AI-written tape most often breaks the 16-pattern limit; say so instead of "can't read" */
+      if(got.error==="patterns" && doc && Array.isArray(doc.patterns) && doc.patterns.length>SONGS.PATTERNS_MAX)
+        toast(tr("studio.import.toomany",{n:doc.patterns.length,max:SONGS.PATTERNS_MAX}));
+      else toast(tr(got.error==="newer" ? "studio.import.newer" : "studio.import.bad"));
+      return;
+    }
     song=got.song;
     song.folder=T.projectFolder==="demo" ? "" : T.projectFolder;
     delete song.template;          /* a demo copy from elsewhere is the user's own tape here */
@@ -3063,6 +3069,7 @@ function importJson(file){
     writeProject(id,song).then(function(ok){
       if(!ok) return;
       installSong(song,id,[]);
+      setScreen("song");             /* an imported tape opens on its whole song, not on pattern A's drums */
       toast(tr("studio.import.done",{name:song.name||tr("studio.proj.unnamed")}));
     });
   },function(e){
