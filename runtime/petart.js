@@ -765,6 +765,245 @@ var ICONS={
 };
 
 /* ---------- souvenirs: 16 x 16, everyday things it finds on its walks ---------- */
+/* Stateful finds share their frames with petstate.js: the top-level grid is always the first grow stage. */
+var SEED_GRID=[
+  "................",
+  "................",
+  "...........kk...",
+  "..........kpk...",
+  ".........kpk....",
+  "........kpk.....",
+  ".....kkkpk......",
+  "....kmmmmk......",
+  "...kmppmmk......",
+  "...kmmmmmk......",
+  "....kmmmmk......",
+  ".....kkkk.......",
+  "................",
+  "................",
+  "................",
+  "................"];
+var SEED_SPROUT=[
+  "................",
+  "................",
+  "................",
+  "................",
+  "........kk......",
+  ".......kddk.....",
+  "......kddddk....",
+  ".......kddk.....",
+  "........kk......",
+  ".......kdk......",
+  "......kdkdk.....",
+  ".....kdk.kdk....",
+  "....kkk...kkk...",
+  "...kmmmmmmmmk...",
+  "....kkkkkkkk....",
+  "................"];
+var SEED_BUD=[
+  "................",
+  "................",
+  "........kk......",
+  ".......kddk.....",
+  "......kddddk....",
+  ".....kdddddk....",
+  "......kdddk.....",
+  ".......kdk......",
+  ".......kdk......",
+  ".......kdk......",
+  "......kdkdk.....",
+  ".....kdk.kdk....",
+  "....kkk...kkk...",
+  "...kmmmmmmmmk...",
+  "....kkkkkkkk....",
+  "................"];
+var SEED_BLOOM=[
+  "................",
+  ".......kkk......",
+  "......kmmmk.....",
+  ".....kmpmpmk....",
+  ".....kmmmmmk....",
+  "......kmmmk.....",
+  ".......kkk......",
+  ".......kdk......",
+  ".......kdk......",
+  "......kdkdk.....",
+  ".....kdk.kdk....",
+  "....kkk...kkk...",
+  "...kmmmmmmmmk...",
+  "....kkkkkkkk....",
+  "................",
+  "................"];
+var SEED_NIGHT=[
+  "................",
+  "................",
+  ".......kkk......",
+  "......kmmmk.....",
+  ".....kmmmmmk....",
+  ".....kmmmmmk....",
+  "......kmmmk.....",
+  ".......kkk......",
+  ".......kdk......",
+  "......kdkdk.....",
+  ".....kdk.kdk....",
+  "....kkk...kkk...",
+  "...kmmmmmmmmk...",
+  "....kkkkkkkk....",
+  "................",
+  "................"];
+var VANE_CALM=[
+  "................",
+  "....kkkkkkkk....",
+  "...kddddddddk...",
+  "....kkkkkkkk....",
+  ".......kk.......",
+  ".......kk.......",
+  ".......kk.......",
+  ".......kk.......",
+  ".......kk.......",
+  ".......kk.......",
+  "......kmmk......",
+  ".....kmmmmk.....",
+  "....kkkkkkkk....",
+  "................",
+  "................",
+  "................"];
+var VANE_WIND=[
+  "................",
+  "..k..kkkkkk.....",
+  "...k.kddddk.....",
+  "....kddddddk....",
+  ".....kkkkkk.....",
+  ".......kk.......",
+  ".......kk.......",
+  ".......kk.......",
+  ".......kk.......",
+  ".......kk.......",
+  ".......kk.......",
+  "......kmmk......",
+  ".....kmmmmk.....",
+  "....kkkkkkkk....",
+  "................",
+  "................"];
+var VANE_RAIN=[
+  "...p..p...p..p..",
+  "....p...p...p...",
+  ".......kk.......",
+  "......kddk......",
+  ".....kddddk.....",
+  "....kddddddk....",
+  ".......kk.......",
+  ".......kk.......",
+  ".......kk.......",
+  ".......kk.......",
+  ".......kk.......",
+  "......kmmk......",
+  ".....kmmmmk.....",
+  "....kkkkkkkk....",
+  "................",
+  "................"];
+var GLOBE_CLEAR=[
+  "................",
+  ".....kkkkkk.....",
+  "....kppppppk....",
+  "...kppppppppk...",
+  "...kppppppppk...",
+  "...kppppppppk...",
+  "...kppppppppk...",
+  "....kppppppk....",
+  ".....kkkkkk.....",
+  "....kmmmmmmk....",
+  "...kmmmmmmmmk...",
+  "...kkkkkkkkkk...",
+  "................",
+  "................",
+  "................",
+  "................"];
+var GLOBE_SNOW=[
+  "................",
+  ".....kkkkkk.....",
+  "....kmmmmmmk....",
+  "...kmppppppmk...",
+  "...kmpmppmmpk...",
+  "...kmppppppmk...",
+  "...kmpmppmmpk...",
+  "....kmmmmmmk....",
+  ".....kkkkkk.....",
+  "....kmmmmmmk....",
+  "...kmmmmmmmmk...",
+  "...kkkkkkkkkk...",
+  "................",
+  "................",
+  "................",
+  "................"];
+var MOON_NEW=[
+  "................",
+  "................",
+  ".....kkkkkk.....",
+  "....kddddddk....",
+  "...kddddddddk...",
+  "..kddddddddddk..",
+  "..kddddddddddk..",
+  "..kddddddddddk..",
+  "..kddddddddddk..",
+  "..kddddddddddk..",
+  "..kddddddddddk..",
+  "...kddddddddk...",
+  "....kddddddk....",
+  ".....kkkkkk.....",
+  "................",
+  "................"];
+var MOON_WAXING=[
+  "................",
+  "................",
+  ".....kkkkkk.....",
+  "....kdddpppk....",
+  "...kddddppppk...",
+  "..kdddddpppppk..",
+  "..kdddddpppppk..",
+  "..kdddddpppppk..",
+  "..kdddddpppppk..",
+  "..kdddddpppppk..",
+  "..kdddddpppppk..",
+  "...kddddppppk...",
+  "....kdddpppk....",
+  ".....kkkkkk.....",
+  "................",
+  "................"];
+var MOON_FULL=[
+  "................",
+  "................",
+  ".....kkkkkk.....",
+  "....kppppppk....",
+  "...kppppppppk...",
+  "..kppppppppppk..",
+  "..kppppppppppk..",
+  "..kppppppppppk..",
+  "..kppppppppppk..",
+  "..kppppppppppk..",
+  "..kppppppppppk..",
+  "...kppppppppk...",
+  "....kppppppk....",
+  ".....kkkkkk.....",
+  "................",
+  "................"];
+var MOON_WANING=[
+  "................",
+  "................",
+  ".....kkkkkk.....",
+  "....kpppdddk....",
+  "...kppppddddk...",
+  "..kpppppdddddk..",
+  "..kpppppdddddk..",
+  "..kpppppdddddk..",
+  "..kpppppdddddk..",
+  "..kpppppdddddk..",
+  "..kpppppdddddk..",
+  "...kppppddddk...",
+  "....kpppdddk....",
+  ".....kkkkkk.....",
+  "................",
+  "................"];
 var SOUV=[
   {id:"shell",grid:[
   "................",
@@ -1072,23 +1311,52 @@ var SOUV=[
   "................",
   "................",
   "................"]},
-  {id:"seed",grid:[
-  "................",
-  "................",
-  "...........kk...",
-  "..........kpk...",
-  ".........kpk....",
-  "........kpk.....",
-  ".....kkkpk......",
-  "....kmmmmk......",
-  "...kmppmmk......",
-  "...kmmmmmk......",
-  "....kmmmmk......",
-  ".....kkkk.......",
-  "................",
-  "................",
-  "................",
-  "................"]},
+  {id:"seed",grid:SEED_GRID,state:{
+    v:1,
+    layers:[
+      {kind:"grow",stages:[
+        {id:"seed",grid:SEED_GRID,hold:86400},
+        {id:"sprout",grid:SEED_SPROUT,hold:86400},
+        {id:"bud",grid:SEED_BUD,hold:172800},
+        {id:"bloom",grid:SEED_BLOOM,hold:0}
+      ]},
+      {kind:"match",when:{stage:["bloom"]},rules:[
+        {when:{night:true},id:"bloom-night",grid:SEED_NIGHT},
+        {id:"bloom-day",grid:SEED_BLOOM}
+      ]}
+    ]
+  }},
+  {id:"vane",grid:VANE_CALM,state:{
+    v:1,
+    layers:[
+      {kind:"match",rules:[
+        {when:{weather:["rain"]},id:"wet",grid:VANE_RAIN},
+        {when:{weather:["wind"]},id:"windy",grid:VANE_WIND},
+        {id:"calm",grid:VANE_CALM}
+      ]}
+    ]
+  }},
+  {id:"snowglobe",grid:GLOBE_CLEAR,state:{
+    v:1,
+    layers:[
+      {kind:"match",rules:[
+        {when:{season:["winter"]},id:"snow",grid:GLOBE_SNOW},
+        {when:{weather:["snow"]},id:"snow",grid:GLOBE_SNOW},
+        {id:"clear",grid:GLOBE_CLEAR}
+      ]}
+    ]
+  }},
+  {id:"moondial",grid:MOON_NEW,state:{
+    v:1,
+    layers:[
+      {kind:"match",rules:[
+        {when:{lunarDay:[1,6]},id:"new",grid:MOON_NEW},
+        {when:{lunarDay:[7,14]},id:"waxing",grid:MOON_WAXING},
+        {when:{lunarDay:[15,21]},id:"full",grid:MOON_FULL},
+        {id:"waning",grid:MOON_WANING}
+      ]}
+    ]
+  }},
   {id:"clip",grid:[
   "................",
   "................",
@@ -1602,8 +1870,36 @@ function roomOk(room){
   }
   return errs;
 }
+/* A pack's state uses grids; pet.js turns them into px strings. Check every frame and the px fallback here. */
+function isSouvGrid(g){ return isGrid(g) && g.length===16 && String(g[0]).length===16; }
+function stateErrs(id,st,top){
+  var errs=[], frames=0, first=null, i, j, l, stg;
+  if(!st || st.v!==1 || !Array.isArray(st.layers)) return ["souvenir "+id+" state"];
+  for(i=0;i<st.layers.length;i++){
+    l=st.layers[i];
+    if(!l || (l.kind!=="grow" && l.kind!=="match")){ errs.push("souvenir "+id+" state layer "+i); continue; }
+    if(l.kind==="grow"){
+      if(!Array.isArray(l.stages) || l.stages.length<2){ errs.push("souvenir "+id+" state stages"); continue; }
+      for(j=0;j<l.stages.length;j++){
+        stg=l.stages[j];
+        if(!stg || typeof stg.id!=="string" || !isSouvGrid(stg.grid)){ errs.push("souvenir "+id+" state stage "+j); continue; }
+        frames++;
+        if(j===0) first=stg.grid;
+      }
+    } else {
+      if(!Array.isArray(l.rules) || !l.rules.length){ errs.push("souvenir "+id+" state rules"); continue; }
+      for(j=0;j<l.rules.length;j++){
+        if(!l.rules[j] || !isSouvGrid(l.rules[j].grid)) errs.push("souvenir "+id+" state rule "+j);
+        else frames++;
+      }
+    }
+  }
+  if(frames>8) errs.push("souvenir "+id+" state frames");
+  if(first && top && first.join("")!==top.join("")) errs.push("souvenir "+id+" state first");
+  return errs;
+}
 function packOk(pack){
-  var errs=[], i, k;
+  var errs=[], i, k, id;
   if(!pack || typeof pack!=="object") return ["pack"];
   if(!pack.id || typeof pack.id!=="string") errs.push("id");
   errs=errs.concat(roomOk(pack.room));
@@ -1615,7 +1911,9 @@ function packOk(pack){
   for(k in props) if(Object.prototype.hasOwnProperty.call(props,k) && !isGrid(props[k])) errs.push("prop "+k);
   var souv=pack.souvenirs||[];
   for(i=0;i<souv.length;i++){
-    if(!souv[i] || !souv[i].id || !isGrid(souv[i].grid)) errs.push("souvenir "+((souv[i] && souv[i].id) || i));
+    id=(souv[i] && souv[i].id) || i;
+    if(!souv[i] || !souv[i].id || !isGrid(souv[i].grid)) errs.push("souvenir "+id);
+    else if(souv[i].state) errs=errs.concat(stateErrs(id,souv[i].state,souv[i].grid));
   }
   var fixed=[["egg",pack.egg],["baby",pack.baby],["child",pack.child]];
   for(i=0;i<fixed.length;i++) if(fixed[i][1] && !isGrid(fixed[i][1])) errs.push(fixed[i][0]);
