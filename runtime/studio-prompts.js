@@ -27,7 +27,7 @@ var MACHINE=[
 "96 patterns. Tempo 60-140 BPM, swing is global, no 3/4 or 6/8 yet, no tempo or key change inside a song.",
 "Every sound is synthesised, 1986-style: kits soft, chip, rock, electro; bass voices bass (synth), pick (picked), sub",
 "(808); chord voices keys (electric piano), guitar (strummed), piano, organ, strings; melody voices flute, square (8-bit",
-"lead), pluck (zither or lute-like), reed (harmonica or accordion-like), bowed (erhu or violin-like). A style is made from",
+"lead), pluck (zither or lute-like), reed (harmonica or accordion-like), bowed (a violin). A style is made from",
 "these sounds, rhythm and harmony: it will sound like the style, played on this machine.",
 "Chords may be any type: maj m 7 maj7 m7 9 m9 6 m6 add9 sus2 sus4 dim dim7 aug m7b5 5 (power), on a root that is a",
 "scale degree 0-5, optionally shifted a semitone (acc). Melody notes may leave the scale by a semitone (acc) and may",

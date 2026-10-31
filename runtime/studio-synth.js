@@ -757,44 +757,50 @@ VOICES.reed=function(ctx,out){
   };
 };
 
-/* bowed (12.20.2): a sawtooth through a 2.2 kHz lowpass, each note sliding up from 60 cents below in 90 ms and a
-   6 Hz, 20-cent vibrato fading in after 200 ms; a 60 ms attack (the bow) and a 120 ms release. The envelope peaks at
-   0.22, so a note measures near 0.19-0.24 at velocity 1. */
+/* bowed (12.20, redone after the owner's "it does not sound like strings"): a violin-like line. The first version
+   scooped up 60 cents into every note, which reads as a siren, not a bow. Now: two sawtooths 5 cents apart (the
+   width of a section rather than one thin oscillator), a highpass at 220 Hz that takes the buzz out of the bottom, a
+   body resonance (peaking 1 kHz, +4 dB) and a lowpass that opens with the bow (1.2 kHz to 3.4 kHz over the 90 ms
+   attack), so a note starts soft and gets its rosin. Vibrato 5.5 Hz, 14 cents, fades in after 250 ms as a player's
+   does; a short note stays straight. Release 180 ms. orn slide and vib work as on the other voices. The envelope peak
+   is 0.068: the two sawtooths and the body boost sum to a measured peak near 0.22 at velocity 1, like the flute. */
 VOICES.bowed=function(ctx,out){
   return {
     note:function(midi,at,dur,vel,opts){
-      var f=midiFreq(midi), v=velOf(vel), peak=0.22*v, slide=opts&&opts.slide, moreVib=opts&&opts.vib;
-      var t=when(ctx,at), a=Math.min(0.06,dur), attackEnd=t+a, releaseStart=Math.max(t+dur,attackEnd);
-      var o=ctx.createOscillator(), filter=ctx.createBiquadFilter(), g=ctx.createGain(), nodes;
-      var vib=ctx.createOscillator(), vibGain=ctx.createGain();
-      o.type="sawtooth";
-      if(slide) slideParam(o.frequency,f,t);
-      else {
-        o.frequency.setValueAtTime(f*Math.pow(2,-60/1200),t);
-        o.frequency.exponentialRampToValueAtTime(f,t+0.09);
+      var f=midiFreq(midi), v=velOf(vel), peak=0.068*v, slide=opts&&opts.slide, moreVib=opts&&opts.vib;
+      var t=when(ctx,at), a=Math.min(0.09,dur), attackEnd=t+a, releaseStart=Math.max(t+dur,attackEnd), end=releaseStart+0.19;
+      var o1=ctx.createOscillator(), o2=ctx.createOscillator(), hp=ctx.createBiquadFilter(), body=ctx.createBiquadFilter();
+      var lp=ctx.createBiquadFilter(), g=ctx.createGain(), vib=ctx.createOscillator(), vg1=ctx.createGain(), vg2=ctx.createGain(), nodes;
+      var f2=f*Math.pow(2,5/1200);
+      o1.type="sawtooth"; o2.type="sawtooth";
+      if(slide){ slideParam(o1.frequency,f,t); slideParam(o2.frequency,f2,t); }
+      else { o1.frequency.value=f; o2.frequency.value=f2; }
+      hp.type="highpass"; hp.frequency.value=220; hp.Q.value=0.7;
+      body.type="peaking"; body.frequency.value=1000; body.Q.value=1.2; body.gain.value=4;
+      lp.type="lowpass"; lp.Q.value=0.6;
+      lp.frequency.setValueAtTime(1200,t);
+      lp.frequency.linearRampToValueAtTime(3400,attackEnd);
+      vib.type="sine"; vib.frequency.value=5.5;
+      vg1.gain.setValueAtTime(0,t); vg2.gain.setValueAtTime(0,t);
+      if(releaseStart>t+0.25){
+        vg1.gain.setValueAtTime(0,t+0.25); vg2.gain.setValueAtTime(0,t+0.25);
+        vg1.gain.linearRampToValueAtTime(f*(Math.pow(2,14/1200)-1),t+0.6);
+        vg2.gain.linearRampToValueAtTime(f2*(Math.pow(2,14/1200)-1),t+0.6);
       }
-      filter.type="lowpass"; filter.frequency.value=2200; filter.Q.value=0.5;
-      vib.type="sine"; vib.frequency.value=6;
-      vibGain.gain.setValueAtTime(0,t);
-      if(releaseStart>t+0.2){
-        vibGain.gain.setValueAtTime(0,t+0.2);
-        vibGain.gain.linearRampToValueAtTime(f*(Math.pow(2,20/1200)-1),t+0.5);
-      }
-      vib.connect(vibGain); vibGain.connect(o.frequency);
+      vib.connect(vg1); vib.connect(vg2); vg1.connect(o1.frequency); vg2.connect(o2.frequency);
       g.gain.setValueAtTime(SILENCE,t);
       g.gain.linearRampToValueAtTime(peak,attackEnd);
       g.gain.setValueAtTime(peak,releaseStart);
-      g.gain.exponentialRampToValueAtTime(SILENCE,releaseStart+0.12);
-      o.connect(filter); filter.connect(g); g.connect(out);
-      o.start(t); o.stop(releaseStart+0.13);
-      vib.start(t); vib.stop(releaseStart+0.13);
-      nodes=[o,filter,vib,vibGain,g];
-      if(moreVib) nodes=nodes.concat(vibParams(ctx,t,releaseStart+0.13,[{param:o.frequency,base:f}]));
-      cleanup(o,nodes);
+      g.gain.exponentialRampToValueAtTime(SILENCE,releaseStart+0.18);
+      o1.connect(hp); o2.connect(hp); hp.connect(body); body.connect(lp); lp.connect(g); g.connect(out);
+      o1.start(t); o2.start(t); vib.start(t);
+      o1.stop(end); o2.stop(end); vib.stop(end);
+      nodes=[o1,o2,hp,body,lp,g,vib,vg1,vg2];
+      if(moreVib) nodes=nodes.concat(vibParams(ctx,t,end,[{param:o1.frequency,base:f},{param:o2.frequency,base:f2}]));
+      cleanup(o1,nodes);
     }
   };
 };
-
 
 /* ---------- the soft clip ----------
    A WaveShaper, not a compressor: no look-ahead means no latency and an offline render is bit-for-bit repeatable.
