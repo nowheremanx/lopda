@@ -2037,7 +2037,6 @@ function aiStageText(st){
   if(st.id==="plan") return tr("studio.ai.stage.plan");
   if(st.id==="lay") return tr("studio.ai.stage.lay");
   if(st.id==="melody") return tr("studio.ai.stage.melody",{section:tr("studio.ai.sec."+(v.section||"verse")),n:st.n,of:st.of});
-  if(st.id==="motif") return tr("studio.ai.stage.motif");
   if(st.id==="listen") return tr("studio.ai.stage.listen");
   if(st.id==="read") return tr("studio.ai.stage.read");
   if(st.id==="edit") return tr("studio.ai.stage.edit",{turn:v.turn!=null?v.turn:st.n});

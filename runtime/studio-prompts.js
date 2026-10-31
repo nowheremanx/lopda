@@ -5,7 +5,7 @@
  * can be tuned (tools/studio-ai-trial.mjs) without touching the logic.
  *
  *   LopdaStudioPrompts.plan(o)    -> messages   o: {text, cards:[{name, keyName, scale, bpm:[lo,hi], grooves, bass, form}], allGrooves, allBass}
- *   LopdaStudioPrompts.motif(o)   -> messages   o: {text, card, keyName, scale, bpm, sections:[{id, bars:[chord names], energy}]}
+ *   LopdaStudioPrompts.melody(o)  -> messages   o: {text, style, keyName, scale, bpm, section, energy, bars:[{chord, tones}], before}
  *   LopdaStudioPrompts.listen(o)  -> messages   o: {text, overview}
  *   LopdaStudioPrompts.edit(o)    -> messages   o: {text, overview, focus}
  *   LopdaStudioPrompts.reject(reason) -> the user turn that sends a rejected answer back
@@ -127,43 +127,47 @@ cards.join("\n"),
   return msgs("plan",system,user);
 }
 
-/* Step 4: one motif per section with a melody. The machine writes the notes from the chords (studio-compose.js), so
-   the model decides only what a songwriter decides first: the rhythm of a bar, the shape of the line, where it sits
-   and how it ends. Writing notes one by one, a small model climbed the scale in even eighths (12.20.10). */
-function motif(o){
+/* Step 4, once per section with a melody: the model writes the tune (owner, 2026-10-31: the melody must be the AI's,
+   not the machine's), with a songwriter's moves to develop its own bars, and the critic answers with a teacher's
+   notes (12.20.13). */
+function melody(o){
   var system=[
 MACHINE,
 "",
-"You give each section of a new song its melody idea, a motif. The machine turns it into phrases over the chords:",
-"strong beats land on chord tones, the line moves by your contour between them, the 2nd bar uses the answer rhythm,",
-"the 3rd bar turns the contour upside down, and the last bar ends on a long note.",
+"You write the melody of one section of a new song. Notes are scale degrees of the key: 0 is the tonic, 1 the next",
+"scale note, one octave up is the scale's length (7, or 5 for a pentatonic scale), -1 the scale note below the tonic.",
+"A note rings until the next one; velocity 0 is a rest. A 4th value 1 or -1 raises or lowers a note a semitone, a",
+"5th value \"slide\" or \"vib\" adds an ornament.",
 "",
 JSON_ONLY,
-'Shape: {"motifs":{"verse":{"rhythm":[0,3,6,8,12],"answer":[0,4,6,8],"contour":[1,1,-2,1],"register":"mid","ending":"open"}, ...}}',
+'Shape: {"bars":[ bar, bar, ... ]}  one entry per bar. A bar is either its notes [[step,degree,velocity], ...]',
+"or a move that develops an earlier bar of this section (k counts bars from 1):",
+'  {"repeat":k}                    the same bar again',
+'  {"repeat":k,"end":[[8,4,0.9]]}  the same bar, from step 8 on replaced by these notes (a new ending)',
+'  {"sequence":k,"by":1}           the same bar a scale step higher (by -4..4)',
+'  {"invert":k}                    the same rhythm, the line turned upside down',
+'  {"rest":true}                   a bar of silence (a dramatic stop; rarely)',
 "",
-"Rules:",
-"- rhythm and answer: the steps (0-15) where notes start in one bar, rising, 2-7 of them (4-6 keeps a tune moving;",
-"  a chorus is busier than its verse). Mix long and short notes:",
-"  [0,3,4,8,12] is a dotted figure, [0,6,8,12] a syncopation, [2,4,8] starts after the beat. Never 8 even eighths.",
-"- contour: 2-8 moves in scale steps (-3..3) from note to note, e.g. [1,1,-1,2] climbs and turns. Small steps sing.",
-"- register: low, mid or high. A chorus usually sits higher and moves more than its verse.",
-"- ending: home (ends on the tonic, the end of a thought) or open (on the third or fifth, wants to go on).",
-"- Give each section its own character, fitting the style: a folk tune steps and turns, a march jumps on the beat,",
-"  a ballad holds long notes, a rock riff repeats short figures. Write nothing from a real song."
+"How a good tune works (a teacher will check these and send it back):",
+"- Start from a short idea (a motif) and develop it: repeat it with a changed ending, move it up a step, answer it.",
+"- Mostly steps, with a few leaps; after a leap, step back the other way. One high point in the section.",
+"- Mix long and short notes: dotted notes, a held note, a syncopation (a note on step 3, 6, 10 or 14). Not all even.",
+"- Breathe: a held note or a rest at the end of each two-bar half phrase.",
+"- The first note of a bar and long notes sit on the chord tones given; quick notes between them may pass.",
+"- Do not just arpeggiate the chord, and do not climb the scale for six notes or more.",
+"- Steps 0-15, rising in a bar, 2-8 notes is typical. Degrees -3..12. Never copy a real song."
   ].join("\n");
-  var lines=[], i, s;
-  for(i=0;i<o.sections.length;i++){
-    s=o.sections[i];
-    lines.push(s.id+": "+s.bars.length+" bar"+(s.bars.length>1?"s":"")+", chords "+s.bars.join(" ")+", energy "+s.energy);
-  }
+  var bars=[], i;
+  for(i=0;i<o.bars.length;i++) bars.push("bar "+(i+1)+": chord "+o.bars[i].chord+", chord tones "+list(o.bars[i].tones));
   var user=[
-"STYLE: "+o.card+". Key: "+o.keyName+" "+o.scale+", "+o.bpm+" BPM.",
-"SECTIONS WITH A MELODY:",
-lines.join("\n"),
+"STYLE: "+o.style+". Key: "+o.keyName+" "+o.scale+", "+o.bpm+" BPM.",
+"SECTION: "+o.section+", energy "+o.energy+" (0 calm, 2 full), "+o.bars.length+" bar"+(o.bars.length>1?"s":"")+":",
+bars.join("\n"),
+o.before ? "\nSections already written (give this one its own character, e.g. a chorus higher and busier):\n"+o.before : "",
 "",
 "REQUEST: "+(o.text||"a new song")
   ].join("\n");
-  return msgs("motif",system,user);
+  return msgs("melody",system,user);
 }
 
 /* the tools the model may call, one line each; shared by the listen and edit steps */
@@ -251,5 +255,5 @@ function reject(reason){
   return "That JSON was rejected: "+reason+". Reply with the corrected JSON only.";
 }
 
-window.LopdaStudioPrompts={chordTable:chordTable, plan:plan, motif:motif, listen:listen, edit:edit, reject:reject, lang:lang};
+window.LopdaStudioPrompts={chordTable:chordTable, plan:plan, melody:melody, listen:listen, edit:edit, reject:reject, lang:lang};
 })();

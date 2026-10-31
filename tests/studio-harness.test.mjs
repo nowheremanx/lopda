@@ -5,7 +5,7 @@ import vm from "node:vm";
 import { runScript, read } from "./helpers.mjs";
 
 const ctx = runScript("runtime/studio-song.js");
-for (const f of ["studio-styles.js", "studio-tools.js", "studio-theory.js", "studio-compose.js", "studio-edit.js", "studio-prompts.js", "studio-ai.js", "studio-harness.js"]) {
+for (const f of ["studio-styles.js", "studio-tools.js", "studio-theory.js", "studio-compose.js", "studio-critic.js", "studio-edit.js", "studio-prompts.js", "studio-ai.js", "studio-harness.js"]) {
   vm.runInContext(read("runtime/" + f), ctx, { filename: "runtime/" + f });
 }
 const S = ctx.LopdaSong, ST = ctx.LopdaStudioStyles, E = ctx.LopdaStudioEdit, H = ctx.LopdaStudioHarness;
@@ -55,18 +55,27 @@ function planFor(bpm = 80) {
   };
 }
 
-const MOTIFS = {
-  verse: { rhythm: [0, 3, 4, 8, 12], answer: [0, 6, 8, 12], contour: [1, 1, -2, 1], register: "mid", ending: "open" },
-  chorus: { rhythm: [0, 2, 8, 10], contour: [2, -1, 1], register: "high", ending: "home" },
-};
-function motifAnswer() { return { motifs: MOTIFS }; }
+/* a tune that passes the critic: a motif, its repeat with a new ending, a sequence up a step, a held close; the
+   chorus sits a third higher so it is its own */
+function melodyAnswer(messages) {
+  const user = messages.find((m) => m.role === "user").content;
+  const up = /SECTION: chorus/.test(user) ? 2 : 0;
+  const count = Number((/, (\d+) bars?:/.exec(user) || [0, 4])[1]);
+  const all = [
+    [[0, 2 + up, 0.9], [3, 3 + up, 0.7], [4, 4 + up, 0.8], [8, 2 + up, 0.8], [12, 1 + up, 0.7]],
+    { repeat: 1, end: [[8, 4 + up, 0.9]] },
+    { sequence: 1, by: 1 },
+    [[0, 2 + up, 0.9], [6, 1 + up, 0.7], [8, 0 + up, 0.9]],
+  ];
+  return { bars: all.slice(0, count) };
+}
 
 const listenAnswer = { reply: "A rainy little tune at 100 BPM.", calls: [{ tool: "ghost", pattern: 0, amount: 1 }] };
 
 function fullAnswers(plan) {
   return (step, messages) => {
     if (step === "plan") return plan;
-    if (step === "motif") return motifAnswer(messages);
+    if (step === "melody") return melodyAnswer(messages);
     if (step === "listen") return listenAnswer;
     throw new Error("unexpected step " + step);
   };
@@ -105,16 +114,20 @@ test("skeleton: card, plan, laid bars, melodies and a listen-back", async () => 
   assert.equal(out.song.kit, roll.kit);
   assert.equal(out.card.id, roll.card.id);
 
-  assert.deepEqual(stages.map((s) => s.id), ["plan", "card", "lay", "motif", "listen"]);
+  assert.deepEqual(stages.map((s) => s.id), ["plan", "card", "lay", "melody", "melody", "listen"]);
   assert.equal(stages[1].vars.card, roll.card.en);
   assert.equal(stages[1].vars.key, S.NAMES[roll.key]);
   assert.equal(stages[1].vars.scale, roll.scale);
   assert.equal(stages[1].vars.bpm, 80, "the plan's tempo, not the dice's");
 
-  assert.deepEqual(ask.seen.map((s) => s.step), ["plan", "motif", "listen"]);
-  const motifUser = ask.seen[1].messages.find((m) => m.role === "user").content;
-  assert.match(motifUser, /verse: 4 bars, chords \S+ \S+ \S+ \S+, energy 1/);
-  assert.match(motifUser, /chorus: 4 bars/);
+  assert.deepEqual(ask.seen.map((s) => s.step), ["plan", "melody", "melody", "listen"], "the critic had nothing to say");
+  const melodyUser = ask.seen[1].messages.find((m) => m.role === "user").content;
+  assert.match(melodyUser, /SECTION: verse, energy 1 \(0 calm, 2 full\), 4 bars:/);
+  assert.match(melodyUser, /bar 1: chord \S+, chord tones \d/);
+  assert.match(ask.seen[2].messages.find((m) => m.role === "user").content, /Sections already written[\s\S]*verse:/);
+  /* the AI's own notes are in the song: bar 1 of the verse is the answer's first bar */
+  assert.deepEqual(JSON.parse(JSON.stringify(out.song.patterns[1].notes.melody.filter((n) => n.vel > 0).map((n) => [n.t / S.STEP, n.deg]))),
+    [[0, 2], [3, 3], [4, 4], [8, 2], [12, 1]]);
 
   /* the second hearing of the verse ends on its own last bar (12.20.10) */
   const chain = out.song.song;
@@ -143,7 +156,7 @@ test("skeleton: a too-short plan is sent back with the reason and then fixed", a
   let planCalls = 0;
   const ask = makeAsk((step, messages) => {
     if (step === "plan") return planCalls++ === 0 ? short : planFor();
-    if (step === "motif") return motifAnswer(messages);
+    if (step === "melody") return melodyAnswer(messages);
     if (step === "listen") return listenAnswer;
     throw new Error("unexpected step " + step);
   });
@@ -155,31 +168,30 @@ test("skeleton: a too-short plan is sent back with the reason and then fixed", a
   assert.match(retry[retry.length - 1].content, /That JSON was rejected: the song is \d+ s; add sections so it is 75-150 s/);
 });
 
-test("skeleton: a motif of even eighths is sent back; a plan repeating a section four times is too", async () => {
-  let motifCalls = 0, planCalls = 0;
+test("skeleton: the critic sends a scale run back with a teacher's note; the third answer stands; four repeats are refused", async () => {
+  let melodyCalls = 0, planCalls = 0;
   const loop = { ...planFor(), order: [["intro", 1], ["verse", 4], ["chorus", 4], ["outro", 1]] };
+  const run = { bars: [[[0, 0, 0.8], [2, 1, 0.8], [4, 2, 0.8], [6, 3, 0.8], [8, 4, 0.8], [10, 5, 0.8], [12, 6, 0.8]], { repeat: 1 }, { repeat: 1 }, { repeat: 1 }] };
   const ask = makeAsk((step, messages) => {
     if (step === "plan") return planCalls++ === 0 ? loop : planFor();
-    if (step === "motif") {
-      motifCalls++;
-      if (motifCalls === 1) return { motifs: { ...MOTIFS, verse: { ...MOTIFS.verse, rhythm: [0, 2, 4, 6, 8, 10, 12] } } };
-      return motifAnswer(messages);
-    }
+    if (step === "melody") { melodyCalls++; return /SECTION: verse/.test(messages[1].content) ? run : melodyAnswer(messages); }
     if (step === "listen") return listenAnswer;
     throw new Error("unexpected step " + step);
   });
   const out = await H.skeleton({ text: "x", ask, rand: ST.seeded(1), now: 1000 });
   assert.equal(S.validate(out.song).error, undefined);
   assert.match(ask.seen[1].messages.at(-1).content, /repeats in order must be 1 or 2/);
-  assert.equal(motifCalls, 2);
-  assert.match(ask.seen.at(-2).messages.at(-1).content, /verse: rhythm has notes of one length only/);
+  assert.equal(melodyCalls, 4, "the verse was asked three times (two notes, then it stood), the chorus once");
+  const notes = ask.seen.filter((s) => s.step === "melody")[1].messages.at(-1).content;
+  assert.match(notes, /a teacher's notes: .*(even notes|climbs or falls by step)/);
+  assert.equal(out.song.patterns[1].notes.melody.filter((n) => n.vel > 0).length, 7, "the third answer stands");
 });
 
 test("skeleton: an empty answer is a rewrite with the reason 'empty answer'", async () => {
   let planCalls = 0;
   const ask = makeAsk((step, messages) => {
     if (step === "plan") return planCalls++ === 0 ? "" : planFor();
-    if (step === "motif") return motifAnswer(messages);
+    if (step === "melody") return melodyAnswer(messages);
     if (step === "listen") return listenAnswer;
     throw new Error("unexpected step " + step);
   });
@@ -359,8 +371,8 @@ test("skeleton: the plan picks the sound, typed and borrowed chords and its own 
   const bass0 = verse2.bass.find((n) => n.t === 0);
   assert.equal(S.noteMidi(song, "bass", bass0.deg, bass0.acc) % 12, 0, "the bass plays the borrowed chord's root, C");
   /* the melody over the borrowed C chord takes its tones from it: C natural is degree 6 lowered in D major */
-  const motifUser = ask.seen.find((s) => s.step === "motif").messages.find((m) => m.role === "user").content;
-  assert.match(motifUser, /verse: 4 bars, chords D C Gm7 Asus4/);
+  const melodyUser = ask.seen.find((s) => s.step === "melody").messages.find((m) => m.role === "user").content;
+  assert.match(melodyUser, /bar 2: chord C, chord tones/);
   const mel = verse2.melody.filter((n) => n.vel > 0);
   const pcs = mel.map((n) => S.noteMidi(song, "melody", n.deg, n.acc) % 12);
   assert.ok(pcs.includes(0) || pcs.includes(4) || pcs.includes(7), "a chord tone of C on the bar's strong beat");
@@ -405,7 +417,7 @@ test("skeleton: a solo piece has no drums and no chord pad; an imitating section
     assert.equal(song.patterns[p].notes.drums.length, 0, "no drums in pattern " + p);
     assert.equal(song.patterns[p].notes.chords.length, 0, "no chord pad in pattern " + p);
   }
-  /* verse is patterns 1-4: bar 1 keeps the broken chords, bars 2-4 carry the imitation, which starts on the motif's rhythm */
+  /* verse is patterns 1-4: bar 1 keeps the broken chords, bars 2-4 carry the imitation of the melody's bar before */
   assert.equal(song.patterns[1].notes.bass.length, 8, "alberti in the first bar");
   const onsets = song.patterns[2].notes.bass.filter((n) => n.vel > 0).map((n) => n.t / S.STEP);
   assert.deepEqual(JSON.parse(JSON.stringify(onsets)).slice(0, 4), [0, 3, 4, 8]);

@@ -34,7 +34,7 @@ if (!CMD) {
 const ctx = { console, Math, Date, JSON, Promise, setTimeout, clearTimeout };
 ctx.window = ctx;
 vm.createContext(ctx);
-for (const f of ["studio-song.js", "studio-edit.js", "studio-styles.js", "studio-tools.js", "studio-theory.js", "studio-compose.js", "studio-prompts.js", "studio-ai.js", "studio-harness.js"]) {
+for (const f of ["studio-song.js", "studio-edit.js", "studio-styles.js", "studio-tools.js", "studio-theory.js", "studio-compose.js", "studio-critic.js", "studio-prompts.js", "studio-ai.js", "studio-harness.js"]) {
   vm.runInContext(fs.readFileSync(path.join(root, "runtime", f), "utf8"), ctx, { filename: "runtime/" + f });
 }
 const S = ctx.LopdaSong, H = ctx.LopdaStudioHarness;
