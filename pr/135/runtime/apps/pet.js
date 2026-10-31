@@ -34,7 +34,7 @@
 "use strict";
 
 var LP=window.LP, $=LP.$, S=LP.S, tr=LP.tr, I18N=LP.I18N;
-var Pet=window.LopdaPet, Art=window.LopdaPetArt, Play=window.LopdaPetPlay, L=window.LopdaLunar;
+var Pet=window.LopdaPet, Art=window.LopdaPetArt, Play=window.LopdaPetPlay, PS=window.LopdaPetState, L=window.LopdaLunar;
 
 var HOUR=3600000, DAY=86400000, SCALE=2;
 var ROOM_W=162, ROOM_H=120;
@@ -234,6 +234,16 @@ function saveNow(){
   var data=JSON.parse(JSON.stringify(P.save));
   P.refs.doc.set(data).catch(function(){ P.nostore=true; LP.setStatus("status.unsaved"); });
 }
+/* A failed plantedAt write can leave a grow item on the shelf with no start; begin now rather than lose it. */
+function repairShelf(){
+  var s=P.save;
+  if(!s || !s.shelf) return;
+  var it=findSouv(s.shelf);
+  if(!it || !it.state || !stateHasGrow(it.state) || it.plantedAt!=null) return;
+  it.plantedAt=now();
+  if(P.nostore || !P.refs) return;
+  P.refs.souv.doc(it.id).update({plantedAt:it.plantedAt}).catch(function(){});
+}
 function readUsage(){
   if(!S.db) return Promise.resolve(null);
   return S.db.doc("data/users/local/usage").get().then(function(sn){
@@ -269,7 +279,12 @@ function loadStorage(){
       var o=LP.own(doc.data())||{};
       var name=storedText(o.name), line=storedText(o.line);
       if(!name || !line || typeof o.px!=="string" || o.px.length!==256) return;
-      list.push({id:doc.id, name:name, line:line, px:o.px, at:+o.at||0, ai:!!o.ai, day:o.day?String(o.day):""});
+      var st=(PS && PS.validate) ? PS.validate(o.state,o.px) : null;
+      var it={id:doc.id, name:name, line:line, px:o.px, at:+o.at||0, ai:!!o.ai, day:o.day?String(o.day):""};
+      if(st) it.state=st;
+      if(isFinite(+o.grownMs) && +o.grownMs>0) it.grownMs=+o.grownMs;
+      if(isFinite(+o.plantedAt) && +o.plantedAt>0) it.plantedAt=+o.plantedAt;
+      list.push(it);
     });
     list.sort(function(a,b){ return (a.at||0)-(b.at||0); });
     P.souv=list;
@@ -281,6 +296,7 @@ function loadStorage(){
       LP.setStatus("status.unsaved");
     } else if(P.save){
       P.nostore=false;
+      repairShelf();
     }
     readUsage().then(function(){
       backfillForm();
@@ -510,10 +526,50 @@ function recentNames(){
 }
 /* petsim.builtinSouvenir avoids table entries whose `name` is recent; pack entries carry only an id, so give
    each candidate its localized names before choosing (the id stays for the strings and the picture). */
+function stateHasGrow(state){
+  var layers=(state && state.layers)||[];
+  for(var i=0;i<layers.length;i++) if(layers[i] && layers[i].kind==="grow") return true;
+  return false;
+}
+/* The pack writes grids; the document writes the 256-character px strings the rest of the pet uses. */
+function packState(st,firstPx){
+  if(!PS || !PS.validate || !st || st.v!==1 || !Array.isArray(st.layers)) return null;
+  var out={v:1,layers:[]}, i, j, l, r, stages, rules;
+  for(i=0;i<st.layers.length;i++){
+    l=st.layers[i];
+    if(!l || typeof l!=="object") continue;
+    if(l.kind==="grow" && Array.isArray(l.stages)){
+      stages=[];
+      for(j=0;j<l.stages.length;j++){
+        var x=l.stages[j];
+        if(!x || !x.grid) continue;
+        stages.push({id:x.id,px:pxFromGrid(x.grid),hold:x.hold});
+      }
+      var gl={kind:"grow",stages:stages};
+      if(l.when) gl.when=l.when;
+      out.layers.push(gl);
+    } else if(l.kind==="match" && Array.isArray(l.rules)){
+      rules=[];
+      for(j=0;j<l.rules.length;j++){
+        r=l.rules[j];
+        if(!r || !r.grid) continue;
+        var rr={px:pxFromGrid(r.grid)};
+        if(r.id) rr.id=r.id;
+        if(r.when) rr.when=r.when;
+        rules.push(rr);
+      }
+      var ml={kind:"match",rules:rules};
+      if(l.when) ml.when=l.when;
+      out.layers.push(ml);
+    }
+  }
+  return PS.validate(out, firstPx);
+}
 function souvenirTable(pack){
   return ((pack && pack.souvenirs)||[]).map(function(e){
     var t=dirText(e,e.id);
-    return {id:e.id, grid:e.grid, px:e.px, name:t.name, line:t.line};
+    var first=pxFromGrid(e.grid);
+    return {id:e.id, grid:e.grid, px:first, name:t.name, line:t.line, state:packState(e.state,first)};
   });
 }
 function dirText(entry,id){
@@ -541,12 +597,14 @@ function makeSouvenir(entry){
   var id=(entry && entry.id) || "souv";
   var pairName=textPair(entry && entry.name), pairLine=textPair(entry && entry.line);
   var txt=pairName && pairLine ? {name:pairName, line:pairLine} : dirText(entry,id);
-  return {
+  var s={
     id:LP.uid(), name:txt.name, line:txt.line,
     px:entry && entry.px ? String(entry.px) : pxFromGrid(entry && entry.grid),
     at:now(), ai:!!(entry && entry.ai),
     day:entry && entry.day ? String(entry.day) : dayKey(now())
   };
+  if(entry && entry.state){ s.state=entry.state; s.grownMs=0; }
+  return s;
 }
 function pushSouvenir(s){
   if(P.restoring) return;
@@ -580,6 +638,7 @@ function addSouvenir(entry){
   if(!entry) return Promise.resolve(null);
   var s=makeSouvenir(entry);
   var data={name:s.name, line:s.line, px:s.px, at:s.at, ai:s.ai, day:s.day};
+  if(s.state){ data.state=s.state; data.grownMs=0; }
   if(P.nostore || !P.refs){
     pushSouvenir(s);
     return Promise.resolve(s);
@@ -1398,15 +1457,54 @@ function shelfGainJoy(){
   s.today.shelf=true;
   s.joy=Math.min(sp.joyMax,(+s.joy||0)+1);
 }
+function applySouvPatch(s,patch){
+  if(!s) return;
+  for(var k in patch) if(Object.prototype.hasOwnProperty.call(patch,k)) s[k]=patch[k];
+}
+/* Only the fields we own, never a whole-document set: an older runtime must not wipe a newer field. */
+function updateSouv(s,patch,then){
+  if(!s || !patch){ if(then) then(true); return; }
+  if(P.nostore || !P.refs){ applySouvPatch(s,patch); if(then) then(true); return; }
+  P.refs.souv.doc(s.id).update(patch).then(function(){
+    applySouvPatch(s,patch);
+    if(then) then(true);
+  },function(){
+    LP.setStatus("status.unsaved");
+    if(then) then(false);
+  });
+}
+function shelfTake(s,then){
+  if(!s || !s.state || !stateHasGrow(s.state)){ if(then) then(true); return; }
+  var grown=(+s.grownMs||0) + (s.plantedAt!=null ? Math.max(0,now()-s.plantedAt) : 0);
+  updateSouv(s,{grownMs:grown,plantedAt:null},then);
+}
+function shelfPut(s,then){
+  if(!s || !s.state || !stateHasGrow(s.state)){ if(then) then(true); return; }
+  updateSouv(s,{plantedAt:now(),grownMs:+s.grownMs||0},then);
+}
 function setShelf(id){
   var s=P.save;
   if(!s) return;
-  var put=!!id;
-  s.shelf=id||null;
-  shelfGainJoy();
-  if(put){ P.action="happy"; P.actionUntil=now()+2500; P.idle=null; }
-  P.boxAsk=null; P.panelKey="";
-  beep("ok"); saveSoon(); renderKeys(); render();
+  var old=s.shelf||null, next=id||null;
+  if(old===next){ P.boxAsk=null; P.panelKey=""; renderKeys(); render(); return; }
+  function finish(){
+    s.shelf=next;
+    shelfGainJoy();
+    if(next){ P.action="happy"; P.actionUntil=now()+2500; P.idle=null; }
+    P.boxAsk=null; P.panelKey="";
+    beep("ok"); saveSoon(); renderKeys(); render();
+  }
+  function putNew(){
+    shelfPut(next?findSouv(next):null,function(){ finish(); });
+  }
+  if(old){
+    shelfTake(findSouv(old),function(ok){
+      if(!ok){ P.boxAsk=null; P.panelKey=""; beep("err"); renderKeys(); render(); return; }
+      putNew();
+    });
+  } else {
+    putNew();
+  }
 }
 function askShelfAction(){
   var s=findSouv(P.boxItem);
@@ -1792,6 +1890,22 @@ function gridFromPx(px){
   }
   return rows;
 }
+/* The one place the pet builds the item-state context; the room already owns these values. */
+function souvenirCtx(onShelf){
+  var t=now(), h=hourNow(), lu=null;
+  try{ if(L && L.fromSolar) lu=lunarToday(t); }catch(e){}
+  return {
+    now:t, hour:h, minute:localDate(t).getUTCMinutes(),
+    night:h<6 || h>=19, weather:weatherNow(), season:seasonOf(t),
+    lunar:lu, onShelf:!!onShelf
+  };
+}
+function souvenirView(s,onShelf){
+  if(!s) return null;
+  var fallback={px:s.px, id:"still", layer:null, stage:null};
+  if(!PS || !PS.stateOf) return fallback;
+  try{ return PS.stateOf(s,souvenirCtx(onShelf)); }catch(e){ return fallback; }
+}
 /* kind -> prop; the date flag counts the days, the rest are single grids */
 function pickProp(pick){
   var props=(packOf(P.save).props)||Art.PROPS||{};
@@ -1816,7 +1930,11 @@ function roomScene(){
   };
   if(save && save.shelf){
     var onShelf=findSouv(save.shelf);
-    if(onShelf) scene.shelf=gridFromPx(onShelf.px);
+    if(onShelf){
+      var shelfView=souvenirView(onShelf,true);
+      if(shelfView) scene.shelf=gridFromPx(shelfView.px);
+      scene.shelfId=shelfView ? shelfView.id : "";
+    }
   }
   if(!save) return scene;
   if(save.travel){ scene.sign=true; return scene; }
@@ -2100,7 +2218,8 @@ function buildBox(panel){
     else {
       var card=el("div","pet-souv");
       var cv=el("canvas","pet-souvcv"); cv.width=16; cv.height=16; cv.setAttribute("aria-hidden","true");
-      paintSouvenir(cv,one.px);
+      var oneView=souvenirView(one,P.save && P.save.shelf===one.id);
+      paintSouvenir(cv,oneView ? oneView.px : one.px);
       card.appendChild(cv);
       var body=el("div","pet-souvtext");
       body.appendChild(el("b","pet-souvname",souvText(one,"name")));
@@ -2132,7 +2251,8 @@ function buildBox(panel){
     b.type="button";
     b.setAttribute("aria-label",souvText(s,"name")+" · "+LP.fmt(s.at));
     var cv=el("canvas",""); cv.width=16; cv.height=16; cv.setAttribute("aria-hidden","true");
-    paintSouvenir(cv,s.px);
+    var tileView=souvenirView(s,P.save && P.save.shelf===s.id);
+    paintSouvenir(cv,tileView ? tileView.px : s.px);
     b.appendChild(cv);
     b.onclick=function(){ P.boxSel=i; openBoxItem(); };
     grid.appendChild(b);
@@ -2707,6 +2827,28 @@ if(/[?&]debug\b/.test(location.search)){
       P.weatherOverride=(w==="sun"||w==="cloud"||w==="rain"||w==="snow"||w==="wind") ? w : null;
       render();
       return weatherNow();
+    },
+    souv:function(id){
+      var s=findSouv(id);
+      return s ? JSON.parse(JSON.stringify(s)) : null;
+    },
+    souvShelf:function(id){ setShelf(id||null); return P.save ? P.save.shelf : null; },
+    souvState:function(id){
+      var s=findSouv(id);
+      if(!s) return null;
+      var v=souvenirView(s,P.save && P.save.shelf===s.id);
+      return v ? JSON.parse(JSON.stringify(v)) : null;
+    },
+    /* Move one souvenir's shelf age without waiting days; e2e and the owner's debug screen use this. */
+    souvAge:function(id,hours){
+      var s=findSouv(id);
+      if(!s) return null;
+      var ms=Math.round((+hours||0)*HOUR);
+      if(s.plantedAt!=null && P.save && P.save.shelf===s.id) s.plantedAt-=ms;
+      else s.grownMs=Math.max(0,(+s.grownMs||0)+ms);
+      if(P.refs && !P.nostore) P.refs.souv.doc(s.id).update({grownMs:+s.grownMs||0,plantedAt:s.plantedAt!=null?s.plantedAt:null}).catch(function(){});
+      render();
+      return JSON.parse(JSON.stringify(s));
     },
     finishGame:function(score){
       if(P.sub!=="game" || !P.game) return null;

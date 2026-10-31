@@ -20,7 +20,7 @@
  */
 (function(){
 "use strict";
-var C=window.LopdaStudioCompose, TH=window.LopdaStudioTheory, AI=window.LopdaStudioAI, P=window.LopdaStudioPrompts, ST=window.LopdaStudioStyles,
+var K=window.LopdaStudioCritic, C=window.LopdaStudioCompose, TH=window.LopdaStudioTheory, AI=window.LopdaStudioAI, P=window.LopdaStudioPrompts, ST=window.LopdaStudioStyles,
     T=window.LopdaStudioTools, E=window.LopdaStudioEdit, S=window.LopdaSong;
 
 var MAX_RETRY=2, MAX_TURNS=5, CHORD_STYLES=["triad","seventh","rich"];
@@ -246,6 +246,7 @@ function planCheck(obj,cards,rolls){
     if(s.strum!=null && s.strum!=="none" && T.CHORD_RHYTHMS.indexOf(s.strum)<0)
       return {error:"section '"+id+"': strum must be one of "+T.CHORD_RHYTHMS.join(", ")+" or none"};
     if(s.imitate!=null && typeof s.imitate!=="boolean") return {error:"section '"+id+"': imitate must be true or false"};
+    if(s.end!=null && s.end!=="stop" && s.end!=="fill" && s.end!=="none") return {error:"section '"+id+"': end must be fill, stop or none"};
     if(s.imitate && !s.melody) return {error:"section '"+id+"': imitate needs melody true (the bass imitates the melody's motif)"};
     if(Array.isArray(s.bass)){
       var br=T.run(S.newSong(0),{tool:"bass",pattern:0,steps:s.bass});
@@ -290,7 +291,7 @@ function planCheck(obj,cards,rolls){
   for(i=0;i<sections.length;i++){
     s=sections[i];
     kept.push({id:s.id,chords:s.chords.slice(),groove:s.drums!=null && s.groove==null ? null : s.groove,
-      drums:s.drums!=null && s.groove==null ? s.drums : null,strum:s.strum||"hold",imitate:s.imitate===true,
+      drums:s.drums!=null && s.groove==null ? s.drums : null,strum:s.strum||"hold",imitate:s.imitate===true,end:s.end||"",
       energy:s.energy,bass:s.bass,melody:s.melody,patterns:[]});
   }
   var keptOrder=[];
@@ -346,7 +347,7 @@ function laySong(roll,plan,now){
     s=plan.sections[i];
     for(j=0;j<s.patterns.length;j++){
       p=s.patterns[j];
-      fill=!!follows["$"+s.id] && j===s.patterns.length-1;
+      fill=!!follows["$"+s.id] && j===s.patterns.length-1 && s.end!=="none" && s.end!=="stop";
       /* a bare degree gets the scale's own chord in the plan's chord style (12.20.8) */
       var cj=s.chords[j], dq=int(cj) ? T.diatonicQ(song,cj,plan.chordStyle) : null;
       if(dq) cj={root:cj, q:dq};
@@ -383,28 +384,13 @@ function laySong(roll,plan,now){
 /* The motifs: one ask for every section with a melody, then the local writer (studio-compose.js) builds the phrases
    over the chords. The model decides the rhythm and the shape of each line; the notes come from the chords, so they
    fit (12.20.10). */
-function motifCheck(obj,list){
-  var i, m, why;
-  if(!plain(obj) || !plain(obj.motifs)) return {error:"reply with {\"motifs\":{\"<section id>\":{rhythm, answer, contour, register, ending}, ...}}"};
-  for(i=0;i<list.length;i++){
-    m=obj.motifs[list[i].id];
-    if(!m) return {error:"write a motif for the "+list[i].id};
-    why=C.checkMotif(m);
-    if(why) return {error:list[i].id+": "+why};
-  }
-  return {value:obj.motifs};
-}
-
 function chordSpec(song,plan,c){
   if(!int(c)) return c;
   var q=T.diatonicQ(song,c,plan.chordStyle);
   return q ? {root:c, q:q} : {root:c};
 }
 
-function imitationMotif(m){
-  return {rhythm:m.rhythm, answer:m.answer, contour:m.contour, register:"low", ending:m.ending};
-}
-/* a phrase bar for the bass track: replace the bar's bass with these notes (degrees count from the bass's own tonic) */
+/* a bar for the bass track: replace the bar's bass with these notes (degrees count from the bass's own tonic) */
 function bassOps(p,notes){
   var ops=[{op:"clearTrack",pattern:p,track:"bass"}], i, n, o;
   for(i=0;i<notes.length;i++){
@@ -416,43 +402,78 @@ function bassOps(p,notes){
   return ops;
 }
 
-function motifRun(c,song,plan,roll,text,onStage){
-  var list=[], i, j, s, bars, sections=[];
+/* The melody, one ask per section: the model writes the notes, may develop its own bars with repeat / sequence /
+   invert / rest, and the critic (studio-critic.js) sends it back with what to fix. Notes off the key are refused
+   every time; taste is advice, asked at most twice, and the third answer stands (12.20.13). If the line fails
+   anyway, the local phrase writer fills the section so the song is never left without a tune. */
+function melodyCheck(song,s,specs,others,tries){
+  return function(obj){
+    var ex, why, k, tried=song, issues=[], advice;
+    tries.n++;
+    if(!plain(obj)) return {error:"reply with {\"bars\":[...]}"};
+    ex=K.expand(obj.bars);
+    if(ex.error) return {error:ex.error};
+    if(ex.bars.length!==specs.length) return {error:"write exactly "+specs.length+" bar"+(specs.length===1?"":"s")+", one per chord"};
+    for(k=0;k<ex.bars.length;k++){
+      var tr=T.run(tried,{tool:"melody",pattern:s.patterns[k],notes:ex.bars[k]});
+      if(tr.error) return {error:"bar "+(k+1)+": "+tr.error};
+      var ap=E.apply(tried,tr.ops);
+      if(!ap.song) return {error:"bar "+(k+1)+" cannot be written: "+applyWhy(ap,tr.ops)};
+      tried=ap.song;
+      if(TH) issues=issues.concat(TH.patternIssues(tried,s.patterns[k]).map(function(m){ return m.replace(/pattern [A-P] /,"bar "+(k+1)+" "); }));
+    }
+    if(issues.length) return {error:issues.slice(0,3).join("; ")};
+    advice=K.review(song,ex.bars,specs,others);
+    if(advice.length && tries.n<=MAX_RETRY) return {error:"a teacher's notes: "+advice.slice(0,3).join("; ")};
+    return {value:ex.bars};
+  };
+}
+
+var FALLBACK_MOTIF={rhythm:[0,3,4,8,12], answer:[0,4,6,8], contour:[1,1,-2,1], register:"mid", ending:"home"};
+
+function melodyRun(c,song,plan,roll,text,onStage){
+  var list=[], written=[], i, idx=0;
   for(i=0;i<plan.sections.length;i++) if(plan.sections[i].melody) list.push(plan.sections[i]);
-  if(!list.length) return Promise.resolve(song);
-  stage(onStage,"motif",1,1,{});
-  for(i=0;i<list.length;i++){
-    s=list[i]; bars=[];
-    for(j=0;j<s.chords.length;j++){
-      var spec=chordSpec(song,plan,s.chords[j]), cn=S.chordName(song,spec.root,spec.q,spec.acc);
-      bars.push(cn ? cn.name : "?");
+  function finish(s,specs,bars){
+    var k;
+    for(k=0;k<bars.length;k++) song=applyTool(song,{tool:"melody",pattern:s.patterns[k],notes:bars[k]});
+    /* imitation: the bass answers each melody bar a bar later and lower, its weighty notes moved onto the chord it
+       now sounds over, so the two lines are a small canon in the harmony (12.20.11) */
+    if(s.imitate && specs.length>1){
+      for(k=1;k<bars.length;k++)
+        song=applyTool(song,{tool:"ops",ops:bassOps(s.patterns[k],K.fitToChord(song,bars[k-1],specs[k],-3,9))});
     }
-    sections.push({id:s.id, bars:bars, energy:s.energy});
+    if(s.alt>=0){
+      song=applyTool(song,{tool:"melody",pattern:s.alt,notes:K.endOtherWay(song,bars[bars.length-1],specs[specs.length-1])});
+      /* the second hearing ends with the band stopping on beat 3 (12.20.12) */
+      song=applyTool(song,{tool:"stop",pattern:s.alt});
+    }
+    if(s.end==="stop") song=applyTool(song,{tool:"stop",pattern:s.patterns[s.patterns.length-1]});
+    written.push({id:s.id, bars:bars});
   }
-  var msgs=P.motif({text:text, card:P.lang(text)==="Chinese"?roll.card.zh:roll.card.en,
-    keyName:S.NAMES[song.key], scale:song.scale, bpm:song.bpm, sections:sections});
-  return step(c,msgs,function(obj){ return motifCheck(obj,list); },"melody").then(function(ans){
-    var motifs=ans.value, start=null, k, out, alt;
-    for(i=0;i<list.length;i++){
-      s=list[i];
-      var specs=s.chords.map(function(x){ return chordSpec(song,plan,x); });
-      out=C.phrase(song,motifs[s.id],specs,{variant:0,start:start});
-      for(k=0;k<out.length;k++) song=applyTool(song,{tool:"melody",pattern:s.patterns[k],notes:out[k]});
-      /* imitation: the bass answers with the same motif a bar later and lower, over its own chords, so the two lines
-         are a small canon that stays in the harmony (a fugue's entry, as far as two voices allow) (12.20.11) */
-      if(s.imitate && specs.length>1){
-        var low=C.phrase(song,imitationMotif(motifs[s.id]),specs.slice(1),{variant:0});
-        for(k=0;k<low.length;k++) song=applyTool(song,{tool:"ops",ops:bassOps(s.patterns[k+1],low[k])});
-      }
-      if(s.alt>=0){
-        alt=C.phrase(song,motifs[s.id],specs,{variant:1,start:start});
-        song=applyTool(song,{tool:"melody",pattern:s.alt,notes:alt[alt.length-1]});
-      }
-      var last=out[out.length-1], ln=last && last[last.length-1];
-      if(ln) start=ln[1];
+  function next(){
+    if(idx>=list.length) return Promise.resolve(song);
+    var s=list[idx], at=idx, specs, names=[], k, tries={n:0};
+    idx++;
+    specs=s.chords.map(function(x){ return chordSpec(song,plan,x); });
+    for(k=0;k<specs.length;k++){
+      var cn=S.chordName(song,specs[k].root,specs[k].q,specs[k].acc);
+      names.push({chord:cn ? cn.name : "?", tones:T.chordToneText(song,specs[k])});
     }
-    return song;
-  });
+    stage(onStage,"melody",at+1,list.length,{section:s.id});
+    var msgs=P.melody({text:text, style:P.lang(text)==="Chinese"?roll.card.zh:roll.card.en,
+      keyName:S.NAMES[song.key], scale:song.scale, bpm:song.bpm, section:s.id, energy:s.energy, bars:names,
+      before:written.map(function(w){ return w.id+": "+JSON.stringify(w.bars); }).join("\n")});
+    return step(c,msgs,melodyCheck(song,s,specs,written,tries),"melody").then(function(ans){
+      finish(s,specs,ans.value);
+      return next();
+    },function(e){
+      if(!e || e.code!=="unreadable") throw e;
+      finish(s,specs,C.phrase(song,FALLBACK_MOTIF,specs,{variant:0}));
+      return next();
+    });
+  }
+  return next();
 }
 
 /* ---------- the listen-back ---------- */
@@ -516,7 +537,7 @@ function skeleton(o){
       stage(o.onStage,"card",1,1,{card:cardName,own:plan.card===0,key:S.NAMES[roll.key],scale:roll.scale,bpm:plan.bpm});
       stage(o.onStage,"lay",1,1,{});
       song=laySong(roll,plan,now);
-      return motifRun(c,song,plan,roll,text,o.onStage);
+      return melodyRun(c,song,plan,roll,text,o.onStage);
     }).then(function(song){
       stage(o.onStage,"listen",1,1,{});
       var msgs=P.listen({text:text,overview:AI.overview(song)});

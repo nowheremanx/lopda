@@ -2037,7 +2037,6 @@ function aiStageText(st){
   if(st.id==="plan") return tr("studio.ai.stage.plan");
   if(st.id==="lay") return tr("studio.ai.stage.lay");
   if(st.id==="melody") return tr("studio.ai.stage.melody",{section:tr("studio.ai.sec."+(v.section||"verse")),n:st.n,of:st.of});
-  if(st.id==="motif") return tr("studio.ai.stage.motif");
   if(st.id==="listen") return tr("studio.ai.stage.listen");
   if(st.id==="read") return tr("studio.ai.stage.read");
   if(st.id==="edit") return tr("studio.ai.stage.edit",{turn:v.turn!=null?v.turn:st.n});
@@ -2099,14 +2098,16 @@ function renderAiSheet(sh){
     return;
   }
   if(!T.aiBusy) sh.appendChild(el("p","st-sheet-label",tr("studio.ai.hint")));
-  var input=el("input","st-name st-ai-input");
-  input.type="text";
-  input.maxLength=160;
+  /* a few lines that scroll inside: a request can be a paragraph (owner, 2026-10-31). Return makes a new line; the
+     send button sends, and Ctrl/Cmd+Return too on a keyboard. */
+  var input=el("textarea","st-name st-ai-input");
+  input.rows=3;
+  input.maxLength=600;
   input.id="studio-ai-input";
   input.placeholder=tr("studio.ai.placeholder");
   input.value=T.aiNote||"";
   input.disabled=T.aiBusy;
-  input.onkeydown=function(e){ if(e.key==="Enter"){ e.preventDefault(); askAi(input.value); } };
+  input.onkeydown=function(e){ if(e.key==="Enter" && (e.ctrlKey || e.metaKey)){ e.preventDefault(); askAi(input.value); } };
   sh.appendChild(input);
   if(T.aiBusy){
     var prog=el("div","st-ai-progress");

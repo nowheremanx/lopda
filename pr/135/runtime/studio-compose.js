@@ -92,10 +92,16 @@ function bar(song,spec,rhythm,contour,cur,range,o){
   var out=[], targets=chordTargets(song,spec,range[0],range[1]), i, step, deg, acc, strong, a, k=o.k;
   for(i=0;i<rhythm.length;i++){
     step=rhythm[i];
-    /* beats 1 and 3, and the bar's last note (it rings over the chord the longest), sit on chord tones */
-    strong=step===0 || step===8 || i===0 || i===rhythm.length-1;
+    /* Only the notes the ear weighs sit on chord tones: the bar's first note, beat 3 of every other bar, and a last
+       note long enough to ring over the chord. Snapping every beat made the line a broken chord, an arpeggio from
+       start to end (owner, 2026-10-31: "the melody keeps arpeggiating"). Elsewhere the line steps by its contour. */
+    var len=(i+1<rhythm.length ? rhythm[i+1] : 16)-step;
+    strong=i===0 || (step===8 && o.bar%2===0) || (i===rhythm.length-1 && len>=6);
     if(strong){
-      a=nearest(targets,i===0 ? cur : cur+contour[k%contour.length]);
+      var want=i===0 ? cur : cur+contour[k%contour.length];
+      a=nearest(targets,want);
+      /* a chord tone more than a step away from where the line was going is not worth the leap on beat 3 */
+      if(i>0 && a && Math.abs(a.deg-want)>1 && len<6) a={deg:clamp(want,range[0],range[1]), acc:0};
       deg=a ? a.deg : cur; acc=a ? a.acc : 0;
       if(i>0) k++;
     } else {
@@ -142,6 +148,7 @@ function phrase(song,motif,bars,o){
     r=i%2===1 && motif.answer ? motif.answer : motif.rhythm;
     contour=motif.contour;
     if(i===2) contour=motif.contour.map(function(m){ return -m; });
+    st.bar=i;
     b=bar(song,bars[i],r,contour,cur,range,st);
     cur=b.cur;
     if(i===bars.length-1) b.notes=cadence(song,bars[i],b.notes,cur,range,home);

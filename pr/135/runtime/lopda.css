@@ -937,6 +937,7 @@ textarea::placeholder{color:var(--ink-2)}
 /* the project library, versions, guide and assistant sheets (12.15, 12.16) */
 .st-name{width:100%;box-sizing:border-box;height:44px;padding:6px 8px;background:var(--lcd);color:var(--ink);border:2px solid var(--ink);font-family:var(--f-lcd);font-size:16px;line-height:1.2}
 .st-name::placeholder{color:var(--ink-2)}
+.st-ai-input{height:auto;min-height:88px;max-height:132px;resize:none;overflow-y:auto;-webkit-overflow-scrolling:touch}
 /* iOS paints a disabled field and button grey and half transparent: keep them in the four tones while the AI works */
 .st-name:disabled{opacity:1;color:var(--ink-2);-webkit-text-fill-color:var(--ink-2);border-color:var(--ink-2)}
 .st-ai-chip:disabled,.st-sheet .st-sheet-btn:disabled{opacity:1;color:var(--ink-2);-webkit-text-fill-color:var(--ink-2);border-color:var(--ink-2);cursor:default}

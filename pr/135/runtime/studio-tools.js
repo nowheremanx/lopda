@@ -21,7 +21,7 @@ var PARENT=S.PARENT || {"minor-penta":"minor","major-penta":"major","minor":"min
 var ALL_TRACKS=["drums","bass","chords","melody"];
 var CHANGES=["same","sparse","no-melody","lift"];
 var CHORD_RHYTHMS=["hold","stabs","pulse"];
-var TOOLS=["ops","groove","chords","bass","ghost","fill","melody","copy","chain","set","mix"];
+var TOOLS=["ops","groove","chords","bass","ghost","fill","stop","melody","copy","chain","set","mix"];
 
 function plain(x){ return !!x && typeof x==="object" && Object.prototype.toString.call(x)==="[object Object]"; }
 function int(n){ return typeof n==="number" && isFinite(n) && Math.floor(n)===n; }
@@ -355,6 +355,35 @@ function fillOps(song,p){
   return ops;
 }
 
+/* A stop: the band plays to beat 3, hits it together, and leaves two beats of silence before the next section
+   (owner, 2026-10-31: "no sudden stops at all"). Every track's notes after step 8 go; a rest at step 10 cuts what
+   would ring on. */
+function stopOps(song,p){
+  var ops=[], tracks=["drums","bass","chords","melody"], i, j, list, n, st, rest={}, sounding={};
+  for(i=0;i<tracks.length;i++){
+    list=notesOf(song,p,tracks[i]);
+    for(j=0;j<list.length;j++){
+      n=list[j];
+      if(!n) continue;
+      st=Math.floor(n.t/S.STEP);
+      if(st<=8 && n.vel>0) sounding[tracks[i]]=true;
+      if(st<=8) continue;
+      if(tracks[i]==="drums") ops.push({op:"setDrum",pattern:p,drum:n.key,step:st,on:false});
+      else ops.push({op:"removeNote",pattern:p,track:tracks[i],step:st});
+    }
+  }
+  ops.push({op:"setDrum",pattern:p,drum:"kick",step:8,on:true,vel:0.95});
+  ops.push({op:"setDrum",pattern:p,drum:"snare",step:8,on:true,vel:0.95});
+  for(i=1;i<tracks.length;i++) if(sounding[tracks[i]]) ops.push({op:"setRest",pattern:p,track:tracks[i],step:10});
+  return ops;
+}
+
+function toolStop(song,call){
+  var p=patternArg(call);
+  if(p===null) return patternError();
+  return {ops:stopOps(song,p)};
+}
+
 function toolFill(song,call){
   var p=patternArg(call);
   if(p===null) return patternError();
@@ -523,6 +552,7 @@ function run(song,call){
     case "bass": return toolBass(song,call);
     case "ghost": return toolGhost(song,call);
     case "fill": return toolFill(song,call);
+    case "stop": return toolStop(song,call);
     case "melody": return toolMelody(song,call);
     case "copy": return toolCopy(song,call);
     case "chain": return toolChain(song,call);
