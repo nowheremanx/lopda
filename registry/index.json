@@ -1,6 +1,6 @@
 {
   "spec": "lopda/1",
-  "generated": "2026-10-30",
+  "generated": "2026-11-01",
   "apps": [
     {
       "spec": "lopda/1",
@@ -294,21 +294,24 @@
         "................",
         "................"
       ],
-      "version": "1.5.0",
+      "version": "1.6.0",
       "released": "2026-10-07",
       "updated": "2026-10-13",
-      "description": "15×15 棋盘，你执黑先手和电脑下，可以悔棋。",
+      "description": "15×15 棋盘，你执黑先手和电脑下，可以悔棋；也能通过电波和另一台掌机对战。",
       "i18n": {
         "en": {
           "name": "Gomoku",
-          "description": "15×15 board. You play black and move first against the computer. Undo allowed."
+          "description": "15×15 board. Play the computer, or a friend over the radio link."
         }
       },
       "author": "Haowei Wu",
       "license": "MIT",
+      "permissions": [
+        "link"
+      ],
       "path": "apps/gomoku/index.html",
-      "sha256": "8c0005208ed3d1f27e7e022a0fc1766ea01e2626f919bfc1c409b80b36e96165",
-      "bytes": 12352
+      "sha256": "8bdfff6638d720f6a693f5253e020aae3a3f6027050fd50fbce62ce3bcd1d470",
+      "bytes": 29929
     },
     {
       "spec": "lopda/1",
@@ -425,7 +428,7 @@
       ],
       "version": "1.1.0",
       "released": "2026-10-28",
-      "updated": "2026-10-28",
+      "updated": "2026-10-29",
       "description": "六十秒一关：钩金块、躲炸药，钱袋随机，商店看运气。",
       "i18n": {
         "en": {

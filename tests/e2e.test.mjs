@@ -7719,7 +7719,7 @@ test("camera snap: without the permission null and no dialog; Settings lists the
   assert.equal(await p.textContent("#set-sense > span"), "传感器与权限");
   assert.match(await p.textContent("#set-sense-list"), /(拍照测试|snap-test) · 相机/);
   await p.click('#set-sense-list [data-app="snap-test"]');
-  assert.match(await p.textContent("#set-sense-list"), /还没有程序获准使用倾斜感应、麦克风、相机或生词本/);
+  assert.match(await p.textContent("#set-sense-list"), /还没有程序获准使用倾斜感应、麦克风、相机、生词本或连线/);
   f = await runSnapApp(p);
   f.evaluate(() => { snap(); });
   await p.waitForSelector("#file-ask .box");

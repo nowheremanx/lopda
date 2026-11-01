@@ -26,6 +26,7 @@
   #tiltpad::before, #tiltpad::after { content:""; position:absolute; background:#4a4f45; }
   #tiltpad::before { left:50%; top:0; bottom:0; width:1px; } #tiltpad::after { top:50%; left:0; right:0; height:1px; }
   #snapbox { display:flex; flex-direction:column; gap:8px; border:1px solid #4a4f45; padding:8px; }
+  #linkbox { display:flex; flex-direction:column; gap:8px; border:1px solid #4a4f45; padding:8px; }
   #snapcv { width:256px; max-width:100%; aspect-ratio:128/112; image-rendering:pixelated; background:#1b1d1a; display:block; }
   #tiltdot { position:absolute; width:16px; height:16px; margin:-8px 0 0 -8px; left:50%; top:50%; background:var(--paper); }
 </style>
@@ -86,6 +87,13 @@
         </div>
       </div>
       <video id="snapvideo" playsinline muted autoplay hidden></video>
+    </div>
+    <div id="linkbox">
+      <div>Link (PAD.link): <span id="linkstate">closed</span></div>
+      <div class="row">
+        <button id="echopeer" type="button">Echo peer: off</button>
+        <span>two tabs of this page on the same app pair by themselves</span>
+      </div>
     </div>
     <div class="row">
       <label for="notesans">PAD.notes.append answers</label>
@@ -213,11 +221,11 @@
     runToken++;
     if (chip) chip.stop();
     if (chip) document.getElementById("amb").value = "";
-    senseStop("motion"); senseStop("mic"); speech.stop(); snapEnd(null);
+    senseStop("motion"); senseStop("mic"); speech.stop(); snapEnd(null); linkReset();
     /* a word book answer still pending belongs to the frame that is going away: drop it rather than post into the next one */
     if (wbAsk) { wbAsk = null; document.getElementById("wordbookbox").hidden = true; }
     dictLimit = WL.limiter();
-    var l = document.getElementById("lang").value, o = { music: !!chip, ambience: !!chip, sensors: true, notes: true, say: true, camera: true, dict: true };
+    var l = document.getElementById("lang").value, o = { music: !!chip, ambience: !!chip, sensors: true, notes: true, say: true, camera: true, dict: true, link: true };
     if (l) o.lang = l;
     frame.srcdoc = lopdaWrapApp(html, o);
   }
@@ -236,11 +244,12 @@
     }
     else if (d.op === "schema" && typeof d.n === "number" && isFinite(d.n) && d.n >= 0) localStorage.setItem(key() + ":schema", String(Math.floor(d.n)));
     else if (d.op === "error") log("ERROR " + d.msg);
-    else if (d.op === "exit") { runToken++; wbAsk = null; document.getElementById("wordbookbox").hidden = true; log("app asked to exit"); if (chip) chip.stop(); senseStop("motion"); senseStop("mic"); speech.stop(); snapEnd(null); frame.srcdoc = ""; }
+    else if (d.op === "exit") { runToken++; wbAsk = null; document.getElementById("wordbookbox").hidden = true; log("app asked to exit"); if (chip) chip.stop(); senseStop("motion"); senseStop("mic"); speech.stop(); snapEnd(null); linkReset(); frame.srcdoc = ""; }
     else if (d.op === "notes") notesOp(d);
     else if (d.op === "say") sayOp(d);
     else if (d.op === "sense") sense(d);
     else if (d.op === "snap") snapOp(d);
+    else if (d.op === "link") linkOp(d);
     else if (d.op === "dict") dictOp(d);
     else if (d.op === "sfx" && typeof d.name === "string") {
       log("sfx " + d.name);
@@ -595,6 +604,134 @@
     if (this.checked) snapCamera();
     else if (snapping && snapping.stream) { snapping.stream.getTracks().forEach(function (t) { t.stop(); }); snapping.stream = null; }
   };
+  /* PAD.link (SPEC.md 6.8). There is no sound here: two tabs of this harness on the same app pair over
+     BroadcastChannel "lopda-dev-link" with a hello and a hello-ack, and messages take 600 ms each way. The two tab
+     ids decide which side is the initiator, so exactly one is (and two tabs opened at the same moment cannot deadlock).
+     The echo peer pairs one tab with itself: open answers at once as initiator, and every send comes back as a
+     received message 600 ms later. */
+  var LINK_CHANNEL = "lopda-dev-link", LINK_DELAY = 600;
+  var link = { id: Math.random().toString(36).slice(2) + Date.now().toString(36), chan: null, echo: false,
+    pairing: null, open: false, initiator: false, peer: null };
+  function linkShow() {
+    document.getElementById("linkstate").textContent = link.open
+      ? "open, " + (link.initiator ? "initiator" : "responder") + (link.echo ? " (echo peer)" : "")
+      : link.pairing ? "pairing" : "closed";
+  }
+  function linkFmt(data) {
+    return typeof data === "string" ? JSON.stringify(data) : data instanceof Uint8Array ? "Uint8Array(" + data.length + ")" : String(data);
+  }
+  function linkOut(m) { if (link.chan) { try { link.chan.postMessage(m); } catch (e) {} } }
+  function linkChannel() {
+    if (link.chan) return link.chan;
+    if (typeof BroadcastChannel === "undefined") { log("link: this browser has no BroadcastChannel"); return null; }
+    try { link.chan = new BroadcastChannel(LINK_CHANNEL); } catch (e) { log("link: " + e.message); return null; }
+    link.chan.onmessage = function (e) { linkHeard(e.data); };
+    return link.chan;
+  }
+  function linkReplyLinked(d, v, initiator) {
+    if (!d || d.token !== runToken) return;
+    var m = { pad: 1, op: "linked", i: d.i, v: v };
+    if (v === "open") m.initiator = !!initiator;
+    frame.contentWindow.postMessage(m, "*");
+  }
+  function linkDeliver(data) {
+    if (!(typeof data === "string" || data instanceof Uint8Array)) return;
+    log("link message " + linkFmt(data));
+    frame.contentWindow.postMessage({ pad: 1, op: "link", event: "message", data: data }, "*");
+  }
+  function linkOpenNow(initiator, peer) {
+    var p = link.pairing;
+    if (!p) return;
+    link.pairing = null; link.open = true; link.initiator = !!initiator; link.peer = peer;
+    linkShow();
+    log("link.open -> open (" + (initiator ? "initiator" : "responder") + ")");
+    linkReplyLinked(p, "open", initiator);
+  }
+  function linkShut(reason, bye) {
+    var wasOpen = link.open, p = link.pairing;
+    link.open = false; link.initiator = false; link.pairing = null; link.peer = null;
+    if (bye && (wasOpen || p)) linkOut({ kind: "bye", from: link.id, app: appId });
+    linkShow();
+    if (wasOpen) {
+      log("link close: " + reason);
+      frame.contentWindow.postMessage({ pad: 1, op: "link", event: "close", reason: reason }, "*");
+    } else if (p) linkReplyLinked(p, "cancelled");
+  }
+  function linkReset() {
+    if (link.open || link.pairing) {
+      linkOut({ kind: "bye", from: link.id, app: appId });
+      link.open = false; link.initiator = false; link.pairing = null; link.peer = null;
+    }
+    linkShow();
+  }
+  function linkHeard(m) {
+    if (!m || m.from === link.id) return;
+    if (m.app !== appId) { if (m.kind === "hello") log("link: hello from another app (" + m.app + "), ignored"); return; }
+    if (m.kind === "hello") {
+      if (!link.pairing || link.open) return;
+      linkOut({ kind: "ack", from: link.id, to: m.from, app: appId });
+      log("link: hello from another tab, answered");
+      linkOpenNow(link.id < m.from, m.from);
+    } else if (m.kind === "ack" && m.to === link.id) {
+      if (!link.pairing || link.open) return;
+      log("link: hello answered");
+      linkOpenNow(link.id < m.from, m.from);
+    } else if (m.kind === "data" && m.to === link.id) {
+      if (link.open) linkDeliver(m.data);
+    } else if (m.kind === "bye" && m.from === link.peer) {
+      if (!link.open && !link.pairing) return;
+      log("link: bye from the other tab");
+      linkShut("bye", false);
+    }
+  }
+  function linkSendOp(d) {
+    var token = runToken;
+    if (!link.open) { log("link.send -> closed (no link)"); linkReplyLinked({ i: d.i, token: token }, "closed"); return; }
+    var data = d.data;
+    if (!(typeof data === "string" || data instanceof Uint8Array)) { linkReplyLinked({ i: d.i, token: token }, "closed"); return; }
+    log("link.send " + linkFmt(data) + " (600 ms)");
+    linkReplyLinked({ i: d.i, token: token }, "sent");
+    setTimeout(function () {
+      if (token !== runToken || !link.open) return;
+      if (link.echo) linkDeliver(data);
+      else linkOut({ kind: "data", from: link.id, to: link.peer, app: appId, data: data });
+    }, LINK_DELAY);
+  }
+  function linkOp(d) {
+    var token = runToken;
+    if ((manifest.permissions || []).indexOf("link") < 0) {
+      log('ERROR PAD.link needs "permissions": ["link"] in manifest.json');
+      linkReplyLinked({ i: d.i, token: token }, d.action === "open" ? "denied" : "closed");
+      return;
+    }
+    if (d.action === "open") {
+      if (link.open || link.pairing) { log("link.open -> busy (one link at a time)"); linkReplyLinked({ i: d.i, token: token }, "busy"); return; }
+      var proto = typeof d.proto === "string" ? d.proto : "";
+      if (link.echo) {
+        link.open = true; link.initiator = true; link.peer = link.id; linkShow();
+        log("link.open -> open (echo peer, initiator)");
+        linkReplyLinked({ i: d.i, token: token }, "open", true);
+        return;
+      }
+      link.pairing = { i: d.i, token: token, proto: proto };
+      linkShow();
+      if (!linkChannel()) { link.pairing = null; linkShow(); linkReplyLinked({ i: d.i, token: token }, "none"); return; }
+      log("link.open(" + JSON.stringify(proto) + ") -> pairing: open this page in another tab");
+      linkOut({ kind: "hello", from: link.id, app: appId, proto: proto });
+    } else if (d.action === "send") {
+      linkSendOp(d);
+    } else if (d.action === "close") {
+      log("link.close");
+      linkShut("home", true);
+    }
+  }
+  document.getElementById("echopeer").onclick = function () {
+    link.echo = !link.echo;
+    this.textContent = "Echo peer: " + (link.echo ? "on" : "off");
+    linkShow();
+    log("link: echo peer " + (link.echo ? "on (open answers at once, a send comes back after 600 ms)" : "off"));
+  };
+  linkShow();
   /* chin buttons: on-screen pad plus keyboard while the harness has focus. While the viewfinder is open, A shoots and B cancels,
      and nothing reaches the app, as on the handheld */
   var press = function (b, down) {
