@@ -719,3 +719,139 @@ test("a new day keeps yesterday's kind and clears the pick and its counters", ()
   assert.equal(s.today.day, "2026-10-20");
   assert.equal(s.today.used, true);
 });
+
+/* ---------- picking from the catalogue ---------- */
+const FOUR = ["spring", "summer", "autumn", "winter"];
+const closeTo = (a, b) => Math.abs(a - b) < 1e-12;
+function smallTable() {
+  const table = [];
+  for (const s of FOUR) for (let i = 0; i < 3; i++) table.push({ id: `${s}-${i}`, season: s });
+  for (let i = 0; i < 3; i++) table.push({ id: `any-${i}`, season: "any" });
+  return table;
+}
+
+test("pickSouvenir: never out of season, over many seeds", () => {
+  const table = smallTable();
+  for (const season of FOUR) {
+    for (let seed = 0; seed < 200; seed++) {
+      for (const newChance of [0, 0.5, 1]) {
+        const e = P.pickSouvenir(P.rng(seed), table, { season, seen: [], recent: [], newChance });
+        assert.ok(e, "a pool with an entry always picks");
+        assert.ok(e.season === "any" || e.season === season, `${season} picked ${e.id}`);
+      }
+    }
+  }
+});
+
+test("pickSouvenir: unseen first when the new chance hits", () => {
+  const table = [{ id: "a", season: "any" }, { id: "b", season: "any" }, { id: "c", season: "any" }];
+  const picked = new Set();
+  for (let seed = 0; seed < 100; seed++) {
+    const e = P.pickSouvenir(P.rng(seed), table, { season: "summer", seen: ["a"], recent: [], newChance: 1 });
+    assert.notEqual(e.id, "a", "the one already seen is left out");
+    picked.add(e.id);
+  }
+  assert.deepEqual([...picked].sort(), ["b", "c"], "both unseen entries can come out");
+});
+
+test("pickSouvenir: with nothing unseen the seen part avoids recent when it can", () => {
+  const table = [{ id: "a", season: "any" }, { id: "b", season: "any" }, { id: "c", season: "any" }];
+  for (let seed = 0; seed < 100; seed++) {
+    const e = P.pickSouvenir(P.rng(seed), table, { season: "winter", seen: ["a", "b", "c"], recent: ["a", "b"], newChance: 0 });
+    assert.equal(e.id, "c", "the one not recent");
+  }
+  for (let seed = 0; seed < 50; seed++) {
+    const e = P.pickSouvenir(P.rng(seed), table, { season: "winter", seen: ["a", "b", "c"], recent: ["a", "b", "c"], newChance: 0 });
+    assert.ok(["a", "b", "c"].includes(e.id), "all recent: a repeat is unavoidable, never an out-of-season entry");
+  }
+});
+
+test("pickSouvenir: nothing seen picks unseen even with newChance 0", () => {
+  const table = [{ id: "a", season: "any" }, { id: "b", season: "spring" }, { id: "c", season: "winter" }];
+  const ids = new Set();
+  for (let seed = 0; seed < 100; seed++) {
+    const e = P.pickSouvenir(P.rng(seed), table, { season: "spring", seen: [], recent: [], newChance: 0 });
+    assert.ok(e.id === "a" || e.id === "b", "only in-season entries");
+    ids.add(e.id);
+  }
+  assert.deepEqual([...ids].sort(), ["a", "b"]);
+  assert.equal(P.pickSouvenir(P.rng(1), [], { season: "spring", seen: [], recent: [], newChance: 1 }), null);
+  assert.equal(P.pickSouvenir(P.rng(1), [{ id: "winter-1", season: "winter" }], { season: "spring" }), null);
+});
+
+test("pickSouvenir: deterministic, and exactly two draws on every path", () => {
+  const table = smallTable();
+  const opts = { season: "autumn", seen: ["autumn-0", "any-1"], recent: ["autumn-0"], newChance: 0.5 };
+  const a = P.pickSouvenir(P.rng(77), table, opts);
+  const b = P.pickSouvenir(P.rng(77), table, opts);
+  assert.equal(a.id, b.id);
+  assert.deepEqual(plain(P.pickSouvenir(77, table, opts)), plain(a), "a numeric seed works like builtinSouvenir");
+  const outcomes = new Set();
+  for (let seed = 0; seed < 100; seed++) outcomes.add(P.pickSouvenir(P.rng(seed), table, opts).id);
+  assert.ok(outcomes.size > 1, "different seeds move the pick");
+  for (const o of [
+    { season: "autumn", seen: [], recent: [], newChance: 0 },
+    { season: "autumn", seen: ["autumn-0", "autumn-1", "autumn-2"], recent: ["autumn-0"], newChance: 0 },
+    { season: "autumn", seen: [], recent: [], newChance: 1 }
+  ]) {
+    let n = 0;
+    assert.ok(P.pickSouvenir(() => { n++; return 0.99; }, table, o));
+    assert.equal(n, 2, JSON.stringify(o));
+  }
+  let emptyDraws = 0;
+  P.pickSouvenir(() => { emptyDraws++; return 0.99; }, [], { season: "autumn" });
+  assert.equal(emptyDraws, 2, "an empty pool still draws twice");
+});
+
+test("souvenirNewChance: min(1, souvenirNewRate / trait.outing) from the species pack", () => {
+  assert.equal(P.SPECIES.chip.souvenirNewRate, 0.28);
+  for (const [trait, tr] of Object.entries(P.SPECIES.chip.traits)) {
+    const want = Math.min(1, 0.28 / tr.outing);
+    assert.ok(closeTo(P.souvenirNewChance({ species: "chip", trait }), want), trait);
+  }
+  assert.ok(closeTo(P.souvenirNewChance({ species: "chip", trait: "lively" }), 0.4));
+  /* a pack without the rate uses the 0.28 fallback, one with its own rate uses it, and the result never passes 1 */
+  assert.ok(closeTo(P.souvenirNewChance({ species: { traits: { slow: { outing: 0.4 } } }, trait: "slow" }), 0.7));
+  assert.equal(P.souvenirNewChance({ species: { souvenirNewRate: 0.5, traits: { rare: { outing: 0.2 } } }, trait: "rare" }), 1);
+  assert.equal(P.souvenirNewChance({ species: { traits: { still: { outing: 0 } } }, trait: "still" }), 1);
+});
+
+/* One year of outings: 91-day seasons, 20 items each plus 20 in every season. A day's outing is a seeded draw
+   against trait.outing (not outingToday's calendar), then pickSouvenir sees the growing seen and recent lists. */
+function simTable() {
+  const table = [];
+  for (const s of FOUR) for (let i = 0; i < 20; i++) table.push({ id: `${s}-${i}`, season: s });
+  for (let i = 0; i < 20; i++) table.push({ id: `any-${i}`, season: "any" });
+  return table;
+}
+function yearNewFinds(traitName, seed, table) {
+  const trait = P.SPECIES.chip.traits[traitName];
+  const r = P.rng(seed);
+  const startDay = Math.floor(r() * 364);
+  const seen = [], recent = [], seenSet = new Set();
+  const newChance = P.souvenirNewChance({ species: "chip", trait: traitName });
+  let found = 0;
+  for (let d = 0; d < 365; d++) {
+    const season = FOUR[Math.floor((startDay + d) / 91) % 4];
+    if (r() >= trait.outing) continue;
+    const e = P.pickSouvenir(r, table, { season, seen, recent, newChance });
+    if (!seenSet.has(e.id)) { seenSet.add(e.id); seen.push(e.id); found++; }
+    recent.push(e.id);
+    if (recent.length > 5) recent.shift();
+  }
+  return found;
+}
+
+test("pickSouvenir: a seeded year of outings finds 80-100 new souvenirs for every trait", (t) => {
+  const table = simTable();
+  assert.equal(table.length, 100);
+  const averages = {};
+  for (const traitName of Object.keys(P.SPECIES.chip.traits)) {
+    let total = 0;
+    for (let i = 0; i < 50; i++) total += yearNewFinds(traitName, 4000 + i * 131, table);
+    averages[traitName] = total / 50;
+    assert.ok(averages[traitName] >= 80 && averages[traitName] <= 100,
+      `${traitName}: ${averages[traitName]} new finds a year`);
+  }
+  t.diagnostic(JSON.stringify(averages));
+});

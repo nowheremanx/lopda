@@ -40,6 +40,8 @@
  *   pickOfDay(candidates, yesterdayKind, seed) one candidate or null, about half the days nothing
  *   validateSouvenir(input)      a clean {name:{zh,en}, line:{zh,en}, px: 256 chars} or null
  *   builtinSouvenir(rnd, recentNames, table) one entry of table, avoiding recent names when possible
+ *   pickSouvenir(rnd, table, opts)  one in-season entry: unseen first, else seen avoiding recent; always two draws
+ *   souvenirNewChance(save)      min(1, souvenirNewRate / trait.outing), the chance an outing finds something new
  *   aiPrompt(ctx)                {messages, max} for one LP.ai.ask call, with only design.md 7's allowed facts
  *   moodWord(hunger, joy, zh)    the one mood word the prompt may carry
  *   aiCategories(before, after)  the fixed category words whose usage counts grew
@@ -65,6 +67,7 @@ var SPECIES={
     growth:{child:3, adult:10},
     forms:[["book",["reader"]], ["walk",["camera","darkroom"]], ["scholar",["dict"]], ["diary",["notes"]], ["monster",["cart","apps"]]],
     formMinPct:30,
+    souvenirNewRate:0.28,
     outingHours:[10, 17]
   }
 };
@@ -525,6 +528,60 @@ function builtinSouvenir(rnd,recentNames,table){
   return pool[Math.min(pool.length-1,Math.floor(num(r())*pool.length))];
 }
 
+/* ---------- picking from the catalogue ---------- */
+/* The fallback for a species pack without souvenirNewRate; the rate is a number of days, not an outing count. */
+var SOUV_NEW_RATE=0.28;
+/* A table entry's season: "any" is always in season, and a missing season is treated as "any". Ids are strings. */
+function inSeason(e,season){
+  var s=e && e.season;
+  return !s || s==="any" || s===season;
+}
+function idSet(list){
+  var set={};
+  (list||[]).forEach(function(id){ if(id!=null) set[String(id)]=true; });
+  return set;
+}
+/* One entry of table ({id, season, ...}) or null for an empty pool. opts = {season, seen, recent, newChance};
+   seen and recent are catalogue ids. The pool never leaves the season. With unseen entries left and r() < newChance
+   the pick is unseen; otherwise it comes from the seen part, avoiding recent when possible, and the unseen part
+   stands in when the seen part is empty (a first find is never refused).
+   Exactly two r() values are drawn on every path, even for an empty pool: the first decides new vs. seen, the second
+   the index as Math.floor(r2 * candidates.length). Adding a catalogue entry therefore shifts only the index inside
+   the affected part of the pool, never the decision before it. */
+function pickSouvenir(rnd,table,opts){
+  var r=typeof rnd==="function" ? rnd : rng(isFinite(+rnd) ? +rnd : 0);
+  var o=opts||{};
+  var r1=r(), r2=r();
+  var chance=num(o.newChance);
+  if(chance<0) chance=0;
+  if(chance>1) chance=1;
+  var seen=idSet(o.seen), recent=idSet(o.recent);
+  var unseen=[], seenPart=[];
+  (Array.isArray(table) ? table : []).forEach(function(e){
+    if(!e || !inSeason(e,o.season)) return;
+    if(seen[String(e.id)]) seenPart.push(e); else unseen.push(e);
+  });
+  var candidates;
+  if(unseen.length && r1<chance) candidates=unseen;
+  else if(seenPart.length){
+    candidates=seenPart.filter(function(e){ return !recent[String(e.id)]; });
+    if(!candidates.length) candidates=seenPart;
+  } else candidates=unseen;
+  if(!candidates.length) return null;
+  var i=Math.floor(r2*candidates.length);
+  return candidates[i<0 ? 0 : i>=candidates.length ? candidates.length-1 : i];
+}
+/* The chance that one outing is a new find: min(1, souvenirNewRate / outing), about every 3.5 days for every trait,
+   so a lively pet does not empty the catalogue sooner than a sleepy one. The rate comes from the species pack,
+   0.28 when the pack has none; an outing chance of zero gives a certain new find. */
+function souvenirNewChance(save){
+  var sp=speciesOf(save), trait=traitOf(sp, save && save.trait);
+  var rate=num(sp && sp.souvenirNewRate);
+  if(!(rate>0)) rate=SOUV_NEW_RATE;
+  var outing=num(trait && trait.outing);
+  return outing>0 ? Math.min(1, rate/outing) : 1;
+}
+
 /* ---------- the AI's one call ---------- */
 /* Only these six category words may leave the device. They are a fixed vocabulary, not whatever the caller passes. */
 var AI_CATS=["read", "took photos", "studied words", "wrote a diary", "developed film", "played"];
@@ -630,6 +687,7 @@ window.LopdaPet={
   feed:feed, play:play, wash:wash, pat:pat, setLight:setLight, wants:wants,
   outingToday:outingToday, pickOfDay:pickOfDay,
   validateSouvenir:validateSouvenir, builtinSouvenir:builtinSouvenir, aiPrompt:aiPrompt,
+  pickSouvenir:pickSouvenir, souvenirNewChance:souvenirNewChance,
   moodWord:moodWord, aiCategories:aiCategories
 };
 })();
