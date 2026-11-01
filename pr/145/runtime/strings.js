@@ -484,6 +484,7 @@
       "pet.where.street": "路边", "pet.where.busstop": "车站", "pet.where.drawer": "抽屉里",
       "pet.where.roof": "屋顶",
 
+      "pet.souv.grows": "摆在架子上会慢慢长大", "pet.souv.changes": "摆在架子上会慢慢变化",
       "pet.from.found": "在{where}捡到的", "pet.from.trip": "旅行回来带的",
       "pet.from.out": "出门在{where}找到的", "pet.from.outAny": "出门时找到的",
 
@@ -1404,6 +1405,7 @@
       "pet.where.street": "by the roadside", "pet.where.busstop": "at the bus stop", "pet.where.drawer": "in a drawer",
       "pet.where.roof": "on the roof",
 
+      "pet.souv.grows": "Grows slowly on the shelf", "pet.souv.changes": "Changes slowly on the shelf",
       "pet.from.found": "Found {where}", "pet.from.trip": "Brought back from a trip",
       "pet.from.out": "Found on a walk: {where}", "pet.from.outAny": "Found while out",
 
