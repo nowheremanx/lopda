@@ -512,6 +512,29 @@ test("ticksToSec and clampBpm", () => {
   assert.equal(S.clampBpm(60), 60);
 });
 
+test("recStep: on the beat, early and late, the wrap, latency, other lengths and negative ticks", () => {
+  /* 120 BPM: a 16th is 24 ticks and 0.125 s, so one bar (16 steps) is 2 s */
+  const bpm = 120, start = 10, lat = 0;
+  assert.equal(S.recStep(start, start, bpm, 16, lat), 0, "on the beat");
+  assert.equal(S.recStep(start + 0.125, start, bpm, 16, lat), 1, "one step later");
+  assert.equal(S.recStep(start + 0.125 - 0.05, start, bpm, 16, lat), 1, "0.4 step early rounds forward to 1");
+  assert.equal(S.recStep(start + 0.125 + 0.05, start, bpm, 16, lat), 1, "0.4 step late rounds back to 1");
+  assert.equal(S.recStep(start + 0.125 + 0.07, start, bpm, 16, lat), 2, "past half a step rounds forward");
+  assert.equal(S.recStep(start + 2 - 0.01, start, bpm, 16, lat), 0, "a tap before the loop end wraps to step 0");
+  assert.equal(S.recStep(start + 2, start, bpm, 16, lat), 0, "the next bar starts at step 0");
+  /* latency is taken off the tap: a late tap comes back to the step the finger meant */
+  assert.equal(S.recStep(start + 0.125 + 0.05, start, bpm, 16, 0.06), 1, "latency shifts the result");
+  assert.equal(S.recStep(start + 0.125 + 0.05, start, bpm, 16, 0), 1);
+  /* a 12-step pattern still wraps and lands in 0..11 */
+  assert.equal(S.recStep(start + 5 * 0.125, start, bpm, 12, lat), 5);
+  assert.equal(S.recStep(start + 12 * 0.125, start, bpm, 12, lat), 0, "patLen 12 wraps after its last step");
+  assert.equal(S.recStep(start + 11.6 * 0.125, start, bpm, 12, lat), 0);
+  /* taps before the timeline starts stay in range */
+  assert.equal(S.recStep(start - 1, start, bpm, 16, lat), 8, "negative ticks wrap into the pattern");
+  assert.ok(S.recStep(start - 1000, start, bpm, 16, lat) >= 0);
+  assert.ok(S.recStep(start - 1000, start, bpm, 16, lat) < 16);
+});
+
 test("constants: parent scales, voices, note velocity, chord cells, note names, demo pairs", () => {
   assert.deepEqual(plain(S.PARENT), {
     "minor-penta": "minor",

@@ -679,6 +679,19 @@ function ticksToSec(ticks,bpm){
   return ticks*60/(bpm*TPB);
 }
 
+/* Where a live tap lands on the grid (12.24): the seconds on the audio clock, the tick the pattern's timeline starts at,
+   the tempo and the pattern's length. The latency (output + touch) is taken off the tap first, then the tick is rounded
+   to the nearest 16th and wrapped into the pattern, so a tap just before the loop ends lands on step 0 and a tap before
+   the start still has a step. Pure: no state, no clock of its own. */
+function recStep(tapSec,startAt,bpm,patLen,latencySec){
+  var len=num(patLen) && patLen>=1 ? Math.floor(patLen) : STEPS;
+  if(!num(tapSec) || !num(startAt) || !num(bpm) || !(bpm>0)) return 0;
+  var lat=num(latencySec) ? latencySec : 0;
+  var tick=(tapSec-lat-startAt)*bpm*TPB/60;
+  var step=(Math.round(tick/STEP)%len+len)%len;
+  return step===0 ? 0 : step;
+}
+
 /* ---------- pitch ---------- */
 /* MIDI 60 is C4, so octave oct starts at 12*(oct+1). A degree outside the scale's length wraps a whole octave at a time,
    both ways: degree -1 of A minor penta is the G below A4 (67), not the G of two octaves down. */
@@ -1384,7 +1397,7 @@ window.LopdaSong={
   TAPE_MAX:TAPE_MAX, PATTERNS_MAX:PATTERNS_MAX, SONG_MAX:SONG_MAX, NAME_MAX:NAME_MAX,
   newSong:newSong, demoSong:demoSong, popSong:popSong, saintsSong:saintsSong, jasmineSong:jasmineSong, fromDraft:fromDraft, validate:validate, has:has, toggle:toggle,
   setDrum:setDrum, clearTrack:clearTrack, setTrackMix:setTrackMix, setTrackVoice:setTrackVoice,
-  swingTicks:swingTicks, events:events, ticksToSec:ticksToSec,
+  swingTicks:swingTicks, events:events, ticksToSec:ticksToSec, recStep:recStep,
   degreeToMidi:degreeToMidi, clampBpm:clampBpm,
   tonic:tonic, noteMidi:noteMidi, noteName:noteName,
   chordNotes:chordNotes, chordName:chordName,

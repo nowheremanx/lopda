@@ -715,6 +715,12 @@ async function openMenu(p) {
   await p.click("#studio-menu");
   await p.waitForSelector("#studio-sheet:not([hidden])");
 }
+/* 12.24: the bar's ? moved into the ≡ menu; replay the screen's own tour through its row */
+async function replayTour(p) {
+  await openMenu(p);
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "重看本屏教程" }).click();
+  await p.waitForSelector("#v-studio .st-tour-box");
+}
 async function openEdit(p) {
   await openMenu(p);
   await p.locator("#studio-sheet .lcd-menu li", { hasText: "编辑" }).click();
@@ -1007,7 +1013,8 @@ test("studio: the tape opens from home with the demo beat's kick on the grid", {
   assert.deepEqual(on, [1, 8, 11], "the demo kick: steps 1, 8 and 11");
   assert.equal(await p.locator("#v-studio .st-tab.on").getAttribute("data-drum"), "kick");
   assert.match(await p.textContent("#studio-bpm"), /82 BPM/);
-  assert.equal(await p.locator("#studio-tour").count(), 1);
+  assert.equal(await p.locator("#studio-tour").count(), 0, "the tour button left the bar");
+  assert.equal(await p.locator("#studio-rec").count(), 1, "REC took its place");
   assert.equal(await p.locator("#studio-menu").count(), 1);
   assert.deepEqual(errors, []);
 });
@@ -1362,8 +1369,7 @@ test("studio tour: played before the tour, step 1 offers Next instead of waiting
   await skipTour(p);
   await p.click("#studio-play");
   await p.waitForFunction(() => document.querySelector("#v-studio").getAttribute("data-playing") === "true");
-  await p.click("#studio-tour");
-  await p.waitForSelector("#v-studio .st-tour-box");
+  await replayTour(p);
   assert.match(await tourText(p), /按 ▸ 听听这盘磁带。/);
   assert.equal(await p.locator("#v-studio .st-tour-next").isVisible(), true, "an already-done play step shows Next");
   assert.equal(await p.textContent("#v-studio .st-tour-next"), "下一步");
@@ -1389,9 +1395,8 @@ test("studio tour: after Done a reopen has no tour; ? replays it", { skip, timeo
   await openTile(p);
   assert.equal(await tourBox(p).count(), 0, "the tour does not come back by itself");
 
-  await p.click("#studio-tour");
-  await p.waitForSelector("#v-studio .st-tour-box");
-  assert.match(await tourText(p), /按 ▸ 听听这盘磁带。/, "? starts again from step 1");
+  await replayTour(p);
+  assert.match(await tourText(p), /按 ▸ 听听这盘磁带。/, "the menu row starts again from step 1");
   await p.keyboard.press("z");
   await p.waitForSelector("#v-studio .st-tour-box", { state: "detached" });
   assert.deepEqual(errors, []);
@@ -1562,11 +1567,10 @@ test("studio tour: the note, chord and song tours walk their steps to Done; a re
     assert.equal(await p.locator("#v-studio .st-tour-box").count(), 0, `${tour.screen} stays quiet after a reload`);
   }
 
-  /* ? replays the tour of the screen being shown */
+  /* the menu row replays the tour of the screen being shown */
   for (const tour of NEW_TOURS) {
     await p.click(`#studio-screens .st-scr[data-screen="${tour.screen}"]`);
-    await p.click("#studio-tour");
-    await p.waitForSelector("#v-studio .st-tour-box");
+    await replayTour(p);
     await waitTour(p, tour.first);
     assert.equal((await tourTarget(p)).id, tour.screen === "song" ? "studio-pat" : tour.screen === "chords" ? "studio-chord-cells" : "studio-grid",
       `${tour.screen}: ? starts its own tour at step 1`);
@@ -1590,8 +1594,7 @@ test("studio tour: a tour on bass counts for melody too", { skip, timeout: 60000
 
   await p.click('#studio-screens .st-scr[data-screen="melody"]');
   assert.equal(await p.locator("#v-studio .st-tour-box").count(), 0, "melody shares the note tour's key");
-  await p.click("#studio-tour");
-  await p.waitForSelector("#v-studio .st-tour-box");
+  await replayTour(p);
   await waitTour(p, NEW_TOURS[0].first);
   assert.deepEqual((await tourTarget(p)).id, "studio-grid");
   await p.keyboard.press("z");
@@ -1883,8 +1886,7 @@ test("studio tour: selecting a rest cell advances the chord tour's first step an
   await p.locator('.st-chord-cell[data-half="1"]').click();
   await p.locator("#studio-chord-rest").click();
   await p.locator('.st-chord-cell[data-half="0"]').click();
-  await p.click("#studio-tour");
-  await p.waitForSelector("#v-studio .st-tour-box");
+  await replayTour(p);
   await waitTour(p, /一小节两格|Two squares per bar/);
   assert.equal(await p.locator("#v-studio .st-tour-hi").getAttribute("id"), "studio-chord-cells");
 
@@ -4375,5 +4377,82 @@ test("studio synth: every bass and melody voice honours slide and vib and render
     assert.ok(n.peak > 0.01, `${n.voice} ${n.kind} sounds (peak ${n.peak})`);
     assert.ok(n.diff < 1e-4, `${n.voice} ${n.kind} renders the same twice (max difference ${n.diff})`);
   }
+  assert.deepEqual(errors, []);
+});
+
+/* ---------------- real-time recording (docs/design/studio.md 12.24) ---------------- */
+test("studio rec: REC counts one bar in, a melody key writes a note, and one undo takes the take back", { skip, timeout: 90000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await p.click('#studio-screens .st-scr[data-screen="melody"]');
+  await skipScreenTour(p);
+  assert.equal(await p.locator("#v-studio .st-cell.has-note").count(), 0, "the demo melody starts empty");
+  assert.equal(await p.locator("#studio-tour").count(), 0, "the tour button is not in the bar");
+
+  await p.click("#studio-rec");
+  assert.equal(await p.getAttribute("#v-studio", "data-playing"), "true", "REC starts the pattern loop");
+  assert.equal(await p.getAttribute("#v-studio", "data-rec"), "count", "the first pass is the count-in");
+  assert.equal(await p.locator("#studio-rec").getAttribute("aria-pressed"), "true", "REC shows it is armed");
+
+  /* one bar at the demo's 82 BPM is about 2.9 s; wait on the player's own state, not a guessed timeout */
+  await p.waitForFunction(() => document.querySelector("#v-studio").getAttribute("data-rec") === "on", null, { timeout: 15000 });
+  assert.equal(await p.getAttribute("#v-studio", "data-playing"), "true", "the pattern keeps playing from the count-in");
+
+  await p.locator('#studio-keys .st-key[data-deg="2"]').click();
+  assert.equal(await p.locator("#v-studio .st-cell.has-note").count(), 1, "some step got the note");
+
+  await p.click("#studio-rec");
+  assert.equal(await p.getAttribute("#v-studio", "data-rec"), null, "a second REC stops recording");
+  assert.equal(await p.getAttribute("#v-studio", "data-playing"), "true", "stopping REC keeps the loop playing");
+  assert.equal(await p.locator("#v-studio .st-cell.has-note").count(), 1, "the take stays on the grid");
+
+  await openMenu(p);
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "撤销" }).click();
+  assert.equal(await p.locator("#v-studio .st-cell.has-note").count(), 0, "one undo removes the whole take");
+  assert.deepEqual(errors, []);
+});
+
+test("studio rec: a drum tab tap while recording adds a hit", { skip, timeout: 90000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+
+  /* an empty drum bar makes "some step got a hit" unambiguous */
+  await openEdit(p);
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: /清空这条轨/ }).click();
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  assert.equal(await p.locator("#v-studio .st-cell.on").count(), 0, "the drum track is empty");
+
+  await p.click("#studio-rec");
+  await p.waitForFunction(() => document.querySelector("#v-studio").getAttribute("data-rec") === "on", null, { timeout: 15000 });
+  await p.locator('#studio-tabs .st-tab[data-drum="snare"]').click();
+  assert.equal(await p.locator('#studio-tabs .st-tab.on').getAttribute("data-drum"), "snare", "the tab still selects its drum");
+  assert.ok(await p.locator("#v-studio .st-cell.on").count() >= 1, "the tap wrote a snare hit");
+  assert.equal(await p.getAttribute("#v-studio", "data-playing"), "true");
+  await p.click("#studio-rec");
+  assert.equal(await p.getAttribute("#v-studio", "data-rec"), null);
+  assert.deepEqual(errors, []);
+});
+
+test("studio rec: the ≡ menu replays the current screen's tour and the bar has no tour button", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await p.click('#studio-screens .st-scr[data-screen="bass"]');
+  await skipScreenTour(p);
+
+  assert.equal(await p.locator("#studio-tour").count(), 0, "the ? button is gone from the bar");
+  assert.equal(await p.locator("#studio-rec").count(), 1, "REC is the bar's second mini button");
+  await openMenu(p);
+  const row = p.locator("#studio-sheet .lcd-menu li", { hasText: "重看本屏教程" });
+  assert.equal(await row.count(), 1, "the menu has the replay row");
+  await row.click();
+  await p.waitForSelector("#v-studio .st-tour-box");
+  assert.equal(await p.locator("#studio-sheet").isHidden(), true, "the row closes the sheet");
+  assert.equal(await p.locator("#v-studio .st-tour-hi").getAttribute("id"), "studio-grid", "the note screen's tour starts");
+  assert.match(await tourText(p), /16 格还是一小节|16 squares are still one bar/);
+  await p.keyboard.press("z");
+  await p.waitForSelector("#v-studio .st-tour-box", { state: "detached" });
   assert.deepEqual(errors, []);
 });
