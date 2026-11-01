@@ -8,7 +8,11 @@
  * Two phones, half duplex, one slow lossy channel. Pairing is symmetric: nobody
  * picks master or slave. Each side listens for a random while, then says HELLO;
  * the side that hears a HELLO answers HELLO_ACK and is the responder, the side
- * that gets its HELLO_ACK is the initiator. If both talk at once neither hears
+ * that gets its HELLO_ACK is the initiator and answers with an ACK. The responder
+ * opens only on that ACK (or any later frame of the session): on the first
+ * two-iPhone test it opened right after its HELLO_ACK, which the other phone never
+ * heard, and sat in a link with nobody. Without the ACK it sends HELLO_ACK again
+ * (five times), then goes back to listening, still accepting that ACK if it comes. If both talk at once neither hears
  * the other (the channel is half duplex), and the random listen times separate
  * them next round.
  *
@@ -165,6 +169,7 @@ function create(opts){
   var phase="idle", listenUntil=0, attempt=0, rateIdx=0;
   var sid=0, nonce=0, helloRate=null, helloDeadline=0;
   var pendingAck=null, respAck=null, repeatAck=null, replyDue=null;
+  var confirm=null, confirmTries=0, confirmSid=0, lastConfirm=null;   /* the responder, between its HELLO_ACK and the initiator's ACK */
 
   /* open */
   var session=0, lastRecv=0, lastSent=0, lastHeard=0, lastActivity=0;
@@ -191,6 +196,8 @@ function create(opts){
      ours; a PING can be answered by a full DATA frame. */
   function dataWait(r){ return REPLY_MS+airMs(HEADER+CHUNK+2, r)+700; }
   function helloWait(r){ return REPLY_MS+airMs(HEADER+7+16+2, r)+700; }
+  /* the initiator's ACK; it may come as a full DATA frame when it already has a message */
+  function confirmWait(r){ return REPLY_MS+airMs(HEADER+CHUNK+2, r)+700; }
 
   function helloAckBytes(id, n){
     return LINK.encode(TYPES.HELLO_ACK, id, 0, 0,
@@ -239,6 +246,21 @@ function create(opts){
       }
       return;
     }
+    if(phase==="confirmWait" && confirm && now>=confirm.deadline){
+      if(confirmTries<5){
+        /* our HELLO_ACK went unheard (or its ACK did): say it again */
+        pendingAck={session:confirm.session, nonce:confirm.nonce, rate:confirm.rate, mismatch:false};
+        confirm=null;
+        phase="reply";
+        replyDue=now;
+      }else{
+        /* give up, but keep it: if the initiator's frame still arrives while we listen, we are in after all */
+        lastConfirm=confirm;
+        confirm=null; confirmTries=0; confirmSid=0;
+        beginListen(now);
+      }
+      return;
+    }
     if(phase==="reply" && pendingAck){
       if(now<replyDue || !quiet(now)) return;
       phase="replyTx";
@@ -254,12 +276,27 @@ function create(opts){
        sent() is merely late is over on air: accept what arrives after it. */
     if(airBusy && now<txAirEnd) return;
 
+    /* The initiator's ACK (or its first DATA or PING): now we are both in. */
+    var c=phase==="confirmWait" ? confirm : (phase==="listen" || phase==="helloWait" ? lastConfirm : null);
+    if(c && f.session===c.session &&
+       (f.type===TYPES.ACK || f.type===TYPES.DATA || f.type===TYPES.PING)){
+      confirm=null; confirmTries=0; confirmSid=0; lastConfirm=null;
+      respAck={nonce:c.nonce};
+      openAs(false, c.rate, c.session, now);
+      openHeard(f, now, r);
+      return;
+    }
+
     if(f.type===TYPES.HELLO){
       /* A HELLO wins even while we wait for the ACK to our own: the peer is the
-         one still asking, so we drop our attempt and answer as responder. */
-      if(phase!=="listen" && phase!=="helloWait") return;
+         one still asking, so we drop our attempt and answer as responder. While
+         we wait for the initiator's ACK, its retried HELLO (it missed our
+         HELLO_ACK) is answered again. */
+      if(phase!=="listen" && phase!=="helloWait" && phase!=="confirmWait") return;
       var h=LINK.parseHello(f.payload);
       if(!h) return;
+      if(f.session!==confirmSid){ confirmTries=0; confirmSid=f.session; }
+      confirm=null;
       pendingAck={session:f.session, nonce:h.nonce, rate:r,
         mismatch:(h.port!==PORT)||(h.proto!==PROTO)};
       phase="reply";
@@ -275,6 +312,8 @@ function create(opts){
       if(!a || a.nonce!==nonce) return;
       if(a.port!==PORT || a.proto!==PROTO){ finish("other-app"); return; }
       openAs(true, helloRate, sid, now);
+      /* the third leg: the responder waits for this ACK before it opens */
+      scheduleReply(now);
     }
   }
 
@@ -423,7 +462,9 @@ function create(opts){
     if(f.type===TYPES.HELLO){ maybeRepeatAck(f, now, r); return; }
     if(f.type===TYPES.PING){ scheduleReply(now); return; }
     if(f.type===TYPES.DATA){ onData(f, now); return; }
-    /* ACK and a late HELLO_ACK: the ack above was all they had to say. */
+    /* A repeated HELLO_ACK: the responder missed our ACK and is still waiting for it. */
+    if(f.type===TYPES.HELLO_ACK && initiator){ scheduleReply(now); return; }
+    /* An ACK: the ack above was all it had to say. */
   }
 
   function pingTick(now){
@@ -532,8 +573,10 @@ function create(opts){
         finish("other-app");
         return;
       }
-      respAck={nonce:pa.nonce};
-      openAs(false, pa.rate, pa.session, now);
+      /* not open yet: wait for the initiator's ACK (see the top of this file) */
+      confirmTries++;
+      confirm={session:pa.session, nonce:pa.nonce, rate:pa.rate, deadline:now+confirmWait(pa.rate)};
+      phase="confirmWait";
       return;
     }
     if(state!=="open") return;
@@ -583,7 +626,7 @@ function create(opts){
     }
     queue=[];
     rx={parts:[], total:0, dropped:false};
-    pendingAck=null; repeatAck=null; replyDue=null; respAck=null;
+    pendingAck=null; repeatAck=null; replyDue=null; respAck=null; confirm=null;
     airBusy=false;
     txInfo=null;
     txDeadline=0;
