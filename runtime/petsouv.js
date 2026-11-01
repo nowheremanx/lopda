@@ -1553,7 +1553,7 @@ var CATALOG=[
   "..kkkkkkkkkkkk..",
   "................",
   "................"]},
-  {id:"redpacket",set:"fest",season:"spring",where:"doorstep",grid:[
+  {id:"redpacket",set:"fest",season:"winter",where:"doorstep",grid:[
   "................",
   "................",
   "....kkkkkkkk....",
@@ -1570,7 +1570,7 @@ var CATALOG=[
   "...kkkkkkkkkk...",
   "................",
   "................"]},
-  {id:"yuanxiao",set:"fest",season:"spring",where:"street",grid:[
+  {id:"yuanxiao",set:"fest",season:"winter",where:"street",grid:[
   "................",
   "................",
   "....p..p..p.....",
@@ -1604,7 +1604,7 @@ var CATALOG=[
   "..kdk.kdk.kdk...",
   "................",
   "................"]},
-  {id:"lantern",set:"fest",season:"spring",where:"doorstep",grid:[
+  {id:"lantern",set:"fest",season:"winter",where:"doorstep",grid:[
   "................",
   ".......k........",
   "......kkk.......",
