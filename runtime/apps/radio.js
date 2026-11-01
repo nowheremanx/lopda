@@ -455,10 +455,22 @@ function startMeter(){
     }
     M.stream=stream; M.src=src; M.proc=proc; M.silent=silent; M.sr=ctx.sampleRate;
     M.live=true;
+    /* The frame monitor: the link's own receiver (acoustic-rx.js) on this always-open microphone, so a phone that
+       only listens here can tell whether it hears the other phone's link frames (HELLO while it pairs) at all. */
+    M.rx=window.LopdaAcousticRx.create({sampleRate:ctx.sampleRate, rates:[10,20,40]});
+    M.n=0; M.heard={}; M.bad=0; M.last="";
     proc.onaudioprocess=function(e){
       if(M.proc!==proc) return;
       var d=e.inputBuffer.getChannelData(0);
-      var tw=AC.toneWindow(d,0,d.length,M.sr), i, lo=tw.pdb[0];
+      var tw=AC.toneWindow(d,0,d.length,M.sr), i, lo=tw.pdb[0], fr, p;
+      M.rx.push(d,M.n); M.n+=d.length;
+      fr=M.rx.frames();
+      for(i=0;i<fr.length;i++){
+        p=LK.parse(fr[i].bytes);
+        if(!p.ok){ M.bad++; continue; }
+        M.heard[p.frame.typeName]=(M.heard[p.frame.typeName]||0)+1;
+        M.last=p.frame.typeName+" @"+fr[i].rate+" ms";
+      }
       for(i=1;i<4;i++) if(tw.pdb[i]<lo) lo=tw.pdb[i];
       M.pdb=tw.pdb.slice(0);
       if(M.floor==null) M.floor=lo;
@@ -515,6 +527,11 @@ function paintBars(){
   }
   var floor=byId("radio-floor");
   if(floor) floor.textContent=(M.floor==null||!isFinite(M.floor))?tr("radio.meter.floor.off"):tr("radio.meter.floor",{db:Math.round(M.floor)});
+  var mon=byId("radio-rxmon");
+  if(mon){
+    var kinds=M.heard?Object.keys(M.heard).map(function(k){ return k+" "+M.heard[k]; }).join(", "):"";
+    mon.textContent=M.live?tr("radio.meter.rxmon",{list:kinds||"-", bad:M.bad||0, last:M.last||"-"}):"";
+  }
   var state=byId("radio-meter-state");
   if(state) state.textContent=M.live?tr("radio.meter.on"):(M.pending?tr("radio.meter.request"):(M.state||tr("radio.meter.off")));
   renderBar();
