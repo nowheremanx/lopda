@@ -6,7 +6,8 @@ Owner: Haowei Wu. Repo: https://github.com/nowheremanx/lopda.
 Design history and open questions: `docs/decisions.md`. Read it before changing behaviour.
 Design drafts for work not yet merged: `docs/design/` (current: `home-api.md`, the home tile API;
 `pet-room.md`, the pet's scene objects, spots and slots; `pet-souvenir-state.md`, the souvenir state hook
-and its grow / match layers, with cycle deferred;
+and its grow / match layers, with cycle deferred; `pet-souvenirs-100.md`, the souvenir catalogue, picking
+and origin lines;
 `tape4-import.md`, MIDI import into Tape4, after 1.0).
 
 ## Layout
@@ -29,6 +30,7 @@ runtime/        the PWA: index.html, core.js (shared LP object: utils, views, so
                 appsaves.js (an app save document: legacy/new shape, size, schema, damage and newer-format checks, the app snapshot kept after removal; pure functions),
                 petsim.js (the built-in pet's rules: catch-up, sleep, hunger and joy, growth, the day's outing, souvenir checks; pure functions),
                 petstate.js (a souvenir's item state: grow on the shelf, match by night / weather / season / lunar day / grow stage; pure functions),
+                petsouv.js (the pet's souvenir catalogue: 16 x 16 grids, set, season and where, ids never reused; pure data),
                 petart.js (the pet's species pack "chip": 32 x 32 sprite grids and frame builder, the standard front and side poses, props, icons, souvenirs and the 162 x 120 room painter into a tone buffer; pure functions),
                 petplay.js (the pet's play packs: catch, bounce and climb, deterministic 50 ms ticks over the standard 32 x 32 poses and the 162 x 120 tone buffer; pure functions),
                 zip.js (stored zips written, stored and deflated zips read; pure functions, CRC from negative.js), wav.js (a mono 16-bit WAV writer for the tape machine's export; pure functions),
