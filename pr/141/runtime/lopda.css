@@ -722,6 +722,12 @@ textarea::placeholder{color:var(--ink-2)}
 .st-step,.st-mini{flex:none;width:44px;height:44px;display:flex;align-items:center;justify-content:center;padding:0;background:transparent;color:var(--ink);border:2px solid var(--ink);font-family:var(--f-pix);font-size:24px;line-height:1;cursor:pointer}
 .st-mini{font-size:20px}
 .st-step:active,.st-mini:active{background:var(--ink);color:var(--lcd)}
+/* 12.24: REC is a filled paper circle in CSS, inverted while recording; the count-in blinks the dot on each beat */
+.st-rec .st-rec-dot{display:block;width:14px;height:14px;border-radius:50%;background:currentColor}
+.st-rec.on{background:var(--ink);color:var(--lcd)}
+.st-rec.count .st-rec-dot{opacity:0.15}
+.st-rec.count.lit .st-rec-dot{opacity:1}
+.st-rec:disabled{color:var(--ink-2);border-color:var(--ink-2);cursor:default}
 .st-gap{flex:1;min-width:0}
 .st-tabs{flex:none;display:flex;gap:4px;padding:4px 6px;border-bottom:2px solid var(--ink)}
 .st-tab{flex:1;min-width:0;min-height:44px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;padding:2px;background:transparent;color:var(--ink);border:2px solid var(--ink);font-family:var(--f-lcd);font-size:14px;line-height:1.1;cursor:pointer;white-space:nowrap;overflow:hidden}

@@ -36,6 +36,8 @@ var LP=window.LP, $=LP.$, S=LP.S, tr=LP.tr, SONGS=window.LopdaSong, SYNTH=window
 var own=LP.own, toast=LP.toast, show=LP.show, showPad=LP.showPad;
 
 var BASE="data/users/local/studio", LOOKAHEAD=0.1, LOOP_MS=25, SAVE_MS=1000;
+/* 12.24: a live tap arrives one touch-to-handler delay after the finger, on top of the device's output latency */
+var REC_TAP_LAG=0.02;
 /* the mixer's four instrument rows (12.14); the voice row joins them in step 2, when it can sound */
 var MIX_TRACKS=["drums","bass","chords","melody"];
 var TAPE=window.LopdaStudioTape, WAV=window.LopdaWav, MIDI=window.LopdaMidi, ZIP=window.LopdaZip;
@@ -60,6 +62,9 @@ var T={
   playing:false, mode:"", playPat:0, chainPat:0, pendingPat:-1, queued:-1, boundaryGlobal:0,
   loop:0, ctx:null, synth:null, tape:null,
   startAt:0, lastTick:0, heard:0, painted:null, navKey:"",
+  /* 12.24: live recording. rec is "off" | "count" (the one-bar count-in) | "on"; recStartTick is the global tick
+     writing begins at; metroNext is the next metronome beat still to be scheduled */
+  rec:"off", recStartTick:0, recBeat:-1, recLit:false, metroNext:0,
   repeats:[], tour:null,
   /* song mode's bar state (12.12): the bar being heard is frozen; a chain edit only moves where it sits in the
      edited chain, and the next bar is re-anchored from nextSlot at the boundary (h* = heard, ahead = scheduled) */
@@ -170,6 +175,7 @@ function keepSong(song,snap){
   T.painted=null;
 }
 function undo(){
+  if(T.rec!=="off") stopRecording();
   if(!T.history.length || !T.song) return;
   if(T.playing) stopPlay();
   var cur=snapSong(), prev=T.history.pop();
@@ -183,6 +189,7 @@ function undo(){
   toast(tr("studio.undo.done"));
 }
 function redo(){
+  if(T.rec!=="off") stopRecording();
   if(!T.redo.length || !T.song) return;
   if(T.playing) stopPlay();
   var cur=snapSong(), next=T.redo.pop();
@@ -946,6 +953,21 @@ function loop(){
   /* schedule first: if a timer stall made the ears jump past the boundary, scheduleTo still has to place the
      queued pattern at that boundary before the ears are said to be on it */
   scheduleTo(to);
+  /* 12.24: the count-in becomes recording when the ears reach the first boundary; the REC glyph blinks on each beat */
+  if(T.rec!=="off"){
+    scheduleMetro(to);
+    if(T.rec==="count" && heard>=T.recStartTick){
+      T.rec="on";
+      T.recLit=false;
+      renderRec();
+    }
+    var recBeat=Math.floor(heard/SONGS.TPB);
+    if(recBeat!==T.recBeat){
+      T.recBeat=recBeat;
+      T.recLit=!T.recLit;
+      renderRec();
+    }
+  }
   if(T.mode==="pattern" && T.pendingPat>=0 && heard>=T.boundaryGlobal && T.chainPat===T.pendingPat){
     T.playPat=T.pendingPat;
     T.pendingPat=-1;
@@ -984,6 +1006,7 @@ function startPlay(){
   tourEvent("play");
 }
 function stopPlay(){
+  if(T.rec!=="off") stopRecording();
   var was=T.playing;
   T.playing=false;
   T.mode="";
@@ -1053,6 +1076,105 @@ function auditionChord(deg,acc,q){
   notes=notes.slice().sort(function(a,b){ return a-b; });
   for(i=0;i<notes.length;i++) synth.note(voice,notes[i],now+i*strum,0.8,SONGS.NOTE_VEL*vol);
 }
+/* ---------- real-time recording (12.24) ----------
+   REC arms a one-bar count-in; from the first bar boundary after arming every tap on the bass or melody keys (or a drum
+   tab) lands on the nearest 16th of the pattern on screen. The maths is SONGS.recStep; this file only reads the audio
+   clock, maps the global tick onto the pattern the ears are on, and decides whether the tap is written or merely heard. */
+function recScreen(){
+  return T.screen==="drums" || T.screen==="bass" || T.screen==="melody";
+}
+function recPatLen(){
+  var pat=T.song && T.song.patterns && T.song.patterns[T.pat];
+  return pat && pat.len>0 ? pat.len : SONGS.STEPS;
+}
+function tapLatency(){
+  var ac=T.ctx || LP.SND.ctx;
+  return (ac && (ac.outputLatency || ac.baseLatency || 0)) + REC_TAP_LAG;
+}
+/* the tap's global tick with the latency taken off; the count-in compares this, heardTick() is the ears' position */
+function recTickAt(tapSec){
+  var bpm=T.song ? T.song.bpm : SONGS.BPM_DEFAULT;
+  return (tapSec-tapLatency()-T.startAt)*bpm*SONGS.TPB/60;
+}
+/* Writes go only to the pattern on screen, and only while the ears are on it: a queued pattern switch means the
+   scheduler and the ears are on different bars, so the tap is auditioned and not written. */
+function recAt(tapSec){
+  if(T.rec==="off" || !T.song || !T.playing || T.mode!=="pattern") return -1;
+  var tick=recTickAt(tapSec);
+  if(T.rec==="count" && tick>=T.recStartTick){ T.rec="on"; renderRec(); }
+  if(T.rec!=="on" || T.chainPat!==T.pat || T.playPat!==T.pat) return -1;
+  return SONGS.recStep(tapSec,T.startAt,T.song.bpm,recPatLen(),tapLatency());
+}
+/* the first bar boundary after arming, on the one timeline that starts at T.startAt */
+function nextBarTick(){
+  var p=patternTicks(T.playing && T.chainPat>=0 ? T.chainPat : T.pat);
+  if(!(p>0)) p=SONGS.STEPS*SONGS.STEP;
+  var b=Math.ceil((heardTick()+1)/p)*p;
+  return b>0 ? b : p;
+}
+/* a short square click on the audio clock; beat 1 of the bar is louder. It goes to the app bus (so the volume setting
+   applies) but never through the synth or the tape, so the WAV export (which renders its own offline synth) and the
+   song data never see it. */
+function metroClick(at,loud){
+  var ac=T.ctx, o, g;
+  if(!ac || !ac.createOscillator) return;
+  o=ac.createOscillator();
+  g=ac.createGain();
+  o.type="square";
+  o.frequency.value=loud ? 1500 : 1000;
+  g.gain.setValueAtTime(0.0001,at);
+  g.gain.exponentialRampToValueAtTime(loud ? 0.12 : 0.07,at+0.002);
+  g.gain.exponentialRampToValueAtTime(0.0001,at+0.025);
+  o.connect(g);
+  g.connect(LP.SND.app || ac.destination);
+  o.start(at);
+  o.stop(at+0.03);
+}
+/* the look-ahead scheduler's metronome: one click a beat, from the arm to the stop, on the same audio clock as the notes */
+function scheduleMetro(to){
+  var bpm=T.song ? T.song.bpm : SONGS.BPM_DEFAULT;
+  var p=patternTicks(T.chainPat>=0 ? T.chainPat : T.pat);
+  if(!(p>0)) p=SONGS.STEPS*SONGS.STEP;
+  if(!T.ctx) return;
+  while(T.metroNext<to){
+    metroClick(T.startAt+SONGS.ticksToSec(T.metroNext,bpm),(T.metroNext%p)===0);
+    T.metroNext+=SONGS.TPB;
+  }
+}
+function armRecording(){
+  var ac=T.ctx || LP.SND.ctx;
+  if(!T.song || !ac) return;
+  T.rec="count";
+  T.recStartTick=nextBarTick();
+  T.recBeat=Math.floor(Math.max(0,heardTick())/SONGS.TPB);
+  T.recLit=false;
+  T.metroNext=Math.max(0,Math.ceil((ac.currentTime-T.startAt)*T.song.bpm*SONGS.TPB/60/SONGS.TPB)*SONGS.TPB);
+  T.historySilent=true;
+  renderRec();
+}
+/* stopping a take is one undo step, even after many written notes; T.snap still holds the song from before the arm */
+function stopRecording(){
+  if(T.rec==="off") return;
+  T.rec="off";
+  T.recStartTick=0;
+  T.metroNext=0;
+  T.recBeat=-1;
+  T.recLit=false;
+  if(T.historySilent){ T.historySilent=false; pushHistory(); }
+  renderRec();
+}
+function toggleRec(){
+  if(!recScreen() || !T.loaded || !T.song) return;
+  if(T.rec!=="off"){ stopRecording(); return; }
+  /* a song already playing is stopped first: REC records into the current pattern, so it needs pattern mode */
+  if(T.playing && T.mode!=="pattern") stopPlay();
+  if(!T.playing) startPlay();
+  if(!T.playing) return;
+  armRecording();
+  renderNav();
+  renderRec();
+}
+
 /* ---------- deep mode (12.20.5): a sixth column and a small sheet on the note and chord screens ----------
    The switch lives in the studio's own settings document (T.meta.deep), not in the tape and not in undo. With it off
    the screens are the ones above; only a note's acc and a chord's q/acc still show in the names they already carry. */
@@ -1269,7 +1391,8 @@ function build(){
       b.setAttribute("data-drum",drum);
       b.appendChild(el("span","st-tab-name"));
       b.appendChild(el("i","st-dot"));
-      b.onclick=function(){ pickDrum(drum,true,true); };
+      b.onclick=function(){ if(T.rec!=="off") return; pickDrum(drum,true,true); };
+      b.addEventListener("pointerdown",function(e){ recDrumDown(drum,e); });
       tabs.appendChild(b);
     })(SONGS.DRUMS[i]);
   }
@@ -1329,7 +1452,8 @@ function build(){
       b.setAttribute("data-deg",String(deg));
       b.appendChild(el("span","st-key-name"));
       b.appendChild(el("i","st-key-line"));
-      b.onclick=function(){ keyTap(deg); };
+      b.onclick=function(){ if(T.rec!=="off") return; keyTap(deg); };
+      b.addEventListener("pointerdown",function(e){ recPitchDown(deg,e); });
       keys.appendChild(b);
     })(i);
   }
@@ -1337,7 +1461,8 @@ function build(){
   var restKey=el("button","st-rest-key");
   restKey.type="button";
   restKey.id="studio-note-rest";
-  restKey.onclick=function(){ restTap(); };
+  restKey.onclick=function(){ if(T.rec!=="off") return; restTap(); };
+  restKey.addEventListener("pointerdown",function(e){ recRestDown(e); });
   keys.appendChild(restKey);
   var octKey=el("button","st-oct-key");
   octKey.type="button";
@@ -1378,7 +1503,7 @@ function build(){
   bindRepeat($("studio-minus"),-SONGS.BPM_STEP);
   bindRepeat($("studio-plus"),SONGS.BPM_STEP);
   $("studio-play").onclick=function(){ togglePlay(); };
-  $("studio-tour").onclick=function(){ startTour(); };
+  $("studio-rec").onclick=function(){ toggleRec(); };
   $("studio-menu").onclick=function(){ openSheet("menu"); };
   if(window.ResizeObserver) new ResizeObserver(function(){ layout(); }).observe($("studio-board"));
   window.addEventListener("resize",layout);
@@ -1439,6 +1564,23 @@ function renderPlay(){
   b.setAttribute("data-playing",T.playing?"true":"false");
   var n=(T.slot>=0?T.slot:0)+1;
   b.setAttribute("aria-label",tr(T.playing?"studio.stop":(T.screen==="song"?"studio.song.playfrom":"studio.play"),{n:n}));
+}
+/* 12.24: REC is live only on the three editing screens; while recording it inverts, during the count-in its dot blinks */
+function renderRec(){
+  var v=$("v-studio"), b=$("studio-rec"), dot=$("studio-rec-dot");
+  if(!T.built) return;
+  if(v){
+    if(T.rec==="off") v.removeAttribute("data-rec");
+    else v.setAttribute("data-rec",T.rec);
+  }
+  if(!b) return;
+  b.disabled=!(recScreen() && T.loaded && !!T.song);
+  b.classList.toggle("on",T.rec==="on");
+  b.classList.toggle("count",T.rec==="count");
+  b.classList.toggle("lit",T.rec==="count" && T.recLit);
+  b.setAttribute("aria-pressed",T.rec==="off"?"false":"true");
+  b.setAttribute("aria-label",tr(T.rec==="on"?"studio.rec.on":"studio.rec"));
+  if(dot) dot.classList.toggle("lit",T.rec==="count" && T.recLit);
 }
 function stateKey(){
   return T.screen+"|"+T.pat+"|"+(T.playing?T.mode:"")+"|"+(T.playing?playedPat():"")+
@@ -1700,7 +1842,7 @@ function renderAll(){
   build();
   var v=$("v-studio"); if(v) v.setAttribute("data-loaded",T.loaded?"true":"false");
   renderBar(); renderNav(); renderScreens(); renderTabs(); renderGrid(); renderKeys(); renderChords(); renderSong(); renderMixer();
-  renderPlay(); renderSheet();
+  renderPlay(); renderRec(); renderSheet();
   paintPlaying(true);
   layout();
 }
@@ -2300,6 +2442,7 @@ function renderSheet(){
     if(T.loaded) sheetRow(ul,tr("studio.menu.edit"),"",function(){ openSheet("editmenu"); });
     if(T.loaded) sheetRow(ul,tr("studio.menu.file"),"",function(){ openSheet("filemenu"); });
     sheetRow(ul,tr("studio.guide"),"",function(){ openSheet("guide"); });
+    sheetRow(ul,tr("studio.tour.replay"),"",function(){ closeSheet(); startTour(); });
     if(T.loaded) sheetRow(ul,tr("studio.ai.open"),"",function(){ openSheet("ai"); });
     sh.appendChild(ul);
     return;
@@ -2914,6 +3057,7 @@ function copyTo(target){
 /* a new or demo tape: same path as a tab tap, drums screen, pattern A, keeps the beat if one is playing (12.9) */
 function swapTape(song){
   stopRepeatAll();
+  if(T.rec!=="off") stopRecording();      /* the take belongs to the tape being replaced (12.24) */
   screenTo("drums");            /* the same path as a tab tap: an unfinished tour ends unseen */
   T.pat=0; T.focus=0; T.slot=0; T.kb=false;
   T.noteSel={bass:-1,melody:-1}; T.noteDeg={bass:0,melody:0}; T.oct={bass:0,melody:0}; T.chordSel=-1; T.chordDeg=0;
@@ -3251,6 +3395,8 @@ function screenTo(s){
 function setScreen(s){
   if(["drums","bass","chords","melody","song","mixer"].indexOf(s)<0) return;
   var changed=screenTo(s);
+  /* 12.24: REC lives on the drums, bass and melody screens; going to another screen ends the take but keeps the music */
+  if(changed && T.rec!=="off" && !recScreen()) stopRecording();
   renderAll();
   if(changed) maybeTour();
 }
@@ -3336,6 +3482,7 @@ function noteTap(track,step){
 /* the rest key (12.12): the selected cell becomes a rest; it never changes the track's last-used degree and never
    auditions. With no selection it does nothing. */
 function restTap(){
+  if(T.rec!=="off") return;
   var track=noteTrack();
   if(track){ restNote(track); return; }
   if(T.screen==="chords") restChord();
@@ -3377,7 +3524,60 @@ function octTap(){
   renderKeys();
   auditionNote(track,octShift(track));
 }
+/* 12.24: during recording the touch, not the release, is the tap. A pitch key writes a note at the quantised step (no
+   selection changes), the rest key writes a rest, and a drum tab writes a hit at velocity 1; all of them audition. */
+function recPitchDown(deg,e){
+  if(T.rec==="off") return;
+  if(e && e.preventDefault) e.preventDefault();
+  recPitch(deg);
+}
+function recPitch(deg){
+  var track=noteTrack(), ac=T.ctx || LP.SND.ctx, at;
+  if(!track || !T.song || !ac) return;
+  deg+=octShift(track);
+  T.noteDeg[track]=deg;
+  at=recAt(ac.currentTime);
+  if(at>=0){
+    T.song=SONGS.setNote(T.song,T.pat,track,at*SONGS.STEP,deg,SONGS.NOTE_VEL);
+    touch();
+    renderGrid(); renderNav();
+  }
+  auditionNote(track,deg);
+}
+function recRestDown(e){
+  if(T.rec==="off") return;
+  if(e && e.preventDefault) e.preventDefault();
+  recRest();
+}
+function recRest(){
+  var track=noteTrack(), ac=T.ctx || LP.SND.ctx, at;
+  if(!track || !T.song || !ac) return;
+  at=recAt(ac.currentTime);
+  if(at<0) return;
+  T.song=SONGS.setRest(T.song,T.pat,track,at*SONGS.STEP);
+  touch();
+  renderGrid(); renderNav();
+}
+function recDrumDown(drum,e){
+  if(T.rec==="off") return;
+  if(e && e.preventDefault) e.preventDefault();
+  recDrum(drum);
+}
+function recDrum(drum){
+  var ac=T.ctx || LP.SND.ctx, at;
+  if(SONGS.DRUMS.indexOf(drum)<0 || !T.song || !ac) return;
+  T.drum=drum;
+  renderTabs(); renderGrid();
+  auditionDrum();
+  at=recAt(ac.currentTime);
+  if(at>=0){
+    T.song=SONGS.setDrum(T.song,T.pat,drum,at,true,1);
+    touch();
+    renderTabs(); renderGrid(); renderNav();
+  }
+}
 function keyTap(deg){
+  if(T.rec!=="off") return;
   var track=noteTrack(), sel, note;
   if(!track || !T.song) return;
   deg+=octShift(track);
@@ -3653,6 +3853,7 @@ function open(){
   T.noteSel={bass:-1,melody:-1}; T.noteDeg={bass:0,melody:0}; T.oct={bass:0,melody:0};
   T.chordSel=-1; T.chordDeg=0;
   T.painted=null;
+  T.rec="off"; T.recStartTick=0; T.metroNext=0; T.recBeat=-1; T.recLit=false;
   build();
   show("studio");
   showPad(false);
