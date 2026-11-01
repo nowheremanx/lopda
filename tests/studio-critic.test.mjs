@@ -57,3 +57,19 @@ test("expand reads an ornament written where acc goes; a half phrase ending on a
   const bars = [[[0, 2, 0.8], [3, 3, 0.7], [6, 4, 0.8], [8, 2, 0.8], [10, 1, 0.7]], [[0, 2, 0.8], [3, 3, 0.7], [6, 4, 0.8], [12, 1, 0.8]]];
   assert.doesNotMatch(K.review(s, bars, C4, []).join(" "), /breathes/);
 });
+
+test("review: semitone turns and crowded or short ornaments get a note (12.25); a whole-tone turn and one held vib do not", () => {
+  const s = song(2, "minor");
+  /* D minor: degree 4 is A, 5 Bb, 1 E, 2 F; A Bb A and E F E are the semitone turns of the owner's 2026-11-01 tape */
+  const turny = [[[0, 4, 0.8], [3, 5, 0.7], [4, 4, 0.8], [8, 1, 0.8], [10, 2, 0.7], [12, 1, 0.8]], [[0, 4, 0.8, 0, "vib"], [8, 2, 0, 0]]];
+  assert.match(K.review(s, turny, C4, []).join(" "), /semitone 2 times/);
+  /* G A G is a whole tone: no note */
+  const whole = [[[0, 3, 0.8], [3, 4, 0.7], [4, 3, 0.8], [8, 1, 0.8], [12, 2, 0.8]], [[0, 4, 0.8, 0, "vib"], [8, 2, 0, 0]]];
+  const ok = K.review(s, whole, C4, []).join(" ");
+  assert.doesNotMatch(ok, /semitone/);
+  assert.doesNotMatch(ok, /ornament/);
+  const crowded = [[[0, 4, 0.8, 0, "vib"], [4, 3, 0.8, 0, "vib"], [8, 2, 0.8]], [[0, 1, 0.8, 0, "slide"], [8, 0, 0.8]]];
+  assert.match(K.review(s, crowded, C4, []).join(" "), /3 ornaments in 2 bars/);
+  const short = [[[0, 4, 0.8], [2, 3, 0.8, 0, "vib"], [4, 2, 0.8]], [[0, 1, 0.8], [8, 0, 0.8]]];
+  assert.match(K.review(s, short, C4, []).join(" "), /short note/);
+});
