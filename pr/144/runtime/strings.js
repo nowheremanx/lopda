@@ -64,7 +64,7 @@
       "radio.meter.stats": "符号错误 {sym}/{totalSym} · 字节错误 {byte}/{totalByte} · {bps} bit/s",
       "radio.meter.nosync": "没有找到同步", "radio.meter.best": "最佳 {score}/16",
       "radio.meter.lab.empty": "还没有解码结果。", "radio.meter.lab.symbols": "符号：发送 / 收到",
-      "radio.meter.rxmon": "帧监听：{list} · 坏帧 {bad} · 最后 {last}", "radio.noaudio": "音频不可用", "radio.audio": "音频已重建，请重试",
+      "radio.meter.recsave": "存下最近 8 秒录音", "radio.meter.recnone": "还没有录音", "radio.meter.rxmon": "帧监听：{list} · 坏帧 {bad} · 最后 {last}", "radio.noaudio": "音频不可用", "radio.audio": "音频已重建，请重试",
 
       "scripts.title": "脚本",
       "scripts.new": "新建", "scripts.import": "导入",
@@ -718,7 +718,7 @@
       "radio.meter.stats": "Symbol errors {sym}/{totalSym} · byte errors {byte}/{totalByte} · {bps} bit/s",
       "radio.meter.nosync": "No sync", "radio.meter.best": "best {score}/16",
       "radio.meter.lab.empty": "No decode yet.", "radio.meter.lab.symbols": "Symbols: TX / RX",
-      "radio.meter.rxmon": "Frames heard: {list} · bad {bad} · last {last}", "radio.noaudio": "Audio unavailable", "radio.audio": "Audio rebuilt; try again",
+      "radio.meter.recsave": "Save the last 8 s", "radio.meter.recnone": "Nothing recorded yet", "radio.meter.rxmon": "Frames heard: {list} · bad {bad} · last {last}", "radio.noaudio": "Audio unavailable", "radio.audio": "Audio rebuilt; try again",
 
       "scripts.title": "Scripts",
       "scripts.new": "New", "scripts.import": "Import",

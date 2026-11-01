@@ -459,11 +459,14 @@ function startMeter(){
        only listens here can tell whether it hears the other phone's link frames (HELLO while it pairs) at all. */
     M.rx=window.LopdaAcousticRx.create({sampleRate:ctx.sampleRate, rates:[10,20,40]});
     M.n=0; M.heard={}; M.bad=0; M.last="";
+    /* the last 8 s the microphone heard, for a WAV the owner can send back when a phone does not decode (testing) */
+    M.ring=new Float32Array(Math.round(ctx.sampleRate*8)); M.ringAt=0; M.ringFull=false;
     proc.onaudioprocess=function(e){
       if(M.proc!==proc) return;
       var d=e.inputBuffer.getChannelData(0);
       var tw=AC.toneWindow(d,0,d.length,M.sr), i, lo=tw.pdb[0], fr, p;
       M.rx.push(d,M.n); M.n+=d.length;
+      for(i=0;i<d.length;i++){ M.ring[M.ringAt++]=d[i]; if(M.ringAt===M.ring.length){ M.ringAt=0; M.ringFull=true; } }
       fr=M.rx.frames();
       for(i=0;i<fr.length;i++){
         p=LK.parse(fr[i].bytes);
@@ -535,6 +538,17 @@ function paintBars(){
   var state=byId("radio-meter-state");
   if(state) state.textContent=M.live?tr("radio.meter.on"):(M.pending?tr("radio.meter.request"):(M.state||tr("radio.meter.off")));
   renderBar();
+}
+
+/* The meter's last 8 s as a mono WAV, through the share sheet (a click, so iOS grants it). For debugging on phones. */
+function saveRecording(){
+  var M=R.meter;
+  if(!M.ring || (!M.ringFull && !M.ringAt)){ toast(tr("radio.meter.recnone")); return; }
+  var n=M.ringFull ? M.ring.length : M.ringAt, out=new Float32Array(n), i, k=M.ringFull ? M.ringAt : 0;
+  for(i=0;i<n;i++){ out[i]=M.ring[k++]; if(k===M.ring.length) k=0; }
+  var d=new Date(), name="radio-"+d.getFullYear()+LP.pad2(d.getMonth()+1)+LP.pad2(d.getDate())+"-"+LP.pad2(d.getHours())+LP.pad2(d.getMinutes())+LP.pad2(d.getSeconds())+"-"+M.sr+".wav";
+  var blob=new Blob([window.LopdaWav.encode(out,M.sr)],{type:"audio/wav"});
+  LP.S.downloads.save({filename:name, data:blob}).then(function(){},function(e){ if(!(e && e.code==="declined")) toast(LP.saveErr(e)); });
 }
 
 /* ---------- the old M2 known-sequence test, now under the meter ---------- */
@@ -870,6 +884,7 @@ function bindEvents(){
   byId("radio-test-rate").onchange=function(){ R.test.rate=parseInt(this.value,10)||40; R.test.last=null; R.test.stats=""; R.test.hex=""; R.test.state=""; renderMeter(); };
   byId("radio-test-pattern").onchange=function(){ R.test.pattern=this.value; R.test.last=null; R.test.stats=""; R.test.hex=""; R.test.state=""; renderMeter(); };
   byId("radio-test-send").onclick=startSendTest;
+  byId("radio-rec-save").onclick=saveRecording;
   byId("radio-test-recv").onclick=startRecvTest;
   byId("radio-test-stop").onclick=function(){ if(R.test.tx) stopSendTest(); else stopRecvTest(true); };
 }
