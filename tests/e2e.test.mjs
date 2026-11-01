@@ -5993,6 +5993,12 @@ test("pet: a souvenir card says where it came from, an old document finds its pl
   ];
   const run = async (locale) => {
     const zh = locale === "zh-CN";
+    const docData = (d) => {
+      const data = { name: d.name, line: d.line, px: px(1), at: d.at, ai: !!d.ai, day: d.day };
+      if (d.ref) data.ref = d.ref;
+      if (d.where) data.where = d.where;
+      return data;
+    };
     const { p, errors } = await page(t, { locale, serviceWorkers: "block", viewport: { width: 375, height: 667 } });
     await p.clock.install({ time: new Date(2026, 9, 11, 9, 0) });
     await p.goto(base + "/runtime/?debug", { waitUntil: "networkidle" });
@@ -6004,12 +6010,7 @@ test("pet: a souvenir card says where it came from, an old document finds its pl
       return s;
     }, zh ? "芯仔" : "Chip");
     await idb.setDoc(p, "data/users/local/pet", plan);
-    for (const d of docs) {
-      const data = { name: d.name, line: d.line, px: px(1), at: d.at, ai: !!d.ai, day: d.day };
-      if (d.ref) data.ref = d.ref;
-      if (d.where) data.where = d.where;
-      await idb.setDoc(p, "data/users/local/pet/souvenirs/" + d.id, data);
-    }
+    for (const d of docs) await idb.setDoc(p, "data/users/local/pet/souvenirs/" + d.id, docData(d));
     await p.reload({ waitUntil: "networkidle" });
     await p.waitForFunction(() => document.getElementById("savestate").textContent !== "启动中…");
     await p.locator("#home .app", { hasText: zh ? "宠物" : "Pet" }).click();
@@ -6035,6 +6036,11 @@ test("pet: a souvenir card says where it came from, an old document finds its pl
       await p.locator(`#pet-panel .pet-tile[aria-label^="${name}"]`).click();
       await p.waitForSelector("#pet-panel .pet-souvfrom");
       assert.equal(await p.locator("#pet-panel .pet-souvfrom").textContent(), line, name);
+      if (name === (zh ? "贝壳" : "Shell")) {
+        const oldDoc = await idb.doc(p, "data/users/local/pet/souvenirs/origin-old");
+        assert.ok(!Object.prototype.hasOwnProperty.call(oldDoc, "ref"), "reading an old document does not add ref");
+        assert.deepEqual(oldDoc, docData(docs.find((d) => d.id === "origin-old")), "the old document is left unchanged");
+      }
       const fit = await p.evaluate(() => {
         const panel = document.getElementById("pet-panel");
         const card = document.querySelector("#pet-panel .pet-souv").getBoundingClientRect();
