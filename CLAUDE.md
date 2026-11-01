@@ -45,6 +45,7 @@ sdk/            MIT. pad-shim.js (PAD bridge), lo-game.js (game framework), LO-G
 registry/       index.json (generated) + apps/<id>/{manifest.json,index.html,src/ (optional sources)}
 tools/          check-app.mjs, build-index.mjs (also stamps each app's released/updated dates from git), bundle-app.mjs (+ lo-game.mjs alias), lo-game-lib.mjs, stamp-preview.mjs (Node 20+, no deps);
                 readme-shots.mjs (the README pictures: docs/images/ in English, --lang=zh into docs/images/zh/ for README.zh.md; needs Playwright) with readme-scene.mjs (the lake the fake camera sees);
+                souvenir-sheet.mjs (contact sheets of the pet's souvenir catalogue; needs Playwright);
                 gen-lunar.py (one-off generator of the lunar table, needs PyEphem); gen-ecdict.mjs (one-off, ECDICT csv ->
                 vendor/ecdict/) with stardict-write.mjs (StarDict + dictzip writer, also used by tests); lao-zhang-sim.mjs
                 (矿工老张's auto-player: solo haul, target headroom and whole-run difficulty, also used by the tests)
