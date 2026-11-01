@@ -479,6 +479,11 @@
       "pet.sk.lookup": "查",
       "pet.tag": "带回了", "pet.restart.done": "重新开始了。",
 
+      "pet.where.riverbank": "河滩", "pet.where.windowsill": "窗台", "pet.where.yard": "后院",
+      "pet.where.park": "公园", "pet.where.mailbox": "信箱旁", "pet.where.doorstep": "门口",
+      "pet.where.street": "路边", "pet.where.busstop": "车站", "pet.where.drawer": "抽屉里",
+      "pet.where.roof": "屋顶",
+
       "pet.souv.shell": "贝壳", "pet.souv.shell.line": "海浪磨了很久，还留着一点光。",
       "pet.souv.leaf": "红叶", "pet.souv.leaf.line": "从窗外飘进来的，叶脉还很清楚。",
       "pet.souv.post": "明信片", "pet.souv.post.line": "它去过的地方，都在这一小张纸上。",
@@ -1113,6 +1118,11 @@
       "pet.word.hint": "A looks it up, B goes back", "pet.word.back": "B goes back", "pet.word.demo": "light",
       "pet.sk.lookup": "Look",
       "pet.tag": "new", "pet.restart.done": "A new start.",
+
+      "pet.where.riverbank": "the riverbank", "pet.where.windowsill": "the windowsill", "pet.where.yard": "the backyard",
+      "pet.where.park": "the park", "pet.where.mailbox": "the mailbox", "pet.where.doorstep": "the doorstep",
+      "pet.where.street": "the roadside", "pet.where.busstop": "the bus stop", "pet.where.drawer": "a drawer",
+      "pet.where.roof": "the roof",
 
       "pet.souv.shell": "Shell", "pet.souv.shell.line": "Worn smooth by the waves.",
       "pet.souv.leaf": "Red leaf", "pet.souv.leaf.line": "A little red, veins still clear.",

@@ -1,9 +1,12 @@
 // runtime/petart.js: the chip species pack at 32 x 32, the 162 x 120 room and the souvenir strings.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { runScript, EMOJI } from "./helpers.mjs";
+import vm from "node:vm";
+import { runScript, read, EMOJI } from "./helpers.mjs";
 
-const A = runScript("runtime/petart.js").LopdaPetArt;
+const ctx = runScript("runtime/petsouv.js");
+vm.runInContext(read("runtime/petart.js"), ctx, { filename: "runtime/petart.js" });
+const A = ctx.LopdaPetArt;
 const P = A.PACKS.chip;
 const loadStrings = (lang) => runScript("runtime/strings.js", { navigator: { languages: [lang], language: lang } }).LopdaStrings;
 const ZH = loadStrings("zh-CN"), EN = loadStrings("en-US");
