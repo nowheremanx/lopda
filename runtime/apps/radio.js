@@ -89,8 +89,16 @@ function saveTxMode(){ persistLog(); applyTxMode(); }
 
 /* ---------- screens ---------- */
 var PAGES={menu:"radio-page-menu",guide:"radio-page-guide",link:"radio-page-link",write:"radio-page-write",draw:"radio-page-draw",meter:"radio-page-meter"};
+/* the link page's diagnostic line (microphone blocks, level, audio state) is refreshed once a second; nothing else */
+var diagTimer=0;
+function diagTick(){
+  if(!R.live || R.page!=="link" || LP.link.state!=="open"){ clearInterval(diagTimer); diagTimer=0; return; }
+  var rate=byId("radio-link-rate");
+  if(rate) rate.textContent=tr("radio.link.rate",{ms:LP.link.rate==null?"?":LP.link.rate})+" · "+LP.link.diag();
+}
 function setPage(p){
   R.page=p;
+  if(p==="link" && !diagTimer) diagTimer=setInterval(diagTick,1000);
   Object.keys(PAGES).forEach(function(k){ var el=byId(PAGES[k]); if(el) el.hidden=k!==p; });
   var view=byId("v-radio");
   if(view) view.classList.toggle("radio-draw-on", p==="draw");
@@ -258,7 +266,7 @@ function renderLink(){
   var role=byId("radio-link-role"), rate=byId("radio-link-rate");
   if(LP.link.state==="open"){
     role.textContent=tr(LP.link.initiator?"radio.link.role.initiator":"radio.link.role.responder");
-    rate.textContent=tr("radio.link.rate",{ms:LP.link.rate==null?"?":LP.link.rate});
+    rate.textContent=tr("radio.link.rate",{ms:LP.link.rate==null?"?":LP.link.rate})+" · "+LP.link.diag();
   }else{
     role.textContent=tr("radio.link.notopen");
     rate.textContent="";

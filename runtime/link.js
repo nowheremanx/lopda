@@ -87,8 +87,14 @@ function hideMark(){ var m=$("link-mark"); if(m){ m.hidden=true; m.classList.rem
 function txOn(){ var m=$("link-mark"); if(m) m.classList.add("tx"); var w=$("link-wave"); if(w) w.classList.add("tx"); }
 function txOff(){ var m=$("link-mark"); if(m) m.classList.remove("tx"); var w=$("link-wave"); if(w) w.classList.remove("tx"); }
 
+function diagText(){
+  var d=TRANSPORT.diag();
+  if(!d || d.fake) return "";
+  return tr("link.diag",{bps:d.bps, db:d.rms==null?"-":Math.round(d.rms), ctx:d.ctx, err:d.err?" · "+d.err:""});
+}
 function updateBar(){
   if(!OVERLAY) return;
+  var dg=$("link-diag"); if(dg) dg.textContent=diagText();
   var pct=Math.min(100,((Date.now()-PAIR_START)/60000)*100);
   $("link-bar").style.width=pct.toFixed(1)+"%";
 }
@@ -166,6 +172,8 @@ function fakeTransport(){
       T.tx=[]; T.peerFrom=0; T.peerTo=0; T.txUntil=0;
     },
     levels:function(){ return null; },
+    deadMs:function(){ return 0; },
+    diag:function(){ return {fake:true}; },
     txUntil:function(){ return T.txUntil; }
   };
 }
@@ -174,7 +182,8 @@ function fakeTransport(){
 
 function acousticTransport(){
   var T={stream:null, src:null, proc:null, silent:null, ctx:null, sr:48000, rx:null,
-    n:0, floor:null, pdb:null, txUntil:0, onHeard:null, onBusy:null, initGen:0, sentRecent:[], live:false, txMode:"record", reopen:0};
+    n:0, floor:null, pdb:null, txUntil:0, onHeard:null, onBusy:null, initGen:0, sentRecent:[], live:false, txMode:"record", reopen:0,
+    cb:0, cbAt:0, cbRate:0, cbCount:0, cbWin:0, wiredAt:0, rms:null, err:"", rewires:0, busySince:0, quietTx:0};
 
   /* How late our own sound reaches the receiver, in seconds: the speaker's output latency, the
      microphone's input latency and the ScriptProcessor's block (T.n counts samples already handed
@@ -218,10 +227,14 @@ function acousticTransport(){
     T.src=src; T.proc=proc; T.silent=silent; T.ctx=ctx; T.sr=ctx.sampleRate;
     /* the receiver starts a fresh search on the new timeline; the sample counter goes on */
     T.rx=RX.create({sampleRate:ctx.sampleRate, rates:[10,20,40]});
+    T.wiredAt=Date.now(); T.cbAt=0;
 
     proc.onaudioprocess=function(e){
       if(T.proc!==proc) return;
-      var d=e.inputBuffer.getChannelData(0), n=T.n, i, j, tw, max, frames;
+      var d=e.inputBuffer.getChannelData(0), n=T.n, i, j, tw, max, frames, t=Date.now();
+      /* blocks a second, for the diagnostic line: an iPhone whose microphone has stalled shows 0 here */
+      T.cb++; T.cbAt=t; T.cbCount++;
+      if(t-T.cbWin>=1000){ T.cbRate=T.cbCount*1000/Math.max(1,t-T.cbWin); T.cbCount=0; T.cbWin=t; }
       T.rx.push(d,n);
       T.n=n+d.length;
       frames=T.rx.frames();
@@ -235,10 +248,15 @@ function acousticTransport(){
       for(j=1;j<4;j++) if(tw.pdb[j]>max) max=tw.pdb[j];
       if(T.floor===null) T.floor=max;
       else T.floor=max<T.floor ? max : T.floor+0.5;
-      T.pdb=tw.pdb;
+      T.pdb=tw.pdb; T.rms=tw.rmsDb;
       /* our own burst (and its tail) is not someone else talking */
-      if(Date.now()<T.txUntil) return;
-      if(max>T.floor+10 && tw.rmsDb>AC.MIN_RMS && T.onBusy) T.onBusy(Date.now());
+      if(t<T.txUntil) return;
+      /* Carrier sense, capped: a burst is at most a few seconds, so energy that lasts longer is the room (a fan,
+         music), and waiting for it to stop would starve every send. After 4 s of it we talk anyway. */
+      if(max>T.floor+10 && tw.rmsDb>AC.MIN_RMS){
+        if(!T.busySince) T.busySince=t;
+        if(t-T.busySince<4000 && T.onBusy) T.onBusy(t);
+      }else T.busySince=0;
     };
   }
 
@@ -257,7 +275,8 @@ function acousticTransport(){
       /* the session type goes on before the prompt: iOS switches the route while the mic opens */
       LP.setSession("play-and-record");
       var ctx=LP.audio();
-      if(!ctx){ LP.setSession("ambient"); return Promise.resolve(false); }
+      if(!ctx){ T.err="audio"; LP.setSession("ambient"); return Promise.resolve(false); }
+      T.err="";
       LP.wake();
       var p;
       try{
@@ -274,6 +293,7 @@ function acousticTransport(){
         ctx=LP.SND.ctx||ctx;
         try{ wire(ctx); }
         catch(e){
+          T.err="wire "+(e && e.name || "");
           T.stream=null;
           try{ stream.getTracks().forEach(function(t){ try{ t.stop(); }catch(x){} }); }catch(x){}
           LP.setSession("ambient");
@@ -283,7 +303,9 @@ function acousticTransport(){
         $("mic-mark").hidden=false;
         LP.micRoute(true);
         return true;
-      },function(){
+      },function(e){
+        /* NotAllowedError: the permission; NotReadableError: iOS still holds the last capture */
+        T.err=(e && e.name) || "mic";
         LP.setSession("ambient");
         return false;
       });
@@ -291,14 +313,34 @@ function acousticTransport(){
     tick:function(){
       if(!T.stream) return;
       /* core.js rebuild() may replace the context behind our back (iOS kills them) */
-      var ctx=LP.SND.ctx;
+      var ctx=LP.SND.ctx, now=Date.now(), last;
       if(ctx && ctx!==T.ctx){
         try{ wire(ctx); }catch(e){}
+        return;
       }
+      /* A stalled microphone: no block for 1.5 s. Ask the context to run; after 3 s wire the stream again
+         (iOS sometimes stops a ScriptProcessor after a route change). The diagnostic line shows it. */
+      last=T.cbAt||T.wiredAt;
+      if(T.ctx && now-last>1500){
+        if(T.ctx.state!=="running") LP.wake();
+        if(now-last>3000 && T.rewires<5){
+          T.rewires++;
+          try{ wire(LP.SND.ctx||T.ctx); }catch(e){}
+        }
+      }
+    },
+    /* silent for this long: the microphone is not reaching us at all */
+    deadMs:function(){ return T.stream && T.ctx ? Date.now()-(T.cbAt||T.wiredAt) : 0; },
+    diag:function(){
+      var c=T.ctx;
+      return {mic:!!T.stream, ctx:c?c.state:"none", sr:c?c.sampleRate:0, bps:T.cbAt && Date.now()-T.cbAt<1500 ? Math.round(T.cbRate) : 0,
+        rms:T.rms, err:T.err, rewires:T.rewires, quietTx:T.quietTx, txMode:T.txMode};
     },
     send:function(bytes, rate, done){
       var ctx=T.ctx;
       if(!ctx || !T.stream){ setTimeout(function(){ if(done) done(); },0); return; }
+      /* a context that is not running plays nothing: ask it, and count the burst for the diagnostic line */
+      if(ctx.state!=="running"){ LP.wake(); T.quietTx++; }
       if(T.txMode==="playback"){ sendPlayback(bytes, rate, done); return; }
       var samples=AC.synth(bytes,{sampleRate:ctx.sampleRate, symbolMs:rate, amp:0.9});
       var buf=ctx.createBuffer(1,samples.length,ctx.sampleRate);
@@ -410,8 +452,10 @@ function finishClose(reason){
   if(wasPairing){
     resolveOpen("cancelled");
     if(reason==="timeout") toast(tr("link.timeout"));
+    else if(reason==="nomic") toast(tr("link.nomic"));
     else if(reason==="other-app") toast(tr("link.otherapp"));
   }
+  if(!wasPairing && reason==="nomic") toast(tr("link.nomic"));
   INITIATOR=false;
   RATE=null;
   dlog("close "+mapped);
@@ -486,6 +530,8 @@ function pump(){
 function drive(){
   if(!SESSION) return;
   TRANSPORT.tick();
+  /* 8 s without one block from the microphone: it is not coming back. Say so instead of beeping for a minute. */
+  if(TRANSPORT.deadMs()>8000){ finishClose("nomic"); return; }
   SESSION.tick(Date.now());
   pump();
   updateBar();
@@ -501,6 +547,8 @@ function startDriver(){
 
 /* Nothing opened, so nothing closes: no close event reaches a listener that never got a link. */
 function failOpen(v){
+  var d=TRANSPORT.diag();
+  if(d && d.err) toast(tr("link.micfail",{err:d.err}));
   if(STATE==="closed"){ resolveOpen(v); return; }
   var seq=++GEN;
   STATE="closed";
@@ -587,6 +635,8 @@ function on(fn){
 function busy(){ return STATE==="pairing" || STATE==="open"; }
 
 function levels(){ return TRANSPORT.levels(); }
+/* one short line on the microphone and the audio context, for testing on phones (the pairing screen and Radio) */
+function diag(){ return diagText(); }
 /* "record" (default: the microphone stays open while sending) or "playback" (closed while sending); Radio's meter page */
 function setTxMode(m){ if(TRANSPORT.setTxMode) TRANSPORT.setTxMode(m); }
 function txMode(){ return TRANSPORT.txMode ? TRANSPORT.txMode() : "record"; }
@@ -609,7 +659,7 @@ document.addEventListener("visibilitychange",function(){
   if(document.hidden && STATE!=="closed") close("home");
 });
 
-var api={open:open, send:send, close:close, on:on, busy:busy, levels:levels, setTxMode:setTxMode, txMode:txMode};
+var api={open:open, send:send, close:close, on:on, busy:busy, levels:levels, setTxMode:setTxMode, txMode:txMode, diag:diag};
 Object.defineProperty(api,"state",{get:function(){ return STATE; }});
 Object.defineProperty(api,"initiator",{get:function(){ return INITIATOR; }});
 Object.defineProperty(api,"rate",{get:function(){ return RATE; }});

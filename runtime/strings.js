@@ -182,7 +182,7 @@
       "link.hint": "靠近 10–30 厘米，另一台也按连线",
       "link.listen": "正在听…", "link.hello": "握手 {ms} ms…", "link.reply": "应答 {ms} ms…",
       "link.attempt": "第 {n} 次",
-      "link.timeout": "没有连上：超时", "link.otherapp": "对方在用别的程序", "link.on": "连线中",
+      "link.timeout": "没有连上：超时", "link.nomic": "话筒没有声音进来。关掉电波台再开，或者重开 Lo-PDA。", "link.micfail": "话筒打不开（{err}）", "link.diag": "话筒 {bps} 块/秒 · {db} dB · 音频 {ctx}{err}", "link.otherapp": "对方在用别的程序", "link.on": "连线中",
       "set.sense.revoke": "撤销", "set.sense.note": "撤销以后，这个程序下次要用时会再问一次。",
 
       "file.export": "导出「{name}」？", "file.import": "从文件导入？", "file.ok": "好", "file.pick": "选文件",
@@ -836,7 +836,7 @@
       "link.hint": "Hold the phones 10-30 cm apart; press Connect on the other one too",
       "link.listen": "Listening\u2026", "link.hello": "Handshake {ms} ms\u2026", "link.reply": "Answering {ms} ms\u2026",
       "link.attempt": "Try {n}",
-      "link.timeout": "No link: timed out", "link.otherapp": "The other phone is in another program", "link.on": "Link on",
+      "link.timeout": "No link: timed out", "link.nomic": "No sound is coming from the microphone. Close Radio and open it again, or restart Lo-PDA.", "link.micfail": "The microphone did not open ({err})", "link.diag": "Mic {bps} blocks/s · {db} dB · audio {ctx}{err}", "link.otherapp": "The other phone is in another program", "link.on": "Link on",
       "set.sense.revoke": "Revoke", "set.sense.note": "After a revoke, the program asks again the next time.",
 
       "file.export": "Export \u201c{name}\u201d?", "file.import": "Import a file?", "file.ok": "OK", "file.pick": "Choose",
