@@ -2368,6 +2368,8 @@ function buildBox(panel){
       body.appendChild(el("p","pet-souvdate",LP.fmt(one.at)));
       var from=souvFrom(one);
       if(from) body.appendChild(el("p","pet-souvfrom",from));
+      /* the shelf is where a state plays out (a seed only grows there), so say so once on the card */
+      if(one.state) body.appendChild(el("p","pet-souvfrom",tr(stateHasGrow(one.state)?"pet.souv.grows":"pet.souv.changes")));
       if(P.save && P.save.shelf===one.id) body.appendChild(el("p","pet-souvtag",tr("pet.shelf.on")));
       card.appendChild(body);
       panel.appendChild(card);
@@ -2397,6 +2399,8 @@ function buildBox(panel){
     var tileView=souvenirView(s,P.save && P.save.shelf===s.id);
     paintSouvenir(cv,tileView ? tileView.px : s.px);
     b.appendChild(cv);
+    /* a souvenir with an item state gets a 2 x 2 mark in its corner, so the box shows which ones change */
+    if(s.state) b.appendChild(el("span","pet-tile-mark"));
     b.onclick=function(){ P.boxSel=i; openBoxItem(); };
     grid.appendChild(b);
   });

@@ -675,6 +675,7 @@ textarea::placeholder{color:var(--ink-2)}
 .pet-tile{width:32px;height:32px;padding:0;background:transparent;border:0;position:relative;display:flex;align-items:center;justify-content:center;cursor:pointer}
 .pet-tile canvas{width:32px;height:32px;image-rendering:pixelated;image-rendering:crisp-edges;border:2px solid var(--ink);box-sizing:border-box;display:block}
 .pet-tile.on{box-shadow:0 0 0 2px var(--ink)}
+.pet-tile-mark{position:absolute;right:4px;bottom:4px;width:4px;height:4px;background:var(--ink);pointer-events:none}
 .pet-ask{margin-top:4px}
 .pet-askq{margin:0 0 2px;font-size:14px}
 .pet-askrow{display:flex;gap:6px}
