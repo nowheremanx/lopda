@@ -4,7 +4,7 @@
  * course it sounds the same every time"). It gives the model the moves a songwriter develops material with, so a
  * small model does not have to spell every bar, and it reads the result the way a teacher would, naming what to fix:
  * a scale run, a bar that only arpeggiates the chord, a bar of even notes, a phrase with no breath, a line that never
- * moves, a section that copies another. Wrong notes (off the key) are hard errors; taste is advice, asked at most twice.
+ * moves, a section that copies another, a line that keeps circling a note by a semitone, too many ornaments. Wrong notes (off the key) are hard errors; taste is advice, asked at most twice.
  *
  *   LopdaStudioCritic.expand(bars)                     -> {bars:[[[step,deg,vel,acc?,orn?],...],...]} | {error}
  *     a bar is a list of notes, or {"repeat":k, "end":[notes]?}, {"sequence":k, "by":n}, {"invert":k}, {"rest":true}
@@ -142,6 +142,29 @@ function review(song,bars,specs,others){
     else { run=Math.abs(d)===1 ? 2 : 1; dir=Math.abs(d)===1 ? d : 0; }
     if(run>=6){ advice.push("the line climbs or falls by step for six notes or more; turn it around sooner or leap once"); break; }
   }
+  /* a note circled by a semitone (A Bb A, E F E) is the maqam's turn: in a pop tune it reads as Middle Eastern
+     (12.25, owner 2026-11-01: "AI songs often sound Arabic"); once a section is colour, more is the whole sound */
+  var turns=0;
+  for(i=2;i<all.length;i++){
+    var m0=midiOf(song,all[i-2]), m1=midiOf(song,all[i-1]), m2=midiOf(song,all[i]);
+    if(m0===m2 && Math.abs(m1-m0)===1) turns++;
+  }
+  if(turns>1) advice.push("the line circles a note by a semitone "+turns+" times, which sounds Middle Eastern; keep it to once, "+
+    "or step a whole tone away instead");
+  /* ornaments are seasoning: at most one per two bars, and only on a held note (a beat or longer) */
+  var orns=0, shortOrn=0;
+  for(i=0;i<bars.length;i++){
+    b=bars[i];
+    for(j=0;j<b.length;j++){
+      if(b[j][2]>0 && b[j].length>4 && (b[j][4]==="vib" || b[j][4]==="slide")){
+        orns++;
+        if((j+1<b.length ? b[j+1][0] : 16)-b[j][0]<4) shortOrn++;
+      }
+    }
+  }
+  if(orns>Math.max(1,Math.floor(bars.length/2)))
+    advice.push(orns+" ornaments in "+bars.length+" bars is too many; keep at most one per two bars, on a held note");
+  else if(shortOrn) advice.push("an ornament sits on a short note; put slide or vib only on a note held a beat or longer");
   var halfEnds=true;
   for(i=1;i<bars.length;i+=2){
     var lb=bars[i], ln=lb.length ? 16-lb[lb.length-1][0] : 16;
