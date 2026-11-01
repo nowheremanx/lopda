@@ -1,0 +1,796 @@
+# Lo-PDA App Specification v1
+
+Status: draft · Spec id: `lopda/1` (apps written for `lopda/0` keep working) · License: MIT (see `sdk/LICENSE`)
+
+What v1 adds over v0: the chin buttons (`"buttons": true`, `PAD.on`, `PAD.isDown`) and
+system sounds (`PAD.sfx`). Added later within v1, all optional: the player's language
+(`PAD.lang`) and localized store text (manifest `i18n`), see section 6.1; files
+(`"permissions": ["files"]`, `PAD.exportFile`, `PAD.importFile`), see section 6.2; music, sound effects of the
+app's own and ambience (`PAD.music`, `PAD.sfx({...})`, `PAD.ambience`), see section 6.3; tilt, shake, heading and the
+microphone's loudness and pitch (`"permissions": ["motion"]` / `["mic"]`, `PAD.motion`, `PAD.mic`), see section 6.4;
+writing into the player's notes (`"permissions": ["notes"]`, `PAD.notes.append`) and speech (`PAD.say`), see section 6.5;
+one photo taken by the player (`"permissions": ["camera"]`, `PAD.camera.snap`), see section 6.6.
+
+A Lo-PDA app is one self-contained HTML file plus a small manifest. The runtime
+installs it from the registry, pins it to an exact version, and runs it inside
+a sandboxed iframe on the handheld's four-tone screen.
+
+## 1. Files
+
+```
+registry/apps/<id>/
+  manifest.json   required
+  index.html      required, the whole app in one file
+```
+
+No other files are loaded. Images, sounds and fonts must be embedded in
+`index.html` (data: URIs, or drawn in code).
+
+## 2. manifest.json
+
+```json
+{
+  "spec": "lopda/1",
+  "id": "whack-a-mole",
+  "name": "打地鼠",
+  "glyph": "鼠",
+  "category": "game",
+  "icon": ["................", "...16 rows of 16 characters..."],
+  "version": "1.0.0",
+  "description": "点黑格子里的地鼠，20 秒。",
+  "i18n": { "en": { "name": "Mole Bop", "description": "Bop the moles in the dark holes. 20 seconds." } },
+  "author": "Haowei Wu",
+  "license": "MIT",
+  "permissions": [],
+  "buttons": true
+}
+```
+
+| Field | Rule |
+|---|---|
+| `spec` | `"lopda/1"`. `"lopda/0"` is still accepted for apps that use none of the v1 features. |
+| `id` | 3 to 32 characters: `a-z`, `0-9`, `-`. Same as the folder name. Never changes once published. |
+| `name` | Shown under the icon. 1 to 8 characters. No emoji. |
+| `glyph` | Exactly one character (a CJK character, letter or digit), used when there is no `icon` and for screen readers. No emoji. |
+| `category` | Optional. One of `game`, `productivity`, `education`, `create`, `story`, `life`. The store files the app under it and offers that category as a filter; without it the app shows under Other. |
+| `icon` | Optional. A 16×16 pixel icon: an array of 16 strings, each 16 characters long. `0` ink, `1` dark, `2` mid, `3` paper, `.` transparent (the tile shows through). |
+| `version` | Semantic version `MAJOR.MINOR.PATCH`. Bump it on every change. |
+| `description` | One sentence, 80 characters at most. |
+| `i18n` | Optional. Store text in other languages: `{"en": {"name", "description"}, "zh": {...}}`. Only `zh` and `en`, only those two fields, same rules as above. The store and home screen show the entry for the player's language and fall back to `name` / `description`. |
+| `author` | Name or handle. |
+| `license` | One of: `MIT`, `0BSD`, `BSD-2-Clause`, `BSD-3-Clause`, `ISC`, `Apache-2.0`, `CC0-1.0`, `Unlicense`. |
+| `permissions` | Array. Usually empty. Seven capabilities (`lopda/1`): `"files"`, the app may export and import files, each time confirmed by the player (section 6.2); `"motion"`, tilt, shake and heading; `"mic"`, the microphone's loudness and pitch (both section 6.4); `"notes"`, the app may add text to a note of its own in the player's notes, each time confirmed by the player (section 6.5); `"camera"`, the app may ask for a photo, which the player takes in the runtime's viewfinder and the app gets as a small four-tone picture (section 6.6); `"wordbook"`, the app may read and change the player's word book (section 6.7); `"link"`, the app may open a message link to the same app on one other handheld, over sound (section 6.8, runtime 0.57.0+). The store shows them as icons on the app's entry and asks the player before installing (runtime 0.44.0+); an app allowed then does not ask on first use, while files and notes still confirm every call. Anything else fails the checker. |
+| `buttons` | Optional, `lopda/1` only. `true` shows the chin buttons while the app runs (section 4). Leave it out for touch-only apps. |
+
+`registry/index.json` adds `released` (`YYYY-MM-DD`) to every entry: the commit that first added the app's
+`manifest.json`, stamped by `tools/build-index.mjs` from git. When the current version differs from the version
+at that first appearance, it also adds `updated`, the last commit that changed the version. The store wears
+新 / NEW for seven days after `released` when there is no `updated`, and 更新 / UPDATED for seven days after
+`updated`. An app first published as 2.0.0 is NEW, not UPDATED; a 1.0.0 → 2.0.0 change is UPDATED, even on the
+same day (runtime 0.44.0+, dates corrected in 0.44.1). App authors do not write these fields; the manifest
+checker rejects them.
+
+## 3. The screen
+
+- The app fills an iframe that is the handheld's screen: portrait, usually
+  300 to 420 CSS pixels wide, height varies. Use `html,body{margin:0;height:100%;overflow:hidden}`.
+- Four colors only. These are the whole palette:
+
+| Token | Hex | Use |
+|---|---|---|
+| ink | `#1f2a14` | darkest, text |
+| dark | `#4a5a32` | |
+| mid | `#7d8a58` | |
+| paper | `#a3ad7e` | lightest, background |
+
+  `PAD.TONES` exposes the same values. Any other color fails review.
+- Font: `monospace`. External fonts cannot load.
+- No emoji. The runtime strips them; the screen has no color glyphs.
+- Pixel art is welcome. Use `image-rendering: pixelated` on scaled canvases.
+- Layout, touch targets, which tones may carry text, and the cursor: `sdk/UI.md`. Review reads apps against it;
+  the checker cannot.
+
+## 4. Input
+
+- Touch first: use pointer events (`pointerdown`, `pointermove`, `pointerup`).
+- Chin buttons (`lopda/1`): a D-pad, A, B, START and SELECT appear under the screen
+  when the manifest says `"buttons": true`. Read them with `PAD.on` (section 6).
+  The same events come from a keyboard: arrow keys, X = A, Z = B, Enter = START,
+  Shift = SELECT. Do not also handle those keys yourself, or they will fire twice.
+- An app that sets `buttons` should still be playable by touch where it makes sense,
+  and must say on its first screen which button does what.
+- Button convention (recommended, checked in review rather than by the checker): in menus,
+  lists, dialogs and pause screens, A confirms and B goes back or cancels, as in the
+  built-in programs. During play a game maps A and B however it likes (B may be an attack
+  or a jump). START usually pauses or opens a menu; SELECT is free. Do not rely on B to
+  leave the app: the handheld's HOME key does that.
+- Tilt and the microphone (section 6.4) are another way to play, never the only one. An app that reads them
+  **must also be playable with keys** (or touch), because the phone may have no sensor, the player may say no,
+  and the desktop has neither; its first screen says how to switch. A tilt app offers a way to recentre
+  (`PAD.motion.zero()`) and never asks the player to lay the phone flat, unless the app is meant to be used lying flat
+  (a compass, a level): it may say so and guide the player with `flat` (`sdk/UI.md`).
+- `alert`, `confirm` and `prompt` are unavailable. Build confirmations into the UI.
+- Prefer `PAD.sfx` for sound effects, `PAD.music` for music and `PAD.ambience` for background sound (section 6.3): the runtime plays
+  them, so they follow the user's volume (volume 0 is off) and the phone's silent switch, stop
+  when the app closes and pause when the phone locks. Your own Web Audio is allowed but ignores
+  all of that, so keep it quiet and start it only after a user gesture.
+
+## 5. The sandbox
+
+The runtime loads the app with `<iframe sandbox="allow-scripts">` and this
+Content Security Policy:
+
+```
+default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline';
+img-src data: blob:; media-src data: blob:; font-src data:; connect-src 'none'
+```
+
+So an app cannot:
+
+- make network requests of any kind (fetch, XHR, WebSocket, beacons),
+- load external scripts, styles, images or fonts,
+- use `eval` or `new Function`,
+- reach the runtime's storage, other apps' data, cookies or the parent page,
+- open popups or navigate the top window.
+
+## 6. The PAD API
+
+The runtime injects a global `PAD` object before the app's own scripts run.
+
+```js
+await PAD.load(key)          // -> the saved value, or null; rejects if the save cannot be read
+PAD.save(key, value)         // value: anything JSON-serializable
+PAD.remove(key)
+await PAD.saveInfo()         // 0.46.0+; -> {schema, version, updated, bytes}, or null when nothing is saved
+PAD.setSchema(n)             // 0.46.0+; record the data schema this build writes (an integer >= 0)
+PAD.TONES                    // ["#1f2a14", "#4a5a32", "#7d8a58", "#a3ad7e"]
+PAD.spec                     // "lopda/1", the newest spec this runtime implements
+PAD.exit()                   // ask the runtime to close the app
+PAD.lang                     // "zh" or "en"; undefined on older runtimes (section 6.1)
+
+// lopda/1
+PAD.on("press", fn)          // fn(button) when a button goes down
+PAD.on("release", fn)        // fn(button) when it comes back up
+PAD.off(type, fn)
+PAD.isDown(button)           // -> true while held
+PAD.BUTTONS                  // ["up","down","left","right","a","b","start","select"]
+PAD.sfx(name)                // play a system sound
+PAD.SOUNDS                   // ["tap","tick","move","ok","err","hit","miss","coin","win","lose"]
+
+// lopda/1, runtime 0.11.0 and later (section 6.3); PAD.music is undefined on older runtimes
+PAD.sfx({wave, from, to, ms, ...})   // a sound effect of the app's own
+PAD.music.play(song, {loop})         // play a song (MML), replacing the one playing; loops unless loop is false
+PAD.music.stop()                     // fade out over about 0.3 s
+
+// lopda/1, runtime 0.13.0 and later (section 6.3); PAD.ambience is undefined on older runtimes
+PAD.ambience(name, level)            // a background: rain waves waterfall wind fire stream, level 0-1
+PAD.ambience(null)                   // fade it out over about 1 s
+
+// lopda/1 with "permissions": ["files"] (section 6.2); undefined on runtimes before 0.5.0
+await PAD.exportFile({name, type, data})   // -> "saved" | "cancelled"
+await PAD.importFile({accept})             // -> {name, type, data} | null
+
+// lopda/1 with "permissions": ["motion"] / ["mic"] (section 6.4); undefined on runtimes before 0.24.0
+await PAD.motion.start()     // -> "on" | "denied" | "none"
+PAD.motion.stop()
+PAD.motion.zero()            // the way the phone is held now is y = 0
+PAD.on("tilt", fn)           // fn({x, y, heading, flat}), at most 30 a second; flat is runtime 0.35.0+ (undefined before)
+PAD.on("shake", fn)          // fn()
+await PAD.mic.start()        // -> "on" | "denied" | "none"
+PAD.mic.stop()
+PAD.on("sound", fn)          // fn({level, pitch}), at most 20 a second
+
+// lopda/1 (section 6.5); undefined on runtimes before 0.26.0
+await PAD.notes.append(title, text)   // -> "saved" | "denied"   (needs "permissions": ["notes"])
+await PAD.say(text, {lang})           // -> "done" | "stopped" | "unavailable"   (no permission)
+
+// lopda/1 with "permissions": ["camera"] (section 6.6); undefined on runtimes before 0.28.0
+await PAD.camera.snap({size})         // size "small" (128x112) | "large" (256x224) -> {w, h, px} | null
+
+// lopda/1 (section 6.7); undefined on runtimes before 0.36.0
+await PAD.dict.words(q)               // q: {len, pattern, letters, level, max, offset} -> {words, more} | null
+await PAD.dict.lookup(word)           // -> {word, form?, zh, en} | null
+PAD.dict.version                      // "ecdict-1"
+
+// lopda/1 with "permissions": ["wordbook"] (section 6.7); undefined on runtimes before 0.36.0
+await PAD.dict.inBook(words)          // 1-20 words -> boolean[] | null
+await PAD.dict.addWord(word)          // -> "saved" | "denied" | "full" | null
+await PAD.dict.removeWord(word)       // -> "saved" | "denied" | "full" | null
+
+// lopda/1 with "permissions": ["link"] (section 6.8); undefined on runtimes before 0.57.0
+await PAD.link.open({proto})          // -> "open" | "cancelled" | "denied" | "none" | "busy"
+await PAD.link.send(data)             // string or Uint8Array, <= 200 bytes -> "sent" | "lost" | "closed" | "busy" | "big"
+PAD.link.close()
+PAD.link.state                        // "closed" | "open" (pairing counts as "closed")
+PAD.link.initiator                    // true on the side that started it (meaningful while open)
+PAD.on("link", fn)                    // fn({type:"message", data}) | fn({type:"close", reason})
+```
+
+Sounds, roughly: `tap` key click, `tick` short tick (timers), `move` cursor step,
+`ok` success, `err` error, `hit` a thump, `miss` a whiff, `coin` bonus, `win` fanfare,
+`lose` falling tune. Unknown names are ignored. The runtime plays at most 20 sounds a
+second per app, named and custom together.
+
+- Storage is per app, private, and survives app updates **and removing the app**. Installing the
+  same id again carries on from the old save; Settings → App saves is where the player clears it.
+  This is a promise to the player: your save format must keep reading what earlier versions wrote
+  (section 8).
+- Budget: 256 KB of JSON per app. Writes past the budget are dropped.
+- Saves are batched by the runtime; do not save on every frame.
+- `PAD.load` can reject. The code is `"corrupt"` (the bytes are not a save), `"readfail"` (storage
+  could not be read) or `"newer"` (a document format this runtime does not know). Catch it, tell the
+  player what happened, and do not silently reset or overwrite: the runtime shows its own notice and
+  the old bytes stay until the player clears them in Settings → App saves. The app is still the
+  owner of its data and of the way back.
+- `PAD.saveInfo` is the metadata of the save on disk (`schema`, the app version that wrote it,
+  `updated` in milliseconds since the epoch, and `bytes`), not the values themselves. `PAD.setSchema(n)` records the schema this build
+  writes; call it after a migration and it rides with the next save.
+- Uncaught errors and rejected promises are reported to the runtime, which shows
+  them to the user.
+
+### 6.1 Language
+
+Lo-PDA runs in Simplified Chinese or English; the player picks one in Settings
+(the default follows the phone). `PAD.lang` tells the app which: `"zh"` or `"en"`.
+
+- It is optional and additive within `lopda/1`. Runtimes before 0.4.0 do not set it,
+  so **always fall back to your own default when `PAD.lang` is undefined**.
+- It does not change while the app runs: when the player switches language, the
+  runtime starts the app again.
+- Apps are **not required** to be bilingual. Writing both is recommended, so the app
+  works for every player. Keep both short; the English need not be a literal translation.
+- A small table is enough:
+
+```js
+var TXT = {
+  zh: { start: "开始", score: "分 " },
+  en: { start: "START", score: "PTS " }
+}[PAD.lang === "en" ? "en" : "zh"];   // "zh" is this app's own default
+```
+
+Add `i18n` to the manifest too (section 2), so the store shows your app's name
+and description in the player's language. Games on lo-game.js can use `game.t`
+(section 10).
+
+### 6.2 Files
+
+An app that declares `"permissions": ["files"]` can hand a file to the player and take one
+from them. Paint (`registry/apps/paint`) is the worked example.
+
+```js
+if (PAD.exportFile) {   // runtimes before 0.5.0 have neither method
+  var r = await PAD.exportFile({ name: "drawing.png", type: "image/png", data: canvas.toDataURL("image/png") });
+  // r: "saved", or "cancelled" when the player said no
+  var f = await PAD.importFile({ accept: ["image/*"] });
+  // f: {name, type, data}, or null when the player cancelled
+}
+```
+
+- **The runtime asks every time.** Each call shows the handheld's own dialog over the app
+  (`导出「drawing.png」？ 好 / 取消`, `从文件导入？ 选文件 / 取消`). Only the player's tap on that
+  dialog opens the share sheet (phones), a download (desktop) or the file picker. The app cannot
+  skip it and should not ask twice in a row; there is no prompt at install.
+- `data`: a `data:` URL for binary files (images), or a plain string for text. On import, files
+  whose type is `text/*` or `application/json` come back as a string, everything else as a `data:` URL.
+- `accept`: MIME types (`"image/png"`, `"image/*"`) or extensions (`".txt"`). The picker offers
+  only those, and the runtime refuses a picked file of another type (the call resolves `null`).
+- **One file is at most 2 MB.** `exportFile` rejects larger data. On import, a larger picture
+  (`image/png`, `image/jpeg`, …: phone photos often are) is scaled down by the runtime until it fits;
+  any other file over 2 MB is refused and the call resolves `null`.
+- Without the permission both methods reject with an error, and the checker fails an app that calls
+  them without declaring it.
+- Pictures from the player are full colour: reduce them to the four tones yourself before showing them.
+
+### 6.3 Music, sound effects and ambience
+
+The runtime has a small sound chip: four music channels (two pulse waves, a triangle, a noise
+channel), two sound-effect voices and one ambience. The app writes the notes; the runtime plays them, so the
+volume, the phone's silent switch, locking the phone and leaving the app are all
+handled for it. Design notes: `docs/design/pad-audio.md`.
+
+```js
+var song = { bpm: 96,
+  p1:    "@1 v11 o4 l8 a4 >c d c4< a4 | g a g f d4. r",   // pulse 1: the tune
+  p2:    "@0 v7  o3 l8 [r f a >c< r a >c< a]2",            // pulse 2
+  tri:   "v12 o2 l4 f >c f c< d a >d< a",                  // triangle: the bass
+  noise: "l8 [v5 x r v3 x x v6 X4 v3 x r]2" };             // noise: the drums
+if (PAD.music) {                      // undefined before runtime 0.11.0: the app stays silent there
+  PAD.music.play(song);               // loops; PAD.music.play(song, {loop: false}) plays once
+  PAD.sfx({ wave: "noise", from: 900, to: 120, ms: 180, attack: 5, decay: 175, vol: 0.8 });  // a thump
+}
+```
+
+**Songs.** An object with `bpm` (30-300, default 120) and up to four channels, `p1`, `p2`, `tri`
+and `noise`, each a string of MML. At most 8192 characters of MML in all. Only one song plays at a time.
+
+| MML | meaning |
+|---|---|
+| `c d e f g a b` | a note; `+` after it is sharp, `-` flat (`f+`, `b-`) |
+| `r` | a rest |
+| `c8`, `c4.`, `c2..` | a length after a note or rest: 1 whole, 2 half, 4 quarter, … 64; a dot adds half, a second dot a quarter |
+| `l8` | the length for notes that give none (default `l4`; `l8.` works too) |
+| `o4`, `<`, `>` | the octave, 0-7 (`o4 a` is 440 Hz, `o4 c` middle C; default `o4`); `<` one down, `>` one up |
+| `&` | tie: `c4&c8` is one note; before a different pitch it just joins them without a gap |
+| `v0`-`v15` | volume (default `v10`) |
+| `@0`-`@3` | pulse width on `p1` and `p2`: 12.5, 25, 50 (default), 75 %; ignored elsewhere |
+| `[ ... ]3` | repeat 3 times (1-99; `[ ... ]` alone is twice); repeats nest |
+| `x`, `X` | noise channel only: a short tick and a long hit, with lengths like notes |
+| spaces, `\|` | ignored: use them to lay out bars |
+
+Settings carry on until changed, through repeats too. The song loops at the end of its longest
+channel. A song that does not parse is not played: the runtime shows the mistake in its error box,
+with the channel and the column (`p1:12: unknown command 'q'`), and the dev harness logs it.
+
+**Sound effects.** `PAD.sfx` also takes an object. Every field is optional; anything out of range
+is pulled into range, never refused.
+
+| field | meaning |
+|---|---|
+| `wave` | `"square"` (default), `"triangle"` or `"noise"` |
+| `duty` | pulse width for `square`, 0-3 as `@` above (default 2) |
+| `from`, `to` | start and end pitch in Hz, 20-12000 (default 440; `to` defaults to `from`); the pitch slides between them. On `noise` they set how fast the noise runs: low numbers rumble, high ones hiss |
+| `ms` | length, 10-1500 (default 150) |
+| `attack`, `decay` | milliseconds to rise at the start and to fade at the end (default 2, and the rest of the length) |
+| `vol` | 0-1 (default 0.7) |
+| `vibrato` | `{ depth, rate }`: the pitch wobbles `depth` semitones either way (0-2; default 0, none), `rate` times a second (1-20, default 6). Runtime 0.13.0 and later; older runtimes ignore it |
+
+Two effects sound at once; a third cuts off the oldest. Music plays at about half the level of
+an effect, so effects and the runtime's own clicks stay on top.
+
+**Ambience** (runtime 0.13.0 and later). A background sound the runtime makes: the app picks a
+preset and a level, nothing more.
+
+```js
+if (PAD.ambience) {                   // undefined before runtime 0.13.0
+  PAD.ambience("rain", 0.6);          // one of the presets below, level 0-1 (default 0.5)
+  PAD.ambience("rain", 0.2);          // calling again fades over about a second to the new level ...
+  PAD.ambience("wind", 0.5);          // ... or the new preset
+  PAD.ambience(null);                 // fade out over about a second
+}
+```
+
+| preset | sounds like |
+|---|---|
+| `rain` | dense, fine patter |
+| `waves` | the sea, a wave every 6-10 seconds |
+| `waterfall` | a steady, thick roar |
+| `wind` | gusts that rise and fall, with a faint whistle |
+| `fire` | a low flicker and random crackles |
+| `stream` | running water: bubbling and babbling over a soft rush |
+
+One ambience plays at a time. It sits under the music: at level 1 it is quieter than a song.
+A level out of range is pulled into 0-1; an unknown preset is not played and the runtime shows
+it in its error box, like a score that does not parse. The checker fails a literal unknown name.
+
+**Calls a second.** At most 4 `PAD.music` calls a second (more `play` calls are dropped; `stop`
+always works), and separately at most 4 `PAD.ambience` calls a second: over that the newest call
+waits its turn and plays a moment later, and the ones between are skipped, so the ambience always
+ends up as the app last asked. `PAD.ambience(null)` always goes through at once. Call these when a
+scene changes, not every frame.
+
+**When the runtime stops or holds the music and the ambience.** Leaving the app (HOME, the back
+button, another app, a language switch) stops both at once. While the page is hidden or the phone
+is locked the song holds its place and the ambience holds too; both go on when the player comes back.
+At volume 0 (off) they keep going silently, and are heard again from wherever they have got to.
+A browser only lets a page make sound after the player has touched it: a song or ambience asked
+for before that waits, and starts on the first tap or key.
+
+**Only music you may share.** Songs and sound effects in an app must be your own work, or in the
+public domain (classical pieces, folk songs) with the source named in a comment next to the score.
+No transcriptions of other people's music, including old game soundtracks, however short. Review
+checks this (section 9).
+
+### 6.4 Tilt and the microphone
+
+An app that declares `"permissions": ["motion"]` can read how the handheld is tilted, when it is shaken, and which way
+it faces; one that declares `["mic"]` can hear how loud it is around the player and the pitch of a note sung or
+whistled. The runtime asks the player and the phone, reads the sensors itself and hands the app a few coarse numbers.
+The app never gets a recording, a sound sample, or a raw sensor value. Design notes: `docs/design/pad-sensors.md`.
+
+```js
+if (PAD.motion) {                       // undefined before runtime 0.24.0: play with keys only
+  PAD.on("tilt", function (t) { ball.vx += t.x; ball.vy += t.y; });   // t.heading: 0-348.75 or null; t.flat on 0.35.0+
+  PAD.on("shake", function () { dice.roll(); });
+  PAD.motion.start().then(function (r) { if (r !== "on") useKeys(); });
+}
+if (PAD.mic) {
+  PAD.on("sound", function (s) { if (s.level > 0.6) blow(); note.textContent = s.pitch || "-"; });
+  PAD.mic.start();                      // ... and PAD.mic.stop() as soon as the app stops listening
+}
+```
+
+**Readings.** Held upright in portrait, screen towards the player:
+
+| value | meaning |
+|---|---|
+| `x` | left / right tilt, -1 (left) to 1 (right); about 45 degrees reaches the end |
+| `y` | the top edge raised (-1) or lowered (1), counted from how the phone was held at `start()` or the last `zero()` |
+| `flat` | `{x, y}`, the tilt from lying flat, face up, on the same scale and signs as `x` and `y`: `{x: 0, y: 0}` is level within about 1.4 degrees, upright is `y` -1; never affected by `start()` or `zero()` (runtime 0.35.0+; undefined before, so check for it) |
+| `heading` | the compass, in 32 steps of 11.25 degrees (0 is north, 90 east); `null` where the phone has no compass |
+| `shake` | one event per shake; at least 0.5 s between two |
+| `level` | loudness 0-1 (-60 dB of full scale is 0, full scale is 1) |
+| `pitch` | the main frequency in Hz, an integer from 50 to 1500, or `null` when no clear note is heard (breath, noise, silence) |
+
+`x`, `y`, `flat` and `level` come in steps of 1/32. `tilt` comes at most 30 times a second and `sound` at most 20 times, each
+only when a value changed: hold the last one between events.
+
+**Asking.** `start()` can be called at any time; the app does not need a tap of its own. An app installed with the
+permission through the store (runtime 0.44.0+) is already allowed. Otherwise the first time an app asks, the handheld
+shows its own dialog over it (`「迷宫」要用倾斜感应。 允许 / 不允许`; the microphone's adds that the phone's silent switch
+does nothing while it is on). A, or a tap on 允许, allows it and the phone's own prompt may follow; B or 不允许 resolves
+`"denied"`, and the next `start()` asks again. An allowed app is remembered (the player can revoke it in Settings). The phone may still ask again after the handheld is reopened: then a one-line bar
+(`点一下开启倾斜感应`) waits for the player's tap, because the phone takes the answer only from a tap on the handheld
+itself. `start()` resolves `"on"`, `"denied"` (the player or the phone said no, or the manifest lacks the permission)
+or `"none"` (no such sensor: a desktop, an old phone). Without the permission there is no dialog: `"denied"` at once,
+an error in the dev harness, and the checker fails the app.
+
+**While it runs.** Readings go only to the app on the screen. HOME, another program, the app closing or being removed,
+locking the phone: the sensors stop at once and the microphone is closed (the phone's microphone indicator goes out).
+When the player comes back to the same app, the runtime turns on again what was on (with the bar, if the phone wants a
+tap). While the microphone is on, a small mark shows in the status bar, music and sounds keep playing, and the silent
+switch does not mute them; keep it on only while the app is listening. `PAD.motion.stop()` and `PAD.mic.stop()` are
+always safe to call.
+
+**Keys too.** An app that reads tilt or sound must also be playable with keys or touch (section 4).
+
+### 6.5 Notes and speech
+
+Two small ways to reach outside the app, both added in runtime 0.26.0. Check that they exist first.
+
+```js
+if (PAD.notes) {                        // undefined before runtime 0.26.0
+  PAD.notes.append("滚珠迷宫 战绩", "10月17日  第 3 关  42 秒").then(function (r) {
+    // r: "saved", or "denied" when the player said no (or the call broke a rule below)
+  });
+}
+if (PAD.say) PAD.say("apple", { lang: "en" });   // -> "done" | "stopped" | "unavailable"
+```
+
+**`PAD.notes.append(title, text)`** adds text to a note in the handheld's notes (记事本), for a record the player keeps:
+a line in a diary, a log of scores, words to learn. Use it at a natural moment, the end of a round or a "save to notes"
+choice, never in a loop.
+
+- **The runtime asks every time.** Each call shows the handheld's own dialog over the app, the same one as files and
+  sensors: the app's name, the note's title and the first lines of the text (`「迷宫」要写进记事本「战绩」： 写入 / 不写`).
+  A (on release) or 写入 writes; B or 不写 refuses and resolves `"denied"`. Writing is never silent, and there is no
+  prompt at install.
+- **Only the app's own note.** The first call with a title makes a new note: the title, a blank line, the text. Later calls
+  with the same title add a blank line and the text to the end of that note. The app never writes into the player's own
+  notes or another app's, even one with the same title: it gets a note of its own. In the notes, these notes are in the
+  group 来自 app and their row shows the app's name. The app cannot read notes.
+- **Limits.** The title is one line, 1 to 64 characters; the text is 1 character to 4 KB (UTF-8). One dialog at a time:
+  a call while the app's dialog is still open resolves `"denied"`. Past a limit: `"denied"` at once, no dialog, and an
+  error in the dev harness. Emoji are taken out.
+- Without the permission: `"denied"` at once and an error in the dev harness; the checker fails an app that calls
+  `PAD.notes` without declaring `"notes"`.
+
+**`PAD.say(text, {lang})`** reads a short text aloud with the phone's own voice (the one the dictionary uses), offline.
+No permission. Use it for a word or a line the player wants to hear, and always show the text too.
+
+- `lang` is `"zh"`, `"en"` or `"ja"`, `PAD.lang` by default. The runtime picks the phone's first voice for that language
+  (Mandarin `zh-CN`, `en-US` or `en-GB` first, and `ja-JP` first for Japanese). If the phone has no voice for that
+  language, the call is unavailable; the app should remain usable without speech. `PAD.say.languages` lists the
+  languages supported by this runtime; Japanese support starts in runtime 0.29.0.
+- It follows the handheld's volume; at volume 0 it says nothing and resolves `"unavailable"`.
+- At most 200 characters (the rest is cut) and one call a second per app: a call within a second of the last resolves
+  `"unavailable"` and says nothing. A new call stops the one speaking, which resolves `"stopped"`.
+- `"done"` when it finished; `"stopped"` when a new call, HOME, leaving the app or the phone locking cut it short;
+  `"unavailable"` when there is no voice for the language, the volume is 0, the call came too soon, or the phone would
+  not speak. "unavailable" is normal on many phones: an app must work the same without the voice.
+
+### 6.6 The camera
+
+An app that declares `"permissions": ["camera"]` can ask the player for one photo (runtime 0.28.0 and later). The runtime
+opens its own viewfinder, the player takes the picture, and the app gets a small four-tone image. Nothing else: the app
+never sees the camera's picture, its colours or a stream, and the runtime keeps no copy.
+
+```js
+if (PAD.camera) {                        // undefined before runtime 0.28.0
+  PAD.camera.snap({ size: "small" }).then(function (photo) {
+    if (!photo) return;                  // cancelled, refused, no camera, or a snap already open
+    // photo.w, photo.h: 128 x 112 ("small", the default) or 256 x 224 ("large")
+    // photo.px: a Uint8Array of w*h tone indices, row by row, 0 = ink ... 3 = paper (PAD.TONES)
+  });
+}
+```
+
+- **Consent.** An app installed with the permission through the store (runtime 0.44.0+) is already allowed. Otherwise the
+  first `snap()` shows the handheld's own dialog (the same one as files, sensors and notes):
+  `「<app>」想用相机拍一张照片。照片只以四色小图交给它。` A (on release) or 允许 allows it, and the phone's own camera prompt,
+  if any, comes in that tap; B or 不允许 resolves `null` and is not remembered. An allowed app is remembered; Settings →
+  传感器与权限 lists it and can revoke it. After a relaunch the phone may need to ask again: the runtime then shows a one-line
+  bar, 点一下开启相机, first.
+- **Every shot is the player's.** Every `snap()`, allowed or not, opens the viewfinder over the app with the app's name on
+  top. It looks like the camera program: the live picture dithered at the size asked for, A shutter, SELECT the next lens
+  (the phone's physical lenses, focal length shown), up / down exposure, left / right contrast, B cancel, and on-screen
+  shutter and cancel buttons. The chin pad shows while it is open; no key reaches the app. The front camera is mirrored.
+- **What the app receives.** `{w, h, px}`: exactly what the viewfinder showed when the shutter went, at 128 x 112 or 256 x 224
+  (8:7, the camera's two film formats). No date stamp. Draw it with the four tones, store it with `PAD.save` (256 KB per app:
+  pack it, four pixels to a byte, a small one is 3.5 KB), or turn it into whatever the app makes of it.
+- **`null`** when the player cancels (B), refuses the dialog, leaves (HOME, another program, the app closing), the page is
+  hidden, the phone has no camera or refuses it (the handheld says 相机用不了), a snap of this app is already open, or the
+  app has no `"camera"` permission (an error in the dev harness; the checker fails an app that calls `PAD.camera` without
+  declaring it).
+- Show the player what they took and let them take it again (`sdk/UI.md`). An app must have a use without the camera, or
+  say plainly that it needs one.
+
+### 6.7 The dictionary
+
+An app can look words up in the handheld's built-in English-Chinese dictionary (ECDICT): read-only, no permission, nothing
+to declare in `manifest.json` and no dialog, as with `PAD.say` (runtime 0.36.0 and later). Only the built-in book is
+visible: imported dictionaries are not, and the player's word book only through the separate permission below. Switching
+the built-in ECDICT off in 词典 → 词典管理 does not affect apps (that switch is for the dictionary program and the reader).
+Check that `PAD.dict` exists first.
+
+```js
+if (PAD.dict) {                                  // undefined before runtime 0.36.0
+  PAD.dict.words({ pattern: "?a???", level: 1, max: 200 }).then(function (r) {
+    if (!r) return;                              // the dictionary could not be read, or too many calls
+    // r.words: ["party", "large", "water", ...], the most common first
+    // r.more: true when more words match than were returned
+  });
+  PAD.dict.words({ letters: "planet", len: [3, 6] });
+  PAD.dict.lookup("ran").then(function (e) {
+    // e: {word: "run", form: "ran", zh: ["n. 跑, 赛跑, ...", ...], en: ["..."]}, or null
+  });
+  PAD.dict.version;                              // "ecdict-1"
+}
+```
+
+**`words(query)`** resolves `{words, more}`, or `null` when the dictionary cannot be read or the app has made too many
+calls. Every field is optional:
+
+| field | meaning |
+|---|---|
+| `len` | the word's length: a whole number 2-15, or `[min, max]` (each 2-15, min not more than max). Default 2-15 |
+| `pattern` | 2-15 characters of `a-z` and `?`: `?` is any letter, the others must match. It sets the length, and must agree with `len` when both are given |
+| `letters` | 1-15 letters `a-z` to build the word from: each may be used at most as often as it appears here, and need not all be used. `{letters: "planet"}` finds "plant", "plane", "ant", "net" … |
+| `level` | 1-5: words from the most common 2000 / 5000 / 10000 / 15000, or from the whole list (5, the default) |
+| `max` | how many words to return, 1-500. Default 100 |
+| `offset` | how many matching words to skip first (0 or more). For the next page: ask again with `offset` grown by `max` |
+
+The words come in commonness order, the most common first. `more` is `true` when more words matched than were returned,
+so a later page has some.
+
+The list is 22,656 English words written with `a-z`, lower case. It leaves out names, abbreviations and numerals, and a
+reviewed list of slurs, swearing and sexual words: an app can show anything `words()` returns. `lookup()` is not
+filtered: a word left out of that list can still be looked up.
+
+The list, its order and `level` are the same on every phone, and frozen within `lopda/1`; `PAD.dict.version` is
+`"ecdict-1"`. An app may rely on this: a seeded puzzle made from words() is the same on every phone.
+A different version string would mean a different list. `words` reads only a small word list
+(87 KB) on its first call; `lookup` unpacks the whole book the first time (it is the copy the dictionary program
+already loads, so never twice), which takes a moment.
+
+**`lookup(word)`** resolves one entry, or `null` when the word is not in the dictionary. `word` is 1-32 letters, upper or
+lower case.
+
+- The exact spelling is tried first, then the dictionary's base forms: `lookup("ran")` gives the entry `run` with
+  `form: "ran"`. `form` is the word as asked, present only when it was found this way. There is no "nearest word"
+  guessing: a word that is neither in the book nor a form of one resolves `null`.
+- `word` is the entry's headword (it can differ from what was asked). `zh` is a list of Chinese lines, each with its part
+  of speech (`n. 河, 江`, `vt. 跑`), at most 8; lines marked `abbr.` are dropped, and a word with no such line gets its
+  first two lines without the `[计]`-style labels. `en` is a list of English senses, mostly WordNet. Either list can be empty.
+- The data is ECDICT (MIT) with WordNet senses, see `LICENSING.md`. An app may show the senses it gets: they are short
+  glosses, not a dictionary to copy out.
+
+**`null` and the limit.** `null` when the dictionary cannot be read (a missing offline cache file, for example), when
+more than 10 calls were made in a second (words, lookup and the word book together, per app), and when `lookup` finds no
+entry. `null` is normal: the app must still work. On a runtime before 0.36.0 there is no `PAD.dict` at all, so check for it.
+
+**Bad arguments reject**, as `PAD.exportFile` rejects bad arguments: the promise rejects with an `Error` whose message
+starts `PAD.dict.words: ` or `PAD.dict.lookup: `, for example
+`PAD.dict.words: len is a whole number from 2 to 15, or [min, max]` or
+`PAD.dict.lookup: the word is 1 to 32 letters a-z`. Left unhandled, it shows in the runtime's error box.
+
+#### The word book
+
+An app that declares `"permissions": ["wordbook"]` can read and change the player's word book (生词本), the same list the
+dictionary program and the reader use (runtime 0.36.0 and later). It holds at most 2000 words, newest first, and only
+headwords: `addWord("ran")` stores `run`, the entry's headword. An app never sees the imported dictionaries or the
+player's history.
+
+```js
+if (PAD.dict && PAD.dict.inBook) {               // the word book calls arrive with runtime 0.36.0
+  PAD.dict.inBook(["cat", "run"]).then(function (yes) {
+    // yes: [true, true], or null (no grant yet, no permission, or too many calls)
+  });
+  PAD.dict.addWord("ran").then(function (r) {
+    // r: "saved", "denied", "full" (the book already has 2000 words), or null
+  });
+  PAD.dict.removeWord("cat");
+}
+```
+
+- **One grant per app.** An app installed with the permission through the store (runtime 0.44.0+) is already allowed;
+  otherwise the first `addWord` or `removeWord` shows the handheld's own dialog once:
+  `「<app>」想把单词加入你的生词本` (`<app> wants to add words to your word book`). A (on release) or 允许 allows it and
+  the call goes ahead; B or 不允许 resolves `"denied"` for that call and is not remembered, so the next call asks again.
+  Settings → 传感器与权限 lists the app with 生词本 and can revoke it. The dialog is asked once, not per word: a dialog
+  for every word would stop the game.
+- **Reading needs the grant too.** `inBook()` resolves `null` until the player has allowed the app, and when the manifest
+  lacks `"wordbook"`. An app cannot read the book before the player knows. It never opens a dialog of its own.
+- **Answers.** `addWord` / `removeWord` resolve `"saved"` (the book changed or already had that state), `"denied"` (the
+  player said no, or the manifest lacks the permission), `"full"` (adding to a book of 2000 words), or `null` (no grant,
+  over the rate limit, or the word is not in ECDICT, so there is no headword to store). `inBook` resolves an array of
+  booleans the same length as its argument, or `null` (no grant, no permission, over the limit).
+- **Headwords, and case.** `addWord` stores the ECDICT headword: `addWord("ran")` stores `run`, and a word
+  that `lookup` does not find resolves `null` without a dialog. `inBook` and `removeWord` do not look words up: they
+  compare ignoring case, so a stored `London` matches `inBook(["london"])` and `removeWord("LONDON")`, and
+  `inBook(["run"])` is `true` after `addWord("ran")` stored `run`; `inBook(["ran"])` is still `false`, because the
+  stored word is the headword. Pass headwords (the `word` from `lookup`) to all three calls.
+- **Bad arguments reject** with an `Error` whose message starts `PAD.dict.inBook: `, `PAD.dict.addWord: ` or
+  `PAD.dict.removeWord: `: `inBook` takes an array of 1-20 words, and every word is 1-32 letters a-z.
+- **The same limiter.** All `PAD.dict` calls — words, lookup and the word book — count together: at most 10 a second per
+  app, and past that `null`.
+- **Shared, and the player's.** The dictionary program's START and the reader's START change this same list; the word book
+  screen shows what the app added. Revoking the grant in Settings removes only the permission, not the words.
+
+### 6.8 The link
+
+An app that declares `"permissions": ["link"]` can open a message channel to one other handheld running the same app
+(added in runtime 0.57.0, after `lopda/1` was frozen, so check that `PAD.link` exists before using it). The
+runtime draws its pairing screen, works the microphone and the speaker, and carries each message; the app gets a few
+short results and the messages, never the radio. Design notes: `docs/design/radio.md` 7.2-7.3 and 8.5.
+
+```js
+if (PAD.link) {                          // undefined before runtime 0.57.0
+  PAD.link.open({ proto: "gomoku1" }).then(function (r) {
+    // r: "open" | "cancelled" | "denied" | "none" | "busy"
+    // PAD.link.initiator: true on the side that started the link (meaningful while open)
+  });
+  PAD.on("link", function (ev) {
+    if (ev.type === "message") { /* ev.data: a string, or a Uint8Array, as it was sent */ }
+    else if (ev.type === "close") { /* ev.reason: "bye" | "lost" | "other-app" | "home" | "timeout" */ }
+  });
+  PAD.link.send("m,7,8,3").then(function (v) {
+    // v: "sent" | "lost" | "closed" | "busy" | "big"
+  });
+  PAD.link.close();
+  PAD.link.state;                        // "closed" | "open"; pairing counts as "closed"
+}
+```
+
+- **Consent.** An app installed with the permission through the store (runtime 0.44.0+) is already allowed. Otherwise
+  the first `open()` shows the handheld's own dialog over the app: `「<app>」想和另一台掌机连线（声音传数据）。连线时麦克风一直开着。`
+  A (on release) or 允许 allows it and remembers it; B or 不允许 resolves `"denied"` and is not remembered, so the next
+  `open()` asks again. An allowed app is listed in Settings → 传感器与权限 and can be revoked there. Without the
+  permission there is no dialog: `open()` resolves `"denied"` and `send()` resolves `"closed"`, and the checker fails
+  an app that uses `PAD.link` without declaring `"link"`.
+- **The pairing screen is the runtime's.** Both players press their app's connect button; neither side is master or
+  slave. The runtime shows the other handheld, a progress bar and the rate it found, and the phones find each other
+  (about 10-30 cm apart is best). One side ends up the initiator (`PAD.link.initiator`), the other the responder;
+  the game can use that to choose who goes first. B, or HOME, cancels the pairing and resolves `"cancelled"`; 60 seconds
+  without a peer resolves `"cancelled"` too (the runtime says it timed out), as does a peer that turned out to run
+  another app. One link at a time: `open()` resolves `"busy"` while this app is already pairing
+  or linked, or while another program holds the link. `"none"` when the phone cannot do the sound link at all.
+- **What the app gets, and never gets.** Messages through `PAD.on("link")`, a result for each call, and the close
+  reasons. It never sees the rate, the session number, frames, the microphone or a sound sample, and it cannot choose
+  the port: the runtime derives it from the app's id, so two apps never meet by accident. `proto` is the app's own
+  agreement string (the game's rules version, say): ASCII, at most 16 characters, `""` by default. A peer with another
+  app or another `proto` closes the link with `"other-app"`. A `proto` that is not ASCII of at most 16
+  characters rejects the `open()` promise with an `Error`, before anything is shown.
+- **Messages.** `send(data)` takes a string or a `Uint8Array` and a string arrives as a string, a `Uint8Array` as a
+  `Uint8Array`; the type is not guessed. The encoded message is at most 200 bytes (a UTF-8 string counts its bytes);
+  a larger one resolves `"big"` at once and is not sent. Anything else
+  than a string or a `Uint8Array` rejects. Up to 4 messages wait in the queue; a 5th resolves `"busy"` at once, so a
+  game must keep its sends short and few. `"sent"` means the peer acknowledged it; `"lost"` means the retries ran out;
+  `"closed"` means there was no link (or it ended while the message waited).
+- **It is slow.** The modem runs at 10, 20 or 40 ms a symbol, chosen by the pairing; 10 ms is the usual one. A 4-byte
+  move is about 2-3 seconds each way; a 200-byte message is about 10 seconds. Plan turns, not streams: send one move,
+  then wait. There is no throughput to give an app and no way to ask for a faster rate.
+- **Close reasons, and reconnecting.** `"bye"`: the other side left (HOME, its app closed, its screen went away).
+  `"lost"`: the radio gave up after its retries or missed heartbeats. `"other-app"`: the peer opened a different app or
+  `proto`. `"home"`: this side left; the app is usually gone by then. `"timeout"`: pairing found nobody. After any of
+  them `PAD.link.state` is `"closed"`. Reconnecting is the app's job: call `open()` again, then compare state with the
+  peer (a move count, a round number) and send what the other side is missing. The runtime keeps no session across a
+  close.
+- **Encryption is the app's business.** The link moves bytes; the runtime does not encrypt them and cannot see what
+  they mean. An app that wants privacy uses WebCrypto itself (ECDH to exchange keys, AES-GCM for each message, a short
+  safety code both players compare). Whether `crypto.subtle` is available inside the sandbox is up to the phone, so
+  treat encryption as an extra, not a promise.
+- **Exchange is copy, not move.** A lossy link cannot make both sides agree that a trade completed: the last
+  acknowledgement may be the one that is lost. So a gift, a souvenir or a card that is sent is also kept (or marked as
+  sent) by the sender, and the receiver validates what arrives strictly. Nothing disappears because it was sent.
+- **The microphone.** While the link is open (or pairing) the runtime keeps the microphone on, so `PAD.mic.start()`
+  resolves `"none"`; a link that opens while the sensors' microphone is on stops that microphone first. An app that
+  wants both must do one after the other, not at the same time.
+- **Still playable alone.** An app must work without a link, or say plainly that it needs two handhelds. The phone may
+  have no microphone, the player may have no second handheld, or the player may refuse: handle `"denied"`, `"none"`,
+  `"busy"`, `"cancelled"` and `"timeout"` by staying playable alone, and show the player what happened.
+- **The dev harness.** In `sdk/dev.html`, open the same app in two tabs: their `PAD.link.open()` calls pair over a
+  BroadcastChannel (no sound), and messages take 600 ms each way. The **Echo peer** button pairs one tab with itself:
+  `open()` resolves at once as the initiator and every sent message comes back as a received one after 600 ms, which
+  is enough to try a game's link code alone.
+
+## 7. Size and quality
+
+- `index.html` at most 512 KB (with src/ files and framework copies bundled in; section 11).
+- Opens with one line of instructions and a start control.
+- No dead links, no lorem ipsum, no "coming soon" screens.
+- Text in Chinese, English or both, kept short. Both is recommended (section 6.1).
+
+## 8. Versioning and install
+
+- The registry index lists each app's version and the SHA-256 of `index.html`.
+- The runtime installs that exact file and checks the hash. An installed app
+  never changes until the user taps update.
+- An app id is permanent and belongs to one app. Never reuse an id for a different app: the save
+  travels with the id.
+- Data saved with `PAD.save` stays with the app id across versions **and across removing and
+  reinstalling the app**. Your format must therefore stay backward compatible for as long as the
+  app exists. Additive changes are the default: new keys with defaults, keep the old ones.
+
+### Breaking changes: load, transform, then write
+
+When a format change cannot be additive, migrate on the device, inside the app:
+
+1. Keep a schema number inside the saved value (or use `PAD.setSchema`, or both). A top-level
+   `v` in the value is the usual place: `{v: 2, ...}`.
+2. On start, read the old value, transform it in memory, and validate the result. Do not write
+   over the only copy before the transform has succeeded.
+3. Save the transformed value, then record the new schema (`PAD.setSchema(2)`).
+4. If the value's schema is **newer** than the app understands, do not overwrite it. Say so and let
+   the player update the app; `PAD.saveInfo().schema` gives the number on disk.
+5. If loading fails, catch the rejection and tell the player the save cannot be read. Do not
+   silently start a new game over the old data. Settings → App saves is where the player can clear
+   the damaged save after deciding.
+6. Test the migration with a fixture of the old value. A release that breaks an old save is a
+   broken release, not a fresh start.
+
+The runtime keeps the bytes of a save it cannot read until the player clears them, and it refuses
+new writes for that app until then. That is deliberate: the player's data outranks a clean start.
+
+## 9. Checking an app
+
+```sh
+node tools/check-app.mjs registry/apps/<id>
+```
+
+The checker enforces sections 2 (including `permissions`), 3 (colors), 5 (forbidden APIs and external
+resources) and 7 (size), checks `PAD.sfx` names, and fails `PAD.exportFile` / `importFile` without the `files` permission,
+and `PAD.motion` or `PAD.on("tilt" | "shake")` without `motion`, `PAD.mic` or `PAD.on("sound")` without `mic`, `PAD.notes` without `notes`, `PAD.camera` without `camera`,
+`PAD.dict.addWord` / `removeWord` / `inBook` without `wordbook`.
+Passing it is required before review.
+
+Review then reads the app. Besides what the checker cannot see (the button convention in section 4,
+other people's names and characters), it listens to the music and sound effects: they must be original
+or public domain with the source named (section 6.3). The principle, as with the dictionary and the reader:
+**the platform supports formats; what users bring is up to them.** Lo-PDA can play and convert music
+but carries, recommends and links to none that it may not share, and nothing in the store may either.
+
+To try an app with the chin buttons, serve the repo root and open
+`sdk/dev.html?app=registry/apps/<id>`. The harness skips the confirm dialog: an export downloads
+straight away, and an import waits for the file input it shows next to the app. It plays music and
+custom sound effects with the runtime's own chip (`runtime/chip.js`) at the default volume, logs the named
+sounds without playing them, and logs a song that does not parse as an error. For tilt and the microphone it answers
+`start()` at once from the manifest (no dialog) and stands in for the phone: a square to drag for the tilt (it recentres
+when let go), a Shake button, a compass slider, a loudness slider and a pitch field, or this computer's microphone.
+`PAD.notes.append` writes the dialog's words in the log and answers as the select on the right says (`saved` or `denied`);
+`PAD.say` uses this computer's voices when the browser has them, and logs the text either way.
+
+## 10. Games: lo-game.js (optional)
+
+`sdk/lo-game.js` (MIT) is a small framework for games: a four-tone pixel screen,
+crisp Chinese and English text, buttons, scenes, dialogue, menus, tile maps and saving. An app
+that uses it carries its own copy in a `<script data-lo-game="VERSION">` block,
+filled in by `node tools/bundle-app.mjs registry/apps/<id>`. The checker accepts only
+unmodified released copies and skips them when scanning, so review covers the
+game's own code. Since 1.2.0, `game.t({zh: "…", en: "…"})` picks text by `PAD.lang`; since 1.3.0,
+`game.music(song)`, `game.musicStop()` and `game.sfx({...})` play music and custom sounds where the runtime has them;
+since 1.4.0, `game.ambience(name, level)` plays an ambience.
+Reference and AI prompt: `sdk/LO-GAME.md`.
+
+## 11. Source files and lo-3d.js (optional)
+
+An app may keep its code in a `src/` folder next to `index.html` and include each file with
+`<script data-src="src/battle.js"></script>`. `node tools/bundle-app.mjs registry/apps/<id>` copies
+the file into the block verbatim. Paths are relative, start with `src/`, have no `..`, end in `.js`
+(story and data files too, e.g. `var STORY = {...};`), and the file must not contain `</script`.
+Reviewers read `src/`; the checker fails when `index.html` is not exactly what the tool builds,
+and the bundled code is scanned like any other app code. Only `index.html` ships; the 512 KB limit
+applies to it after bundling.
+
+`sdk/lo-3d.js` (MIT) is a small 3D renderer. A block `<script data-lo-3d="VERSION"></script>` is a
+verified framework block exactly like `data-lo-game`: filled by the same tool, accepted only as an
+unmodified released copy (`sdk/lo-3d.versions.json`), and skipped when scanning.
