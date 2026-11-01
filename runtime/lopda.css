@@ -667,6 +667,7 @@ textarea::placeholder{color:var(--ink-2)}
 .pet-souvname{font-weight:600;font-size:15px}
 .pet-souvline{font-size:14px;line-height:1.35;overflow-wrap:anywhere;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .pet-souvdate{font-family:var(--f-pix);font-size:14px;color:var(--ink-2)}
+.pet-souvfrom{font-family:var(--f-pix);font-size:14px;line-height:1.3;color:var(--ink-2);overflow-wrap:anywhere}
 .pet-souvtag{margin:2px 0 0;font-size:13px;color:var(--ink);border:1px solid var(--ink);padding:0 4px;align-self:flex-start}
 .pet-souvfoot{display:flex;justify-content:space-between;gap:8px;font-size:14px;color:var(--ink-2)}
 /* the box index: 5 x 5 pictures a page, newest first; the selected tile gets an outer frame */
@@ -674,6 +675,7 @@ textarea::placeholder{color:var(--ink-2)}
 .pet-tile{width:32px;height:32px;padding:0;background:transparent;border:0;position:relative;display:flex;align-items:center;justify-content:center;cursor:pointer}
 .pet-tile canvas{width:32px;height:32px;image-rendering:pixelated;image-rendering:crisp-edges;border:2px solid var(--ink);box-sizing:border-box;display:block}
 .pet-tile.on{box-shadow:0 0 0 2px var(--ink)}
+.pet-tile-mark{position:absolute;right:4px;bottom:4px;width:4px;height:4px;background:var(--ink);pointer-events:none}
 .pet-ask{margin-top:4px}
 .pet-askq{margin:0 0 2px;font-size:14px}
 .pet-askrow{display:flex;gap:6px}

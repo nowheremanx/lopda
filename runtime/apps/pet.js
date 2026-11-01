@@ -12,7 +12,8 @@
  * stops it.
  *
  * Storage: data/users/local/pet (design.md 8 plus petsim's lastMeal, awakeHunger, awakeJoy, today, seenUse and aiUse;
- * boxSeen and today's pick/outing phase/remaining/hour/ai/shelf flag, and outSouv — the souvenir a background trip is
+ * care — the days-long 0..1 average the souvenir mood comes from — and boxSeen, today's pick/outing
+ * phase/remaining/hour/ai/cared/outEmpty/shelf flag, and outSouv — the souvenir a background trip is
  * bringing in — and data/users/local/pet/souvenirs/<id> {name:{zh,en}, line:{zh,en}, px, at, ai, day}. The pet's
  * `name` is fixed at the hatch and `shelf` is the one souvenir shown on the room's shelf (or null). A failed read is
  * not "no pet": the program then keeps an in-memory pet and never writes an egg over a save it could not read (the
@@ -23,7 +24,7 @@
  * or waiting film. LopdaPet.pickOfDay chooses (about half the days nothing); the pet holds the matching prop
  * and its row lights. START opens the small menu (the pick's own name / 状态 / 纪念品箱; "今天没有" when empty);
  * A on that row opens the summary's own program, then the pick is used for the day. The AI souvenir, when the line is on, is one call at the day's outing (30 s cap) and silently
- * falls back to the built-in table.
+ * falls back to the built-in table; a day whose separate mood roll fails is empty-handed instead and makes no call.
  *
  * From boot: the pet lives without its screen. On storage ready, whenever the home screen draws its icon and on resume,
  * it catches up, rolls the day, decides the pick and the outing and, once the outing hour has come, makes the day's one
@@ -35,6 +36,7 @@
 
 var LP=window.LP, $=LP.$, S=LP.S, tr=LP.tr, I18N=LP.I18N;
 var Pet=window.LopdaPet, Art=window.LopdaPetArt, Play=window.LopdaPetPlay, PS=window.LopdaPetState, L=window.LopdaLunar;
+var Souv=window.LopdaPetSouv;
 
 var HOUR=3600000, DAY=86400000, SCALE=2;
 var ROOM_W=162, ROOM_H=120;
@@ -217,6 +219,13 @@ function normalize(save){
   if(td.outSouv===undefined) td.outSouv=null;
   if(td.outHour===undefined) td.outHour=null;
   if(td.shelf===undefined) td.shelf=false;
+  if(td.cared===undefined) td.cared=false;
+  if(td.outEmpty===undefined) td.outEmpty=false;
+  /* care is the days-long average the outing's chance comes from: keep a real 0..1 number, drop anything else */
+  if(save.care!==undefined){
+    if(typeof save.care==="number" && isFinite(save.care) && save.care>=0 && save.care<=1) save.care=+save.care;
+    else delete save.care;
+  }
   return save;
 }
 function packOf(save){
@@ -281,6 +290,14 @@ function loadStorage(){
       if(!name || !line || typeof o.px!=="string" || o.px.length!==256) return;
       var st=(PS && PS.validate) ? PS.validate(o.state,o.px) : null;
       var it={id:doc.id, name:name, line:line, px:o.px, at:+o.at||0, ai:!!o.ai, day:o.day?String(o.day):""};
+      var ref=souvEntry(o.ref) ? o.ref : null;
+      if(ref) it.ref=ref;
+      var wh=souvWhere(o.where);
+      if(wh) it.where=wh;
+      if(!it.ref && !it.ai){
+        var oldRef=souvRefForName(name);
+        if(oldRef) it.ref=oldRef;
+      }
       if(st) it.state=st;
       if(isFinite(+o.grownMs) && +o.grownMs>0) it.grownMs=+o.grownMs;
       if(isFinite(+o.plantedAt) && +o.plantedAt>0) it.plantedAt=+o.plantedAt;
@@ -511,6 +528,61 @@ function storedText(v){
   if(p) return p;
   return typeof v==="string" && v ? v : null;
 }
+/* The catalogue entry behind a document's ref, or null when the id is missing or unknown (an id is never reused,
+   so an unknown one means a damaged or hand-edited document). */
+function souvEntry(id){
+  if(typeof id!=="string" || !id || !Souv || typeof Souv.byId!=="function") return null;
+  return Souv.byId(id);
+}
+/* A stored AI where is only shown when it is still a pair of two strings; anything else is ignored. */
+function souvWhere(v){
+  if(!v || typeof v!=="object" || Array.isArray(v)) return null;
+  if(typeof v.zh!=="string" || typeof v.en!=="string" || !v.zh || !v.en) return null;
+  return {zh:v.zh, en:v.en};
+}
+/* Old built-in documents have no ref: their name, in either language, is matched back to the catalogue. The table
+   is built from both language tables, not only the one on screen, so a document written in the other language
+   still finds its place. It stays in memory; the document is never written again. */
+var SOUV_NAMES=null;
+function souvNameIndex(){
+  if(SOUV_NAMES) return SOUV_NAMES;
+  var idx={}, str=I18N.STR||{}, table=(Souv && Souv.CATALOG)||[];
+  table.forEach(function(e){
+    ["zh","en"].forEach(function(lang){
+      var n=str[lang] && str[lang]["pet.souv."+e.id];
+      if(typeof n==="string" && n) idx[n]=e.id;
+    });
+  });
+  SOUV_NAMES=idx;
+  return idx;
+}
+function souvRefForName(name){
+  var idx=souvNameIndex();
+  if(typeof name==="string") return idx[name] || null;
+  if(!name || typeof name!=="object") return null;
+  if(typeof name.zh==="string" && idx[name.zh]) return idx[name.zh];
+  if(typeof name.en==="string" && idx[name.en]) return idx[name.en];
+  return null;
+}
+/* The card's one origin line, under the date. A postcard always reads as a trip; an AI find without a place
+   still says it was found while out. Anything else has no line. */
+function souvFrom(s){
+  if(!s) return "";
+  if(s.ref){
+    if(s.ref==="post") return tr("pet.from.trip");
+    var e=souvEntry(s.ref);
+    if(e && e.where) return tr("pet.from.found",{where:tr("pet.where."+e.where)});
+    return "";
+  }
+  if(s.ai){
+    if(s.where){
+      var w=s.where[I18N.lang] || s.where.zh || s.where.en || "";
+      if(w) return tr("pet.from.out",{where:w});
+    }
+    return tr("pet.from.outAny");
+  }
+  return "";
+}
 function souvText(s,field){
   var v=s && s[field], p=textPair(v);
   if(p) return String(p[I18N.lang] || p.zh || p.en || "");
@@ -569,7 +641,7 @@ function souvenirTable(pack){
   return ((pack && pack.souvenirs)||[]).map(function(e){
     var t=dirText(e,e.id);
     var first=pxFromGrid(e.grid);
-    return {id:e.id, grid:e.grid, px:first, name:t.name, line:t.line, state:packState(e.state,first)};
+    return {id:e.id, season:e.season, where:e.where, grid:e.grid, px:first, name:t.name, line:t.line, state:packState(e.state,first)};
   });
 }
 function dirText(entry,id){
@@ -603,6 +675,12 @@ function makeSouvenir(entry){
     at:now(), ai:!!(entry && entry.ai),
     day:entry && entry.day ? String(entry.day) : dayKey(now())
   };
+  if(s.ai){
+    var wh=souvWhere(entry && entry.where);
+    if(wh) s.where=wh;
+  } else if(entry && souvEntry(entry.id)){
+    s.ref=entry.id;
+  }
   if(entry && entry.state){ s.state=entry.state; s.grownMs=0; }
   return s;
 }
@@ -620,15 +698,21 @@ function souvForDay(day){
   for(var i=P.souv.length-1;i>=0;i--) if(P.souv[i].day && P.souv[i].day===day) return P.souv[i];
   return null;
 }
+/* The day's outing is on its way back and the walk-back is left in today for the next visit. souvId is the souvenir
+   it brings, or null for an empty-handed outing; both write out / back the same way. */
+function markDayBack(hour,day,souvId){
+  if(!P.save || !P.save.today || P.save.today.day!==day) return false;
+  var td=P.save.today;
+  td.out=hour; td.outHour=hour; td.back=false;
+  td.outPhase="back"; td.outLeft=4; td.outSouv=souvId==null ? null : souvId;
+  saveNow();
+  return true;
+}
 /* The souvenir document can land while the pet save does not (quota, a closed page). The next run finds it by its day
    and only marks the day, instead of bringing a second one. */
 function markDayWithSouvenir(s,hour,day){
-  if(!s || !P.save || !P.save.today || P.save.today.day!==day) return false;
-  var td=P.save.today;
-  td.out=hour; td.outHour=hour; td.back=false;
-  td.outPhase="back"; td.outLeft=4; td.outSouv=s.id;
-  saveNow();
-  return true;
+  if(!s) return false;
+  return markDayBack(hour,day,s.id);
 }
 /* Returns a promise for the saved souvenir, or null when the write failed. The souvenir enters the box only after
    the document landed: the programme marks the trip/outing done on that promise, so a failed write is retried on
@@ -638,6 +722,8 @@ function addSouvenir(entry){
   if(!entry) return Promise.resolve(null);
   var s=makeSouvenir(entry);
   var data={name:s.name, line:s.line, px:s.px, at:s.at, ai:s.ai, day:s.day};
+  if(s.ref) data.ref=s.ref;
+  if(s.where) data.where=s.where;
   if(s.state){ data.state=s.state; data.grownMs=0; }
   if(P.nostore || !P.refs){
     pushSouvenir(s);
@@ -653,9 +739,32 @@ function addSouvenir(entry){
     return null;
   });
 }
+/* The refs the box remembers: only catalogue ids, so an AI find or an old unmatched document never counts as seen. */
+function souvRefsOf(list){
+  var out=[];
+  (list||[]).forEach(function(s){ if(s && s.ref && souvEntry(s.ref)) out.push(s.ref); });
+  return out;
+}
+/* An empty-handed outing: the weekly roll said no. This frozen marker is not a souvenir document, so finishOuting
+   and decideOuting can tell it from a failed write without a new string or message. */
+var EMPTY_SOUV=Object.freeze({empty:true});
+function souvIsEmpty(v){ return !!(v && v.empty); }
 function outingSouvenir(){
   var seed=(Pet.daySeed(P.save.born,dayKey(now()))^0x5bd1e995)>>>0;
-  return Pet.builtinSouvenir(Pet.rng(seed),recentNames(),souvenirTable(packOf(P.save)));
+  var r=Pet.rng(seed);
+  /* the first draw of the day's own seed decides an empty day, so a reload (or a different box) never turns one
+     into a souvenir day; only a yes draws the two pickSouvenir needs. A pet kept well keeps the full weekly chance;
+     an unhappy one brings very little (petsim careScore / souvenirMood, decisions.md 45). */
+  var chance=Pet.souvenirLocalChance(P.save)*Pet.souvenirMood(P.save.care);
+  if(r()>=chance) return EMPTY_SOUV;
+  var table=souvenirTable(packOf(P.save));
+  var opts={
+    season:seasonOf(now()),
+    seen:souvRefsOf(P.souv),
+    recent:souvRefsOf(P.souv.slice(Math.max(0,P.souv.length-5))),
+    newChance:1
+  };
+  return Pet.pickSouvenir(r,table,opts);
 }
 /* ---------- the AI souvenir (design.md 7; decisions.md section 34 stays: no PAD.ai for apps) ---------- */
 var FORM_WORD={book:"bookish",walk:"walker",scholar:"scholar",diary:"diarist",monster:"little monster",plain:"plain"};
@@ -779,7 +888,7 @@ function startAiJob(td){
       if(job.done) return;
       var v=null;
       try{ v=Pet.validateSouvenir(stripFence(text)); }catch(e){ v=null; }
-      finish(v ? {name:v.name, line:v.line, px:v.px, ai:true} : null);
+      finish(v ? {name:v.name, line:v.line, px:v.px, ai:true, where:v.where} : null);
     },function(){ finish(null); });
   };
   /* a fresh usage read, so the categories are what happened since the last AI call, not boot */
@@ -788,6 +897,11 @@ function startAiJob(td){
 }
 function beginAiSouvenir(){
   startAiJob(P.save && P.save.today);
+}
+/* The AI line is only tried on a day whose separate mood roll passes; the same seed on every reload. A failed gate is
+   an empty-handed outing, not the built-in roll: the pet stays home with nothing and the player's AI credit is kept. */
+function aiMoodOpen(day){
+  return !!P.save && Pet.aiSouvenirAllowed(P.save.born,day,P.save.care);
 }
 /* The outing's phase lives in today so leaving or reloading during the ~20 s does not eat the day's souvenir:
    `outPhase`/`outLeft`/`outHour` are resumed on the next visit; `out`/`back` are written only once the souvenir
@@ -803,31 +917,41 @@ function persistOuting(){
 function startOuting(hour){
   if(P.restoring || P.nostore || P.readFailed) return;
   if(!P.save) return;
-  var had=souvForDay(dayKey(now()));
+  var day=dayKey(now());
+  /* the day's care is decided once, before any roll; the same today.cared keeps a reload from moving it again */
+  Pet.updateCare(P.save,day);
+  saveSoon();
+  var had=souvForDay(day);
   if(had){
-    if(markDayWithSouvenir(had,hour,dayKey(now())) && !P.outing) resumeOuting();
+    if(markDayWithSouvenir(had,hour,day) && !P.outing) resumeOuting();
     render();
     return;
   }
-  if(!P.save.today) P.save.today={day:dayKey(now()),shown:null,picked:false,pick:null,used:false,rewarded:false,ai:false,out:null,back:false,snacks:0,pats:0,played:0,burp:false};
+  if(!P.save.today) P.save.today={day:day,shown:null,picked:false,pick:null,used:false,rewarded:false,ai:false,out:null,back:false,snacks:0,pats:0,played:0,burp:false};
+  var td=P.save.today;
   var left=Math.max(1,Math.round(OUT_MS/500));
-  P.save.today.outPhase="out"; P.save.today.outLeft=left; P.save.today.outHour=hour;
+  td.outPhase="out"; td.outLeft=left; td.outHour=hour;
   stopAiJob();
-  P.outing={phase:"out", left:left, souv:null, hour:hour, done:false, saved:false, day:dayKey(now())};
+  P.outing={phase:"out", left:left, souv:null, hour:hour, done:false, saved:false, day:day};
   P.resumeOuting=false;
+  if(!td.ai && aiAvailable()){
+    if(aiMoodOpen(day)) beginAiSouvenir();
+    else td.outEmpty=true;                                /* the gate said no: no call, no built-in fallback */
+  }
   saveSoon();
-  beginAiSouvenir();
   render();
 }
 function resumeOuting(){
   var td=P.save && P.save.today;
   if(!td || !td.outPhase || td.back || td.day!==dayKey(now())) return false;
+  /* an outing decided before the upgrade may have no care yet; on a new save this is the guarded no-op */
+  if(Pet.updateCare(P.save,td.day)) saveSoon();
   var left=Math.max(1,+td.outLeft||1), back=td.outPhase==="back";
   var souv=null, saved=false;
   if(back){
     souv=findSouv(td.outSouv);
     saved=!!souv;
-    if(!souv) souv=outingSouvenir();
+    if(!souv) souv=td.outEmpty ? EMPTY_SOUV : outingSouvenir();
     left=4;
   }
   P.outing={phase:back?"back":"out", left:left, souv:souv, hour:+td.outHour||hourNow(),
@@ -848,7 +972,7 @@ function markOutingDone(o){
 function finishOuting(){
   var o=P.outing; if(!o || o.done) return;
   o.done=true;
-  if(o.saved){ markOutingDone(o); return; }
+  if(o.saved || souvIsEmpty(o.souv)){ markOutingDone(o); return; }
   addSouvenir(o.souv).then(function(saved){
     if(saved) markOutingDone(o);
     else {
@@ -865,7 +989,8 @@ function stepOuting(){
     if(P.aiJob && !P.aiJob.done){ persistOuting(); render(); return; }
     var job=P.aiJob;
     P.outing.phase="back"; P.outing.left=4;
-    P.outing.souv=(job && job.result) ? job.result : outingSouvenir();
+    var empty=P.save && P.save.today && P.save.today.outEmpty;
+    P.outing.souv=(job && job.result) ? job.result : (empty ? EMPTY_SOUV : outingSouvenir());
     P.outing.saved=false;
     P.aiJob=null;
     persistOuting(); saveSoon(); render();
@@ -884,16 +1009,26 @@ function decideOuting(hour, day){
   P.outResolving=Promise.resolve().then(function(){
     var td=P.save && P.save.today;
     if(!td || td.day!==day || td.out!=null || td.back) return {skip:true};
+    /* once per day, before the AI gate or the built-in roll; the guard keeps a reload from moving it again */
+    Pet.updateCare(P.save,day);
+    td=P.save.today;
     var had=souvForDay(day);
     if(had) return {skip:true, done:markDayWithSouvenir(had,hour,day)};
     td.outHour=hour;
     saveSoon();
     if(!td.ai && aiAvailable()){
-      var job=startAiJob(td);
-      if(job) return job.promise.then(function(entry){
-        if(P.aiJob===job) P.aiJob=null;
-        return {entry:entry};
-      });
+      if(aiMoodOpen(day)){
+        var job=startAiJob(td);
+        if(job) return job.promise.then(function(entry){
+          if(P.aiJob===job) P.aiJob=null;
+          return {entry:entry};
+        });
+      } else {
+        /* the mood roll said no: an empty-handed outing, and the AI credit is saved */
+        td.outEmpty=true;
+        saveSoon();
+        return {entry:null};
+      }
     }
     return {entry:null};
   }).then(function(res){
@@ -902,10 +1037,16 @@ function decideOuting(hour, day){
     var entry=res ? res.entry : null;
     var td=P.save && P.save.today;
     if(!td || td.day!==day || td.out!=null || td.back) return false;
-    var pickSouv=entry || outingSouvenir();
-    if(!pickSouv) return false;
-    pickSouv.day=day;
-    return addSouvenir(pickSouv).then(function(saved){
+    if(!entry){
+      /* a failed AI call falls back to the weekly built-in roll; a failed mood gate does not */
+      if(td.outEmpty) return markDayBack(hour,day,null);
+      entry=outingSouvenir();
+      /* an empty day is marked done at once: no document, and the next visit plays the normal walk-back */
+      if(souvIsEmpty(entry)) return markDayBack(hour,day,null);
+      if(!entry) return false;
+    }
+    entry.day=day;
+    return addSouvenir(entry).then(function(saved){
       if(!saved){
         td.outPhase=""; td.outLeft=0;
         saveSoon();
@@ -1958,7 +2099,7 @@ function roomScene(){
         face:P.frame?"walk2":"walk1"
       }),0);
     }
-    scene.prop=P.outing.souv ? (P.outing.souv.grid || gridFromPx(P.outing.souv.px)) : null;
+    scene.prop=P.outing.souv && !souvIsEmpty(P.outing.souv) ? (P.outing.souv.grid || gridFromPx(P.outing.souv.px)) : null;
     if(scene.prop) scene.propFollow=true;
     px=Math.max(0,px);
   } else {
@@ -2225,6 +2366,10 @@ function buildBox(panel){
       body.appendChild(el("b","pet-souvname",souvText(one,"name")));
       body.appendChild(el("p","pet-souvline",souvText(one,"line")));
       body.appendChild(el("p","pet-souvdate",LP.fmt(one.at)));
+      var from=souvFrom(one);
+      if(from) body.appendChild(el("p","pet-souvfrom",from));
+      /* the shelf is where a state plays out (a seed only grows there), so say so once on the card */
+      if(one.state) body.appendChild(el("p","pet-souvfrom",tr(stateHasGrow(one.state)?"pet.souv.grows":"pet.souv.changes")));
       if(P.save && P.save.shelf===one.id) body.appendChild(el("p","pet-souvtag",tr("pet.shelf.on")));
       card.appendChild(body);
       panel.appendChild(card);
@@ -2254,6 +2399,8 @@ function buildBox(panel){
     var tileView=souvenirView(s,P.save && P.save.shelf===s.id);
     paintSouvenir(cv,tileView ? tileView.px : s.px);
     b.appendChild(cv);
+    /* a souvenir with an item state gets a 2 x 2 mark in its corner, so the box shows which ones change */
+    if(s.state) b.appendChild(el("span","pet-tile-mark"));
     b.onclick=function(){ P.boxSel=i; openBoxItem(); };
     grid.appendChild(b);
   });
