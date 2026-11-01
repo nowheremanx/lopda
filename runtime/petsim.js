@@ -38,7 +38,7 @@
  *   wants(save)                  "food", "wash" or null, for the call icon
  *   outingToday(save, dayKey)    {hour} or null; the caller stores the hour in today.out
  *   pickOfDay(candidates, yesterdayKind, seed) one candidate or null, about half the days nothing
- *   validateSouvenir(input)      a clean {name:{zh,en}, line:{zh,en}, px: 256 chars} or null
+ *   validateSouvenir(input)      a clean {name:{zh,en}, line:{zh,en}, px: 256 chars, where?} or null
  *   builtinSouvenir(rnd, recentNames, table) one entry of table, avoiding recent names when possible
  *   pickSouvenir(rnd, table, opts)  one in-season entry: unseen first, else seen avoiding recent; always two draws
  *   souvenirNewChance(save)      min(1, souvenirNewRate / trait.outing), the chance an outing finds something new
@@ -489,7 +489,8 @@ function bilingualText(v,maxZh,maxEn){
   return {zh:zh, en:en};
 }
 /* name {zh,en}, line {zh,en}, 16 rows of exactly 16 of "0"-"3". The rows are joined into the 256-character string
-   design.md 8 stores, so the caller never has to decide what a "row" is again. */
+   design.md 8 stores, so the caller never has to decide what a "row" is again. where is the one optional field: a
+   made-up place the AI may add. A missing or bad where is dropped on its own; it never rejects the souvenir. */
 function validateSouvenir(input){
   var o=input;
   if(typeof input==="string"){
@@ -505,7 +506,9 @@ function validateSouvenir(input){
     if(typeof row!=="string" || row.length!==16 || !/^[0-3]{16}$/.test(row)) return null;
     rows.push(row);
   }
-  return {name:name, line:line, px:rows.join("")};
+  var where=bilingualText(o.where,6,20), out={name:name, line:line, px:rows.join("")};
+  if(where!==null) out.where=where;
+  return out;
 }
 /* Aim for a name the box does not already show; when every entry repeats, a repeat is better than nothing. The
    table comes from the species pack (Part B), so this file never carries the art. rnd may be a function or a seed. */
@@ -631,7 +634,8 @@ function aiPrompt(ctx){
     if(cats.length) lines.push("这周做过："+cats.join("、"));
     if(recent.length) lines.push("最近带回的纪念品："+recent.join("、"));
     if(word) lines.push("一个词："+word);
-    lines.push("请只输出 JSON：{\"name\":{\"zh\":\"不超过 8 个汉字\",\"en\":\"16 characters at most\"},\"line\":{\"zh\":\"不超过 40 个汉字\",\"en\":\"80 characters at most\"},\"px\":[\"16 行，每行 16 个 0-3 的字符\"]}");
+    lines.push("请只输出 JSON：{\"name\":{\"zh\":\"不超过 8 个汉字\",\"en\":\"16 characters at most\"},\"line\":{\"zh\":\"不超过 40 个汉字\",\"en\":\"80 characters at most\"},\"where\":{\"zh\":\"不超过 6 个汉字\",\"en\":\"20 characters at most\"},\"px\":[\"16 行，每行 16 个 0-3 的字符\"]}");
+    lines.push("where 是一个虚构的、普通的地方，比如旧书摊、桥下，不要真实地名或地址。");
     return {messages:[
       {role:"system", content:"你是一台掌上电脑里的小生物。你只会画一张 16×16 的四色像素小画，并给它起个名字、写一句话。名字和这句话都要中文、英文两版：中文只用汉字，英文只用英文字母（可以空格和基本标点）；不要其他语言，不要表情符号。只输出 JSON，不要解释。"},
       {role:"user", content:lines.join("\n")}
@@ -646,7 +650,8 @@ function aiPrompt(ctx){
   if(cats.length) lines.push("Done this week: "+cats.join(", "));
   if(recent.length) lines.push("Recent souvenirs: "+recent.join(", "));
   if(word) lines.push("One word: "+word);
-  lines.push("Reply with JSON only: {\"name\":{\"zh\":\"8 Chinese characters at most\",\"en\":\"16 characters at most\"},\"line\":{\"zh\":\"40 Chinese characters at most\",\"en\":\"80 characters at most\"},\"px\":[\"16 rows of 16 characters from 0-3\"]}");
+  lines.push("Reply with JSON only: {\"name\":{\"zh\":\"8 Chinese characters at most\",\"en\":\"16 characters at most\"},\"line\":{\"zh\":\"40 Chinese characters at most\",\"en\":\"80 characters at most\"},\"where\":{\"zh\":\"6 Chinese characters at most\",\"en\":\"20 characters at most\"},\"px\":[\"16 rows of 16 characters from 0-3\"]}");
+  lines.push("where is a made-up, ordinary place, like an old book stall or under the bridge; never a real place name or address.");
   return {messages:[
     {role:"system", content:"You are a small creature living inside a handheld computer. You draw one 16x16 four-tone pixel picture and give it a name and one line. Both the name and the line must be given in Chinese and in English: Chinese in Chinese characters only, English in Latin letters only (spaces and basic punctuation are fine). Never another language, no emoji. Reply with JSON only, no explanation."},
     {role:"user", content:lines.join("\n")}

@@ -35,6 +35,7 @@
 
 var LP=window.LP, $=LP.$, S=LP.S, tr=LP.tr, I18N=LP.I18N;
 var Pet=window.LopdaPet, Art=window.LopdaPetArt, Play=window.LopdaPetPlay, PS=window.LopdaPetState, L=window.LopdaLunar;
+var Souv=window.LopdaPetSouv;
 
 var HOUR=3600000, DAY=86400000, SCALE=2;
 var ROOM_W=162, ROOM_H=120;
@@ -281,6 +282,14 @@ function loadStorage(){
       if(!name || !line || typeof o.px!=="string" || o.px.length!==256) return;
       var st=(PS && PS.validate) ? PS.validate(o.state,o.px) : null;
       var it={id:doc.id, name:name, line:line, px:o.px, at:+o.at||0, ai:!!o.ai, day:o.day?String(o.day):""};
+      var ref=souvEntry(o.ref) ? o.ref : null;
+      if(ref) it.ref=ref;
+      var wh=souvWhere(o.where);
+      if(wh) it.where=wh;
+      if(!it.ref && !it.ai){
+        var oldRef=souvRefForName(name);
+        if(oldRef) it.ref=oldRef;
+      }
       if(st) it.state=st;
       if(isFinite(+o.grownMs) && +o.grownMs>0) it.grownMs=+o.grownMs;
       if(isFinite(+o.plantedAt) && +o.plantedAt>0) it.plantedAt=+o.plantedAt;
@@ -511,6 +520,61 @@ function storedText(v){
   if(p) return p;
   return typeof v==="string" && v ? v : null;
 }
+/* The catalogue entry behind a document's ref, or null when the id is missing or unknown (an id is never reused,
+   so an unknown one means a damaged or hand-edited document). */
+function souvEntry(id){
+  if(typeof id!=="string" || !id || !Souv || typeof Souv.byId!=="function") return null;
+  return Souv.byId(id);
+}
+/* A stored AI where is only shown when it is still a pair of two strings; anything else is ignored. */
+function souvWhere(v){
+  if(!v || typeof v!=="object" || Array.isArray(v)) return null;
+  if(typeof v.zh!=="string" || typeof v.en!=="string" || !v.zh || !v.en) return null;
+  return {zh:v.zh, en:v.en};
+}
+/* Old built-in documents have no ref: their name, in either language, is matched back to the catalogue. The table
+   is built from both language tables, not only the one on screen, so a document written in the other language
+   still finds its place. It stays in memory; the document is never written again. */
+var SOUV_NAMES=null;
+function souvNameIndex(){
+  if(SOUV_NAMES) return SOUV_NAMES;
+  var idx={}, str=I18N.STR||{}, table=(Souv && Souv.CATALOG)||[];
+  table.forEach(function(e){
+    ["zh","en"].forEach(function(lang){
+      var n=str[lang] && str[lang]["pet.souv."+e.id];
+      if(typeof n==="string" && n) idx[n]=e.id;
+    });
+  });
+  SOUV_NAMES=idx;
+  return idx;
+}
+function souvRefForName(name){
+  var idx=souvNameIndex();
+  if(typeof name==="string") return idx[name] || null;
+  if(!name || typeof name!=="object") return null;
+  if(typeof name.zh==="string" && idx[name.zh]) return idx[name.zh];
+  if(typeof name.en==="string" && idx[name.en]) return idx[name.en];
+  return null;
+}
+/* The card's one origin line, under the date. A postcard always reads as a trip; an AI find without a place
+   still says it was found while out. Anything else has no line. */
+function souvFrom(s){
+  if(!s) return "";
+  if(s.ref){
+    if(s.ref==="post") return tr("pet.from.trip");
+    var e=souvEntry(s.ref);
+    if(e && e.where) return tr("pet.from.found",{where:tr("pet.where."+e.where)});
+    return "";
+  }
+  if(s.ai){
+    if(s.where){
+      var w=s.where[I18N.lang] || s.where.zh || s.where.en || "";
+      if(w) return tr("pet.from.out",{where:w});
+    }
+    return tr("pet.from.outAny");
+  }
+  return "";
+}
 function souvText(s,field){
   var v=s && s[field], p=textPair(v);
   if(p) return String(p[I18N.lang] || p.zh || p.en || "");
@@ -569,7 +633,7 @@ function souvenirTable(pack){
   return ((pack && pack.souvenirs)||[]).map(function(e){
     var t=dirText(e,e.id);
     var first=pxFromGrid(e.grid);
-    return {id:e.id, grid:e.grid, px:first, name:t.name, line:t.line, state:packState(e.state,first)};
+    return {id:e.id, season:e.season, where:e.where, grid:e.grid, px:first, name:t.name, line:t.line, state:packState(e.state,first)};
   });
 }
 function dirText(entry,id){
@@ -603,6 +667,12 @@ function makeSouvenir(entry){
     at:now(), ai:!!(entry && entry.ai),
     day:entry && entry.day ? String(entry.day) : dayKey(now())
   };
+  if(s.ai){
+    var wh=souvWhere(entry && entry.where);
+    if(wh) s.where=wh;
+  } else if(entry && souvEntry(entry.id)){
+    s.ref=entry.id;
+  }
   if(entry && entry.state){ s.state=entry.state; s.grownMs=0; }
   return s;
 }
@@ -638,6 +708,8 @@ function addSouvenir(entry){
   if(!entry) return Promise.resolve(null);
   var s=makeSouvenir(entry);
   var data={name:s.name, line:s.line, px:s.px, at:s.at, ai:s.ai, day:s.day};
+  if(s.ref) data.ref=s.ref;
+  if(s.where) data.where=s.where;
   if(s.state){ data.state=s.state; data.grownMs=0; }
   if(P.nostore || !P.refs){
     pushSouvenir(s);
@@ -653,9 +725,22 @@ function addSouvenir(entry){
     return null;
   });
 }
+/* The refs the box remembers: only catalogue ids, so an AI find or an old unmatched document never counts as seen. */
+function souvRefsOf(list){
+  var out=[];
+  (list||[]).forEach(function(s){ if(s && s.ref && souvEntry(s.ref)) out.push(s.ref); });
+  return out;
+}
 function outingSouvenir(){
   var seed=(Pet.daySeed(P.save.born,dayKey(now()))^0x5bd1e995)>>>0;
-  return Pet.builtinSouvenir(Pet.rng(seed),recentNames(),souvenirTable(packOf(P.save)));
+  var table=souvenirTable(packOf(P.save));
+  var opts={
+    season:seasonOf(now()),
+    seen:souvRefsOf(P.souv),
+    recent:souvRefsOf(P.souv.slice(Math.max(0,P.souv.length-5))),
+    newChance:Pet.souvenirNewChance(P.save)
+  };
+  return Pet.pickSouvenir(Pet.rng(seed),table,opts);
 }
 /* ---------- the AI souvenir (design.md 7; decisions.md section 34 stays: no PAD.ai for apps) ---------- */
 var FORM_WORD={book:"bookish",walk:"walker",scholar:"scholar",diary:"diarist",monster:"little monster",plain:"plain"};
@@ -779,7 +864,7 @@ function startAiJob(td){
       if(job.done) return;
       var v=null;
       try{ v=Pet.validateSouvenir(stripFence(text)); }catch(e){ v=null; }
-      finish(v ? {name:v.name, line:v.line, px:v.px, ai:true} : null);
+      finish(v ? {name:v.name, line:v.line, px:v.px, ai:true, where:v.where} : null);
     },function(){ finish(null); });
   };
   /* a fresh usage read, so the categories are what happened since the last AI call, not boot */
@@ -2225,6 +2310,8 @@ function buildBox(panel){
       body.appendChild(el("b","pet-souvname",souvText(one,"name")));
       body.appendChild(el("p","pet-souvline",souvText(one,"line")));
       body.appendChild(el("p","pet-souvdate",LP.fmt(one.at)));
+      var from=souvFrom(one);
+      if(from) body.appendChild(el("p","pet-souvfrom",from));
       if(P.save && P.save.shelf===one.id) body.appendChild(el("p","pet-souvtag",tr("pet.shelf.on")));
       card.appendChild(body);
       panel.appendChild(card);

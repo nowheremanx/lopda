@@ -527,6 +527,38 @@ test("validateSouvenir: an extra state field is ignored, not a reason to reject 
   assert.deepEqual(Object.keys(v).sort(), ["line", "name", "px"], "only the white-listed fields survive");
 });
 
+test("validateSouvenir: where is optional, kept when bilingual, and only where is dropped when bad", () => {
+  const good = {
+    name: { zh: "红叶", en: "Red leaf" },
+    line: { zh: "一片叶子", en: "One leaf" },
+    px: rows()
+  };
+  assert.equal(P.validateSouvenir(good).where, undefined, "an old answer has no where");
+  const kept = P.validateSouvenir({ ...good, where: { zh: "桥下", en: "under a bridge" } });
+  assert.ok(kept, "a where does not reject the find");
+  assert.deepEqual(JSON.parse(JSON.stringify(kept.where)), { zh: "桥下", en: "under a bridge" });
+  const longest = P.validateSouvenir({ ...good, where: { zh: "一二三四五六", en: "x".repeat(20) } });
+  assert.equal([...longest.where.zh].length, 6);
+  assert.equal([...longest.where.en].length, 20);
+  const bad = [
+    "桥下",
+    { zh: "桥下" },
+    { en: "under a bridge" },
+    { zh: "", en: "under a bridge" },
+    { zh: "一二三四五六七", en: "under a bridge" },
+    { zh: "桥下", en: "x".repeat(21) },
+    { zh: "桥下", en: "桥下" },
+    { zh: "bridge 桥下", en: "under a bridge" },
+    ["桥下", "under a bridge"],
+    null
+  ];
+  for (const where of bad) {
+    const v = P.validateSouvenir({ ...good, where });
+    assert.ok(v, "a bad where never rejects the souvenir: " + JSON.stringify(where));
+    assert.equal(v.where, undefined, "only where is dropped: " + JSON.stringify(where));
+  }
+});
+
 test("validateSouvenir: one language, the wrong script, or a bad length is refused", () => {
   const good = {
     name: { zh: "红叶", en: "Red leaf" },
@@ -680,6 +712,20 @@ test("aiPrompt: the last five souvenir names fit, the sixth is left behind", () 
   const s = JSON.stringify(P.aiPrompt({ lang: "en", recent: ["N1", "N2", "N3", "N4", "N5", "N6"] }).messages);
   for (const n of ["N2", "N3", "N4", "N5", "N6"]) assert.ok(s.includes(n), n);
   assert.ok(!s.includes("N1"), "only the last five");
+});
+
+test("aiPrompt: the JSON example asks for an optional where and forbids a real address", () => {
+  const text = (r) => r.messages.map((m) => m.content).join("\n");
+  const zh = text(P.aiPrompt({ lang: "zh" })), en = text(P.aiPrompt({ lang: "en" }));
+  assert.ok(zh.includes('"where":{"zh":"不超过 6 个汉字","en":"20 characters at most"}'), "the Chinese example carries where");
+  assert.ok(zh.includes("旧书摊") && zh.includes("不要真实地名或地址"), "the Chinese sentence asks for a made-up place");
+  assert.ok(en.includes('"where":{"zh":"6 Chinese characters at most","en":"20 characters at most"}'), "the English example carries where");
+  assert.ok(en.includes("old book stall") && en.toLowerCase().includes("never a real place name or address"), "the English sentence asks for a made-up place");
+  /* the fields that were already there are unchanged */
+  for (const s of [zh, en]) {
+    assert.ok(s.includes('"name":{"zh"') && s.includes('"line":{"zh"') && s.includes('"px"'));
+  }
+  assert.equal(zh.split("旧书摊").length - 1, 1, "the example sentence is not repeated");
 });
 
 /* ---------- the AI's small vocabulary ---------- */

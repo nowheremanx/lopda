@@ -5974,6 +5974,88 @@ test("pet: the keepsake box is a newest-first month grid with page turns, and fi
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
+test("pet: a souvenir card says where it came from, an old document finds its place, and the card fits 331 x 359", { skip, timeout: 180000 }, async (t) => {
+  const px = (n) => String(n % 4).repeat(256);
+  const docs = [
+    { id: "origin-key", ref: "key", name: { zh: "钥匙", en: "Key" }, line: { zh: "开不了这扇门。", en: "It opens no door." },
+      at: Date.UTC(2026, 9, 1), day: "2026-10-01" },
+    { id: "origin-post", ref: "post", name: { zh: "明信片", en: "Postcard" }, line: { zh: "一张小卡片。", en: "One small card." },
+      at: Date.UTC(2026, 9, 2), day: "2026-10-02" },
+    { id: "origin-aiwhere", ref: null, ai: true, where: { zh: "桥下", en: "under the old bridge" },
+      name: { zh: "旧灯", en: "Old lamp" }, line: { zh: "一小块夜里的光。", en: "A little night light." },
+      at: Date.UTC(2026, 9, 3), day: "2026-10-03" },
+    { id: "origin-aiold", ref: null, ai: true,
+      name: { zh: "夜光", en: "Night light" }, line: { zh: "旧件没有地点。", en: "An old find with no place." },
+      at: Date.UTC(2026, 9, 4), day: "2026-10-04" },
+    /* an old built-in document: no ref, no ai; "Shell" / 贝壳 must match the catalogue by name */
+    { id: "origin-old", ref: null, name: { zh: "贝壳", en: "Shell" }, line: { zh: "海浪磨了很久。", en: "Worn by the waves." },
+      at: Date.UTC(2026, 9, 5), day: "2026-10-05" }
+  ];
+  const run = async (locale) => {
+    const zh = locale === "zh-CN";
+    const { p, errors } = await page(t, { locale, serviceWorkers: "block", viewport: { width: 375, height: 667 } });
+    await p.clock.install({ time: new Date(2026, 9, 11, 9, 0) });
+    await p.goto(base + "/runtime/?debug", { waitUntil: "networkidle" });
+    await p.waitForFunction(() => document.getElementById("savestate").textContent !== "启动中…");
+    const plan = await p.evaluate((name) => {
+      const P = window.LopdaPet, now = Date.now();
+      const s = P.fresh(now, P.rng(9));
+      s.stage = "baby"; s.name = name; s.boxSeen = 0; s.lastDay = null;
+      return s;
+    }, zh ? "芯仔" : "Chip");
+    await idb.setDoc(p, "data/users/local/pet", plan);
+    for (const d of docs) {
+      const data = { name: d.name, line: d.line, px: px(1), at: d.at, ai: !!d.ai, day: d.day };
+      if (d.ref) data.ref = d.ref;
+      if (d.where) data.where = d.where;
+      await idb.setDoc(p, "data/users/local/pet/souvenirs/" + d.id, data);
+    }
+    await p.reload({ waitUntil: "networkidle" });
+    await p.waitForFunction(() => document.getElementById("savestate").textContent !== "启动中…");
+    await p.locator("#home .app", { hasText: zh ? "宠物" : "Pet" }).click();
+    await p.locator("#v-pet:not([hidden])").waitFor();
+    await p.waitForTimeout(200);
+    await p.locator("#pet-keys .sk-start").click();
+    await p.waitForSelector("#pet-panel:not([hidden])");
+    await p.locator("#pet-panel .pet-menu").nth(2).click();
+    await p.waitForTimeout(100);
+    assert.equal(await p.locator("#pet-panel .pet-tile").count(), docs.length, "all seeded finds are in the box");
+
+    /* the smallest LCD: 331 x 359 inside the case */
+    await p.setViewportSize({ width: 375, height: 587 });
+    await p.waitForTimeout(150);
+    const expected = zh ? {
+      "钥匙": "在路边捡到的", "明信片": "旅行回来带的", "旧灯": "出门在桥下找到的",
+      "夜光": "出门时找到的", "贝壳": "在河滩捡到的"
+    } : {
+      "Key": "Found at the roadside", "Postcard": "Brought back from a trip", "Old lamp": "Found while out at under the old bridge",
+      "Night light": "Found while out", "Shell": "Found at the riverbank"
+    };
+    for (const [name, line] of Object.entries(expected)) {
+      await p.locator(`#pet-panel .pet-tile[aria-label^="${name}"]`).click();
+      await p.waitForSelector("#pet-panel .pet-souvfrom");
+      assert.equal(await p.locator("#pet-panel .pet-souvfrom").textContent(), line, name);
+      const fit = await p.evaluate(() => {
+        const panel = document.getElementById("pet-panel");
+        const card = document.querySelector("#pet-panel .pet-souv").getBoundingClientRect();
+        const from = document.querySelector("#pet-panel .pet-souvfrom").getBoundingClientRect();
+        const view = document.getElementById("v-pet");
+        return { panel: panel.getBoundingClientRect().bottom, card: card.bottom, from: from.bottom,
+          panelScroll: panel.scrollHeight, panelClient: panel.clientHeight, viewScroll: view.scrollHeight, viewClient: view.clientHeight };
+      });
+      assert.ok(fit.card <= fit.panel + 0.5 && fit.from <= fit.panel + 0.5, name + " fits inside the panel");
+      assert.ok(fit.panelScroll <= fit.panelClient, name + " does not scroll the panel");
+      assert.ok(fit.viewScroll <= fit.viewClient, name + " does not scroll the pet screen");
+      await p.evaluate(() => { LOPDA_DEBUG.setButton("b", true); LOPDA_DEBUG.setButton("b", false); });
+      await p.waitForTimeout(90);
+      assert.ok(await p.locator("#pet-panel .pet-tile").first().isVisible(), "B returns to the box grid");
+    }
+    assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+  };
+  await run("zh-CN");
+  await run("en-US");
+});
+
 test("pet: the AI souvenir is made and saved with the pet screen never opened; opening plays the short walk-back", { skip, timeout: 120000 }, async (t) => {
   const { p, errors } = await page(t, { locale: "zh-CN", serviceWorkers: "block", viewport: { width: 390, height: 844 } });
   await p.clock.install({ time: new Date(2026, 9, 11, 9, 0) });

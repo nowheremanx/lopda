@@ -484,6 +484,9 @@
       "pet.where.street": "路边", "pet.where.busstop": "车站", "pet.where.drawer": "抽屉里",
       "pet.where.roof": "屋顶",
 
+      "pet.from.found": "在{where}捡到的", "pet.from.trip": "旅行回来带的",
+      "pet.from.out": "出门在{where}找到的", "pet.from.outAny": "出门时找到的",
+
       "pet.souv.shell": "贝壳", "pet.souv.shell.line": "海浪磨了很久，还留着一点光。",
       "pet.souv.leaf": "红叶", "pet.souv.leaf.line": "从窗外飘进来的，叶脉还很清楚。",
       "pet.souv.post": "明信片", "pet.souv.post.line": "它去过的地方，都在这一小张纸上。",
@@ -1123,6 +1126,9 @@
       "pet.where.park": "the park", "pet.where.mailbox": "the mailbox", "pet.where.doorstep": "the doorstep",
       "pet.where.street": "the roadside", "pet.where.busstop": "the bus stop", "pet.where.drawer": "a drawer",
       "pet.where.roof": "the roof",
+
+      "pet.from.found": "Found at {where}", "pet.from.trip": "Brought back from a trip",
+      "pet.from.out": "Found while out at {where}", "pet.from.outAny": "Found while out",
 
       "pet.souv.shell": "Shell", "pet.souv.shell.line": "Worn smooth by the waves.",
       "pet.souv.leaf": "Red leaf", "pet.souv.leaf.line": "A little red, veins still clear.",
