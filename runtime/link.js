@@ -16,6 +16,8 @@
  *   on(fn) -> off()            fn({type:"message", data}) | fn({type:"close", reason})
  *   busy()                     true while pairing or open
  *   levels()                   the last tone dB values and noise floor, for Radio's meter
+ *   setTxMode(m), txMode()     "record" (default) or "playback": close the mic while sending (Radio's meter page, for
+ *                              phones whose speaker goes quiet while the mic is open)
  *
  * ?linkfake swaps the sound for a BroadcastChannel between tabs of one browser, with the
  * session's own air time; &linkloss=0.2 drops that share of the frames. The session layer
@@ -172,7 +174,27 @@ function fakeTransport(){
 
 function acousticTransport(){
   var T={stream:null, src:null, proc:null, silent:null, ctx:null, sr:48000, rx:null,
-    n:0, floor:null, pdb:null, txUntil:0, onHeard:null, onBusy:null, initGen:0};
+    n:0, floor:null, pdb:null, txUntil:0, onHeard:null, onBusy:null, initGen:0, sentRecent:[], live:false, txMode:"record", reopen:0};
+
+  /* How late our own sound reaches the receiver, in seconds: the speaker's output latency, the
+     microphone's input latency and the ScriptProcessor's block (T.n counts samples already handed
+     to us, not the ones still in the block being filled). Browsers report the first two poorly or
+     not at all (iOS gives 0), so a fixed 60 ms is added; the mute span is stretched by all of it. */
+  function lagS(ctx){
+    return 4096/ctx.sampleRate+(ctx.baseLatency||0)+(ctx.outputLatency||0)+0.06;
+  }
+  /* A loud room can still bring our own frame back after the mute ends (an echo off a wall, a
+     phone case resonating). A frame byte-identical to one we sent in the last 20 s is ours: the
+     peer's frames differ in seq/ack and nonce, so a real frame never matches. */
+  function keyOf(bytes){ return Array.prototype.join.call(bytes,","); }
+  function isOwn(bytes){
+    var now=Date.now(), k=keyOf(bytes), i, own=false;
+    for(i=T.sentRecent.length-1;i>=0;i--){
+      if(now-T.sentRecent[i].at>20000) T.sentRecent.splice(i,1);
+      else if(T.sentRecent[i].k===k) own=true;
+    }
+    return own;
+  }
 
   function dropNodes(){
     if(T.proc){
@@ -204,6 +226,7 @@ function acousticTransport(){
       T.n=n+d.length;
       frames=T.rx.frames();
       for(i=0;i<frames.length;i++){
+        if(isOwn(frames[i].bytes)){ dlog("own echo dropped"); continue; }
         if(T.onHeard) T.onHeard(frames[i].bytes, frames[i].rate);
       }
       /* carrier sense: a slow floor under the strongest tone; a real burst jumps 10 dB above it */
@@ -213,6 +236,8 @@ function acousticTransport(){
       if(T.floor===null) T.floor=max;
       else T.floor=max<T.floor ? max : T.floor+0.5;
       T.pdb=tw.pdb;
+      /* our own burst (and its tail) is not someone else talking */
+      if(Date.now()<T.txUntil) return;
       if(max>T.floor+10 && tw.rmsDb>AC.MIN_RMS && T.onBusy) T.onBusy(Date.now());
     };
   }
@@ -254,6 +279,7 @@ function acousticTransport(){
           LP.setSession("ambient");
           return false;
         }
+        T.live=true;
         $("mic-mark").hidden=false;
         LP.micRoute(true);
         return true;
@@ -273,6 +299,7 @@ function acousticTransport(){
     send:function(bytes, rate, done){
       var ctx=T.ctx;
       if(!ctx || !T.stream){ setTimeout(function(){ if(done) done(); },0); return; }
+      if(T.txMode==="playback"){ sendPlayback(bytes, rate, done); return; }
       var samples=AC.synth(bytes,{sampleRate:ctx.sampleRate, symbolMs:rate, amp:0.9});
       var buf=ctx.createBuffer(1,samples.length,ctx.sampleRate);
       if(buf.copyToChannel) buf.copyToChannel(samples,0); else buf.getChannelData(0).set(samples);
@@ -280,11 +307,12 @@ function acousticTransport(){
       src.buffer=buf;
       /* straight to the speaker, not through LP's volume: a fixed level, like a real modem */
       src.connect(ctx.destination);
-      var sr=ctx.sampleRate, T0=ctx.currentTime+0.05, dur=samples.length/sr;
+      var sr=ctx.sampleRate, T0=ctx.currentTime+0.05, dur=samples.length/sr, lag=lagS(ctx);
       var from=T.n+(T0-0.05-ctx.currentTime)*sr;
-      var to=T.n+(T0+dur+0.25-ctx.currentTime)*sr;
+      var to=T.n+(T0+dur+0.25+lag-ctx.currentTime)*sr;
       if(T.rx) T.rx.mute(from,to);
-      T.txUntil=Date.now()+(T0-ctx.currentTime)*1000+dur*1000+270;
+      T.txUntil=Date.now()+(T0-ctx.currentTime+dur+0.25+lag)*1000;
+      T.sentRecent.push({k:keyOf(bytes), at:Date.now()});
       var called=false, safety=0;
       function fin(){
         if(called) return;
@@ -299,13 +327,13 @@ function acousticTransport(){
       try{ src.start(T0); }catch(e){ fin(); }
     },
     stop:function(){
-      var s=T.stream;
-      T.initGen++;
-      T.stream=null;
+      var s=T.stream, live=T.live;
+      T.initGen++; T.reopen++;
+      T.stream=null; T.live=false;
       dropNodes();
-      T.rx=null; T.floor=null; T.pdb=null; T.txUntil=0;
-      if(!s) return; /* nothing was live: leave the page's audio session alone */
-      try{ s.getTracks().forEach(function(t){ try{ t.stop(); }catch(e){} }); }catch(e){}
+      T.rx=null; T.floor=null; T.pdb=null; T.txUntil=0; T.sentRecent=[];
+      if(!live) return; /* nothing was live: leave the page's audio session alone */
+      if(s) try{ s.getTracks().forEach(function(t){ try{ t.stop(); }catch(e){} }); }catch(e){}
       $("mic-mark").hidden=true;
       LP.setSession("ambient");
       LP.micRoute(false);
@@ -313,8 +341,52 @@ function acousticTransport(){
     levels:function(){
       return T.pdb ? {pdb:T.pdb.slice(0), floor:T.floor} : null;
     },
-    txUntil:function(){ return T.txUntil; }
+    txUntil:function(){ return T.txUntil; },
+    setTxMode:function(m){ T.txMode=m==="playback" ? "playback" : "record"; },
+    txMode:function(){ return T.txMode; }
   };
+
+  /* The "playback" send, a switch on Radio's meter page for phones whose speaker goes quiet (or to the earpiece) while
+     the microphone is open: close the microphone, play in "playback", then open it again (the old Radio did this for
+     every frame). Slow: the reopen takes a few hundred ms, and a reply that comes sooner is lost and sent again. */
+  function sendPlayback(bytes, rate, done){
+    var ctx=T.ctx, s=T.stream, my=++T.reopen;
+    dropNodes();
+    T.stream=null; T.rx=null;
+    try{ s.getTracks().forEach(function(t){ try{ t.stop(); }catch(e){} }); }catch(e){}
+    LP.setSession("playback");
+    var samples=AC.synth(bytes,{sampleRate:ctx.sampleRate, symbolMs:rate, amp:0.9});
+    var buf=ctx.createBuffer(1,samples.length,ctx.sampleRate);
+    if(buf.copyToChannel) buf.copyToChannel(samples,0); else buf.getChannelData(0).set(samples);
+    var src=ctx.createBufferSource(), dur=samples.length/ctx.sampleRate;
+    src.buffer=buf;
+    src.connect(ctx.destination);
+    T.txUntil=Date.now()+(dur+0.3)*1000;
+    T.sentRecent.push({k:keyOf(bytes), at:Date.now()});
+    var called=false, safety=0;
+    function fin(){
+      if(called) return;
+      called=true;
+      clearTimeout(safety);
+      src.onended=null;
+      try{ src.disconnect(); }catch(e){}
+      if(done) done();
+      if(my!==T.reopen) return;
+      LP.setSession("play-and-record");
+      var p;
+      try{
+        p=navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false,channelCount:1},video:false});
+      }catch(e){ p=Promise.reject(e); }
+      Promise.resolve(p).then(function(stream){
+        if(my!==T.reopen){ try{ stream.getTracks().forEach(function(t){ try{ t.stop(); }catch(e){} }); }catch(e){} return; }
+        T.stream=stream;
+        try{ wire(LP.SND.ctx||ctx); }catch(e){}
+      },function(){});
+    }
+    src.onended=fin;
+    safety=setTimeout(fin,(dur+1)*1000);
+    try{ src.start(ctx.currentTime+0.05); }catch(e){ fin(); }
+  }
 }
 
 var TRANSPORT=FAKE ? fakeTransport() : acousticTransport();
@@ -515,6 +587,9 @@ function on(fn){
 function busy(){ return STATE==="pairing" || STATE==="open"; }
 
 function levels(){ return TRANSPORT.levels(); }
+/* "record" (default: the microphone stays open while sending) or "playback" (closed while sending); Radio's meter page */
+function setTxMode(m){ if(TRANSPORT.setTxMode) TRANSPORT.setTxMode(m); }
+function txMode(){ return TRANSPORT.txMode ? TRANSPORT.txMode() : "record"; }
 
 /* the overlay's keys: B cancels, A does nothing; every key stops at the overlay */
 LP.padRoute("link",function(b,down){
@@ -534,7 +609,7 @@ document.addEventListener("visibilitychange",function(){
   if(document.hidden && STATE!=="closed") close("home");
 });
 
-var api={open:open, send:send, close:close, on:on, busy:busy, levels:levels};
+var api={open:open, send:send, close:close, on:on, busy:busy, levels:levels, setTxMode:setTxMode, txMode:txMode};
 Object.defineProperty(api,"state",{get:function(){ return STATE; }});
 Object.defineProperty(api,"initiator",{get:function(){ return INITIATOR; }});
 Object.defineProperty(api,"rate",{get:function(){ return RATE; }});
