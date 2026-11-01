@@ -553,7 +553,7 @@ function startSendTest(){
   if(!ctx){ toast(tr("radio.noaudio")); restartMeterLater(); return; }
   LP.wake();
   var data=testBytes(), samples;
-  try{ samples=AC.synth(data,{sampleRate:ctx.sampleRate,symbolMs:R.test.rate,amp:0.9,leadMs:150,tailMs:150}); }
+  try{ samples=AC.synth(data,{sampleRate:ctx.sampleRate,symbolMs:R.test.rate,amp:0.45,leadMs:150,tailMs:150}); }
   catch(e){ LP.setSession("ambient"); R.test.state=tr("radio.meter.fail"); sfx("err"); renderMeter(); restartMeterLater(); return; }
   var buf;
   try{

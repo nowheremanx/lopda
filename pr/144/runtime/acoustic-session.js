@@ -41,7 +41,9 @@
 })(typeof window!=="undefined" ? window : (typeof globalThis!=="undefined" ? globalThis : this), function(LINK){
 "use strict";
 
-var REPLY_MS=600;              /* one turn of the channel: answer a frame after this; the sender mutes its own burst plus the mic latency (~150 ms) for 250 ms more, so a quicker answer loses its preamble */
+var REPLY_MS=1500;             /* one turn of the channel: answer a frame after this. An iPhone sends with its microphone
+                                  closed (link.js, playback) and needs 1-2 s to have it running again (two-iPhone test,
+                                  iOS 27), so a quicker answer lands while the sender is still deaf */
 var QUIET_MS=300;              /* carrier sense: nothing goes out this soon after energy */
 var LISTEN_MIN=800, LISTEN_MAX=2400, BACKOFF_MIN=300, BACKOFF_MAX=1200;
 var TRIES=5, HELLO_TRIES_PER_RATE=3;

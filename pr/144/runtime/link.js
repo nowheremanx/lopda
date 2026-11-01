@@ -32,6 +32,9 @@ var STATE="closed", INITIATOR=false, RATE=null, SESSION=null, TIMER=0, GEN=0;
 var LISTENERS=[], PENDING_SENDS={}, PENDING_OPEN=null, LOCAL_REASON="home";
 var PAIR_START=0, LABEL="", OVERLAY=false, PAD_ON=false, PUMPING=false, PUMP_AGAIN=false;
 var FAKE=/[?&]linkfake\b/.test(location.search);
+/* The burst's fixed level (not the handheld's volume, like a real modem). 0.9 was too harsh on the first iPhone test;
+   about half is still heard at 10-30 cm with the phone's volume up. */
+var TX_AMP=0.45;
 
 function dlog(s){
   var d=window.LOPDA_DEBUG;
@@ -345,7 +348,7 @@ function acousticTransport(){
       /* a context that is not running plays nothing: ask it, and count the burst for the diagnostic line */
       if(ctx.state!=="running"){ LP.wake(); T.quietTx++; }
       if(T.txMode==="playback"){ sendPlayback(bytes, rate, done); return; }
-      var samples=AC.synth(bytes,{sampleRate:ctx.sampleRate, symbolMs:rate, amp:0.9});
+      var samples=AC.synth(bytes,{sampleRate:ctx.sampleRate, symbolMs:rate, amp:TX_AMP});
       var buf=ctx.createBuffer(1,samples.length,ctx.sampleRate);
       if(buf.copyToChannel) buf.copyToChannel(samples,0); else buf.getChannelData(0).set(samples);
       var src=ctx.createBufferSource();
@@ -405,7 +408,7 @@ function acousticTransport(){
     ctx=LP.audio()||T.ctx;
     LP.wake();
     if(ctx.state!=="running") T.quietTx++;
-    var samples=AC.synth(bytes,{sampleRate:ctx.sampleRate, symbolMs:rate, amp:0.9});
+    var samples=AC.synth(bytes,{sampleRate:ctx.sampleRate, symbolMs:rate, amp:TX_AMP});
     var buf=ctx.createBuffer(1,samples.length,ctx.sampleRate);
     if(buf.copyToChannel) buf.copyToChannel(samples,0); else buf.getChannelData(0).set(samples);
     var src=ctx.createBufferSource(), dur=samples.length/ctx.sampleRate;
