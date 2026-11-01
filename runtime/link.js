@@ -3,7 +3,7 @@
  * One microphone stream and one speaker for the whole link: the session layer never sees
  * the hardware, it only asks for bursts and hands us frames. The runtime draws the pairing
  * screen itself (over whatever is in front, like PAD.camera.snap) and the status bar keeps
- * a small antenna while the link is open.
+ * a small antenna while the link is open: waves go out from it while we send and come in while we hear.
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  *
  * LP.link:
@@ -16,6 +16,7 @@
  *   on(fn) -> off()            fn({type:"message", data}) | fn({type:"close", reason})
  *   busy()                     true while pairing or open
  *   levels()                   the last tone dB values and noise floor, for Radio's meter
+ *   air()                      "talk" | "hear" | "" while open: who is on the air now (Radio's chat page)
  *   setTxMode(m), txMode()     "playback" (default where navigator.audioSession exists: close the mic while sending,
  *                              or iOS plays through the earpiece) or "record" (keep it open); Radio's meter page
  *
@@ -86,9 +87,31 @@ function hideOverlay(){
   if(PAD_ON){ PAD_ON=false; LP.releaseButtons(); LP.showPad(false); }
 }
 function showMark(){ var m=$("link-mark"); if(m) m.hidden=false; }
-function hideMark(){ var m=$("link-mark"); if(m){ m.hidden=true; m.classList.remove("tx"); } }
-function txOn(){ var m=$("link-mark"); if(m) m.classList.add("tx"); var w=$("link-wave"); if(w) w.classList.add("tx"); }
-function txOff(){ var m=$("link-mark"); if(m) m.classList.remove("tx"); var w=$("link-wave"); if(w) w.classList.remove("tx"); }
+function hideMark(){ var m=$("link-mark"); if(m){ m.hidden=true; m.classList.remove("tx"); m.classList.remove("rx"); } TALKING=false; HEAR_UNTIL=0; }
+function txOn(){ TALKING=true; var m=$("link-mark"); if(m) m.classList.add("tx"); var w=$("link-wave"); if(w) w.classList.add("tx"); }
+function txOff(){ TALKING=false; var m=$("link-mark"); if(m) m.classList.remove("tx"); var w=$("link-wave"); if(w) w.classList.remove("tx"); }
+/* The other side is on the air: carrier sense fires on every microphone block (about 85 ms) while its burst
+   lasts, so the mark's incoming waves stay on until 400 ms after the last one. Only while the link is open:
+   during pairing the overlay has its own wave. */
+var TALKING=false, HEAR_UNTIL=0, HEAR_TIMER=0;
+function hearOn(now){
+  if(STATE!=="open") return;
+  HEAR_UNTIL=now+400;
+  var m=$("link-mark"); if(m) m.classList.add("rx");
+  if(!HEAR_TIMER) HEAR_TIMER=setTimeout(hearCheck,420);
+}
+function hearCheck(){
+  HEAR_TIMER=0;
+  var left=HEAR_UNTIL-Date.now();
+  if(left>0){ HEAR_TIMER=setTimeout(hearCheck,left+20); return; }
+  var m=$("link-mark"); if(m) m.classList.remove("rx");
+}
+/* for Radio's chat page only (never through PAD): "talk" while our burst plays, "hear" while the other side's does */
+function air(){
+  if(STATE!=="open") return "";
+  if(TALKING) return "talk";
+  return Date.now()<HEAR_UNTIL ? "hear" : "";
+}
 
 function diagText(){
   var d=TRANSPORT.diag();
@@ -632,7 +655,7 @@ function open(o){
     dlog("heard "+frameName(bytes));
     SESSION.heard(bytes, Date.now(), rate);
   });
-  TRANSPORT.onBusy(function(now){ if(SESSION) SESSION.busy(now); });
+  TRANSPORT.onBusy(function(now){ if(SESSION) SESSION.busy(now); hearOn(now); });
 
   var p=new Promise(function(resolve){ PENDING_OPEN=resolve; });
   showOverlay();
@@ -700,7 +723,7 @@ document.addEventListener("visibilitychange",function(){
   if(document.hidden && STATE!=="closed") close("home");
 });
 
-var api={open:open, send:send, close:close, on:on, busy:busy, levels:levels, setTxMode:setTxMode, txMode:txMode, diag:diag};
+var api={open:open, send:send, close:close, on:on, busy:busy, levels:levels, setTxMode:setTxMode, txMode:txMode, diag:diag, air:air};
 Object.defineProperty(api,"state",{get:function(){ return STATE; }});
 Object.defineProperty(api,"initiator",{get:function(){ return INITIATOR; }});
 Object.defineProperty(api,"rate",{get:function(){ return RATE; }});
