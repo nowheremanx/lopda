@@ -3,10 +3,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { runScript } from "./helpers.mjs";
 
-/* Part E raises these as the art lands; the final values are 300 / 60 / 60. */
-const MIN_TOTAL = 83;
-const MIN_PER_SEASON = 0;
-const MIN_ANY = 0;
+/* The final values: 300 finds, at least 60 per season and at least 60 any-season. */
+const MIN_TOTAL = 300;
+const MIN_PER_SEASON = 60;
+const MIN_ANY = 60;
 
 /* The first 23 finds were drawn before the three-tone rule; their pixels never change, so the rule skips them. */
 const FIRST_23 = new Set(["shell", "pebble", "boat", "leaf", "feather", "cone", "acorn", "seed", "post", "button", "key",
