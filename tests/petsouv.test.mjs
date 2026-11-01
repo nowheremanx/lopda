@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { runScript } from "./helpers.mjs";
 
 /* Part E raises these as the art lands; the final values are 300 / 60 / 60. */
-const MIN_TOTAL = 43;
+const MIN_TOTAL = 83;
 const MIN_PER_SEASON = 0;
 const MIN_ANY = 0;
 
