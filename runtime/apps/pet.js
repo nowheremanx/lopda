@@ -690,15 +690,21 @@ function souvForDay(day){
   for(var i=P.souv.length-1;i>=0;i--) if(P.souv[i].day && P.souv[i].day===day) return P.souv[i];
   return null;
 }
+/* The day's outing is on its way back and the walk-back is left in today for the next visit. souvId is the souvenir
+   it brings, or null for an empty-handed outing; both write out / back the same way. */
+function markDayBack(hour,day,souvId){
+  if(!P.save || !P.save.today || P.save.today.day!==day) return false;
+  var td=P.save.today;
+  td.out=hour; td.outHour=hour; td.back=false;
+  td.outPhase="back"; td.outLeft=4; td.outSouv=souvId==null ? null : souvId;
+  saveNow();
+  return true;
+}
 /* The souvenir document can land while the pet save does not (quota, a closed page). The next run finds it by its day
    and only marks the day, instead of bringing a second one. */
 function markDayWithSouvenir(s,hour,day){
-  if(!s || !P.save || !P.save.today || P.save.today.day!==day) return false;
-  var td=P.save.today;
-  td.out=hour; td.outHour=hour; td.back=false;
-  td.outPhase="back"; td.outLeft=4; td.outSouv=s.id;
-  saveNow();
-  return true;
+  if(!s) return false;
+  return markDayBack(hour,day,s.id);
 }
 /* Returns a promise for the saved souvenir, or null when the write failed. The souvenir enters the box only after
    the document landed: the programme marks the trip/outing done on that promise, so a failed write is retried on
@@ -731,16 +737,24 @@ function souvRefsOf(list){
   (list||[]).forEach(function(s){ if(s && s.ref && souvEntry(s.ref)) out.push(s.ref); });
   return out;
 }
+/* An empty-handed outing: the weekly roll said no. This frozen marker is not a souvenir document, so finishOuting
+   and decideOuting can tell it from a failed write without a new string or message. */
+var EMPTY_SOUV=Object.freeze({empty:true});
+function souvIsEmpty(v){ return !!(v && v.empty); }
 function outingSouvenir(){
   var seed=(Pet.daySeed(P.save.born,dayKey(now()))^0x5bd1e995)>>>0;
+  var r=Pet.rng(seed);
+  /* the first draw of the day's own seed decides an empty day, so a reload (or a different box) never turns one
+     into a souvenir day; only a yes draws the two pickSouvenir needs */
+  if(r()>=Pet.souvenirLocalChance(P.save)) return EMPTY_SOUV;
   var table=souvenirTable(packOf(P.save));
   var opts={
     season:seasonOf(now()),
     seen:souvRefsOf(P.souv),
     recent:souvRefsOf(P.souv.slice(Math.max(0,P.souv.length-5))),
-    newChance:Pet.souvenirNewChance(P.save)
+    newChance:1
   };
-  return Pet.pickSouvenir(Pet.rng(seed),table,opts);
+  return Pet.pickSouvenir(r,table,opts);
 }
 /* ---------- the AI souvenir (design.md 7; decisions.md section 34 stays: no PAD.ai for apps) ---------- */
 var FORM_WORD={book:"bookish",walk:"walker",scholar:"scholar",diary:"diarist",monster:"little monster",plain:"plain"};
@@ -933,7 +947,7 @@ function markOutingDone(o){
 function finishOuting(){
   var o=P.outing; if(!o || o.done) return;
   o.done=true;
-  if(o.saved){ markOutingDone(o); return; }
+  if(o.saved || souvIsEmpty(o.souv)){ markOutingDone(o); return; }
   addSouvenir(o.souv).then(function(saved){
     if(saved) markOutingDone(o);
     else {
@@ -987,10 +1001,14 @@ function decideOuting(hour, day){
     var entry=res ? res.entry : null;
     var td=P.save && P.save.today;
     if(!td || td.day!==day || td.out!=null || td.back) return false;
-    var pickSouv=entry || outingSouvenir();
-    if(!pickSouv) return false;
-    pickSouv.day=day;
-    return addSouvenir(pickSouv).then(function(saved){
+    if(!entry){
+      entry=outingSouvenir();
+      /* an empty day is marked done at once: no document, and the next visit plays the normal walk-back */
+      if(souvIsEmpty(entry)) return markDayBack(hour,day,null);
+      if(!entry) return false;
+    }
+    entry.day=day;
+    return addSouvenir(entry).then(function(saved){
       if(!saved){
         td.outPhase=""; td.outLeft=0;
         saveSoon();
@@ -2043,7 +2061,7 @@ function roomScene(){
         face:P.frame?"walk2":"walk1"
       }),0);
     }
-    scene.prop=P.outing.souv ? (P.outing.souv.grid || gridFromPx(P.outing.souv.px)) : null;
+    scene.prop=P.outing.souv && !souvIsEmpty(P.outing.souv) ? (P.outing.souv.grid || gridFromPx(P.outing.souv.px)) : null;
     if(scene.prop) scene.propFollow=true;
     px=Math.max(0,px);
   } else {

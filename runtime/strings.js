@@ -1122,13 +1122,13 @@
       "pet.sk.lookup": "Look",
       "pet.tag": "new", "pet.restart.done": "A new start.",
 
-      "pet.where.riverbank": "the riverbank", "pet.where.windowsill": "the windowsill", "pet.where.yard": "the backyard",
-      "pet.where.park": "the park", "pet.where.mailbox": "the mailbox", "pet.where.doorstep": "the doorstep",
-      "pet.where.street": "the roadside", "pet.where.busstop": "the bus stop", "pet.where.drawer": "a drawer",
-      "pet.where.roof": "the roof",
+      "pet.where.riverbank": "by the riverbank", "pet.where.windowsill": "on the windowsill", "pet.where.yard": "in the backyard",
+      "pet.where.park": "in the park", "pet.where.mailbox": "by the mailbox", "pet.where.doorstep": "on the doorstep",
+      "pet.where.street": "by the roadside", "pet.where.busstop": "at the bus stop", "pet.where.drawer": "in a drawer",
+      "pet.where.roof": "on the roof",
 
-      "pet.from.found": "Found at {where}", "pet.from.trip": "Brought back from a trip",
-      "pet.from.out": "Found while out at {where}", "pet.from.outAny": "Found while out",
+      "pet.from.found": "Found {where}", "pet.from.trip": "Brought back from a trip",
+      "pet.from.out": "Found on a walk: {where}", "pet.from.outAny": "Found while out",
 
       "pet.souv.shell": "Shell", "pet.souv.shell.line": "Worn smooth by the waves.",
       "pet.souv.leaf": "Red leaf", "pet.souv.leaf.line": "A little red, veins still clear.",

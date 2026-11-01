@@ -4725,6 +4725,23 @@ test("pet: one AI souvenir a day, valid or silently built-in, never a note, date
     title: "秘密书名", author: "", lang: "zh", chars: 1000, lens: 1, imgs: 0, added: Date.now() - 9 * 86400000,
     opened: Date.now() - 8 * 86400000, pos: { ch: 0, p: 0, c: 0 }, pct: 10, marks: []
   });
+  /* the egg's born time is chosen so tomorrow's weekly roll brings a built-in souvenir, so the garbage-answer day
+     checks the fallback without depending on how many seconds the boot took */
+  const egg = await p.evaluate(() => {
+    const P = window.LopdaPet, start = Date.now(), day = new Date(start + 86400000);
+    const key = P.dayKey(day.getTime(), -day.getTimezoneOffset());
+    for (let k = 0; k < 300; k++) {
+      const s = P.fresh(start - k * 1000, P.rng(77));
+      if (!P.outingToday(s, key)) continue;
+      const seed = (P.daySeed(s.born, key) ^ 0x5bd1e995) >>> 0;
+      if (P.rng(seed)() >= P.souvenirLocalChance(s)) continue;
+      s.last = start;
+      return s;
+    }
+    return null;
+  });
+  assert.ok(egg, "found an egg whose next day's weekly roll brings a souvenir");
+  await idb.setDoc(p, "data/users/local/pet", egg);
   await p.reload({ waitUntil: "networkidle" });
   await boot();
   await p.waitForFunction(() => LP.dict && LP.dict.bookSummary && LP.dict.bookSummary().n === 1);
@@ -4806,6 +4823,74 @@ test("pet: one AI souvenir a day, valid or silently built-in, never a note, date
   await p.click("#home-key");
   await p.waitForTimeout(300);
   assert.equal(await p.evaluate(() => window.__stopped), 1, "leaving stops the one AI request");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("pet: an empty-handed outing marks the day done, writes no souvenir, and stays empty after a reload", { skip, timeout: 90000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN", serviceWorkers: "block", viewport: { width: 390, height: 844 } });
+  await p.clock.install({ time: new Date(2026, 9, 11, 9, 0) });
+  await p.goto(base + "/runtime/?debug", { waitUntil: "networkidle" });
+  await p.waitForFunction(() => document.getElementById("savestate").textContent !== "启动中…");
+  /* a baby with a known born time, on a day whose outing is real and whose weekly roll says no: the first draw of
+     outingSouvenir's own seed is what the page computes, so the test picks a day rather than stubbing the rule */
+  const plan = await p.evaluate(() => {
+    const P = window.LopdaPet;
+    const d = new Date(); d.setHours(9, 0, 0, 0);
+    const start = d.getTime(), born = start - 5 * 86400000;
+    const s = P.fresh(born, P.rng(77));
+    s.stage = "baby"; s.opened = 2; s.hunger = 4; s.joy = 4; s.lastDay = null; s.name = "芯仔";
+    for (let i = 0; i < 60; i++) {
+      const t = start + i * 86400000, dt = new Date(t);
+      const key = P.dayKey(t, -dt.getTimezoneOffset());
+      const o = P.outingToday(s, key);
+      if (!o) continue;
+      const seed = (P.daySeed(s.born, key) ^ 0x5bd1e995) >>> 0;
+      if (P.rng(seed)() < P.souvenirLocalChance(s)) continue;
+      return { save: s, key, hour: o.hour, at: t, outingAt: new Date(t).setHours(o.hour, 5, 0, 0) };
+    }
+    return null;
+  });
+  assert.ok(plan, "found a day with an outing and an empty weekly roll");
+  plan.save.last = plan.at;
+  plan.save.today.day = null;
+  plan.save.boxSeen = 0;
+  await idb.setDoc(p, "data/users/local/pet", plan.save);
+
+  /* boot at the outing hour with the pet screen closed: the background path decides the empty day */
+  await p.clock.setSystemTime(new Date(plan.outingAt));
+  await p.reload({ waitUntil: "networkidle" });
+  await p.waitForFunction(() => document.getElementById("savestate").textContent !== "启动中…");
+  await p.waitForFunction((hour) => {
+    const s = LOPDA_DEBUG.pet.save();
+    return s && s.today && s.today.out === hour;
+  }, plan.hour, { timeout: 10000 });
+  let save = await p.evaluate(() => LOPDA_DEBUG.pet.save());
+  assert.equal(save.today.back, false, "not back yet: the walk-back is left for the next visit");
+  assert.equal(save.today.outPhase, "back");
+  assert.equal(save.today.outLeft, 4);
+  assert.equal(save.today.outSouv, null, "an empty day brings no souvenir id");
+  assert.equal((await idb.under(p, "data/users/local/pet/souvenirs")).length, 0, "no souvenir document was written");
+
+  /* opening plays the normal walk-back and marks the day done without asking for a write */
+  await p.locator("#home .app", { hasText: "宠物" }).click();
+  await p.locator("#v-pet:not([hidden])").waitFor();
+  await p.waitForFunction(() => LOPDA_DEBUG.pet.save().today.back === true, null, { timeout: 8000 });
+  save = await p.evaluate(() => LOPDA_DEBUG.pet.save());
+  assert.equal(save.today.out, plan.hour);
+  assert.equal(save.today.outPhase, "");
+  assert.equal(save.today.outSouv, null);
+  assert.equal((await idb.under(p, "data/users/local/pet/souvenirs")).length, 0, "still no souvenir after the walk-back");
+
+  /* a reload keeps the day done and still empty */
+  await p.click("#home-key");
+  await p.reload({ waitUntil: "networkidle" });
+  await p.waitForFunction(() => document.getElementById("savestate").textContent !== "启动中…");
+  await p.waitForFunction(() => window.LOPDA_DEBUG && LOPDA_DEBUG.pet && LOPDA_DEBUG.pet.save());
+  save = await p.evaluate(() => LOPDA_DEBUG.pet.save());
+  assert.equal(save.today.out, plan.hour, "the day stays done");
+  assert.equal(save.today.back, true);
+  assert.equal(save.today.outPhase, "");
+  assert.equal((await idb.under(p, "data/users/local/pet/souvenirs")).length, 0, "the empty day never becomes a souvenir day");
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
@@ -6029,8 +6114,8 @@ test("pet: a souvenir card says where it came from, an old document finds its pl
       "钥匙": "在路边捡到的", "明信片": "旅行回来带的", "旧灯": "出门在桥下找到的",
       "夜光": "出门时找到的", "贝壳": "在河滩捡到的"
     } : {
-      "Key": "Found at the roadside", "Postcard": "Brought back from a trip", "Old lamp": "Found while out at under the old bridge",
-      "Night light": "Found while out", "Shell": "Found at the riverbank"
+      "Key": "Found by the roadside", "Postcard": "Brought back from a trip", "Old lamp": "Found on a walk: under the old bridge",
+      "Night light": "Found while out", "Shell": "Found by the riverbank"
     };
     for (const [name, line] of Object.entries(expected)) {
       await p.locator(`#pet-panel .pet-tile[aria-label^="${name}"]`).click();

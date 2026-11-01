@@ -849,38 +849,43 @@ test("pickSouvenir: deterministic, and exactly two draws on every path", () => {
   assert.equal(emptyDraws, 2, "an empty pool still draws twice");
 });
 
-test("souvenirNewChance: min(1, souvenirNewRate / trait.outing) from the species pack", () => {
-  assert.equal(P.SPECIES.chip.souvenirNewRate, 0.28);
+test("souvenirLocalChance: min(1, souvenirLocalRate / trait.outing) from the species pack", () => {
+  assert.ok(closeTo(P.SPECIES.chip.souvenirLocalRate, 1 / 7));
   for (const [trait, tr] of Object.entries(P.SPECIES.chip.traits)) {
-    const want = Math.min(1, 0.28 / tr.outing);
-    assert.ok(closeTo(P.souvenirNewChance({ species: "chip", trait }), want), trait);
+    const want = Math.min(1, (1 / 7) / tr.outing);
+    assert.ok(closeTo(P.souvenirLocalChance({ species: "chip", trait }), want), trait);
   }
-  assert.ok(closeTo(P.souvenirNewChance({ species: "chip", trait: "lively" }), 0.4));
-  /* a pack without the rate uses the 0.28 fallback, one with its own rate uses it, and the result never passes 1 */
-  assert.ok(closeTo(P.souvenirNewChance({ species: { traits: { slow: { outing: 0.4 } } }, trait: "slow" }), 0.7));
-  assert.equal(P.souvenirNewChance({ species: { souvenirNewRate: 0.5, traits: { rare: { outing: 0.2 } } }, trait: "rare" }), 1);
-  assert.equal(P.souvenirNewChance({ species: { traits: { still: { outing: 0 } } }, trait: "still" }), 1);
+  assert.ok(closeTo(P.souvenirLocalChance({ species: "chip", trait: "lively" }), (1 / 7) / 0.7));
+  /* a pack without the rate uses the 1/7 fallback, one with its own rate uses it, and the result never passes 1 */
+  assert.ok(closeTo(P.souvenirLocalChance({ species: { traits: { slow: { outing: 0.4 } } }, trait: "slow" }), (1 / 7) / 0.4));
+  assert.equal(P.souvenirLocalChance({ species: { souvenirLocalRate: 0.5, traits: { rare: { outing: 0.2 } } }, trait: "rare" }), 1);
+  assert.equal(P.souvenirLocalChance({ species: { traits: { still: { outing: 0 } } }, trait: "still" }), 1);
 });
 
-/* One year of outings: 91-day seasons, 20 items each plus 20 in every season. A day's outing is a seeded draw
-   against trait.outing (not outingToday's calendar), then pickSouvenir sees the growing seen and recent lists. */
+/* One year of outings: 91-day seasons, 60 items each plus 60 in every season. A day's outing is a seeded draw
+   against trait.outing (not outingToday's calendar), then the weekly local roll; on a souvenir day pickSouvenir sees
+   the growing seen and recent lists and always takes an unseen in-season entry while one is left. */
 function simTable() {
   const table = [];
-  for (const s of FOUR) for (let i = 0; i < 20; i++) table.push({ id: `${s}-${i}`, season: s });
-  for (let i = 0; i < 20; i++) table.push({ id: `any-${i}`, season: "any" });
+  for (const s of FOUR) for (let i = 0; i < 60; i++) table.push({ id: `${s}-${i}`, season: s });
+  for (let i = 0; i < 60; i++) table.push({ id: `any-${i}`, season: "any" });
   return table;
 }
-function yearNewFinds(traitName, seed, table) {
+function yearLocalSouvenirs(traitName, seed, table) {
   const trait = P.SPECIES.chip.traits[traitName];
   const r = P.rng(seed);
   const startDay = Math.floor(r() * 364);
   const seen = [], recent = [], seenSet = new Set();
-  const newChance = P.souvenirNewChance({ species: "chip", trait: traitName });
+  const localChance = P.souvenirLocalChance({ species: "chip", trait: traitName });
   let found = 0;
   for (let d = 0; d < 365; d++) {
     const season = FOUR[Math.floor((startDay + d) / 91) % 4];
     if (r() >= trait.outing) continue;
-    const e = P.pickSouvenir(r, table, { season, seen, recent, newChance });
+    if (r() >= localChance) continue;                       /* an empty-handed outing */
+    const unseenLeft = table.some((e) => (e.season === "any" || e.season === season) && !seenSet.has(e.id));
+    const e = P.pickSouvenir(r, table, { season, seen, recent, newChance: 1 });
+    assert.ok(e, "a souvenir day picks an entry");
+    if (unseenLeft) assert.ok(!seenSet.has(e.id), `${traitName}: repeated ${e.id} while unseen items remained`);
     if (!seenSet.has(e.id)) { seenSet.add(e.id); seen.push(e.id); found++; }
     recent.push(e.id);
     if (recent.length > 5) recent.shift();
@@ -888,16 +893,16 @@ function yearNewFinds(traitName, seed, table) {
   return found;
 }
 
-test("pickSouvenir: a seeded year of outings finds 80-100 new souvenirs for every trait", (t) => {
+test("pickSouvenir: a seeded year of outings brings 40-65 built-in souvenirs for every trait", (t) => {
   const table = simTable();
-  assert.equal(table.length, 100);
+  assert.equal(table.length, 300);
   const averages = {};
   for (const traitName of Object.keys(P.SPECIES.chip.traits)) {
     let total = 0;
-    for (let i = 0; i < 50; i++) total += yearNewFinds(traitName, 4000 + i * 131, table);
+    for (let i = 0; i < 50; i++) total += yearLocalSouvenirs(traitName, 4000 + i * 131, table);
     averages[traitName] = total / 50;
-    assert.ok(averages[traitName] >= 80 && averages[traitName] <= 100,
-      `${traitName}: ${averages[traitName]} new finds a year`);
+    assert.ok(averages[traitName] >= 40 && averages[traitName] <= 65,
+      `${traitName}: ${averages[traitName]} built-in souvenirs a year`);
   }
   t.diagnostic(JSON.stringify(averages));
 });

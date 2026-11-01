@@ -41,7 +41,7 @@
  *   validateSouvenir(input)      a clean {name:{zh,en}, line:{zh,en}, px: 256 chars, where?} or null
  *   builtinSouvenir(rnd, recentNames, table) one entry of table, avoiding recent names when possible
  *   pickSouvenir(rnd, table, opts)  one in-season entry: unseen first, else seen avoiding recent; always two draws
- *   souvenirNewChance(save)      min(1, souvenirNewRate / trait.outing), the chance an outing finds something new
+ *   souvenirLocalChance(save)    min(1, souvenirLocalRate / trait.outing), the chance an outing brings one back
  *   aiPrompt(ctx)                {messages, max} for one LP.ai.ask call, with only design.md 7's allowed facts
  *   moodWord(hunger, joy, zh)    the one mood word the prompt may carry
  *   aiCategories(before, after)  the fixed category words whose usage counts grew
@@ -67,7 +67,7 @@ var SPECIES={
     growth:{child:3, adult:10},
     forms:[["book",["reader"]], ["walk",["camera","darkroom"]], ["scholar",["dict"]], ["diary",["notes"]], ["monster",["cart","apps"]]],
     formMinPct:30,
-    souvenirNewRate:0.28,
+    souvenirLocalRate:1/7,
     outingHours:[10, 17]
   }
 };
@@ -532,8 +532,8 @@ function builtinSouvenir(rnd,recentNames,table){
 }
 
 /* ---------- picking from the catalogue ---------- */
-/* The fallback for a species pack without souvenirNewRate; the rate is a number of days, not an outing count. */
-var SOUV_NEW_RATE=0.28;
+/* The fallback for a species pack without souvenirLocalRate: one built-in souvenir a week per trait, on average. */
+var SOUV_LOCAL_RATE=1/7;
 /* A table entry's season: "any" is always in season, and a missing season is treated as "any". Ids are strings. */
 function inSeason(e,season){
   var s=e && e.season;
@@ -574,13 +574,13 @@ function pickSouvenir(rnd,table,opts){
   var i=Math.floor(r2*candidates.length);
   return candidates[i<0 ? 0 : i>=candidates.length ? candidates.length-1 : i];
 }
-/* The chance that one outing is a new find: min(1, souvenirNewRate / outing), about every 3.5 days for every trait,
-   so a lively pet does not empty the catalogue sooner than a sleepy one. The rate comes from the species pack,
-   0.28 when the pack has none; an outing chance of zero gives a certain new find. */
-function souvenirNewChance(save){
+/* The chance that one outing brings a built-in souvenir home: min(1, souvenirLocalRate / outing), about one a week
+   for every trait, so a lively pet does not empty the catalogue sooner than a sleepy one. The rate comes from the
+   species pack, 1/7 when the pack has none; an outing chance of zero gives a certain souvenir. */
+function souvenirLocalChance(save){
   var sp=speciesOf(save), trait=traitOf(sp, save && save.trait);
-  var rate=num(sp && sp.souvenirNewRate);
-  if(!(rate>0)) rate=SOUV_NEW_RATE;
+  var rate=num(sp && sp.souvenirLocalRate);
+  if(!(rate>0)) rate=SOUV_LOCAL_RATE;
   var outing=num(trait && trait.outing);
   return outing>0 ? Math.min(1, rate/outing) : 1;
 }
@@ -692,7 +692,7 @@ window.LopdaPet={
   feed:feed, play:play, wash:wash, pat:pat, setLight:setLight, wants:wants,
   outingToday:outingToday, pickOfDay:pickOfDay,
   validateSouvenir:validateSouvenir, builtinSouvenir:builtinSouvenir, aiPrompt:aiPrompt,
-  pickSouvenir:pickSouvenir, souvenirNewChance:souvenirNewChance,
+  pickSouvenir:pickSouvenir, souvenirLocalChance:souvenirLocalChance,
   moodWord:moodWord, aiCategories:aiCategories
 };
 })();
