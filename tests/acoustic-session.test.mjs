@@ -159,7 +159,7 @@ function sendWhenReady(side, data) {
 test("pairing: both start at the same tick, exactly one initiator and one rate", () => {
   const h = new Harness({ seedA: 3, seedB: 8 });
   opened(h);
-  assert.ok(h.a.statuses.some((s) => s.phase === "listen" && s.rate === 10));
+  assert.ok(h.a.statuses.some((s) => s.phase === "listen" && s.rate === 20));
 });
 
 test("pairing: a late start still pairs", () => {
@@ -213,28 +213,28 @@ test("a forced collision of both first HELLOs still pairs later", () => {
   assert.ok(hellos.length >= 3, "the collision cost at least one retry");
 });
 
-test("each side's first three 10 ms HELLOs are lost, so both open at 20", () => {
-  const h = new Harness({ seedA: 51, seedB: 53, dropHelloRate: 10 });
+test("each side's first three 20 ms HELLOs are lost, so both open at 40", () => {
+  const h = new Harness({ seedA: 51, seedB: 53, dropHelloRate: 20 });
   opened(h, 90000);
-  assert.equal(h.a.session.rate, 20);
-  assert.equal(h.b.session.rate, 20);
-  assert.equal(h.a.frames.filter((f) => f.ok && f.frame.type === L.TYPES.HELLO && f.rate === 10).length, 3);
-  assert.equal(h.b.frames.filter((f) => f.ok && f.frame.type === L.TYPES.HELLO && f.rate === 10).length, 3);
+  assert.equal(h.a.session.rate, 40);
+  assert.equal(h.b.session.rate, 40);
+  assert.equal(h.a.frames.filter((f) => f.ok && f.frame.type === L.TYPES.HELLO && f.rate === 20).length, 3);
+  assert.equal(h.b.frames.filter((f) => f.ok && f.frame.type === L.TYPES.HELLO && f.rate === 20).length, 3);
 });
 
 test("the responder follows a repeated HELLO to a new rate", () => {
-  // Three lost HELLO_ACKs push the initiator to 20 ms; the responder, still
-  // waiting for the initiator's ACK (three-way handshake), answers at 20 and
+  // Three lost HELLO_ACKs push the initiator to 40 ms; the responder, still
+  // waiting for the initiator's ACK (three-way handshake), answers at 40 and
   // opens there.
   const h = new Harness({ seedA: 71, seedB: 73, dropHelloAcks: 3 });
   runUntil(h, () => h.a.opens.length && h.b.opens.length, 120000);
   assert.equal(h.a.session.state, "open");
   assert.equal(h.b.session.state, "open");
   assert.notEqual(h.a.opens[0].initiator, h.b.opens[0].initiator);
-  assert.equal(h.a.session.rate, 20);
-  assert.equal(h.b.session.rate, 20);
+  assert.equal(h.a.session.rate, 40);
+  assert.equal(h.b.session.rate, 40);
   const follower = h.a.opens[0].initiator ? h.b : h.a;
-  assert.equal(follower.opens[0].rate, 20, "the responder opened at 20");
+  assert.equal(follower.opens[0].rate, 40, "the responder opened at 40");
 });
 
 test("a lost first HELLO_ACK plus a queued responder message still pairs", () => {
@@ -449,7 +449,7 @@ test("a different proto is other-app on both sides", () => {
   assert.deepEqual(h.b.closes, ["other-app"]);
 });
 
-test("nobody answers: 60 s of HELLOs steps 10 -> 20 -> 40, then timeout", () => {
+test("nobody answers: 60 s of HELLOs steps 20 -> 40, then timeout", () => {
   const session = S.create({ port: PORT, proto: PROTO, random: mulberry32(77) });
   let tx = null, closeReason = null;
   const rates = [];
@@ -468,7 +468,7 @@ test("nobody answers: 60 s of HELLOs steps 10 -> 20 -> 40, then timeout", () => 
     }
   }
   assert.equal(closeReason, "timeout");
-  assert.deepEqual(rates.slice(0, 7), [10, 10, 10, 20, 20, 20, 40]);
+  assert.deepEqual(rates.slice(0, 6), [20, 20, 20, 40, 40, 40]);   // 40 ms HELLOs are long: 10 is not reached in 60 s
 });
 
 test("a host that never calls sent() is rescued by the watchdog", () => {
