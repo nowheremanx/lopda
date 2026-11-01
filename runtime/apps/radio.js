@@ -1,133 +1,594 @@
 /*
- * Lo-PDA built-in: 电波台 / Radio. M2 tone test bench and M3 reliable acoustic link.
- * The modem itself is runtime/acoustic.js (pure functions, tested in tests/acoustic.test.mjs).
- * This file owns the microphone, the speaker and the screen. Frames, CRC, ACK and text are M3/M4.
+ * Lo-PDA built-in: 电波台 / Radio. The acoustic link (LP.link) with its guide, a 16x16 picture editor,
+ * and the M2 meter: live four-tone bars and the old known-sequence test bench.
+ * The modem itself is runtime/acoustic.js; the link session, frames and pairing are runtime/link.js
+ * (session layer acoustic-session.js, frames acoustic-link.js). This file owns only the screen and the
+ * meter's own microphone.
+ *
+ * The link log is a document: data/users/local/radio {log:[{dir,at,kind,text?,pic?,lost?}], txMode}
+ * (the last 30 entries, the four-tone picture as 64 bytes). The backup includes it like any document.
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  */
 (function(){
 "use strict";
-var LP=window.LP, $=LP.$, tr=LP.tr, AC=window.LopdaAcoustic, LINK=window.LopdaAcousticLink;
-var TONES=LP.TONES, micMark=$("mic-mark");
+var LP=window.LP, $=LP.$, tr=LP.tr, AC=window.LopdaAcoustic, LK=window.LopdaAcousticLink;
+var TONES=LP.TONES, own=LP.own, put=LP.put, toast=LP.toast, sfx=LP.sfx, micMark=$("mic-mark");
+var RADIO_PATH="data/users/local/radio", MAX_LOG=30, PROTO="radio1";
 
-var R={tab:"send", rate:10, pattern:"a5", live:false, auto:true, tx:null, rx:null, pending:false, link:null, linkToken:0, token:0,
-  sendText:"", recvText:"", recvStats:"", recvHex:"", last:null, log:[], sendTimer:0, recvTimer:0, suppressAudio:false};
+var R={
+  live:false, page:"menu", menu:0, guide:0, sel:0,
+  ref:null, loaded:false, loading:false,
+  log:[], txMode:"record", closeMsg:"", pending:false, pairClose:false,
+  quiet:false, suppressAudio:false, armA:false,
+  meter:{stream:null,src:null,proc:null,silent:null,sr:48000,token:0,pending:false,live:false,state:"",pdb:null,floor:null},
+  test:{tx:null,rx:null,pending:false,timer:0,token:0,rate:10,pattern:"a5",state:"",stats:"",hex:"",last:null},
+  draw:{px:null,cx:0,cy:0,tone:0}
+};
+var GUIDE=6;
 
-function esc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
-function now(){ return Date.now(); }
-function bytes(){ return AC.testBytes(R.pattern); }
-function totalSymbols(){ return AC.PREAMBLE.length + bytes().length*4; }
-function active(){ return !!(R.tx || R.rx || R.pending || R.link); }
+function byId(id){ return document.getElementById(id); }
+function pad2(n){ return LP.pad2(n); }
+function nowHM(ts){ var d=new Date(ts); return pad2(d.getHours())+":"+pad2(d.getMinutes()); }
 function secs(ms){ return (ms/1000).toFixed(1); }
-function bar(id, part){ var el=$(id); if(el) el.style.width=Math.round(Math.max(0,Math.min(1,part))*100)+"%"; }
+function bar(id,part){ var el=byId(id); if(el) el.style.width=Math.round(Math.max(0,Math.min(1,part))*100)+"%"; }
+function toneCss(t){ var c=TONES[t|0]||TONES[0]; return "rgb("+c[0]+","+c[1]+","+c[2]+")"; }
+function countChars(s){ return Array.from(String(s||"")).length; }
+function blankDraw(){ var a=new Uint8Array(256), i; for(i=0;i<256;i++) a[i]=3; return a; }
+R.draw.px=blankDraw();
 
-function log(msg){
-  var d=new Date();
-  R.log.push((d.getHours()<10?"0":"")+d.getHours()+":"+(d.getMinutes()<10?"0":"")+d.getMinutes()+":"+(d.getSeconds()<10?"0":"")+d.getSeconds()+"  "+msg);
-  if(R.log.length>40) R.log.shift();
-  renderLog();
+/* ---------- the radio document: last 30 messages and the meter's tx mode ---------- */
+function readEntry(x){
+  if(!x || (x.dir!=="in" && x.dir!=="out")) return null;
+  var at=+x.at; if(!isFinite(at)) at=Date.now();
+  var e={dir:x.dir, at:at, kind:x.kind};
+  if(x.kind==="text"){
+    if(typeof x.text!=="string" || x.text.length>200) return null;
+    e.text=x.text;
+  }else if(x.kind==="pic"){
+    if(!x.pic || typeof x.pic.length!=="number" || x.pic.length!==64) return null;
+    e.pic=[];
+    for(var i=0;i<64;i++){ var v=+x.pic[i]; if(!isFinite(v)) return null; e.pic.push(v&255); }
+  }else return null;
+  if(x.lost) e.lost=true;
+  return e;
 }
-function renderLog(){
-  var el=$("radio-log"); if(!el) return;
-  el.innerHTML=R.log.length ? R.log.map(function(s){ return '<div>'+esc(s)+'</div>'; }).join("") : '<div class="hint">'+esc(tr("radio.log.empty"))+'</div>';
-  el.scrollTop=el.scrollHeight;
+function entryDoc(e){
+  var o={dir:e.dir, at:e.at, kind:e.kind};
+  if(e.kind==="text") o.text=e.text;
+  else o.pic=e.pic.slice(0,64);
+  if(e.lost) o.lost=true;
+  return o;
 }
+function persistLog(){
+  if(!R.ref && LP.S.db) R.ref=LP.S.db.doc(RADIO_PATH);
+  if(!R.ref) return;
+  var log=[], i;
+  for(i=0;i<R.log.length;i++) if(!R.log[i].pending) log.push(entryDoc(R.log[i]));
+  put(R.ref,{log:log.slice(-MAX_LOG),txMode:R.txMode});
+}
+function loadDoc(){
+  if(R.loaded || R.loading) return;
+  if(!LP.S.db) return;
+  R.loading=true;
+  R.ref=LP.S.db.doc(RADIO_PATH);
+  R.ref.get().then(function(sn){
+    var d=sn.exists ? own(sn.data()) : null;
+    if(d){
+      var list=[], i;
+      if(d.log && d.log.length) for(i=0;i<d.log.length;i++){ var e=readEntry(d.log[i]); if(e) list.push(e); }
+      if(list.length && !R.log.length) R.log=list.slice(-MAX_LOG);
+      if(d.txMode==="playback" || d.txMode==="record") R.txMode=d.txMode;
+    }
+    R.loaded=true; R.loading=false;
+    applyTxMode();
+    render();
+  },function(){ R.loaded=true; R.loading=false; });
+}
+function applyTxMode(){ if(LP.link && LP.link.setTxMode) LP.link.setTxMode(R.txMode); }
+function saveTxMode(){ persistLog(); applyTxMode(); }
 
+/* ---------- screens ---------- */
+var PAGES={menu:"radio-page-menu",guide:"radio-page-guide",link:"radio-page-link",write:"radio-page-write",draw:"radio-page-draw",meter:"radio-page-meter"};
+function setPage(p){
+  R.page=p;
+  Object.keys(PAGES).forEach(function(k){ var el=byId(PAGES[k]); if(el) el.hidden=k!==p; });
+  var view=byId("v-radio");
+  if(view) view.classList.toggle("radio-draw-on", p==="draw");
+  render();
+}
 function render(){
-  var i, tabs=["send","recv","lab"];
-  for(i=0;i<tabs.length;i++){
-    var b=$("radio-tab-"+tabs[i]);
-    if(b){ if(tabs[i]===R.tab) b.classList.add("on"); else b.classList.remove("on"); }
-    var pane=$("radio-pane-"+tabs[i]);
-    if(pane) pane.hidden=tabs[i]!==R.tab;
+  if(!R.live) return;
+  if(R.page==="menu") renderMenu();
+  else if(R.page==="guide") renderGuide();
+  else if(R.page==="link") renderLink();
+  else if(R.page==="write") renderWrite();
+  else if(R.page==="draw") renderDraw();
+  else if(R.page==="meter") renderMeter();
+  renderBar();
+}
+function renderBar(){
+  var title=tr("radio.title"), state=tr("radio.state.ready");
+  if(R.page==="guide"){ title=tr("radio.guide.title"); state=tr("radio.guide.page",{n:R.guide+1,all:GUIDE}); }
+  else if(R.page==="link"){ title=tr("radio.menu.link"); state=""; }
+  else if(R.page==="write"){ title=tr("radio.write.title"); state=tr("radio.write.count",{n:countChars(byId("radio-write-input").value)}); }
+  else if(R.page==="draw"){ title=tr("radio.draw.title"); }
+  else if(R.page==="meter"){ title=tr("radio.meter.title"); state=R.meter.live?tr("radio.meter.on"):(R.meter.pending?tr("radio.meter.request"):tr("radio.meter.off")); }
+  else state=R.pending?tr("radio.link.connecting"):tr("radio.state.ready");
+  byId("radio-title").textContent=title;
+  byId("radio-state").textContent=state;
+}
+
+/* ---------- menu ---------- */
+function renderMenu(){
+  var rows=byId("radio-menu").children, i;
+  for(i=0;i<rows.length;i++) rows[i].className=(i===R.menu?"on":"");
+  byId("radio-menu-note").textContent=R.pending?tr("radio.link.connecting"):(R.closeMsg||tr("radio.menu.note"));
+}
+function menuPick(){
+  var act=["link","guide","meter"][R.menu];
+  sfx("tap");
+  R.closeMsg="";
+  if(act==="link") startConnect();
+  else if(act==="guide"){ R.guide=0; setPage("guide"); }
+  else { setPage("meter"); startMeter(); }
+}
+function backToMenu(){ R.closeMsg=""; setPage("menu"); }
+
+/* ---------- guide ---------- */
+function guidePage(){
+  var key="radio.guide."+(R.guide+1);
+  return tr(key);
+}
+function renderGuide(){
+  var body=byId("radio-guide-body");
+  body.textContent="";
+  var p=document.createElement("p");
+  p.className="radio-guide-text";
+  p.textContent=guidePage();
+  body.appendChild(p);
+  /* the chirps and the four tones, just as a small strip of the LCD's four inks */
+  if(R.guide===2 || R.guide===3){
+    var strip=document.createElement("div"), i;
+    strip.className="radio-tones";
+    for(i=0;i<4;i++){ var s=document.createElement("i"); s.style.background=toneCss(i); strip.appendChild(s); }
+    body.appendChild(strip);
   }
-  $("radio-auto").checked=R.auto;
-  $("radio-auto").disabled=active();
-  $("radio-rate").disabled=active() || R.auto;
-  $("radio-pattern").disabled=active();
-  $("radio-rate").value=String(R.rate);
-  $("radio-pattern").value=R.pattern;
-  $("radio-pattern-hex").textContent=tr("radio.hex.tx")+" "+AC.hex(bytes());
-  $("radio-send-go").disabled=active();
-  $("radio-recv-go").disabled=active();
-  $("radio-send-stop").disabled=!R.link;
-  $("radio-send-go").textContent=R.auto?tr("radio.send.link"):tr("radio.send.go");
-  $("radio-recv-go").textContent=R.auto?tr("radio.recv.link"):tr("radio.recv.go");
-  $("radio-recv-stop").disabled=!(R.rx || R.link);
-  $("radio-recv-stop").textContent=R.link?tr("radio.recv.cancel"):tr("radio.recv.stop");
-  $("radio-send-state").textContent=R.sendText || (R.auto?tr("radio.send.linkready"):tr("radio.send.ready"));
-  $("radio-recv-state").textContent=R.recvText || (R.auto?tr("radio.recv.linkwait"):tr("radio.recv.wait"));
-  $("radio-recv-stats").textContent=R.recvStats || "";
-  $("radio-recv-hex").textContent=R.recvHex || "";
-  $("radio-state").textContent=R.link ? tr("radio.link.on") : (R.tx ? tr("radio.tx.on") : (R.rx ? tr("radio.rx.on") : (R.last ? tr("radio.last") : tr("radio.ready"))));
-  $("radio-note").textContent=R.auto?tr("radio.note.link"):tr("radio.note");
-  $("radio-lab-note").textContent=R.last ? R.recvStats : tr("radio.lab.note");
+  byId("radio-guide-page").textContent=tr("radio.guide.page",{n:R.guide+1,all:GUIDE});
+}
+function guideGo(d){
+  R.guide=(R.guide+d+GUIDE)%GUIDE;
+  sfx("move");
+  renderGuide();
+  renderBar();
+}
+
+/* ---------- the link: LP.link, its log and the three buttons ---------- */
+function startConnect(){
+  if(R.pending) return;
+  if(LP.link.busy()){ R.closeMsg=tr("radio.open.busy"); toast(R.closeMsg); sfx("err"); renderMenu(); return; }
+  R.pending=true;
+  R.pairClose=false;
+  R.closeMsg="";
+  applyTxMode();
+  renderMenu();
+  var port=LK && LK.port ? LK.port("radio") : 0;
+  /* a pairing that times out or meets another program emits close before open resolves:
+     catch it here so the reason is ours too. The pairing closes the whole list, so off() is harmless. */
+  var preOff=LP.link.on(function(ev){
+    if(ev && ev.type==="close" && R.pending){ R.pairClose=true; onLinkEvent(ev); }
+  });
+  LP.link.open({port:port, proto:PROTO, label:tr("app.radio")}).then(function(v){
+    try{ preOff(); }catch(e){}
+    R.pending=false;
+    if(v==="open"){
+      R.closeMsg="";
+      R.sel=0;
+      LP.link.on(onLinkEvent);           /* link.js empties its list on every close: register again each time */
+      sfx("ok");
+      setPage("link");
+      return;
+    }
+    if(!R.pairClose){
+      R.closeMsg=tr(v==="busy"?"radio.open.busy":v==="cancelled"?"radio.open.cancelled":"radio.open.none");
+      if(v!=="cancelled") toast(R.closeMsg);
+    }
+    sfx("err");
+    renderMenu();
+  },function(){
+    try{ preOff(); }catch(e){}
+    R.pending=false;
+    R.closeMsg=tr("radio.open.none");
+    toast(R.closeMsg);
+    sfx("err");
+    renderMenu();
+  });
+}
+function onLinkEvent(ev){
+  if(!ev) return;
+  if(ev.type==="message"){ onMessage(ev.data); return; }
+  if(ev.type!=="close") return;
+  var reason=ev.reason||"lost";
+  R.closeMsg=tr(reason==="home" && R.pending ? "radio.open.cancelled" : "radio.close."+reason);
+  if(!R.quiet) toast(R.closeMsg);
+  if(R.page==="link" || R.page==="write" || R.page==="draw"){
+    setPage("menu");
+    if(!R.quiet) sfx("miss");
+  }else if(R.page==="menu") renderMenu();
+}
+function onMessage(data){
+  var e=null;
+  if(typeof data==="string"){
+    if(data.length>200) return;
+    e={dir:"in", at:Date.now(), kind:"text", text:data};
+  }else{
+    var bytes=null, i;
+    if(Object.prototype.toString.call(data)==="[object Uint8Array]" && data.length===64) bytes=data;
+    if(!bytes) return;
+    var pic=[];
+    for(i=0;i<64;i++) pic.push(bytes[i]&255);
+    e={dir:"in", at:Date.now(), kind:"pic", pic:pic};
+  }
+  R.log.push(e);
+  while(R.log.length>MAX_LOG) R.log.shift();
+  persistLog();
+  if(R.page==="link") renderLink();
+}
+function queueSend(entry, payload){
+  entry.dir="out";
+  entry.at=Date.now();
+  entry.pending=true;
+  R.log.push(entry);
+  while(R.log.length>MAX_LOG) R.log.shift();
+  renderLink();
+  LP.link.send(payload).then(function(v){
+    entry.pending=false;
+    if(v!=="sent") entry.lost=true;
+    persistLog();
+    if(R.page==="link") renderLink();
+    if(v==="big") toast(tr("radio.send.big"));
+    else if(v!=="sent") toast(tr("radio.send.failed"));
+  },function(){
+    entry.pending=false;
+    entry.lost=true;
+    persistLog();
+    if(R.page==="link") renderLink();
+  });
+}
+function renderLink(){
+  var role=byId("radio-link-role"), rate=byId("radio-link-rate");
+  if(LP.link.state==="open"){
+    role.textContent=tr(LP.link.initiator?"radio.link.role.initiator":"radio.link.role.responder");
+    rate.textContent=tr("radio.link.rate",{ms:LP.link.rate==null?"?":LP.link.rate});
+  }else{
+    role.textContent=tr("radio.link.notopen");
+    rate.textContent="";
+  }
+  var btns=byId("radio-link-actions").children, i;
+  for(i=0;i<btns.length;i++) btns[i].className="btn ghost"+(i===R.sel?" on":"");
+  renderLinkLog();
+}
+function renderLinkLog(){
+  var box=byId("radio-link-log");
+  box.textContent="";
+  if(!R.log.length){
+    var none=document.createElement("p");
+    none.className="hint";
+    none.textContent=tr("radio.link.log.empty");
+    box.appendChild(none);
+    return;
+  }
+  for(var i=0;i<R.log.length;i++){
+    var e=R.log[i];
+    var row=document.createElement("div");
+    row.className="radio-entry"+(e.pending?" pending":"");
+    var dir=document.createElement("span"); dir.className="dir";
+    dir.textContent=tr(e.dir==="out"?"radio.dir.out":"radio.dir.in");
+    var when=document.createElement("span"); when.className="when";
+    when.textContent=nowHM(e.at);
+    row.appendChild(dir); row.appendChild(when);
+    if(e.kind==="pic"){
+      var cv=document.createElement("canvas"); cv.width=32; cv.height=32;
+      drawPic(cv,e.pic||[]);
+      row.appendChild(cv);
+    }else{
+      var txt=document.createElement("span"); txt.className="txt";
+      txt.textContent=e.text==null?"":e.text;
+      row.appendChild(txt);
+    }
+    if(e.pending || e.lost){
+      var flag=document.createElement("span"); flag.className="radio-flag";
+      flag.textContent=tr(e.pending?"radio.link.sending":"radio.link.lost");
+      row.appendChild(flag);
+    }
+    box.appendChild(row);
+  }
+  box.scrollTop=box.scrollHeight;
+}
+function drawPic(cv,bytes){
+  var ctx=cv.getContext("2d"), img=ctx.createImageData(32,32), d=img.data, i, x, y, t, o, dx, dy;
+  for(y=0;y<16;y++) for(x=0;x<16;x++){
+    i=y*16+x; t=(bytes[i>>2]||0)>>(6-((i&3)<<1))&3;
+    var c=TONES[t];
+    for(dy=0;dy<2;dy++) for(dx=0;dx<2;dx++){
+      o=((y*2+dy)*32+(x*2+dx))*4;
+      d[o]=c[0]; d[o+1]=c[1]; d[o+2]=c[2]; d[o+3]=255;
+    }
+  }
+  ctx.putImageData(img,0,0);
+}
+function hangUp(){
+  sfx("tap");
+  R.quiet=false;
+  R.closeMsg=tr("radio.close.bye");
+  if(LP.link.state!=="closed") LP.link.close("bye");
+  else setPage("menu");
+}
+
+/* ---------- write ---------- */
+function openWrite(){
+  if(LP.link.state!=="open"){ toast(tr("radio.link.notopen")); sfx("err"); return; }
+  byId("radio-write-input").value="";
+  setPage("write");
+  updateWrite();
+  setTimeout(function(){ if(R.page==="write") byId("radio-write-input").focus(); },40);
+}
+function updateWrite(){
+  var n=countChars(byId("radio-write-input").value);
+  byId("radio-write-count").textContent=tr("radio.write.count",{n:n});
+  byId("radio-write-note").hidden=n>0;
+  renderBar();
+}
+function renderWrite(){ updateWrite(); }
+function sendText(){
+  var text=LP.noEmoji(byId("radio-write-input").value);
+  text=Array.from(text).slice(0,60).join("");
+  if(!text){ toast(tr("radio.write.empty")); sfx("err"); return; }
+  if(LP.link.state!=="open"){ toast(tr("radio.link.notopen")); sfx("err"); return; }
+  byId("radio-write-input").value="";
+  setPage("link");
+  queueSend({kind:"text", text:text}, text);
+  sfx("ok");
+}
+function cancelWrite(){ setPage("link"); sfx("miss"); }
+
+/* ---------- draw: 16x16, two bits per pixel, four tones ---------- */
+function renderDraw(){
+  var cv=byId("radio-draw-cv"), ctx=cv.getContext("2d"), img=ctx.createImageData(256,256), d=img.data, i, x, y, t, o;
+  for(y=0;y<256;y++) for(x=0;x<256;x++){
+    i=(y>>4)*16+(x>>4);
+    t=TONES[R.draw.px[i]&3];
+    o=(y*256+x)*4;
+    d[o]=t[0]; d[o+1]=t[1]; d[o+2]=t[2]; d[o+3]=255;
+  }
+  ctx.putImageData(img,0,0);
+  /* the grid and the cursor are tone 1 and ink: still four tones, and never part of the sent picture */
+  ctx.fillStyle=toneCss(1);
+  for(i=1;i<16;i++){ ctx.fillRect(i*16,0,1,256); ctx.fillRect(0,i*16,256,1); }
+  var cx=R.draw.cx*16, cy=R.draw.cy*16;
+  ctx.fillStyle=toneCss(0);
+  ctx.fillRect(cx,cy,16,2); ctx.fillRect(cx,cy+14,16,2);
+  ctx.fillRect(cx,cy,2,16); ctx.fillRect(cx+14,cy,2,16);
+  byId("radio-draw-swatch").style.background=toneCss(R.draw.tone);
+  byId("radio-draw-tone").textContent=tr("radio.draw.tone",{n:R.draw.tone+1});
+  renderBar();
+}
+function openDraw(){
+  if(LP.link.state!=="open"){ toast(tr("radio.link.notopen")); sfx("err"); return; }
+  setPage("draw");
+}
+function paintCell(x,y){
+  if(x<0||y<0||x>15||y>15) return;
+  R.draw.cx=x; R.draw.cy=y;
+  R.draw.px[y*16+x]=R.draw.tone;
+  renderDraw();
+}
+function paintAt(e){
+  var cv=byId("radio-draw-cv"), r=cv.getBoundingClientRect();
+  var w=cv.clientWidth||r.width, h=cv.clientHeight||r.height;
+  var x=Math.floor((e.clientX-r.left-(cv.clientLeft||0))*16/w);
+  var y=Math.floor((e.clientY-r.top-(cv.clientTop||0))*16/h);
+  paintCell(Math.max(0,Math.min(15,x)),Math.max(0,Math.min(15,y)));
+}
+function drawSend(){
+  if(LP.link.state!=="open"){ toast(tr("radio.link.notopen")); sfx("err"); return; }
+  var bytes=new Uint8Array(64), pic=[], i, px, sh;
+  for(i=0;i<256;i++){
+    px=R.draw.px[i]&3;
+    sh=6-((i&3)<<1);
+    bytes[i>>2]=bytes[i>>2]|(px<<sh);
+  }
+  for(i=0;i<64;i++) pic.push(bytes[i]);
+  setPage("link");
+  queueSend({kind:"pic", pic:pic}, bytes);
+  sfx("ok");
+}
+
+/* ---------- meter: its own microphone, live four-tone bars and the noise floor ---------- */
+function stopTracks(stream){
+  if(!stream) return;
+  try{ stream.getTracks().forEach(function(t){ try{ t.stop(); }catch(e){} }); }catch(e){}
+}
+function meterClip(){ return navigator.mediaDevices && navigator.mediaDevices.getUserMedia; }
+function startMeter(){
+  var M=R.meter;
+  if(!R.live || R.page!=="meter" || M.stream || M.pending) return;
+  if(LP.link.busy()){ M.state=tr("radio.open.busy"); paintBars(); return; }
+  if(!meterClip()){ M.state=tr("radio.meter.nomic"); paintBars(); return; }
+  var ctx=LP.audio();
+  if(!ctx){ M.state=tr("radio.noaudio"); paintBars(); return; }
+  LP.wake();
+  LP.setSession("play-and-record");
+  M.pending=true;
+  var token=++M.token;
+  M.state=tr("radio.meter.request");
+  paintBars();
+  var p;
+  try{
+    p=navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false,channelCount:1},video:false});
+  }catch(e){ p=Promise.reject(e); }
+  Promise.resolve(p).then(function(stream){
+    if(token!==M.token || !R.live || R.page!=="meter"){ stopTracks(stream); return; }
+    M.pending=false;
+    var src,proc,silent;
+    try{
+      src=ctx.createMediaStreamSource(stream);
+      proc=ctx.createScriptProcessor(4096,1,1);
+      silent=ctx.createGain();
+      silent.gain.value=0;
+      src.connect(proc); proc.connect(silent); silent.connect(ctx.destination);
+    }catch(e){
+      stopTracks(stream);
+      LP.setSession("ambient");
+      M.state=tr("radio.meter.nomic");
+      paintBars();
+      return;
+    }
+    M.stream=stream; M.src=src; M.proc=proc; M.silent=silent; M.sr=ctx.sampleRate;
+    M.live=true;
+    proc.onaudioprocess=function(e){
+      if(M.proc!==proc) return;
+      var d=e.inputBuffer.getChannelData(0);
+      var tw=AC.toneWindow(d,0,d.length,M.sr), i, lo=tw.pdb[0];
+      for(i=1;i<4;i++) if(tw.pdb[i]<lo) lo=tw.pdb[i];
+      M.pdb=tw.pdb.slice(0);
+      if(M.floor==null) M.floor=lo;
+      else M.floor=lo<M.floor ? lo : M.floor*0.9+lo*0.1;
+      paintBars();
+    };
+    micMark.hidden=false;
+    LP.micRoute(true);
+    LP.keepAwake(true);
+    M.state=tr("radio.meter.on");
+    sfx("tap");
+    paintBars();
+  },function(){
+    if(token!==M.token) return;
+    M.pending=false;
+    M.state=tr("radio.meter.nomic");
+    LP.setSession("ambient");
+    R.suppressAudio=true;
+    try{ LP.micRoute(false); }catch(e){}
+    R.suppressAudio=false;
+    if(!LP.link.busy()) micMark.hidden=true;
+    paintBars();
+  });
+}
+function stopMeter(){
+  var M=R.meter, live=M.live || !!M.stream || M.pending;
+  M.token++;
+  M.pending=false;
+  M.live=false;
+  M.state="";
+  if(M.proc){ M.proc.onaudioprocess=null; try{ M.proc.disconnect(); }catch(e){} }
+  if(M.src){ try{ M.src.disconnect(); }catch(e){} }
+  if(M.silent){ try{ M.silent.disconnect(); }catch(e){} }
+  stopTracks(M.stream);
+  M.stream=null; M.src=null; M.proc=null; M.silent=null;
+  M.pdb=null; M.floor=null;
+  if(live){
+    if(!LP.link.busy()) micMark.hidden=true;
+    LP.setSession("ambient");
+    R.suppressAudio=true;
+    try{ LP.micRoute(false); }catch(e){}
+    R.suppressAudio=false;
+    LP.keepAwake(false);
+  }
+  if(R.live && R.page==="meter") paintBars();
+}
+function paintBars(){
+  var M=R.meter, i, db, el, small;
+  for(i=0;i<4;i++){
+    el=byId("radio-bar-"+i); small=byId("radio-db-"+i);
+    db=M.pdb?M.pdb[i]:null;
+    if(el) el.style.width=(db==null||!isFinite(db))?"0%":Math.round(Math.max(0,Math.min(1,(db+90)/90))*100)+"%";
+    if(small) small.textContent=(db==null||!isFinite(db))?"—":Math.round(db)+" dB";
+  }
+  var floor=byId("radio-floor");
+  if(floor) floor.textContent=(M.floor==null||!isFinite(M.floor))?tr("radio.meter.floor.off"):tr("radio.meter.floor",{db:Math.round(M.floor)});
+  var state=byId("radio-meter-state");
+  if(state) state.textContent=M.live?tr("radio.meter.on"):(M.pending?tr("radio.meter.request"):(M.state||tr("radio.meter.off")));
+  renderBar();
+}
+
+/* ---------- the old M2 known-sequence test, now under the meter ---------- */
+function testBytes(){ return AC.testBytes(R.test.pattern); }
+function totalSymbols(){ return AC.PREAMBLE.length + testBytes().length*4; }
+function activeTest(){ return !!(R.test.tx || R.test.rx || R.test.pending); }
+function renderMeter(){
+  var T=R.test;
+  byId("radio-txmode").checked=R.txMode==="playback";
+  byId("radio-test-rate").value=String(T.rate);
+  byId("radio-test-pattern").value=T.pattern;
+  byId("radio-pattern-hex").textContent=tr("radio.hex.tx")+" "+AC.hex(testBytes());
+  byId("radio-test-send").disabled=activeTest();
+  byId("radio-test-recv").disabled=activeTest();
+  byId("radio-test-stop").disabled=!(T.tx||T.rx||T.pending);
+  byId("radio-test-stop").textContent=T.rx?tr("radio.meter.stopdecode"):tr("radio.meter.stop");
+  byId("radio-test-state").textContent=T.state||tr("radio.meter.wait");
+  byId("radio-test-stats").textContent=T.stats;
+  byId("radio-test-hex").textContent=T.hex;
+  byId("radio-lab-note").textContent=T.last?T.stats:tr("radio.meter.lab.empty");
   drawLab();
+  paintBars();
+  renderBar();
 }
-
-function setTab(t){
-  R.tab=t; render();
+function restartMeterLater(){
+  setTimeout(function(){ if(R.live && R.page==="meter" && !activeTest()) startMeter(); },300);
 }
-
-/* ---------- transmit ---------- */
-function startSend(){
-  if(active()) return;
-  /* no microphone while sending: "playback" puts the sound on the speaker and does not ask for the
-     receiver route that "play-and-record" can choose on some iPhones. */
+function startSendTest(){
+  if(activeTest()) return;
+  stopMeter();
   LP.setSession("playback");
   var ctx=LP.audio();
-  if(!ctx){ LP.toast(tr("radio.noaudio")); return; }
+  if(!ctx){ toast(tr("radio.noaudio")); restartMeterLater(); return; }
   LP.wake();
-  var data=bytes();
-  var samples;
-  try{ samples=AC.synth(data,{sampleRate:ctx.sampleRate,symbolMs:R.rate,amp:0.9,leadMs:150,tailMs:150}); }
-  catch(e){ LP.toast(tr("radio.send.fail")); return; }
+  var data=testBytes(), samples;
+  try{ samples=AC.synth(data,{sampleRate:ctx.sampleRate,symbolMs:R.test.rate,amp:0.9,leadMs:150,tailMs:150}); }
+  catch(e){ LP.setSession("ambient"); R.test.state=tr("radio.meter.fail"); sfx("err"); renderMeter(); restartMeterLater(); return; }
   var buf;
   try{
     buf=ctx.createBuffer(1,samples.length,ctx.sampleRate);
     if(buf.copyToChannel) buf.copyToChannel(samples,0);
     else{ var ch=buf.getChannelData(0); for(var i=0;i<samples.length;i++) ch[i]=samples[i]; }
-  }catch(e){ LP.toast(tr("radio.send.fail")); return; }
+  }catch(e){ LP.setSession("ambient"); R.test.state=tr("radio.meter.fail"); sfx("err"); renderMeter(); restartMeterLater(); return; }
   var src=ctx.createBufferSource(); src.buffer=buf;
   var gain=ctx.createGain(); gain.gain.value=1;
   src.connect(gain); gain.connect(LP.SND.app || ctx.destination);
   var totalMs=samples.length/ctx.sampleRate*1000;
-  R.tx={src:src,gain:gain,totalMs:totalMs,start:now()};
-  R.sendText=tr("radio.send.sending",{s:secs(0)});
-  bar("radio-send-bar",0);
+  var tx={src:src,gain:gain,totalMs:totalMs,start:Date.now()};
+  R.test.tx=tx;
+  R.test.state=tr("radio.meter.sending",{s:secs(0)});
+  bar("radio-test-bar",0);
   LP.keepAwake(true);
-  LP.sfx("tap");
-  log(tr("radio.log.tx",{n:data.length,ms:R.rate,s:secs(totalMs)}));
-  src.onended=function(){ finishSend("end"); };
-  try{ src.start(); }catch(e){ finishSend("error"); return; }
-  R.sendTimer=setInterval(function(){
-    if(!R.tx) return;
-    var p=(now()-R.tx.start)/R.tx.totalMs;
-    bar("radio-send-bar",p);
-    R.sendText=tr("radio.send.sending",{s:secs(now()-R.tx.start)});
-    $("radio-send-state").textContent=R.sendText;
-    $("radio-state").textContent=tr("radio.tx.on");
+  sfx("tap");
+  src.onended=function(){ finishSendTest("end"); };
+  try{ src.start(); }catch(e){ finishSendTest("error"); return; }
+  R.test.timer=setInterval(function(){
+    if(R.test.tx!==tx) return;
+    var p=(Date.now()-tx.start)/tx.totalMs;
+    bar("radio-test-bar",p);
+    R.test.state=tr("radio.meter.sending",{s:secs(Date.now()-tx.start)});
+    byId("radio-test-state").textContent=R.test.state;
   },100);
-  render();
+  renderMeter();
 }
-
-function finishSend(why){
-  if(!R.tx) return;
-  clearInterval(R.sendTimer); R.sendTimer=0;
-  var tx=R.tx; R.tx=null;
+function finishSendTest(why){
+  var tx=R.test.tx;
+  if(!tx) return;
+  clearInterval(R.test.timer); R.test.timer=0;
+  R.test.tx=null;
   try{ if(tx.src){ tx.src.onended=null; tx.src.stop(); } }catch(e){}
   try{ if(tx.gain) tx.gain.disconnect(); }catch(e){}
-  bar("radio-send-bar",1);
-  if(why==="error"){ R.sendText=tr("radio.send.fail"); log(tr("radio.send.fail")); LP.sfx("err"); }
-  else if(why==="stop"){ R.sendText=tr("radio.send.stopped"); log(tr("radio.send.stopped")); }
-  else{ R.sendText=tr("radio.send.done",{n:bytes().length}); log(tr("radio.send.done",{n:bytes().length})); LP.sfx("ok"); }
+  bar("radio-test-bar",1);
+  if(why==="error"){ R.test.state=tr("radio.meter.fail"); sfx("err"); }
+  else if(why==="stop"){ R.test.state=tr("radio.meter.stopped"); }
+  else { R.test.state=tr("radio.meter.done",{n:testBytes().length}); sfx("ok"); }
   LP.setSession("ambient");
-  LP.keepAwake(!!R.rx);
-  render();
+  LP.keepAwake(false);
+  renderMeter();
+  restartMeterLater();
 }
-
-function stopSend(){ finishSend("stop"); }
-
-/* ---------- receive ---------- */
+function stopSendTest(){ finishSendTest("stop"); }
 function concat(blocks){
   var n=0, i, out, at=0;
   for(i=0;i<blocks.length;i++) n+=blocks[i].length;
@@ -135,48 +596,51 @@ function concat(blocks){
   for(i=0;i<blocks.length;i++){ out.set(blocks[i],at); at+=blocks[i].length; }
   return out;
 }
-
-function startRecv(){
-  if(active()) return;
-  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
-    R.recvText=tr("radio.recv.nomic"); LP.sfx("err"); render(); return;
-  }
+function startRecvTest(){
+  if(activeTest()) return;
+  stopMeter();
+  if(!meterClip()){ R.test.state=tr("radio.meter.nomic"); sfx("err"); renderMeter(); restartMeterLater(); return; }
   var ctx=LP.audio();
-  if(!ctx){ LP.toast(tr("radio.noaudio")); return; }
+  if(!ctx){ toast(tr("radio.noaudio")); restartMeterLater(); return; }
   LP.wake();
   LP.setSession("play-and-record");
-  R.pending=true; R.token++;
-  var token=R.token;
-  R.recvText=tr("radio.recv.request");
-  render();
+  R.test.pending=true;
+  var token=++R.test.token;
+  R.test.state=tr("radio.meter.request");
+  renderMeter();
   var p;
   try{
     p=navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false,channelCount:1},video:false});
   }catch(e){ p=Promise.reject(e); }
   Promise.resolve(p).then(function(stream){
-    if(!R.pending || token!==R.token){
-      try{ stream.getTracks().forEach(function(t){ t.stop(); }); }catch(e){}
-      return;
-    }
-    R.pending=false;
-    var src, proc, silent;
+    if(!R.test.pending || token!==R.test.token){ stopTracks(stream); return; }
+    R.test.pending=false;
+    var src,proc,silent;
     try{
       src=ctx.createMediaStreamSource(stream);
       proc=ctx.createScriptProcessor(4096,1,1);
-      silent=ctx.createGain(); silent.gain.value=0;
+      silent=ctx.createGain();
+      silent.gain.value=0;
       src.connect(proc); proc.connect(silent); silent.connect(ctx.destination);
     }catch(e){
-      try{ stream.getTracks().forEach(function(t){ t.stop(); }); }catch(x){}
+      stopTracks(stream);
       LP.setSession("ambient");
-      R.recvText=tr("radio.recv.nomic")+" · "+((e&&e.name)||"Error");
-      log(R.recvText); LP.sfx("err"); render(); return;
+      R.suppressAudio=true;
+      try{ LP.micRoute(false); }catch(x){}
+      R.suppressAudio=false;
+      LP.keepAwake(false);
+      micMark.hidden=true;
+      R.test.state=tr("radio.meter.nomic")+" · "+((e&&e.name)||"Error");
+      sfx("err");
+      renderMeter();
+      restartMeterLater();
+      return;
     }
-    var capMs=Math.max(3000, totalSymbols()*R.rate + 3000);
-    var rx={stream:stream,src:src,proc:proc,silent:silent,ctx:ctx,sr:ctx.sampleRate,
-      samples:[],len:0,start:now(),capMs:capMs,capTimer:0,token:token};
-    R.rx=rx;
+    var capMs=Math.max(3000,totalSymbols()*R.test.rate+3000);
+    var rx={stream:stream,src:src,proc:proc,silent:silent,ctx:ctx,sr:ctx.sampleRate,samples:[],len:0,start:Date.now(),capMs:capMs,capTimer:0,token:token};
+    R.test.rx=rx;
     proc.onaudioprocess=function(e){
-      if(R.rx!==rx) return;
+      if(R.test.rx!==rx) return;
       var d=e.inputBuffer.getChannelData(0), copy=new Float32Array(d.length);
       copy.set(d); rx.samples.push(copy); rx.len+=copy.length;
       while(rx.len>rx.sr*10){ var b=rx.samples.shift(); rx.len-=b.length; }
@@ -184,464 +648,204 @@ function startRecv(){
     micMark.hidden=false;
     LP.micRoute(true);
     LP.keepAwake(true);
-    LP.sfx("tap");
-    log(tr("radio.log.rx",{s:secs(capMs)}));
-    R.recvText=tr("radio.recv.listening",{s:secs(0)});
-    rx.capTimer=setTimeout(function(){ stopRecv(true); }, capMs);
-    R.recvTimer=setInterval(function(){
-      if(!R.rx) return;
-      var s=now()-R.rx.start;
-      bar("radio-recv-bar",s/R.rx.capMs);
-      R.recvText=tr("radio.recv.listening",{s:secs(s)});
-      $("radio-recv-state").textContent=R.recvText;
-      $("radio-state").textContent=tr("radio.rx.on");
+    sfx("tap");
+    R.test.state=tr("radio.meter.listening",{s:secs(0)});
+    rx.capTimer=setTimeout(function(){ stopRecvTest(true); },capMs);
+    R.test.timer=setInterval(function(){
+      if(R.test.rx!==rx) return;
+      var s=Date.now()-R.test.rx.start;
+      bar("radio-test-bar",s/R.test.rx.capMs);
+      R.test.state=tr("radio.meter.listening",{s:secs(s)});
+      byId("radio-test-state").textContent=R.test.state;
     },100);
-    render();
-  }, function(err){
-    if(token!==R.token) return;
-    R.pending=false; R.rx=null;
+    renderMeter();
+  },function(err){
+    if(token!==R.test.token) return;
+    R.test.pending=false; R.test.rx=null;
     LP.setSession("ambient");
-    LP.micRoute(false);
+    R.suppressAudio=true;
+    try{ LP.micRoute(false); }catch(e){}
+    R.suppressAudio=false;
     micMark.hidden=true;
-    var name=(err&&err.name)||"Error";
-    R.recvText=tr("radio.recv.nomic")+" · "+name;
-    log(tr("radio.recv.nomic")+" · "+name);
-    LP.toast(tr("radio.recv.nomic"));
-    LP.sfx("err");
-    render();
+    R.test.state=tr("radio.meter.nomic")+" · "+((err&&err.name)||"Error");
+    sfx("err");
+    renderMeter();
+    restartMeterLater();
   });
 }
-
-function stopRecv(decode){
-  var rx=R.rx;
-  R.token++;
-  R.pending=false;
-  if(!rx){ if(decode){ R.recvText=tr("radio.recv.nodata"); render(); } return; }
-  R.rx=null;
-  clearInterval(R.recvTimer); R.recvTimer=0;
+function stopRecvTest(decode){
+  var rx=R.test.rx, wasPending=R.test.pending;
+  R.test.token++;
+  R.test.pending=false;
+  if(!rx){
+    if(wasPending){
+      LP.setSession("ambient");
+      R.suppressAudio=true;
+      try{ LP.micRoute(false); }catch(e){}
+      R.suppressAudio=false;
+      if(!LP.link.busy()) micMark.hidden=true;
+    }
+    if(decode){ R.test.state=tr("radio.meter.nodata"); renderMeter(); }
+    restartMeterLater();
+    return;
+  }
+  R.test.rx=null;
+  clearInterval(R.test.timer); R.test.timer=0;
   clearTimeout(rx.capTimer);
   if(rx.proc){ rx.proc.onaudioprocess=null; try{ rx.proc.disconnect(); }catch(e){} }
   if(rx.src){ try{ rx.src.disconnect(); }catch(e){} }
   if(rx.silent){ try{ rx.silent.disconnect(); }catch(e){} }
-  try{ rx.stream.getTracks().forEach(function(t){ try{ t.stop(); }catch(e){} }); }catch(e){}
+  stopTracks(rx.stream);
   micMark.hidden=true;
   LP.setSession("ambient");
-  LP.micRoute(false);
+  R.suppressAudio=true;
+  try{ LP.micRoute(false); }catch(e){}
+  R.suppressAudio=false;
   LP.keepAwake(false);
-  bar("radio-recv-bar",1);
-  R.recvText=tr("radio.recv.stopped");
-  log(tr("radio.recv.stopped"));
-  if(decode) decodeSamples(concat(rx.samples), rx.sr);
-  render();
+  bar("radio-test-bar",1);
+  R.test.state=tr("radio.meter.stopped");
+  if(decode) decodeSamples(concat(rx.samples),rx.sr);
+  renderMeter();
+  restartMeterLater();
 }
-
-function decodeSamples(samples, sr){
-  if(!samples || !samples.length){ R.recvText=tr("radio.recv.nodata"); return; }
-  var data=bytes();
-  var res=AC.decode(samples,{sampleRate:sr,symbolMs:R.rate,expectedBytes:data,searchSeconds:8});
-  R.last=res;
+function decodeSamples(samples,sr){
+  if(!samples || !samples.length){ R.test.state=tr("radio.meter.nodata"); renderMeter(); return; }
+  var data=testBytes();
+  var res=AC.decode(samples,{sampleRate:sr,symbolMs:R.test.rate,expectedBytes:data,searchSeconds:8});
+  R.test.last=res;
   if(res.sync && res.sync.ok){
-    R.recvText=tr("radio.recv.sync",{score:res.sync.score,ms:Math.round(res.sync.offsetMs)});
-    R.recvStats=tr("radio.recv.stats",{sym:res.symbolErrors,totalSym:res.totalSymbols,byte:res.byteErrors,totalByte:res.totalBytes,bps:Math.round(res.goodput)});
-    R.recvHex=tr("radio.hex.rx")+" "+AC.hex(res.bytes)+"\n"+tr("radio.hex.exp")+" "+AC.hex(data);
-    log((res.ok?tr("radio.recv.ok"):tr("radio.recv.fail"))+" · "+R.recvStats);
-    LP.sfx(res.ok?"ok":"err");
+    R.test.state=tr("radio.meter.sync",{score:res.sync.score,ms:Math.round(res.sync.offsetMs)});
+    R.test.stats=tr("radio.meter.stats",{sym:res.symbolErrors,totalSym:res.totalSymbols,byte:res.byteErrors,totalByte:res.totalBytes,bps:Math.round(res.goodput)});
+    R.test.hex=tr("radio.hex.rx")+" "+AC.hex(res.bytes)+"\n"+tr("radio.hex.exp")+" "+AC.hex(data);
+    sfx(res.ok?"ok":"err");
   }else{
-    R.recvText=tr("radio.recv.nosync")+" · "+tr("radio.recv.best",{score:res.sync?res.sync.score:0});
-    R.recvStats=tr("radio.recv.stats",{sym:res.symbolErrors==null?"?":res.symbolErrors,totalSym:res.totalSymbols,byte:res.byteErrors==null?"?":res.byteErrors,totalByte:res.totalBytes,bps:Math.round(res.goodput)});
-    R.recvHex="";
-    log(tr("radio.recv.nosync")+" · "+R.recvStats);
-    LP.sfx("err");
+    R.test.state=tr("radio.meter.nosync")+" · "+tr("radio.meter.best",{score:res.sync?res.sync.score:0});
+    R.test.stats=tr("radio.meter.stats",{sym:res.symbolErrors==null?"?":res.symbolErrors,totalSym:res.totalSymbols,byte:res.byteErrors==null?"?":res.byteErrors,totalByte:res.totalBytes,bps:Math.round(res.goodput)});
+    R.test.hex="";
+    sfx("err");
   }
-  render();
 }
-
-
-/* ---------- M3: handshake, frames, CRC, ACK/retry ----------
-   The handshake is one HELLO burst at 10 ms. The receiver scans 10/20/40 and answers at the rate it
-   heard. HELLO and HELLO_ACK both have to arrive, so the chosen rate is known to work both ways.
-   A fails to a slower rate on a missing HELLO_ACK. 5 ms stays a manual M2 choice. */
-var LINK_RATES=[10,20,40], SCAN_MS=3200, HELLO_WAIT=7000, TURN_MS=1500;
-function delay(ms){ return new Promise(function(r){ setTimeout(r,ms); }); }
-function errText(e){ return e==="cancelled"?"cancelled":((e&&e.message)||String(e)); }
-function stopTracks(s){ if(s) try{ s.getTracks().forEach(function(t){ try{ t.stop(); }catch(e){} }); }catch(e){} }
-function newSession(){ var s=(((Date.now()&0xFFFF)^Math.floor(Math.random()*65536))&0xFFFF); return s||1; }
-function linkAlive(t){ return !!(R.link && R.link.token===t && !R.link.cancel); }
-function frameMs(bytes,rate){ return Math.round((16+bytes*4)*rate+240); }
-/* The receiver opens its microphone after the previous burst and waits TURN_MS before the sender transmits;
-   the capture window must cover that wait as well as the frame. */
-function ackMs(rate){ return Math.round(frameMs(10,rate)+TURN_MS+600); }
-function dataMs(rate){ return Math.round(frameMs(26,rate)+TURN_MS+600); }
-/* The sender's wait covers the receiver's whole capture + turnaround + its ACK. */
-function dataAckMs(rate){ return Math.round(dataMs(rate)+TURN_MS+frameMs(10,rate)+800); }
-function finAckMs(rate){ return Math.round(ackMs(rate)+TURN_MS+frameMs(10,rate)+800); }
-
-function linkDone(token, ok, why, receiver){
-  if(!R.link || R.link.token!==token) return;
-  var rate=R.link.rate, n=R.link.payload?R.link.payload.length:bytes().length;
-  R.link=null;
-  LP.setSession("ambient");
-  micMark.hidden=true;
-  LP.keepAwake(false);
-  R.suppressAudio=true;
-  try{ LP.micRoute(false); }catch(e){}
-  R.suppressAudio=false;
-  if(receiver){
-    R.recvText=ok?tr("radio.link.received",{n:n,ms:rate}):tr("radio.link.fail",{why:why});
-    if(ok) R.recvStats=tr("radio.link.crc",{n:n,ms:rate});
-  }else{
-    R.sendText=ok?tr("radio.link.sent",{n:n,ms:rate}):tr("radio.link.fail",{why:why});
-  }
-  log((ok?tr("radio.link.ok"):tr("radio.link.fail",{why:why}))+" · "+rate+" ms");
-  LP.sfx(ok?"ok":"err");
-  render();
+function stopTest(){
+  if(R.test.tx) finishSendTest("stop");
+  if(R.test.rx || R.test.pending) stopRecvTest(false);
 }
-
-function cancelLink(){
-  if(!R.link) return;
-  var wasRecv=R.link.role==="recv";
-  var l=R.link;
-  l.cancel=true;
-  R.link=null;
-  if(l.capTimer) clearTimeout(l.capTimer);
-  if(l.pollTimer) clearInterval(l.pollTimer);
-  try{ if(l.src){ l.src.onended=null; l.src.stop(); } }catch(e){}
-  stopTracks(l.stream);
-  micMark.hidden=true;
-  LP.setSession("ambient");
-  LP.keepAwake(false);
-  R.suppressAudio=true;
-  try{ LP.micRoute(false); }catch(e){}
-  R.suppressAudio=false;
-  if(wasRecv) R.recvText=tr("radio.link.cancelled"); else R.sendText=tr("radio.link.cancelled");
-  log(tr("radio.link.cancelled"));
-  render();
-}
-
-function playBurst(frame, rate, token){
-  return new Promise(function(resolve,reject){
-    if(!linkAlive(token)) return reject("cancelled");
-    LP.setSession("playback");
-    var ctx=LP.audio(); if(!ctx) return reject("noaudio");
-    LP.wake();
-    var samples=AC.synth(frame,{sampleRate:ctx.sampleRate,symbolMs:rate,amp:0.9,leadMs:120,tailMs:120});
-    var buf;
-    try{
-      buf=ctx.createBuffer(1,samples.length,ctx.sampleRate);
-      if(buf.copyToChannel) buf.copyToChannel(samples,0);
-      else{ var ch=buf.getChannelData(0); for(var i=0;i<samples.length;i++) ch[i]=samples[i]; }
-    }catch(e){ return reject(e); }
-    var src=ctx.createBufferSource(); src.buffer=buf;
-    var gain=ctx.createGain(); gain.gain.value=1;
-    src.connect(gain); gain.connect(LP.SND.app || ctx.destination);
-    R.link.src=src;
-    src.onended=function(){
-      if(R.link && R.link.token===token) R.link.src=null;
-      try{ src.disconnect(); gain.disconnect(); }catch(e){}
-      resolve();
-    };
-    try{ src.start(); }catch(e){ reject(e); }
-  });
-}
-
-/* Capture for at most ms. `poll(samples, sampleRate)` may return a decoded frame; when it does,
-   stop at once. That is what keeps the two ends from waiting out each other's windows. */
-function captureWindow(ms, token, poll){
-  return new Promise(function(resolve,reject){
-    if(!linkAlive(token)) return reject("cancelled");
-    var ctx=LP.audio(); if(!ctx) return reject("noaudio");
-    LP.wake(); LP.setSession("play-and-record");
-    var p;
-    try{ p=navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false,channelCount:1},video:false}); }
-    catch(e){ p=Promise.reject(e); }
-    Promise.resolve(p).then(function(stream){
-      if(!linkAlive(token)){ stopTracks(stream); return reject("cancelled"); }
-      var src,proc,silent,done=false;
-      try{
-        src=ctx.createMediaStreamSource(stream);
-        proc=ctx.createScriptProcessor(4096,1,1);
-        silent=ctx.createGain(); silent.gain.value=0;
-        src.connect(proc); proc.connect(silent); silent.connect(ctx.destination);
-      }catch(e){ stopTracks(stream); return reject(e); }
-      var blocks=[];
-      function finish(early){
-        if(done) return;
-        done=true;
-        if(R.link){ R.link.capTimer=0; R.link.pollTimer=0; R.link.stream=null; }
-        clearTimeout(capTimer);
-        clearInterval(pollTimer);
-        proc.onaudioprocess=null;
-        try{ proc.disconnect(); }catch(e){}
-        try{ src.disconnect(); }catch(e){}
-        try{ silent.disconnect(); }catch(e){}
-        stopTracks(stream);
-        micMark.hidden=true;
-        LP.setSession("playback");
-        var all=concat(blocks), peak=0, i;
-        for(i=0;i<all.length;i++) if(Math.abs(all[i])>peak) peak=Math.abs(all[i]);
-        if(R.link){ R.link.lastCapture={ms:ms, samples:all.length, peak:peak}; if(window.LOPDA_DEBUG) R.link.lastSamples=all; }
-        resolve({samples:all, sampleRate:ctx.sampleRate, early:early||null});
-      }
-      proc.onaudioprocess=function(e){
-        if(!done && R.link && R.link.token===token){ var d=e.inputBuffer.getChannelData(0); var c=new Float32Array(d.length); c.set(d); blocks.push(c); }
-      };
-      R.link.stream=stream;
-      micMark.hidden=false;
-      LP.micRoute(true);
-      var capTimer=setTimeout(function(){
-        if(!R.link || R.link.token!==token) return;
-        finish(null);
-      }, ms);
-      var pollTimer=0;
-      if(poll){
-        pollTimer=setInterval(function(){
-          if(done || !R.link || R.link.token!==token) return;
-          var s=concat(blocks);
-          var hit=null;
-          try{ hit=poll(s,ctx.sampleRate); }catch(e){}
-          if(hit) finish(hit);
-        }, 120);
-      }
-      R.link.capTimer=capTimer;
-      R.link.pollTimer=pollTimer;
-    }, function(e){
-      if(R.link && R.link.token===token) LP.setSession("ambient");
-      reject(e);
-    });
-  });
-}
-
-function decodeFrameAt(samples, sr, rate){
-  var head=AC.decode(samples,{sampleRate:sr,symbolMs:rate,symbolCount:LINK.HEADER*4});
-  if(!head.sync || !head.sync.ok) return null;
-  var h=LINK.header(head.bytes);
-  if(!h) return null;
-  var body=AC.decodePayload(samples,{sampleRate:sr,symbolMs:rate,startSample:head.sync.startSample,symbolCount:LINK.frameLength(h.length)*4});
-  var p=LINK.parse(body.bytes);
-  if(!p.ok) return {bad:p, header:h, rate:rate};
-  return {frame:p.frame, header:h, rate:rate};
-}
-
-function scanHello(cap){
-  for(var i=0;i<LINK_RATES.length;i++){
-    var hit=decodeFrameAt(cap.samples,cap.sampleRate,LINK_RATES[i]);
-    if(hit && hit.frame && hit.frame.type===LINK.TYPES.HELLO) return hit;
-  }
-  return null;
-}
-
-function sendReliable(frame, seq, rate, token, tries){
-  function attempt(n){
-    if(!linkAlive(token)) return Promise.reject("cancelled");
-    if(n>tries) return Promise.reject("no ack");
-    if(n>1) log(tr("radio.link.retry",{n:n-1}));
-    var wait=seq===1?dataAckMs(rate):finAckMs(rate);
-    return playBurst(frame,rate,token).then(function(){
-      return captureWindow(wait,token,function(samples,sr){
-        var h=decodeFrameAt(samples,sr,rate);
-        return h && h.frame && h.frame.session===R.link.session && h.frame.seq===seq && h.frame.type===LINK.TYPES.ACK ? h : null;
-      });
-    }).then(function(cap){
-      var hit=cap.early || decodeFrameAt(cap.samples,cap.sampleRate,rate);
-      if(hit && hit.frame && hit.frame.session===R.link.session && hit.frame.seq===seq && hit.frame.type===LINK.TYPES.ACK) return true;
-      throw new Error("no ack");
-    }).then(null,function(e){ if(!linkAlive(token)) throw e; return attempt(n+1); });
-  }
-  return attempt(1);
-}
-
-function linkSend(){
-  if(active()) return;
-  var token=++R.linkToken;
-  R.link={token:token, role:"send", session:newSession(), rate:10, src:null, stream:null, capTimer:0, pollTimer:0, cancel:false, payload:null};
-  LP.keepAwake(true); render();
-  function tryRate(i){
-    if(!linkAlive(token)) return Promise.reject("cancelled");
-    if(i>=LINK_RATES.length) return Promise.reject("no hello ack");
-    var rate=LINK_RATES[i];
-    R.link.rate=rate;
-    R.sendText=tr("radio.link.hello",{ms:rate}); render();
-    var hello=LINK.encode(LINK.TYPES.HELLO,R.link.session,0,[]);
-    return playBurst(hello,rate,token).then(function(){
-      return captureWindow(HELLO_WAIT,token,function(samples,sr){
-        var h=decodeFrameAt(samples,sr,rate);
-        return h && h.frame && h.frame.type===LINK.TYPES.HELLO_ACK && h.frame.session===R.link.session ? h : null;
-      });
-    }).then(function(cap){
-      var hit=cap.early || decodeFrameAt(cap.samples,cap.sampleRate,rate);
-      if(hit && hit.frame && hit.frame.type===LINK.TYPES.HELLO_ACK && hit.frame.session===R.link.session){
-        return delay(TURN_MS).then(function(){ return rate; });
-      }
-      throw new Error("no hello ack");
-    }).then(null,function(e){ if(!linkAlive(token)) throw e; log(tr("radio.link.hello.fail",{ms:rate})); return tryRate(i+1); });
-  }
-  tryRate(0).then(function(rate){
-    R.link.rate=rate;
-    R.sendText=tr("radio.link.ready",{ms:rate}); log(tr("radio.link.ready",{ms:rate})); render();
-    var data=LINK.encode(LINK.TYPES.DATA,R.link.session,1,bytes());
-    return sendReliable(data,1,rate,token,3).then(function(){
-      return delay(TURN_MS).then(function(){
-        var fin=LINK.encode(LINK.TYPES.FIN,R.link.session,2,[]);
-        return sendReliable(fin,2,rate,token,2);
-      });
-    });
-  }).then(function(){ linkDone(token,true,null,false); }, function(e){
-    if(linkAlive(token)) linkDone(token,false,errText(e),false);
-  });
-}
-
-function receiveFin(token, attempt){
-  if(!linkAlive(token)) return Promise.reject("cancelled");
-  var rate=R.link.rate, session=R.link.session;
-  return captureWindow(ackMs(rate),token,function(samples,sr){
-    var hello=scanHello({samples:samples,sampleRate:sr});
-    if(hello) return {hello:hello};
-    var h=decodeFrameAt(samples,sr,rate);
-    if(h && h.frame && h.frame.session===session && (h.frame.type===LINK.TYPES.FIN || h.frame.type===LINK.TYPES.DATA)) return {frame:h};
-    return null;
-  }).then(function(cap){
-    var early=cap.early;
-    var hello=early&&early.hello?early.hello:scanHello(cap);
-    if(hello){
-      R.link.rate=hello.rate; R.link.session=hello.frame.session;
-      R.recvText=tr("radio.link.found",{ms:hello.rate}); log(tr("radio.link.found",{ms:hello.rate})); render();
-      return playBurst(LINK.encode(LINK.TYPES.HELLO_ACK,hello.frame.session,0,[]),hello.rate,token).then(function(){
-        return receiveData(token,1);
-      });
-    }
-    var hit=early&&early.frame?early.frame:decodeFrameAt(cap.samples,cap.sampleRate,rate);
-    /* A lost our DATA ACK and retried DATA while we waited for FIN: ACK it again, do not append it twice. */
-    if(hit && hit.frame && hit.frame.type===LINK.TYPES.DATA && hit.frame.session===session){
-      return delay(TURN_MS).then(function(){
-        return playBurst(LINK.encode(LINK.TYPES.ACK,session,hit.frame.seq,[]),rate,token);
-      }).then(function(){
-        return receiveFin(token,attempt);
-      });
-    }
-    if(hit && hit.frame && hit.frame.type===LINK.TYPES.FIN && hit.frame.session===session){
-      return delay(TURN_MS).then(function(){
-        return playBurst(LINK.encode(LINK.TYPES.ACK,session,hit.frame.seq,[]),rate,token);
-      }).then(function(){
-        linkDone(token,true,null,true);
-      });
-    }
-    if(attempt>=2) throw new Error("no fin");
-    return playBurst(LINK.encode(LINK.TYPES.NACK,session,2,[]),rate,token).then(function(){ return receiveFin(token,attempt+1); });
-  });
-}
-
-function receiveData(token, attempt){
-  if(!linkAlive(token)) return Promise.reject("cancelled");
-  var rate=R.link.rate, session=R.link.session;
-  R.recvText=tr("radio.link.data",{ms:rate}); render();
-  return captureWindow(dataMs(rate),token,function(samples,sr){
-    var hello=scanHello({samples:samples,sampleRate:sr});
-    if(hello) return {hello:hello};
-    var h=decodeFrameAt(samples,sr,rate);
-    if(h && h.frame && h.frame.type===LINK.TYPES.DATA && h.frame.session===R.link.session) return {data:h};
-    return null;
-  }).then(function(cap){
-    /* The sender lost our HELLO_ACK and is retrying the handshake at another rate: catch it here too. */
-    var early=cap.early;
-    var hello=early&&early.hello?early.hello:scanHello(cap);
-    if(hello){
-      R.link.rate=hello.rate; R.link.session=hello.frame.session;
-      R.recvText=tr("radio.link.found",{ms:hello.rate}); log(tr("radio.link.found",{ms:hello.rate})); render();
-      return playBurst(LINK.encode(LINK.TYPES.HELLO_ACK,hello.frame.session,0,[]),hello.rate,token).then(function(){
-        return receiveData(token,1);
-      });
-    }
-    var hit=early&&early.data?early.data:decodeFrameAt(cap.samples,cap.sampleRate,rate);
-    if(hit && hit.frame && hit.frame.type===LINK.TYPES.DATA && hit.frame.session===session){
-      R.link.payload=hit.frame.payload;
-      R.recvHex=AC.hex(hit.frame.payload);
-      R.recvStats=tr("radio.link.crc",{n:hit.frame.payload.length,ms:rate});
-      log(tr("radio.link.crc",{n:hit.frame.payload.length,ms:rate})); render();
-      return delay(TURN_MS).then(function(){
-        return playBurst(LINK.encode(LINK.TYPES.ACK,session,hit.frame.seq,[]),rate,token);
-      }).then(function(){
-        return receiveFin(token,1);
-      });
-    }
-    if(attempt>=3) throw new Error("no data");
-    var seq=hit&&hit.frame?hit.frame.seq:1;
-    log(tr("radio.link.nack",{n:attempt}));
-    return playBurst(LINK.encode(LINK.TYPES.NACK,session,seq,[]),rate,token).then(function(){ return receiveData(token,attempt+1); });
-  });
-}
-
-function linkRecv(){
-  if(active()) return;
-  var token=++R.linkToken;
-  R.link={token:token, role:"recv", session:0, rate:10, src:null, stream:null, capTimer:0, pollTimer:0, cancel:false, payload:null};
-  LP.keepAwake(true); R.recvText=tr("radio.link.wait"); render();
-  function scan(){
-    if(!linkAlive(token)) return;
-    R.recvText=tr("radio.link.wait"); render();
-    captureWindow(SCAN_MS,token,function(samples,sr){
-      return scanHello({samples:samples,sampleRate:sr});
-    }).then(function(cap){
-      if(!linkAlive(token)) return;
-      var hit=cap.early || scanHello(cap);
-      if(!hit){ return delay(50).then(scan); }
-      R.link.session=hit.frame.session;
-      R.link.rate=hit.rate;
-      R.recvText=tr("radio.link.found",{ms:hit.rate}); log(tr("radio.link.found",{ms:hit.rate})); render();
-      return delay(TURN_MS).then(function(){
-        return playBurst(LINK.encode(LINK.TYPES.HELLO_ACK,hit.frame.session,0,[]),hit.rate,token);
-      }).then(function(){
-        return receiveData(token,1);
-      });
-    }).then(null,function(e){ if(linkAlive(token)) linkDone(token,false,errText(e),true); });
-  }
-  scan();
-}
-
-function stopAll(){
-  if(R.link) cancelLink();
-  stopSend();
-  if(R.rx || R.pending) stopRecv(false);
-  if(!R.rx){ LP.setSession("ambient"); micMark.hidden=true; LP.keepAwake(false); }
-}
-
-/* ---------- lab ---------- */
 function drawLab(){
-  var cv=$("radio-lab-cv"); if(!cv) return;
+  var cv=byId("radio-lab-cv"); if(!cv) return;
   var c=cv.getContext("2d"), W=cv.width, H=cv.height;
-  c.fillStyle="#a3ad7e"; c.fillRect(0,0,W,H);
-  c.font="24px monospace"; c.fillStyle="#4a5a32";
-  if(!R.last){ c.fillText(tr("radio.lab.empty"),12,30); return; }
-  var syms=R.last.symbols||[], exp=R.last.expected?AC.bytesToSymbols(R.last.expected):null;
-  var bw=Math.max(6,Math.min(18,Math.floor((W-24)/Math.max(1,syms.length))));
-  c.fillText(tr("radio.lab.symbols"),12,22);
-  for(var i=0;i<syms.length;i++){
-    var x=12+i*bw, y=34, w=bw-2, h=40;
-    if(syms[i]<0){ c.strokeStyle="#4a5a32"; c.strokeRect(x,y,w,h); }
-    else{ c.fillStyle="rgb("+TONES[syms[i]][0]+","+TONES[syms[i]][1]+","+TONES[syms[i]][2]+")"; c.fillRect(x,y,w,h); c.strokeStyle="#4a5a32"; c.strokeRect(x,y,w,h); }
-    if(exp && i<exp.length && syms[i]!==exp[i]){ c.strokeStyle="#1f2a14"; c.lineWidth=3; c.strokeRect(x,y,w,h); c.lineWidth=1; }
-  }
-  c.fillStyle="#4a5a32";
+  c.fillStyle=toneCss(3); c.fillRect(0,0,W,H);
+  c.font="24px monospace"; c.fillStyle=toneCss(1);
+  if(!R.test.last){ c.fillText(tr("radio.meter.lab.empty"),12,30); return; }
+  var syms=R.test.last.symbols||[], exp=R.test.last.expected?AC.bytesToSymbols(R.test.last.expected):null;
+  var bw=Math.max(6,Math.min(18,Math.floor((W-24)/Math.max(1,syms.length)))), i;
+  c.fillText(tr("radio.meter.lab.symbols"),12,22);
   for(i=0;i<syms.length;i++){
-    var v=Math.max(0,Math.min(1,((R.last.confidences[i]||0)+5)/40));
+    var x=12+i*bw, y=34, w=bw-2, h=40;
+    if(syms[i]<0){ c.strokeStyle=toneCss(1); c.strokeRect(x,y,w,h); }
+    else{ c.fillStyle=toneCss(syms[i]); c.fillRect(x,y,w,h); c.strokeStyle=toneCss(1); c.strokeRect(x,y,w,h); }
+    if(exp && i<exp.length && syms[i]!==exp[i]){ c.strokeStyle=toneCss(0); c.lineWidth=3; c.strokeRect(x,y,w,h); c.lineWidth=1; }
+  }
+  c.fillStyle=toneCss(1);
+  for(i=0;i<syms.length;i++){
+    var v=Math.max(0,Math.min(1,((R.test.last.confidences[i]||0)+5)/40));
     c.fillRect(12+i*bw,H-18,Math.max(2,bw-2),Math.round(12*v));
   }
 }
+function closeMeter(){
+  setPage("menu");
+  stopTest();
+  stopMeter();
+}
+
+/* ---------- keys: A confirms, B backs out, menu B does nothing ---------- */
+function radioButton(b,down){
+  if(byId("v-radio").hidden) return false;
+  if(R.page==="menu"){
+    if(down){
+      R.armA=false;
+      if(b==="up"||b==="down"){
+        R.menu=(R.menu+(b==="down"?1:2))%3;
+        sfx("move"); renderMenu();
+      }else if(b==="a") R.armA=true;
+    }else if(b==="a" && R.armA){ R.armA=false; menuPick(); }
+    return true;
+  }
+  if(R.page==="guide"){
+    if(!down){ if(b==="a") guideGo(1); return true; }
+    if(b==="left") guideGo(-1);
+    else if(b==="right") guideGo(1);
+    else if(b==="b") backToMenu();
+    return true;
+  }
+  if(R.page==="link"){
+    if(!down) return true;
+    if(b==="left"||b==="up"){ R.sel=(R.sel+2)%3; sfx("move"); renderLink(); }
+    else if(b==="right"||b==="down"){ R.sel=(R.sel+1)%3; sfx("move"); renderLink(); }
+    else if(b==="a"){ var i=R.sel; if(i===0) openWrite(); else if(i===1) openDraw(); else hangUp(); }
+    else if(b==="b") hangUp();
+    return true;
+  }
+  if(R.page==="write"){
+    if(!down) return true;
+    if(b==="a") sendText();
+    else if(b==="b") cancelWrite();
+    return true;
+  }
+  if(R.page==="draw"){
+    if(!down) return true;
+    if(b==="up"){ R.draw.cy=(R.draw.cy+15)%16; sfx("move"); renderDraw(); }
+    else if(b==="down"){ R.draw.cy=(R.draw.cy+1)%16; sfx("move"); renderDraw(); }
+    else if(b==="left"){ R.draw.cx=(R.draw.cx+15)%16; sfx("move"); renderDraw(); }
+    else if(b==="right"){ R.draw.cx=(R.draw.cx+1)%16; sfx("move"); renderDraw(); }
+    else if(b==="a"){ paintCell(R.draw.cx,R.draw.cy); sfx("tick"); }
+    else if(b==="select"){ R.draw.tone=(R.draw.tone+1)&3; sfx("tap"); renderDraw(); }
+    else if(b==="start") drawSend();
+    else if(b==="b"){ setPage("link"); sfx("miss"); }
+    return true;
+  }
+  if(R.page==="meter"){
+    if(!down) return true;
+    if(b==="b") closeMeter();
+    return true;
+  }
+  return true;
+}
 
 /* ---------- events ---------- */
-$("radio-tab-send").onclick=function(){ setTab("send"); };
-$("radio-tab-recv").onclick=function(){ setTab("recv"); };
-$("radio-tab-lab").onclick=function(){ setTab("lab"); };
-$("radio-send-go").onclick=function(){ if(R.auto) linkSend(); else startSend(); };
-$("radio-recv-go").onclick=function(){ if(R.auto) linkRecv(); else startRecv(); };
-$("radio-send-stop").onclick=cancelLink;
-$("radio-recv-stop").onclick=function(){ if(R.link) cancelLink(); else stopRecv(true); };
-$("radio-auto").onchange=function(){
-  R.auto=this.checked;
-  R.sendText=""; R.recvText=""; R.recvStats=""; R.recvHex="";
-  render();
-};
-$("radio-rate").onchange=function(){ R.rate=parseInt(this.value,10)||40; R.sendText=""; R.recvText=""; R.recvStats=""; R.recvHex=""; render(); };
-$("radio-pattern").onchange=function(){ R.pattern=this.value; R.sendText=""; R.recvText=""; R.recvStats=""; R.recvHex=""; render(); };
+function bindEvents(){
+  Array.prototype.forEach.call(byId("radio-menu").children,function(li,i){
+    li.onclick=function(){ R.menu=i; renderMenu(); menuPick(); };
+  });
+  var body=byId("radio-guide-body");
+  body.onclick=function(){ guideGo(1); };
+  byId("radio-write").onclick=openWrite;
+  byId("radio-draw").onclick=openDraw;
+  byId("radio-hangup").onclick=hangUp;
+  byId("radio-write-send").onclick=sendText;
+  byId("radio-write-back").onclick=cancelWrite;
+  byId("radio-write-input").addEventListener("input",updateWrite);
+  byId("radio-write-input").addEventListener("keydown",function(e){
+    if(e.key==="Enter"){ e.preventDefault(); sendText(); }
+    else if(e.key==="Escape"){ e.preventDefault(); cancelWrite(); }
+  });
+  byId("radio-draw-send").onclick=drawSend;
+  byId("radio-draw-back").onclick=function(){ setPage("link"); sfx("miss"); };
+  var cv=byId("radio-draw-cv"), drag=false;
+  cv.addEventListener("pointerdown",function(e){
+    e.preventDefault(); drag=true;
+    try{ cv.setPointerCapture(e.pointerId); }catch(x){}
+    paintAt(e); sfx("tick");
+  });
+  cv.addEventListener("pointermove",function(e){ if(drag) paintAt(e); });
+  ["pointerup","pointercancel","lostpointercapture"].forEach(function(t){
+    cv.addEventListener(t,function(){ drag=false; });
+  });
+  byId("radio-txmode").onchange=function(){ R.txMode=this.checked?"playback":"record"; saveTxMode(); };
+  byId("radio-test-rate").onchange=function(){ R.test.rate=parseInt(this.value,10)||40; R.test.last=null; R.test.stats=""; R.test.hex=""; R.test.state=""; renderMeter(); };
+  byId("radio-test-pattern").onchange=function(){ R.test.pattern=this.value; R.test.last=null; R.test.stats=""; R.test.hex=""; R.test.state=""; renderMeter(); };
+  byId("radio-test-send").onclick=startSendTest;
+  byId("radio-test-recv").onclick=startRecvTest;
+  byId("radio-test-stop").onclick=function(){ if(R.test.tx) stopSendTest(); else stopRecvTest(true); };
+}
 
 /* ---------- register ---------- */
 function icon(){
@@ -665,13 +869,68 @@ function icon(){
   ];
 }
 
+bindEvents();
 if(window.LOPDA_DEBUG) window.LOPDA_DEBUG.radio=R;
-LP.builtin({id:"radio", label:"app.radio", icon:icon, view:"radio",
-  open:function(){ R.live=true; R.tab="send"; render(); renderLog(); LP.show("radio"); },
+
+LP.padRoute("radio",function(b,down){ if(byId("v-radio").hidden) return false; radioButton(b,down); return true; });
+
+LP.builtin({id:"radio", label:"app.radio", icon:icon, view:"radio", keepPad:true,
+  open:function(){
+    R.live=true;
+    R.page="menu";
+    R.menu=0;
+    R.armA=false;
+    R.pending=false;
+    R.quiet=false;
+    R.closeMsg="";
+    applyTxMode();
+    loadDoc();
+    renderMenu();
+    renderBar();
+    LP.show("radio");
+    LP.showPad(true);
+  },
   /* The runtime calls leave/pause/audio on every built-in, not only the one in front. Only the live Radio may
-     let go of the wake lock or the microphone, or it would clobber the reader's lock when the page hides. */
-  leave:function(){ if(R.live){ R.live=false; stopAll(); } },
-  pause:function(){ if(R.live){ stopAll(); R.recvText=tr("radio.recv.stopped"); render(); } },
-  lang:function(){ if(R.live){ render(); renderLog(); } },
-  audio:function(){ if(R.live && !R.suppressAudio){ stopAll(); R.sendText=""; R.recvText=tr("radio.audio"); render(); } }});
+     let go of the link, the microphone or the wake lock, or it would clobber the reader's lock when the page hides. */
+  leave:function(){
+    if(!R.live) return;
+    R.quiet=true;
+    R.page="menu";
+    if(LP.link.state!=="closed") LP.link.close("home");
+    stopTest();
+    stopMeter();
+    R.pending=false;
+    R.live=false;
+    LP.setSession("ambient");
+    if(!LP.link.busy()) micMark.hidden=true;
+    LP.keepAwake(false);
+    R.quiet=false;
+  },
+  pause:function(){
+    if(!R.live) return;
+    R.quiet=true;
+    stopTest();
+    stopMeter();
+    if(LP.link.state!=="closed") LP.link.close("home");
+    R.quiet=false;
+  },
+  resume:function(){
+    if(R.live && R.page==="meter" && !R.meter.stream && !R.meter.pending && !activeTest()) startMeter();
+  },
+  lang:function(){ if(R.live) render(); },
+  audio:function(){
+    if(!R.live || R.suppressAudio) return;
+    R.suppressAudio=true;
+    R.quiet=true;
+    if(LP.link.state!=="closed") LP.link.close("home");
+    R.quiet=false;
+    stopTest();
+    stopMeter();
+    R.suppressAudio=false;
+    R.closeMsg=tr("radio.audio");
+    if(R.page==="link" || R.page==="write" || R.page==="draw"){ setPage("menu"); }
+    else render();
+  },
+  ready:function(){ loadDoc(); }
+});
 })();

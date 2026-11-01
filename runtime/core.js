@@ -529,7 +529,7 @@ function armConfirm(wrapId,btnId,label,onYes,confirm){
    A route returns true when it took the button. */
 var PADB={up:false,down:false,left:false,right:false,a:false,b:false,start:false,select:false};
 var PADKEYS={ArrowUp:"up",ArrowDown:"down",ArrowLeft:"left",ArrowRight:"right",x:"a",X:"a",z:"b",Z:"b",Enter:"start",Shift:"select"};
-var PAD_ORDER=["home","link","snap","file","cart","cam","dark","cal","dict","reader","notes","pet","run"], padRoutes={};   /* "link": the pairing screen (link.js), "snap": an app's viewfinder (apps/snap.js), "file": the runtime's file dialog, while they are open */
+var PAD_ORDER=["home","link","snap","file","cart","cam","dark","cal","dict","reader","notes","pet","radio","run"], padRoutes={};   /* "link": the pairing screen (link.js), "snap": an app's viewfinder (apps/snap.js), "file": the runtime's file dialog, while they are open */
 function padRoute(name,fn){ padRoutes[name]=fn; }
 padRoute("home",function(b,down){
   if(b!=="a" || !down || $("v-home").hidden || !$("home-add-tip")) return false;
