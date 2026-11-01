@@ -17,8 +17,12 @@
  *   name        the name chosen at the hatch (null in an egg, or in a pet hatched before naming); never changed later.
  *   shelf       the id of the one souvenir on the room's shelf, or null.
  *   today.shelf whether changing the shelf already gave the day's +1 joy (reset with the other today counters).
+ *   care        0..1, how well the pet has been kept over the last days: an exponential average of careScore, updated
+ *               once on each outing day when the outing is decided (today.cared guards a second update that day).
+ *               Missing on a new pet or an old save; the first outing starts it at careScore.
  *
- * API (the save-taking functions return new saves; the input save is never changed):
+ * API (the save-taking functions return new saves and never change the input one, except updateCare, which edits the
+ * live save in place and reports whether it changed it):
  *   rng(seed)                    deterministic floats in [0,1), mulberry32
  *   daySeed(born, dayKey)        an integer seed for one pet and one local day
  *   dayKey(now, tzOffsetMin)     "YYYY-MM-DD" in local time; tzOffsetMin is minutes east of UTC
@@ -42,6 +46,11 @@
  *   builtinSouvenir(rnd, recentNames, table) one entry of table, avoiding recent names when possible
  *   pickSouvenir(rnd, table, opts)  one in-season entry: unseen first, else seen avoiding recent; always two draws
  *   souvenirLocalChance(save)    min(1, souvenirLocalRate / trait.outing), the chance an outing brings one back
+ *   careScore(save)              0..1 from joy, hunger and mess: 0.5 * joy + 0.3 * hunger + 0.2 * (1 - mess)
+ *   souvenirMood(care)           clamp((care - 0.2) / 0.6, 0.1, 1), the multiplier a happy pet keeps
+ *   aiSouvenirAllowed(born, day, care)  the AI line's separate day roll; false means an empty-handed outing
+ *   updateCare(save, dayKey)     the one in-place helper: moves care toward careScore once that day, returns true when
+ *                                it changed care (the program calls it on its live save, before the outing's roll)
  *   aiPrompt(ctx)                {messages, max} for one LP.ai.ask call, with only design.md 7's allowed facts
  *   moodWord(hunger, joy, zh)    the one mood word the prompt may carry
  *   aiCategories(before, after)  the fixed category words whose usage counts grew
@@ -144,7 +153,7 @@ function traitsOf(sp){ return Object.keys(sp.traits || {normal:{outing:0.5, idle
 function traitOf(sp,trait){ return (sp.traits && sp.traits[trait]) || sp.traits[traitsOf(sp)[0]]; }
 function blankToday(day,shownYesterday){
   return {day:day, shown:null, shownYesterday:shownYesterday||null, picked:false, pick:null, used:false,
-    rewarded:false, ai:false, out:null, back:false, snacks:0, pats:0, played:0, burp:false, shelf:false};
+    rewarded:false, ai:false, out:null, back:false, snacks:0, pats:0, played:0, burp:false, shelf:false, cared:false};
 }
 function clone(s){ return s==null ? s : JSON.parse(JSON.stringify(s)); }
 function ensureToday(s,key){
@@ -400,6 +409,41 @@ function wants(save){
   if(num(save.hunger)<=1) return "food";                    /* food first: an empty bowl is the louder call */
   if(num(save.mess)>=2) return "wash";
   return null;
+}
+
+/* ---------- how well the pet is kept ---------- */
+/* The pet's mood over days: half joy, a third hunger and a fifth a clean room. The maxima come from the species pack,
+   so a pack with another range needs no change here. A damaged value outside the range is clamped, never trusted. */
+function careScore(save){
+  var sp=speciesOf(save);
+  function part(v,max){ var n=num(v)/(num(max)||1); return n<0 ? 0 : n>1 ? 1 : n; }
+  var score=0.5*part(save && save.joy,sp.joyMax)+0.3*part(save && save.hunger,sp.hungerMax)+
+    0.2*(1-part(save && save.mess,sp.messMax));
+  return score<0 ? 0 : score>1 ? 1 : score;
+}
+/* care 0.8 and above is a full chance, 0.5 halves it, and 0.26 or less is the floor of 0.1. The epsilon only snaps
+   the binary rounding of (0.26 - 0.2) / 0.6 back onto the table. */
+function souvenirMood(care){
+  var v=(num(care)-0.2)/0.6;
+  return v<=0.1+1e-9 ? 0.1 : v>=1-1e-9 ? 1 : v;
+}
+/* The one save-taking helper that edits in place: the program's live save is the thing being decided, and the caller
+   needs to know whether this day already moved care. care is the average of the days, not the one bad hour. */
+function updateCare(save,key){
+  if(!save || !key) return false;
+  var t=ensureToday(save,key);
+  if(t.cared) return false;
+  var score=careScore(save), care=+save.care;
+  save.care=isFinite(care) ? Math.max(0,Math.min(1,0.5*care+0.5*score)) : score;
+  t.cared=true;
+  return true;
+}
+/* The AI line's own gate (pet.js, decisions.md 45): a separate day-seeded roll decides whether the outing even tries.
+   It does not consume the built-in roll's seed. A care below 0.26 is the 0.1 floor, so most such days are empty. */
+var AI_MOOD_SEED=0x7f4a7c15;
+function aiSouvenirAllowed(born,key,care){
+  var r=rng((daySeed(born,key)^AI_MOOD_SEED)>>>0);
+  return r()<souvenirMood(care);
 }
 
 /* ---------- the day's outing ---------- */
@@ -693,6 +737,7 @@ window.LopdaPet={
   outingToday:outingToday, pickOfDay:pickOfDay,
   validateSouvenir:validateSouvenir, builtinSouvenir:builtinSouvenir, aiPrompt:aiPrompt,
   pickSouvenir:pickSouvenir, souvenirLocalChance:souvenirLocalChance,
+  careScore:careScore, souvenirMood:souvenirMood, aiSouvenirAllowed:aiSouvenirAllowed, updateCare:updateCare,
   moodWord:moodWord, aiCategories:aiCategories
 };
 })();

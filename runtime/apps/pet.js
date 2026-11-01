@@ -12,7 +12,8 @@
  * stops it.
  *
  * Storage: data/users/local/pet (design.md 8 plus petsim's lastMeal, awakeHunger, awakeJoy, today, seenUse and aiUse;
- * boxSeen and today's pick/outing phase/remaining/hour/ai/shelf flag, and outSouv — the souvenir a background trip is
+ * care — the days-long 0..1 average the souvenir mood comes from — and boxSeen, today's pick/outing
+ * phase/remaining/hour/ai/cared/outEmpty/shelf flag, and outSouv — the souvenir a background trip is
  * bringing in — and data/users/local/pet/souvenirs/<id> {name:{zh,en}, line:{zh,en}, px, at, ai, day}. The pet's
  * `name` is fixed at the hatch and `shelf` is the one souvenir shown on the room's shelf (or null). A failed read is
  * not "no pet": the program then keeps an in-memory pet and never writes an egg over a save it could not read (the
@@ -23,7 +24,7 @@
  * or waiting film. LopdaPet.pickOfDay chooses (about half the days nothing); the pet holds the matching prop
  * and its row lights. START opens the small menu (the pick's own name / 状态 / 纪念品箱; "今天没有" when empty);
  * A on that row opens the summary's own program, then the pick is used for the day. The AI souvenir, when the line is on, is one call at the day's outing (30 s cap) and silently
- * falls back to the built-in table.
+ * falls back to the built-in table; a day whose separate mood roll fails is empty-handed instead and makes no call.
  *
  * From boot: the pet lives without its screen. On storage ready, whenever the home screen draws its icon and on resume,
  * it catches up, rolls the day, decides the pick and the outing and, once the outing hour has come, makes the day's one
@@ -218,6 +219,13 @@ function normalize(save){
   if(td.outSouv===undefined) td.outSouv=null;
   if(td.outHour===undefined) td.outHour=null;
   if(td.shelf===undefined) td.shelf=false;
+  if(td.cared===undefined) td.cared=false;
+  if(td.outEmpty===undefined) td.outEmpty=false;
+  /* care is the days-long average the outing's chance comes from: keep a real 0..1 number, drop anything else */
+  if(save.care!==undefined){
+    if(typeof save.care==="number" && isFinite(save.care) && save.care>=0 && save.care<=1) save.care=+save.care;
+    else delete save.care;
+  }
   return save;
 }
 function packOf(save){
@@ -745,8 +753,10 @@ function outingSouvenir(){
   var seed=(Pet.daySeed(P.save.born,dayKey(now()))^0x5bd1e995)>>>0;
   var r=Pet.rng(seed);
   /* the first draw of the day's own seed decides an empty day, so a reload (or a different box) never turns one
-     into a souvenir day; only a yes draws the two pickSouvenir needs */
-  if(r()>=Pet.souvenirLocalChance(P.save)) return EMPTY_SOUV;
+     into a souvenir day; only a yes draws the two pickSouvenir needs. A pet kept well keeps the full weekly chance;
+     an unhappy one brings very little (petsim careScore / souvenirMood, decisions.md 45). */
+  var chance=Pet.souvenirLocalChance(P.save)*Pet.souvenirMood(P.save.care);
+  if(r()>=chance) return EMPTY_SOUV;
   var table=souvenirTable(packOf(P.save));
   var opts={
     season:seasonOf(now()),
@@ -888,6 +898,11 @@ function startAiJob(td){
 function beginAiSouvenir(){
   startAiJob(P.save && P.save.today);
 }
+/* The AI line is only tried on a day whose separate mood roll passes; the same seed on every reload. A failed gate is
+   an empty-handed outing, not the built-in roll: the pet stays home with nothing and the player's AI credit is kept. */
+function aiMoodOpen(day){
+  return !!P.save && Pet.aiSouvenirAllowed(P.save.born,day,P.save.care);
+}
 /* The outing's phase lives in today so leaving or reloading during the ~20 s does not eat the day's souvenir:
    `outPhase`/`outLeft`/`outHour` are resumed on the next visit; `out`/`back` are written only once the souvenir
    document has landed. `outSouv` names the souvenir a background trip is bringing in. */
@@ -902,31 +917,41 @@ function persistOuting(){
 function startOuting(hour){
   if(P.restoring || P.nostore || P.readFailed) return;
   if(!P.save) return;
-  var had=souvForDay(dayKey(now()));
+  var day=dayKey(now());
+  /* the day's care is decided once, before any roll; the same today.cared keeps a reload from moving it again */
+  Pet.updateCare(P.save,day);
+  saveSoon();
+  var had=souvForDay(day);
   if(had){
-    if(markDayWithSouvenir(had,hour,dayKey(now())) && !P.outing) resumeOuting();
+    if(markDayWithSouvenir(had,hour,day) && !P.outing) resumeOuting();
     render();
     return;
   }
-  if(!P.save.today) P.save.today={day:dayKey(now()),shown:null,picked:false,pick:null,used:false,rewarded:false,ai:false,out:null,back:false,snacks:0,pats:0,played:0,burp:false};
+  if(!P.save.today) P.save.today={day:day,shown:null,picked:false,pick:null,used:false,rewarded:false,ai:false,out:null,back:false,snacks:0,pats:0,played:0,burp:false};
+  var td=P.save.today;
   var left=Math.max(1,Math.round(OUT_MS/500));
-  P.save.today.outPhase="out"; P.save.today.outLeft=left; P.save.today.outHour=hour;
+  td.outPhase="out"; td.outLeft=left; td.outHour=hour;
   stopAiJob();
-  P.outing={phase:"out", left:left, souv:null, hour:hour, done:false, saved:false, day:dayKey(now())};
+  P.outing={phase:"out", left:left, souv:null, hour:hour, done:false, saved:false, day:day};
   P.resumeOuting=false;
+  if(!td.ai && aiAvailable()){
+    if(aiMoodOpen(day)) beginAiSouvenir();
+    else td.outEmpty=true;                                /* the gate said no: no call, no built-in fallback */
+  }
   saveSoon();
-  beginAiSouvenir();
   render();
 }
 function resumeOuting(){
   var td=P.save && P.save.today;
   if(!td || !td.outPhase || td.back || td.day!==dayKey(now())) return false;
+  /* an outing decided before the upgrade may have no care yet; on a new save this is the guarded no-op */
+  if(Pet.updateCare(P.save,td.day)) saveSoon();
   var left=Math.max(1,+td.outLeft||1), back=td.outPhase==="back";
   var souv=null, saved=false;
   if(back){
     souv=findSouv(td.outSouv);
     saved=!!souv;
-    if(!souv) souv=outingSouvenir();
+    if(!souv) souv=td.outEmpty ? EMPTY_SOUV : outingSouvenir();
     left=4;
   }
   P.outing={phase:back?"back":"out", left:left, souv:souv, hour:+td.outHour||hourNow(),
@@ -964,7 +989,8 @@ function stepOuting(){
     if(P.aiJob && !P.aiJob.done){ persistOuting(); render(); return; }
     var job=P.aiJob;
     P.outing.phase="back"; P.outing.left=4;
-    P.outing.souv=(job && job.result) ? job.result : outingSouvenir();
+    var empty=P.save && P.save.today && P.save.today.outEmpty;
+    P.outing.souv=(job && job.result) ? job.result : (empty ? EMPTY_SOUV : outingSouvenir());
     P.outing.saved=false;
     P.aiJob=null;
     persistOuting(); saveSoon(); render();
@@ -983,16 +1009,26 @@ function decideOuting(hour, day){
   P.outResolving=Promise.resolve().then(function(){
     var td=P.save && P.save.today;
     if(!td || td.day!==day || td.out!=null || td.back) return {skip:true};
+    /* once per day, before the AI gate or the built-in roll; the guard keeps a reload from moving it again */
+    Pet.updateCare(P.save,day);
+    td=P.save.today;
     var had=souvForDay(day);
     if(had) return {skip:true, done:markDayWithSouvenir(had,hour,day)};
     td.outHour=hour;
     saveSoon();
     if(!td.ai && aiAvailable()){
-      var job=startAiJob(td);
-      if(job) return job.promise.then(function(entry){
-        if(P.aiJob===job) P.aiJob=null;
-        return {entry:entry};
-      });
+      if(aiMoodOpen(day)){
+        var job=startAiJob(td);
+        if(job) return job.promise.then(function(entry){
+          if(P.aiJob===job) P.aiJob=null;
+          return {entry:entry};
+        });
+      } else {
+        /* the mood roll said no: an empty-handed outing, and the AI credit is saved */
+        td.outEmpty=true;
+        saveSoon();
+        return {entry:null};
+      }
     }
     return {entry:null};
   }).then(function(res){
@@ -1002,6 +1038,8 @@ function decideOuting(hour, day){
     var td=P.save && P.save.today;
     if(!td || td.day!==day || td.out!=null || td.back) return false;
     if(!entry){
+      /* a failed AI call falls back to the weekly built-in roll; a failed mood gate does not */
+      if(td.outEmpty) return markDayBack(hour,day,null);
       entry=outingSouvenir();
       /* an empty day is marked done at once: no document, and the next visit plays the normal walk-back */
       if(souvIsEmpty(entry)) return markDayBack(hour,day,null);

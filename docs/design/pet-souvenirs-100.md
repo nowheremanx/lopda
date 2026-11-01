@@ -2,6 +2,8 @@
 
 > 2026-11-01 更新（owner）：数量比长相重要，目标改为 **300 件**（四季各 60、`any` 60），大部分由 DeepSeek 画。自带纪念品改为大约一周一件：每次外出按 `min(1, (1/7) / trait.outing)` 决定带不带回，没带回就空手回来、不写文档（`briefs/pet-souvenirs/brief-rate.md`）；有 AI 线路时照旧每天一件 AI 纪念品。下文的 100 是第一版的数量，以 `briefs/pet-souvenirs/brief-art.md` 为准。
 
+心情也会影响这件事：`petsim.careScore(save)` 把 joy、hunger、mess 折成 0..1，存档里的 `care` 按天取平均（新档或旧档第一次出门时从当天的分数开始），只在当天外出决定时更新一次（`today.cared` 防重）。自带纪念品的概率乘 `souvenirMood(care) = clamp((care-0.2)/0.6, 0.1, 1)`；有 AI 线路时，只有当天另一颗按天种子的骰子小于这个系数才发请求，没过就空手回来、不花 AI 额度。养得好的宠物大约一周一件，长期不开心的宠物一年最多十件左右（`brief-mood.md`）。
+
 - 状态：draft，等 owner 确认（2026-11-01）。
 - 目标：没有 AI 线路的玩家，大约每周能捡到一件自带纪念品；库的结构整齐，以后加纪念品只是往表里加行。
 - 范围：`runtime/petsouv.js`（新）、`runtime/petart.js`、`runtime/apps/pet.js`、`runtime/petsim.js`、`runtime/strings.js`、测试。

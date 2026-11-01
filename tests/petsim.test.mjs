@@ -38,7 +38,7 @@ test("fresh: the save of design.md 8, plus lastMeal, today's counters and the ca
   const now = at(2026, 10, 20, 8, 0), s = P.fresh(now, P.rng(7));
   assert.deepEqual(Object.keys(s).sort(), ["aiUse", "awakeHunger", "awakeJoy", "born", "close", "form", "hunger", "joy", "last", "lastDay", "lastMeal",
     "light", "marks", "mess", "name", "opened", "room", "seenUse", "shelf", "species", "stage", "today", "trait", "travel", "v"].sort());
-  assert.deepEqual(Object.keys(s.today).sort(), ["ai", "back", "burp", "day", "out", "pats", "pick", "picked", "played", "rewarded", "shelf", "shown", "shownYesterday", "snacks", "used"]);
+  assert.deepEqual(Object.keys(s.today).sort(), ["ai", "back", "burp", "cared", "day", "out", "pats", "pick", "picked", "played", "rewarded", "shelf", "shown", "shownYesterday", "snacks", "used"]);
   assert.deepEqual([s.v, s.species, s.room, s.born, s.last, s.hunger, s.joy, s.mess, s.close, s.opened, s.lastDay, s.awakeHunger, s.awakeJoy],
     [1, "chip", "chip", now, now, 5, 5, 0, 0, 0, null, 0, 0]);
   assert.deepEqual([s.stage, s.form, s.light, s.travel, s.lastMeal, s.name, s.shelf], ["egg", null, true, false, null, null, null]);
@@ -849,6 +849,67 @@ test("pickSouvenir: deterministic, and exactly two draws on every path", () => {
   assert.equal(emptyDraws, 2, "an empty pool still draws twice");
 });
 
+test("careScore: 0..1, half joy, a third hunger and a fifth a clean room", () => {
+  const s = base();
+  s.joy = 5; s.hunger = 5; s.mess = 0;
+  assert.equal(P.careScore(s), 1);
+  s.joy = 0; s.hunger = 0; s.mess = 3;
+  assert.equal(P.careScore(s), 0);
+  s.joy = 1; s.hunger = 1; s.mess = 2;
+  assert.ok(closeTo(P.careScore(s), 0.5 * 0.2 + 0.3 * 0.2 + 0.2 * (1 - 2 / 3)));
+  /* a damaged save is clamped, never allowed outside 0..1 */
+  for (const [joy, hunger, mess] of [[-4, -2, -1], [99, 99, 99], [0, 5, 0], [NaN, 5, 0]]) {
+    const bad = { ...s, joy, hunger, mess };
+    const v = P.careScore(bad);
+    assert.ok(Number.isFinite(v) && v >= 0 && v <= 1, JSON.stringify([joy, hunger, mess, v]));
+  }
+});
+
+test("souvenirMood: the table - 0.8 gives 1, 0.5 gives 0.5, 0.26 or less gives the 0.1 floor", () => {
+  assert.ok(closeTo(P.souvenirMood(0.8), 1));
+  assert.ok(closeTo(P.souvenirMood(0.5), 0.5));
+  assert.equal(P.souvenirMood(0.26), 0.1);
+  assert.equal(P.souvenirMood(0.2), 0.1);
+  assert.ok(closeTo(P.souvenirMood(0), 0.1));
+  assert.ok(closeTo(P.souvenirMood(0.65), 0.75));
+  assert.ok(closeTo(P.souvenirMood(1), 1));
+  assert.ok(closeTo(P.souvenirMood(2), 1), "above 1 stays at 1");
+});
+
+test("updateCare: missing care starts at careScore, then one EMA per day and never twice on the same day", () => {
+  const s = base();
+  s.joy = 2; s.hunger = 2; s.mess = 1;
+  const first = P.careScore(s);
+  assert.equal(s.care, undefined, "a new or old save has no care yet");
+  assert.equal(P.updateCare(s, "2026-10-20"), true);
+  assert.ok(closeTo(s.care, first), "the first outing starts at careScore");
+  const afterFirst = s.care;
+  s.joy = 5; s.hunger = 5; s.mess = 0;
+  assert.equal(P.updateCare(s, "2026-10-20"), false, "the same day is already cared for");
+  assert.equal(s.care, afterFirst, "a reload cannot move care twice");
+  assert.equal(P.updateCare(s, "2026-10-21"), true);
+  assert.ok(closeTo(s.care, 0.5 * afterFirst + 0.5 * 1), "later days average half the old care and half today");
+  s.today = { day: "2026-10-22" };
+  assert.equal(P.updateCare(s, "2026-10-22"), true, "a new day, even with a bare today, updates once");
+  assert.equal(P.updateCare(s, "2026-10-22"), false);
+});
+
+test("aiSouvenirAllowed: the AI line's separate day roll is skipped when care is low", () => {
+  const born = at(2026, 10, 1, 8, 0);
+  let skipped = 0, allowed = 0;
+  for (let d = 0; d < 200; d++) {
+    const key = "2026-11-" + String(1 + (d % 30)).padStart(2, "0") + "-" + d;
+    if (P.aiSouvenirAllowed(born, key, 0.1)) allowed++; else skipped++;
+    assert.equal(P.aiSouvenirAllowed(born, key, 0.1), P.aiSouvenirAllowed(born, key, 0.1), "the same day gives the same answer");
+  }
+  assert.ok(skipped > 0, "a low-care pet skips many AI days");
+  assert.ok(allowed > 0, "and the day's own roll still lets some through");
+  for (let d = 0; d < 50; d++) {
+    const key = "2026-12-" + String(1 + (d % 30)).padStart(2, "0") + "-" + d;
+    assert.equal(P.aiSouvenirAllowed(born, key, 1), true, "a care of 1 always passes: rng() < 1");
+  }
+});
+
 test("souvenirLocalChance: min(1, souvenirLocalRate / trait.outing) from the species pack", () => {
   assert.ok(closeTo(P.SPECIES.chip.souvenirLocalRate, 1 / 7));
   for (const [trait, tr] of Object.entries(P.SPECIES.chip.traits)) {
@@ -863,25 +924,33 @@ test("souvenirLocalChance: min(1, souvenirLocalRate / trait.outing) from the spe
 });
 
 /* One year of outings: 91-day seasons, 60 items each plus 60 in every season. A day's outing is a seeded draw
-   against trait.outing (not outingToday's calendar), then the weekly local roll; on a souvenir day pickSouvenir sees
-   the growing seen and recent lists and always takes an unseen in-season entry while one is left. */
+   against trait.outing (not outingToday's calendar), then care moves toward the day's careScore (5/5/0 for a pet
+   kept well, 1/1/2 for one neglected), then the weekly local roll times souvenirMood(care); on a souvenir day
+   pickSouvenir sees the growing seen and recent lists and always takes an unseen in-season entry while one is left. */
 function simTable() {
   const table = [];
   for (const s of FOUR) for (let i = 0; i < 60; i++) table.push({ id: `${s}-${i}`, season: s });
   for (let i = 0; i < 60; i++) table.push({ id: `any-${i}`, season: "any" });
   return table;
 }
-function yearLocalSouvenirs(traitName, seed, table) {
+function yearLocalSouvenirs(traitName, seed, table, neglected) {
   const trait = P.SPECIES.chip.traits[traitName];
   const r = P.rng(seed);
   const startDay = Math.floor(r() * 364);
   const seen = [], recent = [], seenSet = new Set();
   const localChance = P.souvenirLocalChance({ species: "chip", trait: traitName });
-  let found = 0;
+  let found = 0, care = null;
   for (let d = 0; d < 365; d++) {
     const season = FOUR[Math.floor((startDay + d) / 91) % 4];
     if (r() >= trait.outing) continue;
-    if (r() >= localChance) continue;                       /* an empty-handed outing */
+    /* the state after catch-up at the outing hour, for this kind of keeper */
+    const key = "sim-" + d;
+    const day = { species: "chip", hunger: neglected ? 1 : 5, joy: neglected ? 1 : 5, mess: neglected ? 2 : 0,
+      today: { day: key } };
+    if (care !== null) day.care = care;
+    assert.equal(P.updateCare(day, key), true);
+    care = day.care;
+    if (r() >= localChance * P.souvenirMood(care)) continue; /* an empty-handed outing */
     const unseenLeft = table.some((e) => (e.season === "any" || e.season === season) && !seenSet.has(e.id));
     const e = P.pickSouvenir(r, table, { season, seen, recent, newChance: 1 });
     assert.ok(e, "a souvenir day picks an entry");
@@ -890,19 +959,24 @@ function yearLocalSouvenirs(traitName, seed, table) {
     recent.push(e.id);
     if (recent.length > 5) recent.shift();
   }
-  return found;
+  return { found, care };
 }
 
-test("pickSouvenir: a seeded year of outings brings 40-65 built-in souvenirs for every trait", (t) => {
+test("souvenir mood: a well-kept pet keeps 40-65 a year, a neglected one at most 10", (t) => {
   const table = simTable();
   assert.equal(table.length, 300);
-  const averages = {};
+  const wellKept = {}, neglected = {};
   for (const traitName of Object.keys(P.SPECIES.chip.traits)) {
     let total = 0;
-    for (let i = 0; i < 50; i++) total += yearLocalSouvenirs(traitName, 4000 + i * 131, table);
-    averages[traitName] = total / 50;
-    assert.ok(averages[traitName] >= 40 && averages[traitName] <= 65,
-      `${traitName}: ${averages[traitName]} built-in souvenirs a year`);
+    for (let i = 0; i < 50; i++) total += yearLocalSouvenirs(traitName, 4000 + i * 131, table, false).found;
+    wellKept[traitName] = total / 50;
+    assert.ok(wellKept[traitName] >= 40 && wellKept[traitName] <= 65,
+      `${traitName}: ${wellKept[traitName]} built-in souvenirs a year for a well-kept pet`);
+    total = 0;
+    for (let i = 0; i < 50; i++) total += yearLocalSouvenirs(traitName, 4000 + i * 131, table, true).found;
+    neglected[traitName] = total / 50;
+    assert.ok(neglected[traitName] <= 10,
+      `${traitName}: ${neglected[traitName]} built-in souvenirs a year for a neglected pet`);
   }
-  t.diagnostic(JSON.stringify(averages));
+  t.diagnostic(JSON.stringify({ wellKept, neglected }));
 });
