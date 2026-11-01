@@ -66,7 +66,7 @@ var T={
   startAt:0, lastTick:0, heard:0, painted:null, navKey:"",
   /* 12.24: live recording. rec is "off" | "count" (the one-bar count-in) | "on"; recStartTick is the global tick
      writing begins at; metroNext is the next metronome beat still to be scheduled */
-  rec:"off", recHold:0, recHeld:false, recStartTick:0, recBeat:-1, recLit:false, metroNext:0,
+  rec:"off", recDown:null, recHold:0, recHeld:false, recStartTick:0, recBeat:-1, recLit:false, metroNext:0,
   repeats:[], tour:null,
   /* song mode's bar state (12.12): the bar being heard is frozen; a chain edit only moves where it sits in the
      edited chain, and the next bar is re-anchored from nextSlot at the boundary (h* = heard, ahead = scheduled) */
@@ -1473,6 +1473,7 @@ function build(){
       b.appendChild(el("i","st-key-line"));
       b.onclick=function(){ if(T.rec!=="off") return; keyTap(deg); };
       b.addEventListener("pointerdown",function(e){ recPitchDown(deg,e); });
+      ["pointerup","pointercancel","pointerleave"].forEach(function(ev){ b.addEventListener(ev,function(){ recPitchUp(); }); });
       keys.appendChild(b);
     })(i);
   }
@@ -3567,12 +3568,27 @@ function recPitch(deg){
   deg+=octShift(track);
   T.noteDeg[track]=deg;
   at=recAt(ac.currentTime);
+  T.recDown=null;
   if(at>=0){
     T.song=SONGS.setNote(T.song,T.pat,track,at*SONGS.STEP,deg,SONGS.NOTE_VEL);
     touch();
     renderGrid(); renderNav();
+    T.recDown={track:track, pat:T.pat, step:at, sec:ac.currentTime};
   }
   auditionNote(track,deg);
+}
+/* 12.24.2: the release ends the note. The hold is measured on the audio clock (both ends carry the same touch lag),
+   rounded to 16ths, at least one; SONGS.releaseRest writes the rest only where no other note already ends it. */
+function recPitchUp(){
+  var d=T.recDown, ac=T.ctx || LP.SND.ctx, held;
+  T.recDown=null;
+  if(!d || T.rec!=="on" || !T.song || !ac || d.pat!==T.pat) return;
+  held=Math.max(1,Math.round((ac.currentTime-d.sec)/SONGS.ticksToSec(SONGS.STEP,T.song.bpm)));
+  var next=SONGS.releaseRest(T.song,d.pat,d.track,d.step,held);
+  if(next===T.song) return;
+  T.song=next;
+  touch();
+  renderGrid(); renderNav();
 }
 function recRestDown(e){
   if(T.rec==="off") return;
