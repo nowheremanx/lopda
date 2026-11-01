@@ -16,8 +16,8 @@
  *   on(fn) -> off()            fn({type:"message", data}) | fn({type:"close", reason})
  *   busy()                     true while pairing or open
  *   levels()                   the last tone dB values and noise floor, for Radio's meter
- *   setTxMode(m), txMode()     "record" (default) or "playback": close the mic while sending (Radio's meter page, for
- *                              phones whose speaker goes quiet while the mic is open)
+ *   setTxMode(m), txMode()     "playback" (default where navigator.audioSession exists: close the mic while sending,
+ *                              or iOS plays through the earpiece) or "record" (keep it open); Radio's meter page
  *
  * ?linkfake swaps the sound for a BroadcastChannel between tabs of one browser, with the
  * session's own air time; &linkloss=0.2 drops that share of the frames. The session layer
@@ -182,7 +182,7 @@ function fakeTransport(){
 
 function acousticTransport(){
   var T={stream:null, src:null, proc:null, silent:null, ctx:null, sr:48000, rx:null,
-    n:0, floor:null, pdb:null, txUntil:0, onHeard:null, onBusy:null, initGen:0, sentRecent:[], live:false, txMode:"record", reopen:0,
+    n:0, floor:null, pdb:null, txUntil:0, onHeard:null, onBusy:null, initGen:0, sentRecent:[], live:false, txMode:navigator.audioSession ? "playback" : "record", reopen:0,
     cb:0, cbAt:0, cbRate:0, cbCount:0, cbWin:0, wiredAt:0, rms:null, err:"", rewires:0, busySince:0, quietTx:0};
 
   /* How late our own sound reaches the receiver, in seconds: the speaker's output latency, the
@@ -330,7 +330,10 @@ function acousticTransport(){
       }
     },
     /* silent for this long: the microphone is not reaching us at all */
-    deadMs:function(){ return T.stream && T.ctx ? Date.now()-(T.cbAt||T.wiredAt) : 0; },
+    deadMs:function(){
+      if(T.live && !T.stream && T.lostAt) return Date.now()-T.lostAt;   /* a playback send whose reopen failed */
+      return T.stream && T.ctx ? Date.now()-(T.cbAt||T.wiredAt) : 0;
+    },
     diag:function(){
       var c=T.ctx;
       return {mic:!!T.stream, ctx:c?c.state:"none", sr:c?c.sampleRate:0, bps:T.cbAt && Date.now()-T.cbAt<1500 ? Math.round(T.cbRate) : 0,
@@ -371,7 +374,7 @@ function acousticTransport(){
     stop:function(){
       var s=T.stream, live=T.live;
       T.initGen++; T.reopen++;
-      T.stream=null; T.live=false;
+      T.stream=null; T.live=false; T.lostAt=0;
       dropNodes();
       T.rx=null; T.floor=null; T.pdb=null; T.txUntil=0; T.sentRecent=[];
       if(!live) return; /* nothing was live: leave the page's audio session alone */
@@ -388,15 +391,20 @@ function acousticTransport(){
     txMode:function(){ return T.txMode; }
   };
 
-  /* The "playback" send, a switch on Radio's meter page for phones whose speaker goes quiet (or to the earpiece) while
-     the microphone is open: close the microphone, play in "playback", then open it again (the old Radio did this for
-     every frame). Slow: the reopen takes a few hundred ms, and a reply that comes sooner is lost and sent again. */
+  /* The "playback" send: close the microphone, play in "playback", then open it again (the old Radio did this for every
+     frame). The default wherever navigator.audioSession exists (iOS): under "play-and-record" iOS plays through the
+     earpiece, which the other phone cannot hear (first two-iPhone test, iOS 27). Radio's meter page can switch it off.
+     Slower: the reopen takes a few hundred ms, and a reply that comes sooner is lost and sent again. */
   function sendPlayback(bytes, rate, done){
-    var ctx=T.ctx, s=T.stream, my=++T.reopen;
+    var s=T.stream, my=++T.reopen, ctx;
     dropNodes();
-    T.stream=null; T.rx=null;
+    T.stream=null; T.rx=null; T.lostAt=0;   /* the burst itself is not a dead microphone */
     try{ s.getTracks().forEach(function(t){ try{ t.stop(); }catch(e){} }); }catch(e){}
+    /* as the old Radio did: the session first, then whatever context core.js has now, woken */
     LP.setSession("playback");
+    ctx=LP.audio()||T.ctx;
+    LP.wake();
+    if(ctx.state!=="running") T.quietTx++;
     var samples=AC.synth(bytes,{sampleRate:ctx.sampleRate, symbolMs:rate, amp:0.9});
     var buf=ctx.createBuffer(1,samples.length,ctx.sampleRate);
     if(buf.copyToChannel) buf.copyToChannel(samples,0); else buf.getChannelData(0).set(samples);
@@ -414,6 +422,7 @@ function acousticTransport(){
       try{ src.disconnect(); }catch(e){}
       if(done) done();
       if(my!==T.reopen) return;
+      T.lostAt=Date.now();
       LP.setSession("play-and-record");
       var p;
       try{
@@ -421,13 +430,13 @@ function acousticTransport(){
       }catch(e){ p=Promise.reject(e); }
       Promise.resolve(p).then(function(stream){
         if(my!==T.reopen){ try{ stream.getTracks().forEach(function(t){ try{ t.stop(); }catch(e){} }); }catch(e){} return; }
-        T.stream=stream;
-        try{ wire(LP.SND.ctx||ctx); }catch(e){}
-      },function(){});
+        T.stream=stream; T.lostAt=0;
+        try{ wire(LP.SND.ctx||ctx); }catch(e){ T.err="wire "+(e && e.name || ""); }
+      },function(e){ T.err=(e && e.name) || "mic"; });
     }
     src.onended=fin;
     safety=setTimeout(fin,(dur+1)*1000);
-    try{ src.start(ctx.currentTime+0.05); }catch(e){ fin(); }
+    try{ src.start(); }catch(e){ fin(); }
   }
 }
 
@@ -637,7 +646,7 @@ function busy(){ return STATE==="pairing" || STATE==="open"; }
 function levels(){ return TRANSPORT.levels(); }
 /* one short line on the microphone and the audio context, for testing on phones (the pairing screen and Radio) */
 function diag(){ return diagText(); }
-/* "record" (default: the microphone stays open while sending) or "playback" (closed while sending); Radio's meter page */
+/* "playback" (closed while sending; the default on iOS) or "record" (the microphone stays open); Radio's meter page */
 function setTxMode(m){ if(TRANSPORT.setTxMode) TRANSPORT.setTxMode(m); }
 function txMode(){ return TRANSPORT.txMode ? TRANSPORT.txMode() : "record"; }
 

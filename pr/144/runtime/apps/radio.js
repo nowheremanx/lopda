@@ -5,7 +5,7 @@
  * (session layer acoustic-session.js, frames acoustic-link.js). This file owns only the screen and the
  * meter's own microphone.
  *
- * The link log is a document: data/users/local/radio {log:[{dir,at,kind,text?,pic?,lost?}], txMode}
+ * The link log is a document: data/users/local/radio {log:[{dir,at,kind,text?,pic?,lost?}], tx?}
  * (the last 30 entries, the four-tone picture as 64 bytes). The backup includes it like any document.
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  */
@@ -18,7 +18,7 @@ var RADIO_PATH="data/users/local/radio", MAX_LOG=30, PROTO="radio1";
 var R={
   live:false, page:"menu", menu:0, guide:0, sel:0,
   ref:null, loaded:false, loading:false,
-  log:[], txMode:"record", closeMsg:"", pending:false, pairClose:false,
+  log:[], txMode:null, closeMsg:"", pending:false, pairClose:false,
   quiet:false, suppressAudio:false, armA:false,
   meter:{stream:null,src:null,proc:null,silent:null,sr:48000,token:0,pending:false,live:false,state:"",pdb:null,floor:null},
   test:{tx:null,rx:null,pending:false,timer:0,token:0,rate:10,pattern:"a5",state:"",stats:"",hex:"",last:null},
@@ -64,7 +64,7 @@ function persistLog(){
   if(!R.ref) return;
   var log=[], i;
   for(i=0;i<R.log.length;i++) if(!R.log[i].pending) log.push(entryDoc(R.log[i]));
-  put(R.ref,{log:log.slice(-MAX_LOG),txMode:R.txMode});
+  put(R.ref,{log:log.slice(-MAX_LOG),tx:R.txMode||undefined});
 }
 function loadDoc(){
   if(R.loaded || R.loading) return;
@@ -77,14 +77,16 @@ function loadDoc(){
       var list=[], i;
       if(d.log && d.log.length) for(i=0;i<d.log.length;i++){ var e=readEntry(d.log[i]); if(e) list.push(e); }
       if(list.length && !R.log.length) R.log=list.slice(-MAX_LOG);
-      if(d.txMode==="playback" || d.txMode==="record") R.txMode=d.txMode;
+      /* "tx", not the old "txMode": the default changed after the first iPhone test, so a switch set before it is dropped */
+      if(d.tx==="playback" || d.tx==="record") R.txMode=d.tx;
     }
     R.loaded=true; R.loading=false;
     applyTxMode();
     render();
   },function(){ R.loaded=true; R.loading=false; });
 }
-function applyTxMode(){ if(LP.link && LP.link.setTxMode) LP.link.setTxMode(R.txMode); }
+/* null: the link's own default (playback on iPhones, see link.js) */
+function applyTxMode(){ if(LP.link && LP.link.setTxMode && R.txMode) LP.link.setTxMode(R.txMode); }
 function saveTxMode(){ persistLog(); applyTxMode(); }
 
 /* ---------- screens ---------- */
@@ -524,7 +526,7 @@ function totalSymbols(){ return AC.PREAMBLE.length + testBytes().length*4; }
 function activeTest(){ return !!(R.test.tx || R.test.rx || R.test.pending); }
 function renderMeter(){
   var T=R.test;
-  byId("radio-txmode").checked=R.txMode==="playback";
+  byId("radio-txmode").checked=(R.txMode||LP.link.txMode())==="playback";
   byId("radio-test-rate").value=String(T.rate);
   byId("radio-test-pattern").value=T.pattern;
   byId("radio-pattern-hex").textContent=tr("radio.hex.tx")+" "+AC.hex(testBytes());
@@ -926,18 +928,20 @@ LP.builtin({id:"radio", label:"app.radio", icon:icon, view:"radio", keepPad:true
     if(R.live && R.page==="meter" && !R.meter.stream && !R.meter.pending && !activeTest()) startMeter();
   },
   lang:function(){ if(R.live) render(); },
+  /* core.js made a new AudioContext (iOS stalled the old one, often right after the microphone opens). The link
+     rewires itself to the new context (link.js tick), so it is never closed here: closing it was what broke the first
+     iPhone test. Only the meter's own capture and the M2 test, which hold nodes of the old context, start over. */
   audio:function(){
     if(!R.live || R.suppressAudio) return;
+    if(R.page!=="meter") return;
     R.suppressAudio=true;
-    R.quiet=true;
-    if(LP.link.state!=="closed") LP.link.close("home");
-    R.quiet=false;
+    var test=activeTest();
     stopTest();
     stopMeter();
     R.suppressAudio=false;
-    R.closeMsg=tr("radio.audio");
-    if(R.page==="link" || R.page==="write" || R.page==="draw"){ setPage("menu"); }
-    else render();
+    if(test) R.closeMsg=tr("radio.audio");
+    restartMeterLater();
+    render();
   },
   ready:function(){ loadDoc(); }
 });
