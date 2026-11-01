@@ -602,3 +602,100 @@ test("wordbook: a runtime error rejects with the method's name, not the message 
   await assert.rejects(rem, /PAD\.dict\.removeWord: no word book/);
   await assert.rejects(book, /PAD\.dict\.inBook: no word book/);
 });
+
+/* ---------- the link (SPEC.md 6.8, runtime 0.57.0) ---------- */
+test("link: PAD.link exists only when the runtime offers it, and the wrapper passes link", () => {
+  assert.equal(app().PAD.link, undefined);
+  assert.equal(app({ sensors: true, notes: true, say: true, camera: true, dict: true }).PAD.link, undefined);
+  assert.equal(app({ link: "yes" }).PAD.link, undefined);
+  const { PAD } = app({ link: true });
+  assert.equal(typeof PAD.link.open, "function");
+  assert.equal(typeof PAD.link.send, "function");
+  assert.equal(typeof PAD.link.close, "function");
+  assert.equal(PAD.link.state, "closed");
+  assert.equal(PAD.link.initiator, false);
+  assert.ok(Object.isFrozen(PAD.link));
+  const { lopdaWrapApp: wrap } = runScript("sdk/pad-shim.js", {});
+  assert.match(wrap("<p>x</p>", { dict: true, link: true }), /\(\{"dict":true,"link":true\}\);/);
+  assert.ok(wrap("<p>x</p>", { link: 1 }).includes(")();"), "link only when it is true");
+});
+
+test("link: open posts proto (default empty) and settles from the matching reply; state and initiator follow", async () => {
+  const a = app({ link: true });
+  const one = a.PAD.link.open({ proto: "gomoku1" });
+  const [p1] = a.posted();
+  assert.deepEqual(p1, { op: "link", i: p1.i, action: "open", proto: "gomoku1", pad: 1 });
+  a.fromRuntime({ pad: 1, op: "linked", i: p1.i, v: "open", initiator: true }, {});   /* not from the parent: ignored */
+  assert.equal(a.PAD.link.state, "closed");
+  a.fromRuntime({ pad: 1, op: "linked", i: p1.i, v: "open", initiator: true });
+  assert.equal(await one, "open");
+  assert.equal(a.PAD.link.state, "open");
+  assert.equal(a.PAD.link.initiator, true);
+
+  const two = a.PAD.link.open();
+  const p2 = a.posted()[1];
+  assert.equal(p2.proto, "", "proto defaults to empty");
+  a.fromRuntime({ pad: 1, op: "linked", i: p2.i, v: "denied" });
+  assert.equal(await two, "denied");
+  assert.equal(a.PAD.link.state, "closed");
+  assert.equal(a.PAD.link.initiator, false);
+
+  /* proto: ASCII, at most 16 characters; a bad one rejects before anything is posted */
+  const posted = a.posted().length;
+  await assert.rejects(a.PAD.link.open({ proto: "x".repeat(17) }), /PAD\.link\.open: proto/);
+  await assert.rejects(a.PAD.link.open({ proto: "café" }), /PAD\.link\.open: proto/);
+  await assert.rejects(a.PAD.link.open({ proto: "gomoku1\u0080" }), /PAD\.link\.open: proto/);
+  await assert.rejects(a.PAD.link.open({ proto: 7 }), /PAD\.link\.open: proto/);
+  assert.equal(a.posted().length, posted);
+});
+
+test("link: send takes a string or a Uint8Array of at most 200 bytes and settles from the reply", async () => {
+  const a = app({ link: true });
+  const U8 = vm.runInContext("Uint8Array", a.ctx);
+  const one = a.PAD.link.send("m,1,2,3"), two = a.PAD.link.send(new U8([1, 2, 3]));
+  const [p1, p2] = a.posted();
+  assert.deepEqual(p1, { op: "link", i: p1.i, action: "send", data: "m,1,2,3", pad: 1 });
+  assert.deepEqual(p2, { op: "link", i: p2.i, action: "send", data: { 0: 1, 1: 2, 2: 3 }, pad: 1 });
+  /* strings count their UTF-8 bytes: 67 chinese characters are 201, so the shim answers "big" without posting */
+  assert.equal(await a.PAD.link.send("測".repeat(67)), "big");
+  assert.equal(await a.PAD.link.send(new U8(201)), "big");
+  await assert.rejects(a.PAD.link.send(7), /PAD\.link\.send: data is a string or a Uint8Array/);
+  await assert.rejects(a.PAD.link.send([1, 2, 3]), /PAD\.link\.send: data is a string or a Uint8Array/);
+  await assert.rejects(a.PAD.link.send(null), /PAD\.link\.send: data is a string or a Uint8Array/);
+  assert.equal(a.posted().length, 2, "a refused message posts nothing");
+  a.fromRuntime({ pad: 1, op: "linked", i: p1.i, v: "sent" }, {});   /* not from the parent: ignored */
+  a.fromRuntime({ pad: 1, op: "linked", i: p1.i, v: "sent" });
+  a.fromRuntime({ pad: 1, op: "linked", i: p2.i, v: "big" });
+  assert.deepEqual(await Promise.all([one, two]), ["sent", "big"]);
+});
+
+test("link: incoming messages and close reach PAD.on('link'); close sets state", async () => {
+  const a = app({ link: true });
+  const U8 = vm.runInContext("Uint8Array", a.ctx);
+  const log = [];
+  const fn = (ev) => log.push(ev);
+  a.PAD.on("link", fn);
+  const p = a.PAD.link.open({ proto: "x" });
+  a.fromRuntime({ pad: 1, op: "linked", i: a.posted()[0].i, v: "open", initiator: false });
+  await p;
+  assert.equal(a.PAD.link.state, "open");
+  assert.equal(a.PAD.link.initiator, false);
+
+  a.fromRuntime({ pad: 1, op: "link", event: "message", data: "hello" }, {});   /* not from the parent: ignored */
+  a.fromRuntime({ pad: 1, op: "link", event: "message", data: "hello" });
+  a.fromRuntime({ pad: 1, op: "link", event: "message", data: new U8([1, 2]) });
+  a.fromRuntime({ pad: 1, op: "link", event: "message", data: { evil: 1 } });    /* not a string or bytes: dropped */
+  a.fromRuntime({ pad: 1, op: "link", event: "message", data: null });
+  assert.equal(log.length, 2);
+  assert.deepEqual(JSON.parse(JSON.stringify(log[0])), { type: "message", data: "hello" });
+  assert.equal(log[1].data.length, 2);
+
+  a.fromRuntime({ pad: 1, op: "link", event: "close", reason: "lost" });
+  assert.equal(a.PAD.link.state, "closed");
+  assert.equal(a.PAD.link.initiator, false);
+  assert.deepEqual(JSON.parse(JSON.stringify(log[2])), { type: "close", reason: "lost" });
+
+  a.PAD.off("link", fn);
+  a.fromRuntime({ pad: 1, op: "link", event: "message", data: "after off" });
+  assert.equal(log.length, 3, "PAD.off stops the listener");
+});

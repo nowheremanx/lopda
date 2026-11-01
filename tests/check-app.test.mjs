@@ -108,7 +108,7 @@ const FAILS = [
   ["long description", { manifest: (m) => (m.description = "长".repeat(81)) }, /description must be 1-80/],
   ["no author", { manifest: (m) => delete m.author }, /author is required/],
   ["GPL licence", { manifest: (m) => (m.license = "GPL-3.0") }, /license must be one of/],
-  ["unknown permission", { manifest: (m) => (m.permissions = ["location"]) }, /unknown permission "location": allowed are files, motion, mic, notes, camera, wordbook/],
+  ["unknown permission", { manifest: (m) => (m.permissions = ["location"]) }, /unknown permission "location": allowed are files, motion, mic, notes, camera, wordbook, link/],
   ["permission twice", { manifest: (m) => (m.permissions = ["files", "files"]) }, /the same one twice/],
   ["PAD.exportFile without the files permission", withCode('PAD.exportFile({ name: "a.txt", type: "text/plain", data: "a" });'), /need "permissions": \["files"\]/],
   ["PAD.importFile without the files permission", withCode("PAD.importFile({ accept: ['text/plain'] });"), /need "permissions": \["files"\]/],
@@ -122,6 +122,7 @@ const FAILS = [
   ["wordbook: PAD.dict.addWord without the wordbook permission", withCode('if (PAD.dict) PAD.dict.addWord("cat");'), /PAD\.dict\.addWord\/removeWord\/inBook need "permissions": \["wordbook"\]/],
   ["wordbook: PAD.dict.removeWord without the wordbook permission", withCode('if (PAD.dict) PAD.dict.removeWord("cat");'), /PAD\.dict\.addWord\/removeWord\/inBook need "permissions": \["wordbook"\]/],
   ["wordbook: PAD.dict.inBook without the wordbook permission", withCode('if (PAD.dict) PAD.dict.inBook(["cat"]);'), /PAD\.dict\.addWord\/removeWord\/inBook need "permissions": \["wordbook"\]/],
+  ["link: PAD.link without the link permission", withCode('if (PAD.link) PAD.link.open({ proto: "gomoku1" });'), /PAD\.link needs "permissions": \["link"\] in manifest\.json/],
   ["notes: files declared does not cover notes", { manifest: (m) => (m.permissions = ["files"]), ...withCode('PAD.importFile({}); PAD.notes.append("a", "b");') }, /needs "permissions": \["notes"\]/],
   ["say: PAD.say on lopda/0", { manifest: (m) => { m.spec = "lopda/0"; delete m.buttons; }, ...withCode('PAD.say("hi");') }, /say\/dict need spec "lopda\/1"/],
   ["dict: PAD.dict on lopda/0", { manifest: (m) => { m.spec = "lopda/0"; delete m.buttons; },
@@ -186,6 +187,8 @@ const PASSES = [
   ["camera: the camera permission with PAD.camera.snap", { manifest: (m) => (m.permissions = ["camera"]), ...withCode('if (PAD.camera) PAD.camera.snap().then(function (p) {});') }],
   ["wordbook: the wordbook permission with PAD.dict.addWord, removeWord and inBook", { manifest: (m) => (m.permissions = ["wordbook"]),
     ...withCode('if (PAD.dict) { PAD.dict.inBook(["cat"]); PAD.dict.addWord("cat"); PAD.dict.removeWord("cat"); }') }],
+  ["link: the link permission with PAD.link", { manifest: (m) => (m.permissions = ["link"]),
+    ...withCode('if (PAD.link) { PAD.link.open({ proto: "gomoku1" }); PAD.on("link", function (ev) {}); }') }],
   ["say: PAD.say needs no permission", withCode('if (PAD.say) PAD.say("hello", { lang: "en" });')],
   ["dict: PAD.dict needs no permission", withCode('if (PAD.dict) PAD.dict.words({ len: 5 }).then(function (r) {});')],
   ["lopda/0 without buttons or PAD.on", {
@@ -239,6 +242,12 @@ test("wordbook: warns about a wordbook permission the app never uses", (t) => {
   const r = tool("check-app.mjs", counter(t, { manifest: (m) => (m.permissions = ["wordbook"]) }));
   assert.equal(r.code, 0, r.out);
   assert.match(r.out, /"wordbook" is declared but PAD\.dict\.addWord\/removeWord\/inBook are never used/);
+});
+
+test("link: warns about a link permission the app never uses", (t) => {
+  const r = tool("check-app.mjs", counter(t, { manifest: (m) => (m.permissions = ["link"]) }));
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /"link" is declared but PAD\.link is never used/);
 });
 
 test("info for a manifest without i18n", (t) => {

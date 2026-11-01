@@ -5,11 +5,12 @@
  * injects it as the first script of every app, so it must stay self-contained:
  * no closures over outer variables, no imports.
  *
- * The runtime calls it with options: lopdaPadShim({lang:"zh"|"en", music:true, ambience:true, sensors:true, notes:true, say:true, camera:true, dict:true}).
+ * The runtime calls it with options: lopdaPadShim({lang:"zh"|"en", music:true, ambience:true, sensors:true, notes:true, say:true, camera:true, dict:true, link:true}).
  * Older runtimes pass none, so PAD.lang is undefined there and apps fall back to their own default; PAD.music is likewise undefined
  * unless the runtime can play it (runtime 0.11.0 and later, and sdk/dev.html), PAD.ambience (0.13.0 and later),
  * PAD.motion and PAD.mic (0.24.0 and later), PAD.notes and PAD.say (0.26.0 and later; Japanese say in 0.29.0),
- * PAD.camera (0.28.0 and later), PAD.dict (0.36.0 and later) and PAD.saveInfo / PAD.setSchema (0.46.0 and later).
+ * PAD.camera (0.28.0 and later), PAD.dict (0.36.0 and later), PAD.saveInfo / PAD.setSchema (0.46.0 and later)
+ * and PAD.link (0.57.0 and later).
  *
  * Messages app -> runtime:  {pad:1, op:"save"|"load"|"remove"|"error"|"exit", ...}
  *                           {pad:1, op:"sfx", name}  or  {pad:1, op:"sfx", params:{wave, duty, from, to, ms, attack, decay, vol, vibrato:{depth, rate}}}
@@ -27,6 +28,9 @@
  *                           {pad:1, op:"dict", i, kind:"add"|"remove", word}   (needs "wordbook")
  *                           {pad:1, op:"schema", n}   (the data schema this build writes)
  *                           {pad:1, op:"info", i}     (the save's metadata)
+ *                           {pad:1, op:"link", i, action:"open", proto}   (needs "link")
+ *                           {pad:1, op:"link", i, action:"send", data}    (data: a string or a Uint8Array)
+ *                           {pad:1, op:"link", action:"close"}
  * Messages runtime -> app:  {pad:1, op:"loaded", i, v}  or  {pad:1, op:"loaded", i, error}
  *                           {pad:1, op:"infoed", i, v}  or  {pad:1, op:"infoed", i, error}
  *                           {pad:1, op:"filed", i, v}  or  {pad:1, op:"filed", i, error}
@@ -36,6 +40,9 @@
  *                           {pad:1, op:"snapped", i, v}  v: {w, h, px: Uint8Array of w*h tones 0-3} | null
  *                           {pad:1, op:"dicted", i, v}  or  {pad:1, op:"dicted", i, error}
  *                                                        v: a words page, an entry, booleans, "saved"|"denied"|"full" or null
+ *                           {pad:1, op:"linked", i, v}  v: an open or send result; "open" also carries initiator
+ *                           {pad:1, op:"link", event:"message", data}
+ *                           {pad:1, op:"link", event:"close", reason}
  *                           {pad:1, op:"tilt", x, y, heading, flat:{x, y}}  {pad:1, op:"shake"}  {pad:1, op:"sound", level, pitch}
  *                           (flat is runtime 0.35.0 and later; older runtimes send no flat)
  *                           {pad:1, op:"button", b, down}   (chin buttons, lopda/1)
@@ -48,14 +55,14 @@ function lopdaPadShim(opts) {
   var LANG = opts && (opts.lang === "zh" || opts.lang === "en") ? opts.lang : undefined;
   var MUSIC = !!(opts && opts.music === true), AMBIENCE = !!(opts && opts.ambience === true), SENSORS = !!(opts && opts.sensors === true);
   var NOTES = !!(opts && opts.notes === true), SAY = !!(opts && opts.say === true), CAMERA = !!(opts && opts.camera === true);
-  var DICT = !!(opts && opts.dict === true);
+  var DICT = !!(opts && opts.dict === true), LINK = !!(opts && opts.link === true);
 
   /* Buttons (lopda/1): the runtime forwards the chin keys; the keyboard works too. */
   var BUTTONS = ["up", "down", "left", "right", "a", "b", "start", "select"];
   var SOUNDS = ["tap", "tick", "move", "ok", "err", "hit", "miss", "coin", "win", "lose"];
   var KEYS = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right",
     x: "a", X: "a", z: "b", Z: "b", Enter: "start", Shift: "select" };
-  var held = {}, on = { press: [], release: [], tilt: [], shake: [], sound: [] };
+  var held = {}, on = { press: [], release: [], tilt: [], shake: [], sound: [], link: [] };
   var listening = function () { return on.press.length + on.release.length > 0; };
   var emit = function (type, arg) {
     on[type].slice().forEach(function (f) {
@@ -241,6 +248,59 @@ function lopdaPadShim(opts) {
     }
   });
 
+  /* The link (runtime 0.57.0, SPEC.md 6.8, "permissions": ["link"]): a message channel to one other handheld, over
+     the runtime's acoustic modem. open({proto}) -> Promise<"open" | "cancelled" | "denied" | "none" | "busy">, the
+     runtime's pairing screen; send(data) -> Promise<"sent" | "lost" | "closed" | "busy" | "big">, data a string or a
+     Uint8Array, encoded 200 bytes at most; close(); state "closed" | "open"; initiator true on the side that started
+     the link. fn({type:"message", data}) and fn({type:"close", reason}) come through PAD.on("link"). The app never
+     sees the rate, the session, frames or sound. */
+  var LINK_STATE = "closed", LINK_INITIATOR = false, linkOpens = {}, linkSends = {};
+  var LINK_REASONS = ["bye", "lost", "other-app", "home", "timeout"];
+  /* a Uint8Array that came from another realm still counts (the test harness hands one over) */
+  var isBytes = function (v) { return v instanceof Uint8Array || Object.prototype.toString.call(v) === "[object Uint8Array]"; };
+  /* proto: up to 16 ASCII characters, "" by default; anything else rejects before anything is posted */
+  var linkProto = function (o) {
+    var p = o && o.proto != null ? o.proto : "";
+    return typeof p === "string" && p.length <= 16 && /^[\x00-\x7f]*$/.test(p) ? p : null;
+  };
+  /* the size the runtime's own encoder gives a string: UTF-8, a lone surrogate three bytes like its U+FFFD */
+  var utf8Size = function (s) {
+    var n = 0, i, c, c2;
+    for (i = 0; i < s.length; i++) {
+      c = s.charCodeAt(i);
+      if (c < 0x80) n += 1;
+      else if (c < 0x800) n += 2;
+      else if (c >= 0xD800 && c <= 0xDBFF && i + 1 < s.length &&
+               (c2 = s.charCodeAt(i + 1)) >= 0xDC00 && c2 <= 0xDFFF) { n += 4; i++; }
+      else n += 3;
+    }
+    return n;
+  };
+  var link = !LINK ? undefined : {};
+  if (link) {
+    link.open = function (o) {
+      var proto = linkProto(o);
+      if (proto === null) return Promise.reject(new Error("PAD.link.open: proto is up to 16 ASCII characters"));
+      return new Promise(function (resolve, reject) {
+        var i = ++seq; linkOpens[i] = { resolve: resolve, reject: reject };
+        post({ op: "link", i: i, action: "open", proto: proto });
+      });
+    };
+    link.send = function (data) {
+      var text = typeof data === "string", bytes = isBytes(data);
+      if (!text && !bytes) return Promise.reject(new Error("PAD.link.send: data is a string or a Uint8Array"));
+      if ((text ? utf8Size(data) : data.length) > 200) return Promise.resolve("big");
+      return new Promise(function (resolve, reject) {
+        var i = ++seq; linkSends[i] = { resolve: resolve, reject: reject };
+        post({ op: "link", i: i, action: "send", data: data });
+      });
+    };
+    link.close = function () { post({ op: "link", action: "close" }); };
+    Object.defineProperty(link, "state", { get: function () { return LINK_STATE; } });
+    Object.defineProperty(link, "initiator", { get: function () { return LINK_INITIATOR; } });
+    Object.freeze(link);
+  }
+
   var fileOp = function (msg) {
     return new Promise(function (resolve, reject) {
       var i = ++seq; filing[i] = { resolve: resolve, reject: reject };
@@ -289,6 +349,7 @@ function lopdaPadShim(opts) {
     say: say,
     camera: camera,
     dict: dict,
+    link: link,
     on: function (type, fn) { if (on[type] && typeof fn === "function") on[type].push(fn); },
     off: function (type, fn) { if (on[type]) on[type] = on[type].filter(function (f) { return f !== fn; }); },
     isDown: function (b) { return !!held[b]; },
@@ -335,6 +396,31 @@ function lopdaPadShim(opts) {
       else if (g.kind === "inBook") g.resolve(boolsOnly(d.v, g.n));
       else if (g.kind === "add" || g.kind === "remove") g.resolve(savedWord(d.v));
       else g.resolve(g.kind === "words" ? wordPage(d.v) : wordEntry(d.v));
+    }
+    else if (d.op === "linked" && LINK && linkOpens[d.i]) {
+      var lo = linkOpens[d.i]; delete linkOpens[d.i];
+      if (d.error != null) lo.reject(new Error("PAD.link.open: " + String(d.error)));
+      else {
+        var lv = ["open", "cancelled", "denied", "none", "busy"].indexOf(d.v) >= 0 ? d.v : "none";
+        if (lv !== "busy") {
+          LINK_STATE = lv === "open" ? "open" : "closed";
+          LINK_INITIATOR = lv === "open" && d.initiator === true;
+        }
+        lo.resolve(lv);
+      }
+    }
+    else if (d.op === "linked" && LINK && linkSends[d.i]) {
+      var ls = linkSends[d.i]; delete linkSends[d.i];
+      if (d.error != null) ls.reject(new Error("PAD.link.send: " + String(d.error)));
+      else ls.resolve(["sent", "lost", "closed", "busy", "big"].indexOf(d.v) >= 0 ? d.v : "closed");
+    }
+    else if (d.op === "link" && LINK && d.event === "message") {
+      if (typeof d.data === "string" || isBytes(d.data)) emit("link", { type: "message", data: d.data });
+    }
+    else if (d.op === "link" && LINK && d.event === "close") {
+      var lr = LINK_REASONS.indexOf(d.reason) >= 0 ? d.reason : "other";
+      LINK_STATE = "closed"; LINK_INITIATOR = false;
+      emit("link", { type: "close", reason: lr });
     }
     else if (d.op === "tilt" && SENSORS && num(d.x, -1, 1) && num(d.y, -1, 1)) {
       var t = { x: d.x, y: d.y, heading: num(d.heading, 0, 360) ? d.heading : null };
@@ -405,7 +491,7 @@ var LOPDA_APP_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src '
 /* Wrap an app's HTML: CSP meta first, then the bridge, then the app.
    opts.lang ("zh" | "en") becomes PAD.lang inside the app; opts.music (true) gives it PAD.music, opts.ambience (true) PAD.ambience,
    opts.sensors (true) PAD.motion and PAD.mic, opts.notes (true) PAD.notes, opts.say (true) PAD.say,
-   opts.camera (true) PAD.camera, opts.dict (true) PAD.dict. */
+   opts.camera (true) PAD.camera, opts.dict (true) PAD.dict, opts.link (true) PAD.link. */
 function lopdaWrapApp(html, opts) {
   var o = {};
   if (opts && (opts.lang === "zh" || opts.lang === "en")) o.lang = opts.lang;
@@ -416,6 +502,7 @@ function lopdaWrapApp(html, opts) {
   if (opts && opts.say === true) o.say = true;
   if (opts && opts.camera === true) o.camera = true;
   if (opts && opts.dict === true) o.dict = true;
+  if (opts && opts.link === true) o.link = true;
   var head = '<meta http-equiv="Content-Security-Policy" content="' + LOPDA_APP_CSP + '">' +
     "<style>*{touch-action:manipulation;-webkit-tap-highlight-color:transparent}</style>" +
     "<script>(" + lopdaPadShim.toString() + ")(" + (Object.keys(o).length ? JSON.stringify(o) : "") + ");<\/script>";
