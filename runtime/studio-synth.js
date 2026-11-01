@@ -88,9 +88,10 @@ function midiFreq(midi){ return 440*Math.pow(2,(midi-69)/12); }
 function when(ctx,at){ return (typeof at==="number" && isFinite(at) && at>ctx.currentTime) ? at : ctx.currentTime; }
 
 /* 12.20.5: the two ornaments a note may carry. A slide starts two semitones below and reaches the pitch in 80 ms; a
-   vibrato is 6 Hz at 25 cents from the very start. `param` is an oscillator's frequency or a buffer source's
-   playbackRate; `base` is the value 25 cents is measured against. No ornament adds no node, so an old tape's render is
-   unchanged. */
+   vibrato is 6 Hz at 25 cents, held straight for the first 150 ms and faded in over the next 250 ms, the way a pop
+   singer or a violinist leans into a long note (12.25: from the very start it wobbled like a maqam singer's). A note
+   shorter than 150 ms stays straight. `param` is an oscillator's frequency or a buffer source's playbackRate; `base`
+   is the value 25 cents is measured against. No ornament adds no node, so an old tape's render is unchanged. */
 function slideParam(param,base,t){
   param.setValueAtTime(base*Math.pow(2,-2/12),t);
   param.exponentialRampToValueAtTime(base,t+0.08);
@@ -103,7 +104,11 @@ function vibParams(ctx,t,end,list){
   o.type="sine"; o.frequency.value=6;
   for(i=0;i<list.length;i++){
     g=ctx.createGain();
-    g.gain.value=list[i].base*(Math.pow(2,25/1200)-1);
+    g.gain.setValueAtTime(0,t);
+    if(end>t+0.15){
+      g.gain.setValueAtTime(0,t+0.15);
+      g.gain.linearRampToValueAtTime(list[i].base*(Math.pow(2,25/1200)-1),t+0.4);
+    }
     o.connect(g); g.connect(list[i].param);
     out.push(g);
   }
@@ -586,7 +591,8 @@ VOICES.flute=function(ctx,out){
       vibGain.gain.setValueAtTime(0,t);
       if(releaseStart>t+0.15){
         vibGain.gain.setValueAtTime(0,t+0.15);
-        vibGain.gain.linearRampToValueAtTime(f*(Math.pow(2,8/1200)-1),t+0.65);
+        /* orn vib deepens this vibrato to 25 cents rather than stacking a second LFO on it (12.25) */
+        vibGain.gain.linearRampToValueAtTime(f*(Math.pow(2,(opts&&opts.vib?25:8)/1200)-1),t+(opts&&opts.vib?0.4:0.65));
       }
       vib.connect(vibGain); vibGain.connect(sine.frequency); vibGain.connect(tri.frequency);
       filter.type="lowpass"; filter.frequency.value=2000; filter.Q.value=0.5;
@@ -603,7 +609,6 @@ VOICES.flute=function(ctx,out){
       var breathEnd=Math.min(t+0.15,releaseStart+0.02);
       noiseVoice(ctx,out,noise,"bandpass",2000,0.7,0.018*v,0.004,breathEnd-t-0.004,breathEnd-t+0.01,t);
       nodes=[sine,sineGain,tri,triGain,vib,vibGain,filter,g];
-      if(opts&&opts.vib) nodes=nodes.concat(vibParams(ctx,t,releaseEnd+0.01,[{param:sine.frequency,base:f},{param:tri.frequency,base:f}]));
       cleanup(sine,nodes);
     }
   };
@@ -646,7 +651,8 @@ VOICES.square=function(ctx,out){
       vibGain.gain.setValueAtTime(0,t);
       if(releaseStart>t+0.14){
         vibGain.gain.setValueAtTime(0,t+0.14);
-        vibGain.gain.linearRampToValueAtTime(f*(Math.pow(2,15/1200)-1),t+0.44);
+        /* orn vib deepens this vibrato to 25 cents rather than stacking a second LFO on it (12.25) */
+        vibGain.gain.linearRampToValueAtTime(f*(Math.pow(2,(moreVib?25:15)/1200)-1),t+(moreVib?0.4:0.44));
       }
       vib.connect(vibGain); vibGain.connect(o.frequency);
       g.gain.setValueAtTime(SILENCE,t);
@@ -657,7 +663,6 @@ VOICES.square=function(ctx,out){
       o.start(t); o.stop(releaseStart+0.07);
       vib.start(t); vib.stop(releaseStart+0.07);
       nodes=[o,filter,vib,vibGain,g];
-      if(moreVib) nodes=nodes.concat(vibParams(ctx,t,releaseStart+0.07,[{param:o.frequency,base:f}]));
       cleanup(o,nodes);
     }
   };
@@ -762,7 +767,8 @@ VOICES.reed=function(ctx,out){
    width of a section rather than one thin oscillator), a highpass at 220 Hz that takes the buzz out of the bottom, a
    body resonance (peaking 1 kHz, +4 dB) and a lowpass that opens with the bow (1.2 kHz to 3.4 kHz over the 90 ms
    attack), so a note starts soft and gets its rosin. Vibrato 5.5 Hz, 14 cents, fades in after 250 ms as a player's
-   does; a short note stays straight. Release 180 ms. orn slide and vib work as on the other voices. The envelope peak
+   does; a short note stays straight. Release 180 ms. orn slide works as on the other voices; orn vib deepens the
+   bow's own vibrato (below). The envelope peak
    is 0.068: the two sawtooths and the body boost sum to a measured peak near 0.22 at velocity 1, like the flute. */
 VOICES.bowed=function(ctx,out){
   return {
@@ -782,10 +788,13 @@ VOICES.bowed=function(ctx,out){
       lp.frequency.linearRampToValueAtTime(3400,attackEnd);
       vib.type="sine"; vib.frequency.value=5.5;
       vg1.gain.setValueAtTime(0,t); vg2.gain.setValueAtTime(0,t);
-      if(releaseStart>t+0.25){
-        vg1.gain.setValueAtTime(0,t+0.25); vg2.gain.setValueAtTime(0,t+0.25);
-        vg1.gain.linearRampToValueAtTime(f*(Math.pow(2,14/1200)-1),t+0.6);
-        vg2.gain.linearRampToValueAtTime(f2*(Math.pow(2,14/1200)-1),t+0.6);
+      /* orn vib deepens this vibrato to 25 cents and brings it in sooner (150 ms); it no longer stacks a second LFO,
+         whose 6 Hz beat against this 5.5 Hz one as a 40-cent wobble from the attack (12.25) */
+      var vStart=moreVib ? 0.15 : 0.25, vFull=moreVib ? 0.4 : 0.6, vCents=moreVib ? 25 : 14;
+      if(releaseStart>t+vStart){
+        vg1.gain.setValueAtTime(0,t+vStart); vg2.gain.setValueAtTime(0,t+vStart);
+        vg1.gain.linearRampToValueAtTime(f*(Math.pow(2,vCents/1200)-1),t+vFull);
+        vg2.gain.linearRampToValueAtTime(f2*(Math.pow(2,vCents/1200)-1),t+vFull);
       }
       vib.connect(vg1); vib.connect(vg2); vg1.connect(o1.frequency); vg2.connect(o2.frequency);
       g.gain.setValueAtTime(SILENCE,t);
@@ -796,7 +805,6 @@ VOICES.bowed=function(ctx,out){
       o1.start(t); o2.start(t); vib.start(t);
       o1.stop(end); o2.stop(end); vib.stop(end);
       nodes=[o1,o2,hp,body,lp,g,vib,vg1,vg2];
-      if(moreVib) nodes=nodes.concat(vibParams(ctx,t,end,[{param:o1.frequency,base:f},{param:o2.frequency,base:f2}]));
       cleanup(o1,nodes);
     }
   };
