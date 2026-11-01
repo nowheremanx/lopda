@@ -23,6 +23,7 @@
       <span id="clock">--:--</span>
       <span class="save" id="savestate">启动中…</span>
       <span class="mic-mark" id="mic-mark" hidden data-i18n-title="sense.listening" title="正在听"></span>
+      <span class="link-mark" id="link-mark" hidden data-i18n-title="link.on" title="连线中"><i></i></span>
       <span class="save" aria-hidden="true">LP-86</span>
     </div>
 
@@ -711,6 +712,23 @@
       </div>
     </section>
 
+    <!-- LP.link: the pairing screen over whatever is in front (link.js); one screen, four tones -->
+    <div class="link-view" id="link" hidden role="dialog" data-i18n-label="link.plain" aria-label="连线">
+      <div class="link-head"><span data-i18n="link.plain">连线</span><span id="link-attempt"></span></div>
+      <h2 id="link-title"></h2>
+      <div class="link-pair" aria-hidden="true">
+        <span class="link-phone"></span>
+        <span class="link-wave" id="link-wave"><i></i><i></i><i></i></span>
+        <span class="link-phone"></span>
+      </div>
+      <p class="link-hint" data-i18n="link.hint">靠近 10–30 厘米，另一台也按连线</p>
+      <p class="link-phase" id="link-phase"></p>
+      <div class="link-progress" aria-hidden="true"><i id="link-bar"></i></div>
+      <div class="link-keys">
+        <button class="ck" type="button" id="link-no"><i>B</i><span data-i18n="common.cancel">取消</span></button>
+      </div>
+    </div>
+
     <div class="toast" id="toast" hidden></div>
   </div>
   <div class="gamepad" id="gamepad" hidden>
@@ -777,6 +795,7 @@
 <script src="acoustic-rx.js"></script>
 <script src="acoustic-session.js"></script>
 <script src="core.js"></script>
+<script src="link.js"></script>
 <script src="apps/notes.js"></script>
 <script src="apps/calendar.js"></script>
 <script src="apps/dict.js"></script>

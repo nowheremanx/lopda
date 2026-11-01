@@ -238,7 +238,7 @@ document.addEventListener("visibilitychange",function(){
 });
 
 /* ---------- sound: tiny square-wave chips through Web Audio (the named sounds themselves are in chip.js) ---------- */
-var RUNTIME_VERSION="0.56.2+5b7d24a";   /* keep in step with VERSION in sw.js */
+var RUNTIME_VERSION="0.57.0+ea37d82";   /* keep in step with VERSION in sw.js */
 /* One volume, five steps, 0 is off (decisions.md section 10). It sets the master gain and nothing else does.
    Under the master: `ui` for the runtime's own clicks and the built-ins' prompts, held at a fraction so they stay as
    quiet as they always were (step 2 gives them 0.11, their level before 0.12.0), and `app` for apps, music and the
@@ -529,7 +529,7 @@ function armConfirm(wrapId,btnId,label,onYes,confirm){
    A route returns true when it took the button. */
 var PADB={up:false,down:false,left:false,right:false,a:false,b:false,start:false,select:false};
 var PADKEYS={ArrowUp:"up",ArrowDown:"down",ArrowLeft:"left",ArrowRight:"right",x:"a",X:"a",z:"b",Z:"b",Enter:"start",Shift:"select"};
-var PAD_ORDER=["home","snap","file","cart","cam","dark","cal","dict","reader","notes","pet","run"], padRoutes={};   /* "snap": an app's viewfinder (apps/snap.js), "file": the runtime's file dialog, while they are open */
+var PAD_ORDER=["home","link","snap","file","cart","cam","dark","cal","dict","reader","notes","pet","run"], padRoutes={};   /* "link": the pairing screen (link.js), "snap": an app's viewfinder (apps/snap.js), "file": the runtime's file dialog, while they are open */
 function padRoute(name,fn){ padRoutes[name]=fn; }
 padRoute("home",function(b,down){
   if(b!=="a" || !down || $("v-home").hidden || !$("home-add-tip")) return false;
