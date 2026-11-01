@@ -42,6 +42,7 @@ as a four-tone negative PNG that carries the colour originals inside, and come b
 | Camera | 点阵相机 | Live dithered viewfinder, rolls of film, seven stocks, every lens on the phone. |
 | Darkroom | 冲洗店 | The film box: develop, view in colour, print, export and import negatives. |
 | Cartridge | 卡带机 | Plays black-and-white Game Boy files you supply, with the chin buttons. Saves can be exported and imported. No games are included. |
+| Radio | 电波台 | Two handhelds talk over sound, like a 1986 modem: both press Link, then send short text and 16 × 16 pictures. Slow on purpose. |
 | Store | 应用商店 | Install, update and run community apps, by category. |
 | Scripts | 脚本 | Your own small HTML/JS programs: copy a prompt for an AI, paste the code back, run it in the sandbox. |
 | Settings | 设置 | Sound, volume, language (中文 / English), which apps may use the sensors and camera, backup and restore of the whole device, updates. |
@@ -54,7 +55,7 @@ Seventeen apps today, all open source and all made for Lo-PDA:
 
 | Kind | Apps |
 |---|---|
-| Games | Paper Tower (a ten-minute tower climb), Fake Yu (a one-key rhythm story), SnapTile (a sliding puzzle from your own photo), Marble (tilt the phone), Candles (blow into the mic), Gomoku, Mole Bop, Gold Dig (a sixty-second hook-and-haul mine), Pagoda (a 3D prologue), Sisyphus (a meditative climb with sixteen lines from Camus) |
+| Games | Paper Tower (a ten-minute tower climb), Fake Yu (a one-key rhythm story), SnapTile (a sliding puzzle from your own photo), Marble (tilt the phone), Candles (blow into the mic), Gomoku (also a two-handheld match over sound), Mole Bop, Gold Dig (a sixty-second hook-and-haul mine), Pagoda (a 3D prologue), Sisyphus (a meditative climb with sixteen lines from Camus) |
 | Story | Rain Station, a visual novel with seven chapters and five endings |
 | Tools and toys | Calc and Paint (both preinstalled), Fortune, Kana, Sounds, VecDream |
 
@@ -68,7 +69,7 @@ and no storage of its own, and talks to the handheld through a small `PAD` objec
 | | What an app can use |
 |---|---|
 | Always | The buttons, 256 KB of saved data, named sounds, chip music in MML, custom sound effects, ambience (rain, waves, fire…), the language, `PAD.say` to speak a line |
-| With a permission | `files` (export and import one file), `motion` (tilt and shake), `mic` (loudness and pitch, never the recording), `notes` (write into Notes), `camera` (one four-tone photo through the handheld's own viewfinder) |
+| With a permission | `files` (export and import one file), `motion` (tilt and shake), `mic` (loudness and pitch, never the recording), `notes` (write into Notes), `camera` (one four-tone photo through the handheld's own viewfinder), `link` (messages to the same app on another handheld, over sound; Gomoku's match is the example) |
 
 Every permission is asked by the handheld itself, not by the app, and the player can say no; apps must still work
 with the keys. The full rules are in [`SPEC.md`](SPEC.md) (spec `lopda/1`); the screen layout rules are in
