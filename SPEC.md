@@ -59,7 +59,7 @@ No other files are loaded. Images, sounds and fonts must be embedded in
 | `i18n` | Optional. Store text in other languages: `{"en": {"name", "description"}, "zh": {...}}`. Only `zh` and `en`, only those two fields, same rules as above. The store and home screen show the entry for the player's language and fall back to `name` / `description`. |
 | `author` | Name or handle. |
 | `license` | One of: `MIT`, `0BSD`, `BSD-2-Clause`, `BSD-3-Clause`, `ISC`, `Apache-2.0`, `CC0-1.0`, `Unlicense`. |
-| `permissions` | Array. Usually empty. Six capabilities (`lopda/1`): `"files"`, the app may export and import files, each time confirmed by the player (section 6.2); `"motion"`, tilt, shake and heading; `"mic"`, the microphone's loudness and pitch (both section 6.4); `"notes"`, the app may add text to a note of its own in the player's notes, each time confirmed by the player (section 6.5); `"camera"`, the app may ask for a photo, which the player takes in the runtime's viewfinder and the app gets as a small four-tone picture (section 6.6); `"wordbook"`, the app may read and change the player's word book (section 6.7). The store shows them as icons on the app's entry and asks the player before installing (runtime 0.44.0+); an app allowed then does not ask on first use, while files and notes still confirm every call. Anything else fails the checker. |
+| `permissions` | Array. Usually empty. Seven capabilities (`lopda/1`): `"files"`, the app may export and import files, each time confirmed by the player (section 6.2); `"motion"`, tilt, shake and heading; `"mic"`, the microphone's loudness and pitch (both section 6.4); `"notes"`, the app may add text to a note of its own in the player's notes, each time confirmed by the player (section 6.5); `"camera"`, the app may ask for a photo, which the player takes in the runtime's viewfinder and the app gets as a small four-tone picture (section 6.6); `"wordbook"`, the app may read and change the player's word book (section 6.7); `"link"`, the app may open a message link to the same app on one other handheld, over sound (section 6.8, runtime 0.58.0+). The store shows them as icons on the app's entry and asks the player before installing (runtime 0.44.0+); an app allowed then does not ask on first use, while files and notes still confirm every call. Anything else fails the checker. |
 | `buttons` | Optional, `lopda/1` only. `true` shows the chin buttons while the app runs (section 4). Leave it out for touch-only apps. |
 
 `registry/index.json` adds `released` (`YYYY-MM-DD`) to every entry: the commit that first added the app's
@@ -196,6 +196,14 @@ PAD.dict.version                      // "ecdict-1"
 await PAD.dict.inBook(words)          // 1-20 words -> boolean[] | null
 await PAD.dict.addWord(word)          // -> "saved" | "denied" | "full" | null
 await PAD.dict.removeWord(word)       // -> "saved" | "denied" | "full" | null
+
+// lopda/1 with "permissions": ["link"] (section 6.8); undefined on runtimes before 0.58.0
+await PAD.link.open({proto})          // -> "open" | "cancelled" | "denied" | "none" | "busy"
+await PAD.link.send(data)             // string or Uint8Array, <= 200 bytes -> "sent" | "lost" | "closed" | "busy" | "big"
+PAD.link.close()
+PAD.link.state                        // "closed" | "open" (pairing counts as "closed")
+PAD.link.initiator                    // true on the side that started it (meaningful while open)
+PAD.on("link", fn)                    // fn({type:"message", data}) | fn({type:"close", reason})
 ```
 
 Sounds, roughly: `tap` key click, `tick` short tick (timers), `move` cursor step,
@@ -617,6 +625,83 @@ if (PAD.dict && PAD.dict.inBook) {               // the word book calls arrive w
   app, and past that `null`.
 - **Shared, and the player's.** The dictionary program's START and the reader's START change this same list; the word book
   screen shows what the app added. Revoking the grant in Settings removes only the permission, not the words.
+
+### 6.8 The link
+
+An app that declares `"permissions": ["link"]` can open a message channel to one other handheld running the same app
+(added in runtime 0.58.0, after `lopda/1` was frozen, so check that `PAD.link` exists before using it). The
+runtime draws its pairing screen, works the microphone and the speaker, and carries each message; the app gets a few
+short results and the messages, never the radio. Design notes: `docs/design/radio.md` 7.2-7.3 and 8.5.
+
+```js
+if (PAD.link) {                          // undefined before runtime 0.58.0
+  PAD.link.open({ proto: "gomoku1" }).then(function (r) {
+    // r: "open" | "cancelled" | "denied" | "none" | "busy"
+    // PAD.link.initiator: true on the side that started the link (meaningful while open)
+  });
+  PAD.on("link", function (ev) {
+    if (ev.type === "message") { /* ev.data: a string, or a Uint8Array, as it was sent */ }
+    else if (ev.type === "close") { /* ev.reason: "bye" | "lost" | "other-app" | "home" | "timeout" */ }
+  });
+  PAD.link.send("m,7,8,3").then(function (v) {
+    // v: "sent" | "lost" | "closed" | "busy" | "big"
+  });
+  PAD.link.close();
+  PAD.link.state;                        // "closed" | "open"; pairing counts as "closed"
+}
+```
+
+- **Consent.** An app installed with the permission through the store (runtime 0.44.0+) is already allowed. Otherwise
+  the first `open()` shows the handheld's own dialog over the app: `「<app>」想和另一台掌机连线（声音传数据）。连线时麦克风一直开着。`
+  A (on release) or 允许 allows it and remembers it; B or 不允许 resolves `"denied"` and is not remembered, so the next
+  `open()` asks again. An allowed app is listed in Settings → 传感器与权限 and can be revoked there. Without the
+  permission there is no dialog: `open()` resolves `"denied"` and `send()` resolves `"closed"`, and the checker fails
+  an app that uses `PAD.link` without declaring `"link"`.
+- **The pairing screen is the runtime's.** Both players press their app's connect button; neither side is master or
+  slave. The runtime shows the other handheld, a progress bar and the rate it found, and the phones find each other
+  (about 10-30 cm apart is best). One side ends up the initiator (`PAD.link.initiator`), the other the responder;
+  the game can use that to choose who goes first. B, or HOME, cancels the pairing and resolves `"cancelled"`; 60 seconds
+  without a peer resolves `"cancelled"` too (the runtime says it timed out), as does a peer that turned out to run
+  another app. One link at a time: `open()` resolves `"busy"` while this app is already pairing
+  or linked, or while another program holds the link. `"none"` when the phone cannot do the sound link at all.
+- **What the app gets, and never gets.** Messages through `PAD.on("link")`, a result for each call, and the close
+  reasons. It never sees the rate, the session number, frames, the microphone or a sound sample, and it cannot choose
+  the port: the runtime derives it from the app's id, so two apps never meet by accident. `proto` is the app's own
+  agreement string (the game's rules version, say): ASCII, at most 16 characters, `""` by default. A peer with another
+  app or another `proto` closes the link with `"other-app"`. A `proto` that is not ASCII of at most 16
+  characters rejects the `open()` promise with an `Error`, before anything is shown.
+- **Messages.** `send(data)` takes a string or a `Uint8Array` and a string arrives as a string, a `Uint8Array` as a
+  `Uint8Array`; the type is not guessed. The encoded message is at most 200 bytes (a UTF-8 string counts its bytes);
+  a larger one resolves `"big"` at once and is not sent. Anything else
+  than a string or a `Uint8Array` rejects. Up to 4 messages wait in the queue; a 5th resolves `"busy"` at once, so a
+  game must keep its sends short and few. `"sent"` means the peer acknowledged it; `"lost"` means the retries ran out;
+  `"closed"` means there was no link (or it ended while the message waited).
+- **It is slow.** The modem runs at 10, 20 or 40 ms a symbol, chosen by the pairing; 10 ms is the usual one. A 4-byte
+  move is about 2-3 seconds each way; a 200-byte message is about 10 seconds. Plan turns, not streams: send one move,
+  then wait. There is no throughput to give an app and no way to ask for a faster rate.
+- **Close reasons, and reconnecting.** `"bye"`: the other side left (HOME, its app closed, its screen went away).
+  `"lost"`: the radio gave up after its retries or missed heartbeats. `"other-app"`: the peer opened a different app or
+  `proto`. `"home"`: this side left; the app is usually gone by then. `"timeout"`: pairing found nobody. After any of
+  them `PAD.link.state` is `"closed"`. Reconnecting is the app's job: call `open()` again, then compare state with the
+  peer (a move count, a round number) and send what the other side is missing. The runtime keeps no session across a
+  close.
+- **Encryption is the app's business.** The link moves bytes; the runtime does not encrypt them and cannot see what
+  they mean. An app that wants privacy uses WebCrypto itself (ECDH to exchange keys, AES-GCM for each message, a short
+  safety code both players compare). Whether `crypto.subtle` is available inside the sandbox is up to the phone, so
+  treat encryption as an extra, not a promise.
+- **Exchange is copy, not move.** A lossy link cannot make both sides agree that a trade completed: the last
+  acknowledgement may be the one that is lost. So a gift, a souvenir or a card that is sent is also kept (or marked as
+  sent) by the sender, and the receiver validates what arrives strictly. Nothing disappears because it was sent.
+- **The microphone.** While the link is open (or pairing) the runtime keeps the microphone on, so `PAD.mic.start()`
+  resolves `"none"`; a link that opens while the sensors' microphone is on stops that microphone first. An app that
+  wants both must do one after the other, not at the same time.
+- **Still playable alone.** An app must work without a link, or say plainly that it needs two handhelds. The phone may
+  have no microphone, the player may have no second handheld, or the player may refuse: handle `"denied"`, `"none"`,
+  `"busy"`, `"cancelled"` and `"timeout"` by staying playable alone, and show the player what happened.
+- **The dev harness.** In `sdk/dev.html`, open the same app in two tabs: their `PAD.link.open()` calls pair over a
+  BroadcastChannel (no sound), and messages take 600 ms each way. The **Echo peer** button pairs one tab with itself:
+  `open()` resolves at once as the initiator and every sent message comes back as a received one after 600 ms, which
+  is enough to try a game's link code alone.
 
 ## 7. Size and quality
 

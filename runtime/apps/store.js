@@ -19,7 +19,7 @@ var own=LP.own, toast=LP.toast, put=LP.put, sfx=LP.sfx, show=LP.show, showPad=LP
 /* community apps that come installed, in this order on the home screen after the built-ins (docs/design/pad-files.md) */
 var PREINSTALL=["calculator","paint"];
 /* capabilities a manifest may ask for (SPEC.md section 2) */
-var PERMISSIONS=["files","motion","mic","notes","camera","wordbook"];
+var PERMISSIONS=["files","motion","mic","notes","camera","wordbook","link"];
 /* a permission as one glance: 16 x 16 pixel icons, the same format as ICONS in core.js. The store's entry shows
    them instead of a line of text; the install dialog shows them with a one-word label (decisions.md section 42). */
 var PERM_ICONS={
@@ -28,7 +28,8 @@ var PERM_ICONS={
   mic:["................",".....0000.......","....033330......","...03333330.....","...03030330.....","...03333330.....","...03030330.....","...03333330.....","...00000000.....","....033330......","....033330......","....033330......","....033330......","...00000000.....","..0000000000....","................"],
   notes:["................","................","...........00...","..........0330..",".........0330...","........0330....",".......0330.....","......0330......",".....0330.......","....0330........","....000.........","...00...........","..00............","................","................","................"],
   camera:["................","................","....0000........","..000000000000..",".03333333333330.",".03300000333330.",".03011111033000.",".00112222103330.",".00122332103330.",".00122332103330.",".00112222103330.",".03011111033330.",".03300000333330.",".00000000000000.","................","................"],
-  wordbook:["................","................","..000000000000..","..033330033330..","..031130031130..","..033330033330..","..031130031130..","..033330033330..","..031130031130..","..033330033330..","..033330033330..","..000000000000..",".......0220.....",".......0220.....","........00......","................"]
+  wordbook:["................","................","..000000000000..","..033330033330..","..031130031130..","..033330033330..","..031130031130..","..033330033330..","..031130031130..","..033330033330..","..033330033330..","..000000000000..",".......0220.....",".......0220.....","........00......","................"],
+  link:["................",".......00.......","......0330......","......0330......","..0...0330...0..",".0....0330....0.","0.....0330.....0",".0....0330....0.","..0...0330...0..","......0330......","......0330......",".....033330.....","....03333330....","....00000000....","................","................"]
 };
 function permIcon(p,cls){
   var s=document.createElement("span"); s.className=cls||"perm"; s.title=tr("store.perm."+p); s.setAttribute("aria-label",tr("store.perm."+p));
@@ -266,7 +267,7 @@ function updateAll(){
    capabilities is confirmed before it is downloaded, and the capabilities it can be granted are remembered then;
    files and notes still ask on every use (decisions.md section 42). An older install, an update that adds a
    permission, or "update all" has no such grant, so the first use asks as before. */
-var GRANTABLE=["motion","mic","camera","wordbook"];
+var GRANTABLE=["motion","mic","camera","wordbook","link"];
 function install(r,btn){
   if(updating) return;
   var a=installedOf(r.id), perms=validPerms(r.permissions);
@@ -392,6 +393,7 @@ function runApp(a){
   closeAsk(false);
   LP.snap.cancel();   /* the old app's viewfinder closes with its frame */
   LP.speech.stop();   /* and its speech */
+  closeLink(S.running);   /* and its link, if the link belongs to it */
   sensors.stopAll();   /* the old app's tilt and microphone end with its frame */
   LP.chip.stop();   /* the old app's song and ambience end with its frame */
   S.running=a;
@@ -404,7 +406,7 @@ function runApp(a){
   showPad(!!a.buttons);
   LP.keepAwake(true);   /* a running app keeps the screen on */
   freshRunFrame();
-  var start=function(h){ $("run-frame").srcdoc=lopdaWrapApp(h,{lang:I18N.lang, music:true, ambience:true, sensors:true, notes:true, say:true, camera:true, dict:true}); };
+  var start=function(h){ $("run-frame").srcdoc=lopdaWrapApp(h,{lang:I18N.lang, music:true, ambience:true, sensors:true, notes:true, say:true, camera:true, dict:true, link:true}); };
   if(a.html){ start(a.html); return; }
   $("run-frame").srcdoc='<body style="margin:0;height:100%;display:flex;align-items:center;justify-content:center;background:#a3ad7e;color:#1f2a14;font:16px monospace">'+tr("run.loading")+'</body>';
   loadHtml(a).then(function(h){
@@ -588,6 +590,8 @@ window.addEventListener("message",function(e){
     dictRequest(S.running,f.contentWindow,d);
   } else if(d.op==="snap"){
     snapRequest(S.running,f.contentWindow,d);
+  } else if(d.op==="link"){
+    linkRequest(S.running,f.contentWindow,d);
   } else if(d.op==="sfx"){
     var named=APP_SFX.indexOf(d.name)>=0, custom=!named && d.params && typeof d.params==="object";
     if(!named && !custom) return;
@@ -806,8 +810,8 @@ var sensors=window.LopdaSensors.host({
   rows.forEach(function(r,y){ for(var i=0;i<7;i++){ var o=(y*7+i)*4; if(r.charAt(i)==="0"){ im.data[o]=t[0]; im.data[o+1]=t[1]; im.data[o+2]=t[2]; im.data[o+3]=255; } } });
   x.putImageData(im,0,0); micMark.appendChild(c);
 })();
-/* allowed apps: {apps: {id: {motion: true, mic: true, camera: true, wordbook: true}}} (the camera's grant: PAD.camera.snap
-   below; the word book's: dictRequest) */
+/* allowed apps: {apps: {id: {motion: true, mic: true, camera: true, wordbook: true, link: true}}} (the camera's grant:
+   PAD.camera.snap below; the word book's: dictRequest; the link's: linkRequest) */
 var grants={}, grantsRef=null;
 function granted(id,kind){ return !!(grants[id] && grants[id][kind]); }
 function saveGrants(){ if(grantsRef) put(grantsRef,{apps:grants}); }
@@ -817,7 +821,7 @@ LP.sensorGrants={
   list:function(){
     return Object.keys(grants).map(function(id){
       var a=installedOf(id);
-      return {id:id, name:a ? appName(a) : id, kinds:["motion","mic","camera","wordbook"].filter(function(k){ return granted(id,k); })};
+      return {id:id, name:a ? appName(a) : id, kinds:["motion","mic","camera","wordbook","link"].filter(function(k){ return granted(id,k); })};
     }).filter(function(g){ return g.kinds.length; });
   },
   revoke:revokeSense
@@ -833,6 +837,8 @@ function senseRequest(app,win,d){
     return;
   }
   if(d.action!=="start") return;
+  /* one microphone: while a link is open (or pairing) PAD.mic gets nothing to open */
+  if(kind==="mic" && LP.link && LP.link.busy()){ reply("none"); return; }
   if(!allowed(app,kind)){ reply("denied"); return; }
   if(!(kind==="motion" ? sensors.motionSupported() : sensors.micSupported())){ reply("none"); return; }
   if(sensors.live[kind]===win){ reply("on"); return; }
@@ -928,6 +934,95 @@ function snapOpen(req){
   /* the app lets go of every button: the viewfinder has the pad now */
   req.win.postMessage({pad:1,op:"release-all"},"*");
   LP.snap.open({name:appName(req.app), size:req.size, owner:function(){ return frontWin()===req.win; }, done:req.reply});
+}
+
+/* ---------- the link: PAD.link (runtime/link.js, SPEC.md 6.8) ----------
+   Only apps whose manifest has "link". The runtime draws its own pairing screen over the app, carries the messages and
+   keeps the microphone; the app gets only messages, a result and close reasons. The first open() shows the runtime's
+   dialog once per app (as the microphone's does); an allowed app is remembered in Settings. One link at a time: the app
+   in front owns it, its messages go back only while it is still in front, and every way out closes it with "home". */
+var linkOwner=null, linkPending=null;
+function linkReply(app,win,d,v,initiator){
+  if(S.running!==app || $("run-frame").contentWindow!==win) return;
+  var m={pad:1,op:"linked",i:d.i,v:v};
+  if(v==="open") m.initiator=!!initiator;
+  win.postMessage(m,"*");
+}
+function linkForward(ev){
+  if(!ev) return;
+  /* runtime/link.js empties its listener list on every close: keep the store's forwarder for the next link */
+  if(ev.type==="close") LP.link.on(linkForward);
+  /* during pairing the app that asked is the one that should hear a close with a reason (timeout, other-app) */
+  var o=linkOwner || linkPending;
+  if(!o) return;
+  if(S.running!==o.app || frontWin()!==o.win) return;
+  if(ev.type==="message") o.win.postMessage({pad:1,op:"link",event:"message",data:ev.data},"*");
+  else if(ev.type==="close"){
+    if(linkOwner===o) linkOwner=null;
+    if(linkPending===o) linkPending=null;
+    o.win.postMessage({pad:1,op:"link",event:"close",reason:String(ev.reason||"other")},"*");
+  }
+}
+if(LP.link && LP.link.on) LP.link.on(linkForward);
+/* HOME, the app leaving, another app, or a new frame: the link ends with its app */
+function closeLink(app){
+  if(!LP.link || !LP.link.close) return;
+  if(linkPending && (!app || linkPending.app===app)){ linkPending=null; LP.link.close("home"); return; }
+  if(linkOwner && (!app || linkOwner.app===app)){ linkOwner=null; LP.link.close("home"); }
+}
+function linkRequest(app,win,d){
+  var reply=function(v,initiator){ linkReply(app,win,d,v,initiator); };
+  var front=frontWin()===win, may=allowed(app,"link");
+  if(d.action==="close"){
+    /* the owner keeps the link until LP.link says close: the shim needs that close event too; a pairing is cancelled */
+    if(front && may && linkOwner && linkOwner.app===app && linkOwner.win===win) LP.link.close("home");
+    else if(front && may && linkPending && linkPending.app===app && linkPending.win===win) LP.link.close("home");
+    return;
+  }
+  if(d.action==="send"){
+    if(!front || !may || !LP.link || !LP.link.send){ reply("closed"); return; }
+    var data=d.data;
+    if(typeof data!=="string" && !(data instanceof Uint8Array)){ reply("closed"); return; }
+    LP.link.send(data).then(function(v){ reply(v); },function(){ reply("closed"); });
+    return;
+  }
+  if(d.action!=="open") return;
+  if(!front || !may){ reply("denied"); return; }
+  if(!LP.link || !LP.link.open || !window.LopdaAcousticLink || !window.LopdaAcousticLink.port){ reply("none"); return; }
+  if(linkPending || linkOwner || LP.link.busy()){ reply("busy"); return; }
+  var proto=d.proto==null?"":String(d.proto);
+  if(proto.length>16 || !/^[\x00-\x7f]*$/.test(proto)){ reply("denied"); return; }
+  var req={app:app, win:win, i:d.i, link:true, proto:proto};
+  req.ok=function(){ closeAsk(false); grant(app.id,"link"); linkBegin(req); };
+  req.cancel=function(){ reply("denied"); };
+  if(granted(app.id,"link")){ linkBegin(req); return; }
+  req.text=tr("link.ask",{name:appName(app)});
+  req.okLabel=tr("sense.allow"); req.noLabel=tr("sense.deny");
+  if(ask) closeAsk(true);
+  openAsk(req);
+}
+/* allowed: one microphone, so the sensors' mic goes first; then the runtime's pairing screen, which answers open() */
+function linkBegin(req){
+  var app=req.app, win=req.win, reply=function(v,initiator){ linkReply(app,win,req,v,initiator); };
+  if(S.running!==app || frontWin()!==win){ reply("cancelled"); return; }
+  if(linkPending || linkOwner || LP.link.busy()){ reply("busy"); return; }
+  if(sensors.live.mic) sensors.stopMic();
+  linkPending={app:app, win:win};
+  LP.link.open({port:window.LopdaAcousticLink.port(app.id), proto:req.proto, label:appName(app)}).then(function(v){
+    var mine=linkPending;
+    if(mine && mine.app===app && mine.win===win) linkPending=null;
+    if(v==="open" && (S.running!==app || frontWin()!==win || LP.link.state!=="open")){
+      /* the app went away, or the peer left inside the same tick: the link has no owner now */
+      LP.link.close("home");
+      reply("cancelled");
+      return;
+    }
+    if(v==="open") linkOwner={app:app, win:win};
+    reply(v,v==="open" ? LP.link.initiator : false);
+  },function(){
+    if(linkPending && linkPending.app===app && linkPending.win===win) linkPending=null;
+    reply("none");
+  });
 }
 
 /* ---------- speech: PAD.say (runtime/speech.js, decisions.md sections 25 and 29). No permission: the voice follows the volume
@@ -1059,7 +1154,7 @@ LP.builtin({id:"store", label:"app.store", icon:"store", view:"store",
 LP.builtin({id:"run", view:"run", keepPad:true,
   leave:function(){
     if(S.running) flushKv(S.running.id);
-    closeAsk(false); LP.snap.cancel(); LP.speech.stop(); sensors.stopAll(); LP.chip.stop(); LP.keepAwake(false); $("run-frame").srcdoc=""; S.running=null;
+    closeAsk(false); LP.snap.cancel(); LP.speech.stop(); closeLink(S.running); sensors.stopAll(); LP.chip.stop(); LP.keepAwake(false); $("run-frame").srcdoc=""; S.running=null;
   },
   lang:function(){
     /* apps read PAD.lang once at start: a running app is started again in the new language */

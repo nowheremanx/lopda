@@ -16,12 +16,16 @@ canvas{background:#a3ad7e;border:3px solid #1f2a14;touch-action:none;display:blo
 /* the tip may wrap; the buttons keep one row whatever the tip says */
 #tip{flex:1;min-width:0}
 #bot>div:last-child{flex-shrink:0;white-space:nowrap}
+#bot>div:last-child button{margin-left:8px}
+#bot>div:last-child button:first-child{margin-left:0}
 button{font-family:monospace;font-size:15px;font-weight:bold;min-height:44px;color:#a3ad7e;background:#1f2a14;border:2px solid #1f2a14;padding:8px 14px;cursor:pointer;box-shadow:3px 3px 0 #4a5a32}
 button:active{transform:translate(2px,2px);box-shadow:1px 1px 0 #4a5a32}
 #ov{position:fixed;left:0;top:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;background:#7d8a58}
 #panel{background:#a3ad7e;border:4px solid #1f2a14;box-shadow:6px 6px 0 #4a5a32;padding:22px 20px;text-align:center;max-width:300px;margin:10px}
 #panel h1{margin:0 0 12px;font-size:34px;letter-spacing:6px}
 #panel p{margin:0 0 18px;font-size:14px;line-height:1.6}
+#panel button{display:block;width:100%;margin:0 0 10px}
+#panel button:last-child{margin-bottom:0}
 .hide{display:none!important}
 </style>
 </head>
@@ -29,9 +33,9 @@ button:active{transform:translate(2px,2px);box-shadow:1px 1px 0 #4a5a32}
 <div id="app">
 <div id="top"><div class="box" id="turn">黑棋落子</div><div class="box" id="rec">胜 0</div></div>
 <div id="wrap"><canvas id="c"></canvas></div>
-<div id="bot"><div id="tip">点交叉点落子</div><div><button id="ud">悔棋</button> <button id="rs">重新开始</button></div></div>
+<div id="bot"><div id="tip">点交叉点落子</div><div><button id="ud">悔棋</button> <button id="rs">重新开始</button> <button id="rc" class="hide">重新连接</button> <button id="ln" class="hide">离开</button></div></div>
 </div>
-<div id="ov"><div id="panel"><h1 id="ot">五子棋</h1><p id="op">你执黑先手。点交叉点，一秒后落子，其间可点别处换位置。横竖斜连成五子即胜。</p><button id="st">开始</button></div></div>
+<div id="ov"><div id="panel"><h1 id="ot">五子棋</h1><p id="op">你执黑先手。点交叉点，一秒后落子，其间可点别处换位置。横竖斜连成五子即胜。</p><button id="st">开始</button><button id="lk" class="hide">对战（电波）</button></div></div>
 <script>
 (function(){
 var N=15,cv=document.getElementById('c'),ctx=cv.getContext('2d');
@@ -40,20 +44,41 @@ var ov=document.getElementById('ov'),ot=document.getElementById('ot'),op=documen
 /* two languages: PAD.lang from the runtime; older runtimes have none, so Chinese is the default */
 var LANG=(typeof PAD!=='undefined'&&PAD.lang==='en')?'en':'zh';
 var TXT={
-  zh:{title:'五子棋',intro:'你执黑先手。点交叉点，一秒后落子，其间可点别处换位置。横竖斜连成五子即胜。',start:'开始',again:'再来一局',undo:'悔棋',restart:'重新开始',
+  zh:{title:'五子棋',intro:'你执黑先手。点交叉点，一秒后落子，其间可点别处换位置。横竖斜连成五子即胜。',start:'开始',again:'再来一局',undo:'悔棋',restart:'重新开始',match:'对战（电波）',menu:'回到菜单',
     yours:'黑棋落子',thinking:'白棋思考中',tip:'点交叉点落子',tipsure:'点别处可换位置',tipover:'点重新开始再来一局',wins:'胜 ',
-    win:'你赢了',lose:'你输了',draw:'平局',winnote:'五子连珠，漂亮。',losenote:'电脑连成五子。',drawnote:'棋盘已满。'},
-  en:{title:'GOMOKU',intro:'You play black and go first. Tap a point and the stone goes down a second later; tap elsewhere before then to move it. Five in a row wins, any direction.',start:'START',again:'AGAIN',undo:'Undo',restart:'Restart',
+    win:'你赢了',lose:'你输了',draw:'平局',winnote:'五子连珠，漂亮。',losenote:'电脑连成五子。',drawnote:'棋盘已满。',
+    myTurn:'你的回合',peerTurn:'对方的回合',waiting:'等对方…',sending:'发送中…',linked:'已连线',linking:'连接中…',offline:'断线了',notYet:'没连上',
+    reconnect:'重新连接',leave:'离开',menuTip:'点回到菜单',
+    linkWin:'你赢了',linkLose:'对方赢了',linkWinnote:'五子连珠，漂亮。',linkLosenote:'对方连成五子。',linkDrawnote:'棋盘已满。',
+    linkTip:'点交叉点落子',offlineTip:'点重新连接',
+    why:{bye:'对方离开了',lost:'信号断了','other-app':'对方换了别的程序',timeout:'没有连上',home:'这边离开了',cancelled:'连线取消了',denied:'没有允许连线',none:'这台掌机不能连线',busy:'已经有别的连线',big:'消息太长',other:'连线出了错'}},
+  en:{title:'GOMOKU',intro:'You play black and go first. Tap a point and the stone goes down a second later; tap elsewhere before then to move it. Five in a row wins, any direction.',start:'START',again:'AGAIN',undo:'Undo',restart:'Restart',match:'Match (radio)',menu:'Menu',
     yours:'Your move',thinking:'White thinking',tip:'Tap a point',tipsure:'Tap elsewhere to move',tipover:'Restart for another',wins:'Wins ',
-    win:'You win',lose:'You lose',draw:'Draw',winnote:'Five in a row. Nice.',losenote:'The computer made five.',drawnote:'The board is full.'}
+    win:'You win',lose:'You lose',draw:'Draw',winnote:'Five in a row. Nice.',losenote:'The computer made five.',drawnote:'The board is full.',
+    myTurn:'Your turn',peerTurn:'Their turn',waiting:'Waiting…',sending:'Sending…',linked:'Linked',linking:'Connecting…',offline:'Disconnected',notYet:'No link',
+    reconnect:'Reconnect',leave:'Leave',menuTip:'Tap Menu',
+    linkWin:'You win',linkLose:'They win',linkWinnote:'Five in a row. Nice.',linkLosenote:'The other side made five.',linkDrawnote:'The board is full.',
+    linkTip:'Tap a point',offlineTip:'Tap Reconnect',
+    why:{bye:'the other side left',lost:'the signal went',"other-app":'the other side switched apps',timeout:'nobody was found',home:'this side left',cancelled:'pairing was cancelled',denied:'the link was not allowed',none:'this handheld cannot link',busy:'another link is busy',big:'the message was too long',other:'the link failed'}}
 }[LANG];
 document.documentElement.lang=LANG==='zh'?'zh-CN':'en';document.title=TXT.title;
 ot.textContent=TXT.title;op.textContent=TXT.intro;document.getElementById('st').textContent=TXT.start;
 document.getElementById('ud').textContent=TXT.undo;document.getElementById('rs').textContent=TXT.restart;recEl.textContent=TXT.wins+0;
+document.getElementById('lk').textContent=TXT.match;
+document.getElementById('rc').textContent=TXT.reconnect;
+document.getElementById('ln').textContent=TXT.leave;
 var C0='#a3ad7e',C1='#7d8a58',C2='#4a5a32',C3='#1f2a14';
 var b,over,busy,last,winLine,hover,pick,pickT,pickAt,WAIT=1000,wins=0,size=300,cell=20,pad=14,hist=[];
+/* the link match: see the long comment over the link functions below */
+var LINK=(typeof PAD!=='undefined'&&PAD.link)?PAD.link:null;
+var mode='solo',panelMode='menu';        // mode: 'solo' | 'link'; panelMode: what the start overlay says
+var linkColour=0;                        // 1 black, 2 white; set once, at the match's first open
+var moves=[];                            // a match's moves in order, [x,y] (the board can be rebuilt from it)
+var linkOpen=false,openingLink=false,sendingMove=false,linkWhy='',syncs=0;
+var sendQ=[],sendBusy=false,syncAsked=false,allBuf=[];
+function emptyBoard(){var nb=[];for(var i=0;i<N;i++)nb.push(new Array(N).fill(0));return nb;}
 function reset(){
-  b=[];for(var i=0;i<N;i++){b.push(new Array(N).fill(0));}
+  b=emptyBoard();
   unpick();over=false;busy=false;last=null;winLine=null;hover=null;hist=[];
   turnEl.textContent=TXT.yours;tipEl.textContent=TXT.tip;draw();
 }
@@ -96,7 +121,7 @@ function draw(){
     ctx.fillStyle=m==1?C0:C3;
     ctx.fillRect(lx-3,ly-3,6,6);
   }
-  if(hover&&!over&&!busy&&b[hover[1]][hover[0]]==0){
+  if(hover&&canMoveNow()&&b[hover[1]][hover[0]]==0){
     var hx=pad+hover[0]*cell,hy=pad+hover[1]*cell;
     ctx.strokeStyle=C3;ctx.lineWidth=2;
     var q=cell*0.5;
@@ -108,7 +133,7 @@ function draw(){
     ctx.stroke();
   }
   // the picked point: a dark stone, and a ring around it that closes when the stone goes down
-  if(pick&&!over&&!busy&&b[pick[1]][pick[0]]==0){
+  if(pick&&canMoveNow()&&b[pick[1]][pick[0]]==0){
     var kx=pad+pick[0]*cell,ky=pad+pick[1]*cell,f=Math.min(1,(Date.now()-pickAt)/WAIT);
     ctx.beginPath();ctx.arc(kx,ky,r,0,7);ctx.fillStyle=C2;ctx.fill();
     ctx.lineWidth=2;ctx.strokeStyle=C3;ctx.stroke();
@@ -211,19 +236,25 @@ function ring(){if(!pick)return;draw();requestAnimationFrame(ring);}
 cv.addEventListener('pointerdown',function(e){
   e.preventDefault();
   var p=pos(e);hover=e.pointerType==='mouse'?p:null;
-  if(!p||over||busy||b[p[1]][p[0]]){draw();return;}
-  if(e.pointerType==='mouse'||(pick&&pick[0]==p[0]&&pick[1]==p[1])){place(p[0],p[1]);return;}
-  unpick();pick=p;pickAt=Date.now();pickT=setTimeout(function(){if(pick)place(pick[0],pick[1]);},WAIT);
+  if(!p||!canMoveNow()||b[p[1]][p[0]]){draw();return;}
+  if(e.pointerType==='mouse'||(pick&&pick[0]==p[0]&&pick[1]==p[1])){tap(p[0],p[1]);return;}
+  unpick();pick=p;pickAt=Date.now();pickT=setTimeout(function(){if(pick)tap(pick[0],pick[1]);},WAIT);
   tipEl.textContent=TXT.tipsure;PAD.sfx('move');ring();
 });
 cv.addEventListener('pointerleave',function(){hover=null;draw();});
-document.getElementById('rs').addEventListener('pointerdown',function(e){e.preventDefault();reset();});
+document.getElementById('rs').addEventListener('pointerdown',function(e){e.preventDefault();if(mode!=='link')reset();});
 document.getElementById('ud').addEventListener('pointerdown',function(e){e.preventDefault();undo();});
+document.getElementById('lk').addEventListener('pointerdown',function(e){e.preventDefault();startLinkGame();});
+document.getElementById('rc').addEventListener('pointerdown',function(e){e.preventDefault();openLink();});
+document.getElementById('ln').addEventListener('pointerdown',function(e){e.preventDefault();leaveMatch();});
 document.getElementById('st').addEventListener('pointerdown',function(e){
-  e.preventDefault();ov.classList.add('hide');reset();resize();
+  e.preventDefault();
+  if(panelMode==='link'){leaveMatch();return;}  // a finished match goes back to the menu, not a solo game
+  mode='solo';updateButtons();ov.classList.add('hide');reset();resize();
 });
 window.addEventListener('resize',resize);
 function undo(){
+  if(mode==='link')return;   // no undo in a match: the two boards must stay the same game
   // a stone still waiting to go down is the first thing undo takes back
   if(pick&&!over&&!busy){unpick();tipEl.textContent=TXT.tip;PAD.sfx('miss');draw();return;}
   if(over||busy||hist.length<2)return;
@@ -232,7 +263,272 @@ function undo(){
   last=hist.length?hist[hist.length-1]:null;
   PAD.sfx('miss');draw();
 }
+/* -------------------------------------------------------------------------------------------------
+   The link match (PAD.link: SPEC.md 6.8, docs/design/radio.md 8.7).
+
+   Which calls, and why:
+   - PAD.link.open({proto:"gomoku1"}) starts the runtime's own pairing screen. "gomoku1" is this app's
+     agreement string: a peer running another app, or another rules version, is refused by the runtime
+     ("other-app"), so both sides always speak the messages below. The result is "open", "cancelled",
+     "denied", "none" or "busy"; only "open" starts or resumes a match.
+   - PAD.link.send(data) is the only way to talk: a string of at most 200 bytes, and the runtime keeps
+     at most 4 waiting. This app therefore has ONE sender queue (sendQ/pumpSend) and never has a second
+     message unsettled while one is in flight. "sent" means the peer acknowledged it; "lost" means the
+     retries ran out; "closed", "busy" and "big" are failures too.
+   - PAD.on("link") hands over {type:"message", data} and {type:"close", reason}.
+   - PAD.link.close() leaves the match; PAD.link.state and PAD.link.initiator are read-only.
+
+   Why every move carries a move number ("m,x,y,n", n is 1-based): the link is slow and lossy, so "the
+   stone I placed" and "the stone the other side has" can disagree. Without n a retried message would
+   put a second stone down, and a lost one would be invisible. n makes both visible: n <= my count is
+   a duplicate (ignore it), n > my count + 1 is a gap (ask for the whole game, never guess the stones).
+
+   Why "sync" and "all,...": a sender cannot know that a message arrived -- the last acknowledgement
+   can be the one that is lost (SPEC.md 6.8, "exchange is copy, not move"). After a gap the receiver
+   sends "sync"; the sender answers with the whole game as "all,x.y;x.y;..." in order. That reply is
+   one message while it fits 200 bytes (about 33 moves). On a longer game it is the same list in
+   chunks "all,<start n>,<x.y;...>", where start is the 1-based number of the chunk's first move, sent
+   one after another through the queue. The receiver collects the chunks in order (allBuf) and only
+   replaces its board when the rebuilt list is longer than its own, so a full board never shrinks.
+
+   Why the colour is fixed at the first open: reconnecting is a new pairing, and the runtime may make
+   the other handheld the initiator this time. The stones of this game keep their colours, so only the
+   FIRST "open" of a match reads PAD.link.initiator (true = black, and black moves first); every later
+   open keeps linkColour. Undo is off in a match for the same reason: one game, two identical boards.
+   ------------------------------------------------------------------------------------------------- */
+
+/* small DOM helper: show/hide by class (toggle with a second argument is not on every old browser) */
+function show(el,on){if(on)el.classList.remove('hide');else el.classList.add('hide');}
+function colourToMove(){return moves.length%2===0?1:2;}   // black moves on even counts (0, 2, 4...)
+/* only the player whose colour is to move may place; solo keeps its old over/busy rule */
+function canMoveNow(){
+  if(mode!=='link')return !over&&!busy;
+  return linkOpen&&!over&&!sendingMove&&colourToMove()===linkColour;
+}
+function reasonText(r){return (TXT.why&&TXT.why[r])||TXT.why.other;}
+function updateButtons(){
+  show(document.getElementById('ud'),mode!=='link');
+  show(document.getElementById('rs'),mode!=='link');
+  show(document.getElementById('ln'),mode==='link');
+  show(document.getElementById('rc'),mode==='link'&&!linkOpen&&!openingLink&&!over);
+  show(document.getElementById('lk'),!!LINK&&panelMode==='menu'&&mode!=='link');
+}
+function updateLinkUI(){
+  if(mode!=='link')return;
+  updateButtons();
+  if(over)return;                                  // endLinkGame owns the texts once a game is decided
+  if(openingLink){turnEl.textContent=TXT.linking;tipEl.textContent=TXT.linking;recEl.textContent=TXT.linking;resize();return;}
+  if(!linkOpen){
+    turnEl.textContent=moves.length?TXT.offline:TXT.notYet;
+    recEl.textContent=turnEl.textContent;
+    tipEl.textContent=(moves.length?TXT.offline:TXT.notYet)+'：'+reasonText(linkWhy)+'。'+TXT.offlineTip;
+    resize();return;
+  }
+  recEl.textContent=TXT.linked;
+  if(sendingMove){turnEl.textContent=TXT.sending;tipEl.textContent=TXT.sending;}
+  else if(colourToMove()===linkColour){turnEl.textContent=TXT.myTurn;tipEl.textContent=TXT.linkTip;}
+  else{turnEl.textContent=TXT.peerTurn;tipEl.textContent=TXT.waiting;}
+  resize();
+}
+/* one message at a time: the runtime queues 4 at most, and the game wants to know each result */
+function queueSend(data,done){sendQ.push({data:data,done:done});pumpSend();}
+function pumpSend(){
+  if(sendBusy||!sendQ.length)return;
+  if(!LINK||!linkOpen){var q=sendQ;sendQ=[];for(var i=0;i<q.length;i++){if(q[i].done)q[i].done('closed');}return;}
+  sendBusy=true;
+  var item=sendQ.shift();
+  LINK.send(item.data).then(function(r){sendBusy=false;if(item.done)item.done(r);pumpSend();},
+    function(){sendBusy=false;if(item.done)item.done('closed');pumpSend();});
+}
+/* the link is over (a "lost" send, or the runtime's close event): keep the stones, say why, offer a reconnect */
+function lostLink(v){
+  if(mode!=='link')return;
+  sendingMove=false;linkOpen=false;linkWhy=v||'lost';unpick();
+  try{if(LINK&&LINK.state==='open')LINK.close();}catch(e){}  // after "lost" the runtime may still hold the link
+  updateLinkUI();
+}
+function startLinkGame(){
+  if(!LINK)return;
+  mode='link';panelMode='link';linkColour=0;moves=[];allBuf=[];syncAsked=false;syncs=0;
+  sendingMove=false;openingLink=false;linkOpen=false;linkWhy='';sendQ=[];sendBusy=false;
+  over=false;busy=false;last=null;winLine=null;hover=null;hist=[];b=emptyBoard();unpick();
+  ov.classList.add('hide');
+  updateLinkUI();
+  openLink();
+}
+function openLink(){
+  if(!LINK||mode!=='link'||openingLink||linkOpen)return;
+  openingLink=true;linkWhy='';updateLinkUI();
+  LINK.open({proto:'gomoku1'}).then(function(r){
+    openingLink=false;
+    if(mode!=='link'){if(r==='open'){try{LINK.close();}catch(e){}}return;}   // left while the runtime paired
+    if(r==='open'){
+      linkOpen=true;
+      if(!linkColour)linkColour=LINK.initiator?1:2;   // only the first open of the match decides
+      allBuf=[];syncAsked=false;updateLinkUI();
+      /* after a reconnect both sides say how many moves they have. The side with fewer sends "sync".
+         On a fresh game both are 0 and there is nothing to compare, so the message is skipped. */
+      if(moves.length)queueSend('n,'+moves.length,function(v){if(v!=='sent')lostLink(v);});
+    }else{
+      linkOpen=false;linkWhy=r;
+      if(r==='cancelled'&&!moves.length)leaveMatch();   // nothing to keep: back to the start menu
+      else updateLinkUI();
+    }
+  },function(){openingLink=false;linkOpen=false;linkWhy='none';updateLinkUI();});
+}
+function leaveMatch(){
+  if(mode!=='link')return;
+  try{if(LINK&&LINK.state==='open')LINK.close();}catch(e){}
+  mode='solo';panelMode='menu';
+  linkColour=0;moves=[];allBuf=[];syncAsked=false;syncs=0;
+  linkOpen=false;openingLink=false;sendingMove=false;linkWhy='';sendQ=[];sendBusy=false;
+  showMenu();
+}
+function showMenu(){
+  mode='solo';panelMode='menu';linkOpen=false;linkColour=0;moves=[];allBuf=[];sendQ=[];
+  reset();                                            // a clean solo board behind the menu
+  ot.textContent=TXT.title;op.textContent=TXT.intro;
+  document.getElementById('st').textContent=TXT.start;
+  updateButtons();
+  ov.classList.remove('hide');
+}
+/* the receiver of "sync" answers with the whole game (one message, or chunks of whole moves) */
+function sendAll(){
+  if(!linkOpen)return;
+  function sent(v){if(v!=='sent')lostLink(v);}
+  var pairs=[],i;
+  for(i=0;i<moves.length;i++)pairs.push(moves[i][0]+'.'+moves[i][1]);
+  var one='all,'+pairs.join(';');
+  if(one.length<=200){queueSend(one,sent);return;}   // ASCII only, so length is the byte count
+  i=0;
+  while(i<pairs.length){
+    var start=i+1,pre='all,'+start+',',chunk=[];
+    while(i<pairs.length){
+      var next=chunk.concat(pairs[i]);
+      if(pre.length+next.join(';').length>200)break;
+      chunk=next;i++;
+    }
+    if(!chunk.length){chunk=[pairs[i]];i++;}          // cannot happen with x,y < 15, but never loop forever
+    queueSend(pre+chunk.join(';'),sent);
+  }
+}
+function askSync(){                                  // I am missing stones: ask for the whole game once
+  if(!linkOpen||syncAsked)return;
+  syncAsked=true;syncs++;
+  queueSend('sync',function(v){if(v!=='sent')lostLink(v);});
+}
+function onCount(k){                                 // "n,<count>" arrives after every open
+  if(!linkOpen||over)return;
+  if(k>moves.length)askSync();                       // the peer has more: the side with fewer asks
+}
+function applyMoves(list){                           // rebuild the board from a whole game
+  var nb=emptyBoard(),i,m;
+  for(i=0;i<list.length;i++){
+    m=list[i];
+    if(!inb(m[0],m[1])||nb[m[1]][m[0]])return;       // malformed: keep the board we have
+    nb[m[1]][m[0]]=(i%2===0)?1:2;                    // move 1 is black, move 2 white, ...
+  }
+  b=nb;moves=list.slice();last=moves.length?moves[moves.length-1]:null;winLine=null;
+  /* the list may end on a winning stone this side never saw (its message was the one that was lost):
+     check the last move so both boards show the same result. checkWin() is the single-player one. */
+  if(!over&&moves.length){
+    var v=(moves.length-1)%2===0?1:2,lm=moves[moves.length-1];
+    if(checkWin(lm[0],lm[1],v)){endLinkGame(v===linkColour?'win':'lose');return;}
+  }
+  if(!over&&full()){endLinkGame('draw');return;}
+  updateLinkUI();
+}
+function onAll(text){                                // "all,..." or "all,<start>,..." (chunks)
+  if(!linkOpen||over)return;
+  var rest=text.slice(4),start=1,body=rest,comma=rest.indexOf(',');
+  if(comma>0&&/^\d+$/.test(rest.slice(0,comma))){start=+rest.slice(0,comma);body=rest.slice(comma+1);}
+  var raw=body?body.split(';'):[],list=[],i,mm;
+  for(i=0;i<raw.length;i++){
+    mm=/^(\d+)\.(\d+)$/.exec(raw[i]);
+    if(!mm||!inb(+mm[1],+mm[2]))return;              // one bad pair: keep what we have
+    list.push([+mm[1],+mm[2]]);
+  }
+  if(start===1)allBuf=[];                            // a fresh full game starts at move 1
+  if(start!==allBuf.length+1)return;                 // a chunk from elsewhere: wait for the next full one
+  allBuf=allBuf.concat(list);
+  syncAsked=false;
+  if(allBuf.length>moves.length)applyMoves(allBuf);   // replace only by a longer game; never shrink
+}
+function onMove(x,y,n){
+  if(!linkOpen||over)return;
+  if(n<=moves.length)return;                         // duplicate or already had it: ignore
+  if(n>moves.length+1){askSync();return;}            // a gap: ask for the whole game, do not guess
+  if(colourToMove()===linkColour)return;             // not the peer's turn (both moved at once): ignore
+  if(!inb(x,y)||b[y][x])return;                      // off the board or occupied: ignore
+  var v=colourToMove();
+  b[y][x]=v;last=[x,y];moves.push([x,y]);PAD.sfx('tick');  // the clock is the peer's; sound matches solo
+  if(checkWin(x,y,v)){endLinkGame(v===linkColour?'win':'lose');return;}
+  if(full()){endLinkGame('draw');return;}
+  updateLinkUI();
+}
+function onLinkMessage(data){
+  if(typeof data!=='string')return;                  // this app speaks text; PAD.link also allows bytes
+  if(data==='sync'){sendAll();return;}
+  if(data.indexOf('all,')===0){onAll(data);return;}
+  var m=/^n,(\d+)$/.exec(data);
+  if(m){onCount(+m[1]);return;}
+  m=/^m,(\d+),(\d+),(\d+)$/.exec(data);
+  if(m){onMove(+m[1],+m[2],+m[3]);return;}
+  /* anything else belongs to another version of this app: ignore it instead of breaking the game */
+}
+function endLinkGame(result){                        // result: 'win', 'lose' or 'draw', from this side
+  over=true;sendingMove=false;
+  turnEl.textContent=result==='win'?TXT.linkWin:result==='lose'?TXT.linkLose:TXT.draw;
+  tipEl.textContent=TXT.menuTip;
+  if(linkOpen)recEl.textContent=TXT.linked;
+  resize();
+  PAD.sfx(result==='win'?'win':(result==='draw'?'ok':'lose'));
+  setTimeout(function(){
+    panelMode='link';
+    ot.textContent=turnEl.textContent;
+    op.textContent=result==='win'?TXT.linkWinnote:result==='lose'?TXT.linkLosenote:TXT.linkDrawnote;
+    document.getElementById('st').textContent=TXT.menu;
+    updateButtons();
+    ov.classList.remove('hide');
+  },900);
+}
+function linkPlace(x,y){                             // a stone of mine in a match
+  if(!canMoveNow()||!inb(x,y)||b[y][x]||colourToMove()!==linkColour)return;
+  unpick();                                          // as in solo: the ring stops, the stone is down
+  var v=linkColour;
+  b[y][x]=v;last=[x,y];moves.push([x,y]);PAD.sfx('tap');
+  var n=moves.length;
+  if(checkWin(x,y,v))endLinkGame('win');
+  else if(full())endLinkGame('draw');
+  /* send whether or not the game just ended: the other side needs the last stone to see the same win */
+  sendingMove=true;updateLinkUI();
+  queueSend('m,'+x+','+y+','+n,function(r){
+    if(mode!=='link')return;
+    sendingMove=false;
+    if(r!=='sent')lostLink(r);
+    else if(!over)updateLinkUI();
+  });
+}
+function tap(x,y){if(mode==='link')linkPlace(x,y);else place(x,y);}
+/* PAD.on("link"): messages and the runtime's close reasons ("bye", "lost", "other-app", "timeout", "home") */
+if(typeof PAD!=='undefined'&&PAD.on)PAD.on('link',function(ev){
+  if(mode!=='link')return;
+  if(ev.type==='message'){onLinkMessage(ev.data);return;}
+  if(ev.type==='close'){
+    if(linkOpen)linkWhy=ev.reason||'lost';   // a close we started ("lost" already set) keeps its reason
+    linkOpen=false;sendingMove=false;sendQ=[];unpick();
+    updateLinkUI();                                  // the board stays; the footer offers 重新连接
+  }
+});
+/* a tiny read-only hook for tests/e2e-gomoku-link.test.mjs: the board and match state as the page shows
+   them. The game itself never reads it. */
+window.__gomoku=function(){
+  return {board:b.map(function(r){return r.slice();}),moves:moves.length,colour:linkColour,mode:mode,
+    open:linkOpen,over:over,sending:sendingMove,syncs:syncs,initiator:LINK?!!LINK.initiator:false,
+    size:size,pad:pad,cell:cell};
+};
 reset();resize();
+updateButtons();
 (async function(){
   try{
     var v=await PAD.load('gomoku_wins');

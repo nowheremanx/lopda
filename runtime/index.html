@@ -23,6 +23,7 @@
       <span id="clock">--:--</span>
       <span class="save" id="savestate">启动中…</span>
       <span class="mic-mark" id="mic-mark" hidden data-i18n-title="sense.listening" title="正在听"></span>
+      <span class="link-mark" id="link-mark" hidden data-i18n-title="link.on" title="连线中"><i></i></span>
       <span class="save" aria-hidden="true">LP-86</span>
     </div>
 
@@ -502,63 +503,114 @@
       </div>
     </section>
 
-    <!-- RADIO: the acoustic link, M2 test bench and M3 handshake/frames (apps/radio.js, acoustic.js, acoustic-link.js) -->
+    <!-- RADIO: the acoustic link (LP.link), its guide and the M2 meter (apps/radio.js, acoustic.js, link.js) -->
     <section class="view radio-view" id="v-radio" hidden>
-      <div class="bar">
-        <h2 data-i18n="radio.title">电波台</h2>
+      <div class="radio-bar" id="radio-bar">
+        <h2 id="radio-title" data-i18n="radio.title">电波台</h2>
         <span class="hint" id="radio-state"></span>
       </div>
-      <div class="radio-body">
-        <div class="radio-tabs" role="tablist">
-          <button class="btn ghost" id="radio-tab-send" type="button" role="tab" data-i18n="radio.tab.send">发报</button>
-          <button class="btn ghost" id="radio-tab-recv" type="button" role="tab" data-i18n="radio.tab.recv">收报</button>
-          <button class="btn ghost" id="radio-tab-lab" type="button" role="tab" data-i18n="radio.tab.lab">仪表</button>
+
+      <div class="radio-page radio-menu-page" id="radio-page-menu">
+        <ul class="radio-list" id="radio-menu">
+          <li data-act="link" class="on" role="button" tabindex="0"><span data-i18n="radio.menu.link">连线</span></li>
+          <li data-act="guide" role="button" tabindex="0"><span data-i18n="radio.menu.guide">说明</span></li>
+          <li data-act="meter" role="button" tabindex="0"><span data-i18n="radio.menu.meter">仪表</span></li>
+        </ul>
+        <p class="hint" id="radio-menu-note" data-i18n="radio.menu.note">两台都按「连线」，靠近一点。</p>
+      </div>
+
+      <div class="radio-page radio-guide-page" id="radio-page-guide" hidden>
+        <div class="radio-guide-body" id="radio-guide-body"></div>
+        <p class="hint radio-guide-page" id="radio-guide-page"></p>
+        <p class="hint" data-i18n="radio.guide.keys">左右翻页 · A 下一页 · B 返回</p>
+      </div>
+
+      <div class="radio-page radio-link-page" id="radio-page-link" hidden>
+        <div class="radio-link-status">
+          <span id="radio-link-role"></span>
+          <span id="radio-link-rate"></span>
         </div>
-        <div class="radio-settings">
+        <div class="radio-link-log" id="radio-link-log"></div>
+        <div class="radio-link-actions" id="radio-link-actions">
+          <button class="btn ghost on" id="radio-write" type="button" data-i18n="radio.link.write">写字</button>
+          <button class="btn ghost" id="radio-draw" type="button" data-i18n="radio.link.draw">画图</button>
+          <button class="btn ghost" id="radio-hangup" type="button" data-i18n="radio.link.hangup">断开</button>
+        </div>
+      </div>
+
+      <div class="radio-page radio-write-page" id="radio-page-write" hidden>
+        <p class="radio-field"><span data-i18n="radio.write.title">写字</span></p>
+        <input id="radio-write-input" type="text" maxlength="60" autocomplete="off" spellcheck="false" data-i18n-ph="radio.write.ph" data-i18n-label="radio.write.title" aria-label="写字">
+        <p class="hint" id="radio-write-count"></p>
+        <p class="hint" id="radio-write-note" data-i18n="radio.write.empty">先写点什么。</p>
+        <div class="radio-write-actions">
+          <button class="btn" id="radio-write-send" type="button" data-i18n="radio.write.send">发送</button>
+          <button class="btn ghost" id="radio-write-back" type="button" data-i18n="radio.write.back">返回</button>
+        </div>
+      </div>
+
+      <div class="radio-page radio-draw-page" id="radio-page-draw" hidden>
+        <canvas id="radio-draw-cv" width="256" height="256" data-i18n-label="radio.draw.label" aria-label="16×16 四色画板"></canvas>
+        <p class="hint radio-draw-hint" data-i18n="radio.draw.keys">方向键移动 · A 涂 · SELECT 换色 · START 发送 · B 返回</p>
+        <div class="radio-draw-actions">
+          <span class="radio-swatch" id="radio-draw-swatch" aria-hidden="true"></span>
+          <span class="radio-draw-tone" id="radio-draw-tone"></span>
+          <button class="btn" id="radio-draw-send" type="button" data-i18n="radio.draw.send">发送</button>
+          <button class="btn ghost" id="radio-draw-back" type="button" data-i18n="radio.draw.back">返回</button>
+        </div>
+      </div>
+
+      <div class="radio-page radio-meter-page" id="radio-page-meter" hidden>
+        <section class="radio-meter-block">
+          <h3 data-i18n="radio.meter.tones">四个音调 · dB</h3>
+          <div class="radio-bars">
+            <div class="radio-bar-row"><span class="radio-bar-label">1500</span><span class="radio-level"><i id="radio-bar-0"></i></span><small id="radio-db-0">—</small></div>
+            <div class="radio-bar-row"><span class="radio-bar-label">2500</span><span class="radio-level"><i id="radio-bar-1"></i></span><small id="radio-db-1">—</small></div>
+            <div class="radio-bar-row"><span class="radio-bar-label">3500</span><span class="radio-level"><i id="radio-bar-2"></i></span><small id="radio-db-2">—</small></div>
+            <div class="radio-bar-row"><span class="radio-bar-label">4500</span><span class="radio-level"><i id="radio-bar-3"></i></span><small id="radio-db-3">—</small></div>
+          </div>
+          <p class="hint" id="radio-meter-state" aria-live="polite"></p>
+          <p class="hint" id="radio-floor"></p>
+          <p class="hint" id="radio-rxmon"></p>
+          <button class="btn ghost" id="radio-rec-save" type="button" data-i18n="radio.meter.recsave">存下最近 8 秒录音</button>
+        </section>
+
+        <label class="radio-check"><input type="checkbox" id="radio-txmode"> <span data-i18n="radio.meter.txmode">发送时关麦</span></label>
+        <p class="hint" data-i18n="radio.meter.txmode.note">有的手机开麦时扬声器变小声。打开后，发送时短暂关麦。</p>
+        <p class="hint" data-i18n="radio.meter.note">这一页开着时才用麦克风。</p>
+
+        <section class="radio-meter-block">
+          <h3 data-i18n="radio.meter.test">已知序列测试</h3>
           <label class="radio-field">
             <span data-i18n="radio.rate">速率</span>
-            <select id="radio-rate">
-              <option value="40">40 ms · 50 bit/s</option>
-              <option value="20">20 ms · 100 bit/s</option>
-              <option value="10" selected>10 ms · 200 bit/s · 推荐</option>
-              <option value="5">5 ms · 400 bit/s</option>
+            <select id="radio-test-rate">
+              <option value="40" data-i18n="radio.rate.40">40 ms · 50 bit/s</option>
+              <option value="20" data-i18n="radio.rate.20">20 ms · 100 bit/s</option>
+              <option value="10" selected data-i18n="radio.rate.10">10 ms · 200 bit/s · 推荐</option>
+              <option value="5" data-i18n="radio.rate.5">5 ms · 400 bit/s</option>
             </select>
           </label>
           <label class="radio-field">
             <span data-i18n="radio.test">测试序列</span>
-            <select id="radio-pattern">
+            <select id="radio-test-pattern">
               <option value="a5" data-i18n="radio.pattern.a5">A5 5A · 16 字节</option>
               <option value="count" data-i18n="radio.pattern.count">00–0F · 16 字节</option>
               <option value="random" data-i18n="radio.pattern.random">随机 · 16 字节</option>
             </select>
           </label>
           <p class="hint radio-hex" id="radio-pattern-hex"></p>
-          <label class="radio-check"><input type="checkbox" id="radio-auto" checked> <span data-i18n="radio.auto">自动握手</span></label>
-        </div>
-        <div class="radio-pane" id="radio-pane-send">
-          <div class="row radio-actions">
-            <button class="btn" id="radio-send-go" type="button" data-i18n="radio.send.link">连接并发送</button>
-            <button class="btn ghost" id="radio-send-stop" type="button" data-i18n="radio.send.cancel" disabled>取消</button>
+          <div class="radio-test-actions">
+            <button class="btn" id="radio-test-send" type="button" data-i18n="radio.meter.send">发送测试</button>
+            <button class="btn ghost" id="radio-test-recv" type="button" data-i18n="radio.meter.recv">接收并解码</button>
+            <button class="btn ghost" id="radio-test-stop" type="button" disabled data-i18n="radio.meter.stop">停止</button>
           </div>
-          <div class="radio-meter"><span id="radio-send-bar"></span></div>
-          <p class="hint" id="radio-send-state" aria-live="polite"></p>
-        </div>
-        <div class="radio-pane" id="radio-pane-recv" hidden>
-          <div class="row radio-actions">
-            <button class="btn" id="radio-recv-go" type="button" data-i18n="radio.recv.link">等待连接</button>
-            <button class="btn ghost" id="radio-recv-stop" type="button" data-i18n="radio.recv.stop" disabled>停止并解码</button>
-          </div>
-          <div class="radio-meter"><span id="radio-recv-bar"></span></div>
-          <p class="hint" id="radio-recv-state" aria-live="polite"></p>
-          <p class="hint" id="radio-recv-stats"></p>
-          <p class="radio-hex" id="radio-recv-hex"></p>
-        </div>
-        <div class="radio-pane" id="radio-pane-lab" hidden>
-          <canvas id="radio-lab-cv" class="radio-scope" width="600" height="120" data-i18n-label="radio.lab.scope" aria-label="符号"></canvas>
-          <p class="hint" id="radio-lab-note"></p>
-          <div class="radio-log" id="radio-log"></div>
-        </div>
-        <p class="hint radio-note" id="radio-note"></p>
+          <div class="radio-meter"><span id="radio-test-bar"></span></div>
+          <p class="hint" id="radio-test-state" aria-live="polite"></p>
+          <p class="hint" id="radio-test-stats"></p>
+          <p class="radio-hex" id="radio-test-hex"></p>
+          <canvas id="radio-lab-cv" class="radio-scope" width="600" height="120" data-i18n-label="radio.meter.lab.symbols" aria-label="符号"></canvas>
+          <p class="hint" id="radio-lab-note" data-i18n="radio.meter.lab.empty">还没有解码结果。</p>
+        </section>
       </div>
     </section>
 
@@ -711,6 +763,24 @@
       </div>
     </section>
 
+    <!-- LP.link: the pairing screen over whatever is in front (link.js); one screen, four tones -->
+    <div class="link-view" id="link" hidden role="dialog" data-i18n-label="link.plain" aria-label="连线">
+      <div class="link-head"><span data-i18n="link.plain">连线</span><span id="link-attempt"></span></div>
+      <h2 id="link-title"></h2>
+      <div class="link-pair" aria-hidden="true">
+        <span class="link-phone"></span>
+        <span class="link-wave" id="link-wave"><i></i><i></i><i></i></span>
+        <span class="link-phone"></span>
+      </div>
+      <p class="link-hint" data-i18n="link.hint">手机音量调大，靠近 10–30 厘米，另一台也按连线</p>
+      <p class="link-phase" id="link-phase"></p>
+      <div class="link-progress" aria-hidden="true"><i id="link-bar"></i></div>
+      <p class="link-diag" id="link-diag"></p>
+      <div class="link-keys">
+        <button class="ck" type="button" id="link-no"><i>B</i><span data-i18n="common.cancel">取消</span></button>
+      </div>
+    </div>
+
     <div class="toast" id="toast" hidden></div>
   </div>
   <div class="gamepad" id="gamepad" hidden>
@@ -775,7 +845,10 @@
 <script src="appsaves.js"></script>
 <script src="acoustic.js"></script>
 <script src="acoustic-link.js"></script>
+<script src="acoustic-rx.js"></script>
+<script src="acoustic-session.js"></script>
 <script src="core.js"></script>
+<script src="link.js"></script>
 <script src="apps/notes.js"></script>
 <script src="apps/calendar.js"></script>
 <script src="apps/dict.js"></script>

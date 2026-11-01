@@ -22,15 +22,15 @@
     "................",
     "................"
   ],
-  "version": "1.5.0",
-  "description": "15×15 棋盘，你执黑先手和电脑下，可以悔棋。",
+  "version": "1.6.0",
+  "description": "15×15 棋盘，你执黑先手和电脑下，可以悔棋；也能通过电波和另一台掌机对战。",
   "i18n": {
     "en": {
       "name": "Gomoku",
-      "description": "15×15 board. You play black and move first against the computer. Undo allowed."
+      "description": "15×15 board. Play the computer, or a friend over the radio link."
     }
   },
   "author": "Haowei Wu",
   "license": "MIT",
-  "permissions": []
+  "permissions": ["link"]
 }

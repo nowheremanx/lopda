@@ -16,7 +16,7 @@ const LANGS = ["zh", "en"];
 const SOUNDS = ["tap", "tick", "move", "ok", "err", "hit", "miss", "coin", "win", "lose"];
 const AMBIENCES = ["rain", "waves", "waterfall", "wind", "fire", "stream"];
 const MAX_BYTES = 512 * 1024;
-const PERMISSIONS = ["files", "motion", "mic", "notes", "camera", "wordbook"];
+const PERMISSIONS = ["files", "motion", "mic", "notes", "camera", "wordbook", "link"];
 const CATEGORIES = ["game", "productivity", "education", "create", "story", "life"];
 const LICENSES = ["MIT", "0BSD", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Apache-2.0", "CC0-1.0", "Unlicense"];
 const PALETTE = [[0x1f, 0x2a, 0x14], [0x4a, 0x5a, 0x32], [0x7d, 0x8a, 0x58], [0xa3, 0xad, 0x7e]];
@@ -185,7 +185,8 @@ export function checkApp(dir) {
   if (!usesFramework && !/\bPAD\./.test(code)) warnings.push("does not use PAD; fine if the app saves nothing");
   for (const mm of code.matchAll(/PAD\.sfx\(\s*["']([^"']*)["']/g)) if (!SOUNDS.includes(mm[1])) errors.push(`PAD.sfx("${mm[1]}") is not a known sound: ${SOUNDS.join(", ")}`);
   for (const mm of code.matchAll(/(PAD|game)\.ambience\(\s*["']([^"']*)["']/g)) if (!AMBIENCES.includes(mm[2])) errors.push(`${mm[1]}.ambience("${mm[2]}") is not a known ambience: ${AMBIENCES.join(", ")}`);
-  const usesButtons = /PAD\.(on|isDown)\s*\(/.test(code);
+  /* PAD.on("tilt" | "shake" | "sound" | "link") is not a button: only press/release (or an unknown event name) counts */
+  const usesButtons = /PAD\.isDown\s*\(/.test(code) || /PAD\.on\s*\(\s*(?!["'](?:tilt|shake|sound|link)["'])/.test(code);
   if (m.spec === "lopda/0" && /PAD\.(on|off|isDown|sfx)\s*\(|PAD\.(music|ambience|say|dict)\b/.test(code)) errors.push('PAD.on/isDown/sfx/music/ambience/say/dict need spec "lopda/1"');
   const usesFiles = /PAD\.(exportFile|importFile)\b/.test(code);
   if (usesFiles && !(Array.isArray(m.permissions) && m.permissions.includes("files"))) errors.push('PAD.exportFile/importFile need "permissions": ["files"] in manifest.json');
@@ -211,6 +212,10 @@ export function checkApp(dir) {
   const usesWordbook = /PAD\.dict\.(addWord|removeWord|inBook)\b/.test(code);
   if (usesWordbook && !perms.includes("wordbook")) errors.push('PAD.dict.addWord/removeWord/inBook need "permissions": ["wordbook"] in manifest.json');
   if (!usesWordbook && perms.includes("wordbook")) warnings.push('"wordbook" is declared but PAD.dict.addWord/removeWord/inBook are never used: drop it');
+  /* the link (SPEC.md 6.8): PAD.link needs "link" */
+  const usesLink = /PAD\.link\b/.test(code);
+  if (usesLink && !perms.includes("link")) errors.push('PAD.link needs "permissions": ["link"] in manifest.json');
+  if (!usesLink && perms.includes("link")) warnings.push('"link" is declared but PAD.link is never used: drop it');
   if (usesButtons && m.buttons !== true) warnings.push('uses PAD.on but "buttons" is not true, so the chin buttons stay hidden (keyboard still works)');
   return { id, errors, warnings, info };
 }

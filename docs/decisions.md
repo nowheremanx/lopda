@@ -1628,3 +1628,24 @@ EXIF，相册就能把照片放到地图上。
 - **AI 的 `where`**：`aiPrompt` 的 JSON 样例多一个 `where`，只要一个虚构的、普通的地方（旧书摊、桥下），不要真实地名或地址；发给 AI 的其余内容不变。`validateSouvenir` 把 `where` 当可选字段：`bilingualText(o.where, 6, 20)` 通过就保留，不通过只丢 `where`，整件纪念品照样有效。
 - **代码**：`runtime/petsouv.js`；`runtime/petart.js`；`runtime/apps/pet.js` 的 `souvEntry / souvWhere / souvRefForName / souvFrom`、纪念品读入、`makeSouvenir / addSouvenir`；`runtime/petsim.js` 的 `pickSouvenir / souvenirLocalChance`；`runtime/strings.js`；`runtime/lopda.css`；`runtime/index.html` 与 `runtime/sw.js` 的 SHELL。`RUNTIME_VERSION` / `VERSION` 0.57.0。
 - **测试**：`tests/petsouv.test.mjs`（id、set / season / where、16 x 16、中英文字）；`tests/petsim.test.mjs`（季节、没见过的优先、避开最近 5 件、确定性、一年模拟、`where` 可选）；`tests/e2e.test.mjs`（四种来源行、旧文档对名、旧文档不被改写）。
+
+## 46. 电波连线：`LP.link` / `PAD.link`、电波台改版、五子棋对战（0.58.0）
+
+2026-11-01，runtime 0.58.0。owner 改了第 7 节“1.0 只把分层做对”的范围：整套做完，暴露系统级接口，用一个 app 做通讯测试。设计稿是 `docs/design/radio.md` 第 7、8 节，这一节只记落地的决定和理由。
+
+- **分层**：声学（`acoustic.js`，不变）→ 增量接收（`acoustic-rx.js`，纯函数，只对新样本算 Goertzel，10/20/40 ms 三档同时找前导）→ 帧（`acoustic-link.js` 帧版本 2）→ 会话（`acoustic-session.js`，纯函数，时钟由调用方传入）→ 宿主（`link.js` 的 `LP.link`）→ 接口（`PAD.link`）→ 程序（电波台、五子棋）。每层在 Node 里单独测；`?linkfake` 用 BroadcastChannel 换掉声音，会话层以上完全一样，所以 e2e 测的是真代码。
+- **接口定义在消息上，不在声音上**：app 只有 `open / send / close / state / initiator` 和 `PAD.on("link")`，看不到速率、会话号、帧和声音。以后换别的传输（例如二维码 → 相机）app 一行不改。一条消息 ≤ 200 字节，排队最多 4 条。
+- **配对是对称的**：两台都按「连线」，没有“主/从”要选（设计规则：少一个决定）。随机先听 0.8–2.4 秒再发 HELLO，同时开口就都听不到、再随机退避。发 HELLO 并收到应答的一方是发起方（五子棋执黑），它再回一个 ACK，应答方收到才进去（三次握手；真机上应答方曾经回完应答就自己进去，对方根本没听到）。HELLO 带端口（app id 的 FNV-1a）和 app 的协议串，不同程序或不同版本直接结束，提示“对方在用别的程序”。
+- **空闲时安静**：没东西要发就不出声，只有发起方空闲 25 秒发一个 PING。先听再说（最近 300 ms 频带里没能量）；没确认随机退避重发，5 次失败算断线。像真的调制解调器那样“慢而可靠”，比一直响着的载波更像 1986 年的掌机，也更省电。
+- **麦克风整个连线期间一直开着（iPhone 发声那几秒除外，见下一条）**：不在每次听的时候重开麦克风。屏蔽自己的声音按 AudioContext 时间算：前 50 ms、后 250 ms，再加上话筒延迟（ScriptProcessor 一块 4096 样本 + 报告的输入输出延迟 + 60 ms 余量）；和最近 20 秒内自己发过的帧逐字节相同的帧当作回声丢掉。回包等待从 300 ms 改成 1.5 秒：iPhone 发声时关话筒，重开要 1–2 秒才稳定（见下一条），回得太快对方还没在听。
+- **iPhone 发声时关话筒**：两台 iOS 27 实测，play-and-record 时声音从听筒出来，对方听不到。所以有 `navigator.audioSession` 的地方默认「发送时关麦」（`LP.link.setTxMode("playback")`）：发送前关话筒、切到 playback，用一个 `<audio>` 元素放（和话筒一起用过的 AudioContext 活着时 iOS 一直走听筒，录音证实：16 的声音到 13 Pro 弱 10 dB、缺 2500 Hz；新建 context 又要点一下才能启动），发完再开话筒；元素靠打开连线那一下（或配对时任何一下）解锁。电波台「仪表」页可以关掉。配对从 20 ms 开始（20 → 40 → 10）：同一批录音里 10 ms 在房间回声下一帧都解不出来。
+- **发射电平固定**（0.45；0.9 在真机上太刺耳），不跟掌机音量走，像真的调制解调器；网页读不到 iPhone 的系统音量，配对画面和说明页提醒把手机音量调大。音调（1500–4500 Hz）偏尖，降到更低频段放在下一步。
+- **同一时间一个连线**：连线期间 `PAD.mic.start()` 返回 `"none"`；`PAD.mic` 开着时 `open` 先停掉它。HOME、换 app、页面隐藏都发一次 BYE（不等确认）并立即结束。
+- **权限**：`"link"`，第一次 `open` 由主程序的确认框问，记在设置的「传感器与权限」里，可撤销；安装前的权限确认（第 42 节）也能先给。
+- **交换是复制，不是转移**：会丢包的链路上没法让两边同时确定“交换完成”，所以以后的礼物、串门都是发副本，发的人也留着。
+- **加密放在 app 里**：主程序只搬运字节，端到端加密是 app 自己的事（WebCrypto 在沙盒里能用）。
+- **版本不兼容就是“听不到”**：帧版本 1 一律不认；两台都要更新到 0.58.0 以上。说明页写明。
+- **电波台改版**：主菜单 连线 / 说明 / 仪表。连线后是来往记录 + 写字（≤ 60 字）/ 画图（16 x 16 四色，64 字节一帧）/ 断开；记录留最近 30 条在 `data/users/local/radio`（进备份）。仪表页是四个音调的 dB 条和底噪（查 iPhone 话筒）、原来的 M2 已知序列测试和「发送时关麦」开关。旧的 M3 一次性收发去掉。
+- **五子棋 1.6.0 是示范**：一步一条消息 `"m,x,y,n"`，n 是第几手：重复的忽略，跳号就要整盘。断线后棋盘留着，重连先交换步数，少的一边补齐；颜色按第一次连线定，重连不换。对战不计 `gomoku_wins`，不能悔棋。代码注释写给照抄的人看。
+- **代码**：`runtime/acoustic-rx.js`、`acoustic-link.js`、`acoustic-session.js`、`link.js`、`apps/radio.js`、`apps/store.js`（`linkRequest`）；`sdk/pad-shim.js`、`sdk/dev.html`（两个标签页互连、回声对端）；`tools/check-app.mjs`（用了 `PAD.link` 没声明 `"link"` 报错）；`SPEC.md` 6.8；`registry/apps/gomoku`。
+- **测试**：`tests/acoustic-rx.test.mjs`、`acoustic-link.test.mjs`、`acoustic-session.test.mjs`（两个会话过一条半双工假信道：配对、同时开口、200 字节、20 % 丢帧仍按序送达、断线、BYE、不同程序）；`pad-shim.test.mjs`、`check-app.test.mjs`；`e2e-link.test.mjs`（两页 `?linkfake` 互传文字和图）；`e2e-gomoku-link.test.mjs`（两个开发台标签页下棋、重复步、断线重连补齐）。
