@@ -54,6 +54,9 @@ var TRIES=5, HELLO_TRIES_PER_RATE=3;
 var PAIR_MS=60000, PING_MS=25000, PING_MISSES=3;
 var QUEUE=4, MAX_MESSAGE=200, CHUNK=60;
 var RATES=[10,20,40];
+/* The order pairing tries them: 20 first. On the first two-iPhone recordings (iOS 27, a room) 10 ms symbols were
+   smeared by the room's echo and never decoded, while 20 ms decoded on the first try. 10 stays as the last resort. */
+var PAIR_RATES=[20,40,10];
 /* A host that forgets sent() must not freeze the link: after this grace beyond
    the burst's own air time we carry on as if it had called it. */
 var SENT_GRACE_MS=2000;
@@ -209,7 +212,7 @@ function create(opts){
   function beginListen(now){
     phase="listen";
     listenUntil=now+rand(LISTEN_MIN, LISTEN_MAX);
-    emit({do:"status", phase:"listen", rate:RATES[rateIdx], attempt:attempt+1});
+    emit({do:"status", phase:"listen", rate:PAIR_RATES[rateIdx], attempt:attempt+1});
   }
 
   function sendHello(now){
@@ -220,7 +223,7 @@ function create(opts){
       sid=1+Math.floor(rnd()*65535);
     }
     nonce=Math.floor(rnd()*65536);
-    helloRate=RATES[rateIdx];
+    helloRate=PAIR_RATES[rateIdx];
     var bytes=LINK.encode(TYPES.HELLO, sid, 0, 0,
       LINK.hello({port:PORT, nonce:nonce, proto:PROTO}), false);
     phase="helloWait";
@@ -241,7 +244,7 @@ function create(opts){
     if(phase==="helloWait"){
       if(helloDeadline && now>=helloDeadline){
         helloDeadline=0;
-        if(attempt>=HELLO_TRIES_PER_RATE){ attempt=0; rateIdx=(rateIdx+1)%RATES.length; }
+        if(attempt>=HELLO_TRIES_PER_RATE){ attempt=0; rateIdx=(rateIdx+1)%PAIR_RATES.length; }
         beginListen(now);
       }
       return;

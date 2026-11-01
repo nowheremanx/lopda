@@ -6,7 +6,8 @@ Owner: Haowei Wu. Repo: https://github.com/nowheremanx/lopda.
 Design history and open questions: `docs/decisions.md`. Read it before changing behaviour.
 Design drafts for work not yet merged: `docs/design/` (current: `home-api.md`, the home tile API;
 `pet-room.md`, the pet's scene objects, spots and slots; `pet-souvenir-state.md`, the souvenir state hook
-and its grow / match layers, with cycle deferred;
+and its grow / match layers, with cycle deferred; `pet-souvenirs-100.md`, the souvenir catalogue, picking
+and origin lines;
 `tape4-import.md`, MIDI import into Tape4, after 1.0).
 
 ## Layout
@@ -32,6 +33,7 @@ runtime/        the PWA: index.html, core.js (shared LP object: utils, views, so
                 appsaves.js (an app save document: legacy/new shape, size, schema, damage and newer-format checks, the app snapshot kept after removal; pure functions),
                 petsim.js (the built-in pet's rules: catch-up, sleep, hunger and joy, growth, the day's outing, souvenir checks; pure functions),
                 petstate.js (a souvenir's item state: grow on the shelf, match by night / weather / season / lunar day / grow stage; pure functions),
+                petsouv.js (the pet's souvenir catalogue: 16 x 16 grids, set, season and where, ids never reused; pure data),
                 petart.js (the pet's species pack "chip": 32 x 32 sprite grids and frame builder, the standard front and side poses, props, icons, souvenirs and the 162 x 120 room painter into a tone buffer; pure functions),
                 petplay.js (the pet's play packs: catch, bounce and climb, deterministic 50 ms ticks over the standard 32 x 32 poses and the 162 x 120 tone buffer; pure functions),
                 zip.js (stored zips written, stored and deflated zips read; pure functions, CRC from negative.js), wav.js (a mono 16-bit WAV writer for the tape machine's export; pure functions),
@@ -46,6 +48,7 @@ sdk/            MIT. pad-shim.js (PAD bridge), lo-game.js (game framework), LO-G
 registry/       index.json (generated) + apps/<id>/{manifest.json,index.html,src/ (optional sources)}
 tools/          check-app.mjs, build-index.mjs (also stamps each app's released/updated dates from git), bundle-app.mjs (+ lo-game.mjs alias), lo-game-lib.mjs, stamp-preview.mjs (Node 20+, no deps);
                 readme-shots.mjs (the README pictures: docs/images/ in English, --lang=zh into docs/images/zh/ for README.zh.md; needs Playwright) with readme-scene.mjs (the lake the fake camera sees);
+                souvenir-sheet.mjs (contact sheets of the pet's souvenir catalogue; needs Playwright);
                 gen-lunar.py (one-off generator of the lunar table, needs PyEphem); gen-ecdict.mjs (one-off, ECDICT csv ->
                 vendor/ecdict/) with stardict-write.mjs (StarDict + dictzip writer, also used by tests); lao-zhang-sim.mjs
                 (矿工老张's auto-player: solo haul, target headroom and whole-run difficulty, also used by the tests)
@@ -82,7 +85,7 @@ README.md (English, the homepage) README.zh.md (Chinese) LICENSE NOTICE LICENSIN
   negative export and import through negative.js, developing through develop.js (once per roll, `dev` {v, seed, at} in the roll; pictures are
   never stored, every look and print develops them again), the colour viewer, single / all singles / contact sheet / film strip prints (only the single print, and each picture of all singles, opens a frame's `geo` and writes GPS into its EXIF; 抹掉地点 erases a roll's places); decisions.md sections 19 and 40), studio (四轨机 / Tape4: the four-track tape machine; drum, bass, chord, melody, song and mixer screens, 64 patterns (A-P, then A1-P3; renameable) and a 96-slot chain with a length/duplicate readout, the tape colour and swing, a folder-based tape library with a Demo folder (neo-soul, daylight pop, When the Saints, 茉莉花), a Demo-copies folder and per-row delete that stays in the library, undo and versions, real-time recording (REC, quantised to 16ths), a workspace zip, a five-page guide, WAV export through wav.js, and an AI co-editor over studio-edit.js/studio-ai.js; tapes in `data/users/local/studio/items` with a `folder` field, versions in `.../versions/<id>`, docs/design/studio.md sections 11-12.17), cart (GB), radio (电波台: 连线 / 说明 / 仪表 over `LP.link`; a log of text (≤ 60 characters) and 16 x 16 four-tone pictures,
   the last 30 in `data/users/local/radio` {log, txMode?}; the meter shows the four tones' dB and the noise floor, the M2
-  known-sequence test and the 发送时关麦 switch (`LP.link.setTxMode`); decisions.md section 45), pet (宠物 / Pet: the built-in pet, petsim.js rules and petart.js art on one hardware screen (a 162 x 120 room at 2 css px, 32 x 32 sprites, five icons and a START menu, two-frame actions); it hatches in ~8 s, is named once at birth (fixed for life), sleeps lying in its bed at night and walks back to the rug in the morning, never dies and lives from boot, silent outside its screen (background catch-up, the day's pick from the read-only summaries, props and 信, the outing and one AI souvenir a day with a silent built-in fallback); souvenirs go on the room's one shelf, not into notes; a souvenir may keep a declarative item state (the seed grows only while on the shelf; the vane / snow globe / moon dial follow weather, season and lunar day) through petstate.js, docs `pet` and `pet/souvenirs/<id>` with `state` / `grownMs` / `plantedAt`, decisions.md sections 37 and 44), store (app store: categories from the manifest's `category` (missing goes to Other), category filters, search over names and descriptions in both languages, permission icons on each entry, a 新 / NEW badge for seven days from the index's `released` (first manifest commit) and 更新 / UPDATED from `updated` when the version changed (both stamped by build-index from git), a freshly installed or updated tile scrolled into view when HOME returns, one confirmation before installing an app that asks for capabilities (decisions.md section 42), single and "update all" installs, preinstalled apps, sandboxed runner, file dialog), scripts (local HTML/JS programs: copy an AI prompt, paste, run in the sandbox; every script has its own storage document), settings (also 备份 / 恢复: the whole
+  known-sequence test and the 发送时关麦 switch (`LP.link.setTxMode`); decisions.md section 46), pet (宠物 / Pet: the built-in pet, petsim.js rules and petart.js art on one hardware screen (a 162 x 120 room at 2 css px, 32 x 32 sprites, five icons and a START menu, two-frame actions); it hatches in ~8 s, is named once at birth (fixed for life), sleeps lying in its bed at night and walks back to the rug in the morning, never dies and lives from boot, silent outside its screen (background catch-up, the day's pick from the read-only summaries, props and 信, the outing and one AI souvenir a day with a silent built-in fallback); souvenirs go on the room's one shelf, not into notes; a souvenir may keep a declarative item state (the seed grows only while on the shelf; the vane / snow globe / moon dial follow weather, season and lunar day) through petstate.js, docs `pet` and `pet/souvenirs/<id>` with `state` / `grownMs` / `plantedAt`, decisions.md sections 37 and 44), store (app store: categories from the manifest's `category` (missing goes to Other), category filters, search over names and descriptions in both languages, permission icons on each entry, a 新 / NEW badge for seven days from the index's `released` (first manifest commit) and 更新 / UPDATED from `updated` when the version changed (both stamped by build-index from git), a freshly installed or updated tile scrolled into view when HOME returns, one confirmation before installing an app that asks for capabilities (decisions.md section 42), single and "update all" installs, preinstalled apps, sandboxed runner, file dialog), scripts (local HTML/JS programs: copy an AI prompt, paste, run in the sandbox; every script has its own storage document), settings (also 备份 / 恢复: the whole
   device as one `lopda-backup-YYYYMMDD.zip` through backup.js, every check before a restore replaces everything, the old data
   written back if a write fails; `data/users/local/backup-meta` {last}; decisions.md section 24; app saves are listed and
   cleared on their own page (decisions.md section 43); the main page is a short menu,
@@ -154,12 +157,12 @@ node --test                                  # the test suite; must pass
   `removeWord(word)` -> "saved" | "denied" | "full" | null, over the player's own word book, the same one the dictionary and
   the reader use; the runtime's dialog on the first add or remove, one grant per app, listed with the sensors in Settings;
   reading needs the grant too; decisions.md section 35).
-- `"link"` (runtime 0.57.0+, SPEC.md 6.8, after lopda/1 was frozen: check `PAD.link` exists): `PAD.link.open({proto})` ->
+- `"link"` (runtime 0.58.0+, SPEC.md 6.8, after lopda/1 was frozen: check `PAD.link` exists): `PAD.link.open({proto})` ->
   "open" | "cancelled" | "denied" | "none" | "busy" (the runtime's pairing screen; both handhelds press, no master),
   `send(data)` (a string or Uint8Array ≤ 200 bytes) -> "sent" | "lost" | "closed" | "busy" | "big", `close()`, `state`,
   `initiator`, `PAD.on("link", fn)` with {type:"message", data} | {type:"close", reason}; one link at a time, `PAD.mic` gives
   "none" meanwhile; the runtime's dialog on the first open, listed in Settings; registry/apps/gomoku is the example;
-  decisions.md section 45.
+  decisions.md section 46.
 - `PAD.say(text, {lang})` (runtime 0.26.0+, no permission, SPEC.md 6.5): the phone's voice through `runtime/speech.js` (shared with
   the dictionary's 发音), follows the volume, ≤ 200 characters, once a second, stops on HOME or a hidden page.
 - `PAD.dict` (runtime 0.36.0+, no permission, SPEC.md 6.7): `PAD.dict.words({len, pattern, letters, level, max, offset})` ->

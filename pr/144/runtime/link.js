@@ -276,6 +276,8 @@ function acousticTransport(){
       if(!this.ok()) return Promise.resolve(false);
       /* a stop() while the system prompt is open makes this late stream a stray */
       var my=++T.initGen;
+      /* inside the open() tap: the element that plays playback sends must be played once by a tap */
+      if(T.txMode==="playback") unlockEl();
       /* the session type goes on before the prompt: iOS switches the route while the mic opens */
       LP.setSession("play-and-record");
       var ctx=LP.audio();
@@ -395,30 +397,28 @@ function acousticTransport(){
       return T.pdb ? {pdb:T.pdb.slice(0), floor:T.floor} : null;
     },
     txUntil:function(){ return T.txUntil; },
+    unlock:function(){ if(T.txMode==="playback") unlockEl(); },
     setTxMode:function(m){ T.txMode=m==="playback" ? "playback" : "record"; },
     txMode:function(){ return T.txMode; }
   };
 
-  /* The "playback" send: close the microphone, play in "playback", then open it again (the old Radio did this for every
-     frame). The default wherever navigator.audioSession exists (iOS): under "play-and-record" iOS plays through the
-     earpiece, which the other phone cannot hear (first two-iPhone test, iOS 27). Radio's meter page can switch it off.
-     Slower: the reopen takes a few hundred ms, and a reply that comes sooner is lost and sent again. */
+  /* The "playback" send: close the microphone, then play the burst through an <audio> element, then open the
+     microphone again. The default wherever navigator.audioSession exists (iOS); Radio's meter page can switch it off.
+     Why an element and not the AudioContext: while the context that ran beside the microphone lives, iOS keeps the
+     phone-call route and plays it through the earpiece, even after the microphone stops (core.js micRoute), and a
+     new context made outside a tap never starts. Recorded on the first two-iPhone test: the 16's bursts reached the
+     13 Pro 10 dB weaker with 2500 Hz missing, while the meter's test send (a tap, a fresh context) was fine. The element
+     is unlocked by a tap (unlockEl: the open() tap, or any tap on the pairing screen) and then plays without one.
+     Slower: the microphone needs 1-2 s to come back, which the session's REPLY_MS waits for. */
   function sendPlayback(bytes, rate, done){
-    var s=T.stream, my=++T.reopen, ctx;
+    var s=T.stream, my=++T.reopen, sr=T.sr||48000;
     dropNodes();
     T.stream=null; T.rx=null; T.lostAt=0;   /* the burst itself is not a dead microphone */
     try{ s.getTracks().forEach(function(t){ try{ t.stop(); }catch(e){} }); }catch(e){}
-    /* as the old Radio did: the session first, then whatever context core.js has now, woken */
     LP.setSession("playback");
-    ctx=LP.audio()||T.ctx;
-    LP.wake();
-    if(ctx.state!=="running") T.quietTx++;
-    var samples=AC.synth(bytes,{sampleRate:ctx.sampleRate, symbolMs:rate, amp:TX_AMP});
-    var buf=ctx.createBuffer(1,samples.length,ctx.sampleRate);
-    if(buf.copyToChannel) buf.copyToChannel(samples,0); else buf.getChannelData(0).set(samples);
-    var src=ctx.createBufferSource(), dur=samples.length/ctx.sampleRate;
-    src.buffer=buf;
-    src.connect(ctx.destination);
+    var samples=AC.synth(bytes,{sampleRate:sr, symbolMs:rate, amp:TX_AMP}), dur=samples.length/sr;
+    var url=URL.createObjectURL(new Blob([window.LopdaWav.encode(samples,sr)],{type:"audio/wav"}));
+    var el=elOf();
     T.txUntil=Date.now()+(dur+0.3)*1000;
     T.sentRecent.push({k:keyOf(bytes), at:Date.now()});
     T.playing=true;
@@ -428,8 +428,8 @@ function acousticTransport(){
       called=true;
       T.playing=false;
       clearTimeout(safety);
-      src.onended=null;
-      try{ src.disconnect(); }catch(e){}
+      el.onended=null; el.onerror=null;
+      try{ URL.revokeObjectURL(url); }catch(e){}
       if(done) done();
       if(my!==T.reopen) return;
       T.lostAt=Date.now();
@@ -441,16 +441,38 @@ function acousticTransport(){
       Promise.resolve(p).then(function(stream){
         if(my!==T.reopen){ try{ stream.getTracks().forEach(function(t){ try{ t.stop(); }catch(e){} }); }catch(e){} return; }
         T.stream=stream; T.lostAt=0;
-        try{ wire(LP.SND.ctx||ctx); }catch(e){ T.err="wire "+(e && e.name || ""); }
+        try{ wire(LP.SND.ctx||T.ctx); }catch(e){ T.err="wire "+(e && e.name || ""); }
       },function(e){ T.err=(e && e.name) || "mic"; });
     }
-    src.onended=fin;
-    safety=setTimeout(fin,(dur+1)*1000);
-    try{ src.start(); }catch(e){ fin(); }
+    el.onended=fin;
+    el.onerror=function(){ T.err="play"; fin(); };
+    safety=setTimeout(fin,(dur+2)*1000);
+    el.src=url;
+    var pr;
+    try{ pr=el.play(); }catch(e){ T.err="play "+(e && e.name || ""); T.quietTx++; fin(); return; }
+    if(pr && pr.then) pr.then(null,function(e){ T.err="play "+(e && e.name || ""); T.quietTx++; fin(); });
   }
+  /* one element for the whole link; a tap must have played it once before iOS lets it play on its own */
+  function elOf(){
+    if(!T.el){ T.el=new Audio(); T.el.preload="auto"; }
+    return T.el;
+  }
+  function unlockEl(){
+    if(T.elOk) return;
+    var el=elOf(), pr;
+    /* 50 ms of silence */
+    el.src=URL.createObjectURL(new Blob([window.LopdaWav.encode(new Float32Array(2400),48000)],{type:"audio/wav"}));
+    try{ pr=el.play(); }catch(e){ return; }
+    if(pr && pr.then) pr.then(function(){ T.elOk=true; },function(){});
+    else T.elOk=true;
+  }
+
 }
 
 var TRANSPORT=FAKE ? fakeTransport() : acousticTransport();
+/* Any tap while a link is pairing or open unlocks the playback element (iOS: user activation comes on release),
+   for an app whose open() came from a message, not from a tap of ours. */
+document.addEventListener("pointerup",function(){ if(STATE!=="closed" && TRANSPORT.unlock) TRANSPORT.unlock(); },true);
 
 /* ---------- the driver: tick, then do whatever the session asks ---------- */
 

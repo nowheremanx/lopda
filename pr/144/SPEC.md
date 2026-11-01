@@ -59,7 +59,7 @@ No other files are loaded. Images, sounds and fonts must be embedded in
 | `i18n` | Optional. Store text in other languages: `{"en": {"name", "description"}, "zh": {...}}`. Only `zh` and `en`, only those two fields, same rules as above. The store and home screen show the entry for the player's language and fall back to `name` / `description`. |
 | `author` | Name or handle. |
 | `license` | One of: `MIT`, `0BSD`, `BSD-2-Clause`, `BSD-3-Clause`, `ISC`, `Apache-2.0`, `CC0-1.0`, `Unlicense`. |
-| `permissions` | Array. Usually empty. Seven capabilities (`lopda/1`): `"files"`, the app may export and import files, each time confirmed by the player (section 6.2); `"motion"`, tilt, shake and heading; `"mic"`, the microphone's loudness and pitch (both section 6.4); `"notes"`, the app may add text to a note of its own in the player's notes, each time confirmed by the player (section 6.5); `"camera"`, the app may ask for a photo, which the player takes in the runtime's viewfinder and the app gets as a small four-tone picture (section 6.6); `"wordbook"`, the app may read and change the player's word book (section 6.7); `"link"`, the app may open a message link to the same app on one other handheld, over sound (section 6.8, runtime 0.57.0+). The store shows them as icons on the app's entry and asks the player before installing (runtime 0.44.0+); an app allowed then does not ask on first use, while files and notes still confirm every call. Anything else fails the checker. |
+| `permissions` | Array. Usually empty. Seven capabilities (`lopda/1`): `"files"`, the app may export and import files, each time confirmed by the player (section 6.2); `"motion"`, tilt, shake and heading; `"mic"`, the microphone's loudness and pitch (both section 6.4); `"notes"`, the app may add text to a note of its own in the player's notes, each time confirmed by the player (section 6.5); `"camera"`, the app may ask for a photo, which the player takes in the runtime's viewfinder and the app gets as a small four-tone picture (section 6.6); `"wordbook"`, the app may read and change the player's word book (section 6.7); `"link"`, the app may open a message link to the same app on one other handheld, over sound (section 6.8, runtime 0.58.0+). The store shows them as icons on the app's entry and asks the player before installing (runtime 0.44.0+); an app allowed then does not ask on first use, while files and notes still confirm every call. Anything else fails the checker. |
 | `buttons` | Optional, `lopda/1` only. `true` shows the chin buttons while the app runs (section 4). Leave it out for touch-only apps. |
 
 `registry/index.json` adds `released` (`YYYY-MM-DD`) to every entry: the commit that first added the app's
@@ -197,7 +197,7 @@ await PAD.dict.inBook(words)          // 1-20 words -> boolean[] | null
 await PAD.dict.addWord(word)          // -> "saved" | "denied" | "full" | null
 await PAD.dict.removeWord(word)       // -> "saved" | "denied" | "full" | null
 
-// lopda/1 with "permissions": ["link"] (section 6.8); undefined on runtimes before 0.57.0
+// lopda/1 with "permissions": ["link"] (section 6.8); undefined on runtimes before 0.58.0
 await PAD.link.open({proto})          // -> "open" | "cancelled" | "denied" | "none" | "busy"
 await PAD.link.send(data)             // string or Uint8Array, <= 200 bytes -> "sent" | "lost" | "closed" | "busy" | "big"
 PAD.link.close()
@@ -629,12 +629,12 @@ if (PAD.dict && PAD.dict.inBook) {               // the word book calls arrive w
 ### 6.8 The link
 
 An app that declares `"permissions": ["link"]` can open a message channel to one other handheld running the same app
-(added in runtime 0.57.0, after `lopda/1` was frozen, so check that `PAD.link` exists before using it). The
+(added in runtime 0.58.0, after `lopda/1` was frozen, so check that `PAD.link` exists before using it). The
 runtime draws its pairing screen, works the microphone and the speaker, and carries each message; the app gets a few
 short results and the messages, never the radio. Design notes: `docs/design/radio.md` 7.2-7.3 and 8.5.
 
 ```js
-if (PAD.link) {                          // undefined before runtime 0.57.0
+if (PAD.link) {                          // undefined before runtime 0.58.0
   PAD.link.open({ proto: "gomoku1" }).then(function (r) {
     // r: "open" | "cancelled" | "denied" | "none" | "busy"
     // PAD.link.initiator: true on the side that started the link (meaningful while open)

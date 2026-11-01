@@ -17,8 +17,12 @@
  *   name        the name chosen at the hatch (null in an egg, or in a pet hatched before naming); never changed later.
  *   shelf       the id of the one souvenir on the room's shelf, or null.
  *   today.shelf whether changing the shelf already gave the day's +1 joy (reset with the other today counters).
+ *   care        0..1, how well the pet has been kept over the last days: an exponential average of careScore, updated
+ *               once on each outing day when the outing is decided (today.cared guards a second update that day).
+ *               Missing on a new pet or an old save; the first outing starts it at careScore.
  *
- * API (the save-taking functions return new saves; the input save is never changed):
+ * API (the save-taking functions return new saves and never change the input one, except updateCare, which edits the
+ * live save in place and reports whether it changed it):
  *   rng(seed)                    deterministic floats in [0,1), mulberry32
  *   daySeed(born, dayKey)        an integer seed for one pet and one local day
  *   dayKey(now, tzOffsetMin)     "YYYY-MM-DD" in local time; tzOffsetMin is minutes east of UTC
@@ -38,8 +42,15 @@
  *   wants(save)                  "food", "wash" or null, for the call icon
  *   outingToday(save, dayKey)    {hour} or null; the caller stores the hour in today.out
  *   pickOfDay(candidates, yesterdayKind, seed) one candidate or null, about half the days nothing
- *   validateSouvenir(input)      a clean {name:{zh,en}, line:{zh,en}, px: 256 chars} or null
+ *   validateSouvenir(input)      a clean {name:{zh,en}, line:{zh,en}, px: 256 chars, where?} or null
  *   builtinSouvenir(rnd, recentNames, table) one entry of table, avoiding recent names when possible
+ *   pickSouvenir(rnd, table, opts)  one in-season entry: unseen first, else seen avoiding recent; always two draws
+ *   souvenirLocalChance(save)    min(1, souvenirLocalRate / trait.outing), the chance an outing brings one back
+ *   careScore(save)              0..1 from joy, hunger and mess: 0.5 * joy + 0.3 * hunger + 0.2 * (1 - mess)
+ *   souvenirMood(care)           clamp((care - 0.2) / 0.6, 0.1, 1), the multiplier a happy pet keeps
+ *   aiSouvenirAllowed(born, day, care)  the AI line's separate day roll; false means an empty-handed outing
+ *   updateCare(save, dayKey)     the one in-place helper: moves care toward careScore once that day, returns true when
+ *                                it changed care (the program calls it on its live save, before the outing's roll)
  *   aiPrompt(ctx)                {messages, max} for one LP.ai.ask call, with only design.md 7's allowed facts
  *   moodWord(hunger, joy, zh)    the one mood word the prompt may carry
  *   aiCategories(before, after)  the fixed category words whose usage counts grew
@@ -65,6 +76,7 @@ var SPECIES={
     growth:{child:3, adult:10},
     forms:[["book",["reader"]], ["walk",["camera","darkroom"]], ["scholar",["dict"]], ["diary",["notes"]], ["monster",["cart","apps"]]],
     formMinPct:30,
+    souvenirLocalRate:1/7,
     outingHours:[10, 17]
   }
 };
@@ -141,7 +153,7 @@ function traitsOf(sp){ return Object.keys(sp.traits || {normal:{outing:0.5, idle
 function traitOf(sp,trait){ return (sp.traits && sp.traits[trait]) || sp.traits[traitsOf(sp)[0]]; }
 function blankToday(day,shownYesterday){
   return {day:day, shown:null, shownYesterday:shownYesterday||null, picked:false, pick:null, used:false,
-    rewarded:false, ai:false, out:null, back:false, snacks:0, pats:0, played:0, burp:false, shelf:false};
+    rewarded:false, ai:false, out:null, back:false, snacks:0, pats:0, played:0, burp:false, shelf:false, cared:false};
 }
 function clone(s){ return s==null ? s : JSON.parse(JSON.stringify(s)); }
 function ensureToday(s,key){
@@ -399,6 +411,41 @@ function wants(save){
   return null;
 }
 
+/* ---------- how well the pet is kept ---------- */
+/* The pet's mood over days: half joy, a third hunger and a fifth a clean room. The maxima come from the species pack,
+   so a pack with another range needs no change here. A damaged value outside the range is clamped, never trusted. */
+function careScore(save){
+  var sp=speciesOf(save);
+  function part(v,max){ var n=num(v)/(num(max)||1); return n<0 ? 0 : n>1 ? 1 : n; }
+  var score=0.5*part(save && save.joy,sp.joyMax)+0.3*part(save && save.hunger,sp.hungerMax)+
+    0.2*(1-part(save && save.mess,sp.messMax));
+  return score<0 ? 0 : score>1 ? 1 : score;
+}
+/* care 0.8 and above is a full chance, 0.5 halves it, and 0.26 or less is the floor of 0.1. The epsilon only snaps
+   the binary rounding of (0.26 - 0.2) / 0.6 back onto the table. */
+function souvenirMood(care){
+  var v=(num(care)-0.2)/0.6;
+  return v<=0.1+1e-9 ? 0.1 : v>=1-1e-9 ? 1 : v;
+}
+/* The one save-taking helper that edits in place: the program's live save is the thing being decided, and the caller
+   needs to know whether this day already moved care. care is the average of the days, not the one bad hour. */
+function updateCare(save,key){
+  if(!save || !key) return false;
+  var t=ensureToday(save,key);
+  if(t.cared) return false;
+  var score=careScore(save), care=+save.care;
+  save.care=isFinite(care) ? Math.max(0,Math.min(1,0.5*care+0.5*score)) : score;
+  t.cared=true;
+  return true;
+}
+/* The AI line's own gate (pet.js, decisions.md 45): a separate day-seeded roll decides whether the outing even tries.
+   It does not consume the built-in roll's seed. A care below 0.26 is the 0.1 floor, so most such days are empty. */
+var AI_MOOD_SEED=0x7f4a7c15;
+function aiSouvenirAllowed(born,key,care){
+  var r=rng((daySeed(born,key)^AI_MOOD_SEED)>>>0);
+  return r()<souvenirMood(care);
+}
+
 /* ---------- the day's outing ---------- */
 function outingToday(save,key){
   if(!save || !key || save.travel) return null;
@@ -486,7 +533,8 @@ function bilingualText(v,maxZh,maxEn){
   return {zh:zh, en:en};
 }
 /* name {zh,en}, line {zh,en}, 16 rows of exactly 16 of "0"-"3". The rows are joined into the 256-character string
-   design.md 8 stores, so the caller never has to decide what a "row" is again. */
+   design.md 8 stores, so the caller never has to decide what a "row" is again. where is the one optional field: a
+   made-up place the AI may add. A missing or bad where is dropped on its own; it never rejects the souvenir. */
 function validateSouvenir(input){
   var o=input;
   if(typeof input==="string"){
@@ -502,7 +550,9 @@ function validateSouvenir(input){
     if(typeof row!=="string" || row.length!==16 || !/^[0-3]{16}$/.test(row)) return null;
     rows.push(row);
   }
-  return {name:name, line:line, px:rows.join("")};
+  var where=bilingualText(o.where,6,20), out={name:name, line:line, px:rows.join("")};
+  if(where!==null) out.where=where;
+  return out;
 }
 /* Aim for a name the box does not already show; when every entry repeats, a repeat is better than nothing. The
    table comes from the species pack (Part B), so this file never carries the art. rnd may be a function or a seed. */
@@ -523,6 +573,60 @@ function builtinSouvenir(rnd,recentNames,table){
   }
   if(!pool.length) pool=table.slice();
   return pool[Math.min(pool.length-1,Math.floor(num(r())*pool.length))];
+}
+
+/* ---------- picking from the catalogue ---------- */
+/* The fallback for a species pack without souvenirLocalRate: one built-in souvenir a week per trait, on average. */
+var SOUV_LOCAL_RATE=1/7;
+/* A table entry's season: "any" is always in season, and a missing season is treated as "any". Ids are strings. */
+function inSeason(e,season){
+  var s=e && e.season;
+  return !s || s==="any" || s===season;
+}
+function idSet(list){
+  var set={};
+  (list||[]).forEach(function(id){ if(id!=null) set[String(id)]=true; });
+  return set;
+}
+/* One entry of table ({id, season, ...}) or null for an empty pool. opts = {season, seen, recent, newChance};
+   seen and recent are catalogue ids. The pool never leaves the season. With unseen entries left and r() < newChance
+   the pick is unseen; otherwise it comes from the seen part, avoiding recent when possible, and the unseen part
+   stands in when the seen part is empty (a first find is never refused).
+   Exactly two r() values are drawn on every path, even for an empty pool: the first decides new vs. seen, the second
+   the index as Math.floor(r2 * candidates.length). Adding a catalogue entry therefore shifts only the index inside
+   the affected part of the pool, never the decision before it. */
+function pickSouvenir(rnd,table,opts){
+  var r=typeof rnd==="function" ? rnd : rng(isFinite(+rnd) ? +rnd : 0);
+  var o=opts||{};
+  var r1=r(), r2=r();
+  var chance=num(o.newChance);
+  if(chance<0) chance=0;
+  if(chance>1) chance=1;
+  var seen=idSet(o.seen), recent=idSet(o.recent);
+  var unseen=[], seenPart=[];
+  (Array.isArray(table) ? table : []).forEach(function(e){
+    if(!e || !inSeason(e,o.season)) return;
+    if(seen[String(e.id)]) seenPart.push(e); else unseen.push(e);
+  });
+  var candidates;
+  if(unseen.length && r1<chance) candidates=unseen;
+  else if(seenPart.length){
+    candidates=seenPart.filter(function(e){ return !recent[String(e.id)]; });
+    if(!candidates.length) candidates=seenPart;
+  } else candidates=unseen;
+  if(!candidates.length) return null;
+  var i=Math.floor(r2*candidates.length);
+  return candidates[i<0 ? 0 : i>=candidates.length ? candidates.length-1 : i];
+}
+/* The chance that one outing brings a built-in souvenir home: min(1, souvenirLocalRate / outing), about one a week
+   for every trait, so a lively pet does not empty the catalogue sooner than a sleepy one. The rate comes from the
+   species pack, 1/7 when the pack has none; an outing chance of zero gives a certain souvenir. */
+function souvenirLocalChance(save){
+  var sp=speciesOf(save), trait=traitOf(sp, save && save.trait);
+  var rate=num(sp && sp.souvenirLocalRate);
+  if(!(rate>0)) rate=SOUV_LOCAL_RATE;
+  var outing=num(trait && trait.outing);
+  return outing>0 ? Math.min(1, rate/outing) : 1;
 }
 
 /* ---------- the AI's one call ---------- */
@@ -574,7 +678,8 @@ function aiPrompt(ctx){
     if(cats.length) lines.push("这周做过："+cats.join("、"));
     if(recent.length) lines.push("最近带回的纪念品："+recent.join("、"));
     if(word) lines.push("一个词："+word);
-    lines.push("请只输出 JSON：{\"name\":{\"zh\":\"不超过 8 个汉字\",\"en\":\"16 characters at most\"},\"line\":{\"zh\":\"不超过 40 个汉字\",\"en\":\"80 characters at most\"},\"px\":[\"16 行，每行 16 个 0-3 的字符\"]}");
+    lines.push("请只输出 JSON：{\"name\":{\"zh\":\"不超过 8 个汉字\",\"en\":\"16 characters at most\"},\"line\":{\"zh\":\"不超过 40 个汉字\",\"en\":\"80 characters at most\"},\"where\":{\"zh\":\"不超过 6 个汉字\",\"en\":\"20 characters at most\"},\"px\":[\"16 行，每行 16 个 0-3 的字符\"]}");
+    lines.push("where 是一个虚构的、普通的地方，比如旧书摊、桥下，不要真实地名或地址。");
     return {messages:[
       {role:"system", content:"你是一台掌上电脑里的小生物。你只会画一张 16×16 的四色像素小画，并给它起个名字、写一句话。名字和这句话都要中文、英文两版：中文只用汉字，英文只用英文字母（可以空格和基本标点）；不要其他语言，不要表情符号。只输出 JSON，不要解释。"},
       {role:"user", content:lines.join("\n")}
@@ -589,7 +694,8 @@ function aiPrompt(ctx){
   if(cats.length) lines.push("Done this week: "+cats.join(", "));
   if(recent.length) lines.push("Recent souvenirs: "+recent.join(", "));
   if(word) lines.push("One word: "+word);
-  lines.push("Reply with JSON only: {\"name\":{\"zh\":\"8 Chinese characters at most\",\"en\":\"16 characters at most\"},\"line\":{\"zh\":\"40 Chinese characters at most\",\"en\":\"80 characters at most\"},\"px\":[\"16 rows of 16 characters from 0-3\"]}");
+  lines.push("Reply with JSON only: {\"name\":{\"zh\":\"8 Chinese characters at most\",\"en\":\"16 characters at most\"},\"line\":{\"zh\":\"40 Chinese characters at most\",\"en\":\"80 characters at most\"},\"where\":{\"zh\":\"6 Chinese characters at most\",\"en\":\"20 characters at most\"},\"px\":[\"16 rows of 16 characters from 0-3\"]}");
+  lines.push("where is a made-up, ordinary place, like an old book stall or under the bridge; never a real place name or address.");
   return {messages:[
     {role:"system", content:"You are a small creature living inside a handheld computer. You draw one 16x16 four-tone pixel picture and give it a name and one line. Both the name and the line must be given in Chinese and in English: Chinese in Chinese characters only, English in Latin letters only (spaces and basic punctuation are fine). Never another language, no emoji. Reply with JSON only, no explanation."},
     {role:"user", content:lines.join("\n")}
@@ -630,6 +736,8 @@ window.LopdaPet={
   feed:feed, play:play, wash:wash, pat:pat, setLight:setLight, wants:wants,
   outingToday:outingToday, pickOfDay:pickOfDay,
   validateSouvenir:validateSouvenir, builtinSouvenir:builtinSouvenir, aiPrompt:aiPrompt,
+  pickSouvenir:pickSouvenir, souvenirLocalChance:souvenirLocalChance,
+  careScore:careScore, souvenirMood:souvenirMood, aiSouvenirAllowed:aiSouvenirAllowed, updateCare:updateCare,
   moodWord:moodWord, aiCategories:aiCategories
 };
 })();

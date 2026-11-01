@@ -1614,22 +1614,37 @@ EXIF，相册就能把照片放到地图上。
 - **代码**：`runtime/petstate.js`；`runtime/apps/pet.js` 的 `souvenirCtx / souvenirView / packState / stateHasGrow / updateSouv / shelfTake / shelfPut / setShelf / repairShelf`、箱子和房间的预览；`runtime/petart.js` 的四个物品和 `packOk` 的 state 帧检查；`runtime/strings.js`；`runtime/index.html` 与 `runtime/sw.js` 的 SHELL。`RUNTIME_VERSION` / `VERSION` 0.52.0。
 - **测试**：`tests/petstate.test.mjs`（grow 边界、架子时间、match 每个条件、覆盖顺序、非法降级）；`tests/petsim.test.mjs`（AI 多给的 `state` 被忽略）；`tests/petart.test.mjs`（四个物品每帧 16 x 16、四色）；`tests/e2e.test.mjs`（摆上种子 -> 调时间 -> 发芽/开花、收进箱子暂停、夜里合上、改天气 -> 风向标、重载保留 `grownMs`、未知字段保留）。
 
-## 45. 电波连线：`LP.link` / `PAD.link`、电波台改版、五子棋对战（0.57.0）
+## 45. 纪念品库与来源（0.57.0）
 
-2026-11-01，runtime 0.57.0。owner 改了第 7 节“1.0 只把分层做对”的范围：整套做完，暴露系统级接口，用一个 app 做通讯测试。设计稿是 `docs/design/radio.md` 第 7、8 节，这一节只记落地的决定和理由。
+2026-10-31，runtime 0.57.0。纪念品库朝 300 件走；这一版先落地库、挑法、卡片上的来源行和 AI 的 `where`，图由后面的批次补。设计稿是 `docs/design/pet-souvenirs-100.md`，这一节只记落地的决定。
+
+- **目录**：新文件 `runtime/petsouv.js`，纯数据，挂 `window.LopdaPetSouv = {CATALOG, SETS, SEASONS, WHERE, byId}`。每件是 `{id, set, season, where, grid, state?}`：`set`（shore / yard / street / desk / sky / fest）决定目录里的排列（按组、组内按加入顺序），`season` 是 `any` 或四季之一，`where` 是地点 key，文字在 `strings.js` 的 `pet.where.<key>`。id 永不改、永不复用（文档靠它认领）；新件只追加在本组末尾。已有的 23 件连同种子、风向标等的网格原样搬过去，像素一个不改；`petart.js` 的物种包改为引用这份目录。
+- **挑法**：`petsim.js` 的 `pickSouvenir(rnd, table, opts)`。池子只取当季或 `any` 的件，绝不给过季的。池子里有没见过的（unseen），永远先从没见过的里挑（`newChance` 为 1，没得挑才轮到见过的）；否则从见过的（seen）里挑，尽量避开最近 5 件，见过的空了就退回没见过的（第一件永远不拒）。种子由 `daySeed(born, day)` 派生（和以前的外出纪念品同一个），同一天开两次结果一样；每次固定抽两个 `r()`（一个定新旧，一个定下标），加一件只会挪动同一部分池子里的下标，不会改变新旧的判断。
+- **自带纪念品的速率**：每次外出按 `min(1, (1/7) / trait.outing)` 决定带不带回自带纪念品，三种性格都约一周一件；其余外出空手回来，不写文档，当天照常标记完成；有 AI 线路时每个外出日最多一件 AI 纪念品（还要过下一条的心情掷骰），AI 失败才回到这条规则。
+- **心情决定带不带**：`petsim.careScore(save)` = 0.5 × joy/joyMax + 0.3 × hunger/hungerMax + 0.2 × (1 − mess/messMax)；存档的 `care` 是它的按天指数平均（`care = 0.5*care + 0.5*careScore`，缺省时直接取当天的分数），只在当天外出决定时写一次，`today.cared` 让重载和每一 tick 都不会写第二次。自带纪念品的概率再乘 `souvenirMood(care) = clamp((care-0.2)/0.6, 0.1, 1)`；有 AI 线路时，另一次按天种子的掷骰（`daySeed` 异或一个常数，第一次 `r()`）小于 `souvenirMood` 才发 AI 请求，没过就空手回来、不调用也不花玩家的 AI 额度；AI 调用本身失败仍回到自带规则。所有掷骰都来自当天种子，重载给同一个答案；旅行明信片不变。
+- **文档的 `ref`**：新的本地件存 `ref: "<目录 id>"`；AI 件不存 `ref`，合法时存 `where: {zh, en}`。旧文档没有 `ref`，读的时候按 `name.zh` / `name.en`（或单语名字）对回目录，只在内存里补，**绝不改写文档**；`ai: true` 的件不参与对名。
+- **来源行**：卡片日期下面一行 `pet-souvfrom`，四种情况，按这个顺序判断：`ref === "post"` → `pet.from.trip`「旅行回来带的」（不管它是旅行还是外出带回的）；其他有 `ref` 且目录有 `where` → `pet.from.found`「在{where}捡到的」；`ai` 有 `where` → `pet.from.out`「出门在{where}找到的」；`ai` 没有 `where` → `pet.from.outAny`「出门时找到的」；其余不显示。
+- **会变的纪念品要看得出来**（0.57.1，owner）：不和静态的分开存放，只在显示上区分：箱子格子右下角一个 2 x 2 的墨色小点；卡片上多一行「摆在架子上会慢慢长大」（有 `grow` 的）或「摆在架子上会慢慢变化」。
+- **AI 的 `where`**：`aiPrompt` 的 JSON 样例多一个 `where`，只要一个虚构的、普通的地方（旧书摊、桥下），不要真实地名或地址；发给 AI 的其余内容不变。`validateSouvenir` 把 `where` 当可选字段：`bilingualText(o.where, 6, 20)` 通过就保留，不通过只丢 `where`，整件纪念品照样有效。
+- **代码**：`runtime/petsouv.js`；`runtime/petart.js`；`runtime/apps/pet.js` 的 `souvEntry / souvWhere / souvRefForName / souvFrom`、纪念品读入、`makeSouvenir / addSouvenir`；`runtime/petsim.js` 的 `pickSouvenir / souvenirLocalChance`；`runtime/strings.js`；`runtime/lopda.css`；`runtime/index.html` 与 `runtime/sw.js` 的 SHELL。`RUNTIME_VERSION` / `VERSION` 0.57.0。
+- **测试**：`tests/petsouv.test.mjs`（id、set / season / where、16 x 16、中英文字）；`tests/petsim.test.mjs`（季节、没见过的优先、避开最近 5 件、确定性、一年模拟、`where` 可选）；`tests/e2e.test.mjs`（四种来源行、旧文档对名、旧文档不被改写）。
+
+## 46. 电波连线：`LP.link` / `PAD.link`、电波台改版、五子棋对战（0.58.0）
+
+2026-11-01，runtime 0.58.0。owner 改了第 7 节“1.0 只把分层做对”的范围：整套做完，暴露系统级接口，用一个 app 做通讯测试。设计稿是 `docs/design/radio.md` 第 7、8 节，这一节只记落地的决定和理由。
 
 - **分层**：声学（`acoustic.js`，不变）→ 增量接收（`acoustic-rx.js`，纯函数，只对新样本算 Goertzel，10/20/40 ms 三档同时找前导）→ 帧（`acoustic-link.js` 帧版本 2）→ 会话（`acoustic-session.js`，纯函数，时钟由调用方传入）→ 宿主（`link.js` 的 `LP.link`）→ 接口（`PAD.link`）→ 程序（电波台、五子棋）。每层在 Node 里单独测；`?linkfake` 用 BroadcastChannel 换掉声音，会话层以上完全一样，所以 e2e 测的是真代码。
 - **接口定义在消息上，不在声音上**：app 只有 `open / send / close / state / initiator` 和 `PAD.on("link")`，看不到速率、会话号、帧和声音。以后换别的传输（例如二维码 → 相机）app 一行不改。一条消息 ≤ 200 字节，排队最多 4 条。
 - **配对是对称的**：两台都按「连线」，没有“主/从”要选（设计规则：少一个决定）。随机先听 0.8–2.4 秒再发 HELLO，同时开口就都听不到、再随机退避。发 HELLO 并收到应答的一方是发起方（五子棋执黑），它再回一个 ACK，应答方收到才进去（三次握手；真机上应答方曾经回完应答就自己进去，对方根本没听到）。HELLO 带端口（app id 的 FNV-1a）和 app 的协议串，不同程序或不同版本直接结束，提示“对方在用别的程序”。
 - **空闲时安静**：没东西要发就不出声，只有发起方空闲 25 秒发一个 PING。先听再说（最近 300 ms 频带里没能量）；没确认随机退避重发，5 次失败算断线。像真的调制解调器那样“慢而可靠”，比一直响着的载波更像 1986 年的掌机，也更省电。
 - **麦克风整个连线期间一直开着（iPhone 发声那几秒除外，见下一条）**：不在每次听的时候重开麦克风。屏蔽自己的声音按 AudioContext 时间算：前 50 ms、后 250 ms，再加上话筒延迟（ScriptProcessor 一块 4096 样本 + 报告的输入输出延迟 + 60 ms 余量）；和最近 20 秒内自己发过的帧逐字节相同的帧当作回声丢掉。回包等待从 300 ms 改成 1.5 秒：iPhone 发声时关话筒，重开要 1–2 秒才稳定（见下一条），回得太快对方还没在听。
-- **iPhone 发声时关话筒**：两台 iOS 27 实测，play-and-record 时声音从听筒出来，对方听不到。所以有 `navigator.audioSession` 的地方默认「发送时关麦」（`LP.link.setTxMode("playback")`）：发送前关话筒、切到 playback、走扬声器，发完再开话筒；电波台「仪表」页可以关掉。
+- **iPhone 发声时关话筒**：两台 iOS 27 实测，play-and-record 时声音从听筒出来，对方听不到。所以有 `navigator.audioSession` 的地方默认「发送时关麦」（`LP.link.setTxMode("playback")`）：发送前关话筒、切到 playback，用一个 `<audio>` 元素放（和话筒一起用过的 AudioContext 活着时 iOS 一直走听筒，录音证实：16 的声音到 13 Pro 弱 10 dB、缺 2500 Hz；新建 context 又要点一下才能启动），发完再开话筒；元素靠打开连线那一下（或配对时任何一下）解锁。电波台「仪表」页可以关掉。配对从 20 ms 开始（20 → 40 → 10）：同一批录音里 10 ms 在房间回声下一帧都解不出来。
 - **发射电平固定**（0.45；0.9 在真机上太刺耳），不跟掌机音量走，像真的调制解调器；网页读不到 iPhone 的系统音量，配对画面和说明页提醒把手机音量调大。音调（1500–4500 Hz）偏尖，降到更低频段放在下一步。
 - **同一时间一个连线**：连线期间 `PAD.mic.start()` 返回 `"none"`；`PAD.mic` 开着时 `open` 先停掉它。HOME、换 app、页面隐藏都发一次 BYE（不等确认）并立即结束。
 - **权限**：`"link"`，第一次 `open` 由主程序的确认框问，记在设置的「传感器与权限」里，可撤销；安装前的权限确认（第 42 节）也能先给。
 - **交换是复制，不是转移**：会丢包的链路上没法让两边同时确定“交换完成”，所以以后的礼物、串门都是发副本，发的人也留着。
 - **加密放在 app 里**：主程序只搬运字节，端到端加密是 app 自己的事（WebCrypto 在沙盒里能用）。
-- **版本不兼容就是“听不到”**：帧版本 1 一律不认；两台都要更新到 0.57.0 以上。说明页写明。
+- **版本不兼容就是“听不到”**：帧版本 1 一律不认；两台都要更新到 0.58.0 以上。说明页写明。
 - **电波台改版**：主菜单 连线 / 说明 / 仪表。连线后是来往记录 + 写字（≤ 60 字）/ 画图（16 x 16 四色，64 字节一帧）/ 断开；记录留最近 30 条在 `data/users/local/radio`（进备份）。仪表页是四个音调的 dB 条和底噪（查 iPhone 话筒）、原来的 M2 已知序列测试和「发送时关麦」开关。旧的 M3 一次性收发去掉。
 - **五子棋 1.6.0 是示范**：一步一条消息 `"m,x,y,n"`，n 是第几手：重复的忽略，跳号就要整盘。断线后棋盘留着，重连先交换步数，少的一边补齐；颜色按第一次连线定，重连不换。对战不计 `gomoku_wins`，不能悔棋。代码注释写给照抄的人看。
 - **代码**：`runtime/acoustic-rx.js`、`acoustic-link.js`、`acoustic-session.js`、`link.js`、`apps/radio.js`、`apps/store.js`（`linkRequest`）；`sdk/pad-shim.js`、`sdk/dev.html`（两个标签页互连、回声对端）；`tools/check-app.mjs`（用了 `PAD.link` 没声明 `"link"` 报错）；`SPEC.md` 6.8；`registry/apps/gomoku`。
