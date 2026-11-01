@@ -163,6 +163,11 @@
       "ai.err.offline": "没有信号：连不上 OpenRouter。", "ai.err.timeout": "一分钟没有回音，断开了。", "ai.err.empty": "AI 什么也没写。", "ai.err.stopped": "已停止。",
       "snap.ask": "「{name}」想用相机拍一张照片。", "snap.asknote": "照片只以四色小图交给它。", "snap.tap": "点一下开启相机",
       "snap.who": "「{name}」要一张照片", "snap.none": "相机用不了",
+      "link.title": "连线「{name}」", "link.plain": "连线",
+      "link.hint": "靠近 10–30 厘米，另一台也按连线",
+      "link.listen": "正在听…", "link.hello": "握手 {ms} ms…", "link.reply": "应答 {ms} ms…",
+      "link.attempt": "第 {n} 次",
+      "link.timeout": "没有连上：超时", "link.otherapp": "对方在用别的程序", "link.on": "连线中",
       "set.sense.revoke": "撤销", "set.sense.note": "撤销以后，这个程序下次要用时会再问一次。",
 
       "file.export": "导出「{name}」？", "file.import": "从文件导入？", "file.ok": "好", "file.pick": "选文件",
@@ -797,6 +802,11 @@
       "ai.err.offline": "No signal: cannot reach OpenRouter.", "ai.err.timeout": "No answer for a minute; hung up.", "ai.err.empty": "The AI wrote nothing.", "ai.err.stopped": "Stopped.",
       "snap.ask": "\u201c{name}\u201d wants to take one photo with the camera.", "snap.asknote": "It only gets the photo as a small four-tone picture.", "snap.tap": "Tap to turn on the camera",
       "snap.who": "\u201c{name}\u201d wants a photo", "snap.none": "The camera is not available",
+      "link.title": "Link: {name}", "link.plain": "Link",
+      "link.hint": "Hold the phones 10-30 cm apart; press Connect on the other one too",
+      "link.listen": "Listening\u2026", "link.hello": "Handshake {ms} ms\u2026", "link.reply": "Answering {ms} ms\u2026",
+      "link.attempt": "Try {n}",
+      "link.timeout": "No link: timed out", "link.otherapp": "The other phone is in another program", "link.on": "Link on",
       "set.sense.revoke": "Revoke", "set.sense.note": "After a revoke, the program asks again the next time.",
 
       "file.export": "Export \u201c{name}\u201d?", "file.import": "Import a file?", "file.ok": "OK", "file.pick": "Choose",
