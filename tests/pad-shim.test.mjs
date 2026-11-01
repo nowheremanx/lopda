@@ -603,7 +603,7 @@ test("wordbook: a runtime error rejects with the method's name, not the message 
   await assert.rejects(book, /PAD\.dict\.inBook: no word book/);
 });
 
-/* ---------- the link (SPEC.md 6.8, runtime 0.57.0) ---------- */
+/* ---------- the link (SPEC.md 6.8, runtime 0.58.0) ---------- */
 test("link: PAD.link exists only when the runtime offers it, and the wrapper passes link", () => {
   assert.equal(app().PAD.link, undefined);
   assert.equal(app({ sensors: true, notes: true, say: true, camera: true, dict: true }).PAD.link, undefined);

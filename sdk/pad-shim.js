@@ -10,7 +10,7 @@
  * unless the runtime can play it (runtime 0.11.0 and later, and sdk/dev.html), PAD.ambience (0.13.0 and later),
  * PAD.motion and PAD.mic (0.24.0 and later), PAD.notes and PAD.say (0.26.0 and later; Japanese say in 0.29.0),
  * PAD.camera (0.28.0 and later), PAD.dict (0.36.0 and later), PAD.saveInfo / PAD.setSchema (0.46.0 and later)
- * and PAD.link (0.57.0 and later).
+ * and PAD.link (0.58.0 and later).
  *
  * Messages app -> runtime:  {pad:1, op:"save"|"load"|"remove"|"error"|"exit", ...}
  *                           {pad:1, op:"sfx", name}  or  {pad:1, op:"sfx", params:{wave, duty, from, to, ms, attack, decay, vol, vibrato:{depth, rate}}}
@@ -248,7 +248,7 @@ function lopdaPadShim(opts) {
     }
   });
 
-  /* The link (runtime 0.57.0, SPEC.md 6.8, "permissions": ["link"]): a message channel to one other handheld, over
+  /* The link (runtime 0.58.0, SPEC.md 6.8, "permissions": ["link"]): a message channel to one other handheld, over
      the runtime's acoustic modem. open({proto}) -> Promise<"open" | "cancelled" | "denied" | "none" | "busy">, the
      runtime's pairing screen; send(data) -> Promise<"sent" | "lost" | "closed" | "busy" | "big">, data a string or a
      Uint8Array, encoded 200 bytes at most; close(); state "closed" | "open"; initiator true on the side that started

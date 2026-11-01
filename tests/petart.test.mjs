@@ -1,9 +1,12 @@
 // runtime/petart.js: the chip species pack at 32 x 32, the 162 x 120 room and the souvenir strings.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { runScript, EMOJI } from "./helpers.mjs";
+import vm from "node:vm";
+import { runScript, read, EMOJI } from "./helpers.mjs";
 
-const A = runScript("runtime/petart.js").LopdaPetArt;
+const ctx = runScript("runtime/petsouv.js");
+vm.runInContext(read("runtime/petart.js"), ctx, { filename: "runtime/petart.js" });
+const A = ctx.LopdaPetArt;
 const P = A.PACKS.chip;
 const loadStrings = (lang) => runScript("runtime/strings.js", { navigator: { languages: [lang], language: lang } }).LopdaStrings;
 const ZH = loadStrings("zh-CN"), EN = loadStrings("en-US");
@@ -475,12 +478,11 @@ test("drawRoom: a second pack brings its own room props", () => {
   assert.notEqual(withChip[90 * W + 12], 3, "the chip room did not draw the fake grid");
 });
 
-test("souvenirs: exactly 23 original finds, 16 x 16, unique ids, postcard kept", () => {
-  assert.equal(P.souvenirs.length, 23);
-  assert.ok(P.souvenirs.length >= 18);
+test("souvenirs: the catalogue keeps the 23 original finds, 16 x 16, unique ids, postcard kept", () => {
+  assert.ok(P.souvenirs.length >= 23);
   const seen = new Set();
   for (const s of P.souvenirs) {
-    assert.ok(/^[a-z]+$/.test(s.id), `${s.id} is a plain id`);
+    assert.ok(/^[a-z][a-z0-9-]*$/.test(s.id), `${s.id} is a plain id`);
     assert.ok(!seen.has(s.id), `${s.id} is unique`);
     seen.add(s.id);
     assertGrid("souvenir " + s.id, s.grid, 16, 16);
