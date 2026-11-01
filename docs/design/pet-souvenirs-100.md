@@ -1,5 +1,7 @@
 # 纪念品库扩到 100 个 — 设计草案
 
+> 2026-11-01 更新（owner）：数量比长相重要，目标改为 **300 件**（四季各 60、`any` 60），大部分由 DeepSeek 画；`NEW_RATE` 改为 0.45（curious 第一年约 164 件新的，第二年底约 296 件；sleepy 每次外出都是新的）。下文的 100 / 0.28 是第一版的数字，以 `briefs/pet-souvenirs/brief-art.md` 为准。
+
 - 状态：draft，等 owner 确认（2026-11-01）。
 - 目标：没有 AI 线路的玩家，第一年每个月都能捡到新东西；库的结构整齐，以后加纪念品只是往表里加行。
 - 范围：`runtime/petsouv.js`（新）、`runtime/petart.js`、`runtime/apps/pet.js`、`runtime/petsim.js`、`runtime/strings.js`、测试。
