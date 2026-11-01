@@ -1872,3 +1872,20 @@ test("harmonic minor: the fifth degree is a major chord (E in A harmonic minor) 
   assert.equal(S.chordNotes(song, 4)[1] % 12, 8, "G sharp, the raised seventh, is the third of V");
   assert.equal(S.noteMidi(song, "melody", 6) % 12, 8);
 });
+
+test("releaseRest: a recorded note ends where the finger lifted (12.24.2)", () => {
+  let song = S.newSong(1);
+  song = S.setNote(song, 0, "melody", 0, 3, S.NOTE_VEL);
+  let out = S.releaseRest(song, 0, "melody", 0, 2);
+  const rest = S.noteAt(out, 0, "melody", 2 * S.STEP);
+  assert.ok(rest && S.isRest(rest), "a rest two steps on");
+  assert.equal(S.noteAt(out, 0, "melody", 0).len, 2 * S.STEP, "the note now lasts two steps");
+  song = S.setNote(song, 0, "melody", 1 * S.STEP, 5, S.NOTE_VEL);
+  assert.equal(S.releaseRest(song, 0, "melody", 0, 3), song, "a note in between already ends it");
+  assert.equal(S.releaseRest(song, 0, "melody", 0, 16), song, "a hold round the whole bar writes nothing");
+  assert.equal(S.releaseRest(song, 0, "melody", 0, 0), song);
+  let wrap = S.setNote(S.newSong(1), 0, "melody", 15 * S.STEP, 2, S.NOTE_VEL);
+  wrap = S.releaseRest(wrap, 0, "melody", 15, 1);
+  assert.ok(S.isRest(S.noteAt(wrap, 0, "melody", 0)), "the rest wraps to step 0");
+  assert.equal(S.validate(wrap).error, undefined);
+});

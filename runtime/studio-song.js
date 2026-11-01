@@ -683,6 +683,22 @@ function ticksToSec(ticks,bpm){
    the tempo and the pattern's length. The latency (output + touch) is taken off the tap first, then the tick is rounded
    to the nearest 16th and wrapped into the pattern, so a tap just before the loop ends lands on step 0 and a tap before
    the start still has a step. Pure: no state, no clock of its own. */
+/* A recorded note ends where the finger lifted (12.24.2): a rest on the step heldSteps after the note's own step,
+   wrapped into the pattern, so a short tap is a short note instead of ringing until the next one. Nothing is written
+   when another note or rest already sits on the steps in between or on that step (the next note ends it anyway), or
+   when the hold reaches round to the note itself. Pure: returns the song unchanged when there is nothing to do. */
+function releaseRest(song,p,track,step,heldSteps){
+  var pat=song && song.patterns && song.patterns[p];
+  if(!pat || !int(step) || !int(heldSteps) || heldSteps<1) return song;
+  var len=int(pat.len) && pat.len>=1 ? pat.len : STEPS, i, at;
+  if(heldSteps>=len) return song;
+  for(i=1;i<=heldSteps;i++){
+    at=((step+i)%len)*STEP;
+    if(noteAt(song,p,track,at)) return song;
+  }
+  return setRest(song,p,track,((step+heldSteps)%len)*STEP);
+}
+
 function recStep(tapSec,startAt,bpm,patLen,latencySec){
   var len=num(patLen) && patLen>=1 ? Math.floor(patLen) : STEPS;
   if(!num(tapSec) || !num(startAt) || !num(bpm) || !(bpm>0)) return 0;
@@ -1397,7 +1413,7 @@ window.LopdaSong={
   TAPE_MAX:TAPE_MAX, PATTERNS_MAX:PATTERNS_MAX, SONG_MAX:SONG_MAX, NAME_MAX:NAME_MAX,
   newSong:newSong, demoSong:demoSong, popSong:popSong, saintsSong:saintsSong, jasmineSong:jasmineSong, fromDraft:fromDraft, validate:validate, has:has, toggle:toggle,
   setDrum:setDrum, clearTrack:clearTrack, setTrackMix:setTrackMix, setTrackVoice:setTrackVoice,
-  swingTicks:swingTicks, events:events, ticksToSec:ticksToSec, recStep:recStep,
+  swingTicks:swingTicks, events:events, ticksToSec:ticksToSec, recStep:recStep, releaseRest:releaseRest,
   degreeToMidi:degreeToMidi, clampBpm:clampBpm,
   tonic:tonic, noteMidi:noteMidi, noteName:noteName,
   chordNotes:chordNotes, chordName:chordName,

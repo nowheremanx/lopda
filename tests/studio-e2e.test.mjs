@@ -4401,6 +4401,7 @@ test("studio rec: REC counts one bar in, a melody key writes a note, and one und
 
   await p.locator('#studio-keys .st-key[data-deg="2"]').click();
   assert.equal(await p.locator("#v-studio .st-cell.has-note").count(), 1, "some step got the note");
+  assert.equal(await p.locator("#v-studio .st-cell.rest").count(), 1, "the release ended it with a rest (12.24.2)");
 
   await p.click("#studio-rec");
   assert.equal(await p.getAttribute("#v-studio", "data-rec"), null, "a second REC stops recording");
