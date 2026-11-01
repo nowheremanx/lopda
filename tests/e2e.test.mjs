@@ -4725,6 +4725,24 @@ test("pet: one AI souvenir a day, valid or silently built-in, never a note, date
     title: "秘密书名", author: "", lang: "zh", chars: 1000, lens: 1, imgs: 0, added: Date.now() - 9 * 86400000,
     opened: Date.now() - 8 * 86400000, pos: { ch: 0, p: 0, c: 0 }, pct: 10, marks: []
   });
+  /* the egg's born time is chosen so tomorrow's weekly roll brings a built-in souvenir, so the garbage-answer day
+     checks the fallback without depending on how many seconds the boot took */
+  const egg = await p.evaluate(() => {
+    const P = window.LopdaPet, start = Date.now(), day = new Date(start + 86400000);
+    const key = P.dayKey(day.getTime(), -day.getTimezoneOffset());
+    for (let k = 0; k < 300; k++) {
+      const s = P.fresh(start - k * 1000, P.rng(77));
+      s.care = 1;                                         /* kept well: the mood multiplier is 1 */
+      if (!P.outingToday(s, key)) continue;
+      const seed = (P.daySeed(s.born, key) ^ 0x5bd1e995) >>> 0;
+      if (P.rng(seed)() >= P.souvenirLocalChance(s)) continue;
+      s.last = start;
+      return s;
+    }
+    return null;
+  });
+  assert.ok(egg, "found an egg whose next day's weekly roll brings a souvenir");
+  await idb.setDoc(p, "data/users/local/pet", egg);
   await p.reload({ waitUntil: "networkidle" });
   await boot();
   await p.waitForFunction(() => LP.dict && LP.dict.bookSummary && LP.dict.bookSummary().n === 1);
@@ -4769,6 +4787,8 @@ test("pet: one AI souvenir a day, valid or silently built-in, never a note, date
   await p.clock.setSystemTime(new Date(2026, 9, 12, 9, 0));
   await p.waitForFunction(() => LOPDA_DEBUG.pet.save().today.day === "2026-10-12", null, { timeout: 10000 });
   await installAi("this is not JSON");
+  /* the AI gate and the fallback both want a well-kept pet: feed it so the weekly roll keeps its full chance */
+  await p.evaluate(() => LOPDA_DEBUG.pet.setStats(5, 5));
   const beforeBad = (await beside()).length;
   await p.evaluate(() => LOPDA_DEBUG.pet.forceOuting());
   assert.equal((await save()).today.ai, true);
@@ -4789,6 +4809,7 @@ test("pet: one AI souvenir a day, valid or silently built-in, never a note, date
   await p.click("#home-key");
   await openPet();
   await p.waitForFunction(() => LOPDA_DEBUG.pet.save().today.day === "2026-10-13", null, { timeout: 10000 });
+  await p.evaluate(() => LOPDA_DEBUG.pet.setStats(5, 5));
   await p.evaluate(() => {
     window.__hangCalled = 0; window.__stopped = 0;
     window.LP.ai = {
@@ -4806,6 +4827,164 @@ test("pet: one AI souvenir a day, valid or silently built-in, never a note, date
   await p.click("#home-key");
   await p.waitForTimeout(300);
   assert.equal(await p.evaluate(() => window.__stopped), 1, "leaving stops the one AI request");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("pet: an empty-handed outing marks the day done, writes no souvenir, and stays empty after a reload", { skip, timeout: 90000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN", serviceWorkers: "block", viewport: { width: 390, height: 844 } });
+  await p.clock.install({ time: new Date(2026, 9, 11, 9, 0) });
+  await p.goto(base + "/runtime/?debug", { waitUntil: "networkidle" });
+  await p.waitForFunction(() => document.getElementById("savestate").textContent !== "启动中…");
+  /* a baby with a known born time, on a day whose outing is real and whose weekly roll says no: the first draw of
+     outingSouvenir's own seed is what the page computes, so the test picks a day rather than stubbing the rule */
+  const plan = await p.evaluate(() => {
+    const P = window.LopdaPet;
+    const d = new Date(); d.setHours(9, 0, 0, 0);
+    const start = d.getTime(), born = start - 5 * 86400000;
+    const s = P.fresh(born, P.rng(77));
+    s.stage = "baby"; s.opened = 2; s.hunger = 4; s.joy = 4; s.lastDay = null; s.name = "芯仔";
+    for (let i = 0; i < 60; i++) {
+      const t = start + i * 86400000, dt = new Date(t);
+      const key = P.dayKey(t, -dt.getTimezoneOffset());
+      const o = P.outingToday(s, key);
+      if (!o) continue;
+      const seed = (P.daySeed(s.born, key) ^ 0x5bd1e995) >>> 0;
+      if (P.rng(seed)() < P.souvenirLocalChance(s)) continue;
+      return { save: s, key, hour: o.hour, at: t, outingAt: new Date(t).setHours(o.hour, 5, 0, 0) };
+    }
+    return null;
+  });
+  assert.ok(plan, "found a day with an outing and an empty weekly roll");
+  plan.save.last = plan.at;
+  plan.save.today.day = null;
+  plan.save.boxSeen = 0;
+  await idb.setDoc(p, "data/users/local/pet", plan.save);
+
+  /* boot at the outing hour with the pet screen closed: the background path decides the empty day */
+  await p.clock.setSystemTime(new Date(plan.outingAt));
+  await p.reload({ waitUntil: "networkidle" });
+  await p.waitForFunction(() => document.getElementById("savestate").textContent !== "启动中…");
+  await p.waitForFunction((hour) => {
+    const s = LOPDA_DEBUG.pet.save();
+    return s && s.today && s.today.out === hour;
+  }, plan.hour, { timeout: 10000 });
+  let save = await p.evaluate(() => LOPDA_DEBUG.pet.save());
+  assert.equal(save.today.back, false, "not back yet: the walk-back is left for the next visit");
+  assert.equal(save.today.outPhase, "back");
+  assert.equal(save.today.outLeft, 4);
+  assert.equal(save.today.outSouv, null, "an empty day brings no souvenir id");
+  assert.equal((await idb.under(p, "data/users/local/pet/souvenirs")).length, 0, "no souvenir document was written");
+
+  /* opening plays the normal walk-back and marks the day done without asking for a write */
+  await p.locator("#home .app", { hasText: "宠物" }).click();
+  await p.locator("#v-pet:not([hidden])").waitFor();
+  await p.waitForFunction(() => LOPDA_DEBUG.pet.save().today.back === true, null, { timeout: 8000 });
+  save = await p.evaluate(() => LOPDA_DEBUG.pet.save());
+  assert.equal(save.today.out, plan.hour);
+  assert.equal(save.today.outPhase, "");
+  assert.equal(save.today.outSouv, null);
+  assert.equal((await idb.under(p, "data/users/local/pet/souvenirs")).length, 0, "still no souvenir after the walk-back");
+
+  /* a reload keeps the day done and still empty */
+  await p.click("#home-key");
+  await p.reload({ waitUntil: "networkidle" });
+  await p.waitForFunction(() => document.getElementById("savestate").textContent !== "启动中…");
+  await p.waitForFunction(() => window.LOPDA_DEBUG && LOPDA_DEBUG.pet && LOPDA_DEBUG.pet.save());
+  save = await p.evaluate(() => LOPDA_DEBUG.pet.save());
+  assert.equal(save.today.out, plan.hour, "the day stays done");
+  assert.equal(save.today.back, true);
+  assert.equal(save.today.outPhase, "");
+  assert.equal((await idb.under(p, "data/users/local/pet/souvenirs")).length, 0, "the empty day never becomes a souvenir day");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+
+test("pet: an unhappy pet skips the AI line and comes back empty-handed, before and after a reload", { skip, timeout: 120000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN", serviceWorkers: "block", viewport: { width: 390, height: 844 } });
+  await p.clock.install({ time: new Date(2026, 9, 11, 9, 0) });
+  await p.goto(base + "/runtime/?debug", { waitUntil: "networkidle" });
+  await p.waitForFunction(() => document.getElementById("savestate").textContent !== "启动中…");
+
+  /* An unhappy pet with care 0.1, on a day whose AI gate fails and whose built-in roll would otherwise pass: an
+     empty-handed answer here proves the failed gate did not fall back to the weekly roll. */
+  const plan = await p.evaluate(() => {
+    const P = window.LopdaPet;
+    const d = new Date(); d.setHours(9, 0, 0, 0);
+    const start = d.getTime(), born = start - 5 * 86400000;
+    const s = P.fresh(born, P.rng(77));
+    s.stage = "baby"; s.opened = 2; s.name = "芯仔"; s.hunger = 1; s.joy = 1; s.mess = 2; s.care = 0.1;
+    for (let i = 0; i < 2000; i++) {
+      const t = start + i * 86400000, dt = new Date(t);
+      const key = P.dayKey(t, -dt.getTimezoneOffset());
+      const o = P.outingToday(s, key);
+      if (!o) continue;
+      if (P.aiSouvenirAllowed(s.born, key, s.care)) continue;
+      const seed = (P.daySeed(s.born, key) ^ 0x5bd1e995) >>> 0;
+      const local = P.souvenirLocalChance(s) * P.souvenirMood(s.care);
+      if (P.rng(seed)() >= local) continue;               /* a fallback would still be empty here, so this day shows it */
+      s.last = t;
+      s.today = { day: key, shown: null, shownYesterday: null, picked: false, pick: null, used: false,
+        rewarded: false, ai: false, out: null, back: false, snacks: 0, pats: 0, played: 0, burp: false,
+        shelf: false, cared: true, outEmpty: false };
+      s.lastDay = null; s.boxSeen = 0;
+      return { save: s, key, hour: o.hour, at: t, outingAt: new Date(t).setHours(o.hour, 5, 0, 0) };
+    }
+    return null;
+  });
+  assert.ok(plan, "found an unhappy day whose AI gate fails and whose built-in roll would pass");
+
+  await p.addInitScript(() => {
+    window.__aiCalls = [];
+    const fake = {
+      on: () => true, err: () => "", watch: () => {},
+      ask: (o) => { window.__aiCalls.push(o); const pr = Promise.resolve("{}"); pr.stop = () => {}; return pr; }
+    };
+    let lp;
+    Object.defineProperty(window, "LP", {
+      configurable: true,
+      get() { return lp; },
+      set(v) { lp = v; try { Object.defineProperty(v, "ai", { configurable: true, get() { return fake; }, set() {} }); } catch (e) {} }
+    });
+  });
+  await idb.setDoc(p, "data/users/local/pet", plan.save);
+
+  /* boot at the outing hour with the pet closed: the background path decides the empty day */
+  await p.clock.setSystemTime(new Date(plan.outingAt));
+  await p.reload({ waitUntil: "networkidle" });
+  await p.waitForFunction(() => document.getElementById("savestate").textContent !== "启动中…");
+  await p.waitForFunction((hour) => {
+    const s = LOPDA_DEBUG.pet.save();
+    return s && s.today && s.today.out === hour;
+  }, plan.hour, { timeout: 10000 });
+  let save = await p.evaluate(() => LOPDA_DEBUG.pet.save());
+  assert.equal(await p.evaluate(() => window.__aiCalls.length), 0, "an unhappy pet makes no AI call");
+  assert.equal(save.today.ai, false, "the day is not marked as asked");
+  assert.equal(save.today.outEmpty, true, "the failed gate marked the outing empty-handed");
+  assert.equal(save.care, 0.1, "the day's care was written once, not moved again");
+  assert.equal((await idb.under(p, "data/users/local/pet/souvenirs")).length, 0, "no souvenir document was written");
+
+  /* opening plays the normal walk-back, still empty-handed */
+  await p.locator("#home .app", { hasText: "宠物" }).click();
+  await p.locator("#v-pet:not([hidden])").waitFor();
+  await p.waitForFunction(() => LOPDA_DEBUG.pet.save().today.back === true, null, { timeout: 8000 });
+  save = await p.evaluate(() => LOPDA_DEBUG.pet.save());
+  assert.equal(save.today.out, plan.hour);
+  assert.equal(save.today.outPhase, "");
+  assert.equal(save.today.outSouv, null);
+  assert.equal((await idb.under(p, "data/users/local/pet/souvenirs")).length, 0, "still no souvenir after the walk-back");
+  assert.equal(await p.evaluate(() => window.__aiCalls.length), 0, "still no AI call after the walk-back");
+
+  /* a reload on the same day keeps the answer: empty, with no new call */
+  await p.click("#home-key");
+  await p.reload({ waitUntil: "networkidle" });
+  await p.waitForFunction(() => document.getElementById("savestate").textContent !== "启动中…");
+  await p.waitForFunction(() => window.LOPDA_DEBUG && LOPDA_DEBUG.pet && LOPDA_DEBUG.pet.save());
+  save = await p.evaluate(() => LOPDA_DEBUG.pet.save());
+  assert.equal(save.today.out, plan.hour, "the day stays done");
+  assert.equal(save.today.back, true);
+  assert.equal(save.today.outEmpty, true);
+  assert.equal(await p.evaluate(() => window.__aiCalls.length), 0, "the reload asks nothing");
+  assert.equal((await idb.under(p, "data/users/local/pet/souvenirs")).length, 0, "the empty day never becomes a souvenir day");
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
@@ -5974,6 +6153,94 @@ test("pet: the keepsake box is a newest-first month grid with page turns, and fi
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
+test("pet: a souvenir card says where it came from, an old document finds its place, and the card fits 331 x 359", { skip, timeout: 180000 }, async (t) => {
+  const px = (n) => String(n % 4).repeat(256);
+  const docs = [
+    { id: "origin-key", ref: "key", name: { zh: "钥匙", en: "Key" }, line: { zh: "开不了这扇门。", en: "It opens no door." },
+      at: Date.UTC(2026, 9, 1), day: "2026-10-01" },
+    { id: "origin-post", ref: "post", name: { zh: "明信片", en: "Postcard" }, line: { zh: "一张小卡片。", en: "One small card." },
+      at: Date.UTC(2026, 9, 2), day: "2026-10-02" },
+    { id: "origin-aiwhere", ref: null, ai: true, where: { zh: "桥下", en: "under the old bridge" },
+      name: { zh: "旧灯", en: "Old lamp" }, line: { zh: "一小块夜里的光。", en: "A little night light." },
+      at: Date.UTC(2026, 9, 3), day: "2026-10-03" },
+    { id: "origin-aiold", ref: null, ai: true,
+      name: { zh: "夜光", en: "Night light" }, line: { zh: "旧件没有地点。", en: "An old find with no place." },
+      at: Date.UTC(2026, 9, 4), day: "2026-10-04" },
+    /* an old built-in document: no ref, no ai; "Shell" / 贝壳 must match the catalogue by name */
+    { id: "origin-old", ref: null, name: { zh: "贝壳", en: "Shell" }, line: { zh: "海浪磨了很久。", en: "Worn by the waves." },
+      at: Date.UTC(2026, 9, 5), day: "2026-10-05" }
+  ];
+  const run = async (locale) => {
+    const zh = locale === "zh-CN";
+    const docData = (d) => {
+      const data = { name: d.name, line: d.line, px: px(1), at: d.at, ai: !!d.ai, day: d.day };
+      if (d.ref) data.ref = d.ref;
+      if (d.where) data.where = d.where;
+      return data;
+    };
+    const { p, errors } = await page(t, { locale, serviceWorkers: "block", viewport: { width: 375, height: 667 } });
+    await p.clock.install({ time: new Date(2026, 9, 11, 9, 0) });
+    await p.goto(base + "/runtime/?debug", { waitUntil: "networkidle" });
+    await p.waitForFunction(() => document.getElementById("savestate").textContent !== "启动中…");
+    const plan = await p.evaluate((name) => {
+      const P = window.LopdaPet, now = Date.now();
+      const s = P.fresh(now, P.rng(9));
+      s.stage = "baby"; s.name = name; s.boxSeen = 0; s.lastDay = null;
+      return s;
+    }, zh ? "芯仔" : "Chip");
+    await idb.setDoc(p, "data/users/local/pet", plan);
+    for (const d of docs) await idb.setDoc(p, "data/users/local/pet/souvenirs/" + d.id, docData(d));
+    await p.reload({ waitUntil: "networkidle" });
+    await p.waitForFunction(() => document.getElementById("savestate").textContent !== "启动中…");
+    await p.locator("#home .app", { hasText: zh ? "宠物" : "Pet" }).click();
+    await p.locator("#v-pet:not([hidden])").waitFor();
+    await p.waitForTimeout(200);
+    await p.locator("#pet-keys .sk-start").click();
+    await p.waitForSelector("#pet-panel:not([hidden])");
+    await p.locator("#pet-panel .pet-menu").nth(2).click();
+    await p.waitForTimeout(100);
+    assert.equal(await p.locator("#pet-panel .pet-tile").count(), docs.length, "all seeded finds are in the box");
+
+    /* the smallest LCD: 331 x 359 inside the case */
+    await p.setViewportSize({ width: 375, height: 587 });
+    await p.waitForTimeout(150);
+    const expected = zh ? {
+      "钥匙": "在路边捡到的", "明信片": "旅行回来带的", "旧灯": "出门在桥下找到的",
+      "夜光": "出门时找到的", "贝壳": "在河滩捡到的"
+    } : {
+      "Key": "Found by the roadside", "Postcard": "Brought back from a trip", "Old lamp": "Found on a walk: under the old bridge",
+      "Night light": "Found while out", "Shell": "Found by the riverbank"
+    };
+    for (const [name, line] of Object.entries(expected)) {
+      await p.locator(`#pet-panel .pet-tile[aria-label^="${name}"]`).click();
+      await p.waitForSelector("#pet-panel .pet-souvfrom");
+      assert.equal(await p.locator("#pet-panel .pet-souvfrom").textContent(), line, name);
+      if (name === (zh ? "贝壳" : "Shell")) {
+        const oldDoc = await idb.doc(p, "data/users/local/pet/souvenirs/origin-old");
+        assert.ok(!Object.prototype.hasOwnProperty.call(oldDoc, "ref"), "reading an old document does not add ref");
+        assert.deepEqual(oldDoc, docData(docs.find((d) => d.id === "origin-old")), "the old document is left unchanged");
+      }
+      const fit = await p.evaluate(() => {
+        const panel = document.getElementById("pet-panel");
+        const card = document.querySelector("#pet-panel .pet-souv").getBoundingClientRect();
+        const from = document.querySelector("#pet-panel .pet-souvfrom").getBoundingClientRect();
+        const view = document.getElementById("v-pet");
+        return { panel: panel.getBoundingClientRect().bottom, card: card.bottom, from: from.bottom,
+          panelScroll: panel.scrollHeight, panelClient: panel.clientHeight, viewScroll: view.scrollHeight, viewClient: view.clientHeight };
+      });
+      assert.ok(fit.card <= fit.panel + 0.5 && fit.from <= fit.panel + 0.5, name + " fits inside the panel");
+      assert.ok(fit.panelScroll <= fit.panelClient, name + " does not scroll the panel");
+      assert.ok(fit.viewScroll <= fit.viewClient, name + " does not scroll the pet screen");
+      await p.evaluate(() => { LOPDA_DEBUG.setButton("b", true); LOPDA_DEBUG.setButton("b", false); });
+      await p.waitForTimeout(90);
+      assert.ok(await p.locator("#pet-panel .pet-tile").first().isVisible(), "B returns to the box grid");
+    }
+    assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+  };
+  await run("zh-CN");
+  await run("en-US");
+});
+
 test("pet: the AI souvenir is made and saved with the pet screen never opened; opening plays the short walk-back", { skip, timeout: 120000 }, async (t) => {
   const { p, errors } = await page(t, { locale: "zh-CN", serviceWorkers: "block", viewport: { width: 390, height: 844 } });
   await p.clock.install({ time: new Date(2026, 9, 11, 9, 0) });
@@ -5986,6 +6253,7 @@ test("pet: the AI souvenir is made and saved with the pet screen never opened; o
     const start = d.getTime(), born = start - 5 * 86400000;
     const s = P.fresh(born, P.rng(77));
     s.stage = "baby"; s.opened = 2; s.hunger = 4; s.joy = 4; s.lastDay = null; s.name = "芯仔";
+    s.care = 1;                                           /* kept well: the mood multiplier is 1, so the gate passes */
     for (let i = 0; i < 20; i++) {
       const t = start + i * 86400000, dt = new Date(t);
       const key = P.dayKey(t, -dt.getTimezoneOffset());

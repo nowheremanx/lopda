@@ -6,6 +6,7 @@ import vm from "node:vm";
 import { read, runScript } from "./helpers.mjs";
 
 const ctx = runScript("runtime/petsim.js");
+vm.runInContext(read("runtime/petsouv.js"), ctx);
 vm.runInContext(read("runtime/petart.js"), ctx);
 vm.runInContext(read("runtime/petplay.js"), ctx);
 const Play = ctx.LopdaPetPlay;

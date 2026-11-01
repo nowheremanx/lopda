@@ -1613,3 +1613,18 @@ EXIF，相册就能把照片放到地图上。
 - **校验与上限**：`LopdaPetState.validate(spec, firstPx)` 清理状态；`layers` <= 4，`grow.stages` <= 6，`match.rules` <= 6，总帧数 <= 8，单段 `hold` <= 30 天、总时长 <= 180 天，帧必须是 16 x 16 的 `0-3`。`grow` 第 0 帧必须等于顶层 `px`。
 - **代码**：`runtime/petstate.js`；`runtime/apps/pet.js` 的 `souvenirCtx / souvenirView / packState / stateHasGrow / updateSouv / shelfTake / shelfPut / setShelf / repairShelf`、箱子和房间的预览；`runtime/petart.js` 的四个物品和 `packOk` 的 state 帧检查；`runtime/strings.js`；`runtime/index.html` 与 `runtime/sw.js` 的 SHELL。`RUNTIME_VERSION` / `VERSION` 0.52.0。
 - **测试**：`tests/petstate.test.mjs`（grow 边界、架子时间、match 每个条件、覆盖顺序、非法降级）；`tests/petsim.test.mjs`（AI 多给的 `state` 被忽略）；`tests/petart.test.mjs`（四个物品每帧 16 x 16、四色）；`tests/e2e.test.mjs`（摆上种子 -> 调时间 -> 发芽/开花、收进箱子暂停、夜里合上、改天气 -> 风向标、重载保留 `grownMs`、未知字段保留）。
+
+## 45. 纪念品库与来源（0.57.0）
+
+2026-10-31，runtime 0.57.0。纪念品库朝 300 件走；这一版先落地库、挑法、卡片上的来源行和 AI 的 `where`，图由后面的批次补。设计稿是 `docs/design/pet-souvenirs-100.md`，这一节只记落地的决定。
+
+- **目录**：新文件 `runtime/petsouv.js`，纯数据，挂 `window.LopdaPetSouv = {CATALOG, SETS, SEASONS, WHERE, byId}`。每件是 `{id, set, season, where, grid, state?}`：`set`（shore / yard / street / desk / sky / fest）决定目录里的排列（按组、组内按加入顺序），`season` 是 `any` 或四季之一，`where` 是地点 key，文字在 `strings.js` 的 `pet.where.<key>`。id 永不改、永不复用（文档靠它认领）；新件只追加在本组末尾。已有的 23 件连同种子、风向标等的网格原样搬过去，像素一个不改；`petart.js` 的物种包改为引用这份目录。
+- **挑法**：`petsim.js` 的 `pickSouvenir(rnd, table, opts)`。池子只取当季或 `any` 的件，绝不给过季的。池子里有没见过的（unseen），永远先从没见过的里挑（`newChance` 为 1，没得挑才轮到见过的）；否则从见过的（seen）里挑，尽量避开最近 5 件，见过的空了就退回没见过的（第一件永远不拒）。种子由 `daySeed(born, day)` 派生（和以前的外出纪念品同一个），同一天开两次结果一样；每次固定抽两个 `r()`（一个定新旧，一个定下标），加一件只会挪动同一部分池子里的下标，不会改变新旧的判断。
+- **自带纪念品的速率**：每次外出按 `min(1, (1/7) / trait.outing)` 决定带不带回自带纪念品，三种性格都约一周一件；其余外出空手回来，不写文档，当天照常标记完成；有 AI 线路时每个外出日最多一件 AI 纪念品（还要过下一条的心情掷骰），AI 失败才回到这条规则。
+- **心情决定带不带**：`petsim.careScore(save)` = 0.5 × joy/joyMax + 0.3 × hunger/hungerMax + 0.2 × (1 − mess/messMax)；存档的 `care` 是它的按天指数平均（`care = 0.5*care + 0.5*careScore`，缺省时直接取当天的分数），只在当天外出决定时写一次，`today.cared` 让重载和每一 tick 都不会写第二次。自带纪念品的概率再乘 `souvenirMood(care) = clamp((care-0.2)/0.6, 0.1, 1)`；有 AI 线路时，另一次按天种子的掷骰（`daySeed` 异或一个常数，第一次 `r()`）小于 `souvenirMood` 才发 AI 请求，没过就空手回来、不调用也不花玩家的 AI 额度；AI 调用本身失败仍回到自带规则。所有掷骰都来自当天种子，重载给同一个答案；旅行明信片不变。
+- **文档的 `ref`**：新的本地件存 `ref: "<目录 id>"`；AI 件不存 `ref`，合法时存 `where: {zh, en}`。旧文档没有 `ref`，读的时候按 `name.zh` / `name.en`（或单语名字）对回目录，只在内存里补，**绝不改写文档**；`ai: true` 的件不参与对名。
+- **来源行**：卡片日期下面一行 `pet-souvfrom`，四种情况，按这个顺序判断：`ref === "post"` → `pet.from.trip`「旅行回来带的」（不管它是旅行还是外出带回的）；其他有 `ref` 且目录有 `where` → `pet.from.found`「在{where}捡到的」；`ai` 有 `where` → `pet.from.out`「出门在{where}找到的」；`ai` 没有 `where` → `pet.from.outAny`「出门时找到的」；其余不显示。
+- **会变的纪念品要看得出来**（0.57.1，owner）：不和静态的分开存放，只在显示上区分：箱子格子右下角一个 2 x 2 的墨色小点；卡片上多一行「摆在架子上会慢慢长大」（有 `grow` 的）或「摆在架子上会慢慢变化」。
+- **AI 的 `where`**：`aiPrompt` 的 JSON 样例多一个 `where`，只要一个虚构的、普通的地方（旧书摊、桥下），不要真实地名或地址；发给 AI 的其余内容不变。`validateSouvenir` 把 `where` 当可选字段：`bilingualText(o.where, 6, 20)` 通过就保留，不通过只丢 `where`，整件纪念品照样有效。
+- **代码**：`runtime/petsouv.js`；`runtime/petart.js`；`runtime/apps/pet.js` 的 `souvEntry / souvWhere / souvRefForName / souvFrom`、纪念品读入、`makeSouvenir / addSouvenir`；`runtime/petsim.js` 的 `pickSouvenir / souvenirLocalChance`；`runtime/strings.js`；`runtime/lopda.css`；`runtime/index.html` 与 `runtime/sw.js` 的 SHELL。`RUNTIME_VERSION` / `VERSION` 0.57.0。
+- **测试**：`tests/petsouv.test.mjs`（id、set / season / where、16 x 16、中英文字）；`tests/petsim.test.mjs`（季节、没见过的优先、避开最近 5 件、确定性、一年模拟、`where` 可选）；`tests/e2e.test.mjs`（四种来源行、旧文档对名、旧文档不被改写）。

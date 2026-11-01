@@ -38,7 +38,7 @@ test("fresh: the save of design.md 8, plus lastMeal, today's counters and the ca
   const now = at(2026, 10, 20, 8, 0), s = P.fresh(now, P.rng(7));
   assert.deepEqual(Object.keys(s).sort(), ["aiUse", "awakeHunger", "awakeJoy", "born", "close", "form", "hunger", "joy", "last", "lastDay", "lastMeal",
     "light", "marks", "mess", "name", "opened", "room", "seenUse", "shelf", "species", "stage", "today", "trait", "travel", "v"].sort());
-  assert.deepEqual(Object.keys(s.today).sort(), ["ai", "back", "burp", "day", "out", "pats", "pick", "picked", "played", "rewarded", "shelf", "shown", "shownYesterday", "snacks", "used"]);
+  assert.deepEqual(Object.keys(s.today).sort(), ["ai", "back", "burp", "cared", "day", "out", "pats", "pick", "picked", "played", "rewarded", "shelf", "shown", "shownYesterday", "snacks", "used"]);
   assert.deepEqual([s.v, s.species, s.room, s.born, s.last, s.hunger, s.joy, s.mess, s.close, s.opened, s.lastDay, s.awakeHunger, s.awakeJoy],
     [1, "chip", "chip", now, now, 5, 5, 0, 0, 0, null, 0, 0]);
   assert.deepEqual([s.stage, s.form, s.light, s.travel, s.lastMeal, s.name, s.shelf], ["egg", null, true, false, null, null, null]);
@@ -527,6 +527,38 @@ test("validateSouvenir: an extra state field is ignored, not a reason to reject 
   assert.deepEqual(Object.keys(v).sort(), ["line", "name", "px"], "only the white-listed fields survive");
 });
 
+test("validateSouvenir: where is optional, kept when bilingual, and only where is dropped when bad", () => {
+  const good = {
+    name: { zh: "红叶", en: "Red leaf" },
+    line: { zh: "一片叶子", en: "One leaf" },
+    px: rows()
+  };
+  assert.equal(P.validateSouvenir(good).where, undefined, "an old answer has no where");
+  const kept = P.validateSouvenir({ ...good, where: { zh: "桥下", en: "under a bridge" } });
+  assert.ok(kept, "a where does not reject the find");
+  assert.deepEqual(JSON.parse(JSON.stringify(kept.where)), { zh: "桥下", en: "under a bridge" });
+  const longest = P.validateSouvenir({ ...good, where: { zh: "一二三四五六", en: "x".repeat(20) } });
+  assert.equal([...longest.where.zh].length, 6);
+  assert.equal([...longest.where.en].length, 20);
+  const bad = [
+    "桥下",
+    { zh: "桥下" },
+    { en: "under a bridge" },
+    { zh: "", en: "under a bridge" },
+    { zh: "一二三四五六七", en: "under a bridge" },
+    { zh: "桥下", en: "x".repeat(21) },
+    { zh: "桥下", en: "桥下" },
+    { zh: "bridge 桥下", en: "under a bridge" },
+    ["桥下", "under a bridge"],
+    null
+  ];
+  for (const where of bad) {
+    const v = P.validateSouvenir({ ...good, where });
+    assert.ok(v, "a bad where never rejects the souvenir: " + JSON.stringify(where));
+    assert.equal(v.where, undefined, "only where is dropped: " + JSON.stringify(where));
+  }
+});
+
 test("validateSouvenir: one language, the wrong script, or a bad length is refused", () => {
   const good = {
     name: { zh: "红叶", en: "Red leaf" },
@@ -682,6 +714,20 @@ test("aiPrompt: the last five souvenir names fit, the sixth is left behind", () 
   assert.ok(!s.includes("N1"), "only the last five");
 });
 
+test("aiPrompt: the JSON example asks for an optional where and forbids a real address", () => {
+  const text = (r) => r.messages.map((m) => m.content).join("\n");
+  const zh = text(P.aiPrompt({ lang: "zh" })), en = text(P.aiPrompt({ lang: "en" }));
+  assert.ok(zh.includes('"where":{"zh":"不超过 6 个汉字","en":"20 characters at most"}'), "the Chinese example carries where");
+  assert.ok(zh.includes("旧书摊") && zh.includes("不要真实地名或地址"), "the Chinese sentence asks for a made-up place");
+  assert.ok(en.includes('"where":{"zh":"6 Chinese characters at most","en":"20 characters at most"}'), "the English example carries where");
+  assert.ok(en.includes("old book stall") && en.toLowerCase().includes("never a real place name or address"), "the English sentence asks for a made-up place");
+  /* the fields that were already there are unchanged */
+  for (const s of [zh, en]) {
+    assert.ok(s.includes('"name":{"zh"') && s.includes('"line":{"zh"') && s.includes('"px"'));
+  }
+  assert.equal(zh.split("旧书摊").length - 1, 1, "the example sentence is not repeated");
+});
+
 /* ---------- the AI's small vocabulary ---------- */
 test("moodWord: one word from hunger and joy, in both languages", () => {
   assert.equal(P.moodWord(0, 5, false), "hungry");
@@ -718,4 +764,219 @@ test("a new day keeps yesterday's kind and clears the pick and its counters", ()
   /* the previous save is untouched */
   assert.equal(s.today.day, "2026-10-20");
   assert.equal(s.today.used, true);
+});
+
+/* ---------- picking from the catalogue ---------- */
+const FOUR = ["spring", "summer", "autumn", "winter"];
+const closeTo = (a, b) => Math.abs(a - b) < 1e-12;
+function smallTable() {
+  const table = [];
+  for (const s of FOUR) for (let i = 0; i < 3; i++) table.push({ id: `${s}-${i}`, season: s });
+  for (let i = 0; i < 3; i++) table.push({ id: `any-${i}`, season: "any" });
+  return table;
+}
+
+test("pickSouvenir: never out of season, over many seeds", () => {
+  const table = smallTable();
+  for (const season of FOUR) {
+    for (let seed = 0; seed < 200; seed++) {
+      for (const newChance of [0, 0.5, 1]) {
+        const e = P.pickSouvenir(P.rng(seed), table, { season, seen: [], recent: [], newChance });
+        assert.ok(e, "a pool with an entry always picks");
+        assert.ok(e.season === "any" || e.season === season, `${season} picked ${e.id}`);
+      }
+    }
+  }
+});
+
+test("pickSouvenir: unseen first when the new chance hits", () => {
+  const table = [{ id: "a", season: "any" }, { id: "b", season: "any" }, { id: "c", season: "any" }];
+  const picked = new Set();
+  for (let seed = 0; seed < 100; seed++) {
+    const e = P.pickSouvenir(P.rng(seed), table, { season: "summer", seen: ["a"], recent: [], newChance: 1 });
+    assert.notEqual(e.id, "a", "the one already seen is left out");
+    picked.add(e.id);
+  }
+  assert.deepEqual([...picked].sort(), ["b", "c"], "both unseen entries can come out");
+});
+
+test("pickSouvenir: with nothing unseen the seen part avoids recent when it can", () => {
+  const table = [{ id: "a", season: "any" }, { id: "b", season: "any" }, { id: "c", season: "any" }];
+  for (let seed = 0; seed < 100; seed++) {
+    const e = P.pickSouvenir(P.rng(seed), table, { season: "winter", seen: ["a", "b", "c"], recent: ["a", "b"], newChance: 0 });
+    assert.equal(e.id, "c", "the one not recent");
+  }
+  for (let seed = 0; seed < 50; seed++) {
+    const e = P.pickSouvenir(P.rng(seed), table, { season: "winter", seen: ["a", "b", "c"], recent: ["a", "b", "c"], newChance: 0 });
+    assert.ok(["a", "b", "c"].includes(e.id), "all recent: a repeat is unavoidable, never an out-of-season entry");
+  }
+});
+
+test("pickSouvenir: nothing seen picks unseen even with newChance 0", () => {
+  const table = [{ id: "a", season: "any" }, { id: "b", season: "spring" }, { id: "c", season: "winter" }];
+  const ids = new Set();
+  for (let seed = 0; seed < 100; seed++) {
+    const e = P.pickSouvenir(P.rng(seed), table, { season: "spring", seen: [], recent: [], newChance: 0 });
+    assert.ok(e.id === "a" || e.id === "b", "only in-season entries");
+    ids.add(e.id);
+  }
+  assert.deepEqual([...ids].sort(), ["a", "b"]);
+  assert.equal(P.pickSouvenir(P.rng(1), [], { season: "spring", seen: [], recent: [], newChance: 1 }), null);
+  assert.equal(P.pickSouvenir(P.rng(1), [{ id: "winter-1", season: "winter" }], { season: "spring" }), null);
+});
+
+test("pickSouvenir: deterministic, and exactly two draws on every path", () => {
+  const table = smallTable();
+  const opts = { season: "autumn", seen: ["autumn-0", "any-1"], recent: ["autumn-0"], newChance: 0.5 };
+  const a = P.pickSouvenir(P.rng(77), table, opts);
+  const b = P.pickSouvenir(P.rng(77), table, opts);
+  assert.equal(a.id, b.id);
+  assert.deepEqual(plain(P.pickSouvenir(77, table, opts)), plain(a), "a numeric seed works like builtinSouvenir");
+  const outcomes = new Set();
+  for (let seed = 0; seed < 100; seed++) outcomes.add(P.pickSouvenir(P.rng(seed), table, opts).id);
+  assert.ok(outcomes.size > 1, "different seeds move the pick");
+  for (const o of [
+    { season: "autumn", seen: [], recent: [], newChance: 0 },
+    { season: "autumn", seen: ["autumn-0", "autumn-1", "autumn-2"], recent: ["autumn-0"], newChance: 0 },
+    { season: "autumn", seen: [], recent: [], newChance: 1 }
+  ]) {
+    let n = 0;
+    assert.ok(P.pickSouvenir(() => { n++; return 0.99; }, table, o));
+    assert.equal(n, 2, JSON.stringify(o));
+  }
+  let emptyDraws = 0;
+  P.pickSouvenir(() => { emptyDraws++; return 0.99; }, [], { season: "autumn" });
+  assert.equal(emptyDraws, 2, "an empty pool still draws twice");
+});
+
+test("careScore: 0..1, half joy, a third hunger and a fifth a clean room", () => {
+  const s = base();
+  s.joy = 5; s.hunger = 5; s.mess = 0;
+  assert.equal(P.careScore(s), 1);
+  s.joy = 0; s.hunger = 0; s.mess = 3;
+  assert.equal(P.careScore(s), 0);
+  s.joy = 1; s.hunger = 1; s.mess = 2;
+  assert.ok(closeTo(P.careScore(s), 0.5 * 0.2 + 0.3 * 0.2 + 0.2 * (1 - 2 / 3)));
+  /* a damaged save is clamped, never allowed outside 0..1 */
+  for (const [joy, hunger, mess] of [[-4, -2, -1], [99, 99, 99], [0, 5, 0], [NaN, 5, 0]]) {
+    const bad = { ...s, joy, hunger, mess };
+    const v = P.careScore(bad);
+    assert.ok(Number.isFinite(v) && v >= 0 && v <= 1, JSON.stringify([joy, hunger, mess, v]));
+  }
+});
+
+test("souvenirMood: the table - 0.8 gives 1, 0.5 gives 0.5, 0.26 or less gives the 0.1 floor", () => {
+  assert.ok(closeTo(P.souvenirMood(0.8), 1));
+  assert.ok(closeTo(P.souvenirMood(0.5), 0.5));
+  assert.equal(P.souvenirMood(0.26), 0.1);
+  assert.equal(P.souvenirMood(0.2), 0.1);
+  assert.ok(closeTo(P.souvenirMood(0), 0.1));
+  assert.ok(closeTo(P.souvenirMood(0.65), 0.75));
+  assert.ok(closeTo(P.souvenirMood(1), 1));
+  assert.ok(closeTo(P.souvenirMood(2), 1), "above 1 stays at 1");
+});
+
+test("updateCare: missing care starts at careScore, then one EMA per day and never twice on the same day", () => {
+  const s = base();
+  s.joy = 2; s.hunger = 2; s.mess = 1;
+  const first = P.careScore(s);
+  assert.equal(s.care, undefined, "a new or old save has no care yet");
+  assert.equal(P.updateCare(s, "2026-10-20"), true);
+  assert.ok(closeTo(s.care, first), "the first outing starts at careScore");
+  const afterFirst = s.care;
+  s.joy = 5; s.hunger = 5; s.mess = 0;
+  assert.equal(P.updateCare(s, "2026-10-20"), false, "the same day is already cared for");
+  assert.equal(s.care, afterFirst, "a reload cannot move care twice");
+  assert.equal(P.updateCare(s, "2026-10-21"), true);
+  assert.ok(closeTo(s.care, 0.5 * afterFirst + 0.5 * 1), "later days average half the old care and half today");
+  s.today = { day: "2026-10-22" };
+  assert.equal(P.updateCare(s, "2026-10-22"), true, "a new day, even with a bare today, updates once");
+  assert.equal(P.updateCare(s, "2026-10-22"), false);
+});
+
+test("aiSouvenirAllowed: the AI line's separate day roll is skipped when care is low", () => {
+  const born = at(2026, 10, 1, 8, 0);
+  let skipped = 0, allowed = 0;
+  for (let d = 0; d < 200; d++) {
+    const key = "2026-11-" + String(1 + (d % 30)).padStart(2, "0") + "-" + d;
+    if (P.aiSouvenirAllowed(born, key, 0.1)) allowed++; else skipped++;
+    assert.equal(P.aiSouvenirAllowed(born, key, 0.1), P.aiSouvenirAllowed(born, key, 0.1), "the same day gives the same answer");
+  }
+  assert.ok(skipped > 0, "a low-care pet skips many AI days");
+  assert.ok(allowed > 0, "and the day's own roll still lets some through");
+  for (let d = 0; d < 50; d++) {
+    const key = "2026-12-" + String(1 + (d % 30)).padStart(2, "0") + "-" + d;
+    assert.equal(P.aiSouvenirAllowed(born, key, 1), true, "a care of 1 always passes: rng() < 1");
+  }
+});
+
+test("souvenirLocalChance: min(1, souvenirLocalRate / trait.outing) from the species pack", () => {
+  assert.ok(closeTo(P.SPECIES.chip.souvenirLocalRate, 1 / 7));
+  for (const [trait, tr] of Object.entries(P.SPECIES.chip.traits)) {
+    const want = Math.min(1, (1 / 7) / tr.outing);
+    assert.ok(closeTo(P.souvenirLocalChance({ species: "chip", trait }), want), trait);
+  }
+  assert.ok(closeTo(P.souvenirLocalChance({ species: "chip", trait: "lively" }), (1 / 7) / 0.7));
+  /* a pack without the rate uses the 1/7 fallback, one with its own rate uses it, and the result never passes 1 */
+  assert.ok(closeTo(P.souvenirLocalChance({ species: { traits: { slow: { outing: 0.4 } } }, trait: "slow" }), (1 / 7) / 0.4));
+  assert.equal(P.souvenirLocalChance({ species: { souvenirLocalRate: 0.5, traits: { rare: { outing: 0.2 } } }, trait: "rare" }), 1);
+  assert.equal(P.souvenirLocalChance({ species: { traits: { still: { outing: 0 } } }, trait: "still" }), 1);
+});
+
+/* One year of outings: 91-day seasons, 60 items each plus 60 in every season. A day's outing is a seeded draw
+   against trait.outing (not outingToday's calendar), then care moves toward the day's careScore (5/5/0 for a pet
+   kept well, 1/1/2 for one neglected), then the weekly local roll times souvenirMood(care); on a souvenir day
+   pickSouvenir sees the growing seen and recent lists and always takes an unseen in-season entry while one is left. */
+function simTable() {
+  const table = [];
+  for (const s of FOUR) for (let i = 0; i < 60; i++) table.push({ id: `${s}-${i}`, season: s });
+  for (let i = 0; i < 60; i++) table.push({ id: `any-${i}`, season: "any" });
+  return table;
+}
+function yearLocalSouvenirs(traitName, seed, table, neglected) {
+  const trait = P.SPECIES.chip.traits[traitName];
+  const r = P.rng(seed);
+  const startDay = Math.floor(r() * 364);
+  const seen = [], recent = [], seenSet = new Set();
+  const localChance = P.souvenirLocalChance({ species: "chip", trait: traitName });
+  let found = 0, care = null;
+  for (let d = 0; d < 365; d++) {
+    const season = FOUR[Math.floor((startDay + d) / 91) % 4];
+    if (r() >= trait.outing) continue;
+    /* the state after catch-up at the outing hour, for this kind of keeper */
+    const key = "sim-" + d;
+    const day = { species: "chip", hunger: neglected ? 1 : 5, joy: neglected ? 1 : 5, mess: neglected ? 2 : 0,
+      today: { day: key } };
+    if (care !== null) day.care = care;
+    assert.equal(P.updateCare(day, key), true);
+    care = day.care;
+    if (r() >= localChance * P.souvenirMood(care)) continue; /* an empty-handed outing */
+    const unseenLeft = table.some((e) => (e.season === "any" || e.season === season) && !seenSet.has(e.id));
+    const e = P.pickSouvenir(r, table, { season, seen, recent, newChance: 1 });
+    assert.ok(e, "a souvenir day picks an entry");
+    if (unseenLeft) assert.ok(!seenSet.has(e.id), `${traitName}: repeated ${e.id} while unseen items remained`);
+    if (!seenSet.has(e.id)) { seenSet.add(e.id); seen.push(e.id); found++; }
+    recent.push(e.id);
+    if (recent.length > 5) recent.shift();
+  }
+  return { found, care };
+}
+
+test("souvenir mood: a well-kept pet keeps 40-65 a year, a neglected one at most 10", (t) => {
+  const table = simTable();
+  assert.equal(table.length, 300);
+  const wellKept = {}, neglected = {};
+  for (const traitName of Object.keys(P.SPECIES.chip.traits)) {
+    let total = 0;
+    for (let i = 0; i < 50; i++) total += yearLocalSouvenirs(traitName, 4000 + i * 131, table, false).found;
+    wellKept[traitName] = total / 50;
+    assert.ok(wellKept[traitName] >= 40 && wellKept[traitName] <= 65,
+      `${traitName}: ${wellKept[traitName]} built-in souvenirs a year for a well-kept pet`);
+    total = 0;
+    for (let i = 0; i < 50; i++) total += yearLocalSouvenirs(traitName, 4000 + i * 131, table, true).found;
+    neglected[traitName] = total / 50;
+    assert.ok(neglected[traitName] <= 10,
+      `${traitName}: ${neglected[traitName]} built-in souvenirs a year for a neglected pet`);
+  }
+  t.diagnostic(JSON.stringify({ wellKept, neglected }));
 });
