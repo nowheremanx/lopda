@@ -93,7 +93,7 @@ function txOff(){ var m=$("link-mark"); if(m) m.classList.remove("tx"); var w=$(
 function diagText(){
   var d=TRANSPORT.diag();
   if(!d || d.fake) return "";
-  return tr("link.diag",{bps:d.bps, db:d.rms==null?"-":Math.round(d.rms), ctx:d.ctx, err:d.err?" · "+d.err:""});
+  return tr("link.doing."+d.doing)+" · "+tr("link.diag",{bps:d.bps, db:d.rms==null?"-":Math.round(d.rms), ctx:d.ctx, n:d.heard, err:d.err?" · "+d.err:""});
 }
 function updateBar(){
   if(!OVERLAY) return;
@@ -186,7 +186,7 @@ function fakeTransport(){
 function acousticTransport(){
   var T={stream:null, src:null, proc:null, silent:null, ctx:null, sr:48000, rx:null,
     n:0, floor:null, pdb:null, txUntil:0, onHeard:null, onBusy:null, initGen:0, sentRecent:[], live:false, txMode:navigator.audioSession ? "playback" : "record", reopen:0,
-    cb:0, cbAt:0, cbRate:0, cbCount:0, cbWin:0, wiredAt:0, rms:null, err:"", rewires:0, busySince:0, quietTx:0};
+    cb:0, cbAt:0, cbRate:0, cbCount:0, cbWin:0, wiredAt:0, rms:null, err:"", rewires:0, busySince:0, quietTx:0, heardN:0, playing:false};
 
   /* How late our own sound reaches the receiver, in seconds: the speaker's output latency, the
      microphone's input latency and the ScriptProcessor's block (T.n counts samples already handed
@@ -243,6 +243,7 @@ function acousticTransport(){
       frames=T.rx.frames();
       for(i=0;i<frames.length;i++){
         if(isOwn(frames[i].bytes)){ dlog("own echo dropped"); continue; }
+        T.heardN++;
         if(T.onHeard) T.onHeard(frames[i].bytes, frames[i].rate);
       }
       /* carrier sense: a slow floor under the strongest tone; a real burst jumps 10 dB above it */
@@ -340,7 +341,9 @@ function acousticTransport(){
     diag:function(){
       var c=T.ctx;
       return {mic:!!T.stream, ctx:c?c.state:"none", sr:c?c.sampleRate:0, bps:T.cbAt && Date.now()-T.cbAt<1500 ? Math.round(T.cbRate) : 0,
-        rms:T.rms, err:T.err, rewires:T.rewires, quietTx:T.quietTx, txMode:T.txMode};
+        rms:T.rms, err:T.err, rewires:T.rewires, quietTx:T.quietTx, txMode:T.txMode, heard:T.heardN,
+        /* who is doing what right now: talking, the microphone coming back after a playback send, or listening */
+        doing:T.playing ? "talk" : (!T.stream ? "reopen" : (T.cbAt && Date.now()-T.cbAt<1500 ? "listen" : "deaf"))};
     },
     send:function(bytes, rate, done){
       var ctx=T.ctx;
@@ -361,10 +364,12 @@ function acousticTransport(){
       if(T.rx) T.rx.mute(from,to);
       T.txUntil=Date.now()+(T0-ctx.currentTime+dur+0.25+lag)*1000;
       T.sentRecent.push({k:keyOf(bytes), at:Date.now()});
+      T.playing=true;
       var called=false, safety=0;
       function fin(){
         if(called) return;
         called=true;
+        T.playing=false;
         clearTimeout(safety);
         src.onended=null;
         try{ src.disconnect(); }catch(e){}
@@ -377,7 +382,7 @@ function acousticTransport(){
     stop:function(){
       var s=T.stream, live=T.live;
       T.initGen++; T.reopen++;
-      T.stream=null; T.live=false; T.lostAt=0;
+      T.stream=null; T.live=false; T.lostAt=0; T.heardN=0; T.playing=false;
       dropNodes();
       T.rx=null; T.floor=null; T.pdb=null; T.txUntil=0; T.sentRecent=[];
       if(!live) return; /* nothing was live: leave the page's audio session alone */
@@ -416,10 +421,12 @@ function acousticTransport(){
     src.connect(ctx.destination);
     T.txUntil=Date.now()+(dur+0.3)*1000;
     T.sentRecent.push({k:keyOf(bytes), at:Date.now()});
+    T.playing=true;
     var called=false, safety=0;
     function fin(){
       if(called) return;
       called=true;
+      T.playing=false;
       clearTimeout(safety);
       src.onended=null;
       try{ src.disconnect(); }catch(e){}
