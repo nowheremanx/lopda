@@ -38,6 +38,8 @@ var own=LP.own, toast=LP.toast, show=LP.show, showPad=LP.showPad;
 var BASE="data/users/local/studio", LOOKAHEAD=0.1, LOOP_MS=25, SAVE_MS=1000;
 /* 12.24: a live tap arrives one touch-to-handler delay after the finger, on top of the device's output latency */
 var REC_TAP_LAG=0.02;
+/* how long REC is held before it clears the track (12.24.1): long enough that a nervous tap never clears */
+var REC_HOLD_MS=700;
 /* the mixer's four instrument rows (12.14); the voice row joins them in step 2, when it can sound */
 var MIX_TRACKS=["drums","bass","chords","melody"];
 var TAPE=window.LopdaStudioTape, WAV=window.LopdaWav, MIDI=window.LopdaMidi, ZIP=window.LopdaZip;
@@ -64,7 +66,7 @@ var T={
   startAt:0, lastTick:0, heard:0, painted:null, navKey:"",
   /* 12.24: live recording. rec is "off" | "count" (the one-bar count-in) | "on"; recStartTick is the global tick
      writing begins at; metroNext is the next metronome beat still to be scheduled */
-  rec:"off", recStartTick:0, recBeat:-1, recLit:false, metroNext:0,
+  rec:"off", recHold:0, recHeld:false, recStartTick:0, recBeat:-1, recLit:false, metroNext:0,
   repeats:[], tour:null,
   /* song mode's bar state (12.12): the bar being heard is frozen; a chain edit only moves where it sits in the
      edited chain, and the next bar is re-anchored from nextSlot at the boundary (h* = heard, ahead = scheduled) */
@@ -1163,6 +1165,23 @@ function stopRecording(){
   if(T.historySilent){ T.historySilent=false; pushHistory(); }
   renderRec();
 }
+/* 12.24.1: hold REC to start again. The track on screen is emptied in this pattern only, then the count-in starts over
+   (or REC arms if it was off). Inside a take the clear is part of the take's one undo step; outside it is its own. */
+function clearAndRerecord(){
+  var track=screenTrack();
+  if(!recScreen() || !T.loaded || !T.song || !track) return;
+  T.song=SONGS.clearTrack(T.song,T.pat,track);
+  if(track==="bass"||track==="melody") T.noteSel[track]=-1;
+  touch();
+  if(T.rec==="off") toggleRec();
+  else {
+    T.rec="count";
+    T.recStartTick=nextBarTick();
+    renderRec();
+  }
+  renderGrid(); renderTabs(); renderNav();
+  toast(tr("studio.rec.cleared",{track:screenName(track)}));
+}
 function toggleRec(){
   if(!recScreen() || !T.loaded || !T.song) return;
   if(T.rec!=="off"){ stopRecording(); return; }
@@ -1503,7 +1522,18 @@ function build(){
   bindRepeat($("studio-minus"),-SONGS.BPM_STEP);
   bindRepeat($("studio-plus"),SONGS.BPM_STEP);
   $("studio-play").onclick=function(){ togglePlay(); };
-  $("studio-rec").onclick=function(){ toggleRec(); };
+  /* a tap toggles REC; holding it clears this track in this pattern and starts a fresh take (12.24.1), like a looper's
+     hold-to-clear. The hold fires once, and the click that follows the release is swallowed. */
+  var recBtn=$("studio-rec");
+  recBtn.onclick=function(){ if(T.recHeld){ T.recHeld=false; return; } toggleRec(); };
+  recBtn.addEventListener("pointerdown",function(){
+    T.recHeld=false;
+    if(T.recHold) clearTimeout(T.recHold);
+    T.recHold=setTimeout(function(){ T.recHold=0; T.recHeld=true; clearAndRerecord(); },REC_HOLD_MS);
+  });
+  ["pointerup","pointercancel","pointerleave"].forEach(function(ev){
+    recBtn.addEventListener(ev,function(){ if(T.recHold){ clearTimeout(T.recHold); T.recHold=0; } });
+  });
   $("studio-menu").onclick=function(){ openSheet("menu"); };
   if(window.ResizeObserver) new ResizeObserver(function(){ layout(); }).observe($("studio-board"));
   window.addEventListener("resize",layout);

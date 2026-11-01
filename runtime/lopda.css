@@ -724,6 +724,8 @@ textarea::placeholder{color:var(--ink-2)}
 .st-step:active,.st-mini:active{background:var(--ink);color:var(--lcd)}
 /* 12.24: REC is a filled paper circle in CSS, inverted while recording; the count-in blinks the dot on each beat */
 .st-rec .st-rec-dot{display:block;width:14px;height:14px;border-radius:50%;background:currentColor}
+/* held to clear (12.24.1): no iOS callout or text selection on the long press */
+.st-rec{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
 .st-rec.on{background:var(--ink);color:var(--lcd)}
 .st-rec.count .st-rec-dot{opacity:0.15}
 .st-rec.count.lit .st-rec-dot{opacity:1}

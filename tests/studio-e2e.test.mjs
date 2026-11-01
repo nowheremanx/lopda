@@ -4435,6 +4435,29 @@ test("studio rec: a drum tab tap while recording adds a hit", { skip, timeout: 9
   assert.deepEqual(errors, []);
 });
 
+test("studio rec: holding REC clears this pattern's track and starts a fresh count-in (12.24.1)", { skip, timeout: 90000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  assert.ok(await p.locator("#v-studio .st-cell.on").count() > 0, "the demo bar has drums");
+  const rec = p.locator("#studio-rec");
+  const box = await rec.boundingBox();
+  await p.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await p.mouse.down();
+  await p.waitForTimeout(900);
+  await p.mouse.up();
+  assert.equal(await p.locator("#v-studio .st-cell.on").count(), 0, "the drums of this pattern are gone");
+  assert.equal(await p.getAttribute("#v-studio", "data-rec"), "count", "a fresh take counts in; the release did not toggle REC off");
+  assert.equal(await p.getAttribute("#v-studio", "data-playing"), "true");
+  await rec.click();
+  assert.equal(await p.getAttribute("#v-studio", "data-rec"), null);
+  await p.click("#studio-menu");
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "撤销" }).first().click();
+  await p.waitForSelector("#studio-sheet", { state: "hidden" }).catch(() => {});
+  assert.ok(await p.locator("#v-studio .st-cell.on").count() > 0, "undo brings the drums back");
+  assert.deepEqual(errors, []);
+});
+
 test("studio rec: the ≡ menu replays the current screen's tour and the bar has no tour button", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await rtPage(t);
   await studioOpen(p);
