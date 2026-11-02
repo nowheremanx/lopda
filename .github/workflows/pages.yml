@@ -60,14 +60,18 @@ jobs:
           # The sdk scripts, the dev harness and the sound chip it shares with the runtime are what every app link
           # runs on, so a change there lists all apps. sdk/*.md and the templates are docs: they do not.
           if printf '%s\n' "$CHANGED" | grep -qE '^(sdk/(.*\.js|dev\.html)|runtime/chip\.js)$'; then APPS=$(ls registry/apps); fi
+          # The landing page at the site root (index.html and the pictures it shows).
+          LANDING=false
+          if printf '%s\n' "$CHANGED" | grep -qE '^(index\.html|docs/images/)'; then LANDING=true; fi
           # Docs, tests, CI only: nothing a preview could show, so no deploy and no comment.
-          if [ -z "$APPS" ] && [ "$RUNTIME" = false ]; then
+          if [ -z "$APPS" ] && [ "$RUNTIME" = false ] && [ "$LANDING" = false ]; then
             echo "deploy=false" >> "$GITHUB_OUTPUT"
             echo "No app, sdk script or runtime change: skipping the preview."
             exit 0
           fi
           echo "deploy=true" >> "$GITHUB_OUTPUT"
           echo "runtime=$RUNTIME" >> "$GITHUB_OUTPUT"
+          echo "landing=$LANDING" >> "$GITHUB_OUTPUT"
           { echo "apps<<EOF"; echo "$APPS"; echo "EOF"; } >> "$GITHUB_OUTPUT"
 
       - name: Prepare the gh-pages worktree
@@ -137,6 +141,7 @@ jobs:
         env:
           APPS: ${{ steps.plan.outputs.apps }}
           RUNTIME: ${{ steps.plan.outputs.runtime }}
+          LANDING: ${{ steps.plan.outputs.landing }}
           VERSION: ${{ steps.publish.outputs.version }}
         run: |
           {
@@ -152,6 +157,7 @@ jobs:
               NAMES=$(echo $APPS | sed 's/ /, /g'); if [ $(echo $APPS | wc -w) -gt 3 ]; then NAMES="any app / 任意 app"; fi
               echo "- runtime (on a phone; install from the store / 在商店里安装: $NAMES): $SITE/pr/$PR/runtime/"
             fi
+            if [ "$LANDING" = true ]; then echo "- landing page / 落地页: $SITE/pr/$PR/"; fi
             for id in $APPS; do
               echo "- $id (dev harness, desktop / 开发台，电脑上用): $SITE/pr/$PR/sdk/dev.html?app=registry/apps/$id"
             done
