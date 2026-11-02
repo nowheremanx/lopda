@@ -67,17 +67,21 @@ const OUT = resolve(args.find((a) => !a.startsWith("--")) || join(ROOT, "docs", 
 /* what the script reads on the screen, and what it writes into the notes, in each language */
 const T = {
   zh: { boot: "启动中…", open: "打开", camera: "点阵相机", darkroom: "冲洗店", notes: "记事本", calendar: "万年历", dict: "词典",
-        reader: "阅读器", book: "論語", store: "应用商店", puzzle: "拍照拼图", tower: "纸塔", yu: "滥竽充数", rain: "雨站",
+        reader: "阅读器", book: "論語", store: "应用商店", pet: "宠物", studio: "四轨机", library: "磁带库", gomoku: "五子棋", radio: "电波台",
+        radioIn: "在湖边吗？", radioOut: "船刚划过去。", puzzle: "拍照拼图", tower: "纸塔", yu: "滥竽充数", rain: "雨站",
         today: "去湖边拍完了一卷胶卷。船从左边划到右边，正好八张。", earlier: "秋天第一次穿外套。",
         quote: "《論語》\n學而時習之，不亦說乎。#摘抄", todo: "买胶卷\n周六去冲洗店。#待办" },
   en: { boot: "BOOT…", open: "Open", camera: "Camera", darkroom: "Darkroom", notes: "Notes", calendar: "Calendar", dict: "Dict",
-        reader: "Reader", book: "Alice", store: "Store", puzzle: "SnapTile", tower: "Paper", yu: "Fake Yu", rain: "Rain Stn",
+        reader: "Reader", book: "Alice", store: "Store", pet: "Pet", studio: "Tape4", library: "Tape library", gomoku: "Gomoku", radio: "Radio",
+        radioIn: "At the lake?", radioOut: "The boat just went by.", puzzle: "SnapTile", tower: "Paper", yu: "Fake Yu", rain: "Rain Stn",
         today: "Shot a whole roll by the lake. The boat crossed from left to right, eight frames exactly.",
         earlier: "First cold morning. Wore a coat.",
         quote: "Alice\u2019s Adventures in Wonderland\n\u201cCuriouser and curiouser!\u201d cried Alice. #quotes",
         todo: "Buy film\nTake the roll to the darkroom on Saturday. #todo" },
 }[LANG];
 const RAW = join(OUT, "raw");
+/* --demo=n: which demo tape Tape4 shows (0 neo-soul, 1 daylight pop, 2 the Saints, 3 茉莉花) */
+const DEMO = +((args.find((a) => a.startsWith("--demo=")) || "--demo=3").slice(7));
 const KEEP_RAW = args.includes("--raw");
 
 const pw = await loadPlaywright();
@@ -115,7 +119,7 @@ const tile = (label) => p.locator("#home .app", { has: p.locator(".label", { has
 const home = async () => { await p.click("#home-key"); await p.waitForTimeout(300); };
 const key = async (k, n = 1, gap = 120) => { for (let i = 0; i < n; i++) { await p.keyboard.press(k); await p.waitForTimeout(gap); } };
 
-await p.goto(base + "/runtime/", { waitUntil: "load" });
+await p.goto(base + "/runtime/?debug", { waitUntil: "load" });
 await p.waitForFunction(() => window.LopdaPlatform && window.LopdaStrings);
 await p.waitForFunction((boot) => document.getElementById("savestate").textContent !== boot, T.boot, { timeout: 8000 });
 await p.waitForLoadState("networkidle");
@@ -201,6 +205,34 @@ if (want("reader")) {
   await shot("reader", 800);
 }
 
+/* ---- the pet: hatched at once (?debug's LOPDA_DEBUG.pet), named with its default name, a few days old ---- */
+if (want("pet")) {
+  await home(); await tile(T.pet);
+  await p.waitForFunction(() => window.LOPDA_DEBUG.pet && LOPDA_DEBUG.pet.save());
+  await p.evaluate(() => LOPDA_DEBUG.pet.hatch());
+  await p.waitForTimeout(400);
+  await p.evaluate(() => LOPDA_DEBUG.pet.setDay(5));
+  await p.waitForTimeout(400);
+  await shot("pet", 600);
+}
+
+/* ---- Tape4: a copy of a demo tape (茉莉花, public domain), its melody screen ---- */
+if (want("studio")) {
+  await home(); await tile(T.studio);
+  await p.waitForSelector("#v-studio:not([hidden])"); await p.waitForTimeout(800);
+  const skipTour = async () => { const b = p.locator("#v-studio .st-tour-box button:visible", { hasText: /Skip|跳过/ }); if (await b.count()) { await b.first().click(); await p.waitForTimeout(300); } };
+  await skipTour();
+  /* a copy of a demo tape: menu, the library, the Demo folder, the tape, confirm */
+  await p.click("#studio-menu"); await p.waitForTimeout(300);
+  await p.locator("#studio-sheet li", { hasText: T.library }).first().click(); await p.waitForTimeout(500);
+  await p.locator("#studio-sheet .st-proj-list li").first().click(); await p.waitForTimeout(400);
+  await p.locator("#studio-sheet .st-proj-list li").nth(DEMO).click(); await p.waitForTimeout(300);
+  await p.locator("#studio-sheet .st-ask .btn:not(.ghost)").click(); await p.waitForTimeout(800);
+  await p.click('#studio-screens .st-scr[data-screen="melody"]'); await p.waitForTimeout(400);
+  await skipTour();
+  await shot("studio", 400);
+}
+
 /* ---- store ---- */
 if (want("store")) {
   await home(); await tile(T.store);
@@ -217,6 +249,10 @@ const play = async (label, steps) => {
   await item.scrollIntoViewIfNeeded();
   if ((await item.locator("button").textContent()) !== T.open) {
     await item.locator("button").click();
+    /* an app that asks for capabilities is confirmed first (decisions.md section 42): A says yes */
+    await p.waitForTimeout(300);
+    const ask = p.locator("#file-ask .box button").first();
+    if (await ask.count()) await ask.click();
     await p.waitForFunction(([l, open]) => { const li = [...document.querySelectorAll("#store-list .store-item")].find((e) => e.textContent.includes(l)); return li && li.querySelector("button").textContent === open; }, [label, T.open], { timeout: 15000 });
     await settle(300);
   }
@@ -224,27 +260,75 @@ const play = async (label, steps) => {
   await p.waitForSelector("#v-run:not([hidden])"); await p.waitForTimeout(1500);
   for (const s of steps) {
     if (typeof s === "number") await p.waitForTimeout(s);
+    else if (typeof s === "function") await s(p.frameLocator("#run-frame"));
     else if (/^[a-z][a-z-]+$/.test(s)) await shot(s, 100);   /* "x" and "ArrowDown" are keys */
     else await key(s, 1, 250);
   }
 };
-/* "name" takes a screenshot called name; a number waits; anything else is a key */
+/* "name" takes a screenshot called name; a number waits; a function gets the app's frame; anything else is a key */
+/* Gomoku: tap a few points of the 15 x 15 board; the computer answers each one */
+const gomoku = async (f) => {
+  const box = await f.locator("#c").boundingBox(), cell = box.width / 15;
+  for (const [x, y] of [[7, 7], [8, 6], [6, 8], [8, 8]]) {
+    await p.mouse.click(box.x + (x + 0.5) * cell, box.y + (y + 0.5) * cell); await p.waitForTimeout(2500);
+  }
+};
 const GAMES = [
   [T.puzzle, ["x", 800, "x", 1500, "x", 1500, "x", 2500, "puzzle"]],          /* allow the camera, shoot the lake, use it */
   [T.tower, ["x", 800, "x", 800, "x", 800, "paper-tower"]],
   [T.yu, ["ArrowDown", "x", 800, "x", 8000, "fake-yu"]],                  /* 选曲, the first song, mid-song */
   [T.rain, ["x", 800, "x", 3000, "rain-station"]],
+  [T.gomoku, [(f) => f.locator("#st").click(), 800, gomoku, "gomoku"]],   /* touch only: START, then a few stones */
 ];
 for (const [label, steps] of GAMES) if (want("games")) await play(label, steps);
 
 await home();
+await p.evaluate(() => { for (let e = document.getElementById("home"); e; e = e.parentElement) e.scrollTop = 0; });   /* a new tile was scrolled into view */
 await shot("home");
+
+/* ---- Radio: a short exchange in the link log (text and a 16 x 16 picture of the boat), seeded before it opens ---- */
+if (want("radio")) {
+  await p.evaluate((T) => {
+    const art = [
+      "3333333333333333", "3333333033333333", "3333333003333333", "3333333020333333", "3333333022033333", "3333333022203333",
+      "3333333022220333", "3333333022222033", "3333333000000003", "3330000000000000", "3333000000000003", "3333300000000033",
+      "2222222222222222", "1212121212121212", "2222222222222222", "1111111111111111"].join("");
+    const pic = []; for (let i = 0; i < 64; i++) { let b = 0; for (let k = 0; k < 4; k++) b = (b << 2) | +art[i * 4 + k]; pic.push(b); }
+    const at = Date.now();
+    return LP.S.db.doc("data/users/local/radio").set({ log: [
+      { dir: "sys", at: at - 6e5, kind: "open", ms: 20 },
+      { dir: "in", at: at - 5.4e5, kind: "text", text: T.radioIn },
+      { dir: "out", at: at - 4.8e5, kind: "pic", pic },
+      { dir: "out", at: at - 4.6e5, kind: "text", text: T.radioOut },
+      { dir: "sys", at: at - 3e5, kind: "close" }] });
+  }, T);
+  /* The link's session needs a running clock, so the shot is taken in a new tab whose clock starts at the same
+     minute and runs. A second handheld in another tab of the same browser talks over ?linkfake's
+     BroadcastChannel (runtime/link.js): both press Link. The seeded log is in the shared IndexedDB. */
+  const open = async (q) => {
+    await q.clock.install({ time: new Date("2026-10-22T09:41:00+08:00") });
+    await q.goto(base + "/runtime/?linkfake", { waitUntil: "load" });
+    await q.waitForFunction(() => window.LP && LP.builtins && LP.S && LP.S.db);
+    await q.waitForTimeout(800);
+    await q.evaluate(() => LP.builtins.find((x) => x.id === "radio").open());
+    await q.waitForSelector("#v-radio:not([hidden])"); await q.waitForTimeout(400);
+  };
+  const r = await ctx.newPage(), q = await ctx.newPage();
+  await open(r); await open(q);
+  await q.click("#radio-menu li:first-child"); await r.click("#radio-menu li:first-child");
+  await r.waitForSelector("#radio-page-link:not([hidden])", { timeout: 20000 });
+  await r.waitForTimeout(800);
+  await r.screenshot({ path: join(RAW, "radio.png"), animations: "disabled", caret: "hide" }); console.log("shot radio");
+  await q.close(); await r.close();
+}
+
 
 /* ---- the README's pictures: four screens side by side, and the darkroom's own prints as they are ---- */
 const ROWS = {
   "screens.png": ["home", "camera", "darkroom", "puzzle"],
   "builtins.png": ["notes", "calendar", "dict", "reader"],
   "apps.png": ["paper-tower", "fake-yu", "rain-station", "store"],
+  "more.png": ["pet", "studio", "radio", "gomoku"],
 };
 for (const [file, names] of Object.entries(ROWS)) {
   if (!names.every((n) => existsSync(join(RAW, n + ".png")))) { console.log("skip", file); continue; }
