@@ -5,7 +5,8 @@
  * (session layer acoustic-session.js, frames acoustic-link.js). This file owns only the screen and the
  * meter's own microphone.
  *
- * The link log is a document: data/users/local/radio {log:[{dir,at,kind,text?,pic?,lost?,ms?}], tx?}
+ * The link log is a document: data/users/local/radio {log:[{dir,at,kind,text?,pic?,lost?,ms?}], tx?, ch?}
+ * (ch: the channel, 1 low or 2 high, for every link on this handheld; read at boot by the ready hook)
  * (the last 30 entries, the four-tone picture as 64 bytes; dir "sys" with kind "open" {ms} or "close" marks
  * where a link began and ended). The backup includes it like any document.
  * The link page reads like a chat: our messages on the right, the other side's on the left, a mark once
@@ -75,7 +76,7 @@ function persistLog(){
   if(!R.ref) return;
   var log=[], i;
   for(i=0;i<R.log.length;i++) if(!R.log[i].pending) log.push(entryDoc(R.log[i]));
-  put(R.ref,{log:log.slice(-MAX_LOG),tx:R.txMode||undefined});
+  put(R.ref,{log:log.slice(-MAX_LOG),tx:R.txMode||undefined,ch:R.ch===2?2:undefined});
 }
 function loadDoc(){
   if(R.loaded || R.loading) return;
@@ -90,15 +91,28 @@ function loadDoc(){
       if(list.length && !R.log.length) R.log=list.slice(-MAX_LOG);
       /* "tx", not the old "txMode": the default changed after the first iPhone test, so a switch set before it is dropped */
       if(d.tx==="playback" || d.tx==="record") R.txMode=d.tx;
+      R.ch=d.ch===2?2:1;
     }
     R.loaded=true; R.loading=false;
     applyTxMode();
+    applyChannel();
     render();
   },function(){ R.loaded=true; R.loading=false; });
 }
 /* null: the link's own default (playback on iPhones, see link.js) */
 function applyTxMode(){ if(LP.link && LP.link.setTxMode && R.txMode) LP.link.setTxMode(R.txMode); }
 function saveTxMode(){ persistLog(); applyTxMode(); }
+function applyChannel(){ if(LP.link && LP.link.setChannel) R.ch=LP.link.setChannel(R.ch||1); }
+/* A on the channel row flips 1 <-> 2; not while a link is pairing or open */
+function toggleChannel(){
+  if(LP.link.busy()){ toast(tr("radio.open.busy")); sfx("err"); return; }
+  R.ch=R.ch===2?1:2;
+  applyChannel();
+  persistLog();
+  sfx("ok");
+  renderMenu();
+}
+function chName(n){ return tr("radio.menu.ch",{n:n, band:tr(n===2?"radio.ch.high":"radio.ch.low")}); }
 
 /* ---------- screens ---------- */
 var PAGES={menu:"radio-page-menu",guide:"radio-page-guide",link:"radio-page-link",write:"radio-page-write",draw:"radio-page-draw",meter:"radio-page-meter"};
@@ -167,10 +181,12 @@ function renderBar(){
 function renderMenu(){
   var rows=byId("radio-menu").children, i;
   for(i=0;i<rows.length;i++) rows[i].className=(i===R.menu?"on":"");
+  byId("radio-menu-ch").textContent=chName(LP.link.channel ? LP.link.channel() : 1);
   byId("radio-menu-note").textContent=R.pending?tr("radio.link.connecting"):(R.closeMsg||tr("radio.menu.note"));
 }
 function menuPick(){
-  var act=["link","guide","meter"][R.menu];
+  var act=["link","channel","guide","meter"][R.menu];
+  if(act==="channel"){ toggleChannel(); return; }
   sfx("tap");
   R.closeMsg="";
   if(act==="link") startConnect();
@@ -630,6 +646,7 @@ function activeTest(){ return !!(R.test.tx || R.test.rx || R.test.pending); }
 function renderMeter(){
   var T=R.test;
   byId("radio-txmode").checked=(R.txMode||LP.link.txMode())==="playback";
+  for(var hz=0;hz<4;hz++) byId("radio-bar-hz-"+hz).textContent=String(AC.TONES[hz]);
   byId("radio-test-rate").value=String(T.rate);
   byId("radio-test-pattern").value=T.pattern;
   byId("radio-pattern-hex").textContent=tr("radio.hex.tx")+" "+AC.hex(testBytes());
@@ -876,7 +893,7 @@ function radioButton(b,down){
     if(down){
       R.armA=false;
       if(b==="up"||b==="down"){
-        R.menu=(R.menu+(b==="down"?1:2))%3;
+        R.menu=(R.menu+(b==="down"?1:3))%4;
         sfx("move"); renderMenu();
       }else if(b==="a") R.armA=true;
     }else if(b==="a" && R.armA){ R.armA=false; menuPick(); }
@@ -989,6 +1006,8 @@ if(window.LOPDA_DEBUG) window.LOPDA_DEBUG.radio=R;
 LP.padRoute("radio",function(b,down){ if(byId("v-radio").hidden) return false; radioButton(b,down); return true; });
 
 LP.builtin({id:"radio", label:"app.radio", icon:icon, view:"radio", keepPad:true,
+  /* the channel is the handheld's, not only Radio's: read it at boot so an app's link uses it too */
+  ready:function(){ loadDoc(); },
   open:function(){
     R.live=true;
     R.page="menu";
