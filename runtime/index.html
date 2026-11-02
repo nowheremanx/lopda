@@ -515,6 +515,7 @@
       <div class="radio-page radio-menu-page" id="radio-page-menu">
         <ul class="radio-list" id="radio-menu">
           <li data-act="link" class="on" role="button" tabindex="0"><span data-i18n="radio.menu.link">连线</span></li>
+          <li data-act="channel" role="button" tabindex="0"><span id="radio-menu-ch"></span></li>
           <li data-act="guide" role="button" tabindex="0"><span data-i18n="radio.menu.guide">说明</span></li>
           <li data-act="meter" role="button" tabindex="0"><span data-i18n="radio.menu.meter">仪表</span></li>
         </ul>
@@ -567,10 +568,10 @@
         <section class="radio-meter-block">
           <h3 data-i18n="radio.meter.tones">四个音调 · dB</h3>
           <div class="radio-bars">
-            <div class="radio-bar-row"><span class="radio-bar-label">1500</span><span class="radio-level"><i id="radio-bar-0"></i></span><small id="radio-db-0">—</small></div>
-            <div class="radio-bar-row"><span class="radio-bar-label">2500</span><span class="radio-level"><i id="radio-bar-1"></i></span><small id="radio-db-1">—</small></div>
-            <div class="radio-bar-row"><span class="radio-bar-label">3500</span><span class="radio-level"><i id="radio-bar-2"></i></span><small id="radio-db-2">—</small></div>
-            <div class="radio-bar-row"><span class="radio-bar-label">4500</span><span class="radio-level"><i id="radio-bar-3"></i></span><small id="radio-db-3">—</small></div>
+            <div class="radio-bar-row"><span class="radio-bar-label" id="radio-bar-hz-0">800</span><span class="radio-level"><i id="radio-bar-0"></i></span><small id="radio-db-0">—</small></div>
+            <div class="radio-bar-row"><span class="radio-bar-label" id="radio-bar-hz-1">1200</span><span class="radio-level"><i id="radio-bar-1"></i></span><small id="radio-db-1">—</small></div>
+            <div class="radio-bar-row"><span class="radio-bar-label" id="radio-bar-hz-2">1600</span><span class="radio-level"><i id="radio-bar-2"></i></span><small id="radio-db-2">—</small></div>
+            <div class="radio-bar-row"><span class="radio-bar-label" id="radio-bar-hz-3">2000</span><span class="radio-level"><i id="radio-bar-3"></i></span><small id="radio-db-3">—</small></div>
           </div>
           <p class="hint" id="radio-meter-state" aria-live="polite"></p>
           <p class="hint" id="radio-floor"></p>
@@ -768,7 +769,7 @@
 
     <!-- LP.link: the pairing screen over whatever is in front (link.js); one screen, four tones -->
     <div class="link-view" id="link" hidden role="dialog" data-i18n-label="link.plain" aria-label="连线">
-      <div class="link-head"><span data-i18n="link.plain">连线</span><span id="link-attempt"></span></div>
+      <div class="link-head"><span data-i18n="link.plain">连线</span><span id="link-ch"></span><span id="link-attempt"></span></div>
       <h2 id="link-title"></h2>
       <div class="link-pair" aria-hidden="true">
         <span class="link-phone"></span>

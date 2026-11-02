@@ -45,11 +45,16 @@
 })(typeof window!=="undefined" ? window : (typeof globalThis!=="undefined" ? globalThis : this), function(LINK){
 "use strict";
 
-var REPLY_MS=1500;             /* one turn of the channel: answer a frame after this. An iPhone sends with its microphone
+var REPLY_MS=2000;             /* one turn of the channel: answer a frame after this. An iPhone sends with its microphone
                                   closed (link.js, playback) and needs 1-2 s to have it running again (two-iPhone test,
                                   iOS 27), so a quicker answer lands while the sender is still deaf */
+/* The turn grows when the peer shows it missed our answer (it repeats what we answered): its microphone came back
+   later than REPLY_MS after its own burst. 500 ms a step, never past TURN_MAX; every wait for the peer's answer
+   allows TURN_MAX, so a slow phone is always waited for. Without this, a phone whose microphone needs more than
+   REPLY_MS to reopen never hears an answer and both sides retry until the pairing times out. */
+var TURN_STEP=500, TURN_MAX=2500;
 var QUIET_MS=300;              /* carrier sense: nothing goes out this soon after energy */
-var LISTEN_MIN=800, LISTEN_MAX=2400, BACKOFF_MIN=300, BACKOFF_MAX=1200;
+var LISTEN_MIN=800, LISTEN_MAX=2400, LISTEN_CAP=4000, BACKOFF_MIN=300, BACKOFF_MAX=1200;
 var TRIES=5, HELLO_TRIES_PER_RATE=3;
 var PAIR_MS=60000, PING_MS=25000, PING_MISSES=3;
 var QUEUE=4, MAX_MESSAGE=200, CHUNK=60;
@@ -169,7 +174,7 @@ function create(opts){
   var airBusy=false, txInfo=null, txDeadline=0, txAirEnd=0;
 
   /* pairing */
-  var phase="idle", listenUntil=0, attempt=0, rateIdx=0;
+  var phase="idle", listenUntil=0, attempt=0, rateIdx=0, misses=0;
   var sid=0, nonce=0, helloRate=null, helloDeadline=0;
   var pendingAck=null, respAck=null, repeatAck=null, replyDue=null;
   var confirm=null, confirmTries=0, confirmSid=0, lastConfirm=null;   /* the responder, between its HELLO_ACK and the initiator's ACK */
@@ -180,6 +185,7 @@ function create(opts){
   var pingActive=false, pingSent=false, pingMisses=0, pingDueAt=0;
   var nextId=0;
 
+  var turn=REPLY_MS;
   function rand(lo, hi){ return lo+(hi-lo)*rnd(); }
   function backoff(){ return rand(BACKOFF_MIN, BACKOFF_MAX); }
   function quiet(now){ return lastBusy===null || now-lastBusy>=QUIET_MS; }
@@ -197,10 +203,12 @@ function create(opts){
      and its frame has to play out before we hear anything. HELLO_ACK's length is
      sized for the longest proto (16 bytes) since the peer's may be longer than
      ours; a PING can be answered by a full DATA frame. */
-  function dataWait(r){ return REPLY_MS+airMs(HEADER+CHUNK+2, r)+700; }
-  function helloWait(r){ return REPLY_MS+airMs(HEADER+7+16+2, r)+700; }
+  function dataWait(r){ return TURN_MAX+airMs(HEADER+CHUNK+2, r)+700; }
+  function helloWait(r){ return TURN_MAX+airMs(HEADER+7+16+2, r)+700; }
   /* the initiator's ACK; it may come as a full DATA frame when it already has a message */
-  function confirmWait(r){ return REPLY_MS+airMs(HEADER+CHUNK+2, r)+700; }
+  function confirmWait(r){ return TURN_MAX+airMs(HEADER+CHUNK+2, r)+700; }
+  /* the peer repeated something we answered: answer later from now on */
+  function slower(){ turn=Math.min(TURN_MAX, turn+TURN_STEP); }
 
   function helloAckBytes(id, n){
     return LINK.encode(TYPES.HELLO_ACK, id, 0, 0,
@@ -211,7 +219,11 @@ function create(opts){
 
   function beginListen(now){
     phase="listen";
-    listenUntil=now+rand(LISTEN_MIN, LISTEN_MAX);
+    /* Binary exponential backoff, as on old Ethernet: every HELLO that went unanswered doubles the window we
+       pick our quiet time from (up to LISTEN_CAP), so two phones that keep talking over each other drift apart
+       instead of retrying in step. */
+    var width=Math.min(LISTEN_CAP, (LISTEN_MAX-LISTEN_MIN)*Math.pow(2, misses));
+    listenUntil=now+rand(LISTEN_MIN, LISTEN_MIN+width);
     emit({do:"status", phase:"listen", rate:PAIR_RATES[rateIdx], attempt:attempt+1});
   }
 
@@ -244,6 +256,7 @@ function create(opts){
     if(phase==="helloWait"){
       if(helloDeadline && now>=helloDeadline){
         helloDeadline=0;
+        misses++;
         if(attempt>=HELLO_TRIES_PER_RATE){ attempt=0; rateIdx=(rateIdx+1)%PAIR_RATES.length; }
         beginListen(now);
       }
@@ -299,12 +312,13 @@ function create(opts){
       var h=LINK.parseHello(f.payload);
       if(!h) return;
       if(f.session!==confirmSid){ confirmTries=0; confirmSid=f.session; }
+      else if(confirmTries>0) slower();   /* we answered this pairing already: our HELLO_ACK came too soon */
       confirm=null;
       pendingAck={session:f.session, nonce:h.nonce, rate:r,
         mismatch:(h.port!==PORT)||(h.proto!==PROTO)};
       phase="reply";
       helloDeadline=0;
-      replyDue=now+REPLY_MS;
+      replyDue=now+turn;
       emit({do:"status", phase:"reply", rate:r, attempt:attempt+1});
       return;
     }
@@ -338,7 +352,7 @@ function create(opts){
 
   function scheduleReply(now){
     /* A reply already on its way answers this frame too; don't push it back. */
-    if(replyDue===null) replyDue=now+REPLY_MS;
+    if(replyDue===null) replyDue=now+turn;
   }
 
   function emitAck(now){
@@ -384,12 +398,12 @@ function create(opts){
       queue.shift();
       m=queue[0];
       /* A turn of silence before the next message: the peer may want to speak. */
-      if(m) m.nextAt=now+REPLY_MS;
+      if(m) m.nextAt=now+turn;
     }else{
       m.index++;
       m.seq=null;
       m.tries=0; /* five tries per fragment, not for the whole message */
-      m.nextAt=now+REPLY_MS;
+      m.nextAt=now+turn;
     }
   }
 
@@ -432,6 +446,7 @@ function create(opts){
     }
     /* A duplicate (our ACK was lost) or a gap: ack what we have and drop it.
        Stop-and-wait means the sender can only be retrying its current frame. */
+    if(f.seq===lastRecv) slower();
     scheduleReply(now);
   }
 
@@ -449,6 +464,7 @@ function create(opts){
       rate=r;
       emit({do:"rate", rate:r});
     }
+    slower();   /* the initiator never heard our HELLO_ACK */
     respAck={nonce:h.nonce};
     repeatAck={bytes:helloAckBytes(session, h.nonce), rate:r};
     scheduleReply(now);
@@ -466,7 +482,7 @@ function create(opts){
     if(f.type===TYPES.PING){ scheduleReply(now); return; }
     if(f.type===TYPES.DATA){ onData(f, now); return; }
     /* A repeated HELLO_ACK: the responder missed our ACK and is still waiting for it. */
-    if(f.type===TYPES.HELLO_ACK && initiator){ scheduleReply(now); return; }
+    if(f.type===TYPES.HELLO_ACK && initiator){ slower(); scheduleReply(now); return; }
     /* An ACK: the ack above was all it had to say. */
   }
 

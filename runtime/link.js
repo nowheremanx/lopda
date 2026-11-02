@@ -17,6 +17,7 @@
  *   busy()                     true while pairing or open
  *   levels()                   the last tone dB values and noise floor, for Radio's meter
  *   air()                      "talk" | "hear" | "" while open: who is on the air now (Radio's chat page)
+ *   setChannel(n), channel()   1 (low, the default) or 2 (high); Radio's menu, never through PAD
  *   setTxMode(m), txMode()     "playback" (default where navigator.audioSession exists: close the mic while sending,
  *                              or iOS plays through the earpiece) or "record" (keep it open); Radio's meter page
  *
@@ -71,6 +72,7 @@ function showOverlay(){
   setOverlayText();
   $("link-phase").textContent=tr("link.listen");
   $("link-attempt").textContent="";
+  $("link-ch").textContent=tr("link.ch",{n:AC.channel()});
   $("link-bar").style.width="0%";
   $("link-wave").className="link-wave";
   /* The pad is a touch way to B, but at 331 x 359 it takes half the LCD and pushes the
@@ -199,6 +201,7 @@ function fakeTransport(){
     },
     levels:function(){ return null; },
     deadMs:function(){ return 0; },
+    hearing:function(){ return true; },
     diag:function(){ return {fake:true}; },
     txUntil:function(){ return T.txUntil; }
   };
@@ -253,13 +256,14 @@ function acousticTransport(){
     T.src=src; T.proc=proc; T.silent=silent; T.ctx=ctx; T.sr=ctx.sampleRate;
     /* the receiver starts a fresh search on the new timeline; the sample counter goes on */
     T.rx=RX.create({sampleRate:ctx.sampleRate, rates:[10,20,40]});
-    T.wiredAt=Date.now(); T.cbAt=0;
+    T.wiredAt=Date.now(); T.cbAt=0; T.liveAt=0;
 
     proc.onaudioprocess=function(e){
       if(T.proc!==proc) return;
       var d=e.inputBuffer.getChannelData(0), n=T.n, i, j, tw, max, frames, t=Date.now();
       /* blocks a second, for the diagnostic line: an iPhone whose microphone has stalled shows 0 here */
       T.cb++; T.cbAt=t; T.cbCount++;
+      if(!T.liveAt) T.liveAt=t;
       if(t-T.cbWin>=1000){ T.cbRate=T.cbCount*1000/Math.max(1,t-T.cbWin); T.cbCount=0; T.cbWin=t; }
       T.rx.push(d,n);
       T.n=n+d.length;
@@ -359,6 +363,8 @@ function acousticTransport(){
       }
     },
     /* silent for this long: the microphone is not reaching us at all */
+    /* the microphone has delivered sound for a moment: carrier sense and the receiver are really listening */
+    hearing:function(){ return !!(T.liveAt && Date.now()-T.liveAt>=LIVE_MS); },
     deadMs:function(){
       if(T.live && !T.stream && T.lostAt) return Date.now()-T.lostAt;   /* a playback send whose reopen failed */
       return T.stream && T.ctx ? Date.now()-(T.cbAt||T.wiredAt) : 0;
@@ -442,7 +448,7 @@ function acousticTransport(){
     var samples=AC.synth(bytes,{sampleRate:sr, symbolMs:rate, amp:TX_AMP}), dur=samples.length/sr;
     var url=URL.createObjectURL(new Blob([window.LopdaWav.encode(samples,sr)],{type:"audio/wav"}));
     var el=elOf();
-    T.txUntil=Date.now()+(dur+0.3)*1000;
+    T.txUntil=Date.now()+(dur+0.3)*1000+ROUTE_MS;
     T.sentRecent.push({k:keyOf(bytes), at:Date.now()});
     T.playing=true;
     var called=false, safety=0;
@@ -469,11 +475,17 @@ function acousticTransport(){
     }
     el.onended=fin;
     el.onerror=function(){ T.err="play"; fin(); };
-    safety=setTimeout(fin,(dur+2)*1000);
+    safety=setTimeout(fin,(dur+2)*1000+ROUTE_MS);
     el.src=url;
-    var pr;
-    try{ pr=el.play(); }catch(e){ T.err="play "+(e && e.name || ""); T.quietTx++; fin(); return; }
-    if(pr && pr.then) pr.then(null,function(e){ T.err="play "+(e && e.name || ""); T.quietTx++; fin(); });
+    /* Give iOS a moment to leave the call-style route: while the microphone was open the session was
+       play-and-record, whose output is the earpiece; a burst started in the same instant as the switch to
+       playback could still go out of the earpiece, where the other phone cannot hear it. */
+    setTimeout(function(){
+      if(called) return;
+      var pr;
+      try{ pr=el.play(); }catch(e){ T.err="play "+(e && e.name || ""); T.quietTx++; fin(); return; }
+      if(pr && pr.then) pr.then(null,function(e){ T.err="play "+(e && e.name || ""); T.quietTx++; fin(); });
+    },ROUTE_MS);
   }
   /* one element for the whole link; a tap must have played it once before iOS lets it play on its own */
   function elOf(){
@@ -601,10 +613,23 @@ function drive(){
   updateBar();
 }
 
+/* The session's clock starts only once the microphone really delivers sound. An iPhone's microphone needs a second
+   or two after getUserMedia; a session started at once would "listen" deaf, hear neither the other side's carrier
+   nor its HELLO, and talk straight over it (both phones pressed together collided on their first HELLO this way).
+   A microphone that never delivers still gets its turn after WAIT_LIVE_MS: the pairing then times out as before. */
+var LIVE_MS=400, WAIT_LIVE_MS=4000;
+/* the pause between switching the audio session to playback and starting a burst (see sendPlayback) */
+var ROUTE_MS=250;
 function startDriver(){
   if(TIMER) return;
-  TIMER=setInterval(drive,50);
-  drive();
+  var gen=GEN, since=Date.now();
+  (function wait(){
+    if(gen!==GEN || STATE==="closed" || TIMER) return;
+    if(!TRANSPORT.hearing() && Date.now()-since<WAIT_LIVE_MS){ setTimeout(wait,50); return; }
+    dlog("live after "+(Date.now()-since)+" ms");
+    TIMER=setInterval(drive,50);
+    drive();
+  })();
 }
 
 /* ---------- LP.link ---------- */
@@ -723,7 +748,13 @@ document.addEventListener("visibilitychange",function(){
   if(document.hidden && STATE!=="closed") close("home");
 });
 
-var api={open:open, send:send, close:close, on:on, busy:busy, levels:levels, setTxMode:setTxMode, txMode:txMode, diag:diag, air:air};
+/* the channel (acoustic.js): Radio keeps the player's choice and sets it at start; every link, an app's too, uses it.
+   Not while a link is pairing or open: the other side would stop hearing us. */
+function setChannel(n){ return busy() ? AC.channel() : AC.setChannel(n); }
+function channel(){ return AC.channel(); }
+
+var api={open:open, send:send, close:close, on:on, busy:busy, levels:levels, setTxMode:setTxMode, txMode:txMode, diag:diag, air:air,
+  setChannel:setChannel, channel:channel};
 Object.defineProperty(api,"state",{get:function(){ return STATE; }});
 Object.defineProperty(api,"initiator",{get:function(){ return INITIATOR; }});
 Object.defineProperty(api,"rate",{get:function(){ return RATE; }});

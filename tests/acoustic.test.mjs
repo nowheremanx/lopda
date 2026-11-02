@@ -13,9 +13,28 @@ function noisy(samples, amount) {
 }
 
 test("four tones and a 16-symbol preamble", () => {
-  assert.deepEqual(AC.TONES, [1500, 2500, 3500, 4500]);
+  assert.deepEqual(AC.TONES, [800, 1200, 1600, 2000], "channel 1, the low one, is the default");
   assert.equal(AC.PREAMBLE.length, 16);
   assert.deepEqual([...new Set(AC.PREAMBLE)].sort(), [0, 1, 2, 3]);
+});
+
+test("channel 2 round-trips, and a burst on one channel is not heard on the other", () => {
+  const bytes = AC.testBytes("a5");
+  try {
+    assert.equal(AC.setChannel(2), 2);
+    assert.deepEqual(AC.TONES, [1500, 2500, 3500, 4500]);
+    const hi = AC.synth(bytes, { sampleRate: 48000, symbolMs: 20 });
+    assert.equal(AC.decode(hi, { sampleRate: 48000, symbolMs: 20, expectedBytes: bytes }).ok, true);
+    AC.setChannel(1);
+    assert.equal(AC.decode(hi, { sampleRate: 48000, symbolMs: 20, expectedBytes: bytes }).ok, false, "channel 1 does not decode channel 2");
+    const lo = AC.synth(bytes, { sampleRate: 48000, symbolMs: 20 });
+    AC.setChannel(2);
+    assert.equal(AC.decode(lo, { sampleRate: 48000, symbolMs: 20, expectedBytes: bytes }).ok, false, "channel 2 does not decode channel 1");
+  } finally {
+    AC.setChannel(1);
+  }
+  assert.equal(AC.channel(), 1);
+  assert.equal(AC.setChannel(7), 1, "anything else is channel 1");
 });
 
 test("a byte is four symbols, MSB pair first", () => {

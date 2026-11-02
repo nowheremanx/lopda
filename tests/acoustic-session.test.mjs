@@ -50,8 +50,14 @@ class Side {
 class Harness {
   constructor({ portA = PORT, protoA = PROTO, seedA = 11, portB = PORT, protoB = PROTO, seedB = 22,
     startA = 0, startB = 0, loss = 0, lossSeed = 1, dropHelloRate = null, dropHelloAcks = 0,
-    firstListen = null, firstSeq, noSent = false } = {}) {
+    firstListen = null, firstSeq, noSent = false, deafStart = 0, deafAfterTx = 0, senseDelay = 0 } = {}) {
     this.t = 0;
+    // A phone is not a perfect radio: its microphone takes a while to start (deafStart, from the side's own
+    // start), an iPhone closes it while it sends and needs a while to reopen it (deafAfterTx), and carrier
+    // sense notices the other side's burst only after a microphone block or two (senseDelay).
+    this.deafStart = deafStart;
+    this.deafAfterTx = deafAfterTx;
+    this.senseDelay = senseDelay;
     this.loss = loss;
     this.lossRng = mulberry32(lossSeed);
     this.dropHelloRate = dropHelloRate;
@@ -92,15 +98,23 @@ class Harness {
         deliver = false;
       }
       if (!this.noSent) s.session.sent(t);
-      if (deliver) s.other.session.heard(tx.bytes, t, tx.rate);
+      s.lastTxEnd = t;
+      // a deaf receiver does not hear a frame whose start it missed
+      if (deliver && !this.deaf(s.other, tx.start) && !this.deaf(s.other, t)) s.other.session.heard(tx.bytes, t, tx.rate);
     }
     for (const s of this.sides) {
-      if (s.other.tx && s.other.tx.start <= t && t < s.other.tx.end) s.session.busy(t);
+      if (s.other.tx && s.other.tx.start + this.senseDelay <= t && t < s.other.tx.end && !this.deaf(s, t)) s.session.busy(t);
     }
     for (const s of this.sides) if (t >= s.startAt) s.session.tick(t);
     for (const s of this.sides) this.pump(s, t);
     if (this.afterStep) this.afterStep();
     if (this.intervals.length > 64) this.intervals = this.intervals.filter((o) => o.end > t - 3000);
+  }
+
+  deaf(side, t) {
+    if (t < side.startAt + this.deafStart) return true;
+    if (side.tx) return true;                       // half duplex: our own burst is on the air
+    return side.lastTxEnd != null && t < side.lastTxEnd + this.deafAfterTx;
   }
 
   pump(side, t) {
@@ -468,7 +482,9 @@ test("nobody answers: 60 s of HELLOs steps 20 -> 40, then timeout", () => {
     }
   }
   assert.equal(closeReason, "timeout");
-  assert.deepEqual(rates.slice(0, 6), [20, 20, 20, 40, 40, 40]);   // 40 ms HELLOs are long: 10 is not reached in 60 s
+  // 40 ms HELLOs are long, and every unanswered HELLO widens the quiet time before the next (exponential backoff)
+  // and waits for the slowest answer (TURN_MAX): 10 is not reached in 60 s
+  assert.deepEqual(rates.slice(0, 4), [20, 20, 20, 40]);
 });
 
 test("a host that never calls sent() is rescued by the watchdog", () => {
@@ -501,10 +517,46 @@ test("a duplicate DATA frame is re-acked and not delivered twice", () => {
   const before = h.b.messages.length;
   const acksBefore = h.b.frames.filter((f) => f.ok && f.frame.type === L.TYPES.ACK).length;
   h.b.session.heard(sent.bytes, h.t, sent.rate);
-  run(h, 2000);
+  run(h, 4000);   // a duplicate also makes B answer later (its ACK came too soon), so allow the longer turn
 
   assert.equal(h.b.messages.length, before, "the duplicate is dropped");
   const acks = h.b.frames.filter((f) => f.ok && f.frame.type === L.TYPES.ACK);
   assert.ok(acks.length > acksBefore, "the duplicate is re-acked");
   assert.ok(acks[acks.length - 1].frame.ack >= sent.frame.seq);
+});
+
+/* Two phones pressed within a second of each other, with an iPhone's deaf times. link.js starts the session only once
+   the microphone delivers sound, so there is no deaf start; but an iPhone closes the microphone while it sends and
+   needs 1-2 s to reopen it (deafAfterTx), and carrier sense notices a burst a block or two late (senseDelay).
+   Before 0.60.0 (answers after 1.5 s, fixed listen window) a 2 s reopen never paired at all. */
+function pairRate(n, opts) {
+  let ok = 0;
+  const times = [];
+  for (let i = 1; i <= n; i++) {
+    const rng = mulberry32(i * 101);
+    const h = new Harness({ seedA: i * 7 + 1, seedB: i * 13 + 5, startA: 0, startB: Math.floor(rng() * 100) * 10, ...opts });
+    const w = runUntil(h, () => h.a.opens.length && h.b.opens.length, 60000);
+    if (h.a.opens.length && h.b.opens.length) { ok++; times.push(w); }
+  }
+  times.sort((x, y) => x - y);
+  return { rate: ok / n, median: times[Math.floor(times.length / 2)] || null };
+}
+
+test("pairing with an iPhone's deaf times: a 2 s reopen pairs at the first try", () => {
+  const r = pairRate(200, { deafAfterTx: 2000, senseDelay: 200 });
+  console.log("# 2 s reopen: " + JSON.stringify(r));
+  assert.ok(r.rate >= 0.99, "paired " + r.rate);
+  assert.ok(r.median <= 15000, "median " + r.median);
+});
+
+test("pairing with a slower phone: a 2.5 s reopen still pairs once the turn has grown", () => {
+  const r = pairRate(200, { deafAfterTx: 2500, senseDelay: 200 });
+  console.log("# 2.5 s reopen: " + JSON.stringify(r));
+  assert.ok(r.rate >= 0.95, "paired " + r.rate);
+});
+
+test("a microphone that starts late costs at most one more round", () => {
+  const r = pairRate(200, { deafStart: 1500, deafAfterTx: 2000, senseDelay: 200 });
+  console.log("# late microphone: " + JSON.stringify(r));
+  assert.ok(r.rate >= 0.98, "paired " + r.rate);
 });
