@@ -18,7 +18,19 @@
 })(typeof window!=="undefined" ? window : (typeof globalThis!=="undefined" ? globalThis : this), function(){
 "use strict";
 
-var TONES=[1500,2500,3500,4500];
+/* Two channels, like a walkie-talkie's: both handhelds must be on the same one (decisions.md section 49).
+   Channel 1, the default, is low and soft; channel 2 is the first, shriller band. 400 Hz apart is still four
+   bins of a 10 ms Hann window. TONES is the current channel's, changed in place by setChannel so every caller
+   (the receiver, the synth, Radio's meter) follows; the runtime has one link and one meter at a time. */
+var CHANNELS={1:[800,1200,1600,2000], 2:[1500,2500,3500,4500]};
+var TONES=CHANNELS[1].slice(), CHANNEL=1;
+function setChannel(n){
+  n=n===2?2:1;
+  CHANNEL=n;
+  for(var i=0;i<4;i++) TONES[i]=CHANNELS[n][i];
+  return n;
+}
+function channel(){ return CHANNEL; }
 var GUARDS=[600,900,2000,3000,4000,5000,5800];
 /* 8 alternating tones for timing, then a sync word that is unlikely to appear in payload data. */
 var PREAMBLE=[0,3,0,3,0,3,0,3, 1,2,0,3,3,0,2,1];
@@ -248,6 +260,9 @@ function hex(bytes){
 return {
   version:"m2",
   TONES:TONES,
+  CHANNELS:CHANNELS,
+  setChannel:setChannel,
+  channel:channel,
   GUARDS:GUARDS,
   PREAMBLE:PREAMBLE,
   RATES:RATES,
