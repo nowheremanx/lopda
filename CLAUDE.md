@@ -9,7 +9,7 @@ Design drafts for work not yet merged: `docs/design/` (current: `home-api.md`, t
 and its grow / match layers, with cycle deferred; `pet-souvenirs-100.md`, the souvenir catalogue, picking
 and origin lines;
 `tape4-import.md`, MIDI import into Tape4, after 1.0;
-`tape4-music.md`, Tape4 songs in apps: MML export, later `PAD.music.play(tape)`).
+`tape4-music.md`, Tape4 songs in apps through `PAD.music.play(tape)`, after 1.0).
 
 ## Layout
 
