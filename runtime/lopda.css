@@ -30,6 +30,7 @@ body{background:var(--case);color:var(--ink);margin:0;display:flex;justify-conte
 .screen::after{content:"";position:absolute;inset:0;z-index:20;pointer-events:none;background:repeating-linear-gradient(0deg,rgba(31,42,20,.03) 0 1px,transparent 1px 3px)}
 .status{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:4px 10px;border-bottom:2px solid var(--ink);font-family:var(--f-pix);font-size:20px;line-height:1;font-variant-numeric:tabular-nums}
 .status .save{font-size:16px;color:var(--ink)}
+.status .save.bad{background:var(--ink);color:var(--lcd);padding:0 4px}
 .view{flex:1;min-height:0;overflow:auto;position:relative}
 /* the phone's keyboard is up (core.js): the LCD takes the visible height; the case around it steps aside */
 html.kb .device{height:var(--vvh,100dvh);padding-block:calc(env(safe-area-inset-top,0px) + 4px) 4px;gap:0}
