@@ -29,6 +29,10 @@ as a four-tone negative PNG that carries the colour originals inside, and come b
 
 ![The same roll as one film strip, with sprocket holes and edge print](docs/images/film-strip.png)
 
+The seven stocks on one photo, same roll and same development, only the stock changes (the first is the original):
+
+![One autumn valley with a lake, eight times: the original, then Portrait, Sunny, Verde, Pastel, Tungsten, Noir and Expired](docs/images/stocks/sheet.jpg)
+
 ## What's inside
 
 ![Notes with today's diary, the calendar with lunar dates and a folded corner on days with a diary, a dictionary entry, and a page of Alice in Wonderland in the reader](docs/images/builtins.png)
