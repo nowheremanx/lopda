@@ -199,6 +199,7 @@ function fakeTransport(){
     },
     levels:function(){ return null; },
     deadMs:function(){ return 0; },
+    hearing:function(){ return true; },
     diag:function(){ return {fake:true}; },
     txUntil:function(){ return T.txUntil; }
   };
@@ -253,13 +254,14 @@ function acousticTransport(){
     T.src=src; T.proc=proc; T.silent=silent; T.ctx=ctx; T.sr=ctx.sampleRate;
     /* the receiver starts a fresh search on the new timeline; the sample counter goes on */
     T.rx=RX.create({sampleRate:ctx.sampleRate, rates:[10,20,40]});
-    T.wiredAt=Date.now(); T.cbAt=0;
+    T.wiredAt=Date.now(); T.cbAt=0; T.liveAt=0;
 
     proc.onaudioprocess=function(e){
       if(T.proc!==proc) return;
       var d=e.inputBuffer.getChannelData(0), n=T.n, i, j, tw, max, frames, t=Date.now();
       /* blocks a second, for the diagnostic line: an iPhone whose microphone has stalled shows 0 here */
       T.cb++; T.cbAt=t; T.cbCount++;
+      if(!T.liveAt) T.liveAt=t;
       if(t-T.cbWin>=1000){ T.cbRate=T.cbCount*1000/Math.max(1,t-T.cbWin); T.cbCount=0; T.cbWin=t; }
       T.rx.push(d,n);
       T.n=n+d.length;
@@ -359,6 +361,8 @@ function acousticTransport(){
       }
     },
     /* silent for this long: the microphone is not reaching us at all */
+    /* the microphone has delivered sound for a moment: carrier sense and the receiver are really listening */
+    hearing:function(){ return !!(T.liveAt && Date.now()-T.liveAt>=LIVE_MS); },
     deadMs:function(){
       if(T.live && !T.stream && T.lostAt) return Date.now()-T.lostAt;   /* a playback send whose reopen failed */
       return T.stream && T.ctx ? Date.now()-(T.cbAt||T.wiredAt) : 0;
@@ -601,10 +605,21 @@ function drive(){
   updateBar();
 }
 
+/* The session's clock starts only once the microphone really delivers sound. An iPhone's microphone needs a second
+   or two after getUserMedia; a session started at once would "listen" deaf, hear neither the other side's carrier
+   nor its HELLO, and talk straight over it (both phones pressed together collided on their first HELLO this way).
+   A microphone that never delivers still gets its turn after WAIT_LIVE_MS: the pairing then times out as before. */
+var LIVE_MS=400, WAIT_LIVE_MS=4000;
 function startDriver(){
   if(TIMER) return;
-  TIMER=setInterval(drive,50);
-  drive();
+  var gen=GEN, since=Date.now();
+  (function wait(){
+    if(gen!==GEN || STATE==="closed" || TIMER) return;
+    if(!TRANSPORT.hearing() && Date.now()-since<WAIT_LIVE_MS){ setTimeout(wait,50); return; }
+    dlog("live after "+(Date.now()-since)+" ms");
+    TIMER=setInterval(drive,50);
+    drive();
+  })();
 }
 
 /* ---------- LP.link ---------- */
