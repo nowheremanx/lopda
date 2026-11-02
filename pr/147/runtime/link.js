@@ -448,7 +448,7 @@ function acousticTransport(){
     var samples=AC.synth(bytes,{sampleRate:sr, symbolMs:rate, amp:TX_AMP}), dur=samples.length/sr;
     var url=URL.createObjectURL(new Blob([window.LopdaWav.encode(samples,sr)],{type:"audio/wav"}));
     var el=elOf();
-    T.txUntil=Date.now()+(dur+0.3)*1000;
+    T.txUntil=Date.now()+(dur+0.3)*1000+ROUTE_MS;
     T.sentRecent.push({k:keyOf(bytes), at:Date.now()});
     T.playing=true;
     var called=false, safety=0;
@@ -475,11 +475,17 @@ function acousticTransport(){
     }
     el.onended=fin;
     el.onerror=function(){ T.err="play"; fin(); };
-    safety=setTimeout(fin,(dur+2)*1000);
+    safety=setTimeout(fin,(dur+2)*1000+ROUTE_MS);
     el.src=url;
-    var pr;
-    try{ pr=el.play(); }catch(e){ T.err="play "+(e && e.name || ""); T.quietTx++; fin(); return; }
-    if(pr && pr.then) pr.then(null,function(e){ T.err="play "+(e && e.name || ""); T.quietTx++; fin(); });
+    /* Give iOS a moment to leave the call-style route: while the microphone was open the session was
+       play-and-record, whose output is the earpiece; a burst started in the same instant as the switch to
+       playback could still go out of the earpiece, where the other phone cannot hear it. */
+    setTimeout(function(){
+      if(called) return;
+      var pr;
+      try{ pr=el.play(); }catch(e){ T.err="play "+(e && e.name || ""); T.quietTx++; fin(); return; }
+      if(pr && pr.then) pr.then(null,function(e){ T.err="play "+(e && e.name || ""); T.quietTx++; fin(); });
+    },ROUTE_MS);
   }
   /* one element for the whole link; a tap must have played it once before iOS lets it play on its own */
   function elOf(){
@@ -612,6 +618,8 @@ function drive(){
    nor its HELLO, and talk straight over it (both phones pressed together collided on their first HELLO this way).
    A microphone that never delivers still gets its turn after WAIT_LIVE_MS: the pairing then times out as before. */
 var LIVE_MS=400, WAIT_LIVE_MS=4000;
+/* the pause between switching the audio session to playback and starting a burst (see sendPlayback) */
+var ROUTE_MS=250;
 function startDriver(){
   if(TIMER) return;
   var gen=GEN, since=Date.now();
