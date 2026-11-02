@@ -130,6 +130,14 @@ Hard rules for index.html:
          indices, 0 = ink ... 3 = paper (PAD.TONES), row by row. null (cancelled, refused, no camera) is normal:
          the app must still work. Show the picture the player took and offer to take it again.
   "permissions" must list "camera" for this.
+- A two-player game over sound with one other handheld, only if the idea needs it (experimental, runtime 0.58.0 and
+  later; registry/apps/gomoku is the example). Check that PAD.link exists first:
+    PAD.link.open({proto: "mygame1"}) -> Promise "open" | "cancelled" | "denied" | "none" | "busy"; the runtime shows
+         its own pairing screen. PAD.link.send(data), a string or Uint8Array of at most 200 bytes, -> Promise "sent" |
+         "lost" | "closed" | "busy" | "big". PAD.on("link", fn) gives {type: "message", data} or {type: "close", reason}.
+         PAD.link.initiator can pick who goes first. It is slow (a short move takes 2-3 seconds): send turns, not
+         streams. The game must stay playable alone, and must handle every result and close reason.
+  "permissions" must list "link" for this.
 - Pixel art: draw on a small canvas and scale it up with
   image-rendering: pixelated.
 
@@ -150,7 +158,7 @@ manifest.json must be:
   "permissions": [<leave empty; "files" only if the app imports or exports files with PAD.importFile / PAD.exportFile;
                    "motion" only if it uses PAD.motion or the tilt/shake events; "mic" only if it uses PAD.mic or the sound event;
                    "notes" only if it uses PAD.notes.append; "camera" only if it uses PAD.camera.snap;
-                   "wordbook" only if it uses PAD.dict.addWord, removeWord or inBook>],
+                   "wordbook" only if it uses PAD.dict.addWord, removeWord or inBook; "link" only if it uses PAD.link>],
   "buttons": <true if the app uses PAD.on, otherwise leave this line out>
 }
 
