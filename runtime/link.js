@@ -17,6 +17,7 @@
  *   busy()                     true while pairing or open
  *   levels()                   the last tone dB values and noise floor, for Radio's meter
  *   air()                      "talk" | "hear" | "" while open: who is on the air now (Radio's chat page)
+ *   setChannel(n), channel()   1 (low, the default) or 2 (high); Radio's menu, never through PAD
  *   setTxMode(m), txMode()     "playback" (default where navigator.audioSession exists: close the mic while sending,
  *                              or iOS plays through the earpiece) or "record" (keep it open); Radio's meter page
  *
@@ -71,6 +72,7 @@ function showOverlay(){
   setOverlayText();
   $("link-phase").textContent=tr("link.listen");
   $("link-attempt").textContent="";
+  $("link-ch").textContent=tr("link.ch",{n:AC.channel()});
   $("link-bar").style.width="0%";
   $("link-wave").className="link-wave";
   /* The pad is a touch way to B, but at 331 x 359 it takes half the LCD and pushes the
@@ -738,7 +740,13 @@ document.addEventListener("visibilitychange",function(){
   if(document.hidden && STATE!=="closed") close("home");
 });
 
-var api={open:open, send:send, close:close, on:on, busy:busy, levels:levels, setTxMode:setTxMode, txMode:txMode, diag:diag, air:air};
+/* the channel (acoustic.js): Radio keeps the player's choice and sets it at start; every link, an app's too, uses it.
+   Not while a link is pairing or open: the other side would stop hearing us. */
+function setChannel(n){ return busy() ? AC.channel() : AC.setChannel(n); }
+function channel(){ return AC.channel(); }
+
+var api={open:open, send:send, close:close, on:on, busy:busy, levels:levels, setTxMode:setTxMode, txMode:txMode, diag:diag, air:air,
+  setChannel:setChannel, channel:channel};
 Object.defineProperty(api,"state",{get:function(){ return STATE; }});
 Object.defineProperty(api,"initiator",{get:function(){ return INITIATOR; }});
 Object.defineProperty(api,"rate",{get:function(){ return RATE; }});
