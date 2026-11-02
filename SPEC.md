@@ -1,6 +1,12 @@
 # Lo-PDA App Specification v1
 
-Status: draft · Spec id: `lopda/1` (apps written for `lopda/0` keep working) · License: MIT (see `sdk/LICENSE`)
+Status: **1.0, frozen** (2026-11-02, runtime 1.0.0) · Spec id: `lopda/1` (apps written for `lopda/0` keep working) · License: MIT (see `sdk/LICENSE`)
+
+**The promise.** An app written to this spec runs on every later Lo-PDA. What `lopda/1` describes here no longer
+changes: no call is removed or renamed, no result changes meaning, no limit gets tighter. New calls come in `lopda/2`,
+and an app finds them by checking that they exist (`if (PAD.xxx)`), as it already does for the calls added within
+`lopda/1`. The one exception is the link (section 6.8), which is experimental and not frozen. Fixes to the wording of this
+document, and runtime bugs that broke what it says, are not changes.
 
 What v1 adds over v0: the chin buttons (`"buttons": true`, `PAD.on`, `PAD.isDown`) and
 system sounds (`PAD.sfx`). Added later within v1, all optional: the player's language

@@ -136,8 +136,8 @@ node --test                                  # the test suite; must pass
 
 ## App spec (summary; SPEC.md is the source of truth)
 
-- An app is one self-contained `index.html` (≤ 512 KB) plus `manifest.json`. Spec `lopda/1`
-  (`lopda/0` still accepted). Optional `"buttons": true` shows the chin pad.
+- An app is one self-contained `index.html` (≤ 512 KB) plus `manifest.json`. Spec `lopda/1`, frozen as 1.0 with runtime 1.0.0
+  (decisions.md section 51; `lopda/0` still accepted). Optional `"buttons": true` shows the chin pad.
 - Runs in `<iframe sandbox="allow-scripts">` with CSP `default-src 'none'; script-src 'unsafe-inline';
   style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; font-src data:; connect-src 'none'`.
   No network, no eval, no storage APIs, no alert/confirm/prompt, no emoji.
@@ -157,7 +157,7 @@ node --test                                  # the test suite; must pass
   `removeWord(word)` -> "saved" | "denied" | "full" | null, over the player's own word book, the same one the dictionary and
   the reader use; the runtime's dialog on the first add or remove, one grant per app, listed with the sensors in Settings;
   reading needs the grant too; decisions.md section 35).
-- `"link"` (runtime 0.58.0+, SPEC.md 6.8, after lopda/1 was frozen: check `PAD.link` exists): `PAD.link.open({proto})` ->
+- `"link"` (runtime 0.58.0+, SPEC.md 6.8, experimental and not frozen with lopda/1: check `PAD.link` exists): `PAD.link.open({proto})` ->
   "open" | "cancelled" | "denied" | "none" | "busy" (the runtime's pairing screen; both handhelds press, no master),
   `send(data)` (a string or Uint8Array ≤ 200 bytes) -> "sent" | "lost" | "closed" | "busy" | "big", `close()`, `state`,
   `initiator`, `PAD.on("link", fn)` with {type:"message", data} | {type:"close", reason}; one link at a time, `PAD.mic` gives
