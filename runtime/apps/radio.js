@@ -1006,8 +1006,6 @@ if(window.LOPDA_DEBUG) window.LOPDA_DEBUG.radio=R;
 LP.padRoute("radio",function(b,down){ if(byId("v-radio").hidden) return false; radioButton(b,down); return true; });
 
 LP.builtin({id:"radio", label:"app.radio", icon:icon, view:"radio", keepPad:true,
-  /* the channel is the handheld's, not only Radio's: read it at boot so an app's link uses it too */
-  ready:function(){ loadDoc(); },
   open:function(){
     R.live=true;
     R.page="menu";
@@ -1018,8 +1016,9 @@ LP.builtin({id:"radio", label:"app.radio", icon:icon, view:"radio", keepPad:true
     R.closeMsg="";
     applyTxMode();
     loadDoc();
-    renderMenu();
-    renderBar();
+    /* setPage, not just R.page: leaving from the meter (HOME) left its page shown under a "menu" state,
+       so B did nothing on the next visit */
+    setPage("menu");
     LP.show("radio");
     LP.showPad(true);
   },
@@ -1066,6 +1065,7 @@ LP.builtin({id:"radio", label:"app.radio", icon:icon, view:"radio", keepPad:true
     restartMeterLater();
     render();
   },
+  /* the channel is the handheld's, not only Radio's: read it at boot so an app's link uses it too */
   ready:function(){ loadDoc(); }
 });
 })();
