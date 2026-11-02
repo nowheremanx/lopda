@@ -1,6 +1,12 @@
 # Lo-PDA App Specification v1
 
-Status: draft · Spec id: `lopda/1` (apps written for `lopda/0` keep working) · License: MIT (see `sdk/LICENSE`)
+Status: **1.0, frozen** (2026-11-02, runtime 1.0.0) · Spec id: `lopda/1` (apps written for `lopda/0` keep working) · License: MIT (see `sdk/LICENSE`)
+
+**The promise.** An app written to this spec runs on every later Lo-PDA. What `lopda/1` describes here no longer
+changes: no call is removed or renamed, no result changes meaning, no limit gets tighter. New calls come in `lopda/2`,
+and an app finds them by checking that they exist (`if (PAD.xxx)`), as it already does for the calls added within
+`lopda/1`. The one exception is the link (section 6.8), which is experimental and not frozen. Fixes to the wording of this
+document, and runtime bugs that broke what it says, are not changes.
 
 What v1 adds over v0: the chin buttons (`"buttons": true`, `PAD.on`, `PAD.isDown`) and
 system sounds (`PAD.sfx`). Added later within v1, all optional: the player's language
@@ -9,7 +15,11 @@ system sounds (`PAD.sfx`). Added later within v1, all optional: the player's lan
 app's own and ambience (`PAD.music`, `PAD.sfx({...})`, `PAD.ambience`), see section 6.3; tilt, shake, heading and the
 microphone's loudness and pitch (`"permissions": ["motion"]` / `["mic"]`, `PAD.motion`, `PAD.mic`), see section 6.4;
 writing into the player's notes (`"permissions": ["notes"]`, `PAD.notes.append`) and speech (`PAD.say`), see section 6.5;
-one photo taken by the player (`"permissions": ["camera"]`, `PAD.camera.snap`), see section 6.6.
+one photo taken by the player (`"permissions": ["camera"]`, `PAD.camera.snap`), see section 6.6; the built-in
+dictionary's words and entries (`PAD.dict`) and the player's word book (`"permissions": ["wordbook"]`), see section 6.7;
+the save's metadata and schema (`PAD.saveInfo`, `PAD.setSchema`), see sections 6 and 8. One more is **experimental**:
+a message link to another handheld (`"permissions": ["link"]`, `PAD.link`), see section 6.8. It is part of `lopda/1`
+but not frozen with it, and may still change.
 
 A Lo-PDA app is one self-contained HTML file plus a small manifest. The runtime
 installs it from the registry, pins it to an exact version, and runs it inside
@@ -183,6 +193,7 @@ PAD.on("sound", fn)          // fn({level, pitch}), at most 20 a second
 // lopda/1 (section 6.5); undefined on runtimes before 0.26.0
 await PAD.notes.append(title, text)   // -> "saved" | "denied"   (needs "permissions": ["notes"])
 await PAD.say(text, {lang})           // -> "done" | "stopped" | "unavailable"   (no permission)
+PAD.say.languages                     // ["zh", "en", "ja"]; "ja" is runtime 0.29.0+
 
 // lopda/1 with "permissions": ["camera"] (section 6.6); undefined on runtimes before 0.28.0
 await PAD.camera.snap({size})         // size "small" (128x112) | "large" (256x224) -> {w, h, px} | null
@@ -197,7 +208,7 @@ await PAD.dict.inBook(words)          // 1-20 words -> boolean[] | null
 await PAD.dict.addWord(word)          // -> "saved" | "denied" | "full" | null
 await PAD.dict.removeWord(word)       // -> "saved" | "denied" | "full" | null
 
-// lopda/1 with "permissions": ["link"] (section 6.8); undefined on runtimes before 0.58.0
+// lopda/1, experimental, with "permissions": ["link"] (section 6.8); undefined on runtimes before 0.58.0
 await PAD.link.open({proto})          // -> "open" | "cancelled" | "denied" | "none" | "busy"
 await PAD.link.send(data)             // string or Uint8Array, <= 200 bytes -> "sent" | "lost" | "closed" | "busy" | "big"
 PAD.link.close()
@@ -629,8 +640,14 @@ if (PAD.dict && PAD.dict.inBook) {               // the word book calls arrive w
 ### 6.8 The link
 
 An app that declares `"permissions": ["link"]` can open a message channel to one other handheld running the same app
-(added in runtime 0.58.0, after `lopda/1` was frozen, so check that `PAD.link` exists before using it). The
-runtime draws its pairing screen, works the microphone and the speaker, and carries each message; the app gets a few
+(added in runtime 0.58.0, so check that `PAD.link` exists before using it).
+
+**Experimental.** The link is part of `lopda/1` but not frozen with the rest of it: pairing, the rates, the limits
+below and the close reasons may still change before `lopda/2`, and the sound link works better on some phones than on
+others. An app that uses it must handle every result and reason, including ones it does not know, and must stay
+playable without it.
+
+The runtime draws its pairing screen, works the microphone and the speaker, and carries each message; the app gets a few
 short results and the messages, never the radio. Design notes: `docs/design/radio.md` 7.2-7.3 and 8.5.
 
 ```js
@@ -681,7 +698,9 @@ if (PAD.link) {                          // undefined before runtime 0.58.0
   then wait. There is no throughput to give an app and no way to ask for a faster rate.
 - **Close reasons, and reconnecting.** `"bye"`: the other side left (HOME, its app closed, its screen went away).
   `"lost"`: the radio gave up after its retries or missed heartbeats. `"other-app"`: the peer opened a different app or
-  `proto`. `"home"`: this side left; the app is usually gone by then. `"timeout"`: pairing found nobody. After any of
+  `proto`. `"home"`: this side left; the app is usually gone by then. `"timeout"`: pairing found nobody (`open()`
+  resolves `"cancelled"` as well). `"other"`: anything else, such as the microphone going quiet for several seconds;
+  treat an unknown reason like `"lost"`. After any of
   them `PAD.link.state` is `"closed"`. Reconnecting is the app's job: call `open()` again, then compare state with the
   peer (a move count, a round number) and send what the other side is missing. The runtime keeps no session across a
   close.
@@ -696,8 +715,8 @@ if (PAD.link) {                          // undefined before runtime 0.58.0
   resolves `"none"`; a link that opens while the sensors' microphone is on stops that microphone first. An app that
   wants both must do one after the other, not at the same time.
 - **Still playable alone.** An app must work without a link, or say plainly that it needs two handhelds. The phone may
-  have no microphone, the player may have no second handheld, or the player may refuse: handle `"denied"`, `"none"`,
-  `"busy"`, `"cancelled"` and `"timeout"` by staying playable alone, and show the player what happened.
+  have no microphone, the player may have no second handheld, or the player may refuse: handle the results `"denied"`,
+  `"none"`, `"busy"` and `"cancelled"`, and every close reason, by staying playable alone, and show the player what happened.
 - **The dev harness.** In `sdk/dev.html`, open the same app in two tabs: their `PAD.link.open()` calls pair over a
   BroadcastChannel (no sound), and messages take 600 ms each way. The **Echo peer** button pairs one tab with itself:
   `open()` resolves at once as the initiator and every sent message comes back as a received one after 600 ms, which
@@ -750,7 +769,7 @@ node tools/check-app.mjs registry/apps/<id>
 The checker enforces sections 2 (including `permissions`), 3 (colors), 5 (forbidden APIs and external
 resources) and 7 (size), checks `PAD.sfx` names, and fails `PAD.exportFile` / `importFile` without the `files` permission,
 and `PAD.motion` or `PAD.on("tilt" | "shake")` without `motion`, `PAD.mic` or `PAD.on("sound")` without `mic`, `PAD.notes` without `notes`, `PAD.camera` without `camera`,
-`PAD.dict.addWord` / `removeWord` / `inBook` without `wordbook`.
+`PAD.dict.addWord` / `removeWord` / `inBook` without `wordbook`, and `PAD.link` without `link`.
 Passing it is required before review.
 
 Review then reads the app. Besides what the checker cannot see (the button convention in section 4,
@@ -768,6 +787,8 @@ sounds without playing them, and logs a song that does not parse as an error. Fo
 when let go), a Shake button, a compass slider, a loudness slider and a pitch field, or this computer's microphone.
 `PAD.notes.append` writes the dialog's words in the log and answers as the select on the right says (`saved` or `denied`);
 `PAD.say` uses this computer's voices when the browser has them, and logs the text either way.
+`PAD.camera.snap` opens a viewfinder beside the app on a generated test picture (or this computer's camera, if ticked),
+`PAD.dict` reads the same built-in word list as the runtime, and `PAD.link` pairs two tabs of the harness (section 6.8).
 
 ## 10. Games: lo-game.js (optional)
 
