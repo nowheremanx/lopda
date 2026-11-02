@@ -97,7 +97,12 @@ test("radio link: two tabs, text both ways, a picture, then hang up", { skip, ti
   await waitOut(a, "pic");
   await waitIn(b, "pic");
 
-  const la = await logOf(a), lb = await logOf(b);
+  /* the log opens with a system line where the link began; the messages follow */
+  const all = await logOf(a);
+  assert.equal(all[0].dir, "sys", JSON.stringify(all));
+  assert.equal(all[0].kind, "open");
+  const msgs = (l) => l.filter((e) => e.dir !== "sys");
+  const la = msgs(await logOf(a)), lb = msgs(await logOf(b));
   assert.deepEqual(la.map((e) => [e.dir, e.kind]), [["out", "text"], ["in", "text"], ["out", "pic"]], JSON.stringify(la));
   assert.deepEqual(lb.map((e) => [e.dir, e.kind]), [["in", "text"], ["out", "text"], ["in", "pic"]], JSON.stringify(lb));
   assert.equal(la[0].text, "第一行");
@@ -111,7 +116,18 @@ test("radio link: two tabs, text both ways, a picture, then hang up", { skip, ti
   assert.ok(la.every((e) => !e.pending && !e.lost), "nothing is still pending or lost");
   assert.ok(lb.every((e) => !e.pending && !e.lost), "nothing is still pending or lost");
 
-  /* the status line names the side and the rate */
+  /* the chat: ours on the right with a tick once acknowledged, theirs on the left; the bar shows the bars and the tag */
+  assert.equal(await a.locator("#radio-link-log .radio-msg.out").count(), 2);
+  assert.equal(await a.locator("#radio-link-log .radio-msg.in").count(), 1);
+  assert.equal(await a.locator("#radio-link-log .radio-msg.out .radio-ok").count(), 2);
+  assert.equal(await a.locator("#radio-link-log .radio-sys").count(), 1);
+  assert.ok(await a.locator("#radio-sig").isVisible(), "the signal bars show while linked");
+  assert.ok((await a.locator("#radio-sig i.on").count()) >= 1, "at least one bar lit");
+  assert.match(await a.textContent("#radio-title"), /在线/);
+  assert.match(await a.textContent("#radio-bar .radio-exp"), /试验/);
+  assert.ok(await a.locator("#link-mark").isVisible(), "the antenna shows in the status bar");
+
+  /* the status line (only with ?debug) names the side and the rate */
   await a.waitForFunction(() => /ms/.test(document.getElementById("radio-link-rate").textContent));
   assert.match(await a.textContent("#radio-link-role"), /发起方|应答方/);
   assert.match(await b.textContent("#radio-link-role"), /发起方|应答方/);
@@ -121,7 +137,9 @@ test("radio link: two tabs, text both ways, a picture, then hang up", { skip, ti
   await a.locator("#radio-page-menu").waitFor({ state: "visible", timeout: 60000 });
   await b.locator("#radio-page-menu").waitFor({ state: "visible", timeout: 60000 });
   assert.match(await b.textContent("#radio-menu-note"), /已断开/);
-  assert.equal((await logOf(b)).length, 3, "B keeps its log after the hang-up");
+  const lbAfter = await logOf(b);
+  assert.equal(msgs(lbAfter).length, 3, "B keeps its log after the hang-up");
+  assert.deepEqual(lbAfter.filter((e) => e.dir === "sys").map((e) => e.kind), ["open", "close"], "B marks where the link began and ended");
 
   assert.deepEqual(errors, []);
 });

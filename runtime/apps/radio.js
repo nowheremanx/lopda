@@ -5,8 +5,12 @@
  * (session layer acoustic-session.js, frames acoustic-link.js). This file owns only the screen and the
  * meter's own microphone.
  *
- * The link log is a document: data/users/local/radio {log:[{dir,at,kind,text?,pic?,lost?}], tx?}
- * (the last 30 entries, the four-tone picture as 64 bytes). The backup includes it like any document.
+ * The link log is a document: data/users/local/radio {log:[{dir,at,kind,text?,pic?,lost?,ms?}], tx?}
+ * (the last 30 entries, the four-tone picture as 64 bytes; dir "sys" with kind "open" {ms} or "close" marks
+ * where a link began and ended). The backup includes it like any document.
+ * The link page reads like a chat: our messages on the right, the other side's on the left, a mark once
+ * the other side has acknowledged one (LP.link.send's "sent" comes only after its ACK), and a line that
+ * says who is on the air. Radio is experimental (decisions.md section 47): the bar says so on every page.
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  */
 (function(){
@@ -38,8 +42,14 @@ R.draw.px=blankDraw();
 
 /* ---------- the radio document: last 30 messages and the meter's tx mode ---------- */
 function readEntry(x){
-  if(!x || (x.dir!=="in" && x.dir!=="out")) return null;
+  if(!x) return null;
   var at=+x.at; if(!isFinite(at)) at=Date.now();
+  if(x.dir==="sys"){
+    if(x.kind==="open") return {dir:"sys", at:at, kind:"open", ms:(+x.ms===10||+x.ms===20||+x.ms===40)?+x.ms:null};
+    if(x.kind==="close") return {dir:"sys", at:at, kind:"close"};
+    return null;
+  }
+  if(x.dir!=="in" && x.dir!=="out") return null;
   var e={dir:x.dir, at:at, kind:x.kind};
   if(x.kind==="text"){
     if(typeof x.text!=="string" || x.text.length>200) return null;
@@ -54,6 +64,7 @@ function readEntry(x){
 }
 function entryDoc(e){
   var o={dir:e.dir, at:e.at, kind:e.kind};
+  if(e.dir==="sys"){ if(e.ms) o.ms=e.ms; return o; }
   if(e.kind==="text") o.text=e.text;
   else o.pic=e.pic.slice(0,64);
   if(e.lost) o.lost=true;
@@ -91,16 +102,34 @@ function saveTxMode(){ persistLog(); applyTxMode(); }
 
 /* ---------- screens ---------- */
 var PAGES={menu:"radio-page-menu",guide:"radio-page-guide",link:"radio-page-link",write:"radio-page-write",draw:"radio-page-draw",meter:"radio-page-meter"};
-/* the link page's diagnostic line (microphone blocks, level, audio state) is refreshed once a second; nothing else */
+/* The link page ticks four times a second: who is on the air, the signal bars and the call timer.
+   The diagnostic line (microphone blocks, level, audio state) shows only with ?debug. */
 var diagTimer=0;
 function diagTick(){
   if(!R.live || R.page!=="link" || LP.link.state!=="open"){ clearInterval(diagTimer); diagTimer=0; return; }
+  renderAir();
+  renderBar();
   var rate=byId("radio-link-rate");
-  if(rate) rate.textContent=tr("radio.link.rate",{ms:LP.link.rate==null?"?":LP.link.rate})+" · "+LP.link.diag();
+  if(rate && window.LOPDA_DEBUG) rate.textContent=tr("radio.link.rate",{ms:LP.link.rate==null?"?":LP.link.rate})+" · "+LP.link.diag();
+}
+/* the bars are the rate the handshake reached (the session may step it down later): 10 ms three, 20 two, 40 one */
+function sigBars(){ var r=LP.link.rate; return r===10?3:r===20?2:r===40?1:0; }
+function callTime(){
+  var s=Math.max(0,Math.floor((Date.now()-(R.openAt||Date.now()))/1000));
+  return Math.floor(s/60)+":"+pad2(s%60);
+}
+function renderAir(){
+  var el=byId("radio-air");
+  if(!el) return;
+  var a=LP.link.air ? LP.link.air() : "";
+  if(a===R.airShown) return;
+  R.airShown=a;
+  el.className="radio-air"+(a?" "+a:"");
+  el.firstChild.textContent=a==="hear"?tr("radio.air.hear"):a==="talk"?tr("radio.air.talk"):"";
 }
 function setPage(p){
   R.page=p;
-  if(p==="link" && !diagTimer) diagTimer=setInterval(diagTick,1000);
+  if(p==="link" && !diagTimer) diagTimer=setInterval(diagTick,250);
   Object.keys(PAGES).forEach(function(k){ var el=byId(PAGES[k]); if(el) el.hidden=k!==p; });
   var view=byId("v-radio");
   if(view) view.classList.toggle("radio-draw-on", p==="draw");
@@ -119,13 +148,19 @@ function render(){
 function renderBar(){
   var title=tr("radio.title"), state=tr("radio.state.ready");
   if(R.page==="guide"){ title=tr("radio.guide.title"); state=tr("radio.guide.page",{n:R.guide+1,all:GUIDE}); }
-  else if(R.page==="link"){ title=tr("radio.menu.link"); state=""; }
+  else if(R.page==="link"){ title=tr("radio.link.online"); state=LP.link.state==="open"?callTime():""; }
   else if(R.page==="write"){ title=tr("radio.write.title"); state=tr("radio.write.count",{n:countChars(byId("radio-write-input").value)}); }
   else if(R.page==="draw"){ title=tr("radio.draw.title"); }
   else if(R.page==="meter"){ title=tr("radio.meter.title"); state=R.meter.live?tr("radio.meter.on"):(R.meter.pending?tr("radio.meter.request"):tr("radio.meter.off")); }
   else state=R.pending?tr("radio.link.connecting"):tr("radio.state.ready");
   byId("radio-title").textContent=title;
   byId("radio-state").textContent=state;
+  var sig=byId("radio-sig"), n=R.page==="link"&&LP.link.state==="open"?sigBars():-1, k;
+  if(sig){
+    sig.hidden=n<0;
+    for(k=0;k<3;k++) sig.children[k].className=k<n?"on":"";
+    sig.title=n<0?"":tr("radio.link.rate",{ms:LP.link.rate});
+  }
 }
 
 /* ---------- menu ---------- */
@@ -193,6 +228,10 @@ function startConnect(){
     if(v==="open"){
       R.closeMsg="";
       R.sel=0;
+      R.openAt=Date.now();
+      R.wasOpen=true;
+      R.airShown=null;
+      pushLog({dir:"sys", at:R.openAt, kind:"open", ms:LP.link.rate});
       LP.link.on(onLinkEvent);           /* link.js empties its list on every close: register again each time */
       sfx("ok");
       setPage("link");
@@ -218,6 +257,7 @@ function onLinkEvent(ev){
   if(ev.type==="message"){ onMessage(ev.data); return; }
   if(ev.type!=="close") return;
   var reason=ev.reason||"lost";
+  if(R.wasOpen){ R.wasOpen=false; pushLog({dir:"sys", at:Date.now(), kind:"close"}); }
   R.closeMsg=tr(reason==="home" && R.pending ? "radio.open.cancelled" : "radio.close."+reason);
   if(!R.quiet) toast(R.closeMsg);
   if(R.page==="link" || R.page==="write" || R.page==="draw"){
@@ -238,12 +278,17 @@ function onMessage(data){
     for(i=0;i<64;i++) pic.push(bytes[i]&255);
     e={dir:"in", at:Date.now(), kind:"pic", pic:pic};
   }
+  pushLog(e);
+  if(R.live && R.page==="link") sfx("tick");
+}
+function pushLog(e){
   R.log.push(e);
   while(R.log.length>MAX_LOG) R.log.shift();
   persistLog();
   if(R.page==="link") renderLink();
 }
 function queueSend(entry, payload){
+  entry.payload=payload;
   entry.dir="out";
   entry.at=Date.now();
   entry.pending=true;
@@ -266,6 +311,8 @@ function queueSend(entry, payload){
 }
 function renderLink(){
   var role=byId("radio-link-role"), rate=byId("radio-link-rate");
+  byId("radio-link-status").hidden=!window.LOPDA_DEBUG;
+  renderAir();
   if(LP.link.state==="open"){
     role.textContent=tr(LP.link.initiator?"radio.link.role.initiator":"radio.link.role.responder");
     rate.textContent=tr("radio.link.rate",{ms:LP.link.rate==null?"?":LP.link.rate})+" · "+LP.link.diag();
@@ -289,13 +336,16 @@ function renderLinkLog(){
   }
   for(var i=0;i<R.log.length;i++){
     var e=R.log[i];
+    if(e.dir==="sys"){
+      var sys=document.createElement("p"); sys.className="radio-sys";
+      sys.textContent=e.kind==="open"
+        ? tr("radio.sys.open",{t:nowHM(e.at), ms:e.ms||"?"})
+        : tr("radio.sys.close",{t:nowHM(e.at)});
+      box.appendChild(sys);
+      continue;
+    }
     var row=document.createElement("div");
-    row.className="radio-entry"+(e.pending?" pending":"");
-    var dir=document.createElement("span"); dir.className="dir";
-    dir.textContent=tr(e.dir==="out"?"radio.dir.out":"radio.dir.in");
-    var when=document.createElement("span"); when.className="when";
-    when.textContent=nowHM(e.at);
-    row.appendChild(dir); row.appendChild(when);
+    row.className="radio-msg "+e.dir+(e.pending?" pending":"")+(e.lost?" lost":"");
     if(e.kind==="pic"){
       var cv=document.createElement("canvas"); cv.width=32; cv.height=32;
       drawPic(cv,e.pic||[]);
@@ -305,14 +355,36 @@ function renderLinkLog(){
       txt.textContent=e.text==null?"":e.text;
       row.appendChild(txt);
     }
-    if(e.pending || e.lost){
-      var flag=document.createElement("span"); flag.className="radio-flag";
-      flag.textContent=tr(e.pending?"radio.link.sending":"radio.link.lost");
-      row.appendChild(flag);
+    var meta=document.createElement("span"); meta.className="meta";
+    if(e.pending){
+      meta.textContent=tr("radio.link.sending");
+      var dots=document.createElement("span"); dots.className="radio-dots";
+      dots.appendChild(document.createElement("i")); dots.appendChild(document.createElement("i")); dots.appendChild(document.createElement("i"));
+      meta.appendChild(dots);
+    }else if(e.lost){
+      /* a lost message can go again with a tap, if this session still has what was sent */
+      meta.textContent=tr(e.payload && LP.link.state==="open" ? "radio.link.retry" : "radio.link.lost");
+      if(e.payload) row.onclick=resendFn(e);
+    }else{
+      meta.textContent=nowHM(e.at);
+      if(e.dir==="out"){ var ok=document.createElement("i"); ok.className="radio-ok"; ok.title=tr("radio.link.acked"); meta.appendChild(ok); }
     }
+    row.appendChild(meta);
     box.appendChild(row);
   }
   box.scrollTop=box.scrollHeight;
+}
+function resendFn(e){
+  return function(){
+    if(!e.lost || !e.payload) return;
+    if(LP.link.state!=="open"){ toast(tr("radio.link.notopen")); sfx("err"); return; }
+    var at=R.log.indexOf(e);
+    if(at>=0) R.log.splice(at,1);
+    var again={kind:e.kind};
+    if(e.kind==="text") again.text=e.text; else again.pic=e.pic;
+    sfx("tap");
+    queueSend(again, e.payload);
+  };
 }
 function drawPic(cv,bytes){
   var ctx=cv.getContext("2d"), img=ctx.createImageData(32,32), d=img.data, i, x, y, t, o, dx, dy;
