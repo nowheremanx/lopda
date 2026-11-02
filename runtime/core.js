@@ -163,7 +163,14 @@ function refresh(kind){
 
 /* ---------- clock & status ---------- */
 var statusKey="status.boot";
-function setStatus(key){ statusKey=key; $("savestate").textContent=tr(key); }
+/* Saving normally says nothing: a status bar that always read 本机存档 / SAVED looked like "just saved" and was
+   misread (v1.md 8). Only trouble writes words, inverted so it is seen: 未存档 (storage refused) and 读档失败. */
+function setStatus(key){
+  statusKey=key;
+  var el=$("savestate"), bad=key==="status.unsaved" || key==="status.readfail";
+  el.textContent=key==="status.saved" ? "" : tr(key);
+  el.classList.toggle("bad",bad);
+}
 function tickClock(){ var d=new Date(); $("clock").textContent=String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0"); LP.each("clock"); }
 
 /* ---------- views ---------- */
@@ -238,7 +245,7 @@ document.addEventListener("visibilitychange",function(){
 });
 
 /* ---------- sound: tiny square-wave chips through Web Audio (the named sounds themselves are in chip.js) ---------- */
-var RUNTIME_VERSION="0.61.1";   /* keep in step with VERSION in sw.js */
+var RUNTIME_VERSION="0.62.0";   /* keep in step with VERSION in sw.js */
 /* One volume, five steps, 0 is off (decisions.md section 10). It sets the master gain and nothing else does.
    Under the master: `ui` for the runtime's own clicks and the built-ins' prompts, held at a fraction so they stay as
    quiet as they always were (step 2 gives them 0.11, their level before 0.12.0), and `app` for apps, music and the
