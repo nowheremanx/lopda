@@ -23,7 +23,7 @@
       <span id="clock">--:--</span>
       <span class="save" id="savestate">启动中…</span>
       <span class="mic-mark" id="mic-mark" hidden data-i18n-title="sense.listening" title="正在听"></span>
-      <span class="link-mark" id="link-mark" hidden data-i18n-title="link.on" title="连线中"><i></i></span>
+      <span class="link-mark" id="link-mark" hidden data-i18n-title="link.on" title="连线中"><b class="w2 l"></b><b class="w1 l"></b><i></i><b class="w1 r"></b><b class="w2 r"></b></span>
       <span class="save" aria-hidden="true">LP-86</span>
     </div>
 
@@ -507,7 +507,9 @@
     <section class="view radio-view" id="v-radio" hidden>
       <div class="radio-bar" id="radio-bar">
         <h2 id="radio-title" data-i18n="radio.title">电波台</h2>
+        <span class="radio-sig" id="radio-sig" hidden><i></i><i></i><i></i></span>
         <span class="hint" id="radio-state"></span>
+        <span class="radio-exp" data-i18n="radio.exp">试验</span>
       </div>
 
       <div class="radio-page radio-menu-page" id="radio-page-menu">
@@ -526,11 +528,12 @@
       </div>
 
       <div class="radio-page radio-link-page" id="radio-page-link" hidden>
-        <div class="radio-link-status">
+        <div class="radio-link-status" id="radio-link-status" hidden>
           <span id="radio-link-role"></span>
           <span id="radio-link-rate"></span>
         </div>
         <div class="radio-link-log" id="radio-link-log"></div>
+        <p class="radio-air" id="radio-air" aria-live="polite"><span></span><span class="radio-dots"><i></i><i></i><i></i></span></p>
         <div class="radio-link-actions" id="radio-link-actions">
           <button class="btn ghost on" id="radio-write" type="button" data-i18n="radio.link.write">写字</button>
           <button class="btn ghost" id="radio-draw" type="button" data-i18n="radio.link.draw">画图</button>
