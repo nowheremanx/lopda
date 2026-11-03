@@ -157,10 +157,11 @@ await p.waitForFunction(() => document.getElementById("dk-vwait").hidden, null, 
 await key("ArrowRight", 3);
 await p.waitForFunction(() => document.getElementById("dk-vwait").hidden, null, { timeout: 20000 });
 await shot("darkroom");
+/* the print sheet: single, all singles, contact sheet, film strip (darkroom.js) */
 await key("Enter"); await p.waitForSelector("#dk-sheet:not([hidden])");
-await key("ArrowDown");
+await key("ArrowDown", 2);
 await download(() => p.keyboard.press("x"), "contact.png"); await settle(400);
-await key("Enter"); await key("ArrowDown", 2);
+await key("Enter"); await key("ArrowDown", 3);
 await download(() => p.keyboard.press("x"), "filmstrip.png"); await settle(400);
 await key("z");
 await home();
