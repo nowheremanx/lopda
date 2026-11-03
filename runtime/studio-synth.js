@@ -12,7 +12,8 @@
  *
  *   LopdaStudioSynth.KITS             the registry: kit id -> function(ctx, out) -> {hit(drum, at, vel)}
  *   LopdaStudioSynth.VOICES           the registry: voice id -> function(ctx, out) -> {note(midi, at, dur, vel)}
- *   LopdaStudioSynth.create(ctx,out)  -> {hit(kit, drum, at, vel), note(voice, midi, at, dur, vel), dispose()}
+ *   LopdaStudioSynth.create(ctx,out,gain)  -> {hit(kit, drum, at, vel), note(voice, midi, at, dur, vel), dispose()}
+ *                                      (gain: optional master fader before the ceiling, default 1)
  *   LopdaStudioSynth.STRUM            voice id -> seconds between the notes of a strummed chord (guitar: 0.012)
  *
  * Sounds are a registry and not a switch: adding an instrument is adding one entry to KITS or VOICES (design rule,
@@ -27,7 +28,8 @@
  * Levels (measured by tests/studio-e2e.test.mjs at 22.05 kHz): all four drums on one step peak 0.79 for both old
  * kits, well under 0.85; each old drum alone stays between 0.13 and 0.49 at velocity 1. The new kits stay under
  * 0.5 a drum and 0.9 for all four on one step. The demo beat's rms is 0.53x the paper tower's title tune with the
- * chip kit and 0.62x with the soft kit, so it sits near PAD.music's songs. The melodic voices at velocity 1 peak
+ * chip kit and 0.62x with the soft kit at gain 1; the player's OUTPUT_GAIN (1.35) lifts that to about 0.72x and
+ * 0.83x, so it sits next to PAD.music rather than under it. The melodic voices at velocity 1 peak
  * 0.30 for bass, 0.072 per keys note, 0.22 for flute and 0.26 for pluck; the new voices stay in the same windows
  * (bass 0.2-0.36, a chord note 0.04-0.11, melody 0.15-0.28); bass 45, a four-note keys chord and pluck 69 together
  * peak 0.58, so the notes alone stay under 0.6. The four-bar demo pattern (drums, bass and chords) with the soft
@@ -831,9 +833,12 @@ function softClipCurve(){
 
 /* ---------- the mix ---------- */
 
-function create(ctx,out){
+/* `gain` is the master fader before the soft ceiling: 1 by default, so an offline render and an old test hear exactly
+   what they heard before. The player passes 1.35 (studio.js OUTPUT_GAIN) because the tape machine's tracks are quiet
+   next to PAD.music; the ceiling catches the loudest tapes instead of letting them clip. */
+function create(ctx,out,gain){
   var master=ctx.createGain(), clip=ctx.createWaveShaper();
-  master.gain.value=1;
+  master.gain.value=(typeof gain==="number" && isFinite(gain) && gain>0) ? gain : 1;
   clip.curve=softClipCurve();
   clip.oversample="none";
   master.connect(clip);

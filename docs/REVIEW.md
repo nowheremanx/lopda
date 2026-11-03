@@ -1,4 +1,4 @@
-English summary: Review apps for original, shareable content; four-tone, usable screens; working keys; justified permissions; sandbox compliance; size; save compatibility across updates and reinstall; and readable code.
+English summary: Review apps for original, shareable content; four-tone, usable screens; working keys; justified permissions; sandbox compliance; size; save compatibility across updates and reinstall; sound that stays comfortable at full volume; and readable code.
 
 # App review checklist
 
@@ -7,6 +7,7 @@ English summary: Review apps for original, shareable content; four-tone, usable 
 - **原创与 IP**：不出现他人的名字、角色、精灵图、音乐或其他受保护素材；不做未经授权的移植。公有领域音乐要在乐谱旁标明来源。
 - **许可证**：只能是 MIT、0BSD、BSD-2-Clause、BSD-3-Clause、ISC、Apache-2.0、CC0-1.0 或 Unlicense。
 - **四色画面**：app 只用 `#1f2a14`、`#4a5a32`、`#7d8a58`、`#a3ad7e` 四种颜色；文字对比度符合 `sdk/UI.md`。
+- **声音舒适度**：在手机外放、掌机最大音量下听每个音效。反复出现的拾取、命中、脚步和菜单声不得刺耳；尤其当心约 1 kHz 以上的方波和快速上滑的 chirp。按 `sdk/UI.md` 第 7 节的规则做。
 - **小屏布局**：按 `sdk/UI.md` 检查 331×359；单一主滚动区、没有横向滚动，触控目标至少 44 px。
 - **按键**：按 `SPEC.md` 第 4 节核对按键提示和操作；菜单、列表、对话框中 A 确认、B 返回或取消。倾斜和麦克风必须有按键或触控的替代方式。
 - **权限**：每项权限都必须必要且实际使用。尤其麦克风只在 app 正在听时开启，听完立即关闭。

@@ -65,6 +65,8 @@ Hard rules for index.html:
     PAD.sfx({ wave: "square", duty: 2, from: 440, to: 880, ms: 90 })   wave: square, triangle or noise;
          from/to in Hz (the pitch slides), ms up to 1500, attack/decay in ms, vol 0-1,
          vibrato: { depth: 0.5, rate: 6 } (semitones 0-2, Hz 1-20) makes the pitch wobble
+  Keep sounds that repeat soft at the loudest volume: prefer triangle or noise to a square above
+  about 1 kHz, and keep pickup and hit chirps under about 1.2 kHz (sdk/UI.md section 7).
     PAD.music.play({ bpm: 120, p1: "...", p2: "...", tri: "...", noise: "..." })   loops; {loop: false} plays once
     PAD.music.stop()
   Background ambience, where PAD.ambience exists (check it first, like PAD.music):

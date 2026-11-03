@@ -341,8 +341,8 @@ GM.ui = (function () {
       var ev = state.events.shift();
       if (ev === "fire") sfx("tap");
       else if (ev === "throw") sfx(GM.SFX.throw);
-      else if (ev === "grab") sfx("hit");
-      else if (ev === "coin") sfx("coin");
+      else if (ev === "grab") { sfx(GM.SFX.grab); sfx(GM.SFX.grabBody); }
+      else if (ev === "coin") sfx(GM.SFX.coin);
       else if (ev === "gem") sfx(GM.SFX.chime);
       else if (ev === "junk") sfx("miss");
       else if (ev === "boom") sfx(GM.SFX.boom);
