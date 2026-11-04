@@ -1,8 +1,0 @@
-StarDict's dict ifo file
-version=2.4.2
-bookname=ECDICT
-wordcount=25000
-idxfilesize=415590
-author=skywind3000 (Linwei)
-description=ECDICT, abridged for Lo-PDA: 25000 common words. MIT License, https://github.com/skywind3000/ECDICT
-sametypesequence=m
