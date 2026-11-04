@@ -429,18 +429,18 @@
       "version": "1.2.0",
       "released": "2026-10-28",
       "updated": "2026-11-03",
-      "description": "六十秒一关：钩金块、躲地雷，借连锁爆炸开路，商店每样限购一个。",
+      "description": "六十秒一关：钩金块、躲地雷，借爆炸开路；十关后老王也来抢。",
       "i18n": {
         "en": {
           "name": "GOLD DIG",
-          "description": "Hook gold, dodge mines, chain blasts. One of each in the shop."
+          "description": "Hook gold, dodge mines, chain blasts; past level 10 Old Wang digs beside you."
         }
       },
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/lao-zhang/index.html",
-      "sha256": "f8c967491b88a6ec288bd58638d3e7fd5a72dbdea36eb5fc1d06713f7957ac26",
-      "bytes": 116160
+      "sha256": "273881843903faa763a4328c35f11cfb11a59e7ea1941e107756ab6bda7d1605",
+      "bytes": 131588
     },
     {
       "spec": "lopda/1",

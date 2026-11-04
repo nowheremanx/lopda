@@ -113,6 +113,8 @@ GM.BASE_SPEED = 28.6;           /* the old large-rock reel speed, now the base *
 GM.BLAST = 30;                  /* a normal bomb clears this radius */
 GM.BIG_BLAST = 54;              /* thrown onto a hauled timed bomb: the big one */
 GM.THROW_TIME = 0.46;           /* old Zhang's throwing pose, in seconds */
+GM.RIVAL_X = 124;               /* Old Wang digs beside Zhang on the endless levels */
+GM.RIVAL_MAX_ROPE = 150;
 GM.PLAY_LEVELS = 10;
 GM.STRENGTH_STEP = 0.15;
 GM.DYNAMITE_HARD_CAP = 9999;   /* only the save file needs a sane ceiling */
@@ -273,6 +275,8 @@ GM.SFX = {
   chain:   { wave: "noise", from: 700, to: 50, ms: 300, vol: 0.75 },
   mine:    { wave: "noise", from: 520, to: 75, ms: 280, vol: 0.8 },
   clank:   { wave: "square", from: 240, to: 120, ms: 90, vol: 0.28 },
+  taunt:   { wave: "triangle", from: 520, to: 940, ms: 190, vol: 0.38 },
+  rivalFire: { wave: "noise", from: 260, to: 520, ms: 80, vol: 0.18 },
   /* the hook touching an item: a soft low thud plus a little noise. The old runtime `hit` was a full-scale
      noise burst and a 98 Hz square, which is the sharp sound at every grab (sdk/UI.md section 7). */
   grab:  { wave: "noise", from: 480, to: 140, ms: 75, attack: 4, decay: 70, vol: 0.28 },
@@ -305,6 +309,7 @@ GM.TEXT = {
     tipMine: "地雷一碰就原地炸。钻石在爆炸圈外：借它炸开石盖。",
     tipChain: "定时炸弹拉上来才炸；炸到地雷，地雷再炸开两边的石墙。",
     tipBig: "拉着定时炸弹时按 B 补一颗：大爆炸能轰开远处整片石墙。",
+    tipWang: "第 10 关之后，老王也来抢矿。他越挖越精，抢到东西还会嘲笑你。",
     tipDefault: "A 下钩　START 暂停",
     buffIntro: "本关：{b}",
     buffNames: ["大力", "幸运草", "岩石图鉴"],
@@ -394,6 +399,7 @@ GM.TEXT = {
     tipMine: "A mine blows where it sits. The diamond is outside the blast: let the mine open the cap.",
     tipChain: "Timed bombs blow on the way up. Catch a mine with that blast and both stone walls go.",
     tipBig: "While hauling a timed bomb, press B: the combined blast is much wider.",
+    tipWang: "Past level 10, Old Wang digs beside you. He sharpens every level, and gloats when he steals one.",
     tipDefault: "A HOOK　START PAUSE",
     buffIntro: "THIS LEVEL: {b}",
     buffNames: ["STRENGTH", "CLOVER", "ROCK BOOK"],
@@ -621,6 +627,7 @@ GM.newState = function () {
     shake: 0,
     anim: 0,
     throwT: 0,
+    rival: null,
     best: { level: 0, bank: 0 },
     bestBlocked: false,
     bestDirty: false,
@@ -663,6 +670,7 @@ GM.startLevel = function (state, n) {
   state.levelSeed = (state.runSeed + n * 7919) >>> 0;
   state.rng = GM.rng(state.levelSeed);
   state.items = GM.generate(state, n);
+  state.rival = n > GM.PLAY_LEVELS ? GM.startRival(state, n) : null;
   state.hook = { state: "swing", len: GM.IDLE_ROPE, angle: 0, item: null };
   state.bomb = null;
   GM.setRun(state, n);
@@ -1123,16 +1131,17 @@ GM.countItems = function (items, type) {
   return n;
 };
 
-GM.tip = function (hook) {
+GM.tip = function (hook, anchor) {
+  anchor = anchor || GM.ANCHOR;
   return {
-    x: GM.ANCHOR.x + Math.sin(hook.angle) * hook.len,
-    y: GM.ANCHOR.y + Math.cos(hook.angle) * hook.len
+    x: anchor.x + Math.sin(hook.angle) * hook.len,
+    y: anchor.y + Math.cos(hook.angle) * hook.len
   };
 };
 
 /* the caught item hangs from the near edge, not from its centre */
-GM.heldPos = function (hook) {
-  var tip = GM.tip(hook);
+GM.heldPos = function (hook, anchor) {
+  var tip = GM.tip(hook, anchor);
   if (!hook.item) return tip;
   var off = hook.item.r + 2;
   return {
@@ -1274,6 +1283,248 @@ GM.collect = function (state) {
 /* One blast. Everything inside the circle is destroyed; a mine or a timed bomb
    inside it goes off in turn, so bombs set off bombs. The source's own item is
    removed by its caller; a held item in range is knocked off the hook. */
+/* ---- Old Wang: the rival in the endless levels ------------------------- */
+
+GM.itemValue = function (it) {
+  if (!it) return 0;
+  if (it.type === "bag") {
+    if (it.reward && it.reward.kind === "cash") return it.reward.value || 0;
+    return 240;
+  }
+  if (it.type === "mole") return it.carry === "diamond" ? GM.ITEMS.diamond.value : 0;
+  if (it.kind === "tnt" || it.kind === "mine" || it.kind === "sealed") return 0;
+  return it.value || 0;
+};
+
+GM.rivalParams = function (n) {
+  var over = Math.max(1, n - GM.PLAY_LEVELS);
+  return {
+    over: over,
+    shotGap: Math.max(1.25, 4.4 - over * 0.25),
+    aimError: Math.max(0.015, 0.20 - over * 0.018),
+    smart: Math.min(0.95, 0.18 + over * 0.08),
+    outSpeed: Math.min(200, 108 + over * 6),
+    swingPeriod: Math.max(2.3, 4.0 - over * 0.12),
+    strength: Math.min(4, Math.floor(over / 4)),
+    speedMul: Math.min(1.3, 0.9 + over * 0.03),
+    tauntDur: Math.max(0.55, 1.25 - over * 0.04),
+    maxRope: Math.min(GM.RIVAL_MAX_ROPE, 136 + over * 2)
+  };
+};
+
+GM.startRival = function (state, n) {
+  var p = GM.rivalParams(n);
+  state.rival = {
+    active: true,
+    anchor: { x: GM.RIVAL_X, y: GM.ANCHOR.y },
+    hook: { state: "swing", len: GM.IDLE_ROPE, angle: 0, item: null },
+    swingT: Math.random() * p.swingPeriod,
+    cooldown: 0.8 + Math.random() * 0.7,
+    target: null,
+    wantAngle: 0,
+    p: p,
+    haul: 0,
+    steals: 0,
+    tauntT: 0,
+    tauntDur: p.tauntDur,
+    tauntKind: 0,
+    tauntText: "",
+    tauntItem: null
+  };
+  return state.rival;
+};
+
+/* the first solid thing a rope fired from this anchor would touch */
+GM.firstHitFrom = function (anchor, item, items) {
+  var ax = anchor.x, ay = anchor.y;
+  var dx = item.x - ax, dy = item.y - ay;
+  var len = Math.sqrt(dx * dx + dy * dy);
+  if (len < 1) return item;
+  var ux = dx / len, uy = dy / len;
+  var best = item, bestT = len;
+  for (var i = 0; i < items.length; i++) {
+    var other = items[i];
+    if (other === item) continue;
+    var ox = other.x - ax, oy = other.y - ay;
+    var proj = ox * ux + oy * uy;
+    if (proj <= 0 || proj > len) continue;
+    var perp = Math.abs(-ox * uy + oy * ux);
+    if (perp <= other.r + 4 && proj < bestT) { best = other; bestT = proj; }
+  }
+  return best;
+};
+
+GM.rivalPick = function (state) {
+  var r = state.rival, items = state.items, pool = [], best = null, bestScore = 0;
+  for (var i = 0; i < items.length; i++) {
+    var it = items[i];
+    if (it.type === "sealed") continue;
+    var dx = it.x - r.anchor.x, dy = it.y - r.anchor.y;
+    var d = Math.sqrt(dx * dx + dy * dy);
+    if (d + it.r + 3 > r.p.maxRope) continue;
+    var a = Math.atan2(dx, dy);
+    if (Math.abs(a) > GM.SWING - 0.05) continue;
+    pool.push(it);
+    var v = GM.itemValue(it);
+    if (v <= 0) v = (it.kind === "tnt" || it.kind === "mine") ? 20 : 1;
+    var score = v / (0.6 + d / 60);
+    if (GM.firstHitFrom(r.anchor, it, items) !== it) score *= 0.25;
+    if (it.kind === "junk" || it.kind === "rock") score *= 0.2;
+    if (it.kind === "tnt" || it.kind === "mine") score *= 0.12;
+    if (score > bestScore) { bestScore = score; best = it; }
+  }
+  if (best && Math.random() > r.p.smart && pool.length) {
+    /* a clumsy Wang grabs whatever is nearest his swing */
+    best = pool[Math.floor(Math.random() * pool.length)];
+  }
+  return best;
+};
+
+GM.rivalFire = function (state) {
+  var r = state.rival;
+  if (!r || r.tauntT > 0 || r.hook.state !== "swing") return false;
+  r.hook.state = "out";
+  r.hook.len = GM.IDLE_ROPE;
+  r.target = null;
+  state.events.push("rivalFire");
+  return true;
+};
+
+GM.rivalAttach = function (state, index) {
+  var r = state.rival, h = r.hook, it = state.items[index];
+  if (it.kind === "sealed") {
+    h.state = "back";
+    var p0 = GM.tip(h, r.anchor);
+    GM.addParticles(state, p0.x, p0.y, 4, ["paper", "mid"]);
+    state.events.push("rivalClank");
+    return null;
+  }
+  if (it.kind === "mine") {
+    state.items.splice(index, 1);
+    h.state = "back";
+    GM.detonate(state, it.x, it.y, GM.BLAST, "rivalMine");
+    r.cooldown = Math.max(r.cooldown, 0.3);
+    return null;
+  }
+  state.items.splice(index, 1);
+  h.item = it;
+  h.state = "back";
+  if (it.kind === "tnt") {
+    var speed = GM.retractSpeed(it, r.p.strength) * r.p.speedMul;
+    var ride = Math.max(0.001, h.len - 2) / speed;
+    it.fuse = Math.max(0.16, Math.min(1.05, ride * 0.58));
+  }
+  var p1 = GM.tip(h, r.anchor);
+  GM.addParticles(state, p1.x, p1.y, 4, ["mid", "dark"]);
+  state.events.push("rivalGrab");
+  return it;
+};
+
+GM.rivalCollect = function (state) {
+  var r = state.rival, h = r.hook, it = h.item;
+  if (!it) return;
+  var value = GM.itemValue(it);
+  h.item = null;
+  h.state = "swing";
+  h.len = GM.IDLE_ROPE;
+  if (it.kind === "tnt") {
+    var q = GM.heldPos(h, r.anchor);
+    GM.detonate(state, q.x, q.y, GM.BLAST, "rivalBoom");
+    return;
+  }
+  r.haul += value;
+  r.steals++;
+  r.cooldown = r.p.shotGap * (0.85 + Math.random() * 0.3);
+  r.tauntT = r.tauntDur;
+  r.tauntKind = Math.floor(Math.random() * 4);
+  r.tauntText = ["HA!", "LOL", "NOOB", "MINE"][r.tauntKind];
+  r.tauntItem = it;
+  state.events.push("rivalTaunt");
+};
+
+GM.stepRival = function (state, dt) {
+  var r = state.rival;
+  if (!r) return;
+  var h = r.hook;
+  if (h.state === "out") {
+    h.len += r.p.outSpeed * dt;
+    var p = GM.tip(h, r.anchor);
+    for (var i = 0; i < state.items.length; i++) {
+      var it = state.items[i];
+      var dx = it.x - p.x, dy = it.y - p.y;
+      if (dx * dx + dy * dy <= (it.r + 4) * (it.r + 4)) {
+        GM.rivalAttach(state, i);
+        return;
+      }
+    }
+    if (h.len >= r.p.maxRope || p.x < 3 || p.x > GM.W - 3 || p.y > GM.H - 2) h.state = "back";
+    return;
+  }
+  if (h.state !== "back") return;
+  if (h.item && h.item.kind === "tnt") {
+    h.item.fuse -= dt;
+    if (h.item.fuse <= 0) {
+      var q = GM.heldPos(h, r.anchor);
+      GM.detonate(state, q.x, q.y, GM.BLAST, "rivalBoom");
+      return;
+    }
+  }
+  var speed = h.item ? GM.retractSpeed(h.item, r.p.strength) * r.p.speedMul : GM.EMPTY_SPEED * 0.9;
+  h.len -= speed * dt;
+  if (h.item && h.len <= 2) {
+    GM.rivalCollect(state);
+    return;
+  }
+  if (!h.item && h.len <= GM.IDLE_ROPE) {
+    h.len = GM.IDLE_ROPE;
+    h.state = "swing";
+    if (r.cooldown < 0.25) r.cooldown = 0.25;
+  }
+};
+
+GM.updateRival = function (state, dt) {
+  var r = state.rival;
+  if (!r) return;
+  if (r.tauntT > 0) {
+    r.tauntT = Math.max(0, r.tauntT - dt);
+    if (r.tauntT <= 0) {
+      r.tauntText = "";
+      r.hook.len = GM.IDLE_ROPE;
+      r.hook.state = "swing";
+      r.target = null;
+      if (r.cooldown < 0.25) r.cooldown = 0.25;
+    }
+    return;
+  }
+  r.cooldown = Math.max(0, r.cooldown - dt);
+  var h = r.hook;
+  if (h.state !== "swing") {
+    var left = dt;
+    while (left > 0) {
+      var step = Math.min(0.016, left);
+      GM.stepRival(state, step);
+      left -= step;
+    }
+    return;
+  }
+  var prev = h.angle;
+  r.swingT += dt;
+  h.angle = Math.sin(r.swingT * Math.PI * 2 / r.p.swingPeriod) * GM.SWING;
+  if (r.cooldown > 0) return;
+  if (!r.target || state.items.indexOf(r.target) < 0) {
+    r.target = GM.rivalPick(state);
+    if (r.target) {
+      var want = Math.atan2(r.target.x - r.anchor.x, r.target.y - r.anchor.y);
+      var err = (Math.random() * 2 - 1) * r.p.aimError;
+      r.wantAngle = Math.max(-GM.SWING + 0.06, Math.min(GM.SWING - 0.06, want + err));
+    }
+  }
+  if (!r.target) return;
+  if ((prev - r.wantAngle) * (h.angle - r.wantAngle) <= 0 && Math.abs(h.angle - prev) < 0.6) {
+    GM.rivalFire(state);
+  }
+};
+
 GM.detonate = function (state, x, y, radius, ev) {
   radius = radius || GM.BLAST;
   var big = radius >= GM.BIG_BLAST;
@@ -1293,6 +1544,14 @@ GM.detonate = function (state, x, y, radius, ev) {
     var hp = GM.heldPos(state.hook);
     dx = hp.x - x; dy = hp.y - y;
     if (dx * dx + dy * dy <= radius * radius) state.hook.item = null;
+  }
+  if (state.rival && state.rival.hook.item) {
+    var rp = GM.heldPos(state.rival.hook, state.rival.anchor);
+    dx = rp.x - x; dy = rp.y - y;
+    if (dx * dx + dy * dy <= radius * radius) {
+      state.rival.hook.item = null;
+      state.rival.hook.state = "back";
+    }
   }
   if (state.hook.state === "out") state.hook.state = "back";
   state.blasts.push({ x: x, y: y, t: 0, life: big ? 0.78 : 0.55, r: radius, big: big });
@@ -1631,6 +1890,7 @@ GM.update = function (state, dt) {
     state.hook.angle = Math.sin(state.swingT * Math.PI * 2 / GM.PERIOD) * GM.SWING;
   }
   GM.moveMoles(state, dt);
+  if (state.rival) GM.updateRival(state, dt);
   if (state.bomb) {
     GM.updateBomb(state, dt);
   } else {
@@ -1642,7 +1902,8 @@ GM.update = function (state, dt) {
     }
   }
   /* nothing left to catch: do not make the player sit out the rest of the clock */
-  if (state.screen === "play" && state.items.length === 0 && !state.hook.item) {
+  var rivalBusy = state.rival && (state.rival.hook.item || state.rival.tauntT > 0);
+  if (state.screen === "play" && state.items.length === 0 && !state.hook.item && !rivalBusy) {
     GM.finishLevel(state);
     return;
   }
@@ -2043,6 +2304,17 @@ GM.FONT3 = {
   "8": ["111", "101", "111", "101", "111"],
   "9": ["111", "101", "111", "001", "111"],
   "$": ["011", "110", "010", "011", "110"],
+  "A": ["111", "101", "111", "101", "101"],
+  "B": ["110", "101", "110", "101", "110"],
+  "E": ["111", "100", "111", "100", "111"],
+  "H": ["101", "101", "111", "101", "101"],
+  "I": ["111", "010", "010", "010", "111"],
+  "L": ["100", "100", "100", "100", "111"],
+  "M": ["101", "111", "101", "101", "101"],
+  "N": ["110", "101", "101", "101", "011"],
+  "O": ["111", "101", "101", "101", "111"],
+  "!": ["010", "010", "010", "000", "010"],
+  "王": ["111", "010", "111", "010", "111"],
   "×": ["000", "101", "010", "101", "000"],
   "+": ["000", "010", "111", "010", "000"],
   "-": ["000", "000", "111", "000", "000"],
@@ -2229,12 +2501,13 @@ GM.drawMole = function (buf, it, anim) {
   }
 };
 
-GM.drawRope = function (buf, hook) {
-  var tip = GM.tip(hook);
+GM.drawRope = function (buf, hook, anchor) {
+  anchor = anchor || GM.ANCHOR;
+  var tip = GM.tip(hook, anchor);
   var a = hook.angle, dx = Math.sin(a), dy = Math.cos(a);
-  GM.line(buf, GM.ANCHOR.x, GM.ANCHOR.y, tip.x - dx, tip.y - dy, GM.INK);
+  GM.line(buf, anchor.x, anchor.y, tip.x - dx, tip.y - dy, GM.INK);
   for (var d = 7; d < hook.len - 3; d += 9) {
-    GM.put(buf, GM.ANCHOR.x + dx * d, GM.ANCHOR.y + dy * d, GM.PAPER);
+    GM.put(buf, anchor.x + dx * d, anchor.y + dy * d, GM.PAPER);
   }
 };
 
@@ -2381,6 +2654,159 @@ GM.drawMiner = function (buf, state) {
   }
 };
 
+GM.drawArm = function (buf, sx, sy, ex, ey, hx, hy) {
+  GM.line(buf, sx, sy, ex, ey, GM.INK);
+  GM.line(buf, ex, ey, hx, hy, GM.INK);
+  GM.rect(buf, hx - 1, hy - 1, 2, 2, GM.INK);
+  GM.rect(buf, hx, hy, 1, 1, GM.PAPER);
+};
+
+GM.tauntBubble = function (buf, cx, cy, text, tailX, tailY) {
+  var k = GM.SCALE, w = GM.textWidth(text, k) + 10, h = 5 * k + 8;
+  var x = Math.round(cx - w / 2), y = Math.round(cy - h);
+  GM.brect(buf, x, y, w, h, GM.INK);
+  GM.brect(buf, x + 2, y + 2, w - 4, h - 4, GM.DARK);
+  GM.textMain(buf, text, x + 5, y + 4, GM.PAPER, k);
+  GM.bline(buf, x + 7, y + h - 1, tailX, tailY, GM.INK);
+  GM.bline(buf, x + 8, y + h - 1, tailX + 1, tailY, GM.PAPER);
+  GM.bline(buf, x + 5, y + h - 1, tailX - 1, tailY, GM.INK);
+};
+
+/* Old Wang: flat cap, stubby beard, and a chest badge. He mines at x=124. */
+GM.drawWang = function (buf, state) {
+  var r = state.rival;
+  if (!r) return;
+  var h = r.hook;
+  var taunting = r.tauntT > 0;
+  var tp = taunting ? 1 - r.tauntT / Math.max(0.001, r.tauntDur) : 0;
+  var back = h.state === "back";
+  var out = h.state === "out";
+  var tug = back ? Math.sin(state.anim * 6.4) : 0;
+  var bob = h.state === "swing" && Math.sin(state.anim * 4 + 1) > 0.35 ? -1 : 0;
+  var bx = GM.RIVAL_X;
+  var by = bob;
+  if (taunting && r.tauntKind === 1) {
+    bx += Math.round(Math.sin(tp * Math.PI * 6) * 2);
+    if (Math.abs(Math.sin(tp * Math.PI * 6)) > 0.7) by -= 1;
+  }
+  var ground = 22;
+
+  GM.rect(buf, bx - 8, ground - 1, 5, 2, GM.INK);
+  GM.rect(buf, bx + 3, ground - 1, 5, 2, GM.INK);
+  GM.rect(buf, bx - 6, ground - 4, 3, 3, GM.DARK);
+  GM.rect(buf, bx + 3, ground - 4, 3, 3, GM.DARK);
+
+  GM.rect(buf, bx - 7, 12 + by, 14, 7, GM.INK);
+  GM.rect(buf, bx - 6, 13 + by, 12, 5, GM.PAPER);
+  GM.rect(buf, bx - 5, 15 + by, 10, 3, GM.DARK);
+  GM.rect(buf, bx - 4, 13 + by, 1, 5, GM.DARK);
+  GM.rect(buf, bx + 3, 13 + by, 1, 5, GM.DARK);
+  GM.textMain(buf, "王", (bx - 1) * GM.SCALE, (13 + by) * GM.SCALE, GM.PAPER, GM.SCALE);
+
+  var headY = 6 + by;
+  if (taunting && r.tauntKind === 0) headY -= 1;
+  GM.rect(buf, bx - 5, headY, 10, 7, GM.INK);
+  GM.rect(buf, bx - 4, headY + 1, 8, 5, GM.PAPER);
+  GM.rect(buf, bx - 3, headY + 3, 2, 1, GM.INK);
+  GM.put(buf, bx + 2, headY + 3, GM.INK);
+  GM.rect(buf, bx, headY + 4, 2, 1, GM.DARK);
+  GM.rect(buf, bx - 2, headY + 5, 4, 1, GM.DARK);
+  if (taunting && r.tauntKind === 0) GM.rect(buf, bx - 1, headY + 5, 3, 2, GM.INK);
+  GM.rect(buf, bx - 4, headY + 6, 2, 1, GM.DARK);
+  GM.rect(buf, bx + 2, headY + 6, 2, 1, GM.DARK);
+  GM.rect(buf, bx - 1, headY + 7, 2, 2, GM.DARK);
+
+  GM.ellipse(buf, bx, 4 + by, 8, 3, GM.INK);
+  GM.ellipse(buf, bx, 4 + by, 7, 2, GM.DARK);
+  GM.rect(buf, bx - 9, 6 + by, 18, 2, GM.INK);
+  GM.rect(buf, bx - 8, 6 + by, 16, 1, GM.PAPER);
+  GM.rect(buf, bx + 9, 7 + by, 4, 1, GM.INK);
+  GM.rect(buf, bx + 9, 7 + by, 3, 1, GM.PAPER);
+  GM.rect(buf, bx - 1, 2 + by, 3, 2, GM.PAPER);
+
+  GM.rect(buf, 122, 16, 2, 2, GM.PAPER);
+  GM.rect(buf, 125, 16, 2, 2, GM.PAPER);
+  GM.rect(buf, 123, 17, 2, 2, GM.DARK);
+  GM.put(buf, 124, 18, GM.PAPER);
+
+  var lhx = 123, lhy = 18 + by, rhx = 125, rhy = 18 + by;
+  var lex = bx - 10, ley = 15 + by, rex = bx + 10, rey = 15 + by;
+  if (out) {
+    lhy = 16 + by; rhy = 16 + by;
+    lex = bx - 9; ley = 14 + by; rex = bx + 9; rey = 14 + by;
+  } else if (back) {
+    var upL = Math.max(0, tug), upR = Math.max(0, -tug);
+    lhy = 18 + by - Math.round(upL * 3);
+    rhy = 18 + by - Math.round(upR * 3);
+    ley = 15 + by - Math.round(upL * 2);
+    rey = 15 + by - Math.round(upR * 2);
+  }
+  if (taunting) {
+    if (r.tauntKind === 0) {
+      lhx = 108; lhy = 10 + by; lex = bx - 10; ley = 12 + by;
+      rhx = bx + 8; rhy = 16 + by; rex = bx + 10; rey = 15 + by;
+    } else if (r.tauntKind === 1) {
+      lhx = bx - 8; lhy = 16 + by; lex = bx - 10; ley = 14 + by;
+      rhx = bx + 8; rhy = 16 + by; rex = bx + 10; rey = 14 + by;
+    } else if (r.tauntKind === 2) {
+      lhx = bx - 8; lhy = 16 + by; lex = bx - 10; ley = 15 + by;
+      rhx = bx + 10; rhy = 20 + by; rex = bx + 11; rey = 16 + by;
+    } else {
+      lhx = bx - 2; lhy = 15 + by; lex = bx - 8; ley = 16 + by;
+      rhx = bx + 2; rhy = 15 + by; rex = bx + 8; rey = 16 + by;
+    }
+  }
+  GM.drawArm(buf, bx - 6, 13 + by, lex, ley, lhx, lhy);
+  GM.drawArm(buf, bx + 6, 13 + by, rex, rey, rhx, rhy);
+
+  if (taunting) {
+    if (r.tauntKind === 1) {
+      GM.line(buf, bx - 10, 18 + by, bx - 13, 18 + by, GM.MID);
+      GM.line(buf, bx + 10, 18 + by, bx + 13, 18 + by, GM.MID);
+    } else if (r.tauntKind === 2) {
+      GM.rect(buf, rhx - 1, rhy + 2, 3, 2, GM.PAPER);
+      GM.put(buf, rhx, rhy + 4, GM.PAPER);
+    } else if (r.tauntKind === 3) {
+      GM.ellipse(buf, bx, 12 + by, 3, 3, GM.PAPER);
+      GM.textMain(buf, "$", (bx - 1) * GM.SCALE, (11 + by) * GM.SCALE, GM.INK, GM.SCALE);
+    }
+    if (r.tauntText) {
+      GM.tauntBubble(buf, (r.anchor.x + 18) * GM.SCALE, 11 * GM.SCALE, r.tauntText,
+        (r.anchor.x + 4) * GM.SCALE, 15 * GM.SCALE);
+    }
+  }
+
+  var label = "王 $" + String(Math.round(r.haul));
+  var pw = GM.textWidth(label, GM.SCALE) + 8, ph = 5 * GM.SCALE + 6;
+  var px = Math.round((r.anchor.x - 18) * GM.SCALE - pw / 2), py = 25 * GM.SCALE;
+  GM.brect(buf, px, py, pw, ph, GM.INK);
+  GM.brect(buf, px + 2, py + 2, pw - 4, ph - 4, GM.DARK);
+  GM.textMain(buf, label, px + 4, py + 3, GM.PAPER, GM.SCALE);
+};
+
+GM.drawRival = function (buf, state) {
+  var r = state.rival;
+  if (!r) return;
+  var h = r.hook;
+  GM.drawRope(buf, h, r.anchor);
+  if (h.item) {
+    var held = GM.heldPos(h, r.anchor);
+    var tip = GM.tip(h, r.anchor);
+    var it = h.item;
+    if (it.type === "mole") {
+      var ox = it.x, oy = it.y;
+      it.x = held.x; it.y = held.y;
+      GM.drawMole(buf, it, state.anim);
+      it.x = ox; it.y = oy;
+    } else {
+      GM.drawItemAt(buf, it, held.x * GM.SCALE, held.y * GM.SCALE, state.anim);
+    }
+    GM.brect(buf, Math.round(tip.x * GM.SCALE) - 2, Math.round(tip.y * GM.SCALE) - 5, 4, 2, GM.PAPER);
+  }
+  GM.drawHook(buf, h);
+  GM.drawWang(buf, state);
+};
+
 GM.drawDynamite = function (buf, state) {
   if (state.dynamite <= 0) return;
   var bx = 94 * GM.SCALE, by = 3 * GM.SCALE;
@@ -2423,6 +2849,7 @@ GM.draw = function (ctx, state) {
   }
   GM.drawHook(buf, state.hook);
   GM.drawMiner(buf, state);
+  if (state.rival) GM.drawRival(buf, state);
   GM.drawDynamite(buf, state);
   if (state.bomb) {
     var bp = GM.bombPos(state.bomb);
@@ -2856,7 +3283,7 @@ GM.ui = (function () {
       : state.level === 3 ? T.tip4 : state.level === 4 ? T.tipMine
       : state.level === 5 ? T.tip7 : state.level === 6 ? T.tip6
       : state.level === 7 ? T.tipChain : state.level === 9 ? T.tipBig
-      : T.tipDefault;
+      : state.level === 11 ? T.tipWang : T.tipDefault;
     var buff = [];
     if (state.strength) buff.push(T.buffNames[0]);
     if (state.clover) buff.push(T.buffNames[1]);
@@ -2890,6 +3317,12 @@ GM.ui = (function () {
       else if (ev === "chain") sfx(GM.SFX.chain);
       else if (ev === "mine") sfx(GM.SFX.mine);
       else if (ev === "clank") sfx(GM.SFX.clank);
+      else if (ev === "rivalFire") sfx(GM.SFX.rivalFire);
+      else if (ev === "rivalGrab") sfx(GM.SFX.grabBody);
+      else if (ev === "rivalTaunt") sfx(GM.SFX.taunt);
+      else if (ev === "rivalBoom") sfx(GM.SFX.boom);
+      else if (ev === "rivalMine") sfx(GM.SFX.mine);
+      else if (ev === "rivalClank") sfx(GM.SFX.clank);
       else if (ev === "tick") sfx("tick");
       else if (ev === "clear") sfx("win");
       else if (ev === "fail") sfx("lose");

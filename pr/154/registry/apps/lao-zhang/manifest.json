@@ -23,11 +23,11 @@
     "................"
   ],
   "version": "1.2.0",
-  "description": "六十秒一关：钩金块、躲地雷，借连锁爆炸开路，商店每样限购一个。",
+  "description": "六十秒一关：钩金块、躲地雷，借爆炸开路；十关后老王也来抢。",
   "i18n": {
     "en": {
       "name": "GOLD DIG",
-      "description": "Hook gold, dodge mines, chain blasts. One of each in the shop."
+      "description": "Hook gold, dodge mines, chain blasts; past level 10 Old Wang digs beside you."
     }
   },
   "author": "Haowei Wu",

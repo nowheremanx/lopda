@@ -138,6 +138,7 @@ GM.newState = function () {
     shake: 0,
     anim: 0,
     throwT: 0,
+    rival: null,
     best: { level: 0, bank: 0 },
     bestBlocked: false,
     bestDirty: false,
@@ -180,6 +181,7 @@ GM.startLevel = function (state, n) {
   state.levelSeed = (state.runSeed + n * 7919) >>> 0;
   state.rng = GM.rng(state.levelSeed);
   state.items = GM.generate(state, n);
+  state.rival = n > GM.PLAY_LEVELS ? GM.startRival(state, n) : null;
   state.hook = { state: "swing", len: GM.IDLE_ROPE, angle: 0, item: null };
   state.bomb = null;
   GM.setRun(state, n);
@@ -640,16 +642,17 @@ GM.countItems = function (items, type) {
   return n;
 };
 
-GM.tip = function (hook) {
+GM.tip = function (hook, anchor) {
+  anchor = anchor || GM.ANCHOR;
   return {
-    x: GM.ANCHOR.x + Math.sin(hook.angle) * hook.len,
-    y: GM.ANCHOR.y + Math.cos(hook.angle) * hook.len
+    x: anchor.x + Math.sin(hook.angle) * hook.len,
+    y: anchor.y + Math.cos(hook.angle) * hook.len
   };
 };
 
 /* the caught item hangs from the near edge, not from its centre */
-GM.heldPos = function (hook) {
-  var tip = GM.tip(hook);
+GM.heldPos = function (hook, anchor) {
+  var tip = GM.tip(hook, anchor);
   if (!hook.item) return tip;
   var off = hook.item.r + 2;
   return {
@@ -791,6 +794,248 @@ GM.collect = function (state) {
 /* One blast. Everything inside the circle is destroyed; a mine or a timed bomb
    inside it goes off in turn, so bombs set off bombs. The source's own item is
    removed by its caller; a held item in range is knocked off the hook. */
+/* ---- Old Wang: the rival in the endless levels ------------------------- */
+
+GM.itemValue = function (it) {
+  if (!it) return 0;
+  if (it.type === "bag") {
+    if (it.reward && it.reward.kind === "cash") return it.reward.value || 0;
+    return 240;
+  }
+  if (it.type === "mole") return it.carry === "diamond" ? GM.ITEMS.diamond.value : 0;
+  if (it.kind === "tnt" || it.kind === "mine" || it.kind === "sealed") return 0;
+  return it.value || 0;
+};
+
+GM.rivalParams = function (n) {
+  var over = Math.max(1, n - GM.PLAY_LEVELS);
+  return {
+    over: over,
+    shotGap: Math.max(1.25, 4.4 - over * 0.25),
+    aimError: Math.max(0.015, 0.20 - over * 0.018),
+    smart: Math.min(0.95, 0.18 + over * 0.08),
+    outSpeed: Math.min(200, 108 + over * 6),
+    swingPeriod: Math.max(2.3, 4.0 - over * 0.12),
+    strength: Math.min(4, Math.floor(over / 4)),
+    speedMul: Math.min(1.3, 0.9 + over * 0.03),
+    tauntDur: Math.max(0.55, 1.25 - over * 0.04),
+    maxRope: Math.min(GM.RIVAL_MAX_ROPE, 136 + over * 2)
+  };
+};
+
+GM.startRival = function (state, n) {
+  var p = GM.rivalParams(n);
+  state.rival = {
+    active: true,
+    anchor: { x: GM.RIVAL_X, y: GM.ANCHOR.y },
+    hook: { state: "swing", len: GM.IDLE_ROPE, angle: 0, item: null },
+    swingT: Math.random() * p.swingPeriod,
+    cooldown: 0.8 + Math.random() * 0.7,
+    target: null,
+    wantAngle: 0,
+    p: p,
+    haul: 0,
+    steals: 0,
+    tauntT: 0,
+    tauntDur: p.tauntDur,
+    tauntKind: 0,
+    tauntText: "",
+    tauntItem: null
+  };
+  return state.rival;
+};
+
+/* the first solid thing a rope fired from this anchor would touch */
+GM.firstHitFrom = function (anchor, item, items) {
+  var ax = anchor.x, ay = anchor.y;
+  var dx = item.x - ax, dy = item.y - ay;
+  var len = Math.sqrt(dx * dx + dy * dy);
+  if (len < 1) return item;
+  var ux = dx / len, uy = dy / len;
+  var best = item, bestT = len;
+  for (var i = 0; i < items.length; i++) {
+    var other = items[i];
+    if (other === item) continue;
+    var ox = other.x - ax, oy = other.y - ay;
+    var proj = ox * ux + oy * uy;
+    if (proj <= 0 || proj > len) continue;
+    var perp = Math.abs(-ox * uy + oy * ux);
+    if (perp <= other.r + 4 && proj < bestT) { best = other; bestT = proj; }
+  }
+  return best;
+};
+
+GM.rivalPick = function (state) {
+  var r = state.rival, items = state.items, pool = [], best = null, bestScore = 0;
+  for (var i = 0; i < items.length; i++) {
+    var it = items[i];
+    if (it.type === "sealed") continue;
+    var dx = it.x - r.anchor.x, dy = it.y - r.anchor.y;
+    var d = Math.sqrt(dx * dx + dy * dy);
+    if (d + it.r + 3 > r.p.maxRope) continue;
+    var a = Math.atan2(dx, dy);
+    if (Math.abs(a) > GM.SWING - 0.05) continue;
+    pool.push(it);
+    var v = GM.itemValue(it);
+    if (v <= 0) v = (it.kind === "tnt" || it.kind === "mine") ? 20 : 1;
+    var score = v / (0.6 + d / 60);
+    if (GM.firstHitFrom(r.anchor, it, items) !== it) score *= 0.25;
+    if (it.kind === "junk" || it.kind === "rock") score *= 0.2;
+    if (it.kind === "tnt" || it.kind === "mine") score *= 0.12;
+    if (score > bestScore) { bestScore = score; best = it; }
+  }
+  if (best && Math.random() > r.p.smart && pool.length) {
+    /* a clumsy Wang grabs whatever is nearest his swing */
+    best = pool[Math.floor(Math.random() * pool.length)];
+  }
+  return best;
+};
+
+GM.rivalFire = function (state) {
+  var r = state.rival;
+  if (!r || r.tauntT > 0 || r.hook.state !== "swing") return false;
+  r.hook.state = "out";
+  r.hook.len = GM.IDLE_ROPE;
+  r.target = null;
+  state.events.push("rivalFire");
+  return true;
+};
+
+GM.rivalAttach = function (state, index) {
+  var r = state.rival, h = r.hook, it = state.items[index];
+  if (it.kind === "sealed") {
+    h.state = "back";
+    var p0 = GM.tip(h, r.anchor);
+    GM.addParticles(state, p0.x, p0.y, 4, ["paper", "mid"]);
+    state.events.push("rivalClank");
+    return null;
+  }
+  if (it.kind === "mine") {
+    state.items.splice(index, 1);
+    h.state = "back";
+    GM.detonate(state, it.x, it.y, GM.BLAST, "rivalMine");
+    r.cooldown = Math.max(r.cooldown, 0.3);
+    return null;
+  }
+  state.items.splice(index, 1);
+  h.item = it;
+  h.state = "back";
+  if (it.kind === "tnt") {
+    var speed = GM.retractSpeed(it, r.p.strength) * r.p.speedMul;
+    var ride = Math.max(0.001, h.len - 2) / speed;
+    it.fuse = Math.max(0.16, Math.min(1.05, ride * 0.58));
+  }
+  var p1 = GM.tip(h, r.anchor);
+  GM.addParticles(state, p1.x, p1.y, 4, ["mid", "dark"]);
+  state.events.push("rivalGrab");
+  return it;
+};
+
+GM.rivalCollect = function (state) {
+  var r = state.rival, h = r.hook, it = h.item;
+  if (!it) return;
+  var value = GM.itemValue(it);
+  h.item = null;
+  h.state = "swing";
+  h.len = GM.IDLE_ROPE;
+  if (it.kind === "tnt") {
+    var q = GM.heldPos(h, r.anchor);
+    GM.detonate(state, q.x, q.y, GM.BLAST, "rivalBoom");
+    return;
+  }
+  r.haul += value;
+  r.steals++;
+  r.cooldown = r.p.shotGap * (0.85 + Math.random() * 0.3);
+  r.tauntT = r.tauntDur;
+  r.tauntKind = Math.floor(Math.random() * 4);
+  r.tauntText = ["HA!", "LOL", "NOOB", "MINE"][r.tauntKind];
+  r.tauntItem = it;
+  state.events.push("rivalTaunt");
+};
+
+GM.stepRival = function (state, dt) {
+  var r = state.rival;
+  if (!r) return;
+  var h = r.hook;
+  if (h.state === "out") {
+    h.len += r.p.outSpeed * dt;
+    var p = GM.tip(h, r.anchor);
+    for (var i = 0; i < state.items.length; i++) {
+      var it = state.items[i];
+      var dx = it.x - p.x, dy = it.y - p.y;
+      if (dx * dx + dy * dy <= (it.r + 4) * (it.r + 4)) {
+        GM.rivalAttach(state, i);
+        return;
+      }
+    }
+    if (h.len >= r.p.maxRope || p.x < 3 || p.x > GM.W - 3 || p.y > GM.H - 2) h.state = "back";
+    return;
+  }
+  if (h.state !== "back") return;
+  if (h.item && h.item.kind === "tnt") {
+    h.item.fuse -= dt;
+    if (h.item.fuse <= 0) {
+      var q = GM.heldPos(h, r.anchor);
+      GM.detonate(state, q.x, q.y, GM.BLAST, "rivalBoom");
+      return;
+    }
+  }
+  var speed = h.item ? GM.retractSpeed(h.item, r.p.strength) * r.p.speedMul : GM.EMPTY_SPEED * 0.9;
+  h.len -= speed * dt;
+  if (h.item && h.len <= 2) {
+    GM.rivalCollect(state);
+    return;
+  }
+  if (!h.item && h.len <= GM.IDLE_ROPE) {
+    h.len = GM.IDLE_ROPE;
+    h.state = "swing";
+    if (r.cooldown < 0.25) r.cooldown = 0.25;
+  }
+};
+
+GM.updateRival = function (state, dt) {
+  var r = state.rival;
+  if (!r) return;
+  if (r.tauntT > 0) {
+    r.tauntT = Math.max(0, r.tauntT - dt);
+    if (r.tauntT <= 0) {
+      r.tauntText = "";
+      r.hook.len = GM.IDLE_ROPE;
+      r.hook.state = "swing";
+      r.target = null;
+      if (r.cooldown < 0.25) r.cooldown = 0.25;
+    }
+    return;
+  }
+  r.cooldown = Math.max(0, r.cooldown - dt);
+  var h = r.hook;
+  if (h.state !== "swing") {
+    var left = dt;
+    while (left > 0) {
+      var step = Math.min(0.016, left);
+      GM.stepRival(state, step);
+      left -= step;
+    }
+    return;
+  }
+  var prev = h.angle;
+  r.swingT += dt;
+  h.angle = Math.sin(r.swingT * Math.PI * 2 / r.p.swingPeriod) * GM.SWING;
+  if (r.cooldown > 0) return;
+  if (!r.target || state.items.indexOf(r.target) < 0) {
+    r.target = GM.rivalPick(state);
+    if (r.target) {
+      var want = Math.atan2(r.target.x - r.anchor.x, r.target.y - r.anchor.y);
+      var err = (Math.random() * 2 - 1) * r.p.aimError;
+      r.wantAngle = Math.max(-GM.SWING + 0.06, Math.min(GM.SWING - 0.06, want + err));
+    }
+  }
+  if (!r.target) return;
+  if ((prev - r.wantAngle) * (h.angle - r.wantAngle) <= 0 && Math.abs(h.angle - prev) < 0.6) {
+    GM.rivalFire(state);
+  }
+};
+
 GM.detonate = function (state, x, y, radius, ev) {
   radius = radius || GM.BLAST;
   var big = radius >= GM.BIG_BLAST;
@@ -810,6 +1055,14 @@ GM.detonate = function (state, x, y, radius, ev) {
     var hp = GM.heldPos(state.hook);
     dx = hp.x - x; dy = hp.y - y;
     if (dx * dx + dy * dy <= radius * radius) state.hook.item = null;
+  }
+  if (state.rival && state.rival.hook.item) {
+    var rp = GM.heldPos(state.rival.hook, state.rival.anchor);
+    dx = rp.x - x; dy = rp.y - y;
+    if (dx * dx + dy * dy <= radius * radius) {
+      state.rival.hook.item = null;
+      state.rival.hook.state = "back";
+    }
   }
   if (state.hook.state === "out") state.hook.state = "back";
   state.blasts.push({ x: x, y: y, t: 0, life: big ? 0.78 : 0.55, r: radius, big: big });
@@ -1148,6 +1401,7 @@ GM.update = function (state, dt) {
     state.hook.angle = Math.sin(state.swingT * Math.PI * 2 / GM.PERIOD) * GM.SWING;
   }
   GM.moveMoles(state, dt);
+  if (state.rival) GM.updateRival(state, dt);
   if (state.bomb) {
     GM.updateBomb(state, dt);
   } else {
@@ -1159,7 +1413,8 @@ GM.update = function (state, dt) {
     }
   }
   /* nothing left to catch: do not make the player sit out the rest of the clock */
-  if (state.screen === "play" && state.items.length === 0 && !state.hook.item) {
+  var rivalBusy = state.rival && (state.rival.hook.item || state.rival.tauntT > 0);
+  if (state.screen === "play" && state.items.length === 0 && !state.hook.item && !rivalBusy) {
     GM.finishLevel(state);
     return;
   }
