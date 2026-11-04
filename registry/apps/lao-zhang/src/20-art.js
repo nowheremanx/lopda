@@ -597,8 +597,8 @@ GM.drawRope = function (buf, hook, anchor) {
   }
 };
 
-GM.drawHook = function (buf, hook) {
-  var tip = GM.tip(hook);
+GM.drawHook = function (buf, hook, anchor) {
+  var tip = GM.tip(hook, anchor);
   var a = hook.angle, dx = Math.sin(a), dy = Math.cos(a);
   var px = Math.cos(a), py = -Math.sin(a);
   GM.line(buf, tip.x - dx * 3, tip.y - dy * 3, tip.x, tip.y, GM.INK);
@@ -889,7 +889,7 @@ GM.drawRival = function (buf, state) {
     }
     GM.brect(buf, Math.round(tip.x * GM.SCALE) - 2, Math.round(tip.y * GM.SCALE) - 5, 4, 2, GM.PAPER);
   }
-  GM.drawHook(buf, h);
+  GM.drawHook(buf, h, r.anchor);
   GM.drawWang(buf, state);
 };
 

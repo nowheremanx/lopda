@@ -586,6 +586,24 @@ test("Old Wang appears only after level 10 and gets sharper each level", () => {
   assert.ok(p30.maxRope >= p11.maxRope);
 });
 
+test("Wang's hook is drawn from his own anchor, not Zhang's", () => {
+  const buf = new Uint8Array(GM.BW * GM.BH);
+  buf.fill(GM.PAPER);
+  const hook = { state: "swing", angle: 0, len: 100, item: null };
+  GM.drawHook(buf, hook, { x: GM.RIVAL_X, y: GM.ANCHOR.y });
+  let minX = Infinity, maxX = -Infinity;
+  for (let y = 0; y < GM.BH; y++) {
+    for (let x = 0; x < GM.BW; x++) {
+      if (buf[y * GM.BW + x] === GM.PAPER) continue;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+    }
+  }
+  const center = (minX + maxX) / 2;
+  assert.ok(Math.abs(center - GM.RIVAL_X * GM.SCALE) < 16, `claw at x ${center}, Wang at ${GM.RIVAL_X * GM.SCALE}`);
+  assert.ok(center > GM.ANCHOR.x * GM.SCALE + 60, "the claw is not floating at Zhang's anchor");
+});
+
 test("Wang steals a haul, puffs up, and taunts Zhang", () => {
   const state = GM.newState();
   state.runSeed = 101;
