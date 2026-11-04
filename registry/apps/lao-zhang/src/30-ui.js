@@ -79,7 +79,7 @@ GM.ui = (function () {
   function codexValue(type) {
     var it = GM.ITEMS[type];
     if (type === "bag") return T.codexRandom;
-    if (type === "tnt") return T.codexBoom;
+    if (type === "tnt" || type === "mine" || type === "sealed") return T.codexBoom;
     if (type === "mole") return T.codexMole;
     return money(it.value);
   }
@@ -315,8 +315,11 @@ GM.ui = (function () {
       lastIntro = "";
       return;
     }
-    var tip = state.level === 1 ? T.tip1 : state.level === 2 ? T.tip2 : (state.level === 3 || state.level === 4) ? T.tip4
-      : state.level === 6 ? T.tip6 : state.level === 7 ? T.tip7 : T.tipDefault;
+    var tip = state.level === 1 ? T.tip1 : state.level === 2 ? T.tip2
+      : state.level === 3 ? T.tip4 : state.level === 4 ? T.tipMine
+      : state.level === 5 ? T.tip7 : state.level === 6 ? T.tip6
+      : state.level === 7 ? T.tipChain : state.level === 9 ? T.tipBig
+      : T.tipDefault;
     var buff = [];
     if (state.strength) buff.push(T.buffNames[0]);
     if (state.clover) buff.push(T.buffNames[1]);
@@ -346,6 +349,10 @@ GM.ui = (function () {
       else if (ev === "gem") sfx(GM.SFX.chime);
       else if (ev === "junk") sfx("miss");
       else if (ev === "boom") sfx(GM.SFX.boom);
+      else if (ev === "bigboom") sfx(GM.SFX.bigboom);
+      else if (ev === "chain") sfx(GM.SFX.chain);
+      else if (ev === "mine") sfx(GM.SFX.mine);
+      else if (ev === "clank") sfx(GM.SFX.clank);
       else if (ev === "tick") sfx("tick");
       else if (ev === "clear") sfx("win");
       else if (ev === "fail") sfx("lose");

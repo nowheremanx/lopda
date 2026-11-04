@@ -71,15 +71,18 @@ test("generated loot stays reachable, keeps high-value pieces, and does not over
   }
 });
 
-test("every TNT sits on something worth taking, and stays there across seeds", () => {
+test("every TNT sits on something worth taking, or on another bomb", () => {
   for (const seed of [1, 2, 3, 9, 77]) {
     for (let n = 1; n <= GM.PLAY_LEVELS; n++) {
       const state = { level: n, clover: 0, book: 0, rng: GM.rng(seed * 1000 + n), levelSeed: seed * 1000 + n };
       const items = GM.generate(state, n);
       for (const bomb of items.filter((it) => it.type === "tnt")) {
-        const near = items.some((it) => it !== bomb && it.kind !== "rock" && it.kind !== "junk" &&
-          it.type !== "tnt" && Math.hypot(it.x - bomb.x, it.y - bomb.y) <= 30);
-        assert.ok(near, `seed ${seed} level ${n}: TNT has no treasure within its blast`);
+        if (bomb.puzzle) continue;
+        const nearTreasure = items.some((it) => it !== bomb && it.kind !== "rock" && it.kind !== "junk" &&
+          it.type !== "tnt" && it.type !== "mine" && Math.hypot(it.x - bomb.x, it.y - bomb.y) <= 30);
+        const nearBomb = items.some((it) => it !== bomb && (it.type === "tnt" || it.type === "mine") &&
+          Math.hypot(it.x - bomb.x, it.y - bomb.y) <= 30);
+        assert.ok(nearTreasure || nearBomb, `seed ${seed} level ${n}: TNT has nothing to blow up`);
       }
     }
   }
@@ -175,6 +178,167 @@ test("a hooked TNT rides back and blows up before it reaches the miner", () => {
   assert.equal(GM.countItems(state.items, "goldM"), 0, "the nearby gold is destroyed");
 });
 
+test("a mine explodes where it sits instead of riding the hook", () => {
+  const state = GM.newState();
+  state.screen = "play";
+  state.time = 60;
+  state.items = [
+    GM.makeItem(state, "mine", 80, 70, GM.rng(5)),
+    GM.makeItem(state, "goldM", 102, 70, GM.rng(6)),
+    GM.makeItem(state, "goldS", 80, 120, GM.rng(7))
+  ];
+  state.hook = { state: "swing", len: GM.IDLE_ROPE, angle: 0, item: null };
+  assert.equal(GM.fire(state), true);
+  for (let i = 0; i < 120 && !state.blasts.length; i++) GM.update(state, 0.01);
+  assert.equal(state.hook.item, null, "a mine is never hauled");
+  assert.equal(state.hook.state, "back");
+  assert.ok(state.blasts.length >= 1);
+  assert.equal(GM.countItems(state.items, "mine"), 0);
+  assert.equal(GM.countItems(state.items, "goldM"), 0, "the gold beside the mine is wrecked");
+  assert.equal(GM.countItems(state.items, "goldS"), 1, "deep gold survives");
+  assert.ok(state.events.includes("mine"));
+});
+
+test("an explosion chains through bombs and wrecks the loot around them", () => {
+  const state = GM.newState();
+  state.screen = "play";
+  state.items = [
+    GM.makeItem(state, "mine", 60, 80, GM.rng(8)),
+    GM.makeItem(state, "tnt", 88, 80, GM.rng(9)),
+    GM.makeItem(state, "goldM", 74, 80, GM.rng(10)),
+    GM.makeItem(state, "goldS", 20, 130, GM.rng(11))
+  ];
+  state.events = [];
+  GM.detonate(state, 60, 80, GM.BLAST, "mine");
+  assert.equal(GM.countItems(state.items, "mine"), 0);
+  assert.equal(GM.countItems(state.items, "tnt"), 0, "the second bomb is set off too");
+  assert.equal(GM.countItems(state.items, "goldM"), 0);
+  assert.equal(GM.countItems(state.items, "goldS"), 1);
+  assert.ok(state.blasts.length >= 2, "one blast per bomb");
+  assert.ok(state.events.includes("chain"));
+});
+
+test("a thrown bomb wrecks the loot around its target, not just the held item", () => {
+  const state = GM.newState();
+  state.screen = "play";
+  state.time = 60;
+  state.dynamite = 1;
+  state.items = [
+    GM.makeItem(state, "goldM", 70, 95, GM.rng(12)),
+    GM.makeItem(state, "goldS", 20, 130, GM.rng(13))
+  ];
+  state.hook = {
+    state: "back", len: 40, angle: 0,
+    item: { type: "rockL", kind: "rock", value: 10, weight: 4.2, r: 13, fuse: 0 }
+  };
+  assert.equal(GM.useDynamite(state), true);
+  for (let i = 0; i < 80 && state.bomb; i++) GM.update(state, 0.01);
+  assert.equal(state.hook.item, null);
+  assert.equal(GM.countItems(state.items, "goldM"), 0, "gold near the throw is destroyed");
+  assert.equal(GM.countItems(state.items, "goldS"), 1);
+  assert.equal(state.blasts[0].r, GM.BLAST);
+});
+
+test("throwing a bomb onto a hauled timed bomb makes the wide blast", () => {
+  const state = GM.newState();
+  state.screen = "play";
+  state.time = 60;
+  state.dynamite = 1;
+  state.items = [
+    GM.makeItem(state, "goldM", 80, 110, GM.rng(14)),
+    GM.makeItem(state, "goldS", 80, 132, GM.rng(15))
+  ];
+  state.hook = {
+    state: "back", len: 40, angle: 0,
+    item: { type: "tnt", kind: "tnt", value: 0, weight: 1.4, r: 8, fuse: 5 }
+  };
+  assert.equal(GM.useDynamite(state), true);
+  for (let i = 0; i < 80 && state.bomb; i++) GM.update(state, 0.01);
+  assert.equal(state.hook.item, null);
+  assert.equal(GM.countItems(state.items, "goldM"), 0, "the wider blast reaches 42 units");
+  assert.equal(GM.countItems(state.items, "goldS"), 1, "and stops short of 64");
+  assert.ok(state.blasts.some((b) => b.big && b.r === GM.BIG_BLAST));
+  assert.ok(state.events.includes("bigboom"));
+});
+
+test("banded stone rings the hook off and only a blast breaks it", () => {
+  const state = GM.newState();
+  state.screen = "play";
+  state.time = 60;
+  state.items = [
+    GM.makeItem(state, "sealed", 80, 70, GM.rng(16)),
+    GM.makeItem(state, "goldS", 80, 120, GM.rng(17))
+  ];
+  state.hook = { state: "swing", len: GM.IDLE_ROPE, angle: 0, item: null };
+  GM.fire(state);
+  for (let i = 0; i < 160 && state.hook.state !== "back"; i++) GM.update(state, 0.01);
+  assert.equal(state.hook.item, null);
+  assert.equal(state.hook.state, "back");
+  assert.equal(GM.countItems(state.items, "sealed"), 1, "the stone is still there");
+  assert.ok(state.events.includes("clank"));
+  assert.equal(state.blasts.length, 0, "the claw does not break it");
+
+  const wall = state.items.find((it) => it.type === "sealed");
+  GM.detonate(state, wall.x, wall.y, GM.BLAST, "boom");
+  assert.equal(GM.countItems(state.items, "sealed"), 0, "a blast does");
+});
+
+test("the puzzle levels put their vault behind a bomb-sized wall", () => {
+  function puzzleState(n) {
+    const seed = 7000 + n;
+    const state = GM.newState();
+    state.level = n;
+    state.levelSeed = seed;
+    state.rng = GM.rng(seed);
+    state.items = GM.generate(state, n);
+    state.screen = "play";
+    return state;
+  }
+
+  const four = puzzleState(4);
+  const mine4 = four.items.find((it) => it.puzzle && it.type === "mine");
+  const wall4 = four.items.find((it) => it.puzzle && it.type === "sealed");
+  const gem4 = four.items.find((it) => it.puzzle && it.type === "diamond");
+  assert.ok(mine4 && wall4 && gem4, "level 4 places the mine, wall and diamond");
+  GM.detonate(four, mine4.x, mine4.y, GM.BLAST, "mine");
+  assert.ok(!four.items.includes(wall4), "the mine clears the cap");
+  assert.ok(four.items.includes(gem4), "and leaves the diamond outside the blast");
+
+  const seven = puzzleState(7);
+  const mine7 = seven.items.filter((it) => it.puzzle && it.type === "mine");
+  const wall7 = seven.items.filter((it) => it.puzzle && it.type === "sealed");
+  const gem7 = seven.items.filter((it) => it.puzzle && it.type === "diamond");
+  const tnt7 = seven.items.find((it) => it.puzzle && it.type === "tnt");
+  assert.equal(mine7.length, 2);
+  assert.equal(wall7.length, 2);
+  assert.equal(gem7.length, 2);
+  assert.ok(tnt7);
+  /* the timed bomb blows about 21 units up the rope, between the two mines */
+  GM.detonate(seven, tnt7.x, tnt7.y - 21, GM.BLAST, "boom");
+  assert.equal(seven.items.filter((it) => mine7.includes(it)).length, 0, "both mines chain");
+  assert.equal(seven.items.filter((it) => wall7.includes(it)).length, 0, "both walls open");
+  assert.equal(seven.items.filter((it) => gem7.includes(it)).length, 2, "both diamonds survive");
+
+  const nine = puzzleState(9);
+  const wall9 = nine.items.filter((it) => it.puzzle && it.type === "sealed");
+  const gem9 = nine.items.find((it) => it.puzzle && it.type === "diamond");
+  const gold9 = nine.items.find((it) => it.puzzle && it.type === "goldL");
+  assert.equal(wall9.length, 2);
+  assert.ok(gem9 && gold9);
+
+  const small = puzzleState(9);
+  GM.detonate(small, 80, 118, GM.BLAST, "boom");
+  assert.equal(small.items.filter((it) => it.puzzle && it.type === "sealed").length, 2,
+    "a small blast leaves the far walls alone");
+
+  const big = puzzleState(9);
+  GM.detonate(big, 80, 118, GM.BIG_BLAST, "bigboom");
+  assert.equal(big.items.filter((it) => it.puzzle && it.type === "sealed").length, 0,
+    "the wide blast reaches both walls");
+  assert.ok(big.items.some((it) => it.puzzle && it.type === "diamond"), "the diamond is outside even the wide blast");
+  assert.ok(big.items.some((it) => it.puzzle && it.type === "goldL"), "so is the large gold");
+});
+
 test("bags roll cash, dynamite or strength when hauled in", () => {
   const rewards = [
     { kind: "cash", value: 240 },
@@ -222,7 +386,7 @@ test("plain moles are worthless; the rare diamond mole is not", () => {
   }
 });
 
-test("the shop has unlimited dynamite and one-level buffs", () => {
+test("the shop sells each line once, dynamite included", () => {
   const state = GM.newState();
   state.runSeed = 12345;
   state.level = 0;
@@ -247,8 +411,10 @@ test("the shop has unlimited dynamite and one-level buffs", () => {
   const offers = GM.shopOffers(state, 1);
   state.shopOffers = offers;
   const dynIndex = offers.findIndex((o) => o.key === "dynamite");
-  for (let i = 0; i < 20; i++) assert.equal(GM.buy(state, dynIndex), true, "dynamite has no cap");
-  assert.equal(state.dynamite, 20);
+  assert.equal(GM.buy(state, dynIndex), true, "the first dynamite can be bought");
+  assert.equal(state.dynamite, 1);
+  assert.equal(GM.buy(state, dynIndex), false, "dynamite is one per shop, not endless");
+  assert.equal(state.dynamite, 1);
 
   state.bank = 100000;
   const str = offers.findIndex((o) => o.key === "strength" && o.available);

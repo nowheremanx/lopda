@@ -64,7 +64,7 @@ GM.recipeFor = function (n) {
   r.tnt = Math.min(4, r.tnt + Math.floor(extra / 3));
   r.mole = Math.min(4, r.mole + Math.floor(extra / 2));
   /* never turn the mine into a solid wall: shed the cheapest things first */
-  var drop = ["bone", "skull", "rockS", "goldS", "bag", "rockL", "goldM", "goldL", "diamond", "mole", "tnt"];
+  var drop = ["bone", "skull", "rockS", "goldS", "bag", "rockL", "goldM", "goldL", "diamond", "mine", "mole", "tnt"];
   var total = GM.recipeCount(r);
   while (total > 36) {
     for (i = 0; i < drop.length; i++) {
@@ -137,6 +137,7 @@ GM.newState = function () {
     blasts: [],
     shake: 0,
     anim: 0,
+    throwT: 0,
     best: { level: 0, bank: 0 },
     bestBlocked: false,
     bestDirty: false,
@@ -192,6 +193,7 @@ GM.startLevel = function (state, n) {
   state.blasts = [];
   state.shake = 0;
   state.anim = 0;
+  state.throwT = 0;
   state.bestDirty = false;
   state.newBest = false;
   state.bg = null;
@@ -228,10 +230,10 @@ GM.makeItem = function (state, type, x, y, rng) {
   return it;
 };
 
-GM.overlaps = function (x, y, r, items, gap) {
+GM.overlaps = function (x, y, r, items, gap, except) {
   for (var i = 0; i < items.length; i++) {
     var it = items[i];
-    if (it.type === "mole") continue;
+    if (it === except || it.type === "mole") continue;
     var dx = it.x - x, dy = it.y - y, rr = it.r + r + (gap == null ? 2 : gap);
     if (dx * dx + dy * dy < rr * rr) return true;
   }
@@ -247,11 +249,11 @@ GM.reachable = function (x, y, r) {
   return Math.abs(Math.atan2(dx, dy)) <= GM.SWING - 0.05;
 };
 
-GM.spotOK = function (x, y, r, items, gap) {
+GM.spotOK = function (x, y, r, items, gap, except) {
   if (x < r + 3 || x > GM.W - r - 3) return false;
   if (y < GM.GROUND + 14 || y > GM.H - r - 3) return false;
   if (!GM.reachable(x, y, r)) return false;
-  return !GM.overlaps(x, y, r, items, gap);
+  return !GM.overlaps(x, y, r, items, gap, except);
 };
 
 /* How each written level arranges its mine. More vaults means more TNT sitting on
@@ -277,13 +279,40 @@ GM.generate = function (state, n) {
   var left = {}, k, i, j, tries, a, d, p, q, it, spec, val, dx, dy;
   for (k in recipe) if (Object.prototype.hasOwnProperty.call(recipe, k)) left[k] = recipe[k] || 0;
   var theme = GM.MAP_THEMES[Math.min(GM.MAP_THEMES.length - 1, Math.max(0, n - 1))];
+  var zones = [];
 
   function has(type) { return (left[type] || 0) > 0; }
   function spend(type) { left[type] = (left[type] || 0) - 1; }
 
+  function segDist2(px, py, x0, y0, x1, y1) {
+    var vx = x1 - x0, vy = y1 - y0;
+    var len2 = vx * vx + vy * vy;
+    var t = len2 ? ((px - x0) * vx + (py - y0) * vy) / len2 : 0;
+    t = Math.max(0, Math.min(1, t));
+    var qx = x0 + vx * t, qy = y0 + vy * t;
+    return (px - qx) * (px - qx) + (py - qy) * (py - qy);
+  }
+
+  function zoneHit(x, y, r) {
+    for (var zi = 0; zi < zones.length; zi++) {
+      var z = zones[zi];
+      if (z.kind === "line") {
+        if (segDist2(x, y, z.x0, z.y0, z.x1, z.y1) <= (z.w + r) * (z.w + r)) return true;
+      } else {
+        var zx = x - z.x, zy = y - z.y, zr = z.r + r;
+        if (zx * zx + zy * zy <= zr * zr) return true;
+      }
+    }
+    return false;
+  }
+
+  function valid(x, y, r, gap, except) {
+    return !zoneHit(x, y, r) && GM.spotOK(x, y, r, items, gap, except);
+  }
+
   function place(type, x, y, gap) {
     spec = GM.ITEMS[type];
-    if (!GM.spotOK(x, y, spec.r, items, gap == null ? 2 : gap)) return null;
+    if (!valid(x, y, spec.r, gap == null ? 2 : gap)) return null;
     it = GM.makeItem(state, type, x, y, rng);
     items.push(it);
     return it;
@@ -305,7 +334,7 @@ GM.generate = function (state, n) {
     for (var t = 0; t < 260; t++) {
       var x = xMin + rng() * (xMax - xMin);
       var y = yy0 + rng() * (yy1 - yy0);
-      if (GM.spotOK(x, y, spec.r, items, gap == null ? 2 : gap)) return { x: x, y: y };
+      if (valid(x, y, spec.r, gap == null ? 2 : gap)) return { x: x, y: y };
     }
     return null;
   }
@@ -315,12 +344,12 @@ GM.generate = function (state, n) {
     var yy, xx;
     for (yy = GM.GROUND + 14; yy <= GM.H - spec.r - 4; yy += 2) {
       for (xx = spec.r + 4; xx <= GM.W - spec.r - 4; xx += 2) {
-        if (GM.spotOK(xx, yy, spec.r, items, 0)) return { x: xx, y: yy };
+        if (valid(xx, yy, spec.r, 0)) return { x: xx, y: yy };
       }
     }
     for (yy = GM.GROUND + 14; yy <= GM.H - spec.r - 4; yy++) {
       for (xx = spec.r + 4; xx <= GM.W - spec.r - 4; xx++) {
-        if (GM.spotOK(xx, yy, spec.r, items, 0)) return { x: xx, y: yy };
+        if (valid(xx, yy, spec.r, 0)) return { x: xx, y: yy };
       }
     }
     return null;
@@ -335,6 +364,52 @@ GM.generate = function (state, n) {
     if (!p) p = anySpot(type);
     return p ? addAt(type, p.x, p.y, 0) : null;
   }
+
+  /* A hand-built set piece goes down first and takes its pieces out of the recipe.
+     If the counts or the fixed spots do not fit, fall back to the ordinary mine. */
+  function puzzle() {
+    var def = GM.PUZZLES[n], counts = {}, placed = [], placedFree = [], ok = true, pi;
+    if (!def) return false;
+    for (pi = 0; pi < def.pieces.length; pi++) {
+      var pt = def.pieces[pi];
+      if (!pt.free) counts[pt.type] = (counts[pt.type] || 0) + 1;
+    }
+    for (var ct in counts) {
+      if (Object.prototype.hasOwnProperty.call(counts, ct) && (left[ct] || 0) < counts[ct]) return false;
+    }
+    for (pi = 0; pi < def.pieces.length; pi++) {
+      var piece = def.pieces[pi];
+      spec = GM.ITEMS[piece.type];
+      if (!spec || !GM.spotOK(piece.x, piece.y, spec.r, items, 0)) { ok = false; break; }
+      it = GM.makeItem(state, piece.type, piece.x, piece.y, rng);
+      it.puzzle = true;
+      items.push(it);
+      if (!piece.free) spend(piece.type);
+      placed.push(it);
+      placedFree.push(!!piece.free);
+    }
+    if (!ok) {
+      for (pi = 0; pi < placed.length; pi++) {
+        if (!placedFree[pi]) left[placed[pi].type] = (left[placed[pi].type] || 0) + 1;
+      }
+      for (pi = 0; pi < placed.length; pi++) {
+        var at = items.indexOf(placed[pi]);
+        if (at >= 0) items.splice(at, 1);
+      }
+      return false;
+    }
+    for (pi = 0; pi < (def.lines || []).length; pi++) {
+      var ln = def.lines[pi];
+      zones.push({ kind: "line", x0: ln.x0, y0: ln.y0, x1: ln.x1, y1: ln.y1, w: ln.w });
+    }
+    for (pi = 0; pi < (def.circles || []).length; pi++) {
+      var ci = def.circles[pi];
+      zones.push({ kind: "circle", x: ci.x, y: ci.y, r: ci.r });
+    }
+    return true;
+  }
+
+  puzzle();
 
   function cluster(type, count) {
     count = Math.min(count, left[type] || 0);
@@ -507,7 +582,7 @@ GM.generate = function (state, n) {
   }
 
   /* 6. everything else, cheapest last */
-  var order = ["bone", "skull", "rockL", "rockS", "goldS", "goldM", "goldL", "tnt"];
+  var order = ["bone", "skull", "rockL", "rockS", "goldS", "goldM", "goldL", "mine", "tnt"];
   for (i = 0; i < order.length; i++) {
     while (has(order[i])) if (!scatter(order[i])) break;
   }
@@ -523,27 +598,26 @@ GM.generate = function (state, n) {
   /* 7. final safety: every TNT must sit within blast range of something worth taking */
   for (i = 0; i < items.length; i++) {
     it = items[i];
-    if (it.type !== "tnt") continue;
+    if (it.type !== "tnt" || it.puzzle) continue;
     var near = false;
     for (j = 0; j < items.length; j++) {
       val = items[j];
-      if (val === it || val.type === "mole" || val.type === "tnt") continue;
-      if (val.kind === "junk" || val.kind === "rock") continue;
+      if (val === it || val.type === "mole" || val.type === "tnt" || val.type === "mine") continue;
+      if (val.kind === "junk" || val.kind === "rock" || val.kind === "sealed") continue;
       dx = val.x - it.x; dy = val.y - it.y;
       if (dx * dx + dy * dy <= 29 * 29) { near = true; break; }
     }
     if (near) continue;
-    var others = items.slice(0, i).concat(items.slice(i + 1));
     for (j = 0; j < items.length && !near; j++) {
       val = items[j];
-      if (val === it || val.type === "mole" || val.type === "tnt") continue;
-      if (val.kind === "junk" || val.kind === "rock") continue;
+      if (val === it || val.type === "mole" || val.type === "tnt" || val.type === "mine") continue;
+      if (val.kind === "junk" || val.kind === "rock" || val.kind === "sealed") continue;
       var toA = Math.atan2(GM.ANCHOR.y - val.y, GM.ANCHOR.x - val.x);
       for (tries = 0; tries < 50 && !near; tries++) {
         a = toA + (rng() - 0.5) * 1.1;
         d = val.r + it.r + 2 + rng() * 6;
         var nx = val.x + Math.cos(a) * d, ny = val.y + Math.sin(a) * d;
-        if (GM.spotOK(nx, ny, it.r, others, 1)) {
+        if (valid(nx, ny, it.r, 1, it)) {
           it.x = nx;
           it.y = ny;
           near = true;
@@ -604,12 +678,13 @@ GM.useDynamite = function (state) {
   state.bomb = {
     t: 0,
     dur: 0.38,
-    sx: GM.ANCHOR.x,
-    sy: GM.ANCHOR.y - 5,
+    sx: GM.ANCHOR.x + 6,
+    sy: GM.ANCHOR.y - 9,
     tx: p.x,
     ty: p.y,
     item: state.hook.item
   };
+  state.throwT = GM.THROW_TIME;
   state.events.push("throw");
   return true;
 };
@@ -626,19 +701,14 @@ GM.resolveBomb = function (state) {
   var b = state.bomb;
   if (!b) return;
   state.bomb = null;
-  var it = b.item;
+  var it = b.item, big = !!(it && it.kind === "tnt");
   if (state.hook.item === it) {
     state.hook.item = null;
     state.hook.state = "back";
   }
-  if (it.kind === "tnt") {
-    GM.explode(state, b.tx, b.ty);
-  } else {
-    GM.addParticles(state, b.tx, b.ty, 12, ["mid", "dark", "paper"]);
-    state.blasts.push({ x: b.tx, y: b.ty, t: 0, life: 0.5 });
-    state.shake = 0.32;
-    state.events.push("boom");
-  }
+  /* A thrown bomb always wrecks what is around it. Landing it on a timed bomb
+     that is already on the rope turns the small blast into the wide one. */
+  GM.detonate(state, b.tx, b.ty, big ? GM.BIG_BLAST : GM.BLAST, big ? "bigboom" : "boom");
 };
 
 GM.updateBomb = function (state, dt) {
@@ -649,7 +719,22 @@ GM.updateBomb = function (state, dt) {
 
 GM.attach = function (state, index) {
   var it = state.items[index];
+  if (it.kind === "sealed") {
+    /* banded stone: the claw rings off it and comes back empty; only a blast moves it */
+    state.hook.state = "back";
+    var tip = GM.tip(state.hook);
+    GM.addParticles(state, tip.x, tip.y, 4, ["paper", "mid"]);
+    state.events.push("clank");
+    return null;
+  }
   state.items.splice(index, 1);
+  if (it.kind === "mine") {
+    /* a mine does not ride the rope: the hook touching it sets it off on the spot */
+    state.hook.item = null;
+    state.hook.state = "back";
+    GM.detonate(state, it.x, it.y, GM.BLAST, "mine");
+    return null;
+  }
   state.hook.item = it;
   state.hook.state = "back";
   if (it.kind === "tnt") {
@@ -672,7 +757,7 @@ GM.collect = function (state) {
   state.hook.state = "swing";
   state.hook.len = GM.IDLE_ROPE;
   if (it.kind === "tnt") {
-    GM.explode(state, p.x, p.y);
+    GM.detonate(state, p.x, p.y, GM.BLAST, "boom");
     return;
   }
   if (it.kind === "bag") {
@@ -703,23 +788,41 @@ GM.collect = function (state) {
   if (it.kind === "gem") GM.addParticles(state, p.x, p.y, 10, ["paper"]);
 };
 
-GM.explode = function (state, x, y) {
-  var keep = [], i, it;
+/* One blast. Everything inside the circle is destroyed; a mine or a timed bomb
+   inside it goes off in turn, so bombs set off bombs. The source's own item is
+   removed by its caller; a held item in range is knocked off the hook. */
+GM.detonate = function (state, x, y, radius, ev) {
+  radius = radius || GM.BLAST;
+  var big = radius >= GM.BIG_BLAST;
+  var keep = [], chain = [], i, it, dx, dy;
   for (i = 0; i < state.items.length; i++) {
     it = state.items[i];
-    var dx = it.x - x, dy = it.y - y;
-    if (dx * dx + dy * dy <= 30 * 30) {
+    dx = it.x - x; dy = it.y - y;
+    if (dx * dx + dy * dy <= radius * radius) {
       GM.addParticles(state, it.x, it.y, 6, ["mid", "dark", "paper"]);
+      if (it.kind === "tnt" || it.kind === "mine") chain.push({ x: it.x, y: it.y });
     } else {
       keep.push(it);
     }
   }
   state.items = keep;
-  state.hook.item = null;
-  state.hook.state = "back";
-  state.blasts.push({ x: x, y: y, t: 0, life: 0.55 });
-  state.shake = 0.4;
-  state.events.push("boom");
+  if (state.hook.item) {
+    var hp = GM.heldPos(state.hook);
+    dx = hp.x - x; dy = hp.y - y;
+    if (dx * dx + dy * dy <= radius * radius) state.hook.item = null;
+  }
+  if (state.hook.state === "out") state.hook.state = "back";
+  state.blasts.push({ x: x, y: y, t: 0, life: big ? 0.78 : 0.55, r: radius, big: big });
+  state.shake = Math.max(state.shake, big ? 0.72 : 0.4);
+  state.events.push(ev || (big ? "bigboom" : "boom"));
+  if (big) GM.addParticles(state, x, y, 18, ["paper", "mid", "dark"]);
+  for (i = 0; i < chain.length; i++) {
+    GM.detonate(state, chain[i].x, chain[i].y, GM.BLAST, "chain");
+  }
+};
+
+GM.explode = function (state, x, y, radius, ev) {
+  GM.detonate(state, x, y, radius, ev);
 };
 
 GM.addFloat = function (state, x, y, text) {
@@ -990,7 +1093,7 @@ GM.stepHook = function (state, dt) {
     hook.item.fuse -= dt;
     if (hook.item.fuse <= 0) {
       var q = GM.heldPos(hook);
-      GM.explode(state, q.x, q.y);
+      GM.detonate(state, q.x, q.y, GM.BLAST, "boom");
       return;
     }
   }
@@ -1027,6 +1130,7 @@ GM.update = function (state, dt) {
   if (state.screen !== "play") return;
 
   state.anim += dt;
+  if (state.throwT > 0) state.throwT = Math.max(0, state.throwT - dt);
   state.time -= dt;
   if (state.time <= 0) {
     state.time = 0;

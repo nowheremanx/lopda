@@ -24,7 +24,7 @@ const angleTo = (GM, it) => Math.atan2(it.x - GM.ANCHOR.x, it.y - GM.ANCHOR.y);
 const valuable = (it) => it.kind === "gem" || it.kind === "gold" || it.kind === "bag";
 
 function valueOf(it) {
-  if (it.type === "tnt") return -1;
+  if (it.type === "tnt" || it.type === "mine" || it.type === "sealed") return -1;
   if (it.kind === "bag") return 260;
   if (it.kind === "mole") return it.carry === "diamond" ? 900 : 0;
   if (it.kind === "junk" || it.kind === "rock") return 0;
@@ -58,7 +58,8 @@ function behindValue(GM, state, blocker) {
   const ux = dx / len, uy = dy / len;
   let best = 0;
   for (const other of state.items) {
-    if (other === blocker || other.type === "mole" || other.type === "tnt" || !valuable(other)) continue;
+    if (other === blocker || other.type === "mole" || other.type === "tnt" || other.type === "mine" ||
+        other.type === "sealed" || !valuable(other)) continue;
     const ox = other.x - ax, oy = other.y - ay;
     const proj = ox * ux + oy * uy;
     if (proj <= len) continue;
@@ -69,9 +70,16 @@ function behindValue(GM, state, blocker) {
 }
 
 function pickTarget(GM, state, smart) {
+  /* the hand-built vaults are opened by their own bombs: take the mine or the
+     timed bomb first, then the treasure behind the banded stone */
+  if (smart) {
+    const rigged = state.items.find((it) => it.puzzle && (it.type === "mine" || it.type === "tnt") &&
+      firstHit(GM, state, it) === it);
+    if (rigged) return rigged;
+  }
   let best = null, bestScore = 0;
   for (const it of state.items) {
-    if (it.type === "mole" || it.type === "tnt") continue;
+    if (it.type === "mole" || it.type === "tnt" || it.type === "mine" || it.type === "sealed") continue;
     if (firstHit(GM, state, it) !== it) continue;
     let v = valueOf(it);
     if (v <= 0 && smart) v = behindValue(GM, state, it) * 0.55;
@@ -87,6 +95,7 @@ function pickTarget(GM, state, smart) {
 function shouldBlow(GM, state) {
   const it = state.hook.item;
   if (!it || state.dynamite <= 0) return false;
+  if (it.puzzle && it.kind === "tnt") return true;
   if (it.kind !== "rock" && it.kind !== "junk") return false;
   const p = GM.heldPos(state.hook);
   for (const v of state.items) if (valuable(v) && dist(p, v) < 33) return false;
@@ -134,7 +143,7 @@ function shop(GM, state, next, base, opts) {
     if (idx < 0) continue;
     const offer = state.shopOffers[idx];
     if (!offer.available) continue;
-    let copies = key === "dynamite" ? 2 : 1;
+    let copies = 1;
     while (copies-- > 0 && spendable >= offer.price && state.bank >= offer.price) {
       if (!GM.buy(state, idx)) break;
       spendable -= offer.price;

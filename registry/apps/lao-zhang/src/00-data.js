@@ -17,15 +17,20 @@ GM.LEVEL_TIME = 60;
 GM.OUT_SPEED = 135;
 GM.EMPTY_SPEED = 240;
 GM.BASE_SPEED = 28.6;           /* the old large-rock reel speed, now the base */
+GM.BLAST = 30;                  /* a normal bomb clears this radius */
+GM.BIG_BLAST = 54;              /* thrown onto a hauled timed bomb: the big one */
+GM.THROW_TIME = 0.46;           /* old Zhang's throwing pose, in seconds */
 GM.PLAY_LEVELS = 10;
 GM.STRENGTH_STEP = 0.15;
-GM.DYNAMITE_HARD_CAP = 9999;   /* only the save file needs a sane ceiling; the shop has no cap */
+GM.DYNAMITE_HARD_CAP = 9999;   /* only the save file needs a sane ceiling */
 GM.ENDLESS_FIRST_STEP = 2900;
 GM.ENDLESS_GROW = 240;
 
 /* Cumulative cash targets for the ten written levels, retuned with tools/lao-zhang-sim.mjs.
-   Early levels leave a real surplus; levels 4, 8 and 10 are the spikes that spend it. */
-GM.TARGETS = [1200, 3600, 5850, 9000, 12550, 17100, 23100, 30000, 36400, 44800];
+   Early levels leave a real surplus; levels 4, 8 and 10 are the spikes that spend it.
+   Level 4's target now expects the mine to open the vault; level 9's expects the big
+   blast, or enough bank from the levels before it. */
+GM.TARGETS = [1200, 3600, 5850, 10200, 13750, 18300, 24300, 31200, 37600, 46000];
 
 /* value is the base price; bag uses min/max and a roll; rocks are worth triple with the book.
    A bag now rolls cash, dynamite or a burst of strength when it is hauled in. */
@@ -37,31 +42,91 @@ GM.ITEMS = {
   bag:     { kind: "bag",   value: 0,   weight: 0.9,  r: 8,  sprite: "bag",     pref: [50, 126], min: 120, max: 420 },
   rockS:   { kind: "rock",  value: 2,   weight: 1.8,  r: 8,  sprite: "rockS",   pref: [45, 134] },
   rockL:   { kind: "rock",  value: 10,  weight: 4.2,  r: 13, sprite: "rockL",   pref: [60, 129] },
+  sealed:  { kind: "sealed", value: 0,  weight: 8,    r: 13, sprite: "sealed",  pref: [60, 129] },
   bone:    { kind: "junk",  value: 2,   weight: 1.2,  r: 7,  sprite: "bone",    pref: [50, 128] },
   skull:   { kind: "junk",  value: 10,  weight: 1.6,  r: 8,  sprite: "skull",   pref: [55, 132] },
   tnt:     { kind: "tnt",   value: 0,   weight: 1.4,  r: 8,  sprite: "tnt",     pref: [65, 126] },
+  mine:    { kind: "mine",  value: 0,   weight: 1.2,  r: 8,  sprite: "mine",    pref: [70, 126] },
   mole:    { kind: "mole",  value: 0,   weight: 0.9,  r: 8,  sprite: "mole",    pref: [82, 120] }
 };
 
-GM.ITEM_ORDER = ["goldS", "goldM", "goldL", "diamond", "bag", "rockS", "rockL", "bone", "skull", "tnt", "mole"];
+GM.ITEM_ORDER = ["goldS", "goldM", "goldL", "diamond", "bag", "rockS", "rockL", "sealed", "bone", "skull", "tnt", "mine", "mole"];
 
 GM.LEVELS = [
   { goldS: 9, goldM: 3, goldL: 1, bag: 1, rockS: 1, bone: 1 },
   { goldS: 8, goldM: 4, goldL: 2, bag: 2, rockS: 2, bone: 1, diamond: 1 },
   { goldS: 7, goldM: 4, goldL: 2, bag: 2, rockS: 3, rockL: 1, bone: 1, skull: 1, diamond: 1, tnt: 1 },
-  { goldS: 6, goldM: 5, goldL: 3, bag: 2, rockS: 3, rockL: 1, bone: 1, skull: 1, diamond: 1, tnt: 1, mole: 1 },
-  { goldS: 6, goldM: 5, goldL: 3, bag: 3, rockS: 3, rockL: 2, bone: 2, skull: 1, diamond: 2, tnt: 1, mole: 1 },
-  { goldS: 5, goldM: 5, goldL: 3, bag: 3, rockS: 4, rockL: 2, bone: 2, skull: 1, diamond: 2, tnt: 2, mole: 1 },
-  { goldS: 4, goldM: 5, goldL: 4, bag: 3, rockS: 4, rockL: 2, bone: 2, skull: 1, diamond: 2, tnt: 1, mole: 2 },
-  { goldS: 3, goldM: 5, goldL: 4, bag: 3, rockS: 4, rockL: 2, bone: 2, skull: 2, diamond: 2, tnt: 2, mole: 2 },
-  { goldS: 2, goldM: 5, goldL: 4, bag: 3, rockS: 3, rockL: 2, bone: 1, skull: 2, diamond: 3, tnt: 3, mole: 2 },
-  { goldS: 2, goldM: 6, goldL: 5, bag: 3, rockS: 4, rockL: 2, bone: 1, skull: 2, diamond: 3, tnt: 3, mole: 3 }
+  { goldS: 6, goldM: 5, goldL: 3, bag: 2, rockS: 3, rockL: 1, bone: 1, skull: 1, diamond: 1, tnt: 1, mine: 1, mole: 1 },
+  { goldS: 6, goldM: 5, goldL: 3, bag: 3, rockS: 3, rockL: 2, bone: 2, skull: 1, diamond: 2, tnt: 1, mine: 1, mole: 1 },
+  { goldS: 5, goldM: 5, goldL: 3, bag: 3, rockS: 4, rockL: 2, bone: 2, skull: 1, diamond: 2, tnt: 2, mine: 1, mole: 1 },
+  { goldS: 3, goldM: 2, goldL: 4, bag: 3, rockS: 3, rockL: 2, bone: 2, skull: 1, diamond: 2, tnt: 1, mine: 2, mole: 2 },
+  { goldS: 3, goldM: 4, goldL: 4, bag: 3, rockS: 4, rockL: 2, bone: 2, skull: 2, diamond: 2, tnt: 2, mine: 2, mole: 2 },
+  { goldS: 2, goldM: 4, goldL: 4, bag: 3, rockS: 3, rockL: 2, bone: 1, skull: 2, diamond: 3, tnt: 3, mine: 1, mole: 2 },
+  { goldS: 2, goldM: 4, goldL: 5, bag: 3, rockS: 3, rockL: 2, bone: 1, skull: 2, diamond: 3, tnt: 3, mine: 2, mole: 3 }
 ];
 
-/* Shop definitions. Dynamite has no cap; the other three are one-level buffs, so they
-   disappear when the level they were bought for ends. */
+/* Three hand-built set pieces. They are placed before the rest of a level, consume
+   the same item counts as its recipe, and keep a small clear pocket around each
+   piece. Banded stone cannot be hooked, so the bomb is the only way through; the
+   treasure sits just outside the blast that opens the wall. */
+GM.PUZZLES = {
+  4: {
+    pieces: [
+      { type: "diamond", x: 80, y: 118 },
+      { type: "sealed",  x: 80, y: 96, free: true },
+      { type: "mine",    x: 80, y: 68 }
+    ],
+    lines: [],
+    circles: [
+      { x: 80, y: 68, r: 12 },
+      { x: 80, y: 104, r: 16 },
+      { x: 80, y: 118, r: 12 }
+    ]
+  },
+  7: {
+    pieces: [
+      { type: "diamond", x: 26, y: 130 },
+      { type: "diamond", x: 134, y: 130 },
+      { type: "sealed",  x: 40, y: 108, free: true },
+      { type: "sealed",  x: 120, y: 108, free: true },
+      { type: "mine",    x: 64, y: 108 },
+      { type: "mine",    x: 96, y: 108 },
+      { type: "tnt",     x: 80, y: 128 }
+    ],
+    lines: [],
+    circles: [
+      { x: 80, y: 128, r: 13 },
+      { x: 64, y: 108, r: 10 },
+      { x: 96, y: 108, r: 10 },
+      { x: 40, y: 108, r: 12 },
+      { x: 120, y: 108, r: 12 },
+      { x: 26, y: 130, r: 11 },
+      { x: 134, y: 130, r: 11 }
+    ]
+  },
+  9: {
+    pieces: [
+      { type: "diamond", x: 16, y: 132 },
+      { type: "goldL",   x: 144, y: 128 },
+      { type: "sealed",  x: 32, y: 105, free: true },
+      { type: "sealed",  x: 128, y: 105, free: true },
+      { type: "tnt",     x: 80, y: 126 }
+    ],
+    lines: [],
+    circles: [
+      { x: 80, y: 126, r: 14 },
+      { x: 32, y: 105, r: 12 },
+      { x: 128, y: 105, r: 12 },
+      { x: 16, y: 132, r: 11 },
+      { x: 144, y: 128, r: 12 }
+    ]
+  }
+};
+
+/* Shop definitions. Every line is one purchase per shop: dynamite included, so a
+   rich run cannot turn into an endless supply of bombs. */
 GM.SHOP = [
-  { id: "dynamite", key: "dynamite", price: 110, max: null, buff: false },
+  { id: "dynamite", key: "dynamite", price: 110, max: 1,    buff: false },
   { id: "strength", key: "strength", price: 210, max: 1,    buff: true },
   { id: "clover",   key: "clover",   price: 190, max: 1,    buff: true },
   { id: "book",     key: "book",     price: 150, max: 1,    buff: true }
@@ -110,7 +175,11 @@ GM.JINGLE = {
 };
 
 GM.SFX = {
-  boom:  { wave: "noise", from: 900, to: 55, ms: 380, vol: 0.9 },
+  boom:    { wave: "noise", from: 900, to: 55, ms: 380, vol: 0.9 },
+  bigboom: { wave: "noise", from: 1300, to: 38, ms: 680, vol: 0.95 },
+  chain:   { wave: "noise", from: 700, to: 50, ms: 300, vol: 0.75 },
+  mine:    { wave: "noise", from: 520, to: 75, ms: 280, vol: 0.8 },
+  clank:   { wave: "square", from: 240, to: 120, ms: 90, vol: 0.28 },
   /* the hook touching an item: a soft low thud plus a little noise. The old runtime `hit` was a full-scale
      noise burst and a 98 Hz square, which is the sharp sound at every grab (sdk/UI.md section 7). */
   grab:  { wave: "noise", from: 480, to: 140, ms: 75, attack: 4, decay: 70, vol: 0.28 },
@@ -125,7 +194,7 @@ GM.SFX = {
 GM.TEXT = {
   zh: {
     title: "矿工老张",
-    sub: "六十秒一关。钩金子，躲石头。",
+    sub: "六十秒一关。钩金子，躲炸弹，借爆炸开路。",
     tip: "钩子摆动时按 A 下钩。",
     start: "开始",
     best: "最高 第 {l} 关 · ${b}",
@@ -137,9 +206,12 @@ GM.TEXT = {
     intro: "第 {n} 关　目标 ${t}",
     tip1: "石头又重又不值钱；先钩金块。",
     tip2: "钱袋随机开出：现金、炸药或大力。",
-    tip4: "炸药桶会跟着钩子往回走，半路才炸。",
+    tip4: "定时炸弹会跟着钩子往回走，半路才炸。",
     tip6: "有些关商店不进货，或者故意抬价。",
     tip7: "普通地鼠不值钱；带钻石的那只才值钱。",
+    tipMine: "地雷一碰就原地炸。钻石在爆炸圈外：借它炸开石盖。",
+    tipChain: "定时炸弹拉上来才炸；炸到地雷，地雷再炸开两边的石墙。",
+    tipBig: "拉着定时炸弹时按 B 补一颗：大爆炸能轰开远处整片石墙。",
     tipDefault: "A 下钩　START 暂停",
     buffIntro: "本关：{b}",
     buffNames: ["大力", "幸运草", "岩石图鉴"],
@@ -166,7 +238,7 @@ GM.TEXT = {
     owned: "{n}/{m}",
     footShop: "↑↓ 选　A 买　B 下一关",
     shopNames: ["炸药", "力量药水", "幸运草", "岩石图鉴"],
-    shopDescs: ["炸掉钩住的东西，可无限买", "本关收绳更快，过关失效", "本关钱袋更鼓、多一颗钻石", "本关石头值三倍，过关失效"],
+    shopDescs: ["炸掉钩住的东西和周围，每店限购一个", "本关收绳更快，过关失效", "本关钱袋更鼓、多一颗钻石", "本关石头值三倍，过关失效"],
     over: "时间到",
     overShort: "差 ${d}",
     retry: "再来一次",
@@ -198,7 +270,7 @@ GM.TEXT = {
     pauseMenu: "回到主菜单",
     pauseFoot: "↑↓ 选　A 确定　START 继续",
     codexTitle: "物品图鉴",
-    codexHint: "越轻越值钱；炸药桶会炸掉身边的宝贝。",
+    codexHint: "越轻越值钱。炸弹会炸掉身边的宝贝；地雷一碰就炸，炸弹还会引爆炸弹。铁箍石钩不动，只能用炸弹炸开。",
     codexBack: "返回",
     codexFoot: "B 返回",
     codexBoom: "爆炸",
@@ -207,11 +279,11 @@ GM.TEXT = {
     codexHeavy: "重",
     codexRandom: "随机",
     codexMole: "0 / $1,500",
-    codexNames: ["小金块", "中金块", "大金块", "钻石", "钱袋", "小石头", "大石头", "骨头", "头骨", "炸药桶", "地鼠"]
+    codexNames: ["小金块", "中金块", "大金块", "钻石", "钱袋", "小石头", "大石头", "铁箍石", "骨头", "头骨", "定时炸弹", "地雷", "地鼠"]
   },
   en: {
     title: "GOLD DIG",
-    sub: "Sixty seconds a level. Hook gold, dodge rocks.",
+    sub: "Sixty seconds a level. Hook gold, dodge bombs, blast a way in.",
     tip: "Press A as the hook swings.",
     start: "START",
     best: "BEST LV {l} · ${b}",
@@ -223,9 +295,12 @@ GM.TEXT = {
     intro: "LV {n}　TARGET ${t}",
     tip1: "Rocks are heavy and cheap. Hook gold first.",
     tip2: "Bags roll cash, dynamite or a burst of strength.",
-    tip4: "A hooked TNT rides the rope back before it blows.",
+    tip4: "A timed bomb rides the rope back and blows on the way up.",
     tip6: "Some shops have no stock, or raise the price.",
     tip7: "Plain moles are worthless; the one with a diamond is not.",
+    tipMine: "A mine blows where it sits. The diamond is outside the blast: let the mine open the cap.",
+    tipChain: "Timed bombs blow on the way up. Catch a mine with that blast and both stone walls go.",
+    tipBig: "While hauling a timed bomb, press B: the combined blast is much wider.",
     tipDefault: "A HOOK　START PAUSE",
     buffIntro: "THIS LEVEL: {b}",
     buffNames: ["STRENGTH", "CLOVER", "ROCK BOOK"],
@@ -252,7 +327,7 @@ GM.TEXT = {
     owned: "{n}/{m}",
     footShop: "UP/DOWN PICK　A BUY　B NEXT",
     shopNames: ["DYNAMITE", "STRENGTH", "CLOVER", "ROCK BOOK"],
-    shopDescs: ["Blow up what you hooked, no limit", "Faster reel, this level only", "Fatter bags, one extra diamond", "Rocks worth triple, this level only"],
+    shopDescs: ["Blows up the hooked item and its neighbours; one per shop", "Faster reel, this level only", "Fatter bags, one extra diamond", "Rocks worth triple, this level only"],
     over: "TIME UP",
     overShort: "${d} SHORT",
     retry: "TRY AGAIN",
@@ -284,7 +359,7 @@ GM.TEXT = {
     pauseMenu: "MAIN MENU",
     pauseFoot: "UP/DOWN PICK　A CHOOSE　START RESUME",
     codexTitle: "ITEM CODEX",
-    codexHint: "Lighter is better; TNT blows up the loot beside it.",
+    codexHint: "Lighter is better. Bombs wreck the loot beside them; a mine blows at once and bombs set off bombs. Banded stone cannot be hooked: blast it.",
     codexBack: "BACK",
     codexFoot: "B BACK",
     codexBoom: "BOOM",
@@ -293,7 +368,7 @@ GM.TEXT = {
     codexHeavy: "HEAVY",
     codexRandom: "RANDOM",
     codexMole: "0 / $1,500",
-    codexNames: ["GOLD S", "GOLD M", "GOLD L", "DIAMOND", "BAG", "ROCK S", "ROCK L", "BONE", "SKULL", "TNT", "MOLE"]
+    codexNames: ["GOLD S", "GOLD M", "GOLD L", "DIAMOND", "BAG", "ROCK S", "ROCK L", "BANDED ROCK", "BONE", "SKULL", "TIMED BOMB", "MINE", "MOLE"]
   }
 };
 

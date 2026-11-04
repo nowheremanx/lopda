@@ -242,6 +242,40 @@ GM.tntSprite = function () {
   return s;
 };
 
+GM.mineSprite = function () {
+  var s = GM.sprite(30, 24);
+  GM.sellipse(s, 15, 15, 12, 6, GM.INK);
+  GM.sellipse(s, 15, 14, 10, 5, GM.DARK);
+  GM.sellipse(s, 13, 12, 6, 3, GM.MID);
+  /* four stubby horns, so it reads as a mine and not a rock */
+  GM.srect(s, 14, 4, 2, 6, GM.INK);
+  GM.srect(s, 2, 14, 6, 2, GM.INK);
+  GM.srect(s, 22, 14, 6, 2, GM.INK);
+  GM.srect(s, 7, 8, 2, 2, GM.INK);
+  GM.srect(s, 21, 8, 2, 2, GM.INK);
+  GM.sput(s, 14, 3, GM.PAPER);
+  GM.sput(s, 1, 14, GM.PAPER);
+  GM.sput(s, 27, 14, GM.PAPER);
+  /* the pressure plate on top */
+  GM.srect(s, 11, 9, 8, 3, GM.MID);
+  GM.srect(s, 12, 10, 6, 1, GM.INK);
+  GM.sput(s, 13, 11, GM.PAPER);
+  return s;
+};
+
+GM.sealedSprite = function () {
+  var s = GM.blob(52, 40, 61, GM.MID, GM.DARK, true, true);
+  /* two iron bands with rivets: the hook cannot take hold of this one */
+  GM.srect(s, 4, 12, 44, 4, GM.INK);
+  GM.srect(s, 4, 24, 44, 4, GM.INK);
+  var xs = [8, 18, 28, 38], i;
+  for (i = 0; i < xs.length; i++) {
+    GM.srect(s, xs[i], 13, 2, 2, GM.PAPER);
+    GM.srect(s, xs[i], 25, 2, 2, GM.PAPER);
+  }
+  return s;
+};
+
 GM.dynIconSprite = function () {
   var s = GM.sprite(16, 16);
   GM.srect(s, 6, 5, 4, 9, GM.DARK);
@@ -407,6 +441,8 @@ GM.initArt = function () {
     bone: GM.boneSprite(),
     skull: GM.skullSprite(),
     tnt: GM.tntSprite(),
+    mine: GM.mineSprite(),
+    sealed: GM.sealedSprite(),
     dynIcon: GM.dynIconSprite(),
     bomb: GM.bombSprite(),
     shopStrength: GM.shopStrengthSprite(),
@@ -500,6 +536,10 @@ GM.drawItemAt = function (buf, it, bx, by, anim) {
     GM.brect(buf, x + 23, y + 1, 3, 3, GM.PAPER);
     GM.bput(buf, x + 22, y + 3, GM.MID);
   }
+  if (it.kind === "mine" && Math.sin(anim * 5 + it.x) > 0.72) {
+    GM.brect(buf, x + 13, y + 2, 4, 4, GM.PAPER);
+    GM.bput(buf, x + 14, y + 3, GM.MID);
+  }
 };
 
 GM.drawMole = function (buf, it, anim) {
@@ -536,12 +576,33 @@ GM.drawMole = function (buf, it, anim) {
   }
 };
 
-GM.drawRope = function (buf, hook) {
+GM.drawRope = function (buf, hook, anim) {
   var tip = GM.tip(hook);
   var a = hook.angle, dx = Math.sin(a), dy = Math.cos(a);
-  GM.line(buf, GM.ANCHOR.x, GM.ANCHOR.y, tip.x - dx, tip.y - dy, GM.INK);
-  for (var d = 7; d < hook.len - 3; d += 9) {
-    GM.put(buf, GM.ANCHOR.x + dx * d, GM.ANCHOR.y + dy * d, GM.PAPER);
+  var px = Math.cos(a), py = -Math.sin(a);
+  if (hook.state === "back" && hook.len > 24) {
+    /* a live rope, not a stick: a small wave runs down it while the reel turns */
+    var lx = GM.ANCHOR.x, ly = GM.ANCHOR.y;
+    for (var d = 8; d < hook.len - 4; d += 7) {
+      var t = d / hook.len;
+      var amp = Math.sin(t * Math.PI) * 0.55 * Math.sin(anim * 20 + t * 13);
+      var x = GM.ANCHOR.x + dx * d + px * amp;
+      var y = GM.ANCHOR.y + dy * d + py * amp;
+      GM.line(buf, lx, ly, x, y, GM.INK);
+      lx = x;
+      ly = y;
+    }
+    GM.line(buf, lx, ly, tip.x - dx, tip.y - dy, GM.INK);
+  } else {
+    GM.line(buf, GM.ANCHOR.x, GM.ANCHOR.y, tip.x - dx, tip.y - dy, GM.INK);
+  }
+  for (var d2 = 7; d2 < hook.len - 3; d2 += 9) {
+    GM.put(buf, GM.ANCHOR.x + dx * d2, GM.ANCHOR.y + dy * d2, GM.PAPER);
+  }
+  if (hook.state === "back" && hook.len > 12) {
+    var d3 = (anim * 46) % (hook.len - 8) + 4;
+    GM.put(buf, GM.ANCHOR.x + dx * d3, GM.ANCHOR.y + dy * d3, GM.PAPER);
+    GM.put(buf, GM.ANCHOR.x + dx * (d3 + 2), GM.ANCHOR.y + dy * (d3 + 2), GM.PAPER);
   }
 };
 
@@ -571,13 +632,21 @@ GM.sweatDrop = function (buf, bx, by) {
 
 GM.drawMiner = function (buf, state) {
   var hook = state.hook;
+  var back = hook.state === "back";
+  var out = hook.state === "out";
+  var hauling = back && !!hook.item;
+  var throwT = state.throwT || 0;
+  var rate = hauling ? (hook.item.weight > 2.4 ? 5.2 : 7.4) : 6.6;
+  var tug = back ? Math.sin(state.anim * rate) : 0;
+  var heave = back && Math.abs(tug) > 0.55 ? -1 : 0;
   var bob = hook.state === "swing" && Math.sin(state.anim * 4) > 0.35 ? -1 : 0;
-  var lean = hook.state === "out" ? 1 : hook.state === "back" ? -1 : 0;
-  var bx = 80 + lean;
-  var by = bob;
+  var lean = out ? 2 : back ? -1 : 0;
+  if (throwT > 0) lean -= 1;
+  var bx = 80 + lean + (back ? Math.round(tug * 1.2) : 0);
+  var by = bob + heave;
   var ground = 22;
 
-  /* boots and legs stay on the ground; the body bobs above them */
+  /* braced boots and legs; the body rocks over them as the rope comes in */
   GM.rect(buf, bx - 8, ground - 1, 5, 2, GM.INK);
   GM.rect(buf, bx + 3, ground - 1, 5, 2, GM.INK);
   GM.rect(buf, bx - 6, ground - 4, 3, 3, GM.DARK);
@@ -609,16 +678,65 @@ GM.drawMiner = function (buf, state) {
   GM.rect(buf, bx - 1, 2 + by, 3, 2, GM.MID);
   GM.put(buf, bx, 2 + by, GM.PAPER);
 
-  /* two hands on the rope, with a small coil at the winch */
-  GM.line(buf, bx - 7, 13 + by, 79, 17, GM.INK);
-  GM.line(buf, bx + 7, 13 + by, 81, 17, GM.INK);
+  /* the winch under his hands */
   GM.rect(buf, 78, 16, 2, 2, GM.PAPER);
   GM.rect(buf, 81, 16, 2, 2, GM.PAPER);
   GM.rect(buf, 79, 17, 2, 2, GM.DARK);
   GM.put(buf, 80, 18, GM.PAPER);
 
+  /* hands: out means both push forward, back means they pull hand over hand,
+     and a thrown bomb sends the right arm over the shoulder then down again */
+  var lhx = 79, lhy = 18 + by, rhx = 81, rhy = 18 + by;
+  var lex = bx - 10, ley = 15 + by, rex = bx + 10, rey = 15 + by;
+  var kick = 0;
+  if (out) {
+    lhx = 78; lhy = 16 + by; rhx = 82; rhy = 16 + by;
+    lex = bx - 9; ley = 14 + by; rex = bx + 9; rey = 14 + by;
+  } else if (back) {
+    var upL = Math.max(0, tug), upR = Math.max(0, -tug);
+    lhy = 18 + by - Math.round(upL * 3);
+    rhy = 18 + by - Math.round(upR * 3);
+    ley = 15 + by - Math.round(upL * 2);
+    rey = 15 + by - Math.round(upR * 2);
+  } else {
+    lhx = 79 + Math.round(Math.sin(state.anim * 3) * 0.5);
+    rhx = 81 + Math.round(Math.sin(state.anim * 3 + 1) * 0.5);
+  }
+  if (throwT > 0) {
+    kick = 1 - throwT / GM.THROW_TIME;
+    rex = bx + 11;
+    rey = 11 + by;
+    if (state.bomb && kick < 0.2) {
+      var bp = GM.bombPos(state.bomb);
+      var kk = Math.min(1, kick / 0.2);
+      rhx = Math.round((bx + 6) + (bp.x - (bx + 6)) * kk);
+      rhy = Math.round((9 + by) + (bp.y - (9 + by)) * kk);
+    } else {
+      rhx = bx + 12;
+      rhy = 8 + by;
+    }
+  }
+  function arm(sx, sy, ex, ey, hx, hy) {
+    GM.line(buf, sx, sy, ex, ey, GM.INK);
+    GM.line(buf, ex, ey, hx, hy, GM.INK);
+    GM.rect(buf, hx - 1, hy - 1, 2, 2, GM.INK);
+    GM.rect(buf, hx, hy, 1, 1, GM.PAPER);
+  }
+  arm(bx - 6, 13 + by, lex, ley, lhx, lhy);
+  arm(bx + 6, 13 + by, rex, rey, rhx, rhy);
+
+  /* a little dust at the boots while he hauls */
+  if (back && hauling && Math.sin(state.anim * 11) > 0.25) {
+    GM.put(buf, bx - 9, ground, GM.MID);
+    GM.put(buf, bx + 9, ground + 0.5, GM.MID);
+  }
+  if (throwT > 0 && kick > 0.12 && kick < 0.55) {
+    GM.line(buf, rhx + 3, rhy + 2, rhx + 6, rhy, GM.MID);
+    GM.line(buf, rhx + 3, rhy + 4, rhx + 7, rhy + 3, GM.PAPER);
+  }
+
   /* sweat: three drops at most, one on each side and one over the brow */
-  if (hook.item) {
+  if (hook.item || throwT > 0.2) {
     var t = state.anim, side, sx, sy, p;
     for (var i = 0; i < 3; i++) {
       side = i === 0 ? -1 : 1;
@@ -627,11 +745,6 @@ GM.drawMiner = function (buf, state) {
       sy = (i === 2 ? 8 : 5) + by + p * p * 10;
       GM.sweatDrop(buf, Math.round(sx * GM.SCALE), Math.round(sy * GM.SCALE));
     }
-  }
-
-  if (state.bomb && state.bomb.t < 0.18) {
-    var bp = GM.bombPos(state.bomb);
-    GM.line(buf, bx + 7, 13 + by, bp.x, bp.y, GM.INK);
   }
 };
 
@@ -660,7 +773,7 @@ GM.draw = function (ctx, state) {
     it = state.items[i];
     if (it.type === "mole") GM.drawMole(buf, it, state.anim);
   }
-  GM.drawRope(buf, state.hook);
+  GM.drawRope(buf, state.hook, state.anim);
   if (state.hook.item) {
     var held = GM.heldPos(state.hook);
     tip = GM.tip(state.hook);
@@ -680,17 +793,30 @@ GM.draw = function (ctx, state) {
   GM.drawDynamite(buf, state);
   if (state.bomb) {
     var bp = GM.bombPos(state.bomb);
-    GM.spriteDraw(buf, GM.SPR.bomb, Math.round(bp.x * GM.SCALE) - 8, Math.round(bp.y * GM.SCALE) - 8);
-    GM.bput(buf, Math.round(bp.x * GM.SCALE) + 4, Math.round(bp.y * GM.SCALE) - 8, GM.PAPER);
+    var bxp = Math.round(bp.x * GM.SCALE), byp = Math.round(bp.y * GM.SCALE);
+    /* a short trail behind the thrown bomb */
+    for (var ti = 1; ti <= 3; ti++) {
+      GM.brect(buf, bxp + (state.bomb.sx * GM.SCALE - bxp) * ti * 0.035,
+        byp + (state.bomb.sy * GM.SCALE - byp) * ti * 0.035, 2, 2, ti === 1 ? GM.MID : GM.DARK);
+    }
+    GM.spriteDraw(buf, GM.SPR.bomb, bxp - 8, byp - 8);
+    GM.bput(buf, bxp + 4, byp - 8, GM.PAPER);
+    GM.bput(buf, bxp + 5, byp - 7, GM.MID);
   }
 
   for (i = 0; i < state.blasts.length; i++) {
     var bl = state.blasts[i], k = bl.t / bl.life;
-    var rr = (4 + k * 27) * GM.SCALE;
+    var rr = (4 + k * ((bl.r || 30) - 4)) * GM.SCALE;
     var bx = bl.x * GM.SCALE, by = bl.y * GM.SCALE;
-    for (var a = 0; a < Math.PI * 2; a += 0.18) {
+    for (var a = 0; a < Math.PI * 2; a += bl.big ? 0.12 : 0.18) {
       GM.brect(buf, bx + Math.cos(a) * rr, by + Math.sin(a) * rr, 2, 2,
         (i + Math.floor(a * 5)) % 2 ? GM.PAPER : GM.MID);
+    }
+    if (bl.big) {
+      for (var a2 = 0; a2 < Math.PI * 2; a2 += 0.16) {
+        GM.brect(buf, bx + Math.cos(a2) * rr * 0.62, by + Math.sin(a2) * rr * 0.62, 2, 2,
+          Math.floor(a2 * 5) % 2 ? GM.MID : GM.DARK);
+      }
     }
     GM.brect(buf, bx - 2, by - 2, 4, 4, GM.PAPER);
   }
