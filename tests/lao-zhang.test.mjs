@@ -435,6 +435,25 @@ test("the shop sells each line once, dynamite included", () => {
   assert.equal(GM.buy(state, missingIndex), false, "an empty shelf cannot be bought");
 });
 
+test("dynamite already in the pack does not use up the shop's one stick", () => {
+  const state = GM.newState();
+  state.runSeed = 12345;
+  state.level = 1;
+  state.bank = 10000;
+  state.dynamite = 1;                              /* a bag in level 1 left one in the pack */
+  state.shopOffers = GM.shopOffers(state, 2);
+  const dyn = state.shopOffers.findIndex((o) => o.key === "dynamite");
+  assert.equal(GM.buy(state, dyn), true, "the shop's own stick is still for sale");
+  assert.equal(state.dynamite, 2);
+  assert.equal(GM.buy(state, dyn), false, "one per shop, not one in the pack");
+  assert.equal(state.dynamite, 2);
+
+  GM.openShop(state);                              /* a new shop starts a new allowance */
+  const again = state.shopOffers.findIndex((o) => o.key === "dynamite");
+  assert.equal(GM.buy(state, again), true);
+  assert.equal(state.dynamite, 3);
+});
+
 test("strength, clover and the rock book expire when the level ends", () => {
   const state = GM.newState();
   state.level = 4;

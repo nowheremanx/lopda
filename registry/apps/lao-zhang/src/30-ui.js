@@ -170,14 +170,15 @@ GM.ui = (function () {
       for (i = 0; i < offers.length; i++) {
         item = offers[i];
         have = state[item.key] || 0;
-        var capped = item.max != null && have >= item.max;
+        var bought = (state.shopBought && state.shopBought[item.key]) || 0;
+        var capped = item.max != null && bought >= item.max;
         can = item.available && !capped && state.bank >= item.price;
         sel = state.shopCursor === i;
         if (!item.available) price = T.soldOut;
-        else if (capped) price = T.max;
+        else if (capped) price = T.shopBought;
         else if (state.bank < item.price) price = GM.fmt(T.shortPrice, { d: GM.money(item.price - state.bank) });
         else price = money(item.price) + (item.priceUp ? " " + T.priceUp : "");
-        var ownedText = item.max == null
+        var ownedText = item.max == null || item.key === "dynamite"
           ? GM.fmt(T.ownedMany, { n: have })
           : GM.fmt(T.owned, { n: have, m: item.max });
         rows += '<button type="button" class="row' + (sel ? " sel" : "") + (can ? "" : " off") + '" data-act="buy" data-i="' + i + '">' +

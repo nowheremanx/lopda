@@ -332,6 +332,7 @@ GM.TEXT = {
     nextTarget: "下关目标 ${t}",
     next: "下一关",
     max: "已满",
+    shopBought: "已买过",
     shortPrice: "差 ${d}",
     owned: "{n}/{m}",
     footShop: "↑↓ 选　A 买　B 下一关",
@@ -422,6 +423,7 @@ GM.TEXT = {
     nextTarget: "NEXT TARGET ${t}",
     next: "NEXT",
     max: "MAX",
+    shopBought: "BOUGHT",
     shortPrice: "${d} SHORT",
     owned: "{n}/{m}",
     footShop: "UP/DOWN PICK　A BUY　B NEXT",
@@ -613,6 +615,7 @@ GM.newState = function () {
     book: 0,
     shopCursor: 4,
     shopOffers: [],
+    shopBought: {},
     runSeed: 1,
     levelSeed: 1,
     rng: GM.rng(1),
@@ -678,6 +681,7 @@ GM.startLevel = function (state, n) {
   state.introT = 1.25;
   state.shopCursor = 4;
   state.shopOffers = [];
+  state.shopBought = {};
   state.events = [];
   state.floats = [];
   state.particles = [];
@@ -1751,6 +1755,7 @@ GM.readBest = function (raw) {
 GM.openShop = function (state) {
   state.shopCursor = 4;
   state.shopOffers = GM.shopOffers(state, state.level + 1);
+  state.shopBought = {};
   state.screen = "shop";
   state.events = [];
 };
@@ -1768,13 +1773,18 @@ GM.buy = function (state, idx) {
   var offers = state.shopOffers && state.shopOffers.length ? state.shopOffers : GM.shopOffers(state, state.level + 1);
   var item = offers[idx];
   if (!item || !item.available) { state.events.push("err"); return false; }
-  var have = state[item.key] || 0;
-  if ((item.max != null && have >= item.max) || state.bank < item.price) {
+  /* A shop's limit counts what was bought here, not what the run already carries:
+     a bag or an earlier shop may leave dynamite in the pack, and that must not
+     turn this shop's one stick into "MAX" before the player has bought anything. */
+  var bought = (state.shopBought && state.shopBought[item.key]) || 0;
+  if ((item.max != null && bought >= item.max) || state.bank < item.price) {
     state.events.push("err");
     return false;
   }
   state.bank -= item.price;
-  state[item.key] = have + 1;
+  state[item.key] = (state[item.key] || 0) + 1;
+  state.shopBought = state.shopBought || {};
+  state.shopBought[item.key] = bought + 1;
   state.shopOffers = offers;
   GM.setRun(state, state.level + 1);
   state.events.push("buy");
@@ -3134,14 +3144,15 @@ GM.ui = (function () {
       for (i = 0; i < offers.length; i++) {
         item = offers[i];
         have = state[item.key] || 0;
-        var capped = item.max != null && have >= item.max;
+        var bought = (state.shopBought && state.shopBought[item.key]) || 0;
+        var capped = item.max != null && bought >= item.max;
         can = item.available && !capped && state.bank >= item.price;
         sel = state.shopCursor === i;
         if (!item.available) price = T.soldOut;
-        else if (capped) price = T.max;
+        else if (capped) price = T.shopBought;
         else if (state.bank < item.price) price = GM.fmt(T.shortPrice, { d: GM.money(item.price - state.bank) });
         else price = money(item.price) + (item.priceUp ? " " + T.priceUp : "");
-        var ownedText = item.max == null
+        var ownedText = item.max == null || item.key === "dynamite"
           ? GM.fmt(T.ownedMany, { n: have })
           : GM.fmt(T.owned, { n: have, m: item.max });
         rows += '<button type="button" class="row' + (sel ? " sel" : "") + (can ? "" : " off") + '" data-act="buy" data-i="' + i + '">' +

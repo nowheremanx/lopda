@@ -124,6 +124,7 @@ GM.newState = function () {
     book: 0,
     shopCursor: 4,
     shopOffers: [],
+    shopBought: {},
     runSeed: 1,
     levelSeed: 1,
     rng: GM.rng(1),
@@ -189,6 +190,7 @@ GM.startLevel = function (state, n) {
   state.introT = 1.25;
   state.shopCursor = 4;
   state.shopOffers = [];
+  state.shopBought = {};
   state.events = [];
   state.floats = [];
   state.particles = [];
@@ -1262,6 +1264,7 @@ GM.readBest = function (raw) {
 GM.openShop = function (state) {
   state.shopCursor = 4;
   state.shopOffers = GM.shopOffers(state, state.level + 1);
+  state.shopBought = {};
   state.screen = "shop";
   state.events = [];
 };
@@ -1279,13 +1282,18 @@ GM.buy = function (state, idx) {
   var offers = state.shopOffers && state.shopOffers.length ? state.shopOffers : GM.shopOffers(state, state.level + 1);
   var item = offers[idx];
   if (!item || !item.available) { state.events.push("err"); return false; }
-  var have = state[item.key] || 0;
-  if ((item.max != null && have >= item.max) || state.bank < item.price) {
+  /* A shop's limit counts what was bought here, not what the run already carries:
+     a bag or an earlier shop may leave dynamite in the pack, and that must not
+     turn this shop's one stick into "MAX" before the player has bought anything. */
+  var bought = (state.shopBought && state.shopBought[item.key]) || 0;
+  if ((item.max != null && bought >= item.max) || state.bank < item.price) {
     state.events.push("err");
     return false;
   }
   state.bank -= item.price;
-  state[item.key] = have + 1;
+  state[item.key] = (state[item.key] || 0) + 1;
+  state.shopBought = state.shopBought || {};
+  state.shopBought[item.key] = bought + 1;
   state.shopOffers = offers;
   GM.setRun(state, state.level + 1);
   state.events.push("buy");
