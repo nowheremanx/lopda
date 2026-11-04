@@ -20,6 +20,8 @@ GM.BASE_SPEED = 28.6;           /* the old large-rock reel speed, now the base *
 GM.BLAST = 30;                  /* a normal bomb clears this radius */
 GM.BIG_BLAST = 54;              /* thrown onto a hauled timed bomb: the big one */
 GM.THROW_TIME = 0.46;           /* old Zhang's throwing pose, in seconds */
+GM.RIVAL_X = 124;               /* Old Wang digs beside Zhang on the endless levels */
+GM.RIVAL_MAX_ROPE = 150;
 GM.PLAY_LEVELS = 10;
 GM.STRENGTH_STEP = 0.15;
 GM.DYNAMITE_HARD_CAP = 9999;   /* only the save file needs a sane ceiling */
@@ -180,6 +182,8 @@ GM.SFX = {
   chain:   { wave: "noise", from: 700, to: 50, ms: 300, vol: 0.75 },
   mine:    { wave: "noise", from: 520, to: 75, ms: 280, vol: 0.8 },
   clank:   { wave: "square", from: 240, to: 120, ms: 90, vol: 0.28 },
+  taunt:   { wave: "triangle", from: 520, to: 940, ms: 190, vol: 0.38 },
+  rivalFire: { wave: "noise", from: 260, to: 520, ms: 80, vol: 0.18 },
   /* the hook touching an item: a soft low thud plus a little noise. The old runtime `hit` was a full-scale
      noise burst and a 98 Hz square, which is the sharp sound at every grab (sdk/UI.md section 7). */
   grab:  { wave: "noise", from: 480, to: 140, ms: 75, attack: 4, decay: 70, vol: 0.28 },
@@ -212,6 +216,7 @@ GM.TEXT = {
     tipMine: "地雷一碰就原地炸。钻石在爆炸圈外：借它炸开石盖。",
     tipChain: "定时炸弹拉上来才炸；炸到地雷，地雷再炸开两边的石墙。",
     tipBig: "拉着定时炸弹时按 B 补一颗：大爆炸能轰开远处整片石墙。",
+    tipWang: "第 10 关之后，老王也来抢矿。他越挖越精，抢到东西还会嘲笑你。",
     tipDefault: "A 下钩　START 暂停",
     buffIntro: "本关：{b}",
     buffNames: ["大力", "幸运草", "岩石图鉴"],
@@ -301,6 +306,7 @@ GM.TEXT = {
     tipMine: "A mine blows where it sits. The diamond is outside the blast: let the mine open the cap.",
     tipChain: "Timed bombs blow on the way up. Catch a mine with that blast and both stone walls go.",
     tipBig: "While hauling a timed bomb, press B: the combined blast is much wider.",
+    tipWang: "Past level 10, Old Wang digs beside you. He sharpens every level, and gloats when he steals one.",
     tipDefault: "A HOOK　START PAUSE",
     buffIntro: "THIS LEVEL: {b}",
     buffNames: ["STRENGTH", "CLOVER", "ROCK BOOK"],

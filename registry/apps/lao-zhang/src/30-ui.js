@@ -319,7 +319,7 @@ GM.ui = (function () {
       : state.level === 3 ? T.tip4 : state.level === 4 ? T.tipMine
       : state.level === 5 ? T.tip7 : state.level === 6 ? T.tip6
       : state.level === 7 ? T.tipChain : state.level === 9 ? T.tipBig
-      : T.tipDefault;
+      : state.level === 11 ? T.tipWang : T.tipDefault;
     var buff = [];
     if (state.strength) buff.push(T.buffNames[0]);
     if (state.clover) buff.push(T.buffNames[1]);
@@ -353,6 +353,12 @@ GM.ui = (function () {
       else if (ev === "chain") sfx(GM.SFX.chain);
       else if (ev === "mine") sfx(GM.SFX.mine);
       else if (ev === "clank") sfx(GM.SFX.clank);
+      else if (ev === "rivalFire") sfx(GM.SFX.rivalFire);
+      else if (ev === "rivalGrab") sfx(GM.SFX.grabBody);
+      else if (ev === "rivalTaunt") sfx(GM.SFX.taunt);
+      else if (ev === "rivalBoom") sfx(GM.SFX.boom);
+      else if (ev === "rivalMine") sfx(GM.SFX.mine);
+      else if (ev === "rivalClank") sfx(GM.SFX.clank);
       else if (ev === "tick") sfx("tick");
       else if (ev === "clear") sfx("win");
       else if (ev === "fail") sfx("lose");

@@ -545,6 +545,52 @@ test("best-run saves are v1, validated, and never downgrade the record", () => {
   assert.equal(payload.bank, 1200);
 });
 
+test("Old Wang appears only after level 10 and gets sharper each level", () => {
+  const ten = GM.newState();
+  ten.runSeed = 99;
+  GM.startLevel(ten, 10);
+  assert.equal(ten.rival, null, "the written levels are a solo dig");
+
+  const eleven = GM.newState();
+  eleven.runSeed = 99;
+  GM.startLevel(eleven, 11);
+  assert.ok(eleven.rival, "Wang joins on the first endless level");
+  assert.equal(eleven.rival.hook.state, "swing");
+  assert.ok(GM.RIVAL_X > GM.ANCHOR.x, "he digs beside Zhang");
+
+  const p11 = GM.rivalParams(11), p20 = GM.rivalParams(20), p30 = GM.rivalParams(30);
+  assert.ok(p20.shotGap < p11.shotGap, "he fires more often");
+  assert.ok(p20.aimError < p11.aimError, "he aims better");
+  assert.ok(p20.smart > p11.smart, "he picks better loot");
+  assert.ok(p20.outSpeed > p11.outSpeed, "he drops the hook faster");
+  assert.ok(p30.smart >= p20.smart && p30.shotGap <= p20.shotGap);
+  assert.ok(p30.maxRope >= p11.maxRope);
+});
+
+test("Wang steals a haul, puffs up, and taunts Zhang", () => {
+  const state = GM.newState();
+  state.runSeed = 101;
+  GM.startLevel(state, 11);
+  state.screen = "play";
+  state.time = 60;
+  state.events = [];
+  state.items = [GM.makeItem(state, "diamond", GM.RIVAL_X, 80, GM.rng(31))];
+  state.rival.hook = { state: "out", len: GM.IDLE_ROPE, angle: 0, item: null };
+  state.rival.tauntT = 0;
+
+  for (let i = 0; i < 900 && state.rival.tauntT <= 0; i++) GM.stepRival(state, 0.01);
+  assert.equal(state.items.length, 0, "the diamond is gone from the player's mine");
+  assert.equal(state.rival.haul, 1500, "Wang counts what he stole");
+  assert.equal(state.rival.steals, 1);
+  assert.ok(state.rival.tauntT > 0, "he stops to gloat");
+  assert.ok(state.events.includes("rivalTaunt"));
+  assert.ok(["HA!", "LOL", "MINE", "NOOB"].includes(state.rival.tauntText));
+
+  for (let i = 0; i < 300 && state.rival.tauntT > 0; i++) GM.updateRival(state, 0.01);
+  assert.equal(state.rival.tauntT, 0);
+  assert.equal(state.rival.hook.state, "swing", "then he goes back to work");
+});
+
 test("the manifest and both languages are store-ready", () => {
   const m = readJSON("registry/apps/lao-zhang/manifest.json");
   assert.equal(m.id, "lao-zhang");
