@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>五十音图</title>
+<!-- Lo-PDA app (lopda/1): original kana flash cards, a small quiz, and optional Japanese speech. MIT License. -->
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #a3ad7e; color: #1f2a14; font-family: monospace; }
+  body { display: flex; flex-direction: column; }
+  header { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 5px; padding: 5px 7px; border-bottom: 2px solid #1f2a14; font-size: 14px; }
+  header b { font-size: 15px; letter-spacing: 1px; }
+  #count { flex: none; width: 6ch; text-align: right; }
+  button { min-height: 44px; border: 2px solid #1f2a14; background: #1f2a14; color: #a3ad7e; font: inherit; font-size: 14px; font-weight: bold; }
+  button.secondary { background: #a3ad7e; color: #1f2a14; }
+  main { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 6px 10px; box-sizing: border-box; }
+  #meta { display: flex; align-items: center; justify-content: space-between; width: 100%; max-width: 290px; color: #4a5a32; font-size: 13px; }
+  #card { flex: none; width: 100%; max-width: 290px; height: 146px; display: flex; flex-direction: column; justify-content: center; align-items: center; border: 3px solid #1f2a14; box-sizing: border-box; }
+  #kana { font-size: 76px; line-height: 1.1; }
+  #romaji { margin-top: 4px; font-size: 18px; }
+  #rate { display: none; margin-top: 6px; font-size: 12px; color: #4a5a32; }
+  #prompt { display: none; flex: none; text-align: center; font-size: 15px; line-height: 1.2; }
+  #options { display: none; flex: none; width: 100%; max-width: 290px; grid-template-columns: 1fr 1fr; gap: 6px; }
+  #options button { background: #a3ad7e; color: #1f2a14; }
+  #options button.selected { background: #1f2a14; color: #a3ad7e; }
+  #controls { flex: none; width: 100%; max-width: 290px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  #controls button { min-width: 0; padding: 2px; }
+  #status { flex: none; min-height: 1.3em; width: 100%; max-width: 290px; text-align: center; color: #4a5a32; font-size: 13px; line-height: 1.3; }
+  #reference { display: none; width: 100%; max-width: 290px; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
+  #reference { grid-template-rows: repeat(16, 56px); }
+  #reference button { min-width: 0; min-height: 56px; padding: 2px 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; }
+  #reference button span:first-child { font-size: 25px; line-height: 1; }
+  #reference button span:last-child { font-size: 12px; line-height: 1; }
+  #reference button { background: #a3ad7e; color: #1f2a14; }
+  #reference button.selected { background: #1f2a14; color: #a3ad7e; border-width: 4px; }
+  body.quiz main { justify-content: flex-start; gap: 5px; padding-top: 5px; padding-bottom: 5px; }
+  body.quiz #meta, body.card #meta { flex: none; }
+  body.quiz #card { height: 72px; }
+  body.quiz #kana { font-size: 48px; }
+  body.quiz #romaji { display: none; }
+  body.quiz #prompt { display: block; }
+  body.quiz #options { display: grid; }
+  body.quiz #controls { display: none; }
+  body.card #rate { display: block; }
+  /* the guide row stays put; only the kana grid below it scrolls */
+  body.list main { align-items: stretch; justify-content: flex-start; }
+  body.list #meta { flex: none; margin: 0 auto; }
+  body.list #reference { display: grid; flex: 1; min-height: 0; align-content: start; overflow-y: auto; -webkit-overflow-scrolling: touch; margin: 0 auto; }
+  body.list #card, body.list #prompt, body.list #options, body.list #controls, body.list #status { display: none; }
+  body.card #reference, body.quiz #reference { display: none; }
+  @media (max-height: 390px) {
+    main { gap: 5px; padding-top: 4px; padding-bottom: 4px; }
+    #card { height: 124px; }
+    #kana { font-size: 66px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <b id="title">五十音图</b>
+  <button id="script" class="secondary" type="button">平假名</button>
+  <button id="view" class="secondary" type="button">START 小测</button>
+  <span id="count">1/71</span>
+</header>
+<main>
+  <div id="meta"><span id="mode">字表</span><span id="guide">↑↓←→ 选 · A 卡片 · START 小测</span></div>
+  <section id="card" aria-live="polite">
+    <div id="kana">あ</div>
+    <div id="romaji">a</div>
+    <div id="rate"></div>
+  </section>
+  <div id="prompt"></div>
+  <div id="options"></div>
+  <div id="reference" role="list" aria-label="Kana reference"></div>
+  <div id="controls">
+    <button id="prev" class="secondary" type="button">Prev</button>
+    <button id="hear" type="button">A 听</button>
+    <button id="next" class="secondary" type="button">Next</button>
+  </div>
+  <div id="status" aria-live="polite"></div>
+</main>
+<script>
+(function () {
+  var LANG = (typeof PAD !== "undefined" && PAD.lang === "en") ? "en" : "zh";
+  var KEY = "kana-cards-state";
+  /* The 五十音顺 table: the 46 plain kana first, then the 濁音 (dakuten: が ざ だ ば rows) and
+     半濁音 (handakuten: ぱ row) laid out below them, a full row each. ぢ/づ share ji/zu with じ/ず,
+     so the quiz keeps its four choices distinct by romaji. */
+  var HIRA = ["あ","い","う","え","お","か","き","く","け","こ","さ","し","す","せ","そ","た","ち","つ","て","と","な","に","ぬ","ね","の","は","ひ","ふ","へ","ほ","ま","み","む","め","も","や","ゆ","よ","ら","り","る","れ","ろ","わ","を","ん","が","ぎ","ぐ","げ","ご","ざ","じ","ず","ぜ","ぞ","だ","ぢ","づ","で","ど","ば","び","ぶ","べ","ぼ","ぱ","ぴ","ぷ","ぺ","ぽ"];
+  var KATA = ["ア","イ","ウ","エ","オ","カ","キ","ク","ケ","コ","サ","シ","ス","セ","ソ","タ","チ","ツ","テ","ト","ナ","ニ","ヌ","ネ","ノ","ハ","ヒ","フ","ヘ","ホ","マ","ミ","ム","メ","モ","ヤ","ユ","ヨ","ラ","リ","ル","レ","ロ","ワ","ヲ","ン","ガ","ギ","グ","ゲ","ゴ","ザ","ジ","ズ","ゼ","ゾ","ダ","ヂ","ヅ","デ","ド","バ","ビ","ブ","ベ","ボ","パ","ピ","プ","ペ","ポ"];
+  var ROMA = ["a","i","u","e","o","ka","ki","ku","ke","ko","sa","shi","su","se","so","ta","chi","tsu","te","to","na","ni","nu","ne","no","ha","hi","fu","he","ho","ma","mi","mu","me","mo","ya","yu","yo","ra","ri","ru","re","ro","wa","wo","n","ga","gi","gu","ge","go","za","ji","zu","ze","zo","da","ji","zu","de","do","ba","bi","bu","be","bo","pa","pi","pu","pe","po"];
+  var TXT = {
+    zh: { title: "五十音图", hira: "平假名", kata: "片假名", list: "字表", card: "卡片", quiz: "小测", startQuiz: "START 小测", backList: "B 字表", quizGuide: "↑↓←→ 选项 · A 确认 · B 字表", cardGuide: "← → 翻页 · A 朗读 · B 字表", listGuide: "↑↓←→ 选择 · A 卡片 · START 小测", question: "选出这个假名的罗马字", hear: "A 听", confirm: "A 确认", mastered: "正确", missed: "再看看：", cont: "（A 继续）", done: "本轮每个假名都练过两次了（B 回字表）", rate: "正确率 {pct}%（{hits}/{tries}）", noStats: "正确率 —", noVoice: "日语朗读暂不可用；仍可继续学习。", legacy: "此版本不支持日语朗读；仍可继续学习。", prev: "前", next: "后" },
+    en: { title: "Kana", hira: "Hiragana", kata: "Katakana", list: "List", card: "Card", quiz: "Quiz", startQuiz: "START Quiz", backList: "B List", quizGuide: "Arrows choose · A answer · B list", cardGuide: "← → browse · A hear · B list", listGuide: "Arrows move · A card · START quiz", question: "Choose this kana's romaji", hear: "A Hear", confirm: "A OK", mastered: "Correct", missed: "Review: ", cont: " (A next)", done: "Every kana has been asked twice this round (B list)", rate: "Accuracy {pct}% ({hits}/{tries})", noStats: "Accuracy —", noVoice: "Japanese speech is unavailable; you can keep studying.", legacy: "Japanese speech needs a newer handheld; keep studying.", prev: "Prev", next: "Next" }
+  }[LANG];
+  var data = { script: "hira", index: 0, screen: "list", target: 0, choices: [], choice: 0, locked: false, awaitConfirm: false, reveal: -1, stats: {}, recent: [], seen: {} };
+  var kanaEl = document.getElementById("kana"), romaEl = document.getElementById("romaji");
+  var rateEl = document.getElementById("rate");
+  var scriptBtn = document.getElementById("script"), statusEl = document.getElementById("status");
+  var promptEl = document.getElementById("prompt"), optionsEl = document.getElementById("options");
+  var referenceEl = document.getElementById("reference"), viewBtn = document.getElementById("view");
+  /* one entry per printed row: the 11 plain-kana rows, then the five voiced rows (が ざ だ ば ぱ).
+     ［や ゆ よ］and ［わ を］sit in the a / u / o columns, ん in the u column. */
+  var GRID_ROWS = [[0,1,2,3,4],[5,6,7,8,9],[10,11,12,13,14],[15,16,17,18,19],[20,21,22,23,24],[25,26,27,28,29],[30,31,32,33,34],[35,36,37],[38,39,40,41,42],[43,44],[45],[46,47,48,49,50],[51,52,53,54,55],[56,57,58,59,60],[61,62,63,64,65],[66,67,68,69,70]];
+  var GRID_COLS = [[0,1,2,3,4],[0,1,2,3,4],[0,1,2,3,4],[0,1,2,3,4],[0,1,2,3,4],[0,1,2,3,4],[0,1,2,3,4],[0,2,4],[0,1,2,3,4],[0,4],[2],[0,1,2,3,4],[0,1,2,3,4],[0,1,2,3,4],[0,1,2,3,4],[0,1,2,3,4]];
+  function table() { return data.script === "hira" ? HIRA : KATA; }
+  function save() {
+    if (typeof PAD !== "undefined" && PAD.save) PAD.save(KEY, { script: data.script, index: data.index, stats: data.stats });
+  }
+  /* each kana has its own score; a card never shows another kana's accuracy */
+  function rateText(index) {
+    var s = data.stats[index];
+    if (!s || !s[0]) return TXT.noStats;
+    return TXT.rate.replace("{pct}", String(Math.round(s[1] * 100 / s[0]))).replace("{hits}", String(s[1])).replace("{tries}", String(s[0]));
+  }
+  function current() { return table()[data.index]; }
+  /* keep the selected kana inside the scrolling grid */
+  function revealSelected(block) {
+    var selected = referenceEl.querySelector(".selected");
+    if (selected) selected.scrollIntoView({ block: block || "nearest" });
+  }
+  function render() {
+    var list = table(), currentIndex = data.screen === "quiz" ? data.target : data.index;
+    document.body.classList.toggle("quiz", data.screen === "quiz");
+    document.body.classList.toggle("card", data.screen === "card");
+    document.body.classList.toggle("list", data.screen === "list");
+    scriptBtn.textContent = data.script === "hira" ? TXT.hira : TXT.kata;
+    document.getElementById("title").textContent = TXT.title;
+    document.getElementById("count").textContent = (data.screen === "quiz" ? data.target + 1 : data.index + 1) + "/" + list.length;
+    document.getElementById("mode").textContent = TXT[data.screen];
+    document.getElementById("guide").textContent = data.screen === "list" ? TXT.listGuide : data.screen === "card" ? TXT.cardGuide : TXT.quizGuide;
+    kanaEl.textContent = list[currentIndex];
+    romaEl.textContent = ROMA[currentIndex];
+    rateEl.textContent = rateText(currentIndex);
+    viewBtn.textContent = data.screen === "list" ? TXT.startQuiz : TXT.backList;
+    viewBtn.style.display = "inline-block";
+    document.getElementById("prev").textContent = TXT.prev;
+    document.getElementById("next").textContent = TXT.next;
+    document.getElementById("hear").textContent = TXT.hear;
+    promptEl.textContent = TXT.question;
+    optionsEl.textContent = "";
+    referenceEl.textContent = "";
+    if (data.screen === "list") {
+      GRID_ROWS.forEach(function (row, r) {
+        row.forEach(function (index, c) {
+          var b = document.createElement("button"), kana = document.createElement("span"), roma = document.createElement("span");
+          b.type = "button"; b.setAttribute("role", "listitem"); b.setAttribute("aria-label", list[index] + " " + ROMA[index]);
+          b.style.gridRow = String(r + 1); b.style.gridColumn = String(GRID_COLS[r][c] + 1);
+          b.className = index === data.index ? "selected" : "";
+          b.setAttribute("aria-selected", index === data.index ? "true" : "false");
+          kana.textContent = list[index]; roma.textContent = ROMA[index];
+          b.appendChild(kana); b.appendChild(roma);
+                b.addEventListener("click", function () { data.index = index; openCard(); });
+          referenceEl.appendChild(b);
+        });
+      });
+      revealSelected();
+    }
+    if (data.screen === "quiz") {
+      data.choices.forEach(function (index, i) {
+        var b = document.createElement("button");
+        b.type = "button"; b.textContent = ROMA[index];
+        b.setAttribute("data-index", String(index));
+        b.className = data.reveal === index || (data.reveal < 0 && i === data.choice) ? "selected" : "";
+        b.addEventListener("click", function () { data.choice = i; answer(); });
+        optionsEl.appendChild(b);
+      });
+    }
+  }
+  function switchScript() {
+    data.script = data.script === "hira" ? "kata" : "hira";
+    if (data.screen === "quiz") { data.index = data.target; data.screen = "list"; }
+    data.locked = false; statusEl.textContent = "";
+    save(); render();
+  }
+  function backToList() {
+    if (data.screen === "quiz") data.index = data.target;
+    data.screen = "list";
+    data.locked = false;
+    statusEl.textContent = "";
+    save();
+    render();
+    revealSelected();
+  }
+  function openCard() {
+    data.screen = "card"; statusEl.textContent = ""; save(); render();
+  }
+  function chooseReference(dir) {
+    var row = 0, col = 0, r, c;
+    for (r = 0; r < GRID_ROWS.length; r++) {
+      c = GRID_ROWS[r].indexOf(data.index);
+      if (c >= 0) { row = r; col = GRID_COLS[r][c]; break; }
+    }
+    if (dir === "left" || dir === "right") {
+      var pos = GRID_ROWS[row].indexOf(data.index), step = dir === "left" ? -1 : 1;
+      data.index = GRID_ROWS[row][(pos + step + GRID_ROWS[row].length) % GRID_ROWS[row].length];
+    } else {
+      var nextRow = (row + (dir === "up" ? -1 : 1) + GRID_ROWS.length) % GRID_ROWS.length;
+      var best = 0, distance = 99;
+      GRID_COLS[nextRow].forEach(function (candidateCol, i) {
+        var d = Math.abs(candidateCol - col);
+        if (d < distance) { distance = d; best = i; }
+      });
+      data.index = GRID_ROWS[nextRow][best];
+    }
+    save();
+    render();
+    revealSelected();
+  }
+  function move(dir) {
+    if (data.screen === "quiz") {
+      if (!data.locked) {
+        if (dir === "up" || dir === "down") data.choice = (data.choice + (dir === "up" ? -2 : 2) + data.choices.length) % data.choices.length;
+        else {
+          var rowStart = Math.floor(data.choice / 2) * 2;
+          data.choice = rowStart + (data.choice % 2 + (dir === "left" ? 1 : 1)) % 2;
+        }
+        render();
+      }
+      return;
+    }
+    if (data.screen !== "card") return;
+    var count = table().length;
+    data.index = (data.index + (dir === "left" || dir === "up" ? -1 : 1) + count) % count;
+    statusEl.textContent = ""; save(); render();
+  }
+  function newQuestion() {
+    /* three distractors whose romaji differ from the answer and from each other, so a kana is never
+       tested against an identical-looking choice (じ and ぢ both read ji, ず and づ both read zu) */
+    var seen = {}, pool = [], i, n, count = table().length;
+    for (i = 0; i < count; i++) {
+      if (i === data.target || ROMA[i] === ROMA[data.target] || seen[ROMA[i]]) continue;
+      seen[ROMA[i]] = true; pool.push(i);
+    }
+    var choices = [data.target];
+    while (choices.length < 4 && pool.length) {
+      n = Math.floor(Math.random() * pool.length);
+      choices.push(pool.splice(n, 1)[0]);
+    }
+    for (i = choices.length - 1; i > 0; i--) {
+      n = Math.floor(Math.random() * (i + 1));
+      var tmp = choices[i]; choices[i] = choices[n]; choices[n] = tmp;
+    }
+    data.choices = choices; data.choice = 0; data.locked = false; data.awaitConfirm = false; data.reveal = -1;
+  }
+  function rememberTarget(index) {
+    data.recent.push(index);
+    while (data.recent.length > 3) data.recent.shift();
+    data.seen[index] = (data.seen[index] || 0) + 1;
+  }
+  /* pick the next kana: never-seen and low-accuracy kana weigh more, and the last few tested are
+     skipped so the same kana is not asked over and over. A kana appears at most twice per quiz
+     round, so a weak kana is repeated but never becomes tiresome. */
+  function pickTarget() {
+    var count = table().length, pool = [], total = 0, i, s, w, r;
+    for (i = 0; i < count; i++) if ((data.seen[i] || 0) < 2 && data.recent.indexOf(i) < 0) pool.push(i);
+    /* if only the last few kana are left, ask one of them rather than ending the round early */
+    if (!pool.length) for (i = 0; i < count; i++) if ((data.seen[i] || 0) < 2) pool.push(i);
+    if (!pool.length) return -1;
+    for (i = 0; i < pool.length; i++) {
+      s = data.stats[pool[i]];
+      w = (!s || !s[0]) ? 1 : Math.max(0.15, 1 - s[1] / s[0]);
+      pool[i] = [pool[i], w]; total += w;
+    }
+    r = Math.random() * total;
+    for (i = 0; i < pool.length; i++) { r -= pool[i][1]; if (r < 0) return pool[i][0]; }
+    return pool[pool.length - 1][0];
+  }
+  function advance() {
+    var next = pickTarget();
+    if (next < 0) { data.locked = true; data.awaitConfirm = false; statusEl.textContent = TXT.done; return; }
+    data.target = next;
+    rememberTarget(data.target);
+    newQuestion(); statusEl.textContent = ""; render();
+  }
+  function startQuiz() {
+    if (data.screen !== "list") return;
+    data.screen = "quiz"; data.target = data.index;
+    data.recent = []; data.seen = {}; rememberTarget(data.target);
+    newQuestion(); statusEl.textContent = ""; render();
+  }
+  function answer() {
+    if (data.screen !== "quiz") return;
+    if (data.locked) {
+      /* after a miss, wait for the user to acknowledge the answer before moving on */
+      if (data.awaitConfirm) { data.awaitConfirm = false; advance(); }
+      return;
+    }
+    data.locked = true;
+    var ok = data.choices[data.choice] === data.target;
+    var stat = data.stats[data.target] || (data.stats[data.target] = [0, 0]);
+    stat[0]++; if (ok) stat[1]++;
+    if (ok) {
+      statusEl.textContent = TXT.mastered;
+      if (typeof PAD !== "undefined" && PAD.sfx) PAD.sfx("ok");
+      save();
+      setTimeout(function () {
+        if (data.screen !== "quiz" || !data.locked || data.awaitConfirm) return;
+        advance();
+      }, 850);
+    } else {
+      data.awaitConfirm = true;
+      data.reveal = data.target;
+      if (typeof PAD !== "undefined" && PAD.sfx) PAD.sfx("miss");
+      save();
+      render();
+      statusEl.textContent = TXT.missed + ROMA[data.target] + TXT.cont;
+    }
+  }
+  function hear() {
+    if (data.screen !== "card") return;
+    if (typeof PAD === "undefined" || !PAD.say) { statusEl.textContent = TXT.legacy; return; }
+    if (!PAD.say.languages || PAD.say.languages.indexOf("ja") < 0) { statusEl.textContent = TXT.legacy; return; }
+    PAD.say(current(), { lang: "ja" }).then(function (result) {
+      if (result === "unavailable") statusEl.textContent = TXT.noVoice;
+      else statusEl.textContent = "";
+    });
+  }
+  function handle(button) {
+    if (data.screen === "list") {
+      if (button === "left" || button === "right" || button === "up" || button === "down") chooseReference(button);
+      else if (button === "a") openCard();
+      else if (button === "start") startQuiz();
+      else if (button === "select") switchScript();
+      return;
+    }
+    if (button === "b") backToList();
+    else if (button === "left") move("left");
+    else if (button === "right") move("right");
+    else if (button === "up" && data.screen === "quiz") move("up");
+    else if (button === "down" && data.screen === "quiz") move("down");
+    else if (button === "a") { if (data.screen === "quiz") answer(); else hear(); }
+    else if (button === "select") switchScript();
+  }
+  document.getElementById("prev").addEventListener("click", function () { move("left"); });
+  document.getElementById("next").addEventListener("click", function () { move("right"); });
+  document.getElementById("hear").addEventListener("click", function () { if (data.screen === "quiz") answer(); else hear(); });
+  scriptBtn.addEventListener("click", switchScript);
+  viewBtn.addEventListener("click", function () { if (data.screen === "list") startQuiz(); else backToList(); });
+  var keyHandler = function (e) {
+    if (e.key.indexOf("Arrow") === 0) { e.preventDefault(); handle(e.key.slice(5).toLowerCase()); }
+    else if (e.key === "x" || e.key === "X") { e.preventDefault(); handle("a"); }
+    else if (e.key === "z" || e.key === "Z") { e.preventDefault(); handle("b"); }
+    else if (e.key === "Enter") { e.preventDefault(); handle(data.screen === "quiz" ? "a" : "start"); }
+    else if (e.key === "Shift") { e.preventDefault(); handle("select"); }
+  };
+  if (typeof PAD !== "undefined" && PAD.on) PAD.on("press", handle);
+  else document.addEventListener("keydown", keyHandler, false);
+  document.documentElement.lang = LANG === "en" ? "en" : "zh-CN";
+  if (typeof PAD !== "undefined" && PAD.load) {
+    PAD.load(KEY).then(function (saved) {
+      if (saved && (saved.script === "hira" || saved.script === "kata")) data.script = saved.script;
+      if (saved && typeof saved.index === "number" && saved.index >= 0 && saved.index < table().length) data.index = saved.index;
+      if (saved && saved.stats && typeof saved.stats === "object") {
+        for (var k in saved.stats) {
+          var v = saved.stats[k];
+          if (/^[0-9]+$/.test(k) && Array.isArray(v) && v.length === 2 && typeof v[0] === "number" && typeof v[1] === "number" && v[0] >= 0 && v[1] >= 0 && v[1] <= v[0]) data.stats[k] = [v[0], v[1]];
+        }
+      }
+      render();
+      revealSelected("center");
+    });
+  } else { render(); revealSelected("center"); }
+})();
+</script>
+</body>
+</html>
