@@ -111,8 +111,12 @@ GM.JINGLE = {
 
 GM.SFX = {
   boom:  { wave: "noise", from: 900, to: 55, ms: 380, vol: 0.9 },
-  /* the two pickup sounds repeat more than any other in the game: lower triangle waves, about a fifth to an octave
-     below the old chirps, so a haul at full volume is bright without stinging (sdk/UI.md section 7). */
+  /* the hook touching an item: a soft low thud plus a little noise. The old runtime `hit` was a full-scale
+     noise burst and a 98 Hz square, which is the sharp sound at every grab (sdk/UI.md section 7). */
+  grab:  { wave: "noise", from: 480, to: 140, ms: 75, attack: 4, decay: 70, vol: 0.28 },
+  grabBody: { wave: "triangle", from: 160, to: 85, ms: 110, attack: 2, decay: 105, vol: 0.35 },
+  /* the two pickup sounds on collect: lower triangle waves, about a fifth to an octave below the old chirps, so a
+     haul at full volume is bright without stinging. */
   coin:  { wave: "triangle", from: 587, to: 880, ms: 130, attack: 4, decay: 120, vol: 0.5 },
   chime: { wave: "triangle", from: 740, to: 1109, ms: 180, attack: 6, decay: 165, vol: 0.45 },
   throw: { wave: "noise", from: 300, to: 900, ms: 110, vol: 0.32 }
