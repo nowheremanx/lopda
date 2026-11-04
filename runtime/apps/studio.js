@@ -36,6 +36,10 @@ var LP=window.LP, $=LP.$, S=LP.S, tr=LP.tr, SONGS=window.LopdaSong, SYNTH=window
 var own=LP.own, toast=LP.toast, show=LP.show, showPad=LP.showPad;
 
 var BASE="data/users/local/studio", LOOKAHEAD=0.1, LOOP_MS=25, SAVE_MS=1000;
+/* the synth's own tracks peak well below PAD.music's songs (the demo beat measured at 0.53-0.62 of the tune by rms),
+   and the soft ceiling leaves room to push the whole mix up without clipping. 1.35 is about +2.6 dB: a tape now sits
+   next to the runtime's music instead of under it, and the densest songs stop at the ceiling. */
+var OUTPUT_GAIN=1.35;
 /* 12.24: a live tap arrives one touch-to-handler delay after the finger, on top of the device's output latency */
 var REC_TAP_LAG=0.02;
 /* how long REC is held before it clears the track (12.24.1): long enough that a nervous tap never clears */
@@ -601,8 +605,8 @@ function buildSynth(ac){
   if(TAPE){
     T.tape=TAPE.create(ac,LP.SND.app);
     T.tape.set(T.song?T.song.tape:2);
-    T.synth=SYNTH.create(ac,T.tape.input);
-  } else T.synth=SYNTH.create(ac,LP.SND.app);
+    T.synth=SYNTH.create(ac,T.tape.input,OUTPUT_GAIN);
+  } else T.synth=SYNTH.create(ac,LP.SND.app,OUTPUT_GAIN);
 }
 function ensureSynth(){
   var ac=LP.SND.ctx || LP.audio();
@@ -3142,7 +3146,7 @@ function renderWav(){
   tape=TAPE.create(oc,oc.destination);
   tape.set(song.tape);
   tape.start(0,seconds);
-  synth=SYNTH.create(oc,tape.input);
+  synth=SYNTH.create(oc,tape.input,OUTPUT_GAIN);
   for(i=0;i<song.tracks.length;i++){
     tr=song.tracks[i];
     vols[tr.id]=typeof tr.vol==="number" ? tr.vol : 1;

@@ -1,6 +1,6 @@
 {
   "spec": "lopda/1",
-  "generated": "2026-11-01",
+  "generated": "2026-11-04",
   "apps": [
     {
       "spec": "lopda/1",
@@ -296,7 +296,7 @@
       ],
       "version": "1.6.0",
       "released": "2026-10-07",
-      "updated": "2026-10-13",
+      "updated": "2026-11-01",
       "description": "15×15 棋盘，你执黑先手和电脑下，可以悔棋；也能通过电波和另一台掌机对战。",
       "i18n": {
         "en": {
@@ -426,9 +426,9 @@
         ".....000000.....",
         "................"
       ],
-      "version": "1.1.0",
+      "version": "1.1.1",
       "released": "2026-10-28",
-      "updated": "2026-10-29",
+      "updated": "2026-11-03",
       "description": "六十秒一关：钩金块、躲炸药，钱袋随机，商店看运气。",
       "i18n": {
         "en": {
@@ -439,8 +439,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/lao-zhang/index.html",
-      "sha256": "6f3671889cc08f8d5f68632a9431f27258cf2811c2bc77f5624331a1b8fe02c5",
-      "bytes": 103448
+      "sha256": "d5c2ceebeaf31c93d8fda5ecb1ddc9a4ed0896d2f33ac87b716d2ad4cbc9983d",
+      "bytes": 104155
     },
     {
       "spec": "lopda/1",
@@ -553,8 +553,9 @@
         "...000000000....",
         "................"
       ],
-      "version": "2.0.0",
+      "version": "2.0.1",
       "released": "2026-10-21",
+      "updated": "2026-11-03",
       "description": "十二页纸塔，十分钟一轮：钥匙、墨铺、怪物特技、炸弹与圣水，每一步都要取舍。",
       "i18n": {
         "en": {
@@ -565,8 +566,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/paper-tower/index.html",
-      "sha256": "9d8c2e0bf63286c4e57a91fe0f37b5e9e075579c3bc7eab53f6de6d13b68d3fd",
-      "bytes": 160884
+      "sha256": "60c5a9fcf1761795cb5015129bc4e4ef3958cc763de1145bcda057bd1279903b",
+      "bytes": 160861
     },
     {
       "spec": "lopda/1",

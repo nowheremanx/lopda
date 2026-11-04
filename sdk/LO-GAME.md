@@ -250,6 +250,8 @@ game.shake(pixels, sec)
 ```js
 game.sfx("hit")      // tap tick move ok err hit miss coin win lose
 game.sfx({ wave: "noise", from: 900, to: 120, ms: 180, attack: 5, decay: 175, vol: 0.8 })  // your own (1.3.0)
+/* effects that repeat (pickups, hits, steps) must stay soft at the loudest volume: prefer triangle or noise
+   to a square above about 1 kHz; see sdk/UI.md section 7 */
 game.music(song)                      // loop a song (1.3.0); game.music(song, { loop: false }) plays it once
 game.musicStop()                      // fade it out
 game.ambience("rain", 0.6)            // a background of rain at level 0-1 (1.4.0); game.ambience(null) fades it out
