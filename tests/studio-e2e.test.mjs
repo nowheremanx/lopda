@@ -176,14 +176,14 @@ async function studioPage(t, withChip) {
       const freq = sr / (lo - 1 + best + delta);
       return { freq, cents: 1200 * Math.log2(freq / expected) };
     };
-    /* `seconds` of the DEMO beat from the song data, swing included */
-    window.renderBeat = async (kit, seconds) => {
+    /* `seconds` of the DEMO beat from the song data, swing included; `gain` is the synth's master fader */
+    window.renderBeat = async (kit, seconds, gain = 1) => {
       const song = LopdaSong.newSong();
       const ticks = 4 * LopdaSong.STEPS * LopdaSong.STEP;
       const ev = LopdaSong.events(song, 0, 0, ticks);
       const oc = new OfflineAudioContext(1, Math.ceil(SR * seconds), SR);
       const out = oc.createGain(); out.gain.value = 1; out.connect(oc.destination);
-      const synth = LopdaStudioSynth.create(oc, out);
+      const synth = LopdaStudioSynth.create(oc, out, gain);
       for (const e of ev) {
         if (e.key) synth.hit(kit, e.key, LopdaSong.ticksToSec(e.tick, song.bpm), e.vel);
       }
@@ -263,6 +263,34 @@ test("studio synth: the demo beat sits near PAD.music", { skip, timeout: 60000 }
     assert.ok(b.ratio >= 0.5 && b.ratio <= 2, `${kit} beat sits near the tune by rms (${b.ratio})`);
     assert.ok(b.peak <= 0.9, `${kit} beat peak ${b.peak} is under 0.9`);
   }
+  assert.deepEqual(errors, []);
+});
+
+test("studio synth: the master fader lifts a quiet tape and the ceiling catches the loudest one", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await studioPage(t);
+  const r = await p.evaluate(async () => {
+    const song = LopdaSong.newSong();
+    const seconds = LopdaSong.ticksToSec(4 * LopdaSong.STEPS * LopdaSong.STEP, song.bpm);
+    const quiet = await renderBeat("soft", seconds, 1);
+    const loud = await renderBeat("soft", seconds, 1.35);
+    const demo = LopdaSong.demoSong(), ticks = LopdaSong.chainTicks(demo, demo.song), ev = LopdaSong.chainEvents(demo, demo.song, 0, ticks);
+    const oc = new OfflineAudioContext(1, Math.ceil(22050 * LopdaSong.ticksToSec(ticks, demo.bpm)), 22050);
+    const out = oc.createGain(); out.gain.value = 1; out.connect(oc.destination);
+    const synth = LopdaStudioSynth.create(oc, out, 1.35);
+    for (const e of ev) {
+      if (!e.vel) continue;
+      const at = LopdaSong.ticksToSec(e.tick, demo.bpm), dur = LopdaSong.ticksToSec(e.len, demo.bpm);
+      if (e.track === "drums") synth.hit(demo.kit, e.key, at, e.vel);
+      else if (e.track === "chords") for (const midi of LopdaSong.chordNotes(demo, e.deg)) synth.note(LopdaSong.SOUND.chords, midi, at, dur, e.vel);
+      else synth.note(LopdaSong.SOUND[e.track], LopdaSong.noteMidi(demo, e.track, e.deg), at, dur, e.vel);
+    }
+    const dense = stats((await oc.startRendering()).getChannelData(0));
+    return { quiet: { rms: quiet.rms, peak: quiet.peak }, loud: { rms: loud.rms, peak: loud.peak }, dense: dense.peak };
+  });
+  t.diagnostic(`demo beat at gain 1: rms ${r.quiet.rms.toFixed(4)}, peak ${r.quiet.peak.toFixed(3)}; at 1.35: rms ${r.loud.rms.toFixed(4)}, peak ${r.loud.peak.toFixed(3)}; dense song at 1.35: peak ${r.dense.toFixed(3)}`);
+  assert.ok(r.loud.rms > r.quiet.rms * 1.2, `the fader makes the tape clearly louder (${r.loud.rms} vs ${r.quiet.rms})`);
+  assert.ok(r.loud.peak <= 0.95, `the fader does not clip the demo beat (${r.loud.peak})`);
+  assert.ok(r.dense <= 0.95, `the soft ceiling still holds the dense song (${r.dense})`);
   assert.deepEqual(errors, []);
 });
 

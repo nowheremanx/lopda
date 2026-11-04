@@ -98,6 +98,15 @@ Contrast of the four tones against each other (WCAG contrast ratio):
 
 - Every action gives two answers: a sound (`PAD.sfx`) and a visible change. A failed action plays `err` and
   says why in a few words.
+- **A sound that repeats must not sting.** The handheld's speaker is small and bright, and its loudest volume
+  is set well above comfortable. A pickup, a step, a hit or a menu blip is heard hundreds of times; it has to
+  stay soft at that volume. The worst offender is a square wave that climbs above about 1 kHz.
+- For bright sounds prefer `"triangle"` or `"noise"` to `"square"`, keep the top note under about 1.2 kHz, use
+  an `attack` of 3 ms or more, and let `decay` fade to the end instead of cutting off. Lower `vol` before you
+  shorten the sound: a short piercing click is worse than a slightly longer soft one. The ten named sounds are
+  already balanced; use one of them when it fits.
+- Test on the phone's own speaker at the loudest volume, never only in headphones, and play the effect twenty
+  times in a row. If it makes you flinch, it will make the player flinch.
 - Anything that takes longer than about half a second shows it is working ("…", a counter, an animation)
   and ignores repeated presses until it is done.
 - Disabled controls look disabled (dark text, or a dashed border) and play `err` when pressed.
@@ -150,3 +159,4 @@ Contrast of the four tones against each other (WCAG contrast ratio):
 | A catalogue whose Left/Right changed a level on some rows and jumped sections on others | Left/Right only change the level; SELECT goes to the next group |
 | A two-column button grid where every arrow moved to the next button in reading order: Down went right, and the lower rows sat below the fold | Keep the screen fixed, use 4 buttons in a 2×2 grid, and make Up/Down move a row (section 5) |
 | Hints in 12 px dark text on paper | 13 px or more, or ink |
+| A gem or pickup chirp on a square wave, climbing to 1.8 kHz; it stings after the tenth haul at full volume | Drop an octave, use `triangle`, keep the top note under 1.2 kHz and soften `vol` (section 7) |
