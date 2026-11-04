@@ -576,33 +576,12 @@ GM.drawMole = function (buf, it, anim) {
   }
 };
 
-GM.drawRope = function (buf, hook, anim) {
+GM.drawRope = function (buf, hook) {
   var tip = GM.tip(hook);
   var a = hook.angle, dx = Math.sin(a), dy = Math.cos(a);
-  var px = Math.cos(a), py = -Math.sin(a);
-  if (hook.state === "back" && hook.len > 24) {
-    /* a live rope, not a stick: a small wave runs down it while the reel turns */
-    var lx = GM.ANCHOR.x, ly = GM.ANCHOR.y;
-    for (var d = 8; d < hook.len - 4; d += 7) {
-      var t = d / hook.len;
-      var amp = Math.sin(t * Math.PI) * 0.55 * Math.sin(anim * 20 + t * 13);
-      var x = GM.ANCHOR.x + dx * d + px * amp;
-      var y = GM.ANCHOR.y + dy * d + py * amp;
-      GM.line(buf, lx, ly, x, y, GM.INK);
-      lx = x;
-      ly = y;
-    }
-    GM.line(buf, lx, ly, tip.x - dx, tip.y - dy, GM.INK);
-  } else {
-    GM.line(buf, GM.ANCHOR.x, GM.ANCHOR.y, tip.x - dx, tip.y - dy, GM.INK);
-  }
-  for (var d2 = 7; d2 < hook.len - 3; d2 += 9) {
-    GM.put(buf, GM.ANCHOR.x + dx * d2, GM.ANCHOR.y + dy * d2, GM.PAPER);
-  }
-  if (hook.state === "back" && hook.len > 12) {
-    var d3 = (anim * 46) % (hook.len - 8) + 4;
-    GM.put(buf, GM.ANCHOR.x + dx * d3, GM.ANCHOR.y + dy * d3, GM.PAPER);
-    GM.put(buf, GM.ANCHOR.x + dx * (d3 + 2), GM.ANCHOR.y + dy * (d3 + 2), GM.PAPER);
+  GM.line(buf, GM.ANCHOR.x, GM.ANCHOR.y, tip.x - dx, tip.y - dy, GM.INK);
+  for (var d = 7; d < hook.len - 3; d += 9) {
+    GM.put(buf, GM.ANCHOR.x + dx * d, GM.ANCHOR.y + dy * d, GM.PAPER);
   }
 };
 
@@ -639,14 +618,15 @@ GM.drawMiner = function (buf, state) {
   var rate = hauling ? (hook.item.weight > 2.4 ? 5.2 : 7.4) : 6.6;
   var tug = back ? Math.sin(state.anim * rate) : 0;
   var heave = back && Math.abs(tug) > 0.55 ? -1 : 0;
+  var heavy = hauling && hook.item.weight >= 4;
   var bob = hook.state === "swing" && Math.sin(state.anim * 4) > 0.35 ? -1 : 0;
   var lean = out ? 2 : back ? -1 : 0;
   if (throwT > 0) lean -= 1;
-  var bx = 80 + lean + (back ? Math.round(tug * 1.2) : 0);
+  var bx = 80 + lean;
   var by = bob + heave;
   var ground = 22;
 
-  /* braced boots and legs; the body rocks over them as the rope comes in */
+  /* braced boots and legs; the body leans into the pull */
   GM.rect(buf, bx - 8, ground - 1, 5, 2, GM.INK);
   GM.rect(buf, bx + 3, ground - 1, 5, 2, GM.INK);
   GM.rect(buf, bx - 6, ground - 4, 3, 3, GM.DARK);
@@ -735,8 +715,8 @@ GM.drawMiner = function (buf, state) {
     GM.line(buf, rhx + 3, rhy + 4, rhx + 7, rhy + 3, GM.PAPER);
   }
 
-  /* sweat: three drops at most, one on each side and one over the brow */
-  if (hook.item || throwT > 0.2) {
+  /* only the really heavy pieces make him sweat; a gold nugget does not */
+  if (heavy) {
     var t = state.anim, side, sx, sy, p;
     for (var i = 0; i < 3; i++) {
       side = i === 0 ? -1 : 1;
@@ -773,7 +753,7 @@ GM.draw = function (ctx, state) {
     it = state.items[i];
     if (it.type === "mole") GM.drawMole(buf, it, state.anim);
   }
-  GM.drawRope(buf, state.hook, state.anim);
+  GM.drawRope(buf, state.hook);
   if (state.hook.item) {
     var held = GM.heldPos(state.hook);
     tip = GM.tip(state.hook);
