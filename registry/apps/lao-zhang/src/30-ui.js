@@ -79,7 +79,7 @@ GM.ui = (function () {
   function codexValue(type) {
     var it = GM.ITEMS[type];
     if (type === "bag") return T.codexRandom;
-    if (type === "tnt") return T.codexBoom;
+    if (type === "tnt" || type === "mine" || type === "sealed") return T.codexBoom;
     if (type === "mole") return T.codexMole;
     return money(it.value);
   }
@@ -170,14 +170,15 @@ GM.ui = (function () {
       for (i = 0; i < offers.length; i++) {
         item = offers[i];
         have = state[item.key] || 0;
-        var capped = item.max != null && have >= item.max;
+        var bought = (state.shopBought && state.shopBought[item.key]) || 0;
+        var capped = item.max != null && bought >= item.max;
         can = item.available && !capped && state.bank >= item.price;
         sel = state.shopCursor === i;
         if (!item.available) price = T.soldOut;
-        else if (capped) price = T.max;
+        else if (capped) price = T.shopBought;
         else if (state.bank < item.price) price = GM.fmt(T.shortPrice, { d: GM.money(item.price - state.bank) });
         else price = money(item.price) + (item.priceUp ? " " + T.priceUp : "");
-        var ownedText = item.max == null
+        var ownedText = item.max == null || item.key === "dynamite"
           ? GM.fmt(T.ownedMany, { n: have })
           : GM.fmt(T.owned, { n: have, m: item.max });
         rows += '<button type="button" class="row' + (sel ? " sel" : "") + (can ? "" : " off") + '" data-act="buy" data-i="' + i + '">' +
@@ -315,8 +316,11 @@ GM.ui = (function () {
       lastIntro = "";
       return;
     }
-    var tip = state.level === 1 ? T.tip1 : state.level === 2 ? T.tip2 : (state.level === 3 || state.level === 4) ? T.tip4
-      : state.level === 6 ? T.tip6 : state.level === 7 ? T.tip7 : T.tipDefault;
+    var tip = state.level === 1 ? T.tip1 : state.level === 2 ? T.tip2
+      : state.level === 3 ? T.tip4 : state.level === 4 ? T.tipMine
+      : state.level === 5 ? T.tip7 : state.level === 6 ? T.tip6
+      : state.level === 7 ? T.tipChain : state.level === 9 ? T.tipBig
+      : state.level === 11 ? T.tipWang : T.tipDefault;
     var buff = [];
     if (state.strength) buff.push(T.buffNames[0]);
     if (state.clover) buff.push(T.buffNames[1]);
@@ -346,6 +350,16 @@ GM.ui = (function () {
       else if (ev === "gem") sfx(GM.SFX.chime);
       else if (ev === "junk") sfx("miss");
       else if (ev === "boom") sfx(GM.SFX.boom);
+      else if (ev === "bigboom") sfx(GM.SFX.bigboom);
+      else if (ev === "chain") sfx(GM.SFX.chain);
+      else if (ev === "mine") sfx(GM.SFX.mine);
+      else if (ev === "clank") sfx(GM.SFX.clank);
+      else if (ev === "rivalFire") sfx(GM.SFX.rivalFire);
+      else if (ev === "rivalGrab") sfx(GM.SFX.grabBody);
+      else if (ev === "rivalTaunt") sfx(GM.SFX.taunt);
+      else if (ev === "rivalBoom") sfx(GM.SFX.boom);
+      else if (ev === "rivalMine") sfx(GM.SFX.mine);
+      else if (ev === "rivalClank") sfx(GM.SFX.clank);
       else if (ev === "tick") sfx("tick");
       else if (ev === "clear") sfx("win");
       else if (ev === "fail") sfx("lose");
