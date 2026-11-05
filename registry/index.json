@@ -426,21 +426,21 @@
         ".....000000.....",
         "................"
       ],
-      "version": "1.1.1",
+      "version": "1.2.2",
       "released": "2026-10-28",
-      "updated": "2026-11-03",
-      "description": "六十秒一关：钩金块、躲炸药，钱袋随机，商店看运气。",
+      "updated": "2026-11-04",
+      "description": "六十秒一关：钩金块、躲地雷，借爆炸开路；十关后老王也来抢。",
       "i18n": {
         "en": {
           "name": "GOLD DIG",
-          "description": "Swing the hook, haul gold, dodge TNT. Bags roll random loot; shops vary."
+          "description": "Hook gold, dodge mines, chain blasts; past level 10 Old Wang digs beside you."
         }
       },
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/lao-zhang/index.html",
-      "sha256": "d5c2ceebeaf31c93d8fda5ecb1ddc9a4ed0896d2f33ac87b716d2ad4cbc9983d",
-      "bytes": 104155
+      "sha256": "97b0e74344f0ddd2ee3ae0e3d5ba301f4a35ff255d84a0057328172f97193b1d",
+      "bytes": 132242
     },
     {
       "spec": "lopda/1",
