@@ -72,6 +72,8 @@ html[lang=zh] .dev.s{background-image:url(docs/images/zh/screens.png)}
 html[lang=zh] .dev.b{background-image:url(docs/images/zh/builtins.png)}
 .dev.a{background-image:url(docs/images/apps.png)}
 html[lang=zh] .dev.a{background-image:url(docs/images/zh/apps.png)}
+.dev.m{background-image:url(docs/images/more.png)}
+html[lang=zh] .dev.m{background-image:url(docs/images/zh/more.png)}
 .dev.i0{background-position:0 0}.dev.i1{background-position:33.333% 0}.dev.i2{background-position:66.667% 0}.dev.i3{background-position:100% 0}
 
 /* hero */
@@ -234,10 +236,13 @@ footer .mark{font-family:var(--f-lcd);font-size:22px;color:var(--on-case);margin
     <figure><div class="dev b i2" role="img" aria-label="A dictionary entry"></div><figcaption data-i18n="in.dict"><b>Dictionary</b>English and Chinese, offline.</figcaption></figure>
     <figure><div class="dev b i3" role="img" aria-label="A page of a book in the reader"></div><figcaption data-i18n="in.reader"><b>Reader</b>TXT and EPUB, an e-ink refresh.</figcaption></figure>
   </div>
+  <div class="shelf">
+    <figure><div class="dev m i0" role="img" aria-label="The pet in its room, with a bed, a calendar and a shelf"></div><figcaption data-i18n="in.pet"><b>Pet</b>Lives in its room, sleeps at night.</figcaption></figure>
+    <figure><div class="dev m i1" role="img" aria-label="Tape4's melody screen with a grid of notes"></div><figcaption data-i18n="in.tape"><b>Tape4</b>Four tracks on tape. Export a WAV.</figcaption></figure>
+    <figure><div class="dev m i2" role="img" aria-label="Radio: text and a small picture sent between two phones"></div><figcaption data-i18n="in.radio"><b>Radio</b>Phone to phone, through the air.</figcaption></figure>
+    <figure><div class="dev m i3" role="img" aria-label="A game of gomoku on a 15 by 15 board"></div><figcaption data-i18n="in.gomoku"><b>Gomoku</b>Play a friend over the same sound link.</figcaption></figure>
+  </div>
   <div class="list">
-    <div><h3 data-i18n="in.tape.h">Tape4</h3><p data-i18n="in.tape.p">A four-track tape machine: drums, bass, chords, melody. Export a WAV.</p></div>
-    <div><h3 data-i18n="in.radio.h">Radio</h3><p data-i18n="in.radio.p">Two phones talk through their speakers and microphones. No network.</p></div>
-    <div><h3 data-i18n="in.pet.h">Pet</h3><p data-i18n="in.pet.p">It hatches, sleeps at night, and brings home a souvenir most days.</p></div>
     <div><h3 data-i18n="in.cart.h">Cartridge</h3><p data-i18n="in.cart.p">A Game Boy player. Bring your own ROMs.</p></div>
     <div><h3 data-i18n="in.scripts.h">Scripts</h3><p data-i18n="in.scripts.p">Ask an AI for a small program, paste it in, run it.</p></div>
     <div><h3 data-i18n="in.backup.h">Backup</h3><p data-i18n="in.backup.p">The whole handheld in one zip file. Restore it on a new phone.</p></div>
@@ -324,9 +329,8 @@ PAD.music.play({ bpm: 120,
     "in.p": "打开就是今天的日记，带农历的万年历，英汉词典，还有一个能帮你查词的阅读器。",
     "in.notes": "<b>记事本</b>今天的日记、标签、搜索。", "in.cal": "<b>万年历</b>农历、节气、放假安排。",
     "in.dict": "<b>词典</b>英汉双解，离线可用。", "in.reader": "<b>阅读器</b>TXT 和 EPUB，墨水屏式刷新。",
-    "in.tape.h": "四轨机", "in.tape.p": "四轨磁带录音机：鼓、贝斯、和弦、旋律。可以导出 WAV。",
-    "in.radio.h": "电波台", "in.radio.p": "两台手机用扬声器和麦克风说话，不用网络。",
-    "in.pet.h": "宠物", "in.pet.p": "它会孵化，晚上睡觉，几乎每天都带回一件纪念品。",
+    "in.pet": "<b>宠物</b>住在自己的小房间里，晚上睡觉。", "in.tape": "<b>四轨机</b>四轨磁带录音，可以导出 WAV。",
+    "in.radio": "<b>电波台</b>手机对手机，声音隔空传。", "in.gomoku": "<b>五子棋</b>用同一条声音连线和朋友对下。",
     "in.cart.h": "卡带机", "in.cart.p": "Game Boy 模拟器，卡带自备。",
     "in.scripts.h": "脚本", "in.scripts.p": "让 AI 写个小程序，粘贴进来，就能运行。",
     "in.backup.h": "备份", "in.backup.p": "整台掌机打包成一个 zip，换手机也能恢复。",
