@@ -10,8 +10,9 @@ A four-tone handheld that lives on your phone. Hi-PDA's low-fidelity cousin.
 
 Lo-PDA is a Progressive Web App styled as a fictional 1986 PDA: a green LCD that shows four tones and nothing else,
 a D-pad, A and B, SELECT and START on its chin, and a HOME key. It comes with a film camera and a darkroom, a diary,
-a calendar, a dictionary, a book reader, a cartridge player and a store of small community apps. Everything runs
-and is saved on the phone. There are no accounts, no ads and no tracking, and it works offline.
+a calendar, a dictionary, a book reader, a pet that lives in the handheld, a four-track tape machine, a cartridge
+player and a store of small community apps. Everything runs and is saved on the phone. There are no accounts, no ads
+and no tracking, and it works offline. The app spec is frozen as 1.0, so apps written today keep working.
 
 ## Shot on Lo-PDA
 
@@ -43,25 +44,29 @@ The seven stocks on one photo, same roll and same development, only the stock ch
 | Calendar | 万年历 | Gregorian and lunar calendar with solar terms, 1900–2100, China's public holidays and days off, your own anniversaries. Days with a diary get a folded corner. |
 | Dictionary | 词典 | English–Chinese, built in and offline (abridged ECDICT). Import StarDict dictionaries; a word book for review; A says the word aloud. |
 | Reader | 阅读器 | TXT and EPUB books, your own fonts, an e-ink style full refresh. Select text to look it up or quote it into Notes. Two public-domain books included. |
+| Pet | 宠物 | A small creature that hatches once, gets a name for life and lives in a room on the screen. It eats, plays, sleeps at night, grows up, and some days comes home with a souvenir for its shelf. It never dies. |
+| Tape4 | 四轨机 | A four-track tape machine: drums, bass, chords and melody, 64 patterns chained into a song, swing and tape colour, a mixer, a tape library with four demo tunes, WAV export. |
 | Camera | 点阵相机 | Live dithered viewfinder, rolls of film, seven stocks, every lens on the phone. |
 | Darkroom | 冲洗店 | The film box: develop, view in colour, print, export and import negatives. |
 | Cartridge | 卡带机 | Plays black-and-white Game Boy files you supply, with the chin buttons. Saves can be exported and imported. No games are included. |
 | Radio | 电波台 | Experimental. Two handhelds talk over sound, like a 1986 modem: both press Link, then send short text and 16 × 16 pictures. Slow on purpose. |
-| Store | 应用商店 | Install, update and run community apps, by category. |
+| Store | 应用商店 | Install, update and run community apps, by category, with search. |
 | Scripts | 脚本 | Your own small HTML/JS programs: copy a prompt for an AI, paste the code back, run it in the sandbox. |
-| Settings | 设置 | Sound, volume, language (中文 / English), which apps may use the sensors and camera, backup and restore of the whole device, updates. |
+| Settings | 设置 | Sound, volume, language (中文 / English), which apps may use the sensors and camera, app saves, backup and restore of the whole device, the optional AI line, updates. |
+
+![The pet in its room, a demo tune in Tape4, a short exchange in Radio with a 16 × 16 picture of a boat, and Gomoku](docs/images/more.png)
 
 ## The app store
 
 ![Three store apps in play, Paper Tower, Fake Yu and Rain Station, and the store's list](docs/images/apps.png)
 
-Seventeen apps today, all open source and all made for Lo-PDA:
+Twenty-two apps today, all open source and all made for Lo-PDA:
 
 | Kind | Apps |
 |---|---|
-| Games | Paper Tower (a ten-minute tower climb), Fake Yu (a one-key rhythm story), SnapTile (a sliding puzzle from your own photo), Marble (tilt the phone), Candles (blow into the mic), Gomoku (also a two-handheld match over sound), Mole Bop, Gold Dig (a sixty-second hook-and-haul mine), Pagoda (a 3D prologue), Sisyphus (a meditative climb with sixteen lines from Camus) |
+| Games | Paper Tower (a ten-minute tower climb), Fake Yu (a one-key rhythm story), SnapTile (a sliding puzzle from your own photo), Marble (tilt the phone), Candles (blow into the mic), Gomoku (also a two-handheld match over sound), Mole Bop, Gold Dig (a sixty-second hook-and-haul mine), Pagoda (a 3D prologue), Sisyphus (a meditative climb with sixteen lines from Camus), Crossing (spell words on a wheel to fill a crossword), DailyBox (one crate-pushing puzzle a day), Klotski (the sliding-block escape), Foothill (seven days running a mountain diner) |
 | Story | Rain Station, a visual novel with seven chapters and five endings |
-| Tools and toys | Calc and Paint (both preinstalled), Fortune, Kana, Sounds, VecDream |
+| Tools and toys | Calc and Paint (both preinstalled), Fortune, Kana, Sounds, VecDream, LuckyWay (hold the phone flat like a compass) |
 
 Preinstalled apps are ordinary store apps: remove them and they stay removed; the store has them again.
 
@@ -72,11 +77,12 @@ and no storage of its own, and talks to the handheld through a small `PAD` objec
 
 | | What an app can use |
 |---|---|
-| Always | The buttons, 256 KB of saved data, named sounds, chip music in MML, custom sound effects, ambience (rain, waves, fire…), the language, `PAD.say` to speak a line |
-| With a permission | `files` (export and import one file), `motion` (tilt and shake), `mic` (loudness and pitch, never the recording), `notes` (write into Notes), `camera` (one four-tone photo through the handheld's own viewfinder), `link` (messages to the same app on another handheld, over sound; Gomoku's match is the example) |
+| Always | The buttons, 256 KB of saved data, named sounds, chip music in MML, custom sound effects, ambience (rain, waves, fire…), the language, `PAD.say` to speak a line, `PAD.dict` (words and meanings from the built-in English dictionary) |
+| With a permission | `files` (export and import one file), `motion` (tilt and shake), `mic` (loudness and pitch, never the recording), `notes` (write into Notes), `camera` (one four-tone photo through the handheld's own viewfinder), `wordbook` (the player's own word book), and the experimental `link` (messages to the same app on another handheld, over sound; Gomoku's match is the example) |
 
 Every permission is asked by the handheld itself, not by the app, and the player can say no; apps must still work
-with the keys. The full rules are in [`SPEC.md`](SPEC.md) (spec `lopda/1`); the screen layout rules are in
+with the keys. The full rules are in [`SPEC.md`](SPEC.md) (spec `lopda/1`, frozen as 1.0: everything in it except `link` will
+not change in a way that breaks an app); the screen layout rules are in
 [`sdk/UI.md`](sdk/UI.md).
 
 ```sh
@@ -100,8 +106,13 @@ node tools/build-index.mjs
 Everything stays in the phone's browser storage. Settings → Backup writes the whole device (notes, rolls and their
 colour originals, books, dictionaries, cartridge saves, app data) into one `lopda-backup-YYYYMMDD.zip`, and Restore
 puts it back after checking it first. Removing an app keeps its saves; Settings → App saves lists them and clears
-them, and a reinstall of the same app carries on. The only built-in that goes online is the calendar, which fetches next year's
-table of China's holidays from jsDelivr when it is missing (the tables up to now ship with the app). Apps cannot reach the network at all.
+them, and a reinstall of the same app carries on.
+
+Two things go online, and only these two. The calendar fetches next year's table of China's holidays from jsDelivr
+when it is missing (the tables up to now ship with the app). And if you add your own OpenRouter key in Settings → AI
+line (off until you do), Scripts can write a program for you, Tape4 can edit a tape with you and the pet can bring home
+a souvenir it made up. Each request carries only what it needs (the script you asked for, the tape being edited, the
+pet's mood and the season), never your notes or photos, and the key is not in the backup. Apps cannot reach the network at all.
 
 ## Run it locally
 
@@ -147,7 +158,7 @@ Every change should take a decision away from the user, or at least not add one.
 no previews, one development per roll, frames you can't edit. The limits are the point.
 Why things are the way they are: [`docs/decisions.md`](docs/decisions.md).
 
-<sub>The screenshots were made in a desktop browser by `tools/readme-shots.mjs` (`--lang=zh` for the Chinese ones), with the camera fed a lake drawn in code.</sub>
+<sub>The screenshots were made in a desktop browser by `tools/readme-shots.mjs` (`--lang=zh` for the Chinese ones), with the camera fed a lake drawn in code. The Radio shot is two tabs of one browser talking through a stand-in for the sound link.</sub>
 
 ## License
 
