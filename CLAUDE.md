@@ -55,6 +55,7 @@ tools/          check-app.mjs, build-index.mjs (also stamps each app's released/
                 (矿工老张's auto-player: solo haul, target headroom and whole-run difficulty, also used by the tests)
 tests/          node:test suite (no deps): tools, strings, PAD shim, app save documents, sensors, speech, platform store, backup, lo-game, negative, develop, notetext, zip, repo rules, petplay, lao-zhang;
                 runtime-shots.mjs (before/after screenshots of the runtime), hko-compare.mjs (lunar table vs the HKO tables, manual)
+index.html      the landing page at the site root (English markup, Chinese table in its script; no third-party requests); the handheld is runtime/
 SPEC.md         app spec lopda/1 (MIT)
 README.md (English, the homepage) README.zh.md (Chinese) LICENSE NOTICE LICENSING.md CONTRIBUTING.md
 ```
