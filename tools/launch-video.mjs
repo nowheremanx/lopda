@@ -206,14 +206,27 @@ async function record() {
     if (await m.locator("#sense-tap").count()) await m.click("#sense-tap"); await m.waitForSelector("#file-ask .box", { timeout: 5000 }).catch(() => {});
     if (await m.locator("#file-ask .box").count()) { await m.waitForTimeout(300); await key(m, "x"); }
     await m.waitForTimeout(800);
+    /* a steady hand: the ball's position is read from the app each step and the phone is tipped toward the next
+       point of the path (level 1: down the left side, under the wall, right, then up to the flag), until it clears */
+    const app = m.frames().find((f) => f !== m.mainFrame());
+    const at = (c, r) => ({ x: c * 8 + 4, y: 16 + r * 8 + 4 });
+    const PATH = [at(2, 14), at(14, 14), at(13, 3)];
     await film(m, "maze", async () => {
-      /* a hand: tip it down past the wall, right, then up to the flag, eased like a wrist */
-      for (const [b, g, ms] of [[40, 0, 200], [66, -2, 700], [64, 0, 600], [44, 24, 600], [42, 22, 500], [16, 4, 700], [14, 0, 900], [40, 0, 900]]) {
-        const from = await m.evaluate(() => window.__tilt), steps = Math.round(ms / 30);
-        for (let i = 1; i <= steps; i++) { const k = 0.5 - Math.cos(Math.PI * i / steps) / 2;
-          await m.evaluate(([b, g]) => { window.__tilt = { beta: b, gamma: g }; }, [from.beta + (b - from.beta) * k, from.gamma + (g - from.gamma) * k]);
-          await m.waitForTimeout(30); }
+      await m.waitForTimeout(600);
+      let k = 0, t0 = Date.now();
+      while (Date.now() - t0 < 9000) {
+        const b = await app.evaluate(() => ({ x: ball.x, y: ball.y, vx: ball.vx, vy: ball.vy, state }));
+        if (b.state === "clear") break;
+        const w = PATH[k], dx = w.x - b.x, dy = w.y - b.y;
+        if (k < PATH.length - 1 && Math.hypot(dx, dy) < 6) { k++; continue; }
+        const cl = (v) => Math.max(-0.7, Math.min(0.7, v));
+        const ax = cl(dx * 0.03 - b.vx * 0.012), ay = cl(dy * 0.03 - b.vy * 0.012);
+        /* gamma 22.5 is x = 0.5; a raised top edge (beta up from the zero) sends the ball down */
+        await m.evaluate(([g, be]) => { window.__tilt = { beta: be, gamma: g }; }, [ax * 45, 40 + ay * 45]);
+        await m.waitForTimeout(30);
       }
+      await m.evaluate(() => { window.__tilt = { beta: 40, gamma: 0 }; });
+      await m.waitForTimeout(2000);
     });
     await m.close();
   }
@@ -337,18 +350,18 @@ const CAPS = {
 };
 /* [clip, from, to, speed, caption]: the screen's shots in order. "grid" is the apps at play, nine at once, full frame. */
 const SHOTS = [
-  ["boot", 0.4, 1.9, 1, 0],
-  ["camera", 1.1, 2.1, 1, 1], ["camera", 4.0, 6.8, 2.8, 1],
-  ["darkroom", 1.0, 4.6, 3.6, 2], ["darkroom", 4.8, 6.8, 1, 2],
-  ["maze", 0.6, 3.6, 1, 3],
-  ["pet", 0.8, 1.8, 1, 4], ["studio", 0.5, 1.5, 1, 5], ["reader", 2.4, 3.4, 1, 6],
-  ["store", 0.4, 5.9, 2.2, 7],
-  ["grid", 0, 3, 1, 8],
+  ["boot", 0.4, 3.4, 1, 0],
+  ["camera", 1.1, 5.1, 1, 1], ["camera", 5.3, 7.8, 2.5, 1],
+  ["darkroom", 1.0, 4.6, 1.8, 2], ["darkroom", 4.8, 8.8, 1, 2],
+  ["maze", 0.3, 6.3, 1, 3],
+  ["pet", 1.0, 2.8, 1, 4], ["studio", 0.4, 2.4, 1, 5], ["reader", 1.4, 3.6, 1, 6],
+  ["store", 0.4, 6.3, 1.5, 7],
+  ["grid", 0, 4, 1, 8],
 ];
 const GRID = [["vector-dream", 1.0], ["fake-yu", 0.3], ["zhenyao-tower", 0.3], ["lao-zhang", 0.3], ["whack-a-mole", 0], ["sisyphus", 0.3],
   ["paper-tower", 0.3], ["daily-box", 0.3], ["shanjiao-diner", 0.3]];   /* [app, where its clip starts] */
-const END = 2.0;                       /* the end card's seconds */
-const SHUTTER = [4.27, 5.40, 5.97, 6.53]; /* the camera clip's shutters (its screen goes dark), for the click */
+const END = 3.0;                       /* the end card's seconds */
+const SHUTTER = [4.27, 5.40, 5.97, 6.53, 7.07, 7.63]; /* the camera clip's shutters (its screen goes dark), for the click */
 
 async function edit() {
   const pw = await loadPlaywright();
@@ -400,7 +413,7 @@ async function edit() {
     if (clip === "grid") { ins.push("-f", "lavfi", "-i", `color=c=black:s=${SW}x${SH}:r=30:d=${len}`); parts.push(`[${k}:v]setsar=1,format=yuv420p[s${k}]`); }
     else {
       ins.push("-i", join(clips, clip + ".mp4"));
-      parts.push(`[${k}:v]trim=${a}:${b},setpts=(PTS-STARTPTS)/${sp},fps=30,scale=${SW}:${SH}:flags=lanczos,setsar=1,format=yuv420p[s${k}]`);
+      parts.push(`[${k}:v]trim=${a}:${b},setpts=(PTS-STARTPTS)/${sp},tpad=stop_mode=clone:stop_duration=${len},trim=0:${len},fps=30,scale=${SW}:${SH}:flags=lanczos,setsar=1,format=yuv420p[s${k}]`);
     }
     times.push({ t, len, cap, clip }); t += len;
   });
@@ -448,7 +461,8 @@ async function edit() {
 
   /* the sound: Tape4's tape from its start, out at the end; a short click on each shutter */
   const iMus = add("-i", join(OUT, "music.wav"));
-  const cam2 = times[2], clicks = SHUTTER.map((s) => cam2.t + (s - SHOTS[2][1]) / SHOTS[2][3]).filter((s) => s >= cam2.t && s < cam2.t + cam2.len);
+  const clicks = [];
+  SHOTS.forEach(([clip, a, b, sp], k) => { if (clip === "camera") for (const x of SHUTTER) if (x >= a && x < b) clicks.push(times[k].t + (x - a) / sp); });
   const iClick = add("-f", "lavfi", "-t", "0.05", "-i", "anoisesrc=d=0.05:c=white:a=0.5:r=44100");
   fc += `[${iMus}:a]aresample=44100,atrim=0:${total},afade=out:st=${(total - 1.5).toFixed(2)}:d=1.5,volume=0.9[mus];` +
     `[${iClick}:a]afade=out:st=0:d=0.05,asplit=${clicks.length}${clicks.map((_, i) => `[k${i}]`).join("")};` +
