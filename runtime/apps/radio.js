@@ -973,6 +973,8 @@ function bindEvents(){
   byId("radio-test-rate").onchange=function(){ R.test.rate=parseInt(this.value,10)||40; R.test.last=null; R.test.stats=""; R.test.hex=""; R.test.state=""; renderMeter(); };
   byId("radio-test-pattern").onchange=function(){ R.test.pattern=this.value; R.test.last=null; R.test.stats=""; R.test.hex=""; R.test.state=""; renderMeter(); };
   byId("radio-test-send").onclick=startSendTest;
+  /* the recording is for debugging a phone that does not decode, so the key shows only with ?debug (like the link's diagnostic line) */
+  byId("radio-rec-save").hidden=!window.LOPDA_DEBUG;
   byId("radio-rec-save").onclick=saveRecording;
   byId("radio-test-recv").onclick=startRecvTest;
   byId("radio-test-stop").onclick=function(){ if(R.test.tx) stopSendTest(); else stopRecvTest(true); };
