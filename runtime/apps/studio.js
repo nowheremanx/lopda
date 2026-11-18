@@ -343,10 +343,9 @@ function saveVersion(label){
 /* ---------- folders and the built-in demo folder (12.17) ---------- */
 function templates(){
   return [
-    {id:"night", label:"studio.demo.name", desc:"studio.demo.desc", make:SONGS.demoSong},
-    {id:"pop", label:"studio.pop.name", desc:"studio.pop.desc", make:SONGS.popSong},
-    {id:"saints", label:"studio.saints.name", desc:"studio.saints.desc", make:SONGS.saintsSong},
-    {id:"jasmine", label:"studio.jasmine.name", desc:"studio.jasmine.desc", make:SONGS.jasmineSong}
+    /* only 夜色 ships (owner, 2026-11-18, decisions.md section 53): the pop, Saints and 茉莉花 tapes wait for a rewrite
+       after Tape4 2.0. Their builders stay in studio-song.js; copies a player already made are their own tapes and stay. */
+    {id:"night", label:"studio.demo.name", desc:"studio.demo.desc", make:SONGS.demoSong}
   ];
 }
 function templateById(id){
@@ -420,11 +419,16 @@ function loadProjects(){
     if(T.sheet==="projects"||T.sheet==="folder") renderSheet();
   });
 }
+/* a tape picked from the library opens where its music is: a song (a chain of more than one slot) on the song
+   screen, a one-pattern beat (a new tape) on the drums (owner, 2026-11-18, decisions.md section 53) */
+function landingScreen(song){
+  return song && Array.isArray(song.song) && song.song.length>1 ? "song" : "drums";
+}
 function installSong(song,id,versions){
   stopRepeatAll();
   if(T.playing) stopPlay();
   T.sheet="";
-  screenTo("drums");
+  screenTo(landingScreen(song));
   T.pat=0; T.focus=0; T.slot=0; T.kb=false;
   T.noteSel={bass:-1,melody:-1}; T.noteDeg={bass:0,melody:0}; T.oct={bass:0,melody:0}; T.chordSel=-1; T.chordDeg=0;
   setSong(song);

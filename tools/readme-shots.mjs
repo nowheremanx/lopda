@@ -80,8 +80,8 @@ const T = {
         todo: "Buy film\nTake the roll to the darkroom on Saturday. #todo" },
 }[LANG];
 const RAW = join(OUT, "raw");
-/* --demo=n: which demo tape Tape4 shows (0 neo-soul, 1 daylight pop, 2 the Saints, 3 茉莉花) */
-const DEMO = +((args.find((a) => a.startsWith("--demo=")) || "--demo=3").slice(7));
+/* --demo=n: which demo tape Tape4 shows (0 夜色 / neo-soul, the only one since 1.0.2) */
+const DEMO = +((args.find((a) => a.startsWith("--demo=")) || "--demo=0").slice(7));
 const KEEP_RAW = args.includes("--raw");
 
 const pw = await loadPlaywright();
@@ -217,7 +217,7 @@ if (want("pet")) {
   await shot("pet", 600);
 }
 
-/* ---- Tape4: a copy of a demo tape (茉莉花, public domain), its melody screen ---- */
+/* ---- Tape4: a copy of the demo tape (夜色), its melody screen ---- */
 if (want("studio")) {
   await home(); await tile(T.studio);
   await p.waitForSelector("#v-studio:not([hidden])"); await p.waitForTimeout(800);
