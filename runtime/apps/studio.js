@@ -343,10 +343,9 @@ function saveVersion(label){
 /* ---------- folders and the built-in demo folder (12.17) ---------- */
 function templates(){
   return [
-    {id:"night", label:"studio.demo.name", desc:"studio.demo.desc", make:SONGS.demoSong},
-    {id:"pop", label:"studio.pop.name", desc:"studio.pop.desc", make:SONGS.popSong},
-    {id:"saints", label:"studio.saints.name", desc:"studio.saints.desc", make:SONGS.saintsSong},
-    {id:"jasmine", label:"studio.jasmine.name", desc:"studio.jasmine.desc", make:SONGS.jasmineSong}
+    /* only 夜色 ships (owner, 2026-11-18, decisions.md section 53): the pop, Saints and 茉莉花 tapes wait for a rewrite
+       after Tape4 2.0. Their builders stay in studio-song.js; copies a player already made are their own tapes and stay. */
+    {id:"night", label:"studio.demo.name", desc:"studio.demo.desc", make:SONGS.demoSong}
   ];
 }
 function templateById(id){

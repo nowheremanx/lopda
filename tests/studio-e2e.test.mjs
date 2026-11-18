@@ -3964,7 +3964,7 @@ test("studio: a tape's JSON comes back as a new tape and keeps the one it came f
   assert.deepEqual(errors, []);
 });
 
-test("studio: the guide, the pop example and clear-track", { skip, timeout: 90000 }, async (t) => {
+test("studio: the guide, the demo and clear-track", { skip, timeout: 90000 }, async (t) => {
   const { p, errors } = await rtPage(t);
   await studioOpen(p);
   await skipTour(p);
@@ -3977,11 +3977,11 @@ test("studio: the guide, the pop example and clear-track", { skip, timeout: 9000
   await p.locator("#studio-sheet .st-sheet-btn", { hasText: "开始玩" }).click();
   await p.waitForSelector("#studio-sheet", { state: "hidden" });
 
-  await useTemplate(p, "白日流行");
-  assert.match(await p.textContent("#studio-bpm"), /96 BPM/);
+  await useTemplate(p, "夜色");
+  assert.match(await p.textContent("#studio-bpm"), /78 BPM/);
   await p.click('#studio-screens .st-scr[data-screen="song"]');
   await skipScreenTour(p);
-  assert.equal(await p.locator(".st-chain-cell").count(), 64, "the pop example is 64 bars");
+  assert.equal(await p.locator(".st-chain-cell").count(), 24, "the demo is 24 bars");
 
   await p.click('#studio-screens .st-scr[data-screen="drums"]');
   await skipScreenTour(p);
@@ -4222,37 +4222,49 @@ test("studio: the guide, library, versions and AI sheets fit 331x359 with 44 px 
   assert.deepEqual(errors, []);
 });
 
-test("studio: the Demo folder holds four templates and copies one without touching the current tape", { skip, timeout: 120000 }, async (t) => {
+test("studio: the Demo folder holds only 夜色 and copies it without touching the current tape", { skip, timeout: 120000 }, async (t) => {
   const { p, errors } = await rtPage(t);
   await studioOpen(p);
   await skipTour(p);
   await openFolders(p);
-  assert.match(await p.textContent("#studio-sheet .st-proj-list"), /示例/);
+  assert.match(await p.textContent("#studio-sheet .st-proj-list"), /示例\s*1/);
   assert.match(await p.textContent("#studio-sheet .st-proj-list"), /我的磁带/);
   await openDemo(p);
   const names = await p.$$eval("#studio-sheet .st-proj-list li span", (els) => els.map((e) => e.textContent));
-  assert.deepEqual(names, ["夜色（neo-soul）", "白日流行", "When the Saints", "茉莉花"]);
+  assert.deepEqual(names, ["夜色（neo-soul）"], "decisions.md 53: the other demos wait for Tape4 2.0");
   await p.locator("#studio-sheet .st-sheet-close").click();       /* folder -> folders */
   await p.waitForSelector("#studio-sheet .st-proj-list");
   await p.locator("#studio-sheet .st-sheet-close").click();
   await p.waitForSelector("#studio-sheet", { state: "hidden" });
 
-  await useTemplate(p, "When the Saints");
-  assert.match(await p.textContent("#studio-bpm"), /104 BPM/);
+  await useTemplate(p, "夜色");
+  assert.match(await p.textContent("#studio-bpm"), /78 BPM/);
   await p.click('#studio-screens .st-scr[data-screen="song"]');
   await skipScreenTour(p);
-  assert.equal(await p.locator(".st-chain-cell").count(), 64, "the Saints arrangement is 64 bars");
-  assert.match(await p.textContent("#studio-song-info"), /64 格 · 2:2\d/);
-  const letters = await p.$$eval(".st-chain-cell", (els) => els.map((e) => e.textContent));
-  assert.equal(letters.slice(0, 8).join(""), "ABCDEFGH", "the first four-bar phrase is its own row");
-  assert.equal(await p.locator(".st-chain-cell.same").count(), 3, "the selected pattern marks its three repeats");
+  assert.equal(await p.locator(".st-chain-cell").count(), 24);
+  assert.equal(await p.locator(".st-chain-cell.same").count(), 2, "the selected pattern marks its two repeats");
+  assert.deepEqual(errors, []);
+});
 
-  await useTemplate(p, "茉莉花");
+test("studio: a copy of a demo that no longer ships stays in the library", { skip, timeout: 120000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  /* a player who copied 茉莉花 before 1.0.2: the copy is their own tape and must not vanish */
+  await p.evaluate(async () => {
+    const s = LopdaSong.jasmineSong(Date.now());
+    s.template = "jasmine";
+    await LopdaPlatform.db.doc("data/users/local/studio/items/old-jasmine").set(s);
+  });
+  await studioOpen(p);
+  if (await tourBox(p).count()) await skipTour(p);
+  await openFolders(p);
+  assert.match(await p.textContent("#studio-sheet .st-proj-list"), /示例副本\s*1/);
+  await p.locator("#studio-sheet .st-proj-list li", { hasText: "示例副本" }).click();
+  await p.waitForSelector("#studio-sheet .st-proj-list");
+  await p.locator("#studio-sheet .st-proj-list li", { hasText: "茉莉花" }).click();
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
   assert.match(await p.textContent("#studio-bpm"), /84 BPM/);
-  await p.click('#studio-screens .st-scr[data-screen="song"]');
-  await skipScreenTour(p);
-  assert.equal(await p.locator(".st-chain-cell").count(), 64);
-  assert.match(await p.textContent("#studio-song-info"), /64 格 · 3:0\d/);
   assert.deepEqual(errors, []);
 });
 
@@ -4293,11 +4305,11 @@ test("studio: demo copies stay out of My tapes and clear in one go", { skip, tim
   const { p, errors } = await rtPage(t);
   await studioOpen(p);
   await skipTour(p);
-  await useTemplate(p, "When the Saints");
-  await useTemplate(p, "茉莉花");
+  await useTemplate(p, "夜色");
+  await useTemplate(p, "夜色");
   await openMyTapes(p);
   assert.equal(await p.locator("#studio-sheet .st-proj-list li").count(), 1, "the two template copies are not in My tapes");
-  assert.doesNotMatch(await p.textContent("#studio-sheet .st-proj-list"), /When the Saints|茉莉花/);
+  assert.doesNotMatch(await p.textContent("#studio-sheet .st-proj-list"), /夜色/);
   await p.click("#studio-sheet .st-sheet-close");       /* folder -> folders */
   await p.waitForSelector("#studio-sheet .st-proj-list");
   assert.match(await p.textContent("#studio-sheet .st-proj-list"), /示例副本\s*2/);
@@ -4320,14 +4332,14 @@ test("studio: editing a demo copy turns it into a normal tape in My tapes", { sk
   const { p, errors } = await rtPage(t);
   await studioOpen(p);
   await skipTour(p);
-  await useTemplate(p, "When the Saints");
+  await useTemplate(p, "夜色");
   await openMyTapes(p);
   assert.equal(await p.locator("#studio-sheet .st-proj-list li").count(), 1, "the copy is not in My tapes yet");
   await p.click("#studio-sheet .st-sheet-close");
   await p.waitForSelector("#studio-sheet .st-proj-list");
   await p.locator("#studio-sheet .st-proj-list li", { hasText: "示例副本" }).click();
   await p.waitForSelector("#studio-sheet .st-proj-list");
-  await p.locator("#studio-sheet .st-proj-list li", { hasText: "When the Saints" }).click();
+  await p.locator("#studio-sheet .st-proj-list li", { hasText: "夜色" }).click();
   await p.waitForSelector("#studio-sheet", { state: "hidden" });
   await p.click("#studio-plus");                    /* the first real edit clears the template tag */
   await openFolders(p);
