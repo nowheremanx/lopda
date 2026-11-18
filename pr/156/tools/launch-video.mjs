@@ -1,5 +1,6 @@
 // The launch video's clips: drives the runtime in Chromium at a phone's size and records each scene as frames.
-// Needs Playwright (as tools/readme-shots.mjs) and ffmpeg on the PATH. Nothing it writes belongs in the repo.
+// Needs Playwright (as tools/readme-shots.mjs) and ffmpeg on the PATH. Its work files stay out of the repo; the landing
+// page shows 720p copies of the film (docs/video/lopda-<lang>.mp4, with a poster frame each).
 //
 //   node tools/launch-video.mjs record <outDir> [--lang=en|zh] [--only=boot,camera,...]
 //   node tools/launch-video.mjs edit <outDir> [--lang=en|zh] [--maze=<phone clip>]
