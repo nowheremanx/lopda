@@ -1,6 +1,6 @@
 {
   "spec": "lopda/1",
-  "generated": "2026-11-04",
+  "generated": "2026-11-18",
   "apps": [
     {
       "spec": "lopda/1",
@@ -661,6 +661,46 @@
       "path": "apps/rain-station/index.html",
       "sha256": "ffae5645ed2913d841b2793d49f6a13ee3ed81cc75113e5d4a66f3cbf935ba8b",
       "bytes": 173113
+    },
+    {
+      "spec": "lopda/1",
+      "id": "save-book",
+      "name": "存档本",
+      "glyph": "存",
+      "category": "productivity",
+      "buttons": true,
+      "icon": [
+        "................",
+        "..000000000000..",
+        "..011111111110..",
+        "..013333333310..",
+        "..013000003310..",
+        "..013022203310..",
+        "..013022203310..",
+        "..013000003310..",
+        "..013022203310..",
+        "..013022203310..",
+        "..013000003310..",
+        "..013333333310..",
+        "..011111111110..",
+        "..000000000000..",
+        "................",
+        "................"
+      ],
+      "version": "1.0.0",
+      "released": "2026-11-18",
+      "description": "最多八个计数器，点选或按 A 累加；查看存档格式与时间。",
+      "i18n": {
+        "en": {
+          "name": "SaveBook",
+          "description": "Keep up to eight tallies; tap or press A to add, and inspect save details."
+        }
+      },
+      "author": "Haowei Wu",
+      "license": "MIT",
+      "path": "apps/save-book/index.html",
+      "sha256": "3e31182f07c35986765aa864aeeef85cae0a3c170a079ff927f1b268aa1aef44",
+      "bytes": 14009
     },
     {
       "spec": "lopda/1",
