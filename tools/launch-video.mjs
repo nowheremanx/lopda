@@ -55,9 +55,13 @@ const VW = 390, VH = 844, DPR = 2;
 
 const T = {
   zh: { camera: "点阵相机", darkroom: "冲洗店", reader: "阅读器", book: "Alice", store: "应用商店", pet: "宠物", studio: "四轨机",
-        library: "磁带库", file: "文件", maze: "滚珠迷宫", open: "打开", play: "播放" },
+        library: "磁带库", file: "文件", maze: "滚珠迷宫", open: "打开", play: "播放", notes: "记事本", calendar: "万年历", dict: "词典",
+        today: "去湖边拍完了一卷胶卷。山上的叶子全红了，正好八张。", earlier: "秋天第一次穿外套。",
+        quote: "《论语》\n学而时习之，不亦说乎。#摘抄", todo: "买胶卷\n周六去冲洗店。#待办" },
   en: { camera: "Camera", darkroom: "Darkroom", reader: "Reader", book: "Alice", store: "Store", pet: "Pet", studio: "Tape4",
-        library: "Tape library", file: /^File/, maze: "Marble", open: "Open", play: "Play" },
+        library: "Tape library", file: /^File/, maze: "Marble", open: "Open", play: "Play", notes: "Notes", calendar: "Calendar", dict: "Dict",
+        today: "Shot a whole roll by the lake. The hills have gone red, eight frames exactly.", earlier: "First cold morning. Wore a coat.",
+        quote: "Alice\u2019s Adventures in Wonderland\n\u201cCuriouser and curiouser!\u201d cried Alice. #quotes", todo: "Buy film\nTake the roll to the darkroom on Saturday. #todo" },
 }[LANG];
 
 
@@ -288,6 +292,38 @@ async function record() {
     });
     await home(p);
   }
+  /* ---- notes, calendar and dictionary: a few days of diary seeded first, as tools/readme-shots.mjs does ---- */
+  if (want("notes") || want("calendar")) {
+    await p.evaluate((T) => {
+      const now = Date.now(), d = (n) => now - n * 864e5, day = (n) => new Date(d(n) + 8 * 36e5).toISOString().slice(0, 10);
+      const title = (k) => LopdaNoteText.diaryTitle(k, LP.I18N.lang, LP.tr, window.LopdaLunar);
+      const notes = LP.S.refs.notes;
+      notes.doc().set({ body: title(day(0)) + "\n" + T.today, day: day(0), created: d(0), updated: d(0) });
+      notes.doc().set({ body: title(day(4)) + "\n" + T.earlier, day: day(4), created: d(4), updated: d(4) });
+      notes.doc().set({ body: T.quote, src: "reader", created: d(2), updated: d(2) });
+      notes.doc().set({ body: T.todo, created: d(1), updated: d(1) });
+    }, T);
+    await p.evaluate(() => LP.refresh("notes"));
+  }
+  if (want("notes")) {
+    await home(p); await tile(p, T.notes); await p.waitForTimeout(800);
+    await film(p, "notes", async () => { await p.waitForTimeout(1200); await key(p, "x"); await p.waitForTimeout(2200); });
+    await home(p);
+  }
+  if (want("calendar")) {
+    await home(p); await tile(p, T.calendar); await p.locator("#v-cal:not([hidden])").waitFor(); await p.waitForTimeout(800);
+    await film(p, "calendar", async () => { await p.waitForTimeout(900); await key(p, "ArrowLeft", 4, 280); await p.waitForTimeout(400); await key(p, "x"); await p.waitForTimeout(2000); });
+    await home(p);
+  }
+  if (want("dict")) {
+    await home(p); await tile(p, T.dict); await p.waitForTimeout(800);
+    await film(p, "dict", async () => {
+      await p.waitForTimeout(400); await p.click("#dict-q");
+      for (const ch of "lantern") { await p.keyboard.type(ch); await p.waitForTimeout(140); }
+      await p.waitForTimeout(500); await p.keyboard.press("Enter"); await p.waitForTimeout(2500);
+    });
+    await home(p);
+  }
   if (want("store")) {
     /* the store, scrolled slowly from the top: how many apps there are */
     await home(p); await tile(p, T.store);
@@ -302,9 +338,15 @@ async function record() {
 
   /* ---- the grid: store apps being played, each started straight from the registry as tests/e2e.test.mjs does,
      in a page without the fake clock (it would stop the sandboxed frame) ---- */
-  if (want("apps")) {
+  const pick = ONLY.filter((o) => o.startsWith("app:"));   /* --only=app:<id>,... films just those */
+  if (want("apps") || pick.length) {
     const a = await ctx.newPage(); await a.goto(base + "/runtime/", { waitUntil: "load" }); await ready(a);
     const keys = async (list) => { for (const [k, ms] of list) { if (k === "wait") await a.waitForTimeout(ms);
+      else if (k === "fn") await ms(a.frameLocator("#run-frame"));
+      else if (k === "drag") { const box = await a.locator("#run-frame").boundingBox(), pt = ([x, y]) => [box.x + box.width * x, box.y + box.height * y];
+        await a.mouse.move(...pt(ms[0])); await a.mouse.down();
+        for (let i = 1; i < ms.length; i++) { const [x0, y0] = pt(ms[i - 1]), [x1, y1] = pt(ms[i]); for (let j = 1; j <= 20; j++) { await a.mouse.move(x0 + (x1 - x0) * j / 20, y0 + (y1 - y0) * j / 20); await a.waitForTimeout(25); } }
+        await a.mouse.up(); }
       else if (k === "tap") { const box = await a.locator("#run-frame").boundingBox(); await a.mouse.click(box.x + box.width * ms[0], box.y + box.height * ms[1]); await a.waitForTimeout(120); }
       else { await a.keyboard.down(k); await a.waitForTimeout(ms); await a.keyboard.up(k); await a.waitForTimeout(60); } } };
     const play = (n) => { const out = []; const ks = ["ArrowRight", "ArrowUp", "ArrowLeft", "x", "ArrowDown", "ArrowRight", "x", "ArrowUp"];
@@ -321,9 +363,22 @@ async function record() {
       ["shanjiao-diner", [["x", 80], ["wait", 1000], ["x", 80], ["wait", 1000], ["x", 80], ["wait", 1000]], play(12)],
       ["sisyphus", [["x", 80], ["wait", 1200]], [["ArrowRight", 3800]]],
       ["daily-box", [["x", 80], ["wait", 1000]], play(12)],
+      ["rain-station", [["x", 80], ["wait", 800], ["x", 80], ["wait", 2500]], [["wait", 1200], ["x", 80], ["wait", 1500], ["x", 80], ["wait", 800]]],
+      /* Gomoku is touch only: START, then a few points of the 15 x 15 board; the computer answers each one */
+      ["gomoku", [["fn", (f) => f.locator("#st").click()], ["wait", 800]], [["fn", async (f) => {
+        const box = await f.locator("#c").boundingBox(), cell = box.width / 15;
+        for (const [x, y] of [[7, 7], [8, 6], [6, 8]]) { await a.mouse.click(box.x + (x + 0.5) * cell, box.y + (y + 0.5) * cell); await a.waitForTimeout(1200); }
+      }]]],
+      ["klotski", [["x", 80], ["wait", 1000]], play(12)],
+      ["crossing", [["x", 80], ["wait", 1200]], [["x", 80], ["wait", 600], ...play(8)]],
+      ["kana-cards", [["x", 80], ["wait", 1000]], [["x", 80], ["wait", 900], ["ArrowRight", 80], ["wait", 900], ["x", 80], ["wait", 900], ["ArrowRight", 80], ["wait", 800]]],
+      ["paint", [["wait", 300]], [["drag", [[0.2, 0.35], [0.8, 0.4], [0.7, 0.6], [0.3, 0.55], [0.5, 0.7]]], ["wait", 600]]],
+      ["sound-board", [["wait", 300]], [["x", 80], ["wait", 700], ["ArrowDown", 80], ["x", 80], ["wait", 700], ["ArrowDown", 80], ["x", 80], ["wait", 700], ["ArrowDown", 80], ["x", 80], ["wait", 700]]],
+      ["daily-slip", [["x", 80], ["wait", 1200]], play(10)],
+      ["calculator", [["wait", 300]], [["tap", [0.15, 0.62]], ["wait", 250], ["tap", [0.4, 0.62]], ["wait", 250], ["tap", [0.65, 0.75]], ["wait", 250], ["tap", [0.15, 0.75]], ["wait", 250], ["tap", [0.88, 0.88]], ["wait", 1500]]],
     ];
     for (const [id, before, during] of APPS) {
-      if (ONLY.length && !want("apps") ) continue;
+      if (pick.length && !pick.includes("app:" + id)) continue;
       const [man, html] = await Promise.all([readFile(join(ROOT, "registry/apps", id, "manifest.json"), "utf8"), readFile(join(ROOT, "registry/apps", id, "index.html"), "utf8")]);
       await a.evaluate(([man, html]) => { const x = Object.assign({}, JSON.parse(man), { html }); window.LP.upsert("apps", x); window.LP.runApp(x); }, [man, html]);
       await a.waitForSelector("#v-run:not([hidden])"); await a.waitForTimeout(2000);
@@ -341,25 +396,33 @@ async function record() {
 const W = 1080, H = 1920, SX = 208, SY = 120, SW = 664, SH = 1436, BEZ = 16;
 const CAPS = {
   en: ["A handheld from 1986 that never existed", "A four-tone camera", "Develop the roll. The prints come out in colour.",
-       "Tilt it to play", "A pet that lives in it", "A four-track tape machine", "Look up any word as you read",
+       "A diary that opens on today", "A lunar calendar, with your diary in it", "An English-Chinese dictionary, built in",
+       "Look up any word as you read", "A pet that lives in it", "A four-track tape machine",
        "An app store full of small apps", "Games, stories, even 3D, on a 1986 screen",
        "Runs in your phone’s browser.<br>Make your own apps with AI."],
-  zh: ["一台从未存在过的 1986 年掌机", "四色点阵相机", "冲洗胶卷，照片是彩色的", "歪一歪就能玩", "里面住着一只宠物", "四轨录音机",
-       "读书时随手查词", "应用商店，装满小应用", "游戏、故事、3D，都在 1986 年的屏幕上",
+  zh: ["一台从未存在过的 1986 年掌机", "四色点阵相机", "冲洗胶卷，照片是彩色的",
+       "记事本，打开就是今天的日记", "万年历，农历节气，还有你的日记", "内置英汉词典",
+       "读书时随手查词", "里面住着一只宠物", "四轨录音机",
+       "应用商店，装满小应用", "游戏、故事、3D，都在 1986 年的屏幕上",
        "在手机浏览器里运行。<br>用 AI 做你自己的应用。"],
 };
-/* [clip, from, to, speed, caption]: the screen's shots in order. "grid" is the apps at play, nine at once, full frame. */
+/* [clip, from, to, speed, caption, grid]: the screen's shots in order. "grid" is apps at play, nine at once, full frame. */
 const SHOTS = [
-  ["boot", 0.4, 3.4, 1, 0],
-  ["camera", 1.1, 5.1, 1, 1], ["camera", 5.3, 7.8, 2.5, 1],
-  ["darkroom", 1.0, 4.6, 1.8, 2], ["darkroom", 4.8, 8.8, 1, 2],
-  ["maze", 0.3, 6.3, 1, 3],
-  ["pet", 1.0, 2.8, 1, 4], ["studio", 0.4, 2.4, 1, 5], ["reader", 1.4, 3.6, 1, 6],
-  ["store", 0.4, 6.3, 1.5, 7],
-  ["grid", 0, 4, 1, 8],
+  ["boot", 0.4, 2.4, 1, 0],
+  ["camera", 1.5, 3.0, 1, 1], ["camera", 4.0, 5.0, 1, 1],
+  ["darkroom", 1.0, 4.6, 3.6, 2], ["darkroom", 4.8, 6.8, 1, 2],
+  ["notes", 0.6, 3.2, 1, 3], ["calendar", 0.6, 4.0, 1.4, 4], ["dict", 0.3, 3.8, 1.4, 5],
+  ["reader", 1.4, 3.6, 1, 6], ["pet", 1.0, 3.0, 1, 7], ["studio", 0.4, 2.4, 1, 8],
+  ["store", 0.4, 6.3, 1.5, 9],
+  ["grid", 0, 3, 1, 10, 0], ["grid", 0, 3, 1, 10, 1],
 ];
-const GRID = [["vector-dream", 1.0], ["fake-yu", 0.3], ["zhenyao-tower", 0.3], ["lao-zhang", 0.3], ["whack-a-mole", 0], ["sisyphus", 0.3],
-  ["paper-tower", 0.3], ["daily-box", 0.3], ["shanjiao-diner", 0.3]];   /* [app, where its clip starts] */
+/* the grids: [app, where its clip starts] */
+const GRIDS = [
+  [["vector-dream", 1.0], ["fake-yu", 0.3], ["zhenyao-tower", 0.3], ["lao-zhang", 0.3], ["whack-a-mole", 0], ["sisyphus", 0.3],
+   ["paper-tower", 0.3], ["daily-box", 0.3], ["shanjiao-diner", 0.3]],
+  [["rain-station", 0.3], ["gomoku", 0.3], ["klotski", 0.3], ["crossing", 0.3], ["kana-cards", 0.3], ["paint", 0.3],
+   ["sound-board", 0.3], ["daily-slip", 0.3], ["calculator", 0.3]],
+];
 const END = 3.0;                       /* the end card's seconds */
 const SHUTTER = [4.27, 5.40, 5.97, 6.53, 7.07, 7.63]; /* the camera clip's shutters (its screen goes dark), for the click */
 
@@ -415,7 +478,7 @@ async function edit() {
       ins.push("-i", join(clips, clip + ".mp4"));
       parts.push(`[${k}:v]trim=${a}:${b},setpts=(PTS-STARTPTS)/${sp},tpad=stop_mode=clone:stop_duration=${len},trim=0:${len},fps=30,scale=${SW}:${SH}:flags=lanczos,setsar=1,format=yuv420p[s${k}]`);
     }
-    times.push({ t, len, cap, clip }); t += len;
+    times.push({ t, len, cap, clip, k }); t += len;
   });
   const total = t + END;
   const n = SHOTS.length;
@@ -434,21 +497,22 @@ async function edit() {
       `[${v}][mz]overlay=0:0:eof_action=pass:enable='between(t,${m.t.toFixed(3)},${(m.t + m.len).toFixed(3)})'[v${vn}];`; v = "v" + vn++;
   }
   /* the grid: each app's screen (the LCD under its title bar), three by three over the background */
-  const g = times.find((x) => x.clip === "grid");
-  if (g) {
+  const grids = times.filter((x) => x.clip === "grid");
+  grids.forEach((g, n) => {
+    const GRID = GRIDS[SHOTS[g.k][5]], q = "g" + n + "_";
     /* the app's own area: under the runtime's status line and the app's title bar, above the chin */
     const CX = 26, CY = 256, CWS = 728, CHS = 1000;
     const CW = 330, CH = Math.round(CW * CHS / CWS / 2) * 2, GAP = 15, X0 = (W - 3 * CW - 2 * GAP) / 2, Y0 = Math.round((SY + SH + BEZ + 40 - 3 * CH - 2 * GAP) / 2);
     const iGb = add("-loop", "1", "-t", String(g.len), "-i", plain);
-    fc += `[${iGb}:v]fps=30,format=yuv420p[gb0];`;
+    fc += `[${iGb}:v]fps=30,format=yuv420p[${q}b0];`;
     GRID.forEach(([id, at], i) => {
       const iA = add("-i", join(clips, "app-" + id + ".mp4"));
       fc += `[${iA}:v]trim=${at}:${at + g.len},setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=${g.len},trim=0:${g.len},fps=30,` +
-        `crop=${CWS}:${CHS}:${CX}:${CY},scale=${CW}:${CH}:flags=lanczos,setsar=1[ga${i}];` +
-        `[gb${i}][ga${i}]overlay=${X0 + (i % 3) * (CW + GAP)}:${Y0 + Math.floor(i / 3) * (CH + GAP)}[gb${i + 1}];`;
+        `crop=${CWS}:${CHS}:${CX}:${CY},scale=${CW}:${CH}:flags=lanczos,setsar=1[${q}a${i}];` +
+        `[${q}b${i}][${q}a${i}]overlay=${X0 + (i % 3) * (CW + GAP)}:${Y0 + Math.floor(i / 3) * (CH + GAP)}[${q}b${i + 1}];`;
     });
-    fc += `[gb${GRID.length}]setpts=PTS-STARTPTS+${g.t.toFixed(3)}/TB[grid];[${v}][grid]overlay=0:0:eof_action=pass:enable='between(t,${g.t.toFixed(3)},${(g.t + g.len).toFixed(3)})'[v${vn}];`; v = "v" + vn++;
-  }
+    fc += `[${q}b${GRID.length}]setpts=PTS-STARTPTS+${g.t.toFixed(3)}/TB[${q}g];[${v}][${q}g]overlay=0:0:eof_action=pass:enable='between(t,${g.t.toFixed(3)},${(g.t + g.len).toFixed(3)})'[v${vn}];`; v = "v" + vn++;
+  });
   /* one caption for each run of shots that share it, faded in */
   const runs = [];
   for (const x of times) { const r = runs.at(-1); if (r && r.cap === x.cap) r.len += x.len; else runs.push({ cap: x.cap, t: x.t, len: x.len }); }
@@ -474,7 +538,8 @@ async function edit() {
     "-c:v", "libx264", "-crf", "18", "-preset", "slow", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", file);
   /* stills for a look: the camera, the colour print, the end card */
   const still = (at, name) => ff("-ss", at.toFixed(2), "-i", file, "-frames:v", "1", join(OUT, `still-${LANG}-${name}.png`));
-  still(times[4].t + 1.0, "print"); still(times[9].t + 1.5, "store"); still(g.t + 1.5, "grid");
+  const at = (c) => times.find((x) => x.clip === c);
+  still(at("darkroom").t + 2.0, "print"); still(at("calendar").t + 1.5, "calendar"); still(grids[1].t + 1.5, "grid");
   console.log("wrote", file, total.toFixed(2) + " s");
 }
 
