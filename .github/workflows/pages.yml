@@ -62,7 +62,7 @@ jobs:
           if printf '%s\n' "$CHANGED" | grep -qE '^(sdk/(.*\.js|dev\.html)|runtime/chip\.js)$'; then APPS=$(ls registry/apps); fi
           # The landing page at the site root (index.html and the pictures it shows).
           LANDING=false
-          if printf '%s\n' "$CHANGED" | grep -qE '^(index\.html|docs/images/)'; then LANDING=true; fi
+          if printf '%s\n' "$CHANGED" | grep -qE '^(index\.html|docs/images/|docs/video/)'; then LANDING=true; fi
           # Docs, tests, CI only: nothing a preview could show, so no deploy and no comment.
           if [ -z "$APPS" ] && [ "$RUNTIME" = false ] && [ "$LANDING" = false ]; then
             echo "deploy=false" >> "$GITHUB_OUTPUT"

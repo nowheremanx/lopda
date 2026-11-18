@@ -84,6 +84,7 @@ html[lang=zh] .dev.m{background-image:url(docs/images/zh/more.png)}
 .hero .fine{font-size:14px;color:var(--on-case-dim)}
 .stage{position:relative;max-width:400px;justify-self:center;width:100%}
 .stage .dev{border-radius:22px 22px 0 0;box-shadow:0 40px 120px -30px rgba(163,173,126,.35)}
+.film{display:block;width:100%;aspect-ratio:9/16;object-fit:cover;background:#1f2a14;border-radius:22px;margin-bottom:clamp(24px,5vw,48px);box-shadow:0 40px 120px -30px rgba(163,173,126,.35)}
 @media (max-width:820px){.hero .grid{grid-template-columns:1fr}.hero .copy{padding-bottom:0}.stage{max-width:320px}}
 
 /* four tones */
@@ -175,8 +176,9 @@ footer .mark{font-family:var(--f-lcd);font-size:22px;color:var(--on-case);margin
     <p class="fine" data-i18n="hero.fine">Free and open source. Made for phones.</p>
   </div>
   <div class="stage">
-    <!-- The 20-second recording goes here: <video> with the screenshot as its poster. -->
-    <div class="dev s i0" role="img" aria-label="Lo-PDA's home screen on a phone: program icons on a green LCD, a D-pad and the A, B and HOME keys"></div>
+    <!-- The launch film (tools/launch-video.mjs, 720p): the script sets its language, and starts it unless the visitor asks for less motion -->
+    <video class="film" id="film" muted loop playsinline preload="none" poster="docs/video/poster-en.jpg"
+      aria-label="A 34-second film of Lo-PDA on a phone: the camera, the darkroom's colour print, the diary, calendar, dictionary, reader, pet and tape machine, the app store and eighteen apps at play"></video>
   </div>
 </div></header>
 
@@ -261,7 +263,7 @@ footer .mark{font-family:var(--f-lcd);font-size:22px;color:var(--on-case);margin
     <figure><div class="dev a i3" role="img" aria-label="The store's list of apps"></div></figure>
   </div>
   <div class="stats">
-    <div class="stat"><div class="n">22</div><div class="u" data-i18n="st.n1">apps in the store today</div></div>
+    <div class="stat"><div class="n">23</div><div class="u" data-i18n="st.n1">apps in the store today</div></div>
     <div class="stat"><div class="n">512 KB</div><div class="u" data-i18n="st.n2">the most an app may weigh</div></div>
     <div class="stat"><div class="n">0</div><div class="u" data-i18n="st.n3">network requests an app can make</div></div>
   </div>
@@ -363,9 +365,22 @@ PAD.music.play({ bpm: 120,
   try { saved = localStorage.getItem("lopda-landing-lang"); } catch (e) {}
   var lang = saved || (/^zh/i.test(navigator.language || "") ? "zh" : "en");
   if (lang === "zh") setLang("zh");
+
+  // The film in the visitor's language. With reduced motion it waits, with controls, for a tap.
+  var film = document.getElementById("film");
+  var still = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  function setFilm(lang) {
+    film.poster = "docs/video/poster-" + lang + ".jpg";
+    film.src = "docs/video/lopda-" + lang + ".mp4";
+    if (still) { film.controls = true; return; }
+    var p = film.play(); if (p && p.catch) p.catch(function () { film.controls = true; });
+  }
+  setFilm(lang);
+
   document.getElementById("lang").addEventListener("click", function () {
     lang = lang === "zh" ? "en" : "zh";
     setLang(lang);
+    setFilm(lang);
     try { localStorage.setItem("lopda-landing-lang", lang); } catch (e) {}
   });
 
