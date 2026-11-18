@@ -35,6 +35,13 @@ body{background:var(--case);color:var(--ink);margin:0;display:flex;justify-conte
 /* the phone's keyboard is up (core.js): the LCD takes the visible height; the case around it steps aside */
 html.kb .device{height:var(--vvh,100dvh);padding-block:calc(env(safe-area-inset-top,0px) + 4px) 4px;gap:0}
 html.kb .brand,html.kb .gamepad,html.kb .keys{display:none!important}
+/* a short window (an iPhone SE in a Safari tab, under the browser's own bars: about 375 x 547; the tests take 375 x 587 as the smallest home-screen window): the case gives
+   the LCD its nameplate row and most of its margins, about 50 px. A home-screen install is never this short, so it
+   keeps the full case; apps are still designed for 331 x 359 (sdk/UI.md), which only the home screen gives an SE. */
+@media (max-height:569px){
+  .device{gap:4px;padding-block:calc(env(safe-area-inset-top,0px) + 4px) calc(env(safe-area-inset-bottom,0px) + 6px)}
+  .brand{display:none}
+}
 .view[hidden]{display:none!important}
 .keys{display:flex;align-items:center;justify-content:space-between;padding-inline:8px}
 .grille{display:grid;grid-template-columns:repeat(6,6px);gap:5px}
