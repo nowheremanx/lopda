@@ -419,11 +419,16 @@ function loadProjects(){
     if(T.sheet==="projects"||T.sheet==="folder") renderSheet();
   });
 }
+/* a tape picked from the library opens where its music is: a song (a chain of more than one slot) on the song
+   screen, a one-pattern beat (a new tape) on the drums (owner, 2026-11-18, decisions.md section 53) */
+function landingScreen(song){
+  return song && Array.isArray(song.song) && song.song.length>1 ? "song" : "drums";
+}
 function installSong(song,id,versions){
   stopRepeatAll();
   if(T.playing) stopPlay();
   T.sheet="";
-  screenTo("drums");
+  screenTo(landingScreen(song));
   T.pat=0; T.focus=0; T.slot=0; T.kb=false;
   T.noteSel={bass:-1,melody:-1}; T.noteDeg={bass:0,melody:0}; T.oct={bass:0,melody:0}; T.chordSel=-1; T.chordDeg=0;
   setSong(song);

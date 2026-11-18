@@ -3217,7 +3217,7 @@ test("studio: the demo tape loads 24 slots and survives a reload", { skip, timeo
   await p.locator("#studio-sheet .st-ask .btn", { hasText: "确认" }).click();
   await p.waitForSelector("#studio-sheet", { state: "hidden" });
 
-  assert.equal(await p.getAttribute("#v-studio", "data-screen"), "drums", "the demo opens on the drums screen");
+  assert.equal(await p.getAttribute("#v-studio", "data-screen"), "song", "the demo opens on the song screen (decisions.md 53)");
   assert.equal(await p.getAttribute("#v-studio", "data-pat"), "0", "pattern A");
   await p.click('#studio-screens .st-scr[data-screen="song"]');
   await skipScreenTour(p);
@@ -4239,6 +4239,7 @@ test("studio: the Demo folder holds only 夜色 and copies it without touching t
 
   await useTemplate(p, "夜色");
   assert.match(await p.textContent("#studio-bpm"), /78 BPM/);
+  assert.equal(await p.getAttribute("#v-studio", "data-screen"), "song", "a song opens on the song screen");
   await p.click('#studio-screens .st-scr[data-screen="song"]');
   await skipScreenTour(p);
   assert.equal(await p.locator(".st-chain-cell").count(), 24);
@@ -4265,6 +4266,12 @@ test("studio: a copy of a demo that no longer ships stays in the library", { ski
   await p.locator("#studio-sheet .st-proj-list li", { hasText: "茉莉花" }).click();
   await p.waitForSelector("#studio-sheet", { state: "hidden" });
   assert.match(await p.textContent("#studio-bpm"), /84 BPM/);
+  assert.equal(await p.getAttribute("#v-studio", "data-screen"), "song");
+  /* a new tape is a one-pattern beat: it opens on the drums */
+  await openMyTapes(p);
+  await p.locator("#studio-sheet .st-proj-actions li", { hasText: "新磁带" }).click();
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  assert.equal(await p.getAttribute("#v-studio", "data-screen"), "drums");
   assert.deepEqual(errors, []);
 });
 
