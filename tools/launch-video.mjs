@@ -276,10 +276,49 @@ async function record() {
     await home(p);
   }
   if (want("store")) {
+    /* the store, scrolled slowly from the top: how many apps there are */
     await home(p); await tile(p, T.store);
-    await p.waitForSelector("#store-list .store-item", { timeout: 10000 }); await p.waitForTimeout(600);
-    await film(p, "store", async () => { await p.waitForTimeout(500); await p.mouse.move(VW / 2, VH / 2); await p.mouse.wheel(0, 500); await p.waitForTimeout(1500); });
+    await p.waitForSelector("#store-list .store-item", { timeout: 10000 }); await p.waitForLoadState("networkidle"); await p.waitForTimeout(800);
+    await film(p, "store", async () => {
+      await p.waitForTimeout(400); await p.mouse.move(VW / 2, VH * 0.4);
+      for (let i = 0; i < 110; i++) { await p.mouse.wheel(0, 14 + 10 * Math.sin(Math.PI * i / 110)); await p.waitForTimeout(30); }
+      await p.waitForTimeout(300);
+    });
     await home(p);
+  }
+
+  /* ---- the grid: store apps being played, each started straight from the registry as tests/e2e.test.mjs does,
+     in a page without the fake clock (it would stop the sandboxed frame) ---- */
+  if (want("apps")) {
+    const a = await ctx.newPage(); await a.goto(base + "/runtime/", { waitUntil: "load" }); await ready(a);
+    const keys = async (list) => { for (const [k, ms] of list) { if (k === "wait") await a.waitForTimeout(ms);
+      else if (k === "tap") { const box = await a.locator("#run-frame").boundingBox(); await a.mouse.click(box.x + box.width * ms[0], box.y + box.height * ms[1]); await a.waitForTimeout(120); }
+      else { await a.keyboard.down(k); await a.waitForTimeout(ms); await a.keyboard.up(k); await a.waitForTimeout(60); } } };
+    const play = (n) => { const out = []; const ks = ["ArrowRight", "ArrowUp", "ArrowLeft", "x", "ArrowDown", "ArrowRight", "x", "ArrowUp"];
+      for (let i = 0; i < n; i++) out.push([ks[i % ks.length], ks[i % ks.length] === "x" ? 80 : 260]); return out; };
+    const taps = (n) => Array.from({ length: n }, (_, i) => ["tap", [0.2 + 0.6 * ((i * 0.37) % 1), 0.3 + 0.5 * ((i * 0.61) % 1)]]);
+    /* [id, before the clip, during it]: a few presses into play first, then about four seconds of playing */
+    const APPS = [
+      ["vector-dream", [["x", 80], ["wait", 1500]], [["wait", 1800], ["x", 80], ["wait", 2200]]],
+      ["zhenyao-tower", [["x", 80], ["wait", 1200], ["x", 80], ["wait", 1200], ["x", 80], ["wait", 1500]], [["ArrowUp", 1500], ["ArrowLeft", 700], ["ArrowUp", 1500]]],
+      ["fake-yu", [["ArrowDown", 80], ["x", 80], ["wait", 800], ["x", 80], ["wait", 4000]], [["wait", 1200], ["x", 80], ["wait", 900], ["x", 80], ["wait", 1500]]],
+      ["lao-zhang", [["x", 80], ["wait", 1000], ["x", 80], ["wait", 1200]], [["wait", 900], ["x", 80], ["wait", 1500], ["x", 80], ["wait", 1300]]],
+      ["paper-tower", [["x", 80], ["wait", 800], ["x", 80], ["wait", 800], ["x", 80], ["wait", 800]], play(12)],
+      ["whack-a-mole", [["tap", [0.5, 0.6]], ["wait", 800], ["tap", [0.5, 0.6]], ["wait", 800]], taps(16)],
+      ["shanjiao-diner", [["x", 80], ["wait", 1000], ["x", 80], ["wait", 1000], ["x", 80], ["wait", 1000]], play(12)],
+      ["sisyphus", [["x", 80], ["wait", 1200]], [["ArrowRight", 3800]]],
+      ["daily-box", [["x", 80], ["wait", 1000]], play(12)],
+    ];
+    for (const [id, before, during] of APPS) {
+      if (ONLY.length && !want("apps") ) continue;
+      const [man, html] = await Promise.all([readFile(join(ROOT, "registry/apps", id, "manifest.json"), "utf8"), readFile(join(ROOT, "registry/apps", id, "index.html"), "utf8")]);
+      await a.evaluate(([man, html]) => { const x = Object.assign({}, JSON.parse(man), { html }); window.LP.upsert("apps", x); window.LP.runApp(x); }, [man, html]);
+      await a.waitForSelector("#v-run:not([hidden])"); await a.waitForTimeout(2000);
+      await keys(before);
+      await film(a, "app-" + id, () => keys(during));
+      await home(a);
+    }
+    await a.close();
   }
   await browser.close(); server.close();
 }
@@ -289,18 +328,25 @@ async function record() {
 const W = 1080, H = 1920, SX = 208, SY = 120, SW = 664, SH = 1436, BEZ = 16;
 const CAPS = {
   en: ["A handheld from 1986 that never existed", "A four-tone camera", "Develop the roll. The prints come out in colour.",
-       "Tilt it to play", "A pet, a tape machine, a dictionary, an app store", "Runs in your phone’s browser.<br>Make your own apps with AI."],
-  zh: ["一台从未存在过的 1986 年掌机", "四色点阵相机", "冲洗胶卷，照片是彩色的", "歪一歪就能玩", "宠物、四轨机、词典、应用商店",
+       "Tilt it to play", "A pet that lives in it", "A four-track tape machine", "Look up any word as you read",
+       "An app store full of small apps", "Games, stories, even 3D, on a 1986 screen",
+       "Runs in your phone’s browser.<br>Make your own apps with AI."],
+  zh: ["一台从未存在过的 1986 年掌机", "四色点阵相机", "冲洗胶卷，照片是彩色的", "歪一歪就能玩", "里面住着一只宠物", "四轨录音机",
+       "读书时随手查词", "应用商店，装满小应用", "游戏、故事、3D，都在 1986 年的屏幕上",
        "在手机浏览器里运行。<br>用 AI 做你自己的应用。"],
 };
-/* [clip, from, to, speed]: the screen's shots in order; the caption index each shot shows */
+/* [clip, from, to, speed, caption]: the screen's shots in order. "grid" is the apps at play, nine at once, full frame. */
 const SHOTS = [
-  ["boot", 0.4, 2.4, 1, 0],
-  ["camera", 1.1, 3.1, 1, 1], ["camera", 4.0, 6.8, 1.4, 1],
-  ["darkroom", 1.0, 4.6, 2.4, 2], ["darkroom", 4.8, 8.3, 1, 2],
-  ["maze", 0.6, 4.6, 1, 3],
-  ["pet", 1.0, 1.7, 1, 4], ["studio", 1.0, 1.7, 1, 4], ["reader", 2.6, 3.5, 1, 4], ["store", 0.8, 1.5, 1, 4],
+  ["boot", 0.4, 1.9, 1, 0],
+  ["camera", 1.1, 2.1, 1, 1], ["camera", 4.0, 6.8, 2.8, 1],
+  ["darkroom", 1.0, 4.6, 3.6, 2], ["darkroom", 4.8, 6.8, 1, 2],
+  ["maze", 0.6, 3.6, 1, 3],
+  ["pet", 0.8, 1.8, 1, 4], ["studio", 0.5, 1.5, 1, 5], ["reader", 2.4, 3.4, 1, 6],
+  ["store", 0.4, 5.9, 2.2, 7],
+  ["grid", 0, 3, 1, 8],
 ];
+const GRID = [["vector-dream", 1.0], ["fake-yu", 0.3], ["zhenyao-tower", 0.3], ["lao-zhang", 0.3], ["whack-a-mole", 0], ["sisyphus", 0.3],
+  ["paper-tower", 0.3], ["daily-box", 0.3], ["shanjiao-diner", 0.3]];   /* [app, where its clip starts] */
 const END = 2.0;                       /* the end card's seconds */
 const SHUTTER = [4.27, 5.40, 5.97, 6.53]; /* the camera clip's shutters (its screen goes dark), for the click */
 
@@ -331,6 +377,7 @@ async function edit() {
   const bg = await layer("bg", `<div style="position:absolute;inset:0;background:radial-gradient(ellipse at 50% 40%,#3a4628 0%,#1f2a14 55%,#141b0c 100%)"></div>
     <div style="position:absolute;left:${SX - BEZ}px;top:${SY - BEZ}px;width:${SW + 2 * BEZ}px;height:${SH + 2 * BEZ}px;border-radius:84px;background:#0c0d0a;
       box-shadow:0 0 0 3px #3b3d36,0 30px 80px rgba(0,0,0,.6)"></div>`, false);
+  const plain = await layer("plain", `<div style="position:absolute;inset:0;background:radial-gradient(ellipse at 50% 40%,#3a4628 0%,#1f2a14 55%,#141b0c 100%)"></div>`, false);
   /* the glass: the screen's rounded corners, over the picture */
   const glass = await layer("glass", `<svg width="${W}" height="${H}" style="position:absolute;inset:0"><defs><mask id="m">
       <rect width="${W}" height="${H}" fill="#fff"/><rect x="${SX}" y="${SY}" width="${SW}" height="${SH}" rx="68" fill="#000"/></mask></defs>
@@ -350,8 +397,11 @@ async function edit() {
   let t = 0; const times = [];
   SHOTS.forEach(([clip, a, b, sp, cap], k) => {
     const len = (b - a) / sp, outside_maze = !(MAZE && clip === "maze");
-    ins.push("-i", join(clips, clip + ".mp4"));
-    parts.push(`[${k}:v]trim=${a}:${b},setpts=(PTS-STARTPTS)/${sp},fps=30,scale=${SW}:${SH}:flags=lanczos,setsar=1[s${k}]`);
+    if (clip === "grid") { ins.push("-f", "lavfi", "-i", `color=c=black:s=${SW}x${SH}:r=30:d=${len}`); parts.push(`[${k}:v]setsar=1,format=yuv420p[s${k}]`); }
+    else {
+      ins.push("-i", join(clips, clip + ".mp4"));
+      parts.push(`[${k}:v]trim=${a}:${b},setpts=(PTS-STARTPTS)/${sp},fps=30,scale=${SW}:${SH}:flags=lanczos,setsar=1,format=yuv420p[s${k}]`);
+    }
     times.push({ t, len, cap, clip }); t += len;
   });
   const total = t + END;
@@ -369,6 +419,22 @@ async function edit() {
     const iM = add("-i", MAZE);
     fc += `[${iM}:v]trim=0:${m.len},setpts=PTS-STARTPTS+${m.t.toFixed(3)}/TB,scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},fps=30[mz];` +
       `[${v}][mz]overlay=0:0:eof_action=pass:enable='between(t,${m.t.toFixed(3)},${(m.t + m.len).toFixed(3)})'[v${vn}];`; v = "v" + vn++;
+  }
+  /* the grid: each app's screen (the LCD under its title bar), three by three over the background */
+  const g = times.find((x) => x.clip === "grid");
+  if (g) {
+    /* the app's own area: under the runtime's status line and the app's title bar, above the chin */
+    const CX = 26, CY = 256, CWS = 728, CHS = 1000;
+    const CW = 330, CH = Math.round(CW * CHS / CWS / 2) * 2, GAP = 15, X0 = (W - 3 * CW - 2 * GAP) / 2, Y0 = Math.round((SY + SH + BEZ + 40 - 3 * CH - 2 * GAP) / 2);
+    const iGb = add("-loop", "1", "-t", String(g.len), "-i", plain);
+    fc += `[${iGb}:v]fps=30,format=yuv420p[gb0];`;
+    GRID.forEach(([id, at], i) => {
+      const iA = add("-i", join(clips, "app-" + id + ".mp4"));
+      fc += `[${iA}:v]trim=${at}:${at + g.len},setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=${g.len},trim=0:${g.len},fps=30,` +
+        `crop=${CWS}:${CHS}:${CX}:${CY},scale=${CW}:${CH}:flags=lanczos,setsar=1[ga${i}];` +
+        `[gb${i}][ga${i}]overlay=${X0 + (i % 3) * (CW + GAP)}:${Y0 + Math.floor(i / 3) * (CH + GAP)}[gb${i + 1}];`;
+    });
+    fc += `[gb${GRID.length}]setpts=PTS-STARTPTS+${g.t.toFixed(3)}/TB[grid];[${v}][grid]overlay=0:0:eof_action=pass:enable='between(t,${g.t.toFixed(3)},${(g.t + g.len).toFixed(3)})'[v${vn}];`; v = "v" + vn++;
   }
   /* one caption for each run of shots that share it, faded in */
   const runs = [];
@@ -394,7 +460,7 @@ async function edit() {
     "-c:v", "libx264", "-crf", "18", "-preset", "slow", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", file);
   /* stills for a look: the camera, the colour print, the end card */
   const still = (at, name) => ff("-ss", at.toFixed(2), "-i", file, "-frames:v", "1", join(OUT, `still-${LANG}-${name}.png`));
-  still(times[1].t + 1.2, "camera"); still(times[4].t + 1.5, "print"); still(total - 0.5, "end");
+  still(times[4].t + 1.0, "print"); still(times[9].t + 1.5, "store"); still(g.t + 1.5, "grid");
   console.log("wrote", file, total.toFixed(2) + " s");
 }
 
