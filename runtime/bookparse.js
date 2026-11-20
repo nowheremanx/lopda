@@ -236,8 +236,7 @@
       if (start + e.csize > n) return Promise.reject(new Error("truncated zip entry: " + nm));
       data = u8.subarray(start, start + e.csize);
       if (e.method === 0) return Promise.resolve(data);
-      var s = new Blob([data]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
-      return new Response(s).arrayBuffer().then(function (b) { return new Uint8Array(b); });
+      return window.LopdaInflate.raw(data);
     }
     function text(nm) {
       return read(nm).then(function (b) { return utf8.decode(b).replace(/^\uFEFF/, ""); });

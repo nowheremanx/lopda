@@ -731,8 +731,7 @@ function startImport(){
 var TEXT_EXT=/\.(md|markdown|txt)$/i;
 function decode(u8){ return new TextDecoder("utf-8").decode(u8).replace(/^﻿/,""); }
 function inflate(raw){
-  if(typeof DecompressionStream==="undefined"){ var e=new Error(tr("notes.nodeflate")); e.code="noinflate"; throw e; }
-  return new Response(new Blob([raw]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).arrayBuffer().then(function(b){ return new Uint8Array(b); });
+  return window.LopdaInflate.raw(raw);
 }
 function skipName(path){
   var parts=path.split("/");
@@ -793,7 +792,7 @@ function importFiles(files){
     if(stats.more) msg+=tr("notes.skipmore",{n:stats.more});
     toast(msg); sfx(added.length?"ok":"err");
   },function(e){
-    toast(e && e.code==="noinflate" ? tr("notes.nodeflate") : tr("notes.importfail",{msg:String((e&&e.message)||e).slice(0,100)})); sfx("err");
+    toast(tr("notes.importfail",{msg:String((e&&e.message)||e).slice(0,100)})); sfx("err");
   }).then(function(){
     N.busy=false;
     if(N.sheet) closeSheet(); else render();
