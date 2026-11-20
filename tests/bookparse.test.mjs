@@ -1,12 +1,14 @@
 // runtime/bookparse.js: text decoding, plain-text chapters, zip and EPUB reading, on small made-up books.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { runScript } from "./helpers.mjs";
+import { read, runScript } from "./helpers.mjs";
+import vm from "node:vm";
 import { gbkEncode, makeZip, makeEpub, makePng } from "./book-fixtures.mjs";
 
-const B = runScript("runtime/bookparse.js", {
-  TextDecoder, Blob, Response, DecompressionStream, Uint8Array, Promise,
-}).LopdaBook;
+const globals = { TextDecoder, Blob, Response, DecompressionStream, Uint8Array, Promise };
+const context = runScript("runtime/inflate.js", globals);
+vm.runInContext(read("runtime/bookparse.js"), context, { filename: "runtime/bookparse.js" });
+const B = context.LopdaBook;
 // results come from another vm realm: compare through JSON (which also proves they are plain data)
 const J = (x) => JSON.parse(JSON.stringify(x));
 const utf8 = (s) => new TextEncoder().encode(s);
@@ -245,6 +247,16 @@ test("parseEpub: Chinese language, heading fallback for chapter titles, errors",
   const guess = J(await B.parseEpub(makeEpub({ lang: "en", chapters: [{ title: "x", html: "<p>这是一本用中文写成的书，没有语言标记。</p>" }] })));
   assert.equal(guess.lang, "zh");
   await assert.rejects(B.parseEpub(makeZip([{ name: "a", data: "b" }])), /rootfile|not in zip/);
+});
+
+test("EPUB deflate reads when DecompressionStream is unavailable", async () => {
+  const ctx = runScript("runtime/inflate.js", { TextDecoder, Blob, Response, Uint8Array, Promise });
+  vm.runInContext(read("runtime/bookparse.js"), ctx, { filename: "runtime/bookparse.js" });
+  const book = await ctx.LopdaBook.parseEpub(makeEpub({
+    title: "Fallback EPUB", chapters: [{ title: "One", html: "<p>Still readable.</p>" }],
+  }));
+  assert.equal(book.title, "Fallback EPUB");
+  assert.equal(book.chapters[0].paras[0].s, "Still readable.");
 });
 
 /* ---- images and links ---- */

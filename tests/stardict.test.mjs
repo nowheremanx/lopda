@@ -2,12 +2,16 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import zlib from "node:zlib";
-import { runScript } from "./helpers.mjs";
+import { read, runScript } from "./helpers.mjs";
+import vm from "node:vm";
 import { writeStarDict, dictzip } from "../tools/stardict-write.mjs";
 
-const SD = runScript("runtime/stardict.js", {
+const globals = {
   TextDecoder, Blob, Response, DecompressionStream, Uint8Array, Uint32Array, DataView, Promise, String,
-}).LopdaStarDict;
+};
+const context = runScript("runtime/inflate.js", globals);
+vm.runInContext(read("runtime/stardict.js"), context, { filename: "runtime/stardict.js" });
+const SD = context.LopdaStarDict;
 
 const ENTRIES = [
   { word: "Run", text: "Run (noun): a short trip. 跑步", syns: ["ran"] },
@@ -190,4 +194,15 @@ test("dictzip: gunzip round trip, small and multi-chunk, random access", () => {
     assert.deepEqual(part, big.subarray(k * 58315, (k + 1) * 58315), "chunk " + k);
     pos += size;
   }
+});
+
+test("dictzip opens when DecompressionStream is unavailable", async () => {
+  const ctx = runScript("runtime/inflate.js", {
+    TextDecoder, Blob, Response, Uint8Array, Uint32Array, DataView, Promise, String,
+  });
+  vm.runInContext(read("runtime/stardict.js"), ctx, { filename: "runtime/stardict.js" });
+  const local = ctx.LopdaStarDict;
+  const w = writeStarDict({ bookname: "Fallback", entries: ENTRIES, dictzip: true });
+  const book = await local.open(files(w));
+  assert.equal((await local.read(book, local.find(book.index, "apple")[0])).text, "apple: a round fruit. 苹果");
 });

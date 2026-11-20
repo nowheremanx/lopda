@@ -26,7 +26,7 @@ var D={
   meta:{},                  // imported book id -> {name, words, syns, added}
   books:{},                 // id -> loaded book (stardict.js), or a promise while loading
   lemma:null,               // ECDICT word forms: form -> lemma
-  refs:null, loading:null, loaded:false,
+  refs:null, loading:null, loaded:false, loadErr:null,
   q:"", cand:[], pick:0,    // the word box, its candidate rows and the highlighted one
   sheet:"", entry:null,     // "entry" | "words" | "books"; the entry on screen {word, results, back}
   stack:[], lines:[],       // entries opened from a selection lead back through the ones before (at most MAX_LEVELS); the entry's text lines
@@ -56,7 +56,7 @@ function loadImported(id){
 function book(id){
   var b=D.books[id];
   if(b) return b.then ? b : Promise.resolve(b);
-  var p=(id===BUILTIN ? loadBuiltin() : loadImported(id)).then(function(bk){ D.books[id]=bk; return bk; },function(e){ delete D.books[id]; throw e; });
+  var p=(id===BUILTIN ? loadBuiltin() : loadImported(id)).then(function(bk){ D.books[id]=bk; if(id===BUILTIN) D.loadErr=null; return bk; },function(e){ delete D.books[id]; if(id===BUILTIN) D.loadErr=String((e&&e.message)||e).slice(0,80); throw e; });
   D.books[id]=p;
   return p;
 }
@@ -67,7 +67,7 @@ function enabledOrder(){ return order().filter(function(id){ return !disabled(id
 function loaded(){
   return Promise.all(enabledOrder().map(function(id){
     return book(id).then(function(b){ return {id:id, b:b}; },function(e){
-      if(!D.warned){ D.warned=true; toast(tr("dict.loadfail",{msg:String((e&&e.message)||e).slice(0,80)})); }
+      if(id!==BUILTIN && !D.warned){ D.warned=true; toast(tr("dict.loadfail",{msg:String((e&&e.message)||e).slice(0,80)})); }
       return null;
     });
   })).then(function(list){ return list.filter(Boolean); });
@@ -184,7 +184,7 @@ function renderList(ensureVisible){
   $("dict-history").hidden=!(!q && D.cand.length);
   ul.scrollTop=D.listScroll;
   if(!enabledOrder().length){ ul.appendChild(el("li","label dict-alloff",tr("dict.alloff"))); return; }
-  if(!D.cand.length){ ul.appendChild(el("li","label",q ? tr("dict.notfound",{w:q}) : tr("dict.nohistory"))); return; }
+  if(!D.cand.length){ ul.appendChild(el("li","label",q ? D.loadErr && !disabled(BUILTIN) ? tr("dict.builtinfail",{msg:D.loadErr}) : tr("dict.notfound",{w:q}) : tr("dict.nohistory"))); return; }
   D.pick=Math.max(0,Math.min(D.pick,D.cand.length-1));
   D.cand.forEach(function(c,i){
     var li=el("li",i===D.pick?"on":"");
@@ -260,7 +260,7 @@ function entrySheet(sh){
   var line=function(t,cls){ var d=el("div",cls||"",t); page.appendChild(d); return d; };
   if(!e.shown){ page.appendChild(el("span","big",e.word)); }
   else if(!e.results) page.appendChild(document.createTextNode(tr("dict.loading")));
-  else if(!e.results.length) page.appendChild(document.createTextNode(e.error ? tr("dict.loadfail",{msg:e.error}) : tr("dict.notfound",{w:e.word})));
+  else if(!e.results.length) page.appendChild(document.createTextNode(D.loadErr && !disabled(BUILTIN) ? tr("dict.builtinfail",{msg:D.loadErr}) : e.error ? tr("dict.loadfail",{msg:e.error}) : tr("dict.notfound",{w:e.word})));
   else {
     if(e.results[0].how==="lemma") line(tr("dict.lemma",{w:e.word, base:e.results[0].word}));
     if(e.results[0].how==="prefix") line(tr("dict.notfound",{w:e.word})+" · "+tr("dict.near"));
