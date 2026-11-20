@@ -1770,3 +1770,10 @@ EXIF，相册就能把照片放到地图上。
 - **电波台仪表页的「存下最近 8 秒录音」**：是给 owner 调试解不出码的手机用的，对玩家没有意义。和连线页的诊断行一样，
   只在 `?debug` 时显示；录音本身只在内存里，不变。
 
+## 55. 旧 iOS 没有 DecompressionStream：内置一个 JS 解压（1.0.5）
+
+2026-11-19。iOS / iPadOS 16.4 以前没有 `DecompressionStream`，词典、EPUB 导入和记事本 zip 导入都会失败（issue #162）。
+
+- `runtime/inflate.js` 是小型纯 JS inflate / gunzip；只有缺少 `DecompressionStream` 时才用，浏览器解压仍是快路径。
+- 内置词典读不出来时，现在会说明原因，不再只显示「查不到」。
+- zip 导入现在总能工作，记事本的 `notes.nodeflate` 提示键已删除。
