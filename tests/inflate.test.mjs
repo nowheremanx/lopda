@@ -82,3 +82,11 @@ test("raw() and gzip() use the JavaScript path without DecompressionStream", asy
   assert.deepEqual(bytes(raw), input);
   assert.deepEqual(bytes(gzip), input);
 });
+
+test("raw() falls back to JavaScript when DecompressionStream lacks the format", async () => {
+  /* some engines have the API but not "deflate-raw": the constructor throws */
+  function DecompressionStream(format) { if (format === "deflate-raw") throw new TypeError("unsupported"); }
+  const partial = runScript("runtime/inflate.js", { Blob, Response, Promise, Uint8Array, DecompressionStream });
+  const input = Buffer.from("partial support ".repeat(50));
+  assert.deepEqual(bytes(await partial.LopdaInflate.raw(zlib.deflateRawSync(input))), input);
+});

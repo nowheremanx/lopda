@@ -1,6 +1,6 @@
 // Lo-PDA: small synchronous RFC 1951/1952 decoder for browsers without DecompressionStream.
 // Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
-(function () {
+(function (root) {
   "use strict";
 
   var LBASE = [3,4,5,6,7,8,9,10,11,13,15,17,19,23,27,31,35,43,51,59,67,83,99,115,131,163,195,227,258];
@@ -136,15 +136,17 @@
 
   function stream(u8, format, fallback) {
     return Promise.resolve().then(function () {
-      if (typeof DecompressionStream !== "function") return fallback(u8);
-      return new Response(new Blob([u8]).stream().pipeThrough(new DecompressionStream(format))).arrayBuffer()
+      var ds = null;
+      // older engines lack the API, and some have it without "deflate-raw" (the constructor throws): use the JS decoder
+      if (typeof DecompressionStream === "function") { try { ds = new DecompressionStream(format); } catch (e) { ds = null; } }
+      if (!ds) return fallback(u8);
+      return new Response(new Blob([u8]).stream().pipeThrough(ds)).arrayBuffer()
         .then(function (b) { return new Uint8Array(b); });
     });
   }
-  var root = typeof window !== "undefined" ? window : this;
   root.LopdaInflate = {
     inflateRaw: inflateRaw, gunzip: gunzip,
     raw: function (u8) { return stream(u8, "deflate-raw", inflateRaw); },
     gzip: function (u8) { return stream(u8, "gzip", gunzip); }
   };
-})();
+})(typeof window !== "undefined" ? window : this);
