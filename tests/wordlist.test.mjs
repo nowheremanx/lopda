@@ -7,9 +7,10 @@ import { gunzipSync } from "node:zlib";
 import vm from "node:vm";
 import { ROOT, read, runScript } from "./helpers.mjs";
 
-const ctx = runScript("runtime/stardict.js", {
+const ctx = runScript("runtime/inflate.js", {
   TextDecoder, Blob, Response, DecompressionStream, Uint8Array, Uint32Array, DataView, Promise, String,
 });
+vm.runInContext(read("runtime/stardict.js"), ctx, { filename: "runtime/stardict.js" });
 vm.runInContext(read("runtime/wordlist.js"), ctx, { filename: "runtime/wordlist.js" });
 const SD = ctx.LopdaStarDict, WL = ctx.LopdaWordList;
 const V = (f) => join(ROOT, "runtime", "vendor", "ecdict", "ecdict" + f);

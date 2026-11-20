@@ -72,10 +72,9 @@
     return { words: words, target: new Uint32Array(target) };
   }
 
-  // dictzip is a gzip member with an extra field, so the browser's gzip decoder reads it whole
+  // dictzip is a gzip member with an extra field; use the shared decoder for older Safari too.
   function gunzip(u8) {
-    var s = new Blob([u8]).stream().pipeThrough(new DecompressionStream("gzip"));
-    return new Response(s).arrayBuffer().then(function (b) { return new Uint8Array(b); });
+    return window.LopdaInflate.gzip(u8);
   }
 
   function fold(word) { return String(word).toLowerCase().trim(); }
