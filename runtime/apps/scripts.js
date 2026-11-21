@@ -11,12 +11,17 @@ var LP=window.LP, $=LP.$, S=LP.S, tr=LP.tr, own=LP.own, toast=LP.toast, put=LP.p
 var PREFIX="local:";
 var CODE_MAX=512*1024;
 var DATA_MAX=256*1024;
+/* a script sent for 改一改: past this, editing on a phone is the wrong tool (docs/design/scripts-revise.md) */
+var REVISE_MAX=64*1024;
+/* a script keeps its last 10 versions, and 1,000,000 characters of code in all */
+var VERSIONS_MAX=10;
+var VERSIONS_CHARS=1000000;
 
 var M={
-  base:null, items:null, data:null, ideaDoc:null,
+  base:null, items:null, data:null, versions:null, asks:null, ideaDoc:null,
   list:[], sizes:{}, cache:{}, schema:{},
   current:null, seq:0, saveTimer:0, dirty:false, askYes:null, dataAskYes:null, seedPromise:null,
-  idea:"", ideaLoaded:false, ideaTouched:false, ideaTimer:0
+  idea:"", ideaLoaded:false, ideaTouched:false, ideaTimer:0, askTimer:0
 };
 
 var ICON=["................","..000000000000..","..033333333330..","..030000000030..","..030333330030..","..030300030030..","..030300330030..","..030333000030..","..030000000030..","..030333300030..","..030000000030..","..033333333330..","..000000000000..","................","................","................"];
@@ -26,6 +31,9 @@ function refs(){
     M.base=S.db.doc("data/users/local/scripts");
     M.items=M.base.collection("items");
     M.data=M.base.collection("data");
+    /* a script's earlier code, and the ask draft of its 改一改 page */
+    M.versions=M.base.collection("versions");
+    M.asks=M.base.collection("asks");
     M.ideaDoc=S.db.doc("data/users/local/script-idea");
   }
   return M.base;
@@ -140,14 +148,112 @@ function saveScript(s){
 }
 function deleteScript(id){
   if(!refs()) return Promise.resolve();
-  /* data first: if that fails, the script (and its way back) stays */
+  /* the order is the way back: data, versions, ask draft, script last, so a failure leaves the script */
   return M.data.doc(id).delete().then(function(){
+    return deleteVersions(id);
+  }).then(function(){
+    return clearAsk(id);
+  }).then(function(){
     return M.items.doc(id).delete();
   }).then(function(){
     M.list=M.list.filter(function(x){ return x.id!==id; });
     delete M.sizes[id]; delete M.cache[id]; delete M.schema[id];
     delete S.kv[PREFIX+id];
   });
+}
+
+/* ---------- versions and ask drafts: what a revision must never lose ----------
+   A revision first writes the old code as a version, and only a version that landed lets the new code in.
+   Doc per script: {v:1, list:[{at, name, body, why}]}, newest first, 10 at most, 1,000,000 body characters
+   in all; the newest one is always kept, so an oversized script still has one way back. */
+function readVersions(id){
+  return M.versions.doc(id).get().then(function(sn){
+    var d=sn.exists ? own(sn.data()) : null;
+    if(!d) return null;
+    if(d.v>1) throw {code:"newer"};
+    return d;
+  });
+}
+function trimVersions(list){
+  var out=[], total=0, i, e, body;
+  /* a damaged doc (list not an array) is nothing to show, never a crash */
+  if(!Array.isArray(list) || !list.length) return out;
+  for(i=0;i<list.length && out.length<VERSIONS_MAX;i++){
+    e=list[i]||{};
+    body=String(e.body==null?"":e.body);
+    /* the newest is never dropped, even when it alone is over the limit */
+    if(out.length && total+body.length>VERSIONS_CHARS) break;
+    out.push({at:+e.at||0, name:String(e.name==null?"":e.name), body:body, why:String(e.why==null?"":e.why)});
+    total+=body.length;
+  }
+  return out;
+}
+function loadVersions(id){
+  if(!id || !refs()) return Promise.resolve([]);
+  return readVersions(id).then(function(d){
+    return d && d.list ? trimVersions(d.list) : [];
+  },function(e){
+    if(e && e.code==="newer") throw e;
+    return [];
+  });
+}
+/* true when the old code is safe: added, already there, or nothing to keep (so the write may go on) */
+function addVersion(id, body, name, why){
+  if(!id) return Promise.resolve(false);
+  body=String(body==null?"":body);
+  if(!body.trim()) return Promise.resolve(true);
+  if(!refs()) return Promise.resolve(false);
+  return readVersions(id).then(function(d){
+    var list=(d && Array.isArray(d.list)) ? d.list : [];
+    if(list.length && list[0] && String(list[0].body)==body) return true;
+    var entry={at:Date.now(), name:String(name==null?"":name).slice(0,40), body:body, why:String(why==null?"":why).slice(0,60)};
+    return put(M.versions.doc(id),{v:1, list:trimVersions([entry].concat(list))}).then(function(ok){ return !!ok; });
+  });
+}
+function deleteVersions(id){
+  if(!id || !refs()) return Promise.resolve(false);
+  return M.versions.doc(id).delete().then(function(){ return true; });
+}
+/* The ask of a script's 改一改 page, kept like the idea draft: typed text survives HOME and a reload. */
+function loadAsk(id){
+  if(!id || !refs()) return Promise.resolve("");
+  return M.asks.doc(id).get().then(function(sn){
+    var d=sn.exists ? own(sn.data()) : null;
+    if(!d || d.v>1 || typeof d.text!=="string") return "";
+    return d.text;
+  },function(){ return ""; });
+}
+function saveAskNow(id, text){
+  clearTimeout(M.askTimer); M.askTimer=0;
+  if(!id || !refs()) return Promise.resolve(false);
+  text=String(text==null?"":text);
+  if(!text) return clearAsk(id);
+  return put(M.asks.doc(id),{v:1, text:text, updated:Date.now()});
+}
+function saveAskSoon(id, text){
+  clearTimeout(M.askTimer);
+  M.askTimer=setTimeout(function(){ saveAskNow(id, text); },600);
+}
+function clearAsk(id){
+  clearTimeout(M.askTimer); M.askTimer=0;
+  if(!id || !refs()) return Promise.resolve(false);
+  return M.asks.doc(id).delete().then(function(){ return true; });
+}
+/* The only way code is replaced: the old body becomes a version first. If that version does not land
+   (a refused write, an unreadable or newer versions doc), the script is not touched at all. */
+function replaceBody(s, code, why){
+  if(!s || !s.id) return Promise.resolve(false);
+  code=String(code==null?"":code);
+  var oldBody=String(s.body==null?"":s.body), oldName=s.name||"";
+  return addVersion(s.id, oldBody, oldName, why).then(function(ok){
+    if(!ok) return false;
+    s.body=code;
+    return saveScript(s).then(function(saved){
+      if(!saved){ s.body=oldBody; return false; }
+      if(M.current===s){ var c=$("script-code"); if(c) c.value=code; M.dirty=false; }
+      return true;
+    },function(){ s.body=oldBody; return false; });
+  },function(){ return false; });
 }
 
 /* First open: put a working Pomodoro in the library. The flag lives in the scripts settings doc,
@@ -240,6 +346,13 @@ LP.scripts={
   info:dataInfo,
   setSchema:setDataSchema,
   size:function(id){ return M.sizes[id]||0; }
+};
+/* pure helpers and the store's write path, for tests/scripts-revise.test.mjs */
+LP.scripts._test={
+  revisePrompt:revisePrompt, checkRevision:checkRevision, trimVersions:trimVersions,
+  addVersion:addVersion, loadVersions:loadVersions, deleteVersions:deleteVersions,
+  loadAsk:loadAsk, saveAskNow:saveAskNow, clearAsk:clearAsk,
+  replaceBody:replaceBody, deleteScript:deleteScript
 };
 
 /* ---------- library ---------- */
@@ -422,6 +535,32 @@ function deriveName(code,fallback){
   if(m) return LP.noEmoji(m[1]).trim().slice(0,40);
   return fallback;
 }
+/* ---------- 改一改: the prompt and the checks (pure) ----------
+   The rules are the 生成 prompt's own words, cut before its 「我想做的是」 line, so 生成 and 改一改
+   never drift apart and scripts.prompt stays exactly as it is. The code goes in by concatenation: tr()
+   fills every {word} it finds, and a program is full of braces. */
+var IDEA_MARK="\u0001IDEA\u0001", CODE_MARK="\u0001CODE\u0001";
+function revisePrompt(code, ask){
+  var full=tr("scripts.prompt",{idea:IDEA_MARK});
+  var at=full.indexOf(IDEA_MARK);
+  var rules=at<0 ? full : full.slice(0,full.lastIndexOf("\n",at)+1);
+  rules=rules.replace(/\s+$/,"");
+  var text=tr("scripts.revise",{ask:ask==null?"":String(ask), code:CODE_MARK});
+  text=text.replace(CODE_MARK,function(){ return code==null?"":String(code); });
+  return rules+"\n\n"+text;
+}
+/* cleanCode (above) first; then the four ways an answer is not the whole revised file */
+function checkRevision(oldBody, raw){
+  var old=String(oldBody==null?"":oldBody).trim();
+  var code=cleanCode(raw);
+  if(!code) return {ok:false, why:"empty"};
+  if(/<\/html\s*>/i.test(old) && !/<\/html\s*>/i.test(code)) return {ok:false, why:"cut"};
+  if(code.length<old.length*0.4) return {ok:false, why:"partial"};
+  if(/其余(部分)?(代码)?(不变|同上|省略)|此处省略|rest (of the code )?(is )?unchanged|\.\.\.\s*existing code|\/\/\s*\.\.\.\s*$/im.test(code)) return {ok:false, why:"partial"};
+  if(code===old) return {ok:false, why:"same"};
+  return {ok:true, code:code};
+}
+
 function pasteNew(){
   readClipboard().then(function(text){
     var code=cleanCode(text);
