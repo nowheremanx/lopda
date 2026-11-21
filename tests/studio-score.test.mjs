@@ -309,3 +309,18 @@ test("degreeFor prefers in-scale spelling, then sharp, then flat, without losing
     }
   }
 });
+
+test("a score read with no chord at all says so first; one chord anywhere is enough to stay quiet", () => {
+  const none = S.toSong(score([bar([], ["1", "2", "3", "4"]), bar([], ["5", "-", "-", "-"])]));
+  assert.equal(none.lost[0], "nochords", "melody and drums only: the note line explains the empty bass and chords");
+  for (const p of none.song.patterns) {
+    assert.equal(p.notes.bass.length, 0);
+    assert.equal(p.notes.chords.length, 0);
+  }
+  const some = S.toSong(score([bar([], ["1", "2", "3", "4"]), bar(["G"], ["5", "-", "-", "-"])]));
+  assert.ok(!some.lost.includes("nochords"));
+  /* chords named from a piano's left hand go the same way as printed ones: bass and chord tracks fill */
+  const leftHand = S.toSong(score([bar(["Cm"], ["5", "3", "1", "0"]), bar(["Ab", "Bb"], ["1", "-", "-", "-"])], { key: "Eb" }));
+  assert.ok(!leftHand.lost.includes("nochords"));
+  assert.ok(leftHand.song.patterns.every((p) => p.notes.bass.length > 0 && p.notes.chords.length > 0));
+});
