@@ -1869,7 +1869,7 @@ game.scene("descent", {
     if (S.wipe > 0) ART.wipe(g, S.wipe, 0);
     if (S.descendPhase === "base" && S.baseT > 0.45) {
       g.text("Le rocher l'attend.", 80, 146, { align: "center", color: 3, shadow: 0 });
-      g.text("石头在山脚等他。", 80, 160, { align: "center", color: 3, shadow: 0 });
+      g.text(game.lang === "en" ? "The rock waits for him." : "石头在山脚等他。", 80, 160, { align: "center", color: 3, shadow: 0 });
     }
   }
 });

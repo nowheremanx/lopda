@@ -3391,10 +3391,10 @@ game.scene("battle", {
   update: function (dt) {
     if (!B) return;
     if (B.mode === "menu") {
-      if (game.repeat("left")) { B.sel = (B.sel + 3) % 4; game.sfx("move"); }
-      if (game.repeat("right")) { B.sel = (B.sel + 1) % 4; game.sfx("move"); }
-      if (game.repeat("up")) { B.sel = (B.sel + 2) % 4; game.sfx("move"); }
-      if (game.repeat("down")) { B.sel = (B.sel + 2) % 4; game.sfx("move"); }
+      if (game.repeat("left")) { B.sel ^= 1; game.sfx("move"); }
+      if (game.repeat("right")) { B.sel ^= 1; game.sfx("move"); }
+      if (game.repeat("up")) { B.sel ^= 2; game.sfx("move"); }
+      if (game.repeat("down")) { B.sel ^= 2; game.sfx("move"); }
       if (game.pressed("a")) playerAction(B.sel);
       if (game.pressed("b")) playerAction(4);
     } else if (B.mode === "end") {

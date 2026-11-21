@@ -196,8 +196,8 @@
   var WEEK_EN = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   var MON_EN = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   var TXT = {
-    zh: { title: "每日一签", draw: "抽签", write: "START 写入", written: "已写入", denied: "没有写入", old: "这台掌机太老，不能写记事本。", noteTitle: "每日一签", cup: "签筒", hint: "静心，抽一支", hintDraw: "A 抽签 · 也可以点签筒", hintSlip: "今日一签 · 明天再来", hintWritten: "已写入 · 明天再来" },
-    en: { title: "Fortune", draw: "Draw", write: "START Notes", written: "Saved", denied: "Not saved", old: "This handheld is too old to write notes.", noteTitle: "Daily fortune", cup: "Fortune cup", hint: "Settle, then draw", hintDraw: "A draw · or tap the cup", hintSlip: "One slip a day", hintWritten: "Saved · come back tomorrow" }
+    zh: { title: "每日一签", draw: "抽签", write: "START 写入", written: "已写入", denied: "没有写入", old: "这台掌机太老，不能写记事本。", noteTitle: "每日一签", cup: "签筒", hint: "静心，抽一支", hintDraw: "A 抽签 · 也可以点签筒", hintSlip: "START 写入记事本 · 明天再来", hintWritten: "已写入 · 明天再来" },
+    en: { title: "Fortune", draw: "Draw", write: "START Notes", written: "Saved", denied: "Not saved", old: "This handheld is too old to write notes.", noteTitle: "Daily fortune", cup: "Fortune cup", hint: "Settle, then draw", hintDraw: "A draw · or tap the cup", hintSlip: "START to Notes · back tomorrow", hintWritten: "Saved · come back tomorrow" }
   }[LANG];
 
   /* Once a day the stick comes out; the reduced-motion setting shortens the same steps
@@ -236,13 +236,15 @@
     if (typeof PAD !== "undefined" && PAD.sfx) PAD.sfx(name);
   }
   function titleFor(dateKey) {
-    return dateKey + "  第" + DATA[state.slip].num + "签  " + DATA[state.slip].grade[LANG] + "\n" + DATA[state.slip].verse[LANG].join("\n") + "\n" + DATA[state.slip].meaning[LANG];
+    var item = DATA[state.slip];
+    var label = LANG === "en" ? "No. " + item.num : "第" + item.num + "签";
+    return dateKey + "  " + label + "  " + item.grade[LANG] + "\n" + item.verse[LANG].join("\n") + "\n" + item.meaning[LANG];
   }
   function showSlip() {
     var item = DATA[state.slip];
     document.title = TXT.title;
     if (state.rendered !== state.slip) {
-      numEl.textContent = "第 " + item.num + " 签";
+      numEl.textContent = LANG === "en" ? "No. " + item.num : "第 " + item.num + " 签";
       gradeEl.textContent = item.grade[LANG];
       verseEl.innerHTML = "";
       item.verse[LANG].forEach(function (line) {
