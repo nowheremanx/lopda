@@ -1135,3 +1135,5 @@ textarea::placeholder{color:var(--ink-2)}
 /* A back key is one symbol: a 44 px square key with the arrow at about the title's weight, not a tall thin strip.
    The LCD font sits the triangle low in its em box; the bottom padding lifts it to the middle. */
 .btn.back{width:44px;min-width:44px;padding:0 0 8px;font-size:28px;line-height:1;display:inline-flex;align-items:center;justify-content:center;flex:none}
+/* The running app's ◂ is a square too, at the bar's own 36 px height: only its width changes, so the app's screen does not. */
+#run-back{width:36px;min-width:36px;padding-left:0;padding-right:0;flex:none}
