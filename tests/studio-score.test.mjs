@@ -29,12 +29,13 @@ test("check is strict about the score shape and locates beat grammar errors", ()
   assert.equal(ok.error, undefined);
   assert.equal(ok.score.capo, 0);
   assert.equal(S.check(score([bar()], { meter: "3/4" })).error, "meter");
-  for (const [bad, error] of [["123", "triplet"], ["", "empty"], ["12345", "tokens"], ["1.", "length"], ["1x", "token"]]) {
+  for (const [bad, error] of [["123", "triplet"], ["", "empty"], ["12345", "tokens"], ["1.2.", "length"], ["1x", "token"]]) {
     const result = S.check(score([bar([], [bad, "0", "0", "0"])]));
     assert.equal(result.error, error);
     assert.deepEqual(plain(result.at), { bar: 0, beat: 0 });
   }
-  assert.equal(S.check({ ...score([bar()]), extra: true }).error, "shape");
+  /* a model's extra comment field is ignored, not a reason to throw the whole reading away */
+  assert.equal(S.check({ ...score([bar()]), extra: true }).error, undefined);
   assert.equal(S.check(score([bar()], { capo: 12 })).error, "capo");
   assert.equal(S.check({ ...score([bar()]), bars: [bar([], ["0", "0", "0"])] }).error, "beats");
   const threeChords = S.check(score([bar(["C", "F", "G"])]));
@@ -43,6 +44,22 @@ test("check is strict about the score shape and locates beat grammar errors", ()
   const nonString = S.check(score([bar([], ["0", "0", null, "0"])]));
   assert.equal(nonString.error, "beat");
   assert.deepEqual(plain(nonString.at), { bar: 0, beat: 2 });
+});
+
+test("dots: next note, or the one before when last; a lone dotted note reads plain", () => {
+  const lens = (s) => Array.from(S.parseBeat(s), (n) => n.len16);
+  assert.deepEqual(lens("1.5"), [3, 1]);
+  assert.deepEqual(lens("11."), [1, 3]);
+  assert.deepEqual(lens("5."), [4]);
+});
+
+test("lenient check rests an unreadable beat and records it; a non-chord is skipped, not fatal", () => {
+  const sc = score([bar(["C"], ["123", "1", "2", "3"]), bar(["N.C."], ["1", "2", "3", "4"])]);
+  assert.equal(S.check(sc).error, "triplet");
+  const r = S.toSong(sc, 0, { lenient: true });
+  assert.equal(r.error, undefined);
+  assert.ok(r.lost.includes("beat:1.1"));
+  assert.ok(r.lost.includes("chord:N.C.>none"));
 });
 
 test("keyPc accounts for capo and recognizes natural-minor key spelling", () => {
@@ -111,13 +128,21 @@ test("jianpu octaves follow the nearest previous sounding note, with ties downwa
   assert.deepEqual(plain(sixMidis), [72, 72, 72, 69], "6 sits below 1 by the nearest-octave rule");
 });
 
-test("explicit octave marks are honored and the below-60 mean is shifted up", () => {
+test("once a reading has any octave dot, plain digits are the middle octave (jianpu's rule), not the nearest", () => {
+  const out = S.toSong(score([bar([], ["5,", "1", "6,", "1"])]));
+  const midis = out.song.patterns[0].notes.melody.filter((n) => n.vel > 0)
+    .map((n) => Song.noteMidi(out.song, "melody", n.deg, n.acc));
+  /* C major, melody "1" = C4 60 before the lift; 5, = G3, 6, = A3: mean 58.25 < 60, so all +12 */
+  assert.deepEqual(plain(midis), [67, 72, 69, 72]);
+});
+
+test("explicit octave marks are honored and a mean below E4 (64) is shifted up", () => {
   const up = S.toSong(score([bar([], ["1'", "0", "0", "0"])]));
   assert.equal(Song.noteMidi(up.song, "melody", up.song.patterns[0].notes.melody[0].deg, up.song.patterns[0].notes.melody[0].acc), 72);
   const shifted = S.toSong(score([bar([], ["1", "0", "0", "0"])], { key: "B" }));
   assert.equal(Song.noteMidi(shifted.song, "melody", shifted.song.patterns[0].notes.melody[0].deg, shifted.song.patterns[0].notes.melody[0].acc), 71);
-  const unchanged = S.toSong(score([bar([], ["1", "0", "0", "0"])]));
-  assert.equal(Song.noteMidi(unchanged.song, "melody", unchanged.song.patterns[0].notes.melody[0].deg, unchanged.song.patterns[0].notes.melody[0].acc), 60);
+  const unchanged = S.toSong(score([bar([], ["5", "0", "0", "0"])]));
+  assert.equal(Song.noteMidi(unchanged.song, "melody", unchanged.song.patterns[0].notes.melody[0].deg, unchanged.song.patterns[0].notes.melody[0].acc), 67);
 });
 
 test("rests, same-pitch ties, slurs to a different pitch, and a barline re-strike", () => {
@@ -147,7 +172,7 @@ test("rests, same-pitch ties, slurs to a different pitch, and a barline re-strik
     bar([], ["-", "0", "0", "0"]),
   ]));
   const restruck = noMeanDoubleCount.song.patterns[1].notes.melody.find((n) => n.vel > 0);
-  assert.equal(Song.noteMidi(noMeanDoubleCount.song, "melody", restruck.deg, restruck.acc), 59);
+  assert.equal(Song.noteMidi(noMeanDoubleCount.song, "melody", restruck.deg, restruck.acc), 71);
 });
 
 test("chords, carry, bass, groove, metadata and event playback form a valid song", () => {
@@ -239,14 +264,14 @@ test("only surviving bars affect the auto-octave mean and lost chord codes", () 
   for (const root of ["C", "D", "E", "G"]) {
     for (const q of quality) {
       if (bars.length === 64) break;
-      bars.push(bar([root + q], ["1", "0", "0", "0"]));
+      bars.push(bar([root + q], ["5", "0", "0", "0"]));
     }
   }
   bars.push(bar(["Cconstructor"], ["1,,,", "0", "0", "0"]));
   const result = S.toSong(score(bars));
   assert.equal(result.song.song.length, 64);
   const first = result.song.patterns[0].notes.melody.find((n) => n.vel > 0);
-  assert.equal(Song.noteMidi(result.song, "melody", first.deg, first.acc), 60);
+  assert.equal(Song.noteMidi(result.song, "melody", first.deg, first.acc), 67, "the dropped low bar does not pull the mean under 64");
   assert.deepEqual(plain(result.lost), ["bars:65"]);
 });
 

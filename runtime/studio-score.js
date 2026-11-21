@@ -14,6 +14,11 @@ var QUALITIES={
 var FALLBACKS={m7add11:"m7", add11:"maj", "m(add9)":"m", madd9:"m", maj9:"maj7", "11":"7", "13":"9", m11:"m7",
   sus4add9:"sus4", "7sus4":"sus4", mMaj7:"m"};
 
+/* The chords sound from C3 up to about an octave and a half above (studio-song.js chordOf, root 48-59). A melody whose
+   mean sits below E4 lives inside them and the flute is covered; a male vocal line does, so it goes up an octave. A
+   higher line (a female voice) is left where the score has it (design section 8.2). */
+var LIFT_BELOW=64;
+
 function plain(x){ return !!x && Object.prototype.toString.call(x)==="[object Object]"; }
 function int(x){ return typeof x==="number" && isFinite(x) && Math.floor(x)===x; }
 function owns(o,k){ return Object.prototype.hasOwnProperty.call(o,k); }
@@ -22,7 +27,7 @@ function shapeKeys(obj,required,optional){
   var k,i;
   if(!plain(obj)) return false;
   for(i=0;i<required.length;i++) if(!owns(obj,required[i])) return false;
-  for(k in obj) if(owns(obj,k) && required.indexOf(k)<0 && optional.indexOf(k)<0) return false;
+  /* extra keys are ignored: a model may add a comment field, and only the known ones are read */
   return true;
 }
 
@@ -42,11 +47,15 @@ function parseBeat(str){
   if(out.length!==1 && out.length!==2 && out.length!==4) return {error:"tokens"};
   base=4/out.length;
   for(i=0;i<out.length;i++) out[i].len16=base;
+  /* a dot takes half of its neighbour: the next note ("1.5" = 3 + 1), or the one before when the dot is last ("11." = 1 + 3,
+     how a dotted note that starts off the beat reads once it is cut at the beat) */
+  /* a lone dotted note ("5.") runs past its beat; a beat cannot hold that, so it reads as the plain note */
+  if(out.length===1) out[0].dotted=false;
   for(i=0;i<out.length;i++) if(out[i].dotted){
-    if(i+1>=out.length) return {error:"length"};
-    if(out[i+1].dotted) return {error:"length"};
+    var nb=i+1<out.length ? i+1 : i-1;
+    if(nb<0 || out[nb].dotted) return {error:"length"};
     out[i].len16=base*1.5;
-    out[i+1].len16=base*0.5;
+    out[nb].len16=base*0.5;
   }
   var total=0;
   for(i=0;i<out.length;i++){
@@ -58,8 +67,8 @@ function parseBeat(str){
   return out;
 }
 
-function check(obj){
-  var score,i,j,b,parsed;
+function check(obj,opts){
+  var score,i,j,b,parsed,beats=null,lenient=!!(opts&&opts.lenient);
   if(!shapeKeys(obj,["key","meter","bars"],["title","capo","bpm"])) return {error:"shape"};
   if(obj.meter!=="4/4") return {error:"meter"};
   if(typeof obj.key!=="string") return {error:"key"};
@@ -67,7 +76,7 @@ function check(obj){
   if(typeof obj.bpm!=="undefined" && obj.bpm!==null && (typeof obj.bpm!=="number"||!isFinite(obj.bpm))) return {error:"bpm"};
   if(typeof obj.title!=="undefined" && typeof obj.title!=="string") return {error:"title"};
   if(!Array.isArray(obj.bars)||obj.bars.length<1||obj.bars.length>400) return {error:"bars"};
-  score={key:obj.key,meter:obj.meter,bars:[],capo:typeof obj.capo==="undefined"?0:obj.capo,bpm:typeof obj.bpm==="undefined"?null:obj.bpm};
+  score={key:obj.key,meter:obj.meter,bars:[],lost:[],capo:typeof obj.capo==="undefined"?0:obj.capo,bpm:typeof obj.bpm==="undefined"?null:obj.bpm};
   if(typeof obj.title!=="undefined") score.title=obj.title;
   for(i=0;i<obj.bars.length;i++){
     b=obj.bars[i];
@@ -78,9 +87,14 @@ function check(obj){
     for(j=0;j<4;j++){
       if(typeof b.beats[j]!=="string") return {error:"beat",at:{bar:i,beat:j}};
       parsed=parseBeat(b.beats[j]);
-      if(parsed.error) return {error:parsed.error,at:{bar:i,beat:j}};
+      if(parsed.error){
+        /* strict (the default) answers with the place, so the model can be asked again; lenient keeps the rest of the
+           score and rests that beat, for the last try (design section 3) */
+        if(!lenient) return {error:parsed.error,at:{bar:i,beat:j}};
+        beats=beats||b.beats.slice(); beats[j]="0"; score.lost.push("beat:"+(i+1)+"."+(j+1));
+      }
     }
-    score.bars.push({chords:b.chords.slice(),beats:b.beats.slice()});
+    score.bars.push({chords:b.chords.slice(),beats:(beats||b.beats).slice()}); beats=null;
   }
   return {score:score};
 }
@@ -180,11 +194,14 @@ function midiForPc(pc,key,track){
   return best;
 }
 
-function toSong(input,now){
-  var checked=check(input);
+function toSong(input,now,opts){
+  var checked=check(input,opts);
   if(checked.error) return checked;
   var score=checked.score,pc=keyPc(score.key,score.capo), mode=keyMode(score.key), songKey, song, lost=[],patterns=[],lastChords=null,i,j,k,bar,active,previousMidi=null,priorBarMidi=null,melodyPitches=[],barPitches,barLost,barChords,decoded,firstBeat,tokens,cursor,token,midi,pitch,cc,rootPc,keyObj,src,styles,groove,step,drum,notes,barData,signature,patternAt,hasMelody,chain=[];
   if(pc===null) return {error:"key"};
+  for(i=0;i<score.lost.length;i++) dedupeLost(lost,score.lost[i]);
+  var marked=false;
+  for(i=0;i<score.bars.length && !marked;i++) for(j=0;j<4;j++) if(/[',]/.test(score.bars[i].beats[j])){ marked=true; break; }
   songKey=pc; keyObj={pc:pc,name:score.key};
   song=LopdaSong.newSong(typeof now==="number"&&isFinite(now)&&now>=0?now:0);
   song.name=Array.from(score.title||"读谱磁带").slice(0,LopdaSong.NAME_MAX).join("");
@@ -200,10 +217,11 @@ function toSong(input,now){
     if(bar.chords.length){
       for(j=0;j<bar.chords.length;j++){
         cc=chord(bar.chords[j],keyObj);
-        if(cc.error) return {error:"chord",at:{bar:i}};
+        /* "N.C." or a word: no chord there, said once, instead of losing the whole score */
+        if(cc.error){ dedupeLost(barLost,"chord:"+bar.chords[j]+">none"); continue; }
         dedupeLost(barLost,cc.lost); barChords.push(cc);
       }
-      lastChords=barChords;
+      if(barChords.length) lastChords=barChords;
     } else if(lastChords) barChords=[lastChords[lastChords.length-1]];
     notes={drums:[],bass:[],chords:[],melody:[]};
     for(j=0;j<barChords.length;j++){
@@ -237,7 +255,9 @@ function toSong(input,now){
           active=null; cursor+=token.len16; continue;
         }
         midi=LopdaSong.tonic("melody",pc)+SCALE[mode][token.deg-1]+12*token.oct+token.acc;
-        if(token.oct===0 && previousMidi!==null){
+        /* jianpu's octave dots are absolute: a plain digit is the middle octave. Only a reading with no dots anywhere (some
+           models leave them all out, design 7.1) guesses the octave from the previous note. */
+        if(!marked && token.oct===0 && previousMidi!==null){
           midi=nearestMidi(LopdaSong.tonic("melody",pc)+SCALE[mode][token.deg-1]+token.acc,previousMidi);
         }
         if(!(active && active.tie && active.midi===midi)){
@@ -274,7 +294,7 @@ function toSong(input,now){
     for(j=0;j<barLost.length;j++) dedupeLost(lost,barLost[j]);
   }
   if(!chain.length) return {error:"song"};
-  var mean=melodyPitches.length?melodyPitches.reduce(function(a,b){return a+b;},0)/melodyPitches.length:60,shift=mean<60?12:0;
+  var mean=melodyPitches.length?melodyPitches.reduce(function(a,b){return a+b;},0)/melodyPitches.length:60,shift=mean<LIFT_BELOW?12:0;
   for(i=0;i<patterns.length;i++){
     notes=patterns[i].notes;
     for(j=0;j<notes.melody.length;j++){
