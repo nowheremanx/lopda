@@ -534,3 +534,10 @@ test("readScore: score pictures are passed as OpenRouter image messages", async 
   assert.match(content[0].text, /pictures are pages.*in order/i);
   assert.deepEqual(plain(content.slice(1)), images.map((url) => ({ type: "image_url", image_url: { url } })));
 });
+
+test("score prompt warns about TAB fret numbers and octave dots", () => {
+  const system = ctx.LopdaStudioPrompts.score({ text: "" })[0].content;
+  assert.match(system, /fret numbers/i);
+  assert.match(system, /octave/i);
+  assert.match(system, /above or below/i);
+});
