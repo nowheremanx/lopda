@@ -44,13 +44,16 @@ function scaleSize(w,h,maxLong){
   var scale=Math.min(1,maxLong/Math.max(w,h));
   return {w:Math.max(1,Math.round(w*scale)),h:Math.max(1,Math.round(h*scale))};
 }
+/* area average, not nearest: a score is thin dark lines on paper, and point samples of a photo miss most of them */
 function scaleLuma(gray,w,h,maxLong){
-  var size=scaleSize(w,h,maxLong), out=new Uint8Array(size.w*size.h), x,y,sx,sy;
+  var size=scaleSize(w,h,maxLong), out=new Uint8Array(size.w*size.h), x,y,sx,sy,x0,x1,y0,y1,sum;
   for(y=0;y<size.h;y++){
-    sy=Math.min(h-1,Math.floor((y+0.5)*h/size.h));
+    y0=Math.floor(y*h/size.h); y1=Math.max(y0+1,Math.min(h,Math.floor((y+1)*h/size.h)));
     for(x=0;x<size.w;x++){
-      sx=Math.min(w-1,Math.floor((x+0.5)*w/size.w));
-      out[y*size.w+x]=gray[sy*w+sx];
+      x0=Math.floor(x*w/size.w); x1=Math.max(x0+1,Math.min(w,Math.floor((x+1)*w/size.w)));
+      sum=0;
+      for(sy=y0;sy<y1;sy++) for(sx=x0;sx<x1;sx++) sum+=gray[sy*w+sx];
+      out[y*size.w+x]=Math.round(sum/((y1-y0)*(x1-x0)));
     }
   }
   return {w:size.w,h:size.h,gray:out};

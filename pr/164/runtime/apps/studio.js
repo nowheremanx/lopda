@@ -2158,18 +2158,35 @@ function appendScorePage(page,epoch){
   renderSheet();
   return true;
 }
-function scoreThumb(page){
-  var small=SCORE_PAGES.scaleLuma(page.gray,page.w,page.h,48), lum=new Float32Array(small.gray.length), i;
+/* a page in four tones, long side at most maxLong; kept on the page (memory only) so a re-render does not dither again */
+function scoreTones(page,maxLong,key){
+  if(page[key]) return page[key];
+  var small=SCORE_PAGES.scaleLuma(page.gray,page.w,page.h,maxLong), lum=new Float32Array(small.gray.length), i;
   for(i=0;i<lum.length;i++) lum[i]=small.gray[i]/255;
-  var tones=FINDER.ditherLuma(lum,small.w,small.h,0,0), cv=el("canvas","st-score-thumb-canvas");
+  var tones=FINDER.ditherLuma(lum,small.w,small.h,0,0), cv=document.createElement("canvas");
   cv.width=small.w; cv.height=small.h;
   var ctx=cv.getContext("2d"), image=ctx.createImageData(small.w,small.h), data=image.data;
   for(i=0;i<tones.length;i++){
     var tone=LP.TONES[tones[i]];
     data[i*4]=tone[0]; data[i*4+1]=tone[1]; data[i*4+2]=tone[2]; data[i*4+3]=255;
   }
-  ctx.putImageData(image,0,0);
+  page[key]={w:small.w,h:small.h,image:image};
+  return page[key];
+}
+/* a fresh canvas each render (a canvas is never drawn onto another one: Safari swaps red and blue on that path) */
+function scoreCanvas(page,maxLong,key,cls){
+  var t=scoreTones(page,maxLong,key), cv=el("canvas",cls);
+  cv.width=t.w; cv.height=t.h; cv.getContext("2d").putImageData(t.image,0,0);
   return cv;
+}
+function scoreThumb(page){ return scoreCanvas(page,96,"thumb","st-score-thumb-canvas"); }
+/* the picked page, big enough to check the framing; the hint while the tray is empty */
+function scorePreview(){
+  var box=el("div","st-score-preview"); box.id="studio-score-preview";
+  var page=T.scorePages[T.scorePagePick];
+  if(page) box.appendChild(scoreCanvas(page,720,"big","st-score-preview-canvas"));
+  else box.appendChild(el("p","st-score-hint",tr("studio.score.hint")));
+  return box;
 }
 function renderScoreTray(sh){
   var tray=el("div","st-score-tray"), pages=el("div","st-score-pages");
@@ -2514,12 +2531,7 @@ function renderAiSheet(sh){
 function renderScoreSheet(sh){
   sheetHead(tr("studio.score.title"));
   var body=el("div","st-score-content");
-  var input=el("textarea","st-name st-ai-input st-score-input");
-  input.rows=6; input.maxLength=12000; input.id="studio-score-input";
-  input.placeholder=tr("studio.score.hint"); input.value=T.scoreText||""; input.disabled=T.aiBusy;
-  input.oninput=function(){ T.scoreText=input.value; };
-  input.onkeydown=function(e){ if(e.key==="Enter" && (e.ctrlKey || e.metaKey)){ e.preventDefault(); askScore(input.value); } };
-  body.appendChild(input);
+  body.appendChild(scorePreview());
   renderScoreTray(body);
   if(T.aiBusy){
     var prog=el("div","st-ai-progress");
@@ -2540,8 +2552,8 @@ function renderScoreSheet(sh){
   sh.appendChild(body);
   if(T.aiBusy) paintAiProgress();
   var row=el("div","st-sheet-row"), read=el("button","st-sheet-btn","");
-  read.type="button"; read.id="studio-score-read"; read.textContent=tr("studio.score.read"); read.disabled=T.aiBusy;
-  read.onclick=function(){ askScore(input.value); };
+  read.type="button"; read.id="studio-score-read"; read.textContent=tr("studio.score.read"); read.disabled=T.aiBusy||!T.scorePages.length;
+  read.onclick=function(){ askScore(""); };
   if(T.aiBusy){
     var stop=el("button","st-sheet-btn",""); stop.type="button"; stop.textContent=tr("studio.ai.stop");
     stop.onclick=aiStopJob; row.appendChild(stop);
@@ -4095,6 +4107,8 @@ function confirmCopy(){
 }
 document.addEventListener("keydown",function(e){
   if(!visible()) return;
+  /* the chin pad is hidden here, so a key core.js already took is the score viewfinder's (LP.snap shows the pad) */
+  if(e.defaultPrevented || (LP.snap && LP.snap.isOpen())) return;
   if(/INPUT|TEXTAREA|SELECT/.test(e.target.nodeName)) return;
   var key=e.key, done=true;
   if(key==="ArrowUp"||key==="ArrowDown"||key==="ArrowLeft"||key==="ArrowRight"){ if(!T.sheet) moveFocus(key); }
