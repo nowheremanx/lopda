@@ -8,6 +8,7 @@
  *   LopdaStudioPrompts.melody(o)  -> messages   o: {text, style, keyName, scale, bpm, section, energy, bars:[{chord, tones}], before}
  *   LopdaStudioPrompts.listen(o)  -> messages   o: {text, overview}
  *   LopdaStudioPrompts.edit(o)    -> messages   o: {text, overview, focus}
+ *   LopdaStudioPrompts.score(o)   -> messages   o: {text, images}
  *   LopdaStudioPrompts.reject(reason) -> the user turn that sends a rejected answer back
  *
  * Every system prompt names its step with "TAPE4 STEP: <name>", which the tests' fake model reads to know what to answer.
@@ -242,6 +243,36 @@ EDIT_ONLY.concat(TOOLS).join("\n")
   return msgs("edit",system,"SONG\n"+o.overview+where+"\n"+chordTable(o.song)+"\n\n"+language(o.text)+"\nREQUEST: "+(o.text||""));
 }
 
+/* A score is transcribed, not arranged: the local score reader turns this one object into the new tape. */
+function score(o){
+  o=o||{};
+  var system=[
+"You transcribe a music score into Tape4's notation. Read any notation: numbered jianpu, staff notation, or chord-over-lyrics text.",
+"Do not arrange, embellish, or transpose the music.",
+"",
+JSON_ONLY,
+'Format: {"title":"...","key":"G","capo":4,"meter":"4/4","bpm":null,"bars":[{"chords":["C","D"],"beats":["4111","1116,","12","0123"]}]}',
+"",
+"Rules:",
+"- key is the written 1= key (or the score's written key for staff notation), as a note name with optional m for minor: e.g. G, Bb or F#m. Never write a key as 'C major'. Keep it exactly as written. capo is the written fret, 0 if none. Never transpose; capo is applied locally.",
+"- Chinese guitar 弹唱谱 layout: the top line 1=G 4/4 is the shape key and meter; a note like 原调B，变调夹第4品 gives capo 4. Each system has chord diagrams on top, a six-line TAB staff in the middle, and the jianpu line with lyrics at the bottom. Numbers on the TAB lines are fret numbers: never read them as melody; read only the jianpu line.",
+"- Underlines under jianpu digits mark eighths (one line) and sixteenths (two lines); use them to split each beat. A dot to the RIGHT of a digit (1·) is a rhythm dot; a dot ABOVE or BELOW a digit is an octave mark. Octave dots are small; a low dot often sits right under the underlines and looks like part of them. Check above and below every single digit.",
+"- Self-check before answering: read each phrase's pitches in order; a jump of more than an octave that comes straight back (high then low again) almost always means a missed or extra octave dot: look again at that note.",
+"- One entry in bars per bar in playing order. Expand repeat signs, 1./2. endings, and D.S. into the real playing order.",
+"- chords are the 1 or 2 chord names printed for each bar, unchanged (e.g. Em7, Asus2/F#); use [] when none. If a chord carries over with no new name, repeat it.",
+"- beats has exactly four strings per bar, one per 4/4 beat. Use 1, 2 or 4 note tokens in each beat (no triplets); they split its four sixteenths equally: 1 is a quarter, 12 two eighths, 1234 four sixteenths. A chord-only sheet writes [\"0\",\"0\",\"0\",\"0\"] for beats.",
+"- Melody only; do not write lyrics or tablature numbers. Tokens: notes 0-7 (0 is rest); # or b before the digit. Octave marks are absolute: a plain digit is the middle octave, ' after the digit means dot above (one octave up), and , means dot below (one octave down); marks may repeat, e.g. 5, or 1'. A lone - holds the previous note for a beat. A dot after a note dots its length (1.5 is dotted eighth then sixteenth). A slur is NOT a tie: use ~ only for a tie between equal notes.",
+"- The meter must be 4/4. Do not invent beats, chords, lyrics or a title; use null for an unknown bpm and an empty title if unreadable.",
+"- Output the one JSON object only."
+  ].join("\n");
+  var user;
+  if(Array.isArray(o.images)&&o.images.length){
+    user=[{type:"text",text:"The pictures are pages of the same score, in order. Transcribe them together.\n"+(o.text||"")}];
+    for(var i=0;i<o.images.length;i++) user.push({type:"image_url",image_url:{url:o.images[i]}});
+  } else user=String(o.text||"");
+  return msgs("score",system,user);
+}
+
 /* The scale's own chord on each degree, named, so a model never writes "C minor" in A minor by guessing (owner's
    tape, 2026-10-30: chords Am, Cm, D7 in A minor). */
 function chordTable(song){
@@ -262,5 +293,5 @@ function reject(reason){
   return "That JSON was rejected: "+reason+". Reply with the corrected JSON only.";
 }
 
-window.LopdaStudioPrompts={chordTable:chordTable, plan:plan, melody:melody, listen:listen, edit:edit, reject:reject, lang:lang};
+window.LopdaStudioPrompts={chordTable:chordTable, plan:plan, melody:melody, listen:listen, edit:edit, score:score, reject:reject, lang:lang};
 })();

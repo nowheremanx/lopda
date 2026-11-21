@@ -21,7 +21,7 @@
 (function(){
 "use strict";
 var K=window.LopdaStudioCritic, TH=window.LopdaStudioTheory, AI=window.LopdaStudioAI, P=window.LopdaStudioPrompts, ST=window.LopdaStudioStyles,
-    T=window.LopdaStudioTools, E=window.LopdaStudioEdit, S=window.LopdaSong;
+    T=window.LopdaStudioTools, E=window.LopdaStudioEdit, S=window.LopdaSong, SCORE=window.LopdaScore;
 
 var MAX_RETRY=2, MAX_TURNS=5, CHORD_STYLES=["triad","seventh","rich"];
 /* the AI's own budget stays at 16 patterns, whatever the format now holds (12.22) */
@@ -641,6 +641,59 @@ function edit(o){
   });
 }
 
+/* A single transcription and one corrected pass. The final pass may keep readable bars and report what was lost. */
+function readScore(o){
+  o=o||{};
+  var now=num(o.now)?o.now:Date.now(), onStage=o.onStage, text=o.text==null?"":String(o.text), images=o.images;
+  return job(o.ask,function(c){
+    c.onStage=onStage; c.onTrouble=o.onTrouble; c.later=o.later;
+    var messages=P.score({text:text,images:images}), firstObj=null, lastObj=null;
+    function inspect(answer){
+      var obj=AI.extract(answer), checked, made, reason, at;
+      if(!obj || obj.error) return {answer:answer,obj:null,reason:"not one JSON object"};
+      try{
+        checked=SCORE.check(obj);
+        if(!checked.error){
+          made=SCORE.toSong(obj,now);
+          if(made.song) return {answer:answer,obj:obj,made:made};
+          checked=made;
+        }
+      }catch(e){
+        return {answer:answer,obj:obj,reason:"could not check the answer"};
+      }
+      reason=checked.error==="key"?'key: write the 1= key as a note name like "G", "Bb" or "F#m"':(checked.error||"invalid score");
+      at=checked.at;
+      if(at){
+        if(typeof at.bar==="number") reason+=" at bar "+(at.bar+1);
+        if(typeof at.beat==="number") reason+=" beat "+(at.beat+1);
+      }
+      return {answer:answer,obj:obj,reason:reason};
+    }
+    stage(onStage,"score");
+    return askOnce(c,messages).then(function(first){
+      var res=inspect(first);
+      if(res.made) return {song:res.made.song,lost:res.made.lost,bars:res.made.song.song.length};
+      firstObj=res.obj;
+      stage(onStage,"score",2,2,{});
+      return askOnce(c,messages.concat([
+        {role:"assistant",content:String(first==null?"":first)},
+        {role:"user",content:P.reject(res.reason)}
+      ])).then(function(second){
+        var retry=inspect(second), fallback;
+        if(retry.made) return {song:retry.made.song,lost:retry.made.lost,bars:retry.made.song.song.length};
+        lastObj=retry.obj||firstObj;
+        if(lastObj){
+          try{
+            fallback=SCORE.toSong(lastObj,now,{lenient:true});
+            if(fallback.song) return {song:fallback.song,lost:fallback.lost,bars:fallback.song.song.length};
+          }catch(e){}
+        }
+        throw harnessError("unreadable","score","unreadable");
+      });
+    });
+  });
+}
+
 /* Does this sentence ask for a new song, or a change to the open one? "写一个俄罗斯风格的曲子" went down the edit path
    and rewrote a blank tape bar by bar (owner, 2026-10-30), so the words of making something are wider than "骨架",
    and a tape that is still the single starting bar is never worth editing into a song. */
@@ -655,5 +708,5 @@ function wantsNewSong(text,song){
   return chain.length<=1 && n<=1 && !EDIT_WORDS.test(t);
 }
 
-window.LopdaStudioHarness={wantsNewSong:wantsNewSong, skeleton:skeleton, edit:edit, MAX_RETRY:MAX_RETRY, MAX_TURNS:MAX_TURNS, AUTO_RETRY:AUTO_RETRY};
+window.LopdaStudioHarness={wantsNewSong:wantsNewSong, skeleton:skeleton, edit:edit, readScore:readScore, MAX_RETRY:MAX_RETRY, MAX_TURNS:MAX_TURNS, AUTO_RETRY:AUTO_RETRY};
 })();
