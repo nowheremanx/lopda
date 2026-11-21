@@ -1129,3 +1129,9 @@ textarea::placeholder{color:var(--ink-2)}
 #v-cal .btn,
 .cam-row .btn,
 #cart-tools .btn{min-height:0}
+/* The running app's bar keeps its old height: the app's screen sizes in sdk/UI.md (331 x 473, 331 x 359 with the
+   chin pad on an iPhone SE) are what apps are designed for, and a taller bar would take 8 px from every app. */
+#v-run .bar .btn{min-height:0}
+/* A back key is one symbol: a 44 px square key with the arrow at about the title's weight, not a tall thin strip.
+   The LCD font sits the triangle low in its em box; the bottom padding lifts it to the middle. */
+.btn.back{width:44px;min-width:44px;padding:0 0 8px;font-size:28px;line-height:1;display:inline-flex;align-items:center;justify-content:center;flex:none}
