@@ -74,9 +74,9 @@
         "...0000000000...",
         "................"
       ],
-      "version": "1.1.0",
+      "version": "1.1.1",
       "released": "2026-10-11",
-      "updated": "2026-10-13",
+      "updated": "2026-11-21",
       "description": "八位数商务计算器，连续运算、百分比和记忆键。",
       "i18n": {
         "en": {
@@ -87,8 +87,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/calculator/index.html",
-      "sha256": "a62418629dabce24745cf77d0faf0a9d7224cbfbc1053c2c9c158673054b0691",
-      "bytes": 14545
+      "sha256": "dbb1c839f26ea83ea3bd5a70702ee7de8214d438e73aa843392636fa0a7e9c0b",
+      "bytes": 14282
     },
     {
       "spec": "lopda/1",
@@ -207,8 +207,9 @@
         "....00000000....",
         "................"
       ],
-      "version": "1.1.1",
+      "version": "1.1.2",
       "released": "2026-10-19",
+      "updated": "2026-11-21",
       "description": "抽一支签，读一段今天的顺便话。写进记事本接口的示范。",
       "i18n": {
         "zh": {
@@ -226,8 +227,8 @@
         "notes"
       ],
       "path": "apps/daily-slip/index.html",
-      "sha256": "c19da202736bdcfd460a05253ceacfe972dea9b4887cf25788d9bd69bc0e88a2",
-      "bytes": 33124
+      "sha256": "0ca237bafbc705e9a36750c32a71e3e3fe265efce9f64bca00091fc8d2438e0b",
+      "bytes": 33240
     },
     {
       "spec": "lopda/1",
@@ -340,7 +341,7 @@
       ],
       "version": "1.5.0",
       "released": "2026-10-19",
-      "updated": "2026-10-19",
+      "updated": "2026-11-21",
       "description": "学习平假名和片假名（含浊音、半浊音），听发音，再做四选一小测。",
       "i18n": {
         "zh": {
@@ -645,7 +646,7 @@
       ],
       "version": "2.0.1",
       "released": "2026-10-08",
-      "updated": "2026-10-21",
+      "updated": "2026-11-21",
       "description": "视觉小说。雨夜小站，一张十年前的旧车票。七章，五个结局。",
       "i18n": {
         "zh": {
@@ -730,7 +731,7 @@
       ],
       "version": "0.1.1",
       "released": "2026-10-28",
-      "updated": "2026-10-28",
+      "updated": "2026-11-21",
       "description": "七天，守住山脚的小馆：采买、打怪、备菜、待客。",
       "i18n": {
         "en": {
@@ -741,8 +742,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/shanjiao-diner/index.html",
-      "sha256": "220f52c26ef7c3fed78eb38a5c103a5167fc9089426319e7baf914a0d6618793",
-      "bytes": 240663
+      "sha256": "08a4052e969012b2cdca12f91b618e0cbf01d2ba9fbf150ce72630d9e047710f",
+      "bytes": 240611
     },
     {
       "spec": "lopda/1",
@@ -769,8 +770,9 @@
         "................",
         "................"
       ],
-      "version": "0.1.1",
+      "version": "0.1.2",
       "released": "2026-10-27",
+      "updated": "2026-11-21",
       "description": "推石上山。它滚下去。再推。加缪的十六句话在山顶等你。",
       "i18n": {
         "en": {
@@ -784,8 +786,8 @@
         "notes"
       ],
       "path": "apps/sisyphus/index.html",
-      "sha256": "f2d37ddf6800a9fbb1a6f60136775be8a26a8ba140e5c9d9f7f2782a37dab02e",
-      "bytes": 96050
+      "sha256": "98136d243207178656a5dd5e9327046daf120cd81fa6ba8d7df3555615b2af8c",
+      "bytes": 96099
     },
     {
       "spec": "lopda/1",
