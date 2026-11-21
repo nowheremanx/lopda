@@ -13,7 +13,7 @@ var TONES=LP.TONES, SND=LP.SND, audio=LP.audio, own=LP.own, toast=LP.toast, put=
    ROMs are the user's own files. Nothing is bundled. Colour carts are refused; dual-mode carts
    are run as black-and-white carts, and Super Game Boy colouring is switched off, so the screen
    only ever shows the four tones. */
-var GB={mod:null, loading:null, e:0, rom:0, joy:0, raf:0, last:0, left:0, paused:false,
+var GB={mod:null, loading:null, launch:0, e:0, rom:0, joy:0, raf:0, last:0, left:0, paused:false,
   cart:null, save:null, ctx:null, img:null, gain:null, aStart:0, dirty:false, timer:0};
 var GB_TICKS=4194304, GB_AUDIO_FRAMES=4096, GB_LEVEL=2.4;
 /* into the runtime's app bus, under its master volume: 2.4 x the steps (0.12, 0.25, 0.42) is the 0.3 / 0.6 / 1
@@ -196,16 +196,19 @@ function cartLayout(){
   k=Math.max(1,k); cv.style.width=Math.round(160*k)+"px"; cv.style.height=Math.round(144*k)+"px";
 }
 window.addEventListener("resize",function(){ if(!$("v-cart").hidden) cartLayout(); });
+/* every start gets a number; eject, HOME and a newer start move it on, so a slow load that finishes late is dropped
+   instead of starting the cartridge the player already took out */
 function gbPlay(c){
+  var launch=++GB.launch;
   $("cart-state").textContent=tr("cart.reading");
   var romP = romOf(c);
   var saveP = S.db ? S.refs.cartsave.doc(c.id).get().then(function(sn){ return sn.exists ? own(sn.data()) : {}; }).catch(function(){ return {}; }) : Promise.resolve({});
   audio();   /* this tap unlocks sound on phones */
   if(SND.ctx && SND.ctx.state==="suspended") SND.ctx.resume();
   Promise.all([gbModule(),romP,saveP]).then(function(r){
-    if($("v-cart").hidden) return;
+    if(launch!==GB.launch || $("v-cart").hidden) return;
     gbStart(c,r[1],r[2]);
-  }).catch(function(e){ $("cart-state").textContent=""; toast(tr("cart.nopower",{msg:(e&&e.message)||e})); sfx("err"); });
+  }).catch(function(e){ if(launch!==GB.launch) return; $("cart-state").textContent=""; toast(tr("cart.nopower",{msg:(e&&e.message)||e})); sfx("err"); });
 }
 function gbStart(c,rom,save){
   gbStop();
@@ -287,7 +290,7 @@ function gbStop(){
   GB.e=0; GB.joy=0; GB.rom=0; GB.cart=null;
   releaseButtons(); LP.keepAwake(false);
 }
-$("cart-eject").onclick=function(){ gbStop(); gbShowLib(); renderCarts(); };
+$("cart-eject").onclick=function(){ GB.launch++; gbStop(); gbShowLib(); renderCarts(); };
 $("cart-save").onclick=function(){
   if(!GB.e) return;
   var m=GB.mod, s=gbWithFile(m._state_file_data_new(GB.e),function(fd,buf){ m._emulator_write_state(GB.e,fd); return b64(buf); });
@@ -309,7 +312,7 @@ if(window.LOPDA_DEBUG) window.LOPDA_DEBUG.GB=GB;
 LP.padRoute("cart",function(b,down){ if(!GB.e) return false; gbJoy(b,down); return true; });
 LP.builtin({id:"cart", label:"app.cart", icon:"cart", view:"cart", keepPad:true,
   open:function(){ openCart(); },
-  leave:function(){ gbStop(); },
+  leave:function(){ GB.launch++; gbStop(); },
   padLayout:function(){ if(!$("v-cart").hidden) cartLayout(); },
   audio:function(){ if(GB.e) gbConnect(); },
   pause:function(){ gbPause(true); },
