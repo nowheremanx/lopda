@@ -591,24 +591,33 @@ var Lo3D = (function () {
 
   /* ---------- state ---------- */
   var yaw = 0.6, pitch = 0.35, dist = 4.2, scene = 0, wire = false, showHud = false;
+  /* the flyover has its own eye: it flies forward (the land comes toward -z, so it looks along -z), a little above
+     the hills ahead and looking down at them. The pad and a drag turn this eye instead of the orbit. */
+  var FLY = { z: 3, ahead: [0, 0.5, 1, 1.5], yaw: 0, pitch: -0.35 };
   var FOG = { near: 2.5, far: 7, lum: 0.95 };
   function sky(y) { return 0.55 + 0.45 * (y / H); }
 
   /* ---------- scenes ---------- */
   function render(tm) {
     var cam = R.camera, o = { wire: wire };
-    cam.yaw = yaw; cam.pitch = pitch; cam.dist = dist; R.fog = null;
+    /* the orbit scenes look at the origin; the flyover moves the eye, so put it back every frame */
+    cam.x = cam.y = cam.z = 0; cam.yaw = yaw; cam.pitch = pitch; cam.dist = dist; R.fog = null;
     if (scene === 0) {
       R.clear(0.92);
       R.draw(KNOT, function (p) { return rotX(rotY(p, tm * 0.7), tm * 0.4); }, o);
     } else if (scene === 1) {
       R.clear(sky);
-      /* the sun sits far away, follows the camera's yaw so it stays in the sky */
-      var sunDir = rotY([0, 0, -1], cam.yaw);
-      var sc = [sunDir[0] * 14, 3.2, sunDir[2] * 14];
+      /* the eye rides over the highest ground just ahead of it, so it never dips into a hill;
+         SELECT raises it (dist 3.2..5.6 -> 0.5..1.7 above the ground) */
+      var ground = -1.25, k;
+      for (k = 0; k < FLY.ahead.length; k++) ground = Math.max(ground, height(0, FLY.z - FLY.ahead[k] - tm * 1.2));
+      cam.dist = 0; cam.x = 0; cam.z = FLY.z; cam.y = ground + 0.5 + (dist - 3.2) * 0.5;
+      cam.yaw = Math.PI + FLY.yaw; cam.pitch = FLY.pitch;
+      /* the sun sits far away ahead of the eye, low enough to stay in the picture, and follows its yaw */
+      var sunDir = rotY([0, 0, 1], cam.yaw);
+      var sc = [sunDir[0] * 14, 2.4, sunDir[2] * 14];
       R.draw(SUN, function (p) { var q = rotY(rotX(p, tm * 0.3), tm * 0.5); return [q[0] + sc[0], q[1] + sc[1], q[2] + sc[2]]; }, { wire: true });
       R.fog = FOG; R.clearDepth();
-      cam.dist = Math.max(0.6, dist - 3.2);
       R.draw(terrain(tm), null, o);
     } else {
       R.clear(0.92);
@@ -625,6 +634,14 @@ var Lo3D = (function () {
 
   /* ---------- input ---------- */
   function clampPitch() { pitch = Math.max(-1.2, Math.min(1.3, pitch)); }
+  /* turn the orbit, or in the flyover the flying eye (a narrower range: it keeps the land in view).
+     dy > 0 is the left key: the orbit swings the model left, the eye turns left (a smaller yaw). */
+  function turn(dy, dp) {
+    if (scene === 1) {
+      FLY.yaw = Math.max(-1.2, Math.min(1.2, FLY.yaw - dy));
+      FLY.pitch = Math.max(-0.9, Math.min(0.3, FLY.pitch + dp));
+    } else { yaw += dy; pitch += dp; clampPitch(); }
+  }
   if (typeof PAD !== "undefined") {
     PAD.on("press", function (b) {
       hideLegend();   /* any key: the player has found the pad */
@@ -639,7 +656,9 @@ var Lo3D = (function () {
   cv.addEventListener("pointerdown", function (e) { hideLegend(); drag = { x: e.clientX, y: e.clientY, id: e.pointerId }; try { cv.setPointerCapture(e.pointerId); } catch (_) {} });
   cv.addEventListener("pointermove", function (e) {
     if (!drag || drag.id !== e.pointerId) return;
-    yaw -= (e.clientX - drag.x) * 0.012; pitch += (e.clientY - drag.y) * 0.012; clampPitch();
+    /* the orbit turns the model with the finger; in the flyover the land follows the finger */
+    var dx = (e.clientX - drag.x) * 0.012;
+    turn(scene === 1 ? dx : -dx, (e.clientY - drag.y) * 0.012);
     drag.x = e.clientX; drag.y = e.clientY;
   });
   function endDrag() { drag = null; }
@@ -650,11 +669,11 @@ var Lo3D = (function () {
   function frame(now) {
     if (!start) { start = now; last = now; }
     var dt = Math.min(0.05, (now - last) / 1000); last = now;
-    if (held("left")) yaw += dt * 1.6;
-    if (held("right")) yaw -= dt * 1.6;
-    if (held("up")) { pitch += dt * 1.2; clampPitch(); }
-    if (held("down")) { pitch -= dt * 1.2; clampPitch(); }
-    if (!drag && !held("left") && !held("right")) yaw += dt * 0.15;
+    if (held("left")) turn(dt * 1.6, 0);
+    if (held("right")) turn(-dt * 1.6, 0);
+    if (held("up")) turn(0, dt * 1.2);
+    if (held("down")) turn(0, -dt * 1.2);
+    if (!drag && !held("left") && !held("right")) yaw += dt * 0.15;   /* the orbit drifts; the flyover holds its course */
     render((now - start) / 1000);
     frames++; fpsT += dt;
     if (fpsT >= 0.5) { fps = Math.round(frames / fpsT); frames = 0; fpsT = 0; }
