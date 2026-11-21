@@ -6,7 +6,6 @@
 
 var NOTES={C:0,D:2,E:4,F:5,G:7,A:9,B:11};
 var SCALE={major:[0,2,4,5,7,9,11],minor:[0,2,3,5,7,8,10]};
-var NAMES={C:0,"C#":1,Db:1,D:2,"D#":3,Eb:3,E:4,F:5,"F#":6,Gb:6,G:7,"G#":8,Ab:8,A:9,"A#":10,Bb:10,B:11};
 var QUALITIES={
   "": "maj", m:"m", "7":"7", maj7:"maj7", M7:"maj7", "Δ":"maj7", m7:"m7", "9":"9", m9:"m9",
   "6":"6", m6:"m6", add9:"add9", add2:"add9", sus2:"sus2", sus4:"sus4", sus:"sus4", dim:"dim", dim7:"dim7",
@@ -112,11 +111,16 @@ function chord(symbol,key){
   bassName=m[4]?m[4].charAt(0).toUpperCase()+m[4].slice(1):null;
   bassPc=bassName?pitchPc(bassName):null;
   if(typeof rootPc!=="number" || (bassName && typeof bassPc!=="number")) return {error:"chord"};
-  suffix=m[3]; q=QUALITIES[suffix]; lost=null;
+  suffix=m[3]; q=owns(QUALITIES,suffix)?QUALITIES[suffix]:null; lost=null;
   if(!q){
-    q=FALLBACKS[suffix];
+    q=owns(FALLBACKS,suffix)?FALLBACKS[suffix]:null;
     if(q) lost="chord:"+symbol+">"+q;
-    else { q=/^m/.test(suffix)?"m":"maj"; lost="chord:"+symbol+">"+q; }
+    else {
+      if(/^maj|^M/.test(suffix)) q=/\d/.test(suffix)?"maj7":"maj";
+      else if(/^m/.test(suffix)||/^min/.test(suffix)) q="m";
+      else q="maj";
+      lost="chord:"+symbol+">"+q;
+    }
   }
   scale=SCALE[keyMode(typeof key==="number"?"":key.name||"")];
   if(!scale) scale=SCALE.major;
@@ -145,10 +149,11 @@ function chord(symbol,key){
 }
 
 function degreeFor(song,track,midi){
-  var d,a;
+  var d,a,accs=[0,1,-1];
   if(!int(midi)) return null;
-  for(d=-32;d<=32;d++){
-    for(a=-1;a<=1;a++) if(LopdaSong.noteMidi(song,track,d,a)===midi) return {deg:d,acc:a};
+  for(var i=0;i<accs.length;i++){
+    a=accs[i];
+    for(d=-32;d<=32;d++) if(LopdaSong.noteMidi(song,track,d,a)===midi) return {deg:d,acc:a};
   }
   return null;
 }
@@ -178,11 +183,12 @@ function midiForPc(pc,key,track){
 function toSong(input,now){
   var checked=check(input);
   if(checked.error) return checked;
-  var score=checked.score,pc=keyPc(score.key,score.capo), mode=keyMode(score.key), songKey, song, lost=[],bars=[],lastChords=null,i,j,k,bar,active,previousMidi=null,priorBarMidi=null,melodyPitches=[],barChords,decoded,firstBeat,tokens,cursor,token,midi,pitch,span,cc,rootPc,keyObj,src,styles,groove,step,drum,notes,barData,signature,patternAt,chain=[];
+  var score=checked.score,pc=keyPc(score.key,score.capo), mode=keyMode(score.key), songKey, song, lost=[],patterns=[],lastChords=null,i,j,k,bar,active,previousMidi=null,priorBarMidi=null,melodyPitches=[],barPitches,barLost,barChords,decoded,firstBeat,tokens,cursor,token,midi,pitch,cc,rootPc,keyObj,src,styles,groove,step,drum,notes,barData,signature,patternAt,hasMelody,chain=[];
   if(pc===null) return {error:"key"};
   songKey=pc; keyObj={pc:pc,name:score.key};
   song=LopdaSong.newSong(typeof now==="number"&&isFinite(now)&&now>=0?now:0);
-  song.name=score.title||"读谱磁带"; song.key=songKey; song.scale=mode; song.bpm=score.bpm===null?80:LopdaSong.clampBpm(score.bpm);
+  song.name=Array.from(score.title||"读谱磁带").slice(0,LopdaSong.NAME_MAX).join("");
+  song.key=songKey; song.scale=mode; song.bpm=score.bpm===null?80:LopdaSong.clampBpm(score.bpm);
   song.swing=0.5; song.tape=2; song.kit="soft";
   song.tracks[2].voice="guitar"; song.tracks[3].voice="flute";
   song.patterns=[]; song.song=[];
@@ -190,12 +196,12 @@ function toSong(input,now){
   groove=styles&&styles.GROOVES&&styles.GROOVES["pop-a"];
   if(!groove) return {error:"song"};
   for(i=0;i<score.bars.length;i++){
-    bar=score.bars[i]; barChords=[];
+    bar=score.bars[i]; barChords=[]; barLost=[]; barPitches=[];
     if(bar.chords.length){
       for(j=0;j<bar.chords.length;j++){
         cc=chord(bar.chords[j],keyObj);
         if(cc.error) return {error:"chord",at:{bar:i}};
-        dedupeLost(lost,cc.lost); barChords.push(cc);
+        dedupeLost(barLost,cc.lost); barChords.push(cc);
       }
       lastChords=barChords;
     } else if(lastChords) barChords=[lastChords[lastChords.length-1]];
@@ -213,18 +219,11 @@ function toSong(input,now){
       notes.bass.push(bassNote);
       notes.bass.push(bassNote2);
     }
-    if(barChords.length){
-      for(j=0;j<LopdaSong.DRUMS.length;j++){
-        drum=LopdaSong.DRUMS[j]; src=groove.steps[drum]||[];
-        for(k=0;k<src.length;k++) notes.drums.push({t:src[k][0]*LopdaSong.STEP,len:LopdaSong.STEP,key:drum,vel:src[k][1]});
-      }
-      notes.drums.sort(function(a,b){return a.t-b.t||LopdaSong.DRUMS.indexOf(a.key)-LopdaSong.DRUMS.indexOf(b.key);});
-    }
     active=null;
     firstBeat=parseBeat(bar.beats[0]);
     if(firstBeat.length===1 && firstBeat[0].hold && priorBarMidi!==null){
       notes.melody.push({t:0,len:1,deg:0,vel:LopdaSong.NOTE_VEL,_midi:priorBarMidi});
-      active={midi:priorBarMidi,tie:false}; previousMidi=priorBarMidi; melodyPitches.push(priorBarMidi);
+      active={midi:priorBarMidi,tie:false}; previousMidi=priorBarMidi;
     }
     for(j=0;j<4;j++){
       decoded=parseBeat(bar.beats[j]);
@@ -244,7 +243,7 @@ function toSong(input,now){
         if(!(active && active.tie && active.midi===midi)){
           notes.melody.push({t:cursor*LopdaSong.STEP,len:1,deg:0,vel:LopdaSong.NOTE_VEL});
           active={midi:midi,tie:token.tie};
-          melodyPitches.push(midi);
+          barPitches.push(midi);
         } else active.tie=token.tie;
         previousMidi=midi;
         /* The temporary pitch is converted after the song-wide octave choice. */
@@ -253,11 +252,31 @@ function toSong(input,now){
       }
     }
     priorBarMidi=active?active.midi:null;
-    bars.push(notes);
+    hasMelody=false;
+    for(j=0;j<notes.melody.length;j++) if(notes.melody[j].vel!==LopdaSong.REST_VEL){hasMelody=true;break;}
+    if(barChords.length || hasMelody){
+      for(j=0;j<LopdaSong.DRUMS.length;j++){
+        drum=LopdaSong.DRUMS[j]; src=groove.steps[drum]||[];
+        for(k=0;k<src.length;k++) notes.drums.push({t:src[k][0]*LopdaSong.STEP,len:LopdaSong.STEP,key:drum,vel:src[k][1]});
+      }
+      notes.drums.sort(function(a,b){return a.t-b.t||LopdaSong.DRUMS.indexOf(a.key)-LopdaSong.DRUMS.indexOf(b.key);});
+    }
+    tie(notes.chords,16*LopdaSong.STEP); tie(notes.bass,16*LopdaSong.STEP); tie(notes.melody,16*LopdaSong.STEP);
+    barData={len:16,notes:notes};
+    signature=JSON.stringify(notes); patternAt=-1;
+    for(j=0;j<patterns.length;j++) if(JSON.stringify(patterns[j].notes)===signature){patternAt=j;break;}
+    if(chain.length>=LopdaSong.SONG_MAX || (patternAt<0 && patterns.length>=LopdaSong.PATTERNS_MAX)){
+      dedupeLost(lost,"bars:"+(i+1)); break;
+    }
+    if(patternAt<0){patternAt=patterns.length;patterns.push(barData);}
+    chain.push(patternAt);
+    for(j=0;j<barPitches.length;j++) melodyPitches.push(barPitches[j]);
+    for(j=0;j<barLost.length;j++) dedupeLost(lost,barLost[j]);
   }
+  if(!chain.length) return {error:"song"};
   var mean=melodyPitches.length?melodyPitches.reduce(function(a,b){return a+b;},0)/melodyPitches.length:60,shift=mean<60?12:0;
-  for(i=0;i<bars.length;i++){
-    notes=bars[i];
+  for(i=0;i<patterns.length;i++){
+    notes=patterns[i].notes;
     for(j=0;j<notes.melody.length;j++){
       src=notes.melody[j];
       if(src.vel===LopdaSong.REST_VEL){delete src._midi;continue;}
@@ -265,17 +284,8 @@ function toSong(input,now){
       if(!pitch) return {error:"song"};
       src.deg=pitch.deg; if(pitch.acc) src.acc=pitch.acc; delete src._midi;
     }
-    tie(notes.chords,16*LopdaSong.STEP); tie(notes.bass,16*LopdaSong.STEP); tie(notes.melody,16*LopdaSong.STEP);
-    barData={len:16,notes:notes};
-    signature=JSON.stringify(notes); patternAt=-1;
-    for(j=0;j<song.patterns.length;j++) if(JSON.stringify(song.patterns[j].notes)===signature){patternAt=j;break;}
-    if(chain.length>=LopdaSong.SONG_MAX || (patternAt<0 && song.patterns.length>=LopdaSong.PATTERNS_MAX)){
-      dedupeLost(lost,"bars:"+(i+1)); break;
-    }
-    if(patternAt<0){patternAt=song.patterns.length;song.patterns.push(barData);}
-    chain.push(patternAt);
   }
-  if(!chain.length) return {error:"song"};
+  song.patterns=patterns;
   song.song=chain;
   var valid=LopdaSong.validate(song);
   if(valid.error) return {error:"song"};

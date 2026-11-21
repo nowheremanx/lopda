@@ -37,6 +37,12 @@ test("check is strict about the score shape and locates beat grammar errors", ()
   assert.equal(S.check({ ...score([bar()]), extra: true }).error, "shape");
   assert.equal(S.check(score([bar()], { capo: 12 })).error, "capo");
   assert.equal(S.check({ ...score([bar()]), bars: [bar([], ["0", "0", "0"])] }).error, "beats");
+  const threeChords = S.check(score([bar(["C", "F", "G"])]));
+  assert.equal(threeChords.error, "chords");
+  assert.deepEqual(plain(threeChords.at), { bar: 0 });
+  const nonString = S.check(score([bar([], ["0", "0", null, "0"])]));
+  assert.equal(nonString.error, "beat");
+  assert.deepEqual(plain(nonString.at), { bar: 0, beat: 2 });
 });
 
 test("keyPc accounts for capo and recognizes natural-minor key spelling", () => {
@@ -64,6 +70,16 @@ test("chord maps the Tape4 qualities and aliases", () => {
     const result = S.chord(symbol, 0);
     assert.equal(result.q, q, symbol);
     assert.equal(result.lost, `chord:${symbol}>${q}`);
+  }
+  for (const [symbol, q] of [["Cmaj", "maj"], ["Cmaj13", "maj7"], ["Cmin7", "m"], ["Cmystery", "m"], ["Cxyz", "maj"]]) {
+    const result = S.chord(symbol, 0);
+    assert.equal(result.q, q, symbol);
+    assert.equal(result.lost, `chord:${symbol}>${q}`);
+  }
+  for (const suffix of ["constructor", "toString", "__proto__"]){
+    const result = S.chord("C" + suffix, 0);
+    assert.equal(result.q, "maj", suffix);
+    assert.equal(result.lost, `chord:C${suffix}>maj`, suffix);
   }
   assert.equal(S.chord("Codd", 0).q, "maj");
   assert.equal(S.chord("Cmystery", 0).q, "m");
@@ -116,6 +132,22 @@ test("rests, same-pitch ties, slurs to a different pitch, and a barline re-strik
   assert.equal(line.song.patterns[1].notes.melody[0].t, 0);
   assert.equal(line.song.patterns[1].notes.melody[0].vel, Song.NOTE_VEL);
   assert.equal(line.song.patterns[0].notes.melody[0].vel, Song.REST_VEL);
+  const tiedAtLine = S.toSong(score([
+    bar([], ["0", "0", "0", "1~"]),
+    bar([], ["1", "0", "0", "0"]),
+  ]));
+  assert.equal(tiedAtLine.song.patterns[1].notes.melody.find((n) => n.vel > 0).t, 0);
+  const restThenHold = S.toSong(score([
+    bar([], ["0", "0", "0", "0"]),
+    bar([], ["-", "0", "0", "0"]),
+  ]));
+  assert.equal(restThenHold.song.patterns[1].notes.melody.some((n) => n.vel > 0), false);
+  const noMeanDoubleCount = S.toSong(score([
+    bar([], ["#1", "0", "0", "b1"]),
+    bar([], ["-", "0", "0", "0"]),
+  ]));
+  const restruck = noMeanDoubleCount.song.patterns[1].notes.melody.find((n) => n.vel > 0);
+  assert.equal(Song.noteMidi(noMeanDoubleCount.song, "melody", restruck.deg, restruck.acc), 59);
 });
 
 test("chords, carry, bass, groove, metadata and event playback form a valid song", () => {
@@ -135,10 +167,28 @@ test("chords, carry, bass, groove, metadata and event playback form a valid song
   assert.equal(tape.song.patterns[0].notes.chords.length, 2);
   assert.deepEqual(plain(tape.song.patterns[0].notes.chords.map((n) => n.t)), [0, 8 * Song.STEP]);
   assert.equal(tape.song.patterns[0].notes.bass.length, 4);
+  assert.deepEqual(plain(tape.song.patterns[0].notes.bass.map((n) => n.t)), [0, 6 * Song.STEP, 8 * Song.STEP, 14 * Song.STEP]);
   assert.ok(tape.song.patterns[0].notes.drums.length > 0);
   assert.deepEqual(plain(tape.song.patterns[1].notes.chords.map((n) => [n.t, n.deg])), [[0, 4]], "empty chords carry the last chord");
   assert.equal(Song.validate(tape.song).error, undefined);
   assert.ok(Song.events(tape.song, tape.song.song[0], 0, 16 * Song.STEP).length > 0);
+  assert.equal(S.toSong(score([bar()], { bpm: null })).song.bpm, 80);
+  assert.equal(S.toSong(score([bar()], { bpm: 30 })).song.bpm, Song.BPM_MIN);
+});
+
+test("titles are truncated to 40 code points while check accepts long titles", () => {
+  const title = "x".repeat(50);
+  assert.equal(S.check(score([bar()], { title })).error, undefined);
+  const result = S.toSong(score([bar()], { title }));
+  assert.ok(result.song);
+  assert.equal(Array.from(result.song.name).length, 40);
+});
+
+test("drums play for a melody pickup, but not for a silent chordless bar", () => {
+  const pickup = S.toSong(score([bar([], ["1", "0", "0", "0"])]));
+  const silent = S.toSong(score([bar()]));
+  assert.ok(pickup.song.patterns[0].notes.drums.length > 0);
+  assert.equal(silent.song.patterns[0].notes.drums.length, 0);
 });
 
 test("the examples are self-written public-domain jianpu and convert into playable tapes", () => {
@@ -183,12 +233,43 @@ test("identical bars share patterns, while 64 patterns and 96 chain slots are ha
   assert.ok(slots.lost.includes("bars:97"));
 });
 
+test("only surviving bars affect the auto-octave mean and lost chord codes", () => {
+  const quality = ["", "m", "7", "maj7", "m7", "9", "m9", "6", "m6", "add9", "sus2", "sus4", "dim", "dim7", "aug", "m7b5", "5"];
+  const bars = [];
+  for (const root of ["C", "D", "E", "G"]) {
+    for (const q of quality) {
+      if (bars.length === 64) break;
+      bars.push(bar([root + q], ["1", "0", "0", "0"]));
+    }
+  }
+  bars.push(bar(["Cconstructor"], ["1,,,", "0", "0", "0"]));
+  const result = S.toSong(score(bars));
+  assert.equal(result.song.song.length, 64);
+  const first = result.song.patterns[0].notes.melody.find((n) => n.vel > 0);
+  assert.equal(Song.noteMidi(result.song, "melody", first.deg, first.acc), 60);
+  assert.deepEqual(plain(result.lost), ["bars:65"]);
+});
+
 test("degreeFor is an exact inverse of noteMidi across the playable pitch range", () => {
   for (const key of [0, 4, 9, 11]) for (const scale of ["major", "minor"]) {
     const song = { key, scale };
     for (let midi = 36; midi <= 84; midi++) {
       const degree = S.degreeFor(song, "melody", midi);
       assert.ok(degree, `${key}/${scale} MIDI ${midi}`);
+      assert.equal(Song.noteMidi(song, "melody", degree.deg, degree.acc), midi);
+    }
+  }
+});
+
+test("degreeFor prefers in-scale spelling, then sharp, then flat, without losing round trips", () => {
+  assert.deepEqual(plain(S.degreeFor({ key: 0, scale: "major" }, "melody", 65)), { deg: 3, acc: 0 });
+  assert.deepEqual(plain(S.degreeFor({ key: 0, scale: "major" }, "melody", 72)), { deg: 7, acc: 0 });
+  for (const song of [{ key: 0, scale: "major" }, { key: 7, scale: "major" }, { key: 9, scale: "minor" }]) {
+    for (let midi = 36; midi <= 84; midi++) {
+      const inScale = Array.from({ length: 65 }, (_, i) => i - 32)
+        .some((deg) => Song.noteMidi(song, "melody", deg, 0) === midi);
+      const degree = S.degreeFor(song, "melody", midi);
+      if (inScale) assert.equal(degree.acc, 0, `${song.key}/${song.scale} MIDI ${midi}`);
       assert.equal(Song.noteMidi(song, "melody", degree.deg, degree.acc), midi);
     }
   }
