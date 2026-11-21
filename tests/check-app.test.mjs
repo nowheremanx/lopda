@@ -156,11 +156,11 @@ const FAILS = [
   ["named colour", { html: (h) => h.replace("color: #1f2a14", "color: red") }, /color: red/],
   ["unknown sound", withCode('PAD.sfx("boom");'), /PAD\.sfx\("boom"\) is not a known sound/],
   ["unknown ambience", withCode('if (PAD.ambience) PAD.ambience("thunder", 1);'), /PAD\.ambience\("thunder"\) is not a known ambience/],
-  ["buttons on lopda/0 code", { manifest: (m) => { m.spec = "lopda/0"; delete m.buttons; } }, /PAD\.on\/isDown\/sfx\/music\/ambience\/say\/dict need spec "lopda\/1"/],
+  ["buttons on lopda/0 code", { manifest: (m) => { m.spec = "lopda/0"; delete m.buttons; } }, /PAD\.on\/isDown\/BUTTONS\/sfx\/music\/ambience\/say\/dict need spec "lopda\/1"/],
   /* the template's own PAD.on and PAD.sfx are renamed away, so PAD.music alone trips the rule */
   ["music on lopda/0 code", { manifest: (m) => { m.spec = "lopda/0"; delete m.buttons; },
     html: (h) => withCode("if (PAD.music) PAD.music.play({ p1: \"c\" });").html(h).replace(/PAD\.(on|sfx)\(/g, "noPad(") },
-    /PAD\.on\/isDown\/sfx\/music\/ambience\/say\/dict need spec "lopda\/1"/],
+    /PAD\.on\/isDown\/BUTTONS\/sfx\/music\/ambience\/say\/dict need spec "lopda\/1"/],
 ];
 
 for (const [name, change, want] of FAILS) {
@@ -258,4 +258,24 @@ test("one failing app fails the run, and each app is reported", (t) => {
   const r = tool("check-app.mjs", counter(t), counter(t, { manifest: (m) => (m.license = "GPL-3.0") }));
   assert.equal(r.code, 1);
   assert.match(r.out, /PASS {2}my-app[\s\S]*FAIL {2}my-app/);
+});
+
+/* PAD.BUTTONS is a lopda/1 button API too (SPEC.md section 4): reading it counts as using the buttons; a comment does not */
+test("PAD.BUTTONS counts as using the buttons, a comment naming it does not", (t) => {
+  const noPress = (extra) => ({
+    manifest: (m) => delete m.buttons,
+    html: (h) => h.replace(/PAD\.on\("press"[\s\S]*?\n  \}\);/, extra)
+  });
+  let r = tool("check-app.mjs", counter(t, noPress("var names = PAD.BUTTONS;")));
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /"buttons" is not true/);
+  r = tool("check-app.mjs", counter(t, noPress("/* PAD.BUTTONS lists the names */")));
+  assert.equal(r.code, 0, r.out);
+  assert.doesNotMatch(r.out, /"buttons" is not true/);
+  r = tool("check-app.mjs", counter(t, {
+    manifest: (m) => { m.spec = "lopda/0"; delete m.buttons; },
+    html: (h) => h.replace(/PAD\.on\("press"[\s\S]*?\n  \}\);/, "var names = PAD.BUTTONS;").replace(/PAD\.sfx\(sound\);/, "")
+  }));
+  assert.notEqual(r.code, 0, r.out);
+  assert.match(r.out, /BUTTONS\/sfx\/music\/ambience\/say\/dict need spec "lopda\/1"/);
 });
