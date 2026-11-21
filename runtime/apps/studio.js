@@ -62,7 +62,7 @@ var T={
   versions:[], versionsOk:false, versionPick:0, projects:null, projectsLoading:false,
   projectFolder:"", templatePick:"", deletePick:"", importData:null, guidePage:0,
   /* 12.16: the assistant's one request and the preview waiting for 采用 */
-  aiBusy:false, aiJob:null, aiPreview:null, aiNote:"", aiTrouble:null,
+  aiBusy:false, aiJob:null, aiPreview:null, aiNote:"", aiTrouble:null, scoreText:"",
   aiCard:"", aiStage:"", aiSig:null, aiMark:false, aiT0:0, aiLast:0, aiTick:0,
   /* the player: one chain clock, chainPat is what is scheduled, playPat is what the ears hear */
   playing:false, mode:"", playPat:0, chainPat:0, pendingPat:-1, queued:-1, boundaryGlobal:0,
@@ -2143,6 +2143,7 @@ function openSheet(name){
   renderSheet();
 }
 function closeSheet(){
+  if(T.sheet==="score"){ T.sheet="ai"; renderSheet(); return; }
   if(T.sheet==="new"||T.sheet==="demo"||T.sheet==="pop"){ T.sheet="menu"; renderSheet(); return; }
   if(T.sheet==="editmenu"||T.sheet==="filemenu"){ T.sheet="menu"; renderSheet(); return; }
   if(T.sheet==="copyask"){ T.sheet="copy"; renderSheet(); return; }
@@ -2235,6 +2236,7 @@ function aiSignalLine(){
 }
 function aiStageText(st){
   var v=st.vars||{};
+  if(st.id==="score") return tr(st.n===2?"studio.score.stage2":"studio.score.stage");
   if(st.id==="card") return tr("studio.ai.stage.card");
   if(st.id==="plan") return tr("studio.ai.stage.plan");
   if(st.id==="lay") return tr("studio.ai.stage.lay");
@@ -2271,19 +2273,35 @@ function aiStopJob(){
   if(T.aiJob && T.aiJob.stop) T.aiJob.stop();
 }
 function isAiDraft(pv){
-  return !!(pv && (pv.draft || (pv.ops && pv.ops.some(function(o){ return o && o.op==="replaceSong"; }))));
+  return !!(pv && (pv.song || pv.draft || (pv.ops && pv.ops.some(function(o){ return o && o.op==="replaceSong"; }))));
+}
+function scoreLostText(code){
+  var m;
+  if((m=/^beat:(\d+)\.(\d+)$/.exec(code))) return tr("studio.score.lost.beat",{bar:m[1],beat:m[2]});
+  if((m=/^chord:(.*)>none$/.exec(code))) return tr("studio.score.lost.skip",{from:m[1]});
+  if((m=/^chord:(.*)>(.*)$/.exec(code))) return tr("studio.score.lost.chord",{from:m[1],to:m[2]});
+  if((m=/^bars:(\d+)$/.exec(code))) return tr("studio.score.lost.bars",{n:Math.max(0,Number(m[1])-1)});
+  return "";
 }
 function renderAiSheet(sh){
-  var head=sheetHead(tr("studio.ai.title"));
+  var head=sheetHead(tr("studio.ai.title")), i;
   head.className+=" st-sheet-head";
   if(T.aiPreview){
     var pr=el("div","st-ai-preview");
     pr.appendChild(el("p","st-ai-reply",T.aiPreview.reply||tr("studio.ai.done")));
     if(T.aiPreview.card) pr.appendChild(el("p","st-ai-card",T.aiPreview.card));
-    pr.appendChild(el("p","st-sheet-label",isAiDraft(T.aiPreview)?tr("studio.ai.newtape"):tr("studio.ai.ops",{n:T.aiPreview.ops.length})));
+    if(Array.isArray(T.aiPreview.lost)){
+      var lost=T.aiPreview.lost, shown=0, li;
+      for(i=0;i<lost.length&&shown<3;i++){
+        li=scoreLostText(lost[i]);
+        if(li){ pr.appendChild(el("p","st-ai-card",li)); shown++; }
+      }
+      if(lost.length>shown) pr.appendChild(el("p","st-ai-card",tr("studio.score.lost.more",{n:lost.length-shown})));
+    }
+    pr.appendChild(el("p","st-sheet-label",isAiDraft(T.aiPreview)?tr("studio.ai.newtape"):tr("studio.ai.ops",{n:(T.aiPreview.ops||[]).length})));
     sh.appendChild(pr);
     var arow=el("div","st-sheet-row");
-    if(T.aiPreview.ops.length || isAiDraft(T.aiPreview)){
+    if((T.aiPreview.ops&&T.aiPreview.ops.length) || isAiDraft(T.aiPreview)){
       var apply=el("button","st-sheet-btn",""); apply.type="button"; apply.textContent=tr("studio.ai.apply");
       apply.onclick=function(){ applyAiPreview(true); };
       arow.appendChild(apply);
@@ -2345,6 +2363,12 @@ function renderAiSheet(sh){
     row.appendChild(stop);
   }
   sh.appendChild(row);
+  if(LP.ai && LP.ai.on()){
+    var readRow=el("div","st-sheet-row"), read=el("button","st-sheet-btn","");
+    read.type="button"; read.textContent=tr("studio.score.row"); read.disabled=T.aiBusy;
+    read.onclick=function(){ openSheet("score"); };
+    readRow.appendChild(read); sh.appendChild(readRow);
+  }
   var chips=el("div","st-ai-chips");
   var chip=function(label,text){
     var b=el("button","st-ai-chip",label); b.type="button";
@@ -2362,11 +2386,46 @@ function renderAiSheet(sh){
     sh.appendChild(state);
   }
 }
+function renderScoreSheet(sh){
+  sheetHead(tr("studio.score.title"));
+  var input=el("textarea","st-name st-ai-input st-score-input");
+  input.rows=6; input.maxLength=12000; input.id="studio-score-input";
+  input.placeholder=tr("studio.score.hint"); input.value=T.scoreText||""; input.disabled=T.aiBusy;
+  input.oninput=function(){ T.scoreText=input.value; };
+  input.onkeydown=function(e){ if(e.key==="Enter" && (e.ctrlKey || e.metaKey)){ e.preventDefault(); askScore(input.value); } };
+  sh.appendChild(input);
+  if(T.aiBusy){
+    var prog=el("div","st-ai-progress");
+    var cardLine=el("p","st-ai-card",""); cardLine.id="studio-ai-card";
+    var stageLine=el("p","st-ai-stage",T.aiStage); stageLine.id="studio-ai-stage";
+    var linkLine=el("p","st-ai-link",""); linkLine.id="studio-ai-link";
+    prog.appendChild(cardLine); prog.appendChild(stageLine); prog.appendChild(linkLine);
+    prog.appendChild(el("p","st-ai-stay",tr("studio.ai.stay")));
+    sh.appendChild(prog); paintAiProgress();
+    if(T.aiTrouble){
+      var tb=el("div","st-ai-trouble"), trow=el("div","st-sheet-row");
+      tb.appendChild(el("p","st-sheet-label",tr("studio.ai.trouble",{why:T.aiTrouble.why})));
+      var again=el("button","st-sheet-btn",tr("studio.ai.trouble.again")); again.type="button"; again.onclick=function(){ aiTroubleAnswer(true); };
+      var quit=el("button","st-sheet-btn",tr("studio.ai.trouble.stop")); quit.type="button"; quit.onclick=function(){ aiTroubleAnswer(false); };
+      trow.appendChild(again); trow.appendChild(quit); tb.appendChild(trow); sh.appendChild(tb);
+    }
+  }
+  var row=el("div","st-sheet-row"), read=el("button","st-sheet-btn","");
+  read.type="button"; read.id="studio-score-read"; read.textContent=tr("studio.score.read"); read.disabled=T.aiBusy;
+  read.onclick=function(){ askScore(input.value); };
+  if(T.aiBusy){
+    var stop=el("button","st-sheet-btn",""); stop.type="button"; stop.textContent=tr("studio.ai.stop");
+    stop.onclick=aiStopJob; row.appendChild(stop);
+  }
+  var back=el("button","st-sheet-btn",""); back.type="button"; back.textContent=tr("studio.score.back");
+  back.onclick=function(){ closeSheet(); };
+  row.insertBefore(read,row.firstChild); row.appendChild(back); sh.appendChild(row);
+}
 function applyAiPreview(play){
   var pv=T.aiPreview;
   if(!pv || !T.loaded || !T.song) return;
-  if(!pv.ops.length && !isAiDraft(pv)){ toast(pv.reply||tr("studio.ai.done")); return; }
-  var out=EDIT.applyAll(T.song,pv.ops);
+  if(!(pv.ops&&pv.ops.length) && !isAiDraft(pv)){ toast(pv.reply||tr("studio.ai.done")); return; }
+  var out=pv.song ? {song:pv.song} : EDIT.applyAll(T.song,pv.ops||[]);
   if(out.error){ toast(tr("studio.ai.bad")); return; }
   if(isAiDraft(pv)){
     var song=out.song, id=LP.uid();
@@ -2425,7 +2484,7 @@ function askAi(text){
     return new Promise(function(resolve){
       T.aiTrouble={resolve:resolve, why:LP.ai.err?LP.ai.err(e):""};
       LP.sfx("err");
-      if(T.sheet==="ai") renderSheet();
+      if(T.sheet==="ai"||T.sheet==="score") renderSheet();
       else toast(tr("studio.ai.trouble.toast"));
     });
   }
@@ -2457,6 +2516,42 @@ function askAi(text){
       : code==="unreadable" ? tr("studio.ai.unread")
       : code==="tools" ? tr("studio.ai.bad")
       : tr("studio.ai.fail",{why:LP.ai.err?LP.ai.err(e):""}));
+    renderSheet();
+  });
+}
+function askScore(text){
+  text=String(text==null?"":text).trim();
+  if(!text || T.aiBusy) return;
+  if(!LP.ai || !LP.ai.on()){ toast(tr("studio.ai.nokey")); return; }
+  T.scoreText=text; T.aiBusy=true; T.aiPreview=null; T.aiCard=""; T.aiStage=""; T.aiSig=null; T.aiMark=false;
+  T.aiTrouble=null; T.aiT0=T.aiLast=Date.now();
+  renderSheet();
+  function onSignal(s){ T.aiSig=s; T.aiLast=Date.now(); T.aiMark=!T.aiMark; paintAiProgress(); }
+  function ask(messages){ return LP.ai.ask({messages:messages,onSignal:onSignal}); }
+  function onStage(st){ aiStage(st); }
+  function onTrouble(e){
+    return new Promise(function(resolve){
+      T.aiTrouble={resolve:resolve,why:LP.ai.err?LP.ai.err(e):""};
+      LP.sfx("err");
+      if(T.sheet==="ai"||T.sheet==="score") renderSheet();
+      else toast(tr("studio.ai.trouble.toast"));
+    });
+  }
+  var job=H.readScore({text:text,ask:ask,onStage:onStage,onTrouble:onTrouble,now:Date.now()});
+  T.aiJob=job;
+  if(T.aiTick) clearInterval(T.aiTick);
+  T.aiTick=setInterval(paintAiProgress,1000); LP.keepAwake(true);
+  function end(){ if(T.aiTick){clearInterval(T.aiTick);T.aiTick=0;} T.aiJob=null; T.aiBusy=false; T.aiTrouble=null; LP.keepAwake(false); }
+  job.then(function(res){
+    end();
+    T.aiPreview={reply:tr("studio.score.done",{n:res.bars}),song:res.song,lost:res.lost||[],bars:res.bars,draft:true,ops:[]};
+    if(T.sheet==="score") T.sheet="ai";
+    else if(T.sheet!=="ai") toast(tr("studio.ai.ready"));
+    renderSheet();
+  },function(e){
+    var code=e&&e.code; end();
+    toast(code==="stopped"?tr("studio.ai.stopped"):code==="unreadable"?tr("studio.score.fail"):
+      tr("studio.ai.fail",{why:LP.ai.err?LP.ai.err(e):""}));
     renderSheet();
   });
 }
@@ -2952,6 +3047,10 @@ function renderSheet(){
   }
   if(T.sheet==="ai"){
     renderAiSheet(sh);
+    return;
+  }
+  if(T.sheet==="score"){
+    renderScoreSheet(sh);
     return;
   }
   if(T.sheet==="noteplay"){
@@ -3869,6 +3968,11 @@ document.addEventListener("keydown",function(e){
     else if(T.sheet==="patname"){
       var pnb=$("studio-sheet").querySelector(".st-sheet-btn");
       if(pnb) pnb.click();
+    }
+    else if(T.sheet==="score"){
+      var sa=document.activeElement, ss=$("studio-sheet"), sr=$("studio-score-read");
+      if(sa && sa.tagName==="BUTTON" && ss && ss.contains(sa) && !sa.disabled) sa.click();
+      else if(sr && !sr.disabled) sr.click();
     }
     else if(T.sheet==="noteplay"||T.sheet==="chordtype") sheetConfirm();
     else if(!T.sheet) tapFocus();

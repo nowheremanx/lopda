@@ -5,7 +5,7 @@ import vm from "node:vm";
 import { runScript, read } from "./helpers.mjs";
 
 const ctx = runScript("runtime/studio-song.js");
-for (const f of ["studio-styles.js", "studio-tools.js", "studio-theory.js", "studio-critic.js", "studio-edit.js", "studio-prompts.js", "studio-ai.js", "studio-harness.js"]) {
+for (const f of ["studio-styles.js", "studio-tools.js", "studio-theory.js", "studio-critic.js", "studio-edit.js", "studio-prompts.js", "studio-ai.js", "studio-score.js", "studio-harness.js"]) {
   vm.runInContext(read("runtime/" + f), ctx, { filename: "runtime/" + f });
 }
 const S = ctx.LopdaSong, ST = ctx.LopdaStudioStyles, E = ctx.LopdaStudioEdit, H = ctx.LopdaStudioHarness;
@@ -458,4 +458,79 @@ test("skeleton: card 0 is the request's own style: no card is forced, the stage 
   const noStyle = makeAsk((step, messages) => (step === "plan" ? (messages.length > 2 ? plan : { ...plan, style: "" }) : fullAnswers(plan)(step, messages)));
   await H.skeleton({ text: "x", ask: noStyle, rand: ST.seeded(7), now: 1000 });
   assert.match(noStyle.seen[1].messages.at(-1).content, /with card 0 write style/);
+});
+
+/* ---------- score reading ---------- */
+
+function tinyScore(beats = ["1234", "12", "1", "0"]) {
+  return { title: "小练习", key: "C", capo: 0, meter: "4/4", bpm: 96, bars: [{ chords: ["C"], beats }] };
+}
+
+test("readScore: a good score becomes a song", async () => {
+  const stages = [], ask = makeAsk([tinyScore()]);
+  const out = await H.readScore({ text: "1=C\nC | 1234 12 1 0", ask, now: 1000, onStage: (s) => stages.push(s) });
+  assert.equal(S.validate(out.song).error, undefined);
+  assert.equal(out.song.name, "小练习");
+  assert.equal(out.bars, 1);
+  assert.deepEqual(plain(out.lost), []);
+  assert.deepEqual(stages.map((s) => [s.id, s.n]), [["score", undefined]]);
+  assert.equal(ask.seen[0].step, "score");
+});
+
+test("readScore: strict error asks once more with a 1-based bar and beat", async () => {
+  const bad = tinyScore(["1234", "123", "1", "0"]), stages = [];
+  const ask = makeAsk([bad, tinyScore()]);
+  const out = await H.readScore({ text: "1=C", ask, now: 1000, onStage: (s) => stages.push(s) });
+  assert.equal(S.validate(out.song).error, undefined);
+  assert.equal(ask.seen.length, 2);
+  assert.match(ask.seen[1].messages.at(-1).content, /bar 1 beat 2/);
+  assert.deepEqual(stages.map((s) => [s.id, s.n]), [["score", undefined], ["score", 2]]);
+});
+
+test("readScore: two invalid objects fall back to lenient beats and retain lost codes", async () => {
+  const bad = tinyScore(["1234", "123", "1", "0"]);
+  const out = await H.readScore({ text: "own exercise", ask: makeAsk([bad, bad]), now: 1000 });
+  assert.equal(S.validate(out.song).error, undefined);
+  assert.ok(plain(out.lost).includes("beat:1.2"));
+  assert.equal(out.bars, 1);
+});
+
+test("readScore: two garbage answers reject as unreadable", async () => {
+  const ask = makeAsk(["no object", "still not JSON"]);
+  await assert.rejects(H.readScore({ text: "score", ask, now: 1000 }), (e) => e.code === "unreadable");
+  assert.equal(ask.seen.length, 2);
+});
+
+test("readScore: stop stops an ask that never resolves", async () => {
+  const ask = makeAsk(() => ({ pending: true }));
+  const job = H.readScore({ text: "score", ask, now: 1000 });
+  await tick();
+  assert.equal(ask.seen.length, 1);
+  job.stop();
+  await assert.rejects(job, (e) => e.code === "stopped");
+  assert.ok(ask.seen[0].promise.wasStopped());
+});
+
+test("readScore: a garbage retry falls back to the first usable score object", async () => {
+  const bad = tinyScore(["1234", "123", "1", "0"]);
+  const out = await H.readScore({ text: "score", ask: makeAsk([bad, "not JSON"]), now: 1000 });
+  assert.equal(S.validate(out.song).error, undefined);
+  assert.ok(plain(out.lost).includes("beat:1.2"));
+});
+
+test("readScore: an invalid key gets an actionable retry hint and rejects twice", async () => {
+  const invalid = { ...tinyScore(), key: "C major" }, ask = makeAsk([invalid, invalid]);
+  await assert.rejects(H.readScore({ text: "score", ask, now: 1000 }), (e) => e.code === "unreadable");
+  assert.match(ask.seen[1].messages.at(-1).content, /1= key as a note name.*G.*Bb.*F#m/);
+});
+
+test("readScore: score pictures are passed as OpenRouter image messages", async () => {
+  const images = ["data:image/jpeg;base64,one", "data:image/jpeg;base64,two"];
+  const ask = makeAsk([tinyScore()]);
+  await H.readScore({ text: "caption", images, ask, now: 1000 });
+  const content = ask.seen[0].messages.find((m) => m.role === "user").content;
+  assert.ok(Array.isArray(content));
+  assert.equal(content[0].type, "text");
+  assert.match(content[0].text, /pictures are pages.*in order/i);
+  assert.deepEqual(plain(content.slice(1)), images.map((url) => ({ type: "image_url", image_url: { url } })));
 });
