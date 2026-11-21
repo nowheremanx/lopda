@@ -68,7 +68,7 @@ button{font-family:inherit;color:inherit}
 /* shared controls */
 textarea{width:100%;font-family:var(--f-lcd);font-size:16px;line-height:1.5;color:var(--ink);background:var(--lcd);border:3px solid var(--ink);padding:8px;resize:none}
 textarea::placeholder{color:var(--ink-2)}
-.btn{font-family:var(--f-lcd);font-size:16px;background:var(--ink);color:var(--lcd);border:0;padding:10px 14px;cursor:pointer;box-shadow:3px 3px 0 var(--ink-2)}
+.btn{font-family:var(--f-lcd);font-size:16px;background:var(--ink);color:var(--lcd);border:0;padding:10px 14px;cursor:pointer;box-shadow:3px 3px 0 var(--ink-2);min-height:44px;box-sizing:border-box}
 .btn:disabled{background:var(--lcd-3);color:var(--ink-2);cursor:default;box-shadow:none}
 .btn.ghost{background:transparent;color:var(--ink);border:2px solid var(--ink);box-shadow:none}
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
@@ -177,9 +177,9 @@ textarea::placeholder{color:var(--ink-2)}
 .store-perms{display:flex;align-items:center;gap:6px;margin-top:1px}
 .store-perms .perm{display:inline-flex;width:16px;height:16px}
 .store-perms canvas{width:16px;height:16px;display:block;image-rendering:pixelated;image-rendering:crisp-edges}
-.store-filters{display:flex;flex-wrap:nowrap;gap:6px;padding:8px 12px 0;overflow-x:auto;scrollbar-width:none}
+.store-filters{display:flex;flex-wrap:nowrap;gap:8px;padding:8px 12px 0;overflow-x:auto;scrollbar-width:none}
 .store-filters::-webkit-scrollbar{display:none}
-.store-filter{flex:none;display:inline-flex;align-items:baseline;gap:5px;font-family:var(--f-lcd);font-size:14px;background:transparent;color:var(--ink);border:2px solid var(--ink);padding:6px 9px;min-height:40px;cursor:pointer}
+.store-filter{flex:none;display:inline-flex;align-items:center;gap:5px;font-family:var(--f-lcd);font-size:14px;background:transparent;color:var(--ink);border:2px solid var(--ink);padding:6px 9px;min-height:44px;cursor:pointer}
 .store-filter span{font-family:var(--f-pix);font-size:14px;color:var(--ink-2)}
 .store-filter[aria-pressed="true"]{background:var(--ink);color:var(--lcd)}
 .store-filter[aria-pressed="true"] span{color:var(--lcd)}
@@ -250,13 +250,14 @@ textarea::placeholder{color:var(--ink-2)}
 .settings{padding:14px;display:flex;flex-direction:column;gap:14px;max-width:420px}
 .set-row{display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px dashed var(--ink-2);padding-bottom:12px;font-size:16px}
 .set-row .btn{padding:6px 14px;min-width:56px}
-/* the short settings menu: one 44 px row per setting, the long parts behind a row */
+/* the short settings menu: one row per setting, the long parts behind a row. Its buttons are 44 px like every .btn;
+   the row's padding is small (2 px above, 4 px below for the 3 px shadow) so a row is 51 px and the first screen at
+   331x359 still ends on the AI line. */
 .set-menu{padding:0 10px 6px;gap:0}
 .set-bar{padding:1px 8px}
 .set-bar h2{line-height:1.1}
-.set-menu .set-row{min-height:44px;padding:6px 0 8px;justify-content:flex-start;gap:10px}
-/* a little air between the buttons and the lines above and below them (the 3 px shadow sits in the bottom gap) */
-.set-menu .set-row .btn{min-height:34px;padding:3px 12px}
+.set-menu .set-row{min-height:44px;padding:2px 0 4px;justify-content:flex-start;gap:10px}
+.set-menu .set-row .btn{padding:3px 12px}
 .set-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .set-ico{flex:none;width:24px;height:24px;display:flex;align-items:center;justify-content:center}
 .set-ico canvas{display:block;width:24px;height:24px;image-rendering:pixelated;image-rendering:crisp-edges}
@@ -1115,3 +1116,16 @@ textarea::placeholder{color:var(--ink-2)}
 /* a tape row in the library: the name, its date or demo tag, and a 44 px delete button */
 .st-proj-list .st-proj-row{padding:0 2px 0 8px;gap:4px}
 .st-row-del{flex:none;width:44px;height:44px;box-sizing:border-box;padding:0;background:transparent;color:var(--ink);border:2px solid var(--ink);font-family:var(--f-lcd);font-size:12px;line-height:1;cursor:pointer}
+
+/* Exceptions to the 44 px rule (decisions.md 59): the calendar is a fixed screen whose header is one dense bar and
+   whose sheets must leave the month its height; the cartridge is a hardware view that fits one screen and never
+   scrolls (its insert label sits in a camera-style row). Tape4's instrument keys, the camera keys, the HOME key, the
+   d-pad, the round keys and the pet icons are not .btn, so the rule never reaches them. */
+.cal-head .btn,
+.cal-date .btn,
+.cal-kind .btn,
+.cal-step .btn,
+.cal-numpad .btn,
+#v-cal .btn,
+.cam-row .btn,
+#cart-tools .btn{min-height:0}
