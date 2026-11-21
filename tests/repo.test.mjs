@@ -179,7 +179,7 @@ test("the only other sites a runtime script names are the calendar's holiday add
     for (const m of code.matchAll(/"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/g)) if (/https?:\/\//.test(m[0])) found.push(f + " " + m[0]);
   }
   assert.deepEqual(found.sort(), ['runtime/ai.js "https://openrouter.ai/api/v1/chat/completions"', 'runtime/apps/calendar.js "https://cdn.jsdelivr.net/gh/NateScarlet/holiday-cn@master/"',
-    'runtime/apps/settings.js "https://nowheremanx.github.io/lopda/"']);
+    'runtime/apps/settings.js "https://nowheremanx.github.io/lopda/"', 'runtime/apps/settings.js "https://openrouter.ai/api/v1/models"']);
 });
 
 test("build-index refuses an app that fails the checker", (t) => {

@@ -7,6 +7,7 @@
 "use strict";
 var LP=window.LP, $=LP.$, S=LP.S, I18N=LP.I18N, tr=LP.tr;
 var SND=LP.SND, RUNTIME_VERSION=LP.RUNTIME_VERSION, put=LP.put, sfx=LP.sfx, toast=LP.toast, show=LP.show, setLang=LP.setLang, renderUpdate=LP.renderUpdate;
+var SCORE_PAGES=window.LopdaScorePages, SCORE_MODELS_URL="https://openrouter.ai/api/v1/models", SCORE_MODELS_PATH="data/users/local/ai-models", SCORE_MODELS_DAY=86400000;
 /* the public site, not location.host: a PR preview or localhost must still share the real address */
 var SHARE_URL="https://nowheremanx.github.io/lopda/";
 var SHARE_TEXT=SHARE_URL.replace(/^https:\/\//,"").replace(/\/$/,"");
@@ -124,13 +125,123 @@ function renderSaves(){
    The user's OpenRouter key and model in one document of their own. The key never leaves this phone except in the
    request itself: it is kept out of the backup, and a restore leaves the one already here. Settings shows its last
    four characters only. LP.ai is what other programs use (apps/scripts.js): on(), ask(o), watch(fn). */
-var AIP="data/users/local/ai", AI={key:"", model:"", seen:[]};
+var AIP="data/users/local/ai", AI={key:"", model:"", scoreModel:"", seen:[]};
+var SCORE_MODELS_CACHE=null, scoreModelPageOpen=false, scoreModelRows=[], scoreModelFocus=0, scoreModelSeq=0;
 /* A saved key shows as dots in its field (a password field shows any value as dots): this stand-in, never the key itself.
    Tapping the field empties it for a new key; leaving it empty puts the dots back. */
 var KEPT="lopda-key-kept!!";
 var AIH=window.LopdaAI.host({fetch:function(u,o){ return fetch(u,o); }});
 function aiChanged(){ renderAi(); AI.seen.forEach(function(f){ try{ f(); }catch(e){} }); }
 function aiErr(e){ return tr("ai.err."+(e && e.code || "http")); }
+function scoreModelId(){ return AI.scoreModel || SCORE_PAGES.DEFAULT_MODEL; }
+function scoreModelLabel(){ return scoreModelId()===SCORE_PAGES.DEFAULT_MODEL ? tr("ai.score.default") : scoreModelId(); }
+function saveAiDoc(){ if(S.db) put(S.db.doc(AIP),{v:1, key:AI.key, model:AI.model, scoreModel:AI.scoreModel}); }
+function cleanScoreModels(list){ return SCORE_PAGES.cleanModels(list); }
+function savedScoreModels(data){
+  if(!data || typeof data.at!=="number" || !Array.isArray(data.list)) return null;
+  return {at:data.at, list:cleanScoreModels(data.list)};
+}
+function readScoreModelsCache(){
+  if(SCORE_MODELS_CACHE) return Promise.resolve(SCORE_MODELS_CACHE);
+  if(!S.db) return Promise.resolve(null);
+  return S.db.doc(SCORE_MODELS_PATH).get().then(function(sn){
+    var cache=sn.exists ? savedScoreModels(LP.own(sn.data())) : null;
+    if(cache) SCORE_MODELS_CACHE=cache;
+    return cache;
+  },function(){ return null; });
+}
+function fetchScoreModels(){
+  return fetch(SCORE_MODELS_URL,{method:"GET", credentials:"omit", referrerPolicy:"no-referrer", cache:"no-store"}).then(function(res){
+    if(!res.ok) throw new Error("HTTP "+res.status);
+    return res.json();
+  }).then(function(payload){
+    var list=SCORE_PAGES.models(payload), cache={at:Date.now(), list:cleanScoreModels(list)};
+    SCORE_MODELS_CACHE=cache;
+    if(S.db) S.db.doc(SCORE_MODELS_PATH).set(cache).catch(function(){});
+    return list;
+  });
+}
+function loadScoreModels(){
+  return readScoreModelsCache().then(function(cache){
+    if(cache && cache.at<=Date.now() && Date.now()-cache.at<SCORE_MODELS_DAY) return {list:cache.list, failed:false};
+    return fetchScoreModels().then(function(list){ return {list:list, failed:false}; },function(){ return {list:cache ? cache.list : [], failed:true}; });
+  });
+}
+function scoreModelChoiceRows(list){
+  var models=cleanScoreModels(list), defaultModel=null, rows, current=scoreModelId(), found=current===SCORE_PAGES.DEFAULT_MODEL;
+  models.forEach(function(m){ if(m.id===SCORE_PAGES.DEFAULT_MODEL) defaultModel=m; });
+  rows=[{id:SCORE_PAGES.DEFAULT_MODEL, name:tr("ai.score.default"), in:defaultModel?defaultModel.in:null, out:defaultModel?defaultModel.out:null}];
+  models.forEach(function(m){
+    if(m.id===SCORE_PAGES.DEFAULT_MODEL) return;
+    if(m.id===current) found=true;
+    rows.push(m);
+  });
+  if(!found) rows.push({id:current, name:current, in:null, out:null});
+  return rows;
+}
+function renderScoreModelList(list,status){
+  var ul=$("set-ai-model-list"), current=scoreModelId();
+  scoreModelRows=scoreModelChoiceRows(list); ul.textContent="";
+  scoreModelRows.forEach(function(m,i){
+    var li=document.createElement("li"), label=document.createElement("span"), price=document.createElement("small");
+    li.setAttribute("role","button"); li.setAttribute("tabindex","0"); li.className=i===scoreModelFocus?"on":"";
+    li.style.minHeight="44px"; li.style.boxSizing="border-box";
+    label.textContent=m.name; price.textContent=SCORE_PAGES.formatModelPrice(m);
+    li.appendChild(label); li.appendChild(price);
+    li.onclick=function(){ scoreModelFocus=i; chooseScoreModel(m.id); };
+    li.onfocus=function(){ scoreModelFocus=i; scoreModelFocusPaint(); };
+    ul.appendChild(li);
+    if(m.id===current) scoreModelFocus=i;
+  });
+  scoreModelFocusPaint();
+  $("set-ai-model-status").textContent=status ? tr(status) : "";
+}
+function scoreModelFocusPaint(){
+  var items=$("set-ai-model-list").children;
+  Array.prototype.forEach.call(items,function(li,i){ li.classList.toggle("on",i===scoreModelFocus); });
+}
+function openScoreModelPage(){
+  var seq=++scoreModelSeq; scoreModelPageOpen=true;
+  $("set-ai-main").hidden=true; $("set-ai-model-page").hidden=false;
+  renderScoreModelList([],"ai.score.loading");
+  sfx("tap");
+  loadScoreModels().then(function(result){
+    if(!scoreModelPageOpen || seq!==scoreModelSeq) return;
+    renderScoreModelList(result.list,result.failed?"ai.score.loadfail":"");
+  });
+}
+function closeScoreModelPage(){
+  if(!scoreModelPageOpen) return;
+  resetScoreModelPage();
+  renderAi(); sfx("tap");
+}
+function resetScoreModelPage(){
+  if(!scoreModelPageOpen) return;
+  scoreModelPageOpen=false; scoreModelSeq++;
+  $("set-ai-model-page").hidden=true; $("set-ai-main").hidden=false;
+}
+function chooseScoreModel(id){
+  AI.scoreModel=id===SCORE_PAGES.DEFAULT_MODEL ? "" : id;
+  saveAiDoc();
+  $("set-ai-score-model-value").textContent=scoreModelLabel();
+  closeScoreModelPage(); sfx("ok");
+}
+$("set-ai-score-model").onclick=openScoreModelPage;
+$("set-ai-model-back").onclick=closeScoreModelPage;
+/* The model chooser is a normal settings list: arrows move its focus, A chooses, and B returns. */
+document.addEventListener("keydown",function(e){
+  if(!scoreModelPageOpen || $("v-set-ai").hidden || (e.target && /INPUT|TEXTAREA/.test(e.target.nodeName)) || e.defaultPrevented) return;
+  var items=$("set-ai-model-list").children, key=e.key;
+  if(key==="ArrowUp" || key==="ArrowLeft") scoreModelFocus=(scoreModelFocus+items.length-1)%items.length;
+  else if(key==="ArrowDown" || key==="ArrowRight") scoreModelFocus=(scoreModelFocus+1)%items.length;
+  else if(key==="x" || key==="X" || key==="Enter"){
+    if(items[scoreModelFocus]) items[scoreModelFocus].click();
+    e.preventDefault(); return;
+  } else if(key==="z" || key==="Z" || key==="Escape"){
+    closeScoreModelPage(); e.preventDefault(); return;
+  } else return;
+  if(items.length){ e.preventDefault(); scoreModelFocusPaint(); }
+});
 /* the row in Settings says whether the line is up; the page behind it (v-set-ai) holds the two labelled fields */
 function renderAi(msg){
   var on=!!AI.key;
@@ -140,15 +251,16 @@ function renderAi(msg){
   if(document.activeElement!==$("set-ai-key")) $("set-ai-key").value=on ? KEPT : "";
   $("set-ai-test").hidden=!on; $("set-ai-del").hidden=!on;
   if(document.activeElement!==$("set-ai-model")) $("set-ai-model").value=AI.model;
+  $("set-ai-score-model-value").textContent=scoreModelLabel();
 }
 $("set-ai-row").onclick=function(){ sfx("tap"); show("set-ai"); };
-$("set-ai-back").onclick=function(){ sfx("tap"); openSettings(); };
+$("set-ai-back").onclick=function(){ resetScoreModelPage(); sfx("tap"); openSettings(); };
 function saveAi(){
   var v=$("set-ai-key").value.trim(), key=v===KEPT ? "" : v, model=$("set-ai-model").value.trim();
   if(!AI.key && !key){ renderAi(tr("ai.nokey")); sfx("err"); return; }
   if(key) AI.key=key;
   AI.model=model;
-  if(S.db) put(S.db.doc(AIP),{v:1, key:AI.key, model:AI.model});
+  saveAiDoc();
   $("set-ai-key").blur();
   aiChanged(); sfx("ok");
 }
@@ -157,7 +269,11 @@ $("set-ai-key").addEventListener("focus",function(){ if(this.value===KEPT) this.
 $("set-ai-key").addEventListener("blur",function(){ if(!this.value && AI.key) this.value=KEPT; });
 $("set-ai-del").onclick=function(){
   AI.key=""; AI.model=""; $("set-ai-model").value="";
-  if(S.db) S.db.doc(AIP).delete().catch(function(){});
+  /* Removing the key clears the AI document unless a score-model choice still needs it. */
+  if(S.db){
+    if(AI.scoreModel) S.db.doc(AIP).set({v:1, key:"", model:"", scoreModel:AI.scoreModel}).catch(function(){});
+    else S.db.doc(AIP).delete().catch(function(){});
+  }
   aiChanged(); sfx("ok");
 };
 $("set-ai-test").onclick=function(){
@@ -171,11 +287,12 @@ $("set-ai-test").onclick=function(){
 LP.ai={
   PATH:AIP,
   on:function(){ return !!AI.key; },
-  /* o: {messages, max, onText, onModel}; the key and the model are added here */
-  ask:function(o){ var q={}; for(var k in o) q[k]=o[k]; q.key=AI.key; q.model=AI.model; return AIH.ask(q); },
+  /* o: {messages, max, onText, onModel, model}; the key and default model are added here */
+  ask:function(o){ var q={}; for(var k in o) q[k]=o[k]; q.key=AI.key; q.model=o.model || AI.model; return AIH.ask(q); },
+  scoreModel:function(){ return scoreModelId(); },
   err:aiErr,
   watch:function(f){ AI.seen.push(f); },
-  saved:function(){ return AI.key ? {v:1, key:AI.key, model:AI.model} : null; }
+  saved:function(){ return AI.key || AI.scoreModel ? {v:1, key:AI.key, model:AI.model, scoreModel:AI.scoreModel} : null; }
 };
 
 /* ---------- the darkroom key (runtime/geotag.js, decisions.md section 40) ----------
@@ -359,7 +476,7 @@ function startBackup(after,dump){
   BS.busy=true; box(tr("bk.reading"));
   (dump ? Promise.resolve(dump) : P.dumpAll()).then(function(d){
     /* the backup carries its own time, so a restored handheld says when its data was saved */
-    var docs=d.docs.filter(function(x){ return x.path!==BMETA && x.path!==AIP; }).concat([{path:BMETA, data:{last:now}}]);
+    var docs=d.docs.filter(function(x){ return x.path!==BMETA && x.path!==AIP && x.path!==SCORE_MODELS_PATH; }).concat([{path:BMETA, data:{last:now}}]);
     return BK.pack({docs:docs, files:d.files},{runtime:RUNTIME_VERSION, now:now});
   }).then(function(pk){
     box(tr("bk.ready",{size:sizeText(pk.size)}),[
@@ -503,6 +620,7 @@ $("set-share-copy").onclick=function(){
 
 LP.builtin({id:"set-ai", view:"set-ai",
   enter:function(){ renderAi(); },
+  leave:function(){ resetScoreModelPage(); },
   lang:function(){ renderAi(); }
 });
 LP.builtin({id:"set-sense", view:"set-sense",
@@ -530,7 +648,11 @@ LP.builtin({id:"settings", label:"app.settings", icon:"settings", view:"settings
   ready:function(){
     S.db.doc(AIP).get().then(function(sn){
       var d=sn.exists ? LP.own(sn.data()) : null;
-      if(d && typeof d.key==="string" && d.key){ AI.key=d.key; AI.model=typeof d.model==="string" ? d.model : ""; aiChanged(); }
+      if(d){
+        AI.scoreModel=typeof d.scoreModel==="string" ? d.scoreModel : "";
+        if(typeof d.key==="string" && d.key){ AI.key=d.key; AI.model=typeof d.model==="string" ? d.model : ""; }
+        aiChanged();
+      }
     }).catch(function(){});
     S.db.doc(BMETA).get().then(function(sn){ var d=sn.exists ? LP.own(sn.data()) : null; BS.last=d && +d.last || 0; renderLast(); }).catch(function(){});
   }});
