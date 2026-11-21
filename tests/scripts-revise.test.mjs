@@ -183,31 +183,90 @@ test("trimVersions: 10 at most, 1,000,000 body characters, dropping from the old
 
   /* exactly at the limit fits */
   assert.deepEqual(plain(T.trimVersions([v(2, 500000), v(1, 500000)])).map((x) => x.at), [2, 1]);
+
+  /* the bodies being swapped are never dropped: neither the count nor the characters can push them out */
+  const kept = [
+    { at: 3, name: "n3", body: "a".repeat(400000), why: "" },
+    { at: 2, name: "n2", body: "b".repeat(400000), why: "" },
+    { at: 1, name: "n1", body: "c".repeat(400000), why: "" },
+  ];
+  assert.deepEqual(plain(T.trimVersions(kept, [kept[2].body])).map((x) => x.at), [3, 1], "the kept oldest body stays, the middle one goes");
+  const all = Array.from({ length: 12 }, (_, i) => ({ at: i, name: "n" + i, body: "b" + i, why: "" }));
+  assert.equal(T.trimVersions(all, all.map((x) => x.body)).length, 12, "keep overrides the count cap");
+  const huge = [{ at: 2, body: "d".repeat(900000), name: "", why: "" }, { at: 1, body: "e".repeat(700000), name: "", why: "" }];
+  assert.deepEqual(plain(T.trimVersions(huge, [huge[1].body])).map((x) => x.at), [2, 1], "keep overrides the character cap");
 });
 
 /* ---------- the store ---------- */
 
-test("addVersion: an empty or duplicate body is not added but still counts as success", async () => {
-  const T = boot("en-US").LP.scripts._test;
-  assert.equal(await T.addVersion("s1", "", "P", ""), true);
-  assert.equal(await T.addVersion("s1", "  \n ", "P", ""), true);
-  assert.deepEqual(plain(await T.loadVersions("s1")), [], "nothing to keep: no version");
+test("keepVersions: each version is labelled by what made it: 原版 orig, 手改 edit, the ask", async () => {
+  const db = makeDB(), ctx = boot("en-US", db), T = ctx.LP.scripts._test;
+  /* empty bodies are never added, and nothing is written for them */
+  assert.equal(await T.keepVersions("k1", "", "P", "  \n ", "P", "x"), true);
+  assert.equal(db.docs.has(P_VERSIONS("k1")), false);
+  assert.deepEqual(plain(await T.loadVersions("k1")), []);
 
-  assert.equal(await T.addVersion("s1", "old code", "P", "add a pause"), true);
-  assert.equal(await T.addVersion("s1", "old code", "P", "again"), true, "the same body again is a success");
-  const one = plain(await T.loadVersions("s1"));
-  assert.equal(one.length, 1);
-  assert.deepEqual(one[0].why, "add a pause");
-  assert.equal(one[0].name, "P");
-  assert.equal(one[0].body, "old code");
-  assert.ok(one[0].at > 0);
+  /* the first change: the code going away is the 原版, the new state carries the ask */
+  assert.equal(await T.keepVersions("k1", "OLD", "P", "NEW", "P", "加一个暂停键"), true);
+  const list = plain(await T.loadVersions("k1"));
+  assert.deepEqual(list.map((x) => x.body), ["NEW", "OLD"], "newest first");
+  assert.deepEqual(list.map((x) => x.why), ["加一个暂停键", "orig"]);
+  assert.deepEqual(list.map((x) => x.name), ["P", "P"]);
+  assert.ok(list[0].at > list[1].at, "the new state is newer than the code it replaced");
+  assert.ok(list[0].at > 0);
 
-  /* newest first, and the caps hold through addVersion too */
-  for (let i = 0; i < 12; i++) assert.equal(await T.addVersion("s1", "code " + i, "P", "r" + i), true);
-  const list = plain(await T.loadVersions("s1"));
-  assert.equal(list.length, 10);
-  assert.equal(list[0].body, "code 11");
-  assert.equal(list[9].body, "code 2");
+  /* hand-typed code that is not in the list yet is 手改, never 原版 */
+  assert.equal(await T.keepVersions("k1", "MANUAL", "P", "MANUAL2", "P", ""), true);
+  const more = plain(await T.loadVersions("k1"));
+  assert.deepEqual(more.map((x) => x.body), ["MANUAL2", "MANUAL", "NEW", "OLD"]);
+  assert.equal(more[1].why, "edit");
+
+  /* switching to a body already in the list adds nothing */
+  const before = plain(db.docs.get(P_VERSIONS("k1")));
+  assert.equal(await T.keepVersions("k1", "MANUAL2", "P", "OLD", "P", ""), true);
+  assert.deepEqual(plain(db.docs.get(P_VERSIONS("k1"))), before, "no row and no write");
+
+  /* an empty script: only the new body, labelled with the ask */
+  assert.equal(await T.keepVersions("k2", "", "P", "NEW", "P", "ask"), true);
+  assert.deepEqual(plain(await T.loadVersions("k2")).map((x) => [x.body, x.why]), [["NEW", "ask"]]);
+});
+
+test("keepVersions: 10 versions and 1,000,000 characters, but the newest and the bodies being swapped are never dropped", async () => {
+  const db = makeDB(), ctx = boot("en-US", db), T = ctx.LP.scripts._test;
+  let body = "code 0";
+  for (let i = 1; i <= 12; i++) {
+    const next = "code " + i;
+    assert.equal(await T.keepVersions("cap", body, "P", next, "P", "r" + i), true);
+    body = next;
+  }
+  const list = plain(await T.loadVersions("cap"));
+  assert.equal(list.length, 10, "10 at most");
+  assert.equal(list[0].body, "code 12");
+  assert.equal(list[9].body, "code 3");
+  assert.equal(list[0].why, "r12");
+
+  /* two huge bodies: both stay in the doc even though together they pass 1,000,000, and the older one no longer fits */
+  const bigOld = "a".repeat(700000), bigNew = "b".repeat(700000), gone = "z".repeat(900000);
+  db.docs.set(P_VERSIONS("big"), { v: 1, list: [{ at: 1, name: "P", body: gone, why: "old" }] });
+  assert.equal(await T.keepVersions("big", bigOld, "P", bigNew, "P", "ask"), true);
+  const big = db.docs.get(P_VERSIONS("big")).list;
+  assert.equal(big.length, 2, "the two bodies being swapped are never dropped");
+  assert.equal(big[0].body, bigNew);
+  assert.equal(big[0].why, "ask");
+  assert.equal(big[1].body, bigOld);
+  assert.equal(big[1].why, "edit");
+  assert.ok(!big.some((x) => x.body === gone), "the older version no longer fits");
+});
+
+test("keepVersions: a damaged list starts over; a newer doc is refused untouched", async () => {
+  const db = makeDB(), ctx = boot("en-US", db), T = ctx.LP.scripts._test;
+  db.docs.set(P_VERSIONS("dmg"), { v: 1, list: "not a list" });
+  assert.equal(await T.keepVersions("dmg", "a", "P", "b", "P", "ask"), true);
+  assert.deepEqual(plain(await T.loadVersions("dmg")).map((x) => [x.body, x.why]), [["b", "ask"], ["a", "orig"]]);
+
+  db.docs.set(P_VERSIONS("new"), { v: 2, list: [] });
+  await assert.rejects(() => T.keepVersions("new", "a", "P", "b", "P", "ask"), (e) => e && e.code === "newer");
+  assert.deepEqual(plain(db.docs.get(P_VERSIONS("new"))), { v: 2, list: [] }, "the newer doc was not touched");
 });
 
 test("loadVersions: none, unreadable and a newer doc", async () => {
@@ -217,28 +276,31 @@ test("loadVersions: none, unreadable and a newer doc", async () => {
   assert.deepEqual(plain(await T.loadVersions("bad")), []);
   db.docs.set(P_VERSIONS("damaged"), { v: 1, list: "not a list" });
   assert.deepEqual(plain(await T.loadVersions("damaged")), [], "a damaged list is nothing to show");
-  assert.equal(await T.addVersion("damaged", "code", "P", "why"), true, "and it can still be written");
   db.docs.set(P_VERSIONS("new"), { v: 2, list: [{ at: 1, name: "P", body: "x", why: "" }] });
   await assert.rejects(() => T.loadVersions("new"), (e) => e && e.code === "newer");
 });
 
-test("replaceBody: the old body is a version before the new body is written", async () => {
+test("replaceBody: both bodies are versions before the script is written", async () => {
   const db = makeDB(), ctx = boot("en-US", db), T = ctx.LP.scripts._test;
   const s = { v: 1, id: "s1", name: "P", body: "OLD", created: 1, updated: 1 };
   assert.equal(await T.replaceBody(s, "NEW", "add a pause"), true);
   assert.equal(db.docs.get(P_ITEMS("s1")).body, "NEW", "the script holds the new code");
   assert.equal(db.docs.get(P_ITEMS("s1")).name, "P", "its name is unchanged");
   const list = plain(db.docs.get(P_VERSIONS("s1")).list);
-  assert.equal(list.length, 1);
-  assert.deepEqual({ body: list[0].body, name: list[0].name, why: list[0].why }, { body: "OLD", name: "P", why: "add a pause" });
+  assert.deepEqual(list.map((x) => x.body), ["NEW", "OLD"], "the new state, then the code it replaced");
+  assert.deepEqual(list.map((x) => x.why), ["add a pause", "orig"]);
+  assert.deepEqual(list.map((x) => x.name), ["P", "P"]);
 
-  /* a revised file may carry a new <title>: the new name lands in the same write, the version keeps the old one */
+  /* a revised file may carry a new <title>: the new name lands in the same write; the code being left
+     is already a version (with its ask), so it is not added a second time */
   assert.equal(await T.replaceBody(s, "NEWER", "add a clock", "钟"), true);
   assert.equal(db.docs.get(P_ITEMS("s1")).name, "钟");
   assert.equal(s.name, "钟");
   const list2 = plain(db.docs.get(P_VERSIONS("s1")).list);
-  assert.equal(list2[0].body, "NEW");
-  assert.equal(list2[0].name, "P", "the version was written before the name changed");
+  assert.deepEqual(list2.map((x) => x.body), ["NEWER", "NEW", "OLD"]);
+  assert.equal(list2[0].name, "钟");
+  assert.equal(list2[0].why, "add a clock");
+  assert.equal(list2[1].why, "add a pause", "the code being left was already a version");
 });
 
 test("replaceBody: if the version cannot be written, the script is not touched", async () => {

@@ -9796,7 +9796,7 @@ test("AI line: while the AI is slow the hint counts time, says what the line is 
   assert.deepEqual(errors, []);
 });
 
-/* ---------- 改一改 / earlier versions (decisions.md section 60): the revise prompt, version-first write, going back ---------- */
+/* ---------- 改一改 / versions (decisions.md section 60): the revise prompt, both bodies as versions, going back ---------- */
 const REVISE_OLD = '<!doctype html>\n<html><head><title>钟 A</title></head>\n<body><p id="t">0</p>\n<script>var n=0;setInterval(function(){n++;document.getElementById("t").textContent=n;},1000);</script>\n</body></html>';
 const REVISE_NEW = '<!doctype html>\n<html><head><title>钟 B</title></head>\n<body><p id="t">0</p><button id="p">停</button>\n<script>var n=0,paused=false;document.getElementById("p").onclick=function(){paused=!paused;};setInterval(function(){if(!paused){n++;document.getElementById("t").textContent=n;}},1000);</script>\n</body></html>';
 const REVISE_CORS = { "access-control-allow-origin": "*", "access-control-allow-headers": "authorization, content-type", "access-control-allow-methods": "POST" };
@@ -9880,38 +9880,77 @@ test("AI line: 改一改 sends the current code and the ask, keeps the old code 
   assert.match(prompt, /下面是现在的程序/, "then the revise paragraph");
   assert.ok(!prompt.includes("我想做的是"), "the idea line is not sent");
 
-  /* the old code is a version; the script has the answer; the PAD save never moved */
+  /* the new state and the code it replaced are both versions; the script has the answer; the PAD save never moved */
   assert.equal((await reviseDoc(p, "items", "srev")).body, REVISE_NEW);
   const ver = await reviseDoc(p, "versions", "srev");
   assert.equal(ver.v, 1);
-  assert.equal(ver.list.length, 1);
-  assert.equal(ver.list[0].body, REVISE_OLD);
-  assert.equal(ver.list[0].name, "我的钟");
+  assert.equal(ver.list.length, 2, "the new state and the code it replaced");
+  assert.equal(ver.list[0].body, REVISE_NEW);
   assert.equal(ver.list[0].why, "加一个暂停键");
-  assert.ok(ver.list[0].at > 0);
+  assert.equal(ver.list[0].name, "我的钟");
+  assert.equal(ver.list[1].body, REVISE_OLD);
+  assert.equal(ver.list[1].why, "orig", "the code before the first change is the 原版");
+  assert.ok(ver.list[0].at > ver.list[1].at, "newest first");
   assert.deepEqual((await reviseDoc(p, "data", "srev")).kv, { n: 7 });
 
-  /* 选项 → 以前的版本 lists it, shows it read-only, and 换回这个 puts it back */
+  /* 选项 → 版本 lists both, highlights the one in use, and 换回这个 puts the old one back without a new row */
   await p.click("#script-menu");
+  assert.equal(await p.locator("#script-versions-open").innerText(), "版本");
   await p.click("#script-versions-open");
   await p.waitForFunction(() => !document.getElementById("v-script-versions").hidden);
-  await p.waitForFunction(() => document.querySelectorAll("#versions-list li").length === 1);
-  assert.match(await p.locator("#versions-list .t").innerText(), /\d{1,2}\/\d{1,2} \d\d:\d\d/);
-  assert.match(await p.locator("#versions-list .d").innerText(), /改：加一个暂停键 · \d/);
+  await p.waitForFunction(() => document.querySelectorAll("#versions-list li").length === 2);
+  assert.equal(await p.locator("#v-script-versions h2").innerText(), "版本");
+  const rows = await p.evaluate(() => [...document.querySelectorAll("#versions-list li")].map((li) => ({
+    on: li.classList.contains("on"), now: li.getAttribute("aria-current"),
+    t: li.querySelector(".t").textContent, d: li.querySelector(".d").textContent,
+  })));
+  assert.equal(rows.length, 2);
+  assert.match(rows[0].t, /\d{1,2}\/\d{1,2} \d\d:\d\d/);
+  assert.match(rows[0].d, /^当前 · 改：加一个暂停键 · \d/, "the new code is in use");
+  assert.equal(rows[0].on, true);
+  assert.equal(rows[0].now, "true");
+  assert.match(rows[1].d, /^原版 · \d/, "the code before the first change");
+  assert.equal(rows[1].on, false);
+  assert.equal(rows[1].now, null);
+
+  /* the version in use has nothing to switch to */
   await p.click("#versions-list button");
   await p.waitForFunction(() => !document.getElementById("versions-code-wrap").hidden);
-  assert.equal(await p.inputValue("#versions-code"), REVISE_OLD);
+  assert.equal(await p.inputValue("#versions-code"), REVISE_NEW);
   assert.equal(await p.evaluate(() => document.getElementById("versions-code").readOnly), true);
+  assert.equal(await p.evaluate(() => document.getElementById("versions-use").hidden), true, "the code in use cannot be switched to");
+
+  /* the 原版 can: 换回这个 restores it, and the list keeps its two rows */
+  await p.click("#versions-return");
+  await p.waitForFunction(() => !document.getElementById("versions-list-wrap").hidden);
+  await p.locator("#versions-list li").nth(1).locator("button").click();
+  await p.waitForFunction(() => !document.getElementById("versions-code-wrap").hidden);
+  assert.equal(await p.inputValue("#versions-code"), REVISE_OLD);
+  assert.equal(await p.evaluate(() => document.getElementById("versions-use").hidden), false, "another version can be switched to");
   await p.click("#versions-use");
   await p.waitForFunction(() => !document.getElementById("v-script-edit").hidden);
   assert.equal(await p.inputValue("#script-code"), REVISE_OLD, "the old code is back");
   assert.equal(await p.inputValue("#script-name"), "我的钟");
   const ver2 = await reviseDoc(p, "versions", "srev");
-  assert.equal(ver2.list.length, 2);
-  assert.equal(ver2.list[0].body, REVISE_NEW, "the replaced code is itself a version");
-  assert.equal(ver2.list[0].why, "restore");
+  assert.equal(ver2.list.length, 2, "switching to a version already in the list adds no row");
+  assert.equal(ver2.list[0].body, REVISE_NEW);
+  assert.equal(ver2.list[0].why, "加一个暂停键");
   assert.equal(ver2.list[1].body, REVISE_OLD);
+  assert.equal(ver2.list[1].why, "orig");
   assert.deepEqual((await reviseDoc(p, "data", "srev")).kv, { n: 7 }, "the PAD save never moves");
+
+  /* the highlight moved to the restored code */
+  await p.click("#script-menu");
+  await p.click("#script-versions-open");
+  await p.waitForFunction(() => document.querySelectorAll("#versions-list li").length === 2);
+  const after = await p.evaluate(() => [...document.querySelectorAll("#versions-list li")].map((li) => ({
+    on: li.classList.contains("on"), now: li.getAttribute("aria-current"), d: li.querySelector(".d").textContent,
+  })));
+  assert.equal(after[0].on, false);
+  assert.match(after[0].d, /^改：加一个暂停键 · \d/);
+  assert.equal(after[1].on, true, "the code in use is highlighted");
+  assert.equal(after[1].now, "true");
+  assert.match(after[1].d, /^当前 · 原版 · \d/);
   assert.deepEqual(errors, []);
 });
 
@@ -9949,9 +9988,11 @@ test("AI line: ◂ pressed mid-revise leaves the stored body alone, and the answ
   await p.waitForFunction(() => { const el = document.getElementById("toast"); return el && !el.hidden && /改好了/.test(el.textContent); });
   assert.equal((await reviseDoc(p, "items", "sback")).body, REVISE_NEW, "the answer landed after leaving");
   const ver = await reviseDoc(p, "versions", "sback");
-  assert.equal(ver.list.length, 1);
-  assert.equal(ver.list[0].body, REVISE_OLD, "the old code was the version written first");
+  assert.equal(ver.list.length, 2);
+  assert.equal(ver.list[0].body, REVISE_NEW, "the answer is the newest version");
   assert.equal(ver.list[0].why, "加一个暂停键");
+  assert.equal(ver.list[1].body, REVISE_OLD, "the old code is the 原版");
+  assert.equal(ver.list[1].why, "orig");
   assert.deepEqual(errors, []);
 });
 
@@ -10003,9 +10044,11 @@ test("scripts: without a key, 改一改 copies the revise prompt and 粘贴新�
   await p.waitForFunction(() => !document.getElementById("v-script-edit").hidden);
   assert.equal(await p.inputValue("#script-code"), REVISE_NEW);
   const ver = await reviseDoc(p, "versions", "snokey");
-  assert.equal(ver.list.length, 1);
-  assert.equal(ver.list[0].body, REVISE_OLD);
-  assert.equal(ver.list[0].why, "改成蓝色");
+  assert.equal(ver.list.length, 2);
+  assert.equal(ver.list[0].body, REVISE_NEW);
+  assert.equal(ver.list[0].why, "改成蓝色", "the pasted state carries the ask");
+  assert.equal(ver.list[1].body, REVISE_OLD);
+  assert.equal(ver.list[1].why, "orig");
   assert.equal((await reviseDoc(p, "items", "snokey")).body, REVISE_NEW);
   assert.deepEqual((await reviseDoc(p, "data", "snokey")).kv, { n: 7 });
   assert.deepEqual(errors, []);
@@ -10046,7 +10089,12 @@ test("AI line: opening a script from the library while its revise streams shows 
   await p.waitForFunction(() => /改好了（用时 0:0\d）/.test(document.getElementById("script-hint").textContent));
   assert.equal(await p.inputValue("#script-code"), REVISE_NEW);
   assert.equal((await reviseDoc(p, "items", "sopen")).body, REVISE_NEW);
-  assert.equal((await reviseDoc(p, "versions", "sopen")).list[0].body, REVISE_OLD);
+  const ver = await reviseDoc(p, "versions", "sopen");
+  assert.equal(ver.list.length, 2);
+  assert.equal(ver.list[0].body, REVISE_NEW);
+  assert.equal(ver.list[0].why, "加一个暂停键");
+  assert.equal(ver.list[1].body, REVISE_OLD);
+  assert.equal(ver.list[1].why, "orig");
   assert.deepEqual(errors, []);
 });
 
