@@ -31,7 +31,8 @@
         os.createIndex("parent", "parent", { unique: false });
       };
       req.onsuccess = function () { resolve(req.result); };
-      req.onerror = function () { reject(err("unavailable", req.error)); };
+      /* forget a failed open, as openFiles does: a cached rejection would fail every later call until a reload */
+      req.onerror = function () { opening = null; reject(err("unavailable", req.error)); };
     });
     return opening;
   }
