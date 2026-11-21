@@ -669,6 +669,9 @@ textarea::placeholder{color:var(--ink-2)}
 .scripts-list button{width:100%;min-height:52px;text-align:left;background:none;border:0;border-bottom:1px dashed var(--ink-2);padding:6px 10px;cursor:pointer;display:flex;flex-direction:column;justify-content:center;gap:2px;color:inherit;font:inherit}
 .scripts-list .t{font-size:16px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .scripts-list .d{font-size:13px;max-width:100%;color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* the version in use (以前的版本) */
+.scripts-list li.on button{background:var(--ink);color:var(--lcd)}
+.scripts-list li.on .d{color:var(--lcd)}
 .scripts-empty{padding:10px 4px;text-align:center;line-height:1.4}
 .scripts-count{margin:6px 10px -4px;font-size:15px;font-weight:normal;color:var(--ink-2)}
 #v-script-edit .editor{position:relative}

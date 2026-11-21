@@ -175,18 +175,26 @@ function readVersions(id){
     return d;
   });
 }
-function trimVersions(list){
-  var out=[], total=0, i, e, body;
+function trimVersions(list, keep){
+  var all=[], out=[], total=0, count=0, i, e, body;
   /* a damaged doc (list not an array) is nothing to show, never a crash */
   if(!Array.isArray(list) || !list.length) return out;
-  for(i=0;i<list.length && out.length<VERSIONS_MAX;i++){
+  keep=keep||[];
+  for(i=0;i<list.length;i++){
     e=list[i]||{};
     body=String(e.body==null?"":e.body);
-    /* the newest is never dropped, even when it alone is over the limit */
-    if(out.length && total+body.length>VERSIONS_CHARS) break;
-    out.push({at:+e.at||0, name:String(e.name==null?"":e.name), body:body, why:String(e.why==null?"":e.why)});
-    total+=body.length;
+    /* the newest, and the bodies in keep (the code on screen and the code it replaces), are never dropped */
+    all.push({e:{at:+e.at||0, name:String(e.name==null?"":e.name), body:body, why:String(e.why==null?"":e.why)},
+      must:i===0 || keep.indexOf(body)>=0, take:false});
   }
+  for(i=0;i<all.length;i++) if(all[i].must){ all[i].take=true; total+=all[i].e.body.length; count++; }
+  /* the rest, newest first, while they fit: 10 versions and 1,000,000 characters in all */
+  for(i=0;i<all.length;i++){
+    if(all[i].take) continue;
+    if(count>=VERSIONS_MAX || total+all[i].e.body.length>VERSIONS_CHARS) continue;
+    all[i].take=true; total+=all[i].e.body.length; count++;
+  }
+  for(i=0;i<all.length;i++) if(all[i].take) out.push(all[i].e);
   return out;
 }
 function loadVersions(id){
@@ -198,17 +206,23 @@ function loadVersions(id){
     return [];
   });
 }
-/* true when the old code is safe: added, already there, or nothing to keep (so the write may go on) */
-function addVersion(id, body, name, why){
+/* Each version is one state of the code, labelled with what made it: "orig" (the code before the first change),
+   "edit" (typed by hand), "paste", or the ask of a 改一改. The code in use is the version whose body is the script's
+   body, so switching back and forth adds nothing: a body already in the list is never added again (owner,
+   2026-11-21). Before a replacement both the code going away and the code coming in are in the list.
+   Resolves true when both are safe (added, or already there); only then may the script be written. */
+function keepVersions(id, oldBody, oldName, newBody, newName, why){
   if(!id) return Promise.resolve(false);
-  body=String(body==null?"":body);
-  if(!body.trim()) return Promise.resolve(true);
+  oldBody=String(oldBody==null?"":oldBody); newBody=String(newBody==null?"":newBody);
   if(!refs()) return Promise.resolve(false);
   return readVersions(id).then(function(d){
-    var list=(d && Array.isArray(d.list)) ? d.list : [];
-    if(list.length && list[0] && String(list[0].body)==body) return true;
-    var entry={at:Date.now(), name:String(name==null?"":name).slice(0,40), body:body, why:String(why==null?"":why).slice(0,60)};
-    return put(M.versions.doc(id),{v:1, list:trimVersions([entry].concat(list))}).then(function(ok){ return !!ok; });
+    var list=(d && Array.isArray(d.list)) ? trimVersions(d.list) : [], now=Date.now(), changed=false;
+    function has(b){ for(var i=0;i<list.length;i++) if(list[i].body===b) return true; return false; }
+    function entry(at, name, body, w){ return {at:at, name:String(name==null?"":name).slice(0,40), body:body, why:String(w==null?"":w).slice(0,60)}; }
+    if(oldBody.trim() && !has(oldBody)){ list.unshift(entry(now-1, oldName, oldBody, list.length ? "edit" : "orig")); changed=true; }
+    if(newBody.trim() && !has(newBody)){ list.unshift(entry(now, newName, newBody, why)); changed=true; }
+    if(!changed) return true;
+    return put(M.versions.doc(id),{v:1, list:trimVersions(list,[oldBody,newBody])}).then(function(ok){ return !!ok; });
   });
 }
 function deleteVersions(id){
@@ -248,7 +262,7 @@ function replaceBody(s, code, why, newName, before){
   code=String(code==null?"":code);
   /* before: the body and name a revise started from, so the version never comes from in-memory state */
   var oldBody=String(before ? before.body : s.body==null ? "" : s.body), oldName=(before ? before.name : s.name)||"";
-  return addVersion(s.id, oldBody, oldName, why).then(function(ok){
+  return keepVersions(s.id, oldBody, oldName, code, newName||oldName, why).then(function(ok){
     if(!ok) return false;
     s.body=code;
     if(newName) s.name=String(newName).slice(0,40);
@@ -864,6 +878,8 @@ function revisePaste(){
 
 /* ---------- 以前的版本: each earlier body, read-only, with 换回这个 ---------- */
 function whyLabel(why){
+  if(why==="orig") return tr("scripts.versions.orig");
+  if(why==="edit") return tr("scripts.versions.edit");
   if(why==="paste") return tr("scripts.versions.paste");
   if(why==="restore") return tr("scripts.versions.restore");
   return tr("scripts.versions.revise",{ask:why||""});
@@ -884,10 +900,12 @@ function renderVersions(keepPick){
   loadVersions(s.id).then(function(list){
     if(seq!==M.verSeq) return;
     list.forEach(function(v){
-      var li=document.createElement("li");
+      var li=document.createElement("li"), now=v.body===String(s.body||"");
+      /* the code in use is highlighted; picking another one moves the highlight, it adds no row */
+      if(now){ li.className="on"; li.setAttribute("aria-current","true"); }
       var b=document.createElement("button"); b.type="button";
       var t=document.createElement("span"); t.className="t"; t.textContent=LP.fmt(v.at);
-      var d=document.createElement("span"); d.className="d"; d.textContent=whyLabel(v.why)+" · "+sizeBytes(v.body.length);
+      var d=document.createElement("span"); d.className="d"; d.textContent=(now ? tr("scripts.versions.now")+" · " : "")+whyLabel(v.why)+" · "+sizeBytes(v.body.length);
       b.appendChild(t); b.appendChild(d);
       b.onclick=function(){ pickVersion(v); };
       li.appendChild(b); ul.appendChild(li);
@@ -910,6 +928,8 @@ function pickVersion(v){
   $("versions-list-wrap").hidden=true;
   $("versions-code-wrap").hidden=false;
   $("versions-actions").hidden=false;
+  /* the code in use has nothing to switch to */
+  $("versions-use").hidden=!!M.current && v.body===String(M.current.body||"");
   sfx("tap");
 }
 function versionsBack(){
@@ -922,7 +942,7 @@ function restoreVersion(){
   if(G.job){ toast(tr("scripts.gen.one")); return; }
   saveCurrent(true).then(function(ok){
     if(!ok) return;
-    return replaceBody(s, v.body, "restore", v.name||s.name||"").then(function(done){
+    return replaceBody(s, v.body, "", v.name||s.name||"").then(function(done){
       if(!done){ toast(tr("scripts.revise.nover")); sfx("err"); return; }
       show("script-edit");
       toast(tr("scripts.versions.restored")); sfx("ok");
@@ -1197,7 +1217,7 @@ LP.builtin({id:"script-versions", view:"script-versions", keepPad:false,
    so state and stream point at the real objects */
 LP.scripts._test={
   revisePrompt:revisePrompt, checkRevision:checkRevision, trimVersions:trimVersions,
-  addVersion:addVersion, loadVersions:loadVersions, deleteVersions:deleteVersions,
+  keepVersions:keepVersions, loadVersions:loadVersions, deleteVersions:deleteVersions,
   loadAsk:loadAsk, saveAskNow:saveAskNow, clearAsk:clearAsk,
   replaceBody:replaceBody, deleteScript:deleteScript,
   revising:revising, saveCurrent:saveCurrent, state:M, stream:G
