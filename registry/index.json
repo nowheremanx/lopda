@@ -1,6 +1,6 @@
 {
   "spec": "lopda/1",
-  "generated": "2026-11-18",
+  "generated": "2026-11-21",
   "apps": [
     {
       "spec": "lopda/1",
@@ -338,8 +338,9 @@
         "..000..0....0...",
         ".........000...."
       ],
-      "version": "1.4.0",
+      "version": "1.5.0",
       "released": "2026-10-19",
+      "updated": "2026-10-19",
       "description": "学习平假名和片假名（含浊音、半浊音），听发音，再做四选一小测。",
       "i18n": {
         "zh": {
@@ -354,8 +355,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/kana-cards/index.html",
-      "sha256": "8a7ae828c7a0b5e1885c8732530dd237abd1302e1dc290e9603d5b5d5a3421ca",
-      "bytes": 21949
+      "sha256": "bba2be8cf661ece5da7f3a6fcee94a746a63aee62692cae5f38c89bfe4fcf014",
+      "bytes": 23049
     },
     {
       "spec": "lopda/1",
@@ -642,7 +643,7 @@
         "..2..........2..",
         "................"
       ],
-      "version": "2.0.0",
+      "version": "2.0.1",
       "released": "2026-10-08",
       "updated": "2026-10-21",
       "description": "视觉小说。雨夜小站，一张十年前的旧车票。七章，五个结局。",
@@ -659,8 +660,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/rain-station/index.html",
-      "sha256": "ffae5645ed2913d841b2793d49f6a13ee3ed81cc75113e5d4a66f3cbf935ba8b",
-      "bytes": 173113
+      "sha256": "eaf9f1f03e887b130a1a739d8ea3d43ff831a2d04d6ff2bdcce5a077ed9c9174",
+      "bytes": 173654
     },
     {
       "spec": "lopda/1",
@@ -727,8 +728,9 @@
         "................",
         "................"
       ],
-      "version": "0.1.0",
+      "version": "0.1.1",
       "released": "2026-10-28",
+      "updated": "2026-10-28",
       "description": "七天，守住山脚的小馆：采买、打怪、备菜、待客。",
       "i18n": {
         "en": {
@@ -739,8 +741,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/shanjiao-diner/index.html",
-      "sha256": "0c6f5dbc43934d514dd3bec39db7e78d37b0ff4f8657946a93d63503015aafa0",
-      "bytes": 240184
+      "sha256": "220f52c26ef7c3fed78eb38a5c103a5167fc9089426319e7baf914a0d6618793",
+      "bytes": 240663
     },
     {
       "spec": "lopda/1",
