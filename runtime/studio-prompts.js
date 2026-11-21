@@ -251,7 +251,7 @@ function score(o){
 "Do not arrange, embellish, or transpose the music.",
 "",
 JSON_ONLY,
-'Format: {"title":"...","key":"G","capo":4,"meter":"4/4","bpm":null,"bars":[{"chords":["C","D"],"beats":["4111","1116,","12","0123"]}]}',
+'Format: {"title":"...","key":"D","capo":2,"meter":"4/4","bpm":null,"bars":[{"chords":["F","G7"],"beats":["3532","1","6,5,","0"]}]}',
 "",
 "Rules:",
 "- key is the written 1= key (or the score's written key for staff notation), as a note name with optional m for minor: e.g. G, Bb or F#m. Never write a key as 'C major'. Keep it exactly as written. capo is the written fret, 0 if none. Never transpose; capo is applied locally.",
