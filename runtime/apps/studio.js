@@ -2423,6 +2423,7 @@ function scoreLostText(code){
   if((m=/^chord:(.*)>none$/.exec(code))) return tr("studio.score.lost.skip",{from:m[1]});
   if((m=/^chord:(.*)>(.*)$/.exec(code))) return tr("studio.score.lost.chord",{from:m[1],to:m[2]});
   if((m=/^bars:(\d+)$/.exec(code))) return tr("studio.score.lost.bars",{n:Math.max(0,Number(m[1])-1)});
+  if(code==="nochords") return tr("studio.score.lost.nochords");
   return "";
 }
 function renderAiSheet(sh){
@@ -2459,6 +2460,8 @@ function renderAiSheet(sh){
     sh.appendChild(brow);
     return;
   }
+  /* the user says which way a request goes by the button they press: edit this tape, or write a new one (decisions.md
+     section 57) */
   if(!T.aiBusy) sh.appendChild(el("p","st-sheet-label",tr("studio.ai.hint")));
   /* a few lines that scroll inside: a request can be a paragraph (owner, 2026-10-31). Return makes a new line; the
      send button sends, and Ctrl/Cmd+Return too on a keyboard. */
@@ -2469,7 +2472,8 @@ function renderAiSheet(sh){
   input.placeholder=tr("studio.ai.placeholder");
   input.value=T.aiNote||"";
   input.disabled=T.aiBusy;
-  input.onkeydown=function(e){ if(e.key==="Enter" && (e.ctrlKey || e.metaKey)){ e.preventDefault(); askAi(input.value); } };
+  /* Ctrl/Cmd+Return does what the first button does: edit this tape */
+  input.onkeydown=function(e){ if(e.key==="Enter" && (e.ctrlKey || e.metaKey)){ e.preventDefault(); askAi(input.value,"edit"); } };
   sh.appendChild(input);
   if(T.aiBusy){
     var prog=el("div","st-ai-progress");
@@ -2495,10 +2499,16 @@ function renderAiSheet(sh){
     }
   }
   var row=el("div","st-sheet-row");
-  var send=el("button","st-sheet-btn",""); send.type="button"; send.textContent=tr("studio.ai.send");
-  send.disabled=T.aiBusy;
-  send.onclick=function(){ askAi(input.value); };
-  row.appendChild(send);
+  var sendBtn=function(id,label,mode){
+    var b=el("button","st-sheet-btn",""); b.type="button"; b.id=id; b.textContent=tr(label);
+    b.onclick=function(){ askAi(input.value,mode); };
+    row.appendChild(b);
+  };
+  /* while the AI works only 停 stays in the row: three buttons would not fit 331 px in English */
+  if(!T.aiBusy){
+    sendBtn("studio-ai-edit","studio.ai.send.edit","edit");
+    sendBtn("studio-ai-new","studio.ai.send.new","new");
+  }
   if(T.aiBusy){
     var stop=el("button","st-sheet-btn",""); stop.type="button"; stop.textContent=tr("studio.ai.stop");
     stop.onclick=aiStopJob;
@@ -2512,15 +2522,15 @@ function renderAiSheet(sh){
     readRow.appendChild(read); sh.appendChild(readRow);
   }
   var chips=el("div","st-ai-chips");
-  var chip=function(label,text){
+  var chip=function(label,text,mode){
     var b=el("button","st-ai-chip",label); b.type="button";
     b.disabled=T.aiBusy;
-    b.onclick=function(){ askAi(text); };
+    b.onclick=function(){ askAi(text,mode); };
     chips.appendChild(b);
   };
-  chip(tr("studio.ai.chip.faster"),tr("studio.ai.chip.faster"));
-  chip(tr("studio.ai.chip.swing"),tr("studio.ai.chip.swing"));
-  chip(tr("studio.ai.chip.skeleton"),tr("studio.ai.chip.skeleton"));
+  chip(tr("studio.ai.chip.faster"),tr("studio.ai.chip.faster"),"edit");
+  chip(tr("studio.ai.chip.swing"),tr("studio.ai.chip.swing"),"edit");
+  chip(tr("studio.ai.chip.skeleton"),tr("studio.ai.chip.skeleton"),"new");
   sh.appendChild(chips);
   if(!T.aiBusy){
     var state=el("p","st-sheet-label st-ai-state",aiState());
@@ -2598,14 +2608,17 @@ function listenFromTop(){
   renderAll();
   startPlay();
 }
-function askAi(text){
+/* mode: "edit" changes the open tape (undoable, a version before it), "new" writes a new tape as a draft; the button
+   the user pressed decides, never the words (decisions.md section 57) */
+function askAi(text,mode){
   text=String(text==null?"":text).trim();
+  if(mode!=="edit") mode="new";
   if(!text || T.aiBusy) return;
   T.aiNote=text;
   /* every request goes to the AI: the local phrase matcher read "a 12-bar blues in E major" as "change the key to E
      major" and did it (owner, 2026-10-31), so it was removed */
   if(!LP.ai || !LP.ai.on()){
-    if(H.wantsNewSong(text,T.song)) toast(tr("studio.ai.nokey.template"));
+    if(mode==="new") toast(tr("studio.ai.nokey.template"));
     else toast(tr("studio.ai.nokey"));
     renderSheet();
     return;
@@ -2629,7 +2642,7 @@ function askAi(text){
       else toast(tr("studio.ai.trouble.toast"));
     });
   }
-  var job=H.wantsNewSong(text,T.song)
+  var job=mode==="new"
     ? H.skeleton({text:text,ask:ask,onStage:onStage,onTrouble:onTrouble})
     : H.edit({song:T.song,focus:{screen:T.screen,pattern:T.pat,slot:T.slot},text:text,ask:ask,onStage:onStage,onTrouble:onTrouble});
   T.aiJob=job;

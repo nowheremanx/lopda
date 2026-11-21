@@ -694,19 +694,7 @@ function readScore(o){
   });
 }
 
-/* Does this sentence ask for a new song, or a change to the open one? "写一个俄罗斯风格的曲子" went down the edit path
-   and rewrote a blank tape bar by bar (owner, 2026-10-30), so the words of making something are wider than "骨架",
-   and a tape that is still the single starting bar is never worth editing into a song. */
-var NEW_SONG=/骨架|写一首|来一首|做一首|写一个|写个|做一个|做个|来一个|来个|一首|曲子|新歌|新的歌|skeleton|song idea|new song|write (a|me)|make (a|me)|compose|an? [\w\s-]*(song|tune|track|piece)\b/i;
-var EDIT_WORDS=/改|换|调|加|去掉|删|更|再|让它|把|副歌|主歌|change|make it|more|less|add|remove|turn|swap/i;
-function wantsNewSong(text,song){
-  var t=String(text||"");
-  if(NEW_SONG.test(t) && !/^(把|让|给)/.test(t.trim())) return true;
-  var chain=song && song.song || [], used={}, i, n=0;
-  for(i=0;i<chain.length;i++) if(!used["$"+chain[i]]){ used["$"+chain[i]]=true; n++; }
-  /* a fresh tape (one bar in the chain): anything that is not clearly an edit makes a new song */
-  return chain.length<=1 && n<=1 && !EDIT_WORDS.test(t);
-}
-
-window.LopdaStudioHarness={wantsNewSong:wantsNewSong, skeleton:skeleton, edit:edit, readScore:readScore, MAX_RETRY:MAX_RETRY, MAX_TURNS:MAX_TURNS, AUTO_RETRY:AUTO_RETRY};
+/* No guessing from the words whether a request wants a new song or an edit: the AI page has a button for each and the
+   user's press decides (decisions.md section 57). The guesser read "请在这首曲子上加和弦和贝斯" as a new song (owner, 2026-11-21). */
+window.LopdaStudioHarness={skeleton:skeleton, edit:edit, readScore:readScore, MAX_RETRY:MAX_RETRY, MAX_TURNS:MAX_TURNS, AUTO_RETRY:AUTO_RETRY};
 })();

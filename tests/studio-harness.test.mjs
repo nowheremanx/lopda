@@ -401,14 +401,9 @@ test("skeleton: the plan picks the sound, typed and borrowed chords and its own 
   assert.ok(pcs.includes(0) || pcs.includes(4) || pcs.includes(7), "a chord tone of C on the bar's strong beat");
 });
 
-test("wantsNewSong: words of making a song, or a fresh tape, start a new song; edits stay edits", () => {
-  const fresh = S.newSong(0), demo = S.demoSong(0);
-  for (const t of ["写一个俄罗斯风格的曲子", "来个骨架", "做一首中国风的歌", "write me a sad song", "an upbeat tune for a walk", "compose something"])
-    assert.equal(H.wantsNewSong(t, demo), true, t);
-  for (const t of ["副歌的军鼓加点 ghost note", "把 B 段的旋律去掉", "make it faster", "整首更欢快一点"])
-    assert.equal(H.wantsNewSong(t, demo), false, t);
-  assert.equal(H.wantsNewSong("俄罗斯风格", fresh), true, "a fresh tape with a style word becomes a new song");
-  assert.equal(H.wantsNewSong("更快一点", fresh), false);
+test("no word guesser: the button the user presses picks a new song or an edit (decisions.md section 57)", () => {
+  /* "请在这首曲子上加和弦和贝斯" went to a new song because it said 曲子 (owner, 2026-11-21) */
+  assert.equal(H.wantsNewSong, undefined);
 });
 
 test("the edit prompt names the scale's own chords so a model does not guess Cm in A minor", () => {
@@ -533,6 +528,14 @@ test("readScore: score pictures are passed as OpenRouter image messages", async 
   assert.equal(content[0].type, "text");
   assert.match(content[0].text, /pictures are pages.*in order/i);
   assert.deepEqual(plain(content.slice(1)), images.map((url) => ({ type: "image_url", image_url: { url } })));
+});
+
+test("score prompt names chords from an accompaniment staff when none are printed", () => {
+  const system = ctx.LopdaStudioPrompts.score({ text: "" })[0].content;
+  assert.match(system, /No chord names printed, but an accompaniment staff/);
+  assert.match(system, /left hand/);
+  assert.match(system, /melody from the top staff only/);
+  assert.doesNotMatch(system, /use \[\] when none/, "an empty chord list only when nothing is played under the melody");
 });
 
 test("score prompt warns about TAB fret numbers and octave dots", () => {

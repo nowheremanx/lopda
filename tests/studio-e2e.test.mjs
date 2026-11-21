@@ -4005,7 +4005,7 @@ test("studio: with no key nothing changes the tape; an AI reply is previewed and
   await p.locator("#studio-sheet .lcd-menu li", { hasText: "让 AI 改" }).click();
   await p.waitForSelector("#studio-ai-input");
   await p.fill("#studio-ai-input", "来一首 E 大调 12 bar blues");
-  await p.locator("#studio-sheet .st-sheet-btn", { hasText: "说" }).click();
+  await p.click("#studio-ai-new");
   assert.match(await p.textContent("#toast"), /没接上 AI/);
   assert.equal(await p.textContent("#studio-bpm"), before);
   await p.click("#studio-sheet .st-sheet-head button").catch(() => {});
@@ -4024,7 +4024,7 @@ test("studio: with no key nothing changes the tape; an AI reply is previewed and
   await p.locator("#studio-sheet .lcd-menu li", { hasText: "让 AI 改" }).click();
   await p.waitForSelector("#studio-ai-input");
   await p.fill("#studio-ai-input", "改成 100");
-  await p.locator("#studio-sheet .st-sheet-btn", { hasText: "说" }).click();
+  await p.click("#studio-ai-edit");
   await p.waitForFunction(() => /看谱子|轮/.test((document.querySelector("#studio-ai-stage") || {}).textContent || ""));
   const link1 = await p.textContent("#studio-ai-link");
   assert.match(link1, /^[▮▯] /, "the link line starts with the mark");
@@ -4068,7 +4068,7 @@ test("studio: a dropped AI line is dialled again, then the user decides; a long 
   await p.locator("#studio-sheet .lcd-menu li", { hasText: "让 AI 改" }).click();
   await p.waitForSelector("#studio-ai-input");
   await p.fill("#studio-ai-input", "把踩镲改密一点");
-  await p.locator("#studio-sheet .st-sheet-btn", { hasText: "说" }).click();
+  await p.click("#studio-ai-edit");
   await p.waitForFunction(() => /重拨/.test((document.querySelector("#studio-ai-stage") || {}).textContent || ""));
   await p.waitForSelector("#studio-ai-again", { timeout: 40000 });
   assert.equal(await p.evaluate(() => window.__aiCalls), 4, "three automatic redials after the first try");
@@ -4118,7 +4118,7 @@ test("studio: an AI draft becomes a new tape and leaves the current one alone", 
   await p.locator("#studio-sheet .lcd-menu li", { hasText: "让 AI 改" }).click();
   await p.waitForSelector("#studio-ai-input");
   await p.fill("#studio-ai-input", "来个雨夜骨架");
-  await p.locator("#studio-sheet .st-sheet-btn", { hasText: "说" }).click();
+  await p.click("#studio-ai-new");
   await p.waitForSelector("#studio-sheet .st-ai-preview");
   assert.match(await p.textContent("#studio-sheet .st-sheet-label"), /新磁带/);
   assert.match(await p.textContent("#studio-sheet .st-ai-card"), /抽到风格卡.*BPM/);
@@ -4206,7 +4206,7 @@ test("studio: the guide, library, versions and AI sheets fit 331x359 with 44 px 
     LP.ai.ask = () => new Promise(() => {});
   });
   await p.fill("#studio-ai-input", "改一下");
-  await p.locator("#studio-sheet .st-sheet-btn", { hasText: "说" }).click();
+  await p.click("#studio-ai-edit");
   await p.waitForFunction(() => /[▮▯]/.test((document.querySelector("#studio-ai-link") || {}).textContent || ""));
   await p.waitForFunction(() => /看谱子|轮/.test((document.querySelector("#studio-ai-stage") || {}).textContent || ""));
   const spill = await p.evaluate(() => {
