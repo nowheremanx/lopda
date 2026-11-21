@@ -21,7 +21,7 @@ function fresh() {
   };
 }
 
-function save() { if (S) game.save(SAVE_KEY, S); }
+function save() { if (bootFailed) return; if (S) game.save(SAVE_KEY, S); }
 function seen(id) { return !!(S && S.seen[id]); }
 function mark(id) { if (S) { S.seen[id] = 1; save(); } }
 function flag(id) { return !!(S && S.flags[id]); }

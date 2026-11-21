@@ -1587,7 +1587,7 @@ var view = "play", logTop = 0;
 /* chapter snapshots are script positions, so they expire with the story version */
 var PROGRESS_VERSION = STORY_VERSION;
 var progress = { v: PROGRESS_VERSION, done: {} };
-var progressLoaded = false;
+var progressLoaded = false, progressFailed = false;
 
 function fresh() { return { v: STORY_VERSION, pc: 0, flags: {}, bg: null, left: null, right: null, chapter: null }; }
 function who(id) { return id && CAST[id] ? T(CAST[id].name) : ""; }
@@ -1608,6 +1608,9 @@ function loadProgress() {
     for (var id in p.done) {
       if (Object.prototype.hasOwnProperty.call(p.done, id) && !progress.done[id]) progress.done[id] = p.done[id];
     }
+  }, function () {
+    /* an unreadable chapter save means no chapters; nothing is written over it */
+    progressLoaded = true; progressFailed = true;
   });
 }
 function chapterList() {
@@ -1620,7 +1623,7 @@ function finishChapter(c) {
     flags: copyFlags(c.flags || {}), bg: c.bg || null,
     left: c.left || null, right: c.right || null
   };
-  game.save("chapters", progress);
+  if (!progressFailed) game.save("chapters", progress);
 }
 function playChapter(c) {
   var r = progress.done[c.id];
@@ -1821,15 +1824,23 @@ function drawLog(g) {
   }
 }
 
-var saved = null, menuIdx = 0;
+var saved = null, menuIdx = 0, titleLoading = false;
 game.scene("title", {
   enter: function () {
-    saved = null; menuIdx = 0;
+    saved = null; menuIdx = 0; titleLoading = true;
     loadProgress();
-    game.load("vn").then(function (v) { saved = v && v.v === STORY_VERSION ? v : null; });
+    game.load("vn").then(function (v) {
+      saved = v && v.v === STORY_VERSION ? v : null;
+      titleLoading = false;
+    }, function () {
+      /* leave the corrupt save untouched; the player can still start over */
+      saved = null; titleLoading = false;
+    });
     listen("title");
   },
   update: function () {
+    /* the menu must not act on a save that has not been read yet */
+    if (titleLoading) return;
     if (game.pressed("select") && hasChapters()) {
       game.sfx("tap");
       game.go("chapters", "title");
@@ -1865,7 +1876,7 @@ game.scene("title", {
     g.rect(0, 112, 160, 32, g.PAPER);
     g.line(0, 112, 160, 112, g.INK);
     var hasSave = !!saved;
-    g.text(T(hasSave ? { zh: "↑↓ 选  A 确定", en: "Up/Dn  A: OK" } : { zh: "A 开始", en: "A: start" }), 80, 115, { align: "center", color: g.INK });
+    g.text(titleLoading ? "…" : T(hasSave ? { zh: "↑↓ 选  A 确定", en: "Up/Dn  A: OK" } : { zh: "A 开始", en: "A: start" }), 80, 115, { align: "center", color: g.INK });
     var hint = hasChapters()
       ? { zh: "SELECT 选章  B 回看", en: "SELECT chapters  B log" }
       : { zh: "剧情中 A 前进 B 回看", en: "Story: A next  B log" };

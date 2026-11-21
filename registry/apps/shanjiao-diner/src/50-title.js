@@ -57,6 +57,7 @@ game.scene("title", {
     }
     g.text("←→ 选   A 决定", 108, 226, { align: "center", color: g.DARK });
     if (!booted) g.text("…", 108, 170, { align: "center", color: g.DARK });
+    else if (bootFailed) g.text("存档读不出来，可在设置里处理", 108, 170, { align: "center", color: g.DARK });
   }
 });
 

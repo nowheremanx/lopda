@@ -197,6 +197,9 @@ game.scene("title", {
     game.load("state").then(function (v) {
       if (v && v.found == null) v.found = !!(v.key || v.thanked);   /* saves from v1.1.0 */
       S = v;
+    }, function () {
+      /* the save can't be read: start fresh; the runtime will not let a new save overwrite it */
+      S = null;
     });
   },
   update: function () {
