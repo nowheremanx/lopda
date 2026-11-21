@@ -3425,14 +3425,19 @@ function exportWav(){
   if(T.built) renderSheet();
   if(T.playing) stopPlay();
   T.exporting=true;
-  toast(tr("studio.exporting"));
+  /* a long tape renders for many seconds on a phone, longer than a toast stays: the line is shown again every second
+     with the time so far until the render ends (owner, 2026-11-21: the toast went and the share sheet came much later) */
+  var t0=Date.now(), tick=function(){ toast(tr("studio.exporting",{s:Math.floor((Date.now()-t0)/1000)})); }, timer=setInterval(tick,1000);
+  tick();
   renderWav().then(function(blob){
+    clearInterval(timer);
     return LP.S.downloads.save({filename:wavName(),data:blob}).then(function(res){
       if(res && res.status==="saved") toast(tr("studio.exported"));
     },function(e){
       if(!(e && e.code==="declined")){ toast(LP.saveErr(e)); }
     });
   }).then(function(){ T.exporting=false; },function(){
+    clearInterval(timer);
     T.exporting=false;
     toast(tr("studio.export.fail"));
   });
