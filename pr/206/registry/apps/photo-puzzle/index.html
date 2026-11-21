@@ -1,0 +1,1405 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>拍照拼图</title>
+<!-- Lo-PDA example app (lopda/1): a sliding puzzle cut from a photo the player takes with PAD.camera.snap
+     (SPEC.md 6.6), or from six original four-tone pictures drawn in this file. Shows the photo before using it and
+     allows a retake (sdk/UI.md section 10). Normal and arcade games, an opening cut, a self-solving picture on the
+     main menu, a hint that numbers every piece and points an arrow at the hole, and an unfinished game kept with
+     PAD.save. Chin buttons, touch, PAD.sfx and a short PAD.music jingle. MIT License. -->
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #a3ad7e; color: #1f2a14; font-family: monospace; }
+  body { display: flex; flex-direction: column; }
+  header { flex: none; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 6px 10px; border-bottom: 2px solid #1f2a14; font-size: 15px; }
+  header b { font-size: 17px; letter-spacing: 2px; }
+  #info { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  main { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 8px 10px; box-sizing: border-box; }
+  #stage { flex: 1; min-height: 88px; width: 100%; display: flex; align-items: center; justify-content: center; }
+  canvas { display: block; image-rendering: pixelated; image-rendering: crisp-edges; border: 3px solid #1f2a14; touch-action: none; }
+  #msg { flex: none; margin: 0; font-size: 15px; line-height: 1.4; text-align: center; min-height: 1.4em; overflow-wrap: anywhere; }
+  #msg.note { background: #1f2a14; color: #a3ad7e; padding: 2px 8px; }
+  #menu { flex: none; width: 100%; max-width: 360px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  #menu.three { grid-template-columns: repeat(3, 1fr); }
+  #menu:empty { display: none; }
+  #menu button:only-child { grid-column: 1 / -1; }
+  #menu button { font: inherit; font-size: 16px; font-weight: bold; min-height: 44px; width: 100%; padding: 0 4px; background: #a3ad7e; color: #1f2a14; border: 2px solid #1f2a14; }
+  #menu button.on { background: #1f2a14; color: #a3ad7e; }
+  #menu button.off { color: #4a5a32; border-style: dashed; }
+  footer { flex: none; padding: 4px 10px 6px; border-top: 2px solid #1f2a14; font-size: 13px; color: #4a5a32; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #fuse { position: fixed; inset: 0; z-index: 10; pointer-events: none; display: none; }
+  #fuse.on { display: block; }
+  #fuse i { position: absolute; display: block; background-repeat: repeat; }
+  #fuse i.t, #fuse i.b { height: 3px; background-image: repeating-linear-gradient(90deg, #1f2a14 0 3px, transparent 3px 6px); }
+  #fuse i.l, #fuse i.r { width: 3px; background-image: repeating-linear-gradient(180deg, #1f2a14 0 3px, transparent 3px 6px); }
+  #fuse i.t { right: 0; top: 0; }
+  #fuse i.r { right: 0; bottom: 0; }
+  #fuse i.b { left: 0; bottom: 0; }
+  #fuse i.l { left: 0; top: 0; }
+  #fuse.low i { animation: fuseBlink .5s steps(1) infinite; }
+  @keyframes fuseBlink { 0%, 100% { visibility: visible; } 50% { visibility: hidden; } }
+</style>
+</head>
+<body>
+<header><b id="ttl">拍照拼图</b><span id="info"></span></header>
+<main>
+  <div id="stage"><canvas id="cv" width="128" height="112"></canvas></div>
+  <p id="msg"></p>
+  <div id="menu"></div>
+</main>
+<footer id="ft"></footer>
+<div id="fuse"><i class="t"></i><i class="r"></i><i class="b"></i><i class="l"></i></div>
+
+<script data-src="src/solver.js">
+/* The solver behind 看它解 / SELECT / the tutorial: rows first, then columns, then the last 2×2 -- the way a person
+   solves it, not the shortest way. Every stage is a small breadth-first search over the cells that still matter:
+   the pieces this stage is placing and the gap. Pieces already home are walls, and every other piece is
+   interchangeable, which keeps the search at a few thousand states (a few milliseconds on a phone) and makes the
+   plan easy to explain in one line. No DOM, no PAD: tests/solver.test.mjs plays a thousand boards with it.
+
+   Board layout: tiles[position] = piece, pieces 0 … n*n-2 are the picture, n*n-1 is the gap. */
+var Solver = (function () {
+  "use strict";
+
+  /* Each stage places one or two pieces; after it they are locked and never move again. */
+  function stages(n) {
+    if (n === 3) return [
+      [{ p: 0, at: 0 }],                                            /* row 1: 1 */
+      [{ p: 1, at: 1 }, { p: 2, at: 2 }],                           /* row 1: 2 and 3 together */
+      [{ p: 3, at: 3 }, { p: 6, at: 6 }],                           /* column 1: 4 and 7 together */
+      [{ p: 4, at: 4 }, { p: 5, at: 5 }, { p: 7, at: 7 }],          /* the last 2×2 */
+    ];
+    return [
+      [{ p: 0, at: 0 }], [{ p: 1, at: 1 }], [{ p: 2, at: 2 }, { p: 3, at: 3 }],
+      [{ p: 4, at: 4 }], [{ p: 5, at: 5 }], [{ p: 6, at: 6 }, { p: 7, at: 7 }],
+      [{ p: 8, at: 8 }, { p: 12, at: 12 }],                         /* the last two rows, column by column */
+      [{ p: 9, at: 9 }, { p: 13, at: 13 }],
+      [{ p: 10, at: 10 }, { p: 11, at: 11 }, { p: 14, at: 14 }],
+    ];
+  }
+
+  function neighbours(n, g) {
+    var r = (g / n) | 0, c = g % n, out = [];
+    if (r > 0) out.push(g - n);
+    if (r < n - 1) out.push(g + n);
+    if (c > 0) out.push(g - 1);
+    if (c < n - 1) out.push(g + 1);
+    return out;
+  }
+
+  /* One stage: BFS over (positions of the pieces being placed, gap). Returns the cells to slide, in order, or null.
+     `locked` holds the pieces finished in earlier stages: they are walls, which is what makes the search small.
+     Merely being at home does not lock a piece -- a wall can pinch the free cells into a path where the goal is
+     out of reach, so only finished stages may block (found by the thousand-board test). */
+  function find(n, tiles, targets, locked) {
+    var N = n * n, gapPiece = N - 1, gap = tiles.indexOf(gapPiece);
+    var start = [], want = [], i, k;
+    for (i = 0; i < targets.length; i++) { start.push(tiles.indexOf(targets[i].p)); want.push(targets[i].at); }
+
+    if (start.join() === want.join()) return [];
+
+    var wall = {};
+    for (i = 0; i < (locked || []).length; i++) wall[tiles.indexOf(locked[i])] = true;
+
+    function done(pos) {
+      for (k = 0; k < want.length; k++) if (pos[k] !== want[k]) return false;
+      return true;
+    }
+
+    var key0 = start.join(",") + "|" + gap;
+    var prev = new Map(); prev.set(key0, null);
+    var queue = [{ pos: start, gap: gap, key: key0 }];
+    for (var qi = 0; qi < queue.length; qi++) {
+      var cur = queue[qi], g = cur.gap, nb = neighbours(n, g);
+      for (var j = 0; j < nb.length; j++) {
+        var q = nb[j];
+        if (wall[q]) continue;
+        var pos = cur.pos.slice(), hit = -1;
+        for (k = 0; k < pos.length; k++) if (pos[k] === q) { hit = k; break; }
+        if (hit >= 0) pos[hit] = g;
+        var key = pos.join(",") + "|" + q;
+        if (prev.has(key)) continue;
+        prev.set(key, [cur.key, q]);
+        if (done(pos)) {
+          var out = [];
+          for (var s = key; prev.get(s); s = prev.get(s)[0]) out.push(prev.get(s)[1]);
+          out.reverse();
+          return out;
+        }
+        queue.push({ pos: pos, gap: q, key: key });
+      }
+    }
+    return null;
+  }
+
+  /* the piece at q slides into the gap */
+  function step(tiles, n, q) {
+    var gap = tiles.indexOf(n * n - 1);
+    tiles[gap] = tiles[q];
+    tiles[q] = n * n - 1;
+  }
+
+  /* the whole board, as [{p, stage}] where p is the cell to slide; null if a stage cannot be planned */
+  function solve(n, tiles) {
+    var work = tiles.slice(), out = [], plan = stages(n), locked = [];
+    for (var s = 0; s < plan.length; s++) {
+      var moves = find(n, work, plan[s], locked);
+      if (!moves) return null;
+      for (var i = 0; i < moves.length; i++) { out.push({ p: moves[i], stage: s }); step(work, n, moves[i]); }
+      for (var j = 0; j < plan[s].length; j++) locked.push(plan[s][j].p);
+    }
+    return out;
+  }
+
+  /* one custom goal, for a tutorial lesson: [{p: piece, at: position}], with `keep` pieces left where they are */
+  function goalPlan(n, tiles, targets, keep) {
+    var moves = find(n, tiles, targets, keep);
+    if (!moves) return null;
+    return moves.map(function (p) { return { p: p, stage: 0 }; });
+  }
+
+  return { stages: stages, solve: solve, goalPlan: goalPlan };
+})();
+</script>
+<script>
+(function () {
+  "use strict";
+  var HAS_PAD = typeof PAD !== "undefined";
+  var TONES = [[31, 42, 20], [74, 90, 50], [125, 138, 88], [163, 173, 126]];   /* PAD.TONES as RGB: 0 ink ... 3 paper */
+  var W = 128, H = 112;   /* PAD.camera.snap({size: "small"}): the camera's standard film, 8:7 */
+
+  /* two languages: PAD.lang from the runtime; older runtimes have none, so Chinese is the default */
+  var LANG = HAS_PAD && PAD.lang === "en" ? "en" : "zh";
+  var TXT = {
+    zh: { title: "拍照拼图", snap: "拍一张", gallery: "内置图片", modeNormal: "模式 普通", modeArcade: "模式 街机",
+      howto: "怎么玩", mainMenu: "主菜单", cont: "继续", resume: "继续", next: "下一局", again: "再来一局",
+      sizeNow: "难度 {n}×{n}", watch: "看它解", prev: "上一张", start: "开始", nextPic: "下一张",
+      use: "用这张", retake: "重拍", moves: "{n} 步", best: "最佳 {n}", helped: "助",
+      intro: "拍一张，或挑一张。", nocam: "这台掌机不能拍照，用内置图片玩。",
+      nophoto: "没拿到照片，用内置图片玩。", taking: "拍照中…", saved: "上次那盘还在这里。",
+      look: "就用这张吗？", won: "拼好了！{n} 步。", wonArcade: "拼好了！{n} 步，剩 {t}。",
+      record: "新纪录！", unlocked: "下一局是 4×4。", trick: "4×4 有窍门：试试怎么玩。",
+      solved: "拼好了！", timeUp: "时间到。", left: "剩 {t}", picture: "图 {i}/{n}",
+      normal: "普通", arcade: "街机", locked: "这台掌机不能拍照。",
+      kTitle: "方向键 选　A 确定　B 主菜单", kMain: "方向键 选　A 确定",
+      kMainBack: "方向键 选　A 确定　B 返回", kGallery: "←→ 换图　↑↓ 难度　A 开始　B 返回",
+      kPreview: "A 用这张　B 重拍", kCut: "A 跳过",
+      kPlay: "方向键 推　A 看原图　START 菜单　SELECT 提示", kMenu: "方向键 选　A 确定　B 返回",
+      kLesson: "方向键 推　SELECT 提示　START 退出", kLessonDone: "A 下一课　START 退出", kSolved: "A 继续", kWon: "方向键 选　A 确定", kLost: "方向键 选　A 确定",
+      lessonDone: "做到了！", lessonN: "第 {n} 课",
+      lesson1: "方向键把空格旁边的块推进空格。箭头指着第一步：先推 5 号块，再推 8 号块；按 SELECT 可再看。",
+      lesson2: "把 1 号块送到左上角。编号就在每块左上角，按 SELECT 可以再看箭头。",
+      lesson3: "一行最后两块：把 3 号块放到 2 号块下面，再一起转进去。",
+      lesson4: "一行拼好就别再动它。最后两行按列来。先看一遍。",
+      demoEnd: "看完了：拼好一行，再拼下一行。",
+      stage3: ["第 1 行：送 1 号块", "第 1 行：最后两块一起", "第 1 列：3 和 6 一起", "最后 2×2：转到位"],
+      stage4: ["第 1 行：送 1 号块", "第 1 行：送 2 号块", "第 1 行：最后两块一起", "第 2 行：送 5 号块",
+        "第 2 行：送 6 号块", "第 2 行：最后两块一起", "最后两行：9、13 一起", "最后两行：10、14 一起",
+        "最后 2×2：转到位"],
+      pics: { lake: "山湖", lighthouse: "灯塔", city: "夜城", dunes: "沙丘", pines: "松林", blossom: "花见" },
+      quitLesson: "退出教程", nextLesson: "下一课", backMain: "回主菜单" },
+    en: { title: "SNAPTILE", snap: "Take a photo", gallery: "Built-in pictures", modeNormal: "Mode Normal", modeArcade: "Mode Arcade",
+      howto: "How to play", mainMenu: "Main menu", cont: "Continue", resume: "Resume", next: "Next puzzle", again: "Play again",
+      sizeNow: "Size {n}×{n}", watch: "Watch it solve", prev: "Previous", start: "Start", nextPic: "Next",
+      use: "Use this", retake: "Retake", moves: "{n} moves", best: "best {n}", helped: "aid",
+      intro: "Snap one, or pick one.", nocam: "No camera here: playing with the built-in pictures.",
+      nophoto: "No photo: playing with the built-in pictures.", taking: "Camera…", saved: "Your last puzzle is here.",
+      look: "Use this one?", won: "Solved in {n} moves!", wonArcade: "Solved in {n} moves, {t} left!",
+      record: "New record!", unlocked: "Next one is 4×4.", trick: "4×4 has a trick: try How to play.",
+      solved: "Solved!", timeUp: "Time up.", left: "{t} left", picture: "Picture {i}/{n}",
+      normal: "Normal", arcade: "Arcade", locked: "No camera on this handheld.",
+      kTitle: "Arrows pick  A ok  B main menu", kMain: "Arrows pick  A ok",
+      kMainBack: "Arrows pick  A ok  B back", kGallery: "←→ picture  ↑↓ size  A start  B back",
+      kPreview: "A use  B retake", kCut: "A skip",
+      kPlay: "D-pad slide  A peek  START menu  SELECT hint", kMenu: "Arrows pick  A ok  B back",
+      kLesson: "D-pad slide  SELECT hint  START leave", kLessonDone: "A next  START leave", kSolved: "A continue", kWon: "Arrows pick  A ok", kLost: "Arrows pick  A ok",
+      lessonDone: "Done!", lessonN: "Lesson {n}",
+      lesson1: "The arrows push the piece next to the gap into it. The arrow marks the first move: push tile 5 up, then tile 8 left. Press SELECT to see it again.",
+      lesson2: "Bring tile 1 to the top-left corner. Each number sits in its tile's top-left corner; SELECT shows the arrow again.",
+      lesson3: "The last two in a row: put tile 3 under tile 2, then turn them in together.",
+      lesson4: "Once a row is done, leave it alone. The last two rows go column by column. Just watch.",
+      demoEnd: "That is the idea: one row, then the next.",
+      stage3: ["Row 1: bring tile 1", "Row 1: last two together", "Column 1: 3 and 6 together", "Last 2×2: turn it home"],
+      stage4: ["Row 1: bring tile 1", "Row 1: bring tile 2", "Row 1: last two together", "Row 2: bring tile 5",
+        "Row 2: bring tile 6", "Row 2: last two together", "Last rows: 9 and 13 together", "Last rows: 10 and 14 together",
+        "Last 2×2: turn it home"],
+      pics: { lake: "Lake", lighthouse: "Lighthouse", city: "Night city", dunes: "Dunes", pines: "Pines", blossom: "Blossom" },
+      quitLesson: "Leave lesson", nextLesson: "Next lesson", backMain: "Main menu" }
+  }[LANG];
+  function tx(key, n) { return String(TXT[key]).replace(/\{n\}/g, n); }
+  function fmt(s, vars) { return s.replace(/\{(\w+)\}/g, function (_, k) { return vars[k] === undefined ? "" : vars[k]; }); }
+  function clockText(sec) {
+    sec = Math.max(0, Math.ceil(sec));
+    var m = Math.floor(sec / 60), r = sec % 60;
+    return m + ":" + (r < 10 ? "0" : "") + r;
+  }
+  function stageText(n, i) { var a = n === 3 ? TXT.stage3 : TXT.stage4; return a[i] || ""; }
+  document.documentElement.lang = LANG === "zh" ? "zh-CN" : "en";
+  document.title = TXT.title;
+  document.getElementById("ttl").textContent = TXT.title;
+
+  /* ---------- the built-in pictures: original art drawn here, dithered like the camera so they look taken ----------
+     Large shapes and clear horizons: a puzzle cut from them should be solvable by eye, even at 4×4. */
+  var BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+  function hash(x, y) { var n = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return n - Math.floor(n); }
+  function fill(L, x0, y0, x1, y1, v) {
+    x0 = Math.max(0, Math.round(x0)); y0 = Math.max(0, Math.round(y0));
+    x1 = Math.min(W, Math.round(x1)); y1 = Math.min(H, Math.round(y1));
+    for (var y = y0; y < y1; y++) for (var x = x0; x < x1; x++) L[y * W + x] = v;
+  }
+  function disc(L, cx, cy, r, v) {
+    var rr = r * r;
+    for (var y = Math.floor(cy - r); y <= Math.ceil(cy + r); y++) for (var x = Math.floor(cx - r); x <= Math.ceil(cx + r); x++) {
+      if (x < 0 || x >= W || y < 0 || y >= H) continue;
+      var dx = x - cx, dy = y - cy;
+      if (dx * dx + dy * dy <= rr) L[y * W + x] = v;
+    }
+  }
+  function poly(L, pts, v) {
+    var minY = H, maxY = 0, i;
+    for (i = 0; i < pts.length; i++) { minY = Math.min(minY, pts[i][1]); maxY = Math.max(maxY, pts[i][1]); }
+    for (var y = Math.max(0, Math.floor(minY)); y <= Math.min(H - 1, Math.ceil(maxY)); y++) {
+      var xs = [], a = pts[pts.length - 1], b;
+      for (i = 0; i < pts.length; i++) {
+        b = pts[i];
+        if ((a[1] <= y && b[1] > y) || (b[1] <= y && a[1] > y)) xs.push(a[0] + (y - a[1]) * (b[0] - a[0]) / (b[1] - a[1]));
+        a = b;
+      }
+      xs.sort(function (p, q) { return p - q; });
+      for (i = 0; i + 1 < xs.length; i += 2) {
+        var x0 = Math.max(0, Math.round(xs[i])), x1 = Math.min(W - 1, Math.round(xs[i + 1]));
+        for (var x = x0; x <= x1; x++) L[y * W + x] = v;
+      }
+    }
+  }
+  function line(L, x0, y0, x1, y1, v, t) {
+    t = t || 1;
+    var dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1, err = dx + dy;
+    for (;;) {
+      fill(L, x0 - (t >> 1), y0 - (t >> 1), x0 - (t >> 1) + t, y0 - (t >> 1) + t, v);
+      if (x0 === x1 && y0 === y1) break;
+      var e2 = 2 * err;
+      if (e2 >= dy) { err += dy; x0 += sx; }
+      if (e2 <= dx) { err += dx; y0 += sy; }
+    }
+  }
+  function sky(L, top, bottom) {
+    for (var y = 0; y < H; y++) { var v = top + (bottom - top) * y / H; for (var x = 0; x < W; x++) L[y * W + x] = v; }
+  }
+  function bird(L, x, y) { line(L, x, y, x + 3, y - 2, 0.05, 1); line(L, x + 3, y - 2, x + 6, y, 0.05, 1); }
+
+  function sceneLake(L) {
+    var x, y, v;
+    sky(L, 0.42, 0.72);
+    disc(L, 96, 24, 14, 0.72); disc(L, 96, 24, 10, 1);
+    bird(L, 20, 28); bird(L, 58, 16);
+    poly(L, [[0, 66], [16, 50], [36, 60], [58, 40], [82, 56], [106, 46], [128, 58], [128, 85], [0, 85]], 0.3);
+    poly(L, [[50, 50], [58, 40], [66, 50], [58, 58]], 0.92);
+    poly(L, [[10, 57], [16, 50], [23, 57]], 0.85);
+    for (y = 85; y < H; y++) for (x = 0; x < W; x++) {
+      v = 0.42 + 0.16 * Math.sin(x * 0.35 + y * 1.7);
+      if (x >= 84 && x <= 108) v += 0.22;
+      if (y % 6 === 0) v = 0.95;
+      if (y >= 88 && y <= 96 && x >= 18 && x <= 36) v -= 0.12;
+      L[y * W + x] = v;
+    }
+    fill(L, 18, 72, 34, 85, 0.85);
+    poly(L, [[15, 73], [26, 64], [37, 73]], 0.08);
+    fill(L, 24, 77, 28, 85, 0.05);
+    fill(L, 29, 77, 32, 80, 0.95);
+  }
+  function sceneLighthouse(L) {
+    var x, y;
+    sky(L, 0.12, 0.3);
+    for (y = 0; y < 52; y++) for (x = 0; x < W; x++) if (hash(x, y) > 0.988) L[y * W + x] = 0.95;
+    disc(L, 28, 22, 9, 1); disc(L, 33, 19, 8, 0.16);
+    for (y = 72; y < H; y++) for (x = 0; x < W; x++) {
+      var v = 0.28 + 0.16 * Math.sin(x * 0.4 + y * 1.4);
+      if (y < 74) v = 0.55;
+      if (y > 76 && y % 7 === 0) v = 0.7;
+      L[y * W + x] = v;
+    }
+    poly(L, [[97, 30], [128, 8], [128, 22]], 0.55);
+    poly(L, [[97, 30], [128, 42], [128, 54]], 0.5);
+    for (y = 30; y <= 72; y++) {
+      var hw = 3 + (y - 30) * 0.10, band = (y >= 40 && y < 47) || (y >= 55 && y < 62) || (y >= 68);
+      for (x = Math.round(97 - hw); x <= Math.round(97 + hw); x++) L[y * W + x] = band ? 0.12 : 0.9;
+    }
+    fill(L, 92, 26, 102, 32, 0.05); disc(L, 97, 29, 3, 1);
+    poly(L, [[78, 84], [90, 74], [104, 80], [118, 76], [128, 84], [128, 96], [78, 96]], 0.08);
+    poly(L, [[18, 88], [34, 88], [30, 92], [22, 92]], 0.05);
+    line(L, 26, 78, 26, 88, 0.05, 1); line(L, 26, 78, 33, 86, 0.7, 1);
+  }
+  function sceneCity(L) {
+    var x, y, i;
+    sky(L, 0.2, 0.36);
+    for (y = 0; y < 50; y++) for (x = 0; x < W; x++) if (hash(x, y) > 0.993) L[y * W + x] = 0.95;
+    disc(L, 108, 18, 8, 0.98);
+    var blocks = [[0, 16, 58], [18, 14, 44], [34, 20, 64], [56, 12, 38], [70, 18, 54], [90, 14, 46], [106, 22, 68]];
+    for (i = 0; i < blocks.length; i++) {
+      var bx = blocks[i][0], bw = blocks[i][1], bt = blocks[i][2];
+      fill(L, bx, bt, bx + bw, 90, 0.08);
+      for (y = bt + 4; y < 86; y += 4) for (x = bx + 2; x < bx + bw - 2; x += 3) if (hash(x, y) > 0.52) fill(L, x, y, x + 2, y + 2, 0.95);
+      if (bw > 14) line(L, bx + Math.floor(bw / 2), bt - 8, bx + Math.floor(bw / 2), bt, 0.08, 1);
+    }
+    for (y = 90; y < H; y++) for (x = 0; x < W; x++) {
+      var v = 0.32 + 0.12 * Math.sin(x * 0.4 + y * 1.5);
+      if (y % 5 === 0) v = 0.55;
+      L[y * W + x] = v;
+    }
+    for (x = 2; x < W; x += 3) if (hash(x, 50) > 0.55) line(L, x, 90, x, 96, 0.7, 1);
+    poly(L, [[10, 100], [30, 100], [26, 104], [14, 104]], 0.05);
+    line(L, 20, 92, 20, 100, 0.05, 1); line(L, 20, 92, 27, 99, 0.65, 1);
+  }
+  function sceneDunes(L) {
+    var x, y;
+    sky(L, 0.62, 0.9);
+    disc(L, 96, 22, 13, 0.78); disc(L, 96, 22, 9, 1);
+    for (x = 0; x < W; x++) {
+      var d1 = 58 + 7 * Math.sin(x * 0.055) + 3 * Math.sin(x * 0.13 + 1);
+      var d2 = 76 + 6 * Math.sin(x * 0.04 + 1.7);
+      var d3 = 94 + 5 * Math.sin(x * 0.06 + 3.1);
+      for (y = 0; y < H; y++) {
+        if (y >= d3) L[y * W + x] = 0.24;
+        else if (y >= d2) L[y * W + x] = 0.46;
+        else if (y >= d1) L[y * W + x] = 0.76;
+      }
+      fill(L, x, d1, x + 1, d1 + 2, 0.98);
+    }
+    fill(L, 28, 48, 33, 94, 0.06);
+    fill(L, 21, 60, 26, 64, 0.06); fill(L, 21, 60, 25, 78, 0.06);
+    fill(L, 35, 54, 40, 58, 0.06); fill(L, 36, 54, 40, 72, 0.06);
+    for (y = 52; y < 90; y += 7) { line(L, 25, y, 28, y - 2, 0.5, 1); line(L, 34, y + 1, 38, y - 1, 0.5, 1); }
+    bird(L, 18, 24); bird(L, 58, 14);
+  }
+  function pine(L, x, base, h, w, v) {
+    fill(L, x - 1, base - h * 0.25, x + 2, base, 0.05);
+    for (var i = 0; i < 3; i++) {
+      var top = base - h + i * h * 0.22;
+      var half = w * (0.35 + i * 0.28) / 2;
+      var bottom = base - h * 0.28 + i * h * 0.16;
+      poly(L, [[x, top], [x - half, bottom], [x + half, bottom]], v - i * 0.03);
+    }
+  }
+  function scenePines(L) {
+    sky(L, 0.55, 0.72);
+    poly(L, [[102, 20], [128, 0], [128, 42]], 0.8);
+    disc(L, 102, 20, 13, 0.75); disc(L, 102, 20, 8, 1);
+    poly(L, [[0, 72], [26, 44], [52, 70], [78, 40], [104, 66], [128, 50], [128, 82], [0, 82]], 0.36);
+    fill(L, 0, 88, W, H, 0.95);
+    poly(L, [[54, 112], [62, 88], [70, 88], [82, 112]], 0.62);
+    pine(L, 8, 96, 34, 24, 0.14); pine(L, 30, 92, 26, 18, 0.2); pine(L, 48, 98, 40, 28, 0.1);
+    pine(L, 80, 94, 30, 22, 0.18); pine(L, 104, 100, 44, 32, 0.08); pine(L, 122, 108, 30, 22, 0.14);
+  }
+  function sceneBlossom(L) {
+    var x, y, i;
+    sky(L, 0.5, 0.7);
+    poly(L, [[0, 70], [30, 36], [58, 66], [86, 44], [112, 64], [128, 56], [128, 84], [0, 84]], 0.34);
+    for (y = 82; y < H; y++) for (x = 0; x < W; x++) {
+      var v = 0.42 + 0.12 * Math.sin(x * 0.4 + y * 1.6);
+      if (y % 6 === 0) v = 0.8;
+      L[y * W + x] = v;
+    }
+    fill(L, 40, 36, 46, 86, 0.9); fill(L, 82, 36, 88, 86, 0.9);
+    fill(L, 30, 30, 98, 36, 0.9);
+    poly(L, [[26, 30], [30, 26], [34, 30]], 0.9); poly(L, [[94, 30], [98, 26], [102, 30]], 0.9);
+    fill(L, 36, 48, 92, 52, 0.9); fill(L, 60, 38, 68, 48, 0.08);
+    fill(L, 40, 86, 46, 98, 0.68); fill(L, 82, 86, 88, 98, 0.68); fill(L, 30, 86, 98, 90, 0.68);
+    line(L, 128, 6, 96, 18, 0.05, 2); line(L, 108, 12, 88, 24, 0.05, 2); line(L, 100, 16, 74, 10, 0.05, 2);
+    var puffs = [[96, 16, 5], [86, 24, 4], [76, 12, 4], [110, 8, 4], [118, 20, 3], [82, 6, 3], [70, 18, 3]];
+    for (i = 0; i < puffs.length; i++) { disc(L, puffs[i][0], puffs[i][1], puffs[i][2], 0.95); disc(L, puffs[i][0], puffs[i][1], puffs[i][2] - 2, 0.8); }
+    for (i = 0; i < 24; i++) { var px = Math.round(hash(i, 3) * W), py = 20 + Math.round(hash(i, 7) * 60); L[py * W + px] = 0.95; }
+    poly(L, [[14, 96], [34, 96], [30, 100], [18, 100]], 0.05);
+    line(L, 24, 88, 24, 96, 0.05, 1); line(L, 24, 88, 31, 95, 0.7, 1);
+  }
+  function makeArt(draw) {
+    var L = new Float32Array(W * H);
+    draw(L);
+    var px = new Uint8Array(W * H);
+    for (var y = 0; y < H; y++) for (var x = 0; x < W; x++) {
+      var v = L[y * W + x];
+      if (v < 0) v = 0; else if (v > 1) v = 1;
+      var t = (BAYER[(y % 4) * 4 + (x % 4)] + 0.5) / 16 - 0.5;
+      px[y * W + x] = Math.max(0, Math.min(3, Math.round(v * 3 + t)));
+    }
+    return { w: W, h: H, px: px };
+  }
+  var BUILTINS = [
+    { id: "lake", zh: "山湖", en: "Lake", draw: sceneLake },
+    { id: "lighthouse", zh: "灯塔", en: "Lighthouse", draw: sceneLighthouse },
+    { id: "city", zh: "夜城", en: "Night city", draw: sceneCity },
+    { id: "dunes", zh: "沙丘", en: "Dunes", draw: sceneDunes },
+    { id: "pines", zh: "松林", en: "Pines", draw: scenePines },
+    { id: "blossom", zh: "花见", en: "Blossom", draw: sceneBlossom }
+  ];
+  BUILTINS.forEach(function (b) { b.pic = makeArt(b.draw); });
+  var BUILTIN = BUILTINS[0].pic;
+  function picIndex(key) { for (var i = 0; i < BUILTINS.length; i++) if (BUILTINS[i].id === key) return i; return 0; }
+  function picName(b) { return LANG === "en" ? b.en : b.zh; }
+
+  /* ---------- the four lessons: fixed boards, so every player meets the same two moves, pair and row ----------
+     Lesson 4 is a 4×4 and a demo only: it plays up to the end of the second row and stops. */
+  var LESSONS = [
+    { n: 3, tiles: [0, 1, 2, 3, 8, 5, 6, 4, 7], goal: null, keep: [] },
+    { n: 3, tiles: [2, 1, 4, 3, 8, 0, 7, 5, 6], goal: [{ p: 0, at: 0 }], keep: [] },
+    { n: 3, tiles: [0, 4, 7, 1, 8, 6, 3, 2, 5], goal: [{ p: 1, at: 1 }, { p: 2, at: 2 }], keep: [0] },
+    { n: 4, tiles: [14, 2, 5, 7, 4, 15, 10, 11, 1, 9, 0, 12, 13, 6, 3, 8], goal: null, keep: [], demo: 5 }
+  ];
+
+  /* ---------- state ----------
+     n / tiles / pic / gameArcade / left describe the board that is on screen. nextN / arcade / galleryIndex
+     are the choices the main menu and the picture browser are making for the NEXT game, so changing a choice
+     never disturbs an unfinished game kept in the store. */
+  var S = { screen: "title", sel: 0, items: [],
+    pic: BUILTIN, picKey: "lake", shot: null, note: "", mainNote: "", busy: false,
+    n: 3, nextN: 3, tiles: [], gap: 0, moves: 0, peek: false,
+    big: false, best: {}, bestTime: {}, record: false, timeRecord: false, helped: false, showTrick: false,
+    hasSave: false, previewFrom: "camera", src: "builtin",
+    arcade: false, gameArcade: false, left: 0, arcadeTotal: 0,
+    clockAt: 0, clockTimer: 0, clockLow: -1,
+    mode: "normal", lesson: 0, lessonDone: false, doneText: "", beforeTutorial: null, lessonTimer: 0,
+    demo: null, hint: null, animMove: null,
+    intro: null, introTimer: 0, attract: null, attractTimer: 0, attractIndex: 0,
+    galleryIndex: 0, menuFrom: "play", unlockedNow: false };
+
+  function sfx(name) { if (HAS_PAD) PAD.sfx(name); }
+  function savePuzzle() {
+    if (!HAS_PAD) return;
+    PAD.save("puzzle", { best: S.best, big: S.big, time: S.bestTime, arcade: S.arcade, n: S.nextN,
+      pickPic: BUILTINS[S.galleryIndex].id });
+  }
+
+  /* ---------- the unfinished puzzle: PAD.save("game") ----------
+     tiles are positions -> pieces, the gap is tile n*n-1 (so no separate gap field can disagree), and the picture
+     is four pixels a byte in base64 (about 4.8 KB). A built-in picture stores only its id; the six scenes are drawn
+     again from code. A finished puzzle removes the key. */
+  function packPic(px) {
+    var out = new Uint8Array((px.length + 3) >> 2), s = "";
+    for (var i = 0; i < px.length; i++) out[i >> 2] |= px[i] << ((i % 4) * 2);
+    for (var j = 0; j < out.length; j += 4096) s += String.fromCharCode.apply(null, out.subarray(j, j + 4096));
+    return btoa(s);
+  }
+  function unpackPic(str) {
+    var s = atob(str), px = new Uint8Array(s.length * 4);
+    for (var i = 0; i < s.length; i++) {
+      var b = s.charCodeAt(i);
+      px[i * 4] = b & 3; px[i * 4 + 1] = (b >> 2) & 3; px[i * 4 + 2] = (b >> 4) & 3; px[i * 4 + 3] = (b >> 6) & 3;
+    }
+    return px;
+  }
+  function saveGame() {
+    if (!HAS_PAD || !S.tiles.length || S.mode === "tutorial") return;
+    var g = { v: 1, n: S.n, tiles: S.tiles.slice(), moves: S.moves, src: S.src, helped: S.helped,
+      arcade: S.gameArcade, left: Math.max(0, S.left) };
+    if (S.src === "builtin") g.picKey = S.picKey;
+    else g.pic = packPic(S.pic.px);
+    PAD.save("game", g);
+  }
+  function dropGame() { if (HAS_PAD) PAD.remove("game"); }
+  function arcadeTotal(n) { return n === 3 ? 120 : 300; }
+  function checkGame(g) {
+    if (!g || typeof g !== "object" || g.v !== 1) return null;
+    var n = g.n, N = n * n, i, j;
+    if (n !== 3 && n !== 4) return null;
+    if (!Array.isArray(g.tiles) || g.tiles.length !== N) return null;
+    var seen = {}, inv = 0;
+    for (i = 0; i < N; i++) {
+      var v = g.tiles[i];
+      if (typeof v !== "number" || v !== (v | 0) || v < 0 || v >= N || seen[v]) return null;
+      seen[v] = true;
+      if (v !== N - 1) for (j = 0; j < i; j++) if (g.tiles[j] !== N - 1 && g.tiles[j] > v) inv++;
+    }
+    var gap = g.tiles.indexOf(N - 1);
+    if (n % 2 === 1) { if (inv % 2) return null; }
+    else if ((inv + (n - ((gap / n) | 0))) % 2 !== 1) return null;   /* blank row from the bottom, 1-based */
+    if (typeof g.moves !== "number" || g.moves !== (g.moves | 0) || g.moves < 0) return null;
+    if (["camera", "file", "builtin"].indexOf(g.src) < 0) return null;
+    var px = null, key = "";
+    if (g.src === "builtin") {
+      key = typeof g.picKey === "string" ? g.picKey : "lake";
+      key = BUILTINS[picIndex(key)].id;
+    } else {
+      if (typeof g.pic !== "string") return null;
+      try { px = unpackPic(g.pic); } catch (e) { return null; }
+      if (px.length !== W * H) return null;
+    }
+    var arcade = g.arcade === true, left = 0;
+    if (arcade) {
+      if (typeof g.left !== "number" || isNaN(g.left) || g.left <= 0) left = arcadeTotal(n);
+      else left = Math.min(arcadeTotal(n), g.left);
+    }
+    return { n: n, tiles: g.tiles, moves: g.moves, src: g.src, px: px, picKey: key,
+      helped: g.helped === true, arcade: arcade, left: left };
+  }
+  function restore(g) {
+    S.n = g.n; S.nextN = g.n; S.tiles = g.tiles; S.gap = g.tiles.indexOf(g.n * g.n - 1);
+    S.moves = g.moves; S.src = g.src; S.helped = g.helped;
+    S.gameArcade = g.arcade; S.arcade = g.arcade; S.arcadeTotal = arcadeTotal(g.n); S.left = g.left;
+    if (g.px) { S.pic = { w: W, h: H, px: g.px }; S.picKey = ""; }
+    else { S.galleryIndex = picIndex(g.picKey); S.attractIndex = S.galleryIndex; S.pic = BUILTINS[S.galleryIndex].pic; S.picKey = BUILTINS[S.galleryIndex].id; }
+    S.hasSave = true;
+  }
+
+  /* the startup reads: the last choices and, if there is one, the unfinished game */
+  if (HAS_PAD) {
+    Promise.all([
+      PAD.load("puzzle").catch(function () { return null; }),
+      PAD.load("game").catch(function () { return null; })
+    ]).then(function (r) {
+      var d = r[0];
+      if (d && typeof d === "object") {
+        S.best = d.best && typeof d.best === "object" ? d.best : {};
+        S.bestTime = d.time && typeof d.time === "object" ? d.time : {};
+        S.big = d.big === true;
+        S.arcade = d.arcade === true;
+        S.nextN = d.n === 4 ? 4 : 3;
+        S.galleryIndex = picIndex(typeof d.pickPic === "string" ? d.pickPic : "lake");
+        S.attractIndex = S.galleryIndex;
+        S.pic = BUILTINS[S.galleryIndex].pic; S.picKey = BUILTINS[S.galleryIndex].id;
+      }
+      var g = checkGame(r[1]);
+      if (g) restore(g); else if (r[1]) dropGame();
+      go(g ? "title" : "main");
+    });
+  }
+
+  /* ---------- the camera: PAD.camera.snap ----------
+     snap() opens the runtime's own viewfinder over this app. The player presses the shutter (or cancels); the promise
+     then gives {w, h, px}: px is a Uint8Array of w*h tone indices, row by row, 0 = ink ... 3 = paper, the same order as
+     PAD.TONES. It gives null when the player cancels or says no, there is no camera, or a snap is already open; null is
+     normal, so the app always has a way on without a photo. PAD.camera is undefined on runtimes before 0.28.0. */
+  function takePhoto() {
+    if (!HAS_PAD || !PAD.camera) { useBuiltin(TXT.nocam); return; }
+    if (S.busy) return;
+    S.busy = true; msg(TXT.taking, false);
+    PAD.camera.snap({ size: "small" }).then(function (photo) {
+      S.busy = false;
+      if (!photo) { useBuiltin(TXT.nophoto); return; }
+      S.shot = photo; S.previewFrom = "camera"; sfx("ok"); go("preview");
+    }).catch(function () { S.busy = false; useBuiltin(TXT.nophoto); });
+  }
+  function useBuiltin(line) {
+    S.galleryIndex = S.galleryIndex % BUILTINS.length;
+    S.pic = BUILTINS[S.galleryIndex].pic; S.picKey = BUILTINS[S.galleryIndex].id; S.src = "builtin";
+    sfx("err"); startGame(line);
+  }
+
+  /* ---------- the puzzle: tiles[position] = which piece is there; piece n*n-1 is the gap ---------- */
+  function ordered(n) { var a = [], N = n * n; for (var i = 0; i < N; i++) a.push(i); return a; }
+  function solvedTiles(tiles) { for (var i = 0; i < tiles.length; i++) if (tiles[i] !== i) return false; return true; }
+  function neighbours(n, g) {
+    var r = Math.floor(g / n), c = g % n, out = [];
+    if (r > 0) out.push(g - n); if (r < n - 1) out.push(g + n);
+    if (c > 0) out.push(g - 1); if (c < n - 1) out.push(g + 1);
+    return out;
+  }
+  function shuffleTiles(n) {
+    var N = n * n, tiles = ordered(n), gap = N - 1, back = -1, steps = n === 3 ? 80 : 200;
+    for (var k = 0; k < steps || solvedTiles(tiles); k++) {
+      var opts = neighbours(n, gap).filter(function (p) { return p !== back; });
+      var p = opts[Math.floor(Math.random() * opts.length)];
+      back = gap;
+      tiles[gap] = tiles[p]; tiles[p] = N - 1; gap = p;
+    }
+    return { tiles: tiles, gap: gap };
+  }
+  function swap(p) { S.tiles[S.gap] = S.tiles[p]; S.tiles[p] = S.n * S.n - 1; S.gap = p; }
+
+  function startGame(note) {
+    S.n = S.nextN === 4 ? 4 : 3;
+    S.gameArcade = S.arcade;
+    var sh = shuffleTiles(S.n), N = S.n * S.n;
+    S.tiles = ordered(S.n); S.gap = N - 1;
+    S.moves = 0; S.peek = false; S.record = false; S.timeRecord = false; S.helped = false; S.showTrick = false;
+    S.unlockedNow = false;
+    S.note = note || ""; S.demo = null;
+    S.arcadeTotal = arcadeTotal(S.n); S.left = S.gameArcade ? S.arcadeTotal : 0;
+    S.intro = { t0: 0, ms: 0, total: 980, to: sh.tiles, toGap: sh.gap };
+    savePuzzle();
+    go("cut");
+    requestAnimationFrame(introTick);
+  }
+  function introTick(t) {
+    var A = S.intro; if (!A || S.screen !== "cut") return;
+    if (!A.t0) A.t0 = t;
+    A.ms = t - A.t0;
+    if (A.ms >= A.total) { finishIntro(); return; }
+    paint();
+    requestAnimationFrame(introTick);
+  }
+  function finishIntro() {
+    var A = S.intro; if (!A) return;
+    S.intro = null;
+    S.tiles = A.to.slice(); S.gap = A.toGap;
+    S.hasSave = true;
+    saveGame();
+    go("play");
+  }
+  function skipIntro() { if (!S.intro) return; sfx("tap"); finishIntro(); }
+
+  /* a direction pushes the piece on that side of the gap towards it: up moves the piece below the gap up */
+  function push(dir) {
+    var n = S.n, r = Math.floor(S.gap / n), c = S.gap % n;
+    var p = dir === "up" ? (r < n - 1 ? S.gap + n : -1) : dir === "down" ? (r > 0 ? S.gap - n : -1)
+      : dir === "left" ? (c < n - 1 ? S.gap + 1 : -1) : (c > 0 ? S.gap - 1 : -1);
+    if (p < 0) { sfx("err"); return; }
+    slide(p);
+  }
+  /* ---------- a slide takes 140 ms: the board's logical state changes at once, and the moved piece is drawn
+     between its two cells until the animation ends. Input during the animation simply starts the next one. ---------- */
+  var MOVE_MS = 140, moveRaf = 0;
+  function startMoveAnim(from, to, piece) {
+    if (moveRaf) { cancelAnimationFrame(moveRaf); moveRaf = 0; }
+    S.animMove = { from: from, to: to, piece: piece, t0: 0, ms: 0 };
+    moveRaf = requestAnimationFrame(moveTick);
+  }
+  function moveTick(t) {
+    moveRaf = 0;
+    var A = S.animMove; if (!A) return;
+    if (!A.t0) A.t0 = t;
+    A.ms = t - A.t0;
+    if (A.ms >= MOVE_MS) { S.animMove = null; paint(); return; }
+    paint();
+    moveRaf = requestAnimationFrame(moveTick);
+  }
+  function clearMoveAnim() {
+    if (moveRaf) { cancelAnimationFrame(moveRaf); moveRaf = 0; }
+    S.animMove = null;
+  }
+  function moveAt(screen) { return S.animMove && (screen === "play" || screen === "lesson") ? S.animMove : null; }
+
+  function slide(p) {
+    clearHint();
+    if (neighbours(S.n, S.gap).indexOf(p) < 0) { sfx("err"); return; }
+    var from = p, to = S.gap, piece = S.tiles[p];
+    swap(p); S.moves++; sfx("move");
+    if (S.screen === "play" || S.screen === "lesson") startMoveAnim(from, to, piece);
+    if (S.mode === "tutorial") {
+      if (!S.lessonDone && goalMet()) { S.lessonDone = true; S.doneText = TXT.lessonDone; sfx("ok"); }
+      draw();
+      return;
+    }
+    if (solvedTiles(S.tiles)) win(); else { saveGame(); draw(); }
+  }
+  function win() {
+    stopClock(false);
+    var key = String(S.n), best = S.best[key];
+    S.demo = null; S.note = "";
+    if (S.gameArcade) {
+      S.record = false;
+      var before = S.bestTime[key] || 0;
+      S.timeRecord = !S.helped && S.left > before;
+      if (S.timeRecord) S.bestTime[key] = S.left;
+    } else {
+      S.timeRecord = false;
+      S.record = !S.helped && (!best || S.moves < best);
+      if (S.record) S.best[key] = S.moves;
+    }
+    S.showTrick = S.n === 4 && !best;
+    if (S.n === 3 && !S.big) { S.big = true; S.unlockedNow = true; S.nextN = 4; }
+    savePuzzle(); dropGame(); S.hasSave = false;
+    sfx("win");
+    if (HAS_PAD && PAD.music) PAD.music.play({ bpm: 150, p1: "@1 v12 o5 l16 c e g >c8 r <g >c4", tri: "v11 o3 l8 c g >c4" }, { loop: false });
+    S.anim = { t0: 0, landed: false, done: false };
+    go("solved");
+    requestAnimationFrame(tick);
+  }
+
+  /* ---------- the clock: only arcade games have one ----------
+     left is saved with every move and whenever play pauses, so closing the handheld does not stop the fuse and
+     reopening does not give the time back. START's menu pauses it; the menu is the pause. */
+  function startClock() {
+    if (!S.gameArcade || S.screen !== "play" || S.left <= 0) { updateFuse(); return; }
+    stopClock(false);
+    S.clockAt = Date.now(); S.clockLow = Math.ceil(S.left);
+    S.clockTimer = setInterval(clockTick, 250);
+    updateInfo(); updateFuse();
+  }
+  function stopClock(save) {
+    if (S.clockTimer) { clearInterval(S.clockTimer); S.clockTimer = 0; }
+    if (S.clockAt) { S.left = Math.max(0, S.left - (Date.now() - S.clockAt) / 1000); S.clockAt = 0; }
+    if (save && S.screen === "play" && S.gameArcade) saveGame();
+    if (S.screen === "play") updateInfo();
+    updateFuse();
+  }
+  function clockTick() {
+    if (S.screen !== "play" || !S.gameArcade) return;
+    var now = Date.now();
+    if (S.clockAt) { S.left = Math.max(0, S.left - (now - S.clockAt) / 1000); S.clockAt = now; }
+    updateInfo(); updateFuse();
+    var sec = Math.ceil(S.left);
+    if (sec <= 10 && sec !== S.clockLow) { S.clockLow = sec; if (sec > 0) sfx("tick"); }
+    if (S.left <= 0) loseGame();
+  }
+  function loseGame() {
+    if (S.screen !== "play") return;
+    S.left = 0; stopClock(false);
+    if (S.demo) { clearTimeout(S.demo.timer); S.demo = null; }
+    S.note = "";
+    dropGame(); S.hasSave = false;
+    sfx("lose");
+    go("lost");
+  }
+  function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+  function seg(sel) { return document.querySelector("#fuse i" + sel); }
+  function updateFuse() {
+    var f = document.getElementById("fuse"), on = S.gameArcade && S.screen === "play" && S.left > 0 && !S.intro;
+    f.className = on ? (S.left <= 10 ? "on low" : "on") : "";
+    if (!on) return;
+    var total = S.arcadeTotal || arcadeTotal(S.n);
+    var p = 1 - clamp(S.left / total, 0, 1);
+    var pr = [clamp(p * 4, 0, 1), clamp(p * 4 - 1, 0, 1), clamp(p * 4 - 2, 0, 1), clamp(p * 4 - 3, 0, 1)];
+    var w = window.innerWidth, h = window.innerHeight;
+    seg(".t").style.width = Math.max(0, (1 - pr[0]) * w) + "px";
+    seg(".r").style.height = Math.max(0, (1 - pr[1]) * h) + "px";
+    seg(".b").style.width = Math.max(0, (1 - pr[2]) * w) + "px";
+    seg(".l").style.height = Math.max(0, (1 - pr[3]) * h) + "px";
+  }
+
+  /* ---------- the solved picture: the last piece drops in, the cuts melt away, a glint runs over it ---------- */
+  var DROP = 450, MELT = 1050, GLINT = 1600;
+  function tick(t) {
+    var a = S.anim; if (S.screen !== "solved" || !a || a.done) return;
+    if (!a.t0) a.t0 = t;
+    a.ms = t - a.t0;
+    if (!a.landed && a.ms >= DROP) { a.landed = true; sfx("ok"); }
+    if (a.ms >= GLINT) { endAnim(); return; }
+    paint();
+    requestAnimationFrame(tick);
+  }
+  function endAnim() { S.anim.done = true; S.anim.ms = GLINT; draw(); }
+
+  /* ---------- drawing: the picture, cut into cells, written with putImageData ----------
+     A piece is a raised plastic tile: 1 px of paper on its top and left, 1 px of ink on its bottom and right (the old
+     cut line, now the shadow side). The empty slot is a hole: ink floor, lit paper lip. Shape, not colour. */
+  var cv = document.getElementById("cv"), ctx = cv.getContext("2d"), img = ctx.createImageData(W, H);
+  function edges(n, size) { var e = []; for (var i = 0; i <= n; i++) e.push(Math.round(i * size / n)); return e; }
+  var RECTS = {};
+  function rects(n) {
+    if (RECTS[n]) return RECTS[n];
+    var xs = edges(n, W), ys = edges(n, H), x = [], y = [], w = [], h = [];
+    for (var p = 0; p < n * n; p++) {
+      var c = p % n, r = (p / n) | 0;
+      x.push(xs[c]); y.push(ys[r]); w.push(xs[c + 1] - xs[c]); h.push(ys[r + 1] - ys[r]);
+    }
+    RECTS[n] = { xs: xs, ys: ys, x: x, y: y, w: w, h: h };
+    return RECTS[n];
+  }
+  function put(out, X, Y, v, stop) {
+    if (X < 0 || X >= W || Y < 0 || Y >= H || (stop && Y >= stop)) return;
+    out[Y * W + X] = v;
+  }
+  function tile(out, src, R, p, t, dy, dx, noClip) {
+    var x0 = R.x[p] + (dx || 0), y0 = R.y[p], w = R.w[p], h = R.h[p], sx = R.x[t], sy = R.y[t];
+    var bottom = !noClip && dy ? y0 + h : 0, x, y, oy = dy || 0;
+    for (y = 1; y < h - 1; y++) for (x = 1; x < w - 1; x++) put(out, x0 + x, y0 + y + oy, src[(sy + y) * W + sx + x], bottom);
+    for (x = 1; x < w - 1; x++) { put(out, x0 + x, y0 + oy, 3, bottom); put(out, x0 + x, y0 + h - 1 + oy, 0, bottom); }
+    for (y = 1; y < h - 1; y++) { put(out, x0, y0 + y + oy, 3, bottom); put(out, x0 + w - 1, y0 + y + oy, 0, bottom); }
+    put(out, x0, y0 + oy, 3, bottom); put(out, x0 + w - 1, y0 + oy, 0, bottom);
+    put(out, x0, y0 + h - 1 + oy, 0, bottom); put(out, x0 + w - 1, y0 + h - 1 + oy, 0, bottom);
+  }
+  function slot(out, R, p) {
+    var x0 = R.x[p], y0 = R.y[p], w = R.w[p], h = R.h[p];
+    for (var y = 0; y < h; y++) for (var x = 0; x < w; x++) out[(y0 + y) * W + x0 + x] = x >= w - 1 || y >= h - 1 ? 3 : 0;
+  }
+  function board(out, src, n, tiles, hide) {
+    var R = rects(n), gapPiece = n * n - 1;
+    for (var p = 0; p < n * n; p++) {
+      var t = tiles[p];
+      if (t === gapPiece || p === hide) slot(out, R, p); else tile(out, src, R, p, t, 0);
+    }
+  }
+  function ring(out, R, p) {
+    var x0 = R.x[p], y0 = R.y[p], w = R.w[p], h = R.h[p], x, y;
+    for (x = 0; x < w; x++) { out[y0 * W + x0 + x] = 3 - out[y0 * W + x0 + x]; out[(y0 + h - 1) * W + x0 + x] = 3 - out[(y0 + h - 1) * W + x0 + x]; }
+    for (y = 0; y < h; y++) { out[(y0 + y) * W + x0] = 3 - out[(y0 + y) * W + x0]; out[(y0 + y) * W + x0 + w - 1] = 3 - out[(y0 + y) * W + x0 + w - 1]; }
+  }
+  /* ---------- the hint overlay: a numbered badge on every piece and an arrow from the piece to the hole ----------
+     Numbers are drawn here, not in CSS: the board is a 128×112 four-tone image. A 5×7 numeral at 2× sits on a
+     paper plate with an ink rim, so it stays readable over both the light and the dark parts of a picture. */
+  var DIGIT = {
+    "0": ["01110", "10001", "10011", "10101", "11001", "10001", "01110"],
+    "1": ["00100", "01100", "00100", "00100", "00100", "00100", "01110"],
+    "2": ["01110", "10001", "00001", "00010", "00100", "01000", "11111"],
+    "3": ["11111", "00010", "00100", "00010", "00001", "10001", "01110"],
+    "4": ["00010", "00110", "01010", "10010", "11111", "00010", "00010"],
+    "5": ["11111", "10000", "11110", "00001", "00001", "10001", "01110"],
+    "6": ["00110", "01000", "10000", "11110", "10001", "10001", "01110"],
+    "7": ["11111", "00001", "00010", "00100", "01000", "01000", "01000"],
+    "8": ["01110", "10001", "10001", "01110", "10001", "10001", "01110"],
+    "9": ["01110", "10001", "10001", "01111", "00001", "00010", "01100"]
+  };
+  function badgeAt(out, bx, by, num) {
+    var text = String(num), scale = 2, kern = 1, pad = 2, i, r, c, xx, yy;
+    var tw = text.length * 5 * scale + (text.length - 1) * kern, th = 7 * scale;
+    var bw = tw + pad * 2 + 2, bh = th + pad * 2 + 2;
+    for (r = 0; r < bh; r++) for (c = 0; c < bw; c++)
+      put(out, bx + c, by + r, r === 0 || r === bh - 1 || c === 0 || c === bw - 1 ? 0 : 3);
+    for (i = 0; i < text.length; i++) {
+      var g = DIGIT[text.charAt(i)], ox = bx + 1 + pad + i * (5 * scale + kern), oy = by + 1 + pad;
+      for (r = 0; r < 7; r++) for (c = 0; c < 5; c++) if (g[r].charAt(c) === "1")
+        for (yy = 0; yy < scale; yy++) for (xx = 0; xx < scale; xx++) put(out, ox + c * scale + xx, oy + r * scale + yy, 0);
+    }
+  }
+  function badge(out, R, p, num) { badgeAt(out, R.x[p] + 3, R.y[p] + 3, num); }
+  function numbers(out, n, tiles, skip) {
+    var R = rects(n), gapPiece = n * n - 1;
+    for (var p = 0; p < n * n; p++) if (tiles[p] !== gapPiece && p !== skip) badge(out, R, p, tiles[p] + 1);
+  }
+  /* an arrow from the piece's centre, a quarter of the way in, to the centre of the hole; ink rim, paper body */
+  function arrowShape(cb, x0, y0, dx, dy, len, headLen, shaftHalf, headHalf) {
+    for (var s = 0; s < len; s++) {
+      var hw = s >= len - headLen ? Math.max(0, Math.round(headHalf * (len - s) / headLen)) : shaftHalf;
+      for (var w = -hw; w <= hw; w++) cb(x0 + dx * s + (dy ? w : 0), y0 + dy * s + (dx ? w : 0));
+    }
+  }
+  function hintArrow(out, R, from, to) {
+    var fx = R.x[from] + (R.w[from] >> 1), fy = R.y[from] + (R.h[from] >> 1);
+    var tx = R.x[to] + (R.w[to] >> 1), ty = R.y[to] + (R.h[to] >> 1);
+    var dx = tx > fx ? 1 : tx < fx ? -1 : 0, dy = ty > fy ? 1 : ty < fy ? -1 : 0;
+    var cell = Math.min(R.w[from], R.h[from]), off = Math.round(cell / 4);
+    var sx = fx + dx * off, sy = fy + dy * off;
+    var len = Math.abs(tx - sx) + Math.abs(ty - sy);
+    if (len < 4) return;
+    var half = Math.max(1, Math.round(cell / 14));
+    var headHalf = Math.max(half + 2, Math.round(cell / 5));
+    var headLen = Math.max(5, Math.round(cell / 3));
+    arrowShape(function (x, y) { put(out, x, y, 0); }, sx, sy, dx, dy, len + 2, headLen + 2, half + 1, headHalf + 1);
+    arrowShape(function (x, y) { put(out, x, y, 3); }, sx, sy, dx, dy, len + 1, headLen + 1, half, headHalf);
+  }
+  function showNumbers() { return (S.screen === "lesson" && S.mode === "tutorial") || !!S.hint; }
+  var MASKS = {};
+  function edgeMask(n) {
+    if (MASKS[n]) return MASKS[n];
+    var R = rects(n), m = new Uint8Array(W * H), x, y, k;
+    for (x = 0; x < W; x++) { m[x] = 1; m[(H - 1) * W + x] = 1; }
+    for (y = 0; y < H; y++) { m[y * W] = 1; m[y * W + W - 1] = 1; }
+    for (k = 1; k < n; k++) {
+      x = R.xs[k];
+      for (y = 0; y < H; y++) { m[y * W + x] = 1; m[y * W + x - 1] = 1; }
+      y = R.ys[k];
+      for (x = 0; x < W; x++) { m[y * W + x] = 1; m[(y - 1) * W + x] = 1; }
+    }
+    MASKS[n] = m;
+    return m;
+  }
+  function cutFrame() {
+    var A = S.intro; if (!A) return S.pic.px;
+    var n = S.n, N = n * n, R = rects(n), g = N - 1, src = S.pic.px, out = new Uint8Array(W * H), i, x, y;
+    var tiled = new Uint8Array(W * H);
+    for (var p = 0; p < N; p++) tile(tiled, src, R, p, p, 0);   /* every cell is a tile: no slot yet */
+    for (i = 0; i < out.length; i++) out[i] = src[i];
+    var cut = clamp(A.ms / 300, 0, 1), mask = edgeMask(n);
+    for (i = 0; i < out.length; i++) if (mask[i] && (BAYER[((i / W | 0) % 4) * 4 + (i % W) % 4] + 0.5) / 16 <= cut) out[i] = tiled[i];
+    var drop = clamp((A.ms - 300) / 300, 0, 1);
+    if (drop > 0) {
+      slot(out, R, g);
+      var gh = R.h[g], off = Math.round((1 - (1 - drop) * (1 - drop)) * gh);
+      if (off < gh) tile(out, src, R, g, g, off);
+    }
+    var mix = clamp((A.ms - 600) / 350, 0, 1);
+    if (mix > 0) {
+      var shuffled = new Uint8Array(W * H); board(shuffled, src, n, A.to);
+      for (i = 0; i < out.length; i++) if ((BAYER[((i / W | 0) % 4) * 4 + (i % W) % 4] + 0.5) / 16 <= mix) out[i] = shuffled[i];
+    }
+    return out;
+  }
+  function solvedFrame(src) {
+    var a = S.anim, ms = a.done ? GLINT : a.ms || 0;
+    if (ms >= GLINT) return src;
+    var n = S.n, R = rects(n), out = new Uint8Array(W * H);
+    board(out, src, n, S.tiles);
+    var g = n * n - 1, gh = R.h[g];
+    var drop = Math.min(1, ms / DROP), ease = 1 - (1 - drop) * (1 - drop);
+    var off = Math.round((1 - ease) * gh);
+    if (off > 0) tile(out, src, R, g, g, off);
+    var melt = Math.max(0, Math.min(1, (ms - DROP) / (MELT - DROP)));
+    if (melt > 0) {
+      var mask = edgeMask(n), th = melt * 16;
+      for (var i = 0; i < out.length; i++) if (mask[i] && BAYER[((i / W | 0) % 4) * 4 + (i % W) % 4] + 0.5 >= th) out[i] = src[i];
+    }
+    var glint = ms > MELT ? (ms - MELT) / (GLINT - MELT) * (W + H + 24) - 12 : -99;
+    for (var y = 0; y < H; y++) for (var x = 0; x < W; x++) {
+      var dg = x + y - glint;
+      if (dg > -6 && dg < 6) { var o = y * W + x; out[o] = Math.min(3, out[o] + (dg > -3 && dg < 3 ? 2 : 1)); }
+    }
+    return out;
+  }
+  function attractFrame() {
+    var A = S.attract;
+    if (!A) return S.pic.px;
+    if (A.phase === "done") return A.pic.px;
+    var out = new Uint8Array(W * H);
+    if (A.anim) {
+      var M = A.anim, R = rects(A.n);
+      board(out, A.pic.px, A.n, A.tiles, M.to);
+      var tt = M.ms >= MOVE_MS ? 1 : M.ms / MOVE_MS, ease = tt * tt * (3 - 2 * tt);
+      var dx = Math.round((R.x[M.to] - R.x[M.from]) * ease);
+      var dy = Math.round((R.y[M.to] - R.y[M.from]) * ease);
+      tile(out, A.pic.px, R, M.from, M.piece, dy, dx, true);
+    } else board(out, A.pic.px, A.n, A.tiles);
+    return out;
+  }
+  function frame() {
+    var sc = S.screen;
+    if (sc === "main") return attractFrame();
+    if (sc === "gallery") return BUILTINS[S.galleryIndex].pic.px;
+    if (sc === "cut") return cutFrame();
+    var pic = sc === "preview" ? S.shot : S.pic;
+    if (!pic) pic = S.pic;
+    if (sc === "solved") return solvedFrame(pic.px);
+    if (sc === "won") return pic.px;
+    if (sc === "title" && !S.hasSave) return pic.px;
+    if (sc === "title" || sc === "play" || sc === "menu" || sc === "lesson" || sc === "lost") {
+      if (S.peek && (sc === "play" || sc === "lesson")) return pic.px;
+      var out = new Uint8Array(W * H), R = rects(S.n), A = moveAt(sc), dx = 0, dy = 0;
+      if (A) {
+        board(out, pic.px, S.n, S.tiles, A.to);   /* the destination is still a hole while the piece is in the air */
+        var tt = A.ms >= MOVE_MS ? 1 : A.ms / MOVE_MS, ease = tt * tt * (3 - 2 * tt);
+        dx = Math.round((R.x[A.to] - R.x[A.from]) * ease);
+        dy = Math.round((R.y[A.to] - R.y[A.from]) * ease);
+        tile(out, pic.px, R, A.from, A.piece, dy, dx, true);
+      } else board(out, pic.px, S.n, S.tiles);
+      if (S.hint && (sc === "play" || sc === "lesson")) {
+        ring(out, R, S.hint.p);
+        hintArrow(out, R, S.hint.p, S.hint.gap);
+      }
+      /* numbers last, so the arrow's tail never hides a digit; a moving piece carries its badge with it */
+      if (showNumbers()) {
+        numbers(out, S.n, S.tiles, A ? A.to : -1);
+        if (A) badgeAt(out, R.x[A.from] + 3 + dx, R.y[A.from] + 3 + dy, A.piece + 1);
+      }
+      return out;
+    }
+    return pic.px;
+  }
+  function paint() {
+    var px = frame(), d = img.data;
+    for (var i = 0; i < px.length; i++) { var c = TONES[px[i]]; d[i * 4] = c[0]; d[i * 4 + 1] = c[1]; d[i * 4 + 2] = c[2]; d[i * 4 + 3] = 255; }
+    ctx.putImageData(img, 0, 0);
+  }
+  function layout() {
+    var st = document.getElementById("stage"), w = st.clientWidth - 6, h = st.clientHeight - 6;
+    var k = Math.max(1, Math.min(w / W, h / H));
+    cv.style.width = Math.floor(W * k) + "px"; cv.style.height = Math.floor(H * k) + "px";
+  }
+  window.addEventListener("resize", function () { layout(); updateFuse(); });
+
+  /* ---------- the main menu's attract mode: the built-in pictures solve themselves, then rest a moment ---------- */
+  var attractRaf = 0;
+  function startAttract() {
+    stopAttract();
+    if (S.screen !== "main") return;
+    attractRound(S.attractIndex);
+  }
+  function attractRound(i) {
+    clearAttractAnim();
+    var n = 3, k = i % BUILTINS.length, b = BUILTINS[k], sh = shuffleTiles(n);
+    var plan = Solver.solve(n, sh.tiles) || [];
+    S.attract = { n: n, index: k, pic: b.pic, tiles: sh.tiles, gap: sh.gap, plan: plan, i: 0, phase: plan.length ? "solve" : "done", timer: 0, anim: null };
+    S.attractIndex = (k + 1) % BUILTINS.length;
+    paint();
+    scheduleAttract(plan.length ? 260 : 2600);
+  }
+  function scheduleAttract(ms) { if (S.attract) S.attract.timer = setTimeout(attractStep, ms); }
+  function attractAnim(A, from, to, piece) {
+    if (attractRaf) { cancelAnimationFrame(attractRaf); attractRaf = 0; }
+    A.anim = { from: from, to: to, piece: piece, t0: 0, ms: 0 };
+    attractRaf = requestAnimationFrame(attractTick);
+  }
+  function attractTick(t) {
+    attractRaf = 0;
+    var A = S.attract;
+    if (!A || !A.anim || S.screen !== "main") return;
+    if (!A.anim.t0) A.anim.t0 = t;
+    A.anim.ms = t - A.anim.t0;
+    if (A.anim.ms >= MOVE_MS) { A.anim = null; paint(); return; }
+    paint();
+    attractRaf = requestAnimationFrame(attractTick);
+  }
+  function clearAttractAnim() {
+    if (attractRaf) { cancelAnimationFrame(attractRaf); attractRaf = 0; }
+    if (S.attract) S.attract.anim = null;
+  }
+  function attractStep() {
+    var A = S.attract; if (!A || S.screen !== "main") return;
+    if (A.phase === "solve") {
+      if (A.i < A.plan.length) {
+        var p = A.plan[A.i++].p, N = A.n * A.n, from = p, to = A.gap, piece = A.tiles[p];
+        A.tiles[A.gap] = A.tiles[p]; A.tiles[p] = N - 1; A.gap = p;
+        attractAnim(A, from, to, piece);
+        paint();
+        scheduleAttract(160);
+        return;
+      }
+      clearAttractAnim();
+      A.phase = "done"; paint(); scheduleAttract(2600);
+    } else attractRound(A.index + 1);
+  }
+  function stopAttract() {
+    if (attractRaf) { cancelAnimationFrame(attractRaf); attractRaf = 0; }
+    if (S.attract) { clearTimeout(S.attract.timer); S.attract = null; }
+  }
+
+  /* ---------- watching it solve, and one hint ---------- */
+  function startDemo(limit) {
+    if (S.demo) return;
+    var plan = Solver.solve(S.n, S.tiles);
+    if (!plan || !plan.length) { sfx("err"); return; }
+    if (S.mode !== "tutorial") { S.helped = true; saveGame(); }
+    clearHint();
+    S.demo = { steps: plan, i: 0, timer: 0, limit: limit === undefined ? 999 : limit };
+    demoStep();
+  }
+  function demoStep() {
+    var d = S.demo; if (!d) return;
+    if (d.i >= d.steps.length || d.steps[d.i].stage > d.limit) { endDemo(); return; }
+    var st = d.steps[d.i++];
+    S.note = stageText(S.n, st.stage);
+    slide(st.p);
+    if (S.demo) d.timer = setTimeout(demoStep, 333);
+  }
+  function endDemo() {
+    if (!S.demo) return;
+    clearTimeout(S.demo.timer); S.demo = null; S.note = "";
+    if (S.mode === "tutorial" && S.screen === "lesson") { S.lessonDone = true; S.doneText = TXT.demoEnd; sfx("ok"); }
+    draw();
+  }
+  function stopDemo() {
+    if (!S.demo) return;
+    clearTimeout(S.demo.timer); S.demo = null; S.note = "";
+    if (S.mode === "tutorial" && S.screen === "lesson" && !S.lessonDone && LESSONS[S.lesson].demo !== undefined) {
+      S.lessonDone = true; S.doneText = TXT.demoEnd; sfx("ok");
+    }
+    draw();
+  }
+  function hint() {
+    if (S.lessonDone || (S.screen !== "play" && S.screen !== "lesson")) return;
+    if (S.hint) { clearHint(); return; }   /* SELECT again puts the picture back */
+    var plan;
+    if (S.mode === "tutorial") {
+      var L = LESSONS[S.lesson];
+      plan = L.goal ? Solver.goalPlan(S.n, S.tiles, L.goal, L.keep) : Solver.solve(S.n, S.tiles);
+    } else plan = Solver.solve(S.n, S.tiles);
+    if (!plan || !plan.length) { sfx("err"); return; }
+    if (S.mode !== "tutorial") { S.helped = true; saveGame(); }
+    S.hint = { p: plan[0].p, gap: S.gap }; draw();
+  }
+  function clearHint() {
+    if (S.hint) { S.hint = null; paint(); }
+  }
+
+  /* ---------- the four lessons (怎么玩) ---------- */
+  function lessonText() { return TXT["lesson" + (S.lesson + 1)]; }
+  function startLesson(i) {
+    clearTimeout(S.lessonTimer); S.lessonTimer = 0;
+    if (i === 0) {
+      S.beforeTutorial = {
+        n: S.n, nextN: S.nextN, arcade: S.arcade, gameArcade: S.gameArcade, galleryIndex: S.galleryIndex,
+        pic: S.pic, picKey: S.picKey, src: S.src, hasSave: S.hasSave,
+        game: S.hasSave ? { tiles: S.tiles.slice(), gap: S.gap, moves: S.moves, helped: S.helped, left: S.left, arcadeTotal: S.arcadeTotal } : null
+      };
+    }
+    var L = LESSONS[i];
+    S.mode = "tutorial"; S.lesson = i; S.lessonDone = false; S.doneText = "";
+    S.n = L.n; S.tiles = L.tiles.slice(); S.gap = S.tiles.indexOf(S.n * S.n - 1);
+    S.moves = 0; S.helped = false; S.note = ""; S.peek = false;
+    S.galleryIndex = 0; S.pic = BUILTINS[0].pic; S.picKey = BUILTINS[0].id; S.src = "builtin"; S.demo = null;
+    go("lesson");
+  }
+  function nextLesson() { if (S.lesson < LESSONS.length - 1) startLesson(S.lesson + 1); else endTutorial(); }
+  function endTutorial() {
+    clearTimeout(S.lessonTimer); S.lessonTimer = 0;
+    if (S.demo) { clearTimeout(S.demo.timer); S.demo = null; }
+    clearHint();
+    var back = S.beforeTutorial; S.beforeTutorial = null;
+    S.mode = "normal"; S.lessonDone = false; S.doneText = ""; S.note = ""; S.helped = false;
+    if (back) {
+      S.n = back.n; S.nextN = back.nextN; S.arcade = back.arcade; S.gameArcade = back.gameArcade;
+      S.galleryIndex = back.galleryIndex; S.pic = back.pic; S.picKey = back.picKey; S.src = back.src; S.hasSave = back.hasSave;
+      if (back.game) {
+        S.tiles = back.game.tiles; S.gap = back.game.gap; S.moves = back.game.moves; S.helped = back.game.helped;
+        S.left = back.game.left; S.arcadeTotal = back.game.arcadeTotal;
+      } else { S.tiles = []; S.moves = 0; S.gap = 0; }
+    } else {
+      S.n = 3; S.nextN = 3; S.tiles = []; S.moves = 0;
+      S.galleryIndex = 0; S.pic = BUILTINS[0].pic; S.picKey = BUILTINS[0].id; S.src = "builtin";
+    }
+    go("main");
+  }
+  function goalMet() {
+    var L = LESSONS[S.lesson], i;
+    for (i = 0; i < L.keep.length; i++) if (S.tiles[L.keep[i]] !== L.keep[i]) return false;
+    if (!L.goal) return solvedTiles(S.tiles);
+    for (i = 0; i < L.goal.length; i++) if (S.tiles[L.goal[i].at] !== L.goal[i].p) return false;
+    return true;
+  }
+
+  /* ---------- screens ---------- */
+  function msg(text, note) { var m = document.getElementById("msg"); m.textContent = text; m.className = note ? "note" : ""; }
+  function defaultSel(screen) { return screen === "gallery" ? 1 : 0; }
+  function updateInfo() { var el = document.getElementById("info"); if (el) el.textContent = infoText(); }
+  function go(screen) {
+    if (S.screen === "play" && screen !== "play") { stopClock(screen !== "solved" && screen !== "won" && screen !== "lost"); S.note = ""; }
+    clearHint();
+    clearMoveAnim();
+    stopAttract();
+    if (S.demo) { clearTimeout(S.demo.timer); S.demo = null; }
+    S.screen = screen; S.sel = defaultSel(screen); S.peek = false;
+    draw();
+    if (screen === "main") startAttract();
+    if (screen === "play") startClock();
+    if (screen === "lesson" && S.mode === "tutorial") {
+      clearTimeout(S.lessonTimer); S.lessonTimer = 0;
+      var L = LESSONS[S.lesson], at = S.lesson;
+      if (L.demo !== undefined && !S.lessonDone && S.moves === 0) S.lessonTimer = setTimeout(function () {
+        if (S.mode === "tutorial" && S.screen === "lesson" && S.lesson === at && !S.lessonDone && S.moves === 0) startDemo(L.demo);
+      }, 600);
+      /* a lesson opens with its first move already marked: ring, number and arrow, until the first slide */
+      if (L.demo === undefined && !S.lessonDone) hint();
+    }
+  }
+  function menuItems() {
+    var camera = HAS_PAD && !!PAD.camera;
+    if (S.screen === "title") return S.hasSave ? [["cont", TXT.cont], ["mainmenu", TXT.mainMenu]] : [["mainmenu", TXT.mainMenu]];
+    if (S.screen === "main") return [["snap", TXT.snap, !camera], ["gallery", TXT.gallery],
+      ["mode", S.arcade ? TXT.modeArcade : TXT.modeNormal], ["howto", TXT.howto]];
+    if (S.screen === "gallery") return [["prev", TXT.prev], ["start", TXT.start], ["nextPic", TXT.nextPic]];
+    if (S.screen === "preview") return [["use", TXT.use], ["retake", TXT.retake]];
+    if (S.screen === "menu") {
+      if (S.mode === "tutorial") return [["resume", TXT.resume], ["quit", TXT.quitLesson]];
+      return [["resume", TXT.resume], ["size", tx("sizeNow", S.n)], ["watch", TXT.watch], ["mainmenu", TXT.mainMenu]];
+    }
+    if (S.screen === "lesson" && S.lessonDone) return [["nextlesson", S.lesson < LESSONS.length - 1 ? TXT.nextLesson : TXT.backMain]];
+    if (S.screen === "solved") return S.anim && S.anim.done ? [["goon", TXT.cont]] : [];
+    if (S.screen === "won") return [["next", TXT.next], ["mainmenu", TXT.mainMenu]];
+    if (S.screen === "lost") return [["again", TXT.again], ["mainmenu", TXT.mainMenu]];
+    return [];
+  }
+  function infoText() {
+    var sc = S.screen, aid = S.helped ? "  " + TXT.helped : "";
+    if (S.mode === "tutorial") return tx("lessonN", S.lesson + 1) + "  " + tx("moves", S.moves);
+    if (sc === "main") return S.nextN + "×" + S.nextN + "  " + (S.arcade ? TXT.arcade : TXT.normal);
+    if (sc === "gallery") return S.nextN + "×" + S.nextN + "  " + fmt(TXT.picture, { i: S.galleryIndex + 1, n: BUILTINS.length })
+      + "  " + picName(BUILTINS[S.galleryIndex]);
+    if (sc === "title") return S.n + "×" + S.n + "  " + tx("moves", S.moves) + aid;
+    if (sc === "cut") return S.n + "×" + S.n + "  " + (S.gameArcade ? TXT.arcade : TXT.normal);
+    if (sc !== "play" && sc !== "menu" && sc !== "solved" && sc !== "won" && sc !== "lost") return "";
+    var out = S.n + "×" + S.n + "  " + tx("moves", S.moves);
+    if (S.gameArcade) out += "  " + fmt(TXT.left, { t: clockText(S.left) });
+    else { var best = S.best[String(S.n)]; if (best) out += "  " + tx("best", best); }
+    return out + aid;
+  }
+  function wonText() {
+    var s = S.gameArcade ? fmt(TXT.wonArcade, { n: S.moves, t: clockText(S.left) }) : tx("won", S.moves);
+    if (S.record || S.timeRecord) s += " " + TXT.record;
+    if (S.unlockedNow) s += " " + TXT.unlocked;
+    if (S.showTrick) s += " " + TXT.trick;
+    return s;
+  }
+  function footerKey() {
+    var sc = S.screen;
+    if (sc === "title") return "kTitle";
+    if (sc === "main") return S.hasSave ? "kMainBack" : "kMain";
+    if (sc === "lesson" && S.lessonDone) return "kLessonDone";
+    return ({ gallery: "kGallery", preview: "kPreview", cut: "kCut", play: "kPlay", menu: "kMenu",
+      lesson: "kLesson", solved: "kSolved", won: "kWon", lost: "kLost" })[sc] || "";
+  }
+  function draw() {
+    var sc = S.screen;
+    document.getElementById("info").textContent = infoText();
+    if (sc === "title") msg(S.hasSave ? TXT.saved : TXT.intro, false);
+    else if (sc === "main") msg(S.mainNote || TXT.intro, false);
+    else if (sc === "gallery") msg(picName(BUILTINS[S.galleryIndex]), false);
+    else if (sc === "preview") msg(TXT.look, false);
+    else if (sc === "cut") msg("", false);
+    else if (sc === "play") msg(S.note, !!S.note);
+    else if (sc === "menu") msg("", false);
+    else if (sc === "lesson") msg(S.lessonDone ? S.doneText : (S.note || lessonText()), S.lessonDone);
+    else if (sc === "solved") msg(S.anim && S.anim.done ? TXT.solved : "", false);
+    else if (sc === "won") msg(wonText(), false);
+    else if (sc === "lost") msg(TXT.timeUp, true);
+    var fk = footerKey();
+    document.getElementById("ft").textContent = fk ? TXT[fk] : "";
+    S.items = menuItems();
+    var box = document.getElementById("menu"); box.textContent = "";
+    box.className = sc === "gallery" ? "three" : "";
+    S.items.forEach(function (it, i) {
+      var b = document.createElement("button"); b.type = "button"; b.textContent = it[1];
+      b.className = (i === S.sel ? "on" : "") + (it[2] ? " off" : "");
+      b.onclick = function () { S.sel = i; choose(); };
+      box.appendChild(b);
+    });
+    paint(); layout(); updateFuse();
+  }
+  function continueGame() { if (!S.hasSave) { go("main"); return; } S.arcade = S.gameArcade; S.nextN = S.n; S.note = ""; go("play"); }
+  function browse(d) { S.galleryIndex = (S.galleryIndex + d + BUILTINS.length) % BUILTINS.length; S.attractIndex = S.galleryIndex; S.sel = 1; sfx("tick"); savePuzzle(); draw(); }
+  function toggleSize() { S.nextN = S.nextN === 3 ? 4 : 3; sfx("tick"); savePuzzle(); draw(); }
+  function startGallery() {
+    S.galleryIndex = S.galleryIndex % BUILTINS.length;
+    savePuzzle();
+    S.pic = BUILTINS[S.galleryIndex].pic; S.picKey = BUILTINS[S.galleryIndex].id; S.src = "builtin"; S.note = "";
+    startGame();
+  }
+  function choose() {
+    var it = S.items[S.sel]; if (!it || S.busy) return;
+    if (it[2]) { sfx("err"); msg(TXT.locked, true); return; }
+    var id = it[0];
+    if (id === "snap") { sfx("tap"); takePhoto(); }
+    else if (id === "gallery") { sfx("tap"); go("gallery"); }
+    else if (id === "mode") { S.arcade = !S.arcade; savePuzzle(); sfx("tick"); draw(); }
+    else if (id === "howto") { sfx("tap"); startLesson(0); }
+    else if (id === "cont") { sfx("tap"); continueGame(); }
+    else if (id === "mainmenu") { sfx("tap"); go("main"); }
+    else if (id === "resume") { sfx("tap"); go(S.menuFrom); }
+    else if (id === "size") { sfx("tick"); S.nextN = S.n === 3 ? 4 : 3; S.arcade = S.gameArcade; startGame(); }
+    else if (id === "watch") { sfx("tap"); go("play"); startDemo(); }
+    else if (id === "use") { sfx("ok"); S.pic = S.shot; S.picKey = ""; S.src = S.previewFrom; S.note = ""; startGame(); }
+    else if (id === "retake") { sfx("tap"); takePhoto(); }
+    else if (id === "prev") browse(-1);
+    else if (id === "nextPic") browse(1);
+    else if (id === "start") { sfx("ok"); startGallery(); }
+    else if (id === "next") { sfx("tap"); S.nextN = S.unlockedNow ? 4 : S.n; S.arcade = S.gameArcade; startGame(); }
+    else if (id === "again") { sfx("tap"); S.nextN = S.n; S.arcade = S.gameArcade; startGame(); }
+    else if (id === "quit") { sfx("tap"); endTutorial(); }
+    else if (id === "nextlesson") { sfx("tap"); nextLesson(); }
+    else if (id === "goon") { sfx("tap"); go("won"); }
+  }
+
+  /* Two columns, moved as a grid: left/right within a row, up/down between rows. A short last row keeps its
+     column where it can. This is the rule in sdk/UI.md section 5; the old 6-item menu walked one item at a time,
+     so Down looked like Right and the lower rows sat below the fold. */
+  function moveSel(b) {
+    var n = S.items.length; if (!n) return;
+    var cols = 2, rows = Math.ceil(n / cols), row = Math.floor(S.sel / cols), col = S.sel % cols;
+    if (b === "left" || b === "right" || rows < 2) {
+      var len = Math.min(cols, n - row * cols);
+      if (len < 2) return;
+      col = (col + (b === "right" || b === "down" ? 1 : len - 1)) % len;
+    } else {
+      row = (row + (b === "down" ? 1 : rows - 1)) % rows;
+      var len2 = Math.min(cols, n - row * cols);
+      if (col >= len2) col = len2 - 1;
+    }
+    S.sel = row * cols + col; sfx("move"); draw();
+  }
+
+  /* ---------- keys and touch ---------- */
+  if (HAS_PAD) {
+    PAD.on("press", function (b) {
+      if (S.busy) return;
+      if (S.screen === "cut") { if (b === "a" || b === "b" || b === "start" || b === "select") skipIntro(); return; }
+      if (S.demo) { stopDemo(); return; }
+      var sc = S.screen, dir = b === "up" || b === "down" || b === "left" || b === "right";
+      if (sc === "play" || sc === "lesson") {
+        if (sc === "lesson" && S.lessonDone) {
+          if (b === "a") choose();
+          else if (b === "start") { S.menuFrom = "lesson"; sfx("tap"); go("menu"); }
+          return;
+        }
+        if (dir) push(b);
+        else if (b === "a") { S.peek = true; paint(); }
+        else if (b === "select") hint();
+        else if (b === "start") { S.menuFrom = sc; sfx("tap"); go("menu"); }
+        return;
+      }
+      if (sc === "solved") { if (b === "a") { if (S.anim.done) choose(); else endAnim(); } return; }
+      if (sc === "preview") {
+        if (b === "a") { S.sel = 0; choose(); } else if (b === "b") { S.sel = 1; choose(); }
+        return;
+      }
+      if (sc === "gallery") {
+        if (b === "left") browse(-1);
+        else if (b === "right") browse(1);
+        else if (b === "up" || b === "down") toggleSize();
+        else if (b === "a") { S.sel = 1; choose(); }
+        else if (b === "b") { sfx("tap"); go("main"); }
+        return;
+      }
+      if (sc === "main") {
+        if (dir) moveSel(b);
+        else if (b === "a") choose();
+        else if (b === "b" && S.hasSave) { sfx("tap"); go("title"); }
+        return;
+      }
+      if (sc === "title") {
+        if (dir) moveSel(b);
+        else if (b === "a") choose();
+        else if (b === "b") { sfx("tap"); go("main"); }
+        return;
+      }
+      if (sc === "menu") {
+        if (dir) moveSel(b);
+        else if (b === "a") choose();
+        else if (b === "b") { sfx("tap"); go(S.menuFrom); }
+        return;
+      }
+      if (sc === "won" || sc === "lost") {
+        if (dir) moveSel(b);
+        else if (b === "a") choose();
+      }
+    });
+    PAD.on("release", function (b) { if (b === "a" && S.peek) { S.peek = false; paint(); } });
+  }
+
+  /* touch: tap a piece next to the gap, or swipe it towards the gap; the cut and the solved animation skip on a tap */
+  function cellAt(e) {
+    var r = cv.getBoundingClientRect(), x = (e.clientX - r.left) / r.width * W, y = (e.clientY - r.top) / r.height * H;
+    var xs = edges(S.n, W), ys = edges(S.n, H), c = 0, row = 0;
+    while (c < S.n - 1 && x >= xs[c + 1]) c++;
+    while (row < S.n - 1 && y >= ys[row + 1]) row++;
+    return row * S.n + c;
+  }
+  var touch = null, swallow = false, SWIPE = 12;
+  cv.addEventListener("pointerdown", function (e) {
+    if (S.screen === "cut") { skipIntro(); return; }
+    if (S.demo) { stopDemo(); return; }
+    if (S.screen !== "play" && S.screen !== "lesson") return;
+    if (S.screen === "lesson" && S.lessonDone) return;
+    touch = { id: e.pointerId, x: e.clientX, y: e.clientY, cell: cellAt(e) };
+    try { cv.setPointerCapture(e.pointerId); } catch (err) {}
+  });
+  cv.addEventListener("pointercancel", function () { touch = null; });
+  cv.addEventListener("pointerup", function (e) {
+    var t = touch; touch = null;
+    if (!t || t.id !== e.pointerId || (S.screen !== "play" && S.screen !== "lesson") || S.lessonDone) return;
+    swallow = true;
+    var dx = e.clientX - t.x, dy = e.clientY - t.y;
+    if (Math.abs(dx) < SWIPE && Math.abs(dy) < SWIPE) { slide(t.cell); return; }
+    var n = S.n, r = Math.floor(t.cell / n), c = t.cell % n, to;
+    if (Math.abs(dx) > Math.abs(dy)) to = dx > 0 ? (c < n - 1 ? t.cell + 1 : -1) : (c > 0 ? t.cell - 1 : -1);
+    else to = dy > 0 ? (r < n - 1 ? t.cell + n : -1) : (r > 0 ? t.cell - n : -1);
+    if (to !== S.gap) { sfx("err"); return; }
+    slide(t.cell);
+  });
+  cv.addEventListener("click", function () {
+    if (swallow) { swallow = false; return; }
+    if (S.screen === "cut") { skipIntro(); return; }
+    if (S.screen === "solved") { if (S.anim.done) { S.sel = 0; choose(); } else endAnim(); }
+  });
+  document.addEventListener("visibilitychange", function () {
+    if (document.hidden) stopClock(true);
+    else if (S.screen === "play") startClock();
+  });
+
+  /* for tests/e2e.test.mjs: where the pieces are, so a test can solve the puzzle with real key presses */
+  window.PUZZLE = { state: function () {
+    return { screen: S.screen, n: S.n, nextN: S.nextN, tiles: S.tiles.slice(), gap: S.gap, moves: S.moves,
+      fromCamera: S.src === "camera", src: S.src, picKey: S.picKey, helped: S.helped, hasSave: S.hasSave, saved: S.hasSave,
+      sel: S.sel, items: S.items.map(function (it) { return it[1]; }), demo: !!S.demo, hint: !!S.hint,
+      hintAt: S.hint ? { p: S.hint.p, gap: S.hint.gap } : null, numbers: showNumbers(),
+      moving: !!S.animMove,
+      mode: S.mode, lesson: S.lesson, lessonDone: S.lessonDone, animDone: !!(S.anim && S.anim.done),
+      arcade: S.arcade, gameArcade: S.gameArcade, left: S.left, arcadeTotal: S.arcadeTotal,
+      best: S.best[String(S.n)] || 0, bestTime: S.bestTime[String(S.n)] || 0,
+      gallery: S.galleryIndex, pictures: BUILTINS.map(picName), fuse: document.getElementById("fuse").className,
+      intro: S.intro ? { phase: S.intro.ms < 300 ? "cut" : S.intro.ms < 600 ? "drop" : "mix", ms: S.intro.ms, gap: S.gap, total: S.intro.total } : null,
+      attract: S.attract ? { index: S.attract.index, n: S.attract.n, phase: S.attract.phase, moves: S.attract.i, plan: S.attract.plan.length, moving: !!S.attract.anim } : null };
+  } };
+
+  if (!HAS_PAD) go("main"); else draw();
+})();
+
+</script>
+</body>
+</html>
