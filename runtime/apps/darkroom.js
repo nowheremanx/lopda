@@ -302,13 +302,20 @@ function erasePlaces(){
     toMenu("discard"); renderSheet(); render();
   });
 }
+/* The roll's document goes first and its latents only after it is gone: if the delete fails, the roll comes back
+   whole (its frames and colour pictures together), never as a document whose pictures were already thrown away.
+   A latent left behind by a failed file delete is unreachable bytes, not a broken roll. */
 function discard(){
   var r=current(); if(!r) return;
   delete D.rolls[r.id]; D.sheet=""; renderSheet(); render();
   sfx("ok"); toast(tr("dk.discarded"));
   if(!S.db) return;
-  S.refs.rolls.doc(r.id).delete().catch(function(){});
-  r.frames.reduce(function(pr,f){ return pr.then(function(){ return P.files.del(FILM.latentKey(r.id,f.n)).catch(function(){}); }); },Promise.resolve());
+  S.refs.rolls.doc(r.id).delete().then(function(){
+    return r.frames.reduce(function(pr,f){ return pr.then(function(){ return P.files.del(FILM.latentKey(r.id,f.n)).catch(function(){}); }); },Promise.resolve());
+  },function(){
+    if(!D.rolls[r.id]){ D.rolls[r.id]=r; renderSheet(); render(); }
+    sfx("err"); toast(tr("dk.savefail"));
+  });
 }
 
 /* ---------- importing a negative: all of it or nothing ---------- */
@@ -445,8 +452,16 @@ function startDevelop(r){
   (function next(k){
     if(gen!==D.gen) return;
     if(k>=work.total){
-      r.dev=dev; if(S.db) put(S.refs.rolls.doc(r.id),r);
-      work.end=true; return;
+      /* developed only once it is written down: a roll that opened in the viewer but came back undeveloped would be
+         developed again with another seed, and its pictures would change. put shows its own toast on failure. */
+      r.dev=dev;
+      if(!S.db){ work.end=true; return; }
+      put(S.refs.rolls.doc(r.id),r).then(function(ok){
+        if(gen!==D.gen) return;
+        if(ok){ work.end=true; return; }
+        delete r.dev; closeFull(); sfx("err"); renderKeys(); render();
+      });
+      return;
     }
     developFrame(r,dev,k,1).then(null,function(){ return DEV.develop(null,devOpts(r,r.frames[k],dev,1)); }).then(function(img){
       if(gen!==D.gen) return;

@@ -382,7 +382,8 @@ function takeFrame(px,latent){
   /* the place job before renderCam: the unload menu must already see it (the stream, and its fix, stop there) */
   if(latent && LIVE.on && S.db) sealPlace(fr,now);
   renderCam();
-  if(S.db) put(S.refs.frames.doc(roll+"-"+pad2(n)),fr).then(function(ok){ if(!ok) toast(tr("cam.lost")); });
+  /* a job too: unloading deletes the frame documents, and a late write landing after that delete would leave a stray frame */
+  if(S.db) F.jobs.push(put(S.refs.frames.doc(roll+"-"+pad2(n)),fr).then(function(ok){ if(!ok) toast(tr("cam.lost")); }));
   if(rollFull()){ toast(tr("cam.last")); stopLive(); }
 }
 $("cam-shutter").onclick=function(){ shoot(); };

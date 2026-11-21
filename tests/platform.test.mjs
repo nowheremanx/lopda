@@ -182,6 +182,16 @@ test("errors carry a code: unavailable, quota_exceeded", async () => {
   assert.equal((await db.doc(NOTES + "/small").get()).exists, true);
 });
 
+test("a failed database open is not remembered: the next call opens again", async () => {
+  const opts = { broken: true };
+  const { P, indexedDB } = platform(opts);
+  await assert.rejects(P.db.doc(NOTES + "/n1").get(), (e) => e.code === "unavailable");
+  opts.broken = false;   /* the phone freed space, the other tab let go: the same page tries again */
+  await P.db.doc(NOTES + "/n1").set({ body: "back" });
+  assert.equal((await P.db.doc(NOTES + "/n1").get()).data().body, "back");
+  assert.equal(indexedDB.opened, 2);
+});
+
 /* ---------------- file export ---------------- */
 
 function exporter({ coarse = false, share } = {}) {
