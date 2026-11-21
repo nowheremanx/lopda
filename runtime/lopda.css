@@ -654,12 +654,12 @@ textarea::placeholder{color:var(--ink-2)}
 /* the idea page: one long prompt, its own screen, and a clear button that asks twice */
 .idea-main{flex:1;min-height:0;display:flex;flex-direction:column;gap:8px;padding:8px;overflow:hidden}
 .idea-main .hint{flex:none}
-#scripts-idea{flex:1;min-height:0;width:100%;font-family:var(--f-lcd);font-size:16px;line-height:1.45;color:var(--ink);background:var(--lcd);border:3px solid var(--ink);border-radius:0;padding:10px;resize:none;-webkit-appearance:none;appearance:none}
-#scripts-idea::placeholder{color:var(--ink-2)}
-#scripts-idea:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+#scripts-idea,#revise-ask{flex:1;min-height:0;width:100%;font-family:var(--f-lcd);font-size:16px;line-height:1.45;color:var(--ink);background:var(--lcd);border:3px solid var(--ink);border-radius:0;padding:10px;resize:none;-webkit-appearance:none;appearance:none}
+#scripts-idea::placeholder,#revise-ask::placeholder{color:var(--ink-2)}
+#scripts-idea:focus-visible,#revise-ask:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
 .idea-actions{flex:none;display:flex;gap:8px;padding:6px 8px;border-top:2px solid var(--ink)}
 .idea-actions .btn{flex:1;min-height:44px}
-#idea-status{min-height:18px;line-height:1.3}
+#idea-status,#revise-status{min-height:18px;line-height:1.3}
 #idea-clear:disabled{color:var(--mid);border-color:var(--mid);background:transparent;box-shadow:none;cursor:default}
 #idea-ask{bottom:58px}
 #idea-ask p{margin:0 0 2px;font-size:15px;line-height:1.35}
@@ -681,7 +681,9 @@ textarea::placeholder{color:var(--ink-2)}
 .script-menu{position:absolute;left:8px;right:8px;bottom:58px;z-index:2;background:var(--lcd-2);border:3px solid var(--ink);box-shadow:4px 4px 0 var(--ink-2);padding:8px;display:flex;flex-direction:column;gap:6px}
 .script-menu .btn{min-height:44px}
 #script-ask p{margin:0 0 2px;font-size:15px;line-height:1.35}
-#scripts-prompt-box{width:100%;height:120px;font-family:var(--f-lcd);font-size:13px;line-height:1.35;color:var(--ink);background:var(--lcd);border:2px solid var(--ink);padding:6px;resize:none}
+#scripts-prompt-box,#revise-prompt-box{width:100%;height:120px;font-family:var(--f-lcd);font-size:13px;line-height:1.35;color:var(--ink);background:var(--lcd);border:2px solid var(--ink);padding:6px;resize:none}
+#versions-code{flex:1;min-height:0;width:100%;font-family:var(--f-lcd);font-size:13px;line-height:1.45;color:var(--ink);background:transparent;border:0;border-radius:0;padding:10px;resize:none}
+#versions-code:focus-visible{outline:none}
 #data-ask{bottom:10px}
 #data-ask p{margin:0 0 2px;font-size:15px;line-height:1.35}
 #data-clear-all:disabled{color:var(--mid);border-color:var(--mid);background:transparent;box-shadow:none;cursor:default}

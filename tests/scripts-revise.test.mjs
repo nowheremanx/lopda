@@ -57,10 +57,10 @@ function makeDB() {
   return { docs, fail, ops, doc(p) { return ref(p); }, collection(p) { return coll(p); } };
 }
 
-function makeLP(ctx, db) {
+function makeLP(ctx, db, $) {
   const S = ctx.LopdaStrings;
   return {
-    $: () => el(),
+    $,
     S: { db, kv: {} },
     tr: S.t,
     own: (d) => (d == null ? null : JSON.parse(JSON.stringify(d))),
@@ -79,7 +79,9 @@ function boot(lang, db) {
     document: { addEventListener() {}, createElement() { return el(); }, body: { appendChild() {}, removeChild() {} }, hidden: false },
     setTimeout, clearTimeout,
   });
-  ctx.LP = makeLP(ctx, db || makeDB());
+  /* one element per id, like the real page: a test can set a textarea and read it back */
+  const page = new Map(), $ = (id) => { if (!page.has(id)) page.set(id, el()); return page.get(id); };
+  ctx.LP = makeLP(ctx, db || makeDB(), $);
   vm.runInContext(read("runtime/apps/scripts.js"), ctx, { filename: "runtime/apps/scripts.js" });
   return ctx;
 }
@@ -229,6 +231,14 @@ test("replaceBody: the old body is a version before the new body is written", as
   const list = plain(db.docs.get(P_VERSIONS("s1")).list);
   assert.equal(list.length, 1);
   assert.deepEqual({ body: list[0].body, name: list[0].name, why: list[0].why }, { body: "OLD", name: "P", why: "add a pause" });
+
+  /* a revised file may carry a new <title>: the new name lands in the same write, the version keeps the old one */
+  assert.equal(await T.replaceBody(s, "NEWER", "add a clock", "钟"), true);
+  assert.equal(db.docs.get(P_ITEMS("s1")).name, "钟");
+  assert.equal(s.name, "钟");
+  const list2 = plain(db.docs.get(P_VERSIONS("s1")).list);
+  assert.equal(list2[0].body, "NEW");
+  assert.equal(list2[0].name, "P", "the version was written before the name changed");
 });
 
 test("replaceBody: if the version cannot be written, the script is not touched", async () => {
@@ -282,4 +292,37 @@ test("ask drafts: kept per script, cleared when empty or deleted", async () => {
   await T.saveAskNow("s5", "again");
   assert.equal(await T.clearAsk("s5"), true);
   assert.equal(db.docs.has(P_ASKS("s5")), false);
+});
+
+/* ---------- the save guard: a revise in flight must not touch the script document ---------- */
+
+test("saveCurrent: while a revise of this script streams, nothing is read from the textarea or written", async () => {
+  const db = makeDB(), ctx = boot("en-US", db), T = ctx.LP.scripts._test, $ = ctx.LP.$;
+  const s = { v: 1, id: "s9", name: "P", body: "OLD", created: 1, updated: 1 };
+  T.state.current = s;
+  $("script-name").value = "P";
+  $("script-code").value = "TYPED";
+  assert.equal(await T.saveCurrent(true), true, "without a revise the editor's text is saved");
+  assert.equal(db.docs.get(P_ITEMS("s9")).body, "TYPED");
+
+  /* the revise starts: the answer streams into the textarea, the script document must not move */
+  T.stream.job = { stop() {} }; T.stream.mode = "revise"; T.stream.s = s; T.stream.text = "STREAMING";
+  $("script-code").value = "STREAMING";
+  $("script-name").value = "renamed";
+  assert.equal(T.revising(s), true);
+  assert.equal(T.revising({ id: "other" }), false);
+  assert.equal(T.revising(null), false);
+  assert.equal(await T.saveCurrent(true), true, "the guard reports success without writing");
+  assert.equal(db.docs.get(P_ITEMS("s9")).body, "TYPED", "the stored body did not move");
+  assert.equal(db.docs.get(P_ITEMS("s9")).name, "P", "nor the stored name");
+  assert.equal(s.body, "TYPED", "nor the in-memory body");
+  assert.equal(s.name, "P", "nor the in-memory name");
+
+  /* a different script (and the same script once the job is over) saves as always */
+  T.stream.job = null; T.stream.mode = "gen"; T.stream.s = null;
+  assert.equal(T.revising(s), false);
+  $("script-name").value = "P2";
+  assert.equal(await T.saveCurrent(true), true);
+  assert.equal(db.docs.get(P_ITEMS("s9")).body, "STREAMING");
+  assert.equal(db.docs.get(P_ITEMS("s9")).name, "P2");
 });
