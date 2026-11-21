@@ -622,13 +622,14 @@ test("daily-box app: box-now restores the board, and an old day's box-now is dro
   for (const candidate of ["up", "down", "left", "right"]) {
     const probe = Board.create(level);
     const result = Board.step(probe, candidate);
-    if (result.kind === "walk") {
+    /* a walk or a push: some days' boards start with the player boxed in by crates, so only a push moves */
+    if (result.kind === "walk" || result.kind === "push") {
       Board.step(state, candidate);
       dir = candidate;
       break;
     }
   }
-  assert.ok(dir, "today's level has a direction to walk");
+  assert.ok(dir, "today's level has a direction to move");
   const key = localKey(new Date());
   /* box-now.history is the undo stack with the current position as its last entry */
   const history = state.history.concat([{
