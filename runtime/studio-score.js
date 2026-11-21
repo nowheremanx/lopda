@@ -298,6 +298,9 @@ function toSong(input,now,opts){
     for(j=0;j<barLost.length;j++) dedupeLost(lost,barLost[j]);
   }
   if(!chain.length) return {error:"song"};
+  /* a score read with no chord at all gives a tape of melody and drums only: say so first, so an empty bass and chord
+     track reads as what the score held, not as a fault (owner's piano score, 2026-11-21, decisions.md section 57) */
+  if(lastChords===null) lost.unshift("nochords");
   var mean=melodyPitches.length?melodyPitches.reduce(function(a,b){return a+b;},0)/melodyPitches.length:60,shift=mean<LIFT_BELOW?12:0;
   for(i=0;i<patterns.length;i++){
     notes=patterns[i].notes;
