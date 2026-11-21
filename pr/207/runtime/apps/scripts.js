@@ -243,10 +243,11 @@ function clearAsk(id){
 /* The only way code is replaced: the old body becomes a version first. If that version does not land
    (a refused write, an unreadable or newer versions doc), the script is not touched at all. newName is
    the name of the revised file; it is applied only after the version has landed, in the same write. */
-function replaceBody(s, code, why, newName){
+function replaceBody(s, code, why, newName, before){
   if(!s || !s.id) return Promise.resolve(false);
   code=String(code==null?"":code);
-  var oldBody=String(s.body==null?"":s.body), oldName=s.name||"";
+  /* before: the body and name a revise started from, so the version never comes from in-memory state */
+  var oldBody=String(before ? before.body : s.body==null ? "" : s.body), oldName=(before ? before.name : s.name)||"";
   return addVersion(s.id, oldBody, oldName, why).then(function(ok){
     if(!ok) return false;
     s.body=code;
@@ -596,6 +597,8 @@ function pasteEditor(){
   readClipboard().then(function(text){
     var code=cleanCode(text);
     if(!code) throw new Error("empty");
+    /* while this script is being revised the editor may be blank (the model is still thinking): never paste into it */
+    if(revising(s)){ toast(tr("scripts.gen.one")); return; }
     if(String($("script-code").value||"").trim()){ editPaste(s, code); return; }
     $("script-code").value=code;
     s.body=code;
@@ -810,7 +813,7 @@ function startRevise(s, old, ask){
   G.job.then(function(all){
     var res=checkRevision(old.body, all);
     if(!res.ok) throw {code:"revise", why:res.why};
-    return replaceBody(s, res.code, ask.slice(0,60), revisedName(old, res.code)).then(function(done){
+    return replaceBody(s, res.code, ask.slice(0,60), revisedName(old, res.code), old).then(function(done){
       if(done){
         clearAsk(s.id); M.askTouched=false;
         var ta=$("revise-ask"); if(ta) ta.value="";
