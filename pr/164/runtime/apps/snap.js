@@ -8,16 +8,17 @@
  * LP.snap:
  *   supported()          this page can open a camera at all (HTTPS and getUserMedia)
  *   systemOk()           the phone has already allowed a camera since the page opened: no tap of the runtime's own is needed
- *   open({name, size, owner, done})   call inside a tap of the runtime's own, or once systemOk(): getUserMedia starts here.
+ *   open({name, size, owner, done, keep?}) call inside a tap of the runtime's own, or once systemOk(): getUserMedia starts here.
  *                        name: the app's name for the title line; size "small" | "large"; owner() -> false once the app
- *                        is not in front any more; done({w, h, px} | null) is called exactly once
+ *                        is not in front any more; done({w, h, px} | null) is called exactly once. Internal keep:true also
+ *                        supplies a full-frame {w,h,gray} luma image as the second argument on a shot.
  *   cancel()             close with null (B, HOME, another program, the app gone, the page hidden)
  *   isOpen()
  */
 (function(){
 "use strict";
 var LP=window.LP, $=LP.$, tr=LP.tr, sfx=LP.sfx, toast=LP.toast, TONES=LP.TONES;
-var FINDER=window.LopdaFinder, LENS=window.LopdaLenses;
+var FINDER=window.LopdaFinder, LENS=window.LopdaLenses, SCORE=window.LopdaScorePages;
 /* the safety net looks every quarter second, like the sensors' (decisions.md section 23). It also watches the stream, as
    the camera program's watchdog does (decisions.md section 4): no picture after REPLAY_MS asks play() again, after
    NOFRAME_MS (or a track that ends, or stays muted MUTE_MS) the stream restarts once; a second failure closes with null */
@@ -29,6 +30,7 @@ var SN={req:null, stream:null, gen:0, raf:0, last:0, watch:null, lens:"w", lense
 function log(s){ var d=window.LOPDA_DEBUG; if(d) (d.snap=d.snap||[]).push(s); }
 var cv=$("snap-cv"), ctx=cv.getContext("2d"), img=ctx.createImageData(cv.width,cv.height);
 var grab=FINDER.grabber();
+var fullGrab=FINDER.grabber();
 
 function supported(){ return !!(window.isSecureContext && navigator.mediaDevices && navigator.mediaDevices.getUserMedia); }
 /* the lenses the snap found itself, else the ones the camera program found, else the plain back / front pair */
@@ -48,7 +50,7 @@ function idle(){ draw(new Uint8Array(cv.width*cv.height).fill(1)); }
 function render(){
   if(!SN.req) return;
   var sg=function(v){ return (v>0?"+":v<0?"−":"±")+Math.abs(v); };
-  $("snap-who").textContent=tr("snap.who",{name:SN.req.o.name});
+  $("snap-who").textContent=SN.req.o.keep ? SN.req.o.name : tr("snap.who",{name:SN.req.o.name});
   $("snap-exp").textContent=tr("cam.exp",{b:sg(SN.exposure), c:sg(SN.contrast)});
   $("snap-lens").hidden=!SN.stream;
   $("snap-lens").textContent=LP.film.lensName(lensNow());
@@ -151,17 +153,25 @@ function frame(v){
   var r=SN.req;
   return FINDER.ditherLuma(grab(v,v.videoWidth,v.videoHeight,r.w,r.h,lensNow().id==="f"),r.w,r.h,SN.exposure,SN.contrast);
 }
+function fullFrame(v){
+  var size=SCORE.scaleSize(v.videoWidth,v.videoHeight,1600), w=size.w, h=size.h;
+  var lum=fullGrab(v,v.videoWidth,v.videoHeight,w,h,false), gray=new Uint8Array(w*h);
+  for(var i=0;i<gray.length;i++) gray[i]=Math.max(0,Math.min(255,Math.round(lum[i]*255)));
+  return {w:w,h:h,gray:gray};
+}
 function shoot(){
   var v=$("snap-video");
   if(!SN.req || !SN.stream || SN.swapping || v.readyState<2 || !v.videoWidth) return;
   var r=SN.req, px=frame(v);
   /* the shutter: the sound, the finder blinks dark, and it closes */
   sfx("shutter"); draw(px); $("snap-shut").hidden=false;
-  finish({w:r.w, h:r.h, px:px},160);
+  var kept=null;
+  if(r.o.keep) try{ kept=fullFrame(v); }catch(e){ log("full frame failed"); }
+  finish({w:r.w, h:r.h, px:px},160,kept);
 }
 function cancel(){ finish(null); }
 /* every way out ends here: the stream stops at once, the app hears once */
-function finish(v,linger){
+function finish(v,linger,extraFrame){
   var r=SN.req; if(!r) return;
   SN.req=null; SN.gen++;
   cancelAnimationFrame(SN.raf); clearInterval(SN.watch); SN.watch=null;
@@ -172,7 +182,8 @@ function finish(v,linger){
   clearTimeout(SN.blink);
   if(linger) SN.blink=setTimeout(close,linger); else close();
   LP.releaseButtons(); LP.showPad(SN.padWas);
-  r.o.done(v);
+  if(r.o.keep) r.o.done(v,extraFrame||null);
+  else r.o.done(v);
 }
 /* SELECT: the next lens. The finder goes dark until the new lens gives a picture, as in the camera program */
 function nextLens(){
