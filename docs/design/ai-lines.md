@@ -1,6 +1,6 @@
 # 设计草稿：多条 AI 线路（像 iPhone 的 eSIM）
 
-状态：**设计草稿，未实现，等 owner 批准**。基于 main `7220dd0` / runtime 1.1.2。只动文档；实现清单见第 9 节。
+状态：**owner 2026-11-21 已批准（第 10 节四条都是「是」），未实现**。基于 main `7220dd0` / runtime 1.1.2。只动文档；实现清单见第 9 节。
 要改 decisions.md 第 34 节「只接 OpenRouter、一个地址」的规定，实现时写一个新的小节说明为什么改。
 
 背景：现在设置里的「AI 线路」只有一条：OpenRouter 的 key 加一个模型名（`data/users/local/ai` {v:1, key, model, scoreModel}）。
@@ -167,9 +167,9 @@ repo 测试「runtime 只联系这些站」要把这五个地址加进白名单�
 5. decisions.md 新的一节（改写第 34 节的「只接 OpenRouter」），RUNTIME_VERSION 升一个小版本。
 6. iPhone 实测：每家至少一次真 key「试一下」+ 脚本生成（owner 用自己的 key）。
 
-## 10. 请 owner 定的事
+## 10. owner 已定（2026-11-21）
 
-1. 第一批五家（OpenRouter、DeepSeek、Kimi、千问、硅基流动）可以吗？
-2. 线路名自动起、第一版不让改名，可以吗？
-3. 读谱只能选能看图的线路（DeepSeek 灰掉），可以吗？
-4. 不让用户自填地址，可以吗？
+1. 第一批五家：OpenRouter、DeepSeek、Kimi、千问、硅基流动。
+2. 线路名自动起，第一版不让改名。
+3. 读谱只能选能看图的线路（DeepSeek 灰掉）。
+4. 不让用户自填地址。
