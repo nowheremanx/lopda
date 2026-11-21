@@ -8,11 +8,14 @@
   body { display: flex; align-items: center; justify-content: center; touch-action: none; }
   canvas { width: 100vw; max-width: calc(100vh * 160 / 144); aspect-ratio: 160 / 144; image-rendering: pixelated; image-rendering: crisp-edges; display: block; }
   #hud { position: absolute; left: 6px; top: 6px; font-size: 11px; line-height: 1.3; background: #1f2a14; color: #a3ad7e; padding: 3px 5px; white-space: pre; display: none; }
+  /* bottom-left, so it never covers the HUD; no pointer events, a drag over it still turns the view */
+  #legend { position: absolute; left: 6px; bottom: 6px; font-size: 11px; line-height: 1.3; background: #1f2a14; color: #a3ad7e; padding: 3px 5px; white-space: pre; pointer-events: none; }
 </style>
 </head>
 <body>
 <canvas id="c" width="160" height="144"></canvas>
 <div id="hud"></div>
+<div id="legend"></div>
 <script data-lo-3d="1.1.0">
 /*
  * lo-3d.js 1.1.0, a small software 3D renderer for Lo-PDA apps.
@@ -516,6 +519,22 @@ var Lo3D = (function () {
                  names: ["环结", "飞越", "晶体"] };
   var sub = Lo3D.sub, cross = Lo3D.cross, norm = Lo3D.norm, rotX = Lo3D.rotX, rotY = Lo3D.rotY, rotZ = Lo3D.rotZ;
 
+  /* ---------- the key legend ----------
+     It says what the pad does on the first screen, then goes away and never comes back: on the first key,
+     on the first drag on the canvas, or after 6 s, whichever comes first. */
+  var legend = document.getElementById("legend");
+  var legendShown = true, legendTimer = 0;
+  if (legend) legend.textContent = en ? "A scene  B wire\nSTART info  SELECT zoom\nPad/drag to look"
+                                      : "A 换场景  B 线框\nSTART 信息  SELECT 远近\n方向键/拖动 转视角";
+  function hideLegend() {
+    if (!legendShown) return;                 /* hiding twice is harmless */
+    legendShown = false;
+    if (legend) legend.style.display = "none";
+    if (legendTimer) { clearTimeout(legendTimer); legendTimer = 0; }
+  }
+  /* a test harness may have no setTimeout; the first key or drag still hides it */
+  if (typeof setTimeout === "function") legendTimer = setTimeout(hideLegend, 6000);
+
   /* ---------- meshes ---------- */
   function knot() {
     var v = [], t = [], N = 72, M = 7, p = 2, q = 3, i, j;
@@ -608,6 +627,7 @@ var Lo3D = (function () {
   function clampPitch() { pitch = Math.max(-1.2, Math.min(1.3, pitch)); }
   if (typeof PAD !== "undefined") {
     PAD.on("press", function (b) {
+      hideLegend();   /* any key: the player has found the pad */
       if (b === "a") { scene = (scene + 1) % 3; PAD.sfx("tick"); }
       else if (b === "b") { wire = !wire; PAD.sfx("tick"); }
       else if (b === "start") { showHud = !showHud; hud.style.display = showHud ? "block" : "none"; }
@@ -616,7 +636,7 @@ var Lo3D = (function () {
   }
   function held(b) { return typeof PAD !== "undefined" && PAD.isDown && PAD.isDown(b); }
   var drag = null;
-  cv.addEventListener("pointerdown", function (e) { drag = { x: e.clientX, y: e.clientY, id: e.pointerId }; try { cv.setPointerCapture(e.pointerId); } catch (_) {} });
+  cv.addEventListener("pointerdown", function (e) { hideLegend(); drag = { x: e.clientX, y: e.clientY, id: e.pointerId }; try { cv.setPointerCapture(e.pointerId); } catch (_) {} });
   cv.addEventListener("pointermove", function (e) {
     if (!drag || drag.id !== e.pointerId) return;
     yaw -= (e.clientX - drag.x) * 0.012; pitch += (e.clientY - drag.y) * 0.012; clampPitch();
