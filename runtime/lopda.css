@@ -1077,6 +1077,21 @@ textarea::placeholder{color:var(--ink-2)}
 .st-name{width:100%;box-sizing:border-box;height:44px;padding:6px 8px;background:var(--lcd);color:var(--ink);border:2px solid var(--ink);font-family:var(--f-lcd);font-size:16px;line-height:1.2}
 .st-name::placeholder{color:var(--ink-2)}
 .st-ai-input{height:auto;min-height:88px;max-height:132px;resize:none;overflow-y:auto;-webkit-overflow-scrolling:touch}
+.st-score-preview{flex:1;min-height:120px;display:flex;align-items:center;justify-content:center;border:2px solid var(--ink-2);box-sizing:border-box;padding:4px;overflow:hidden}
+.st-score-preview-canvas{display:block;max-width:100%;max-height:100%;object-fit:contain;image-rendering:pixelated;image-rendering:crisp-edges}
+.st-score-hint{margin:0;padding:8px;color:var(--ink-2);text-align:center;line-height:1.5}
+.st-score-content{flex:1;min-height:0;display:flex;flex-direction:column;gap:6px;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch}
+.st-score-tray{flex:none;display:flex;flex-direction:column;gap:4px;min-width:0}
+.st-score-pages{display:flex;gap:6px;min-width:0;min-height:52px;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;touch-action:pan-x}
+.st-score-pages:empty{display:none}
+.st-score-thumb{flex:none;width:56px;height:52px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;padding:2px;background:transparent;border:2px solid var(--ink-2);cursor:pointer}
+.st-score-thumb.on{border:3px solid var(--ink)}
+.st-score-thumb-canvas{display:block;max-width:48px;max-height:44px;object-fit:contain;image-rendering:pixelated;image-rendering:crisp-edges}
+.st-score-actions{flex:none;display:flex;flex-direction:column;gap:4px;min-width:0}
+.st-score-action-row{flex:none;display:flex;gap:4px;min-width:0}
+.st-score-action-row .st-sheet-btn{flex:1;min-width:0;min-height:44px;padding:2px 6px;font-size:14px;overflow:hidden}
+.st-score-action-row #studio-score-left,.st-score-action-row #studio-score-right{flex:none;width:44px;padding:0;font-size:18px}
+.st-score-actions .st-sheet-btn:disabled{opacity:1;color:var(--ink-2);-webkit-text-fill-color:var(--ink-2);border-color:var(--ink-2);cursor:default}
 /* iOS paints a disabled field and button grey and half transparent: keep them in the four tones while the AI works */
 .st-name:disabled{opacity:1;color:var(--ink-2);-webkit-text-fill-color:var(--ink-2);border-color:var(--ink-2)}
 .st-ai-chip:disabled,.st-sheet .st-sheet-btn:disabled{opacity:1;color:var(--ink-2);-webkit-text-fill-color:var(--ink-2);border-color:var(--ink-2);cursor:default}

@@ -214,14 +214,19 @@
 
     <!-- AI LINE: the OpenRouter key and model, opened from Settings (decisions.md section 34) -->
     <section class="view" id="v-set-ai" hidden>
-      <div class="bar">
-        <button class="btn ghost" id="set-ai-back" type="button" aria-label="返回">◂</button>
-        <h2 data-i18n="ai.label">AI 线路</h2>
-      </div>
-      <div class="settings set-ai-page">
-        <p class="hint" data-i18n="ai.note">接上以后，脚本里的「生成」直接请 AI 写程序。key 只存在这台手机上，不进备份；请用设了额度上限的 key。</p>
-        <p class="hint" data-i18n="ai.pet"></p>
-        <p class="hint" id="set-ai-state" aria-live="polite"></p>
+      <div id="set-ai-main">
+        <div class="bar">
+          <button class="btn ghost" id="set-ai-back" type="button" aria-label="返回">◂</button>
+          <h2 data-i18n="ai.label">AI 线路</h2>
+        </div>
+        <div class="settings set-ai-page">
+          <p class="hint" data-i18n="ai.note">接上以后，脚本里的「生成」直接请 AI 写程序。key 只存在这台手机上，不进备份；请用设了额度上限的 key。</p>
+          <p class="hint" data-i18n="ai.pet"></p>
+          <p class="hint" id="set-ai-state" aria-live="polite"></p>
+        <button class="set-open set-ai-score-model" id="set-ai-score-model" type="button">
+          <span class="set-label" data-i18n="ai.score.label">读谱模型</span>
+          <span class="set-state" id="set-ai-score-model-value">默认（Sol）</span>
+        </button>
         <label class="set-ai-field">
           <span data-i18n="ai.key">OpenRouter 的 key</span>
           <input id="set-ai-key" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="200" data-i18n-ph="ai.key.ph" placeholder="sk-or-…">
@@ -235,6 +240,18 @@
           <button class="btn" id="set-ai-save" type="button" data-i18n="ai.save">保存</button>
           <button class="btn ghost" id="set-ai-test" type="button" data-i18n="ai.test" hidden>试一下</button>
           <button class="btn ghost" id="set-ai-del" type="button" data-i18n="ai.del" hidden>删除 key</button>
+        </div>
+        </div>
+      </div>
+      <div id="set-ai-model-page" hidden>
+        <div class="bar">
+          <button class="btn ghost" id="set-ai-model-back" type="button" aria-label="返回" style="min-height:44px">◂</button>
+          <h2 data-i18n="ai.score.label">读谱模型</h2>
+        </div>
+        <div class="settings set-ai-page">
+          <p class="hint" id="set-ai-model-status" aria-live="polite"></p>
+          <p class="hint" data-i18n="ai.score.pricehint">输入 / 输出 · 美元/百万 token</p>
+          <ul class="lcd-menu set-ai-model-list" id="set-ai-model-list"></ul>
         </div>
       </div>
     </section>
@@ -475,6 +492,7 @@
       <div class="dict-sheet st-sheet" id="studio-sheet" hidden></div>
       <input type="file" id="studio-import-file" accept=".zip,application/zip" hidden>
       <input type="file" id="studio-import-json" accept=".json,application/json" hidden>
+      <input type="file" id="studio-score-import" accept="image/*" multiple hidden>
     </section>
 
     <!-- CARTRIDGE PLAYER -->
@@ -832,11 +850,13 @@
 <script src="zip.js"></script>
 <script src="backup.js"></script>
 <script src="ai.js"></script>
+<script src="score-pages.js"></script>
 <script src="studio-song.js"></script>
 <script src="studio-synth.js"></script>
 <script src="studio-tape.js"></script>
 <script src="studio-edit.js"></script>
 <script src="studio-styles.js"></script>
+<script src="studio-score.js"></script>
 <script src="studio-tools.js"></script>
 <script src="studio-theory.js"></script>
 <script src="studio-critic.js"></script>
