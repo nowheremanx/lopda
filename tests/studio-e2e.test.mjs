@@ -4527,3 +4527,49 @@ test("studio rec: the ≡ menu replays the current screen's tour and the bar has
   await p.waitForSelector("#v-studio .st-tour-box", { state: "detached" });
   assert.deepEqual(errors, []);
 });
+
+test("studio: score page tray imports, reorders and sends images with the score model", { skip, timeout: 90000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await p.evaluate(() => {
+    LP.ai = {
+      on: () => true,
+      scoreModel: () => "test/vision-score-model",
+      err: () => "test error",
+      ask: (o) => {
+        const user = [...o.messages].reverse().find((m) => m.role === "user");
+        window.__scoreAsk = { model: o.model, parts: user.content.filter((part) => part.type === "image_url").map((part) => part.image_url.url) };
+        return Promise.resolve(JSON.stringify({ title: "Test", key: "C", capo: 0, meter: "4/4", bpm: 96,
+          bars: [{ chords: ["C"], beats: ["1", "1", "1", "1"] }] }));
+      },
+    };
+  });
+  await p.click("#studio-menu");
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "让 AI 改" }).click();
+  await p.locator("#studio-sheet .st-sheet-row button", { hasText: "读谱" }).click();
+  await p.setInputFiles("#studio-score-import", [
+    { name: "first.svg", mimeType: "image/svg+xml", buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50"><rect width="100" height="50" fill="white"/><rect width="50" height="50" fill="black"/></svg>') },
+    { name: "second.svg", mimeType: "image/svg+xml", buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50"><rect width="100" height="50" fill="black"/><rect width="50" height="50" fill="white"/></svg>') },
+  ]);
+  await p.waitForFunction(() => document.querySelectorAll("#studio-sheet .st-score-thumb").length === 2);
+  await p.click("#studio-score-left");
+  await p.click("#studio-score-read");
+  await p.waitForFunction(() => window.__scoreAsk && window.__scoreAsk.parts.length === 2);
+  await p.waitForSelector("#studio-score-read", { state: "detached" });
+  const result = await p.evaluate(async () => {
+    async function leftPixel(url) {
+      const image = new Image(); image.src = url; await image.decode();
+      const canvas = document.createElement("canvas"); canvas.width = image.naturalWidth; canvas.height = image.naturalHeight;
+      const ctx = canvas.getContext("2d"); ctx.drawImage(image, 0, 0);
+      return ctx.getImageData(10, 25, 1, 1).data[0];
+    }
+    return { model: window.__scoreAsk.model, urls: window.__scoreAsk.parts,
+      left: await Promise.all(window.__scoreAsk.parts.map(leftPixel)) };
+  });
+  assert.equal(result.model, "test/vision-score-model");
+  assert.ok(result.urls.every((url) => url.startsWith("data:image/jpeg;")), "pages are sent as JPEG data URLs");
+  assert.ok(result.left[0] > 200, "the former second (white-left) page is now first");
+  assert.ok(result.left[1] < 50, "the former first (black-left) page is now second");
+  assert.deepEqual(errors, []);
+});

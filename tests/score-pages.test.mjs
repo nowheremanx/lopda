@@ -37,3 +37,28 @@ test("score model prices format as per-million input and output prices", () => {
   assert.equal(S.formatPrice(null), "—");
   assert.equal(S.formatModelPrice({ in: 0.2, out: 0.4 }), "$0.20 / $0.40");
 });
+
+test("score page pixels convert between grayscale RGBA and luma", () => {
+  const rgba = S.grayRgba(new Uint8Array([0, 128, 255]));
+  assert.deepEqual([...rgba], [0, 0, 0, 255, 128, 128, 128, 255, 255, 255, 255, 255]);
+  assert.deepEqual([...S.rgbaLuma(new Uint8ClampedArray([0, 0, 0, 255, 255, 255, 255, 255]))], [0, 255]);
+});
+
+test("score page scaling keeps its aspect and long side limit", () => {
+  assert.deepEqual({ ...S.scaleSize(3200, 1600, 1600) }, { w: 1600, h: 800 });
+  const scaled = S.scaleLuma(new Uint8Array([0, 40, 80, 120, 160, 200]), 3, 2, 2);
+  assert.deepEqual({ w: scaled.w, h: scaled.h, gray: [...scaled.gray] }, { w: 2, h: 1, gray: [120, 200] });
+  assert.deepEqual({ ...S.scaleSize(3, 2, 1600) }, { w: 3, h: 2 });
+});
+
+test("score page order moves without mutation and caps the tray at six", () => {
+  const pages = Array.from({ length: 6 }, (_, id) => ({ id }));
+  const moved = S.movePage(pages, 1, -1);
+  assert.deepEqual(moved.map((page) => page.id), [1, 0, 2, 3, 4, 5]);
+  assert.deepEqual(pages.map((page) => page.id), [0, 1, 2, 3, 4, 5]);
+  assert.equal(S.moveIndex(1, -1, 6), 0);
+  assert.equal(S.moveIndex(5, 1, 6), 5);
+  assert.equal(S.appendPage(pages, { id: 6 }), null);
+  assert.equal(S.appendPage(pages.slice(0, 5), { id: 5 }).length, 6);
+  assert.equal(S.MAX_PAGES, 6);
+});

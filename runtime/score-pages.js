@@ -2,6 +2,7 @@
 (function(){
 "use strict";
 var DEFAULT_MODEL="openai/gpt-6.2-sol";
+var MAX_PAGES=6;
 function tokenPrice(value){
   var n=typeof value==="number" ? value : parseFloat(value);
   return isFinite(n) && n>=0 ? Math.round(n*1000000*100000000)/100000000 : null;
@@ -38,6 +39,43 @@ function formatPrice(value){
   return "$"+(s||"0");
 }
 function formatModelPrice(model){ return formatPrice(model && model.in)+" / "+formatPrice(model && model.out); }
-window.LopdaScorePages={DEFAULT_MODEL:DEFAULT_MODEL, models:models, cleanModels:cleanModels,
-  formatPrice:formatPrice, formatModelPrice:formatModelPrice};
+function scaleSize(w,h,maxLong){
+  w=Math.max(1,+w||1); h=Math.max(1,+h||1); maxLong=Math.max(1,+maxLong||1600);
+  var scale=Math.min(1,maxLong/Math.max(w,h));
+  return {w:Math.max(1,Math.round(w*scale)),h:Math.max(1,Math.round(h*scale))};
+}
+function scaleLuma(gray,w,h,maxLong){
+  var size=scaleSize(w,h,maxLong), out=new Uint8Array(size.w*size.h), x,y,sx,sy;
+  for(y=0;y<size.h;y++){
+    sy=Math.min(h-1,Math.floor((y+0.5)*h/size.h));
+    for(x=0;x<size.w;x++){
+      sx=Math.min(w-1,Math.floor((x+0.5)*w/size.w));
+      out[y*size.w+x]=gray[sy*w+sx];
+    }
+  }
+  return {w:size.w,h:size.h,gray:out};
+}
+function grayRgba(gray){
+  var out=new Uint8ClampedArray(gray.length*4), i, value;
+  for(i=0;i<gray.length;i++){ value=gray[i]; out[i*4]=out[i*4+1]=out[i*4+2]=value; out[i*4+3]=255; }
+  return out;
+}
+function rgbaLuma(rgba){
+  var out=new Uint8Array(rgba.length/4), i;
+  for(i=0;i<out.length;i++) out[i]=Math.round(0.2126*rgba[i*4]+0.7152*rgba[i*4+1]+0.0722*rgba[i*4+2]);
+  return out;
+}
+function appendPage(pages,page){
+  if(!Array.isArray(pages) || pages.length>=MAX_PAGES) return null;
+  var out=pages.slice(); out.push(page); return out;
+}
+function movePage(pages,index,delta){
+  var out=Array.isArray(pages)?pages.slice():[], to=index+delta;
+  if(index<0 || index>=out.length || to<0 || to>=out.length) return out;
+  var page=out.splice(index,1)[0]; out.splice(to,0,page); return out;
+}
+function moveIndex(index,delta,length){ return Math.max(0,Math.min(length-1,index+delta)); }
+window.LopdaScorePages={DEFAULT_MODEL:DEFAULT_MODEL, MAX_PAGES:MAX_PAGES, models:models, cleanModels:cleanModels,
+  formatPrice:formatPrice, formatModelPrice:formatModelPrice, scaleSize:scaleSize, scaleLuma:scaleLuma,
+  grayRgba:grayRgba, rgbaLuma:rgbaLuma, appendPage:appendPage, movePage:movePage, moveIndex:moveIndex};
 })();
