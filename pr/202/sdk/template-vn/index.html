@@ -220,7 +220,7 @@ function drawLog(g) {
 
 var saved = null, menuIdx = 0;
 game.scene("title", {
-  enter: function () { saved = null; menuIdx = 0; game.load("vn").then(function (v) { saved = v; }); },
+  enter: function () { saved = null; menuIdx = 0; game.load("vn").then(function (v) { saved = v; }, function () { saved = null; /* unreadable: start over; the runtime keeps it */ }); },
   update: function () {
     var n = saved ? 2 : 1;
     if (game.repeat("up") || game.repeat("down")) { menuIdx = (menuIdx + 1) % n; game.sfx("move"); }
