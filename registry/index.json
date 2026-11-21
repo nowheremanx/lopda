@@ -1,6 +1,6 @@
 {
   "spec": "lopda/1",
-  "generated": "2026-11-18",
+  "generated": "2026-11-21",
   "apps": [
     {
       "spec": "lopda/1",
@@ -74,9 +74,9 @@
         "...0000000000...",
         "................"
       ],
-      "version": "1.1.0",
+      "version": "1.1.1",
       "released": "2026-10-11",
-      "updated": "2026-10-13",
+      "updated": "2026-11-21",
       "description": "八位数商务计算器，连续运算、百分比和记忆键。",
       "i18n": {
         "en": {
@@ -87,8 +87,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/calculator/index.html",
-      "sha256": "a62418629dabce24745cf77d0faf0a9d7224cbfbc1053c2c9c158673054b0691",
-      "bytes": 14545
+      "sha256": "dbb1c839f26ea83ea3bd5a70702ee7de8214d438e73aa843392636fa0a7e9c0b",
+      "bytes": 14282
     },
     {
       "spec": "lopda/1",
@@ -207,8 +207,9 @@
         "....00000000....",
         "................"
       ],
-      "version": "1.1.1",
+      "version": "1.1.2",
       "released": "2026-10-19",
+      "updated": "2026-11-21",
       "description": "抽一支签，读一段今天的顺便话。写进记事本接口的示范。",
       "i18n": {
         "zh": {
@@ -226,8 +227,8 @@
         "notes"
       ],
       "path": "apps/daily-slip/index.html",
-      "sha256": "c19da202736bdcfd460a05253ceacfe972dea9b4887cf25788d9bd69bc0e88a2",
-      "bytes": 33124
+      "sha256": "0ca237bafbc705e9a36750c32a71e3e3fe265efce9f64bca00091fc8d2438e0b",
+      "bytes": 33240
     },
     {
       "spec": "lopda/1",
@@ -338,8 +339,9 @@
         "..000..0....0...",
         ".........000...."
       ],
-      "version": "1.4.0",
+      "version": "1.5.0",
       "released": "2026-10-19",
+      "updated": "2026-11-21",
       "description": "学习平假名和片假名（含浊音、半浊音），听发音，再做四选一小测。",
       "i18n": {
         "zh": {
@@ -354,8 +356,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/kana-cards/index.html",
-      "sha256": "8a7ae828c7a0b5e1885c8732530dd237abd1302e1dc290e9603d5b5d5a3421ca",
-      "bytes": 21949
+      "sha256": "bba2be8cf661ece5da7f3a6fcee94a746a63aee62692cae5f38c89bfe4fcf014",
+      "bytes": 23049
     },
     {
       "spec": "lopda/1",
@@ -642,9 +644,9 @@
         "..2..........2..",
         "................"
       ],
-      "version": "2.0.0",
+      "version": "2.0.1",
       "released": "2026-10-08",
-      "updated": "2026-10-21",
+      "updated": "2026-11-21",
       "description": "视觉小说。雨夜小站，一张十年前的旧车票。七章，五个结局。",
       "i18n": {
         "zh": {
@@ -659,8 +661,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/rain-station/index.html",
-      "sha256": "ffae5645ed2913d841b2793d49f6a13ee3ed81cc75113e5d4a66f3cbf935ba8b",
-      "bytes": 173113
+      "sha256": "eaf9f1f03e887b130a1a739d8ea3d43ff831a2d04d6ff2bdcce5a077ed9c9174",
+      "bytes": 173654
     },
     {
       "spec": "lopda/1",
@@ -727,8 +729,9 @@
         "................",
         "................"
       ],
-      "version": "0.1.0",
+      "version": "0.1.1",
       "released": "2026-10-28",
+      "updated": "2026-11-21",
       "description": "七天，守住山脚的小馆：采买、打怪、备菜、待客。",
       "i18n": {
         "en": {
@@ -739,8 +742,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/shanjiao-diner/index.html",
-      "sha256": "0c6f5dbc43934d514dd3bec39db7e78d37b0ff4f8657946a93d63503015aafa0",
-      "bytes": 240184
+      "sha256": "08a4052e969012b2cdca12f91b618e0cbf01d2ba9fbf150ce72630d9e047710f",
+      "bytes": 240611
     },
     {
       "spec": "lopda/1",
@@ -767,8 +770,9 @@
         "................",
         "................"
       ],
-      "version": "0.1.1",
+      "version": "0.1.2",
       "released": "2026-10-27",
+      "updated": "2026-11-21",
       "description": "推石上山。它滚下去。再推。加缪的十六句话在山顶等你。",
       "i18n": {
         "en": {
@@ -782,8 +786,8 @@
         "notes"
       ],
       "path": "apps/sisyphus/index.html",
-      "sha256": "f2d37ddf6800a9fbb1a6f60136775be8a26a8ba140e5c9d9f7f2782a37dab02e",
-      "bytes": 96050
+      "sha256": "98136d243207178656a5dd5e9327046daf120cd81fa6ba8d7df3555615b2af8c",
+      "bytes": 96099
     },
     {
       "spec": "lopda/1",
