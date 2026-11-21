@@ -47,7 +47,10 @@ test("score page pixels convert between grayscale RGBA and luma", () => {
 test("score page scaling keeps its aspect and long side limit", () => {
   assert.deepEqual({ ...S.scaleSize(3200, 1600, 1600) }, { w: 1600, h: 800 });
   const scaled = S.scaleLuma(new Uint8Array([0, 40, 80, 120, 160, 200]), 3, 2, 2);
-  assert.deepEqual({ w: scaled.w, h: scaled.h, gray: [...scaled.gray] }, { w: 2, h: 1, gray: [120, 200] });
+  assert.deepEqual({ w: scaled.w, h: scaled.h, gray: [...scaled.gray] }, { w: 2, h: 1, gray: [60, 120] });
+  const paper = new Uint8Array(64).fill(255);
+  for (let y = 0; y < 8; y++) paper[y * 8 + 2] = 0;
+  assert.deepEqual([...S.scaleLuma(paper, 8, 8, 2).gray], [191, 255, 191, 255], "a one-pixel line still shows after scaling down");
   assert.deepEqual({ ...S.scaleSize(3, 2, 1600) }, { w: 3, h: 2 });
 });
 

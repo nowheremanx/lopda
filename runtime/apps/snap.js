@@ -73,6 +73,9 @@ function open(o){
   SN.exposure=0; SN.contrast=0; SN.restarts=0;
   if(cv.width!==size.w || cv.height!==size.h){ cv.width=size.w; cv.height=size.h; img=ctx.createImageData(size.w,size.h); }
   idle();
+  /* an app's finder sits over the app (#v-run); a built-in's (keep) sits over the whole screen, since #v-run is hidden then */
+  var host=o.keep ? $("screen") : $("v-run");
+  if($("snap").parentNode!==host) host.appendChild($("snap"));
   $("snap").hidden=false;
   /* the camera's keys: the chin pad shows while the finder is open, whatever the app asked for */
   SN.padWas=!$("gamepad").hidden; LP.showPad(true);
