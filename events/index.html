@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Lo-PDA Events</title>
+<meta name="description" content="Lo-PDA events: challenges for making small apps for a fictional 1986 handheld, and what people made.">
+<link rel="icon" href="../runtime/icons/icon-192.png">
+<style>
+@font-face{font-family:"VT323";font-display:swap;src:url(../runtime/fonts/vt323-002.woff2) format("woff2")}
+/* The landing page's look: graphite (the case) and paper (the LCD) bands. Same tokens as ../index.html. */
+:root{
+  --case:#171815; --case-2:#22241f; --case-line:#33362e;
+  --lcd-ink:#1f2a14; --lcd-dark:#4a5a32; --lcd-mid:#7d8a58; --lcd-paper:#a3ad7e;
+  --paper:#e9ebdf; --paper-2:#dfe2d2; --on-case:#eef0e6; --on-case-dim:#9a9f8c;
+  --home:#c4432f;
+  --f-display:-apple-system,"SF Pro Display",system-ui,"Segoe UI",Roboto,"PingFang SC",sans-serif;
+  --f-body:-apple-system,"SF Pro Text",system-ui,"Segoe UI",Roboto,"PingFang SC",sans-serif;
+  --f-lcd:"VT323",ui-monospace,Menlo,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--case);color:var(--on-case);font:17px/1.55 var(--f-body);-webkit-font-smoothing:antialiased}
+a{color:inherit}
+.wrap{max-width:1080px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.band{padding-block:clamp(48px,8vw,96px)}
+.band.paper{background:var(--paper);color:var(--lcd-ink)}
+.lcd{font-family:var(--f-lcd);letter-spacing:.08em;text-transform:uppercase}
+h1,h2{font-family:var(--f-display);font-weight:700;letter-spacing:-.03em;line-height:1.05;text-wrap:balance;margin:0}
+h1{font-size:clamp(40px,7vw,80px)}
+h2{font-size:clamp(30px,4.6vw,52px);margin-bottom:28px}
+h3{font:600 20px/1.25 var(--f-display);letter-spacing:-.01em;margin:0 0 6px}
+p{margin:0}
+.lede{font-size:clamp(18px,2.1vw,22px);line-height:1.45;max-width:40ch;color:var(--on-case-dim);margin-top:20px;text-wrap:pretty}
+.paper .lede{color:var(--lcd-dark)}
+.eyebrow{font-size:20px;color:var(--lcd-mid);margin-bottom:14px}
+.paper .eyebrow{color:var(--lcd-dark)}
+
+nav{position:sticky;top:0;z-index:5;background:var(--case);border-bottom:1px solid var(--case-line)}
+nav .wrap{display:flex;align-items:center;gap:18px;height:52px;font-size:14px}
+nav .mark{font-family:var(--f-lcd);font-size:24px;letter-spacing:.06em;text-decoration:none;margin-right:auto}
+nav a.l{text-decoration:none;color:var(--on-case-dim)}
+nav a.l:hover,nav .lang:hover{color:var(--on-case)}
+nav .lang{background:none;border:0;color:var(--on-case-dim);font:14px var(--f-body);cursor:pointer;padding:8px 4px}
+.btn{display:inline-flex;align-items:center;min-height:44px;border-radius:999px;padding:12px 22px;font:600 16px/1 var(--f-body);text-decoration:none;border:0;cursor:pointer}
+.btn.home{background:var(--home);color:#fff;box-shadow:inset 0 -3px 0 rgba(0,0,0,.25)}
+.btn.ghost{background:transparent;color:inherit;box-shadow:inset 0 0 0 1.5px currentColor}
+
+.chip{display:inline-block;font:20px/1 var(--f-lcd);letter-spacing:.08em;text-transform:uppercase;padding:5px 10px 3px;border-radius:4px;background:var(--lcd-paper);color:var(--lcd-ink)}
+.chip.done{background:var(--case-line);color:var(--on-case-dim)}
+
+/* the list of events */
+.list{display:grid;gap:16px;margin-top:36px}
+.ev{display:block;text-decoration:none;background:var(--case-2);border:1px solid var(--case-line);border-radius:14px;padding:22px}
+.ev:hover{border-color:var(--on-case-dim)}
+.ev h3{font-size:24px;margin-top:12px}
+.ev p{color:var(--on-case-dim);margin-top:6px;max-width:60ch}
+
+/* one event */
+.steps{list-style:none;padding:0;margin:0;display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));counter-reset:s}
+.steps li{background:var(--paper-2);border-radius:12px;padding:18px;counter-increment:s}
+.steps li::before{content:counter(s);display:block;font:28px/1 var(--f-lcd);color:var(--lcd-dark);margin-bottom:8px}
+.steps p{color:var(--lcd-dark);font-size:16px}
+.cards{display:grid;gap:16px;grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
+.card{background:var(--case-2);border:1px solid var(--case-line);border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.card .top{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.card .meta{font:20px/1 var(--f-lcd);letter-spacing:.06em;color:var(--lcd-mid);white-space:nowrap}
+.card .what{color:var(--on-case)}
+.card dl{margin:0;display:grid;gap:8px;font-size:15px}
+.card dt{font:18px/1 var(--f-lcd);letter-spacing:.08em;text-transform:uppercase;color:var(--lcd-mid)}
+.card dd{margin:2px 0 0;color:var(--on-case-dim)}
+.card details{margin-top:auto;border-top:1px solid var(--case-line);padding-top:10px}
+.card summary{cursor:pointer;min-height:44px;display:flex;align-items:center;font-weight:600}
+.card pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.5 ui-monospace,Menlo,monospace;background:var(--lcd-paper);color:var(--lcd-ink);border-radius:8px;padding:12px;margin:8px 0}
+.card .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.card .row a{font-size:15px;color:var(--on-case-dim)}
+.made{display:grid;gap:16px;grid-template-columns:repeat(auto-fill,minmax(220px,1fr))}
+.made figure{margin:0;background:var(--paper-2);border-radius:12px;padding:12px}
+.made img{display:block;width:100%;height:auto;image-rendering:pixelated;border-radius:6px;background:var(--lcd-paper)}
+.made figcaption{margin-top:10px;font-size:15px;color:var(--lcd-dark)}
+.made figcaption b{color:var(--lcd-ink)}
+.back{display:inline-block;margin:0 16px 24px 0;color:var(--on-case-dim);text-decoration:none;min-height:44px;line-height:44px}
+footer{padding-block:32px;color:var(--on-case-dim);font-size:14px}
+</style>
+</head>
+<body>
+<nav><div class="wrap">
+  <a class="mark" href="../">LO-PDA</a>
+  <a class="l" href="./" data-t="nav.events">Events</a>
+  <a class="l" href="https://github.com/nowheremanx/lopda">GitHub</a>
+  <button class="lang" type="button" id="lang">中文</button>
+  <a class="btn home" href="../runtime/" data-t="nav.open">Open</a>
+</div></nav>
+<main id="main"></main>
+<footer><div class="wrap" data-t="foot">MIT · A fictional handheld, made for fun.</div></footer>
+
+<script src="events.js"></script>
+<script>
+(function () {
+  // Page text. Event text comes from events.js as {en, zh}.
+  var T = {
+    en: {
+      "nav.events": "Events", "nav.open": "Open", "foot": "MIT · A fictional handheld, made for fun.",
+      "list.e": "Events", "list.h": "Make something small.",
+      "list.p": "Challenges for making apps for Lo-PDA, with an AI or without. When one ends, what people made stays here.",
+      "open": "Open", "archived": "Archived", "back": "All events",
+      "how.e": "How it works", "how.h": "Ten minutes, one phone.",
+      "cards.e": "Challenge cards", "cards.h": "Pick one.",
+      "cards.p": "Each card is a starting point, not a spec. Keep the twist; change the rest.",
+      "stars": "Difficulty", "hours": "h",
+      "looks": "What you'll show", "twist": "The 1986 twist", "skip": "Leave out",
+      "prompt": "Starter prompt", "copy": "Copy", "copied": "Copied", "issue": "Issue",
+      "made.e": "What people made", "made.h": "The apps.", "by": "by",
+      "join": "Made one? Open a pull request and link this event."
+    },
+    zh: {
+      "nav.events": "活动", "nav.open": "打开", "foot": "MIT · 一台虚构的掌机，做着玩的。",
+      "list.e": "活动", "list.h": "做点小东西。",
+      "list.p": "给 Lo-PDA 做 app 的挑战，用不用 AI 都行。活动结束后，大家做的东西会留在这里。",
+      "open": "进行中", "archived": "已归档", "back": "全部活动",
+      "how.e": "怎么玩", "how.h": "十分钟，一台手机。",
+      "cards.e": "挑战卡", "cards.h": "挑一张。",
+      "cards.p": "每张卡只是起点，不是规格书。留住那点 1986 的味道，其他随你改。",
+      "stars": "难度", "hours": "小时",
+      "looks": "做完能晒什么", "twist": "1986 味道", "skip": "别做",
+      "prompt": "起手 prompt", "copy": "复制", "copied": "已复制", "issue": "Issue",
+      "made.e": "大家做了什么", "made.h": "作品。", "by": "作者",
+      "join": "做好了？开一个 pull request，写上这个活动。"
+    }
+  };
+  var REPO = "https://github.com/nowheremanx/lopda";
+  var events = window.LOPDA_EVENTS || [];
+  var main = document.getElementById("main");
+
+  // Same choice as the landing page (same origin, same key).
+  var lang = null;
+  try { lang = localStorage.getItem("lopda-landing-lang"); } catch (e) {}
+  if (lang !== "zh" && lang !== "en") lang = /^zh/i.test(navigator.language || "") ? "zh" : "en";
+
+  function t(k) { return T[lang][k]; }
+  function L(v) { return v ? (v[lang] || v.en) : ""; }
+  // Build elements with textContent only: event text is data, never markup.
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+  // add() appends and returns the parent; put() appends one child and returns the child.
+  function put(parent, child) { parent.appendChild(child); return child; }
+  function add(parent) { for (var i = 1; i < arguments.length; i++) if (arguments[i]) parent.appendChild(arguments[i]); return parent; }
+  function band(paper) { var s = el("section", "band" + (paper ? " paper" : "")); var w = el("div", "wrap"); s.appendChild(w); main.appendChild(s); return w; }
+  function chip(ev) { return el("span", "chip" + (ev.status === "archived" ? " done" : ""), t(ev.status === "archived" ? "archived" : "open")); }
+  function stars(n) { var s = ""; for (var i = 0; i < 3; i++) s += i < n ? "*" : "·"; return s; }
+
+  function renderList() {
+    var w = band(false);
+    add(w, el("div", "eyebrow lcd", t("list.e")), el("h1", null, t("list.h")), el("p", "lede", t("list.p")));
+    var list = put(w, el("div", "list"));
+    events.forEach(function (ev) {
+      var a = el("a", "ev"); a.href = "#" + ev.id;
+      add(a, chip(ev), el("h3", null, L(ev.title)), el("p", null, L(ev.when)), el("p", null, L(ev.lede)));
+      list.appendChild(a);
+    });
+    document.title = lang === "zh" ? "Lo-PDA 活动" : "Lo-PDA Events";
+  }
+
+  function renderCard(ev, c) {
+    var card = el("article", "card"); card.id = c.id;
+    var top = add(el("div", "top"), el("h3", null, L(c.name)),
+      el("span", "meta", stars(c.stars) + "  " + c.hours + " " + t("hours")));
+    top.lastChild.title = t("stars");
+    var dl = el("dl");
+    [["looks", c.looks], ["twist", c.twist], ["skip", c.skip]].forEach(function (r) { add(dl, el("dt", null, t(r[0])), el("dd", null, L(r[1]))); });
+    var det = el("details"); add(det, el("summary", null, t("prompt")));
+    var pre = put(det, el("pre", null, c.prompt));
+    var row = put(det, el("div", "row"));
+    var copy = put(row, el("button", "btn ghost", t("copy"))); copy.type = "button";
+    copy.addEventListener("click", function () {
+      var done = function () { copy.textContent = t("copied"); setTimeout(function () { copy.textContent = t("copy"); }, 1500); };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(c.prompt).then(done, function () { selectText(pre); });
+      else selectText(pre);
+    });
+    if (c.issue) { var a = put(row, el("a", null, t("issue") + " #" + c.issue)); a.href = REPO + "/issues/" + c.issue; }
+    return add(card, top, el("p", "what", L(c.what)), dl, det);
+  }
+  function selectText(node) { var r = document.createRange(); r.selectNodeContents(node); var s = getSelection(); s.removeAllRanges(); s.addRange(r); }
+
+  function renderEvent(ev) {
+    var w = band(false);
+    var back = put(w, el("a", "back", "< " + t("back"))); back.href = "#";
+    add(w, chip(ev), el("h1", null, L(ev.title)), el("p", "lede", L(ev.when) + " · " + L(ev.lede)));
+
+    // The summary comes first once an event is over: that is what a visitor came back for.
+    if (ev.summary) {
+      var s = band(true);
+      add(s, el("div", "eyebrow lcd", t("made.e")), el("h2", null, t("made.h")));
+      if (ev.summary.text) put(s, el("p", "lede", L(ev.summary.text))).style.marginBottom = "28px";
+      var made = put(s, el("div", "made"));
+      (ev.summary.apps || []).forEach(function (a) {
+        var fig = el("figure"), img = el("img");
+        img.src = "shots/" + ev.id + "/" + a.app + ".png"; img.alt = L(a.name); img.loading = "lazy";
+        var cap = el("figcaption"); add(cap, el("b", null, L(a.name)), document.createTextNode(" · " + t("by") + " "));
+        var who = put(cap, el("a", null, "@" + a.by)); who.href = "https://github.com/" + encodeURIComponent(a.by);
+        made.appendChild(add(fig, img, cap));
+      });
+    }
+
+    if (ev.steps && ev.steps.length) {
+      var h = band(true);
+      add(h, el("div", "eyebrow lcd", t("how.e")), el("h2", null, t("how.h")));
+      var ol = put(h, el("ol", "steps"));
+      ev.steps.forEach(function (st) { add(ol, add(el("li"), el("h3", null, L(st.h)), el("p", null, L(st.p)))); });
+    }
+
+    if (ev.cards && ev.cards.length) {
+      var c = band(false);
+      add(c, el("div", "eyebrow lcd", t("cards.e")), el("h2", null, t("cards.h")));
+      put(c, el("p", "lede", t("cards.p"))).style.margin = "-12px 0 28px";
+      var grid = put(c, el("div", "cards"));
+      ev.cards.forEach(function (card) { grid.appendChild(renderCard(ev, card)); });
+      if (ev.status !== "archived") add(c, el("p", "lede", t("join")));
+    }
+    document.title = L(ev.title) + " · Lo-PDA";
+  }
+
+  function render() {
+    main.textContent = "";
+    var id = decodeURIComponent(location.hash.slice(1)), ev = null;
+    for (var i = 0; i < events.length; i++) if (events[i].id === id) ev = events[i];
+    if (ev) renderEvent(ev); else renderList();
+    document.documentElement.lang = lang;
+    document.getElementById("lang").textContent = lang === "zh" ? "EN" : "中文";
+    var ts = document.querySelectorAll("[data-t]");
+    for (var j = 0; j < ts.length; j++) ts[j].textContent = t(ts[j].getAttribute("data-t"));
+  }
+
+  document.getElementById("lang").addEventListener("click", function () {
+    lang = lang === "zh" ? "en" : "zh";
+    try { localStorage.setItem("lopda-landing-lang", lang); } catch (e) {}
+    render();
+  });
+  addEventListener("hashchange", function () { render(); scrollTo(0, 0); });
+  render();
+})();
+</script>
+</body>
+</html>
