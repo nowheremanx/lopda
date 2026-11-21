@@ -62,6 +62,16 @@ test("lenient check rests an unreadable beat and records it; a non-chord is skip
   assert.ok(r.lost.includes("chord:N.C.>none"));
 });
 
+test("chords on a capo sheet sound with the capo, like the key: G shapes with capo 4 play in B", () => {
+  const out = S.toSong(score([bar(["C", "D"], ["1", "0", "0", "0"]), bar(["Em7", "D/F#"], ["0", "0", "0", "0"])], { key: "G", capo: 4 }));
+  const names = (p) => out.song.patterns[p].notes.chords.map((n) => Song.chordNotes(out.song, n.deg, n.q, n.acc)[0] % 12);
+  assert.equal(out.song.key, 11);
+  assert.deepEqual(plain(names(0)), [4, 6], "C and D shapes sound E and F#");
+  assert.deepEqual(plain(names(1)), [8, 6], "Em7 shape sounds G#m7");
+  const bass = out.song.patterns[1].notes.bass.filter((n) => n.vel > 0).map((n) => Song.noteMidi(out.song, "bass", n.deg, n.acc) % 12);
+  assert.ok(bass.includes(10), "the slash bass F# sounds A#");
+});
+
 test("keyPc accounts for capo and recognizes natural-minor key spelling", () => {
   assert.equal(S.keyPc("G", 4), 11);
   assert.equal(S.keyPc("A", 2), 11);

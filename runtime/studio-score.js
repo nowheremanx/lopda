@@ -124,6 +124,10 @@ function chord(symbol,key){
   rootName=m[1].toUpperCase()+m[2]; rootPc=pitchPc(rootName);
   bassName=m[4]?m[4].charAt(0).toUpperCase()+m[4].slice(1):null;
   bassPc=bassName?pitchPc(bassName):null;
+  /* chord names on a capo sheet are the shapes the hand makes; they sound `capo` semitones higher, like the key does */
+  var shift=plain(key) && int(key.capo) ? key.capo : 0;
+  if(typeof rootPc==="number") rootPc=mod(rootPc+shift,12);
+  if(typeof bassPc==="number") bassPc=mod(bassPc+shift,12);
   if(typeof rootPc!=="number" || (bassName && typeof bassPc!=="number")) return {error:"chord"};
   suffix=m[3]; q=owns(QUALITIES,suffix)?QUALITIES[suffix]:null; lost=null;
   if(!q){
@@ -202,7 +206,7 @@ function toSong(input,now,opts){
   for(i=0;i<score.lost.length;i++) dedupeLost(lost,score.lost[i]);
   var marked=false;
   for(i=0;i<score.bars.length && !marked;i++) for(j=0;j<4;j++) if(/[',]/.test(score.bars[i].beats[j])){ marked=true; break; }
-  songKey=pc; keyObj={pc:pc,name:score.key};
+  songKey=pc; keyObj={pc:pc,name:score.key,capo:score.capo};
   song=LopdaSong.newSong(typeof now==="number"&&isFinite(now)&&now>=0?now:0);
   song.name=Array.from(score.title||"读谱磁带").slice(0,LopdaSong.NAME_MAX).join("");
   song.key=songKey; song.scale=mode; song.bpm=score.bpm===null?80:LopdaSong.clampBpm(score.bpm);
