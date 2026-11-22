@@ -297,6 +297,9 @@ test("props: the bowls, the piles, the flag and the double-size digit font", () 
   assert.equal(A.numberGrid(9).length, 7);
   assert.equal(A.numberGrid(9)[0].length, 5);
   assert.equal(A.numberGrid(24)[0].length, 11);
+  assert.equal(A.numberGrid(123)[0].length, 17);
+  assert.equal(A.numberGrid(9999)[0].length, 23, "four digits and the gaps");
+  assert.equal(A.numberGrid(12345)[0].length, 23, "the grid stops at four digits");
   const seen = new Set();
   for (let n = 1; n <= 31; n++) seen.add(A.numberGrid(n).join("\n"));
   assert.equal(seen.size, 31, "every day 1-31 has its own digits");

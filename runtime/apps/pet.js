@@ -226,6 +226,15 @@ function normalize(save){
     if(typeof save.care==="number" && isFinite(save.care) && save.care>=0 && save.care<=1) save.care=+save.care;
     else delete save.care;
   }
+  /* best scores are optional (an older save has none); a junk number is no record, never a broken round */
+  if(save.best!==undefined){
+    if(!save.best || typeof save.best!=="object" || Array.isArray(save.best)) delete save.best;
+    else ["catch","bounce","climb"].forEach(function(id){
+      var n=save.best[id];
+      if(n===undefined) return;
+      save.best[id]=(typeof n==="number" && isFinite(n) && n>=0) ? Math.floor(n) : 0;
+    });
+  }
   return save;
 }
 function packOf(save){
@@ -839,7 +848,8 @@ function stripFence(text){
 }
 /* One call a day. today.ai is written first, so a reload never asks twice; the answer may arrive while the pet's
    screen is closed (the day's outing is decided in the background too). Anything other than a valid souvenir becomes
-   the built-in one; leaving the screen stops a request that is still running. */
+   the built-in one; leaving or pausing the screen does not stop the day's request, only a restore/reset does (the
+   job's own 30 s timer caps it, and the outing waits for the answer because it is the day's souvenir). */
 function aiAvailable(){
   if(P.restoring || P.nostore || P.readFailed) return false;
   var ai=LP.ai;
@@ -862,7 +872,7 @@ function startAiJob(td){
   if(!td || td.ai || !aiAvailable()) return null;
   td.ai=true;
   saveNow();
-  var job={done:false,result:null,timer:0,stop:null,resolve:null};
+  var job={day:td.day,done:false,result:null,timer:0,stop:null,resolve:null};
   job.promise=new Promise(function(resolve){ job.resolve=resolve; });
   P.aiJob=job;
   var finish=function(result){
@@ -980,13 +990,18 @@ function finishOuting(){
   var o=P.outing; if(!o || o.done) return;
   o.done=true;
   if(o.saved || souvIsEmpty(o.souv)){ markOutingDone(o); return; }
-  addSouvenir(o.souv).then(function(saved){
-    if(saved) markOutingDone(o);
-    else {
-      /* leave the phase in today: the next visit tries the write again */
-      P.outing=null; P.resumeOuting=false; render();
-    }
-  });
+  /* a write already started when the walk began: wait for it rather than write the same day twice */
+  function write(){
+    addSouvenir(o.souv).then(function(saved){
+      if(saved) markOutingDone(o);
+      else {
+        /* leave the phase in today: the next visit tries the write again */
+        P.outing=null; P.resumeOuting=false; render();
+      }
+    });
+  }
+  if(o.write) o.write.then(function(saved){ if(saved) markOutingDone(o); else write(); });
+  else write();
 }
 function stepOuting(){
   if(!P.outing || P.outing.done) return;
@@ -1001,6 +1016,20 @@ function stepOuting(){
     P.outing.saved=false;
     P.aiJob=null;
     persistOuting(); saveSoon(); render();
+    /* The souvenir is written when the walk home starts, not when it ends: leaving during these two seconds
+       keeps the day's find (the walk-back resumes it from today.outSouv). */
+    if(!souvIsEmpty(P.outing.souv)){
+      var out=P.outing;
+      out.write=addSouvenir(out.souv).then(function(saved){
+        if(!saved) return null;
+        if(P.outing===out) out.saved=true;
+        if(P.save && P.save.today && P.save.today.day===out.day) P.save.today.outSouv=saved.id;
+        saveSoon(); render();
+        return saved;
+      });
+      /* the background day waits for this write, so leaving now can never roll a second souvenir for the day */
+      P.outWrite={day:out.day,promise:out.write};
+    }
   } else if(P.outing.phase==="back" && P.outing.left<=0){
     persistOuting();
     finishOuting();
@@ -1013,7 +1042,10 @@ function stepOuting(){
 function decideOuting(hour, day){
   if(P.restoring || P.nostore || P.readFailed) return Promise.resolve(false);
   if(P.outResolving) return P.outResolving;
-  P.outResolving=Promise.resolve().then(function(){
+  /* A walk-back that started on the screen writes the day's souvenir first: decide only after that write,
+     so the two paths cannot both bring one. */
+  var walk=(P.outWrite && P.outWrite.day===day) ? P.outWrite.promise : null;
+  P.outResolving=(walk||Promise.resolve()).then(function(){
     var td=P.save && P.save.today;
     if(!td || td.day!==day || td.out!=null || td.back) return {skip:true};
     /* once per day, before the AI gate or the built-in roll; the guard keeps a reload from moving it again */
@@ -1023,6 +1055,15 @@ function decideOuting(hour, day){
     if(had) return {skip:true, done:markDayWithSouvenir(had,hour,day)};
     td.outHour=hour;
     saveSoon();
+    /* A request started on the screen is still the day's one: leaving the screen no longer aborts it (its own
+       30 s cap ends it), so the background path waits for that answer instead of rolling a second souvenir. */
+    var pending=P.aiJob;
+    if(pending && pending.day===day && (!pending.done || pending.result)){
+      return pending.promise.then(function(entry){
+        if(P.aiJob===pending) P.aiJob=null;
+        return {entry:entry};
+      });
+    }
     if(!td.ai && aiAvailable()){
       if(aiMoodOpen(day)){
         var job=startAiJob(td);
@@ -1052,6 +1093,9 @@ function decideOuting(hour, day){
       if(souvIsEmpty(entry)) return markDayBack(hour,day,null);
       if(!entry) return false;
     }
+    /* the wait above may have let the screen's walk-back write the day's souvenir: never a second one */
+    var again=souvForDay(day);
+    if(again) return markDayWithSouvenir(again,hour,day);
     entry.day=day;
     return addSouvenir(entry).then(function(saved){
       if(!saved){
@@ -1546,6 +1590,7 @@ function startGame(id){
   P.gamePress={left:false,right:false,a:false};
   P.gameLabel="";
   silenceWeather();
+  if(LP.keepAwake) LP.keepAwake(true);
   beep("tap"); renderKeys(); render();
 }
 function startRound(){
@@ -1554,6 +1599,7 @@ function startRound(){
   P.gameHeld={left:false,right:false,a:false};
   P.gamePress={left:false,right:false,a:false};
   P.panelKey="";
+  if(LP.keepAwake) LP.keepAwake(true);
   beep("tap"); renderKeys(); render();
   startGameTimer();
 }
@@ -1587,8 +1633,20 @@ function gameSounds(events){
     else if(e==="land") beep("tick");
   });
 }
+/* The best of a game, 0 when an older save has no best field yet. */
+function bestScore(id){
+  var b=P.save && P.save.best, n=b && typeof b==="object" ? b[id] : 0;
+  return typeof n==="number" && isFinite(n) && n>0 ? Math.floor(n) : 0;
+}
 function applyGameJoy(st){
   if(!P.save || !st) return;
+  var id=st.id || (P.game && P.game.id);
+  var score=Math.max(0,Math.floor(+st.score||0));
+  if(id && score>bestScore(id)){
+    if(!P.save.best || typeof P.save.best!=="object" || Array.isArray(P.save.best)) P.save.best={catch:0,bounce:0,climb:0};
+    P.save.best[id]=score;
+    if(P.game && P.game.id===id) P.game.newBest=true;
+  }
   P.save=Pet.play(P.save,st.joy,dayKey(now()));
   P.action="happy"; P.actionUntil=now()+2500; P.heartUntil=now()+2500;
   beep(st.joy>1?"win":"ok"); saveSoon();
@@ -1596,6 +1654,7 @@ function applyGameJoy(st){
 function stopGameTimer(){ if(P.gameTimer){ clearInterval(P.gameTimer); P.gameTimer=0; } }
 function exitGame(swallowAUp){
   stopGameTimer();
+  if(LP.keepAwake) LP.keepAwake(false);
   P.game=null;
   P.gameHeld={left:false,right:false,a:false};
   P.gamePress={left:false,right:false,a:false};
@@ -2281,7 +2340,7 @@ function panelKey(){
   var s=P.save||{}, st=gameState();
   return [P.sub,P.foodSel,P.boxPage,P.boxAsk?P.boxAsk.id+P.boxAsk.take:"" ,P.menuSel,P.confirmStage,I18N.lang,P.souv.length,P.boxSel,P.boxItem||"",activePick()?activePick().kind:"",
     P.naming?(P.naming.confirm?1:0):-1,
-    P.gameSel,P.game?P.game.id:"",st?st.score:-1,st&&st.done?1:0,P.game&&P.game.applied?1:0,P.game&&P.game.started?1:0,
+    P.gameSel,P.game?P.game.id:"",st?st.score:-1,st&&st.done?1:0,P.game&&P.game.applied?1:0,P.game&&P.game.started?1:0,P.game&&P.game.newBest?1:0,
     P.wordWord,P.wordMeaning,P.wordBusy,
     s.stage,s.name,s.hunger,s.joy,s.opened,s.born,s.close,s.travel,s.light].join("|");
 }
@@ -2342,6 +2401,7 @@ function buildGameStart(panel){
   var g=P.game ? gameById(P.game.id) : null, box=el("div","pet-gbox");
   box.appendChild(el("p","pet-gname",g?tr(g.labelKey):tr("pet.game.title")));
   box.appendChild(el("p","pet-ghow",tr("pet.game.how."+(P.game?P.game.id:"catch"))));
+  box.appendChild(el("p","pet-gbest",tr("pet.game.best",{n:bestScore(P.game?P.game.id:"")})));
   panel.appendChild(box);
 }
 function buildGameOver(panel){
@@ -2360,6 +2420,8 @@ function buildGameOver(panel){
   score.setAttribute("aria-label",tr("pet.game.score",{n:st.score}));
   paintScore(score,st.score);
   box.appendChild(score);
+  box.appendChild(el("p","pet-gbest",tr("pet.game.best",{n:bestScore(P.game?P.game.id:"")})));
+  if(P.game && P.game.newBest) box.appendChild(el("p","pet-gbest",tr("pet.game.newbest")));
   box.appendChild(el("p","pet-gcomment",tr(st.joy>=2?"pet.game.result.fun":"pet.game.result.ok")));
   box.appendChild(el("p","pet-ganykey",tr("pet.game.anykey")));
   panel.appendChild(box);
@@ -2716,7 +2778,8 @@ function leave(){
   P.gamePress={left:false,right:false,a:false};
   P.gameTouch=null;
   P.wordWord=""; P.wordMeaning=null; P.wordBusy=false;
-  stopAiJob();
+  /* the day's AI request is not the screen's: it keeps running to today's answer (its own 30 s cap) */
+  if(LP.keepAwake) LP.keepAwake(false);
   silenceWeather();
   saveNow();
   stopJingle();
@@ -2734,7 +2797,8 @@ function pause(){
   P.holdFired=false; clearHold();
   persistOuting();
   stopTimer(); stopGameTimer(); saveNow();
-  stopAiJob();
+  /* a paused screen keeps the day's AI request: its answer belongs to the outing, not to the view */
+  if(LP.keepAwake) LP.keepAwake(false);
   silenceWeather();
   stopJingle();
 }
@@ -2746,7 +2810,10 @@ function resume(){
     if(P.pausedAt && now()-P.pausedAt>=120000 && naturalAsleep()) putToBed();
     P.pausedAt=0;
     P.wasAsleep=inBedSleep(); maybeNamePrompt(); render(); startTimer(); refreshUsage();
-    if(P.sub==="game" && P.game && P.game.started && !gameDone()) startGameTimer();
+    if(P.sub==="game" && P.game && P.game.started && !gameDone()){
+      startGameTimer();
+      if(LP.keepAwake) LP.keepAwake(true);
+    }
   } else {
     backgroundDay();
   }

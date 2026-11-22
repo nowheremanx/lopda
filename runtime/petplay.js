@@ -568,8 +568,7 @@ function climbTick(s,inp){
     top=np.y;
   }
   s.score=Math.max(s.score,s.height);
-  if(s.pet.y>H+12) finish(s);                           /* fell off the bottom of the screen */
-  if(s.tick>=900) finish(s);                            /* 45 s at most */
+  if(s.pet.y>H+12) finish(s);                           /* fell off the bottom of the screen: the only end */
 }
 function climbDraw(s,buf,w,h,pack,poseFor){
   clear(buf);
