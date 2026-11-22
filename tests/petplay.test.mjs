@@ -167,14 +167,20 @@ const RUN_FRONT = 39;                                  /* PET_X + 23 */
 function runAim(speedPx) { return speedPx * 4 + 10; }
 /* The bot a careful player is: a full jump over a thing on the floor, a quick hop (A for three ticks) when a plane
    is over a low thing, and nothing for a plane alone. It records each new pattern's gap from the last one's right edge. */
-function runBot(g, seed, ticks, policy = "smart") {
+function runBot(g, seed, ticks, policy = "smart", watch = null) {
   const s = g.init(seed), spawned = [], seen = new Set();
   let hold = 0, right = null;
   for (let i = 0; i < ticks && !s.done; i++) {
     const ahead = s.obs.filter((o) => o.x + o.w > 24 && o.kind !== "none").sort((a, b) => a.x - b.x);
     const grounds = ahead.filter((o) => o.kind === "ground"), planes = ahead.filter((o) => o.kind === "plane");
     let pressA = false;
-    if (s.onGround && ahead.length) {
+    if (s.mode !== "run") {
+      /* a stage: beat (or stroke) whenever the body is below the next opening's middle and not already rising */
+      const gate = s.obs.filter((o) => o.kind === "gate" && o.x + o.w > 24).sort((a, b) => a.x - b.x)[0];
+      const target = gate ? (gate.top + gate.bot) / 2 : Play.RUN.FLOOR - 40, body = Play.RUN.FLOOR - 1 - s.h - 8;
+      if (policy !== "naive" && body > target + 2 && s.fv <= 0) pressA = true;
+      if (policy === "naive" && s.tick % 6 === 0) pressA = true;
+    } else if (s.onGround && ahead.length) {
       const sp = s.speedQ / 4;
       if (policy === "naive") {
         if (ahead[0].x - RUN_FRONT <= runAim(sp)) { pressA = true; hold = 20; }
@@ -186,18 +192,19 @@ function runBot(g, seed, ticks, policy = "smart") {
         else if (dist > 0 && dist <= sp * 3 + 6) { pressA = true; hold = 3; }
       }
     }
-    g.step(s, { left: false, right: false, a: hold > 0, press: { left: false, right: false, a: pressA } }, 50);
+    const before = s.mode;
+    g.step(s, { left: false, right: false, a: hold > 0 || pressA, press: { left: false, right: false, a: pressA } }, 50);
     if (hold > 0) hold--;
+    if (watch) watch(s, before, pressA);
     /* a new pattern: one or two things pushed in the same tick; its gap is from the previous pattern's right edge */
     const fresh = s.obs.filter((o) => !seen.has(o));
     const older = s.obs.filter((o) => seen.has(o));
-    right = older.length ? Math.max(...older.map((o) => o.x + o.w)) : right;
+    right = older.length ? Math.max(...older.map((o) => o.x + o.w)) : null;
     if (fresh.length) {
-      const left = Math.min(...fresh.map((o) => o.x)), r2 = Math.max(...fresh.map((o) => o.x + o.w));
-      spawned.push({ gap: right == null ? null : left - right, speedQ: s.speedQ, kinds: fresh.map((o) => o.kind),
+      const left = Math.min(...fresh.map((o) => o.x));
+      spawned.push({ gap: right == null || fresh.some((o) => o.kind === "gate") || s.obs.some((o) => o.kind === "gate" && !fresh.includes(o)) ? null : left - right, speedQ: s.speedQ, kinds: fresh.map((o) => o.kind),
         nuts: fresh.filter((o) => o.nut).map((o) => ({ kind: o.kind, up: Play.RUN.FLOOR - (o.nut.y + 10) })), tick: s.tick });
       for (const o of fresh) seen.add(o);
-      right = r2;
     }
     /* positions move with the world: the right edge is measured again every tick */
     const all = s.obs.filter((o) => seen.has(o));
@@ -228,6 +235,7 @@ test("run: the speed ramps from 16 to 32 by 100-tick steps", () => {
   const inp = { left: false, right: false, a: false, press: {} };
   const seen = [];
   for (let i = 0; i < 1700; i++) {
+    s.stageAt = Infinity;              /* the room only: a stage caps the speed */
     g.step(s, inp, 50);
     seen.push(s.speedQ);
     s.obs.length = 0;                  /* this test is about the clock, not the things in the way */
@@ -320,6 +328,7 @@ test("run: patterns keep a landing gap, never below minGap(speed); planes from 1
       }
       if (sp.tick < Play.RUN.LEVEL_TICKS) assert.ok(!sp.kinds.includes("plane"), "no plane in the first ten seconds");
       if (sp.tick < 2 * Play.RUN.LEVEL_TICKS) assert.ok(!(sp.kinds.includes("ground") && sp.kinds.includes("plane")), "no plane over a thing before 20 s");
+      if (sp.kinds.includes("gate")) continue;          /* a stage's nuts sit in its openings */
       for (const n of sp.nuts) {
         /* a nut is its own thing, never carried by a plane: low where a plane will pass over it, else high */
         assert.equal(n.kind, "none", "a nut is not attached to anything");
@@ -645,4 +654,41 @@ test("climb: the scenery changes with height - wall, roof, sky, stars - in backg
     return Array.from(buf).join("");
   });
   assert.equal(new Set(pics).size, 4, "each band looks different");
+});
+
+test("run: stages - out of the window into the sky, then into the pond, in turn; A beats or strokes; the room comes back", () => {
+  const g = game("run"), R = Play.RUN;
+  assert.ok(R.STAGE_FIRST >= 2000, "the first stage comes after a proper run");
+  let sawFly = 0, sawSwim = 0, back = 0;
+  for (let seed = 1; seed <= 30; seed++) {
+    const r = runBot(g, seed, 4000);
+    assert.equal(r.state.done, false, `seed ${seed}: a careful player gets through every stage`);
+    assert.ok(r.state.stageN >= 2, `seed ${seed}: at least a sky and a pond in 4000 ticks (${r.state.stageN})`);
+  }
+  /* the order and the rules, step by step on one seed */
+  let gates = [], lastMid = null;
+  runBot(g, 5, 4000, "smart", (s, before, press) => {
+    if (before === "run" && s.mode !== "run") {
+      if (s.mode === "fly") sawFly++; else sawSwim++;
+      assert.equal(s.mode, (sawFly + sawSwim) % 2 ? "fly" : "swim", "sky first, then the pond, in turn");
+      assert.ok(s.events.includes(s.mode));
+      gates = []; lastMid = null;
+    }
+    if (before !== "run" && s.mode !== "run") {
+      assert.ok(s.speedQ <= R.STAGE_SPEED, "a stage is at most 5 px a tick");
+      if (press) assert.ok(s.events.includes("flap") && !s.events.includes("jump"), "A beats, it does not jump");
+      for (const o of s.obs) if (o.kind === "gate" && !gates.includes(o)) {
+        gates.push(o);
+        const gh = o.bot - o.top, mid = (o.top + o.bot) / 2;
+        assert.ok(gh >= R.GAP_MIN && gh <= R.GAP_START, `the opening is ${gh} px`);
+        if (lastMid != null) assert.ok(Math.abs(mid - lastMid) <= R.STAGE[o.scene].move + 1, `the opening moved ${mid - lastMid} px`);
+        lastMid = mid;
+      }
+    }
+    if (before !== "run" && s.mode === "run") {
+      back++;
+      assert.equal(gates.length, R.STAGE_GATES, "every stage has its gates");
+    }
+  });
+  assert.ok(sawFly >= 1 && sawSwim >= 1 && back >= 2, `sky ${sawFly}, pond ${sawSwim}, back in the room ${back}`);
 });
