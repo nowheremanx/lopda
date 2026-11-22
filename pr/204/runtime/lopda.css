@@ -805,6 +805,7 @@ textarea::placeholder{color:var(--ink-2)}
 .pet-gbox{display:flex;flex-direction:column;align-items:center;gap:5px;border:2px solid var(--ink);padding:10px 16px;min-width:200px;max-width:290px;box-sizing:border-box;background:var(--lcd);box-shadow:0 0 0 2px var(--lcd),0 0 0 4px var(--ink)}
 .pet-gname{margin:0;font-family:var(--f-lcd);font-size:19px;font-weight:600;line-height:1.1}
 .pet-ghow{margin:0;font-size:13px;line-height:1.3;color:var(--ink-2)}
+.pet-gbest{margin:0;font-size:11px;line-height:1.2;color:var(--ink-2)}
 .pet-gface{display:block;width:56px;height:56px;image-rendering:pixelated;image-rendering:crisp-edges}
 .pet-gscorelabel{margin:0;font-size:11px;letter-spacing:2px;color:var(--ink-2)}
 .pet-gscore{display:block;image-rendering:pixelated;image-rendering:crisp-edges}
