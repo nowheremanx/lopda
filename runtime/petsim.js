@@ -256,7 +256,13 @@ function catchUp(save,now,ctx){
   var s=clone(save), events=[], tz=num(ctx && ctx.tz);
   if(!s) return {save:s, events:events};
   now=num(now);
-  if(now<s.last) return {save:s, events:events};            /* a clock set back is no time at all */
+  if(now<s.last){
+    /* the clock was set back: no time passes, but last follows it, or every later check is an absence of hours.
+       the day is rolled again so the day's counters are the new clock's */
+    s.last=now;
+    rollToday(s,tz);
+    return {save:s, events:events};
+  }
   if(now===s.last){ rollToday(s,tz); return {save:s, events:events}; }
   var sp=speciesOf(s), gap=now-s.last;
   if(gap>=3*DAY){
@@ -328,6 +334,7 @@ function openDay(save,key,counts){
   var sp=speciesOf(s);
   if(!s.today || s.today.day!==key) s.today=blankToday(key, s.today && s.today.shown);
   if(s.lastDay===key) return s;
+  if(s.lastDay && key<s.lastDay) return s;    /* keys sort as text: a clock set back is not a growth day */
   s.lastDay=key;
   s.close=(s.close||0)+1;
   if(s.stage!=="egg"){

@@ -5246,6 +5246,60 @@ test("pet: START opens the menu, B closes it, and 状态 / 纪念品箱 open fro
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
+test("pet: travel - the START mail row is disabled while it is away and A does nothing", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN", serviceWorkers: "block", viewport: { width: 375, height: 667 } });
+  await p.clock.install({ time: new Date(2026, 9, 11, 9, 0) });
+  await p.goto(base + "/runtime/?debug", { waitUntil: "networkidle" });
+  await p.waitForFunction(() => document.getElementById("savestate").textContent !== "启动中…");
+  const key = async (...bs) => { for (const b of bs) { await p.evaluate((b) => { LOPDA_DEBUG.setButton(b, true); LOPDA_DEBUG.setButton(b, false); }, b); await p.waitForTimeout(100); } };
+  const openPet = async () => {
+    await p.locator("#home .app", { hasText: "宠物" }).click();
+    await p.locator("#v-pet:not([hidden])").waitFor();
+    await p.waitForTimeout(150);
+  };
+  await openPet();
+  await p.waitForFunction(() => window.LOPDA_DEBUG.pet && LOPDA_DEBUG.pet.save());
+  await p.evaluate(() => LOPDA_DEBUG.pet.hatch());
+  await p.waitForTimeout(120);
+
+  /* a pick at home: the mail row is live and names it */
+  await p.evaluate(() => LOPDA_DEBUG.pet.forcePick("word"));
+  await p.locator("#pet-keys .sk-start").click();
+  await p.waitForSelector("#pet-panel:not([hidden])");
+  let mail = p.locator("#pet-panel .pet-menu").nth(0);
+  assert.equal(await mail.isDisabled(), false, "mail is open when the pet is home with a pick");
+  assert.match(await mail.innerText(), /单词/);
+  await key("b");
+  assert.ok(await p.isHidden("#pet-panel"));
+
+  /* 80 hours away: it is travelling, so the row says 今天没有 and A does nothing */
+  assert.equal(await p.evaluate(() => LOPDA_DEBUG.pet.advance(80).travel), true);
+  await p.click("#home-key");
+  await openPet();
+  assert.ok(await p.locator("#pet-away").isVisible(), "the room is empty and the sign is up");
+  assert.equal((await p.evaluate(() => LOPDA_DEBUG.pet.save())).today.pick, null, "a pick is not made while it is away");
+  await p.locator("#pet-keys .sk-start").click();
+  await p.waitForSelector("#pet-panel:not([hidden])");
+  mail = p.locator("#pet-panel .pet-menu").nth(0);
+  assert.equal(await mail.isDisabled(), true, "the mail row is disabled while it travels");
+  assert.match(await mail.innerText(), /今天没有/);
+  await key("a");
+  assert.equal(await p.evaluate(() => LOPDA_DEBUG.pet.save().travel), true, "A uses no mail and does not bring it home");
+  assert.ok(await p.locator("#pet-panel").isVisible(), "the menu stays open on the refused press");
+  await key("b");
+
+  /* home again with a fresh pick: the same row is live */
+  await key("a");                                              /* the call brings it back with its postcard */
+  await p.waitForFunction(() => LOPDA_DEBUG.pet.save().travel === false);
+  await p.evaluate(() => LOPDA_DEBUG.pet.forcePick("word"));
+  await p.locator("#pet-keys .sk-start").click();
+  await p.waitForSelector("#pet-panel:not([hidden])");
+  mail = p.locator("#pet-panel .pet-menu").nth(0);
+  assert.equal(await mail.isDisabled(), false, "mail is open again once it is home");
+  assert.match(await mail.innerText(), /单词/);
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
 test("pet: games - the play list opens each pack, the canvas moves at 20 fps, B returns, a finished round raises joy", { skip, timeout: 90000 }, async (t) => {
   const { p, errors } = await page(t, { ...pw.devices["iPhone 13"], locale: "zh-CN", serviceWorkers: "block" });
   await p.clock.install({ time: new Date(2026, 9, 11, 9, 0) });

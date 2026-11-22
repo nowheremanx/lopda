@@ -490,7 +490,8 @@ function cleanPick(o){
 /* The film box is the one asynchronous summary; the others are in memory. The decision waits for all of them. */
 function buildPick(){
   var save=P.save;
-  if(!save || save.stage==="egg") return;
+  /* away on the long absence: it is not home to find anything, and the return day brings its postcard instead */
+  if(!save || save.stage==="egg" || save.travel) return;
   var td=save.today;
   if(!td) return;
   if(td.picked) return;
@@ -1295,6 +1296,7 @@ function finishTaskOnLeave(){
   } else {
     P.awakeLeft=0; P.at=useSpotAt("sleep","sleep");
   }
+  P.feeds=[];                                    /* a meal queued during a night wake is not eaten later on its own */
   P.task=null; P.action=""; P.actionUntil=0; P.puffUntil=0; P.lightReturn=false;
 }
 /* One flash per real change of need. While the pet is asleep nothing flashes or sounds; the need is kept and
@@ -1724,14 +1726,19 @@ function setShelf(id){
   var old=s.shelf||null, next=id||null;
   if(old===next){ P.boxAsk=null; P.panelKey=""; renderKeys(); render(); return; }
   function finish(){
-    s.shelf=next;
+    var cur=P.save;                    /* a care action may have cloned the save while the souvenir was written */
+    if(!cur) return;
+    cur.shelf=next;
     shelfGainJoy();
     if(next){ P.action="happy"; P.actionUntil=now()+2500; P.idle=null; }
     P.boxAsk=null; P.panelKey="";
     beep("ok"); saveSoon(); renderKeys(); render();
   }
   function putNew(){
-    shelfPut(next?findSouv(next):null,function(){ finish(); });
+    shelfPut(next?findSouv(next):null,function(ok){
+      if(!ok){ P.boxAsk=null; P.panelKey=""; beep("err"); renderKeys(); render(); return; }
+      finish();
+    });
   }
   if(old){
     shelfTake(findSouv(old),function(ok){
@@ -1861,8 +1868,10 @@ var PICK_NAME={date:"pet.pick.date",word:"pet.pick.word",book:"pet.pick.book",fi
 function menuItems(){
   var pick=activePick();
   if(pick && !PICK_NAME[pick.kind]) pick=null;      /* an old kind with no program is not offered */
+  /* while it is away or out there is nobody home to read the mail */
+  var can=!!pick && !(P.save && P.save.travel) && !P.outing;
   return [
-    {id:"mail", enabled:!!pick, label:tr(pick?PICK_NAME[pick.kind]:"pet.menu.none")},
+    {id:"mail", enabled:can, label:tr(can?PICK_NAME[pick.kind]:"pet.menu.none")},
     {id:"look", enabled:true},
     {id:"box", enabled:true}
   ];
@@ -1883,7 +1892,7 @@ function chooseMenuItem(i){
 /* ---------- the day's pick: its own program, or the word card ---------- */
 function usePick(){
   var pick=activePick();
-  if(P.sub || !pick || !P.save || P.save.travel || P.outing || P.save.stage==="egg") return;
+  if(P.sub || !pick || !P.save || P.save.travel || P.outing || P.save.stage==="egg"){ beep("err"); return; }
   if(pick.kind==="date"){
     if(typeof pick.day!=="number" || !LP.calendar || typeof LP.calendar.open!=="function") return;
     finishPick();
@@ -2337,6 +2346,8 @@ function boxes(n){
   return wrap;
 }
 function panelKey(){
+  /* the naming panel's field must survive every other change: rebuilding it mid-typing closes the phone's keyboard */
+  if(P.sub==="name") return ["name",P.naming&&P.naming.confirm?1:0,I18N.lang].join("|");
   var s=P.save||{}, st=gameState();
   return [P.sub,P.foodSel,P.boxPage,P.boxAsk?P.boxAsk.id+P.boxAsk.take:"" ,P.menuSel,P.confirmStage,I18N.lang,P.souv.length,P.boxSel,P.boxItem||"",activePick()?activePick().kind:"",
     P.naming?(P.naming.confirm?1:0):-1,
@@ -2973,6 +2984,9 @@ function clockHome(){
   if(!s || s.stage==="egg") return;
   var key=dayKey(now()), td=s.today||{}, need=false;
   if(td.day!==key) need=true;
+  /* one hour of the background day is a real step of hunger and mess: without it the tile keeps its old face for as
+     long as the home screen sits there */
+  if(!need && typeof s.last==="number" && now()-s.last>=HOUR) need=true;
   if(!need && !P.outing && !td.back && td.out==null){
     var o=Pet.outingToday(s,key);
     if(o && hourNow()>=o.hour) need=true;
