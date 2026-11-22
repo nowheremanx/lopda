@@ -121,21 +121,50 @@ function renderSaves(){
   });
 }
 
-/* ---------- the AI line (runtime/ai.js, decisions.md section 34) ----------
-   The user's OpenRouter key and model in one document of their own. The key never leaves this phone except in the
-   request itself: it is kept out of the backup, and a restore leaves the one already here. Settings shows its last
-   four characters only. LP.ai is what other programs use (apps/scripts.js): on(), ask(o), watch(fn). */
-var AIP="data/users/local/ai", AI={key:"", model:"", scoreModel:"", seen:[]};
+/* ---------- the AI lines (runtime/ai.js, runtime/ailines.js, decisions.md sections 34 and 61) ----------
+   The user's keys, one line per key, like a phone's SIM cards, in one document of their own. A key never leaves this
+   phone except in a request to its own provider: the document is kept out of the backup, and a restore leaves the one
+   already here. Settings shows the last four characters only. LP.ai is what other programs use: on(use), ask(o),
+   line(use), err(e, use), watch(fn); `use` is "scripts", "studio", "score" or "pet".
+   Data safety: nothing is written to the document before it has been read. A read that fails (readFailed) or a document
+   from a newer Lo-PDA (newer) blocks every write until a later read succeeds, so one new line can never erase the others. */
+var AIP="data/users/local/ai", AL=window.LopdaAiLines, PROV=window.LopdaAI.PROVIDERS;
+var AI={st:AL.load(null), loaded:false, readFailed:false, seen:[], lastTimer:0};
 var SCORE_MODELS_CACHE=null, scoreModelPageOpen=false, scoreModelRows=[], scoreModelFocus=0, scoreModelSeq=0;
 /* A saved key shows as dots in its field (a password field shows any value as dots): this stand-in, never the key itself.
    Tapping the field empties it for a new key; leaving it empty puts the dots back. */
 var KEPT="lopda-key-kept!!";
 var AIH=window.LopdaAI.host({fetch:function(u,o){ return fetch(u,o); }});
 function aiChanged(){ renderAi(); AI.seen.forEach(function(f){ try{ f(); }catch(e){} }); }
-function aiErr(e){ return tr("ai.err."+(e && e.code || "http")); }
-function scoreModelId(){ return AI.scoreModel || SCORE_PAGES.DEFAULT_MODEL; }
+function aiLang(){ return I18N.lang==="en" ? "en" : "zh"; }
+function lineName(l){ return AL.name(l,PROV,aiLang()); }
+function aiErr(e,use){
+  var l=AL.pick(AI.st,use||"",PROV), p=l && window.LopdaAI.provider(l.provider);
+  return tr("ai.err."+(e && e.code || "http"),{line:l ? lineName(l) : "AI", site:p ? p.site : ""});
+}
+/* may the document be written now? Only after a good read of a document this runtime understands. */
+function aiWritable(){ return !!(S.db && AI.loaded && !AI.readFailed && !AI.st.newer); }
+function saveAiDoc(){ if(!aiWritable()) return false; put(S.db.doc(AIP),AL.toDoc(AI.st)); return true; }
+/* (re)read the document; on success the state is replaced by what is stored, on failure every write stays blocked */
+function readAi(){
+  if(!S.db) return Promise.resolve();
+  return S.db.doc(AIP).get().then(function(sn){
+    AI.st=AL.load(sn.exists ? LP.own(sn.data()) : null);
+    AI.loaded=true; AI.readFailed=false;
+    aiChanged();
+  },function(e){
+    if(window.console) console.error("Lo-PDA: the AI lines could not be read", e);
+    AI.readFailed=true; aiChanged();
+  });
+}
+/* the result of the last real request on a line, for the line's status row: one write, a second after the last answer */
+function noteLast(id,last){
+  if(!aiWritable() || !AL.setLast(AI.st,id,last)) return;
+  clearTimeout(AI.lastTimer);
+  AI.lastTimer=setTimeout(function(){ saveAiDoc(); renderAi(); },1000);
+}
+function scoreModelId(){ var u=AI.st.use.score; return u && u.model || SCORE_PAGES.DEFAULT_MODEL; }
 function scoreModelLabel(){ return scoreModelId()===SCORE_PAGES.DEFAULT_MODEL ? tr("ai.score.default") : scoreModelId(); }
-function saveAiDoc(){ if(S.db) put(S.db.doc(AIP),{v:1, key:AI.key, model:AI.model, scoreModel:AI.scoreModel}); }
 function cleanScoreModels(list){ return SCORE_PAGES.cleanModels(list); }
 function savedScoreModels(data){
   if(!data || typeof data.at!=="number" || !Array.isArray(data.list)) return null;
@@ -221,7 +250,8 @@ function resetScoreModelPage(){
   $("set-ai-model-page").hidden=true; $("set-ai-main").hidden=false;
 }
 function chooseScoreModel(id){
-  AI.scoreModel=id===SCORE_PAGES.DEFAULT_MODEL ? "" : id;
+  if(!aiWritable()){ closeScoreModelPage(); renderAi(); sfx("err"); return; }
+  AL.setScoreModel(AI.st,id===SCORE_PAGES.DEFAULT_MODEL ? "" : id);
   saveAiDoc();
   $("set-ai-score-model-value").textContent=scoreModelLabel();
   closeScoreModelPage(); sfx("ok");
@@ -242,57 +272,86 @@ document.addEventListener("keydown",function(e){
   } else return;
   if(items.length){ e.preventDefault(); scoreModelFocusPaint(); }
 });
+/* Until the settings page for several lines (part 3), this page edits the first OpenRouter line. */
+function pageLine(){ for(var i=0;i<AI.st.lines.length;i++) if(AI.st.lines[i].provider==="openrouter") return AI.st.lines[i]; return null; }
 /* the row in Settings says whether the line is up; the page behind it (v-set-ai) holds the two labelled fields */
 function renderAi(msg){
-  var on=!!AI.key;
-  $("set-ai-open").textContent=tr(on ? "ai.row.on" : "ai.row.off");
-  $("set-ai-state").textContent=msg || (on ? tr("ai.on",{key:AI.key.slice(-4), model:AI.model || window.LopdaAI.MODEL}) : tr("ai.off"));
-  $("set-ai-key").placeholder=on ? tr("ai.key.saved",{key:AI.key.slice(-4)}) : tr("ai.key.ph");
+  var l=pageLine(), on=!!(l && l.key), bad=AI.readFailed ? "ai.readfail" : AI.st.newer ? "ai.newer" : "";
+  $("set-ai-open").textContent=bad ? tr(bad) : tr(AL.pick(AI.st,"",PROV) ? "ai.row.on" : "ai.row.off");
+  $("set-ai-state").textContent=msg || (bad ? tr(bad) : on ? tr("ai.on",{key:l.key.slice(-4), model:l.model || window.LopdaAI.MODEL}) : tr("ai.off"));
+  $("set-ai-key").placeholder=on ? tr("ai.key.saved",{key:l.key.slice(-4)}) : tr("ai.key.ph");
   if(document.activeElement!==$("set-ai-key")) $("set-ai-key").value=on ? KEPT : "";
   $("set-ai-test").hidden=!on; $("set-ai-del").hidden=!on;
-  if(document.activeElement!==$("set-ai-model")) $("set-ai-model").value=AI.model;
+  if(document.activeElement!==$("set-ai-model")) $("set-ai-model").value=l ? l.model : "";
   $("set-ai-score-model-value").textContent=scoreModelLabel();
 }
-$("set-ai-row").onclick=function(){ sfx("tap"); show("set-ai"); };
+/* a read that failed is tried again whenever the page opens */
+$("set-ai-row").onclick=function(){ sfx("tap"); show("set-ai"); if(AI.readFailed) readAi(); };
 $("set-ai-back").onclick=function(){ resetScoreModelPage(); sfx("tap"); openSettings(); };
 function saveAi(){
-  var v=$("set-ai-key").value.trim(), key=v===KEPT ? "" : v, model=$("set-ai-model").value.trim();
-  if(!AI.key && !key){ renderAi(tr("ai.nokey")); sfx("err"); return; }
-  if(key) AI.key=key;
-  AI.model=model;
+  var v=$("set-ai-key").value.trim(), key=v===KEPT ? "" : v, model=$("set-ai-model").value.trim(), l=pageLine();
+  if(!aiWritable()){ renderAi(); sfx("err"); return; }
+  if(!(l && l.key) && !key){ renderAi(tr("ai.nokey")); sfx("err"); return; }
+  if(l) AL.edit(AI.st,l.id,key,model); else AL.add(AI.st,"openrouter",key,model,Date.now());
   saveAiDoc();
   $("set-ai-key").blur();
   aiChanged(); sfx("ok");
 }
 $("set-ai-save").onclick=saveAi;
 $("set-ai-key").addEventListener("focus",function(){ if(this.value===KEPT) this.value=""; });
-$("set-ai-key").addEventListener("blur",function(){ if(!this.value && AI.key) this.value=KEPT; });
+$("set-ai-key").addEventListener("blur",function(){ var l=pageLine(); if(!this.value && l && l.key) this.value=KEPT; });
 $("set-ai-del").onclick=function(){
-  AI.key=""; AI.model=""; $("set-ai-model").value="";
-  /* Removing the key clears the AI document unless a score-model choice still needs it. */
-  if(S.db){
-    if(AI.scoreModel) S.db.doc(AIP).set({v:1, key:"", model:"", scoreModel:AI.scoreModel}).catch(function(){});
-    else S.db.doc(AIP).delete().catch(function(){});
-  }
+  var l=pageLine();
+  if(!aiWritable()){ renderAi(); sfx("err"); return; }
+  /* deleting a line removes its key; Tape4's score-model choice stays */
+  if(l) AL.remove(AI.st,l.id);
+  $("set-ai-model").value="";
+  saveAiDoc();
   aiChanged(); sfx("ok");
 };
 $("set-ai-test").onclick=function(){
-  var b=this; if(b.disabled) return;
+  var b=this, l=pageLine(); if(b.disabled || !l) return;
   b.disabled=true; renderAi(tr("ai.testing")); sfx("tap");
   var used="";
-  LP.ai.ask({messages:[{role:"user", content:"Reply with the single word OK."}], max:16, onModel:function(m){ used=m; }}).then(function(t){
-    renderAi(tr("ai.tested",{text:t.trim().slice(0,40), model:used || AI.model || window.LopdaAI.MODEL})); sfx("ok");
+  askLine(l,{messages:[{role:"user", content:"Reply with the single word OK."}], max:16, onModel:function(m){ used=m; }},l.model).then(function(t){
+    renderAi(tr("ai.tested",{text:t.trim().slice(0,40), model:used || l.model || window.LopdaAI.MODEL})); sfx("ok");
   },function(e){ renderAi(aiErr(e)); sfx("err"); }).then(function(){ b.disabled=false; });
 };
+/* one request down one line: the key goes only to that line's own provider (ai.js looks the address up in its table) */
+function askLine(l,o,model){
+  var q={}, k;
+  for(k in o) if(k!=="use" && k!=="key" && k!=="provider" && k!=="url") q[k]=o[k];
+  q.provider=l.provider; q.key=l.key; q.model=o.model || model;
+  var p=AIH.ask(q), id=l.id;
+  p.then(function(){ noteLast(id,{ok:true, at:Date.now()}); },function(e){
+    var c=e && e.code;
+    if(c && c!=="stopped" && c!=="nokey") noteLast(id,{ok:false, code:c, at:Date.now()});
+  });
+  return p;
+}
 LP.ai={
   PATH:AIP,
-  on:function(){ return !!AI.key; },
-  /* o: {messages, max, onText, onModel, model}; the key and default model are added here */
-  ask:function(o){ var q={}; for(var k in o) q[k]=o[k]; q.key=AI.key; q.model=o.model || AI.model; return AIH.ask(q); },
-  scoreModel:function(){ return scoreModelId(); },
+  /* is there a line this program can use? ("score" needs one that can see) */
+  on:function(use){ return !!AL.pick(AI.st,use||"",PROV); },
+  /* o: {use, messages, max, onText, onModel, onSignal, model}; the line, its key, provider and model are added here */
+  ask:function(o){
+    var use=o && o.use || "", l=AL.pick(AI.st,use,PROV);
+    if(!l) return AIH.ask({key:"", messages:[]});
+    return askLine(l,o,AL.modelFor(AI.st,use,l,PROV,SCORE_PAGES.DEFAULT_MODEL));
+  },
+  /* the line a program would use, for its status line and messages: never the key */
+  line:function(use){
+    var l=AL.pick(AI.st,use||"",PROV), p=l && window.LopdaAI.provider(l.provider);
+    return l ? {id:l.id, name:lineName(l), provider:l.provider, vision:!!(p && p.vision)} : null;
+  },
+  /* the model Tape4's score reading would use */
+  scoreModel:function(){ var l=AL.pick(AI.st,"score",PROV); return l ? AL.modelFor(AI.st,"score",l,PROV,SCORE_PAGES.DEFAULT_MODEL) : scoreModelId(); },
   err:aiErr,
   watch:function(f){ AI.seen.push(f); },
-  saved:function(){ return AI.key || AI.scoreModel ? {v:1, key:AI.key, model:AI.model, scoreModel:AI.scoreModel} : null; }
+  /* the whole document as it should be stored, or null when there is nothing in it */
+  saved:function(){ return AI.loaded && (AI.st.lines.length || Object.keys(AI.st.use).length) ? AL.toDoc(AI.st) : null; },
+  /* for the tests */
+  _test:{state:function(){ return {st:AI.st, loaded:AI.loaded, readFailed:AI.readFailed}; }, reread:readAi}
 };
 
 /* ---------- the darkroom key (runtime/geotag.js, decisions.md section 40) ----------
@@ -534,11 +593,13 @@ function doRestore(bk){
   box(tr("rs.working"));
   /* the AI key is never in a backup: the one on this phone stays, whatever the file holds. The darkroom key does go
      in (without it a restored phone could not read its own photos' places), and a restore only ever adds keys. */
-  S.db.doc(DKP).get().then(function(sn){
-    var mineDark=sn.exists ? LP.own(sn.data()) : null, theirsDark=null, i;
+  /* the AI document is read again here and written back exactly as stored, whatever its version: a restore must never
+     lose a key, not even after an earlier read failed or when a newer Lo-PDA wrote it. If it cannot be read, no restore. */
+  Promise.all([S.db.doc(DKP).get(),S.db.doc(AIP).get()]).then(function(r){
+    var sn=r[0], mineDark=sn.exists ? LP.own(sn.data()) : null, theirsDark=null, i;
     for(i=0;i<bk.docs.length;i++) if(bk.docs[i].path===DKP) theirsDark=bk.docs[i].data;
     var dark=G.mergeRing(mineDark,theirsDark);
-    var mine=LP.ai.saved(), docs=bk.docs.filter(function(x){ return x.path!==AIP && x.path!==DKP; });
+    var mine=r[1].exists ? LP.own(r[1].data()) : null, docs=bk.docs.filter(function(x){ return x.path!==AIP && x.path!==DKP; });
     if(mine) docs.push({path:AIP, data:mine});
     if(dark) docs.push({path:DKP, data:dark});
     /* programs stop their own writes before anything is replaced; the page reloads straight after a successful restore */
@@ -646,14 +707,7 @@ LP.builtin({id:"settings", label:"app.settings", icon:"settings", view:"settings
   open:function(){ openSettings(); },
   lang:function(){ renderSettings(); renderSense(); renderAi(); renderLast(); renderSavesRow(); },
   ready:function(){
-    S.db.doc(AIP).get().then(function(sn){
-      var d=sn.exists ? LP.own(sn.data()) : null;
-      if(d){
-        AI.scoreModel=typeof d.scoreModel==="string" ? d.scoreModel : "";
-        if(typeof d.key==="string" && d.key){ AI.key=d.key; AI.model=typeof d.model==="string" ? d.model : ""; }
-        aiChanged();
-      }
-    }).catch(function(){});
+    readAi();
     S.db.doc(BMETA).get().then(function(sn){ var d=sn.exists ? LP.own(sn.data()) : null; BS.last=d && +d.last || 0; renderLast(); }).catch(function(){});
   }});
 })();

@@ -9732,6 +9732,169 @@ test("AI line: a key in Settings turns 复制 into 生成, the code streams into
   assert.deepEqual(errors, []);
 });
 
+/* ---- AI lines (decisions.md section 61): the data must never lose a key ---- */
+const AIDOC = "data/users/local/ai";
+const TWO_LINES = { v: 2, next: 3, def: "l1", use: { score: { line: "l2", model: "" } },
+  lines: [{ id: "l1", provider: "deepseek", n: 1, key: "sk-deep-1111", model: "", on: true, added: 1 },
+    { id: "l2", provider: "openrouter", n: 1, key: "sk-or-2222", model: "", on: true, added: 2 }],
+  key: "sk-or-2222", model: "", scoreModel: "" };
+const AI_CORS = { "access-control-allow-origin": "*", "access-control-allow-headers": "authorization, content-type", "access-control-allow-methods": "POST" };
+/* every provider's address answers "OK" and records who was asked with which key */
+async function fakeProviders(p) {
+  const asked = [];
+  for (const host of ["https://openrouter.ai/api/**", "https://api.deepseek.com/**", "https://api.moonshot.cn/**", "https://dashscope.aliyuncs.com/**", "https://api.siliconflow.cn/**"]) {
+    await p.route(host, async (r) => {
+      if (r.request().method() === "OPTIONS") return r.fulfill({ status: 204, headers: AI_CORS });
+      asked.push({ url: r.request().url(), auth: r.request().headers().authorization, body: JSON.parse(r.request().postData() || "{}") });
+      await r.fulfill({ status: 200, headers: { ...AI_CORS, "content-type": "text/event-stream" },
+        body: "data: " + JSON.stringify({ model: "m", choices: [{ delta: { content: "OK" } }] }) + "\n\ndata: [DONE]\n\n" });
+    });
+  }
+  return asked;
+}
+async function aiDoc(p) { return p.evaluate((path) => LopdaPlatform.db.doc(path).get().then((s) => (s.exists ? s.data() : null)), AIDOC); }
+async function bootWithAi(p, doc) {
+  await p.goto(base + "/runtime/", { waitUntil: "load" });
+  await p.waitForFunction(() => window.LP && LP.ai);
+  await p.evaluate(([path, d]) => LopdaPlatform.db.doc(path).set(d), [AIDOC, doc]);
+  await p.reload({ waitUntil: "load" });
+  await p.waitForFunction(() => window.LP && LP.ai && LP.ai._test.state().loaded);
+}
+
+test("AI line: an old single OpenRouter key becomes the first line after the upgrade, and still works", { skip, timeout: 45000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN" });
+  const asked = await fakeProviders(p);
+  await bootWithAi(p, { v: 1, key: "sk-or-old-9876", model: "a/b", scoreModel: "x/see" });
+  assert.equal(await p.evaluate(() => LP.ai.on("scripts")), true);
+  assert.deepEqual(await p.evaluate(() => LP.ai.line("scripts")), { id: "l1", name: "OpenRouter", provider: "openrouter", vision: true });
+  /* reading writes nothing: the v1 document is still exactly as it was */
+  assert.deepEqual(await aiDoc(p), { v: 1, key: "sk-or-old-9876", model: "a/b", scoreModel: "x/see" });
+  assert.equal(await p.evaluate(() => LP.ai.ask({ use: "scripts", messages: [{ role: "user", content: "hi" }] })), "OK");
+  assert.equal(asked[0].url, "https://openrouter.ai/api/v1/chat/completions");
+  assert.equal(asked[0].auth, "Bearer sk-or-old-9876");
+  assert.equal(asked[0].body.model, "a/b");
+  assert.equal(await p.evaluate(() => LP.ai.scoreModel()), "x/see");
+  /* the first write (the line's status, a second later) is v2 with the key kept and mirrored */
+  await p.evaluate(async (path) => { while ((await LopdaPlatform.db.doc(path).get()).data().v !== 2) await new Promise((r) => setTimeout(r, 50)); }, AIDOC);
+  const d = await aiDoc(p);
+  assert.equal(d.lines.length, 1);
+  assert.equal(d.lines[0].key, "sk-or-old-9876");
+  assert.equal(d.lines[0].last.ok, true);
+  assert.deepEqual([d.key, d.model, d.scoreModel, d.def, d.next], ["sk-or-old-9876", "a/b", "x/see", "l1", 2]);
+  assert.deepEqual(d.use, { score: { line: "l1", model: "x/see" } });
+  /* booting again reads the v2 document to the same state */
+  await p.reload({ waitUntil: "load" });
+  await p.waitForFunction(() => window.LP && LP.ai && LP.ai._test.state().loaded);
+  assert.deepEqual(await p.evaluate(() => LP.ai.line("pet")), { id: "l1", name: "OpenRouter", provider: "openrouter", vision: true });
+  assert.deepEqual(errors, []);
+});
+
+test("AI line: each key goes only to its own provider: scripts down DeepSeek, the score reading down OpenRouter", { skip, timeout: 45000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN" });
+  const asked = await fakeProviders(p);
+  await bootWithAi(p, TWO_LINES);
+  await p.evaluate(() => LP.ai.ask({ use: "scripts", messages: [{ role: "user", content: "a" }] }));
+  await p.evaluate(() => LP.ai.ask({ use: "score", messages: [{ role: "user", content: "b" }] }));
+  assert.equal(asked.length, 2);
+  assert.equal(asked[0].url, "https://api.deepseek.com/chat/completions");
+  assert.equal(asked[0].auth, "Bearer sk-deep-1111");
+  assert.equal(asked[0].body.model, "deepseek-flash");
+  assert.equal(asked[1].url, "https://openrouter.ai/api/v1/chat/completions");
+  assert.equal(asked[1].auth, "Bearer sk-or-2222");
+  assert.ok(!JSON.stringify(asked[0]).includes("sk-or-2222") && !JSON.stringify(asked[1]).includes("sk-deep-1111"));
+  /* the line's name, never its key */
+  assert.deepEqual(await p.evaluate(() => LP.ai.line("score")), { id: "l2", name: "OpenRouter", provider: "openrouter", vision: true });
+  assert.ok(!JSON.stringify(await p.evaluate(() => [LP.ai.line("scripts"), LP.ai.line("score")])).includes("sk-"));
+  assert.deepEqual(errors, []);
+});
+
+test("AI line: a read that fails blocks every write until a later read succeeds; a newer document is never written", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN" });
+  /* the AI document's get() rejects while window.__failAi is set */
+  await p.addInitScript((path) => {
+    let real;
+    window.__failAi = true;
+    Object.defineProperty(window, "LopdaPlatform", { configurable: true, get: () => real, set(v) {
+      const doc = v.db.doc;
+      v.db.doc = function (q) {
+        const r = doc.call(this, q);
+        if (q === path) { const get = r.get.bind(r); r.get = () => (window.__failAi ? Promise.reject(new Error("read failed")) : get()); }
+        return r;
+      };
+      real = v;
+    } });
+  }, AIDOC);
+  await p.goto(base + "/runtime/", { waitUntil: "load" });
+  await p.waitForFunction(() => window.LP && LP.ai);
+  await p.evaluate(([path, d]) => { window.__failAi = false; return LopdaPlatform.db.doc(path).set(d); }, [AIDOC, TWO_LINES]);
+  await p.reload({ waitUntil: "load" });
+  await p.waitForFunction(() => window.LP && LP.ai && LP.ai._test.state().readFailed);
+  assert.equal(await p.evaluate(() => LP.ai.on("scripts")), false);
+  assert.equal(await p.evaluate(() => LP.ai.saved()), null);
+  /* Settings says it cannot read; saving a new key changes nothing */
+  await p.evaluate(() => LP.builtins.filter((b) => b.id === "settings")[0].open());
+  await p.waitForFunction(() => !document.getElementById("v-settings").hidden);
+  assert.match(await p.locator("#set-ai-open").innerText(), /读不出/);
+  await p.click("#set-ai-open");
+  await p.waitForFunction(() => !document.getElementById("v-set-ai").hidden);
+  await p.fill("#set-ai-key", "sk-or-new-3333");
+  await p.click("#set-ai-save");
+  await p.waitForTimeout(300);
+  await p.evaluate(() => { window.__failAi = false; });
+  assert.deepEqual(await aiDoc(p), TWO_LINES, "nothing was written");
+  /* the next read succeeds: both lines are back, still untouched */
+  await p.evaluate(() => LP.ai._test.reread());
+  assert.equal(await p.evaluate(() => LP.ai.on("scripts")), true);
+  assert.equal(await p.evaluate(() => LP.ai._test.state().st.lines.length), 2);
+  assert.deepEqual(await aiDoc(p), TWO_LINES);
+
+  /* a document from a newer Lo-PDA: not read, not written */
+  const NEWER = { v: 3, lines: [{ id: "l1", provider: "deepseek", key: "sk-future" }], somethingNew: true };
+  await p.evaluate(([path, d]) => LopdaPlatform.db.doc(path).set(d), [AIDOC, NEWER]);
+  await p.evaluate(() => LP.ai._test.reread());
+  assert.equal(await p.evaluate(() => LP.ai.on("scripts")), false);
+  assert.match(await p.locator("#set-ai-state").innerText(), /新版 Lo-PDA/);
+  await p.fill("#set-ai-key", "sk-or-new-4444");
+  await p.click("#set-ai-save");
+  await p.waitForTimeout(300);
+  assert.deepEqual(await aiDoc(p), NEWER);
+  assert.deepEqual(errors.filter((e) => !/AI lines could not be read|read failed/.test(e)), []);
+});
+
+test("AI line: two lines stay out of the backup, and a restore keeps this phone's lines", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN" });
+  await bootWithAi(p, TWO_LINES);
+  const docs = await p.evaluate(async () => {
+    const pack = LopdaBackup.pack; let seen = null;
+    LopdaBackup.pack = (d, o) => { seen = d.docs; return pack(d, o); };
+    LP.show("set-backup");
+    document.getElementById("set-backup-go").click();
+    while (!seen) await new Promise((r) => setTimeout(r, 50));
+    LopdaBackup.pack = pack;
+    return seen;
+  });
+  assert.ok(docs.length > 0);
+  assert.ok(!JSON.stringify(docs).includes("sk-deep-1111") && !JSON.stringify(docs).includes("sk-or-2222"));
+  /* a backup from elsewhere that does carry an AI document (with someone else's key) */
+  const bytes = await p.evaluate(async (path) => {
+    const pk = await LopdaBackup.pack({ docs: [{ path: "data/users/local/restore-probe", data: { body: "hello", updated: 1 } },
+      { path, data: { v: 1, key: "sk-or-theirs-5555", model: "" } }], files: [] }, { runtime: LP.RUNTIME_VERSION, now: Date.now() });
+    const blob = new Blob(LopdaZip.writeParts(pk.entries));
+    return [...new Uint8Array(await blob.arrayBuffer())];
+  }, AIDOC);
+  /* the backup is not saved: 取消 */
+  await p.waitForFunction(() => document.querySelectorAll("#set-backup-btns .btn").length === 2);
+  await p.click("#set-backup-btns .btn.ghost");
+  await p.setInputFiles("#set-restore-file", { name: "lopda-backup.zip", mimeType: "application/zip", buffer: Buffer.from(bytes) });
+  await p.waitForFunction(() => /^这个备份做于 /.test(document.getElementById("set-backup-msg").textContent), null, { timeout: 20000 });
+  await p.click("#set-backup-btns .btn:not(.ghost)");
+  await Promise.all([p.waitForEvent("load", { timeout: 20000 }), p.click("#set-backup-btns .btn:not(.ghost)")]);
+  await p.waitForFunction(() => window.LP && LP.ai && LP.ai._test.state().loaded);
+  assert.deepEqual(await aiDoc(p), TWO_LINES);
+  assert.equal(await p.evaluate(() => LopdaPlatform.db.doc("data/users/local/restore-probe").get().then((s) => s.data().body)), "hello");
+  assert.deepEqual(errors, []);
+});
+
 test("AI line: while the AI is slow the hint counts time, says what the line is doing and flips on every signal; leaving the screen is named", { skip, timeout: 45000 }, async (t) => {
   const { p, errors } = await page(t, { locale: "zh-CN" });
   /* a hand-driven OpenRouter: the test opens the line and pushes each piece */
