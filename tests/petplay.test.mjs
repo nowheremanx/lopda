@@ -442,5 +442,5 @@ test("climb: no input stays on the start platform past the old cap with score 0;
   high.pet.y = 29; high.pet.vy = -12;
   g.step(high, { left: false, right: false, a: false, press: {} }, 50);
   assert.ok(high.height > 0, "above the threshold the camera climbs");
-  assert.equal(high.score, high.height);
+  assert.equal(high.score, 0, "height alone is no point: only landing on a new, higher platform scores");
 });
