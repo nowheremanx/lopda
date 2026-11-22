@@ -535,6 +535,7 @@
       "pet.word.title": "单词卡", "pet.word.loading": "正在查…", "pet.word.none": "没找到意思。",
       "pet.word.hint": "按 A 查意思，B 返回", "pet.word.back": "按 B 返回", "pet.word.demo": "光",
       "pet.sk.lookup": "查",
+      "pet.go.ask": "去看看{v}？", "pet.go.yes": "去", "pet.go.no": "不去",
       "pet.tag": "带回了", "pet.restart.done": "重新开始了。",
 
       "pet.where.riverbank": "河滩", "pet.where.windowsill": "窗台", "pet.where.yard": "后院",
@@ -1521,6 +1522,7 @@
       "pet.word.title": "Word card", "pet.word.loading": "Looking it up...", "pet.word.none": "No meaning found.",
       "pet.word.hint": "A looks it up, B goes back", "pet.word.back": "B goes back", "pet.word.demo": "light",
       "pet.sk.lookup": "Look",
+      "pet.go.ask": "Go to {v}?", "pet.go.yes": "Go", "pet.go.no": "Stay",
       "pet.tag": "new", "pet.restart.done": "A new start.",
 
       "pet.where.riverbank": "by the riverbank", "pet.where.windowsill": "on the windowsill", "pet.where.yard": "in the backyard",

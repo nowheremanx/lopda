@@ -5349,6 +5349,75 @@ test("pet: the room shows what it saw", { skip, timeout: 90000 }, async (t) => {
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
+/* A long press on a thing in the room asks first ("去看看冲洗店？"), a long press on the empty floor still pats, and a
+   short tap keeps the word card's own behaviour. Going is not using the pick and writes nothing. */
+test("pet: a long press on a room thing asks 去看看 and A goes there, B stays", { skip, timeout: 90000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN", serviceWorkers: "block", viewport: { width: 375, height: 667 } });
+  await p.clock.install({ time: new Date(2026, 9, 11, 9, 0) });   /* 09:00: awake, no outing (its hours start at 10) */
+  await p.goto(base + "/runtime/?debug", { waitUntil: "networkidle" });
+  await p.waitForFunction(() => document.getElementById("savestate").textContent !== "启动中…");
+  const boot = () => p.waitForFunction(() => document.getElementById("savestate").textContent !== "启动中…");
+  const save = () => p.evaluate(() => LOPDA_DEBUG.pet.save());
+  const key = async (...bs) => { for (const b of bs) { await p.evaluate((b) => { LOPDA_DEBUG.setButton(b, true); LOPDA_DEBUG.setButton(b, false); }, b); await p.waitForTimeout(100); } };
+  const openPet = async () => {
+    await p.locator("#home .app", { hasText: "宠物" }).click();
+    await p.locator("#v-pet:not([hidden])").waitFor();
+    await p.waitForTimeout(150);
+  };
+  /* a long press at a room pixel, mapped through the canvas' own rect as the room draws it */
+  const hold = async (rx, ry) => {
+    const box = await p.locator("#pet-cv").boundingBox();
+    await p.mouse.move(box.x + rx * box.width / 162, box.y + ry * box.height / 120);
+    await p.mouse.down();
+    await p.waitForTimeout(750);
+    await p.mouse.up();
+    await p.waitForTimeout(150);
+  };
+  await openPet();
+  await p.evaluate(() => LOPDA_DEBUG.pet.hatch());
+  await p.waitForTimeout(1200);          /* let the hatch's debounced save land before writing the store */
+
+  /* one framed picture on the wall, seeded the way the saw test seeds it */
+  const plan = await save();
+  plan.saw = { photos: 1, reads: 0 };
+  plan.seenUse = { reader: 0, dict: 0, notes: 0, darkroom: 0 };
+  plan.today.sawPhoto = false;
+  plan.today.sawRead = false;
+  await idb.setDoc(p, "data/users/local/pet", plan);
+  await p.reload({ waitUntil: "networkidle" });
+  await boot();
+  await openPet();
+
+  /* the long press on the first picture (its box is room 56,53..65,62) asks first; B stays, and nothing changes */
+  const before = JSON.stringify(await save());
+  await hold(61, 58);
+  await p.waitForSelector("#pet-panel:not([hidden])");
+  assert.match(await p.locator("#pet-panel").innerText(), /去看看冲洗店？/, "the panel asks before it takes you anywhere");
+  assert.equal(await p.locator("#pet-keys .sk-a span").innerText(), "去", "A is 去");
+  assert.equal(await p.locator("#pet-keys .sk-b span").innerText(), "不去", "B is 不去");
+  await key("b");
+  assert.ok(await p.isHidden("#pet-panel"), "B closes the panel");
+  assert.ok(await p.isVisible("#v-pet"), "the pet is still open");
+  assert.equal(JSON.stringify(await save()), before, "and going nowhere changes nothing in the save");
+
+  /* the same long press, then A: the darkroom opens, and the day's pick is not used */
+  await hold(61, 58);
+  await p.waitForSelector("#pet-panel:not([hidden])");
+  await key("a");
+  await p.waitForSelector("#v-dark:not([hidden])");
+  assert.ok(await p.isHidden("#v-pet"), "A goes to the darkroom");
+  assert.equal((await save()).today.used, false, "going does not use the pick");
+
+  /* back in the room, a long press on the empty floor still pats the pet */
+  await p.click("#home-key");
+  await openPet();
+  const pats = (await save()).today.pats;
+  await hold(30, 110);
+  await p.waitForFunction((n) => LOPDA_DEBUG.pet.save().today.pats > n, pats, { timeout: 5000 });
+  assert.ok(await p.isHidden("#pet-panel"), "an empty spot asks nothing");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
 test("pet: games - the play list opens each pack, the canvas moves at 20 fps, B returns, a finished round raises joy", { skip, timeout: 90000 }, async (t) => {
   const { p, errors } = await page(t, { ...pw.devices["iPhone 13"], locale: "zh-CN", serviceWorkers: "block" });
   await p.clock.install({ time: new Date(2026, 9, 11, 9, 0) });
