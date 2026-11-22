@@ -31,6 +31,9 @@ var W=162, H=120, TICK=50;
 var TONE={k:0,d:1,m:2,p:3};
 /* the score at which a round is worth +2 instead of +1. Low on purpose: play is not a test. */
 var JOY2={catch:15,run:60,climb:6};
+/* below this a round made no progress (it ran straight into the first thing, never left the start platform): no joy
+   then, and the program says it wants another go instead of calling it fun (owner, 2026-11-22) */
+var JOY1={catch:3,run:10,climb:1};
 
 function num(v){ var n=+v; return isFinite(n) ? n : 0; }
 function clamp(v,lo,hi){ v=Math.floor(num(v)); return v<lo ? lo : v>hi ? hi : v; }
@@ -155,7 +158,11 @@ function note(s,event){
   }
 }
 function reacting(s){ return !!(s.react && s.tick<s.reactUntil); }
-function joyFor(id,score){ return num(score)>=JOY2[id] ? 2 : 1; }
+function joyFor(id,score){
+  score=num(score);
+  if(JOY1[id]!==undefined && score<JOY1[id]) return 0;
+  return score>=JOY2[id] ? 2 : 1;
+}
 function finish(state,score){
   if(!state || state.done) return state;
   if(score!=null) state.score=Math.max(0,Math.floor(num(score)));
@@ -337,7 +344,7 @@ function runInit(seed){
   var s=base("run",seed);
   s.speedQ=R_SPEED_START; s.moveQ=0; s.dist=0; s.obs=[]; s.nutScore=0;
   s.h=0; s.vy=0; s.onGround=true; s.buf=0; s.dying=0;
-  runSpawn(s,W+10);                                     /* something arrives inside the first three seconds */
+  runSpawn(s,W+60);                                     /* the first thing arrives after about three seconds */
   return s;
 }
 function runTick(s,inp){
@@ -474,7 +481,7 @@ function runDraw(s,buf,w,h,pack,poseFor){
  * player can cross at most 32 px; every next platform is generated inside that reach. Steps are 18-24 px apart
  * so they read as separate bars rather than a ladder of overlapping lines. */
 var C_RISE=30, C_RUN=32, C_GAP_MIN=18, C_GAP_MAX=24, C_JITTER=12;
-var C_JUMP=-12, C_CAM=30;                             /* camera only climbs above row 30 */
+var C_JUMP=-12, C_CAM=30, C_AHEAD=-40;                             /* camera only climbs above row 30 */
 var FEET_L=9, FEET_R=23, FEET_BOTTOM=30;               /* x+9 .. x+22 inclusive, y+30 */
 var START_PLAT={x:48,y:92,w:56};
 /* The first six platforms are the old, forgiving chain. After that the curve ramps over the next 30: narrower
@@ -667,7 +674,8 @@ function climbTick(s,inp){
   for(i=s.plats.length-1;i>=0;i--) if(s.plats[i].y>H+4) s.plats.splice(i,1);
   var top=H, above=null, first=true;
   for(i=0;i<s.plats.length;i++) if(s.plats[i].y<top){ top=s.plats[i].y; above=s.plats[i]; }
-  while(top>36){
+  /* generate above the screen, so a new step scrolls in from the top edge instead of appearing in view */
+  while(top>C_AHEAD){
     var np=climbNext(s,above,first);
     s.plats.push(np);
     above=np;

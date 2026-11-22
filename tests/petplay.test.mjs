@@ -90,14 +90,17 @@ test("a round always ends: catch on its three lives within 1000 ticks, and a run
   assert.equal(s.tick, 4000, "4000 ticks and still climbing");
 });
 
-test("a finished round has score and joy 1 or 2, never negative", () => {
+test("a finished round has score and joy 0, 1 or 2: no progress, no joy; never negative", () => {
+  const min = { catch: 3, run: 10, climb: 1 };
   for (const g of Play.GAMES) {
     const s = g.init(99);
     s.score = -5;
     Play.finish(s);
     assert.equal(s.done, true);
     assert.equal(s.score, 0);
-    assert.equal(s.joy, 1, "a zero score still gives +1");
+    assert.equal(s.joy, 0, `${g.id}: a round with no progress earns nothing`);
+    assert.equal(Play.joyFor(g.id, min[g.id] - 1), 0, `${g.id}: just below the minimum`);
+    assert.equal(Play.joyFor(g.id, min[g.id]), 1, `${g.id}: the minimum is +1`);
     const t = g.init(99);
     t.score = 999;
     Play.finish(t);

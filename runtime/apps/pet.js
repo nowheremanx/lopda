@@ -1670,9 +1670,13 @@ function applyGameJoy(st){
     P.save.best[id]=score;
     if(P.game && P.game.id===id) P.game.newBest=true;
   }
-  P.save=Pet.play(P.save,st.joy,dayKey(now()));
-  P.action="happy"; P.actionUntil=now()+2500; P.heartUntil=now()+2500;
-  beep(st.joy>1?"win":"ok"); saveSoon();
+  /* a round with no progress earns nothing; the best score above is still kept */
+  if(st.joy>0){
+    P.save=Pet.play(P.save,st.joy,dayKey(now()));
+    P.action="happy"; P.actionUntil=now()+2500; P.heartUntil=now()+2500;
+    beep(st.joy>1?"win":"ok");
+  } else beep("tap");
+  saveSoon();
 }
 function stopGameTimer(){ if(P.gameTimer){ clearInterval(P.gameTimer); P.gameTimer=0; } }
 function exitGame(swallowAUp){
@@ -2454,7 +2458,7 @@ function buildGameOver(panel){
   box.appendChild(score);
   box.appendChild(el("p","pet-gbest",tr("pet.game.best",{n:bestScore(P.game?P.game.id:"")})));
   if(P.game && P.game.newBest) box.appendChild(el("p","pet-gbest",tr("pet.game.newbest")));
-  box.appendChild(el("p","pet-gcomment",tr(st.joy>=2?"pet.game.result.fun":"pet.game.result.ok")));
+  box.appendChild(el("p","pet-gcomment",tr(st.joy>=2?"pet.game.result.fun":st.joy>=1?"pet.game.result.ok":"pet.game.result.again")));
   box.appendChild(el("p","pet-ganykey",tr("pet.game.anykey")));
   panel.appendChild(box);
 }
@@ -2963,19 +2967,21 @@ function bindRoom(){
     if(gameDone()){ exitGame(); return; }
     if(!P.game.started){ startRound(); return; }
     P.gameTouch=e.pointerId;
-    gameSide(e);
+    /* the runner has one button: a finger anywhere on the field is A, pressed and held */
+    if(P.game.id==="run"){ P.gamePress.a=true; P.gameHeld.a=true; }
+    else gameSide(e);
     try{ if(cv.setPointerCapture) cv.setPointerCapture(e.pointerId); }catch(err){}
     e.preventDefault();
   }
   function gameTouchEnd(e){
     if(P.gameTouch==null || (e && e.pointerId!==P.gameTouch)) return;
     P.gameTouch=null;
-    P.gameHeld.left=false; P.gameHeld.right=false;
+    P.gameHeld.left=false; P.gameHeld.right=false; P.gameHeld.a=false;
   }
   cv.addEventListener("pointerdown",gameTouch);
   cv.addEventListener("pointermove",function(e){
     if(P.gameTouch==null || e.pointerId!==P.gameTouch) return;
-    gameSide(e);
+    if(P.game && P.game.id!=="run") gameSide(e);
     e.preventDefault();
   });
   ["pointerup","pointercancel","pointerleave"].forEach(function(t){ cv.addEventListener(t,gameTouchEnd); });
@@ -2997,7 +3003,8 @@ LP.padRoute("pet",function(b,down){
       if(down) startRound();                                   /* any other first key starts the round */
       return true;
     }
-    if(b==="a"){ if(down) pressA(); return true; }
+    /* A is held as well as pressed: the runner's jump goes higher while A stays down */
+    if(b==="a"){ P.gameHeld.a=!!down; if(down) pressA(); return true; }
     if(b==="b"){ if(down) exitGame(); return true; }
     if(b==="left" || b==="right"){ P.gameHeld[b]=!!down; return true; }
     return true;                                  /* up/down/start/select do nothing in a play pack */
