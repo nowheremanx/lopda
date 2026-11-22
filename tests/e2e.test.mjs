@@ -10083,6 +10083,9 @@ test("AI line: the lines page: add DeepSeek and OpenRouter, switch one off, choo
   const deepRow = p.locator("#set-ai-use-list li", { hasText: "DeepSeek" });
   assert.equal(await deepRow.getAttribute("aria-disabled"), "true");
   assert.match(await deepRow.innerText(), /这条线路看不了图/);
+  /* each row says which key it is, so two lines of one provider can be told apart */
+  assert.match(await deepRow.innerText(), /…1111/);
+  assert.match(await p.locator("#set-ai-use-list li", { hasText: "OpenRouter" }).innerText(), /…2222/);
   await deepRow.click({ force: true });
   assert.equal(await p.evaluate(() => document.getElementById("set-ai-use").hidden), false, "a blind line does nothing");
   assert.ok(await fits(), "the use page fits 331 px");
