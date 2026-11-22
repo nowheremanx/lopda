@@ -134,6 +134,9 @@ var AI={st:AL.load(null), loaded:false, readFailed:false, seen:[], lastTimer:0};
    the line page's last message, and the keyboard ring */
 var AIPAGE="main", AILINE="", AIPROV="", AIUSE="", AILINEMSG="", AIDELARMED=false, AISCOREFROM="main";
 var AIFOCUS=0, AIFOCUSABLES=[];
+/* the line page's vision model as typed (or picked from the list for a model) before 保存, and the line it belongs to:
+   a render must not throw an unsaved choice away, but opening another line must not keep it either */
+var AIVM="", AIVMIN=null;
 var SCORE_MODELS_CACHE=null, scoreModelPageOpen=false, scoreModelRows=[], scoreModelFocus=0, scoreModelSeq=0;
 /* A saved key shows as dots in its field (a password field shows any value as dots): this stand-in, never the key itself.
    Tapping the field empties it for a new key; leaving it empty puts the dots back. */
@@ -169,8 +172,10 @@ function noteLast(id,last){
   clearTimeout(AI.lastTimer);
   AI.lastTimer=setTimeout(function(){ saveAiDoc(); renderAi(); },1000);
 }
-function scoreModelId(){ var u=AI.st.use.score; return u && u.model || SCORE_PAGES.DEFAULT_MODEL; }
-function scoreModelLabel(){ return scoreModelId()===SCORE_PAGES.DEFAULT_MODEL ? tr("ai.score.default") : scoreModelId(); }
+/* the model the line page's field holds (an empty field means the default): the score list marks this row, and 保存
+   writes whatever the field says. Nothing reads use.score any more: an old score model moved onto its OpenRouter line. */
+function scoreModelId(){ var el=$("set-ai-vmodel"); return (el && el.value.trim()) || SCORE_PAGES.DEFAULT_MODEL; }
+function scoreModelLabel(){ var id=scoreModelId(); return id===SCORE_PAGES.DEFAULT_MODEL ? tr("ai.score.default") : id; }
 function cleanScoreModels(list){ return SCORE_PAGES.cleanModels(list); }
 function savedScoreModels(data){
   if(!data || typeof data.at!=="number" || !Array.isArray(data.list)) return null;
@@ -246,7 +251,7 @@ function openScoreModelPage(){
     renderScoreModelList(result.list,result.failed?"ai.score.loadfail":"");
   });
 }
-/* the score model page's ◂ goes back where it was opened from (the 读谱 use page) */
+/* the score model page's ◂ goes back where it was opened from (the OpenRouter line's page) */
 function closeScoreModelPage(){
   if(!scoreModelPageOpen) return;
   var back=AISCOREFROM||"main";
@@ -260,14 +265,16 @@ function resetScoreModelPage(){
   scoreModelPageOpen=false; scoreModelSeq++;
   aiPage("main"); AISCOREFROM="main";
 }
+/* choosing a model only fills the line page's 看图模型 field: nothing is written until 保存, so looking around can never
+   change the document. The default row empties the field, which means "the provider's default". */
 function chooseScoreModel(id){
-  if(!aiWritable()){ closeScoreModelPage(); renderAi(); sfx("err"); return; }
-  AL.setScoreModel(AI.st,id===SCORE_PAGES.DEFAULT_MODEL ? "" : id);
-  saveAiDoc();
+  var el=$("set-ai-vmodel"), value=id===SCORE_PAGES.DEFAULT_MODEL ? "" : id;
+  if(el) el.value=value;
+  AIVM=value; AIVMIN=AILINE;
   var back=AISCOREFROM||"main";
   scoreModelPageOpen=false; scoreModelSeq++;
   aiPage(back); AISCOREFROM="main";
-  aiChanged(); sfx("ok");
+  renderAi(); sfx("ok");
 }
 $("set-ai-score-model").onclick=openScoreModelPage;
 $("set-ai-model-back").onclick=closeScoreModelPage;
@@ -346,14 +353,14 @@ function toggleAiLine(id,on){
 }
 function openAiLine(id){
   if(document.activeElement && /^(INPUT|TEXTAREA)$/.test(document.activeElement.nodeName)) document.activeElement.blur();
-  AILINE=id; AIPROV=""; AILINEMSG=""; AIDELARMED=false;
+  AILINE=id; AIPROV=""; AILINEMSG=""; AIDELARMED=false; AIVMIN=null;
   aiPage("line"); renderAi(); sfx("tap");
 }
 /* a new line: nothing is added until 保存 */
 function openAiProvider(id){
   var p=window.LopdaAI.provider(id); if(!p) return;
   if(document.activeElement && /^(INPUT|TEXTAREA)$/.test(document.activeElement.nodeName)) document.activeElement.blur();
-  AILINE=""; AIPROV=id; AILINEMSG=""; AIDELARMED=false;
+  AILINE=""; AIPROV=id; AILINEMSG=""; AIDELARMED=false; AIVMIN=null;
   aiPage("line"); renderAi(); sfx("tap");
 }
 function openAiUse(use){ AIUSE=use; aiPage("use"); renderAi(); sfx("tap"); }
@@ -427,11 +434,21 @@ function renderAiLine(){
   if(document.activeElement!==$("set-ai-model")) $("set-ai-model").value=l ? l.model : "";
   $("set-ai-model").placeholder=prov ? prov.model : "";
   $("set-ai-model-hint").textContent=!prov ? "" : (prov.id==="openrouter" ? tr("ai.model.hint") : tr("ai.model.def",{model:prov.model}));
+  /* a line that cannot see has no pictures to read: no field, no OpenRouter list. Only OpenRouter picks from its list. */
+  var seeing=!!(prov && prov.vision);
+  $("set-ai-vmodel-row").hidden=!seeing;
+  $("set-ai-vmodel-hint").hidden=!seeing;
+  if(AIVMIN!==AILINE){ AIVMIN=AILINE; AIVM=l ? l.visionModel : ""; }
+  if(document.activeElement!==$("set-ai-vmodel")) $("set-ai-vmodel").value=AIVM;
+  $("set-ai-vmodel").placeholder=prov ? (prov.id==="openrouter" ? SCORE_PAGES.DEFAULT_MODEL : prov.visionModel) : "";
+  $("set-ai-score-model").hidden=!(seeing && prov.id==="openrouter");
   $("set-ai-line-state").textContent=AILINEMSG;
   $("set-ai-test").hidden=!l; $("set-ai-del").hidden=!l;
   $("set-ai-del").textContent=tr(AIDELARMED ? "ai.del.sure" : "ai.del");
   var focus=[$("set-ai-save")];
   if(l){ focus.push($("set-ai-test")); focus.push($("set-ai-del")); }
+  if(seeing) focus.push($("set-ai-vmodel"));
+  if(!$("set-ai-score-model").hidden) focus.push($("set-ai-score-model"));
   return focus;
 }
 
@@ -468,11 +485,6 @@ function renderAiUse(){
       function(){ chooseUseLine(l.id); });
     ul.appendChild(li); focus.push(li);
   });
-  /* the score model list only matters while 读谱 goes down OpenRouter */
-  var sl=AL.pick(AI.st,"score",PROV), sp=sl && lineProvider(sl);
-  var scoreRow=$("set-ai-score-model");
-  scoreRow.hidden=!(use==="score" && sp && sp.id==="openrouter");
-  if(!scoreRow.hidden) focus.push(scoreRow);
   /* the ring starts on the choice, as in the score model list, not on the first row */
   if(AIPAGE==="use" && focus.length){
     var at=0;
@@ -494,7 +506,7 @@ function renderAi(msg){
   if(typeof msg==="string") AILINEMSG=msg;
   var focus={main:renderAiMain(), add:renderAiAdd(), line:renderAiLine(), use:renderAiUse()};
   $("set-ai-open").textContent=aiRowText();
-  $("set-ai-score-model-value").textContent=scoreModelLabel();
+  $("set-ai-score-model-value").textContent=scoreModelLabel()+" ›";
   if(AIPAGE!=="model") aiSetFocus(focus[AIPAGE] || []);
 }
 /* a read that failed is tried again whenever the page opens; it always opens on the list */
@@ -512,15 +524,18 @@ $("set-ai-def").onclick=function(){ openAiUse("def"); };
 function saveAi(){
   if(!aiWritable()){ renderAi(); sfx("err"); return; }
   var v=$("set-ai-key").value.trim(), key=v===KEPT ? "" : v, model=$("set-ai-model").value.trim(), l=curLine();
+  var prov=l ? lineProvider(l) : (AIPROV ? window.LopdaAI.provider(AIPROV) : null);
+  /* a blind provider has no field to read: leave whatever an older line carries alone */
+  var vmodel=prov && prov.vision ? $("set-ai-vmodel").value.trim() : undefined;
   if(l){
-    AL.edit(AI.st,l.id,key,model); saveAiDoc(); AILINEMSG="";
+    AL.edit(AI.st,l.id,key,model,vmodel); saveAiDoc(); AILINEMSG="";
+    AIVM=l.visionModel || ""; AIVMIN=l.id;
     $("set-ai-key").blur(); aiChanged(); sfx("ok"); return;
   }
-  var prov=AIPROV ? window.LopdaAI.provider(AIPROV) : null;
   if(!prov){ renderAi(); sfx("err"); return; }
   if(!key){ renderAi(tr("ai.nokey")); sfx("err"); return; }
-  l=AL.add(AI.st,prov.id,key,model,Date.now());
-  AILINE=l.id; AIPROV=""; AILINEMSG="";
+  l=AL.add(AI.st,prov.id,key,model,Date.now(),vmodel || "");
+  AILINE=l.id; AIPROV=""; AILINEMSG=""; AIVM=l.visionModel || ""; AIVMIN=l.id;
   $("set-ai-key").blur();
   saveAiDoc();
   aiChanged(); sfx("ok");
@@ -530,6 +545,11 @@ function saveAi(){
 $("set-ai-save").onclick=saveAi;
 $("set-ai-key").addEventListener("focus",function(){ if(this.value===KEPT) this.value=""; });
 $("set-ai-key").addEventListener("blur",function(){ var l=curLine(); if(!this.value && l && l.key) this.value=KEPT; });
+/* what is typed stays a draft until 保存, even when the line's status redraws the page; the pick row follows it */
+$("set-ai-vmodel").addEventListener("input",function(){
+  AIVM=this.value; AIVMIN=AILINE;
+  $("set-ai-score-model-value").textContent=scoreModelLabel()+" ›";
+});
 function runAiTest(){
   var b=$("set-ai-test"), l=curLine();
   if(!l || b.disabled) return;
@@ -604,8 +624,8 @@ LP.ai={
     var l=AL.pick(AI.st,use||"",PROV), p=l && window.LopdaAI.provider(l.provider);
     return l ? {id:l.id, name:lineName(l), provider:l.provider, vision:!!(p && p.vision)} : null;
   },
-  /* the model Tape4's score reading would use */
-  scoreModel:function(){ var l=AL.pick(AI.st,"score",PROV); return l ? AL.modelFor(AI.st,"score",l,PROV,SCORE_PAGES.DEFAULT_MODEL) : scoreModelId(); },
+  /* the model Tape4's score reading would use: the picked line's vision model, else the default */
+  scoreModel:function(){ var l=AL.pick(AI.st,"score",PROV); return l ? AL.modelFor(AI.st,"score",l,PROV,SCORE_PAGES.DEFAULT_MODEL) : SCORE_PAGES.DEFAULT_MODEL; },
   err:aiErr,
   watch:function(f){ AI.seen.push(f); },
   /* the whole document as it should be stored, or null when there is nothing in it */

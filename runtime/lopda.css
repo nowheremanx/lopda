@@ -298,6 +298,7 @@ textarea::placeholder{color:var(--ink-2)}
 .set-ai-field{display:flex;flex-direction:column;gap:4px;font-size:16px}
 .set-ai-field input{min-height:44px;font-family:var(--f-lcd);font-size:16px;color:var(--ink);background:var(--lcd);border:3px solid var(--ink);border-radius:0;padding:4px 8px;width:100%;min-width:0;-webkit-appearance:none;appearance:none}
 .set-ai-field input::placeholder{color:var(--ink-2)}
+.set-ai-field input.focus{outline:3px solid var(--ink);outline-offset:2px}
 .set-ai-page .row{flex-wrap:wrap;gap:8px}
 .set-ai-page .btn{min-height:44px;padding:6px 14px}
 /* the lines: a card mark, the name, the key's last four and the switch, with the last result under them */

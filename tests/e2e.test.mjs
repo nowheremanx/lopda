@@ -9674,7 +9674,7 @@ test("AI line: a key in Settings turns 复制 into 生成, the code streams into
   await p.click('[data-provider="openrouter"]');
   await p.waitForFunction(() => !document.getElementById("set-ai-line").hidden);
   /* each field has its label */
-  assert.deepEqual(await p.locator("#set-ai-line .set-ai-field > span").allInnerTexts(), ["key", "模型"]);
+  assert.deepEqual(await p.locator("#set-ai-line .set-ai-field > span").allInnerTexts(), ["key", "模型", "看图模型"]);
   await p.fill("#set-ai-key", "sk-or-secret-1234");
   await p.click("#set-ai-save");
   await p.waitForFunction(() => /线路正常/.test(document.getElementById("set-ai-line-state").textContent));
@@ -9787,9 +9787,10 @@ test("AI line: an old single OpenRouter key becomes the first line after the upg
   const d = await aiDoc(p);
   assert.equal(d.lines.length, 1);
   assert.equal(d.lines[0].key, "sk-or-old-9876");
+  assert.equal(d.lines[0].visionModel, "x/see");
   assert.equal(d.lines[0].last.ok, true);
   assert.deepEqual([d.key, d.model, d.scoreModel, d.def, d.next], ["sk-or-old-9876", "a/b", "x/see", "l1", 2]);
-  assert.deepEqual(d.use, { score: { line: "l1", model: "x/see" } });
+  assert.deepEqual(d.use, {});
   /* booting again reads the v2 document to the same state */
   await p.reload({ waitUntil: "load" });
   await p.waitForFunction(() => window.LP && LP.ai && LP.ai._test.state().loaded);
@@ -10032,18 +10033,52 @@ test("AI line: the lines page: add DeepSeek and OpenRouter, switch one off, choo
   assert.equal(doc.use.score.line, orLine.id);
   await p.locator('#set-ai-use-links li[data-use="score"]').click();
   await p.waitForFunction(() => !document.getElementById("set-ai-use").hidden);
-  assert.equal(await p.evaluate(() => document.getElementById("set-ai-score-model").hidden), false);
   assert.equal(await p.locator("#set-ai-use-list li.on .set-ai-name").innerText(), "OpenRouter", "the choice is marked");
+  assert.equal(await p.locator("#set-ai-use #set-ai-score-model").count(), 0, "the score model row is not on the use page");
   assert.ok(await fits(), "the score use page fits 331 px");
-  /* the score model page belongs to this use page: its back comes here */
-  await p.click("#set-ai-score-model");
-  await p.waitForFunction(() => !document.getElementById("set-ai-model-page").hidden);
-  await p.click("#set-ai-model-back");
-  await p.waitForFunction(() => !document.getElementById("set-ai-use").hidden);
 
   /* switching DeepSeek off keeps its key, and one line on hides the uses block */
   await p.click("#set-ai-use-back");
   await p.waitForFunction(() => !document.getElementById("set-ai-main").hidden);
+
+  /* the vision model lives on the line's own page: OpenRouter has the field and its list, a blind line has neither */
+  await p.locator("#set-ai-lines li", { hasText: "OpenRouter" }).locator(".set-ai-name").click();
+  await p.waitForFunction(() => !document.getElementById("set-ai-line").hidden);
+  assert.equal(await p.evaluate(() => document.getElementById("set-ai-vmodel-row").hidden), false);
+  assert.equal(await p.evaluate(() => document.getElementById("set-ai-vmodel-hint").hidden), false);
+  assert.equal(await p.inputValue("#set-ai-vmodel"), "");
+  assert.equal(await p.getAttribute("#set-ai-vmodel", "placeholder"), "openai/gpt-6.2-sol");
+  assert.equal(await p.locator("#set-ai-score-model").isHidden(), false);
+  assert.equal(await p.locator("#set-ai-score-model-value").innerText(), "默认（Sol） ›");
+  assert.ok(await fits(), "the line page with the vision field fits 331 px");
+  /* the OpenRouter list belongs to this line page: its ◂ comes back here, and looking changes nothing */
+  await p.click("#set-ai-score-model");
+  await p.waitForFunction(() => !document.getElementById("set-ai-model-page").hidden);
+  await p.click("#set-ai-model-back");
+  await p.waitForFunction(() => !document.getElementById("set-ai-line").hidden);
+  assert.equal(await p.inputValue("#set-ai-vmodel"), "");
+  await p.click("#set-ai-line-back");
+  await p.waitForFunction(() => !document.getElementById("set-ai-main").hidden);
+
+  await p.locator("#set-ai-lines li", { hasText: "DeepSeek" }).locator(".set-ai-name").click();
+  await p.waitForFunction(() => !document.getElementById("set-ai-line").hidden);
+  assert.equal(await p.evaluate(() => document.getElementById("set-ai-vmodel-row").hidden), true, "a blind line has no vision field");
+  assert.equal(await p.evaluate(() => document.getElementById("set-ai-vmodel-hint").hidden), true);
+  assert.equal(await p.locator("#set-ai-score-model").isHidden(), true, "nor the OpenRouter list");
+  await p.click("#set-ai-line-back");
+  await p.waitForFunction(() => !document.getElementById("set-ai-main").hidden);
+
+  await p.locator("#set-ai-lines li", { hasText: "OpenRouter" }).locator(".set-ai-name").click();
+  await p.waitForFunction(() => !document.getElementById("set-ai-line").hidden);
+  await p.fill("#set-ai-vmodel", "x/vision-test");
+  await p.click("#set-ai-save");
+  await p.waitForFunction((path) => LopdaPlatform.db.doc(path).get().then((s) =>
+    s.data().lines.some((l) => l.provider === "openrouter" && l.visionModel === "x/vision-test")), AIDOC);
+  assert.equal(await p.evaluate(() => LP.ai.scoreModel()), "x/vision-test");
+  assert.equal(await p.locator("#set-ai-score-model-value").innerText(), "x/vision-test ›");
+  await p.click("#set-ai-line-back");
+  await p.waitForFunction(() => !document.getElementById("set-ai-main").hidden);
+
   await p.locator("#set-ai-lines li", { hasText: "DeepSeek" }).locator(".set-ai-sw").click();
   await p.waitForFunction((path) => LopdaPlatform.db.doc(path).get().then((s) => s.data().lines.some((l) => l.provider === "deepseek" && l.on === false)), AIDOC);
   assert.equal(await p.evaluate(() => document.getElementById("set-ai-uses").hidden), true);
@@ -10072,6 +10107,43 @@ test("AI line: the lines page: add DeepSeek and OpenRouter, switch one off, choo
   await p.keyboard.press("z");
   await p.waitForFunction(() => !document.getElementById("set-ai-main").hidden);
   assert.ok(await fits(), "the list still fits 331 px");
+  assert.deepEqual(errors, []);
+});
+
+test("AI line: picking a vision model from the OpenRouter list fills the field and saves only with 保存", { skip, timeout: 45000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN", viewport: { width: 331, height: 359 }, hasTouch: true });
+  await fakeProviders(p);
+  await p.route("https://openrouter.ai/api/v1/models", (r) => r.fulfill({ status: 200,
+    headers: { ...AI_CORS, "content-type": "application/json" },
+    body: JSON.stringify({ data: [{ id: "x/a", name: "A", pricing: { prompt: "0.000001", completion: "0.000002" },
+      architecture: { input_modalities: ["text", "image"] } }] }) }));
+  const lone = { v: 2, next: 2, def: "l1", use: {}, key: "sk-or-2222", model: "", scoreModel: "",
+    lines: [{ id: "l1", provider: "openrouter", n: 1, key: "sk-or-2222", model: "", visionModel: "", on: true, added: 1 }] };
+  await bootWithAi(p, lone);
+
+  await p.evaluate(() => LP.builtins.filter((b) => b.id === "settings")[0].open());
+  await p.waitForFunction(() => !document.getElementById("v-settings").hidden);
+  await p.click("#set-ai-open");
+  await p.waitForFunction(() => !document.getElementById("set-ai-main").hidden);
+  await p.locator("#set-ai-lines li", { hasText: "OpenRouter" }).locator(".set-ai-name").click();
+  await p.waitForFunction(() => !document.getElementById("set-ai-line").hidden);
+  assert.equal(await p.inputValue("#set-ai-vmodel"), "");
+
+  await p.click("#set-ai-score-model");
+  await p.waitForFunction(() => !document.getElementById("set-ai-model-page").hidden);
+  await p.waitForSelector('#set-ai-model-list li:has-text("A")');
+  await p.locator("#set-ai-model-list li", { hasText: "A" }).click();
+  await p.waitForFunction(() => !document.getElementById("set-ai-line").hidden);
+  assert.equal(await p.inputValue("#set-ai-vmodel"), "x/a", "the pick fills the field");
+  assert.equal(await p.locator("#set-ai-score-model-value").innerText(), "x/a ›");
+  assert.deepEqual(await aiDoc(p), lone, "picking a model writes nothing");
+
+  await p.click("#set-ai-save");
+  await p.waitForFunction((path) => LopdaPlatform.db.doc(path).get().then((s) => s.data().lines[0].visionModel === "x/a"), AIDOC);
+  const doc = await aiDoc(p);
+  assert.equal(doc.lines[0].visionModel, "x/a");
+  assert.equal(doc.lines[0].key, "sk-or-2222", "the saved key is kept");
+  assert.equal(await p.evaluate(() => LP.ai.scoreModel()), "x/a");
   assert.deepEqual(errors, []);
 });
 
