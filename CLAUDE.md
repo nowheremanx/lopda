@@ -58,7 +58,8 @@ tools/          check-app.mjs, build-index.mjs (also stamps each app's released/
                 (矿工老张's auto-player: solo haul, target headroom and whole-run difficulty, also used by the tests)
 tests/          node:test suite (no deps): tools, strings, PAD shim, app save documents, sensors, speech, platform store, backup, lo-game, negative, develop, notetext, zip, repo rules, petplay, lao-zhang;
                 runtime-shots.mjs (before/after screenshots of the runtime), hko-compare.mjs (lunar table vs the HKO tables, manual)
-events/         the events page (index.html, linked from the landing page): challenge cards, a tutorial and, once an event ends,
+events/         the events page (index.html, linked from the landing page): two ways in (a script on the phone, an app for the store
+                with a coding agent), challenge cards and, once an event ends,
                 a summary of what people made; all data in events.js ({en, zh} text), pictures in shots/<event>/<app>.png
                 from tools/event-shots.mjs (needs Playwright)
 index.html      the landing page at the site root (English markup, Chinese table in its script; no third-party requests); the handheld is runtime/

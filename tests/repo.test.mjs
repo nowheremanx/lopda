@@ -260,11 +260,16 @@ test("events/events.js: both languages everywhere, cards point at real issues, a
     assert.match(ev.id, /^[a-z0-9-]+$/, ev.id); assert.ok(!ids.has(ev.id), "unique id " + ev.id); ids.add(ev.id);
     assert.ok(["open", "archived"].includes(ev.status), ev.id + " status");
     pairs(ev, ev.id);
+    /* the two ways in: the phone (a script, a taste) and the computer (an app in the store) */
+    if (ev.ways) assert.equal(ev.ways.map((w) => w.id).join(), "phone,computer", ev.id + " ways");
+    for (const w of ev.ways || []) assert.ok(w.steps.length && w.facts.length === 3, ev.id + "/" + w.id + " has steps and three facts");
     const cardIds = new Set();
     for (const c of ev.cards || []) {
       assert.ok(!cardIds.has(c.id), "unique card " + c.id); cardIds.add(c.id);
       assert.ok([1, 2, 3].includes(c.stars), c.id + " stars");
       assert.ok(typeof c.prompt === "string" && c.prompt.length > 40, c.id + " has a starter prompt");
+      /* an open event's card has its one line for Scripts on the phone and two asks for Revise */
+      if (ev.status === "open") assert.ok(c.idea && Array.isArray(c.revise) && c.revise.length === 2, c.id + " has a phone line and two revisions");
     }
     if (ev.status === "archived") assert.ok(ev.summary, ev.id + " is archived with a summary");
     for (const a of (ev.summary && ev.summary.apps) || []) {
