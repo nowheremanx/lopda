@@ -7,7 +7,7 @@
 "use strict";
 var LP=window.LP, $=LP.$, S=LP.S, I18N=LP.I18N, tr=LP.tr;
 var SND=LP.SND, RUNTIME_VERSION=LP.RUNTIME_VERSION, put=LP.put, sfx=LP.sfx, toast=LP.toast, show=LP.show, setLang=LP.setLang, renderUpdate=LP.renderUpdate;
-var SCORE_PAGES=window.LopdaScorePages, SCORE_MODELS_URL="https://openrouter.ai/api/v1/models", SCORE_MODELS_PATH="data/users/local/ai-models", SCORE_MODELS_DAY=86400000;
+var SCORE_PAGES=window.LopdaScorePages, SCORE_MODELS_PATH="data/users/local/ai-models", SCORE_MODELS_DAY=86400000;
 /* the public site, not location.host: a PR preview or localhost must still share the real address */
 var SHARE_URL="https://nowheremanx.github.io/lopda/";
 var SHARE_TEXT=SHARE_URL.replace(/^https:\/\//,"").replace(/\/$/,"");
@@ -121,25 +121,87 @@ function renderSaves(){
   });
 }
 
-/* ---------- the AI line (runtime/ai.js, decisions.md section 34) ----------
-   The user's OpenRouter key and model in one document of their own. The key never leaves this phone except in the
-   request itself: it is kept out of the backup, and a restore leaves the one already here. Settings shows its last
-   four characters only. LP.ai is what other programs use (apps/scripts.js): on(), ask(o), watch(fn). */
-var AIP="data/users/local/ai", AI={key:"", model:"", scoreModel:"", seen:[]};
-var SCORE_MODELS_CACHE=null, scoreModelPageOpen=false, scoreModelRows=[], scoreModelFocus=0, scoreModelSeq=0;
+/* ---------- the AI lines (runtime/ai.js, runtime/ailines.js, decisions.md sections 34 and 61) ----------
+   The user's keys, one line per key, like a phone's SIM cards, in one document of their own. A key never leaves this
+   phone except in a request to its own provider: the document is kept out of the backup, and a restore leaves the one
+   already here. Settings shows the last four characters only. LP.ai is what other programs use: on(use), ask(o),
+   line(use), err(e, use), watch(fn); `use` is "scripts", "studio", "score" or "pet".
+   Data safety: nothing is written to the document before it has been read. A read that fails (readFailed) or a document
+   from a newer Lo-PDA (newer) blocks every write until a later read succeeds, so one new line can never erase the others. */
+var AIP="data/users/local/ai", AL=window.LopdaAiLines, PROV=window.LopdaAI.PROVIDERS;
+var AI={st:AL.load(null), loaded:false, readFailed:false, seen:[], lastTimer:0};
+/* the screens' own state, never the document: which page is open, the line being edited, the use being chosen,
+   the line page's last message, and the keyboard ring */
+var AIPAGE="main", AILINE="", AIPROV="", AIUSE="", AILINEMSG="", AIDELARMED=false, AISCOREFROM="main";
+var AIFOCUS=0, AIFOCUSABLES=[];
+/* the line page's two model fields as typed (or picked) before 保存, and the line they belong to: a render must not
+   throw an unsaved choice away, but opening another line must not keep it either */
+var AIM="", AIMIN=null, AIVM="", AIVMIN=null;
+/* the model list page, which serves both fields: the provider's models, the search and the ring. OpenRouter's list is
+   cached in a document of its own; the other providers' lists hold no prices and stay in memory for this session. */
+var SCORE_MODELS_CACHE=null, MODEL_MAX_ROWS=200;
+var MODEL_PAGE={open:false, field:"vmodel", prov:null, line:"", list:[], failed:false, error:null, status:""};
+var MODEL_ROWS=[], MODEL_FOCUS=0, MODEL_QUERY="", MODEL_SEQ=0, OTHER_MODELS={};
 /* A saved key shows as dots in its field (a password field shows any value as dots): this stand-in, never the key itself.
    Tapping the field empties it for a new key; leaving it empty puts the dots back. */
 var KEPT="lopda-key-kept!!";
 var AIH=window.LopdaAI.host({fetch:function(u,o){ return fetch(u,o); }});
 function aiChanged(){ renderAi(); AI.seen.forEach(function(f){ try{ f(); }catch(e){} }); }
-function aiErr(e){ return tr("ai.err."+(e && e.code || "http")); }
-function scoreModelId(){ return AI.scoreModel || SCORE_PAGES.DEFAULT_MODEL; }
-function scoreModelLabel(){ return scoreModelId()===SCORE_PAGES.DEFAULT_MODEL ? tr("ai.score.default") : scoreModelId(); }
-function saveAiDoc(){ if(S.db) put(S.db.doc(AIP),{v:1, key:AI.key, model:AI.model, scoreModel:AI.scoreModel}); }
+function aiLang(){ return I18N.lang==="en" ? "en" : "zh"; }
+function lineName(l){ return AL.name(l,PROV,aiLang()); }
+/* a failure's words for one line: the name of the line that failed leads, the site is its own, never a whole key */
+function aiErrLine(e,l){
+  var p=l && window.LopdaAI.provider(l.provider);
+  return tr("ai.err."+(e && e.code || "http"),{line:l ? lineName(l) : "AI", site:p ? p.site : ""});
+}
+function aiErr(e,use){ return aiErrLine(e,AL.pick(AI.st,use||"",PROV)); }
+/* may the document be written now? Only after a good read of a document this runtime understands. */
+function aiWritable(){ return !!(S.db && AI.loaded && !AI.readFailed && !AI.st.newer); }
+function saveAiDoc(){ if(!aiWritable()) return false; put(S.db.doc(AIP),AL.toDoc(AI.st)); return true; }
+/* (re)read the document; on success the state is replaced by what is stored, on failure every write stays blocked */
+function readAi(){
+  if(!S.db) return Promise.resolve();
+  return S.db.doc(AIP).get().then(function(sn){
+    AI.st=AL.load(sn.exists ? LP.own(sn.data()) : null);
+    AI.loaded=true; AI.readFailed=false;
+    aiChanged();
+  },function(e){
+    if(window.console) console.error("Lo-PDA: the AI lines could not be read", e);
+    AI.readFailed=true; aiChanged();
+  });
+}
+/* the result of the last real request on a line, for the line's status row: one write, a second after the last answer */
+function noteLast(id,last){
+  if(!aiWritable() || !AL.setLast(AI.st,id,last)) return;
+  clearTimeout(AI.lastTimer);
+  AI.lastTimer=setTimeout(function(){ saveAiDoc(); renderAi(); },1000);
+}
+/* The line page's two model fields (an empty field means the provider's default). 保存 writes whatever a field says;
+   the list only ever fills one. Field ids and drafts are shared by the line page and the list. */
+function modelFieldId(field){ return field==="model" ? "set-ai-model" : "set-ai-vmodel"; }
+function modelFieldValue(field){ var el=$(modelFieldId(field)); return el ? el.value.trim() : ""; }
+function modelDefaultId(field,prov){
+  if(!prov) return "";
+  if(field==="model") return prov.model || "";
+  return prov.id==="openrouter" ? SCORE_PAGES.DEFAULT_MODEL : (prov.visionModel || "");
+}
+/* OpenRouter's vision default is its own shared pick (the score reading's model); the others name the provider's default */
+function modelDefaultLabel(field,prov){
+  if(field==="vmodel" && prov && prov.id==="openrouter") return tr("ai.score.default");
+  var id=modelDefaultId(field,prov);
+  return tr("ai.model.default")+(id ? " ("+id+")" : "");
+}
+/* the pick rows' right side: what the field holds, or that it is empty (the default) */
+function modelPickLabel(field,prov){
+  var v=modelFieldValue(field);
+  if(v) return v+" ›";
+  return (field==="vmodel" && prov && prov.id==="openrouter" ? tr("ai.score.default") : tr("ai.model.default"))+" ›";
+}
 function cleanScoreModels(list){ return SCORE_PAGES.cleanModels(list); }
+/* the cache is versioned: a document without v:2 was written by the vision-only list, so it is fetched again */
 function savedScoreModels(data){
-  if(!data || typeof data.at!=="number" || !Array.isArray(data.list)) return null;
-  return {at:data.at, list:cleanScoreModels(data.list)};
+  if(!data || data.v!==2 || typeof data.at!=="number" || !Array.isArray(data.list)) return null;
+  return {v:2, at:data.at, list:cleanScoreModels(data.list)};
 }
 function readScoreModelsCache(){
   if(SCORE_MODELS_CACHE) return Promise.resolve(SCORE_MODELS_CACHE);
@@ -150,12 +212,10 @@ function readScoreModelsCache(){
     return cache;
   },function(){ return null; });
 }
+/* OpenRouter's list is public: ai.js sends no key for it, and the picker keeps it for a day */
 function fetchScoreModels(){
-  return fetch(SCORE_MODELS_URL,{method:"GET", credentials:"omit", referrerPolicy:"no-referrer", cache:"no-store"}).then(function(res){
-    if(!res.ok) throw new Error("HTTP "+res.status);
-    return res.json();
-  }).then(function(payload){
-    var list=SCORE_PAGES.models(payload), cache={at:Date.now(), list:cleanScoreModels(list)};
+  return AIH.models({provider:"openrouter"}).then(function(payload){
+    var list=SCORE_PAGES.models(payload), cache={v:2, at:Date.now(), list:cleanScoreModels(list)};
     SCORE_MODELS_CACHE=cache;
     if(S.db) S.db.doc(SCORE_MODELS_PATH).set(cache).catch(function(){});
     return list;
@@ -164,135 +224,559 @@ function fetchScoreModels(){
 function loadScoreModels(){
   return readScoreModelsCache().then(function(cache){
     if(cache && cache.at<=Date.now() && Date.now()-cache.at<SCORE_MODELS_DAY) return {list:cache.list, failed:false};
-    return fetchScoreModels().then(function(list){ return {list:list, failed:false}; },function(){ return {list:cache ? cache.list : [], failed:true}; });
+    return fetchScoreModels().then(function(list){ return {list:list, failed:false}; },
+      function(e){ return {list:cache ? cache.list : [], failed:true, error:e}; });
   });
 }
-function scoreModelChoiceRows(list){
-  var models=cleanScoreModels(list), defaultModel=null, rows, current=scoreModelId(), found=current===SCORE_PAGES.DEFAULT_MODEL;
-  models.forEach(function(m){ if(m.id===SCORE_PAGES.DEFAULT_MODEL) defaultModel=m; });
-  rows=[{id:SCORE_PAGES.DEFAULT_MODEL, name:tr("ai.score.default"), in:defaultModel?defaultModel.in:null, out:defaultModel?defaultModel.out:null}];
-  models.forEach(function(m){
-    if(m.id===SCORE_PAGES.DEFAULT_MODEL) return;
+/* the other providers answer with ids only, and only for a saved key: one list per line, kept for this session */
+function loadLineModels(prov,l){
+  if(!prov) return Promise.resolve({list:[], failed:true, error:{code:"http"}});
+  if(prov.id==="openrouter") return loadScoreModels();
+  if(!l || !l.key) return Promise.resolve({list:[], failed:true, error:{code:"nokey"}});
+  if(OTHER_MODELS[l.id]) return Promise.resolve({list:OTHER_MODELS[l.id], failed:false});
+  return AIH.models({provider:prov.id, key:l.key}).then(function(payload){
+    var list=SCORE_PAGES.cleanModels(SCORE_PAGES.idModels(payload));
+    OTHER_MODELS[l.id]=list;
+    return {list:list, failed:false};
+  },function(e){ return {list:[], failed:true, error:e}; });
+}
+/* a search is words separated by spaces, every one of them somewhere in the id or the name, case left out */
+function modelWords(){
+  return MODEL_QUERY.toLowerCase().split(/\s+/).filter(function(w){ return !!w; });
+}
+function modelMatches(m,words){
+  if(!words.length) return true;
+  var hay=(m.id+" "+m.name).toLowerCase(), i;
+  for(i=0;i<words.length;i++) if(hay.indexOf(words[i])<0) return false;
+  return true;
+}
+/* The default row always leads (it is what an empty field means), then the models the search keeps; the field's own model
+   stays visible even when the provider no longer lists it. */
+function modelRows(){
+  var field=MODEL_PAGE.field, prov=MODEL_PAGE.prov, all=MODEL_PAGE.list||[], words=modelWords();
+  var defId=modelDefaultId(field,prov), current=modelFieldValue(field), defModel=null, found=false, shown=0, kept=0, rows=[];
+  if(field==="vmodel" && prov && prov.id==="openrouter") all=SCORE_PAGES.visionOnly(all);
+  all.forEach(function(m){ if(m.id===defId) defModel=m; });
+  rows.push({id:defId, name:modelDefaultLabel(field,prov), in:defModel?defModel.in:null, out:defModel?defModel.out:null,
+    vision:defModel?!!defModel.vision:false, def:true});
+  all.forEach(function(m){
+    if(m.id===defId) return;
     if(m.id===current) found=true;
+    if(!modelMatches(m,words)) return;
+    kept++;
+    if(shown>=MODEL_MAX_ROWS) return;
+    shown++;
     rows.push(m);
   });
-  if(!found) rows.push({id:current, name:current, in:null, out:null});
-  return rows;
+  if(!words.length && current && !found) rows.push({id:current, name:current, in:null, out:null, vision:false});
+  return {rows:rows, more:Math.max(0,kept-shown)};
 }
-function renderScoreModelList(list,status){
-  var ul=$("set-ai-model-list"), current=scoreModelId();
-  scoreModelRows=scoreModelChoiceRows(list); ul.textContent="";
-  scoreModelRows.forEach(function(m,i){
-    var li=document.createElement("li"), label=document.createElement("span"), price=document.createElement("small");
-    li.setAttribute("role","button"); li.setAttribute("tabindex","0"); li.className=i===scoreModelFocus?"on":"";
-    li.style.minHeight="44px"; li.style.boxSizing="border-box";
-    label.textContent=m.name; price.textContent=SCORE_PAGES.formatModelPrice(m);
-    li.appendChild(label); li.appendChild(price);
-    li.onclick=function(){ scoreModelFocus=i; chooseScoreModel(m.id); };
-    li.onfocus=function(){ scoreModelFocus=i; scoreModelFocusPaint(); };
-    ul.appendChild(li);
-    if(m.id===current) scoreModelFocus=i;
-  });
-  scoreModelFocusPaint();
-  $("set-ai-model-status").textContent=status ? tr(status) : "";
-}
-function scoreModelFocusPaint(){
+function modelFocusPaint(){
   var items=$("set-ai-model-list").children;
-  Array.prototype.forEach.call(items,function(li,i){ li.classList.toggle("on",i===scoreModelFocus); });
+  Array.prototype.forEach.call(items,function(li,i){ li.classList.toggle("on",i===MODEL_FOCUS); });
 }
-function openScoreModelPage(){
-  var seq=++scoreModelSeq; scoreModelPageOpen=true;
-  $("set-ai-main").hidden=true; $("set-ai-model-page").hidden=false;
-  renderScoreModelList([],"ai.score.loading");
+function renderModelList(){
+  var ul=$("set-ai-model-list"), keep=MODEL_ROWS[MODEL_FOCUS] ? MODEL_ROWS[MODEL_FOCUS].id
+    : (modelFieldValue(MODEL_PAGE.field) || modelDefaultId(MODEL_PAGE.field,MODEL_PAGE.prov));
+  var got=modelRows(), anyPrice=false, at=0;
+  MODEL_ROWS=got.rows; ul.textContent="";
+  MODEL_ROWS.forEach(function(m,i){
+    var li=document.createElement("li"), label=document.createElement("span"), price=document.createElement("small");
+    li.setAttribute("role","button"); li.setAttribute("tabindex","0");
+    li.style.minHeight="44px"; li.style.boxSizing="border-box";
+    label.textContent=m.name;
+    /* a list of ids has no prices: the column stays empty */
+    price.textContent=(m.in==null && m.out==null) ? "" : SCORE_PAGES.formatModelPrice(m);
+    if(price.textContent) anyPrice=true;
+    li.appendChild(label); li.appendChild(price);
+    li.onclick=function(){ MODEL_FOCUS=i; chooseModelRow(m); };
+    li.onfocus=function(){ MODEL_FOCUS=i; modelFocusPaint(); };
+    ul.appendChild(li);
+    if(m.id===keep) at=i;
+  });
+  MODEL_FOCUS=at;
+  $("set-ai-model-price").hidden=!anyPrice;
+  $("set-ai-model-more").textContent=got.more ? tr("ai.list.more",{n:got.more}) : "";
+  $("set-ai-model-status").textContent=MODEL_PAGE.status ? tr(MODEL_PAGE.status)
+    : MODEL_PAGE.failed ? tr("ai.score.loadfail")+"\n"+aiErrLine(MODEL_PAGE.error||{},curLine()) : "";
+  modelFocusPaint();
+  var search=$("set-ai-model-search");
+  if(search) search.setAttribute("aria-label",tr("ai.list.search"));
+}
+/* a provider other than OpenRouter wants the line's key before it answers */
+function modelListReady(prov,l){ return !!(prov && prov.models && (prov.id==="openrouter" || (l && l.key))); }
+function openModelList(field){
+  var l=curLine(), prov=l ? lineProvider(l) : (AIPROV ? window.LopdaAI.provider(AIPROV) : null);
+  if(!prov || !prov.models) return;
+  if(!modelListReady(prov,l)){ sfx("err"); return; }
+  field=field==="model" ? "model" : "vmodel";
+  AISCOREFROM=AIPAGE==="model" ? AISCOREFROM : AIPAGE;
+  MODEL_PAGE={open:true, field:field, prov:prov, line:l?l.id:"", list:[], failed:false, error:null, status:"ai.score.loading"};
+  MODEL_ROWS=[]; MODEL_FOCUS=0; MODEL_QUERY="";
+  var seq=++MODEL_SEQ;
+  aiPage("model");
+  $("set-ai-model-title").textContent=tr(field==="model" ? "ai.model" : "ai.vmodel");
+  $("set-ai-model-search").value="";
+  $("set-ai-model-search").placeholder=tr("ai.list.search");
+  renderModelList();
   sfx("tap");
-  loadScoreModels().then(function(result){
-    if(!scoreModelPageOpen || seq!==scoreModelSeq) return;
-    renderScoreModelList(result.list,result.failed?"ai.score.loadfail":"");
+  loadLineModels(prov,l).then(function(result){
+    if(!MODEL_PAGE.open || seq!==MODEL_SEQ) return;
+    MODEL_PAGE.list=result.list||[]; MODEL_PAGE.failed=!!result.failed; MODEL_PAGE.error=result.error||null;
+    MODEL_PAGE.status="";
+    renderModelList();
   });
 }
-function closeScoreModelPage(){
-  if(!scoreModelPageOpen) return;
-  resetScoreModelPage();
+/* the list's ◂ goes back where it was opened from (the line's page) */
+function closeModelList(){
+  if(!MODEL_PAGE.open) return;
+  var back=AISCOREFROM||"main";
+  MODEL_PAGE.open=false; MODEL_SEQ++;
+  aiPage(back); AISCOREFROM="main";
   renderAi(); sfx("tap");
 }
-function resetScoreModelPage(){
-  if(!scoreModelPageOpen) return;
-  scoreModelPageOpen=false; scoreModelSeq++;
-  $("set-ai-model-page").hidden=true; $("set-ai-main").hidden=false;
+/* leaving the whole AI page puts everything back to the lines list */
+function resetModelPage(){
+  if(!MODEL_PAGE.open) return;
+  MODEL_PAGE.open=false; MODEL_SEQ++;
+  aiPage("main"); AISCOREFROM="main";
 }
-function chooseScoreModel(id){
-  AI.scoreModel=id===SCORE_PAGES.DEFAULT_MODEL ? "" : id;
-  saveAiDoc();
-  $("set-ai-score-model-value").textContent=scoreModelLabel();
-  closeScoreModelPage(); sfx("ok");
+/* Choosing a row only fills the line page's field (the default row empties it): nothing is written until 保存,
+   so looking around can never change the document. */
+function chooseModelRow(row){
+  var field=MODEL_PAGE.field, value=row.def ? "" : row.id, el=$(modelFieldId(field));
+  if(el) el.value=value;
+  if(field==="model"){ AIM=value; AIMIN=AILINE; } else { AIVM=value; AIVMIN=AILINE; }
+  var back=AISCOREFROM||"main";
+  MODEL_PAGE.open=false; MODEL_SEQ++;
+  aiPage(back); AISCOREFROM="main";
+  renderAi(); sfx("ok");
 }
-$("set-ai-score-model").onclick=openScoreModelPage;
-$("set-ai-model-back").onclick=closeScoreModelPage;
-/* The model chooser is a normal settings list: arrows move its focus, A chooses, and B returns. */
-document.addEventListener("keydown",function(e){
-  if(!scoreModelPageOpen || $("v-set-ai").hidden || (e.target && /INPUT|TEXTAREA/.test(e.target.nodeName)) || e.defaultPrevented) return;
-  var items=$("set-ai-model-list").children, key=e.key;
-  if(key==="ArrowUp" || key==="ArrowLeft") scoreModelFocus=(scoreModelFocus+items.length-1)%items.length;
-  else if(key==="ArrowDown" || key==="ArrowRight") scoreModelFocus=(scoreModelFocus+1)%items.length;
-  else if(key==="x" || key==="X" || key==="Enter"){
-    if(items[scoreModelFocus]) items[scoreModelFocus].click();
-    e.preventDefault(); return;
-  } else if(key==="z" || key==="Z" || key==="Escape"){
-    closeScoreModelPage(); e.preventDefault(); return;
-  } else return;
-  if(items.length){ e.preventDefault(); scoreModelFocusPaint(); }
+$("set-ai-model-pick").onclick=function(){ openModelList("model"); };
+$("set-ai-score-model").onclick=function(){ openModelList("vmodel"); };
+$("set-ai-model-back").onclick=closeModelList;
+$("set-ai-model-search").addEventListener("input",function(){
+  MODEL_QUERY=this.value; MODEL_FOCUS=0; renderModelList();
 });
-/* the row in Settings says whether the line is up; the page behind it (v-set-ai) holds the two labelled fields */
-function renderAi(msg){
-  var on=!!AI.key;
-  $("set-ai-open").textContent=tr(on ? "ai.row.on" : "ai.row.off");
-  $("set-ai-state").textContent=msg || (on ? tr("ai.on",{key:AI.key.slice(-4), model:AI.model || window.LopdaAI.MODEL}) : tr("ai.off"));
-  $("set-ai-key").placeholder=on ? tr("ai.key.saved",{key:AI.key.slice(-4)}) : tr("ai.key.ph");
-  if(document.activeElement!==$("set-ai-key")) $("set-ai-key").value=on ? KEPT : "";
-  $("set-ai-test").hidden=!on; $("set-ai-del").hidden=!on;
-  if(document.activeElement!==$("set-ai-model")) $("set-ai-model").value=AI.model;
-  $("set-ai-score-model-value").textContent=scoreModelLabel();
+/* The model chooser is a normal settings list: arrows move its focus, A chooses, and B returns. The search box keeps
+   its own keys: Escape clears it (then leaves), ArrowDown drops the ring onto the first row. */
+document.addEventListener("keydown",function(e){
+  if(!MODEL_PAGE.open || $("v-set-ai").hidden || e.defaultPrevented) return;
+  var t=e.target||{}, key=e.key, search=$("set-ai-model-search"), items=$("set-ai-model-list").children, n=items.length;
+  if(t===search){
+    if(key==="Escape"){
+      if(search.value){ search.value=""; MODEL_QUERY=""; MODEL_FOCUS=0; renderModelList(); }
+      else closeModelList();
+      e.preventDefault();
+    } else if(key==="ArrowDown" && n){
+      if(search.blur) search.blur();
+      MODEL_FOCUS=0; modelFocusPaint();
+      e.preventDefault();
+    }
+    return;
+  }
+  if(/^(INPUT|TEXTAREA)$/.test(t.nodeName)) return;
+  if(key==="ArrowUp" || key==="ArrowLeft"){ if(!n) return; MODEL_FOCUS=(MODEL_FOCUS+n-1)%n; modelFocusPaint(); }
+  else if(key==="ArrowDown" || key==="ArrowRight"){ if(!n) return; MODEL_FOCUS=(MODEL_FOCUS+1)%n; modelFocusPaint(); }
+  else if(key==="x" || key==="X" || key==="Enter"){ if(items[MODEL_FOCUS]) items[MODEL_FOCUS].click(); e.preventDefault(); return; }
+  else if(key==="z" || key==="Z" || key==="Escape"){ closeModelList(); e.preventDefault(); return; }
+  else return;
+  e.preventDefault();
+});
+/* ---------- the lines' pages: the list, a provider, one line, one use (the model list has its page above) ---------- */
+var AI_PAGE_IDS={main:"set-ai-main", add:"set-ai-add", line:"set-ai-line", use:"set-ai-use", model:"set-ai-model-page"};
+/* exactly one sub-page of v-set-ai is visible at a time */
+function aiPage(name){
+  if(name!=="line") AIDELARMED=false;
+  var k;
+  for(k in AI_PAGE_IDS) if(Object.prototype.hasOwnProperty.call(AI_PAGE_IDS,k)){
+    var el=$(AI_PAGE_IDS[k]); if(el) el.hidden=k!==name;
+  }
+  AIPAGE=name; AIFOCUS=0;
+  /* each page starts at its top: the click that opened it may have scrolled the previous one */
+  var view=$("v-set-ai"); if(view) view.scrollTop=0;
+  if(name!=="line" && document.activeElement && /^(INPUT|TEXTAREA)$/.test(document.activeElement.nodeName)) document.activeElement.blur();
 }
-$("set-ai-row").onclick=function(){ sfx("tap"); show("set-ai"); };
-$("set-ai-back").onclick=function(){ resetScoreModelPage(); sfx("tap"); openSettings(); };
-function saveAi(){
-  var v=$("set-ai-key").value.trim(), key=v===KEPT ? "" : v, model=$("set-ai-model").value.trim();
-  if(!AI.key && !key){ renderAi(tr("ai.nokey")); sfx("err"); return; }
-  if(key) AI.key=key;
-  AI.model=model;
+function curLine(){ return AILINE ? AL.find(AI.st,AILINE) : null; }
+function lineProvider(l){ return l ? window.LopdaAI.provider(l.provider) : null; }
+/* the provider whose line page is open: a saved line's, or the one a new line will be */
+function pageProvider(){
+  var l=curLine();
+  return l ? lineProvider(l) : (AIPROV ? window.LopdaAI.provider(AIPROV) : null);
+}
+function aiFocusPaint(){
+  for(var i=0;i<AIFOCUSABLES.length;i++) AIFOCUSABLES[i].classList.toggle("focus",i===AIFOCUS);
+}
+function aiSetFocus(list){
+  AIFOCUSABLES=list;
+  if(AIFOCUS>=list.length) AIFOCUS=0;
+  aiFocusPaint();
+}
+function aiBackToMain(){
+  AILINE=""; AIPROV=""; AILINEMSG="";
+  aiPage("main"); renderAi(); sfx("tap");
+}
+function aiBack(){
+  if(AIPAGE==="model"){ closeModelList(); return; }
+  if(AIPAGE!=="main"){ aiBackToMain(); return; }
+  sfx("tap"); openSettings();
+}
+/* the last real request's result, for a line's second row */
+function aiLineStatus(l){
+  if(!lineProvider(l)) return tr("ai.st.unknown");
+  if(!l.on) return tr("ai.st.off");
+  var last=l.last;
+  if(last && last.ok) return tr("ai.st.ok",{at:LP.fmt(last.at)});
+  if(last && last.code){
+    var known={key:1,credit:1,busy:1,server:1,http:1,offline:1,timeout:1,empty:1};
+    return tr("ai.st."+(known[last.code]?last.code:"http"));
+  }
+  return tr("ai.st.new");
+}
+/* the row in Settings: unreadable, a newer document, nothing on, the one line's name, or the count */
+function aiRowText(){
+  if(AI.readFailed) return tr("ai.row.readfail");
+  if(AI.st.newer) return tr("ai.row.newer");
+  var on=AL.onLines(AI.st);
+  if(!on.length) return tr("ai.row.off");
+  if(on.length===1) return lineName(on[0])+" ›";
+  return tr("ai.row.n",{n:on.length});
+}
+/* the switch changes the line only: tapping it never opens the line's page */
+function toggleAiLine(id,on){
+  if(!aiWritable()){ renderAi(); sfx("err"); return; }
+  AL.setOn(AI.st,id,on); saveAiDoc(); aiChanged(); sfx("ok");
+}
+function openAiLine(id){
+  if(document.activeElement && /^(INPUT|TEXTAREA)$/.test(document.activeElement.nodeName)) document.activeElement.blur();
+  AILINE=id; AIPROV=""; AILINEMSG=""; AIDELARMED=false; AIMIN=null; AIVMIN=null;
+  aiPage("line"); renderAi(); sfx("tap");
+}
+/* a new line: nothing is added until 保存 */
+function openAiProvider(id){
+  var p=window.LopdaAI.provider(id); if(!p) return;
+  if(document.activeElement && /^(INPUT|TEXTAREA)$/.test(document.activeElement.nodeName)) document.activeElement.blur();
+  AILINE=""; AIPROV=id; AILINEMSG=""; AIDELARMED=false; AIMIN=null; AIVMIN=null;
+  aiPage("line"); renderAi(); sfx("tap");
+}
+function openAiUse(use){ AIUSE=use; aiPage("use"); renderAi(); sfx("tap"); }
+
+function renderAiMain(){
+  var bad=AI.readFailed ? "ai.readfail" : AI.st.newer ? "ai.newer" : "";
+  $("set-ai-state").textContent=bad ? tr(bad) : AI.st.lines.length ? "" : tr("ai.off");
+  var ul=$("set-ai-lines"), focus=[];
+  ul.textContent="";
+  AI.st.lines.forEach(function(l){
+    var li=document.createElement("li");
+    li.setAttribute("role","button"); li.setAttribute("tabindex","0");
+    var top=document.createElement("div"); top.className="set-ai-top";
+    var mark=document.createElement("span"); mark.className="set-ai-mark"; mark.setAttribute("aria-hidden","true");
+    mark.textContent=l.on ? "▣" : "□";
+    var name=document.createElement("span"); name.className="set-ai-name"; name.textContent=lineName(l);
+    var key=document.createElement("span"); key.className="set-ai-key"; key.textContent=l.key ? "…"+l.key.slice(-4) : "";
+    var sw=document.createElement("button"); sw.type="button"; sw.className="set-ai-sw"; sw.setAttribute("role","switch");
+    sw.setAttribute("aria-checked",l.on ? "true" : "false"); sw.textContent=tr(l.on ? "ai.sw.on" : "ai.sw.off");
+    sw.disabled=!lineProvider(l);
+    sw.onclick=function(ev){ if(ev && ev.stopPropagation) ev.stopPropagation(); toggleAiLine(l.id,!l.on); };
+    top.appendChild(mark); top.appendChild(name); top.appendChild(key); top.appendChild(sw);
+    var st=document.createElement("small"); st.className="set-ai-status"; st.textContent=aiLineStatus(l);
+    li.appendChild(top); li.appendChild(st);
+    li.onclick=function(){ openAiLine(l.id); };
+    ul.appendChild(li); focus.push(li);
+  });
+  focus.push($("set-ai-add-open"));
+  var on=AL.onLines(AI.st), uses=$("set-ai-uses");
+  uses.hidden=on.length<2;
+  if(on.length>=2){
+    var def=AL.find(AI.st,AI.st.def);
+    $("set-ai-def-value").textContent=(def ? lineName(def) : "")+" ›";
+    focus.push($("set-ai-def"));
+    var ulu=$("set-ai-use-links"); ulu.textContent="";
+    AL.USES.forEach(function(u){
+      var li=document.createElement("li"); li.className="set-ai-use";
+      li.setAttribute("role","button"); li.setAttribute("tabindex","0"); li.setAttribute("data-use",u);
+      var label=document.createElement("span"); label.className="set-ai-name"; label.textContent=tr("ai.use."+u);
+      var chosen=AI.st.use[u] && AL.find(AI.st,AI.st.use[u].line);
+      var value=document.createElement("span"); value.className="set-ai-value";
+      value.textContent=(chosen && chosen.on ? lineName(chosen) : tr("ai.use.default"))+" ›";
+      li.appendChild(label); li.appendChild(value);
+      li.onclick=function(){ openAiUse(u); };
+      ulu.appendChild(li); focus.push(li);
+    });
+  } else $("set-ai-use-links").textContent="";
+  return focus;
+}
+
+function renderAiAdd(){
+  var ul=$("set-ai-providers"), focus=[];
+  ul.textContent="";
+  PROV.forEach(function(p){
+    var li=document.createElement("li");
+    li.setAttribute("role","button"); li.setAttribute("tabindex","0"); li.setAttribute("data-provider",p.id);
+    var name=document.createElement("span"); name.className="set-ai-name"; name.textContent=p.name[aiLang()] || p.name.en;
+    var d=document.createElement("small"); d.className="set-ai-status"; d.textContent=tr("ai.prov."+p.id);
+    li.appendChild(name); li.appendChild(d);
+    li.onclick=function(){ openAiProvider(p.id); };
+    ul.appendChild(li); focus.push(li);
+  });
+  return focus;
+}
+
+function renderAiLine(){
+  var l=curLine(), prov=l ? lineProvider(l) : (AIPROV ? window.LopdaAI.provider(AIPROV) : null);
+  $("set-ai-line-title").textContent=l ? lineName(l) : (prov ? (prov.name[aiLang()] || prov.name.en) : "");
+  $("set-ai-key").placeholder=(l && l.key) ? tr("ai.key.saved",{key:l.key.slice(-4)}) : tr("ai.key.ph");
+  if(document.activeElement!==$("set-ai-key")) $("set-ai-key").value=(l && l.key) ? KEPT : "";
+  if(AIMIN!==AILINE){ AIMIN=AILINE; AIM=l ? l.model : ""; }
+  if(document.activeElement!==$("set-ai-model")) $("set-ai-model").value=AIM;
+  $("set-ai-model").placeholder=prov ? prov.model : "";
+  $("set-ai-model-hint").textContent=!prov ? "" : (prov.id==="openrouter" ? tr("ai.model.hint") : tr("ai.model.def",{model:prov.model}));
+  /* a line that cannot see has no pictures to read: no field, no list. Every provider with a model list gets a 从列表选
+     row under each field; the ones that want a key stay greyed until this line has one saved. */
+  var seeing=!!(prov && prov.vision), canList=!!(prov && prov.models);
+  var needKey=canList && prov.id!=="openrouter" && !(l && l.key);
+  $("set-ai-vmodel-row").hidden=!seeing;
+  $("set-ai-vmodel-hint").hidden=!seeing;
+  if(AIVMIN!==AILINE){ AIVMIN=AILINE; AIVM=l ? l.visionModel : ""; }
+  if(document.activeElement!==$("set-ai-vmodel")) $("set-ai-vmodel").value=AIVM;
+  $("set-ai-vmodel").placeholder=prov ? (prov.id==="openrouter" ? SCORE_PAGES.DEFAULT_MODEL : prov.visionModel) : "";
+  aiPickRow($("set-ai-model-pick"),canList,needKey);
+  aiPickRow($("set-ai-score-model"),canList && seeing,needKey);
+  $("set-ai-list-needkey").hidden=!needKey;
+  $("set-ai-model-pick-value").textContent=modelPickLabel("model",prov);
+  $("set-ai-score-model-value").textContent=modelPickLabel("vmodel",prov);
+  $("set-ai-line-state").textContent=AILINEMSG;
+  $("set-ai-test").hidden=!l; $("set-ai-del").hidden=!l;
+  $("set-ai-del").textContent=tr(AIDELARMED ? "ai.del.sure" : "ai.del");
+  var focus=[$("set-ai-save")];
+  if(l){ focus.push($("set-ai-test")); focus.push($("set-ai-del")); }
+  if(!$("set-ai-model-pick").hidden && !needKey) focus.push($("set-ai-model-pick"));
+  if(seeing) focus.push($("set-ai-vmodel"));
+  if(!$("set-ai-score-model").hidden && !needKey) focus.push($("set-ai-score-model"));
+  return focus;
+}
+/* a pick row: hidden for a provider with no model list, greyed (and never opened) until the line has a saved key */
+function aiPickRow(el,shown,disabled){
+  el.hidden=!shown;
+  el.classList.toggle("off",!!disabled);
+  if(disabled) el.setAttribute("aria-disabled","true"); else el.removeAttribute("aria-disabled");
+}
+
+function aiUseRow(labelText,secondText,disabled,current,go,extra){
+  var li=document.createElement("li");
+  li.setAttribute("role","radio"); li.setAttribute("tabindex","0");
+  li.setAttribute("aria-checked",current ? "true" : "false");
+  if(disabled){ li.setAttribute("aria-disabled","true"); li.className="off"; }
+  else if(current) li.className="on";
+  if(extra) li.className+=(li.className ? " " : "")+extra;
+  var top=document.createElement("div"); top.className="set-ai-top";
+  var name=document.createElement("span"); name.className="set-ai-name"; name.textContent=labelText;
+  top.appendChild(name); li.appendChild(top);
+  if(secondText){ var st=document.createElement("small"); st.className="set-ai-status"; st.textContent=secondText; li.appendChild(st); }
+  li.onclick=function(){ if(disabled){ sfx("err"); return; } go(); };
+  return li;
+}
+function renderAiUse(){
+  var use=AIUSE;
+  $("set-ai-use-title").textContent=use==="def" ? tr("ai.def") : tr("ai.use."+use);
+  var ul=$("set-ai-use-list"), focus=[], on=AL.onLines(AI.st);
+  ul.textContent="";
+  var chosen=use==="def" ? AI.st.def : (AI.st.use[use] && AI.st.use[use].line || "");
+  var chosenLine=chosen ? AL.find(AI.st,chosen) : null;
+  var chosenProv=chosenLine ? lineProvider(chosenLine) : null;
+  var valid=!!(chosenLine && chosenLine.on && (use!=="score" || (chosenProv && chosenProv.vision)));
+  if(use!=="def"){
+    var d=aiUseRow(tr("ai.use.followdef"),"",false,!valid,function(){ chooseUseLine(""); },"set-ai-follow");
+    ul.appendChild(d); focus.push(d);
+  }
+  on.forEach(function(l){
+    var p=lineProvider(l), dis=use==="score" && !(p && p.vision);
+    /* each line is one key: its last four characters say which, as in the lines list */
+    var keyHint=l.key ? "…"+l.key.slice(-4) : "";
+    var li=aiUseRow(lineName(l), dis ? keyHint+(keyHint ? " · " : "")+tr("ai.novision") : keyHint, dis, valid && !dis && l.id===chosen,
+      function(){ chooseUseLine(l.id); });
+    ul.appendChild(li); focus.push(li);
+  });
+  /* the ring starts on the choice, as in the score model list, not on the first row */
+  if(AIPAGE==="use" && focus.length){
+    var at=0;
+    for(var i=0;i<focus.length;i++) if(focus[i].classList.contains("on")){ at=i; break; }
+    AIFOCUS=at;
+  }
+  return focus;
+}
+function chooseUseLine(id){
+  if(!aiWritable()){ renderAi(); sfx("err"); return; }
+  if(AIUSE==="def") AL.setDef(AI.st,id);
+  else AL.choose(AI.st,AIUSE,id);
   saveAiDoc();
+  aiPage("main"); aiChanged(); sfx("ok");
+}
+
+/* redraws every sub-page from AI.st, so whichever one is open is current after any change; msg is the line page's status */
+function renderAi(msg){
+  if(typeof msg==="string") AILINEMSG=msg;
+  var focus={main:renderAiMain(), add:renderAiAdd(), line:renderAiLine(), use:renderAiUse()};
+  $("set-ai-open").textContent=aiRowText();
+  if(AIPAGE!=="model") aiSetFocus(focus[AIPAGE] || []);
+}
+/* a read that failed is tried again whenever the page opens; it always opens on the list */
+$("set-ai-row").onclick=function(){
+  sfx("tap"); AILINE=""; AIPROV=""; AIUSE=""; AILINEMSG=""; AIDELARMED=false;
+  aiPage("main"); show("set-ai"); if(AI.readFailed) readAi(); renderAi();
+};
+$("set-ai-back").onclick=function(){ resetModelPage(); sfx("tap"); openSettings(); };
+$("set-ai-add-open").onclick=function(){ aiPage("add"); renderAi(); sfx("tap"); };
+$("set-ai-add-back").onclick=aiBackToMain;
+$("set-ai-line-back").onclick=aiBackToMain;
+$("set-ai-use-back").onclick=aiBackToMain;
+$("set-ai-def").onclick=function(){ openAiUse("def"); };
+
+function saveAi(){
+  if(!aiWritable()){ renderAi(); sfx("err"); return; }
+  var v=$("set-ai-key").value.trim(), key=v===KEPT ? "" : v, model=$("set-ai-model").value.trim(), l=curLine();
+  var prov=l ? lineProvider(l) : (AIPROV ? window.LopdaAI.provider(AIPROV) : null);
+  /* a blind provider has no field to read: leave whatever an older line carries alone */
+  var vmodel=prov && prov.vision ? $("set-ai-vmodel").value.trim() : undefined;
+  if(l){
+    AL.edit(AI.st,l.id,key,model,vmodel); saveAiDoc(); AILINEMSG="";
+    AIM=l.model || ""; AIMIN=l.id; AIVM=l.visionModel || ""; AIVMIN=l.id;
+    $("set-ai-key").blur(); aiChanged(); sfx("ok"); return;
+  }
+  if(!prov){ renderAi(); sfx("err"); return; }
+  if(!key){ renderAi(tr("ai.nokey")); sfx("err"); return; }
+  l=AL.add(AI.st,prov.id,key,model,Date.now(),vmodel || "");
+  AILINE=l.id; AIPROV=""; AILINEMSG=""; AIM=l.model || ""; AIMIN=l.id; AIVM=l.visionModel || ""; AIVMIN=l.id;
   $("set-ai-key").blur();
+  saveAiDoc();
   aiChanged(); sfx("ok");
+  /* a new line is tried on the spot: a failure still keeps it, with the reason in its status line */
+  runAiTest();
 }
 $("set-ai-save").onclick=saveAi;
 $("set-ai-key").addEventListener("focus",function(){ if(this.value===KEPT) this.value=""; });
-$("set-ai-key").addEventListener("blur",function(){ if(!this.value && AI.key) this.value=KEPT; });
-$("set-ai-del").onclick=function(){
-  AI.key=""; AI.model=""; $("set-ai-model").value="";
-  /* Removing the key clears the AI document unless a score-model choice still needs it. */
-  if(S.db){
-    if(AI.scoreModel) S.db.doc(AIP).set({v:1, key:"", model:"", scoreModel:AI.scoreModel}).catch(function(){});
-    else S.db.doc(AIP).delete().catch(function(){});
-  }
-  aiChanged(); sfx("ok");
-};
-$("set-ai-test").onclick=function(){
-  var b=this; if(b.disabled) return;
+$("set-ai-key").addEventListener("blur",function(){ var l=curLine(); if(!this.value && l && l.key) this.value=KEPT; });
+/* what is typed stays a draft until 保存, even when the line's status redraws the page; the pick rows follow it */
+$("set-ai-vmodel").addEventListener("input",function(){
+  AIVM=this.value; AIVMIN=AILINE;
+  $("set-ai-score-model-value").textContent=modelPickLabel("vmodel",pageProvider());
+});
+$("set-ai-model").addEventListener("input",function(){
+  AIM=this.value; AIMIN=AILINE;
+  $("set-ai-model-pick-value").textContent=modelPickLabel("model",pageProvider());
+});
+/* a capital letter drawn large on a small white picture: the vision step of the line test, and what it should read */
+function aiTestPicture(){
+  var letters="ACEFHKMNPRTWXY", ch=letters.charAt(Math.floor(Math.random()*letters.length));
+  var cv=document.createElement("canvas"), g;
+  cv.width=cv.height=96;
+  g=cv.getContext("2d");
+  g.fillStyle="#fff"; g.fillRect(0,0,96,96);
+  g.fillStyle="#000"; g.font="bold 64px sans-serif"; g.textAlign="center"; g.textBaseline="middle";
+  g.fillText(ch,48,48);
+  var url=cv.toDataURL("image/jpeg",0.9);
+  cv.width=cv.height=1;
+  return {letter:ch, url:url};
+}
+function runAiTest(){
+  var b=$("set-ai-test"), l=curLine();
+  if(!l || b.disabled) return;
   b.disabled=true; renderAi(tr("ai.testing")); sfx("tap");
-  var used="";
-  LP.ai.ask({messages:[{role:"user", content:"Reply with the single word OK."}], max:16, onModel:function(m){ used=m; }}).then(function(t){
-    renderAi(tr("ai.tested",{text:t.trim().slice(0,40), model:used || AI.model || window.LopdaAI.MODEL})); sfx("ok");
-  },function(e){ renderAi(aiErr(e)); sfx("err"); }).then(function(){ b.disabled=false; });
-};
+  var used="", prov=lineProvider(l), id=l.id;
+  function model(){ return used || l.model || (prov ? prov.model : window.LopdaAI.MODEL); }
+  function done(parts,ok){
+    if(AILINE===id){ AILINEMSG=parts.join("\n"); renderAi(); }
+    sfx(ok ? "ok" : "err"); b.disabled=false;
+  }
+  askLine(l,{messages:[{role:"user", content:"What is 1+1? Reply with the number only."}], max:2048, onModel:function(m){ used=m; }},l.model).then(function(t){
+    var textOk=AL.checkAnswer("math",t,2),
+      textPart=textOk ? tr("ai.t.text.ok",{model:model()}) : tr("ai.t.text.bad",{text:t.trim().slice(0,40)});
+    if(!prov || !prov.vision){ done([tr(textOk ? "ai.t.ok" : "ai.t.some"), textPart], textOk); return; }
+    var pic=aiTestPicture();
+    askLine(l,{messages:[{role:"user", content:[{type:"image_url", image_url:{url:pic.url}},
+        {type:"text", text:"Which capital letter is in this picture? Reply with the letter only."}]}], max:2048,
+      onModel:function(m){ used=m; }}, AL.modelFor(AI.st,"score",l,PROV,SCORE_PAGES.DEFAULT_MODEL)).then(function(v){
+      var visOk=AL.checkAnswer("letter",v,pic.letter);
+      done([tr(textOk && visOk ? "ai.t.ok" : "ai.t.some"), textPart,
+        visOk ? tr("ai.t.vis.ok",{letter:pic.letter, model:model()})
+          : tr("ai.t.vis.bad",{text:v.trim().slice(0,40), letter:pic.letter})], textOk && visOk);
+    },function(e){
+      done([tr("ai.t.some"), textPart, tr("ai.t.vis.err",{why:aiErrLine(e,l)})], false);
+    });
+  },function(e){
+    if(AILINE===id){ AILINEMSG=aiErrLine(e,l); renderAi(); }
+    sfx("err"); b.disabled=false;
+  });
+}
+$("set-ai-test").onclick=runAiTest;
+/* deleting a line removes its key (the score-model choice stays); two presses, and leaving the page forgets the first */
+function deleteAiLine(){
+  if(!aiWritable()){ renderAi(); sfx("err"); return; }
+  var l=curLine(); if(!l) return;
+  if(!AIDELARMED){ AIDELARMED=true; renderAi(); sfx("tap"); return; }
+  AL.remove(AI.st,l.id); saveAiDoc();
+  AIDELARMED=false; AILINE=""; AIPROV=""; AILINEMSG="";
+  aiPage("main"); aiChanged(); sfx("ok");
+}
+$("set-ai-del").onclick=deleteAiLine;
+/* the pages' keys, like the score model list: arrows move the ring, A/Enter chooses, B/Escape goes back */
+document.addEventListener("keydown",function(e){
+  if($("v-set-ai").hidden || AIPAGE==="model") return;
+  var t=e.target || {};
+  if(/^(INPUT|TEXTAREA)$/.test(t.nodeName)){
+    if(e.key==="Escape"){ t.blur(); e.preventDefault(); }
+    return;
+  }
+  if(e.defaultPrevented) return;
+  var items=AIFOCUSABLES, key=e.key, n=items.length;
+  if(key==="ArrowUp" || key==="ArrowLeft"){
+    if(!n) return;
+    AIFOCUS=(AIFOCUS+n-1)%n; aiFocusPaint(); e.preventDefault();
+  } else if(key==="ArrowDown" || key==="ArrowRight"){
+    if(!n) return;
+    AIFOCUS=(AIFOCUS+1)%n; aiFocusPaint(); e.preventDefault();
+  } else if(key==="x" || key==="X" || key==="Enter"){
+    if(items[AIFOCUS]) items[AIFOCUS].click();
+    e.preventDefault();
+  } else if(key==="z" || key==="Z" || key==="Escape"){
+    aiBack(); e.preventDefault();
+  }
+});
+/* one request down one line: the key goes only to that line's own provider (ai.js looks the address up in its table) */
+function askLine(l,o,model){
+  var q={}, k;
+  for(k in o) if(k!=="use" && k!=="key" && k!=="provider" && k!=="url") q[k]=o[k];
+  q.provider=l.provider; q.key=l.key; q.model=o.model || model;
+  var p=AIH.ask(q), id=l.id;
+  p.then(function(){ noteLast(id,{ok:true, at:Date.now()}); },function(e){
+    var c=e && e.code;
+    if(c && c!=="stopped" && c!=="nokey") noteLast(id,{ok:false, code:c, at:Date.now()});
+  });
+  return p;
+}
 LP.ai={
   PATH:AIP,
-  on:function(){ return !!AI.key; },
-  /* o: {messages, max, onText, onModel, model}; the key and default model are added here */
-  ask:function(o){ var q={}; for(var k in o) q[k]=o[k]; q.key=AI.key; q.model=o.model || AI.model; return AIH.ask(q); },
-  scoreModel:function(){ return scoreModelId(); },
+  /* is there a line this program can use? ("score" needs one that can see) */
+  on:function(use){ return !!AL.pick(AI.st,use||"",PROV); },
+  /* o: {use, messages, max, onText, onModel, onSignal, model}; the line, its key, provider and model are added here */
+  ask:function(o){
+    var use=o && o.use || "", l=AL.pick(AI.st,use,PROV);
+    if(!l) return AIH.ask({key:"", messages:[]});
+    return askLine(l,o,AL.modelFor(AI.st,use,l,PROV,SCORE_PAGES.DEFAULT_MODEL));
+  },
+  /* the line a program would use, for its status line and messages: never the key */
+  line:function(use){
+    var l=AL.pick(AI.st,use||"",PROV), p=l && window.LopdaAI.provider(l.provider);
+    return l ? {id:l.id, name:lineName(l), provider:l.provider, vision:!!(p && p.vision)} : null;
+  },
+  /* the model Tape4's score reading would use: the picked line's vision model, else the default */
+  scoreModel:function(){ var l=AL.pick(AI.st,"score",PROV); return l ? AL.modelFor(AI.st,"score",l,PROV,SCORE_PAGES.DEFAULT_MODEL) : SCORE_PAGES.DEFAULT_MODEL; },
   err:aiErr,
   watch:function(f){ AI.seen.push(f); },
-  saved:function(){ return AI.key || AI.scoreModel ? {v:1, key:AI.key, model:AI.model, scoreModel:AI.scoreModel} : null; }
+  /* the whole document as it should be stored, or null when there is nothing in it */
+  saved:function(){ return AI.loaded && (AI.st.lines.length || Object.keys(AI.st.use).length) ? AL.toDoc(AI.st) : null; },
+  /* for the tests */
+  _test:{state:function(){ return {st:AI.st, loaded:AI.loaded, readFailed:AI.readFailed}; }, reread:readAi}
 };
 
 /* ---------- the darkroom key (runtime/geotag.js, decisions.md section 40) ----------
@@ -534,11 +1018,13 @@ function doRestore(bk){
   box(tr("rs.working"));
   /* the AI key is never in a backup: the one on this phone stays, whatever the file holds. The darkroom key does go
      in (without it a restored phone could not read its own photos' places), and a restore only ever adds keys. */
-  S.db.doc(DKP).get().then(function(sn){
-    var mineDark=sn.exists ? LP.own(sn.data()) : null, theirsDark=null, i;
+  /* the AI document is read again here and written back exactly as stored, whatever its version: a restore must never
+     lose a key, not even after an earlier read failed or when a newer Lo-PDA wrote it. If it cannot be read, no restore. */
+  Promise.all([S.db.doc(DKP).get(),S.db.doc(AIP).get()]).then(function(r){
+    var sn=r[0], mineDark=sn.exists ? LP.own(sn.data()) : null, theirsDark=null, i;
     for(i=0;i<bk.docs.length;i++) if(bk.docs[i].path===DKP) theirsDark=bk.docs[i].data;
     var dark=G.mergeRing(mineDark,theirsDark);
-    var mine=LP.ai.saved(), docs=bk.docs.filter(function(x){ return x.path!==AIP && x.path!==DKP; });
+    var mine=r[1].exists ? LP.own(r[1].data()) : null, docs=bk.docs.filter(function(x){ return x.path!==AIP && x.path!==DKP; });
     if(mine) docs.push({path:AIP, data:mine});
     if(dark) docs.push({path:DKP, data:dark});
     /* programs stop their own writes before anything is replaced; the page reloads straight after a successful restore */
@@ -620,7 +1106,7 @@ $("set-share-copy").onclick=function(){
 
 LP.builtin({id:"set-ai", view:"set-ai",
   enter:function(){ renderAi(); },
-  leave:function(){ resetScoreModelPage(); },
+  leave:function(){ resetModelPage(); },
   lang:function(){ renderAi(); }
 });
 LP.builtin({id:"set-sense", view:"set-sense",
@@ -646,14 +1132,7 @@ LP.builtin({id:"settings", label:"app.settings", icon:"settings", view:"settings
   open:function(){ openSettings(); },
   lang:function(){ renderSettings(); renderSense(); renderAi(); renderLast(); renderSavesRow(); },
   ready:function(){
-    S.db.doc(AIP).get().then(function(sn){
-      var d=sn.exists ? LP.own(sn.data()) : null;
-      if(d){
-        AI.scoreModel=typeof d.scoreModel==="string" ? d.scoreModel : "";
-        if(typeof d.key==="string" && d.key){ AI.key=d.key; AI.model=typeof d.model==="string" ? d.model : ""; }
-        aiChanged();
-      }
-    }).catch(function(){});
+    readAi();
     S.db.doc(BMETA).get().then(function(sn){ var d=sn.exists ? LP.own(sn.data()) : null; BS.last=d && +d.last || 0; renderLast(); }).catch(function(){});
   }});
 })();

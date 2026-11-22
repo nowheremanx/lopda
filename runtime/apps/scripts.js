@@ -659,7 +659,7 @@ function editorAction(){
    count show whether the line is (ai.js hangs up after a minute of nothing). Leaving the page drops the line on iPhone,
    so the hint asks the user to stay, and a failure after leaving says so. */
 var G={job:null, s:null, t0:0, last:0, sig:null, mark:false, tick:0, left:false, mode:"gen", text:"", old:null, ask:""};
-function aiOn(){ return !!(LP.ai && LP.ai.on()); }
+function aiOn(){ return !!(LP.ai && LP.ai.on("scripts")); }
 function generating(){ return !!G.job && !!M.current && M.current===G.s; }
 /* A revise of s is streaming: the editor shows the answer, and nothing may read it into s or write it out. */
 function revising(s){ return !!(G.job && G.mode==="revise" && s && G.s===s); }
@@ -688,7 +688,7 @@ function generate(){
   if(M.ideaTouched || M.idea) saveIdeaNow();
   var s=newScript(false);
   G.s=s; G.t0=G.last=Date.now(); G.sig=null; G.left=false;
-  G.job=LP.ai.ask({messages:[{role:"user", content:tr("scripts.prompt",{idea:promptIdea()})}],
+  G.job=LP.ai.ask({use:"scripts", messages:[{role:"user", content:tr("scripts.prompt",{idea:promptIdea()})}],
     onSignal:function(q){ G.sig=q; G.last=Date.now(); G.mark=!G.mark; genHint(); },
     onText:function(piece,all){
       s.body=all;
@@ -715,7 +715,7 @@ function generate(){
       sfx("ok");
     });
   }).catch(function(e){
-    var code=e && e.code, why=tr("scripts.gen.fail",{why:G.left && code!=="stopped" ? tr("scripts.gen.left") : LP.ai.err(e)}),
+    var code=e && e.code, why=tr("scripts.gen.fail",{why:G.left && code!=="stopped" ? tr("scripts.gen.left") : LP.ai.err(e,"scripts")}),
       here=M.current===s && !$("v-script-edit").hidden;
     end();
     if(here) setHint(why); else toast(why);
@@ -803,7 +803,7 @@ function revisedName(old, code){
 function startRevise(s, old, ask){
   G.mode="revise"; G.s=s; G.text=""; G.old=old; G.ask=ask;
   G.t0=G.last=Date.now(); G.sig=null; G.left=false;
-  G.job=LP.ai.ask({messages:[{role:"user", content:revisePrompt(old.body, ask)}],
+  G.job=LP.ai.ask({use:"scripts", messages:[{role:"user", content:revisePrompt(old.body, ask)}],
     onSignal:function(q){ G.sig=q; G.last=Date.now(); G.mark=!G.mark; genHint(); },
     onText:function(piece,all){
       /* the answer is a candidate, never s.body; it lives in G.text so a re-entered editor shows it */
@@ -840,7 +840,7 @@ function startRevise(s, old, ask){
   }).catch(function(e){
     var code=e && e.code, why;
     if(code==="revise") why=tr("scripts.revise.fail",{why:tr("scripts.revise.why."+e.why)});
-    else why=tr("scripts.gen.fail",{why:G.left && code!=="stopped" ? tr("scripts.gen.left") : LP.ai.err(e)});
+    else why=tr("scripts.gen.fail",{why:G.left && code!=="stopped" ? tr("scripts.gen.left") : LP.ai.err(e,"scripts")});
     end();
     if(here()) setHint(why); else toast(why);
     sfx("err");
