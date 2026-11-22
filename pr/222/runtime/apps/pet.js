@@ -6,10 +6,10 @@
  * Screen: the room is a 162 x 120 canvas at 2 CSS pixels a pixel (324 x 240), then five 44 px icon targets and the
  * soft keys; 328 px of content, so it fits the 331 x 359 LCD with nothing to scroll. Everything on the canvas is
  * putImageData from a Uint8Array of tone indices: never drawImage after putImageData (Safari swaps red and blue).
- * Sub-screens (food, the play pack list, the START menu, look, box, word, the naming panel) open over the room at the
- * same 324 x 240, on paper with ink text. A play pack runs in the room canvas at 20 fps only while its screen is
- * visible (50 ms fixed ticks in petplay.js), from the same putImageData buffer as the room; leaving, pausing or HOME
- * stops it.
+ * Sub-screens (food, the play pack list, the START menu, look, box, word, the naming panel, the long press's
+ * 去看看？ question) open over the room at the same 324 x 240, on paper with ink text. A play pack runs in the room
+ * canvas at 20 fps only while its screen is visible (50 ms fixed ticks in petplay.js), from the same putImageData
+ * buffer as the room; leaving, pausing or HOME stops it.
  *
  * Storage: data/users/local/pet (design.md 8 plus petsim's lastMeal, awakeHunger, awakeJoy, today, seenUse and aiUse;
  * care — the days-long 0..1 average the souvenir mood comes from — and boxSeen, today's pick/outing
@@ -85,8 +85,8 @@ var NAME_EMOJI=/[\p{Extended_Pictographic}\u{1F1E6}-\u{1F1FF}\u{1F3FB}-\u{1F3FF}
 var P={
   save:null, loaded:false, nostore:false, readTried:false, readFailed:false, inView:false,
   refs:null, souv:[], usage:null, resumeOuting:false,
-  sub:null, sel:0, menuSel:0, frame:0,
-  anim:0, hold:0, roomHold:0, holdFired:false,
+  sub:null, sel:0, menuSel:0, frame:0, go:null,
+  anim:0, hold:0, roomHold:0, roomAt:null, holdFired:false,
   eggMs:0, hatching:null, action:null, actionUntil:0, heartUntil:0,
   washUntil:0, washStart:0, flash:null, outing:null, foodSel:0, boxPage:0, boxSel:0, boxItem:null, boxAsk:null,
   naming:null, task:null, at:null, feeds:[], awakeLeft:0, puffUntil:0, pendingNeed:null, lightReturn:false,
@@ -1670,9 +1670,13 @@ function applyGameJoy(st){
     P.save.best[id]=score;
     if(P.game && P.game.id===id) P.game.newBest=true;
   }
-  P.save=Pet.play(P.save,st.joy,dayKey(now()));
-  P.action="happy"; P.actionUntil=now()+2500; P.heartUntil=now()+2500;
-  beep(st.joy>1?"win":"ok"); saveSoon();
+  /* a round with no progress earns nothing; the best score above is still kept */
+  if(st.joy>0){
+    P.save=Pet.play(P.save,st.joy,dayKey(now()));
+    P.action="happy"; P.actionUntil=now()+2500; P.heartUntil=now()+2500;
+    beep(st.joy>1?"win":"ok");
+  } else beep("tap");
+  saveSoon();
 }
 function stopGameTimer(){ if(P.gameTimer){ clearInterval(P.gameTimer); P.gameTimer=0; } }
 function exitGame(swallowAUp){
@@ -1865,12 +1869,14 @@ function pressA(){
   }
   if(P.sub==="name"){ nameNext(); return; }
   if(P.sub==="word"){ lookupWord(); return; }
+  if(P.sub==="go"){ goNow(); return; }
   if(P.sub) return;
   if(P.save.travel){ bringBack(); return; }
   useSelected();
 }
 function back(){
   if(P.sub==="game"){ exitGame(); return; }
+  if(P.sub==="go"){ closeGo(); return; }
   if(P.sub==="name"){
     if(P.naming && P.naming.confirm) nameEdit();
     return;
@@ -2372,6 +2378,7 @@ function panelKey(){
   if(P.sub==="name") return ["name",P.naming&&P.naming.confirm?1:0,I18N.lang].join("|");
   var s=P.save||{}, st=gameState();
   return [P.sub,P.foodSel,P.boxPage,P.boxAsk?P.boxAsk.id+P.boxAsk.take:"" ,P.menuSel,P.confirmStage,I18N.lang,P.souv.length,P.boxSel,P.boxItem||"",activePick()?activePick().kind:"",
+    P.go?P.go.name:"",
     P.naming?(P.naming.confirm?1:0):-1,
     P.gameSel,P.game?P.game.id:"",st?st.score:-1,st&&st.done?1:0,P.game&&P.game.applied?1:0,P.game&&P.game.started?1:0,P.game&&P.game.newBest?1:0,
     P.wordWord,P.wordMeaning,P.wordBusy,
@@ -2454,7 +2461,7 @@ function buildGameOver(panel){
   box.appendChild(score);
   box.appendChild(el("p","pet-gbest",tr("pet.game.best",{n:bestScore(P.game?P.game.id:"")})));
   if(P.game && P.game.newBest) box.appendChild(el("p","pet-gbest",tr("pet.game.newbest")));
-  box.appendChild(el("p","pet-gcomment",tr(st.joy>=2?"pet.game.result.fun":"pet.game.result.ok")));
+  box.appendChild(el("p","pet-gcomment",tr(st.joy>=2?"pet.game.result.fun":st.joy>=1?"pet.game.result.ok":"pet.game.result.again")));
   box.appendChild(el("p","pet-ganykey",tr("pet.game.anykey")));
   panel.appendChild(box);
 }
@@ -2479,6 +2486,15 @@ function buildWord(panel){
   if(P.wordBusy) panel.appendChild(el("p","pet-pinfo",tr("pet.word.loading")));
   else if(P.wordMeaning!=null) panel.appendChild(el("p","pet-meaning",P.wordMeaning));
   panel.appendChild(el("p","pet-phint",tr(P.wordMeaning!=null?"pet.word.back":"pet.word.hint")));
+}
+/* the long press's one question, with its own two buttons: B (or 不去) stays, A (or 去) goes */
+function buildGo(panel){
+  var target=P.go;
+  panel.appendChild(el("p","pet-ptitle",tr("pet.go.ask",{v:target?tr(target.name):""})));
+  var row=el("div","pet-askrow");
+  var yes=el("button","btn",tr("pet.go.yes")); yes.type="button"; yes.id="pet-go-yes"; yes.onclick=function(){ goNow(); };
+  var no=el("button","btn ghost",tr("pet.go.no")); no.type="button"; no.id="pet-go-no"; no.onclick=function(){ closeGo(); };
+  row.appendChild(yes); row.appendChild(no); panel.appendChild(row);
 }
 function buildBox(panel){
   panel.appendChild(el("p","pet-ptitle",tr("pet.box.title")));
@@ -2602,6 +2618,7 @@ function renderPanel(){
   else if(P.sub==="box") buildBox(panel);
   else if(P.sub==="name") buildName(panel);
   else if(P.sub==="word") buildWord(panel);
+  else if(P.sub==="go") buildGo(panel);
   if(P.sub==="look" && P.confirmStage){
     LP.resetConfirm("pet-confirm","pet-confirm-btn",tr("pet.look.restart"),restartPet);
     if(P.confirmStage===2){
@@ -2645,6 +2662,7 @@ function aKeyLabel(){
   }
   if(P.sub==="name") return P.naming && P.naming.confirm ? "pet.name.yes" : "pet.name.ok";
   if(P.sub==="word") return "pet.sk.lookup";
+  if(P.sub==="go") return "pet.go.yes";
   if(!P.save || isEgg()) return "";
   if(P.save.travel) return "pet.act.call";
   switch(P.sel){
@@ -2676,6 +2694,7 @@ function renderKeys(){
   var blabel=tr(inGame?"pet.game.exit":"sk.back");
   if(P.sub==="box" && P.boxAsk) blabel=tr("pet.shelf.no");
   else if(P.sub==="name") blabel=tr("pet.name.edit");
+  else if(P.sub==="go") blabel=tr("pet.go.no");
   LP.softkeys(wrap,{
     select:null,                           /* reserved for switching rooms when more species come (visits) */
     start:{label:egg ? "" : tr("pet.sk.menu"),disabled:!!P.sub || egg,fn:openMenu},
@@ -2803,6 +2822,7 @@ function leave(){
   if(P.roomHold){ clearTimeout(P.roomHold); P.roomHold=0; }
   P.holdFired=false;
   P.sub=null; P.confirmStage=0; P.game=null; P.outing=null;
+  P.go=null; P.roomAt=null;
   P.naming=null; P.boxAsk=null; P.wasAsleep=null;
   finishTaskOnLeave();
   P.gameHeld={left:false,right:false,a:false};
@@ -2916,32 +2936,148 @@ function tag(){
   if(!P.save) return "";
   return P.souv.length > (+P.save.boxSeen||0) ? tr("pet.tag") : "";
 }
+/* One mapping from a pointer event to a pixel of the room canvas: the card's tap and the long press both use it,
+   never coordinates typed in here. */
+function roomPoint(e){
+  var cv=$("pet-cv");
+  if(!cv || !e) return null;
+  var r=cv.getBoundingClientRect();
+  if(!r.width || !r.height) return null;
+  return {x:(e.clientX-r.left)*cv.width/r.width, y:(e.clientY-r.top)*cv.height/r.height};
+}
+function inRoomBox(x,y,b){
+  if(!b) return false;
+  /* the room's own furniture boxes are [x,y,w,h]; the resolver's prop box is {x,y,w,h} */
+  var bx, by, bw, bh;
+  if(typeof b.length==="number"){ bx=b[0]; by=b[1]; bw=b[2]; bh=b[3]; }
+  else { bx=b.x; by=b.y; bw=b.w; bh=b.h; }
+  return x>=bx && x<bx+bw && y>=by && y<by+bh;
+}
 /* A short tap on the word card in the room turns it over. The box comes from the same Art.resolve the room
-   draws with, never from coordinates typed in here; the long hold still pats as it always did. */
+   draws with; the long hold on a thing asks 去看看？, anywhere else it pats as it always did. */
 function tapPickCard(e){
   var pick=activePick(), scene=P.lastScene;
   if(!pick || pick.kind!=="word" || !scene || scene.propPick!=="word" || !Art.resolve) return;
   var at;
   try{ at=Art.resolve(scene,roomNow()); }catch(err){ return; }
   if(!at || !at.prop) return;
-  var cv=$("pet-cv");
-  if(!cv) return;
-  var r=cv.getBoundingClientRect();
-  if(!r.width || !r.height) return;
-  var x=(e.clientX-r.left)*cv.width/r.width, y=(e.clientY-r.top)*cv.height/r.height, b=at.prop;
-  if(x<b.x || x>=b.x+b.w || y<b.y || y>=b.y+b.h) return;
+  var pt=roomPoint(e);
+  if(!pt || !inRoomBox(pt.x,pt.y,at.prop)) return;
   usePick();
+}
+/* ---------- 去看看？: a long press on a thing in the room asks before it takes you anywhere ----------
+   The boxes are the art's own: the day's pick's prop through Art.resolve (the same resolver the room draws with),
+   then pack.roomThings in its order. A long press anywhere else still pats. Going changes nothing in the save: the
+   pick is not used, no day is marked, and the program opened is the player's own (decisions.md section 37). */
+function goAllowed(){
+  return !!(P.save && !P.sub && P.save.stage!=="egg" && !P.save.travel && !P.outing && !inBedSleep());
+}
+/* a built-in by id, opened the way its own home tile opens it; every caller guards with try/catch */
+function openBuiltin(id){
+  var list=LP.builtins||[], i;
+  for(i=0;i<list.length;i++){
+    var b=list[i];
+    if(b && b.id===id && typeof b.open==="function"){ b.open(); return true; }
+  }
+  return false;
+}
+function openReaderGo(){
+  try{
+    if(LP.reader && typeof LP.reader.current==="function" && typeof LP.reader.open==="function"){
+      var cur=LP.reader.current();
+      if(cur && cur.id && LP.reader.open(cur.id)) return true;
+    }
+  }catch(e){}
+  return openBuiltin("reader");
+}
+function openDiaryGo(){
+  /* the notes' own "YYYY-MM-DD" key for today; an earlier day with no diary would open a fresh one, which is fine */
+  try{
+    if(LP.notes && typeof LP.notes.openDiary==="function" && LP.notes.openDiary(dayKey(now()))) return true;
+  }catch(e){}
+  return openBuiltin("notes");
+}
+function openCalendarGo(day){
+  try{
+    if(typeof day==="number" && LP.calendar && typeof LP.calendar.open==="function" && LP.calendar.open(day)) return true;
+  }catch(e){}
+  return openBuiltin("calendar");
+}
+function goTargetFor(id){
+  if(id==="photo") return {name:"app.darkroom", go:function(){ return openBuiltin("darkroom"); }};
+  if(id==="books" || id==="bookshelf") return {name:"app.reader", go:openReaderGo};
+  if(id==="diary") return {name:"app.notes", go:openDiaryGo};
+  if(id==="calendar") return {name:"app.calendar", go:function(){ return openCalendarGo(dayNumberNow()); }};
+  return null;
+}
+/* the thing under a room pixel, first hit wins; null is the empty floor, which pats */
+function roomTarget(x,y){
+  var scene=P.lastScene, pick=activePick(), pack=packOf(P.save), things, i, at;
+  if(!scene) return null;
+  if(pick && (pick.kind==="date" || pick.kind==="word") && scene.propPick===pick.kind && Art && typeof Art.resolve==="function"){
+    at=null;
+    try{ at=Art.resolve(scene,roomNow()); }catch(err){ at=null; }
+    if(at && inRoomBox(x,y,at.prop)){
+      if(pick.kind==="date"){
+        var day=pick.day;
+        return {name:"app.calendar", go:function(){ return openCalendarGo(day); }};
+      }
+      return {name:"app.dict", go:function(){ return openBuiltin("dict"); }};
+    }
+  }
+  if(!pack || typeof pack.roomThings!=="function") return null;
+  try{ things=pack.roomThings(scene.saw)||[]; }catch(err){ things=[]; }
+  for(i=0;i<things.length;i++){
+    if(!things[i] || !inRoomBox(x,y,things[i].box)) continue;
+    var hit=goTargetFor(things[i].id);
+    if(hit) return hit;
+  }
+  return null;
+}
+function askGo(target){
+  if(!target) return;
+  P.sub="go"; P.go=target; P.panelKey="";
+  beep("tap"); renderKeys(); render();
+}
+function closeGo(){
+  if(P.sub!=="go") return;
+  P.sub=null; P.go=null; P.panelKey="";
+  beep("tap"); renderKeys(); render();
+}
+/* A opens the program and the panel closes with it. A target that cannot be opened (no built-in, a broken
+   summary) gives the error tone and puts the room back, never a dead key. */
+function goNow(){
+  var target=P.go;
+  if(!target) return;
+  P.sub=null; P.go=null; P.panelKey="";
+  var ok=false;
+  try{ ok=typeof target.go==="function" && target.go()!==false; }catch(err){ ok=false; }
+  if(!ok){
+    beep("err"); renderKeys(); render();
+    return;
+  }
+  /* a program that opened has shown its own view, and this screen has left; nothing to draw here */
+  if(isOpen()){ renderKeys(); render(); }
+}
+function longRoomPress(){
+  if(goAllowed()){
+    var pt=P.roomAt, target=pt ? roomTarget(pt.x,pt.y) : null;
+    if(target){ P.roomAt=null; askGo(target); return; }
+  }
+  P.roomAt=null;
+  patPet();
 }
 function bindRoom(){
   var cv=$("pet-cv");
   if(!cv || cv.getAttribute("data-bound")) return;
   cv.setAttribute("data-bound","1");
-  cv.addEventListener("pointerdown",function(){
+  cv.addEventListener("pointerdown",function(e){
     if(document.hidden || !isOpen() || P.sub || P.save && (P.save.travel || P.outing)) return;
     if(P.roomHold){ clearTimeout(P.roomHold); }
+    P.roomAt=roomPoint(e);
     P.roomHold=setTimeout(function(){
       P.roomHold=0;
-      if(!document.hidden) patPet();
+      if(!document.hidden) longRoomPress();
     },HOLD_MS);
   });
   ["pointerup","pointercancel","pointerleave"].forEach(function(t){
@@ -2963,19 +3099,21 @@ function bindRoom(){
     if(gameDone()){ exitGame(); return; }
     if(!P.game.started){ startRound(); return; }
     P.gameTouch=e.pointerId;
-    gameSide(e);
+    /* the runner has one button: a finger anywhere on the field is A, pressed and held */
+    if(P.game.id==="run"){ P.gamePress.a=true; P.gameHeld.a=true; }
+    else gameSide(e);
     try{ if(cv.setPointerCapture) cv.setPointerCapture(e.pointerId); }catch(err){}
     e.preventDefault();
   }
   function gameTouchEnd(e){
     if(P.gameTouch==null || (e && e.pointerId!==P.gameTouch)) return;
     P.gameTouch=null;
-    P.gameHeld.left=false; P.gameHeld.right=false;
+    P.gameHeld.left=false; P.gameHeld.right=false; P.gameHeld.a=false;
   }
   cv.addEventListener("pointerdown",gameTouch);
   cv.addEventListener("pointermove",function(e){
     if(P.gameTouch==null || e.pointerId!==P.gameTouch) return;
-    gameSide(e);
+    if(P.game && P.game.id!=="run") gameSide(e);
     e.preventDefault();
   });
   ["pointerup","pointercancel","pointerleave"].forEach(function(t){ cv.addEventListener(t,gameTouchEnd); });
@@ -2997,7 +3135,8 @@ LP.padRoute("pet",function(b,down){
       if(down) startRound();                                   /* any other first key starts the round */
       return true;
     }
-    if(b==="a"){ if(down) pressA(); return true; }
+    /* A is held as well as pressed: the runner's jump goes higher while A stays down */
+    if(b==="a"){ P.gameHeld.a=!!down; if(down) pressA(); return true; }
     if(b==="b"){ if(down) exitGame(); return true; }
     if(b==="left" || b==="right"){ P.gameHeld[b]=!!down; return true; }
     return true;                                  /* up/down/start/select do nothing in a play pack */

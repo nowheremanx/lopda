@@ -1234,6 +1234,20 @@ function drawSaw(buf,w,h,saw){
     bhline(buf,w,h,56,91,3,2); bhline(buf,w,h,62,91,3,2); bhline(buf,w,h,62,92,2,2);
   }
 }
+/* Where the room's things are, for the program's long press ("去看看？"): [{id, box:[x,y,w,h]}] in room pixels, the
+   saw marks first (they are drawn over the wall), then the wall calendar and the bookshelf. Only counts reach here. */
+function roomThings(saw){
+  var out=[], i, n;
+  saw=saw||{};
+  n=Math.max(0,Math.min(SAW_PHOTOS,Math.floor(+saw.photos||0)));
+  for(i=0;i<n;i++) out.push({id:"photo", box:[56+i*14,53,10,10]});
+  n=Math.max(0,Math.min(SAW_READS,Math.floor(+saw.reads||0)));
+  if(n) out.push({id:"books", box:[114,13-(n-1)*3,44,3*n]});
+  if(saw.diary) out.push({id:"diary", box:[54,89,13,6]});
+  out.push({id:"calendar", box:[60,13,28,35]});
+  out.push({id:"bookshelf", box:[114,16,44,80]});
+  return out;
+}
 function drawFurniture(buf,w,h,scene,room){
   var x, y, i;
   /* wall: paper with a grid of soft 12 px spaced 2 x 2 dots */
@@ -1567,6 +1581,7 @@ var CHIP_PACK={
   icons:ICONS,
   homeIcons:HOME_ICONS,
   homeForm:homeForm,
+  roomThings:roomThings,
   souvenirs:(window.LopdaPetSouv && window.LopdaPetSouv.CATALOG)||[]
 };
 var PACKS={chip:CHIP_PACK};

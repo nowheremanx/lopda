@@ -31,6 +31,9 @@ var W=162, H=120, TICK=50;
 var TONE={k:0,d:1,m:2,p:3};
 /* the score at which a round is worth +2 instead of +1. Low on purpose: play is not a test. */
 var JOY2={catch:15,run:60,climb:6};
+/* below this a round made no progress (it ran straight into the first thing, never left the start platform): no joy
+   then, and the program says it wants another go instead of calling it fun (owner, 2026-11-22) */
+var JOY1={catch:3,run:10,climb:1};
 
 function num(v){ var n=+v; return isFinite(n) ? n : 0; }
 function clamp(v,lo,hi){ v=Math.floor(num(v)); return v<lo ? lo : v>hi ? hi : v; }
@@ -92,15 +95,63 @@ function dots(buf,w,h,list){
 }
 /* catch's floor and a few specks in the air; a wide, calm sky so the falling parts are the only movement */
 var CATCH_DOTS=[[20,20],[44,14],[70,22],[96,15],[122,23],[142,14],[58,34],[110,31],[31,44],[84,40],[135,42]];
-/* climb's wall: a faint brick grid that moves with the camera, so height reads even before a platform passes */
+/* climb's scenery: the world goes up from the room's brick wall to the roof, the sky and the stars, so height is
+   something you see, not only a number. Every mark belongs to a world altitude (the row's height above the start),
+   never to a screen row, so it scrolls with the steps. Background tones only (paper and mid): the steps stay ink. */
+var C_ROOF=400, C_SKY=560, C_SPACE=1300;
+function hash2(a,b){
+  var h=(Math.imul(a|0,374761393)+Math.imul(b|0,668265263))|0;
+  h=Math.imul(h^(h>>>13),1274126177);
+  return (h^(h>>>16))>>>0;
+}
+/* one cloud every 45 px of sky, its place fixed by its number: three puffs on a flat bottom, drawn as an outline */
+function cloudIn(k,x,alt){
+  var cy=C_SKY+k*45+20, cx=16+hash2(k,7)%130, a=alt-cy;
+  if(a<0 || a>12) return false;
+  function puff(px,pa,r){ var dx=x-px, da=a-pa; return dx*dx+da*da<=r*r; }
+  return puff(cx-8,0,5) || puff(cx,3,7) || puff(cx+8,0,5) || (a<=1 && x>=cx-12 && x<=cx+12);
+}
+function climbCloud(buf,w,x,y,alt){
+  var k=Math.floor((alt-C_SKY-20)/45);
+  if(!cloudIn(k,x,alt)) return;
+  if(!cloudIn(k,x-1,alt) || !cloudIn(k,x+1,alt) || !cloudIn(k,x,alt-1) || !cloudIn(k,x,alt+1)) buf[y*w+x]=2;
+}
 function climbWall(buf,w,h,height){
-  var off=((height||0)%12+12)%12, y, x, row;
-  for(y=-12+off;y<h;y+=12){
-    /* the brick columns belong to the world row, not to the screen row: using the screen would make them
-       jump 12 px sideways every time the camera crosses a 12 px line */
-    row=Math.floor((y-height)/12);
-    rect(buf,w,h,0,y,w,1,2);
-    for(x=(((row%2)+2)%2?8:20);x<w;x+=24) rect(buf,w,h,x,y,1,11,2);
+  var y, x, alt, row, k;
+  for(y=0;y<h;y++){
+    alt=(height||0)+(h-y);
+    if(alt<C_ROOF){
+      /* the room's wall: brick lines every 12 px, the joints staggered by the world row */
+      if(((alt%12)+12)%12===0){ rect(buf,w,h,0,y,w,1,2); continue; }
+      row=Math.floor(alt/12);
+      for(x=(((row%2)+2)%2?8:20);x<w;x+=24) put(buf,w,h,x,y,2);
+    } else if(alt<C_SKY){
+      /* the roof: a gutter at the eave, then slanted tiles with a line every 8 px */
+      if(alt<C_ROOF+3){ rect(buf,w,h,0,y,w,1,2); continue; }
+      /* round-bottomed shingles, 16 px wide and 8 rows tall, each row offset by half a tile */
+      row=Math.floor((alt-C_ROOF)/8);
+      k=(alt-C_ROOF)%8;
+      for(x=0;x<w;x++){
+        var tx=(x+(row%2?8:0))%16;
+        if((k===1 && tx>=4 && tx<=11) || (k===2 && (tx===2 || tx===3 || tx===12 || tx===13)) ||
+           (k>=3 && (tx===1 || tx===14))) put(buf,w,h,x,y,2);
+      }
+    } else if(alt<C_SPACE){
+      /* the sky: clouds drifting past, nothing else */
+      for(x=0;x<w;x++) climbCloud(buf,w,x,y,alt);
+    } else {
+      /* the stars, and a crescent moon where they begin */
+      for(x=0;x<w;x++){
+        k=hash2(x,alt);
+        if(k%1499===0){ put(buf,w,h,x,y,2); put(buf,w,h,x-1,y,2); put(buf,w,h,x+1,y,2); put(buf,w,h,x,y-1,2); put(buf,w,h,x,y+1,2); }
+        else if(k%283===0) put(buf,w,h,x,y,2);
+      }
+      var my=alt-(C_SPACE+70);
+      if(my>=-9 && my<=9) for(x=110;x<=130;x++){
+        var dx=x-120, d1=dx*dx+my*my, d2=(dx+5)*(dx+5)+my*my;
+        if(d1<=81 && d2>64) put(buf,w,h,x,y,2);
+      }
+    }
   }
 }
 /* the old 16 px game props at the room's new scale: every cell becomes a 2 x 2 block */
@@ -155,7 +206,11 @@ function note(s,event){
   }
 }
 function reacting(s){ return !!(s.react && s.tick<s.reactUntil); }
-function joyFor(id,score){ return num(score)>=JOY2[id] ? 2 : 1; }
+function joyFor(id,score){
+  score=num(score);
+  if(JOY1[id]!==undefined && score<JOY1[id]) return 0;
+  return score>=JOY2[id] ? 2 : 1;
+}
 function finish(state,score){
   if(!state || state.done) return state;
   if(score!=null) state.score=Math.max(0,Math.floor(num(score)));
@@ -337,7 +392,7 @@ function runInit(seed){
   var s=base("run",seed);
   s.speedQ=R_SPEED_START; s.moveQ=0; s.dist=0; s.obs=[]; s.nutScore=0;
   s.h=0; s.vy=0; s.onGround=true; s.buf=0; s.dying=0;
-  runSpawn(s,W+10);                                     /* something arrives inside the first three seconds */
+  runSpawn(s,W+60);                                     /* the first thing arrives after about three seconds */
   return s;
 }
 function runTick(s,inp){
@@ -474,7 +529,7 @@ function runDraw(s,buf,w,h,pack,poseFor){
  * player can cross at most 32 px; every next platform is generated inside that reach. Steps are 18-24 px apart
  * so they read as separate bars rather than a ladder of overlapping lines. */
 var C_RISE=30, C_RUN=32, C_GAP_MIN=18, C_GAP_MAX=24, C_JITTER=12;
-var C_JUMP=-12, C_CAM=30;                             /* camera only climbs above row 30 */
+var C_JUMP=-12, C_CAM=30, C_AHEAD=-40;                             /* camera only climbs above row 30 */
 var FEET_L=9, FEET_R=23, FEET_BOTTOM=30;               /* x+9 .. x+22 inclusive, y+30 */
 var START_PLAT={x:48,y:92,w:56};
 /* The first six platforms are the old, forgiving chain. After that the curve ramps over the next 30: narrower
@@ -667,7 +722,8 @@ function climbTick(s,inp){
   for(i=s.plats.length-1;i>=0;i--) if(s.plats[i].y>H+4) s.plats.splice(i,1);
   var top=H, above=null, first=true;
   for(i=0;i<s.plats.length;i++) if(s.plats[i].y<top){ top=s.plats[i].y; above=s.plats[i]; }
-  while(top>36){
+  /* generate above the screen, so a new step scrolls in from the top edge instead of appearing in view */
+  while(top>C_AHEAD){
     var np=climbNext(s,above,first);
     s.plats.push(np);
     above=np;
@@ -715,7 +771,7 @@ window.LopdaPetPlay={
     DROP_FROM:DROP_FROM, DROP_CHANCE:DROP_CHANCE},
   RUN:{FLOOR:FLOOR, PET_X:PET_X, SPEED_START:R_SPEED_START, SPEED_MAX:R_SPEED_MAX, JUMP_VY:R_JUMP_VY,
     minGap:runMinGap},
-  CLIMB:{RISE:C_RISE, RUN:C_RUN, GAP_MIN:C_GAP_MIN, GAP_MAX:C_GAP_MAX, GAP_HARD:C_RISE-4,
+  CLIMB:{ROOF:C_ROOF, SKY:C_SKY, SPACE:C_SPACE, RISE:C_RISE, RUN:C_RUN, GAP_MIN:C_GAP_MIN, GAP_MAX:C_GAP_MAX, GAP_HARD:C_RISE-4,
     WIDTH_EASY_MIN:20, WIDTH_EASY_MAX:36, WIDTH_HARD:C_WIDTH_HARD, EASY_PLATS:C_EASY_PLATS,
     RAMP_PLATS:C_RAMP_PLATS, FEET_L:FEET_L, FEET_R:FEET_R, FEET_BOTTOM:FEET_BOTTOM}
 };

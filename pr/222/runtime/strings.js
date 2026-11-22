@@ -517,7 +517,7 @@
       "pet.game.best": "最高 {n}", "pet.game.newbest": "新纪录！",
       "pet.game.how.catch": "接住零件，别碰水滴", "pet.game.how.run": "A 跳过房间里的东西，按久跳得高",
       "pet.game.how.climb": "左右移动，往上跳",
-      "pet.game.result.fun": "它玩得很开心", "pet.game.result.ok": "它玩得挺好",
+      "pet.game.result.fun": "它玩得很开心", "pet.game.result.ok": "它玩得挺好", "pet.game.result.again": "它还想再玩一次",
       "pet.game.anykey": "按任意键回房间",
       "pet.game.exit": "退出", "pet.game.jump": "跳", "pet.game.room": "回房间",
       "pet.sk.start": "开始",
@@ -535,6 +535,7 @@
       "pet.word.title": "单词卡", "pet.word.loading": "正在查…", "pet.word.none": "没找到意思。",
       "pet.word.hint": "按 A 查意思，B 返回", "pet.word.back": "按 B 返回", "pet.word.demo": "光",
       "pet.sk.lookup": "查",
+      "pet.go.ask": "去看看{v}？", "pet.go.yes": "去", "pet.go.no": "不去",
       "pet.tag": "带回了", "pet.restart.done": "重新开始了。",
 
       "pet.where.riverbank": "河滩", "pet.where.windowsill": "窗台", "pet.where.yard": "后院",
@@ -1503,7 +1504,7 @@
       "pet.game.best": "Best {n}", "pet.game.newbest": "New best!",
       "pet.game.how.catch": "Catch parts; dodge water drops", "pet.game.how.run": "A jumps over things; hold for higher",
       "pet.game.how.climb": "Steer left/right and climb",
-      "pet.game.result.fun": "It had fun", "pet.game.result.ok": "It had a good time",
+      "pet.game.result.fun": "It had fun", "pet.game.result.ok": "It had a good time", "pet.game.result.again": "It wants another go",
       "pet.game.anykey": "Any key: back to the room",
       "pet.game.exit": "Quit", "pet.game.jump": "Jump", "pet.game.room": "Room",
       "pet.sk.start": "Start",
@@ -1521,6 +1522,7 @@
       "pet.word.title": "Word card", "pet.word.loading": "Looking it up...", "pet.word.none": "No meaning found.",
       "pet.word.hint": "A looks it up, B goes back", "pet.word.back": "B goes back", "pet.word.demo": "light",
       "pet.sk.lookup": "Look",
+      "pet.go.ask": "Go to {v}?", "pet.go.yes": "Go", "pet.go.no": "Stay",
       "pet.tag": "new", "pet.restart.done": "A new start.",
 
       "pet.where.riverbank": "by the riverbank", "pet.where.windowsill": "on the windowsill", "pet.where.yard": "in the backyard",
