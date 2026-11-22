@@ -1291,7 +1291,7 @@ CPU 降速 4 倍（DevTools 的 CPU throttling，粗略代表旧手机）时，�
 2026-10-23，owner 要求优先做（原本建议放在 1.0 之后）。脚本原来的流程是「写需求 → 复制提示词 → 去 AI 聊天窗口 → 把代码粘贴回来」；
 接上 AI 线路以后，「生成」直接把同一份提示词发出去，代码一边收一边显示在编辑器里。
 
-- **只接 OpenRouter**：`runtime/ai.js` 里写死 `https://openrouter.ai/api/v1/chat/completions`。这是第 14 节以外第二个第三方地址，
+- **只接 OpenRouter**（已由第 61 节改成五家服务商的固定表）：`runtime/ai.js` 里写死 `https://openrouter.ai/api/v1/chat/completions`。这是第 14 节以外第二个第三方地址，
   repo 测试只放行这两个。选它的原因是 owner 在浏览器里实测：OpenRouter 回应浏览器的跨域检查（CORS），网页可以直接调用；
   OpenCode 的接口不回应，被浏览器拦下（2026-10-23）。不做转发服务器（1.0 不做服务器），也不让用户填地址：多一个地址就多一个决定，
   而且大多数服务不允许网页直接调用，填了也用不了。模型可以填（OpenRouter 的模型名），空着用 `openrouter/auto`。
@@ -1841,3 +1841,35 @@ EXIF，相册就能把照片放到地图上。
 - **不做「带内容跳到 AI app」**：国内常用的 AI app 没有这种链接，提示词加代码也远超网址能带的长度（owner 2026-11-21 同意不做）。没有 key 的人照旧：复制提示词去聊天窗口，回来按「粘贴新版本」，走同一套检查、先存版本。
 - **不改的**：`scripts.prompt` 一字不改、「生成」的按钮和流程、`runtime/ai.js`、设置页、`backup.js`、`platform.js`；脚本的存档 `scripts/data/<id>` 在改一改、粘贴、换回里都不碰；已有的脚本文档 `scripts/items/<id>` 不加字段；SDK、SPEC、PAD 冻结。
 - **代码**：`runtime/apps/scripts.js`（`revisePrompt`、`checkRevision`、版本与草稿、`replaceBody`、改一改页和以前的版本页）、`runtime/index.html`、`runtime/strings.js`、`tests/scripts-revise.test.mjs`，e2e 在 `tests/e2e.test.mjs` 里共用 AI 线路的假线路。
+
+## 61. 几条 AI 线路，像手机的 eSIM（1.1.5）
+
+2026-11-21，owner 批准 `docs/design/ai-lines.md`（第 10 节四条都是「是」）。第 34 节只接 OpenRouter，可国内用户付不了它的钱，
+「生成」对他们只是一个用不上的按钮。owner 在浏览器里逐家测过跨域（CORS），能从网页直接调用的才收。
+
+- **改了第 34 节的哪一条**：「只接 OpenRouter」换成 `runtime/ai.js` 里一张写死的服务商表，第一批五家：OpenRouter、DeepSeek、
+  Kimi（Moonshot）、通义千问（阿里云百炼，DashScope 兼容模式）、硅基流动。每家记地址、默认模型、能不能看图和看图模型、充值网站。
+  百度千帆、阶跃、MiniMax 也测通了，等有人要再加；智谱、豆包、混元被 CORS 拦下，不收（要转发服务器，1.0 不做服务器）。
+  repo 测试的「只联系这些站」白名单加了这四个地址，只许出现在 `ai.js`。
+- **没改的**：没有 `PAD.ai`，社区 app 和脚本里的程序碰不到 AI；用户仍然不能填地址（key 只发给它自己那一家：线路只记服务商 id，
+  `ask` 从表里查地址，调用方传来的地址一律不看）；key 只存本机、不进备份、只显示末四位、请求不带 cookie 和 Referer；
+  流式读法、等待提示、一分钟没信号就断，都照旧，只多认一个思考字段名 `reasoning_content`。
+- **线路**：每条线路一把 key，能开能关（关掉不删 key），第一条自动成为默认；默认被关掉或删掉时换成剩下开着的第一条，不问。
+  名字自动起（服务商名，同一家第二把叫「DeepSeek 2」，加的时候定下，不能改名）。只有一条开着的线路时，「默认线路 / 谁用哪条」整块不显示。
+  「谁用哪条」四处：脚本、四轨机、读谱、宠物；读谱只能选能看图的线路，DeepSeek 灰掉。读谱走 OpenRouter 时仍用第 56 节的读谱模型列表，
+  走别家时用那家的看图模型；只发文字不带照片的读谱走四轨机那条线路。添加线路时按「保存」自动试一下，试不通也存下，状态行写原因。
+  删除线路要按两次。四轨机的状态行写「AI：DeepSeek」这样的线路名，出错的话前面带线路名和那家的充值网站。
+- **默认模型**（2026-11-21 对着各家文档挑的，代码里标了 `TODO(owner): confirm`）：DeepSeek `deepseek-flash`；Kimi `kimi-k3.1-pro`
+  （看图同一个；K3 系列总在思考）；千问 `qwen3.7-plus`（看图同一个）；硅基流动 `deepseek-ai/DeepSeek-V4-Flash`，看图
+  `moonshotai/Kimi-K2.7-Code`（取自文档示例，模型列表要登录才看得到）。余额不足：DeepSeek 是 402，Kimi 是 429 加
+  `exceeded_current_quota_error`，千问是 403/429 加 `Arrearage`，都算「额度用完」；硅基流动文档没写，认不出的仍是「被拒绝」。
+- **数据**：同一个文档 `data/users/local/ai` 升到 v:2 {next, lines, def, use}，线路 id 是 `l` 加递增数字，删了不复用。
+  纯函数在 `runtime/ailines.js`（`tests/ailines.test.mjs`）。v:1 有 key 的变成 OpenRouter 线路 `l1`（默认），`scoreModel` 变成 `use.score`；
+  只有 `scoreModel` 的不建线路，先记着。不认识的服务商的线路照样留着，只是用不了。
+- **读到才写**：文档读失败时什么都不写（显示「读不出」，打开 AI 页时再读一次），否则加一条线路就会把别的线路盖掉；
+  v 大于 2（新版 Lo-PDA 存的）的不读也不写。恢复备份时重新读一次本机的文档，原样写回，不经过解析：哪怕之前读失败、或者是新版存的，key 也不会丢；
+  这次读不出来就不恢复。
+- **镜像字段和回退**：v:2 文档顶层仍写 `key / model / scoreModel`，取第一条开着的 OpenRouter 线路，手机上还缓存着旧版 runtime 时照样找得到 key。
+  代价：同一把 key 在文档里有两份（都不进备份）；旧版在设置里按了保存会写回 v:1，别家的线路就丢了。只在回退版本时发生，可以接受。
+- **代码**：`runtime/ai.js`（`PROVIDERS`、`ask({provider, key, model, fallbackModel…})`、按家认「余额不足」的错误码）、`runtime/ailines.js`、
+  `apps/settings.js`（AI 线路的几页、`LP.ai.on/ask/line/err(use)`），调用处 `apps/scripts.js`、`apps/studio.js`、`apps/pet.js` 只多传一个用途名。

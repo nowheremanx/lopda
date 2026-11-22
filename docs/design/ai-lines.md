@@ -1,6 +1,6 @@
 # 设计草稿：多条 AI 线路（像 iPhone 的 eSIM）
 
-状态：**owner 2026-11-21 已批准（第 10 节四条都是「是」），未实现**。基于 main `7220dd0` / runtime 1.1.2。只动文档；实现清单见第 9 节。
+状态：**owner 2026-11-21 已批准（第 10 节四条都是「是」），已在 1.1.5 实现（decisions.md 第 61 节）**。基于 main `7220dd0` / runtime 1.1.2。只动文档；实现清单见第 9 节。
 要改 decisions.md 第 34 节「只接 OpenRouter、一个地址」的规定，实现时写一个新的小节说明为什么改。
 
 背景：现在设置里的「AI 线路」只有一条：OpenRouter 的 key 加一个模型名（`data/users/local/ai` {v:1, key, model, scoreModel}）。
