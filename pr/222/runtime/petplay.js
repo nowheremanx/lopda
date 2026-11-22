@@ -231,10 +231,20 @@ function run(game,state,input,dtMs){
  * past it. Speed and distance are in quarter pixels, kept as integers, so every position stays an integer room
  * pixel on every device. The pet's body box (x+8 .. x+23, 18 px up from the feet) is smaller than the drawn
  * sprite: a hit has to look like one. A jump rises 45 px (vy -9, +1 a tick) and stays above 19 px for 14 ticks,
- * so every obstacle (22 px at most) can be cleared by a jump pressed in time; a tap cuts the rise at vy -3. */
+ * so every obstacle (22 px at most) can be cleared by a jump pressed in time; a tap cuts the rise at vy -3.
+ *
+ * Owner, 2026-11-22: "a timed press every so often runs forever, and the nut is free". So the same press is not always
+ * right. From 10 s a paper plane glides past at head height: standing passes under it, a full jump flies into it,
+ * and a quick hop (A held at most 150 ms) stays under it. From 20 s a plane may come over a low thing on the floor:
+ * only the quick hop gets through. Nuts are worth 10 and sit where they cost something: high in the air alone (only a
+ * long press reaches) or under a plane (only a hop reaches, a long press hits the plane). */
 var FLOOR=100, PET_X=16, PET_BODY_L=8, PET_BODY_R=23, PET_BODY_TOP=18;
 var R_SPEED_START=16, R_SPEED_MAX=32, R_JUMP_VY=-9, R_CUT_VY=-3, R_DIE=12;
 var R_STEP_TICKS=100, R_TILE=240;
+/* the plane: its bottom 56 px above the floor, so the body clears it standing and in a hop of up to 38 px (A held
+   at most three ticks, peak 36), and meets it in any longer jump (four ticks peak at 41). Low nuts sit 20 px up (any
+   hop reaches them), high nuts 50 px up (A held three ticks or more). */
+var R_PLANE_UP=56, R_NUT_LOW=20, R_NUT_HIGH=50, R_NUT_PTS=10, R_LEVEL_TICKS=200;
 /* one seeded gap from a previous obstacle's right edge to the next one's left edge: a jump's 18 ticks of travel,
    30 px, and up to 70 px of room. runMinGap is the floor of that, and the tests check it. */
 function runMinGap(speedQ){
@@ -255,15 +265,42 @@ var NUT=(function(){                                   /* the old 5 x 5 nut at t
   var g=scaleGrid([".kkk.","kmpmk","kmmmk","kmpmk",".kkk."],2);
   return {w:String(g[0]).length, h:g.length, grid:g};
 })();
+var PLANE=(function(){                                 /* a paper plane gliding left, nose first, 20 x 10 */
+  var g=scaleGrid(["........kk",
+                   "....kkkkpk",
+                   "kkkkpppppk",
+                   ".kkmmmmkk.",
+                   "...kkkk..."],2);
+  return {w:String(g[0]).length, h:g.length, grid:g};
+})();
+function runLevel(tick){ return Math.min(3,Math.floor(num(tick)/R_LEVEL_TICKS)); }
+function runGround(s,x,low){
+  /* low: only the slipper and the bowl (a hop clears them); else any, and the book stack from 20 s */
+  var n=low ? 2 : (s.tick>=400 ? RUN_THINGS.length : RUN_THINGS.length-1);
+  var k=low ? 1+Math.floor(rand(s)*2) : Math.floor(rand(s)*n), t=RUN_THINGS[k];
+  return {x:x, y:FLOOR-t.h, w:t.w, h:t.h, k:k, kind:"ground", nut:null};
+}
+function runPlane(x){
+  return {x:x, y:FLOOR-R_PLANE_UP-PLANE.h, w:PLANE.w, h:PLANE.h, kind:"plane", nut:null};
+}
+function nutAt(cx,up){ return {x:cx-Math.floor(NUT.w/2), y:FLOOR-up-NUT.h}; }
+/* One pattern at x: a thing on the floor, a plane (maybe with a low nut under it), a plane over a low thing, or a
+   high nut on its own. The weights shift with the level; the first ten seconds are floor things only. */
 function runSpawn(s,x){
-  var late=s.tick>=400, k=Math.floor(rand(s)*(late?RUN_THINGS.length:RUN_THINGS.length-1));
-  var t=RUN_THINGS[k];
-  var o={x:x,y:FLOOR-t.h,w:t.w,h:t.h,k:k,nut:null};
-  /* about a third of the obstacles carry a nut above them: a reward for jumping, never a reason to */
-  if(rand(s)<0.35){
-    o.nut={x:x+Math.floor(t.w/2)-Math.floor(NUT.w/2), y:FLOOR-30-Math.floor(rand(s)*9)-NUT.h};
-  }
-  s.obs.push(o);
+  var lv=runLevel(s.tick), r=rand(s), o, p;
+  var wPlane=lv>=1 ? 0.25 : 0, wUnder=lv>=2 ? 0.2 : 0, wNut=0.15;
+  if(r<wNut){
+    o={x:x, y:0, w:NUT.w, h:0, kind:"none", nut:nutAt(x+Math.floor(NUT.w/2),R_NUT_HIGH)};
+    s.obs.push(o);
+  } else if(r<wNut+wPlane){
+    o=runPlane(x);
+    if(rand(s)<0.5) o.nut=nutAt(x+Math.floor(PLANE.w/2),R_NUT_LOW);
+    s.obs.push(o);
+  } else if(r<wNut+wPlane+wUnder){
+    o=runGround(s,x+2,true);
+    p=runPlane(x+2+Math.floor(o.w/2)-Math.floor(PLANE.w/2));
+    s.obs.push(o); s.obs.push(p);
+  } else s.obs.push(runGround(s,x,false));
 }
 function runInit(seed){
   var s=base("run",seed);
@@ -310,23 +347,25 @@ function runTick(s,inp){
     o=s.obs[i];
     if(o.nut && o.nut.x+NUT.w>PET_X+PET_BODY_L && o.nut.x<PET_X+PET_BODY_R+1 &&
        o.nut.y+NUT.h>top && o.nut.y<bottom+1){
-      o.nut=null; s.nutScore+=5; note(s,"nut");
+      o.nut=null; s.nutScore+=R_NUT_PTS; note(s,"nut");
     }
   }
   for(i=0;i<s.obs.length;i++){
     o=s.obs[i];
+    if(o.kind==="none") continue;
     if(PET_X+PET_BODY_R>=o.x+1 && PET_X+PET_BODY_L<=o.x+o.w-2 &&
-       bottom>=FLOOR-o.h+1 && top<=FLOOR-2){
+       bottom>=o.y+1 && top<=o.y+o.h-2){
       note(s,"hit"); s.dying=R_DIE;
       break;
     }
   }
   for(i=s.obs.length-1;i>=0;i--) if(s.obs[i].x+s.obs[i].w<0) s.obs.splice(i,1);
-  var last=s.obs[s.obs.length-1];
+  var last=null;
+  for(i=0;i<s.obs.length;i++) if(!last || s.obs[i].x+s.obs[i].w>last.x+last.w) last=s.obs[i];
   if(!last) runSpawn(s,W+10);
   else if(last.x+last.w<=W) runSpawn(s,last.x+last.w+runMinGap(s.speedQ)+Math.floor(rand(s)*71));
   if(!jumped && !pressed && s.buf>0) s.buf--;
-  s.score=Math.floor(s.dist/8)+s.nutScore;
+  s.score=Math.floor(s.dist/16)+s.nutScore;
 }
 function inkRows(g){
   var top=-1, bottom=-1;
@@ -378,7 +417,8 @@ function runDraw(s,buf,w,h,pack,poseFor){
   var i, o;
   for(i=0;i<s.obs.length;i++){
     o=s.obs[i];
-    blit(buf,w,h,RUN_THINGS[o.k].grid,o.x,FLOOR-RUN_THINGS[o.k].h);
+    if(o.kind==="plane") blit(buf,w,h,PLANE.grid,o.x,o.y);
+    else if(o.kind!=="none") blit(buf,w,h,RUN_THINGS[o.k].grid,o.x,FLOOR-RUN_THINGS[o.k].h);
   }
   var grid=runPetGrid(s,poseFor), y;
   var rows=inkRows(grid), bottom=rows && rows.bottom>=0 ? rows.bottom : 31;
@@ -642,7 +682,8 @@ window.LopdaPetPlay={
   finish:finish,
   reaction:reaction,
   climbReachable:climbReachable,
-  RUN:{FLOOR:FLOOR, PET_X:PET_X, SPEED_START:R_SPEED_START, SPEED_MAX:R_SPEED_MAX, JUMP_VY:R_JUMP_VY,
+  RUN:{PLANE_UP:R_PLANE_UP, NUT_LOW:R_NUT_LOW, NUT_HIGH:R_NUT_HIGH, NUT_PTS:R_NUT_PTS, LEVEL_TICKS:R_LEVEL_TICKS,
+    FLOOR:FLOOR, PET_X:PET_X, SPEED_START:R_SPEED_START, SPEED_MAX:R_SPEED_MAX, JUMP_VY:R_JUMP_VY,
     minGap:runMinGap},
   CLIMB:{ROOF:C_ROOF, SKY:C_SKY, SPACE:C_SPACE, RISE:C_RISE, RUN:C_RUN, GAP_MIN:C_GAP_MIN, GAP_MAX:C_GAP_MAX, GAP_HARD:C_RISE-4,
     WIDTH_EASY_MIN:20, WIDTH_EASY_MAX:36, WIDTH_HARD:C_WIDTH_HARD, EASY_PLATS:C_EASY_PLATS,
