@@ -140,7 +140,7 @@ test("PROVIDERS lists the five providers, each with a chat completions address",
     assert.equal(typeof p.name.en, "string", p.id);
     assert.equal(AI.provider(p.id), p);
   }
-  assert.equal(AI.provider("deepseek").vision, false);
+  assert.ok(AI.PROVIDERS.every((p) => p.vision), "all five read images (2026-11-21)");
   assert.equal(AI.provider("nope"), null);
 });
 

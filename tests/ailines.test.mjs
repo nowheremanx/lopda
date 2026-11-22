@@ -102,7 +102,11 @@ test("the first line is the default; turning it off or deleting it moves the def
   assert.equal(st.lines.length, 1);
 });
 
+/* every provider in the table reads images today (2026-11-21); the rule is tested with one that cannot */
+const BLIND = P.map((p) => (p.id === "deepseek" ? { ...p, vision: false, visionModel: "" } : p));
+
 test("pick: a program's own line, else the default; score needs a line that can see", () => {
+  const P = BLIND;
   const st = L.load(null);
   const d = L.add(st, "deepseek", "kd"), o = L.add(st, "openrouter", "ko"), k = L.add(st, "kimi", "kk");
   assert.equal(L.pick(st, "scripts", P).id, d.id);
@@ -123,6 +127,13 @@ test("pick: a program's own line, else the default; score needs a line that can 
   const st2 = L.load(null); L.add(st2, "deepseek", "kd");
   assert.equal(L.pick(st2, "score", P), null);
   assert.equal(L.pick(st2, "studio", P).provider, "deepseek");
+});
+
+test("DeepSeek reads a score with its own model", () => {
+  const st = L.load(null);
+  const d = L.add(st, "deepseek", "kd");
+  assert.equal(L.pick(st, "score", P).id, d.id);
+  assert.equal(L.modelFor(st, "score", d, P, "dflt"), "deepseek-flash");
 });
 
 test("deleting a line drops its key and every use entry that named it; the score model choice stays", () => {

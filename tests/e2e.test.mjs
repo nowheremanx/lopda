@@ -9841,6 +9841,8 @@ test("AI line: Tape4 shows the line's name and reading a score with photos needs
   const asked = await fakeProviders(p);
   /* only the DeepSeek line: it can write a song but cannot see a page */
   await bootWithAi(p, { ...TWO_LINES, next: 2, def: "l1", use: {}, lines: [TWO_LINES.lines[0]], key: "", model: "", scoreModel: "" });
+  /* every provider reads images today (2026-11-21): the rule is tested with DeepSeek made blind in this page */
+  await p.evaluate(() => { const d = LopdaAI.provider("deepseek"); d.vision = false; d.visionModel = ""; });
   await p.locator("#home .app", { hasText: "四轨机" }).click();
   await p.waitForSelector("#v-studio:not([hidden])");
   await p.waitForFunction(() => document.querySelector("#v-studio").getAttribute("data-loaded") === "true");
@@ -9966,6 +9968,8 @@ test("AI line: the lines page: add DeepSeek and OpenRouter, switch one off, choo
   await fakeProviders(p);
   await p.goto(base + "/runtime/", { waitUntil: "load" });
   await p.waitForFunction(() => window.LP && LP.ai && LP.ai._test.state().loaded);
+  /* every provider reads images today (2026-11-21): the rule is tested with DeepSeek made blind in this page */
+  await p.evaluate(() => { const d = LopdaAI.provider("deepseek"); d.vision = false; d.visionModel = ""; });
   const fits = () => p.evaluate(() => document.documentElement.scrollWidth <= 331);
 
   await p.evaluate(() => LP.builtins.filter((b) => b.id === "settings")[0].open());
