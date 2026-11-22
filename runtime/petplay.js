@@ -253,7 +253,8 @@ var R_STEP_TICKS=100, R_TILE=240;
    at most three ticks, peak 36), and meets it in any longer jump (four ticks peak at 41). Low nuts sit 20 px up (any
    hop reaches them), high nuts 50 px up (A held three ticks or more). */
 /* Stages (owner, 2026-11-22: "late in a run nothing changes but the speed"): every R_STAGE_EVERY px of running the room
-   ends and a stretch of R_STAGE_GATES gates begins, out of the window into the sky or down into a pond, in turn. There
+   ends and a stretch of R_STAGE_GATES gates begins, out of the window into the sky, down into a pond, or the lights go out, in a seeded random order with no
+   stage twice in a row. There
    A no longer jumps: each press is one wing beat (sky) or one stroke (water), and the pet falls or sinks between them.
    A gate is a column from above and a column from below with an opening between; the opening narrows from 56 to 38 px
    and its middle moves at most 26 px (14 in the slower water, where it also stays at least 46 px wide) from one gate to the next, so a beat or two always reaches it. In the sky the roof
@@ -266,7 +267,7 @@ var STAGE={
   swim:{flap:10, grav:2, fall:12, top:32, ceil:30, move:14, gapMin:46}  /* a stroke lifts about 7 px, it sinks gently, the openings
                                                               move less; the surface is row 26 */
 };
-/* The third stage is the lights going out (owner, 2026-11-22): a 3-2-1 count in the middle of the screen, then for
+/* The third stage is the lights going out (owner, 2026-11-22): a three-second fade into the night, then for
    R_DARK_LEN px the room is dark but for the small lamp the pet carries, lighting an oval ahead of it. The run goes on
    underneath with its usual things, at most 5 px a tick, so the lamp shows a thing at least half a second ahead. */
 var R_DIVE_FROM=76, R_SURFACE=27, R_LIGHT_UP=40;
@@ -357,7 +358,7 @@ function runInit(seed){
   s.speedQ=R_SPEED_START; s.moveQ=0; s.dist=0; s.obs=[]; s.nutScore=0;
   s.h=0; s.vy=0; s.onGround=true; s.buf=0; s.dying=0;
   s.mode="run"; s.scene="room"; s.stageAt=R_STAGE_FIRST; s.stageN=0; s.gatesMade=0; s.fq=0; s.fv=0; s.lastGap=null;
-  s.dark=0; s.darkCount=0; s.darkUntil=0; s.intro=null; s.anim=null; s.splashT=-99; s.lightUp=0; s.pondEdge=null;
+  s.dark=0; s.darkCount=0; s.darkUntil=0; s.intro=null; s.anim=null; s.splashT=-99; s.lightUp=0; s.pondEdge=null; s.lastStage=null;
   runSpawn(s,W+60);                                     /* the first thing arrives after about three seconds */
   return s;
 }
@@ -391,17 +392,24 @@ function spawnGate(s,x){
 /* Before the sky or the pond, a short way in (owner, 2026-11-22: a sudden switch left him still pressing to jump):
    the room runs on empty while an open window (the sky) or the pond's edge (the water) comes in from the right; the
    program shows the stage's one-line hint when it starts ("intro" event); when the pet reaches it, it goes through
-   by itself (A does nothing meanwhile) and the stage begins. The lights out has its own 3-2-1 instead. */
+   by itself (A does nothing meanwhile) and the stage begins. The lights out has its own slow fade instead. */
+/* which stage comes next: seeded and random (owner: not a fixed order), never the same one twice in a row */
+var STAGE_KINDS=["fly","dark","swim"];
+function nextStageKind(s){
+  var pool=[], i;
+  for(i=0;i<STAGE_KINDS.length;i++) if(STAGE_KINDS[i]!==s.lastStage) pool.push(STAGE_KINDS[i]);
+  return pool[Math.floor(rand(s)*pool.length)];
+}
 function startIntro(s){
-  var kind=["fly","dark","swim"][s.stageN%3];
-  if(kind==="dark"){ startStage(s); return; }
+  var kind=nextStageKind(s);
+  s.lastStage=kind;
+  if(kind==="dark"){ startStage(s,"dark"); return; }
   s.intro={kind:kind, x:W+70};                           /* about two seconds of empty room to read the hint */
   note(s,"intro");
   note(s,"intro_"+kind);
 }
-function startStage(s){
-  /* in turn: the sky, the lights out, the pond */
-  var kind=s.intro ? s.intro.kind : ["fly","dark","swim"][s.stageN%3];
+function startStage(s,kindArg){
+  var kind=kindArg || (s.intro ? s.intro.kind : nextStageKind(s));
   s.intro=null;
   if(kind==="dark"){
     s.stageN++;
@@ -467,7 +475,7 @@ function runTick(s,inp){
   var ramp=R_SPEED_START+Math.floor(s.tick/R_STEP_TICKS);
   s.speedQ=Math.min(s.mode==="run" && !s.dark ? R_SPEED_MAX : R_STAGE_SPEED,ramp);
   if(s.dark){
-    if(s.darkCount>0){ s.darkCount--; if(s.darkCount%20===0) note(s,s.darkCount ? "count" : "lightsout"); }
+    if(s.darkCount>0){ s.darkCount--; if(!s.darkCount) note(s,"lightsout"); }
     else if(s.lightUp>0){ s.lightUp--; if(!s.lightUp){ s.dark=0; s.stageAt=s.dist+R_STAGE_EVERY; } }
     else if(s.dist>=s.darkUntil){ s.lightUp=R_LIGHT_UP; note(s,"lightson"); }
   }
@@ -610,10 +618,16 @@ function skyBackdrop(buf,w,h,dist){
       if(inC(x,y) && (!inC(x-1,y) || !inC(x+1,y) || !inC(x,y-1) || !inC(x,y+1))) put(buf,w,h,x,y,2);
     }
   }
+  /* below: the town's roofs, not the room's floor - a ridge line and rows of round-bottomed tiles */
   rect(buf,w,h,0,FLOOR,w,1,0);
   rect(buf,w,h,0,FLOOR+1,w,h-FLOOR-1,2);
-  var o2=((dist%16)+16)%16;
-  for(x=-o2;x<w;x+=16){ rect(buf,w,h,x+2,FLOOR+4,10,1,1); rect(buf,w,h,x+10,FLOOR+11,10,1,1); }
+  var o2=((dist%12)+12)%12, row;
+  for(row=0;row*6+FLOOR+2<h;row++){
+    var ty=FLOOR+2+row*6;
+    for(x=-o2+(row%2?6:0)-12;x<w;x+=12){
+      rect(buf,w,h,x+2,ty+4,8,1,1); put(buf,w,h,x+1,ty+3,1); put(buf,w,h,x+10,ty+3,1);
+    }
+  }
 }
 /* the pond: a wavy surface at row 26, light ripples, and a sandy bottom */
 function pondBackdrop(buf,w,h,dist){
@@ -731,7 +745,7 @@ function runDraw(s,buf,w,h,pack,poseFor){
     if(o.nut) blit(buf,w,h,NUT.grid,o.nut.x,o.nut.y);
   }
   if(s.dark){
-    /* the dark comes and goes gradually (owner): while the count runs the night thickens and the lit oval shrinks to
+    /* the dark comes and goes gradually (owner; it replaced a 3-2-1 count): over three seconds the night thickens and the lit oval shrinks to
        the lamp's; when the lights come back the same in reverse. L is how dark: 0 none, 1 full; a 4 x 4 ordered dither
        spreads it, so the room fades with the four tones only */
     var L=s.darkCount>0 ? 1-s.darkCount/R_DARK_COUNT : s.lightUp>0 ? s.lightUp/R_LIGHT_UP : 1;
@@ -740,15 +754,6 @@ function runDraw(s,buf,w,h,pack,poseFor){
       ddx=(xx-R_LAMP_X)/(R_LAMP_RX*k); ddy=(yy-cy)/(R_LAMP_RY*k); dd=ddx*ddx+ddy*ddy;
       if(dd>1){ if(BAYER[yy&3][xx&3]<th) buf[yy*w+xx]=0; }
       else if(L>=1 && dd>0.8 && ((xx+yy)&1)) buf[yy*w+xx]=1;    /* a dithered rim, like a lamp's falloff */
-    }
-  }
-  if(s.dark && s.darkCount>0){
-    /* the count: 3, 2, 1 in big digits in the middle, on a paper card */
-    var A=window.LopdaPetArt, n=Math.ceil(s.darkCount/20);
-    if(A && typeof A.numberGrid==="function"){
-      var ng=A.numberGrid(n), sc=4, nw=String(ng[0]).length*sc, nh=ng.length*sc, nx=Math.floor((w-nw)/2), ny=24;
-      rect(buf,w,h,nx-6,ny-6,nw+12,nh+12,0); rect(buf,w,h,nx-4,ny-4,nw+8,nh+8,3);
-      blitAs(buf,w,h,ng,nx,ny,sc,0);
     }
   }
   if(s.dark){ frame(buf,w,h); scoreDigits(buf,w,h,s.score,3); return; }

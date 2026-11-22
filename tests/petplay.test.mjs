@@ -656,7 +656,7 @@ test("climb: the scenery changes with height - wall, roof, sky, stars - in backg
   assert.equal(new Set(pics).size, 4, "each band looks different");
 });
 
-test("run: stages - out of the window into the sky, then into the pond, in turn; A beats or strokes; the room comes back", () => {
+test("run: stages - the sky, the pond and the lights out in random order, never twice in a row; A beats or strokes; the room comes back", () => {
   const g = game("run"), R = Play.RUN;
   assert.ok(R.STAGE_FIRST >= 2000, "the first stage comes after a proper run");
   let sawFly = 0, sawSwim = 0, back = 0;
@@ -670,7 +670,6 @@ test("run: stages - out of the window into the sky, then into the pond, in turn;
   runBot(g, 5, 4000, "smart", (s, before, press, animBefore) => {
     if (before === "run" && s.mode !== "run") {
       if (s.mode === "fly") sawFly++; else sawSwim++;
-      assert.equal(s.mode, (sawFly + sawSwim) % 2 ? "fly" : "swim", "sky first, then the pond, in turn");
       assert.ok(s.events.includes(s.mode));
       gates = []; lastMid = null;
     }
@@ -692,28 +691,38 @@ test("run: stages - out of the window into the sky, then into the pond, in turn;
       assert.equal(gates.length, R.STAGE_GATES, "every stage has its gates");
     }
   });
-  assert.ok(sawFly >= 1 && sawSwim >= 1 && back >= 2, `sky ${sawFly}, pond ${sawSwim}, back in the room ${back}`);
+  /* the order: over many seeds every stage comes first sometimes, and no stage ever follows itself */
+  const firsts = new Set();
+  for (let seed = 1; seed <= 40; seed++) {
+    const kinds = [];
+    runBot(g, seed, 4000, "smart", (s, before) => {
+      if (before === "run" && s.mode !== "run") kinds.push(s.mode);
+      if (s.events.includes("dark")) kinds.push("dark");
+    });
+    firsts.add(kinds[0]);
+    for (let i = 1; i < kinds.length; i++) assert.notEqual(kinds[i], kinds[i - 1], `seed ${seed}: ${kinds.join(",")}`);
+  }
+  assert.equal(firsts.size, 3, "any stage can come first");
+  assert.ok(sawFly + sawSwim >= 1 && back >= 1, `sky ${sawFly}, pond ${sawSwim}, back in the room ${back}`);
 });
 
-test("run: the lights go out between the sky and the pond - a 3-2-1 count, then only the lamp's oval is lit", () => {
+test("run: the lights go out - a three-second fade, then only the lamp's oval is lit, then the light comes back", () => {
   const g = game("run"), R = Play.RUN;
   const s = g.init(1);
-  let started = null, counts = [], out = null, on = null, order = [];
-  for (let i = 0; i < 3000 && !s.done; i++) {
-    const before = s.mode;
+  s.lastStage = "fly";
+  let started = null, out = null, on = null;
+  for (let i = 0; i < 3000 && !s.done && !on; i++) {
+    if (!started && s.dist + 162 >= s.stageAt) { s.lastStage = "x"; s.rn = 0; }
     g.step(s, { left: false, right: false, a: false, press: {} }, 50);
-    if (before === "run" && s.mode !== "run") order.push(s.mode);
-    if (s.events.includes("dark")) { started = s.tick; order.push("dark"); }
-    if (s.events.includes("count")) counts.push(s.tick);
+    if (s.events.includes("dark")) started = s.tick;
     if (s.events.includes("lightsout")) out = s.tick;
     if (s.events.includes("lightson")) on = s.tick;
-    if (on) break;
     s.dying = 0;                                      /* this test is about the stage clock, not about surviving */
     s.obs = s.obs.filter((o) => o.kind !== "ground" && o.kind !== "plane");
+    if (s.mode !== "run" && !started) { s.mode = "run"; s.scene = "room"; s.anim = null; s.obs = []; s.intro = null; s.stageAt = s.dist + 10; }
   }
-  assert.deepEqual(order.slice(0, 2), ["fly", "dark"], "the sky first, then the lights out");
-  assert.equal(out - started, R.DARK_COUNT, "three seconds of counting");
-  assert.equal(counts.length, 2, "3 and 2 and 1: two count beats before the lights go out");
+  assert.ok(started, "the lights went out at some point");
+  assert.equal(out - started, R.DARK_COUNT, "three seconds of fading");
   assert.ok(on > out, "and the lights come back on");
   /* drawing in the dark: ink outside the lamp's oval, the pet's own spot lit, the score in paper */
   const d = g.init(2);
