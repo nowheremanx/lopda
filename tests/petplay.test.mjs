@@ -172,19 +172,26 @@ function runBot(g, seed, ticks, policy = "smart") {
   let hold = 0, right = null;
   for (let i = 0; i < ticks && !s.done; i++) {
     const ahead = s.obs.filter((o) => o.x + o.w > 24 && o.kind !== "none").sort((a, b) => a.x - b.x);
+    const grounds = ahead.filter((o) => o.kind === "ground"), planes = ahead.filter((o) => o.kind === "plane");
     let pressA = false;
     if (s.onGround && ahead.length) {
-      const o = ahead[0], sp = s.speedQ / 4, dist = o.x - RUN_FRONT;
-      const plane = ahead.find((p) => p.kind === "plane" && Math.abs(p.x - o.x) < 12);
-      const ground = ahead.find((p) => p.kind === "ground" && Math.abs(p.x - o.x) < 12);
-      if (policy === "naive") { if (dist <= runAim(sp)) { pressA = true; hold = 20; } }
-      else if (ground && plane) { if (dist > 0 && dist <= sp * 3 + 6) { pressA = true; hold = 3; } }
-      else if (o.kind === "ground" && dist <= runAim(sp)) { pressA = true; hold = 20; }
+      const sp = s.speedQ / 4;
+      if (policy === "naive") {
+        if (ahead[0].x - RUN_FRONT <= runAim(sp)) { pressA = true; hold = 20; }
+      } else if (grounds.length && grounds[0].x - RUN_FRONT <= runAim(sp)) {
+        /* a plane that will be over the pet while it is in the air: hop under it instead of a full jump */
+        const dist = grounds[0].x - RUN_FRONT, tg = dist / sp;
+        const danger = planes.some((p) => (p.x - RUN_FRONT) / (sp + p.vx) < tg + 22);
+        if (!danger) { pressA = true; hold = 20; }
+        else if (dist > 0 && dist <= sp * 3 + 6) { pressA = true; hold = 3; }
+      }
     }
     g.step(s, { left: false, right: false, a: hold > 0, press: { left: false, right: false, a: pressA } }, 50);
     if (hold > 0) hold--;
     /* a new pattern: one or two things pushed in the same tick; its gap is from the previous pattern's right edge */
     const fresh = s.obs.filter((o) => !seen.has(o));
+    const older = s.obs.filter((o) => seen.has(o));
+    right = older.length ? Math.max(...older.map((o) => o.x + o.w)) : right;
     if (fresh.length) {
       const left = Math.min(...fresh.map((o) => o.x)), r2 = Math.max(...fresh.map((o) => o.x + o.w));
       spawned.push({ gap: right == null ? null : left - right, speedQ: s.speedQ, kinds: fresh.map((o) => o.kind),
@@ -306,8 +313,9 @@ test("run: patterns keep a landing gap, never below minGap(speed); planes from 1
     assert.equal(r.state.done, false, `seed ${seed} went the distance`);
     for (const sp of r.spawned) {
       if (sp.gap != null) {
-        assert.ok(sp.gap >= M(sp.speedQ) - 8, `seed ${seed}: gap ${sp.gap} at speed ${sp.speedQ / 4} px`);
-        assert.ok(sp.gap <= M(sp.speedQ) + 72, `seed ${seed}: gap ${sp.gap} inside the rule`);
+        assert.ok(sp.gap >= M(sp.speedQ), `seed ${seed}: gap ${sp.gap} at speed ${sp.speedQ / 4} px`);
+        /* a plane starts further back, by how much faster than the room it flies: only floor things have an upper bound */
+        if (!sp.kinds.includes("plane")) assert.ok(sp.gap <= M(sp.speedQ) + 72, `seed ${seed}: gap ${sp.gap} inside the rule`);
         pairs++;
       }
       if (sp.tick < Play.RUN.LEVEL_TICKS) assert.ok(!sp.kinds.includes("plane"), "no plane in the first ten seconds");
@@ -322,21 +330,25 @@ test("run: patterns keep a landing gap, never below minGap(speed); planes from 1
   assert.ok(low > 0 && high > 0, `nuts both low (${low}) and high (${high})`);
 });
 
-test("run: a plane - standing and a quick hop (A up to 3 ticks) pass under it, a longer jump flies into it", () => {
+test("run: a plane - standing and a quick hop (A up to 3 ticks) pass under it, a long jump (5+) flies into it", () => {
   const g = game("run");
-  const tryHold = (n) => {
+  const tryHold = (n, ph) => {
     const s = g.init(3);
     s.tick = 900;
-    s.obs = [{ x: 60, y: Play.RUN.FLOOR - Play.RUN.PLANE_UP - 10, w: 20, h: 10, kind: "plane", nut: null }];
+    const y = Play.RUN.FLOOR - Play.RUN.PLANE_UP - 10;
+    s.obs = [{ x: 60, y, base: y, w: 20, h: 10, kind: "plane", nut: null, vx: 0, phase: ph }];
     for (let t = 0; t < 40 && !s.dying; t++) {
       g.step(s, { left: false, right: false, a: t < n, press: { left: false, right: false, a: t === 0 && n > 0 } }, 50);
       s.obs[0].x = 18;                                  /* keep the plane right over the pet for the whole jump */
     }
     return s.dying > 0;
   };
-  assert.equal(tryHold(0), false, "standing passes under");
-  for (const n of [1, 2, 3]) assert.equal(tryHold(n), false, `A for ${n} ticks stays under`);
-  for (const n of [4, 6, 20]) assert.equal(tryHold(n), true, `A for ${n} ticks flies into it`);
+  /* every bob phase: the plane is alive, but the rule holds wherever it is in its bob */
+  for (let ph = 0; ph < 16; ph++) {
+    assert.equal(tryHold(0, ph), false, "standing passes under");
+    for (const n of [1, 2, 3]) assert.equal(tryHold(n, ph), false, `A for ${n} ticks stays under (phase ${ph})`);
+    for (const n of [5, 6, 20]) assert.equal(tryHold(n, ph), true, `A for ${n} ticks flies into it (phase ${ph})`);
+  }
 });
 
 test("run: jumping at everything is not enough - a full-jump-at-anything bot falls to a plane, the careful one runs on", () => {

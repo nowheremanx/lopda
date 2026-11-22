@@ -280,8 +280,20 @@ function runGround(s,x,low){
   var k=low ? 1+Math.floor(rand(s)*2) : Math.floor(rand(s)*n), t=RUN_THINGS[k];
   return {x:x, y:FLOOR-t.h, w:t.w, h:t.h, k:k, kind:"ground", nut:null};
 }
-function runPlane(x){
-  return {x:x, y:FLOOR-R_PLANE_UP-PLANE.h, w:PLANE.w, h:PLANE.h, kind:"plane", nut:null};
+/* Planes are alive (owner, 2026-11-22: a plane pinned in place looked dead): each one flies 1 or 2 px a tick faster
+   than the room scrolls and bobs up and down by up to 3 px on its own phase. Its lowest point is still 53 px over the
+   floor, so a quick hop (A up to three ticks, 36 px) passes under every plane, and a long jump (A five ticks or more,
+   45 px) meets it wherever it is in its bob. Four ticks (41 px) is the edge: it depends on the bob. */
+var BOB=[0,1,2,3,3,2,1,0,0,-1,-2,-3,-3,-2,-1,0];
+function runPlane(s,x){
+  return {x:x, y:FLOOR-R_PLANE_UP-PLANE.h, base:FLOOR-R_PLANE_UP-PLANE.h, w:PLANE.w, h:PLANE.h, kind:"plane", nut:null,
+    vx:1+Math.floor(rand(s)*2), phase:Math.floor(rand(s)*16)};
+}
+/* how far a plane flies ahead of the room before a thing at x reaches the pet: used to start it further right so
+   the two meet over the pet, and to keep a plane clear of the pattern before it */
+function planeLead(s,x,vx){
+  var sp=Math.max(1,Math.floor(s.speedQ/4));
+  return vx*Math.max(0,Math.ceil((x-(PET_X+16))/sp));
 }
 function nutAt(cx,up){ return {x:cx-Math.floor(NUT.w/2), y:FLOOR-up-NUT.h}; }
 /* One pattern at x: a thing on the floor, a plane (maybe with a low nut under it), a plane over a low thing, or a
@@ -293,12 +305,17 @@ function runSpawn(s,x){
     o={x:x, y:0, w:NUT.w, h:0, kind:"none", nut:nutAt(x+Math.floor(NUT.w/2),R_NUT_HIGH)};
     s.obs.push(o);
   } else if(r<wNut+wPlane){
-    o=runPlane(x);
-    if(rand(s)<0.5) o.nut=nutAt(x+Math.floor(PLANE.w/2),R_NUT_LOW);
+    /* a faster plane starts further back, so it never catches the thing before it over the pet */
+    o=runPlane(s,x);
+    o.x=x+o.vx*40;
+    /* the nut hangs under the plane and flies with it */
+    if(rand(s)<0.5) o.nut=nutAt(o.x+Math.floor(PLANE.w/2),R_NUT_LOW);
     s.obs.push(o);
   } else if(r<wNut+wPlane+wUnder){
     o=runGround(s,x+2,true);
-    p=runPlane(x+2+Math.floor(o.w/2)-Math.floor(PLANE.w/2));
+    p=runPlane(s,0);
+    var gc=o.x+Math.floor(o.w/2);
+    p.x=gc+planeLead(s,gc,p.vx)-Math.floor(PLANE.w/2);   /* it reaches the low thing just as the pet does */
     s.obs.push(o); s.obs.push(p);
   } else s.obs.push(runGround(s,x,false));
 }
@@ -319,8 +336,14 @@ function runTick(s,inp){
   var i, o;
   for(i=0;i<s.obs.length;i++){
     o=s.obs[i];
-    o.x-=d;
-    if(o.nut) o.nut.x-=d;
+    var dx=d+(o.vx||0);
+    o.x-=dx;
+    if(o.nut) o.nut.x-=dx;
+    if(o.kind==="plane"){
+      var ny=o.base+BOB[((s.tick>>1)+o.phase)&15];
+      if(o.nut) o.nut.y+=ny-o.y;
+      o.y=ny;
+    }
   }
   var pressed=!!(inp.press && inp.press.a);
   if(pressed) s.buf=3;
