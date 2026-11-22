@@ -319,10 +319,12 @@ test("run: patterns keep a landing gap, never below minGap(speed); planes from 1
         pairs++;
       }
       if (sp.tick < Play.RUN.LEVEL_TICKS) assert.ok(!sp.kinds.includes("plane"), "no plane in the first ten seconds");
-      if (sp.tick < 2 * Play.RUN.LEVEL_TICKS) assert.ok(!(sp.kinds.length === 2), "no plane over a thing before 20 s");
+      if (sp.tick < 2 * Play.RUN.LEVEL_TICKS) assert.ok(!(sp.kinds.includes("ground") && sp.kinds.includes("plane")), "no plane over a thing before 20 s");
       for (const n of sp.nuts) {
-        if (n.kind === "plane") { assert.equal(n.up, Play.RUN.NUT_LOW, "a nut under a plane sits low"); low++; }
-        else { assert.equal(n.kind, "none"); assert.equal(n.up, Play.RUN.NUT_HIGH, "a nut alone sits high"); high++; }
+        /* a nut is its own thing, never carried by a plane: low where a plane will pass over it, else high */
+        assert.equal(n.kind, "none", "a nut is not attached to anything");
+        if (sp.kinds.includes("plane")) { assert.equal(n.up, Play.RUN.NUT_LOW, "a nut a plane will pass over sits low"); low++; }
+        else { assert.equal(n.up, Play.RUN.NUT_HIGH, "a nut alone sits high"); high++; }
       }
     }
   }
