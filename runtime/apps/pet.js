@@ -6,10 +6,10 @@
  * Screen: the room is a 162 x 120 canvas at 2 CSS pixels a pixel (324 x 240), then five 44 px icon targets and the
  * soft keys; 328 px of content, so it fits the 331 x 359 LCD with nothing to scroll. Everything on the canvas is
  * putImageData from a Uint8Array of tone indices: never drawImage after putImageData (Safari swaps red and blue).
- * Sub-screens (food, the play pack list, the START menu, look, box, word, the naming panel) open over the room at the
- * same 324 x 240, on paper with ink text. A play pack runs in the room canvas at 20 fps only while its screen is
- * visible (50 ms fixed ticks in petplay.js), from the same putImageData buffer as the room; leaving, pausing or HOME
- * stops it.
+ * Sub-screens (food, the play pack list, the START menu, look, box, word, the naming panel, the long press's
+ * 去看看？ question) open over the room at the same 324 x 240, on paper with ink text. A play pack runs in the room
+ * canvas at 20 fps only while its screen is visible (50 ms fixed ticks in petplay.js), from the same putImageData
+ * buffer as the room; leaving, pausing or HOME stops it.
  *
  * Storage: data/users/local/pet (design.md 8 plus petsim's lastMeal, awakeHunger, awakeJoy, today, seenUse and aiUse;
  * care — the days-long 0..1 average the souvenir mood comes from — and boxSeen, today's pick/outing
@@ -20,10 +20,13 @@
  * status bar says 未存档).
  *
  * The day: on the first open of a day (and after hatching) the program asks the read-only summaries for the day's one
- * pick: an upcoming calendar date (a count of days, never a name), the word book, a book not opened for a week,
- * or waiting film. LopdaPet.pickOfDay chooses (about half the days nothing); the pet holds the matching prop
- * and its row lights. START opens the small menu (the pick's own name / 状态 / 纪念品箱; "今天没有" when empty);
- * A on that row opens the summary's own program, then the pick is used for the day. The AI souvenir, when the line is on, is one call at the day's outing (30 s cap) and silently
+ * pick: an upcoming calendar date (a count of days, never a name) or a word from the word book. LopdaPet.pickOfDay
+ * chooses (about half the days nothing); the pet holds the matching prop in its room, a flag counting down or a small
+ * card. A short tap on the card turns it over on the pet's own screen (the meaning is looked up there); no pick opens
+ * another program, and START's small menu is only 状态 / 纪念品箱. The room slowly shows what you did elsewhere, from
+ * counts and flags only, never a photo, a title or a note (decisions.md section 63): a small framed picture for each
+ * darkroom visit, a book laid flat on the shelf for the reader, bunting on the holiday itself, an open notebook at the
+ * foot of the bed when today has a diary (save.saw, today.sawPhoto / sawRead). The AI souvenir, when the line is on, is one call at the day's outing (30 s cap) and silently
  * falls back to the built-in table; a day whose separate mood roll fails is empty-handed instead and makes no call.
  *
  * From boot: the pet lives without its screen. On storage ready, whenever the home screen draws its icon and on resume,
@@ -82,13 +85,13 @@ var NAME_EMOJI=/[\p{Extended_Pictographic}\u{1F1E6}-\u{1F1FF}\u{1F3FB}-\u{1F3FF}
 var P={
   save:null, loaded:false, nostore:false, readTried:false, readFailed:false, inView:false,
   refs:null, souv:[], usage:null, resumeOuting:false,
-  sub:null, sel:0, menuSel:0, frame:0,
-  anim:0, hold:0, roomHold:0, holdFired:false,
+  sub:null, sel:0, menuSel:0, frame:0, go:null,
+  anim:0, hold:0, roomHold:0, roomAt:null, holdFired:false,
   eggMs:0, hatching:null, action:null, actionUntil:0, heartUntil:0,
   washUntil:0, washStart:0, flash:null, outing:null, foodSel:0, boxPage:0, boxSel:0, boxItem:null, boxAsk:null,
   naming:null, task:null, at:null, feeds:[], awakeLeft:0, puffUntil:0, pendingNeed:null, lightReturn:false,
   ignoreAUp:false,
-  wasAsleep:null, lastScene:null, flashSeq:0,
+  wasAsleep:null, pausedAt:0, lastScene:null, flashSeq:0,
   game:null, gameSel:0, gameTimer:0, gameLabel:"", gameHeld:{left:false,right:false,a:false}, gamePress:{left:false,right:false,a:false}, gameTouch:null,
   gameSeed:null,
   moodClearUntil:0,
@@ -196,6 +199,11 @@ function freshSave(){
   s.boxSeen=0;
   return s;
 }
+function sawCount(v,max){
+  var n=Math.floor(+v);
+  if(!isFinite(n) || n<0) return 0;
+  return Math.min(max,n);
+}
 function normalize(save){
   if(!save || typeof save!=="object") return null;
   if(!save.species) save.species=defaultSpecies();
@@ -221,10 +229,31 @@ function normalize(save){
   if(td.shelf===undefined) td.shelf=false;
   if(td.cared===undefined) td.cared=false;
   if(td.outEmpty===undefined) td.outEmpty=false;
+  if(td.sawPhoto===undefined) td.sawPhoto=false;
+  if(td.sawRead===undefined) td.sawRead=false;
+  /* what the room keeps of other programs: an optional, additive count, never a name or a picture. A save
+     without it opens exactly as before; a field that is not a count becomes 0, and a saw that is not an
+     object at all is dropped. */
+  if(save.saw!==undefined){
+    if(!save.saw || typeof save.saw!=="object" || Array.isArray(save.saw)) delete save.saw;
+    else {
+      save.saw.photos=sawCount(save.saw.photos,3);
+      save.saw.reads=sawCount(save.saw.reads,5);
+    }
+  }
   /* care is the days-long average the outing's chance comes from: keep a real 0..1 number, drop anything else */
   if(save.care!==undefined){
     if(typeof save.care==="number" && isFinite(save.care) && save.care>=0 && save.care<=1) save.care=+save.care;
     else delete save.care;
+  }
+  /* best scores are optional (an older save has none); a junk number is no record, never a broken round */
+  if(save.best!==undefined){
+    if(!save.best || typeof save.best!=="object" || Array.isArray(save.best)) delete save.best;
+    else ["catch","run","climb","bounce"].forEach(function(id){
+      var n=save.best[id];
+      if(n===undefined) return;
+      save.best[id]=(typeof n==="number" && isFinite(n) && n>=0) ? Math.floor(n) : 0;
+    });
   }
   return save;
 }
@@ -363,6 +392,7 @@ function refreshTime(){
   P.save=Pet.openDay(P.save,dayKey(now()),P.usage||null);
   if(P.save.stage==="adult" && !P.save.form && P.usage) P.save.form=Pet.adultForm(P.usage,P.save.species);
   handleEvents(r.events);
+  settleLamp();                                    /* an old save asleep with the lamp on: off it goes */
   saveSoon();
   checkOuting();
   buildPick();
@@ -379,6 +409,7 @@ function dayWork(){
   var r=Pet.catchUp(P.save,now(),{tz:tz()});
   P.save=r.save;
   if(P.save.stage==="adult" && !P.save.form && P.usage) P.save.form=Pet.adultForm(P.usage,P.save.species);
+  settleLamp();                                    /* the background day leaves a sleeping pet in the dark too */
   noteWants();
   saveSoon();
   buildPick();
@@ -403,6 +434,8 @@ function scheduleBackground(){
 
 /* ---------- the pick of the day (design.md 6) ---------- */
 var USE_KEYS=["reader","dict","notes","darkroom"];
+/* the room's diary question is cached for one day; refreshUsage drops the cache when the screen opens */
+var sawDiaryDay=null, sawDiaryOn=false;
 function activePick(){
   var td=P.save && P.save.today;
   return td && !td.used && td.pick && td.pick.kind ? td.pick : null;
@@ -415,10 +448,22 @@ function dayNumberNow(){
   return null;
 }
 /* The usage counts are re-read when the screen opens. Growth since the last look makes it a little happier, once a
-   day (today.rewarded), and seenUse then moves to the fresh counts. Never a message. */
+   day (today.rewarded), and seenUse then moves to the fresh counts. The same growth leaves one more mark in its
+   room — a small picture, one more book on the shelf — at most once each a day. Never a message. */
+function sawGrow(s,td,field,max,flag){
+  var saw=s.saw;
+  if(!saw || typeof saw!=="object" || Array.isArray(saw)) saw={photos:0,reads:0};
+  saw[field]=Math.min(max,sawCount(saw[field],max)+1);
+  s.saw=saw;
+  td[flag]=true;
+}
 function rewardUse(){
-  var s=P.save, td=s && s.today, counts=P.usage, seen=s && s.seenUse, grew=false, i;
-  if(!s || !td || !counts || s.stage==="egg") return;
+  var s=P.save, td=s && s.today, counts=P.usage, seen=s && s.seenUse, grew=false, i, marks=false;
+  if(!s || !td || !counts || s.stage==="egg") return false;
+  if(seen){
+    if(!td.sawPhoto && (+counts.darkroom||0)>(+seen.darkroom||0)){ sawGrow(s,td,"photos",3,"sawPhoto"); marks=true; }
+    if(!td.sawRead && (+counts.reader||0)>(+seen.reader||0)){ sawGrow(s,td,"reads",5,"sawRead"); marks=true; }
+  }
   if(!td.rewarded && seen) for(i=0;i<USE_KEYS.length;i++) if((+counts[USE_KEYS[i]]||0)>(+seen[USE_KEYS[i]]||0)) grew=true;
   if(grew){
     var sp=Pet.SPECIES[s.species]||Pet.SPECIES.chip;
@@ -427,20 +472,24 @@ function rewardUse(){
   }
   s.seenUse={};
   for(i=0;i<USE_KEYS.length;i++) s.seenUse[USE_KEYS[i]]=+counts[USE_KEYS[i]]||0;
+  return marks;
 }
 function usageArrived(){
   if(!P.save || !isOpen()) return;
-  rewardUse();
+  var marks=rewardUse();
   saveSoon();
   if(P.save.today && !P.save.today.picked) buildPick();
+  if(marks) render();             /* the room shows the new mark at once, not at the next 500 ms tick */
 }
-/* readUsage is the only way the pet learns what happened in other programs; call it on every enter/resume */
+/* readUsage is the only way the pet learns what happened in other programs; call it on every enter/resume.
+   The diary answer is a notes query, so it is asked again here and cached for the rest of the day. */
 function refreshUsage(){
+  sawDiaryDay=null;
   return readUsage().then(function(){ usageArrived(); },function(){});
 }
 /* One candidate per source, each guarded: a missing or broken summary just drops its candidate. */
 function pickCandidates(){
-  var list=[], t=now(), key=dayKey(t);
+  var list=[], key=dayKey(now());
   try{
     if(LP.calendar && typeof LP.calendar.upcoming==="function"){
       var up=LP.calendar.upcoming(7)||[];
@@ -459,12 +508,6 @@ function pickCandidates(){
       }
     }
   }catch(e){}
-  try{
-    if(LP.reader && typeof LP.reader.current==="function"){
-      var cur=LP.reader.current();
-      if(cur && cur.id && (+cur.opened||0)<=t-7*DAY) list.push({kind:"book", urgency:3, id:String(cur.id)});
-    }
-  }catch(e){}
   return list;
 }
 function cleanPick(o){
@@ -476,29 +519,21 @@ function cleanPick(o){
   if(o.word) f.word=String(o.word);
   return f;
 }
-/* The film box is the one asynchronous summary; the others are in memory. The decision waits for all of them. */
+/* The candidates are in memory, so the decision is one microtask; a pick forced meanwhile still wins. */
 function buildPick(){
   var save=P.save;
-  if(!save || save.stage==="egg") return;
+  /* away on the long absence: it is not home to find anything, and the return day brings its postcard instead */
+  if(!save || save.stage==="egg" || save.travel) return;
   var td=save.today;
   if(!td) return;
   if(td.picked) return;
-  var seq=++P.pickSeq, list=pickCandidates(), film=null;
-  try{
-    if(LP.darkroom && typeof LP.darkroom.summary==="function"){
-      film=Promise.resolve(LP.darkroom.summary()).then(function(s){
-        if(s && +s.n>0) list.push({kind:"film", urgency:4});
-      },function(){});
-    }
-  }catch(e){ film=null; }
-  Promise.resolve(film).then(function(){
+  var seq=++P.pickSeq;
+  Promise.resolve().then(function(){
     if(seq!==P.pickSeq || P.restoring) return;
     var cur=P.save && P.save.today;
-    /* a care action clones the save while the film summary is in flight: decide against today's new object, not the
-       captured one, so the pick is not silently lost */
     if(!cur || cur.picked || cur.day!==td.day) return;
     cur.picked=true;
-    var pick=Pet.pickOfDay(list, cur.shownYesterday||null, Pet.daySeed(P.save.born, cur.day));
+    var pick=Pet.pickOfDay(pickCandidates(), cur.shownYesterday||null, Pet.daySeed(P.save.born, cur.day));
     cur.pick=cleanPick(pick);
     cur.shown=cur.pick ? cur.pick.kind : null;
     cur.used=false;
@@ -767,7 +802,7 @@ function outingSouvenir(){
   return Pet.pickSouvenir(r,table,opts);
 }
 /* ---------- the AI souvenir (design.md 7; decisions.md section 34 stays: no PAD.ai for apps) ---------- */
-var FORM_WORD={book:"bookish",walk:"walker",scholar:"scholar",diary:"diarist",monster:"little monster",plain:"plain"};
+var FORM_WORD={book:"bookish",walk:"walker",scholar:"scholar",diary:"diarist",monster:"player",plain:"plain"};
 function formWord(){
   var s=P.save;
   if(!s) return "";
@@ -837,7 +872,8 @@ function stripFence(text){
 }
 /* One call a day. today.ai is written first, so a reload never asks twice; the answer may arrive while the pet's
    screen is closed (the day's outing is decided in the background too). Anything other than a valid souvenir becomes
-   the built-in one; leaving the screen stops a request that is still running. */
+   the built-in one; leaving or pausing the screen does not stop the day's request, only a restore/reset does (the
+   job's own 30 s timer caps it, and the outing waits for the answer because it is the day's souvenir). */
 function aiAvailable(){
   if(P.restoring || P.nostore || P.readFailed) return false;
   var ai=LP.ai;
@@ -860,7 +896,7 @@ function startAiJob(td){
   if(!td || td.ai || !aiAvailable()) return null;
   td.ai=true;
   saveNow();
-  var job={done:false,result:null,timer:0,stop:null,resolve:null};
+  var job={day:td.day,done:false,result:null,timer:0,stop:null,resolve:null};
   job.promise=new Promise(function(resolve){ job.resolve=resolve; });
   P.aiJob=job;
   var finish=function(result){
@@ -978,13 +1014,18 @@ function finishOuting(){
   var o=P.outing; if(!o || o.done) return;
   o.done=true;
   if(o.saved || souvIsEmpty(o.souv)){ markOutingDone(o); return; }
-  addSouvenir(o.souv).then(function(saved){
-    if(saved) markOutingDone(o);
-    else {
-      /* leave the phase in today: the next visit tries the write again */
-      P.outing=null; P.resumeOuting=false; render();
-    }
-  });
+  /* a write already started when the walk began: wait for it rather than write the same day twice */
+  function write(){
+    addSouvenir(o.souv).then(function(saved){
+      if(saved) markOutingDone(o);
+      else {
+        /* leave the phase in today: the next visit tries the write again */
+        P.outing=null; P.resumeOuting=false; render();
+      }
+    });
+  }
+  if(o.write) o.write.then(function(saved){ if(saved) markOutingDone(o); else write(); });
+  else write();
 }
 function stepOuting(){
   if(!P.outing || P.outing.done) return;
@@ -999,6 +1040,20 @@ function stepOuting(){
     P.outing.saved=false;
     P.aiJob=null;
     persistOuting(); saveSoon(); render();
+    /* The souvenir is written when the walk home starts, not when it ends: leaving during these two seconds
+       keeps the day's find (the walk-back resumes it from today.outSouv). */
+    if(!souvIsEmpty(P.outing.souv)){
+      var out=P.outing;
+      out.write=addSouvenir(out.souv).then(function(saved){
+        if(!saved) return null;
+        if(P.outing===out) out.saved=true;
+        if(P.save && P.save.today && P.save.today.day===out.day) P.save.today.outSouv=saved.id;
+        saveSoon(); render();
+        return saved;
+      });
+      /* the background day waits for this write, so leaving now can never roll a second souvenir for the day */
+      P.outWrite={day:out.day,promise:out.write};
+    }
   } else if(P.outing.phase==="back" && P.outing.left<=0){
     persistOuting();
     finishOuting();
@@ -1011,7 +1066,10 @@ function stepOuting(){
 function decideOuting(hour, day){
   if(P.restoring || P.nostore || P.readFailed) return Promise.resolve(false);
   if(P.outResolving) return P.outResolving;
-  P.outResolving=Promise.resolve().then(function(){
+  /* A walk-back that started on the screen writes the day's souvenir first: decide only after that write,
+     so the two paths cannot both bring one. */
+  var walk=(P.outWrite && P.outWrite.day===day) ? P.outWrite.promise : null;
+  P.outResolving=(walk||Promise.resolve()).then(function(){
     var td=P.save && P.save.today;
     if(!td || td.day!==day || td.out!=null || td.back) return {skip:true};
     /* once per day, before the AI gate or the built-in roll; the guard keeps a reload from moving it again */
@@ -1021,6 +1079,15 @@ function decideOuting(hour, day){
     if(had) return {skip:true, done:markDayWithSouvenir(had,hour,day)};
     td.outHour=hour;
     saveSoon();
+    /* A request started on the screen is still the day's one: leaving the screen no longer aborts it (its own
+       30 s cap ends it), so the background path waits for that answer instead of rolling a second souvenir. */
+    var pending=P.aiJob;
+    if(pending && pending.day===day && (!pending.done || pending.result)){
+      return pending.promise.then(function(entry){
+        if(P.aiJob===pending) P.aiJob=null;
+        return {entry:entry};
+      });
+    }
     if(!td.ai && aiAvailable()){
       if(aiMoodOpen(day)){
         var job=startAiJob(td);
@@ -1050,6 +1117,9 @@ function decideOuting(hour, day){
       if(souvIsEmpty(entry)) return markDayBack(hour,day,null);
       if(!entry) return false;
     }
+    /* the wait above may have let the screen's walk-back write the day's souvenir: never a second one */
+    var again=souvForDay(day);
+    if(again) return markDayWithSouvenir(again,hour,day);
     entry.day=day;
     return addSouvenir(entry).then(function(saved){
       if(!saved){
@@ -1114,6 +1184,24 @@ function naturalAsleep(){
 }
 /* the pet is in bed and nothing (a wake walk, the forced two minutes) is holding it up */
 function inBedSleep(){ return naturalAsleep() && !P.task && !(P.awakeLeft>0); }
+/* The lamp belongs to the pet's day, not to a mode: a sleeping pet never lies in a lit room (written here, not
+   through setLight, so an automatic switch is not a care action and leaves close alone). */
+function settleLamp(){
+  if(!P.save || P.save.stage==="egg" || P.save.light===false || !inBedSleep()) return false;
+  P.save.light=false;
+  saveSoon();
+  renderKeys();
+  return true;
+}
+/* Leaving it up at night is not a state the room keeps: it is asleep in bed. The lamp goes off with it. */
+function putToBed(){
+  if(!naturalAsleep()) return false;
+  P.task=null; P.awakeLeft=0; P.feeds=[];
+  P.action=""; P.actionUntil=0; P.puffUntil=0; P.lightReturn=false;
+  P.at=useSpotAt("sleep","sleep");
+  if(P.save && P.save.light!==false){ P.save.light=false; saveSoon(); }
+  return true;
+}
 function atBed(){ var b=useSpotAt("sleep","sleep"); return !!P.at && Math.abs(P.at.x-b.x)<=2 && Math.abs(P.at.y-b.y)<=2; }
 function spotNow(){
   if(P.task && P.task.pos) return {x:P.task.pos.x,y:P.task.pos.y};
@@ -1214,20 +1302,24 @@ function startChore(kind,phase){
    pet is put at the place the chore was heading for. The two minutes only count while the screen is showing it. */
 function finishTaskOnLeave(){
   var task=P.task;
-  if(!task) return;
+  if(!task){ putToBed(); return; }               /* already in bed at night: the lamp goes off with us */
   if(task.kind==="feed"){
     while(P.feeds.length){
       var kind=P.feeds.shift(), sp=Pet.SPECIES[P.save.species]||Pet.SPECIES.chip;
       if(!(kind==="meal" && (+P.save.hunger||0)>=sp.hungerMax)) P.save=Pet.feed(P.save,kind,now(),dayKey(now()));
       if(kind==="snack" && P.save.today && P.save.today.burp) P.save.today.burp=false;
     }
-    P.awakeLeft=0; P.at=naturalAsleep()?useSpotAt("sleep","sleep"):useSpotAt("rest","stand");
+    P.feeds=[];
+    if(putToBed()) return;
+    P.awakeLeft=0; P.at=useSpotAt("rest","stand");
+  } else if(putToBed()){
+    return;                                      /* asleep at night: no chore leaves it standing awake all night */
   } else if(task.kind==="grumpy" || task.kind==="wake"){
-    if(P.save.light===false && naturalAsleep()){ P.awakeLeft=0; P.at=useSpotAt("sleep","sleep"); }
-    else { P.awakeLeft=Math.max(P.awakeLeft,AWAKE_TICKS); P.at=useSpotAt("rest","stand"); }
+    P.awakeLeft=Math.max(P.awakeLeft,AWAKE_TICKS); P.at=useSpotAt("rest","stand");
   } else {
     P.awakeLeft=0; P.at=useSpotAt("sleep","sleep");
   }
+  P.feeds=[];                                    /* a meal queued during a night wake is not eaten later on its own */
   P.task=null; P.action=""; P.actionUntil=0; P.puffUntil=0; P.lightReturn=false;
 }
 /* One flash per real change of need. While the pet is asleep nothing flashes or sounds; the need is kept and
@@ -1310,6 +1402,15 @@ function toggleLight(){
   if(!P.save) return;
   var t=now(), h=hourNow(), mins=localDate(t).getUTCMinutes();
   var wasAsleep=inBedSleep();
+  if(wasAsleep){
+    /* On a sleeping pet in bed any press of the lamp wakes it, and the lamp is on (the grumpy wake from the bed). */
+    P.save=Pet.setLight(P.save,true);
+    P.action=null; P.actionUntil=0; P.idle=null;
+    P.at=useSpotAt("sleep","sleep");
+    startChore("grumpy","angry");
+    beep("tick"); saveSoon(); renderKeys(); render();
+    return;
+  }
   P.save=Pet.setLight(P.save,!P.save.light);
   P.action=null; P.actionUntil=0; P.idle=null;
   if(P.task){
@@ -1320,14 +1421,13 @@ function toggleLight(){
       } else if(P.task.phase==="walkRug"){
         startChore("bed","walkBed");
       }
+    } else if(P.task.kind==="bed" && P.save.light===true){
+      /* the lamp on during the walk to bed turns it back to the rug, awake (from where it stands) */
+      startChore("grumpy","walkRug");
     } else if(P.save.light===false){
       P.lightReturn=true;
     }
-  } else if(wasAsleep && P.save.light===true){
-    /* light on at night: wakes it, angry, and it walks to the rug (the same walk as every bed <-> floor move) */
-    P.at=useSpotAt("sleep","sleep");
-    startChore("grumpy","angry");
-  } else if(P.save.light===false && Pet.asleep(P.save,h,mins) && !wasAsleep){
+  } else if(P.save.light===false && Pet.asleep(P.save,h,mins)){
     /* light off: back to bed at once, walking */
     P.awakeLeft=0;
     startChore("bed","walkBed");
@@ -1515,6 +1615,7 @@ function startGame(id){
   P.gamePress={left:false,right:false,a:false};
   P.gameLabel="";
   silenceWeather();
+  if(LP.keepAwake) LP.keepAwake(true);
   beep("tap"); renderKeys(); render();
 }
 function startRound(){
@@ -1523,6 +1624,7 @@ function startRound(){
   P.gameHeld={left:false,right:false,a:false};
   P.gamePress={left:false,right:false,a:false};
   P.panelKey="";
+  if(LP.keepAwake) LP.keepAwake(true);
   beep("tap"); renderKeys(); render();
   startGameTimer();
 }
@@ -1540,31 +1642,53 @@ function gameTick(){
     stopGameTimer();
     if(!P.game.applied){ P.game.applied=true; applyGameJoy(st); }
     renderKeys();
-  } else {
-    /* the only label that changes during play: 发球 until the ball is in the air */
-    var lab=(P.game.id==="bounce" && !st.ball) ? "serve" : "";
-    if(lab!==P.gameLabel){ P.gameLabel=lab; renderKeys(); }
   }
   render();
 }
 /* the packs name moments, the program names the short original sounds from the four-tone chip */
 function gameSounds(events){
   (events||[]).forEach(function(e){
-    if(e==="catch" || e==="serve") beep("coin");
-    else if(e==="return" || e==="bat") beep("hit");
-    else if(e==="petmiss") beep("miss");
+    if(e==="nut") beep("coin");
+    else if(e==="jump" || e==="flap") beep("tap");
+    else if(e==="fly" || e==="swim" || e==="lightson") beep("ok");
+    else if(e==="dark") beep("tick");
+    /* a stage's one-line hint, so a player who still thinks A jumps learns the new rule before it matters */
+    if(e==="intro_fly" || e==="intro_swim" || e==="dark" || e==="back"){
+      var key={intro_fly:"pet.run.fly", intro_swim:"pet.run.swim", dark:"pet.run.dark", back:"pet.run.back"}[e];
+      if(LP.toast) LP.toast(tr(key));
+    }
+    else if(e==="lightsout") beep("miss");
+    else if(e==="splash") beep("hit");
+    else if(e==="hit") beep("miss");
     else if(e==="land") beep("tick");
   });
 }
+/* The best of a game, 0 when an older save has no best field yet. */
+function bestScore(id){
+  var b=P.save && P.save.best, n=b && typeof b==="object" ? b[id] : 0;
+  return typeof n==="number" && isFinite(n) && n>0 ? Math.floor(n) : 0;
+}
 function applyGameJoy(st){
   if(!P.save || !st) return;
-  P.save=Pet.play(P.save,st.joy,dayKey(now()));
-  P.action="happy"; P.actionUntil=now()+2500; P.heartUntil=now()+2500;
-  beep(st.joy>1?"win":"ok"); saveSoon();
+  var id=st.id || (P.game && P.game.id);
+  var score=Math.max(0,Math.floor(+st.score||0));
+  if(id && score>bestScore(id)){
+    if(!P.save.best || typeof P.save.best!=="object" || Array.isArray(P.save.best)) P.save.best={run:0,climb:0};
+    P.save.best[id]=score;
+    if(P.game && P.game.id===id) P.game.newBest=true;
+  }
+  /* a round with no progress earns nothing; the best score above is still kept */
+  if(st.joy>0){
+    P.save=Pet.play(P.save,st.joy,dayKey(now()));
+    P.action="happy"; P.actionUntil=now()+2500; P.heartUntil=now()+2500;
+    beep(st.joy>1?"win":"ok");
+  } else beep("tap");
+  saveSoon();
 }
 function stopGameTimer(){ if(P.gameTimer){ clearInterval(P.gameTimer); P.gameTimer=0; } }
 function exitGame(swallowAUp){
   stopGameTimer();
+  if(LP.keepAwake) LP.keepAwake(false);
   P.game=null;
   P.gameHeld={left:false,right:false,a:false};
   P.gamePress={left:false,right:false,a:false};
@@ -1634,14 +1758,19 @@ function setShelf(id){
   var old=s.shelf||null, next=id||null;
   if(old===next){ P.boxAsk=null; P.panelKey=""; renderKeys(); render(); return; }
   function finish(){
-    s.shelf=next;
+    var cur=P.save;                    /* a care action may have cloned the save while the souvenir was written */
+    if(!cur) return;
+    cur.shelf=next;
     shelfGainJoy();
     if(next){ P.action="happy"; P.actionUntil=now()+2500; P.idle=null; }
     P.boxAsk=null; P.panelKey="";
     beep("ok"); saveSoon(); renderKeys(); render();
   }
   function putNew(){
-    shelfPut(next?findSouv(next):null,function(){ finish(); });
+    shelfPut(next?findSouv(next):null,function(ok){
+      if(!ok){ P.boxAsk=null; P.panelKey=""; beep("err"); renderKeys(); render(); return; }
+      finish();
+    });
   }
   if(old){
     shelfTake(findSouv(old),function(ok){
@@ -1735,7 +1864,6 @@ function pressA(){
     if(gameDone()){ exitGame(); return; }              /* any key returns to the room, never a new round */
     if(!P.game.started){ startRound(); return; }
     P.gamePress.a=true;
-    if(P.game.id==="bounce") beep("tick");
     return;
   }
   if(P.sub==="menu"){ chooseMenuItem(P.menuSel); return; }
@@ -1748,12 +1876,14 @@ function pressA(){
   }
   if(P.sub==="name"){ nameNext(); return; }
   if(P.sub==="word"){ lookupWord(); return; }
+  if(P.sub==="go"){ goNow(); return; }
   if(P.sub) return;
   if(P.save.travel){ bringBack(); return; }
   useSelected();
 }
 function back(){
   if(P.sub==="game"){ exitGame(); return; }
+  if(P.sub==="go"){ closeGo(); return; }
   if(P.sub==="name"){
     if(P.naming && P.naming.confirm) nameEdit();
     return;
@@ -1766,57 +1896,33 @@ function back(){
     beep("tap"); renderKeys(); render();
   }
 }
-/* START opens the small menu over the room; A on the day's row uses the pick. */
-var PICK_NAME={date:"pet.pick.date",word:"pet.pick.word",book:"pet.pick.book",film:"pet.pick.film"};
+/* START opens the small menu over the room: how it is, and its keepsakes. Nothing takes you anywhere. */
 function menuItems(){
-  var pick=activePick();
-  if(pick && !PICK_NAME[pick.kind]) pick=null;      /* an old kind with no program is not offered */
   return [
-    {id:"mail", enabled:!!pick, label:tr(pick?PICK_NAME[pick.kind]:"pet.menu.none")},
     {id:"look", enabled:true},
     {id:"box", enabled:true}
   ];
 }
 function openMenu(){
   if(P.sub || !P.save || isEgg()) return;
-  P.sub="menu"; P.menuSel=activePick()?0:1; P.confirmStage=0;
+  P.sub="menu"; P.menuSel=0; P.confirmStage=0;
   beep("tap"); renderKeys(); render();
 }
 function chooseMenuItem(i){
   var item=menuItems()[i];
   if(!item || !item.enabled){ beep("err"); return; }
-  if(item.id==="mail"){ P.sub=null; renderKeys(); usePick(); }
-  else if(item.id==="look") openLook();
+  if(item.id==="look") openLook();
   else openBox();
 }
 
-/* ---------- the day's pick: its own program, or the word card ---------- */
+/* ---------- the day's pick: the word card, opened in the room ---------- */
 function usePick(){
   var pick=activePick();
-  if(P.sub || !pick || !P.save || P.save.travel || P.outing || P.save.stage==="egg") return;
-  if(pick.kind==="date"){
-    if(typeof pick.day!=="number" || !LP.calendar || typeof LP.calendar.open!=="function") return;
-    finishPick();
-    LP.calendar.open(pick.day);
-    return;
-  }
-  if(pick.kind==="word"){
-    P.sub="word"; P.wordWord=pick.word||""; P.wordMeaning=null; P.wordBusy=false;
-    finishPick(); beep("tap"); renderKeys(); render();
-    return;
-  }
-  if(pick.kind==="book"){
-    if(!LP.reader || typeof LP.reader.open!=="function" || !pick.id) return;
-    if(LP.reader.open(pick.id)) finishPick();
-    return;
-  }
-  if(pick.kind==="film"){
-    var open=null, i;
-    for(i=0;LP.builtins && i<LP.builtins.length;i++) if(LP.builtins[i].id==="darkroom"){ open=LP.builtins[i].open; break; }
-    if(typeof open!=="function") return;
-    finishPick();
-    open();
-  }
+  if(P.sub || !pick || !P.save || P.save.travel || P.outing || P.save.stage==="egg"){ beep("err"); return; }
+  /* a date flag and an old book or film pick from before the update draw and do nothing: no program is opened */
+  if(pick.kind!=="word") return;
+  P.sub="word"; P.wordWord=pick.word||""; P.wordMeaning=null; P.wordBusy=false;
+  finishPick(); beep("tap"); renderKeys(); render();
 }
 function fitText(text,max){
   var s=String(text==null?"":text).replace(/\s+/g," ").trim(), cp=Array.from(s);
@@ -2062,6 +2168,31 @@ function pickProp(pick){
   if(pick.kind==="film") return props.film||null;
   return null;
 }
+/* whether today has a diary: a read-only note to the notes' index, asked once a day and guarded like the picks */
+function diaryToday(){
+  var key=dayKey(now());
+  if(sawDiaryDay===key) return sawDiaryOn;
+  sawDiaryDay=key; sawDiaryOn=false;
+  try{
+    if(LP.notes && typeof LP.notes.diaryDays==="function"){
+      var d=localDate(now());
+      var days=LP.notes.diaryDays(d.getUTCFullYear(),d.getUTCMonth()+1);
+      sawDiaryOn=!!(days && days[d.getUTCDate()]);
+    }
+  }catch(e){ sawDiaryOn=false; }
+  return sawDiaryOn;
+}
+/* What the room keeps of what you did elsewhere: counts and flags only, never a photo, a title or a note.
+   The date flag hangs its bunting on the holiday itself, whether the pick is used or not. */
+function sawOf(save){
+  var saw=(save && save.saw) || {}, pick=save && save.today && save.today.pick;
+  return {
+    photos:sawCount(saw.photos,3),
+    reads:sawCount(saw.reads,5),
+    bunting:!!(pick && pick.kind==="date" && pick.in===0),
+    diary:diaryToday()
+  };
+}
 function roomScene(){
   var save=P.save, t=now(), pack=packOf(save), h=hourNow(), min=localDate(t).getUTCMinutes();
   var night=h<6 || h>=19;
@@ -2070,7 +2201,7 @@ function roomScene(){
   var scene={
     pack:pack, night:night, season:seasonOf(t), weather:weatherNow(), phase:Math.floor(t/500),
     dayOfMonth:localDate(t).getUTCDate(),
-    lightOff:!!(save && save.light===false && asleepNow),
+    lightOff:!!(save && save.light===false && night),
     bowlFull:save ? save.hunger>=2 : true,
     mess:save ? save.mess : 0
   };
@@ -2083,6 +2214,9 @@ function roomScene(){
     }
   }
   if(!save) return scene;
+  /* the room keeps a little of what you did elsewhere; an egg has not seen anything and a travelling pet
+     leaves the room as it is, so neither draws the marks */
+  if(save.stage!=="egg" && !save.travel) scene.saw=sawOf(save);
   if(save.travel){ scene.sign=true; return scene; }
   if(P.outing && P.outing.phase==="out") return scene;
 
@@ -2112,7 +2246,7 @@ function roomScene(){
     if(pick){
       scene.prop=pickProp(pick);
       /* a pick's small prop has a named slot beside the rug; it stands still while the pet walks */
-      if(scene.prop) scene.propSlot="pick";
+      if(scene.prop){ scene.propSlot="pick"; scene.propPick=pick.kind; }
     }
     if(!P.task){
       /* a want points it at the bowl or the piles */
@@ -2144,8 +2278,8 @@ function roomScene(){
   scene.petX=px; scene.petY=py;
   if(save.stage!=="egg") P.at={x:px,y:py};
   if(save.stage!=="egg" && isLidong(t)) scene.pet=wearScarf(scene.pet);
-  if(P.heartUntil>t){ scene.prop=(pack.props||{}).heart; scene.propSlot=null; scene.propFollow=true; }
-  else if(P.puffUntil>t){ scene.prop=PUFF; scene.propSlot=null; scene.propX=px+24; scene.propY=py+4; }
+  if(P.heartUntil>t){ scene.prop=(pack.props||{}).heart; scene.propSlot=null; scene.propFollow=true; scene.propPick=null; }
+  else if(P.puffUntil>t){ scene.prop=PUFF; scene.propSlot=null; scene.propX=px+24; scene.propY=py+4; scene.propPick=null; }
   else if(!scene.prop && isMidAutumn(t)){ scene.prop=(pack.props||{}).mooncake; scene.propSlot=null; scene.propFollow=true; }
   if(asleepNow && save.stage!=="egg") scene.zz=true;
   return scene;
@@ -2247,10 +2381,13 @@ function boxes(n){
   return wrap;
 }
 function panelKey(){
+  /* the naming panel's field must survive every other change: rebuilding it mid-typing closes the phone's keyboard */
+  if(P.sub==="name") return ["name",P.naming&&P.naming.confirm?1:0,I18N.lang].join("|");
   var s=P.save||{}, st=gameState();
   return [P.sub,P.foodSel,P.boxPage,P.boxAsk?P.boxAsk.id+P.boxAsk.take:"" ,P.menuSel,P.confirmStage,I18N.lang,P.souv.length,P.boxSel,P.boxItem||"",activePick()?activePick().kind:"",
+    P.go?P.go.name:"",
     P.naming?(P.naming.confirm?1:0):-1,
-    P.gameSel,P.game?P.game.id:"",st?st.score:-1,st&&st.done?1:0,P.game&&P.game.applied?1:0,P.game&&P.game.started?1:0,
+    P.gameSel,P.game?P.game.id:"",st?st.score:-1,st&&st.done?1:0,P.game&&P.game.applied?1:0,P.game&&P.game.started?1:0,P.game&&P.game.newBest?1:0,
     P.wordWord,P.wordMeaning,P.wordBusy,
     s.stage,s.name,s.hunger,s.joy,s.opened,s.born,s.close,s.travel,s.light].join("|");
 }
@@ -2260,7 +2397,6 @@ function buildMenu(panel){
   items.forEach(function(it,i){
     var b=el("button","pet-menu"+(i===P.menuSel?" on":"")+(it.enabled?"":" dim"));
     b.type="button";
-    if(it.id==="mail" && it.enabled) b.appendChild(el("i","pet-dot"));
     b.appendChild(el("span","",it.label || tr("pet.menu."+it.id)));
     b.disabled=!it.enabled;
     b.setAttribute("aria-disabled",it.enabled?"false":"true");
@@ -2310,7 +2446,8 @@ function buildGameStart(panel){
   panel.onclick=function(){ startRound(); };
   var g=P.game ? gameById(P.game.id) : null, box=el("div","pet-gbox");
   box.appendChild(el("p","pet-gname",g?tr(g.labelKey):tr("pet.game.title")));
-  box.appendChild(el("p","pet-ghow",tr("pet.game.how."+(P.game?P.game.id:"catch"))));
+  box.appendChild(el("p","pet-ghow",tr("pet.game.how."+(P.game?P.game.id:"run"))));
+  box.appendChild(el("p","pet-gbest",tr("pet.game.best",{n:bestScore(P.game?P.game.id:"")})));
   panel.appendChild(box);
 }
 function buildGameOver(panel){
@@ -2329,7 +2466,9 @@ function buildGameOver(panel){
   score.setAttribute("aria-label",tr("pet.game.score",{n:st.score}));
   paintScore(score,st.score);
   box.appendChild(score);
-  box.appendChild(el("p","pet-gcomment",tr(st.joy>=2?"pet.game.result.fun":"pet.game.result.ok")));
+  box.appendChild(el("p","pet-gbest",tr("pet.game.best",{n:bestScore(P.game?P.game.id:"")})));
+  if(P.game && P.game.newBest) box.appendChild(el("p","pet-gbest",tr("pet.game.newbest")));
+  box.appendChild(el("p","pet-gcomment",tr(st.joy>=2?"pet.game.result.fun":st.joy>=1?"pet.game.result.ok":"pet.game.result.again")));
   box.appendChild(el("p","pet-ganykey",tr("pet.game.anykey")));
   panel.appendChild(box);
 }
@@ -2354,6 +2493,15 @@ function buildWord(panel){
   if(P.wordBusy) panel.appendChild(el("p","pet-pinfo",tr("pet.word.loading")));
   else if(P.wordMeaning!=null) panel.appendChild(el("p","pet-meaning",P.wordMeaning));
   panel.appendChild(el("p","pet-phint",tr(P.wordMeaning!=null?"pet.word.back":"pet.word.hint")));
+}
+/* the long press's one question, with its own two buttons: B (or 不去) stays, A (or 去) goes */
+function buildGo(panel){
+  var target=P.go;
+  panel.appendChild(el("p","pet-ptitle",tr("pet.go.ask",{v:target?tr(target.name):""})));
+  var row=el("div","pet-askrow");
+  var yes=el("button","btn",tr("pet.go.yes")); yes.type="button"; yes.id="pet-go-yes"; yes.onclick=function(){ goNow(); };
+  var no=el("button","btn ghost",tr("pet.go.no")); no.type="button"; no.id="pet-go-no"; no.onclick=function(){ closeGo(); };
+  row.appendChild(yes); row.appendChild(no); panel.appendChild(row);
 }
 function buildBox(panel){
   panel.appendChild(el("p","pet-ptitle",tr("pet.box.title")));
@@ -2477,6 +2625,7 @@ function renderPanel(){
   else if(P.sub==="box") buildBox(panel);
   else if(P.sub==="name") buildName(panel);
   else if(P.sub==="word") buildWord(panel);
+  else if(P.sub==="go") buildGo(panel);
   if(P.sub==="look" && P.confirmStage){
     LP.resetConfirm("pet-confirm","pet-confirm-btn",tr("pet.look.restart"),restartPet);
     if(P.confirmStage===2){
@@ -2509,8 +2658,7 @@ function aKeyLabel(){
   if(P.sub==="game"){
     if(gameDone()) return "pet.game.room";
     if(P.game && !P.game.started) return "pet.sk.start";
-    var st=gameState();
-    return P.game && P.game.id==="bounce" && st && !st.ball ? "pet.game.serve" : "";
+    return P.game && P.game.id==="run" ? "pet.game.jump" : "";
   }
   if(P.sub==="menu") return "pet.sk.open";
   if(P.sub==="look") return "pet.sk.hold";
@@ -2521,6 +2669,7 @@ function aKeyLabel(){
   }
   if(P.sub==="name") return P.naming && P.naming.confirm ? "pet.name.yes" : "pet.name.ok";
   if(P.sub==="word") return "pet.sk.lookup";
+  if(P.sub==="go") return "pet.go.yes";
   if(!P.save || isEgg()) return "";
   if(P.save.travel) return "pet.act.call";
   switch(P.sel){
@@ -2552,6 +2701,7 @@ function renderKeys(){
   var blabel=tr(inGame?"pet.game.exit":"sk.back");
   if(P.sub==="box" && P.boxAsk) blabel=tr("pet.shelf.no");
   else if(P.sub==="name") blabel=tr("pet.name.edit");
+  else if(P.sub==="go") blabel=tr("pet.go.no");
   LP.softkeys(wrap,{
     select:null,                           /* reserved for switching rooms when more species come (visits) */
     start:{label:egg ? "" : tr("pet.sk.menu"),disabled:!!P.sub || egg,fn:openMenu},
@@ -2638,6 +2788,8 @@ function tick(){
     if(P.wasAsleep===null) P.wasAsleep=sleepNow;
     else if(P.wasAsleep && !sleepNow && !P.task && !P.outing){
       P.at=useSpotAt("sleep","sleep");
+      /* the morning comes: the lamp goes back on, so last night's switch-off is not tonight's bedtime */
+      if(!naturalAsleep() && P.save.light===false){ P.save.light=true; saveSoon(); renderKeys(); }
       startChore("wake","walkRug");
       P.wasAsleep=false;
     } else if(!P.wasAsleep && sleepNow && !P.task && !P.outing && !atBed()){
@@ -2647,6 +2799,8 @@ function tick(){
       P.wasAsleep=sleepNow;
     }
   }
+  /* a sleeping pet never lies in a lit room; on screen the switch happens in the same tick it settles */
+  settleLamp();
   render();
 }
 
@@ -2675,13 +2829,15 @@ function leave(){
   if(P.roomHold){ clearTimeout(P.roomHold); P.roomHold=0; }
   P.holdFired=false;
   P.sub=null; P.confirmStage=0; P.game=null; P.outing=null;
+  P.go=null; P.roomAt=null;
   P.naming=null; P.boxAsk=null; P.wasAsleep=null;
   finishTaskOnLeave();
   P.gameHeld={left:false,right:false,a:false};
   P.gamePress={left:false,right:false,a:false};
   P.gameTouch=null;
   P.wordWord=""; P.wordMeaning=null; P.wordBusy=false;
-  stopAiJob();
+  /* the day's AI request is not the screen's: it keeps running to today's answer (its own 30 s cap) */
+  if(LP.keepAwake) LP.keepAwake(false);
   silenceWeather();
   saveNow();
   stopJingle();
@@ -2694,19 +2850,28 @@ function stopJingle(){
 }
 function pause(){
   if(!P.inView) return;
+  P.pausedAt=now();
   if(P.roomHold){ clearTimeout(P.roomHold); P.roomHold=0; }
   P.holdFired=false; clearHold();
   persistOuting();
   stopTimer(); stopGameTimer(); saveNow();
-  stopAiJob();
+  /* a paused screen keeps the day's AI request: its answer belongs to the outing, not to the view */
+  if(LP.keepAwake) LP.keepAwake(false);
   silenceWeather();
   stopJingle();
 }
 function resume(){
   P.resumeOuting=true;
   if(isOpen()){
-    refreshTime(); P.wasAsleep=inBedSleep(); maybeNamePrompt(); render(); startTimer(); refreshUsage();
-    if(P.sub==="game" && P.game && P.game.started && !gameDone()) startGameTimer();
+    refreshTime();
+    /* a long stay in the background is no way to hold a pet up at night; a short app switch keeps the two minutes */
+    if(P.pausedAt && now()-P.pausedAt>=120000 && naturalAsleep()) putToBed();
+    P.pausedAt=0;
+    P.wasAsleep=inBedSleep(); maybeNamePrompt(); render(); startTimer(); refreshUsage();
+    if(P.sub==="game" && P.game && P.game.started && !gameDone()){
+      startGameTimer();
+      if(LP.keepAwake) LP.keepAwake(true);
+    }
   } else {
     backgroundDay();
   }
@@ -2751,7 +2916,8 @@ function coreRows(grid){
 function homeState(){
   var s=P.save;
   if(!s) return "none";
-  return [s.stage,s.travel,iconState(),P.souv.length,+s.boxSeen||0].join("|");
+  /* the adult form is part of the picture: a new form must redraw the tile */
+  return [s.stage,s.travel,iconState(),P.souv.length,+s.boxSeen||0,s.form||""].join("|");
 }
 function homeMaybeRender(){
   var h=$("v-home");
@@ -2763,8 +2929,12 @@ function homeMaybeRender(){
 }
 function icon(){
   var pack=packOf(P.save), set=(pack && pack.homeIcons)||{};
-  var rows=set[iconState()] || null;
+  var state=iconState(), own=set[state]||null;
+  var rows=own;
   if(!rows || rows.length!==16) rows=ICON_ROWS;
+  /* the adult's awake face wears its accessory, a few pixels over the plain icon */
+  if(own && state==="face" && P.save && P.save.stage==="adult" && typeof pack.homeForm==="function")
+    rows=pack.homeForm(P.save.form||"plain", rows);
   P.homeSig=homeState();
   scheduleBackground();
   return coreRows(rows) || ICON_ROWS.slice();
@@ -2773,22 +2943,158 @@ function tag(){
   if(!P.save) return "";
   return P.souv.length > (+P.save.boxSeen||0) ? tr("pet.tag") : "";
 }
+/* One mapping from a pointer event to a pixel of the room canvas: the card's tap and the long press both use it,
+   never coordinates typed in here. */
+function roomPoint(e){
+  var cv=$("pet-cv");
+  if(!cv || !e) return null;
+  var r=cv.getBoundingClientRect();
+  if(!r.width || !r.height) return null;
+  return {x:(e.clientX-r.left)*cv.width/r.width, y:(e.clientY-r.top)*cv.height/r.height};
+}
+function inRoomBox(x,y,b){
+  if(!b) return false;
+  /* the room's own furniture boxes are [x,y,w,h]; the resolver's prop box is {x,y,w,h} */
+  var bx, by, bw, bh;
+  if(typeof b.length==="number"){ bx=b[0]; by=b[1]; bw=b[2]; bh=b[3]; }
+  else { bx=b.x; by=b.y; bw=b.w; bh=b.h; }
+  return x>=bx && x<bx+bw && y>=by && y<by+bh;
+}
+/* A short tap on the word card in the room turns it over. The box comes from the same Art.resolve the room
+   draws with; the long hold on a thing asks 去看看？, anywhere else it pats as it always did. */
+function tapPickCard(e){
+  var pick=activePick(), scene=P.lastScene;
+  if(!pick || pick.kind!=="word" || !scene || scene.propPick!=="word" || !Art.resolve) return;
+  var at;
+  try{ at=Art.resolve(scene,roomNow()); }catch(err){ return; }
+  if(!at || !at.prop) return;
+  var pt=roomPoint(e);
+  if(!pt || !inRoomBox(pt.x,pt.y,at.prop)) return;
+  usePick();
+}
+/* ---------- 去看看？: a long press on a thing in the room asks before it takes you anywhere ----------
+   The boxes are the art's own: the day's pick's prop through Art.resolve (the same resolver the room draws with),
+   then pack.roomThings in its order. A long press anywhere else still pats. Going changes nothing in the save: the
+   pick is not used, no day is marked, and the program opened is the player's own (decisions.md section 37). */
+function goAllowed(){
+  return !!(P.save && !P.sub && P.save.stage!=="egg" && !P.save.travel && !P.outing && !inBedSleep());
+}
+/* a built-in by id, opened the way its own home tile opens it; every caller guards with try/catch */
+function openBuiltin(id){
+  var list=LP.builtins||[], i;
+  for(i=0;i<list.length;i++){
+    var b=list[i];
+    if(b && b.id===id && typeof b.open==="function"){ b.open(); return true; }
+  }
+  return false;
+}
+function openReaderGo(){
+  try{
+    if(LP.reader && typeof LP.reader.current==="function" && typeof LP.reader.open==="function"){
+      var cur=LP.reader.current();
+      if(cur && cur.id && LP.reader.open(cur.id)) return true;
+    }
+  }catch(e){}
+  return openBuiltin("reader");
+}
+function openDiaryGo(){
+  /* the notes' own "YYYY-MM-DD" key for today; an earlier day with no diary would open a fresh one, which is fine */
+  try{
+    if(LP.notes && typeof LP.notes.openDiary==="function" && LP.notes.openDiary(dayKey(now()))) return true;
+  }catch(e){}
+  return openBuiltin("notes");
+}
+function openCalendarGo(day){
+  try{
+    if(typeof day==="number" && LP.calendar && typeof LP.calendar.open==="function" && LP.calendar.open(day)) return true;
+  }catch(e){}
+  return openBuiltin("calendar");
+}
+function goTargetFor(id){
+  if(id==="photo") return {name:"app.darkroom", go:function(){ return openBuiltin("darkroom"); }};
+  if(id==="books" || id==="bookshelf") return {name:"app.reader", go:openReaderGo};
+  if(id==="diary") return {name:"app.notes", go:openDiaryGo};
+  if(id==="calendar") return {name:"app.calendar", go:function(){ return openCalendarGo(dayNumberNow()); }};
+  return null;
+}
+/* the thing under a room pixel, first hit wins; null is the empty floor, which pats */
+function roomTarget(x,y){
+  var scene=P.lastScene, pick=activePick(), pack=packOf(P.save), things, i, at;
+  if(!scene) return null;
+  if(pick && (pick.kind==="date" || pick.kind==="word") && scene.propPick===pick.kind && Art && typeof Art.resolve==="function"){
+    at=null;
+    try{ at=Art.resolve(scene,roomNow()); }catch(err){ at=null; }
+    if(at && inRoomBox(x,y,at.prop)){
+      if(pick.kind==="date"){
+        var day=pick.day;
+        return {name:"app.calendar", go:function(){ return openCalendarGo(day); }};
+      }
+      return {name:"app.dict", go:function(){ return openBuiltin("dict"); }};
+    }
+  }
+  if(!pack || typeof pack.roomThings!=="function") return null;
+  try{ things=pack.roomThings(scene.saw)||[]; }catch(err){ things=[]; }
+  for(i=0;i<things.length;i++){
+    if(!things[i] || !inRoomBox(x,y,things[i].box)) continue;
+    var hit=goTargetFor(things[i].id);
+    if(hit) return hit;
+  }
+  return null;
+}
+function askGo(target){
+  if(!target) return;
+  P.sub="go"; P.go=target; P.panelKey="";
+  beep("tap"); renderKeys(); render();
+}
+function closeGo(){
+  if(P.sub!=="go") return;
+  P.sub=null; P.go=null; P.panelKey="";
+  beep("tap"); renderKeys(); render();
+}
+/* A opens the program and the panel closes with it. A target that cannot be opened (no built-in, a broken
+   summary) gives the error tone and puts the room back, never a dead key. */
+function goNow(){
+  var target=P.go;
+  if(!target) return;
+  P.sub=null; P.go=null; P.panelKey="";
+  var ok=false;
+  try{ ok=typeof target.go==="function" && target.go()!==false; }catch(err){ ok=false; }
+  if(!ok){
+    beep("err"); renderKeys(); render();
+    return;
+  }
+  /* a program that opened has shown its own view, and this screen has left; nothing to draw here */
+  if(isOpen()){ renderKeys(); render(); }
+}
+function longRoomPress(){
+  if(goAllowed()){
+    var pt=P.roomAt, target=pt ? roomTarget(pt.x,pt.y) : null;
+    if(target){ P.roomAt=null; askGo(target); return; }
+  }
+  P.roomAt=null;
+  patPet();
+}
 function bindRoom(){
   var cv=$("pet-cv");
   if(!cv || cv.getAttribute("data-bound")) return;
   cv.setAttribute("data-bound","1");
-  cv.addEventListener("pointerdown",function(){
+  cv.addEventListener("pointerdown",function(e){
     if(document.hidden || !isOpen() || P.sub || P.save && (P.save.travel || P.outing)) return;
     if(P.roomHold){ clearTimeout(P.roomHold); }
+    P.roomAt=roomPoint(e);
     P.roomHold=setTimeout(function(){
       P.roomHold=0;
-      if(!document.hidden) patPet();
+      if(!document.hidden) longRoomPress();
     },HOLD_MS);
   });
   ["pointerup","pointercancel","pointerleave"].forEach(function(t){
-    cv.addEventListener(t,function(){ if(P.roomHold){ clearTimeout(P.roomHold); P.roomHold=0; } });
+    cv.addEventListener(t,function(e){
+      var tap=t==="pointerup" && !!P.roomHold;
+      if(P.roomHold){ clearTimeout(P.roomHold); P.roomHold=0; }
+      if(tap) tapPickCard(e);
+    });
   });
-  /* The play field itself moves catch and climb: hold the left or right half, in addition to the chin pad. */
+  /* The play field itself moves climb: hold the left or right half, in addition to the chin pad. */
   cv.style.touchAction="none";
   function gameSide(e){
     var r=cv.getBoundingClientRect();
@@ -2800,19 +3106,21 @@ function bindRoom(){
     if(gameDone()){ exitGame(); return; }
     if(!P.game.started){ startRound(); return; }
     P.gameTouch=e.pointerId;
-    gameSide(e);
+    /* the runner has one button: a finger anywhere on the field is A, pressed and held */
+    if(P.game.id==="run"){ P.gamePress.a=true; P.gameHeld.a=true; }
+    else gameSide(e);
     try{ if(cv.setPointerCapture) cv.setPointerCapture(e.pointerId); }catch(err){}
     e.preventDefault();
   }
   function gameTouchEnd(e){
     if(P.gameTouch==null || (e && e.pointerId!==P.gameTouch)) return;
     P.gameTouch=null;
-    P.gameHeld.left=false; P.gameHeld.right=false;
+    P.gameHeld.left=false; P.gameHeld.right=false; P.gameHeld.a=false;
   }
   cv.addEventListener("pointerdown",gameTouch);
   cv.addEventListener("pointermove",function(e){
     if(P.gameTouch==null || e.pointerId!==P.gameTouch) return;
-    gameSide(e);
+    if(P.game && P.game.id!=="run") gameSide(e);
     e.preventDefault();
   });
   ["pointerup","pointercancel","pointerleave"].forEach(function(t){ cv.addEventListener(t,gameTouchEnd); });
@@ -2834,7 +3142,8 @@ LP.padRoute("pet",function(b,down){
       if(down) startRound();                                   /* any other first key starts the round */
       return true;
     }
-    if(b==="a"){ if(down) pressA(); return true; }
+    /* A is held as well as pressed: the runner's jump goes higher while A stays down */
+    if(b==="a"){ P.gameHeld.a=!!down; if(down) pressA(); return true; }
     if(b==="b"){ if(down) exitGame(); return true; }
     if(b==="left" || b==="right"){ P.gameHeld[b]=!!down; return true; }
     return true;                                  /* up/down/start/select do nothing in a play pack */
@@ -2866,6 +3175,9 @@ function clockHome(){
   if(!s || s.stage==="egg") return;
   var key=dayKey(now()), td=s.today||{}, need=false;
   if(td.day!==key) need=true;
+  /* one hour of the background day is a real step of hunger and mess: without it the tile keeps its old face for as
+     long as the home screen sits there */
+  if(!need && typeof s.last==="number" && now()-s.last>=HOUR) need=true;
   if(!need && !P.outing && !td.back && td.out==null){
     var o=Pet.outingToday(s,key);
     if(o && hourNow()>=o.hour) need=true;

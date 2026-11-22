@@ -62,12 +62,18 @@ function digitGrid(n){
   var d=String(n).charAt(0);
   return (DIGITS[d]||DIGITS["0"]).slice();
 }
-/* numberGrid(24) -> five wide, seven high; numberGrid(124) -> eleven wide with our one-column gap. */
+/* numberGrid(24) -> five wide, seven high; numberGrid(124) -> eleven wide with our one-column gap. Up to four
+   digits share the same 5 x 7 font, the climb score's three and four. */
 function numberGrid(n){
-  var s=String(Math.max(0,Math.min(99,Number(n)||0)));
+  var s=String(Math.max(0,Math.min(9999,Math.floor(Number(n)||0))));
   if(s.length<2) return digitGrid(s);
-  var a=rows(digitGrid(s.charAt(0))), b=rows(digitGrid(s.charAt(1))), out=[];
-  for(var r=0;r<7;r++) out.push(a[r].join("")+"."+b[r].join(""));
+  var parts=[], i, out=[], line, r;
+  for(i=0;i<s.length;i++) parts.push(rows(digitGrid(s.charAt(i))));
+  for(r=0;r<7;r++){
+    line=parts[0][r].join("");
+    for(i=1;i<parts.length;i++) line+="."+parts[i][r].join("");
+    out.push(line);
+  }
   return out;
 }
 
@@ -374,10 +380,9 @@ function drawBrow(g,stage,e){
     for(x=R;x<R+w;x++) px(g,x,by,"k");
     px(g,R+w-1,by+1,"k");
   } else if(e.brow==="angry"){
-    for(x=L;x<L+w;x++) px(g,x,by,"k");
-    px(g,L+w-1,by+1,"k");
-    for(x=R;x<R+w;x++) px(g,x,by,"k");
-    px(g,R,by+1,"k");
+    /* a short tilted brow at the inner corner only: cross, not fierce (decisions.md section 63) */
+    px(g,L+w-2,by,"k"); px(g,L+w-1,by+1,"k");
+    px(g,R+1,by,"k"); px(g,R,by+1,"k");
   }
 }
 function drawMouth(g,stage,kind){
@@ -586,58 +591,79 @@ var CHIP_EGG=drawEgg(0);
 var CHIP_EGG_CRACK=[drawEgg(1),drawEgg(2)];
 
 /* ---------- adult forms: the adult body plus one accessory that tells the form ------------------ */
+/* The rules (decisions.md section 63): the face never moves and is never covered. The eyes and the mouth (rows 13-24,
+   columns 8-23) keep their own pixels; an accessory sits on the head's top, at a side, in a hand or under the mouth.
+   Every branch is a reward, never a trap: no horns, no fangs, no pointed tail. Each one must still read as the same
+   cute pet when it shrinks to the home screen. */
 function accessoryBook(g,o){
-  var shape=markEye(o), w=EYE_W[shape], L=14-w, R=18, ey=STAGES.adult.eyeY;
-  /* reading glasses: a thin frame around each eye and a bridge */
-  var i, x;
+  /* round reading glasses one pixel wider than the eyes: the paper lens around each eye keeps the face bright, so
+     even the angry face never looks like sunglasses */
+  var shape=markEye(o), w=EYE_W[shape], L=14-w, R=18, ey=STAGES.adult.eyeY, eh=STAGES.adult.eyeH, i, x, y, x0;
   for(i=0;i<2;i++){
-    x=i?R:L;
-    hline(g,x-1,ey-1,w+2,"k");
-    hline(g,x-1,ey+STAGES.adult.eyeH,w+2,"k");
-    px(g,x-1,ey,"k"); px(g,x+w,ey,"k");
-    px(g,x-1,ey+1,"k"); px(g,x+w,ey+1,"k");
+    x0=(i?R:L)-2;
+    for(y=ey-1;y<=ey+eh;y++) for(x=x0+1;x<=x0+w+2;x++) if(g[y][x]==="m") g[y][x]="p";
+    hline(g,x0+1,ey-2,w+2,"k");
+    hline(g,x0+1,ey+eh+1,w+2,"k");
+    for(y=ey-1;y<=ey+eh;y++){ px(g,x0,y,"k"); px(g,x0+w+3,y,"k"); }
   }
-  hline(g,L+w,ey-1,R-(L+w)+1,"k");
+  /* a bookmark ribbon from the head's top edge */
+  for(y=7;y<12;y++) px(g,24,y,"d");
+  px(g,23,11,"k"); px(g,25,11,"k"); px(g,24,12,"k");
   /* a tiny book held at the right hip: ink cover, paper pages, a dark spine */
-  fill(g,23,17,6,8,"k");
-  fill(g,24,18,4,6,"p");
-  hline(g,24,21,4,"d");
-  px(g,23,17,"p"); px(g,23,24,"p");
+  fill(g,25,19,5,7,"k");
+  fill(g,26,20,3,5,"p");
+  hline(g,26,22,3,"d");
 }
 function accessoryWalk(g){
-  var bx=5, bw=22, x;
-  /* a scarf across the chest, with one end hanging down */
-  fill(g,bx+2,18,bw-4,1,"k");
-  fill(g,bx+2,19,bw-4,2,"m");
-  fill(g,bx+2,21,bw-4,1,"k");
-  fill(g,bx+8,22,5,2,"d");
-  px(g,bx+8,24,"m"); px(g,bx+12,24,"m");
-  hline(g,bx+10,20,bw-14,"p");
-  /* the walking stick: a hooked ink line at the right side */
-  for(x=7;x<27;x++) px(g,29,x,"k");
-  px(g,28,7,"k"); px(g,27,8,"k"); px(g,27,9,"k");
-  px(g,30,26,"k"); px(g,29,27,"k");
+  /* the little photographer: a beret on the left of the head, clear of the antenna */
+  hline(g,7,7,5,"k");
+  hline(g,5,8,9,"k"); fill(g,6,8,7,1,"d");
+  hline(g,4,9,11,"k"); fill(g,5,9,9,1,"d");
+  px(g,9,6,"k");
+  /* a small camera on a strap under the mouth: ink body, a paper lens with an ink pupil, a dark button */
+  px(g,10,22,"k"); px(g,11,23,"k");
+  px(g,21,22,"k"); px(g,20,23,"k");
+  fill(g,12,24,8,5,"k");
+  fill(g,13,25,6,3,"d");
+  fill(g,14,25,3,3,"p"); px(g,15,26,"k");
+  px(g,18,25,"p");
 }
 function accessoryScholar(g){
-  /* a mortarboard: a wide ink board, a dark cap below it, a tassel on the right */
-  hline(g,8,8,16,"k");
-  hline(g,10,9,12,"d");
-  hline(g,12,10,8,"k");
-  for(var y=9;y<14;y++) px(g,23,y,"k");
-  px(g,24,14,"k"); px(g,23,15,"p");
+  /* a small mortarboard tipped onto the right of the head, and a long tassel hanging at the side */
+  hline(g,21,6,6,"k");
+  hline(g,19,7,7,"k");
+  fill(g,20,8,5,2,"d"); px(g,20,8,"k"); px(g,24,9,"k");
+  for(var y=7;y<14;y++) px(g,27,y,"d");
+  px(g,27,14,"k"); px(g,26,15,"k"); px(g,27,15,"k");
 }
 function accessoryDiary(g){
-  /* a pen tucked behind the antenna on the left: ink barrel, paper nib, dark clip */
-  for(var y=1;y<10;y++){ px(g,8,y,"k"); px(g,9,y,"d"); }
-  px(g,8,0,"p"); px(g,9,0,"p");
-  hline(g,7,3,1,"k"); hline(g,10,3,1,"k");
+  /* a pen tucked behind the right ear, slanting down to the head's corner: ink barrel, dark shine, paper nib;
+     and a small ink spot on the cheek */
+  for(var i=0;i<7;i++){ px(g,20+i,2+i,"k"); px(g,21+i,2+i,"k"); px(g,22+i,2+i,"k"); px(g,21+i,2+i,"d"); }
+  px(g,20,2,"p"); px(g,21,2,"k");
+  px(g,27,9,"k"); px(g,28,9,"k"); px(g,28,10,"p");
+  px(g,22,21,"d"); px(g,23,21,"d"); px(g,22,22,"d");
 }
 function accessoryMonster(g){
-  /* two little horns on the head's top corners; the teeth are paper in the smile */
-  px(g,8,8,"k"); hline(g,7,9,3,"k"); hline(g,6,10,5,"k");
-  px(g,22,8,"k"); hline(g,21,9,3,"k"); hline(g,20,10,5,"k");
-  px(g,14,23,"p"); px(g,17,23,"p");
-  px(g,14,24,"p"); px(g,17,24,"p");
+  /* the form id stays "monster" (saves keep it); the picture is the player: headphones over the antenna, a tiny
+     handheld in the right hand */
+  hline(g,9,4,14,"k");
+  px(g,8,5,"k"); px(g,7,6,"k"); px(g,23,5,"k"); px(g,24,6,"k");
+  for(var y=7;y<12;y++){ px(g,6,y,"k"); px(g,25,y,"k"); }
+  fill(g,2,12,5,6,"k"); fill(g,3,13,3,4,"d");
+  fill(g,25,12,5,6,"k"); fill(g,26,13,3,4,"d");
+  fill(g,24,20,7,9,"k");
+  fill(g,25,21,5,3,"p");
+  px(g,26,26,"d"); px(g,28,25,"m"); px(g,28,27,"m");
+}
+function accessoryPlain(g){
+  /* a small flower on the left of the head: paper petals, a dark heart, an ink stem with one leaf */
+  px(g,8,2,"k");
+  px(g,7,3,"k"); px(g,8,3,"p"); px(g,9,3,"k");
+  px(g,6,4,"k"); px(g,7,4,"p"); px(g,8,4,"d"); px(g,9,4,"p"); px(g,10,4,"k");
+  px(g,7,5,"k"); px(g,8,5,"p"); px(g,9,5,"k");
+  px(g,8,6,"k"); px(g,8,7,"k"); px(g,8,8,"k"); px(g,8,9,"k");
+  px(g,9,8,"k"); px(g,10,7,"k");
 }
 var FORM_IDS=["book","walk","scholar","diary","monster","plain"];
 function adult(id,o){
@@ -649,6 +675,7 @@ function adult(id,o){
   else if(id==="scholar") accessoryScholar(g);
   else if(id==="diary") accessoryDiary(g);
   else if(id==="monster") accessoryMonster(g);
+  else if(id==="plain") accessoryPlain(g);
   return join(g);
 }
 
@@ -718,7 +745,13 @@ function homeChip(state){
   homeAntenna(g);
   if(state==="away") return join(g);
   homeEyes(g,state==="sleep");
-  if(state==="sleep") return join(g);
+  if(state==="sleep"){
+    /* a tiny z at the top right, clear of the antenna (x6-9) and the body (which starts at y5) */
+    hline(g,12,1,3,"k");
+    px(g,13,2,"k");
+    hline(g,12,3,3,"k");
+    return join(g);
+  }
   if(state==="need"){
     fill(g,3,8,3,2,"k"); px(g,3,8,"p");
     fill(g,9,8,3,2,"k"); px(g,9,8,"p");
@@ -741,6 +774,30 @@ function homeEgg(){
       var edge=Math.abs(x+0.5-8)>rx-1.1 || Math.abs(y+0.5-8)>7.2-1.1;
       px(g,x,y,edge?"k":(x>=9 || y>=13 ? "d" : "m"));
     }
+  }
+  return join(g);
+}
+/* The adult form's accessory, shrunk to a few pixels, laid over the plain awake home icon ("face") so the home screen
+   shows your own pet. Need keeps its big eyes and its mark, sleep its z, away its hollow outline: they stay as they are. */
+function homeForm(form,rows16){
+  if(!rows16 || rows16.length!==16) return rows16;
+  var g=rows(rows16);
+  if(form==="book"){
+    /* thin dark rims and an ink bridge: glasses, not sunglasses, even at 16 px */
+    hline(g,3,7,4,"d"); hline(g,8,7,4,"d");
+    px(g,3,8,"d"); px(g,3,9,"d"); px(g,11,8,"d"); px(g,11,9,"d");
+    px(g,6,8,"d"); px(g,8,8,"d"); px(g,7,8,"k");
+  } else if(form==="walk"){
+    hline(g,2,3,4,"k"); hline(g,1,4,5,"k"); px(g,3,2,"k");
+  } else if(form==="scholar"){
+    hline(g,10,3,5,"k"); hline(g,11,4,3,"d"); px(g,15,4,"k"); px(g,15,5,"k");
+  } else if(form==="diary"){
+    px(g,11,1,"k"); px(g,12,2,"k"); px(g,13,3,"k"); px(g,14,4,"k"); px(g,11,0,"p");
+  } else if(form==="monster"){
+    hline(g,4,2,8,"k"); px(g,3,3,"k"); px(g,12,3,"k"); px(g,2,4,"k"); px(g,13,4,"k");
+    fill(g,0,7,2,3,"k"); fill(g,14,7,2,3,"k");
+  } else if(form==="plain"){
+    px(g,3,0,"k"); px(g,2,1,"k"); px(g,3,1,"p"); px(g,4,1,"k"); px(g,3,2,"k"); px(g,3,3,"k"); px(g,3,4,"k");
   }
   return join(g);
 }
@@ -1125,6 +1182,72 @@ function drawShelf(buf,w,h,scene,room){
     blit(buf,w,h,scene.shelf,sx,sy);
   }
 }
+/* ---------- "it saw it": the room keeps a little of what you did elsewhere (decisions.md section 63) ----------
+ * scene.saw = {photos:0-3, reads:0-5, bunting:bool, diary:bool}, all optional; a missing field draws nothing, so an
+ * old scene paints the same room as before. Only counts and flags reach here, never a photo, a title or a note. */
+var SAW_PHOTOS=3, SAW_READS=5;
+var FRAME_PICS=[
+  ["pppppp","ppppdk","pppppp","ppmmpp","pmmmmp"],     /* a hill under a sun */
+  ["ppddpp","pddddp","ppddpp","pppkpp","mmmkmm"],     /* a tree */
+  ["pppppp","pkpppp","pppppp","mpmpmp","mmmmmm"]      /* the sea and a bird */
+];
+var STACK_W=[30,24,28,22,26];
+function drawSaw(buf,w,h,saw){
+  if(!saw) return;
+  var i, x, y, n;
+  /* holiday bunting along the top of the wall, left of the bookshelf */
+  if(saw.bunting){
+    bhline(buf,w,h,2,2,109,1);
+    for(i=0,x=4;x<106;x+=9,i++){
+      y=3;
+      var t=i%2?2:0;
+      brect(buf,w,h,x,y,5,1,t); brect(buf,w,h,x+1,y+1,3,1,t); bput(buf,w,h,x+2,y+2,t);
+    }
+  }
+  /* small framed pictures under the window and the calendar, one for each darkroom visit it noticed */
+  n=Math.max(0,Math.min(SAW_PHOTOS,Math.floor(+saw.photos||0)));
+  for(i=0;i<n;i++){
+    x=56+i*14; y=54;
+    brect(buf,w,h,x,y,10,9,0);
+    var pic=FRAME_PICS[i%FRAME_PICS.length];
+    for(var r=0;r<pic.length;r++) for(var c=0;c<6;c++){
+      var ch=pic[r].charAt(c);
+      bput(buf,w,h,x+2+c,y+2+r,TONE_OF[ch]);
+    }
+    brect(buf,w,h,x+1,y+1,8,1,3); brect(buf,w,h,x+1,y+7,8,1,3);
+    bput(buf,w,h,x+1,y+2,3); bput(buf,w,h,x+8,y+2,3);
+    for(var q=2;q<7;q++){ bput(buf,w,h,x+1,y+q,3); bput(buf,w,h,x+8,y+q,3); }
+    bput(buf,w,h,x+4,y-1,0); bput(buf,w,h,x+5,y-1,0);
+  }
+  /* finished reading lies flat on top of the bookshelf, one more book each time it noticed */
+  n=Math.max(0,Math.min(SAW_READS,Math.floor(+saw.reads||0)));
+  for(i=0;i<n;i++){
+    var bw=STACK_W[i], bx=114+Math.floor((44-bw)/2)+(i%2?2:-2), by=13-i*3;
+    brect(buf,w,h,bx,by,bw,3,0);
+    brect(buf,w,h,bx+1,by+1,bw-2,1,i%3===0?1:i%3===1?2:3);
+    bput(buf,w,h,bx+bw-3,by+1,3);
+  }
+  /* today's diary: an open notebook at the foot of the bed */
+  if(saw.diary){
+    brect(buf,w,h,54,89,13,6,0);
+    brect(buf,w,h,55,90,5,4,3); brect(buf,w,h,61,90,5,4,3);
+    bhline(buf,w,h,56,91,3,2); bhline(buf,w,h,62,91,3,2); bhline(buf,w,h,62,92,2,2);
+  }
+}
+/* Where the room's things are, for the program's long press ("去看看？"): [{id, box:[x,y,w,h]}] in room pixels, the
+   saw marks first (they are drawn over the wall), then the wall calendar and the bookshelf. Only counts reach here. */
+function roomThings(saw){
+  var out=[], i, n;
+  saw=saw||{};
+  n=Math.max(0,Math.min(SAW_PHOTOS,Math.floor(+saw.photos||0)));
+  for(i=0;i<n;i++) out.push({id:"photo", box:[56+i*14,53,10,10]});
+  n=Math.max(0,Math.min(SAW_READS,Math.floor(+saw.reads||0)));
+  if(n) out.push({id:"books", box:[114,13-(n-1)*3,44,3*n]});
+  if(saw.diary) out.push({id:"diary", box:[54,89,13,6]});
+  out.push({id:"calendar", box:[60,13,28,35]});
+  out.push({id:"bookshelf", box:[114,16,44,80]});
+  return out;
+}
 function drawFurniture(buf,w,h,scene,room){
   var x, y, i;
   /* wall: paper with a grid of soft 12 px spaced 2 x 2 dots */
@@ -1175,6 +1298,8 @@ function drawFurniture(buf,w,h,scene,room){
   bhline(buf,w,h,28,79,22,1); bhline(buf,w,h,28,82,22,1);
   brect(buf,w,h,12,87,3,5,0); brect(buf,w,h,48,87,3,5,0);
   bhline(buf,w,h,9,92,43,1);
+
+  drawSaw(buf,w,h,scene.saw);
 
   /* the rug the pet stands on */
   brect(buf,w,h,70,98,56,19,0);
@@ -1455,6 +1580,8 @@ var CHIP_PACK={
   room:CHIP_ROOM,
   icons:ICONS,
   homeIcons:HOME_ICONS,
+  homeForm:homeForm,
+  roomThings:roomThings,
   souvenirs:(window.LopdaPetSouv && window.LopdaPetSouv.CATALOG)||[]
 };
 var PACKS={chip:CHIP_PACK};
