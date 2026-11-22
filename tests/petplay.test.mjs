@@ -692,3 +692,35 @@ test("run: stages - out of the window into the sky, then into the pond, in turn;
   });
   assert.ok(sawFly >= 1 && sawSwim >= 1 && back >= 2, `sky ${sawFly}, pond ${sawSwim}, back in the room ${back}`);
 });
+
+test("run: the lights go out between the sky and the pond - a 3-2-1 count, then only the lamp's oval is lit", () => {
+  const g = game("run"), R = Play.RUN;
+  const s = g.init(1);
+  let started = null, counts = [], out = null, on = null, order = [];
+  for (let i = 0; i < 3000 && !s.done; i++) {
+    const before = s.mode;
+    g.step(s, { left: false, right: false, a: false, press: {} }, 50);
+    if (before === "run" && s.mode !== "run") order.push(s.mode);
+    if (s.events.includes("dark")) { started = s.tick; order.push("dark"); }
+    if (s.events.includes("count")) counts.push(s.tick);
+    if (s.events.includes("lightsout")) out = s.tick;
+    if (s.events.includes("lightson")) on = s.tick;
+    if (on) break;
+    s.dying = 0;                                      /* this test is about the stage clock, not about surviving */
+    s.obs = s.obs.filter((o) => o.kind !== "ground" && o.kind !== "plane");
+  }
+  assert.deepEqual(order.slice(0, 2), ["fly", "dark"], "the sky first, then the lights out");
+  assert.equal(out - started, R.DARK_COUNT, "three seconds of counting");
+  assert.equal(counts.length, 2, "3 and 2 and 1: two count beats before the lights go out");
+  assert.ok(on > out, "and the lights come back on");
+  /* drawing in the dark: ink outside the lamp's oval, the pet's own spot lit, the score in paper */
+  const d = g.init(2);
+  d.obs = []; d.dark = 1; d.darkCount = 0; d.darkUntil = 1e9; d.score = 7;
+  const buf = drawTones(g, d);
+  assert.equal(buf[60 * W + 150], 0, "far ahead is dark");
+  assert.equal(buf[10 * W + 20], 0, "the top left is dark");
+  assert.notEqual(buf[(R.FLOOR - 10) * W + 30], 0, "around the pet is lit");
+  let paper = 0;
+  for (let y = 4; y < 11; y++) for (let x = W - 12; x < W - 4; x++) if (buf[y * W + x] === 3) paper++;
+  assert.ok(paper > 5, "the score is still readable in the dark");
+});

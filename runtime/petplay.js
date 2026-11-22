@@ -83,13 +83,21 @@ function frame(buf,w,h){
   rect(buf,w,h,0,0,2,h,0);
   rect(buf,w,h,w-2,0,2,h,0);
 }
-function scoreDigits(buf,w,h,score){
+function scoreDigits(buf,w,h,score,tone){
   var A=window.LopdaPetArt;
   if(!A || typeof A.numberGrid!=="function") return;
   var grid=A.numberGrid(score);
   if(!grid || !grid.length) return;
   var gw=String(grid[0]).length;
-  blit(buf,w,h,grid,w-4-gw,4);
+  if(tone===undefined) blit(buf,w,h,grid,w-4-gw,4);
+  else blitAs(buf,w,h,grid,w-4-gw,4,1,tone);
+}
+/* a grid's ink in one tone, each cell scale x scale: the countdown's big digits and the score in the dark */
+function blitAs(buf,w,h,grid,x,y,scale,tone){
+  for(var r=0;r<grid.length;r++){
+    var line=String(grid[r]);
+    for(var c=0;c<line.length;c++) if(line.charAt(c)==="k") rect(buf,w,h,x+c*scale,y+r*scale,scale,scale,tone);
+  }
 }
 /* climb's scenery: the world goes up from the room's brick wall to the roof, the sky and the stars, so height is
    something you see, not only a number. Every mark belongs to a world altitude (the row's height above the start),
@@ -258,6 +266,10 @@ var STAGE={
   swim:{flap:10, grav:2, fall:12, top:32, ceil:30, move:14, gapMin:46}  /* a stroke lifts about 7 px, it sinks gently, the openings
                                                               move less; the surface is row 26 */
 };
+/* The third stage is the lights going out (owner, 2026-11-22): a 3-2-1 count in the middle of the screen, then for
+   R_DARK_LEN px the room is dark but for the small lamp the pet carries, lighting an oval ahead of it. The run goes on
+   underneath with its usual things, at most 5 px a tick, so the lamp shows a thing at least half a second ahead. */
+var R_DARK_COUNT=60, R_DARK_LEN=2000, R_LAMP_X=56, R_LAMP_RX=54, R_LAMP_RY=44;
 var R_PLANE_UP=56, R_NUT_LOW=20, R_NUT_HIGH=50, R_NUT_PTS=10, R_LEVEL_TICKS=200;
 /* one seeded gap from a previous obstacle's right edge to the next one's left edge: a jump's 18 ticks of travel,
    30 px, and up to 70 px of room. runMinGap is the floor of that, and the tests check it. */
@@ -343,6 +355,7 @@ function runInit(seed){
   s.speedQ=R_SPEED_START; s.moveQ=0; s.dist=0; s.obs=[]; s.nutScore=0;
   s.h=0; s.vy=0; s.onGround=true; s.buf=0; s.dying=0;
   s.mode="run"; s.scene="room"; s.stageAt=R_STAGE_FIRST; s.stageN=0; s.gatesMade=0; s.fq=0; s.fv=0; s.lastGap=null;
+  s.dark=0; s.darkCount=0; s.darkUntil=0;
   runSpawn(s,W+60);                                     /* the first thing arrives after about three seconds */
   return s;
 }
@@ -374,7 +387,16 @@ function spawnGate(s,x){
   s.gatesMade++;
 }
 function startStage(s){
-  s.mode=s.stageN%2 ? "swim" : "fly";
+  /* in turn: the sky, the lights out, the pond */
+  var kind=["fly","dark","swim"][s.stageN%3];
+  if(kind==="dark"){
+    s.stageN++;
+    s.dark=1; s.darkCount=R_DARK_COUNT; s.darkUntil=s.dist+R_DARK_LEN;
+    note(s,"dark");
+    runSpawn(s,W+60);
+    return;
+  }
+  s.mode=kind;
   s.scene=s.mode;
   s.stageN++;
   s.gatesMade=0; s.lastGap=null;
@@ -402,7 +424,11 @@ function hitsGate(o,top,bottom){
 function runTick(s,inp){
   if(s.dying>0){ s.dying--; if(s.dying<=0) finish(s); return; }
   var ramp=R_SPEED_START+Math.floor(s.tick/R_STEP_TICKS);
-  s.speedQ=Math.min(s.mode==="run" ? R_SPEED_MAX : R_STAGE_SPEED,ramp);
+  s.speedQ=Math.min(s.mode==="run" && !s.dark ? R_SPEED_MAX : R_STAGE_SPEED,ramp);
+  if(s.dark){
+    if(s.darkCount>0){ s.darkCount--; if(s.darkCount%20===0) note(s,s.darkCount ? "count" : "lightsout"); }
+    else if(s.dist>=s.darkUntil){ s.dark=0; s.stageAt=s.dist+R_STAGE_EVERY; note(s,"lightson"); }
+  }
   s.moveQ+=s.speedQ;
   var d=Math.floor(s.moveQ/4);
   s.moveQ-=d*4;
@@ -463,11 +489,12 @@ function runTick(s,inp){
   var last=null;
   for(i=0;i<s.obs.length;i++) if(!last || s.obs[i].x+s.obs[i].w>last.x+last.w) last=s.obs[i];
   if(s.mode==="run"){
-    if(s.dist+W>=s.stageAt){
+    if(!s.dark && s.dist+W>=s.stageAt){
       /* the room ends: no new things; once the last one has gone by and the pet is on the floor, the stage begins */
       if(!s.obs.length && s.onGround && s.scene==="room") startStage(s);
     }
     else if(!last) runSpawn(s,W+10);
+    /* (while the lights are out the run spawns as usual; stageAt is set again when they come back on) */
     else if(last.x+last.w<=W) runSpawn(s,last.x+last.w+runMinGap(s.speedQ)+Math.floor(rand(s)*71));
   } else {
     if(s.gatesMade<R_STAGE_GATES){
@@ -606,6 +633,27 @@ function runDraw(s,buf,w,h,pack,poseFor){
   for(i=0;i<s.obs.length;i++){
     o=s.obs[i];
     if(o.nut) blit(buf,w,h,NUT.grid,o.nut.x,o.nut.y);
+  }
+  if(s.dark && s.darkCount<=0){
+    /* lights out: ink everywhere but the lamp's oval ahead of the pet; the score stays readable in paper */
+    var cy=FLOOR-1-s.h-14, yy, xx, ddx, ddy;
+    for(yy=0;yy<h;yy++) for(xx=0;xx<w;xx++){
+      ddx=(xx-R_LAMP_X)/R_LAMP_RX; ddy=(yy-cy)/R_LAMP_RY;
+      if(ddx*ddx+ddy*ddy>1) buf[yy*w+xx]=0;
+      else if(ddx*ddx+ddy*ddy>0.8 && ((xx+yy)&1)) buf[yy*w+xx]=1;   /* a dithered rim, like a lamp's falloff */
+    }
+    frame(buf,w,h);
+    scoreDigits(buf,w,h,s.score,3);
+    return;
+  }
+  if(s.dark && s.darkCount>0){
+    /* the count: 3, 2, 1 in big digits in the middle, on a paper card */
+    var A=window.LopdaPetArt, n=Math.ceil(s.darkCount/20);
+    if(A && typeof A.numberGrid==="function"){
+      var ng=A.numberGrid(n), sc=4, nw=String(ng[0]).length*sc, nh=ng.length*sc, nx=Math.floor((w-nw)/2), ny=24;
+      rect(buf,w,h,nx-6,ny-6,nw+12,nh+12,0); rect(buf,w,h,nx-4,ny-4,nw+8,nh+8,3);
+      blitAs(buf,w,h,ng,nx,ny,sc,0);
+    }
   }
   frame(buf,w,h);
   scoreDigits(buf,w,h,s.score);
@@ -854,7 +902,8 @@ window.LopdaPetPlay={
   finish:finish,
   reaction:reaction,
   climbReachable:climbReachable,
-  RUN:{STAGE_FIRST:R_STAGE_FIRST, STAGE_EVERY:R_STAGE_EVERY, STAGE_GATES:R_STAGE_GATES, STAGE_SPEED:R_STAGE_SPEED,
+  RUN:{DARK_COUNT:R_DARK_COUNT, DARK_LEN:R_DARK_LEN, LAMP_X:R_LAMP_X, LAMP_RX:R_LAMP_RX,
+    STAGE_FIRST:R_STAGE_FIRST, STAGE_EVERY:R_STAGE_EVERY, STAGE_GATES:R_STAGE_GATES, STAGE_SPEED:R_STAGE_SPEED,
     GAP_START:R_GAP_START, GAP_MIN:R_GAP_MIN, GATE_SPACE:R_GATE_SPACE, STAGE:STAGE,
     PLANE_UP:R_PLANE_UP, NUT_LOW:R_NUT_LOW, NUT_HIGH:R_NUT_HIGH, NUT_PTS:R_NUT_PTS, LEVEL_TICKS:R_LEVEL_TICKS,
     FLOOR:FLOOR, PET_X:PET_X, SPEED_START:R_SPEED_START, SPEED_MAX:R_SPEED_MAX, JUMP_VY:R_JUMP_VY,

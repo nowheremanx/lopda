@@ -1650,7 +1650,9 @@ function gameSounds(events){
   (events||[]).forEach(function(e){
     if(e==="nut") beep("coin");
     else if(e==="jump" || e==="flap") beep("tap");
-    else if(e==="fly" || e==="swim") beep("ok");
+    else if(e==="fly" || e==="swim" || e==="lightson") beep("ok");
+    else if(e==="dark" || e==="count") beep("tick");
+    else if(e==="lightsout") beep("miss");
     else if(e==="hit") beep("miss");
     else if(e==="land") beep("tick");
   });
