@@ -30,7 +30,7 @@
 var W=162, H=120, TICK=50;
 var TONE={k:0,d:1,m:2,p:3};
 /* the score at which a round is worth +2 instead of +1. Low on purpose: play is not a test. */
-var JOY2={catch:15,run:60,climb:30};
+var JOY2={catch:15,run:60,climb:6};
 
 function num(v){ var n=+v; return isFinite(n) ? n : 0; }
 function clamp(v,lo,hi){ v=Math.floor(num(v)); return v<lo ? lo : v>hi ? hi : v; }
@@ -467,7 +467,7 @@ function runDraw(s,buf,w,h,pack,poseFor){
   scoreDigits(buf,w,h,s.score);
 }
 
-/* ---------- climb: the pet jumps on its own, the screen scrolls, the score is the height ----------
+/* ---------- climb: the pet jumps on its own, the screen scrolls, the score is one per new higher platform ----------
  * The body is 32 x 32, but only its bottom row of legs is the feet: columns 9-22 at row 30. Collision and the sprite's
  * x bounds use those feet, never the full 32 px box: a sprite whose empty corners hang over a platform is not on it.
  * A jump rises 30 px (vy -12, +2 a tick) and the air time to a platform up to 24 px higher is 8 ticks, so the
@@ -674,7 +674,7 @@ function climbTick(s,inp){
     first=false;
     top=np.y;
   }
-  s.score=Math.max(s.score,s.height);
+  s.score=s.records;                                    /* one point for each new, higher platform it lands on */
   if(s.pet.y>H+12) finish(s);                           /* fell off the bottom of the screen: the only end */
 }
 function climbDraw(s,buf,w,h,pack,poseFor){
