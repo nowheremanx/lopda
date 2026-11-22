@@ -16,26 +16,31 @@ var URL_CHAT="https://openrouter.ai/api/v1/chat/completions",
 
 /* The providers: five OpenAI-compatible chat completions endpoints, in the order the screens list them
    (decisions.md section 61). The address is the only place the key is sent; providers are never tried in turn.
-   idle: optional, an override of IDLE in milliseconds. */
+   models: the provider's own model list, the same OpenAI-compatible shape (the line page's 从列表选 fetches it);
+   only OpenRouter's is public, the rest need that line's key. idle: optional, an override of IDLE in milliseconds. */
 var PROVIDERS=[
   /* https://openrouter.ai/docs */
-  {id:"openrouter", name:{zh:"OpenRouter", en:"OpenRouter"}, url:URL_CHAT, model:MODEL, vision:true,
-    visionModel:"", site:"openrouter.ai", keyHint:"sk-or-"},
+  {id:"openrouter", name:{zh:"OpenRouter", en:"OpenRouter"}, url:URL_CHAT, models:"https://openrouter.ai/api/v1/models",
+    model:MODEL, vision:true, visionModel:"", site:"openrouter.ai", keyHint:"sk-or-"},
   /* https://api-docs.deepseek.com/zh-cn/quick_start/pricing (2026-11-21: deepseek-flash is DeepSeek-V4.1-Flash and reads images) */
   {id:"deepseek", name:{zh:"DeepSeek", en:"DeepSeek"}, url:"https://api.deepseek.com/chat/completions",
+    models:"https://api.deepseek.com/models",
     model:"deepseek-flash", vision:true, visionModel:"deepseek-flash", site:"platform.deepseek.com", keyHint:"sk-"},
   /* https://platform.kimi.com/docs/api/chat */
   /* kimi-k3.1-pro: cheaper than kimi-k3 and sees natively (https://platform.kimi.com/docs/pricing/chat, 2026-11-21) */
   {id:"kimi", name:{zh:"Kimi", en:"Kimi"}, url:"https://api.moonshot.cn/v1/chat/completions",
+    models:"https://api.moonshot.cn/v1/models",
     model:"kimi-k3.1-pro", vision:true, visionModel:"kimi-k3.1-pro", site:"platform.kimi.com", keyHint:"sk-"},
   /* https://help.aliyun.com/zh/model-studio/compatibility-of-openai-with-dashscope */
   /* qwen3.7-plus: Bailian's balanced model, sees, streams reasoning_content (its model page, 2026-11-21). The docs' newer
      host carries a workspace id; this older shared host still answers. */
   {id:"qwen", name:{zh:"通义千问", en:"Qwen"}, url:"https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+    models:"https://dashscope.aliyuncs.com/compatible-mode/v1/models",
     model:"qwen3.7-plus", vision:true, visionModel:"qwen3.7-plus", site:"bailian.console.aliyun.com", keyHint:"sk-"},
   /* https://docs.siliconflow.cn/cn/api-reference/chat-completions/chat-completions */
   /* vision model from https://docs.siliconflow.cn/cn/userguide/capabilities/vision (2026-11-21) */
   {id:"siliconflow", name:{zh:"硅基流动", en:"SiliconFlow"}, url:"https://api.siliconflow.cn/v1/chat/completions",
+    models:"https://api.siliconflow.cn/v1/models?type=text",
     model:"deepseek-ai/DeepSeek-V4-Flash", vision:true, visionModel:"Pro/moonshotai/Kimi-K2.6",
     site:"cloud.siliconflow.cn", keyHint:"sk-"}
 ];
@@ -94,7 +99,8 @@ function failed(res,pid){
    the whole answer; .stop() ends it ("stopped"). provider is an id from PROVIDERS, missing means "openrouter"; model wins
    over fallbackModel, which wins over the provider's own default. s = {phase: "open" (the line is up, nothing written yet)
    | "think" | "write", think, text}: called once the response arrives and again for every piece, keep-alive comments
-   included; think and text count characters. */
+   included; think and text count characters.
+   models({provider, key}) -> Promise of the provider's parsed model list (see models() below). */
 function host(env){
   var later=env.setTimeout||setTimeout, unlater=env.clearTimeout||clearTimeout;
   function ask(o){
@@ -157,7 +163,26 @@ function host(env){
     p.stop=function(){ why="stopped"; if(ctl) ctl.abort(); };
     return p;
   }
-  return {ask:ask};
+  /* models({provider, key}) -> Promise of the provider's model list, parsed from its own address. The key rides along
+     only to the provider it belongs to; OpenRouter's list is public, so no key is sent there at all. */
+  function models(o){
+    var prov=provider(o && o.provider), key=(o && o.key) || "";
+    return Promise.resolve().then(function(){
+      if(!prov) throw fail("http","unknown provider");
+      if(prov.id!=="openrouter" && !key) throw fail("nokey");
+      var headers={};
+      if(prov.id!=="openrouter") headers.Authorization="Bearer "+key;
+      return env.fetch(prov.models,{method:"GET", credentials:"omit", referrerPolicy:"no-referrer", cache:"no-store",
+        headers:headers});
+    }).then(function(res){
+      if(!res.ok) throw fail(httpCode(res.status), "HTTP "+res.status);
+      return res.json();
+    },function(e){
+      if(e && typeof e.code==="string") throw e;
+      throw fail("offline", e && e.message);
+    });
+  }
+  return {ask:ask, models:models};
 }
 
 window.LopdaAI={host:host, lines:lines, httpCode:httpCode, bodyCode:bodyCode, URL:URL_CHAT, MODEL:MODEL, IDLE:IDLE,

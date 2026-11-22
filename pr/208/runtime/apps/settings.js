@@ -7,7 +7,7 @@
 "use strict";
 var LP=window.LP, $=LP.$, S=LP.S, I18N=LP.I18N, tr=LP.tr;
 var SND=LP.SND, RUNTIME_VERSION=LP.RUNTIME_VERSION, put=LP.put, sfx=LP.sfx, toast=LP.toast, show=LP.show, setLang=LP.setLang, renderUpdate=LP.renderUpdate;
-var SCORE_PAGES=window.LopdaScorePages, SCORE_MODELS_URL="https://openrouter.ai/api/v1/models", SCORE_MODELS_PATH="data/users/local/ai-models", SCORE_MODELS_DAY=86400000;
+var SCORE_PAGES=window.LopdaScorePages, SCORE_MODELS_PATH="data/users/local/ai-models", SCORE_MODELS_DAY=86400000;
 /* the public site, not location.host: a PR preview or localhost must still share the real address */
 var SHARE_URL="https://nowheremanx.github.io/lopda/";
 var SHARE_TEXT=SHARE_URL.replace(/^https:\/\//,"").replace(/\/$/,"");
@@ -134,10 +134,14 @@ var AI={st:AL.load(null), loaded:false, readFailed:false, seen:[], lastTimer:0};
    the line page's last message, and the keyboard ring */
 var AIPAGE="main", AILINE="", AIPROV="", AIUSE="", AILINEMSG="", AIDELARMED=false, AISCOREFROM="main";
 var AIFOCUS=0, AIFOCUSABLES=[];
-/* the line page's vision model as typed (or picked from the list for a model) before 保存, and the line it belongs to:
-   a render must not throw an unsaved choice away, but opening another line must not keep it either */
-var AIVM="", AIVMIN=null;
-var SCORE_MODELS_CACHE=null, scoreModelPageOpen=false, scoreModelRows=[], scoreModelFocus=0, scoreModelSeq=0;
+/* the line page's two model fields as typed (or picked) before 保存, and the line they belong to: a render must not
+   throw an unsaved choice away, but opening another line must not keep it either */
+var AIM="", AIMIN=null, AIVM="", AIVMIN=null;
+/* the model list page, which serves both fields: the provider's models, the search and the ring. OpenRouter's list is
+   cached in a document of its own; the other providers' lists hold no prices and stay in memory for this session. */
+var SCORE_MODELS_CACHE=null, MODEL_MAX_ROWS=200;
+var MODEL_PAGE={open:false, field:"vmodel", prov:null, line:"", list:[], failed:false, error:null, status:""};
+var MODEL_ROWS=[], MODEL_FOCUS=0, MODEL_QUERY="", MODEL_SEQ=0, OTHER_MODELS={};
 /* A saved key shows as dots in its field (a password field shows any value as dots): this stand-in, never the key itself.
    Tapping the field empties it for a new key; leaving it empty puts the dots back. */
 var KEPT="lopda-key-kept!!";
@@ -172,14 +176,32 @@ function noteLast(id,last){
   clearTimeout(AI.lastTimer);
   AI.lastTimer=setTimeout(function(){ saveAiDoc(); renderAi(); },1000);
 }
-/* the model the line page's field holds (an empty field means the default): the score list marks this row, and 保存
-   writes whatever the field says. Nothing reads use.score any more: an old score model moved onto its OpenRouter line. */
-function scoreModelId(){ var el=$("set-ai-vmodel"); return (el && el.value.trim()) || SCORE_PAGES.DEFAULT_MODEL; }
-function scoreModelLabel(){ var id=scoreModelId(); return id===SCORE_PAGES.DEFAULT_MODEL ? tr("ai.score.default") : id; }
+/* The line page's two model fields (an empty field means the provider's default). 保存 writes whatever a field says;
+   the list only ever fills one. Field ids and drafts are shared by the line page and the list. */
+function modelFieldId(field){ return field==="model" ? "set-ai-model" : "set-ai-vmodel"; }
+function modelFieldValue(field){ var el=$(modelFieldId(field)); return el ? el.value.trim() : ""; }
+function modelDefaultId(field,prov){
+  if(!prov) return "";
+  if(field==="model") return prov.model || "";
+  return prov.id==="openrouter" ? SCORE_PAGES.DEFAULT_MODEL : (prov.visionModel || "");
+}
+/* OpenRouter's vision default is its own shared pick (the score reading's model); the others name the provider's default */
+function modelDefaultLabel(field,prov){
+  if(field==="vmodel" && prov && prov.id==="openrouter") return tr("ai.score.default");
+  var id=modelDefaultId(field,prov);
+  return tr("ai.model.default")+(id ? " ("+id+")" : "");
+}
+/* the pick rows' right side: what the field holds, or that it is empty (the default) */
+function modelPickLabel(field,prov){
+  var v=modelFieldValue(field);
+  if(v) return v+" ›";
+  return (field==="vmodel" && prov && prov.id==="openrouter" ? tr("ai.score.default") : tr("ai.model.default"))+" ›";
+}
 function cleanScoreModels(list){ return SCORE_PAGES.cleanModels(list); }
+/* the cache is versioned: a document without v:2 was written by the vision-only list, so it is fetched again */
 function savedScoreModels(data){
-  if(!data || typeof data.at!=="number" || !Array.isArray(data.list)) return null;
-  return {at:data.at, list:cleanScoreModels(data.list)};
+  if(!data || data.v!==2 || typeof data.at!=="number" || !Array.isArray(data.list)) return null;
+  return {v:2, at:data.at, list:cleanScoreModels(data.list)};
 }
 function readScoreModelsCache(){
   if(SCORE_MODELS_CACHE) return Promise.resolve(SCORE_MODELS_CACHE);
@@ -190,12 +212,10 @@ function readScoreModelsCache(){
     return cache;
   },function(){ return null; });
 }
+/* OpenRouter's list is public: ai.js sends no key for it, and the picker keeps it for a day */
 function fetchScoreModels(){
-  return fetch(SCORE_MODELS_URL,{method:"GET", credentials:"omit", referrerPolicy:"no-referrer", cache:"no-store"}).then(function(res){
-    if(!res.ok) throw new Error("HTTP "+res.status);
-    return res.json();
-  }).then(function(payload){
-    var list=SCORE_PAGES.models(payload), cache={at:Date.now(), list:cleanScoreModels(list)};
+  return AIH.models({provider:"openrouter"}).then(function(payload){
+    var list=SCORE_PAGES.models(payload), cache={v:2, at:Date.now(), list:cleanScoreModels(list)};
     SCORE_MODELS_CACHE=cache;
     if(S.db) S.db.doc(SCORE_MODELS_PATH).set(cache).catch(function(){});
     return list;
@@ -204,95 +224,166 @@ function fetchScoreModels(){
 function loadScoreModels(){
   return readScoreModelsCache().then(function(cache){
     if(cache && cache.at<=Date.now() && Date.now()-cache.at<SCORE_MODELS_DAY) return {list:cache.list, failed:false};
-    return fetchScoreModels().then(function(list){ return {list:list, failed:false}; },function(){ return {list:cache ? cache.list : [], failed:true}; });
+    return fetchScoreModels().then(function(list){ return {list:list, failed:false}; },
+      function(e){ return {list:cache ? cache.list : [], failed:true, error:e}; });
   });
 }
-function scoreModelChoiceRows(list){
-  var models=cleanScoreModels(list), defaultModel=null, rows, current=scoreModelId(), found=current===SCORE_PAGES.DEFAULT_MODEL;
-  models.forEach(function(m){ if(m.id===SCORE_PAGES.DEFAULT_MODEL) defaultModel=m; });
-  rows=[{id:SCORE_PAGES.DEFAULT_MODEL, name:tr("ai.score.default"), in:defaultModel?defaultModel.in:null, out:defaultModel?defaultModel.out:null}];
-  models.forEach(function(m){
-    if(m.id===SCORE_PAGES.DEFAULT_MODEL) return;
+/* the other providers answer with ids only, and only for a saved key: one list per line, kept for this session */
+function loadLineModels(prov,l){
+  if(!prov) return Promise.resolve({list:[], failed:true, error:{code:"http"}});
+  if(prov.id==="openrouter") return loadScoreModels();
+  if(!l || !l.key) return Promise.resolve({list:[], failed:true, error:{code:"nokey"}});
+  if(OTHER_MODELS[l.id]) return Promise.resolve({list:OTHER_MODELS[l.id], failed:false});
+  return AIH.models({provider:prov.id, key:l.key}).then(function(payload){
+    var list=SCORE_PAGES.cleanModels(SCORE_PAGES.idModels(payload));
+    OTHER_MODELS[l.id]=list;
+    return {list:list, failed:false};
+  },function(e){ return {list:[], failed:true, error:e}; });
+}
+/* a search is words separated by spaces, every one of them somewhere in the id or the name, case left out */
+function modelWords(){
+  return MODEL_QUERY.toLowerCase().split(/\s+/).filter(function(w){ return !!w; });
+}
+function modelMatches(m,words){
+  if(!words.length) return true;
+  var hay=(m.id+" "+m.name).toLowerCase(), i;
+  for(i=0;i<words.length;i++) if(hay.indexOf(words[i])<0) return false;
+  return true;
+}
+/* The default row always leads (it is what an empty field means), then the models the search keeps; the field's own model
+   stays visible even when the provider no longer lists it. */
+function modelRows(){
+  var field=MODEL_PAGE.field, prov=MODEL_PAGE.prov, all=MODEL_PAGE.list||[], words=modelWords();
+  var defId=modelDefaultId(field,prov), current=modelFieldValue(field), defModel=null, found=false, shown=0, kept=0, rows=[];
+  if(field==="vmodel" && prov && prov.id==="openrouter") all=SCORE_PAGES.visionOnly(all);
+  all.forEach(function(m){ if(m.id===defId) defModel=m; });
+  rows.push({id:defId, name:modelDefaultLabel(field,prov), in:defModel?defModel.in:null, out:defModel?defModel.out:null,
+    vision:defModel?!!defModel.vision:false, def:true});
+  all.forEach(function(m){
+    if(m.id===defId) return;
     if(m.id===current) found=true;
+    if(!modelMatches(m,words)) return;
+    kept++;
+    if(shown>=MODEL_MAX_ROWS) return;
+    shown++;
     rows.push(m);
   });
-  if(!found) rows.push({id:current, name:current, in:null, out:null});
-  return rows;
+  if(!words.length && current && !found) rows.push({id:current, name:current, in:null, out:null, vision:false});
+  return {rows:rows, more:Math.max(0,kept-shown)};
 }
-function renderScoreModelList(list,status){
-  var ul=$("set-ai-model-list"), current=scoreModelId();
-  scoreModelRows=scoreModelChoiceRows(list); ul.textContent="";
-  scoreModelRows.forEach(function(m,i){
-    var li=document.createElement("li"), label=document.createElement("span"), price=document.createElement("small");
-    li.setAttribute("role","button"); li.setAttribute("tabindex","0"); li.className=i===scoreModelFocus?"on":"";
-    li.style.minHeight="44px"; li.style.boxSizing="border-box";
-    label.textContent=m.name; price.textContent=SCORE_PAGES.formatModelPrice(m);
-    li.appendChild(label); li.appendChild(price);
-    li.onclick=function(){ scoreModelFocus=i; chooseScoreModel(m.id); };
-    li.onfocus=function(){ scoreModelFocus=i; scoreModelFocusPaint(); };
-    ul.appendChild(li);
-    if(m.id===current) scoreModelFocus=i;
-  });
-  scoreModelFocusPaint();
-  $("set-ai-model-status").textContent=status ? tr(status) : "";
-}
-function scoreModelFocusPaint(){
+function modelFocusPaint(){
   var items=$("set-ai-model-list").children;
-  Array.prototype.forEach.call(items,function(li,i){ li.classList.toggle("on",i===scoreModelFocus); });
+  Array.prototype.forEach.call(items,function(li,i){ li.classList.toggle("on",i===MODEL_FOCUS); });
 }
-function openScoreModelPage(){
-  var seq=++scoreModelSeq; scoreModelPageOpen=true;
+function renderModelList(){
+  var ul=$("set-ai-model-list"), keep=MODEL_ROWS[MODEL_FOCUS] ? MODEL_ROWS[MODEL_FOCUS].id
+    : (modelFieldValue(MODEL_PAGE.field) || modelDefaultId(MODEL_PAGE.field,MODEL_PAGE.prov));
+  var got=modelRows(), anyPrice=false, at=0;
+  MODEL_ROWS=got.rows; ul.textContent="";
+  MODEL_ROWS.forEach(function(m,i){
+    var li=document.createElement("li"), label=document.createElement("span"), price=document.createElement("small");
+    li.setAttribute("role","button"); li.setAttribute("tabindex","0");
+    li.style.minHeight="44px"; li.style.boxSizing="border-box";
+    label.textContent=m.name;
+    /* a list of ids has no prices: the column stays empty */
+    price.textContent=(m.in==null && m.out==null) ? "" : SCORE_PAGES.formatModelPrice(m);
+    if(price.textContent) anyPrice=true;
+    li.appendChild(label); li.appendChild(price);
+    li.onclick=function(){ MODEL_FOCUS=i; chooseModelRow(m); };
+    li.onfocus=function(){ MODEL_FOCUS=i; modelFocusPaint(); };
+    ul.appendChild(li);
+    if(m.id===keep) at=i;
+  });
+  MODEL_FOCUS=at;
+  $("set-ai-model-price").hidden=!anyPrice;
+  $("set-ai-model-more").textContent=got.more ? tr("ai.list.more",{n:got.more}) : "";
+  $("set-ai-model-status").textContent=MODEL_PAGE.status ? tr(MODEL_PAGE.status)
+    : MODEL_PAGE.failed ? tr("ai.score.loadfail")+"\n"+aiErrLine(MODEL_PAGE.error||{},curLine()) : "";
+  modelFocusPaint();
+  var search=$("set-ai-model-search");
+  if(search) search.setAttribute("aria-label",tr("ai.list.search"));
+}
+/* a provider other than OpenRouter wants the line's key before it answers */
+function modelListReady(prov,l){ return !!(prov && prov.models && (prov.id==="openrouter" || (l && l.key))); }
+function openModelList(field){
+  var l=curLine(), prov=l ? lineProvider(l) : (AIPROV ? window.LopdaAI.provider(AIPROV) : null);
+  if(!prov || !prov.models) return;
+  if(!modelListReady(prov,l)){ sfx("err"); return; }
+  field=field==="model" ? "model" : "vmodel";
   AISCOREFROM=AIPAGE==="model" ? AISCOREFROM : AIPAGE;
+  MODEL_PAGE={open:true, field:field, prov:prov, line:l?l.id:"", list:[], failed:false, error:null, status:"ai.score.loading"};
+  MODEL_ROWS=[]; MODEL_FOCUS=0; MODEL_QUERY="";
+  var seq=++MODEL_SEQ;
   aiPage("model");
-  renderScoreModelList([],"ai.score.loading");
+  $("set-ai-model-title").textContent=tr(field==="model" ? "ai.model" : "ai.vmodel");
+  $("set-ai-model-search").value="";
+  $("set-ai-model-search").placeholder=tr("ai.list.search");
+  renderModelList();
   sfx("tap");
-  loadScoreModels().then(function(result){
-    if(!scoreModelPageOpen || seq!==scoreModelSeq) return;
-    renderScoreModelList(result.list,result.failed?"ai.score.loadfail":"");
+  loadLineModels(prov,l).then(function(result){
+    if(!MODEL_PAGE.open || seq!==MODEL_SEQ) return;
+    MODEL_PAGE.list=result.list||[]; MODEL_PAGE.failed=!!result.failed; MODEL_PAGE.error=result.error||null;
+    MODEL_PAGE.status="";
+    renderModelList();
   });
 }
-/* the score model page's ◂ goes back where it was opened from (the OpenRouter line's page) */
-function closeScoreModelPage(){
-  if(!scoreModelPageOpen) return;
+/* the list's ◂ goes back where it was opened from (the line's page) */
+function closeModelList(){
+  if(!MODEL_PAGE.open) return;
   var back=AISCOREFROM||"main";
-  scoreModelPageOpen=false; scoreModelSeq++;
+  MODEL_PAGE.open=false; MODEL_SEQ++;
   aiPage(back); AISCOREFROM="main";
   renderAi(); sfx("tap");
 }
 /* leaving the whole AI page puts everything back to the lines list */
-function resetScoreModelPage(){
-  if(!scoreModelPageOpen) return;
-  scoreModelPageOpen=false; scoreModelSeq++;
+function resetModelPage(){
+  if(!MODEL_PAGE.open) return;
+  MODEL_PAGE.open=false; MODEL_SEQ++;
   aiPage("main"); AISCOREFROM="main";
 }
-/* choosing a model only fills the line page's 看图模型 field: nothing is written until 保存, so looking around can never
-   change the document. The default row empties the field, which means "the provider's default". */
-function chooseScoreModel(id){
-  var el=$("set-ai-vmodel"), value=id===SCORE_PAGES.DEFAULT_MODEL ? "" : id;
+/* Choosing a row only fills the line page's field (the default row empties it): nothing is written until 保存,
+   so looking around can never change the document. */
+function chooseModelRow(row){
+  var field=MODEL_PAGE.field, value=row.def ? "" : row.id, el=$(modelFieldId(field));
   if(el) el.value=value;
-  AIVM=value; AIVMIN=AILINE;
+  if(field==="model"){ AIM=value; AIMIN=AILINE; } else { AIVM=value; AIVMIN=AILINE; }
   var back=AISCOREFROM||"main";
-  scoreModelPageOpen=false; scoreModelSeq++;
+  MODEL_PAGE.open=false; MODEL_SEQ++;
   aiPage(back); AISCOREFROM="main";
   renderAi(); sfx("ok");
 }
-$("set-ai-score-model").onclick=openScoreModelPage;
-$("set-ai-model-back").onclick=closeScoreModelPage;
-/* The model chooser is a normal settings list: arrows move its focus, A chooses, and B returns. */
-document.addEventListener("keydown",function(e){
-  if(!scoreModelPageOpen || $("v-set-ai").hidden || (e.target && /INPUT|TEXTAREA/.test(e.target.nodeName)) || e.defaultPrevented) return;
-  var items=$("set-ai-model-list").children, key=e.key;
-  if(key==="ArrowUp" || key==="ArrowLeft") scoreModelFocus=(scoreModelFocus+items.length-1)%items.length;
-  else if(key==="ArrowDown" || key==="ArrowRight") scoreModelFocus=(scoreModelFocus+1)%items.length;
-  else if(key==="x" || key==="X" || key==="Enter"){
-    if(items[scoreModelFocus]) items[scoreModelFocus].click();
-    e.preventDefault(); return;
-  } else if(key==="z" || key==="Z" || key==="Escape"){
-    closeScoreModelPage(); e.preventDefault(); return;
-  } else return;
-  if(items.length){ e.preventDefault(); scoreModelFocusPaint(); }
+$("set-ai-model-pick").onclick=function(){ openModelList("model"); };
+$("set-ai-score-model").onclick=function(){ openModelList("vmodel"); };
+$("set-ai-model-back").onclick=closeModelList;
+$("set-ai-model-search").addEventListener("input",function(){
+  MODEL_QUERY=this.value; MODEL_FOCUS=0; renderModelList();
 });
-/* ---------- the lines' pages: the list, a provider, one line, one use (the score models have their page above) ---------- */
+/* The model chooser is a normal settings list: arrows move its focus, A chooses, and B returns. The search box keeps
+   its own keys: Escape clears it (then leaves), ArrowDown drops the ring onto the first row. */
+document.addEventListener("keydown",function(e){
+  if(!MODEL_PAGE.open || $("v-set-ai").hidden || e.defaultPrevented) return;
+  var t=e.target||{}, key=e.key, search=$("set-ai-model-search"), items=$("set-ai-model-list").children, n=items.length;
+  if(t===search){
+    if(key==="Escape"){
+      if(search.value){ search.value=""; MODEL_QUERY=""; MODEL_FOCUS=0; renderModelList(); }
+      else closeModelList();
+      e.preventDefault();
+    } else if(key==="ArrowDown" && n){
+      if(search.blur) search.blur();
+      MODEL_FOCUS=0; modelFocusPaint();
+      e.preventDefault();
+    }
+    return;
+  }
+  if(/^(INPUT|TEXTAREA)$/.test(t.nodeName)) return;
+  if(key==="ArrowUp" || key==="ArrowLeft"){ if(!n) return; MODEL_FOCUS=(MODEL_FOCUS+n-1)%n; modelFocusPaint(); }
+  else if(key==="ArrowDown" || key==="ArrowRight"){ if(!n) return; MODEL_FOCUS=(MODEL_FOCUS+1)%n; modelFocusPaint(); }
+  else if(key==="x" || key==="X" || key==="Enter"){ if(items[MODEL_FOCUS]) items[MODEL_FOCUS].click(); e.preventDefault(); return; }
+  else if(key==="z" || key==="Z" || key==="Escape"){ closeModelList(); e.preventDefault(); return; }
+  else return;
+  e.preventDefault();
+});
+/* ---------- the lines' pages: the list, a provider, one line, one use (the model list has its page above) ---------- */
 var AI_PAGE_IDS={main:"set-ai-main", add:"set-ai-add", line:"set-ai-line", use:"set-ai-use", model:"set-ai-model-page"};
 /* exactly one sub-page of v-set-ai is visible at a time */
 function aiPage(name){
@@ -308,6 +399,11 @@ function aiPage(name){
 }
 function curLine(){ return AILINE ? AL.find(AI.st,AILINE) : null; }
 function lineProvider(l){ return l ? window.LopdaAI.provider(l.provider) : null; }
+/* the provider whose line page is open: a saved line's, or the one a new line will be */
+function pageProvider(){
+  var l=curLine();
+  return l ? lineProvider(l) : (AIPROV ? window.LopdaAI.provider(AIPROV) : null);
+}
 function aiFocusPaint(){
   for(var i=0;i<AIFOCUSABLES.length;i++) AIFOCUSABLES[i].classList.toggle("focus",i===AIFOCUS);
 }
@@ -321,7 +417,7 @@ function aiBackToMain(){
   aiPage("main"); renderAi(); sfx("tap");
 }
 function aiBack(){
-  if(AIPAGE==="model"){ closeScoreModelPage(); return; }
+  if(AIPAGE==="model"){ closeModelList(); return; }
   if(AIPAGE!=="main"){ aiBackToMain(); return; }
   sfx("tap"); openSettings();
 }
@@ -353,14 +449,14 @@ function toggleAiLine(id,on){
 }
 function openAiLine(id){
   if(document.activeElement && /^(INPUT|TEXTAREA)$/.test(document.activeElement.nodeName)) document.activeElement.blur();
-  AILINE=id; AIPROV=""; AILINEMSG=""; AIDELARMED=false; AIVMIN=null;
+  AILINE=id; AIPROV=""; AILINEMSG=""; AIDELARMED=false; AIMIN=null; AIVMIN=null;
   aiPage("line"); renderAi(); sfx("tap");
 }
 /* a new line: nothing is added until 保存 */
 function openAiProvider(id){
   var p=window.LopdaAI.provider(id); if(!p) return;
   if(document.activeElement && /^(INPUT|TEXTAREA)$/.test(document.activeElement.nodeName)) document.activeElement.blur();
-  AILINE=""; AIPROV=id; AILINEMSG=""; AIDELARMED=false; AIVMIN=null;
+  AILINE=""; AIPROV=id; AILINEMSG=""; AIDELARMED=false; AIMIN=null; AIVMIN=null;
   aiPage("line"); renderAi(); sfx("tap");
 }
 function openAiUse(use){ AIUSE=use; aiPage("use"); renderAi(); sfx("tap"); }
@@ -431,25 +527,39 @@ function renderAiLine(){
   $("set-ai-line-title").textContent=l ? lineName(l) : (prov ? (prov.name[aiLang()] || prov.name.en) : "");
   $("set-ai-key").placeholder=(l && l.key) ? tr("ai.key.saved",{key:l.key.slice(-4)}) : tr("ai.key.ph");
   if(document.activeElement!==$("set-ai-key")) $("set-ai-key").value=(l && l.key) ? KEPT : "";
-  if(document.activeElement!==$("set-ai-model")) $("set-ai-model").value=l ? l.model : "";
+  if(AIMIN!==AILINE){ AIMIN=AILINE; AIM=l ? l.model : ""; }
+  if(document.activeElement!==$("set-ai-model")) $("set-ai-model").value=AIM;
   $("set-ai-model").placeholder=prov ? prov.model : "";
   $("set-ai-model-hint").textContent=!prov ? "" : (prov.id==="openrouter" ? tr("ai.model.hint") : tr("ai.model.def",{model:prov.model}));
-  /* a line that cannot see has no pictures to read: no field, no OpenRouter list. Only OpenRouter picks from its list. */
-  var seeing=!!(prov && prov.vision);
+  /* a line that cannot see has no pictures to read: no field, no list. Every provider with a model list gets a 从列表选
+     row under each field; the ones that want a key stay greyed until this line has one saved. */
+  var seeing=!!(prov && prov.vision), canList=!!(prov && prov.models);
+  var needKey=canList && prov.id!=="openrouter" && !(l && l.key);
   $("set-ai-vmodel-row").hidden=!seeing;
   $("set-ai-vmodel-hint").hidden=!seeing;
   if(AIVMIN!==AILINE){ AIVMIN=AILINE; AIVM=l ? l.visionModel : ""; }
   if(document.activeElement!==$("set-ai-vmodel")) $("set-ai-vmodel").value=AIVM;
   $("set-ai-vmodel").placeholder=prov ? (prov.id==="openrouter" ? SCORE_PAGES.DEFAULT_MODEL : prov.visionModel) : "";
-  $("set-ai-score-model").hidden=!(seeing && prov.id==="openrouter");
+  aiPickRow($("set-ai-model-pick"),canList,needKey);
+  aiPickRow($("set-ai-score-model"),canList && seeing,needKey);
+  $("set-ai-list-needkey").hidden=!needKey;
+  $("set-ai-model-pick-value").textContent=modelPickLabel("model",prov);
+  $("set-ai-score-model-value").textContent=modelPickLabel("vmodel",prov);
   $("set-ai-line-state").textContent=AILINEMSG;
   $("set-ai-test").hidden=!l; $("set-ai-del").hidden=!l;
   $("set-ai-del").textContent=tr(AIDELARMED ? "ai.del.sure" : "ai.del");
   var focus=[$("set-ai-save")];
   if(l){ focus.push($("set-ai-test")); focus.push($("set-ai-del")); }
+  if(!$("set-ai-model-pick").hidden && !needKey) focus.push($("set-ai-model-pick"));
   if(seeing) focus.push($("set-ai-vmodel"));
-  if(!$("set-ai-score-model").hidden) focus.push($("set-ai-score-model"));
+  if(!$("set-ai-score-model").hidden && !needKey) focus.push($("set-ai-score-model"));
   return focus;
+}
+/* a pick row: hidden for a provider with no model list, greyed (and never opened) until the line has a saved key */
+function aiPickRow(el,shown,disabled){
+  el.hidden=!shown;
+  el.classList.toggle("off",!!disabled);
+  if(disabled) el.setAttribute("aria-disabled","true"); else el.removeAttribute("aria-disabled");
 }
 
 function aiUseRow(labelText,secondText,disabled,current,go,extra){
@@ -506,7 +616,6 @@ function renderAi(msg){
   if(typeof msg==="string") AILINEMSG=msg;
   var focus={main:renderAiMain(), add:renderAiAdd(), line:renderAiLine(), use:renderAiUse()};
   $("set-ai-open").textContent=aiRowText();
-  $("set-ai-score-model-value").textContent=scoreModelLabel()+" ›";
   if(AIPAGE!=="model") aiSetFocus(focus[AIPAGE] || []);
 }
 /* a read that failed is tried again whenever the page opens; it always opens on the list */
@@ -514,7 +623,7 @@ $("set-ai-row").onclick=function(){
   sfx("tap"); AILINE=""; AIPROV=""; AIUSE=""; AILINEMSG=""; AIDELARMED=false;
   aiPage("main"); show("set-ai"); if(AI.readFailed) readAi(); renderAi();
 };
-$("set-ai-back").onclick=function(){ resetScoreModelPage(); sfx("tap"); openSettings(); };
+$("set-ai-back").onclick=function(){ resetModelPage(); sfx("tap"); openSettings(); };
 $("set-ai-add-open").onclick=function(){ aiPage("add"); renderAi(); sfx("tap"); };
 $("set-ai-add-back").onclick=aiBackToMain;
 $("set-ai-line-back").onclick=aiBackToMain;
@@ -529,13 +638,13 @@ function saveAi(){
   var vmodel=prov && prov.vision ? $("set-ai-vmodel").value.trim() : undefined;
   if(l){
     AL.edit(AI.st,l.id,key,model,vmodel); saveAiDoc(); AILINEMSG="";
-    AIVM=l.visionModel || ""; AIVMIN=l.id;
+    AIM=l.model || ""; AIMIN=l.id; AIVM=l.visionModel || ""; AIVMIN=l.id;
     $("set-ai-key").blur(); aiChanged(); sfx("ok"); return;
   }
   if(!prov){ renderAi(); sfx("err"); return; }
   if(!key){ renderAi(tr("ai.nokey")); sfx("err"); return; }
   l=AL.add(AI.st,prov.id,key,model,Date.now(),vmodel || "");
-  AILINE=l.id; AIPROV=""; AILINEMSG=""; AIVM=l.visionModel || ""; AIVMIN=l.id;
+  AILINE=l.id; AIPROV=""; AILINEMSG=""; AIM=l.model || ""; AIMIN=l.id; AIVM=l.visionModel || ""; AIVMIN=l.id;
   $("set-ai-key").blur();
   saveAiDoc();
   aiChanged(); sfx("ok");
@@ -545,10 +654,14 @@ function saveAi(){
 $("set-ai-save").onclick=saveAi;
 $("set-ai-key").addEventListener("focus",function(){ if(this.value===KEPT) this.value=""; });
 $("set-ai-key").addEventListener("blur",function(){ var l=curLine(); if(!this.value && l && l.key) this.value=KEPT; });
-/* what is typed stays a draft until 保存, even when the line's status redraws the page; the pick row follows it */
+/* what is typed stays a draft until 保存, even when the line's status redraws the page; the pick rows follow it */
 $("set-ai-vmodel").addEventListener("input",function(){
   AIVM=this.value; AIVMIN=AILINE;
-  $("set-ai-score-model-value").textContent=scoreModelLabel()+" ›";
+  $("set-ai-score-model-value").textContent=modelPickLabel("vmodel",pageProvider());
+});
+$("set-ai-model").addEventListener("input",function(){
+  AIM=this.value; AIMIN=AILINE;
+  $("set-ai-model-pick-value").textContent=modelPickLabel("model",pageProvider());
 });
 /* a capital letter drawn large on a small white picture: the vision step of the line test, and what it should read */
 function aiTestPicture(){
@@ -991,7 +1104,7 @@ $("set-share-copy").onclick=function(){
 
 LP.builtin({id:"set-ai", view:"set-ai",
   enter:function(){ renderAi(); },
-  leave:function(){ resetScoreModelPage(); },
+  leave:function(){ resetModelPage(); },
   lang:function(){ renderAi(); }
 });
 LP.builtin({id:"set-sense", view:"set-sense",

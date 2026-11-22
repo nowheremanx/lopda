@@ -260,6 +260,10 @@
             <input id="set-ai-model" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="100">
           </label>
           <p class="hint" id="set-ai-model-hint"></p>
+          <button class="set-ai-row" id="set-ai-model-pick" type="button" hidden>
+            <span class="set-ai-label" data-i18n="ai.model.pick">从列表选</span>
+            <span class="set-ai-value" id="set-ai-model-pick-value"></span>
+          </button>
           <label class="set-ai-field" id="set-ai-vmodel-row">
             <span data-i18n="ai.vmodel">看图模型</span>
             <input id="set-ai-vmodel" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="100">
@@ -269,6 +273,7 @@
             <span class="set-ai-label" data-i18n="ai.vmodel.pick">从列表选</span>
             <span class="set-ai-value" id="set-ai-score-model-value"></span>
           </button>
+          <p class="hint" id="set-ai-list-needkey" hidden data-i18n="ai.list.needkey">先保存 key 才能拿列表</p>
           <p class="hint" id="set-ai-line-state" aria-live="polite"></p>
           <div class="row">
             <button class="btn" id="set-ai-save" type="button" data-i18n="ai.save">保存</button>
@@ -289,12 +294,14 @@
       <div id="set-ai-model-page" hidden>
         <div class="bar">
           <button class="btn ghost back" id="set-ai-model-back" type="button" aria-label="返回">◂</button>
-          <h2 data-i18n="ai.score.label">读谱模型</h2>
+          <h2 id="set-ai-model-title"></h2>
         </div>
         <div class="settings set-ai-page">
+          <input id="set-ai-model-search" class="set-ai-search" type="text" enterkeyhint="search" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="100" data-i18n-ph="ai.list.search" placeholder="搜索模型名">
           <p class="hint" id="set-ai-model-status" aria-live="polite"></p>
-          <p class="hint" data-i18n="ai.score.pricehint">输入 / 输出 · 美元/百万 token</p>
+          <p class="hint" id="set-ai-model-price" data-i18n="ai.score.pricehint">输入 / 输出 · 美元/百万 token</p>
           <ul class="lcd-menu set-ai-model-list" id="set-ai-model-list"></ul>
+          <p class="hint" id="set-ai-model-more" aria-live="polite"></p>
         </div>
       </div>
     </section>
