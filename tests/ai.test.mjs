@@ -128,3 +128,69 @@ test("an abort the browser reports as a DOMException (code 20) is still stopped"
   p.stop();
   await assert.rejects(p, { code: "stopped" });
 });
+
+/* the provider table: five addresses, each one its own key's only destination */
+
+test("PROVIDERS lists the five providers, each with a chat completions address", () => {
+  assert.deepEqual(Array.from(AI.PROVIDERS, (p) => p.id), ["openrouter", "deepseek", "kimi", "qwen", "siliconflow"]);
+  for (const p of AI.PROVIDERS) {
+    assert.match(p.url, /^https:\/\/.+\/chat\/completions$/, p.id);
+    assert.equal(typeof p.keyHint, "string", p.id);
+    assert.equal(typeof p.name.zh, "string", p.id);
+    assert.equal(typeof p.name.en, "string", p.id);
+    assert.equal(AI.provider(p.id), p);
+  }
+  assert.equal(AI.provider("deepseek").vision, false);
+  assert.equal(AI.provider("nope"), null);
+});
+
+test("ask() talks to each provider's own address with that provider's default model", async () => {
+  for (const p of AI.PROVIDERS) {
+    const think = (t) => event({ choices: [{ delta: { reasoning_content: t } }] });
+    const { h, calls } = host((u, o) => stream([think("hmm"), piece("OK"), "data: [DONE]\n\n"], o.signal));
+    const seen = [];
+    assert.equal(await h.ask({ provider: p.id, key: "k", messages: [], onSignal: (s) => seen.push(s.phase + " " + s.think + " " + s.text) }), "OK", p.id);
+    assert.equal(calls.length, 1, p.id);
+    assert.equal(calls[0].url, p.url, p.id);
+    assert.equal(calls[0].opts.headers.Authorization, "Bearer k", p.id);
+    assert.equal(JSON.parse(calls[0].opts.body).model, p.model, p.id);
+    assert.deepEqual(seen.slice(0, 3), ["open 0 0", "think 3 0", "write 3 2"], p.id);
+  }
+});
+
+test("the model given wins over fallbackModel, which wins over the provider's default", async () => {
+  const pick = async (o) => {
+    const { h, calls } = host((u, opts) => stream([piece("OK")], opts.signal));
+    assert.equal(await h.ask({ provider: "deepseek", key: "k", messages: [], ...o }), "OK");
+    return JSON.parse(calls[0].opts.body).model;
+  };
+  assert.equal(await pick({ model: "a/b", fallbackModel: "c/d" }), "a/b");
+  assert.equal(await pick({ fallbackModel: "c/d" }), "c/d");
+  assert.equal(await pick({}), "deepseek-flash");
+});
+
+test("an unknown provider fails as http and sends nothing", async () => {
+  const { h, calls } = host(() => assert.fail("no request"));
+  await assert.rejects(h.ask({ provider: "nope", key: "k", messages: [] }), { code: "http" });
+  assert.equal(calls.length, 0);
+});
+
+test("a url passed by the caller is ignored: the request goes to the provider's own address", async () => {
+  const { h, calls } = host((u, o) => stream([piece("OK")], o.signal));
+  assert.equal(await h.ask({ provider: "qwen", key: "k", messages: [], url: "https://evil.example/x" }), "OK");
+  assert.equal(calls[0].url, AI.provider("qwen").url);
+});
+
+test("a documented balance answer is named credit, other failures keep their word", async () => {
+  const failWith = (status, body) => host(() => Promise.resolve({ ok: false, status, text: () => Promise.resolve(JSON.stringify(body)) }));
+  const cases = [
+    ["kimi", 429, { error: { type: "exceeded_current_quota_error" } }, "credit"],
+    ["kimi", 429, {}, "busy"],
+    ["qwen", 403, { code: "Arrearage" }, "credit"],
+    ["qwen", 403, {}, "key"],
+  ];
+  for (const [provider, status, body, code] of cases) {
+    const { h } = failWith(status, body);
+    await assert.rejects(h.ask({ provider, key: "k", messages: [] }), { code }, provider + " " + status);
+  }
+});
