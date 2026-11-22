@@ -2357,7 +2357,7 @@ function patternButtons(click,current){
 /* 12.16: the assistant sheet. The quick commands work with no key; a longer request goes to the AI line and comes
    back as a preview, never straight into the song. */
 function aiState(){
-  return LP.ai && LP.ai.on() ? tr("studio.ai.on") : tr("studio.ai.off");
+  return LP.ai && LP.ai.on("studio") ? tr("studio.ai.on",{line: LP.ai.line("studio").name}) : tr("studio.ai.off");
 }
 /* the progress under the input (12.19.7): the stage in plain words, the card once it is drawn, and the same line of
    communication as the scripts page. One clock for the whole job; a 1 s interval only rewrites these three text nodes,
@@ -2515,7 +2515,7 @@ function renderAiSheet(sh){
     row.appendChild(stop);
   }
   sh.appendChild(row);
-  if(LP.ai && LP.ai.on()){
+  if(LP.ai && LP.ai.on("studio")){
     var readRow=el("div","st-sheet-row"), read=el("button","st-sheet-btn","");
     read.type="button"; read.textContent=tr("studio.score.row"); read.disabled=T.aiBusy;
     read.onclick=function(){ openSheet("score"); };
@@ -2617,7 +2617,7 @@ function askAi(text,mode){
   T.aiNote=text;
   /* every request goes to the AI: the local phrase matcher read "a 12-bar blues in E major" as "change the key to E
      major" and did it (owner, 2026-10-31), so it was removed */
-  if(!LP.ai || !LP.ai.on()){
+  if(!LP.ai || !LP.ai.on("studio")){
     if(mode==="new") toast(tr("studio.ai.nokey.template"));
     else toast(tr("studio.ai.nokey"));
     renderSheet();
@@ -2632,11 +2632,11 @@ function askAi(text,mode){
     T.aiSig=s; T.aiLast=Date.now(); T.aiMark=!T.aiMark;
     paintAiProgress();
   }
-  function ask(messages){ return LP.ai.ask({messages:messages,onSignal:onSignal}); }
+  function ask(messages){ return LP.ai.ask({messages:messages,onSignal:onSignal,use:"studio"}); }
   function onStage(st){ aiStage(st); }
   function onTrouble(e){
     return new Promise(function(resolve){
-      T.aiTrouble={resolve:resolve, why:LP.ai.err?LP.ai.err(e):""};
+      T.aiTrouble={resolve:resolve, why:LP.ai.err?LP.ai.err(e,"studio"):""};
       LP.sfx("err");
       if(T.sheet==="ai"||T.sheet==="score") renderSheet();
       else toast(tr("studio.ai.trouble.toast"));
@@ -2669,30 +2669,30 @@ function askAi(text,mode){
     toast(code==="stopped" ? tr("studio.ai.stopped")
       : code==="unreadable" ? tr("studio.ai.unread")
       : code==="tools" ? tr("studio.ai.bad")
-      : tr("studio.ai.fail",{why:LP.ai.err?LP.ai.err(e):""}));
+      : tr("studio.ai.fail",{why:LP.ai.err?LP.ai.err(e,"studio"):""}));
     renderSheet();
   });
 }
 function askScore(text){
   text=String(text==null?"":text).trim();
   if((!text && !T.scorePages.length) || T.aiBusy) return;
-  if(!LP.ai || !LP.ai.on()){ toast(tr("studio.ai.nokey")); return; }
   var images=[];
   try{ if(T.scorePages.length) images=scoreJpegs(); }
   catch(e){ toast(tr("studio.score.fail")); return; }
+  /* pictures need a line that can see; words can go down the studio line */
+  var use=images.length ? "score" : "studio";
+  if(!LP.ai || !LP.ai.on(use)){ toast(tr(use==="score" ? "ai.novision" : "studio.ai.nokey")); return; }
   T.scoreText=text; T.aiBusy=true; T.aiPreview=null; T.aiCard=""; T.aiStage=""; T.aiSig=null; T.aiMark=false;
   T.aiTrouble=null; T.aiT0=T.aiLast=Date.now();
   renderSheet();
   function onSignal(s){ T.aiSig=s; T.aiLast=Date.now(); T.aiMark=!T.aiMark; paintAiProgress(); }
   function ask(messages){
-    var options={messages:messages,onSignal:onSignal};
-    if(images.length) options.model=LP.ai.scoreModel();
-    return LP.ai.ask(options);
+    return LP.ai.ask({messages:messages,onSignal:onSignal,use:use});
   }
   function onStage(st){ aiStage(st); }
   function onTrouble(e){
     return new Promise(function(resolve){
-      T.aiTrouble={resolve:resolve,why:LP.ai.err?LP.ai.err(e):""};
+      T.aiTrouble={resolve:resolve,why:LP.ai.err?LP.ai.err(e,use):""};
       LP.sfx("err");
       if(T.sheet==="ai"||T.sheet==="score") renderSheet();
       else toast(tr("studio.ai.trouble.toast"));
@@ -2713,7 +2713,7 @@ function askScore(text){
   },function(e){
     var code=e&&e.code; end();
     toast(code==="stopped"?tr("studio.ai.stopped"):code==="unreadable"?tr("studio.score.fail"):
-      tr("studio.ai.fail",{why:LP.ai.err?LP.ai.err(e):""}));
+      tr("studio.ai.fail",{why:LP.ai.err?LP.ai.err(e,use):""}));
     renderSheet();
   });
 }

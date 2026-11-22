@@ -42,6 +42,8 @@ nav .wrap{display:flex;align-items:center;gap:18px;height:52px;font-size:14px}
 nav .mark{font-family:var(--f-lcd);font-size:24px;letter-spacing:.06em;text-decoration:none;margin-right:auto}
 nav a.l{text-decoration:none;color:var(--on-case-dim)}
 nav a.l:hover,nav .lang:hover{color:var(--on-case)}
+nav .mark,nav a.l,nav .btn{white-space:nowrap}
+@media (max-width:380px){nav .wrap{gap:12px} nav a.gh{display:none}}
 nav .lang{background:none;border:0;color:var(--on-case-dim);font:14px var(--f-body);cursor:pointer;padding:8px 4px}
 .btn{display:inline-flex;align-items:center;min-height:44px;border-radius:999px;padding:12px 22px;font:600 16px/1 var(--f-body);text-decoration:none;border:0;cursor:pointer}
 .btn.home{background:var(--home);color:#fff;box-shadow:inset 0 -3px 0 rgba(0,0,0,.25)}
@@ -58,23 +60,67 @@ nav .lang{background:none;border:0;color:var(--on-case-dim);font:14px var(--f-bo
 .ev p{color:var(--on-case-dim);margin-top:6px;max-width:60ch}
 
 /* one event */
-.steps{list-style:none;padding:0;margin:0;display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));counter-reset:s}
-.steps li{background:var(--paper-2);border-radius:12px;padding:18px;counter-increment:s}
-.steps li::before{content:counter(s);display:block;font:28px/1 var(--f-lcd);color:var(--lcd-dark);margin-bottom:8px}
-.steps p{color:var(--lcd-dark);font-size:16px}
-.cards{display:grid;gap:16px;grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
-.card{background:var(--case-2);border:1px solid var(--case-line);border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.jump{display:flex;gap:10px;flex-wrap:wrap;margin-top:28px}
+
+/* two ways in: the phone (an LCD-coloured panel) and the computer (a case-coloured one) */
+.ways{display:grid;gap:18px;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr))}
+.way{border-radius:18px;padding:clamp(20px,3vw,32px);display:flex;flex-direction:column;gap:18px;min-width:0;scroll-margin-top:64px}
+.way.phone{background:var(--lcd-paper);color:var(--lcd-ink)}
+.way.computer{background:var(--case);color:var(--on-case)}
+.way .where{display:flex;justify-content:space-between;align-items:baseline;gap:12px;font:22px/1 var(--f-lcd);letter-spacing:.08em;text-transform:uppercase}
+.way.phone .where{color:var(--lcd-dark)} .way.computer .where{color:var(--lcd-mid)}
+.way h2{margin:0;font-size:clamp(34px,4.6vw,48px)}
+.way .wl{font-size:17px;line-height:1.45;max-width:42ch}
+.way.phone .wl{color:var(--lcd-dark)} .way.computer .wl{color:var(--on-case-dim)}
+.facts{margin:0;display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:15px;padding:14px 0;border-block:1px solid}
+.way.phone .facts{border-color:var(--lcd-mid)} .way.computer .facts{border-color:var(--case-line)}
+.facts dt{font:18px/1.3 var(--f-lcd);letter-spacing:.06em;text-transform:uppercase;opacity:.75}
+.facts dd{margin:0;font-weight:600}
+.wsteps{list-style:none;margin:0;padding:0;display:grid;gap:14px;counter-reset:s}
+.wsteps li{display:grid;grid-template-columns:30px 1fr;column-gap:10px;counter-increment:s}
+.wsteps li::before{content:counter(s);grid-row:1 / span 2;font:30px/.9 var(--f-lcd)}
+.way.phone .wsteps li::before{color:var(--lcd-dark)} .way.computer .wsteps li::before{color:var(--lcd-mid)}
+.wsteps h3{font-size:18px;margin:0 0 2px}
+.wsteps p{font-size:15px;overflow-wrap:anywhere}
+.way.phone .wsteps p{color:var(--lcd-dark)} .way.computer .wsteps p{color:var(--on-case-dim)}
+.way .end{font-size:15px;font-style:italic}
+.way.phone .end{color:var(--lcd-dark)} .way.computer .end{color:var(--on-case-dim)}
+
+/* the little screens that type their lines: an LCD in a case bezel, and a terminal */
+.screen{border-radius:12px;padding:12px}
+.way.phone .screen{background:var(--case);box-shadow:inset 0 -3px 0 rgba(0,0,0,.35)}
+.screen .glass{height:100%;min-height:170px;border-radius:6px;padding:10px 12px;font:21px/1.2 var(--f-lcd);letter-spacing:.03em;overflow:hidden}
+.way.phone .glass{background:var(--lcd-paper);color:var(--lcd-ink);box-shadow:inset 0 0 0 2px var(--lcd-dark)}
+.way.computer .screen{background:#0c0d0b;border:1px solid var(--case-line)}
+.way.computer .glass{padding:4px 6px;font:13px/1.65 ui-monospace,Menlo,monospace;letter-spacing:0;color:var(--on-case-dim)}
+.way.computer .glass .cmd{color:var(--on-case)}
+.way.computer .glass .ok{color:#9fbf6a}
+.glass div{white-space:pre-wrap;overflow-wrap:anywhere;min-height:1.2em}
+.glass .cur::after{content:"";display:inline-block;width:.55em;height:1em;margin-left:2px;vertical-align:-.12em;background:currentColor;animation:blink 1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+@media (prefers-reduced-motion:reduce){.glass .cur::after{animation:none}}
+
+/* challenge cards */
+.cards{display:grid;gap:16px;grid-template-columns:repeat(auto-fill,minmax(min(100%,320px),1fr))}
+.card{background:var(--case-2);border:1px solid var(--case-line);border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:12px;min-width:0;scroll-margin-top:64px}
 .card .top{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
 .card .meta{font:20px/1 var(--f-lcd);letter-spacing:.06em;color:var(--lcd-mid);white-space:nowrap}
 .card .what{color:var(--on-case)}
 .card dl{margin:0;display:grid;gap:8px;font-size:15px}
 .card dt{font:18px/1 var(--f-lcd);letter-spacing:.08em;text-transform:uppercase;color:var(--lcd-mid)}
 .card dd{margin:2px 0 0;color:var(--on-case-dim)}
-.card details{margin-top:auto;border-top:1px solid var(--case-line);padding-top:10px}
+.card .try{background:var(--lcd-paper);color:var(--lcd-ink);border-radius:10px;padding:14px;display:grid;gap:10px}
+.card .try .lbl{font:18px/1 var(--f-lcd);letter-spacing:.08em;text-transform:uppercase;color:var(--lcd-dark)}
+.card .try .idea{font-size:16px;font-weight:600;line-height:1.4}
+.card .try ul{list-style:none;margin:0;padding:0;display:grid;gap:4px;font-size:15px;color:var(--lcd-dark)}
+.card .try li::before{content:"> ";font-family:var(--f-lcd);font-size:18px}
+.card .try .btn{justify-self:start;padding:10px 18px;min-height:44px}
+.card details{margin-top:auto;border-top:1px solid var(--case-line);padding-top:4px}
 .card summary{cursor:pointer;min-height:44px;display:flex;align-items:center;font-weight:600}
-.card pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.5 ui-monospace,Menlo,monospace;background:var(--lcd-paper);color:var(--lcd-ink);border-radius:8px;padding:12px;margin:8px 0}
+.card details dl{margin:4px 0 10px}
+.card pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.5 ui-monospace,Menlo,monospace;background:#0c0d0b;color:var(--on-case);border:1px solid var(--case-line);border-radius:8px;padding:12px;margin:8px 0}
 .card .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-.card .row a{font-size:15px;color:var(--on-case-dim)}
+.card .row a{font-size:15px;color:var(--on-case-dim);min-height:44px;line-height:44px}
 .made{display:grid;gap:16px;grid-template-columns:repeat(auto-fill,minmax(220px,1fr))}
 .made figure{margin:0;background:var(--paper-2);border-radius:12px;padding:12px}
 .made img{display:block;width:100%;height:auto;image-rendering:pixelated;border-radius:6px;background:var(--lcd-paper)}
@@ -88,7 +134,7 @@ footer{padding-block:32px;color:var(--on-case-dim);font-size:14px}
 <nav><div class="wrap">
   <a class="mark" href="../">LO-PDA</a>
   <a class="l" href="./" data-t="nav.events">Events</a>
-  <a class="l" href="https://github.com/nowheremanx/lopda">GitHub</a>
+  <a class="l gh" href="https://github.com/nowheremanx/lopda">GitHub</a>
   <button class="lang" type="button" id="lang">中文</button>
   <a class="btn home" href="../runtime/" data-t="nav.open">Open</a>
 </div></nav>
@@ -105,12 +151,13 @@ footer{padding-block:32px;color:var(--on-case-dim);font-size:14px}
       "list.e": "Events", "list.h": "Make something small.",
       "list.p": "Challenges for making apps for Lo-PDA, with an AI or without. When one ends, what people made stays here.",
       "open": "Open", "archived": "Archived", "back": "All events",
-      "how.e": "How it works", "how.h": "Ten minutes, one phone.",
+      "ways.e": "Two ways in", "ways.h": "A taste, or the real thing.",
       "cards.e": "Challenge cards", "cards.h": "Pick one.",
-      "cards.p": "Each card is a starting point, not a spec. Keep the twist; change the rest.",
+      "cards.p": "Each card has one line for your phone and a full brief for a coding agent. It is a starting point, not a spec: keep the twist, change the rest.",
+      "try": "On the phone", "then": "Then revise:", "agent": "For a coding agent",
       "stars": "Difficulty", "hours": "h",
       "looks": "What you'll show", "twist": "The 1986 twist", "skip": "Leave out",
-      "prompt": "Starter prompt", "copy": "Copy", "copied": "Copied", "issue": "Issue",
+      "prompt": "Starter prompt", "copy": "Copy", "copied": "Copied", "issue": "Issue", "copyline": "Copy the line",
       "made.e": "What people made", "made.h": "The apps.", "by": "by",
       "join": "Made one? Open a pull request and link this event."
     },
@@ -119,12 +166,13 @@ footer{padding-block:32px;color:var(--on-case-dim);font-size:14px}
       "list.e": "活动", "list.h": "做点小东西。",
       "list.p": "给 Lo-PDA 做 app 的挑战，用不用 AI 都行。活动结束后，大家做的东西会留在这里。",
       "open": "进行中", "archived": "已归档", "back": "全部活动",
-      "how.e": "怎么玩", "how.h": "十分钟，一台手机。",
+      "ways.e": "两条路", "ways.h": "尝个鲜，或者做成真的。",
       "cards.e": "挑战卡", "cards.h": "挑一张。",
-      "cards.p": "每张卡只是起点，不是规格书。留住那点 1986 的味道，其他随你改。",
+      "cards.p": "每张卡有一句给手机用的话，和一份给编程助手的完整说明。它只是起点，不是规格书：留住那点 1986 的味道，其他随你改。",
+      "try": "在手机上", "then": "再改一改：", "agent": "给编程助手",
       "stars": "难度", "hours": "小时",
       "looks": "做完能晒什么", "twist": "1986 味道", "skip": "别做",
-      "prompt": "起手 prompt", "copy": "复制", "copied": "已复制", "issue": "Issue",
+      "prompt": "起手 prompt", "copy": "复制", "copied": "已复制", "issue": "Issue", "copyline": "复制这句",
       "made.e": "大家做了什么", "made.h": "作品。", "by": "作者",
       "join": "做好了？开一个 pull request，写上这个活动。"
     }
@@ -166,31 +214,101 @@ footer{padding-block:32px;color:var(--on-case-dim);font-size:14px}
     document.title = lang === "zh" ? "Lo-PDA 活动" : "Lo-PDA Events";
   }
 
+  // A copy button: the clipboard when the page may use it, else the text is selected for a long-press copy.
+  function copyButton(label, text, node) {
+    var b = el("button", "btn ghost", label); b.type = "button";
+    b.addEventListener("click", function () {
+      var done = function () { b.textContent = t("copied"); setTimeout(function () { b.textContent = label; }, 1500); };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, function () { selectText(node); });
+      else selectText(node);
+    });
+    return b;
+  }
+
+  // A card: what it is and its 1986 twist, then the phone's one line (with two follow-ups for Revise),
+  // then, folded, the full brief for a coding agent.
   function renderCard(ev, c) {
     var card = el("article", "card"); card.id = c.id;
     var top = add(el("div", "top"), el("h3", null, L(c.name)),
       el("span", "meta", stars(c.stars) + "  " + c.hours + " " + t("hours")));
     top.lastChild.title = t("stars");
     var dl = el("dl");
-    [["looks", c.looks], ["twist", c.twist], ["skip", c.skip]].forEach(function (r) { add(dl, el("dt", null, t(r[0])), el("dd", null, L(r[1]))); });
-    var det = el("details"); add(det, el("summary", null, t("prompt")));
+    [["looks", c.looks], ["twist", c.twist]].forEach(function (r) { add(dl, el("dt", null, t(r[0])), el("dd", null, L(r[1]))); });
+    var tryBox = null;
+    if (c.idea) {
+      tryBox = el("div", "try");
+      var idea = el("p", "idea", L(c.idea));
+      add(tryBox, el("div", "lbl", t("try")), idea);
+      if (c.revise && c.revise.length) {
+        var ul = el("ul");
+        c.revise.forEach(function (r) { ul.appendChild(el("li", null, L(r))); });
+        add(tryBox, el("div", "lbl", t("then")), ul);
+      }
+      tryBox.appendChild(copyButton(t("copyline"), L(c.idea), idea));
+    }
+    var det = el("details"); add(det, el("summary", null, t("agent")));
+    if (c.skip) { var sk = put(det, el("dl")); add(sk, el("dt", null, t("skip")), el("dd", null, L(c.skip))); }
     var pre = put(det, el("pre", null, c.prompt));
     var row = put(det, el("div", "row"));
-    var copy = put(row, el("button", "btn ghost", t("copy"))); copy.type = "button";
-    copy.addEventListener("click", function () {
-      var done = function () { copy.textContent = t("copied"); setTimeout(function () { copy.textContent = t("copy"); }, 1500); };
-      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(c.prompt).then(done, function () { selectText(pre); });
-      else selectText(pre);
-    });
+    row.appendChild(copyButton(t("copy"), c.prompt, pre));
     if (c.issue) { var a = put(row, el("a", null, t("issue") + " #" + c.issue)); a.href = REPO + "/issues/" + c.issue; }
-    return add(card, top, el("p", "what", L(c.what)), dl, det);
+    return add(card, top, el("p", "what", L(c.what)), dl, tryBox, det);
   }
   function selectText(node) { var r = document.createRange(); r.selectNodeContents(node); var s = getSelection(); s.removeAllRanges(); s.addRange(r); }
+
+  // One way in: where and how long, the headline, three facts, its little screen, the steps.
+  function renderWay(wy) {
+    var box = el("section", "way " + wy.id); box.id = "way-" + wy.id;
+    var where = add(el("div", "where"), el("span", null, L(wy.where)), el("span", null, L(wy.time)));
+    var facts = el("dl", "facts");
+    (wy.facts || []).forEach(function (f) { add(facts, el("dt", null, L(f.k)), el("dd", null, L(f.v))); });
+    var screen = null;
+    if (wy.demo && wy.demo.length) {
+      screen = el("div", "screen"); screen.setAttribute("aria-hidden", "true");
+      typeLines(put(screen, el("div", "glass")), wy.demo.map(L));
+    }
+    var ol = el("ol", "wsteps");
+    (wy.steps || []).forEach(function (st) { add(ol, add(el("li"), el("h3", null, L(st.h)), el("p", null, L(st.p)))); });
+    return add(box, where, el("h2", null, L(wy.title)), el("p", "wl", L(wy.lede)), facts, screen, ol, wy.end && el("p", "end", L(wy.end)));
+  }
+
+  // The little screens type their lines one after another, then start over. Each render starts new timers,
+  // so the old ones are cleared first (a language switch or a new page). With reduced motion: all lines, still.
+  var timers = [];
+  function later(fn, ms) { timers.push(setTimeout(fn, ms)); }
+  function stopTyping() { timers.forEach(clearTimeout); timers = []; }
+  function lineClass(s) { return /^\$ /.test(s) ? "cmd" : /^PASS\b/.test(s) ? "ok" : ""; }
+  function typeLines(glass, lines) {
+    var still = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (still) { lines.forEach(function (s) { glass.appendChild(el("div", lineClass(s), s)); }); return; }
+    function run() {
+      glass.textContent = "";
+      (function next(i) {
+        if (i >= lines.length) { later(run, 3200); return; }
+        var row = put(glass, el("div", lineClass(lines[i]) + " cur")), text = lines[i], n = 0;
+        var typed = /^[>$]/.test(text);   // what the person types comes a letter at a time; answers appear at once
+        (function step() {
+          n = typed ? n + 1 : text.length;
+          row.textContent = text.slice(0, n);
+          if (n < text.length) later(step, 45);
+          else later(function () { row.className = lineClass(text); next(i + 1); }, typed ? 500 : 900);
+        })();
+      })(0);
+    }
+    later(run, 400);
+  }
 
   function renderEvent(ev) {
     var w = band(false);
     var back = put(w, el("a", "back", "< " + t("back"))); back.href = "#";
     add(w, chip(ev), el("h1", null, L(ev.title)), el("p", "lede", L(ev.when) + " · " + L(ev.lede)));
+    if (ev.ways && ev.ways.length && ev.status !== "archived") {
+      var jump = put(w, el("div", "jump"));
+      ev.ways.forEach(function (wy, i) {
+        var j = put(jump, el("a", "btn " + (i ? "ghost" : "home"), L(wy.where) + " · " + L(wy.time)));
+        j.href = "#" + ev.id + "/" + wy.id;
+      });
+    }
 
     // The summary comes first once an event is over: that is what a visitor came back for.
     if (ev.summary) {
@@ -207,11 +325,11 @@ footer{padding-block:32px;color:var(--on-case-dim);font-size:14px}
       });
     }
 
-    if (ev.steps && ev.steps.length) {
+    if (ev.ways && ev.ways.length) {
       var h = band(true);
-      add(h, el("div", "eyebrow lcd", t("how.e")), el("h2", null, t("how.h")));
-      var ol = put(h, el("ol", "steps"));
-      ev.steps.forEach(function (st) { add(ol, add(el("li"), el("h3", null, L(st.h)), el("p", null, L(st.p)))); });
+      add(h, el("div", "eyebrow lcd", t("ways.e")), el("h2", null, t("ways.h")));
+      var ways = put(h, el("div", "ways"));
+      ev.ways.forEach(function (wy) { ways.appendChild(renderWay(wy)); });
     }
 
     if (ev.cards && ev.cards.length) {
@@ -225,11 +343,15 @@ footer{padding-block:32px;color:var(--on-case-dim);font-size:14px}
     document.title = L(ev.title) + " · Lo-PDA";
   }
 
+  // #<event> opens an event; #<event>/<way> or #<event>/<card> also scrolls to that part of it.
   function render() {
+    stopTyping();
     main.textContent = "";
-    var id = decodeURIComponent(location.hash.slice(1)), ev = null;
-    for (var i = 0; i < events.length; i++) if (events[i].id === id) ev = events[i];
+    var parts = decodeURIComponent(location.hash.slice(1)).split("/"), ev = null;
+    for (var i = 0; i < events.length; i++) if (events[i].id === parts[0]) ev = events[i];
     if (ev) renderEvent(ev); else renderList();
+    var at = parts[1] && (document.getElementById("way-" + parts[1]) || document.getElementById(parts[1]));
+    if (at) at.scrollIntoView();
     document.documentElement.lang = lang;
     document.getElementById("lang").textContent = lang === "zh" ? "EN" : "中文";
     var ts = document.querySelectorAll("[data-t]");
@@ -241,7 +363,11 @@ footer{padding-block:32px;color:var(--on-case-dim);font-size:14px}
     try { localStorage.setItem("lopda-landing-lang", lang); } catch (e) {}
     render();
   });
-  addEventListener("hashchange", function () { render(); scrollTo(0, 0); });
+  addEventListener("hashchange", function () {
+    var sub = location.hash.indexOf("/") > 0;
+    render();
+    if (!sub) scrollTo(0, 0);
+  });
   render();
 })();
 </script>

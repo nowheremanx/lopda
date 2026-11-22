@@ -68,7 +68,7 @@ button{font-family:inherit;color:inherit}
 /* shared controls */
 textarea{width:100%;font-family:var(--f-lcd);font-size:16px;line-height:1.5;color:var(--ink);background:var(--lcd);border:3px solid var(--ink);padding:8px;resize:none}
 textarea::placeholder{color:var(--ink-2)}
-.btn{font-family:var(--f-lcd);font-size:16px;background:var(--ink);color:var(--lcd);border:0;padding:10px 14px;cursor:pointer;box-shadow:3px 3px 0 var(--ink-2)}
+.btn{font-family:var(--f-lcd);font-size:16px;background:var(--ink);color:var(--lcd);border:0;padding:10px 14px;cursor:pointer;box-shadow:3px 3px 0 var(--ink-2);min-height:44px;box-sizing:border-box}
 .btn:disabled{background:var(--lcd-3);color:var(--ink-2);cursor:default;box-shadow:none}
 .btn.ghost{background:transparent;color:var(--ink);border:2px solid var(--ink);box-shadow:none}
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
@@ -177,9 +177,9 @@ textarea::placeholder{color:var(--ink-2)}
 .store-perms{display:flex;align-items:center;gap:6px;margin-top:1px}
 .store-perms .perm{display:inline-flex;width:16px;height:16px}
 .store-perms canvas{width:16px;height:16px;display:block;image-rendering:pixelated;image-rendering:crisp-edges}
-.store-filters{display:flex;flex-wrap:nowrap;gap:6px;padding:8px 12px 0;overflow-x:auto;scrollbar-width:none}
+.store-filters{display:flex;flex-wrap:nowrap;gap:8px;padding:8px 12px 0;overflow-x:auto;scrollbar-width:none}
 .store-filters::-webkit-scrollbar{display:none}
-.store-filter{flex:none;display:inline-flex;align-items:baseline;gap:5px;font-family:var(--f-lcd);font-size:14px;background:transparent;color:var(--ink);border:2px solid var(--ink);padding:6px 9px;min-height:40px;cursor:pointer}
+.store-filter{flex:none;display:inline-flex;align-items:center;gap:5px;font-family:var(--f-lcd);font-size:14px;background:transparent;color:var(--ink);border:2px solid var(--ink);padding:6px 9px;min-height:44px;cursor:pointer}
 .store-filter span{font-family:var(--f-pix);font-size:14px;color:var(--ink-2)}
 .store-filter[aria-pressed="true"]{background:var(--ink);color:var(--lcd)}
 .store-filter[aria-pressed="true"] span{color:var(--lcd)}
@@ -250,13 +250,14 @@ textarea::placeholder{color:var(--ink-2)}
 .settings{padding:14px;display:flex;flex-direction:column;gap:14px;max-width:420px}
 .set-row{display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px dashed var(--ink-2);padding-bottom:12px;font-size:16px}
 .set-row .btn{padding:6px 14px;min-width:56px}
-/* the short settings menu: one 44 px row per setting, the long parts behind a row */
+/* the short settings menu: one row per setting, the long parts behind a row. Its buttons are 44 px like every .btn;
+   the row's padding is small (2 px above, 4 px below for the 3 px shadow) so a row is 51 px and the first screen at
+   331x359 still ends on the AI line. */
 .set-menu{padding:0 10px 6px;gap:0}
 .set-bar{padding:1px 8px}
 .set-bar h2{line-height:1.1}
-.set-menu .set-row{min-height:44px;padding:6px 0 8px;justify-content:flex-start;gap:10px}
-/* a little air between the buttons and the lines above and below them (the 3 px shadow sits in the bottom gap) */
-.set-menu .set-row .btn{min-height:34px;padding:3px 12px}
+.set-menu .set-row{min-height:44px;padding:2px 0 4px;justify-content:flex-start;gap:10px}
+.set-menu .set-row .btn{padding:3px 12px}
 .set-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .set-ico{flex:none;width:24px;height:24px;display:flex;align-items:center;justify-content:center}
 .set-ico canvas{display:block;width:24px;height:24px;image-rendering:pixelated;image-rendering:crisp-edges}
@@ -297,8 +298,49 @@ textarea::placeholder{color:var(--ink-2)}
 .set-ai-field{display:flex;flex-direction:column;gap:4px;font-size:16px}
 .set-ai-field input{min-height:44px;font-family:var(--f-lcd);font-size:16px;color:var(--ink);background:var(--lcd);border:3px solid var(--ink);border-radius:0;padding:4px 8px;width:100%;min-width:0;-webkit-appearance:none;appearance:none}
 .set-ai-field input::placeholder{color:var(--ink-2)}
+/* the model list's search box: the same field look, one row of its own at the top of the list page */
+.set-ai-search{min-height:44px;width:100%;box-sizing:border-box;font-family:var(--f-lcd);font-size:16px;color:var(--ink);background:var(--lcd);border:3px solid var(--ink);border-radius:0;padding:4px 8px;-webkit-appearance:none;appearance:none}
+.set-ai-search::placeholder{color:var(--ink-2)}
+.set-ai-search:focus{outline:3px solid var(--ink);outline-offset:2px}
+/* a pick row whose provider wants a key first: shown, but greyed and never opened */
+.set-ai-row.off,.set-ai-row[aria-disabled="true"]{color:var(--ink-2);cursor:default}
+.set-ai-row.off .set-ai-value,.set-ai-row[aria-disabled="true"] .set-ai-value{color:var(--ink-2)}
+/* "pick a model" and "pick a vision model" share the list page */
+#set-ai-model-status{white-space:pre-line}
+/* the line test writes one line per step */
+#set-ai-line-state{white-space:pre-line}
+.set-ai-field input.focus{outline:3px solid var(--ink);outline-offset:2px}
 .set-ai-page .row{flex-wrap:wrap;gap:8px}
 .set-ai-page .btn{min-height:44px;padding:6px 14px}
+/* the lines: a card mark, the name, the key's last four and the switch, with the last result under them */
+.set-ai-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
+.set-ai-list li{display:flex;flex-direction:column;justify-content:center;min-height:44px;padding:4px 8px;box-sizing:border-box;cursor:pointer}
+.set-ai-list li.on,.set-ai-list li.focus{background:var(--ink);color:var(--lcd)}
+.set-ai-list li.off{color:var(--ink-2);cursor:default}
+.set-ai-list li.on .set-ai-key,.set-ai-list li.on .set-ai-status,.set-ai-list li.on .set-ai-value,.set-ai-list li.focus .set-ai-key,.set-ai-list li.focus .set-ai-status,.set-ai-list li.focus .set-ai-value{color:var(--lcd)}
+.set-ai-list .set-ai-value{flex:none;color:var(--ink-2);font-size:15px;white-space:nowrap}
+.set-ai-top{display:flex;align-items:center;gap:8px;width:100%;min-width:0}
+.set-ai-mark{flex:none;font-family:var(--f-pix);font-size:18px}
+.set-ai-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:16px}
+.set-ai-key{flex:none;font-family:var(--f-pix);font-size:14px;color:var(--ink-2)}
+.set-ai-status{font-size:12px;color:var(--ink-2)}
+.set-ai-sw{flex:none;min-width:44px;min-height:44px;padding:0 6px;font-family:var(--f-lcd);font-size:15px;background:transparent;color:var(--ink);border:2px solid var(--ink);cursor:pointer}
+.set-ai-sw[aria-checked="true"]{background:var(--ink);color:var(--lcd)}
+.set-ai-sw:disabled{color:var(--ink-2);border-color:var(--ink-2);background:transparent}
+.set-ai-add{width:100%;min-height:44px;padding:0 8px;box-sizing:border-box;background:none;border:0;border-top:1px dashed var(--ink-2);color:inherit;font:inherit;text-align:left;cursor:pointer}
+.set-ai-add:active{background:var(--lcd-2)}
+.set-ai-add.focus{outline:3px solid var(--ink);outline-offset:2px}
+.set-ai-uses{display:flex;flex-direction:column;gap:2px;border-top:1px dashed var(--ink-2);margin-top:4px;padding-top:4px}
+.set-ai-row{display:flex;align-items:center;gap:10px;width:100%;min-height:44px;padding:0 8px;box-sizing:border-box;background:none;border:0;border-bottom:1px dashed var(--ink-2);color:inherit;font:inherit;text-align:left;cursor:pointer}
+.set-ai-row:active{background:var(--lcd-2)}
+.set-ai-row.focus{outline:3px solid var(--ink);outline-offset:-3px}
+.set-ai-page .btn.focus{outline:3px solid var(--ink);outline-offset:2px}
+.set-ai-row .set-ai-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.set-ai-row .set-ai-value{flex:none;max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-2);font-size:15px}
+.set-ai-heading{margin:6px 0 0;font-size:13px;color:var(--ink-2)}
+/* the four "who uses which" rows are one line each: the label left, the line's name right */
+.set-ai-list li.set-ai-use{flex-direction:row;align-items:center;justify-content:space-between;gap:8px}
+.set-ai-use-list li.set-ai-follow .set-ai-name{white-space:normal;line-height:1.2;overflow:visible}
 .set-backup{display:flex;flex-direction:column;gap:8px;border-bottom:1px dashed var(--ink-2);padding-bottom:12px}
 .set-backup .set-row{border-bottom:0;padding-bottom:0}
 .set-backup-box{display:flex;flex-direction:column;gap:8px;border:2px solid var(--ink);padding:10px;background:var(--lcd-2);font-size:15px}
@@ -653,12 +695,12 @@ textarea::placeholder{color:var(--ink-2)}
 /* the idea page: one long prompt, its own screen, and a clear button that asks twice */
 .idea-main{flex:1;min-height:0;display:flex;flex-direction:column;gap:8px;padding:8px;overflow:hidden}
 .idea-main .hint{flex:none}
-#scripts-idea{flex:1;min-height:0;width:100%;font-family:var(--f-lcd);font-size:16px;line-height:1.45;color:var(--ink);background:var(--lcd);border:3px solid var(--ink);border-radius:0;padding:10px;resize:none;-webkit-appearance:none;appearance:none}
-#scripts-idea::placeholder{color:var(--ink-2)}
-#scripts-idea:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+#scripts-idea,#revise-ask{flex:1;min-height:0;width:100%;font-family:var(--f-lcd);font-size:16px;line-height:1.45;color:var(--ink);background:var(--lcd);border:3px solid var(--ink);border-radius:0;padding:10px;resize:none;-webkit-appearance:none;appearance:none}
+#scripts-idea::placeholder,#revise-ask::placeholder{color:var(--ink-2)}
+#scripts-idea:focus-visible,#revise-ask:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
 .idea-actions{flex:none;display:flex;gap:8px;padding:6px 8px;border-top:2px solid var(--ink)}
 .idea-actions .btn{flex:1;min-height:44px}
-#idea-status{min-height:18px;line-height:1.3}
+#idea-status,#revise-status{min-height:18px;line-height:1.3}
 #idea-clear:disabled{color:var(--mid);border-color:var(--mid);background:transparent;box-shadow:none;cursor:default}
 #idea-ask{bottom:58px}
 #idea-ask p{margin:0 0 2px;font-size:15px;line-height:1.35}
@@ -668,6 +710,9 @@ textarea::placeholder{color:var(--ink-2)}
 .scripts-list button{width:100%;min-height:52px;text-align:left;background:none;border:0;border-bottom:1px dashed var(--ink-2);padding:6px 10px;cursor:pointer;display:flex;flex-direction:column;justify-content:center;gap:2px;color:inherit;font:inherit}
 .scripts-list .t{font-size:16px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .scripts-list .d{font-size:13px;max-width:100%;color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* the version in use (以前的版本) */
+.scripts-list li.on button{background:var(--ink);color:var(--lcd)}
+.scripts-list li.on .d{color:var(--lcd)}
 .scripts-empty{padding:10px 4px;text-align:center;line-height:1.4}
 .scripts-count{margin:6px 10px -4px;font-size:15px;font-weight:normal;color:var(--ink-2)}
 #v-script-edit .editor{position:relative}
@@ -680,7 +725,9 @@ textarea::placeholder{color:var(--ink-2)}
 .script-menu{position:absolute;left:8px;right:8px;bottom:58px;z-index:2;background:var(--lcd-2);border:3px solid var(--ink);box-shadow:4px 4px 0 var(--ink-2);padding:8px;display:flex;flex-direction:column;gap:6px}
 .script-menu .btn{min-height:44px}
 #script-ask p{margin:0 0 2px;font-size:15px;line-height:1.35}
-#scripts-prompt-box{width:100%;height:120px;font-family:var(--f-lcd);font-size:13px;line-height:1.35;color:var(--ink);background:var(--lcd);border:2px solid var(--ink);padding:6px;resize:none}
+#scripts-prompt-box,#revise-prompt-box{width:100%;height:120px;font-family:var(--f-lcd);font-size:13px;line-height:1.35;color:var(--ink);background:var(--lcd);border:2px solid var(--ink);padding:6px;resize:none}
+#versions-code{flex:1;min-height:0;width:100%;font-family:var(--f-lcd);font-size:13px;line-height:1.45;color:var(--ink);background:transparent;border:0;border-radius:0;padding:10px;resize:none}
+#versions-code:focus-visible{outline:none}
 #data-ask{bottom:10px}
 #data-ask p{margin:0 0 2px;font-size:15px;line-height:1.35}
 #data-clear-all:disabled{color:var(--mid);border-color:var(--mid);background:transparent;box-shadow:none;cursor:default}
@@ -1115,3 +1162,24 @@ textarea::placeholder{color:var(--ink-2)}
 /* a tape row in the library: the name, its date or demo tag, and a 44 px delete button */
 .st-proj-list .st-proj-row{padding:0 2px 0 8px;gap:4px}
 .st-row-del{flex:none;width:44px;height:44px;box-sizing:border-box;padding:0;background:transparent;color:var(--ink);border:2px solid var(--ink);font-family:var(--f-lcd);font-size:12px;line-height:1;cursor:pointer}
+
+/* Exceptions to the 44 px rule (decisions.md 59): the calendar is a fixed screen whose header is one dense bar and
+   whose sheets must leave the month its height; the cartridge is a hardware view that fits one screen and never
+   scrolls (its insert label sits in a camera-style row). Tape4's instrument keys, the camera keys, the HOME key, the
+   d-pad, the round keys and the pet icons are not .btn, so the rule never reaches them. */
+.cal-head .btn,
+.cal-date .btn,
+.cal-kind .btn,
+.cal-step .btn,
+.cal-numpad .btn,
+#v-cal .btn,
+.cam-row .btn,
+#cart-tools .btn{min-height:0}
+/* The running app's bar keeps its old height: the app's screen sizes in sdk/UI.md (331 x 473, 331 x 359 with the
+   chin pad on an iPhone SE) are what apps are designed for, and a taller bar would take 8 px from every app. */
+#v-run .bar .btn{min-height:0}
+/* A back key is one symbol: a 44 px square key with the arrow at about the title's weight, not a tall thin strip.
+   The LCD font sits the triangle low in its em box; the bottom padding lifts it to the middle. */
+.btn.back{width:44px;min-width:44px;padding:0 0 8px;font-size:28px;line-height:1;display:inline-flex;align-items:center;justify-content:center;flex:none}
+/* The running app's ◂ is a square too, at the bar's own 36 px height: only its width changes, so the app's screen does not. */
+#run-back{width:36px;min-width:36px;padding-left:0;padding-right:0;flex:none}

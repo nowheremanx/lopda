@@ -11,12 +11,18 @@ var LP=window.LP, $=LP.$, S=LP.S, tr=LP.tr, own=LP.own, toast=LP.toast, put=LP.p
 var PREFIX="local:";
 var CODE_MAX=512*1024;
 var DATA_MAX=256*1024;
+/* a script sent for 改一改: past this, editing on a phone is the wrong tool (docs/design/scripts-revise.md) */
+var REVISE_MAX=64*1024;
+/* a script keeps its last 10 versions, and 1,000,000 characters of code in all */
+var VERSIONS_MAX=10;
+var VERSIONS_CHARS=1000000;
 
 var M={
-  base:null, items:null, data:null, ideaDoc:null,
+  base:null, items:null, data:null, versions:null, asks:null, ideaDoc:null,
   list:[], sizes:{}, cache:{}, schema:{},
   current:null, seq:0, saveTimer:0, dirty:false, askYes:null, dataAskYes:null, seedPromise:null,
-  idea:"", ideaLoaded:false, ideaTouched:false, ideaTimer:0
+  idea:"", ideaLoaded:false, ideaTouched:false, ideaTimer:0, askTimer:0,
+  askFor:null, askTouched:false, verPick:null, verSeq:0, reviseBusy:false
 };
 
 var ICON=["................","..000000000000..","..033333333330..","..030000000030..","..030333330030..","..030300030030..","..030300330030..","..030333000030..","..030000000030..","..030333300030..","..030000000030..","..033333333330..","..000000000000..","................","................","................"];
@@ -26,6 +32,9 @@ function refs(){
     M.base=S.db.doc("data/users/local/scripts");
     M.items=M.base.collection("items");
     M.data=M.base.collection("data");
+    /* a script's earlier code, and the ask draft of its 改一改 page */
+    M.versions=M.base.collection("versions");
+    M.asks=M.base.collection("asks");
     M.ideaDoc=S.db.doc("data/users/local/script-idea");
   }
   return M.base;
@@ -140,14 +149,129 @@ function saveScript(s){
 }
 function deleteScript(id){
   if(!refs()) return Promise.resolve();
-  /* data first: if that fails, the script (and its way back) stays */
+  /* the order is the way back: data, versions, ask draft, script last, so a failure leaves the script */
   return M.data.doc(id).delete().then(function(){
+    return deleteVersions(id);
+  }).then(function(){
+    return clearAsk(id);
+  }).then(function(){
     return M.items.doc(id).delete();
   }).then(function(){
     M.list=M.list.filter(function(x){ return x.id!==id; });
     delete M.sizes[id]; delete M.cache[id]; delete M.schema[id];
     delete S.kv[PREFIX+id];
   });
+}
+
+/* ---------- versions and ask drafts: what a revision must never lose ----------
+   A revision first writes the old code as a version, and only a version that landed lets the new code in.
+   Doc per script: {v:1, list:[{at, name, body, why}]}, newest first, 10 at most, 1,000,000 body characters
+   in all; the newest one is always kept, so an oversized script still has one way back. */
+function readVersions(id){
+  return M.versions.doc(id).get().then(function(sn){
+    var d=sn.exists ? own(sn.data()) : null;
+    if(!d) return null;
+    if(d.v>1) throw {code:"newer"};
+    return d;
+  });
+}
+function trimVersions(list, keep){
+  var all=[], out=[], total=0, count=0, i, e, body;
+  /* a damaged doc (list not an array) is nothing to show, never a crash */
+  if(!Array.isArray(list) || !list.length) return out;
+  keep=keep||[];
+  for(i=0;i<list.length;i++){
+    e=list[i]||{};
+    body=String(e.body==null?"":e.body);
+    /* the newest, and the bodies in keep (the code on screen and the code it replaces), are never dropped */
+    all.push({e:{at:+e.at||0, name:String(e.name==null?"":e.name), body:body, why:String(e.why==null?"":e.why)},
+      must:i===0 || keep.indexOf(body)>=0, take:false});
+  }
+  for(i=0;i<all.length;i++) if(all[i].must){ all[i].take=true; total+=all[i].e.body.length; count++; }
+  /* the rest, newest first, while they fit: 10 versions and 1,000,000 characters in all */
+  for(i=0;i<all.length;i++){
+    if(all[i].take) continue;
+    if(count>=VERSIONS_MAX || total+all[i].e.body.length>VERSIONS_CHARS) continue;
+    all[i].take=true; total+=all[i].e.body.length; count++;
+  }
+  for(i=0;i<all.length;i++) if(all[i].take) out.push(all[i].e);
+  return out;
+}
+function loadVersions(id){
+  if(!id || !refs()) return Promise.resolve([]);
+  return readVersions(id).then(function(d){
+    return d && d.list ? trimVersions(d.list) : [];
+  },function(e){
+    if(e && e.code==="newer") throw e;
+    return [];
+  });
+}
+/* Each version is one state of the code, labelled with what made it: "orig" (the code before the first change),
+   "edit" (typed by hand), "paste", or the ask of a 改一改. The code in use is the version whose body is the script's
+   body, so switching back and forth adds nothing: a body already in the list is never added again (owner,
+   2026-11-21). Before a replacement both the code going away and the code coming in are in the list.
+   Resolves true when both are safe (added, or already there); only then may the script be written. */
+function keepVersions(id, oldBody, oldName, newBody, newName, why){
+  if(!id) return Promise.resolve(false);
+  oldBody=String(oldBody==null?"":oldBody); newBody=String(newBody==null?"":newBody);
+  if(!refs()) return Promise.resolve(false);
+  return readVersions(id).then(function(d){
+    var list=(d && Array.isArray(d.list)) ? trimVersions(d.list) : [], now=Date.now(), changed=false;
+    function has(b){ for(var i=0;i<list.length;i++) if(list[i].body===b) return true; return false; }
+    function entry(at, name, body, w){ return {at:at, name:String(name==null?"":name).slice(0,40), body:body, why:String(w==null?"":w).slice(0,60)}; }
+    if(oldBody.trim() && !has(oldBody)){ list.unshift(entry(now-1, oldName, oldBody, list.length ? "edit" : "orig")); changed=true; }
+    if(newBody.trim() && !has(newBody)){ list.unshift(entry(now, newName, newBody, why)); changed=true; }
+    if(!changed) return true;
+    return put(M.versions.doc(id),{v:1, list:trimVersions(list,[oldBody,newBody])}).then(function(ok){ return !!ok; });
+  });
+}
+function deleteVersions(id){
+  if(!id || !refs()) return Promise.resolve(false);
+  return M.versions.doc(id).delete().then(function(){ return true; });
+}
+/* The ask of a script's 改一改 page, kept like the idea draft: typed text survives HOME and a reload. */
+function loadAsk(id){
+  if(!id || !refs()) return Promise.resolve("");
+  return M.asks.doc(id).get().then(function(sn){
+    var d=sn.exists ? own(sn.data()) : null;
+    if(!d || d.v>1 || typeof d.text!=="string") return "";
+    return d.text;
+  },function(){ return ""; });
+}
+function saveAskNow(id, text){
+  clearTimeout(M.askTimer); M.askTimer=0;
+  if(!id || !refs()) return Promise.resolve(false);
+  text=String(text==null?"":text);
+  if(!text) return clearAsk(id);
+  return put(M.asks.doc(id),{v:1, text:text, updated:Date.now()});
+}
+function saveAskSoon(id, text){
+  clearTimeout(M.askTimer);
+  M.askTimer=setTimeout(function(){ saveAskNow(id, text); },600);
+}
+function clearAsk(id){
+  clearTimeout(M.askTimer); M.askTimer=0;
+  if(!id || !refs()) return Promise.resolve(false);
+  return M.asks.doc(id).delete().then(function(){ return true; });
+}
+/* The only way code is replaced: the old body becomes a version first. If that version does not land
+   (a refused write, an unreadable or newer versions doc), the script is not touched at all. newName is
+   the name of the revised file; it is applied only after the version has landed, in the same write. */
+function replaceBody(s, code, why, newName, before){
+  if(!s || !s.id) return Promise.resolve(false);
+  code=String(code==null?"":code);
+  /* before: the body and name a revise started from, so the version never comes from in-memory state */
+  var oldBody=String(before ? before.body : s.body==null ? "" : s.body), oldName=(before ? before.name : s.name)||"";
+  return keepVersions(s.id, oldBody, oldName, code, newName||oldName, why).then(function(ok){
+    if(!ok) return false;
+    s.body=code;
+    if(newName) s.name=String(newName).slice(0,40);
+    return saveScript(s).then(function(saved){
+      if(!saved){ s.body=oldBody; s.name=oldName; return false; }
+      if(M.current===s){ var c=$("script-code"); if(c) c.value=code; M.dirty=false; }
+      return true;
+    },function(){ s.body=oldBody; s.name=oldName; return false; });
+  },function(){ return false; });
 }
 
 /* First open: put a working Pomodoro in the library. The flag lives in the scripts settings doc,
@@ -281,6 +405,9 @@ function newScript(focus){
   return s;
 }
 function openScript(id){
+  /* a script being revised is opened as the job's own object, so the save guard (revising) still holds and
+     the editor shows the answer arriving, never a second copy that could be edited and then overwritten */
+  if(G.job && G.mode==="revise" && G.s && G.s.id===id){ M.current=G.s; M.dirty=false; show("script-edit"); return; }
   loadScript(id).then(function(s){
     if(!s){ toast(tr("common.readfail",{msg:tr("common.unknown")})); return; }
     M.current=s; M.dirty=false;
@@ -290,8 +417,9 @@ function openScript(id){
 
 function renderEditor(){
   if(!M.current){ show("scripts"); return; }
+  /* during a revise the textarea shows the incoming answer, never the stored code */
   $("script-name").value=M.current.name||"";
-  $("script-code").value=M.current.body||"";
+  $("script-code").value=revising(M.current) ? (G.text||"") : (M.current.body||"");
   $("script-menu-panel").hidden=true;
   $("script-ask").hidden=true;
   renderGen();
@@ -304,12 +432,17 @@ function renderEditor(){
 
 function flushSource(){
   if(!M.current || !M.dirty) return Promise.resolve(true);
+  /* the ◂ back button and leaving the editor go through here: a revise must not move the stored code */
+  if(revising(M.current)) return Promise.resolve(true);
   clearTimeout(M.saveTimer);
   return saveCurrent(true);
 }
 function saveCurrent(quiet){
   if(!M.current) return Promise.resolve(false);
   var s=M.current;
+  /* While a revise of this script streams, the textarea holds the incoming answer: skip every write,
+     so the timer, ◂ back, leaving the editor and 保存并运行 all leave the document alone. */
+  if(revising(s)) return Promise.resolve(true);
   var name=$("script-name").value;
   if(name!=null) s.name=LP.noEmoji(name).slice(0,40).trim();
   s.body=$("script-code").value;
@@ -326,6 +459,7 @@ function saveCurrent(quiet){
   });
 }
 function scheduleSave(){
+  if(revising(M.current)) return;
   M.dirty=true;
   clearTimeout(M.saveTimer);
   M.saveTimer=setTimeout(function(){ if(M.current) saveCurrent(true); },700);
@@ -422,6 +556,32 @@ function deriveName(code,fallback){
   if(m) return LP.noEmoji(m[1]).trim().slice(0,40);
   return fallback;
 }
+/* ---------- 改一改: the prompt and the checks (pure) ----------
+   The rules are the 生成 prompt's own words, cut before its 「我想做的是」 line, so 生成 and 改一改
+   never drift apart and scripts.prompt stays exactly as it is. The code goes in by concatenation: tr()
+   fills every {word} it finds, and a program is full of braces. */
+var IDEA_MARK="\u0001IDEA\u0001", CODE_MARK="\u0001CODE\u0001";
+function revisePrompt(code, ask){
+  var full=tr("scripts.prompt",{idea:IDEA_MARK});
+  var at=full.indexOf(IDEA_MARK);
+  var rules=at<0 ? full : full.slice(0,full.lastIndexOf("\n",at)+1);
+  rules=rules.replace(/\s+$/,"");
+  var text=tr("scripts.revise",{ask:ask==null?"":String(ask), code:CODE_MARK});
+  text=text.replace(CODE_MARK,function(){ return code==null?"":String(code); });
+  return rules+"\n\n"+text;
+}
+/* cleanCode (above) first; then the four ways an answer is not the whole revised file */
+function checkRevision(oldBody, raw){
+  var old=String(oldBody==null?"":oldBody).trim();
+  var code=cleanCode(raw);
+  if(!code) return {ok:false, why:"empty"};
+  if(/<\/html\s*>/i.test(old) && !/<\/html\s*>/i.test(code)) return {ok:false, why:"cut"};
+  if(code.length<old.length*0.4) return {ok:false, why:"partial"};
+  if(/其余(部分)?(代码)?(不变|同上|省略)|此处省略|rest (of the code )?(is )?unchanged|\.\.\.\s*existing code|\/\/\s*\.\.\.\s*$/im.test(code)) return {ok:false, why:"partial"};
+  if(code===old) return {ok:false, why:"same"};
+  return {ok:true, code:code};
+}
+
 function pasteNew(){
   readClipboard().then(function(text){
     var code=cleanCode(text);
@@ -443,17 +603,24 @@ function pasteNew(){
     toast(tr("scripts.pastefail"));
   });
 }
+/* paste into the editor: an empty editor takes the code as it always did (the old body is empty, nothing to
+   keep); over existing code the old body becomes a version first, through replaceBody */
 function pasteEditor(){
   if(!M.current) newScript(true);
+  var s=M.current;
   readClipboard().then(function(text){
     var code=cleanCode(text);
     if(!code) throw new Error("empty");
+    /* while this script is being revised the editor may be blank (the model is still thinking): never paste into it */
+    if(revising(s)){ toast(tr("scripts.gen.one")); return; }
+    if(String($("script-code").value||"").trim()){ editPaste(s, code); return; }
     $("script-code").value=code;
-    M.current.body=code;
+    s.body=code;
     if(!$("script-name").value || /^程序 |^Script /.test($("script-name").value)){
-      M.current.name=deriveName(code,M.current.name);
-      $("script-name").value=M.current.name;
+      s.name=deriveName(code,s.name);
+      $("script-name").value=s.name;
     }
+    renderGen();
     scheduleSave();
     toast(tr("scripts.pasted"));
   },function(){
@@ -464,6 +631,24 @@ function pasteEditor(){
     toast(tr("scripts.pastefail"));
   });
 }
+function editPaste(s, code){
+  if(G.job){ toast(tr("scripts.gen.one")); return; }
+  saveCurrent(true).then(function(ok){
+    if(!ok) return;
+    var name=$("script-name").value;
+    var newName=(!name || /^程序 |^Script /.test(name)) ? deriveName(code,s.name) : "";
+    return replaceBody(s, code, "paste", newName).then(function(done){
+      if(!done){ toast(tr("scripts.revise.nover")); sfx("err"); return; }
+      if(M.current===s){ $("script-code").value=code; $("script-name").value=s.name; M.dirty=false; }
+      toast(tr("scripts.pasted")); sfx("ok");
+    });
+  });
+}
+/* the editor row's left key: 停止 while the AI writes, 改一改 with code, 粘贴代码 when the editor is empty */
+function editorAction(){
+  if(!M.current || revising(M.current)) return;
+  if(hasCode()) show("script-revise"); else pasteEditor();
+}
 
 /* ---------- generate: the idea sent down the AI line, the code streamed into a new script (decisions.md section 34) ----------
    One at a time. The answer goes into the editor as it arrives, read-only, with 粘贴 turned into 停止; the script is saved
@@ -473,14 +658,18 @@ function pasteEditor(){
    that really arrives, and how long it has been quiet. The clock shows the screen is alive; the mark and the quiet
    count show whether the line is (ai.js hangs up after a minute of nothing). Leaving the page drops the line on iPhone,
    so the hint asks the user to stay, and a failure after leaving says so. */
-var G={job:null, s:null, t0:0, last:0, sig:null, mark:false, tick:0, left:false};
-function aiOn(){ return !!(LP.ai && LP.ai.on()); }
+var G={job:null, s:null, t0:0, last:0, sig:null, mark:false, tick:0, left:false, mode:"gen", text:"", old:null, ask:""};
+function aiOn(){ return !!(LP.ai && LP.ai.on("scripts")); }
 function generating(){ return !!G.job && !!M.current && M.current===G.s; }
+/* A revise of s is streaming: the editor shows the answer, and nothing may read it into s or write it out. */
+function revising(s){ return !!(G.job && G.mode==="revise" && s && G.s===s); }
+function hasCode(){ var c=$("script-code"); return !!(c && String(c.value||"").trim()); }
 function renderGen(){
   var on=generating();
   $("script-code").readOnly=on;
   $("script-run").disabled=on;
-  $("script-paste").textContent=tr(on ? "scripts.gen.stop" : "scripts.paste");
+  /* the row's left key: stop while the AI writes, 改一改 with code in the editor, 粘贴代码 when it is empty */
+  $("script-paste").textContent=tr(on ? "scripts.gen.stop" : hasCode() ? "scripts.revise.button" : "scripts.paste");
   $("script-code").placeholder=tr(on ? "scripts.gen.ph" : "scripts.code");
 }
 function clock(ms){ var t=Math.floor(Math.max(0,ms)/1000); return Math.floor(t/60)+":"+LP.pad2(t%60); }
@@ -499,7 +688,7 @@ function generate(){
   if(M.ideaTouched || M.idea) saveIdeaNow();
   var s=newScript(false);
   G.s=s; G.t0=G.last=Date.now(); G.sig=null; G.left=false;
-  G.job=LP.ai.ask({messages:[{role:"user", content:tr("scripts.prompt",{idea:promptIdea()})}],
+  G.job=LP.ai.ask({use:"scripts", messages:[{role:"user", content:tr("scripts.prompt",{idea:promptIdea()})}],
     onSignal:function(q){ G.sig=q; G.last=Date.now(); G.mark=!G.mark; genHint(); },
     onText:function(piece,all){
       s.body=all;
@@ -526,7 +715,7 @@ function generate(){
       sfx("ok");
     });
   }).catch(function(e){
-    var code=e && e.code, why=tr("scripts.gen.fail",{why:G.left && code!=="stopped" ? tr("scripts.gen.left") : LP.ai.err(e)}),
+    var code=e && e.code, why=tr("scripts.gen.fail",{why:G.left && code!=="stopped" ? tr("scripts.gen.left") : LP.ai.err(e,"scripts")}),
       here=M.current===s && !$("v-script-edit").hidden;
     end();
     if(here) setHint(why); else toast(why);
@@ -536,9 +725,241 @@ function generate(){
 /* iOS suspends a hidden page, and the request with it */
 document.addEventListener("visibilitychange",function(){ if(document.hidden && G.job) G.left=true; });
 
+/* ---------- 改一改: the ask page and the revise job (decisions.md section 60) ----------
+   Same machinery as 生成 (one job, the clock, keepAwake, stop), but the answer is only a candidate:
+   it never touches s.body, and it replaces the script only after checkRevision passes and the old body
+   is safe as a version. The editor shows the answer as it arrives; the ask draft outlives the page. */
+function askText(){ var ta=$("revise-ask"); return ta ? ta.value : ""; }
+function setReviseStatus(s){ var el=$("revise-status"); if(el) el.textContent=s||""; }
+function renderReviseButtons(){
+  var go=$("revise-go"), pa=$("revise-paste"), note=$("revise-note");
+  var on=aiOn(), over=!!M.current && String(M.current.body||"").length>REVISE_MAX;
+  if(go){ go.textContent=tr(on ? "scripts.revise.run" : "scripts.copy"); go.disabled=over; }
+  if(pa){ pa.hidden=on; pa.disabled=over; }
+  if(note) note.textContent=over ? tr("scripts.revise.toolong",{size:sizeBytes(String(M.current.body||"").length)})
+    : tr(on ? "scripts.revise.note" : "scripts.revise.note.copy");
+}
+function renderRevise(){
+  var s=M.current;
+  if(!s){ show("scripts"); return; }
+  M.askFor=s.id; M.askTouched=false;
+  var ta=$("revise-ask"); if(ta) ta.value="";
+  var box=$("revise-prompt-box"); if(box) box.hidden=true;
+  setReviseStatus("");
+  renderReviseButtons();
+  loadAsk(s.id).then(function(text){
+    if(M.askFor!==s.id || M.askTouched) return;
+    if(ta) ta.value=text;
+    renderReviseButtons();
+  });
+}
+function askEmpty(){
+  setReviseStatus(tr("scripts.revise.ask"));
+  var ta=$("revise-ask"); if(ta) ta.focus();
+}
+function reviseCopy(){
+  var s=M.current; if(!s) return;
+  if(G.job){ toast(tr("scripts.gen.one")); return; }
+  var ask=askText().trim();
+  if(!ask){ askEmpty(); return; }
+  var code=String(s.body||"");
+  if(code.length>REVISE_MAX){ setReviseStatus(tr("scripts.revise.toolong",{size:sizeBytes(code.length)})); return; }
+  saveAskNow(s.id, ask);
+  var text=revisePrompt(code, ask);
+  copyText(text).then(function(){
+    var box=$("revise-prompt-box"); if(box) box.hidden=true;
+    setReviseStatus(tr("scripts.revise.copied")); sfx("ok");
+    if($("v-script-revise").hidden) toast(tr("scripts.revise.copied"));
+  },function(){
+    var box=$("revise-prompt-box");
+    if(box){ box.value=text; box.hidden=false; box.focus(); box.select(); }
+    setReviseStatus(tr("scripts.copyfail")); sfx("err");
+  });
+}
+function reviseJob(){
+  if(G.job || M.reviseBusy){ toast(tr("scripts.gen.one")); return; }
+  var s=M.current; if(!s) return;
+  var ask=askText().trim();
+  if(!ask){ askEmpty(); return; }
+  saveAskNow(s.id, ask);
+  /* the latest typing becomes the old version, so save it before anything else; the flag keeps a
+     second tap from starting a second job in the gap before G.job exists */
+  M.reviseBusy=true;
+  saveCurrent(true).then(function(ok){
+    M.reviseBusy=false;
+    if(!ok) return;
+    if(G.job){ toast(tr("scripts.gen.one")); return; }
+    var old={body:String(s.body||""), name:s.name||""};
+    if(old.body.length>REVISE_MAX){ setReviseStatus(tr("scripts.revise.toolong",{size:sizeBytes(old.body.length)})); return; }
+    startRevise(s, old, ask);
+  },function(){ M.reviseBusy=false; });
+}
+/* the name of the revised file: a default name or one derived from the old <title> may follow the new <title> */
+function revisedName(old, code){
+  var derived=deriveName(code,"");
+  if(!old.name || /^(程序|Script) \d+$/.test(old.name) || old.name===deriveName(old.body,"")) return derived||old.name;
+  return old.name;
+}
+function startRevise(s, old, ask){
+  G.mode="revise"; G.s=s; G.text=""; G.old=old; G.ask=ask;
+  G.t0=G.last=Date.now(); G.sig=null; G.left=false;
+  G.job=LP.ai.ask({use:"scripts", messages:[{role:"user", content:revisePrompt(old.body, ask)}],
+    onSignal:function(q){ G.sig=q; G.last=Date.now(); G.mark=!G.mark; genHint(); },
+    onText:function(piece,all){
+      /* the answer is a candidate, never s.body; it lives in G.text so a re-entered editor shows it */
+      G.text=all;
+      if(M.current!==s || $("v-script-edit").hidden) return;
+      var c=$("script-code"); c.value=all; c.scrollTop=c.scrollHeight;
+    }});
+  M.current=s;
+  show("script-edit");
+  renderGen(); genHint(); sfx("tap");
+  G.tick=setInterval(genHint,1000);
+  LP.keepAwake(true);
+  function here(){ return M.current===s && !$("v-script-edit").hidden; }
+  /* every way out (ok, refused, stop, left) puts the stored code and name back on screen */
+  function end(){
+    clearInterval(G.tick);
+    G.job=null; G.s=null; G.mode="gen";
+    if(here()){ $("script-code").value=s.body||""; $("script-name").value=s.name||""; renderGen(); }
+    if(!$("v-script-edit").hidden) LP.keepAwake(false);
+  }
+  G.job.then(function(all){
+    var res=checkRevision(old.body, all);
+    if(!res.ok) throw {code:"revise", why:res.why};
+    return replaceBody(s, res.code, ask.slice(0,60), revisedName(old, res.code), old).then(function(done){
+      if(done){
+        clearAsk(s.id); M.askTouched=false;
+        var ta=$("revise-ask"); if(ta) ta.value="";
+      }
+      var msg=tr(done ? "scripts.revise.done" : "scripts.revise.nover",{t:clock(Date.now()-G.t0)});
+      end();
+      if(here()) setHint(msg); else toast(msg);
+      sfx(done ? "ok" : "err");
+    });
+  }).catch(function(e){
+    var code=e && e.code, why;
+    if(code==="revise") why=tr("scripts.revise.fail",{why:tr("scripts.revise.why."+e.why)});
+    else why=tr("scripts.gen.fail",{why:G.left && code!=="stopped" ? tr("scripts.gen.left") : LP.ai.err(e,"scripts")});
+    end();
+    if(here()) setHint(why); else toast(why);
+    sfx("err");
+  });
+}
+/* 粘贴新版本: the whole file came back from a chat window, not down the line */
+function revisePaste(){
+  var s=M.current; if(!s) return;
+  if(G.job || M.reviseBusy){ toast(tr("scripts.gen.one")); return; }
+  M.reviseBusy=true;
+  function finish(){ M.reviseBusy=false; }
+  readClipboard().then(function(text){
+    var code=cleanCode(text);
+    if(!code) throw new Error("empty");
+    var res=checkRevision(String(s.body||""), code);
+    if(!res.ok){ setReviseStatus(tr("scripts.revise.fail",{why:tr("scripts.revise.why."+res.why)})); sfx("err"); finish(); return; }
+    var ask=askText().trim();
+    return saveCurrent(true).then(function(ok){
+      if(!ok){ finish(); return; }
+      return replaceBody(s, res.code, (ask||"paste").slice(0,60)).then(function(done){
+        finish();
+        if(!done){ setReviseStatus(tr("scripts.revise.nover")); sfx("err"); return; }
+        clearAsk(s.id); M.askTouched=false;
+        var ta=$("revise-ask"); if(ta) ta.value="";
+        show("script-edit");
+        toast(tr("scripts.revise.pasted")); sfx("ok");
+      });
+    });
+  },function(){
+    finish(); setReviseStatus(tr("scripts.pastefail")); sfx("err");
+  }).catch(function(){
+    finish(); setReviseStatus(tr("scripts.pastefail")); sfx("err");
+  });
+}
+
+/* ---------- 以前的版本: each earlier body, read-only, with 换回这个 ---------- */
+function whyLabel(why){
+  if(why==="orig") return tr("scripts.versions.orig");
+  if(why==="edit") return tr("scripts.versions.edit");
+  if(why==="paste") return tr("scripts.versions.paste");
+  if(why==="restore") return tr("scripts.versions.restore");
+  return tr("scripts.versions.revise",{ask:why||""});
+}
+function showVersionList(){
+  M.verPick=null;
+  $("versions-list-wrap").hidden=false;
+  $("versions-code-wrap").hidden=true;
+  $("versions-actions").hidden=true;
+}
+function renderVersions(keepPick){
+  var seq=++M.verSeq, s=M.current, keep=keepPick ? M.verPick : null;
+  var ul=$("versions-list"), empty=$("versions-empty");
+  if(!ul || !empty) return;
+  ul.textContent="";
+  showVersionList();
+  if(!s || !refs()){ empty.hidden=false; empty.textContent=tr("scripts.nodb"); return; }
+  loadVersions(s.id).then(function(list){
+    if(seq!==M.verSeq) return;
+    list.forEach(function(v){
+      var li=document.createElement("li"), now=v.body===String(s.body||"");
+      /* the code in use is highlighted; picking another one moves the highlight, it adds no row */
+      if(now){ li.className="on"; li.setAttribute("aria-current","true"); }
+      var b=document.createElement("button"); b.type="button";
+      var t=document.createElement("span"); t.className="t"; t.textContent=LP.fmt(v.at);
+      var d=document.createElement("span"); d.className="d"; d.textContent=(now ? tr("scripts.versions.now")+" · " : "")+whyLabel(v.why)+" · "+sizeBytes(v.body.length);
+      b.appendChild(t); b.appendChild(d);
+      b.onclick=function(){ pickVersion(v); };
+      li.appendChild(b); ul.appendChild(li);
+    });
+    empty.hidden=list.length>0;
+    if(!list.length) empty.textContent=tr("scripts.versions.empty");
+    /* a language switch redraws the list only; the version being read stays on screen */
+    if(keep) for(var i=0;i<list.length;i++) if(list[i].at===keep.at && list[i].body===keep.body){ pickVersion(list[i]); break; }
+  },function(e){
+    if(seq!==M.verSeq) return;
+    empty.hidden=false;
+    empty.textContent=tr(e && e.code==="newer" ? "scripts.newer" : "scripts.versions.fail");
+  });
+}
+function pickVersion(v){
+  if(!v) return;
+  M.verPick=v;
+  var box=$("versions-code");
+  if(box){ box.value=v.body||""; box.scrollTop=0; }
+  $("versions-list-wrap").hidden=true;
+  $("versions-code-wrap").hidden=false;
+  $("versions-actions").hidden=false;
+  /* the code in use has nothing to switch to */
+  $("versions-use").hidden=!!M.current && v.body===String(M.current.body||"");
+  sfx("tap");
+}
+function versionsBack(){
+  if(M.verPick){ showVersionList(); return; }
+  show("script-edit");
+}
+function restoreVersion(){
+  var s=M.current, v=M.verPick;
+  if(!s || !v || !v.body) return;
+  if(G.job){ toast(tr("scripts.gen.one")); return; }
+  saveCurrent(true).then(function(ok){
+    if(!ok) return;
+    return replaceBody(s, v.body, "", v.name||s.name||"").then(function(done){
+      if(!done){ toast(tr("scripts.revise.nover")); sfx("err"); return; }
+      show("script-edit");
+      toast(tr("scripts.versions.restored")); sfx("ok");
+    });
+  });
+}
+function openVersions(){
+  if(!M.current) return;
+  if(G.job){ toast(tr("scripts.gen.one")); return; }
+  M.verPick=null;
+  show("script-versions");
+}
+
 /* ---------- run ---------- */
 function runCurrent(){
   if(!M.current) return;
+  if(revising(M.current)) return;   /* the textarea holds the answer, not the code to run */
   saveCurrent(true).then(function(ok){
     if(!ok) return;
     return loadData(M.current.id).then(function(){
@@ -649,6 +1070,7 @@ function importFile(f){
 }
 function exportCurrent(){
   if(!M.current) return;
+  if(revising(M.current)){ toast(tr("scripts.gen.one")); return; }
   var body=$("script-code").value;
   if(!body){ toast(tr("scripts.emptycode")); return; }
   if(!LP.S.downloads){ toast(tr("scripts.exportfail")); return; }
@@ -703,7 +1125,9 @@ function init(){
   $("script-copy").onclick=copyPrompt;
   $("script-menu-close").onclick=function(){ $("script-menu-panel").hidden=true; };
   $("script-export").onclick=exportCurrent;
-  $("script-paste").onclick=function(){ if(generating()) G.job.stop(); else pasteEditor(); };
+  $("script-menu-paste").onclick=function(){ $("script-menu-panel").hidden=true; pasteEditor(); };
+  $("script-versions-open").onclick=function(){ $("script-menu-panel").hidden=true; openVersions(); };
+  $("script-paste").onclick=function(){ if(generating()) G.job.stop(); else editorAction(); };
   $("script-run").onclick=runCurrent;
   $("script-clear").onclick=function(){
     if(!M.current) return;
@@ -719,6 +1143,7 @@ function init(){
   $("script-delete").onclick=function(){
     if(!M.current) return;
     closeAsk();
+    if(revising(M.current)){ toast(tr("scripts.gen.one")); return; }
     var id=M.current.id, n=M.sizes[id]||0;
     ask(tr("scripts.confirm.delete",{name:M.current.name,size:sizeBytes(n)}),function(){
       deleteScript(id).then(function(){
@@ -730,8 +1155,29 @@ function init(){
   $("script-ask-yes").onclick=function(){ var f=M.askYes; closeAsk(); if(f) f(); };
   $("script-ask-no").onclick=closeAsk;
 
-  $("script-name").addEventListener("input",function(){ if(M.current){ M.current.name=LP.noEmoji(this.value).slice(0,40); scheduleSave(); } });
-  $("script-code").addEventListener("input",function(){ if(M.current){ M.current.body=this.value; scheduleSave(); } });
+  $("script-name").addEventListener("input",function(){
+    if(!M.current || revising(M.current)) return;
+    M.current.name=LP.noEmoji(this.value).slice(0,40); scheduleSave();
+  });
+  $("script-code").addEventListener("input",function(){
+    if(!M.current || revising(M.current)) return;
+    M.current.body=this.value; scheduleSave(); renderGen();
+  });
+
+  /* 改一改 page */
+  $("revise-back").onclick=function(){ show("script-edit"); };
+  $("revise-go").onclick=function(){ if(aiOn()) reviseJob(); else reviseCopy(); };
+  $("revise-paste").onclick=revisePaste;
+  $("revise-ask").addEventListener("input",function(){
+    M.askTouched=true;
+    if(M.current) saveAskSoon(M.current.id,this.value);
+  });
+  $("revise-ask").addEventListener("blur",function(){ if(M.current) saveAskNow(M.current.id,this.value); });
+
+  /* 以前的版本 page */
+  $("versions-back").onclick=versionsBack;
+  $("versions-return").onclick=versionsBack;
+  $("versions-use").onclick=restoreVersion;
 }
 
 /* ---------- built-in registration ---------- */
@@ -756,6 +1202,26 @@ LP.builtin({id:"script-data", view:"script-data", keepPad:false,
   enter:function(){ closeDataAsk(); renderData(); },
   lang:function(){ if(!$("v-script-data").hidden) renderData(); }
 });
+LP.builtin({id:"script-revise", view:"script-revise", keepPad:false,
+  enter:function(){ renderRevise(); },
+  /* the ask draft outlives the page; an empty ask removes it */
+  leave:function(){ if(M.askFor) saveAskNow(M.askFor, askText()); },
+  lang:function(){ if(!$("v-script-revise").hidden) renderReviseButtons(); }
+});
+LP.builtin({id:"script-versions", view:"script-versions", keepPad:false,
+  enter:function(){ renderVersions(false); },
+  /* a language switch redraws the list in place; the version being read stays on screen */
+  lang:function(){ if(!$("v-script-versions").hidden) renderVersions(true); }
+});
+/* pure helpers and the store's write path, for tests/scripts-revise.test.mjs; after every declaration,
+   so state and stream point at the real objects */
+LP.scripts._test={
+  revisePrompt:revisePrompt, checkRevision:checkRevision, trimVersions:trimVersions,
+  keepVersions:keepVersions, loadVersions:loadVersions, deleteVersions:deleteVersions,
+  loadAsk:loadAsk, saveAskNow:saveAskNow, clearAsk:clearAsk,
+  replaceBody:replaceBody, deleteScript:deleteScript,
+  revising:revising, saveCurrent:saveCurrent, state:M, stream:G
+};
 
 init();
 })();
