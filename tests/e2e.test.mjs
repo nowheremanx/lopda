@@ -9643,6 +9643,8 @@ test("scripts: a script that reads the buttons gets the chin pad", { skip, timeo
 
 test("AI line: a key in Settings turns 复制 into 生成, the code streams into a new script, and the key stays out of the backup", { skip, timeout: 45000 }, async (t) => {
   const { p, errors } = await page(t, { locale: "zh-CN" });
+  /* Math.random 0 draws the line test's first letter, A, which the route below answers */
+  await p.addInitScript(() => { Math.random = () => 0; });
   const asked = [];
   const CORS = { "access-control-allow-origin": "*", "access-control-allow-headers": "authorization, content-type", "access-control-allow-methods": "POST" };
   await p.route("https://openrouter.ai/**", async (r) => {
@@ -9650,7 +9652,10 @@ test("AI line: a key in Settings turns 复制 into 生成, the code streams into
     const body = JSON.parse(r.request().postData());
     asked.push({ auth: r.request().headers().authorization, body });
     const ev = (o) => "data: " + JSON.stringify(o) + "\n\n";
-    const text = body.max_tokens ? ["OK"] : ["Sure:\n```html\n<!doctype html><title>番茄", "钟</title><body>tick</body></html>\n```"];
+    const last = body.messages && body.messages.length ? body.messages[body.messages.length - 1].content : "";
+    const image = Array.isArray(last) && last.some((c) => c && c.type === "image_url");
+    /* the line test's two steps answer right; anything else is the script's code */
+    const text = image ? ["A"] : JSON.stringify(last).includes("1+1") ? ["2"] : ["Sure:\n```html\n<!doctype html><title>番茄", "钟</title><body>tick</body></html>\n```"];
     await r.fulfill({ status: 200, headers: { ...CORS, "content-type": "text/event-stream" },
       body: ": OPENROUTER PROCESSING\n\n" + text.map((c) => ev({ model: "test/model", choices: [{ delta: { content: c } }] })).join("") + "data: [DONE]\n\n" });
   });
@@ -9678,7 +9683,7 @@ test("AI line: a key in Settings turns 复制 into 生成, the code streams into
   await p.fill("#set-ai-key", "sk-or-secret-1234");
   await p.click("#set-ai-save");
   await p.waitForFunction(() => /线路正常/.test(document.getElementById("set-ai-line-state").textContent));
-  assert.match(await p.locator("#set-ai-line-state").innerText(), /「OK」（test\/model）/);
+  assert.match(await p.locator("#set-ai-line-state").innerText(), /算对了（test\/model）/);
   assert.equal(asked[0].auth, "Bearer sk-or-secret-1234");
   assert.ok(!(await p.locator("#v-set-ai").innerText()).includes("secret"));
   /* the saved key shows as dots: a stand-in in the password field, never the key */
@@ -9696,8 +9701,8 @@ test("AI line: a key in Settings turns 复制 into 生成, the code streams into
   await p.fill("#set-ai-model", ""); await p.click("#set-ai-save");
   await p.click("#set-ai-test");
   await p.waitForFunction(() => /线路正常/.test(document.getElementById("set-ai-line-state").textContent));
-  assert.match(await p.locator("#set-ai-line-state").innerText(), /「OK」（test\/model）/);
-  assert.equal(asked[1].auth, "Bearer sk-or-secret-1234");
+  assert.match(await p.locator("#set-ai-line-state").innerText(), /算对了（test\/model）/);
+  assert.equal(asked[2].auth, "Bearer sk-or-secret-1234");
 
   await p.click("#set-ai-line-back");
   await p.waitForFunction(() => !document.getElementById("set-ai-main").hidden);
@@ -9731,7 +9736,7 @@ test("AI line: a key in Settings turns 复制 into 生成, the code streams into
   assert.equal(await p.inputValue("#script-name"), "番茄钟");
   assert.equal(await p.locator("#script-paste").innerText(), "改一改");
   assert.ok(await p.locator("#script-run").isEnabled());
-  const sent = asked[2].body;
+  const sent = asked[4].body;
   assert.equal(sent.stream, true);
   assert.equal(sent.model, "openrouter/auto");
   assert.match(sent.messages[0].content, /我想做的是：一个番茄钟/);
@@ -9747,15 +9752,20 @@ const TWO_LINES = { v: 2, next: 3, def: "l1", use: { score: { line: "l2", model:
     { id: "l2", provider: "openrouter", n: 1, key: "sk-or-2222", model: "", on: true, added: 2 }],
   key: "sk-or-2222", model: "", scoreModel: "" };
 const AI_CORS = { "access-control-allow-origin": "*", "access-control-allow-headers": "authorization, content-type", "access-control-allow-methods": "POST" };
-/* every provider's address answers "OK" and records who was asked with which key */
-async function fakeProviders(p) {
-  const asked = [];
+/* every provider's address answers by what it was asked: "2" to 1+1, "A" to a picture (opts.letter when the reader
+   should name the wrong one), "OK" otherwise; records who was asked with which key and what */
+async function fakeProviders(p, opts) {
+  const asked = [], wrong = opts && opts.letter;
   for (const host of ["https://openrouter.ai/api/**", "https://api.deepseek.com/**", "https://api.moonshot.cn/**", "https://dashscope.aliyuncs.com/**", "https://api.siliconflow.cn/**"]) {
     await p.route(host, async (r) => {
       if (r.request().method() === "OPTIONS") return r.fulfill({ status: 204, headers: AI_CORS });
-      asked.push({ url: r.request().url(), auth: r.request().headers().authorization, body: JSON.parse(r.request().postData() || "{}") });
+      const body = JSON.parse(r.request().postData() || "{}");
+      asked.push({ url: r.request().url(), auth: r.request().headers().authorization, body });
+      const last = body.messages && body.messages.length ? body.messages[body.messages.length - 1].content : "";
+      const image = Array.isArray(last) && last.some((c) => c && c.type === "image_url");
+      const answer = image ? (wrong || "A") : JSON.stringify(last).includes("1+1") ? "2" : "OK";
       await r.fulfill({ status: 200, headers: { ...AI_CORS, "content-type": "text/event-stream" },
-        body: "data: " + JSON.stringify({ model: "m", choices: [{ delta: { content: "OK" } }] }) + "\n\ndata: [DONE]\n\n" });
+        body: "data: " + JSON.stringify({ model: "m", choices: [{ delta: { content: answer } }] }) + "\n\ndata: [DONE]\n\n" });
     });
   }
   return asked;
@@ -9815,6 +9825,59 @@ test("AI line: each key goes only to its own provider: scripts down DeepSeek, th
   assert.deepEqual(await p.evaluate(() => LP.ai.line("score")), { id: "l2", name: "OpenRouter", provider: "openrouter", vision: true });
   assert.ok(!JSON.stringify(await p.evaluate(() => [LP.ai.line("scripts"), LP.ai.line("score")])).includes("sk-"));
   assert.deepEqual(errors, []);
+});
+
+test("AI line: 试一下 checks the text model with 1+1 and the vision model with a letter", { skip, timeout: 60000 }, async (t) => {
+  /* an OpenRouter line and a Kimi line: the Kimi line is the one under test */
+  const lines = { v: 2, next: 3, def: "l1", use: {},
+    lines: [{ id: "l1", provider: "openrouter", n: 1, key: "sk-or-2222", model: "", on: true, added: 1 },
+      { id: "l2", provider: "kimi", n: 1, key: "sk-kimi-3333", model: "", on: true, added: 2 }],
+    key: "sk-or-2222", model: "", scoreModel: "" };
+  async function openKimi(x) {
+    await x.evaluate(() => LP.builtins.filter((b) => b.id === "settings")[0].open());
+    await x.waitForFunction(() => !document.getElementById("v-settings").hidden);
+    await x.click("#set-ai-open");
+    await x.waitForFunction(() => !document.getElementById("set-ai-main").hidden);
+    await x.locator("#set-ai-lines li", { hasText: "Kimi" }).locator(".set-ai-name").click();
+    await x.waitForFunction(() => !document.getElementById("set-ai-line").hidden);
+    await x.click("#set-ai-test");
+  }
+
+  const { p, errors } = await page(t, { locale: "zh-CN", viewport: { width: 331, height: 359 }, hasTouch: true });
+  /* Math.random 0 draws the first letter, A */
+  await p.addInitScript(() => { Math.random = () => 0; });
+  const asked = await fakeProviders(p);
+  await bootWithAi(p, lines);
+  await openKimi(p);
+  await p.waitForFunction(() => /线路正常/.test(document.getElementById("set-ai-line-state").textContent));
+  assert.equal(asked.length, 2);
+  for (const a of asked) {
+    assert.equal(a.url, "https://api.moonshot.cn/v1/chat/completions");
+    assert.equal(a.body.model, "kimi-k3.1-pro");
+    assert.equal(a.body.max_tokens, 2048);
+  }
+  assert.match(JSON.stringify(asked[0].body.messages), /1\+1/);
+  const parts = asked[1].body.messages[asked[1].body.messages.length - 1].content;
+  assert.ok(Array.isArray(parts), "the vision step sends parts");
+  const pic = parts.find((c) => c && c.type === "image_url");
+  assert.ok(pic && /^data:image\/jpeg/.test(pic.image_url.url), JSON.stringify(parts));
+  const shown = await p.locator("#set-ai-line-state").innerText();
+  assert.match(shown, /线路正常/);
+  assert.match(shown, /算对了/);
+  assert.match(shown, /认出 A/);
+  assert.deepEqual(errors, []);
+
+  /* a reader that names the wrong letter: the line is connected, but one step is wrong */
+  const { p: q, errors: qErrors } = await page(t, { locale: "zh-CN", viewport: { width: 331, height: 359 }, hasTouch: true });
+  await q.addInitScript(() => { Math.random = () => 0; });
+  await fakeProviders(q, { letter: "Z" });
+  await bootWithAi(q, lines);
+  await openKimi(q);
+  await q.waitForFunction(() => /有一步不对/.test(document.getElementById("set-ai-line-state").textContent));
+  const wrong = await q.locator("#set-ai-line-state").innerText();
+  assert.match(wrong, /有一步不对/);
+  assert.match(wrong, /答成了「Z」，应该是 A/);
+  assert.deepEqual(qErrors, []);
 });
 
 test("AI line: 生成 in scripts goes down the scripts line", { skip, timeout: 45000 }, async (t) => {
@@ -9966,6 +10029,8 @@ test("AI line: two lines stay out of the backup, and a restore keeps this phone'
 
 test("AI line: the lines page: add DeepSeek and OpenRouter, switch one off, choose 读谱, delete with a second press", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await page(t, { locale: "zh-CN", viewport: { width: 331, height: 359 }, hasTouch: true });
+  /* Math.random 0 draws the line test's first letter, A, which the fake answers */
+  await p.addInitScript(() => { Math.random = () => 0; });
   await fakeProviders(p);
   await p.goto(base + "/runtime/", { waitUntil: "load" });
   await p.waitForFunction(() => window.LP && LP.ai && LP.ai._test.state().loaded);

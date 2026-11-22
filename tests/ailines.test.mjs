@@ -200,3 +200,13 @@ test("modelFor: the line's model, or empty for the provider default; OpenRouter 
   const q = L.add(st, "qwen", "kq", "");
   assert.equal(L.modelFor(st, "pet", q, P, "dflt"), "");
 });
+
+test("checkAnswer: a math answer holds the number as a whole number, after a final think tag", () => {
+  for (const ok of ["2", "答案是 2。", "**2**", "1+1=2", "Let me think.\n</think >\n答案是 2。"]) assert.equal(L.checkAnswer("math", ok, 2), true, ok);
+  for (const bad of ["12", "22", "", "答案是 1。", "2 </think > 12"]) assert.equal(L.checkAnswer("math", bad, 2), false, bad);
+});
+
+test("checkAnswer: a letter answer has the letter standalone, case-insensitive", () => {
+  for (const ok of ["K", "k.", "The letter is K", "字母是 K"]) assert.equal(L.checkAnswer("letter", ok, "K"), true, ok);
+  for (const bad of ["OK", "A", "", "The letter is XK"]) assert.equal(L.checkAnswer("letter", bad, "K"), false, bad);
+});

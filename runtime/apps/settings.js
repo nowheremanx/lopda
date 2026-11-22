@@ -550,18 +550,48 @@ $("set-ai-vmodel").addEventListener("input",function(){
   AIVM=this.value; AIVMIN=AILINE;
   $("set-ai-score-model-value").textContent=scoreModelLabel()+" ›";
 });
+/* a capital letter drawn large on a small white picture: the vision step of the line test, and what it should read */
+function aiTestPicture(){
+  var letters="ACEFHKMNPRTWXY", ch=letters.charAt(Math.floor(Math.random()*letters.length));
+  var cv=document.createElement("canvas"), g;
+  cv.width=cv.height=96;
+  g=cv.getContext("2d");
+  g.fillStyle="#fff"; g.fillRect(0,0,96,96);
+  g.fillStyle="#000"; g.font="bold 64px sans-serif"; g.textAlign="center"; g.textBaseline="middle";
+  g.fillText(ch,48,48);
+  var url=cv.toDataURL("image/jpeg",0.9);
+  cv.width=cv.height=1;
+  return {letter:ch, url:url};
+}
 function runAiTest(){
   var b=$("set-ai-test"), l=curLine();
   if(!l || b.disabled) return;
   b.disabled=true; renderAi(tr("ai.testing")); sfx("tap");
   var used="", prov=lineProvider(l), id=l.id;
-  askLine(l,{messages:[{role:"user", content:"Reply with the single word OK."}], max:16, onModel:function(m){ used=m; }},l.model).then(function(t){
-    if(AILINE===id){ AILINEMSG=tr("ai.tested",{text:t.trim().slice(0,40), model:used || l.model || (prov ? prov.model : window.LopdaAI.MODEL)}); renderAi(); }
-    sfx("ok");
+  function model(){ return used || l.model || (prov ? prov.model : window.LopdaAI.MODEL); }
+  function done(parts,ok){
+    if(AILINE===id){ AILINEMSG=parts.join("\n"); renderAi(); }
+    sfx(ok ? "ok" : "err"); b.disabled=false;
+  }
+  askLine(l,{messages:[{role:"user", content:"What is 1+1? Reply with the number only."}], max:2048, onModel:function(m){ used=m; }},l.model).then(function(t){
+    var textOk=AL.checkAnswer("math",t,2),
+      textPart=textOk ? tr("ai.t.text.ok",{model:model()}) : tr("ai.t.text.bad",{text:t.trim().slice(0,40)});
+    if(!prov || !prov.vision){ done([tr(textOk ? "ai.t.ok" : "ai.t.some"), textPart], textOk); return; }
+    var pic=aiTestPicture();
+    askLine(l,{messages:[{role:"user", content:[{type:"image_url", image_url:{url:pic.url}},
+        {type:"text", text:"Which capital letter is in this picture? Reply with the letter only."}]}], max:2048,
+      onModel:function(m){ used=m; }}, AL.modelFor(AI.st,"score",l,PROV,SCORE_PAGES.DEFAULT_MODEL)).then(function(v){
+      var visOk=AL.checkAnswer("letter",v,pic.letter);
+      done([tr(textOk && visOk ? "ai.t.ok" : "ai.t.some"), textPart,
+        visOk ? tr("ai.t.vis.ok",{letter:pic.letter, model:model()})
+          : tr("ai.t.vis.bad",{text:v.trim().slice(0,40), letter:pic.letter})], textOk && visOk);
+    },function(e){
+      done([tr("ai.t.some"), textPart, tr("ai.t.vis.err",{why:aiErrLine(e,l)})], false);
+    });
   },function(e){
     if(AILINE===id){ AILINEMSG=aiErrLine(e,l); renderAi(); }
-    sfx("err");
-  }).then(function(){ b.disabled=false; });
+    sfx("err"); b.disabled=false;
+  });
 }
 $("set-ai-test").onclick=runAiTest;
 /* deleting a line removes its key (the score-model choice stays); two presses, and leaving the page forgets the first */
