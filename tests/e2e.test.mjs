@@ -9816,6 +9816,60 @@ test("AI line: each key goes only to its own provider: scripts down DeepSeek, th
   assert.deepEqual(errors, []);
 });
 
+test("AI line: 生成 in scripts goes down the scripts line", { skip, timeout: 45000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN" });
+  const asked = await fakeProviders(p);
+  await bootWithAi(p, { ...TWO_LINES, use: { ...TWO_LINES.use, scripts: { line: "l2", model: "" } } });
+  assert.equal(await p.evaluate(() => LP.ai.on("scripts")), true);
+  await p.evaluate(() => LP.show("scripts"));
+  await p.click("#scripts-write");
+  assert.equal(await p.locator("#idea-copy").innerText(), "生成");
+  await p.fill("#scripts-idea", "一个番茄钟");
+  await p.click("#idea-copy");
+  /* fakeProviders answers "OK", not code: only the request matters here */
+  const deadline = Date.now() + 10000;
+  while (!asked.length && Date.now() < deadline) await new Promise((r) => setTimeout(r, 25));
+  assert.equal(asked.length, 1);
+  assert.equal(asked[0].url, "https://openrouter.ai/api/v1/chat/completions");
+  assert.equal(asked[0].auth, "Bearer sk-or-2222");
+  assert.ok(!JSON.stringify(asked).includes("sk-deep-1111"), "the DeepSeek key never left the phone");
+  assert.deepEqual(errors, []);
+});
+
+test("AI line: Tape4 shows the line's name and reading a score with photos needs a line that can see", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN" });
+  const asked = await fakeProviders(p);
+  /* only the DeepSeek line: it can write a song but cannot see a page */
+  await bootWithAi(p, { ...TWO_LINES, next: 2, def: "l1", use: {}, lines: [TWO_LINES.lines[0]], key: "", model: "", scoreModel: "" });
+  await p.locator("#home .app", { hasText: "四轨机" }).click();
+  await p.waitForSelector("#v-studio:not([hidden])");
+  await p.waitForFunction(() => document.querySelector("#v-studio").getAttribute("data-loaded") === "true");
+  await p.waitForFunction(() => document.querySelectorAll("#v-studio .st-cell").length === 16);
+  /* the first open's tour would cover the screens */
+  await p.waitForSelector("#v-studio .st-tour-box");
+  await p.keyboard.press("z");
+  await p.waitForSelector("#v-studio .st-tour-box", { state: "detached" });
+
+  await p.click("#studio-menu");
+  await p.waitForSelector("#studio-sheet:not([hidden])");
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "让 AI 改" }).click();
+  await p.waitForSelector("#studio-ai-input");
+  assert.equal(await p.textContent("#studio-ai-state"), "AI：DeepSeek");
+
+  /* a photo page on the 读谱 sheet: the blind line gives up before any request */
+  await p.locator("#studio-sheet .st-sheet-row button", { hasText: "读谱" }).click();
+  await p.waitForSelector("#studio-score-read");
+  await p.setInputFiles("#studio-score-import", [
+    { name: "page.svg", mimeType: "image/svg+xml", buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50"><rect width="100" height="50" fill="white"/><rect width="50" height="50" fill="black"/></svg>') },
+  ]);
+  await p.waitForFunction(() => document.querySelectorAll("#studio-sheet .st-score-thumb").length === 1);
+  await p.click("#studio-score-read");
+  await p.waitForFunction(() => /这条线路看不了图/.test(document.getElementById("toast").textContent));
+  assert.equal(asked.length, 0, "no request was made");
+  await p.waitForSelector("#studio-score-read");
+  assert.deepEqual(errors, []);
+});
+
 test("AI line: a read that fails blocks every write until a later read succeeds; a newer document is never written", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await page(t, { locale: "zh-CN" });
   /* the AI document's get() rejects while window.__failAi is set */
