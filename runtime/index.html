@@ -714,6 +714,8 @@
         </div>
         <p class="hint" id="script-hint" aria-live="polite"></p>
         <div class="script-menu" id="script-menu-panel" hidden>
+          <button class="btn ghost" id="script-menu-paste" type="button" data-i18n="scripts.paste">粘贴代码</button>
+          <button class="btn ghost" id="script-versions-open" type="button" data-i18n="scripts.versions.title">版本</button>
           <button class="btn ghost" id="script-copy" type="button" data-i18n="scripts.copy">复制提示词</button>
           <button class="btn ghost" id="script-export" type="button" data-i18n="scripts.export">导出脚本</button>
           <button class="btn ghost" id="script-clear" type="button" data-i18n="scripts.clear">清除存档</button>
@@ -748,6 +750,43 @@
           <button class="btn" id="data-ask-yes" type="button" data-i18n="scripts.yes">确认</button>
           <button class="btn ghost" id="data-ask-no" type="button" data-i18n="common.cancel">取消</button>
         </div>
+      </div>
+    </section>
+
+    <!-- SCRIPT REVISE: one ask about the code on screen, sent down the AI line like 生成; the old code becomes a version -->
+    <section class="view scripts-view" id="v-script-revise" hidden>
+      <div class="bar">
+        <button class="btn ghost back" id="revise-back" type="button" aria-label="返回">◂</button>
+        <h2 data-i18n="scripts.revise.title">改一改</h2>
+      </div>
+      <div class="idea-main">
+        <p class="hint" id="revise-note"></p>
+        <textarea id="revise-ask" maxlength="500" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" data-i18n-ph="scripts.revise.ph" placeholder="想怎么改？例如：加一个暂停键"></textarea>
+        <p class="hint" id="revise-status" aria-live="polite"></p>
+        <textarea id="revise-prompt-box" hidden readonly aria-label="AI prompt"></textarea>
+      </div>
+      <div class="idea-actions">
+        <button class="btn ghost" id="revise-paste" type="button" data-i18n="scripts.revise.paste">粘贴新版本</button>
+        <button class="btn" id="revise-go" type="button" data-i18n="scripts.revise.run">改</button>
+      </div>
+    </section>
+
+    <!-- SCRIPT VERSIONS: the earlier bodies of one script, read-only, with 换回这个 -->
+    <section class="view scripts-view" id="v-script-versions" hidden>
+      <div class="bar">
+        <button class="btn ghost back" id="versions-back" type="button" aria-label="返回">◂</button>
+        <h2 data-i18n="scripts.versions.title">版本</h2>
+      </div>
+      <div class="scripts-main" id="versions-list-wrap">
+        <ul class="lcd-menu scripts-list" id="versions-list"></ul>
+        <p class="hint scripts-empty" id="versions-empty" hidden></p>
+      </div>
+      <div class="scripts-main" id="versions-code-wrap" hidden>
+        <textarea id="versions-code" readonly spellcheck="false" aria-label="程序代码"></textarea>
+      </div>
+      <div class="idea-actions" id="versions-actions" hidden>
+        <button class="btn ghost" id="versions-return" type="button" data-i18n="scripts.versions.back">返回</button>
+        <button class="btn" id="versions-use" type="button" data-i18n="scripts.versions.use">换回这个</button>
       </div>
     </section>
 
