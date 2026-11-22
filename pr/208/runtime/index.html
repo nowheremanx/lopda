@@ -260,6 +260,15 @@
             <input id="set-ai-model" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="100">
           </label>
           <p class="hint" id="set-ai-model-hint"></p>
+          <label class="set-ai-field" id="set-ai-vmodel-row">
+            <span data-i18n="ai.vmodel">看图模型</span>
+            <input id="set-ai-vmodel" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="100">
+          </label>
+          <p class="hint" id="set-ai-vmodel-hint" data-i18n="ai.vmodel.hint">读谱时用它看照片；空着就用默认。</p>
+          <button class="set-ai-row" id="set-ai-score-model" type="button" hidden>
+            <span class="set-ai-label" data-i18n="ai.vmodel.pick">从列表选</span>
+            <span class="set-ai-value" id="set-ai-score-model-value"></span>
+          </button>
           <p class="hint" id="set-ai-line-state" aria-live="polite"></p>
           <div class="row">
             <button class="btn" id="set-ai-save" type="button" data-i18n="ai.save">保存</button>
@@ -275,10 +284,6 @@
         </div>
         <div class="settings set-ai-page">
           <ul class="set-ai-list set-ai-use-list" id="set-ai-use-list" role="radiogroup"></ul>
-          <button class="set-ai-row" id="set-ai-score-model" type="button" hidden>
-            <span class="set-ai-label" data-i18n="ai.score.label">读谱模型</span>
-            <span class="set-ai-value" id="set-ai-score-model-value">默认（Sol）</span>
-          </button>
         </div>
       </div>
       <div id="set-ai-model-page" hidden>

@@ -5,8 +5,11 @@
  * `data/users/local/ai` and hands it here; tests/ailines.test.mjs runs them in Node.
  *
  * The document, v:2:
- *   {v:2, next, lines:[{id, provider, n, key, model, on, added, last?}], def, use:{scripts|studio|score|pet: {line, model}},
- *    key, model, scoreModel}
+ *   {v:2, next, lines:[{id, provider, n, key, model, visionModel, on, added, last?}], def,
+ *    use:{scripts|studio|score|pet: {line, model}}, key, model, scoreModel}
+ * - model is what the line writes with, visionModel what it reads pictures with (Tape4's score reading); "" means the
+ *   provider's default (on OpenRouter the score-model default, Sol).
+ * - use entries only pick a line. use.score.model is kept only while no OpenRouter line exists to take an old score model.
  * - id is "l" + next, never reused after a delete, so a use entry cannot end up on a new line by accident.
  * - n numbers the lines of one provider ("DeepSeek", "DeepSeek 2"), fixed when the line is added.
  * - key / model / scoreModel at the top mirror the first OpenRouter line that is on: a phone still running an older cached
@@ -37,7 +40,7 @@ function load(doc){
       if(!l || typeof l!=="object" || typeof l.id!=="string" || !l.id || seen[l.id] || typeof l.provider!=="string") return;
       /* every field the line has is kept, the ones we use are made sane */
       var c=copy(l);
-      c.key=str(l.key); c.model=str(l.model); c.on=l.on!==false; c.n=+l.n>0 ? Math.floor(+l.n) : 1;
+      c.key=str(l.key); c.model=str(l.model); c.visionModel=str(l.visionModel); c.on=l.on!==false; c.n=+l.n>0 ? Math.floor(+l.n) : 1;
       seen[c.id]=true; top=Math.max(top,num(c.id));
       st.lines.push(c);
     });
@@ -46,17 +49,30 @@ function load(doc){
     var u=doc.use && typeof doc.use==="object" ? doc.use : {};
     for(var k in u) if(Object.prototype.hasOwnProperty.call(u,k) && u[k] && typeof u[k]==="object")
       st.use[k]={line:str(u[k].line), model:str(u[k].model)};
+    adoptScoreModel(st);
     fixDef(st);
     return st;
   }
   /* v:1 (or no v at all): one OpenRouter key, its model and Tape4's score model */
   var key=str(doc.key), model=str(doc.model), score=str(doc.scoreModel);
   if(key){
-    st.lines.push({id:"l1", provider:"openrouter", n:1, key:key, model:model, on:true, added:0});
+    st.lines.push({id:"l1", provider:"openrouter", n:1, key:key, model:model, visionModel:score, on:true, added:0});
     st.next=2; st.def="l1";
-    if(score) st.use.score={line:"l1", model:score};
   } else if(score) st.use.score={line:"", model:score};
   return st;
+}
+
+/* An old score model (v:1 scoreModel, or an earlier v:2 use.score.model) belongs to an OpenRouter line's visionModel:
+   the line the score use names, else the first OpenRouter line. Without one it waits in use.score.model. */
+function adoptScoreModel(st){
+  var u=st.use.score, l, i;
+  if(!u || !u.model) return;
+  l=u.line ? find(st,u.line) : null;
+  if(!l) for(i=0;i<st.lines.length;i++) if(st.lines[i].provider==="openrouter"){ l=st.lines[i]; break; }
+  if(!l || l.provider!=="openrouter") return;
+  if(!l.visionModel) l.visionModel=u.model;
+  u.model="";
+  if(!u.line) delete st.use.score;
 }
 
 /* the state -> the document to write (with the v:1 mirror fields) */
@@ -67,7 +83,7 @@ function toDoc(st){
   for(k in st.use) use[k]={line:st.use[k].line, model:st.use[k].model};
   return {v:2, next:st.next, lines:st.lines.map(copy), def:st.def, use:use,
     key:mirror ? mirror.key : "", model:mirror ? mirror.model : "",
-    scoreModel:mirror && st.use.score && (st.use.score.line===mirror.id || !st.use.score.line) ? st.use.score.model : ""};
+    scoreModel:mirror ? mirror.visionModel || "" : ""};
 }
 
 /* a line can carry requests: on, with a key, for a provider in the table (and one that can see, when asked) */
@@ -92,12 +108,13 @@ function pick(st,use,providers){
   for(i=0;i<st.lines.length;i++) if(usable(st.lines[i],providers,vision)) return st.lines[i];
   return null;
 }
-/* the model for that program on that line ("" lets ai.js use the provider's default). On OpenRouter, reading a score
-   uses Tape4's own score-model choice (scoreDefault when none); elsewhere the provider's vision model. */
+/* the model for that program on that line ("" lets ai.js use the provider's default). Reading a score uses the line's
+   visionModel, else the provider's vision model (on OpenRouter scoreDefault, Tape4's default score model). */
 function modelFor(st,use,line,providers,scoreDefault){
   var p=prov(providers,line.provider);
   if(use==="score"){
-    if(line.provider==="openrouter"){ var u=st.use.score; return u && u.model ? u.model : scoreDefault || ""; }
+    if(line.visionModel) return line.visionModel;
+    if(line.provider==="openrouter") return scoreDefault || "";
     return p && p.visionModel || line.model;
   }
   return line.model;
@@ -109,18 +126,21 @@ function name(line,providers,lang){
 }
 
 /* ---- changes; each returns the line touched (or true) and edits st in place ---- */
-function add(st,provider,key,model,now){
+function add(st,provider,key,model,now,visionModel){
   var n=0;
   st.lines.forEach(function(l){ if(l.provider===provider) n=Math.max(n,l.n); });
-  var l={id:"l"+st.next, provider:provider, n:n+1, key:str(key), model:str(model), on:true, added:now||0};
+  var l={id:"l"+st.next, provider:provider, n:n+1, key:str(key), model:str(model), visionModel:str(visionModel), on:true, added:now||0};
   st.next++; st.lines.push(l);
+  adoptScoreModel(st);
   fixDef(st);
   return l;
 }
-function edit(st,id,key,model){
+/* an empty key keeps the old one; visionModel undefined leaves it as it is */
+function edit(st,id,key,model,visionModel){
   var l=find(st,id); if(!l) return null;
   if(key) l.key=key;
   l.model=str(model);
+  if(visionModel!==undefined) l.visionModel=str(visionModel);
   return l;
 }
 /* turning a line off keeps its key */
@@ -131,7 +151,7 @@ function setOn(st,id,on){
   fixDef(st);
   return l;
 }
-/* deleting a line drops its key and every use entry that named it (the score model choice itself stays) */
+/* deleting a line drops its key, its models and every use entry that named it */
 function remove(st,id){
   var i, k;
   for(i=0;i<st.lines.length;i++) if(st.lines[i].id===id){ st.lines.splice(i,1); break; }
@@ -150,16 +170,10 @@ function choose(st,use,id){
   else delete st.use[use];
   return true;
 }
-function setScoreModel(st,model){
-  var u=st.use.score;
-  if(model) st.use.score={line:u ? u.line : "", model:model};
-  else if(u && u.line) u.model="";
-  else delete st.use.score;
-}
 function setLast(st,id,last){ var l=find(st,id); if(!l) return null; l.last=last; return l; }
 /* lines that are on, in order */
 function onLines(st){ return st.lines.filter(function(l){ return l.on; }); }
 
 window.LopdaAiLines={USES:USES, load:load, toDoc:toDoc, pick:pick, modelFor:modelFor, name:name, usable:usable, find:find,
-  add:add, edit:edit, setOn:setOn, remove:remove, setDef:setDef, choose:choose, setScoreModel:setScoreModel, setLast:setLast, onLines:onLines};
+  add:add, edit:edit, setOn:setOn, remove:remove, setDef:setDef, choose:choose, setLast:setLast, onLines:onLines};
 })();
