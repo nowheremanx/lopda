@@ -1,4 +1,4 @@
-// runtime/petplay.js: the pet's three play packs are pure, deterministic and always end; the room's 162 x 120
+// runtime/petplay.js: the pet's two play packs are pure, deterministic and always end; the room's 162 x 120
 // tone buffer is the only thing draw() may write.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -37,11 +37,11 @@ function drawTones(g, state) {
   return buf;
 }
 
-test("three play packs, all front view for now; the side poses are ready for later", () => {
-  assert.deepEqual(Array.from(Play.GAMES, (g) => g.id), ["catch", "bounce", "climb"]);
-  assert.deepEqual(Array.from(Play.GAMES, (g) => g.labelKey), ["pet.game.catch", "pet.game.bounce", "pet.game.climb"]);
+test("two play packs: climb in front view, the runner from the side", () => {
+  assert.deepEqual(Array.from(Play.GAMES, (g) => g.id), ["run", "climb"]);
+  assert.deepEqual(Array.from(Play.GAMES, (g) => g.labelKey), ["pet.game.run", "pet.game.climb"]);
+  assert.deepEqual(Array.from(Play.GAMES, (g) => g.view), ["side", "front"]);
   for (const g of Play.GAMES) {
-    assert.equal(g.view, "front", "no side game ships yet");
     assert.equal(typeof g.init, "function");
     assert.equal(typeof g.step, "function");
     assert.equal(typeof g.draw, "function");
@@ -59,16 +59,17 @@ test("each pack is deterministic for a seed and an input script", () => {
     assert.deepEqual(a.state.events, b.state.events, g.id);
   }
   /* a different seed moves the round */
-  const c = drive(game("catch"), 1).state, d = drive(game("catch"), 2).state;
+  const c = drive(game("climb"), 1, 300).state, d = drive(game("climb"), 2, 300).state;
   assert.notDeepEqual(JSON.parse(JSON.stringify(c)), JSON.parse(JSON.stringify(d)));
 });
 
-test("a round always ends: at most 600 ticks for catch, 900 for bounce; climb only on a fall", () => {
-  for (const g of [game("catch"), game("bounce")]) {
-    const r = drive(g, 7, 5000);
-    assert.equal(r.state.done, true, `${g.id} ended`);
-    assert.ok(r.steps < 5000, `${g.id} did not loop forever`);
-    assert.ok(r.state.tick <= (g.id === "catch" ? 600 : 900), `${g.id} is capped in time: ${r.state.tick}`);
+test("a round always ends: a run with no input hits the first thing within 400, and climb has no clock", () => {
+  /* a run has no clock: it ends on the first hit, and the first obstacle arrives inside three seconds */
+  for (const seed of [1, 7, 99]) {
+    const r = drive(game("run"), seed, 5000);
+    assert.equal(r.state.done, true, `run ${seed} ended`);
+    assert.ok(r.state.tick <= 400, `run ${seed} ended on a hit, not a clock: ${r.state.tick}`);
+    assert.ok(r.state.events.includes("end"));
   }
   /* climb has no clock: a pet that never falls keeps the round going past the old 45 s cap */
   const climb = game("climb"), s = climb.init(7);
@@ -77,14 +78,17 @@ test("a round always ends: at most 600 ticks for catch, 900 for bounce; climb on
   assert.equal(s.tick, 4000, "4000 ticks and still climbing");
 });
 
-test("a finished round has score and joy 1 or 2, never negative", () => {
+test("a finished round has score and joy 0, 1 or 2: no progress, no joy; never negative", () => {
+  const min = { run: 10, climb: 1 };
   for (const g of Play.GAMES) {
     const s = g.init(99);
     s.score = -5;
     Play.finish(s);
     assert.equal(s.done, true);
     assert.equal(s.score, 0);
-    assert.equal(s.joy, 1, "a zero score still gives +1");
+    assert.equal(s.joy, 0, `${g.id}: a round with no progress earns nothing`);
+    assert.equal(Play.joyFor(g.id, min[g.id] - 1), 0, `${g.id}: just below the minimum`);
+    assert.equal(Play.joyFor(g.id, min[g.id]), 1, `${g.id}: the minimum is +1`);
     const t = g.init(99);
     t.score = 999;
     Play.finish(t);
@@ -128,19 +132,12 @@ test("draw: a thin ink frame, the score in petart's pixel digits, and each game'
     for (let y = 0; y < H; y++) for (const x of [0, 1, W - 2, W - 1]) assert.equal(a[y * W + x], 0, `${g.id} frame column ${x}`);
   }
 
-  /* catch: a floor line under a floor band, and specks in the sky */
-  const catchGame = game("catch"), catchState = catchGame.init(4);
-  const onFloor = drawTones(catchGame, catchState);
-  assert.equal(onFloor[(H - 6) * W + 10], 1, "catch has a floor line");
-  assert.equal(onFloor[(H - 4) * W + 10], 2, "and a floor band");
-  assert.equal(onFloor[20 * W + 20], 2, "with background dots");
-
-  /* bounce: the dashed centre line and the two side walls */
-  const bounceGame = game("bounce"), bounceState = bounceGame.init(4);
-  const court = drawTones(bounceGame, bounceState);
-  assert.equal(court[10 * W + Math.floor(W / 2)], 2, "the centre line is dashed");
-  assert.equal(court[20 * W + 5], 2, "the left wall");
-  assert.equal(court[20 * W + W - 6], 2, "the right wall");
+  /* run: an ink floor line over a mid band that scrolls */
+  const runGame = game("run"), runState = runGame.init(4);
+  const lane = drawTones(runGame, runState);
+  assert.equal(lane[Play.RUN.FLOOR * W + 10], 0, "run has an ink floor line");
+  assert.equal(lane[(Play.RUN.FLOOR + 1) * W + 10], 2, "and a mid band under it");
+  assert.equal(lane[18 * W + 20], 2, "and a window frame on the wall behind");
 
   /* climb: the faint wall pattern scrolls with the camera and nothing else changes */
   const climbGame = game("climb"), climbState = climbGame.init(4);
@@ -163,81 +160,285 @@ test("draw: a thin ink frame, the score in petart's pixel digits, and each game'
   assert.ok([...wall0].includes(2), "climb's wall is drawn in the faint tone");
 });
 
-test("catch: standing under a falling thing catches it", () => {
-  const g = game("catch"), s = g.init(5);
-  s.next = 999;                       /* no new thing while this one falls */
-  s.things = [{ x: s.petX + 10, y: s.petY - 40, k: 0, w: 12, h: 12 }];
-  for (let i = 0; i < 40 && s.score === 0; i++) g.step(s, inputAt(i), 50);
-  assert.equal(s.score, 1, "the thing above the pet was caught");
-  assert.equal(s.things.length, 0);
-  assert.ok(s.events.includes("catch"));
-  assert.equal(s.done, false);
-});
-
-test("bounce: a paddle under the ball returns it up, and the pet does not hop or react", () => {
-  const g = game("bounce"), s = g.init(5);
-  s.ball = { x: s.paddleX + 12, y: s.paddleY - 8, vx: 0, vy: 2 };
-  g.step(s, inputAt(0), 50);
-  assert.equal(s.score, 1, "your return scored");
-  assert.equal(s.ball.vy, -2, "the ball is going back up");
-  assert.ok(s.events.includes("return"));
-  assert.equal(s.done, false);
-  assert.equal(s.hop, 0, "the pet does not hop when your paddle returns the ball");
-  assert.equal(s.petY, s.petBaseY, "the pet stays on its base row");
-  assert.equal(s.react, null, "no pose: the ball did not touch the pet");
-});
-
-test("bounce: the pet at the top bats the ball back down with a short hop; no walk bob while sliding", () => {
-  const g = game("bounce"), s = g.init(7), base = s.petBaseY, W = Play.W;
-  /* the pet slides under the ball, on its base row, with no walk bob */
-  const ys = [];
-  for (let i = 0; i < 80 && !s.done; i++) {
-    if (s.ball && s.ball.vy > 0) s.paddleX = Math.max(2, Math.min(W - 4 - s.paddleW, s.ball.x - 15));
-    if (s.ball && s.ball.vy < 0) s.ball.y = Math.min(s.ball.y, s.petY + 60);
-    g.step(s, { left: false, right: false, a: false, press: { left: false, right: false, a: false } }, 50);
-    if (!s.hop) assert.equal(s.petY, base, "the pet is on its base row outside its own hop");
-    ys.push(s.petY);
+/* The runner's bot: press A when the next thing is inside four ticks of travel plus 10 px of the pet's front,
+   and hold it until landing (a released A cuts the rise to a short hop). Four ticks is a late, safe press; the
+   two-tick-longer figure lands the pet on the tail of a wide slipper at the slowest speed. */
+const RUN_FRONT = 39;                                  /* PET_X + 23 */
+function runAim(speedPx) { return speedPx * 4 + 10; }
+/* The bot a careful player is: a full jump over a thing on the floor, a quick hop (A for three ticks) when a plane
+   is over a low thing, and nothing for a plane alone. It records each new pattern's gap from the last one's right edge. */
+function runBot(g, seed, ticks, policy = "smart", watch = null) {
+  const s = g.init(seed), spawned = [], seen = new Set();
+  let hold = 0, right = null;
+  for (let i = 0; i < ticks && !s.done; i++) {
+    const ahead = s.obs.filter((o) => o.x + o.w > 24 && o.kind !== "none").sort((a, b) => a.x - b.x);
+    const grounds = ahead.filter((o) => o.kind === "ground"), planes = ahead.filter((o) => o.kind === "plane");
+    let pressA = false;
+    if (s.mode !== "run") {
+      /* a stage: beat (or stroke) whenever the body is below the next opening's middle and not already rising */
+      const gate = s.obs.filter((o) => o.kind === "gate" && o.x + o.w > 24).sort((a, b) => a.x - b.x)[0];
+      const target = gate ? (gate.top + gate.bot) / 2 : Play.RUN.FLOOR - 40, body = Play.RUN.FLOOR - 1 - s.h - 8;
+      if (policy !== "naive" && body > target + 2 && s.fv <= 0) pressA = true;
+      if (policy === "naive" && s.tick % 6 === 0) pressA = true;
+    } else if (s.onGround && ahead.length) {
+      const sp = s.speedQ / 4;
+      if (policy === "naive") {
+        if (ahead[0].x - RUN_FRONT <= runAim(sp)) { pressA = true; hold = 20; }
+      } else if (grounds.length && grounds[0].x - RUN_FRONT <= runAim(sp)) {
+        /* a plane that will be over the pet while it is in the air: hop under it instead of a full jump */
+        const dist = grounds[0].x - RUN_FRONT, tg = dist / sp;
+        const danger = planes.some((p) => (p.x - RUN_FRONT) / (sp + p.vx) < tg + 22);
+        if (!danger) { pressA = true; hold = 20; }
+        else if (dist > 0 && dist <= sp * 3 + 6) { pressA = true; hold = 3; }
+      }
+    }
+    const before = s.mode, animBefore = !!s.anim;
+    g.step(s, { left: false, right: false, a: hold > 0 || pressA, press: { left: false, right: false, a: pressA } }, 50);
+    if (hold > 0) hold--;
+    if (watch) watch(s, before, pressA, animBefore);
+    /* a new pattern: one or two things pushed in the same tick; its gap is from the previous pattern's right edge */
+    const fresh = s.obs.filter((o) => !seen.has(o));
+    const older = s.obs.filter((o) => seen.has(o));
+    right = older.length ? Math.max(...older.map((o) => o.x + o.w)) : null;
+    if (fresh.length) {
+      const left = Math.min(...fresh.map((o) => o.x));
+      spawned.push({ gap: right == null || fresh.some((o) => o.kind === "gate") || s.obs.some((o) => o.kind === "gate" && !fresh.includes(o)) ? null : left - right, speedQ: s.speedQ, kinds: fresh.map((o) => o.kind),
+        nuts: fresh.filter((o) => o.nut).map((o) => ({ kind: o.kind, up: Play.RUN.FLOOR - (o.nut.y + 10) })), tick: s.tick });
+      for (const o of fresh) seen.add(o);
+    }
+    /* positions move with the world: the right edge is measured again every tick */
+    const all = s.obs.filter((o) => seen.has(o));
+    if (all.length) right = Math.max(...all.map((o) => o.x + o.w));
   }
-  assert.ok(ys.includes(base));
-  assert.ok(ys.filter((y) => y === base).length > ys.length / 2, "the resting row is the normal one");
-  /* a ball that reaches the pet is batted back down: a hop, the jump pose, and no point for you */
-  const t = game("bounce"), b = t.init(8);
-  b.ball = { x: b.petX + 12, y: b.petY + 31, vx: 0, vy: -2, decided: true, miss: false };
-  t.step(b, { left: false, right: false, a: false, press: {} }, 50);
-  assert.ok(b.events.includes("bat"), "the pet's bat is its own moment");
-  assert.equal(b.ball.vy, 2, "the ball goes back down");
-  assert.equal(b.score, 0, "the pet's own return is not your point");
-  assert.ok(b.hop > 0, "a short hop");
-  assert.equal(b.react, "jump", "the push pose");
-  t.step(b, { left: false, right: false, a: false, press: {} }, 50);
-  assert.equal(b.petY, b.petBaseY - 2, "the hop lifts it a little");
-  for (let i = 0; i < 6; i++) t.step(b, { left: false, right: false, a: false, press: {} }, 50);
-  assert.equal(b.petY, b.petBaseY, "and it comes back down to the base row");
+  return { state: s, spawned };
+}
+function inkBottom(grid) {
+  let bottom = -1;
+  for (let r = 0; r < grid.length; r++) if (/[kdmp]/.test(String(grid[r]))) bottom = r;
+  return bottom;
+}
+/* the pixels a grid puts on the buffer at PET_X, y: the draw's own blit, written by hand for the comparison */
+function spriteAt(grid, x0, y0) {
+  const out = [];
+  for (let r = 0; r < grid.length; r++) {
+    const line = String(grid[r]);
+    for (let c = 0; c < line.length; c++) {
+      const t = { k: 0, d: 1, m: 2, p: 3 }[line.charAt(c)];
+      if (t !== undefined) out.push([x0 + c, y0 + r, t]);
+    }
+  }
+  return out;
+}
+
+test("run: the speed ramps from 16 to 32 by 100-tick steps", () => {
+  const g = game("run"), s = g.init(3);
+  const inp = { left: false, right: false, a: false, press: {} };
+  const seen = [];
+  for (let i = 0; i < 1700; i++) {
+    s.stageAt = Infinity;              /* the room only: a stage caps the speed */
+    g.step(s, inp, 50);
+    seen.push(s.speedQ);
+    s.obs.length = 0;                  /* this test is about the clock, not the things in the way */
+  }
+  assert.equal(Play.RUN.SPEED_START, 16);
+  assert.equal(Play.RUN.SPEED_MAX, 32);
+  assert.equal(Play.RUN.JUMP_VY, -9);
+  assert.equal(Play.RUN.FLOOR, 100);
+  assert.equal(Play.RUN.PET_X, 16);
+  assert.equal(seen[0], 16, "tick 1: 4 px a tick");
+  assert.equal(seen[98], 16, "still 16 up to tick 99");
+  assert.equal(seen[99], 17, "17 from tick 100");
+  assert.equal(seen[199], 18, "one more every 100 ticks");
+  assert.equal(seen[1599], 32, "32 from tick 1600");
+  assert.equal(seen[1699], 32, "and no faster");
+  for (let i = 1; i < seen.length; i++) assert.ok(seen[i] >= seen[i - 1], `never slower at tick ${i + 1}`);
 });
 
-test("bounce: a seeded whiff grows with the rally, scores for you and never counts as your miss", () => {
-  const g = game("bounce"), s = g.init(10);
-  s.ball = { x: s.petX + 12, y: s.petY + 31, vx: 0, vy: -2, decided: true, miss: true };
-  for (let i = 0; i < 40 && s.petMisses === 0; i++) g.step(s, { left: false, right: false, a: false, press: {} }, 50);
-  assert.equal(s.petMisses, 1, "the pet whiffed");
-  assert.equal(s.score, 1, "the whiff scores for you");
-  assert.equal(s.misses, 0, "it is not one of your three misses");
-  assert.ok(s.tick < 900, "the round goes on");
-  const c = Play.BOUNCE.missChance;
-  assert.ok(c(0) >= 0.02 && c(0) <= 0.05, "rare at the start: " + c(0));
-  assert.ok(c(10) > c(0), "more likely as the rally grows");
-  assert.ok(c(100) <= Play.BOUNCE.MISS_MAX, "and capped");
+test("run: a held jump rises 45 px, a tap cuts it short, and a press three ticks early jumps on landing", () => {
+  const g = game("run"), held = { left: false, right: false, a: true, press: {} };
+  const first = { left: false, right: false, a: true, press: { left: false, right: false, a: true } };
+  const s = g.init(4);
+  s.obs = [];
+  let peak = 0, air = 0;
+  g.step(s, first, 50);
+  assert.ok(s.events.includes("jump"), "the press takes off");
+  assert.equal(s.onGround, false);
+  while (!s.onGround && air < 60) { g.step(s, held, 50); air++; peak = Math.max(peak, s.h); }
+  assert.equal(peak, 45, "a held jump peaks at 45 px");
+  assert.ok(air >= 16 && air <= 20, `and stays up about 18 ticks: ${air}`);
+  /* a tap: the rise is cut at vy -3, so the pet only hops */
+  const t = g.init(4);
+  t.obs = [];
+  g.step(t, first, 50);
+  let tapPeak = 0;
+  for (let i = 0; i < 40 && !t.onGround; i++) { g.step(t, { left: false, right: false, a: false, press: {} }, 50); tapPeak = Math.max(tapPeak, t.h); }
+  assert.ok(tapPeak > 15 && tapPeak < 30, `a tap is a short hop: ${tapPeak}`);
+  /* three ticks before the floor: the press is remembered and the pet leaves the floor again on landing */
+  const b = g.init(4);
+  b.obs = [];
+  g.step(b, first, 50);
+  while (!(b.vy > 0 && b.h <= 30) && b.tick < 40) g.step(b, held, 50);
+  assert.ok(b.h > 0 && b.vy > 0, "falling, three ticks above the floor");
+  g.step(b, first, 50);                                  /* the press, three ticks out */
+  assert.equal(b.events.includes("jump"), false, "a press in the air does not jump");
+  for (let i = 0; i < 2; i++) g.step(b, held, 50);
+  assert.equal(b.onGround, false, "still off the floor");
+  g.step(b, held, 50);                                   /* the landing tick */
+  assert.ok(b.events.includes("jump"), "the buffered press takes off on the landing tick");
+  assert.equal(b.onGround, false);
+  assert.equal(b.vy, Play.RUN.JUMP_VY);
+  /* but not from four ticks out: the buffer is three ticks, not more */
+  const c = g.init(4);
+  c.obs = [];
+  g.step(c, first, 50);
+  while (!(c.vy > 0 && c.h <= 35) && c.tick < 40) g.step(c, held, 50);
+  g.step(c, first, 50);
+  for (let i = 0; i < 4 && !c.onGround; i++) { c.events = []; g.step(c, held, 50); }
+  assert.equal(c.onGround, true, "a press four ticks out is not held over the landing");
 });
 
-test("catch: the pet walks 6 px a tick and things come every 0.7 to 1.0 seconds", () => {
-  const g = game("catch"), s = g.init(3);
-  s.next = 999;
-  const x = s.petX;
-  g.step(s, { left: false, right: true, a: false, press: {} }, 50);
-  assert.equal(s.petX, x + 6, "120 px a second");
-  s.next = 1;
-  g.step(s, { left: false, right: false, a: false, press: {} }, 50);
-  assert.ok(s.next >= 14 && s.next <= 20, "spawn gap is 14-20 ticks: " + s.next);
+test("run: a bot that presses A in time survives 3000 ticks on 50 seeds", () => {
+  const g = game("run");
+  let survived = 0;
+  const scores = [];
+  for (let seed = 1; seed <= 50; seed++) {
+    const r = runBot(g, seed, 3000);
+    if (!r.state.done) survived++;
+    scores.push(r.state.score);
+  }
+  scores.sort((a, b) => a - b);
+  assert.equal(survived, 50, `the game is fair: the bot survived ${survived}/50 seeds`);
+  assert.ok(scores[0] > 100, `a 3000-tick run scores: lowest ${scores[0]}`);
+});
+
+test("run: patterns keep a landing gap, never below minGap(speed); planes from 10 s, plane over a thing from 20 s; nuts low or high", () => {
+  const M = Play.RUN.minGap;
+  assert.equal(M(16), 102, "at 4 px a tick: 18 ticks of travel plus 30 px");
+  assert.equal(M(32), 174, "at 8 px a tick");
+  let pairs = 0, low = 0, high = 0;
+  for (let seed = 1; seed <= 8; seed++) {
+    const r = runBot(game("run"), seed, 3000);
+    assert.equal(r.state.done, false, `seed ${seed} went the distance`);
+    for (const sp of r.spawned) {
+      if (sp.gap != null) {
+        assert.ok(sp.gap >= M(sp.speedQ), `seed ${seed}: gap ${sp.gap} at speed ${sp.speedQ / 4} px`);
+        /* a plane starts further back, by how much faster than the room it flies: only floor things have an upper bound */
+        if (!sp.kinds.includes("plane")) assert.ok(sp.gap <= M(sp.speedQ) + 72, `seed ${seed}: gap ${sp.gap} inside the rule`);
+        pairs++;
+      }
+      if (sp.tick < Play.RUN.LEVEL_TICKS) assert.ok(!sp.kinds.includes("plane"), "no plane in the first ten seconds");
+      if (sp.tick < 2 * Play.RUN.LEVEL_TICKS) assert.ok(!(sp.kinds.includes("ground") && sp.kinds.includes("plane")), "no plane over a thing before 20 s");
+      if (sp.kinds.includes("gate")) continue;          /* a stage's nuts sit in its openings */
+      for (const n of sp.nuts) {
+        /* a nut is its own thing, never carried by a plane: low where a plane will pass over it, else high */
+        assert.equal(n.kind, "none", "a nut is not attached to anything");
+        if (sp.kinds.includes("plane")) { assert.equal(n.up, Play.RUN.NUT_LOW, "a nut a plane will pass over sits low"); low++; }
+        else { assert.equal(n.up, Play.RUN.NUT_HIGH, "a nut alone sits high"); high++; }
+      }
+    }
+  }
+  assert.ok(pairs >= 100, `enough spawns to judge: ${pairs}`);
+  assert.ok(low > 0 && high > 0, `nuts both low (${low}) and high (${high})`);
+});
+
+test("run: a plane - standing and a quick hop (A up to 3 ticks) pass under it, a long jump (5+) flies into it", () => {
+  const g = game("run");
+  const tryHold = (n, ph) => {
+    const s = g.init(3);
+    s.tick = 900;
+    const y = Play.RUN.FLOOR - Play.RUN.PLANE_UP - 10;
+    s.obs = [{ x: 60, y, base: y, w: 20, h: 10, kind: "plane", nut: null, vx: 0, phase: ph }];
+    for (let t = 0; t < 40 && !s.dying; t++) {
+      g.step(s, { left: false, right: false, a: t < n, press: { left: false, right: false, a: t === 0 && n > 0 } }, 50);
+      s.obs[0].x = 18;                                  /* keep the plane right over the pet for the whole jump */
+    }
+    return s.dying > 0;
+  };
+  /* every bob phase: the plane is alive, but the rule holds wherever it is in its bob */
+  for (let ph = 0; ph < 16; ph++) {
+    assert.equal(tryHold(0, ph), false, "standing passes under");
+    for (const n of [1, 2, 3]) assert.equal(tryHold(n, ph), false, `A for ${n} ticks stays under (phase ${ph})`);
+    for (const n of [5, 6, 20]) assert.equal(tryHold(n, ph), true, `A for ${n} ticks flies into it (phase ${ph})`);
+  }
+});
+
+test("run: jumping at everything is not enough - a full-jump-at-anything bot falls to a plane, the careful one runs on", () => {
+  const g = game("run");
+  const ends = [];
+  for (let seed = 1; seed <= 50; seed++) {
+    const r = runBot(g, seed, 3000, "naive");
+    ends.push(r.state.done ? r.state.tick : 3000);
+  }
+  ends.sort((a, b) => a - b);
+  assert.ok(ends[49] < 1500, `the naive bot never lasts: longest ${ends[49]} ticks`);
+  assert.ok(ends[25] < 800, `median ${ends[25]} ticks`);
+});
+
+test("run: the feet-aligned draw stands the pet on FLOOR-1 in both walk frames, and lifts it in the air", () => {
+  const g = game("run");
+  for (const [tick, face] of [[0, "walk1"], [3, "walk2"]]) {
+    const s = g.init(2);
+    s.obs = [];
+    s.tick = tick;
+    const buf = drawTones(g, s);
+    let bottom = -1;
+    for (let y = 3; y < Play.RUN.FLOOR; y++) for (let x = Play.RUN.PET_X; x < Play.RUN.PET_X + 32; x++) {
+      if (buf[y * W + x] === 0) bottom = y;
+    }
+    assert.equal(bottom, 99, `${face} sits on the floor row, not bobbing`);
+    const grid = poseFor("side", face);
+    for (const [x, y, t] of spriteAt(grid, Play.RUN.PET_X, Play.RUN.FLOOR - 1 - inkBottom(grid))) {
+      assert.equal(buf[y * W + x], t, `${face} pixel ${x},${y}`);
+    }
+  }
+  /* in the air the walk1 offset is the base, plus the jump height: no bob, one clean lift */
+  const air = g.init(2);
+  air.obs = [];
+  air.onGround = false; air.vy = -4; air.h = 20;
+  const lifted = drawTones(g, air);
+  const jBase = Play.RUN.FLOOR - 1 - inkBottom(poseFor("side", "walk1"));
+  for (const [x, y, t] of spriteAt(poseFor("side", "jump"), Play.RUN.PET_X, jBase - 20)) {
+    assert.equal(lifted[y * W + x], t, `jump pixel ${x},${y}`);
+  }
+});
+
+test("run: a nut floating over the lane gives ten points and disappears", () => {
+  const g = game("run"), s = g.init(9);
+  s.obs = [{ x: 90, y: 88, w: 14, h: 12, k: 0, kind: "ground", nut: { x: 28, y: 70 } }];
+  const before = s.score;
+  g.step(s, { left: false, right: false, a: true, press: { left: false, right: false, a: true } }, 50);
+  assert.ok(s.events.includes("jump"));
+  assert.ok(s.events.includes("nut"), "the jump took the nut");
+  assert.equal(s.score, before + Play.RUN.NUT_PTS, "a nut is ten points on top of the distance");
+  assert.equal(Play.RUN.NUT_PTS, 10);
+  assert.equal(s.obs[0].nut, null, "and it is gone");
+});
+
+test("run: a hit stops the world, and twelve ticks later the round is over", () => {
+  const g = game("run"), s = g.init(11);
+  const inp = { left: false, right: false, a: false, press: {} };
+  for (let i = 0; i < 400 && !s.dying && !s.done; i++) g.step(s, inp, 50);
+  assert.ok(s.dying > 0, "the first thing in the lane stopped the run");
+  assert.ok(s.events.includes("hit"));
+  assert.equal(s.done, false, "the result waits for the short countdown");
+  const xs = s.obs.map((o) => o.x).join(","), d0 = s.dist, t0 = s.tick, score0 = s.score;
+  const buf = new Uint8Array(W * H);
+  g.draw(s, buf, W, H, PACK, poseFor);
+  const face = poseFor("front", "surprised");
+  for (const [x, y, t] of spriteAt(face, Play.RUN.PET_X, Play.RUN.FLOOR - 1 - inkBottom(face))) {
+    assert.equal(buf[y * W + x], t, `the surprised face pixel ${x},${y}`);
+  }
+  for (let i = 0; i < 11; i++) g.step(s, inp, 50);
+  assert.equal(s.obs.map((o) => o.x).join(","), xs, "the world stopped");
+  assert.equal(s.dist, d0, "and the distance with it");
+  assert.equal(s.score, score0);
+  assert.equal(s.tick, t0 + 11);
+  assert.ok(s.dying > 0, "still counting down");
+  g.step(s, inp, 50);
+  assert.equal(s.dying, 0);
+  assert.equal(s.done, true, "twelve ticks later the round is over");
+  assert.ok(s.events.includes("end"));
+  assert.ok(s.joy >= 1);
 });
 
 /* The bots the owner's numbers are measured with. The target is the platform directly above the one just left,
@@ -401,22 +602,15 @@ test("climb: collision uses the feet, not the empty corners of the 32 px sprite"
 
 test("reactions: a small pure table per game names the pose of the moment", () => {
   const R = Play.reaction;
-  assert.equal(R("catch", "catch", { catches: 1 }), "happy");
-  assert.equal(R("catch", "catch", { catches: 5 }), "jump", "every 5th catch is a short cheer");
-  assert.equal(R("catch", "miss", { misses: 1 }), "fall");
-  assert.equal(R("catch", "miss", { misses: 2 }), "sad");
-  assert.equal(R("bounce", "bat", {}), "jump", "the pet's push is its own moment");
-  assert.equal(R("bounce", "return", { rally: 4 }), null, "your return makes the pet do nothing");
-  assert.equal(R("bounce", "return", { rally: 9 }), null, "and a long rally changes nothing");
-  assert.equal(R("bounce", "petmiss", {}), "surprised", "the pet whiffed: a surprised face");
-  assert.equal(R("bounce", "miss", { misses: 1 }), "surprised", "the ball passed your paddle");
+  assert.equal(R("run", "hit", {}), "surprised", "running into something is the end of a run");
+  assert.equal(R("run", "jump", {}), null, "a jump needs no face");
+  assert.equal(R("run", "nut", {}), null, "and a nut is the play, not a pose");
   assert.equal(R("climb", "record", { height: 30 }), "happy");
   assert.equal(R("climb", "blink", {}), "blink");
   assert.equal(R("climb", "land", {}), null);
-  assert.equal(R("nope", "catch", {}), null);
+  assert.equal(R("nope", "hit", {}), null);
   /* the reaction really reaches the drawn frame and then gives way to the movement pose */
-  const g = game("catch"), s = g.init(3);
-  s.things = []; s.next = 999;
+  const g = game("climb"), s = g.init(3);
   s.react = "happy"; s.reactUntil = s.tick + 5;
   const buf = new Uint8Array(W * H);
   g.draw(s, buf, W, H, PACK, poseFor);
@@ -443,4 +637,153 @@ test("climb: no input stays on the start platform past the old cap with score 0;
   g.step(high, { left: false, right: false, a: false, press: {} }, 50);
   assert.ok(high.height > 0, "above the threshold the camera climbs");
   assert.equal(high.score, 0, "height alone is no point: only landing on a new, higher platform scores");
+});
+
+test("climb: the scenery changes with height - wall, roof, sky, stars - in background tones only", () => {
+  const g = game("climb"), C = Play.CLIMB;
+  assert.ok(C.ROOF < C.SKY && C.SKY < C.SPACE, "the bands go up in order");
+  const pics = [0, C.ROOF + 40, C.SKY + 200, C.SPACE + 100].map((h) => {
+    const s = g.init(5);
+    s.plats = [];                                  /* only the scenery */
+    s.pet = null;
+    s.height = h;
+    const buf = drawTones(g, s);
+    for (let y = 4; y < H - 4; y++) for (let x = 4; x < W - 30; x++) {
+      assert.ok([2, 3].includes(buf[y * W + x]), `height ${h}: background is paper or mid at ${x},${y}`);
+    }
+    return Array.from(buf).join("");
+  });
+  assert.equal(new Set(pics).size, 4, "each band looks different");
+});
+
+test("run: stages - the sky, the pond and the lights out in random order, never twice in a row; A beats or strokes; the room comes back", () => {
+  const g = game("run"), R = Play.RUN;
+  assert.ok(R.STAGE_FIRST >= 2000, "the first stage comes after a proper run");
+  let sawFly = 0, sawSwim = 0, back = 0;
+  for (let seed = 1; seed <= 30; seed++) {
+    const r = runBot(g, seed, 4000);
+    assert.equal(r.state.done, false, `seed ${seed}: a careful player gets through every stage`);
+    assert.ok(r.state.stageN >= 2, `seed ${seed}: at least a sky and a pond in 4000 ticks (${r.state.stageN})`);
+  }
+  /* the order and the rules, step by step on one seed */
+  let gates = [], lastMid = null;
+  runBot(g, 5, 4000, "smart", (s, before, press, animBefore) => {
+    if (before === "run" && s.mode !== "run") {
+      if (s.mode === "fly") sawFly++; else sawSwim++;
+      assert.ok(s.events.includes(s.mode));
+      gates = []; lastMid = null;
+    }
+    if (before !== "run" && s.mode !== "run") {
+      assert.ok(s.speedQ <= R.STAGE_SPEED, "a stage is at most 5 px a tick");
+      /* A beats (or strokes); during the pond's dive and climb out A does nothing at all */
+      if (press && !animBefore) assert.ok(s.events.includes("flap") && !s.events.includes("jump"), "A beats, it does not jump");
+      if (press && animBefore) assert.ok(!s.events.includes("flap") && !s.events.includes("jump"), "A does nothing in the dive");
+      for (const o of s.obs) if (o.kind === "gate" && !gates.includes(o)) {
+        gates.push(o);
+        const gh = o.bot - o.top, mid = (o.top + o.bot) / 2;
+        assert.ok(gh >= R.GAP_MIN && gh <= R.GAP_START, `the opening is ${gh} px`);
+        if (lastMid != null) assert.ok(Math.abs(mid - lastMid) <= R.STAGE[o.scene].move + 1, `the opening moved ${mid - lastMid} px`);
+        lastMid = mid;
+      }
+    }
+    if (before !== "run" && s.mode === "run") {
+      back++;
+      assert.equal(gates.length, R.STAGE_GATES, "every stage has its gates");
+    }
+  });
+  /* the order: over many seeds every stage comes first sometimes, and no stage ever follows itself */
+  const firsts = new Set();
+  for (let seed = 1; seed <= 40; seed++) {
+    const kinds = [];
+    runBot(g, seed, 4000, "smart", (s, before) => {
+      if (before === "run" && s.mode !== "run") kinds.push(s.mode);
+      if (s.events.includes("dark")) kinds.push("dark");
+    });
+    firsts.add(kinds[0]);
+    for (let i = 1; i < kinds.length; i++) assert.notEqual(kinds[i], kinds[i - 1], `seed ${seed}: ${kinds.join(",")}`);
+  }
+  assert.equal(firsts.size, 3, "any stage can come first");
+  assert.ok(sawFly + sawSwim >= 1 && back >= 1, `sky ${sawFly}, pond ${sawSwim}, back in the room ${back}`);
+});
+
+test("run: the lights go out - a three-second fade, then only the lamp's oval is lit, then the light comes back", () => {
+  const g = game("run"), R = Play.RUN;
+  const s = g.init(1);
+  s.lastStage = "fly";
+  let started = null, out = null, on = null;
+  for (let i = 0; i < 3000 && !s.done && !on; i++) {
+    if (!started && s.dist + 162 >= s.stageAt) { s.lastStage = "x"; s.rn = 0; }
+    g.step(s, { left: false, right: false, a: false, press: {} }, 50);
+    if (s.events.includes("dark")) started = s.tick;
+    if (s.events.includes("lightsout")) out = s.tick;
+    if (s.events.includes("lightson")) on = s.tick;
+    s.dying = 0;                                      /* this test is about the stage clock, not about surviving */
+    s.obs = s.obs.filter((o) => o.kind !== "ground" && o.kind !== "plane");
+    if (s.mode !== "run" && !started) { s.mode = "run"; s.scene = "room"; s.anim = null; s.obs = []; s.intro = null; s.stageAt = s.dist + 10; }
+  }
+  assert.ok(started, "the lights went out at some point");
+  assert.equal(out - started, R.DARK_COUNT, "three seconds of fading");
+  assert.ok(on > out, "and the lights come back on");
+  /* drawing in the dark: ink outside the lamp's oval, the pet's own spot lit, the score in paper */
+  const d = g.init(2);
+  d.obs = []; d.dark = 1; d.darkCount = 0; d.darkUntil = 1e9; d.score = 7;
+  const buf = drawTones(g, d);
+  assert.equal(buf[60 * W + 150], 0, "far ahead is dark");
+  assert.equal(buf[10 * W + 20], 0, "the top left is dark");
+  assert.notEqual(buf[(R.FLOOR - 10) * W + 30], 0, "around the pet is lit");
+  let paper = 0;
+  for (let y = 4; y < 11; y++) for (let x = W - 12; x < W - 4; x++) if (buf[y * W + x] === 3) paper++;
+  assert.ok(paper > 5, "the score is still readable in the dark");
+});
+
+test("run: a way into each stage - the hint event first, an empty room, then the stage; A does nothing meanwhile", () => {
+  const g = game("run");
+  const s = g.init(3);
+  let intro = null, started = null, jumpsInIntro = 0;
+  for (let i = 0; i < 2000 && !started; i++) {
+    g.step(s, { left: false, right: false, a: true, press: { left: false, right: false, a: i % 3 === 0 } }, 50);
+    if (s.events.includes("intro_fly")) intro = s.tick;
+    if (intro && !started && s.events.includes("jump")) jumpsInIntro++;
+    if (s.events.includes("fly")) started = s.tick;
+    s.dying = 0;
+    s.obs = s.obs.filter((o) => o.kind === "gate");
+  }
+  assert.ok(intro && started, "the sky's way in, then the sky");
+  assert.ok(started - intro >= 30, `about two seconds to read the hint: ${started - intro} ticks`);
+  assert.equal(jumpsInIntro, 0, "A does not jump on the way in");
+});
+
+test("run: into the pond - a dive through the surface to the bottom with a splash, and out again in an arc", () => {
+  const g = game("run"), R = Play.RUN;
+  let dive = null, settled = null, rise = null, out = null, splashes = 0, minH = 99;
+  runBot(g, 4, 4000, "smart", (s, before) => {
+    if (s.events.includes("splash")) splashes++;
+    if (before === "run" && s.mode === "swim") dive = s.tick;
+    if (dive && !settled) minH = Math.min(minH, s.h);
+    if (dive && !settled && s.mode === "swim" && !s.anim && s.gatesMade > 0) settled = s.tick;
+    if (s.mode === "swim" && s.anim && s.anim.kind === "rise" && !rise) rise = s.tick;
+    if (before === "swim" && s.mode === "run" && !out) {
+      out = s.tick;
+      assert.ok(!s.onGround && s.h > 0, "it leaves the water in the air, then falls onto the floor");
+    }
+  });
+  assert.ok(dive && settled && rise && out, "dive, swim, climb out");
+  assert.ok(settled - dive >= 10, `the dive takes a moment: ${settled - dive} ticks`);
+  assert.equal(minH, 0, "it sinks to the bottom before the first gate");
+  assert.ok(splashes >= 2, "a splash going in and one coming out");
+});
+
+test("run: the dark comes and goes gradually - darker each count beat, and lighter again before it ends", () => {
+  const g = game("run");
+  const inkAt = (count, up) => {
+    const s = g.init(2);
+    s.obs = []; s.dark = 1; s.darkCount = count; s.lightUp = up || 0; s.darkUntil = 1e9;
+    const buf = drawTones(g, s);
+    let n = 0;
+    for (let y = 2; y < 30; y++) for (let x = 100; x < 160; x++) if (buf[y * W + x] === 0) n++;
+    return n;
+  };
+  const a = inkAt(59), b = inkAt(40), c = inkAt(20), d = inkAt(0), e = inkAt(0, 30), f = inkAt(0, 5);
+  assert.ok(a < b && b < c && c < d, `the night thickens: ${a} < ${b} < ${c} < ${d}`);
+  assert.ok(f < e && e <= d, `and thins when the light comes back: ${d} >= ${e} > ${f}`);
 });
