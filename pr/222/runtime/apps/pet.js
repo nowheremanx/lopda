@@ -1649,7 +1649,8 @@ function gameTick(){
 function gameSounds(events){
   (events||[]).forEach(function(e){
     if(e==="nut") beep("coin");
-    else if(e==="jump") beep("tap");
+    else if(e==="jump" || e==="flap") beep("tap");
+    else if(e==="fly" || e==="swim") beep("ok");
     else if(e==="hit") beep("miss");
     else if(e==="land") beep("tick");
   });

@@ -244,6 +244,20 @@ var R_STEP_TICKS=100, R_TILE=240;
 /* the plane: its bottom 56 px above the floor, so the body clears it standing and in a hop of up to 38 px (A held
    at most three ticks, peak 36), and meets it in any longer jump (four ticks peak at 41). Low nuts sit 20 px up (any
    hop reaches them), high nuts 50 px up (A held three ticks or more). */
+/* Stages (owner, 2026-11-22: "late in a run nothing changes but the speed"): every R_STAGE_EVERY px of running the room
+   ends and a stretch of R_STAGE_GATES gates begins, out of the window into the sky or down into a pond, in turn. There
+   A no longer jumps: each press is one wing beat (sky) or one stroke (water), and the pet falls or sinks between them.
+   A gate is a column from above and a column from below with an opening between; the opening narrows from 56 to 38 px
+   and its middle moves at most 26 px (14 in the slower water, where it also stays at least 46 px wide) from one gate to the next, so a beat or two always reaches it. In the sky the roof
+   below is safe to stand on and the ceiling only stops you; in the water the surface stops you and the bottom is safe.
+   The world moves at most 5 px a tick in a stage. Then the pet comes back down to the floor and the room goes on. */
+var R_STAGE_FIRST=2400, R_STAGE_EVERY=4000, R_STAGE_GATES=14, R_STAGE_SPEED=20, R_GATE_W=18, R_GATE_SPACE=88;
+var R_GAP_START=56, R_GAP_MIN=38, R_GAP_STEP=2;
+var STAGE={
+  fly:{flap:12, grav:3, fall:16, top:10, ceil:4, move:26, gapMin:38},     /* quarter pixels: a beat lifts about 7 px, so it takes a beat every third of a second to hold height */
+  swim:{flap:10, grav:2, fall:12, top:32, ceil:30, move:14, gapMin:46}  /* a stroke lifts about 7 px, it sinks gently, the openings
+                                                              move less; the surface is row 26 */
+};
 var R_PLANE_UP=56, R_NUT_LOW=20, R_NUT_HIGH=50, R_NUT_PTS=10, R_LEVEL_TICKS=200;
 /* one seeded gap from a previous obstacle's right edge to the next one's left edge: a jump's 18 ticks of travel,
    30 px, and up to 70 px of room. runMinGap is the floor of that, and the tests check it. */
@@ -328,12 +342,67 @@ function runInit(seed){
   var s=base("run",seed);
   s.speedQ=R_SPEED_START; s.moveQ=0; s.dist=0; s.obs=[]; s.nutScore=0;
   s.h=0; s.vy=0; s.onGround=true; s.buf=0; s.dying=0;
+  s.mode="run"; s.scene="room"; s.stageAt=R_STAGE_FIRST; s.stageN=0; s.gatesMade=0; s.fq=0; s.fv=0; s.lastGap=null;
   runSpawn(s,W+60);                                     /* the first thing arrives after about three seconds */
   return s;
 }
+/* the stage's own physics, in quarter pixels of altitude above the floor (fq) and per tick (fv, up is positive) */
+function stagePhysics(s,inp){
+  var st=STAGE[s.mode], pressed=!!(inp.press && inp.press.a), hmax=(FLOOR-PET_BODY_TOP-st.ceil)*4;
+  if(pressed){ s.fv=st.flap; note(s,"flap"); }
+  else s.fv=Math.max(-st.fall,s.fv-st.grav);
+  s.fq+=s.fv;
+  if(s.fq<0){ s.fq=0; s.fv=0; }
+  if(s.fq>hmax){ s.fq=hmax; if(s.fv>0) s.fv=0; }
+  s.h=Math.floor(s.fq/4);
+  s.onGround=s.fq===0;
+}
+function gateOpening(s){
+  var st=STAGE[s.mode], gh=Math.max(st.gapMin,R_GAP_START-R_GAP_STEP*s.gatesMade);
+  var lo=st.top+Math.floor(gh/2), hi=FLOOR-6-Math.ceil(gh/2), mid;
+  if(s.lastGap==null) mid=Math.max(lo,Math.min(hi,FLOOR-40));
+  else mid=s.lastGap+Math.floor(rand(s)*(2*st.move+1))-st.move;
+  mid=Math.max(lo,Math.min(hi,mid));
+  s.lastGap=mid;
+  return {top:mid-Math.floor(gh/2), bot:mid+Math.ceil(gh/2)};
+}
+function spawnGate(s,x){
+  var g=gateOpening(s);
+  var o={x:x, y:0, w:R_GATE_W, h:0, kind:"gate", top:g.top, bot:g.bot, scene:s.mode, nut:null};
+  if(rand(s)<0.4) o.nut={x:x+Math.floor((R_GATE_W-NUT.w)/2), y:Math.floor((g.top+g.bot)/2)-Math.floor(NUT.h/2)};
+  s.obs.push(o);
+  s.gatesMade++;
+}
+function startStage(s){
+  s.mode=s.stageN%2 ? "swim" : "fly";
+  s.scene=s.mode;
+  s.stageN++;
+  s.gatesMade=0; s.lastGap=null;
+  s.onGround=false; s.vy=0; s.buf=0;
+  if(s.mode==="fly"){ s.fq=0; s.fv=STAGE.fly.flap; }               /* out of the window with a first beat */
+  else { s.fq=(FLOOR-PET_BODY_TOP-STAGE.swim.ceil)*4; s.fv=0; }     /* a splash onto the pond's surface */
+  s.h=Math.floor(s.fq/4);
+  note(s,s.mode);
+  spawnGate(s,W+30);
+}
+function endStage(s){
+  var was=s.mode;
+  s.mode="run";
+  s.stageAt=s.dist+R_STAGE_EVERY;
+  s.fv=0;
+  if(was==="fly" && s.h>0){ s.onGround=false; s.vy=0; }         /* it glides down onto the floor with the jump's fall */
+  else { s.h=0; s.fq=0; s.onGround=true; s.vy=0; note(s,"land"); }
+  s.scene="room";
+  runSpawn(s,W+60);
+}
+function hitsGate(o,top,bottom){
+  if(!(PET_X+PET_BODY_R>=o.x+1 && PET_X+PET_BODY_L<=o.x+o.w-2)) return false;
+  return top<o.top-1 || bottom>o.bot+1;
+}
 function runTick(s,inp){
   if(s.dying>0){ s.dying--; if(s.dying<=0) finish(s); return; }
-  s.speedQ=Math.min(R_SPEED_MAX,R_SPEED_START+Math.floor(s.tick/R_STEP_TICKS));
+  var ramp=R_SPEED_START+Math.floor(s.tick/R_STEP_TICKS);
+  s.speedQ=Math.min(s.mode==="run" ? R_SPEED_MAX : R_STAGE_SPEED,ramp);
   s.moveQ+=s.speedQ;
   var d=Math.floor(s.moveQ/4);
   s.moveQ-=d*4;
@@ -350,24 +419,28 @@ function runTick(s,inp){
     }
   }
   var pressed=!!(inp.press && inp.press.a);
-  if(pressed) s.buf=3;
   var jumped=false;
-  if(s.onGround && (pressed || s.buf>0)){
-    s.vy=R_JUMP_VY; s.h=0; s.onGround=false; s.buf=0; jumped=true; note(s,"jump");
-  }
-  if(!s.onGround){
-    s.h-=s.vy;
-    s.vy+=1;
-    if(s.h<=0){
-      s.h=0; s.vy=0; s.onGround=true;
-      /* a press made up to three ticks before the landing takes off right on it */
-      if(s.buf>0 && !jumped){
-        s.vy=R_JUMP_VY; s.onGround=false; s.buf=0; jumped=true; note(s,"jump");
+  if(s.mode!=="run") stagePhysics(s,inp);
+  else {
+    if(pressed) s.buf=3;
+    if(s.onGround && (pressed || s.buf>0)){
+      s.vy=R_JUMP_VY; s.h=0; s.onGround=false; s.buf=0; jumped=true; note(s,"jump");
+    }
+    if(!s.onGround){
+      s.h-=s.vy;
+      s.vy+=1;
+      if(s.h<=0){
+        s.h=0; s.vy=0; s.onGround=true;
+        if(s.scene!=="room"){ s.scene="room"; note(s,"land"); }
+        /* a press made up to three ticks before the landing takes off right on it */
+        if(s.buf>0 && !jumped){
+          s.vy=R_JUMP_VY; s.onGround=false; s.buf=0; jumped=true; note(s,"jump");
+        }
       }
     }
+    /* variable height: letting go while rising turns a 45 px jump into a short hop */
+    if(!s.onGround && !inp.a && s.vy<R_CUT_VY) s.vy=R_CUT_VY;
   }
-  /* variable height: letting go while rising turns a 45 px jump into a short hop */
-  if(!s.onGround && !inp.a && s.vy<R_CUT_VY) s.vy=R_CUT_VY;
   /* the body box: 16 px wide and 18 rows tall, its bottom row on the feet */
   var bottom=FLOOR-1-s.h, top=bottom-PET_BODY_TOP+1;
   for(i=0;i<s.obs.length;i++){
@@ -380,8 +453,8 @@ function runTick(s,inp){
   for(i=0;i<s.obs.length;i++){
     o=s.obs[i];
     if(o.kind==="none") continue;
-    if(PET_X+PET_BODY_R>=o.x+1 && PET_X+PET_BODY_L<=o.x+o.w-2 &&
-       bottom>=o.y+1 && top<=o.y+o.h-2){
+    if(o.kind==="gate" ? hitsGate(o,top,bottom) :
+       (PET_X+PET_BODY_R>=o.x+1 && PET_X+PET_BODY_L<=o.x+o.w-2 && bottom>=o.y+1 && top<=o.y+o.h-2)){
       note(s,"hit"); s.dying=R_DIE;
       break;
     }
@@ -389,9 +462,19 @@ function runTick(s,inp){
   for(i=s.obs.length-1;i>=0;i--) if(s.obs[i].x+s.obs[i].w<0) s.obs.splice(i,1);
   var last=null;
   for(i=0;i<s.obs.length;i++) if(!last || s.obs[i].x+s.obs[i].w>last.x+last.w) last=s.obs[i];
-  if(!last) runSpawn(s,W+10);
-  else if(last.x+last.w<=W) runSpawn(s,last.x+last.w+runMinGap(s.speedQ)+Math.floor(rand(s)*71));
-  if(!jumped && !pressed && s.buf>0) s.buf--;
+  if(s.mode==="run"){
+    if(s.dist+W>=s.stageAt){
+      /* the room ends: no new things; once the last one has gone by and the pet is on the floor, the stage begins */
+      if(!s.obs.length && s.onGround && s.scene==="room") startStage(s);
+    }
+    else if(!last) runSpawn(s,W+10);
+    else if(last.x+last.w<=W) runSpawn(s,last.x+last.w+runMinGap(s.speedQ)+Math.floor(rand(s)*71));
+  } else {
+    if(s.gatesMade<R_STAGE_GATES){
+      if(last && last.x<=W-R_GATE_SPACE+R_GATE_W) spawnGate(s,last.x+R_GATE_SPACE);
+    } else if(!s.obs.length) endStage(s);
+  }
+  if(s.mode==="run" && !jumped && !pressed && s.buf>0) s.buf--;
   s.score=Math.floor(s.dist/16)+s.nutScore;
 }
 function inkRows(g){
@@ -424,32 +507,94 @@ function runPetGrid(s,poseFor){
   if(s.dying>0) return poseOf(poseFor,"front","surprised");
   if(reacting(s)) return poseOf(poseFor,"front",s.react);
   var pose;
-  if(s.onGround) pose=(Math.floor(s.tick/3)%2)?"walk2":"walk1";
+  /* in a stage the paper wings (or fins) beat: fast in the sky, slow in the water; standing on the roof it walks */
+  if(s.mode==="fly" && !s.onGround) pose=(Math.floor(s.tick/2)%2)?"flap2":"flap1";
+  else if(s.mode==="swim") pose=(Math.floor(s.tick/4)%2)?"flap2":"flap1";
+  else if(s.onGround) pose=(Math.floor(s.tick/3)%2)?"walk2":"walk1";
   else if(s.vy<0) pose="jump";
   else pose=(Math.floor(s.tick/2)%2)?"flap2":"flap1";
   return poseOf(poseFor,"side",pose);
 }
-function runDraw(s,buf,w,h,pack,poseFor){
-  clear(buf);
-  runBackdrop(buf,w,h,(((Math.floor(s.dist/2))%R_TILE)+R_TILE)%R_TILE);
-  /* the floor: an ink line, a mid band under it and a dashed pattern that scrolls with the world */
+/* the sky stage: drifting clouds over a tiled roof */
+function skyBackdrop(buf,w,h,dist){
+  var off=Math.floor(dist/3), k, cx, cy, x, y, dx, dy;
+  for(k=0;k<4;k++){
+    cx=((k*67+20-off)%(w+60)+(w+60))%(w+60)-30; cy=14+(k*23)%50;
+    for(y=cy-6;y<=cy+1;y++) for(x=cx-14;x<=cx+14;x++){
+      var inC=function(px,py){ dx=px-cx; dy=py-cy;
+        return py<=cy && (dx*dx/196+dy*dy/36<=1 || (px-cx+6)*(px-cx+6)+(py-cy+3)*(py-cy+3)<=20); };
+      if(inC(x,y) && (!inC(x-1,y) || !inC(x+1,y) || !inC(x,y-1) || !inC(x,y+1))) put(buf,w,h,x,y,2);
+    }
+  }
   rect(buf,w,h,0,FLOOR,w,1,0);
   rect(buf,w,h,0,FLOOR+1,w,h-FLOOR-1,2);
-  var offw=((s.dist%24)+24)%24, x;
-  for(x=-offw;x<w;x+=24){
-    rect(buf,w,h,x,FLOOR+3,10,2,1);
-    rect(buf,w,h,x+12,FLOOR+8,6,1,3);
-    rect(buf,w,h,x+6,FLOOR+13,8,2,1);
+  var o2=((dist%16)+16)%16;
+  for(x=-o2;x<w;x+=16){ rect(buf,w,h,x+2,FLOOR+4,10,1,1); rect(buf,w,h,x+10,FLOOR+11,10,1,1); }
+}
+/* the pond: a wavy surface at row 26, light ripples, and a sandy bottom */
+function pondBackdrop(buf,w,h,dist){
+  var off=((Math.floor(dist/2)%8)+8)%8, x, y;
+  for(x=0;x<w;x++){ put(buf,w,h,x,25+((x+off)%8<4?0:1),0); }
+  for(y=40;y<FLOOR-4;y+=14) for(x=((y*5-dist)%32+32)%32;x<w;x+=32) rect(buf,w,h,x,y,6,1,2);
+  rect(buf,w,h,0,FLOOR,w,1,1);
+  rect(buf,w,h,0,FLOOR+1,w,h-FLOOR-1,2);
+  for(x=((-dist)%12+12)%12;x<w;x+=12) put(buf,w,h,x,FLOOR+5,1);
+}
+/* a gate: what hangs from above and what stands below, with the opening between; each scene its own things */
+function drawGate(buf,w,h,o){
+  var x=o.x, y;
+  if(o.scene==="fly"){
+    /* paper lanterns on a string, the lowest one at the opening's top */
+    for(y=o.top-12;y>-12;y-=12){
+      rect(buf,w,h,x+1,y,16,12,0); rect(buf,w,h,x+3,y+1,12,10,3);
+      rect(buf,w,h,x+3,y+4,12,1,2); rect(buf,w,h,x+3,y+7,12,1,2); rect(buf,w,h,x+8,y,2,12,1);
+    }
+    /* a brick chimney from the roof up to the opening's bottom, with a wider cap */
+    rect(buf,w,h,x-1,o.bot,R_GATE_W+2,4,0);
+    rect(buf,w,h,x+1,o.bot+4,16,FLOOR-o.bot-4,0); rect(buf,w,h,x+3,o.bot+4,12,FLOOR-o.bot-4,2);
+    for(y=o.bot+8;y<FLOOR;y+=6) rect(buf,w,h,x+3,y,12,1,1);
+  } else {
+    /* water weed hanging from the surface down to the opening */
+    for(y=27;y<o.top;y++){
+      var sway=((y>>2)%2) ? 1 : 0;
+      rect(buf,w,h,x+2+sway,y,14,1,1); put(buf,w,h,x+2+sway,y,0); put(buf,w,h,x+15+sway,y,0);
+    }
+    rect(buf,w,h,x+2,o.top-1,15,1,0);
+    /* round stones piled from the bottom up to the opening */
+    for(y=FLOOR-10;y>o.bot-10;y-=10){
+      var yy=Math.max(o.bot,y);
+      rect(buf,w,h,x+1,yy,16,FLOOR-yy>10?10:FLOOR-yy,0);
+      rect(buf,w,h,x+3,yy+1,12,(FLOOR-yy>10?10:FLOOR-yy)-2,2);
+      put(buf,w,h,x+1,yy,3); put(buf,w,h,x+16,yy,3);
+    }
+  }
+}
+function runDraw(s,buf,w,h,pack,poseFor){
+  clear(buf);
+  if(s.scene==="fly") skyBackdrop(buf,w,h,s.dist);
+  else if(s.scene==="swim") pondBackdrop(buf,w,h,s.dist);
+  else {
+    runBackdrop(buf,w,h,(((Math.floor(s.dist/2))%R_TILE)+R_TILE)%R_TILE);
+    /* the floor: an ink line, a mid band under it and a dashed pattern that scrolls with the world */
+    rect(buf,w,h,0,FLOOR,w,1,0);
+    rect(buf,w,h,0,FLOOR+1,w,h-FLOOR-1,2);
+    var offw=((s.dist%24)+24)%24, x;
+    for(x=-offw;x<w;x+=24){
+      rect(buf,w,h,x,FLOOR+3,10,2,1);
+      rect(buf,w,h,x+12,FLOOR+8,6,1,3);
+      rect(buf,w,h,x+6,FLOOR+13,8,2,1);
+    }
   }
   var i, o;
   for(i=0;i<s.obs.length;i++){
     o=s.obs[i];
     if(o.kind==="plane") blit(buf,w,h,PLANE.grid,o.x,o.y);
+    else if(o.kind==="gate") drawGate(buf,w,h,o);
     else if(o.kind!=="none") blit(buf,w,h,RUN_THINGS[o.k].grid,o.x,FLOOR-RUN_THINGS[o.k].h);
   }
   var grid=runPetGrid(s,poseFor), y;
   var rows=inkRows(grid), bottom=rows && rows.bottom>=0 ? rows.bottom : 31;
-  if(!s.onGround && s.h>0){
+  if(!s.onGround && s.h>0 || s.mode==="swim"){
     /* the air pose keeps the walk1 offset, so the bob is gone and only the jump lifts it */
     var w1=inkRows(poseOf(poseFor,"side","walk1"));
     y=FLOOR-1-(w1 && w1.bottom>=0 ? w1.bottom : 29)-s.h;
@@ -709,7 +854,9 @@ window.LopdaPetPlay={
   finish:finish,
   reaction:reaction,
   climbReachable:climbReachable,
-  RUN:{PLANE_UP:R_PLANE_UP, NUT_LOW:R_NUT_LOW, NUT_HIGH:R_NUT_HIGH, NUT_PTS:R_NUT_PTS, LEVEL_TICKS:R_LEVEL_TICKS,
+  RUN:{STAGE_FIRST:R_STAGE_FIRST, STAGE_EVERY:R_STAGE_EVERY, STAGE_GATES:R_STAGE_GATES, STAGE_SPEED:R_STAGE_SPEED,
+    GAP_START:R_GAP_START, GAP_MIN:R_GAP_MIN, GATE_SPACE:R_GATE_SPACE, STAGE:STAGE,
+    PLANE_UP:R_PLANE_UP, NUT_LOW:R_NUT_LOW, NUT_HIGH:R_NUT_HIGH, NUT_PTS:R_NUT_PTS, LEVEL_TICKS:R_LEVEL_TICKS,
     FLOOR:FLOOR, PET_X:PET_X, SPEED_START:R_SPEED_START, SPEED_MAX:R_SPEED_MAX, JUMP_VY:R_JUMP_VY,
     minGap:runMinGap},
   CLIMB:{ROOF:C_ROOF, SKY:C_SKY, SPACE:C_SPACE, RISE:C_RISE, RUN:C_RUN, GAP_MIN:C_GAP_MIN, GAP_MAX:C_GAP_MAX, GAP_HARD:C_RISE-4,
