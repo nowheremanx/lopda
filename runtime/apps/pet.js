@@ -1648,9 +1648,7 @@ function gameTick(){
 /* the packs name moments, the program names the short original sounds from the four-tone chip */
 function gameSounds(events){
   (events||[]).forEach(function(e){
-    if(e==="catch" || e==="nut") beep("coin");
-    else if(e==="splash") beep("err");
-    else if(e==="combo") beep("ok");
+    if(e==="nut") beep("coin");
     else if(e==="jump") beep("tap");
     else if(e==="hit") beep("miss");
     else if(e==="land") beep("tick");
@@ -1666,7 +1664,7 @@ function applyGameJoy(st){
   var id=st.id || (P.game && P.game.id);
   var score=Math.max(0,Math.floor(+st.score||0));
   if(id && score>bestScore(id)){
-    if(!P.save.best || typeof P.save.best!=="object" || Array.isArray(P.save.best)) P.save.best={catch:0,run:0,climb:0};
+    if(!P.save.best || typeof P.save.best!=="object" || Array.isArray(P.save.best)) P.save.best={run:0,climb:0};
     P.save.best[id]=score;
     if(P.game && P.game.id===id) P.game.newBest=true;
   }
@@ -2439,7 +2437,7 @@ function buildGameStart(panel){
   panel.onclick=function(){ startRound(); };
   var g=P.game ? gameById(P.game.id) : null, box=el("div","pet-gbox");
   box.appendChild(el("p","pet-gname",g?tr(g.labelKey):tr("pet.game.title")));
-  box.appendChild(el("p","pet-ghow",tr("pet.game.how."+(P.game?P.game.id:"catch"))));
+  box.appendChild(el("p","pet-ghow",tr("pet.game.how."+(P.game?P.game.id:"run"))));
   box.appendChild(el("p","pet-gbest",tr("pet.game.best",{n:bestScore(P.game?P.game.id:"")})));
   panel.appendChild(box);
 }
@@ -3087,7 +3085,7 @@ function bindRoom(){
       if(tap) tapPickCard(e);
     });
   });
-  /* The play field itself moves catch and climb: hold the left or right half, in addition to the chin pad. */
+  /* The play field itself moves climb: hold the left or right half, in addition to the chin pad. */
   cv.style.touchAction="none";
   function gameSide(e){
     var r=cv.getBoundingClientRect();

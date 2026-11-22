@@ -15,8 +15,9 @@
  *
  * Games may only ask a species pack for the standard poses (petart.js): front idle / happy / sad / angry / sulk /
  * blink / jump / fall / catch and side walk1 / walk2 / jump / flap1 / flap2. A pack that has the poses can play every
- * game, so a new species needs no game code. One side game ships, the runner (run): it uses the side walk, jump and
- * flap poses, and the front set for its one reaction and its end.
+ * game, so a new species needs no game code. Two games ship: the runner (run), which uses the side walk, jump and flap
+ * poses and the front set for its one reaction and its end, and the climber (climb), on the front idle, blink, jump
+ * and fall poses.
  * A game's reactions are a pure table (reaction(id, event, state)): the tick names a moment, the table names a pose,
  * and the pose lasts a few ticks before the movement pose takes over again.
  *
@@ -30,10 +31,10 @@
 var W=162, H=120, TICK=50;
 var TONE={k:0,d:1,m:2,p:3};
 /* the score at which a round is worth +2 instead of +1. Low on purpose: play is not a test. */
-var JOY2={catch:15,run:60,climb:6};
+var JOY2={run:60,climb:6};
 /* below this a round made no progress (it ran straight into the first thing, never left the start platform): no joy
    then, and the program says it wants another go instead of calling it fun (owner, 2026-11-22) */
-var JOY1={catch:3,run:10,climb:1};
+var JOY1={run:10,climb:1};
 
 function num(v){ var n=+v; return isFinite(n) ? n : 0; }
 function clamp(v,lo,hi){ v=Math.floor(num(v)); return v<lo ? lo : v>hi ? hi : v; }
@@ -90,11 +91,6 @@ function scoreDigits(buf,w,h,score){
   var gw=String(grid[0]).length;
   blit(buf,w,h,grid,w-4-gw,4);
 }
-function dots(buf,w,h,list){
-  for(var i=0;i<list.length;i++) rect(buf,w,h,list[i][0],list[i][1],2,2,2);
-}
-/* catch's floor and a few specks in the air; a wide, calm sky so the falling parts are the only movement */
-var CATCH_DOTS=[[20,20],[44,14],[70,22],[96,15],[122,23],[142,14],[58,34],[110,31],[31,44],[84,40],[135,42]];
 /* climb's scenery: the world goes up from the room's brick wall to the roof, the sky and the stars, so height is
    something you see, not only a number. Every mark belongs to a world altitude (the row's height above the start),
    never to a screen row, so it scrolls with the steps. Background tones only (paper and mid): the steps stay ink. */
@@ -175,14 +171,8 @@ function base(id,seed){
 /* ---------- reactions: one small table per game, a pure function of the moment and the round ----------
  * The tick calls this with the event it just added; the answer is a standard pose or null. Durations are in ticks
  * (50 ms), short on purpose: the pet answers the moment, then goes back to moving. */
-var REACT_TICKS={happy:6,fall:6,sad:8,jump:8,blink:4};
+var REACT_TICKS={happy:6,blink:4};
 var REACT={
-  catch:function(event,state){
-    if(event==="catch") return state.combo>0 && state.combo%5===0 ? "jump" : "happy";
-    if(event==="splash") return "surprised";
-    if(event==="miss") return state.lives<=1 ? "sad" : "fall";
-    return null;
-  },
   run:function(event,state){
     if(event==="hit") return "surprised";              /* it ran into something: the only end of a run */
     return null;                                       /* a jump and a nut are the play, not a face */
@@ -236,122 +226,6 @@ function run(game,state,input,dtMs){
   return state;
 }
 
-/* ---------- catch: the pet walks the floor, parts fall off the shelf, water drops are bad news ----------
- * Three lives, no clock: a part that falls past the floor costs one, and so does catching a drop (an electronic
- * pet and water). Every 200 ticks the fall gets one pixel a tick faster and the spawns come closer together; at
- * level 5 a part drops every 4-5 ticks. The pet's feet keep their 6 px a tick, so the round gets harder without
- * ever taking the controls away. */
-var THINGS=[
-  {grid:[".kkkk.","kppppk","kkkkkk",".kmmk.",".kmmk.","..kk.."]},   /* a bolt */
-  {grid:[".kkk.","kmpmk","kmmmk","kmpmk",".kkk."]},                 /* a nut */
-  {grid:[".k.k","kmmk","kmk.","kk.."]}                             /* a crumb */
-].map(function(t){
-  var g=scaleGrid(t.grid,2);
-  return {w:String(g[0]).length, h:g.length, grid:g};
-});
-/* The hazard: a 5 x 6 teardrop at the same 2 x scale, ink outline, a paper highlight and mid inside. */
-var CATCH_DROP={grid:["..k..",".kpk.",".kpk.","kppmk","kmmmk",".kkk."]};
-CATCH_DROP.grid=scaleGrid(CATCH_DROP.grid,2);
-CATCH_DROP.w=String(CATCH_DROP.grid[0]).length;
-CATCH_DROP.h=CATCH_DROP.grid.length;
-var LEVEL_TICKS=200, LEVEL_MAX=5, DROP_FROM=1, DROP_CHANCE=0.18;
-function catchLevel(tick){ return Math.min(LEVEL_MAX,Math.floor(num(tick)/LEVEL_TICKS)); }
-function catchFallSpeed(level){ return 4+clamp(level,0,LEVEL_MAX); }        /* 4 -> 9 px a tick */
-function catchSpawnBase(level){ return 14-2*clamp(level,0,LEVEL_MAX); }     /* 14 -> 4 ticks */
-/* A drop that would share a part's landing spot while that part is still high would force the player to pick
-   one and lose the other: where that happens the spawn is a part instead. */
-function dropNearPart(s,x,w){
-  var cx=x+w/2;
-  for(var i=0;i<s.things.length;i++){
-    var o=s.things[i];
-    if(o.k==="drop" || o.y>=40) continue;
-    if(Math.abs(o.x+o.w/2-cx)<=12) return true;
-  }
-  return false;
-}
-function catchSpawn(s){
-  var level=clamp(s.level||0,0,LEVEL_MAX);
-  var k=Math.floor(rand(s)*THINGS.length), t=THINGS[k];
-  var drop=level>=DROP_FROM && rand(s)<DROP_CHANCE;
-  var obj=drop ? CATCH_DROP : t;
-  var x=4+Math.floor(rand(s)*(W-8-obj.w));
-  if(drop && dropNearPart(s,x,obj.w)){
-    drop=false; obj=t;
-    x=4+Math.floor(rand(s)*(W-8-obj.w));
-  }
-  s.things.push({x:x,y:-obj.h,k:drop?"drop":k,w:obj.w,h:obj.h});
-  s.next=catchSpawnBase(level)+Math.floor(rand(s)*(7-level));
-}
-function catchInit(seed){
-  var s=base("catch",seed);
-  s.petX=64; s.petY=84; s.things=[]; s.misses=0; s.splashes=0; s.catches=0; s.combo=0;
-  s.level=0; s.lives=3; s.next=14;
-  return s;
-}
-function catchTick(s,inp){
-  var dir=(inp.right?1:0)-(inp.left?1:0);
-  if(dir) s.petX=clamp(s.petX+dir*6,1,W-33);          /* 120 px a second: the whole floor in 1.3 seconds */
-  s.level=catchLevel(s.tick);
-  s.next--;
-  if(s.next<=0) catchSpawn(s);
-  var speed=catchFallSpeed(s.level);
-  for(var i=s.things.length-1;i>=0;i--){
-    var o=s.things[i];
-    o.y+=speed;
-    var bottom=o.y+o.h, ox=o.x+o.w/2;
-    if(bottom>=s.petY+8 && bottom<=s.petY+30 && ox>=s.petX+2 && ox<=s.petX+30){
-      s.things.splice(i,1);
-      if(o.k==="drop"){
-        s.splashes++; s.combo=0; s.lives=3-s.misses-s.splashes; note(s,"splash");
-      } else {
-        s.catches++; s.combo++;
-        if(s.combo%5===0){ s.score+=2; note(s,"catch"); note(s,"combo"); }
-        else { s.score++; note(s,"catch"); }
-      }
-      continue;
-    }
-    if(o.y>H){
-      s.things.splice(i,1);
-      if(o.k==="drop") continue;                       /* a drop that falls past is good news, not a miss */
-      s.misses++; s.combo=0; s.lives=3-s.misses-s.splashes; note(s,"miss");
-    }
-  }
-  s.lives=3-s.misses-s.splashes;
-  if(s.lives<=0) finish(s);
-}
-function catchDraw(s,buf,w,h,pack,poseFor){
-  clear(buf);
-  dots(buf,w,h,CATCH_DOTS);
-  /* the shelf the parts fall off: a mid plank across the top, two dark brackets under it */
-  rect(buf,w,h,2,10,w-4,2,2);
-  rect(buf,w,h,18,12,3,2,1);
-  rect(buf,w,h,w-21,12,3,2,1);
-  rect(buf,w,h,0,h-6,w,1,1);
-  rect(buf,w,h,0,h-5,w,5,2);
-  var near=false;
-  for(var i=0;i<s.things.length;i++){
-    var o=s.things[i];
-    if(o.y>s.petY-48 && o.y<s.petY && Math.abs(o.x+o.w/2-(s.petX+16))<20) near=true;
-  }
-  var pose=reacting(s) ? s.react : (near?"catch":"idle");
-  blit(buf,w,h,poseOf(poseFor,"front",pose),s.petX,s.petY);
-  for(i=0;i<s.things.length;i++){
-    var t=s.things[i].k==="drop" ? CATCH_DROP : (THINGS[s.things[i].k]||THINGS[0]);
-    blit(buf,w,h,t.grid,s.things[i].x,s.things[i].y);
-  }
-  /* the lives: three 4 x 4 pips at the top left, ink while left and a mid outline once lost */
-  for(i=0;i<3;i++){
-    var px=5+i*6;
-    if(i<s.lives) rect(buf,w,h,px,4,4,4,0);
-    else {
-      rect(buf,w,h,px,4,4,1,2); rect(buf,w,h,px,7,4,1,2);
-      rect(buf,w,h,px,4,1,4,2); rect(buf,w,h,px+3,4,1,4,2);
-    }
-  }
-  frame(buf,w,h);
-  scoreDigits(buf,w,h,s.score);
-}
-
 /* ---------- run: one button, the pet runs right through its own room, hold A to jump higher ----------
  * The floor is an ink line at row 100 with a mid band under it; the pet is pinned at x=16 and the world scrolls
  * past it. Speed and distance are in quarter pixels, kept as integers, so every position stays an integer room
@@ -367,7 +241,7 @@ function runMinGap(speedQ){
   return Math.ceil(18*Math.max(0,num(speedQ))/4)+30;
 }
 /* the room's own furniture as things in the way: a book, a bowl, a slipper, and after 20 s a stack of two books.
-   Ink outline, dark or mid inside, 2 x 2 blocks like the catch props. */
+   Ink outline, dark or mid inside, 2 x 2 blocks. */
 var RUN_THINGS=[
   {grid:["kkkkkkk","kdmmmmk","kdmmmmk","kdmmmmk","kdmmmmk","kkkkkkk"]},       /* a book, 14 x 12 */
   {grid:["kkkkkkkkk","kdddddddk",".kmmmmmk.","..kkkkk.."]},                   /* a bowl, 18 x 8 */
@@ -377,14 +251,17 @@ var RUN_THINGS=[
   var g=scaleGrid(t.grid,2);
   return {w:String(g[0]).length, h:g.length, grid:g};
 });
-var RUN_NUT=THINGS[1];                                  /* the catch game's nut, 10 x 10 */
+var NUT=(function(){                                   /* the old 5 x 5 nut at the room's 2 x scale, 10 x 10 */
+  var g=scaleGrid([".kkk.","kmpmk","kmmmk","kmpmk",".kkk."],2);
+  return {w:String(g[0]).length, h:g.length, grid:g};
+})();
 function runSpawn(s,x){
   var late=s.tick>=400, k=Math.floor(rand(s)*(late?RUN_THINGS.length:RUN_THINGS.length-1));
   var t=RUN_THINGS[k];
   var o={x:x,y:FLOOR-t.h,w:t.w,h:t.h,k:k,nut:null};
   /* about a third of the obstacles carry a nut above them: a reward for jumping, never a reason to */
   if(rand(s)<0.35){
-    o.nut={x:x+Math.floor(t.w/2)-Math.floor(RUN_NUT.w/2), y:FLOOR-30-Math.floor(rand(s)*9)-RUN_NUT.h};
+    o.nut={x:x+Math.floor(t.w/2)-Math.floor(NUT.w/2), y:FLOOR-30-Math.floor(rand(s)*9)-NUT.h};
   }
   s.obs.push(o);
 }
@@ -431,8 +308,8 @@ function runTick(s,inp){
   var bottom=FLOOR-1-s.h, top=bottom-PET_BODY_TOP+1;
   for(i=0;i<s.obs.length;i++){
     o=s.obs[i];
-    if(o.nut && o.nut.x+RUN_NUT.w>PET_X+PET_BODY_L && o.nut.x<PET_X+PET_BODY_R+1 &&
-       o.nut.y+RUN_NUT.h>top && o.nut.y<bottom+1){
+    if(o.nut && o.nut.x+NUT.w>PET_X+PET_BODY_L && o.nut.x<PET_X+PET_BODY_R+1 &&
+       o.nut.y+NUT.h>top && o.nut.y<bottom+1){
       o.nut=null; s.nutScore+=5; note(s,"nut");
     }
   }
@@ -516,7 +393,7 @@ function runDraw(s,buf,w,h,pack,poseFor){
   blit(buf,w,h,grid,PET_X,y);
   for(i=0;i<s.obs.length;i++){
     o=s.obs[i];
-    if(o.nut) blit(buf,w,h,RUN_NUT.grid,o.nut.x,o.nut.y);
+    if(o.nut) blit(buf,w,h,NUT.grid,o.nut.x,o.nut.y);
   }
   frame(buf,w,h);
   scoreDigits(buf,w,h,s.score);
@@ -752,23 +629,19 @@ function climbDraw(s,buf,w,h,pack,poseFor){
   scoreDigits(buf,w,h,s.score);
 }
 
-/* ---------- the three packs ---------- */
-var CATCH={id:"catch", labelKey:"pet.game.catch", view:"front", init:catchInit,
-  step:function(s,i,dt){ return run(CATCH,s,i,dt); }, draw:catchDraw, tick:catchTick};
+/* ---------- the two packs ---------- */
 var RUN={id:"run", labelKey:"pet.game.run", view:"side", init:runInit,
   step:function(s,i,dt){ return run(RUN,s,i,dt); }, draw:runDraw, tick:runTick};
 var CLIMB={id:"climb", labelKey:"pet.game.climb", view:"front", init:climbInit,
   step:function(s,i,dt){ return run(CLIMB,s,i,dt); }, draw:climbDraw, tick:climbTick};
 
 window.LopdaPetPlay={
-  GAMES:[CATCH,RUN,CLIMB],
+  GAMES:[RUN,CLIMB],
   W:W, H:H, TICK:TICK,
   joyFor:joyFor,
   finish:finish,
   reaction:reaction,
   climbReachable:climbReachable,
-  CATCH:{LEVEL_TICKS:LEVEL_TICKS, LEVEL_MAX:LEVEL_MAX, fallSpeed:catchFallSpeed, spawnBase:catchSpawnBase,
-    DROP_FROM:DROP_FROM, DROP_CHANCE:DROP_CHANCE},
   RUN:{FLOOR:FLOOR, PET_X:PET_X, SPEED_START:R_SPEED_START, SPEED_MAX:R_SPEED_MAX, JUMP_VY:R_JUMP_VY,
     minGap:runMinGap},
   CLIMB:{ROOF:C_ROOF, SKY:C_SKY, SPACE:C_SPACE, RISE:C_RISE, RUN:C_RUN, GAP_MIN:C_GAP_MIN, GAP_MAX:C_GAP_MAX, GAP_HARD:C_RISE-4,

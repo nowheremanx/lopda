@@ -5462,74 +5462,14 @@ test("pet: games - the play list opens each pack, the canvas moves at 20 fps, B 
   await p.keyboard.press("ArrowRight");                    /* 食物 -> 玩 */
   await p.waitForTimeout(80);
 
-  /* 玩 opens a small vertical list of the three packs */
+  /* 玩 opens a small vertical list of the two packs */
   await key("a");
   await p.waitForSelector("#pet-panel:not([hidden])");
   const items = await p.$$eval("#pet-panel .pet-menu", (l) => l.map((x) => x.innerText.trim()));
-  assert.deepEqual(items, ["接东西", "快跑", "往上跳"]);
+  assert.deepEqual(items, ["快跑", "往上跳"]);
   assert.equal(await p.locator("#pet-keys .sk-a span").innerText(), "开始");
 
-  /* catch: its start card, then the 20 fps loop runs while visible, stops while hidden and resumes; the pet's x follows the keys */
-  await key("a");
-  const startCard = await p.locator("#pet-panel").innerText();
-  assert.match(startCard, /接东西/, "the start card names the game");
-  assert.match(startCard, /接住零件，别碰水滴/, "and gives one line of how to play");
-  assert.equal(await p.locator("#pet-keys .sk-a span").innerText(), "开始");
-  await key("a");                                          /* the first key removes the start card */
-  assert.ok(await p.isHidden("#pet-panel"), "a running play pack shows the room canvas");
-  await p.evaluate(() => { window.__steps = 0; });
-  await p.waitForTimeout(1000);
-  const ran = await steps();
-  assert.ok(ran >= 10 && ran <= 35, `about 20 steps in a second: ${ran}`);
-  await p.evaluate(() => {
-    Object.defineProperty(document, "hidden", { value: true, configurable: true });
-    document.dispatchEvent(new Event("visibilitychange"));
-    window.__steps = 0;
-  });
-  await p.waitForTimeout(500);
-  assert.equal(await steps(), 0, "no steps while the page is hidden");
-  await p.evaluate(() => {
-    Object.defineProperty(document, "hidden", { value: false, configurable: true });
-    document.dispatchEvent(new Event("visibilitychange"));
-    window.__steps = 0;
-  });
-  await p.waitForTimeout(500);
-  const resumed = await steps();
-  assert.ok(resumed >= 5 && resumed <= 20, `the loop resumed: ${resumed} steps in half a second`);
-  const c0 = await sig();
-  const x0 = await p.evaluate(() => window.__gameState && window.__gameState.petX);
-  await p.keyboard.down("ArrowRight");
-  await p.waitForTimeout(400);
-  await p.keyboard.up("ArrowRight");
-  await p.keyboard.down("ArrowLeft");
-  await p.waitForTimeout(250);
-  await p.keyboard.up("ArrowLeft");
-  const x1 = await p.evaluate(() => window.__gameState && window.__gameState.petX);
-  assert.ok(x1 > x0, `the pet walked right (${x0} -> ${x1})`);
-  /* holding the right half of the play field also walks it */
-  const tb = await p.locator("#pet-cv").boundingBox();
-  const tx0 = x1;
-  await p.mouse.move(tb.x + tb.width * 0.8, tb.y + tb.height * 0.5);
-  await p.mouse.down();
-  await p.waitForTimeout(300);
-  const tx1 = await p.evaluate(() => window.__gameState && window.__gameState.petX);
-  await p.mouse.up();
-  assert.ok(tx1 > tx0, `holding the right half walks it too (${tx0} -> ${tx1})`);
-  assert.notEqual(await sig(), c0, "catch moves");
-  await assertFourTones("catch");
-  assert.equal(await p.locator("#pet-keys .sk-b span").innerText(), "退出");
-  await key("b");
-  assert.ok(await p.isHidden("#pet-panel"));
-  assert.equal(await p.locator("#pet-keys .sk-b span").innerText(), "返回", "B left the game for the room");
-  await p.evaluate(() => { window.__steps = 0; });
-  await p.waitForTimeout(300);
-  assert.equal(await steps(), 0, "B stopped the 20 fps loop");
-
-  /* run: pick the second pack, the start card names it, A starts, A jumps, the room scrolls, B leaves */
-  await key("a");
-  await p.waitForSelector("#pet-panel:not([hidden])");
-  await p.keyboard.press("ArrowDown");
-  await p.waitForTimeout(80);
+  /* run: the first pack's start card, then A starts, A jumps, the room scrolls, B leaves */
   await key("a");
   await p.waitForSelector("#pet-panel:not([hidden])");
   assert.match(await p.locator("#pet-panel").innerText(), /快跑/);
@@ -5553,39 +5493,77 @@ test("pet: games - the play list opens each pack, the canvas moves at 20 fps, B 
   assert.equal(await p.locator("#pet-keys .sk-b span").innerText(), "退出");
   await key("b");
 
-  /* climb: the pet jumps, the camera scrolls, steering moves it, B leaves */
+  /* climb: the second pack's start card, then the 20 fps loop runs while visible, stops while hidden and
+     resumes; holding a half of the play field steers it, as do the keys; B leaves */
   await key("a");
   await p.waitForSelector("#pet-panel:not([hidden])");
-  await p.keyboard.press("ArrowDown");
   await p.keyboard.press("ArrowDown");
   await p.waitForTimeout(80);
   await key("a");
   await p.waitForSelector("#pet-panel:not([hidden])");
   assert.match(await p.locator("#pet-panel").innerText(), /往上跳/);
-  await key("a");                                          /* start */
-  await p.waitForTimeout(250);
-  const m0 = await sig();
+  assert.match(await p.locator("#pet-panel").innerText(), /左右移动，往上跳/, "and gives one line of how to play");
+  assert.equal(await p.locator("#pet-keys .sk-a span").innerText(), "开始");
+  await key("a");                                          /* the first key removes the start card */
+  assert.ok(await p.isHidden("#pet-panel"), "a running play pack shows the room canvas");
+  await p.evaluate(() => { window.__steps = 0; });
+  await p.waitForTimeout(1000);
+  const ran = await steps();
+  assert.ok(ran >= 10 && ran <= 35, `about 20 steps in a second: ${ran}`);
+  await p.evaluate(() => {
+    Object.defineProperty(document, "hidden", { value: true, configurable: true });
+    document.dispatchEvent(new Event("visibilitychange"));
+    window.__steps = 0;
+  });
+  await p.waitForTimeout(500);
+  assert.equal(await steps(), 0, "no steps while the page is hidden");
+  await p.evaluate(() => {
+    Object.defineProperty(document, "hidden", { value: false, configurable: true });
+    document.dispatchEvent(new Event("visibilitychange"));
+    window.__steps = 0;
+  });
+  await p.waitForTimeout(500);
+  const resumed = await steps();
+  assert.ok(resumed >= 5 && resumed <= 20, `the loop resumed: ${resumed} steps in half a second`);
+  const c0 = await sig();
+  /* holding the left half of the play field steers it left; the pet stays over the start platform */
+  const tb = await p.locator("#pet-cv").boundingBox();
+  const tx0 = await p.evaluate(() => window.__gameState && window.__gameState.pet.x);
+  await p.mouse.move(tb.x + tb.width * 0.2, tb.y + tb.height * 0.5);
+  await p.mouse.down();
+  await p.waitForTimeout(300);
+  const tx1 = await p.evaluate(() => window.__gameState && window.__gameState.pet.x);
+  await p.mouse.up();
+  assert.ok(tx1 < tx0, `holding the left half steers it too (${tx0} -> ${tx1})`);
+  assert.notEqual(await sig(), c0, "climb moves");
+  await assertFourTones("climb");
   const mx0 = await p.evaluate(() => window.__gameState && window.__gameState.pet.x);
   await p.keyboard.down("ArrowRight");
   await p.waitForTimeout(500);
   await p.keyboard.up("ArrowRight");
   const mx1 = await p.evaluate(() => window.__gameState && window.__gameState.pet.x);
   assert.ok(mx1 > mx0, `climb steers right (${mx0} -> ${mx1})`);
-  assert.notEqual(await sig(), m0, "climb moves");
-  await assertFourTones("climb");
+  assert.equal(await p.locator("#pet-keys .sk-b span").innerText(), "退出");
   await key("b");
+  assert.ok(await p.isHidden("#pet-panel"));
+  assert.equal(await p.locator("#pet-keys .sk-b span").innerText(), "返回", "B left the game for the room");
+  await p.evaluate(() => { window.__steps = 0; });
+  await p.waitForTimeout(300);
+  assert.equal(await steps(), 0, "B stopped the 20 fps loop");
 
   /* a round's result card, then any key returns to the room (never 再来 / a new round) */
   await key("a");                                          /* 玩 */
   await p.waitForSelector("#pet-panel:not([hidden])");
-  await key("a");                                          /* catch: the start card */
+  await p.keyboard.press("ArrowDown");
+  await p.waitForTimeout(80);
+  await key("a");                                          /* climb: the start card */
   const before = await save();
   await key("a");                                          /* first key starts the round */
   await p.evaluate(() => LOPDA_DEBUG.pet.finishGame(16));
   await p.waitForTimeout(150);
   const st = await p.evaluate(() => LOPDA_DEBUG.pet.gameState());
   assert.equal(st.score, 16);
-  assert.equal(st.joy, 2, "16 catches is over the +2 threshold");
+  assert.equal(st.joy, 2, "16 points is over climb's +2 threshold");
   const panel = await p.locator("#pet-panel").innerText();
   assert.doesNotMatch(panel, /再来/, "no repeat button on the result");
   assert.match(panel, /它玩得很开心/, "a quiet comment");
@@ -5651,7 +5629,6 @@ test("pet: games - Climb shows three digits, has no time cap and keeps a best sc
   await key("a");
   await p.waitForSelector("#pet-panel:not([hidden])");
   await p.keyboard.press("ArrowDown");
-  await p.keyboard.press("ArrowDown");
   await p.waitForTimeout(80);
   await key("a");
   await p.waitForSelector("#pet-panel:not([hidden])");
@@ -5691,7 +5668,6 @@ test("pet: games - Climb shows three digits, has no time cap and keeps a best sc
   /* the next start card shows the record; a shorter round keeps it and does not claim a new one */
   await key("a");
   await p.waitForSelector("#pet-panel:not([hidden])");
-  await p.keyboard.press("ArrowDown");
   await p.keyboard.press("ArrowDown");
   await p.waitForTimeout(80);
   await key("a");
@@ -5741,7 +5717,6 @@ test("pet: third phone feedback - holding right climbs to a higher platform, and
   await key("a");
   await p.waitForSelector("#pet-panel:not([hidden])");
   await p.evaluate(() => LOPDA_DEBUG.pet.gameSeed(9));
-  await p.keyboard.press("ArrowDown");
   await p.keyboard.press("ArrowDown");
   await p.waitForTimeout(80);
   await key("a");
