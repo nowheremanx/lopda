@@ -1658,6 +1658,7 @@ function gameSounds(events){
       if(LP.toast) LP.toast(tr(key));
     }
     else if(e==="lightsout") beep("miss");
+    else if(e==="splash") beep("hit");
     else if(e==="hit") beep("miss");
     else if(e==="land") beep("tick");
   });

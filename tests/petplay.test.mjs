@@ -192,10 +192,10 @@ function runBot(g, seed, ticks, policy = "smart", watch = null) {
         else if (dist > 0 && dist <= sp * 3 + 6) { pressA = true; hold = 3; }
       }
     }
-    const before = s.mode;
+    const before = s.mode, animBefore = !!s.anim;
     g.step(s, { left: false, right: false, a: hold > 0 || pressA, press: { left: false, right: false, a: pressA } }, 50);
     if (hold > 0) hold--;
-    if (watch) watch(s, before, pressA);
+    if (watch) watch(s, before, pressA, animBefore);
     /* a new pattern: one or two things pushed in the same tick; its gap is from the previous pattern's right edge */
     const fresh = s.obs.filter((o) => !seen.has(o));
     const older = s.obs.filter((o) => seen.has(o));
@@ -667,7 +667,7 @@ test("run: stages - out of the window into the sky, then into the pond, in turn;
   }
   /* the order and the rules, step by step on one seed */
   let gates = [], lastMid = null;
-  runBot(g, 5, 4000, "smart", (s, before, press) => {
+  runBot(g, 5, 4000, "smart", (s, before, press, animBefore) => {
     if (before === "run" && s.mode !== "run") {
       if (s.mode === "fly") sawFly++; else sawSwim++;
       assert.equal(s.mode, (sawFly + sawSwim) % 2 ? "fly" : "swim", "sky first, then the pond, in turn");
@@ -676,7 +676,9 @@ test("run: stages - out of the window into the sky, then into the pond, in turn;
     }
     if (before !== "run" && s.mode !== "run") {
       assert.ok(s.speedQ <= R.STAGE_SPEED, "a stage is at most 5 px a tick");
-      if (press) assert.ok(s.events.includes("flap") && !s.events.includes("jump"), "A beats, it does not jump");
+      /* A beats (or strokes); during the pond's dive and climb out A does nothing at all */
+      if (press && !animBefore) assert.ok(s.events.includes("flap") && !s.events.includes("jump"), "A beats, it does not jump");
+      if (press && animBefore) assert.ok(!s.events.includes("flap") && !s.events.includes("jump"), "A does nothing in the dive");
       for (const o of s.obs) if (o.kind === "gate" && !gates.includes(o)) {
         gates.push(o);
         const gh = o.bot - o.top, mid = (o.top + o.bot) / 2;
@@ -740,4 +742,39 @@ test("run: a way into each stage - the hint event first, an empty room, then the
   assert.ok(intro && started, "the sky's way in, then the sky");
   assert.ok(started - intro >= 30, `about two seconds to read the hint: ${started - intro} ticks`);
   assert.equal(jumpsInIntro, 0, "A does not jump on the way in");
+});
+
+test("run: into the pond - a dive through the surface to the bottom with a splash, and out again in an arc", () => {
+  const g = game("run"), R = Play.RUN;
+  let dive = null, settled = null, rise = null, out = null, splashes = 0, minH = 99;
+  runBot(g, 4, 4000, "smart", (s, before) => {
+    if (s.events.includes("splash")) splashes++;
+    if (before === "run" && s.mode === "swim") dive = s.tick;
+    if (dive && !settled) minH = Math.min(minH, s.h);
+    if (dive && !settled && s.mode === "swim" && !s.anim && s.gatesMade > 0) settled = s.tick;
+    if (s.mode === "swim" && s.anim && s.anim.kind === "rise" && !rise) rise = s.tick;
+    if (before === "swim" && s.mode === "run" && !out) {
+      out = s.tick;
+      assert.ok(!s.onGround && s.h > 0, "it leaves the water in the air, then falls onto the floor");
+    }
+  });
+  assert.ok(dive && settled && rise && out, "dive, swim, climb out");
+  assert.ok(settled - dive >= 10, `the dive takes a moment: ${settled - dive} ticks`);
+  assert.equal(minH, 0, "it sinks to the bottom before the first gate");
+  assert.ok(splashes >= 2, "a splash going in and one coming out");
+});
+
+test("run: the dark comes and goes gradually - darker each count beat, and lighter again before it ends", () => {
+  const g = game("run");
+  const inkAt = (count, up) => {
+    const s = g.init(2);
+    s.obs = []; s.dark = 1; s.darkCount = count; s.lightUp = up || 0; s.darkUntil = 1e9;
+    const buf = drawTones(g, s);
+    let n = 0;
+    for (let y = 2; y < 30; y++) for (let x = 100; x < 160; x++) if (buf[y * W + x] === 0) n++;
+    return n;
+  };
+  const a = inkAt(59), b = inkAt(40), c = inkAt(20), d = inkAt(0), e = inkAt(0, 30), f = inkAt(0, 5);
+  assert.ok(a < b && b < c && c < d, `the night thickens: ${a} < ${b} < ${c} < ${d}`);
+  assert.ok(f < e && e <= d, `and thins when the light comes back: ${d} >= ${e} > ${f}`);
 });
