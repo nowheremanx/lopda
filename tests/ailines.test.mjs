@@ -9,13 +9,14 @@ const L = runScript("runtime/ailines.js", {}).LopdaAiLines;
 const P = AI.PROVIDERS;
 const plain = (x) => JSON.parse(JSON.stringify(x));
 
-test("a v1 document with a key becomes line l1 on OpenRouter, the default, with the score model kept", () => {
+test("a v1 document with a key becomes line l1 on OpenRouter, the default, with the score model as its vision model", () => {
   const st = L.load({ v: 1, key: "sk-or-abcd", model: "a/b", scoreModel: "x/vision" });
   assert.equal(st.lines.length, 1);
-  assert.deepEqual(plain(st.lines[0]), { id: "l1", provider: "openrouter", n: 1, key: "sk-or-abcd", model: "a/b", on: true, added: 0 });
+  assert.deepEqual(plain(st.lines[0]), { id: "l1", provider: "openrouter", n: 1, key: "sk-or-abcd", model: "a/b", visionModel: "x/vision", on: true, added: 0 });
   assert.equal(st.def, "l1");
   assert.equal(st.next, 2);
-  assert.deepEqual(plain(st.use), { score: { line: "l1", model: "x/vision" } });
+  assert.deepEqual(plain(st.use), {});
+  assert.equal(L.modelFor(st, "score", st.lines[0], P, "dflt"), "x/vision");
   const doc = L.toDoc(st);
   assert.equal(doc.v, 2);
   /* the mirror fields: an older runtime still finds its key */
@@ -36,7 +37,34 @@ test("a v1 document with only a score model makes no line and keeps the choice",
   const l = L.add(st, "openrouter", "sk-or-1", "", 5);
   assert.equal(L.modelFor(st, "score", L.pick(st, "score", P), P, "dflt"), "x/vision");
   assert.equal(L.toDoc(st).scoreModel, "x/vision");
+  assert.equal(l.visionModel, "x/vision");
+  assert.deepEqual(plain(st.use), {});
   assert.equal(st.def, l.id);
+});
+
+test("a v2 document from before the vision field moves use.score.model onto its OpenRouter line", () => {
+  const doc = { v: 2, next: 3, def: "l1", use: { score: { line: "l2", model: "x/see" }, pet: { line: "l1", model: "" } },
+    lines: [{ id: "l1", provider: "deepseek", n: 1, key: "kd", model: "", on: true, added: 1 },
+      { id: "l2", provider: "openrouter", n: 1, key: "ko", model: "", on: true, added: 2 }] };
+  const st = L.load(doc);
+  assert.equal(st.lines[1].visionModel, "x/see");
+  assert.deepEqual(plain(st.use), { score: { line: "l2", model: "" }, pet: { line: "l1", model: "" } });
+  assert.equal(st.lines[1].key, "ko");
+  /* idempotent */
+  assert.deepEqual(plain(L.load(L.toDoc(st))), plain(st));
+});
+
+test("vision models: the line's own, else the provider's; edit leaves it alone unless given", () => {
+  const st = L.load(null);
+  const k = L.add(st, "kimi", "kk", "", 1, "kimi-other");
+  assert.equal(L.modelFor(st, "score", k, P, "dflt"), "kimi-other");
+  assert.equal(L.modelFor(st, "studio", k, P, "dflt"), "");
+  L.edit(st, k.id, "", "text-model");
+  assert.equal(k.visionModel, "kimi-other");
+  assert.equal(k.key, "kk");
+  L.edit(st, k.id, "", "text-model", "");
+  assert.equal(L.modelFor(st, "score", k, P, "dflt"), "kimi-k3.1-pro");
+  assert.equal(L.modelFor(st, "scripts", k, P, "dflt"), "text-model");
 });
 
 test("no document, null, garbage: an empty state, nothing thrown", () => {
@@ -136,15 +164,16 @@ test("DeepSeek reads a score with its own model", () => {
   assert.equal(L.modelFor(st, "score", d, P, "dflt"), "deepseek-flash");
 });
 
-test("deleting a line drops its key and every use entry that named it; the score model choice stays", () => {
+test("deleting a line drops its key, its models and every use entry that named it", () => {
   const st = L.load({ v: 1, key: "sk-or", scoreModel: "x/v" });
   const d = L.add(st, "deepseek", "kd");
   L.choose(st, "scripts", d.id); L.choose(st, "pet", "l1");
   L.remove(st, "l1");
-  assert.deepEqual(plain(st.use), { scripts: { line: d.id, model: "" }, score: { line: "", model: "x/v" } });
+  assert.deepEqual(plain(st.use), { scripts: { line: d.id, model: "" } });
   assert.ok(!JSON.stringify(L.toDoc(st)).includes("sk-or"));
+  assert.ok(!JSON.stringify(L.toDoc(st)).includes("x/v"));
   L.remove(st, d.id);
-  assert.deepEqual(plain(st.use), { score: { line: "", model: "x/v" } });
+  assert.deepEqual(plain(st.use), {});
 });
 
 test("mirror fields follow the first OpenRouter line that is on", () => {
@@ -158,14 +187,15 @@ test("mirror fields follow the first OpenRouter line that is on", () => {
   assert.equal(L.toDoc(st).key, "");
 });
 
-test("modelFor: the line's model, or empty for the provider default; OpenRouter score uses the score choice", () => {
+test("modelFor: the line's model, or empty for the provider default; OpenRouter score uses the line's vision model or the score default", () => {
   const st = L.load(null);
   const o = L.add(st, "openrouter", "k", "a/b");
   assert.equal(L.modelFor(st, "scripts", o, P, "dflt"), "a/b");
   assert.equal(L.modelFor(st, "score", o, P, "dflt"), "dflt");
-  L.setScoreModel(st, "x/v");
+  L.edit(st, o.id, "", "a/b", "x/v");
   assert.equal(L.modelFor(st, "score", o, P, "dflt"), "x/v");
-  L.setScoreModel(st, "");
+  assert.equal(L.toDoc(st).scoreModel, "x/v");
+  L.edit(st, o.id, "", "a/b", "");
   assert.equal(L.modelFor(st, "score", o, P, "dflt"), "dflt");
   const q = L.add(st, "qwen", "kq", "");
   assert.equal(L.modelFor(st, "pet", q, P, "dflt"), "");
