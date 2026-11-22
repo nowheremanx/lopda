@@ -591,7 +591,9 @@ function renderAiUse(){
   }
   on.forEach(function(l){
     var p=lineProvider(l), dis=use==="score" && !(p && p.vision);
-    var li=aiUseRow(lineName(l), dis ? tr("ai.novision") : "", dis, valid && !dis && l.id===chosen,
+    /* each line is one key: its last four characters say which, as in the lines list */
+    var keyHint=l.key ? "…"+l.key.slice(-4) : "";
+    var li=aiUseRow(lineName(l), dis ? keyHint+(keyHint ? " · " : "")+tr("ai.novision") : keyHint, dis, valid && !dis && l.id===chosen,
       function(){ chooseUseLine(l.id); });
     ul.appendChild(li); focus.push(li);
   });
