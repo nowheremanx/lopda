@@ -63,11 +63,19 @@ test("each pack is deterministic for a seed and an input script", () => {
   assert.notDeepEqual(JSON.parse(JSON.stringify(c)), JSON.parse(JSON.stringify(d)));
 });
 
-test("a round always ends: at most 600 ticks for catch, and a run with no input hits the first thing within 400", () => {
-  const catchRound = drive(game("catch"), 7, 5000);
-  assert.equal(catchRound.state.done, true, "catch ended");
-  assert.ok(catchRound.steps < 5000, "catch did not loop forever");
-  assert.ok(catchRound.state.tick <= 600, `catch is capped in time: ${catchRound.state.tick}`);
+test("a round always ends: catch on its three lives within 1000 ticks, and a run with no input hits the first thing within 400", () => {
+  /* catch has no clock: with no input the pet misses parts until its three lives are gone */
+  const noInput = { left: false, right: false, a: false, press: { left: false, right: false, a: false } };
+  const catchGame = game("catch");
+  for (const seed of [7, 1, 99, 39]) {
+    const s = catchGame.init(seed);
+    let i = 0;
+    for (; i < 1000 && !s.done; i++) catchGame.step(s, noInput, 50);
+    assert.equal(s.done, true, `catch ${seed} ended`);
+    assert.ok(s.tick <= 1000, `catch ${seed} ended on its lives, not a clock: ${s.tick}`);
+    assert.ok(s.lives <= 0, `catch ${seed} lost all three lives`);
+    assert.ok(s.misses >= 1, `catch ${seed} ended by missed parts`);
+  }
   /* a run has no clock: it ends on the first hit, and the first obstacle arrives inside three seconds */
   for (const seed of [1, 7, 99]) {
     const r = drive(game("run"), seed, 5000);
@@ -398,7 +406,7 @@ test("run: a hit stops the world, and twelve ticks later the round is over", () 
   assert.ok(s.joy >= 1);
 });
 
-test("catch: the pet walks 6 px a tick and things come every 0.7 to 1.0 seconds", () => {
+test("catch: the pet walks 6 px a tick and at level 0 things come every 0.7 to 1.0 seconds", () => {
   const g = game("catch"), s = g.init(3);
   s.next = 999;
   const x = s.petX;
@@ -406,7 +414,240 @@ test("catch: the pet walks 6 px a tick and things come every 0.7 to 1.0 seconds"
   assert.equal(s.petX, x + 6, "120 px a second");
   s.next = 1;
   g.step(s, { left: false, right: false, a: false, press: {} }, 50);
-  assert.ok(s.next >= 14 && s.next <= 20, "spawn gap is 14-20 ticks: " + s.next);
+  assert.ok(s.next >= 14 && s.next <= 20, "spawn gap is 14-20 ticks at level 0: " + s.next);
+});
+
+/* ---------- catch's rules for v2: levels, the water drop, the combo, the lives ---------- */
+const CATCH_NO_INPUT = { left: false, right: false, a: false, press: { left: false, right: false, a: false } };
+function catchStep(g, s) { g.step(s, CATCH_NO_INPUT, 50); }
+
+test("catch: the level ramps every 200 ticks to 5, the fall is 4 + level and the spawns close in", () => {
+  const C = Play.CATCH;
+  assert.equal(C.LEVEL_TICKS, 200);
+  assert.equal(C.LEVEL_MAX, 5);
+  assert.equal(C.DROP_FROM, 1);
+  assert.equal(C.DROP_CHANCE, 0.18);
+  for (let level = 0; level <= 5; level++) {
+    assert.equal(C.fallSpeed(level), 4 + level, `level ${level} falls 4 + ${level}`);
+    assert.equal(C.spawnBase(level), 14 - 2 * level, `level ${level} spawns every ${14 - 2 * level} + rand`);
+  }
+  assert.equal(C.fallSpeed(0), 4);
+  assert.equal(C.fallSpeed(5), 9);
+  assert.equal(C.fallSpeed(9), 9, "past the top the speed stays at 9");
+  assert.equal(C.spawnBase(9), 4, "and the spawn stays at 4");
+
+  const g = game("catch");
+  const levelAt = (n) => {
+    const s = g.init(1);
+    s.next = 999; s.misses = 0; s.splashes = 0; s.lives = 3; s.tick = n - 1;
+    catchStep(g, s);
+    return s.level;
+  };
+  for (const [n, want] of [[1, 0], [199, 0], [200, 1], [399, 1], [400, 2], [599, 2], [600, 3], [999, 4], [1000, 5], [2000, 5]]) {
+    assert.equal(levelAt(n), want, `tick ${n} is level ${want}`);
+  }
+
+  /* the fall really uses the level's speed */
+  for (const [n, level] of [[1, 0], [200, 1], [600, 3], [1000, 5]]) {
+    const s = g.init(3);
+    s.next = 999; s.misses = 0; s.splashes = 0; s.lives = 3; s.tick = n - 1;
+    s.things = [{ x: 20, y: 0, k: 1, w: 10, h: 10 }];
+    catchStep(g, s);
+    assert.equal(s.things[0].y, C.fallSpeed(level), `at tick ${n} a thing falls ${C.fallSpeed(level)} px`);
+  }
+
+  /* the spawn interval is base + 0 .. (6 - level), checked at every level */
+  for (let level = 0; level <= 5; level++) {
+    const lo = C.spawnBase(level), hi = lo + (6 - level);
+    for (let seed = 1; seed <= 20; seed++) {
+      const s = g.init(seed);
+      for (let k = 0; k < 4; k++) {
+        s.misses = 0; s.splashes = 0; s.lives = 3;
+        s.tick = level * C.LEVEL_TICKS - 1; s.next = 1; s.things = [];
+        catchStep(g, s);
+        assert.equal(s.level, level);
+        assert.ok(s.next >= lo && s.next <= hi, `level ${level}: next ${s.next} in ${lo}..${hi}`);
+      }
+    }
+  }
+});
+
+test("catch: k: drop spawns only from level 1, never on a part's landing spot while that part is high", () => {
+  const C = Play.CATCH, g = game("catch");
+  function kindsAt(level, seed, count) {
+    const s = g.init(seed), out = [];
+    for (let k = 0; k < count; k++) {
+      s.misses = 0; s.splashes = 0; s.lives = 3;
+      s.tick = level * C.LEVEL_TICKS - 1; s.next = 1; s.things = [];
+      catchStep(g, s);
+      out.push(s.things[0].k);
+    }
+    return out;
+  }
+  const level0 = [];
+  for (let seed = 1; seed <= 30; seed++) level0.push(...kindsAt(0, seed, 10));
+  assert.ok(level0.length >= 300);
+  assert.equal(level0.filter((k) => k === "drop").length, 0, "no water at level 0");
+
+  const level1 = [];
+  for (let seed = 1; seed <= 30; seed++) level1.push(...kindsAt(1, seed, 10));
+  const drops = level1.filter((k) => k === "drop").length;
+  assert.ok(drops > 0, "water drops start at level 1");
+  const rate = drops / level1.length;
+  assert.ok(rate > 0.1 && rate < 0.28, `about 18% drops: ${(rate * 100).toFixed(1)}%`);
+
+  /* a parked part above row 40 makes a drop on top of it impossible: the spawn stays a part */
+  const s = g.init(77);
+  let checked = 0;
+  for (let i = 0; i < 600; i++) {
+    s.misses = 0; s.splashes = 0; s.lives = 3;
+    s.tick = C.LEVEL_TICKS - 1; s.next = 1;
+    s.things = [{ x: 70, y: 20, k: 1, w: 10, h: 10 }];  /* centre 75, 20 px above the line */
+    catchStep(g, s);
+    const spawned = s.things[s.things.length - 1];
+    if (spawned.k === "drop") {
+      assert.ok(Math.abs(spawned.x + spawned.w / 2 - 75) > 12, "a drop keeps 12 px from a high part");
+      checked++;
+    }
+  }
+  assert.ok(checked > 0, "drops still appear away from the part");
+});
+
+test("catch: a caught drop costs a life and the combo, and is not a miss; a passed drop costs nothing", () => {
+  const g = game("catch"), s = g.init(5);
+  s.next = 999; s.score = 0; s.combo = 4; s.misses = 0; s.splashes = 0; s.lives = 3;
+  s.things = [{ x: s.petX + 10, y: s.petY - 20, k: "drop", w: 10, h: 12 }];
+  for (let i = 0; i < 40 && s.splashes === 0; i++) catchStep(g, s);
+  assert.equal(s.splashes, 1, "the drop was caught");
+  assert.equal(s.misses, 0, "and that is not a miss");
+  assert.equal(s.lives, 2, "one life gone");
+  assert.equal(s.combo, 0, "the combo resets");
+  assert.equal(s.score, 0, "a drop scores nothing");
+  assert.ok(s.events.includes("splash"));
+  assert.equal(s.events.includes("catch"), false);
+  assert.equal(s.done, false);
+
+  const t = g.init(6);
+  t.next = 999; t.misses = 0; t.splashes = 0; t.lives = 3;
+  t.things = [{ x: 4, y: 110, k: "drop", w: 10, h: 12 }];
+  for (let i = 0; i < 10 && t.things.length; i++) catchStep(g, t);
+  assert.equal(t.things.length, 0, "the drop fell past");
+  assert.equal(t.splashes, 0);
+  assert.equal(t.misses, 0, "letting a drop fall is the point");
+  assert.equal(t.lives, 3);
+  assert.equal(t.events.includes("miss"), false);
+});
+
+test("catch: every fifth catch in a row scores two, and a miss starts the row again", () => {
+  const g = game("catch"), s = g.init(8);
+  s.next = 999; s.misses = 0; s.splashes = 0; s.lives = 3;
+  function catchOne() {
+    s.next = 999; s.things = [];
+    s.things.push({ x: s.petX + 10, y: s.petY - 20, k: 1, w: 10, h: 10 });
+    for (let i = 0; i < 15; i++) {
+      catchStep(g, s);
+      if (s.events.includes("catch")) return s.events.includes("combo");
+    }
+    throw new Error("the part was not caught");
+  }
+  const scores = [], combos = [];
+  for (let n = 0; n < 6; n++) { combos.push(catchOne()); scores.push(s.score); }
+  assert.deepEqual(scores, [1, 2, 3, 4, 6, 7], "the fifth catch is worth two");
+  assert.deepEqual(combos, [false, false, false, false, true, false], "and it raises combo");
+  assert.equal(s.combo, 6);
+
+  /* a missed part puts the row back to zero, so the next fifth is five catches later */
+  s.things = [{ x: 4, y: 110, k: 1, w: 10, h: 10 }];
+  let missed = false;
+  for (let i = 0; i < 10 && !missed; i++) { catchStep(g, s); missed = s.events.includes("miss"); }
+  assert.ok(missed);
+  assert.equal(s.combo, 0);
+  assert.equal(catchOne(), false, "the catch after a miss is an ordinary one");
+  assert.equal(s.score, 8);
+});
+
+test("catch: the third loss ends the round, on lives rather than a clock", () => {
+  const g = game("catch"), s = g.init(9);
+  s.next = 999; s.misses = 0; s.splashes = 0; s.lives = 3; s.combo = 3;
+  for (let k = 1; k <= 3; k++) {
+    s.things = [{ x: s.petX + 10, y: s.petY - 20, k: "drop", w: 10, h: 12 }];
+    for (let i = 0; i < 40 && s.splashes < k; i++) catchStep(g, s);
+    assert.equal(s.splashes, k);
+    assert.equal(s.lives, 3 - k);
+    if (k < 3) assert.equal(s.done, false, `still playing after ${k} losses`);
+  }
+  assert.equal(s.done, true, "the third splash ends it");
+  assert.ok(s.events.includes("end"));
+  assert.equal(s.misses, 0, "drops are not misses");
+  assert.ok(s.tick < 1000);
+});
+
+test("catch: the draw is four tones, with a shelf and brackets, and three pips for the lives", () => {
+  const g = game("catch"), s = g.init(12);
+  s.things = [{ x: 20, y: 30, k: "drop", w: 10, h: 12 }, { x: 100, y: 50, k: 1, w: 10, h: 10 }];
+  s.score = 9; s.combo = 4; s.misses = 1; s.splashes = 1; s.lives = 1;
+  const buf = drawTones(g, s);
+  for (let i = 0; i < buf.length; i++) assert.ok(buf[i] >= 0 && buf[i] <= 3, `pixel ${i} is ${buf[i]}`);
+  assert.equal(buf[10 * W + 100], 2, "a mid shelf plank across the top");
+  assert.equal(buf[12 * W + 19], 1, "a dark bracket under it");
+  assert.equal(buf[(H - 6) * W + 10], 1, "the ink floor line");
+  assert.equal(buf[(H - 4) * W + 10], 2, "the mid floor band");
+  assert.equal(buf[4 * W + 5], 0, "one life left: the first pip is ink");
+  assert.equal(buf[4 * W + 11], 2, "a lost pip is a mid outline");
+  assert.equal(buf[5 * W + 12], 3, "and its inside is paper");
+});
+
+/* The catch bot: walk toward the lowest part that can still be caught, and stay out of a water drop's
+   column before it reaches the floor. It reads only the state a player can see. */
+function catchBotStep(g, s) {
+  const C = Play.CATCH;
+  const level = Math.min(C.LEVEL_MAX, Math.floor((s.tick + 1) / C.LEVEL_TICKS));
+  const speed = C.fallSpeed(level);
+  const cx = s.petX + 16;
+  let dodge = 0, urgent = Infinity;
+  for (const o of s.things) {
+    if (o.k !== "drop") continue;
+    const ocx = o.x + o.w / 2, bottom = o.y + o.h;
+    const ticksIn = (s.petY + 8 - bottom) / speed;
+    const ticksOut = (s.petY + 30 - bottom) / speed;
+    if (ticksOut < 0 || ticksIn > 3) continue;          /* not about to be under us */
+    if (ocx < s.petX - 4 || ocx > s.petX + 36) continue;
+    if (ticksOut < urgent) { urgent = ticksOut; dodge = ocx >= cx ? -1 : 1; }
+  }
+  if (dodge) {
+    g.step(s, { left: dodge < 0, right: dodge > 0, a: false, press: { left: false, right: false, a: false } }, 50);
+    return;
+  }
+  let target = null, targetT1 = Infinity, next = null, nextT0 = Infinity;
+  for (const o of s.things) {
+    if (o.k === "drop") continue;
+    const ocx = o.x + o.w / 2, bottom = o.y + o.h;
+    if (bottom > s.petY + 30) continue;                 /* already past the catch */
+    const t1 = Math.max(0, (s.petY + 30 - bottom) / speed);
+    const t0 = (s.petY + 8 - bottom) / speed;
+    const lo = ocx - 14, hi = ocx + 14;                 /* where the pet's middle catches it */
+    const gap = cx < lo ? lo - cx : cx > hi ? cx - hi : 0;
+    if (gap <= 6 * t1 && t1 < targetT1) { targetT1 = t1; target = { lo, hi }; }
+    if (t0 < nextT0) { nextT0 = t0; next = { lo, hi }; }
+  }
+  const pick = target || next;
+  const dir = !pick ? 0 : cx < pick.lo ? 1 : cx > pick.hi ? -1 : 0;
+  g.step(s, { left: dir < 0, right: dir > 0, a: false, press: { left: false, right: false, a: false } }, 50);
+}
+
+test("catch: a greedy bot survives past tick 600 on at least 80% of 50 seeds", () => {
+  const g = game("catch");
+  let past = 0;
+  const ends = [];
+  for (let seed = 1; seed <= 50; seed++) {
+    const s = g.init(seed);
+    for (let i = 0; i < 700 && !s.done; i++) catchBotStep(g, s);
+    ends.push(s.tick);
+    if (s.tick > 600) past++;
+  }
+  ends.sort((a, b) => a - b);
+  assert.ok(past >= 40, `the greedy bot survived past tick 600 on ${past}/50 seeds`);
+  assert.ok(ends[0] > 300, `no seed ended absurdly early: lowest ${ends[0]}`);
 });
 
 /* The bots the owner's numbers are measured with. The target is the platform directly above the one just left,
@@ -570,10 +811,11 @@ test("climb: collision uses the feet, not the empty corners of the 32 px sprite"
 
 test("reactions: a small pure table per game names the pose of the moment", () => {
   const R = Play.reaction;
-  assert.equal(R("catch", "catch", { catches: 1 }), "happy");
-  assert.equal(R("catch", "catch", { catches: 5 }), "jump", "every 5th catch is a short cheer");
-  assert.equal(R("catch", "miss", { misses: 1 }), "fall");
-  assert.equal(R("catch", "miss", { misses: 2 }), "sad");
+  assert.equal(R("catch", "catch", { combo: 1 }), "happy");
+  assert.equal(R("catch", "catch", { combo: 5 }), "jump", "every 5th catch in a row is a short cheer");
+  assert.equal(R("catch", "splash", { lives: 2 }), "surprised", "a caught drop startles it");
+  assert.equal(R("catch", "miss", { lives: 3 }), "fall");
+  assert.equal(R("catch", "miss", { lives: 1 }), "sad", "on the last life a miss is sad");
   assert.equal(R("run", "hit", {}), "surprised", "running into something is the end of a run");
   assert.equal(R("run", "jump", {}), null, "a jump needs no face");
   assert.equal(R("run", "nut", {}), null, "and a nut is the play, not a pose");

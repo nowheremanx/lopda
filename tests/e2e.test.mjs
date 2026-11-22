@@ -5355,7 +5355,7 @@ test("pet: games - the play list opens each pack, the canvas moves at 20 fps, B 
   await key("a");
   const startCard = await p.locator("#pet-panel").innerText();
   assert.match(startCard, /接东西/, "the start card names the game");
-  assert.match(startCard, /接住掉下来的零件/, "and gives one line of how to play");
+  assert.match(startCard, /接住零件，别碰水滴/, "and gives one line of how to play");
   assert.equal(await p.locator("#pet-keys .sk-a span").innerText(), "开始");
   await key("a");                                          /* the first key removes the start card */
   assert.ok(await p.isHidden("#pet-panel"), "a running play pack shows the room canvas");
@@ -5463,16 +5463,16 @@ test("pet: games - the play list opens each pack, the canvas moves at 20 fps, B 
   await key("a");                                          /* catch: the start card */
   const before = await save();
   await key("a");                                          /* first key starts the round */
-  await p.evaluate(() => LOPDA_DEBUG.pet.finishGame(12));
+  await p.evaluate(() => LOPDA_DEBUG.pet.finishGame(16));
   await p.waitForTimeout(150);
   const st = await p.evaluate(() => LOPDA_DEBUG.pet.gameState());
-  assert.equal(st.score, 12);
-  assert.equal(st.joy, 2, "12 catches is over the +2 threshold");
+  assert.equal(st.score, 16);
+  assert.equal(st.joy, 2, "16 catches is over the +2 threshold");
   const panel = await p.locator("#pet-panel").innerText();
   assert.doesNotMatch(panel, /再来/, "no repeat button on the result");
   assert.match(panel, /它玩得很开心/, "a quiet comment");
   assert.match(panel, /按任意键回房间/, "the way back is named");
-  assert.equal(await p.locator(".pet-gscore").getAttribute("aria-label"), "得分 12");
+  assert.equal(await p.locator(".pet-gscore").getAttribute("aria-label"), "得分 16");
   const scoreInk = await p.evaluate(() => {
     const c = document.querySelector(".pet-gscore"), d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data;
     let n = 0;

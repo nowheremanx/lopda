@@ -30,7 +30,7 @@
 var W=162, H=120, TICK=50;
 var TONE={k:0,d:1,m:2,p:3};
 /* the score at which a round is worth +2 instead of +1. Low on purpose: play is not a test. */
-var JOY2={catch:6,run:60,climb:30};
+var JOY2={catch:15,run:60,climb:30};
 
 function num(v){ var n=+v; return isFinite(n) ? n : 0; }
 function clamp(v,lo,hi){ v=Math.floor(num(v)); return v<lo ? lo : v>hi ? hi : v; }
@@ -127,8 +127,9 @@ function base(id,seed){
 var REACT_TICKS={happy:6,fall:6,sad:8,jump:8,blink:4};
 var REACT={
   catch:function(event,state){
-    if(event==="catch") return state.catches>0 && state.catches%5===0 ? "jump" : "happy";
-    if(event==="miss") return state.misses>=2 ? "sad" : "fall";
+    if(event==="catch") return state.combo>0 && state.combo%5===0 ? "jump" : "happy";
+    if(event==="splash") return "surprised";
+    if(event==="miss") return state.lives<=1 ? "sad" : "fall";
     return null;
   },
   run:function(event,state){
@@ -180,7 +181,11 @@ function run(game,state,input,dtMs){
   return state;
 }
 
-/* ---------- catch: the pet walks the floor, small things fall, catching scores ---------- */
+/* ---------- catch: the pet walks the floor, parts fall off the shelf, water drops are bad news ----------
+ * Three lives, no clock: a part that falls past the floor costs one, and so does catching a drop (an electronic
+ * pet and water). Every 200 ticks the fall gets one pixel a tick faster and the spawns come closer together; at
+ * level 5 a part drops every 4-5 ticks. The pet's feet keep their 6 px a tick, so the round gets harder without
+ * ever taking the controls away. */
 var THINGS=[
   {grid:[".kkkk.","kppppk","kkkkkk",".kmmk.",".kmmk.","..kk.."]},   /* a bolt */
   {grid:[".kkk.","kmpmk","kmmmk","kmpmk",".kkk."]},                 /* a nut */
@@ -189,36 +194,83 @@ var THINGS=[
   var g=scaleGrid(t.grid,2);
   return {w:String(g[0]).length, h:g.length, grid:g};
 });
+/* The hazard: a 5 x 6 teardrop at the same 2 x scale, ink outline, a paper highlight and mid inside. */
+var CATCH_DROP={grid:["..k..",".kpk.",".kpk.","kppmk","kmmmk",".kkk."]};
+CATCH_DROP.grid=scaleGrid(CATCH_DROP.grid,2);
+CATCH_DROP.w=String(CATCH_DROP.grid[0]).length;
+CATCH_DROP.h=CATCH_DROP.grid.length;
+var LEVEL_TICKS=200, LEVEL_MAX=5, DROP_FROM=1, DROP_CHANCE=0.18;
+function catchLevel(tick){ return Math.min(LEVEL_MAX,Math.floor(num(tick)/LEVEL_TICKS)); }
+function catchFallSpeed(level){ return 4+clamp(level,0,LEVEL_MAX); }        /* 4 -> 9 px a tick */
+function catchSpawnBase(level){ return 14-2*clamp(level,0,LEVEL_MAX); }     /* 14 -> 4 ticks */
+/* A drop that would share a part's landing spot while that part is still high would force the player to pick
+   one and lose the other: where that happens the spawn is a part instead. */
+function dropNearPart(s,x,w){
+  var cx=x+w/2;
+  for(var i=0;i<s.things.length;i++){
+    var o=s.things[i];
+    if(o.k==="drop" || o.y>=40) continue;
+    if(Math.abs(o.x+o.w/2-cx)<=12) return true;
+  }
+  return false;
+}
+function catchSpawn(s){
+  var level=clamp(s.level||0,0,LEVEL_MAX);
+  var k=Math.floor(rand(s)*THINGS.length), t=THINGS[k];
+  var drop=level>=DROP_FROM && rand(s)<DROP_CHANCE;
+  var obj=drop ? CATCH_DROP : t;
+  var x=4+Math.floor(rand(s)*(W-8-obj.w));
+  if(drop && dropNearPart(s,x,obj.w)){
+    drop=false; obj=t;
+    x=4+Math.floor(rand(s)*(W-8-obj.w));
+  }
+  s.things.push({x:x,y:-obj.h,k:drop?"drop":k,w:obj.w,h:obj.h});
+  s.next=catchSpawnBase(level)+Math.floor(rand(s)*(7-level));
+}
 function catchInit(seed){
   var s=base("catch",seed);
-  s.petX=64; s.petY=84; s.things=[]; s.misses=0; s.catches=0; s.next=14;
+  s.petX=64; s.petY=84; s.things=[]; s.misses=0; s.splashes=0; s.catches=0; s.combo=0;
+  s.level=0; s.lives=3; s.next=14;
   return s;
 }
 function catchTick(s,inp){
   var dir=(inp.right?1:0)-(inp.left?1:0);
   if(dir) s.petX=clamp(s.petX+dir*6,1,W-33);          /* 120 px a second: the whole floor in 1.3 seconds */
+  s.level=catchLevel(s.tick);
   s.next--;
-  if(s.next<=0){
-    var k=Math.floor(rand(s)*THINGS.length), t=THINGS[k];
-    s.things.push({x:4+Math.floor(rand(s)*(W-8-t.w)), y:-t.h, k:k, w:t.w, h:t.h});
-    s.next=14+Math.floor(rand(s)*7);                  /* a thing every 0.7 to 1.0 seconds */
-  }
+  if(s.next<=0) catchSpawn(s);
+  var speed=catchFallSpeed(s.level);
   for(var i=s.things.length-1;i>=0;i--){
     var o=s.things[i];
-    o.y+=4;                                            /* 80 px a second: a short fall, time to walk over */
+    o.y+=speed;
     var bottom=o.y+o.h, ox=o.x+o.w/2;
     if(bottom>=s.petY+8 && bottom<=s.petY+30 && ox>=s.petX+2 && ox<=s.petX+30){
-      s.things.splice(i,1); s.score++; s.catches++; note(s,"catch");
+      s.things.splice(i,1);
+      if(o.k==="drop"){
+        s.splashes++; s.combo=0; s.lives=3-s.misses-s.splashes; note(s,"splash");
+      } else {
+        s.catches++; s.combo++;
+        if(s.combo%5===0){ s.score+=2; note(s,"catch"); note(s,"combo"); }
+        else { s.score++; note(s,"catch"); }
+      }
       continue;
     }
-    if(o.y>H){ s.things.splice(i,1); s.misses++; note(s,"miss"); }
+    if(o.y>H){
+      s.things.splice(i,1);
+      if(o.k==="drop") continue;                       /* a drop that falls past is good news, not a miss */
+      s.misses++; s.combo=0; s.lives=3-s.misses-s.splashes; note(s,"miss");
+    }
   }
-  if(s.misses>=3) finish(s);
-  if(s.tick>=600) finish(s);                            /* 30 s at most, then the score stands */
+  s.lives=3-s.misses-s.splashes;
+  if(s.lives<=0) finish(s);
 }
 function catchDraw(s,buf,w,h,pack,poseFor){
   clear(buf);
   dots(buf,w,h,CATCH_DOTS);
+  /* the shelf the parts fall off: a mid plank across the top, two dark brackets under it */
+  rect(buf,w,h,2,10,w-4,2,2);
+  rect(buf,w,h,18,12,3,2,1);
+  rect(buf,w,h,w-21,12,3,2,1);
   rect(buf,w,h,0,h-6,w,1,1);
   rect(buf,w,h,0,h-5,w,5,2);
   var near=false;
@@ -229,10 +281,18 @@ function catchDraw(s,buf,w,h,pack,poseFor){
   var pose=reacting(s) ? s.react : (near?"catch":"idle");
   blit(buf,w,h,poseOf(poseFor,"front",pose),s.petX,s.petY);
   for(i=0;i<s.things.length;i++){
-    var t=THINGS[s.things[i].k]||THINGS[0];
+    var t=s.things[i].k==="drop" ? CATCH_DROP : (THINGS[s.things[i].k]||THINGS[0]);
     blit(buf,w,h,t.grid,s.things[i].x,s.things[i].y);
   }
-  for(i=0;i<Math.min(3,s.misses);i++) rect(buf,w,h,6+i*6,5,4,2,0);
+  /* the lives: three 4 x 4 pips at the top left, ink while left and a mid outline once lost */
+  for(i=0;i<3;i++){
+    var px=5+i*6;
+    if(i<s.lives) rect(buf,w,h,px,4,4,4,0);
+    else {
+      rect(buf,w,h,px,4,4,1,2); rect(buf,w,h,px,7,4,1,2);
+      rect(buf,w,h,px,4,1,4,2); rect(buf,w,h,px+3,4,1,4,2);
+    }
+  }
   frame(buf,w,h);
   scoreDigits(buf,w,h,s.score);
 }
@@ -651,6 +711,8 @@ window.LopdaPetPlay={
   finish:finish,
   reaction:reaction,
   climbReachable:climbReachable,
+  CATCH:{LEVEL_TICKS:LEVEL_TICKS, LEVEL_MAX:LEVEL_MAX, fallSpeed:catchFallSpeed, spawnBase:catchSpawnBase,
+    DROP_FROM:DROP_FROM, DROP_CHANCE:DROP_CHANCE},
   RUN:{FLOOR:FLOOR, PET_X:PET_X, SPEED_START:R_SPEED_START, SPEED_MAX:R_SPEED_MAX, JUMP_VY:R_JUMP_VY,
     minGap:runMinGap},
   CLIMB:{RISE:C_RISE, RUN:C_RUN, GAP_MIN:C_GAP_MIN, GAP_MAX:C_GAP_MAX, GAP_HARD:C_RISE-4,
