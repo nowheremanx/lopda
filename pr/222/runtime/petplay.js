@@ -308,9 +308,14 @@ function runSpawn(s,x){
     /* a faster plane starts further back, so it never catches the thing before it over the pet */
     o=runPlane(s,x);
     o.x=x+o.vx*40;
-    /* the nut hangs under the plane and flies with it */
-    if(rand(s)<0.5) o.nut=nutAt(o.x+Math.floor(PLANE.w/2),R_NUT_LOW);
     s.obs.push(o);
+    /* sometimes a nut sits low in the air on its own, where the plane will be passing over it just as the pet
+       arrives: the two move on their own (the nut with the room, the plane faster), they only meet there */
+    if(rand(s)<0.5){
+      var cx=x+20, lead=planeLead(s,cx,o.vx);
+      o.x=cx+lead-Math.floor(PLANE.w/2);
+      s.obs.push({x:cx-Math.floor(NUT.w/2), y:0, w:NUT.w, h:0, kind:"none", nut:nutAt(cx,R_NUT_LOW)});
+    }
   } else if(r<wNut+wPlane+wUnder){
     o=runGround(s,x+2,true);
     p=runPlane(s,0);
@@ -341,7 +346,6 @@ function runTick(s,inp){
     if(o.nut) o.nut.x-=dx;
     if(o.kind==="plane"){
       var ny=o.base+BOB[((s.tick>>1)+o.phase)&15];
-      if(o.nut) o.nut.y+=ny-o.y;
       o.y=ny;
     }
   }
