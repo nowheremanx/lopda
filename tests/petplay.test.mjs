@@ -63,13 +63,18 @@ test("each pack is deterministic for a seed and an input script", () => {
   assert.notDeepEqual(JSON.parse(JSON.stringify(c)), JSON.parse(JSON.stringify(d)));
 });
 
-test("a round always ends: at most 600 ticks for catch, 900 for bounce and climb", () => {
-  for (const g of Play.GAMES) {
+test("a round always ends: at most 600 ticks for catch, 900 for bounce; climb only on a fall", () => {
+  for (const g of [game("catch"), game("bounce")]) {
     const r = drive(g, 7, 5000);
     assert.equal(r.state.done, true, `${g.id} ended`);
     assert.ok(r.steps < 5000, `${g.id} did not loop forever`);
     assert.ok(r.state.tick <= (g.id === "catch" ? 600 : 900), `${g.id} is capped in time: ${r.state.tick}`);
   }
+  /* climb has no clock: a pet that never falls keeps the round going past the old 45 s cap */
+  const climb = game("climb"), s = climb.init(7);
+  for (let i = 0; i < 4000 && !s.done; i++) climb.step(s, { left: false, right: false, a: false, press: { left: false, right: false, a: false } }, 50);
+  assert.equal(s.done, false, "climb does not end on a clock");
+  assert.equal(s.tick, 4000, "4000 ticks and still climbing");
 });
 
 test("a finished round has score and joy 1 or 2, never negative", () => {
@@ -329,19 +334,20 @@ test("climb: the difficulty curve is easy for six platforms, then narrower, high
   }
 });
 
-test("climb: 200 seeds — a perfect steering bot caps, a 300 ms bot falls in 40-70%, random input in >90%", () => {
+test("climb: 200 seeds — a perfect steering bot survives 4000 ticks, a 300 ms bot falls in 40-70%, random input in >90%", () => {
   const g = game("climb");
   let perfectCap = 0, delayedFalls = 0, randomFalls = 0;
   const randomScores = [];
   for (let seed = 1; seed <= 200; seed++) {
-    if (climbRun(g, seed, 0).tick >= 900) perfectCap++;
+    /* the loops are capped by the test: with no time limit a bot that never falls keeps going */
+    if (!climbRun(g, seed, 0).done) perfectCap++;
     const delayed = climbRun(g, seed, 6);       /* 300 ms at a 50 ms tick */
-    if (!(delayed.tick >= 900)) delayedFalls++;
+    if (delayed.done) delayedFalls++;
     const random = randomClimb(g, seed);
     randomScores.push(random.score);
-    if (!(random.tick >= 900)) randomFalls++;
+    if (random.done) randomFalls++;
   }
-  assert.ok(perfectCap >= 190, `perfect bot capped ${perfectCap}/200, wanted at least 190`);
+  assert.ok(perfectCap >= 190, `perfect bot still going ${perfectCap}/200, wanted at least 190`);
   assert.ok(delayedFalls >= 80 && delayedFalls <= 140, `delayed bot fell ${delayedFalls}/200, wanted 80-140`);
   assert.ok(randomFalls >= 181, `random bot fell ${randomFalls}/200, wanted more than 180`);
   randomScores.sort((a, b) => a - b);
@@ -417,14 +423,14 @@ test("reactions: a small pure table per game names the pose of the moment", () =
   assert.ok(buf.some((v) => v >= 0 && v <= 3));
 });
 
-test("climb: no input ends at the cap with score 0 and joy 1; the camera moves only above y=30", () => {
+test("climb: no input stays on the start platform past the old cap with score 0; the camera moves only above y=30", () => {
   const g = game("climb"), s = g.init(77);
-  for (let i = 0; i < 2000 && !s.done; i++) g.step(s, { left: false, right: false, a: false, press: {} }, 50);
-  assert.equal(s.done, true, "the round ended");
-  assert.equal(s.tick, 900, "at the 45 s cap");
+  for (let i = 0; i < 4000 && !s.done; i++) g.step(s, { left: false, right: false, a: false, press: {} }, 50);
+  assert.equal(s.done, false, "the round is still going: there is no clock");
+  assert.equal(s.tick, 4000, "past the old 45 s cap");
   assert.equal(s.score, 0, "doing nothing climbs nothing");
   assert.equal(s.height, 0, "the camera never moved");
-  assert.equal(s.joy, 1);
+  assert.equal(s.joy, 0, "no result and no joy before a fall");
 
   const low = g.init(1);
   low.pet.y = 31; low.pet.vy = 0;
@@ -436,5 +442,5 @@ test("climb: no input ends at the cap with score 0 and joy 1; the camera moves o
   high.pet.y = 29; high.pet.vy = -12;
   g.step(high, { left: false, right: false, a: false, press: {} }, 50);
   assert.ok(high.height > 0, "above the threshold the camera climbs");
-  assert.equal(high.score, high.height);
+  assert.equal(high.score, 0, "height alone is no point: only landing on a new, higher platform scores");
 });

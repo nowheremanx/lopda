@@ -76,6 +76,28 @@ test("asleep: 22:00-7:00, sleepy 21:30-7:30, and a light left off after 20:00", 
   assert.equal(P.asleep({ ...dark, trait: "sleepy" }, 20, 30), true);
 });
 
+test("the lamp belongs to the day: catch-up turns it off at night and on in the morning", () => {
+  /* L1: 21:00 -> 23:00 with the lamp on ends asleep in a dark room */
+  const night = P.catchUp(base(at(2026, 10, 20, 21, 0)), at(2026, 10, 20, 23, 0), { tz: TZ });
+  assert.equal(night.save.light, false, "a sleeping pet turns the lamp off");
+  assert.equal(P.asleep(night.save, 23, 0), true);
+  assert.ok(!night.events.includes("woke"), "no wake before morning");
+
+  /* L2: 23:00 -> 08:00 with the lamp off wakes it with the lamp back on */
+  const morning = P.catchUp(night.save, at(2026, 10, 21, 8, 0), { tz: TZ });
+  assert.equal(morning.save.light, true, "the morning turns the lamp back on");
+  assert.equal(P.asleep(morning.save, 8, 0), false);
+  assert.ok(morning.events.includes("woke"));
+
+  /* a lamp switched off at 15:00 still means the early sleep, and the next morning light is on again */
+  const early = P.catchUp({ ...base(at(2026, 10, 20, 15, 0)), light: false }, at(2026, 10, 20, 21, 0), { tz: TZ });
+  assert.equal(early.save.light, false);
+  assert.equal(P.asleep(early.save, 21, 0), true, "light off after 20:00 sends it to bed early");
+  const next = P.catchUp(early.save, at(2026, 10, 21, 8, 0), { tz: TZ });
+  assert.equal(next.save.light, true, "one dark evening does not last into the next day");
+  assert.equal(P.asleep(next.save, 21, 0), false, "and the next evening is not an early bedtime again");
+});
+
 test("actionReady: in bed only the light; travel only the call; an outing and an egg none", () => {
   const adult = { stage: "adult" };
   const ACTIONS = [...P.ACTIONS];
@@ -219,12 +241,19 @@ test("away >= 3 days: travel and the return values; 2 days is only a long catch-
   assert.equal(exact.save.travel, true, "exactly three days counts");
 });
 
-test("clock set back: no time passes and last stays", () => {
+test("clock set back: no time passes, last follows the clock and the day rolls with it", () => {
   const s = base(at(2026, 10, 20, 12, 0));
   const back = P.catchUp(s, at(2026, 10, 20, 9, 0), { tz: TZ });
-  assert.deepEqual(plain(back.save), plain(s));
-  assert.deepEqual(plain(back.events), []);
-  assert.equal(back.save.last, s.last);
+  assert.deepEqual([back.save.hunger, back.save.joy, back.save.mess], [s.hunger, s.joy, s.mess], "no hunger or joy change");
+  assert.deepEqual(plain(back.events), [], "no events");
+  assert.equal(back.save.last, at(2026, 10, 20, 9, 0), "last follows the clock back, or the next open is hours of absence");
+  assert.equal(back.save.today.day, "2026-10-20");
+
+  /* set back across midnight: the day's today is the clock's day, and no growth day is undone */
+  const late = P.openDay(base(at(2026, 10, 21, 2, 0)), "2026-10-21");
+  const rolled = P.catchUp(late, at(2026, 10, 20, 22, 0), { tz: TZ });
+  assert.equal(rolled.save.today.day, "2026-10-20", "today rolls to the earlier day");
+  assert.equal(rolled.save.lastDay, "2026-10-21", "the growth day already counted stays");
 });
 
 test("catch-up never mutates its input and returns a new object", () => {
@@ -283,6 +312,17 @@ test("stage: egg until hatch, child on the 3rd day opened, adult on the 10th; on
   const after = P.openDay(s, "2026-10-31", { notes: 100 });
   assert.equal(after.form, "book", "the adult form never changes");
   assert.equal(after.close, 12, "a day opened raises close, egg days included");
+});
+
+test("clock set back: a day key before lastDay is not a growth day", () => {
+  let s = P.hatch(base());
+  s = P.openDay(s, "2026-10-20");
+  assert.deepEqual([s.opened, s.close, s.lastDay], [1, 1, "2026-10-20"]);
+  const back = P.openDay(s, "2026-10-19");
+  assert.deepEqual([back.opened, back.close, back.lastDay], [1, 1, "2026-10-20"], "the earlier day counts nothing");
+  assert.equal(back.today.day, "2026-10-19", "today still follows the clock's day");
+  const next = P.openDay(back, "2026-10-21");
+  assert.deepEqual([next.opened, next.close, next.lastDay], [2, 2, "2026-10-21"], "the clock forward counts the new day once");
 });
 
 test("ten days opened as an egg do not count toward growth; the day after hatching is day one", () => {

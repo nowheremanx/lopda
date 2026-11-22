@@ -62,12 +62,18 @@ function digitGrid(n){
   var d=String(n).charAt(0);
   return (DIGITS[d]||DIGITS["0"]).slice();
 }
-/* numberGrid(24) -> five wide, seven high; numberGrid(124) -> eleven wide with our one-column gap. */
+/* numberGrid(24) -> five wide, seven high; numberGrid(124) -> eleven wide with our one-column gap. Up to four
+   digits share the same 5 x 7 font, the climb score's three and four. */
 function numberGrid(n){
-  var s=String(Math.max(0,Math.min(99,Number(n)||0)));
+  var s=String(Math.max(0,Math.min(9999,Math.floor(Number(n)||0))));
   if(s.length<2) return digitGrid(s);
-  var a=rows(digitGrid(s.charAt(0))), b=rows(digitGrid(s.charAt(1))), out=[];
-  for(var r=0;r<7;r++) out.push(a[r].join("")+"."+b[r].join(""));
+  var parts=[], i, out=[], line, r;
+  for(i=0;i<s.length;i++) parts.push(rows(digitGrid(s.charAt(i))));
+  for(r=0;r<7;r++){
+    line=parts[0][r].join("");
+    for(i=1;i<parts.length;i++) line+="."+parts[i][r].join("");
+    out.push(line);
+  }
   return out;
 }
 
@@ -718,7 +724,13 @@ function homeChip(state){
   homeAntenna(g);
   if(state==="away") return join(g);
   homeEyes(g,state==="sleep");
-  if(state==="sleep") return join(g);
+  if(state==="sleep"){
+    /* a tiny z at the top right, clear of the antenna (x6-9) and the body (which starts at y5) */
+    hline(g,12,1,3,"k");
+    px(g,13,2,"k");
+    hline(g,12,3,3,"k");
+    return join(g);
+  }
   if(state==="need"){
     fill(g,3,8,3,2,"k"); px(g,3,8,"p");
     fill(g,9,8,3,2,"k"); px(g,9,8,"p");

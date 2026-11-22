@@ -246,6 +246,43 @@ test("homeIcons: five 16 x 16 states, all different, a round chip with an antenn
   }
 });
 
+test("homeIcons.sleep: the same sleeping chip, now with a tiny z at the top right", () => {
+  /* the sleeping icon before the z, every row 16 pixels of .kdmp */
+  const OLD = [
+    "......kkkk......",
+    "......kkkk......",
+    "......kkkk......",
+    ".......kk.......",
+    ".......kk.......",
+    "....kkkkkkkk....",
+    "...kkmmmmmmkk...",
+    "..kkmmmmmmmdkk..",
+    "..kmmmmmmmmddk..",
+    "..kkkkkmmkkkkk..",
+    "..kmmmmmmmmddk..",
+    "..kmmmmmmmmddk..",
+    "..kkmmmmmmmdkk..",
+    "...kkddddddkk...",
+    "....kkkkkkkk....",
+    "................"
+  ];
+  const sleep = P.homeIcons.sleep;
+  assertGrid("homeIcons sleep", sleep, 16, 16);
+  let changed = 0;
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+    if (sleep[y][x] === OLD[y][x]) continue;
+    changed++;
+    assert.ok(x >= 11 && y <= 4, `the z sits in the free top-right corner (${x},${y})`);
+    assert.equal(OLD[y][x], ".", `the z only adds pixels (${x},${y})`);
+    assert.equal(sleep[y][x], "k", `the z is ink (${x},${y})`);
+  }
+  assert.ok(changed >= 2 && changed <= 9, `a tiny z, not a redraw: ${changed} pixels`);
+  /* the awake face has nothing there: the corner belongs to sleep */
+  for (let y = 0; y <= 4; y++) for (let x = 11; x < 16; x++) {
+    assert.equal(P.homeIcons.face[y][x], ".", `the awake icon has no z (${x},${y})`);
+  }
+});
+
 test("props: the bowls, the piles, the flag and the double-size digit font", () => {
   const full = P.props.bowl, empty = P.props.bowlEmpty;
   assertGrid("bowl", full); assertGrid("bowlEmpty", empty);
@@ -260,6 +297,9 @@ test("props: the bowls, the piles, the flag and the double-size digit font", () 
   assert.equal(A.numberGrid(9).length, 7);
   assert.equal(A.numberGrid(9)[0].length, 5);
   assert.equal(A.numberGrid(24)[0].length, 11);
+  assert.equal(A.numberGrid(123)[0].length, 17);
+  assert.equal(A.numberGrid(9999)[0].length, 23, "four digits and the gaps");
+  assert.equal(A.numberGrid(12345)[0].length, 23, "the grid stops at four digits");
   const seen = new Set();
   for (let n = 1; n <= 31; n++) seen.add(A.numberGrid(n).join("\n"));
   assert.equal(seen.size, 31, "every day 1-31 has its own digits");
