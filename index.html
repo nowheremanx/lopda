@@ -163,6 +163,7 @@ footer .mark{font-family:var(--f-lcd);font-size:22px;color:var(--on-case);margin
   <a class="l" href="#inside" data-i18n="nav.inside">Inside</a>
   <a class="l" href="#store" data-i18n="nav.apps">Apps</a>
   <a class="l" href="#make" data-i18n="nav.make">Make an app</a>
+  <a class="l" href="events/" data-i18n="nav.events">Events</a>
   <a class="l" href="https://github.com/nowheremanx/lopda">GitHub</a>
   <button class="lang" type="button" id="lang">中文</button>
   <a class="btn home" href="runtime/" data-i18n="nav.open">Open</a>
@@ -289,6 +290,7 @@ footer .mark{font-family:var(--f-lcd);font-size:22px;color:var(--on-case);margin
     <div class="links">
       <a class="btn ghost" href="https://github.com/nowheremanx/lopda/blob/main/SPEC.md" data-i18n="mk.spec">Read the spec</a>
       <a class="btn ghost" href="https://github.com/nowheremanx/lopda/blob/main/sdk/PROMPT.md" data-i18n="mk.prompt">The AI prompt</a>
+      <a class="btn ghost" href="events/" data-i18n="mk.events">Challenges</a>
     </div>
   </div>
   <pre><span class="c">&lt;!-- index.html --&gt;</span>
@@ -328,7 +330,7 @@ PAD.music.play({ bpm: 120,
 (function () {
   // Chinese text, keyed like the data-i18n attributes. Values may hold <b> (the captions).
   var ZH = {
-    "nav.camera": "相机", "nav.inside": "内置程序", "nav.apps": "应用", "nav.make": "做个 app", "nav.open": "打开",
+    "nav.camera": "相机", "nav.inside": "内置程序", "nav.apps": "应用", "nav.make": "做个 app", "nav.events": "活动", "nav.open": "打开",
     "hero.h": "一台 1986 年的掌机，住在你的手机里。",
     "hero.p": "四种绿色，一个十字键，一台胶片相机和一间冲洗店。不用注册，没有广告，离线也能用。",
     "cta.open": "打开 Lo-PDA", "cta.install": "添加到主屏幕", "hero.fine": "免费，开源，为手机而做。",
@@ -353,7 +355,7 @@ PAD.music.play({ bpm: 120,
     "st.n1": "个应用已上架", "st.n2": "一个应用的体积上限", "st.n3": "个应用能发出的网络请求",
     "mk.e": "做个 app", "mk.h": "一个 HTML 文件，你的 AI 就能写。",
     "mk.p": "规范很短，1.0 已冻结。把提示词交给你的 AI 助手，在开发台里试，再提一个 pull request。",
-    "mk.spec": "阅读规范", "mk.prompt": "AI 提示词",
+    "mk.spec": "阅读规范", "mk.prompt": "AI 提示词", "mk.events": "挑战卡",
     "d.e": "你的数据", "d.h": "数据只留在你的手机上。",
     "d.p": "不用注册，也没有要登录的地方。笔记、照片和存档都存在手机自己的存储里。",
     "d.off.h": "离线可用", "d.off.p": "打开一次，之后在飞机上、山里都能用。",

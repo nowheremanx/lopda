@@ -220,7 +220,7 @@ test("the Pages workflow publishes the repo without tests, dependencies or CI fi
   assert.equal(pats.length, 3, "one pattern for runtime/, one for the sdk files every app link runs on, one for the landing page");
   const [runtimeRe, allAppsRe, landingRe] = pats;
   /* the landing page at the site root and the pictures it shows get a link to the preview's root */
-  for (const p of ["index.html", "docs/images/screens.png", "docs/images/stocks/1-portrait.jpg", "docs/video/lopda-en.mp4"]) assert.ok(landingRe.test(p), p);
+  for (const p of ["index.html", "docs/images/screens.png", "docs/images/stocks/1-portrait.jpg", "docs/video/lopda-en.mp4", "events/index.html", "events/events.js"]) assert.ok(landingRe.test(p), p);
   for (const p of ["runtime/index.html", "registry/apps/a/index.html", "docs/x.md", "sdk/template/index.html"]) assert.ok(!landingRe.test(p), p);
   assert.ok(y.includes("$SITE/pr/$PR/\""), "landing link");
   /* runtime/ gets the runtime link only: the app links open sdk/dev.html, which loads nothing from runtime/ but chip.js */
@@ -237,4 +237,44 @@ test("the Pages workflow publishes the repo without tests, dependencies or CI fi
   assert.ok(y.includes("runtime=$RUNTIME") && y.includes("$SITE/pr/$PR/runtime/"), "runtime link");
   assert.ok(y.includes("lopda-pr-") && !/Do not open `?runtime/i.test(y) && !y.includes("请不要打开"), "no warning about runtime/");
   assert.deepEqual([...y.matchAll(/uses:\s*(\S+)/g)].map((m) => m[1]), ["actions/checkout@v4"], "only actions/checkout");
+});
+
+test("events/events.js: both languages everywhere, cards point at real issues, archived events have their pictures", () => {
+  const box = { window: {} };
+  vm.runInNewContext(read("events/events.js"), box);
+  const events = box.window.LOPDA_EVENTS;
+  assert.ok(Array.isArray(events) && events.length, "LOPDA_EVENTS is a non-empty list");
+  /* every {en, zh} pair has both; a missing one would show English to a Chinese reader */
+  const pairs = (v, at) => {
+    if (!v || typeof v !== "object") return;
+    const keys = Object.keys(v);
+    if (keys.includes("en") || keys.includes("zh")) {
+      assert.ok(typeof v.en === "string" && v.en && typeof v.zh === "string" && v.zh, at + " has en and zh");
+      assert.doesNotMatch(v.en + v.zh, EMOJI, at + " has no emoji");
+      return;
+    }
+    for (const k of keys) pairs(v[k], at + "." + k);
+  };
+  const ids = new Set();
+  for (const ev of events) {
+    assert.match(ev.id, /^[a-z0-9-]+$/, ev.id); assert.ok(!ids.has(ev.id), "unique id " + ev.id); ids.add(ev.id);
+    assert.ok(["open", "archived"].includes(ev.status), ev.id + " status");
+    pairs(ev, ev.id);
+    /* the two ways in: the phone (a script, a taste) and the computer (an app in the store) */
+    if (ev.ways) assert.equal(ev.ways.map((w) => w.id).join(), "phone,computer", ev.id + " ways");
+    for (const w of ev.ways || []) assert.ok(w.steps.length && w.facts.length === 3, ev.id + "/" + w.id + " has steps and three facts");
+    const cardIds = new Set();
+    for (const c of ev.cards || []) {
+      assert.ok(!cardIds.has(c.id), "unique card " + c.id); cardIds.add(c.id);
+      assert.ok([1, 2, 3].includes(c.stars), c.id + " stars");
+      assert.ok(typeof c.prompt === "string" && c.prompt.length > 40, c.id + " has a starter prompt");
+      /* an open event's card has its one line for Scripts on the phone and two asks for Revise */
+      if (ev.status === "open") assert.ok(c.idea && Array.isArray(c.revise) && c.revise.length === 2, c.id + " has a phone line and two revisions");
+    }
+    if (ev.status === "archived") assert.ok(ev.summary, ev.id + " is archived with a summary");
+    for (const a of (ev.summary && ev.summary.apps) || []) {
+      assert.ok(APP_IDS.includes(a.app), a.app + " is a registry app");
+      assert.ok(existsSync(join(ROOT, "events", "shots", ev.id, a.app + ".png")), a.app + " has its picture (tools/event-shots.mjs)");
+    }
+  }
 });
