@@ -10197,6 +10197,10 @@ test("AI line: picking a vision model from the OpenRouter list fills the field a
   await p.click("#set-ai-score-model");
   await p.waitForFunction(() => !document.getElementById("set-ai-model-page").hidden);
   await p.waitForSelector('#set-ai-model-list li:has-text("A")');
+  /* the list is cached in its v:2 form, with which models read pictures */
+  const cache = await p.evaluate(() => LopdaPlatform.db.doc("data/users/local/ai-models").get().then((s) => s.data()));
+  assert.equal(cache.v, 2);
+  assert.deepEqual(cache.list, [{ id: "x/a", name: "A", in: 1, out: 2, vision: true }]);
   await p.locator("#set-ai-model-list li", { hasText: "A" }).click();
   await p.waitForFunction(() => !document.getElementById("set-ai-line").hidden);
   assert.equal(await p.inputValue("#set-ai-vmodel"), "x/a", "the pick fills the field");
@@ -10209,6 +10213,106 @@ test("AI line: picking a vision model from the OpenRouter list fills the field a
   assert.equal(doc.lines[0].visionModel, "x/a");
   assert.equal(doc.lines[0].key, "sk-or-2222", "the saved key is kept");
   assert.equal(await p.evaluate(() => LP.ai.scoreModel()), "x/a");
+  assert.deepEqual(errors, []);
+});
+
+test("AI line: the model lists: search narrows OpenRouter's list; a DeepSeek line lists its models with its own key", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN", viewport: { width: 331, height: 359 }, hasTouch: true });
+  await fakeProviders(p);
+  const OR_LIST = { data: [
+    { id: "x/see-one", name: "See One", pricing: { prompt: "0.000001", completion: "0.000002" }, architecture: { input_modalities: ["text", "image"] } },
+    { id: "x/text-only", name: "Text Only", pricing: { prompt: "0.000003", completion: "0.000004" }, architecture: { input_modalities: ["text"] } },
+    { id: "x/see-two", name: "See Two", pricing: { prompt: "0.000005", completion: "0.000006" }, architecture: { input_modalities: ["text", "image"] } },
+  ] };
+  const json = (body) => ({ status: 200, headers: { ...AI_CORS, "content-type": "application/json" }, body: JSON.stringify(body) });
+  /* the two model lists, registered after fakeProviders so they win; the DeepSeek one records its Authorization */
+  await p.route("https://openrouter.ai/api/v1/models", (r) => r.fulfill(json(OR_LIST)));
+  const modelCalls = [];
+  await p.route("https://api.deepseek.com/models", (r) => {
+    if (r.request().method() === "OPTIONS") return r.fulfill({ status: 204, headers: AI_CORS });
+    modelCalls.push({ url: r.request().url(), auth: r.request().headers().authorization });
+    return r.fulfill(json({ data: [{ id: "deepseek-v4-pro" }, { id: "deepseek-flash" }, { no: "id" }] }));
+  });
+  /* every request this page makes, so a key leaving for another host would show */
+  const seen = [];
+  p.on("request", (r) => seen.push({ url: r.url(), auth: (r.headers() || {}).authorization || "" }));
+
+  const doc = { v: 2, next: 3, def: "l1", use: {}, key: "sk-or-2222", model: "", scoreModel: "",
+    lines: [{ id: "l1", provider: "openrouter", n: 1, key: "sk-or-2222", model: "", visionModel: "", on: true, added: 1 },
+      { id: "l2", provider: "deepseek", n: 1, key: "", model: "", visionModel: "", on: true, added: 2 }] };
+  await bootWithAi(p, doc);
+  await p.evaluate(() => LP.builtins.filter((b) => b.id === "settings")[0].open());
+  await p.waitForFunction(() => !document.getElementById("v-settings").hidden);
+  await p.click("#set-ai-open");
+  await p.waitForFunction(() => !document.getElementById("set-ai-main").hidden);
+
+  /* OpenRouter: both fields pick from its public list, the model field from all of it */
+  await p.locator("#set-ai-lines li", { hasText: "OpenRouter" }).locator(".set-ai-name").click();
+  await p.waitForFunction(() => !document.getElementById("set-ai-line").hidden);
+  assert.equal(await p.evaluate(() => document.getElementById("set-ai-model-pick").hidden), false);
+  assert.equal(await p.locator("#set-ai-model-pick-value").innerText(), "默认 ›");
+  assert.equal(await p.getAttribute("#set-ai-model-pick", "aria-disabled"), null, "OpenRouter's list needs no key");
+  await p.click("#set-ai-model-pick");
+  await p.waitForFunction(() => !document.getElementById("set-ai-model-page").hidden);
+  await p.waitForFunction(() => document.querySelectorAll("#set-ai-model-list li").length === 4);
+  assert.equal(await p.locator("#set-ai-model-title").innerText(), "模型");
+  const names = await p.evaluate(() => [...document.querySelectorAll("#set-ai-model-list li span")].map((s) => s.textContent));
+  assert.deepEqual(names, ["默认 (openrouter/auto)", "See One", "Text Only", "See Two"], "the default row, then all three models");
+  /* typing narrows the rows: the default stays, and only what matches remains */
+  await p.fill("#set-ai-model-search", "see two");
+  assert.equal(await p.evaluate(() => document.querySelectorAll("#set-ai-model-list li").length), 2);
+  await p.fill("#set-ai-model-search", "two");
+  assert.equal(await p.locator("#set-ai-model-list li").count(), 2);
+  await p.locator("#set-ai-model-list li", { hasText: "See Two" }).click();
+  await p.waitForFunction(() => !document.getElementById("set-ai-line").hidden);
+  assert.equal(await p.inputValue("#set-ai-model"), "x/see-two", "the pick fills the model field");
+  assert.equal(await p.locator("#set-ai-model-pick-value").innerText(), "x/see-two ›");
+  assert.deepEqual(await aiDoc(p), doc, "picking a model writes nothing");
+  /* the vision field's list is the same one, kept to the models that read pictures */
+  await p.click("#set-ai-score-model");
+  await p.waitForFunction(() => !document.getElementById("set-ai-model-page").hidden);
+  await p.waitForFunction(() => document.querySelectorAll("#set-ai-model-list li").length === 3);
+  assert.equal(await p.locator("#set-ai-model-title").innerText(), "看图模型");
+  assert.doesNotMatch(await p.locator("#set-ai-model-list").innerText(), /Text Only/);
+  await p.click("#set-ai-model-back");
+  await p.waitForFunction(() => !document.getElementById("set-ai-line").hidden);
+  assert.deepEqual(await aiDoc(p), doc, "looking around writes nothing either");
+  /* 保存 is the one write */
+  await p.click("#set-ai-save");
+  await p.waitForFunction((path) => LopdaPlatform.db.doc(path).get().then((s) => s.data().lines[0].model === "x/see-two"), AIDOC);
+  assert.equal((await aiDoc(p)).lines[0].key, "sk-or-2222");
+
+  /* DeepSeek: the rows are there but greyed until this line has a saved key */
+  await p.click("#set-ai-line-back");
+  await p.waitForFunction(() => !document.getElementById("set-ai-main").hidden);
+  await p.locator("#set-ai-lines li", { hasText: "DeepSeek" }).locator(".set-ai-name").click();
+  await p.waitForFunction(() => !document.getElementById("set-ai-line").hidden);
+  assert.equal(await p.evaluate(() => document.getElementById("set-ai-model-pick").hidden), false);
+  assert.equal(await p.getAttribute("#set-ai-model-pick", "aria-disabled"), "true");
+  assert.equal(await p.getAttribute("#set-ai-score-model", "aria-disabled"), "true");
+  assert.equal(await p.evaluate(() => document.getElementById("set-ai-list-needkey").hidden), false);
+  assert.match(await p.locator("#set-ai-list-needkey").innerText(), /先保存 key/);
+  await p.click("#set-ai-model-pick", { force: true });
+  assert.equal(await p.evaluate(() => document.getElementById("set-ai-line").hidden), false, "a greyed row opens nothing");
+  assert.equal(modelCalls.length, 0, "and asks no provider for a list");
+
+  await p.fill("#set-ai-key", "sk-deep-3333");
+  await p.click("#set-ai-save");
+  await p.waitForFunction((path) => LopdaPlatform.db.doc(path).get().then((s) => s.data().lines[1].key === "sk-deep-3333"), AIDOC);
+  await p.waitForFunction(() => document.getElementById("set-ai-model-pick").getAttribute("aria-disabled") === null);
+  assert.equal(await p.getAttribute("#set-ai-score-model", "aria-disabled"), null);
+  await p.click("#set-ai-model-pick");
+  await p.waitForFunction(() => !document.getElementById("set-ai-model-page").hidden);
+  /* the default row carries deepseek-flash itself, so the list is that row and the other id */
+  await p.waitForFunction(() => document.querySelectorAll("#set-ai-model-list li").length === 2);
+  const deepNames = await p.locator("#set-ai-model-list li").allInnerTexts();
+  assert.match(deepNames.join(" | "), /deepseek-flash/);
+  assert.match(deepNames.join(" | "), /deepseek-v4-pro/);
+  assert.equal(modelCalls.length, 1, "one list request");
+  assert.equal(modelCalls[0].url, "https://api.deepseek.com/models");
+  assert.equal(modelCalls[0].auth, "Bearer sk-deep-3333", "the list is asked with this line's own key");
+  const leaked = seen.filter((r) => r.auth.includes("sk-deep-3333") && !r.url.startsWith("https://api.deepseek.com/"));
+  assert.deepEqual(leaked, [], "the DeepSeek key goes to no other host");
   assert.deepEqual(errors, []);
 });
 

@@ -178,10 +178,14 @@ test("the only other sites a runtime script names are the calendar's holiday add
     const code = read(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
     for (const m of code.matchAll(/"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/g)) if (/https?:\/\//.test(m[0])) found.push(f + " " + m[0]);
   }
-  assert.deepEqual(found.sort(), ['runtime/ai.js "https://api.deepseek.com/chat/completions"', 'runtime/ai.js "https://api.moonshot.cn/v1/chat/completions"',
-    'runtime/ai.js "https://api.siliconflow.cn/v1/chat/completions"', 'runtime/ai.js "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"',
-    'runtime/ai.js "https://openrouter.ai/api/v1/chat/completions"', 'runtime/apps/calendar.js "https://cdn.jsdelivr.net/gh/NateScarlet/holiday-cn@master/"',
-    'runtime/apps/settings.js "https://nowheremanx.github.io/lopda/"', 'runtime/apps/settings.js "https://openrouter.ai/api/v1/models"']);
+  assert.deepEqual(found.sort(), ['runtime/ai.js "https://api.deepseek.com/chat/completions"', 'runtime/ai.js "https://api.deepseek.com/models"',
+    'runtime/ai.js "https://api.moonshot.cn/v1/chat/completions"', 'runtime/ai.js "https://api.moonshot.cn/v1/models"',
+    'runtime/ai.js "https://api.siliconflow.cn/v1/chat/completions"', 'runtime/ai.js "https://api.siliconflow.cn/v1/models?type=text"',
+    'runtime/ai.js "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"',
+    'runtime/ai.js "https://dashscope.aliyuncs.com/compatible-mode/v1/models"',
+    'runtime/ai.js "https://openrouter.ai/api/v1/chat/completions"', 'runtime/ai.js "https://openrouter.ai/api/v1/models"',
+    'runtime/apps/calendar.js "https://cdn.jsdelivr.net/gh/NateScarlet/holiday-cn@master/"',
+    'runtime/apps/settings.js "https://nowheremanx.github.io/lopda/"']);
 });
 
 test("build-index refuses an app that fails the checker", (t) => {

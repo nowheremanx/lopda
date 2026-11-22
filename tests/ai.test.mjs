@@ -129,12 +129,44 @@ test("an abort the browser reports as a DOMException (code 20) is still stopped"
   await assert.rejects(p, { code: "stopped" });
 });
 
+test("models() lists every provider's models at its own address, with a key only where the list needs one", async () => {
+  for (const p of AI.PROVIDERS) {
+    const { h, calls } = host(() => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ data: [] }) }));
+    assert.deepEqual(await h.models({ provider: p.id, key: "k" }), { data: [] }, p.id);
+    assert.equal(calls.length, 1, p.id);
+    assert.equal(calls[0].url, p.models, p.id);
+    const o = calls[0].opts;
+    assert.equal(o.method, "GET", p.id);
+    assert.equal(o.credentials, "omit", p.id);
+    assert.equal(o.referrerPolicy, "no-referrer", p.id);
+    assert.equal(o.cache, "no-store", p.id);
+    if (p.id === "openrouter") assert.equal(o.headers.Authorization, undefined, "OpenRouter's list is public");
+    else assert.equal(o.headers.Authorization, "Bearer k", p.id);
+  }
+});
+
+test("models() without the key its provider wants, or with an unknown provider, sends nothing", async () => {
+  const { h, calls } = host(() => assert.fail("no request"));
+  await assert.rejects(h.models({ provider: "deepseek" }), { code: "nokey" });
+  await assert.rejects(h.models({ provider: "deepseek", key: "" }), { code: "nokey" });
+  await assert.rejects(h.models({ provider: "nope", key: "k" }), { code: "http" });
+  assert.equal(calls.length, 0);
+});
+
+test("models() names a refused answer and no network", async () => {
+  const refused = host(() => Promise.resolve({ ok: false, status: 401 }));
+  await assert.rejects(refused.h.models({ provider: "kimi", key: "k" }), { code: "key" });
+  const down = host(() => Promise.reject(new TypeError("Failed to fetch")));
+  await assert.rejects(down.h.models({ provider: "openrouter" }), { code: "offline" });
+});
+
 /* the provider table: five addresses, each one its own key's only destination */
 
-test("PROVIDERS lists the five providers, each with a chat completions address", () => {
+test("PROVIDERS lists the five providers, each with a chat completions address and a model list", () => {
   assert.deepEqual(Array.from(AI.PROVIDERS, (p) => p.id), ["openrouter", "deepseek", "kimi", "qwen", "siliconflow"]);
   for (const p of AI.PROVIDERS) {
     assert.match(p.url, /^https:\/\/.+\/chat\/completions$/, p.id);
+    assert.match(p.models, /^https:\/\/.+\/models(\?.*)?$/, p.id);
     assert.equal(typeof p.keyHint, "string", p.id);
     assert.equal(typeof p.name.zh, "string", p.id);
     assert.equal(typeof p.name.en, "string", p.id);
