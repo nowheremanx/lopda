@@ -10,10 +10,10 @@ function tokenPrice(value){
 function models(payload){
   var source=Array.isArray(payload) ? payload : payload && Array.isArray(payload.data) ? payload.data : [], out=[];
   source.forEach(function(m){
-    var mods=m && m.architecture && m.architecture.input_modalities;
-    if(!Array.isArray(mods) || mods.indexOf("image")<0 || !m.id) return;
-    var pricing=m.pricing||{};
-    out.push({id:String(m.id), name:String(m.name||m.id), in:tokenPrice(pricing.prompt), out:tokenPrice(pricing.completion)});
+    if(!m || !m.id) return;
+    var mods=m.architecture && m.architecture.input_modalities, pricing=m.pricing||{};
+    out.push({id:String(m.id), name:String(m.name||m.id), in:tokenPrice(pricing.prompt), out:tokenPrice(pricing.completion),
+      vision:Array.isArray(mods) && mods.indexOf("image")>=0});
   });
   out.sort(function(a,b){
     var ap=a.in==null ? Infinity : a.in, bp=b.in==null ? Infinity : b.in;
@@ -21,12 +21,26 @@ function models(payload){
   });
   return out;
 }
+/* the models a picture can go to; everything else is text only */
+function visionOnly(list){
+  return (Array.isArray(list) ? list : []).filter(function(m){ return !!(m && m.vision); });
+}
+/* A provider whose list is only ids ({data:[{id}]}) still fills the picker: no name, no prices, nothing known about pictures */
+function idModels(payload){
+  var source=Array.isArray(payload) ? payload : payload && Array.isArray(payload.data) ? payload.data : [], out=[];
+  source.forEach(function(m){
+    if(!m || typeof m.id!=="string" || !m.id) return;
+    out.push({id:m.id, name:m.id, in:null, out:null, vision:false});
+  });
+  out.sort(function(a,b){ return a.id<b.id?-1:a.id>b.id?1:0; });
+  return out;
+}
 function cleanModels(list){
   if(!Array.isArray(list)) return [];
   return list.filter(function(m){ return m && typeof m.id==="string" && m.id; }).map(function(m){
     var input=typeof m.in==="number" && isFinite(m.in) && m.in>=0 ? m.in : null;
     var output=typeof m.out==="number" && isFinite(m.out) && m.out>=0 ? m.out : null;
-    return {id:m.id, name:typeof m.name==="string" && m.name ? m.name : m.id, in:input, out:output};
+    return {id:m.id, name:typeof m.name==="string" && m.name ? m.name : m.id, in:input, out:output, vision:m.vision===true};
   }).sort(function(a,b){
     var ap=a.in==null ? Infinity : a.in, bp=b.in==null ? Infinity : b.in;
     return ap-bp || (a.name<b.name?-1:a.name>b.name?1:0) || (a.id<b.id?-1:a.id>b.id?1:0);
@@ -78,7 +92,8 @@ function movePage(pages,index,delta){
   var page=out.splice(index,1)[0]; out.splice(to,0,page); return out;
 }
 function moveIndex(index,delta,length){ return Math.max(0,Math.min(length-1,index+delta)); }
-window.LopdaScorePages={DEFAULT_MODEL:DEFAULT_MODEL, MAX_PAGES:MAX_PAGES, models:models, cleanModels:cleanModels,
+window.LopdaScorePages={DEFAULT_MODEL:DEFAULT_MODEL, MAX_PAGES:MAX_PAGES, models:models, visionOnly:visionOnly,
+  idModels:idModels, cleanModels:cleanModels,
   formatPrice:formatPrice, formatModelPrice:formatModelPrice, scaleSize:scaleSize, scaleLuma:scaleLuma,
   grayRgba:grayRgba, rgbaLuma:rgbaLuma, appendPage:appendPage, movePage:movePage, moveIndex:moveIndex};
 })();

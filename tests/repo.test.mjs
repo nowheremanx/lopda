@@ -171,15 +171,21 @@ test("the holiday-cn year files the calendar ships are valid, pre-cached, and th
 
 /* The handheld asks no other site for anything, with one exception: the calendar's holiday file (decisions.md section 14).
    Comments are stripped, strings kept. */
-/* each address is written down in decisions.md: the holidays (section 14) and the AI line (section 34) */
-test("the only other sites a runtime script names are the calendar's holiday address and the AI line", () => {
+/* each address is written down in decisions.md: the holidays (section 14), the AI line (section 34) and the AI providers (section 61) */
+test("the only other sites a runtime script names are the calendar's holiday address and the AI providers", () => {
   const found = [];
   for (const f of RUNTIME_JS) {
     const code = read(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
     for (const m of code.matchAll(/"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/g)) if (/https?:\/\//.test(m[0])) found.push(f + " " + m[0]);
   }
-  assert.deepEqual(found.sort(), ['runtime/ai.js "https://openrouter.ai/api/v1/chat/completions"', 'runtime/apps/calendar.js "https://cdn.jsdelivr.net/gh/NateScarlet/holiday-cn@master/"',
-    'runtime/apps/settings.js "https://nowheremanx.github.io/lopda/"', 'runtime/apps/settings.js "https://openrouter.ai/api/v1/models"']);
+  assert.deepEqual(found.sort(), ['runtime/ai.js "https://api.deepseek.com/chat/completions"', 'runtime/ai.js "https://api.deepseek.com/models"',
+    'runtime/ai.js "https://api.moonshot.cn/v1/chat/completions"', 'runtime/ai.js "https://api.moonshot.cn/v1/models"',
+    'runtime/ai.js "https://api.siliconflow.cn/v1/chat/completions"', 'runtime/ai.js "https://api.siliconflow.cn/v1/models?type=text"',
+    'runtime/ai.js "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"',
+    'runtime/ai.js "https://dashscope.aliyuncs.com/compatible-mode/v1/models"',
+    'runtime/ai.js "https://openrouter.ai/api/v1/chat/completions"', 'runtime/ai.js "https://openrouter.ai/api/v1/models"',
+    'runtime/apps/calendar.js "https://cdn.jsdelivr.net/gh/NateScarlet/holiday-cn@master/"',
+    'runtime/apps/settings.js "https://nowheremanx.github.io/lopda/"']);
 });
 
 test("build-index refuses an app that fails the checker", (t) => {

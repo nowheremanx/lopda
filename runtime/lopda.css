@@ -298,8 +298,49 @@ textarea::placeholder{color:var(--ink-2)}
 .set-ai-field{display:flex;flex-direction:column;gap:4px;font-size:16px}
 .set-ai-field input{min-height:44px;font-family:var(--f-lcd);font-size:16px;color:var(--ink);background:var(--lcd);border:3px solid var(--ink);border-radius:0;padding:4px 8px;width:100%;min-width:0;-webkit-appearance:none;appearance:none}
 .set-ai-field input::placeholder{color:var(--ink-2)}
+/* the model list's search box: the same field look, one row of its own at the top of the list page */
+.set-ai-search{min-height:44px;width:100%;box-sizing:border-box;font-family:var(--f-lcd);font-size:16px;color:var(--ink);background:var(--lcd);border:3px solid var(--ink);border-radius:0;padding:4px 8px;-webkit-appearance:none;appearance:none}
+.set-ai-search::placeholder{color:var(--ink-2)}
+.set-ai-search:focus{outline:3px solid var(--ink);outline-offset:2px}
+/* a pick row whose provider wants a key first: shown, but greyed and never opened */
+.set-ai-row.off,.set-ai-row[aria-disabled="true"]{color:var(--ink-2);cursor:default}
+.set-ai-row.off .set-ai-value,.set-ai-row[aria-disabled="true"] .set-ai-value{color:var(--ink-2)}
+/* "pick a model" and "pick a vision model" share the list page */
+#set-ai-model-status{white-space:pre-line}
+/* the line test writes one line per step */
+#set-ai-line-state{white-space:pre-line}
+.set-ai-field input.focus{outline:3px solid var(--ink);outline-offset:2px}
 .set-ai-page .row{flex-wrap:wrap;gap:8px}
 .set-ai-page .btn{min-height:44px;padding:6px 14px}
+/* the lines: a card mark, the name, the key's last four and the switch, with the last result under them */
+.set-ai-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
+.set-ai-list li{display:flex;flex-direction:column;justify-content:center;min-height:44px;padding:4px 8px;box-sizing:border-box;cursor:pointer}
+.set-ai-list li.on,.set-ai-list li.focus{background:var(--ink);color:var(--lcd)}
+.set-ai-list li.off{color:var(--ink-2);cursor:default}
+.set-ai-list li.on .set-ai-key,.set-ai-list li.on .set-ai-status,.set-ai-list li.on .set-ai-value,.set-ai-list li.focus .set-ai-key,.set-ai-list li.focus .set-ai-status,.set-ai-list li.focus .set-ai-value{color:var(--lcd)}
+.set-ai-list .set-ai-value{flex:none;color:var(--ink-2);font-size:15px;white-space:nowrap}
+.set-ai-top{display:flex;align-items:center;gap:8px;width:100%;min-width:0}
+.set-ai-mark{flex:none;font-family:var(--f-pix);font-size:18px}
+.set-ai-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:16px}
+.set-ai-key{flex:none;font-family:var(--f-pix);font-size:14px;color:var(--ink-2)}
+.set-ai-status{font-size:12px;color:var(--ink-2)}
+.set-ai-sw{flex:none;min-width:44px;min-height:44px;padding:0 6px;font-family:var(--f-lcd);font-size:15px;background:transparent;color:var(--ink);border:2px solid var(--ink);cursor:pointer}
+.set-ai-sw[aria-checked="true"]{background:var(--ink);color:var(--lcd)}
+.set-ai-sw:disabled{color:var(--ink-2);border-color:var(--ink-2);background:transparent}
+.set-ai-add{width:100%;min-height:44px;padding:0 8px;box-sizing:border-box;background:none;border:0;border-top:1px dashed var(--ink-2);color:inherit;font:inherit;text-align:left;cursor:pointer}
+.set-ai-add:active{background:var(--lcd-2)}
+.set-ai-add.focus{outline:3px solid var(--ink);outline-offset:2px}
+.set-ai-uses{display:flex;flex-direction:column;gap:2px;border-top:1px dashed var(--ink-2);margin-top:4px;padding-top:4px}
+.set-ai-row{display:flex;align-items:center;gap:10px;width:100%;min-height:44px;padding:0 8px;box-sizing:border-box;background:none;border:0;border-bottom:1px dashed var(--ink-2);color:inherit;font:inherit;text-align:left;cursor:pointer}
+.set-ai-row:active{background:var(--lcd-2)}
+.set-ai-row.focus{outline:3px solid var(--ink);outline-offset:-3px}
+.set-ai-page .btn.focus{outline:3px solid var(--ink);outline-offset:2px}
+.set-ai-row .set-ai-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.set-ai-row .set-ai-value{flex:none;max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-2);font-size:15px}
+.set-ai-heading{margin:6px 0 0;font-size:13px;color:var(--ink-2)}
+/* the four "who uses which" rows are one line each: the label left, the line's name right */
+.set-ai-list li.set-ai-use{flex-direction:row;align-items:center;justify-content:space-between;gap:8px}
+.set-ai-use-list li.set-ai-follow .set-ai-name{white-space:normal;line-height:1.2;overflow:visible}
 .set-backup{display:flex;flex-direction:column;gap:8px;border-bottom:1px dashed var(--ink-2);padding-bottom:12px}
 .set-backup .set-row{border-bottom:0;padding-bottom:0}
 .set-backup-box{display:flex;flex-direction:column;gap:8px;border:2px solid var(--ink);padding:10px;background:var(--lcd-2);font-size:15px}

@@ -128,3 +128,101 @@ test("an abort the browser reports as a DOMException (code 20) is still stopped"
   p.stop();
   await assert.rejects(p, { code: "stopped" });
 });
+
+test("models() lists every provider's models at its own address, with a key only where the list needs one", async () => {
+  for (const p of AI.PROVIDERS) {
+    const { h, calls } = host(() => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ data: [] }) }));
+    assert.deepEqual(await h.models({ provider: p.id, key: "k" }), { data: [] }, p.id);
+    assert.equal(calls.length, 1, p.id);
+    assert.equal(calls[0].url, p.models, p.id);
+    const o = calls[0].opts;
+    assert.equal(o.method, "GET", p.id);
+    assert.equal(o.credentials, "omit", p.id);
+    assert.equal(o.referrerPolicy, "no-referrer", p.id);
+    assert.equal(o.cache, "no-store", p.id);
+    if (p.id === "openrouter") assert.equal(o.headers.Authorization, undefined, "OpenRouter's list is public");
+    else assert.equal(o.headers.Authorization, "Bearer k", p.id);
+  }
+});
+
+test("models() without the key its provider wants, or with an unknown provider, sends nothing", async () => {
+  const { h, calls } = host(() => assert.fail("no request"));
+  await assert.rejects(h.models({ provider: "deepseek" }), { code: "nokey" });
+  await assert.rejects(h.models({ provider: "deepseek", key: "" }), { code: "nokey" });
+  await assert.rejects(h.models({ provider: "nope", key: "k" }), { code: "http" });
+  assert.equal(calls.length, 0);
+});
+
+test("models() names a refused answer and no network", async () => {
+  const refused = host(() => Promise.resolve({ ok: false, status: 401 }));
+  await assert.rejects(refused.h.models({ provider: "kimi", key: "k" }), { code: "key" });
+  const down = host(() => Promise.reject(new TypeError("Failed to fetch")));
+  await assert.rejects(down.h.models({ provider: "openrouter" }), { code: "offline" });
+});
+
+/* the provider table: five addresses, each one its own key's only destination */
+
+test("PROVIDERS lists the five providers, each with a chat completions address and a model list", () => {
+  assert.deepEqual(Array.from(AI.PROVIDERS, (p) => p.id), ["openrouter", "deepseek", "kimi", "qwen", "siliconflow"]);
+  for (const p of AI.PROVIDERS) {
+    assert.match(p.url, /^https:\/\/.+\/chat\/completions$/, p.id);
+    assert.match(p.models, /^https:\/\/.+\/models(\?.*)?$/, p.id);
+    assert.equal(typeof p.keyHint, "string", p.id);
+    assert.equal(typeof p.name.zh, "string", p.id);
+    assert.equal(typeof p.name.en, "string", p.id);
+    assert.equal(AI.provider(p.id), p);
+  }
+  assert.ok(AI.PROVIDERS.every((p) => p.vision), "all five read images (2026-11-21)");
+  assert.equal(AI.provider("nope"), null);
+});
+
+test("ask() talks to each provider's own address with that provider's default model", async () => {
+  for (const p of AI.PROVIDERS) {
+    const think = (t) => event({ choices: [{ delta: { reasoning_content: t } }] });
+    const { h, calls } = host((u, o) => stream([think("hmm"), piece("OK"), "data: [DONE]\n\n"], o.signal));
+    const seen = [];
+    assert.equal(await h.ask({ provider: p.id, key: "k", messages: [], onSignal: (s) => seen.push(s.phase + " " + s.think + " " + s.text) }), "OK", p.id);
+    assert.equal(calls.length, 1, p.id);
+    assert.equal(calls[0].url, p.url, p.id);
+    assert.equal(calls[0].opts.headers.Authorization, "Bearer k", p.id);
+    assert.equal(JSON.parse(calls[0].opts.body).model, p.model, p.id);
+    assert.deepEqual(seen.slice(0, 3), ["open 0 0", "think 3 0", "write 3 2"], p.id);
+  }
+});
+
+test("the model given wins over fallbackModel, which wins over the provider's default", async () => {
+  const pick = async (o) => {
+    const { h, calls } = host((u, opts) => stream([piece("OK")], opts.signal));
+    assert.equal(await h.ask({ provider: "deepseek", key: "k", messages: [], ...o }), "OK");
+    return JSON.parse(calls[0].opts.body).model;
+  };
+  assert.equal(await pick({ model: "a/b", fallbackModel: "c/d" }), "a/b");
+  assert.equal(await pick({ fallbackModel: "c/d" }), "c/d");
+  assert.equal(await pick({}), "deepseek-flash");
+});
+
+test("an unknown provider fails as http and sends nothing", async () => {
+  const { h, calls } = host(() => assert.fail("no request"));
+  await assert.rejects(h.ask({ provider: "nope", key: "k", messages: [] }), { code: "http" });
+  assert.equal(calls.length, 0);
+});
+
+test("a url passed by the caller is ignored: the request goes to the provider's own address", async () => {
+  const { h, calls } = host((u, o) => stream([piece("OK")], o.signal));
+  assert.equal(await h.ask({ provider: "qwen", key: "k", messages: [], url: "https://evil.example/x" }), "OK");
+  assert.equal(calls[0].url, AI.provider("qwen").url);
+});
+
+test("a documented balance answer is named credit, other failures keep their word", async () => {
+  const failWith = (status, body) => host(() => Promise.resolve({ ok: false, status, text: () => Promise.resolve(JSON.stringify(body)) }));
+  const cases = [
+    ["kimi", 429, { error: { type: "exceeded_current_quota_error" } }, "credit"],
+    ["kimi", 429, {}, "busy"],
+    ["qwen", 403, { code: "Arrearage" }, "credit"],
+    ["qwen", 403, {}, "key"],
+  ];
+  for (const [provider, status, body, code] of cases) {
+    const { h } = failWith(status, body);
+    await assert.rejects(h.ask({ provider, key: "k", messages: [] }), { code }, provider + " " + status);
+  }
+});
