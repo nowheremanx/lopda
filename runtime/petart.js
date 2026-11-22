@@ -718,7 +718,13 @@ function homeChip(state){
   homeAntenna(g);
   if(state==="away") return join(g);
   homeEyes(g,state==="sleep");
-  if(state==="sleep") return join(g);
+  if(state==="sleep"){
+    /* a tiny z at the top right, clear of the antenna (x6-9) and the body (which starts at y5) */
+    hline(g,12,1,3,"k");
+    px(g,13,2,"k");
+    hline(g,12,3,3,"k");
+    return join(g);
+  }
   if(state==="need"){
     fill(g,3,8,3,2,"k"); px(g,3,8,"p");
     fill(g,9,8,3,2,"k"); px(g,9,8,"p");

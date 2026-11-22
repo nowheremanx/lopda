@@ -284,7 +284,12 @@ function catchUp(save,now,ctx){
       p=local(m+part/2,tz);
       slp=asleep(s,p.h,p.mi);
       if(wasAsleep===null) wasAsleep=slp;
-      else if(wasAsleep && !slp && !woke){ woke=true; events.push("woke"); }
+      else if(wasAsleep && !slp){
+        if(!woke){ woke=true; events.push("woke"); }
+        s.light=true;                                   /* the morning sun: a new day starts with the lamp on */
+      } else if(!wasAsleep && slp){
+        s.light=false;                                  /* in bed asleep: the pet turns its own lamp off */
+      }
       wasAsleep=slp;
       if(!slp) awake+=part;
     }

@@ -88,7 +88,7 @@ var P={
   washUntil:0, washStart:0, flash:null, outing:null, foodSel:0, boxPage:0, boxSel:0, boxItem:null, boxAsk:null,
   naming:null, task:null, at:null, feeds:[], awakeLeft:0, puffUntil:0, pendingNeed:null, lightReturn:false,
   ignoreAUp:false,
-  wasAsleep:null, lastScene:null, flashSeq:0,
+  wasAsleep:null, pausedAt:0, lastScene:null, flashSeq:0,
   game:null, gameSel:0, gameTimer:0, gameLabel:"", gameHeld:{left:false,right:false,a:false}, gamePress:{left:false,right:false,a:false}, gameTouch:null,
   gameSeed:null,
   moodClearUntil:0,
@@ -363,6 +363,7 @@ function refreshTime(){
   P.save=Pet.openDay(P.save,dayKey(now()),P.usage||null);
   if(P.save.stage==="adult" && !P.save.form && P.usage) P.save.form=Pet.adultForm(P.usage,P.save.species);
   handleEvents(r.events);
+  settleLamp();                                    /* an old save asleep with the lamp on: off it goes */
   saveSoon();
   checkOuting();
   buildPick();
@@ -379,6 +380,7 @@ function dayWork(){
   var r=Pet.catchUp(P.save,now(),{tz:tz()});
   P.save=r.save;
   if(P.save.stage==="adult" && !P.save.form && P.usage) P.save.form=Pet.adultForm(P.usage,P.save.species);
+  settleLamp();                                    /* the background day leaves a sleeping pet in the dark too */
   noteWants();
   saveSoon();
   buildPick();
@@ -1114,6 +1116,24 @@ function naturalAsleep(){
 }
 /* the pet is in bed and nothing (a wake walk, the forced two minutes) is holding it up */
 function inBedSleep(){ return naturalAsleep() && !P.task && !(P.awakeLeft>0); }
+/* The lamp belongs to the pet's day, not to a mode: a sleeping pet never lies in a lit room (written here, not
+   through setLight, so an automatic switch is not a care action and leaves close alone). */
+function settleLamp(){
+  if(!P.save || P.save.stage==="egg" || P.save.light===false || !inBedSleep()) return false;
+  P.save.light=false;
+  saveSoon();
+  renderKeys();
+  return true;
+}
+/* Leaving it up at night is not a state the room keeps: it is asleep in bed. The lamp goes off with it. */
+function putToBed(){
+  if(!naturalAsleep()) return false;
+  P.task=null; P.awakeLeft=0; P.feeds=[];
+  P.action=""; P.actionUntil=0; P.puffUntil=0; P.lightReturn=false;
+  P.at=useSpotAt("sleep","sleep");
+  if(P.save && P.save.light!==false){ P.save.light=false; saveSoon(); }
+  return true;
+}
 function atBed(){ var b=useSpotAt("sleep","sleep"); return !!P.at && Math.abs(P.at.x-b.x)<=2 && Math.abs(P.at.y-b.y)<=2; }
 function spotNow(){
   if(P.task && P.task.pos) return {x:P.task.pos.x,y:P.task.pos.y};
@@ -1214,17 +1234,20 @@ function startChore(kind,phase){
    pet is put at the place the chore was heading for. The two minutes only count while the screen is showing it. */
 function finishTaskOnLeave(){
   var task=P.task;
-  if(!task) return;
+  if(!task){ putToBed(); return; }               /* already in bed at night: the lamp goes off with us */
   if(task.kind==="feed"){
     while(P.feeds.length){
       var kind=P.feeds.shift(), sp=Pet.SPECIES[P.save.species]||Pet.SPECIES.chip;
       if(!(kind==="meal" && (+P.save.hunger||0)>=sp.hungerMax)) P.save=Pet.feed(P.save,kind,now(),dayKey(now()));
       if(kind==="snack" && P.save.today && P.save.today.burp) P.save.today.burp=false;
     }
-    P.awakeLeft=0; P.at=naturalAsleep()?useSpotAt("sleep","sleep"):useSpotAt("rest","stand");
+    P.feeds=[];
+    if(putToBed()) return;
+    P.awakeLeft=0; P.at=useSpotAt("rest","stand");
+  } else if(putToBed()){
+    return;                                      /* asleep at night: no chore leaves it standing awake all night */
   } else if(task.kind==="grumpy" || task.kind==="wake"){
-    if(P.save.light===false && naturalAsleep()){ P.awakeLeft=0; P.at=useSpotAt("sleep","sleep"); }
-    else { P.awakeLeft=Math.max(P.awakeLeft,AWAKE_TICKS); P.at=useSpotAt("rest","stand"); }
+    P.awakeLeft=Math.max(P.awakeLeft,AWAKE_TICKS); P.at=useSpotAt("rest","stand");
   } else {
     P.awakeLeft=0; P.at=useSpotAt("sleep","sleep");
   }
@@ -1310,6 +1333,15 @@ function toggleLight(){
   if(!P.save) return;
   var t=now(), h=hourNow(), mins=localDate(t).getUTCMinutes();
   var wasAsleep=inBedSleep();
+  if(wasAsleep){
+    /* On a sleeping pet in bed any press of the lamp wakes it, and the lamp is on (the grumpy wake from the bed). */
+    P.save=Pet.setLight(P.save,true);
+    P.action=null; P.actionUntil=0; P.idle=null;
+    P.at=useSpotAt("sleep","sleep");
+    startChore("grumpy","angry");
+    beep("tick"); saveSoon(); renderKeys(); render();
+    return;
+  }
   P.save=Pet.setLight(P.save,!P.save.light);
   P.action=null; P.actionUntil=0; P.idle=null;
   if(P.task){
@@ -1320,14 +1352,13 @@ function toggleLight(){
       } else if(P.task.phase==="walkRug"){
         startChore("bed","walkBed");
       }
+    } else if(P.task.kind==="bed" && P.save.light===true){
+      /* the lamp on during the walk to bed turns it back to the rug, awake (from where it stands) */
+      startChore("grumpy","walkRug");
     } else if(P.save.light===false){
       P.lightReturn=true;
     }
-  } else if(wasAsleep && P.save.light===true){
-    /* light on at night: wakes it, angry, and it walks to the rug (the same walk as every bed <-> floor move) */
-    P.at=useSpotAt("sleep","sleep");
-    startChore("grumpy","angry");
-  } else if(P.save.light===false && Pet.asleep(P.save,h,mins) && !wasAsleep){
+  } else if(P.save.light===false && Pet.asleep(P.save,h,mins)){
     /* light off: back to bed at once, walking */
     P.awakeLeft=0;
     startChore("bed","walkBed");
@@ -2070,7 +2101,7 @@ function roomScene(){
   var scene={
     pack:pack, night:night, season:seasonOf(t), weather:weatherNow(), phase:Math.floor(t/500),
     dayOfMonth:localDate(t).getUTCDate(),
-    lightOff:!!(save && save.light===false && asleepNow),
+    lightOff:!!(save && save.light===false && night),
     bowlFull:save ? save.hunger>=2 : true,
     mess:save ? save.mess : 0
   };
@@ -2638,6 +2669,8 @@ function tick(){
     if(P.wasAsleep===null) P.wasAsleep=sleepNow;
     else if(P.wasAsleep && !sleepNow && !P.task && !P.outing){
       P.at=useSpotAt("sleep","sleep");
+      /* the morning comes: the lamp goes back on, so last night's switch-off is not tonight's bedtime */
+      if(!naturalAsleep() && P.save.light===false){ P.save.light=true; saveSoon(); renderKeys(); }
       startChore("wake","walkRug");
       P.wasAsleep=false;
     } else if(!P.wasAsleep && sleepNow && !P.task && !P.outing && !atBed()){
@@ -2647,6 +2680,8 @@ function tick(){
       P.wasAsleep=sleepNow;
     }
   }
+  /* a sleeping pet never lies in a lit room; on screen the switch happens in the same tick it settles */
+  settleLamp();
   render();
 }
 
@@ -2694,6 +2729,7 @@ function stopJingle(){
 }
 function pause(){
   if(!P.inView) return;
+  P.pausedAt=now();
   if(P.roomHold){ clearTimeout(P.roomHold); P.roomHold=0; }
   P.holdFired=false; clearHold();
   persistOuting();
@@ -2705,7 +2741,11 @@ function pause(){
 function resume(){
   P.resumeOuting=true;
   if(isOpen()){
-    refreshTime(); P.wasAsleep=inBedSleep(); maybeNamePrompt(); render(); startTimer(); refreshUsage();
+    refreshTime();
+    /* a long stay in the background is no way to hold a pet up at night; a short app switch keeps the two minutes */
+    if(P.pausedAt && now()-P.pausedAt>=120000 && naturalAsleep()) putToBed();
+    P.pausedAt=0;
+    P.wasAsleep=inBedSleep(); maybeNamePrompt(); render(); startTimer(); refreshUsage();
     if(P.sub==="game" && P.game && P.game.started && !gameDone()) startGameTimer();
   } else {
     backgroundDay();

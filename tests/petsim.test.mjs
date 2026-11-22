@@ -76,6 +76,28 @@ test("asleep: 22:00-7:00, sleepy 21:30-7:30, and a light left off after 20:00", 
   assert.equal(P.asleep({ ...dark, trait: "sleepy" }, 20, 30), true);
 });
 
+test("the lamp belongs to the day: catch-up turns it off at night and on in the morning", () => {
+  /* L1: 21:00 -> 23:00 with the lamp on ends asleep in a dark room */
+  const night = P.catchUp(base(at(2026, 10, 20, 21, 0)), at(2026, 10, 20, 23, 0), { tz: TZ });
+  assert.equal(night.save.light, false, "a sleeping pet turns the lamp off");
+  assert.equal(P.asleep(night.save, 23, 0), true);
+  assert.ok(!night.events.includes("woke"), "no wake before morning");
+
+  /* L2: 23:00 -> 08:00 with the lamp off wakes it with the lamp back on */
+  const morning = P.catchUp(night.save, at(2026, 10, 21, 8, 0), { tz: TZ });
+  assert.equal(morning.save.light, true, "the morning turns the lamp back on");
+  assert.equal(P.asleep(morning.save, 8, 0), false);
+  assert.ok(morning.events.includes("woke"));
+
+  /* a lamp switched off at 15:00 still means the early sleep, and the next morning light is on again */
+  const early = P.catchUp({ ...base(at(2026, 10, 20, 15, 0)), light: false }, at(2026, 10, 20, 21, 0), { tz: TZ });
+  assert.equal(early.save.light, false);
+  assert.equal(P.asleep(early.save, 21, 0), true, "light off after 20:00 sends it to bed early");
+  const next = P.catchUp(early.save, at(2026, 10, 21, 8, 0), { tz: TZ });
+  assert.equal(next.save.light, true, "one dark evening does not last into the next day");
+  assert.equal(P.asleep(next.save, 21, 0), false, "and the next evening is not an early bedtime again");
+});
+
 test("actionReady: in bed only the light; travel only the call; an outing and an egg none", () => {
   const adult = { stage: "adult" };
   const ACTIONS = [...P.ACTIONS];

@@ -5048,6 +5048,58 @@ test("pet: the home icon is an egg, a sleeping pet and a pet that wants somethin
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
+test("pet: the home icon is the sleeping face when a lamp wake is left by HOME at night, and reopening shows it in bed", { skip, timeout: 90000 }, async (t) => {
+  const { p, errors } = await page(t, { ...pw.devices["iPhone 13"], locale: "zh-CN", serviceWorkers: "block" });
+  await p.clock.install({ time: new Date(2026, 9, 11, 23, 0) });
+  await p.goto(base + "/runtime/?debug", { waitUntil: "networkidle" });
+  await p.waitForFunction(() => document.getElementById("savestate").textContent !== "启动中…");
+  const save = () => p.evaluate(() => LOPDA_DEBUG.pet.save());
+  const spot = () => p.evaluate(() => LOPDA_DEBUG.pet.spot());
+  const until = async (fn, ticks = 40) => {
+    for (let i = 0; i < ticks; i++) {
+      await p.clock.runFor(500);
+      if (await fn()) return true;
+    }
+    return false;
+  };
+  await p.locator("#home .app", { hasText: "宠物" }).click();
+  await p.locator("#v-pet:not([hidden])").waitFor();
+  await p.evaluate(() => LOPDA_DEBUG.pet.hatch());
+  await p.clock.runFor(3000);
+  await p.waitForTimeout(400);                     /* a missed outing decided in the background may land here */
+  for (let i = 0; i < 20 && (await spot()).outing; i++) await p.clock.runFor(500);
+  assert.ok(await until(async () => (await spot()).zz === true, 20), "asleep in bed at 23:00");
+  assert.equal((await save()).light, false, "and the lamp is off");
+
+  /* one press on the lamp wakes it, then HOME during the grumble */
+  await p.locator(".pet-ikey").nth(3).click();
+  await p.clock.runFor(500);
+  const woken = await spot();
+  assert.equal(woken.zz, false, "the lamp woke it");
+  assert.equal(woken.act, "angry");
+  assert.equal((await save()).light, true);
+  await p.click("#home-key");
+  await p.waitForTimeout(250);
+
+  /* the home tile is the sleeping face, not the awake one */
+  const icon = await p.evaluate(() => LP.builtins.find((b) => b.id === "pet").icon());
+  const sleepRows = await p.evaluate(() => {
+    const grid = window.LopdaPetArt.PACKS.chip.homeIcons.sleep, map = { k: "0", d: "1", m: "2", p: "3", ".": "." };
+    return grid.map((r) => r.replace(/[kdmp.]/g, (ch) => map[ch]));
+  });
+  assert.deepEqual(icon, sleepRows, "leaving it up at night puts it back in bed");
+  assert.equal((await save()).light, false, "and the lamp goes with it");
+
+  /* reopening shows it in bed, not standing on the rug */
+  await p.locator("#home .app", { hasText: "宠物" }).click();
+  await p.locator("#v-pet:not([hidden])").waitFor();
+  await p.waitForTimeout(250);
+  const back = await spot();
+  assert.equal(back.zz, true);
+  assert.deepEqual([back.x, back.y], [10, 52]);
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
 test("pet: START opens the menu, B closes it, and 状态 / 纪念品箱 open from it", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await page(t, { locale: "zh-CN", serviceWorkers: "block", viewport: { width: 390, height: 844 } });
   await p.clock.install({ time: new Date(2026, 9, 11, 9, 0) });
@@ -5617,13 +5669,12 @@ test("pet: in bed only the light answers; a meal pressed while it gets up waits 
   assert.equal(await p.locator(".pet-ikey").nth(0).getAttribute("aria-disabled"), "true", "a meal is not offered in bed");
   const lastMeal = (await save()).lastMeal;
 
-  /* off then on: the light is the way up */
-  await p.locator(".pet-ikey").nth(3).click();
-  await p.clock.runFor(500);
-  assert.equal((await spot()).zz, true, "the dark keeps it in bed");
+  /* the lamp is off in bed, and one press wakes it: any press on a sleeping pet in bed is the way up */
+  assert.equal((await save()).light, false, "a sleeping pet turned its lamp off");
   await p.locator(".pet-ikey").nth(3).click();
   await p.clock.runFor(300);
-  assert.equal((await spot()).zz, false, "the light woke it");
+  assert.equal((await spot()).zz, false, "the lamp woke it");
+  assert.equal((await save()).light, true, "and the lamp is on");
 
   /* a meal pressed while it is getting up is queued, never eaten in bed */
   await feed("meal");
@@ -5645,11 +5696,9 @@ test("pet: in bed only the light answers; a meal pressed while it gets up waits 
   assert.equal(a.zz, true, "Zz is back");
   assert.equal((await save()).hunger, 5);
 
-  /* a full pet still gets up (the light) and shakes its head at the bowl */
+  /* a full pet still gets up (the lamp) and shakes its head at the bowl */
   await p.evaluate(() => LOPDA_DEBUG.pet.setStats(5, 3));
   const fullMeal = (await save()).lastMeal;
-  await p.locator(".pet-ikey").nth(3).click();
-  await p.clock.runFor(500);
   await p.locator(".pet-ikey").nth(3).click();
   await p.clock.runFor(300);
   await feed("meal");
@@ -5709,15 +5758,14 @@ test("pet: a pat wakes a sleeping pet angry; it walks to the rug, returns after 
   assert.deepEqual([a.x, a.y], [10, 52], "back in bed by itself");
   assert.equal(a.zz, true);
 
-  /* light on at night wakes it the same way; light off sends it back at once, walking */
-  await p.locator(".pet-ikey").nth(3).click();        /* light off: it is already asleep */
-  await p.clock.runFor(1000);
-  assert.equal((await spot()).zz, true);
-  await p.locator(".pet-ikey").nth(3).click();        /* light on: the light woke it */
+  /* back in bed it turned the lamp off; one press wakes it the same way, and the lamp is on again */
+  assert.equal((await save()).light, false, "asleep in bed, the lamp is off");
+  await p.locator(".pet-ikey").nth(3).click();
   await p.clock.runFor(500);
   a = await spot();
   assert.equal(a.zz, false);
   assert.equal(a.act, "angry");
+  assert.equal((await save()).light, true, "the waking press turned the lamp on");
   assert.ok(await until(async () => { const q = await spot(); return q.y === 69 && q.x > 10 && !q.phase; }, 20), "walks to the rug");
   const rugX = (await spot()).x;
   await p.locator(".pet-ikey").nth(3).click();        /* light off: straight back, no two-minute wait */

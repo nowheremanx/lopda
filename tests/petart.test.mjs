@@ -246,6 +246,43 @@ test("homeIcons: five 16 x 16 states, all different, a round chip with an antenn
   }
 });
 
+test("homeIcons.sleep: the same sleeping chip, now with a tiny z at the top right", () => {
+  /* the sleeping icon before the z, every row 16 pixels of .kdmp */
+  const OLD = [
+    "......kkkk......",
+    "......kkkk......",
+    "......kkkk......",
+    ".......kk.......",
+    ".......kk.......",
+    "....kkkkkkkk....",
+    "...kkmmmmmmkk...",
+    "..kkmmmmmmmdkk..",
+    "..kmmmmmmmmddk..",
+    "..kkkkkmmkkkkk..",
+    "..kmmmmmmmmddk..",
+    "..kmmmmmmmmddk..",
+    "..kkmmmmmmmdkk..",
+    "...kkddddddkk...",
+    "....kkkkkkkk....",
+    "................"
+  ];
+  const sleep = P.homeIcons.sleep;
+  assertGrid("homeIcons sleep", sleep, 16, 16);
+  let changed = 0;
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+    if (sleep[y][x] === OLD[y][x]) continue;
+    changed++;
+    assert.ok(x >= 11 && y <= 4, `the z sits in the free top-right corner (${x},${y})`);
+    assert.equal(OLD[y][x], ".", `the z only adds pixels (${x},${y})`);
+    assert.equal(sleep[y][x], "k", `the z is ink (${x},${y})`);
+  }
+  assert.ok(changed >= 2 && changed <= 9, `a tiny z, not a redraw: ${changed} pixels`);
+  /* the awake face has nothing there: the corner belongs to sleep */
+  for (let y = 0; y <= 4; y++) for (let x = 11; x < 16; x++) {
+    assert.equal(P.homeIcons.face[y][x], ".", `the awake icon has no z (${x},${y})`);
+  }
+});
+
 test("props: the bowls, the piles, the flag and the double-size digit font", () => {
   const full = P.props.bowl, empty = P.props.bowlEmpty;
   assertGrid("bowl", full); assertGrid("bowlEmpty", empty);
