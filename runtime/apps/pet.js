@@ -88,7 +88,7 @@ var P={
   washUntil:0, washStart:0, flash:null, outing:null, foodSel:0, boxPage:0, boxSel:0, boxItem:null, boxAsk:null,
   naming:null, task:null, at:null, feeds:[], awakeLeft:0, puffUntil:0, pendingNeed:null, lightReturn:false,
   ignoreAUp:false,
-  wasAsleep:null, lastScene:null, flashSeq:0,
+  wasAsleep:null, pausedAt:0, lastScene:null, flashSeq:0,
   game:null, gameSel:0, gameTimer:0, gameLabel:"", gameHeld:{left:false,right:false,a:false}, gamePress:{left:false,right:false,a:false}, gameTouch:null,
   gameSeed:null,
   moodClearUntil:0,
@@ -225,6 +225,15 @@ function normalize(save){
   if(save.care!==undefined){
     if(typeof save.care==="number" && isFinite(save.care) && save.care>=0 && save.care<=1) save.care=+save.care;
     else delete save.care;
+  }
+  /* best scores are optional (an older save has none); a junk number is no record, never a broken round */
+  if(save.best!==undefined){
+    if(!save.best || typeof save.best!=="object" || Array.isArray(save.best)) delete save.best;
+    else ["catch","bounce","climb"].forEach(function(id){
+      var n=save.best[id];
+      if(n===undefined) return;
+      save.best[id]=(typeof n==="number" && isFinite(n) && n>=0) ? Math.floor(n) : 0;
+    });
   }
   return save;
 }
@@ -363,6 +372,7 @@ function refreshTime(){
   P.save=Pet.openDay(P.save,dayKey(now()),P.usage||null);
   if(P.save.stage==="adult" && !P.save.form && P.usage) P.save.form=Pet.adultForm(P.usage,P.save.species);
   handleEvents(r.events);
+  settleLamp();                                    /* an old save asleep with the lamp on: off it goes */
   saveSoon();
   checkOuting();
   buildPick();
@@ -379,6 +389,7 @@ function dayWork(){
   var r=Pet.catchUp(P.save,now(),{tz:tz()});
   P.save=r.save;
   if(P.save.stage==="adult" && !P.save.form && P.usage) P.save.form=Pet.adultForm(P.usage,P.save.species);
+  settleLamp();                                    /* the background day leaves a sleeping pet in the dark too */
   noteWants();
   saveSoon();
   buildPick();
@@ -479,7 +490,8 @@ function cleanPick(o){
 /* The film box is the one asynchronous summary; the others are in memory. The decision waits for all of them. */
 function buildPick(){
   var save=P.save;
-  if(!save || save.stage==="egg") return;
+  /* away on the long absence: it is not home to find anything, and the return day brings its postcard instead */
+  if(!save || save.stage==="egg" || save.travel) return;
   var td=save.today;
   if(!td) return;
   if(td.picked) return;
@@ -837,7 +849,8 @@ function stripFence(text){
 }
 /* One call a day. today.ai is written first, so a reload never asks twice; the answer may arrive while the pet's
    screen is closed (the day's outing is decided in the background too). Anything other than a valid souvenir becomes
-   the built-in one; leaving the screen stops a request that is still running. */
+   the built-in one; leaving or pausing the screen does not stop the day's request, only a restore/reset does (the
+   job's own 30 s timer caps it, and the outing waits for the answer because it is the day's souvenir). */
 function aiAvailable(){
   if(P.restoring || P.nostore || P.readFailed) return false;
   var ai=LP.ai;
@@ -860,7 +873,7 @@ function startAiJob(td){
   if(!td || td.ai || !aiAvailable()) return null;
   td.ai=true;
   saveNow();
-  var job={done:false,result:null,timer:0,stop:null,resolve:null};
+  var job={day:td.day,done:false,result:null,timer:0,stop:null,resolve:null};
   job.promise=new Promise(function(resolve){ job.resolve=resolve; });
   P.aiJob=job;
   var finish=function(result){
@@ -978,13 +991,18 @@ function finishOuting(){
   var o=P.outing; if(!o || o.done) return;
   o.done=true;
   if(o.saved || souvIsEmpty(o.souv)){ markOutingDone(o); return; }
-  addSouvenir(o.souv).then(function(saved){
-    if(saved) markOutingDone(o);
-    else {
-      /* leave the phase in today: the next visit tries the write again */
-      P.outing=null; P.resumeOuting=false; render();
-    }
-  });
+  /* a write already started when the walk began: wait for it rather than write the same day twice */
+  function write(){
+    addSouvenir(o.souv).then(function(saved){
+      if(saved) markOutingDone(o);
+      else {
+        /* leave the phase in today: the next visit tries the write again */
+        P.outing=null; P.resumeOuting=false; render();
+      }
+    });
+  }
+  if(o.write) o.write.then(function(saved){ if(saved) markOutingDone(o); else write(); });
+  else write();
 }
 function stepOuting(){
   if(!P.outing || P.outing.done) return;
@@ -999,6 +1017,20 @@ function stepOuting(){
     P.outing.saved=false;
     P.aiJob=null;
     persistOuting(); saveSoon(); render();
+    /* The souvenir is written when the walk home starts, not when it ends: leaving during these two seconds
+       keeps the day's find (the walk-back resumes it from today.outSouv). */
+    if(!souvIsEmpty(P.outing.souv)){
+      var out=P.outing;
+      out.write=addSouvenir(out.souv).then(function(saved){
+        if(!saved) return null;
+        if(P.outing===out) out.saved=true;
+        if(P.save && P.save.today && P.save.today.day===out.day) P.save.today.outSouv=saved.id;
+        saveSoon(); render();
+        return saved;
+      });
+      /* the background day waits for this write, so leaving now can never roll a second souvenir for the day */
+      P.outWrite={day:out.day,promise:out.write};
+    }
   } else if(P.outing.phase==="back" && P.outing.left<=0){
     persistOuting();
     finishOuting();
@@ -1011,7 +1043,10 @@ function stepOuting(){
 function decideOuting(hour, day){
   if(P.restoring || P.nostore || P.readFailed) return Promise.resolve(false);
   if(P.outResolving) return P.outResolving;
-  P.outResolving=Promise.resolve().then(function(){
+  /* A walk-back that started on the screen writes the day's souvenir first: decide only after that write,
+     so the two paths cannot both bring one. */
+  var walk=(P.outWrite && P.outWrite.day===day) ? P.outWrite.promise : null;
+  P.outResolving=(walk||Promise.resolve()).then(function(){
     var td=P.save && P.save.today;
     if(!td || td.day!==day || td.out!=null || td.back) return {skip:true};
     /* once per day, before the AI gate or the built-in roll; the guard keeps a reload from moving it again */
@@ -1021,6 +1056,15 @@ function decideOuting(hour, day){
     if(had) return {skip:true, done:markDayWithSouvenir(had,hour,day)};
     td.outHour=hour;
     saveSoon();
+    /* A request started on the screen is still the day's one: leaving the screen no longer aborts it (its own
+       30 s cap ends it), so the background path waits for that answer instead of rolling a second souvenir. */
+    var pending=P.aiJob;
+    if(pending && pending.day===day && (!pending.done || pending.result)){
+      return pending.promise.then(function(entry){
+        if(P.aiJob===pending) P.aiJob=null;
+        return {entry:entry};
+      });
+    }
     if(!td.ai && aiAvailable()){
       if(aiMoodOpen(day)){
         var job=startAiJob(td);
@@ -1050,6 +1094,9 @@ function decideOuting(hour, day){
       if(souvIsEmpty(entry)) return markDayBack(hour,day,null);
       if(!entry) return false;
     }
+    /* the wait above may have let the screen's walk-back write the day's souvenir: never a second one */
+    var again=souvForDay(day);
+    if(again) return markDayWithSouvenir(again,hour,day);
     entry.day=day;
     return addSouvenir(entry).then(function(saved){
       if(!saved){
@@ -1114,6 +1161,24 @@ function naturalAsleep(){
 }
 /* the pet is in bed and nothing (a wake walk, the forced two minutes) is holding it up */
 function inBedSleep(){ return naturalAsleep() && !P.task && !(P.awakeLeft>0); }
+/* The lamp belongs to the pet's day, not to a mode: a sleeping pet never lies in a lit room (written here, not
+   through setLight, so an automatic switch is not a care action and leaves close alone). */
+function settleLamp(){
+  if(!P.save || P.save.stage==="egg" || P.save.light===false || !inBedSleep()) return false;
+  P.save.light=false;
+  saveSoon();
+  renderKeys();
+  return true;
+}
+/* Leaving it up at night is not a state the room keeps: it is asleep in bed. The lamp goes off with it. */
+function putToBed(){
+  if(!naturalAsleep()) return false;
+  P.task=null; P.awakeLeft=0; P.feeds=[];
+  P.action=""; P.actionUntil=0; P.puffUntil=0; P.lightReturn=false;
+  P.at=useSpotAt("sleep","sleep");
+  if(P.save && P.save.light!==false){ P.save.light=false; saveSoon(); }
+  return true;
+}
 function atBed(){ var b=useSpotAt("sleep","sleep"); return !!P.at && Math.abs(P.at.x-b.x)<=2 && Math.abs(P.at.y-b.y)<=2; }
 function spotNow(){
   if(P.task && P.task.pos) return {x:P.task.pos.x,y:P.task.pos.y};
@@ -1214,20 +1279,24 @@ function startChore(kind,phase){
    pet is put at the place the chore was heading for. The two minutes only count while the screen is showing it. */
 function finishTaskOnLeave(){
   var task=P.task;
-  if(!task) return;
+  if(!task){ putToBed(); return; }               /* already in bed at night: the lamp goes off with us */
   if(task.kind==="feed"){
     while(P.feeds.length){
       var kind=P.feeds.shift(), sp=Pet.SPECIES[P.save.species]||Pet.SPECIES.chip;
       if(!(kind==="meal" && (+P.save.hunger||0)>=sp.hungerMax)) P.save=Pet.feed(P.save,kind,now(),dayKey(now()));
       if(kind==="snack" && P.save.today && P.save.today.burp) P.save.today.burp=false;
     }
-    P.awakeLeft=0; P.at=naturalAsleep()?useSpotAt("sleep","sleep"):useSpotAt("rest","stand");
+    P.feeds=[];
+    if(putToBed()) return;
+    P.awakeLeft=0; P.at=useSpotAt("rest","stand");
+  } else if(putToBed()){
+    return;                                      /* asleep at night: no chore leaves it standing awake all night */
   } else if(task.kind==="grumpy" || task.kind==="wake"){
-    if(P.save.light===false && naturalAsleep()){ P.awakeLeft=0; P.at=useSpotAt("sleep","sleep"); }
-    else { P.awakeLeft=Math.max(P.awakeLeft,AWAKE_TICKS); P.at=useSpotAt("rest","stand"); }
+    P.awakeLeft=Math.max(P.awakeLeft,AWAKE_TICKS); P.at=useSpotAt("rest","stand");
   } else {
     P.awakeLeft=0; P.at=useSpotAt("sleep","sleep");
   }
+  P.feeds=[];                                    /* a meal queued during a night wake is not eaten later on its own */
   P.task=null; P.action=""; P.actionUntil=0; P.puffUntil=0; P.lightReturn=false;
 }
 /* One flash per real change of need. While the pet is asleep nothing flashes or sounds; the need is kept and
@@ -1310,6 +1379,15 @@ function toggleLight(){
   if(!P.save) return;
   var t=now(), h=hourNow(), mins=localDate(t).getUTCMinutes();
   var wasAsleep=inBedSleep();
+  if(wasAsleep){
+    /* On a sleeping pet in bed any press of the lamp wakes it, and the lamp is on (the grumpy wake from the bed). */
+    P.save=Pet.setLight(P.save,true);
+    P.action=null; P.actionUntil=0; P.idle=null;
+    P.at=useSpotAt("sleep","sleep");
+    startChore("grumpy","angry");
+    beep("tick"); saveSoon(); renderKeys(); render();
+    return;
+  }
   P.save=Pet.setLight(P.save,!P.save.light);
   P.action=null; P.actionUntil=0; P.idle=null;
   if(P.task){
@@ -1320,14 +1398,13 @@ function toggleLight(){
       } else if(P.task.phase==="walkRug"){
         startChore("bed","walkBed");
       }
+    } else if(P.task.kind==="bed" && P.save.light===true){
+      /* the lamp on during the walk to bed turns it back to the rug, awake (from where it stands) */
+      startChore("grumpy","walkRug");
     } else if(P.save.light===false){
       P.lightReturn=true;
     }
-  } else if(wasAsleep && P.save.light===true){
-    /* light on at night: wakes it, angry, and it walks to the rug (the same walk as every bed <-> floor move) */
-    P.at=useSpotAt("sleep","sleep");
-    startChore("grumpy","angry");
-  } else if(P.save.light===false && Pet.asleep(P.save,h,mins) && !wasAsleep){
+  } else if(P.save.light===false && Pet.asleep(P.save,h,mins)){
     /* light off: back to bed at once, walking */
     P.awakeLeft=0;
     startChore("bed","walkBed");
@@ -1515,6 +1592,7 @@ function startGame(id){
   P.gamePress={left:false,right:false,a:false};
   P.gameLabel="";
   silenceWeather();
+  if(LP.keepAwake) LP.keepAwake(true);
   beep("tap"); renderKeys(); render();
 }
 function startRound(){
@@ -1523,6 +1601,7 @@ function startRound(){
   P.gameHeld={left:false,right:false,a:false};
   P.gamePress={left:false,right:false,a:false};
   P.panelKey="";
+  if(LP.keepAwake) LP.keepAwake(true);
   beep("tap"); renderKeys(); render();
   startGameTimer();
 }
@@ -1556,8 +1635,20 @@ function gameSounds(events){
     else if(e==="land") beep("tick");
   });
 }
+/* The best of a game, 0 when an older save has no best field yet. */
+function bestScore(id){
+  var b=P.save && P.save.best, n=b && typeof b==="object" ? b[id] : 0;
+  return typeof n==="number" && isFinite(n) && n>0 ? Math.floor(n) : 0;
+}
 function applyGameJoy(st){
   if(!P.save || !st) return;
+  var id=st.id || (P.game && P.game.id);
+  var score=Math.max(0,Math.floor(+st.score||0));
+  if(id && score>bestScore(id)){
+    if(!P.save.best || typeof P.save.best!=="object" || Array.isArray(P.save.best)) P.save.best={catch:0,bounce:0,climb:0};
+    P.save.best[id]=score;
+    if(P.game && P.game.id===id) P.game.newBest=true;
+  }
   P.save=Pet.play(P.save,st.joy,dayKey(now()));
   P.action="happy"; P.actionUntil=now()+2500; P.heartUntil=now()+2500;
   beep(st.joy>1?"win":"ok"); saveSoon();
@@ -1565,6 +1656,7 @@ function applyGameJoy(st){
 function stopGameTimer(){ if(P.gameTimer){ clearInterval(P.gameTimer); P.gameTimer=0; } }
 function exitGame(swallowAUp){
   stopGameTimer();
+  if(LP.keepAwake) LP.keepAwake(false);
   P.game=null;
   P.gameHeld={left:false,right:false,a:false};
   P.gamePress={left:false,right:false,a:false};
@@ -1634,14 +1726,19 @@ function setShelf(id){
   var old=s.shelf||null, next=id||null;
   if(old===next){ P.boxAsk=null; P.panelKey=""; renderKeys(); render(); return; }
   function finish(){
-    s.shelf=next;
+    var cur=P.save;                    /* a care action may have cloned the save while the souvenir was written */
+    if(!cur) return;
+    cur.shelf=next;
     shelfGainJoy();
     if(next){ P.action="happy"; P.actionUntil=now()+2500; P.idle=null; }
     P.boxAsk=null; P.panelKey="";
     beep("ok"); saveSoon(); renderKeys(); render();
   }
   function putNew(){
-    shelfPut(next?findSouv(next):null,function(){ finish(); });
+    shelfPut(next?findSouv(next):null,function(ok){
+      if(!ok){ P.boxAsk=null; P.panelKey=""; beep("err"); renderKeys(); render(); return; }
+      finish();
+    });
   }
   if(old){
     shelfTake(findSouv(old),function(ok){
@@ -1771,8 +1868,10 @@ var PICK_NAME={date:"pet.pick.date",word:"pet.pick.word",book:"pet.pick.book",fi
 function menuItems(){
   var pick=activePick();
   if(pick && !PICK_NAME[pick.kind]) pick=null;      /* an old kind with no program is not offered */
+  /* while it is away or out there is nobody home to read the mail */
+  var can=!!pick && !(P.save && P.save.travel) && !P.outing;
   return [
-    {id:"mail", enabled:!!pick, label:tr(pick?PICK_NAME[pick.kind]:"pet.menu.none")},
+    {id:"mail", enabled:can, label:tr(can?PICK_NAME[pick.kind]:"pet.menu.none")},
     {id:"look", enabled:true},
     {id:"box", enabled:true}
   ];
@@ -1793,7 +1892,7 @@ function chooseMenuItem(i){
 /* ---------- the day's pick: its own program, or the word card ---------- */
 function usePick(){
   var pick=activePick();
-  if(P.sub || !pick || !P.save || P.save.travel || P.outing || P.save.stage==="egg") return;
+  if(P.sub || !pick || !P.save || P.save.travel || P.outing || P.save.stage==="egg"){ beep("err"); return; }
   if(pick.kind==="date"){
     if(typeof pick.day!=="number" || !LP.calendar || typeof LP.calendar.open!=="function") return;
     finishPick();
@@ -2070,7 +2169,7 @@ function roomScene(){
   var scene={
     pack:pack, night:night, season:seasonOf(t), weather:weatherNow(), phase:Math.floor(t/500),
     dayOfMonth:localDate(t).getUTCDate(),
-    lightOff:!!(save && save.light===false && asleepNow),
+    lightOff:!!(save && save.light===false && night),
     bowlFull:save ? save.hunger>=2 : true,
     mess:save ? save.mess : 0
   };
@@ -2247,10 +2346,12 @@ function boxes(n){
   return wrap;
 }
 function panelKey(){
+  /* the naming panel's field must survive every other change: rebuilding it mid-typing closes the phone's keyboard */
+  if(P.sub==="name") return ["name",P.naming&&P.naming.confirm?1:0,I18N.lang].join("|");
   var s=P.save||{}, st=gameState();
   return [P.sub,P.foodSel,P.boxPage,P.boxAsk?P.boxAsk.id+P.boxAsk.take:"" ,P.menuSel,P.confirmStage,I18N.lang,P.souv.length,P.boxSel,P.boxItem||"",activePick()?activePick().kind:"",
     P.naming?(P.naming.confirm?1:0):-1,
-    P.gameSel,P.game?P.game.id:"",st?st.score:-1,st&&st.done?1:0,P.game&&P.game.applied?1:0,P.game&&P.game.started?1:0,
+    P.gameSel,P.game?P.game.id:"",st?st.score:-1,st&&st.done?1:0,P.game&&P.game.applied?1:0,P.game&&P.game.started?1:0,P.game&&P.game.newBest?1:0,
     P.wordWord,P.wordMeaning,P.wordBusy,
     s.stage,s.name,s.hunger,s.joy,s.opened,s.born,s.close,s.travel,s.light].join("|");
 }
@@ -2311,6 +2412,7 @@ function buildGameStart(panel){
   var g=P.game ? gameById(P.game.id) : null, box=el("div","pet-gbox");
   box.appendChild(el("p","pet-gname",g?tr(g.labelKey):tr("pet.game.title")));
   box.appendChild(el("p","pet-ghow",tr("pet.game.how."+(P.game?P.game.id:"catch"))));
+  box.appendChild(el("p","pet-gbest",tr("pet.game.best",{n:bestScore(P.game?P.game.id:"")})));
   panel.appendChild(box);
 }
 function buildGameOver(panel){
@@ -2329,6 +2431,8 @@ function buildGameOver(panel){
   score.setAttribute("aria-label",tr("pet.game.score",{n:st.score}));
   paintScore(score,st.score);
   box.appendChild(score);
+  box.appendChild(el("p","pet-gbest",tr("pet.game.best",{n:bestScore(P.game?P.game.id:"")})));
+  if(P.game && P.game.newBest) box.appendChild(el("p","pet-gbest",tr("pet.game.newbest")));
   box.appendChild(el("p","pet-gcomment",tr(st.joy>=2?"pet.game.result.fun":"pet.game.result.ok")));
   box.appendChild(el("p","pet-ganykey",tr("pet.game.anykey")));
   panel.appendChild(box);
@@ -2638,6 +2742,8 @@ function tick(){
     if(P.wasAsleep===null) P.wasAsleep=sleepNow;
     else if(P.wasAsleep && !sleepNow && !P.task && !P.outing){
       P.at=useSpotAt("sleep","sleep");
+      /* the morning comes: the lamp goes back on, so last night's switch-off is not tonight's bedtime */
+      if(!naturalAsleep() && P.save.light===false){ P.save.light=true; saveSoon(); renderKeys(); }
       startChore("wake","walkRug");
       P.wasAsleep=false;
     } else if(!P.wasAsleep && sleepNow && !P.task && !P.outing && !atBed()){
@@ -2647,6 +2753,8 @@ function tick(){
       P.wasAsleep=sleepNow;
     }
   }
+  /* a sleeping pet never lies in a lit room; on screen the switch happens in the same tick it settles */
+  settleLamp();
   render();
 }
 
@@ -2681,7 +2789,8 @@ function leave(){
   P.gamePress={left:false,right:false,a:false};
   P.gameTouch=null;
   P.wordWord=""; P.wordMeaning=null; P.wordBusy=false;
-  stopAiJob();
+  /* the day's AI request is not the screen's: it keeps running to today's answer (its own 30 s cap) */
+  if(LP.keepAwake) LP.keepAwake(false);
   silenceWeather();
   saveNow();
   stopJingle();
@@ -2694,19 +2803,28 @@ function stopJingle(){
 }
 function pause(){
   if(!P.inView) return;
+  P.pausedAt=now();
   if(P.roomHold){ clearTimeout(P.roomHold); P.roomHold=0; }
   P.holdFired=false; clearHold();
   persistOuting();
   stopTimer(); stopGameTimer(); saveNow();
-  stopAiJob();
+  /* a paused screen keeps the day's AI request: its answer belongs to the outing, not to the view */
+  if(LP.keepAwake) LP.keepAwake(false);
   silenceWeather();
   stopJingle();
 }
 function resume(){
   P.resumeOuting=true;
   if(isOpen()){
-    refreshTime(); P.wasAsleep=inBedSleep(); maybeNamePrompt(); render(); startTimer(); refreshUsage();
-    if(P.sub==="game" && P.game && P.game.started && !gameDone()) startGameTimer();
+    refreshTime();
+    /* a long stay in the background is no way to hold a pet up at night; a short app switch keeps the two minutes */
+    if(P.pausedAt && now()-P.pausedAt>=120000 && naturalAsleep()) putToBed();
+    P.pausedAt=0;
+    P.wasAsleep=inBedSleep(); maybeNamePrompt(); render(); startTimer(); refreshUsage();
+    if(P.sub==="game" && P.game && P.game.started && !gameDone()){
+      startGameTimer();
+      if(LP.keepAwake) LP.keepAwake(true);
+    }
   } else {
     backgroundDay();
   }
@@ -2866,6 +2984,9 @@ function clockHome(){
   if(!s || s.stage==="egg") return;
   var key=dayKey(now()), td=s.today||{}, need=false;
   if(td.day!==key) need=true;
+  /* one hour of the background day is a real step of hunger and mess: without it the tile keeps its old face for as
+     long as the home screen sits there */
+  if(!need && typeof s.last==="number" && now()-s.last>=HOUR) need=true;
   if(!need && !P.outing && !td.back && td.out==null){
     var o=Pet.outingToday(s,key);
     if(o && hourNow()>=o.hour) need=true;
