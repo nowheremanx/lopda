@@ -841,7 +841,7 @@ function stripFence(text){
 function aiAvailable(){
   if(P.restoring || P.nostore || P.readFailed) return false;
   var ai=LP.ai;
-  return !!(ai && typeof ai.on==="function" && ai.on() && typeof ai.ask==="function");
+  return !!(ai && typeof ai.on==="function" && ai.on("pet") && typeof ai.ask==="function");
 }
 function stopAiJob(){
   var job=P.aiJob;
@@ -877,7 +877,12 @@ function startAiJob(td){
     P.save.aiUse=copyCounts(P.usage);
     saveNow();
     var pr;
-    try{ pr=ai.ask(prompt); }catch(e){ finish(null); return; }
+    try{
+      var req={}, k;
+      for(k in prompt){ if(Object.prototype.hasOwnProperty.call(prompt,k)) req[k]=prompt[k]; }
+      req.use="pet";
+      pr=ai.ask(req);
+    }catch(e){ finish(null); return; }
     job.stop=function(){ try{ if(pr && typeof pr.stop==="function") pr.stop(); }catch(e){} };
     job.timer=setTimeout(function(){
       job.timer=0;

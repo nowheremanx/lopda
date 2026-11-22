@@ -4014,6 +4014,7 @@ test("studio: with no key nothing changes the tape; an AI reply is previewed and
   /* the harness' first ask is held open: the sheet shows the stage and the link line, and a signal flips the mark */
   await p.evaluate(() => {
     LP.ai.on = () => true;
+    LP.ai.line = () => ({ id: "l1", name: "Test", provider: "openrouter", vision: true });
     window.__aiSignal = null;
     LP.ai.ask = (o) => {
       window.__aiSignal = o.onSignal;
@@ -4052,6 +4053,7 @@ test("studio: a dropped AI line is dialled again, then the user decides; a long 
   await skipTour(p);
   await p.evaluate(() => {
     LP.ai.on = () => true;
+    LP.ai.line = () => ({ id: "l1", name: "Test", provider: "openrouter", vision: true });
     window.__aiCalls = 0;
     /* 86 hat changes in two ops calls, like the owner's nine-bar rewrite (2026-10-30) */
     const ops = [];
@@ -4106,6 +4108,7 @@ test("studio: an AI draft becomes a new tape and leaves the current one alone", 
     const answers = { plan: JSON.stringify(plan), melody: JSON.stringify(melody),
       listen: JSON.stringify({ reply: "这盘磁带写好了", calls: [] }) };
     LP.ai.on = () => true;
+    LP.ai.line = () => ({ id: "l1", name: "Test", provider: "openrouter", vision: true });
     window.__aiSteps = [];
     LP.ai.ask = (o) => {
       const m = /TAPE4 STEP: (\w+)/.exec(o.messages[0].content);
@@ -4203,6 +4206,7 @@ test("studio: the guide, library, versions and AI sheets fit 331x359 with 44 px 
   /* a job in progress: the card, the stage and the link line stay inside the screen */
   await p.evaluate(() => {
     LP.ai.on = () => true;
+    LP.ai.line = () => ({ id: "l1", name: "Test", provider: "openrouter", vision: true });
     LP.ai.ask = () => new Promise(() => {});
   });
   await p.fill("#studio-ai-input", "改一下");
@@ -4528,18 +4532,18 @@ test("studio rec: the ≡ menu replays the current screen's tour and the bar has
   assert.deepEqual(errors, []);
 });
 
-test("studio: score page tray imports, reorders and sends images with the score model", { skip, timeout: 90000 }, async (t) => {
+test("studio: score page tray imports, reorders and sends images down the score line", { skip, timeout: 90000 }, async (t) => {
   const { p, errors } = await rtPage(t);
   await studioOpen(p);
   await skipTour(p);
   await p.evaluate(() => {
     LP.ai = {
       on: () => true,
-      scoreModel: () => "test/vision-score-model",
+      line: () => ({ id: "l1", name: "Test", provider: "openrouter", vision: true }),
       err: () => "test error",
       ask: (o) => {
         const user = [...o.messages].reverse().find((m) => m.role === "user");
-        window.__scoreAsk = { model: o.model, parts: user.content.filter((part) => part.type === "image_url").map((part) => part.image_url.url) };
+        window.__scoreAsk = { use: o.use, model: o.model, parts: user.content.filter((part) => part.type === "image_url").map((part) => part.image_url.url) };
         return Promise.resolve(JSON.stringify({ title: "Test", key: "C", capo: 0, meter: "4/4", bpm: 96,
           bars: [{ chords: ["C"], beats: ["1", "1", "1", "1"] }] }));
       },
@@ -4564,10 +4568,12 @@ test("studio: score page tray imports, reorders and sends images with the score 
       const ctx = canvas.getContext("2d"); ctx.drawImage(image, 0, 0);
       return ctx.getImageData(10, 25, 1, 1).data[0];
     }
-    return { model: window.__scoreAsk.model, urls: window.__scoreAsk.parts,
+    return { use: window.__scoreAsk.use, model: window.__scoreAsk.model, urls: window.__scoreAsk.parts,
       left: await Promise.all(window.__scoreAsk.parts.map(leftPixel)) };
   });
-  assert.equal(result.model, "test/vision-score-model");
+  /* the photos go down the score line; LP.ai picks that line's score model itself */
+  assert.equal(result.use, "score");
+  assert.equal(result.model, undefined);
   assert.ok(result.urls.every((url) => url.startsWith("data:image/jpeg;")), "pages are sent as JPEG data URLs");
   assert.ok(result.left[0] > 200, "the former second (white-left) page is now first");
   assert.ok(result.left[1] < 50, "the former first (black-left) page is now second");

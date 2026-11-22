@@ -5,27 +5,39 @@ import { runScript } from "./helpers.mjs";
 const S = runScript("runtime/score-pages.js").LopdaScorePages;
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
-test("score model listing keeps image-input models, trims fields and sorts by prompt price", () => {
+test("score model listing keeps every model, marks the ones that read images, trims fields and sorts by prompt price", () => {
   const list = plain(S.models({ data: [
     { id: "text/only", name: "Text", architecture: { input_modalities: ["text"] }, pricing: { prompt: "0.000001", completion: "0.000002" }, extra: true },
     { id: "vision/second", name: "Second", architecture: { input_modalities: ["text", "image"] }, pricing: { prompt: "0.0000003", completion: "0.0000008" }, extra: true },
     { id: "vision/first", name: "First", architecture: { input_modalities: ["image"] }, pricing: { prompt: "0.0000001", completion: "0.0000004" } },
+    { name: "no id", pricing: { prompt: "0" } },
   ] }));
   assert.deepEqual(list, [
-    { id: "vision/first", name: "First", in: 0.1, out: 0.4 },
-    { id: "vision/second", name: "Second", in: 0.3, out: 0.8 },
+    { id: "vision/first", name: "First", in: 0.1, out: 0.4, vision: true },
+    { id: "vision/second", name: "Second", in: 0.3, out: 0.8, vision: true },
+    { id: "text/only", name: "Text", in: 1, out: 2, vision: false },
   ]);
+  assert.deepEqual(plain(S.visionOnly(list)).map((m) => m.id), ["vision/first", "vision/second"]);
+  assert.deepEqual(plain(S.visionOnly(null)), []);
 });
 
-test("score model cache sanitation stores only the trimmed fields", () => {
+test("score model cache sanitation stores only the trimmed fields, vision included", () => {
   assert.deepEqual(plain(S.cleanModels([
-    { id: "b", name: "Bee", in: 2, out: 3, architecture: { input_modalities: ["image"] }, junk: true },
+    { id: "b", name: "Bee", in: 2, out: 3, vision: true, architecture: { input_modalities: ["image"] }, junk: true },
     { id: "a", name: "Ay", in: 1, out: null, junk: true },
     { name: "missing id", in: 0, out: 0 },
   ])), [
-    { id: "a", name: "Ay", in: 1, out: null },
-    { id: "b", name: "Bee", in: 2, out: 3 },
+    { id: "a", name: "Ay", in: 1, out: null, vision: false },
+    { id: "b", name: "Bee", in: 2, out: 3, vision: true },
   ]);
+});
+
+test("a provider's plain id list becomes pickable rows, sorted by id, without prices", () => {
+  assert.deepEqual(plain(S.idModels({ data: [{ id: "deepseek-v4-pro" }, { id: "deepseek-flash" }, {}, { id: 5 }, { id: "" }] })), [
+    { id: "deepseek-flash", name: "deepseek-flash", in: null, out: null, vision: false },
+    { id: "deepseek-v4-pro", name: "deepseek-v4-pro", in: null, out: null, vision: false },
+  ]);
+  assert.deepEqual(plain(S.idModels(null)), []);
 });
 
 test("score model prices format as per-million input and output prices", () => {

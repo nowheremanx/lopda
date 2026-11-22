@@ -120,7 +120,7 @@
     <!-- SENSORS AND PERMISSIONS: the apps allowed tilt, the microphone, the camera or the word book -->
     <section class="view" id="v-set-sense" hidden>
       <div class="bar">
-        <button class="btn ghost" id="set-sense-back" type="button" aria-label="返回">◂</button>
+        <button class="btn ghost back" id="set-sense-back" type="button" aria-label="返回">◂</button>
         <h2 data-i18n="set.sense">传感器与权限</h2>
       </div>
       <div class="settings">
@@ -135,7 +135,7 @@
     <!-- APP SAVES: kept when an app is removed (decisions.md section 43) -->
     <section class="view" id="v-set-saves" hidden>
       <div class="bar">
-        <button class="btn ghost" id="set-saves-back" type="button" aria-label="返回">◂</button>
+        <button class="btn ghost back" id="set-saves-back" type="button" aria-label="返回">◂</button>
         <h2 data-i18n="saves.title">程序存档</h2>
       </div>
       <div class="settings">
@@ -151,7 +151,7 @@
     <!-- BACKUP: the whole device as one file (decisions.md section 24) -->
     <section class="view" id="v-set-backup" hidden>
       <div class="bar">
-        <button class="btn ghost" id="set-backup-back" type="button" aria-label="返回">◂</button>
+        <button class="btn ghost back" id="set-backup-back" type="button" aria-label="返回">◂</button>
         <h2 data-i18n="set.backup">备份与恢复</h2>
       </div>
       <div class="settings">
@@ -179,7 +179,7 @@
     <!-- SHARE: the public site as a QR code, drawn on the device -->
     <section class="view" id="v-set-share" hidden>
       <div class="bar">
-        <button class="btn ghost" id="set-share-back" type="button" aria-label="返回">◂</button>
+        <button class="btn ghost back" id="set-share-back" type="button" aria-label="返回">◂</button>
         <h2 data-i18n="set.share">分享</h2>
       </div>
       <div class="settings set-share-page">
@@ -196,7 +196,7 @@
     <!-- ABOUT: what a PDA is, this device, and the licences -->
     <section class="view" id="v-set-about" hidden>
       <div class="bar">
-        <button class="btn ghost" id="set-about-back" type="button" aria-label="返回">◂</button>
+        <button class="btn ghost back" id="set-about-back" type="button" aria-label="返回">◂</button>
         <h2 data-i18n="set.about">关于</h2>
       </div>
       <div class="settings set-about-page">
@@ -212,46 +212,96 @@
       </div>
     </section>
 
-    <!-- AI LINE: the OpenRouter key and model, opened from Settings (decisions.md section 34) -->
+    <!-- AI LINES: a phone's SIM list, the keys, the default line and who uses which (decisions.md section 61) -->
     <section class="view" id="v-set-ai" hidden>
       <div id="set-ai-main">
         <div class="bar">
-          <button class="btn ghost" id="set-ai-back" type="button" aria-label="返回">◂</button>
+          <button class="btn ghost back" id="set-ai-back" type="button" aria-label="返回">◂</button>
           <h2 data-i18n="ai.label">AI 线路</h2>
         </div>
         <div class="settings set-ai-page">
+          <p class="hint" id="set-ai-state" aria-live="polite"></p>
+          <ul class="set-ai-list" id="set-ai-lines"></ul>
+          <button class="set-ai-add" id="set-ai-add-open" type="button" data-i18n="ai.add">＋ 添加线路</button>
+          <div class="set-ai-uses" id="set-ai-uses" hidden>
+            <button class="set-ai-row" id="set-ai-def" type="button">
+              <span class="set-ai-label" data-i18n="ai.def">默认线路</span>
+              <span class="set-ai-value" id="set-ai-def-value"></span>
+            </button>
+            <p class="set-ai-heading" data-i18n="ai.uses">谁用哪条</p>
+            <ul class="set-ai-list" id="set-ai-use-links"></ul>
+          </div>
+          <!-- the explanations go under the lines, like the small print under a phone's SIM list -->
           <p class="hint" data-i18n="ai.note">接上以后，脚本里的「生成」直接请 AI 写程序。key 只存在这台手机上，不进备份；请用设了额度上限的 key。</p>
           <p class="hint" data-i18n="ai.pet"></p>
-          <p class="hint" id="set-ai-state" aria-live="polite"></p>
-        <button class="set-open set-ai-score-model" id="set-ai-score-model" type="button">
-          <span class="set-label" data-i18n="ai.score.label">读谱模型</span>
-          <span class="set-state" id="set-ai-score-model-value">默认（Sol）</span>
-        </button>
-        <label class="set-ai-field">
-          <span data-i18n="ai.key">OpenRouter 的 key</span>
-          <input id="set-ai-key" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="200" data-i18n-ph="ai.key.ph" placeholder="sk-or-…">
-        </label>
-        <label class="set-ai-field">
-          <span data-i18n="ai.model">模型</span>
-          <input id="set-ai-model" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="100" placeholder="openrouter/auto">
-        </label>
-        <p class="hint" data-i18n="ai.model.hint">填 openrouter.ai/models 上的模型名，例如便宜够用的 deepseek/deepseek-v4.1-flash；空着就让 OpenRouter 自动选，可能选到贵的。</p>
-        <div class="row">
-          <button class="btn" id="set-ai-save" type="button" data-i18n="ai.save">保存</button>
-          <button class="btn ghost" id="set-ai-test" type="button" data-i18n="ai.test" hidden>试一下</button>
-          <button class="btn ghost" id="set-ai-del" type="button" data-i18n="ai.del" hidden>删除 key</button>
         </div>
+      </div>
+      <div id="set-ai-add" hidden>
+        <div class="bar">
+          <button class="btn ghost back" id="set-ai-add-back" type="button" aria-label="返回">◂</button>
+          <h2 data-i18n="ai.add.title">添加线路</h2>
+        </div>
+        <div class="settings set-ai-page">
+          <ul class="set-ai-list" id="set-ai-providers"></ul>
+        </div>
+      </div>
+      <div id="set-ai-line" hidden>
+        <div class="bar">
+          <button class="btn ghost back" id="set-ai-line-back" type="button" aria-label="返回">◂</button>
+          <h2 id="set-ai-line-title"></h2>
+        </div>
+        <div class="settings set-ai-page">
+          <label class="set-ai-field">
+            <span data-i18n="ai.key">key</span>
+            <input id="set-ai-key" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="200" data-i18n-ph="ai.key.ph" placeholder="sk-or-…">
+          </label>
+          <label class="set-ai-field">
+            <span data-i18n="ai.model">模型</span>
+            <input id="set-ai-model" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="100">
+          </label>
+          <p class="hint" id="set-ai-model-hint"></p>
+          <button class="set-ai-row" id="set-ai-model-pick" type="button" hidden>
+            <span class="set-ai-label" data-i18n="ai.model.pick">从列表选</span>
+            <span class="set-ai-value" id="set-ai-model-pick-value"></span>
+          </button>
+          <label class="set-ai-field" id="set-ai-vmodel-row">
+            <span data-i18n="ai.vmodel">看图模型</span>
+            <input id="set-ai-vmodel" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="100">
+          </label>
+          <p class="hint" id="set-ai-vmodel-hint" data-i18n="ai.vmodel.hint">读谱时用它看照片；空着就用默认。</p>
+          <button class="set-ai-row" id="set-ai-score-model" type="button" hidden>
+            <span class="set-ai-label" data-i18n="ai.vmodel.pick">从列表选</span>
+            <span class="set-ai-value" id="set-ai-score-model-value"></span>
+          </button>
+          <p class="hint" id="set-ai-list-needkey" hidden data-i18n="ai.list.needkey">先保存 key 才能拿列表</p>
+          <p class="hint" id="set-ai-line-state" aria-live="polite"></p>
+          <div class="row">
+            <button class="btn" id="set-ai-save" type="button" data-i18n="ai.save">保存</button>
+            <button class="btn ghost" id="set-ai-test" type="button" data-i18n="ai.test" hidden>试一下</button>
+            <button class="btn ghost" id="set-ai-del" type="button" data-i18n="ai.del" hidden>删除线路</button>
+          </div>
+        </div>
+      </div>
+      <div id="set-ai-use" hidden>
+        <div class="bar">
+          <button class="btn ghost back" id="set-ai-use-back" type="button" aria-label="返回">◂</button>
+          <h2 id="set-ai-use-title"></h2>
+        </div>
+        <div class="settings set-ai-page">
+          <ul class="set-ai-list set-ai-use-list" id="set-ai-use-list" role="radiogroup"></ul>
         </div>
       </div>
       <div id="set-ai-model-page" hidden>
         <div class="bar">
-          <button class="btn ghost" id="set-ai-model-back" type="button" aria-label="返回" style="min-height:44px">◂</button>
-          <h2 data-i18n="ai.score.label">读谱模型</h2>
+          <button class="btn ghost back" id="set-ai-model-back" type="button" aria-label="返回">◂</button>
+          <h2 id="set-ai-model-title"></h2>
         </div>
         <div class="settings set-ai-page">
+          <input id="set-ai-model-search" class="set-ai-search" type="text" enterkeyhint="search" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="100" data-i18n-ph="ai.list.search" placeholder="搜索模型名">
           <p class="hint" id="set-ai-model-status" aria-live="polite"></p>
-          <p class="hint" data-i18n="ai.score.pricehint">输入 / 输出 · 美元/百万 token</p>
+          <p class="hint" id="set-ai-model-price" data-i18n="ai.score.pricehint">输入 / 输出 · 美元/百万 token</p>
           <ul class="lcd-menu set-ai-model-list" id="set-ai-model-list"></ul>
+          <p class="hint" id="set-ai-model-more" aria-live="polite"></p>
         </div>
       </div>
     </section>
@@ -259,7 +309,7 @@
     <!-- DARKROOM KEY: the key that opens the places in your negatives, kept inside the runtime -->
     <section class="view" id="v-set-key" hidden>
       <div class="bar">
-        <button class="btn ghost" id="set-key-back" type="button" aria-label="返回">◂</button>
+        <button class="btn ghost back" id="set-key-back" type="button" aria-label="返回">◂</button>
         <h2 data-i18n="key.label">暗房钥匙</h2>
       </div>
       <div class="settings set-ai-page">
@@ -676,7 +726,7 @@
     <!-- SCRIPT IDEA: a full page for a long prompt to hand to an AI -->
     <section class="view scripts-view" id="v-script-idea" hidden>
       <div class="bar">
-        <button class="btn ghost" id="idea-back" type="button" aria-label="返回">◂</button>
+        <button class="btn ghost back" id="idea-back" type="button" aria-label="返回">◂</button>
         <h2 data-i18n="scripts.idea.title">让 AI 写一个</h2>
         <button class="btn ghost" id="idea-clear" type="button" data-i18n="scripts.idea.clear" disabled>清空</button>
       </div>
@@ -703,7 +753,7 @@
     <section class="view" id="v-script-edit" hidden>
       <div class="editor">
         <div class="bar">
-          <button class="btn ghost" id="script-back" type="button" aria-label="返回">◂</button>
+          <button class="btn ghost back" id="script-back" type="button" aria-label="返回">◂</button>
           <input id="script-name" type="text" maxlength="40" autocomplete="off" autocorrect="off" spellcheck="false" data-i18n-ph="scripts.name" placeholder="名字">
           <button class="btn ghost" id="script-menu" type="button" data-i18n="scripts.menu">选项</button>
         </div>
@@ -714,6 +764,8 @@
         </div>
         <p class="hint" id="script-hint" aria-live="polite"></p>
         <div class="script-menu" id="script-menu-panel" hidden>
+          <button class="btn ghost" id="script-menu-paste" type="button" data-i18n="scripts.paste">粘贴代码</button>
+          <button class="btn ghost" id="script-versions-open" type="button" data-i18n="scripts.versions.title">版本</button>
           <button class="btn ghost" id="script-copy" type="button" data-i18n="scripts.copy">复制提示词</button>
           <button class="btn ghost" id="script-export" type="button" data-i18n="scripts.export">导出脚本</button>
           <button class="btn ghost" id="script-clear" type="button" data-i18n="scripts.clear">清除存档</button>
@@ -733,7 +785,7 @@
     <!-- SCRIPT DATA: every script's storage, and a way to clear it -->
     <section class="view scripts-view" id="v-script-data" hidden>
       <div class="bar">
-        <button class="btn ghost" id="data-back" type="button" aria-label="返回">◂</button>
+        <button class="btn ghost back" id="data-back" type="button" aria-label="返回">◂</button>
         <h2 data-i18n="scripts.data.title">脚本存档</h2>
         <button class="btn ghost" id="data-clear-all" type="button" data-i18n="scripts.data.clearall" disabled>清空</button>
       </div>
@@ -748,6 +800,43 @@
           <button class="btn" id="data-ask-yes" type="button" data-i18n="scripts.yes">确认</button>
           <button class="btn ghost" id="data-ask-no" type="button" data-i18n="common.cancel">取消</button>
         </div>
+      </div>
+    </section>
+
+    <!-- SCRIPT REVISE: one ask about the code on screen, sent down the AI line like 生成; the old code becomes a version -->
+    <section class="view scripts-view" id="v-script-revise" hidden>
+      <div class="bar">
+        <button class="btn ghost back" id="revise-back" type="button" aria-label="返回">◂</button>
+        <h2 data-i18n="scripts.revise.title">改一改</h2>
+      </div>
+      <div class="idea-main">
+        <p class="hint" id="revise-note"></p>
+        <textarea id="revise-ask" maxlength="500" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" data-i18n-ph="scripts.revise.ph" placeholder="想怎么改？例如：加一个暂停键"></textarea>
+        <p class="hint" id="revise-status" aria-live="polite"></p>
+        <textarea id="revise-prompt-box" hidden readonly aria-label="AI prompt"></textarea>
+      </div>
+      <div class="idea-actions">
+        <button class="btn ghost" id="revise-paste" type="button" data-i18n="scripts.revise.paste">粘贴新版本</button>
+        <button class="btn" id="revise-go" type="button" data-i18n="scripts.revise.run">改</button>
+      </div>
+    </section>
+
+    <!-- SCRIPT VERSIONS: the earlier bodies of one script, read-only, with 换回这个 -->
+    <section class="view scripts-view" id="v-script-versions" hidden>
+      <div class="bar">
+        <button class="btn ghost back" id="versions-back" type="button" aria-label="返回">◂</button>
+        <h2 data-i18n="scripts.versions.title">版本</h2>
+      </div>
+      <div class="scripts-main" id="versions-list-wrap">
+        <ul class="lcd-menu scripts-list" id="versions-list"></ul>
+        <p class="hint scripts-empty" id="versions-empty" hidden></p>
+      </div>
+      <div class="scripts-main" id="versions-code-wrap" hidden>
+        <textarea id="versions-code" readonly spellcheck="false" aria-label="程序代码"></textarea>
+      </div>
+      <div class="idea-actions" id="versions-actions" hidden>
+        <button class="btn ghost" id="versions-return" type="button" data-i18n="scripts.versions.back">返回</button>
+        <button class="btn" id="versions-use" type="button" data-i18n="scripts.versions.use">换回这个</button>
       </div>
     </section>
 
@@ -850,6 +939,7 @@
 <script src="zip.js"></script>
 <script src="backup.js"></script>
 <script src="ai.js"></script>
+<script src="ailines.js"></script>
 <script src="score-pages.js"></script>
 <script src="studio-song.js"></script>
 <script src="studio-synth.js"></script>

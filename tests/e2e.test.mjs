@@ -9643,6 +9643,8 @@ test("scripts: a script that reads the buttons gets the chin pad", { skip, timeo
 
 test("AI line: a key in Settings turns 复制 into 生成, the code streams into a new script, and the key stays out of the backup", { skip, timeout: 45000 }, async (t) => {
   const { p, errors } = await page(t, { locale: "zh-CN" });
+  /* Math.random 0 draws the line test's first letter, A, which the route below answers */
+  await p.addInitScript(() => { Math.random = () => 0; });
   const asked = [];
   const CORS = { "access-control-allow-origin": "*", "access-control-allow-headers": "authorization, content-type", "access-control-allow-methods": "POST" };
   await p.route("https://openrouter.ai/**", async (r) => {
@@ -9650,7 +9652,10 @@ test("AI line: a key in Settings turns 复制 into 生成, the code streams into
     const body = JSON.parse(r.request().postData());
     asked.push({ auth: r.request().headers().authorization, body });
     const ev = (o) => "data: " + JSON.stringify(o) + "\n\n";
-    const text = body.max_tokens ? ["OK"] : ["Sure:\n```html\n<!doctype html><title>番茄", "钟</title><body>tick</body></html>\n```"];
+    const last = body.messages && body.messages.length ? body.messages[body.messages.length - 1].content : "";
+    const image = Array.isArray(last) && last.some((c) => c && c.type === "image_url");
+    /* the line test's two steps answer right; anything else is the script's code */
+    const text = image ? ["A"] : JSON.stringify(last).includes("1+1") ? ["2"] : ["Sure:\n```html\n<!doctype html><title>番茄", "钟</title><body>tick</body></html>\n```"];
     await r.fulfill({ status: 200, headers: { ...CORS, "content-type": "text/event-stream" },
       body: ": OPENROUTER PROCESSING\n\n" + text.map((c) => ev({ model: "test/model", choices: [{ delta: { content: c } }] })).join("") + "data: [DONE]\n\n" });
   });
@@ -9662,18 +9667,24 @@ test("AI line: a key in Settings turns 复制 into 生成, the code streams into
   await p.click("#scripts-write");
   assert.equal(await p.locator("#idea-copy").innerText(), "复制 AI 提示词");
 
-  /* Settings: paste a key, test the line; only the last four characters are shown */
+  /* Settings: add an OpenRouter line, paste a key, save; the new line is tried at once */
   await p.evaluate(() => LP.builtins.filter((b) => b.id === "settings")[0].open());
   await p.waitForFunction(() => !document.getElementById("v-settings").hidden);
   assert.equal(await p.locator("#set-ai-open").innerText(), "未接上 ›");
   await p.click("#set-ai-open");
   await p.waitForFunction(() => !document.getElementById("v-set-ai").hidden);
   assert.match(await p.locator("#set-ai-state").innerText(), /还没接上/);
+  await p.click("#set-ai-add-open");
+  await p.waitForFunction(() => !document.getElementById("set-ai-add").hidden);
+  await p.click('[data-provider="openrouter"]');
+  await p.waitForFunction(() => !document.getElementById("set-ai-line").hidden);
   /* each field has its label */
-  assert.deepEqual(await p.locator("#v-set-ai .set-ai-field > span").allInnerTexts(), ["OpenRouter 的 key", "模型"]);
+  assert.deepEqual(await p.locator("#set-ai-line .set-ai-field > span").allInnerTexts(), ["key", "模型", "看图模型"]);
   await p.fill("#set-ai-key", "sk-or-secret-1234");
   await p.click("#set-ai-save");
-  assert.match(await p.locator("#set-ai-state").innerText(), /key …1234 · 模型 openrouter\/auto/);
+  await p.waitForFunction(() => /线路正常/.test(document.getElementById("set-ai-line-state").textContent));
+  assert.match(await p.locator("#set-ai-line-state").innerText(), /算对了（test\/model）/);
+  assert.equal(asked[0].auth, "Bearer sk-or-secret-1234");
   assert.ok(!(await p.locator("#v-set-ai").innerText()).includes("secret"));
   /* the saved key shows as dots: a stand-in in the password field, never the key */
   assert.equal(await p.getAttribute("#set-ai-key", "type"), "password");
@@ -9686,16 +9697,18 @@ test("AI line: a key in Settings turns 复制 into 生成, the code streams into
   assert.equal(await p.inputValue("#set-ai-key"), shown, "left empty, the dots come back");
   /* saving the model alone keeps the key */
   await p.fill("#set-ai-model", "a/b"); await p.click("#set-ai-save");
-  assert.match(await p.locator("#set-ai-state").innerText(), /key …1234 · 模型 a\/b/);
+  assert.equal(await p.inputValue("#set-ai-model"), "a/b");
   await p.fill("#set-ai-model", ""); await p.click("#set-ai-save");
   await p.click("#set-ai-test");
-  await p.waitForFunction(() => /线路正常/.test(document.getElementById("set-ai-state").textContent));
-  assert.match(await p.locator("#set-ai-state").innerText(), /「OK」（test\/model）/);
-  assert.equal(asked[0].auth, "Bearer sk-or-secret-1234");
+  await p.waitForFunction(() => /线路正常/.test(document.getElementById("set-ai-line-state").textContent));
+  assert.match(await p.locator("#set-ai-line-state").innerText(), /算对了（test\/model）/);
+  assert.equal(asked[2].auth, "Bearer sk-or-secret-1234");
 
+  await p.click("#set-ai-line-back");
+  await p.waitForFunction(() => !document.getElementById("set-ai-main").hidden);
   await p.click("#set-ai-back");
   await p.waitForFunction(() => !document.getElementById("v-settings").hidden);
-  assert.equal(await p.locator("#set-ai-open").innerText(), "已接上 ›");
+  assert.equal(await p.locator("#set-ai-open").innerText(), "OpenRouter ›");
 
   /* the backup leaves the key out */
   const docs = await p.evaluate(async () => {
@@ -9721,14 +9734,588 @@ test("AI line: a key in Settings turns 复制 into 生成, the code streams into
   await p.waitForFunction(() => /写好了（用时 0:0\d）/.test(document.getElementById("script-hint").textContent));
   assert.equal(await p.inputValue("#script-code"), "<!doctype html><title>番茄钟</title><body>tick</body></html>");
   assert.equal(await p.inputValue("#script-name"), "番茄钟");
-  assert.equal(await p.locator("#script-paste").innerText(), "粘贴代码");
+  assert.equal(await p.locator("#script-paste").innerText(), "改一改");
   assert.ok(await p.locator("#script-run").isEnabled());
-  const sent = asked[1].body;
+  const sent = asked[4].body;
   assert.equal(sent.stream, true);
   assert.equal(sent.model, "openrouter/auto");
   assert.match(sent.messages[0].content, /我想做的是：一个番茄钟/);
   await p.click("#script-back");
   await p.waitForFunction(() => [...document.querySelectorAll("#scripts-list .t")].some((e) => e.textContent === "番茄钟"));
+  assert.deepEqual(errors, []);
+});
+
+/* ---- AI lines (decisions.md section 61): the data must never lose a key ---- */
+const AIDOC = "data/users/local/ai";
+const TWO_LINES = { v: 2, next: 3, def: "l1", use: { score: { line: "l2", model: "" } },
+  lines: [{ id: "l1", provider: "deepseek", n: 1, key: "sk-deep-1111", model: "", on: true, added: 1 },
+    { id: "l2", provider: "openrouter", n: 1, key: "sk-or-2222", model: "", on: true, added: 2 }],
+  key: "sk-or-2222", model: "", scoreModel: "" };
+const AI_CORS = { "access-control-allow-origin": "*", "access-control-allow-headers": "authorization, content-type", "access-control-allow-methods": "POST" };
+/* every provider's address answers by what it was asked: "2" to 1+1, "A" to a picture (opts.letter when the reader
+   should name the wrong one), "OK" otherwise; records who was asked with which key and what */
+async function fakeProviders(p, opts) {
+  const asked = [], wrong = opts && opts.letter;
+  for (const host of ["https://openrouter.ai/api/**", "https://api.deepseek.com/**", "https://api.moonshot.cn/**", "https://dashscope.aliyuncs.com/**", "https://api.siliconflow.cn/**"]) {
+    await p.route(host, async (r) => {
+      if (r.request().method() === "OPTIONS") return r.fulfill({ status: 204, headers: AI_CORS });
+      const body = JSON.parse(r.request().postData() || "{}");
+      asked.push({ url: r.request().url(), auth: r.request().headers().authorization, body });
+      const last = body.messages && body.messages.length ? body.messages[body.messages.length - 1].content : "";
+      const image = Array.isArray(last) && last.some((c) => c && c.type === "image_url");
+      const answer = image ? (wrong || "A") : JSON.stringify(last).includes("1+1") ? "2" : "OK";
+      await r.fulfill({ status: 200, headers: { ...AI_CORS, "content-type": "text/event-stream" },
+        body: "data: " + JSON.stringify({ model: "m", choices: [{ delta: { content: answer } }] }) + "\n\ndata: [DONE]\n\n" });
+    });
+  }
+  return asked;
+}
+async function aiDoc(p) { return p.evaluate((path) => LopdaPlatform.db.doc(path).get().then((s) => (s.exists ? s.data() : null)), AIDOC); }
+async function bootWithAi(p, doc) {
+  await p.goto(base + "/runtime/", { waitUntil: "load" });
+  await p.waitForFunction(() => window.LP && LP.ai);
+  await p.evaluate(([path, d]) => LopdaPlatform.db.doc(path).set(d), [AIDOC, doc]);
+  await p.reload({ waitUntil: "load" });
+  await p.waitForFunction(() => window.LP && LP.ai && LP.ai._test.state().loaded);
+}
+
+test("AI line: an old single OpenRouter key becomes the first line after the upgrade, and still works", { skip, timeout: 45000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN" });
+  const asked = await fakeProviders(p);
+  await bootWithAi(p, { v: 1, key: "sk-or-old-9876", model: "a/b", scoreModel: "x/see" });
+  assert.equal(await p.evaluate(() => LP.ai.on("scripts")), true);
+  assert.deepEqual(await p.evaluate(() => LP.ai.line("scripts")), { id: "l1", name: "OpenRouter", provider: "openrouter", vision: true });
+  /* reading writes nothing: the v1 document is still exactly as it was */
+  assert.deepEqual(await aiDoc(p), { v: 1, key: "sk-or-old-9876", model: "a/b", scoreModel: "x/see" });
+  assert.equal(await p.evaluate(() => LP.ai.ask({ use: "scripts", messages: [{ role: "user", content: "hi" }] })), "OK");
+  assert.equal(asked[0].url, "https://openrouter.ai/api/v1/chat/completions");
+  assert.equal(asked[0].auth, "Bearer sk-or-old-9876");
+  assert.equal(asked[0].body.model, "a/b");
+  assert.equal(await p.evaluate(() => LP.ai.scoreModel()), "x/see");
+  /* the first write (the line's status, a second later) is v2 with the key kept and mirrored */
+  await p.evaluate(async (path) => { while ((await LopdaPlatform.db.doc(path).get()).data().v !== 2) await new Promise((r) => setTimeout(r, 50)); }, AIDOC);
+  const d = await aiDoc(p);
+  assert.equal(d.lines.length, 1);
+  assert.equal(d.lines[0].key, "sk-or-old-9876");
+  assert.equal(d.lines[0].visionModel, "x/see");
+  assert.equal(d.lines[0].last.ok, true);
+  assert.deepEqual([d.key, d.model, d.scoreModel, d.def, d.next], ["sk-or-old-9876", "a/b", "x/see", "l1", 2]);
+  assert.deepEqual(d.use, {});
+  /* booting again reads the v2 document to the same state */
+  await p.reload({ waitUntil: "load" });
+  await p.waitForFunction(() => window.LP && LP.ai && LP.ai._test.state().loaded);
+  assert.deepEqual(await p.evaluate(() => LP.ai.line("pet")), { id: "l1", name: "OpenRouter", provider: "openrouter", vision: true });
+  assert.deepEqual(errors, []);
+});
+
+test("AI line: each key goes only to its own provider: scripts down DeepSeek, the score reading down OpenRouter", { skip, timeout: 45000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN" });
+  const asked = await fakeProviders(p);
+  await bootWithAi(p, TWO_LINES);
+  await p.evaluate(() => LP.ai.ask({ use: "scripts", messages: [{ role: "user", content: "a" }] }));
+  await p.evaluate(() => LP.ai.ask({ use: "score", messages: [{ role: "user", content: "b" }] }));
+  assert.equal(asked.length, 2);
+  assert.equal(asked[0].url, "https://api.deepseek.com/chat/completions");
+  assert.equal(asked[0].auth, "Bearer sk-deep-1111");
+  assert.equal(asked[0].body.model, "deepseek-flash");
+  assert.equal(asked[1].url, "https://openrouter.ai/api/v1/chat/completions");
+  assert.equal(asked[1].auth, "Bearer sk-or-2222");
+  assert.ok(!JSON.stringify(asked[0]).includes("sk-or-2222") && !JSON.stringify(asked[1]).includes("sk-deep-1111"));
+  /* the line's name, never its key */
+  assert.deepEqual(await p.evaluate(() => LP.ai.line("score")), { id: "l2", name: "OpenRouter", provider: "openrouter", vision: true });
+  assert.ok(!JSON.stringify(await p.evaluate(() => [LP.ai.line("scripts"), LP.ai.line("score")])).includes("sk-"));
+  assert.deepEqual(errors, []);
+});
+
+test("AI line: 试一下 checks the text model with 1+1 and the vision model with a letter", { skip, timeout: 60000 }, async (t) => {
+  /* an OpenRouter line and a Kimi line: the Kimi line is the one under test */
+  const lines = { v: 2, next: 3, def: "l1", use: {},
+    lines: [{ id: "l1", provider: "openrouter", n: 1, key: "sk-or-2222", model: "", on: true, added: 1 },
+      { id: "l2", provider: "kimi", n: 1, key: "sk-kimi-3333", model: "", on: true, added: 2 }],
+    key: "sk-or-2222", model: "", scoreModel: "" };
+  async function openKimi(x) {
+    await x.evaluate(() => LP.builtins.filter((b) => b.id === "settings")[0].open());
+    await x.waitForFunction(() => !document.getElementById("v-settings").hidden);
+    await x.click("#set-ai-open");
+    await x.waitForFunction(() => !document.getElementById("set-ai-main").hidden);
+    await x.locator("#set-ai-lines li", { hasText: "Kimi" }).locator(".set-ai-name").click();
+    await x.waitForFunction(() => !document.getElementById("set-ai-line").hidden);
+    await x.click("#set-ai-test");
+  }
+
+  const { p, errors } = await page(t, { locale: "zh-CN", viewport: { width: 331, height: 359 }, hasTouch: true });
+  /* Math.random 0 draws the first letter, A */
+  await p.addInitScript(() => { Math.random = () => 0; });
+  const asked = await fakeProviders(p);
+  await bootWithAi(p, lines);
+  await openKimi(p);
+  await p.waitForFunction(() => /线路正常/.test(document.getElementById("set-ai-line-state").textContent));
+  assert.equal(asked.length, 2);
+  for (const a of asked) {
+    assert.equal(a.url, "https://api.moonshot.cn/v1/chat/completions");
+    assert.equal(a.body.model, "kimi-k3.1-pro");
+    assert.equal(a.body.max_tokens, 2048);
+  }
+  assert.match(JSON.stringify(asked[0].body.messages), /1\+1/);
+  const parts = asked[1].body.messages[asked[1].body.messages.length - 1].content;
+  assert.ok(Array.isArray(parts), "the vision step sends parts");
+  const pic = parts.find((c) => c && c.type === "image_url");
+  assert.ok(pic && /^data:image\/jpeg/.test(pic.image_url.url), JSON.stringify(parts));
+  const shown = await p.locator("#set-ai-line-state").innerText();
+  assert.match(shown, /线路正常/);
+  assert.match(shown, /算对了/);
+  assert.match(shown, /认出 A/);
+  assert.deepEqual(errors, []);
+
+  /* a reader that names the wrong letter: the line is connected, but one step is wrong */
+  const { p: q, errors: qErrors } = await page(t, { locale: "zh-CN", viewport: { width: 331, height: 359 }, hasTouch: true });
+  await q.addInitScript(() => { Math.random = () => 0; });
+  await fakeProviders(q, { letter: "Z" });
+  await bootWithAi(q, lines);
+  await openKimi(q);
+  await q.waitForFunction(() => /有一步不对/.test(document.getElementById("set-ai-line-state").textContent));
+  const wrong = await q.locator("#set-ai-line-state").innerText();
+  assert.match(wrong, /有一步不对/);
+  assert.match(wrong, /答成了「Z」，应该是 A/);
+  assert.deepEqual(qErrors, []);
+});
+
+test("AI line: 生成 in scripts goes down the scripts line", { skip, timeout: 45000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN" });
+  const asked = await fakeProviders(p);
+  await bootWithAi(p, { ...TWO_LINES, use: { ...TWO_LINES.use, scripts: { line: "l2", model: "" } } });
+  assert.equal(await p.evaluate(() => LP.ai.on("scripts")), true);
+  await p.evaluate(() => LP.show("scripts"));
+  await p.click("#scripts-write");
+  assert.equal(await p.locator("#idea-copy").innerText(), "生成");
+  await p.fill("#scripts-idea", "一个番茄钟");
+  await p.click("#idea-copy");
+  /* fakeProviders answers "OK", not code: only the request matters here */
+  const deadline = Date.now() + 10000;
+  while (!asked.length && Date.now() < deadline) await new Promise((r) => setTimeout(r, 25));
+  assert.equal(asked.length, 1);
+  assert.equal(asked[0].url, "https://openrouter.ai/api/v1/chat/completions");
+  assert.equal(asked[0].auth, "Bearer sk-or-2222");
+  assert.ok(!JSON.stringify(asked).includes("sk-deep-1111"), "the DeepSeek key never left the phone");
+  assert.deepEqual(errors, []);
+});
+
+test("AI line: Tape4 shows the line's name and reading a score with photos needs a line that can see", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN" });
+  const asked = await fakeProviders(p);
+  /* only the DeepSeek line: it can write a song but cannot see a page */
+  await bootWithAi(p, { ...TWO_LINES, next: 2, def: "l1", use: {}, lines: [TWO_LINES.lines[0]], key: "", model: "", scoreModel: "" });
+  /* every provider reads images today (2026-11-21): the rule is tested with DeepSeek made blind in this page */
+  await p.evaluate(() => { const d = LopdaAI.provider("deepseek"); d.vision = false; d.visionModel = ""; });
+  await p.locator("#home .app", { hasText: "四轨机" }).click();
+  await p.waitForSelector("#v-studio:not([hidden])");
+  await p.waitForFunction(() => document.querySelector("#v-studio").getAttribute("data-loaded") === "true");
+  await p.waitForFunction(() => document.querySelectorAll("#v-studio .st-cell").length === 16);
+  /* the first open's tour would cover the screens */
+  await p.waitForSelector("#v-studio .st-tour-box");
+  await p.keyboard.press("z");
+  await p.waitForSelector("#v-studio .st-tour-box", { state: "detached" });
+
+  await p.click("#studio-menu");
+  await p.waitForSelector("#studio-sheet:not([hidden])");
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "让 AI 改" }).click();
+  await p.waitForSelector("#studio-ai-input");
+  assert.equal(await p.textContent("#studio-ai-state"), "AI：DeepSeek");
+
+  /* a photo page on the 读谱 sheet: the blind line gives up before any request */
+  await p.locator("#studio-sheet .st-sheet-row button", { hasText: "读谱" }).click();
+  await p.waitForSelector("#studio-score-read");
+  await p.setInputFiles("#studio-score-import", [
+    { name: "page.svg", mimeType: "image/svg+xml", buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50"><rect width="100" height="50" fill="white"/><rect width="50" height="50" fill="black"/></svg>') },
+  ]);
+  await p.waitForFunction(() => document.querySelectorAll("#studio-sheet .st-score-thumb").length === 1);
+  await p.click("#studio-score-read");
+  await p.waitForFunction(() => /这条线路看不了图/.test(document.getElementById("toast").textContent));
+  assert.equal(asked.length, 0, "no request was made");
+  await p.waitForSelector("#studio-score-read");
+  assert.deepEqual(errors, []);
+});
+
+test("AI line: a read that fails blocks every write until a later read succeeds; a newer document is never written", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN" });
+  /* the AI document's get() rejects while window.__failAi is set */
+  await p.addInitScript((path) => {
+    let real;
+    window.__failAi = true;
+    Object.defineProperty(window, "LopdaPlatform", { configurable: true, get: () => real, set(v) {
+      const doc = v.db.doc;
+      v.db.doc = function (q) {
+        const r = doc.call(this, q);
+        if (q === path) { const get = r.get.bind(r); r.get = () => (window.__failAi ? Promise.reject(new Error("read failed")) : get()); }
+        return r;
+      };
+      real = v;
+    } });
+  }, AIDOC);
+  await p.goto(base + "/runtime/", { waitUntil: "load" });
+  await p.waitForFunction(() => window.LP && LP.ai);
+  await p.evaluate(([path, d]) => { window.__failAi = false; return LopdaPlatform.db.doc(path).set(d); }, [AIDOC, TWO_LINES]);
+  await p.reload({ waitUntil: "load" });
+  await p.waitForFunction(() => window.LP && LP.ai && LP.ai._test.state().readFailed);
+  assert.equal(await p.evaluate(() => LP.ai.on("scripts")), false);
+  assert.equal(await p.evaluate(() => LP.ai.saved()), null);
+  /* Settings says it cannot read; saving a new key changes nothing */
+  await p.evaluate(() => LP.builtins.filter((b) => b.id === "settings")[0].open());
+  await p.waitForFunction(() => !document.getElementById("v-settings").hidden);
+  assert.match(await p.locator("#set-ai-open").innerText(), /读不出/);
+  await p.click("#set-ai-open");
+  await p.waitForFunction(() => !document.getElementById("v-set-ai").hidden);
+  assert.match(await p.locator("#set-ai-state").innerText(), /读不出/);
+  await p.click("#set-ai-add-open");
+  await p.click('[data-provider="openrouter"]');
+  await p.waitForFunction(() => !document.getElementById("set-ai-line").hidden);
+  await p.fill("#set-ai-key", "sk-or-new-3333");
+  await p.click("#set-ai-save");
+  await p.waitForTimeout(300);
+  await p.evaluate(() => { window.__failAi = false; });
+  assert.deepEqual(await aiDoc(p), TWO_LINES, "nothing was written");
+  /* the next read succeeds: both lines are back, still untouched */
+  await p.evaluate(() => LP.ai._test.reread());
+  assert.equal(await p.evaluate(() => LP.ai.on("scripts")), true);
+  assert.equal(await p.evaluate(() => LP.ai._test.state().st.lines.length), 2);
+  assert.deepEqual(await aiDoc(p), TWO_LINES);
+
+  /* a document from a newer Lo-PDA: not read, not written */
+  const NEWER = { v: 3, lines: [{ id: "l1", provider: "deepseek", key: "sk-future" }], somethingNew: true };
+  await p.evaluate(([path, d]) => LopdaPlatform.db.doc(path).set(d), [AIDOC, NEWER]);
+  await p.evaluate(() => LP.ai._test.reread());
+  assert.equal(await p.evaluate(() => LP.ai.on("scripts")), false);
+  assert.match(await p.locator("#set-ai-state").innerText(), /新版 Lo-PDA/);
+  await p.fill("#set-ai-key", "sk-or-new-4444");
+  await p.click("#set-ai-save");
+  await p.waitForTimeout(300);
+  assert.deepEqual(await aiDoc(p), NEWER);
+  assert.deepEqual(errors.filter((e) => !/AI lines could not be read|read failed/.test(e)), []);
+});
+
+test("AI line: two lines stay out of the backup, and a restore keeps this phone's lines", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN" });
+  await bootWithAi(p, TWO_LINES);
+  const docs = await p.evaluate(async () => {
+    const pack = LopdaBackup.pack; let seen = null;
+    LopdaBackup.pack = (d, o) => { seen = d.docs; return pack(d, o); };
+    LP.show("set-backup");
+    document.getElementById("set-backup-go").click();
+    while (!seen) await new Promise((r) => setTimeout(r, 50));
+    LopdaBackup.pack = pack;
+    return seen;
+  });
+  assert.ok(docs.length > 0);
+  assert.ok(!JSON.stringify(docs).includes("sk-deep-1111") && !JSON.stringify(docs).includes("sk-or-2222"));
+  /* a backup from elsewhere that does carry an AI document (with someone else's key) */
+  const bytes = await p.evaluate(async (path) => {
+    const pk = await LopdaBackup.pack({ docs: [{ path: "data/users/local/restore-probe", data: { body: "hello", updated: 1 } },
+      { path, data: { v: 1, key: "sk-or-theirs-5555", model: "" } }], files: [] }, { runtime: LP.RUNTIME_VERSION, now: Date.now() });
+    const blob = new Blob(LopdaZip.writeParts(pk.entries));
+    return [...new Uint8Array(await blob.arrayBuffer())];
+  }, AIDOC);
+  /* the backup is not saved: 取消 */
+  await p.waitForFunction(() => document.querySelectorAll("#set-backup-btns .btn").length === 2);
+  await p.click("#set-backup-btns .btn.ghost");
+  await p.setInputFiles("#set-restore-file", { name: "lopda-backup.zip", mimeType: "application/zip", buffer: Buffer.from(bytes) });
+  await p.waitForFunction(() => /^这个备份做于 /.test(document.getElementById("set-backup-msg").textContent), null, { timeout: 20000 });
+  await p.click("#set-backup-btns .btn:not(.ghost)");
+  await Promise.all([p.waitForEvent("load", { timeout: 20000 }), p.click("#set-backup-btns .btn:not(.ghost)")]);
+  await p.waitForFunction(() => window.LP && LP.ai && LP.ai._test.state().loaded);
+  assert.deepEqual(await aiDoc(p), TWO_LINES);
+  assert.equal(await p.evaluate(() => LopdaPlatform.db.doc("data/users/local/restore-probe").get().then((s) => s.data().body)), "hello");
+  assert.deepEqual(errors, []);
+});
+
+test("AI line: the lines page: add DeepSeek and OpenRouter, switch one off, choose 读谱, delete with a second press", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN", viewport: { width: 331, height: 359 }, hasTouch: true });
+  /* Math.random 0 draws the line test's first letter, A, which the fake answers */
+  await p.addInitScript(() => { Math.random = () => 0; });
+  await fakeProviders(p);
+  await p.goto(base + "/runtime/", { waitUntil: "load" });
+  await p.waitForFunction(() => window.LP && LP.ai && LP.ai._test.state().loaded);
+  /* every provider reads images today (2026-11-21): the rule is tested with DeepSeek made blind in this page */
+  await p.evaluate(() => { const d = LopdaAI.provider("deepseek"); d.vision = false; d.visionModel = ""; });
+  const fits = () => p.evaluate(() => document.documentElement.scrollWidth <= 331);
+
+  await p.evaluate(() => LP.builtins.filter((b) => b.id === "settings")[0].open());
+  await p.waitForFunction(() => !document.getElementById("v-settings").hidden);
+  await p.click("#set-ai-open");
+  await p.waitForFunction(() => !document.getElementById("set-ai-main").hidden);
+
+  /* DeepSeek: choose the provider, paste the key, save; the new line is tested at once */
+  await p.click("#set-ai-add-open");
+  await p.waitForFunction(() => !document.getElementById("set-ai-add").hidden);
+  assert.equal(await p.locator("#set-ai-providers li").count(), 5);
+  assert.ok(await fits(), "the provider page fits 331 px");
+  await p.click('[data-provider="deepseek"]');
+  await p.waitForFunction(() => !document.getElementById("set-ai-line").hidden);
+  assert.equal(await p.locator("#set-ai-line-title").innerText(), "DeepSeek");
+  assert.equal(await p.getAttribute("#set-ai-model", "placeholder"), "deepseek-flash");
+  assert.match(await p.locator("#set-ai-model-hint").innerText(), /空着就用 deepseek-flash。/);
+  await p.fill("#set-ai-key", "sk-deep-test-1111");
+  await p.click("#set-ai-save");
+  await p.waitForFunction(() => /线路正常/.test(document.getElementById("set-ai-line-state").textContent));
+  assert.ok(await fits(), "the line page fits 331 px");
+
+  /* a second line, OpenRouter, from the list */
+  await p.click("#set-ai-line-back");
+  await p.waitForFunction(() => !document.getElementById("set-ai-main").hidden);
+  await p.waitForFunction(() => /正常/.test(document.querySelector("#set-ai-lines li .set-ai-status").textContent));
+  await p.click("#set-ai-add-open");
+  await p.waitForFunction(() => !document.getElementById("set-ai-add").hidden);
+  await p.click('[data-provider="openrouter"]');
+  await p.waitForFunction(() => !document.getElementById("set-ai-line").hidden);
+  assert.match(await p.locator("#set-ai-model-hint").innerText(), /openrouter\.ai\/models/);
+  await p.fill("#set-ai-key", "sk-or-test-2222");
+  await p.click("#set-ai-save");
+  await p.waitForFunction(() => /线路正常/.test(document.getElementById("set-ai-line-state").textContent));
+  await p.click("#set-ai-line-back");
+  await p.waitForFunction(() => !document.getElementById("set-ai-main").hidden);
+  /* two lines on: the Settings row counts them, the uses block appears */
+  assert.equal(await p.locator("#set-ai-open").innerText(), "2 条 ›");
+  assert.equal(await p.evaluate(() => document.getElementById("set-ai-uses").hidden), false);
+  assert.ok(await fits(), "the list fits 331 px");
+
+  /* 读谱: DeepSeek cannot see, OpenRouter can; choosing OpenRouter brings the score-model row with it */
+  await p.locator('#set-ai-use-links li[data-use="score"]').click();
+  await p.waitForFunction(() => !document.getElementById("set-ai-use").hidden);
+  const deepRow = p.locator("#set-ai-use-list li", { hasText: "DeepSeek" });
+  assert.equal(await deepRow.getAttribute("aria-disabled"), "true");
+  assert.match(await deepRow.innerText(), /这条线路看不了图/);
+  /* each row says which key it is, so two lines of one provider can be told apart */
+  assert.match(await deepRow.innerText(), /…1111/);
+  assert.match(await p.locator("#set-ai-use-list li", { hasText: "OpenRouter" }).innerText(), /…2222/);
+  await deepRow.click({ force: true });
+  assert.equal(await p.evaluate(() => document.getElementById("set-ai-use").hidden), false, "a blind line does nothing");
+  assert.ok(await fits(), "the use page fits 331 px");
+  await p.locator("#set-ai-use-list li", { hasText: "OpenRouter" }).click();
+  await p.waitForFunction(() => !document.getElementById("set-ai-main").hidden);
+  await p.waitForFunction((path) => LopdaPlatform.db.doc(path).get().then((s) => {
+    const d = s.data();
+    return !!(d.use && d.use.score && d.use.score.line);
+  }), AIDOC);
+  let doc = await aiDoc(p);
+  const orLine = doc.lines.find((l) => l.provider === "openrouter");
+  const deepLine = doc.lines.find((l) => l.provider === "deepseek");
+  assert.equal(doc.use.score.line, orLine.id);
+  await p.locator('#set-ai-use-links li[data-use="score"]').click();
+  await p.waitForFunction(() => !document.getElementById("set-ai-use").hidden);
+  assert.equal(await p.locator("#set-ai-use-list li.on .set-ai-name").innerText(), "OpenRouter", "the choice is marked");
+  assert.equal(await p.locator("#set-ai-use #set-ai-score-model").count(), 0, "the score model row is not on the use page");
+  assert.ok(await fits(), "the score use page fits 331 px");
+
+  /* switching DeepSeek off keeps its key, and one line on hides the uses block */
+  await p.click("#set-ai-use-back");
+  await p.waitForFunction(() => !document.getElementById("set-ai-main").hidden);
+
+  /* the vision model lives on the line's own page: OpenRouter has the field and its list, a blind line has neither */
+  await p.locator("#set-ai-lines li", { hasText: "OpenRouter" }).locator(".set-ai-name").click();
+  await p.waitForFunction(() => !document.getElementById("set-ai-line").hidden);
+  assert.equal(await p.evaluate(() => document.getElementById("set-ai-vmodel-row").hidden), false);
+  assert.equal(await p.evaluate(() => document.getElementById("set-ai-vmodel-hint").hidden), false);
+  assert.equal(await p.inputValue("#set-ai-vmodel"), "");
+  assert.equal(await p.getAttribute("#set-ai-vmodel", "placeholder"), "openai/gpt-6.2-sol");
+  assert.equal(await p.locator("#set-ai-score-model").isHidden(), false);
+  assert.equal(await p.locator("#set-ai-score-model-value").innerText(), "默认（Sol） ›");
+  assert.ok(await fits(), "the line page with the vision field fits 331 px");
+  /* the OpenRouter list belongs to this line page: its ◂ comes back here, and looking changes nothing */
+  await p.click("#set-ai-score-model");
+  await p.waitForFunction(() => !document.getElementById("set-ai-model-page").hidden);
+  await p.click("#set-ai-model-back");
+  await p.waitForFunction(() => !document.getElementById("set-ai-line").hidden);
+  assert.equal(await p.inputValue("#set-ai-vmodel"), "");
+  await p.click("#set-ai-line-back");
+  await p.waitForFunction(() => !document.getElementById("set-ai-main").hidden);
+
+  await p.locator("#set-ai-lines li", { hasText: "DeepSeek" }).locator(".set-ai-name").click();
+  await p.waitForFunction(() => !document.getElementById("set-ai-line").hidden);
+  assert.equal(await p.evaluate(() => document.getElementById("set-ai-vmodel-row").hidden), true, "a blind line has no vision field");
+  assert.equal(await p.evaluate(() => document.getElementById("set-ai-vmodel-hint").hidden), true);
+  assert.equal(await p.locator("#set-ai-score-model").isHidden(), true, "nor the OpenRouter list");
+  await p.click("#set-ai-line-back");
+  await p.waitForFunction(() => !document.getElementById("set-ai-main").hidden);
+
+  await p.locator("#set-ai-lines li", { hasText: "OpenRouter" }).locator(".set-ai-name").click();
+  await p.waitForFunction(() => !document.getElementById("set-ai-line").hidden);
+  await p.fill("#set-ai-vmodel", "x/vision-test");
+  await p.click("#set-ai-save");
+  await p.waitForFunction((path) => LopdaPlatform.db.doc(path).get().then((s) =>
+    s.data().lines.some((l) => l.provider === "openrouter" && l.visionModel === "x/vision-test")), AIDOC);
+  assert.equal(await p.evaluate(() => LP.ai.scoreModel()), "x/vision-test");
+  assert.equal(await p.locator("#set-ai-score-model-value").innerText(), "x/vision-test ›");
+  await p.click("#set-ai-line-back");
+  await p.waitForFunction(() => !document.getElementById("set-ai-main").hidden);
+
+  await p.locator("#set-ai-lines li", { hasText: "DeepSeek" }).locator(".set-ai-sw").click();
+  await p.waitForFunction((path) => LopdaPlatform.db.doc(path).get().then((s) => s.data().lines.some((l) => l.provider === "deepseek" && l.on === false)), AIDOC);
+  assert.equal(await p.evaluate(() => document.getElementById("set-ai-uses").hidden), true);
+  doc = await aiDoc(p);
+  const deepOff = doc.lines.find((l) => l.id === deepLine.id);
+  assert.equal(deepOff.on, false);
+  assert.equal(deepOff.key, "sk-deep-test-1111");
+  assert.equal(await p.locator("#set-ai-lines li", { hasText: "DeepSeek" }).locator(".set-ai-sw").getAttribute("aria-checked"), "false");
+
+  /* delete OpenRouter: the first press only asks, the second deletes */
+  await p.locator("#set-ai-lines li", { hasText: "OpenRouter" }).locator(".set-ai-name").click();
+  await p.waitForFunction(() => !document.getElementById("set-ai-line").hidden);
+  await p.click("#set-ai-del");
+  assert.equal(await p.locator("#set-ai-del").innerText(), "再按一次删除");
+  assert.equal((await aiDoc(p)).lines.some((l) => l.provider === "openrouter"), true, "nothing is deleted yet");
+  await p.click("#set-ai-del");
+  await p.waitForFunction(() => !document.getElementById("set-ai-main").hidden);
+  await p.waitForFunction((path) => LopdaPlatform.db.doc(path).get().then((s) => !s.data().lines.some((l) => l.provider === "openrouter")), AIDOC);
+  const after = await aiDoc(p);
+  assert.equal(after.lines.some((l) => l.provider === "openrouter"), false);
+  assert.ok(!JSON.stringify(after).includes("sk-or-test-2222"), "the deleted key is gone");
+
+  /* the keyboard: z on the provider page goes back to the list */
+  await p.click("#set-ai-add-open");
+  await p.waitForFunction(() => !document.getElementById("set-ai-add").hidden);
+  await p.keyboard.press("z");
+  await p.waitForFunction(() => !document.getElementById("set-ai-main").hidden);
+  assert.ok(await fits(), "the list still fits 331 px");
+  assert.deepEqual(errors, []);
+});
+
+test("AI line: picking a vision model from the OpenRouter list fills the field and saves only with 保存", { skip, timeout: 45000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN", viewport: { width: 331, height: 359 }, hasTouch: true });
+  await fakeProviders(p);
+  await p.route("https://openrouter.ai/api/v1/models", (r) => r.fulfill({ status: 200,
+    headers: { ...AI_CORS, "content-type": "application/json" },
+    body: JSON.stringify({ data: [{ id: "x/a", name: "A", pricing: { prompt: "0.000001", completion: "0.000002" },
+      architecture: { input_modalities: ["text", "image"] } }] }) }));
+  const lone = { v: 2, next: 2, def: "l1", use: {}, key: "sk-or-2222", model: "", scoreModel: "",
+    lines: [{ id: "l1", provider: "openrouter", n: 1, key: "sk-or-2222", model: "", visionModel: "", on: true, added: 1 }] };
+  await bootWithAi(p, lone);
+
+  await p.evaluate(() => LP.builtins.filter((b) => b.id === "settings")[0].open());
+  await p.waitForFunction(() => !document.getElementById("v-settings").hidden);
+  await p.click("#set-ai-open");
+  await p.waitForFunction(() => !document.getElementById("set-ai-main").hidden);
+  await p.locator("#set-ai-lines li", { hasText: "OpenRouter" }).locator(".set-ai-name").click();
+  await p.waitForFunction(() => !document.getElementById("set-ai-line").hidden);
+  assert.equal(await p.inputValue("#set-ai-vmodel"), "");
+
+  await p.click("#set-ai-score-model");
+  await p.waitForFunction(() => !document.getElementById("set-ai-model-page").hidden);
+  await p.waitForSelector('#set-ai-model-list li:has-text("A")');
+  /* the list is cached in its v:2 form, with which models read pictures */
+  const cache = await p.evaluate(() => LopdaPlatform.db.doc("data/users/local/ai-models").get().then((s) => s.data()));
+  assert.equal(cache.v, 2);
+  assert.deepEqual(cache.list, [{ id: "x/a", name: "A", in: 1, out: 2, vision: true }]);
+  await p.locator("#set-ai-model-list li", { hasText: "A" }).click();
+  await p.waitForFunction(() => !document.getElementById("set-ai-line").hidden);
+  assert.equal(await p.inputValue("#set-ai-vmodel"), "x/a", "the pick fills the field");
+  assert.equal(await p.locator("#set-ai-score-model-value").innerText(), "x/a ›");
+  assert.deepEqual(await aiDoc(p), lone, "picking a model writes nothing");
+
+  await p.click("#set-ai-save");
+  await p.waitForFunction((path) => LopdaPlatform.db.doc(path).get().then((s) => s.data().lines[0].visionModel === "x/a"), AIDOC);
+  const doc = await aiDoc(p);
+  assert.equal(doc.lines[0].visionModel, "x/a");
+  assert.equal(doc.lines[0].key, "sk-or-2222", "the saved key is kept");
+  assert.equal(await p.evaluate(() => LP.ai.scoreModel()), "x/a");
+  assert.deepEqual(errors, []);
+});
+
+test("AI line: the model lists: search narrows OpenRouter's list; a DeepSeek line lists its models with its own key", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN", viewport: { width: 331, height: 359 }, hasTouch: true });
+  await fakeProviders(p);
+  const OR_LIST = { data: [
+    { id: "x/see-one", name: "See One", pricing: { prompt: "0.000001", completion: "0.000002" }, architecture: { input_modalities: ["text", "image"] } },
+    { id: "x/text-only", name: "Text Only", pricing: { prompt: "0.000003", completion: "0.000004" }, architecture: { input_modalities: ["text"] } },
+    { id: "x/see-two", name: "See Two", pricing: { prompt: "0.000005", completion: "0.000006" }, architecture: { input_modalities: ["text", "image"] } },
+  ] };
+  const json = (body) => ({ status: 200, headers: { ...AI_CORS, "content-type": "application/json" }, body: JSON.stringify(body) });
+  /* the two model lists, registered after fakeProviders so they win; the DeepSeek one records its Authorization */
+  await p.route("https://openrouter.ai/api/v1/models", (r) => r.fulfill(json(OR_LIST)));
+  const modelCalls = [];
+  await p.route("https://api.deepseek.com/models", (r) => {
+    if (r.request().method() === "OPTIONS") return r.fulfill({ status: 204, headers: AI_CORS });
+    modelCalls.push({ url: r.request().url(), auth: r.request().headers().authorization });
+    return r.fulfill(json({ data: [{ id: "deepseek-v4-pro" }, { id: "deepseek-flash" }, { no: "id" }] }));
+  });
+  /* every request this page makes, so a key leaving for another host would show */
+  const seen = [];
+  p.on("request", (r) => seen.push({ url: r.url(), auth: (r.headers() || {}).authorization || "" }));
+
+  const doc = { v: 2, next: 3, def: "l1", use: {}, key: "sk-or-2222", model: "", scoreModel: "",
+    lines: [{ id: "l1", provider: "openrouter", n: 1, key: "sk-or-2222", model: "", visionModel: "", on: true, added: 1 },
+      { id: "l2", provider: "deepseek", n: 1, key: "", model: "", visionModel: "", on: true, added: 2 }] };
+  await bootWithAi(p, doc);
+  await p.evaluate(() => LP.builtins.filter((b) => b.id === "settings")[0].open());
+  await p.waitForFunction(() => !document.getElementById("v-settings").hidden);
+  await p.click("#set-ai-open");
+  await p.waitForFunction(() => !document.getElementById("set-ai-main").hidden);
+
+  /* OpenRouter: both fields pick from its public list, the model field from all of it */
+  await p.locator("#set-ai-lines li", { hasText: "OpenRouter" }).locator(".set-ai-name").click();
+  await p.waitForFunction(() => !document.getElementById("set-ai-line").hidden);
+  assert.equal(await p.evaluate(() => document.getElementById("set-ai-model-pick").hidden), false);
+  assert.equal(await p.locator("#set-ai-model-pick-value").innerText(), "默认 ›");
+  assert.equal(await p.getAttribute("#set-ai-model-pick", "aria-disabled"), null, "OpenRouter's list needs no key");
+  await p.click("#set-ai-model-pick");
+  await p.waitForFunction(() => !document.getElementById("set-ai-model-page").hidden);
+  await p.waitForFunction(() => document.querySelectorAll("#set-ai-model-list li").length === 4);
+  assert.equal(await p.locator("#set-ai-model-title").innerText(), "模型");
+  const names = await p.evaluate(() => [...document.querySelectorAll("#set-ai-model-list li span")].map((s) => s.textContent));
+  assert.deepEqual(names, ["默认 (openrouter/auto)", "See One", "Text Only", "See Two"], "the default row, then all three models");
+  /* typing narrows the rows: the default stays, and only what matches remains */
+  await p.fill("#set-ai-model-search", "see two");
+  assert.equal(await p.evaluate(() => document.querySelectorAll("#set-ai-model-list li").length), 2);
+  await p.fill("#set-ai-model-search", "two");
+  assert.equal(await p.locator("#set-ai-model-list li").count(), 2);
+  await p.locator("#set-ai-model-list li", { hasText: "See Two" }).click();
+  await p.waitForFunction(() => !document.getElementById("set-ai-line").hidden);
+  assert.equal(await p.inputValue("#set-ai-model"), "x/see-two", "the pick fills the model field");
+  assert.equal(await p.locator("#set-ai-model-pick-value").innerText(), "x/see-two ›");
+  assert.deepEqual(await aiDoc(p), doc, "picking a model writes nothing");
+  /* the vision field's list is the same one, kept to the models that read pictures */
+  await p.click("#set-ai-score-model");
+  await p.waitForFunction(() => !document.getElementById("set-ai-model-page").hidden);
+  await p.waitForFunction(() => document.querySelectorAll("#set-ai-model-list li").length === 3);
+  assert.equal(await p.locator("#set-ai-model-title").innerText(), "看图模型");
+  assert.doesNotMatch(await p.locator("#set-ai-model-list").innerText(), /Text Only/);
+  await p.click("#set-ai-model-back");
+  await p.waitForFunction(() => !document.getElementById("set-ai-line").hidden);
+  assert.deepEqual(await aiDoc(p), doc, "looking around writes nothing either");
+  /* 保存 is the one write */
+  await p.click("#set-ai-save");
+  await p.waitForFunction((path) => LopdaPlatform.db.doc(path).get().then((s) => s.data().lines[0].model === "x/see-two"), AIDOC);
+  assert.equal((await aiDoc(p)).lines[0].key, "sk-or-2222");
+
+  /* DeepSeek: the rows are there but greyed until this line has a saved key */
+  await p.click("#set-ai-line-back");
+  await p.waitForFunction(() => !document.getElementById("set-ai-main").hidden);
+  await p.locator("#set-ai-lines li", { hasText: "DeepSeek" }).locator(".set-ai-name").click();
+  await p.waitForFunction(() => !document.getElementById("set-ai-line").hidden);
+  assert.equal(await p.evaluate(() => document.getElementById("set-ai-model-pick").hidden), false);
+  assert.equal(await p.getAttribute("#set-ai-model-pick", "aria-disabled"), "true");
+  assert.equal(await p.getAttribute("#set-ai-score-model", "aria-disabled"), "true");
+  assert.equal(await p.evaluate(() => document.getElementById("set-ai-list-needkey").hidden), false);
+  assert.match(await p.locator("#set-ai-list-needkey").innerText(), /先保存 key/);
+  await p.click("#set-ai-model-pick", { force: true });
+  assert.equal(await p.evaluate(() => document.getElementById("set-ai-line").hidden), false, "a greyed row opens nothing");
+  assert.equal(modelCalls.length, 0, "and asks no provider for a list");
+
+  await p.fill("#set-ai-key", "sk-deep-3333");
+  await p.click("#set-ai-save");
+  await p.waitForFunction((path) => LopdaPlatform.db.doc(path).get().then((s) => s.data().lines[1].key === "sk-deep-3333"), AIDOC);
+  await p.waitForFunction(() => document.getElementById("set-ai-model-pick").getAttribute("aria-disabled") === null);
+  assert.equal(await p.getAttribute("#set-ai-score-model", "aria-disabled"), null);
+  await p.click("#set-ai-model-pick");
+  await p.waitForFunction(() => !document.getElementById("set-ai-model-page").hidden);
+  /* the default row carries deepseek-flash itself, so the list is that row and the other id */
+  await p.waitForFunction(() => document.querySelectorAll("#set-ai-model-list li").length === 2);
+  const deepNames = await p.locator("#set-ai-model-list li").allInnerTexts();
+  assert.match(deepNames.join(" | "), /deepseek-flash/);
+  assert.match(deepNames.join(" | "), /deepseek-v4-pro/);
+  assert.equal(modelCalls.length, 1, "one list request");
+  assert.equal(modelCalls[0].url, "https://api.deepseek.com/models");
+  assert.equal(modelCalls[0].auth, "Bearer sk-deep-3333", "the list is asked with this line's own key");
+  const leaked = seen.filter((r) => r.auth.includes("sk-deep-3333") && !r.url.startsWith("https://api.deepseek.com/"));
+  assert.deepEqual(leaked, [], "the DeepSeek key goes to no other host");
   assert.deepEqual(errors, []);
 });
 
@@ -9793,6 +10380,308 @@ test("AI line: while the AI is slow the hint counts time, says what the line is 
     __line.drop();
   });
   await p.waitForFunction(() => /没写完：离开了画面，线路断了，请重新生成。/.test(document.getElementById("script-hint").textContent));
+  assert.deepEqual(errors, []);
+});
+
+/* ---------- 改一改 / versions (decisions.md section 60): the revise prompt, both bodies as versions, going back ---------- */
+const REVISE_OLD = '<!doctype html>\n<html><head><title>钟 A</title></head>\n<body><p id="t">0</p>\n<script>var n=0;setInterval(function(){n++;document.getElementById("t").textContent=n;},1000);</script>\n</body></html>';
+const REVISE_NEW = '<!doctype html>\n<html><head><title>钟 B</title></head>\n<body><p id="t">0</p><button id="p">停</button>\n<script>var n=0,paused=false;document.getElementById("p").onclick=function(){paused=!paused;};setInterval(function(){if(!paused){n++;document.getElementById("t").textContent=n;}},1000);</script>\n</body></html>';
+const REVISE_CORS = { "access-control-allow-origin": "*", "access-control-allow-headers": "authorization, content-type", "access-control-allow-methods": "POST" };
+
+/* a script with code and a PAD save, seeded straight into the store */
+async function reviseSeed(p, id, name, body) {
+  await p.evaluate(async ([id, name, body]) => {
+    await LopdaPlatform.db.doc("data/users/local/scripts/items/" + id).set({ v: 1, id, name, body, created: 1, updated: 1 });
+    await LopdaPlatform.db.doc("data/users/local/scripts/data/" + id).set({ v: 1, kv: { n: 7 }, updated: 1, bytes: 9 });
+  }, [id, name, body]);
+}
+const reviseDoc = (p, kind, id) => p.evaluate(([kind, id]) => LopdaPlatform.db.doc("data/users/local/scripts/" + kind + "/" + id).get()
+  .then((s) => (s.exists ? s.data() : null)), [kind, id]);
+async function reviseOpen(p, name) {
+  await p.evaluate(() => LP.show("scripts"));
+  await p.waitForFunction((n) => [...document.querySelectorAll("#scripts-list .t")].some((e) => e.textContent === n), name);
+  await p.locator("#scripts-list button", { hasText: name }).click();
+  await p.waitForFunction(() => !document.getElementById("v-script-edit").hidden);
+}
+/* a key in the AI document, read at boot like Settings would leave it */
+async function reviseKey(p) {
+  await p.evaluate(() => LopdaPlatform.db.doc("data/users/local/ai").set({ v: 1, key: "sk-or-x", model: "" }));
+  await p.reload({ waitUntil: "load" });
+  await p.waitForFunction(() => window.LP && LP.ai && LP.ai.on());
+}
+/* the AI line the test drives by hand: open it, push a piece of the answer, read it, finish it */
+async function reviseLine(p) {
+  await p.addInitScript(() => {
+    const real = window.fetch;
+    window.fetch = (u, o) => {
+      if (!String(u).startsWith("https://openrouter.ai/")) return real(u, o);
+      return new Promise((resolve, reject) => {
+        let ctl;
+        const body = new ReadableStream({ start(c) { ctl = c; } });
+        o.signal.addEventListener("abort", () => { reject(new DOMException("aborted", "AbortError")); try { ctl.error(new DOMException("aborted", "AbortError")); } catch {} });
+        window.__line = {
+          open: () => resolve(new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } })),
+          push: (s) => ctl.enqueue(new TextEncoder().encode(s)),
+        };
+      });
+    };
+  });
+}
+const reviseEvent = (c) => "data: " + JSON.stringify({ model: "test/model", choices: [{ delta: { content: c } }] }) + "\n\n";
+
+test("AI line: 改一改 sends the current code and the ask, keeps the old code as a version, and 换回这个 brings it back", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN" });
+  const asked = [];
+  await p.route("https://openrouter.ai/**", async (r) => {
+    if (r.request().method() === "OPTIONS") return r.fulfill({ status: 204, headers: REVISE_CORS });
+    const body = JSON.parse(r.request().postData());
+    asked.push(body);
+    const text = body.max_tokens ? ["OK"] : [REVISE_NEW];
+    await r.fulfill({ status: 200, headers: { ...REVISE_CORS, "content-type": "text/event-stream" },
+      body: text.map(reviseEvent).join("") + "data: [DONE]\n\n" });
+  });
+  await p.goto(base + "/runtime/", { waitUntil: "load" });
+  await p.waitForFunction(() => window.LP && LP.show && LP.ai);
+  await reviseKey(p);
+  await reviseSeed(p, "srev", "我的钟", REVISE_OLD);
+  await reviseOpen(p, "我的钟");
+  assert.equal(await p.locator("#script-paste").innerText(), "改一改", "code in the editor: the row key is 改一改");
+  await p.click("#script-paste");
+  await p.waitForFunction(() => !document.getElementById("v-script-revise").hidden);
+  assert.match(await p.locator("#revise-note").innerText(), /AI 按现在的代码改/);
+  await p.fill("#revise-ask", "加一个暂停键");
+  await p.click("#revise-go");
+  await p.waitForFunction(() => !document.getElementById("v-script-edit").hidden);
+  await p.waitForFunction(() => /改好了（用时 0:0\d）/.test(document.getElementById("script-hint").textContent));
+  assert.equal(await p.inputValue("#script-code"), REVISE_NEW, "the editor holds the answer");
+  assert.equal(await p.inputValue("#script-name"), "我的钟", "a name that was not the title stays");
+
+  /* what went out: the 生成 rules, the old code, then the ask, all in one message */
+  const sent = asked[asked.length - 1];
+  const prompt = sent.messages[0].content;
+  assert.equal(sent.stream, true);
+  assert.ok(prompt.includes(REVISE_OLD), "the request carries the current code");
+  assert.ok(prompt.includes("加一个暂停键"), "and the ask");
+  assert.ok(prompt.indexOf(REVISE_OLD) < prompt.indexOf("加一个暂停键"), "the code comes before the ask");
+  assert.match(prompt, /你是一名 Lo-PDA 程序员/, "the 生成 rules lead");
+  assert.match(prompt, /下面是现在的程序/, "then the revise paragraph");
+  assert.ok(!prompt.includes("我想做的是"), "the idea line is not sent");
+
+  /* the new state and the code it replaced are both versions; the script has the answer; the PAD save never moved */
+  assert.equal((await reviseDoc(p, "items", "srev")).body, REVISE_NEW);
+  const ver = await reviseDoc(p, "versions", "srev");
+  assert.equal(ver.v, 1);
+  assert.equal(ver.list.length, 2, "the new state and the code it replaced");
+  assert.equal(ver.list[0].body, REVISE_NEW);
+  assert.equal(ver.list[0].why, "加一个暂停键");
+  assert.equal(ver.list[0].name, "我的钟");
+  assert.equal(ver.list[1].body, REVISE_OLD);
+  assert.equal(ver.list[1].why, "orig", "the code before the first change is the 原版");
+  assert.ok(ver.list[0].at > ver.list[1].at, "newest first");
+  assert.deepEqual((await reviseDoc(p, "data", "srev")).kv, { n: 7 });
+
+  /* 选项 → 版本 lists both, highlights the one in use, and 换回这个 puts the old one back without a new row */
+  await p.click("#script-menu");
+  assert.equal(await p.locator("#script-versions-open").innerText(), "版本");
+  await p.click("#script-versions-open");
+  await p.waitForFunction(() => !document.getElementById("v-script-versions").hidden);
+  await p.waitForFunction(() => document.querySelectorAll("#versions-list li").length === 2);
+  assert.equal(await p.locator("#v-script-versions h2").innerText(), "版本");
+  const rows = await p.evaluate(() => [...document.querySelectorAll("#versions-list li")].map((li) => ({
+    on: li.classList.contains("on"), now: li.getAttribute("aria-current"),
+    t: li.querySelector(".t").textContent, d: li.querySelector(".d").textContent,
+  })));
+  assert.equal(rows.length, 2);
+  assert.match(rows[0].t, /\d{1,2}\/\d{1,2} \d\d:\d\d/);
+  assert.match(rows[0].d, /^当前 · 改：加一个暂停键 · \d/, "the new code is in use");
+  assert.equal(rows[0].on, true);
+  assert.equal(rows[0].now, "true");
+  assert.match(rows[1].d, /^原版 · \d/, "the code before the first change");
+  assert.equal(rows[1].on, false);
+  assert.equal(rows[1].now, null);
+
+  /* the version in use has nothing to switch to */
+  await p.click("#versions-list button");
+  await p.waitForFunction(() => !document.getElementById("versions-code-wrap").hidden);
+  assert.equal(await p.inputValue("#versions-code"), REVISE_NEW);
+  assert.equal(await p.evaluate(() => document.getElementById("versions-code").readOnly), true);
+  assert.equal(await p.evaluate(() => document.getElementById("versions-use").hidden), true, "the code in use cannot be switched to");
+
+  /* the 原版 can: 换回这个 restores it, and the list keeps its two rows */
+  await p.click("#versions-return");
+  await p.waitForFunction(() => !document.getElementById("versions-list-wrap").hidden);
+  await p.locator("#versions-list li").nth(1).locator("button").click();
+  await p.waitForFunction(() => !document.getElementById("versions-code-wrap").hidden);
+  assert.equal(await p.inputValue("#versions-code"), REVISE_OLD);
+  assert.equal(await p.evaluate(() => document.getElementById("versions-use").hidden), false, "another version can be switched to");
+  await p.click("#versions-use");
+  await p.waitForFunction(() => !document.getElementById("v-script-edit").hidden);
+  assert.equal(await p.inputValue("#script-code"), REVISE_OLD, "the old code is back");
+  assert.equal(await p.inputValue("#script-name"), "我的钟");
+  const ver2 = await reviseDoc(p, "versions", "srev");
+  assert.equal(ver2.list.length, 2, "switching to a version already in the list adds no row");
+  assert.equal(ver2.list[0].body, REVISE_NEW);
+  assert.equal(ver2.list[0].why, "加一个暂停键");
+  assert.equal(ver2.list[1].body, REVISE_OLD);
+  assert.equal(ver2.list[1].why, "orig");
+  assert.deepEqual((await reviseDoc(p, "data", "srev")).kv, { n: 7 }, "the PAD save never moves");
+
+  /* the highlight moved to the restored code */
+  await p.click("#script-menu");
+  await p.click("#script-versions-open");
+  await p.waitForFunction(() => document.querySelectorAll("#versions-list li").length === 2);
+  const after = await p.evaluate(() => [...document.querySelectorAll("#versions-list li")].map((li) => ({
+    on: li.classList.contains("on"), now: li.getAttribute("aria-current"), d: li.querySelector(".d").textContent,
+  })));
+  assert.equal(after[0].on, false);
+  assert.match(after[0].d, /^改：加一个暂停键 · \d/);
+  assert.equal(after[1].on, true, "the code in use is highlighted");
+  assert.equal(after[1].now, "true");
+  assert.match(after[1].d, /^当前 · 原版 · \d/);
+  assert.deepEqual(errors, []);
+});
+
+test("AI line: ◂ pressed mid-revise leaves the stored body alone, and the answer lands when the stream finishes", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN" });
+  await reviseLine(p);
+  await p.goto(base + "/runtime/", { waitUntil: "load" });
+  await p.waitForFunction(() => window.LP && LP.ai);
+  await reviseKey(p);
+  await reviseSeed(p, "sback", "返回钟", REVISE_OLD);
+  await reviseOpen(p, "返回钟");
+  await p.click("#script-paste");
+  await p.waitForFunction(() => !document.getElementById("v-script-revise").hidden);
+  await p.fill("#revise-ask", "加一个暂停键");
+  await p.click("#revise-go");
+  await p.waitForFunction(() => !document.getElementById("v-script-edit").hidden);
+  await p.waitForFunction(() => !!window.__line);
+  await p.evaluate(() => { __line.open(); });
+
+  /* the first half of the answer arrives: the editor shows it, the script does not */
+  const head = REVISE_NEW.slice(0, REVISE_NEW.length - 24), tail = REVISE_NEW.slice(-24);
+  await p.evaluate((s) => __line.push(s), reviseEvent(head));
+  await p.waitForFunction((t) => document.getElementById("script-code").value === t, head);
+  assert.equal((await reviseDoc(p, "items", "sback")).body, REVISE_OLD, "a stream is not a save");
+  assert.equal(await reviseDoc(p, "versions", "sback"), null, "no version yet");
+
+  /* ◂ mid-stream: the library, the old body, no version */
+  await p.click("#script-back");
+  await p.waitForFunction(() => !document.getElementById("v-scripts").hidden);
+  assert.equal((await reviseDoc(p, "items", "sback")).body, REVISE_OLD, "back did not write the answer");
+  assert.equal(await reviseDoc(p, "versions", "sback"), null);
+
+  /* the rest arrives: it is applied while the user is in the library, version first, with a toast */
+  await p.evaluate((s) => __line.push(s + "data: [DONE]\n\n"), reviseEvent(tail));
+  await p.waitForFunction(() => { const el = document.getElementById("toast"); return el && !el.hidden && /改好了/.test(el.textContent); });
+  assert.equal((await reviseDoc(p, "items", "sback")).body, REVISE_NEW, "the answer landed after leaving");
+  const ver = await reviseDoc(p, "versions", "sback");
+  assert.equal(ver.list.length, 2);
+  assert.equal(ver.list[0].body, REVISE_NEW, "the answer is the newest version");
+  assert.equal(ver.list[0].why, "加一个暂停键");
+  assert.equal(ver.list[1].body, REVISE_OLD, "the old code is the 原版");
+  assert.equal(ver.list[1].why, "orig");
+  assert.deepEqual(errors, []);
+});
+
+test("AI line: a truncated revise answer is refused: the code stays, nothing is written and no version is added", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN" });
+  const CUT = "<!doctype html><html><head><title>钟 B</title></head><body>half";
+  await p.route("https://openrouter.ai/**", async (r) => {
+    if (r.request().method() === "OPTIONS") return r.fulfill({ status: 204, headers: REVISE_CORS });
+    await r.fulfill({ status: 200, headers: { ...REVISE_CORS, "content-type": "text/event-stream" },
+      body: reviseEvent(CUT) + "data: [DONE]\n\n" });
+  });
+  await p.goto(base + "/runtime/", { waitUntil: "load" });
+  await p.waitForFunction(() => window.LP && LP.show && LP.ai);
+  await reviseKey(p);
+  await reviseSeed(p, "scut", "半截钟", REVISE_OLD);
+  await reviseOpen(p, "半截钟");
+  await p.click("#script-paste");
+  await p.waitForFunction(() => !document.getElementById("v-script-revise").hidden);
+  await p.fill("#revise-ask", "加一个暂停键");
+  await p.click("#revise-go");
+  await p.waitForFunction(() => !document.getElementById("v-script-edit").hidden);
+  await p.waitForFunction(() => /没能改：AI 没写完/.test(document.getElementById("script-hint").textContent));
+  assert.equal(await p.inputValue("#script-code"), REVISE_OLD, "the old code is back in the editor");
+  assert.equal((await reviseDoc(p, "items", "scut")).body, REVISE_OLD, "the script did not move");
+  assert.equal(await reviseDoc(p, "versions", "scut"), null, "no version was added");
+  assert.deepEqual(errors, []);
+});
+
+test("scripts: without a key, 改一改 copies the revise prompt and 粘贴新版本 applies the file, keeping the old code", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN" });
+  await p.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: base });
+  await p.goto(base + "/runtime/", { waitUntil: "load" });
+  await p.waitForFunction(() => window.LP && LP.show && LP.ai);
+  await reviseSeed(p, "snokey", "手工钟", REVISE_OLD);
+  await reviseOpen(p, "手工钟");
+  await p.click("#script-paste");
+  await p.waitForFunction(() => !document.getElementById("v-script-revise").hidden);
+  assert.equal(await p.locator("#revise-go").innerText(), "复制 AI 提示词");
+  assert.equal(await p.locator("#revise-paste").isVisible(), true, "粘贴新版本 without a key");
+  await p.fill("#revise-ask", "改成蓝色");
+  await p.click("#revise-go");
+  const prompt = await p.evaluate(() => navigator.clipboard.readText());
+  assert.ok(prompt.includes(REVISE_OLD), "the copied prompt carries the code");
+  assert.ok(prompt.includes("改成蓝色"), "and the ask");
+  assert.match(prompt, /下面是现在的程序/);
+
+  await p.evaluate((text) => navigator.clipboard.writeText(text), REVISE_NEW);
+  await p.click("#revise-paste");
+  await p.waitForFunction(() => !document.getElementById("v-script-edit").hidden);
+  assert.equal(await p.inputValue("#script-code"), REVISE_NEW);
+  const ver = await reviseDoc(p, "versions", "snokey");
+  assert.equal(ver.list.length, 2);
+  assert.equal(ver.list[0].body, REVISE_NEW);
+  assert.equal(ver.list[0].why, "改成蓝色", "the pasted state carries the ask");
+  assert.equal(ver.list[1].body, REVISE_OLD);
+  assert.equal(ver.list[1].why, "orig");
+  assert.equal((await reviseDoc(p, "items", "snokey")).body, REVISE_NEW);
+  assert.deepEqual((await reviseDoc(p, "data", "snokey")).kv, { n: 7 });
+  assert.deepEqual(errors, []);
+});
+
+test("AI line: opening a script from the library while its revise streams shows the answer, read-only, and the stored body is still old", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN" });
+  await reviseLine(p);
+  await p.goto(base + "/runtime/", { waitUntil: "load" });
+  await p.waitForFunction(() => window.LP && LP.ai);
+  await reviseKey(p);
+  await reviseSeed(p, "sopen", "五号", REVISE_OLD);
+  await reviseOpen(p, "五号");
+  await p.click("#script-paste");
+  await p.waitForFunction(() => !document.getElementById("v-script-revise").hidden);
+  await p.fill("#revise-ask", "加一个暂停键");
+  await p.click("#revise-go");
+  await p.waitForFunction(() => !document.getElementById("v-script-edit").hidden);
+  await p.waitForFunction(() => !!window.__line);
+  await p.evaluate(() => { __line.open(); });
+  const head = REVISE_NEW.slice(0, REVISE_NEW.length - 24), tail = REVISE_NEW.slice(-24);
+  await p.evaluate((s) => __line.push(s), reviseEvent(head));
+  await p.waitForFunction((t) => document.getElementById("script-code").value === t, head);
+  assert.equal(await p.evaluate(() => document.getElementById("script-code").readOnly), true, "read-only while it streams");
+  assert.equal(await p.locator("#script-paste").innerText(), "停止");
+
+  /* leave, then open the same script from the library: the answer so far, read-only, the body still old */
+  await p.click("#script-back");
+  await p.waitForFunction(() => !document.getElementById("v-scripts").hidden);
+  assert.equal((await reviseDoc(p, "items", "sopen")).body, REVISE_OLD);
+  await reviseOpen(p, "五号");
+  assert.equal(await p.inputValue("#script-code"), head, "the answer so far is on screen");
+  assert.equal(await p.evaluate(() => document.getElementById("script-code").readOnly), true, "and read-only");
+  assert.equal((await reviseDoc(p, "items", "sopen")).body, REVISE_OLD, "the stored body is still old");
+
+  /* the rest arrives on the reopened editor: the version first, then the new code */
+  await p.evaluate((s) => __line.push(s + "data: [DONE]\n\n"), reviseEvent(tail));
+  await p.waitForFunction(() => /改好了（用时 0:0\d）/.test(document.getElementById("script-hint").textContent));
+  assert.equal(await p.inputValue("#script-code"), REVISE_NEW);
+  assert.equal((await reviseDoc(p, "items", "sopen")).body, REVISE_NEW);
+  const ver = await reviseDoc(p, "versions", "sopen");
+  assert.equal(ver.list.length, 2);
+  assert.equal(ver.list[0].body, REVISE_NEW);
+  assert.equal(ver.list[0].why, "加一个暂停键");
+  assert.equal(ver.list[1].body, REVISE_OLD);
+  assert.equal(ver.list[1].why, "orig");
   assert.deepEqual(errors, []);
 });
 
