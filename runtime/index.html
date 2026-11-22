@@ -212,7 +212,7 @@
       </div>
     </section>
 
-    <!-- AI LINE: the OpenRouter key and model, opened from Settings (decisions.md section 34) -->
+    <!-- AI LINES: a phone's SIM list, the keys, the default line and who uses which (decisions.md section 61) -->
     <section class="view" id="v-set-ai" hidden>
       <div id="set-ai-main">
         <div class="bar">
@@ -220,27 +220,65 @@
           <h2 data-i18n="ai.label">AI 线路</h2>
         </div>
         <div class="settings set-ai-page">
+          <p class="hint" id="set-ai-state" aria-live="polite"></p>
+          <ul class="set-ai-list" id="set-ai-lines"></ul>
+          <button class="set-ai-add" id="set-ai-add-open" type="button" data-i18n="ai.add">＋ 添加线路</button>
+          <div class="set-ai-uses" id="set-ai-uses" hidden>
+            <button class="set-ai-row" id="set-ai-def" type="button">
+              <span class="set-ai-label" data-i18n="ai.def">默认线路</span>
+              <span class="set-ai-value" id="set-ai-def-value"></span>
+            </button>
+            <p class="set-ai-heading" data-i18n="ai.uses">谁用哪条</p>
+            <ul class="set-ai-list" id="set-ai-use-links"></ul>
+          </div>
+          <!-- the explanations go under the lines, like the small print under a phone's SIM list -->
           <p class="hint" data-i18n="ai.note">接上以后，脚本里的「生成」直接请 AI 写程序。key 只存在这台手机上，不进备份；请用设了额度上限的 key。</p>
           <p class="hint" data-i18n="ai.pet"></p>
-          <p class="hint" id="set-ai-state" aria-live="polite"></p>
-        <button class="set-open set-ai-score-model" id="set-ai-score-model" type="button">
-          <span class="set-label" data-i18n="ai.score.label">读谱模型</span>
-          <span class="set-state" id="set-ai-score-model-value">默认（Sol）</span>
-        </button>
-        <label class="set-ai-field">
-          <span data-i18n="ai.key">OpenRouter 的 key</span>
-          <input id="set-ai-key" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="200" data-i18n-ph="ai.key.ph" placeholder="sk-or-…">
-        </label>
-        <label class="set-ai-field">
-          <span data-i18n="ai.model">模型</span>
-          <input id="set-ai-model" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="100" placeholder="openrouter/auto">
-        </label>
-        <p class="hint" data-i18n="ai.model.hint">填 openrouter.ai/models 上的模型名，例如便宜够用的 deepseek/deepseek-v4.1-flash；空着就让 OpenRouter 自动选，可能选到贵的。</p>
-        <div class="row">
-          <button class="btn" id="set-ai-save" type="button" data-i18n="ai.save">保存</button>
-          <button class="btn ghost" id="set-ai-test" type="button" data-i18n="ai.test" hidden>试一下</button>
-          <button class="btn ghost" id="set-ai-del" type="button" data-i18n="ai.del" hidden>删除 key</button>
         </div>
+      </div>
+      <div id="set-ai-add" hidden>
+        <div class="bar">
+          <button class="btn ghost back" id="set-ai-add-back" type="button" aria-label="返回">◂</button>
+          <h2 data-i18n="ai.add.title">添加线路</h2>
+        </div>
+        <div class="settings set-ai-page">
+          <ul class="set-ai-list" id="set-ai-providers"></ul>
+        </div>
+      </div>
+      <div id="set-ai-line" hidden>
+        <div class="bar">
+          <button class="btn ghost back" id="set-ai-line-back" type="button" aria-label="返回">◂</button>
+          <h2 id="set-ai-line-title"></h2>
+        </div>
+        <div class="settings set-ai-page">
+          <label class="set-ai-field">
+            <span data-i18n="ai.key">key</span>
+            <input id="set-ai-key" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="200" data-i18n-ph="ai.key.ph" placeholder="sk-or-…">
+          </label>
+          <label class="set-ai-field">
+            <span data-i18n="ai.model">模型</span>
+            <input id="set-ai-model" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="100">
+          </label>
+          <p class="hint" id="set-ai-model-hint"></p>
+          <p class="hint" id="set-ai-line-state" aria-live="polite"></p>
+          <div class="row">
+            <button class="btn" id="set-ai-save" type="button" data-i18n="ai.save">保存</button>
+            <button class="btn ghost" id="set-ai-test" type="button" data-i18n="ai.test" hidden>试一下</button>
+            <button class="btn ghost" id="set-ai-del" type="button" data-i18n="ai.del" hidden>删除线路</button>
+          </div>
+        </div>
+      </div>
+      <div id="set-ai-use" hidden>
+        <div class="bar">
+          <button class="btn ghost back" id="set-ai-use-back" type="button" aria-label="返回">◂</button>
+          <h2 id="set-ai-use-title"></h2>
+        </div>
+        <div class="settings set-ai-page">
+          <ul class="set-ai-list set-ai-use-list" id="set-ai-use-list" role="radiogroup"></ul>
+          <button class="set-ai-row" id="set-ai-score-model" type="button" hidden>
+            <span class="set-ai-label" data-i18n="ai.score.label">读谱模型</span>
+            <span class="set-ai-value" id="set-ai-score-model-value">默认（Sol）</span>
+          </button>
         </div>
       </div>
       <div id="set-ai-model-page" hidden>

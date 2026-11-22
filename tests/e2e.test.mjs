@@ -9662,18 +9662,24 @@ test("AI line: a key in Settings turns 复制 into 生成, the code streams into
   await p.click("#scripts-write");
   assert.equal(await p.locator("#idea-copy").innerText(), "复制 AI 提示词");
 
-  /* Settings: paste a key, test the line; only the last four characters are shown */
+  /* Settings: add an OpenRouter line, paste a key, save; the new line is tried at once */
   await p.evaluate(() => LP.builtins.filter((b) => b.id === "settings")[0].open());
   await p.waitForFunction(() => !document.getElementById("v-settings").hidden);
   assert.equal(await p.locator("#set-ai-open").innerText(), "未接上 ›");
   await p.click("#set-ai-open");
   await p.waitForFunction(() => !document.getElementById("v-set-ai").hidden);
   assert.match(await p.locator("#set-ai-state").innerText(), /还没接上/);
+  await p.click("#set-ai-add-open");
+  await p.waitForFunction(() => !document.getElementById("set-ai-add").hidden);
+  await p.click('[data-provider="openrouter"]');
+  await p.waitForFunction(() => !document.getElementById("set-ai-line").hidden);
   /* each field has its label */
-  assert.deepEqual(await p.locator("#v-set-ai .set-ai-field > span").allInnerTexts(), ["OpenRouter 的 key", "模型"]);
+  assert.deepEqual(await p.locator("#set-ai-line .set-ai-field > span").allInnerTexts(), ["key", "模型"]);
   await p.fill("#set-ai-key", "sk-or-secret-1234");
   await p.click("#set-ai-save");
-  assert.match(await p.locator("#set-ai-state").innerText(), /key …1234 · 模型 openrouter\/auto/);
+  await p.waitForFunction(() => /线路正常/.test(document.getElementById("set-ai-line-state").textContent));
+  assert.match(await p.locator("#set-ai-line-state").innerText(), /「OK」（test\/model）/);
+  assert.equal(asked[0].auth, "Bearer sk-or-secret-1234");
   assert.ok(!(await p.locator("#v-set-ai").innerText()).includes("secret"));
   /* the saved key shows as dots: a stand-in in the password field, never the key */
   assert.equal(await p.getAttribute("#set-ai-key", "type"), "password");
@@ -9686,16 +9692,18 @@ test("AI line: a key in Settings turns 复制 into 生成, the code streams into
   assert.equal(await p.inputValue("#set-ai-key"), shown, "left empty, the dots come back");
   /* saving the model alone keeps the key */
   await p.fill("#set-ai-model", "a/b"); await p.click("#set-ai-save");
-  assert.match(await p.locator("#set-ai-state").innerText(), /key …1234 · 模型 a\/b/);
+  assert.equal(await p.inputValue("#set-ai-model"), "a/b");
   await p.fill("#set-ai-model", ""); await p.click("#set-ai-save");
   await p.click("#set-ai-test");
-  await p.waitForFunction(() => /线路正常/.test(document.getElementById("set-ai-state").textContent));
-  assert.match(await p.locator("#set-ai-state").innerText(), /「OK」（test\/model）/);
-  assert.equal(asked[0].auth, "Bearer sk-or-secret-1234");
+  await p.waitForFunction(() => /线路正常/.test(document.getElementById("set-ai-line-state").textContent));
+  assert.match(await p.locator("#set-ai-line-state").innerText(), /「OK」（test\/model）/);
+  assert.equal(asked[1].auth, "Bearer sk-or-secret-1234");
 
+  await p.click("#set-ai-line-back");
+  await p.waitForFunction(() => !document.getElementById("set-ai-main").hidden);
   await p.click("#set-ai-back");
   await p.waitForFunction(() => !document.getElementById("v-settings").hidden);
-  assert.equal(await p.locator("#set-ai-open").innerText(), "已接上 ›");
+  assert.equal(await p.locator("#set-ai-open").innerText(), "OpenRouter ›");
 
   /* the backup leaves the key out */
   const docs = await p.evaluate(async () => {
@@ -9723,7 +9731,7 @@ test("AI line: a key in Settings turns 复制 into 生成, the code streams into
   assert.equal(await p.inputValue("#script-name"), "番茄钟");
   assert.equal(await p.locator("#script-paste").innerText(), "改一改");
   assert.ok(await p.locator("#script-run").isEnabled());
-  const sent = asked[1].body;
+  const sent = asked[2].body;
   assert.equal(sent.stream, true);
   assert.equal(sent.model, "openrouter/auto");
   assert.match(sent.messages[0].content, /我想做的是：一个番茄钟/);
@@ -9837,6 +9845,10 @@ test("AI line: a read that fails blocks every write until a later read succeeds;
   assert.match(await p.locator("#set-ai-open").innerText(), /读不出/);
   await p.click("#set-ai-open");
   await p.waitForFunction(() => !document.getElementById("v-set-ai").hidden);
+  assert.match(await p.locator("#set-ai-state").innerText(), /读不出/);
+  await p.click("#set-ai-add-open");
+  await p.click('[data-provider="openrouter"]');
+  await p.waitForFunction(() => !document.getElementById("set-ai-line").hidden);
   await p.fill("#set-ai-key", "sk-or-new-3333");
   await p.click("#set-ai-save");
   await p.waitForTimeout(300);
@@ -9892,6 +9904,116 @@ test("AI line: two lines stay out of the backup, and a restore keeps this phone'
   await p.waitForFunction(() => window.LP && LP.ai && LP.ai._test.state().loaded);
   assert.deepEqual(await aiDoc(p), TWO_LINES);
   assert.equal(await p.evaluate(() => LopdaPlatform.db.doc("data/users/local/restore-probe").get().then((s) => s.data().body)), "hello");
+  assert.deepEqual(errors, []);
+});
+
+test("AI line: the lines page: add DeepSeek and OpenRouter, switch one off, choose 读谱, delete with a second press", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN", viewport: { width: 331, height: 359 }, hasTouch: true });
+  await fakeProviders(p);
+  await p.goto(base + "/runtime/", { waitUntil: "load" });
+  await p.waitForFunction(() => window.LP && LP.ai && LP.ai._test.state().loaded);
+  const fits = () => p.evaluate(() => document.documentElement.scrollWidth <= 331);
+
+  await p.evaluate(() => LP.builtins.filter((b) => b.id === "settings")[0].open());
+  await p.waitForFunction(() => !document.getElementById("v-settings").hidden);
+  await p.click("#set-ai-open");
+  await p.waitForFunction(() => !document.getElementById("set-ai-main").hidden);
+
+  /* DeepSeek: choose the provider, paste the key, save; the new line is tested at once */
+  await p.click("#set-ai-add-open");
+  await p.waitForFunction(() => !document.getElementById("set-ai-add").hidden);
+  assert.equal(await p.locator("#set-ai-providers li").count(), 5);
+  assert.ok(await fits(), "the provider page fits 331 px");
+  await p.click('[data-provider="deepseek"]');
+  await p.waitForFunction(() => !document.getElementById("set-ai-line").hidden);
+  assert.equal(await p.locator("#set-ai-line-title").innerText(), "DeepSeek");
+  assert.equal(await p.getAttribute("#set-ai-model", "placeholder"), "deepseek-flash");
+  assert.match(await p.locator("#set-ai-model-hint").innerText(), /空着就用 deepseek-flash。/);
+  await p.fill("#set-ai-key", "sk-deep-test-1111");
+  await p.click("#set-ai-save");
+  await p.waitForFunction(() => /线路正常/.test(document.getElementById("set-ai-line-state").textContent));
+  assert.ok(await fits(), "the line page fits 331 px");
+
+  /* a second line, OpenRouter, from the list */
+  await p.click("#set-ai-line-back");
+  await p.waitForFunction(() => !document.getElementById("set-ai-main").hidden);
+  await p.waitForFunction(() => /正常/.test(document.querySelector("#set-ai-lines li .set-ai-status").textContent));
+  await p.click("#set-ai-add-open");
+  await p.waitForFunction(() => !document.getElementById("set-ai-add").hidden);
+  await p.click('[data-provider="openrouter"]');
+  await p.waitForFunction(() => !document.getElementById("set-ai-line").hidden);
+  assert.match(await p.locator("#set-ai-model-hint").innerText(), /openrouter\.ai\/models/);
+  await p.fill("#set-ai-key", "sk-or-test-2222");
+  await p.click("#set-ai-save");
+  await p.waitForFunction(() => /线路正常/.test(document.getElementById("set-ai-line-state").textContent));
+  await p.click("#set-ai-line-back");
+  await p.waitForFunction(() => !document.getElementById("set-ai-main").hidden);
+  /* two lines on: the Settings row counts them, the uses block appears */
+  assert.equal(await p.locator("#set-ai-open").innerText(), "2 条 ›");
+  assert.equal(await p.evaluate(() => document.getElementById("set-ai-uses").hidden), false);
+  assert.ok(await fits(), "the list fits 331 px");
+
+  /* 读谱: DeepSeek cannot see, OpenRouter can; choosing OpenRouter brings the score-model row with it */
+  await p.locator('#set-ai-use-links li[data-use="score"]').click();
+  await p.waitForFunction(() => !document.getElementById("set-ai-use").hidden);
+  const deepRow = p.locator("#set-ai-use-list li", { hasText: "DeepSeek" });
+  assert.equal(await deepRow.getAttribute("aria-disabled"), "true");
+  assert.match(await deepRow.innerText(), /这条线路看不了图/);
+  await deepRow.click({ force: true });
+  assert.equal(await p.evaluate(() => document.getElementById("set-ai-use").hidden), false, "a blind line does nothing");
+  assert.ok(await fits(), "the use page fits 331 px");
+  await p.locator("#set-ai-use-list li", { hasText: "OpenRouter" }).click();
+  await p.waitForFunction(() => !document.getElementById("set-ai-main").hidden);
+  await p.waitForFunction((path) => LopdaPlatform.db.doc(path).get().then((s) => {
+    const d = s.data();
+    return !!(d.use && d.use.score && d.use.score.line);
+  }), AIDOC);
+  let doc = await aiDoc(p);
+  const orLine = doc.lines.find((l) => l.provider === "openrouter");
+  const deepLine = doc.lines.find((l) => l.provider === "deepseek");
+  assert.equal(doc.use.score.line, orLine.id);
+  await p.locator('#set-ai-use-links li[data-use="score"]').click();
+  await p.waitForFunction(() => !document.getElementById("set-ai-use").hidden);
+  assert.equal(await p.evaluate(() => document.getElementById("set-ai-score-model").hidden), false);
+  assert.equal(await p.locator("#set-ai-use-list li.on .set-ai-name").innerText(), "OpenRouter", "the choice is marked");
+  assert.ok(await fits(), "the score use page fits 331 px");
+  /* the score model page belongs to this use page: its back comes here */
+  await p.click("#set-ai-score-model");
+  await p.waitForFunction(() => !document.getElementById("set-ai-model-page").hidden);
+  await p.click("#set-ai-model-back");
+  await p.waitForFunction(() => !document.getElementById("set-ai-use").hidden);
+
+  /* switching DeepSeek off keeps its key, and one line on hides the uses block */
+  await p.click("#set-ai-use-back");
+  await p.waitForFunction(() => !document.getElementById("set-ai-main").hidden);
+  await p.locator("#set-ai-lines li", { hasText: "DeepSeek" }).locator(".set-ai-sw").click();
+  await p.waitForFunction((path) => LopdaPlatform.db.doc(path).get().then((s) => s.data().lines.some((l) => l.provider === "deepseek" && l.on === false)), AIDOC);
+  assert.equal(await p.evaluate(() => document.getElementById("set-ai-uses").hidden), true);
+  doc = await aiDoc(p);
+  const deepOff = doc.lines.find((l) => l.id === deepLine.id);
+  assert.equal(deepOff.on, false);
+  assert.equal(deepOff.key, "sk-deep-test-1111");
+  assert.equal(await p.locator("#set-ai-lines li", { hasText: "DeepSeek" }).locator(".set-ai-sw").getAttribute("aria-checked"), "false");
+
+  /* delete OpenRouter: the first press only asks, the second deletes */
+  await p.locator("#set-ai-lines li", { hasText: "OpenRouter" }).locator(".set-ai-name").click();
+  await p.waitForFunction(() => !document.getElementById("set-ai-line").hidden);
+  await p.click("#set-ai-del");
+  assert.equal(await p.locator("#set-ai-del").innerText(), "再按一次删除");
+  assert.equal((await aiDoc(p)).lines.some((l) => l.provider === "openrouter"), true, "nothing is deleted yet");
+  await p.click("#set-ai-del");
+  await p.waitForFunction(() => !document.getElementById("set-ai-main").hidden);
+  await p.waitForFunction((path) => LopdaPlatform.db.doc(path).get().then((s) => !s.data().lines.some((l) => l.provider === "openrouter")), AIDOC);
+  const after = await aiDoc(p);
+  assert.equal(after.lines.some((l) => l.provider === "openrouter"), false);
+  assert.ok(!JSON.stringify(after).includes("sk-or-test-2222"), "the deleted key is gone");
+
+  /* the keyboard: z on the provider page goes back to the list */
+  await p.click("#set-ai-add-open");
+  await p.waitForFunction(() => !document.getElementById("set-ai-add").hidden);
+  await p.keyboard.press("z");
+  await p.waitForFunction(() => !document.getElementById("set-ai-main").hidden);
+  assert.ok(await fits(), "the list still fits 331 px");
   assert.deepEqual(errors, []);
 });
 

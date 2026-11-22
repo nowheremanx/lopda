@@ -130,6 +130,10 @@ function renderSaves(){
    from a newer Lo-PDA (newer) blocks every write until a later read succeeds, so one new line can never erase the others. */
 var AIP="data/users/local/ai", AL=window.LopdaAiLines, PROV=window.LopdaAI.PROVIDERS;
 var AI={st:AL.load(null), loaded:false, readFailed:false, seen:[], lastTimer:0};
+/* the screens' own state, never the document: which page is open, the line being edited, the use being chosen,
+   the line page's last message, and the keyboard ring */
+var AIPAGE="main", AILINE="", AIPROV="", AIUSE="", AILINEMSG="", AIDELARMED=false, AISCOREFROM="main";
+var AIFOCUS=0, AIFOCUSABLES=[];
 var SCORE_MODELS_CACHE=null, scoreModelPageOpen=false, scoreModelRows=[], scoreModelFocus=0, scoreModelSeq=0;
 /* A saved key shows as dots in its field (a password field shows any value as dots): this stand-in, never the key itself.
    Tapping the field empties it for a new key; leaving it empty puts the dots back. */
@@ -138,10 +142,12 @@ var AIH=window.LopdaAI.host({fetch:function(u,o){ return fetch(u,o); }});
 function aiChanged(){ renderAi(); AI.seen.forEach(function(f){ try{ f(); }catch(e){} }); }
 function aiLang(){ return I18N.lang==="en" ? "en" : "zh"; }
 function lineName(l){ return AL.name(l,PROV,aiLang()); }
-function aiErr(e,use){
-  var l=AL.pick(AI.st,use||"",PROV), p=l && window.LopdaAI.provider(l.provider);
+/* a failure's words for one line: the name of the line that failed leads, the site is its own, never a whole key */
+function aiErrLine(e,l){
+  var p=l && window.LopdaAI.provider(l.provider);
   return tr("ai.err."+(e && e.code || "http"),{line:l ? lineName(l) : "AI", site:p ? p.site : ""});
 }
+function aiErr(e,use){ return aiErrLine(e,AL.pick(AI.st,use||"",PROV)); }
 /* may the document be written now? Only after a good read of a document this runtime understands. */
 function aiWritable(){ return !!(S.db && AI.loaded && !AI.readFailed && !AI.st.newer); }
 function saveAiDoc(){ if(!aiWritable()) return false; put(S.db.doc(AIP),AL.toDoc(AI.st)); return true; }
@@ -231,7 +237,8 @@ function scoreModelFocusPaint(){
 }
 function openScoreModelPage(){
   var seq=++scoreModelSeq; scoreModelPageOpen=true;
-  $("set-ai-main").hidden=true; $("set-ai-model-page").hidden=false;
+  AISCOREFROM=AIPAGE==="model" ? AISCOREFROM : AIPAGE;
+  aiPage("model");
   renderScoreModelList([],"ai.score.loading");
   sfx("tap");
   loadScoreModels().then(function(result){
@@ -239,22 +246,28 @@ function openScoreModelPage(){
     renderScoreModelList(result.list,result.failed?"ai.score.loadfail":"");
   });
 }
+/* the score model page's ◂ goes back where it was opened from (the 读谱 use page) */
 function closeScoreModelPage(){
   if(!scoreModelPageOpen) return;
-  resetScoreModelPage();
+  var back=AISCOREFROM||"main";
+  scoreModelPageOpen=false; scoreModelSeq++;
+  aiPage(back); AISCOREFROM="main";
   renderAi(); sfx("tap");
 }
+/* leaving the whole AI page puts everything back to the lines list */
 function resetScoreModelPage(){
   if(!scoreModelPageOpen) return;
   scoreModelPageOpen=false; scoreModelSeq++;
-  $("set-ai-model-page").hidden=true; $("set-ai-main").hidden=false;
+  aiPage("main"); AISCOREFROM="main";
 }
 function chooseScoreModel(id){
   if(!aiWritable()){ closeScoreModelPage(); renderAi(); sfx("err"); return; }
   AL.setScoreModel(AI.st,id===SCORE_PAGES.DEFAULT_MODEL ? "" : id);
   saveAiDoc();
-  $("set-ai-score-model-value").textContent=scoreModelLabel();
-  closeScoreModelPage(); sfx("ok");
+  var back=AISCOREFROM||"main";
+  scoreModelPageOpen=false; scoreModelSeq++;
+  aiPage(back); AISCOREFROM="main";
+  aiChanged(); sfx("ok");
 }
 $("set-ai-score-model").onclick=openScoreModelPage;
 $("set-ai-model-back").onclick=closeScoreModelPage;
@@ -272,51 +285,298 @@ document.addEventListener("keydown",function(e){
   } else return;
   if(items.length){ e.preventDefault(); scoreModelFocusPaint(); }
 });
-/* Until the settings page for several lines (part 3), this page edits the first OpenRouter line. */
-function pageLine(){ for(var i=0;i<AI.st.lines.length;i++) if(AI.st.lines[i].provider==="openrouter") return AI.st.lines[i]; return null; }
-/* the row in Settings says whether the line is up; the page behind it (v-set-ai) holds the two labelled fields */
-function renderAi(msg){
-  var l=pageLine(), on=!!(l && l.key), bad=AI.readFailed ? "ai.readfail" : AI.st.newer ? "ai.newer" : "";
-  $("set-ai-open").textContent=bad ? tr(bad) : tr(AL.pick(AI.st,"",PROV) ? "ai.row.on" : "ai.row.off");
-  $("set-ai-state").textContent=msg || (bad ? tr(bad) : on ? tr("ai.on",{key:l.key.slice(-4), model:l.model || window.LopdaAI.MODEL}) : tr("ai.off"));
-  $("set-ai-key").placeholder=on ? tr("ai.key.saved",{key:l.key.slice(-4)}) : tr("ai.key.ph");
-  if(document.activeElement!==$("set-ai-key")) $("set-ai-key").value=on ? KEPT : "";
-  $("set-ai-test").hidden=!on; $("set-ai-del").hidden=!on;
-  if(document.activeElement!==$("set-ai-model")) $("set-ai-model").value=l ? l.model : "";
-  $("set-ai-score-model-value").textContent=scoreModelLabel();
+/* ---------- the lines' pages: the list, a provider, one line, one use (the score models have their page above) ---------- */
+var AI_PAGE_IDS={main:"set-ai-main", add:"set-ai-add", line:"set-ai-line", use:"set-ai-use", model:"set-ai-model-page"};
+/* exactly one sub-page of v-set-ai is visible at a time */
+function aiPage(name){
+  if(name!=="line") AIDELARMED=false;
+  var k;
+  for(k in AI_PAGE_IDS) if(Object.prototype.hasOwnProperty.call(AI_PAGE_IDS,k)){
+    var el=$(AI_PAGE_IDS[k]); if(el) el.hidden=k!==name;
+  }
+  AIPAGE=name; AIFOCUS=0;
+  /* each page starts at its top: the click that opened it may have scrolled the previous one */
+  var view=$("v-set-ai"); if(view) view.scrollTop=0;
+  if(name!=="line" && document.activeElement && /^(INPUT|TEXTAREA)$/.test(document.activeElement.nodeName)) document.activeElement.blur();
 }
-/* a read that failed is tried again whenever the page opens */
-$("set-ai-row").onclick=function(){ sfx("tap"); show("set-ai"); if(AI.readFailed) readAi(); };
-$("set-ai-back").onclick=function(){ resetScoreModelPage(); sfx("tap"); openSettings(); };
-function saveAi(){
-  var v=$("set-ai-key").value.trim(), key=v===KEPT ? "" : v, model=$("set-ai-model").value.trim(), l=pageLine();
+function curLine(){ return AILINE ? AL.find(AI.st,AILINE) : null; }
+function lineProvider(l){ return l ? window.LopdaAI.provider(l.provider) : null; }
+function aiFocusPaint(){
+  for(var i=0;i<AIFOCUSABLES.length;i++) AIFOCUSABLES[i].classList.toggle("focus",i===AIFOCUS);
+}
+function aiSetFocus(list){
+  AIFOCUSABLES=list;
+  if(AIFOCUS>=list.length) AIFOCUS=0;
+  aiFocusPaint();
+}
+function aiBackToMain(){
+  AILINE=""; AIPROV=""; AILINEMSG="";
+  aiPage("main"); renderAi(); sfx("tap");
+}
+function aiBack(){
+  if(AIPAGE==="model"){ closeScoreModelPage(); return; }
+  if(AIPAGE!=="main"){ aiBackToMain(); return; }
+  sfx("tap"); openSettings();
+}
+/* the last real request's result, for a line's second row */
+function aiLineStatus(l){
+  if(!lineProvider(l)) return tr("ai.st.unknown");
+  if(!l.on) return tr("ai.st.off");
+  var last=l.last;
+  if(last && last.ok) return tr("ai.st.ok",{at:LP.fmt(last.at)});
+  if(last && last.code){
+    var known={key:1,credit:1,busy:1,server:1,http:1,offline:1,timeout:1,empty:1};
+    return tr("ai.st."+(known[last.code]?last.code:"http"));
+  }
+  return tr("ai.st.new");
+}
+/* the row in Settings: unreadable, a newer document, nothing on, the one line's name, or the count */
+function aiRowText(){
+  if(AI.readFailed) return tr("ai.row.readfail");
+  if(AI.st.newer) return tr("ai.row.newer");
+  var on=AL.onLines(AI.st);
+  if(!on.length) return tr("ai.row.off");
+  if(on.length===1) return lineName(on[0])+" ›";
+  return tr("ai.row.n",{n:on.length});
+}
+/* the switch changes the line only: tapping it never opens the line's page */
+function toggleAiLine(id,on){
   if(!aiWritable()){ renderAi(); sfx("err"); return; }
-  if(!(l && l.key) && !key){ renderAi(tr("ai.nokey")); sfx("err"); return; }
-  if(l) AL.edit(AI.st,l.id,key,model); else AL.add(AI.st,"openrouter",key,model,Date.now());
+  AL.setOn(AI.st,id,on); saveAiDoc(); aiChanged(); sfx("ok");
+}
+function openAiLine(id){
+  if(document.activeElement && /^(INPUT|TEXTAREA)$/.test(document.activeElement.nodeName)) document.activeElement.blur();
+  AILINE=id; AIPROV=""; AILINEMSG=""; AIDELARMED=false;
+  aiPage("line"); renderAi(); sfx("tap");
+}
+/* a new line: nothing is added until 保存 */
+function openAiProvider(id){
+  var p=window.LopdaAI.provider(id); if(!p) return;
+  if(document.activeElement && /^(INPUT|TEXTAREA)$/.test(document.activeElement.nodeName)) document.activeElement.blur();
+  AILINE=""; AIPROV=id; AILINEMSG=""; AIDELARMED=false;
+  aiPage("line"); renderAi(); sfx("tap");
+}
+function openAiUse(use){ AIUSE=use; aiPage("use"); renderAi(); sfx("tap"); }
+
+function renderAiMain(){
+  var bad=AI.readFailed ? "ai.readfail" : AI.st.newer ? "ai.newer" : "";
+  $("set-ai-state").textContent=bad ? tr(bad) : AI.st.lines.length ? "" : tr("ai.off");
+  var ul=$("set-ai-lines"), focus=[];
+  ul.textContent="";
+  AI.st.lines.forEach(function(l){
+    var li=document.createElement("li");
+    li.setAttribute("role","button"); li.setAttribute("tabindex","0");
+    var top=document.createElement("div"); top.className="set-ai-top";
+    var mark=document.createElement("span"); mark.className="set-ai-mark"; mark.setAttribute("aria-hidden","true");
+    mark.textContent=l.on ? "▣" : "□";
+    var name=document.createElement("span"); name.className="set-ai-name"; name.textContent=lineName(l);
+    var key=document.createElement("span"); key.className="set-ai-key"; key.textContent=l.key ? "…"+l.key.slice(-4) : "";
+    var sw=document.createElement("button"); sw.type="button"; sw.className="set-ai-sw"; sw.setAttribute("role","switch");
+    sw.setAttribute("aria-checked",l.on ? "true" : "false"); sw.textContent=tr(l.on ? "ai.sw.on" : "ai.sw.off");
+    sw.disabled=!lineProvider(l);
+    sw.onclick=function(ev){ if(ev && ev.stopPropagation) ev.stopPropagation(); toggleAiLine(l.id,!l.on); };
+    top.appendChild(mark); top.appendChild(name); top.appendChild(key); top.appendChild(sw);
+    var st=document.createElement("small"); st.className="set-ai-status"; st.textContent=aiLineStatus(l);
+    li.appendChild(top); li.appendChild(st);
+    li.onclick=function(){ openAiLine(l.id); };
+    ul.appendChild(li); focus.push(li);
+  });
+  focus.push($("set-ai-add-open"));
+  var on=AL.onLines(AI.st), uses=$("set-ai-uses");
+  uses.hidden=on.length<2;
+  if(on.length>=2){
+    var def=AL.find(AI.st,AI.st.def);
+    $("set-ai-def-value").textContent=(def ? lineName(def) : "")+" ›";
+    focus.push($("set-ai-def"));
+    var ulu=$("set-ai-use-links"); ulu.textContent="";
+    AL.USES.forEach(function(u){
+      var li=document.createElement("li"); li.className="set-ai-use";
+      li.setAttribute("role","button"); li.setAttribute("tabindex","0"); li.setAttribute("data-use",u);
+      var label=document.createElement("span"); label.className="set-ai-name"; label.textContent=tr("ai.use."+u);
+      var chosen=AI.st.use[u] && AL.find(AI.st,AI.st.use[u].line);
+      var value=document.createElement("span"); value.className="set-ai-value";
+      value.textContent=(chosen && chosen.on ? lineName(chosen) : tr("ai.use.default"))+" ›";
+      li.appendChild(label); li.appendChild(value);
+      li.onclick=function(){ openAiUse(u); };
+      ulu.appendChild(li); focus.push(li);
+    });
+  } else $("set-ai-use-links").textContent="";
+  return focus;
+}
+
+function renderAiAdd(){
+  var ul=$("set-ai-providers"), focus=[];
+  ul.textContent="";
+  PROV.forEach(function(p){
+    var li=document.createElement("li");
+    li.setAttribute("role","button"); li.setAttribute("tabindex","0"); li.setAttribute("data-provider",p.id);
+    var name=document.createElement("span"); name.className="set-ai-name"; name.textContent=p.name[aiLang()] || p.name.en;
+    var d=document.createElement("small"); d.className="set-ai-status"; d.textContent=tr("ai.prov."+p.id);
+    li.appendChild(name); li.appendChild(d);
+    li.onclick=function(){ openAiProvider(p.id); };
+    ul.appendChild(li); focus.push(li);
+  });
+  return focus;
+}
+
+function renderAiLine(){
+  var l=curLine(), prov=l ? lineProvider(l) : (AIPROV ? window.LopdaAI.provider(AIPROV) : null);
+  $("set-ai-line-title").textContent=l ? lineName(l) : (prov ? (prov.name[aiLang()] || prov.name.en) : "");
+  $("set-ai-key").placeholder=(l && l.key) ? tr("ai.key.saved",{key:l.key.slice(-4)}) : tr("ai.key.ph");
+  if(document.activeElement!==$("set-ai-key")) $("set-ai-key").value=(l && l.key) ? KEPT : "";
+  if(document.activeElement!==$("set-ai-model")) $("set-ai-model").value=l ? l.model : "";
+  $("set-ai-model").placeholder=prov ? prov.model : "";
+  $("set-ai-model-hint").textContent=!prov ? "" : (prov.id==="openrouter" ? tr("ai.model.hint") : tr("ai.model.def",{model:prov.model}));
+  $("set-ai-line-state").textContent=AILINEMSG;
+  $("set-ai-test").hidden=!l; $("set-ai-del").hidden=!l;
+  $("set-ai-del").textContent=tr(AIDELARMED ? "ai.del.sure" : "ai.del");
+  var focus=[$("set-ai-save")];
+  if(l){ focus.push($("set-ai-test")); focus.push($("set-ai-del")); }
+  return focus;
+}
+
+function aiUseRow(labelText,secondText,disabled,current,go,extra){
+  var li=document.createElement("li");
+  li.setAttribute("role","radio"); li.setAttribute("tabindex","0");
+  li.setAttribute("aria-checked",current ? "true" : "false");
+  if(disabled){ li.setAttribute("aria-disabled","true"); li.className="off"; }
+  else if(current) li.className="on";
+  if(extra) li.className+=(li.className ? " " : "")+extra;
+  var top=document.createElement("div"); top.className="set-ai-top";
+  var name=document.createElement("span"); name.className="set-ai-name"; name.textContent=labelText;
+  top.appendChild(name); li.appendChild(top);
+  if(secondText){ var st=document.createElement("small"); st.className="set-ai-status"; st.textContent=secondText; li.appendChild(st); }
+  li.onclick=function(){ if(disabled){ sfx("err"); return; } go(); };
+  return li;
+}
+function renderAiUse(){
+  var use=AIUSE;
+  $("set-ai-use-title").textContent=use==="def" ? tr("ai.def") : tr("ai.use."+use);
+  var ul=$("set-ai-use-list"), focus=[], on=AL.onLines(AI.st);
+  ul.textContent="";
+  var chosen=use==="def" ? AI.st.def : (AI.st.use[use] && AI.st.use[use].line || "");
+  var chosenLine=chosen ? AL.find(AI.st,chosen) : null;
+  var chosenProv=chosenLine ? lineProvider(chosenLine) : null;
+  var valid=!!(chosenLine && chosenLine.on && (use!=="score" || (chosenProv && chosenProv.vision)));
+  if(use!=="def"){
+    var d=aiUseRow(tr("ai.use.followdef"),"",false,!valid,function(){ chooseUseLine(""); },"set-ai-follow");
+    ul.appendChild(d); focus.push(d);
+  }
+  on.forEach(function(l){
+    var p=lineProvider(l), dis=use==="score" && !(p && p.vision);
+    var li=aiUseRow(lineName(l), dis ? tr("ai.novision") : "", dis, valid && !dis && l.id===chosen,
+      function(){ chooseUseLine(l.id); });
+    ul.appendChild(li); focus.push(li);
+  });
+  /* the score model list only matters while 读谱 goes down OpenRouter */
+  var sl=AL.pick(AI.st,"score",PROV), sp=sl && lineProvider(sl);
+  var scoreRow=$("set-ai-score-model");
+  scoreRow.hidden=!(use==="score" && sp && sp.id==="openrouter");
+  if(!scoreRow.hidden) focus.push(scoreRow);
+  /* the ring starts on the choice, as in the score model list, not on the first row */
+  if(AIPAGE==="use" && focus.length){
+    var at=0;
+    for(var i=0;i<focus.length;i++) if(focus[i].classList.contains("on")){ at=i; break; }
+    AIFOCUS=at;
+  }
+  return focus;
+}
+function chooseUseLine(id){
+  if(!aiWritable()){ renderAi(); sfx("err"); return; }
+  if(AIUSE==="def") AL.setDef(AI.st,id);
+  else AL.choose(AI.st,AIUSE,id);
   saveAiDoc();
+  aiPage("main"); aiChanged(); sfx("ok");
+}
+
+/* redraws every sub-page from AI.st, so whichever one is open is current after any change; msg is the line page's status */
+function renderAi(msg){
+  if(typeof msg==="string") AILINEMSG=msg;
+  var focus={main:renderAiMain(), add:renderAiAdd(), line:renderAiLine(), use:renderAiUse()};
+  $("set-ai-open").textContent=aiRowText();
+  $("set-ai-score-model-value").textContent=scoreModelLabel();
+  if(AIPAGE!=="model") aiSetFocus(focus[AIPAGE] || []);
+}
+/* a read that failed is tried again whenever the page opens; it always opens on the list */
+$("set-ai-row").onclick=function(){
+  sfx("tap"); AILINE=""; AIPROV=""; AIUSE=""; AILINEMSG=""; AIDELARMED=false;
+  aiPage("main"); show("set-ai"); if(AI.readFailed) readAi(); renderAi();
+};
+$("set-ai-back").onclick=function(){ resetScoreModelPage(); sfx("tap"); openSettings(); };
+$("set-ai-add-open").onclick=function(){ aiPage("add"); renderAi(); sfx("tap"); };
+$("set-ai-add-back").onclick=aiBackToMain;
+$("set-ai-line-back").onclick=aiBackToMain;
+$("set-ai-use-back").onclick=aiBackToMain;
+$("set-ai-def").onclick=function(){ openAiUse("def"); };
+
+function saveAi(){
+  if(!aiWritable()){ renderAi(); sfx("err"); return; }
+  var v=$("set-ai-key").value.trim(), key=v===KEPT ? "" : v, model=$("set-ai-model").value.trim(), l=curLine();
+  if(l){
+    AL.edit(AI.st,l.id,key,model); saveAiDoc(); AILINEMSG="";
+    $("set-ai-key").blur(); aiChanged(); sfx("ok"); return;
+  }
+  var prov=AIPROV ? window.LopdaAI.provider(AIPROV) : null;
+  if(!prov){ renderAi(); sfx("err"); return; }
+  if(!key){ renderAi(tr("ai.nokey")); sfx("err"); return; }
+  l=AL.add(AI.st,prov.id,key,model,Date.now());
+  AILINE=l.id; AIPROV=""; AILINEMSG="";
   $("set-ai-key").blur();
+  saveAiDoc();
   aiChanged(); sfx("ok");
+  /* a new line is tried on the spot: a failure still keeps it, with the reason in its status line */
+  runAiTest();
 }
 $("set-ai-save").onclick=saveAi;
 $("set-ai-key").addEventListener("focus",function(){ if(this.value===KEPT) this.value=""; });
-$("set-ai-key").addEventListener("blur",function(){ var l=pageLine(); if(!this.value && l && l.key) this.value=KEPT; });
-$("set-ai-del").onclick=function(){
-  var l=pageLine();
-  if(!aiWritable()){ renderAi(); sfx("err"); return; }
-  /* deleting a line removes its key; Tape4's score-model choice stays */
-  if(l) AL.remove(AI.st,l.id);
-  $("set-ai-model").value="";
-  saveAiDoc();
-  aiChanged(); sfx("ok");
-};
-$("set-ai-test").onclick=function(){
-  var b=this, l=pageLine(); if(b.disabled || !l) return;
+$("set-ai-key").addEventListener("blur",function(){ var l=curLine(); if(!this.value && l && l.key) this.value=KEPT; });
+function runAiTest(){
+  var b=$("set-ai-test"), l=curLine();
+  if(!l || b.disabled) return;
   b.disabled=true; renderAi(tr("ai.testing")); sfx("tap");
-  var used="";
+  var used="", prov=lineProvider(l), id=l.id;
   askLine(l,{messages:[{role:"user", content:"Reply with the single word OK."}], max:16, onModel:function(m){ used=m; }},l.model).then(function(t){
-    renderAi(tr("ai.tested",{text:t.trim().slice(0,40), model:used || l.model || window.LopdaAI.MODEL})); sfx("ok");
-  },function(e){ renderAi(aiErr(e)); sfx("err"); }).then(function(){ b.disabled=false; });
-};
+    if(AILINE===id){ AILINEMSG=tr("ai.tested",{text:t.trim().slice(0,40), model:used || l.model || (prov ? prov.model : window.LopdaAI.MODEL)}); renderAi(); }
+    sfx("ok");
+  },function(e){
+    if(AILINE===id){ AILINEMSG=aiErrLine(e,l); renderAi(); }
+    sfx("err");
+  }).then(function(){ b.disabled=false; });
+}
+$("set-ai-test").onclick=runAiTest;
+/* deleting a line removes its key (the score-model choice stays); two presses, and leaving the page forgets the first */
+function deleteAiLine(){
+  if(!aiWritable()){ renderAi(); sfx("err"); return; }
+  var l=curLine(); if(!l) return;
+  if(!AIDELARMED){ AIDELARMED=true; renderAi(); sfx("tap"); return; }
+  AL.remove(AI.st,l.id); saveAiDoc();
+  AIDELARMED=false; AILINE=""; AIPROV=""; AILINEMSG="";
+  aiPage("main"); aiChanged(); sfx("ok");
+}
+$("set-ai-del").onclick=deleteAiLine;
+/* the pages' keys, like the score model list: arrows move the ring, A/Enter chooses, B/Escape goes back */
+document.addEventListener("keydown",function(e){
+  if($("v-set-ai").hidden || AIPAGE==="model") return;
+  var t=e.target || {};
+  if(/^(INPUT|TEXTAREA)$/.test(t.nodeName)){
+    if(e.key==="Escape"){ t.blur(); e.preventDefault(); }
+    return;
+  }
+  if(e.defaultPrevented) return;
+  var items=AIFOCUSABLES, key=e.key, n=items.length;
+  if(key==="ArrowUp" || key==="ArrowLeft"){
+    if(!n) return;
+    AIFOCUS=(AIFOCUS+n-1)%n; aiFocusPaint(); e.preventDefault();
+  } else if(key==="ArrowDown" || key==="ArrowRight"){
+    if(!n) return;
+    AIFOCUS=(AIFOCUS+1)%n; aiFocusPaint(); e.preventDefault();
+  } else if(key==="x" || key==="X" || key==="Enter"){
+    if(items[AIFOCUS]) items[AIFOCUS].click();
+    e.preventDefault();
+  } else if(key==="z" || key==="Z" || key==="Escape"){
+    aiBack(); e.preventDefault();
+  }
+});
 /* one request down one line: the key goes only to that line's own provider (ai.js looks the address up in its table) */
 function askLine(l,o,model){
   var q={}, k;
