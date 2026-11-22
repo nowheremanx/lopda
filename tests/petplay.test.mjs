@@ -856,3 +856,20 @@ test("climb: no input stays on the start platform past the old cap with score 0;
   assert.ok(high.height > 0, "above the threshold the camera climbs");
   assert.equal(high.score, 0, "height alone is no point: only landing on a new, higher platform scores");
 });
+
+test("climb: the scenery changes with height - wall, roof, sky, stars - in background tones only", () => {
+  const g = game("climb"), C = Play.CLIMB;
+  assert.ok(C.ROOF < C.SKY && C.SKY < C.SPACE, "the bands go up in order");
+  const pics = [0, C.ROOF + 40, C.SKY + 200, C.SPACE + 100].map((h) => {
+    const s = g.init(5);
+    s.plats = [];                                  /* only the scenery */
+    s.pet = null;
+    s.height = h;
+    const buf = drawTones(g, s);
+    for (let y = 4; y < H - 4; y++) for (let x = 4; x < W - 30; x++) {
+      assert.ok([2, 3].includes(buf[y * W + x]), `height ${h}: background is paper or mid at ${x},${y}`);
+    }
+    return Array.from(buf).join("");
+  });
+  assert.equal(new Set(pics).size, 4, "each band looks different");
+});
