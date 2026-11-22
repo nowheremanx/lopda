@@ -269,6 +269,8 @@ var STAGE={
 /* The third stage is the lights going out (owner, 2026-11-22): a 3-2-1 count in the middle of the screen, then for
    R_DARK_LEN px the room is dark but for the small lamp the pet carries, lighting an oval ahead of it. The run goes on
    underneath with its usual things, at most 5 px a tick, so the lamp shows a thing at least half a second ahead. */
+var R_DIVE_FROM=76, R_SURFACE=27, R_LIGHT_UP=40;
+var BAYER=[[0,8,2,10],[12,4,14,6],[3,11,1,9],[15,7,13,5]];
 var R_DARK_COUNT=60, R_DARK_LEN=2000, R_LAMP_X=56, R_LAMP_RX=54, R_LAMP_RY=44;
 var R_PLANE_UP=56, R_NUT_LOW=20, R_NUT_HIGH=50, R_NUT_PTS=10, R_LEVEL_TICKS=200;
 /* one seeded gap from a previous obstacle's right edge to the next one's left edge: a jump's 18 ticks of travel,
@@ -355,7 +357,7 @@ function runInit(seed){
   s.speedQ=R_SPEED_START; s.moveQ=0; s.dist=0; s.obs=[]; s.nutScore=0;
   s.h=0; s.vy=0; s.onGround=true; s.buf=0; s.dying=0;
   s.mode="run"; s.scene="room"; s.stageAt=R_STAGE_FIRST; s.stageN=0; s.gatesMade=0; s.fq=0; s.fv=0; s.lastGap=null;
-  s.dark=0; s.darkCount=0; s.darkUntil=0; s.intro=null;
+  s.dark=0; s.darkCount=0; s.darkUntil=0; s.intro=null; s.anim=null; s.splashT=-99; s.lightUp=0; s.pondEdge=null;
   runSpawn(s,W+60);                                     /* the first thing arrives after about three seconds */
   return s;
 }
@@ -413,11 +415,33 @@ function startStage(s){
   s.stageN++;
   s.gatesMade=0; s.lastGap=null;
   s.onGround=false; s.vy=0; s.buf=0;
-  if(s.mode==="fly"){ s.fq=0; s.fv=STAGE.fly.flap; }               /* out of the window with a first beat */
-  else { s.fq=30*4; s.fv=0; }                                        /* a splash into the middle of the pond */
+  if(s.mode==="fly"){ s.fq=0; s.fv=STAGE.fly.flap; spawnGate(s,W+30); }   /* out of the window with a first beat */
+  else {
+    /* the dive (owner: the water switched in at once): from a hop over the edge it drops through the surface with a
+       splash and sinks to the bottom; the first gate comes when it has settled */
+    s.anim={kind:"dive"}; s.fq=R_DIVE_FROM*4; s.fv=0;
+  }
   s.h=Math.floor(s.fq/4);
   note(s,s.mode);
-  spawnGate(s,W+30);
+}
+/* the pond's own moves, with A ignored: the dive in, and at the end the climb up and out onto the floor */
+function pondAnim(s){
+  var a=s.anim, surf=FLOOR-PET_BODY_TOP-R_SURFACE;
+  if(a.kind==="dive"){
+    var was=s.h;
+    s.fv-=2;
+    if(s.h<surf) s.fv=Math.max(s.fv,-6);                 /* the water slows the fall */
+    s.fq+=s.fv;
+    if(s.fq<=0){ s.fq=0; s.fv=0; s.anim=null; spawnGate(s,W+30); }
+    s.h=Math.floor(s.fq/4);
+    if(was>=surf && s.h<surf){ s.splashT=s.tick; note(s,"splash"); }
+  } else {
+    /* up to the surface, then out in a little arc onto the room's floor */
+    s.fv=Math.min(10,s.fv+2);
+    s.fq+=s.fv;
+    s.h=Math.floor(s.fq/4);
+    if(s.h>=surf){ s.splashT=s.tick; note(s,"splash"); s.anim=null; endStage(s); }
+  }
 }
 function endStage(s){
   var was=s.mode;
@@ -426,6 +450,10 @@ function endStage(s){
   s.fv=0;
   note(s,"back");                                               /* the program says A jumps again */
   if(was==="fly" && s.h>0){ s.onGround=false; s.vy=0; }         /* it glides down onto the floor with the jump's fall */
+  else if(was==="swim"){
+    /* out of the water in a small arc onto the floor, the pond's edge sliding away behind it */
+    s.h=Math.min(s.h,40); s.onGround=false; s.vy=-3; s.pondEdge=PET_X+26;
+  }
   else { s.h=0; s.fq=0; s.onGround=true; s.vy=0; note(s,"land"); }
   s.scene="room";
   runSpawn(s,W+60);
@@ -440,7 +468,8 @@ function runTick(s,inp){
   s.speedQ=Math.min(s.mode==="run" && !s.dark ? R_SPEED_MAX : R_STAGE_SPEED,ramp);
   if(s.dark){
     if(s.darkCount>0){ s.darkCount--; if(s.darkCount%20===0) note(s,s.darkCount ? "count" : "lightsout"); }
-    else if(s.dist>=s.darkUntil){ s.dark=0; s.stageAt=s.dist+R_STAGE_EVERY; note(s,"lightson"); }
+    else if(s.lightUp>0){ s.lightUp--; if(!s.lightUp){ s.dark=0; s.stageAt=s.dist+R_STAGE_EVERY; } }
+    else if(s.dist>=s.darkUntil){ s.lightUp=R_LIGHT_UP; note(s,"lightson"); }
   }
   s.moveQ+=s.speedQ;
   var d=Math.floor(s.moveQ/4);
@@ -459,13 +488,19 @@ function runTick(s,inp){
   }
   var pressed=!!(inp.press && inp.press.a);
   var jumped=false;
+  if(s.pondEdge!=null){ s.pondEdge-=d; if(s.pondEdge<-20) s.pondEdge=null; }
   if(s.intro){
     s.intro.x-=d;
-    if(s.intro.x<=PET_X+20 && s.onGround){ startStage(s); }
+    if(s.intro.kind==="swim"){
+      /* at the edge it hops up by itself, and at the top of the hop the pond takes over: it falls in from there */
+      if(s.intro.x<=PET_X+24 && s.onGround && !s.intro.hop){ s.intro.hop=true; s.vy=R_JUMP_VY; s.onGround=false; note(s,"jump"); }
+      else if(s.intro.hop && !s.onGround && s.vy>=0){ startStage(s); }
+    } else if(s.intro.x<=PET_X+20 && s.onGround){ startStage(s); }
     else if(!s.onGround){ /* finish a jump in the air, but no new one: it goes through on its own */ }
     pressed=false; s.buf=0; inp={left:false,right:false,a:false,press:{}};
   }
-  if(s.mode!=="run") stagePhysics(s,inp);
+  if(s.mode==="swim" && s.anim) pondAnim(s);
+  else if(s.mode!=="run") stagePhysics(s,inp);
   else {
     if(pressed) s.buf=3;
     if(s.onGround && (pressed || s.buf>0)){
@@ -517,8 +552,11 @@ function runTick(s,inp){
     else if(last.x+last.w<=W) runSpawn(s,last.x+last.w+runMinGap(s.speedQ)+Math.floor(rand(s)*71));
   } else {
     if(s.gatesMade<R_STAGE_GATES){
-      if(last && last.x<=W-R_GATE_SPACE+R_GATE_W) spawnGate(s,last.x+R_GATE_SPACE);
-    } else if(!s.obs.length) endStage(s);
+      if(last && last.kind==="gate" && last.x<=W-R_GATE_SPACE+R_GATE_W) spawnGate(s,last.x+R_GATE_SPACE);
+    } else if(!s.obs.length){
+      if(s.mode==="swim"){ if(!s.anim){ s.anim={kind:"rise"}; s.fv=Math.max(0,s.fv); } }
+      else endStage(s);
+    }
   }
   if(s.mode==="run" && !jumped && !pressed && s.buf>0) s.buf--;
   s.score=Math.floor(s.dist/16)+s.nutScore;
@@ -638,6 +676,12 @@ function drawIntro(buf,w,h,it){
     put(buf,w,h,x+1,FLOOR-13,1); put(buf,w,h,x+2,FLOOR-14,1);
   }
 }
+/* after the pond: the water is behind the pet, left of x, until it scrolls away */
+function drawPondBehind(buf,w,h,x){
+  var xx, y;
+  for(xx=0;xx<Math.min(w,x);xx++) for(y=FLOOR;y<h;y++) put(buf,w,h,xx,y,y===FLOOR+((xx>>2)&1) ? 0 : (y>FLOOR+1 ? 2 : 3));
+  for(y=FLOOR-12;y<FLOOR;y++){ put(buf,w,h,x-3,y,0); if(y>FLOOR-8) put(buf,w,h,x-6,y,0); }
+}
 function runDraw(s,buf,w,h,pack,poseFor){
   clear(buf);
   if(s.scene==="fly") skyBackdrop(buf,w,h,s.dist);
@@ -655,6 +699,7 @@ function runDraw(s,buf,w,h,pack,poseFor){
     }
   }
   if(s.intro) drawIntro(buf,w,h,s.intro);
+  if(s.pondEdge!=null && s.scene==="room") drawPondBehind(buf,w,h,s.pondEdge);
   var i, o;
   for(i=0;i<s.obs.length;i++){
     o=s.obs[i];
@@ -673,21 +718,29 @@ function runDraw(s,buf,w,h,pack,poseFor){
     y=FLOOR-1-bottom;
   }
   blit(buf,w,h,grid,PET_X,y);
+  if(s.scene==="swim" && s.tick-s.splashT<10){
+    /* a splash where it broke the surface: drops thrown up, smaller each tick */
+    var st2=s.tick-s.splashT, sx;
+    for(sx=0;sx<6;sx++){
+      var dx2=(sx-2.5)*(4+st2), dy2=-((sx%3)+2)*Math.max(0,6-st2);
+      rect(buf,w,h,PET_X+16+Math.round(dx2),25+dy2,2,2,0);
+    }
+  }
   for(i=0;i<s.obs.length;i++){
     o=s.obs[i];
     if(o.nut) blit(buf,w,h,NUT.grid,o.nut.x,o.nut.y);
   }
-  if(s.dark && s.darkCount<=0){
-    /* lights out: ink everywhere but the lamp's oval ahead of the pet; the score stays readable in paper */
-    var cy=FLOOR-1-s.h-14, yy, xx, ddx, ddy;
+  if(s.dark){
+    /* the dark comes and goes gradually (owner): while the count runs the night thickens and the lit oval shrinks to
+       the lamp's; when the lights come back the same in reverse. L is how dark: 0 none, 1 full; a 4 x 4 ordered dither
+       spreads it, so the room fades with the four tones only */
+    var L=s.darkCount>0 ? 1-s.darkCount/R_DARK_COUNT : s.lightUp>0 ? s.lightUp/R_LIGHT_UP : 1;
+    var k=1+2*(1-L), cy=FLOOR-1-s.h-14, yy, xx, ddx, ddy, dd, th=Math.round(L*16);
     for(yy=0;yy<h;yy++) for(xx=0;xx<w;xx++){
-      ddx=(xx-R_LAMP_X)/R_LAMP_RX; ddy=(yy-cy)/R_LAMP_RY;
-      if(ddx*ddx+ddy*ddy>1) buf[yy*w+xx]=0;
-      else if(ddx*ddx+ddy*ddy>0.8 && ((xx+yy)&1)) buf[yy*w+xx]=1;   /* a dithered rim, like a lamp's falloff */
+      ddx=(xx-R_LAMP_X)/(R_LAMP_RX*k); ddy=(yy-cy)/(R_LAMP_RY*k); dd=ddx*ddx+ddy*ddy;
+      if(dd>1){ if(BAYER[yy&3][xx&3]<th) buf[yy*w+xx]=0; }
+      else if(L>=1 && dd>0.8 && ((xx+yy)&1)) buf[yy*w+xx]=1;    /* a dithered rim, like a lamp's falloff */
     }
-    frame(buf,w,h);
-    scoreDigits(buf,w,h,s.score,3);
-    return;
   }
   if(s.dark && s.darkCount>0){
     /* the count: 3, 2, 1 in big digits in the middle, on a paper card */
@@ -698,6 +751,7 @@ function runDraw(s,buf,w,h,pack,poseFor){
       blitAs(buf,w,h,ng,nx,ny,sc,0);
     }
   }
+  if(s.dark){ frame(buf,w,h); scoreDigits(buf,w,h,s.score,3); return; }
   frame(buf,w,h);
   scoreDigits(buf,w,h,s.score);
 }
@@ -945,7 +999,7 @@ window.LopdaPetPlay={
   finish:finish,
   reaction:reaction,
   climbReachable:climbReachable,
-  RUN:{DARK_COUNT:R_DARK_COUNT, DARK_LEN:R_DARK_LEN, LAMP_X:R_LAMP_X, LAMP_RX:R_LAMP_RX,
+  RUN:{LIGHT_UP:R_LIGHT_UP, DIVE_FROM:R_DIVE_FROM, SURFACE:R_SURFACE, DARK_COUNT:R_DARK_COUNT, DARK_LEN:R_DARK_LEN, LAMP_X:R_LAMP_X, LAMP_RX:R_LAMP_RX,
     STAGE_FIRST:R_STAGE_FIRST, STAGE_EVERY:R_STAGE_EVERY, STAGE_GATES:R_STAGE_GATES, STAGE_SPEED:R_STAGE_SPEED,
     GAP_START:R_GAP_START, GAP_MIN:R_GAP_MIN, GATE_SPACE:R_GATE_SPACE, STAGE:STAGE,
     PLANE_UP:R_PLANE_UP, NUT_LOW:R_NUT_LOW, NUT_HIGH:R_NUT_HIGH, NUT_PTS:R_NUT_PTS, LEVEL_TICKS:R_LEVEL_TICKS,
