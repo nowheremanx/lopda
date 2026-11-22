@@ -165,27 +165,36 @@ test("draw: a thin ink frame, the score in petart's pixel digits, and each game'
    two-tick-longer figure lands the pet on the tail of a wide slipper at the slowest speed. */
 const RUN_FRONT = 39;                                  /* PET_X + 23 */
 function runAim(speedPx) { return speedPx * 4 + 10; }
-function runBot(g, seed, ticks) {
+/* The bot a careful player is: a full jump over a thing on the floor, a quick hop (A for three ticks) when a plane
+   is over a low thing, and nothing for a plane alone. It records each new pattern's gap from the last one's right edge. */
+function runBot(g, seed, ticks, policy = "smart") {
   const s = g.init(seed), spawned = [], seen = new Set();
-  let hold = false;
+  let hold = 0, right = null;
   for (let i = 0; i < ticks && !s.done; i++) {
-    let next = null;
-    for (const o of s.obs) if (o.x + o.w > 24 && (!next || o.x < next.x)) next = o;
+    const ahead = s.obs.filter((o) => o.x + o.w > 24 && o.kind !== "none").sort((a, b) => a.x - b.x);
     let pressA = false;
-    if (s.onGround) {
-      hold = false;
-      if (next && next.x - RUN_FRONT <= runAim(s.speedQ / 4)) { pressA = true; hold = true; }
+    if (s.onGround && ahead.length) {
+      const o = ahead[0], sp = s.speedQ / 4, dist = o.x - RUN_FRONT;
+      const plane = ahead.find((p) => p.kind === "plane" && Math.abs(p.x - o.x) < 12);
+      const ground = ahead.find((p) => p.kind === "ground" && Math.abs(p.x - o.x) < 12);
+      if (policy === "naive") { if (dist <= runAim(sp)) { pressA = true; hold = 20; } }
+      else if (ground && plane) { if (dist > 0 && dist <= sp * 3 + 6) { pressA = true; hold = 3; } }
+      else if (o.kind === "ground" && dist <= runAim(sp)) { pressA = true; hold = 20; }
     }
-    g.step(s, { left: false, right: false, a: hold, press: { left: false, right: false, a: pressA } }, 50);
-    /* the gap as it was made: the obstacle before it has moved on by the time the round ends */
-    for (let j = 0; j < s.obs.length; j++) {
-      const o = s.obs[j];
-      if (seen.has(o)) continue;
-      seen.add(o);
-      const prev = j > 0 ? s.obs[j - 1] : null;
-      spawned.push({ gap: prev ? o.x - (prev.x + prev.w) : null, speedQ: s.speedQ,
-        nut: o.nut ? o.nut.y : null });
+    g.step(s, { left: false, right: false, a: hold > 0, press: { left: false, right: false, a: pressA } }, 50);
+    if (hold > 0) hold--;
+    /* a new pattern: one or two things pushed in the same tick; its gap is from the previous pattern's right edge */
+    const fresh = s.obs.filter((o) => !seen.has(o));
+    if (fresh.length) {
+      const left = Math.min(...fresh.map((o) => o.x)), r2 = Math.max(...fresh.map((o) => o.x + o.w));
+      spawned.push({ gap: right == null ? null : left - right, speedQ: s.speedQ, kinds: fresh.map((o) => o.kind),
+        nuts: fresh.filter((o) => o.nut).map((o) => ({ kind: o.kind, up: Play.RUN.FLOOR - (o.nut.y + 10) })), tick: s.tick });
+      for (const o of fresh) seen.add(o);
+      right = r2;
     }
+    /* positions move with the world: the right edge is measured again every tick */
+    const all = s.obs.filter((o) => seen.has(o));
+    if (all.length) right = Math.max(...all.map((o) => o.x + o.w));
   }
   return { state: s, spawned };
 }
@@ -287,30 +296,59 @@ test("run: a bot that presses A in time survives 3000 ticks on 50 seeds", () => 
   assert.ok(scores[0] > 100, `a 3000-tick run scores: lowest ${scores[0]}`);
 });
 
-test("run: obstacles keep a landing gap, never below minGap(speed), and carry nuts 30-38 px up", () => {
+test("run: patterns keep a landing gap, never below minGap(speed); planes from 10 s, plane over a thing from 20 s; nuts low or high", () => {
   const M = Play.RUN.minGap;
-  assert.equal(M(12), 84, "at 3 px a tick: 18 ticks of travel plus 30 px");
-  assert.equal(M(28), 156, "at 7 px a tick");
-  assert.ok(M(28) > M(12), "the faster the world, the wider the room");
-  let pairs = 0, nuts = 0;
-  for (let seed = 1; seed <= 5; seed++) {
+  assert.equal(M(16), 102, "at 4 px a tick: 18 ticks of travel plus 30 px");
+  assert.equal(M(32), 174, "at 8 px a tick");
+  let pairs = 0, low = 0, high = 0;
+  for (let seed = 1; seed <= 8; seed++) {
     const r = runBot(game("run"), seed, 3000);
     assert.equal(r.state.done, false, `seed ${seed} went the distance`);
-    for (let i = 1; i < r.spawned.length; i++) {
-      const now = r.spawned[i];
-      assert.equal(typeof now.gap, "number", `seed ${seed}: a spawn after the first`);
-      assert.ok(now.gap >= M(now.speedQ), `seed ${seed}: gap ${now.gap} at speed ${now.speedQ / 4} px`);
-      assert.ok(now.gap <= M(now.speedQ) + 70, `seed ${seed}: gap ${now.gap} inside the rule`);
-      pairs++;
-    }
-    for (const sp of r.spawned) if (sp.nut != null) {
-      const up = Play.RUN.FLOOR - (sp.nut + 10);
-      assert.ok(up >= 30 && up <= 38, `a nut floats ${up} px above the floor`);
-      nuts++;
+    for (const sp of r.spawned) {
+      if (sp.gap != null) {
+        assert.ok(sp.gap >= M(sp.speedQ) - 8, `seed ${seed}: gap ${sp.gap} at speed ${sp.speedQ / 4} px`);
+        assert.ok(sp.gap <= M(sp.speedQ) + 72, `seed ${seed}: gap ${sp.gap} inside the rule`);
+        pairs++;
+      }
+      if (sp.tick < Play.RUN.LEVEL_TICKS) assert.ok(!sp.kinds.includes("plane"), "no plane in the first ten seconds");
+      if (sp.tick < 2 * Play.RUN.LEVEL_TICKS) assert.ok(!(sp.kinds.length === 2), "no plane over a thing before 20 s");
+      for (const n of sp.nuts) {
+        if (n.kind === "plane") { assert.equal(n.up, Play.RUN.NUT_LOW, "a nut under a plane sits low"); low++; }
+        else { assert.equal(n.kind, "none"); assert.equal(n.up, Play.RUN.NUT_HIGH, "a nut alone sits high"); high++; }
+      }
     }
   }
-  assert.ok(pairs >= 40, `enough spawns to judge: ${pairs}`);
-  assert.ok(nuts > 0, "and some of them carry a nut");
+  assert.ok(pairs >= 100, `enough spawns to judge: ${pairs}`);
+  assert.ok(low > 0 && high > 0, `nuts both low (${low}) and high (${high})`);
+});
+
+test("run: a plane - standing and a quick hop (A up to 3 ticks) pass under it, a longer jump flies into it", () => {
+  const g = game("run");
+  const tryHold = (n) => {
+    const s = g.init(3);
+    s.tick = 900;
+    s.obs = [{ x: 60, y: Play.RUN.FLOOR - Play.RUN.PLANE_UP - 10, w: 20, h: 10, kind: "plane", nut: null }];
+    for (let t = 0; t < 40 && !s.dying; t++) {
+      g.step(s, { left: false, right: false, a: t < n, press: { left: false, right: false, a: t === 0 && n > 0 } }, 50);
+      s.obs[0].x = 18;                                  /* keep the plane right over the pet for the whole jump */
+    }
+    return s.dying > 0;
+  };
+  assert.equal(tryHold(0), false, "standing passes under");
+  for (const n of [1, 2, 3]) assert.equal(tryHold(n), false, `A for ${n} ticks stays under`);
+  for (const n of [4, 6, 20]) assert.equal(tryHold(n), true, `A for ${n} ticks flies into it`);
+});
+
+test("run: jumping at everything is not enough - a full-jump-at-anything bot falls to a plane, the careful one runs on", () => {
+  const g = game("run");
+  const ends = [];
+  for (let seed = 1; seed <= 50; seed++) {
+    const r = runBot(g, seed, 3000, "naive");
+    ends.push(r.state.done ? r.state.tick : 3000);
+  }
+  ends.sort((a, b) => a - b);
+  assert.ok(ends[49] < 1500, `the naive bot never lasts: longest ${ends[49]} ticks`);
+  assert.ok(ends[25] < 800, `median ${ends[25]} ticks`);
 });
 
 test("run: the feet-aligned draw stands the pet on FLOOR-1 in both walk frames, and lifts it in the air", () => {
@@ -341,14 +379,15 @@ test("run: the feet-aligned draw stands the pet on FLOOR-1 in both walk frames, 
   }
 });
 
-test("run: a nut floating over the lane gives five points and disappears", () => {
+test("run: a nut floating over the lane gives ten points and disappears", () => {
   const g = game("run"), s = g.init(9);
-  s.obs = [{ x: 90, y: 88, w: 14, h: 12, k: 0, nut: { x: 28, y: 70 } }];
+  s.obs = [{ x: 90, y: 88, w: 14, h: 12, k: 0, kind: "ground", nut: { x: 28, y: 70 } }];
   const before = s.score;
   g.step(s, { left: false, right: false, a: true, press: { left: false, right: false, a: true } }, 50);
   assert.ok(s.events.includes("jump"));
   assert.ok(s.events.includes("nut"), "the jump took the nut");
-  assert.equal(s.score, before + 5, "a nut is five points on top of the distance");
+  assert.equal(s.score, before + Play.RUN.NUT_PTS, "a nut is ten points on top of the distance");
+  assert.equal(Play.RUN.NUT_PTS, 10);
   assert.equal(s.obs[0].nut, null, "and it is gone");
 });
 
