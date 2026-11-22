@@ -1651,7 +1651,7 @@ function gameSounds(events){
     if(e==="nut") beep("coin");
     else if(e==="jump" || e==="flap") beep("tap");
     else if(e==="fly" || e==="swim" || e==="lightson") beep("ok");
-    else if(e==="dark" || e==="count") beep("tick");
+    else if(e==="dark") beep("tick");
     /* a stage's one-line hint, so a player who still thinks A jumps learns the new rule before it matters */
     if(e==="intro_fly" || e==="intro_swim" || e==="dark" || e==="back"){
       var key={intro_fly:"pet.run.fly", intro_swim:"pet.run.swim", dark:"pet.run.dark", back:"pet.run.back"}[e];
