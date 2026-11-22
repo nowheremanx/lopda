@@ -1856,16 +1856,14 @@ EXIF，相册就能把照片放到地图上。
   流式读法、等待提示、一分钟没信号就断，都照旧，只多认一个思考字段名 `reasoning_content`。
 - **线路**：每条线路一把 key，能开能关（关掉不删 key），第一条自动成为默认；默认被关掉或删掉时换成剩下开着的第一条，不问。
   名字自动起（服务商名，同一家第二把叫「DeepSeek 2」，加的时候定下，不能改名）。只有一条开着的线路时，「默认线路 / 谁用哪条」整块不显示。
-  「谁用哪条」四处：脚本、四轨机、读谱、宠物；读谱只能选能看图的线路，DeepSeek 灰掉。读谱走 OpenRouter 时仍用第 56 节的读谱模型列表，
+  「谁用哪条」四处：脚本、四轨机、读谱、宠物；读谱只能选能看图的线路，看不了图的灰掉（设计时 DeepSeek 不能看图；2026-11-21 官网写 deepseek-flash 已能看图，所以现在五家都能读谱，这条规则留给以后看不了图的服务商）。读谱走 OpenRouter 时仍用第 56 节的读谱模型列表，
   走别家时用那家的看图模型；只发文字不带照片的读谱走四轨机那条线路。添加线路时按「保存」自动试一下，试不通也存下，状态行写原因。
   删除线路要按两次。四轨机的状态行写「AI：DeepSeek」这样的线路名，出错的话前面带线路名和那家的充值网站。
-- **默认模型**（2026-11-21 对着各家文档挑的，代码里标了 `TODO(owner): confirm`）：DeepSeek `deepseek-flash`；Kimi `kimi-k3.1-pro`
-  （看图同一个；K3 系列总在思考）；千问 `qwen3.7-plus`（看图同一个）；硅基流动 `deepseek-ai/DeepSeek-V4-Flash`，看图
-  `moonshotai/Kimi-K2.7-Code`（取自文档示例，模型列表要登录才看得到）。余额不足：DeepSeek 是 402，Kimi 是 429 加
+- **默认模型**（2026-11-21 在各家官网核对过价格和能力）：DeepSeek `deepseek-flash`（即 V4.1-Flash，能看图，¥2 / ¥8 每百万 token，空闲时段半价）；
+  Kimi `kimi-k3.1-pro`（比 kimi-k3 便宜，原生看图，K3 系列总在思考）；千问 `qwen3.7-plus`（官方的均衡款，能看图）；硅基流动
+  `deepseek-ai/DeepSeek-V4-Flash`，看图用视觉文档里的 `Pro/moonshotai/Kimi-K2.6`。余额不足：DeepSeek 是 402，Kimi 是 429 加
   `exceeded_current_quota_error`，千问是 403/429 加 `Arrearage`，都算「额度用完」；硅基流动文档没写，认不出的仍是「被拒绝」。
-- **数据**：同一个文档 `data/users/local/ai` 升到 v:2 {next, lines, def, use}，线路 id 是 `l` 加递增数字，删了不复用。
-  纯函数在 `runtime/ailines.js`（`tests/ailines.test.mjs`）。v:1 有 key 的变成 OpenRouter 线路 `l1`（默认），`scoreModel` 变成 `use.score`；
-  只有 `scoreModel` 的不建线路，先记着。不认识的服务商的线路照样留着，只是用不了。
+  千问文档的新地址带工作空间编号，用户填不了（第 34 节：不填地址），所以用仍然可用的共享地址 `dashscope.aliyuncs.com`。
 - **读到才写**：文档读失败时什么都不写（显示「读不出」，打开 AI 页时再读一次），否则加一条线路就会把别的线路盖掉；
   v 大于 2（新版 Lo-PDA 存的）的不读也不写。恢复备份时重新读一次本机的文档，原样写回，不经过解析：哪怕之前读失败、或者是新版存的，key 也不会丢；
   这次读不出来就不恢复。

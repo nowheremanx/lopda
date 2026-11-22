@@ -21,21 +21,22 @@ var PROVIDERS=[
   /* https://openrouter.ai/docs */
   {id:"openrouter", name:{zh:"OpenRouter", en:"OpenRouter"}, url:URL_CHAT, model:MODEL, vision:true,
     visionModel:"", site:"openrouter.ai", keyHint:"sk-or-"},
-  /* https://api-docs.deepseek.com/ */
+  /* https://api-docs.deepseek.com/zh-cn/quick_start/pricing (2026-11-21: deepseek-flash is DeepSeek-V4.1-Flash and reads images) */
   {id:"deepseek", name:{zh:"DeepSeek", en:"DeepSeek"}, url:"https://api.deepseek.com/chat/completions",
-    model:"deepseek-flash", vision:false, visionModel:"", site:"platform.deepseek.com", keyHint:"sk-"},
+    model:"deepseek-flash", vision:true, visionModel:"deepseek-flash", site:"platform.deepseek.com", keyHint:"sk-"},
   /* https://platform.kimi.com/docs/api/chat */
-  // TODO(owner): confirm the kimi model (chosen flagship, cost unknown)
+  /* kimi-k3.1-pro: cheaper than kimi-k3 and sees natively (https://platform.kimi.com/docs/pricing/chat, 2026-11-21) */
   {id:"kimi", name:{zh:"Kimi", en:"Kimi"}, url:"https://api.moonshot.cn/v1/chat/completions",
     model:"kimi-k3.1-pro", vision:true, visionModel:"kimi-k3.1-pro", site:"platform.kimi.com", keyHint:"sk-"},
   /* https://help.aliyun.com/zh/model-studio/compatibility-of-openai-with-dashscope */
-  // TODO(owner): confirm the qwen model choice
+  /* qwen3.7-plus: Bailian's balanced model, sees, streams reasoning_content (its model page, 2026-11-21). The docs' newer
+     host carries a workspace id; this older shared host still answers. */
   {id:"qwen", name:{zh:"通义千问", en:"Qwen"}, url:"https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
     model:"qwen3.7-plus", vision:true, visionModel:"qwen3.7-plus", site:"bailian.console.aliyun.com", keyHint:"sk-"},
   /* https://docs.siliconflow.cn/cn/api-reference/chat-completions/chat-completions */
-  // TODO(owner): confirm the siliconflow visionModel (taken from a docs example; the model list needs login)
+  /* vision model from https://docs.siliconflow.cn/cn/userguide/capabilities/vision (2026-11-21) */
   {id:"siliconflow", name:{zh:"硅基流动", en:"SiliconFlow"}, url:"https://api.siliconflow.cn/v1/chat/completions",
-    model:"deepseek-ai/DeepSeek-V4-Flash", vision:true, visionModel:"moonshotai/Kimi-K2.7-Code",
+    model:"deepseek-ai/DeepSeek-V4-Flash", vision:true, visionModel:"Pro/moonshotai/Kimi-K2.6",
     site:"cloud.siliconflow.cn", keyHint:"sk-"}
 ];
 
