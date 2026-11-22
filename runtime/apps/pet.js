@@ -229,7 +229,7 @@ function normalize(save){
   /* best scores are optional (an older save has none); a junk number is no record, never a broken round */
   if(save.best!==undefined){
     if(!save.best || typeof save.best!=="object" || Array.isArray(save.best)) delete save.best;
-    else ["catch","bounce","climb"].forEach(function(id){
+    else ["catch","run","climb","bounce"].forEach(function(id){
       var n=save.best[id];
       if(n===undefined) return;
       save.best[id]=(typeof n==="number" && isFinite(n) && n>=0) ? Math.floor(n) : 0;
@@ -1619,19 +1619,15 @@ function gameTick(){
     stopGameTimer();
     if(!P.game.applied){ P.game.applied=true; applyGameJoy(st); }
     renderKeys();
-  } else {
-    /* the only label that changes during play: 发球 until the ball is in the air */
-    var lab=(P.game.id==="bounce" && !st.ball) ? "serve" : "";
-    if(lab!==P.gameLabel){ P.gameLabel=lab; renderKeys(); }
   }
   render();
 }
 /* the packs name moments, the program names the short original sounds from the four-tone chip */
 function gameSounds(events){
   (events||[]).forEach(function(e){
-    if(e==="catch" || e==="serve") beep("coin");
-    else if(e==="return" || e==="bat") beep("hit");
-    else if(e==="petmiss") beep("miss");
+    if(e==="catch" || e==="nut") beep("coin");
+    else if(e==="jump") beep("tap");
+    else if(e==="hit") beep("miss");
     else if(e==="land") beep("tick");
   });
 }
@@ -1645,7 +1641,7 @@ function applyGameJoy(st){
   var id=st.id || (P.game && P.game.id);
   var score=Math.max(0,Math.floor(+st.score||0));
   if(id && score>bestScore(id)){
-    if(!P.save.best || typeof P.save.best!=="object" || Array.isArray(P.save.best)) P.save.best={catch:0,bounce:0,climb:0};
+    if(!P.save.best || typeof P.save.best!=="object" || Array.isArray(P.save.best)) P.save.best={catch:0,run:0,climb:0};
     P.save.best[id]=score;
     if(P.game && P.game.id===id) P.game.newBest=true;
   }
@@ -1832,7 +1828,6 @@ function pressA(){
     if(gameDone()){ exitGame(); return; }              /* any key returns to the room, never a new round */
     if(!P.game.started){ startRound(); return; }
     P.gamePress.a=true;
-    if(P.game.id==="bounce") beep("tick");
     return;
   }
   if(P.sub==="menu"){ chooseMenuItem(P.menuSel); return; }
@@ -2613,8 +2608,7 @@ function aKeyLabel(){
   if(P.sub==="game"){
     if(gameDone()) return "pet.game.room";
     if(P.game && !P.game.started) return "pet.sk.start";
-    var st=gameState();
-    return P.game && P.game.id==="bounce" && st && !st.ball ? "pet.game.serve" : "";
+    return P.game && P.game.id==="run" ? "pet.game.jump" : "";
   }
   if(P.sub==="menu") return "pet.sk.open";
   if(P.sub==="look") return "pet.sk.hold";

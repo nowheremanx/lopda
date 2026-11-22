@@ -5348,7 +5348,7 @@ test("pet: games - the play list opens each pack, the canvas moves at 20 fps, B 
   await key("a");
   await p.waitForSelector("#pet-panel:not([hidden])");
   const items = await p.$$eval("#pet-panel .pet-menu", (l) => l.map((x) => x.innerText.trim()));
-  assert.deepEqual(items, ["接东西", "弹球", "往上跳"]);
+  assert.deepEqual(items, ["接东西", "快跑", "往上跳"]);
   assert.equal(await p.locator("#pet-keys .sk-a span").innerText(), "开始");
 
   /* catch: its start card, then the 20 fps loop runs while visible, stops while hidden and resumes; the pet's x follows the keys */
@@ -5407,23 +5407,32 @@ test("pet: games - the play list opens each pack, the canvas moves at 20 fps, B 
   await p.waitForTimeout(300);
   assert.equal(await steps(), 0, "B stopped the 20 fps loop");
 
-  /* bounce: the start card goes on the first key, A serves, the ball moves, B leaves */
+  /* run: pick the second pack, the start card names it, A starts, A jumps, the room scrolls, B leaves */
   await key("a");
   await p.waitForSelector("#pet-panel:not([hidden])");
   await p.keyboard.press("ArrowDown");
   await p.waitForTimeout(80);
   await key("a");
   await p.waitForSelector("#pet-panel:not([hidden])");
-  assert.match(await p.locator("#pet-panel").innerText(), /弹球/);
+  assert.match(await p.locator("#pet-panel").innerText(), /快跑/);
+  assert.match(await p.locator("#pet-panel").innerText(), /按久跳得高/, "and gives one line of how to play");
+  assert.equal(await p.locator("#pet-keys .sk-a span").innerText(), "开始");
   await key("a");                                          /* start */
   await p.waitForTimeout(200);
-  const b0 = await sig();
-  await key("a");                                          /* serve */
-  await p.keyboard.down("ArrowLeft");
-  await p.waitForTimeout(600);
-  await p.keyboard.up("ArrowLeft");
-  assert.notEqual(await sig(), b0, "bounce moves");
-  await assertFourTones("bounce");
+  assert.equal(await p.evaluate(() => LOPDA_DEBUG.pet.gameState().id), "run", "the runner is the round");
+  assert.equal(await p.locator("#pet-keys .sk-a span").innerText(), "跳", "A jumps while running");
+  const r0 = await sig();
+  await p.keyboard.down("x");                              /* A held: a full jump */
+  await p.waitForTimeout(150);
+  await p.keyboard.up("x");
+  const rh = await p.evaluate(() => window.__gameState && window.__gameState.h);
+  assert.ok(rh > 0, `A lifted the pet off the floor: h ${rh}`);
+  await p.waitForTimeout(400);
+  const rx = await p.evaluate(() => window.__gameState && window.__gameState.dist);
+  assert.ok(rx > 0, `the room scrolls: dist ${rx}`);
+  assert.notEqual(await sig(), r0, "run moves");
+  await assertFourTones("run");
+  assert.equal(await p.locator("#pet-keys .sk-b span").innerText(), "退出");
   await key("b");
 
   /* climb: the pet jumps, the camera scrolls, steering moves it, B leaves */

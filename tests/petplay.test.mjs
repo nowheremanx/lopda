@@ -37,11 +37,11 @@ function drawTones(g, state) {
   return buf;
 }
 
-test("three play packs, all front view for now; the side poses are ready for later", () => {
-  assert.deepEqual(Array.from(Play.GAMES, (g) => g.id), ["catch", "bounce", "climb"]);
-  assert.deepEqual(Array.from(Play.GAMES, (g) => g.labelKey), ["pet.game.catch", "pet.game.bounce", "pet.game.climb"]);
+test("three play packs: catch and climb in front view, the runner from the side", () => {
+  assert.deepEqual(Array.from(Play.GAMES, (g) => g.id), ["catch", "run", "climb"]);
+  assert.deepEqual(Array.from(Play.GAMES, (g) => g.labelKey), ["pet.game.catch", "pet.game.run", "pet.game.climb"]);
+  assert.deepEqual(Array.from(Play.GAMES, (g) => g.view), ["front", "side", "front"]);
   for (const g of Play.GAMES) {
-    assert.equal(g.view, "front", "no side game ships yet");
     assert.equal(typeof g.init, "function");
     assert.equal(typeof g.step, "function");
     assert.equal(typeof g.draw, "function");
@@ -63,12 +63,17 @@ test("each pack is deterministic for a seed and an input script", () => {
   assert.notDeepEqual(JSON.parse(JSON.stringify(c)), JSON.parse(JSON.stringify(d)));
 });
 
-test("a round always ends: at most 600 ticks for catch, 900 for bounce; climb only on a fall", () => {
-  for (const g of [game("catch"), game("bounce")]) {
-    const r = drive(g, 7, 5000);
-    assert.equal(r.state.done, true, `${g.id} ended`);
-    assert.ok(r.steps < 5000, `${g.id} did not loop forever`);
-    assert.ok(r.state.tick <= (g.id === "catch" ? 600 : 900), `${g.id} is capped in time: ${r.state.tick}`);
+test("a round always ends: at most 600 ticks for catch, and a run with no input hits the first thing within 400", () => {
+  const catchRound = drive(game("catch"), 7, 5000);
+  assert.equal(catchRound.state.done, true, "catch ended");
+  assert.ok(catchRound.steps < 5000, "catch did not loop forever");
+  assert.ok(catchRound.state.tick <= 600, `catch is capped in time: ${catchRound.state.tick}`);
+  /* a run has no clock: it ends on the first hit, and the first obstacle arrives inside three seconds */
+  for (const seed of [1, 7, 99]) {
+    const r = drive(game("run"), seed, 5000);
+    assert.equal(r.state.done, true, `run ${seed} ended`);
+    assert.ok(r.state.tick <= 400, `run ${seed} ended on a hit, not a clock: ${r.state.tick}`);
+    assert.ok(r.state.events.includes("end"));
   }
   /* climb has no clock: a pet that never falls keeps the round going past the old 45 s cap */
   const climb = game("climb"), s = climb.init(7);
@@ -135,12 +140,12 @@ test("draw: a thin ink frame, the score in petart's pixel digits, and each game'
   assert.equal(onFloor[(H - 4) * W + 10], 2, "and a floor band");
   assert.equal(onFloor[20 * W + 20], 2, "with background dots");
 
-  /* bounce: the dashed centre line and the two side walls */
-  const bounceGame = game("bounce"), bounceState = bounceGame.init(4);
-  const court = drawTones(bounceGame, bounceState);
-  assert.equal(court[10 * W + Math.floor(W / 2)], 2, "the centre line is dashed");
-  assert.equal(court[20 * W + 5], 2, "the left wall");
-  assert.equal(court[20 * W + W - 6], 2, "the right wall");
+  /* run: an ink floor line over a mid band that scrolls */
+  const runGame = game("run"), runState = runGame.init(4);
+  const lane = drawTones(runGame, runState);
+  assert.equal(lane[Play.RUN.FLOOR * W + 10], 0, "run has an ink floor line");
+  assert.equal(lane[(Play.RUN.FLOOR + 1) * W + 10], 2, "and a mid band under it");
+  assert.equal(lane[18 * W + 20], 2, "and a window frame on the wall behind");
 
   /* climb: the faint wall pattern scrolls with the camera and nothing else changes */
   const climbGame = game("climb"), climbState = climbGame.init(4);
@@ -174,59 +179,223 @@ test("catch: standing under a falling thing catches it", () => {
   assert.equal(s.done, false);
 });
 
-test("bounce: a paddle under the ball returns it up, and the pet does not hop or react", () => {
-  const g = game("bounce"), s = g.init(5);
-  s.ball = { x: s.paddleX + 12, y: s.paddleY - 8, vx: 0, vy: 2 };
-  g.step(s, inputAt(0), 50);
-  assert.equal(s.score, 1, "your return scored");
-  assert.equal(s.ball.vy, -2, "the ball is going back up");
-  assert.ok(s.events.includes("return"));
-  assert.equal(s.done, false);
-  assert.equal(s.hop, 0, "the pet does not hop when your paddle returns the ball");
-  assert.equal(s.petY, s.petBaseY, "the pet stays on its base row");
-  assert.equal(s.react, null, "no pose: the ball did not touch the pet");
-});
-
-test("bounce: the pet at the top bats the ball back down with a short hop; no walk bob while sliding", () => {
-  const g = game("bounce"), s = g.init(7), base = s.petBaseY, W = Play.W;
-  /* the pet slides under the ball, on its base row, with no walk bob */
-  const ys = [];
-  for (let i = 0; i < 80 && !s.done; i++) {
-    if (s.ball && s.ball.vy > 0) s.paddleX = Math.max(2, Math.min(W - 4 - s.paddleW, s.ball.x - 15));
-    if (s.ball && s.ball.vy < 0) s.ball.y = Math.min(s.ball.y, s.petY + 60);
-    g.step(s, { left: false, right: false, a: false, press: { left: false, right: false, a: false } }, 50);
-    if (!s.hop) assert.equal(s.petY, base, "the pet is on its base row outside its own hop");
-    ys.push(s.petY);
+/* The runner's bot: press A when the next thing is inside four ticks of travel plus 10 px of the pet's front,
+   and hold it until landing (a released A cuts the rise to a short hop). Four ticks is a late, safe press; the
+   two-tick-longer figure lands the pet on the tail of a wide slipper at the slowest speed. */
+const RUN_FRONT = 39;                                  /* PET_X + 23 */
+function runAim(speedPx) { return speedPx * 4 + 10; }
+function runBot(g, seed, ticks) {
+  const s = g.init(seed), spawned = [], seen = new Set();
+  let hold = false;
+  for (let i = 0; i < ticks && !s.done; i++) {
+    let next = null;
+    for (const o of s.obs) if (o.x + o.w > 24 && (!next || o.x < next.x)) next = o;
+    let pressA = false;
+    if (s.onGround) {
+      hold = false;
+      if (next && next.x - RUN_FRONT <= runAim(s.speedQ / 4)) { pressA = true; hold = true; }
+    }
+    g.step(s, { left: false, right: false, a: hold, press: { left: false, right: false, a: pressA } }, 50);
+    /* the gap as it was made: the obstacle before it has moved on by the time the round ends */
+    for (let j = 0; j < s.obs.length; j++) {
+      const o = s.obs[j];
+      if (seen.has(o)) continue;
+      seen.add(o);
+      const prev = j > 0 ? s.obs[j - 1] : null;
+      spawned.push({ gap: prev ? o.x - (prev.x + prev.w) : null, speedQ: s.speedQ,
+        nut: o.nut ? o.nut.y : null });
+    }
   }
-  assert.ok(ys.includes(base));
-  assert.ok(ys.filter((y) => y === base).length > ys.length / 2, "the resting row is the normal one");
-  /* a ball that reaches the pet is batted back down: a hop, the jump pose, and no point for you */
-  const t = game("bounce"), b = t.init(8);
-  b.ball = { x: b.petX + 12, y: b.petY + 31, vx: 0, vy: -2, decided: true, miss: false };
-  t.step(b, { left: false, right: false, a: false, press: {} }, 50);
-  assert.ok(b.events.includes("bat"), "the pet's bat is its own moment");
-  assert.equal(b.ball.vy, 2, "the ball goes back down");
-  assert.equal(b.score, 0, "the pet's own return is not your point");
-  assert.ok(b.hop > 0, "a short hop");
-  assert.equal(b.react, "jump", "the push pose");
-  t.step(b, { left: false, right: false, a: false, press: {} }, 50);
-  assert.equal(b.petY, b.petBaseY - 2, "the hop lifts it a little");
-  for (let i = 0; i < 6; i++) t.step(b, { left: false, right: false, a: false, press: {} }, 50);
-  assert.equal(b.petY, b.petBaseY, "and it comes back down to the base row");
+  return { state: s, spawned };
+}
+function inkBottom(grid) {
+  let bottom = -1;
+  for (let r = 0; r < grid.length; r++) if (/[kdmp]/.test(String(grid[r]))) bottom = r;
+  return bottom;
+}
+/* the pixels a grid puts on the buffer at PET_X, y: the draw's own blit, written by hand for the comparison */
+function spriteAt(grid, x0, y0) {
+  const out = [];
+  for (let r = 0; r < grid.length; r++) {
+    const line = String(grid[r]);
+    for (let c = 0; c < line.length; c++) {
+      const t = { k: 0, d: 1, m: 2, p: 3 }[line.charAt(c)];
+      if (t !== undefined) out.push([x0 + c, y0 + r, t]);
+    }
+  }
+  return out;
+}
+
+test("run: the speed ramps from 16 to 32 by 100-tick steps", () => {
+  const g = game("run"), s = g.init(3);
+  const inp = { left: false, right: false, a: false, press: {} };
+  const seen = [];
+  for (let i = 0; i < 1700; i++) {
+    g.step(s, inp, 50);
+    seen.push(s.speedQ);
+    s.obs.length = 0;                  /* this test is about the clock, not the things in the way */
+  }
+  assert.equal(Play.RUN.SPEED_START, 16);
+  assert.equal(Play.RUN.SPEED_MAX, 32);
+  assert.equal(Play.RUN.JUMP_VY, -9);
+  assert.equal(Play.RUN.FLOOR, 100);
+  assert.equal(Play.RUN.PET_X, 16);
+  assert.equal(seen[0], 16, "tick 1: 4 px a tick");
+  assert.equal(seen[98], 16, "still 16 up to tick 99");
+  assert.equal(seen[99], 17, "17 from tick 100");
+  assert.equal(seen[199], 18, "one more every 100 ticks");
+  assert.equal(seen[1599], 32, "32 from tick 1600");
+  assert.equal(seen[1699], 32, "and no faster");
+  for (let i = 1; i < seen.length; i++) assert.ok(seen[i] >= seen[i - 1], `never slower at tick ${i + 1}`);
 });
 
-test("bounce: a seeded whiff grows with the rally, scores for you and never counts as your miss", () => {
-  const g = game("bounce"), s = g.init(10);
-  s.ball = { x: s.petX + 12, y: s.petY + 31, vx: 0, vy: -2, decided: true, miss: true };
-  for (let i = 0; i < 40 && s.petMisses === 0; i++) g.step(s, { left: false, right: false, a: false, press: {} }, 50);
-  assert.equal(s.petMisses, 1, "the pet whiffed");
-  assert.equal(s.score, 1, "the whiff scores for you");
-  assert.equal(s.misses, 0, "it is not one of your three misses");
-  assert.ok(s.tick < 900, "the round goes on");
-  const c = Play.BOUNCE.missChance;
-  assert.ok(c(0) >= 0.02 && c(0) <= 0.05, "rare at the start: " + c(0));
-  assert.ok(c(10) > c(0), "more likely as the rally grows");
-  assert.ok(c(100) <= Play.BOUNCE.MISS_MAX, "and capped");
+test("run: a held jump rises 45 px, a tap cuts it short, and a press three ticks early jumps on landing", () => {
+  const g = game("run"), held = { left: false, right: false, a: true, press: {} };
+  const first = { left: false, right: false, a: true, press: { left: false, right: false, a: true } };
+  const s = g.init(4);
+  s.obs = [];
+  let peak = 0, air = 0;
+  g.step(s, first, 50);
+  assert.ok(s.events.includes("jump"), "the press takes off");
+  assert.equal(s.onGround, false);
+  while (!s.onGround && air < 60) { g.step(s, held, 50); air++; peak = Math.max(peak, s.h); }
+  assert.equal(peak, 45, "a held jump peaks at 45 px");
+  assert.ok(air >= 16 && air <= 20, `and stays up about 18 ticks: ${air}`);
+  /* a tap: the rise is cut at vy -3, so the pet only hops */
+  const t = g.init(4);
+  t.obs = [];
+  g.step(t, first, 50);
+  let tapPeak = 0;
+  for (let i = 0; i < 40 && !t.onGround; i++) { g.step(t, { left: false, right: false, a: false, press: {} }, 50); tapPeak = Math.max(tapPeak, t.h); }
+  assert.ok(tapPeak > 15 && tapPeak < 30, `a tap is a short hop: ${tapPeak}`);
+  /* three ticks before the floor: the press is remembered and the pet leaves the floor again on landing */
+  const b = g.init(4);
+  b.obs = [];
+  g.step(b, first, 50);
+  while (!(b.vy > 0 && b.h <= 30) && b.tick < 40) g.step(b, held, 50);
+  assert.ok(b.h > 0 && b.vy > 0, "falling, three ticks above the floor");
+  g.step(b, first, 50);                                  /* the press, three ticks out */
+  assert.equal(b.events.includes("jump"), false, "a press in the air does not jump");
+  for (let i = 0; i < 2; i++) g.step(b, held, 50);
+  assert.equal(b.onGround, false, "still off the floor");
+  g.step(b, held, 50);                                   /* the landing tick */
+  assert.ok(b.events.includes("jump"), "the buffered press takes off on the landing tick");
+  assert.equal(b.onGround, false);
+  assert.equal(b.vy, Play.RUN.JUMP_VY);
+  /* but not from four ticks out: the buffer is three ticks, not more */
+  const c = g.init(4);
+  c.obs = [];
+  g.step(c, first, 50);
+  while (!(c.vy > 0 && c.h <= 35) && c.tick < 40) g.step(c, held, 50);
+  g.step(c, first, 50);
+  for (let i = 0; i < 4 && !c.onGround; i++) { c.events = []; g.step(c, held, 50); }
+  assert.equal(c.onGround, true, "a press four ticks out is not held over the landing");
+});
+
+test("run: a bot that presses A in time survives 3000 ticks on 50 seeds", () => {
+  const g = game("run");
+  let survived = 0;
+  const scores = [];
+  for (let seed = 1; seed <= 50; seed++) {
+    const r = runBot(g, seed, 3000);
+    if (!r.state.done) survived++;
+    scores.push(r.state.score);
+  }
+  scores.sort((a, b) => a - b);
+  assert.equal(survived, 50, `the game is fair: the bot survived ${survived}/50 seeds`);
+  assert.ok(scores[0] > 100, `a 3000-tick run scores: lowest ${scores[0]}`);
+});
+
+test("run: obstacles keep a landing gap, never below minGap(speed), and carry nuts 30-38 px up", () => {
+  const M = Play.RUN.minGap;
+  assert.equal(M(12), 84, "at 3 px a tick: 18 ticks of travel plus 30 px");
+  assert.equal(M(28), 156, "at 7 px a tick");
+  assert.ok(M(28) > M(12), "the faster the world, the wider the room");
+  let pairs = 0, nuts = 0;
+  for (let seed = 1; seed <= 5; seed++) {
+    const r = runBot(game("run"), seed, 3000);
+    assert.equal(r.state.done, false, `seed ${seed} went the distance`);
+    for (let i = 1; i < r.spawned.length; i++) {
+      const now = r.spawned[i];
+      assert.equal(typeof now.gap, "number", `seed ${seed}: a spawn after the first`);
+      assert.ok(now.gap >= M(now.speedQ), `seed ${seed}: gap ${now.gap} at speed ${now.speedQ / 4} px`);
+      assert.ok(now.gap <= M(now.speedQ) + 70, `seed ${seed}: gap ${now.gap} inside the rule`);
+      pairs++;
+    }
+    for (const sp of r.spawned) if (sp.nut != null) {
+      const up = Play.RUN.FLOOR - (sp.nut + 10);
+      assert.ok(up >= 30 && up <= 38, `a nut floats ${up} px above the floor`);
+      nuts++;
+    }
+  }
+  assert.ok(pairs >= 40, `enough spawns to judge: ${pairs}`);
+  assert.ok(nuts > 0, "and some of them carry a nut");
+});
+
+test("run: the feet-aligned draw stands the pet on FLOOR-1 in both walk frames, and lifts it in the air", () => {
+  const g = game("run");
+  for (const [tick, face] of [[0, "walk1"], [3, "walk2"]]) {
+    const s = g.init(2);
+    s.obs = [];
+    s.tick = tick;
+    const buf = drawTones(g, s);
+    let bottom = -1;
+    for (let y = 3; y < Play.RUN.FLOOR; y++) for (let x = Play.RUN.PET_X; x < Play.RUN.PET_X + 32; x++) {
+      if (buf[y * W + x] === 0) bottom = y;
+    }
+    assert.equal(bottom, 99, `${face} sits on the floor row, not bobbing`);
+    const grid = poseFor("side", face);
+    for (const [x, y, t] of spriteAt(grid, Play.RUN.PET_X, Play.RUN.FLOOR - 1 - inkBottom(grid))) {
+      assert.equal(buf[y * W + x], t, `${face} pixel ${x},${y}`);
+    }
+  }
+  /* in the air the walk1 offset is the base, plus the jump height: no bob, one clean lift */
+  const air = g.init(2);
+  air.obs = [];
+  air.onGround = false; air.vy = -4; air.h = 20;
+  const lifted = drawTones(g, air);
+  const jBase = Play.RUN.FLOOR - 1 - inkBottom(poseFor("side", "walk1"));
+  for (const [x, y, t] of spriteAt(poseFor("side", "jump"), Play.RUN.PET_X, jBase - 20)) {
+    assert.equal(lifted[y * W + x], t, `jump pixel ${x},${y}`);
+  }
+});
+
+test("run: a nut floating over the lane gives five points and disappears", () => {
+  const g = game("run"), s = g.init(9);
+  s.obs = [{ x: 90, y: 88, w: 14, h: 12, k: 0, nut: { x: 28, y: 70 } }];
+  const before = s.score;
+  g.step(s, { left: false, right: false, a: true, press: { left: false, right: false, a: true } }, 50);
+  assert.ok(s.events.includes("jump"));
+  assert.ok(s.events.includes("nut"), "the jump took the nut");
+  assert.equal(s.score, before + 5, "a nut is five points on top of the distance");
+  assert.equal(s.obs[0].nut, null, "and it is gone");
+});
+
+test("run: a hit stops the world, and twelve ticks later the round is over", () => {
+  const g = game("run"), s = g.init(11);
+  const inp = { left: false, right: false, a: false, press: {} };
+  for (let i = 0; i < 400 && !s.dying && !s.done; i++) g.step(s, inp, 50);
+  assert.ok(s.dying > 0, "the first thing in the lane stopped the run");
+  assert.ok(s.events.includes("hit"));
+  assert.equal(s.done, false, "the result waits for the short countdown");
+  const xs = s.obs.map((o) => o.x).join(","), d0 = s.dist, t0 = s.tick, score0 = s.score;
+  const buf = new Uint8Array(W * H);
+  g.draw(s, buf, W, H, PACK, poseFor);
+  const face = poseFor("front", "surprised");
+  for (const [x, y, t] of spriteAt(face, Play.RUN.PET_X, Play.RUN.FLOOR - 1 - inkBottom(face))) {
+    assert.equal(buf[y * W + x], t, `the surprised face pixel ${x},${y}`);
+  }
+  for (let i = 0; i < 11; i++) g.step(s, inp, 50);
+  assert.equal(s.obs.map((o) => o.x).join(","), xs, "the world stopped");
+  assert.equal(s.dist, d0, "and the distance with it");
+  assert.equal(s.score, score0);
+  assert.equal(s.tick, t0 + 11);
+  assert.ok(s.dying > 0, "still counting down");
+  g.step(s, inp, 50);
+  assert.equal(s.dying, 0);
+  assert.equal(s.done, true, "twelve ticks later the round is over");
+  assert.ok(s.events.includes("end"));
+  assert.ok(s.joy >= 1);
 });
 
 test("catch: the pet walks 6 px a tick and things come every 0.7 to 1.0 seconds", () => {
@@ -405,11 +574,9 @@ test("reactions: a small pure table per game names the pose of the moment", () =
   assert.equal(R("catch", "catch", { catches: 5 }), "jump", "every 5th catch is a short cheer");
   assert.equal(R("catch", "miss", { misses: 1 }), "fall");
   assert.equal(R("catch", "miss", { misses: 2 }), "sad");
-  assert.equal(R("bounce", "bat", {}), "jump", "the pet's push is its own moment");
-  assert.equal(R("bounce", "return", { rally: 4 }), null, "your return makes the pet do nothing");
-  assert.equal(R("bounce", "return", { rally: 9 }), null, "and a long rally changes nothing");
-  assert.equal(R("bounce", "petmiss", {}), "surprised", "the pet whiffed: a surprised face");
-  assert.equal(R("bounce", "miss", { misses: 1 }), "surprised", "the ball passed your paddle");
+  assert.equal(R("run", "hit", {}), "surprised", "running into something is the end of a run");
+  assert.equal(R("run", "jump", {}), null, "a jump needs no face");
+  assert.equal(R("run", "nut", {}), null, "and a nut is the play, not a pose");
   assert.equal(R("climb", "record", { height: 30 }), "happy");
   assert.equal(R("climb", "blink", {}), "blink");
   assert.equal(R("climb", "land", {}), null);

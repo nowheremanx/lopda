@@ -15,12 +15,14 @@
  *
  * Games may only ask a species pack for the standard poses (petart.js): front idle / happy / sad / angry / sulk /
  * blink / jump / fall / catch and side walk1 / walk2 / jump / flap1 / flap2. A pack that has the poses can play every
- * game, so a new species needs no game code. No side game ships yet: the side poses are drawn and ready for later.
+ * game, so a new species needs no game code. One side game ships, the runner (run): it uses the side walk, jump and
+ * flap poses, and the front set for its one reaction and its end.
  * A game's reactions are a pure table (reaction(id, event, state)): the tick names a moment, the table names a pose,
  * and the pose lasts a few ticks before the movement pose takes over again.
  *
  * A finished state is {done:true, score, joy}; joy is +1, or +2 at the game's threshold, and never negative.
- * There is no losing state and no losing message: the program shows a result card and any key goes back to the room.
+ * A run that hits something simply ends. There is no losing message: the program shows a result card and any key
+ * goes back to the room.
  */
 (function(){
 "use strict";
@@ -28,7 +30,7 @@
 var W=162, H=120, TICK=50;
 var TONE={k:0,d:1,m:2,p:3};
 /* the score at which a round is worth +2 instead of +1. Low on purpose: play is not a test. */
-var JOY2={catch:6,bounce:6,climb:30};
+var JOY2={catch:6,run:60,climb:30};
 
 function num(v){ var n=+v; return isFinite(n) ? n : 0; }
 function clamp(v,lo,hi){ v=Math.floor(num(v)); return v<lo ? lo : v>hi ? hi : v; }
@@ -115,12 +117,6 @@ function scaleGrid(g,n){
 function poseOf(poseFor,view,name){
   try{ return poseFor(view,name); }catch(e){ return null; }
 }
-function mirrorGrid(grid){
-  if(!grid) return grid;
-  var out=[];
-  for(var r=0;r<grid.length;r++) out.push(String(grid[r]).split("").reverse().join(""));
-  return out;
-}
 function base(id,seed){
   return {id:id, seed:seed>>>0, rn:0, acc:0, tick:0, done:false, score:0, joy:0, events:[],
     react:null, reactUntil:0};
@@ -135,11 +131,9 @@ var REACT={
     if(event==="miss") return state.misses>=2 ? "sad" : "fall";
     return null;
   },
-  bounce:function(event,state){
-    if(event==="bat") return "jump";                  /* the pet pushed the ball down: a short hop pose */
-    if(event==="petmiss") return "surprised";          /* it whiffed: your point */
-    if(event==="miss") return "surprised";             /* the ball passed your paddle */
-    return null;                                       /* your return: the pet does not react */
+  run:function(event,state){
+    if(event==="hit") return "surprised";              /* it ran into something: the only end of a run */
+    return null;                                       /* a jump and a nut are the play, not a face */
   },
   climb:function(event,state){
     if(event==="record") return "happy";
@@ -243,75 +237,104 @@ function catchDraw(s,buf,w,h,pack,poseFor){
   scoreDigits(buf,w,h,s.score);
 }
 
-/* ---------- bounce: the pet at the top is the other player, your paddle is at the bottom ---------- */
-/* It is a fair rally: the pet almost always returns, but a seeded whiff grows with the rally and scores for you.
-   Your paddle never makes the pet hop; only its own bat does. */
-var B_MISS_BASE=0.03, B_MISS_STEP=0.02, B_MISS_MAX=0.24;
-function bounceMissChance(rally){
-  var r=Math.max(0,num(rally));
-  return Math.min(B_MISS_MAX,B_MISS_BASE+r*B_MISS_STEP);
+/* ---------- run: one button, the pet runs right through its own room, hold A to jump higher ----------
+ * The floor is an ink line at row 100 with a mid band under it; the pet is pinned at x=16 and the world scrolls
+ * past it. Speed and distance are in quarter pixels, kept as integers, so every position stays an integer room
+ * pixel on every device. The pet's body box (x+8 .. x+23, 18 px up from the feet) is smaller than the drawn
+ * sprite: a hit has to look like one. A jump rises 45 px (vy -9, +1 a tick) and stays above 19 px for 14 ticks,
+ * so every obstacle (22 px at most) can be cleared by a jump pressed in time; a tap cuts the rise at vy -3. */
+var FLOOR=100, PET_X=16, PET_BODY_L=8, PET_BODY_R=23, PET_BODY_TOP=18;
+var R_SPEED_START=16, R_SPEED_MAX=32, R_JUMP_VY=-9, R_CUT_VY=-3, R_DIE=12;
+var R_STEP_TICKS=100, R_TILE=240;
+/* one seeded gap from a previous obstacle's right edge to the next one's left edge: a jump's 18 ticks of travel,
+   30 px, and up to 70 px of room. runMinGap is the floor of that, and the tests check it. */
+function runMinGap(speedQ){
+  return Math.ceil(18*Math.max(0,num(speedQ))/4)+30;
 }
-function bounceInit(seed){
-  var s=base("bounce",seed);
-  s.petX=64; s.petBaseY=4; s.petY=4;
-  s.paddleX=66; s.paddleY=110; s.paddleW=30;
-  s.ball=null; s.reload=0; s.misses=0; s.petMisses=0; s.rally=0; s.petFace=1; s.hop=0;
+/* the room's own furniture as things in the way: a book, a bowl, a slipper, and after 20 s a stack of two books.
+   Ink outline, dark or mid inside, 2 x 2 blocks like the catch props. */
+var RUN_THINGS=[
+  {grid:["kkkkkkk","kdmmmmk","kdmmmmk","kdmmmmk","kdmmmmk","kkkkkkk"]},       /* a book, 14 x 12 */
+  {grid:["kkkkkkkkk","kdddddddk",".kmmmmmk.","..kkkkk.."]},                   /* a bowl, 18 x 8 */
+  {grid:[".kkkkkkkk.","kmmmmmmmmk","kkkkkkkkkk"]},                            /* a slipper, 20 x 6 */
+  {grid:[".kkkkkk",".kdmmmk",".kdmmmk",".kkkkkk","kkkkkk.","kdmmmk.","kdmmmk.","kdmmmk.","kdmmmk.","kkkkkk."]}
+].map(function(t){
+  var g=scaleGrid(t.grid,2);
+  return {w:String(g[0]).length, h:g.length, grid:g};
+});
+var RUN_NUT=THINGS[1];                                  /* the catch game's nut, 10 x 10 */
+function runSpawn(s,x){
+  var late=s.tick>=400, k=Math.floor(rand(s)*(late?RUN_THINGS.length:RUN_THINGS.length-1));
+  var t=RUN_THINGS[k];
+  var o={x:x,y:FLOOR-t.h,w:t.w,h:t.h,k:k,nut:null};
+  /* about a third of the obstacles carry a nut above them: a reward for jumping, never a reason to */
+  if(rand(s)<0.35){
+    o.nut={x:x+Math.floor(t.w/2)-Math.floor(RUN_NUT.w/2), y:FLOOR-30-Math.floor(rand(s)*9)-RUN_NUT.h};
+  }
+  s.obs.push(o);
+}
+function runInit(seed){
+  var s=base("run",seed);
+  s.speedQ=R_SPEED_START; s.moveQ=0; s.dist=0; s.obs=[]; s.nutScore=0;
+  s.h=0; s.vy=0; s.onGround=true; s.buf=0; s.dying=0;
+  runSpawn(s,W+10);                                     /* something arrives inside the first three seconds */
   return s;
 }
-function bounceHop(s){
-  if(s.hop>0) return;
-  s.hop=4;                                             /* up for two or three ticks, then back down */
-}
-function bounceHopStep(s){
-  if(!s.hop) return;
-  s.hop--;
-  var off=s.hop===3?2:s.hop===2?4:s.hop===1?2:0;
-  s.petY=s.petBaseY-off;
-}
-function bounceLaunch(s){
-  s.ball={x:clamp(s.petX+12,2,W-8), y:s.petY+36, vx:rand(s)<0.5?-2:2, vy:2};
-  s.events.push("serve");
-}
-function bounceTick(s,inp){
-  var dir=(inp.right?1:0)-(inp.left?1:0);
-  bounceHopStep(s);
-  if(dir) s.paddleX=clamp(s.paddleX+dir*6,2,W-4-s.paddleW);   /* 120 px a second */
-  if(s.ball){
-    var target=clamp(s.ball.x-12,4,W-36);
-    if(target>s.petX){ s.petX+=2; s.petDir=1; }
-    else if(target<s.petX){ s.petX-=2; s.petDir=-1; }
+function runTick(s,inp){
+  if(s.dying>0){ s.dying--; if(s.dying<=0) finish(s); return; }
+  s.speedQ=Math.min(R_SPEED_MAX,R_SPEED_START+Math.floor(s.tick/R_STEP_TICKS));
+  s.moveQ+=s.speedQ;
+  var d=Math.floor(s.moveQ/4);
+  s.moveQ-=d*4;
+  s.dist+=d;
+  var i, o;
+  for(i=0;i<s.obs.length;i++){
+    o=s.obs[i];
+    o.x-=d;
+    if(o.nut) o.nut.x-=d;
   }
-  if(!s.ball){
-    if(s.reload>0){
-      s.reload--;
-      if(s.reload===0) bounceLaunch(s);
-    } else if(inp.press && inp.press.a) bounceLaunch(s);
+  var pressed=!!(inp.press && inp.press.a);
+  if(pressed) s.buf=3;
+  var jumped=false;
+  if(s.onGround && (pressed || s.buf>0)){
+    s.vy=R_JUMP_VY; s.h=0; s.onGround=false; s.buf=0; jumped=true; note(s,"jump");
   }
-  if(s.ball){
-    var b=s.ball;
-    b.x+=b.vx; b.y+=b.vy;
-    if(b.x<2){ b.x=2; b.vx=2; }
-    if(b.x>W-8){ b.x=W-8; b.vx=-2; }
-    /* one seeded decision as the ball reaches the pet's row: a rare whiff, more likely late in a rally */
-    if(b.vy<0 && !b.decided && b.y<=s.petY+36){
-      b.decided=true;
-      b.miss=rand(s)<bounceMissChance(s.rally);
-    }
-    /* the pet is the top player: when it reaches the ball it bats it down; no point for the pet's return */
-    if(!b.miss && b.vy<0 && b.y<=s.petY+32 && b.y+6>=s.petY && b.x+6>=s.petX && b.x<=s.petX+30){
-      b.y=s.petY+32; b.vy=2; s.rally++; note(s,"bat"); bounceHop(s);
-    } else if(b.y<-8){
-      s.ball=null; s.reload=20; s.petMisses++; s.score++; s.rally=0; note(s,"petmiss");
-    }
-    if(b && b.vy>0 && b.y+6>=s.paddleY && b.y<=s.paddleY+4 && b.x+6>=s.paddleX && b.x<=s.paddleX+s.paddleW){
-      b.y=s.paddleY-6; b.vy=-2; b.vx=b.x+2<s.paddleX+s.paddleW/2?-2:2;
-      s.score++; s.rally++; note(s,"return");
-    } else if(b && b.y>H){
-      s.ball=null; s.reload=20; s.misses++; s.rally=0; note(s,"miss");
+  if(!s.onGround){
+    s.h-=s.vy;
+    s.vy+=1;
+    if(s.h<=0){
+      s.h=0; s.vy=0; s.onGround=true;
+      /* a press made up to three ticks before the landing takes off right on it */
+      if(s.buf>0 && !jumped){
+        s.vy=R_JUMP_VY; s.onGround=false; s.buf=0; jumped=true; note(s,"jump");
+      }
     }
   }
-  if(s.misses>=3) finish(s);
-  if(s.tick>=900) finish(s);                            /* 45 s at most */
+  /* variable height: letting go while rising turns a 45 px jump into a short hop */
+  if(!s.onGround && !inp.a && s.vy<R_CUT_VY) s.vy=R_CUT_VY;
+  /* the body box: 16 px wide and 18 rows tall, its bottom row on the feet */
+  var bottom=FLOOR-1-s.h, top=bottom-PET_BODY_TOP+1;
+  for(i=0;i<s.obs.length;i++){
+    o=s.obs[i];
+    if(o.nut && o.nut.x+RUN_NUT.w>PET_X+PET_BODY_L && o.nut.x<PET_X+PET_BODY_R+1 &&
+       o.nut.y+RUN_NUT.h>top && o.nut.y<bottom+1){
+      o.nut=null; s.nutScore+=5; note(s,"nut");
+    }
+  }
+  for(i=0;i<s.obs.length;i++){
+    o=s.obs[i];
+    if(PET_X+PET_BODY_R>=o.x+1 && PET_X+PET_BODY_L<=o.x+o.w-2 &&
+       bottom>=FLOOR-o.h+1 && top<=FLOOR-2){
+      note(s,"hit"); s.dying=R_DIE;
+      break;
+    }
+  }
+  for(i=s.obs.length-1;i>=0;i--) if(s.obs[i].x+s.obs[i].w<0) s.obs.splice(i,1);
+  var last=s.obs[s.obs.length-1];
+  if(!last) runSpawn(s,W+10);
+  else if(last.x+last.w<=W) runSpawn(s,last.x+last.w+runMinGap(s.speedQ)+Math.floor(rand(s)*71));
+  if(!jumped && !pressed && s.buf>0) s.buf--;
+  s.score=Math.floor(s.dist/8)+s.nutScore;
 }
 function inkRows(g){
   var top=-1, bottom=-1;
@@ -324,38 +347,62 @@ function inkRows(g){
   }
   return {top:top,bottom:bottom};
 }
-/* A side walk cycle may be used only when its two frames share the same vertical extent: a one-pixel step up or
-   down is exactly the bob the owner saw, so the front idle frame is used instead. */
-function stillSideWalk(a,b){
-  var ra=inkRows(a), rb=inkRows(b);
-  return !!ra && !!rb && ra.top>=0 && ra.top===rb.top && ra.bottom===rb.bottom;
+/* the wall behind: a window, a picture and a shelf line at half the world's speed, repeating every 240 px */
+function runBackdrop(buf,w,h,off){
+  for(var k=-1;k<=1;k++){
+    var ox=k*R_TILE-off, wx=ox+18, sx=ox+120, fx=ox+92, y;
+    rect(buf,w,h,wx,18,52,1,2); rect(buf,w,h,wx,52,52,1,2);
+    rect(buf,w,h,wx,18,1,35,2); rect(buf,w,h,wx+51,18,1,35,2);
+    rect(buf,w,h,wx+25,19,1,33,2); rect(buf,w,h,wx+1,34,50,1,2);
+    rect(buf,w,h,sx,62,58,1,2);
+    rect(buf,w,h,sx+8,63,1,4,2); rect(buf,w,h,sx+48,63,1,4,2);
+    rect(buf,w,h,fx,30,26,1,2); rect(buf,w,h,fx,48,26,1,2);
+    rect(buf,w,h,fx,30,1,19,2); rect(buf,w,h,fx+25,30,1,19,2);
+    /* a couple of far specks, so an empty wall still reads as a wall */
+    for(y=0;y<2;y++) rect(buf,w,h,ox+(y?206:76),y?70:12,2,1,2);
+  }
 }
-function bounceDraw(s,buf,w,h,pack,poseFor){
+function runPetGrid(s,poseFor){
+  if(s.dying>0) return poseOf(poseFor,"front","surprised");
+  if(reacting(s)) return poseOf(poseFor,"front",s.react);
+  var pose;
+  if(s.onGround) pose=(Math.floor(s.tick/3)%2)?"walk2":"walk1";
+  else if(s.vy<0) pose="jump";
+  else pose=(Math.floor(s.tick/2)%2)?"flap2":"flap1";
+  return poseOf(poseFor,"side",pose);
+}
+function runDraw(s,buf,w,h,pack,poseFor){
   clear(buf);
-  /* the court: a dashed centre line and a thin wall down each side, inside the field's frame */
-  for(var y=10;y<h-10;y+=8) rect(buf,w,h,Math.floor(w/2),y,1,3,2);
-  rect(buf,w,h,5,8,1,h-16,2);
-  rect(buf,w,h,w-6,8,1,h-16,2);
-  var grid;
-  if(reacting(s)){
-    grid=poseOf(poseFor,"front",s.react);
+  runBackdrop(buf,w,h,(((Math.floor(s.dist/2))%R_TILE)+R_TILE)%R_TILE);
+  /* the floor: an ink line, a mid band under it and a dashed pattern that scrolls with the world */
+  rect(buf,w,h,0,FLOOR,w,1,0);
+  rect(buf,w,h,0,FLOOR+1,w,h-FLOOR-1,2);
+  var offw=((s.dist%24)+24)%24, x;
+  for(x=-offw;x<w;x+=24){
+    rect(buf,w,h,x,FLOOR+3,10,2,1);
+    rect(buf,w,h,x+12,FLOOR+8,6,1,3);
+    rect(buf,w,h,x+6,FLOOR+13,8,2,1);
+  }
+  var i, o;
+  for(i=0;i<s.obs.length;i++){
+    o=s.obs[i];
+    blit(buf,w,h,RUN_THINGS[o.k].grid,o.x,FLOOR-RUN_THINGS[o.k].h);
+  }
+  var grid=runPetGrid(s,poseFor), y;
+  var rows=inkRows(grid), bottom=rows && rows.bottom>=0 ? rows.bottom : 31;
+  if(!s.onGround && s.h>0){
+    /* the air pose keeps the walk1 offset, so the bob is gone and only the jump lifts it */
+    var w1=inkRows(poseOf(poseFor,"side","walk1"));
+    y=FLOOR-1-(w1 && w1.bottom>=0 ? w1.bottom : 29)-s.h;
   } else {
-    var a=poseOf(poseFor,"side","walk1"), b=poseOf(poseFor,"side","walk2");
-    if(stillSideWalk(a,b)){
-      grid=s.tick%2?b:a;
-      if(s.petDir<0) grid=mirrorGrid(grid);
-    } else {
-      grid=poseOf(poseFor,"front","idle");
-    }
+    /* on the ground the measured ink bottom sits on FLOOR-1, whatever the frame's own padding */
+    y=FLOOR-1-bottom;
   }
-  blit(buf,w,h,grid,s.petX,s.petY);
-  rect(buf,w,h,s.paddleX,s.paddleY,s.paddleW,4,0);
-  rect(buf,w,h,s.paddleX+2,s.paddleY+4,s.paddleW-4,2,1);
-  if(s.ball){
-    rect(buf,w,h,s.ball.x,s.ball.y,6,6,0);
-    rect(buf,w,h,s.ball.x+2,s.ball.y+2,2,2,3);
+  blit(buf,w,h,grid,PET_X,y);
+  for(i=0;i<s.obs.length;i++){
+    o=s.obs[i];
+    if(o.nut) blit(buf,w,h,RUN_NUT.grid,o.nut.x,o.nut.y);
   }
-  for(var i=0;i<Math.min(3,s.misses);i++) rect(buf,w,h,6+i*6,5,4,2,0);
   frame(buf,w,h);
   scoreDigits(buf,w,h,s.score);
 }
@@ -592,19 +639,20 @@ function climbDraw(s,buf,w,h,pack,poseFor){
 /* ---------- the three packs ---------- */
 var CATCH={id:"catch", labelKey:"pet.game.catch", view:"front", init:catchInit,
   step:function(s,i,dt){ return run(CATCH,s,i,dt); }, draw:catchDraw, tick:catchTick};
-var BOUNCE={id:"bounce", labelKey:"pet.game.bounce", view:"front", init:bounceInit,
-  step:function(s,i,dt){ return run(BOUNCE,s,i,dt); }, draw:bounceDraw, tick:bounceTick};
+var RUN={id:"run", labelKey:"pet.game.run", view:"side", init:runInit,
+  step:function(s,i,dt){ return run(RUN,s,i,dt); }, draw:runDraw, tick:runTick};
 var CLIMB={id:"climb", labelKey:"pet.game.climb", view:"front", init:climbInit,
   step:function(s,i,dt){ return run(CLIMB,s,i,dt); }, draw:climbDraw, tick:climbTick};
 
 window.LopdaPetPlay={
-  GAMES:[CATCH,BOUNCE,CLIMB],
+  GAMES:[CATCH,RUN,CLIMB],
   W:W, H:H, TICK:TICK,
   joyFor:joyFor,
   finish:finish,
   reaction:reaction,
   climbReachable:climbReachable,
-  BOUNCE:{MISS_BASE:B_MISS_BASE, MISS_STEP:B_MISS_STEP, MISS_MAX:B_MISS_MAX, missChance:bounceMissChance},
+  RUN:{FLOOR:FLOOR, PET_X:PET_X, SPEED_START:R_SPEED_START, SPEED_MAX:R_SPEED_MAX, JUMP_VY:R_JUMP_VY,
+    minGap:runMinGap},
   CLIMB:{RISE:C_RISE, RUN:C_RUN, GAP_MIN:C_GAP_MIN, GAP_MAX:C_GAP_MAX, GAP_HARD:C_RISE-4,
     WIDTH_EASY_MIN:20, WIDTH_EASY_MAX:36, WIDTH_HARD:C_WIDTH_HARD, EASY_PLATS:C_EASY_PLATS,
     RAMP_PLATS:C_RAMP_PLATS, FEET_L:FEET_L, FEET_R:FEET_R, FEET_BOTTOM:FEET_BOTTOM}
