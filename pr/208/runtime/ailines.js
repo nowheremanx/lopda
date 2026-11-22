@@ -174,6 +174,26 @@ function setLast(st,id,last){ var l=find(st,id); if(!l) return null; l.last=last
 /* lines that are on, in order */
 function onLines(st){ return st.lines.filter(function(l){ return l.on; }); }
 
+/* Whether the line test's answer is right. "math": the number expect appears as a whole number (not next to another
+   digit), ignoring anything before a final closing think tag; "letter": expect as a standalone ASCII letter,
+   case-insensitive (not next to another letter). */
+function checkAnswer(kind,text,expect){
+  text=str(text);
+  if(kind==="math"){
+    var n=String(expect==null ? "" : expect), i=text.toLowerCase().lastIndexOf("</think");
+    if(!/^\d+$/.test(n)) return false;
+    if(i>=0) text=text.slice(i+7).replace(/^\s*>?/,"");
+    return new RegExp("(^|[^0-9])"+n+"([^0-9]|$)").test(text);
+  }
+  if(kind==="letter"){
+    var c=str(expect).toUpperCase();
+    if(!/^[A-Z]$/.test(c)) return false;
+    return new RegExp("(^|[^A-Za-z])"+c+"([^A-Za-z]|$)","i").test(text);
+  }
+  return false;
+}
+
 window.LopdaAiLines={USES:USES, load:load, toDoc:toDoc, pick:pick, modelFor:modelFor, name:name, usable:usable, find:find,
-  add:add, edit:edit, setOn:setOn, remove:remove, setDef:setDef, choose:choose, setLast:setLast, onLines:onLines};
+  add:add, edit:edit, setOn:setOn, remove:remove, setDef:setDef, choose:choose, setLast:setLast, onLines:onLines,
+  checkAnswer:checkAnswer};
 })();
