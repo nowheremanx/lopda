@@ -20,10 +20,13 @@
  * status bar says 未存档).
  *
  * The day: on the first open of a day (and after hatching) the program asks the read-only summaries for the day's one
- * pick: an upcoming calendar date (a count of days, never a name), the word book, a book not opened for a week,
- * or waiting film. LopdaPet.pickOfDay chooses (about half the days nothing); the pet holds the matching prop
- * and its row lights. START opens the small menu (the pick's own name / 状态 / 纪念品箱; "今天没有" when empty);
- * A on that row opens the summary's own program, then the pick is used for the day. The AI souvenir, when the line is on, is one call at the day's outing (30 s cap) and silently
+ * pick: an upcoming calendar date (a count of days, never a name) or a word from the word book. LopdaPet.pickOfDay
+ * chooses (about half the days nothing); the pet holds the matching prop in its room, a flag counting down or a small
+ * card. A short tap on the card turns it over on the pet's own screen (the meaning is looked up there); no pick opens
+ * another program, and START's small menu is only 状态 / 纪念品箱. The room slowly shows what you did elsewhere, from
+ * counts and flags only, never a photo, a title or a note (decisions.md section 63): a small framed picture for each
+ * darkroom visit, a book laid flat on the shelf for the reader, bunting on the holiday itself, an open notebook at the
+ * foot of the bed when today has a diary (save.saw, today.sawPhoto / sawRead). The AI souvenir, when the line is on, is one call at the day's outing (30 s cap) and silently
  * falls back to the built-in table; a day whose separate mood roll fails is empty-handed instead and makes no call.
  *
  * From boot: the pet lives without its screen. On storage ready, whenever the home screen draws its icon and on resume,
@@ -196,6 +199,11 @@ function freshSave(){
   s.boxSeen=0;
   return s;
 }
+function sawCount(v,max){
+  var n=Math.floor(+v);
+  if(!isFinite(n) || n<0) return 0;
+  return Math.min(max,n);
+}
 function normalize(save){
   if(!save || typeof save!=="object") return null;
   if(!save.species) save.species=defaultSpecies();
@@ -221,6 +229,18 @@ function normalize(save){
   if(td.shelf===undefined) td.shelf=false;
   if(td.cared===undefined) td.cared=false;
   if(td.outEmpty===undefined) td.outEmpty=false;
+  if(td.sawPhoto===undefined) td.sawPhoto=false;
+  if(td.sawRead===undefined) td.sawRead=false;
+  /* what the room keeps of other programs: an optional, additive count, never a name or a picture. A save
+     without it opens exactly as before; a field that is not a count becomes 0, and a saw that is not an
+     object at all is dropped. */
+  if(save.saw!==undefined){
+    if(!save.saw || typeof save.saw!=="object" || Array.isArray(save.saw)) delete save.saw;
+    else {
+      save.saw.photos=sawCount(save.saw.photos,3);
+      save.saw.reads=sawCount(save.saw.reads,5);
+    }
+  }
   /* care is the days-long average the outing's chance comes from: keep a real 0..1 number, drop anything else */
   if(save.care!==undefined){
     if(typeof save.care==="number" && isFinite(save.care) && save.care>=0 && save.care<=1) save.care=+save.care;
@@ -414,6 +434,8 @@ function scheduleBackground(){
 
 /* ---------- the pick of the day (design.md 6) ---------- */
 var USE_KEYS=["reader","dict","notes","darkroom"];
+/* the room's diary question is cached for one day; refreshUsage drops the cache when the screen opens */
+var sawDiaryDay=null, sawDiaryOn=false;
 function activePick(){
   var td=P.save && P.save.today;
   return td && !td.used && td.pick && td.pick.kind ? td.pick : null;
@@ -426,10 +448,22 @@ function dayNumberNow(){
   return null;
 }
 /* The usage counts are re-read when the screen opens. Growth since the last look makes it a little happier, once a
-   day (today.rewarded), and seenUse then moves to the fresh counts. Never a message. */
+   day (today.rewarded), and seenUse then moves to the fresh counts. The same growth leaves one more mark in its
+   room — a small picture, one more book on the shelf — at most once each a day. Never a message. */
+function sawGrow(s,td,field,max,flag){
+  var saw=s.saw;
+  if(!saw || typeof saw!=="object" || Array.isArray(saw)) saw={photos:0,reads:0};
+  saw[field]=Math.min(max,sawCount(saw[field],max)+1);
+  s.saw=saw;
+  td[flag]=true;
+}
 function rewardUse(){
-  var s=P.save, td=s && s.today, counts=P.usage, seen=s && s.seenUse, grew=false, i;
-  if(!s || !td || !counts || s.stage==="egg") return;
+  var s=P.save, td=s && s.today, counts=P.usage, seen=s && s.seenUse, grew=false, i, marks=false;
+  if(!s || !td || !counts || s.stage==="egg") return false;
+  if(seen){
+    if(!td.sawPhoto && (+counts.darkroom||0)>(+seen.darkroom||0)){ sawGrow(s,td,"photos",3,"sawPhoto"); marks=true; }
+    if(!td.sawRead && (+counts.reader||0)>(+seen.reader||0)){ sawGrow(s,td,"reads",5,"sawRead"); marks=true; }
+  }
   if(!td.rewarded && seen) for(i=0;i<USE_KEYS.length;i++) if((+counts[USE_KEYS[i]]||0)>(+seen[USE_KEYS[i]]||0)) grew=true;
   if(grew){
     var sp=Pet.SPECIES[s.species]||Pet.SPECIES.chip;
@@ -438,20 +472,24 @@ function rewardUse(){
   }
   s.seenUse={};
   for(i=0;i<USE_KEYS.length;i++) s.seenUse[USE_KEYS[i]]=+counts[USE_KEYS[i]]||0;
+  return marks;
 }
 function usageArrived(){
   if(!P.save || !isOpen()) return;
-  rewardUse();
+  var marks=rewardUse();
   saveSoon();
   if(P.save.today && !P.save.today.picked) buildPick();
+  if(marks) render();             /* the room shows the new mark at once, not at the next 500 ms tick */
 }
-/* readUsage is the only way the pet learns what happened in other programs; call it on every enter/resume */
+/* readUsage is the only way the pet learns what happened in other programs; call it on every enter/resume.
+   The diary answer is a notes query, so it is asked again here and cached for the rest of the day. */
 function refreshUsage(){
+  sawDiaryDay=null;
   return readUsage().then(function(){ usageArrived(); },function(){});
 }
 /* One candidate per source, each guarded: a missing or broken summary just drops its candidate. */
 function pickCandidates(){
-  var list=[], t=now(), key=dayKey(t);
+  var list=[], key=dayKey(now());
   try{
     if(LP.calendar && typeof LP.calendar.upcoming==="function"){
       var up=LP.calendar.upcoming(7)||[];
@@ -470,12 +508,6 @@ function pickCandidates(){
       }
     }
   }catch(e){}
-  try{
-    if(LP.reader && typeof LP.reader.current==="function"){
-      var cur=LP.reader.current();
-      if(cur && cur.id && (+cur.opened||0)<=t-7*DAY) list.push({kind:"book", urgency:3, id:String(cur.id)});
-    }
-  }catch(e){}
   return list;
 }
 function cleanPick(o){
@@ -487,7 +519,7 @@ function cleanPick(o){
   if(o.word) f.word=String(o.word);
   return f;
 }
-/* The film box is the one asynchronous summary; the others are in memory. The decision waits for all of them. */
+/* The candidates are in memory, so the decision is one microtask; a pick forced meanwhile still wins. */
 function buildPick(){
   var save=P.save;
   /* away on the long absence: it is not home to find anything, and the return day brings its postcard instead */
@@ -495,22 +527,13 @@ function buildPick(){
   var td=save.today;
   if(!td) return;
   if(td.picked) return;
-  var seq=++P.pickSeq, list=pickCandidates(), film=null;
-  try{
-    if(LP.darkroom && typeof LP.darkroom.summary==="function"){
-      film=Promise.resolve(LP.darkroom.summary()).then(function(s){
-        if(s && +s.n>0) list.push({kind:"film", urgency:4});
-      },function(){});
-    }
-  }catch(e){ film=null; }
-  Promise.resolve(film).then(function(){
+  var seq=++P.pickSeq;
+  Promise.resolve().then(function(){
     if(seq!==P.pickSeq || P.restoring) return;
     var cur=P.save && P.save.today;
-    /* a care action clones the save while the film summary is in flight: decide against today's new object, not the
-       captured one, so the pick is not silently lost */
     if(!cur || cur.picked || cur.day!==td.day) return;
     cur.picked=true;
-    var pick=Pet.pickOfDay(list, cur.shownYesterday||null, Pet.daySeed(P.save.born, cur.day));
+    var pick=Pet.pickOfDay(pickCandidates(), cur.shownYesterday||null, Pet.daySeed(P.save.born, cur.day));
     cur.pick=cleanPick(pick);
     cur.shown=cur.pick ? cur.pick.kind : null;
     cur.used=false;
@@ -779,7 +802,7 @@ function outingSouvenir(){
   return Pet.pickSouvenir(r,table,opts);
 }
 /* ---------- the AI souvenir (design.md 7; decisions.md section 34 stays: no PAD.ai for apps) ---------- */
-var FORM_WORD={book:"bookish",walk:"walker",scholar:"scholar",diary:"diarist",monster:"little monster",plain:"plain"};
+var FORM_WORD={book:"bookish",walk:"walker",scholar:"scholar",diary:"diarist",monster:"player",plain:"plain"};
 function formWord(){
   var s=P.save;
   if(!s) return "";
@@ -1860,59 +1883,33 @@ function back(){
     beep("tap"); renderKeys(); render();
   }
 }
-/* START opens the small menu over the room; A on the day's row uses the pick. */
-var PICK_NAME={date:"pet.pick.date",word:"pet.pick.word",book:"pet.pick.book",film:"pet.pick.film"};
+/* START opens the small menu over the room: how it is, and its keepsakes. Nothing takes you anywhere. */
 function menuItems(){
-  var pick=activePick();
-  if(pick && !PICK_NAME[pick.kind]) pick=null;      /* an old kind with no program is not offered */
-  /* while it is away or out there is nobody home to read the mail */
-  var can=!!pick && !(P.save && P.save.travel) && !P.outing;
   return [
-    {id:"mail", enabled:can, label:tr(can?PICK_NAME[pick.kind]:"pet.menu.none")},
     {id:"look", enabled:true},
     {id:"box", enabled:true}
   ];
 }
 function openMenu(){
   if(P.sub || !P.save || isEgg()) return;
-  P.sub="menu"; P.menuSel=activePick()?0:1; P.confirmStage=0;
+  P.sub="menu"; P.menuSel=0; P.confirmStage=0;
   beep("tap"); renderKeys(); render();
 }
 function chooseMenuItem(i){
   var item=menuItems()[i];
   if(!item || !item.enabled){ beep("err"); return; }
-  if(item.id==="mail"){ P.sub=null; renderKeys(); usePick(); }
-  else if(item.id==="look") openLook();
+  if(item.id==="look") openLook();
   else openBox();
 }
 
-/* ---------- the day's pick: its own program, or the word card ---------- */
+/* ---------- the day's pick: the word card, opened in the room ---------- */
 function usePick(){
   var pick=activePick();
   if(P.sub || !pick || !P.save || P.save.travel || P.outing || P.save.stage==="egg"){ beep("err"); return; }
-  if(pick.kind==="date"){
-    if(typeof pick.day!=="number" || !LP.calendar || typeof LP.calendar.open!=="function") return;
-    finishPick();
-    LP.calendar.open(pick.day);
-    return;
-  }
-  if(pick.kind==="word"){
-    P.sub="word"; P.wordWord=pick.word||""; P.wordMeaning=null; P.wordBusy=false;
-    finishPick(); beep("tap"); renderKeys(); render();
-    return;
-  }
-  if(pick.kind==="book"){
-    if(!LP.reader || typeof LP.reader.open!=="function" || !pick.id) return;
-    if(LP.reader.open(pick.id)) finishPick();
-    return;
-  }
-  if(pick.kind==="film"){
-    var open=null, i;
-    for(i=0;LP.builtins && i<LP.builtins.length;i++) if(LP.builtins[i].id==="darkroom"){ open=LP.builtins[i].open; break; }
-    if(typeof open!=="function") return;
-    finishPick();
-    open();
-  }
+  /* a date flag and an old book or film pick from before the update draw and do nothing: no program is opened */
+  if(pick.kind!=="word") return;
+  P.sub="word"; P.wordWord=pick.word||""; P.wordMeaning=null; P.wordBusy=false;
+  finishPick(); beep("tap"); renderKeys(); render();
 }
 function fitText(text,max){
   var s=String(text==null?"":text).replace(/\s+/g," ").trim(), cp=Array.from(s);
@@ -2158,6 +2155,31 @@ function pickProp(pick){
   if(pick.kind==="film") return props.film||null;
   return null;
 }
+/* whether today has a diary: a read-only note to the notes' index, asked once a day and guarded like the picks */
+function diaryToday(){
+  var key=dayKey(now());
+  if(sawDiaryDay===key) return sawDiaryOn;
+  sawDiaryDay=key; sawDiaryOn=false;
+  try{
+    if(LP.notes && typeof LP.notes.diaryDays==="function"){
+      var d=localDate(now());
+      var days=LP.notes.diaryDays(d.getUTCFullYear(),d.getUTCMonth()+1);
+      sawDiaryOn=!!(days && days[d.getUTCDate()]);
+    }
+  }catch(e){ sawDiaryOn=false; }
+  return sawDiaryOn;
+}
+/* What the room keeps of what you did elsewhere: counts and flags only, never a photo, a title or a note.
+   The date flag hangs its bunting on the holiday itself, whether the pick is used or not. */
+function sawOf(save){
+  var saw=(save && save.saw) || {}, pick=save && save.today && save.today.pick;
+  return {
+    photos:sawCount(saw.photos,3),
+    reads:sawCount(saw.reads,5),
+    bunting:!!(pick && pick.kind==="date" && pick.in===0),
+    diary:diaryToday()
+  };
+}
 function roomScene(){
   var save=P.save, t=now(), pack=packOf(save), h=hourNow(), min=localDate(t).getUTCMinutes();
   var night=h<6 || h>=19;
@@ -2179,6 +2201,9 @@ function roomScene(){
     }
   }
   if(!save) return scene;
+  /* the room keeps a little of what you did elsewhere; an egg has not seen anything and a travelling pet
+     leaves the room as it is, so neither draws the marks */
+  if(save.stage!=="egg" && !save.travel) scene.saw=sawOf(save);
   if(save.travel){ scene.sign=true; return scene; }
   if(P.outing && P.outing.phase==="out") return scene;
 
@@ -2208,7 +2233,7 @@ function roomScene(){
     if(pick){
       scene.prop=pickProp(pick);
       /* a pick's small prop has a named slot beside the rug; it stands still while the pet walks */
-      if(scene.prop) scene.propSlot="pick";
+      if(scene.prop){ scene.propSlot="pick"; scene.propPick=pick.kind; }
     }
     if(!P.task){
       /* a want points it at the bowl or the piles */
@@ -2240,8 +2265,8 @@ function roomScene(){
   scene.petX=px; scene.petY=py;
   if(save.stage!=="egg") P.at={x:px,y:py};
   if(save.stage!=="egg" && isLidong(t)) scene.pet=wearScarf(scene.pet);
-  if(P.heartUntil>t){ scene.prop=(pack.props||{}).heart; scene.propSlot=null; scene.propFollow=true; }
-  else if(P.puffUntil>t){ scene.prop=PUFF; scene.propSlot=null; scene.propX=px+24; scene.propY=py+4; }
+  if(P.heartUntil>t){ scene.prop=(pack.props||{}).heart; scene.propSlot=null; scene.propFollow=true; scene.propPick=null; }
+  else if(P.puffUntil>t){ scene.prop=PUFF; scene.propSlot=null; scene.propX=px+24; scene.propY=py+4; scene.propPick=null; }
   else if(!scene.prop && isMidAutumn(t)){ scene.prop=(pack.props||{}).mooncake; scene.propSlot=null; scene.propFollow=true; }
   if(asleepNow && save.stage!=="egg") scene.zz=true;
   return scene;
@@ -2358,7 +2383,6 @@ function buildMenu(panel){
   items.forEach(function(it,i){
     var b=el("button","pet-menu"+(i===P.menuSel?" on":"")+(it.enabled?"":" dim"));
     b.type="button";
-    if(it.id==="mail" && it.enabled) b.appendChild(el("i","pet-dot"));
     b.appendChild(el("span","",it.label || tr("pet.menu."+it.id)));
     b.disabled=!it.enabled;
     b.setAttribute("aria-disabled",it.enabled?"false":"true");
@@ -2865,7 +2889,8 @@ function coreRows(grid){
 function homeState(){
   var s=P.save;
   if(!s) return "none";
-  return [s.stage,s.travel,iconState(),P.souv.length,+s.boxSeen||0].join("|");
+  /* the adult form is part of the picture: a new form must redraw the tile */
+  return [s.stage,s.travel,iconState(),P.souv.length,+s.boxSeen||0,s.form||""].join("|");
 }
 function homeMaybeRender(){
   var h=$("v-home");
@@ -2877,8 +2902,12 @@ function homeMaybeRender(){
 }
 function icon(){
   var pack=packOf(P.save), set=(pack && pack.homeIcons)||{};
-  var rows=set[iconState()] || null;
+  var state=iconState(), own=set[state]||null;
+  var rows=own;
   if(!rows || rows.length!==16) rows=ICON_ROWS;
+  /* the adult's awake face wears its accessory, a few pixels over the plain icon */
+  if(own && state==="face" && P.save && P.save.stage==="adult" && typeof pack.homeForm==="function")
+    rows=pack.homeForm(P.save.form||"plain", rows);
   P.homeSig=homeState();
   scheduleBackground();
   return coreRows(rows) || ICON_ROWS.slice();
@@ -2886,6 +2915,22 @@ function icon(){
 function tag(){
   if(!P.save) return "";
   return P.souv.length > (+P.save.boxSeen||0) ? tr("pet.tag") : "";
+}
+/* A short tap on the word card in the room turns it over. The box comes from the same Art.resolve the room
+   draws with, never from coordinates typed in here; the long hold still pats as it always did. */
+function tapPickCard(e){
+  var pick=activePick(), scene=P.lastScene;
+  if(!pick || pick.kind!=="word" || !scene || scene.propPick!=="word" || !Art.resolve) return;
+  var at;
+  try{ at=Art.resolve(scene,roomNow()); }catch(err){ return; }
+  if(!at || !at.prop) return;
+  var cv=$("pet-cv");
+  if(!cv) return;
+  var r=cv.getBoundingClientRect();
+  if(!r.width || !r.height) return;
+  var x=(e.clientX-r.left)*cv.width/r.width, y=(e.clientY-r.top)*cv.height/r.height, b=at.prop;
+  if(x<b.x || x>=b.x+b.w || y<b.y || y>=b.y+b.h) return;
+  usePick();
 }
 function bindRoom(){
   var cv=$("pet-cv");
@@ -2900,7 +2945,11 @@ function bindRoom(){
     },HOLD_MS);
   });
   ["pointerup","pointercancel","pointerleave"].forEach(function(t){
-    cv.addEventListener(t,function(){ if(P.roomHold){ clearTimeout(P.roomHold); P.roomHold=0; } });
+    cv.addEventListener(t,function(e){
+      var tap=t==="pointerup" && !!P.roomHold;
+      if(P.roomHold){ clearTimeout(P.roomHold); P.roomHold=0; }
+      if(tap) tapPickCard(e);
+    });
   });
   /* The play field itself moves catch and climb: hold the left or right half, in addition to the chin pad. */
   cv.style.touchAction="none";
