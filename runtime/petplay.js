@@ -355,7 +355,7 @@ function runInit(seed){
   s.speedQ=R_SPEED_START; s.moveQ=0; s.dist=0; s.obs=[]; s.nutScore=0;
   s.h=0; s.vy=0; s.onGround=true; s.buf=0; s.dying=0;
   s.mode="run"; s.scene="room"; s.stageAt=R_STAGE_FIRST; s.stageN=0; s.gatesMade=0; s.fq=0; s.fv=0; s.lastGap=null;
-  s.dark=0; s.darkCount=0; s.darkUntil=0;
+  s.dark=0; s.darkCount=0; s.darkUntil=0; s.intro=null;
   runSpawn(s,W+60);                                     /* the first thing arrives after about three seconds */
   return s;
 }
@@ -386,9 +386,21 @@ function spawnGate(s,x){
   s.obs.push(o);
   s.gatesMade++;
 }
+/* Before the sky or the pond, a short way in (owner, 2026-11-22: a sudden switch left him still pressing to jump):
+   the room runs on empty while an open window (the sky) or the pond's edge (the water) comes in from the right; the
+   program shows the stage's one-line hint when it starts ("intro" event); when the pet reaches it, it goes through
+   by itself (A does nothing meanwhile) and the stage begins. The lights out has its own 3-2-1 instead. */
+function startIntro(s){
+  var kind=["fly","dark","swim"][s.stageN%3];
+  if(kind==="dark"){ startStage(s); return; }
+  s.intro={kind:kind, x:W+70};                           /* about two seconds of empty room to read the hint */
+  note(s,"intro");
+  note(s,"intro_"+kind);
+}
 function startStage(s){
   /* in turn: the sky, the lights out, the pond */
-  var kind=["fly","dark","swim"][s.stageN%3];
+  var kind=s.intro ? s.intro.kind : ["fly","dark","swim"][s.stageN%3];
+  s.intro=null;
   if(kind==="dark"){
     s.stageN++;
     s.dark=1; s.darkCount=R_DARK_COUNT; s.darkUntil=s.dist+R_DARK_LEN;
@@ -402,7 +414,7 @@ function startStage(s){
   s.gatesMade=0; s.lastGap=null;
   s.onGround=false; s.vy=0; s.buf=0;
   if(s.mode==="fly"){ s.fq=0; s.fv=STAGE.fly.flap; }               /* out of the window with a first beat */
-  else { s.fq=(FLOOR-PET_BODY_TOP-STAGE.swim.ceil)*4; s.fv=0; }     /* a splash onto the pond's surface */
+  else { s.fq=30*4; s.fv=0; }                                        /* a splash into the middle of the pond */
   s.h=Math.floor(s.fq/4);
   note(s,s.mode);
   spawnGate(s,W+30);
@@ -412,6 +424,7 @@ function endStage(s){
   s.mode="run";
   s.stageAt=s.dist+R_STAGE_EVERY;
   s.fv=0;
+  note(s,"back");                                               /* the program says A jumps again */
   if(was==="fly" && s.h>0){ s.onGround=false; s.vy=0; }         /* it glides down onto the floor with the jump's fall */
   else { s.h=0; s.fq=0; s.onGround=true; s.vy=0; note(s,"land"); }
   s.scene="room";
@@ -446,6 +459,12 @@ function runTick(s,inp){
   }
   var pressed=!!(inp.press && inp.press.a);
   var jumped=false;
+  if(s.intro){
+    s.intro.x-=d;
+    if(s.intro.x<=PET_X+20 && s.onGround){ startStage(s); }
+    else if(!s.onGround){ /* finish a jump in the air, but no new one: it goes through on its own */ }
+    pressed=false; s.buf=0; inp={left:false,right:false,a:false,press:{}};
+  }
   if(s.mode!=="run") stagePhysics(s,inp);
   else {
     if(pressed) s.buf=3;
@@ -491,7 +510,7 @@ function runTick(s,inp){
   if(s.mode==="run"){
     if(!s.dark && s.dist+W>=s.stageAt){
       /* the room ends: no new things; once the last one has gone by and the pet is on the floor, the stage begins */
-      if(!s.obs.length && s.onGround && s.scene==="room") startStage(s);
+      if(!s.obs.length && s.scene==="room" && !s.intro) startIntro(s);       /* a jump in the air finishes on the way in */
     }
     else if(!last) runSpawn(s,W+10);
     /* (while the lights are out the run spawns as usual; stageAt is set again when they come back on) */
@@ -596,6 +615,29 @@ function drawGate(buf,w,h,o){
     }
   }
 }
+/* the way into a stage: a tall open window with sky and a cloud in it, or the floor giving way to a pond */
+function drawIntro(buf,w,h,it){
+  var x=it.x, y, xx;
+  if(it.kind==="fly"){
+    rect(buf,w,h,x,18,46,FLOOR-18,0);
+    rect(buf,w,h,x+3,21,40,FLOOR-21,3);
+    for(xx=x+10;xx<x+30;xx++) put(buf,w,h,xx,40,2);
+    for(xx=x+14;xx<x+26;xx++) put(buf,w,h,xx,37,2);
+    put(buf,w,h,x+13,38,2); put(buf,w,h,x+12,39,2); put(buf,w,h,x+26,38,2); put(buf,w,h,x+27,39,2);
+    /* the open casement swung in against the wall */
+    rect(buf,w,h,x-12,20,10,FLOOR-24,0); rect(buf,w,h,x-10,22,6,FLOOR-28,2);
+    rect(buf,w,h,x,FLOOR-2,46,2,0);
+  } else {
+    /* from x on, the floor is water: a wavy surface line at the floor and the water below */
+    for(xx=Math.max(0,x);xx<w;xx++){
+      for(y=FLOOR;y<h;y++) put(buf,w,h,xx,y,y===FLOOR+((xx>>2)&1) ? 0 : (y>FLOOR+1 ? 2 : 3));
+      if(((xx-x)%16)===8) for(y=FLOOR+4;y<h-3;y+=5) put(buf,w,h,xx,y,3);
+    }
+    /* reeds at the edge */
+    for(y=FLOOR-12;y<FLOOR;y++){ put(buf,w,h,x+2,y,0); if(y>FLOOR-8) put(buf,w,h,x+5,y,0); }
+    put(buf,w,h,x+1,FLOOR-13,1); put(buf,w,h,x+2,FLOOR-14,1);
+  }
+}
 function runDraw(s,buf,w,h,pack,poseFor){
   clear(buf);
   if(s.scene==="fly") skyBackdrop(buf,w,h,s.dist);
@@ -612,6 +654,7 @@ function runDraw(s,buf,w,h,pack,poseFor){
       rect(buf,w,h,x+6,FLOOR+13,8,2,1);
     }
   }
+  if(s.intro) drawIntro(buf,w,h,s.intro);
   var i, o;
   for(i=0;i<s.obs.length;i++){
     o=s.obs[i];

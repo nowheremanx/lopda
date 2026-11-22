@@ -724,3 +724,20 @@ test("run: the lights go out between the sky and the pond - a 3-2-1 count, then 
   for (let y = 4; y < 11; y++) for (let x = W - 12; x < W - 4; x++) if (buf[y * W + x] === 3) paper++;
   assert.ok(paper > 5, "the score is still readable in the dark");
 });
+
+test("run: a way into each stage - the hint event first, an empty room, then the stage; A does nothing meanwhile", () => {
+  const g = game("run");
+  const s = g.init(3);
+  let intro = null, started = null, jumpsInIntro = 0;
+  for (let i = 0; i < 2000 && !started; i++) {
+    g.step(s, { left: false, right: false, a: true, press: { left: false, right: false, a: i % 3 === 0 } }, 50);
+    if (s.events.includes("intro_fly")) intro = s.tick;
+    if (intro && !started && s.events.includes("jump")) jumpsInIntro++;
+    if (s.events.includes("fly")) started = s.tick;
+    s.dying = 0;
+    s.obs = s.obs.filter((o) => o.kind === "gate");
+  }
+  assert.ok(intro && started, "the sky's way in, then the sky");
+  assert.ok(started - intro >= 30, `about two seconds to read the hint: ${started - intro} ticks`);
+  assert.equal(jumpsInIntro, 0, "A does not jump on the way in");
+});
