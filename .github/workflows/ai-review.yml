@@ -1,0 +1,105 @@
+# AI pre-review of a pull request, for outside contributors' PRs above all. Advice only: the owner still decides.
+#
+# How to start it: the repo owner comments `/review` on a PR (or runs it from the Actions tab with the PR number).
+# Nobody else can start it, so strangers cannot spend the API quota or poke the bot.
+#
+# Why it is safe with a fork PR (docs: docs.github.com, "Securely using pull_request_target"):
+#   - issue_comment and workflow_dispatch run THIS file and tools/ai-review.mjs as they are on main, never the PR's copy.
+#   - The PR's code is never checked out, installed, built or run. The diff is fetched as text with `gh pr diff`.
+#   - The API key is given to one step only, which runs only tools/ai-review.mjs from main: one request to one URL, no
+#     tools for the model, so a prompt injection in the PR cannot run commands or read the key.
+#   - PR text (title, body, diff) never goes through ${{ }} into a shell line; it is written to files and read as data.
+#   - The token can only comment (pull-requests / issues: write); it cannot push (contents: read).
+# Secret masking (***) only hides the key in logs; it is not what keeps the key safe. Not running PR code is.
+#
+# Settings (once), one of:
+#   - OpenCode, no stored key (preferred): an OpenCode service account trusted for GitHub Actions on this repo, branch
+#     main, permission Models: Request. Repository variable OPENCODE_CLIENT_ID = its client id (sk_...). Each run trades
+#     GitHub's short-lived OIDC token for a short-lived OpenCode token, so there is no long-lived key to steal. "Runs
+#     from: main" means only workflow code on main may sign in: a PR's own workflow never can.
+#   - Any OpenAI-compatible API with a key: repository secret AI_REVIEW_KEY (default endpoint and model are DeepSeek's).
+# Optional variables AI_REVIEW_URL (chat completions URL) and AI_REVIEW_MODEL override the defaults.
+# Only git, the gh CLI and the runner's own node are used; the one action is actions/checkout of main.
+name: ai-review
+on:
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "PR number"
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  id-token: write   # only for the OpenCode sign-in below; the OIDC token names this repo and main
+
+concurrency:
+  group: ai-review-${{ github.event.issue.number || github.event.inputs.pr }}
+  cancel-in-progress: false
+
+jobs:
+  review:
+    # Comments: only on PRs, only `/review` at the start, only by the owner. workflow_dispatch already needs write access.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.issue.pull_request &&
+       startsWith(github.event.comment.body, '/review') &&
+       github.event.comment.author_association == 'OWNER')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      PR: ${{ github.event.issue.number || github.event.inputs.pr }}
+    steps:
+      - name: Check the PR number
+        run: |
+          case "$PR" in ''|*[!0-9]*) echo "not a PR number: $PR"; exit 1;; esac
+
+      # main, not the PR: the script and the review rules come from here.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Fetch the PR as text
+        run: |
+          mkdir -p "$RUNNER_TEMP/pr"
+          gh pr diff "$PR" > "$RUNNER_TEMP/pr/diff.txt"
+          gh pr view "$PR" --json title,body,author,headRefOid,isCrossRepository > "$RUNNER_TEMP/pr/pr.json"
+          wc -c "$RUNNER_TEMP/pr/diff.txt"
+
+      # The sign-in and the review are one step, so the OpenCode token lives only in this shell and the node process it
+      # starts; it is never written to GITHUB_ENV, where every later step could read it.
+      - name: Review
+        env:
+          OPENCODE_CLIENT_ID: ${{ vars.OPENCODE_CLIENT_ID }}
+          AI_REVIEW_KEY: ${{ secrets.AI_REVIEW_KEY }}
+          AI_REVIEW_URL: ${{ vars.AI_REVIEW_URL }}
+          AI_REVIEW_MODEL: ${{ vars.AI_REVIEW_MODEL }}
+          GH_TOKEN: ""
+        run: |
+          if [ -n "$OPENCODE_CLIENT_ID" ]; then
+            oidc=$(curl -sSf --oauth2-bearer "$ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+              "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=https://opencode.ai/console" | jq -r .value)
+            token=$(curl -sSf https://opencode.ai/console/auth/oauth/token \
+              -d grant_type=urn:ietf:params:oauth:grant-type:token-exchange \
+              -d subject_token_type=urn:ietf:params:oauth:token-type:jwt \
+              --data-urlencode client_id="$OPENCODE_CLIENT_ID" \
+              --data-urlencode subject_token="$oidc" | jq -r .access_token)
+            if [ -z "$token" ] || [ "$token" = null ]; then echo "OpenCode sign-in failed"; exit 1; fi
+            echo "::add-mask::$token"
+            export AI_REVIEW_KEY="$token"
+            export AI_REVIEW_URL="${AI_REVIEW_URL:-https://opencode.ai/inference/openai/v1/chat/completions}"
+            export AI_REVIEW_MODEL="${AI_REVIEW_MODEL:-deepseek-v4.1-flash}"
+          fi
+          node tools/ai-review.mjs "$RUNNER_TEMP/pr/diff.txt" "$RUNNER_TEMP/pr/pr.json" "$RUNNER_TEMP/pr/comment.md"
+
+      - name: Post the comment
+        run: |
+          SHA=$(node -e 'process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).headRefOid||"").slice(0,7))' "$RUNNER_TEMP/pr/pr.json")
+          printf '\n\n<sub>Reviewed commit %s. Run again with /review after new pushes.</sub>\n' "$SHA" >> "$RUNNER_TEMP/pr/comment.md"
+          gh pr comment "$PR" --body-file "$RUNNER_TEMP/pr/comment.md"
