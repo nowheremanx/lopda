@@ -3,7 +3,8 @@
  * statutory days off and make-up workdays. Design: docs/design/calendar.md.
  * Copyright (c) 2026 Haowei Wu. MIT License, see LICENSE.
  *
- * Lunar dates and solar terms come from runtime/lunar.js (a table, 1900-2100).
+ * Lunar dates and solar terms come from runtime/lunar.js (a table, 1900-2100). In English the month view and the
+ * day sheet show US holidays, by rule and offline, from runtime/usholidays.js.
  * Diaries come from the notes, read only, through LP.notes.diaryDays, diariesOn and openDiary (decisions.md section 21):
  * the calendar never reads a note itself. Writing, and starting a diary for an earlier day, happen in 记事本.
  * Days off: holiday-cn (MIT, runtime/vendor/holiday-cn/). The years shipped with the runtime are in BUNDLED.
@@ -13,7 +14,7 @@
  */
 (function(){
 "use strict";
-var LP=window.LP, $=LP.$, S=LP.S, tr=LP.tr, L=window.LopdaLunar;
+var LP=window.LP, $=LP.$, S=LP.S, tr=LP.tr, L=window.LopdaLunar, I18N=LP.I18N, US=window.LopdaUSHolidays;
 var own=LP.own, toast=LP.toast, put=LP.put, sfx=LP.sfx, show=LP.show, showPad=LP.showPad, uid=LP.uid;
 
 var BUNDLED={2026:"vendor/holiday-cn/2026.json"};
@@ -54,6 +55,25 @@ function lunarText(lu){ return tr(lu.leap?"cal.lunarleap":"cal.lunar",{month:lun
 function yearText(ly,key){ return tr(key||"cal.year",{gz:tr("cal.gz",{s:list("cal.stems")[L.stem(ly)], b:list("cal.branches")[L.branch(ly)]}), animal:list("cal.animals")[L.branch(ly)]}); }
 function weekdayName(y,m,d){ return list("cal.weekday")[L.weekday(y,m,d)]; }
 function dateText(y,m,d){ return tr("cal.date",{y:y, m:m, d:d, mon:list("cal.months")[m-1], w:weekdayName(y,m,d)}); }
+
+/* English shows US holidays by rule (runtime/usholidays.js) instead of the Chinese festivals, terms and days off */
+function isEN(){ return I18N.lang==="en"; }
+function usName(e){ return tr("cal.us."+e.id); }
+function usLine(e){ return tr(e.observed?"cal.us.obs":"cal.us.is",{name:usName(e)}); }
+function usCell(y,m,d){ var a=US.on(y,m,d); return a.length ? tr("cal.uss."+a[0].id) : ""; }
+/* the federal day off: on the actual day when the holiday has no observed shift, else on the observed day only */
+function usOff(y,m,d){
+  var a=US.on(y,m,d);
+  for(var i=0;i<a.length;i++){
+    var e=a[i];
+    if(e.federal && (e.observed || !US.observedOf(e.id,y))) return e;
+  }
+  return null;
+}
+function usAria(y,m,d){
+  var a=US.on(y,m,d);
+  return a.length ? " · "+a.map(usLine).join(" · ") : "";
+}
 
 /* traditional festivals by the lunar date (not in a leap month), statutory ones by the Gregorian date */
 var SOLAR_FEST={101:"newyear", 501:"labour", 1001:"national"};
@@ -173,6 +193,7 @@ function buildGrid(){
   }
 }
 function cellText(y,m,d,lu){
+  if(isEN()){ var us=usCell(y,m,d); return us ? {t:us, hi:true} : {t:""}; }
   var f=festivals(y,m,d,lu); if(f.length) return {t:tr("cal.fs."+f[0]), hi:true};
   var j=L.term(y,m,d); if(j>=0) return {t:list("cal.termshort")[j], hi:true};
   if(!lu) return {t:""};
@@ -183,9 +204,9 @@ function cellText(y,m,d,lu){
 function render(grid){
   if(!C.cells.length) buildGrid();
   C.todayN=todayN();
-  var lu=L.fromSolar(C.y,C.m,C.d);
+  var en=isEN(), lu=L.fromSolar(C.y,C.m,C.d);
   $("cal-ym").textContent=tr("cal.ym",{y:C.y, m:C.m, mon:list("cal.months")[C.m-1]});
-  $("cal-ly").textContent=lu ? yearText(lu.year,"cal.yearhead") : "";
+  $("cal-ly").textContent=en ? "" : (lu ? yearText(lu.year,"cal.yearhead") : "");
   var wk=$("cal-week"); wk.textContent="";
   list("cal.week").forEach(function(w){ var s=document.createElement("span"); s.textContent=w; wk.appendChild(s); });
   var first=L.dayNumber(C.y,C.m,1)-L.weekday(C.y,C.m,1), sel=selN(), marks=datesBetween(first,first+41), diaries={};
@@ -193,7 +214,7 @@ function render(grid){
   var diaryOn=function(y,m,d){ var k=y*100+m; if(!(k in diaries)) diaries[k]=LP.notes ? LP.notes.diaryDays(y,m) : {}; return !!diaries[k][d]; };
   C.cells.forEach(function(b,i){
     var n=first+i, t=L.fromDayNumber(n), inRange=n>=FIRST && n<=LAST, l=inRange ? L.fromSolar(t.y,t.m,t.d) : null;
-    var c=inRange ? cellText(t.y,t.m,t.d,l) : {t:""}, h=C.hol[iso(t.y,t.m,t.d)];
+    var c=inRange ? cellText(t.y,t.m,t.d,l) : {t:""}, h=en?null:C.hol[iso(t.y,t.m,t.d)], off=en && inRange ? usOff(t.y,t.m,t.d) : null;
     var dy=inRange && diaryOn(t.y,t.m,t.d);
     b.className="cal-cell"+(t.m!==C.m?" out":"")+(n===C.todayN?" today":"")+(n===sel?" sel":"")+(dy?" dy":"");
     b.disabled=!inRange;
@@ -201,16 +222,17 @@ function render(grid){
     b.childNodes[1].textContent=c.t; b.childNodes[1].className=c.hi?"hi":"";
     while(b.childNodes.length>2) b.removeChild(b.lastChild);
     if(h){ var i2=document.createElement("i"); i2.className=h.off?"off":"work"; i2.textContent=tr(h.off?"cal.badge.off":"cal.badge.work"); b.appendChild(i2); }
+    if(off){ var i3=document.createElement("i"); i3.className="off"; i3.textContent=tr("cal.badge.off"); b.appendChild(i3); }
     if(marks[n]){ b.appendChild(document.createElement("u")); }
-    b.setAttribute("aria-label",inRange ? dateText(t.y,t.m,t.d)+(l?" "+lunarText(l):"")+(dy?" · "+tr("cal.diary"):"") : "");
+    b.setAttribute("aria-label",inRange ? dateText(t.y,t.m,t.d)+(en ? usAria(t.y,t.m,t.d) : (l?" "+lunarText(l):""))+(dy?" · "+tr("cal.diary"):"") : "");
   });
   $("cal-info").textContent=infoLine();
   if(!grid) renderSheet();
 }
 function infoLine(){
-  var lu=L.fromSolar(C.y,C.m,C.d), parts=[tr("cal.short",{m:C.m, d:C.d, mon:list("cal.months")[C.m-1], w:weekdayName(C.y,C.m,C.d)})];
-  if(lu) parts.push(lunarText(lu));
-  var j=L.term(C.y,C.m,C.d); if(j>=0) parts.push(list("cal.terms")[j]);
+  var en=isEN(), lu=L.fromSolar(C.y,C.m,C.d), parts=[tr("cal.short",{m:C.m, d:C.d, mon:list("cal.months")[C.m-1], w:weekdayName(C.y,C.m,C.d)})];
+  if(!en && lu) parts.push(lunarText(lu));
+  if(!en){ var j=L.term(C.y,C.m,C.d); if(j>=0) parts.push(list("cal.terms")[j]); }
   var diff=selN()-todayN();
   if(diff) parts.push(tr(diff>0?"cal.after":"cal.before",{n:Math.abs(diff)}));
   return parts.join(" · ");
@@ -256,13 +278,20 @@ function renderSheet(){
   else if(C.sheet==="add") addSheet(sh);
   else if(C.sheet==="jump") jumpSheet(sh);
 }
+/* English day sheet: the day's US holidays (actual or observed), the federal day off, then the lunar date */
+function usDayLines(body,lu){
+  US.on(C.y,C.m,C.d).forEach(function(e,i){ body.appendChild(el("p",i?"":"cal-big",usLine(e))); });
+  if(usOff(C.y,C.m,C.d)) body.appendChild(el("p","",tr("cal.us.off")));
+  if(lu) body.appendChild(el("p","hint",lunarText(lu)));
+}
 function daySheet(sh){
-  var lu=L.fromSolar(C.y,C.m,C.d), j=L.term(C.y,C.m,C.d), h=C.hol[iso(C.y,C.m,C.d)], n=selN();
+  var en=isEN(), lu=L.fromSolar(C.y,C.m,C.d), j=L.term(C.y,C.m,C.d), h=en?null:C.hol[iso(C.y,C.m,C.d)], n=selN();
   sh.appendChild(el("p","sheet-title",dateText(C.y,C.m,C.d)));
   var body=el("div","cal-lines");
-  if(lu){ body.appendChild(el("p","cal-big",lunarText(lu))); body.appendChild(el("p","",yearText(lu.year))); }
-  if(j>=0) body.appendChild(el("p","",tr("cal.termis",{name:list("cal.terms")[j]})));
-  var f=festivals(C.y,C.m,C.d,lu);
+  if(en) usDayLines(body,lu);
+  if(lu && !en){ body.appendChild(el("p","cal-big",lunarText(lu))); body.appendChild(el("p","",yearText(lu.year))); }
+  if(j>=0 && !en) body.appendChild(el("p","",tr("cal.termis",{name:list("cal.terms")[j]})));
+  var f=en?[]:festivals(C.y,C.m,C.d,lu);
   if(f.length) body.appendChild(el("p","",tr("cal.festis",{name:f.map(function(x){ return tr("cal.f."+x); }).join(" · ")})));
   if(h) body.appendChild(el("p","",tr(h.off?"cal.offday":"cal.workday",{name:holidayName(h.name)})));
   var mine=datesBetween(n,n)[n]||[];
