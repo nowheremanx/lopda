@@ -51,7 +51,8 @@ sdk/            MIT. pad-shim.js (PAD bridge), lo-game.js (game framework), LO-G
 registry/       index.json (generated) + apps/<id>/{manifest.json,index.html,src/ (optional sources)}
 tools/          check-app.mjs, build-index.mjs (also stamps each app's released/updated dates from git), bundle-app.mjs (+ lo-game.mjs alias), lo-game-lib.mjs, stamp-preview.mjs (Node 20+, no deps);
                 ai-review.mjs (the AI pre-review behind .github/workflows/ai-review.yml: the owner's `/review` on a PR; diff as text only,
-                a fixed local scan, one chat completion with no tools, a comment; OpenCode by OIDC with var OPENCODE_CLIENT_ID, or secret AI_REVIEW_KEY; vars AI_REVIEW_URL / AI_REVIEW_MODEL);
+                a fixed local scan with red/yellow levels per area, one chat completion with no tools whose rules are docs/ai-review.md,
+                a comment headed by one badge (PASS / CHECK / BLOCK, the stricter of scan and model); OpenCode by OIDC with var OPENCODE_CLIENT_ID, or secret AI_REVIEW_KEY; vars AI_REVIEW_URL / AI_REVIEW_MODEL);
                 readme-shots.mjs (the README pictures: docs/images/ in English, --lang=zh into docs/images/zh/ for README.zh.md; needs Playwright) with readme-scene.mjs (the lake the fake camera sees);
                 souvenir-sheet.mjs (contact sheets of the pet's souvenir catalogue; needs Playwright);
                 launch-video.mjs (the first launch film, about 34 s: records the runtime's scenes and cuts them with ffmpeg; needs Playwright and ffmpeg;
