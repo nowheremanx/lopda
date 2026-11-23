@@ -95,6 +95,8 @@ nav .lang{background:none;border:0;color:var(--on-case-dim);font:14px var(--f-bo
   .ways{gap:0;margin-inline:calc(-1 * max(16px,env(safe-area-inset-left,0px))) calc(-1 * max(16px,env(safe-area-inset-right,0px)))}
   .band.ways-band{padding-bottom:0}
   .way.computer{border-bottom:1px solid var(--case-line)}
+  /* Jumping to a panel puts its top right under the sticky bar, so no sliver of the band above shows (owner, 2026-11-23). */
+  .way{scroll-margin-top:var(--nav-h,64px)}
   .way{border-radius:0;padding:28px max(20px,env(safe-area-inset-right,0px)) 32px max(20px,env(safe-area-inset-left,0px))}
 }
 
@@ -364,7 +366,11 @@ footer{padding-block:32px;color:var(--on-case-dim);font-size:14px}
     for (var i = 0; i < events.length; i++) if (events[i].id === parts[0]) ev = events[i];
     if (ev) renderEvent(ev); else renderList();
     var at = parts[1] && (document.getElementById("way-" + parts[1]) || document.getElementById(parts[1]));
-    if (at) at.scrollIntoView();
+    if (at) {
+      // the sticky bar's real height, which the fonts decide (the phone panels scroll to exactly that)
+      document.documentElement.style.setProperty("--nav-h", document.querySelector("nav").offsetHeight + "px");
+      at.scrollIntoView();
+    }
     document.documentElement.lang = lang;
     document.getElementById("lang").textContent = lang === "zh" ? "EN" : "中文";
     var ts = document.querySelectorAll("[data-t]");
