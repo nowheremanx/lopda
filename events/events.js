@@ -29,7 +29,13 @@ window.LOPDA_EVENTS = [
         lede: { en: "Say what you want in one line. An AI writes it, it runs on the handheld, and you change it with another line.",
                 zh: "一句话说你想要什么。AI 写好，掌机上就能跑；想改，再说一句。" },
         facts: [
-          { k: { en: "You need", zh: "要准备" }, v: { en: "Your phone, and an AI key or any AI chat", zh: "一台手机，一把 AI key 或任意 AI 聊天" } },
+          { k: { en: "You need", zh: "要准备" },
+            v: { en: "Your phone, and a key for one AI line: DeepSeek, Kimi, Qwen, SiliconFlow or OpenRouter. Or any AI chat.",
+                 zh: "一台手机，一把 AI 线路的 key：DeepSeek、Kimi、通义千问、硅基流动或 OpenRouter，任选一家。或者任意 AI 聊天。" },
+            /* the handheld's own Settings, AI line, + Add line page (events/img/) */
+            pic: { src: { en: "img/ai-lines-en.png", zh: "img/ai-lines-zh.png" },
+                   alt: { en: "The handheld's Add a line page: OpenRouter, DeepSeek, Kimi, Qwen and SiliconFlow, each with how you pay",
+                          zh: "掌机的「添加线路」页：OpenRouter、DeepSeek、Kimi、通义千问、硅基流动，每家写着怎么付款" } } },
           { k: { en: "Who sees it", zh: "谁能看到" }, v: { en: "Only you", zh: "只有你自己" } },
           { k: { en: "It lives", zh: "放在哪" }, v: { en: "In Scripts, on this phone", zh: "这台手机的「脚本」里" } }
         ],
