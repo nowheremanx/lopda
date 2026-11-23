@@ -57,7 +57,7 @@ function colRef(list) {
   return { get: () => Promise.resolve({ docs: list.map(([id, v]) => ({ id, data: () => v })) }), doc: () => docRef(undefined) };
 }
 
-/* run lunar.js, then one built-in, with a fake window.LP */
+/* run lunar.js and usholidays.js (the calendar's English holidays), then one built-in, with a fake window.LP */
 function boot(file, opt = {}) {
   const ids = new Map();
   const $ = (id) => { if (!ids.has(id)) ids.set(id, elem()); return ids.get(id); };
@@ -70,7 +70,7 @@ function boot(file, opt = {}) {
   };
   const shown = [];
   const LP = {
-    $, S: { db: opt.db || null }, shown,
+    $, S: { db: opt.db || null }, shown, I18N: { lang: "zh" },
     tr: (k, p) => (k === "cal.ym" && p ? p.y + "-" + p.m : k),
     own: (x) => x, toast() {}, put: () => Promise.resolve(true), sfx() {},
     show(name) { shown.push(name); }, showPad() {}, uid: () => "id",
@@ -88,6 +88,7 @@ function boot(file, opt = {}) {
     LP, Date: fixedDate("2026-10-24T12:00:00")
   }, opt.globals || {});
   const ctx = runScript("runtime/lunar.js", globals);
+  vm.runInContext(read("runtime/usholidays.js"), ctx, { filename: "runtime/usholidays.js" });
   vm.runInContext(read(file), ctx, { filename: file });
   const builtin = ctx.LP.builtins[0];
   return { ctx, LP: ctx.LP, $, builtin, document };
