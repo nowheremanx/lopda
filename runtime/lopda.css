@@ -202,6 +202,7 @@ textarea::placeholder{color:var(--ink-2)}
 .save-sheet p{margin:0;font-size:14px;word-break:break-all}
 /* the runtime's file dialog over a running app: the scrim (no colour of its own) keeps taps off the app */
 .file-ask{position:absolute;inset:0;z-index:7;display:flex;align-items:center;justify-content:center;padding:16px}
+.file-ask .box:focus{outline:none}
 .file-ask .box{width:100%;max-width:300px;background:var(--lcd-2);border:3px solid var(--ink);box-shadow:4px 4px 0 var(--ink);padding:14px;display:flex;flex-direction:column;gap:12px}
 .file-ask p{margin:0;font-size:16px;line-height:1.4;word-break:break-all}
 .file-ask .row{display:flex;gap:10px}
