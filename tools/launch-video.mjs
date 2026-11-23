@@ -622,15 +622,38 @@ async function record() {
       ["klotski", [["x", 80], ["wait", 1000]], play(12)],
       ["crossing", [["x", 80], ["wait", 1200]], [["x", 80], ["wait", 600], ...play(8)]],
       ["kana-cards", [["x", 80], ["wait", 1000]], [["x", 80], ["wait", 900], ["ArrowRight", 80], ["wait", 900], ["x", 80], ["wait", 900], ["ArrowRight", 80], ["wait", 800]]],
-      ["paint", [["wait", 300]], [["drag", [[0.2, 0.35], [0.8, 0.4], [0.7, 0.6], [0.3, 0.55], [0.5, 0.7]]], ["wait", 600]]],
+      /* Paint: a little handheld drawn stroke by stroke on the 96 x 96 canvas with the bold pen (original drawing):
+         the body, its screen, a smile on the screen, the cross, two round keys */
+      ["paint", [["fn", (f) => f.locator("#size").click()], ["wait", 400]], [["fn", async (f) => {
+        const box = await f.locator("#cv").boundingBox(), at = ([x, y]) => [box.x + box.width * x / 96, box.y + box.height * y / 96];
+        const ring = (cx, cy, r, n = 10) => Array.from({ length: n + 1 }, (_, i) => [cx + r * Math.cos(2 * Math.PI * i / n), cy + r * Math.sin(2 * Math.PI * i / n)]);
+        const strokes = [
+          [[30, 12], [66, 12], [66, 84], [30, 84], [30, 12]],      /* body */
+          [[36, 18], [60, 18], [60, 42], [36, 42], [36, 18]],      /* screen */
+          [[42, 32], [45, 35], [51, 35], [54, 32]],                /* a smile on it */
+          [[35, 60], [47, 60]], [[41, 54], [41, 66]],              /* the cross */
+          ring(55, 64, 3, 8), ring(61, 56, 3, 8),                  /* two keys */
+        ];
+        for (const st of strokes) {
+          await a.mouse.move(...at(st[0])); await a.mouse.down();
+          for (let i = 1; i < st.length; i++) { const [x0, y0] = st[i - 1], [x1, y1] = st[i], n = Math.max(2, Math.round(Math.hypot(x1 - x0, y1 - y0) / 3));
+            for (let j = 1; j <= n; j++) { await a.mouse.move(...at([x0 + (x1 - x0) * j / n, y0 + (y1 - y0) * j / n])); await a.waitForTimeout(22); } }
+          await a.mouse.up(); await a.waitForTimeout(220);
+        }
+      }], ["wait", 900]]],
       ["sound-board", [["wait", 300]], [["x", 80], ["wait", 700], ["ArrowDown", 80], ["x", 80], ["wait", 700], ["ArrowDown", 80], ["x", 80], ["wait", 700], ["ArrowDown", 80], ["x", 80], ["wait", 700]]],
       ["daily-slip", [["x", 80], ["wait", 1200]], play(10)],
-      /* Save book: counters, A adds one, the D-pad picks another */
-      ["save-book", [["wait", 500]], [["x", 80], ["wait", 300], ["x", 80], ["wait", 300], ["ArrowDown", 80], ["wait", 300], ["x", 80], ["wait", 300], ["x", 80], ["wait", 300], ["x", 80], ["wait", 300], ["ArrowRight", 80], ["wait", 300], ["x", 80], ["wait", 300], ["x", 80], ["wait", 500]]],
+      /* Save book: two tallies named first (the name field, then the handheld's A: the app's own 新增 button is a form
+         submit, which the sandbox blocks), then counted up by tapping them */
+      ["save-book", [["fn", async (f) => { for (const n of (LANG === "zh" ? ["喝水", "练琴"] : ["Water", "Piano"])) {
+          await f.locator("#name").fill(n); await f.locator("#name").focus();
+          const bx = await a.locator('.gamepad [data-b="a"]').boundingBox(); await a.mouse.click(bx.x + bx.width / 2, bx.y + bx.height / 2); await a.waitForTimeout(400); } }], ["wait", 500]],
+        [["fn", async (f) => { const rows = f.locator("#list > *"); for (const k of [0, 0, 1, 0, 1, 1, 0, 1, 0]) { await rows.nth(k).click({ position: { x: 40, y: 12 } }); await a.waitForTimeout(420); } }]]],
       ["calculator", [["wait", 300]], [["tap", [0.15, 0.62]], ["wait", 250], ["tap", [0.4, 0.62]], ["wait", 250], ["tap", [0.65, 0.75]], ["wait", 250], ["tap", [0.15, 0.75]], ["wait", 250], ["tap", [0.88, 0.88]], ["wait", 1500]]],
     ];
     /* what the second half of a --long clip plays where repeating the first would not look like play */
     const LONG_EXTRA = {
+      paint: [["wait", 600]],   /* the picture is finished: it stays */
       gomoku: [["fn", async (f) => {
         const box = await f.locator("#c").boundingBox(), cell = box.width / 15;
         for (const [x, y] of [[5, 9], [9, 5], [8, 8]]) { await a.mouse.click(box.x + (x + 0.5) * cell, box.y + (y + 0.5) * cell); await a.waitForTimeout(1200); }
