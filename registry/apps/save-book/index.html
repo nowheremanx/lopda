@@ -35,10 +35,10 @@ input::placeholder{color:#4a5a32}
 <header><h1 id="title">存档本</h1><div id="status"></div></header>
 <main id="main">
   <div id="list"></div>
-  <form id="addForm">
-    <input id="name" maxlength="16" autocomplete="off">
-    <button id="add" class="primary" type="submit"></button>
-  </form>
+  <div id="addForm">
+    <input id="name" maxlength="16" autocomplete="off" enterkeyhint="done">
+    <button id="add" class="primary" type="button"></button>
+  </div>
   <div id="inlineInfo" class="line"></div>
   <section id="infoScreen" class="hidden">
     <p id="infoDetail" class="line"></p>
@@ -387,9 +387,14 @@ input::placeholder{color:#4a5a32}
     });
   }
 
-  form.addEventListener('submit', function (event) {
-    event.preventDefault();
-    addTally();
+  // No <form> submit here: apps run in a sandbox without allow-forms, so the browser drops
+  // form submissions before any submit handler runs. The button and the Enter key call addTally directly.
+  addButton.addEventListener('click', addTally);
+  nameInput.addEventListener('keydown', function (event) {
+    if (event.key === 'Enter' && !event.isComposing) {
+      event.preventDefault();
+      addTally();
+    }
   });
   backButton.addEventListener('click', function () {
     infoPage = false;

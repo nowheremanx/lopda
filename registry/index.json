@@ -1,6 +1,6 @@
 {
   "spec": "lopda/1",
-  "generated": "2026-11-21",
+  "generated": "2026-11-23",
   "apps": [
     {
       "spec": "lopda/1",
@@ -689,8 +689,9 @@
         "................",
         "................"
       ],
-      "version": "1.0.0",
+      "version": "1.0.1",
       "released": "2026-11-18",
+      "updated": "2026-11-18",
       "description": "最多八个计数器，点选或按 A 累加；查看存档格式与时间。",
       "i18n": {
         "en": {
@@ -701,8 +702,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/save-book/index.html",
-      "sha256": "3e31182f07c35986765aa864aeeef85cae0a3c170a079ff927f1b268aa1aef44",
-      "bytes": 14009
+      "sha256": "f45fa8fa315155f98b04f2d8c2ba422705d82ce6900b8135c8813e034a5517f6",
+      "bytes": 14346
     },
     {
       "spec": "lopda/1",
