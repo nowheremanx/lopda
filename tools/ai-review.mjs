@@ -183,6 +183,29 @@ export function formatComment({ findings, cut, answer, model, error }) {
   return sanitize(lines.join("\n"));
 }
 
+// The useful part of an error body: {error: {message}} / {message} / plain text, one line, at most 300 characters.
+export function errorText(body) {
+  let t = String(body || "");
+  try {
+    const j = JSON.parse(t);
+    t = (j.error && (j.error.message || j.error.type || JSON.stringify(j.error))) || j.message || j.detail || t;
+  } catch (e) { /* not JSON: keep the text */ }
+  t = String(t).replace(/\s+/g, " ").trim();
+  return t.length > 300 ? t.slice(0, 300) + "..." : t || "(no body)";
+}
+
+// GET <base>/models next to <base>/chat/completions; [] when it fails. Same host and key as the review call.
+async function listModels(url, key) {
+  if (!/\/chat\/completions$/.test(url)) return [];
+  try {
+    const res = await fetch(url.replace(/\/chat\/completions$/, "/models"), {
+      headers: { authorization: "Bearer " + key }, signal: AbortSignal.timeout(30000) });
+    if (!res.ok) return [];
+    const j = await res.json();
+    return (j.data || []).map((m) => String(m.id)).filter((id) => /^[\w.:\/-]{1,80}$/.test(id)).slice(0, 60);
+  } catch (e) { return []; }
+}
+
 async function callModel({ url, key, model, system, user }) {
   const res = await fetch(url, {
     method: "POST",
@@ -191,8 +214,14 @@ async function callModel({ url, key, model, system, user }) {
     signal: AbortSignal.timeout(300000),
   });
   const text = await res.text();
-  // Never echo the response body on error: keep the log free of anything but the status.
-  if (!res.ok) throw new Error("model API answered HTTP " + res.status);
+  // On an error, show the API's own reason (cut short; it never holds the key) and, when the URL looks like
+  // .../chat/completions, the model ids the same API offers, so a wrong model name or plan is plain to see.
+  if (!res.ok) {
+    let msg = "model API answered HTTP " + res.status + ": " + errorText(text);
+    const ids = await listModels(url, key);
+    if (ids.length) msg += "\nModels this API offers: " + ids.join(", ");
+    throw new Error(msg);
+  }
   const json = JSON.parse(text);
   return json.choices && json.choices[0] && json.choices[0].message ? json.choices[0].message.content : "";
 }
