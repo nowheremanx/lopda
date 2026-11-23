@@ -50,6 +50,11 @@ const LANG = opt("lang", "en");
 const ONLY = opt("only", "").split(",").filter(Boolean);
 const want = (n) => !ONLY.length || ONLY.includes(n);
 const LONG = args.includes("--long");
+/* --clock=<ISO time>: the fixed clock (the English film sets late November so the calendar shows US holidays) */
+const CLOCK = opt("clock", "2026-10-22T09:41:00+08:00");
+/* --audio: also record what the page plays (the runtime's one AudioContext, tapped where it meets the speakers) and put
+   it under each clip, so the edit has the real UI sounds */
+const AUDIO = args.includes("--audio");
 if (MODE !== "record" && MODE !== "edit") { console.error("usage: launch-video.mjs record|edit <outDir> [--lang=en|zh]"); process.exit(2); }
 
 /* the screen's size in css px, and the scale of the frames */
@@ -88,10 +93,32 @@ async function record() {
     timezoneId: "Asia/Shanghai", locale: LANG === "zh" ? "zh-CN" : "en-US", serviceWorkers: "block", acceptDownloads: true,
     permissions: ["camera"] });
   await ctx.route("https://cdn.jsdelivr.net/**", (r) => r.fulfill({ status: 404, body: "not found" }));
+  if (AUDIO) await ctx.addInitScript(() => {
+    const connect = AudioNode.prototype.connect, taps = new Map();
+    window.__lpRec = { taps };
+    AudioNode.prototype.connect = function (target, ...rest) {
+      const r = connect.call(this, target, ...rest);
+      try { if (target && target === this.context.destination) {
+        let d = taps.get(this.context); if (!d) { d = this.context.createMediaStreamDestination(); taps.set(this.context, d); }
+        connect.call(this, d); } } catch (e) {}
+      return r;
+    };
+  });
+  const recStart = async (p) => p.evaluate(() => {
+    if (window.LP && LP.audio) LP.audio();
+    const d = window.__lpRec && [...window.__lpRec.taps.values()][0]; if (!d) return false;
+    const r = window.__lpRec.rec = new MediaRecorder(d.stream, { mimeType: "audio/webm" }); window.__lpRec.chunks = [];
+    r.ondataavailable = (e) => window.__lpRec.chunks.push(e.data); r.start(200); return true;
+  }).catch(() => false);
+  const recStop = async (p) => p.evaluate(() => new Promise((ok) => {
+    const R = window.__lpRec; if (!R || !R.rec) return ok(null);
+    R.rec.onstop = () => { const fr = new FileReader(); fr.onload = () => ok(String(fr.result).split(",")[1]); fr.readAsDataURL(new Blob(R.chunks, { type: "audio/webm" })); };
+    R.rec.stop();
+  })).catch(() => null);
 
   const newPage = async (q = "") => {
     const p = await ctx.newPage();
-    await p.clock.install({ time: new Date("2026-10-22T09:41:00+08:00") });   /* a weekday morning; time runs */
+    await p.clock.install({ time: new Date(CLOCK) });   /* a weekday morning; time runs */
     await p.goto(base + "/runtime/" + q, { waitUntil: "load" });
     return p;
   };
@@ -108,12 +135,15 @@ async function record() {
   async function film(p, name, act, shots = false) {
     const dir = join(work, name); await rm(dir, { recursive: true, force: true }); await mkdir(dir, { recursive: true });
     const frames = [], file = () => join(dir, String(frames.length).padStart(5, "0") + ".jpg");
-    let cdp = null, t0, t1;
+    let cdp = null, t0, t1, recAt = null, rec = null;
+    const begin = async () => { if (AUDIO && await recStart(p)) recAt = Date.now() / 1000; };
+    const finish = async () => { if (recAt != null) rec = await recStop(p); };
     if (shots) {
+      await begin();
       let done = false; t0 = Date.now() / 1000;
       const loop = (async () => { while (!done) { const f = file(), t = Date.now() / 1000;
         await p.screenshot({ path: f, type: "jpeg", quality: 92 }); frames.push({ file: f, t }); } })();
-      await act(); t1 = Date.now() / 1000; done = true; await loop;
+      await act(); t1 = Date.now() / 1000; done = true; await loop; await finish();
     } else {
       cdp = await ctx.newCDPSession(p);
       cdp.on("Page.screencastFrame", async (f) => {
@@ -122,10 +152,11 @@ async function record() {
         writeFile(out, Buffer.from(f.data, "base64"));
         try { await cdp.send("Page.screencastFrameAck", { sessionId: f.sessionId }); } catch {}
       });
+      await begin();
       await cdp.send("Page.startScreencast", { format: "jpeg", quality: 95, maxWidth: VW * DPR, maxHeight: VH * DPR, everyNthFrame: 1 });
       t0 = Date.now() / 1000; film.t0 = Date.now();
       await act();
-      t1 = Date.now() / 1000;
+      t1 = Date.now() / 1000; await finish();
       await cdp.send("Page.stopScreencast"); await p.waitForTimeout(300); await cdp.detach();
       t1 -= t0 - frames[0]?.t || 0; t0 = frames[0]?.t;   /* the screencast's own clock */
     }
@@ -138,12 +169,18 @@ async function record() {
     await writeFile(join(dir, "list.txt"), list);
     ff("-f", "concat", "-safe", "0", "-i", join(dir, "list.txt"), "-vf", `fps=30,scale=${VW * DPR}:${VH * DPR}:flags=neighbor,format=yuv420p`,
       "-c:v", "libx264", "-crf", "14", "-preset", "slow", join(clips, name + ".mp4"));
-    console.log("clip", name, frames.length, "frames", (t1 - t0).toFixed(1) + " s");
+    /* the page's sound under the clip: the recorder started recAt (epoch s), the picture at t0 (the screencast's clock) */
+    if (rec) {
+      const webm = join(dir, "sound.webm"), tmp = join(dir, "with-sound.mp4"); await writeFile(webm, Buffer.from(rec, "base64"));
+      const off = recAt - t0, af = off >= 0 ? `adelay=${Math.round(off * 1000)}:all=1,apad` : `atrim=start=${(-off).toFixed(3)},asetpts=PTS-STARTPTS,apad`;
+      ff("-i", join(clips, name + ".mp4"), "-i", webm, "-filter_complex", `[1:a]${af}[a]`, "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-shortest", tmp);
+      await rm(join(clips, name + ".mp4")); await writeFile(join(clips, name + ".mp4"), await readFile(tmp));
+    }
   }
 
   /* ---- boot: the first start, the home screen drawing ---- */
   let p = await ctx.newPage();
-  await p.clock.install({ time: new Date("2026-10-22T09:41:00+08:00") });
+  await p.clock.install({ time: new Date(CLOCK) });
   await p.goto("about:blank");
   if (want("boot")) await film(p, "boot", async () => { await p.goto(base + "/runtime/", { waitUntil: "load" }); await ready(p); await p.waitForTimeout(1500); });
   else { await p.goto(base + "/runtime/", { waitUntil: "load" }); await ready(p); }
@@ -310,14 +347,16 @@ async function record() {
      <outDir>/wind-up-timer/, or --timer=<file>) is put into Scripts, run once as it is, revised with one line, run again.
      Only with --only=scripts-revise and DEEPSEEK_KEY in the environment, as scripts-gen. ---- */
   if (ONLY.includes("scripts-revise")) {
-    const KEY = process.env.DEEPSEEK_KEY;
-    if (!KEY) throw new Error("scripts-revise needs DEEPSEEK_KEY in the environment");
+    /* --runonly: no AI at all: run the newest saved timer and its newest revised version (for clips with sound) */
+    const RUNONLY = args.includes("--runonly");
+    const KEY = process.env.DEEPSEEK_KEY || (RUNONLY ? "" : null);
+    if (KEY == null) throw new Error("scripts-revise needs DEEPSEEK_KEY in the environment");
     const { readdirSync } = await import("node:fs");
     const tdir = join(OUT, "wind-up-timer");
     const file = opt("timer", "") || join(tdir, readdirSync(tdir).filter((f) => /^timer-.*\.html$/.test(f)).sort().at(-1));
     const body = await readFile(file, "utf8");
     const ASK = opt("ask", LANG === "zh" ? "数字再大一点" : "Make the numbers bigger");
-    const NAME = LANG === "zh" ? "发条蛋表" : "Wind-up egg timer";
+    const NAME = opt("name", LANG === "zh" ? "发条蛋表" : "Wind-up egg timer");
     const q = await newPage(); await ready(q);
     await q.evaluate(([k, body, name]) => Promise.all([
       LP.S.db.doc("data/users/local/ai").set({ v: 2, next: 2, def: "l1", use: {},
@@ -340,6 +379,17 @@ async function record() {
       await q.click("#script-run"); await q.waitForSelector("#v-run:not([hidden])", { timeout: 10000 }); await q.waitForTimeout(1200);
       await play();
     }, true);
+    if (RUNONLY) {
+      const rfile = join(tdir, readdirSync(tdir).filter((f) => /^revised-.*\.html$/.test(f)).sort().at(-1));
+      await home(q);
+      await q.evaluate(([body, name]) => LP.S.db.doc("data/users/local/scripts/items/timer").set({ v: 1, id: "timer", name, body, created: Date.now(), updated: Date.now() }), [await readFile(rfile, "utf8"), NAME]);
+      await q.reload({ waitUntil: "load" }); await ready(q); await openTimer();
+      await film(q, "scripts-revised", async () => {
+        await q.click("#script-run"); await q.waitForSelector("#v-run:not([hidden])", { timeout: 10000 }); await q.waitForTimeout(1200);
+        await play();
+      }, true);
+      await q.close();
+    } else {
     await home(q); await openTimer();
     const t0 = Date.now();
     await film(q, "scripts-revise", async () => {
@@ -365,6 +415,7 @@ async function record() {
       await play();
     }, true);
     await q.close();
+    }
   }
   /* ---- the events page at a phone's width: the list, the first event, its two ways (their little screens typing), the cards ---- */
   if (ONLY.includes("events")) {
@@ -391,7 +442,8 @@ async function record() {
     const q = await ctx.newPage(); await q.goto(base + "/runtime/", { waitUntil: "load" }); await ready(q);
     await tile(q, T.store);
     await q.waitForSelector("#store-list .store-item", { timeout: 10000 }); await q.waitForLoadState("networkidle"); await q.waitForTimeout(800);
-    const NEW = LANG === "zh" ? "新" : "NEW";
+    /* --badge=updated looks for the UPDATED badge instead, for a week when no app is new */
+    const NEW = opt("badge", "") === "updated" ? (LANG === "zh" ? "更新" : "UPDATED") : (LANG === "zh" ? "新" : "NEW");
     const y = await q.evaluate((n) => { const b = [...document.querySelectorAll("#store-list .store-badge")].find((e) => e.textContent === n);
       return b ? b.closest(".store-item").getBoundingClientRect().top - 220 : null; }, NEW);
     if (y == null) throw new Error("store-new: no app has the " + NEW + " badge today");
@@ -608,7 +660,7 @@ async function record() {
       ["lao-zhang", [["x", 80], ["wait", 1000], ["x", 80], ["wait", 1200]], [["wait", 900], ["x", 80], ["wait", 1500], ["x", 80], ["wait", 1300]]],
       ["paper-tower", [["x", 80], ["wait", 800], ["x", 80], ["wait", 800], ["x", 80], ["wait", 800]], play(12)],
       /* one tap at a time: each tap draws its own hammer for 260 ms, so quick taps show several hammers at once */
-      ["whack-a-mole", [["tap", [0.5, 0.6]], ["wait", 800], ["tap", [0.5, 0.6]], ["wait", 800]], taps(9).flatMap((x) => [x, ["wait", 330]])],
+      ["whack-a-mole", [["fn", (f) => f.locator("#btns button").first().click()], ["wait", 900]], taps(9).flatMap((x) => [x, ["wait", 330]])],
       ["shanjiao-diner", [["x", 80], ["wait", 1000], ["x", 80], ["wait", 1000], ["x", 80], ["wait", 1000]], play(12)],
       /* Sisyphus pushes while A is held (not the D-pad) */
       ["sisyphus", [["x", 80], ["wait", 1200]], [["x", 3800]]],
