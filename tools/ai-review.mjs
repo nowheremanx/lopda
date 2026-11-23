@@ -20,6 +20,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { randomUUID } from "node:crypto";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -206,10 +207,22 @@ async function listModels(url, key) {
   } catch (e) { return []; }
 }
 
+// OpenCode Go routes requests by client and session: it asks for a stable x-opencode-session per conversation and a
+// user agent naming the client (opencode.ai/docs/console/go). One review is one conversation. Other APIs get neither.
+const SESSION = "lopda-ai-review-" + randomUUID();
+export function requestHeaders(url, key) {
+  const h = { "content-type": "application/json", authorization: "Bearer " + key };
+  if (/^https:\/\/opencode\.ai\//.test(url)) {
+    h["x-opencode-session"] = SESSION;
+    h["user-agent"] = "lopda-ai-review/1 (+https://github.com/nowheremanx/lopda)";
+  }
+  return h;
+}
+
 async function callModel({ url, key, model, system, user }) {
   const res = await fetch(url, {
     method: "POST",
-    headers: { "content-type": "application/json", authorization: "Bearer " + key },
+    headers: requestHeaders(url, key),
     body: JSON.stringify({ model, temperature: 0.2, messages: [{ role: "system", content: system }, { role: "user", content: user }] }),
     signal: AbortSignal.timeout(300000),
   });
