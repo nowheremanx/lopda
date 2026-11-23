@@ -246,6 +246,65 @@ async function record() {
     await film(q, "pet", async () => { await q.waitForTimeout(4000); });
     await q.close();
   }
+  /* ---- the pet doing something: its Run play pack (the play icon, the first pack), jumping on A ---- */
+  if (ONLY.includes("pet-act")) {
+    const q = await newPage("?debug"); await ready(q);
+    await tile(q, T.pet);
+    await q.waitForFunction(() => window.LOPDA_DEBUG.pet && LOPDA_DEBUG.pet.save());
+    await q.evaluate(() => LOPDA_DEBUG.pet.hatch()); await q.waitForTimeout(400);
+    await q.evaluate(() => LOPDA_DEBUG.pet.setDay(5)); await q.waitForTimeout(600);
+    await q.evaluate(() => LOPDA_DEBUG.pet.gameSeed(7)); await q.waitForTimeout(1500);
+    await key(q, "ArrowRight"); await q.waitForTimeout(300);
+    await key(q, "x"); await q.waitForTimeout(600);               /* the pack list */
+    await key(q, "x"); await q.waitForTimeout(800);               /* Run: its start card */
+    await film(q, "pet-act", async () => {
+      await q.waitForTimeout(600);
+      await key(q, "x"); await q.waitForTimeout(500);             /* the round starts */
+      for (let i = 0; i < 9; i++) { await q.keyboard.down("x"); await q.waitForTimeout(i % 3 ? 120 : 260); await q.keyboard.up("x"); await q.waitForTimeout(520); }
+      await q.waitForTimeout(800);
+    });
+    await q.close();
+  }
+  /* ---- Scripts writing a program with the AI: only with --only=scripts-gen and DEEPSEEK_KEY in the environment.
+     The key is written straight into the AI lines document (the shape settings.js keeps, runtime/ailines.js) and never
+     shown: the Settings pages are not opened. The answer is kept in <outDir>/wind-up-timer/. ---- */
+  if (ONLY.includes("scripts-gen")) {
+    const KEY = process.env.DEEPSEEK_KEY;
+    if (!KEY) throw new Error("scripts-gen needs DEEPSEEK_KEY in the environment");
+    const IDEA = opt("idea", LANG === "zh" ? "一个发条蛋表" : "A wind-up egg timer");
+    const q = await newPage(); await ready(q);
+    await q.evaluate((k) => LP.S.db.doc("data/users/local/ai").set({ v: 2, next: 2, def: "l1", use: {},
+      lines: [{ id: "l1", provider: "deepseek", n: 1, key: k, model: "", visionModel: "", on: true, added: Date.now() }] }), KEY);
+    await q.reload({ waitUntil: "load" }); await ready(q);
+    await tile(q, LANG === "zh" ? "脚本" : "Scripts"); await q.waitForSelector("#v-scripts:not([hidden])"); await q.waitForTimeout(600);
+    await film(q, "scripts-gen", async () => {
+      await q.waitForTimeout(500);
+      await q.click("#scripts-write"); await q.waitForSelector("#v-script-idea:not([hidden])"); await q.waitForTimeout(500);
+      await q.click("#scripts-idea");
+      for (const ch of IDEA) { await q.keyboard.type(ch); await q.waitForTimeout(220); }
+      await q.waitForTimeout(700);
+      await q.click("#idea-copy");                                   /* 生成 */
+      await q.waitForSelector("#v-script-edit:not([hidden])");
+      await q.waitForFunction(() => !document.getElementById("script-run").disabled && document.getElementById("script-code").value.length > 50,
+        null, { timeout: 15 * 60000, polling: 500 });
+      await q.waitForTimeout(1500);
+    });
+    const code = await q.$eval("#script-code", (e) => e.value);
+    const dir = join(OUT, "wind-up-timer"); await mkdir(dir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    await writeFile(join(dir, "timer-" + stamp + ".html"), code);
+    console.log("scripts-gen: " + code.length + " characters, " + join(dir, "timer-" + stamp + ".html"));
+    /* the running program is a sandboxed frame: screenshots instead of the screencast */
+    await film(q, "scripts-run", async () => {
+      await q.click("#script-run"); await q.waitForSelector("#v-run:not([hidden])", { timeout: 10000 }); await q.waitForTimeout(1500);
+      const box = await q.locator("#run-frame").boundingBox(), cx = box.x + box.width / 2, cy = box.y + box.height * 0.45, r = box.width * 0.25;
+      await q.mouse.move(cx + r, cy); await q.mouse.down();
+      for (let i = 0; i <= 60; i++) { const a = i / 60 * Math.PI * 1.6; await q.mouse.move(cx + r * Math.cos(a), cy + r * Math.sin(a)); await q.waitForTimeout(25); }
+      await q.mouse.up(); await q.waitForTimeout(800);
+      await key(q, "ArrowUp", 3, 250); await key(q, "x"); await q.waitForTimeout(3000);
+    }, true);
+    await q.close();
+  }
   if (want("studio")) {
     await home(p); await tile(p, T.studio);
     await p.waitForSelector("#v-studio:not([hidden])"); await p.waitForTimeout(800);
