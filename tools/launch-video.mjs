@@ -423,15 +423,18 @@ async function record() {
     await q.addInitScript((l) => { try { localStorage.setItem("lopda-landing-lang", l); } catch (e) {} }, LANG);
     await q.goto(base + "/events/", { waitUntil: "networkidle" }); await q.waitForTimeout(800);
     const glide = async (dy, ms) => { const n = Math.max(1, Math.round(ms / 30)); for (let i = 0; i < n; i++) { await q.mouse.wheel(0, dy / n); await q.waitForTimeout(30); } };
-    const to = async (sel, ms, off = 90) => { const y = await q.evaluate(([s, o]) => { const e = document.querySelector(s); return e ? e.getBoundingClientRect().top - o : 0; }, [sel, off]); await glide(y, ms); };
+    /* scroll an element (or the section that holds it) to just under the site's header, so the frame starts inside that
+       section and no strip of the section above shows (owner, 2026-11-23); off > 0 places it that far lower */
+    const to = async (sel, ms, off = 0, section = false) => { const y = await q.evaluate(([s, o, sec]) => { let e = document.querySelector(s); if (e && sec) e = e.closest("section") || e;
+      const nav = document.querySelector("nav"), top = nav ? nav.getBoundingClientRect().bottom : 0; return e ? e.getBoundingClientRect().top - top - o : 0; }, [sel, off, section]); await glide(y, ms); };
     await q.mouse.move(VW / 2, VH / 2);
     await film(q, "events", async () => {
       await q.waitForTimeout(900);
       await q.locator("a.ev").first().click(); await q.waitForTimeout(1200);
       await to("#way-phone", 900); await q.waitForTimeout(2600);
-      await to("#way-phone .screen", 600, 200); await q.waitForTimeout(800);
+      await to("#way-phone .screen", 600, 110); await q.waitForTimeout(800);
       await to(".way:not(#way-phone)", 900); await q.waitForTimeout(2400);
-      await to(".card", 900, 140); await q.waitForTimeout(600);
+      await to(".card", 900, 0, true); await q.waitForTimeout(600);
       await glide(2200, 2600); await q.waitForTimeout(500);
     });
     await q.close();
