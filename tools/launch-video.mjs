@@ -475,11 +475,18 @@ async function record() {
     await q.click("#studio-menu"); await q.waitForTimeout(300);
     await q.locator("#studio-sheet li", { hasText: T.file }).first().click(); await q.waitForTimeout(300);
     const [d] = await Promise.all([q.waitForEvent("download", { timeout: 180000 }), q.locator("#studio-sheet li", { hasText: /WAV/ }).first().click()]);
-    const wav = join(dirname(resolve(file)), "film-tape.wav"); await d.saveAs(wav); console.log("studio-tape:", wav);
+    const wav = resolve(file).replace(/\.json$/, "") + ".wav"; await d.saveAs(wav); console.log("studio-tape:", wav);
     await q.waitForFunction(() => document.getElementById("toast").hidden, null, { timeout: 15000 }).catch(() => {}); await q.waitForTimeout(500);
+    /* --slot=<n>: start the chain at bar n (1-based): the song screen's play key starts from the selected slot, so the picture can match the
+       bar the film's soundtrack is at; otherwise from the top */
+    const slot = +opt("slot", "0");
     for (const scr of opt("screens", "song,drums").split(",")) {
       await q.click(`#studio-screens .st-scr[data-screen="${scr}"]`); await q.waitForTimeout(400); await skipTour();
-      await q.click("#studio-play"); await q.waitForTimeout(400);
+      if (slot > 0 && scr === "song") {
+        await q.locator("#studio-chain > *").nth(slot - 1).click(); await q.waitForTimeout(400);
+        if (await q.locator("#studio-sheet:not([hidden])").count()) { await key(q, "z"); await q.waitForTimeout(300); }
+        await q.click("#studio-play"); await q.waitForTimeout(200);
+      } else { await q.click("#studio-play"); await q.waitForTimeout(400); }
       await film(q, "studio-" + scr, async () => { await q.waitForTimeout(7000); });
       await q.click("#studio-play"); await q.waitForTimeout(500);
     }
@@ -601,7 +608,8 @@ async function record() {
       ["paper-tower", [["x", 80], ["wait", 800], ["x", 80], ["wait", 800], ["x", 80], ["wait", 800]], play(12)],
       ["whack-a-mole", [["tap", [0.5, 0.6]], ["wait", 800], ["tap", [0.5, 0.6]], ["wait", 800]], taps(16)],
       ["shanjiao-diner", [["x", 80], ["wait", 1000], ["x", 80], ["wait", 1000], ["x", 80], ["wait", 1000]], play(12)],
-      ["sisyphus", [["x", 80], ["wait", 1200]], [["ArrowRight", 3800]]],
+      /* Sisyphus pushes while A is held (not the D-pad) */
+      ["sisyphus", [["x", 80], ["wait", 1200]], [["x", 3800]]],
       ["daily-box", [["x", 80], ["wait", 1000]], play(12)],
       ["rain-station", [["x", 80], ["wait", 800], ["x", 80], ["wait", 2500]], [["wait", 1200], ["x", 80], ["wait", 1500], ["x", 80], ["wait", 800]]],
       /* Gomoku is touch only: START, then a few points of the 15 x 15 board; the computer answers each one */
