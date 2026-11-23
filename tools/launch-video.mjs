@@ -12,6 +12,20 @@
 // The camera is Chromium's fake device fed from docs/images/stocks/0-original.jpg (the owner's own photo, already
 // shown in the README), moving slowly as a hand would. Frames come from the DevTools screencast with their own
 // timestamps, so every clip plays at the speed it ran. The cartridge player is never shown: Lo-PDA ships no games.
+//
+// Scenes for the promo films, recorded only when named in --only (the edit for those films lives outside the repo):
+//   home-cam, notes2, calendar2   home into the camera and one shot; today's diary with 那年今日; diary corners
+//   pet-act                       the pet's Run pack;  ai-add  the AI lines' provider list (refuses if any line is stored)
+//   scripts-gen, scripts-revise   Scripts writing (--idea) and revising (--ask) a program over a DeepSeek line; the key
+//                                 comes only from the DEEPSEEK_KEY environment variable and never reaches the screen;
+//                                 --runonly replays saved programs (--timer, --revised) without the AI; --hold sets how
+//                                 long a run is filmed after the dial is let go
+//   events, store-new             the events page (each part scrolled to just under the header); the newest app's badge
+//                                 (--badge=updated takes the UPDATED badge)
+//   studio-tape, studio-bars      Tape4 playing --tape=<song.json> (its WAV exported; --slot starts at a bar); the drums
+//                                 and melody pages playing --bars=<n,...> one bar at a time, for cutting in step
+// Other flags: --clock=<ISO time> (the fixed clock), --audio (the page's own sound under each clip), --long (grid apps
+// played twice as long), --only=app:<id>,... (just those apps).
 import { createServer } from "node:http";
 import { readFile, writeFile, mkdir, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
