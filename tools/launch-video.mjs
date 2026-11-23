@@ -578,6 +578,23 @@ async function record() {
     }
     await q.close();
   }
+  /* ---- the AI lines' provider list (Settings -> AI lines -> Add a line), for "bring a key from any of these". Only in a
+     fresh profile: the run refuses to film if any line (any key) is stored. The shot ends with a finger pressing on
+     DeepSeek and stops before the press lands, so no key page or key field is ever opened. ---- */
+  if (ONLY.includes("ai-add")) {
+    const q = await newPage(); await ready(q);
+    const lines = await q.evaluate(() => LP.S.db.doc("data/users/local/ai").get().then((s) => (s.exists && Array.isArray(s.data().lines) ? s.data().lines.length : 0)));
+    if (lines) throw new Error("ai-add: this profile has AI lines stored; it only runs in a fresh one");
+    await tile(q, LANG === "zh" ? "设置" : "Settings"); await q.waitForTimeout(700);
+    await film(q, "ai-add", async () => {
+      await q.waitForTimeout(500);
+      await q.click("#set-ai-open"); await q.waitForSelector("#set-ai-main:not([hidden])"); await q.waitForTimeout(700);
+      await q.click("#set-ai-add-open"); await q.waitForSelector("#set-ai-providers li"); await q.waitForTimeout(2200);
+      const b = await q.locator('#set-ai-providers li[data-provider="deepseek"]').boundingBox();
+      await q.mouse.move(b.x + b.width / 2, b.y + b.height / 2); await q.mouse.down(); await q.waitForTimeout(350);
+    });
+    await q.close();
+  }
   if (want("studio")) {
     await home(p); await tile(p, T.studio);
     await p.waitForSelector("#v-studio:not([hidden])"); await p.waitForTimeout(800);
