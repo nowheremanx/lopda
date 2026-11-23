@@ -122,7 +122,7 @@ async function record() {
         try { await cdp.send("Page.screencastFrameAck", { sessionId: f.sessionId }); } catch {}
       });
       await cdp.send("Page.startScreencast", { format: "jpeg", quality: 95, maxWidth: VW * DPR, maxHeight: VH * DPR, everyNthFrame: 1 });
-      t0 = Date.now() / 1000;
+      t0 = Date.now() / 1000; film.t0 = Date.now();
       await act();
       t1 = Date.now() / 1000;
       await cdp.send("Page.stopScreencast"); await p.waitForTimeout(300); await cdp.detach();
@@ -400,6 +400,89 @@ async function record() {
       const n = 60; for (let i = 0; i < n; i++) { await q.mouse.wheel(0, y / n); await q.waitForTimeout(30); }
       await q.waitForTimeout(2200);
     });
+    await q.close();
+  }
+  /* ---- film 1 v2's opening: the home screen, the eight keys pressed in turn (their drawn caps light), a pause, then a tap
+     on the camera's tile straight into the viewfinder (a roll already loaded) and one shot. The tile's box is printed
+     so the edit can draw the fingertip where the tap really was. ---- */
+  if (ONLY.includes("home-cam")) {
+    const q = await newPage("?debug"); await ready(q);
+    await tile(q, T.camera);
+    await q.waitForSelector("#cam-load:not([hidden])"); await q.waitForTimeout(500);
+    await q.click("#roll-count"); await q.click("#roll-count"); await q.click("#roll-go");
+    await q.waitForSelector("#cam-live-tag:not([hidden])", { timeout: 10000 }); await q.waitForTimeout(800);
+    await home(q); await q.waitForTimeout(1200);
+    const box = await q.locator("#home .app", { has: q.locator(".label", { hasText: new RegExp("^" + T.camera + "$") }) }).boundingBox();
+    console.log("home-cam: camera tile", JSON.stringify(box));
+    await film(q, "home-cam", async () => {
+      await q.waitForTimeout(1600);
+      for (const b of ["up", "right", "down", "left", "b", "a", "select", "start"]) {
+        await q.evaluate((b) => LOPDA_DEBUG.setButton(b, true), b); await q.waitForTimeout(260);
+        await q.evaluate((b) => LOPDA_DEBUG.setButton(b, false), b); await q.waitForTimeout(140);
+      }
+      await q.waitForTimeout(5200);
+      const t = Date.now(); await q.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      console.log("home-cam: tap at", ((t - film.t0) / 1000).toFixed(2), "s");
+      await q.waitForSelector("#cam-live-tag:not([hidden])", { timeout: 10000 }); await q.waitForTimeout(2600);
+      await q.click("#cam-shutter");
+      await q.waitForFunction(() => document.getElementById("cam-shut").hidden, null, { timeout: 3000 });
+      await q.waitForTimeout(1800);
+    });
+    await q.close();
+  }
+  /* ---- notes and calendar for film 1 v2: diaries on today, a year and two years ago (那年今日) and a few October days
+     (the calendar's folded corners) ---- */
+  if (ONLY.includes("notes2") || ONLY.includes("calendar2")) {
+    const q = await newPage(); await ready(q);
+    const YEARS = LANG === "zh" ? ["去年今天，第一次自己冲胶卷，八张里糊了五张。", "前年今天，在旧货市场看见一台掌机，没舍得买。"] : ["A year ago today: my first roll, five of eight blurred.", "Two years ago: saw an old handheld at the flea market. Didn't buy it."];
+    const MORE = LANG === "zh" ? ["重阳，爬了一趟山。", "下雨，在家读完一本书。"] : ["Climbed the hill.", "Rain. Finished a book at home."];
+    await q.evaluate(([T, YEARS, MORE]) => {
+      const now = Date.now(), d = (n) => now - n * 864e5, day = (n) => new Date(d(n) + 8 * 36e5).toISOString().slice(0, 10);
+      const title = (k) => LopdaNoteText.diaryTitle(k, LP.I18N.lang, LP.tr, window.LopdaLunar);
+      const notes = LP.S.refs.notes;
+      const diary = (n, text) => notes.doc().set({ body: title(day(n)) + "\n" + text, day: day(n), created: d(n), updated: d(n) });
+      diary(0, T.today); diary(365, YEARS[0]); diary(730, YEARS[1]);
+      diary(4, T.earlier); diary(9, MORE[0]); diary(15, MORE[1]);
+      notes.doc().set({ body: T.quote, src: "reader", created: d(2), updated: d(2) });
+      notes.doc().set({ body: T.todo, created: d(1), updated: d(1) });
+    }, [T, YEARS, MORE]);
+    await q.evaluate(() => LP.refresh("notes")); await q.waitForTimeout(500);
+    if (ONLY.includes("notes2")) {
+      await tile(q, T.notes); await q.waitForTimeout(900);
+      await film(q, "notes2", async () => { await q.waitForTimeout(1400); await key(q, "x"); await q.waitForTimeout(4200); });
+      await home(q);
+    }
+    if (ONLY.includes("calendar2")) {
+      await tile(q, T.calendar); await q.locator("#v-cal:not([hidden])").waitFor(); await q.waitForTimeout(800);
+      await film(q, "calendar2", async () => { await q.waitForTimeout(2600); await key(q, "ArrowLeft", 4, 320); await q.waitForTimeout(700); await key(q, "x"); await q.waitForTimeout(2800); });
+      await home(q);
+    }
+    await q.close();
+  }
+  /* ---- Tape4 playing a given tape (--tape=<song.json>, a LopdaSong document): put into the library as the current
+     tape, exported as <outDir>/<name>.wav through the machine's own WAV export, then played on the song screen ---- */
+  if (ONLY.includes("studio-tape")) {
+    const file = opt("tape", ""); if (!file) throw new Error("studio-tape needs --tape=<song.json>");
+    const song = JSON.parse(await readFile(file, "utf8"));
+    const q = await newPage(); await ready(q);
+    await q.evaluate((song) => Promise.all([
+      LP.S.db.doc("data/users/local/studio/items/filmtape").set(song),
+      LP.S.db.doc("data/users/local/studio").set({ current: "filmtape", toured: { drums: true, bass: true, chords: true, melody: true, song: true, mixer: true }, hushTip: true })]), song);
+    await q.reload({ waitUntil: "load" }); await ready(q);
+    await tile(q, T.studio); await q.waitForSelector("#v-studio:not([hidden])"); await q.waitForTimeout(1000);
+    const skipTour = async () => { const b = q.locator("#v-studio .st-tour-box button:visible", { hasText: /Skip|跳过/ }); if (await b.count()) { await b.first().click(); await q.waitForTimeout(300); } };
+    await skipTour();
+    await q.click("#studio-menu"); await q.waitForTimeout(300);
+    await q.locator("#studio-sheet li", { hasText: T.file }).first().click(); await q.waitForTimeout(300);
+    const [d] = await Promise.all([q.waitForEvent("download", { timeout: 180000 }), q.locator("#studio-sheet li", { hasText: /WAV/ }).first().click()]);
+    const wav = join(dirname(resolve(file)), "film-tape.wav"); await d.saveAs(wav); console.log("studio-tape:", wav);
+    await q.waitForFunction(() => document.getElementById("toast").hidden, null, { timeout: 15000 }).catch(() => {}); await q.waitForTimeout(500);
+    for (const scr of opt("screens", "song,drums").split(",")) {
+      await q.click(`#studio-screens .st-scr[data-screen="${scr}"]`); await q.waitForTimeout(400); await skipTour();
+      await q.click("#studio-play"); await q.waitForTimeout(400);
+      await film(q, "studio-" + scr, async () => { await q.waitForTimeout(7000); });
+      await q.click("#studio-play"); await q.waitForTimeout(500);
+    }
     await q.close();
   }
   if (want("studio")) {
