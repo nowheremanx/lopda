@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { splitDiff, scan, trimDiff, sanitize, buildPrompt, formatComment } from "../tools/ai-review.mjs";
+import { splitDiff, scan, trimDiff, sanitize, buildPrompt, formatComment, errorText } from "../tools/ai-review.mjs";
 
 const DIFF = [
   "diff --git a/registry/apps/x/index.html b/registry/apps/x/index.html",
@@ -89,4 +89,12 @@ test("without a key the script writes the local scan only and makes no request",
   const out = readFileSync(join(dir, "o.md"), "utf8");
   assert.match(out, /local scan only/);
   assert.match(out, /network call/);
+});
+
+test("errorText keeps the API's reason short and on one line", () => {
+  assert.equal(errorText('{"error":{"message":"Model  not   found"}}'), "Model not found");
+  assert.equal(errorText('{"message":"no plan"}'), "no plan");
+  assert.equal(errorText("Bad gateway"), "Bad gateway");
+  assert.equal(errorText(""), "(no body)");
+  assert.ok(errorText("x".repeat(1000)).length < 310);
 });
