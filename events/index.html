@@ -85,6 +85,14 @@ nav .lang{background:none;border:0;color:var(--on-case-dim);font:14px var(--f-bo
 .way.phone .wsteps p{color:var(--lcd-dark)} .way.computer .wsteps p{color:var(--on-case-dim)}
 .way .end{font-size:15px;font-style:italic}
 .way.phone .end{color:var(--lcd-dark)} .way.computer .end{color:var(--on-case-dim)}
+/* On a phone the two panels run edge to edge: a paper margin beside them looked like a white frame (owner, 2026-11-23).
+   The computer panel ends the band, so no paper strip sits between it and the dark cards band. */
+@media (max-width:600px){
+  .ways{gap:0;margin-inline:calc(-1 * max(16px,env(safe-area-inset-left,0px))) calc(-1 * max(16px,env(safe-area-inset-right,0px)))}
+  .band.ways-band{padding-bottom:0}
+  .way.computer{border-bottom:1px solid var(--case-line)}
+  .way{border-radius:0;padding:28px max(20px,env(safe-area-inset-right,0px)) 32px max(20px,env(safe-area-inset-left,0px))}
+}
 
 /* the little screens that type their lines: an LCD in a case bezel, and a terminal */
 .screen{border-radius:12px;padding:12px}
@@ -327,6 +335,7 @@ footer{padding-block:32px;color:var(--on-case-dim);font-size:14px}
 
     if (ev.ways && ev.ways.length) {
       var h = band(true);
+      h.parentNode.className += " ways-band";
       add(h, el("div", "eyebrow lcd", t("ways.e")), el("h2", null, t("ways.h")));
       var ways = put(h, el("div", "ways"));
       ev.ways.forEach(function (wy) { ways.appendChild(renderWay(wy)); });
