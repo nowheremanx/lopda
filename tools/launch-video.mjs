@@ -545,6 +545,36 @@ async function record() {
     }
     await q.close();
   }
+  /* ---- Tape4 bar by bar: for each --bars=<n,...> (1-based chain slots of --tape=<song.json>), the drums page and the
+     melody page playing that bar's own pattern from its first step, so the edit can cut them in at the moment the
+     soundtrack plays that bar. Clips studio-<--tag>-<drums|melody>-b<n>; the pattern starts about 0.4 s in. ---- */
+  if (ONLY.includes("studio-bars")) {
+    const file = opt("tape", ""), tag = opt("tag", "tape"), bars = opt("bars", "").split(",").filter(Boolean).map(Number);
+    if (!file || !bars.length) throw new Error("studio-bars needs --tape and --bars");
+    const song = JSON.parse(await readFile(file, "utf8"));
+    const q = await newPage(); await ready(q);
+    await q.evaluate((song) => Promise.all([
+      LP.S.db.doc("data/users/local/studio/items/filmtape").set(song),
+      LP.S.db.doc("data/users/local/studio").set({ current: "filmtape", toured: { drums: true, bass: true, chords: true, melody: true, song: true, mixer: true }, hushTip: true })]), song);
+    await q.reload({ waitUntil: "load" }); await ready(q);
+    await tile(q, T.studio); await q.waitForSelector("#v-studio:not([hidden])"); await q.waitForTimeout(1000);
+    const skipTour = async () => { const b = q.locator("#v-studio .st-tour-box button:visible", { hasText: /Skip|跳过/ }); if (await b.count()) { await b.first().click(); await q.waitForTimeout(300); } };
+    await skipTour();
+    for (const n of bars) {
+      const pat = song.song[n - 1];
+      for (const scr of ["drums", "melody"]) {
+        await q.click("#studio-pat"); await q.waitForTimeout(300);
+        await q.click(`#studio-sheet .st-pat-btn[data-pat="${pat}"]`); await q.waitForTimeout(300);
+        await q.click(`#studio-screens .st-scr[data-screen="${scr}"]`); await q.waitForTimeout(400); await skipTour();
+        await film(q, `studio-${tag}-${scr}-b${n}`, async () => {
+          await q.waitForTimeout(400); await q.click("#studio-play");   /* the drums / melody page plays its pattern */
+          await q.waitForTimeout(2800);
+        });
+        await q.click("#studio-play"); await q.waitForTimeout(400);
+      }
+    }
+    await q.close();
+  }
   if (want("studio")) {
     await home(p); await tile(p, T.studio);
     await p.waitForSelector("#v-studio:not([hidden])"); await p.waitForTimeout(800);
@@ -701,6 +731,8 @@ async function record() {
           await f.locator("#name").fill(n); await f.locator("#name").focus();
           const bx = await a.locator('.gamepad [data-b="a"]').boundingBox(); await a.mouse.click(bx.x + bx.width / 2, bx.y + bx.height / 2); await a.waitForTimeout(400); } }], ["wait", 500]],
         [["fn", async (f) => { const rows = f.locator("#list > *"); for (const k of [0, 0, 1, 0, 1, 1, 0, 1, 0]) { await rows.nth(k).click({ position: { x: 40, y: 12 } }); await a.waitForTimeout(420); } }]]],
+      /* the marble maze pushed with the D-pad, as a player without tilt would (no autopilot) */
+      ["tilt-maze", [["x", 80], ["wait", 900], ["z", 80], ["wait", 700]],   /* B: "Don't allow" tilt, the D-pad then */ [["ArrowDown", 900], ["ArrowRight", 700], ["ArrowDown", 500], ["ArrowRight", 900], ["ArrowUp", 600], ["ArrowRight", 500]]],
       ["calculator", [["wait", 300]], [["tap", [0.15, 0.62]], ["wait", 250], ["tap", [0.4, 0.62]], ["wait", 250], ["tap", [0.65, 0.75]], ["wait", 250], ["tap", [0.15, 0.75]], ["wait", 250], ["tap", [0.88, 0.88]], ["wait", 1500]]],
     ];
     /* what the second half of a --long clip plays where repeating the first would not look like play */
