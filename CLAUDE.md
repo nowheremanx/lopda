@@ -52,7 +52,10 @@ registry/       index.json (generated) + apps/<id>/{manifest.json,index.html,src
 tools/          check-app.mjs, build-index.mjs (also stamps each app's released/updated dates from git), bundle-app.mjs (+ lo-game.mjs alias), lo-game-lib.mjs, stamp-preview.mjs (Node 20+, no deps);
                 readme-shots.mjs (the README pictures: docs/images/ in English, --lang=zh into docs/images/zh/ for README.zh.md; needs Playwright) with readme-scene.mjs (the lake the fake camera sees);
                 souvenir-sheet.mjs (contact sheets of the pet's souvenir catalogue; needs Playwright);
-                launch-video.mjs (the launch film, about 34 s: records the runtime's scenes and cuts them with ffmpeg; needs Playwright and ffmpeg; its 720p copies for the landing page are docs/video/; also records the promo films' scenes, the AI ones only with DEEPSEEK_KEY in the environment, with --clock, --audio, --long, --hold and the other flags in its header);
+                launch-video.mjs (the first launch film, about 34 s: records the runtime's scenes and cuts them with ffmpeg; needs Playwright and ffmpeg;
+                also records the promo films' scenes, the AI ones only with DEEPSEEK_KEY in the environment, with --clock, --audio, --long, --hold and the other flags in its header);
+                docs/video/ holds the landing page's two promo films as 720p copies with posters (intro-<lang> and first-app-<lang>,
+                both tap to play); the 1080p masters stay out of the repo;
                 gen-lunar.py (one-off generator of the lunar table, needs PyEphem); gen-ecdict.mjs (one-off, ECDICT csv ->
                 vendor/ecdict/) with stardict-write.mjs (StarDict + dictzip writer, also used by tests); lao-zhang-sim.mjs
                 (矿工老张's auto-player: solo haul, target headroom and whole-run difficulty, also used by the tests)

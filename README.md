@@ -6,6 +6,8 @@ A four-tone handheld that lives on your phone. Hi-PDA's low-fidelity cousin.
 
 **Try it:** https://nowheremanx.github.io/lopda/ — open it on a phone and "Add to Home Screen".
 
+**Watch:** [Lo-PDA in a minute](https://nowheremanx.github.io/lopda/docs/video/intro-en.mp4) · [Your first app, start to finish](https://nowheremanx.github.io/lopda/docs/video/first-app-en.mp4) (vertical, about a minute each)
+
 ![Lo-PDA on a phone: the home screen, the camera's dithered live viewfinder, a developed colour photo in the darkroom, and a sliding puzzle made from that photo](docs/images/screens.png)
 
 Lo-PDA is a Progressive Web App styled as a fictional 1986 PDA: a green LCD that shows four tones and nothing else,
@@ -41,7 +43,7 @@ The seven stocks on one photo, same roll and same development, only the stock ch
 | Built-in | 内置 | What it does |
 |---|---|---|
 | Notes | 记事本 | Opens on today's diary, with "on this day" from earlier years. Tags from `#words`, search, pins, a trash kept 30 days, a zip of Markdown files out and back in. |
-| Calendar | 万年历 | Gregorian and lunar calendar with solar terms, 1900–2100, China's public holidays and days off, your own anniversaries. Days with a diary get a folded corner. |
+| Calendar | 万年历 | 1900–2100. In English it shows US holidays, worked out offline, with the federal days off marked; in Chinese, the lunar calendar, solar terms, China's public holidays and days off. Your own anniversaries; days with a diary get a folded corner. |
 | Dictionary | 词典 | English–Chinese, built in and offline (abridged ECDICT). Import StarDict dictionaries; a word book for review; A says the word aloud. |
 | Reader | 阅读器 | TXT and EPUB books, your own fonts, an e-ink style full refresh. Select text to look it up or quote it into Notes. Two public-domain books included. |
 | Pet | 宠物 | A small creature that hatches once, gets a name for life and lives in a room on the screen. It eats, plays, sleeps at night, grows up, and some days comes home with a souvenir for its shelf. It never dies. |
@@ -51,8 +53,8 @@ The seven stocks on one photo, same roll and same development, only the stock ch
 | Cartridge | 卡带机 | Plays black-and-white Game Boy files you supply, with the chin buttons. Saves can be exported and imported. No games are included. |
 | Radio | 电波台 | Experimental. Two handhelds talk over sound, like a 1986 modem: both press Link, then send short text and 16 × 16 pictures. Slow on purpose. |
 | Store | 应用商店 | Install, update and run community apps, by category, with search. |
-| Scripts | 脚本 | Your own small HTML/JS programs: copy a prompt for an AI, paste the code back, run it in the sandbox. |
-| Settings | 设置 | Sound, volume, language (中文 / English), which apps may use the sensors and camera, app saves, backup and restore of the whole device, the optional AI line, updates. |
+| Scripts | 脚本 | Your own small HTML/JS programs: one line to an AI line and it writes the program (or copy the prompt into any AI chat and paste the code back), then run it in the sandbox. Revise changes it with one more sentence; the old code is kept first, ten versions per script. |
+| Settings | 设置 | Sound, volume, language (中文 / English), which apps may use the sensors and camera, app saves, backup and restore of the whole device, AI lines (your own keys for DeepSeek, Kimi, Qwen, SiliconFlow or OpenRouter, like SIM cards), updates. |
 
 ![The pet in its room, a demo tune in Tape4, a short exchange in Radio with a 16 × 16 picture of a boat, and Gomoku](docs/images/more.png)
 
@@ -94,6 +96,8 @@ node tools/build-index.mjs
 ```
 
 - Writing with an AI assistant: [`sdk/PROMPT.md`](sdk/PROMPT.md) is a ready-made prompt.
+- Not sure what to make? The [events page](https://nowheremanx.github.io/lopda/events/) has challenge cards, each with a
+  one-line idea to try on the phone in ten minutes and a starter prompt for a coding agent.
 - Games: [`sdk/lo-game.js`](sdk/LO-GAME.md) has a pixel font, dialogue boxes, menus and tile maps; start from
   `sdk/template-game/`, or `sdk/template-vn/` for a visual novel. 3D: [`sdk/lo-3d.js`](sdk/LO-3D.md).
 - The online harness loads any registry app with buttons and a log, nothing to install:
@@ -109,9 +113,9 @@ puts it back after checking it first. Removing an app keeps its saves; Settings 
 them, and a reinstall of the same app carries on.
 
 Two things go online, and only these two. The calendar fetches next year's table of China's holidays from jsDelivr
-when it is missing (the tables up to now ship with the app). And if you add your own OpenRouter key in Settings → AI
-line (off until you do), Scripts can write a program for you, Tape4 can edit a tape with you and the pet can bring home
-a souvenir it made up. Each request carries only what it needs (the script you asked for, the tape being edited, the
+when it is missing (the tables up to now ship with the app). And if you add your own key in Settings → AI line (off
+until you do; DeepSeek, Kimi, Qwen, SiliconFlow or OpenRouter, and each key goes only to its own provider), Scripts
+can write and revise a program for you, Tape4 can edit a tape with you and the pet can bring home a souvenir it made up. Each request carries only what it needs (the script you asked for, the tape being edited, the
 pet's mood and the season), never your notes or photos, and the key is not in the backup. Apps cannot reach the network at all.
 
 ## Run it locally
