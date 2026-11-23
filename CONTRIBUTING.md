@@ -19,6 +19,10 @@ There are two ways to contribute, and they have different rules.
    `node tools/build-index.mjs`, and open a PR using the checklist.
    [检查 app、更新目录，再按投稿清单提 PR。]
 
+Looking for an idea? The [events page](https://nowheremanx.github.io/lopda/events/) has challenge
+cards with a starter prompt each; name the card you picked in the PR.
+[不知道做什么？活动页有挑战卡，每张带起手 prompt；PR 里写上你选的卡。]
+
 Reviewers use [`docs/REVIEW.md`](docs/REVIEW.md).
 
 ## A. Submit an app to the registry
