@@ -47,6 +47,8 @@ Reviewers use [`docs/REVIEW.md`](docs/REVIEW.md).
 5. Open a pull request. A maintainer reviews it for content and whether it
    works. Security comes from the sandbox, so reviewers do not need to audit
    every line, but obvious abuse is rejected.
+   The maintainer may also run an AI pre-review (`/review`, `.github/workflows/ai-review.yml`):
+   it reads your diff as text, never runs your code, and only posts advice; a person decides.
 6. After merge, `node tools/build-index.mjs` regenerates `registry/index.json`.
 
 Your app keeps its own license (one of the permissive licenses in
