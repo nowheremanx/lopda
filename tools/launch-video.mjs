@@ -12,6 +12,20 @@
 // The camera is Chromium's fake device fed from docs/images/stocks/0-original.jpg (the owner's own photo, already
 // shown in the README), moving slowly as a hand would. Frames come from the DevTools screencast with their own
 // timestamps, so every clip plays at the speed it ran. The cartridge player is never shown: Lo-PDA ships no games.
+//
+// Scenes for the promo films, recorded only when named in --only (the edit for those films lives outside the repo):
+//   home-cam, notes2, calendar2   home into the camera and one shot; today's diary with 那年今日; diary corners
+//   pet-act                       the pet's Run pack;  ai-add  the AI lines' provider list (refuses if any line is stored)
+//   scripts-gen, scripts-revise   Scripts writing (--idea) and revising (--ask) a program over a DeepSeek line; the key
+//                                 comes only from the DEEPSEEK_KEY environment variable and never reaches the screen;
+//                                 --runonly replays saved programs (--timer, --revised) without the AI; --hold sets how
+//                                 long a run is filmed after the dial is let go
+//   events, store-new             the events page (each part scrolled to just under the header); the newest app's badge
+//                                 (--badge=updated takes the UPDATED badge)
+//   studio-tape, studio-bars      Tape4 playing --tape=<song.json> (its WAV exported; --slot starts at a bar); the drums
+//                                 and melody pages playing --bars=<n,...> one bar at a time, for cutting in step
+// Other flags: --clock=<ISO time> (the fixed clock), --audio (the page's own sound under each clip), --long (grid apps
+// played twice as long), --only=app:<id>,... (just those apps).
 import { createServer } from "node:http";
 import { readFile, writeFile, mkdir, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -49,6 +63,12 @@ const opt = (k, d) => { const a = args.find((x) => x.startsWith("--" + k + "="))
 const LANG = opt("lang", "en");
 const ONLY = opt("only", "").split(",").filter(Boolean);
 const want = (n) => !ONLY.length || ONLY.includes(n);
+const LONG = args.includes("--long");
+/* --clock=<ISO time>: the fixed clock (the English film sets late November so the calendar shows US holidays) */
+const CLOCK = opt("clock", "2026-10-22T09:41:00+08:00");
+/* --audio: also record what the page plays (the runtime's one AudioContext, tapped where it meets the speakers) and put
+   it under each clip, so the edit has the real UI sounds */
+const AUDIO = args.includes("--audio");
 if (MODE !== "record" && MODE !== "edit") { console.error("usage: launch-video.mjs record|edit <outDir> [--lang=en|zh]"); process.exit(2); }
 
 /* the screen's size in css px, and the scale of the frames */
@@ -87,10 +107,32 @@ async function record() {
     timezoneId: "Asia/Shanghai", locale: LANG === "zh" ? "zh-CN" : "en-US", serviceWorkers: "block", acceptDownloads: true,
     permissions: ["camera"] });
   await ctx.route("https://cdn.jsdelivr.net/**", (r) => r.fulfill({ status: 404, body: "not found" }));
+  if (AUDIO) await ctx.addInitScript(() => {
+    const connect = AudioNode.prototype.connect, taps = new Map();
+    window.__lpRec = { taps };
+    AudioNode.prototype.connect = function (target, ...rest) {
+      const r = connect.call(this, target, ...rest);
+      try { if (target && target === this.context.destination) {
+        let d = taps.get(this.context); if (!d) { d = this.context.createMediaStreamDestination(); taps.set(this.context, d); }
+        connect.call(this, d); } } catch (e) {}
+      return r;
+    };
+  });
+  const recStart = async (p) => p.evaluate(() => {
+    if (window.LP && LP.audio) LP.audio();
+    const d = window.__lpRec && [...window.__lpRec.taps.values()][0]; if (!d) return false;
+    const r = window.__lpRec.rec = new MediaRecorder(d.stream, { mimeType: "audio/webm" }); window.__lpRec.chunks = [];
+    r.ondataavailable = (e) => window.__lpRec.chunks.push(e.data); r.start(200); return true;
+  }).catch(() => false);
+  const recStop = async (p) => p.evaluate(() => new Promise((ok) => {
+    const R = window.__lpRec; if (!R || !R.rec) return ok(null);
+    R.rec.onstop = () => { const fr = new FileReader(); fr.onload = () => ok(String(fr.result).split(",")[1]); fr.readAsDataURL(new Blob(R.chunks, { type: "audio/webm" })); };
+    R.rec.stop();
+  })).catch(() => null);
 
   const newPage = async (q = "") => {
     const p = await ctx.newPage();
-    await p.clock.install({ time: new Date("2026-10-22T09:41:00+08:00") });   /* a weekday morning; time runs */
+    await p.clock.install({ time: new Date(CLOCK) });   /* a weekday morning; time runs */
     await p.goto(base + "/runtime/" + q, { waitUntil: "load" });
     return p;
   };
@@ -107,12 +149,15 @@ async function record() {
   async function film(p, name, act, shots = false) {
     const dir = join(work, name); await rm(dir, { recursive: true, force: true }); await mkdir(dir, { recursive: true });
     const frames = [], file = () => join(dir, String(frames.length).padStart(5, "0") + ".jpg");
-    let cdp = null, t0, t1;
+    let cdp = null, t0, t1, recAt = null, rec = null;
+    const begin = async () => { if (AUDIO && await recStart(p)) recAt = Date.now() / 1000; };
+    const finish = async () => { if (recAt != null) rec = await recStop(p); };
     if (shots) {
+      await begin();
       let done = false; t0 = Date.now() / 1000;
       const loop = (async () => { while (!done) { const f = file(), t = Date.now() / 1000;
         await p.screenshot({ path: f, type: "jpeg", quality: 92 }); frames.push({ file: f, t }); } })();
-      await act(); t1 = Date.now() / 1000; done = true; await loop;
+      await act(); t1 = Date.now() / 1000; done = true; await loop; await finish();
     } else {
       cdp = await ctx.newCDPSession(p);
       cdp.on("Page.screencastFrame", async (f) => {
@@ -121,10 +166,11 @@ async function record() {
         writeFile(out, Buffer.from(f.data, "base64"));
         try { await cdp.send("Page.screencastFrameAck", { sessionId: f.sessionId }); } catch {}
       });
+      await begin();
       await cdp.send("Page.startScreencast", { format: "jpeg", quality: 95, maxWidth: VW * DPR, maxHeight: VH * DPR, everyNthFrame: 1 });
-      t0 = Date.now() / 1000;
+      t0 = Date.now() / 1000; film.t0 = Date.now();
       await act();
-      t1 = Date.now() / 1000;
+      t1 = Date.now() / 1000; await finish();
       await cdp.send("Page.stopScreencast"); await p.waitForTimeout(300); await cdp.detach();
       t1 -= t0 - frames[0]?.t || 0; t0 = frames[0]?.t;   /* the screencast's own clock */
     }
@@ -137,12 +183,18 @@ async function record() {
     await writeFile(join(dir, "list.txt"), list);
     ff("-f", "concat", "-safe", "0", "-i", join(dir, "list.txt"), "-vf", `fps=30,scale=${VW * DPR}:${VH * DPR}:flags=neighbor,format=yuv420p`,
       "-c:v", "libx264", "-crf", "14", "-preset", "slow", join(clips, name + ".mp4"));
-    console.log("clip", name, frames.length, "frames", (t1 - t0).toFixed(1) + " s");
+    /* the page's sound under the clip: the recorder started recAt (epoch s), the picture at t0 (the screencast's clock) */
+    if (rec) {
+      const webm = join(dir, "sound.webm"), tmp = join(dir, "with-sound.mp4"); await writeFile(webm, Buffer.from(rec, "base64"));
+      const off = recAt - t0, af = off >= 0 ? `adelay=${Math.round(off * 1000)}:all=1,apad` : `atrim=start=${(-off).toFixed(3)},asetpts=PTS-STARTPTS,apad`;
+      ff("-i", join(clips, name + ".mp4"), "-i", webm, "-filter_complex", `[1:a]${af}[a]`, "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-shortest", tmp);
+      await rm(join(clips, name + ".mp4")); await writeFile(join(clips, name + ".mp4"), await readFile(tmp));
+    }
   }
 
   /* ---- boot: the first start, the home screen drawing ---- */
   let p = await ctx.newPage();
-  await p.clock.install({ time: new Date("2026-10-22T09:41:00+08:00") });
+  await p.clock.install({ time: new Date(CLOCK) });
   await p.goto("about:blank");
   if (want("boot")) await film(p, "boot", async () => { await p.goto(base + "/runtime/", { waitUntil: "load" }); await ready(p); await p.waitForTimeout(1500); });
   else { await p.goto(base + "/runtime/", { waitUntil: "load" }); await ready(p); }
@@ -244,6 +296,317 @@ async function record() {
     await q.evaluate(() => LOPDA_DEBUG.pet.hatch()); await q.waitForTimeout(400);
     await q.evaluate(() => LOPDA_DEBUG.pet.setDay(5)); await q.waitForTimeout(1200);
     await film(q, "pet", async () => { await q.waitForTimeout(4000); });
+    await q.close();
+  }
+  /* ---- the pet doing something: its Run play pack (the play icon, the first pack), jumping on A ---- */
+  if (ONLY.includes("pet-act")) {
+    const q = await newPage("?debug"); await ready(q);
+    await tile(q, T.pet);
+    await q.waitForFunction(() => window.LOPDA_DEBUG.pet && LOPDA_DEBUG.pet.save());
+    await q.evaluate(() => LOPDA_DEBUG.pet.hatch()); await q.waitForTimeout(400);
+    await q.evaluate(() => LOPDA_DEBUG.pet.setDay(5)); await q.waitForTimeout(600);
+    await q.evaluate(() => LOPDA_DEBUG.pet.gameSeed(7)); await q.waitForTimeout(1500);
+    await key(q, "ArrowRight"); await q.waitForTimeout(300);
+    await key(q, "x"); await q.waitForTimeout(600);               /* the pack list */
+    await key(q, "x"); await q.waitForTimeout(800);               /* Run: its start card */
+    await film(q, "pet-act", async () => {
+      await q.waitForTimeout(600);
+      await key(q, "x"); await q.waitForTimeout(500);             /* the round starts */
+      for (let i = 0; i < 9; i++) { await q.keyboard.down("x"); await q.waitForTimeout(i % 3 ? 120 : 260); await q.keyboard.up("x"); await q.waitForTimeout(520); }
+      await q.waitForTimeout(800);
+    });
+    await q.close();
+  }
+  /* ---- Scripts writing a program with the AI: only with --only=scripts-gen and DEEPSEEK_KEY in the environment.
+     The key is written straight into the AI lines document (the shape settings.js keeps, runtime/ailines.js) and never
+     shown: the Settings pages are not opened. The answer is kept in <outDir>/wind-up-timer/. ---- */
+  if (ONLY.includes("scripts-gen")) {
+    const KEY = process.env.DEEPSEEK_KEY;
+    if (!KEY) throw new Error("scripts-gen needs DEEPSEEK_KEY in the environment");
+    const IDEA = opt("idea", LANG === "zh" ? "一个发条蛋表" : "A wind-up egg timer");
+    const q = await newPage(); await ready(q);
+    await q.evaluate((k) => LP.S.db.doc("data/users/local/ai").set({ v: 2, next: 2, def: "l1", use: {},
+      lines: [{ id: "l1", provider: "deepseek", n: 1, key: k, model: "", visionModel: "", on: true, added: Date.now() }] }), KEY);
+    await q.reload({ waitUntil: "load" }); await ready(q);
+    await tile(q, LANG === "zh" ? "脚本" : "Scripts"); await q.waitForSelector("#v-scripts:not([hidden])"); await q.waitForTimeout(600);
+    await film(q, "scripts-gen", async () => {
+      await q.waitForTimeout(500);
+      await q.click("#scripts-write"); await q.waitForSelector("#v-script-idea:not([hidden])"); await q.waitForTimeout(500);
+      await q.click("#scripts-idea");
+      for (const ch of IDEA) { await q.keyboard.type(ch); await q.waitForTimeout(220); }
+      await q.waitForTimeout(700);
+      await q.click("#idea-copy");                                   /* 生成 */
+      await q.waitForSelector("#v-script-edit:not([hidden])");
+      await q.waitForFunction(() => !document.getElementById("script-run").disabled && document.getElementById("script-code").value.length > 50,
+        null, { timeout: 15 * 60000, polling: 500 });
+      await q.waitForTimeout(1500);
+    });
+    const code = await q.$eval("#script-code", (e) => e.value);
+    const dir = join(OUT, "wind-up-timer"); await mkdir(dir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    await writeFile(join(dir, "timer-" + stamp + ".html"), code);
+    console.log("scripts-gen: " + code.length + " characters, " + join(dir, "timer-" + stamp + ".html"));
+    /* the running program is a sandboxed frame: screenshots instead of the screencast */
+    await film(q, "scripts-run", async () => {
+      await q.click("#script-run"); await q.waitForSelector("#v-run:not([hidden])", { timeout: 10000 }); await q.waitForTimeout(1500);
+      const box = await q.locator("#run-frame").boundingBox(), cx = box.x + box.width / 2, cy = box.y + box.height * 0.45, r = box.width * 0.25;
+      await q.mouse.move(cx + r, cy); await q.mouse.down();
+      for (let i = 0; i <= 60; i++) { const a = i / 60 * Math.PI * 1.6; await q.mouse.move(cx + r * Math.cos(a), cy + r * Math.sin(a)); await q.waitForTimeout(25); }
+      await q.mouse.up(); await q.waitForTimeout(800);
+      await key(q, "ArrowUp", 3, 250); await key(q, "x"); await q.waitForTimeout(3000);
+    }, true);
+    await q.close();
+  }
+  /* ---- Scripts revising a program with 改一改: the wind-up timer that scripts-gen wrote (the newest file in
+     <outDir>/wind-up-timer/, or --timer=<file>) is put into Scripts, run once as it is, revised with one line, run again.
+     Only with --only=scripts-revise and DEEPSEEK_KEY in the environment, as scripts-gen. ---- */
+  if (ONLY.includes("scripts-revise")) {
+    /* --runonly: no AI at all: run the newest saved timer and its newest revised version (for clips with sound) */
+    const RUNONLY = args.includes("--runonly");
+    const KEY = process.env.DEEPSEEK_KEY || (RUNONLY ? "" : null);
+    if (KEY == null) throw new Error("scripts-revise needs DEEPSEEK_KEY in the environment");
+    const { readdirSync } = await import("node:fs");
+    const tdir = join(OUT, "wind-up-timer");
+    const file = opt("timer", "") || join(tdir, readdirSync(tdir).filter((f) => /^timer-.*\.html$/.test(f)).sort().at(-1));
+    const body = await readFile(file, "utf8");
+    const ASK = opt("ask", LANG === "zh" ? "数字再大一点" : "Make the numbers bigger");
+    const NAME = opt("name", LANG === "zh" ? "发条蛋表" : "Wind-up egg timer");
+    const q = await newPage(); await ready(q);
+    await q.evaluate(([k, body, name]) => Promise.all([
+      LP.S.db.doc("data/users/local/ai").set({ v: 2, next: 2, def: "l1", use: {},
+        lines: [{ id: "l1", provider: "deepseek", n: 1, key: k, model: "", visionModel: "", on: true, added: Date.now() }] }),
+      LP.S.db.doc("data/users/local/scripts/items/timer").set({ v: 1, id: "timer", name, body, created: Date.now(), updated: Date.now() })]),
+      [KEY, body, NAME]);
+    await q.reload({ waitUntil: "load" }); await ready(q);
+    const openTimer = async () => {
+      await tile(q, LANG === "zh" ? "脚本" : "Scripts"); await q.waitForSelector("#v-scripts:not([hidden])"); await q.waitForTimeout(500);
+      await q.locator("#scripts-list li", { hasText: NAME }).first().click(); await q.waitForSelector("#v-script-edit:not([hidden])"); await q.waitForTimeout(500);
+    };
+    const play = async () => {
+      const box = await q.locator("#run-frame").boundingBox(), cx = box.x + box.width / 2, cy = box.y + box.height * 0.45, r = box.width * 0.25;
+      await q.mouse.move(cx + r, cy); await q.mouse.down();
+      for (let i = 0; i <= 50; i++) { const a = i / 50 * Math.PI * 1.4; await q.mouse.move(cx + r * Math.cos(a), cy + r * Math.sin(a)); await q.waitForTimeout(25); }
+      await q.mouse.up(); await q.waitForTimeout(+opt("hold", "1800"));   /* --hold: how long the countdown runs after release */
+    };
+    await openTimer();
+    await film(q, "scripts-old", async () => {
+      await q.click("#script-run"); await q.waitForSelector("#v-run:not([hidden])", { timeout: 10000 }); await q.waitForTimeout(1200);
+      await play();
+    }, true);
+    if (RUNONLY) {
+      const rfile = opt("revised", "") || join(tdir, readdirSync(tdir).filter((f) => /^revised-.*\.html$/.test(f)).sort().at(-1));
+      await home(q);
+      await q.evaluate(([body, name]) => LP.S.db.doc("data/users/local/scripts/items/timer").set({ v: 1, id: "timer", name, body, created: Date.now(), updated: Date.now() }), [await readFile(rfile, "utf8"), NAME]);
+      await q.reload({ waitUntil: "load" }); await ready(q); await openTimer();
+      await film(q, "scripts-revised", async () => {
+        await q.click("#script-run"); await q.waitForSelector("#v-run:not([hidden])", { timeout: 10000 }); await q.waitForTimeout(1200);
+        await play();
+      }, true);
+      await q.close();
+    } else {
+    await home(q); await openTimer();
+    const t0 = Date.now();
+    await film(q, "scripts-revise", async () => {
+      await q.waitForTimeout(600);
+      await q.click("#script-paste");                               /* 改一改 */
+      await q.waitForSelector("#v-script-revise:not([hidden])"); await q.waitForTimeout(500);
+      await q.click("#revise-ask");
+      for (const ch of ASK) { await q.keyboard.type(ch); await q.waitForTimeout(220); }
+      await q.waitForTimeout(600);
+      await q.click("#revise-go");                                  /* 改 */
+      await q.waitForSelector("#v-script-edit:not([hidden])");
+      await q.waitForFunction(() => !document.getElementById("script-run").disabled && /改好了|Revised|Done|不满意|not happy/.test(document.getElementById("script-hint").textContent),
+        null, { timeout: 15 * 60000, polling: 500 });
+      await q.waitForTimeout(1500);
+    });
+    const hint = await q.$eval("#script-hint", (e) => e.textContent);
+    const code = await q.$eval("#script-code", (e) => e.value);
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    await writeFile(join(tdir, "revised-" + stamp + ".html"), code);
+    console.log("scripts-revise: " + ((Date.now() - t0) / 1000).toFixed(0) + " s, " + code.length + " characters; " + hint.split("\n")[0]);
+    await film(q, "scripts-revised", async () => {
+      await q.click("#script-run"); await q.waitForSelector("#v-run:not([hidden])", { timeout: 10000 }); await q.waitForTimeout(1200);
+      await play();
+    }, true);
+    await q.close();
+    }
+  }
+  /* ---- the events page at a phone's width: the list, the first event, its two ways (their little screens typing), the cards ---- */
+  if (ONLY.includes("events")) {
+    const q = await ctx.newPage();
+    await q.addInitScript((l) => { try { localStorage.setItem("lopda-landing-lang", l); } catch (e) {} }, LANG);
+    await q.goto(base + "/events/", { waitUntil: "networkidle" }); await q.waitForTimeout(800);
+    const glide = async (dy, ms) => { const n = Math.max(1, Math.round(ms / 30)); for (let i = 0; i < n; i++) { await q.mouse.wheel(0, dy / n); await q.waitForTimeout(30); } };
+    /* scroll an element (or the section that holds it) to just under the site's header, so the frame starts inside that
+       section and no strip of the section above shows (owner, 2026-11-23); off > 0 places it that far lower */
+    const to = async (sel, ms, off = 0, section = false) => { const y = await q.evaluate(([s, o, sec]) => { let e = document.querySelector(s); if (e && sec) e = e.closest("section") || e;
+      const nav = document.querySelector("nav"), top = nav ? nav.getBoundingClientRect().bottom : 0; return e ? e.getBoundingClientRect().top - top - o : 0; }, [sel, off, section]); await glide(y, ms); };
+    await q.mouse.move(VW / 2, VH / 2);
+    await film(q, "events", async () => {
+      await q.waitForTimeout(900);
+      await q.locator("a.ev").first().click(); await q.waitForTimeout(1200);
+      await to("#way-phone", 900); await q.waitForTimeout(2600);
+      await to("#way-phone .screen", 600, 110); await q.waitForTimeout(800);
+      await to(".way:not(#way-phone)", 900); await q.waitForTimeout(2400);
+      await to(".card", 900, 0, true); await q.waitForTimeout(600);
+      await glide(2200, 2600); await q.waitForTimeout(500);
+    });
+    await q.close();
+  }
+  /* ---- the store's newest app with its NEW badge: a page on the real date (the badge lasts seven days from the
+     index's released date), scrolled to the first badged entry ---- */
+  if (ONLY.includes("store-new")) {
+    const q = await ctx.newPage(); await q.goto(base + "/runtime/", { waitUntil: "load" }); await ready(q);
+    await tile(q, T.store);
+    await q.waitForSelector("#store-list .store-item", { timeout: 10000 }); await q.waitForLoadState("networkidle"); await q.waitForTimeout(800);
+    /* --badge=updated looks for the UPDATED badge instead, for a week when no app is new */
+    const NEW = opt("badge", "") === "updated" ? (LANG === "zh" ? "更新" : "UPDATED") : (LANG === "zh" ? "新" : "NEW");
+    const y = await q.evaluate((n) => { const b = [...document.querySelectorAll("#store-list .store-badge")].find((e) => e.textContent === n);
+      return b ? b.closest(".store-item").getBoundingClientRect().top - 220 : null; }, NEW);
+    if (y == null) throw new Error("store-new: no app has the " + NEW + " badge today");
+    await q.mouse.move(VW / 2, VH * 0.4);
+    await film(q, "store-new", async () => {
+      await q.waitForTimeout(500);
+      const n = 60; for (let i = 0; i < n; i++) { await q.mouse.wheel(0, y / n); await q.waitForTimeout(30); }
+      await q.waitForTimeout(2200);
+    });
+    await q.close();
+  }
+  /* ---- film 1 v2's opening: the home screen, the eight keys pressed in turn (their drawn caps light), a pause, then a tap
+     on the camera's tile straight into the viewfinder (a roll already loaded) and one shot. The tile's box is printed
+     so the edit can draw the fingertip where the tap really was. ---- */
+  if (ONLY.includes("home-cam")) {
+    const q = await newPage("?debug"); await ready(q);
+    await tile(q, T.camera);
+    await q.waitForSelector("#cam-load:not([hidden])"); await q.waitForTimeout(500);
+    await q.click("#roll-count"); await q.click("#roll-count"); await q.click("#roll-go");
+    await q.waitForSelector("#cam-live-tag:not([hidden])", { timeout: 10000 }); await q.waitForTimeout(800);
+    await home(q); await q.waitForTimeout(1200);
+    const box = await q.locator("#home .app", { has: q.locator(".label", { hasText: new RegExp("^" + T.camera + "$") }) }).boundingBox();
+    console.log("home-cam: camera tile", JSON.stringify(box));
+    await film(q, "home-cam", async () => {
+      await q.waitForTimeout(1600);
+      for (const b of ["up", "right", "down", "left", "b", "a", "select", "start"]) {
+        await q.evaluate((b) => LOPDA_DEBUG.setButton(b, true), b); await q.waitForTimeout(260);
+        await q.evaluate((b) => LOPDA_DEBUG.setButton(b, false), b); await q.waitForTimeout(140);
+      }
+      await q.waitForTimeout(5200);
+      const t = Date.now(); await q.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      console.log("home-cam: tap at", ((t - film.t0) / 1000).toFixed(2), "s");
+      await q.waitForSelector("#cam-live-tag:not([hidden])", { timeout: 10000 }); await q.waitForTimeout(2600);
+      await q.click("#cam-shutter");
+      await q.waitForFunction(() => document.getElementById("cam-shut").hidden, null, { timeout: 3000 });
+      await q.waitForTimeout(1800);
+    });
+    await q.close();
+  }
+  /* ---- notes and calendar for film 1 v2: diaries on today, a year and two years ago (那年今日) and a few October days
+     (the calendar's folded corners) ---- */
+  if (ONLY.includes("notes2") || ONLY.includes("calendar2")) {
+    const q = await newPage(); await ready(q);
+    const YEARS = LANG === "zh" ? ["去年今天，第一次自己冲胶卷，八张里糊了五张。", "前年今天，在旧货市场看见一台掌机，没舍得买。"] : ["A year ago today: my first roll, five of eight blurred.", "Two years ago: saw an old handheld at the flea market. Didn't buy it."];
+    const MORE = LANG === "zh" ? ["重阳，爬了一趟山。", "下雨，在家读完一本书。"] : ["Climbed the hill.", "Rain. Finished a book at home."];
+    await q.evaluate(([T, YEARS, MORE]) => {
+      const now = Date.now(), d = (n) => now - n * 864e5, day = (n) => new Date(d(n) + 8 * 36e5).toISOString().slice(0, 10);
+      const title = (k) => LopdaNoteText.diaryTitle(k, LP.I18N.lang, LP.tr, window.LopdaLunar);
+      const notes = LP.S.refs.notes;
+      const diary = (n, text) => notes.doc().set({ body: title(day(n)) + "\n" + text, day: day(n), created: d(n), updated: d(n) });
+      diary(0, T.today); diary(365, YEARS[0]); diary(730, YEARS[1]);
+      diary(4, T.earlier); diary(9, MORE[0]); diary(15, MORE[1]);
+      notes.doc().set({ body: T.quote, src: "reader", created: d(2), updated: d(2) });
+      notes.doc().set({ body: T.todo, created: d(1), updated: d(1) });
+    }, [T, YEARS, MORE]);
+    await q.evaluate(() => LP.refresh("notes")); await q.waitForTimeout(500);
+    if (ONLY.includes("notes2")) {
+      await tile(q, T.notes); await q.waitForTimeout(900);
+      await film(q, "notes2", async () => { await q.waitForTimeout(1400); await key(q, "x"); await q.waitForTimeout(4200); });
+      await home(q);
+    }
+    if (ONLY.includes("calendar2")) {
+      await tile(q, T.calendar); await q.locator("#v-cal:not([hidden])").waitFor(); await q.waitForTimeout(800);
+      await film(q, "calendar2", async () => { await q.waitForTimeout(2600); await key(q, "ArrowLeft", 4, 320); await q.waitForTimeout(700); await key(q, "x"); await q.waitForTimeout(2800); });
+      await home(q);
+    }
+    await q.close();
+  }
+  /* ---- Tape4 playing a given tape (--tape=<song.json>, a LopdaSong document): put into the library as the current
+     tape, exported as <outDir>/<name>.wav through the machine's own WAV export, then played on the song screen ---- */
+  if (ONLY.includes("studio-tape")) {
+    const file = opt("tape", ""); if (!file) throw new Error("studio-tape needs --tape=<song.json>");
+    const song = JSON.parse(await readFile(file, "utf8"));
+    const q = await newPage(); await ready(q);
+    await q.evaluate((song) => Promise.all([
+      LP.S.db.doc("data/users/local/studio/items/filmtape").set(song),
+      LP.S.db.doc("data/users/local/studio").set({ current: "filmtape", toured: { drums: true, bass: true, chords: true, melody: true, song: true, mixer: true }, hushTip: true })]), song);
+    await q.reload({ waitUntil: "load" }); await ready(q);
+    await tile(q, T.studio); await q.waitForSelector("#v-studio:not([hidden])"); await q.waitForTimeout(1000);
+    const skipTour = async () => { const b = q.locator("#v-studio .st-tour-box button:visible", { hasText: /Skip|跳过/ }); if (await b.count()) { await b.first().click(); await q.waitForTimeout(300); } };
+    await skipTour();
+    await q.click("#studio-menu"); await q.waitForTimeout(300);
+    await q.locator("#studio-sheet li", { hasText: T.file }).first().click(); await q.waitForTimeout(300);
+    const [d] = await Promise.all([q.waitForEvent("download", { timeout: 180000 }), q.locator("#studio-sheet li", { hasText: /WAV/ }).first().click()]);
+    const wav = resolve(file).replace(/\.json$/, "") + ".wav"; await d.saveAs(wav); console.log("studio-tape:", wav);
+    await q.waitForFunction(() => document.getElementById("toast").hidden, null, { timeout: 15000 }).catch(() => {}); await q.waitForTimeout(500);
+    /* --slot=<n>: start the chain at bar n (1-based): the song screen's play key starts from the selected slot, so the picture can match the
+       bar the film's soundtrack is at; otherwise from the top */
+    const slot = +opt("slot", "0");
+    for (const scr of opt("screens", "song,drums").split(",")) {
+      await q.click(`#studio-screens .st-scr[data-screen="${scr}"]`); await q.waitForTimeout(400); await skipTour();
+      if (slot > 0 && scr === "song") {
+        await q.locator("#studio-chain > *").nth(slot - 1).click(); await q.waitForTimeout(400);
+        if (await q.locator("#studio-sheet:not([hidden])").count()) { await key(q, "z"); await q.waitForTimeout(300); }
+        await q.click("#studio-play"); await q.waitForTimeout(200);
+      } else { await q.click("#studio-play"); await q.waitForTimeout(400); }
+      await film(q, "studio-" + scr, async () => { await q.waitForTimeout(7000); });
+      await q.click("#studio-play"); await q.waitForTimeout(500);
+    }
+    await q.close();
+  }
+  /* ---- Tape4 bar by bar: for each --bars=<n,...> (1-based chain slots of --tape=<song.json>), the drums page and the
+     melody page playing that bar's own pattern from its first step, so the edit can cut them in at the moment the
+     soundtrack plays that bar. Clips studio-<--tag>-<drums|melody>-b<n>; the pattern starts about 0.4 s in. ---- */
+  if (ONLY.includes("studio-bars")) {
+    const file = opt("tape", ""), tag = opt("tag", "tape"), bars = opt("bars", "").split(",").filter(Boolean).map(Number);
+    if (!file || !bars.length) throw new Error("studio-bars needs --tape and --bars");
+    const song = JSON.parse(await readFile(file, "utf8"));
+    const q = await newPage(); await ready(q);
+    await q.evaluate((song) => Promise.all([
+      LP.S.db.doc("data/users/local/studio/items/filmtape").set(song),
+      LP.S.db.doc("data/users/local/studio").set({ current: "filmtape", toured: { drums: true, bass: true, chords: true, melody: true, song: true, mixer: true }, hushTip: true })]), song);
+    await q.reload({ waitUntil: "load" }); await ready(q);
+    await tile(q, T.studio); await q.waitForSelector("#v-studio:not([hidden])"); await q.waitForTimeout(1000);
+    const skipTour = async () => { const b = q.locator("#v-studio .st-tour-box button:visible", { hasText: /Skip|跳过/ }); if (await b.count()) { await b.first().click(); await q.waitForTimeout(300); } };
+    await skipTour();
+    for (const n of bars) {
+      const pat = song.song[n - 1];
+      for (const scr of ["drums", "melody"]) {
+        await q.click("#studio-pat"); await q.waitForTimeout(300);
+        await q.click(`#studio-sheet .st-pat-btn[data-pat="${pat}"]`); await q.waitForTimeout(300);
+        await q.click(`#studio-screens .st-scr[data-screen="${scr}"]`); await q.waitForTimeout(400); await skipTour();
+        await film(q, `studio-${tag}-${scr}-b${n}`, async () => {
+          await q.waitForTimeout(400); await q.click("#studio-play");   /* the drums / melody page plays its pattern */
+          await q.waitForTimeout(2800);
+        });
+        await q.click("#studio-play"); await q.waitForTimeout(400);
+      }
+    }
+    await q.close();
+  }
+  /* ---- the AI lines' provider list (Settings -> AI lines -> Add a line), for "bring a key from any of these". Only in a
+     fresh profile: the run refuses to film if any line (any key) is stored. The shot ends with a finger pressing on
+     DeepSeek and stops before the press lands, so no key page or key field is ever opened. ---- */
+  if (ONLY.includes("ai-add")) {
+    const q = await newPage(); await ready(q);
+    const lines = await q.evaluate(() => LP.S.db.doc("data/users/local/ai").get().then((s) => (s.exists && Array.isArray(s.data().lines) ? s.data().lines.length : 0)));
+    if (lines) throw new Error("ai-add: this profile has AI lines stored; it only runs in a fresh one");
+    await tile(q, LANG === "zh" ? "设置" : "Settings"); await q.waitForTimeout(700);
+    await film(q, "ai-add", async () => {
+      await q.waitForTimeout(500);
+      await q.click("#set-ai-open"); await q.waitForSelector("#set-ai-main:not([hidden])"); await q.waitForTimeout(700);
+      await q.click("#set-ai-add-open"); await q.waitForSelector("#set-ai-providers li"); await q.waitForTimeout(2200);
+      const b = await q.locator('#set-ai-providers li[data-provider="deepseek"]').boundingBox();
+      await q.mouse.move(b.x + b.width / 2, b.y + b.height / 2); await q.mouse.down(); await q.waitForTimeout(350);
+    });
     await q.close();
   }
   if (want("studio")) {
@@ -360,9 +723,11 @@ async function record() {
       ["fake-yu", [["ArrowDown", 80], ["x", 80], ["wait", 800], ["x", 80], ["wait", 4000]], [["wait", 1200], ["x", 80], ["wait", 900], ["x", 80], ["wait", 1500]]],
       ["lao-zhang", [["x", 80], ["wait", 1000], ["x", 80], ["wait", 1200]], [["wait", 900], ["x", 80], ["wait", 1500], ["x", 80], ["wait", 1300]]],
       ["paper-tower", [["x", 80], ["wait", 800], ["x", 80], ["wait", 800], ["x", 80], ["wait", 800]], play(12)],
-      ["whack-a-mole", [["tap", [0.5, 0.6]], ["wait", 800], ["tap", [0.5, 0.6]], ["wait", 800]], taps(16)],
+      /* one tap at a time: each tap draws its own hammer for 260 ms, so quick taps show several hammers at once */
+      ["whack-a-mole", [["fn", (f) => f.locator("#btns button").first().click()], ["wait", 900]], taps(9).flatMap((x) => [x, ["wait", 330]])],
       ["shanjiao-diner", [["x", 80], ["wait", 1000], ["x", 80], ["wait", 1000], ["x", 80], ["wait", 1000]], play(12)],
-      ["sisyphus", [["x", 80], ["wait", 1200]], [["ArrowRight", 3800]]],
+      /* Sisyphus pushes while A is held (not the D-pad) */
+      ["sisyphus", [["x", 80], ["wait", 1200]], [["x", 3800]]],
       ["daily-box", [["x", 80], ["wait", 1000]], play(12)],
       ["rain-station", [["x", 80], ["wait", 800], ["x", 80], ["wait", 2500]], [["wait", 1200], ["x", 80], ["wait", 1500], ["x", 80], ["wait", 800]]],
       /* Gomoku is touch only: START, then a few points of the 15 x 15 board; the computer answers each one */
@@ -373,18 +738,57 @@ async function record() {
       ["klotski", [["x", 80], ["wait", 1000]], play(12)],
       ["crossing", [["x", 80], ["wait", 1200]], [["x", 80], ["wait", 600], ...play(8)]],
       ["kana-cards", [["x", 80], ["wait", 1000]], [["x", 80], ["wait", 900], ["ArrowRight", 80], ["wait", 900], ["x", 80], ["wait", 900], ["ArrowRight", 80], ["wait", 800]]],
-      ["paint", [["wait", 300]], [["drag", [[0.2, 0.35], [0.8, 0.4], [0.7, 0.6], [0.3, 0.55], [0.5, 0.7]]], ["wait", 600]]],
+      /* Paint: a little handheld drawn stroke by stroke on the 96 x 96 canvas with the bold pen (original drawing):
+         the body, its screen, a smile on the screen, the cross, two round keys */
+      ["paint", [["fn", (f) => f.locator("#size").click()], ["wait", 400]], [["fn", async (f) => {
+        const box = await f.locator("#cv").boundingBox(), at = ([x, y]) => [box.x + box.width * x / 96, box.y + box.height * y / 96];
+        const ring = (cx, cy, r, n = 10) => Array.from({ length: n + 1 }, (_, i) => [cx + r * Math.cos(2 * Math.PI * i / n), cy + r * Math.sin(2 * Math.PI * i / n)]);
+        const strokes = [
+          [[30, 12], [66, 12], [66, 84], [30, 84], [30, 12]],      /* body */
+          [[36, 18], [60, 18], [60, 42], [36, 42], [36, 18]],      /* screen */
+          [[42, 32], [45, 35], [51, 35], [54, 32]],                /* a smile on it */
+          [[35, 60], [47, 60]], [[41, 54], [41, 66]],              /* the cross */
+          ring(55, 64, 3, 8), ring(61, 56, 3, 8),                  /* two keys */
+        ];
+        for (const st of strokes) {
+          await a.mouse.move(...at(st[0])); await a.mouse.down();
+          for (let i = 1; i < st.length; i++) { const [x0, y0] = st[i - 1], [x1, y1] = st[i], n = Math.max(2, Math.round(Math.hypot(x1 - x0, y1 - y0) / 3));
+            for (let j = 1; j <= n; j++) { await a.mouse.move(...at([x0 + (x1 - x0) * j / n, y0 + (y1 - y0) * j / n])); await a.waitForTimeout(22); } }
+          await a.mouse.up(); await a.waitForTimeout(220);
+        }
+      }], ["wait", 900]]],
       ["sound-board", [["wait", 300]], [["x", 80], ["wait", 700], ["ArrowDown", 80], ["x", 80], ["wait", 700], ["ArrowDown", 80], ["x", 80], ["wait", 700], ["ArrowDown", 80], ["x", 80], ["wait", 700]]],
       ["daily-slip", [["x", 80], ["wait", 1200]], play(10)],
+      /* Save book: two tallies named first (the name field, then the handheld's A: the app's own 新增 button is a form
+         submit, which the sandbox blocks), then counted up by tapping them */
+      ["save-book", [["fn", async (f) => { for (const n of (LANG === "zh" ? ["喝水", "练琴"] : ["Water", "Piano"])) {
+          await f.locator("#name").fill(n); await f.locator("#name").focus();
+          const bx = await a.locator('.gamepad [data-b="a"]').boundingBox(); await a.mouse.click(bx.x + bx.width / 2, bx.y + bx.height / 2); await a.waitForTimeout(400); } }], ["wait", 500]],
+        [["fn", async (f) => { const rows = f.locator("#list > *"); for (const k of [0, 0, 1, 0, 1, 1, 0, 1, 0]) { await rows.nth(k).click({ position: { x: 40, y: 12 } }); await a.waitForTimeout(420); } }]]],
+      /* the marble maze pushed with the D-pad, as a player without tilt would (no autopilot) */
+      ["tilt-maze", [["x", 80], ["wait", 900], ["z", 80], ["wait", 700]],   /* B: "Don't allow" tilt, the D-pad then */ [["ArrowDown", 900], ["ArrowRight", 700], ["ArrowDown", 500], ["ArrowRight", 900], ["ArrowUp", 600], ["ArrowRight", 500]]],
+      /* Photo puzzle with a built-in picture (no camera): pick one, then slide tiles */
+      ["photo-puzzle", [["x", 80], ["wait", 900], ["x", 80], ["wait", 900], ["x", 80], ["wait", 900]], play(14)],
+      /* Candles: hold A to blow (no microphone needed) */
+      ["blow-candles", [["x", 80], ["wait", 900], ["x", 80], ["wait", 700]], [["x", 1400], ["wait", 500], ["x", 1200], ["wait", 500], ["x", 1000], ["wait", 400]]],
       ["calculator", [["wait", 300]], [["tap", [0.15, 0.62]], ["wait", 250], ["tap", [0.4, 0.62]], ["wait", 250], ["tap", [0.65, 0.75]], ["wait", 250], ["tap", [0.15, 0.75]], ["wait", 250], ["tap", [0.88, 0.88]], ["wait", 1500]]],
     ];
+    /* what the second half of a --long clip plays where repeating the first would not look like play */
+    const LONG_EXTRA = {
+      paint: [["wait", 600]],   /* the picture is finished: it stays */
+      gomoku: [["fn", async (f) => {
+        const box = await f.locator("#c").boundingBox(), cell = box.width / 15;
+        for (const [x, y] of [[5, 9], [9, 5], [8, 8]]) { await a.mouse.click(box.x + (x + 0.5) * cell, box.y + (y + 0.5) * cell); await a.waitForTimeout(1200); }
+      }]],
+    };
     for (const [id, before, during] of APPS) {
       if (pick.length && !pick.includes("app:" + id)) continue;
       const [man, html] = await Promise.all([readFile(join(ROOT, "registry/apps", id, "manifest.json"), "utf8"), readFile(join(ROOT, "registry/apps", id, "index.html"), "utf8")]);
       await a.evaluate(([man, html]) => { const x = Object.assign({}, JSON.parse(man), { html }); window.LP.upsert("apps", x); window.LP.runApp(x); }, [man, html]);
       await a.waitForSelector("#v-run:not([hidden])"); await a.waitForTimeout(2000);
       await keys(before);
-      await film(a, "app-" + id, () => keys(during));
+      /* --long: the playing part twice over, for a grid that stays on screen longer (clips named app-<id>-long) */
+      await film(a, "app-" + id + (LONG ? "-long" : ""), async () => { await keys(during); if (LONG) await keys(LONG_EXTRA[id] || during); });
       await home(a);
     }
     await a.close();
