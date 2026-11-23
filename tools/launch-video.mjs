@@ -733,6 +733,10 @@ async function record() {
         [["fn", async (f) => { const rows = f.locator("#list > *"); for (const k of [0, 0, 1, 0, 1, 1, 0, 1, 0]) { await rows.nth(k).click({ position: { x: 40, y: 12 } }); await a.waitForTimeout(420); } }]]],
       /* the marble maze pushed with the D-pad, as a player without tilt would (no autopilot) */
       ["tilt-maze", [["x", 80], ["wait", 900], ["z", 80], ["wait", 700]],   /* B: "Don't allow" tilt, the D-pad then */ [["ArrowDown", 900], ["ArrowRight", 700], ["ArrowDown", 500], ["ArrowRight", 900], ["ArrowUp", 600], ["ArrowRight", 500]]],
+      /* Photo puzzle with a built-in picture (no camera): pick one, then slide tiles */
+      ["photo-puzzle", [["x", 80], ["wait", 900], ["x", 80], ["wait", 900], ["x", 80], ["wait", 900]], play(14)],
+      /* Candles: hold A to blow (no microphone needed) */
+      ["blow-candles", [["x", 80], ["wait", 900], ["x", 80], ["wait", 700]], [["x", 1400], ["wait", 500], ["x", 1200], ["wait", 500], ["x", 1000], ["wait", 400]]],
       ["calculator", [["wait", 300]], [["tap", [0.15, 0.62]], ["wait", 250], ["tap", [0.4, 0.62]], ["wait", 250], ["tap", [0.65, 0.75]], ["wait", 250], ["tap", [0.15, 0.75]], ["wait", 250], ["tap", [0.88, 0.88]], ["wait", 1500]]],
     ];
     /* what the second half of a --long clip plays where repeating the first would not look like play */
