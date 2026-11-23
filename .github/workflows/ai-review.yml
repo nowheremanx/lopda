@@ -93,7 +93,7 @@ jobs:
             if [ -z "$token" ] || [ "$token" = null ]; then echo "OpenCode sign-in failed"; exit 1; fi
             echo "::add-mask::$token"
             export AI_REVIEW_KEY="$token"
-            export AI_REVIEW_URL="${AI_REVIEW_URL:-https://opencode.ai/inference/openai/v1/chat/completions}"
+            export AI_REVIEW_URL="${AI_REVIEW_URL:-https://opencode.ai/inference/go/v1/chat/completions}"
             export AI_REVIEW_MODEL="${AI_REVIEW_MODEL:-deepseek-v4.1-flash}"
           fi
           node tools/ai-review.mjs "$RUNNER_TEMP/pr/diff.txt" "$RUNNER_TEMP/pr/pr.json" "$RUNNER_TEMP/pr/comment.md"

@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { splitDiff, scan, trimDiff, sanitize, buildPrompt, formatComment, errorText } from "../tools/ai-review.mjs";
+import { splitDiff, scan, trimDiff, sanitize, buildPrompt, formatComment, errorText, requestHeaders } from "../tools/ai-review.mjs";
 
 const DIFF = [
   "diff --git a/registry/apps/x/index.html b/registry/apps/x/index.html",
@@ -97,4 +97,13 @@ test("errorText keeps the API's reason short and on one line", () => {
   assert.equal(errorText("Bad gateway"), "Bad gateway");
   assert.equal(errorText(""), "(no body)");
   assert.ok(errorText("x".repeat(1000)).length < 310);
+});
+
+test("OpenCode gets a session header and a user agent; other APIs do not", () => {
+  const a = requestHeaders("https://opencode.ai/inference/go/v1/chat/completions", "k");
+  assert.match(a["x-opencode-session"], /^lopda-ai-review-/);
+  assert.match(a["user-agent"], /lopda-ai-review/);
+  assert.equal(a.authorization, "Bearer k");
+  assert.equal(requestHeaders("https://opencode.ai/x", "k")["x-opencode-session"], a["x-opencode-session"], "stable within a run");
+  assert.equal(requestHeaders("https://api.deepseek.com/chat/completions", "k")["x-opencode-session"], undefined);
 });
