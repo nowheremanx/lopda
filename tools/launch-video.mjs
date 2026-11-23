@@ -305,6 +305,103 @@ async function record() {
     }, true);
     await q.close();
   }
+  /* ---- Scripts revising a program with 改一改: the wind-up timer that scripts-gen wrote (the newest file in
+     <outDir>/wind-up-timer/, or --timer=<file>) is put into Scripts, run once as it is, revised with one line, run again.
+     Only with --only=scripts-revise and DEEPSEEK_KEY in the environment, as scripts-gen. ---- */
+  if (ONLY.includes("scripts-revise")) {
+    const KEY = process.env.DEEPSEEK_KEY;
+    if (!KEY) throw new Error("scripts-revise needs DEEPSEEK_KEY in the environment");
+    const { readdirSync } = await import("node:fs");
+    const tdir = join(OUT, "wind-up-timer");
+    const file = opt("timer", "") || join(tdir, readdirSync(tdir).filter((f) => /^timer-.*\.html$/.test(f)).sort().at(-1));
+    const body = await readFile(file, "utf8");
+    const ASK = opt("ask", LANG === "zh" ? "数字再大一点" : "Make the numbers bigger");
+    const NAME = LANG === "zh" ? "发条蛋表" : "Wind-up egg timer";
+    const q = await newPage(); await ready(q);
+    await q.evaluate(([k, body, name]) => Promise.all([
+      LP.S.db.doc("data/users/local/ai").set({ v: 2, next: 2, def: "l1", use: {},
+        lines: [{ id: "l1", provider: "deepseek", n: 1, key: k, model: "", visionModel: "", on: true, added: Date.now() }] }),
+      LP.S.db.doc("data/users/local/scripts/items/timer").set({ v: 1, id: "timer", name, body, created: Date.now(), updated: Date.now() })]),
+      [KEY, body, NAME]);
+    await q.reload({ waitUntil: "load" }); await ready(q);
+    const openTimer = async () => {
+      await tile(q, LANG === "zh" ? "脚本" : "Scripts"); await q.waitForSelector("#v-scripts:not([hidden])"); await q.waitForTimeout(500);
+      await q.locator("#scripts-list li", { hasText: NAME }).first().click(); await q.waitForSelector("#v-script-edit:not([hidden])"); await q.waitForTimeout(500);
+    };
+    const play = async () => {
+      const box = await q.locator("#run-frame").boundingBox(), cx = box.x + box.width / 2, cy = box.y + box.height * 0.45, r = box.width * 0.25;
+      await q.mouse.move(cx + r, cy); await q.mouse.down();
+      for (let i = 0; i <= 50; i++) { const a = i / 50 * Math.PI * 1.4; await q.mouse.move(cx + r * Math.cos(a), cy + r * Math.sin(a)); await q.waitForTimeout(25); }
+      await q.mouse.up(); await q.waitForTimeout(1800);
+    };
+    await openTimer();
+    await film(q, "scripts-old", async () => {
+      await q.click("#script-run"); await q.waitForSelector("#v-run:not([hidden])", { timeout: 10000 }); await q.waitForTimeout(1200);
+      await play();
+    }, true);
+    await home(q); await openTimer();
+    const t0 = Date.now();
+    await film(q, "scripts-revise", async () => {
+      await q.waitForTimeout(600);
+      await q.click("#script-paste");                               /* 改一改 */
+      await q.waitForSelector("#v-script-revise:not([hidden])"); await q.waitForTimeout(500);
+      await q.click("#revise-ask");
+      for (const ch of ASK) { await q.keyboard.type(ch); await q.waitForTimeout(220); }
+      await q.waitForTimeout(600);
+      await q.click("#revise-go");                                  /* 改 */
+      await q.waitForSelector("#v-script-edit:not([hidden])");
+      await q.waitForFunction(() => !document.getElementById("script-run").disabled && /改好了|Revised|Done|不满意|not happy/.test(document.getElementById("script-hint").textContent),
+        null, { timeout: 15 * 60000, polling: 500 });
+      await q.waitForTimeout(1500);
+    });
+    const hint = await q.$eval("#script-hint", (e) => e.textContent);
+    const code = await q.$eval("#script-code", (e) => e.value);
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    await writeFile(join(tdir, "revised-" + stamp + ".html"), code);
+    console.log("scripts-revise: " + ((Date.now() - t0) / 1000).toFixed(0) + " s, " + code.length + " characters; " + hint.split("\n")[0]);
+    await film(q, "scripts-revised", async () => {
+      await q.click("#script-run"); await q.waitForSelector("#v-run:not([hidden])", { timeout: 10000 }); await q.waitForTimeout(1200);
+      await play();
+    }, true);
+    await q.close();
+  }
+  /* ---- the events page at a phone's width: the list, the first event, its two ways (their little screens typing), the cards ---- */
+  if (ONLY.includes("events")) {
+    const q = await ctx.newPage();
+    await q.addInitScript((l) => { try { localStorage.setItem("lopda-landing-lang", l); } catch (e) {} }, LANG);
+    await q.goto(base + "/events/", { waitUntil: "networkidle" }); await q.waitForTimeout(800);
+    const glide = async (dy, ms) => { const n = Math.max(1, Math.round(ms / 30)); for (let i = 0; i < n; i++) { await q.mouse.wheel(0, dy / n); await q.waitForTimeout(30); } };
+    const to = async (sel, ms, off = 90) => { const y = await q.evaluate(([s, o]) => { const e = document.querySelector(s); return e ? e.getBoundingClientRect().top - o : 0; }, [sel, off]); await glide(y, ms); };
+    await q.mouse.move(VW / 2, VH / 2);
+    await film(q, "events", async () => {
+      await q.waitForTimeout(900);
+      await q.locator("a.ev").first().click(); await q.waitForTimeout(1200);
+      await to("#way-phone", 900); await q.waitForTimeout(2600);
+      await to("#way-phone .screen", 600, 200); await q.waitForTimeout(800);
+      await to(".way:not(#way-phone)", 900); await q.waitForTimeout(2400);
+      await to(".card", 900, 140); await q.waitForTimeout(600);
+      await glide(2200, 2600); await q.waitForTimeout(500);
+    });
+    await q.close();
+  }
+  /* ---- the store's newest app with its NEW badge: a page on the real date (the badge lasts seven days from the
+     index's released date), scrolled to the first badged entry ---- */
+  if (ONLY.includes("store-new")) {
+    const q = await ctx.newPage(); await q.goto(base + "/runtime/", { waitUntil: "load" }); await ready(q);
+    await tile(q, T.store);
+    await q.waitForSelector("#store-list .store-item", { timeout: 10000 }); await q.waitForLoadState("networkidle"); await q.waitForTimeout(800);
+    const NEW = LANG === "zh" ? "新" : "NEW";
+    const y = await q.evaluate((n) => { const b = [...document.querySelectorAll("#store-list .store-badge")].find((e) => e.textContent === n);
+      return b ? b.closest(".store-item").getBoundingClientRect().top - 220 : null; }, NEW);
+    if (y == null) throw new Error("store-new: no app has the " + NEW + " badge today");
+    await q.mouse.move(VW / 2, VH * 0.4);
+    await film(q, "store-new", async () => {
+      await q.waitForTimeout(500);
+      const n = 60; for (let i = 0; i < n; i++) { await q.mouse.wheel(0, y / n); await q.waitForTimeout(30); }
+      await q.waitForTimeout(2200);
+    });
+    await q.close();
+  }
   if (want("studio")) {
     await home(p); await tile(p, T.studio);
     await p.waitForSelector("#v-studio:not([hidden])"); await p.waitForTimeout(800);
