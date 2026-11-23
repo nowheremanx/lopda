@@ -372,7 +372,7 @@ async function record() {
       const box = await q.locator("#run-frame").boundingBox(), cx = box.x + box.width / 2, cy = box.y + box.height * 0.45, r = box.width * 0.25;
       await q.mouse.move(cx + r, cy); await q.mouse.down();
       for (let i = 0; i <= 50; i++) { const a = i / 50 * Math.PI * 1.4; await q.mouse.move(cx + r * Math.cos(a), cy + r * Math.sin(a)); await q.waitForTimeout(25); }
-      await q.mouse.up(); await q.waitForTimeout(1800);
+      await q.mouse.up(); await q.waitForTimeout(+opt("hold", "1800"));   /* --hold: how long the countdown runs after release */
     };
     await openTimer();
     await film(q, "scripts-old", async () => {
@@ -380,7 +380,7 @@ async function record() {
       await play();
     }, true);
     if (RUNONLY) {
-      const rfile = join(tdir, readdirSync(tdir).filter((f) => /^revised-.*\.html$/.test(f)).sort().at(-1));
+      const rfile = opt("revised", "") || join(tdir, readdirSync(tdir).filter((f) => /^revised-.*\.html$/.test(f)).sort().at(-1));
       await home(q);
       await q.evaluate(([body, name]) => LP.S.db.doc("data/users/local/scripts/items/timer").set({ v: 1, id: "timer", name, body, created: Date.now(), updated: Date.now() }), [await readFile(rfile, "utf8"), NAME]);
       await q.reload({ waitUntil: "load" }); await ready(q); await openTimer();
