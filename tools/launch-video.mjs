@@ -49,6 +49,7 @@ const opt = (k, d) => { const a = args.find((x) => x.startsWith("--" + k + "="))
 const LANG = opt("lang", "en");
 const ONLY = opt("only", "").split(",").filter(Boolean);
 const want = (n) => !ONLY.length || ONLY.includes(n);
+const LONG = args.includes("--long");
 if (MODE !== "record" && MODE !== "edit") { console.error("usage: launch-video.mjs record|edit <outDir> [--lang=en|zh]"); process.exit(2); }
 
 /* the screen's size in css px, and the scale of the frames */
@@ -606,7 +607,8 @@ async function record() {
       ["fake-yu", [["ArrowDown", 80], ["x", 80], ["wait", 800], ["x", 80], ["wait", 4000]], [["wait", 1200], ["x", 80], ["wait", 900], ["x", 80], ["wait", 1500]]],
       ["lao-zhang", [["x", 80], ["wait", 1000], ["x", 80], ["wait", 1200]], [["wait", 900], ["x", 80], ["wait", 1500], ["x", 80], ["wait", 1300]]],
       ["paper-tower", [["x", 80], ["wait", 800], ["x", 80], ["wait", 800], ["x", 80], ["wait", 800]], play(12)],
-      ["whack-a-mole", [["tap", [0.5, 0.6]], ["wait", 800], ["tap", [0.5, 0.6]], ["wait", 800]], taps(16)],
+      /* one tap at a time: each tap draws its own hammer for 260 ms, so quick taps show several hammers at once */
+      ["whack-a-mole", [["tap", [0.5, 0.6]], ["wait", 800], ["tap", [0.5, 0.6]], ["wait", 800]], taps(9).flatMap((x) => [x, ["wait", 330]])],
       ["shanjiao-diner", [["x", 80], ["wait", 1000], ["x", 80], ["wait", 1000], ["x", 80], ["wait", 1000]], play(12)],
       /* Sisyphus pushes while A is held (not the D-pad) */
       ["sisyphus", [["x", 80], ["wait", 1200]], [["x", 3800]]],
@@ -623,15 +625,25 @@ async function record() {
       ["paint", [["wait", 300]], [["drag", [[0.2, 0.35], [0.8, 0.4], [0.7, 0.6], [0.3, 0.55], [0.5, 0.7]]], ["wait", 600]]],
       ["sound-board", [["wait", 300]], [["x", 80], ["wait", 700], ["ArrowDown", 80], ["x", 80], ["wait", 700], ["ArrowDown", 80], ["x", 80], ["wait", 700], ["ArrowDown", 80], ["x", 80], ["wait", 700]]],
       ["daily-slip", [["x", 80], ["wait", 1200]], play(10)],
+      /* Save book: counters, A adds one, the D-pad picks another */
+      ["save-book", [["wait", 500]], [["x", 80], ["wait", 300], ["x", 80], ["wait", 300], ["ArrowDown", 80], ["wait", 300], ["x", 80], ["wait", 300], ["x", 80], ["wait", 300], ["x", 80], ["wait", 300], ["ArrowRight", 80], ["wait", 300], ["x", 80], ["wait", 300], ["x", 80], ["wait", 500]]],
       ["calculator", [["wait", 300]], [["tap", [0.15, 0.62]], ["wait", 250], ["tap", [0.4, 0.62]], ["wait", 250], ["tap", [0.65, 0.75]], ["wait", 250], ["tap", [0.15, 0.75]], ["wait", 250], ["tap", [0.88, 0.88]], ["wait", 1500]]],
     ];
+    /* what the second half of a --long clip plays where repeating the first would not look like play */
+    const LONG_EXTRA = {
+      gomoku: [["fn", async (f) => {
+        const box = await f.locator("#c").boundingBox(), cell = box.width / 15;
+        for (const [x, y] of [[5, 9], [9, 5], [8, 8]]) { await a.mouse.click(box.x + (x + 0.5) * cell, box.y + (y + 0.5) * cell); await a.waitForTimeout(1200); }
+      }]],
+    };
     for (const [id, before, during] of APPS) {
       if (pick.length && !pick.includes("app:" + id)) continue;
       const [man, html] = await Promise.all([readFile(join(ROOT, "registry/apps", id, "manifest.json"), "utf8"), readFile(join(ROOT, "registry/apps", id, "index.html"), "utf8")]);
       await a.evaluate(([man, html]) => { const x = Object.assign({}, JSON.parse(man), { html }); window.LP.upsert("apps", x); window.LP.runApp(x); }, [man, html]);
       await a.waitForSelector("#v-run:not([hidden])"); await a.waitForTimeout(2000);
       await keys(before);
-      await film(a, "app-" + id, () => keys(during));
+      /* --long: the playing part twice over, for a grid that stays on screen longer (clips named app-<id>-long) */
+      await film(a, "app-" + id + (LONG ? "-long" : ""), async () => { await keys(during); if (LONG) await keys(LONG_EXTRA[id] || during); });
       await home(a);
     }
     await a.close();
