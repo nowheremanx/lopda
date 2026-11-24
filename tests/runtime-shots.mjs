@@ -353,7 +353,7 @@ async function capture(rootArg, outArg) {
   await p.waitForTimeout(500);
   await shot("18-store");
   const item = p.locator("#store-list .store-item", { hasText: "五子棋" });
-  await item.locator("button").first().click();
+  await item.locator("button").click();
   await p.waitForFunction(() => { const li = [...document.querySelectorAll("#store-list .store-item")].find((e) => /五子棋/.test(e.textContent)); return li && li.querySelector("button").textContent === "打开"; }, null, { timeout: 10000 });
   await settle(300);
   await shot("19-store-installed");

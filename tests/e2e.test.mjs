@@ -254,7 +254,7 @@ test("preinstalled apps: installed on first start after the built-ins, and a rem
   const until = async (fn, what) => { for (let i = 0; i < 100; i++) { if (await fn()) return; await p.waitForTimeout(100); } assert.fail("timed out waiting for " + what); };
   await until(async () => ((await doc("data/users/local/preinstall"))?.ids || []).length === 2, "the preinstall record");
   await p.locator("#home .app", { hasText: "点阵画板" }).click();
-  await p.click("#run-del"); await p.click("#run-del-wrap .btn:not(.ghost)");
+  await p.click("#run-more"); await p.click("#run-del"); await p.click("#run-del-wrap .btn:not(.ghost)");
   await until(async () => !(await doc("data/users/local/apps/items/paint")), "paint's removal");
   await p.reload({ waitUntil: "networkidle" }); await p.waitForTimeout(500);
   assert.deepEqual((await tiles(p)).slice(-1), ["计算器"]);
@@ -306,7 +306,7 @@ test("removing an app keeps its save; Settings clears it; a damaged save is repo
   assert.deepEqual(saved.kv, { k: { hello: "world" } });
   assert.equal(saved.v, 1);
   assert.equal(saved.app.id, "probe");
-  await p.click("#run-del");
+  await p.click("#run-more"); await p.click("#run-del");
   assert.match(await p.textContent("#run-del-wrap .btn:not(.ghost)"), /存档会留着/);
   await p.click("#run-del-wrap .btn:not(.ghost)");
   await p.waitForSelector("#v-home:not([hidden])");
@@ -477,7 +477,7 @@ test("store: an app that asks for a capability shows its icons before install, a
   assert.equal(await item.locator(".store-perms .perm").count(), 1, "the entry shows the microphone as one icon");
   assert.equal(await item.locator("small").filter({ hasText: "会用麦克风" }).count(), 0, "no line of permission text");
 
-  await item.locator("button").first().click();
+  await item.locator("button").click();
   await p.waitForSelector("#file-ask .ask-perms");
   assert.equal(await p.locator("#file-ask .ask-perm").count(), 1);
   assert.match(await p.textContent("#file-ask .ask-perm"), /话筒/);
@@ -491,9 +491,9 @@ test("store: an app that asks for a capability shows its icons before install, a
   assert.equal(await p.evaluate(() => document.activeElement && document.activeElement.textContent.trim()), "安装",
     "the focus returns to the install button");
   await p.waitForSelector("#file-ask", { state: "detached" });
-  assert.equal((await item.locator("button").first().innerText()).trim(), "安装", "cancelling changes nothing");
+  assert.equal((await item.locator("button").innerText()).trim(), "安装", "cancelling changes nothing");
 
-  await item.locator("button").first().click();
+  await item.locator("button").click();
   await p.waitForSelector("#file-ask .ask-perms");
   await p.click("#file-ok");
   await p.waitForFunction(() => [...document.querySelectorAll("#store-list .store-item")]
@@ -568,19 +568,25 @@ test("a link: an app that asks for a capability is confirmed first, an unknown i
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
-test("store: an entry's share button copies a link straight to that app", { skip, timeout: 30000 }, async (t) => {
+test("the running app's ⋯ menu shares a link straight to it, and closes on a tap elsewhere", { skip, timeout: 30000 }, async (t) => {
   const { p, errors } = await page(t, { locale: "zh-CN" });
   await p.context().grantPermissions(["clipboard-read", "clipboard-write"]);
   await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
   /* no share sheet in headless Chromium on Linux; make sure of it so the clipboard path runs */
   await p.evaluate(() => { try { delete Navigator.prototype.share; } catch {} });
-  await p.locator("#home .app.builtin", { hasText: "应用商店" }).click();
-  await p.fill("#store-q", "华容道");
-  const item = p.locator("#store-list .store-item");
-  await item.waitFor();
-  await item.locator(".store-share").click();
+  await p.waitForFunction(() => window.LP && LP.S.apps.some((a) => a.id === "calculator"));
+  await p.evaluate(() => LP.runApp(LP.S.apps.find((a) => a.id === "calculator")));
+  await p.waitForSelector("#v-run:not([hidden])");
+  assert.equal(await p.isHidden("#run-menu"), true);
+  await p.click("#run-more");
+  assert.equal(await p.getAttribute("#run-more", "aria-expanded"), "true");
+  await p.click("#run-title");
+  assert.equal(await p.isHidden("#run-menu"), true, "a tap outside closes the menu");
+  await p.click("#run-more");
+  await p.click("#run-share");
   await p.waitForFunction(() => /链接已复制/.test(document.getElementById("toast").textContent));
-  assert.equal(await p.evaluate(() => navigator.clipboard.readText()), base + "/runtime/?app=klotski");
+  assert.equal(await p.evaluate(() => navigator.clipboard.readText()), base + "/runtime/?app=calculator");
+  assert.equal(await p.isHidden("#run-menu"), true);
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
@@ -7959,7 +7965,7 @@ test("sensor: HOME stops the tilt feed; removing a mic app ends its stream too",
   f.evaluate(() => { go("mic"); });
   await p.waitForSelector("#file-ask .box"); await p.click("#file-ok");
   await until(p, async () => (await R(f)).results.includes("mic:on"), "mic on");
-  await p.click("#run-del"); await p.click("#run-del-wrap .btn:not(.ghost)");
+  await p.click("#run-more"); await p.click("#run-del"); await p.click("#run-del-wrap .btn:not(.ghost)");
   assert.equal(await p.evaluate(() => window.__stream.getTracks().every((x) => x.readyState === "ended")), true);
   assert.equal(await p.evaluate(() => navigator.audioSession.type), "ambient");
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
@@ -8137,7 +8143,7 @@ test("camera snap: HOME, removing the app, a hidden page and a vanished frame ea
   f = await runSnapApp(p);
   f.evaluate(() => { snap(); });
   await finderLive(p);
-  await p.evaluate(() => { document.getElementById("run-del").click(); document.querySelector("#run-del-wrap .btn:not(.ghost)").click(); });
+  await p.evaluate(() => { document.getElementById("run-more").click(); document.getElementById("run-del").click(); document.querySelector("#run-del-wrap .btn:not(.ghost)").click(); });
   assert.equal(await allEnded(p), true, "removing the app ends the stream");
   assert.equal(await p.evaluate(() => window.LP.snap.isOpen()), false);
   /* the page hidden (locked, another app): null, and nothing comes back. Removing the app dropped its grant: asked again */

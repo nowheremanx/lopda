@@ -248,8 +248,8 @@ const play = async (label, steps) => {
   await p.waitForLoadState("networkidle"); await p.waitForTimeout(800);   /* the list draws again once the index arrives */
   const item = p.locator("#store-list .store-item", { hasText: label }).first();
   await item.scrollIntoViewIfNeeded();
-  if ((await item.locator("button").first().textContent()) !== T.open) {
-    await item.locator("button").first().click();
+  if ((await item.locator("button").textContent()) !== T.open) {
+    await item.locator("button").click();
     /* an app that asks for capabilities is confirmed first (decisions.md section 42): A says yes */
     await p.waitForTimeout(300);
     const ask = p.locator("#file-ask .box button").first();
