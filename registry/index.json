@@ -936,8 +936,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/rain-station/index.html",
-      "sha256": "594adf4514668a2bd87930fd3cd1be5f7dae6cb05fac18758f4009300158b66c",
-      "bytes": 103724
+      "sha256": "7b1db1f997ec82c5d61451d572599d0ec701db0598f00f3c2fcbc4179bf98dee",
+      "bytes": 103865
     },
     {
       "spec": "lopda/1",
