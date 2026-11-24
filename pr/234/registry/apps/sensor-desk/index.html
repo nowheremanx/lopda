@@ -218,13 +218,16 @@ function off(kind) {
     refreshMotion();
     /* start() asks the player and the phone if it must, then answers "on" | "denied" | "none";
        the state line changes only when that answer is in (never before) */
-    PAD.motion.start().then(function (r) {
+    function answered(r) {
       motionAsking = false;
       if (!motionWanted) { PAD.motion.stop(); return; }     /* the player turned it off while the phone asked */
       if (r === "on") { motionState = "on"; }
-      else { motionWanted = false; motionState = r; forgotTilt(); }
+      else { motionWanted = false; motionState = r === "denied" ? "denied" : "none"; forgotTilt(); }
       refreshMotion(); requestDraw();
-    });
+    }
+    /* SPEC.md 6.4 says start() never rejects; the second handler only keeps a runtime fault from
+       leaving the button stuck in "asking" for good, and reads it as "none" */
+    PAD.motion.start().then(answered, function () { answered("none"); });
   }
   function stopMotion() {
     motionWanted = false; motionAsking = false; motionState = "off";
@@ -260,13 +263,14 @@ function off(kind) {
     micWanted = true; micAsking = true;
     refreshMic();
     /* the same three answers; "denied" leaves the button able to ask again */
-    PAD.mic.start().then(function (r) {
+    function answered(r) {
       micAsking = false;
       if (!micWanted) { PAD.mic.stop(); return; }
       if (r === "on") { micState = "on"; }
-      else { micWanted = false; micState = r; level = 0; peak = 0; pitch = null; }
+      else { micWanted = false; micState = r === "denied" ? "denied" : "none"; level = 0; peak = 0; pitch = null; }
       refreshMic(); requestDraw();
-    });
+    }
+    PAD.mic.start().then(answered, function () { answered("none"); });   /* as for the tilt above */
   }
   function stopMic() {
     micWanted = false; micAsking = false; micState = "off";
@@ -293,7 +297,7 @@ function off(kind) {
   }
   var NOTES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
   function pitchText(hz) {
-    if (hz == null) return "-";
+    if (!(hz > 0)) return "-";                               /* null (no clear note), and never log(0) */
     var n = Math.round(69 + 12 * Math.log(hz / 440) / Math.LN2);   /* A4 = 440 Hz is MIDI 69; keep hz exact here */
     var i = ((n % 12) + 12) % 12;
     return Math.round(hz) + " Hz  " + NOTES[i] + (Math.floor(n / 12) - 1);
