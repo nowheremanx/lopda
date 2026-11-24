@@ -5,15 +5,15 @@
   "glyph": "感",
   "category": "education",
   "version": "1.0.0",
-  "description": "实时显示倾斜、摇晃、方向和声音，传感器用法的示范程序。",
+  "description": "开发示例：实时显示倾斜、摇晃、方向和声音，以及允许、拒绝、没有传感器时的样子。",
   "i18n": {
     "zh": {
       "name": "传感器台",
-      "description": "实时显示倾斜、摇晃、方向和声音，传感器用法的示范程序。"
+      "description": "开发示例：实时显示倾斜、摇晃、方向和声音，以及允许、拒绝、没有传感器时的样子。"
     },
     "en": {
       "name": "Sensors",
-      "description": "Live tilt, shake, heading and sound: the example for PAD.motion and PAD.mic."
+      "description": "Developer example: live tilt, shake, heading, sound and each permission state."
     }
   },
   "author": "Haowei Wu",
