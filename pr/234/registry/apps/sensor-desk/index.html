@@ -347,8 +347,8 @@ function off(kind) {
     circle(CX, CY, REACH, 2, false);                         /* the range: 1.0 is the ring */
     for (x = CX - REACH; x <= CX + REACH; x++) px(x, CY, 2);
     for (y = CY - REACH; y <= CY + REACH; y++) px(CX, y, 2);
-    /* a bubble floats to the high side: tilting right (x > 0) lowers the right edge, so the bubble goes left;
-       a raised top edge (y < 0) is high, so the bubble goes up, and y needs no flip */
+    /* A bubble floats to the high side, the opposite of a rolling ball. x = 1 is the right side down, so the
+       bubble goes left: -x. y = 1 is the top edge down, so the bottom is high and the bubble goes down: +y. */
     if (hasFlat) circle(CX - tilt.flat.x * REACH, CY + tilt.flat.y * REACH, 6, 1, false);
     if (tilt) circle(CX - tilt.x * REACH, CY + tilt.y * REACH, 4, 0, true);
     else circle(CX, CY, 4, 1, false);                        /* no reading yet: a hollow dot at rest */
