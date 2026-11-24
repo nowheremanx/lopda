@@ -342,8 +342,9 @@
         "................",
         "................"
       ],
-      "version": "1.0.6",
+      "version": "1.0.7",
       "released": "2026-10-28",
+      "updated": "2026-11-24",
       "description": "曹操从华容道脱身：全关开放，记录步数，附八课大师教程与逐步提示。",
       "i18n": {
         "zh": {
@@ -358,8 +359,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/klotski/index.html",
-      "sha256": "7fb2c921b0816147033d0519ba89900bf2acd3f3ed7226ca124374653f1b6ff4",
-      "bytes": 153321
+      "sha256": "d6ca96704891856c5df0f788afbf8d9fd114164f20dec506b3b3cf5384b5ef4f",
+      "bytes": 154105
     },
     {
       "spec": "lopda/1",
