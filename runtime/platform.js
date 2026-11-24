@@ -151,7 +151,16 @@
     q.doc = function (id) { return docRef(path + "/" + (id || newId())); };
     return q;
   }
-  var db = { doc: docRef, collection: collRef, ready: function () { return open().then(function () { return true; }); } };
+  /* coming back from the background, start on a fresh connection instead of finding out a request later that iOS
+     closed the old one: the old one is closed once its last transaction ends (close() lets them finish), so nothing
+     already sent is lost, and each document's writes stay in order (core.js sends them one at a time) */
+  function reconnect() {
+    var p = opening; opening = null;
+    if (p) p.then(function (d) { try { d.close(); } catch (e) {} }, function () {});
+    var f = filesOpening; filesOpening = null;
+    if (f) f.then(function (d) { try { d.close(); } catch (e) {} }, function () {});
+  }
+  var db = { doc: docRef, collection: collRef, ready: function () { return open().then(function () { return true; }); }, reconnect: reconnect };
 
   /* ---------------- binary store ----------------
      Dictionaries are megabytes of Blobs and typed arrays, which the document store's JSON copies would break.

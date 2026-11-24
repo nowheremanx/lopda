@@ -270,6 +270,20 @@ test("a write that never answers is reported, never sent twice, and the next wri
   assert.equal((await ref.get()).data().body, "newer");
 });
 
+test("coming back from the background starts a fresh connection; a write already sent still lands", async () => {
+  const { P, indexedDB, state } = flaky();
+  const ref = P.db.doc(NOTES + "/n1");
+  await ref.set({ body: "a" });
+  const pending = ref.set({ body: "b" });   /* sent on the old connection */
+  P.db.reconnect();
+  await pending;
+  assert.equal((await ref.get()).data().body, "b");
+  assert.equal(indexedDB.opened, 2, "the read after resume opened a new connection");
+  assert.ok(state.closed >= 1, "the old one is closed");
+  P.db.reconnect(); P.db.reconnect();   /* twice in a row, nothing open: harmless */
+  assert.equal((await ref.get()).data().body, "b");
+});
+
 test("the whole-device backup has no time limit: a slow dump is not cut off", async () => {
   const { P, state } = flaky();
   await P.db.doc(NOTES + "/n1").set({ body: "a" });
