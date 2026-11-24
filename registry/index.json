@@ -749,8 +749,8 @@
         "mic"
       ],
       "path": "apps/sensor-desk/index.html",
-      "sha256": "206c61847c909974e985f5dd5e401123f5521e14bfa8957278a0142966b824ee",
-      "bytes": 17634
+      "sha256": "5d615422cbb4c1433f234c986a7b6e5aedf4fa63d81840757d1547b30da3456b",
+      "bytes": 17856
     },
     {
       "spec": "lopda/1",
