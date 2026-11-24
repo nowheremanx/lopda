@@ -254,7 +254,7 @@ test("preinstalled apps: installed on first start after the built-ins, and a rem
   const until = async (fn, what) => { for (let i = 0; i < 100; i++) { if (await fn()) return; await p.waitForTimeout(100); } assert.fail("timed out waiting for " + what); };
   await until(async () => ((await doc("data/users/local/preinstall"))?.ids || []).length === 2, "the preinstall record");
   await p.locator("#home .app", { hasText: "点阵画板" }).click();
-  await p.click("#run-del"); await p.click("#run-del-wrap .btn:not(.ghost)");
+  await p.click("#run-more"); await p.click("#run-del"); await p.click("#run-del-wrap .btn:not(.ghost)");
   await until(async () => !(await doc("data/users/local/apps/items/paint")), "paint's removal");
   await p.reload({ waitUntil: "networkidle" }); await p.waitForTimeout(500);
   assert.deepEqual((await tiles(p)).slice(-1), ["计算器"]);
@@ -306,7 +306,7 @@ test("removing an app keeps its save; Settings clears it; a damaged save is repo
   assert.deepEqual(saved.kv, { k: { hello: "world" } });
   assert.equal(saved.v, 1);
   assert.equal(saved.app.id, "probe");
-  await p.click("#run-del");
+  await p.click("#run-more"); await p.click("#run-del");
   assert.match(await p.textContent("#run-del-wrap .btn:not(.ghost)"), /存档会留着/);
   await p.click("#run-del-wrap .btn:not(.ghost)");
   await p.waitForSelector("#v-home:not([hidden])");
@@ -518,6 +518,75 @@ test("store: an app that asks for a capability shows its icons before install, a
   assert.ok(tileBox && viewBox, "the installed app has a home tile");
   assert.ok(tileBox.y >= viewBox.y - 1 && tileBox.y + tileBox.height <= viewBox.y + viewBox.height + 1,
     "the installed app is scrolled into view");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("a link straight to an app: installs it like the store, runs it, cleans the address, never fetches an installed copy again", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN" });
+  const fetched = [];
+  p.on("request", (r) => { if (r.url().includes("/registry/apps/klotski/")) fetched.push(r.url()); });
+  await p.goto(base + "/runtime/?app=klotski&debug", { waitUntil: "load" });
+  await p.waitForSelector("#v-run:not([hidden])", { timeout: 15000 });
+  assert.match(await p.textContent("#run-title"), /华容道/);
+  assert.match(await p.locator("#toast").innerText(), /浏览器里的试玩/, "a browser tab says it is a trial, once");
+  assert.equal(new URL(p.url()).search, "?debug", "the app parameter leaves the address, the rest stays");
+  await p.locator("#run-frame").waitFor();
+  /* back goes home, where the new tile is */
+  await p.click("#run-back");
+  await p.waitForSelector("#v-home:not([hidden])");
+  assert.equal(await p.locator("#home .app", { hasText: "华容道" }).count(), 1);
+  assert.equal(fetched.length, 1, "downloaded once");
+  /* the same link again: the installed copy runs, nothing is downloaded */
+  await p.goto(base + "/runtime/?app=klotski", { waitUntil: "load" });
+  await p.waitForSelector("#v-run:not([hidden])", { timeout: 15000 });
+  assert.equal(fetched.length, 1, "an installed app is never fetched again by a link");
+  /* a reload starts at home */
+  await p.reload({ waitUntil: "load" });
+  await p.waitForFunction(() => window.LP && document.querySelectorAll("#home .app:not(.builtin)").length >= 3);
+  await p.waitForTimeout(300);
+  assert.equal(await p.isHidden("#v-run"), true);
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("a link: an app that asks for a capability is confirmed first, an unknown id stays home, a built-in opens", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN" });
+  await p.goto(base + "/runtime/?app=blow-candles", { waitUntil: "load" });
+  await p.waitForSelector("#file-ask .ask-perms", { timeout: 15000 });
+  await p.click("#file-no");
+  await p.waitForSelector("#file-ask", { state: "detached" });
+  await p.waitForTimeout(300);
+  assert.equal(await p.isHidden("#v-home"), false, "cancelling stays home");
+  assert.equal(await p.locator("#home .app", { hasText: "吹蜡烛" }).count(), 0, "and installs nothing");
+
+  await p.goto(base + "/runtime/?app=no-such-app", { waitUntil: "load" });
+  await p.waitForFunction(() => /没找到链接里的程序/.test(document.getElementById("toast").textContent), null, { timeout: 15000 });
+  assert.equal(await p.isHidden("#v-home"), false);
+
+  await p.goto(base + "/runtime/?app=calendar", { waitUntil: "load" });
+  await p.waitForSelector("#v-cal:not([hidden])", { timeout: 15000 });
+  assert.equal(new URL(p.url()).search, "");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("the running app's ⋯ menu shares a link straight to it, and closes on a tap elsewhere", { skip, timeout: 30000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN" });
+  await p.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  /* no share sheet in headless Chromium on Linux; make sure of it so the clipboard path runs */
+  await p.evaluate(() => { try { delete Navigator.prototype.share; } catch {} });
+  await p.waitForFunction(() => window.LP && LP.S.apps.some((a) => a.id === "calculator"));
+  await p.evaluate(() => LP.runApp(LP.S.apps.find((a) => a.id === "calculator")));
+  await p.waitForSelector("#v-run:not([hidden])");
+  assert.equal(await p.isHidden("#run-menu"), true);
+  await p.click("#run-more");
+  assert.equal(await p.getAttribute("#run-more", "aria-expanded"), "true");
+  await p.click("#run-title");
+  assert.equal(await p.isHidden("#run-menu"), true, "a tap outside closes the menu");
+  await p.click("#run-more");
+  await p.click("#run-share");
+  await p.waitForFunction(() => /链接已复制/.test(document.getElementById("toast").textContent));
+  assert.equal(await p.evaluate(() => navigator.clipboard.readText()), base + "/runtime/?app=calculator");
+  assert.equal(await p.isHidden("#run-menu"), true);
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
@@ -7896,7 +7965,7 @@ test("sensor: HOME stops the tilt feed; removing a mic app ends its stream too",
   f.evaluate(() => { go("mic"); });
   await p.waitForSelector("#file-ask .box"); await p.click("#file-ok");
   await until(p, async () => (await R(f)).results.includes("mic:on"), "mic on");
-  await p.click("#run-del"); await p.click("#run-del-wrap .btn:not(.ghost)");
+  await p.click("#run-more"); await p.click("#run-del"); await p.click("#run-del-wrap .btn:not(.ghost)");
   assert.equal(await p.evaluate(() => window.__stream.getTracks().every((x) => x.readyState === "ended")), true);
   assert.equal(await p.evaluate(() => navigator.audioSession.type), "ambient");
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
@@ -8074,7 +8143,7 @@ test("camera snap: HOME, removing the app, a hidden page and a vanished frame ea
   f = await runSnapApp(p);
   f.evaluate(() => { snap(); });
   await finderLive(p);
-  await p.evaluate(() => { document.getElementById("run-del").click(); document.querySelector("#run-del-wrap .btn:not(.ghost)").click(); });
+  await p.evaluate(() => { document.getElementById("run-more").click(); document.getElementById("run-del").click(); document.querySelector("#run-del-wrap .btn:not(.ghost)").click(); });
   assert.equal(await allEnded(p), true, "removing the app ends the stream");
   assert.equal(await p.evaluate(() => window.LP.snap.isOpen()), false);
   /* the page hidden (locked, another app): null, and nothing comes back. Removing the app dropped its grant: asked again */

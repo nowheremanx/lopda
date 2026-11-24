@@ -846,7 +846,11 @@
         <div class="bar">
           <button class="btn ghost" id="run-back" type="button">◂</button>
           <h2 id="run-title" data-i18n="run.title">程序</h2>
-          <div class="confirm" id="run-del-wrap"><button class="btn ghost" id="run-del" type="button" data-i18n="run.remove">卸载</button></div>
+          <button class="btn ghost" id="run-more" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="run-menu" data-i18n-label="run.more" aria-label="更多">⋯</button>
+          <div class="run-menu" id="run-menu" hidden>
+            <button class="btn ghost" id="run-share" type="button" data-i18n="store.share">分享</button>
+            <div class="confirm" id="run-del-wrap"><button class="btn ghost" id="run-del" type="button" data-i18n="run.remove">卸载</button></div>
+          </div>
         </div>
         <iframe id="run-frame" sandbox="allow-scripts" data-i18n-title="run.frame" title="运行中的程序"></iframe>
         <div class="err" id="run-err" hidden>
