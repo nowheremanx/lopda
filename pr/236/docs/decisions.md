@@ -2025,3 +2025,35 @@ EXIF，相册就能把照片放到地图上。
 - **没做的**：落地页根地址（`/lopda/?app=`）的短链接；SPEC 和 app 代码不变。
 - **代码**：`runtime/apps/store.js`（`linkId`、`openLink`、`shareLink`、`closeRunMenu`，`install` / `doInstall` 多了可选的按钮和回调）、
   `runtime/index.html`、`runtime/lopda.css`、`runtime/sw.js`、`runtime/strings.js`；e2e 加了链接和「⋯」的测试，卸载的测试先点「⋯」。Claude 写的。
+
+## 67. 点开 app 一直「载入中…」：iPhone 断掉的数据库连接（1.2.1）
+
+2026-11-24，主人报告：偶尔点开一个 app，一直显示「载入中…」，只能退出重开。
+
+- **原因（推断，没在手机上抓到）**：装好的 app 代码不常驻内存，第一次运行时才从 IndexedDB 读出来，读的时候显示「载入中…」。
+  `platform.js` 开机只开一次数据库连接，之后一直用它。iOS 上 PWA 在后台放久了，WebKit 可能把这条连接关掉；之后的事务要么在
+  `transaction()` 当场抛 `InvalidStateError`，要么收下请求却永远没有回音。旧代码没有超时也不重连，只有重开 app 才有新连接。
+- **改了什么**（只改 `runtime/platform.js` 的文档库）：
+  - 连接的 `onclose` / `onversionchange` 一到就丢掉它，下一次调用重新打开。
+  - `transaction()` 当场抛 `InvalidStateError`：什么都还没排进去，换新连接重试一次（读写都行）；再失败就报错，不会死循环。
+  - 读：5 秒没结果就放弃这个事务（abort）、关掉连接，在新连接上再读一次；还没结果就报 `timeout`，运行界面提示「读档失败（timeout）」，
+    不再无限转圈。再点一次就是新连接。
+  - 写：10 秒没结果就 abort、报 `timeout`（「保存失败」），换新连接，但**不自动重发**：迟到的旧写入可能落在新写入之后，把旧数据写回去。
+    以前一次卡住的写会把同一个文档后面所有的存档都堵住（core.js 的 `put` 一个接一个排队），现在会放行。
+  - 从后台回来（`visibilitychange` 变为可见）时 boot.js 调 `db.reconnect()`：直接换一条新连接，不等到下一次读写卡住才发现。旧连接上已经发出的
+    事务照常做完再关（`close()` 会等它们），每个文档的写仍按 core.js 的顺序一个接一个，所以不丢不乱。超时是这条之外的兜底。
+  - 打开数据库本身不设时限：开机在等它，放弃就会让整次使用都不存档。
+  - 整机备份的读和恢复的写（`dumpAll` / `replaceAll`）不设时限，数据多时本来就慢。
+  - 文件库（词典、书、照片，`lopda-files`）只加了「连接关掉就丢掉、当场抛错就重试一次」，不设时限：文件可能有几 MB。
+- **另一种「卡住」（电脑 Chrome）**：主人在电脑 Chrome 上「强制刷新后马上点计算器」「快速进出计算器」也见到一直「载入中…」，
+  或界面出来了但按钮上的字不见。计算器画界面不等数据库，所以这是 Chrome 没把沙箱 iframe 画完（代码里早有记录：复用的 iframe
+  可能不刷新）。以前一个 iframe 先显示「载入中…」再换成 app，HOME 时再换成空白，同一个 iframe 导航好几次。现在每一页（载入中、app、
+  HOME 后的空白）都用一个新的 iframe，`srcdoc` 在插进页面之前就设好，每个 iframe 只导航一次。快速进出点阵画板时，画布还停在最小的 96 格，拉一下 Chrome 窗口才变满屏：app 第一行代码运行时 iframe 还没排版、没有真实尺寸，
+  之后 Chrome 也没给它发 `resize`。所以插入新 iframe 后马上读一次 `offsetHeight`，让父页面当场排版，app 一开始就量到真实尺寸。
+  这一步没用：主人说还会出现。之后在主人的 Chrome 里量到了真正的原因：app 第一行代码运行时，iframe 的视口已经是对的
+  （713 px 高），但 app 自己的 `body` 还是 0 px 高（它的 `height:100%` 还没生效），一会儿后才是 713 px；视口没变，所以不会有
+  `resize`。画板就停在最小的 96 格。修法：app 载入（`load`）后，把 iframe 缩短 1 px 两帧再还原，app 收到两次 `resize`，最后一次是
+  真实尺寸，等于替用户「拉一下窗口」。在主人的 Chrome 里试过：6 次里 6 次开始是 0 px，`resize` 后都是 713 px。会自己算尺寸的 app
+  本来就要听 `resize`（电脑窗口和手机横竖屏都会变），所以不会弄坏按规范写的 app。无头 Chromium 复现不出来。
+- **测试**：`tests/platform.test.mjs` 让假 IndexedDB 模拟「连接已关」和「收下请求不回音」，计时器加速 100 倍。
+- 如果还会卡住，说明原因不在这里：那时等十几秒会看到「读档失败」的提示，可以据此再查。Claude 写的（数据安全，没有交给 DeepSeek）。
