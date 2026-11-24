@@ -919,25 +919,25 @@
         "..2..........2..",
         "................"
       ],
-      "version": "2.0.1",
+      "version": "3.0.0",
       "released": "2026-10-08",
-      "updated": "2026-11-21",
-      "description": "视觉小说。雨夜小站，一张十年前的旧车票。七章，五个结局。",
+      "updated": "2026-11-24",
+      "description": "短篇视觉小说。雨夜的小站，车晚点五十分钟，爸送你去上大学。十分钟读完。",
       "i18n": {
         "zh": {
           "name": "雨站",
-          "description": "视觉小说。雨夜小站，一张十年前的旧车票。七章，五个结局。"
+          "description": "短篇视觉小说。雨夜的小站，车晚点五十分钟，爸送你去上大学。十分钟读完。"
         },
         "en": {
           "name": "Rain Stn",
-          "description": "Visual novel. A rainy station, a ten-year-old ticket. 7 chapters, 5 endings."
+          "description": "Short visual novel. A rainy station, a train 50 min late, Dad seeing you off."
         }
       },
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/rain-station/index.html",
-      "sha256": "eaf9f1f03e887b130a1a739d8ea3d43ff831a2d04d6ff2bdcce5a077ed9c9174",
-      "bytes": 173654
+      "sha256": "98f081be4434ac036121509828624c09361a326ece8b774b3c3b52ed3afbe8f8",
+      "bytes": 106090
     },
     {
       "spec": "lopda/1",

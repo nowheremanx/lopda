@@ -211,92 +211,103 @@ test("the paper tower's tunes parse: four channels each, and the title tune is 3
   assert.equal(parse(M.title).song.seconds, 30);
 });
 
-test("the rain station: rain under the title and the station, lighter on the train, none at dawn; the same frames", async () => {
+/* the rain station: a fake PAD with an in-memory store; `reject` makes every load fail */
+function rainStation(store = {}, opt = {}) {
+  const file = join(ROOT, "registry/apps/rain-station/index.html");
+  const on = { press: [], release: [] }, down = new Set(), heard = [];
+  const pad = { lang: opt.lang || "zh", spec: "lopda/1", on: (type, f) => { if (on[type]) on[type].push(f); }, off() {}, isDown: (b) => down.has(b),
+    load: (k) => opt.reject ? Promise.reject(new Error("damaged")) : Promise.resolve(k in store ? JSON.parse(JSON.stringify(store[k])) : null),
+    save: (k, v) => { store[k] = JSON.parse(JSON.stringify(v)); }, remove: (k) => { delete store[k]; }, exit() {}, sfx() {},
+    music: { play() {}, stop() {} }, ambience: (n, l) => heard.push(n ? n + " " + l : "quiet") };
+  const app = boot(file, { pad });
+  const run = async (n) => { for (let i = 0; i < n; i++) { app.frame(); await app.ctx.get("__yield")(); } };
+  const tap = async (k) => { down.add(k); on.press.forEach((f) => f(k)); await run(2); down.delete(k); on.release.forEach((f) => f(k)); await run(1); };
+  /* press `keys` in turn until the story ends (or `max` rounds) */
+  const read = async (keys, max = 2000) => {
+    for (let i = 0; i < max; i++) {
+      for (const k of keys) await tap(k);
+      const cur = app.ctx.get("cur");
+      if (cur && cur.kind === "end") return true;
+    }
+    return false;
+  };
+  return { app, run, tap, read, heard, store };
+}
+
+test("the rain station: rain under the title and outside, softer with the headphones on, none once it stops; the same frames", async () => {
   const file = join(ROOT, "registry/apps/rain-station/index.html");
   const without = await scripted(file), withAmb = await scripted(file, { music: true, ambience: true });
   assert.deepEqual(withAmb.frames, without.frames);
   const amb = withAmb.calls.filter((c) => c[0] === "ambience").map((c) => c[1] + " " + c[2]);
-  assert.deepEqual(amb.slice(0, 2), ["rain 0.4", "rain 0.7"], "the title, then the station");
-  for (const a of amb) assert.match(a, /^(rain (0\.4|0\.7|0\.5|0\.8|0\.15|0\.3)|null 0)$/);
+  assert.deepEqual(amb.slice(0, 2), ["rain 0.4", "rain 0.7"], "the title, then outside the station");
   assert.ok(!without.calls.some((c) => c[0] === "ambience"), "an old runtime: no calls");
-  /* Two whole stories, driven fast: A only (the night train), and two DOWNs before A (stay, to dawn). */
-  const story = async (keys) => {
-    const on = { press: [], release: [] }, down = new Set(), heard = [];
-    const pad = { lang: "zh", spec: "lopda/1", on: (type, f) => { if (on[type]) on[type].push(f); }, off() {}, isDown: (b) => down.has(b),
-      load: () => Promise.resolve(null), save() {}, remove() {}, exit() {}, sfx() {}, music: { play() {}, stop() {} },
-      ambience: (n, l) => heard.push(n ? n + " " + l : "quiet") };
-    const app = boot(file, { pad });
-    const run = async (n) => { for (let i = 0; i < n; i++) { app.frame(); await app.ctx.get("__yield")(); } };
-    const tap = async (k) => { down.add(k); on.press.forEach((f) => f(k)); await run(2); down.delete(k); on.release.forEach((f) => f(k)); await run(1); };
-    await run(30);
-    for (let i = 0; i < 800; i++) {
-      for (const k of keys) await tap(k);
-      const cur = app.ctx.get("cur");
-      if (cur && cur.kind === "end") break;
-    }
-    return heard;
-  };
-  assert.deepEqual(await story(["a"]), ["rain 0.4", "rain 0.7", "rain 0.5", "rain 0.8", "rain 0.15", "rain 0.8", "rain 0.3", "rain 0.15"]);
-  assert.deepEqual(await story(["down", "down", "a"]), ["rain 0.4", "rain 0.7", "rain 0.5", "rain 0.8", "rain 0.15", "rain 0.8", "rain 0.5", "quiet"]);
+  /* A only: the headphones, the open window; DOWN then A: sitting with him, behind the glass */
+  const one = rainStation();
+  await one.run(30);
+  assert.ok(await one.read(["a"]));
+  assert.deepEqual(one.heard, ["rain 0.4", "rain 0.7", "rain 0.45", "rain 0.1", "rain 0.45", "rain 0.8", "rain 0.6", "rain 0.25", "quiet"]);
+  assert.deepEqual(plain(one.app.ctx.get("S").flags), { phones: true, open: true });
+  const two = rainStation();
+  await two.run(30);
+  assert.ok(await two.read(["down", "a"]));
+  assert.deepEqual(two.heard, ["rain 0.4", "rain 0.7", "rain 0.45", "rain 0.8", "rain 0.6", "rain 0.25", "quiet"]);
+  assert.deepEqual(plain(two.app.ctx.get("S").flags), { sat: true, glass: true });
+  /* the lines of each path are read, the other path's are not */
+  const said = (x) => x.app.ctx.get("log").map((e) => e.text).join("\n");
+  assert.match(said(one), /你戴上耳机/); assert.doesNotMatch(said(one), /学校食堂/);
+  assert.match(said(two), /学校食堂/); assert.doesNotMatch(said(two), /你戴上耳机/);
+  assert.match(said(one), /还说你开窗/); assert.match(said(two), /你光点头/);
+  assert.match(said(two), /下回我站那/);
 });
 
-test("the rain station: a finished chapter unlocks in Select and replays from its start", async () => {
-  const file = join(ROOT, "registry/apps/rain-station/index.html");
-  const store = {};
-  const on = { press: [], release: [] }, down = new Set();
-  const pad = {
-    lang: "zh", spec: "lopda/1",
-    on: (type, f) => { if (on[type]) on[type].push(f); }, off() {}, isDown: (b) => down.has(b),
-    load: (k) => Promise.resolve(k in store ? store[k] : null),
-    save: (k, v) => { store[k] = v; }, remove: (k) => { delete store[k]; }, exit() {}, sfx() {},
-    music: { play() {}, stop() {} }, ambience() {}
-  };
-  const app = boot(file, { pad });
-  const run = async (n) => { for (let i = 0; i < n; i++) { app.frame(); await app.ctx.get("__yield")(); } };
-  const tap = async (k) => {
-    down.add(k); on.press.forEach((f) => f(k)); await run(2);
-    down.delete(k); on.release.forEach((f) => f(k)); await run(2);
-  };
-  await run(5);
-  const game = app.ctx.get("game"), SCRIPT = app.ctx.get("SCRIPT");
-  const ch3 = SCRIPT.findIndex((s) => s.id === "ch3");
-  const ch4 = SCRIPT.findIndex((s) => s.id === "ch4");
-  const start = { v: app.ctx.get("STORY_VERSION"), pc: ch3, flags: { tape: true, truth: true }, bg: "waiting", left: "mei", right: null, chapter: null };
-  game.go("play", start, { fade: false });
-  await run(2);
-  assert.equal(app.ctx.get("S").chapter.id, "ch3");
-  /* leaving for the next chapter is what marks this one finished */
-  app.ctx.get("S").pc = ch4;
-  app.ctx.get("run")();
-  await run(2);
-  assert.deepEqual(app.ctx.get("chapterList")().map((c) => c.id), ["ch3"]);
-  assert.deepEqual(plain(store.chapters.done.ch3), { flags: { tape: true, truth: true }, bg: "waiting", left: "mei", right: null });
-  /* title -> Select -> chapter menu */
-  game.go("title", undefined, { fade: false });
-  await run(5);
-  await tap("select");
-  await run(40);
-  assert.equal(app.ctx.get("chFrom"), "title");
-  assert.deepEqual(app.ctx.get("chapterList")().map((c) => c.id), ["ch3"]);
-  /* A replays the chapter card, with the flags and portraits it started with */
-  await tap("a");
-  await run(40);
-  const replay = app.ctx.get("S");
-  assert.equal(replay.pc, ch3 + 1);
-  assert.equal(replay.chapter.id, "ch3");
-  assert.deepEqual(plain(replay.flags), { tape: true, truth: true });
-  assert.equal(replay.bg, "waiting");
-  assert.equal(replay.left, "mei");
-  assert.equal(replay.right, null);
-  /* Select during play opens the same menu; B comes back to the story */
-  await tap("select");
-  await run(40);
-  assert.equal(app.ctx.get("chFrom"), "play");
-  await tap("b");
-  await run(40);
-  assert.equal(app.ctx.get("S").chapter.id, "ch3");
-  assert.ok(app.ctx.get("S").pc >= ch3 + 1);
-  assert.deepEqual(plain(app.ctx.get("S").flags), { tape: true, truth: true });
+test("the rain station: saves its place under its own key, continues there, and never touches the old story's saves", async () => {
+  const old = { vn: { v: 3, pc: 120, flags: { tape: true }, bg: "waiting", left: "mei", right: null, chapter: null },
+    chapters: { v: 3, done: { prologue: { flags: {}, bg: "station", left: null, right: null } } } };
+  const store = plain(old);
+  const a = rainStation(store);
+  await a.run(30);
+  await a.tap("a");                       /* Start */
+  await a.run(40);
+  for (let i = 0; i < 30; i++) await a.tap("a");
+  const S = plain(a.app.ctx.get("S"));
+  assert.equal(store.story.v, 1);
+  assert.equal(store.story.at, S.at);
+  assert.ok(S.at > 10);
+  assert.deepEqual(store.vn, old.vn); assert.deepEqual(store.chapters, old.chapters);
+  /* a new start of the app offers Continue, which lands on the same line with the same picture and backlog */
+  const b = rainStation(store);
+  await b.run(30);
+  assert.equal(b.app.ctx.get("saved").at, S.at);
+  await b.tap("a");
+  await b.run(40);
+  assert.equal(b.app.ctx.get("S").at, S.at);
+  assert.deepEqual(plain(b.app.ctx.get("S").flags), S.flags);
+  assert.equal(b.app.ctx.get("S").scene, S.scene);
+  assert.deepEqual(plain(b.app.ctx.get("log")).map((e) => e.text), plain(a.app.ctx.get("log")).map((e) => e.text));
+  /* reading to the end clears the place; the old saves are still there */
+  assert.ok(await b.read(["a"]));
+  assert.ok(!("story" in store));
+  assert.deepEqual(store.vn, old.vn); assert.deepEqual(store.chapters, old.chapters);
+  /* a save from another version, or a broken one, is set aside, not used and not overwritten until a new story saves */
+  for (const bad of [{ v: 2, at: 5, flags: {}, stage: {} }, { v: 1, at: 99999, flags: {}, stage: {} }, { v: 1, at: "x" }, "junk"]) {
+    const c = rainStation({ story: bad });
+    await c.run(30);
+    assert.equal(c.app.ctx.get("saved"), null);
+    assert.deepEqual(c.store.story, bad);
+  }
+  /* a load that fails: the story still plays, and nothing is written */
+  const d = rainStation({}, { reject: true });
+  await d.run(30);
+  await d.tap("a");
+  await d.run(40);
+  for (let i = 0; i < 10; i++) await d.tap("a");
+  assert.equal(d.app.ctx.get("canSave"), false);
+  assert.deepEqual(Object.keys(d.store), []);
+  /* English reads to the end too */
+  const e = rainStation({}, { lang: "en" });
+  await e.run(30);
+  assert.ok(await e.read(["a"]));
+  assert.match(e.app.ctx.get("log").map((x) => x.text).join("\n"), /next time ill stand there/);
 });
 
 test("the paper tower draws the same frames with and without music, and plays its tunes and its own sounds", async () => {
