@@ -149,6 +149,26 @@ function autoService() {
   return true;
 }
 
+/* Opening with an empty stove and no action left to cook: close the day with an
+ * empty ledger.  Same fields as autoService's, so the night scene and the save
+ * need no migration; `closed` only changes the header wording. */
+function closedDay() {
+  if (!S) return false;
+  var lost = S.demand && S.demand.length ? S.demand.length : serveCount();
+  var rep = Math.round(0 / 2) - lost;
+  addRep(rep);
+  S.flags.opened = 1;
+  S.lastLedger = {
+    served: 0, lost: lost, earned: 0, tips: 0,
+    repDelta: rep, leftover: 0, satisfied: 0, missed: 0, auto: true, closed: true
+  };
+  S.stats.lost += lost;
+  S.phase = "night";
+  save();
+  game.go("night");
+  return true;
+}
+
 function freeSeat() {
   for (var i = 0; i < SERV.seats; i++) if (!SERV.tables[i]) return i;
   return -1;
