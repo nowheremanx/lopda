@@ -856,7 +856,7 @@
         </div>
       </div>
       <!-- PAD.camera.snap: the runtime's own viewfinder over a running app (apps/snap.js); one screen, no scrolling -->
-      <div class="snap cam-view" id="snap" hidden role="dialog" data-i18n-label="cam.finder" aria-label="取景器">
+      <div class="snap cam-view" id="snap" hidden role="dialog" aria-modal="true" data-i18n-label="cam.finder" aria-label="取景器">
         <div class="cam-lcd"><span id="snap-who"></span><span id="snap-exp">亮±0 对±0</span></div>
         <div class="finder-box" id="snap-box">
           <div class="finder" id="snap-finder">
@@ -875,7 +875,7 @@
     </section>
 
     <!-- LP.link: the pairing screen over whatever is in front (link.js); one screen, four tones -->
-    <div class="link-view" id="link" hidden role="dialog" data-i18n-label="link.plain" aria-label="连线">
+    <div class="link-view" id="link" hidden role="dialog" aria-modal="true" data-i18n-label="link.plain" aria-label="连线">
       <div class="link-head"><span data-i18n="link.plain">连线</span><span id="link-ch"></span><span id="link-attempt"></span></div>
       <h2 id="link-title"></h2>
       <div class="link-pair" aria-hidden="true">
