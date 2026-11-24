@@ -51,9 +51,15 @@ test("the mountain maps are 18 x 16 and every spot is on walkable ground", () =>
   }
 });
 
-test("the app boots to the title and a new game reaches the first morning", async () => {
+/* SJ_FILE points a one-off run at another build (the pre-0.1.2 bundle, to prove
+ * the stuck-save test fails there); normal runs use the app. */
+const DINER_FILE = process.env.SJ_FILE || "registry/apps/shanjiao-diner/index.html";
+
+async function bootDiner(seed, save) {
   const { boot } = await import("./app-vm.mjs");
   const store = {}, listeners = {};
+  // a save goes in under SAVE_KEY, "diner" in src/00-main.js, so 继续 is offered
+  if (save) store.diner = JSON.parse(JSON.stringify(save));
   const pad = {
     lang: "zh",
     save(k, v) { store[k] = JSON.parse(JSON.stringify(v)); },
@@ -63,7 +69,21 @@ test("the app boots to the title and a new game reaches the first morning", asyn
     on(t, fn) { (listeners[t] ||= []).push(fn); },
     off() {}, isDown() { return false; }
   };
-  const app = boot("registry/apps/shanjiao-diner/index.html", { pad, seed: 3 });
+  return { app: boot(DINER_FILE, { pad, seed }), listeners };
+}
+
+/* one chin press, then a few frames so the scene sees it */
+function buttons(app, listeners) {
+  const tick = async (n = 1) => { for (let i = 0; i < n; i++) { app.frame(); await new Promise((r) => setImmediate(r)); } };
+  const press = async (b) => {
+    (listeners.press || []).forEach((f) => f(b)); await tick(2);
+    (listeners.release || []).forEach((f) => f(b)); await tick(1);
+  };
+  return { tick, press };
+}
+
+test("the app boots to the title and a new game reaches the first morning", async () => {
+  const { app, listeners } = await bootDiner(3);
   const tick = async (n = 1) => { for (let i = 0; i < n; i++) { app.frame(); await new Promise((r) => setImmediate(r)); } };
   const press = async (b) => {
     (listeners.press || []).forEach((f) => f(b)); await tick(2);
@@ -78,4 +98,181 @@ test("the app boots to the title and a new game reaches the first morning", asyn
   assert.equal(S.day, 1);
   assert.equal(S.phase, "morning");
   assert.ok(app.hashes.length > 0);
+});
+
+test("a morning with no stock and no actions left closes the day instead of soft-locking", async () => {
+  const { app, listeners } = await bootDiner(7);
+  const tick = async (n = 1) => { for (let i = 0; i < n; i++) { app.frame(); await new Promise((r) => setImmediate(r)); } };
+  const press = async (b) => {
+    (listeners.press || []).forEach((f) => f(b)); await tick(2);
+    (listeners.release || []).forEach((f) => f(b)); await tick(1);
+  };
+  await tick(6);
+  await press("a");                 // 开始
+  await tick(80);                   // title fade, then the first morning
+  const game = app.ctx.get("game");
+  const S = app.ctx.get("S");
+  assert.equal(S.phase, "morning");
+  S.seen.intro = 1;
+  game.pop(true);                   // dismiss the day-one introduction
+  await tick(3);
+  // the dead end: both actions spent, nothing cooked, so 菜单 is disabled
+  S.ap = 0; S.stock = {}; S.menu = []; S.flags.prepared = false;
+  app.ctx.get("morningAct")(5);     // 开门
+  await tick(3);
+  await press("a");                 // 今天歇业
+  await tick(90);                   // the fade into the night scene
+  assert.equal(S.phase, "night");
+  assert.equal(S.lastLedger.closed, true);
+  assert.equal(S.lastLedger.served, 0);
+  assert.ok(S.lastLedger.lost >= 3, "the day's customers are booked as lost");
+  assert.equal(S.lastLedger.rentDone, 1, "the night scene entered and did its rent step");
+});
+
+test("a save stuck in an empty morning closes the day and wakes on day 3", async () => {
+  // start from a real save: a new game, read at its first morning
+  const first = await bootDiner(3);
+  const firstKeys = buttons(first.app, first.listeners);
+  await firstKeys.tick(6);
+  assert.equal(first.app.ctx.get("booted"), true);
+  await firstKeys.press("a");           // 开始
+  await firstKeys.tick(80);             // the title fade, then the first morning
+  const day1 = first.app.ctx.get("S");
+  assert.equal(day1.day, 1);
+  const stuck = JSON.parse(JSON.stringify(day1));
+  // the state players were stuck in: both actions spent, nothing cooked
+  stuck.day = 2;
+  stuck.phase = "morning";
+  stuck.ap = 0;
+  stuck.stock = {};
+  stuck.menu = [];
+  stuck.flags = stuck.flags || {};
+  stuck.flags.prepared = false;
+  stuck.flags.opened = false;
+
+  const { app, listeners } = await bootDiner(4, stuck);
+  const { tick, press } = buttons(app, listeners);
+  await tick(6);
+  assert.equal(app.ctx.get("booted"), true);
+  // src/50-title.js: a loaded save puts 继续 first, and the cursor starts on it
+  const opts = app.ctx.get("titleOptions")();
+  assert.equal(opts[0].id, "continue", "继续 is the first title option");
+  assert.equal(app.ctx.get("TITLE_SEL"), 0, "继续 is the selected option");
+  await press("a");                     // 继续
+  // the fade into the saved morning, then the day-2 story: A through it like a player
+  for (let i = 0; i < 24; i++) await press("a");
+  const S = app.ctx.get("S");
+  assert.equal(S.day, 2, "the save loaded as it was saved");
+  assert.equal(S.phase, "morning", "继续 reaches the saved morning");
+  // the bar starts on 出门; five rights reach 开门 (morningActions in src/51-morning.js)
+  for (let i = 0; i < 5; i++) await press("right");
+  assert.equal(app.ctx.get("MORNING_SEL"), 5, "the cursor is on 开门");
+  await press("a");                     // 开门: the stove is empty, the only offer is 今天歇业
+  await press("a");                     // accept it
+  for (let i = 0; i < 90 && S.phase !== "night"; i++) await tick(1);
+  assert.equal(S.phase, "night", "开门 with an empty stove must close the day, not leave the morning stuck");
+  assert.equal(S.lastLedger.closed, true);
+  // A through the night's story, then its last A sleeps into the next morning
+  for (let i = 0; i < 40 && !(S.day === 3 && S.phase === "morning"); i++) {
+    if (S.phase === "night") await press("a");
+    else await tick(5);
+  }
+  assert.equal(S.day, 3, "the night ends on day 3");
+  assert.equal(S.phase, "morning", "day 3 opens in the morning");
+  assert.equal(S.ap, 2, "day 3 has its two actions");
+});
+
+test("every help line fits 188 px and the last one ends above the footer strip", async () => {
+  const { app } = await bootDiner(8);
+  const game = app.ctx.get("game");
+  const UI = app.ctx.get("UI");
+  // UI.help's line list is a local array in src/30-ui.js and is drawn through the
+  // closure's text(), so the literals come from the source; the measurements and
+  // the layout come from the running app's own pixel font.
+  const src = read("registry/apps/shanjiao-diner/src/30-ui.js");
+  const block = src.match(/function help\(g, page\)[\s\S]*?var lines = \[([\s\S]*?)\];/);
+  assert.ok(block, "src/30-ui.js still has UI.help's line list");
+  const lines = [...block[1].matchAll(/"([^"]*)"/g)].map((m) => m[1]);
+  assert.equal(lines.length, 12);
+  for (const line of lines) {
+    const w = game.g.measure(line);
+    assert.ok(w <= 188, `"${line}" is ${w} px, wider than the 188 px fit`);
+  }
+  // draw the help screen and record each text baseline
+  const drawn = [];
+  const proxy = new Proxy(game.g, {
+    get(target, prop) {
+      if (prop === "text") return (str, x, y, o) => { drawn.push({ str, y }); return target.text(str, x, y, o); };
+      const v = target[prop];
+      return typeof v === "function" ? v.bind(target) : v;
+    }
+  });
+  UI.help(proxy);
+  // the footer is at R.footer.y; the deepest text above it is the list's last line
+  const above = drawn.filter((d) => d.y < UI.R.footer.y).map((d) => d.y);
+  assert.ok(above.length, "the help screen drew its text");
+  const lastY = Math.max(...above);
+  const strip = UI.R.footer.y - 4;
+  assert.ok(lastY + game.g.lineHeight <= strip,
+    `the help list's last line ends at ${lastY + game.g.lineHeight} px, on the footer strip at ${strip}`);
+});
+
+test("the prep footer keeps 返回 instead of shortening it to …", async () => {
+  const { app, listeners } = await bootDiner(5);
+  const { tick, press } = buttons(app, listeners);
+  await tick(6);
+  await press("a");                     // 开始
+  for (let i = 0; i < 90 && !app.ctx.get("S"); i++) await tick(1);
+  assert.ok(app.ctx.get("S"), "a new game has state");
+  const game = app.ctx.get("game");
+  const UI = app.ctx.get("UI");
+  await tick(60);                       // the title's fade into the morning
+  game.go("prep");                      // the 菜单 screen; this also drops the intro overlay
+  await tick(60);                       // its fade out and in
+  const footers = [];
+  const origFooter = UI.footer;
+  UI.footer = function (g, str, color) { footers.push(String(str)); return origFooter(g, str, color); };
+  await tick(2);
+  UI.footer = origFooter;
+  assert.ok(footers.length, "the prep screen drew its footer");
+  const footer = footers[0];
+  assert.ok(footer.includes("备好"), `expected the prep footer, got "${footer}"`);
+  assert.ok(!footer.includes("…"), `the prep footer is shortened: ${footer}`);
+  const w = game.g.measure(footer);
+  assert.ok(w <= UI.R.footer.w, `"${footer}" is ${w} px, wider than the ${UI.R.footer.w} px footer`);
+});
+
+test("老周's choice box fits its labels and the screen", async () => {
+  const { app, listeners } = await bootDiner(6);
+  const { tick, press } = buttons(app, listeners);
+  await tick(6);
+  await press("a");                     // 开始
+  for (let i = 0; i < 90 && !app.ctx.get("S"); i++) await tick(1);
+  const game = app.ctx.get("game");
+  const S = app.ctx.get("S");
+  assert.ok(S, "a new game has state");
+  // run the day-2 morning story and catch the box src/58-event.js hands to choose()
+  S.day = 2;
+  S.seen = {};
+  const origSay = game.say, origChoose = game.choose;
+  game.say = () => Promise.resolve(true);
+  let box = null;
+  game.choose = (items, o) => {
+    box = { items: items.slice(), x: o.x, width: o.width };
+    return Promise.resolve(0);
+  };
+  app.ctx.get("MorningStory")();
+  for (let i = 0; i < 30 && !box; i++) await tick(2);
+  game.say = origSay;
+  game.choose = origChoose;
+  assert.ok(box, "the day-2 story asks 收下 or 给你十文");
+  assert.deepEqual(box.items, ["收下，记你账上", "给你十文"]);
+  assert.ok(box.x >= 0, `the box starts ${box.x} px from the left`);
+  assert.ok(box.x + box.width <= game.width,
+    `the box ends at ${box.x + box.width} px, off the ${game.width} px screen`);
+  // menuScene draws a label at x + pad 6 + arrow 8, with a 1 px border at the right
+  for (const label of box.items) {
+    const w = game.g.measure(label);
+    assert.ok(w <= box.width - 15, `"${label}" is ${w} px, wider than the ${box.width - 15} px the box holds`);
+  }
 });
