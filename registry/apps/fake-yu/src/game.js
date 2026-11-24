@@ -221,13 +221,14 @@ game.scene("title", {
   draw: function (g) {
     var beat = game.time * 0.8;
     ART.hall(g, beat, { happy: clearedCount() === SONGS.length, kingEye: 0, petals: true, spot: true });
-    /* title strip */
-    g.rect(0, 0, 160, 14, PAPER);
-    g.rect(0, 13, 160, 1, INK);
-    g.text(T(TX.titleKeys), 5, 2, { color: DARK });
-    g.text(T(TX.endingCount, { e: endingsCount() }), 155, 2, { align: "right", color: DARK });
+    /* title strip: the top line sits 2 px lower, with paper to spare above it;
+       the strip grows with it so the plaque below keeps its bottom row at 55 */
+    g.rect(0, 0, 160, 16, PAPER);
+    g.rect(0, 15, 160, 1, INK);
+    g.text(T(TX.titleKeys), 5, 4, { color: DARK });
+    g.text(T(TX.endingCount, { e: endingsCount() }), 155, 4, { align: "right", color: DARK });
     /* the plaque */
-    g.window(14, 14, 132, 42);
+    g.window(14, 16, 132, 40);
     g.text(T(TX.title), 80, 17, { align: "center" });
     g.text(T(TX.subtitle), 80, 30, { align: "center", color: DARK });
     var actN = Math.min(3, SONGS[Math.min(profile.story, SONGS.length - 1)].act);
@@ -543,7 +544,7 @@ function buildPlay(i, storyMode, encore) {
     combo: 0, maxCombo: 0, score: 0, perfect: 0, good: 0, miss: 0, noise: 0, caught: 0,
     suspicion: 0, total: chart.length, judged: {}, hold: null,
     puffs: [], bits: [], judge: null, judgeUntil: 0,
-    warned: {}, inEye: {}, eye: false, banner: "", bannerUntil: 0,
+    warned: {}, inEye: {}, eye: false, eyeWake: 0, banner: "", bannerUntil: 0,
     ended: false, failed: false, endAt: 0,
     lastBeat: -1, startPuff: 0, sweat: 0, clap: false,
     hasB: firstB !== null, firstB: firstB === null ? 1e9 : firstB,
@@ -782,7 +783,7 @@ function finishCountdown(P) {
   /* the chip starts the resumed score just after the call, as it did at the song's start */
   P.start = game.time + 0.06 - resumeT;
   P.t = resumeT - 0.06;
-  P.eye = false; P.inEye = {}; P.warned = {};
+  P.eye = false; P.eyeWake = 0; P.inEye = {}; P.warned = {};
   P.banner = ""; P.judge = null; P.touchA = false;
   P.pause = null;
   game.music(P.song.resumeAt(q.resumeBeat), { loop: false });
@@ -833,7 +834,7 @@ function drawPause(g, P) {
         g.text(items[i], 80, y, { align: "center", color: PAPER });
       } else g.text(items[i], 80, y, { align: "center" });
     }
-    g.text(T(TX.pauseKeys), 80, 136, { align: "center", color: PAPER });
+    g.text(T(TX.pauseKeys), 80, 130, { align: "center", color: PAPER });
   } else {
     g.window(30, 10, 100, 68);
     ART.portrait(g, "nanguo", "worried", 56, 15);
@@ -905,6 +906,21 @@ game.scene("play", {
       }
       var eye = inWatch(P, t);
       P.eye = eye;
+
+      /* Half a beat before the eye opens it twitches: shut, half, shut, half.
+         The warning is only drawn, so no judgement, score or suspicion changes.
+         Sound is optional now: a player with the phone muted still sees it. */
+      P.eyeWake = 0;
+      if (!eye) {
+        for (i = 0; i < P.song.watch.length; i++) {
+          var wakeAt = P.song.watch[i][0], lead = beatSec * 0.5;
+          if (t >= wakeAt - lead && t < wakeAt) {
+            var seg = Math.floor((1 - (wakeAt - t) / lead) * 4);
+            P.eyeWake = seg % 2 ? 0.5 : 0.24;
+            break;
+          }
+        }
+      }
 
       /* touch: the screen is A, except the chime button */
       var p = game.pointer;
@@ -1010,6 +1026,9 @@ game.scene("play", {
     /* lane labels */
     g.text("A", 10, 82, { color: DARK });
     if (P.hasB) g.text("B", 10, 41, { color: DARK });
+    /* the waking eye, drawn under the notes so a hold in the last half beat stays
+       readable; the full eye replaces it when the watch starts */
+    if (!P.eye && P.eyeWake) drawEye(g, 49, 38, 62, 22, P.eyeWake);
     if (P.eye) {
       var ws = watchStart(P), we = watchEnd(P);
       var lid = Math.min(1, 0.55 + Math.min(1, (t - ws) * 10));
@@ -1088,7 +1107,7 @@ game.scene("play", {
       g.text(tt("吹", "play"), 74, 2, { color: DARK });
       if (P.hasB) { keycap(g, "B", 92, 3, 1); g.text(tt("敲", "hit"), 104, 2, { color: DARK }); }
     }
-    drawSuspicion(g, P.suspicion);
+    drawSuspicion(g, P.suspicion, P.eyeWake || 1);
     /* touch button */
     if (P.hasB) touchButton(g, TOUCH_B, T(TX.touchB), false);
     /* banner */
@@ -1172,9 +1191,9 @@ function drawEye(g, x, y, w, h, lid) {
     g.pixel(px - 1, cy - 1, PAPER);
   }
 }
-function drawSuspicion(g, value) {
+function drawSuspicion(g, value, lid) {
   var x = 112, y = 5;
-  drawEye(g, x, y, 9, 5, 1);
+  drawEye(g, x, y, 9, 5, lid == null ? 1 : lid);
   for (var i = 0; i < 5; i++) {
     var on = value > i * 20;
     g.rect(124 + i * 6, 4, 5, 7, PAPER);

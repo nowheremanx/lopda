@@ -1,9 +1,16 @@
 // Fake Yu's music data, checked without a browser: lengths, charts, gazes and MML.
+// The app itself runs in tests/app-vm.mjs for its layout and the king's waking eye.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
+import { execFileSync } from "node:child_process";
+import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
+import { join } from "node:path";
+import { boot } from "./app-vm.mjs";
 
 const require = createRequire(import.meta.url);
+const ROOT = join(import.meta.dirname, "..");
+const APP = join(ROOT, "registry/apps/fake-yu/index.html");
 global.window = {};
 require("../runtime/chip.js");
 const { FAKE_SONGS } = require("../registry/apps/fake-yu/src/music.js");
@@ -122,3 +129,184 @@ test("story still has ten chapters, one choice and four endings", () => {
     for (const page of ending.pages) assert.ok(page.zh && page.en, `${ending.art}: missing ending text`);
   }
 });
+
+/* ---------- the app in the VM: edge spacing and the waking eye ---------- */
+
+/* one run of the app with a fake PAD and a manual clock; press()/release() go through
+   PAD's press/release events, exactly as the chin buttons do */
+function harness(file, seed) {
+  const on = { press: [], release: [] }, down = new Set();
+  let image = null;
+  const pad = {
+    lang: "zh", spec: "lopda/1",
+    on: (type, fn) => { if (on[type]) on[type].push(fn); }, off() {},
+    isDown: (b) => down.has(b),
+    load: () => Promise.resolve(null), save() {}, remove() {}, exit() {}, sfx() {},
+    music: { play() {}, stop() {} }, ambience() {}
+  };
+  const app = boot(file, { pad, seed: seed || 7, onPut: (img) => { image = img; } });
+  const frame = async (n) => {
+    for (let i = 0; i < n; i++) { app.frame(); await app.ctx.get("__yield")(); }
+  };
+  const press = (b) => { if (down.has(b)) return; down.add(b); on.press.forEach((f) => f(b)); };
+  const release = (b) => { if (!down.has(b)) return; down.delete(b); on.release.forEach((f) => f(b)); };
+  return { app, game: app.ctx.get("game"), frame, press, release, down, image: () => image };
+}
+
+/* the bundle's lopix12 subset, so a text call's row can be turned into the rows its
+   glyphs actually ink; text(y) is the top of the cell, not a baseline */
+function inkBounds(html, str) {
+  const m = /LoGame\.font\((\{[\s\S]*?\})\);/.exec(html);
+  assert.ok(m, "the bundle carries its pixel font");
+  const font = JSON.parse(m[1]);
+  let top = 99, bottom = -1;
+  for (const ch of str) {
+    const gl = font.glyphs[ch];
+    if (!gl) continue;   /* a space (no glyph) or a character dropped from the subset */
+    const cut = gl.indexOf(":"), w = +gl.slice(0, cut), buf = Buffer.from(gl.slice(cut + 1), "base64");
+    for (let y = 0; y < font.cell; y++) for (let x = 0; x < w; x++) {
+      if ((buf[(y * w + x) >> 3] >> (7 - ((y * w + x) & 7))) & 1) {
+        top = Math.min(top, y); bottom = Math.max(bottom, y);
+      }
+    }
+  }
+  assert.ok(bottom >= 0, `no ink for ${JSON.stringify(str)} in the font`);
+  return { top, bottom };
+}
+
+/* record one frame's g.text calls; y is the top of the glyph cell */
+function recordText(game) {
+  const calls = [], draw = game.g.text;
+  game.g.text = function (str, x, y, o) { calls.push({ str, x, y }); return draw.call(game.g, str, x, y, o); };
+  return calls;
+}
+
+const W = 160, H = 144;
+function inkInEyeBox(img) {
+  let n = 0;
+  for (let y = 38; y <= 60; y++) for (let x = 49; x < 111; x++) {
+    const o = (y * W + x) * 4;
+    if (img.data[o] === 0x1f && img.data[o + 1] === 0x2a && img.data[o + 2] === 0x14) n++;
+  }
+  return n;
+}
+
+test("edge spacing: the title's top line and the pause footer keep 2 px", async () => {
+  const html = readFileSync(APP, "utf8");
+  const h = harness(APP);
+  await h.frame(12);                      /* boot -> title */
+  const calls = recordText(h.game);
+  calls.length = 0;
+  await h.frame(1);
+  const topKeys = calls.find((c) => c.str === "↑↓选 A好");
+  const endings = calls.find((c) => /^结局 \d+\/4$/.test(c.str));
+  assert.ok(topKeys, "the title draws its key line");
+  assert.ok(endings, "the title draws its ending count");
+  for (const c of [topKeys, endings]) {
+    const ink = inkBounds(html, c.str);
+    assert.ok(c.y + ink.top >= 2, `"${c.str}" inks row ${c.y + ink.top}: less than 2 px from the top`);
+    /* the line sat at y=2 and was pushed down to make room */
+    assert.ok(c.y >= 4, `"${c.str}" starts at y=${c.y}, not 2 px lower than before`);
+  }
+
+  h.game.go("play", { i: 0 }, { fade: false });
+  await h.frame(3);
+  h.press("start");
+  await h.frame(1);
+  h.release("start");
+  calls.length = 0;
+  await h.frame(1);
+  const footer = calls.find((c) => c.str.indexOf("START") >= 0 && c.str.indexOf("继续") >= 0);
+  assert.ok(footer, "the pause menu draws its key footer");
+  const ink = inkBounds(html, footer.str);
+  assert.ok(footer.y >= 2, `pause footer starts at y=${footer.y}`);
+  const bottom = footer.y + ink.bottom;
+  assert.ok(H - 1 - bottom >= 2, `pause footer inks row ${bottom}: less than 2 px from the bottom`);
+});
+
+/* play song 0 by pressing each note on its frame, so the run reaches the first watch;
+   returns one record per frame and the ink count in the eye's box at three moments */
+async function playFirstSong(file) {
+  const h = harness(file);
+  await h.frame(6);
+  h.game.go("play", { i: 0 }, { fade: false });
+  await h.frame(2);
+  const song = FAKE_SONGS[0], ws = song.watch[0][0], lead = 30 / song.bpm;
+  const held = { a: null, b: null }, timeline = [], shots = { before: null, warn: null, open: null };
+  for (let guard = 0; guard < 60 * 26; guard++) {
+    const P = h.app.ctx.get("P");
+    if (!P) break;
+    const nextT = P.t + 1 / 60;
+    /* let a hold go at its end; a tap goes on the frame after its press */
+    for (const lane of ["a", "b"]) {
+      const n = held[lane];
+      if (!n) continue;
+      if (!n.hold || nextT >= n.end - 0.005) { h.release(lane); held[lane] = null; }
+    }
+    /* press a note when its time is on this frame; never while the eye is open */
+    if (!P.eye && !P.ended) {
+      for (const n of P.chart) {
+        if (P.judged[n.t]) continue;
+        if (n.t > nextT - 0.009 && n.t <= nextT + 0.009) {
+          if (held[n.lane]) { h.release(n.lane); held[n.lane] = null; }
+          h.press(n.lane); held[n.lane] = n;
+        }
+      }
+    }
+    await h.frame(1);
+    const Q = h.app.ctx.get("P"), t = +Q.t.toFixed(3);
+    timeline.push({
+      t, score: Q.score, suspicion: Q.suspicion, perfect: Q.perfect, good: Q.good,
+      miss: Q.miss, noise: Q.noise, caught: Q.caught, eye: !!Q.eye, wake: Q.eyeWake || 0
+    });
+    if (t < ws - lead - 0.005 && t >= ws - lead - 0.15) shots.before = inkInEyeBox(h.image());
+    else if (shots.warn == null && t >= ws - lead && t < ws && timeline[timeline.length - 1].wake === 0.5) {
+      shots.warn = inkInEyeBox(h.image());
+    }
+    if (shots.open == null && Q.eye && t >= ws + 0.1) shots.open = inkInEyeBox(h.image());
+    if (Q.ended || t > 25.5) break;
+  }
+  return { timeline, shots };
+}
+
+test("the king's eye twitches before it opens, and scoring is unchanged", async (t) => {
+  const song = FAKE_SONGS[0];
+  const [ws, we] = song.watch[0], lead = 30 / song.bpm;   /* half a beat */
+  const now = await playFirstSong(APP);
+
+  const before = now.timeline.filter((f) => f.t < ws - lead - 0.02);
+  assert.ok(before.length > 20, "the run reaches the warning");
+  assert.ok(before.every((f) => f.wake === 0), "the eye is quiet before its half beat");
+  const warning = now.timeline.filter((f) => f.t >= ws - lead + 0.002 && f.t < ws - 0.002);
+  assert.ok(warning.length >= 6, `only ${warning.length} frames in the warning half beat`);
+  assert.ok(warning.every((f) => f.wake > 0 && f.wake < 0.7), "the eye is only ever half open (or shut) in the lead-up");
+  assert.ok(warning.every((f) => !f.eye), "the watch itself has not begun");
+  assert.ok(new Set(warning.map((f) => f.wake)).size >= 2, "the eyelid flickers instead of holding one frame");
+  const open = now.timeline.filter((f) => f.t >= ws + 0.02 && f.t < we - 0.02);
+  assert.ok(open.length > 60, "the run covers the whole watch");
+  assert.ok(open.every((f) => f.eye && f.wake === 0), "the full eye, and no warning, while it watches");
+
+  /* and it is really drawn: ink in the eye's box only from the lead-up on */
+  assert.ok(now.shots.before < 20, `ink in the eye box before the warning: ${now.shots.before}`);
+  assert.ok(now.shots.warn > now.shots.before + 40, `the warning eye draws (${now.shots.warn} ink pixels)`);
+  assert.ok(now.shots.open > now.shots.warn, "the open eye is bigger than the half-open warning");
+
+  /* the same scripted run on the last committed bundle: score and suspicion must match */
+  let oldHtml;
+  try {
+    oldHtml = execFileSync("git", ["show", "HEAD:registry/apps/fake-yu/index.html"], { cwd: ROOT, encoding: "utf8", maxBuffer: 8 << 20 });
+  } catch (e) {
+    t.skip("no git to read the previous bundle: " + e.message);
+    return;
+  }
+  const tmp = join(import.meta.dirname, "tmp-fakeyu-old.html");
+  try {
+    writeFileSync(tmp, oldHtml);
+    const old = await playFirstSong(tmp);
+    const norm = (tl) => tl.map((f) => [f.score, f.suspicion, f.perfect, f.good, f.miss, f.noise, f.caught]);
+    assert.deepEqual(norm(now.timeline), norm(old.timeline), "score and suspicion changed");
+  } finally {
+    try { unlinkSync(tmp); } catch (e) {}
+  }
+});
+
