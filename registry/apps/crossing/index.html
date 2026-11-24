@@ -116,15 +116,17 @@
   #cover.confirm #cover-actions button { box-sizing: border-box; min-width: 96px; min-height: 44px; padding: 0 12px; }
   #cover.confirm #cover-actions button.outline { background: #a3ad7e; color: #1f2a14; border: 2px solid #1f2a14; box-shadow: none; }
   /* The results card is its own calm column: the list, the chosen word's whole line below it, then NEXT ROUND.
-     The detail box keeps its three lines whichever item is chosen, so nothing jumps as the cursor moves. */
-  #cover.done { gap: 8px; padding: 8px 12px; }
+     The detail box keeps its three lines whichever item is chosen, so nothing jumps as the cursor moves. A
+     32 px row and 6 px gaps let the full six-word card (the largest grid) stay on one 331x359 screen; 44 px
+     rows would scroll it. */
+  #cover.done { gap: 6px; padding: 6px 12px; }
   #cover.done #cover-text { font-size: 16px; line-height: 1.3; }
-  #cover.done #cover-list li { padding: 0 24px 0 6px; position: relative; }
+  #cover.done #cover-list li { height: 32px; line-height: 32px; padding: 0 24px 0 6px; position: relative; }
   #cover.done #cover-list li.sel { background: #1f2a14; color: #a3ad7e; border-bottom-color: #1f2a14; }
   /* the word book mark at the right end of a row: a 10x14 ribbon with a V notch, drawn in CSS.
      In the book it is solid ink; not in the book (or unknown) it is a hollow dashed outline in the
      dark tone. On the selected, inverted row both become paper so they stay visible. */
-  .mark { position: absolute; right: 6px; top: 4.5px; width: 10px; height: 14px; box-sizing: border-box;
+  .mark { position: absolute; right: 6px; top: 50%; margin-top: -7px; width: 10px; height: 14px; box-sizing: border-box;
     border: 1px dashed #4a5a32; border-bottom: 0; pointer-events: none; }
   /* the pseudo-elements sit in the 8x13 padding box (1px side and top borders), so the notch runs
      border-box (0,14) -> (5,10.64) -> (10,14), the same V as the filled ribbon's clip-path */
@@ -189,7 +191,7 @@
     zh: {
       round: "第 {n} 关", hint: "提示 {n}", loading: "翻字典…",
       error: "这台掌机的词典打不开", retry: "再试一次",
-      appName: "拼字格", cont: "继续 · 第 {n} 关", rounds: "选关", random: "随机关", randomLock: "通关 100 关后开放",
+      appName: "拼字格", cont: "继续 · 第 {n} 关", rounds: "选关", random: "随机关", randomLock: "通关 {n} 关后开放",
       howto: "玩法", pickHead: "第 {a}-{b} 关", pickFoot: "◄ ► 翻页", titleKeys: "↑↓ 选 · A 打开",
       lockedRound: "先过第 {n} 关",
       replay: " · 重玩", badge: "随机", doneRandom: "随机关完成",
@@ -212,7 +214,7 @@
     en: {
       round: "ROUND {n}", hint: "HINT {n}", loading: "Looking up…",
       error: "This handheld's dictionary won't open.", retry: "TRY AGAIN",
-      appName: "CROSSING", cont: "CONTINUE · ROUND {n}", rounds: "ROUNDS", random: "RANDOM", randomLock: "Opens after round 100",
+      appName: "CROSSING", cont: "CONTINUE · ROUND {n}", rounds: "ROUNDS", random: "RANDOM", randomLock: "Opens after round {n}",
       howto: "HOW TO PLAY", pickHead: "ROUNDS {a}-{b}", pickFoot: "◄ ► page", titleKeys: "↑↓ pick · A open",
       lockedRound: "Clear round {n} first",
       replay: " · REPLAY", badge: "RANDOM", doneRandom: "RANDOM CLEAR",
@@ -246,6 +248,10 @@
      rest is a short hunt. The same rnd seed gives everyone the same grid and the same wheel order. */
   var PRACTICE = ["star", "rats", "arts", "tar", "rat", "art", "sat"];
   var PRACTICE_SEED = 1986;
+  /* RANDOM opens once round 30 is cleared, and its locked row says so. The last fixed round (100) is a
+     different rule in the title below: there is no round 101 to continue, so RANDOM also takes the first
+     place then. */
+  var RANDOM_AT = 30;
 
   /* The title menu's pixel icons: 8x8 strings, "#" a filled pixel, drawn at 2 px each as inline SVG rects. */
   var ICONS = {
@@ -358,6 +364,42 @@
   function setNote(s, kind, word) {
     noteStart(kind, word);
     noteTextEl.textContent = s || "";
+  }
+
+  /* The note is two lines at most: the box under the grid keeps its 36 px, so the keys line below it never
+     moves. A hint's Chinese line lists ten senses and runs past two lines on a phone whose font is wider than
+     this screen's, so keep the senses that fit and end with "…". Width is counted in half-width cells (a
+     monospace letter is 0.6 em, a Chinese one two cells), measured on the screen the app is running on. */
+  function fitNote(s) {
+    var em = parseFloat(window.getComputedStyle(noteTextEl).fontSize) || 14;
+    var width = noteTextEl.clientWidth || noteEl.clientWidth || 315;
+    var budget = Math.max(16, Math.floor(width / (em * 0.6)) * 2 - 4);   /* two lines, with the ellipsis' own room */
+    function cells(t) {
+      var n = 0, i, c;
+      for (i = 0; i < t.length; i++) {
+        c = t.charCodeAt(i);
+        n += c > 0x2e7f ? 2 : 1;    /* CJK, kana, full-width punctuation: one em each */
+      }
+      return n;
+    }
+    if (cells(s) <= budget) return s;
+    /* a dictionary line's senses are separated by a comma: cut between them, never inside one */
+    var parts = s.split(/[,;、，；]\s*/), out = "", i, next, cut;
+    for (i = 0; i < parts.length; i++) {
+      next = out ? out + ", " + parts[i] : parts[i];
+      if (cells(next + "…") > budget) break;
+      out = next;
+    }
+    if (!out) {
+      /* one unbroken run longer than the box (a single long English definition): cut it where it fits */
+      cut = "";
+      for (i = 0; i < s.length; i++) {
+        if (cells(cut + s.charAt(i) + "…") > budget) break;
+        cut += s.charAt(i);
+      }
+      out = cut;
+    }
+    return out + "…";
   }
 
   /* The line under the grid follows the player's language. PAD.lang is fixed when the app starts, so this is the
@@ -735,7 +777,8 @@
   /* ---------- the title, the round picker, the way out ---------- */
 
   /* The title is a short menu, not a round: the results card's own column, its rows inverted like its cursor.
-     Once round 100 is cleared there is no round 101 to continue, so RANDOM takes the first place. */
+     RANDOM opens on its own after round 30. Once round 100 is cleared there is no round 101 to continue, so
+     RANDOM takes the first place too. */
   function showTitle() {
     clearPickMsg();
     phase = "title";
@@ -750,7 +793,7 @@
     if (firstRandom) titleRows.push({ kind: "random" });
     else titleRows.push({ kind: "continue" });
     titleRows.push({ kind: "pick" });
-    if (!firstRandom) titleRows.push({ kind: "random", locked: state.cleared < 100 });
+    if (!firstRandom) titleRows.push({ kind: "random", locked: state.cleared < RANDOM_AT });
     titleRows.push({ kind: "help" });
     if (titlePick >= titleRows.length) titlePick = 0;
     coverList.innerHTML = "";
@@ -771,7 +814,7 @@
         /* locked looks locked even before the cursor lands on it: dark words, a dashed box, and the reason in it */
         li.className = "locked";
         li.innerHTML = '<span class="ico">' + iconSvg("random") + '</span><span class="label"><span class="rname">' +
-          TXT.random + '</span><span class="lock">' + TXT.randomLock + "</span></span>";
+          TXT.random + '</span><span class="lock">' + TXT.randomLock.replace("{n}", RANDOM_AT) + "</span></span>";
       } else {
         li.innerHTML = '<span class="ico">' + iconSvg(icon) + '</span><span class="rname">' + name + "</span>" +
           (prog ? '<span class="prog">' + prog + "</span>" : "");
@@ -1413,7 +1456,7 @@
         updateHeader(); save();
       } else state.hintTurn++;
       if (m) state.mean[word] = m;         /* the results card shows the plain line, not the hint's masked one */
-      if (token === noteSeq) setNote(TXT.hintHead + line);
+      if (token === noteSeq) setNote(fitNote(TXT.hintHead + line));
     }, function () { hintBusy = false; if (token === noteSeq) setNote(TXT.noEntry); });
   }
 
@@ -1530,7 +1573,7 @@
   coverBtn2.addEventListener("click", function () {
     if (phase === "leave") leaveToTitle();          /* LEAVE is the leave panel's second button */
   });
-  /* The word rows are 24 px tall, below the 44 px touch rule, so the whole row width is the target. A tap on
+  /* The word rows are 32 px tall, still under the 44 px touch rule: the whole row width is the target. A tap on
      the right 44 px is the word book toggle (and selects the word); a tap elsewhere selects and reads it.
      Like the grid, the tap counts only on pointerup and only when it did not travel: a scroll must not pick.
      The title's and the picker's rows take a tap the same way, as A would. */

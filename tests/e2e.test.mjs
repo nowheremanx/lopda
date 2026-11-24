@@ -11291,9 +11291,9 @@ test("crossing: round 1 shows a grid, a demo spells one word, words typed with t
   });
   assert.deepEqual(title.size, [331, 359]);
   assert.equal(title.name, "拼字格");
-  assert.deepEqual(title.rows, ["继续 · 第 1 关", "选关", "随机关通关 100 关后开放", "玩法"]);
+  assert.deepEqual(title.rows, ["继续 · 第 1 关", "选关", "随机关通关 30 关后开放", "玩法"]);
   assert.deepEqual(title.sel, [true, false, false, false], "the title opens on CONTINUE");
-  assert.deepEqual(title.locked, [false, false, true, false], "RANDOM is locked before round 100");
+  assert.deepEqual(title.locked, [false, false, true, false], "RANDOM is locked before round 30");
   assert.equal(title.dashed, "dashed", "the locked row has a dashed border");
   assert.deepEqual(title.icons, [true, true, true, true], "every title row has its pixel icon");
   assert.deepEqual(title.art.cells, 10, "the art is W, CROSSING and N");
