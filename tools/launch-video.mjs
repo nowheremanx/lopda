@@ -240,8 +240,8 @@ async function record() {
     await p.waitForSelector("#store-list .store-item", { timeout: 10000 }); await p.waitForLoadState("networkidle"); await p.waitForTimeout(800);
     const item = p.locator("#store-list .store-item", { hasText: T.maze }).first();
     await item.scrollIntoViewIfNeeded();
-    if ((await item.locator("button").textContent()) !== T.open) {
-      await item.locator("button").click(); await p.waitForTimeout(400);
+    if ((await item.locator("button").first().textContent()) !== T.open) {
+      await item.locator("button").first().click(); await p.waitForTimeout(400);
       const ask = p.locator("#file-ask .box button").first(); if (await ask.count()) await ask.click();
       await p.waitForFunction(([l, o]) => { const li = [...document.querySelectorAll("#store-list .store-item")].find((e) => e.textContent.includes(l)); return li && li.querySelector("button").textContent === o; }, [T.maze, T.open], { timeout: 15000 });
       await p.waitForTimeout(500);

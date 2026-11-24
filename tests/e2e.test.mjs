@@ -477,7 +477,7 @@ test("store: an app that asks for a capability shows its icons before install, a
   assert.equal(await item.locator(".store-perms .perm").count(), 1, "the entry shows the microphone as one icon");
   assert.equal(await item.locator("small").filter({ hasText: "会用麦克风" }).count(), 0, "no line of permission text");
 
-  await item.locator("button").click();
+  await item.locator("button").first().click();
   await p.waitForSelector("#file-ask .ask-perms");
   assert.equal(await p.locator("#file-ask .ask-perm").count(), 1);
   assert.match(await p.textContent("#file-ask .ask-perm"), /话筒/);
@@ -491,9 +491,9 @@ test("store: an app that asks for a capability shows its icons before install, a
   assert.equal(await p.evaluate(() => document.activeElement && document.activeElement.textContent.trim()), "安装",
     "the focus returns to the install button");
   await p.waitForSelector("#file-ask", { state: "detached" });
-  assert.equal((await item.locator("button").innerText()).trim(), "安装", "cancelling changes nothing");
+  assert.equal((await item.locator("button").first().innerText()).trim(), "安装", "cancelling changes nothing");
 
-  await item.locator("button").click();
+  await item.locator("button").first().click();
   await p.waitForSelector("#file-ask .ask-perms");
   await p.click("#file-ok");
   await p.waitForFunction(() => [...document.querySelectorAll("#store-list .store-item")]
@@ -518,6 +518,69 @@ test("store: an app that asks for a capability shows its icons before install, a
   assert.ok(tileBox && viewBox, "the installed app has a home tile");
   assert.ok(tileBox.y >= viewBox.y - 1 && tileBox.y + tileBox.height <= viewBox.y + viewBox.height + 1,
     "the installed app is scrolled into view");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("a link straight to an app: installs it like the store, runs it, cleans the address, never fetches an installed copy again", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN" });
+  const fetched = [];
+  p.on("request", (r) => { if (r.url().includes("/registry/apps/klotski/")) fetched.push(r.url()); });
+  await p.goto(base + "/runtime/?app=klotski&debug", { waitUntil: "load" });
+  await p.waitForSelector("#v-run:not([hidden])", { timeout: 15000 });
+  assert.match(await p.textContent("#run-title"), /华容道/);
+  assert.match(await p.locator("#toast").innerText(), /浏览器里的试玩/, "a browser tab says it is a trial, once");
+  assert.equal(new URL(p.url()).search, "?debug", "the app parameter leaves the address, the rest stays");
+  await p.locator("#run-frame").waitFor();
+  /* back goes home, where the new tile is */
+  await p.click("#run-back");
+  await p.waitForSelector("#v-home:not([hidden])");
+  assert.equal(await p.locator("#home .app", { hasText: "华容道" }).count(), 1);
+  assert.equal(fetched.length, 1, "downloaded once");
+  /* the same link again: the installed copy runs, nothing is downloaded */
+  await p.goto(base + "/runtime/?app=klotski", { waitUntil: "load" });
+  await p.waitForSelector("#v-run:not([hidden])", { timeout: 15000 });
+  assert.equal(fetched.length, 1, "an installed app is never fetched again by a link");
+  /* a reload starts at home */
+  await p.reload({ waitUntil: "load" });
+  await p.waitForFunction(() => window.LP && document.querySelectorAll("#home .app:not(.builtin)").length >= 3);
+  await p.waitForTimeout(300);
+  assert.equal(await p.isHidden("#v-run"), true);
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("a link: an app that asks for a capability is confirmed first, an unknown id stays home, a built-in opens", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN" });
+  await p.goto(base + "/runtime/?app=blow-candles", { waitUntil: "load" });
+  await p.waitForSelector("#file-ask .ask-perms", { timeout: 15000 });
+  await p.click("#file-no");
+  await p.waitForSelector("#file-ask", { state: "detached" });
+  await p.waitForTimeout(300);
+  assert.equal(await p.isHidden("#v-home"), false, "cancelling stays home");
+  assert.equal(await p.locator("#home .app", { hasText: "吹蜡烛" }).count(), 0, "and installs nothing");
+
+  await p.goto(base + "/runtime/?app=no-such-app", { waitUntil: "load" });
+  await p.waitForFunction(() => /没找到链接里的程序/.test(document.getElementById("toast").textContent), null, { timeout: 15000 });
+  assert.equal(await p.isHidden("#v-home"), false);
+
+  await p.goto(base + "/runtime/?app=calendar", { waitUntil: "load" });
+  await p.waitForSelector("#v-cal:not([hidden])", { timeout: 15000 });
+  assert.equal(new URL(p.url()).search, "");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("store: an entry's share button copies a link straight to that app", { skip, timeout: 30000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN" });
+  await p.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  /* no share sheet in headless Chromium on Linux; make sure of it so the clipboard path runs */
+  await p.evaluate(() => { try { delete Navigator.prototype.share; } catch {} });
+  await p.locator("#home .app.builtin", { hasText: "应用商店" }).click();
+  await p.fill("#store-q", "华容道");
+  const item = p.locator("#store-list .store-item");
+  await item.waitFor();
+  await item.locator(".store-share").click();
+  await p.waitForFunction(() => /链接已复制/.test(document.getElementById("toast").textContent));
+  assert.equal(await p.evaluate(() => navigator.clipboard.readText()), base + "/runtime/?app=klotski");
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
