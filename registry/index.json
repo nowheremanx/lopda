@@ -1,6 +1,6 @@
 {
   "spec": "lopda/1",
-  "generated": "2026-11-23",
+  "generated": "2026-11-24",
   "apps": [
     {
       "spec": "lopda/1",
@@ -691,7 +691,7 @@
       ],
       "version": "1.0.1",
       "released": "2026-11-18",
-      "updated": "2026-11-18",
+      "updated": "2026-11-23",
       "description": "最多八个计数器，点选或按 A 累加；查看存档格式与时间。",
       "i18n": {
         "en": {
@@ -704,6 +704,53 @@
       "path": "apps/save-book/index.html",
       "sha256": "f45fa8fa315155f98b04f2d8c2ba422705d82ce6900b8135c8813e034a5517f6",
       "bytes": 14346
+    },
+    {
+      "spec": "lopda/1",
+      "id": "sensor-desk",
+      "name": "传感器台",
+      "glyph": "感",
+      "category": "education",
+      "icon": [
+        "................",
+        "................",
+        "......0000......",
+        "....00011000....",
+        "...0033113300...",
+        "..003333122100..",
+        "..033331222230..",
+        "..013331222210..",
+        "..013333122110..",
+        "..033333313330..",
+        "..033333333330..",
+        "..003333333300..",
+        "...0033113300...",
+        "....00011000....",
+        "......0000......",
+        "................"
+      ],
+      "version": "1.0.0",
+      "released": "2026-11-23",
+      "description": "实时显示倾斜、摇晃、方向和声音，传感器用法的示范程序。",
+      "i18n": {
+        "zh": {
+          "name": "传感器台",
+          "description": "实时显示倾斜、摇晃、方向和声音，传感器用法的示范程序。"
+        },
+        "en": {
+          "name": "Sensors",
+          "description": "Live tilt, shake, heading and sound: the example for PAD.motion and PAD.mic."
+        }
+      },
+      "author": "Haowei Wu",
+      "license": "MIT",
+      "permissions": [
+        "motion",
+        "mic"
+      ],
+      "path": "apps/sensor-desk/index.html",
+      "sha256": "ef3a0053ad0bcea6e9c328b98f3b2f91e4b18000597900afce5a70c33b440b0b",
+      "bytes": 18316
     },
     {
       "spec": "lopda/1",
