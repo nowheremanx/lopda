@@ -75,7 +75,7 @@ function run() {
       S.at++; continue;
     }
     if (s.sfx) { if (SOUNDS[s.sfx]) game.sfx(SOUNDS[s.sfx]); S.at++; continue; }
-    if (s.chapter) { store(); cur = { kind: "chapter", title: T(s.chapter), sub: T(s.sub) }; return; }
+    if (s.chapter) { store(); cur = { kind: "chapter", title: T(s.chapter), sub: T(s.sub), since: game.time }; return; }
     if (s.text) {
       store();
       cur = { kind: "say", who: s.who, sms: !!s.sms, text: T(s.text), pages: null, page: 0, n: 0 };
@@ -87,7 +87,7 @@ function run() {
       /* the story is over: the next start is a new one */
       if (canSave) game.remove(SAVE_KEY);
       game.sfx("ok");
-      cur = { kind: "end", title: T(s.end), sub: T(s.sub) };
+      cur = { kind: "end", title: T(s.end), sub: T(s.sub), since: game.time };
       return;
     }
     S.at++;
@@ -170,6 +170,8 @@ game.scene("play", {
     if (game.pressed("b") && (cur.kind === "say" || cur.kind === "choice")) {
       view = "log"; logTop = Math.max(0, log.length - 4); game.sfx("tap"); return;
     }
+    /* a card holds for a moment, so a tap meant for the line before does not skip it */
+    if (cur.since !== undefined && game.time - cur.since < (cur.kind === "end" ? 1.5 : 0.5)) return;
     if (game.pressed("a") || game.pressed("start") || game.pointer.pressed) advance();
   },
   draw: function (g) {
