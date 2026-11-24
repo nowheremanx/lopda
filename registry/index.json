@@ -525,9 +525,9 @@
         "0333112033333330",
         "0000000000000000"
       ],
-      "version": "1.1.0",
+      "version": "1.2.0",
       "released": "2026-10-16",
-      "updated": "2026-10-16",
+      "updated": "2026-11-24",
       "description": "倾斜机身让小钢珠滚到终点，别掉进洞。也能用方向键推。倾斜感应的示范。",
       "i18n": {
         "zh": {
@@ -545,8 +545,8 @@
         "motion"
       ],
       "path": "apps/tilt-maze/index.html",
-      "sha256": "8c9c6e317482db6db1aa62d8aad429a711b4553396c66e14cc59a4ff6422b18e",
-      "bytes": 63815
+      "sha256": "4881df9acef3c933aa92700b48686eff546ae779f615407693870e38ffdd2198",
+      "bytes": 67313
     },
     {
       "spec": "lopda/1",
