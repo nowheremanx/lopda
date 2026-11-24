@@ -23,6 +23,14 @@ test("registry/index.json is what build-index.mjs would write", (t) => {
   assert.deepEqual(cur, fresh, "run node tools/build-index.mjs");
 });
 
+test("registry/order.json sets the store order: listed apps first, in its order, the rest by id (#186)", () => {
+  const order = readJSON("registry/order.json").order;
+  assert.equal(new Set(order).size, order.length, "no app listed twice");
+  const listed = APP_IDS.filter((id) => order.includes(id)).sort((a, b) => order.indexOf(a) - order.indexOf(b));
+  const rest = APP_IDS.filter((id) => !order.includes(id));
+  assert.deepEqual(readJSON("registry/index.json").apps.map((a) => a.id), [...listed, ...rest]);
+});
+
 test("registry entries carry released, and updated when the version changed", () => {
   const index = readJSON("registry/index.json");
   const real = (a, k) => {
@@ -43,7 +51,7 @@ test("registry entries carry released, and updated when the version changed", ()
 test("every index entry points at the exact file it describes", () => {
   const index = readJSON("registry/index.json");
   assert.equal(index.spec, "lopda/1");
-  assert.deepEqual(index.apps.map((a) => a.id), APP_IDS);
+  assert.deepEqual(index.apps.map((a) => a.id).sort(), APP_IDS, "every app once (the order is registry/order.json)");
   for (const a of index.apps) {
     const html = readFileSync(join(ROOT, "registry", a.path));
     assert.equal(a.sha256, sha256(html), a.id);

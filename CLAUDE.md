@@ -48,7 +48,7 @@ runtime/        the PWA: index.html, core.js (shared LP object: utils, views, so
                 vendor/qrcode-generator/ (the share page's QR encoder, MIT)
 sdk/            MIT. pad-shim.js (PAD bridge), lo-game.js (game framework), LO-GAME.md, lo-3d.js (3D), LO-3D.md, PROMPT.md, UI.md (app layout rules),
                 dev.html (app harness), template/, template-game/, template-vn/ (visual novel), fonts/ (lopix12, OFL)
-registry/       index.json (generated) + apps/<id>/{manifest.json,index.html,src/ (optional sources)}
+registry/       index.json (generated; its order is the store order inside each category, from order.json, unlisted apps after by id) + apps/<id>/{manifest.json,index.html,src/ (optional sources)}
 tools/          check-app.mjs, build-index.mjs (also stamps each app's released/updated dates from git), bundle-app.mjs (+ lo-game.mjs alias), lo-game-lib.mjs, stamp-preview.mjs (Node 20+, no deps);
                 ai-review.mjs (the AI pre-review behind .github/workflows/ai-review.yml: the owner's `/review` on a PR; diff as text only,
                 a fixed local scan with red/yellow levels per area, one chat completion with no tools whose rules are docs/ai-review.md,
