@@ -481,7 +481,15 @@ test("store: an app that asks for a capability shows its icons before install, a
   await p.waitForSelector("#file-ask .ask-perms");
   assert.equal(await p.locator("#file-ask .ask-perm").count(), 1);
   assert.match(await p.textContent("#file-ask .ask-perm"), /话筒/);
+  /* a modal for VoiceOver: labelled by its question, the focus on the box (not on OK), back on the button after (#167) */
+  assert.deepEqual(await p.evaluate(() => {
+    const box = document.querySelector("#file-ask .box");
+    return [box.getAttribute("role"), box.getAttribute("aria-modal"),
+      document.getElementById(box.getAttribute("aria-labelledby")) === box.querySelector("p"), document.activeElement === box];
+  }), ["dialog", "true", true, true]);
   await p.click("#file-no");
+  assert.equal(await p.evaluate(() => document.activeElement && document.activeElement.textContent.trim()), "安装",
+    "the focus returns to the install button");
   await p.waitForSelector("#file-ask", { state: "detached" });
   assert.equal((await item.locator("button").innerText()).trim(), "安装", "cancelling changes nothing");
 
