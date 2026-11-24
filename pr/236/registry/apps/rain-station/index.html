@@ -1397,7 +1397,7 @@ game.scene("play", {
       drawEndPicture(g);
       drawBox(g);
       g.text(cur.title || "END", 80, BOX_Y + 6, { align: "center" });
-      if (cur.sub) g.text(cur.sub, 80, BOX_Y + 22, { align: "center", color: g.DARK });
+      if (cur.sub) g.text(cur.sub, 80, BOX_Y + 22, { align: "center", color: g.INK });
       g.text(T({ zh: "A 回到标题", en: "A: back to title" }), 80, BOX_Y + 40, { align: "center", color: g.INK });
       return;
     }
@@ -1500,7 +1500,7 @@ game.scene("title", {
     drawTitlePicture(g);
     g.window(20, 26, 120, 36);
     g.text(T(STORY_TITLE), 80, 30, { align: "center" });
-    g.text(T(STORY_SUB), 80, 45, { align: "center", color: g.DARK });
+    g.text(T(STORY_SUB), 80, 45, { align: "center", color: g.INK });
     drawBox(g);
     if (loading) { g.text("…", 80, BOX_Y + 8, { align: "center" }); return; }
     var items = saved ? [T({ zh: "继续", en: "Continue" }), T({ zh: "从头开始", en: "Start over" })] : [T({ zh: "开始", en: "Start" })];
