@@ -22,30 +22,72 @@
   var PR = typeof location !== "undefined" && /\/pr\/(\d+)\//.exec(location.pathname || "");
   var DB_NAME = PR ? "lopda-pr-" + PR[1] : "lopda", STORE = "docs";
   var opening = null;
+  /* iOS can drop a home-screen app's IndexedDB connection while it sits in the background. The dead connection then either
+     throws on transaction() or, worse, takes requests that never answer: an app's tile stayed on 载入中… until a relaunch.
+     So the connection is forgotten when it closes or throws, and a transaction that does not finish in time is given up
+     (decisions.md section 67). A read is tried once more on a fresh connection; a write never is, because a late first
+     attempt could land after a newer write and put old data back: it is aborted, reported, and the next call reconnects. */
+  var READ_MS = 5000, WRITE_MS = 10000;
+  var timer = typeof setTimeout === "function" ? setTimeout : null;
+  var untimer = typeof clearTimeout === "function" ? clearTimeout : function () {};
+  /* opening itself has no time limit: boot waits on it, and giving up there would leave the whole session unsaved */
   function open() {
     if (opening) return opening;
-    opening = new Promise(function (resolve, reject) {
+    var mine = opening = new Promise(function (resolve, reject) {
       var req = indexedDB.open(DB_NAME, 1);
       req.onupgradeneeded = function () {
         var os = req.result.createObjectStore(STORE, { keyPath: "path" });
         os.createIndex("parent", "parent", { unique: false });
       };
-      req.onsuccess = function () { resolve(req.result); };
+      req.onsuccess = function () {
+        var db = req.result;
+        db.onclose = function () { forget(mine, db); };
+        db.onversionchange = function () { forget(mine, db); };
+        resolve(db);
+      };
       /* forget a failed open, as openFiles does: a cached rejection would fail every later call until a reload */
-      req.onerror = function () { opening = null; reject(err("unavailable", req.error)); };
+      req.onerror = function () { if (opening === mine) opening = null; reject(err("unavailable", req.error)); };
     });
-    return opening;
+    return mine;
   }
   function err(code, e) { return { code: code, message: String((e && e.message) || e || code) }; }
-  function tx(mode, fn) {
-    return open().then(function (db) {
+  /* drop a connection; the next call opens a new one */
+  function forget(p, db) {
+    if (opening === p) opening = null;
+    try { db.close(); } catch (e) {}
+  }
+  /* wait: how long the transaction may take before it is given up (0: no limit, for the whole-device backup) */
+  function tx(mode, fn, wait) {
+    if (wait == null) wait = mode === "readonly" ? READ_MS : WRITE_MS;
+    return attempt(mode, fn, wait, mode === "readonly" ? 1 : 0, true);
+  }
+  /* again: retries left after a timeout (reads only); fresh: one retry left after a closed connection threw */
+  function attempt(mode, fn, wait, again, fresh) {
+    var p = open();
+    return p.then(function (db) {
       return new Promise(function (resolve, reject) {
-        var t = db.transaction(STORE, mode), os = t.objectStore(STORE), out;
+        var t, os, out, done = false, watch;
+        /* a closed connection throws here, before anything is queued: safe to reconnect and retry, a write too */
+        try { t = db.transaction(STORE, mode); os = t.objectStore(STORE); }
+        catch (e) {
+          forget(p, db);
+          if (fresh && e && e.name === "InvalidStateError") { resolve(attempt(mode, fn, wait, again, false)); return; }
+          reject(err("unavailable", e)); return;
+        }
+        var end = function (fnEnd) { if (done) return; done = true; untimer(watch); fnEnd(); };
         /* a request that throws at once (a value that cannot be stored) must not let the rest commit */
-        try { out = fn(os); } catch (e) { try { t.abort(); } catch (x) {} reject(err("unavailable", e)); return; }
-        t.oncomplete = function () { resolve(out && "result" in out ? out.result : undefined); };
-        t.onerror = function () { reject(err("unavailable", t.error)); };
-        t.onabort = function () { reject(err(t.error && t.error.name === "QuotaExceededError" ? "quota_exceeded" : "unavailable", t.error)); };
+        try { out = fn(os); } catch (e) { end(function () { try { t.abort(); } catch (x) {} reject(err("unavailable", e)); }); return; }
+        t.oncomplete = function () { end(function () { resolve(out && "result" in out ? out.result : undefined); }); };
+        t.onerror = function () { end(function () { reject(err("unavailable", t.error)); }); };
+        t.onabort = function () { end(function () { reject(err(t.error && t.error.name === "QuotaExceededError" ? "quota_exceeded" : "unavailable", t.error)); }); };
+        if (wait && timer) watch = timer(function () {
+          end(function () {
+            try { t.abort(); } catch (x) {}
+            forget(p, db);
+            if (again > 0) resolve(attempt(mode, fn, wait, again - 1, fresh));
+            else reject(err("timeout", "the database did not answer"));
+          });
+        }, wait);
       });
     });
   }
@@ -120,15 +162,28 @@
     filesOpening = new Promise(function (resolve, reject) {
       var req = indexedDB.open(DB_NAME + "-files", 1);
       req.onupgradeneeded = function () { req.result.createObjectStore("files"); };
-      req.onsuccess = function () { resolve(req.result); };
+      req.onsuccess = function () {
+        var fdb = req.result, mine = filesOpening;
+        /* as the documents: a connection iOS closed is forgotten (no time limit here, files can be megabytes) */
+        fdb.onclose = fdb.onversionchange = function () { if (filesOpening === mine) filesOpening = null; try { fdb.close(); } catch (e) {} };
+        resolve(fdb);
+      };
       req.onerror = function () { filesOpening = null; reject(err("unavailable", req.error)); };
     });
     return filesOpening;
   }
-  function filesTx(mode, fn) {
-    return openFiles().then(function (fdb) {
+  function filesTx(mode, fn, retried) {
+    var p = openFiles();
+    return p.then(function (fdb) {
       return new Promise(function (resolve, reject) {
-        var t = fdb.transaction("files", mode), r;
+        var t, r;
+        try { t = fdb.transaction("files", mode); }
+        catch (e) {
+          if (filesOpening === p) filesOpening = null;
+          try { fdb.close(); } catch (x) {}
+          if (!retried && e && e.name === "InvalidStateError") resolve(filesTx(mode, fn, true)); else reject(err("unavailable", e));
+          return;
+        }
         try { r = fn(t.objectStore("files")); } catch (e) { try { t.abort(); } catch (x) {} reject(err("unavailable", e)); return; }
         t.oncomplete = function () { resolve(r && "result" in r ? r.result : undefined); };
         t.onerror = function () { reject(err("unavailable", t.error)); };
@@ -147,7 +202,7 @@
      writes it back in the same transaction, so each database is either all old or all new. The two databases cannot share
      a transaction; when the second one fails, the caller writes its own copy of the old data back (apps/settings.js). */
   function dumpAll() {
-    var docs = tx("readonly", function (os) { return os.getAll(); }).then(function (recs) {
+    var docs = tx("readonly", function (os) { return os.getAll(); }, 0).then(function (recs) {
       return (recs || []).map(function (r) { return { path: r.path, data: r.data }; });
     });
     var fl = filesTx("readonly", function (os) {
@@ -162,7 +217,7 @@
     return tx("readwrite", function (os) {
       os.clear();
       docs.forEach(function (d) { os.put({ path: d.path, parent: d.path.slice(0, d.path.lastIndexOf("/")), data: d.data }); });
-    }).then(function () {
+    }, 0).then(function () {
       return filesTx("readwrite", function (os) {
         os.clear();
         fl.forEach(function (f) { os.put(f.value, f.key); });
