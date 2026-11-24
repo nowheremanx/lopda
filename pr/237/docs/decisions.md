@@ -2006,9 +2006,12 @@ EXIF，相册就能把照片放到地图上。
 
 2026-11-24，主人想推广时发一个链接，对方点开直接进某个 app。
 
-- **怎么用**：`https://nowheremanx.github.io/lopda/runtime/?app=klotski`。商店每一项多了一个「分享」按钮（有系统分享就弹分享面板，
-  没有就复制链接），链接用的是当前地址，所以 PR 预览里分享出去的是预览地址。内置程序的 id 也行（`?app=camera`、`?app=studio`），
+- **怎么用**：`https://nowheremanx.github.io/lopda/runtime/?app=klotski`。内置程序的 id 也行（`?app=camera`、`?app=studio`），
   打开那个内置程序。语言和平时一样跟着系统（或设置里选的）。
+- **从哪里分享**：运行界面顶栏右边的「卸载」换成「⋯」，菜单里是「分享」和「卸载」（卸载仍要再点一次确认）。分享有系统面板就弹面板，
+  没有就复制链接；链接用当前地址，所以 PR 预览里分享的是预览地址。本地脚本没有链接，也没有「⋯」。菜单只用手点，下巴键盘仍归 app；
+  再点「⋯」、点别处或点进 app 都会收起。主人起初问商店要不要放：不放（2026-11-24）。一行只留一个主要动作（安装 / 打开），每行一个
+  很少用的分享是噪音，还和「安装」平起平坐；想分享的人多半正在玩，那一刻在 app 里。代价是没装的 app 要先装、打开一次才能分享。
 - **没装的 app**：从商店目录装，和在商店里点「安装」一模一样：校验哈希；要权限的 app 先弹同一个确认框，点了才装，取消就停在首页。
   链接自己不给任何权限。装好后直接打开，首页也多了它的格子。
 - **数据安全**：已经装了的 app 就打开本机那一份，链接不会更新、覆盖或删掉什么；存档不动。id 不对或商店里没有，提示一句，留在首页。
@@ -2020,5 +2023,5 @@ EXIF，相册就能把照片放到地图上。
   主屏幕版里不出现）。首页原有的「加到主屏幕」卡片照旧。安卓 Chrome 装过的 PWA 有时能接管同站链接，不保证。
 - **离线**：sw.js 对带查询参数的页面导航（`?app=`、`?debug`）用缓存里的同一页（`ignoreSearch`），链接离线也能开，缓存也不会每个链接存一份。
 - **没做的**：落地页根地址（`/lopda/?app=`）的短链接；SPEC 和 app 代码不变。
-- **代码**：`runtime/apps/store.js`（`linkId`、`openLink`、`shareLink`，`install` / `doInstall` 多了可选的按钮和回调）、`runtime/sw.js`、
-  `runtime/strings.js`；e2e 加了链接的测试。Claude 写的。
+- **代码**：`runtime/apps/store.js`（`linkId`、`openLink`、`shareLink`、`closeRunMenu`，`install` / `doInstall` 多了可选的按钮和回调）、
+  `runtime/index.html`、`runtime/lopda.css`、`runtime/sw.js`、`runtime/strings.js`；e2e 加了链接和「⋯」的测试，卸载的测试先点「⋯」。Claude 写的。

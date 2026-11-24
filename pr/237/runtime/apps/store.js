@@ -183,13 +183,7 @@ function storeItem(r){
   else { btn.className="btn ghost"; btn.textContent=tr("store.open"); }
   if(updating) btn.disabled=true;   /* one update at a time */
   else btn.onclick=function(){ if(a && a.sha256===r.sha256) runApp(a); else install(r,btn); };
-  /* a link that opens this app straight away, for telling a friend (decisions.md section 66) */
-  var share=document.createElement("button"); share.type="button"; share.className="btn ghost store-share";
-  share.textContent=tr("store.share"); share.setAttribute("aria-label",tr("store.share.title",{name:appName(r)}));
-  share.onclick=function(){ shareLink(r); };
-  var acts=document.createElement("div"); acts.className="acts";
-  acts.appendChild(btn); acts.appendChild(share);
-  li.appendChild(tile); li.appendChild(body); li.appendChild(acts);
+  li.appendChild(tile); li.appendChild(body); li.appendChild(btn);
   return li;
 }
 function categoryHead(c,n){
@@ -473,8 +467,9 @@ function runApp(a){
   S.running=a;
   dictLimit=window.LopdaWordList ? window.LopdaWordList.limiter() : null;
   $("run-title").textContent=a.local ? appName(a) : appName(a)+" · v"+(a.version||"?");
-  $("run-del-wrap").hidden=!!a.local;   /* local scripts are removed in the scripts app, not here */
-  if(!a.local) LP.resetConfirm("run-del-wrap","run-del",tr("run.remove"),function(){ if(S.running){ var n=appName(S.running); deleteApp(S.running.id); show("home"); toast(tr("run.removed",{name:n})); } },tr("run.remove.confirm",{name:appName(a)}));
+  closeRunMenu();
+  $("run-more").hidden=!!a.local;   /* local scripts are removed in the scripts app and have no link: no ⋯ */
+  if(!a.local) LP.resetConfirm("run-del-wrap","run-del",tr("run.remove"),removeRunning,tr("run.remove.confirm",{name:appName(a)}));
   $("run-err").hidden=true;
   show("run");
   showPad(!!a.buttons);
@@ -489,6 +484,22 @@ function runApp(a){
   }).catch(function(e){ if(S.running===a) toast(tr("run.loadfail",{code:(e&&e.code)||tr("common.unknown")})); });
 }
 $("run-back").onclick=function(){ show(S.running && S.running.back || "home"); };
+/* ⋯: the running app's own menu, 分享 (the same link as the store's) and 卸载 (still a second tap to confirm).
+   Touch only; the chin pad stays the app's. It closes on a second ⋯, on a tap anywhere else, and when the app takes the focus. */
+function closeRunMenu(){
+  if($("run-menu").hidden) return;
+  $("run-menu").hidden=true; $("run-more").setAttribute("aria-expanded","false");
+  if(S.running && !S.running.local) LP.resetConfirm("run-del-wrap","run-del",tr("run.remove"),removeRunning,tr("run.remove.confirm",{name:appName(S.running)}));
+}
+function removeRunning(){ if(S.running){ var n=appName(S.running); deleteApp(S.running.id); show("home"); toast(tr("run.removed",{name:n})); } }
+$("run-more").onclick=function(){
+  if(!$("run-menu").hidden){ closeRunMenu(); return; }
+  sfx("tap");
+  $("run-menu").hidden=false; $("run-more").setAttribute("aria-expanded","true");
+};
+$("run-share").onclick=function(){ var a=S.running; closeRunMenu(); if(a && !a.local) shareLink(a); };
+document.addEventListener("pointerdown",function(e){ if(!$("run-menu").hidden && !$("run-menu").contains(e.target) && e.target!==$("run-more")) closeRunMenu(); },true);
+window.addEventListener("blur",closeRunMenu);
 $("run-err-close").onclick=function(){ $("run-err").hidden=true; };
 
 /* Local scripts live in the scripts app but have their own storage document, one per script.
@@ -1235,7 +1246,7 @@ LP.builtin({id:"store", label:"app.store", icon:"store", view:"store",
 LP.builtin({id:"run", view:"run", keepPad:true,
   leave:function(){
     if(S.running) flushKv(S.running.id);
-    closeAsk(false); LP.snap.cancel(); LP.speech.stop(); closeLink(S.running); sensors.stopAll(); LP.chip.stop(); LP.keepAwake(false); $("run-frame").srcdoc=""; S.running=null;
+    closeRunMenu(); closeAsk(false); LP.snap.cancel(); LP.speech.stop(); closeLink(S.running); sensors.stopAll(); LP.chip.stop(); LP.keepAwake(false); $("run-frame").srcdoc=""; S.running=null;
   },
   lang:function(){
     /* apps read PAD.lang once at start: a running app is started again in the new language */
