@@ -5,7 +5,7 @@
  * so a first start without network can still install them.
  * The cache is named after this worker's scope as well as its version: GitHub Pages PR previews (pr/<n>/runtime/)
  * share Cache Storage with the real site, and each worker only ever deletes its own scope's old caches. */
-var VERSION = "lopda-v1.1.9+727f2d9";
+var VERSION = "lopda-v1.2.0+d2aebbf";
 var CACHE = VERSION + " " + self.registration.scope;
 var SHELL = ["./", "index.html", "lopda.css", "strings.js", "platform.js", "lunar.js", "usholidays.js", "inflate.js", "stardict.js", "wordlist.js", "bookparse.js", "textsel.js", "chip.js", "sensors.js", "speech.js", "lenses.js", "finder.js", "negative.js", "exif.js", "geotag.js", "develop.js", "notetext.js", "petsim.js", "petstate.js", "petsouv.js", "petart.js", "petplay.js", "zip.js", "backup.js", "ai.js", "ailines.js", "score-pages.js", "studio-song.js", "studio-synth.js", "studio-tape.js", "studio-edit.js", "studio-styles.js", "studio-score.js", "studio-tools.js", "studio-theory.js", "studio-critic.js", "studio-prompts.js", "studio-ai.js", "studio-harness.js", "wav.js", "midi.js", "vendor/qrcode-generator/qrcode.js", "qr.js", "appsaves.js", "acoustic.js", "acoustic-link.js", "acoustic-rx.js", "acoustic-session.js", "core.js", "link.js",
   "apps/notes.js", "apps/calendar.js", "apps/dict.js", "apps/reader.js", "apps/camera.js", "apps/darkroom.js", "apps/studio.js", "apps/cart.js", "apps/radio.js", "apps/pet.js", "apps/snap.js", "apps/store.js", "apps/scripts-templates.js", "apps/scripts.js", "apps/settings.js", "boot.js", "../sdk/pad-shim.js",
@@ -49,6 +49,14 @@ self.addEventListener("fetch", function (e) {
   }
   if (url.pathname.indexOf("/registry/apps/") >= 0) {
     e.respondWith(fetch(req).catch(function () { return cached(req).then(function (hit) { return hit || Response.error(); }); }));
+    return;
+  }
+  /* a page opened with a query (a link straight to an app, runtime/?app=<id>, or ?debug) is the same page:
+     serve the cached one, so the link works offline and the cache does not fill with one copy per link */
+  if (req.mode === "navigate" && url.search) {
+    e.respondWith(caches.open(CACHE).then(function (c) { return c.match(req, { ignoreSearch: true }); }).then(function (hit) {
+      return hit || fetch(req);
+    }));
     return;
   }
   e.respondWith(cached(req).then(function (hit) {

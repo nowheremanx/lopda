@@ -1185,3 +1185,11 @@ textarea::placeholder{color:var(--ink-2)}
 .btn.back{width:44px;min-width:44px;padding:0 0 8px;font-size:28px;line-height:1;display:inline-flex;align-items:center;justify-content:center;flex:none}
 /* The running app's ◂ is a square too, at the bar's own 36 px height: only its width changes, so the app's screen does not. */
 #run-back{width:36px;min-width:36px;padding-left:0;padding-right:0;flex:none}
+/* ⋯ on the right of the same bar, the same 36 px square; its menu (分享, 卸载) drops over the top of the app (decisions.md section 66) */
+#run-more{width:36px;min-width:36px;padding-left:0;padding-right:0;flex:none}
+#v-run .bar{position:relative}
+.run-menu{position:absolute;right:8px;top:100%;z-index:3;display:flex;flex-direction:column;align-items:stretch;gap:6px;padding:8px;
+  background:var(--lcd);border:2px solid var(--ink);box-shadow:3px 3px 0 var(--ink-2);min-width:120px}
+.run-menu[hidden]{display:none}
+#v-run .run-menu .btn{min-height:44px}
+.run-menu .confirm{flex-direction:column}
