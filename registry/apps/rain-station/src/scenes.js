@@ -12,11 +12,10 @@ var FIG = LoGame.sprites({
     "...000...", "..00000..", "..03330..", "..03330..", "...000...", "..01110..", ".0111110.", ".0111110.",
     ".0111110.", ".0311130.", ".0111110.", "..01110..", "..02220..", "..02220..", "..02020..", "..02020..",
     "..02020..", "..02020..", "..00.00.."],
-  /* sitting on the bench, seen from the front; the suitcase goes between his knees */
-  dadSit: [
-    "....000....", "...00000...", "...03330...", "...03330...", "....000....", "..0111110..", ".011111110.",
-    ".011111110.", ".011111110.", ".031111130.", ".022222220.", ".022222220.", ".02.....20.", ".02.....20.",
-    ".02.....20.", ".00.....00."],
+  /* sitting on the bench, seen from the front, hands on the knees; the same body as standing, folded */
+  sit: [
+    "...000...", "..00000..", "..03330..", "..03330..", "...000...", "..01110..", ".0111110.", ".0111110.",
+    ".0311130.", ".0222220.", "..02.20..", "..02.20..", "..02.20..", "..00.00.."],
   /* crouching by the backpack, one hand in the side pocket */
   dadCrouch: [
     "...000.....", "..00000....", "..03330....", "..03330....", "...000.....", "..011110...", ".01111110..",
@@ -145,45 +144,45 @@ var SCENES = {
 
   /* the waiting room: ticket window, chalk board, door, clock, bench, a window on the rain */
   waiting: function (g, st) {
+    /* one scale for everyone: a standing person is 19 pixels, feet on y 64; the counter is at chest height */
     g.rect(0, 0, 160, 62, g.MID); g.dither(0, 0, 160, 8, g.DARK, 2);
     g.rect(0, 62, 160, 26, g.DARK); g.line(0, 62, 160, 62, g.INK);
     /* ticket window: lit, with Old Zhou behind it unless he has come out */
-    g.rect(4, 16, 32, 28, g.INK); g.rect(6, 18, 28, 24, g.PAPER);
-    if (st.zhou !== "near") g.sprite(FIG.zhouHead, 15, 34);
-    g.rect(4, 42, 32, 4, g.DARK); g.frame(4, 42, 32, 4, g.INK);
-    g.rect(24, 36, 7, 5, g.DARK); g.pixel(26, 38, g.PAPER);   /* the radio */
+    g.rect(4, 28, 32, 24, g.INK); g.rect(6, 30, 28, 22, g.PAPER);
+    if (st.zhou !== "near") g.sprite(FIG.zhouHead, 15, 45);
+    g.rect(2, 52, 36, 3, g.DARK); g.frame(2, 52, 36, 3, g.INK); g.rect(4, 55, 32, 8, g.DARK);
+    g.rect(26, 47, 7, 5, g.DARK); g.pixel(28, 49, g.PAPER);   /* the radio */
     /* the board: K728, 50 */
-    if (st.board) { g.rect(40, 18, 18, 17, g.INK); g.frame(40, 18, 18, 17, g.DARK); tiny(g, "K728", 41, 21, g.PAPER); tiny(g, "50", 45, 28, g.MID); }
-    /* the door */
-    g.rect(62, 22, 16, 40, g.DARK); g.frame(62, 22, 16, 40, g.INK); g.pixel(75, 43, g.PAPER);
+    if (st.board) { g.rect(40, 24, 18, 17, g.INK); g.frame(40, 24, 18, 17, g.DARK); tiny(g, "K728", 41, 27, g.PAPER); tiny(g, "50", 45, 34, g.MID); }
+    /* the door, a head taller than a man */
+    g.rect(62, 38, 14, 26, g.DARK); g.frame(62, 38, 14, 26, g.INK); g.pixel(73, 51, g.PAPER);
     /* the clock */
-    g.circle(98, 14, 7, g.PAPER, true); g.circle(98, 14, 7, g.INK, false);
-    g.line(98, 14, 98, 9, g.INK); g.line(98, 14, 102, 16, g.INK);
+    g.circle(102, 18, 7, g.PAPER, true); g.circle(102, 18, 7, g.INK, false);
+    g.line(102, 18, 102, 13, g.INK); g.line(102, 18, 106, 20, g.INK);
     /* the window on the rain */
-    g.rect(122, 10, 32, 34, g.INK); g.frame(122, 10, 32, 34, g.DARK);
-    rain(g, 124, 12, 28, 30, 10, g.MID);
-    g.line(138, 10, 138, 43, g.DARK); g.line(122, 26, 153, 26, g.DARK);
-    /* the bench */
-    g.rect(82, 56, 36, 3, g.INK); g.rect(84, 59, 2, 13, g.INK); g.rect(114, 59, 2, 13, g.INK);
-    g.rect(82, 50, 36, 2, g.INK);
-    g.sprite(FIG.pack, 122, 65);
-    if (st.dad === "out" || st.dad === "wet") g.sprite(FIG.coat, 84, 52);
-    if (st.dad === "bench" || st.dad === "wet") {
-      g.sprite(FIG.dadSit, 96, 41, st.dad === "wet" ? { map: [0, 0, 2, 3] } : undefined);
-      g.rect(99, 52, 5, 9, g.MID); g.frame(99, 52, 5, 9, g.INK);
-    } else if (st.dad === "window") {
-      g.sprite(FIG.dad, 30, 45);
-      g.rect(99, 56, 5, 9, g.MID); g.frame(99, 56, 5, 9, g.INK);
-    } else if (st.dad === "stand") {
-      g.sprite(FIG.dad, 112, 45);
-      g.rect(99, 56, 5, 9, g.MID); g.frame(99, 56, 5, 9, g.INK);
-    } else if (st.dad === "crouch") {
-      g.sprite(FIG.dadCrouch, 112, 61);
-      g.rect(99, 56, 5, 9, g.MID); g.frame(99, 56, 5, 9, g.INK);
+    g.rect(124, 14, 30, 28, g.INK); g.frame(124, 14, 30, 28, g.DARK);
+    rain(g, 126, 16, 26, 24, 10, g.MID);
+    g.line(139, 14, 139, 41, g.DARK); g.line(124, 28, 153, 28, g.DARK);
+    /* the bench: back, seat, legs */
+    g.rect(80, 54, 42, 2, g.INK); g.rect(80, 57, 42, 2, g.INK);
+    g.rect(82, 59, 2, 5, g.INK); g.rect(118, 59, 2, 5, g.INK);
+    /* you, on the right of the bench: a lighter jacket; headphones while the rain is muffled */
+    g.sprite(FIG.sit, 104, 50, { map: [0, 2, 1, 3] });
+    if (st.muffle) { g.line(105, 50, 111, 50, g.INK); g.rect(105, 52, 1, 2, g.INK); g.rect(111, 52, 1, 2, g.INK); }
+    g.sprite(FIG.pack, 115, 57);
+    /* Dad, on the left of the bench, or wherever the story put him */
+    var dad = st.dad;
+    if (dad === "out" || dad === "wet") g.sprite(FIG.coat, 81, 55);
+    if (dad === "bench" || dad === "wet") {
+      g.sprite(FIG.sit, 86, 50, dad === "wet" ? { map: [0, 0, 2, 3] } : undefined);
+      g.rect(88, 57, 5, 7, g.MID); g.frame(88, 57, 5, 7, g.INK);   /* the suitcase between his knees */
     } else {
-      g.rect(99, 56, 5, 9, g.MID); g.frame(99, 56, 5, 9, g.INK);
+      g.rect(88, 57, 5, 7, g.MID); g.frame(88, 57, 5, 7, g.INK);
+      if (dad === "window") g.sprite(FIG.dad, 30, 45);
+      else if (dad === "stand") g.sprite(FIG.dad, 122, 45);
+      else if (dad === "crouch") g.sprite(FIG.dadCrouch, 120, 53, { flip: true });
     }
-    if (st.zhou === "near") { g.sprite(FIG.zhou, 120, 45); g.rect(117, 54, 4, 4, g.PAPER); g.frame(117, 54, 4, 4, g.INK); }
+    if (st.zhou === "near") { g.sprite(FIG.zhou, 128, 45); g.rect(125, 53, 4, 4, g.PAPER); g.frame(125, 53, 4, 4, g.INK); }
   },
 
   platform: function (g, st, live) { drawPlatform(g, st, live, false); },
