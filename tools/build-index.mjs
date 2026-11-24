@@ -9,7 +9,15 @@ import { execFileSync } from "node:child_process";
 
 const root = join(import.meta.dirname, "..");
 const appsDir = join(root, "registry", "apps");
-const ids = readdirSync(appsDir).filter((d) => statSync(join(appsDir, d)).isDirectory()).sort();
+/* The store lists apps in index order inside each category. registry/order.json is that order, picked by hand:
+   the strongest apps of a category first, the developer examples last. An app the list does not name comes after
+   the listed ones, by id, so a new app shows up without anyone editing the list. Names of apps that no longer
+   exist are ignored. (issue #186) */
+let order = [];
+try { order = JSON.parse(readFileSync(join(root, "registry", "order.json"), "utf8")).order || []; } catch {}
+const rank = (id) => { const i = order.indexOf(id); return i < 0 ? order.length : i; };
+const ids = readdirSync(appsDir).filter((d) => statSync(join(appsDir, d)).isDirectory()).sort()
+  .sort((a, b) => rank(a) - rank(b));
 
 /* The index's two dates are derived, not authored:
    - released: the commit that first added the app's manifest.json, i.e. the app's first appearance in the store.
