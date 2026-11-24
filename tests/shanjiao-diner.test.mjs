@@ -51,7 +51,7 @@ test("the mountain maps are 18 x 16 and every spot is on walkable ground", () =>
   }
 });
 
-test("the app boots to the title and a new game reaches the first morning", async () => {
+async function bootDiner(seed) {
   const { boot } = await import("./app-vm.mjs");
   const store = {}, listeners = {};
   const pad = {
@@ -63,7 +63,11 @@ test("the app boots to the title and a new game reaches the first morning", asyn
     on(t, fn) { (listeners[t] ||= []).push(fn); },
     off() {}, isDown() { return false; }
   };
-  const app = boot("registry/apps/shanjiao-diner/index.html", { pad, seed: 3 });
+  return { app: boot("registry/apps/shanjiao-diner/index.html", { pad, seed }), listeners };
+}
+
+test("the app boots to the title and a new game reaches the first morning", async () => {
+  const { app, listeners } = await bootDiner(3);
   const tick = async (n = 1) => { for (let i = 0; i < n; i++) { app.frame(); await new Promise((r) => setImmediate(r)); } };
   const press = async (b) => {
     (listeners.press || []).forEach((f) => f(b)); await tick(2);
@@ -78,4 +82,33 @@ test("the app boots to the title and a new game reaches the first morning", asyn
   assert.equal(S.day, 1);
   assert.equal(S.phase, "morning");
   assert.ok(app.hashes.length > 0);
+});
+
+test("a morning with no stock and no actions left closes the day instead of soft-locking", async () => {
+  const { app, listeners } = await bootDiner(7);
+  const tick = async (n = 1) => { for (let i = 0; i < n; i++) { app.frame(); await new Promise((r) => setImmediate(r)); } };
+  const press = async (b) => {
+    (listeners.press || []).forEach((f) => f(b)); await tick(2);
+    (listeners.release || []).forEach((f) => f(b)); await tick(1);
+  };
+  await tick(6);
+  await press("a");                 // 开始
+  await tick(80);                   // title fade, then the first morning
+  const game = app.ctx.get("game");
+  const S = app.ctx.get("S");
+  assert.equal(S.phase, "morning");
+  S.seen.intro = 1;
+  game.pop(true);                   // dismiss the day-one introduction
+  await tick(3);
+  // the dead end: both actions spent, nothing cooked, so 菜单 is disabled
+  S.ap = 0; S.stock = {}; S.menu = []; S.flags.prepared = false;
+  app.ctx.get("morningAct")(5);     // 开门
+  await tick(3);
+  await press("a");                 // 今天歇业
+  await tick(90);                   // the fade into the night scene
+  assert.equal(S.phase, "night");
+  assert.equal(S.lastLedger.closed, true);
+  assert.equal(S.lastLedger.served, 0);
+  assert.ok(S.lastLedger.lost >= 3, "the day's customers are booked as lost");
+  assert.equal(S.lastLedger.rentDone, 1, "the night scene entered and did its rent step");
 });
