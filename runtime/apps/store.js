@@ -459,10 +459,19 @@ function freshRunFrame(doc){
   f.id="run-frame"; f.setAttribute("sandbox","allow-scripts"); f.title=old.title;
   if(doc!=null) f.srcdoc=doc;
   old.parentNode.replaceChild(f,old);
-  /* lay the page out now, so the frame has its real size before the app's first line runs: Chrome could start the
-     app in a frame not yet sized and then not tell it about the real size (Paint stayed at its smallest canvas
-     until the window was resized) */
-  void f.offsetHeight;
+  void f.offsetHeight;   /* lay the page out now: the frame has its real size before the app's first line runs */
+  /* Desktop Chrome can run an app's first lines before its own page is laid out: the viewport is right, but the
+     body is still 0 px tall, and as the viewport never changes no resize comes later. Paint then kept its smallest
+     canvas until the window was resized (owner, measured in his Chrome: body 0 px at start, 713 px a moment later).
+     So once the app has loaded, the frame is made 1 px shorter for two frames and given back: the app hears two
+     resizes, the last one at its real size, as if the window had been nudged. An app that sizes itself already
+     listens for resize: a desktop window and a phone turning sideways change the size too. */
+  if(doc) f.addEventListener("load",function(){
+    if($("run-frame")!==f) return;
+    f.style.marginBottom="1px";
+    var raf=window.requestAnimationFrame || function(fn){ return setTimeout(fn,16); };
+    raf(function(){ raf(function(){ f.style.marginBottom=""; }); });
+  },{once:true});
 }
 function runApp(a){
   closeAsk(false);
