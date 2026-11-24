@@ -86,7 +86,7 @@ function run() {
     if (s.end) {
       /* the story is over: the next start is a new one */
       if (canSave) game.remove(SAVE_KEY);
-      game.sfx("ok");
+      game.music(END_SONG, { loop: false });
       cur = { kind: "end", title: T(s.end), sub: T(s.sub), since: game.time };
       return;
     }
@@ -109,7 +109,7 @@ function advance() {
     game.sfx("ok");
     S.at++; run(); return;
   }
-  if (cur.kind === "end") game.go("title");
+  if (cur.kind === "end") { game.musicStop(); game.go("title"); }
 }
 
 /* the rows a choice puts on screen, for taps */

@@ -767,13 +767,15 @@ var FINE_ROWS = {
     "....01110.01110...", "....01110.01110...", "....01110.01110...", "....01110.01110...",
     "...00000..00000..."
   ],
+  /* seen from the side, crouched by the backpack, one hand going into its side pocket */
   dadCrouch: [
-    ".....00000000.......", "....0011111100......", "....0233333320......", "....0233333320......",
-    "...033003300330.....", "...033303303330.....", "....0332322330......", "....0323003230......",
-    "....0332332330......", ".....00000000.......", "......033330........", "....0010330100......",
-    "..00111033011100....", ".0111111001111110...", ".0111011011101110...", ".0110111011110110...",
-    ".01101110111101100..", ".0110111011110110333", ".0110111011110110333", ".0222222222222220...",
-    ".0222200002222220...", "..00000....000000..."
+    "...........0000000........", "..........001111100.......", ".........00211333300......", ".........02233333330......",
+    ".........02233003030......", ".........0223233330.......", ".........02333333330......", "..........033333030.......",
+    "..........02223330........", "...........033300.........", "..........003330..........", ".........01111110.........",
+    "........0111111100........", ".......01111101110........", "......0111111101100.......", "......0111111101110.......",
+    ".....011111111101100......", "....0111111111001110......", "...011111111110001110.....", "..01111111111222201110....",
+    "..011111111122222201110...", "..0111111112222222201330..", "..0122222222222222220330..", "..022222222222222222200...",
+    "..0222222222220022220.....", "..022222222000.022220.....", "...00000000....022220.....", "...000000......00000000..."
   ],
   zhou: [
     ".....00000000.....", "....1111331111....", "..00000000000000..", "....0233333320....",
@@ -801,6 +803,8 @@ function doubled(rows) {
   rows.forEach(function (r) { var w = r.replace(/./g, "$&$&"); out.push(w, w); });
   return out;
 }
+/* an eighth note, for the tune in your headphones */
+var NOTE = LoGame.sprite(["..0..", "..00.", "..0.0", "000..", "000.."]);
 var BIG = { pack: LoGame.sprite(doubled(FIG_ROWS.pack)), coat: LoGame.sprite(doubled(FIG_ROWS.coat)) };
 
 /* a tiny 3 x 5 digit font, for the pillar plates, the carriage numbers and the chalk board */
@@ -925,14 +929,22 @@ var SCENES = {
     g.circle(69, 7, 5, g.PAPER, true); g.circle(69, 7, 5, g.INK, false); g.line(69, 7, 69, 4, g.INK); g.line(69, 7, 72, 8, g.INK);
     /* the window on the rain, above the bench */
     g.rect(102, 4, 48, 26, g.INK); g.frame(102, 4, 48, 26, g.DARK);
-    rain(g, 104, 6, 44, 22, 12, g.MID);
+    rain(g, 104, 6, 44, 22, st.muffle ? 5 : 12, st.muffle ? g.DARK : g.MID);
     g.line(126, 4, 126, 29, g.DARK);
     /* the bench: the back below the shoulders, the seat at the knee */
     g.rect(90, 49, 64, 3, g.INK); g.rect(90, 54, 64, 3, g.INK);
     g.rect(92, 57, 3, 7, g.INK); g.rect(149, 57, 3, 7, g.INK);
     /* you, on the left of the bench, a lighter jacket; headphones while the rain is muffled */
     g.sprite(FINE.youSit, 96, 35);
-    if (st.muffle) { g.rect(101, 34, 8, 1, g.INK); g.rect(98, 38, 2, 3, g.INK); g.rect(110, 38, 2, 3, g.INK); }
+    if (st.muffle) {
+      /* headphones you can see from the door: a band over the hair, a cup on each ear, and a tune rising */
+      g.rect(100, 33, 10, 2, g.INK); g.rect(99, 34, 2, 4, g.INK); g.rect(109, 34, 2, 4, g.INK);
+      g.rect(97, 37, 4, 5, g.INK); g.rect(109, 37, 4, 5, g.INK); g.rect(98, 38, 2, 3, g.DARK); g.rect(110, 38, 2, 3, g.DARK);
+      for (var k = 0; k < 2; k++) {
+        var p = (game.time * 0.5 + k * 0.5) % 1, ny = Math.round(32 - p * 14), nx = 86 + k * 4 + Math.round(Math.sin(p * 6) * 1.5);
+        g.sprite(NOTE, nx, ny);
+      }
+    }
     g.sprite(BIG.pack, 80, 50);
     /* Dad, on the right of the bench, or wherever the story put him */
     var dad = st.dad;
@@ -944,7 +956,7 @@ var SCENES = {
       g.rect(133, 55, 9, 9, g.MID); g.frame(133, 55, 9, 9, g.INK); g.line(134, 58, 140, 58, g.PAPER);
       if (dad === "window") g.sprite(FINE.dad, 30, 24);
       else if (dad === "stand") g.sprite(FINE.dad, 62, 24);
-      else if (dad === "crouch") g.sprite(FINE.dadCrouch, 60, 42);
+      else if (dad === "crouch") g.sprite(FINE.dadCrouch, 58, 64 - FINE_ROWS.dadCrouch.length);
     }
     if (st.zhou === "near") { g.sprite(FINE.zhou, 62, 24); g.rect(78, 44, 6, 6, g.PAPER); g.frame(78, 44, 6, 6, g.INK); }
   },
@@ -1284,6 +1296,19 @@ var STORY = [].concat(
   end("三号柱子", "Pillar Three", "下回我站那。", "Next time I'll stand there.")
 );
 </script>
+<script data-src="src/music.js">
+/* 雨站 / Rain Station: the music.
+   "Pillar Three", for the last card. Written for this app (MIT, like the rest of it); not a
+   transcription of anything. C major, slow, played once: a plain tune over half-note bass, the
+   kind a father might hum without knowing he is humming. */
+var END_SONG = {
+  bpm: 66,
+  p1: "@1 v8 o4 l4 g4. e8 d c | e2 a g | f4. e8 d c | d2. r | g4. e8 d c | e g >c< b | a4. g8 f a | g2. r |" +
+      " a4. g8 e c | f a g f | e d c d | c1",
+  p2: "@1 v3 o3 l1 g a a b g b a b a a b g",
+  tri: "v10 o2 l2 c g | a e | f >c< | g d | c g | e b | f >c< | g d | a e | f >c< | g d | c1"
+};
+</script>
 <script data-src="src/player.js">
 /* The player: reads STORY (story.js) one step at a time and draws SCENES (scenes.js) above a text box.
 
@@ -1373,7 +1398,7 @@ function run() {
     if (s.end) {
       /* the story is over: the next start is a new one */
       if (canSave) game.remove(SAVE_KEY);
-      game.sfx("ok");
+      game.music(END_SONG, { loop: false });
       cur = { kind: "end", title: T(s.end), sub: T(s.sub), since: game.time };
       return;
     }
@@ -1396,7 +1421,7 @@ function advance() {
     game.sfx("ok");
     S.at++; run(); return;
   }
-  if (cur.kind === "end") game.go("title");
+  if (cur.kind === "end") { game.musicStop(); game.go("title"); }
 }
 
 /* the rows a choice puts on screen, for taps */
