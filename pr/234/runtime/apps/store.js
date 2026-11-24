@@ -665,8 +665,11 @@ function openAsk(req){
     onRelease(tap,function(){ askOk(); });
     return;
   }
+  /* a modal for VoiceOver too: it reads the question first and stays inside the box; the focus goes to the box itself, not
+     to OK, so nothing is confirmed by accident, and returns where it was when the dialog closes (issue #167) */
   var box=document.createElement("div"); box.className="box"; box.setAttribute("role","dialog");
-  var p=document.createElement("p"); p.textContent=req.text;
+  box.setAttribute("aria-modal","true"); box.setAttribute("aria-labelledby","file-ask-q"); box.tabIndex=-1;
+  var p=document.createElement("p"); p.id="file-ask-q"; p.textContent=req.text;
   /* the notes dialog's line names an app and a note: keep each name whole on its line */
   if(req.quote) p.className="names";
   box.appendChild(p);
@@ -690,6 +693,8 @@ function openAsk(req){
   row.appendChild(ok); row.appendChild(no); box.appendChild(row);
   if(S.running && S.running.buttons){ var k=document.createElement("small"); k.textContent=tr("file.keys"); box.appendChild(k); }
   scrim.appendChild(box); $("screen").appendChild(scrim);
+  req.focusWas=document.activeElement;
+  try{ box.focus({preventScroll:true}); }catch(e){}
   onRelease(ok,function(){ askOk(); });
   onRelease(no,function(){ closeAsk(true); });
 }
@@ -708,6 +713,7 @@ function closeAsk(answer){
   ask=null;
   /* the tap that closed it may still turn into a click: keep the empty scrim a moment so it can't reach the app */
   var el=req.el; el.textContent=""; setTimeout(function(){ el.remove(); },400);
+  var was=req.focusWas; if(was && was.focus && document.contains(was)) try{ was.focus({preventScroll:true}); }catch(e){}
   if(answer && req.cancel) req.cancel();
 }
 function askOk(){ var req=ask; if(req) req.ok(); }
