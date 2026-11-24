@@ -9000,6 +9000,101 @@ test("blow-candles: B on the dialog falls back to holding A, says so, and A puts
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
+/* ---------- 传感器台: the reference app for PAD.motion and PAD.mic (SPEC.md 6.4) ----------
+   It is plain HTML, not a lo-game app, so it is started straight from the registry and read through its own rows. */
+const runDesk = async (p) => {
+  const man = JSON.parse(readFileSync(join(ROOT, "registry/apps/sensor-desk/manifest.json"), "utf8"));
+  const html = readFileSync(join(ROOT, "registry/apps/sensor-desk/index.html"), "utf8");
+  await p.evaluate(([man, html]) => { const a = Object.assign({}, man, { html }); window.LP.upsert("apps", a); window.LP.runApp(a); }, [man, html]);
+  let f;
+  await until(p, async () => {
+    f = p.frames().find((x) => x !== p.mainFrame());
+    return !!f && await f.evaluate(() => { const h = document.getElementById("mic-hint"); return !!h && h.textContent.length > 0; }).catch(() => false);
+  }, "the sensor desk");
+  return f;
+};
+
+test("sensor-desk: 开 asks for tilt, A allows it, the fake tilt reaches the x row, 关 stops it", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await sensePage(t);
+  const f = await runDesk(p);
+  assert.equal(await f.textContent("#motion-state"), "没开");
+  assert.equal(await f.getAttribute("#zero-btn", "aria-disabled"), "true", "zero needs a running sensor");
+  await f.click("#motion-btn");
+  await p.waitForSelector("#file-ask .box");
+  assert.equal(await p.textContent("#file-ask p"), "「传感器台」要用倾斜感应。");
+  await press(p, "a");
+  await until(p, async () => (await f.textContent("#motion-state")) === "开着", "tilt on");
+  assert.equal(await f.getAttribute("#zero-btn", "aria-disabled"), "false");
+  /* the stubbed phone sends beta 40 / gamma 22.5: x = 0.5, flat {0.5, -0.875} (runtime/sensors.js) */
+  await until(p, async () => (await f.textContent("#v-x")) === "0.50", "the fake tilt in x");
+  assert.equal(await f.textContent("#v-fx"), "0.50");
+  assert.equal(await f.textContent("#v-heading"), "无罗盘");
+  await f.click("#motion-btn");
+  await until(p, async () => (await f.textContent("#motion-state")) === "没开", "tilt off");
+  await until(p, async () => (await f.textContent("#v-x")) === "-", "the rows cleared");
+  assert.equal(await f.textContent("#motion-btn"), "开");
+  assert.equal(await micOn(p), false);
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("sensor-desk: B on the mic dialog leaves 未允许 and the next tap asks again", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await sensePage(t);
+  const f = await runDesk(p);
+  await f.click("#mic-btn");
+  await p.waitForSelector("#file-ask .box");
+  assert.match(await p.textContent("#file-ask p"), /要用麦克风/);
+  assert.match(await p.textContent("#file-ask p.note"), /静音键不起作用/);
+  await press(p, "b");
+  await until(p, async () => (await f.textContent("#mic-state")) === "未允许", "mic denied");
+  assert.equal(await f.textContent("#mic-btn"), "开");
+  assert.equal(await f.getAttribute("#mic-btn", "aria-disabled"), "false", "the player may ask again");
+  assert.equal(await micOn(p), false);
+  await p.waitForSelector("#file-ask", { state: "detached" });
+  await f.click("#mic-btn");
+  await p.waitForSelector("#file-ask .box");
+  assert.match(await p.textContent("#file-ask p"), /要用麦克风/);
+  await press(p, "b");
+  await until(p, async () => (await f.textContent("#mic-state")) === "未允许", "denied again");
+  await p.waitForSelector("#file-ask", { state: "detached" });
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("sensor-desk: at 331 px wide nothing scrolls sideways and every button is at least 44 px tall", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await sensePage(t);
+  await p.setViewportSize({ width: 375, height: 667 });    /* the iPhone SE: a 331 px LCD */
+  const f = await runDesk(p);
+  const box = await f.evaluate(() => {
+    const main = document.querySelector("main");
+    const buttons = Array.from(document.querySelectorAll("button")).map((b) => {
+      const r = b.getBoundingClientRect();
+      return { text: b.textContent, top: r.top, left: r.left, bottom: r.bottom, right: r.right, height: r.height };
+    });
+    return {
+      width: innerWidth, height: innerHeight,
+      doc: document.documentElement.scrollWidth, body: document.body.scrollWidth,
+      mainClient: main.clientWidth, mainScroll: main.scrollWidth, mainHeight: main.clientHeight,
+      buttons
+    };
+  });
+  assert.equal(box.width, 331, "the LCD is 331 px wide at the smallest size");
+  assert.ok(box.doc <= box.width && box.body <= box.width, "no horizontal page scroll: " + JSON.stringify(box));
+  assert.ok(box.mainScroll <= box.mainClient, "main does not scroll sideways: " + box.mainScroll + " > " + box.mainClient);
+  assert.deepEqual(box.buttons.map((b) => b.text), ["开", "归零", "开"]);
+  box.buttons.forEach((b) => assert.ok(b.height >= 44, `${b.text} is ${b.height} px tall`));
+  const [motion, zero, mic] = box.buttons;
+  assert.ok(zero.left - motion.right >= 8, "8 px between the tilt buttons: " + (zero.left - motion.right));
+  assert.ok(mic.top - Math.max(motion.bottom, zero.bottom) >= 8, "8 px under the tilt row");
+  /* the code card is the end of the one scrolling column, and main reaches it */
+  const bottom = await f.evaluate(() => {
+    const main = document.querySelector("main"), pre = document.querySelector("pre");
+    main.scrollTop = main.scrollHeight;
+    const m = main.getBoundingClientRect(), r = pre.getBoundingClientRect();
+    return { top: main.scrollTop, last: r.bottom - m.bottom };
+  });
+  assert.ok(bottom.top > 0 && bottom.last <= 1, "scrolling main shows the last line: " + JSON.stringify(bottom));
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
 /* a 32 KB MBC3 cartridge with a clock, 8 KB of RAM and a battery (type 0x10): it switches the RAM on, writes 0x5A at the
    first RAM byte and 0xC3 at the last, then loops. Built here, no game. */
 function savRom() {
