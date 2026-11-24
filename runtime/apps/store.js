@@ -450,12 +450,28 @@ LP.onData("apps",function(){ if(linkWait){ linkWait=false; openLink(); } });
 /* ---------- runner: sandboxed iframe + PAD bridge (sdk/pad-shim.js) ---------- */
 var KV_BUDGET=256*1024;
 var dictLimit=null;   /* PAD.dict's 10 calls a second: a new limiter for every app start */
-/* A new iframe for every run. Desktop Chrome can leave a reused sandboxed frame unpainted
-   (scripts run, nothing shows); a fresh one also means no state carries over between apps. */
-function freshRunFrame(){
+/* A new iframe for every page it shows: the app, the 载入中… card before it, nothing after HOME. Desktop Chrome can
+   leave a reused sandboxed frame unpainted or half painted (scripts run, the screen shows the page before, or buttons
+   without their text); the owner saw both after quick runs (decisions.md section 67). So a frame never navigates
+   twice: its srcdoc is set before it joins the page. A fresh one also means no state carries over between apps. */
+function freshRunFrame(doc){
   var old=$("run-frame"), f=document.createElement("iframe");
   f.id="run-frame"; f.setAttribute("sandbox","allow-scripts"); f.title=old.title;
+  if(doc!=null) f.srcdoc=doc;
   old.parentNode.replaceChild(f,old);
+  void f.offsetHeight;   /* lay the page out now: the frame has its real size before the app's first line runs */
+  /* Desktop Chrome can run an app's first lines before its own page is laid out: the viewport is right, but the
+     body is still 0 px tall, and as the viewport never changes no resize comes later. Paint then kept its smallest
+     canvas until the window was resized (owner, measured in his Chrome: body 0 px at start, 713 px a moment later).
+     So once the app has loaded, the frame is made 1 px shorter for two frames and given back: the app hears two
+     resizes, the last one at its real size, as if the window had been nudged. An app that sizes itself already
+     listens for resize: a desktop window and a phone turning sideways change the size too. */
+  if(doc) f.addEventListener("load",function(){
+    if($("run-frame")!==f) return;
+    f.style.marginBottom="1px";
+    var raf=window.requestAnimationFrame || function(fn){ return setTimeout(fn,16); };
+    raf(function(){ raf(function(){ f.style.marginBottom=""; }); });
+  },{once:true});
 }
 function runApp(a){
   closeAsk(false);
@@ -474,10 +490,9 @@ function runApp(a){
   show("run");
   showPad(!!a.buttons);
   LP.keepAwake(true);   /* a running app keeps the screen on */
-  freshRunFrame();
-  var start=function(h){ $("run-frame").srcdoc=lopdaWrapApp(h,{lang:I18N.lang, music:true, ambience:true, sensors:true, notes:true, say:true, camera:true, dict:true, link:true}); };
+  var start=function(h){ freshRunFrame(lopdaWrapApp(h,{lang:I18N.lang, music:true, ambience:true, sensors:true, notes:true, say:true, camera:true, dict:true, link:true})); };
   if(a.html){ start(a.html); return; }
-  $("run-frame").srcdoc='<body style="margin:0;height:100%;display:flex;align-items:center;justify-content:center;background:#a3ad7e;color:#1f2a14;font:16px monospace">'+tr("run.loading")+'</body>';
+  freshRunFrame('<body style="margin:0;height:100%;display:flex;align-items:center;justify-content:center;background:#a3ad7e;color:#1f2a14;font:16px monospace">'+tr("run.loading")+'</body>');
   loadHtml(a).then(function(h){
     if(S.running!==a) return;
     if(h) start(h); else toast(tr("run.missing"));
@@ -1246,7 +1261,7 @@ LP.builtin({id:"store", label:"app.store", icon:"store", view:"store",
 LP.builtin({id:"run", view:"run", keepPad:true,
   leave:function(){
     if(S.running) flushKv(S.running.id);
-    closeRunMenu(); closeAsk(false); LP.snap.cancel(); LP.speech.stop(); closeLink(S.running); sensors.stopAll(); LP.chip.stop(); LP.keepAwake(false); $("run-frame").srcdoc=""; S.running=null;
+    closeRunMenu(); closeAsk(false); LP.snap.cancel(); LP.speech.stop(); closeLink(S.running); sensors.stopAll(); LP.chip.stop(); LP.keepAwake(false); freshRunFrame(); S.running=null;
   },
   lang:function(){
     /* apps read PAD.lang once at start: a running app is started again in the new language */
