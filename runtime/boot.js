@@ -42,6 +42,7 @@ LP.renderHome();
     LP.each("ready");
     document.addEventListener("visibilitychange",function(){
       if(document.hidden){ LP.each("pause"); return; }
+      P.db.reconnect();   /* iOS may have closed the database while the app was away (decisions.md section 67) */
       LP.each("resume");
       refresh("apps"); refresh("notes");
     });

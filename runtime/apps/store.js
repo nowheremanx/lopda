@@ -268,28 +268,31 @@ function updateAll(){
    files and notes still ask on every use (decisions.md section 42). An older install, an update that adds a
    permission, or "update all" has no such grant, so the first use asks as before. */
 var GRANTABLE=["motion","mic","camera","wordbook","link"];
-function install(r,btn){
+function install(r,btn,then){
   if(updating) return;
   var a=installedOf(r.id), perms=validPerms(r.permissions);
   var added=a ? perms.filter(function(p){ return (a.permissions||[]).indexOf(p)<0; }) : perms;
-  if(!added.length){ doInstall(r,btn,[]); return; }
+  if(!added.length){ doInstall(r,btn,[],then); return; }
   var req={text:tr(a?"store.updateask":"store.installask",{name:appName(r)}), perms:added, install:true,
     okLabel:tr(a?"store.update":"store.install"), noLabel:tr("common.cancel")};
-  req.ok=function(){ closeAsk(false); doInstall(r,btn,added); };
+  req.ok=function(){ closeAsk(false); doInstall(r,btn,added,then); };
   if(ask) closeAsk(true);
   openAsk(req);
   sfx("tap");
 }
-function doInstall(r,btn,added){
-  btn.disabled=true; btn.textContent=tr("store.downloading");
+/* btn: the store entry's button, which shows the download (none for a link, below); then: called once it is installed */
+function doInstall(r,btn,added,then){
+  if(btn){ btn.disabled=true; btn.textContent=tr("store.downloading"); }
   fetchApp(r).then(function(prev){
     added.filter(function(p){ return GRANTABLE.indexOf(p)>=0; }).forEach(function(p){ grant(r.id,p); });
     toast(tr(prev?"store.updated":"store.installed",{name:appName(r)})); sfx("ok");
     S.revealApp=r.id;   /* the home screen scrolls this tile into view when it comes back */
     renderStore(true);
     if(!$("v-home").hidden) renderHome();
+    if(then) then(installedOf(r.id));
   }).catch(function(e){
-    toast(tr("store.failed",{msg:e.message})); sfx("err"); btn.disabled=false; btn.textContent=tr("store.retry");
+    toast(tr("store.failed",{msg:e.message})); sfx("err");
+    if(btn){ btn.disabled=false; btn.textContent=tr("store.retry"); }
   });
 }
 /* download, verify and store one registry entry; resolves with the version it replaced (or null) */
@@ -379,15 +382,96 @@ function deleteApp(id){
      still flush the last 500 ms of saves after this call */
 }
 
+/* ---------- a link straight to one program: runtime/?app=<id> (decisions.md section 66) ----------
+   For telling someone about an app: the link skips the home screen and starts it, in the phone's language as
+   always. A community app that is not installed in this browser is installed from the registry first, exactly as
+   the store would (hash-checked, and an app that asks for capabilities gets the same confirmation, so a link never
+   grants anything by itself). An installed copy runs as it is: a link never updates, replaces or removes anything.
+   A built-in id (pet, camera, studio...) opens that program. The parameter leaves the address bar at once, so a
+   reload or a home-screen install from this page starts at home. On iPhone a link always opens in Safari, never in
+   the home-screen app, and the two keep separate saves: a link in a browser tab says so once, on the way in. */
+function linkUrl(id){ return location.origin+location.pathname+"?app="+encodeURIComponent(id); }
+function shareLink(r){
+  sfx("tap");
+  var url=linkUrl(r.id);
+  /* the share sheet and the clipboard need a real click, never pointerdown (CLAUDE.md) */
+  if(navigator.share){
+    try{
+      var sp=navigator.share({title:appName(r), url:url});
+      if(sp && sp.catch) sp.catch(function(e){ if(!(e && e.name==="AbortError") && window.console) console.error("Lo-PDA share failed",e); });
+      return;
+    }catch(e){}
+  }
+  var p=null;
+  try{ if(navigator.clipboard && navigator.clipboard.writeText) p=navigator.clipboard.writeText(url); }catch(e){ p=null; }
+  if(!p){ toast(url); return; }
+  p.then(function(){ toast(tr("store.share.copied")); sfx("ok"); },function(){ toast(url); });
+}
+var linkId=(function(){
+  var id=null;
+  try{
+    var u=new URL(location.href);
+    if(!u.searchParams.has("app")) return null;
+    id=String(u.searchParams.get("app")||"").trim().toLowerCase();
+    /* ?debug, ?linkfake and the rest stay as they were written */
+    var rest=location.search.slice(1).split("&").filter(function(x){ return x && !/^app(=|$)/.test(x); }).join("&");
+    history.replaceState(history.state,"",location.pathname+(rest?"?"+rest:"")+location.hash);
+  }catch(e){ return null; }
+  return id;
+})();
+function inBrowserTab(){ return !(navigator.standalone===true || (window.matchMedia && matchMedia("(display-mode: standalone)").matches)); }
+function startLinked(a){
+  if(!a || $("v-home").hidden) return;   /* the player has gone somewhere else meanwhile: leave them there */
+  runApp(a);
+  if(inBrowserTab()) toast(tr("link.trial"));
+}
+function openLink(){
+  var id=linkId; linkId=null;
+  if(id===null) return;
+  if(!/^[a-z0-9-]{3,32}$/.test(id)){ toast(tr("link.unknown")); return; }
+  var bi=null; LP.builtins.forEach(function(b){ if(b.id===id && b.icon && b.open) bi=b; });
+  if(bi){ bi.open(); return; }
+  var a=installedOf(id);
+  if(a){ startLinked(a); return; }
+  toast(tr("link.fetching"));
+  (S.registry ? Promise.resolve() : loadRegistry()).then(function(){
+    if(!$("v-home").hidden && !installedOf(id)){
+      if(!S.registry){ toast(tr("link.offline")); sfx("err"); return; }
+      var r=null; registryApps().forEach(function(x){ if(x.id===id) r=x; });
+      if(!r){ toast(tr("link.unknown")); sfx("err"); return; }
+      install(r,null,startLinked);
+    } else startLinked(installedOf(id));
+  });
+}
+/* the link waits for the installed apps to be read, so an installed copy is found and never fetched again */
+var linkWait=!!linkId;
+LP.onData("apps",function(){ if(linkWait){ linkWait=false; openLink(); } });
+
 /* ---------- runner: sandboxed iframe + PAD bridge (sdk/pad-shim.js) ---------- */
 var KV_BUDGET=256*1024;
 var dictLimit=null;   /* PAD.dict's 10 calls a second: a new limiter for every app start */
-/* A new iframe for every run. Desktop Chrome can leave a reused sandboxed frame unpainted
-   (scripts run, nothing shows); a fresh one also means no state carries over between apps. */
-function freshRunFrame(){
+/* A new iframe for every page it shows: the app, the 载入中… card before it, nothing after HOME. Desktop Chrome can
+   leave a reused sandboxed frame unpainted or half painted (scripts run, the screen shows the page before, or buttons
+   without their text); the owner saw both after quick runs (decisions.md section 67). So a frame never navigates
+   twice: its srcdoc is set before it joins the page. A fresh one also means no state carries over between apps. */
+function freshRunFrame(doc){
   var old=$("run-frame"), f=document.createElement("iframe");
   f.id="run-frame"; f.setAttribute("sandbox","allow-scripts"); f.title=old.title;
+  if(doc!=null) f.srcdoc=doc;
   old.parentNode.replaceChild(f,old);
+  void f.offsetHeight;   /* lay the page out now: the frame has its real size before the app's first line runs */
+  /* Desktop Chrome can run an app's first lines before its own page is laid out: the viewport is right, but the
+     body is still 0 px tall, and as the viewport never changes no resize comes later. Paint then kept its smallest
+     canvas until the window was resized (owner, measured in his Chrome: body 0 px at start, 713 px a moment later).
+     So once the app has loaded, the frame is made 1 px shorter for two frames and given back: the app hears two
+     resizes, the last one at its real size, as if the window had been nudged. An app that sizes itself already
+     listens for resize: a desktop window and a phone turning sideways change the size too. */
+  if(doc) f.addEventListener("load",function(){
+    if($("run-frame")!==f) return;
+    f.style.marginBottom="1px";
+    var raf=window.requestAnimationFrame || function(fn){ return setTimeout(fn,16); };
+    raf(function(){ raf(function(){ f.style.marginBottom=""; }); });
+  },{once:true});
 }
 function runApp(a){
   closeAsk(false);
@@ -399,22 +483,38 @@ function runApp(a){
   S.running=a;
   dictLimit=window.LopdaWordList ? window.LopdaWordList.limiter() : null;
   $("run-title").textContent=a.local ? appName(a) : appName(a)+" · v"+(a.version||"?");
-  $("run-del-wrap").hidden=!!a.local;   /* local scripts are removed in the scripts app, not here */
-  if(!a.local) LP.resetConfirm("run-del-wrap","run-del",tr("run.remove"),function(){ if(S.running){ var n=appName(S.running); deleteApp(S.running.id); show("home"); toast(tr("run.removed",{name:n})); } },tr("run.remove.confirm",{name:appName(a)}));
+  closeRunMenu();
+  $("run-more").hidden=!!a.local;   /* local scripts are removed in the scripts app and have no link: no ⋯ */
+  if(!a.local) LP.resetConfirm("run-del-wrap","run-del",tr("run.remove"),removeRunning,tr("run.remove.confirm",{name:appName(a)}));
   $("run-err").hidden=true;
   show("run");
   showPad(!!a.buttons);
   LP.keepAwake(true);   /* a running app keeps the screen on */
-  freshRunFrame();
-  var start=function(h){ $("run-frame").srcdoc=lopdaWrapApp(h,{lang:I18N.lang, music:true, ambience:true, sensors:true, notes:true, say:true, camera:true, dict:true, link:true}); };
+  var start=function(h){ freshRunFrame(lopdaWrapApp(h,{lang:I18N.lang, music:true, ambience:true, sensors:true, notes:true, say:true, camera:true, dict:true, link:true})); };
   if(a.html){ start(a.html); return; }
-  $("run-frame").srcdoc='<body style="margin:0;height:100%;display:flex;align-items:center;justify-content:center;background:#a3ad7e;color:#1f2a14;font:16px monospace">'+tr("run.loading")+'</body>';
+  freshRunFrame('<body style="margin:0;height:100%;display:flex;align-items:center;justify-content:center;background:#a3ad7e;color:#1f2a14;font:16px monospace">'+tr("run.loading")+'</body>');
   loadHtml(a).then(function(h){
     if(S.running!==a) return;
     if(h) start(h); else toast(tr("run.missing"));
   }).catch(function(e){ if(S.running===a) toast(tr("run.loadfail",{code:(e&&e.code)||tr("common.unknown")})); });
 }
 $("run-back").onclick=function(){ show(S.running && S.running.back || "home"); };
+/* ⋯: the running app's own menu, 分享 (the same link as the store's) and 卸载 (still a second tap to confirm).
+   Touch only; the chin pad stays the app's. It closes on a second ⋯, on a tap anywhere else, and when the app takes the focus. */
+function closeRunMenu(){
+  if($("run-menu").hidden) return;
+  $("run-menu").hidden=true; $("run-more").setAttribute("aria-expanded","false");
+  if(S.running && !S.running.local) LP.resetConfirm("run-del-wrap","run-del",tr("run.remove"),removeRunning,tr("run.remove.confirm",{name:appName(S.running)}));
+}
+function removeRunning(){ if(S.running){ var n=appName(S.running); deleteApp(S.running.id); show("home"); toast(tr("run.removed",{name:n})); } }
+$("run-more").onclick=function(){
+  if(!$("run-menu").hidden){ closeRunMenu(); return; }
+  sfx("tap");
+  $("run-menu").hidden=false; $("run-more").setAttribute("aria-expanded","true");
+};
+$("run-share").onclick=function(){ var a=S.running; closeRunMenu(); if(a && !a.local) shareLink(a); };
+document.addEventListener("pointerdown",function(e){ if(!$("run-menu").hidden && !$("run-menu").contains(e.target) && e.target!==$("run-more")) closeRunMenu(); },true);
+window.addEventListener("blur",closeRunMenu);
 $("run-err-close").onclick=function(){ $("run-err").hidden=true; };
 
 /* Local scripts live in the scripts app but have their own storage document, one per script.
@@ -1155,12 +1255,13 @@ LP.builtin({id:"store", label:"app.store", icon:"store", view:"store",
   tag:function(){ return updatesAvailable()?tr("home.updates"):""; },
   enter:function(){ storeCat="all"; setQuery("",false); loadRegistry(); },
   leave:function(){ if(ask && ask.install) closeAsk(false); },
-  ready:function(){ loadRegistry(); }});
+  ready:function(){ loadRegistry(); },
+  nostore:function(){ if(linkWait){ linkWait=false; openLink(); } }});
 /* the runner owns the run view but has no icon of its own: apps appear on the home screen */
 LP.builtin({id:"run", view:"run", keepPad:true,
   leave:function(){
     if(S.running) flushKv(S.running.id);
-    closeAsk(false); LP.snap.cancel(); LP.speech.stop(); closeLink(S.running); sensors.stopAll(); LP.chip.stop(); LP.keepAwake(false); $("run-frame").srcdoc=""; S.running=null;
+    closeRunMenu(); closeAsk(false); LP.snap.cancel(); LP.speech.stop(); closeLink(S.running); sensors.stopAll(); LP.chip.stop(); LP.keepAwake(false); freshRunFrame(); S.running=null;
   },
   lang:function(){
     /* apps read PAD.lang once at start: a running app is started again in the new language */

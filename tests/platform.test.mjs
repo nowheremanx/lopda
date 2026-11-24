@@ -192,6 +192,109 @@ test("a failed database open is not remembered: the next call opens again", asyn
   assert.equal(indexedDB.opened, 2);
 });
 
+/* iOS can drop the connection of an app left in the background (decisions.md section 67). These tests reach into the
+   fake: `lost` makes the next transaction() throw as a closed connection does; `hang` makes a transaction take its
+   requests and never answer. Timers run 100 times faster so a 5 s limit is 50 ms. */
+function flaky() {
+  const state = { lost: 0, hang: 0, hung: [], closed: 0 };
+  const fast = (fn, ms) => setTimeout(fn, (ms || 0) / 100);
+  const { P, indexedDB } = platform({}, { setTimeout: fast, clearTimeout });
+  const open = indexedDB.open;
+  indexedDB.open = (name, v) => {
+    const req = open(name, v);
+    const wrap = () => {
+      const db = req.result, tx = db.transaction;
+      db.close = () => { state.closed++; };
+      db.transaction = (s, mode) => {
+        if (state.lost > 0) { state.lost--; throw Object.assign(new Error("closing"), { name: "InvalidStateError" }); }
+        const t = tx(s, mode);
+        if (state.hang > 0) {
+          state.hang--; state.hung.push(t);
+          /* requests are taken but no event ever fires */
+          let aborted = false;
+          t.abort = () => { aborted = true; };
+          Object.defineProperty(t, "oncomplete", { set() {}, get() {} });
+          Object.defineProperty(t, "onabort", { set() {}, get() {} });
+          Object.defineProperty(t, "onerror", { set() {}, get() {} });
+          t.wasAborted = () => aborted;
+        }
+        return t;
+      };
+    };
+    let onsuccess;
+    Object.defineProperty(req, "onsuccess", { get: () => onsuccess && (() => { wrap(); onsuccess(); }), set: (f) => { onsuccess = f; } });
+    return req;
+  };
+  return { P, indexedDB, state };
+}
+
+test("a connection that iOS closed is dropped: the read or write opens a new one and goes through", async () => {
+  const { P, indexedDB, state } = flaky();
+  const ref = P.db.doc(NOTES + "/n1");
+  await ref.set({ body: "a" });
+  assert.equal(indexedDB.opened, 1);
+  state.lost = 1;
+  assert.equal((await ref.get()).data().body, "a");
+  assert.equal(indexedDB.opened, 2, "a new connection");
+  state.lost = 1;
+  await ref.set({ body: "b" });   /* nothing was queued on the dead connection, so the write is safe to send again */
+  assert.equal((await ref.get()).data().body, "b");
+  assert.equal(indexedDB.opened, 3);
+  state.lost = 2;   /* closed twice in a row: one retry, then an error instead of a loop */
+  await assert.rejects(ref.get(), (e) => e.code === "unavailable");
+});
+
+test("a read that never answers is given up and tried once more on a new connection, then reported", async () => {
+  const { P, indexedDB, state } = flaky();
+  const ref = P.db.doc(BASE + "/code/items/klotski");
+  await ref.set({ html: "<p>hi</p>" });
+  state.hang = 1;
+  assert.equal((await ref.get()).data().html, "<p>hi</p>", "the second try answers");
+  assert.equal(indexedDB.opened, 2);
+  assert.ok(state.hung[0].wasAborted() && state.closed >= 1, "the stuck transaction is aborted and its connection closed");
+  state.hang = 2;
+  await assert.rejects(ref.get(), (e) => e.code === "timeout", "no endless 载入中…");
+  assert.equal((await ref.get()).data().html, "<p>hi</p>", "and the next call works");
+});
+
+test("a write that never answers is reported, never sent twice, and the next write uses a new connection", async () => {
+  const { P, indexedDB, state } = flaky();
+  const ref = P.db.doc(NOTES + "/n1");
+  await ref.set({ body: "old" });
+  state.hang = 1;
+  await assert.rejects(ref.set({ body: "new" }), (e) => e.code === "timeout");
+  assert.equal(state.hung.length, 1, "one attempt only");
+  assert.ok(state.hung[0].wasAborted());
+  await ref.set({ body: "newer" });
+  assert.equal(indexedDB.opened, 2);
+  assert.equal((await ref.get()).data().body, "newer");
+});
+
+test("coming back from the background starts a fresh connection; a write already sent still lands", async () => {
+  const { P, indexedDB, state } = flaky();
+  const ref = P.db.doc(NOTES + "/n1");
+  await ref.set({ body: "a" });
+  const pending = ref.set({ body: "b" });   /* sent on the old connection */
+  P.db.reconnect();
+  await pending;
+  assert.equal((await ref.get()).data().body, "b");
+  assert.equal(indexedDB.opened, 2, "the read after resume opened a new connection");
+  assert.ok(state.closed >= 1, "the old one is closed");
+  P.db.reconnect(); P.db.reconnect();   /* twice in a row, nothing open: harmless */
+  assert.equal((await ref.get()).data().body, "b");
+});
+
+test("the whole-device backup has no time limit: a slow dump is not cut off", async () => {
+  const { P, state } = flaky();
+  await P.db.doc(NOTES + "/n1").set({ body: "a" });
+  state.hang = 1;
+  let settled = false;
+  P.dumpAll().then(() => { settled = true; }, () => { settled = true; });
+  await new Promise((r) => setTimeout(r, 300));   /* several times the read limit */
+  assert.equal(settled, false, "still waiting, not given up");
+  assert.equal(state.hung[0].wasAborted(), false);
+});
+
 /* ---------------- file export ---------------- */
 
 function exporter({ coarse = false, share } = {}) {
