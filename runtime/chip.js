@@ -555,7 +555,8 @@ function create(ctx,out,opt){
 
 /* ---------- host: what the runtime and the harness hold ----------
    o.context(create) -> the AudioContext (made only when create is true), o.output() -> the node to play into,
-   o.level() sets the master volume before sound starts. Handles: music and ambience before the AudioContext may start
+   o.level() sets the master volume before sound starts, o.claim() (optional) is told that music or ambience is about to
+   sound (the runtime's radio steps aside). Handles: music and ambience before the AudioContext may start
    (kept, started on the first touch or key), pausing with the page, and the call rates: at most 4 music calls and
    4 ambience calls a second, each counted on its own. */
 var MUSIC_RATE=4, AMB_RATE=4;
@@ -580,6 +581,7 @@ function host(o){
     if(!running(ctx)){ try{ ctx.resume().then(function(){ if(running(ctx)) start(); },function(){}); }catch(e){} return; }
     paused=false;
     if(o.level) o.level();
+    if(o.claim) o.claim();
     if(want){ var w=want; want=null; cur=w; chip.play(w.song,{loop:w.loop}); }
     if(wantAmb){ var a=wantAmb; wantAmb=null; curAmb=a; chip.ambience(a.name,a.level); }
   }

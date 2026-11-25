@@ -714,10 +714,13 @@ window.addEventListener("message",function(e){
     if(named) LP.appSfx(d.name); else LP.sfxCustom(d.params);
   } else if(d.op==="music"){
     /* at most 4 calls a second (chip.js drops the rest); a score that does not parse is shown like any app error */
+    /* an app's song takes the speaker: the tuner stops (decisions.md section 69) */
+    if(d.action==="play") LP.claimAudio("app");
     var r=LP.chip.music(d);
     if(r && r.error){ $("run-err-msg").textContent=tr("run.music",{msg:String(r.error).slice(0,240)}); $("run-err").hidden=false; }
   } else if(d.op==="ambience"){
     /* 4 calls a second (over that, the newest waits its turn); an unknown preset is shown like any app error */
+    if(d.name) LP.claimAudio("app");
     var ra=LP.chip.ambience(d);
     if(ra && ra.error){ $("run-err-msg").textContent=tr("run.ambience",{msg:String(ra.error).slice(0,240)}); $("run-err").hidden=false; }
   }

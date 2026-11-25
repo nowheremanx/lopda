@@ -686,6 +686,94 @@
       </div>
     </section>
 
+    <!-- TUNER (收音机): the dial and its readout; the menu, my stations, one station, a link, the directory and the guide open in its place -->
+    <section class="view tn-view" id="v-tuner" hidden>
+      <div class="tn-page tn-dial-page" id="tn-page-dial">
+        <div class="tn-dial" id="tn-dial">
+          <div class="tn-scale" id="tn-scale"></div>
+          <i class="tn-needle" aria-hidden="true"></i>
+          <div class="tn-empty" id="tn-empty" hidden>
+            <span data-i18n="tuner.empty">还没有电台。</span>
+            <button class="btn" type="button" id="tn-empty-find" data-i18n="tuner.menu.find">找台</button>
+          </div>
+        </div>
+        <div class="tn-readout">
+          <b class="tn-name" id="tn-name"></b>
+          <span class="tn-meta" id="tn-meta"></span>
+          <div class="tn-line">
+            <span class="tn-sig" id="tn-sig" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+            <span class="tn-status" id="tn-status" aria-live="polite"></span>
+            <span class="tn-time" id="tn-time"></span>
+          </div>
+          <span class="tn-sleep" id="tn-sleep" hidden></span>
+        </div>
+        <div class="tn-ctrl">
+          <button class="btn ghost tn-step" type="button" id="tn-prev" data-i18n-label="tuner.prev" aria-label="上一台">◀</button>
+          <button class="btn tn-power" type="button" id="tn-power"></button>
+          <button class="btn ghost tn-step" type="button" id="tn-next" data-i18n-label="tuner.next" aria-label="下一台">▶</button>
+          <button class="btn ghost tn-keep" type="button" id="tn-keep" data-i18n="tuner.sk.keep" hidden>存下</button>
+        </div>
+      </div>
+
+      <div class="tn-page" id="tn-page-menu" hidden>
+        <div class="bar"><h2 data-i18n="tuner.title">收音机</h2></div>
+        <ul class="lcd-menu tn-menu" id="tn-menu"></ul>
+      </div>
+
+      <div class="tn-page" id="tn-page-list" hidden>
+        <div class="bar">
+          <h2><span data-i18n="tuner.menu.list">我的电台</span> <small id="tn-list-count"></small></h2>
+          <button class="btn ghost" type="button" id="tn-list-find" data-i18n="tuner.menu.find">找台</button>
+          <button class="btn" type="button" id="tn-list-add" data-i18n="tuner.sk.add">添加</button>
+        </div>
+        <p class="hint tn-note" id="tn-list-note" data-i18n="tuner.list.empty" hidden>还没有电台。去「找台」挑几个，或者加一个链接。</p>
+        <ul class="tn-rows" id="tn-list"></ul>
+      </div>
+
+      <div class="tn-page" id="tn-page-edit" hidden>
+        <div class="bar"><h2 data-i18n="tuner.edit.title">电台</h2></div>
+        <form class="tn-form" id="tn-edit-form" autocomplete="off">
+          <label><span data-i18n="tuner.field.name">名字</span><input id="tn-edit-name" type="text" maxlength="60" spellcheck="false"></label>
+          <label><span data-i18n="tuner.field.url">地址</span><input id="tn-edit-url" type="url" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="2048"></label>
+          <p class="hint tn-note" id="tn-edit-note" aria-live="polite"></p>
+          <div class="tn-form-row">
+            <button class="btn ghost" type="button" id="tn-edit-up" data-i18n="tuner.edit.up">上移</button>
+            <button class="btn ghost" type="button" id="tn-edit-down" data-i18n="tuner.edit.down">下移</button>
+            <button class="btn ghost tn-del" type="button" id="tn-edit-del"></button>
+          </div>
+          <button type="submit" hidden></button>
+        </form>
+      </div>
+
+      <div class="tn-page" id="tn-page-add" hidden>
+        <div class="bar"><h2 data-i18n="tuner.menu.add">加链接</h2></div>
+        <form class="tn-form" id="tn-add-form" autocomplete="off">
+          <label><span data-i18n="tuner.field.url">地址</span><input id="tn-add-url" type="url" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="2048" placeholder="https://…"></label>
+          <label><span data-i18n="tuner.field.nameopt">名字（可不填）</span><input id="tn-add-name" type="text" maxlength="60" spellcheck="false"></label>
+          <p class="hint" data-i18n="tuner.add.hint">电台的流地址，或者 .m3u / .pls / .xspf 列表的链接。</p>
+          <p class="hint tn-note" id="tn-add-note" aria-live="polite"></p>
+          <button type="submit" hidden></button>
+        </form>
+      </div>
+
+      <div class="tn-page tn-find-page" id="tn-page-find" hidden>
+        <form class="tn-find-head" id="tn-find-form" autocomplete="off">
+          <input id="tn-find-q" type="search" enterkeyhint="search" maxlength="60" autocapitalize="off" autocorrect="off" spellcheck="false" data-i18n-ph="tuner.find.ph" placeholder="台名，例如 jazz、交通">
+          <button class="btn" type="submit" data-i18n="tuner.find.go">搜索</button>
+        </form>
+        <ul class="tn-rows" id="tn-results"></ul>
+        <p class="hint tn-note" id="tn-find-note" aria-live="polite"></p>
+      </div>
+
+      <div class="tn-page" id="tn-page-help" hidden>
+        <div class="bar"><h2 data-i18n="tuner.menu.help">说明</h2></div>
+        <div class="tn-help" id="tn-help"></div>
+      </div>
+
+      <div id="tn-keys"></div>
+      <input type="file" id="tn-file" accept=".m3u,.m3u8,.pls,.xspf,.json,.txt,audio/x-mpegurl,audio/mpegurl,audio/x-scpls,application/xspf+xml,application/json,text/plain" hidden>
+    </section>
+
     <!-- PET: one hardware screen, the room (81 x 60 at 4 px), eight icons and the soft keys; sub-screens open over the room -->
     <section class="view pet-view" id="v-pet" hidden>
       <div class="pet-stage" id="pet-stage">
@@ -960,6 +1048,7 @@
 <script src="studio-harness.js"></script>
 <script src="wav.js"></script>
 <script src="midi.js"></script>
+<script src="stations.js"></script>
 <script src="vendor/qrcode-generator/qrcode.js"></script>
 <script src="qr.js"></script>
 <script src="appsaves.js"></script>
@@ -978,6 +1067,7 @@
 <script src="apps/studio.js"></script>
 <script src="apps/cart.js"></script>
 <script src="apps/radio.js"></script>
+<script src="apps/tuner.js"></script>
 <script src="apps/pet.js"></script>
 <script src="apps/snap.js"></script>
 <script src="apps/store.js"></script>
