@@ -187,6 +187,22 @@ test("tuner: an interruption the phone does not announce shows as interrupted, a
   await p.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
   await until(p, () => window.LOPDA_DEBUG.tuner.E.state === "playing");
   assert.equal((await st()).st, "UFM 100.3");
+  /* in the background the session freeing up (another web page starting its sound) never grabs the speaker back */
+  await key("a");
+  await until(p, () => window.LOPDA_DEBUG.tuner.E.state === "off");
+  await key("a");
+  await until(p, () => window.LOPDA_DEBUG.tuner.E.state === "playing");
+  /* the page is in the background (another Safari tab is in front) */
+  await p.evaluate(() => Object.defineProperty(document, "hidden", { configurable: true, get: () => true }));
+  await p.evaluate(() => { const { E } = window.LOPDA_DEBUG.tuner; E.stopping = true; E.el.pause(); E.stopping = false; });
+  await until(p, () => window.LOPDA_DEBUG.tuner.E.state === "paused");
+  await p.evaluate(() => window.LOPDA_DEBUG.tuner.onSession("active"));
+  await sleep(500);
+  assert.equal((await st()).state, "paused", "hidden: a free session does not resume");
+  await p.evaluate(() => { delete document.hidden; });
+  await p.evaluate(() => window.LOPDA_DEBUG.tuner.onSession("active"));
+  await until(p, () => window.LOPDA_DEBUG.tuner.E.state === "playing");
+
   /* a pause the user asked for (the lock screen) is never resumed behind their back */
   await key("a");
   assert.equal((await st()).state, "off");
