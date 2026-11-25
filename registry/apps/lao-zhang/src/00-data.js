@@ -223,8 +223,8 @@ GM.TEXT = {
     soldOut: "本关无货",
     priceUp: "涨价",
     ownedMany: "×{n}",
-    footPlay: "A/点 下钩　START 暂停",
-    footPlayDyn: "A/点 下钩　B 炸药　START 暂停",
+    footPlay: "A/点 下钩　{b}　START 暂停",
+    footB: "B 炸药 ×{n}",
     pause: "暂停",
     resume: "继续",
     footPause: "START 继续",
@@ -284,7 +284,7 @@ GM.TEXT = {
     codexMid: "中",
     codexHeavy: "重",
     codexRandom: "随机",
-    codexMole: "0 / $1,500",
+    codexMole: "多数不值钱；带钻石的值 $1,500",
     codexNames: ["小金块", "中金块", "大金块", "钻石", "钱袋", "小石头", "大石头", "铁箍石", "骨头", "头骨", "定时炸弹", "地雷", "地鼠"]
   },
   en: {
@@ -314,8 +314,8 @@ GM.TEXT = {
     soldOut: "NO STOCK",
     priceUp: "PRICE UP",
     ownedMany: "x{n}",
-    footPlay: "A/TAP HOOK　START PAUSE",
-    footPlayDyn: "A/TAP HOOK　B BOOM　START PAUSE",
+    footPlay: "A/TAP HOOK　{b}　START PAUSE",
+    footB: "B BOOM ×{n}",
     pause: "PAUSED",
     resume: "RESUME",
     footPause: "START RESUME",
@@ -375,7 +375,7 @@ GM.TEXT = {
     codexMid: "MID",
     codexHeavy: "HEAVY",
     codexRandom: "RANDOM",
-    codexMole: "0 / $1,500",
+    codexMole: "Most are junk; one carries a $1,500 diamond",
     codexNames: ["GOLD S", "GOLD M", "GOLD L", "DIAMOND", "BAG", "ROCK S", "ROCK L", "BANDED ROCK", "BONE", "SKULL", "TIMED BOMB", "MINE", "MOLE"]
   }
 };
@@ -393,4 +393,12 @@ GM.money = function (n) {
 
 GM.text = function (lang) {
   return GM.TEXT[lang === "en" ? "en" : "zh"];
+};
+
+/* the play footer, always with the B key and the sticks in hand; the UI dims the
+   B part when the count is zero */
+GM.footPlayText = function (lang, n) {
+  var T = GM.text(lang);
+  n = Math.max(0, Math.round(Number(n) || 0));
+  return GM.fmt(T.footPlay, { b: GM.fmt(T.footB, { n: n }) });
 };
