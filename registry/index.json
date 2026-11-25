@@ -835,14 +835,14 @@
         ".0000...........",
         "................"
       ],
-      "version": "1.1.1",
+      "version": "1.2.0",
       "released": "2026-10-11",
-      "updated": "2026-10-15",
-      "description": "96×96 四色点阵画板：撤销、清空，能导入图片转成点阵，也能导出 PNG。",
+      "updated": "2026-11-24",
+      "description": "96×96 四色点阵画板：撤销、重做、清空，能导入图片转成点阵，也能导出 PNG。",
       "i18n": {
         "en": {
           "name": "Paint",
-          "description": "96×96 four-tone pixel paint. Import a picture, export PNG."
+          "description": "96×96 four-tone pixel paint. Undo, redo, clear, import a picture, export PNG."
         }
       },
       "author": "Haowei Wu",
@@ -851,8 +851,8 @@
         "files"
       ],
       "path": "apps/paint/index.html",
-      "sha256": "0862559f4791dc26a4f0a4c6421bb27aa7f68f693523470c06b40123b4c4ae53",
-      "bytes": 11329
+      "sha256": "e4a9d0a8da0409b762cdf59ddd69f1a8745f6624031f085f5854b7ad230b3a56",
+      "bytes": 12377
     },
     {
       "spec": "lopda/1",
