@@ -425,6 +425,20 @@ function startLinked(a){
   runApp(a);
   if(inBrowserTab()) toast(tr("link.trial"));
 }
+/* tools/stamp-preview.mjs stamps a PR preview's RUNTIME_VERSION as "<x>+<sha7>"; a release never has the "+".
+   Only a preview may replace an installed app from its registry when a link opens it (decisions.md section 68). */
+function isPreviewBuild(){ return String(LP.RUNTIME_VERSION||"").indexOf("+")>=0; }
+/* In a preview an installed app may be an earlier push: compare it with the preview's registry and update it exactly
+   as the store's update does (hash check, saves kept, a grown permission list confirmed), then run it. The registry
+   cannot be read, the app left it, or the hashes match: run the installed copy, as always (decisions.md section 68). */
+function previewLink(id){
+  (S.registry ? Promise.resolve() : loadRegistry()).then(function(){
+    var now=installedOf(id), r=null;
+    registryApps().forEach(function(x){ if(x.id===id) r=x; });
+    if(!now || !r || now.sha256===r.sha256 || $("v-home").hidden){ startLinked(now); return; }
+    install(r,null,startLinked);
+  });
+}
 function openLink(){
   var id=linkId; linkId=null;
   if(id===null) return;
@@ -432,7 +446,7 @@ function openLink(){
   var bi=null; LP.builtins.forEach(function(b){ if(b.id===id && b.icon && b.open) bi=b; });
   if(bi){ bi.open(); return; }
   var a=installedOf(id);
-  if(a){ startLinked(a); return; }
+  if(a){ if(isPreviewBuild()) previewLink(id); else startLinked(a); return; }
   toast(tr("link.fetching"));
   (S.registry ? Promise.resolve() : loadRegistry()).then(function(){
     if(!$("v-home").hidden && !installedOf(id)){
