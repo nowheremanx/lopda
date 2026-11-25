@@ -788,8 +788,9 @@
         "......0000......",
         "................"
       ],
-      "version": "1.0.0",
+      "version": "1.0.1",
       "released": "2026-11-23",
+      "updated": "2026-11-24",
       "description": "开发示例：实时显示倾斜、摇晃、方向和声音，以及允许、拒绝、没有传感器时的样子。",
       "i18n": {
         "zh": {
@@ -808,8 +809,8 @@
         "mic"
       ],
       "path": "apps/sensor-desk/index.html",
-      "sha256": "ef3a0053ad0bcea6e9c328b98f3b2f91e4b18000597900afce5a70c33b440b0b",
-      "bytes": 18316
+      "sha256": "c50a304508c0ac824faf4c043d186e5e140ed6032cd20fb3ce0e8f8beb69ca0a",
+      "bytes": 19814
     },
     {
       "spec": "lopda/1",
