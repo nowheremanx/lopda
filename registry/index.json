@@ -622,9 +622,9 @@
         "...0000000000...",
         "................"
       ],
-      "version": "1.1.1",
+      "version": "1.2.0",
       "released": "2026-10-11",
-      "updated": "2026-11-21",
+      "updated": "2026-11-24",
       "description": "八位数商务计算器，连续运算、百分比和记忆键。",
       "i18n": {
         "en": {
@@ -635,8 +635,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/calculator/index.html",
-      "sha256": "dbb1c839f26ea83ea3bd5a70702ee7de8214d438e73aa843392636fa0a7e9c0b",
-      "bytes": 14282
+      "sha256": "dba170723ce7d835e9d5cbf30abdbdfcec6d712aaf695948fe7bd9b28eca08fe",
+      "bytes": 13646
     },
     {
       "spec": "lopda/1",
