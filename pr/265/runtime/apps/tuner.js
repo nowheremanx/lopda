@@ -1,5 +1,5 @@
 /*
- * Lo-PDA built-in: 收音机 / Tuner, the internet radio (decisions.md section 69, docs/design/tuner.md).
+ * Lo-PDA built-in: 收音机 / Tuner, the internet radio (decisions.md section 69).
  *
  * A 1986 portable with a dial: the stations you keep sit on the dial like frequencies, LEFT / RIGHT (or a finger on the
  * dial) turn it, and between two stations there is only hiss. Landing on one tunes it. It plays through one <audio>
@@ -74,7 +74,8 @@ function hhmmss(ms){
 /* ---------- the document ---------- */
 function ref(){ if(!T.ref && LP.S.db) T.ref=LP.S.db.doc(DOC); return T.ref; }
 function save(){
-  var r=ref(); if(!r) return;
+  /* never over a list we could not read: that would replace the user's stations with what this session added */
+  var r=ref(); if(!r || !T.loaded) return;
   put(r,{v:1, stations:T.list.map(function(s){ var o={}; for(var k in s) o[k]=s[k]; return o; }), last:T.last||undefined, seeded:true});
 }
 function load(){
@@ -89,13 +90,17 @@ function load(){
     });
     T.list=list;
     T.last=d && typeof d.last==="string" ? d.last : null;
+    T.loaded=true; T.loading=null;
     if(!d || !d.seeded){
       T.list=ST.merge(T.list,SEED.map(function(x){ return ST.make(x,""); }),LP.uid).list;
       save();
     }
-    T.loaded=true; T.loading=null;
     var i=idx(T.last); T.pos=i<0 ? 0 : i;
-  },function(){ T.loading=null; });
+  },function(e){
+    /* the list stays unsaved (save() refuses) and the next open reads again */
+    T.loading=null;
+    toast(tr("common.readfail",{msg:e && e.message || e}));
+  });
   return T.loading;
 }
 
@@ -147,13 +152,16 @@ function player(){
     hiss(0);
     msState("playing");
   });
-  ["waiting","stalled"].forEach(function(t){ a.addEventListener(t,function(){
+  /* only "waiting" (the element has run dry): Safari sends "stalled" on live streams that go on playing */
+  a.addEventListener("waiting",function(){
     if(E.state!=="playing") return;
+    E.heard=a.currentTime;
     setState("buffering"); hiss(0.25);
     clearTimeout(E.watch); E.watch=setTimeout(function(){ retry("stall"); },STALL_MS);
-  }); });
+  });
   a.addEventListener("error",function(){
-    if(!on() || a.src===silentUrl) return;
+    /* a late error from the src before the last dial is not this station's */
+    if(!on() || a.src===silentUrl || (E.src && a.src!==E.src)) return;
     var c=a.error && a.error.code;
     retry(c===2 ? "net" : c===3 ? "decode" : "format");
   });
@@ -166,12 +174,20 @@ function player(){
     clearTimeout(E.watch); clearTimeout(E.retry);
     setState("paused"); hiss(0); msState("paused");
   });
-  a.addEventListener("timeupdate",checkSleep);
+  a.addEventListener("timeupdate",function(){
+    checkSleep();
+    /* sound is moving again without a "playing" event: back to playing, no reconnect */
+    if(E.state==="buffering" && a.src!==silentUrl && a.currentTime>E.heard+0.5){
+      clearTimeout(E.watch); clearTimeout(E.retry); E.tries=0;
+      setState("playing"); hiss(0); msState("playing");
+    }
+  });
   level();
   return a;
 }
 function prime(){
-  if(E.primed) return;
+  /* never over a station that is sounding or paused on the lock screen */
+  if(E.primed || (E.state!=="off" && E.state!=="nosignal")) return;
   var a=player(), url=silence(); if(!url) return;
   E.primed=true;
   /* "ambient" first, so this silence never stops the user's own podcast */
@@ -221,7 +237,7 @@ function dial(){
   go(url);
   function go(u){
     E.stopping=true; try{ a.pause(); }catch(e){} E.stopping=false;
-    a.src=u;
+    a.src=u; E.src=a.src; E.heard=Infinity;
     var p=null; try{ p=a.play(); }catch(e){}
     if(p && p.catch) p.catch(function(e){
       if(gen!==E.gen) return;
@@ -259,8 +275,15 @@ function silenceEl(){
 /* how: "pause" keeps the lock screen's card so its play button can bring the station back */
 function stop(how){
   E.gen++;
-  silenceEl();
   clearTimeout(E.watch); clearTimeout(E.retry);
+  /* the lock screen's pause keeps the src (iOS drops the Now Playing card of an element with none); play dials again */
+  if(how==="pause" && E.st && E.el){
+    E.stopping=true; try{ E.el.pause(); }catch(e){} E.stopping=false;
+    hiss(0); E.since=0; E.tries=0; E.err="";
+    setState("paused"); msState("paused");
+    return;
+  }
+  silenceEl();
   hiss(0);
   E.since=0; E.tries=0; E.err="";
   if(how!=="pause"){ E.sleepAt=0; E.sleepMin=0; }
@@ -293,11 +316,11 @@ function mediaMeta(){
   if(E.msReady) return;
   E.msReady=true;
   var set=function(a,fn){ try{ ms.setActionHandler(a,fn); }catch(e){} };
-  set("play",function(){ if(!on() && E.st) dial(); });
+  set("play",function(){ if(!on() && E.st){ E.tries=0; E.since=0; dial(); } });
   set("pause",function(){ stop("pause"); });
   set("stop",function(){ stop(); });
-  set("nexttrack",function(){ step(1,true); });
-  set("previoustrack",function(){ step(-1,true); });
+  set("nexttrack",function(){ step(1,true,true); });
+  set("previoustrack",function(){ step(-1,true,true); });
 }
 function msState(s){
   if(!("mediaSession" in navigator)) return;
@@ -355,7 +378,9 @@ function glideTo(i,andTune){
   T.target=i;
   cancelAnimationFrame(T.anim);
   var from=T.pos, dist=Math.abs(i-from), dur=Math.min(600,160+dist*140), t0=performance.now();
-  if(dist<0.01){ arrive(); return; }
+  /* no frames come while the phone is locked or another program has the screen (lock-screen next / previous):
+     land at once, or the station would never change */
+  if(dist<0.01 || document.hidden || !T.live){ arrive(); return; }
   if(on() && E.st && !E.preview){ E.muted=true; level(); }
   if(andTune || on()) hiss(0.45);
   (function frame(now){
@@ -375,11 +400,13 @@ function glideTo(i,andTune){
     tune(st,false);
   }
 }
-function step(d,andTune){
+/* `wrap`: the lock screen's next / previous go round the ends (there is no edge to feel there) */
+function step(d,andTune,wrap){
   if(!T.list.length){ sfx("err"); return; }
   var base=T.target!=null ? T.target : Math.round(T.pos), n=T.list.length;
   var next=base+d;
-  if(next<0 || next>=n){ sfx("err"); return; }
+  if(wrap) next=(next+n)%n;
+  else if(next<0 || next>=n){ sfx("err"); return; }
   glideTo(next,andTune || on());
 }
 function bindDial(){
@@ -850,11 +877,19 @@ function tick(){
 }
 
 bind();
-if(window.LOPDA_DEBUG) window.LOPDA_DEBUG.tuner={T:T, E:E, SEED:SEED};
+if(window.LOPDA_DEBUG) window.LOPDA_DEBUG.tuner={T:T, E:E, SEED:SEED, step:step};
 
 LP.padRoute("tuner",function(b,down){
   if(byId("v-tuner").hidden) return false;
-  if(down) press(b);
+  /* import and export open the file picker or the share sheet: on the release of a press that began on that row
+     (a pointerdown is not a user activation on touch) */
+  var m=T.page==="menu" && b==="a" ? MENU[T.menu] : "";
+  if(m==="import" || m==="export"){
+    if(down) T.armed=m;
+    else if(T.armed===m){ T.armed=""; menuGo(m); }
+    return true;
+  }
+  if(down){ T.armed=""; press(b); }
   return true;
 });
 
@@ -881,9 +916,12 @@ LP.builtin({id:"tuner", label:"app.tuner", icon:function(){ return ICON; }, view
     if(!T.live) return;
     T.live=false;
     clearInterval(T.ticker); T.ticker=0;
-    if(T.drag){ T.drag=null; E.muted=false; level(); }
+    var drag=T.drag;
+    T.drag=null; T.dragged=false;
     cancelAnimationFrame(T.anim); T.anim=0;
-    if(T.target!=null){ T.pos=T.target; T.target=null; }
+    /* HOME mid-glide: land where it was going (and tune it, as the glide would have); mid-drag: back where it was */
+    if(T.target!=null) glideTo(T.target,on());
+    else if(drag){ E.muted=false; level(); }
     if(E.state!=="playing") hiss(0);
     blur();
   },

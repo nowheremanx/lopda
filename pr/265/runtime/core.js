@@ -247,7 +247,7 @@ document.addEventListener("visibilitychange",function(){
 });
 
 /* ---------- sound: tiny square-wave chips through Web Audio (the named sounds themselves are in chip.js) ---------- */
-var RUNTIME_VERSION="1.3.0+000b946";   /* keep in step with VERSION in sw.js */
+var RUNTIME_VERSION="1.3.0+a8ec28c";   /* keep in step with VERSION in sw.js */
 /* One volume, five steps, 0 is off (decisions.md section 10). It sets the master gain and nothing else does.
    Under the master: `ui` for the runtime's own clicks and the built-ins' prompts, held at a fraction so they stay as
    quiet as they always were (step 2 gives them 0.11, their level before 0.12.0), and `app` for apps, music and the
@@ -314,8 +314,9 @@ function appSfx(name){ playNamed(name,"app"); }
 var chip=window.LopdaChip.host({
   context:function(make){ return SND.ctx || (make ? audio() : null); },
   output:function(){ return SND.app; },
-  level:applyLevel,
-  claim:function(){ claimAudio("app"); }
+  level:applyLevel
+  /* no claim here: built-ins use LP.chip too (the pet's weather bed, its hatch jingle), and a quiet room must not
+     switch the radio off. store.js claims for apps, whose music is their own */
 });
 function sfxCustom(params){
   if(!SND.vol || !audio()) return;

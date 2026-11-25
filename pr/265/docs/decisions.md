@@ -2078,3 +2078,59 @@ EXIF，相册就能把照片放到地图上。
 - **代码**：`runtime/apps/store.js`（`isPreviewBuild`、`previewLink`、`openLink`），`.github/workflows/pages.yml`，
   `runtime/core.js` 与 `runtime/sw.js` 的版本号；e2e 加了预览（替换 core.js 的版本号、改注册表）和正式版两条链接测试，
   `tests/stamp-preview.test.mjs` 多查了戳里的 `+`。代码由 DeepSeek 写，Claude 复查（改的是正式站不该变的链接行为，所以两条测试都留在 e2e 里）。
+
+## 69. 收音机 / Tuner：网络收音机，内置程序（1.3.0）
+
+2026-11-25，主人想要网络收音机（很多华人听 UFM 100.3），也问四轨机能不能后台播放。先做了一页测试（PR #258，没合并），
+在主人 iPhone 的 Safari 里测完再动手。
+
+- **测出来的事实**：页面里一个普通的 `<audio>` 元素，锁屏、切到别的 app 都接着响；Web Audio 实时合成（四轨机现在的做法）
+  一到后台就停。UFM 100.3 有 https 的 AAC 和 MP3 直播流（StreamTheWorld）；HLS（.m3u8）在 iPhone 上原生能播；
+  只有 http 的台在 https 页面里也能播（Chrome 会自动升级成 https；以后的 iOS 可能收紧）。SomaFM 在 iPhone 上播不了，原因没查清。
+- **四轨机不做后台播放**（主人决定）：要后台播只能先渲染成 WAV，太慢，也就不能边播边改了。
+- **为什么是内置程序，不是商店 app**：app 的 CSP 是 `connect-src 'none'`、`media-src data: blob:`，根本连不上电台；
+  给 app 开网络会破坏「app 不能联网」这条（README「你的数据」）。所以 SDK 不加接口。
+- **名字**：中文「收音机」，英文 **Tuner**（Radio 已经是电波台），id `tuner`，主屏排在电波台后面。
+- **样子**：1986 年的便携收音机。上面是刻度窗：存下的台像频率一样排在刻度上，台名上下错开印着，指针固定在中间，刻度在下面滑；
+  开着时刻度窗是亮的（纸色），关着是暗的（中间色），像刻度灯。左右键或手指拨动刻度换台，两台之间只有沙沙声（运行时自己的噪声，
+  跟着掌机音量），停到台上才「对准」开始收；手指松开就吸到最近的台。关着时拨台只动指针，不出声。下面是读数：台名、第几台、
+  国家和格式、信号格、收听时长、睡眠倒计时。信号格是真的：缓冲里还剩几秒（`buffered`），不是装饰。
+- **按键**：A 开 / 关，左右换台（到头不绕回），SELECT 睡眠定时（关 → 15 → 30 → 60 分钟 → 关），START 菜单；其他页 B 返回。
+  菜单：我的电台、找台、加链接、导入列表文件、导出列表（.m3u）、睡眠定时、说明。
+- **离开程序接着响**（主人决定）：回主屏、开别的程序都不停，主屏图标下写「在响」。锁屏卡片（Media Session）显示台名，
+  能暂停、继续、上一台、下一台。播的时候运行时把 `navigator.audioSession.type` 定在 `"playback"`（`LP.holdPlayback`），
+  所以静音开关不会把它关掉、锁屏也不断；停了就回到 `"ambient"`。中间别的程序要求 `"ambient"` 也还是 `"playback"`。
+- **别的程序要喇叭时它让开**（主人决定）：`LP.claimAudio(who)` 通知每个内置程序的 `claim` 钩子，收音机就停下并提示一句。
+  会叫它的：四轨机开始播放、app 的 `PAD.music` / `PAD.ambience` 开始响（chip.js 的 host 多了可选的 `o.claim`）、卡带机开机、
+  任何人把声音会话切到 `"play-and-record"`（麦克风：电波台、app 的 `PAD.mic`、连线）。按键音、`PAD.sfx`、`PAD.say` 不叫它，照常混在一起。
+- **不会卡住**：调台 15 秒没声音、缓冲 12 秒不动、流断了（`error`、`ended`），自动重连三次，间隔 1.5、3、4.5 秒；地址根本放不了
+  （`MEDIA_ERR_SRC_NOT_SUPPORTED`）只再试一次；没联网直接说没联网。最后写清是哪种「没信号」。被电话、Siri、拔耳机打断时显示
+  「被打断了」，按 A 或锁屏的播放键再开。
+- **iPhone 的手势限制**：下巴上的按键走 `pointerdown`，触屏上它不算用户手势，`play()` 可能被拒。所以打开收音机的那一下点击里，
+  先让同一个 audio 元素放 0.1 秒静音（先确认是 `"ambient"`，不打断用户自己的播客）；iOS 之后就允许这个元素不靠手势再播，
+  按键、重连、锁屏播放都能用。万一还是被拒，提示「点一下 ▸ 开」。
+- **从不把流接进 Web Audio**：别的网站的流没有 CORS，接进去出来是静音。所以音量只能这样做：掌机音量 0 时 `muted`（iOS 认），
+  其他档在桌面浏览器设 `volume`；iPhone 上用手机自己的音量键。
+- **睡眠定时**：到点就关。除了每秒一次的检查，还挂在 audio 元素的 `timeupdate` 上（锁屏后台播放时它还在来），回到前台也查一次。
+  后台里的定时器 iOS 可能不跑，这一点只能在手机上验证（PR 的检查清单里有）。
+- **电台从哪来**：
+  - 第一次打开放好六个台（主人同意）：UFM 100.3、FIP、Radio Paradise、NHK World Radio、CCTV-13 新闻（伴音）、Rti 臺灣之音。
+    都是电台自己公开的流，当天在 iPhone 或桌面 Chrome 上放过。只放一次（文档里 `seeded:true`），删掉就不会回来。
+  - 「找台」查 radio-browser.info（社区维护的免费目录，5 万多个台，有 CORS）：按台名搜，筛中文 / 英文 / 全部（默认跟界面语言），
+    按点击数排，去掉坏台，40 个。点一下试听（不存），`+` 或 START 存下；试听中的台回到刻度页有「存下」按钮。
+    依次试 `all.api`、`de1.api`、`de2.api` 三个地址。只发搜索词和语言，不发别的；不回报点击（目录希望客户端回报，我们不回报）。
+  - 「加链接」：流地址直接加上并马上收听试试；`.m3u` / `.pls` / `.xspf` 列表的链接先读进来（要对方允许 CORS，不允许就说清楚，
+    建议下载后导入），一个台就加一个，多个就全加。`.m3u8` 是 HLS 流本身，当一个台加。
+  - 「导入列表文件」：M3U（含 `#EXTINF`）、PLS、XSPF、radio-browser 的 JSON、我们自己的 `{stations:[…]}`，1 MB 以内；
+    重复的（http/https、结尾斜杠不算区别）跳过，最多 200 个台，提示加了几个、跳过几个、放不下几个。
+  - 「导出列表」：`lopda-stations-YYYYMMDD.m3u`。网上没有通用的电台 JSON 标准，最通用的是 M3U，VLC、iTunes 等都能打开，
+    也能导回来。
+- **存档**：`data/users/local/tuner` {v:1, stations:[{id, name, url, home?, cc?, codec?, kbps?}], last?, seeded:true}，跟着整机备份走；
+  只存链接，不存音频。`stations.js`（纯函数）负责整理名字和地址（只要 http / https，别的如 `javascript:` 一律不要）、解析、
+  去重、导出；`tuner.js` 负责画、取、播。
+- **对外地址**：`tests/repo.test.mjs` 管着运行时里能出现的外部网址，这次加了目录的三个地址和六个台。
+- **代码**：`runtime/apps/tuner.js`、`runtime/stations.js`（`tests/stations.test.mjs`），`index.html` 的 `#v-tuner`，`lopda.css` 末尾，
+  `strings.js` 的 `tuner.*`，`core.js`（`holdPlayback`、`claimAudio`、钩子 `claim` / `level`），`chip.js`（`o.claim`），
+  `studio.js` 和 `cart.js` 各一行 `LP.claimAudio`，`platform.js` 给 `.m3u` 一个 MIME。`tests/e2e-tuner.test.mjs` 用假的流（WAV）和假的目录
+  跑一遍：放、换台、离开接着响、让开、睡眠、编辑删除、导入导出、加链接、找台和试听、坏台、331 宽、拖刻度。
+  Claude 设计并写了程序，播放列表解析（`stations.js` 和它的测试）交给另一个 Claude 按说明写，Claude 复查。
