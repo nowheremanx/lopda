@@ -1,5 +1,5 @@
 /*
- * Lo-PDA built-in: 收音机 / Tuner, the internet radio (decisions.md section 69, docs/design/tuner.md).
+ * Lo-PDA built-in: 收音机 / Tuner, the internet radio (decisions.md section 69).
  *
  * A 1986 portable with a dial: the stations you keep sit on the dial like frequencies, LEFT / RIGHT (or a finger on the
  * dial) turn it, and between two stations there is only hiss. Landing on one tunes it. It plays through one <audio>
