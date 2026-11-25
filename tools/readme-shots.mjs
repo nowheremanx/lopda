@@ -1,7 +1,7 @@
 // The README's pictures: drives the runtime in Chromium and writes docs/images/.
 // Needs Playwright (not a dependency: npm i --no-save playwright, or a global install found through NODE_PATH).
 //
-//   node tools/readme-shots.mjs [outDir] [--lang=en|zh] [--raw] [--only=camera,notes,calendar,dict,reader,store,games]
+//   node tools/readme-shots.mjs [outDir] [--lang=en|zh] [--raw] [--only=camera,notes,calendar,dict,reader,pet,studio,store,games,radio,tuner]
 //
 // Writes screens.png, builtins.png, apps.png (four screens each) into outDir, plus contact-sheet.png and film-strip.png
 // in English (the prints are the same in both languages). The default outDir is docs/images for English (README.md)
@@ -67,12 +67,12 @@ const OUT = resolve(args.find((a) => !a.startsWith("--")) || join(ROOT, "docs", 
 /* what the script reads on the screen, and what it writes into the notes, in each language */
 const T = {
   zh: { boot: "启动中…", open: "打开", camera: "点阵相机", darkroom: "冲洗店", notes: "记事本", calendar: "万年历", dict: "词典",
-        reader: "阅读器", book: "論語", store: "应用商店", pet: "宠物", studio: "四轨机", library: "磁带库", gomoku: "五子棋", radio: "电波台",
+        reader: "阅读器", book: "論語", store: "应用商店", pet: "宠物", studio: "四轨机", library: "磁带库", radio: "电波台", tuner: "收音机",
         radioIn: "在湖边吗？", radioOut: "船刚划过去。", puzzle: "拍照拼图", tower: "纸塔", yu: "滥竽充数", rain: "雨站",
         today: "去湖边拍完了一卷胶卷。船从左边划到右边，正好八张。", earlier: "秋天第一次穿外套。",
         quote: "《論語》\n學而時習之，不亦說乎。#摘抄", todo: "买胶卷\n周六去冲洗店。#待办" },
   en: { boot: "BOOT…", open: "Open", camera: "Camera", darkroom: "Darkroom", notes: "Notes", calendar: "Calendar", dict: "Dict",
-        reader: "Reader", book: "Alice", store: "Store", pet: "Pet", studio: "Tape4", library: "Tape library", gomoku: "Gomoku", radio: "Radio",
+        reader: "Reader", book: "Alice", store: "Store", pet: "Pet", studio: "Tape4", library: "Tape library", radio: "Radio", tuner: "Tuner",
         radioIn: "At the lake?", radioOut: "The boat just went by.", puzzle: "SnapTile", tower: "Paper", yu: "Fake Yu", rain: "Rain Stn",
         today: "Shot a whole roll by the lake. The boat crossed from left to right, eight frames exactly.",
         earlier: "First cold morning. Wore a coat.",
@@ -96,7 +96,7 @@ const base = `http://127.0.0.1:${server.address().port}`;
 const browser = await pw.chromium.launch({ args: [
   "--disable-site-isolation-trials",
   "--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream", `--use-file-for-fake-video-capture=${cam}`,
-  "--force-color-profile=srgb", "--font-render-hinting=none"] });
+  "--force-color-profile=srgb", "--font-render-hinting=none", "--autoplay-policy=no-user-gesture-required"] });
 const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1, hasTouch: false,
   reducedMotion: "reduce", timezoneId: "Asia/Shanghai", locale: LANG === "zh" ? "zh-CN" : "en-US", serviceWorkers: "block", acceptDownloads: true,
   permissions: ["camera"] });
@@ -104,6 +104,13 @@ await ctx.addInitScript(initScript);
 const p = await ctx.newPage();
 await p.clock.setFixedTime(new Date("2026-10-22T09:41:00+08:00"));
 await p.route("https://cdn.jsdelivr.net/**", (r) => r.fulfill({ status: 404, body: "not found" }));
+/* the tuner's seeded stations: a quiet WAV stands in for every stream (as tests/e2e-tuner.test.mjs), so no shot reaches a
+   broadcaster and none of their programmes is recorded */
+const quietWav = (() => { const sr = 8000, n = sr * 60, b = Buffer.alloc(44 + n * 2);
+  b.write("RIFF", 0); b.writeUInt32LE(36 + n * 2, 4); b.write("WAVE", 8); b.write("fmt ", 12); b.writeUInt32LE(16, 16);
+  b.writeUInt16LE(1, 20); b.writeUInt16LE(1, 22); b.writeUInt32LE(sr, 24); b.writeUInt32LE(sr * 2, 28); b.writeUInt16LE(2, 32);
+  b.writeUInt16LE(16, 34); b.write("data", 36); b.writeUInt32LE(n * 2, 40); return b; })();
+await p.route(/streamtheworld|radiofrance|radioparadise|nhkworld|myalicdn|akamaized/, (r) => r.fulfill({ status: 200, contentType: "audio/wav", body: quietWav }));
 
 const settle = async (ms = 250) => {
   await p.waitForFunction(() => document.getElementById("toast").hidden, null, { timeout: 8000 });
@@ -267,19 +274,11 @@ const play = async (label, steps) => {
   }
 };
 /* "name" takes a screenshot called name; a number waits; a function gets the app's frame; anything else is a key */
-/* Gomoku: tap a few points of the 15 x 15 board; the computer answers each one */
-const gomoku = async (f) => {
-  const box = await f.locator("#c").boundingBox(), cell = box.width / 15;
-  for (const [x, y] of [[7, 7], [8, 6], [6, 8], [8, 8]]) {
-    await p.mouse.click(box.x + (x + 0.5) * cell, box.y + (y + 0.5) * cell); await p.waitForTimeout(2500);
-  }
-};
 const GAMES = [
   [T.puzzle, ["x", 800, "x", 1500, "x", 1500, "x", 2500, "puzzle"]],          /* allow the camera, shoot the lake, use it */
   [T.tower, ["x", 800, "x", 800, "x", 800, "paper-tower"]],
   [T.yu, ["ArrowDown", "x", 800, "x", 8000, "fake-yu"]],                  /* 选曲, the first song, mid-song */
   [T.rain, ["x", 800, "x", 3000, "rain-station"]],
-  [T.gomoku, [(f) => f.locator("#st").click(), 800, gomoku, "gomoku"]],   /* touch only: START, then a few stones */
 ];
 for (const [label, steps] of GAMES) if (want("games")) await play(label, steps);
 
@@ -324,12 +323,27 @@ if (want("radio")) {
 }
 
 
+/* ---- Tuner: the dial turned one station on from the first and switched on; it stops again before HOME ---- */
+if (want("tuner")) {
+  await home(); await tile(T.tuner);
+  await p.waitForFunction(() => window.LOPDA_DEBUG.tuner && window.LOPDA_DEBUG.tuner.T.loaded && document.querySelectorAll("#tn-scale .tn-mark").length > 0);
+  const press = (b) => p.evaluate((x) => { window.LOPDA_DEBUG.setButton(x, true); window.LOPDA_DEBUG.setButton(x, false); }, b);
+  await press("a");
+  await p.waitForFunction(() => window.LOPDA_DEBUG.tuner.E.state === "playing", null, { timeout: 15000 });
+  await press("right");
+  await p.waitForTimeout(1500);
+  await p.waitForFunction(() => window.LOPDA_DEBUG.tuner.E.state === "playing", null, { timeout: 15000 });
+  await shot("tuner", 800);
+  await press("a"); await p.waitForTimeout(300);
+  await home();
+}
+
 /* ---- the README's pictures: four screens side by side, and the darkroom's own prints as they are ---- */
 const ROWS = {
   "screens.png": ["home", "camera", "darkroom", "puzzle"],
   "builtins.png": ["notes", "calendar", "dict", "reader"],
   "apps.png": ["paper-tower", "fake-yu", "rain-station", "store"],
-  "more.png": ["pet", "studio", "radio", "gomoku"],
+  "more.png": ["pet", "studio", "tuner", "radio"],
 };
 for (const [file, names] of Object.entries(ROWS)) {
   if (!names.every((n) => existsSync(join(RAW, n + ".png")))) { console.log("skip", file); continue; }
