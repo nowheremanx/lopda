@@ -194,7 +194,7 @@ var UI = (function () {
       "开门可选自动结算，按 A 上菜。",
       "打烊看账，初四、初七交租。",
       "第七天山神宴：备好三道菜。",
-      "图鉴：SELECT，或早市的「图鉴」。",
+      "图鉴：SELECT 或早市「图鉴」。",
       "方向键 选    A 好    B 返回",
       "START 暂停 / 存档",
       "客人想吃的菜，看早市「想吃」。",
@@ -202,7 +202,8 @@ var UI = (function () {
       "常客好感 3 心，会来帮你。"
     ];
     for (var i = 0; i < lines.length; i++) {
-      text(g, lines[i], 14, 52 + i * 14, { color: i === 7 ? g.DARK : g.INK, fit: 188 });
+      // 13 px apart keeps the last line clear of the footer strip
+      text(g, lines[i], 14, 50 + i * 13, { color: i === 7 ? g.DARK : g.INK, fit: 188 });
     }
     footer(g, "A / B 返回");
   }

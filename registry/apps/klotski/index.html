@@ -2798,17 +2798,35 @@ function openLessonAt(i) {
 
 /* ---------------- the page reader: notes and help ---------------- */
 var pg = { section: null, blocks: null, list: [], page: 0, ready: false };
+/* A page holds whole paragraphs (one block line, wrapped to the width) while they fit; a paragraph
+   that does not fit starts the next page rather than being cut in half. Only a paragraph longer
+   than a page is split, and then never into a lone line: 9 lines become 7 + 2, not 8 + 1. */
 function buildPages(g, blocks) {
-  var out = [], i, j, lines, wanted, k;
+  var out = [], i, j, k, n, take, wanted, page, blockPages, startPage;
   var LIMIT = 8;
   for (i = 0; i < blocks.length; i++) {
-    lines = [];
+    blockPages = 0;
+    page = null;
+    startPage = function () {
+      page = { title: blocks[i].title, cont: blockPages > 0, lines: [] };
+      blockPages++;
+      out.push(page);
+    };
     for (j = 0; j < blocks[i].lines.length; j++) {
       wanted = g.wrap(T(blocks[i].lines[j]), 144);
-      for (k = 0; k < wanted.length; k++) lines.push(wanted[k]);
-    }
-    for (j = 0; j < lines.length; j += LIMIT) {
-      out.push({ title: blocks[i].title, cont: j > 0, lines: lines.slice(j, j + LIMIT) });
+      if (wanted.length > LIMIT) {
+        k = 0;
+        while (k < wanted.length) {
+          take = Math.min(LIMIT, wanted.length - k);
+          if (wanted.length - k - take === 1) take = LIMIT - 1;
+          startPage();
+          for (n = k; n < k + take; n++) page.lines.push(wanted[n]);
+          k += take;
+        }
+      } else {
+        if (!page || page.lines.length + wanted.length > LIMIT) startPage();
+        for (n = 0; n < wanted.length; n++) page.lines.push(wanted[n]);
+      }
     }
   }
   return out;

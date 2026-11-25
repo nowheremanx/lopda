@@ -114,7 +114,7 @@ game.scene("prep", {
       for (var nk in need) if (Object.prototype.hasOwnProperty.call(need, nk)) parts.push(DATA.ING[nk].name + "×" + need[nk]);
       UI.text(g, parts.join(" ") + "　定" + (PREP_PLAN[id2] || 0) + "　可" + prepRoom(id2), 10, 202, { color: g.DARK, fit: 196 });
     }
-    UI.footer(g, "↑↓ 选　←→ 份数　A 备好　B 返回");
+    UI.footer(g, "↑↓选 ←→份数 A备好 B返回");
     UI.toast(g);
   }
 });

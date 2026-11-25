@@ -51,9 +51,15 @@ game.scene("event", {
       if (args.pages) await game.say(args.pages, { name: name, speed: 34 });
       var result = 0;
       if (args.choices && args.choices.length) {
+        // size the box to its longest line instead of a fixed 86 px, so a long
+        // choice never runs off the right edge; keep it right of the portrait
+        var widest = 0;
+        for (var ci = 0; ci < args.choices.length; ci++) widest = Math.max(widest, game.g.measure(args.choices[ci]));
+        if (args.title) widest = Math.max(widest, game.g.measure(args.title));
+        var boxW = Math.min(204, widest + 22); // menuScene's padding: 6 + 6 + arrow 8 + border 2; never wider than the screen
         result = await game.choose(args.choices, {
           title: args.title,
-          x: 124, y: 52, width: 86,
+          x: Math.max(6, Math.min(124, 210 - boxW)), y: 52, width: boxW,
           cancel: args.cancel === true
         });
       }

@@ -137,6 +137,28 @@ test("START does nothing during a dialogue", async () => {
   assert.equal(z.get("busy"), false);
 });
 
+/* ---------- the key hint at the bottom of a map (A talks, START opens the menu) ---------- */
+test("the map's key hint is up on arrival and comes back after standing still, but never under the menu or a dialogue", async () => {
+  const z = await onRoad();
+  assert.equal(z.get("ZT").state().hint, true, "the hint is up on arrival");
+  /* nothing pressed: four seconds and it goes, six and it is back */
+  await z.run(6 * 60 + 20);
+  assert.equal(z.get("ZT").state().hint, true, "back after standing still");
+  /* the field menu takes the bottom of the screen: the hint is not drawn, even if its time is not up */
+  await z.tap("start");
+  assert.equal(z.get("fm.kind"), "main");
+  assert.equal(z.get("ZT").state().hint, false, "input put it away");
+  z.get("hintT = 2");
+  assert.equal(z.get("ZT").state().hint, false, "the field menu leaves no room for it");
+  await z.tap("b");
+  assert.equal(z.get("fm"), null);
+  /* nor under a dialogue, which is an overlay of its own over the map */
+  z.get("talk([{ say: 'hello' }])");
+  await z.run(2);
+  z.get("hintT = 2");
+  assert.equal(z.get("ZT").state().hint, false, "a dialogue leaves no room for it");
+});
+
 /* a cutscene seen before: A fast-forwards the motion, but every line of its dialogue is still shown (A also turns the page,
    and a skip that swallowed the dialogue lost the boss's entrance to the first press) */
 test("a seen cutscene skips its motion with A but still shows every line: the boss's entrance", async () => {
