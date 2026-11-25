@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Radio POC">
+<meta name="theme-color" content="#262925">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="../../runtime/icons/apple-touch-icon.png">
+<title>Radio POC</title>
+<!--
+  POC, research only (not part of the handheld, not linked from it, never merged as is).
+  Questions it answers on a real iPhone:
+    1. Can a https page play internet radio (UFM 100.3 and others), and what happens to http-only streams?
+    2. Can a pasted .m3u / .pls / .m3u8 link be resolved in the browser (needs CORS for .m3u/.pls)?
+    3. Does sound keep going when the screen locks or another app comes to the front, for:
+       A an <audio> element in the page, B an <audio> element inside a sandboxed iframe (where Lo-PDA apps live),
+       C Web Audio synthesised live with a timer scheduler (how Tape4 plays today),
+       D the same music rendered to a WAV first and played by <audio>,
+       E Web Audio routed through an <audio> element (MediaStreamDestination),
+       each with or without Media Session (lock-screen controls) and with navigator.audioSession.type set.
+  The log measures it: when the page comes back it says how many seconds were hidden and how far the sound moved.
+  Plain ES5 like the runtime; no network except the streams the user picks; nothing stored.
+-->
+<style>
+:root{--ink:#1f2a14;--dark:#4a5a32;--mid:#7d8a58;--paper:#a3ad7e}
+*{box-sizing:border-box}
+html,body{margin:0;background:#262925}
+body{font:15px/1.4 -apple-system,system-ui,sans-serif;color:var(--ink);padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+main{max-width:480px;margin:0 auto;background:var(--paper);min-height:100vh;padding:12px 16px 40px}
+h1{font-size:18px;margin:4px 0 2px}
+h2{font-size:15px;margin:18px 0 6px;border-bottom:2px solid var(--ink);padding-bottom:2px}
+p.note{margin:4px 0;color:var(--dark);font-size:13px}
+button,select,input{font:inherit;color:var(--ink);background:var(--paper);border:2px solid var(--ink);border-radius:0;min-height:44px}
+button{padding:0 12px;cursor:pointer}
+button:active,button.on{background:var(--ink);color:var(--paper)}
+input{width:100%;padding:0 8px}
+input::placeholder{color:#4a5a32}
+.row{display:flex;gap:8px;align-items:center;margin:6px 0;flex-wrap:wrap}
+.row>label{flex:1;min-width:120px}
+.list button{display:block;width:100%;text-align:left;margin:4px 0;padding:6px 10px}
+.list small{display:block;color:var(--dark);font-size:12px}
+.list button.on small{color:var(--mid)}
+.modes label{display:flex;gap:8px;align-items:flex-start;min-height:44px;padding:6px 0;border-bottom:1px dashed var(--mid)}
+.modes input{width:22px;min-height:22px;margin:2px 0 0;flex:none;accent-color:#1f2a14}
+#now{border:2px solid var(--ink);padding:8px;margin:8px 0;min-height:44px}
+#now b{display:block}
+#frameBox{display:none;margin:6px 0}
+#frameBox iframe{width:100%;height:96px;border:2px dashed var(--ink);background:var(--paper)}
+#log{font:12px/1.35 ui-monospace,Menlo,monospace;background:var(--ink);color:var(--paper);padding:8px;height:260px;overflow:auto;white-space:pre-wrap;margin:6px 0}
+.big{font-size:16px;font-weight:bold}
+</style>
+</head>
+<body>
+<main>
+<h1>网络收音机 / 后台播放 POC</h1>
+<p class="note">研究页，不是掌机的一部分。选一种播放方式和一个台，播放，然后锁屏或切到别的 app，过一两分钟再回来看日志。</p>
+
+<div id="now"><b id="nowTitle">没在播</b><span id="nowSub" class="note"></span></div>
+<div class="row"><button id="stopBtn" class="big">停止</button><button id="copyBtn">复制日志</button><button id="clearBtn">清空日志</button></div>
+
+<h2>1. 播放方式</h2>
+<div class="modes" id="modes">
+  <label><input type="radio" name="mode" value="A" checked><span><b>A 页面里的 audio 元素</b><br><span class="note">最普通的网络电台做法。</span></span></label>
+  <label><input type="radio" name="mode" value="B"><span><b>B iframe 里的 audio 元素</b><br><span class="note">app 都跑在沙盒 iframe 里。注意：真正的 app 的 CSP 不允许连外网，这里放宽了，只为测后台。要点 iframe 里自己的按钮。</span></span></label>
+  <label><input type="radio" name="mode" value="C"><span><b>C Web Audio 实时合成</b><br><span class="note">四轨机现在的方式：定时器往前排音符。只放内置的测试曲，不放电台。</span></span></label>
+  <label><input type="radio" name="mode" value="D"><span><b>D 先渲染成 WAV，再用 audio 播</b><br><span class="note">同一首测试曲，先离线渲染好（约 3 分钟），再循环播。</span></span></label>
+  <label><input type="radio" name="mode" value="E"><span><b>E Web Audio 经 audio 元素输出</b><br><span class="note">实时合成，但声音走一个 audio 元素（MediaStream）。看能不能骗过后台限制。</span></span></label>
+</div>
+<div id="frameBox"><iframe id="frame" sandbox="allow-scripts" allow="autoplay" title="sandboxed player"></iframe></div>
+
+<h2>2. 系统设置</h2>
+<div class="row"><label for="sess">声音会话 audioSession.type</label>
+  <select id="sess"><option value="">不设（浏览器默认）</option><option value="playback">playback（后台播放用）</option><option value="ambient">ambient（掌机现在用的）</option><option value="auto">auto</option></select></div>
+<p class="note" id="sessNote"></p>
+<div class="row"><label for="ms">锁屏控制 Media Session</label>
+  <select id="ms"><option value="on">开：显示台名和播放/暂停</option><option value="off">关</option></select></div>
+<p class="note" id="msNote"></p>
+
+<h2>3. 电台（A / B 用）</h2>
+<div class="list" id="stations"></div>
+
+<h2>4. 粘贴一个链接</h2>
+<p class="note">可以是流地址，也可以是 .m3u / .pls / .m3u8 文件的链接。</p>
+<div class="row"><input id="paste" type="url" placeholder="https://..." autocomplete="off" autocapitalize="off" spellcheck="false"></div>
+<div class="row"><button id="pasteBtn">解析并播放</button></div>
+
+<h2>5. 测试曲（C / D / E 用）</h2>
+<div class="row"><button id="songBtn" class="big">播放测试曲</button></div>
+<p class="note">一首原创的 8 小节循环，四个音色，约 100 BPM。</p>
+
+<h2>日志</h2>
+<p class="note">回到前台时会算：后台多少秒，声音前进了多少秒。两者接近 = 后台一直在响。</p>
+<div id="log"></div>
+<p class="note" id="env"></p>
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ---------- stations: checked on 2026-11-25 from a desktop browser (radio-browser.info directory) ---------- */
+  var STW = "https://playerservices.streamtheworld.com/api/livestream-redirect/";
+  var STATIONS = [
+    { name: "UFM 100.3（AAC）", url: STW + "UFM_1003AAC.aac", sub: "新加坡 Mediacorp，https，直播流" },
+    { name: "UFM 100.3（MP3）", url: STW + "UFM_1003.mp3", sub: "同一个台的 MP3 流" },
+    { name: "Radio Paradise", url: "https://stream.radioparadise.com/aac-128", sub: "美国，听众支持，https AAC" },
+    { name: "SomaFM Groove Salad", url: "https://ice1.somafm.com/groovesalad-128-mp3", sub: "美国，https MP3" },
+    { name: "BBC World Service（HLS）", url: "https://a.files.bbci.co.uk/media/live/manifesto/audio/simulcast/hls/nonuk/sbr_low/ak/bbc_world_service.m3u8", sub: ".m3u8：Safari 原生能播，桌面 Chrome 通常不能" },
+    { name: "http 测试：SomaFM（http 地址）", url: "http://ice1.somafm.com/groovesalad-128-mp3", sub: "混合内容：被拦截，还是被自动升级成 https？（这个台也有 https）" },
+    { name: "http 测试：只有 http 的台", url: "http://radiostream.communityradio.kr/jcfm1", sub: "韩国社区台，应该只有 http，预期被拦截（猜测）" }
+  ];
+
+  var $ = function (id) { return document.getElementById(id); };
+  var logEl = $("log"), lines = [];
+  var t0 = Date.now();
+  function stamp() {
+    var d = new Date();
+    function p(n) { return (n < 10 ? "0" : "") + n; }
+    return p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
+  }
+  function log(s) {
+    var line = stamp() + "  " + s;
+    lines.push(line);
+    logEl.textContent = lines.join("\n");
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+  function mode() { var r = document.querySelector("input[name=mode]:checked"); return r ? r.value : "A"; }
+  function setNow(title, sub) { $("nowTitle").textContent = title; $("nowSub").textContent = sub || ""; }
+
+  /* ---------- environment ---------- */
+  var standalone = window.navigator.standalone === true || (window.matchMedia && matchMedia("(display-mode: standalone)").matches);
+  var hlsNative = document.createElement("audio").canPlayType("application/vnd.apple.mpegurl");
+  $("env").textContent = "运行方式：" + (standalone ? "主屏幕 app（standalone）" : "浏览器标签页") +
+    " · 原生 HLS：" + (hlsNative ? "能（" + hlsNative + "）" : "不能") +
+    " · audioSession：" + (navigator.audioSession ? "有（现在 " + navigator.audioSession.type + "）" : "没有") +
+    " · mediaSession：" + ("mediaSession" in navigator ? "有" : "没有") +
+    " · " + navigator.userAgent;
+  log("开始。" + (standalone ? "主屏幕 app" : "浏览器标签页") + "，页面 " + location.protocol);
+
+  /* ---------- audio session ---------- */
+  function applySession() {
+    var v = $("sess").value;
+    if (!navigator.audioSession) { $("sessNote").textContent = "这个浏览器没有 navigator.audioSession（iOS 17+ Safari 才有），这一项不起作用。"; return; }
+    if (v) { try { navigator.audioSession.type = v; } catch (e) { log("audioSession 设置失败：" + e.name); } }
+    $("sessNote").textContent = "现在是 " + navigator.audioSession.type + "。";
+    log("audioSession.type = " + navigator.audioSession.type);
+  }
+  $("sess").onchange = applySession;
+  applySession();
+
+  /* ---------- media session ---------- */
+  var current = null; /* {kind, title, play(), pause()} */
+  function applyMediaSession() {
+    if (!("mediaSession" in navigator)) { $("msNote").textContent = "这个浏览器没有 Media Session。"; return; }
+    var ms = navigator.mediaSession, on = $("ms").value === "on";
+    var acts = ["play", "pause", "stop", "seekbackward", "seekforward", "previoustrack", "nexttrack"];
+    for (var i = 0; i < acts.length; i++) { try { ms.setActionHandler(acts[i], null); } catch (e) {} }
+    if (!on || !current) { ms.metadata = null; $("msNote").textContent = on ? "播放时会设置。" : "已关：锁屏上只有浏览器自己猜的信息（如果有）。"; return; }
+    try {
+      ms.metadata = new MediaMetadata({ title: current.title, artist: "Lo-PDA Radio POC", album: "方式 " + current.kind,
+        artwork: [{ src: "../../runtime/icons/icon-512.png", sizes: "512x512", type: "image/png" }] });
+    } catch (e) { log("MediaMetadata 失败：" + e.name); }
+    try { ms.setActionHandler("play", function () { log("锁屏：播放"); if (current) current.play(); }); } catch (e) {}
+    try { ms.setActionHandler("pause", function () { log("锁屏：暂停"); if (current) current.pause(); }); } catch (e) {}
+    try { ms.setActionHandler("stop", function () { log("锁屏：停止"); stopAll(); }); } catch (e) {}
+    $("msNote").textContent = "已设置：锁屏应显示「" + current.title + "」。";
+  }
+  function msState(s) { if ("mediaSession" in navigator) { try { navigator.mediaSession.playbackState = s; } catch (e) {} } }
+  $("ms").onchange = applyMediaSession;
+
+  /* ---------- A: an <audio> element in the page ---------- */
+  var audio = new Audio();
+  audio.preload = "none";
+  audio.setAttribute("playsinline", "");
+  ["playing", "pause", "waiting", "stalled", "ended", "error", "emptied"].forEach(function (ev) {
+    audio.addEventListener(ev, function () {
+      var extra = ev === "error" && audio.error ? " code " + audio.error.code + (audio.error.code === 4 ? "（格式不支持，或被拦截）" : "") : "";
+      log("audio: " + ev + extra + " t=" + (isFinite(audio.currentTime) ? audio.currentTime.toFixed(1) : "?"));
+      if (ev === "playing") msState("playing");
+      if (ev === "pause") msState("paused");
+    });
+  });
+
+  function playUrl(url, title) {
+    var m = mode();
+    if (m === "C" || m === "D" || m === "E") { log("方式 " + m + " 只放测试曲。电台请选 A 或 B。"); return; }
+    if (location.protocol === "https:" && /^http:/i.test(url)) log("注意：http 流在 https 页面里是混合内容（mixed content），看看是被拦截还是被自动升级。");
+    if (/\.m3u8(\?|$)/i.test(url) && !hlsNative) log("注意：这个浏览器不能原生播 HLS（.m3u8）。Safari 能。");
+    stopAll();
+    if (m === "A") {
+      audio.src = url;
+      current = { kind: "A", title: title, play: function () { audio.play(); }, pause: function () { audio.pause(); },
+        pos: function () { return audio.currentTime; } };
+      applyMediaSession();
+      setNow(title, "方式 A · " + url);
+      log("A 播放 " + url);
+      audio.play().then(function () { log("A play() 成功"); }, function (e) { log("A play() 失败：" + e.name + " " + e.message); });
+    } else {
+      showFrame(true);
+      frameSend({ cmd: "load", url: url, title: title });
+      current = { kind: "B", title: title, play: function () { frameSend({ cmd: "play" }); }, pause: function () { frameSend({ cmd: "pause" }); },
+        pos: function () { return framePos; } };
+      applyMediaSession();
+      setNow(title, "方式 B · 点下面 iframe 里的按钮开始 · " + url);
+      log("B 已把地址交给 iframe，请点 iframe 里的「播放」");
+    }
+  }
+
+  /* ---------- B: an <audio> element inside a sandboxed iframe ----------
+     The real app iframe has connect-src 'none' and media-src data: blob:, so a store app could not play a stream at all;
+     this frame widens media-src only, to learn whether iOS keeps a frame's audio alive in the background. */
+  var FRAME_DOC = '<!doctype html><meta charset="utf-8">' +
+    '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'unsafe-inline\'; style-src \'unsafe-inline\'; media-src https: http: blob: data:">' +
+    '<style>body{margin:0;font:14px -apple-system,sans-serif;background:#a3ad7e;color:#1f2a14;padding:6px}' +
+    'button{font:inherit;min-height:44px;border:2px solid #1f2a14;background:#a3ad7e;color:#1f2a14;padding:0 12px}</style>' +
+    '<div>iframe 里的播放器 <span id="s">（等地址）</span></div><button id="p">播放</button> <button id="q">暂停</button>' +
+    '<script>var a=new Audio();a.setAttribute("playsinline","");var s=document.getElementById("s");' +
+    'function up(m){parent.postMessage({poc:1,msg:m,t:isFinite(a.currentTime)?a.currentTime:0},"*")}' +
+    '["playing","pause","waiting","stalled","error"].forEach(function(e){a.addEventListener(e,function(){s.textContent=e;up("iframe audio: "+e+(e==="error"&&a.error?" code "+a.error.code:""))})});' +
+    'setInterval(function(){parent.postMessage({poc:1,t:isFinite(a.currentTime)?a.currentTime:0},"*")},1000);' +
+    'function go(){a.play().then(function(){up("iframe play() 成功")},function(e){up("iframe play() 失败："+e.name)})}' +
+    'document.getElementById("p").onclick=go;document.getElementById("q").onclick=function(){a.pause()};' +
+    'addEventListener("message",function(e){var d=e.data||{};if(d.cmd==="load"){a.src=d.url;s.textContent=d.title}' +
+    'else if(d.cmd==="play")go();else if(d.cmd==="pause")a.pause();else if(d.cmd==="stop"){a.pause();a.removeAttribute("src");a.load();s.textContent="（停止）"}})' +
+    '<\/script>';
+  var frame = $("frame"), framePos = 0, frameReady = false, frameQueue = [];
+  frame.srcdoc = FRAME_DOC;
+  frame.onload = function () { frameReady = true; while (frameQueue.length) frame.contentWindow.postMessage(frameQueue.shift(), "*"); };
+  function frameSend(m) { if (frameReady) frame.contentWindow.postMessage(m, "*"); else frameQueue.push(m); }
+  function showFrame(on) { $("frameBox").style.display = on ? "block" : "none"; }
+  window.addEventListener("message", function (e) {
+    if (e.source !== frame.contentWindow || !e.data || !e.data.poc) return;
+    framePos = e.data.t;
+    if (e.data.msg) {
+      log(e.data.msg + " t=" + framePos.toFixed(1));
+      if (/playing/.test(e.data.msg)) msState("playing");
+      if (/: pause/.test(e.data.msg)) msState("paused");
+    }
+  });
+
+  /* ---------- the test song: one original 8-bar loop, used by C, D and E ---------- */
+  var BPM = 100, BEAT = 60 / BPM, LOOP = 32 * BEAT; /* 8 bars of 4/4 = 19.2 s */
+  var CHORDS = [[57, 60, 64], [53, 57, 60], [48, 52, 55], [55, 59, 62]]; /* Am F C G, two bars each */
+  var MELODY = [76, 0, 74, 72, 74, 0, 69, 0, 72, 0, 71, 69, 67, 0, 0, 0]; /* one per half beat, repeated with a twist */
+  function hz(n) { return 440 * Math.pow(2, (n - 69) / 12); }
+  function note(ctx, out, type, freq, at, dur, vol) {
+    var o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = type; o.frequency.value = freq;
+    g.gain.setValueAtTime(0, at);
+    g.gain.linearRampToValueAtTime(vol, at + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0008, at + dur);
+    o.connect(g); g.connect(out); o.start(at); o.stop(at + dur + 0.02);
+  }
+  function noiseBuf(ctx) {
+    var b = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.2), ctx.sampleRate), d = b.getChannelData(0), x = 12345;
+    for (var i = 0; i < d.length; i++) { x = (x * 1103515245 + 12345) & 0x7fffffff; d[i] = x / 0x3fffffff - 1; }
+    return b;
+  }
+  /* schedules beat b (0..31) of the loop at time `at` */
+  function scheduleBeat(ctx, out, nb, b, at) {
+    var ch = CHORDS[Math.floor(b / 8) % 4];
+    if (b % 2 === 0) for (var i = 0; i < 3; i++) note(ctx, out, "triangle", hz(ch[i]), at, BEAT * 1.8, 0.05);
+    note(ctx, out, "square", hz(ch[0] - 12), at, BEAT * 0.45, 0.06);
+    for (var h = 0; h < 2; h++) {
+      var m = MELODY[(b * 2 + h) % 16];
+      if (m) note(ctx, out, "square", hz(m + (b >= 16 && (b * 2 + h) % 16 === 4 ? 2 : 0)), at + h * BEAT / 2, BEAT * 0.4, 0.04);
+    }
+    var s = ctx.createBufferSource(), g = ctx.createGain(), f = ctx.createBiquadFilter();
+    s.buffer = nb; f.type = "highpass"; f.frequency.value = b % 2 ? 2000 : 6000;
+    g.gain.setValueAtTime(b % 2 ? 0.12 : 0.06, at); g.gain.exponentialRampToValueAtTime(0.001, at + 0.08);
+    s.connect(f); f.connect(g); g.connect(out); s.start(at); s.stop(at + 0.1);
+  }
+
+  /* C and E: live synthesis with a lookahead timer, the way Tape4 schedules */
+  var live = null; /* {ctx, timer, next, beat, ticks, el} */
+  function startLive(viaElement) {
+    var AC = window.AudioContext || window.webkitAudioContext;
+    var ctx = new AC(), out = ctx.destination, el = null;
+    if (viaElement) {
+      if (!ctx.createMediaStreamDestination) { log("E：这个浏览器没有 createMediaStreamDestination"); ctx.close(); return; }
+      var dest = ctx.createMediaStreamDestination();
+      out = dest;
+      el = new Audio(); el.setAttribute("playsinline", ""); el.srcObject = dest.stream;
+      el.play().then(function () { log("E audio 元素 play() 成功"); }, function (e) { log("E audio 元素 play() 失败：" + e.name); });
+    }
+    var nb = noiseBuf(ctx);
+    live = { ctx: ctx, el: el, next: ctx.currentTime + 0.1, beat: 0, ticks: 0, nb: nb, out: out };
+    ctx.onstatechange = function () { log("AudioContext: " + ctx.state + " t=" + ctx.currentTime.toFixed(1)); };
+    live.timer = setInterval(tick, 25);
+    tick();
+    var k = viaElement ? "E" : "C";
+    current = { kind: k, title: "测试曲（" + (viaElement ? "Web Audio 经 audio 元素" : "Web Audio 实时") + "）",
+      play: function () { ctx.resume(); if (el) el.play(); }, pause: function () { ctx.suspend(); if (el) el.pause(); },
+      pos: function () { return ctx.currentTime; } };
+    applyMediaSession(); msState("playing");
+    setNow(current.title, "方式 " + k + " · 定时器每 25 ms 往前排 0.2 秒");
+    log(k + " 开始，AudioContext " + ctx.state + "，采样率 " + ctx.sampleRate);
+  }
+  function tick() {
+    if (!live) return;
+    live.ticks++;
+    var ctx = live.ctx;
+    if (live.next < ctx.currentTime - 1) { log("定时器落后 " + (ctx.currentTime - live.next).toFixed(1) + " 秒，跳过（后台节流？）"); live.next = ctx.currentTime + 0.05; }
+    while (live.next < ctx.currentTime + 0.2) {
+      scheduleBeat(ctx, live.out, live.nb, live.beat % 32, live.next);
+      live.next += BEAT; live.beat++;
+    }
+  }
+
+  /* D: render the same loop offline, write a WAV, play it with <audio loop> */
+  function renderWav(done) {
+    var rate = 22050, OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    var ctx = new OAC(1, Math.ceil(rate * LOOP), rate), nb = noiseBuf(ctx);
+    for (var b = 0; b < 32; b++) scheduleBeat(ctx, ctx.destination, nb, b, 0.02 + b * BEAT);
+    var t = Date.now();
+    var p = ctx.startRendering();
+    function fin(buf) {
+      /* the loop repeated REPS times (about 3 minutes), so currentTime never wraps during a lock-screen test */
+      var d1 = buf.getChannelData(0), n1 = d1.length, REPS = 10, n = n1 * REPS, d = new Float32Array(n);
+      for (var r = 0; r < REPS; r++) d.set(d1, r * n1);
+      var ab = new ArrayBuffer(44 + n * 2), v = new DataView(ab);
+      function str(o, s) { for (var i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); }
+      str(0, "RIFF"); v.setUint32(4, 36 + n * 2, true); str(8, "WAVE"); str(12, "fmt "); v.setUint32(16, 16, true);
+      v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true);
+      v.setUint16(32, 2, true); v.setUint16(34, 16, true); str(36, "data"); v.setUint32(40, n * 2, true);
+      for (var i = 0; i < n; i++) { var x = Math.max(-1, Math.min(1, d[i])); v.setInt16(44 + i * 2, x * 32767, true); }
+      log("D 渲染 " + LOOP.toFixed(1) + " 秒用了 " + (Date.now() - t) + " ms，重复 " + REPS + " 遍，WAV " + Math.round(ab.byteLength / 1024) + " KB");
+      done(new Blob([ab], { type: "audio/wav" }));
+    }
+    if (p && p.then) p.then(fin); else ctx.oncomplete = function (e) { fin(e.renderedBuffer); };
+  }
+  /* rendered once at load: on iOS play() must run inside the tap, so the WAV has to be ready before it */
+  var wavUrl = null;
+  renderWav(function (blob) { wavUrl = URL.createObjectURL(blob); });
+
+  $("songBtn").onclick = function () {
+    var m = mode();
+    if (m === "A" || m === "B") { log("测试曲请选方式 C、D 或 E。"); return; }
+    stopAll();
+    if (m === "C") startLive(false);
+    else if (m === "E") startLive(true);
+    else {
+      audio.loop = true;
+      var go = function (url) {
+        audio.src = url;
+        current = { kind: "D", title: "测试曲（渲染好的 WAV）", play: function () { audio.play(); }, pause: function () { audio.pause(); },
+          pos: function () { return audio.currentTime; } };
+        applyMediaSession();
+        setNow(current.title, "方式 D · 约 " + Math.round(LOOP * 10 / 60) + " 分钟的 WAV，循环");
+        audio.play().then(function () { log("D play() 成功"); }, function (e) { log("D play() 失败：" + e.name + "（再点一次试试）"); });
+      };
+      if (wavUrl) go(wavUrl); else log("WAV 还在渲染，过一秒再点");
+    }
+  };
+
+  /* ---------- stop ---------- */
+  function stopAll() {
+    audio.pause(); audio.loop = false; audio.removeAttribute("src"); audio.load();
+    frameSend({ cmd: "stop" }); framePos = 0;
+    if (live) {
+      clearInterval(live.timer);
+      if (live.el) { live.el.pause(); live.el.srcObject = null; }
+      live.ctx.close(); live = null;
+    }
+    current = null; applyMediaSession(); msState("none");
+    setNow("没在播", "");
+  }
+  $("stopBtn").onclick = function () { stopAll(); log("停止"); };
+
+  /* ---------- stations list ---------- */
+  var listEl = $("stations");
+  STATIONS.forEach(function (s) {
+    var b = document.createElement("button");
+    b.innerHTML = "<span></span><small></small>";
+    b.firstChild.textContent = s.name; b.lastChild.textContent = s.sub;
+    b.onclick = function () { playUrl(s.url, s.name); };
+    listEl.appendChild(b);
+  });
+
+  /* ---------- paste: a stream, or a playlist file (.m3u / .pls / .m3u8) ---------- */
+  function parsePlaylist(text) {
+    if (/#EXT-X-/.test(text)) return { hls: true };
+    var m, urls = [];
+    var re = /^\s*File\d+\s*=\s*(\S+)/gim; /* .pls */
+    while ((m = re.exec(text))) urls.push(m[1]);
+    if (!urls.length) text.split(/\r?\n/).forEach(function (l) { l = l.trim(); if (l && l[0] !== "#" && /^https?:\/\//i.test(l)) urls.push(l); });
+    return { urls: urls };
+  }
+  $("pasteBtn").onclick = function () {
+    var url = $("paste").value.trim();
+    if (!/^https?:\/\//i.test(url)) { log("链接要以 http:// 或 https:// 开头"); return; }
+    var path = url.split("?")[0].toLowerCase();
+    if (/\.m3u8$/.test(path)) { log("这是 HLS 列表（.m3u8），直接交给播放器"); playUrl(url, "粘贴的 HLS"); return; }
+    if (!/\.(m3u|pls)$/.test(path)) { log("当作流地址直接播"); playUrl(url, "粘贴的流"); return; }
+    /* .m3u / .pls: the browser must read the file, which needs the other site to allow CORS. */
+    log("读取列表文件 " + url);
+    var ok = false;
+    fetch(url).then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.text(); }).then(function (t) {
+      var p = parsePlaylist(t);
+      if (p.hls) { log("文件里是 HLS，直接交给播放器"); playUrl(url, "粘贴的 HLS"); return; }
+      if (!p.urls.length) { log("文件里没找到流地址"); return; }
+      log("找到 " + p.urls.length + " 个地址，用第一个：" + p.urls[0]);
+      var firstHttps = p.urls.filter(function (u) { return /^https:/i.test(u); })[0];
+      if (firstHttps && firstHttps !== p.urls[0]) log("其中有 https 的，改用它：" + firstHttps);
+      playUrl(firstHttps || p.urls[0], "粘贴的列表");
+    }, function (e) {
+      log("读不到列表文件（" + e.message + "）。多半是对方没开 CORS，或者是 http 被拦了。可以用文本编辑器打开这个文件，把里面的流地址直接贴进来。");
+    });
+  };
+
+  /* ---------- the measurement: how far did the sound move while the page was hidden? ---------- */
+  var hiddenAt = 0, hiddenPos = 0, hiddenTicks = 0;
+  function pos() { try { return current && current.pos ? current.pos() : 0; } catch (e) { return 0; } }
+  document.addEventListener("visibilitychange", function () {
+    if (document.hidden) {
+      hiddenAt = Date.now(); hiddenPos = pos(); hiddenTicks = live ? live.ticks : 0;
+      log("页面隐藏（锁屏或切走）。" + (current ? "正在播：方式 " + current.kind + " t=" + hiddenPos.toFixed(1) : "没在播"));
+    } else if (hiddenAt) {
+      var away = (Date.now() - hiddenAt) / 1000, moved = pos() - hiddenPos;
+      var msg = "回来了。后台 " + away.toFixed(0) + " 秒";
+      if (current) {
+        msg += "，声音前进 " + moved.toFixed(0) + " 秒";
+        if (live) msg += "，定时器跑了 " + (live.ticks - hiddenTicks) + " 次（正常约 " + Math.round(away * 40) + " 次）";
+        msg += moved > away * 0.9 ? " => 后台一直在响" : moved < 2 ? " => 后台基本停了" : " => 后台响了一部分";
+        if (current.kind === "D" && moved < 0) msg += "（WAV 播完一遍又从头开始了，以耳朵为准）";
+      }
+      log(msg);
+      hiddenAt = 0;
+    }
+  });
+  window.addEventListener("pagehide", function () { log("pagehide"); });
+  window.addEventListener("pageshow", function (e) { if (e.persisted) log("pageshow（从缓存恢复）"); });
+
+  /* ---------- log tools ---------- */
+  $("copyBtn").onclick = function () {
+    var text = lines.join("\n") + "\n\n" + $("env").textContent;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { log("日志已复制"); }, function () { log("复制失败，请长按日志区域手动选择"); });
+    } else log("这个浏览器不能直接复制，请长按日志区域手动选择");
+  };
+  $("clearBtn").onclick = function () { lines = []; logEl.textContent = ""; };
+  document.getElementById("modes").addEventListener("change", function () {
+    var m = mode();
+    showFrame(m === "B");
+    log("方式改成 " + m);
+  });
+})();
+</script>
+</body>
+</html>
