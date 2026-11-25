@@ -115,6 +115,33 @@ test("tuner: six stations on first open, A plays, the dial steps, it plays on af
   assert.deepEqual(errors, []);
 });
 
+test("tuner: HOME mid-glide lands and tunes, lock-screen next works away from the program, a stray waiting recovers", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors, key, st } = await open(t);
+  await key("a");
+  await until(p, () => window.LOPDA_DEBUG.tuner.E.state === "playing");
+  /* HOME while the needle is still gliding: it lands on FIP and tunes it, never stays muted on the old station */
+  await p.evaluate(() => window.LOPDA_DEBUG.setButton("right", true));
+  await p.evaluate(() => window.LOPDA_DEBUG.setButton("right", false));
+  await p.click("#home-key");
+  await until(p, () => { const { E } = window.LOPDA_DEBUG.tuner; return E.st.name === "FIP" && E.state === "playing"; });
+  assert.equal(await p.evaluate(() => window.LOPDA_DEBUG.tuner.E.el.muted), false, "not left muted");
+  /* the lock screen's next, with no animation frames to wait for (another program has the screen) */
+  await p.evaluate(() => window.LOPDA_DEBUG.tuner.step(1, true, true));
+  await until(p, () => { const { E } = window.LOPDA_DEBUG.tuner; return E.st.name === "Radio Paradise" && E.state === "playing"; });
+  assert.equal(await p.evaluate(() => window.LOPDA_DEBUG.tuner.E.el.muted), false);
+  /* and it goes round the ends */
+  const n = (await st()).n;
+  for (let i = 3; i <= n; i++) await p.evaluate(() => window.LOPDA_DEBUG.tuner.step(1, true, true));
+  await until(p, () => { const { E } = window.LOPDA_DEBUG.tuner; return E.st.name === "UFM 100.3" && E.state === "playing"; });
+  /* "waiting" while the sound goes on: back to playing on the next progress, no reconnect */
+  const gen = await p.evaluate(() => window.LOPDA_DEBUG.tuner.E.gen);
+  await p.evaluate(() => window.LOPDA_DEBUG.tuner.E.el.dispatchEvent(new Event("waiting")));
+  assert.equal((await st()).state, "buffering");
+  await until(p, () => window.LOPDA_DEBUG.tuner.E.state === "playing");
+  assert.equal(await p.evaluate(() => window.LOPDA_DEBUG.tuner.E.gen), gen, "no re-dial");
+  assert.deepEqual(errors, []);
+});
+
 test("tuner: another program's music stops it, and so does the sleep timer", { skip, timeout: 60000 }, async (t) => {
   const { p, errors, key, st } = await open(t);
   await key("a");
@@ -126,10 +153,13 @@ test("tuner: another program's music stops it, and so does the sleep timer", { s
   assert.equal(await p.evaluate(() => window.LP.SND.hold), false, "and let go when it stops");
   assert.match(await p.locator("#toast").textContent(), /别的程序/);
 
-  /* an app's music (through the chip host) claims the speaker too */
+  /* a built-in's own chip sound (the pet's rain bed, its jingle) does not: only an app's music claims (store.js) */
   await key("a");
   await until(p, () => window.LOPDA_DEBUG.tuner.E.state === "playing");
   await p.evaluate(() => window.LP.chip.music({ action: "play", song: { bpm: 120, p1: "c4" }, loop: false }));
+  await sleep(300);
+  assert.equal((await st()).state, "playing", "LP.chip from a built-in leaves the radio on");
+  await p.evaluate(() => window.LP.claimAudio("app"));
   await until(p, () => window.LOPDA_DEBUG.tuner.E.state === "off");
 
   await key("a");

@@ -314,8 +314,9 @@ function appSfx(name){ playNamed(name,"app"); }
 var chip=window.LopdaChip.host({
   context:function(make){ return SND.ctx || (make ? audio() : null); },
   output:function(){ return SND.app; },
-  level:applyLevel,
-  claim:function(){ claimAudio("app"); }
+  level:applyLevel
+  /* no claim here: built-ins use LP.chip too (the pet's weather bed, its hatch jingle), and a quiet room must not
+     switch the radio off. store.js claims for apps, whose music is their own */
 });
 function sfxCustom(params){
   if(!SND.vol || !audio()) return;
