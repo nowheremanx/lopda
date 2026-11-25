@@ -63,7 +63,10 @@ var MOTION_OFF = T({ zh: "感应未允许：用左右键转", en: "Motion off: u
 var LAY_FLAT = T({ zh: "放平一点，让气泡回到中间", en: "Lay it flat: bubble to the middle" });
 var HINT = T({ zh: "旧历书上的说法，图个吉利", en: "Old almanac lore, just for luck." });
 var KEY_LINE = T({ zh: "A 说明 · 上下换日 · START 今天", en: "A info · ↑↓ day · START today" });
-var PANEL_TITLE = T({ zh: "这一天的五位", en: "That day's five" });
+/* Without a compass Left/Right turn the dial, so the key line has to say so; the full Chinese
+   line is too wide for 216 px, and the English even more so, hence the pairs run together. */
+var KEY_LINE_TURN = T({ zh: "←→转 A说明 ↑↓换日 START今天", en: "←→turn A info ↑↓day START today" });
+var PANEL_TITLE = T({ zh: "这一天的五位", en: "The day's five gods" });
 var PANEL_HINT = T({ zh: "平放手机；方向不对就把手机画几个 8 字", en: "Hold it flat; if it is off, wave the phone in a figure 8." });
 var PANEL_CLOSE = T({ zh: "A/B 关闭 · 上下换日", en: "A/B close · ↑↓ day" });
 
@@ -90,7 +93,7 @@ function godList(stem, deg) {
 function headerText(dt, p) {
   var text = T({
     zh: dt.m + "月" + dt.d + "日 " + p.name + "日",
-    en: MONTHS[dt.m - 1] + " " + dt.d + " · day " + p.name
+    en: MONTHS[dt.m - 1] + " " + dt.d + " · " + p.name + "日"
   });
   if (offset < 0) {
     text += T({ zh: offset === -1 ? " · 昨" : " · 前" + (-offset), en: offset === -1 ? " · prev" : " · prev " + (-offset) });
@@ -183,6 +186,8 @@ if (HAS_MOTION) {
 /* ---- easing: each 11.25-degree step glides in about 150 ms, with a tick ---- */
 var dialAngle = 0, dialFrom = 0, dialTo = 0, dialT = 1;
 
+/* the dial follows the magnetometer when there is one, and the keys when there is not */
+function keyLine() { return compass ? KEY_LINE : KEY_LINE_TURN; }
 function fallbackLine() {
   if (compass) return "";
   if (HAS_MOTION && wanted && !live && !denied) return "";   /* the dialog is still up */
@@ -483,7 +488,7 @@ game.scene("compass", {
     drawFaceMark(g);
     drawNotice(g);
     drawFaced(g, p.stem);
-    g.text(KEY_LINE, CX, 212, { align: "center", color: g.DARK });
+    g.text(keyLine(), CX, 212, { align: "center", color: g.DARK });
     g.text(HINT, CX, 226, { align: "center", color: g.DARK });
     if (panel) drawPanel(g, p.stem);
   }
