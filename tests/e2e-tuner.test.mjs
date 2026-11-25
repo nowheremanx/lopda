@@ -66,7 +66,7 @@ async function open(t, opts = {}) {
   });
   await p.route(/api\.radio-browser\.info/, (r) => {
     asked.push(r.request().url());
-    return r.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify(DIRECTORY) });
+    return r.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify(opts.directory || DIRECTORY) });
   });
   await p.goto(`${base}/runtime/?debug`);
   await p.waitForFunction(() => window.LP && window.LP.S.db);
@@ -157,6 +157,20 @@ test("tuner: UP / DOWN keep the menu's chosen row in view on the smallest screen
   assert.equal(await p.evaluate(() => document.getElementById("v-tuner").scrollTop), 0, "the screen itself never scrolls");
   await key("up");
   assert.ok(await seen(), "last row in view");
+  assert.deepEqual(errors, []);
+});
+
+test("tuner: on Find and My stations only the rows scroll; the search box and the bar stay put", { skip, timeout: 60000 }, async (t) => {
+  const directory = Array.from({ length: 30 }, (_, i) => ({ stationuuid: "u" + i, name: "Test FM " + i, url: "https://radio.test/s" + i + ".mp3", countrycode: "US", codec: "MP3", bitrate: 128, hls: 0 }));
+  const { p, errors, key } = await open(t, { viewport: { width: 331, height: 560 }, directory });
+  await key("start", "down", "a");
+  await p.waitForFunction(() => document.querySelectorAll("#tn-results li").length > 3);
+  const top = () => p.evaluate(() => document.getElementById("tn-find-q").getBoundingClientRect().top);
+  const before = await top();
+  for (let i = 0; i < 12; i++) await key("down");
+  assert.equal(await top(), before, "the search box does not move");
+  assert.ok(await p.evaluate(() => document.getElementById("tn-results").scrollTop) > 0, "the results scrolled");
+  assert.equal(await p.evaluate(() => document.getElementById("tn-page-find").scrollTop), 0);
   assert.deepEqual(errors, []);
 });
 
