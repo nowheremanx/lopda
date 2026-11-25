@@ -1,6 +1,6 @@
 {
   "spec": "lopda/1",
-  "generated": "2026-11-24",
+  "generated": "2026-11-25",
   "apps": [
     {
       "spec": "lopda/1",
@@ -185,8 +185,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/fake-yu/index.html",
-      "sha256": "a17342935d869a8fd67e0636635d4dbd5c819f974a8ddf5be6eb7647008396e3",
-      "bytes": 205321
+      "sha256": "902893afdfeb493498e16f744182e2eb2d8d483474cbcd67dd87e269a32be08b",
+      "bytes": 206596
     },
     {
       "spec": "lopda/1",
@@ -480,7 +480,7 @@
       ],
       "version": "1.6.1",
       "released": "2026-10-24",
-      "updated": "2026-10-25",
+      "updated": "2026-11-24",
       "description": "在字母盘上拼出单词，填满小小字谜格。拼对后中文显示在格下，再读出英文。",
       "i18n": {
         "zh": {
@@ -528,7 +528,7 @@
       ],
       "version": "1.1.0",
       "released": "2026-10-16",
-      "updated": "2026-10-16",
+      "updated": "2026-11-24",
       "description": "倾斜机身让小钢珠滚到终点，别掉进洞。也能用方向键推。倾斜感应的示范。",
       "i18n": {
         "zh": {

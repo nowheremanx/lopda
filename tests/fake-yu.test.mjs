@@ -134,11 +134,11 @@ test("story still has ten chapters, one choice and four endings", () => {
 
 /* one run of the app with a fake PAD and a manual clock; press()/release() go through
    PAD's press/release events, exactly as the chin buttons do */
-function harness(file, seed) {
+function harness(file, seed, lang) {
   const on = { press: [], release: [] }, down = new Set();
   let image = null;
   const pad = {
-    lang: "zh", spec: "lopda/1",
+    lang: lang || "zh", spec: "lopda/1",
     on: (type, fn) => { if (on[type]) on[type].push(fn); }, off() {},
     isDown: (b) => down.has(b),
     load: () => Promise.resolve(null), save() {}, remove() {}, exit() {}, sfx() {},
@@ -310,3 +310,44 @@ test("the king's eye twitches before it opens, and scoring is unchanged", async 
   }
 });
 
+
+/* The play HUD and the B touch button, in both languages and for every song: the key hints sit between
+   the song's short name and the suspicion eye (from x = 112) without touching either, and the touch
+   button and its label stay on the 160 px screen. (An iPhone showed "A play B hit" running into the eye
+   and "B chime" cut off at the right edge in English.) */
+for (const lang of ["zh", "en"]) {
+  test(`the play HUD and the B button fit the screen for every song (${lang})`, async () => {
+    const h = harness(APP, 7, lang);
+    await h.frame(12);
+    const calls = recordText(h.game);
+    for (let i = 0; i < FAKE_SONGS.length; i++) {
+      h.game.go("play", { i, story: false }, { fade: false });
+      await h.frame(3);
+      calls.length = 0;
+      await h.frame(1);
+      const m = (str) => h.game.g.measure(str);
+      const hud = calls.filter((c) => c.y <= 3 && !/^\d+$/.test(c.str));
+      const short = FAKE_SONGS[i].short[lang];
+      const name = hud.find((c) => c.str === short);
+      assert.ok(name, `${short}: the HUD draws the song's short name`);
+      const nameEnd = name.x + m(name.str);
+      for (const c of hud) {
+        if (c === name) continue;
+        assert.ok(c.x > nameEnd, `${short}: "${c.str}" at x=${c.x} runs into the name ending at ${nameEnd}`);
+        assert.ok(c.x + m(c.str) <= 112, `${short}: "${c.str}" ends at ${c.x + m(c.str)}, over the eye at 112`);
+      }
+      const words = hud.filter((c) => c !== name).sort((a, b) => a.x - b.x);
+      for (let k = 1; k < words.length; k++) {
+        assert.ok(words[k].x >= words[k - 1].x + m(words[k - 1].str), `${short}: "${words[k - 1].str}" and "${words[k].str}" overlap`);
+      }
+      const P = h.app.ctx.get("P");
+      if (P.hasB) {
+        const B = h.app.ctx.get("TOUCH_B");
+        const label = calls.find((c) => c.y === B.y + 3);
+        assert.ok(label, `${short}: the B button draws its label`);
+        assert.ok(B.x >= 0 && B.x + B.w <= 160, `${short}: the B button spans ${B.x}..${B.x + B.w}`);
+        assert.ok(m(label.str) <= B.w - 4, `${short}: "${label.str}" (${m(label.str)} px) does not fit the ${B.w} px button`);
+      }
+    }
+  });
+}

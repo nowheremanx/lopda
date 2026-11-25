@@ -1103,13 +1103,11 @@ game.scene("play", {
       bigText(g, String(P.combo), 72, 3, 2, INK, "center");
       g.text(tt("连", "x"), 88, 2, { color: DARK });
     } else {
-      keycap(g, "A", 62, 3, 1);
-      g.text(tt("吹", "play"), 74, 2, { color: DARK });
-      if (P.hasB) { keycap(g, "B", 92, 3, 1); g.text(tt("敲", "hit"), 104, 2, { color: DARK }); }
+      hudKeys(g, 4 + g.measure(T(P.song.short)) + 6, HUD_RIGHT);
     }
     drawSuspicion(g, P.suspicion, P.eyeWake || 1);
     /* touch button */
-    if (P.hasB) touchButton(g, TOUCH_B, T(TX.touchB), false);
+    if (P.hasB) { sizeTouchB(g); touchButton(g, TOUCH_B, T(TX.touchB), false); }
     /* banner */
     if (P.banner && t < P.bannerUntil) {
       g.window(22, 18, 116, 16);
@@ -1145,7 +1143,34 @@ game.scene("play", {
     drawPause(g, P);
   }
 });
+/* The HUD's key hints sit between the song's short name and the suspicion eye (drawSuspicion draws it from
+   x = 112). They are laid out by measuring, right-aligned against the eye: with words when everything fits
+   ("A play B hit"), as bare keycaps when the name is long (Greensleeves), never over the name or the eye. */
+var HUD_RIGHT = 109, KEYCAP_W = 7;
+function hudKeys(g, left, right) {
+  var keys = [["A", tt("吹", "play")]];
+  if (P.hasB) keys.push(["B", tt("敲", "hit")]);
+  var withWords = 0, bare = 0, i;
+  for (i = 0; i < keys.length; i++) {
+    withWords += KEYCAP_W + 3 + g.measure(keys[i][1]) + (i ? 5 : 0);
+    bare += KEYCAP_W + (i ? 4 : 0);
+  }
+  var words = left + withWords <= right;
+  if (!words && left + bare > right) return;          /* no room at all: the name wins */
+  var x = right - (words ? withWords : bare);
+  for (i = 0; i < keys.length; i++) {
+    if (i) x += words ? 5 : 4;
+    x += keycap(g, keys[i][0], x, 3, 1);
+    if (words) { g.text(keys[i][1], x + 3, 2, { color: DARK }); x += 3 + g.measure(keys[i][1]); }
+  }
+}
+/* the touch button for B: as wide as its label needs (zh "B 敲" fits 36 px, en "B chime" does not),
+   right-aligned on the stage so it never runs off the screen; sized once the language is known */
 var TOUCH_B = { x: 120, y: 122, w: 36, h: 20 };
+function sizeTouchB(g) {
+  var w = Math.max(36, g.measure(T(TX.touchB)) + 10);
+  TOUCH_B.w = w; TOUCH_B.x = 156 - w;
+}
 function touchButton(g, b, label, off) {
   g.rect(b.x, b.y, b.w, b.h, PAPER);
   g.frame(b.x, b.y, b.w, b.h, off ? MID : INK);
