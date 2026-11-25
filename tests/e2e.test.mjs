@@ -569,6 +569,131 @@ test("a link straight to an app: installs it like the store, runs it, cleans the
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
+test("a preview link replaces an older installed copy from this push, keeping its save", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN", serviceWorkers: "block" });
+  const { createHash } = await import("node:crypto");
+  /* the pages workflow stamps a preview's RUNTIME_VERSION with "+<sha7>"; the runtime tells previews by that "+" */
+  const core = (await readFile(join(ROOT, "runtime/core.js"), "utf8"))
+    .replace(/(var RUNTIME_VERSION=")([^"+]+)(")/, "$1$2+abc1234$3");
+  await p.route("**/runtime/core.js", (r) => r.fulfill({ status: 200, contentType: "text/javascript", body: core }));
+  const fetched = [];
+  p.on("request", (r) => { if (r.url().includes("/registry/apps/klotski/")) fetched.push(r.url()); });
+  /* every toast in order: the update notice is later covered by the trial line when the app opens, and both can
+     land in one MutationObserver callback, so read each record's own text rather than the element's current one */
+  await p.addInitScript(() => {
+    window.__toasts = [];
+    document.addEventListener("DOMContentLoaded", () => {
+      const el = document.getElementById("toast");
+      if (!el) return;
+      new MutationObserver((records) => {
+        for (const r of records) {
+          const t = r.type === "characterData" ? r.target.data : (r.addedNodes[0] && r.addedNodes[0].textContent);
+          if (t) window.__toasts.push(t);
+        }
+      }).observe(el, { childList: true, characterData: true, subtree: true });
+    });
+  });
+  const until = async (fn, what) => { for (let i = 0; i < 100; i++) { if (await fn()) return; await p.waitForTimeout(100); } assert.fail("timed out waiting for " + what); };
+  const appFrame = () => p.frames().find((f) => f !== p.mainFrame());
+  const doc = (path) => p.evaluate((path) => new Promise((resolve, reject) => {
+    const req = indexedDB.open("lopda");
+    req.onerror = () => reject(req.error);
+    req.onsuccess = () => {
+      const get = req.result.transaction("docs").objectStore("docs").get(path);
+      get.onsuccess = () => { req.result.close(); resolve(get.result ? get.result.data : null); };
+      get.onerror = () => reject(get.error);
+    };
+  }), path);
+
+  /* push 1: the link installs klotski from the preview and runs it; the player saves something */
+  await p.goto(base + "/runtime/?app=klotski", { waitUntil: "load" });
+  await p.waitForSelector("#v-run:not([hidden])", { timeout: 15000 });
+  await until(() => { const f = appFrame(); return f ? f.evaluate(() => !!window.PAD).catch(() => false) : false; }, "the app frame");
+  await appFrame().evaluate(() => PAD.save("probe", { keep: 1 }));
+  await p.waitForTimeout(900);
+  assert.equal(await p.evaluate(() => LP.RUNTIME_VERSION), RUNTIME_VERSION + "+abc1234", "the page runs the stamped core");
+  await until(async () => ((await doc("data/users/local/apps/items/klotski")) || {}).sha256, "the install record");
+  const first = await doc("data/users/local/apps/items/klotski");
+  assert.equal(fetched.length, 1, "push 1 downloaded the app once");
+
+  /* push 2: the preview's registry describes a different build, whose hash matches its file */
+  const original = await readFile(join(ROOT, "registry/apps/klotski/index.html"));
+  const pushed = Buffer.concat([original, Buffer.from("\n<script>window.__previewPush=2;</" + "script>\n")]);
+  const index = JSON.parse(await readFile(join(ROOT, "registry/index.json"), "utf8"));
+  const entry = index.apps.find((a) => a.id === "klotski");
+  entry.sha256 = createHash("sha256").update(pushed).digest("hex");
+  entry.version = "9.9.9-preview";
+  await p.route("**/registry/index.json*", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(index) }));
+  await p.route("**/registry/apps/klotski/index.html", (r) => r.fulfill({ status: 200, contentType: "text/html", body: pushed }));
+
+  await p.goto(base + "/runtime/?app=klotski", { waitUntil: "load" });
+  await p.waitForSelector("#v-run:not([hidden])", { timeout: 15000 });
+  await until(async () => {
+    const f = appFrame();
+    return f ? await f.evaluate(() => window.__previewPush === 2).catch(() => false) : false;
+  }, "the new copy to run");
+  assert.equal(fetched.length, 2, "the new copy was fetched once more");
+  await until(async () => (await p.evaluate(() => window.__toasts || [])).some((x) => /已更新/.test(x)), "the store's updated notice");
+
+  const second = await doc("data/users/local/apps/items/klotski");
+  assert.equal(second.sha256, entry.sha256, "the installed copy is this push's build");
+  assert.equal(second.version, "9.9.9-preview");
+  assert.notEqual(second.sha256, first.sha256);
+  const saved = await doc("data/users/local/appdata/items/klotski");
+  assert.deepEqual(saved.kv.probe, { keep: 1 }, "the save written before the update is kept");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("a production link runs the installed copy and fetches nothing when the registry moved on", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN", serviceWorkers: "block" });
+  const { createHash } = await import("node:crypto");
+  const fetched = [];
+  p.on("request", (r) => { if (r.url().includes("/registry/apps/klotski/")) fetched.push(r.url()); });
+  const until = async (fn, what) => { for (let i = 0; i < 100; i++) { if (await fn()) return; await p.waitForTimeout(100); } assert.fail("timed out waiting for " + what); };
+  const appFrame = () => p.frames().find((f) => f !== p.mainFrame());
+  const doc = (path) => p.evaluate((path) => new Promise((resolve, reject) => {
+    const req = indexedDB.open("lopda");
+    req.onerror = () => reject(req.error);
+    req.onsuccess = () => {
+      const get = req.result.transaction("docs").objectStore("docs").get(path);
+      get.onsuccess = () => { req.result.close(); resolve(get.result ? get.result.data : null); };
+      get.onerror = () => reject(get.error);
+    };
+  }), path);
+
+  /* no stamp: a release build, so section 66 holds */
+  await p.goto(base + "/runtime/?app=klotski", { waitUntil: "load" });
+  await p.waitForSelector("#v-run:not([hidden])", { timeout: 15000 });
+  await until(() => { const f = appFrame(); return f ? f.evaluate(() => !!window.PAD).catch(() => false) : false; }, "the app frame");
+  assert.equal(await p.evaluate(() => LP.RUNTIME_VERSION), RUNTIME_VERSION, "the page runs the unstamped release");
+  await until(async () => ((await doc("data/users/local/apps/items/klotski")) || {}).sha256, "the install record");
+  const installed = await doc("data/users/local/apps/items/klotski");
+  assert.equal(fetched.length, 1, "the link installed it once");
+
+  /* the registry moves on; a production link still opens the installed copy and downloads nothing */
+  const original = await readFile(join(ROOT, "registry/apps/klotski/index.html"));
+  const pushed = Buffer.concat([original, Buffer.from("\n<script>window.__previewPush=2;</" + "script>\n")]);
+  const index = JSON.parse(await readFile(join(ROOT, "registry/index.json"), "utf8"));
+  const entry = index.apps.find((a) => a.id === "klotski");
+  entry.sha256 = createHash("sha256").update(pushed).digest("hex");
+  entry.version = "9.9.9-preview";
+  await p.route("**/registry/index.json*", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(index) }));
+  await p.route("**/registry/apps/klotski/index.html", (r) => r.fulfill({ status: 200, contentType: "text/html", body: pushed }));
+
+  await p.goto(base + "/runtime/?app=klotski", { waitUntil: "load" });
+  await p.waitForSelector("#v-run:not([hidden])", { timeout: 15000 });
+  assert.match(await p.textContent("#run-title"), /华容道/);
+  await until(async () => {
+    const f = appFrame();
+    return f ? await f.evaluate(() => !!window.PAD && typeof window.__previewPush === "undefined").catch(() => false) : false;
+  }, "the installed copy to run");
+  await p.waitForTimeout(500);
+  assert.equal(fetched.length, 1, "nothing is fetched for an installed app");
+  const after = await doc("data/users/local/apps/items/klotski");
+  assert.equal(after.sha256, installed.sha256, "the installed copy is untouched");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
 test("a link: an app that asks for a capability is confirmed first, an unknown id stays home, a built-in opens", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await page(t, { locale: "zh-CN" });
   await p.goto(base + "/runtime/?app=blow-candles", { waitUntil: "load" });
