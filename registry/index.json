@@ -67,9 +67,9 @@
         "................",
         "................"
       ],
-      "version": "4.0.0",
+      "version": "4.1.0",
       "released": "2026-10-07",
-      "updated": "2026-10-27",
+      "updated": "2026-11-24",
       "description": "60 秒冲分，或无尽生存。戴头盔的砸两下，冒火花的雷别碰。",
       "i18n": {
         "en": {
@@ -80,8 +80,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/whack-a-mole/index.html",
-      "sha256": "037e5efd0ae2809e5713e69a1696f89e54c75958bd553a32f2d4ec7cd4e4ffc9",
-      "bytes": 22989
+      "sha256": "d5b8c6d915fdac08dc01663b39ad784779ebf4c416fef702c4c83c5040d62675",
+      "bytes": 25658
     },
     {
       "spec": "lopda/1",
