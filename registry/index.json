@@ -97,7 +97,7 @@
       "i18n": {
         "en": {
           "name": "Pagoda",
-          "description": "A xianxia prologue. The cart has an LX-3D chip: 3D town, tower and battles."
+          "description": "A xianxia prologue on an LX-3D chip: town, tower, battles. (Chinese only)"
         }
       },
       "author": "Haowei Wu",
@@ -138,7 +138,7 @@
       "i18n": {
         "en": {
           "name": "Foothill",
-          "description": "Seven days to keep a little mountain diner open: gather, fight, cook and serve."
+          "description": "Keep a mountain diner open for seven days: gather, fight, cook. (Chinese only)"
         }
       },
       "author": "Haowei Wu",
