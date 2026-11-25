@@ -996,6 +996,7 @@ function startPlay(){
   if(T.playing || !T.song) return;
   var ac=LP.audio();
   if(!ac) return;
+  LP.claimAudio("studio");   /* the radio stops for the tape machine */
   ensureSynth();
   if(T.tape) T.tape.start();
   T.mode=T.screen==="song" ? "song" : "pattern";

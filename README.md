@@ -51,6 +51,7 @@ The seven stocks on one photo, same roll and same development, only the stock ch
 | Camera | 点阵相机 | Live dithered viewfinder, rolls of film, seven stocks, every lens on the phone. |
 | Darkroom | 冲洗店 | The film box: develop, view in colour, print, export and import negatives. |
 | Cartridge | 卡带机 | Plays black-and-white Game Boy files you supply, with the chin buttons. Saves can be exported and imported. No games are included. |
+| Tuner | 收音机 | Internet radio on a dial: turn it with LEFT / RIGHT or a finger, hiss between stations. Keeps playing when you leave it or lock the phone, with lock-screen controls and a sleep timer. Find stations in the radio-browser.info directory, add a link, import and export .m3u. Six stations to start. |
 | Radio | 电波台 | Experimental. Two handhelds talk over sound, like a 1986 modem: both press Link, then send short text and 16 × 16 pictures. Slow on purpose. |
 | Store | 应用商店 | Install, update and run community apps, by category, with search. |
 | Scripts | 脚本 | Your own small HTML/JS programs: one line to an AI line and it writes the program (or copy the prompt into any AI chat and paste the code back), then run it in the sandbox. Revise changes it with one more sentence; the old code is kept first, ten versions per script. |
@@ -112,7 +113,8 @@ colour originals, books, dictionaries, cartridge saves, app data) into one `lopd
 puts it back after checking it first. Removing an app keeps its saves; Settings → App saves lists them and clears
 them, and a reinstall of the same app carries on.
 
-Two things go online, and only these two. The calendar fetches next year's table of China's holidays from jsDelivr
+Three things go online, and only these three. The tuner plays the stations you pick from their own servers, and
+its Find page sends the words you search for to the radio-browser.info directory; it keeps only links, never audio. The calendar fetches next year's table of China's holidays from jsDelivr
 when it is missing (the tables up to now ship with the app). And if you add your own key in Settings → AI line (off
 until you do; DeepSeek, Kimi, Qwen, SiliconFlow or OpenRouter, and each key goes only to its own provider), Scripts
 can write and revise a program for you, Tape4 can edit a tape with you and the pet can bring home a souvenir it made up. Each request carries only what it needs (the script you asked for, the tape being edited, the

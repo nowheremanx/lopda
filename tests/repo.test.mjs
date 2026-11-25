@@ -180,7 +180,7 @@ test("the holiday-cn year files the calendar ships are valid, pre-cached, and th
 /* The handheld asks no other site for anything, with one exception: the calendar's holiday file (decisions.md section 14).
    Comments are stripped, strings kept. */
 /* each address is written down in decisions.md: the holidays (section 14), the AI line (section 34) and the AI providers (section 61) */
-test("the only other sites a runtime script names are the calendar's holiday address and the AI providers", () => {
+test("the only other sites a runtime script names are the calendar's holiday address, the AI providers and the tuner's directory and first stations", () => {
   const found = [];
   for (const f of RUNTIME_JS) {
     const code = read(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
@@ -193,7 +193,15 @@ test("the only other sites a runtime script names are the calendar's holiday add
     'runtime/ai.js "https://dashscope.aliyuncs.com/compatible-mode/v1/models"',
     'runtime/ai.js "https://openrouter.ai/api/v1/chat/completions"', 'runtime/ai.js "https://openrouter.ai/api/v1/models"',
     'runtime/apps/calendar.js "https://cdn.jsdelivr.net/gh/NateScarlet/holiday-cn@master/"',
-    'runtime/apps/settings.js "https://nowheremanx.github.io/lopda/"']);
+    'runtime/apps/settings.js "https://nowheremanx.github.io/lopda/"',
+    /* the tuner (decisions.md section 69): the radio-browser.info directory and the six stations put on the dial once */
+    'runtime/apps/tuner.js "https://all.api.radio-browser.info"', 'runtime/apps/tuner.js "https://de1.api.radio-browser.info"',
+    'runtime/apps/tuner.js "https://de2.api.radio-browser.info"', 'runtime/apps/tuner.js "https://icecast.radiofrance.fr/fip-midfi.mp3"',
+    'runtime/apps/tuner.js "https://nhkworld-radio.nhkworld.jp/hls/live/nhkworld-radio-media2/index.m3u8"',
+    'runtime/apps/tuner.js "https://piccpndali.v.myalicdn.com/audio/cctv13_2.m3u8"',
+    'runtime/apps/tuner.js "https://playerservices.streamtheworld.com/api/livestream-redirect/UFM_1003AAC.aac"',
+    'runtime/apps/tuner.js "https://stream.radioparadise.com/aac-128"',
+    'runtime/apps/tuner.js "https://streamak0138.akamaized.net/live0138lh-mbm9/_definst_/rti3/chunklist.m3u8"'].sort());
 });
 
 test("build-index refuses an app that fails the checker", (t) => {

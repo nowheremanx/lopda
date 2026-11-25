@@ -235,7 +235,7 @@
   }
 
   /* ---------------- file export ---------------- */
-  var MIME = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", txt: "text/plain", md: "text/markdown", zip: "application/zip", json: "application/json", html: "text/html" };
+  var MIME = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", txt: "text/plain", md: "text/markdown", zip: "application/zip", json: "application/json", html: "text/html", m3u: "audio/x-mpegurl" };
   function toFile(req) {
     var ext = (req.filename.split(".").pop() || "").toLowerCase(), type = MIME[ext] || "application/octet-stream";
     var blob = req.data instanceof Blob ? req.data : new Blob([req.data], { type: type });
