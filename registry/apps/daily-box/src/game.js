@@ -840,6 +840,7 @@ function helpLines() {
     T({ zh: "方向键或滑动，B 撤销。", en: "Keys/swipe. B undo." }),
     T({ zh: "SELECT 重来", en: "SELECT restart" }),
     T({ zh: "START 菜单", en: "START menu" }),
+    T({ zh: "看答案也不断连续", en: "Peeking keeps streak" }),
     T({ zh: "一天一关，明天再来。", en: "One puzzle a day." })
   ];
 }
@@ -855,7 +856,6 @@ function drawHelp(g) {
   var lines = helpLines();
   for (var i = 0; i < lines.length; i++) {
     ty += g.text(lines[i], x + 9, ty, { width: w - 18 });
-    ty += 1;
   }
   g.text(T({ zh: "A 好", en: "A OK" }), x + w / 2, y + h - 16, { align: "center" });
 }
@@ -894,13 +894,16 @@ function cardBadge(rec) {
 function drawCard(g) {
   var rec = solvedRecord || saved.days[dayK] || { pushes: state.pushes, moves: state.moves, ms: playMs, peeked: peeked };
   var badge = cardBadge(rec);
-  var w = 124, h = 106, x = 18, y = Math.round((TB - h) / 2);
+  /* The peeked card carries one more line (it still counts for the streak), so it is 10 px taller. */
+  var w = 124, h = badge === "answer" ? 116 : 106, x = 18, y = Math.round((TB - h) / 2);
   g.window(x, y, w, h);
   var ty = y + 6;
   g.text(T({ zh: "今日完成", en: "All done" }), x + w / 2, ty, { align: "center" });
   ty += 16;
   if (badge === "answer") {
     g.text(T({ zh: "看过答案", en: "Answer shown" }), x + w / 2, ty, { align: "center", color: g.DARK });
+    ty += 14;
+    g.text(T({ zh: "看了答案也算连续", en: "Keeps your streak" }), x + w / 2, ty, { align: "center" });
     ty += 14;
   } else if (badge === "perfect") {
     g.text(T({ zh: "完美", en: "Perfect" }), x + w / 2, ty, { align: "center", color: g.DARK });

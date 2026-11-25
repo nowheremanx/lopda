@@ -1185,3 +1185,52 @@ test("daily-box app: normalizeBox drops junk day entries (app-vm)", async () => 
   assert.deepEqual(kept["2020-01-01"], { pushes: 1, moves: 2, ms: 3, peeked: true });
   assert.deepEqual(kept["2020-01-05"], { pushes: 1, moves: 2, ms: 3, peeked: false });
 });
+
+/* --- the owner's ruling: a peeked day keeps its streak, and the card says so --------------------- */
+
+const CARD_W = 124;
+
+test("daily-box app: a peeked day's card says the streak still counts, inside the card (app-vm)", async () => {
+  const key = localKey(new Date());
+  const days = {};
+  days[key] = { pushes: 99, moves: 99, ms: 99999, peeked: true };
+  const { app } = bootBox({ "box-help": 1, "box": { v: 1, days } });
+  await settleApp();
+  const BOX = app.ctx.get("BOX");
+  assert.equal(BOX.state().ui, "card");
+  assert.equal(BOX.badge(), "answer");
+
+  const game = app.ctx.get("game");
+  const calls = [];
+  const text = game.g.text;
+  game.g.text = function (str, x, y, o) {
+    calls.push({ str: String(str), x, y, o: o || {} });
+    return text.call(game.g, str, x, y, o);
+  };
+  run(app, 2);
+  game.g.text = text;
+
+  const line = calls.find((c) => c.str === "看了答案也算连续");
+  assert.ok(line, "the peeked card draws the line that says it still counts");
+  assert.equal(line.x, 80, "the line is centred in the card");
+  const width = game.g.measure(line.str);
+  assert.ok(width <= CARD_W - 8, `the line is ${width} px wide, the card allows ${CARD_W - 8}`);
+  const ok = calls.find((c) => c.str === "A 好");
+  assert.ok(ok && line.y + 13 <= ok.y, "the new line leaves the A key label its place");
+});
+
+async function peekedStreakFor(offsets) {
+  const days = dayWith(offsets);
+  for (const key of Object.keys(days)) days[key].peeked = true;
+  const { app } = bootBox({ "box-help": 1, "box": { v: 1, days } });
+  await settleApp();
+  return app.ctx.get("BOX").streak();
+}
+
+test("daily-box app: a peeked day counts in the streak exactly like a solved one (app-vm)", async () => {
+  for (const offsets of [[0], [0, 1], [1], [0, 2]]) {
+    assert.equal(await peekedStreakFor(offsets), await streakFor(offsets), `offsets ${offsets.join(",")}`);
+  }
+  assert.equal(await peekedStreakFor([0, 1]), 2, "two peeked days in a row are a streak of two");
+  assert.equal(await peekedStreakFor([0, 2]), 1, "a gap still breaks the streak");
+});
