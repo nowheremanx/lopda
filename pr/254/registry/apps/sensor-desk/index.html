@@ -49,6 +49,11 @@
   .hint { margin: 0; font-size: 14px; line-height: 1.4; color: #4a5a32; }
   pre { margin: 0; padding: 8px; border: 2px solid #1f2a14; background: #a3ad7e; color: #1f2a14;
     font-family: inherit; font-size: 13px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+  /* the page is longer than the smallest screen: say so while there is more below, and keep the
+     strip in the layout when the cue goes so the page does not jump at the end */
+  footer { flex: none; display: flex; justify-content: center; padding: 4px 0 6px; border-top: 1px solid #4a5a32; }
+  #more-cue { font-size: 14px; color: #4a5a32; letter-spacing: .1em; }
+  #more-cue.gone { visibility: hidden; }
 </style>
 </head>
 <body>
@@ -84,34 +89,52 @@
 
   <section>
     <h2 id="code-title">代码</h2>
-    <pre id="code">// undefined before runtime 0.24.0
+    <pre id="code">var out =
+  document.getElementById("out");
+
+// PAD.motion / PAD.mic are
+// undefined before 0.24.0: keys only
 if (PAD.motion) {
-  PAD.on("tilt", function (t) {
-    show(t.x, t.y,
-         t.flat, t.heading);
-  });
+  PAD.on("tilt", tilt);
+  start(PAD.motion);
 }
 if (PAD.mic) {
-  PAD.on("sound", function (s) {
-    show(s.level, s.pitch);
+  PAD.on("sound", sound);
+  start(PAD.mic);
+}
+
+// readings: hold the last value
+function tilt(t) {
+  out.textContent =
+    "x " + t.x.toFixed(2) + " " +
+    "y " + t.y.toFixed(2) + " " +
+    (t.heading == null ?
+      "-" : t.heading);
+}
+function sound(s) {
+  out.textContent =
+    "level " + s.level.toFixed(2) +
+    " " + (s.pitch || "-");
+}
+
+// start() asks the player, then
+// answers "on", "denied" or "none";
+// it never rejects
+function start(sensor) {
+  sensor.start().then(function (r) {
+    out.textContent = r;
+  }, function () {
+    out.textContent = "none";
   });
 }
-function on(kind) {
-  PAD[kind].start().then(
-    function (r) {
-      // "on", "denied" or "none"
-      state = r;
-    }
-  );
-}
-function off(kind) {
-  // stop when the player turns it
-  // off or no longer needs it
-  // (the mic holds the audio session)
-  PAD[kind].stop();
+// stop when done: the mic holds
+// the phone's audio session
+function stop(sensor) {
+  sensor.stop();
 }</pre>
   </section>
 </main>
+<footer><span id="more-cue">更多 ↓</span></footer>
 <script>
 (function () {
   "use strict";
@@ -120,7 +143,7 @@ function off(kind) {
   var T = {
     zh: {
       title: "传感器台", kicker: "SENSOR DESK", tilt: "倾斜", sound: "声音", code: "代码",
-      start: "开", stop: "关", zero: "归零",
+      start: "开", stop: "关", zero: "归零", more: "更多 ↓",
       state: { off: "没开", on: "开着", denied: "未允许", none: "这台手机没有", old: "系统太旧（要 0.24.0+）" },
       noCompass: "无罗盘",
       compass: ["北", "东北", "东", "东南", "南", "西南", "西", "西北"],
@@ -128,7 +151,7 @@ function off(kind) {
     },
     en: {
       title: "Sensor Desk", kicker: "传感器台", tilt: "Tilt", sound: "Sound", code: "Code",
-      start: "On", stop: "Off", zero: "Zero",
+      start: "On", stop: "Off", zero: "Zero", more: "More ↓",
       state: { off: "off", on: "on", denied: "not allowed", none: "no sensor here", old: "too old (needs 0.24.0+)" },
       noCompass: "no compass",
       compass: ["N", "NE", "E", "SE", "S", "SW", "W", "NW"],
@@ -170,6 +193,16 @@ function off(kind) {
   $("mic-hint").textContent = T.hint;
   $("bubble").setAttribute("aria-label", LANG === "en" ? "Bubble level" : "水平气泡");
   $("v-shake").textContent = shakeText(0);
+  $("more-cue").textContent = T.more;
+
+  /* the cue at the bottom edge says the page goes on; it goes away once the end is reached */
+  var mainEl = document.querySelector("main"), moreCue = $("more-cue");
+  function checkMore() {
+    var atEnd = mainEl.scrollTop + mainEl.clientHeight >= mainEl.scrollHeight - 1;
+    moreCue.classList.toggle("gone", atEnd);
+  }
+  mainEl.addEventListener("scroll", checkMore, { passive: true });   /* the only scrolling area, sdk/UI.md */
+  window.addEventListener("resize", checkMore);
 
   function refreshMotion() {
     $("motion-state").textContent = T.state[motionState];
@@ -377,6 +410,7 @@ function off(kind) {
   }
 
   refresh();
+  checkMore();                                             /* the cue is right from the first frame */
 })();
 </script>
 </body>

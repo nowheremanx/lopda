@@ -195,11 +195,9 @@ game.scene("play", {
     if (!S.flags.intro) {
       S.flags.intro = true; saveAuto(); busy = true; bannerT = 0;
       game.say([
-        t("纸塔的灯灭了。十二页纸一起发软，边角往里卷。", "The tower's lamp is out. Twelve pages are going soft, curling at the edges."),
-        t("你是阿折，送信人。带着最后一根火柴，从第一页爬到灯座。", "You are A Zhe, a courier. Carry the last match from page one to the lamp stand."),
-        t("方向键走。A 开门、说话、打怪。START 菜单，SELECT 摸身边的墙。", "Arrows walk. A opens, talks and fights. START menu, SELECT feels the wall."),
-        t("有些怪守在门口，绕不过去；先看损耗再动手。", "Some monsters hold a doorway. You cannot walk around them; read the cost first."),
-        t("打不过就回墨铺。败北只回本页入口，金币少两成。", "Stuck? Go back to a shop. Falling only returns you here, minus a fifth of your gold.")
+        t("你是阿折，纸塔的送信人。爬上十二页，把灭了的灯点回来。", "You are A Zhe, a courier. Climb twelve pages, relight the lamp."),
+        t("方向键走，A 开门、说话、打怪。START 菜单，SELECT 摸身边的折缝。", "Arrows walk. A opens and fights. START menu. SELECT feels a wall."),
+        t("打之前先看损耗；倒下只回到本页入口。详细玩法在菜单「说明」。", "Cost first; a fall sends you to this page's start. More: How to play.")
       ], { name: t("纸塔", "Paper Tower") }).then(function () { busy = false; });
     }
   },
@@ -634,7 +632,9 @@ async function helpPages() {
     t("三根灯芯在三、七、十一页的折缝里。带齐了，蠹王会弱一些。", "Three wicks wait in the seams of pages three, seven and eleven. With all three, the King is weaker.")
   ]));
 }
-/* The instructions are a plain paged sheet, not a story: A turns the page, START or B leaves. */
+/* The instructions are a plain paged sheet, not a story: A turns the page, START or B leaves.
+   The sheet is a page of its own below the HUD (plain paper, so the floor and its banner do not
+   show through), the HUD stays readable above it, and the keys sit in the box's last line. */
 function helpScene(tips) {
   var lh = game.g.lineHeight, per = 3, lines = [], pages = [], i, j;
   for (i = 0; i < tips.length; i++) {
@@ -642,7 +642,7 @@ function helpScene(tips) {
     for (j = 0; j < wrapped.length; j++) lines.push(wrapped[j]);
   }
   for (i = 0; i < lines.length; i += per) pages.push(lines.slice(i, i + per));
-  var page = 0, boxH = per * lh + 10, top = game.height - boxH;
+  var page = 0, boxH = per * lh + 10 + lh, top = game.height - boxH;
   var name = t("怎么玩", "How to play");
   var hint = t("A 翻页　START / B 结束", "A next　START / B end");
   return {
@@ -655,14 +655,13 @@ function helpScene(tips) {
     },
     draw: function (g) {
       g.origin(0, 0); g.clip();
-      var ny = top - lh - 3, nw = g.measure(name) + 10;
+      g.rect(0, HUD, game.width, game.height - HUD, g.PAPER);
+      var ny = top - lh - 4, nw = g.measure(name) + 10;
       g.window(4, ny, nw, lh + 4, { thin: true });
       g.text(name, 9, ny + 2);
-      var hw = g.measure(hint) + 10;
-      g.window(game.width - 4 - hw, 4, hw, lh + 4, { thin: true });
-      g.text(hint, game.width - 4 - hw + 5, 6, { color: g.DARK });
       g.window(0, top, game.width, boxH);
       for (var k = 0; k < pages[page].length; k++) g.text(pages[page][k], 8, top + 5 + k * lh);
+      g.text(hint, 8, top + 5 + per * lh, { color: g.DARK });
     }
   };
 }
@@ -806,23 +805,24 @@ function mapScene() {
       g.clear(g.PAPER); g.window(2, 2, 156, 140, { thin: true });
       g.text(t("第 {n} 页　{name}", "Page {n}　{name}").replace("{n}", S.floor).replace("{name}", tname(D.FLOOR_NAMES[S.floor - 1])), 80, 3, { align: "center" });
       g.text(t("折缝 {s}　灯芯 {w}/3", "seams {s}　wicks {w}/3").replace("{s}", R.secrets(S).length).replace("{w}", S.wicks), 80, 16, { align: "center", color: g.DARK });
-      var ox = 25, oy = 30, k = 10;
+      var ox = 36, oy = 30, k = 8;
       for (var y = 0; y < 11; y++) for (var x = 0; x < 11; x++) {
         var ch = R.tile(S, x, y), px = ox + x * k, py = oy + y * k;
         g.rect(px, py, k, k, g.PAPER);
         if (ch === "#") g.rect(px, py, k, k, g.INK);
-        else if (ch === "%") { g.rect(px, py, k, k, g.DARK); g.line(px + 2, py + 3, px + 7, py + 7, g.PAPER); }
+        else if (ch === "%") { g.rect(px, py, k, k, g.DARK); g.line(px + 2, py + 2, px + 5, py + 5, g.PAPER); }
         else if (ch === "Y" || ch === "B" || ch === "R") g.rect(px + 1, py + 1, k - 2, k - 2, ch === "Y" ? g.MID : g.DARK);
         else if (D.isMonster(ch) || ch === "z" || ch === "Z") g.rect(px + 2, py + 2, k - 4, k - 4, g.INK);
         else if (ch === "m") g.rect(px + 2, py + 2, k - 4, k - 4, g.DARK);
-        else if (ch === "n") g.rect(px + 3, py + 3, k - 6, k - 6, g.DARK);
-        else if (ch === "f") { g.rect(px + 3, py + 3, 4, 4, g.MID); }
-        else if (ch === ">" || ch === "<") g.rect(px + 2, py + 4, k - 4, 2, g.INK);
-        else if (D.isItem(ch)) g.rect(px + 4, py + 4, 2, 2, g.INK);
-        else if (ch === "L") { g.rect(px + 4, py + 3, 2, 4, g.INK); g.rect(px + 2, py + 2, 6, 2, g.MID); }
+        else if (ch === "n") g.rect(px + 3, py + 3, k - 5, k - 5, g.DARK);
+        else if (ch === "f") { g.rect(px + 2, py + 2, 3, 3, g.MID); }
+        else if (ch === ">" || ch === "<") g.rect(px + 2, py + 3, k - 4, 2, g.INK);
+        else if (D.isItem(ch)) g.rect(px + 3, py + 3, 2, 2, g.INK);
+        else if (ch === "L") { g.rect(px + 3, py + 2, 2, 4, g.INK); g.rect(px + 2, py + 1, 4, 2, g.MID); }
       }
-      g.rect(ox + S.x * k + 2, oy + S.y * k + 2, 6, 6, g.INK);
-      g.rect(ox + S.x * k + 3, oy + S.y * k + 3, 4, 4, g.PAPER);
+      g.rect(ox + S.x * k + 2, oy + S.y * k + 2, 4, 4, g.INK);
+      g.rect(ox + S.x * k + 3, oy + S.y * k + 3, 2, 2, g.PAPER);
+      g.text(t("A / B 关", "A / B close"), 80, 124, { align: "center", color: g.DARK });
     }
   };
 }
