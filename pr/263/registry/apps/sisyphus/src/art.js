@@ -242,6 +242,20 @@ var ART = (function () {
       var pyW = WORLD.pathY(pxW) + 10 + (k * 17) % 40;
       px(g, pxW - cam.x, pyW - cam.y, k % 3 === 0 ? 2.2 : 0.8);
     }
+
+    /* survey marks every tenth of the climb: the stone passes them, so the player
+       sees the height without a meter. The halfway mark is taller, the only ornament. */
+    for (var m = 1; m <= 9; m++) {
+      var mxW = WORLD.pathX(m / 10);
+      var mx = Math.round(mxW - cam.x);
+      if (mx < 1 || mx > W - 2) continue;
+      var my = Math.round(WORLD.pathY(mxW) - cam.y);
+      if (my < 4 || my > H + 1) continue;
+      var tall = m === 5 ? 4 : 3;
+      g.line(mx, my - tall, mx, my - 1, night ? 3 : 0);
+      g.pixel(mx - 1, my - 1, night ? 2 : 1);
+      g.pixel(mx + 1, my - 1, night ? 2 : 1);
+    }
   }
 
   function crack(wx, y) {
@@ -474,8 +488,10 @@ var ART = (function () {
     var bsx = s.boulderX - s.cam.x, bsy = s.boulderY - s.cam.y;
     var psx = s.playerX - s.cam.x, psy = s.playerY - s.cam.y;
     var night = s.mode === "descent";
+    /* the last moment before the slide: the stone shivers on the ledge */
+    var wob = s.warn ? Math.sin(s.time * 46) : 0;
 
-    boulder(g, bsx, bsy, s.boulderR, s.boulderAngle, night);
+    boulder(g, bsx + wob * 1.5, bsy - (s.warn ? Math.abs(wob) : 0), s.boulderR, s.boulderAngle + wob * 0.02, night);
     sisyphus(g, psx, psy, s.pose, s.walkPhase, bsx, bsy, s.boulderR, night);
     drawDust(g, s);
   }

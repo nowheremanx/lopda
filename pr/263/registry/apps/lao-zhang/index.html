@@ -2645,13 +2645,12 @@ GM.drawMiner = function (buf, state) {
   GM.put(buf, bx - 4, 11 + by, GM.DARK);
   GM.put(buf, bx + 4, 11 + by, GM.DARK);
 
-  /* a low safety cap: crown, broad brim and a front peak */
+  /* a low safety cap: crown and broad brim. He faces us, so no side peak: drawn one row under the brim it read
+     as a stray dot beside the cap on a phone (owner, 2026-11-25). */
   GM.ellipse(buf, bx, 4 + by, 8, 3, GM.INK);
   GM.ellipse(buf, bx, 4 + by, 7, 2, GM.PAPER);
   GM.rect(buf, bx - 9, 6 + by, 18, 2, GM.INK);
   GM.rect(buf, bx - 8, 6 + by, 16, 1, GM.PAPER);
-  GM.rect(buf, bx + 9, 7 + by, 3, 1, GM.INK);
-  GM.rect(buf, bx + 9, 7 + by, 2, 1, GM.PAPER);
   GM.rect(buf, bx - 1, 2 + by, 3, 2, GM.MID);
   GM.put(buf, bx, 2 + by, GM.PAPER);
 
@@ -2791,8 +2790,6 @@ GM.drawWang = function (buf, state) {
   GM.ellipse(buf, bx, 4 + by, 7, 2, GM.DARK);
   GM.rect(buf, bx - 9, 6 + by, 18, 2, GM.INK);
   GM.rect(buf, bx - 8, 6 + by, 16, 1, GM.PAPER);
-  GM.rect(buf, bx + 9, 7 + by, 4, 1, GM.INK);
-  GM.rect(buf, bx + 9, 7 + by, 3, 1, GM.PAPER);
   GM.rect(buf, bx - 1, 2 + by, 3, 2, GM.PAPER);
 
   GM.rect(buf, 122, 16, 2, 2, GM.PAPER);
