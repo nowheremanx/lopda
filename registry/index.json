@@ -256,7 +256,7 @@
       ],
       "version": "0.1.2",
       "released": "2026-10-27",
-      "updated": "2026-11-21",
+      "updated": "2026-11-24",
       "description": "推石上山。它滚下去。再推。加缪的十六句话在山顶等你。",
       "i18n": {
         "en": {
@@ -315,7 +315,8 @@
       "license": "MIT",
       "path": "apps/daily-box/index.html",
       "sha256": "27595753b1d6b3869cca0844cfe5cd23d6a968dfa3eb6e514f69b9be0c2317e4",
-      "bytes": 160246
+      "bytes": 160246,
+      "updated": "2026-11-24"
     },
     {
       "spec": "lopda/1",
@@ -623,7 +624,7 @@
       ],
       "version": "1.1.1",
       "released": "2026-10-11",
-      "updated": "2026-11-21",
+      "updated": "2026-11-24",
       "description": "八位数商务计算器，连续运算、百分比和记忆键。",
       "i18n": {
         "en": {
@@ -893,8 +894,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/vector-dream/index.html",
-      "sha256": "5da8d135f80eb5718f13631793f872acac183e839cb03e68773b4ecbe843cc32",
-      "bytes": 45132
+      "sha256": "de5263b83d145d2c564a3122bc5d6e86ab61cb3fda6a980f2ef92b57dcf140a9",
+      "bytes": 44241
     },
     {
       "spec": "lopda/1",
@@ -968,7 +969,7 @@
       ],
       "version": "1.1.2",
       "released": "2026-10-19",
-      "updated": "2026-11-21",
+      "updated": "2026-11-24",
       "description": "抽一支签，读一段今天的顺便话。写进记事本接口的示范。",
       "i18n": {
         "zh": {

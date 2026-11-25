@@ -617,23 +617,6 @@ var Lo3D = (function () {
                       [xW, LAKE_Y, wz], [xE, LAKE_Y, wz + 0.015], [xW, LAKE_Y, wz + 0.015]);
       lakeWire.t.push([k, k + 1, k + 2], [k + 3, k + 4, k + 5]);
     }
-    /* a crest runs along z where the ground is highest across x, and along x where it is highest across z */
-    function crestX(i, j) {
-      if (i < 1 || i > GN - 1 || j < 0 || j > GN) return false;
-      var k = id(i, j);
-      return !wet[k] && py[k] > py[k - 1] + 0.012 && py[k] > py[k + 1] + 0.012;
-    }
-    function crestZ(i, j) {
-      if (j < 1 || j > GN - 1 || i < 0 || i > GN) return false;
-      var k = id(i, j);
-      return !wet[k] && py[k] > py[k - n] + 0.012 && py[k] > py[k + n] + 0.012;
-    }
-    var ridge = [];
-    for (j = 1; j < GN; j++) for (i = 1; i < GN; i++) {
-      var k = id(i, j); if (wet[k]) continue;
-      if (crestX(i, j) && crestX(i, j + 1)) ridge.push([px[k], py[k] + 0.06, pz[k], px[k], py[k + n] + 0.06, pz[k + n]]);
-      if (crestZ(i, j) && crestZ(i + 1, j)) ridge.push([px[k], py[k] + 0.06, pz[k], px[k + 1], py[k + 1] + 0.06, pz[k + 1]]);
-    }
     /* a handful of short paper glints on the water; they drift slowly, and the depth buffer hides
        the ones that drift over land, so the dashes are cut by the real shoreline */
     var glints = [];
@@ -642,7 +625,7 @@ var Lo3D = (function () {
       glints.push([gl[0] + Math.sin(tm * 0.31 + ph) * 0.22, gl[1] + Math.cos(tm * 0.19 + ph) * 0.14,
                    gl[2] * (0.75 + 0.25 * Math.sin(tm * 0.5 + ph))]);
     }
-    return { land: land, lake: lake, lakeWire: lakeWire, ridge: ridge, glints: glints };
+    return { land: land, lake: lake, lakeWire: lakeWire, glints: glints };
   }
   function cube(s) {
     var v = [], t = [], i;
@@ -734,10 +717,8 @@ var Lo3D = (function () {
     }
     R.present();
     if (scene === 1 && !wire) {
-      for (var r = 0; r < terr.ridge.length; r++) {
-        var q = terr.ridge[r];
-        R.streak([q[0], q[1], q[2]], [q[3], q[4], q[5]], 0);
-      }
+      /* no ink crest lines: on a phone they read as black streaks across the slopes (owner, 2026-11-25);
+         the distance shading alone separates the hills */
       for (var gl = 0; gl < terr.glints.length; gl++) {
         var g = terr.glints[gl];
         R.streak([g[0], LAKE_Y + 0.02, g[1]], [g[0] + g[2], LAKE_Y + 0.02, g[1]], 3);
