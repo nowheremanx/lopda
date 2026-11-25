@@ -47,7 +47,7 @@ game.load("seen").then(function (s) {
 game.load("progress").then(function (p) { if (p && p.v === 1 && p.map && p.hero && p.flags) lastSave = p; });
 
 /* ---------- title ---------- */
-scene("title", {
+var TITLE = scene("title", {
   enter: function () { busy = false; Snd.music("title"); Snd.amb(null); },
   draw: function (g) {
     var a = game.time * 0.12, T = town.def.tower;
@@ -55,7 +55,8 @@ scene("title", {
     g.window(14, 82, 132, 52);
     g.text("镇妖塔·序章", 80, 88, { align: "center" });
     g.text("内置 LX-3D 协处理器", 80, 104, { align: "center", color: g.DARK });
-    if (Math.floor(game.time * 2) % 2) g.text("按 A 开始", 80, 119, { align: "center" });
+    /* the menu is an overlay of its own: the prompt would blink through it */
+    if (game.top() === TITLE && Math.floor(game.time * 2) % 2) g.text("按 A 开始", 80, 119, { align: "center" });
   },
   update: function () {
     if (busy || !game.ok()) return;
@@ -124,6 +125,12 @@ function galleryHero() { var h = Rules.newHero(10); h.mp = 999; return h; }
 var DIRS = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
 var NEXT = { floor1: "floor2", floor2: "top" };
 var hero, people = [], foes = [], cam, busy = false, cur = null, banner = "";
+/* The key hint at the bottom of a map, for a player who does not know that A talks and START opens the menu.
+   It is shown on arrival, and again after a while standing still with nothing pressed; any input puts it away.
+   hintT: seconds of hint left; idleT: seconds since the last input while nothing else is going on. */
+var HINT = "A 说话 · START 菜单", HINT_SEC = 4, IDLE_SEC = 6;
+var hintT = 0, idleT = 0;
+var HINT_BTNS = ["up", "down", "left", "right", "a", "b", "start", "select"];
 var INFO = {};
 /* what a cutscene adds to the map: stage (extra actors, see Maps.render), glows (point lights that can pulse),
    rip (the ripple over the frame), panel (a cut-in band: the hand, the master's face), ended (the end card has been shown) */
@@ -539,7 +546,14 @@ function bump(c, r, dir) {
 /* the banner with the place's name, for a moment */
 function showBanner(text, sec) {
   banner = text;
-  Cut.T.after(sec, function () { if (banner === text) banner = ""; });
+  Cut.T.after(sec == null ? 3 : sec, function () { if (banner === text) banner = ""; });
+}
+
+/* the hint is drawn over the map alone: never under a dialogue, a cutscene, the skip question or the field menu */
+function hintOn() { return hintT > 0 && !busy && !fm && game.top() === MAP; }
+function anyInput() {
+  for (var i = 0; i < HINT_BTNS.length; i++) if (game.pressed(HINT_BTNS[i]) || game.btn(HINT_BTNS[i])) return true;
+  return !!(game.pointer && game.pointer.pressed);
 }
 
 /* ---------- the field menu ----------
@@ -604,7 +618,7 @@ function fmDraw(g) {
   }
 }
 
-scene("map", {
+var MAP = scene("map", {
   enter: async function (args) {
     args = args || {};
     Cut.reset();
@@ -663,16 +677,21 @@ scene("map", {
       flags.entered[cur.id] = 1;
       busy = false;
     } else {
-      if (!args.at) showBanner(name, 1.5);
+      if (!args.at) showBanner(name);
       flags.entered[cur.id] = 1;
     }
     if (args.at && args.result) afterFight(args);
+    /* the key hint on every arrival; a cutscene or the ending that follows keeps it off the screen */
+    hintT = HINT_SEC; idleT = 0;
   },
   exit: function () { Cut.reset(); },
   update: function (dt) {
     Cut.step(dt);
-    if (busy) return;
-    if (fm) { fmUpdate(); return; }
+    /* the hint goes at the first touch; input is read once, the key block below uses it again */
+    var input = anyInput();
+    if (input) { hintT = 0; idleT = 0; }
+    if (busy) { idleT = 0; return; }
+    if (fm) { idleT = 0; fmUpdate(); return; }
     if (hero.moving) {
       var m = hero.moving;
       m.t = Math.min(1, m.t + dt * 4.2);
@@ -701,6 +720,10 @@ scene("map", {
     /* the camera trails the hero a little */
     cam.x += (hero.x - cam.x) * Math.min(1, dt * 8);
     cam.z += (hero.z - cam.z) * Math.min(1, dt * 8);
+    /* the key hint: back after six seconds standing still with nothing pressed */
+    if (hintT > 0) hintT = Math.max(0, hintT - dt);
+    if (input || hero.moving) idleT = 0; else idleT += dt;
+    if (idleT >= IDLE_SEC) { idleT = 0; hintT = HINT_SEC; }
   },
   draw: function (g) {
     /* hero.walking: a cutscene walks him by tweening x and z, so the stride follows the clock instead of a step's progress */
@@ -750,6 +773,12 @@ scene("map", {
       var w = g.measure(banner) + 14;
       g.window(Math.round(80 - w / 2), 6, w, 18);
       g.text(banner, 80, 10, { align: "center" });
+    }
+    /* the key hint at the bottom, the banner's mirror: inside the 160 x 144 screen and clear of the hero */
+    if (hintOn()) {
+      var hw = g.measure(HINT) + 14;
+      g.window(Math.round(80 - hw / 2), 122, hw, 18);
+      g.text(HINT, 80, 126, { align: "center" });
     }
     /* a cut-in is a band across the middle of the screen; the scene behind it is darkened */
     if (panel) {
@@ -802,7 +831,7 @@ var ZT = {
   },
   state: function () {
     return { scene: where, map: cur && cur.id, x: hero && hero.c, y: hero && hero.r, flags: flags, hero: me, ended: ended, credits: cr.phase, cleared: !!Cut.seen.cleared,
-      sound: Snd.wanted() };
+      hint: hintOn(), sound: Snd.wanted() };
   }
 };
 

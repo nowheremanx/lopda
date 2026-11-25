@@ -4,7 +4,7 @@
   "name": "传感器台",
   "glyph": "感",
   "category": "education",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "开发示例：实时显示倾斜、摇晃、方向和声音，以及允许、拒绝、没有传感器时的样子。",
   "i18n": {
     "zh": {

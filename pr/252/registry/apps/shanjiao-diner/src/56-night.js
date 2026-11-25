@@ -110,7 +110,7 @@ game.scene("night", {
   draw: function (g) {
     ART.room(g, S, "night", game.time, -1);
     var L = S.lastLedger || {};
-    UI.header(g, S, L.auto ? "打烊·自动" : "打烊");
+    UI.header(g, S, L.closed ? "今日歇业" : L.auto ? "打烊·自动" : "打烊");
     // left: the money
     g.window(6, 32, 110, 180);
     g.text("今日", 12, 36, { color: g.DARK });
