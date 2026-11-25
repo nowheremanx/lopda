@@ -662,9 +662,9 @@
         "................",
         "................"
       ],
-      "version": "1.0.1",
+      "version": "1.0.2",
       "released": "2026-11-18",
-      "updated": "2026-11-23",
+      "updated": "2026-11-24",
       "description": "开发示例：最多八个计数器，点选或按 A 累加；看存档格式、版本和迁移。",
       "i18n": {
         "en": {
@@ -675,8 +675,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/save-book/index.html",
-      "sha256": "f45fa8fa315155f98b04f2d8c2ba422705d82ce6900b8135c8813e034a5517f6",
-      "bytes": 14346
+      "sha256": "866ef67714ab34d34f9dc95a8f7812e2926338f29e6fd97fb697c7c28c92f988",
+      "bytes": 14952
     },
     {
       "spec": "lopda/1",

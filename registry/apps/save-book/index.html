@@ -10,7 +10,8 @@ body{display:flex;flex-direction:column}
 header{flex:none;padding:8px 12px 4px}
 h1{font-size:18px;margin:0 0 3px}
 #status{font-size:14px;line-height:1.25;min-height:18px;color:#4a5a32;overflow-wrap:anywhere}
-main{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:6px 12px}
+/* scroll-padding keeps a row scrolled to by the keys clear of the sticky form (44 px tall + its 8 px padding) */
+main{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0 12px 6px;scroll-padding-top:60px}
 footer{flex:none;padding:4px 8px 6px;text-align:center;font-size:13px;color:#4a5a32}
 .counter{display:flex;gap:8px;margin:0 0 8px}
 button{font:inherit;color:#1f2a14;background:#a3ad7e;border:2px solid #1f2a14;min-height:44px;touch-action:manipulation;cursor:pointer}
@@ -21,7 +22,9 @@ button:disabled{color:#4a5a32}
 .entry.selected,.primary{background:#1f2a14;color:#a3ad7e}
 .remove{width:48px;flex:none;font-size:18px}
 .remove:disabled{color:#4a5a32}
-#addForm{display:flex;gap:8px;margin:8px 0}
+/* The form stays at the top of the scrolling area: adding a counter grows the list below it,
+   so the input and the button never move under a thumb that is about to tap again. */
+#addForm{position:sticky;top:0;z-index:1;display:flex;gap:8px;padding:8px 0;background:#a3ad7e}
 input{min-width:0;flex:1;height:44px;box-sizing:border-box;font:16px monospace;padding:0 8px;color:#1f2a14;background:#a3ad7e;border:2px solid #1f2a14;caret-color:#1f2a14}
 input::placeholder{color:#4a5a32}
 #add{min-width:72px;padding:0 10px}
@@ -34,11 +37,11 @@ input::placeholder{color:#4a5a32}
 <body>
 <header><h1 id="title">存档本</h1><div id="status"></div></header>
 <main id="main">
-  <div id="list"></div>
   <div id="addForm">
     <input id="name" maxlength="16" autocomplete="off" enterkeyhint="done">
     <button id="add" class="primary" type="button"></button>
   </div>
+  <div id="list"></div>
   <div id="inlineInfo" class="line"></div>
   <section id="infoScreen" class="hidden">
     <p id="infoDetail" class="line"></p>
@@ -58,7 +61,7 @@ input::placeholder{color:#4a5a32}
       corrupt: '存档损坏；请到设置清除', readfail: '存档无法读取；请到设置清除', newer: '存档格式较新；请到设置清除',
       schemaNew: '存档版本较新；请更新应用', badData: '存档内容不符；请到设置清除',
       back: '返回', schema: '格式', version: '应用', updated: '保存时间', bytes: '字节',
-      keys: '↑↓ 选择　A 加一　START 信息', added: '已新增', removed: '已删除', subtracted: '已减一',
+      keys: '↑↓ 选择　A 加一　START 信息', keysInfo: 'A / B 返回', added: '已新增', removed: '已删除', subtracted: '已减一',
       invalid: '请输入名称', remove: '删除计数器', subtract: '减一',
       loadErr: '读取失败；只读至设置清除存档'
     },
@@ -67,7 +70,7 @@ input::placeholder{color:#4a5a32}
       corrupt: 'Save damaged; clear it in Settings', readfail: 'Save unreadable; clear it in Settings', newer: 'Save format newer; clear it in Settings',
       schemaNew: 'Save schema newer; update this app', badData: 'Save data invalid; clear it in Settings',
       back: 'Back', schema: 'Schema', version: 'App', updated: 'Saved', bytes: 'Bytes',
-      keys: '↑↓ Select　A +1　START Info', added: 'Added', removed: 'Removed', subtracted: 'Subtracted',
+      keys: '↑↓ Select　A +1　START Info', keysInfo: 'A / B back', added: 'Added', removed: 'Removed', subtracted: 'Subtracted',
       invalid: 'Enter a name', remove: 'Remove tally', subtract: 'Subtract one',
       loadErr: 'Load failed; read-only until cleared in Settings'
     }
@@ -82,6 +85,7 @@ input::placeholder{color:#4a5a32}
   var infoPage = false;
   var list = document.getElementById('list');
   var status = document.getElementById('status');
+  var hint = document.getElementById('hint');
   var form = document.getElementById('addForm');
   var nameInput = document.getElementById('name');
   var inlineInfo = document.getElementById('inlineInfo');
@@ -93,7 +97,7 @@ input::placeholder{color:#4a5a32}
   document.documentElement.lang = lang === 'en' ? 'en' : 'zh-CN';
   document.title = TXT.title;
   document.getElementById('title').textContent = TXT.title;
-  document.getElementById('hint').textContent = TXT.keys;
+  hint.textContent = TXT.keys;
   nameInput.placeholder = TXT.name;
   addButton.textContent = TXT.add;
   backButton.textContent = TXT.back;
@@ -241,6 +245,8 @@ input::placeholder{color:#4a5a32}
     form.classList.toggle('hidden', infoPage);
     inlineInfo.classList.toggle('hidden', infoPage);
     backButton.classList.toggle('hidden', !infoPage);
+    // The footer lists only the keys this screen uses (UI.md 6): on the info page A and B just go back.
+    hint.textContent = infoPage ? TXT.keysInfo : TXT.keys;
     infoDetail.textContent = infoText();
     addButton.disabled = readOnly || !ready || tallies.length >= 8;
     nameInput.disabled = readOnly || !ready || tallies.length >= 8;
