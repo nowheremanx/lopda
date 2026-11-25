@@ -578,7 +578,7 @@ var Lo3D = (function () {
   /* The hills keep their true height everywhere and are shaded dark near, light far (aerial haze).
      The lake is one flat plane at LAKE_Y over the whole grid, never a row of cells: the depth buffer cuts
      the shoreline where the ground rises through the plane, so it wanders with the land. Water is one flat
-     tone with a few paper glints drifting on it. Crest lines come back as world segments for R.streak. */
+     tone with a few paper glints drifting on it. */
   function terrain(tm, cam) {
     var n = GN + 1, i, j, off = tm * 1.2, base = Math.floor(off / GS) * GS, fr = off - base;
     var px = [], py = [], pz = [], wet = [];
@@ -594,7 +594,7 @@ var Lo3D = (function () {
       var a = id(i, j), b = id(i + 1, j), c = id(i, j + 1), d = id(i + 1, j + 1);
       var cx = (px[a] + px[d]) / 2, cz = (pz[a] + pz[d]) / 2;
       var far = Math.sqrt((cx - cam.x) * (cx - cam.x) + (cz - cam.z) * (cz - cam.z));
-      var alb = Math.min(1.15, 0.24 + far * 0.11);
+      var alb = Math.min(1.15, 0.45 + far * 0.09);   /* near slopes stay above the ink band: darker, they dithered rows of ink dots that read as stripes (owner, 2026-11-25) */
       var k = land.v.length;
       land.v.push(at(a), at(c), at(d), at(a), at(d), at(b));
       land.t.push([k, k + 1, k + 2], [k + 3, k + 4, k + 5]);
