@@ -212,9 +212,10 @@ test("build-index refuses an app that fails the checker", (t) => {
 test("every preview comment links the runtime, also for a PR that only changes an app", () => {
   const y = read(".github/workflows/pages.yml");
   const step = y.slice(y.indexOf("Comment preview links on the PR"));
-  const links = [...step.matchAll(/echo "- runtime[^"]*: \$SITE\/pr\/\$PR\/runtime\/"/g)];
-  assert.equal(links.length, 2, "one runtime line for runtime PRs, one naming the apps to install");
-  assert.ok(/if \[ "\$RUNTIME" = true \] \|\| \[ -z "\$APPS" \]; then[\s\S]*else[\s\S]*fi/.test(step), "no branch without a runtime link");
+  /* one plain runtime line, always; each changed app has its own phone link straight into the preview (#68) */
+  assert.ok(/echo "- runtime: \$SITE\/pr\/\$PR\/runtime\/"/.test(step), "the runtime link, with no store wording");
+  assert.match(step, /for id in \$APPS; do\n\s+echo "- \$id \(phone \/ 手机\): \$SITE\/pr\/\$PR\/runtime\/\?app=\$id"\n\s+echo "- \$id \(dev harness/, "a phone link before each dev-harness link");
+  assert.ok(!/install from the store/.test(step), "the runtime line no longer sends the phone to the store");
 });
 
 test("the Pages workflow publishes the repo without tests, dependencies or CI files", () => {

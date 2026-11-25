@@ -4,19 +4,19 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <title>计算器</title>
-<!-- Lo-PDA app (lopda/1): eight-digit business calculator. Seven-segment LCD on a canvas, touch keys and chin buttons.
+<!-- Lo-PDA app (lopda/1): eight-digit business calculator. Seven-segment LCD on a canvas, touch keys and a physical keyboard.
 Copyright (c) 2026 Haowei Wu. MIT License. -->
 <style>
 html,body{margin:0;height:100%;overflow:hidden;background:#a3ad7e;font-family:monospace;color:#1f2a14;touch-action:none;user-select:none;-webkit-user-select:none}
-#app{display:flex;flex-direction:column;height:100%;box-sizing:border-box;padding:10px 12px;gap:8px}
+#app{display:flex;flex-direction:column;height:100%;box-sizing:border-box;padding:6px 12px;gap:6px}
 #lcd{border:3px solid #1f2a14;background:#a3ad7e;box-shadow:3px 3px 0 #4a5a32;padding:2px;display:flex;justify-content:center;flex:none}
 canvas{display:block}
-#keys{flex:1;min-height:0;display:grid;grid-template-columns:repeat(4,1fr);grid-template-rows:repeat(6,1fr);gap:7px}
+/* the four memory keys get one short row of their own; the five rows a player uses keep 44 px or more */
+#keys{flex:1;min-height:0;display:grid;grid-template-columns:repeat(4,1fr);grid-template-rows:32px repeat(5,minmax(0,1fr));gap:6px}
 button{font-family:monospace;font-size:20px;font-weight:bold;min-height:0;padding:0;color:#a3ad7e;background:#4a5a32;border:2px solid #1f2a14;box-shadow:3px 3px 0 #1f2a14;touch-action:manipulation;cursor:pointer;-webkit-tap-highlight-color:transparent}
 button.n{background:#1f2a14;box-shadow:3px 3px 0 #4a5a32}
-button.m{background:#7d8a58;color:#1f2a14;font-size:16px}
+button.m{background:#7d8a58;color:#1f2a14;font-size:15px}
 button.dn{transform:translate(2px,2px);box-shadow:1px 1px 0 #1f2a14;background:#7d8a58;color:#1f2a14}
-button.cur{outline:3px solid #1f2a14;outline-offset:1px;background:#a3ad7e;color:#1f2a14}
 </style>
 </head>
 <body>
@@ -156,8 +156,9 @@ var cv=document.getElementById('c'),ctx=cv.getContext('2d'),img=null,last=null,G
 function fitCanvas(){
   var css=document.getElementById('lcd').clientWidth-4,dpr=Math.max(1,Math.min(3,window.devicePixelRatio||1));
   var W=Math.floor(css*dpr);
-  /* widths in digit widths: margins, minus slot 0.9, eight digits of 1 with 0.62 after each (the point lives there) */
-  var dw=W/(0.45+0.9+8+8*0.62+0.1);
+  /* widths in digit widths: margins, minus slot 0.9, eight digits of 1 with 0.62 after each (the point lives there).
+     The height is capped too: on the smallest screen the keys below must keep their 44 px, so the LCD gives way. */
+  var dw=Math.min(W/(0.45+0.9+8+8*0.62+0.1),(window.innerHeight||360)*0.125*dpr/(0.72+1.7+0.32));
   G={dw:dw,dh:dw*1.7,t:Math.max(2,dw*0.19),sp:dw*0.62,slant:0.09,x0:dw*0.45,top:dw*0.72,W:W};
   G.H=Math.round(G.top+G.dh+dw*0.32);
   cv.width=W;cv.height=G.H;
@@ -254,10 +255,9 @@ var keysEl=document.getElementById('keys'),K=[];
   }
 })();
 
-var S=Calc.create(),curI=0,curCol=0,showCur=false,hold=null;
-for(var q=0;q<K.length;q++)if(K[q].k==='5'){curI=q;curCol=K[q].c;}
+var S=Calc.create(),hold=null;
 function sfx(n){try{PAD.sfx(n);}catch(e){}}
-function save(){try{PAD.save('calc',{m:S.mem,a:S.acc});}catch(e){}}
+function save(){try{PAD.save('calc',{m:S.mem});}catch(e){}}
 function refresh(){last=Calc.view(S);draw();}
 function key(k){
   var was=S.err;
@@ -266,35 +266,8 @@ function key(k){
   refresh();
   if(k==='='||k==='%'||k==='C'||k.charAt(0)==='M')save();
 }
-function flash(i){
-  var el=K[i].el;el.classList.add('dn');
-  setTimeout(function(){el.classList.remove('dn');},90);
-}
-function showCursor(){
-  for(var i=0;i<K.length;i++)K[i].el.classList.toggle('cur',showCur&&i===curI);
-}
-function move(dir){
-  if(!showCur){showCur=true;showCursor();return;}
-  var cur=K[curI],ni=curI,i;
-  if(dir==='left'||dir==='right'){
-    var t=curI+(dir==='left'?-1:1);
-    if(t>=0&&t<K.length&&K[t].r===cur.r){ni=t;curCol=K[t].c;}
-  }else{
-    var row=cur.r+(dir==='up'?-1:1);
-    for(i=0;i<K.length;i++)if(K[i].r===row&&K[i].c<=curCol&&curCol<K[i].c+K[i].w)ni=i;
-  }
-  if(ni!==curI){curI=ni;sfx('move');}
-  showCursor();
-}
-function padPress(b){
-  if(b==='up'||b==='down'||b==='left'||b==='right')move(b);
-  else if(b==='a'){
-    if(!showCur){showCur=true;showCursor();return;}
-    flash(curI);key(K[curI].k);
-  }else if(b==='b')key('C');
-  else if(b==='start')key('=');
-}
-if(typeof PAD!=='undefined'&&PAD.on)PAD.on('press',padPress);
+/* read-only state for tests; nothing on the screen depends on it */
+window.__calc=function(){var v=Calc.view(S);return {mem:S.mem,text:v.text,neg:v.neg,err:v.err};};
 
 /* pointer input: pressed look follows the finger, the key fires on touch down like a real key */
 keysEl.addEventListener('pointerdown',function(e){
@@ -309,7 +282,7 @@ function release(){if(hold){hold.classList.remove('dn');hold=null;}}
 window.addEventListener('pointerup',release);
 window.addEventListener('pointercancel',release);
 
-/* physical keyboard: only keys the PAD shim does not already map (arrows, x, z, Enter, Shift) */
+/* physical keyboard: typing digits and operators works here; the hat's arrow keys map to buttons only */
 var KMAP={'.':'.','+':'+','-':'-','*':'*','/':'/','%':'%','=':'=','c':'C','C':'C','Escape':'C','Backspace':'<',',':'.'};
 window.addEventListener('keydown',function(e){
   if(e.ctrlKey||e.metaKey||e.altKey)return;
@@ -326,7 +299,7 @@ try{
   PAD.load('calc').then(function(v){
     if(v&&typeof v==='object'){
       if(isFinite(v.m))S.mem=v.m;
-      if(isFinite(v.a)&&v.a!==0){S.acc=v.a;S.after=true;}
+      /* an old save's a (the last display) is ignored on purpose: a calculator powers on at 0 */
       refresh();
     }
   });

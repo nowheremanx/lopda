@@ -36,6 +36,7 @@ var S = {
   rollT: 0, rollFrom: 0,
   lock: 0, phase: 1,
   heaveT: 0, breathT: 0, stepT: 0, slipT: 0, wasPush: false,
+  warn: false, warned: false,
   descentT: 0, epi: 0, endT: 0, descendPhase: "far", farX: WORLD.SUMMIT_X, wipe: 0, baseT: 0,
   menuIndex: 0, menuOpen: false,
   galleryList: [], galleryIndex: 0, galleryStatus: null, gallerySaving: false, galleryDone: 0,
@@ -85,7 +86,7 @@ function resetRun(newLoop) {
   S.summitT = 0; S.gong = false; S.fallT = 0;
   S.descentT = 0; S.epi = 0; S.endT = 0; S.descendPhase = "far"; S.farX = WORLD.SUMMIT_X; S.wipe = 0; S.baseT = 0;
   S.heaveT = 0; S.breathT = 0; S.stepT = 0; S.slipT = 0;
-  S.wasPush = false; S.lock = 0.28; S.phase = 1;
+  S.wasPush = false; S.warn = false; S.warned = false; S.lock = 0.28; S.phase = 1;
   S.dust = [];
   S.walkPhase = 0;
   S.boulderAngle = 0;
@@ -146,6 +147,13 @@ game.scene("title", {
 });
 
 /* ---------------- climb ---------------- */
+/* the tally of summits, quiet in the top corner; before the first one the mountain is enough */
+function drawRunHud(g) {
+  if (S.summits > 0) {
+    g.text(T({ zh: "第 " + S.summits + " 次", en: String(S.summits) }), 153, 4, { align: "right", color: 1 });
+  }
+}
+
 game.scene("climb", {
   enter: function (args) {
     if (args && args.reset) resetRun(!!args.newLoop);
@@ -154,6 +162,7 @@ game.scene("climb", {
     S.pose = "stand";
     S.quoteOpened = false;
     S.wasPush = false;
+    S.warn = false; S.warned = false;
     game.music(MUSIC.ascent1);
     setAmbience(0.22);
   },
@@ -169,6 +178,7 @@ game.scene("climb", {
 
     if (pushing) {
       S.idle = 0;
+      S.warn = false; S.warned = false;
       var speed = 0.0175 * (1 - 0.30 * S.p);
       S.p += speed * dt;
       S.boulderAngle += speed * dt * 31;
@@ -192,6 +202,13 @@ game.scene("climb", {
       }
     } else {
       S.idle += dt;
+      /* the warning window is the 0.4 s before the stone gives way; it changes
+         pose, a puff and the wobble, never the slide's timing */
+      S.warn = S.p > 0 && S.idle > 0.55 && S.idle <= 0.95;
+      if (S.warn && !S.warned) {
+        S.warned = true;
+        ART.spawnDust(S, S.boulderX - S.boulderR + 2, S.boulderY + S.boulderR - 2, 2, 4);
+      }
       if (S.idle > 0.95 && S.p > 0) {
         var slide = 0.0024 + Math.max(0, S.idle - 0.95) * 0.0022;
         S.p -= slide * dt;
@@ -206,7 +223,7 @@ game.scene("climb", {
           }
         }
       } else {
-        S.pose = "stand";
+        S.pose = S.warn ? "strain" : "stand";
       }
       if (S.p <= 0) { S.p = 0; S.pose = "stand"; }
       else if (S.idle > 8.5) { startRollback(); return; }
@@ -228,6 +245,7 @@ game.scene("climb", {
   draw: function (g) {
     S.time = game.time;
     ART.drawWorld(g, S);
+    drawRunHud(g);
   }
 });
 
@@ -238,6 +256,7 @@ function startRollback() {
   S.rollT = 0;
   S.rollFrom = S.p;
   S.pose = "slip";
+  S.warn = false; S.warned = false;
   S.wasPush = false;
   SFX.rumble(game);
   game.musicStop();
@@ -274,6 +293,7 @@ game.scene("rollback", {
   draw: function (g) {
     S.time = game.time;
     ART.drawWorld(g, S);
+    drawRunHud(g);
   }
 });
 
@@ -285,6 +305,7 @@ function startSummit() {
   S.gong = false;
   S.quoteOpened = false;
   S.pose = "look";
+  S.warn = false; S.warned = false;
   S.wasPush = false;
   updatePositions();
   S.boulderX = WORLD.SUMMIT_X;
@@ -505,7 +526,15 @@ game.scene("menu", {
       SFX.click(game);
       if (S.menuIndex === 0) game.pop();
       else if (S.menuIndex === 1) game.push("gallery");
-      else game.say(aboutPages(), { name: T({ zh: "关于", en: "About" }) });
+      else {
+        /* About is its own screen: the menu closes, so nothing of it is drawn
+           under the dialogue; closing About puts the pause menu back */
+        game.pop();
+        game.say(aboutPages(), { name: T({ zh: "关于", en: "About" }) }).then(function () {
+          if (S.mode === "climb" || S.mode === "descent") game.push("menu");
+        });
+      }
+      return;
     }
   },
   draw: function (g) {
@@ -574,7 +603,7 @@ game.scene("gallery", {
       return;
     }
     var q = S.galleryList[S.galleryIndex];
-    ART.card(g, q, "幸福手册", (S.galleryIndex + 1) + " / " + S.galleryList.length, 1, S.galleryStatus, "A 写入    B 返回");
+    ART.card(g, q, "幸福手册", S.galleryList.length + " / " + QS.QUOTES.length, 1, S.galleryStatus, "A 写入    B 返回");
   }
 });
 

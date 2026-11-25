@@ -140,7 +140,6 @@ jobs:
         if: steps.plan.outputs.deploy == 'true' && github.event_name == 'pull_request' && github.event.action != 'closed'
         env:
           APPS: ${{ steps.plan.outputs.apps }}
-          RUNTIME: ${{ steps.plan.outputs.runtime }}
           LANDING: ${{ steps.plan.outputs.landing }}
           VERSION: ${{ steps.publish.outputs.version }}
         run: |
@@ -148,17 +147,13 @@ jobs:
             echo '<!-- lopda-preview -->'
             echo '**Preview / 预览** (GitHub Pages takes about a minute to update / 页面约需一分钟更新)'
             echo
-            # Every preview carries the whole site, so the runtime link always works. It is the one to use on a
-            # phone: the dev harness is a desktop tool (small buttons, a log). For an app-only PR it says where to
-            # find the changed apps: the preview's store lists this PR's registry.
-            if [ "$RUNTIME" = true ] || [ -z "$APPS" ]; then
-              echo "- runtime: $SITE/pr/$PR/runtime/"
-            else
-              NAMES=$(echo $APPS | sed 's/ /, /g'); if [ $(echo $APPS | wc -w) -gt 3 ]; then NAMES="any app / 任意 app"; fi
-              echo "- runtime (on a phone; install from the store / 在商店里安装: $NAMES): $SITE/pr/$PR/runtime/"
-            fi
+            # Every preview carries the whole site, so the runtime link always works. On a phone each changed app
+            # also has its own link into the preview's runtime, which installs it, or updates an older copy this
+            # preview installed (decisions.md section 68). The dev harness is a desktop tool: small buttons, a log.
+            echo "- runtime: $SITE/pr/$PR/runtime/"
             if [ "$LANDING" = true ]; then echo "- landing page / 落地页: $SITE/pr/$PR/"; echo "- events / 活动: $SITE/pr/$PR/events/"; fi
             for id in $APPS; do
+              echo "- $id (phone / 手机): $SITE/pr/$PR/runtime/?app=$id"
               echo "- $id (dev harness, desktop / 开发台，电脑上用): $SITE/pr/$PR/sdk/dev.html?app=registry/apps/$id"
             done
             # Settings -> 检查更新 on the phone shows the version it runs; it should match this one.
