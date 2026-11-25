@@ -1,6 +1,6 @@
 {
   "spec": "lopda/1",
-  "generated": "2026-11-24",
+  "generated": "2026-11-25",
   "apps": [
     {
       "spec": "lopda/1",
@@ -172,9 +172,9 @@
         "................",
         "................"
       ],
-      "version": "2.1.1",
+      "version": "2.1.2",
       "released": "2026-10-21",
-      "updated": "2026-10-28",
+      "updated": "2026-11-24",
       "description": "节奏故事：十首古典曲、三幕剧情、四种结局。A 吹竽、B 敲磬；国王睁眼时停手，闭上再起手。",
       "i18n": {
         "en": {
@@ -185,8 +185,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/fake-yu/index.html",
-      "sha256": "3fd0dced7afae1a279dbb2bf704854601469930714ff458e7fc313163f7394eb",
-      "bytes": 204289
+      "sha256": "902893afdfeb493498e16f744182e2eb2d8d483474cbcd67dd87e269a32be08b",
+      "bytes": 206596
     },
     {
       "spec": "lopda/1",
