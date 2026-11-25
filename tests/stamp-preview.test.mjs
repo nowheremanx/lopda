@@ -24,6 +24,8 @@ test("stamps core.js and sw.js with the same version, which the update check rea
   const want = `${base}+0123abc`;
   assert.equal(r.out.trim(), want);
   const rt = readRt(dir, "core.js").match(/var RUNTIME_VERSION="([^"]+)"/)[1];
+  /* the runtime tells a preview build by this "+" (store.js isPreviewBuild, decisions.md section 68) */
+  assert.ok(rt.includes("+"), "a stamped preview's RUNTIME_VERSION carries the +");
   /* the same pattern as latestVersion() in core.js */
   const sw = /VERSION\s*=\s*"lopda-v([^"]+)"/.exec(readRt(dir, "sw.js"))[1];
   assert.equal(rt, want);
