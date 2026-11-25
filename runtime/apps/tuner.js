@@ -722,7 +722,8 @@ function exportList(){
 /* find: the radio-browser.info directory */
 function renderFind(){
   var f=T.find;
-  if(!f.lang) f.lang=LP.I18N.lang==="en" ? "en" : "zh";
+  /* every station by default; the chips narrow to what a station broadcasts in (owner, 2026-11-25) */
+  if(!f.lang) f.lang="all";
   Array.prototype.forEach.call(byId("tn-chips").children,function(c){ c.classList.toggle("on",c.getAttribute("data-lang")===f.lang); });
   byId("tn-find-note").textContent=f.busy ? tr("tuner.find.busy") : f.note;
   var ul=byId("tn-results"); ul.textContent="";
@@ -760,7 +761,7 @@ function dirFetch(path,hosts){
 }
 function search(){
   var f=T.find, seq=++f.seq;
-  if(!f.lang) f.lang=LP.I18N.lang==="en" ? "en" : "zh";
+  if(!f.lang) f.lang="all";
   f.q=byId("tn-find-q").value.trim().slice(0,60);
   f.busy=true; f.note=""; f.loaded=true; renderFind();
   var q="limit=40&hidebroken=true&order=clickcount&reverse=true";
@@ -849,7 +850,7 @@ function press(b){
     if(b==="up" || b==="down"){ if(!f.rows.length) return; f.sel=clamp(f.sel+(b==="up"?-1:1),0,f.rows.length-1); sfx("move"); renderFind(); renderKeys(); scrollSel("tn-results"); }
     else if(b==="a") previewRow();
     else if(b==="start") keepRow();
-    else if(b==="select"){ var L=["zh","en","all"]; f.lang=L[(L.indexOf(f.lang)+1)%L.length]; sfx("tap"); search(); }
+    else if(b==="select"){ var L=["all","zh","en"]; f.lang=L[(L.indexOf(f.lang)+1)%L.length]; sfx("tap"); search(); }
     else if(b==="b"){ blur(); sfx("tap"); setPage("menu"); }
     return;
   }

@@ -290,12 +290,15 @@ test("tuner: the directory search, a preview, keeping it from the dial", { skip,
   await key("start", "down", "a");
   assert.equal((await st()).page, "find");
   await until(p, () => document.querySelectorAll("#tn-results li").length === 2);
-  assert.match(asked[0], /language=chinese/, "the chip follows the interface language");
+  assert.doesNotMatch(asked[0], /language=/, "every station by default");
   assert.match(asked[0], /hidebroken=true/);
   await p.fill("#tn-find-q", "jazz");
   await p.press("#tn-find-q", "Enter");
   await sleep(300);
   assert.match(asked[asked.length - 1], /name=jazz/);
+  await key("select");
+  await sleep(300);
+  assert.match(asked[asked.length - 1], /language=chinese/, "SELECT narrows to Chinese-language stations");
   await key("select");
   await sleep(300);
   assert.match(asked[asked.length - 1], /language=english/);
