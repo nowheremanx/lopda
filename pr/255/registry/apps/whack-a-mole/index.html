@@ -47,14 +47,14 @@
   var TXT = {
     zh: { title: "打地鼠", score: "分 {n}", combo: "连 {n}", time: "{n} 秒", best: "最高 {n}", bestTime: "最长 {n}",
       menu: "60 秒冲分，或无尽生存。<br>无尽每砸中一只加 1 秒，时间归零或踩雷结束。<br>头盔两下，冒火花的雷别碰。",
-      mode60: "60 秒", modeEndless: "无尽", bests: "60 秒 {s} · 无尽 {t}",
+      mode60: "60 秒", modeEndless: "无尽", bests: "60 秒 {s} · 无尽 {t}", noRecords: "还没有记录",
       again: "再来一局", modes: "选模式", record: "新纪录", over: "时间到", boom: "踩雷",
       got: "砸中 {n} 分。", endlessGot: "坚持 {t}，砸中 {s} 分。",
       result: "命中 {h}/{t} · 最高连击 {c}<br>踩雷 {m} · 评价 {r}",
       bestline: "<br>最高 {n} 分。", bestlineEndless: "<br>最长 {t} · 最高 {s}" },
     en: { title: "MOLE BOP", score: "PTS {n}", combo: "CMB {n}", time: "{n} S", best: "TOP {n}", bestTime: "BEST {n}",
       menu: "60s score attack, or endless survival.<br>Endless: each mole adds 1s; time out or hit a mine and it's over.<br>Helmets take two hits.",
-      mode60: "60s", modeEndless: "ENDLESS", bests: "60s {s} · ENDLESS {t}",
+      mode60: "60s", modeEndless: "ENDLESS", bests: "60s {s} · ENDLESS {t}", noRecords: "No records yet",
       again: "AGAIN", modes: "MODES", record: "NEW RECORD", over: "TIME UP", boom: "BOOM",
       got: "{n} points.", endlessGot: "Lasted {t}, {s} points.",
       result: "{h}/{t} hits · best combo {c}<br>mines {m} · rank {r}",
@@ -99,13 +99,16 @@
   var hits = 0, taps = 0, minesHit = 0, maxCombo = 0, shakeUntil = 0;
   var MODE = "60", dying = false, endedAt = 0, best60 = 0, bestEndless = 0, bestEndlessTime = 0;
   var RUN_MS = 60000, ENDLESS_START_MS = 15000;
+  /* the dirt at a hole twitches this long before the mole rises; the spawn is decided this much
+     earlier, so the rise itself still happens at the moment it always did */
+  var TELL_MS = 300;
   /* custom sound effects arrived with PAD.music in runtime 0.11.0; older runtimes keep the named sounds */
   var CAN_SFX = typeof PAD !== "undefined" && !!PAD.music;
 
   /* fixed tufts of grass, same every game */
   var tufts = []; (function () { var s = 7; for (var i = 0; i < 26; i++) { s = (s * 73 + 41) % 997; tufts.push([s % 116 + 2, TOP + (s * 7) % (H - TOP - 4)]); } })();
 
-  for (var i = 0; i < 9; i++) holes.push({ x: (i % 3) * CW, y: TOP + Math.floor(i / 3) * CH, s: "down", t: 0, stay: 0, helmet: false, gold: false, kind: "mole", lastTap: 0, scorch: false });
+  for (var i = 0; i < 9; i++) holes.push({ x: (i % 3) * CW, y: TOP + Math.floor(i / 3) * CH, s: "down", t: 0, riseAt: 0, stay: 0, helmet: false, gold: false, kind: "mole", lastTap: 0, scorch: false });
 
   function blit(img, x, y, k) { g.drawImage(img, Math.round(x), Math.round(y), img.width * (k || 2), img.height * (k || 2)); }
   function oval(cx, cy, rx, ry, color) {
@@ -151,6 +154,8 @@
     });
   }
   function showBests() {
+    /* nothing played yet: two dashes read as a broken screen, so say it in words */
+    if (!best60 && !bestEndlessTime) { document.getElementById("bests").textContent = TXT.noRecords; return; }
     document.getElementById("bests").innerHTML = tf("bests", {
       s: best60 || "--",
       t: bestEndlessTime ? fmtTime(bestEndlessTime) : "--"
@@ -208,6 +213,27 @@
     if (age < 120) { g.fillStyle = PAPER; g.fillRect(cx - 1, cy - 1, 2, 2); }
   }
 
+  /* the tell: the rim of the hole swells and a few crumbs twitch, four tones, no sprite yet.
+     It says "something is coming out here", never what: a mine and a crowned mole twitch alike. */
+  function tellMark(h, now, cx, cy) {
+    var k = Math.min(1, (now - h.t) / TELL_MS);
+    var side = Math.floor(now / 60) % 2;
+    oval(cx, cy - 1, Math.round(3 + 7 * k), Math.round(1 + 2 * k), MID);
+    oval(cx, cy - 2, Math.round(2 + 4 * k), Math.round(1 + k), DARK);
+    g.fillStyle = INK;
+    g.fillRect(cx - 10 + side, cy - 3 - side, 2, 1);
+    g.fillRect(cx + 8 - side, cy - 2 - (1 - side), 2, 1);
+    g.fillStyle = DARK;
+    g.fillRect(cx - 4 + side, cy - 4 - side, 1, 1);
+    g.fillRect(cx + 3 - side, cy - 5 + side, 1, 1);
+    /* near the end one clod lifts off, so the rise reads as its landing */
+    if (k > 0.55) {
+      var u = (k - 0.55) / 0.45;
+      g.fillStyle = side ? MID : DARK;
+      g.fillRect(cx - 1, cy - 5 - Math.round(7 * u), 2, 2);
+    }
+  }
+
   function draw(now) {
     g.fillStyle = PAPER; g.fillRect(0, 0, W, H);
     g.save();
@@ -225,6 +251,7 @@
       }
       oval(cx, cy, 16, 6, MID);
       oval(cx, cy, 14, 4, INK);
+      if (h.s === "tell") tellMark(h, now, cx, cy);
       var r = rise(h, now);
       if (r > 0) {
         var top = cy - 28 * r + 2 - (h.s === "hit" && h.kind === "mole" ? -6 : 0);
@@ -281,8 +308,9 @@
     g.restore();
   }
 
-  function spawn(now) {
-    var p = Math.min(1, (now - startAt) / RUN_MS);
+  /* now: when the dirt starts to twitch; at: when the mole would have risen without the tell */
+  function spawn(now, at) {
+    var p = Math.min(1, (at - startAt) / RUN_MS);
     var cap = p < 0.33 ? 3 : 4;
     var up = holes.filter(function (h) { return h.kind === "mole" && h.s !== "down"; }).length;
     if (up >= cap) return;
@@ -290,27 +318,31 @@
     if (!free.length) return;
     var h = free[Math.floor(Math.random() * free.length)];
     h.kind = "mole"; h.helmet = false; h.gold = false;
-    h.s = "rise"; h.t = now;
+    h.s = at > now ? "tell" : "rise"; h.t = now; h.riseAt = at;
     h.stay = 380 + 520 * (1 - p) + Math.random() * 140;
-    var goldChance = now - startAt > 15000 ? 0.06 + 0.04 * p : 0;
+    var goldChance = at - startAt > 15000 ? 0.06 + 0.04 * p : 0;
     if (Math.random() < goldChance) { h.gold = true; h.stay *= 0.65; }
-    else h.helmet = now - startAt > 8000 && Math.random() < 0.22;
+    else h.helmet = at - startAt > 8000 && Math.random() < 0.22;
   }
 
-  function spawnMine(now) {
+  function spawnMine(now, at) {
     if (holes.some(function (h) { return h.kind === "mine" && h.s !== "down"; })) return;
     var free = holes.filter(function (h) { return h.s === "down" && now - h.lastTap > 300; });
     if (!free.length) return;
     var h = free[Math.floor(Math.random() * free.length)];
     h.kind = "mine"; h.helmet = false; h.gold = false;
-    h.s = "rise"; h.t = now; h.stay = 900;
-    fuseSound();
+    h.s = at > now ? "tell" : "rise"; h.t = now; h.riseAt = at; h.stay = 900;
+    if (h.s === "rise") fuseSound();
   }
 
   function step(now) {
     holes.forEach(function (h) {
       var upMs = h.kind === "mine" ? 200 : 120;
-      if (h.s === "rise" && now - h.t >= upMs) { h.s = "up"; h.t = now; }
+      if (h.s === "tell" && now >= h.riseAt) {
+        h.s = "rise"; h.t = h.riseAt;
+        if (h.kind === "mine") fuseSound();
+      }
+      else if (h.s === "rise" && now - h.t >= upMs) { h.s = "up"; h.t = now; }
       else if (h.s === "up" && now - h.t >= h.stay) {
         h.s = "sink"; h.t = now;
         if (h.kind === "mole") { combo = 0; showCombo(); }
@@ -322,14 +354,17 @@
       if (now >= endAt) finish("mine");
       return;
     }
-    var p = Math.min(1, (now - startAt) / RUN_MS);
-    if (now >= nextSpawn) {
-      spawn(now);
-      nextSpawn = now + 300 + 620 * (1 - p) + Math.random() * 140;
+    /* each spawn is decided TELL_MS early, so the dirt can twitch first; the rise keeps the old
+       moment, and the next one is counted from that same moment as before */
+    if (now >= nextSpawn - TELL_MS) {
+      var at = Math.max(nextSpawn, now), ps = Math.min(1, (at - startAt) / RUN_MS);
+      spawn(now, at);
+      nextSpawn = at + 300 + 620 * (1 - ps) + Math.random() * 140;
     }
-    if (now >= nextMine) {
-      spawnMine(now);
-      nextMine = now + 2600 + 1400 * (1 - p) + Math.random() * 600;
+    if (now >= nextMine - TELL_MS) {
+      var atMine = Math.max(nextMine, now), pm = Math.min(1, (atMine - startAt) / RUN_MS);
+      spawnMine(now, atMine);
+      nextMine = atMine + 2600 + 1400 * (1 - pm) + Math.random() * 600;
     }
     var sec = Math.ceil((endAt - now) / 1000);
     if (sec !== lastSec) {
@@ -380,7 +415,7 @@
     startAt = now;
     endAt = now + (MODE === "60" ? RUN_MS : ENDLESS_START_MS);
     nextSpawn = now + 400; nextMine = now + 8000; lastSec = -1;
-    holes.forEach(function (h) { h.s = "down"; h.helmet = false; h.gold = false; h.kind = "mole"; h.lastTap = 0; h.scorch = false; });
+    holes.forEach(function (h) { h.s = "down"; h.riseAt = 0; h.helmet = false; h.gold = false; h.kind = "mole"; h.lastTap = 0; h.scorch = false; });
     hammers = []; pops = [];
     $t("sc", "score", 0); showCombo(); setClock((endAt - now) / 1000); setBest();
     document.getElementById("bests").classList.add("hide");
@@ -444,6 +479,18 @@
     var col = Math.min(2, Math.floor(x / CW)), row = Math.min(2, Math.floor(y / CH));
     whack(row * 3 + col);
   });
+  /* tests only: a read-only snapshot of the nine holes (state, kind, and how long a tell has left);
+     the game never reads it, and the copy it returns cannot change anything */
+  window.__mole = function () {
+    return {
+      playing: playing, mode: MODE, score: score, combo: combo,
+      holes: holes.map(function (h) {
+        return { s: h.s, kind: h.kind, helmet: h.helmet, gold: h.gold,
+          tellLeft: h.s === "tell" ? Math.max(0, h.riseAt - performance.now()) : 0 };
+      })
+    };
+  };
+
   $t("sc", "score", 0); $t("cb", "combo", 0); $t("bs", "best", 0); $t("ot", "title");
   var lg = document.getElementById("logo").getContext("2d"); lg.imageSmoothingEnabled = false;
   lg.drawImage(SP.mole, 0, 8); lg.drawImage(SP.mine, 16, 8);
