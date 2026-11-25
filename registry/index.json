@@ -573,9 +573,9 @@
         "................",
         "................"
       ],
-      "version": "1.1.0",
+      "version": "1.2.0",
       "released": "2026-10-16",
-      "updated": "2026-10-16",
+      "updated": "2026-11-24",
       "description": "对着话筒吹灭一排蜡烛，最后唱准一个音把蜡烛点回来。按住 A 也能吹。话筒的示范。",
       "i18n": {
         "zh": {
@@ -593,8 +593,8 @@
         "mic"
       ],
       "path": "apps/blow-candles/index.html",
-      "sha256": "37155aab6ec064679f3b9df8c6b6ebb433c53ad23f47d37f1c722f5f4f1b02d1",
-      "bytes": 58794
+      "sha256": "313eadfa5403c038a381d1630c2351029662477df307cac756909e348fb15057",
+      "bytes": 59330
     },
     {
       "spec": "lopda/1",
