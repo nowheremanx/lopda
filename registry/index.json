@@ -90,9 +90,9 @@
       "glyph": "塔",
       "category": "game",
       "buttons": true,
-      "version": "0.4.0",
+      "version": "0.4.1",
       "released": "2026-10-10",
-      "updated": "2026-10-12",
+      "updated": "2026-11-24",
       "description": "仙侠序章，可通关。卡带内置 LX-3D 协处理器：三维小镇、山道、塔内与斗法。",
       "i18n": {
         "en": {
@@ -103,8 +103,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/zhenyao-tower/index.html",
-      "sha256": "901fd75decb02770b25df835a3de4b3d76f036dd7409975728824af55c723ef7",
-      "bytes": 297184
+      "sha256": "c7f113b2f1c0250ffe547f56e4041251aa9327d3ee8c92c3da01f472a023d1f8",
+      "bytes": 299676
     },
     {
       "spec": "lopda/1",
@@ -213,9 +213,9 @@
         "...000000000....",
         "................"
       ],
-      "version": "2.0.1",
+      "version": "2.0.2",
       "released": "2026-10-21",
-      "updated": "2026-11-03",
+      "updated": "2026-11-24",
       "description": "十二页纸塔，十分钟一轮：钥匙、墨铺、怪物特技、炸弹与圣水，每一步都要取舍。",
       "i18n": {
         "en": {
@@ -226,8 +226,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/paper-tower/index.html",
-      "sha256": "60c5a9fcf1761795cb5015129bc4e4ef3958cc763de1145bcda057bd1279903b",
-      "bytes": 160861
+      "sha256": "754cbaecb12b5adb01ec947b97b277d4c2f7c58d2a8e1d3bbc68c23abdf1895e",
+      "bytes": 160879
     },
     {
       "spec": "lopda/1",
@@ -433,9 +433,9 @@
         "................",
         "................"
       ],
-      "version": "1.6.0",
+      "version": "1.7.0",
       "released": "2026-10-07",
-      "updated": "2026-11-01",
+      "updated": "2026-11-24",
       "description": "15×15 棋盘，你执黑先手和电脑下，可以悔棋；也能通过电波和另一台掌机对战。",
       "i18n": {
         "en": {
@@ -449,8 +449,8 @@
         "link"
       ],
       "path": "apps/gomoku/index.html",
-      "sha256": "8bdfff6638d720f6a693f5253e020aae3a3f6027050fd50fbce62ce3bcd1d470",
-      "bytes": 29929
+      "sha256": "039b14d7ef0b978e7d09c62538735cae2533700d07ef197f13bfcbbd23bad560",
+      "bytes": 33193
     },
     {
       "spec": "lopda/1",
