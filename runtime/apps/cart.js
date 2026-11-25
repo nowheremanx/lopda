@@ -14,8 +14,12 @@ var TONES=LP.TONES, SND=LP.SND, audio=LP.audio, own=LP.own, toast=LP.toast, put=
    are run as black-and-white carts, and Super Game Boy colouring is switched off, so the screen
    only ever shows the four tones. */
 var GB={mod:null, loading:null, launch:0, e:0, rom:0, joy:0, raf:0, last:0, left:0, paused:false,
-  cart:null, save:null, ctx:null, img:null, gain:null, aStart:0, dirty:false, timer:0};
+  cart:null, save:null, ctx:null, img:null, gain:null, aStart:0, dirty:false, timer:0, tenths:10};
 var GB_TICKS=4194304, GB_AUDIO_FRAMES=4096, GB_LEVEL=2.4;
+/* the speed knob, in tenths: 0.5x to 1.5x, like the pitch control of a tape deck. Faster also means higher, as on
+   tape: the sound is played back at the same rate the game runs, so it never falls behind or breaks up. Beyond 1.5x
+   it turns shrill, so the knob stops there. Every start begins at 1.0x and nothing is stored (decisions.md 70). */
+var GB_SLOWEST=5, GB_FASTEST=15;
 /* into the runtime's app bus, under its master volume: 2.4 x the steps (0.12, 0.25, 0.42) is the 0.3 / 0.6 / 1
    the cartridge had before runtime 0.12.0 */
 var CARTS=[];
@@ -189,7 +193,8 @@ function gbShowLib(){
 }
 function cartLayout(){
   var cv=$("cart-cv"), box=$("cart-play"); if(box.hidden) return;
-  var msg=$("cart-msg"), w=box.clientWidth-16, h=box.clientHeight-16-(msg.offsetHeight ? msg.offsetHeight+8 : 0)-6;
+  var msg=$("cart-msg"), knob=$("cart-speed"), w=box.clientWidth-16,
+    h=box.clientHeight-16-(msg.offsetHeight ? msg.offsetHeight+8 : 0)-(knob.offsetHeight ? knob.offsetHeight+8 : 0)-6;
   /* every game pixel gets the same whole number of screen pixels, so the picture stays crisp */
   var dpr=window.devicePixelRatio||1, fit=Math.min(w/160,h/144), k=Math.floor(fit*dpr)/dpr;
   if(k<fit*0.9) k=fit;   /* on small screens size wins over perfectly even pixels */
@@ -225,7 +230,7 @@ function gbStart(c,rom,save){
   var cv=$("cart-cv"); GB.ctx=cv.getContext("2d"); GB.img=GB.ctx.createImageData(160,144);
   GB.ctx.fillStyle="rgb("+TONES[3].join(",")+")"; GB.ctx.fillRect(0,0,160,144);
   gbConnect();
-  GB.aStart=0; GB.last=0; GB.left=0; GB.paused=false; GB.dirty=false;
+  GB.aStart=0; GB.last=0; GB.left=0; GB.paused=false; GB.dirty=false; gbSpeed(10);
   GB.timer=setInterval(function(){ if(GB.dirty) gbSaveSram(); },1500);
   $("cart-lib").hidden=true; $("cart-play").hidden=false; $("cart-tools").hidden=false; $("v-cart").classList.add("locked"); $("v-cart").scrollTop=0;
   $("cart-title").textContent=c.name; $("cart-state").textContent="";
@@ -246,7 +251,7 @@ function gbFrame(ms){
   GB.raf=requestAnimationFrame(gbFrame);
   if(GB.paused) return;
   var m=GB.mod, sec=ms/1000, d=Math.max(sec-(GB.last||sec),0); GB.last=sec;
-  var until=m._emulator_get_ticks_f64(GB.e)+Math.min(d,5/60)*GB_TICKS-GB.left, frame=false;
+  var until=m._emulator_get_ticks_f64(GB.e)+Math.min(d,5/60)*GB_TICKS*GB.tenths/10-GB.left, frame=false;
   for(;;){
     var ev=m._emulator_run_until_f64(GB.e,until);
     if(ev&1) frame=true;
@@ -264,8 +269,9 @@ function gbAudio(){
   if(GB.aStart<now){ GB.aStart=now+0.1; }
   var buf=ac.createBuffer(2,GB_AUDIO_FRAMES,GB.rate), l=buf.getChannelData(0), r=buf.getChannelData(1);
   for(var i=0;i<GB_AUDIO_FRAMES;i++){ l[i]=src[2*i]/255; r[i]=src[2*i+1]/255; }
-  var n=ac.createBufferSource(); n.buffer=buf; n.connect(GB.gain); n.start(GB.aStart);
-  GB.aStart+=GB_AUDIO_FRAMES/GB.rate;
+  /* at 1.2x the game makes 1.2 s of sound a second: play it 1.2x as fast (and so a little higher) to keep up */
+  var k=GB.tenths/10, n=ac.createBufferSource(); n.buffer=buf; n.playbackRate.value=k; n.connect(GB.gain); n.start(GB.aStart);
+  GB.aStart+=GB_AUDIO_FRAMES/GB.rate/k;
 }
 var GB_JOY={up:"_set_joyp_up",down:"_set_joyp_down",left:"_set_joyp_left",right:"_set_joyp_right",a:"_set_joyp_A",b:"_set_joyp_B",start:"_set_joyp_start",select:"_set_joyp_select"};
 function gbJoy(b,down){ if(GB.e && GB_JOY[b]) GB.mod[GB_JOY[b]](GB.e,down?1:0); }
@@ -291,6 +297,14 @@ function gbStop(){
   GB.e=0; GB.joy=0; GB.rom=0; GB.cart=null;
   releaseButtons(); LP.keepAwake(false);
 }
+function gbSpeed(t){
+  GB.tenths=Math.max(GB_SLOWEST,Math.min(GB_FASTEST,t));
+  $("cart-rate").textContent=(GB.tenths/10).toFixed(1)+"\u00d7";
+  $("cart-slower").disabled=GB.tenths<=GB_SLOWEST; $("cart-faster").disabled=GB.tenths>=GB_FASTEST;
+}
+$("cart-slower").onclick=function(){ if(GB.e) gbSpeed(GB.tenths-1); };
+$("cart-faster").onclick=function(){ if(GB.e) gbSpeed(GB.tenths+1); };
+$("cart-rate").onclick=function(){ if(GB.e) gbSpeed(10); };
 $("cart-eject").onclick=function(){ GB.launch++; gbStop(); gbShowLib(); renderCarts(); };
 $("cart-save").onclick=function(){
   if(!GB.e) return;

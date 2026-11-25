@@ -9465,6 +9465,58 @@ test("cart: the ROM in the emulator stays whole across eject, play again and a .
   assert.deepEqual(notBlocked(errors), []);
 });
 
+test("cart: the speed knob runs the game from 0.5x to 1.5x in tenths and starts every cart at 1.0x", { skip, timeout: 90000 }, async (t) => {
+  /* an iPhone SE page: the knob sits under the game screen, and screen, knob and pad all fit without scrolling */
+  const { p, errors } = await page(t, { locale: "zh-CN", viewport: { width: 375, height: 667 } });
+  await p.route(/jsdelivr/, (r) => r.abort());
+  await p.goto(base + "/runtime/?debug", { waitUntil: "networkidle" });
+  await p.waitForFunction(() => window.LP && window.LP.S.db);
+  await tile(p, "卡带机");
+  await p.setInputFiles("#cart-file", { name: "loop.gb", mimeType: "application/octet-stream", buffer: loopRom() });
+  await p.waitForSelector("#cart-list .btn:not(.ghost)");
+  await p.click("#cart-list .btn:not(.ghost)");
+  await p.waitForSelector("#cart-play:not([hidden])", { timeout: 10000 });
+  const knob = () => p.evaluate(() => ({ rate: document.getElementById("cart-rate").textContent,
+    slower: document.getElementById("cart-slower").disabled, faster: document.getElementById("cart-faster").disabled }));
+  assert.deepEqual(await knob(), { rate: "1.0\u00d7", slower: false, faster: false });
+  const fits = await p.evaluate(() => {
+    const box = document.getElementById("cart-play").getBoundingClientRect(), r = (id) => document.getElementById(id).getBoundingClientRect();
+    const cv = r("cart-cv"), k = r("cart-speed");
+    return { inside: cv.top >= box.top && k.bottom <= box.bottom + 0.5, under: k.top >= cv.bottom, screen: cv.width >= 160,
+      scrolls: document.getElementById("v-cart").scrollHeight > document.getElementById("v-cart").clientHeight };
+  });
+  assert.deepEqual(fits, { inside: true, under: true, screen: true, scrolls: false });
+  /* how fast the game runs against the clock on the wall, over about a second */
+  const pace = () => p.evaluate(() => new Promise((res) => {
+    const GB = window.LOPDA_DEBUG.GB, m = GB.mod, t0 = m._emulator_get_ticks_f64(GB.e), w0 = performance.now();
+    setTimeout(() => res((m._emulator_get_ticks_f64(GB.e) - t0) / 4194304 / ((performance.now() - w0) / 1000)), 1200);
+  }));
+  const one = await pace();
+  for (let i = 0; i < 6; i++) await p.click("#cart-faster", { force: true });
+  assert.deepEqual(await knob(), { rate: "1.5\u00d7", slower: false, faster: true }, "the knob stops at 1.5x");
+  const fast = await pace();
+  assert.ok(Math.abs(fast / one - 1.5) < 0.2, "1.5x runs half as fast again: " + one.toFixed(2) + " -> " + fast.toFixed(2));
+  /* the number puts it back to 1.0x */
+  await p.click("#cart-rate");
+  assert.equal((await knob()).rate, "1.0\u00d7");
+  for (let i = 0; i < 6; i++) await p.click("#cart-slower", { force: true });
+  assert.deepEqual(await knob(), { rate: "0.5\u00d7", slower: true, faster: false }, "the knob stops at 0.5x");
+  const slow = await pace();
+  assert.ok(Math.abs(slow / one - 0.5) < 0.1, "0.5x runs at half speed: " + one.toFixed(2) + " -> " + slow.toFixed(2));
+  /* nothing is kept: the next start is 1.0x again, after eject and after HOME */
+  await p.click("#cart-eject");
+  await p.click("#cart-list .btn:not(.ghost)");
+  await p.waitForSelector("#cart-play:not([hidden])", { timeout: 10000 });
+  assert.equal((await knob()).rate, "1.0\u00d7");
+  await p.click("#cart-faster");
+  await p.click("#home-key");
+  await tile(p, "卡带机");
+  await p.click("#cart-list .btn:not(.ghost)");
+  await p.waitForSelector("#cart-play:not([hidden])", { timeout: 10000 });
+  assert.equal((await knob()).rate, "1.0\u00d7");
+  assert.deepEqual(notBlocked(errors), []);
+});
+
 /* ---------------- whole-device backup and restore (Settings) ---------------- */
 
 /* both databases read straight from IndexedDB, Blobs and typed arrays as their bytes in hex: what "byte for byte" compares */

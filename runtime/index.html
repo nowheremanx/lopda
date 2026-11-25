@@ -567,6 +567,12 @@
       </div>
       <div class="cart-play" id="cart-play" hidden>
         <canvas id="cart-cv" width="160" height="144" data-i18n-label="cart.screen" aria-label="卡带画面"></canvas>
+        <!-- the speed knob: 0.5x to 1.5x in tenths, back to 1.0x on every start (apps/cart.js) -->
+        <div class="row" id="cart-speed" data-i18n-label="cart.speed" role="group" aria-label="速度">
+          <button class="btn ghost" id="cart-slower" type="button" data-i18n-label="cart.slower" aria-label="慢一点">−</button>
+          <button class="btn ghost" id="cart-rate" type="button" data-i18n-label="cart.speedreset" aria-label="回到原速">1.0×</button>
+          <button class="btn ghost" id="cart-faster" type="button" data-i18n-label="cart.faster" aria-label="快一点">+</button>
+        </div>
         <p class="hint" id="cart-msg" data-i18n="cart.keys">键盘：方向键 · X=A · Z=B · 回车=START · Shift=SELECT</p>
       </div>
     </section>
