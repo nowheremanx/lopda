@@ -15,6 +15,7 @@
 //
 // Scenes for the promo films, recorded only when named in --only (the edit for those films lives outside the repo):
 //   home-cam, notes2, calendar2   home into the camera and one shot; today's diary with 那年今日; diary corners
+//   tuner                         the tuner's dial swept by a finger and stepped back (silent stand-in streams)
 //   pet-act                       the pet's Run pack;  ai-add  the AI lines' provider list (refuses if any line is stored)
 //   scripts-gen, scripts-revise   Scripts writing (--idea) and revising (--ask) a program over a DeepSeek line; the key
 //                                 comes only from the DEEPSEEK_KEY environment variable and never reaches the screen;
@@ -75,11 +76,11 @@ if (MODE !== "record" && MODE !== "edit") { console.error("usage: launch-video.m
 const VW = 390, VH = 844, DPR = 2;
 
 const T = {
-  zh: { camera: "点阵相机", darkroom: "冲洗店", reader: "阅读器", book: "Alice", store: "应用商店", pet: "宠物", studio: "四轨机",
+  zh: { camera: "点阵相机", darkroom: "冲洗店", reader: "阅读器", book: "Alice", store: "应用商店", pet: "宠物", studio: "四轨机", tuner: "收音机",
         library: "磁带库", file: "文件", maze: "滚珠迷宫", open: "打开", play: "播放", notes: "记事本", calendar: "万年历", dict: "词典",
         today: "去湖边拍完了一卷胶卷。山上的叶子全红了，正好八张。", earlier: "秋天第一次穿外套。",
         quote: "《论语》\n学而时习之，不亦说乎。#摘抄", todo: "买胶卷\n周六去冲洗店。#待办" },
-  en: { camera: "Camera", darkroom: "Darkroom", reader: "Reader", book: "Alice", store: "Store", pet: "Pet", studio: "Tape4",
+  en: { camera: "Camera", darkroom: "Darkroom", reader: "Reader", book: "Alice", store: "Store", pet: "Pet", studio: "Tape4", tuner: "Tuner",
         library: "Tape library", file: /^File/, maze: "Marble", open: "Open", play: "Play", notes: "Notes", calendar: "Calendar", dict: "Dict",
         today: "Shot a whole roll by the lake. The hills have gone red, eight frames exactly.", earlier: "First cold morning. Wore a coat.",
         quote: "Alice\u2019s Adventures in Wonderland\n\u201cCuriouser and curiouser!\u201d cried Alice. #quotes", todo: "Buy film\nTake the roll to the darkroom on Saturday. #todo" },
@@ -107,6 +108,13 @@ async function record() {
     timezoneId: "Asia/Shanghai", locale: LANG === "zh" ? "zh-CN" : "en-US", serviceWorkers: "block", acceptDownloads: true,
     permissions: ["camera"] });
   await ctx.route("https://cdn.jsdelivr.net/**", (r) => r.fulfill({ status: 404, body: "not found" }));
+  /* the tuner's seeded stations: a quiet WAV stands in for every stream (as tests/e2e-tuner.test.mjs), so a film never
+     reaches a broadcaster and never carries one of their programmes; what it hears between stations is the runtime's hiss */
+  const quietWav = (() => { const sr = 8000, n = sr * 60, b = Buffer.alloc(44 + n * 2);
+    b.write("RIFF", 0); b.writeUInt32LE(36 + n * 2, 4); b.write("WAVE", 8); b.write("fmt ", 12); b.writeUInt32LE(16, 16);
+    b.writeUInt16LE(1, 20); b.writeUInt16LE(1, 22); b.writeUInt32LE(sr, 24); b.writeUInt32LE(sr * 2, 28); b.writeUInt16LE(2, 32);
+    b.writeUInt16LE(16, 34); b.write("data", 36); b.writeUInt32LE(n * 2, 40); return b; })();
+  await ctx.route(/streamtheworld|radiofrance|radioparadise|nhkworld|myalicdn|akamaized/, (r) => r.fulfill({ status: 200, contentType: "audio/wav", body: quietWav }));
   if (AUDIO) await ctx.addInitScript(() => {
     const connect = AudioNode.prototype.connect, taps = new Map();
     window.__lpRec = { taps };
@@ -633,6 +641,29 @@ async function record() {
     await film(p, "studio", async () => { await p.waitForTimeout(3000); });
     await p.click("#studio-play");
     await home(p);
+  }
+  /* ---- the tuner: switched on at the first station, then a finger sweeps the dial through the hiss and lets go on
+     the third; LEFT steps back one (NHK is HLS, which the stand-in WAV cannot play) (recorded only when named: tuner) ---- */
+  if (ONLY.includes("tuner")) {
+    const q = await newPage("?debug"); await ready(q);
+    await tile(q, T.tuner);
+    await q.waitForFunction(() => window.LOPDA_DEBUG.tuner && LOPDA_DEBUG.tuner.T.loaded && document.querySelectorAll("#tn-scale .tn-mark").length > 0);
+    const press = (b) => q.evaluate((x) => { LOPDA_DEBUG.setButton(x, true); LOPDA_DEBUG.setButton(x, false); }, b);
+    await press("a");
+    await q.waitForFunction(() => LOPDA_DEBUG.tuner.E.state === "playing", null, { timeout: 15000 }); await q.waitForTimeout(600);
+    await film(q, "tuner", async () => {
+      const on = (n) => q.waitForFunction((n) => LOPDA_DEBUG.tuner.E.state === "playing" && LOPDA_DEBUG.tuner.E.st && LOPDA_DEBUG.tuner.E.st.name !== n, n, { timeout: 15000 });
+      const name = () => q.evaluate(() => LOPDA_DEBUG.tuner.E.st && LOPDA_DEBUG.tuner.E.st.name);
+      let was = await name();
+      await q.waitForTimeout(700);
+      const box = await q.locator("#tn-dial").boundingBox(), y = box.y + box.height * 0.6;
+      await q.mouse.move(box.x + box.width * 0.7, y); await q.mouse.down();
+      for (let i = 1; i <= 40; i++) { await q.mouse.move(box.x + box.width * (0.7 - 0.45 * i / 40), y); await q.waitForTimeout(35); }
+      await q.mouse.up();
+      await on(was); await q.waitForTimeout(1600);
+      was = await name(); await press("left"); await on(was); await q.waitForTimeout(1600);
+    });
+    await press("a"); await q.close();
   }
   if (want("reader")) {
     await home(p); await tile(p, T.reader); await p.waitForSelector("#rd-list li", { timeout: 10000 }); await p.waitForTimeout(500);

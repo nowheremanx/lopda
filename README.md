@@ -47,7 +47,7 @@ The seven stocks on one photo, same roll and same development, only the stock ch
 | Dictionary | 词典 | English–Chinese, built in and offline (abridged ECDICT). Import StarDict dictionaries; a word book for review; A says the word aloud. |
 | Reader | 阅读器 | TXT and EPUB books, your own fonts, an e-ink style full refresh. Select text to look it up or quote it into Notes. Two public-domain books included. |
 | Pet | 宠物 | A small creature that hatches once, gets a name for life and lives in a room on the screen. It eats, plays, sleeps at night, grows up, and some days comes home with a souvenir for its shelf. It never dies. |
-| Tape4 | 四轨机 | A four-track tape machine: drums, bass, chords and melody, 64 patterns chained into a song, swing and tape colour, a mixer, a tape library with four demo tunes, WAV export. |
+| Tape4 | 四轨机 | A four-track tape machine: drums, bass, chords and melody, 64 patterns chained into a song, swing and tape colour, a mixer, a tape library with a demo tune, WAV export. |
 | Camera | 点阵相机 | Live dithered viewfinder, rolls of film, seven stocks, every lens on the phone. |
 | Darkroom | 冲洗店 | The film box: develop, view in colour, print, export and import negatives. |
 | Cartridge | 卡带机 | Plays black-and-white Game Boy files you supply, with the chin buttons. Saves can be exported and imported. No games are included. |
@@ -57,19 +57,19 @@ The seven stocks on one photo, same roll and same development, only the stock ch
 | Scripts | 脚本 | Your own small HTML/JS programs: one line to an AI line and it writes the program (or copy the prompt into any AI chat and paste the code back), then run it in the sandbox. Revise changes it with one more sentence; the old code is kept first, ten versions per script. |
 | Settings | 设置 | Sound, volume, language (中文 / English), which apps may use the sensors and camera, app saves, backup and restore of the whole device, AI lines (your own keys for DeepSeek, Kimi, Qwen, SiliconFlow or OpenRouter, like SIM cards), updates. |
 
-![The pet in its room, a demo tune in Tape4, a short exchange in Radio with a 16 × 16 picture of a boat, and Gomoku](docs/images/more.png)
+![The pet in its room, the demo tune in Tape4, the Tuner's dial on a station, and a short exchange in Radio with a 16 × 16 picture of a boat](docs/images/more.png)
 
 ## The app store
 
 ![Three store apps in play, Paper Tower, Fake Yu and Rain Station, and the store's list](docs/images/apps.png)
 
-Twenty-three apps today, all open source and all made for Lo-PDA:
+Twenty-four apps today, all open source and all made for Lo-PDA:
 
 | Kind | Apps |
 |---|---|
 | Games | Paper Tower (a ten-minute tower climb), Fake Yu (a one-key rhythm story), SnapTile (a sliding puzzle from your own photo), Marble (tilt the phone), Candles (blow into the mic), Gomoku (also a two-handheld match over sound), Mole Bop, Gold Dig (a sixty-second hook-and-haul mine), Pagoda (a 3D prologue), Sisyphus (a meditative climb with sixteen lines from Camus), Crossing (spell words on a wheel to fill a crossword), DailyBox (one crate-pushing puzzle a day), Klotski (the sliding-block escape), Foothill (seven days running a mountain diner) |
-| Story | Rain Station, a ten-minute visual novel |
-| Tools and toys | Calc and Paint (both preinstalled), Fortune, Kana, Sounds, VecDream, LuckyWay (hold the phone flat like a compass), SaveBook (a tally book, and the example of keeping old saves readable) |
+| Story | Rain Station: Fifty Minutes Late, a ten-minute visual novel (a rainy platform, a late train, your dad seeing you off to university) |
+| Tools and toys | Calc and Paint (both preinstalled), Fortune, Kana, Sounds, VecDream, LuckyWay (hold the phone flat like a compass), SaveBook (a tally book, and the example of keeping old saves readable), Sensors (live tilt, shake, heading and sound, the example for the sensor permissions) |
 
 Preinstalled apps are ordinary store apps: remove them and they stay removed; the store has them again.
 
@@ -164,7 +164,7 @@ Every change should take a decision away from the user, or at least not add one.
 no previews, one development per roll, frames you can't edit. The limits are the point.
 Why things are the way they are: [`docs/decisions.md`](docs/decisions.md).
 
-<sub>The screenshots were made in a desktop browser by `tools/readme-shots.mjs` (`--lang=zh` for the Chinese ones), with the camera fed a lake drawn in code. The Radio shot is two tabs of one browser talking through a stand-in for the sound link.</sub>
+<sub>The screenshots were made in a desktop browser by `tools/readme-shots.mjs` (`--lang=zh` for the Chinese ones), with the camera fed a lake drawn in code. The Tuner's streams are a silent stand-in, and the Radio shot is two tabs of one browser talking through a stand-in for the sound link.</sub>
 
 ## License
 
