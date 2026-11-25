@@ -433,9 +433,9 @@
         "................",
         "................"
       ],
-      "version": "1.6.0",
+      "version": "1.7.0",
       "released": "2026-10-07",
-      "updated": "2026-11-01",
+      "updated": "2026-11-24",
       "description": "15×15 棋盘，你执黑先手和电脑下，可以悔棋；也能通过电波和另一台掌机对战。",
       "i18n": {
         "en": {
@@ -449,8 +449,8 @@
         "link"
       ],
       "path": "apps/gomoku/index.html",
-      "sha256": "8bdfff6638d720f6a693f5253e020aae3a3f6027050fd50fbce62ce3bcd1d470",
-      "bytes": 29929
+      "sha256": "039b14d7ef0b978e7d09c62538735cae2533700d07ef197f13bfcbbd23bad560",
+      "bytes": 33193
     },
     {
       "spec": "lopda/1",
