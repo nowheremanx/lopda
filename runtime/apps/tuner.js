@@ -876,7 +876,7 @@ function bind(){
    Another app's sound (a video, a podcast, a call) takes the phone's audio. iOS often stops our element without a
    "pause" event, so the readout said 收听中 over silence (owner, 2026-11-25). Three signs, whichever comes first: the
    pause event, the audio session going "interrupted" (Safari 16.4+), and time that stops moving while we think it plays.
-   When the session is free again, or the user comes back to the screen, it dials the station again by itself; where
+   When the user comes back to the screen (or the session frees up while they are on it), it dials the station again; where
    the phone wants a tap for that, it stays "interrupted" and A or the lock screen's play brings it back. */
 function interrupted(){
   if(E.state!=="playing" && E.state!=="buffering" && E.state!=="tuning") return;
@@ -894,6 +894,12 @@ function resume(){
   dial();
 }
 var STILL_MS=5000;
+function onSession(state){
+  if(state==="interrupted") interrupted();
+  /* only while the user is looking at Lo-PDA: in the background, the session freeing up can be another web page that
+     just started its own sound, and the radio grabbed the speaker back from it (owner, 2026-11-25) */
+  else if(E.interrupted && !document.hidden) resume();
+}
 function checkAlive(){
   var a=E.el;
   if(!a || E.state!=="playing" || a.src===silentUrl) return;
@@ -902,10 +908,8 @@ function checkAlive(){
 }
 (function(){
   var S=navigator.audioSession;
-  if(S && S.addEventListener) S.addEventListener("statechange",function(){
-    if(S.state==="interrupted") interrupted();
-    else if(E.interrupted) resume();
-  });
+  if(S && S.addEventListener) S.addEventListener("statechange",function(){ onSession(S.state); });
+
   document.addEventListener("visibilitychange",function(){
     if(document.hidden) return;
     var a=E.el;
@@ -926,7 +930,7 @@ function tick(){
 }
 
 bind();
-if(window.LOPDA_DEBUG) window.LOPDA_DEBUG.tuner={T:T, E:E, SEED:SEED, step:step};
+if(window.LOPDA_DEBUG) window.LOPDA_DEBUG.tuner={T:T, E:E, SEED:SEED, step:step, onSession:onSession};
 
 LP.padRoute("tuner",function(b,down){
   if(byId("v-tuner").hidden) return false;
