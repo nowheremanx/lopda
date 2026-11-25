@@ -174,6 +174,28 @@ test("tuner: on Find and My stations only the rows scroll; the search box and th
   assert.deepEqual(errors, []);
 });
 
+test("tuner: an interruption the phone does not announce shows as interrupted, and coming back dials again", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors, key, st } = await open(t);
+  await key("a");
+  await until(p, () => window.LOPDA_DEBUG.tuner.E.state === "playing");
+  /* another app took the audio: no pause event, time just stops */
+  await p.evaluate(() => { const { E } = window.LOPDA_DEBUG.tuner; E.stopping = true; E.el.pause(); E.stopping = false; E.movedAt = Date.now() - 10000; });
+  await until(p, () => window.LOPDA_DEBUG.tuner.E.state === "paused");
+  assert.match(await p.locator("#tn-status").textContent(), /打断/);
+  assert.equal(await p.evaluate(() => window.LP.SND.hold), false, "the playback session is let go");
+  /* the user comes back to the screen: it dials the station again by itself */
+  await p.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await until(p, () => window.LOPDA_DEBUG.tuner.E.state === "playing");
+  assert.equal((await st()).st, "UFM 100.3");
+  /* a pause the user asked for (the lock screen) is never resumed behind their back */
+  await key("a");
+  assert.equal((await st()).state, "off");
+  await p.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await sleep(500);
+  assert.equal((await st()).state, "off");
+  assert.deepEqual(errors, []);
+});
+
 test("tuner: another program's music stops it, and so does the sleep timer", { skip, timeout: 60000 }, async (t) => {
   const { p, errors, key, st } = await open(t);
   await key("a");

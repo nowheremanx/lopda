@@ -145,7 +145,7 @@ function player(){
   a.addEventListener("playing",function(){
     if(a.src===silentUrl || !E.st) return;
     clearTimeout(E.watch); clearTimeout(E.retry);
-    E.tries=0; E.err="";
+    E.tries=0; E.err=""; E.resuming=false; E.interrupted=false; E.movedAt=Date.now();
     if(!E.since) E.since=Date.now();
     setState("playing");
     hiss(0);
@@ -170,11 +170,11 @@ function player(){
   a.addEventListener("pause",function(){
     /* only a station that was sounding: our own pause before a new src arrives while "tuning" */
     if(E.stopping || a.src===silentUrl || (E.state!=="playing" && E.state!=="buffering")) return;
-    clearTimeout(E.watch); clearTimeout(E.retry);
-    setState("paused"); hiss(0); msState("paused");
+    interrupted();
   });
   a.addEventListener("timeupdate",function(){
     checkSleep();
+    if(a.currentTime!==E.lastT){ E.lastT=a.currentTime; E.movedAt=Date.now(); }
     /* sound is moving again without a "playing" event: back to playing, no reconnect */
     if(E.state==="buffering" && a.src!==silentUrl && a.currentTime>E.heard+0.5){
       clearTimeout(E.watch); clearTimeout(E.retry); E.tries=0;
@@ -240,7 +240,8 @@ function dial(){
     var p=null; try{ p=a.play(); }catch(e){}
     if(p && p.catch) p.catch(function(e){
       if(gen!==E.gen) return;
-      if(e && e.name==="NotAllowedError") fail("tap");
+      /* a resume after an interruption the phone does not allow without a tap: stay "interrupted", A or the lock screen brings it back */
+      if(e && e.name==="NotAllowedError"){ if(E.resuming){ E.resuming=false; interrupted(); } else fail("tap"); }
     });
   }
 }
@@ -273,7 +274,7 @@ function silenceEl(){
 }
 /* how: "pause" keeps the lock screen's card so its play button can bring the station back */
 function stop(how){
-  E.gen++;
+  E.gen++; E.interrupted=false; E.resuming=false;
   clearTimeout(E.watch); clearTimeout(E.retry);
   /* the lock screen's pause keeps the src (iOS drops the Now Playing card of an element with none); play dials again */
   if(how==="pause" && E.st && E.el){
@@ -871,9 +872,56 @@ function bind(){
   byId("tn-file").addEventListener("change",function(){ var f=this.files && this.files[0]; importFile(f); });
 }
 
+/* ---------- interruptions ----------
+   Another app's sound (a video, a podcast, a call) takes the phone's audio. iOS often stops our element without a
+   "pause" event, so the readout said 收听中 over silence (owner, 2026-11-25). Three signs, whichever comes first: the
+   pause event, the audio session going "interrupted" (Safari 16.4+), and time that stops moving while we think it plays.
+   When the session is free again, or the user comes back to the screen, it dials the station again by itself; where
+   the phone wants a tap for that, it stays "interrupted" and A or the lock screen's play brings it back. */
+function interrupted(){
+  if(E.state!=="playing" && E.state!=="buffering" && E.state!=="tuning") return;
+  E.gen++;
+  clearTimeout(E.watch); clearTimeout(E.retry);
+  E.interrupted=true; E.since=0;
+  /* the element may still think it plays: hold it, so it never comes back on its own behind a "paused" readout */
+  if(E.el && !E.el.paused){ E.stopping=true; try{ E.el.pause(); }catch(e){} E.stopping=false; }
+  hiss(0);
+  setState("paused"); msState("paused");
+}
+function resume(){
+  if(!E.interrupted || E.state!=="paused" || !E.st) return;
+  E.interrupted=false; E.resuming=true; E.tries=0;
+  dial();
+}
+var STILL_MS=5000;
+function checkAlive(){
+  var a=E.el;
+  if(!a || E.state!=="playing" || a.src===silentUrl) return;
+  /* time is only trusted on screen: in the background the phone may send timeupdate rarely */
+  if(a.paused || (!document.hidden && E.movedAt && Date.now()-E.movedAt>STILL_MS)) interrupted();
+}
+(function(){
+  var S=navigator.audioSession;
+  if(S && S.addEventListener) S.addEventListener("statechange",function(){
+    if(S.state==="interrupted") interrupted();
+    else if(E.interrupted) resume();
+  });
+  document.addEventListener("visibilitychange",function(){
+    if(document.hidden) return;
+    var a=E.el;
+    if(a && a.paused) checkAlive();
+    else E.movedAt=Date.now();   /* a fresh start for the time check: timeupdate may have been rare while hidden */
+    if(E.interrupted) resume();
+  });
+  /* time that stops moving is checked while the radio is on, even with the program off screen (timers may sleep in the
+     background; then the check runs when the page wakes) */
+  setInterval(function(){ if(E.state==="playing" && !T.live) checkAlive(); },2000);
+})();
+
 /* the clock: the listening time, the signal, the sleep countdown */
 function tick(){
   checkSleep();
+  checkAlive();
   if(T.live && T.page==="dial" && !document.hidden) renderReadout();
 }
 
