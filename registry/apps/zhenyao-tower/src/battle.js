@@ -277,9 +277,15 @@ var Battle = (function () {
   }
 
   /* ---------- the HUD, numbers and menus ---------- */
-  function bar(g, x, y, w, v, max) {
+  /* The bar is an ink frame with a two-pixel inside. fill: the part still there, empty: the part lost, both
+     defaulting to the ink band the hero's bars sit on (paper in an ink frame). The foe's bar sits on a paper
+     panel, so there its full part must be ink and its lost part paper: a paper fill made a full bar look empty
+     and an emptying bar look fuller. */
+  function bar(g, x, y, w, v, max, fill, empty) {
+    var fw = Math.round((w - 2) * Math.max(0, Math.min(1, v / max)));
     g.rect(x, y, w, 4, g.INK);
-    g.rect(x + 1, y + 1, Math.round((w - 2) * Math.max(0, Math.min(1, v / max))), 2, g.PAPER);
+    g.rect(x + 1, y + 1, fw, 2, fill == null ? g.PAPER : fill);
+    g.rect(x + 1 + fw, y + 1, w - 2 - fw, 2, empty == null ? g.INK : empty);
   }
   function outlined(g, text, x, y, color) {
     [[-1, 0], [1, 0], [0, -1], [0, 1]].forEach(function (d) { g.text(text, x + d[0], y + d[1], { align: "center", color: g.INK }); });
@@ -350,7 +356,7 @@ var Battle = (function () {
         var f = S.b.foes[m.i], weak = BATTLE.ELEMENTS[f.weak].name;
         g.text(f.name, 6, 116);
         g.text("怕" + weak, 154, 116, { align: "right", color: g.DARK });
-        bar(g, 6, 133, 148, S.foes[m.i].shown, f.maxHp);
+        bar(g, 6, 133, 148, S.foes[m.i].shown, f.maxHp, g.INK, g.PAPER);
       }
     }
   }

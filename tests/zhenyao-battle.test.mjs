@@ -2,7 +2,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import vm from "node:vm";
-import { read } from "./helpers.mjs";
+import { join } from "node:path";
+import { read, ROOT } from "./helpers.mjs";
+import { boot } from "./app-vm.mjs";
 import { report } from "./zhenyao-sim.mjs";
 
 // acceptance criteria from the handoff
@@ -114,4 +116,52 @@ test("balance: the boss needs the weakness", () => {
 test("balance: a smart hero reaches the boss at level 7 or more", () => {
   assert.ok(rep.policies.smart.minLevelAtBoss >= MIN_LEVEL_AT_BOSS,
     `avg ${rep.policies.smart.levelAtBoss}, min ${rep.policies.smart.minLevelAtBoss}`);
+});
+
+/* ---------- the foe's HP bar in a fight ----------
+   The target panel is paper, so the part of the bar still there must be ink and the part lost paper; a paper
+   fill made a full bar look empty and an emptying one fuller (src/battle.js bar(), drawn at 6, 133, 148). */
+const APP = join(ROOT, "registry", "apps", "zhenyao-tower", "index.html");
+const INK = "31,42,20";      // #1f2a14
+const PAPER = "163,173,126"; // #a3ad7e
+
+test("the foe bar is ink for the HP left and paper for the HP lost", async () => {
+  let last = null;
+  const app = boot(APP, { seed: 7, onPut: (img) => { last = img; } });
+  const yieldNow = app.ctx.get("__yield");
+  const run = async (n) => { for (let i = 0; i < n; i++) { app.frame(); await yieldNow(); } };
+  const send = app.ctx.get("dispatchEvent"), KE = app.ctx.get("KeyboardEvent");
+  /* one press, then a frame with the button up: the menus only read it on the frame it goes down */
+  const press = async (key) => {
+    send(new KE("keydown", { key: key })); await run(1);
+    send(new KE("keyup", { key: key })); await run(1);
+  };
+  const menuKind = () => { const s = app.ctx.get("Battle.S()"); return s && s.menu ? s.menu.kind : null; };
+  const px = (x, y) => {
+    const o = (y * 160 + x) * 4;
+    return last.data[o] + "," + last.data[o + 1] + "," + last.data[o + 2];
+  };
+  /* the bar's inside line: x 7..152 of y 134, the two pixels of paper or ink inside the 4 px frame */
+  const line = () => { const out = []; for (let x = 7; x <= 152; x++) out.push(px(x, 134)); return out; };
+
+  await run(5);
+  app.ctx.get("ZT.fight(0, 0)");              // 狐火 on the road, one foe, at full HP
+  let n = 0;
+  for (; n < 2000 && menuKind() !== "cmd"; n++) await run(1);
+  assert.equal(menuKind(), "cmd", "the fight reached its command menu");
+  await press("x");                           // 攻击: the target panel comes up
+  for (n = 0; n < 200 && menuKind() !== "target"; n++) await run(1);
+  assert.equal(menuKind(), "target", "the target panel is up");
+  await run(1);                               // one frame with it drawn, nothing pressed
+  assert.ok(last, "a frame reached the screen");
+  const S = app.ctx.get("Battle.S()"), i = S.menu.i;
+  const shown = line();
+  assert.deepEqual(shown.filter((c) => c !== INK), [], "at full HP the whole inside line is ink");
+  /* half the HP: the left half of the line is ink, the right half paper */
+  S.foes[i].shown = Math.floor(S.b.foes[i].maxHp / 2);
+  await run(1);
+  const fw = Math.round(146 * S.foes[i].shown / S.b.foes[i].maxHp), half = line();
+  assert.ok(fw > 0 && fw < 146, `half HP leaves part of the bar: ${fw} of 146`);
+  assert.deepEqual(half.slice(0, fw).filter((c) => c !== INK), [], `the ${fw} pixels of HP left are ink`);
+  assert.deepEqual(half.slice(fw).filter((c) => c !== PAPER), [], `the ${146 - fw} pixels lost are paper`);
 });

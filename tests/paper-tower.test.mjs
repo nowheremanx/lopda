@@ -4,7 +4,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import vm from "node:vm";
-import { read, runScript } from "./helpers.mjs";
+import { join } from "node:path";
+import { read, runScript, ROOT } from "./helpers.mjs";
+import { boot } from "./app-vm.mjs";
 
 const ctx = vm.createContext({ console });
 vm.runInContext(read("registry/apps/paper-tower/src/data.js"), ctx);
@@ -464,3 +466,92 @@ test("a player who never opens a fold can still finish", () => {
   assert.equal(r.S.wicks, 0);
   assert.ok(r.S.hp > 0);
 });
+
+/* ---------------- the first minute and the sheets ---------------- */
+
+/* The app in Node: a fake PAD that starts a new game, and a clock the test steps by hand. */
+function bootTower(lang) {
+  const on = { press: [], release: [] };
+  const pad = {
+    lang, spec: "lopda/1",
+    on: (type, f) => { if (on[type]) on[type].push(f); },
+    off() {}, isDown: () => false,
+    load: () => Promise.resolve(null), save() {}, remove() {}, exit() {}, sfx() {}
+  };
+  const app = boot(join(ROOT, "registry/apps/paper-tower/index.html"), { pad });
+  const game = app.ctx.get("game");
+  const run = async (n) => { for (let i = 0; i < n; i++) { app.frame(); await app.ctx.get("__yield")(); } };
+  const tap = async (b, after = 2) => {
+    on.press.forEach((f) => f(b));
+    await run(2);
+    on.release.forEach((f) => f(b));
+    await run(after);
+  };
+  return { app, game, run, tap };
+}
+/* the title, its menu, 新的一页, and the half second it fades into the play scene */
+async function startPlay(t) {
+  await t.run(10);
+  await t.tap("a");
+  await t.run(6);
+  await t.tap("a");
+  await t.run(90);
+  return t;
+}
+/* a g that only records: the sheet's pages and the map's footer need no framebuffer */
+function recorder(game) {
+  const drawn = { dither: [], rects: [], windows: [], texts: [] };
+  const g = {
+    INK: 0, DARK: 1, MID: 2, PAPER: 3,
+    origin() {}, clip() {}, clear() {}, frame() {}, line() {},
+    rect(x, y, w, h, c) { drawn.rects.push({ x, y, w, h, c }); },
+    dither(x, y, w, h) { drawn.dither.push({ x, y, w, h }); },
+    window(x, y, w, h) { drawn.windows.push({ x, y, w, h }); },
+    text(s, x, y) { drawn.texts.push({ s, x, y }); },
+    measure: (s) => game.g.measure(s)
+  };
+  return { g, drawn };
+}
+
+for (const lang of ["zh", "en"]) {
+  test(`the first-time intro is three short pages (${lang})`, async () => {
+    const t = bootTower(lang);
+    const said = [];
+    const say = t.game.say;
+    t.game.say = (text, o) => { said.push(text); return say.call(t.game, text, o); };
+    await startPlay(t);
+    assert.equal(said.length, 1, "the play scene says the intro once");
+    assert.equal(t.app.ctx.get("S").flags.intro, true);
+    const pages = said[0];
+    assert.equal(pages.length, 3, `the intro is ${pages.length} pages`);
+    for (const page of pages) {
+      assert.ok(t.game.g.wrap(page, t.game.width - 16).length <= 3, `this page does not fit the dialog box: ${page}`);
+    }
+    assert.ok(pages.some((p) => p.includes("START") && p.includes("SELECT")), "the keys are still named");
+    assert.match(pages[2], lang === "zh" ? /说明/ : /How to play/);
+  });
+}
+
+test("the help sheet covers the page below the HUD and keeps its keys clear of the HUD", async () => {
+  const t = await startPlay(bootTower("zh"));
+  const HUD = t.app.ctx.get("HUD");
+  const rec = recorder(t.game);
+  const tips = ["方向键走，A 开门、说话、打怪。START 菜单，SELECT 摸身边的折缝。"];
+  t.app.ctx.get("helpScene")(tips).draw(rec.g);
+  assert.ok(rec.drawn.rects.some((r) => r.x === 0 && r.y === HUD && r.w === t.game.width && r.y + r.h === t.game.height && r.c === rec.g.PAPER),
+    "the page below the HUD is covered with plain paper, so the floor and its banner do not show through");
+  for (const r of rec.drawn.windows) assert.ok(r.y >= HUD, `a sheet window at y=${r.y} sits on the HUD`);
+  const hint = rec.drawn.texts.find((d) => d.s.includes("START"));
+  assert.ok(hint, "the keys are drawn");
+  assert.ok(hint.y >= HUD, `the keys at y=${hint.y} sit on the HUD`);
+});
+
+for (const lang of ["zh", "en"]) {
+  test(`the map page wears the same footer as the other pages (${lang})`, async () => {
+    const t = await startPlay(bootTower(lang));
+    const rec = recorder(t.game);
+    t.app.ctx.get("mapScene")().draw(rec.g);
+    const footer = lang === "zh" ? "A / B 关" : "A / B close";
+    assert.ok(rec.drawn.texts.some((d) => d.s === footer), `the map's texts: ${rec.drawn.texts.map((d) => d.s).join(" | ")}`);
+  });
+}
