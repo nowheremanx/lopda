@@ -67,9 +67,9 @@
         "................",
         "................"
       ],
-      "version": "4.0.0",
+      "version": "4.1.0",
       "released": "2026-10-07",
-      "updated": "2026-10-27",
+      "updated": "2026-11-24",
       "description": "60 秒冲分，或无尽生存。戴头盔的砸两下，冒火花的雷别碰。",
       "i18n": {
         "en": {
@@ -80,8 +80,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/whack-a-mole/index.html",
-      "sha256": "037e5efd0ae2809e5713e69a1696f89e54c75958bd553a32f2d4ec7cd4e4ffc9",
-      "bytes": 22989
+      "sha256": "d5b8c6d915fdac08dc01663b39ad784779ebf4c416fef702c4c83c5040d62675",
+      "bytes": 25658
     },
     {
       "spec": "lopda/1",
@@ -90,9 +90,9 @@
       "glyph": "塔",
       "category": "game",
       "buttons": true,
-      "version": "0.4.0",
+      "version": "0.4.1",
       "released": "2026-10-10",
-      "updated": "2026-10-12",
+      "updated": "2026-11-24",
       "description": "仙侠序章，可通关。卡带内置 LX-3D 协处理器：三维小镇、山道、塔内与斗法。",
       "i18n": {
         "en": {
@@ -103,8 +103,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/zhenyao-tower/index.html",
-      "sha256": "901fd75decb02770b25df835a3de4b3d76f036dd7409975728824af55c723ef7",
-      "bytes": 297184
+      "sha256": "c7f113b2f1c0250ffe547f56e4041251aa9327d3ee8c92c3da01f472a023d1f8",
+      "bytes": 299676
     },
     {
       "spec": "lopda/1",
@@ -131,9 +131,9 @@
         "................",
         "................"
       ],
-      "version": "0.1.1",
+      "version": "0.1.2",
       "released": "2026-10-28",
-      "updated": "2026-11-21",
+      "updated": "2026-11-24",
       "description": "七天，守住山脚的小馆：采买、打怪、备菜、待客。",
       "i18n": {
         "en": {
@@ -144,8 +144,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/shanjiao-diner/index.html",
-      "sha256": "08a4052e969012b2cdca12f91b618e0cbf01d2ba9fbf150ce72630d9e047710f",
-      "bytes": 240611
+      "sha256": "ec205b30688ab01f8e8786bd277814c88370a266f76cc7151759b2f6dad0a4fa",
+      "bytes": 242396
     },
     {
       "spec": "lopda/1",
@@ -213,9 +213,9 @@
         "...000000000....",
         "................"
       ],
-      "version": "2.0.1",
+      "version": "2.0.2",
       "released": "2026-10-21",
-      "updated": "2026-11-03",
+      "updated": "2026-11-24",
       "description": "十二页纸塔，十分钟一轮：钥匙、墨铺、怪物特技、炸弹与圣水，每一步都要取舍。",
       "i18n": {
         "en": {
@@ -226,8 +226,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/paper-tower/index.html",
-      "sha256": "60c5a9fcf1761795cb5015129bc4e4ef3958cc763de1145bcda057bd1279903b",
-      "bytes": 160861
+      "sha256": "754cbaecb12b5adb01ec947b97b277d4c2f7c58d2a8e1d3bbc68c23abdf1895e",
+      "bytes": 160879
     },
     {
       "spec": "lopda/1",
@@ -342,8 +342,9 @@
         "................",
         "................"
       ],
-      "version": "1.0.6",
+      "version": "1.0.7",
       "released": "2026-10-28",
+      "updated": "2026-11-24",
       "description": "曹操从华容道脱身：全关开放，记录步数，附八课大师教程与逐步提示。",
       "i18n": {
         "zh": {
@@ -358,8 +359,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/klotski/index.html",
-      "sha256": "7fb2c921b0816147033d0519ba89900bf2acd3f3ed7226ca124374653f1b6ff4",
-      "bytes": 153321
+      "sha256": "d6ca96704891856c5df0f788afbf8d9fd114164f20dec506b3b3cf5384b5ef4f",
+      "bytes": 154105
     },
     {
       "spec": "lopda/1",
@@ -386,9 +387,9 @@
         "................",
         "................"
       ],
-      "version": "1.5.0",
+      "version": "1.5.1",
       "released": "2026-10-17",
-      "updated": "2026-10-20",
+      "updated": "2026-11-24",
       "description": "拍一张照片，或从六张内置图片里挑一张，切成滑块拼图再拼回来。普通和街机两种玩法。",
       "i18n": {
         "zh": {
@@ -406,8 +407,8 @@
         "camera"
       ],
       "path": "apps/photo-puzzle/index.html",
-      "sha256": "64fa2bc50023869635c70566e3a70da6c749150fcd08ff2db30ac91905289810",
-      "bytes": 73126
+      "sha256": "3f7ff285909e7a3f30e6166b5b1290afbc9140906f9ee83c03f7e4270bf49c94",
+      "bytes": 75448
     },
     {
       "spec": "lopda/1",
@@ -433,9 +434,9 @@
         "................",
         "................"
       ],
-      "version": "1.6.0",
+      "version": "1.7.0",
       "released": "2026-10-07",
-      "updated": "2026-11-01",
+      "updated": "2026-11-24",
       "description": "15×15 棋盘，你执黑先手和电脑下，可以悔棋；也能通过电波和另一台掌机对战。",
       "i18n": {
         "en": {
@@ -449,8 +450,8 @@
         "link"
       ],
       "path": "apps/gomoku/index.html",
-      "sha256": "8bdfff6638d720f6a693f5253e020aae3a3f6027050fd50fbce62ce3bcd1d470",
-      "bytes": 29929
+      "sha256": "039b14d7ef0b978e7d09c62538735cae2533700d07ef197f13bfcbbd23bad560",
+      "bytes": 33193
     },
     {
       "spec": "lopda/1",
@@ -573,9 +574,9 @@
         "................",
         "................"
       ],
-      "version": "1.1.0",
+      "version": "1.2.0",
       "released": "2026-10-16",
-      "updated": "2026-10-16",
+      "updated": "2026-11-24",
       "description": "对着话筒吹灭一排蜡烛，最后唱准一个音把蜡烛点回来。按住 A 也能吹。话筒的示范。",
       "i18n": {
         "zh": {
@@ -593,8 +594,8 @@
         "mic"
       ],
       "path": "apps/blow-candles/index.html",
-      "sha256": "37155aab6ec064679f3b9df8c6b6ebb433c53ad23f47d37f1c722f5f4f1b02d1",
-      "bytes": 58794
+      "sha256": "313eadfa5403c038a381d1630c2351029662477df307cac756909e348fb15057",
+      "bytes": 59330
     },
     {
       "spec": "lopda/1",
@@ -661,9 +662,9 @@
         "................",
         "................"
       ],
-      "version": "1.0.1",
+      "version": "1.0.2",
       "released": "2026-11-18",
-      "updated": "2026-11-23",
+      "updated": "2026-11-24",
       "description": "开发示例：最多八个计数器，点选或按 A 累加；看存档格式、版本和迁移。",
       "i18n": {
         "en": {
@@ -674,8 +675,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/save-book/index.html",
-      "sha256": "f45fa8fa315155f98b04f2d8c2ba422705d82ce6900b8135c8813e034a5517f6",
-      "bytes": 14346
+      "sha256": "866ef67714ab34d34f9dc95a8f7812e2926338f29e6fd97fb697c7c28c92f988",
+      "bytes": 14952
     },
     {
       "spec": "lopda/1",
@@ -702,9 +703,9 @@
         "..000..0....0...",
         ".........000...."
       ],
-      "version": "1.5.0",
+      "version": "1.5.1",
       "released": "2026-10-19",
-      "updated": "2026-11-21",
+      "updated": "2026-11-24",
       "description": "学习平假名和片假名（含浊音、半浊音），听发音，再做四选一小测。",
       "i18n": {
         "zh": {
@@ -719,8 +720,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/kana-cards/index.html",
-      "sha256": "bba2be8cf661ece5da7f3a6fcee94a746a63aee62692cae5f38c89bfe4fcf014",
-      "bytes": 23049
+      "sha256": "50486de956abf2eac3fe53d05e1e2069f5230a02b07217ebe5837271250f6e03",
+      "bytes": 25539
     },
     {
       "spec": "lopda/1",
@@ -787,8 +788,9 @@
         "......0000......",
         "................"
       ],
-      "version": "1.0.0",
+      "version": "1.0.1",
       "released": "2026-11-23",
+      "updated": "2026-11-24",
       "description": "开发示例：实时显示倾斜、摇晃、方向和声音，以及允许、拒绝、没有传感器时的样子。",
       "i18n": {
         "zh": {
@@ -807,8 +809,8 @@
         "mic"
       ],
       "path": "apps/sensor-desk/index.html",
-      "sha256": "ef3a0053ad0bcea6e9c328b98f3b2f91e4b18000597900afce5a70c33b440b0b",
-      "bytes": 18316
+      "sha256": "c50a304508c0ac824faf4c043d186e5e140ed6032cd20fb3ce0e8f8beb69ca0a",
+      "bytes": 19814
     },
     {
       "spec": "lopda/1",
@@ -834,14 +836,14 @@
         ".0000...........",
         "................"
       ],
-      "version": "1.1.1",
+      "version": "1.2.0",
       "released": "2026-10-11",
-      "updated": "2026-10-15",
-      "description": "96×96 四色点阵画板：撤销、清空，能导入图片转成点阵，也能导出 PNG。",
+      "updated": "2026-11-24",
+      "description": "96×96 四色点阵画板：撤销、重做、清空，能导入图片转成点阵，也能导出 PNG。",
       "i18n": {
         "en": {
           "name": "Paint",
-          "description": "96×96 four-tone pixel paint. Import a picture, export PNG."
+          "description": "96×96 four-tone pixel paint. Undo, redo, clear, import a picture, export PNG."
         }
       },
       "author": "Haowei Wu",
@@ -850,8 +852,8 @@
         "files"
       ],
       "path": "apps/paint/index.html",
-      "sha256": "0862559f4791dc26a4f0a4c6421bb27aa7f68f693523470c06b40123b4c4ae53",
-      "bytes": 11329
+      "sha256": "e4a9d0a8da0409b762cdf59ddd69f1a8745f6624031f085f5854b7ad230b3a56",
+      "bytes": 12377
     },
     {
       "spec": "lopda/1",
@@ -1012,8 +1014,9 @@
         "......0000......",
         "................"
       ],
-      "version": "1.0.0",
+      "version": "1.0.1",
       "released": "2026-10-24",
+      "updated": "2026-11-24",
       "description": "平放手机当罗盘，看今天喜神、财神、福神和贵神在哪个方向。旧历书上的说法，图个吉利。指南针的示范。",
       "i18n": {
         "en": {
@@ -1027,8 +1030,8 @@
         "motion"
       ],
       "path": "apps/luck-compass/index.html",
-      "sha256": "1d3d990fb41f9a60301599d459ecf83d765803cbf1d19b5f09080ddd504c1916",
-      "bytes": 68468
+      "sha256": "ce47467c83ba15a5b5edcb1b92d55831bac15a0ff604f7b122947602a1a407ef",
+      "bytes": 69027
     }
   ]
 }

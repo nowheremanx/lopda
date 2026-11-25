@@ -778,7 +778,7 @@ function end() {
   score += R.got + R.timeBonus;
   game.sfx(R.got + R.timeBonus > 0 ? "win" : "lose");
   fire(R.bonus && R.c[0].lit ? 1 : 0);
-  if (R.bonus && score > best) { best = score; game.save("best", best); }
+  if (score > best) { best = score; game.save("best", best); }   /* every round, not only the bonus: quitting keeps the record */
 }
 
 /* blowing: how hard, 0-1, from the microphone or from A held down */
@@ -797,17 +797,30 @@ function blowing(dt) {
 }
 
 function blowOut(dt) {
-  var w = R.wind, half = (R.c.length - 1) / 2 || 1, out = 0;
+  var w = R.wind, out = 0;
   R.c.forEach(function (c, k) {
     if (c.smoke > 0) c.smoke -= dt;
     if (!c.lit) return;
-    var far = Math.abs(k - half) / half;                /* the breath is aimed at the middle: a loud one reaches the ends */
-    var reach = w * (1.15 - far * 0.55);
+    var reach = reachAt(k, w);
     if (reach > 0.25) c.life -= (reach - 0.15) * dt * 1.6 / c.hard;
     else c.life = Math.min(1, c.life + dt * 0.5);       /* a flame that is let be stands up again */
     if (c.life <= 0) { c.lit = false; c.smoke = 1.2; out++; }
   });
   if (out) { game.sfx(PUFF); fire(litCount()); }
+}
+
+/* how much of the breath one candle gets: the middle most, the ends least */
+function reachAt(k, w) {
+  var half = (R.c.length - 1) / 2 || 1, far = Math.abs(k - half) / half;
+  return w * (1.15 - far * 0.55);
+}
+
+/* the aim cue: every flame leans away from the middle by what its own wick gets, so on a weak
+   breath the outer ones barely move and the player sees that they need more air */
+function flameLean(k) {
+  var half = (R.c.length - 1) / 2 || 1, side = k < half ? -1 : k > half ? 1 : (Math.floor(game.time * 3) % 2 ? 1 : -1);
+  var lean = Math.min(3, Math.floor(reachAt(k, R.wind) * 8));     /* 3 px: a 7 px flame stays on its wick */
+  return lean * side;
 }
 
 function sing(dt) {
@@ -845,17 +858,16 @@ async function pause() {
 
 /* ---- drawing ---- */
 function drawCandles(g) {
-  var half = (R.c.length - 1) / 2 || 1;
   R.c.forEach(function (c, k) {
     var top = TABLE - c.h, x = c.x - (c.w >> 1);
     g.rect(x, top, c.w, c.h, g.PAPER); g.frame(x, top, c.w, c.h, g.INK);
     g.rect(x + 1, top + 1, 2, c.h - 2, g.MID);
     if (c.lit || c.smoke > 0 || R.bonus) g.line(c.x, top - 3, c.x, top - 1, g.INK);       /* the wick */
     if (c.lit) {
-      var side = k < half ? -1 : k > half ? 1 : (Math.floor(game.time * 3) % 2 ? 1 : -1);
-      var lean = Math.round(R.wind * 3 * side * (0.4 + 0.6 * c.life));
+      var lean = flameLean(k);
+      c.lean = lean;                                     /* what the screen shows, for the aim cue */
       var f = c.life > 0.45 ? FLAME[Math.floor(game.time * 6 + k) % 2] : SMALL;
-      g.sprite(f, c.x - (f.w >> 1) + lean, top - 3 - f.h, { flip: side < 0 && lean !== 0 });
+      g.sprite(f, c.x - (f.w >> 1) + lean, top - 3 - f.h, { flip: lean < 0 });
     } else if (c.smoke > 0 && !R.bonus) {
       var u = 1.2 - c.smoke;
       for (var j = 0; j < 4; j++) {
@@ -953,9 +965,12 @@ game.scene("title", {
     var title = T({ zh: "吹蜡烛", en: "CANDLES" }), tw = g.measure(title);
     g.text(title, 80, 2, { align: "center", color: g.PAPER });
     g.sprite(SMALL, 80 - (tw >> 1) - 12, 6); g.sprite(SMALL, 80 + (tw >> 1) + 7, 6);
-    var cap = HAS_MIC ? T({ zh: "对着话筒吹灭蜡烛", en: "Blow them out" }) : T({ zh: "按住 A 吹灭蜡烛", en: "Hold A to blow" }), cw = g.measure(cap) + 11;
-    if (HAS_MIC) g.sprite(ICON.mic, 80 - (cw >> 1), 82);
-    g.text(cap, HAS_MIC ? 80 - (cw >> 1) + 11 : 80, 80, HAS_MIC ? {} : { align: "center" });
+    var micMode = HAS_MIC && mode === "mic";
+    var cap = micMode ? T({ zh: "对着话筒吹灭蜡烛", en: "Blow them out" }) : T({ zh: "按住 A 吹灭蜡烛", en: "Hold A to blow" });
+    if (micMode) {
+      var cw = g.measure(cap) + 11;
+      g.sprite(ICON.mic, 80 - (cw >> 1), 82); g.text(cap, 80 - (cw >> 1) + 11, 80);
+    } else g.text(cap, 80, 80, { align: "center" });
     g.rect(8, 95, 144, 1, g.MID);
     var y = 98;
     keyRow(g, "a", "A", T({ zh: "按住吹", en: "hold, blow" }), y); y += 14;

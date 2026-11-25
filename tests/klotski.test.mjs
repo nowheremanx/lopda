@@ -205,11 +205,11 @@ test("klotski: a lesson's marked soldier is kept apart from the other 1x1s", () 
 
 /* --- the app ---------------------------------------------------------------------------------------- */
 
-function fakePad(initial) {
+function fakePad(initial, lang) {
   const data = JSON.parse(JSON.stringify(initial || {}));
   const listeners = {};
   const pad = {
-    lang: "zh",
+    lang: lang || "zh",
     on(type, fn) { (listeners[type] = listeners[type] || []).push(fn); },
     off() {},
     isDown() { return false; },
@@ -229,8 +229,8 @@ async function settle() { for (let i = 0; i < 8; i++) await new Promise((resolve
 function tapButton(app, pad, button) {
   pad.press(button); run(app, 1); pad.release(button); run(app, 3);
 }
-async function bootApp(initial) {
-  const pad = fakePad(initial);
+async function bootApp(initial, lang) {
+  const pad = fakePad(initial, lang);
   const app = boot(join(ROOT, APP_REL), { pad: pad.pad, seed: 1 });
   await settle();
   run(app, 3);
@@ -346,4 +346,86 @@ test("klotski app: the level list is open, and a key moves the selected piece", 
     if (K.state().moves > before) moved = true;
   }
   assert.ok(moved, "SELECT + Right never moved a piece");
+});
+
+/* --- the page reader: 玩法 and 大师笔记 -------------------------------------------------------------- */
+
+/* Both callers of buildPages (the start menu and the master-class list) pass KLOTSKI_DATA.help or
+   .notes; drive the pages scene so the pages come from the app's own g, wrap and font. */
+async function builtPages(lang) {
+  const { app } = await bootApp({}, lang);
+  const game = app.ctx.get("game");
+  const pg = app.ctx.get("pg");
+  const data = app.ctx.get("KLOTSKI_DATA");
+  const sets = { notes: data.notes, help: data.help };
+  const built = {};
+  for (const name of Object.keys(sets)) {
+    game.go("pages", { section: name, blocks: sets[name] }, { fade: false });
+    run(app, 3);
+    built[name] = pg.list.map((p) => ({ title: p.title, cont: p.cont, lines: p.lines.slice() }));
+  }
+  return { game, sets, built };
+}
+
+/* Every rule the pages promise: whole paragraphs, no lone line, nothing lost, and cont marking
+   exactly the pages after a block's first. */
+function checkPageSet(game, blocks, pages, where) {
+  const wrapped = blocks.map((b) => b.lines.map((line) => game.g.wrap(game.t(line), 144)));
+  const perBlock = blocks.map(() => []);
+  let bi = -1, blockPage = 0;
+  for (const page of pages) {
+    if (!page.cont) { bi++; blockPage = 0; }
+    blockPage++;
+    assert.equal(page.cont, blockPage > 1, `${where}: cont does not mark the pages after a block's first`);
+    assert.ok(bi >= 0 && bi < blocks.length, `${where}: a page starts outside its block`);
+    assert.equal(page.title.zh, blocks[bi].title.zh, `${where}: a page names another block`);
+    assert.equal(page.title.en, blocks[bi].title.en, `${where}: a page names another block`);
+    assert.ok(page.lines.length >= 1 && page.lines.length <= 8, `${where}: a page holds ${page.lines.length} lines`);
+    perBlock[bi].push(page);
+  }
+  blocks.forEach((_, i) => {
+    const shown = perBlock[i].reduce((all, p) => all.concat(p.lines), []);
+    const expected = wrapped[i].reduce((all, lines) => all.concat(lines), []);
+    assert.ok(perBlock[i].length >= 1, `${where}/${i}: the block made no page`);
+    assert.deepEqual(shown, expected, `${where}/${i}: the pages lost or reordered a line`);
+    if (expected.length > 1) {
+      for (const page of perBlock[i]) assert.notEqual(page.lines.length, 1, `${where}/${i}: a page holds one orphan line`);
+    }
+    /* a page break inside a paragraph's wrapped lines is only allowed past a page of 8 */
+    const breaks = [];
+    let at = 0;
+    for (const page of perBlock[i]) { at += page.lines.length; breaks.push(at); }
+    breaks.pop();
+    let start = 0;
+    for (const para of wrapped[i]) {
+      const end = start + para.length;
+      for (const b of breaks) {
+        if (b > start && b < end) assert.ok(para.length > 8, `${where}/${i}: a ${para.length}-line paragraph is split across pages`);
+      }
+      start = end;
+    }
+  });
+}
+
+test("klotski: 玩法 and 大师笔记 keep paragraphs whole on every page, in both languages", async () => {
+  for (const lang of ["zh", "en"]) {
+    const { game, sets, built } = await builtPages(lang);
+    for (const name of Object.keys(sets)) checkPageSet(game, sets[name], built[name], `${lang}/${name}`);
+  }
+});
+
+test("klotski: a paragraph longer than a page is split without leaving a lone line", async () => {
+  const { app } = await bootApp();
+  const buildPages = app.ctx.get("buildPages");
+  /* a fake g whose wrap gives a line count straight from the text, so the split rule is visible */
+  const g = { wrap(text) { const n = Number(text); const lines = []; for (let i = 0; i < n; i++) lines.push(text + ":" + i); return lines; } };
+  const one = (lines) => buildPages(g, [{ title: { zh: "T", en: "T" }, lines }]);
+  assert.deepEqual(one(["9"]).map((p) => p.lines.length), [7, 2], "9 lines became 8 + 1");
+  assert.deepEqual(one(["10"]).map((p) => p.lines.length), [8, 2]);
+  assert.deepEqual(one(["16"]).map((p) => p.lines.length), [8, 8]);
+  assert.deepEqual(one(["17"]).map((p) => p.lines.length), [8, 7, 2], "17 lines left a lone line at the end");
+  assert.deepEqual(one(["2", "9"]).map((p) => p.lines.length), [2, 7, 2], "a long paragraph must start a page of its own");
+  assert.deepEqual(one(["5", "3"]).map((p) => p.lines.length), [8], "two short paragraphs share a page");
+  assert.deepEqual(one(["5", "4"]).map((p) => p.lines.length), [5, 4], "a paragraph that does not fit starts the next page");
+  assert.deepEqual(one(["9"]).map((p) => p.cont), [false, true]);
 });

@@ -60,6 +60,16 @@ function morningAct(i) {
   if (acts[i].id === "codex") { game.sfx("tap"); game.push("codex", { from: "morning" }); return; }
   if (acts[i].id === "open") {
     if (stockTotal() <= 0) {
+      // No food and no way left to cook it: the day can only be closed.  The
+      // alternative was a stuck morning with 开门, 菜单 and 出门 all unusable.
+      if (S.ap <= 0 || S.flags.prepared) {
+        busy = true;
+        game.choose(["今天歇业"], { title: "灶上是空的。今天就歇业吧？", cancel: true }).then(function (c) {
+          busy = false;
+          if (c === 0) closedDay();
+        });
+        return;
+      }
       busy = true;
       game.say("灶上还是空的。先去备菜吧。").then(function () { busy = false; });
       return;
