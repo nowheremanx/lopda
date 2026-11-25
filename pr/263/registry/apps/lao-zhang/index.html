@@ -18,7 +18,8 @@
   #stage { flex: 1; min-height: 0; position: relative; display: flex; align-items: center; justify-content: center; padding: 4px; box-sizing: border-box; overflow: hidden; }
   #c { display: block; image-rendering: pixelated; image-rendering: crisp-edges; border: 2px solid #1f2a14; touch-action: none; background: #a3ad7e; }
   #foot { flex: none; height: 18px; line-height: 18px; font-size: 13px; text-align: center; color: #4a5a32; white-space: nowrap; overflow: hidden; }
-  #intro { position: absolute; top: 50px; left: 8px; right: 8px; box-sizing: border-box; background: #1f2a14; color: #a3ad7e; padding: 3px 7px; text-align: center; font-size: 13px; line-height: 1.35; pointer-events: none; z-index: 3; }
+  /* the level's tip sits low over the dirt, never over 老张 and his winch at the top (owner, 2026-11-25) */
+  #intro { position: absolute; bottom: 10px; left: 8px; right: 8px; box-sizing: border-box; background: #1f2a14; color: #a3ad7e; padding: 3px 7px; text-align: center; font-size: 13px; line-height: 1.35; pointer-events: none; z-index: 3; }
   #intro b { display: block; font-size: 14px; }
   #intro span { display: block; }
   #intro[hidden] { display: none !important; }

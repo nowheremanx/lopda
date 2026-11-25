@@ -40,8 +40,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/lao-zhang/index.html",
-      "sha256": "9d69374141c77833e48eba5abffbfde956d63ae67217ff2b144979ab85546cf5",
-      "bytes": 135152
+      "sha256": "83e090f47e15586bb37cd0e13649f9a0b40f670e60163f3912931c304b61aebf",
+      "bytes": 135266
     },
     {
       "spec": "lopda/1",
@@ -622,9 +622,9 @@
         "...0000000000...",
         "................"
       ],
-      "version": "1.1.1",
+      "version": "1.2.0",
       "released": "2026-10-11",
-      "updated": "2026-11-21",
+      "updated": "2026-11-24",
       "description": "八位数商务计算器，连续运算、百分比和记忆键。",
       "i18n": {
         "en": {
@@ -635,8 +635,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/calculator/index.html",
-      "sha256": "dbb1c839f26ea83ea3bd5a70702ee7de8214d438e73aa843392636fa0a7e9c0b",
-      "bytes": 14282
+      "sha256": "dba170723ce7d835e9d5cbf30abdbdfcec6d712aaf695948fe7bd9b28eca08fe",
+      "bytes": 13646
     },
     {
       "spec": "lopda/1",
@@ -967,9 +967,9 @@
         "....00000000....",
         "................"
       ],
-      "version": "1.1.2",
+      "version": "1.2.0",
       "released": "2026-10-19",
-      "updated": "2026-11-21",
+      "updated": "2026-11-24",
       "description": "抽一支签，读一段今天的顺便话。写进记事本接口的示范。",
       "i18n": {
         "zh": {
@@ -987,8 +987,8 @@
         "notes"
       ],
       "path": "apps/daily-slip/index.html",
-      "sha256": "0ca237bafbc705e9a36750c32a71e3e3fe265efce9f64bca00091fc8d2438e0b",
-      "bytes": 33240
+      "sha256": "b76b63956fc71324e960ac36da8d8171c061ed4dad9b39b0c0e118158728928e",
+      "bytes": 59910
     },
     {
       "spec": "lopda/1",
