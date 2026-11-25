@@ -425,10 +425,31 @@ test("store: category filters split the catalogue, and one button updates every 
 });
 
 test("store: search finds an app by either language, ignores case, and clearing brings the catalogue back", { skip, timeout: 60000 }, async (t) => {
-  const { p, errors } = await page(t, { locale: "zh-CN" });
+  /* no service worker: it would answer registry/index.json from its cache, past the route below */
+  const { p, errors } = await page(t, { locale: "zh-CN", serviceWorkers: "block" });
   /* a fixed day, so the seven-day NEW badge is stable: paper-tower is a week old,
      luck-compass is four days old, and Fake Yu's 2.1.1 update is today */
   await p.clock.install({ time: new Date(2026, 9, 28, 12, 0) });
+  /* The badges come from the index's released / updated dates, which build-index stamps from git and which
+     move whenever one of these apps ships a new version. Pin the five apps this test reads to the dates the
+     comment above describes, so the test checks the badge rules, not the repo's release history. */
+  const PINNED = {
+    "paper-tower": { released: "2026-10-21" },
+    "crossing": { released: "2026-10-20", updated: "2026-10-26" },
+    "luck-compass": { released: "2026-10-24" },
+    "fake-yu": { released: "2026-10-01", updated: "2026-10-28" },
+    "gomoku": { released: "2026-10-07", updated: "2026-10-12" }
+  };
+  await p.route("**/registry/index.json*", async (r) => {
+    const res = await r.fetch();
+    const index = await res.json();
+    for (const a of index.apps) {
+      if (!PINNED[a.id]) continue;
+      delete a.updated;
+      Object.assign(a, PINNED[a.id]);
+    }
+    await r.fulfill({ response: res, json: index });
+  });
   await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
   await p.waitForFunction(() => document.querySelectorAll("#home .app:not(.builtin)").length === 2);
   await p.locator("#home .app.builtin", { hasText: "应用商店" }).click();
