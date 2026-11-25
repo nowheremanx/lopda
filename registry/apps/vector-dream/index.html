@@ -569,75 +569,80 @@ var Lo3D = (function () {
     return { v: v, t: t };
   }
   var GN = 22, GS = 0.5, LAKE_Y = -1.25, LAKE_TONE = 2;
+  /* a handful of short paper glints on the water, as x, z and length; each drifts on its own phase */
+  var GLINTS = [[-3.4, -3.6, 0.9], [-2.4, -2.6, 0.55], [-1.5, -1.7, 0.7], [-3.9, -1.2, 0.5],
+                [-2.7, 0.3, 0.8], [1.3, -0.7, 0.6], [2.3, 0.7, 0.5], [-4.1, 3.2, 0.7]];
   function height(x, z) {
     return 0.55 * Math.sin(x * 0.7 + z * 0.3) + 0.35 * Math.sin(z * 0.9 - x * 0.4) + 0.2 * Math.sin(x * 1.9 + z * 1.3) - 0.9;
   }
-  /* The hills are split three ways so each reads at a glance: land dark near and light far (aerial haze),
-     water one flat tone, and an ink wall along every lake edge. Crest lines come back as world segments
-     for R.streak after the frame is dithered. */
+  /* The hills keep their true height everywhere and are shaded dark near, light far (aerial haze).
+     The lake is one flat plane at LAKE_Y over the whole grid, never a row of cells: the depth buffer cuts
+     the shoreline where the ground rises through the plane, so it wanders with the land. Water is one flat
+     tone with a few paper glints drifting on it. Crest lines come back as world segments for R.streak. */
   function terrain(tm, cam) {
     var n = GN + 1, i, j, off = tm * 1.2, base = Math.floor(off / GS) * GS, fr = off - base;
-    var px = [], py = [], pz = [], raw = [], wet = [], lakeCell = [];
+    var px = [], py = [], pz = [], wet = [];
     for (j = 0; j < n; j++) for (i = 0; i < n; i++) {
       var x = (i - GN / 2) * GS, z = (j - GN / 2) * GS;
-      var h = height(x, z - base), w = h < LAKE_Y;                 /* flat "lakes" */
-      px.push(x); py.push(w ? LAKE_Y : h); pz.push(z + fr); raw.push(h); wet.push(w);
+      var h = height(x, z - base);
+      px.push(x); py.push(h); pz.push(z + fr); wet.push(h < LAKE_Y);
     }
     function id(i, j) { return j * n + i; }
     function at(k) { return [px[k], py[k], pz[k]]; }
-    function tri(m, a, b, c) { var k = m.v.length; m.v.push(a, b, c); m.t.push([k, k + 1, k + 2]); }
-    var land = { v: [], t: [], c: [], two: true }, lake = { v: [], t: [], two: true }, shore = { v: [], t: [], two: true };
+    var land = { v: [], t: [], c: [], two: true }, lake = { v: [], t: [], two: true };
     for (j = 0; j < GN; j++) for (i = 0; i < GN; i++) {
       var a = id(i, j), b = id(i + 1, j), c = id(i, j + 1), d = id(i + 1, j + 1);
-      var whole = wet[a] && wet[b] && wet[c] && wet[d];
-      lakeCell.push(whole);
-      if (whole) {
-        tri(lake, at(a), at(c), at(d));
-        tri(lake, at(a), at(d), at(b));
-      } else {
-        var cx = (px[a] + px[d]) / 2, cz = (pz[a] + pz[d]) / 2;
-        var far = Math.sqrt((cx - cam.x) * (cx - cam.x) + (cz - cam.z) * (cz - cam.z));
-        var alb = Math.min(1.15, 0.24 + far * 0.11);
-        var k = land.v.length;
-        land.v.push(at(a), at(c), at(d), at(a), at(d), at(b));
-        land.t.push([k, k + 1, k + 2], [k + 3, k + 4, k + 5]);
-        land.c.push(alb, alb);
-      }
+      var cx = (px[a] + px[d]) / 2, cz = (pz[a] + pz[d]) / 2;
+      var far = Math.sqrt((cx - cam.x) * (cx - cam.x) + (cz - cam.z) * (cz - cam.z));
+      var alb = Math.min(1.15, 0.24 + far * 0.11);
+      var k = land.v.length;
+      land.v.push(at(a), at(c), at(d), at(a), at(d), at(b));
+      land.t.push([k, k + 1, k + 2], [k + 3, k + 4, k + 5]);
+      land.c.push(alb, alb);
     }
-    /* the shoreline: a short ink wall on every edge where water meets land */
-    function isLake(i, j) { return i >= 0 && j >= 0 && i < GN && j < GN && lakeCell[j * GN + i]; }
+    /* the water surface: one cell at a time so the renderer's near-plane skip only drops the bits under
+       the eye, all at the same height */
     for (j = 0; j < GN; j++) for (i = 0; i < GN; i++) {
-      if (!lakeCell[j * GN + i]) continue;
-      var a = id(i, j), b = id(i + 1, j), c = id(i, j + 1), d = id(i + 1, j + 1), edges = [];
-      if (!isLake(i, j - 1)) edges.push([a, b]);
-      if (!isLake(i, j + 1)) edges.push([c, d]);
-      if (!isLake(i - 1, j)) edges.push([a, c]);
-      if (!isLake(i + 1, j)) edges.push([b, d]);
-      for (var e = 0; e < edges.length; e++) {
-        var p0 = at(edges[e][0]), p1 = at(edges[e][1]);
-        var q0 = [p0[0], LAKE_Y + 0.12, p0[2]], q1 = [p1[0], LAKE_Y + 0.12, p1[2]];
-        tri(shore, [p0[0], LAKE_Y - 0.01, p0[2]], [p1[0], LAKE_Y - 0.01, p1[2]], q1);
-        tri(shore, [p0[0], LAKE_Y - 0.01, p0[2]], q1, q0);
-      }
+      var x0 = (i - GN / 2) * GS, x1 = x0 + GS, z0 = (j - GN / 2) * GS + fr, z1 = z0 + GS;
+      lake.v.push([x0, LAKE_Y, z0], [x1, LAKE_Y, z0], [x1, LAKE_Y, z1], [x0, LAKE_Y, z0], [x1, LAKE_Y, z1], [x0, LAKE_Y, z1]);
+      k = lake.v.length - 6;
+      lake.t.push([k, k + 1, k + 2], [k + 3, k + 4, k + 5]);
+    }
+    /* in wireframe the full lattice would crowd out the hills, so the water is a few horizontal lines */
+    var lakeWire = { v: [], t: [], two: true };
+    for (j = 0; j <= GN; j += 2) {
+      var wz = (j - GN / 2) * GS + fr, xW = -GN / 2 * GS, xE = GN / 2 * GS;
+      k = lakeWire.v.length;
+      lakeWire.v.push([xW, LAKE_Y, wz], [xE, LAKE_Y, wz], [xE, LAKE_Y, wz + 0.015],
+                      [xW, LAKE_Y, wz], [xE, LAKE_Y, wz + 0.015], [xW, LAKE_Y, wz + 0.015]);
+      lakeWire.t.push([k, k + 1, k + 2], [k + 3, k + 4, k + 5]);
     }
     /* a crest runs along z where the ground is highest across x, and along x where it is highest across z */
     function crestX(i, j) {
       if (i < 1 || i > GN - 1 || j < 0 || j > GN) return false;
       var k = id(i, j);
-      return !wet[k] && raw[k] > raw[k - 1] + 0.012 && raw[k] > raw[k + 1] + 0.012;
+      return !wet[k] && py[k] > py[k - 1] + 0.012 && py[k] > py[k + 1] + 0.012;
     }
     function crestZ(i, j) {
       if (j < 1 || j > GN - 1 || i < 0 || i > GN) return false;
       var k = id(i, j);
-      return !wet[k] && raw[k] > raw[k - n] + 0.012 && raw[k] > raw[k + n] + 0.012;
+      return !wet[k] && py[k] > py[k - n] + 0.012 && py[k] > py[k + n] + 0.012;
     }
     var ridge = [];
     for (j = 1; j < GN; j++) for (i = 1; i < GN; i++) {
       var k = id(i, j); if (wet[k]) continue;
-      if (crestX(i, j) && crestX(i, j + 1)) ridge.push([px[k], raw[k] + 0.06, pz[k], px[k], raw[k + n] + 0.06, pz[k + n]]);
-      if (crestZ(i, j) && crestZ(i + 1, j)) ridge.push([px[k], raw[k] + 0.06, pz[k], px[k + 1], raw[k + 1] + 0.06, pz[k + 1]]);
+      if (crestX(i, j) && crestX(i, j + 1)) ridge.push([px[k], py[k] + 0.06, pz[k], px[k], py[k + n] + 0.06, pz[k + n]]);
+      if (crestZ(i, j) && crestZ(i + 1, j)) ridge.push([px[k], py[k] + 0.06, pz[k], px[k + 1], py[k + 1] + 0.06, pz[k + 1]]);
     }
-    return { land: land, lake: lake, shore: shore, ridge: ridge };
+    /* a handful of short paper glints on the water; they drift slowly, and the depth buffer hides
+       the ones that drift over land, so the dashes are cut by the real shoreline */
+    var glints = [];
+    for (var g = 0; g < GLINTS.length; g++) {
+      var gl = GLINTS[g], ph = g * 1.7;
+      glints.push([gl[0] + Math.sin(tm * 0.31 + ph) * 0.22, gl[1] + Math.cos(tm * 0.19 + ph) * 0.14,
+                   gl[2] * (0.75 + 0.25 * Math.sin(tm * 0.5 + ph))]);
+    }
+    return { land: land, lake: lake, lakeWire: lakeWire, ridge: ridge, glints: glints };
   }
   function cube(s) {
     var v = [], t = [], i;
@@ -707,10 +712,9 @@ var Lo3D = (function () {
       var terr = terrain(tm, cam);
       if (wire) {
         R.draw(terr.land, null, o);
-        R.draw(terr.lake, null, o);
+        R.draw(terr.lakeWire, null, o);
       } else {
         R.draw(terr.land, null, {});
-        R.draw(terr.shore, null, { tone: 0, two: true });
         R.draw(terr.lake, null, { tone: LAKE_TONE, two: true });
       }
     } else {
@@ -733,6 +737,11 @@ var Lo3D = (function () {
       for (var r = 0; r < terr.ridge.length; r++) {
         var q = terr.ridge[r];
         R.streak([q[0], q[1], q[2]], [q[3], q[4], q[5]], 0);
+      }
+      for (var gl = 0; gl < terr.glints.length; gl++) {
+        var g = terr.glints[gl];
+        R.streak([g[0], LAKE_Y + 0.02, g[1]], [g[0] + g[2], LAKE_Y + 0.02, g[1]], 3);
+        R.streak([g[0] + 0.12, LAKE_Y + 0.02, g[1] + 0.07], [g[0] + 0.12 + g[2] * 0.7, LAKE_Y + 0.02, g[1] + 0.07], 3);
       }
     }
     ctx.putImageData(R.paint(img), 0, 0);

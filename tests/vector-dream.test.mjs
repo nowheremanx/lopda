@@ -40,6 +40,46 @@ function toneCounts(img) {
   return counts;
 }
 
+function toneAt(img, x, y) {
+  const i = (y * W + x) * 4;
+  return TONE[img[i] + "," + img[i + 1] + "," + img[i + 2]];
+}
+
+/* the water's surface: the biggest 4-connected blob of the water tone (2), not the dithered far hills */
+function waterMask(img) {
+  const seen = new Uint8Array(W * H);
+  let best = [];
+  for (let s = 0; s < W * H; s++) {
+    if (seen[s] || toneAt(img, s % W, (s / W) | 0) !== 2) continue;
+    const queue = [s], blob = [];
+    seen[s] = 1;
+    while (queue.length) {
+      const k = queue.pop();
+      blob.push(k);
+      const x = k % W, y = (k / W) | 0;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = x + dx, ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+        const nk = ny * W + nx;
+        if (seen[nk] || toneAt(img, nx, ny) !== 2) continue;
+        seen[nk] = 1;
+        queue.push(nk);
+      }
+    }
+    if (blob.length > best.length) best = blob;
+  }
+  const mask = new Uint8Array(W * H);
+  for (const k of best) mask[k] = 1;
+  return mask;
+}
+
+/* how far the boundary runs straight through (x, y) along (dx, dy), counting boundary pixels only */
+function straightRun(boundary, x, y, dx, dy) {
+  let n = 1;
+  for (let cx = x + dx, cy = y + dy; cx >= 0 && cy >= 0 && cx < W && cy < H && boundary.has(cy * W + cx); cx += dx, cy += dy) n++;
+  return n;
+}
+
 test("vector-dream: the auto-tour changes the scene after the idle time, and a key stops it", () => {
   const v = launch();
   v.run(30);
@@ -95,4 +135,56 @@ test("vector-dream: the flyover uses at least three tones, and the crystal's cen
     if (cry[i] === 31 && cry[i + 1] === 42 && cry[i + 2] === 20) ink++;
   }
   assert.ok(ink / total < 0.9, `the crystal's centre is ${Math.round(100 * ink / total)}% ink`);
+});
+
+// The owner read the first lake as an ancient city wall: the water was built from whole terrain cells, so
+// its edge was a staircase of straight grid lines, and every lake edge carried a 0.12-high ink band. Both
+// show in the flyover's first solid frame. This test measures two things there:
+//  - the share of the water/land boundary that lies in straight horizontal or vertical runs of 6 px or
+//    more. A cell-edged lake is mostly long straight runs (the old frame: 69%); a shoreline cut by the
+//    terrain's true heights wanders and only a few pixels stay on one axis (the new frame: 11%).
+//  - the ink pixels directly above and below each column's water run. A raised ink shore reads as a
+//    band 2-4 px thick; the flat plane adds no ink at all (the old frame had bands up to 10 px).
+test("vector-dream: the lake's edge is a natural contour with no ink wall", () => {
+  const v = launch();
+  v.run(5);
+  v.press("a");                                  /* the flyover */
+  v.run(1);
+  const img = v.shot();
+  const mask = waterMask(img);
+  let water = 0;
+  for (let k = 0; k < mask.length; k++) water += mask[k];
+  assert.ok(water > 500, `the flyover shows only ${water} px of water`);
+
+  /* boundary: a water pixel with a non-water 4-neighbour */
+  const boundary = new Set();
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const k = y * W + x;
+    if (!mask[k]) continue;
+    if ((x > 0 && !mask[k - 1]) || (x < W - 1 && !mask[k + 1]) || (y > 0 && !mask[k - W]) || (y < H - 1 && !mask[k + W])) boundary.add(k);
+  }
+  let straight = 0;
+  for (const k of boundary) {
+    const x = k % W, y = (k / W) | 0;
+    const across = Math.max(straightRun(boundary, x, y, 1, 0), straightRun(boundary, x, y, -1, 0));
+    const down = Math.max(straightRun(boundary, x, y, 0, 1), straightRun(boundary, x, y, 0, -1));
+    if (Math.max(across, down) >= 6) straight++;
+  }
+  const share = straight / boundary.size;
+  assert.ok(share < 0.4, `${Math.round(100 * share)}% of the lake's edge is straight horizontal/vertical runs of 6 px or more`);
+
+  /* no ink band: look just above and just below every column's water run */
+  let thickest = 0;
+  for (let x = 0; x < W; x++) for (let y = 0; y < H; y++) {
+    const k = y * W + x;
+    if (!mask[k] || (y > 0 && mask[k - W])) continue;      /* the top of a water run */
+    let above = 0, yy = y - 1;
+    while (yy >= 0 && toneAt(img, x, yy) === 0) { above++; yy--; }
+    let end = y;
+    while (end + 1 < H && mask[(end + 1) * W + x]) end++;
+    let below = 0;
+    for (yy = end + 1; yy < H && toneAt(img, x, yy) === 0; yy++) below++;
+    thickest = Math.max(thickest, above, below);
+  }
+  assert.ok(thickest <= 2, `${thickest} px of ink lie between the water and the land`);
 });
