@@ -1269,9 +1269,6 @@ textarea::placeholder{color:var(--ink-2)}
 .tn-del.armed{background:var(--ink);color:var(--lcd)}
 .tn-find-head{display:flex;gap:6px;padding:8px 8px 6px;flex:none}
 .tn-find-head input{flex:1}
-.tn-chips{display:flex;gap:6px;padding:0 8px 4px;flex:none}
-.tn-chips .btn{flex:1;padding:6px 4px;font-size:14px}
-.tn-chips .btn.on{background:var(--ink);color:var(--lcd)}
 /* the search box, the chips and the list page's bar stay put: only the rows scroll (owner, 2026-11-25) */
 .tn-find-page,#tn-page-list{overflow:hidden}
 .tn-find-page .tn-rows,#tn-page-list .tn-rows{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden}
