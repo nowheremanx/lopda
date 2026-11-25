@@ -10,7 +10,8 @@
   header b { font-size: 17px; }
   #now { color: #4a5a32; font-size: 14px; text-align: right; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   #list { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 0 8px; -webkit-overflow-scrolling: touch; touch-action: pan-y; }
-  h2 { font-size: 14px; font-weight: normal; color: #4a5a32; margin: 10px 12px 2px; letter-spacing: 1px; }
+  h2 { font-size: 14px; font-weight: normal; color: #4a5a32; margin: 10px 12px 2px; letter-spacing: 1px; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  h2 .pos { color: #1f2a14; letter-spacing: 0; white-space: nowrap; }
   .row { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 0 12px; min-height: 48px; font-size: 15px; cursor: pointer; touch-action: manipulation; }
   .row small { color: #4a5a32; font-size: 14px; white-space: nowrap; }
   .row.on small { color: #1f2a14; }
@@ -18,7 +19,7 @@
   .row.sel { background: #1f2a14; color: #a3ad7e; }
   .row.sel small { color: #a3ad7e; }
   .mark { display: inline-block; width: 1.2em; }
-  #code { border-top: 2px solid #1f2a14; padding: 8px 12px; min-height: 58px; font-size: 14px; line-height: 1.45; color: #1f2a14; background: #7d8a58; white-space: pre-wrap; word-break: break-all; }
+  #code { border-top: 2px solid #1f2a14; padding: 8px 12px; min-height: 58px; max-height: 46vh; overflow-y: auto; -webkit-overflow-scrolling: touch; font-size: 14px; line-height: 1.45; color: #1f2a14; background: #7d8a58; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-all; }
   #keys { padding: 4px 12px 8px; font-size: 14px; color: #1f2a14; background: #7d8a58; }
 </style>
 </head>
@@ -30,7 +31,8 @@
 <script>
 /* Sounds: a catalogue of every sound the handheld's chip makes, for players to hear and for app authors to copy.
    The two songs are original (Haowei Wu, MIT, like the rest of the app). */
-var ZH = PAD.lang !== "en";
+var LANG = typeof PAD !== "undefined" && PAD.lang === "en" ? "en" : "zh";   /* older runtimes have no PAD.lang: Chinese */
+var ZH = LANG === "zh";
 var T = ZH ? {
   title: "声音样本", music: "乐曲", amb: "环境声", named: "具名音效", custom: "自定义音效",
   keys: "↑↓ 选  A 播放  B 全停  SELECT 换组",
@@ -85,6 +87,10 @@ AMB.forEach(function (a) { add(1, { kind: "amb", id: a[0], label: ZH ? a[1] : a[
 NAMED.forEach(function (n) { add(2, { kind: "named", id: n, label: n }); });
 CUSTOM.forEach(function (c) { add(3, { kind: "custom", label: ZH ? c[0] : c[1], p: c[2] }); });
 
+/* each group counts its own rows, for the "2 / 6" mark at its heading */
+var groupTotal = [0, 0, 0, 0], groupPos = [];
+rows.forEach(function (r, i) { groupTotal[r.sec]++; groupPos[i] = groupTotal[r.sec]; });
+
 function usable(r) {
   if (r.kind === "song" || r.kind === "custom") return hasMusic;
   if (r.kind === "amb") return hasAmb;
@@ -94,12 +100,21 @@ function lv(id) { return level[id] / 5; }
 function bars(id) { var n = level[id], s = ""; for (var i = 1; i <= 5; i++) s += i <= n ? "▮" : "▯"; return s; }
 function js(o) { return JSON.stringify(o).replace(/"(\w+)":/g, "$1: ").replace(/,/g, ", "); }
 var SFX = "PAD." + "sfx(";   /* written out for the reader; split so the checker does not take it for a call */
+/* the whole song, not a sample: a reader copies this block into their app and hears the same tune. The MML runs
+   long on one line, so the box wraps it (white-space: pre-wrap, overflow-wrap: anywhere). Both songs loop, as the
+   app's own PAD.music.play(song) does (music loops unless { loop: false }). */
+function songCode(s) {
+  return "PAD.music.play({\n" +
+    "  bpm: " + s.bpm + ",\n" +
+    "  p1: " + JSON.stringify(s.p1) + ",\n" +
+    "  p2: " + JSON.stringify(s.p2) + ",\n" +
+    "  tri: " + JSON.stringify(s.tri) + ",\n" +
+    "  noise: " + JSON.stringify(s.noise) + "\n" +
+    "}, { loop: true })";
+}
 function code(r) {
   if (!usable(r)) return T.newer;
-  if (r.kind === "song") {
-    var s = SONGS[r.id];
-    return "PAD.music.play({ bpm: " + s.bpm + ",\n  p1: \"" + s.p1.slice(0, 40) + "...\", ... })";
-  }
+  if (r.kind === "song") return songCode(SONGS[r.id]);
   if (r.kind === "amb") return "PAD.ambience(\"" + r.id + "\", " + lv(r.id).toFixed(1) + ")";
   if (r.kind === "named") return SFX + "\"" + r.id + "\")";
   if (r.p === "talk") return "/* one blip a letter, a pitch per character */\n" + SFX + js(Object.assign({ from: 520 }, TALK)) + ")";
@@ -108,9 +123,13 @@ function code(r) {
 
 var list = document.getElementById("list");
 function draw() {
-  var h = "", secs = [T.music, T.amb, T.named, T.custom], last = -1;
+  var h = "", secs = [T.music, T.amb, T.named, T.custom], last = -1, here = rows[sel].sec;
   rows.forEach(function (r, i) {
-    if (r.sec !== last) { h += "<h2>" + secs[r.sec] + "</h2>"; last = r.sec; }
+    if (r.sec !== last) {
+      /* the mark sits on the group holding the selection: it says where the player is, and has no meaning elsewhere */
+      h += "<h2>" + secs[r.sec] + (r.sec === here ? '<span class="pos">' + groupPos[sel] + " / " + groupTotal[r.sec] + "</span>" : "") + "</h2>";
+      last = r.sec;
+    }
     var on = (r.kind === "song" && song === r.id) || (r.kind === "amb" && amb === r.id);
     var right = !usable(r) ? T.newer : r.kind === "amb" ? bars(r.id) : r.kind === "song" ? r.hint : "";
     h += '<div class="row' + (i === sel ? " sel" : "") + (on ? " on" : "") + (usable(r) ? "" : " off") + '" data-i="' + i + '">' +
@@ -181,6 +200,7 @@ list.addEventListener("click", function (e) {
   sel = +el.getAttribute("data-i"); play(rows[sel]);
 });
 
+document.documentElement.lang = ZH ? "zh-CN" : "en";
 document.title = T.title;
 document.getElementById("title").textContent = T.title;
 draw();

@@ -748,9 +748,9 @@
         "................",
         "................"
       ],
-      "version": "1.0.2",
+      "version": "1.1.0",
       "released": "2026-10-12",
-      "updated": "2026-10-13",
+      "updated": "2026-11-24",
       "description": "开发示例：这台机器能发出的每一种声音：乐曲、环境声、具名和自定义音效，选中就显示写法。",
       "i18n": {
         "en": {
@@ -761,8 +761,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/sound-board/index.html",
-      "sha256": "538634b7844cea925073c21f80f8b9fb5d8e93c4c6e6b6c7a9c7fb7e152345bf",
-      "bytes": 9896
+      "sha256": "abf5e38b9595c7d87dec70c117114fae0845811305ef72ac12a855337a1d3ba4",
+      "bytes": 11299
     },
     {
       "spec": "lopda/1",
