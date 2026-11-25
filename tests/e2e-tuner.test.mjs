@@ -50,7 +50,7 @@ const DIRECTORY = [
 ];
 
 async function open(t, opts = {}) {
-  const ctx = await browser.newContext({ viewport: { width: 375, height: 667 }, hasTouch: true, locale: "zh-CN", acceptDownloads: true });
+  const ctx = await browser.newContext({ viewport: opts.viewport || { width: 375, height: 667 }, hasTouch: true, locale: "zh-CN", acceptDownloads: true });
   const p = await ctx.newPage();
   const errors = [];
   p.on("pageerror", (e) => errors.push(e.message));
@@ -139,6 +139,22 @@ test("tuner: HOME mid-glide lands and tunes, lock-screen next works away from th
   assert.equal((await st()).state, "buffering");
   await until(p, () => window.LOPDA_DEBUG.tuner.E.state === "playing");
   assert.equal(await p.evaluate(() => window.LOPDA_DEBUG.tuner.E.gen), gen, "no re-dial");
+  assert.deepEqual(errors, []);
+});
+
+test("tuner: UP / DOWN keep the menu's chosen row in view on the smallest screen", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors, key } = await open(t, { viewport: { width: 331, height: 560 } });
+  await key("start");
+  const seen = () => p.evaluate(() => {
+    const ul = document.getElementById("tn-menu"), li = ul.querySelector("li.on");
+    let box = ul.parentElement; while (box && getComputedStyle(box).overflowY === "visible") box = box.parentElement;
+    const a = li.getBoundingClientRect(), b = box.getBoundingClientRect();
+    return a.top >= b.top - 1 && a.bottom <= b.bottom + 1;
+  });
+  for (let i = 0; i < 7; i++) { assert.ok(await seen(), "row " + i + " in view"); await key("down"); }
+  assert.ok(await seen(), "wrapped to the first row, in view");
+  await key("up");
+  assert.ok(await seen(), "last row in view");
   assert.deepEqual(errors, []);
 });
 

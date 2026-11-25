@@ -588,7 +588,7 @@ function markPlaying(){
 }
 function hostOf(url){ var m=/^https?:\/\/([^\/?#:]+)/i.exec(url||""); return m ? m[1].replace(/^www\./,"") : ""; }
 function scrollSel(id){
-  var li=byId(id).children[id==="tn-list" ? T.sel : T.find.sel];
+  var li=byId(id).children[id==="tn-list" ? T.sel : id==="tn-menu" ? T.menu : T.find.sel];
   if(li && li.scrollIntoView) try{ li.scrollIntoView({block:"nearest"}); }catch(e){}
 }
 function listen(i){
@@ -809,12 +809,12 @@ function press(b){
     if(b==="left") step(-1);
     else if(b==="right") step(1);
     else if(b==="a") power();
-    else if(b==="start"){ T.menu=0; sfx("tap"); setPage("menu"); }
+    else if(b==="start"){ T.menu=0; sfx("tap"); setPage("menu"); scrollSel("tn-menu"); }
     else if(b==="select") sleepStep();
     return;
   }
   if(p==="menu"){
-    if(b==="up" || b==="down"){ T.menu=(T.menu+(b==="up"?-1:1)+MENU.length)%MENU.length; sfx("move"); renderMenu(); }
+    if(b==="up" || b==="down"){ T.menu=(T.menu+(b==="up"?-1:1)+MENU.length)%MENU.length; sfx("move"); renderMenu(); scrollSel("tn-menu"); }
     else if(b==="a") menuGo(MENU[T.menu]);
     else if(b==="b"){ sfx("tap"); setPage("dial"); }
     return;
@@ -846,6 +846,8 @@ function press(b){
     return;
   }
   if(p==="help" && b==="b"){ sfx("tap"); setPage("menu"); }
+  /* the help text may be taller than the screen: UP / DOWN scroll it */
+  if(p==="help" && (b==="up" || b==="down")){ var hp=byId("tn-page-help"); hp.scrollTop+=(b==="up"?-1:1)*Math.round(hp.clientHeight*0.6); }
 }
 function blur(){ var a=document.activeElement; if(a && a.blur && /INPUT/.test(a.tagName)) a.blur(); }
 
