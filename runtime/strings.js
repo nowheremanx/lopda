@@ -512,6 +512,7 @@
       "cart.nopower": "开不了机：{msg}", "cart.badrom": "这盘卡带读不出来",
       "cart.saved": "存好了（覆盖上一份）。", "cart.loadgo": "确认读档", "cart.restored": "回到 {when} 的存档。",
       "cart.loadfail": "存档读不进去。",
+      "cart.speed": "速度", "cart.slower": "慢一点", "cart.faster": "快一点", "cart.speedreset": "回到原速",
 
       "app.pet": "宠物",
       "pet.sk.mail": "信", "pet.sk.use": "用", "pet.sk.menu": "菜单", "pet.sk.open": "打开",
@@ -1517,6 +1518,7 @@
       "cart.nopower": "Won't start: {msg}", "cart.badrom": "can't read this cart",
       "cart.saved": "Saved (over the last one).", "cart.loadgo": "Load?", "cart.restored": "Back to the save from {when}.",
       "cart.loadfail": "Couldn't load the save.",
+      "cart.speed": "Speed", "cart.slower": "Slower", "cart.faster": "Faster", "cart.speedreset": "Back to normal speed",
 
       "app.pet": "Pet",
       "pet.sk.mail": "Mail", "pet.sk.use": "Use", "pet.sk.menu": "Menu", "pet.sk.open": "Open",

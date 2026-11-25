@@ -383,6 +383,10 @@ textarea::placeholder{color:var(--ink-2)}
 #cart-cv{display:block;image-rendering:pixelated;image-rendering:crisp-edges;border:3px solid var(--ink);background:var(--lcd)}
 .cart-play .hint{text-align:center;max-width:360px}
 #cart-tools .btn{padding:6px 8px;font-size:13px}
+/* the speed knob under the screen: small keys, like the tools row, so the game screen keeps its size */
+#cart-speed{gap:6px;flex:none}
+#cart-speed .btn{padding:4px 10px;font-size:13px;min-width:40px}
+#cart-rate{min-width:64px;font-variant-numeric:tabular-nums}
 .store-item .acts{display:flex;flex-direction:column;gap:6px;flex:none}
 /* a cartridge: play on the right, its other actions (the battery save out and in, toss) in a row under it */
 .cart-item{flex-wrap:wrap}
@@ -1176,7 +1180,8 @@ textarea::placeholder{color:var(--ink-2)}
 .cal-numpad .btn,
 #v-cal .btn,
 .cam-row .btn,
-#cart-tools .btn{min-height:0}
+#cart-tools .btn,
+#cart-speed .btn{min-height:0}
 /* The running app's bar keeps its old height: the app's screen sizes in sdk/UI.md (331 x 473, 331 x 359 with the
    chin pad on an iPhone SE) are what apps are designed for, and a taller bar would take 8 px from every app. */
 #v-run .bar .btn{min-height:0}
