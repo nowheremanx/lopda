@@ -26,6 +26,14 @@
   #menu button { font: inherit; font-size: 16px; font-weight: bold; min-height: 44px; width: 100%; padding: 0 4px; background: #a3ad7e; color: #1f2a14; border: 2px solid #1f2a14; }
   #menu button.on { background: #1f2a14; color: #a3ad7e; }
   #menu button.off { color: #4a5a32; border-style: dashed; }
+  /* the mode entry is a switch: both states stay visible, the one in force is filled; the whole button is the target */
+  #menu button.sw { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 2px 4px; line-height: 1; }
+  #menu button.sw .swl { font-size: 13px; font-weight: normal; }
+  #menu button.sw .swo { display: flex; gap: 5px; }
+  #menu button.sw .swo .o { font-size: 15px; padding: 1px 3px; border: 1px solid transparent; }
+  #menu button.sw .swo .o.on { background: #1f2a14; color: #a3ad7e; }
+  #menu button.on .swo .o { color: #a3ad7e; }
+  #menu button.on .swo .o.on { background: #a3ad7e; color: #1f2a14; }
   footer { flex: none; padding: 4px 10px 6px; border-top: 2px solid #1f2a14; font-size: 13px; color: #4a5a32; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #fuse { position: fixed; inset: 0; z-index: 10; pointer-events: none; display: none; }
   #fuse.on { display: block; }
@@ -171,15 +179,15 @@ var Solver = (function () {
   /* two languages: PAD.lang from the runtime; older runtimes have none, so Chinese is the default */
   var LANG = HAS_PAD && PAD.lang === "en" ? "en" : "zh";
   var TXT = {
-    zh: { title: "拍照拼图", snap: "拍一张", gallery: "内置图片", modeNormal: "模式 普通", modeArcade: "模式 街机",
+    zh: { title: "拍照拼图", snap: "拍一张", gallery: "内置图片", modeLabel: "模式",
       howto: "怎么玩", mainMenu: "主菜单", cont: "继续", resume: "继续", next: "下一局", again: "再来一局",
       sizeNow: "难度 {n}×{n}", watch: "看它解", prev: "上一张", start: "开始", nextPic: "下一张",
-      use: "用这张", retake: "重拍", moves: "{n} 步", best: "最佳 {n}", helped: "助",
+      use: "用这张", retake: "重拍", moves: "{n} 步", best: "最佳 {n}", helped: "助", noRecord: "用了提示，不计记录",
       intro: "拍一张，或挑一张。", nocam: "这台掌机不能拍照，用内置图片玩。",
       nophoto: "没拿到照片，用内置图片玩。", taking: "拍照中…", saved: "上次那盘还在这里。",
       look: "就用这张吗？", won: "拼好了！{n} 步。", wonArcade: "拼好了！{n} 步，剩 {t}。",
       record: "新纪录！", unlocked: "下一局是 4×4。", trick: "4×4 有窍门：试试怎么玩。",
-      solved: "拼好了！", timeUp: "时间到。", left: "剩 {t}", picture: "图 {i}/{n}",
+      solved: "拼好了！", timeUpAt: "时间到。已拼好 {k}/{n}", left: "剩 {t}", picture: "图 {i}/{n}",
       normal: "普通", arcade: "街机", locked: "这台掌机不能拍照。",
       kTitle: "方向键 选　A 确定　B 主菜单", kMain: "方向键 选　A 确定",
       kMainBack: "方向键 选　A 确定　B 返回", kGallery: "←→ 换图　↑↓ 难度　A 开始　B 返回",
@@ -198,15 +206,15 @@ var Solver = (function () {
         "最后 2×2：转到位"],
       pics: { lake: "山湖", lighthouse: "灯塔", city: "夜城", dunes: "沙丘", pines: "松林", blossom: "花见" },
       quitLesson: "退出教程", nextLesson: "下一课", backMain: "回主菜单" },
-    en: { title: "SNAPTILE", snap: "Take a photo", gallery: "Built-in pictures", modeNormal: "Mode Normal", modeArcade: "Mode Arcade",
+    en: { title: "SNAPTILE", snap: "Take a photo", gallery: "Built-in pictures", modeLabel: "Mode",
       howto: "How to play", mainMenu: "Main menu", cont: "Continue", resume: "Resume", next: "Next puzzle", again: "Play again",
       sizeNow: "Size {n}×{n}", watch: "Watch it solve", prev: "Previous", start: "Start", nextPic: "Next",
-      use: "Use this", retake: "Retake", moves: "{n} moves", best: "best {n}", helped: "aid",
+      use: "Use this", retake: "Retake", moves: "{n} moves", best: "best {n}", helped: "aid", noRecord: "Hints used: not recorded",
       intro: "Snap one, or pick one.", nocam: "No camera here: playing with the built-in pictures.",
       nophoto: "No photo: playing with the built-in pictures.", taking: "Camera…", saved: "Your last puzzle is here.",
       look: "Use this one?", won: "Solved in {n} moves!", wonArcade: "Solved in {n} moves, {t} left!",
       record: "New record!", unlocked: "Next one is 4×4.", trick: "4×4 has a trick: try How to play.",
-      solved: "Solved!", timeUp: "Time up.", left: "{t} left", picture: "Picture {i}/{n}",
+      solved: "Solved!", timeUpAt: "Time up. {k}/{n} in place.", left: "{t} left", picture: "Picture {i}/{n}",
       normal: "Normal", arcade: "Arcade", locked: "No camera on this handheld.",
       kTitle: "Arrows pick  A ok  B main menu", kMain: "Arrows pick  A ok",
       kMainBack: "Arrows pick  A ok  B back", kGallery: "←→ picture  ↑↓ size  A start  B back",
@@ -587,6 +595,8 @@ var Solver = (function () {
   /* ---------- the puzzle: tiles[position] = which piece is there; piece n*n-1 is the gap ---------- */
   function ordered(n) { var a = [], N = n * n; for (var i = 0; i < N; i++) a.push(i); return a; }
   function solvedTiles(tiles) { for (var i = 0; i < tiles.length; i++) if (tiles[i] !== i) return false; return true; }
+  /* how far an unfinished board got: pieces in their home cell, the hole not counted as a piece */
+  function inPlace() { var c = 0, N = S.n * S.n; for (var i = 0; i < N - 1; i++) if (S.tiles[i] === i) c++; return c; }
   function neighbours(n, g) {
     var r = Math.floor(g / n), c = g % n, out = [];
     if (r > 0) out.push(g - n); if (r < n - 1) out.push(g + n);
@@ -670,6 +680,7 @@ var Solver = (function () {
 
   function slide(p) {
     clearHint();
+    if (S.note === TXT.noRecord) S.note = "";   /* the one-time aid note gives way to the move */
     if (neighbours(S.n, S.gap).indexOf(p) < 0) { sfx("err"); return; }
     var from = p, to = S.gap, piece = S.tiles[p];
     swap(p); S.moves++; sfx("move");
@@ -1042,11 +1053,18 @@ var Solver = (function () {
   }
 
   /* ---------- watching it solve, and one hint ---------- */
+  /* the first help in a game says once that the game will not count; the win screen says it again */
+  function markHelped() {
+    var first = !S.helped;
+    S.helped = true;
+    if (first) S.note = TXT.noRecord;
+    saveGame();
+  }
   function startDemo(limit) {
     if (S.demo) return;
     var plan = Solver.solve(S.n, S.tiles);
     if (!plan || !plan.length) { sfx("err"); return; }
-    if (S.mode !== "tutorial") { S.helped = true; saveGame(); }
+    if (S.mode !== "tutorial") markHelped();
     clearHint();
     S.demo = { steps: plan, i: 0, timer: 0, limit: limit === undefined ? 999 : limit };
     demoStep();
@@ -1082,7 +1100,7 @@ var Solver = (function () {
       plan = L.goal ? Solver.goalPlan(S.n, S.tiles, L.goal, L.keep) : Solver.solve(S.n, S.tiles);
     } else plan = Solver.solve(S.n, S.tiles);
     if (!plan || !plan.length) { sfx("err"); return; }
-    if (S.mode !== "tutorial") { S.helped = true; saveGame(); }
+    if (S.mode !== "tutorial") markHelped();
     S.hint = { p: plan[0].p, gap: S.gap }; draw();
   }
   function clearHint() {
@@ -1163,7 +1181,7 @@ var Solver = (function () {
     var camera = HAS_PAD && !!PAD.camera;
     if (S.screen === "title") return S.hasSave ? [["cont", TXT.cont], ["mainmenu", TXT.mainMenu]] : [["mainmenu", TXT.mainMenu]];
     if (S.screen === "main") return [["snap", TXT.snap, !camera], ["gallery", TXT.gallery],
-      ["mode", S.arcade ? TXT.modeArcade : TXT.modeNormal], ["howto", TXT.howto]];
+      ["mode", TXT.modeLabel, false, "switch"], ["howto", TXT.howto]];
     if (S.screen === "gallery") return [["prev", TXT.prev], ["start", TXT.start], ["nextPic", TXT.nextPic]];
     if (S.screen === "preview") return [["use", TXT.use], ["retake", TXT.retake]];
     if (S.screen === "menu") {
@@ -1195,6 +1213,7 @@ var Solver = (function () {
     if (S.record || S.timeRecord) s += " " + TXT.record;
     if (S.unlockedNow) s += " " + TXT.unlocked;
     if (S.showTrick) s += " " + TXT.trick;
+    if (S.helped) s += " " + TXT.noRecord;   /* a hinted game never counts, so say it rather than leave the best looking beaten */
     return s;
   }
   function footerKey() {
@@ -1204,6 +1223,20 @@ var Solver = (function () {
     if (sc === "lesson" && S.lessonDone) return "kLessonDone";
     return ({ gallery: "kGallery", preview: "kPreview", cut: "kCut", play: "kPlay", menu: "kMenu",
       lesson: "kLesson", solved: "kSolved", won: "kWon", lost: "kLost" })[sc] || "";
+  }
+  /* The mode entry: both states are on the button, the one in force reversed out. The old single label looked like
+     the plain buttons beside it and one tap silently changed the next game, so the state was easy to miss. */
+  function modeSwitch(b) {
+    b.className += " sw";
+    b.setAttribute("aria-label", TXT.modeLabel + " " + (S.arcade ? TXT.arcade : TXT.normal));
+    b.setAttribute("aria-pressed", S.arcade ? "true" : "false");
+    var lb = document.createElement("span"); lb.className = "swl"; lb.textContent = TXT.modeLabel;
+    var opts = document.createElement("span"); opts.className = "swo";
+    [[TXT.normal, false], [TXT.arcade, true]].forEach(function (o) {
+      var s = document.createElement("span"); s.className = "o" + (o[1] === S.arcade ? " on" : ""); s.textContent = o[0];
+      opts.appendChild(s);
+    });
+    b.appendChild(lb); b.appendChild(opts);
   }
   function draw() {
     var sc = S.screen;
@@ -1218,16 +1251,17 @@ var Solver = (function () {
     else if (sc === "lesson") msg(S.lessonDone ? S.doneText : (S.note || lessonText()), S.lessonDone);
     else if (sc === "solved") msg(S.anim && S.anim.done ? TXT.solved : "", false);
     else if (sc === "won") msg(wonText(), false);
-    else if (sc === "lost") msg(TXT.timeUp, true);
+    else if (sc === "lost") msg(fmt(TXT.timeUpAt, { k: inPlace(), n: S.n * S.n }), true);
     var fk = footerKey();
     document.getElementById("ft").textContent = fk ? TXT[fk] : "";
     S.items = menuItems();
     var box = document.getElementById("menu"); box.textContent = "";
     box.className = sc === "gallery" ? "three" : "";
     S.items.forEach(function (it, i) {
-      var b = document.createElement("button"); b.type = "button"; b.textContent = it[1];
+      var b = document.createElement("button"); b.type = "button";
       b.className = (i === S.sel ? "on" : "") + (it[2] ? " off" : "");
       b.onclick = function () { S.sel = i; choose(); };
+      if (it[3] === "switch") modeSwitch(b); else b.textContent = it[1];
       box.appendChild(b);
     });
     paint(); layout(); updateFuse();

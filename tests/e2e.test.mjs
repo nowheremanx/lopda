@@ -8455,7 +8455,7 @@ test("photo puzzle: a 2×2 main menu, a four-item game menu that fits 331×359, 
   const f = await runPuzzle(p);
   await p.waitForTimeout(600);
   assert.equal((await ppState(f)).screen, "main");
-  assert.deepEqual(await ppLabels(f), ["拍一张", "内置图片", "模式 普通", "怎么玩"]);
+  assert.deepEqual(await ppLabels(f), ["拍一张", "内置图片", "模式普通街机", "怎么玩"]);
   assert.equal(await f.textContent("#msg"), "拍一张，或挑一张。");
   assert.equal((await ppState(f)).sel, 0);
   /* a grid, not a list: Down goes to the button below, not to the next one in reading order */
@@ -8463,12 +8463,14 @@ test("photo puzzle: a 2×2 main menu, a four-item game menu that fits 331×359, 
   await press(p, "right"); assert.equal((await ppState(f)).sel, 3);
   await press(p, "up"); assert.equal((await ppState(f)).sel, 1);
   await press(p, "left"); assert.equal((await ppState(f)).sel, 0);
-  /* the mode button toggles in place */
+  /* the mode button is a two-state switch: both states on it, the one in force reversed out; tapping flips it */
   await press(p, "down"); await press(p, "a");
   let s = await ppState(f);
-  assert.deepEqual([s.screen, s.arcade, s.items[2]], ["main", true, "模式 街机"]);
+  assert.deepEqual([s.screen, s.arcade, s.items[2]], ["main", true, "模式"]);
+  assert.equal(await f.textContent("#menu button.sw .swo .o.on"), "街机");
   await press(p, "a");
-  assert.deepEqual([(await ppState(f)).arcade, (await ppState(f)).items[2]], [false, "模式 普通"]);
+  assert.deepEqual([(await ppState(f)).arcade, (await ppState(f)).items[2]], [false, "模式"]);
+  assert.equal(await f.textContent("#menu button.sw .swo .o.on"), "普通");
   /* the gallery: left/right browse, up/down changes the size, A starts the picture on screen */
   await ppClick(f, "内置图片");
   await until(p, async () => (await ppState(f)).screen === "gallery", "the gallery");
@@ -8638,7 +8640,7 @@ test("photo puzzle: without a photo it plays a built-in picture and says why; no
   await p.click("#home-key");
   const old = PP.html.replace("<script>", "<script>window.PAD = Object.assign({}, PAD, { camera: undefined });</script>\n<script>");
   f = await runPuzzle(p, old); await ppToMain(p, f);
-  assert.deepEqual(await ppLabels(f), ["拍一张 off", "内置图片", "模式 普通", "怎么玩"]);
+  assert.deepEqual(await ppLabels(f), ["拍一张 off", "内置图片", "模式普通街机", "怎么玩"]);
   await press(p, "a");
   assert.equal(await f.textContent("#msg"), "这台掌机不能拍照。");
   await ppClick(f, "内置图片");
@@ -8773,7 +8775,7 @@ test("photo puzzle: 怎么玩 teaches four lessons; the board shows its gap; a l
   const { p, errors } = await snapPage(t);
   let f = await runPuzzle(p); await ppToMain(p, f);
   const labels = () => ppLabels(f);
-  assert.deepEqual(await labels(), ["拍一张", "内置图片", "模式 普通", "怎么玩"]);
+  assert.deepEqual(await labels(), ["拍一张", "内置图片", "模式普通街机", "怎么玩"]);
   await ppClick(f, "怎么玩");
   await until(p, async () => (await ppState(f)).screen === "lesson", "lesson 1");
   let s = await ppState(f);
@@ -8832,7 +8834,7 @@ test("photo puzzle: 怎么玩 teaches four lessons; the board shows its gap; a l
   await press(p, "a");
   await until(p, async () => (await ppState(f)).screen === "main", "back on the main menu");
   assert.equal((await ppState(f)).mode, "normal");
-  assert.deepEqual(await labels(), ["拍一张", "内置图片", "模式 普通", "怎么玩"]);
+  assert.deepEqual(await labels(), ["拍一张", "内置图片", "模式普通街机", "怎么玩"]);
   /* entered with an unfinished game, leaving the lessons puts that game back untouched */
   await ppStartBuiltin(p, f);
   await ppPress(p, f, ppDir(await ppState(f)));
@@ -8901,7 +8903,7 @@ test("photo puzzle: the main menu solves the built-in pictures by itself; the op
 test("photo puzzle: arcade counts down on the screen-edge fuse, pauses in the menu, and loses at zero", { skip, timeout: 120000 }, async (t) => {
   const { p, errors } = await snapPage(t);
   let f = await runPuzzle(p); await ppToMain(p, f);
-  await ppClick(f, "模式 普通");
+  await press(p, "down"); await press(p, "a");   /* the mode switch, selected from the pad */
   await until(p, async () => (await ppState(f)).arcade, "arcade mode");
   await ppStartBuiltin(p, f);
   let s = await ppState(f);
@@ -8952,7 +8954,7 @@ test("photo puzzle: arcade counts down on the screen-edge fuse, pauses in the me
   s = await ppState(f);
   assert.deepEqual([s.left, s.hasSave, s.fuse], [0, false, ""]);
   assert.deepEqual(await ppLabels(f), ["再来一局", "主菜单"]);
-  assert.equal(await f.textContent("#msg"), "时间到。");
+  assert.equal(await f.textContent("#msg"), "时间到。已拼好 6/9");   /* the hole at home is not a placed piece */
   await p.waitForTimeout(600);
   assert.equal(await f.evaluate(() => PAD.load("game")), null, "a lost game is not kept");
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
