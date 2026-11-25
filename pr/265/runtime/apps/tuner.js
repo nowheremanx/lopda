@@ -17,7 +17,7 @@
  * document like any other. Only links are kept, never audio.
  *
  * The network: the streams themselves (the stations' own servers, http or https), a station list (.m3u / .pls / .xspf)
- * the user adds by link, and the directory search (the words typed and the language chip go to radio-browser.info,
+ * the user adds by link, and the directory search (the words typed go to radio-browser.info,
  * a free community directory; nothing else is sent). No stream is ever routed into Web Audio: a stream from another
  * site without CORS would come out silent there. The hiss between stations is the runtime's own noise.
  *
@@ -32,7 +32,6 @@ var GAP=88;                      /* px between two stations on the dial */
 var SLEEP=[0,15,30,60];          /* SELECT steps the sleep timer through these minutes */
 var TUNE_MS=15000, STALL_MS=12000, RETRIES=3;
 var DIR_HOSTS=["https://all.api.radio-browser.info","https://de1.api.radio-browser.info","https://de2.api.radio-browser.info"];   /* tried in turn */
-var DIR_LANG={zh:"chinese", en:"english", all:""};
 var FILE_MAX=1024*1024;
 
 /* the stations on the dial the first time (owner, 2026-11-25). Each one played on an iPhone or in desktop Chrome the day
@@ -52,7 +51,7 @@ var T={
   list:[], last:null,
   pos:0, target:null, anim:0, drag:null,
   menu:0, sel:0, editId:null, delArm:false,
-  find:{q:"", lang:null, rows:[], sel:0, busy:false, note:"", seq:0, loaded:false},
+  find:{q:"", rows:[], sel:0, busy:false, note:"", seq:0, loaded:false},
   addNote:"", ticker:0, scaleKey:""
 };
 /* the player: st is the station being played (a saved one, or a directory result heard before it is saved: preview) */
@@ -524,7 +523,7 @@ function renderKeys(){
   else if(p==="add") LP.softkeys(k,{select:null,start:null,b:back,a:sk(tr("tuner.sk.add"),b("a"))});
   else if(p==="find"){
     var r=T.find.rows[T.find.sel], has=r && saved(r.url);
-    LP.softkeys(k,{select:sk(tr("tuner.lang."+(T.find.lang||"all")),b("select")),
+    LP.softkeys(k,{select:null,
       start:sk(has ? tr("tuner.sk.kept") : tr("tuner.sk.keep"),b("start"),!r || !!has),b:back,a:sk(tr("tuner.sk.listen"),b("a"),!r)});
   }
   else LP.softkeys(k,{select:null,start:null,b:back,a:null});
@@ -722,9 +721,6 @@ function exportList(){
 /* find: the radio-browser.info directory */
 function renderFind(){
   var f=T.find;
-  /* every station by default; the chips narrow to what a station broadcasts in (owner, 2026-11-25) */
-  if(!f.lang) f.lang="all";
-  Array.prototype.forEach.call(byId("tn-chips").children,function(c){ c.classList.toggle("on",c.getAttribute("data-lang")===f.lang); });
   byId("tn-find-note").textContent=f.busy ? tr("tuner.find.busy") : f.note;
   var ul=byId("tn-results"); ul.textContent="";
   f.rows.forEach(function(r,i){
@@ -761,12 +757,10 @@ function dirFetch(path,hosts){
 }
 function search(){
   var f=T.find, seq=++f.seq;
-  if(!f.lang) f.lang="all";
   f.q=byId("tn-find-q").value.trim().slice(0,60);
   f.busy=true; f.note=""; f.loaded=true; renderFind();
   var q="limit=40&hidebroken=true&order=clickcount&reverse=true";
   if(f.q) q+="&name="+encodeURIComponent(f.q);
-  if(DIR_LANG[f.lang]) q+="&language="+DIR_LANG[f.lang];
   dirFetch("/json/stations/search?"+q).then(function(arr){
     if(seq!==f.seq) return;
     f.rows=ST.fromDirectory(Array.isArray(arr) ? arr : []);
@@ -850,7 +844,6 @@ function press(b){
     if(b==="up" || b==="down"){ if(!f.rows.length) return; f.sel=clamp(f.sel+(b==="up"?-1:1),0,f.rows.length-1); sfx("move"); renderFind(); renderKeys(); scrollSel("tn-results"); }
     else if(b==="a") previewRow();
     else if(b==="start") keepRow();
-    else if(b==="select"){ var L=["all","zh","en"]; f.lang=L[(L.indexOf(f.lang)+1)%L.length]; sfx("tap"); search(); }
     else if(b==="b"){ blur(); sfx("tap"); setPage("menu"); }
     return;
   }
@@ -875,9 +868,6 @@ function bind(){
   byId("tn-edit-form").onsubmit=function(e){ e.preventDefault(); blur(); saveEdit(); };
   byId("tn-add-form").onsubmit=function(e){ e.preventDefault(); blur(); addLink(); };
   byId("tn-find-form").onsubmit=function(e){ e.preventDefault(); blur(); search(); };
-  Array.prototype.forEach.call(byId("tn-chips").children,function(c){
-    c.onclick=function(){ T.find.lang=c.getAttribute("data-lang"); sfx("tap"); search(); };
-  });
   byId("tn-file").addEventListener("change",function(){ var f=this.files && this.files[0]; importFile(f); });
 }
 
