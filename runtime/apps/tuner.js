@@ -589,7 +589,15 @@ function markPlaying(){
 function hostOf(url){ var m=/^https?:\/\/([^\/?#:]+)/i.exec(url||""); return m ? m[1].replace(/^www\./,"") : ""; }
 function scrollSel(id){
   var li=byId(id).children[id==="tn-list" ? T.sel : id==="tn-menu" ? T.menu : T.find.sel];
-  if(li && li.scrollIntoView) try{ li.scrollIntoView({block:"nearest"}); }catch(e){}
+  if(!li) return;
+  /* by hand, on the page's own scroller only: Safari's scrollIntoView also scrolls the screen around it, which slid the
+     first row under the title bar (owner, 2026-11-25). The first row goes to the very top, padding included */
+  var box=li.parentNode; while(box && box!==document.body && !/auto|scroll/.test(getComputedStyle(box).overflowY)) box=box.parentNode;
+  if(!box || box===document.body) return;
+  var b=box.getBoundingClientRect(), r=li.getBoundingClientRect();
+  if(!li.previousElementSibling) box.scrollTop=0;
+  else if(r.top<b.top) box.scrollTop+=r.top-b.top;
+  else if(r.bottom>b.bottom) box.scrollTop+=r.bottom-b.bottom;
 }
 function listen(i){
   var s=T.list[i]; if(!s) return;

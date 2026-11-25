@@ -153,6 +153,8 @@ test("tuner: UP / DOWN keep the menu's chosen row in view on the smallest screen
   });
   for (let i = 0; i < 7; i++) { assert.ok(await seen(), "row " + i + " in view"); await key("down"); }
   assert.ok(await seen(), "wrapped to the first row, in view");
+  assert.equal(await p.evaluate(() => { let b = document.getElementById("tn-menu").parentElement; while (getComputedStyle(b).overflowY === "visible") b = b.parentElement; return b.scrollTop; }), 0, "back at the very top");
+  assert.equal(await p.evaluate(() => document.getElementById("v-tuner").scrollTop), 0, "the screen itself never scrolls");
   await key("up");
   assert.ok(await seen(), "last row in view");
   assert.deepEqual(errors, []);
