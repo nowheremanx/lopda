@@ -880,9 +880,9 @@
         "................",
         "................"
       ],
-      "version": "0.2.1",
+      "version": "0.3.0",
       "released": "2026-10-08",
-      "updated": "2026-11-21",
+      "updated": "2026-11-24",
       "description": "手写的软件三维渲染：环结、飞越山地、晶体。方向键转视角，A 换场景，B 线框。",
       "i18n": {
         "en": {
@@ -893,8 +893,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/vector-dream/index.html",
-      "sha256": "40ce541bea2a92a5961acb496f16bd8b413a3c41ef9df58bbb68d2f1fc90b279",
-      "bytes": 38228
+      "sha256": "c914f411227e0e9eb4b72b86a5d35afe9644af1ab83c7ab9e0de59125fed7745",
+      "bytes": 44266
     },
     {
       "spec": "lopda/1",

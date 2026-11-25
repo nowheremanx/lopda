@@ -520,17 +520,29 @@ var Lo3D = (function () {
   var sub = Lo3D.sub, cross = Lo3D.cross, norm = Lo3D.norm, rotX = Lo3D.rotX, rotY = Lo3D.rotY, rotZ = Lo3D.rotZ;
 
   /* ---------- the key legend ----------
-     It says what the pad does on the first screen, then goes away and never comes back: on the first key,
-     on the first drag on the canvas, or after 6 s, whichever comes first. */
+     It says what the pad does on the first screen, then goes away on the first key, the first drag on the
+     canvas, or after 6 s, whichever comes first. START brings it back with the numbers. */
   var legend = document.getElementById("legend");
-  var legendShown = true, legendTimer = 0;
+  var legendShown = true, legendTimer = 0, info = false;
+  hud.style.display = "none";
+  if (legend) legend.style.display = "block";
   if (legend) legend.textContent = en ? "A scene  B wire\nSTART info  SELECT zoom\nPad/drag to look"
                                       : "A 换场景  B 线框\nSTART 信息  SELECT 远近\n方向键/拖动 转视角";
   function hideLegend() {
-    if (!legendShown) return;                 /* hiding twice is harmless */
+    if (info || !legendShown) return;         /* START keeps both on; hiding twice is harmless */
     legendShown = false;
     if (legend) legend.style.display = "none";
     if (legendTimer) { clearTimeout(legendTimer); legendTimer = 0; }
+  }
+  /* START brings the legend back with the numbers, and START again puts both away */
+  function setInfo(on) {
+    info = on;
+    if (hud) hud.style.display = on ? "block" : "none";
+    if (legend) legend.style.display = on ? "block" : "none";
+    if (on) {
+      legendShown = true;
+      if (legendTimer) { clearTimeout(legendTimer); legendTimer = 0; }
+    }
   }
   /* a test harness may have no setTimeout; the first key or drag still hides it */
   if (typeof setTimeout === "function") legendTimer = setTimeout(hideLegend, 6000);
@@ -556,29 +568,76 @@ var Lo3D = (function () {
     }
     return { v: v, t: t };
   }
-  var GN = 22, GS = 0.5;
+  var GN = 22, GS = 0.5, LAKE_Y = -1.25, LAKE_TONE = 2;
   function height(x, z) {
     return 0.55 * Math.sin(x * 0.7 + z * 0.3) + 0.35 * Math.sin(z * 0.9 - x * 0.4) + 0.2 * Math.sin(x * 1.9 + z * 1.3) - 0.9;
   }
-  function terrain(tm) {
-    var v = [], t = [], i, j, off = tm * 1.2, base = Math.floor(off / GS) * GS, fr = off - base;
-    for (j = 0; j <= GN; j++) for (i = 0; i <= GN; i++) {
+  /* The hills are split three ways so each reads at a glance: land dark near and light far (aerial haze),
+     water one flat tone, and an ink wall along every lake edge. Crest lines come back as world segments
+     for R.streak after the frame is dithered. */
+  function terrain(tm, cam) {
+    var n = GN + 1, i, j, off = tm * 1.2, base = Math.floor(off / GS) * GS, fr = off - base;
+    var px = [], py = [], pz = [], raw = [], wet = [], lakeCell = [];
+    for (j = 0; j < n; j++) for (i = 0; i < n; i++) {
       var x = (i - GN / 2) * GS, z = (j - GN / 2) * GS;
-      var h = height(x, z - base); if (h < -1.25) h = -1.25;        /* flat "lakes" */
-      v.push([x, h, z + fr]);
+      var h = height(x, z - base), w = h < LAKE_Y;                 /* flat "lakes" */
+      px.push(x); py.push(w ? LAKE_Y : h); pz.push(z + fr); raw.push(h); wet.push(w);
     }
+    function id(i, j) { return j * n + i; }
+    function at(k) { return [px[k], py[k], pz[k]]; }
+    function tri(m, a, b, c) { var k = m.v.length; m.v.push(a, b, c); m.t.push([k, k + 1, k + 2]); }
+    var land = { v: [], t: [], c: [], two: true }, lake = { v: [], t: [], two: true }, shore = { v: [], t: [], two: true };
     for (j = 0; j < GN; j++) for (i = 0; i < GN; i++) {
-      var a = j * (GN + 1) + i, b = a + 1, c = a + GN + 1, d = c + 1;
-      t.push([a, c, d], [a, d, b]);
+      var a = id(i, j), b = id(i + 1, j), c = id(i, j + 1), d = id(i + 1, j + 1);
+      var whole = wet[a] && wet[b] && wet[c] && wet[d];
+      lakeCell.push(whole);
+      if (whole) {
+        tri(lake, at(a), at(c), at(d));
+        tri(lake, at(a), at(d), at(b));
+      } else {
+        var cx = (px[a] + px[d]) / 2, cz = (pz[a] + pz[d]) / 2;
+        var far = Math.sqrt((cx - cam.x) * (cx - cam.x) + (cz - cam.z) * (cz - cam.z));
+        var alb = Math.min(1.15, 0.24 + far * 0.11);
+        var k = land.v.length;
+        land.v.push(at(a), at(c), at(d), at(a), at(d), at(b));
+        land.t.push([k, k + 1, k + 2], [k + 3, k + 4, k + 5]);
+        land.c.push(alb, alb);
+      }
     }
-    return { v: v, t: t, two: true };
-  }
-  /* wound the other way round from Lo3D.ico/box, so the far faces show: the look this demo always had */
-  function ico(r) {
-    var g = (1 + Math.sqrt(5)) / 2, v = [[-1, g, 0], [1, g, 0], [-1, -g, 0], [1, -g, 0], [0, -1, g], [0, 1, g], [0, -1, -g], [0, 1, -g], [g, 0, -1], [g, 0, 1], [-g, 0, -1], [-g, 0, 1]];
-    var t = [[0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11], [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8], [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9], [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1]];
-    for (var i = 0; i < v.length; i++) { var n = norm(v[i]); v[i] = [n[0] * r, n[1] * r, n[2] * r]; }
-    return { v: v, t: t };
+    /* the shoreline: a short ink wall on every edge where water meets land */
+    function isLake(i, j) { return i >= 0 && j >= 0 && i < GN && j < GN && lakeCell[j * GN + i]; }
+    for (j = 0; j < GN; j++) for (i = 0; i < GN; i++) {
+      if (!lakeCell[j * GN + i]) continue;
+      var a = id(i, j), b = id(i + 1, j), c = id(i, j + 1), d = id(i + 1, j + 1), edges = [];
+      if (!isLake(i, j - 1)) edges.push([a, b]);
+      if (!isLake(i, j + 1)) edges.push([c, d]);
+      if (!isLake(i - 1, j)) edges.push([a, c]);
+      if (!isLake(i + 1, j)) edges.push([b, d]);
+      for (var e = 0; e < edges.length; e++) {
+        var p0 = at(edges[e][0]), p1 = at(edges[e][1]);
+        var q0 = [p0[0], LAKE_Y + 0.12, p0[2]], q1 = [p1[0], LAKE_Y + 0.12, p1[2]];
+        tri(shore, [p0[0], LAKE_Y - 0.01, p0[2]], [p1[0], LAKE_Y - 0.01, p1[2]], q1);
+        tri(shore, [p0[0], LAKE_Y - 0.01, p0[2]], q1, q0);
+      }
+    }
+    /* a crest runs along z where the ground is highest across x, and along x where it is highest across z */
+    function crestX(i, j) {
+      if (i < 1 || i > GN - 1 || j < 0 || j > GN) return false;
+      var k = id(i, j);
+      return !wet[k] && raw[k] > raw[k - 1] + 0.012 && raw[k] > raw[k + 1] + 0.012;
+    }
+    function crestZ(i, j) {
+      if (j < 1 || j > GN - 1 || i < 0 || i > GN) return false;
+      var k = id(i, j);
+      return !wet[k] && raw[k] > raw[k - n] + 0.012 && raw[k] > raw[k + n] + 0.012;
+    }
+    var ridge = [];
+    for (j = 1; j < GN; j++) for (i = 1; i < GN; i++) {
+      var k = id(i, j); if (wet[k]) continue;
+      if (crestX(i, j) && crestX(i, j + 1)) ridge.push([px[k], raw[k] + 0.06, pz[k], px[k], raw[k + n] + 0.06, pz[k + n]]);
+      if (crestZ(i, j) && crestZ(i + 1, j)) ridge.push([px[k], raw[k] + 0.06, pz[k], px[k + 1], raw[k + 1] + 0.06, pz[k + 1]]);
+    }
+    return { land: land, lake: lake, shore: shore, ridge: ridge };
   }
   function cube(s) {
     var v = [], t = [], i;
@@ -587,21 +646,44 @@ var Lo3D = (function () {
     for (i = 0; i < 6; i++) t.push([q[i][0], q[i][1], q[i][2]], [q[i][0], q[i][2], q[i][3]]);
     return { v: v, t: t };
   }
-  var KNOT = knot(), ICO = ico(0.9), CUBE = cube(0.18), SUN = ico(1.2);
+  /* one albedo per face, so the crystal is a set of facets instead of a single flat value */
+  function facets(mesh) {
+    var c = [];
+    for (var i = 0; i < mesh.t.length; i++) c.push(0.74 + (i % 5) * 0.07);
+    return { v: mesh.v, t: mesh.t, c: c };
+  }
+  /* the sun as one clean disc: paper inside, a one-pixel ink rim. 255 is lo-3d's transparent sprite pixel. */
+  var SUN_DISC = (function () {
+    var n = 15, s = { w: n, h: n, px: new Uint8Array(n * n) };
+    for (var y = 0; y < n; y++) for (var x = 0; x < n; x++) {
+      var dx = x - 7, dy = y - 7, rr = Math.sqrt(dx * dx + dy * dy);
+      s.px[y * n + x] = rr <= 5.3 ? 3 : rr <= 6.3 ? 0 : 255;
+    }
+    return s;
+  })();
+  var KNOT = knot(), ICO = facets(Lo3D.ico(0.9)), CUBE = cube(0.18), SUN = Lo3D.ico(1.2);
 
   /* ---------- state ---------- */
-  var yaw = 0.6, pitch = 0.35, dist = 4.2, scene = 0, wire = false, showHud = false;
+  var yaw = 0.6, pitch = 0.35, dist = 4.2, scene = 0, wire = false;
   /* the flyover has its own eye: it flies forward (the land comes toward -z, so it looks along -z), a little above
      the hills ahead and looking down at them. The pad and a drag turn this eye instead of the orbit. */
   var FLY = { z: 3, ahead: [0, 0.5, 1, 1.5], yaw: 0, pitch: -0.35 };
   var FOG = { near: 2.5, far: 7, lum: 0.95 };
-  function sky(y) { return 0.55 + 0.45 * (y / H); }
+  /* a dusk sky: the top stays darker than the far hills, so a ridge shows against it */
+  function sky(y) { return 0.34 + 0.48 * (y / H); }
+  /* screensaver: 10 s without input starts the tour, which moves to the next scene every 25 s and sways
+     the camera a little. Any key, drag or held arrow stops it; the sway fades out so the view never jumps. */
+  var TOUR_IDLE = 10000, TOUR_SCENE = 25000;
+  var lastInput = null, tour = false, tourAt = 0, tourFade = 0, inputFlag = false, clock = 0;
 
   /* ---------- scenes ---------- */
   function render(tm) {
     var cam = R.camera, o = { wire: wire };
+    var sway = tourFade * Math.sin(tm * 0.22) * 0.1;
     /* the orbit scenes look at the origin; the flyover moves the eye, so put it back every frame */
-    cam.x = cam.y = cam.z = 0; cam.yaw = yaw; cam.pitch = pitch; cam.dist = dist; R.fog = null;
+    cam.x = cam.y = cam.z = 0; cam.yaw = yaw; cam.pitch = pitch + sway;
+    cam.dist = dist + tourFade * Math.sin(tm * 0.17) * 0.3;
+    R.fog = null;
     if (scene === 0) {
       R.clear(0.92);
       R.draw(KNOT, function (p) { return rotX(rotY(p, tm * 0.7), tm * 0.4); }, o);
@@ -609,19 +691,37 @@ var Lo3D = (function () {
       R.clear(sky);
       /* the eye rides over the highest ground just ahead of it, so it never dips into a hill;
          SELECT raises it (dist 3.2..5.6 -> 0.5..1.7 above the ground) */
-      var ground = -1.25, k;
+      var ground = LAKE_Y, k;
       for (k = 0; k < FLY.ahead.length; k++) ground = Math.max(ground, height(0, FLY.z - FLY.ahead[k] - tm * 1.2));
-      cam.dist = 0; cam.x = 0; cam.z = FLY.z; cam.y = ground + 0.5 + (dist - 3.2) * 0.5;
-      cam.yaw = Math.PI + FLY.yaw; cam.pitch = FLY.pitch;
+      cam.dist = 0; cam.x = 0; cam.z = FLY.z; cam.y = ground + 0.5 + (dist - 3.2) * 0.5 + tourFade * Math.sin(tm * 0.22) * 0.06;
+      cam.yaw = Math.PI + FLY.yaw; cam.pitch = FLY.pitch + sway * 0.35;
       /* the sun sits far away ahead of the eye, low enough to stay in the picture, and follows its yaw */
       var sunDir = rotY([0, 0, 1], cam.yaw);
       var sc = [sunDir[0] * 14, 2.4, sunDir[2] * 14];
-      R.draw(SUN, function (p) { var q = rotY(rotX(p, tm * 0.3), tm * 0.5); return [q[0] + sc[0], q[1] + sc[1], q[2] + sc[2]]; }, { wire: true });
+      if (wire) {
+        R.draw(SUN, function (p) { var q = rotY(rotX(p, tm * 0.3), tm * 0.5); return [q[0] + sc[0], q[1] + sc[1], q[2] + sc[2]]; }, { wire: true });
+      } else {
+        R.sprite(SUN_DISC, sc[0], sc[1], sc[2], { scale: 0.16, anchor: "center" });
+      }
       R.fog = FOG; R.clearDepth();
-      R.draw(terrain(tm), null, o);
+      var terr = terrain(tm, cam);
+      if (wire) {
+        R.draw(terr.land, null, o);
+        R.draw(terr.lake, null, o);
+      } else {
+        R.draw(terr.land, null, {});
+        R.draw(terr.shore, null, { tone: 0, two: true });
+        R.draw(terr.lake, null, { tone: LAKE_TONE, two: true });
+      }
     } else {
-      R.clear(0.92);
-      R.draw(ICO, function (p) { return rotY(rotZ(p, tm * 0.3), tm * 0.6); }, { wire: wire, bias: 0.05 });
+      R.clear(1);
+      var spin = function (p) { return rotY(rotZ(p, tm * 0.3), tm * 0.6); };
+      if (wire) {
+        R.draw(ICO, spin, { wire: true, bias: 0.05 });
+      } else {
+        R.draw(ICO, spin, { bias: 0.08 });
+        R.draw(ICO, spin, { wire: true, tone: 0 });
+      }
       for (var i = 0; i < 6; i++) {
         var a = tm * 1.1 + i * Math.PI / 3, r = 1.7;
         var c = [Math.cos(a) * r, Math.sin(a * 2) * 0.35, Math.sin(a) * r];
@@ -629,6 +729,12 @@ var Lo3D = (function () {
       }
     }
     R.present();
+    if (scene === 1 && !wire) {
+      for (var r = 0; r < terr.ridge.length; r++) {
+        var q = terr.ridge[r];
+        R.streak([q[0], q[1], q[2]], [q[3], q[4], q[5]], 0);
+      }
+    }
     ctx.putImageData(R.paint(img), 0, 0);
   }
 
@@ -644,18 +750,24 @@ var Lo3D = (function () {
   }
   if (typeof PAD !== "undefined") {
     PAD.on("press", function (b) {
+      inputFlag = true;
       hideLegend();   /* any key: the player has found the pad */
       if (b === "a") { scene = (scene + 1) % 3; PAD.sfx("tick"); }
       else if (b === "b") { wire = !wire; PAD.sfx("tick"); }
-      else if (b === "start") { showHud = !showHud; hud.style.display = showHud ? "block" : "none"; }
+      else if (b === "start") { setInfo(!info); }
       else if (b === "select") { dist = dist > 5 ? 3.2 : dist + 0.8; }
     });
   }
   function held(b) { return typeof PAD !== "undefined" && PAD.isDown && PAD.isDown(b); }
   var drag = null;
-  cv.addEventListener("pointerdown", function (e) { hideLegend(); drag = { x: e.clientX, y: e.clientY, id: e.pointerId }; try { cv.setPointerCapture(e.pointerId); } catch (_) {} });
+  cv.addEventListener("pointerdown", function (e) {
+    inputFlag = true; hideLegend();
+    drag = { x: e.clientX, y: e.clientY, id: e.pointerId };
+    try { cv.setPointerCapture(e.pointerId); } catch (_) {}
+  });
   cv.addEventListener("pointermove", function (e) {
     if (!drag || drag.id !== e.pointerId) return;
+    inputFlag = true;
     /* the orbit turns the model with the finger; in the flyover the land follows the finger */
     var dx = (e.clientX - drag.x) * 0.012;
     turn(scene === 1 ? dx : -dx, (e.clientY - drag.y) * 0.012);
@@ -669,6 +781,15 @@ var Lo3D = (function () {
   function frame(now) {
     if (!start) { start = now; last = now; }
     var dt = Math.min(0.05, (now - last) / 1000); last = now;
+    clock = now;
+    if (lastInput == null) lastInput = now;
+    /* the tour starts after the idle time, moves on every TOUR_SCENE, and any input puts it to sleep again */
+    var acting = held("left") || held("right") || held("up") || held("down");
+    if (inputFlag) { inputFlag = false; lastInput = now; if (tour) tour = false; }
+    if (acting) { lastInput = now; if (tour) tour = false; }
+    if (!tour && now - lastInput >= TOUR_IDLE) { tour = true; tourAt = now; scene = (scene + 1) % 3; }
+    else if (tour && now - tourAt >= TOUR_SCENE) { tourAt = now; scene = (scene + 1) % 3; }
+    tourFade += ((tour ? 1 : 0) - tourFade) * Math.min(1, dt * 3);
     if (held("left")) turn(dt * 1.6, 0);
     if (held("right")) turn(-dt * 1.6, 0);
     if (held("up")) turn(0, dt * 1.2);
@@ -677,9 +798,15 @@ var Lo3D = (function () {
     render((now - start) / 1000);
     frames++; fpsT += dt;
     if (fpsT >= 0.5) { fps = Math.round(frames / fpsT); frames = 0; fpsT = 0; }
-    if (showHud) hud.textContent = T.scene + " " + T.names[scene] + "\n" + T.mode + " " + (wire ? T.wire : T.solid) + "\n" + T.fps + " " + fps + "  " + T.tri + " " + R.stats.tris;
+    if (info) hud.textContent = T.scene + " " + T.names[scene] + "\n" + T.mode + " " + (wire ? T.wire : T.solid) + "\n" + T.fps + " " + fps + "  " + T.tri + " " + R.stats.tris;
     requestAnimationFrame(frame);
   }
+  /* the tests' window on the app; the demo itself never reads it */
+  window.VECDREAM = { state: function () {
+    return { scene: scene, wire: wire, info: info, tour: tour,
+      hud: hud.style.display !== "none", legend: legend ? legend.style.display !== "none" : false,
+      hudText: hud.textContent, idle: lastInput == null ? 0 : clock - lastInput };
+  } };
   requestAnimationFrame(frame);
 })();
 </script>
