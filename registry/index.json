@@ -881,9 +881,9 @@
         "................",
         "................"
       ],
-      "version": "0.2.1",
+      "version": "0.3.0",
       "released": "2026-10-08",
-      "updated": "2026-11-21",
+      "updated": "2026-11-24",
       "description": "手写的软件三维渲染：环结、飞越山地、晶体。方向键转视角，A 换场景，B 线框。",
       "i18n": {
         "en": {
@@ -894,8 +894,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/vector-dream/index.html",
-      "sha256": "40ce541bea2a92a5961acb496f16bd8b413a3c41ef9df58bbb68d2f1fc90b279",
-      "bytes": 38228
+      "sha256": "c11d5a0949676d87d4b2747c62eb459a7050eafb65a3b2628051bf178ab13265",
+      "bytes": 44312
     },
     {
       "spec": "lopda/1",
@@ -967,9 +967,9 @@
         "....00000000....",
         "................"
       ],
-      "version": "1.1.2",
+      "version": "1.2.0",
       "released": "2026-10-19",
-      "updated": "2026-11-21",
+      "updated": "2026-11-24",
       "description": "抽一支签，读一段今天的顺便话。写进记事本接口的示范。",
       "i18n": {
         "zh": {
@@ -987,8 +987,8 @@
         "notes"
       ],
       "path": "apps/daily-slip/index.html",
-      "sha256": "0ca237bafbc705e9a36750c32a71e3e3fe265efce9f64bca00091fc8d2438e0b",
-      "bytes": 33240
+      "sha256": "b76b63956fc71324e960ac36da8d8171c061ed4dad9b39b0c0e118158728928e",
+      "bytes": 59910
     },
     {
       "spec": "lopda/1",
