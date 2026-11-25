@@ -1193,3 +1193,85 @@ textarea::placeholder{color:var(--ink-2)}
 .run-menu[hidden]{display:none}
 #v-run .run-menu .btn{min-height:44px}
 .run-menu .confirm{flex-direction:column}
+
+/* ---------- 收音机 / Tuner (apps/tuner.js): a dial window over a readout, the soft keys at the bottom ----------
+   The dial's face is the lamp: mid tone while the set is off, paper when it is on. Only the four tones; the dithered
+   edges are a pattern of dark dots, not a gradient. */
+.tn-view{display:flex;flex-direction:column;overflow:hidden}
+.tn-page{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column}
+.tn-dial-page{overflow:hidden}
+#tn-keys{flex:none}
+.tn-dial{position:relative;flex:none;height:104px;margin:8px 8px 0;border:3px solid var(--ink);background:var(--lcd-3);overflow:hidden;box-shadow:3px 3px 0 var(--ink-2);touch-action:none;cursor:grab}
+.lamp .tn-dial{background:var(--lcd)}
+.tn-dial::before,.tn-dial::after{content:"";position:absolute;top:0;bottom:0;width:36px;z-index:5;pointer-events:none;
+  background:conic-gradient(var(--ink-2) 0 25%,transparent 0 50%,var(--ink-2) 0 75%,transparent 0) 0 0/4px 4px}
+.tn-dial::before{left:0;-webkit-mask:linear-gradient(90deg,#000 0 14px,transparent 14px);mask:linear-gradient(90deg,#000 0 14px,transparent 14px)}
+.tn-dial::after{right:0;-webkit-mask:linear-gradient(270deg,#000 0 14px,transparent 14px);mask:linear-gradient(270deg,#000 0 14px,transparent 14px)}
+.tn-scale{position:absolute;top:0;bottom:0;left:0;z-index:4;will-change:transform}
+/* the needle runs behind the scale's print, so the name it points at stays readable */
+.tn-scale::before{content:"";position:absolute;left:-480px;right:-480px;top:38px;height:12px;background:repeating-linear-gradient(90deg,var(--ink-2) 0 1px,transparent 1px 11px);background-position:-1px 0}
+.tn-scale::after{content:"";position:absolute;left:-480px;right:-480px;top:50px;height:2px;background:var(--ink)}
+.tn-mark{position:absolute;top:0;bottom:0;width:0}
+.tn-mark::before{content:"";position:absolute;left:-1px;top:30px;width:3px;height:26px;background:var(--ink)}
+.tn-label{position:absolute;top:4px;left:0;transform:translateX(-50%);max-width:164px;padding:1px 5px;border:0;background:transparent;color:var(--ink);font-family:var(--f-lcd);font-size:14px;line-height:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
+.tn-mark.low .tn-label{top:74px}
+.tn-mark.near .tn-label{background:var(--ink);color:var(--lcd)}
+.tn-num{position:absolute;top:56px;left:0;transform:translateX(-50%);font-style:normal;font-family:var(--f-pix);font-size:14px;line-height:14px;color:var(--ink-2)}
+.tn-mark.low .tn-num{top:56px}
+.tn-needle{position:absolute;left:50%;top:0;bottom:0;width:3px;margin-left:-1px;background:var(--ink);z-index:3;pointer-events:none}
+.tn-needle::before{content:"";position:absolute;left:-5px;top:0;border:6px solid transparent;border-top:7px solid var(--ink);border-bottom:0}
+.tn-empty{position:absolute;inset:0;z-index:6;display:flex;align-items:center;justify-content:center;gap:10px;background:var(--lcd-3);font-size:14px;padding:0 10px}
+.tn-readout{flex:1;min-height:0;display:flex;flex-direction:column;justify-content:center;gap:4px;padding:8px 12px;overflow:hidden}
+.tn-name{font-size:22px;font-weight:400;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tn-meta{font-size:13px;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-height:17px}
+.tn-line{display:flex;align-items:center;gap:8px;min-height:26px}
+.tn-sig{display:flex;align-items:flex-end;gap:2px;height:16px;flex:none}
+.tn-sig i{width:4px;border:1px solid var(--ink);background:transparent}
+.tn-sig i:nth-child(1){height:4px}.tn-sig i:nth-child(2){height:7px}.tn-sig i:nth-child(3){height:10px}.tn-sig i:nth-child(4){height:13px}.tn-sig i:nth-child(5){height:16px}
+.tn-sig i.on{background:var(--ink)}
+.tn-status{flex:1;min-width:0;font-size:14px;line-height:1.25;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.tn-status.bad{font-weight:600}
+.tn-time{flex:none;font-family:var(--f-pix);font-size:18px;font-variant-numeric:tabular-nums}
+.tn-sleep{align-self:flex-start;font-family:var(--f-pix);font-size:15px;line-height:1;background:var(--ink);color:var(--lcd);padding:3px 6px}
+.tn-ctrl{flex:none;display:flex;gap:8px;padding:0 8px 8px}
+.tn-ctrl .btn{min-height:48px}
+.tn-step{width:56px;flex:none;font-size:18px;padding:0}
+.tn-power{flex:1;font-size:18px;letter-spacing:.06em}
+.tn-power.on{background:transparent;color:var(--ink);border:3px solid var(--ink);box-shadow:none}
+.tn-keep{flex:none}
+.tn-menu{padding:6px 0}
+.tn-menu li{min-height:44px}
+.tn-menu li small{font-size:14px}
+.bar h2 small{font-family:var(--f-pix);font-size:15px;color:var(--ink-2)}
+.tn-note{padding:6px 10px}
+.tn-note:empty{display:none}
+.tn-rows{list-style:none;margin:0;padding:2px 8px 8px;display:flex;flex-direction:column}
+.tn-row{display:flex;gap:6px;align-items:stretch;border-bottom:1px dashed var(--lcd-3);padding:2px 0}
+.tn-row-main{flex:1;min-width:0;display:flex;align-items:center;gap:8px;min-height:48px;padding:3px 6px;border:0;background:transparent;color:var(--ink);text-align:left;font-family:var(--f-lcd);cursor:pointer}
+.tn-row.on .tn-row-main{background:var(--ink);color:var(--lcd)}
+.tn-row-num{font-style:normal;font-family:var(--f-pix);font-size:16px;color:var(--ink-2);flex:none}
+.tn-row.on .tn-row-num{color:var(--lcd-3)}
+.tn-row-txt{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.tn-row-txt b{font-weight:400;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tn-row-txt small{font-size:12px;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tn-row.on .tn-row-txt small{color:var(--lcd-3)}
+.tn-air{flex:none;font-style:normal;font-family:var(--f-pix);font-size:13px;line-height:1;border:1px solid currentColor;padding:2px 4px}
+.tn-row-edit{flex:none;width:44px;min-height:44px;border:2px solid var(--ink);background:transparent;color:var(--ink);font-family:var(--f-lcd);font-size:18px;cursor:pointer;padding:0}
+.tn-row-edit:disabled{border-color:var(--lcd-3);color:var(--ink-2);cursor:default}
+.tn-form{display:grid;gap:10px;padding:10px}
+.tn-form label{display:grid;gap:4px;font-size:14px}
+.tn-form input,.tn-find-head input{min-width:0;min-height:44px;font-family:var(--f-lcd);font-size:16px;color:var(--ink);background:var(--lcd);border:3px solid var(--ink);border-radius:0;padding:6px 8px;-webkit-appearance:none;appearance:none}
+.tn-form input::placeholder,.tn-find-head input::placeholder{color:var(--ink-2)}
+.tn-find-head input::-webkit-search-cancel-button{display:none}
+.tn-form .tn-note{padding:0}
+.tn-form-row{display:flex;gap:8px;flex-wrap:wrap}
+.tn-del{margin-left:auto}
+.tn-del.armed{background:var(--ink);color:var(--lcd)}
+.tn-find-head{display:flex;gap:6px;padding:8px 8px 6px;flex:none}
+.tn-find-head input{flex:1}
+.tn-chips{display:flex;gap:6px;padding:0 8px 4px;flex:none}
+.tn-chips .btn{flex:1;padding:6px 4px;font-size:14px}
+.tn-chips .btn.on{background:var(--ink);color:var(--lcd)}
+.tn-find-page .tn-rows{flex:none}
+.tn-help{padding:4px 12px 12px;font-size:14px;line-height:1.5}
+.tn-help p{margin:8px 0}

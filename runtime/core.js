@@ -28,7 +28,9 @@ var S = {
      ready(), nostore(), pause(), resume()   storage opened / failed, page hidden / shown (boot.js)
      restore()                         a backup restore is about to replace everything: stop writes and reload
      clock()                           the status bar clock ticked (every 15 s): cheap checks only, no timers of its own
-     audio()                           the AudioContext was replaced (the phone had stopped it): reconnect into LP.SND.app */
+     audio()                           the AudioContext was replaced (the phone had stopped it): reconnect into LP.SND.app
+     claim(who)                        another program starts music or the microphone (LP.claimAudio): the radio stops
+     level()                           the volume step or the system-sound switch changed */
 var LP = window.LP = {$:$, S:S, I18N:I18N, tr:tr, builtins:[]};
 LP.builtin = function(b){ LP.builtins.push(b); return b; };
 LP.each = function(hook){ var args=Array.prototype.slice.call(arguments,1); LP.builtins.forEach(function(b){ if(b[hook]) b[hook].apply(b,args); }); };
@@ -245,17 +247,18 @@ document.addEventListener("visibilitychange",function(){
 });
 
 /* ---------- sound: tiny square-wave chips through Web Audio (the named sounds themselves are in chip.js) ---------- */
-var RUNTIME_VERSION="1.2.2";   /* keep in step with VERSION in sw.js */
+var RUNTIME_VERSION="1.3.0";   /* keep in step with VERSION in sw.js */
 /* One volume, five steps, 0 is off (decisions.md section 10). It sets the master gain and nothing else does.
    Under the master: `ui` for the runtime's own clicks and the built-ins' prompts, held at a fraction so they stay as
    quiet as they always were (step 2 gives them 0.11, their level before 0.12.0), and `app` for apps, music and the
    cartridge at the full step. `uiOn` switches the `ui` bus off on its own (Settings → 系统声音), so the clicks can go
    while games and apps keep their sound; it changes nothing else (decisions.md section 41). */
-var SND={ctx:null, vol:2, uiOn:true, gain:null, ui:null, app:null, stale:false, session:"ambient"};
+var SND={ctx:null, vol:2, uiOn:true, gain:null, ui:null, app:null, stale:false, session:"ambient", hold:false};
 var VOL_GAIN=[0,0.12,0.25,0.42,0.6], VOL_MAX=4, UI_LEVEL=0.44;
 function applyLevel(){
   if(SND.ui) SND.ui.gain.value=SND.uiOn?UI_LEVEL:0;
   if(SND.gain) SND.gain.gain.value=VOL_GAIN[SND.vol]||0;
+  LP.each("level");
 }
 function audio(){
   if(SND.ctx) return SND.ctx;
@@ -274,9 +277,22 @@ function audio(){
    "play-and-record" (runtime/sensors.js sets that, and sets "ambient" back on every way out; decisions.md section 23).
    Remembered, so a context made again meanwhile keeps the session the microphone needs */
 function setSession(type){
+  var was=SND.session;
   SND.session=type;
-  try{ if(navigator.audioSession) navigator.audioSession.type=type; }catch(e){}
+  applySession();
+  /* the microphone and a radio stream do not go together (the link would hear the broadcast) */
+  if(type==="play-and-record" && was!=="play-and-record") claimAudio("mic");
 }
+/* the radio (apps/tuner.js) holds "playback" while it plays, so the stream goes on with the screen locked and is not
+   muted by the silent switch: "ambient" asked for meanwhile is "playback" (decisions.md section 69) */
+function applySession(){
+  var t=SND.session==="ambient" && SND.hold ? "playback" : SND.session;
+  try{ if(navigator.audioSession) navigator.audioSession.type=t; }catch(e){}
+}
+function holdPlayback(on){ SND.hold=!!on; applySession(); }
+/* another program is about to make music (Tape4's transport, an app's PAD.music or ambience, the cartridge) or open the
+   microphone: the radio steps aside, like a real handheld with one speaker */
+function claimAudio(who){ LP.each("claim",who); }
 /* ask a context that is not running to run, whatever stopped it ("suspended", or Safari's "interrupted") */
 function wake(){ var ac=SND.ctx; if(ac && ac.state!=="running" && ac.state!=="closed") try{ ac.resume(); }catch(e){} }
 var APP_SFX=["tap","tick","move","ok","err","hit","miss","coin","win","lose"];
@@ -298,7 +314,8 @@ function appSfx(name){ playNamed(name,"app"); }
 var chip=window.LopdaChip.host({
   context:function(make){ return SND.ctx || (make ? audio() : null); },
   output:function(){ return SND.app; },
-  level:applyLevel
+  level:applyLevel,
+  claim:function(){ claimAudio("app"); }
 });
 function sfxCustom(params){
   if(!SND.vol || !audio()) return;
@@ -536,7 +553,7 @@ function armConfirm(wrapId,btnId,label,onYes,confirm){
    A route returns true when it took the button. */
 var PADB={up:false,down:false,left:false,right:false,a:false,b:false,start:false,select:false};
 var PADKEYS={ArrowUp:"up",ArrowDown:"down",ArrowLeft:"left",ArrowRight:"right",x:"a",X:"a",z:"b",Z:"b",Enter:"start",Shift:"select"};
-var PAD_ORDER=["home","link","snap","file","cart","cam","dark","cal","dict","reader","notes","pet","radio","run"], padRoutes={};   /* "link": the pairing screen (link.js), "snap": an app's viewfinder (apps/snap.js), "file": the runtime's file dialog, while they are open */
+var PAD_ORDER=["home","link","snap","file","cart","cam","dark","cal","dict","reader","notes","pet","radio","tuner","run"], padRoutes={};   /* "link": the pairing screen (link.js), "snap": an app's viewfinder (apps/snap.js), "file": the runtime's file dialog, while they are open */
 function padRoute(name,fn){ padRoutes[name]=fn; }
 padRoute("home",function(b,down){
   if(b!=="a" || !down || $("v-home").hidden || !$("home-add-tip")) return false;
@@ -603,7 +620,7 @@ var share={
   TONES:TONES, BAYER:BAYER, saveCanvas:saveCanvas, saveBlob:saveBlob, saveErr:saveErr, sha256hex:sha256hex,
   upsert:upsert, dropLocal:dropLocal, pending:pending, refresh:refresh, onData:onData,
   setStatus:setStatus, tickClock:tickClock, show:show, keepAwake:keepAwake,
-  RUNTIME_VERSION:RUNTIME_VERSION, SND:SND, VOL_MAX:VOL_MAX, VOL_GAIN:VOL_GAIN, audio:audio, wake:wake, setSession:setSession, micRoute:micRoute, sfx:sfx, appSfx:appSfx, APP_SFX:APP_SFX, chip:chip, sfxCustom:sfxCustom, applyLevel:applyLevel, speech:speech,
+  RUNTIME_VERSION:RUNTIME_VERSION, SND:SND, VOL_MAX:VOL_MAX, VOL_GAIN:VOL_GAIN, audio:audio, wake:wake, setSession:setSession, holdPlayback:holdPlayback, claimAudio:claimAudio, micRoute:micRoute, sfx:sfx, appSfx:appSfx, APP_SFX:APP_SFX, chip:chip, sfxCustom:sfxCustom, applyLevel:applyLevel, speech:speech,
   setLang:setLang, UPD:UPD, renderUpdate:renderUpdate,
   validIcon:validIcon, iconCanvas:iconCanvas, fillTile:fillTile, appName:appName, appDesc:appDesc, renderHome:renderHome,
   resetConfirm:resetConfirm, padRoute:padRoute, setButton:setButton, releaseButtons:releaseButtons, showPad:showPad

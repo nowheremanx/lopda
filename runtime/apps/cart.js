@@ -232,6 +232,7 @@ function gbStart(c,rom,save){
   resetCartLoad(); showPad(true); cartLayout();
   c.played=Date.now(); if(S.db) put(S.refs.carts.doc(c.id),(function(){ var o={}; for(var k in c) if(k!=="id"&&k!=="mem") o[k]=c[k]; return o; })());
   GB.raf=requestAnimationFrame(gbFrame);
+  LP.claimAudio("cart");   /* the radio stops for a game's sound */
   LP.keepAwake(true);   /* a game keeps the screen on */
 }
 function gbConnect(){
