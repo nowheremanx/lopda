@@ -141,8 +141,11 @@ GM.ui = (function () {
       var cells = "";
       for (i = 0; i < GM.ITEM_ORDER.length; i++) {
         var ct = GM.ITEM_ORDER[i];
-        cells += '<div class="ccell"><canvas width="32" height="32" data-item="' + ct + '" aria-hidden="true"></canvas>' +
-          "<b>" + esc(T.codexNames[i]) + "</b><span>" + esc(codexValue(ct)) + "</span>" +
+        var wide = ct === "mole";
+        cells += '<div class="ccell"' + (wide ? ' style="grid-column: span 3"' : "") + '>' +
+          '<canvas width="32" height="32" data-item="' + ct + '" aria-hidden="true"></canvas>' +
+          "<b>" + esc(T.codexNames[i]) + "</b>" +
+          "<span" + (wide ? ' style="white-space:normal"' : "") + ">" + esc(codexValue(ct)) + "</span>" +
           "<em>" + esc(codexWeight(ct)) + "</em></div>";
       }
       return shell("codex",
@@ -295,8 +298,8 @@ GM.ui = (function () {
   }
 
   function updateFoot(force) {
-    var text;
-    if (state.screen === "play" || state.screen === "intro") text = state.dynamite > 0 ? T.footPlayDyn : T.footPlay;
+    var text, dyn = state.dynamite > 0 ? state.dynamite : 0;
+    if (state.screen === "play" || state.screen === "intro") text = GM.footPlayText(LANG, dyn);
     else if (state.screen === "paused") text = T.pauseFoot;
     else if (state.screen === "confirm") text = T.confirmFoot;
     else if (state.screen === "codex") text = T.codexFoot;
@@ -307,7 +310,13 @@ GM.ui = (function () {
     else text = T.menuFoot;
     if (!force && text === lastFoot) return;
     lastFoot = text;
-    foot.textContent = text;
+    if ((state.screen === "play" || state.screen === "intro") && dyn <= 0) {
+      /* the B key is always taught, but greyed out while there is nothing to throw */
+      var b = esc(GM.fmt(T.footB, { n: 0 }));
+      foot.innerHTML = esc(T.footPlay).replace("{b}", '<span style="color:#7d8a58">' + b + "</span>");
+    } else {
+      foot.textContent = text;
+    }
   }
 
   function updateIntro() {
@@ -527,7 +536,8 @@ GM.ui = (function () {
     }
     if (s === "play") {
       if (btn === "a") { GM.fire(state); pump(); }
-      else if (btn === "b" && state.dynamite > 0) {
+      else if (btn === "b") {
+        /* with no stick in the pack B still answers, so the key never feels dead */
         if (!GM.useDynamite(state)) sfx("err");
         pump();
       } else if (btn === "start" && GM.pause(state)) enter("paused");

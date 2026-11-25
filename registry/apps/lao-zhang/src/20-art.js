@@ -121,6 +121,26 @@ GM.sellipse = function (s, cx, cy, rx, ry, c) {
   }
 };
 
+/* a line inside a sprite that never spills into the clear surround or over the
+   ink edge: facets and cracks may only cut the body they belong to */
+GM.slineBody = function (s, x0, y0, x1, y1, c) {
+  x0 = Math.round(x0); y0 = Math.round(y0);
+  x1 = Math.round(x1); y1 = Math.round(y1);
+  var dx = Math.abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
+  var dy = -Math.abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
+  var err = dx + dy;
+  for (;;) {
+    if (x0 >= 0 && y0 >= 0 && x0 < s.w && y0 < s.h) {
+      var t = s.b[y0 * s.w + x0];
+      if (t !== GM.CLEAR && t !== GM.INK) s.b[y0 * s.w + x0] = c;
+    }
+    if (x0 === x1 && y0 === y1) break;
+    var e2 = 2 * err;
+    if (e2 >= dy) { err += dy; x0 += sx; }
+    if (e2 <= dx) { err += dx; y0 += sy; }
+  }
+};
+
 /* a one-pixel ink edge around everything already drawn in a sprite */
 GM.soutline = function (s, ink) {
   var copy = s.b.slice();
@@ -175,6 +195,39 @@ GM.blob = function (w, h, seed, base, shadow, highlight, speck) {
     GM.sline(s, Math.round(cx - rx * 0.35), Math.round(cy - ry * 0.1), Math.round(cx + rx * 0.2), Math.round(cy + ry * 0.45), GM.INK);
     GM.sline(s, Math.round(cx - rx * 0.35), Math.round(cy - ry * 0.1), Math.round(cx - rx * 0.65), Math.round(cy - ry * 0.35), GM.INK);
   }
+  return s;
+};
+
+/* Gold in four tones: a mid-toned nugget with an ink edge, dark facet planes and
+   one small paper glint. Rocks get the opposite treatment (rockBlob): dark and
+   matte, so the two never read the same at a glance. */
+GM.goldBlob = function (w, h, seed) {
+  var s = GM.blob(w, h, seed, GM.MID, GM.DARK, false, false);
+  var cx = w / 2, cy = h / 2;
+  if (w >= 20) {
+    GM.slineBody(s, cx - w * 0.24, cy - h * 0.04, cx + w * 0.08, cy + h * 0.30, GM.DARK);
+    GM.slineBody(s, cx + w * 0.02, cy - h * 0.28, cx + w * 0.24, cy - h * 0.02, GM.DARK);
+    GM.slineBody(s, cx - w * 0.28, cy + h * 0.04, cx - w * 0.02, cy - h * 0.26, GM.INK);
+  }
+  /* a 2x2 glint with a tip, up and left of centre; every pixel is inside the body */
+  var gx = Math.round(cx - w * 0.18), gy = Math.round(cy - h * 0.22);
+  GM.slineBody(s, gx, gy, gx + 1, gy, GM.PAPER);
+  GM.slineBody(s, gx, gy, gx, gy + 1, GM.PAPER);
+  GM.slineBody(s, gx - 1, gy - 1, gx - 1, gy - 1, GM.PAPER);
+  return s;
+};
+
+/* a boulder: dark body, scattered mid dither, ink cracks and no bright pixel at all */
+GM.rockBlob = function (w, h, seed) {
+  var s = GM.blob(w, h, seed, GM.DARK, GM.INK, false, true);
+  var rng = GM.rng(seed + 13), x, y;
+  for (y = 0; y < h; y++) {
+    for (x = 0; x < w; x++) {
+      if (s.b[y * w + x] === GM.DARK && rng() < 0.17) s.b[y * w + x] = GM.MID;
+    }
+  }
+  GM.slineBody(s, w * 0.60, h * 0.24, w * 0.76, h * 0.50, GM.INK);
+  GM.slineBody(s, w * 0.38, h * 0.58, w * 0.52, h * 0.76, GM.MID);
   return s;
 };
 
@@ -442,11 +495,11 @@ GM.textWidth = function (text, k) {
 
 GM.initArt = function () {
   GM.SPR = {
-    goldS: GM.blob(28, 24, 11, GM.PAPER, GM.MID, false, false),
-    goldM: GM.blob(40, 32, 17, GM.PAPER, GM.MID, false, false),
-    goldL: GM.blob(52, 40, 23, GM.PAPER, GM.MID, false, false),
-    rockS: GM.blob(32, 28, 31, GM.MID, GM.DARK, true, true),
-    rockL: GM.blob(52, 40, 37, GM.MID, GM.DARK, true, true),
+    goldS: GM.goldBlob(28, 24, 11),
+    goldM: GM.goldBlob(40, 32, 17),
+    goldL: GM.goldBlob(52, 40, 23),
+    rockS: GM.rockBlob(32, 28, 31),
+    rockL: GM.rockBlob(52, 40, 37),
     diamond: GM.diamondSprite(),
     bag: GM.bagSprite(),
     bone: GM.boneSprite(),
@@ -460,7 +513,7 @@ GM.initArt = function () {
     shopClover: GM.shopCloverSprite(),
     shopBook: GM.shopBookSprite(),
     moleIcon: GM.moleIconSprite(),
-    miniGold: GM.blob(10, 8, 41, GM.PAPER, GM.MID, false, false),
+    miniGold: GM.goldBlob(10, 8, 41),
     miniGem: GM.miniGemSprite()
   };
 };

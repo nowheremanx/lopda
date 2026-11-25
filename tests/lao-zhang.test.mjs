@@ -628,6 +628,65 @@ test("Wang steals a haul, puffs up, and taunts Zhang", () => {
   assert.equal(state.rival.hook.state, "swing", "then he goes back to work");
 });
 
+test("gold reads bright with an ink edge; rock stays dark, dithered and matte", () => {
+  function count(spr, color, pred) {
+    var n = 0;
+    for (var y = 0; y < spr.h; y++) {
+      for (var x = 0; x < spr.w; x++) {
+        if (spr.b[y * spr.w + x] === color && (!pred || pred(x, y))) n++;
+      }
+    }
+    return n;
+  }
+  function touchesClear(spr, x, y) {
+    if (x === 0 || y === 0 || x === spr.w - 1 || y === spr.h - 1) return true;
+    return spr.b[y * spr.w + x - 1] === GM.CLEAR || spr.b[y * spr.w + x + 1] === GM.CLEAR ||
+      spr.b[(y - 1) * spr.w + x] === GM.CLEAR || spr.b[(y + 1) * spr.w + x] === GM.CLEAR;
+  }
+
+  for (const name of ["goldS", "goldM", "goldL"]) {
+    const spr = GM.SPR[name];
+    assert.ok(spr, `missing ${name}`);
+    const edge = count(spr, GM.INK, (x, y) => touchesClear(spr, x, y));
+    assert.ok(edge >= 8, `${name} ink outline is only ${edge} px`);
+    const glint = count(spr, GM.PAPER, (x, y) => !touchesClear(spr, x, y));
+    assert.ok(glint >= 2, `${name} has no paper glint inside (${glint} px)`);
+    assert.equal(count(spr, GM.PAPER), glint, `${name} paper must only be the glint`);
+  }
+
+  for (const name of ["rockS", "rockL"]) {
+    const spr = GM.SPR[name];
+    assert.ok(spr, `missing ${name}`);
+    assert.equal(count(spr, GM.PAPER), 0, `${name} must not glint`);
+    assert.ok(count(spr, GM.DARK) > 0, `${name} needs a dark body`);
+    assert.ok(count(spr, GM.MID) > 0, `${name} needs a dithered surface`);
+    assert.ok(count(spr, GM.INK) > 0, `${name} needs an ink edge and cracks`);
+  }
+});
+
+test("the play footer always teaches B and shows the dynamite count", () => {
+  for (const lang of ["zh", "en"]) {
+    for (const n of [0, 2]) {
+      const line = GM.footPlayText(lang, n);
+      assert.match(line, /(^|\s)B(\s|$)/, `${lang} ${n}: no B key in "${line}"`);
+      assert.ok(line.includes("×" + n), `${lang} ${n}: no count in "${line}"`);
+      assert.ok(line.includes("START"), `${lang} ${n}: no START in "${line}"`);
+      assert.ok(!line.includes("{"), `${lang} ${n}: template not filled`);
+    }
+    assert.notEqual(GM.footPlayText(lang, 0), GM.footPlayText(lang, 2), `${lang}: the count must show`);
+  }
+});
+
+test("the mole codex line says what a mole is worth, not '0 / $1,500'", () => {
+  for (const lang of ["zh", "en"]) {
+    const line = GM.text(lang).codexMole;
+    assert.ok(!line.includes("0 /"), `${lang}: "${line}" still reads like 0 or $1,500`);
+    assert.match(line, /1,500/, `${lang}: the rare mole's value is missing`);
+    assert.match(line, lang === "zh" ? /钻石/ : /diamond/i, `${lang}: the diamond is missing`);
+    assert.match(line, lang === "zh" ? /不值钱/ : /junk|worthless/i, `${lang}: most moles must read as dross`);
+  }
+});
+
 test("the manifest and both languages are store-ready", () => {
   const m = readJSON("registry/apps/lao-zhang/manifest.json");
   assert.equal(m.id, "lao-zhang");
