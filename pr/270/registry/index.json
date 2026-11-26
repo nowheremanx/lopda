@@ -74,14 +74,14 @@
       "i18n": {
         "en": {
           "name": "LostDeck",
-          "description": "First-person maze shooter on a silent station: eleven decks down to the core."
+          "description": "First-person maze shooter on a silent station: fourteen decks down to the core."
         }
       },
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/lost-deck/index.html",
-      "sha256": "c79d15d38dac7e714b284c5b2379af8b27fa51a954dfda2ef2c1ced6d43ff939",
-      "bytes": 161681
+      "sha256": "eed289411f69f7f641334b74c7504039893add4cac3d440d9893690816eebfd5",
+      "bytes": 167725
     },
     {
       "spec": "lopda/1",

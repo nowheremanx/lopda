@@ -294,7 +294,96 @@
       ]
     },
     {
-      id: 11, par: 120, face: 270, fog: 0.38, ammo: 40, scatter: true, boss: true,
+      id: 11, par: 160, face: 0, fog: 0.5, dark: 1.1, ammo: 40, scatter: true,
+      name: { zh: "引擎脊", en: "Engine Spine" },
+      brief: { zh: "主引擎的维修通道又黑又长。闸门后面才是下去的电梯，开关会把灯和闸门一起打开。",
+               en: "The engine spine is long and dark. The lift down is behind a shutter; the switch brings back the lights and lifts it." },
+      goal: { zh: "方块→圆形→开关→电梯", en: "Square, circle, switch, lift" },
+      logs: [
+        { zh: "轮机长：核心切断了引擎，想把整个站拉进更低的轨道。开关在南边，圆形门后面。", en: "Chief engineer: the core cut the engines to drag the station lower. The switch is south, behind the circle door." }
+      ],
+      map: [
+        "##############################",
+        "#@...#.....##########T###....#",
+        "#....#..c..#..f...#.....#..f.#",
+        "#.a..D.....D......#..o..#....#",
+        "#....#..h..#...k..#x...x#..u.#",
+        "###D###D#####D#######1####D###",
+        "#................f...........#",
+        "#.PPP..PPP..PPPP..PPP..PPP...#",
+        "#....c.......g.......c.....a.#",
+        "#.PPP..PPP..PPPP..PPP..PPP...#",
+        "#............................#",
+        "####D#######=########2#####D##",
+        "#a......#........#....g..#c..#",
+        "#..c....#.x....k.#.f.....#..h#",
+        "#.....s.#.....a..#.....c.##S##",
+        "#l......#c.......#......h#A.a#",
+        "############E########X########"
+      ]
+    },
+    {
+      id: 12, par: 190, face: 270, fog: 0.42, ammo: 40, scatter: true,
+      name: { zh: "观景环", en: "Observation Ring" },
+      brief: { zh: "观景环绕着中央大厅转一圈。三张门卡分在三个角落的舱室里，大厅里的电梯要三角卡。",
+               en: "The observation ring runs round the central hall. The three cards wait in three corner rooms; the hall's lift needs the triangle." },
+      goal: { zh: "方块→圆形→三角→电梯", en: "All three cards, lift" },
+      logs: [
+        { zh: "观测员：从这儿能看见地球。核心关掉了舷窗的遮光板，说要让我们“看清楚”。", en: "Observer: you can see Earth from here. The core opened every shutter and said we should 'look closely'." }
+      ],
+      map: [
+        "#W##W##W##W##W##W##W##W##W##W##W",
+        "#........c.....g..............a#",
+        "#..............................#",
+        "#..####D########3#######1####..#",
+        "#f.#.....c.##......##.....a.#..#",
+        "#..#.c.....##......##f......#..#",
+        "#..#...u.a.##.a....##...o...#..#",
+        "#..#.......##......##......s#..#",
+        "#..##########..i.i.##########..#",
+        "#@.SAH#######......##########g.#",
+        "#..##########..i.i.##########..#",
+        "#..#.......##......##.....A.#..#",
+        "#..T...v...##s....s##.c.h...#..#",
+        "#..#.g...x.##......##.....c.#.f#",
+        "#..#a......#####E####x......#..#",
+        "#..####2################D####..#",
+        "#..............................#",
+        "#a.............g......c.......h#",
+        "#W##W##W##W##W##W##W##W##W##W##W"
+      ]
+    },
+    {
+      id: 13, par: 170, face: 0, fog: 0.45, ammo: 40, scatter: true,
+      name: { zh: "逃生舱", en: "Escape Pods" },
+      brief: { zh: "逃生舱都弹出去了，只剩空架子。最后一部电梯通往核心，前面是闸门和三角门。",
+               en: "Every pod has launched; only the racks are left. The last lift goes to the core, past a shutter and the triangle door." },
+      goal: { zh: "方块→三角→开关→电梯", en: "Square, triangle, switch, lift" },
+      logs: [
+        { zh: "最后一条：七个舱，六个人。我留下来，把核心的电梯钥匙放进了三角门。", en: "Last entry: seven pods, six people. I stayed, and locked the core lift behind the triangle door." }
+      ],
+      map: [
+        "##############################",
+        "#@....###b##c##b##.##b##f##h##",
+        "#.....D.............g........#",
+        "#.....#.......c..............#",
+        "#...a.###D#######1#######D####",
+        "#.....#......#......x#.....f.#",
+        "###D###.c.u..#.f.....#..x....#",
+        "#....a#......#...v...#....H..#",
+        "#.h...T....c.#.....s.#.a.....#",
+        "#.....#.....a#.......#c......#",
+        "###D##########################",
+        "#............c.#...f.....#...#",
+        "#....i..a..i...#..x...s..#.l.#",
+        "#.........g....=.........3...E",
+        "#....i.....i...#....g....#.A.#",
+        "#.c............#.k.....k.#...#",
+        "########X#####################"
+      ]
+    },
+    {
+      id: 14, par: 120, face: 270, fog: 0.38, ammo: 40, scatter: true, boss: true,
       name: { zh: "核心", en: "The Core" },
       brief: { zh: "核心就在下面。四个电源节点给它供护盾，通风口里还会爬出东西。先断电，再关掉它。",
                en: "The core is below. Four power nodes feed its shield, and things crawl out of the vents. Cut the power, then shut it down." },
