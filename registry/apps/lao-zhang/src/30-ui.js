@@ -31,6 +31,7 @@ GM.ui = (function () {
     cv.addEventListener("pointerdown", onCanvas);
     ov.addEventListener("click", onOverlay);
     addEventListener("resize", fit);
+    addEventListener("resize", function () { if (lastScreen === "title") paintTitle(); });
     document.addEventListener("visibilitychange", onVis);
     if (typeof PAD !== "undefined" && PAD.on) PAD.on("press", onPad);
     fit();
@@ -105,9 +106,8 @@ GM.ui = (function () {
         ? GM.fmt(T.menuContinueAt, { n: state.run.level, b: GM.money(state.run.bank) })
         : T.menuNoRun;
       return shell("title center",
-        '<canvas id="logo" width="16" height="16" aria-hidden="true"></canvas>' +
-        "<h1>" + esc(T.title) + "</h1>" +
-        '<p class="sub">' + esc(T.sub) + "</p>" +
+        '<canvas id="logo" aria-hidden="true"></canvas>' +
+        '<h1 class="vh">' + esc(T.title) + "</h1>" +
         '<div class="menu">' +
           row(state.menuCursor === 0, "continue", T.menuContinue, runSub, !state.run) +
           row(state.menuCursor === 1, "new", T.menuNew, T.menuNewSub, false) +
@@ -224,13 +224,7 @@ GM.ui = (function () {
   function post(screen) {
     var i, c, ctx2, spr;
     if (screen === "title") {
-      var logo = $("logo");
-      if (!logo) return;
-      logo.style.width = "64px";
-      logo.style.height = "64px";
-      var lctx = logo.getContext("2d");
-      lctx.imageSmoothingEnabled = false;
-      lctx.drawImage(GM.iconCanvas(), 0, 0);
+      paintTitle();
       return;
     }
     if (screen === "shop") {
@@ -263,6 +257,35 @@ GM.ui = (function () {
         ctx2.drawImage(src, (32 - iw) / 2, (32 - ih) / 2, iw, ih);
       }
     }
+  }
+
+  /* The title picture (the name is written in it), as large as the room above the menu allows, at most 3x, in
+     whole device pixels so every pixel stays square; on a screen too short for 1x it shrinks rather than push the
+     menu off. Written with putImageData only; the pixels for one size are kept, as every cursor move redraws. */
+  var titleImg = null;
+  function paintTitle() {
+    var logo = $("logo");
+    if (!logo || !ov) return;
+    var A = GM.titleArt, W = A.W, H = A.H, body = logo.parentNode, kids = body.children, used = 20, n = 0, i;
+    for (i = 0; i < kids.length; i++) if (kids[i] !== logo && kids[i].offsetHeight) { used += kids[i].offsetHeight; n++; }
+    used += n * 4 + (ov.lastElementChild && ov.lastElementChild !== body ? ov.lastElementChild.offsetHeight : 0);
+    var room = ov.clientHeight - used;
+    var d = window.devicePixelRatio || 1;
+    var fit = Math.max(0.25, Math.min((ov.clientWidth - 24) / W, room / H, 3)) * d, k = Math.max(1, Math.floor(fit));
+    logo.style.width = (W * (fit < 1 ? fit : k) / d) + "px";
+    logo.style.height = (H * (fit < 1 ? fit : k) / d) + "px";
+    if (!titleImg || titleImg.width !== W * k) {
+      var px = A.draw(LANG), tones = [[0xa3, 0xad, 0x7e], [0x7d, 0x8a, 0x58], [0x4a, 0x5a, 0x32], [0x1f, 0x2a, 0x14]];
+      titleImg = new ImageData(W * k, H * k);
+      var o = titleImg.data;
+      for (var y = 0; y < H * k; y++) for (var x = 0; x < W * k; x++) {
+        var t = tones[px[((y / k) | 0) * W + ((x / k) | 0)]], j = (y * W * k + x) * 4;
+        o[j] = t[0]; o[j + 1] = t[1]; o[j + 2] = t[2]; o[j + 3] = 255;
+      }
+    }
+    logo.width = W * k;
+    logo.height = H * k;
+    logo.getContext("2d").putImageData(titleImg, 0, 0);
   }
 
   function enter(screen) {
