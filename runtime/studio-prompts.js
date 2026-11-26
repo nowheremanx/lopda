@@ -8,7 +8,7 @@
  *   LopdaStudioPrompts.melody(o)  -> messages   o: {text, style, keyName, scale, bpm, section, energy, bars:[{chord, tones}], before}
  *   LopdaStudioPrompts.listen(o)  -> messages   o: {text, overview}
  *   LopdaStudioPrompts.edit(o)    -> messages   o: {text, overview, focus}
- *   LopdaStudioPrompts.score(o)   -> messages   o: {text, images}
+ *   LopdaStudioPrompts.score(o)   -> messages   o: {text, images, note}
  *   LopdaStudioPrompts.reject(reason) -> the user turn that sends a rejected answer back
  *
  * Every system prompt names its step with "TAPE4 STEP: <name>", which the tests' fake model reads to know what to answer.
@@ -266,12 +266,26 @@ JSON_ONLY,
 "- beats are the melody only; do not write lyrics or tablature numbers. Tokens: notes 0-7 (0 is rest); # or b before the digit. Octave marks are absolute: a plain digit is the middle octave, ' after the digit means dot above (one octave up), and , means dot below (one octave down); marks may repeat, e.g. 5, or 1'. A lone - holds the previous note for a beat. A dot after a note dots its length (1.5 is dotted eighth then sixteenth). A slur is NOT a tie: use ~ only for a tie between equal notes.",
 "- The meter must be 4/4. Do not invent beats, lyrics or a title, nor chords where nothing is played under the melody; use null for an unknown bpm and an empty title if unreadable.",
 "- Output the one JSON object only."
-  ].join("\n");
+  ];
+  var note=String(o.note==null?"":o.note).trim();
+  /* The user's own notes (decisions.md section 73). The model only turns them into fields; the local reader does the
+     arithmetic and the picking, so a plain model gets a capo or a broken chord right. With no notes, nothing here is sent
+     and the request is the same as before. */
+  if(note) system=system.concat([
+"",
+"The user wrote NOTES about this score. Follow them; they win over the rules above where the two differ. Put what they ask into these optional fields, and leave the notes and lyrics out of every other field:",
+"- capo: a capo fret the notes name (\"capo 3\", \"夹 3 品\") when the score does not print one. Still never transpose a note yourself.",
+"- shift: semitones the notes ask to move the whole song, -12 to 12 (\"up 2 semitones\" is 2, \"down a whole tone\" is -2). Only for a transpose the notes ask for that is not a capo. Default 0.",
+"- accomp: \"arpeggio\" when the notes ask for broken chords or for following the TAB's picking instead of strummed or block chords; otherwise \"block\". Still write the chord names as usual.",
+"- pick: with accomp \"arpeggio\", the picking pattern of one 4/4 bar as 8 characters, one per eighth note: R the bass string (the root, or the bass of a slash chord), 5 the fifth, 8 the root an octave up, 3 the third above that octave, - lets the last note ring. Read it from the TAB's fret numbers by string if the score has one (lowest sounding string R, then up); e.g. R5838583. null if you cannot read it.",
+"- Anything else the notes say (which pages or bars to read, which staff holds the melody) changes how you read; it adds no field."
+  ]);
+  system=system.join("\n");
   var user;
   if(Array.isArray(o.images)&&o.images.length){
-    user=[{type:"text",text:"The pictures are pages of the same score, in order. Transcribe them together.\n"+(o.text||"")}];
+    user=[{type:"text",text:"The pictures are pages of the same score, in order. Transcribe them together.\n"+(o.text||"")+(note?"\nNOTES: "+note:"")}];
     for(var i=0;i<o.images.length;i++) user.push({type:"image_url",image_url:{url:o.images[i]}});
-  } else user=String(o.text||"");
+  } else user=String(o.text||"")+(note?"\nNOTES: "+note:"");
   return msgs("score",system,user);
 }
 

@@ -324,3 +324,60 @@ test("a score read with no chord at all says so first; one chord anywhere is eno
   assert.ok(!leftHand.lost.includes("nochords"));
   assert.ok(leftHand.song.patterns.every((p) => p.notes.bass.length > 0 && p.notes.chords.length > 0));
 });
+
+// The user's notes on a score (decisions.md section 73): the model fills shift / accomp / pick, the reader applies them.
+const melodyBars = () => [bar(["C"], ["1", "3", "5", "1'"]), bar(["F", "G"], ["6", "5", "4", "2"])];
+
+test("note fields are ignored without notes: the same tape whatever a model adds", () => {
+  const base = plain(S.toSong(score(melodyBars()), 0));
+  const extra = plain(S.toSong(score(melodyBars(), { shift: 3, accomp: "arpeggio", pick: "bogus" }), 0));
+  assert.deepEqual(extra, base);
+  assert.equal(S.check(score(melodyBars(), { pick: "bogus" })).error, undefined);
+});
+
+test("with notes, shift moves the whole song like a capo and is said first", () => {
+  const capo = plain(S.toSong(score(melodyBars(), { capo: 3 }), 0, { notes: true }));
+  const shift = plain(S.toSong(score(melodyBars(), { shift: 3 }), 0, { notes: true }));
+  assert.equal(shift.song.key, 3);
+  assert.deepEqual(shift.song.patterns, capo.song.patterns);
+  assert.equal(shift.lost[0], "note:shift:+3");
+  assert.equal(capo.lost[0], "note:capo:3");
+  const down = plain(S.toSong(score(melodyBars(), { shift: -2 }), 0, { notes: true }));
+  assert.equal(down.song.key, 10);
+  assert.equal(down.lost[0], "note:shift:-2");
+  assert.equal(S.check(score(melodyBars(), { shift: 13 }), { notes: true }).error, "shift");
+  assert.equal(S.check(score(melodyBars(), { shift: 13 }), { notes: true, lenient: true }).error, undefined);
+});
+
+test("with notes, arpeggio picks the chord tones on the bass track and mutes the chords", () => {
+  const out = plain(S.toSong(score(melodyBars(), { accomp: "arpeggio", pick: "R5838583" }), 0, { notes: true }));
+  const song = out.song, track = (id) => song.tracks.find((t) => t.id === id);
+  assert.equal(track("chords").mute, true);
+  assert.equal(track("bass").voice, "pick");
+  assert.ok(out.lost.includes("note:arp"));
+  const first = song.patterns[song.song[0]].notes;
+  assert.equal(first.chords.length, 1, "the chord stays on its screen");
+  const midis = first.bass.map((n) => Song.noteMidi(song, "bass", n.deg, n.acc || 0));
+  assert.equal(first.bass.length, 8);
+  assert.deepEqual(first.bass.map((n) => n.t / Song.STEP), [0, 2, 4, 6, 8, 10, 12, 14]);
+  const r = midis[0];
+  assert.equal(r % 12, 0, "R is the C root");
+  assert.deepEqual(midis.map((m) => m - r), [0, 7, 12, 16, 12, 7, 12, 16]);
+  /* two chords: the second half of the pattern starts on G's bass note */
+  const second = song.patterns[song.song[1]].notes;
+  const g = second.bass.find((n) => n.t === 8 * Song.STEP);
+  assert.equal(Song.noteMidi(song, "bass", g.deg, g.acc || 0) % 12, 7);
+  assert.ok(Song.validate(song).song);
+});
+
+test("arpeggio: a slash chord picks its bass note, a hold rings, a bad pick is refused or dropped", () => {
+  const out = plain(S.toSong(score([bar(["C/E"], beats)], { accomp: "arpeggio", pick: "R-5-8-3-" }), 0, { notes: true }));
+  const notes = out.song.patterns[0].notes.bass;
+  assert.equal(notes.length, 4);
+  assert.equal(Song.noteMidi(out.song, "bass", notes[0].deg, notes[0].acc || 0) % 12, 4);
+  assert.equal(notes[0].len, 4 * Song.STEP);
+  assert.equal(S.check(score(melodyBars(), { accomp: "arpeggio", pick: "-5838583" }), { notes: true }).error, "pick");
+  const lenient = S.toSong(score(melodyBars(), { accomp: "arpeggio", pick: "xx" }), 0, { notes: true, lenient: true });
+  assert.ok(lenient.song);
+  assert.equal(plain(lenient.song.patterns[0].notes.bass).length, 8, "the default pattern");
+});

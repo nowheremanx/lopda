@@ -644,24 +644,27 @@ function edit(o){
 /* A single transcription and one corrected pass. The final pass may keep readable bars and report what was lost. */
 function readScore(o){
   o=o||{};
-  var now=num(o.now)?o.now:Date.now(), onStage=o.onStage, text=o.text==null?"":String(o.text), images=o.images;
+  var now=num(o.now)?o.now:Date.now(), onStage=o.onStage, text=o.text==null?"":String(o.text), images=o.images,
+    note=o.note==null?"":String(o.note).trim(), opts=note?{notes:true}:undefined;
   return job(o.ask,function(c){
     c.onStage=onStage; c.onTrouble=o.onTrouble; c.later=o.later;
-    var messages=P.score({text:text,images:images}), firstObj=null, lastObj=null;
+    var messages=P.score({text:text,images:images,note:note}), firstObj=null, lastObj=null;
     function inspect(answer){
       var obj=AI.extract(answer), checked, made, reason, at;
       if(!obj || obj.error) return {answer:answer,obj:null,reason:"not one JSON object"};
       try{
-        checked=SCORE.check(obj);
+        checked=SCORE.check(obj,opts);
         if(!checked.error){
-          made=SCORE.toSong(obj,now);
+          made=SCORE.toSong(obj,now,opts);
           if(made.song) return {answer:answer,obj:obj,made:made};
           checked=made;
         }
       }catch(e){
         return {answer:answer,obj:obj,reason:"could not check the answer"};
       }
-      reason=checked.error==="key"?'key: write the 1= key as a note name like "G", "Bb" or "F#m"':(checked.error||"invalid score");
+      reason=checked.error==="key"?'key: write the 1= key as a note name like "G", "Bb" or "F#m"':
+        checked.error==="pick"?"pick: 8 characters of R 3 5 8 -, the first not -, or null":
+        checked.error==="shift"?"shift: a whole number of semitones from -12 to 12":(checked.error||"invalid score");
       at=checked.at;
       if(at){
         if(typeof at.bar==="number") reason+=" at bar "+(at.bar+1);
@@ -684,7 +687,7 @@ function readScore(o){
         lastObj=retry.obj||firstObj;
         if(lastObj){
           try{
-            fallback=SCORE.toSong(lastObj,now,{lenient:true});
+            fallback=SCORE.toSong(lastObj,now,{lenient:true,notes:!!note});
             if(fallback.song) return {song:fallback.song,lost:fallback.lost,bars:fallback.song.song.length};
           }catch(e){}
         }
