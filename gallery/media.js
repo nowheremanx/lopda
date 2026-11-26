@@ -5,5 +5,9 @@ window.LOPDA_GALLERY_MEDIA = {
   "gomoku": {"en":{"stills":1},"zh":{"stills":1}},
   "lao-zhang": {"en":{"stills":1},"zh":{"stills":1}},
   "lost-deck": {"en":{"stills":1},"zh":{"stills":1}},
+  "paper-tower": {"en":{"stills":1},"zh":{"stills":1}},
+  "rain-station": {"en":{"stills":1},"zh":{"stills":1}},
+  "shanjiao-diner": {"en":{"stills":1},"zh":{"stills":1}},
+  "sisyphus": {"en":{"stills":1},"zh":{"stills":1}},
   "zhenyao-tower": {"en":{"stills":1},"zh":{"stills":1}}
 };
