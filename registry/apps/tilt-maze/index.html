@@ -1491,7 +1491,7 @@ function drawWorld(g) {
 function drawHud(g) {
   g.rect(0, 0, 160, HUD, g.INK);
   g.text(T({ zh: "第{n}关 {name}", en: "{n} {name}" }, { n: level + 1, name: T(LEVELS[level].name) }), 3, 1, { color: g.PAPER });
-  for (var i = 0; i < 3; i++) g.sprite(i < gemCount() ? PIP_FULL : PIP_EMPTY, 116 + i * 7, 5);
+  for (var i = 0; i < 3; i++) g.sprite(i < gemCount() ? PIP_FULL : PIP_EMPTY, 106 + i * 7, 5);
   /* how the sensor stands: a bubble level while tilt is live, else the word for keys */
   if (live) {
     g.frame(140, 2, 17, 12, g.PAPER);
@@ -1532,7 +1532,7 @@ function drawIntro(g) {
   g.text(T({ zh: "第{a}区", en: "AREA {a}" }, { a: areaOf(level) + 1 }), 80, HUD + 30, { align: "center", color: tone });
   bigText(g, T(a.name), 80, HUD + 48, tone);
   g.rect(40, HUD + 82, 80, 1, tone === g.PAPER ? g.MID : g.DARK);
-  if (k >= 1) g.text(T(a.hint), 80, HUD + 92, { align: "center", color: g.PAPER, width: 150 });
+  if (k >= 1) g.text(T(a.hint), 5, HUD + 92, { align: "center", color: g.PAPER, width: 150 });
 }
 
 /* the level's tally: name, time, the three gem slots filling one by one */
