@@ -49,7 +49,9 @@ footer{padding-block:32px;color:var(--on-case-dim);font-size:14px;border-top:1px
 .playb{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);display:inline-flex;align-items:center;gap:10px;
   padding:12px 20px 12px 16px;min-height:44px;border:0;border-radius:999px;background:rgba(31,42,20,.88);color:var(--lcd-paper);
   font:600 16px/1 var(--f-body,system-ui);cursor:pointer;box-shadow:0 10px 30px -10px rgba(0,0,0,.7);transition:opacity .2s}
-.playb svg{width:18px;height:18px;fill:currentColor}
+.playb svg{width:18px;height:18px;fill:currentColor;flex:none}
+.playb{white-space:nowrap}
+@media (max-width:760px){.playb{font-size:15px;padding:10px 16px 10px 13px;gap:8px;bottom:10px}}
 .playb:hover{background:rgba(31,42,20,.96)}
 .glass.playing .playb{opacity:0;pointer-events:none}
 
@@ -68,8 +70,11 @@ footer{padding-block:32px;color:var(--on-case-dim);font-size:14px;border-top:1px
 /* one app */
 .back{display:inline-flex;align-items:center;min-height:44px;text-decoration:none;color:var(--on-case-dim);margin-top:16px}
 .back:hover{color:var(--on-case)}
-.app{display:grid;gap:clamp(24px,4vw,56px);grid-template-columns:minmax(0,380px) minmax(0,1fr);align-items:start;padding-top:12px}
-@media (max-width:760px){.app{grid-template-columns:1fr} .app .screen{max-width:420px;width:100%;margin-inline:auto}}
+.app{display:grid;column-gap:clamp(24px,4vw,56px);grid-template-columns:minmax(0,380px) minmax(0,1fr);grid-template-rows:auto 1fr;
+  grid-template-areas:"screen top" "screen txt";align-items:start;padding-top:12px}
+.app .top{grid-area:top}.app .screen{grid-area:screen}.app .txt{grid-area:txt}
+@media (max-width:760px){.app{grid-template-columns:1fr;grid-template-rows:none;grid-template-areas:"top" "screen" "txt";row-gap:20px}
+  .app .screen{max-width:min(420px,40svh);width:100%;margin-inline:auto;box-sizing:border-box}}
 .app h1{font-size:clamp(30px,4vw,48px)}
 .app .who{display:flex;align-items:center;gap:12px;margin-bottom:16px}
 .app .who canvas{width:40px;height:40px;image-rendering:pixelated;flex:none}
@@ -217,13 +222,15 @@ footer{padding-block:32px;color:var(--on-case-dim);font-size:14px;border-top:1px
     if (!e || !REG[id]) { main.appendChild(el("p", "lede", t("missing"))); return; }
     document.title = name(id) + " · Lo-PDA";
     var a = REG[id], box = el("section", "app");
-    box.appendChild(screen(id, true));
-    var txt = el("div");
+    /* the name and the one-line title come first on a phone, so the page says what it is before the picture
+       (owner, 2026-11-26); on a desktop they sit beside the screen, above the rest of the text */
+    var top = el("div", "top"), txt = el("div", "txt");
+    box.appendChild(top); box.appendChild(screen(id, true));
     var who = el("div", "who"); who.appendChild(icon(a.icon, a.glyph));
     var wn = el("div"); wn.appendChild(el("div", "n", name(id)));
     wn.appendChild(el("div", "m", t("cat." + (a.category || "other")) + " · v" + a.version));
-    who.appendChild(wn); txt.appendChild(who);
-    txt.appendChild(el("h1", null, L(e.title)));
+    who.appendChild(wn); top.appendChild(who);
+    top.appendChild(el("h1", null, L(e.title)));
     txt.appendChild(el("p", "note", L(e.note)));
     txt.appendChild(el("p", "desc", desc(id)));
     if (e.uses && e.uses.length) {
