@@ -68,12 +68,12 @@ const OUT = resolve(args.find((a) => !a.startsWith("--")) || join(ROOT, "docs", 
 const T = {
   zh: { boot: "启动中…", open: "打开", camera: "点阵相机", darkroom: "冲洗店", notes: "记事本", calendar: "万年历", dict: "词典",
         reader: "阅读器", book: "論語", store: "应用商店", pet: "宠物", studio: "四轨机", library: "磁带库", radio: "电波台", tuner: "收音机",
-        radioIn: "在湖边吗？", radioOut: "船刚划过去。", puzzle: "拍照拼图", tower: "纸塔", yu: "滥竽充数", rain: "雨站",
+        radioIn: "在湖边吗？", radioOut: "船刚划过去。", puzzle: "拍照拼图", tower: "纸塔", yu: "滥竽充数", rain: "雨站", deck: "失联站",
         today: "去湖边拍完了一卷胶卷。船从左边划到右边，正好八张。", earlier: "秋天第一次穿外套。",
         quote: "《論語》\n學而時習之，不亦說乎。#摘抄", todo: "买胶卷\n周六去冲洗店。#待办" },
   en: { boot: "BOOT…", open: "Open", camera: "Camera", darkroom: "Darkroom", notes: "Notes", calendar: "Calendar", dict: "Dict",
         reader: "Reader", book: "Alice", store: "Store", pet: "Pet", studio: "Tape4", library: "Tape library", radio: "Radio", tuner: "Tuner",
-        radioIn: "At the lake?", radioOut: "The boat just went by.", puzzle: "SnapTile", tower: "Paper", yu: "Fake Yu", rain: "Rain Stn",
+        radioIn: "At the lake?", radioOut: "The boat just went by.", puzzle: "SnapTile", tower: "Paper", yu: "Fake Yu", rain: "Rain Stn", deck: "LostDeck",
         today: "Shot a whole roll by the lake. The boat crossed from left to right, eight frames exactly.",
         earlier: "First cold morning. Wore a coat.",
         quote: "Alice\u2019s Adventures in Wonderland\n\u201cCuriouser and curiouser!\u201d cried Alice. #quotes",
@@ -268,7 +268,7 @@ const play = async (label, steps) => {
   await p.waitForSelector("#v-run:not([hidden])"); await p.waitForTimeout(1500);
   for (const s of steps) {
     if (typeof s === "number") await p.waitForTimeout(s);
-    else if (typeof s === "function") await s(p.frameLocator("#run-frame"));
+    else if (typeof s === "function") await s(p.frameLocator("#run-frame"), p);
     else if (/^[a-z][a-z-]+$/.test(s)) await shot(s, 100);   /* "x" and "ArrowDown" are keys */
     else await key(s, 1, 250);
   }
@@ -279,6 +279,20 @@ const GAMES = [
   [T.tower, ["x", 800, "x", 800, "x", 800, "paper-tower"]],
   [T.yu, ["ArrowDown", "x", 800, "x", 8000, "fake-yu"]],                  /* 选曲, the first song, mid-song */
   [T.rain, ["x", 800, "x", 3000, "rain-station"]],
+  /* Lost Deck: deck 9, facing its guard down a lit corridor, through the game's own test hooks LD.dbgStart and LD.dbg
+     (as gallery/gallery.js stages it); the first-time hints are drawn only after a few seconds */
+  [T.deck, [1500, async (f, page) => {
+    const app = page.frames().find((x) => x.parentFrame() === page.mainFrame() && x !== page.mainFrame());
+    await app.evaluate(() => LD.dbgStart(8)); await page.waitForTimeout(2300);
+    await app.evaluate(() => { const w = LD.dbg(), P = w.P; let e = null;
+      w.things.forEach((t) => { if (t.kind === "foe" && t.type === "guard" && (!e || Math.hypot(t.x - P.x, t.y - P.y) < Math.hypot(e.x - P.x, e.y - P.y))) e = t; });
+      for (let k = 0; k < 32; k++) { const a = k * Math.PI / 16, x = e.x + Math.cos(a) * 3.2, y = e.y + Math.sin(a) * 3.2; let ok = true;
+        for (let q = 0; q <= 1; q += 0.05) { const px = e.x + (x - e.x) * q, py = e.y + (y - e.y) * q;
+          if (w.wallAt(Math.floor(px), Math.floor(py)) || w.wallAt(Math.floor(px + 0.3), Math.floor(py)) || w.wallAt(Math.floor(px - 0.3), Math.floor(py)) ||
+              w.wallAt(Math.floor(px), Math.floor(py + 0.3)) || w.wallAt(Math.floor(px), Math.floor(py - 0.3))) { ok = false; break; } }
+        if (ok) { P.x = x; P.y = y; P.a = Math.atan2(e.y - y, e.x - x); return; } } });
+    await page.waitForTimeout(300);
+  }, "lost-deck"]],
 ];
 for (const [label, steps] of GAMES) if (want("games")) await play(label, steps);
 
@@ -342,7 +356,7 @@ if (want("tuner")) {
 const ROWS = {
   "screens.png": ["home", "camera", "darkroom", "puzzle"],
   "builtins.png": ["notes", "calendar", "dict", "reader"],
-  "apps.png": ["paper-tower", "fake-yu", "rain-station", "store"],
+  "apps.png": ["lost-deck", "fake-yu", "paper-tower", "store"],
   "more.png": ["pet", "studio", "tuner", "radio"],
 };
 for (const [file, names] of Object.entries(ROWS)) {

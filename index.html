@@ -9,6 +9,7 @@
 <title>Lo-PDA</title>
 <meta name="description" content="A four-tone handheld from 1986 that lives on your phone. Film camera, darkroom, diary, games and a store of tiny apps. No accounts, works offline.">
 <meta name="theme-color" content="#171815">
+<link rel="stylesheet" href="site/site.css">
 <meta property="og:title" content="Lo-PDA">
 <meta property="og:description" content="A handheld from 1986. It lives on your phone.">
 <meta property="og:image" content="https://nowheremanx.github.io/lopda/docs/images/screens.png">
@@ -30,8 +31,6 @@
 }
 *{box-sizing:border-box}
 html,body{margin:0}
-nav .lang{background:none;border:0;color:var(--on-case-dim);font:14px var(--f-body);cursor:pointer;padding:8px 4px}
-nav .lang:hover{color:var(--on-case)}
 body{background:var(--case);color:var(--on-case);font:17px/1.55 var(--f-body);-webkit-font-smoothing:antialiased}
 a{color:inherit}
 .wrap{max-width:1080px;margin:0 auto;padding-left:max(20px,env(safe-area-inset-left,0px));padding-right:max(20px,env(safe-area-inset-right,0px))}
@@ -48,20 +47,13 @@ p{margin:0}
 .eyebrow{font-size:20px;color:var(--lcd-mid);margin-bottom:18px}
 .paper .eyebrow{color:var(--lcd-dark)}
 
-/* nav */
-nav{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:color-mix(in srgb,var(--case) 82%,transparent);backdrop-filter:saturate(1.4) blur(14px);-webkit-backdrop-filter:saturate(1.4) blur(14px);border-bottom:1px solid var(--case-line)}
+/* the top bar is shared by every page of the site: site/site.css and site/site.js */
 body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--case)}
-nav .wrap{display:flex;align-items:center;gap:22px;height:52px;font-size:14px}
-nav .mark{font-family:var(--f-lcd);font-size:24px;letter-spacing:.06em;text-decoration:none;margin-right:auto}
-nav a.l{text-decoration:none;color:var(--on-case-dim)}
-nav a.l:hover{color:var(--on-case)}
-@media (max-width:640px){nav a.l{display:none}}
 .btn{display:inline-flex;align-items:center;gap:8px;border-radius:999px;padding:12px 22px;font:600 16px/1 var(--f-body);text-decoration:none;border:0}
 .btn.home{background:var(--home);color:#fff;box-shadow:inset 0 -3px 0 rgba(0,0,0,.25)}
 .btn.home:hover{filter:brightness(1.08)}
 .btn.ghost{color:var(--on-case);box-shadow:inset 0 0 0 1px var(--case-line)}
 .paper .btn.ghost{color:var(--lcd-ink);box-shadow:inset 0 0 0 1px var(--lcd-mid)}
-nav .btn{padding:8px 16px;font-size:14px}
 a:focus-visible,.btn:focus-visible,button:focus-visible{outline:2px solid var(--lcd-paper);outline-offset:3px}
 
 /* device crops: each screenshot strip holds four phones side by side */
@@ -100,23 +92,20 @@ html[lang=zh] .dev.m{background-image:url(docs/images/zh/more.png)}
 @media (max-width:760px){.split{grid-template-columns:1fr}}
 
 /* camera -> darkroom */
-.pair{max-width:760px;margin-inline:auto;display:grid;grid-template-columns:1fr auto 1fr;gap:clamp(12px,3vw,40px);align-items:center;margin-top:64px}
-.pair figure{margin:0;display:grid;gap:14px}
-.pair figcaption{font-size:15px;color:var(--on-case-dim)}
-.pair figcaption b{color:var(--on-case);font-weight:600}
-.arrow{font-family:var(--f-lcd);font-size:22px;color:var(--lcd-mid);text-align:center;line-height:1.1}
-@media (max-width:640px){.pair{grid-template-columns:1fr 1fr}.arrow{display:none}}
-
-/* stocks */
-.stocks{margin-top:clamp(72px,10vw,120px);display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.1fr);gap:clamp(24px,5vw,64px);align-items:center}
-@media (max-width:760px){.stocks{grid-template-columns:1fr}}
-.print{background:#f4f2ea;padding:14px 14px 48px;border-radius:3px;box-shadow:0 30px 80px -30px rgba(0,0,0,.8);transform:rotate(-1.2deg);max-width:420px;justify-self:center;width:100%}
-.print img{display:block;width:100%;aspect-ratio:7/8;object-fit:cover}
-.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:24px}
-.chips button{font:20px var(--f-lcd);letter-spacing:.05em;text-transform:uppercase;background:none;color:var(--on-case-dim);border:1px solid var(--case-line);border-radius:999px;padding:6px 14px;cursor:pointer}
+/* the camera: the viewfinder's four tones, then the darkroom's print */
+.develop{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:clamp(16px,3vw,40px);align-items:start;margin-top:64px}
+.develop figure{margin:0;display:grid;gap:14px;min-width:0}
+.develop figcaption{font-size:15px;color:var(--on-case-dim)}
+.develop figcaption b{color:var(--on-case);font-weight:600}
+.lcdpic{background:#0c0d0b;border-radius:14px;padding:12px;box-shadow:inset 0 -3px 0 rgba(0,0,0,.4)}
+.lcdpic img{display:block;width:100%;height:auto;aspect-ratio:8/7;image-rendering:pixelated;border-radius:4px}
+.arrow{font-family:var(--f-lcd);font-size:22px;color:var(--lcd-mid);text-align:center;line-height:1.1;align-self:center}
+.print{background:#f4f2ea;padding:12px 12px 40px;border-radius:3px;box-shadow:0 30px 80px -30px rgba(0,0,0,.8);transform:rotate(-1deg)}
+.print img{display:block;width:100%;height:auto;aspect-ratio:8/7;object-fit:cover}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chips button{font:20px var(--f-lcd);letter-spacing:.05em;text-transform:uppercase;background:none;color:var(--on-case-dim);border:1px solid var(--case-line);border-radius:999px;padding:6px 14px;min-height:44px;cursor:pointer}
 .chips button[aria-pressed="true"]{background:var(--lcd-paper);color:var(--lcd-ink);border-color:var(--lcd-paper)}
-.strip{margin-top:clamp(56px,8vw,96px);overflow-x:auto;border-radius:6px}
-.strip img{display:block;height:120px;max-width:none}
+@media (max-width:640px){.develop{grid-template-columns:1fr}.arrow{display:none}}
 
 /* built-ins */
 .shelf{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:clamp(12px,2vw,24px);margin-top:56px}
@@ -134,6 +123,19 @@ html[lang=zh] .dev.m{background-image:url(docs/images/zh/more.png)}
 .stat .n{font:700 clamp(44px,6vw,72px)/1 var(--f-display);letter-spacing:-.04em}
 .stat .u{font-size:15px;color:var(--on-case-dim);margin-top:8px}
 @media (max-width:560px){.stats{grid-template-columns:1fr}}
+/* the gallery: the best apps, each with a cover and a film; the store section ends on it */
+.gal{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.1fr);gap:clamp(24px,4vw,56px);align-items:center;margin-top:64px;
+  padding:clamp(24px,4vw,48px);border-radius:24px;background:var(--case-2);box-shadow:inset 0 0 0 1px var(--case-line);text-decoration:none;color:inherit}
+.gal h3{font:700 clamp(28px,3.4vw,40px)/1.1 var(--f-display);letter-spacing:-.02em;margin:0 0 14px}
+.gal p{color:var(--on-case-dim);margin:0 0 26px;max-width:34ch}
+.gal .covers{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:clamp(10px,1.6vw,18px)}
+.gal .cv{aspect-ratio:692/1036;border-radius:10px;background:#0c0d0b center/cover no-repeat;box-shadow:0 24px 60px -24px rgba(0,0,0,.9);transition:transform .25s}
+.gal .cv:nth-child(2){transform:translateY(-14px)}
+.gal:hover .cv{transform:translateY(-6px)}.gal:hover .cv:nth-child(2){transform:translateY(-20px)}
+.cv.c0{background-image:url(gallery/media/lost-deck/en-1.png)}html[lang=zh] .cv.c0{background-image:url(gallery/media/lost-deck/zh-1.png)}
+.cv.c1{background-image:url(gallery/media/zhenyao-tower/en-1.png)}html[lang=zh] .cv.c1{background-image:url(gallery/media/zhenyao-tower/zh-1.png)}
+.cv.c2{background-image:url(gallery/media/fake-yu/en-1.png)}html[lang=zh] .cv.c2{background-image:url(gallery/media/fake-yu/zh-1.png)}
+@media (max-width:760px){.gal{grid-template-columns:1fr}.gal .covers{order:-1}}
 
 /* make an app */
 pre{margin:0;background:var(--lcd-ink);color:var(--lcd-paper);border-radius:14px;padding:24px;overflow-x:auto;font:15px/1.6 ui-monospace,"SF Mono",Menlo,monospace}
@@ -158,17 +160,7 @@ footer .mark{font-family:var(--f-lcd);font-size:22px;color:var(--on-case);margin
 </style>
 </head>
 <body>
-<nav><div class="wrap">
-  <a class="mark" href="#top">LO-PDA</a>
-  <a class="l" href="#camera" data-i18n="nav.camera">Camera</a>
-  <a class="l" href="#inside" data-i18n="nav.inside">Inside</a>
-  <a class="l" href="#store" data-i18n="nav.apps">Apps</a>
-  <a class="l" href="#make" data-i18n="nav.make">Make an app</a>
-  <a class="l" href="events/" data-i18n="nav.events">Events</a>
-  <a class="l" href="https://github.com/nowheremanx/lopda">GitHub</a>
-  <button class="lang" type="button" id="lang">中文</button>
-  <a class="btn home" href="runtime/" data-i18n="nav.open">Open</a>
-</div></nav>
+<script src="site/site.js" data-root="" data-page="home"></script>
 
 <header class="hero" id="top"><div class="wrap grid">
   <div class="copy">
@@ -206,19 +198,15 @@ footer .mark{font-family:var(--f-lcd);font-size:22px;color:var(--on-case);margin
     <div><div class="eyebrow lcd" data-i18n="cam.e">Shot on Lo-PDA</div><h2 data-i18n="cam.h">No preview. You find out in the darkroom.</h2></div>
     <p class="lede" data-i18n="cam.p">Load a roll of 8, 12 or 16 frames. The viewfinder is a live four-tone dither. When the roll is done, the darkroom develops it once, in colour.</p>
   </div>
-  <div class="pair">
-    <figure><div class="dev s i1" role="img" aria-label="The camera's four-tone live viewfinder, framing a lake with a pagoda and a sail boat"></div>
-      <figcaption data-i18n="cam.vf"><b>The viewfinder.</b> Frame 1 of 8, Portrait 400.</figcaption></figure>
+  <!-- One photo, the owner's own (docs/images/stocks/): on the left as the viewfinder shows it, four tones
+       (tools/stock-tones.mjs runs it through runtime/finder.js); on the right as the darkroom develops it, one stock at a time. -->
+  <div class="develop">
+    <figure class="vf"><div class="lcdpic"><img src="docs/images/stocks/0-tones.png" width="256" height="224"
+      alt="An autumn valley with a lake in the camera's four-tone viewfinder"></div>
+      <figcaption data-i18n="cam.vf"><b>The viewfinder.</b> Four tones, live.</figcaption></figure>
     <div class="arrow" aria-hidden="true">DEVELOP<br>&rarr;</div>
-    <figure><div class="dev s i2" role="img" aria-label="The same frame developed in colour in the darkroom, with a date stamp"></div>
-      <figcaption data-i18n="cam.pr"><b>The print.</b> Grain, halation and a date stamp.</figcaption></figure>
-  </div>
-
-  <div class="stocks">
-    <div class="print"><img id="stock-img" src="docs/images/stocks/1-portrait.jpg" width="700" height="800" alt="An autumn valley on Portrait 400"></div>
-    <div>
-      <h3 data-i18n="stock.h">Seven film stocks</h3>
-      <p class="lede" data-i18n="stock.p">Each has its own colour, grain and quirks. Pick a roll before you shoot; it stays in the camera until the last frame.</p>
+    <figure class="pr"><div class="print"><img id="stock-img" src="docs/images/stocks/1-portrait.jpg" width="800" height="700" alt="The same valley developed on Portrait 400"></div>
+      <figcaption data-i18n="cam.pr"><b>The print.</b> Seven film stocks, each with its own colour and grain. Pick one:</figcaption>
       <div class="chips" id="chips">
         <button type="button" data-f="1-portrait" aria-pressed="true">Portrait 400</button>
         <button type="button" data-f="2-sunny" aria-pressed="false">Sunny 200</button>
@@ -227,10 +215,8 @@ footer .mark{font-family:var(--f-lcd);font-size:22px;color:var(--on-case);margin
         <button type="button" data-f="5-tungsten" aria-pressed="false">Tungsten 800T</button>
         <button type="button" data-f="6-noir" aria-pressed="false">Noir 400</button>
         <button type="button" data-f="7-expired" aria-pressed="false">Expired</button>
-      </div>
-    </div>
+      </div></figure>
   </div>
-  <div class="strip"><img src="docs/images/film-strip.png" alt="A developed roll as one film strip with sprocket holes and edge print"></div>
 </div></section>
 
 <section class="band paper" id="inside"><div class="wrap">
@@ -263,16 +249,25 @@ footer .mark{font-family:var(--f-lcd);font-size:22px;color:var(--on-case);margin
     <p class="lede" data-i18n="st.p">Games, puzzles and tools from the community. Each one installs in a second and runs in a sandbox with no internet.</p>
   </div>
   <div class="shelf">
-    <figure><div class="dev a i0" role="img" aria-label="Paper Tower, a small dungeon game"></div></figure>
-    <figure><div class="dev a i1" role="img" aria-label="Fake Yu, a rhythm story"></div></figure>
-    <figure><div class="dev a i2" role="img" aria-label="Rain Station, a short visual novel"></div></figure>
+    <figure><a href="gallery/?app=lost-deck"><div class="dev a i0" role="img" aria-label="LostDeck, a first-person shooter on a lost space station"></div></a></figure>
+    <figure><a href="gallery/?app=fake-yu"><div class="dev a i1" role="img" aria-label="Fake Yu, a rhythm story"></div></a></figure>
+    <figure><div class="dev a i2" role="img" aria-label="Paper Tower, a small dungeon game"></div></figure>
     <figure><div class="dev a i3" role="img" aria-label="The store's list of apps"></div></figure>
   </div>
   <div class="stats">
-    <div class="stat"><div class="n">24</div><div class="u" data-i18n="st.n1">apps in the store today</div></div>
+    <div class="stat"><div class="n">25</div><div class="u" data-i18n="st.n1">apps in the store today</div></div>
     <div class="stat"><div class="n">512 KB</div><div class="u" data-i18n="st.n2">the most an app may weigh</div></div>
     <div class="stat"><div class="n">0</div><div class="u" data-i18n="st.n3">network requests an app can make</div></div>
   </div>
+  <a class="gal" href="gallery/">
+    <div>
+      <div class="eyebrow lcd" data-i18n="st.g.e">The gallery</div>
+      <h3 data-i18n="st.g.h">The best of the store, in motion.</h3>
+      <p data-i18n="st.g.p">A cover and a short film of each, before you install anything. One tap opens it on your phone.</p>
+      <span class="btn home" data-i18n="st.g.b">Browse the gallery</span>
+    </div>
+    <div class="covers" aria-hidden="true"><div class="cv c0"></div><div class="cv c1"></div><div class="cv c2"></div></div>
+  </a>
 </div></section>
 
 <section class="band paper" id="make"><div class="wrap split">
@@ -329,7 +324,6 @@ PAD.music.play({ bpm: 120,
 (function () {
   // Chinese text, keyed like the data-i18n attributes. Values may hold <b> (the captions).
   var ZH = {
-    "nav.camera": "相机", "nav.inside": "内置程序", "nav.apps": "应用", "nav.make": "做个 app", "nav.events": "活动", "nav.open": "打开",
     "hero.h": "一台 1986 年的掌机，住在你的手机里。",
     "hero.p": "四种绿色，一个十字键，一台胶片相机和一间冲洗店。不用注册，没有广告，离线也能用。",
     "cta.open": "打开 Lo-PDA", "cta.install": "添加到主屏幕", "hero.fine": "免费，开源，为手机而做。",
@@ -338,8 +332,7 @@ PAD.music.play({ bpm: 120,
     "tone.ink": "墨", "tone.dark": "深", "tone.mid": "中", "tone.paper": "纸",
     "cam.e": "Lo-PDA 拍摄", "cam.h": "没有预览，冲出来才知道。",
     "cam.p": "装一卷 8、12 或 16 张的胶卷。取景器是实时的四色抖动画面。拍完一卷，冲洗店会把它冲一次，彩色的。",
-    "cam.vf": "<b>取景器。</b>第 1 张，共 8 张，Portrait 400。", "cam.pr": "<b>相片。</b>颗粒、光晕和日期戳。",
-    "stock.h": "七种胶卷", "stock.p": "每一种都有自己的颜色、颗粒和小脾气。拍之前选好，拍完最后一张才能换。",
+    "cam.vf": "<b>取景器。</b>四种颜色，实时。", "cam.pr": "<b>相片。</b>七种胶卷，各有自己的颜色和颗粒。挑一种看看：",
     "in.e": "内置", "in.h": "一口袋的程序。",
     "in.p": "打开就是今天的日记，带农历的万年历，英汉词典，还有一个能帮你查词的阅读器。",
     "in.notes": "<b>记事本</b>今天的日记、标签、搜索。", "in.cal": "<b>万年历</b>农历、节气、放假安排。",
@@ -351,7 +344,8 @@ PAD.music.play({ bpm: 120,
     "in.backup.h": "备份", "in.backup.p": "整台掌机打包成一个 zip，换手机也能恢复。",
     "st.e": "应用商店", "st.h": "小小的应用，由人来做。",
     "st.p": "社区做的游戏、谜题和工具。每个一秒装好，在没有网络的沙盒里运行。",
-    "st.n1": "个应用已上架", "st.n2": "一个应用的体积上限", "st.n3": "个应用能发出的网络请求",
+    "st.n1": "个应用已上架", "st.n2": "一个应用的体积上限", "st.n3": "个应用能发出的网络请求", "st.g.e": "精选", "st.g.h": "商店里最好的几个，先看它们动起来。",
+    "st.g.p": "每个应用一张封面、一段实机画面，装之前就知道它长什么样。点一下，在手机上打开。", "st.g.b": "看看精选应用",
     "mk.e": "做个 app", "mk.h": "一个 HTML 文件，你的 AI 就能写。",
     "mk.p": "规范很短，1.0 已冻结。把提示词交给你的 AI 助手，在开发台里试，再提一个 pull request。",
     "mk.spec": "阅读规范", "mk.prompt": "AI 提示词", "mk.events": "挑战卡",
@@ -370,14 +364,10 @@ PAD.music.play({ bpm: 120,
   function setLang(lang) {
     var t = lang === "zh" ? ZH : EN;
     for (var i = 0; i < nodes.length; i++) nodes[i].innerHTML = t[nodes[i].getAttribute("data-i18n")];
-    document.documentElement.lang = lang === "zh" ? "zh" : "en";
-    document.getElementById("lang").textContent = lang === "zh" ? "EN" : "中文";
   }
 
-  // The visitor's choice wins; otherwise follow the phone's language.
-  var saved = null;
-  try { saved = localStorage.getItem("lopda-landing-lang"); } catch (e) {}
-  var lang = saved || (/^zh/i.test(navigator.language || "") ? "zh" : "en");
+  // The language is the site's (site/site.js: the visitor's choice, else the phone's); its button in the top bar switches.
+  var lang = LopdaSite.lang;
   if (lang === "zh") setLang("zh");
 
   // The two films in the visitor's language. They carry sound (a voice-over in Chinese), so neither starts by itself: a tap plays it.
@@ -393,12 +383,7 @@ PAD.music.play({ bpm: 120,
   film.addEventListener("play", function () { film2.pause(); });
   film2.addEventListener("play", function () { film.pause(); });
 
-  document.getElementById("lang").addEventListener("click", function () {
-    lang = lang === "zh" ? "en" : "zh";
-    setLang(lang);
-    setFilm(lang);
-    try { localStorage.setItem("lopda-landing-lang", lang); } catch (e) {}
-  });
+  LopdaSite.onLang(function (l) { lang = l; setLang(lang); setFilm(lang); });
 
   // The film stock buttons swap the print.
   var img = document.getElementById("stock-img"), chips = document.getElementById("chips");
@@ -408,7 +393,7 @@ PAD.music.play({ bpm: 120,
     var all = chips.querySelectorAll("button");
     for (var i = 0; i < all.length; i++) all[i].setAttribute("aria-pressed", all[i] === b ? "true" : "false");
     img.src = "docs/images/stocks/" + b.getAttribute("data-f") + ".jpg";
-    img.alt = "An autumn valley on " + b.textContent;
+    img.alt = "The same valley developed on " + b.textContent;
   });
 })();
 </script>

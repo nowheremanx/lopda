@@ -69,6 +69,10 @@ events/         the events page (index.html, linked from the landing page): two 
                 with a coding agent), challenge cards and, once an event ends,
                 a summary of what people made; all data in events.js ({en, zh} text), pictures in shots/<event>/<app>.png
                 from tools/event-shots.mjs (needs Playwright)
+gallery/        the app gallery (index.html, ?app=<id> for one app): the best store apps with a cover and a short film each;
+                the list, its text and each film's scene in gallery.js, media in media/<id>/ from tools/gallery-shots.mjs (needs
+                Playwright and ffmpeg; writes media.js)
+site/           the top bar every page of the website shares (site.js writes it and keeps the page language, site.css)
 index.html      the landing page at the site root (English markup, Chinese table in its script; no third-party requests); the handheld is runtime/
 SPEC.md         app spec lopda/1 (MIT)
 README.md (English, the homepage) README.zh.md (Chinese) LICENSE NOTICE LICENSING.md CONTRIBUTING.md

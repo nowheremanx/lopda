@@ -237,7 +237,7 @@ test("the Pages workflow publishes the repo without tests, dependencies or CI fi
   assert.equal(pats.length, 3, "one pattern for runtime/, one for the sdk files every app link runs on, one for the landing page");
   const [runtimeRe, allAppsRe, landingRe] = pats;
   /* the landing page at the site root and the pictures it shows get a link to the preview's root */
-  for (const p of ["index.html", "docs/images/screens.png", "docs/images/stocks/1-portrait.jpg", "docs/video/lopda-en.mp4", "events/index.html", "events/events.js"]) assert.ok(landingRe.test(p), p);
+  for (const p of ["index.html", "docs/images/screens.png", "docs/images/stocks/1-portrait.jpg", "docs/video/lopda-en.mp4", "events/index.html", "events/events.js", "gallery/index.html", "gallery/media/lost-deck/en.mp4", "site/site.js"]) assert.ok(landingRe.test(p), p);
   for (const p of ["runtime/index.html", "registry/apps/a/index.html", "docs/x.md", "sdk/template/index.html"]) assert.ok(!landingRe.test(p), p);
   assert.ok(y.includes("$SITE/pr/$PR/\""), "landing link");
   /* runtime/ gets the runtime link only: the app links open sdk/dev.html, which loads nothing from runtime/ but chip.js */
@@ -254,6 +254,27 @@ test("the Pages workflow publishes the repo without tests, dependencies or CI fi
   assert.ok(y.includes("runtime=$RUNTIME") && y.includes("$SITE/pr/$PR/runtime/"), "runtime link");
   assert.ok(y.includes("lopda-pr-") && !/Do not open `?runtime/i.test(y) && !y.includes("请不要打开"), "no warning about runtime/");
   assert.deepEqual([...y.matchAll(/uses:\s*(\S+)/g)].map((m) => m[1]), ["actions/checkout@v4"], "only actions/checkout");
+});
+
+test("gallery/gallery.js: store apps only, both languages, uses known, every film and still in place", () => {
+  const box = { window: {} };
+  vm.runInNewContext(read("gallery/gallery.js") + "\n" + read("gallery/media.js"), box);
+  const list = box.window.LOPDA_GALLERY, uses = box.window.LOPDA_GALLERY_USES, media = box.window.LOPDA_GALLERY_MEDIA;
+  const ids = new Set(JSON.parse(read("registry/index.json")).apps.map((a) => a.id));
+  assert.ok(Array.isArray(list) && list.length, "LOPDA_GALLERY is a non-empty list");
+  assert.equal(new Set(list.map((e) => e.id)).size, list.length, "no app twice");
+  for (const e of list) {
+    assert.ok(ids.has(e.id), e.id + " is a store app (registry/index.json)");
+    for (const k of ["title", "note"]) assert.ok(e[k] && e[k].en && e[k].zh, e.id + "." + k + " in both languages");
+    for (const u of e.uses || []) assert.ok(uses[u] && uses[u].en && uses[u].zh, e.id + " uses " + u);
+    assert.ok(e.scene && Array.isArray(e.scene.clip) && e.scene.clip.length, e.id + " has a scene to film");
+    for (const lang of ["en", "zh"]) {
+      const m = media[e.id] && media[e.id][lang];
+      assert.ok(m && m.stills >= 1, e.id + " " + lang + " is filmed (node tools/gallery-shots.mjs --only=" + e.id + ")");
+      assert.ok(existsSync(join(ROOT, "gallery/media", e.id, lang + ".mp4")), e.id + " " + lang + ".mp4");
+      for (let n = 1; n <= m.stills; n++) assert.ok(existsSync(join(ROOT, "gallery/media", e.id, lang + "-" + n + ".png")), e.id + " " + lang + "-" + n + ".png");
+    }
+  }
 });
 
 test("events/events.js: both languages everywhere, cards point at real issues, archived events have their pictures", () => {
