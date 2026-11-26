@@ -34,7 +34,7 @@ test("lost-deck: every deck can be finished without a secret, and every card, pi
   for (const D of LD.DECKS) {
     const m = D.map, at = (x, y) => (m[y] && m[y][x]) || "#";
     const start = []; m.forEach((r, y) => { const x = r.indexOf("@"); if (x >= 0) start.push(x, y); });
-    const flood = (cards, secrets) => {
+    const flood = (cards, secrets, ban) => {
       const seen = new Set([start.join()]), q = [start], got = new Set(); let exit = false;
       while (q.length) {
         const [x, y] = q.shift();
@@ -42,13 +42,13 @@ test("lost-deck: every deck can be finished without a secret, and every card, pi
           const nx = x + dx, ny = y + dy, c = at(nx, ny), k = nx + "," + ny;
           if (seen.has(k)) continue;
           if (c === "E") { exit = true; continue; }
-          if (c === "X") { got.add("="); continue; }   /* a switch, thrown from the cell beside it */
+          if (c === "X") { if (ban !== "=") got.add("="); continue; }   /* a switch, thrown from the cell beside it */
           if ("123=".includes(c) && !cards.has(c)) continue;
           if ("#PCWMKT".includes(c) || (c === "S" && !secrets)) continue;
           seen.add(k);
           if ("ikxl".includes(c)) continue;   /* columns, crates, canisters and lamps block the way */
           q.push([nx, ny]);
-          if (c === "u") got.add("1"); if (c === "o") got.add("2"); if (c === "v") got.add("3");
+          const card = { u: "1", o: "2", v: "3" }[c]; if (card && card !== ban) got.add(card);
         }
       }
       return { seen, got, exit };
@@ -56,6 +56,14 @@ test("lost-deck: every deck can be finished without a secret, and every card, pi
     let cards = new Set(), r;
     for (let i = 0; i < 4; i++) { r = flood(cards, false); cards = new Set([...cards, ...r.got]); }
     if (!D.boss) assert.ok(r.exit, `deck ${D.id}: the lift cannot be reached`);
+    /* every card and switch on a deck is needed: without it the lift stays shut, secrets or not */
+    /* (a switch with no shutter, on the dark deck, only brings the lights back) */
+    if (!D.boss) for (const key of r.got) {
+      if (key === "=" && !m.some((row) => row.includes("="))) continue;
+      let held = new Set(), f;
+      for (let i = 0; i < 4; i++) { f = flood(held, true, key); held = new Set([...held, ...f.got]); }
+      assert.ok(!f.exit, `deck ${D.id}: the lift can be reached without "${key}"`);
+    }
     for (let i = 0; i < 4; i++) { r = flood(cards, true); cards = new Set([...cards, ...r.got]); }
     m.forEach((row, y) => [...row].forEach((c, x) => {
       if ("cfsgnaAhHuovGB".includes(c)) assert.ok(r.seen.has(x + "," + y), `deck ${D.id}: "${c}" at ${x},${y} cannot be reached`);
@@ -63,8 +71,8 @@ test("lost-deck: every deck can be finished without a secret, and every card, pi
   }
 });
 
-test("lost-deck: the auto-player clears the early decks inside par", () => {
-  for (const d of [0, 1, 3]) {
+test("lost-deck: the auto-player clears early, shutter and three-card decks inside par", () => {
+  for (const d of [0, 1, 3, 5, 8, 9]) {
     const r = playDeck(d, 7919);
     assert.equal(r.end, "exit", `deck ${d + 1}: ${JSON.stringify(r)}`);
     assert.ok(r.hp > 0 && r.time < LD.DECKS[d].par, `deck ${d + 1}: ${JSON.stringify(r)}`);
