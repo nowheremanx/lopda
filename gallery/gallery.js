@@ -166,12 +166,7 @@ window.LOPDA_GALLERY = [
       /* two moves before the film, two in it: four black stones in all, so the computer cannot have five yet */
       clip: [["tapIn", "#c", 6.5 / 15, 8.5 / 15], ["wait", 1200], ["tapIn", "#c", 8.5 / 15, 8.5 / 15], ["wait", 2200]]
     }
-  }
-];
-
-/* Waiting for a later batch (owner, 2026-11-26: the first batch is five). Their text and scenes are ready: move an
-   entry up into LOPDA_GALLERY and film it. The page and the tool ignore this list. */
-window.LOPDA_GALLERY_NEXT = [
+  },
   {
     id: "sisyphus",
     title: { en: "Push the stone up the hill", zh: "推石上山" },
@@ -205,6 +200,74 @@ window.LOPDA_GALLERY_NEXT = [
     }
   },
   {
+    id: "paper-tower",
+    title: { en: "A tower climb in twelve pages, in ten minutes", zh: "十二页的爬塔，十分钟一局" },
+    note: {
+      en: "Keys, doors, shops and monsters, and every fight is plain arithmetic you can read before you take it. Twelve pages, three keepers, a tight purse: the question is always what to leave behind. A fall folds you back to the page's door, not to the start.",
+      zh: "钥匙、门、商店、怪物，每一场战斗都是摆在眼前的算术，打之前就算得清。十二页，三个守关的，钱永远不够：每一步都在想该放弃什么。倒下了只是折回本页门口，不用从头来。"
+    },
+    uses: ["lo-game", "music", "save", "buttons"],
+    scene: {
+      /* the title (its tower of paper) is the cover; then a new game past the three opening lines: page 1, take the
+         yellow key, walk up to the ink drop in the doorway and fight it */
+      setup: [["wait", 1500], ["cover"], ["key", "x", 80], ["wait", 700], ["key", "x", 80], ["wait", 1400],
+        ["key", "x", 80], ["wait", 450], ["key", "x", 80], ["wait", 450], ["key", "x", 80], ["wait", 450], ["key", "x", 80], ["wait", 450], ["key", "x", 80], ["wait", 450], ["key", "x", 80], ["wait", 450]],
+      clip: [["key", "ArrowRight", 80], ["wait", 260], ["key", "ArrowRight", 80], ["wait", 260], ["key", "ArrowRight", 80], ["wait", 260], ["still"],
+        ["key", "ArrowUp", 80], ["wait", 260], ["key", "ArrowUp", 80], ["wait", 260], ["key", "ArrowUp", 80], ["wait", 260], ["key", "ArrowUp", 80], ["wait", 260], ["key", "x", 80], ["wait", 600], ["key", "x", 80], ["wait", 1600]]
+    }
+  },
+  {
+    id: "rain-station",
+    title: { en: "A rainy night, a late train, and Dad", zh: "雨夜，晚点的车，和爸爸" },
+    note: {
+      en: "A short visual novel: a small station in the rain, the train fifty minutes late, and a father seeing his child off to university. Ten minutes to read, with rain on the roof the whole time. In Chinese and English.",
+      zh: "一篇短短的视觉小说：雨夜的小站，车晚点五十分钟，爸爸送你去上大学。十分钟读完，雨一直下在站台的棚顶上。"
+    },
+    uses: ["lo-game", "music", "ambience", "save", "buttons"],
+    scene: {
+      /* the title (the station in the rain) is the cover; past the chapter card, the first lines of the story */
+      setup: [["wait", 1500], ["cover"], ["key", "x", 80], ["wait", 2000], ["key", "x", 80], ["wait", 600]],
+      clip: [["wait", 1800], ["key", "x", 80], ["wait", 2000], ["still"], ["key", "x", 80], ["wait", 2000], ["key", "x", 80], ["wait", 2000]]
+    }
+  },
+  {
+    id: "klotski",
+    title: { en: "Slide Cao Cao out of Huarong Pass", zh: "让曹操从华容道脱身" },
+    note: {
+      en: "The old sliding-block puzzle: the big block has to reach the gap at the bottom. Every level is open, steps are recorded, and eight short lessons teach the moves the masters use. Stuck? One hint, or a whole demo that hands the board back when it ends.",
+      zh: "老的滑块谜题：大块要挪到底下的出口。所有关卡都开着，记录步数，还有八节小课讲高手的走法。卡住了，可以看一步提示，或者看整段演示，演完把棋盘还给你。"
+    },
+    uses: ["lo-game", "touch", "save", "buttons"],
+    scene: {
+      /* the title picture is the cover; then 横刀立马 (k27, four up from the top of the list, wrapping), played by the
+         game's own demo (START, 演示) */
+      setup: [["wait", 1200], ["cover"], ["key", "x", 80], ["wait", 700],
+        ["key", "ArrowUp", 80], ["wait", 120], ["key", "ArrowUp", 80], ["wait", 120], ["key", "ArrowUp", 80], ["wait", 120], ["key", "ArrowUp", 80], ["wait", 300],
+        ["key", "x", 80], ["wait", 1200],
+        ["key", "Enter", 80], ["wait", 300], ["key", "ArrowDown", 80], ["key", "ArrowDown", 80], ["key", "ArrowDown", 80], ["key", "x", 80], ["wait", 600]],
+      clip: [["wait", 2500], ["still"], ["wait", 2500]]
+    }
+  },
+  {
+    id: "photo-puzzle",
+    title: { en: "Take a photo, slide it back together", zh: "拍一张照片，再一块块拼回来" },
+    note: {
+      en: "The handheld's camera takes a four-tone photo and cuts it into tiles. Or pick one of six built-in pictures. Normal mode for a quiet puzzle, arcade mode against the clock, and a solver that shows you how.",
+      zh: "用掌机的相机拍一张四色照片，切成滑块。也可以从六张内置图片里挑。普通模式慢慢拼，街机模式和时间赛跑，还有一个会演示解法的帮手。"
+    },
+    uses: ["camera", "buttons", "save"],
+    scene: {
+      /* the main screen is the title: the name over a built-in picture that solves itself (the film never uses a camera) */
+      setup: [["wait", 1200], ["cover"], ["wait", 300]],
+      clip: [["wait", 2400], ["still"], ["wait", 2400]]
+    }
+  }
+];
+
+/* Waiting for a later batch (owner, 2026-11-26). Their text and scenes are ready: move an
+   entry up into LOPDA_GALLERY and film it. The page and the tool ignore this list. */
+window.LOPDA_GALLERY_NEXT = [
+  {
     id: "vector-dream",
     title: { en: "A 3D renderer written by hand", zh: "手写的三维渲染器" },
     note: {
@@ -217,21 +280,6 @@ window.LOPDA_GALLERY_NEXT = [
       setup: [["wait", 1500], ["key", "x", 80], ["wait", 1200]],
       clip: [["wait", 1500], ["still"], ["wait", 2600]],
       after: [["key", "x", 80], ["wait", 1500], ["still"], ["key", "x", 80], ["wait", 1500], ["still"], ["key", "z", 80], ["wait", 800], ["still"]]
-    }
-  },
-  {
-    id: "photo-puzzle",
-    title: { en: "Take a photo, slide it back together", zh: "拍一张照片，再一块块拼回来" },
-    note: {
-      en: "The handheld's camera takes a four-tone photo and cuts it into tiles. Or pick one of six built-in pictures. Normal mode for a quiet puzzle, arcade mode against the clock, and a solver that shows you how.",
-      zh: "用掌机的相机拍一张四色照片，切成滑块。也可以从六张内置图片里挑。普通模式慢慢拼，街机模式和时间赛跑，还有一个会演示解法的帮手。"
-    },
-    uses: ["camera", "buttons", "save"],
-    scene: {
-      /* a built-in picture (the film never uses a camera): the picker is the cover, then the tiles slide */
-      setup: [["wait", 1200], ["still"], ["key", "ArrowRight", 80], ["wait", 300], ["key", "x", 80], ["wait", 1000], ["cover"], ["key", "x", 80], ["wait", 1400]],
-      clip: [["key", "ArrowRight", 80], ["wait", 300], ["key", "ArrowUp", 80], ["wait", 300], ["key", "ArrowLeft", 80], ["wait", 300], ["key", "ArrowDown", 80], ["wait", 300], ["still"],
-        ["key", "ArrowRight", 80], ["wait", 300], ["key", "ArrowUp", 80], ["wait", 300], ["key", "ArrowLeft", 80], ["wait", 300], ["key", "ArrowDown", 80], ["wait", 300], ["key", "ArrowRight", 80], ["wait", 400]]
     }
   },
   {
