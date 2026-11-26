@@ -159,13 +159,13 @@ footer{padding-block:32px;color:var(--on-case-dim);font-size:14px;border-top:1px
     v.preload = "none"; v.setAttribute("aria-hidden", "true"); g.appendChild(v);
     v.addEventListener("playing", function () { v.classList.add("on"); });
     s.play = function () { if (reduce) return; if (!v.src) v.src = m.film; var p = v.play(); if (p && p.catch) p.catch(function () {}); };
-    s.stop = function () { if (!v.src) return; v.pause(); };
+    /* back to the cover: the film hides and starts again from the top next time */
+    s.stop = function () { if (!v.src) return; v.pause(); v.classList.remove("on"); try { v.currentTime = 0; } catch (e) {} };
     if (autoplay) setTimeout(s.play, 0);
     return s;
   }
 
   /* ---------- the overview ---------- */
-  var watcher = null;
   function overview() {
     document.title = lang === "zh" ? "Lo-PDA 精选应用" : "Lo-PDA Gallery";
     main.textContent = "";
@@ -174,31 +174,22 @@ footer{padding-block:32px;color:var(--on-case-dim);font-size:14px;border-top:1px
     head.appendChild(el("h1", null, t("head.h")));
     head.appendChild(el("p", "lede", t("head.p")));
     main.appendChild(head);
-    var grid = el("div", "grid"), screens = [];
+    var grid = el("div", "grid");
     LIST.forEach(function (e) {
       if (!REG[e.id]) return;                 /* an app no longer in the store drops out of the gallery too */
       var a = el("a", "item"); a.href = "?app=" + encodeURIComponent(e.id);
-      var s = screen(e.id, false); a.appendChild(s); screens.push(s);
+      var s = screen(e.id, false); a.appendChild(s);
       var n = el("div", "name"); n.appendChild(icon(REG[e.id].icon)); n.appendChild(el("span", null, name(e.id))); a.appendChild(n);
       a.appendChild(el("div", "what", L(e.title)));
-      /* a pointer that hovers plays the film under it; a finger cannot hover, so there the screens on view play */
+      /* the cover is the app's title screen; a pointer that hovers plays the film under it */
       a.addEventListener("mouseenter", function () { if (hover) s.play(); });
       a.addEventListener("mouseleave", function () { if (hover) s.stop(); });
       a.addEventListener("click", function (ev) { if (ev.metaKey || ev.ctrlKey || ev.shiftKey) return; ev.preventDefault(); go(e.id); });
       grid.appendChild(a);
     });
     main.appendChild(grid);
-    if (watcher) watcher.disconnect();
-    if (!hover && "IntersectionObserver" in window) {
-      var seen = new Map();
-      watcher = new IntersectionObserver(function (list) {
-        list.forEach(function (x) { seen.set(x.target, x.intersectionRatio); });
-        /* every screen that is mostly on view plays; the rest rest on their covers. (Only the most visible one played
-           at first, but two cards side by side on a phone are equally visible, so the left one never moved.) */
-        screens.forEach(function (s) { if ((seen.get(s) || 0) >= 0.6) s.play(); else s.stop(); });
-      }, { threshold: [0, 0.6, 0.8, 1] });
-      screens.forEach(function (s) { watcher.observe(s); });
-    }
+    /* a finger cannot hover: on a phone the grid is a shelf of covers, like cartridge boxes (owner, 2026-11-26),
+       and the film plays on the app's own page */
   }
   var hover = window.matchMedia && matchMedia("(hover: hover)").matches;
 
@@ -206,7 +197,6 @@ footer{padding-block:32px;color:var(--on-case-dim);font-size:14px;border-top:1px
   function detail(id) {
     var i = LIST.findIndex(function (e) { return e.id === id; }), e = LIST[i];
     main.textContent = "";
-    if (watcher) { watcher.disconnect(); watcher = null; }
     var back = el("a", "back", "← " + t("back")); back.href = "./";
     back.addEventListener("click", function (ev) { ev.preventDefault(); go(null); });
     main.appendChild(back);

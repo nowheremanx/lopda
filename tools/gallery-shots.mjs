@@ -81,7 +81,10 @@ for (const lang of LANGS) {
     const dir = join(work, e.id + "-" + lang), out = join(ROOT, "gallery/media", e.id);
     await rm(dir, { recursive: true, force: true }); await mkdir(dir, { recursive: true }); await mkdir(out, { recursive: true });
     const [man, html] = await Promise.all([readFile(join(ROOT, "registry/apps", e.id, "manifest.json"), "utf8"), readFile(join(ROOT, "registry/apps", e.id, "index.html"), "utf8")]);
-    await a.evaluate(([man, html]) => { const x = Object.assign({}, JSON.parse(man), { html }); window.LP.upsert("apps", x); window.LP.runApp(x); }, [man, html]);
+    /* scene.kv: the app's saved data for this run only (this browser is thrown away), e.g. tips already seen, so a
+       film shows play and not a first-time hint. It replaces whatever the previous scene left. */
+    await a.evaluate(([man, html, kv]) => { const x = Object.assign({}, JSON.parse(man), { html });
+      LP.S.kv[x.id] = JSON.parse(JSON.stringify(kv || {})); window.LP.upsert("apps", x); window.LP.runApp(x); }, [man, html, e.scene.kv || null]);
     await a.waitForSelector("#v-run:not([hidden])"); await a.waitForTimeout(2000);
     const frameEl = a.locator("#run-frame"), clip = await frameEl.boundingBox();
     const appFrame = () => a.frames().find((f) => f !== a.mainFrame() && f.parentFrame() === a.mainFrame());
@@ -90,6 +93,7 @@ for (const lang of LANGS) {
     const shots = [], marks = [];
     let filming = false;
     const still = async () => { if (filming) marks.push(Date.now() / 1000); else shots.push(await a.screenshot({ clip })); };
+    let cover = null;   /* ["cover"]: the box art, the app's own title screen; it goes first */
     const run = async (steps) => {
       for (const s of steps || []) {
         const [k, x, y, z] = s;
@@ -98,8 +102,26 @@ for (const lang of LANGS) {
         else if (k === "tap") { await a.mouse.click(clip.x + clip.width * x, clip.y + clip.height * y); await a.waitForTimeout(120); }
         else if (k === "tapIn") { const b = await a.frameLocator("#run-frame").locator(x).first().boundingBox();
           await a.mouse.click(b.x + b.width * y, b.y + b.height * z); await a.waitForTimeout(120); }
-        else if (k === "eval") await appFrame().evaluate(x);
+        else if (k === "stroke") {   /* a finger drawing through points given in a size x size grid over an element */
+          const b = await a.frameLocator("#run-frame").locator(x).first().boundingBox(), at = ([px, py]) => [b.x + b.width * px / z, b.y + b.height * py / z];
+          await a.mouse.move(...at(y[0])); await a.mouse.down();
+          for (let i = 1; i < y.length; i++) { const [x0, y0] = y[i - 1], [x1, y1] = y[i], n = Math.max(2, Math.round(Math.hypot(x1 - x0, y1 - y0) / 3));
+            for (let j = 1; j <= n; j++) { await a.mouse.move(...at([x0 + (x1 - x0) * j / n, y0 + (y1 - y0) * j / n])); await a.waitForTimeout(22); } }
+          await a.mouse.up(); await a.waitForTimeout(200);
+        }
+        else if (k === "swipe") {   /* a finger through the elements matching x whose text is each letter of y in turn (a word wheel) */
+          const items = a.frameLocator("#run-frame").locator(x), n = await items.count(), boxes = [], used = new Set();
+          for (const ch of y) { for (let i = 0; i < n; i++) { if (used.has(i)) continue;
+            if ((await items.nth(i).textContent()).trim().toLowerCase() === ch.toLowerCase()) { used.add(i); boxes.push(await items.nth(i).boundingBox()); break; } } }
+          const pts = boxes.map((b) => [b.x + b.width / 2, b.y + b.height / 2]);
+          if (pts.length) { await a.mouse.move(...pts[0]); await a.mouse.down();
+            for (let i = 1; i < pts.length; i++) for (let j = 1; j <= 8; j++) { await a.mouse.move(pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * j / 8, pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * j / 8); await a.waitForTimeout(18); }
+            await a.waitForTimeout(80); await a.mouse.up(); await a.waitForTimeout(250); }
+        }
+        /* code that returns a promise (a scene pushed, say) is not waited for: only the call itself */
+        else if (k === "eval") await appFrame().evaluate((c) => { (0, eval)(c); }, x);
         else if (k === "still") await still();
+        else if (k === "cover") cover = await a.screenshot({ clip });
         else throw new Error(e.id + ": unknown step " + k);
       }
     };
@@ -129,7 +151,7 @@ for (const lang of LANGS) {
     const fromClip = [];
     for (const m of marks) fromClip.push(await readFile(frames.reduce((b, x) => Math.abs(x.t - m) < Math.abs(b.t - m) ? x : b, frames[0]).f));
     const stills = [];
-    for (const buf of fromClip.concat(shots)) { const f = join(out, lang + "-" + (stills.length + 1) + ".png"); await writeFile(f, buf); stills.push(f); }
+    for (const buf of (cover ? [cover] : []).concat(fromClip, shots)) { const f = join(out, lang + "-" + (stills.length + 1) + ".png"); await writeFile(f, buf); stills.push(f); }
     /* old stills past the new count would linger: remove them */
     for (let n = stills.length + 1; n < 20; n++) await rm(join(out, lang + "-" + n + ".png"), { force: true });
     (MEDIA[e.id] = MEDIA[e.id] || {})[lang] = { stills: stills.length };
