@@ -176,8 +176,8 @@
         g.text(rows[i][0], 10, 28 + i * 15);
         g.text(rows[i][1], 150, 28 + i * 15, { align: "right", color: 1 });
       }
-      g.text(t("走向门就会开。", "Doors open as you walk in."), 80, 136, { align: "center", color: 1 });
-      g.text(t("A 返回", "A back"), 80, 148, { align: "center", color: 1 });
+      g.text(t("走向门就会开。", "Doors open as you walk in."), 80, 132, { align: "center", color: 1 });
+      g.text(t("A 返回", "A back"), 80, 146, { align: "center", color: 1 });
     }
   });
 
@@ -515,7 +515,7 @@
         var y = 46 + i * 22;
         g.text(rows[i][0], 12, y, { color: 2 });
         g.text(rows[i][1], 108, y, { color: 3, align: "right" });
-        if (rows[i][2]) g.text(rows[i][2], 108, y + 11, { color: 1, align: "right" });
+        if (rows[i][2]) g.text(rows[i][2], 108, y + 11, { color: 2, align: "right" });
         if (this.t > 1.3 + i * 0.25) { if (rows[i][3]) g.rect(132, y + 2, 9, 9, 3); else g.frame(132, y + 2, 9, 9, 2); }
       }
       if (r.newBest && this.t > 2) g.text(t("新纪录", "New best"), 80, 112, { color: 3, align: "center" });
@@ -551,8 +551,8 @@
       drawStars(1 / 60, 0.6);
       var lines = LD.ENDING[game.lang] || LD.ENDING.zh, y = 20;
       var shown = Math.floor(this.t * 0.7);
-      for (var i = 0; i < Math.min(lines.length, shown + 1); i++) { y += g.text(lines[i], 80, y, { color: i === shown ? 2 : 3, align: "center", width: 150 }) + 4; }
-      if (this.t > 2) g.text(t("A 返回", "A back"), 80, 146, { color: 1, align: "center" });
+      for (var i = 0; i < Math.min(lines.length, shown + 1); i++) { y += g.text(lines[i], 5, y, { color: i === shown ? 2 : 3, align: "center", width: 150 }) + 4; }
+      if (this.t > 2) g.text(t("A 返回", "A back"), 80, 146, { color: 2, align: "center" });
     }
   });
 
