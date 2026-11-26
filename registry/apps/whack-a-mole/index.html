@@ -12,12 +12,19 @@
   #hud span { border: 2px solid #1f2a14; background: #7d8a58; padding: 2px 6px; white-space: nowrap; }
   #stage { position: relative; }
   canvas { display: block; image-rendering: pixelated; image-rendering: crisp-edges; border: 3px solid #1f2a14; touch-action: none; }
-  #ov { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: #a3ad7e; border: 3px solid #1f2a14; text-align: center; padding: 12px; box-sizing: border-box; }
-  #ov h1 { margin: 0; font-size: 26px; letter-spacing: 3px; }
-  #ov p { margin: 0; font-size: 14px; line-height: 1.55; }
-  #ov canvas { border: 0; }
-  #btns { display: flex; gap: 8px; width: 100%; max-width: 240px; }
-  #btns button { flex: 1; min-height: 44px; padding: 8px 6px; font-size: 15px; }
+  #ov { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: #a3ad7e; border: 3px solid #1f2a14; text-align: center; padding: 10px; box-sizing: border-box; overflow-y: auto; }
+  #ov.title-view { gap: 4px; }
+  #ov h1 { margin: 0; font-size: 26px; letter-spacing: 2px; }
+  #op { margin: 0; font-size: 15px; line-height: 1.45; white-space: pre-line; }
+  #title-slot { width: 160px; height: 160px; flex: none; display: flex; align-items: center; justify-content: center; font-size: 30px; font-weight: bold; letter-spacing: 3px; }
+  #btns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; width: 100%; max-width: 280px; flex: none; }
+  #btns button { min-height: 44px; padding: 8px 6px; font-size: 15px; }
+  #btns button.wide { grid-column: 1 / -1; }
+  #btns button.locked { background: #4a5a32; color: #a3ad7e; }
+  #btns button.selected { outline: 3px solid #1f2a14; outline-offset: 2px; }
+  #wipe { position: absolute; z-index: 4; inset: 0; pointer-events: none; background: #1f2a14; transform: translateX(-105%); }
+  #wipe.go { animation: wipe 300ms linear; }
+  @keyframes wipe { 0% { transform: translateX(-105%); } 100% { transform: translateX(105%); } }
   #bests { font-size: 13px; }
   button { font: inherit; font-weight: bold; min-height: 44px; padding: 8px 20px; background: #1f2a14; color: #a3ad7e; border: 0; box-shadow: 3px 3px 0 #4a5a32; }
   .hide { display: none !important; }
@@ -29,12 +36,13 @@
   <div id="stage">
     <canvas id="c" width="120" height="150"></canvas>
     <div id="ov">
-      <canvas id="logo" width="32" height="32"></canvas>
+      <div id="title-slot">打地鼠</div>
       <h1 id="ot">打地鼠</h1>
       <p id="op"></p>
       <div id="btns"></div>
       <p id="bests"></p>
     </div>
+    <div id="wipe"></div>
   </div>
 </div>
 <script>
@@ -46,19 +54,32 @@
   var LANG = typeof PAD !== "undefined" && PAD.lang === "en" ? "en" : "zh";
   var TXT = {
     zh: { title: "打地鼠", score: "分 {n}", combo: "连 {n}", time: "{n} 秒", best: "最高 {n}", bestTime: "最长 {n}",
-      menu: "60 秒冲分，或无尽生存。<br>无尽每砸中一只加 1 秒，时间归零或踩雷结束。<br>头盔两下，冒火花的雷别碰。",
-      mode60: "60 秒", modeEndless: "无尽", bests: "60 秒 {s} · 无尽 {t}", noRecords: "还没有记录",
+      menu: "头盔砸两下，雷别碰。", mode60: "60 秒", modeEndless: "无尽", modeLevels: "闯关",
+      bests: "60 秒 {s} · 无尽 {t}", noRecords: "还没有记录",
       again: "再来一局", modes: "选模式", record: "新纪录", over: "时间到", boom: "踩雷",
       got: "砸中 {n} 分。", endlessGot: "坚持 {t}，砸中 {s} 分。",
       result: "命中 {h}/{t} · 最高连击 {c}<br>踩雷 {m} · 评价 {r}",
-      bestline: "<br>最高 {n} 分。", bestlineEndless: "<br>最长 {t} · 最高 {s}" },
+      bestline: "<br>最高 {n} 分。", bestlineEndless: "<br>最长 {t} · 最高 {s}",
+      levelTitle: "第 {n} 关", levelTarget: "目标 {n} 分", levelHint: "普通地鼠，砸就对了",
+      levelList: "关卡", back: "返回", next: "下一关", levels: "关卡", stars: "星",
+      levelResult: "得分 {s} · {n} 星", newStars: "新纪录：星数增加", levelDone: "过关", levelAgain: "再来",
+      locked: "未解锁", thiefHint: "小偷没砸到会换洞跑", helmetHint: "戴头盔的要砸两下",
+      goldHint: "金地鼠：快，+3", mineHint: "冒火花的雷别碰", allHint: "全部来了，更快",
+      levelHints: ["普通地鼠，砸就对了", "", "戴头盔的要砸两下", "", "金地鼠：快，+3", "", "小偷没砸到会换洞跑", "冒火花的雷别碰", "", "全部来了，更快"] },
     en: { title: "MOLE BOP", score: "PTS {n}", combo: "CMB {n}", time: "{n} S", best: "TOP {n}", bestTime: "BEST {n}",
-      menu: "60s score attack, or endless survival.<br>Endless: each mole adds 1s; time out or hit a mine and it's over.<br>Helmets take two hits.",
-      mode60: "60s", modeEndless: "ENDLESS", bests: "60s {s} · ENDLESS {t}", noRecords: "No records yet",
+      menu: "Helmets take two hits. Avoid the mines.", mode60: "60s", modeEndless: "ENDLESS", modeLevels: "LEVELS",
+      bests: "60s {s} · ENDLESS {t}", noRecords: "No records yet",
       again: "AGAIN", modes: "MODES", record: "NEW RECORD", over: "TIME UP", boom: "BOOM",
       got: "{n} points.", endlessGot: "Lasted {t}, {s} points.",
       result: "{h}/{t} hits · best combo {c}<br>mines {m} · rank {r}",
-      bestline: "<br>Best: {n}.", bestlineEndless: "<br>Best: {t} · {s} pts" }
+      bestline: "<br>Best: {n}.", bestlineEndless: "<br>Best: {t} · {s} pts",
+      levelTitle: "LEVEL {n}", levelTarget: "TARGET {n} PTS", levelHint: "Bonk the plain moles.",
+      levelList: "LEVELS", back: "BACK", next: "NEXT", levels: "LEVELS", stars: "STARS",
+      levelResult: "SCORE {s} · {n} STARS", newStars: "NEW BEST: MORE STARS", levelDone: "CLEAR",
+      levelAgain: "AGAIN", locked: "LOCKED", thiefHint: "Missed thieves run to a new hole",
+      helmetHint: "Helmets take two hits", goldHint: "Gold moles are fast: +3",
+      mineHint: "Avoid the sparking mines", allHint: "Everything, faster",
+      levelHints: ["Bonk the plain moles.", "", "Helmets take two hits", "", "Gold moles: fast, +3", "", "Missed thieves run to a new hole", "Avoid the sparking mines", "", "Everything, faster"] }
   }[LANG];
   function tx(key, n) { return TXT[key].replace("{n}", n); }
   function tf(key, o) { return TXT[key].replace(/\{(\w+)\}/g, function (_, k) { return o[k]; }); }
@@ -98,7 +119,21 @@
   var playing = false, score = 0, combo = 0, endAt = 0, nextSpawn = 0, nextMine = 0, lastSec = -1, startAt = 0;
   var hits = 0, taps = 0, minesHit = 0, maxCombo = 0, shakeUntil = 0;
   var MODE = "60", dying = false, endedAt = 0, best60 = 0, bestEndless = 0, bestEndlessTime = 0;
-  var RUN_MS = 60000, ENDLESS_START_MS = 15000;
+  var RUN_MS = 60000, ENDLESS_START_MS = 15000, LEVEL_MS = 30000;
+  var LEVELS = [
+    { target: 20, cap: 2, helmet: false, gold: false, thief: false, mines: false, p0: 0, p1: 0.10, hint: { zh: "普通地鼠，砸就对了", en: "Bonk the plain moles." } },
+    { target: 22, cap: 3, helmet: false, gold: false, thief: false, mines: false, p0: 0.10, p1: 0.25, hint: null },
+    { target: 23, cap: 3, helmet: true, gold: false, thief: false, mines: false, p0: 0.15, p1: 0.30, hint: { zh: "戴头盔的要砸两下", en: "Helmets take two hits" } },
+    { target: 26, cap: 3, helmet: true, gold: false, thief: false, mines: false, p0: 0.30, p1: 0.45, hint: null },
+    { target: 30, cap: 3, helmet: true, gold: true, thief: false, mines: false, p0: 0.35, p1: 0.50, hint: { zh: "金地鼠：快，+3", en: "Gold moles: fast, +3" } },
+    { target: 33, cap: 4, helmet: true, gold: true, thief: false, mines: false, p0: 0.45, p1: 0.60, hint: null },
+    { target: 35, cap: 3, helmet: true, gold: true, thief: true, mines: false, p0: 0.50, p1: 0.65, hint: { zh: "小偷没砸到会换洞跑", en: "Missed thieves run to a new hole" } },
+    { target: 45, cap: 4, helmet: true, gold: true, thief: true, mines: true, p0: 0.55, p1: 0.75, hint: { zh: "冒火花的雷别碰", en: "Avoid the sparking mines" } },
+    { target: 55, cap: 4, helmet: true, gold: true, thief: true, mines: true, p0: 0.70, p1: 0.90, hint: null },
+    { target: 65, cap: 4, helmet: true, gold: true, thief: true, mines: true, p0: 0.85, p1: 1.00, hint: { zh: "全部来了，更快", en: "Everything, faster" } }
+  ];
+  var levelNo = 0, stars = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], levelSaveProtected = false;
+  var screen = "title", transitionBusy = false, thiefRuns = 0;
   /* the dirt at a hole twitches this long before the mole rises; the spawn is decided this much
      earlier, so the rise itself still happens at the moment it always did */
   var TELL_MS = 300;
@@ -141,6 +176,8 @@
   function setClock(left) { document.getElementById("tm").textContent = clockText(left); }
   function setBest() {
     if (MODE === "60") $t("bs", "best", best60);
+    else if (MODE === "level") document.getElementById("bs").textContent =
+      (LANG === "zh" ? "目标 " : "TGT ") + LEVELS[levelNo - 1].target;
     else $t("bs", "bestTime", bestEndlessTime ? fmtTime(bestEndlessTime) : "--");
   }
   function setButtons(items) {
@@ -149,7 +186,13 @@
     items.forEach(function (it) {
       var b = document.createElement("button");
       b.type = "button"; b.textContent = it.label;
-      b.addEventListener("click", it.fn);
+      if (it.wide) b.className = "wide";
+      if (it.locked) b.className += (b.className ? " " : "") + "locked";
+      b.addEventListener("click", function () {
+        if (transitionBusy) return;
+        if (it.locked) { PAD.sfx("err"); return; }
+        PAD.sfx("tap"); it.fn();
+      });
       box.appendChild(b);
     });
   }
@@ -161,19 +204,75 @@
       t: bestEndlessTime ? fmtTime(bestEndlessTime) : "--"
     });
   }
-  function showMenu() {
-    playing = false; dying = false; MODE = "60";
-    $t("ot", "title");
-    document.getElementById("op").innerHTML = TXT.menu;
+  function starsFor(n, target) { return n >= Math.ceil(target * 1.4) ? 3 : n >= Math.ceil(target * 1.2) ? 2 : n >= target ? 1 : 0; }
+  function transition(fn) {
+    if (transitionBusy) return;
+    transitionBusy = true;
+    fn();
+    var wipe = document.getElementById("wipe");
+    wipe.classList.remove("go");
+    void wipe.offsetWidth;
+    wipe.classList.add("go");
+    setTimeout(function () { wipe.classList.remove("go"); transitionBusy = false; }, 300);
+  }
+  function labelStars(n) {
+    var s = "";
+    for (var i = 0; i < 3; i++) s += i < n ? "*" : "-";
+    return s;
+  }
+  function showTitle() {
+    playing = false; dying = false; MODE = "60"; screen = "title";
+    document.getElementById("ot").classList.add("hide");
+    document.getElementById("op").classList.add("hide");
+    document.getElementById("ov").classList.add("title-view");
+    document.getElementById("title-slot").classList.remove("hide");
+    document.getElementById("title-slot").textContent = TXT.title;
     document.getElementById("bests").classList.remove("hide");
     showBests(); setBest();
     setButtons([
-      { label: TXT.mode60, fn: function () { start("60"); } },
-      { label: TXT.modeEndless, fn: function () { start("endless"); } }
+      { label: TXT.modeLevels, fn: function () { transition(showLevels); } },
+      { label: TXT.mode60, fn: function () { transition(function () { start("60"); }); } },
+      { label: TXT.modeEndless, fn: function () { transition(function () { start("endless"); }); }, wide: true }
     ]);
     document.getElementById("ov").classList.remove("hide");
     $t("sc", "score", 0); showCombo(); setClock(60);
   }
+  function showLevels() {
+    playing = false; dying = false; screen = "levels";
+    document.getElementById("ov").classList.remove("title-view");
+    document.getElementById("ot").classList.remove("hide");
+    document.getElementById("op").classList.remove("hide");
+    document.getElementById("title-slot").classList.add("hide");
+    $t("ot", "levelList"); document.getElementById("op").textContent = "";
+    document.getElementById("bests").classList.add("hide");
+    var items = LEVELS.map(function (_, i) {
+      var open = i === 0 || stars[i - 1] > 0;
+      return { label: (i + 1) + "  " + labelStars(stars[i]), locked: !open,
+        fn: function () { levelNo = i + 1; transition(showLevelCard); } };
+    });
+    items.push({ label: TXT.back, fn: function () { transition(showTitle); }, wide: true });
+    setButtons(items);
+    document.getElementById("ov").classList.remove("hide");
+  }
+  function refreshLevelList() { if (screen === "levels") showLevels(); }
+  function showLevelCard() {
+    playing = false; dying = false; screen = "card";
+    document.getElementById("ov").classList.remove("title-view");
+    document.getElementById("ot").classList.remove("hide");
+    document.getElementById("op").classList.remove("hide");
+    var data = LEVELS[levelNo - 1];
+    document.getElementById("title-slot").classList.add("hide");
+    document.getElementById("ot").textContent = tf("levelTitle", { n: levelNo });
+    document.getElementById("op").textContent = tf("levelTarget", { n: data.target }) +
+      (data.hint ? "\n" + data.hint[LANG] : "");
+    document.getElementById("bests").classList.add("hide");
+    setButtons([
+      { label: LANG === "zh" ? "开始" : "START", fn: function () { transition(function () { start("level"); }); }, wide: true },
+      { label: TXT.back, fn: function () { transition(showLevels); }, wide: true }
+    ]);
+    document.getElementById("ov").classList.remove("hide");
+  }
+  function showMenu() { transition(showTitle); }
 
   /* the triangle blip climbs with the combo; older runtimes get the named sounds */
   function hitSound(add) {
@@ -266,6 +365,7 @@
         } else {
           blit(h.s === "hit" ? SP.dizzy : SP.mole, cx - 16, top - 2);
           if (h.helmet && h.s !== "hit") blit(SP.helmet, cx - 16, top - 2);
+          if (h.thief && h.s !== "hit") { g.fillStyle = DARK; g.fillRect(cx - 8, top + 13, 16, 2); }
           if (h.gold && h.s !== "hit") {
             blit(SP.crown, cx - 8, top - 8);
             if (Math.floor(now / 150) % 2) blit(SP.spark, cx + 8, top - 6, 1);
@@ -281,6 +381,18 @@
           }
         }
       }
+    });
+    holes.forEach(function (h) {
+      if (h.s !== "run") return;
+      var from = holes[h.runFrom], to = holes[h.runTo], q = Math.min(1, (now - h.t) / 250);
+      var x1 = from.x + 20, y1 = from.y + 20, x2 = to.x + 20, y2 = to.y + 20;
+      g.fillStyle = DARK;
+      for (var d = 0; d < 5; d++) {
+        var u = Math.min(1, q + (d - 2) * 0.07);
+        g.fillRect(Math.round(x1 + (x2 - x1) * u), Math.round(y1 + (y2 - y1) * u), 3, 2);
+      }
+      blit(SP.mole, x1 + (x2 - x1) * q - 16, y1 + (y2 - y1) * q - 16);
+      g.fillStyle = DARK; g.fillRect(Math.round(x1 + (x2 - x1) * q - 8), Math.round(y1 + (y2 - y1) * q - 3), 16, 2);
     });
     hammers = hammers.filter(function (m) { return now - m.t < 260; });
     hammers.forEach(function (m) {
@@ -309,23 +421,32 @@
   }
 
   /* now: when the dirt starts to twitch; at: when the mole would have risen without the tell */
-  function spawn(now, at) {
-    var p = Math.min(1, (at - startAt) / RUN_MS);
-    var cap = p < 0.33 ? 3 : 4;
-    var up = holes.filter(function (h) { return h.kind === "mole" && h.s !== "down"; }).length;
+  function profileAt(at) {
+    if (MODE !== "level") return Math.min(1, (at - startAt) / RUN_MS);
+    var data = LEVELS[levelNo - 1], progress = Math.max(0, Math.min(1, (at - startAt) / LEVEL_MS));
+    return data.p0 + (data.p1 - data.p0) * progress;
+  }
+  function spawn(now, at, p) {
+    var data = MODE === "level" ? LEVELS[levelNo - 1] : null;
+    var cap = data ? data.cap : (p < 0.33 ? 3 : 4);
+    var up = holes.filter(function (h) { return h.kind === "mole" && h.s !== "down" && h.s !== "runTarget"; }).length;
     if (up >= cap) return;
     var free = holes.filter(function (h) { return h.s === "down"; });
     if (!free.length) return;
     var h = free[Math.floor(Math.random() * free.length)];
-    h.kind = "mole"; h.helmet = false; h.gold = false;
+    h.kind = "mole"; h.helmet = false; h.gold = false; h.thief = false; h.escaped = false; h.runStay = 0;
     h.s = at > now ? "tell" : "rise"; h.t = now; h.riseAt = at;
     h.stay = 380 + 520 * (1 - p) + Math.random() * 140;
-    var goldChance = at - startAt > 15000 ? 0.06 + 0.04 * p : 0;
+    var goldChance = data ? (data.gold ? 0.06 + 0.04 * p : 0) : (at - startAt > 15000 ? 0.06 + 0.04 * p : 0);
     if (Math.random() < goldChance) { h.gold = true; h.stay *= 0.65; }
-    else h.helmet = at - startAt > 8000 && Math.random() < 0.22;
+    else h.helmet = data ? (data.helmet && Math.random() < 0.22) : (at - startAt > 8000 && Math.random() < 0.22);
+    if (data && data.thief && Math.random() < 0.18) {
+      h.thief = true; h.runStay = h.stay; h.stay *= 0.7;
+    }
   }
 
   function spawnMine(now, at) {
+    if (MODE === "level" && !LEVELS[levelNo - 1].mines) return;
     if (holes.some(function (h) { return h.kind === "mine" && h.s !== "down"; })) return;
     var free = holes.filter(function (h) { return h.s === "down" && now - h.lastTap > 300; });
     if (!free.length) return;
@@ -335,10 +456,24 @@
     if (h.s === "rise") fuseSound();
   }
 
-  function step(now) {
+  function beginThiefRun(h, fromIndex, now) {
+    var free = holes.map(function (hole, i) { return hole.s === "down" && i !== fromIndex ? i : -1; }).filter(function (i) { return i >= 0; });
+    if (!free.length) { h.s = "down"; return; }
+    h.runTarget = free[Math.floor(Math.random() * free.length)];
+    holes[h.runTarget].s = "runTarget";
+    h.runFrom = fromIndex; h.runTo = h.runTarget; h.s = "run"; h.t = now;
+    thiefRuns++;
+  }
+  function step(now, p) {
     holes.forEach(function (h) {
       var upMs = h.kind === "mine" ? 200 : 120;
-      if (h.s === "tell" && now >= h.riseAt) {
+      if (h.s === "run" && now - h.t >= 250) {
+        var dest = holes[h.runTarget], source = h;
+        dest.kind = "mole"; dest.helmet = source.helmet; dest.gold = source.gold; dest.thief = true;
+        dest.escaped = true; dest.runStay = source.runStay; dest.stay = source.runStay;
+        dest.s = "rise"; dest.t = now; dest.riseAt = now; dest.lastTap = source.lastTap;
+        source.s = "down"; source.thief = false;
+      } else if (h.s === "tell" && now >= h.riseAt) {
         h.s = "rise"; h.t = h.riseAt;
         if (h.kind === "mine") fuseSound();
       }
@@ -347,7 +482,10 @@
         h.s = "sink"; h.t = now;
         if (h.kind === "mole") { combo = 0; showCombo(); }
       }
-      else if (h.s === "sink" && now - h.t >= upMs) { h.s = "down"; }
+      else if (h.s === "sink" && now - h.t >= upMs) {
+        if (h.thief && !h.escaped) beginThiefRun(h, holes.indexOf(h), now);
+        else h.s = "down";
+      }
       else if (h.s === "hit" && now - h.t >= 420) { h.s = "down"; }
     });
     if (dying) {
@@ -357,12 +495,12 @@
     /* each spawn is decided TELL_MS early, so the dirt can twitch first; the rise keeps the old
        moment, and the next one is counted from that same moment as before */
     if (now >= nextSpawn - TELL_MS) {
-      var at = Math.max(nextSpawn, now), ps = Math.min(1, (at - startAt) / RUN_MS);
-      spawn(now, at);
+      var at = Math.max(nextSpawn, now), ps = at === now ? p : profileAt(at);
+      spawn(now, at, ps);
       nextSpawn = at + 300 + 620 * (1 - ps) + Math.random() * 140;
     }
     if (now >= nextMine - TELL_MS) {
-      var atMine = Math.max(nextMine, now), pm = Math.min(1, (atMine - startAt) / RUN_MS);
+      var atMine = Math.max(nextMine, now), pm = atMine === now ? p : profileAt(atMine);
       spawnMine(now, atMine);
       nextMine = atMine + 2600 + 1400 * (1 - pm) + Math.random() * 600;
     }
@@ -399,7 +537,7 @@
       if (MODE === "endless") endAt += h.gold ? 3000 : 1000;
       if (h.helmet) { h.helmet = false; h.stay += 300; PAD.sfx("hit"); m.hit = false; m.helm = true; return; }
       combo++; if (combo > maxCombo) maxCombo = combo;
-      var add = h.gold ? 3 : (combo % 5 === 0 ? 2 : 1);
+      var add = h.thief && h.escaped ? 3 : (h.gold ? 3 : (combo % 5 === 0 ? 2 : 1));
       score += add; h.s = "hit"; h.t = now;
       pops.push({ x: h.x + 18, y: h.y + 2, n: add, t: now });
       hitSound(add);
@@ -409,26 +547,52 @@
   }
 
   function start(mode) {
-    MODE = mode === "endless" ? "endless" : "60";
+    MODE = mode === "endless" ? "endless" : (mode === "level" ? "level" : "60");
+    screen = "play";
     var now = performance.now();
     score = 0; combo = 0; hits = 0; taps = 0; minesHit = 0; maxCombo = 0; shakeUntil = 0; dying = false; endedAt = 0;
     startAt = now;
-    endAt = now + (MODE === "60" ? RUN_MS : ENDLESS_START_MS);
-    nextSpawn = now + 400; nextMine = now + 8000; lastSec = -1;
-    holes.forEach(function (h) { h.s = "down"; h.riseAt = 0; h.helmet = false; h.gold = false; h.kind = "mole"; h.lastTap = 0; h.scorch = false; });
+    endAt = now + (MODE === "60" ? RUN_MS : MODE === "level" ? LEVEL_MS : ENDLESS_START_MS);
+    nextSpawn = now + 400; nextMine = now + (MODE === "level" ? 2500 : 8000); lastSec = -1; thiefRuns = 0;
+    holes.forEach(function (h) {
+      h.s = "down"; h.riseAt = 0; h.helmet = false; h.gold = false; h.kind = "mole";
+      h.lastTap = 0; h.scorch = false; h.thief = false; h.escaped = false; h.runStay = 0;
+    });
     hammers = []; pops = [];
     $t("sc", "score", 0); showCombo(); setClock((endAt - now) / 1000); setBest();
     document.getElementById("bests").classList.add("hide");
+    document.getElementById("title-slot").classList.add("hide");
+    document.getElementById("ov").classList.remove("title-view");
+    document.getElementById("ot").classList.remove("hide");
+    document.getElementById("op").classList.remove("hide");
     document.getElementById("ov").classList.add("hide");
     playing = true; PAD.sfx("ok");
   }
-  function finish(reason) {
+  function finish(reason) { transition(function () { finishScreen(reason); }); }
+  function finishScreen(reason) {
     if (!playing) return;
     playing = false; dying = false;
     var endNow = endedAt || performance.now();
     var elapsed = Math.max(0, Math.round((endNow - startAt) / 1000));
     var record;
-    if (MODE === "60") {
+    if (MODE === "level") {
+      screen = "tally";
+      var data = LEVELS[levelNo - 1], earned = starsFor(score, data.target), old = stars[levelNo - 1];
+      record = earned > old;
+      if (!levelSaveProtected && record) {
+        stars[levelNo - 1] = earned;
+        PAD.save("levels", { v: 1, stars: stars.slice() });
+      }
+      document.getElementById("op").textContent = tf("levelResult", { s: score, n: earned }) +
+        (record ? "\n" + TXT.newStars : "");
+      document.getElementById("ot").textContent = earned ? TXT.levelDone : TXT.over;
+      var results = [];
+      if (stars[levelNo - 1] >= 1 && levelNo < 10) results.push({ label: TXT.next, fn: function () { levelNo++; transition(showLevelCard); } });
+      results.push({ label: TXT.levelAgain, fn: function () { transition(function () { start("level"); }); } });
+      results.push({ label: TXT.levels, fn: function () { transition(showLevels); }, wide: true });
+      setButtons(results);
+    } else if (MODE === "60") {
+      screen = "tally";
       record = score > best60;
       if (record) { best60 = score; PAD.save("best60", best60); }
       setBest();
@@ -437,6 +601,7 @@
         (record || !best60 ? "" : tx("bestline", best60));
       $t("ot", record ? "record" : "over");
     } else {
+      screen = "tally";
       var recScore = score > bestEndless, recTime = elapsed > bestEndlessTime && score > 0;
       record = recScore || recTime;
       if (recScore) { bestEndless = score; PAD.save("bestEndless", bestEndless); }
@@ -450,8 +615,8 @@
     $t("sc", "score", score);
     $t("cb", "combo", 0); setClock(0);
     document.getElementById("bests").classList.add("hide");
-    setButtons([
-      { label: TXT.again, fn: function () { start(MODE); } },
+    if (MODE !== "level") setButtons([
+      { label: TXT.again, fn: function () { transition(function () { start(MODE); }); } },
       { label: TXT.modes, fn: showMenu }
     ]);
     document.getElementById("ov").classList.remove("hide");
@@ -459,7 +624,7 @@
   }
 
   function loop(now) {
-    if (playing) step(now);
+    if (playing) step(now, profileAt(now));
     draw(now);
     requestAnimationFrame(loop);
   }
@@ -469,7 +634,6 @@
     var aw = st.clientWidth - 22, ah = st.clientHeight - hud.offsetHeight - 30;
     var k = Math.min(aw / W, ah / H); if (k >= 2) k = Math.floor(k); k = Math.max(1, k);
     cv.style.width = Math.round(W * k) + "px"; cv.style.height = Math.round(H * k) + "px";
-    var lg = document.getElementById("logo"); lg.style.width = lg.style.height = Math.round(24 * Math.max(2, Math.floor(k))) + "px";
   }
 
   cv.addEventListener("pointerdown", function (e) {
@@ -483,21 +647,30 @@
      the game never reads it, and the copy it returns cannot change anything */
   window.__mole = function () {
     return {
-      playing: playing, mode: MODE, score: score, combo: combo,
+      playing: playing, mode: MODE, level: levelNo, screen: screen, score: score, combo: combo,
+      stars: stars.slice(), starsFor: starsFor, thiefRuns: thiefRuns,
       holes: holes.map(function (h) {
-        return { s: h.s, kind: h.kind, helmet: h.helmet, gold: h.gold,
+        return { s: h.s, kind: h.kind, helmet: h.helmet, gold: h.gold, thief: !!h.thief, escaped: !!h.escaped, runTarget: h.runTarget,
           tellLeft: h.s === "tell" ? Math.max(0, h.riseAt - performance.now()) : 0 };
       })
     };
   };
 
   $t("sc", "score", 0); $t("cb", "combo", 0); $t("bs", "best", 0); $t("ot", "title");
-  var lg = document.getElementById("logo").getContext("2d"); lg.imageSmoothingEnabled = false;
-  lg.drawImage(SP.mole, 0, 8); lg.drawImage(SP.mine, 16, 8);
+  document.getElementById("title-slot").textContent = TXT.title;
   PAD.load("best60").then(function (v) { best60 = +v || 0; showBests(); setBest(); });
   PAD.load("bestEndless").then(function (v) { bestEndless = +v || 0; });
   PAD.load("bestEndlessTime").then(function (v) { bestEndlessTime = +v || 0; showBests(); setBest(); });
-  showMenu();
+  PAD.load("levels").then(function (v) {
+    if (v && typeof v === "object" && +v.v > 1) {
+      levelSaveProtected = true; stars = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; refreshLevelList(); return;
+    }
+    var valid = v && v.v === 1 && Array.isArray(v.stars) && v.stars.length === 10 &&
+      v.stars.every(function (n) { return typeof n === "number" && n % 1 === 0 && n >= 0 && n <= 3; });
+    stars = valid ? v.stars.slice() : [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    refreshLevelList();
+  }, function () { stars = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; refreshLevelList(); });
+  showTitle();
   addEventListener("resize", fit); fit();
   requestAnimationFrame(loop);
 })();
