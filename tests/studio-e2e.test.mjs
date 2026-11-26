@@ -4579,3 +4579,38 @@ test("studio: score page tray imports, reorders and sends images down the score 
   assert.ok(result.left[1] < 50, "the former first (black-left) page is now second");
   assert.deepEqual(errors, []);
 });
+
+test("studio: score notes go to the AI with the photos, and what they changed leads the result", { skip, timeout: 90000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await p.evaluate(() => {
+    LP.ai = {
+      on: () => true,
+      line: () => ({ id: "l1", name: "Test", provider: "openrouter", vision: true }),
+      err: () => "test error",
+      ask: (o) => {
+        const user = [...o.messages].reverse().find((m) => m.role === "user");
+        window.__scoreText = user.content[0].text;
+        return Promise.resolve(JSON.stringify({ title: "Test", key: "C", capo: 3, meter: "4/4", bpm: 96, accomp: "arpeggio", pick: "R5838583",
+          bars: [{ chords: ["C"], beats: ["1", "1", "1", "1"] }] }));
+      },
+    };
+  });
+  await p.click("#studio-menu");
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "让 AI 改" }).click();
+  await p.locator("#studio-sheet .st-sheet-row button", { hasText: "读谱" }).click();
+  await p.setInputFiles("#studio-score-import", [
+    { name: "page.svg", mimeType: "image/svg+xml", buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50"><rect width="100" height="50" fill="white"/></svg>') },
+  ]);
+  await p.waitForFunction(() => document.querySelectorAll("#studio-sheet .st-score-thumb").length === 1);
+  await p.fill("#studio-score-note", "夹 3 品，照六线谱弹分解和弦");
+  await p.click("#studio-score-read");
+  await p.waitForFunction(() => typeof window.__scoreText === "string");
+  assert.match(await p.evaluate(() => window.__scoreText), /NOTES: 夹 3 品，照六线谱弹分解和弦$/);
+  await p.waitForSelector("#studio-sheet .st-ai-preview");
+  const lines = await p.locator("#studio-sheet .st-ai-preview .st-ai-card").allTextContents();
+  assert.equal(lines[0], "变调夹 3 品，整首已升 3 个半音");
+  assert.match(lines[1], /分解和弦/);
+  assert.deepEqual(errors, []);
+});

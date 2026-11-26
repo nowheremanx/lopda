@@ -544,3 +544,26 @@ test("score prompt warns about TAB fret numbers and octave dots", () => {
   assert.match(system, /octave/i);
   assert.match(system, /above or below/i);
 });
+
+test("score prompt: no notes sends nothing new; notes add the fields and the user's words", () => {
+  const P = ctx.LopdaStudioPrompts;
+  const plainMsgs = plain(P.score({ text: "x" }));
+  assert.deepEqual(plain(P.score({ text: "x", note: "  " })), plainMsgs);
+  assert.doesNotMatch(plainMsgs[0].content, /NOTES|- shift:|- pick:/);
+  const withNote = plain(P.score({ text: "x", images: ["data:image/jpeg;base64,AA"], note: "夹 3 品，分解和弦" }));
+  assert.match(withNote[0].content, /shift/);
+  assert.match(withNote[0].content, /pick/);
+  assert.match(withNote[1].content[0].text, /NOTES: 夹 3 品，分解和弦$/);
+});
+
+test("readScore: notes reach the prompt and turn on the note fields", async () => {
+  const answer = JSON.stringify({ key: "C", meter: "4/4", shift: 2, accomp: "arpeggio", pick: "R5838583",
+    bars: [{ chords: ["C"], beats: ["1", "2", "3", "4"] }] });
+  const ask = makeAsk([answer]);
+  const out = await H.readScore({ text: "1=C", note: "up a whole tone, broken chords", ask, now: 1000 });
+  assert.equal(out.song.key, 2);
+  assert.deepEqual(plain(out.lost).slice(0, 2), ["note:shift:+2", "note:arp"]);
+  const none = await H.readScore({ text: "1=C", ask: makeAsk([answer]), now: 1000 });
+  assert.equal(none.song.key, 0);
+  assert.deepEqual(plain(none.lost), []);
+});
