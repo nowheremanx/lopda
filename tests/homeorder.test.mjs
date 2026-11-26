@@ -53,6 +53,15 @@ test("an uninstall takes away only its own tile; nothing else moves", () => {
   assert.equal(r.changed, true);
 });
 
+test("paint and the calculator keep their places while they are not installed, even after another install", () => {
+  const first = H.arrange(null, BUILTINS, [], true).order;
+  const linked = H.arrange(first, BUILTINS, [{ id: "gomoku", installed: 1 }], true);
+  assert.deepEqual(plain(linked.order), [...plain(H.DEFAULT), "a:gomoku"]);
+  const later = H.arrange(linked.order, BUILTINS, [{ id: "gomoku", installed: 1 }, ...PRE], true);
+  assert.equal(later.changed, false);
+  assert.deepEqual(plain(later.keys.slice(-3)), ["a:calculator", "a:paint", "a:gomoku"]);
+});
+
 test("before the installed apps are read, their places are kept but not drawn", () => {
   const stored = [...plain(H.DEFAULT), "a:gomoku"];
   const r = H.arrange(stored, BUILTINS, [], false);

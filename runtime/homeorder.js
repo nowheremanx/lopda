@@ -49,9 +49,10 @@ function arrange(stored, builtins, apps, appsKnown){
   base.forEach(function(k){
     if(seen[k]) return;
     /* Kept without a tile behind it: every key of DEFAULT (paint and the calculator install a moment after the
-       first start and take their places then); a built-in key (an older runtime opened from a stale cache must
-       not throw away the place of a program a newer one has); an app key while the apps are not read yet. */
-    var keep = !stored || have[k] || k.charAt(0)==="b" || !appsKnown;
+       first start, maybe after an app a link installed, and take their own places then; removed and installed
+       again, they come back there); a built-in key (an older runtime opened from a stale cache must not throw away
+       the place of a program a newer one has); an app key while the apps are not read yet. */
+    var keep = have[k] || k.charAt(0)==="b" || !appsKnown || DEFAULT.indexOf(k)>=0;
     if(keep){ seen[k]=true; order.push(k); }
   });
   builtins.forEach(function(id){ var k=bkey(id); if(!seen[k]){ seen[k]=true; order.push(k); } });
