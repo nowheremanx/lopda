@@ -262,6 +262,7 @@
     if (input.strafe) turn = 0;
     if (turn) P.turnV = Math.min(1, P.turnV + dt * 6); else P.turnV = 0;
     P.a += turn * dt * (0.9 + 1.9 * P.turnV);
+    if (input.turnBy) P.a += input.turnBy;   /* a finger dragged across the view */
     var fwd = (input.up ? 1 : 0) - (input.down ? 1 : 0);
     var str = input.strafe ? (input.right ? 1 : 0) - (input.left ? 1 : 0) : 0;
     var ca = Math.cos(P.a), sa = Math.sin(P.a);
