@@ -114,12 +114,12 @@ window.LOPDA_GALLERY = [
     },
     uses: ["lo-game", "music", "save", "buttons"],
     scene: {
-      /* level 11, where old Wang digs beside you, played by a steady hand (its title is a plain menu: the cover is the mine);
+      /* the title screen is the cover; then level 11, where old Wang digs beside you, played by a steady hand;
          then the shop between levels */
-      setup: [["eval", LZ_CATCH], ["wait", 900], ["key", "x", 80], ["wait", 700],
+      setup: [["eval", LZ_CATCH], ["wait", 900], ["cover"], ["key", "x", 80], ["wait", 700],
         ["eval", "GM.startLevel(__lz,11);__lz.bank=Math.round(GM.targetFor(11)*0.6/10)*10;__lz.dynamite=2;__lz.strength=3;GM.ui.enter('intro')"], ["wait", 900],
         ["key", "x", 80], ["wait", 900], ["eval", LZ_AIM], ["wait", 800]],
-      clip: [["wait", 1600], ["cover"], ["wait", 2600]],
+      clip: [["wait", 1600], ["still"], ["wait", 2600]],
       after: [["wait", 2500], ["still"], ["eval", "clearInterval(window.__lzAim);GM.openShop(__lz);GM.ui.enter('shop')"], ["wait", 900], ["still"]]
     }
   },
