@@ -1,6 +1,6 @@
 {
   "spec": "lopda/1",
-  "generated": "2026-11-25",
+  "generated": "2026-11-26",
   "apps": [
     {
       "spec": "lopda/1",
@@ -42,6 +42,46 @@
       "path": "apps/lao-zhang/index.html",
       "sha256": "83e090f47e15586bb37cd0e13649f9a0b40f670e60163f3912931c304b61aebf",
       "bytes": 135266
+    },
+    {
+      "spec": "lopda/1",
+      "id": "lost-deck",
+      "name": "失联站",
+      "glyph": "站",
+      "category": "game",
+      "buttons": true,
+      "icon": [
+        "................",
+        "................",
+        "..000000000000..",
+        "..011111111110..",
+        "..010000000010..",
+        "..010333333010..",
+        "..010322223010..",
+        "..010320023010..",
+        "..010320023010..",
+        "..010322223010..",
+        "..010333333010..",
+        "..010000000010..",
+        "..011111111110..",
+        "..000000000000..",
+        "................",
+        "................"
+      ],
+      "version": "1.0.0",
+      "released": "2026-11-26",
+      "description": "第一人称迷宫射击：空间站失联了，带着铆钉枪一层层往下，找门卡、躲光弹、关掉核心。",
+      "i18n": {
+        "en": {
+          "name": "LostDeck",
+          "description": "First-person maze shooter on a silent station: a rivet gun, six decks, one core."
+        }
+      },
+      "author": "Haowei Wu",
+      "license": "MIT",
+      "path": "apps/lost-deck/index.html",
+      "sha256": "fc878a64464fa173209bcf7ee509c29829207a05bfd4b1bc065e0ac190683ea9",
+      "bytes": 146670
     },
     {
       "spec": "lopda/1",
@@ -924,7 +964,7 @@
       ],
       "version": "3.0.0",
       "released": "2026-10-08",
-      "updated": "2026-11-24",
+      "updated": "2026-11-23",
       "description": "短篇视觉小说。雨夜的小站，车晚点五十分钟，爸送你去上大学。十分钟读完。",
       "i18n": {
         "zh": {
