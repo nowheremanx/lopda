@@ -23,7 +23,7 @@
 html,body{margin:0}
 body{background:var(--case);color:var(--on-case);font:17px/1.55 var(--f-body);-webkit-font-smoothing:antialiased}
 a{color:inherit}
-.wrap{max-width:1180px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.wrap{max-width:1080px;margin:0 auto;padding-left:max(20px,env(safe-area-inset-left,0px));padding-right:max(20px,env(safe-area-inset-right,0px))}
 h1,h2{font-family:var(--f-display);font-weight:700;letter-spacing:-.03em;line-height:1.05;text-wrap:balance;margin:0}
 h1{font-size:clamp(36px,6vw,68px)}
 h2{font-size:clamp(28px,4vw,44px)}
@@ -31,14 +31,16 @@ p{margin:0}
 .eyebrow{font:20px/1 var(--f-lcd);letter-spacing:.08em;text-transform:uppercase;color:var(--lcd-mid);margin-bottom:14px}
 .lede{font-size:clamp(18px,2.1vw,22px);line-height:1.45;max-width:44ch;color:var(--on-case-dim);margin-top:18px;text-wrap:pretty}
 
-nav{position:sticky;top:0;z-index:5;background:var(--case);border-bottom:1px solid var(--case-line)}
-nav .wrap{display:flex;align-items:center;gap:18px;height:52px;font-size:14px}
+/* the landing page's bar, item for item (../index.html), so moving between the pages keeps everything in its place */
+nav{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:color-mix(in srgb,var(--case) 82%,transparent);backdrop-filter:saturate(1.4) blur(14px);-webkit-backdrop-filter:saturate(1.4) blur(14px);border-bottom:1px solid var(--case-line)}
+nav .wrap{max-width:1080px;padding-left:max(20px,env(safe-area-inset-left,0px));padding-right:max(20px,env(safe-area-inset-right,0px));display:flex;align-items:center;gap:22px;height:52px;font-size:14px}
 nav .mark{font-family:var(--f-lcd);font-size:24px;letter-spacing:.06em;text-decoration:none;margin-right:auto}
 nav a.l{text-decoration:none;color:var(--on-case-dim)}
-nav a.l:hover,nav .lang:hover{color:var(--on-case)}
-nav .mark,nav a.l,nav .btn{white-space:nowrap}
-@media (max-width:420px){nav .wrap{gap:12px} nav a.gh{display:none}}
+nav a.l:hover,nav a.l[aria-current]{color:var(--on-case)}
+@media (max-width:640px){nav a.l{display:none}}
 nav .lang{background:none;border:0;color:var(--on-case-dim);font:14px var(--f-body);cursor:pointer;padding:8px 4px}
+nav .lang:hover{color:var(--on-case)}
+nav .btn{padding:8px 16px;font-size:14px;min-height:0}
 .btn{display:inline-flex;align-items:center;min-height:44px;border-radius:999px;padding:12px 22px;font:600 16px/1 var(--f-body);text-decoration:none;border:0;cursor:pointer}
 .btn.home{background:var(--home);color:#fff;box-shadow:inset 0 -3px 0 rgba(0,0,0,.25)}
 .btn.ghost{background:transparent;color:inherit;box-shadow:inset 0 0 0 1.5px currentColor}
@@ -85,14 +87,25 @@ footer{padding-block:32px;color:var(--on-case-dim);font-size:14px;border-top:1px
 .pn a{text-decoration:none;color:var(--on-case-dim);min-height:44px;display:inline-flex;align-items:center}
 .pn a:hover{color:var(--on-case)}
 .pn .nx{margin-left:auto;text-align:right}
+/* on a desktop the neighbours sit at the sides of the window, half way down, so a visitor can leaf through without
+   scrolling to the bottom (owner, 2026-11-26); the left and right arrow keys do the same. Phones keep the bottom row. */
+.side{position:fixed;top:50%;z-index:4;transform:translateY(-50%);display:none;place-items:center;width:56px;height:56px;border-radius:50%;
+  background:var(--case-2);border:1px solid var(--case-line);color:var(--on-case);text-decoration:none;font:28px/1 var(--f-body)}
+.side:hover{border-color:var(--on-case-dim)}
+.side.pv{left:max(12px,calc(50% - 540px - 76px))} .side.nx{right:max(12px,calc(50% - 540px - 76px))}
+@media (min-width:900px) and (hover:hover){.side{display:grid} .pn{display:none}}
 </style>
 </head>
 <body>
 <nav><div class="wrap">
   <a class="mark" href="../">LO-PDA</a>
-  <a class="l" href="./" data-t="nav.gallery">Gallery</a>
+  <a class="l" href="../#camera" data-t="nav.camera">Camera</a>
+  <a class="l" href="../#inside" data-t="nav.inside">Inside</a>
+  <a class="l" href="../#store" data-t="nav.apps">Apps</a>
+  <a class="l" href="../#make" data-t="nav.make">Make an app</a>
+  <a class="l" href="./" data-t="nav.gallery" aria-current="page">Gallery</a>
   <a class="l" href="../events/" data-t="nav.events">Events</a>
-  <a class="l gh" href="https://github.com/nowheremanx/lopda">GitHub</a>
+  <a class="l" href="https://github.com/nowheremanx/lopda">GitHub</a>
   <button class="lang" type="button" id="lang">中文</button>
   <a class="btn home" href="../runtime/" data-t="nav.open">Open</a>
 </div></nav>
@@ -106,7 +119,7 @@ footer{padding-block:32px;color:var(--on-case-dim);font-size:14px;border-top:1px
   // Page text. Each app's own text comes from gallery.js as {en, zh}; its name, icon and version from the registry.
   var T = {
     en: {
-      "nav.gallery": "Gallery", "nav.events": "Events", "nav.open": "Open", "foot": "MIT · A fictional handheld, made for fun.",
+      "nav.camera": "Camera", "nav.inside": "Inside", "nav.apps": "Apps", "nav.make": "Make an app", "nav.gallery": "Gallery", "nav.events": "Events", "nav.open": "Open", "foot": "MIT · A fictional handheld, made for fun.",
       "head.e": "Gallery", "head.h": "Small apps, made with care.",
       "head.p": "The best of the store, chosen by hand. Each one is a single HTML file under 512 KB, with no network. Tap one for a closer look, or open it on your phone.",
       "back": "All apps", "open": "Open on your phone", "source": "Source", "uses": "What it uses",
@@ -114,7 +127,7 @@ footer{padding-block:32px;color:var(--on-case-dim);font-size:14px;border-top:1px
       "missing": "No such app in the gallery.", "loading": "Loading..."
     },
     zh: {
-      "nav.gallery": "精选", "nav.events": "活动", "nav.open": "打开", "foot": "MIT · 一台虚构的掌机，做着玩的。",
+      "nav.camera": "相机", "nav.inside": "内置程序", "nav.apps": "应用", "nav.make": "做个 app", "nav.gallery": "精选", "nav.events": "活动", "nav.open": "打开", "foot": "MIT · 一台虚构的掌机，做着玩的。",
       "head.e": "精选应用", "head.h": "小应用，用心做。",
       "head.p": "从商店里挑出来的精品。每一个都只是一个不到 512 KB 的 HTML 文件，不联网。点进去看详情，或者直接在手机上打开。",
       "back": "全部应用", "open": "在手机上打开", "source": "源码", "uses": "用到了",
@@ -228,25 +241,23 @@ footer{padding-block:32px;color:var(--on-case-dim);font-size:14px;border-top:1px
     txt.appendChild(acts);
     box.appendChild(txt);
     main.appendChild(box);
-    var m = media(id);
-    if (m && m.stills.length > 1) {
-      var st = el("div", "stills");
-      m.stills.slice(1).forEach(function (src) {
-        var s = el("div", "screen"), g = el("div", "glass"), img = el("img"); img.src = src; img.alt = ""; img.loading = "lazy";
-        g.appendChild(img); s.appendChild(g); st.appendChild(s);
-      });
-      main.appendChild(st);
-    }
-    /* the neighbours, so the gallery can be walked through like a shelf */
-    var shown = LIST.filter(function (x) { return REG[x.id]; }), j = shown.indexOf(e);
+    /* the neighbours, so the gallery can be walked through like a shelf: at the bottom on a phone, at the sides on a
+       desktop, where the shelf also wraps round (the last app's next is the first) */
+    var shown = LIST.filter(function (x) { return REG[x.id]; }), j = shown.indexOf(e), n = shown.length;
     var pn = el("div", "pn");
-    [[shown[j - 1], "pv", "← "], [shown[j + 1], "nx", ""]].forEach(function (p) {
+    [[shown[j - 1], "pv", "\u2190 "], [shown[j + 1], "nx", ""]].forEach(function (p) {
       if (!p[0]) return;
-      var l = el("a", p[1], p[1] === "nx" ? name(p[0].id) + " →" : p[2] + name(p[0].id)); l.href = "?app=" + encodeURIComponent(p[0].id);
+      var l = el("a", p[1], p[1] === "nx" ? name(p[0].id) + " \u2192" : p[2] + name(p[0].id)); l.href = "?app=" + encodeURIComponent(p[0].id);
       l.addEventListener("click", function (ev) { ev.preventDefault(); go(p[0].id); });
       pn.appendChild(l);
     });
     main.appendChild(pn);
+    if (n > 1) [[shown[(j - 1 + n) % n], "pv", "\u2039"], [shown[(j + 1) % n], "nx", "\u203a"]].forEach(function (p) {
+      var l = el("a", "side " + p[1], p[2]); l.href = "?app=" + encodeURIComponent(p[0].id);
+      l.title = name(p[0].id); l.setAttribute("aria-label", name(p[0].id));
+      l.addEventListener("click", function (ev) { ev.preventDefault(); go(p[0].id); });
+      main.appendChild(l);
+    });
   }
 
   /* ---------- routing: ?app=<id> is one app, nothing is the overview ---------- */
@@ -257,6 +268,12 @@ footer{padding-block:32px;color:var(--on-case-dim);font-size:14px;border-top:1px
     render(); window.scrollTo(0, 0);
   }
   window.addEventListener("popstate", render);
+  /* the arrow keys leaf through the apps on an app's page */
+  document.addEventListener("keydown", function (ev) {
+    if (ev.altKey || ev.metaKey || ev.ctrlKey || !current()) return;
+    var side = ev.key === "ArrowLeft" ? ".side.pv" : ev.key === "ArrowRight" ? ".side.nx" : null, l = side && document.querySelector(side);
+    if (l) { ev.preventDefault(); l.click(); }
+  });
 
   function applyText() {
     document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
