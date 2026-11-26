@@ -59,6 +59,8 @@ footer{padding-block:32px;color:var(--on-case-dim);font-size:14px;border-top:1px
 .item:hover .screen,.item:focus-visible .screen{outline:2px solid var(--lcd-mid);outline-offset:2px}
 .item .name{display:flex;align-items:center;gap:8px;font:600 17px/1.2 var(--f-display)}
 .item .name canvas{width:20px;height:20px;image-rendering:pixelated;flex:none}
+.glyph{display:inline-grid;place-items:center;flex:none;width:20px;height:20px;border-radius:3px;background:var(--lcd-paper);color:var(--lcd-ink);font:700 13px/1 var(--f-body)}
+.app .who .glyph{width:40px;height:40px;font-size:26px;border-radius:5px}
 .item .what{font-size:14px;line-height:1.35;color:var(--on-case-dim)}
 
 /* one app */
@@ -134,8 +136,10 @@ footer{padding-block:32px;color:var(--on-case-dim);font-size:14px;border-top:1px
 
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
   /* the app's 16 x 16 icon in the four tones, as the home screen draws it */
-  function icon(rows) {
-    var c = el("canvas"); if (!rows || !rows.length) return c;
+  /* an app without a pixel icon shows its glyph on a paper tile, as the home screen does */
+  function icon(rows, glyph) {
+    if (!rows || !rows.length) { var gl = el("span", "glyph", glyph || ""); return gl; }
+    var c = el("canvas");
     var n = rows.length; c.width = c.height = n; var x = c.getContext("2d");
     rows.forEach(function (r, y) { for (var i = 0; i < n; i++) { var ch = r.charAt(i); if (ch === ".") continue; x.fillStyle = TONES[+ch] || TONES[0]; x.fillRect(i, y, 1, 1); } });
     return c;
@@ -179,7 +183,7 @@ footer{padding-block:32px;color:var(--on-case-dim);font-size:14px;border-top:1px
       if (!REG[e.id]) return;                 /* an app no longer in the store drops out of the gallery too */
       var a = el("a", "item"); a.href = "?app=" + encodeURIComponent(e.id);
       var s = screen(e.id, false); a.appendChild(s);
-      var n = el("div", "name"); n.appendChild(icon(REG[e.id].icon)); n.appendChild(el("span", null, name(e.id))); a.appendChild(n);
+      var n = el("div", "name"); n.appendChild(icon(REG[e.id].icon, REG[e.id].glyph)); n.appendChild(el("span", null, name(e.id))); a.appendChild(n);
       a.appendChild(el("div", "what", L(e.title)));
       /* the cover is the app's title screen; a pointer that hovers plays the film under it */
       a.addEventListener("mouseenter", function () { if (hover) s.play(); });
@@ -205,7 +209,7 @@ footer{padding-block:32px;color:var(--on-case-dim);font-size:14px;border-top:1px
     var a = REG[id], box = el("section", "app");
     box.appendChild(screen(id, true));
     var txt = el("div");
-    var who = el("div", "who"); who.appendChild(icon(a.icon));
+    var who = el("div", "who"); who.appendChild(icon(a.icon, a.glyph));
     var wn = el("div"); wn.appendChild(el("div", "n", name(id)));
     wn.appendChild(el("div", "m", t("cat." + (a.category || "other")) + " · v" + a.version));
     who.appendChild(wn); txt.appendChild(who);
