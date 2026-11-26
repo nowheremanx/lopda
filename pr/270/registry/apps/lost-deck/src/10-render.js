@@ -11,6 +11,7 @@
   var PROJ = (W / 2) / FOV;           /* pixels per unit of height at distance 1 */
   var fb = new Uint8Array(W * VH);
   var zbuf = new Float32Array(W);
+  var col = new Float32Array(W);   /* the darkening rate per column, kept between frames */
   var BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map(function (v) { return (v + 0.5) / 16; });
 
   /* a ray from (px, py) along (rx, ry); returns the perpendicular distance and what it hit.
@@ -74,7 +75,6 @@
     var plx = -dy * FOV, ply = dx * FOV;
     var hz = (VH >> 1) + (view.bob | 0), time = view.time;
     var FL = LD.FLOOR, CE = LD.CEIL, SL = LD.SLIME, fp = FL.px, cp = CE.px, sp = SL.px;
-    var col = new Float32Array(W);
     for (var x0 = 0; x0 < W; x0++) col[x0] = shadeK(view, x0);
     var base = view.light || 0;
     /* floor and ceiling */

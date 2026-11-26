@@ -1488,6 +1488,7 @@ var LD = window.LD = {};
   var PROJ = (W / 2) / FOV;           /* pixels per unit of height at distance 1 */
   var fb = new Uint8Array(W * VH);
   var zbuf = new Float32Array(W);
+  var col = new Float32Array(W);   /* the darkening rate per column, kept between frames */
   var BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map(function (v) { return (v + 0.5) / 16; });
 
   /* a ray from (px, py) along (rx, ry); returns the perpendicular distance and what it hit.
@@ -1551,7 +1552,6 @@ var LD = window.LD = {};
     var plx = -dy * FOV, ply = dx * FOV;
     var hz = (VH >> 1) + (view.bob | 0), time = view.time;
     var FL = LD.FLOOR, CE = LD.CEIL, SL = LD.SLIME, fp = FL.px, cp = CE.px, sp = SL.px;
-    var col = new Float32Array(W);
     for (var x0 = 0; x0 < W; x0++) col[x0] = shadeK(view, x0);
     var base = view.light || 0;
     /* floor and ceiling */
@@ -1752,7 +1752,7 @@ var LD = window.LD = {};
   W.opaque = function (x, y) {
     var c = this.cell(x, y);
     if (c === 0) return false;
-    if (c >= 10 && c <= 13) return this.M.open[y * this.M.w + x] < 0.6;
+    if (c >= 10 && c <= 13) return this.M.open[y * this.M.w + x] < 0.95;   /* the same leaf a rivet stops at */
     return true;
   };
   W.sightLine = function (x0, y0, x1, y1) {
@@ -2026,7 +2026,7 @@ var LD = window.LD = {};
   };
   W.hurtPlayer = function (dmg, fx, fy) {
     var P = this.P;
-    if (P.dead || dmg <= 0) return;
+    if (P.dead || dmg <= 0 || this.safe) return;   /* safe: the deck is already won */
     if (this.deck.easy) dmg = Math.ceil(dmg * 0.6);
     P.hp -= dmg; P.hurt = 0.35;
     P.hurtDir = angDiff(Math.atan2(fy - P.y, fx - P.x), P.a);
@@ -2063,7 +2063,7 @@ var LD = window.LD = {};
     e.cd -= dt;
     if (e.stagger > 0) { e.stagger -= dt; return; }
     /* attacks */
-    if (F.melee && dist < F.melee.range + e.r && e.cd <= 0) {
+    if (F.melee && dist < F.melee.range + e.r && e.cd <= 0 && e.see) {   /* no bites round a corner */
       e.cd = F.melee.cd; e.act = 0.25; this.hurtPlayer(F.melee.dmg, e.x, e.y);
     }
     if (F.burst && dist < F.burst.near) { this.kill(e); return; }
@@ -2522,7 +2522,15 @@ var LD = window.LD = {};
       if (typeof v !== "object" || typeof v.v !== "number") { saveMsg = t("存档格式不对，这次不保存。", "Save not understood; not saving."); return; }
       if (v.v > SAVE_V) { saveMsg = t("存档来自新版本，请更新游戏。", "Save is from a newer version. Update the game."); return; }
       save.unlocked = Math.max(1, Math.min(LD.DECKS.length + 1, v.unlocked | 0));
-      save.best = v.best && typeof v.best === "object" ? v.best : {};
+      save.best = {};
+      /* keep each record in the shape this version draws; the stored copy is only rewritten after a deck is cleared */
+      if (v.best && typeof v.best === "object") Object.keys(v.best).forEach(function (k) {
+        var b = v.best[k];
+        if (!b || typeof b !== "object" || typeof b.time !== "number") return;
+        var m = Array.isArray(b.marks) ? b.marks : [];
+        save.best[k] = { time: b.time, kills: +b.kills || 0, foes: +b.foes || 0, secrets: +b.secrets || 0, total: +b.total || 0, marks: [!!m[0], !!m[1], !!m[2]] };
+        for (var x in b) if (!(x in save.best[k])) save.best[k][x] = b[x];
+      });
       save.tips = v.tips && typeof v.tips === "object" ? v.tips : {};
       saveOk = true;
     }, function () { saveMsg = t("存档读不出来，这次不保存。", "Save could not be read; not saving."); });
@@ -2550,12 +2558,17 @@ var LD = window.LD = {};
     wake: { wave: "triangle", from: 180, to: 360, ms: 220, vol: 0.28, vibrato: { depth: 1, rate: 14 } },
     ping: { wave: "triangle", from: 1600, to: 1500, ms: 70, vol: 0.28 },
     lift: { wave: "triangle", from: 200, to: 600, ms: 900, attack: 80, vol: 0.5, vibrato: { depth: 0.4, rate: 5 } },
-    step: { wave: "noise", from: 120, to: 80, ms: 40, vol: 0.12 }
+    shot0: null
   };
-  var lastSfx = {};
+  delete SFX.shot0;
+  /* the runtime plays at most 20 a second: keep under that with room to spare, the same sound never twice in 60 ms */
+  var lastSfx = {}, recent = [];
   function sfx(name) {
     var now = game.time;
     if (lastSfx[name] != null && now - lastSfx[name] < 0.06) return;
+    while (recent.length && now - recent[0] > 1) recent.shift();
+    if (recent.length >= 15) return;
+    recent.push(now);
     lastSfx[name] = now;
     game.sfx(SFX[name] || name);
   }
@@ -2585,7 +2598,7 @@ var LD = window.LD = {};
 
   /* big text: draw it once with the pixel font, read the pixels back, keep them as a bitmap */
   var bigCache = {};
-  function bigText(str, cx, y, k, tone) {
+  function bigCacheFor(str) {
     var b = bigCache[str];
     if (!b) {
       var w = Math.ceil(g.measure(str)), h = 14;
@@ -2596,6 +2609,10 @@ var LD = window.LD = {};
       b = bigCache[str] = { w: w, px: px };
       g.rect(0, 0, w + 2, h, 3);
     }
+    return b;
+  }
+  function bigText(str, cx, y, k, tone) {
+    var b = bigCacheFor(str);
     var x0 = Math.round(cx - b.w * k / 2);
     for (var i = 0; i < b.px.length; i += 2) g.rect(x0 + b.px[i] * k, y + b.px[i + 1] * k, k, k, tone);
   }
@@ -2635,6 +2652,7 @@ var LD = window.LD = {};
       }
     },
     draw: function (gg) {
+      bigCacheFor(t("失联站", "LOST DECK"));   /* measured before the stars clear the screen */
       drawStars(1 / 60, 0.25);
       /* the station: a ring and a spine, drawn in dark */
       var cx = 80, cy = 58;
@@ -2646,9 +2664,9 @@ var LD = window.LD = {};
       for (var i = 0; i < items.length; i++) {
         var sel = i === titleSel, y = y0 + i * 16;
         if (sel) g.rect(30, y - 1, 100, 15, 3);
-        g.text(items[i].label, 80, y, { color: sel ? 0 : 2, align: "center" });
+        g.text(items[i].label, 80, y, { color: sel ? 0 : 3, align: "center" });
       }
-      g.text(saveMsg || t("A 确定  上下 选", "A select  UP/DOWN"), 80, 146, { color: saveMsg ? 3 : 1, align: "center" });
+      g.text(saveMsg || t("上下选  A确定", "UP/DOWN, then A"), 80, 146, { color: 3, align: "center" });
     }
   });
   function titleItems() {
@@ -2675,17 +2693,17 @@ var LD = window.LD = {};
       ];
       for (var i = 0; i < rows.length; i++) {
         g.text(rows[i][0], 10, 28 + i * 15);
-        g.text(rows[i][1], 150, 28 + i * 15, { align: "right", color: 1 });
+        g.text(rows[i][1], 150, 28 + i * 15, { align: "right", color: 0 });
       }
-      g.text(t("走向门就会开。", "Doors open as you walk in."), 80, 132, { align: "center", color: 1 });
-      g.text(t("A 返回", "A back"), 80, 146, { align: "center", color: 1 });
+      g.text(t("走向门就会开。", "Doors open as you walk in."), 80, 132, { align: "center", color: 0 });
+      g.text(t("A 返回", "A back"), 80, 146, { align: "center", color: 0 });
     }
   });
 
   /* ---------------- deck list ---------------- */
   var deckSel = 0;
   game.scene("decks", {
-    enter: function () { deckSel = Math.min(save.unlocked, LD.DECKS.length) - 1; },
+    enter: function () { deckSel = Math.min(save.unlocked, LD.DECKS.length) - 1; game.music(LD.MUSIC.title); game.ambience(null); },
     update: function () {
       var d = game.dir(), n = LD.DECKS.length;
       if (d.y) { deckSel = (deckSel + d.y + n) % n; sfx("tick"); }
@@ -2699,7 +2717,7 @@ var LD = window.LD = {};
       g.text(t("选层", "Decks"), 6, 4);
       var got = 0;
       Object.keys(save.best).forEach(function (k) { var b = save.best[k]; if (b && b.marks) b.marks.forEach(function (m) { if (m) got++; }); });
-      g.text(t("标记 {a}/{b}", "Marks {a}/{b}", { a: got, b: LD.DECKS.length * 3 }), 154, 4, { align: "right", color: 1 });
+      g.text(t("标记 {a}/{b}", "Marks {a}/{b}", { a: got, b: LD.DECKS.length * 3 }), 154, 4, { align: "right", color: 0 });
       g.rect(0, 19, 160, 1, 0);
       var top = Math.max(0, Math.min(deckSel - 3, LD.DECKS.length - 7));
       for (var i = top; i < Math.min(LD.DECKS.length, top + 7); i++) {
@@ -2718,7 +2736,7 @@ var LD = window.LD = {};
       g.rect(0, 141, 160, 1, 0);
       var line = deckSel >= save.unlocked ? t("先通过上一层", "Clear the deck before") :
         b2 ? t("最快 {a}  标准 {b}", "Best {a}  par {b}", { a: clock(b2.time), b: clock(D2.par) }) : t("标准 {b}", "Par {b}", { b: clock(D2.par) });
-      g.text(line, 80, 145, { align: "center", color: 1 });
+      g.text(line, 80, 145, { align: "center", color: 0 });
     }
   });
 
@@ -2739,25 +2757,25 @@ var LD = window.LD = {};
     draw: function () {
       var D = LD.DECKS[deckIdx];
       g.clear(0);
-      g.text(t("第{n}层", "DECK {n}", { n: deckIdx + 1 }), 8, 8, { color: 2 });
-      g.text(dname(D), 8, 22, { color: 3 });
-      g.rect(8, 38, 144, 1, 1);
+      g.text(t("第{n}层", "DECK {n}", { n: deckIdx + 1 }), 8, 6, { color: 3 });
+      g.text(dname(D), 8, 20, { color: 3 });
+      /* the goal sits under the name, then the story types out below a rule */
+      var y = 36 + g.text(t("目标：", "Goal: ") + T(D.goal), 8, 36, { color: 3, width: 144 });
+      g.rect(8, y + 2, 144, 1, 1);
       var txt = T(D.brief), n = Math.min(txt.length, Math.floor(this.t * 30));
-      g.text(txt.slice(0, n), 8, 44, { color: 3, width: 144 });
-      if (n >= txt.length) {
-        g.text(t("目标", "Goal"), 8, 112, { color: 2 });
-        g.text(T(D.goal), 8, 126, { color: 3 });
-        if (Math.floor(this.t * 2) & 1) g.text(t("A 出发", "A go"), 152, 146, { color: 3, align: "right" });
-        else g.text(t("A 出发", "A go"), 152, 146, { color: 2, align: "right" });
-      }
-      if (Math.floor(this.t * 3) & 1 && n < txt.length) g.rect(8, 150, 5, 2, 3);
+      g.text(txt.slice(0, n), 8, y + 7, { color: 3, width: 144 });
+      if (n >= txt.length && (Math.floor(this.t * 2) & 1)) g.text(t("A 出发", "A go"), 152, 6, { color: 3, align: "right" });
+      if (Math.floor(this.t * 3) & 1 && n < txt.length) g.rect(146, 10, 5, 2, 3);
     }
   });
 
   /* ---------------- play ---------------- */
   var world = null, toast = null, toastT = 0, bigMsg = null, bigT = 0, bHeld = 0, bMoved = false, pending = null, endT = 0;
+  var bArmed = false, aLock = false;
+  /* a dialog or menu is about to take the keys: forget the B press that opened it, hold A until it is released */
+  function overlay() { bArmed = false; aLock = true; }
   function say(msg, sec) { toast = msg; toastT = sec || 2.2; }
-  function tip(id, msg) { if (save.tips[id]) return; save.tips[id] = 1; say(msg, 3.2); }
+  function tip(id, msg) { if (save.tips[id]) return; save.tips[id] = 1; say(msg, 3.2); writeSave(); }
   var GUN_NAME = { wrench: { zh: "扳手", en: "Wrench" }, rivet: { zh: "铆钉枪", en: "Rivet gun" }, scatter: { zh: "散钉枪", en: "Scatter" } };
   var CARD_NAME = [null, { zh: "方块", en: "square" }, { zh: "圆形", en: "circle" }, { zh: "三角", en: "triangle" }];
   var FOE_TIP = {
@@ -2770,12 +2788,12 @@ var LD = window.LD = {};
   var hooks = {
     door: function () { sfx("door"); },
     locked: function (k) { sfx("err"); say(t("要{c}门卡。", "Needs the {c} card.", { c: T(CARD_NAME[k]) })); },
-    exit: function () { if (!pending) { pending = "exit"; endT = 0; sfx("lift"); } },
+    exit: function () { if (!pending) { pending = "exit"; endT = 0; world.safe = true; sfx("lift"); } },
     secret: function (n, m) { sfx("win"); say(t("暗格 {n}/{m}", "Secret {n}/{m}", { n: n, m: m }), 2.5); },
     terminal: function (i) {
       var D = LD.DECKS[deckIdx], log = D.logs && D.logs[i];
       sfx("tap");
-      if (log) game.say(T(log), { name: t("终端", "TERMINAL") });
+      if (log) { overlay(); game.say(T(log), { name: t("终端", "TERMINAL") }); }
     },
     nothing: function () {},
     swap: function (gname) { sfx("tick"); say(T(GUN_NAME[gname]), 1); },
@@ -2787,7 +2805,7 @@ var LD = window.LD = {};
     ping: function () { sfx("ping"); tip("shield", t("核心有盾，先打节点。", "Shielded. Break the nodes first.")); },
     boom: function (x, y, gas) { sfx(gas ? "puff" : "boom"); if (!gas) game.shake(2, 0.25); },
     hurt: function (d) { sfx("hurt"); if (d >= 12) game.shake(2, 0.2); },
-    dead: function () { pending = "dead"; endT = 0; game.musicStop(); },
+    dead: function () { if (pending) return; pending = "dead"; endT = 0; game.musicStop(); },
     pickup: function (it) {
       if (it.kind === "card") { sfx("card"); say(t("拿到{c}门卡", "Got the {c} card", { c: T(CARD_NAME[it.n]) }), 2.4); }
       else if (it.kind === "gun") { sfx("card"); say(t("散钉枪！SELECT 换枪", "Scatter gun! SELECT swaps"), 3); }
@@ -2798,14 +2816,14 @@ var LD = window.LD = {};
     wake: function (e) { sfx("wake"); if (FOE_TIP[e.type]) tip("foe-" + e.type, T(FOE_TIP[e.type])); },
     zap: function () { sfx("zap"); },
     spawn: function () { sfx("puff"); },
-    coreDown: function () { pending = "core"; endT = 0; game.musicStop(); }
+    coreDown: function () { pending = "core"; endT = 0; world.safe = true; game.musicStop(); }
   };
 
   game.scene("play", {
     enter: function () {
       var D = LD.DECKS[deckIdx];
       world = new LD.World(D, hooks);
-      toast = null; toastT = 0; pending = null; endT = 0; bHeld = 0; bMoved = false;
+      toast = null; toastT = 0; pending = null; endT = 0; bHeld = 0; bMoved = false; bArmed = false; aLock = true;
       bigMsg = t("第{n}层 {name}", "DECK {n} {name}", { n: deckIdx + 1, name: dname(D) }); bigT = 2.2;
       game.music(D.boss ? LD.MUSIC.boss : LD.MUSIC.deck);
       game.ambience("wind", D.dark ? 0.35 : 0.18);
@@ -2816,13 +2834,16 @@ var LD = window.LD = {};
       if (!world) return;
       toastT -= dt; bigT -= dt;
       if (pending) { endT += dt; world.update(dt * (pending === "dead" ? 0.3 : 1), {}); return this.finish(); }
-      if (game.pressed("start")) { sfx("tap"); game.push("pause"); return; }
+      if (game.pressed("start")) { sfx("tap"); overlay(); game.push("pause"); return; }
       /* B: a short press uses what is in front; held with LEFT or RIGHT it sidesteps */
       var input = { up: game.btn("up"), down: game.btn("down"), left: game.btn("left"), right: game.btn("right") };
-      if (game.pressed("b")) { bHeld = 0; bMoved = false; }
+      if (game.pressed("b")) { bHeld = 0; bMoved = false; bArmed = true; }
       if (game.btn("b")) { bHeld += dt; if (input.left || input.right) bMoved = true; input.strafe = true; }
-      if (game.released("b") && !bMoved && bHeld < 0.4) input.use = true;
-      input.fire = game.btn("a") || (game.pointer.down && game.pointer.y < VH);
+      if (game.released("b") && bArmed && !bMoved && bHeld < 0.4) input.use = true;
+      if (!game.btn("b")) bArmed = false;
+      /* after a dialog or the pause menu, A fires only once it has been let go */
+      if (aLock && !game.btn("a") && !game.pointer.down) aLock = false;
+      input.fire = !aLock && (game.btn("a") || (game.pointer.down && game.pointer.y < VH));
       input.swap = game.pressed("select");
       world.update(dt, input);
       var P = world.P;
@@ -2924,13 +2945,13 @@ var LD = window.LD = {};
     /* rivets */
     g.sprite(ICON.rivet, 54, y1 + 3);
     g.text(P.gun === "wrench" && P.ammo === 0 ? "--" : String(P.ammo), 64, y1);
-    g.text(T(GUN_NAME[P.gun]), 54, y1 + 14, { color: 1 });
+    g.text(T(GUN_NAME[P.gun]), 54, y1 + 14, { color: 0 });
     /* cards */
     for (var k = 1; k <= 3; k++) {
       var x = 116 + (k - 1) * 14;
       if (world.cards[k]) g.sprite(ICON["card" + k], x, y1 + 2); else g.sprite(ICON.empty, x, y1 + 2);
     }
-    g.text(t("敌{a}/{b}", "{a}/{b}", { a: world.kills, b: world.foes }), 157, y1 + 14, { color: 1, align: "right" });
+    g.text(t("敌{a}/{b}", "{a}/{b}", { a: world.kills, b: world.foes }), 157, y1 + 14, { color: 0, align: "right" });
   }
 
   /* ---------------- pause and the map ---------------- */
@@ -2951,16 +2972,16 @@ var LD = window.LD = {};
     draw: function () {
       g.rect(0, 0, 160, VH, 0);
       drawMap(world, 4, 2, 152, 68);
-      g.text(T(LD.DECKS[deckIdx].goal), 80, 72, { color: 2, align: "center" });
+      g.text(T(LD.DECKS[deckIdx].goal), 80, 72, { color: 3, align: "center" });
       var items = [t("继续", "Resume"), t("重来这一层", "Restart deck"), t("选层", "Decks")];
       for (var j = 0; j < 3; j++) {
         var yj = 87 + j * 13, s2 = j === pauseSel;
         if (s2) g.rect(0, yj, 96, 13, 3);
-        g.text(items[j], 6, yj, { color: s2 ? 0 : 2 });
+        g.text(items[j], 6, yj, { color: s2 ? 0 : 3 });
       }
-      g.text(clock(world.time), 154, 88, { color: 2, align: "right" });
-      g.text(t("暗格{a}/{b}", "Sec {a}/{b}", { a: world.secretsFound, b: world.secrets }), 154, 101, { color: 2, align: "right" });
-      g.text(t("敌{a}/{b}", "Foe {a}/{b}", { a: world.kills, b: world.foes }), 154, 114, { color: 2, align: "right" });
+      g.text(clock(world.time), 154, 88, { color: 3, align: "right" });
+      g.text(t("暗格{a}/{b}", "Sec {a}/{b}", { a: world.secretsFound, b: world.secrets }), 154, 101, { color: 3, align: "right" });
+      g.text(t("敌{a}/{b}", "Foe {a}/{b}", { a: world.kills, b: world.foes }), 154, 114, { color: 3, align: "right" });
     }
   });
   function drawMap(Wd, x0, y0, w, h) {
@@ -3010,7 +3031,7 @@ var LD = window.LD = {};
       var D = LD.DECKS[deckIdx], r = result, k = Math.min(1, this.t / 1.2);
       drawStars(1 / 60, 3);
       g.text(t("第{n}层 通过", "DECK {n} CLEAR", { n: deckIdx + 1 }), 80, 10, { color: 3, align: "center" });
-      g.text(dname(D), 80, 24, { color: 2, align: "center" });
+      g.text(dname(D), 80, 24, { color: 3, align: "center" });
       var rows = [
         [t("用时", "Time"), clock(r.time * k), t("标准 {p}", "par {p}", { p: clock(D.par) }), r.marks[0]],
         [t("消灭", "Kills"), Math.round(r.kills * k) + "/" + r.foes, "", r.marks[1]],
@@ -3018,15 +3039,15 @@ var LD = window.LD = {};
       ];
       for (var i = 0; i < 3; i++) {
         var y = 46 + i * 22;
-        g.text(rows[i][0], 12, y, { color: 2 });
+        g.text(rows[i][0], 12, y, { color: 3 });
         g.text(rows[i][1], 108, y, { color: 3, align: "right" });
-        if (rows[i][2]) g.text(rows[i][2], 108, y + 11, { color: 2, align: "right" });
+        if (rows[i][2]) g.text(rows[i][2], 108, y + 11, { color: 3, align: "right" });
         if (this.t > 1.3 + i * 0.25) { if (rows[i][3]) g.rect(132, y + 2, 9, 9, 3); else g.frame(132, y + 2, 9, 9, 2); }
       }
       if (r.newBest && this.t > 2) g.text(t("新纪录", "New best"), 80, 112, { color: 3, align: "center" });
       if (this.t > 1.6) {
         var next = deckIdx + 1 < LD.DECKS.length ? t("A 下一层", "A next deck") : t("A 返回", "A back");
-        g.text(next + "   " + t("B 选层", "B decks"), 80, 144, { color: 2, align: "center" });
+        g.text(next + "   " + t("B 选层", "B decks"), 80, 144, { color: 3, align: "center" });
       }
     }
   });
@@ -3042,8 +3063,8 @@ var LD = window.LD = {};
       g.clear(0);
       for (var y = 0; y < 160; y += 2) if (Math.random() < 0.5) g.rect(0, y, 160, 1, 1);
       g.text(t("信号中断", "SIGNAL LOST"), 80, 60, { color: 3, align: "center" });
-      g.text(t("第{n}层 {t}", "Deck {n}  {t}", { n: deckIdx + 1, t: clock(world ? world.time : 0) }), 80, 78, { color: 2, align: "center" });
-      if (this.t > 0.8) g.text(t("A 再来  B 选层", "A retry  B decks"), 80, 140, { color: 2, align: "center" });
+      g.text(t("第{n}层 {t}", "Deck {n}  {t}", { n: deckIdx + 1, t: clock(world ? world.time : 0) }), 80, 78, { color: 3, align: "center" });
+      if (this.t > 0.8) g.text(t("A 再来  B 选层", "A retry  B decks"), 80, 140, { color: 3, align: "center" });
     }
   });
   game.scene("ending", {
@@ -3056,8 +3077,8 @@ var LD = window.LD = {};
       drawStars(1 / 60, 0.6);
       var lines = LD.ENDING[game.lang] || LD.ENDING.zh, y = 20;
       var shown = Math.floor(this.t * 0.7);
-      for (var i = 0; i < Math.min(lines.length, shown + 1); i++) { y += g.text(lines[i], 5, y, { color: i === shown ? 2 : 3, align: "center", width: 150 }) + 4; }
-      if (this.t > 2) g.text(t("A 返回", "A back"), 80, 146, { color: 2, align: "center" });
+      for (var i = 0; i < Math.min(lines.length, shown + 1); i++) { y += g.text(lines[i], 5, y, { color: 3, align: "center", width: 150 }) + 4; }
+      if (this.t > 2) g.text(t("A 返回", "A back"), 80, 146, { color: 3, align: "center" });
     }
   });
 
