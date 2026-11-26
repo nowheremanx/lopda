@@ -148,3 +148,17 @@ test("lost-deck app: an older save keeps its progress when a deck is cleared", a
   assert.equal(p.data.save.best["3"].time, 99);
   assert.equal(p.data.save.tips.move, 1);
 });
+
+test("lost-deck app: once the lift or the core is reached, nothing can kill you before the deck is scored", async () => {
+  const p = fakePad({});
+  const app = boot(APP, { pad: p.pad, seed: 5 });
+  await settle(); frames(app, 5);
+  const L = app.ctx.get("LD");
+  L.dbgStart(0); frames(app, 5);
+  const w = L.dbg();
+  w.hooks.exit();
+  w.hurtPlayer(500, w.P.x + 1, w.P.y);
+  assert.equal(w.P.dead, false);
+  frames(app, 120); await settle();
+  assert.equal(p.data.save.unlocked, 2);
+});

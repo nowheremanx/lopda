@@ -111,7 +111,7 @@
   W.opaque = function (x, y) {
     var c = this.cell(x, y);
     if (c === 0) return false;
-    if (c >= 10 && c <= 13) return this.M.open[y * this.M.w + x] < 0.6;
+    if (c >= 10 && c <= 13) return this.M.open[y * this.M.w + x] < 0.95;   /* the same leaf a rivet stops at */
     return true;
   };
   W.sightLine = function (x0, y0, x1, y1) {
@@ -385,7 +385,7 @@
   };
   W.hurtPlayer = function (dmg, fx, fy) {
     var P = this.P;
-    if (P.dead || dmg <= 0) return;
+    if (P.dead || dmg <= 0 || this.safe) return;   /* safe: the deck is already won */
     if (this.deck.easy) dmg = Math.ceil(dmg * 0.6);
     P.hp -= dmg; P.hurt = 0.35;
     P.hurtDir = angDiff(Math.atan2(fy - P.y, fx - P.x), P.a);
@@ -422,7 +422,7 @@
     e.cd -= dt;
     if (e.stagger > 0) { e.stagger -= dt; return; }
     /* attacks */
-    if (F.melee && dist < F.melee.range + e.r && e.cd <= 0) {
+    if (F.melee && dist < F.melee.range + e.r && e.cd <= 0 && e.see) {   /* no bites round a corner */
       e.cd = F.melee.cd; e.act = 0.25; this.hurtPlayer(F.melee.dmg, e.x, e.y);
     }
     if (F.burst && dist < F.burst.near) { this.kill(e); return; }
