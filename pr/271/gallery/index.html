@@ -181,7 +181,7 @@ footer{padding-block:32px;color:var(--on-case-dim);font-size:14px;border-top:1px
       var s = screen(e.id, false); a.appendChild(s); screens.push(s);
       var n = el("div", "name"); n.appendChild(icon(REG[e.id].icon)); n.appendChild(el("span", null, name(e.id))); a.appendChild(n);
       a.appendChild(el("div", "what", L(e.title)));
-      /* a pointer that hovers plays the film under it; a finger cannot hover, so there the screen nearest the middle plays */
+      /* a pointer that hovers plays the film under it; a finger cannot hover, so there the screens on view play */
       a.addEventListener("mouseenter", function () { if (hover) s.play(); });
       a.addEventListener("mouseleave", function () { if (hover) s.stop(); });
       a.addEventListener("click", function (ev) { if (ev.metaKey || ev.ctrlKey || ev.shiftKey) return; ev.preventDefault(); go(e.id); });
@@ -193,10 +193,9 @@ footer{padding-block:32px;color:var(--on-case-dim);font-size:14px;border-top:1px
       var seen = new Map();
       watcher = new IntersectionObserver(function (list) {
         list.forEach(function (x) { seen.set(x.target, x.intersectionRatio); });
-        /* one film at a time: the most visible screen plays, the rest rest on their covers */
-        var best = null, r = 0.6;
-        seen.forEach(function (ratio, node) { if (ratio >= r) { best = node; r = ratio; } });
-        screens.forEach(function (s) { if (s === best) s.play(); else s.stop(); });
+        /* every screen that is mostly on view plays; the rest rest on their covers. (Only the most visible one played
+           at first, but two cards side by side on a phone are equally visible, so the left one never moved.) */
+        screens.forEach(function (s) { if ((seen.get(s) || 0) >= 0.6) s.play(); else s.stop(); });
       }, { threshold: [0, 0.6, 0.8, 1] });
       screens.forEach(function (s) { watcher.observe(s); });
     }
